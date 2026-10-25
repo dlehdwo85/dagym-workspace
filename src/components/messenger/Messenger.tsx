@@ -27,7 +27,7 @@ export type RoomRow = { id: string; kind: 'dm' | 'group' | 'company' | 'task' | 
 type Reaction = { emoji: string; n: number; mine: boolean; names: string[] };
 export type Msg = { id: string; room_id: string; author_id: string | null; author_name: string | null; created_at: string; edited_at: string | null; pinned_at: string | null;
   body: string; deleted: boolean; file_name: string | null; file_mime: string | null; file_size: number | null; task_id: string | null; mine: boolean;
-  reply_to?: string | null; reply?: { author: string | null; body: string; file: string | null; deleted: boolean } | null; reactions?: Reaction[];
+  reply_to?: string | null; reply?: { author: string | null; body: string; file: string | null; mime?: string | null; n?: number | null; deleted: boolean } | null; reactions?: Reaction[];
   kind?: 'text' | 'system' | 'forward' | 'poll' | 'event' | 'sticker'; forward_of?: string | null; unread?: number;
   /** 메신저 2차: 사진 묶음·스티커·투표·일정 카드 */
   batch_id?: string | null; sticker?: string | null; poll?: Poll | null; event?: EventCard | null };
@@ -72,10 +72,14 @@ export const shortTime = (s: string | null) => {
 };
 const dayLabel = (s: string) => new Intl.DateTimeFormat('ko-KR', { timeZone: TZ, year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(s));
 const plain = (s: string | null) => (s ?? '').replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/g, '@$1');
+/** 답장 인용·전달 미리보기의 파일 글(로컬 10/25 사소 ②): 사진 묶음은 파일 이름 대신 '📷 사진 3장' — 알림·방 목록 미리보기와 같은 꼴 */
+const fileText = (name: string | null, mime?: string | null, n = 1) => !name ? '' : /^image\//.test(mime ?? '') ? (n > 1 ? `📷 사진 ${n}장` : '📷 사진') : /^video\//.test(mime ?? '') ? (n > 1 ? `🎬 동영상 ${n}개` : '🎬 동영상') : `📎 ${name}`;
 const fmtSize = (n: number | null) => (!n ? '' : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))}KB` : `${(n / 1024 / 1024).toFixed(1)}MB`);
 const render = (body: string, hl?: string) => body.split(/(@\[[^\]]+\]\([0-9a-f-]{36}\)|https?:\/\/[^\s<]+)/g).map((p, i) => {
   const m = /^@\[([^\]]+)\]\(([0-9a-f-]{36})\)$/.exec(p);
-  if (m) return <span key={i} className="rounded bg-black/10 px-0.5 font-medium">@{hl ? markText(m[1], hl, i) : m[1]}</span>;
+  if (m) return m[2] === ALL_ID // 로컬 10/25 사소 ③: @전체는 눈에 띄게(노란 칩)
+    ? <span key={i} className="rounded bg-amber-300/90 px-1 font-semibold text-amber-950" data-testid="mention-all-chip">@{hl ? markText(m[1], hl, i) : m[1]}</span>
+    : <span key={i} className="rounded bg-black/10 px-0.5 font-medium">@{hl ? markText(m[1], hl, i) : m[1]}</span>;
   if (/^https?:\/\//.test(p)) return <a key={i} href={p} target="_blank" rel="noreferrer" className="break-all underline">{p}</a>;
   return hl ? markText(p, hl, i) : p;
 });
@@ -474,6 +478,8 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const members = data?.members ?? [];
   const toWire = (s: string) => members.filter((m) => m.id !== user.id).reduce((acc, m) => acc.split(`@${m.name}`).join(`@[${m.name}](${m.id})`),
     data?.room.canMentionAll ? s.replace(/(^|\s)@전체(?=$|[\s.,!?~])/g, `$1@[전체](${ALL_ID})`) : s); // B11 @전체
+  /** 사진 묶음 장 수(인용 라벨 '📷 사진 n장') — 화면에 있는 같은 묶음만 셈 */
+  const bundleN = (x: Msg) => (x.batch_id ? msgs.filter((y) => y.batch_id === x.batch_id && !y.deleted).length : 1);
   const mergeMine = (mid: string, p: Partial<Msg>) => setMsgs((cur) => cur.some((m) => m.id === mid) ? cur : [...cur, { id: mid, room_id: id, author_id: user.id, author_name: user.name, created_at: new Date().toISOString(),
     edited_at: null, pinned_at: null, body: '', deleted: false, file_name: null, file_mime: null, file_size: null, task_id: null, mine: true, reactions: [], ...p }]);
   /** 최신 메시지로(지난 구간을 보던 중이면 새로 불러와 맨 아래) */
@@ -507,7 +513,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     try {
       const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body, ...(rep ? { replyTo: rep.id } : {}) } });
       spoken.current.add(r.id);
-      afterSend(r.id, { body, reply_to: rep?.id ?? null, reply: rep ? { author: rep.author_name, body: rep.body.slice(0, 120), file: rep.file_name, deleted: false } : null });
+      afterSend(r.id, { body, reply_to: rep?.id ?? null, reply: rep ? { author: rep.author_name, body: rep.body.slice(0, 120), file: rep.file_name, mime: rep.file_mime, n: bundleN(rep), deleted: false } : null });
     } catch (er: any) { setText(text); setReplyTo(rep); toast.error(er.message); }
   }
   // ---- V38 3 음성 모드 ----
@@ -591,10 +597,11 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
         for (const x of ids) await api(`/api/chat/messages/${x}`, { method: 'DELETE' });
         setMsgs((c) => c.map((x) => (ids.includes(x.id) ? { ...x, deleted: true, body: '' } : x)));
       }
-      else if (what === 'event') { // B9 메시지 → 일정(날짜·시각은 글에서 읽어 미리 채움)
+      else if (what === 'event') { // B9 메시지 → 일정(날짜·시각은 글에서 읽어 미리 채움) · 로컬 10/25 사소 ①: '@전체'(멘션)는 제목에서 뺌
         const today = dayKey(new Date().toISOString());
-        const p = parseTaskText(plain(m.body), dir.users, today);
-        setEventDraft({ title: (p.title || plain(m.body).split('\n')[0]).slice(0, 100), date: p.dueDate ?? today, time: p.dueTime, fromMessage: m.id });
+        const src = plain(m.body).replace(/(^|\s)@전체(?=$|[\s.,!?~])/g, '$1').replace(/[ \t]{2,}/g, ' ').trim();
+        const p = parseTaskText(src, dir.users, today);
+        setEventDraft({ title: (p.title || src.split('\n')[0]).slice(0, 100), date: p.dueDate ?? today, time: p.dueTime, fromMessage: m.id });
       }
       else if (what === 'task') { const s = await api(`/api/chat/messages/${m.id}/to-task`, { body: {} }); setToTask({ msg: m, ...s }); }
       else { await api(`/api/chat/messages/${m.id}/pin`, { body: { pin: what === 'pin' } }); reload(); }
@@ -793,7 +800,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                           {m.reply && (
                             <button type="button" onClick={(e) => { e.stopPropagation(); if (m.reply_to) jumpTo(m.reply_to); }} title="원래 메시지로 가기"
                               className={cx('mb-1 block w-full border-l-2 pl-2 text-left text-xs hover:opacity-80', m.mine ? 'border-white/60 text-white/80' : 'border-teal-600 text-ink-2')} data-testid="chat-reply-quote">
-                              <b>{m.reply.author ?? '알 수 없음'}</b><div className="line-clamp-2">{m.reply.deleted ? '삭제된 메시지' : plain(m.reply.body) || `📎 ${m.reply.file}`}</div>
+                              <b>{m.reply.author ?? '알 수 없음'}</b><div className="line-clamp-2">{m.reply.deleted ? '삭제된 메시지' : plain(m.reply.body) || fileText(m.reply.file, m.reply.mime, m.reply.n ?? 1)}</div>
                             </button>
                           )}
                           {st ? <StickerView s={st} />
@@ -877,7 +884,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
         <UploadProgress items={prog} />
         {replyTo && (
           <div className="flex items-center gap-2 border-t border-line bg-teal-50/60 px-3 py-1.5 text-xs" data-testid="chat-replying">
-            <CornerUpLeft className="size-3.5 shrink-0 text-teal-700" /><span className="min-w-0 flex-1 truncate"><b>{replyTo.author_name}</b>에게 답장: {plain(replyTo.body) || replyTo.file_name}</span>
+            <CornerUpLeft className="size-3.5 shrink-0 text-teal-700" /><span className="min-w-0 flex-1 truncate"><b>{replyTo.author_name}</b>에게 답장: {plain(replyTo.body) || fileText(replyTo.file_name, replyTo.file_mime, bundleN(replyTo))}</span>
             <button onClick={() => setReplyTo(null)} aria-label="답장 취소" className="text-ink-3"><X className="size-4" /></button>
           </div>
         )}
@@ -1436,7 +1443,7 @@ function ForwardModal({ msg, fromRoom, onClose }: { msg: Msg; fromRoom: string; 
   return (
     <Modal open onClose={onClose} title="전달">
       <div className="space-y-3 text-sm" data-testid="chat-forward">
-        <div className="rounded-input border border-line bg-slate-50 px-3 py-2 text-xs"><b>{msg.author_name}</b>: <span className="line-clamp-2">{plain(msg.body) || `📎 ${msg.file_name}`}</span></div>
+        <div className="rounded-input border border-line bg-slate-50 px-3 py-2 text-xs"><b>{msg.author_name}</b>: <span className="line-clamp-2">{plain(msg.body) || fileText(msg.file_name, msg.file_mime)}</span></div>
         <input className={inputCls} placeholder="방 이름으로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="방 찾기" />
         <ul className="max-h-64 divide-y divide-line overflow-y-auto rounded-input border border-line">
           {rooms.map((r) => <li key={r.id}><label className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-slate-50"><input type="checkbox" checked={pick.includes(r.id)} onChange={(e) => setPick((p) => (e.target.checked ? [...p, r.id] : p.filter((x) => x !== r.id)))} aria-label={`${r.name ?? ''} 선택`} /><RoomIcon r={r} size={28} /><span className="flex-1 truncate">{r.name}</span><span className="text-xs text-ink-3">{KIND_LABEL[r.kind]}</span></label></li>)}

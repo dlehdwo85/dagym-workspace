@@ -44,6 +44,20 @@ describe('메신저 2차', () => {
     await ctx.staffA.client.ok('POST', `/api/chat/rooms/${P.g}/read`, {});
   });
 
+  test('답장 인용 라벨(로컬 10/25 사소 ②): 사진 묶음에 답장하면 reply.mime·n(장 수) — 화면은 파일 이름 대신 "📷 사진 3장" · 글에 답장은 n 1', async () => {
+    const batch = crypto.randomUUID(); const ids = [];
+    for (const n of ['x.jpg', 'y.jpg', 'z.jpg']) {
+      const f = await up(ctx.owner, P.g, n, 'image/jpeg');
+      ids.push((await ctx.owner.ok('POST', `/api/chat/rooms/${P.g}/messages`, { body: '', file: f, batch, batchSize: 3 })).id);
+    }
+    const r = await ctx.staffA.client.ok('POST', `/api/chat/rooms/${P.g}/messages`, { body: '사진 잘 봤어요', replyTo: ids[0] });
+    const m = (await ctx.owner.ok('GET', `/api/chat/rooms/${P.g}`)).messages.find((x) => x.id === r.id);
+    assert.deepEqual([m.reply.file, m.reply.mime, m.reply.n], ['x.jpg', 'image/jpeg', 3]);
+    const t = await ctx.staffA.client.ok('POST', `/api/chat/rooms/${P.g}/messages`, { body: '글 답장', replyTo: r.id });
+    const m2 = (await ctx.owner.ok('GET', `/api/chat/rooms/${P.g}`)).messages.find((x) => x.id === t.id);
+    assert.deepEqual([m2.reply.body, m2.reply.file, m2.reply.n], ['사진 잘 봤어요', null, 1]);
+  });
+
   test('B10 스티커: 코드 → kind sticker·body 글·목록 미리보기·알림 "(스티커)", 없는 코드·파일과 같이·고치기 400 / 반응 16개·자주 쓰는 반응 6개(많이 쓴 순)', async () => {
     const s = await ctx.staffA.client.ok('POST', `/api/chat/rooms/${P.g}/messages`, { sticker: 'thanks' });
     const m = (await ctx.owner.ok('GET', `/api/chat/rooms/${P.g}`)).messages.find((x) => x.id === s.id);

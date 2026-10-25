@@ -299,8 +299,9 @@ const MSG_COLS = (sql: Sql, u: SessionUser) => sql`m.id::text as id, m.room_id, 
   case when m.deleted_at is null then m.file_name end as file_name, case when m.deleted_at is null then m.file_mime end as file_mime,
   case when m.deleted_at is null then m.file_size end as file_size, m.task_id, (m.author_id = ${u.id}) as mine,
   m.reply_to::text as reply_to,
-  (select json_build_object('author', ru.name, 'body', case when rm.deleted_at is null then left(rm.body, 120) else '' end, 'file', case when rm.deleted_at is null then rm.file_name end, 'deleted', rm.deleted_at is not null)
-     from chat_messages rm left join users ru on ru.id = rm.author_id where rm.id = m.reply_to) as reply,
+  (select json_build_object('author', ru.name, 'body', case when rm.deleted_at is null then left(rm.body, 120) else '' end, 'file', case when rm.deleted_at is null then rm.file_name end, 'deleted', rm.deleted_at is not null,
+     'mime', case when rm.deleted_at is null then rm.file_mime end, 'n', case when rm.batch_id is null then 1 else (select count(*)::int from chat_messages b where b.room_id = rm.room_id and b.batch_id = rm.batch_id and b.deleted_at is null) end)
+     from chat_messages rm left join users ru on ru.id = rm.author_id where rm.id = m.reply_to) as reply, -- 로컬 10/25 사소 ②: 인용 라벨 '📷 사진 n장'용 mime·묶음 장 수
   coalesce((select json_agg(json_build_object('emoji', g.emoji, 'n', g.n, 'mine', g.mine, 'names', g.names) order by g.first)
      from (select r.emoji, count(*)::int n, bool_or(r.user_id = ${u.id}) mine, array_agg(ru2.name order by r.created_at) names, min(r.created_at) first
        from chat_reactions r join users ru2 on ru2.id = r.user_id where r.message_id = m.id group by r.emoji) g), '[]') as reactions,
