@@ -80,7 +80,7 @@ const canShareFiles = () => Capacitor.getPlatform() === 'ios' && Capacitor.isPlu
 /** 예전 앱(플러그인 없음)에서는 서버 알림을 그대로 받는다 */
 const hasLocal = () => Capacitor.isPluginAvailable('LocalNotifications');
 import { api } from './client';
-import { WN_ACTION_IDS, WN_SETS, wnCategory } from '@/lib/notifCategories';
+import { WN_ACTION_IDS, WN_OPEN_IDS, WN_SETS, wnCategory } from '@/lib/notifCategories';
 import { deepPath } from '@/lib/deepLink';
 
 type Router = { push: (href: string) => void; replace: (href: string) => void };
@@ -142,7 +142,8 @@ export async function initNative(router: Router) {
   FirebaseMessaging.addListener('notificationActionPerformed', (e: any) => {
     const d = e?.notification?.data ?? {};
     const aid = String(e?.actionId ?? 'tap');
-    if (d.notificationId && d.alarm !== 'true' && d.alarm !== true && WN_ACTION_IDS.has(aid)) { notifAction(String(d.notificationId), aid, e?.inputValue, d.link).catch(() => go(d.link)); return; }
+    // #618 [승인함 열기]/[열기](open 버튼)는 서버 처리 없이 본문 탭과 같다(아래: 읽음 표시 + 그 화면으로)
+    if (d.notificationId && d.alarm !== 'true' && d.alarm !== true && WN_ACTION_IDS.has(aid) && !WN_OPEN_IDS.has(aid)) { notifAction(String(d.notificationId), aid, e?.inputValue, d.link).catch(() => go(d.link)); return; }
     if (d.notificationId) api('/api/notifications/read', { method: 'POST', body: { ids: [d.notificationId] } }).then(() => window.dispatchEvent(new Event('wos-refresh'))).catch(() => {});
     if (d.alarm === 'true' || d.alarm === true) { alarmAction(String(e?.actionId ?? 'tap'), { id: e?.notification?.id, title: e?.notification?.title, body: e?.notification?.body, extra: { link: d.link, kind: d.taskId ? 'task' : undefined, entityId: d.taskId || undefined, alarm: true, snoozeMinutes: d.snoozeMinutes, key: d.notificationId } }, 'fcm').catch(() => go(d.link)); return; }
     go(d.link);

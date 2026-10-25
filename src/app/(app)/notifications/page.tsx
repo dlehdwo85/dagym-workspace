@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Loading, cx, fmtDateTime, toast } from '@/components/ui';
 import { NOTIFICATION_TYPES } from '@/lib/types';
@@ -13,6 +14,7 @@ const SWIPE = 70; // px — 왼쪽으로 밀면 읽음, 오른쪽으로 밀면 �
 const LONG_PRESS = 500; // ms — 길게 누르면 다중 선택
 
 export default function Notifications() {
+  const router = useRouter();
   // #104 ⑥: 묶음 알림 링크(/notifications?space=marketing) → 그 공간 알림만
   const [spaceQ, setSpaceQ] = useUrlState('space', '');
   const space = SPACE_CHIP[spaceQ] ? spaceQ : null;
@@ -42,8 +44,13 @@ export default function Notifications() {
   const toggle = (k: string) => setCollapsed((c) => { const n = { ...c, [k]: !c[k] }; try { localStorage.setItem('notif-collapsed', JSON.stringify(n)); } catch { /* 무시 */ } return n; });
   const act = useApi<{ items: any[] }>(tab === 'activity' ? '/api/notifications/activity' : null);
   /** 로컬 10/20 알림에서 바로 처리: 서버가 준 버튼(승인/수정 요청·연장 승인/거절·답글/확인·배정 확인/오늘 할 일·10분 뒤) → 처리되면 그 자리에 "승인함 ✓" */
-  async function runAction(n: any, a: { id: string; label: string; input?: 'text' }) {
+  async function runAction(n: any, a: { id: string; label: string; input?: 'text'; open?: true }) {
     let text: string | undefined;
+    if (a.open) { // #618 [승인함 열기]/[열기]: 읽음 표시 + 그 화면으로(서버 처리 없음)
+      if (!n.read_at) read([n.id]);
+      router.push(n.link || '/');
+      return;
+    }
     if (a.input === 'text') { const t = prompt(`${a.label} 내용`); if (t === null) return; text = t.trim(); if (!text) { toast.error(`${a.label} 내용을 적어 주세요`); return; } }
     try {
       const r = await api<{ label: string; unread: number }>(`/api/notifications/${n.id}/action`, { body: { action: a.id, text } });

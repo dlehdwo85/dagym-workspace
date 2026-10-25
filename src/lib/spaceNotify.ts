@@ -63,7 +63,9 @@ export function groupOf(space: string, title: string): { group: string; head: st
 
 export async function notifySpace(sql: Sql, n: SpaceNotifyInput): Promise<{ direct: string[]; hourly: string[]; daily: string[] }> {
   const g = groupOf(n.space, n.title);
-  const base = { type: n.type, title: n.title, body: n.body, link: n.link, entityType: n.entityType, entityId: n.entityId, dedupeKey: n.dedupeKey, push: n.push, meta: g ? { ...(n.meta ?? {}), ...g } : n.meta, space: n.space };
+  // #618: 승인 대기 알림(approval)은 meta.approval 로 표시 → 푸시·목록 버튼 [확인][승인함 열기](notifActions)
+  const extra = { ...(g ?? {}), ...(n.approval ? { approval: true } : {}) };
+  const base = { type: n.type, title: n.title, body: n.body, link: n.link, entityType: n.entityType, entityId: n.entityId, dedupeKey: n.dedupeKey, push: n.push, meta: Object.keys(extra).length ? { ...(n.meta ?? {}), ...extra } : n.meta, space: n.space };
   if (n.test) {
     const to = n.test.actorId ? [n.test.actorId] : [];
     if (to.length) await notify(sql, { ...base, userIds: to, actorId: null });

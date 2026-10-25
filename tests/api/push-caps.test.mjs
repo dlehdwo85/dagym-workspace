@@ -60,3 +60,64 @@ test('1.1.3 앱(android-actions-1) = data 전용(앱이 버튼 그림) · 옛 �
   assert.deepEqual([again.label, again.already], ['확인함', true]);
   assert.equal((await ctx.managerA.client.req('POST', `/api/notifications/${m1.data.notificationId}/action`, { action: 'ack' })).status, 404, '남의 알림 404');
 });
+
+// #618(대표 10/25) 모든 푸시 알림 [확인](읽음 + 지움) + 종류별 1개: 일정 [10분 뒤] · 마감 [완료](담당자만) · 승인 대기 [승인함 열기](서버 처리 없이 열기)
+// 가짜 FCM 으로 본 payload·카테고리 구조 시험 — 실제 휴대폰 버튼 표시·iOS 카테고리 등록(앱 재시작 뒤)은 로컬이 실기기에서 확인
+test('#618 [확인] 모든 알림 · 마감 [완료](담당자만, 요청자는 [확인]만) · 일정 [10분 뒤] · 승인 대기 [승인함 열기] · 웹 목록은 [확인]만 있는 줄 버튼 없음', async () => {
+  // 기기: staffA 1.1.3 안드로이드(data 전용) · owner 아이폰(카테고리)
+  const delivery = async (nid, endpoint) => {
+    const [s] = await sql`select id from push_subscriptions where endpoint = ${endpoint}`;
+    await sql`insert into notification_deliveries (notification_id, subscription_id, channel, status, next_attempt_at) values (${nid}, ${s.id}, 'fcm', 'pending', now()) on conflict do nothing`;
+  };
+  // 같은 업무 링크로 배정 푸시(task_assigned)도 가므로 알림 id 로 찾는다
+  const sentFor = async (token, nid) => { for (let i = 0; i < 30; i++) { const m = (await state()).fcm.find((x) => x.token === token && x.data?.notificationId === nid); if (m) return m; await tick(); await new Promise((r) => setTimeout(r, 300)); } throw new Error(`FCM 이 오지 않음: ${token} ${nid}`); };
+  const insert = async (userId, row) => (await sql`insert into notifications (user_id, type, title, body, link, entity_type, entity_id, meta, dedupe_key)
+    values (${userId}, ${row.type}, ${row.title}, ${row.body ?? ''}, ${row.link}, ${row.entityType ?? null}, ${row.entityId ?? null}, ${sql.json(row.meta ?? {})}, ${`t618:${row.type}:${Math.random()}`}) returning id`)[0].id;
+  // ① 마감 알림(담당자 staffA) → [확인][완료] · 요청자(owner)에게 간 '[요청] 마감' → [확인]만(task_mine=false)
+  const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '마감 버튼 시험 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
+  const nDue = await insert(ctx.staffA.id, { type: 'due_soon', title: '오늘 마감: 마감 버튼 시험 업무', link: `/tasks/${t}`, entityType: 'task', entityId: t, meta: { kind: 'due' } });
+  await delivery(nDue, 'fcm-new-staffA');
+  const nReq = await insert(ctx.ownerId, { type: 'due_soon', title: '[요청] 마감 임박: 마감 버튼 시험 업무', link: `/tasks/${t}`, entityType: 'task', entityId: t, meta: { kind: 'due' } });
+  await delivery(nReq, 'fcm-ios-owner');
+  // ② 일정 알림(알람 아님) → [확인][10분 뒤] · ③ 승인 대기(마케팅, 업무 아님) → [확인][승인함 열기] · ④ 공지 → [확인]만
+  const nEv = await insert(ctx.staffA.id, { type: 'event_reminder', title: '일정 30분 전: 버튼 시험 회의', link: '/calendar', entityType: 'event', meta: { kind: 'event' } });
+  await delivery(nEv, 'fcm-new-staffA');
+  const nAp = await insert(ctx.ownerId, { type: 'review_requested', title: 'AI 마케터 승인 요청 1건: 버튼 시험', link: '/s/marketing/approvals?tab=proposals', meta: { approval: true } });
+  await delivery(nAp, 'fcm-ios-owner');
+  const nAn = await insert(ctx.staffA.id, { type: 'announcement', title: '공지 버튼 시험', link: '/announcements' });
+  await delivery(nAn, 'fcm-new-staffA');
+  const mDue = await sentFor('fcm-new-staffA', nDue);
+  assert.deepEqual(JSON.parse(mDue.data.actions).map((a) => [a.id, a.label]), [['ack', '확인'], ['done', '완료']], '마감 알림 = [확인][완료]');
+  const mReq = await sentFor('fcm-ios-owner', nReq);
+  assert.deepEqual([JSON.parse(mReq.data.actions).map((a) => a.id), mReq.apns.payload.aps.category], [['ack'], 'wn.ack'], '요청자에게 간 마감 알림은 [확인]만');
+  const mEv = await sentFor('fcm-new-staffA', nEv);
+  assert.deepEqual(JSON.parse(mEv.data.actions).map((a) => [a.id, a.label]), [['ack', '확인'], ['snooze', '10분 뒤']], '일정 = [확인][10분 뒤]');
+  const mAp = await sentFor('fcm-ios-owner', nAp);
+  assert.deepEqual([JSON.parse(mAp.data.actions).map((a) => [a.id, a.label, a.open]), mAp.apns.payload.aps.category], [[['ack', '확인', undefined], ['open', '승인함 열기', true]], 'wn.ack.open'], '승인 대기 = [확인][승인함 열기](open 표시)');
+  const mAn = await sentFor('fcm-new-staffA', nAn);
+  assert.deepEqual(JSON.parse(mAn.data.actions).map((a) => a.id), ['ack'], '그 밖의 알림도 [확인]');
+  // 웹 알림 목록: [확인]만 있는 줄은 버튼 없음(기존 [읽음]), 2개짜리는 그대로
+  const list = await ctx.staffA.client.ok('GET', '/api/notifications');
+  const row = (id) => list.items.find((x) => x.id === id);
+  assert.deepEqual([row(nAn).actions, row(nDue).actions.map((a) => a.id), row(nEv).actions.map((a) => a.id)], [[], ['ack', 'done'], ['ack', 'snooze']]);
+  // [완료] → 업무 완료 · 결과 문구 '완료함' · 알림 처리됨 · 읽음
+  const done = await ctx.staffA.client.ok('POST', `/api/notifications/${nDue}/action`, { action: 'done' });
+  assert.equal(done.label, '완료함');
+  assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done');
+  const [afterDue] = await sql`select action_done, read_at from notifications where id = ${nDue}`;
+  assert.ok(afterDue.action_done === '완료함' && afterDue.read_at, '처리 표시 + 읽음');
+  // 요청자는 [완료] 못 함(버튼에 없음 → 400) · [확인]은 됨
+  assert.equal((await ctx.owner.req('POST', `/api/notifications/${nReq}/action`, { action: 'done' })).status, 400);
+  assert.equal((await ctx.owner.ok('POST', `/api/notifications/${nReq}/action`, { action: 'ack' })).label, '확인함');
+  // [승인함 열기]를 옛 안드로이드 앱이 서버로 보내면: 읽음 표시 + 400 '눌러서 승인함을 열어 주세요'(처리 표시는 안 남음)
+  const open = await ctx.owner.req('POST', `/api/notifications/${nAp}/action`, { action: 'open' });
+  assert.equal(open.status, 400);
+  assert.match(open.body.error.message, /눌러서 승인함을 열어 주세요/);
+  const [afterAp] = await sql`select action_done, read_at from notifications where id = ${nAp}`;
+  assert.ok(!afterAp.action_done && afterAp.read_at, '열기는 읽음만');
+  // 일정 [10분 뒤] → 10분 뒤 다시 푸시(처리 표시 없음)
+  const sn = await ctx.staffA.client.ok('POST', `/api/notifications/${nEv}/action`, { action: 'snooze' });
+  assert.equal(sn.label, '10분 뒤 다시 알림');
+  const [d2] = await sql`select count(*)::int n from notification_deliveries where notification_id = ${nEv} and status = 'pending' and next_attempt_at > now() + interval '8 minutes'`;
+  assert.equal(d2.n, 1, '10분 뒤 발송 예약');
+});

@@ -7,36 +7,47 @@ import { activity } from './log';
 import { todaySeoul } from './time';
 import type { SessionUser } from './types';
 
-export type NotifAction = { id: string; label: string; input?: 'text'; done?: string };
-export type NotifRow = { id: string; type: string; link: string; entity_type: string | null; entity_id: string | null; meta: Record<string, any> | null; action_done: string | null; task_status?: string | null; ext_pending?: boolean | null };
+/** open: 서버 처리 없이 그 화면을 연다(웹·앱이 link 로 이동). 앱이 모르고 /action 으로 보내면 읽음 + 400 '눌러서 열어 주세요'(누르면 앱이 열림) */
+export type NotifAction = { id: string; label: string; input?: 'text'; done?: string; open?: true };
+/** task_mine: 받는 사람이 그 업무의 담당자(첫 담당자·함께 맡은 사람)인지 — 마감 알림 [완료]는 담당자에게만(요청자·관리자 '마감 위험' 알림은 [확인]만) */
+export type NotifRow = { id: string; type: string; link: string; entity_type: string | null; entity_id: string | null; meta: Record<string, any> | null; action_done: string | null; task_status?: string | null; ext_pending?: boolean | null; task_mine?: boolean | null };
 
-/** 알림 한 줄에 보일 버튼. 처리됐거나 대상이 끝났으면 없음 */
+const ACK: NotifAction = { id: 'ack', label: '확인', done: '확인함' };
+const ALARM: NotifAction[] = [{ id: 'dismiss', label: '해제', done: '알람 해제' }, { id: 'snooze', label: '10분 뒤', done: '10분 뒤 다시 알림' }];
+/** 알림 한 줄에 보일 버튼(#618 대표 10/25: 모든 푸시 알림에 [확인] = 읽음 + 지움, 종류별 1개 더 — 일정 [10분 뒤]·마감 [완료]·승인 대기 [승인함 열기]).
+ *  처리됐으면 없음. 알람처럼 울리는 알림은 [해제][10분 뒤] 그대로([해제] = 확인). 웹 알림 목록은 [확인]만 있는 줄이면 기존 [읽음] 버튼을 쓴다(webActions) */
 export function actionsFor(n: NotifRow): NotifAction[] {
   if (n.action_done) return [];
   const kind = n.meta?.kind as string | undefined;
   switch (n.type) {
     case 'review_requested':
-      if (kind === 'extension') return n.ext_pending === false ? [] : [{ id: 'approve_ext', label: '승인', done: '연장 승인함' }, { id: 'reject_ext', label: '거절', done: '연장 거절함' }];
-      if (kind === 'handoff') return [];
-      if (n.task_status && n.task_status !== 'review') return [];
+      if (kind === 'extension') return n.ext_pending === false ? [ACK] : [{ id: 'approve_ext', label: '승인', done: '연장 승인함' }, { id: 'reject_ext', label: '거절', done: '연장 거절함' }];
+      if (kind === 'handoff') return [ACK];
+      // 마케팅 승인 대기(업무가 아닌 승인 요청: 승인함·운영실·제작실 카드) → [확인][승인함 열기](승인함이 아니면 [열기])
+      if (n.entity_type !== 'task' || n.meta?.approval) return [ACK, n.link.startsWith('/s/marketing/approvals') ? { id: 'open', label: '승인함 열기', open: true } : { id: 'view', label: '열기', open: true }];
+      if (n.task_status && n.task_status !== 'review') return [ACK];
       return [{ id: 'approve', label: '승인', done: '승인함' }, { id: 'changes', label: '수정 요청', input: 'text', done: '수정 요청함' }];
     case 'comment': case 'mention':
-      return [{ id: 'reply', label: '답글', input: 'text', done: '답글 남김' }, { id: 'ack', label: '확인', done: '확인함' }];
+      return [{ id: 'reply', label: '답글', input: 'text', done: '답글 남김' }, ACK];
     case 'chat': // 메신저 3차 C12: 푸시에서 바로 답장(그 방에 메시지)·읽음 — iOS 는 같은 버튼 묶음(wn.reply.ack)
-      return n.entity_id ? [{ id: 'reply', label: '답장', input: 'text', done: '답장함' }, { id: 'ack', label: '읽음', done: '읽음' }] : [];
+      return n.entity_id ? [{ id: 'reply', label: '답장', input: 'text', done: '답장함' }, { id: 'ack', label: '읽음', done: '읽음' }] : [ACK];
     case 'task_assigned':
-      if (n.task_status === 'done') return [];
-      return [{ id: 'ack', label: '확인', done: '확인함' }, { id: 'today', label: '오늘 할 일에 넣기', done: '오늘 할 일에 넣음' }];
+      if (n.task_status === 'done') return [ACK];
+      return [ACK, { id: 'today', label: '오늘 할 일에 넣기', done: '오늘 할 일에 넣음' }];
     case 'event_reminder':
       // 로컬 10/20(대표): 알람처럼 울리는 알림은 [해제][10분 뒤]
-      if (n.meta?.alarm) return [{ id: 'dismiss', label: '해제', done: '알람 해제' }, { id: 'snooze', label: '10분 뒤', done: '10분 뒤 다시 알림' }];
-      return [{ id: 'snooze', label: '10분 뒤 다시', done: '10분 뒤 다시 알림' }];
+      if (n.meta?.alarm) return ALARM;
+      return [ACK, { id: 'snooze', label: '10분 뒤', done: '10분 뒤 다시 알림' }];
     case 'due_soon':
-      if (n.meta?.alarm && n.task_status !== 'done') return [{ id: 'dismiss', label: '해제', done: '알람 해제' }, { id: 'snooze', label: '10분 뒤', done: '10분 뒤 다시 알림' }];
-      return [];
-    default: return [];
+      if (n.task_status === 'done') return [ACK];
+      if (n.meta?.alarm) return ALARM;
+      // [완료] = 업무 완료(검토 필수면 검토 요청, 함께 맡은 업무면 내 몫 완료) — 담당자에게만
+      return n.entity_type === 'task' && n.entity_id && n.task_mine !== false ? [ACK, { id: 'done', label: '완료', done: '완료함' }] : [ACK];
+    default: return [ACK];
   }
 }
+/** 웹 알림 목록용: [확인]만 있는 줄은 버튼 없이(줄마다 있는 [읽음]·[보관]이 그 몫) */
+export const webActions = (a: NotifAction[]) => (a.length === 1 && a[0].id === 'ack' ? [] : a);
 
 export const actionInput = z.object({ action: z.string().min(1).max(30), text: z.string().trim().max(2000).optional() });
 
@@ -45,13 +56,18 @@ export async function performAction(u: SessionUser, notificationId: string, i: z
   const sql = db();
   const [n] = await sql<NotifRow[]>`select n.id, n.type, n.link, n.entity_type, n.entity_id, n.meta, n.action_done,
       case when n.entity_type = 'task' then t.status end as task_status,
-      case when n.meta->>'extensionId' is not null then exists (select 1 from task_due_extensions x where x.id = (n.meta->>'extensionId')::uuid and x.status = 'pending') end as ext_pending
+      case when n.meta->>'extensionId' is not null then exists (select 1 from task_due_extensions x where x.id = (n.meta->>'extensionId')::uuid and x.status = 'pending') end as ext_pending,
+      case when t.id is not null then (t.assignee_id = n.user_id or exists (select 1 from task_assignees ta where ta.task_id = t.id and ta.user_id = n.user_id)) end as task_mine
     from notifications n left join tasks t on n.entity_type = 'task' and t.id = n.entity_id where n.id = ${notificationId} and n.user_id = ${u.id}`;
   if (!n) throw notFound('알림을 찾을 수 없습니다');
   if (n.action_done) return { ok: true, label: n.action_done, already: true, unread: await unread(sql, u.id) };
   const act = actionsFor(n).find((a) => a.id === i.action);
   if (!act) throw badRequest('이 알림에서는 할 수 없는 처리입니다 — 열어서 확인해 주세요');
   if (act.input === 'text' && !i.text) throw badRequest(`${act.label} 내용을 적어 주세요`);
+  if (act.open) { // #618 [승인함 열기]·[열기]: 웹·iOS 앱은 서버를 부르지 않고 그 화면으로 간다. 옛 안드로이드 앱이 보내면 읽음만 표시하고 "눌러서 열어 주세요"(그 알림을 누르면 앱이 link 로 열림)
+    await sql`update notifications set read_at = coalesce(read_at, now()) where id = ${n.id}`;
+    throw badRequest(act.id === 'open' ? '눌러서 승인함을 열어 주세요' : '눌러서 열어 주세요');
+  }
   const taskId = n.entity_type === 'task' ? n.entity_id! : null;
   const T = await import('./tasks');
   let label = act.done ?? act.label;
@@ -100,6 +116,17 @@ export async function performAction(u: SessionUser, notificationId: string, i: z
       const [t] = await sql<{ version: number }[]>`select version from tasks where id = ${taskId} and deleted_at is null`;
       if (!t) throw notFound('업무가 없습니다');
       await T.updateTask(u, taskId, { startDate: todaySeoul(), version: t.version });
+      break;
+    }
+    case 'done': { // #618 마감 알림 [완료]: 위젯 체크와 같은 길(검토 필수면 검토 요청, 함께 맡은 업무면 내 몫 완료) — 권한은 updateTask(담당자만)
+      if (!taskId) throw badRequest('업무 알림이 아닙니다');
+      const [t] = await sql<{ version: number; status: string; approval_required: boolean }[]>`select version, status, approval_required from tasks where id = ${taskId} and deleted_at is null`;
+      if (!t) throw notFound('업무가 없습니다');
+      if (t.status === 'done') { label = '이미 완료됨'; break; }
+      await T.updateTask(u, taskId, { status: t.approval_required ? 'review' : 'done', version: t.version });
+      const [after] = await sql<{ status: string }[]>`select status from tasks where id = ${taskId}`;
+      if (after?.status === 'review') label = '검토 요청함';
+      else if (after?.status !== 'done') label = '내 몫 완료함';
       break;
     }
     case 'snooze': {

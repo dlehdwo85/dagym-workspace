@@ -108,6 +108,17 @@ export async function hubArchive({ owner, ctx, sql, BASE, SHOTS }) {
     const arow = rows.filter({ hasText: '예산 없음' }); await arow.waitFor();
     assert.equal(await arow.getByTestId('lead-archive-reason').innerText(), '사유: 예산 없음');
     assert.ok((await arow.getByTestId('lead-archive').innerText()).includes(ownerName), '누가');
+    // 로컬 10/25 20:00 ①(152차): '단계별' 보기로 열어도 보관함은 표(PC)·카드(휴대폰)로 — 칸반에는 되돌리기 칸이 없어서
+    await leads.getByRole('group', { name: '보기' }).getByRole('button', { name: '단계별' }).click();
+    await arow.waitFor();
+    assert.equal(await leads.getByTestId('sales-pipeline').count(), 0, '보관함에서는 칸반 대신 표');
+    // 상세 단계 띠에도 [되돌리기 → 이전 단계]
+    await arow.getByTestId('lead-archive-reason').click();
+    const dres = owner.getByTestId('lead-detail-restore'); await dres.waitFor();
+    assert.equal(await dres.innerText(), '되돌리기 → 1차연락완료');
+    await owner.goBack(); await dres.waitFor({ state: 'detached' });
+    await leads.getByRole('group', { name: '보기' }).getByRole('button', { name: '표' }).click();
+    await arow.waitFor();
     await owner.screenshot({ path: `${SHOTS}/298-leads-archive.png` });
     await arow.getByTestId('lead-archive-restore').click();
     await owner.getByText('되돌렸습니다 — ').first().waitFor();

@@ -127,7 +127,7 @@ async function groupPayload(sql: ReturnType<typeof db>, userId: string, meta: { 
 export async function dispatchPending(limit = 50, opt: { tick?: boolean } = {}) {
   const sql = db();
   const claimed = await sql<
-    { id: number; channel: string; endpoint: string; keys: any; sub_id: string; caps: string[] | null; user_id: string; title: string; body: string; link: string; nid: string; attempts: number; type: string; entity_type: string | null; entity_id: string | null; meta: any; action_done: string | null }[]
+    { id: number; channel: string; endpoint: string; keys: any; sub_id: string; caps: string[] | null; user_id: string; title: string; body: string; link: string; nid: string; attempts: number; type: string; entity_type: string | null; entity_id: string | null; meta: any; action_done: string | null; task_status: string | null; task_mine: boolean | null }[]
   >`
     with c as (
       select d.id from notification_deliveries d
@@ -139,7 +139,9 @@ export async function dispatchPending(limit = 50, opt: { tick?: boolean } = {}) 
     update notification_deliveries d set attempts = d.attempts + 1, next_attempt_at = now() + interval '5 minutes'
     from c, push_subscriptions p, notifications n
     where d.id = c.id and p.id = d.subscription_id and n.id = d.notification_id
-    returning d.id, d.channel, p.endpoint, p.keys, p.id as sub_id, p.caps, n.user_id, n.title, n.body, n.link, n.id as nid, d.attempts, n.type, n.entity_type, n.entity_id, n.meta, n.action_done`;
+    returning d.id, d.channel, p.endpoint, p.keys, p.id as sub_id, p.caps, n.user_id, n.title, n.body, n.link, n.id as nid, d.attempts, n.type, n.entity_type, n.entity_id, n.meta, n.action_done,
+      (select t.status from tasks t where n.entity_type = 'task' and t.id = n.entity_id) as task_status,
+      (select t.assignee_id = n.user_id or exists (select 1 from task_assignees ta where ta.task_id = t.id and ta.user_id = n.user_id) from tasks t where n.entity_type = 'task' and t.id = n.entity_id) as task_mine`;
   // 구독이 삭제된 행 정리
   await sql`update notification_deliveries set status = 'skipped', error = '구독 없음' where status = 'pending' and subscription_id is null`;
 
@@ -152,7 +154,8 @@ export async function dispatchPending(limit = 50, opt: { tick?: boolean } = {}) 
     if (d.action_done) { await sql`update notification_deliveries set status = 'skipped', error = '이미 처리됨' where id = ${d.id}`; continue; } // 처리된 알림은 다시 푸시하지 않음
     if (d.meta?.group && lastOf.get(`${d.sub_id}|${d.meta.group}`) !== Number(d.id)) { await sql`update notification_deliveries set status = 'skipped', error = '묶어서 보냄' where id = ${d.id}`; continue; }
     let payload: Payload = { title: d.title, body: d.body, link: d.link, notificationId: d.nid, type: d.type, taskId: d.entity_type === 'task' ? d.entity_id : null, tag: d.nid,
-      actions: actionsFor({ id: d.nid, type: d.type, link: d.link, entity_type: d.entity_type, entity_id: d.entity_id, meta: d.meta, action_done: d.action_done }),
+      // #618: 모든 푸시에 [확인] + 종류별 1개(마감 [완료]는 담당자에게만 — task_mine)
+      actions: actionsFor({ id: d.nid, type: d.type, link: d.link, entity_type: d.entity_type, entity_id: d.entity_id, meta: d.meta, action_done: d.action_done, task_status: d.task_status, task_mine: d.task_mine }),
       ...(d.meta?.alarm ? { alarm: true, snoozeMinutes: 10 } : {}),
       // 메신저 3차: 메시지 알림은 방마다 한 묶음(iOS thread-id·1.1.3 앱 group) — 카톡처럼 방별로 접힘
       ...(d.type === 'chat' && d.entity_id ? { group: `chat:${d.entity_id}` } : {}) };

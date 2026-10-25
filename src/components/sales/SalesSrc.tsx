@@ -487,6 +487,7 @@ function LeadProgress({ id, data, onSaved, go }: { id: string; data: any; onSave
   const open = (data.wTasks ?? []).filter((x: any) => x.status !== 'done'); const td = today();
   const upcoming = (data.events ?? []).filter((x: any) => new Date(x.end_at ?? x.start_at).getTime() >= Date.now() - 86400000).sort((a: any, b: any) => String(a.start_at).localeCompare(String(b.start_at)));
   const stages: string[] = (data.stages ?? []).filter((x: string) => !CLOSED_STAGES.includes(x)); const idx = stages.indexOf(l.status);
+  const prevRaw = (data.statusLog ?? []).find((g: any) => g.to_status === l.status)?.from_status; const prevStage = prevRaw && !CLOSED_STAGES.includes(prevRaw) ? prevRaw : '신규리드';
   return (
     <div className="space-y-3 text-sm" data-testid="lead-progress">
       {/* 단계 띠: 지난 단계 채움, 현재 강조, 누르면 이동 */}
@@ -498,6 +499,8 @@ function LeadProgress({ id, data, onSaved, go }: { id: string; data: any; onSave
           <span className="text-ink-3">현재 <b className="text-ink">{l.status ?? '미정'}</b>{idx >= 0 && ` · ${idx + 1}/${stages.length} 단계`}</span>
           {ed && CLOSED_STAGES.filter((x) => x !== '되돌림').map((st) => <button key={st} type="button" onClick={() => move(st)} className={cx('rounded-full border px-2 py-0.5', l.status === st ? 'border-red-300 bg-red-50 font-semibold text-red-700' : 'border-line text-ink-3 hover:text-red-700')} data-testid={`lead-stage-${st}`}>{st}</button>)}
           {l.status === '되돌림' && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">되돌림</span>}
+          {/* 로컬 10/25 20:00 ①: 보관함(보류·실패·되돌림) 리드는 상세에서도 [되돌리기] — 마지막 기록의 이전 단계(그것도 보류·실패면 신규리드) */}
+          {ed && CLOSED_STAGES.includes(String(l.status)) && <button type="button" onClick={() => void patch({ status: prevStage, reason: '보관함에서 되돌림' }, `되돌렸습니다 — '${prevStage}'`)} className="rounded-full border border-line bg-white px-2 py-0.5 font-semibold text-brand-700 hover:bg-brand-50" data-testid="lead-detail-restore">되돌리기 → {prevStage}</button>}
         </div>
         {pending && <div className="mt-2 flex flex-wrap items-center gap-2 rounded-input bg-amber-50 p-2 text-xs" data-testid="lead-stage-reason-box">
           <span className="text-amber-900">{pending} 사유(필수)</span><input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-stage-reason" />
@@ -702,8 +705,11 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const SORT_FN: Record<string, (a: any, b: any) => number> = { activity: (a, b) => String(b.lastActivity ?? '').localeCompare(String(a.lastActivity ?? '')), next: (a, b) => String(a.next ?? '9999').localeCompare(String(b.next ?? '9999')), name: (a, b) => String(a.name).localeCompare(String(b.name), 'ko'), revenue: (a, b) => (Number(b.revenue) || 0) - (Number(a.revenue) || 0), created: (a, b) => String(b.created ?? '').localeCompare(String(a.created ?? '')) };
   const shown = pool.filter((l) => chips.every((c) => CHIP_FN[c]?.(l)) && (!fPri || l.priorityCode === fPri) && (!fOwner || l.ownerId === fOwner) && (!fRegion || l.region === fRegion)).sort(SORT_FN[sort] ?? SORT_FN.activity);
   const ed = data?.readOnly === false;
-  // #610 ⓒ 보관함 [되돌리기] = 마지막 기록의 이전 단계(없으면 신규리드)로 — 단계 기록에 사유가 남음
-  const restoreLead = async (l: any) => { try { await api(`/api/sales/leads/${l.id}`, { method: 'PATCH', body: { status: l.archive?.prev ?? '신규리드', reason: '보관함에서 되돌림' } }); toast.ok(`되돌렸습니다 — '${l.archive?.prev ?? '신규리드'}'로 기본 목록에 나옵니다`); reload(); } catch (e: any) { toast.error(e.message); } };
+  // 로컬 10/25 20:00 ①: 보관함은 '단계별'·'간단' 보기여도 표(PC)·카드(휴대폰)로 — [되돌리기]가 있는 보기
+  const v = box === 'archive' && (view === 'stages' || view === 'compact') ? 'table' : view;
+  // #610 ⓒ 보관함 [되돌리기] = 마지막 기록의 이전 단계(그것도 보류·실패면 신규리드)로 — 단계 기록에 사유가 남음
+  const prevOf = (l: any) => (l.archive?.prev && !ARCHIVED_STAGES.has(l.archive.prev) ? l.archive.prev : '신규리드');
+  const restoreLead = async (l: any) => { try { await api(`/api/sales/leads/${l.id}`, { method: 'PATCH', body: { status: prevOf(l), reason: '보관함에서 되돌림' } }); toast.ok(`되돌렸습니다 — '${prevOf(l)}'로 기본 목록에 나옵니다`); reload(); } catch (e: any) { toast.error(e.message); } };
   const rowExtra = (l: any) => (box === 'archive' ? <LeadArchiveCell l={l} ed={ed} onRestore={() => restoreLead(l)} /> : ed && l.status === '신규리드' ? <AdvanceButton l={l} people={data?.canAssign ? data.people ?? [] : null} me={me} onDone={reload} /> : null);
   const card = (l: any) => (
     <li key={l.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-lead-card"><button type="button" onClick={() => setOpen(l.id)} className="block w-full text-left" data-testid="sales-lead-open">
@@ -737,7 +743,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
             {ed && data.canAssign && <label className={cx(linkCls, 'cursor-pointer')} data-testid="leads-csv-import">CSV 가져오기<input type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pickCsv(f); }} aria-label="CSV 파일" data-testid="leads-csv-file" /></label>}</span>
         </div>
         {/* 영업관리 2-13 표 칸: 거래처명(담당·최근 활동·금액) · 관심 사업 · 시설 · 지역 · 단계 · 우선 · 예상매출 · 다음 연락 · 최근 활동 · 담당 — 휴대폰은 카드 */}
-        {view === 'table' && <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block"><table className="w-full min-w-[960px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>{['거래처명', '관심 사업', '시설', '지역', '단계', '우선', '예상매출', '다음 연락', '최근 활동', '담당'].map((h) => <th key={h} className="whitespace-nowrap p-2">{h}</th>)}</tr></thead>
+        {v === 'table' && <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block"><table className="w-full min-w-[960px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>{['거래처명', '관심 사업', '시설', '지역', '단계', '우선', '예상매출', '다음 연락', '최근 활동', '담당'].map((h) => <th key={h} className="whitespace-nowrap p-2">{h}</th>)}</tr></thead>
           <tbody>{shown.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={(e) => { if (!(e.target as HTMLElement).closest('input,select,button')) setOpen(l.id); }} data-testid="sales-lead-row">
             {/* 대표 요청(영업관리 거래처 장): 표 안에서 바로 고치기 — 거래처명·단계·우선·다음 연락·담당(관리자). 바뀌면 바로 저장 */}
             <td className="p-2 font-medium">{ed ? <CellInput value={l.name} onSave={(v) => patchLead(l.id, { name: v })} label="거래처명" testId="cell-name" /> : l.name}{l.contact && <span className="block text-[11px] font-normal text-ink-3">{l.contact}{l.phone ? ` · ${l.phone}` : ''}</span>}</td>
@@ -750,10 +756,10 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
             <td className="p-2 text-xs">{ed && data.canAssign ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.ownerId ?? ''} aria-label="담당" data-testid="cell-owner" onChange={(e) => patchLead(l.id, { ownerId: e.target.value || null })}><option value="">없음</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select> : l.owner ?? ''}</td></tr>)}
             {!shown.length && <tr><td colSpan={10} className="p-6 text-center text-ink-3">{box === 'archive' ? '보관함이 비어 있습니다 — 보류·실패로 바꾼 리드와 되돌린 리드가 여기에 모입니다' : '리드가 없습니다'}</td></tr>}</tbody></table></div>}
         {/* 대표 10/21 12:00 영업 재편 3): 진행 단계(예전 '파이프라인' 메뉴)는 리드·거래처 안 '단계별' 보기 — PC 칸반·휴대폰 단계 칩 목록 */}
-        {view === 'stages' && <Pipeline embedded />}
-        {view === 'compact' && <ul className="hidden divide-y divide-line rounded-card border border-line bg-white text-sm shadow-card md:block" data-testid="leads-compact">{shown.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50"><span className="min-w-0 flex-1 truncate font-medium">{l.name}</span>{chip(l.status)}<span className="w-28 truncate text-xs text-ink-2">{l.owner ?? ''}</span><span className={cx('w-24 text-xs tabular-nums', l.next && l.next < td ? 'font-semibold text-red-600' : 'text-ink-3')}>{kd(l.next)}</span><span className="hidden w-24 text-right text-xs tabular-nums text-ink-3 lg:block">{won(l.revenue) || '-'}</span></button></li>)}{!shown.length && <li className="p-6 text-center text-ink-3">리드가 없습니다</li>}</ul>}
+        {v === 'stages' && <Pipeline embedded />}
+        {v === 'compact' && <ul className="hidden divide-y divide-line rounded-card border border-line bg-white text-sm shadow-card md:block" data-testid="leads-compact">{shown.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50"><span className="min-w-0 flex-1 truncate font-medium">{l.name}</span>{chip(l.status)}<span className="w-28 truncate text-xs text-ink-2">{l.owner ?? ''}</span><span className={cx('w-24 text-xs tabular-nums', l.next && l.next < td ? 'font-semibold text-red-600' : 'text-ink-3')}>{kd(l.next)}</span><span className="hidden w-24 text-right text-xs tabular-nums text-ink-3 lg:block">{won(l.revenue) || '-'}</span></button></li>)}{!shown.length && <li className="p-6 text-center text-ink-3">리드가 없습니다</li>}</ul>}
         {/* 대표 검수 10/20 ②: 전화·문자 줄과 홈페이지 칩을 카드 안에, 날짜 10. 22.(목). 휴대폰은 늘 카드 */}
-        <ul className={cx('space-y-2', view === 'cards' ? 'md:grid md:grid-cols-2 md:gap-2 md:space-y-0 xl:grid-cols-3' : 'md:hidden', view === 'stages' && 'hidden')} data-testid="sales-lead-cards">{shown.map(card)}{!shown.length && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
+        <ul className={cx('space-y-2', v === 'cards' ? 'md:grid md:grid-cols-2 md:gap-2 md:space-y-0 xl:grid-cols-3' : 'md:hidden', v === 'stages' && 'hidden')} data-testid="sales-lead-cards">{shown.map(card)}{!shown.length && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
         </>
       )}
       {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}

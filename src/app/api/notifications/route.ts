@@ -1,6 +1,6 @@
 import { handler } from '@/lib/api';
 import { db } from '@/lib/db';
-import { actionsFor, type NotifRow } from '@/lib/notifActions';
+import { actionsFor, webActions, type NotifRow } from '@/lib/notifActions';
 
 export const GET = handler(async ({ req, user }) => {
   const unreadOnly = req.nextUrl.searchParams.get('unread') === '1';
@@ -10,7 +10,8 @@ export const GET = handler(async ({ req, user }) => {
   // V12 7번: 검토 요청 알림은 업무가 아직 검토 중이면 바로 승인·반려 (task_status·task_version)
   const items = await sql<any[]>`select n.id, n.type, n.title, n.body, n.link, n.read_at, n.created_at, u.name as actor_name, n.entity_id, n.entity_type, n.meta, n.count, n.action_done, n.action_done_at, n.space, n.archived_at,
       case when n.entity_type = 'task' then t.status end as task_status, case when n.type = 'review_requested' then t.version end as task_version,
-      case when n.meta->>'extensionId' is not null then exists (select 1 from task_due_extensions x where x.id = (n.meta->>'extensionId')::uuid and x.status = 'pending') end as ext_pending
+      case when n.meta->>'extensionId' is not null then exists (select 1 from task_due_extensions x where x.id = (n.meta->>'extensionId')::uuid and x.status = 'pending') end as ext_pending,
+      case when t.id is not null then (t.assignee_id = n.user_id or exists (select 1 from task_assignees ta where ta.task_id = t.id and ta.user_id = n.user_id)) end as task_mine
     from notifications n left join users u on u.id = n.actor_id
     left join tasks t on n.entity_type = 'task' and t.id = n.entity_id and t.deleted_at is null
     where n.user_id = ${user.id} and n.type <> 'chat' ${archived ? sql`and n.archived_at is not null` : sql`and n.archived_at is null`} ${unreadOnly ? sql`and n.read_at is null` : sql``} ${space && ['work', 'sales', 'marketing'].includes(space) ? sql`and n.space = ${space}` : sql``}
@@ -24,5 +25,6 @@ export const GET = handler(async ({ req, user }) => {
     .map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, link: n.link, entityType: n.entity_type ?? null, entityId: n.entity_id ?? null, actions: actionsFor(n as NotifRow) })) : undefined;
   // #114 ⑦ 휴대폰 상단 '결재할 것 n건' — 같은 폴링에 실어 보낸다(별도 폴링 없음)
   const approvalsTodo = unreadOnly ? await (await import('@/lib/approvalForms')).todoCount(sql, user).catch(() => 0) : undefined;
-  return { items: items.map((n) => ({ ...n, actions: actionsFor(n as NotifRow) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}) };
+  // #618: 푸시는 모든 알림에 [확인]이 붙지만, 웹 목록은 줄마다 [읽음]·[보관]이 있으므로 [확인]만 있는 줄은 버튼 없이(webActions)
+  return { items: items.map((n) => ({ ...n, actions: webActions(actionsFor(n as NotifRow)) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}) };
 });
