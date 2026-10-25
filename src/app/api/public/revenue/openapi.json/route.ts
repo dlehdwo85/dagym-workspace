@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export function GET() {
   if (process.env.FEATURE_GPT_ACTION !== '1') return NextResponse.json({ error: 'not found' }, { status: 404 }); // V13 1번: 기본 꺼짐
-  const url = process.env.APP_URL ?? 'https://work-in.dev';
+  const url = process.env.APP_URL ?? 'https://www.work-in.dev';
   return NextResponse.json({
     openapi: '3.1.0',
     info: { title: '워크인 매출 입력', version: '1.0.0', description: '현장별 월 실적(매출·지출·회원수·목표)을 워크인에 입력합니다. 입력 전용이며 조회·삭제는 할 수 없습니다.' },

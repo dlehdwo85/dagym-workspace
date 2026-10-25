@@ -86,6 +86,6 @@ export async function sitesView(u: SessionUser, weeks = 4) {
   const summary = rows.map((r) => { const [c, p] = r.weeks; return `${r.name}: ${r.connected ? `방문 ${c.visits}${d(c.visits, p?.visits ?? null)} · CTA ${c.cta}${d(c.cta, p?.cta ?? null)} · ` : '방문·CTA 미연결 · '}게시 ${c.posts}${d(c.posts, p?.posts ?? null)} · 광고 ${won(c.adCost)}/클릭 ${c.clicks}${d(c.clicks, p?.clicks ?? null)} · 문의 ${c.inquiries}${d(c.inquiries, p?.inquiries ?? null)}`; });
   // 사이트별 공개 키(방문·CTA 전용 — 브라우저에 넣어도 되는 값). 연동 토큰 원문은 여기 없음
   const keys = await sql<{ id: string; site: string; name: string }[]>`select id, site, name from integration_tokens where tenant = ${t} and revoked_at is null order by created_at`;
-  return { weeks: wk, rows, summary, thisWeek: wk[0], sites, beaconUrl: `${(process.env.APP_URL ?? 'https://work-in.dev').replace(/\/$/, '')}/api/public/site-event`,
+  return { weeks: wk, rows, summary, thisWeek: wk[0], sites, beaconUrl: `${(process.env.APP_URL ?? 'https://www.work-in.dev').replace(/\/$/, '')}/api/public/site-event`,
     beaconKeys: keys.map((k) => ({ site: k.site, name: k.name, key: beaconKeyOf(k.id) })) };
 }

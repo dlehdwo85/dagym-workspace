@@ -171,6 +171,7 @@ test('맞춤 목록: 1차 규칙(지역·시·군·업력·근로자·소상공�
   assert.deepEqual([v.counts.fit, v.counts.closing], [v.items.length, 2], 'D-14 안: 경기 마케팅(D-6)·용인 IP(D-10)');
   assert.equal(v.profile.region, '경기'); assert.equal(v.keys.datago, true);
   const all = await ctx.staffA.client.ok('GET', '/api/sales/support?showNo=1');
+  assert.equal(all.counts.fit, v.counts.fit, '로컬 158차 확인: 해당 없음 보기를 켜도 탭 숫자(맞춤 n)는 그대로'); assert.equal(all.items.length, v.items.length + 3, '목록에는 해당 없음 3건이 더 보임');
   assert.ok(find(all.items, B.b3.pblancNm).rule.flags.some((f) => f.level === 'no' && f.text === '부산 기업 대상(우리 경기)'));
   assert.ok(find(all.items, B.b4.pblancNm).rule.flags.some((f) => f.level === 'no' && f.text === '화성시 공고(우리 용인시)'));
   const hit = await ctx.staffA.client.ok('GET', `/api/sales/support?showNo=1&q=${encodeURIComponent('화성')}`);
