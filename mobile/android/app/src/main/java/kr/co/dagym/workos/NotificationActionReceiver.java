@@ -23,7 +23,7 @@ import org.json.JSONObject;
  */
 public class NotificationActionReceiver extends BroadcastReceiver {
 
-    private static final String DEFAULT_SERVER = "https://work-in.dev";
+    private static final String DEFAULT_SERVER = "https://www.work-in.dev";
 
     @Override
     public void onReceive(Context context, Intent intent) {

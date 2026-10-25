@@ -33,7 +33,7 @@ public class TodayWidget extends AppWidgetProvider {
     static final String ACTION_REFRESH = "kr.co.dagym.workos.WIDGET_REFRESH";
     private static final String ACTION_DONE = "kr.co.dagym.workos.WIDGET_DONE";
     private static final String PREFS = "workin_widget";
-    private static final String DEFAULT_SERVER = "https://work-in.dev";
+    private static final String DEFAULT_SERVER = "https://www.work-in.dev";
     private static final int[] ROWS = { R.id.w_row0, R.id.w_row1, R.id.w_row2, R.id.w_row3, R.id.w_row4 };
     private static final int[] CHECKS = { R.id.w_check0, R.id.w_check1, R.id.w_check2, R.id.w_check3, R.id.w_check4 };
     private static final int[] TITLES = { R.id.w_title0, R.id.w_title1, R.id.w_title2, R.id.w_title3, R.id.w_title4 };
