@@ -263,7 +263,9 @@ test('마감 알림: 7일 안 → D-7 한 번 · 3일 안에 처음 잡힌 건�
   await tick();
   assert.deepEqual(await notes(), ['지원사업 마감 D-2: E2E 알림 시험 2', '지원사업 마감 D-3: E2E 알림 시험 1', '지원사업 마감 D-5: E2E 알림 시험 1']);
   const h = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
-  assert.deepEqual([h.support.closing, h.support.mine, h.support.fit], [3, 2, 1], '7일 안: 관심·준비 2(알림 시험) + 맞춤 1(경기 마케팅 D-6)');
+  // #649 ③(대표 10/25 23:20): '맞춤'은 AI 가 판정한 것만 — 1차 규칙만 맞는 '경기 마케팅 D-6'은 '확인 중'(pending)으로 따로
+  assert.deepEqual([h.support.closing, h.support.mine, h.support.fit], [2, 2, 0], '7일 안: 관심·준비 2(알림 시험) · AI 판정 전 맞춤은 안 셈');
+  assert.ok(h.support.pending >= 1, `1차 맞춤(AI 확인 중) ${JSON.stringify(h.support)}`);
   assert.ok(h.support.fitOpen >= h.support.fit && h.support.mineOpen >= h.support.mine, `#647 홈 고정 카드: 신청 가능 맞춤·관심 수 ${JSON.stringify(h.support)}`);
 });
 
@@ -298,4 +300,49 @@ test('#568 주 1회 묶음: 1차 ✅·AI 판단 없는 공고를 자동 판단(�
   const m = await ctx.owner.ok('POST', '/api/sales/support/weekly', {});
   assert.equal(m.week, w.week); assert.ok(m.weekly.items.length >= 1); assert.equal(m.aiCount, 0, '다시 묶어도 이미 판단한 건은 다시 안 돌림');
   assert.equal((await sql`select count(*)::int n from notifications where type = 'support_weekly' and user_id = ${ctx.ownerId}`)[0].n, 1, '수동으로 다시 만들어도 알림은 주마다 한 번');
+});
+
+test('#649·#651(대표 10/25 23:20): 대상 업종 ≠ 우리 업종 → 해당 없음(전 업종·우대 문구는 예외, 제목에만 있으면 확인 필요) · 관심 키워드만으로는 맞춤 아님 · 1차 맞춤은 AI 판정 전 "확인 중" · 깨진 제목은 맞춤·마감 임박에서 숨김 · 해독기(charset 우선·한글 비율)', async () => {
+  const { decodeKoreanText, koreanScore, garbledText } = await import('../../src/lib/sales/collectors/koreanText.ts'); // Node 22 형식 제거로 .ts 직접 불러옴(잎 모듈)
+  // 해독기 — UTF-8 응답에 깨진 바이트가 하나 섞여도 전체를 EUC-KR 로 읽지 않음(143건 원인) · EUC-KR 응답은 EUC-KR · charset 헤더가 있으면 그대로
+  const ko = '2026년 하반기 중점산업 창업 중소기업 육성';
+  const utf = new TextEncoder().encode(JSON.stringify({ title: ko }));
+  const mixed = new Uint8Array([...utf.slice(0, 12), 0xff, ...utf.slice(12)]);
+  assert.deepEqual([decodeKoreanText(utf).encoding, decodeKoreanText(utf).by], ['utf-8', 'clean']);
+  const m1 = decodeKoreanText(mixed); assert.deepEqual([m1.encoding, m1.by], ['utf-8', 'score']); assert.ok(m1.text.includes('중소기업 육성'), m1.text);
+  const euc = new Uint8Array([0xc1, 0xdf, 0xbc, 0xd2, 0xb1, 0xe2, 0xbe, 0xf7, 0x20, 0xc1, 0xf6, 0xbf, 0xf8]); // '중소기업 지원' EUC-KR
+  const e1 = decodeKoreanText(euc); assert.deepEqual([e1.encoding, e1.by, e1.text], ['euc-kr', 'score', '중소기업 지원']);
+  assert.deepEqual([decodeKoreanText(euc, 'text/html; charset=EUC-KR').by, decodeKoreanText(utf, 'application/json; charset=utf-8').by], ['charset', 'charset']);
+  assert.ok(koreanScore(ko) > 0.5 && koreanScore('以��議� �뱁 Multi AI Agent 媛諛(R&D) ��� Track ��怨� 怨듦') < 0);
+  assert.deepEqual([garbledText('以��議� �뱁 Multi AI Agent 媛諛(R&D) ��� Track ��怨� 怨듦'), garbledText(ko), garbledText('Multi AI Agent R&D Track'), garbledText(''), garbledText(null)], [true, false, false, false, false]);
+  // 규칙 — 프로필 업종 소프트웨어·피트니스, 관심 IP·마케팅
+  await ctx.owner.ok('PUT', '/api/sales/support/profile', { regionSido: '경기', regionSigungu: '용인시', founded: d(-2200), size: '소기업', employees: 12, industries: ['소프트웨어', '피트니스'], keywords: ['출입'], certs: ['벤처기업'], brands: ['다짐', '하이링크', '워크인'], interests: ['IP', '마케팅'], excludes: [], memo: '시험 회사 소개' });
+  const ins = (o) => sql`insert into support_programs ${sql({ source: 'bizinfo', regions: [], nationwide: true, hashtags: [], attachments: sql.json([]), apply_end: d(20), ...o })} returning id`.then((r) => r[0].id);
+  const g = '以��議� �뱁 Multi AI Agent 媛諛(R&D) ��� Track ��怨� 怨듦';
+  const [t1, t2, t3, t4, t5, t6, t7] = await Promise.all([
+    ins({ source_id: 'IND-1', title: '[시험] 로컬 인디브랜드 성장 프로그램', target: '식품제조가공업·즉석판매제조가공업 기업', biz_years: '3년미만,5년미만,7년미만', summary: '마케팅·판로 지원' }),
+    ins({ source_id: 'IND-2', title: '[시험] 제조·IT 중소기업 디지털 전환', target: '제조업, 정보통신업 등 전 업종 중소기업', summary: '마케팅 지원' }),
+    ins({ source_id: 'IND-3', title: '[시험] 중소기업 수출 바우처', target: '중소기업(제조업 우대)', summary: '해외 마케팅 지원' }),
+    ins({ source_id: 'IND-4', title: '[시험] 빅웨이브 IR 초격차 반도체 분야', target: '중소기업', summary: 'IR 지원' }),
+    ins({ source_id: 'IND-5', title: '[시험] 온라인 마케팅 바우처', target: '중소기업', summary: '온라인 광고·홍보 지원' }),
+    ins({ source_id: 'IND-6', title: '[경기] [시험] 체육시설 운영 기업 디지털 지원', target: '체육시설업 영위 중소기업', regions: ['경기'], nationwide: false, summary: '피트니스 시설 마케팅 지원' }),
+    ins({ source_id: 'IND-7', title: g, target: '중소기업', summary: '깨진 글자' }),
+  ]);
+  const all = (await ctx.owner.ok('GET', '/api/sales/support?tab=all&limit=200')).items;
+  const by = (id) => all.find((x) => x.id === id);
+  assert.equal(by(t1).rule.verdict, 'no'); assert.ok(by(t1).rule.flags.some((f) => f.level === 'no' && /식품 업종 대상\(우리 소프트웨어·피트니스\)/.test(f.text)), JSON.stringify(by(t1).rule.flags));
+  assert.notEqual(by(t2).rule.verdict, 'no', '전 업종 문구'); assert.ok(!by(t2).rule.flags.some((f) => f.level === 'no'), JSON.stringify(by(t2).rule.flags));
+  assert.notEqual(by(t3).rule.verdict, 'no', '우대 구절은 뺌'); assert.ok(!by(t3).rule.flags.some((f) => /업종/.test(f.text)), JSON.stringify(by(t3).rule.flags));
+  assert.ok(by(t4).rule.flags.some((f) => f.level === 'warn' && /제목에 반도체소재 업종/.test(f.text)), JSON.stringify(by(t4).rule.flags));
+  assert.equal(by(t5).rule.verdict, 'maybe', '관심 키워드(마케팅)만으로는 맞춤이 안 됨'); assert.ok(by(t5).rule.flags.some((f) => /^관심:/.test(f.text)));
+  assert.equal(by(t6).rule.verdict, 'fit'); assert.ok(by(t6).rule.flags.some((f) => f.level === 'ok' && /대상 업종 스포츠 — 우리 업종/.test(f.text)), JSON.stringify(by(t6).rule.flags));
+  assert.deepEqual([by(t6).pending, by(t6).ai, by(t6).garbled], [true, null, false], 'AI 판정 전 1차 맞춤 = 확인 중');
+  assert.deepEqual([by(t7).rule.verdict, by(t7).garbled], ['no', true]); assert.ok(by(t7).rule.flags.some((f) => /글자가 깨져/.test(f.text)));
+  const fit = (await ctx.owner.ok('GET', '/api/sales/support?tab=fit&limit=200')).items;
+  assert.ok(fit.some((x) => x.id === t6) && !fit.some((x) => x.id === t7) && !fit.some((x) => x.id === t1), '맞춤 탭: 1차 맞춤(확인 중)은 보이고 깨진·업종 불일치는 안 보임');
+  const cl = (await ctx.owner.ok('GET', '/api/sales/support?tab=closing&limit=200')).items;
+  assert.ok(!cl.some((x) => x.id === t7), '마감 임박에도 깨진 건 없음');
+  const h = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
+  assert.ok(h.support.pending >= 1 && h.support.fit === 0, `홈 카드: AI 판정 전은 pending 으로 ${JSON.stringify(h.support)}`);
+  await sql`delete from support_programs where source_id like 'IND-%'`;
 });

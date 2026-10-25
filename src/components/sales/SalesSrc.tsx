@@ -280,7 +280,7 @@ export function SalesHome() {
       {/* #647(대표 10/25 22:20): 앱에서 지원사업이 잘 안 보여서 — 홈 상단 고정 카드 '이번 주 맞는 지원사업 n건'(7일 안 마감 맞춤) + 허브 '지원사업' 탭 */}
       {data.support && <Link href="/s/sales/support?tab=fit" className="flex items-center gap-3 rounded-card border-2 border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 shadow-card hover:border-blue-400" data-testid="sales-support-pin">
         <div className="min-w-0 flex-1"><div className="text-sm font-semibold text-[#1D4ED8]">이번 주 맞는 지원사업 <span className="text-lg tabular-nums" data-testid="sales-support-pin-n">{data.support.fit}</span>건</div>
-          <div className="truncate text-[11px] text-ink-2">7일 안 마감 기준 · 신청할 수 있는 맞춤 {data.support.fitOpen ?? 0}건 · 관심·준비 중 {data.support.mineOpen ?? data.support.mine}건</div></div>
+          <div className="truncate text-[11px] text-ink-2">7일 안 마감 기준 · 신청할 수 있는 맞춤 {data.support.fitOpen ?? 0}건 · 관심·준비 중 {data.support.mineOpen ?? data.support.mine}건{data.support.pending ? ` · AI 확인 중 ${data.support.pending}건` : ''}</div></div>
         <span className="shrink-0 text-xs font-medium text-[#1D4ED8]">지원사업 보기 →</span>
       </Link>}
       {data.today && <TodayRow date={data.today.date} cards={[

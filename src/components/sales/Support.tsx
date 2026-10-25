@@ -37,8 +37,11 @@ function Dday({ d, text }: { d: number | null; text?: string | null }) {
   return <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums', cls)} data-testid="support-dday">{d < 0 ? '마감' : d === 0 ? 'D-day' : `D-${d}`}</span>;
 }
 function Verdict({ it }: { it: Pick<Item, 'ai' | 'rule'> }) {
-  const v = it.ai?.verdict ?? it.rule.verdict; const [icon, label, cls] = VERDICT[v];
-  return <span className={cx('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold', cls)} data-testid="support-verdict" data-verdict={v} data-by={it.ai ? 'ai' : 'rule'} title={it.ai ? 'AI 세일즈 판단' : '1차 규칙 판단(지역·업력·규모·관심 분야)'}>{icon} {label}<span className="ml-1 font-normal opacity-70">{it.ai ? 'AI' : '1차'}</span></span>;
+  const v = it.ai?.verdict ?? it.rule.verdict;
+  const pending = !it.ai && v === 'fit'; // #649 ③(대표 10/25 23:20): 1차 규칙만 맞는 공고는 AI 판정 전까지 '확인 중' — '해당'은 AI 가 판정한 것만
+  const [icon, label, cls] = pending ? ['⏳', 'AI 확인 중', 'border-amber-200 bg-amber-50 text-amber-800'] : VERDICT[v];
+  return <span className={cx('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold', cls)} data-testid="support-verdict" data-verdict={v} data-by={it.ai ? 'ai' : 'rule'} data-pending={pending ? '1' : undefined}
+    title={it.ai ? 'AI 세일즈 판단' : pending ? '1차 규칙은 맞음 — [AI 판단]으로 확인하면 해당 여부가 정해집니다' : '1차 규칙 판단(지역·업력·규모·업종·관심 분야)'}>{icon} {label}{!pending && <span className="ml-1 font-normal opacity-70">{it.ai ? 'AI' : '1차'}</span>}</span>;
 }
 const Flags = ({ flags, max }: { flags: Flag[]; max?: number }) => (
   <div className="flex flex-wrap gap-1" data-testid="support-flags">{flags.slice(0, max ?? flags.length).map((f, i) => <span key={i} className={cx('rounded-full px-1.5 py-0.5 text-[11px]', FLAG_CLS[f.level])} data-level={f.level}>{f.level === 'ok' ? '✓' : f.level === 'no' ? '✕' : '!'} {f.text}</span>)}
