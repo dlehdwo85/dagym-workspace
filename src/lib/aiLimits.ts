@@ -36,12 +36,14 @@ const month = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' })
 export type AiLimitRow = {
   key: AiSpace; name: string; shared: boolean; planLabel: string | null;
   limit: { requests: number | null; usd: number | null; credits?: number | null; videos?: number | null };
-  used: { requests: number; usd: number; credits?: number; videos?: number };
+  used: { requests: number; usd: number | null; credits?: number; videos?: number };
   left: { requests: number | null; usd: number | null; credits?: number | null; videos?: number | null };
   pct: number | null; feel: Feel[]; note: string;
+  /** 한도·쓴 양을 체감 단위(질문 n회)로 — 화면이 달러로 계산하지 않게 서버가 미리(#602: 고객사 응답엔 달러가 없음) */
+  feelLimit?: number | null; feelUsed?: number | null;
 };
 /** 회사 한 곳의 세 AI 한도·사용·잔여 표 + 요금제별 기준표 */
-export async function aiLimitsView(tenant: string, sql: Sql = db()) {
+export async function aiLimitsView(tenant: string, sql: Sql = db(), full = true) {
   const P = await import('./plans'); const M = await import('./mktAuto'); const A = await import('./ai/assistant');
   const start = `${month()}-01`;
   const [{ limits }, usage, m, bySpace, rates, ms, mu, cost, plans] = await Promise.all([
@@ -85,7 +87,21 @@ export async function aiLimitsView(tenant: string, sql: Sql = db()) {
       ],
       note: ms.plan_code ? `마케팅 요금제 ${ms.plan?.label ?? ms.plan_code}: 월 크레딧·마케팅 AI 한도·생성 영상 편수` : '마케팅 요금제를 고르면 크레딧 한도가 생깁니다(지금은 회사 AI 한도만)' },
   ];
-  return { month: month(), usdKrw: rate, rows, pool: { requests: { limit: limits.aiRequests, used: usage.aiRequests, left: poolReqLeft }, usd: { limit: poolUsdLimit, used: r2(m.costUsd), left: poolUsdLeft } }, budget: b, plans };
+  for (const r of rows) { // 체감 단위 환산은 서버에서(화면은 숫자만 보여 줌)
+    const f = r.feel[0]; const left = r.left.usd, used = r.used.usd ?? 0;
+    r.feelLimit = r.key !== 'marketing' && r.limit.requests === null && f && f.n !== null && left !== null ? Math.round(((left + used) / Math.max(1e-9, left)) * f.n) : null;
+    r.feelUsed = r.key !== 'marketing' && f && f.n !== null && left !== null && left > 0 ? Math.round((used / left) * f.n) : null;
+  }
+  const out = { month: month(), usdKrw: rate, rows, pool: { requests: { limit: limits.aiRequests, used: usage.aiRequests, left: poolReqLeft }, usd: { limit: poolUsdLimit, used: r2(m.costUsd) as number | null, left: poolUsdLeft } }, budget: b, plans };
+  return full ? out : customerAiLimits(out);
+}
+/** #602(대표 10/25): 고객사에게는 달러·단가('1회 약 66원')를 빼고 횟수·%·남은 양만. 요금제 기준표의 마케팅 AI 달러는 원화 '분'으로 */
+export function customerAiLimits<T extends { usdKrw: number; rows: AiLimitRow[]; pool: { requests: unknown; usd: { limit: number | null; used: number | null; left: number | null } }; plans: Awaited<ReturnType<typeof aiPlanMatrix>> }>(v: T): T {
+  return { ...v,
+    rows: v.rows.map((r) => ({ ...r, limit: { ...r.limit, usd: null }, used: { ...r.used, usd: null }, left: { ...r.left, usd: null }, feel: r.feel.map((f) => ({ ...f, per: '' })) })),
+    pool: { ...v.pool, usd: { limit: null, used: null, left: null } },
+    plans: { ...v.plans, plans: v.plans.plans.map((p) => ({ ...p, work: { ...p.work, feelPerUser: p.work.feelPerUser.map((f) => ({ ...f, per: '' })) },
+      marketing: p.marketing ? { ...p.marketing, aiMonthlyUsd: null, aiMonthlyKrw: p.marketing.aiMonthlyUsd === null ? null : Math.round(p.marketing.aiMonthlyUsd * v.usdKrw) } : null })) } };
 }
 
 export type AiPlanRow = {

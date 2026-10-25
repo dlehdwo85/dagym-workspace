@@ -32,10 +32,11 @@ export async function aiBudget({ owner, sql, BASE, SHOTS }) {
     assert.ok(await owner.getByLabel('AI 에게 요청', { exact: true }).isDisabled(), '다 쓰면 입력 막힘');
     await owner.screenshot({ path: `${SHOTS}/251-ai-budget-over.png` });
     // 플랫폼 운영: 요금제 표 '회사·1인' 원 칸 + 회사 목록 예산 %
-    await owner.goto(BASE + '/platform');
+    await owner.goto(BASE + '/platform?tab=billing'); // #565(10/24 저녁) 탭 재편 뒤 요금제 표는 '요금·결제' 탭
     assert.equal(await owner.getByTestId('plan-ai-krw-trial').inputValue(), '5000');
     assert.equal(await owner.getByTestId('plan-ai-krw-pu-w_basic').inputValue(), '500');
     assert.equal(await owner.getByTestId('plan-ai-krw-pu-w_pro').inputValue(), '3000');
+    await owner.goto(BASE + '/platform?tab=company'); // 회사 목록(예산 %)은 '회사·가입' 탭
     assert.match(await owner.getByTestId('company-ai-budget-default').innerText(), /월 AI 예산 [\d,]+원 중 10\d% · 멈춤/);
   } finally {
     await sql`delete from ai_usage where tenant = 'default' and purpose = 'e2e_budget'`;

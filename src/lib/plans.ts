@@ -144,9 +144,19 @@ export async function usageOverview(u: SessionUser) {
     sql`select r.id, r.plan_code, r.addons, r.note, r.status, r.created_at, u2.name as requested_by_name from plan_requests r join users u2 on u2.id = r.requested_by
       where r.tenant = ${tenant} order by r.created_at desc limit 10`,
   ]);
+  // #602(대표 10/25): 고객사 응답에는 달러·원가 단가·운영 메모가 없다(원화·%·횟수만). 슈퍼관리자·내부 테넌트는 그대로
+  const full = (await import('./customerScope')).seesInternals(u);
+  const ai = await aiBreakdown(tenant, sql);
+  const { aiCostUsd: _usd, ...usageCust } = usage;
   return { tenant, subscription: { planCode: sub.plan_code, planName: sub.plan_name, monthlyKrw: sub.per_user_krw ? sub.per_user_krw * Math.max(1, usage.users) : sub.monthly_krw, perUserKrw: sub.per_user_krw ?? null, addons: sub.addons, periodStart: sub.period_start, periodEnd: sub.period_end, status: sub.status },
-    limits, usage, plans, addons, topFiles: top, requests, demo: tenant === 'demo', ai: await aiBreakdown(tenant, sql), aiLimits: await (await import('./aiLimits')).aiLimitsView(tenant, sql), canEdit: (await (await import('./menuPerms')).menuLevel(u, 'usage', sql)) === 'edit',
-    aiBudget: await (await import('./ai/companyBudget')).companyAiBudget(tenant, sql) }; // 대표 10/24 ② 회사 월 AI 예산(원) 게이지
+    limits, usage: full ? usage : usageCust, plans, addons, topFiles: top, requests, demo: tenant === 'demo', ai: full ? { currency: 'usd' as const, ...ai } : customerAi(ai), aiLimits: await (await import('./aiLimits')).aiLimitsView(tenant, sql, full), canEdit: (await (await import('./menuPerms')).menuLevel(u, 'usage', sql)) === 'edit',
+    aiBudget: await (await import('./ai/companyBudget')).companyAiBudget(tenant, sql), full }; // 대표 10/24 ② 회사 월 AI 예산(원) 게이지
+}
+/** #602 고객사용 AI 사용 내역: 금액은 전부 원화(환율은 서버가 적용), 달러 칸·운영 메모 없음 */
+function customerAi(a: Awaited<ReturnType<typeof aiBreakdown>>) {
+  const k = (usd: number) => Math.round(usd * a.usdKrw);
+  return { currency: 'krw' as const, cost: k(a.costUsd), limit: k(a.limitUsd), left: k(a.leftUsd), pct: a.pct, requests: a.requests, tokens: a.tokens, blocked: a.blocked, dailyLimit: a.dailyLimit,
+    byUser: (a.byUser as unknown as { user_id: string; name: string; requests: number; cost: number }[]).map((x) => ({ ...x, cost: k(x.cost) })), byPurpose: (a.byPurpose as unknown as { purpose: string; requests: number; cost: number }[]).map((x) => ({ ...x, cost: k(x.cost) })) };
 }
 
 /** V14 4번: 이번 달 AI 사용 — 사람별·기능별, 회사 월 한도($) 대비 %, 원 환산(USD_KRW, 기본 1,400) */

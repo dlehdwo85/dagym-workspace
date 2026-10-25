@@ -62,7 +62,9 @@ export async function aiBudgetsOverview(u: SessionUser) {
     sql<{ krw: number; usd: number }[]>`select coalesce(sum(coalesce(cost_krw, cost_usd * ${usdKrw()})), 0)::float8 krw, coalesce(sum(cost_usd), 0)::float8 usd from ai_usage
       where tenant = ${tenantOf(u)} and created_at >= (${m + '-01'}::date::timestamp at time zone 'Asia/Seoul')`,
   ]);
-  return { month: m, usdKrw: usdKrw(), canEdit: isOwner(u), people: rows, pending, top, totalKrw: Math.round(tot.krw), totalUsd: Math.round(tot.usd * 100) / 100 };
+  // #602: 달러 합계·환율은 슈퍼관리자·내부 테넌트에게만(고객사는 원화만)
+  const full = (await import('../customerScope')).seesInternals(u);
+  return { month: m, canEdit: isOwner(u), people: rows, pending, top, totalKrw: Math.round(tot.krw), ...(full ? { usdKrw: usdKrw(), totalUsd: Math.round(tot.usd * 100) / 100 } : {}) };
 }
 export async function myAiRequests(u: SessionUser) {
   return { requests: await db()`select id, month, amount_krw, reason, status, created_at, decided_at from ai_limit_requests where user_id = ${u.id} order by created_at desc limit 10` };

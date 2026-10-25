@@ -9,9 +9,13 @@ import { PortalApplyLink, portalService } from './PortalApply';
 type Src = { label: string; ok: boolean; calls: number; received: number; kept: number; total?: number; keys?: string[]; error?: string; note?: string; sent?: string; head?: string };
 type Run = { id: number; slug: string; trigger: string; started_at: string; finished_at: string | null; status: string; inserted: number; updated: number; unchanged: number; errors: number; summary: string | null; error_log: string | null; detail?: { sources?: Record<string, Src> } | null };
 export type CollectorAlert = { slug: string; source: string | null; label: string; lastOkAt: string | null; failStreak: number; reason: string; error: string | null };
-type C = { slug: string; label: string; hourKst: number; againKst?: number | number[] | null; hours?: number[]; source: string; bid: boolean; support?: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null };
-type Data = { canEdit: boolean; platformAdmin: boolean; counts: Record<string, number>; collectors: C[]; runs: Run[]; alerts?: CollectorAlert[] };
+type C = { slug: string; label: string; hourKst: number; againKst?: number | number[] | null; hours?: number[]; source: string | null; bid: boolean; support?: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null;
+  /** #602 고객사에게만: 연결 상태 3가지 + 방법(키 이름·원천 주소·오류 원인 대신) */ state?: 'connected' | 'disconnected' | 'apply_needed' | 'off' | null; how?: string | null };
+type Data = { full?: boolean; canEdit: boolean; platformAdmin: boolean; counts: Record<string, number>; collectors: C[]; runs: Run[]; alerts?: CollectorAlert[] };
 const ST: Record<string, [string, string]> = { success: ['성공', 'bg-emerald-50 text-emerald-800'], partial: ['일부', 'bg-amber-50 text-amber-800'], failed: ['실패', 'bg-red-50 text-red-800'], running: ['실행 중', 'bg-blue-50 text-blue-800'], skipped: ['건너뜀', 'bg-slate-100 text-ink-3'] };
+// #602 고객사 화면: 결과는 '받음/못 받음'으로(원인 없음), 연결 상태는 연결됨·신청 필요·연결 안 됨·잠시 중단
+const ST_CUST: Record<string, [string, string]> = { success: ['받음', 'bg-emerald-50 text-emerald-800'], partial: ['일부 받음', 'bg-amber-50 text-amber-800'], failed: ['못 받음', 'bg-red-50 text-red-800'], running: ['받는 중', 'bg-blue-50 text-blue-800'], skipped: ['건너뜀', 'bg-slate-100 text-ink-3'] };
+const STATE: Record<NonNullable<C['state']>, [string, string]> = { connected: ['연결됨', 'bg-emerald-50 text-emerald-800'], disconnected: ['연결 안 됨', 'bg-red-50 text-red-800'], apply_needed: ['신청 필요', 'bg-amber-50 text-amber-800'], off: ['잠시 중단', 'bg-slate-100 text-ink-3'] };
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
 const csv = (s: string) => s.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
 
@@ -28,12 +32,13 @@ export function Collectors() {
     <section id="collectors" className="scroll-mt-16 rounded-card border border-line bg-white p-4 shadow-card" data-testid="sales-collectors">
       {!!data.alerts?.length && <CollectorAlerts alerts={data.alerts} />}
       <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">자동 수집(수집기 {data.collectors.length}개)</h2><span className="text-xs text-ink-2">공고 {total.toLocaleString('ko-KR')}건 보유 · 매일 KST 06~08시 순서대로 하루 한 번(지원사업은 08·14시 두 번)</span></div>
-      <p className="mt-1 text-xs text-ink-2">영업관리에서 옮겨 온 수집기입니다. 끄면 이 회사의 당일 다이제스트·오늘 새 공고에서 그 출처가 빠집니다(수집 자체는 공용). 필요한 키가 없는 수집기는 “키 필요”로 표시됩니다.</p>
-      <ul className="mt-2 divide-y divide-line text-sm">{data.collectors.map((c) => { const st = c.last ? ST[c.last.status] ?? [c.last.status, 'bg-slate-100'] : null; const missing = c.needs.filter((n) => !n.present && !/선택/.test(n.key)); return (
-        <li key={c.slug} className="py-2" data-testid="sales-collector" data-slug={c.slug} data-enabled={c.enabled}>
+      <p className="mt-1 text-xs text-ink-2">영업관리에서 옮겨 온 수집기입니다. 끄면 이 회사의 당일 다이제스트·오늘 새 공고에서 그 출처가 빠집니다(수집 자체는 공용). {data.full === false ? '연결 상태는 연결됨 · 신청 필요 · 연결 안 됨으로 표시되고, 신청이 필요한 원천은 [방법 보기]에 순서가 있습니다.' : '필요한 키가 없는 수집기는 “키 필요”로 표시됩니다.'}</p>
+      <ul className="mt-2 divide-y divide-line text-sm">{data.collectors.map((c) => { const st = c.last ? (data.full === false ? ST_CUST : ST)[c.last.status] ?? [c.last.status, 'bg-slate-100'] : null; const missing = c.needs.filter((n) => !n.present && !/선택/.test(n.key)); return (
+        <li key={c.slug} className="py-2" data-testid="sales-collector" data-slug={c.slug} data-enabled={c.enabled} data-state={c.state ?? undefined}>
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium">{c.label}</span>
             <span className={cx('rounded-full px-2 py-0.5 text-[11px]', c.bid ? 'bg-violet-50 text-violet-800' : c.support ? 'bg-teal-50 text-teal-800' : 'bg-slate-100 text-ink-2')}>{c.bid ? '입찰·공고' : c.support ? '지원사업' : '영업 DB'}</span>
+            {c.state && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', STATE[c.state][1])} data-testid="sales-collector-state">{STATE[c.state][0]}</span>}
             {st && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', st[1])} data-testid="sales-collector-status">{st[0]}</span>}
             {missing.length > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">키 필요: {missing.map((m) => m.key).join(', ')}</span>}
             {!c.globalEnabled && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-3">플랫폼에서 꺼짐</span>}
@@ -44,7 +49,8 @@ export function Collectors() {
               {data.platformAdmin && <button type="button" className="text-[11px] underline text-ink-3" onClick={() => toggle(c, 'global')}>{c.globalEnabled ? '플랫폼 끄기' : '플랫폼 켜기'}</button>}
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-ink-3">{c.source}</p>
+          {c.source && <p className="mt-0.5 text-xs text-ink-3">{c.source}</p>}
+          {c.how && <details className="mt-0.5 text-xs text-ink-2"><summary className="cursor-pointer font-medium text-amber-800">방법 보기</summary><p className="mt-0.5" data-testid="sales-collector-how">{c.how}</p></details>}
           {c.last?.summary && <p className={cx('mt-0.5 text-xs', portalService(c.last.summary) ? 'text-amber-900' : 'text-ink-2')} data-testid="sales-collector-summary">{c.last.summary}<PortalApplyLink summary={c.last.summary} /></p>}
           {/* #522 원천별: 받은 줄·관련(저장) 줄·첫 줄 칸 이름(값 없이) — [지금 수집] 뒤 바로 확인 */}
           {c.last?.detail?.sources && <ul className="mt-0.5 space-y-0.5 text-[11px] text-ink-2" data-testid="sales-collector-sources">{Object.entries(c.last.detail.sources).map(([k, v]) => (
@@ -53,8 +59,8 @@ export function Collectors() {
               {!v.ok && (v.sent || v.head) ? <details className="text-ink-3"><summary className="cursor-pointer">보낸 주소·응답 앞부분(키는 ***)</summary><p className="break-all font-mono" data-testid="sales-collector-sent">{v.sent}</p>{v.head && <pre className="whitespace-pre-wrap break-all font-mono" data-testid="sales-collector-head">{v.head}</pre>}</details> : null}</li>))}</ul>}
           {c.last?.error_log && <details className="mt-0.5 text-xs text-red-700"><summary className="cursor-pointer">오류 {c.last.errors}건</summary><pre className="whitespace-pre-wrap break-all">{c.last.error_log}</pre></details>}
         </li>); })}</ul>
-      <details className="mt-2 text-xs" open={open === 'runs'} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open ? 'runs' : null)}><summary className="cursor-pointer text-ink-2">최근 실행 {data.runs.length}건</summary>
-        <ul className="mt-1 space-y-0.5" data-testid="sales-collector-runs">{data.runs.map((r) => <li key={r.id} className="text-ink-2">{fmtDateTime(r.started_at)} · {r.slug} · {ST[r.status]?.[0] ?? r.status} · 신규 {r.inserted} 갱신 {r.updated} 변화없음 {r.unchanged}{r.errors ? ` 오류 ${r.errors}` : ''} · {r.trigger === 'manual' ? '수동' : '자동'}</li>)}</ul></details>
+      {data.full !== false && <details className="mt-2 text-xs" open={open === 'runs'} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open ? 'runs' : null)}><summary className="cursor-pointer text-ink-2">최근 실행 {data.runs.length}건</summary>
+        <ul className="mt-1 space-y-0.5" data-testid="sales-collector-runs">{data.runs.map((r) => <li key={r.id} className="text-ink-2">{fmtDateTime(r.started_at)} · {r.slug} · {ST[r.status]?.[0] ?? r.status} · 신규 {r.inserted} 갱신 {r.updated} 변화없음 {r.unchanged}{r.errors ? ` 오류 ${r.errors}` : ''} · {r.trigger === 'manual' ? '수동' : '자동'}</li>)}</ul></details>}
     </section>
   );
 }
