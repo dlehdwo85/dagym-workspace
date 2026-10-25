@@ -6,6 +6,7 @@ import { isNativeApp } from './native';
 import { MediaFull } from './MediaView';
 import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
+import { AttachEditModal, editModeOf } from './AttachEdit';
 
 /** V8 5번: 사진은 올리기 전에 긴 변 1600px·JPEG 85% 로 줄인다(휴대폰 원본 5~10MB → 수백 KB). GIF·작은 사진·실패 시 원본 */
 export async function shrinkImage(file: File): Promise<File> {
@@ -62,7 +63,9 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   const [sheetOf, setSheetOf] = useState<any | null>(null);
   const [libOpen, setLibOpen] = useState(false); // 대표 10/20 23:55: [자료실에서 가져오기]
   const verRef = useRef<HTMLInputElement>(null); const [verTarget, setVerTarget] = useState<any | null>(null);
-  const editKind = (a: any) => (/\.docx$/i.test(a.file_name ?? '') ? 'doc' : /\.xlsx$/i.test(a.file_name ?? '') ? 'sheet' : 'file');
+  // #533 [고치기] 하나로: docx = 워크인 문서, xlsx = 칸 고치기, 글·사진·PDF = 브라우저 편집기, 그 밖 = 내려받아 고친 뒤 올리기 안내
+  const [editOf, setEditOf] = useState<any | null>(null);
+  const startEdit = (a: any) => { const m = editModeOf(a); if (m === 'doc') openDoc(a); else if (m === 'sheet') setSheetOf(a); else setEditOf(a); };
   async function openDoc(a: any) {
     try { const r = await api<{ link: string; created: boolean }>(`/api/attachments/${a.id}/doc`, { body: {} }); if (r.created) toast.ok('워크인 문서로 바꿨습니다 — 같이 고친 뒤 [업무로 저장]'); window.location.href = r.link; } catch (e: any) { toast.error(e.message); }
   }
@@ -125,9 +128,10 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       )}
       <ul className="space-y-1.5" data-testid="attachments">
         {items.map((a) => (
-          <li key={a.id} className="flex items-center gap-2.5 rounded-input border border-line px-2.5 py-2 text-sm">
+          <li key={a.id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-input border border-line px-2.5 py-2 text-sm">
             <FileKindIcon a={a} />
-            <div className="min-w-0 flex-1">
+            {/* #533: 버튼이 많아도 이름이 사라지지 않게 — 이름 최소 폭, 모자라면 버튼 묶음이 다음 줄로 */}
+            <div className="min-w-[10rem] flex-1">
               <a href={`/api/attachments/${a.id}/download${a.kind === 'file' ? '?inline=1' : ''}`} target="_blank" rel="noopener noreferrer" className="block truncate font-semibold text-accent-700 hover:underline">
                 {a.doc_title || a.file_name || a.url}
               </a>
@@ -142,6 +146,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
                 {a.kind === 'link' && <span className="truncate">원본: {(() => { try { return new URL(a.url).hostname; } catch { return ''; } })()}</span>}
               </div>
             </div>
+            <div className="ml-auto flex shrink-0 items-center gap-1">
             {/* V14 49: 업무를 볼 수 있는 사람 누구나 미리보기(PDF·사진)·내려받기 — 앱은 서명 주소를 받아 기기 브라우저/공유로 넘김 */}
             {isVideo(a) && <button type="button" onClick={() => setView(a)} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 재생`} title="재생" data-testid="att-play"><Eye className="size-4" /></button>}
             {a.kind === 'file' && /^(image\/|application\/pdf)/.test(a.mime_type ?? '') && (
@@ -150,11 +155,13 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
             {a.kind === 'file' && (
               <button type="button" onClick={() => openFile(a.id, false)} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 내려받기`} title="내려받기" data-testid="att-download"><Download className="size-4" /></button>
             )}
-            {a.kind === 'file' && editKind(a) === 'doc' && canEdit && <button type="button" onClick={() => openDoc(a)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-input border border-accent-200 bg-accent-50 px-2 text-xs font-medium text-accent-700 hover:bg-accent-100" title="Word 파일을 워크인 문서로 열어 요청자·담당자가 같이 고치고 [업무로 저장]" data-testid="att-edit-doc"><PenLine className="size-3.5" />{a.doc_id ? '편집 계속' : '열어서 편집'}</button>}
-            {a.kind === 'file' && editKind(a) === 'sheet' && canEdit && <button type="button" onClick={() => setSheetOf(a)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-input border border-accent-200 bg-accent-50 px-2 text-xs font-medium text-accent-700 hover:bg-accent-100" title="Excel 칸 값을 고쳐 새 버전으로(서식·수식 그대로)" data-testid="att-edit-sheet"><Table2 className="size-3.5" />칸 고치기</button>}
+            {a.kind === 'file' && canEdit && (() => { const m = editModeOf(a); return (
+              <button type="button" onClick={() => startEdit(a)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-input border border-accent-200 bg-accent-50 px-2 text-xs font-medium text-accent-700 hover:bg-accent-100"
+                title={EDIT_TITLE[m]} data-testid="att-edit" data-mode={m}>{m === 'sheet' ? <Table2 className="size-3.5" /> : <PenLine className="size-3.5" />}{m === 'doc' && a.doc_id ? '편집 계속' : '고치기'}</button>); })()}
             {a.kind === 'file' && canEdit && <button type="button" onClick={() => { setVerTarget(a); verRef.current?.click(); }} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 새 버전 올리기`} title="내려받아 고친 파일을 새 버전으로(이전 버전 보관)" data-testid="att-new-version"><Upload className="size-4" /></button>}
             {a.kind === 'file' && (Number(a.version ?? 1) > 1 || a.doc_id) && <button type="button" onClick={() => setVersionsOf(a)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold text-ink-2 hover:bg-slate-200" title="버전 기록·되돌리기" data-testid="att-versions"><History className="size-3" />v{a.version ?? 1}</button>}
             {(a.created_by === meId || canEdit) && <button onClick={() => remove(a.id)} className="rounded p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" aria-label="첨부 삭제"><Trash2 className="size-4" /></button>}
+            </div>
           </li>
         ))}
         {!items.length && <li className="text-xs text-ink-3">첨부된 자료가 없습니다</li>}
@@ -211,6 +218,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       </Modal>
       <UploadProgress items={prog} />
       <input ref={verRef} type="file" className="hidden" onChange={(e) => uploadVersion(verTarget, e.target.files?.[0])} aria-label="새 버전 파일" data-testid="att-version-file" />
+      {editOf && <AttachEditModal a={editOf} onClose={() => setEditOf(null)} onSaved={() => { onChange(); broadcastRefresh(); }} onDownload={() => openFile(editOf.id, false)} onUploadNew={() => { setVerTarget(editOf); verRef.current?.click(); }} />}
       {versionsOf && <VersionsModal a={versionsOf} canEdit={canEdit} onClose={() => setVersionsOf(null)} onChange={() => { onChange(); broadcastRefresh(); }} />}
       {sheetOf && <SheetEditModal a={sheetOf} onClose={() => setSheetOf(null)} onSaved={() => { setSheetOf(null); onChange(); broadcastRefresh(); }} />}
       {libOpen && taskId && <LibraryPickModal onClose={() => setLibOpen(false)} onPick={async (files) => {
@@ -220,7 +228,8 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   );
 }
 
-const VKIND: Record<string, string> = { original: '원본', upload: '새 파일 올림', doc: '문서 편집 저장', sheet: '칸 고침', restore: '되돌림' };
+const VKIND: Record<string, string> = { original: '원본', upload: '새 파일 올림', doc: '문서 편집 저장', sheet: '칸 고침', restore: '되돌림', text: '글 고침', image: '사진 고침', pdf: 'PDF 에 써넣음' };
+const EDIT_TITLE: Record<string, string> = { doc: 'Word 파일을 워크인 문서로 열어 요청자·담당자가 같이 고치고 [업무로 저장]', sheet: 'Excel 칸 값을 고쳐 새 버전으로(서식·수식 그대로)', text: '글을 고쳐 새 버전으로 저장', image: '돌리기·자르기·펜·글자로 고쳐 새 버전으로 저장', pdf: '가리기·글자·체크·서명을 넣어 새 버전으로 저장', other: '내려받아 고친 뒤 [고친 파일 올리기] = 새 버전' };
 function VersionsModal({ a, canEdit, onClose, onChange }: { a: any; canEdit: boolean; onClose: () => void; onChange: () => void }) {
   const [data, setData] = useState<any | null>(null);
   const load = () => api<any>(`/api/attachments/${a.id}/versions`).then(setData).catch((e) => toast.error(e.message));

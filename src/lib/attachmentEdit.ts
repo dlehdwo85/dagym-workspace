@@ -17,7 +17,8 @@ import { tenantOf, type SessionUser } from './types';
  * 대표 10/20 23:05 "파일을 업무에 올리면 열어서 요청자·담당자들이 고치고 저장" — 외부 유료 편집기 없이 워크인 안에서.
  * ① docx → [열어서 편집]: 1회 변환해 워크인 문서(Tiptap+Yjs 공동 편집)로, 업무 참여자(요청자·담당자·협업자·검토자)에게 편집 공유. [업무로 저장]하면 Word 로 다시 써서 첨부 새 버전.
  * ② xlsx → [칸 고치기]: 서식·수식·병합은 그대로 두고 값만 바꿔 새 버전(docFill.fillXlsx).
- * ③ 그 밖(hwp·pdf·이미지·pptx…) → [새 버전 올리기]: 내려받아 고친 파일을 다시 올리면 v2… 이전 버전 보관·되돌리기.
+ * ③ 그 밖(hwp·pptx…) → [새 버전 올리기]: 내려받아 고친 파일을 다시 올리면 v2… 이전 버전 보관·되돌리기.
+ * ④ #533 [고치기]: 글(txt·csv·md…)·사진은 브라우저에서 고쳐 새 버전으로 올리고(edit: text·image), PDF 는 글자·체크·서명·가리기를 서버가 찍어 새 버전(editPdf).
  * 모든 저장은 버전 기록 + 업무 타임라인 '파일 수정 — 이름 v3' + 요청자(본인 제외) 알림. 권한 = 그 업무의 요청자·담당자·협업자·검토자·관리자(perms.edit), 그 외는 보기.
  */
 const EDITABLE_DOC = /\.docx$/i; const EDITABLE_SHEET = /\.xlsx$/i;
@@ -41,7 +42,7 @@ async function participants(taskId: string) {
   return [...new Set([t?.created_by, t?.assignee_id, t?.requested_by, ...co.map((c) => c.user_id), ...rv.map((r) => r.assignee_id)].filter(Boolean))] as string[];
 }
 /** 저장 뒤 공통: 버전 번호 올리고 타임라인·알림 */
-async function bump(u: SessionUser, a: any, next: { key: string; name: string; mime: string; size: number; kind: 'upload' | 'doc' | 'sheet' | 'restore'; note?: string }) {
+async function bump(u: SessionUser, a: any, next: { key: string; name: string; mime: string; size: number; kind: 'upload' | 'doc' | 'sheet' | 'restore' | 'text' | 'image' | 'pdf'; note?: string }) {
   const sql = db();
   const version = Number(a.version ?? 1) + 1;
   await sql.begin(async (tx) => {
@@ -72,18 +73,19 @@ export const newVersionInput = z.object({ fileName: z.string().trim().min(1).max
 export async function startVersion(u: SessionUser, id: string, i: z.infer<typeof newVersionInput>) {
   const { a, canEdit } = await editable(u, id); if (!canEdit) throw forbidden('이 업무의 요청자·담당자·검토자만 고칠 수 있습니다');
   await (await import('./plans')).assertStorage(u, i.size);
-  const safe = i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120);
-  const key = `att/${new Date().toISOString().slice(0, 7)}/${a.id}/v${Number(a.version ?? 1) + 1}-${safe}`;
+  const key = versionKey(a, i.fileName);
   const mime = i.mimeType || a.mime_type || 'application/octet-stream';
   return { key, upload: await uploadTarget(key, mime), mime, fileName: i.fileName, note: i.note ?? null };
 }
-export const completeVersionInput = z.object({ key: z.string().min(1).max(300), fileName: z.string().trim().min(1).max(200), mimeType: z.string().max(120).optional(), note: z.string().max(300).optional() });
+const versionKey = (a: any, name: string) => `att/${new Date().toISOString().slice(0, 7)}/${a.id}/v${Number(a.version ?? 1) + 1}-${name.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
+// #533: edit = 브라우저 편집기에서 고친 글·사진(버전 기록에 '글 고침'·'사진 고침')
+export const completeVersionInput = z.object({ key: z.string().min(1).max(300), fileName: z.string().trim().min(1).max(200), mimeType: z.string().max(120).optional(), note: z.string().max(300).optional(), edit: z.enum(['text', 'image']).optional() });
 /** 새 버전 올리기 2/2: 올라갔는지 확인 → 현재 파일을 바꾸고 이전은 보관 */
 export async function completeVersion(u: SessionUser, id: string, i: z.infer<typeof completeVersionInput>) {
   const { a, canEdit } = await editable(u, id); if (!canEdit) throw forbidden();
   if (!i.key.startsWith(`att/`) || !i.key.includes(`/${a.id}/`)) throw badRequest('올린 자리가 다릅니다');
   const size = await objectSize(i.key); if (size === null) throw badRequest('올린 파일을 찾을 수 없습니다. 다시 올려 주세요');
-  return bump(u, a, { key: i.key, name: i.fileName, mime: i.mimeType || a.mime_type, size, kind: 'upload', note: i.note });
+  return bump(u, a, { key: i.key, name: i.fileName, mime: i.mimeType || a.mime_type, size, kind: i.edit ?? 'upload', note: i.note });
 }
 export async function restoreVersion(u: SessionUser, id: string, versionId: string) {
   const { a, canEdit } = await editable(u, id); if (!canEdit) throw forbidden();
@@ -96,6 +98,52 @@ export async function versionDownload(u: SessionUser, id: string, versionId: str
   const [v] = await db()<any[]>`select storage_key, file_name from attachment_versions where id = ${versionId} and attachment_id = ${id}`;
   if (!v) throw notFound('버전이 없습니다');
   return downloadUrl(v.storage_key, v.file_name, false);
+}
+
+// ---------------- #533 [고치기]: 편집기 원본 · PDF 에 찍기 ----------------
+/** 편집기가 읽는 원본 바이트(같은 출처) — 고칠 수 있는 사람만, 자료실 기밀 파일은 기밀 열람 권한, 50MB 까지 */
+export async function editSource(u: SessionUser, id: string) {
+  const { a, canEdit } = await editable(u, id); if (!canEdit) throw forbidden('이 업무의 요청자·담당자·검토자만 고칠 수 있습니다');
+  const { storageSecurity, userSeesConfidential } = await import('./library');
+  const lib = await storageSecurity(tenantOf(u), a.storage_key);
+  if (lib?.deleted) throw notFound('자료실에서 지운 파일입니다');
+  if (lib?.security === 'confidential' && !(await userSeesConfidential(u.id))) throw forbidden('기밀 자료입니다 — 기밀 열람 권한이 있어야 고칠 수 있습니다');
+  const size = await objectSize(a.storage_key); if (size === null) throw notFound('파일을 찾을 수 없습니다');
+  if (size > 50 * 1024 * 1024) throw badRequest('50MB 가 넘는 파일은 브라우저에서 고칠 수 없습니다 — 내려받아 고친 뒤 [고친 파일 올리기]');
+  return { a, bytes: await getObject(a.storage_key) };
+}
+const stampInput = z.object({ type: z.enum(['text', 'check', 'sign', 'cover']), page: z.number().int().min(1).max(2000), x: z.number().min(0).max(1), y: z.number().min(0).max(1), w: z.number().min(0.003).max(1), h: z.number().min(0.003).max(1),
+  value: z.string().max(2000).optional(), image: z.string().max(400_000).optional() });
+export const pdfEditInput = z.object({ items: z.array(stampInput).min(1).max(300) });
+const STAMP_LABEL = { text: '글자', check: '체크', sign: '서명', cover: '가리기' } as const;
+/** PDF [고치기] 저장: 흰 상자로 가리고 그 위에 글자·체크·서명을 찍어 같은 첨부의 새 버전(원본은 v1 로 보관) */
+export async function editPdf(u: SessionUser, id: string, i: z.infer<typeof pdfEditInput>) {
+  const { a, bytes } = await editSource(u, id);
+  if (!/pdf/i.test(a.mime_type ?? '') && !/\.pdf$/i.test(a.file_name ?? '')) throw badRequest('PDF 첨부만 이렇게 고칠 수 있습니다');
+  let total = 0;
+  const items = i.items.map((it) => {
+    if (it.x + it.w > 1.001 || it.y + it.h > 1.001) throw badRequest('칸이 쪽 밖으로 나갔습니다');
+    const value = it.value?.replace(/[\u{10000}-\u{10FFFF}]/gu, '').trimEnd(); // 글꼴에 없는 그림 문자 빼기
+    if (it.type === 'text' && !value?.trim()) throw badRequest('빈 글자 칸이 있습니다 — 적거나 지워 주세요');
+    let png: Buffer | undefined;
+    if (it.type === 'sign') {
+      const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(it.image ?? ''); if (!m) throw badRequest('서명 그림이 없습니다');
+      png = Buffer.from(m[1], 'base64'); if (png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw badRequest('서명 그림 형식이 다릅니다');
+      total += png.length;
+    }
+    return { type: it.type, page: it.page, x: it.x, y: it.y, w: it.w, h: it.h, value, png };
+  });
+  if (total > 1_500_000) throw badRequest('서명 그림이 너무 큽니다');
+  const { stampPdf, unrotatePdf } = await import('./contractPdf');
+  let out: Buffer;
+  try { out = await stampPdf((await unrotatePdf(bytes)) ?? bytes, items); } // 돌아간 쪽은 화면에 보이는 방향 그대로 세운 뒤 찍음(편집기 좌표 = 보이는 쪽)
+  catch (e: any) {
+    if (e?.message === 'NO_PAGE') throw badRequest('없는 쪽에 놓은 칸이 있습니다');
+    throw badRequest(/encrypt/i.test(String(e?.message ?? e)) ? '암호가 걸린 PDF 는 고칠 수 없습니다 — 내려받아 고친 뒤 [고친 파일 올리기]' : 'PDF 를 읽지 못했습니다 — 내려받아 고친 뒤 [고친 파일 올리기]');
+  }
+  const key = versionKey(a, a.file_name); await putObject(key, out, 'application/pdf');
+  const n = (['text', 'check', 'sign', 'cover'] as const).map((t) => [STAMP_LABEL[t], items.filter((x) => x.type === t).length] as const).filter(([, c]) => c).map(([l, c]) => `${l} ${c}`).join('·');
+  return bump(u, a, { key, name: a.file_name, mime: 'application/pdf', size: out.length, kind: 'pdf', note: `PDF 에 써넣음(${n})` });
 }
 
 // ---------------- docx → 워크인 문서(공동 편집) ----------------

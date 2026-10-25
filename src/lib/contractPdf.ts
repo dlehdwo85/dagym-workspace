@@ -168,3 +168,39 @@ export async function unrotatePdf(buf: Buffer | Uint8Array): Promise<Buffer | nu
   }
   return Buffer.from(await out.save());
 }
+
+/** #533 업무 첨부 PDF [고치기]: 쪽 비율 좌표(0..1, 왼쪽 위 기준)에 가리기(흰 상자)·글자(여러 줄)·체크·서명 그림을 찍은 새 PDF. 없는 쪽이면 Error('NO_PAGE') */
+export type StampItem = { type: 'text' | 'check' | 'sign' | 'cover'; page: number; x: number; y: number; w: number; h: number; value?: string; png?: Buffer };
+export async function stampPdf(source: Buffer | Uint8Array, items: StampItem[]): Promise<Buffer> {
+  const { PDFDocument, rgb } = await import('pdf-lib');
+  const fontkit = (await import('@pdf-lib/fontkit')).default;
+  const f = await fonts();
+  const doc = await PDFDocument.load(source, { updateMetadata: false }); doc.registerFontkit(fontkit);
+  const reg = await doc.embedFont(f.regular, { subset: true });
+  const ink = rgb(0.08, 0.08, 0.1);
+  const pages = doc.getPages();
+  if (items.some((it) => !pages[it.page - 1])) throw new Error('NO_PAGE');
+  // 가리기를 먼저 — 같은 자리에 놓은 글자가 흰 상자 위에 오게
+  for (const it of [...items].sort((a, b) => Number(b.type === 'cover') - Number(a.type === 'cover'))) {
+    const page = pages[it.page - 1];
+    const { width: PW, height: PH } = page.getSize();
+    const bx = it.x * PW, bw = it.w * PW, bh = it.h * PH, by = PH - it.y * PH - bh;
+    if (it.type === 'cover') page.drawRectangle({ x: bx, y: by, width: bw, height: bh, color: rgb(1, 1, 1) });
+    else if (it.type === 'check') {
+      const s = Math.min(bw, bh), ox = bx + (bw - s) / 2, oy = by + (bh - s) / 2, th = Math.max(1, s * 0.12);
+      page.drawLine({ start: { x: ox + s * 0.12, y: oy + s * 0.52 }, end: { x: ox + s * 0.4, y: oy + s * 0.2 }, thickness: th, color: ink });
+      page.drawLine({ start: { x: ox + s * 0.4, y: oy + s * 0.2 }, end: { x: ox + s * 0.9, y: oy + s * 0.85 }, thickness: th, color: ink });
+    } else if (it.type === 'sign' && it.png) {
+      const img = await doc.embedPng(it.png);
+      const sc = Math.min(bw / img.width, bh / img.height), w = img.width * sc, h = img.height * sc;
+      page.drawImage(img, { x: bx + (bw - w) / 2, y: by + (bh - h) / 2, width: w, height: h });
+    } else if (it.type === 'text' && it.value) {
+      const lines = it.value.split('\n').slice(0, 40);
+      let size = Math.max(5, Math.min(14, (bh / lines.length) * 0.78));
+      while (size > 5 && lines.some((l) => reg.widthOfTextAtSize(l, size) > bw - 2)) size -= 0.5;
+      const lh = size * 1.25, top = lines.length === 1 ? by + (bh - size) / 2 + size * 0.18 : by + bh - size * 0.95; // 한 줄은 칸 가운데(전자계약 칸과 같은 식), 여러 줄은 위에서부터
+      lines.forEach((l, n) => { let t = l; while (t.length > 1 && reg.widthOfTextAtSize(t, size) > bw - 2) t = t.slice(0, -1); if (t) page.drawText(t, { x: bx + 1, y: top - n * lh, size, font: reg, color: ink }); });
+    }
+  }
+  return Buffer.from(await doc.save());
+}

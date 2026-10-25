@@ -93,3 +93,43 @@ test('xlsx [칸 고치기]: 값 있는 칸 읽기 → 값 바꿔 저장 = 새 �
   assert.ok([403, 404].includes((await ctx.staffB.client.req('GET', `/api/attachments/${id}/sheet`)).status));
   assert.equal((await sql`select count(*)::int n from activities where action = 'file_edited' and changes->>'kind' = 'sheet'`)[0].n, 1);
 });
+
+test('#533 [고치기]: 원본 읽기(고칠 사람만) · 글 고쳐 새 버전(글 고침) · PDF 에 가리기·글자·체크·서명 → 같은 자리에 찍힌 새 버전(PDF 에 써넣음)', async () => {
+  const txt = await upload(ctx.owner, '회의 메모.txt', 'text/plain', Buffer.from('첫 줄\n둘째 줄', 'utf8'));
+  assert.ok([403, 404].includes((await ctx.staffB.client.req('GET', `/api/attachments/${txt}/raw`)).status), '참여자 아니면 원본 못 읽음');
+  assert.equal((await fetchBytes(ctx.staffA.client, `/api/attachments/${txt}/raw`)).toString('utf8'), '첫 줄\n둘째 줄');
+  const body = Buffer.from('첫 줄 고침\n둘째 줄\n셋째 줄', 'utf8');
+  const st = await ctx.staffA.client.ok('POST', `/api/attachments/${txt}/versions`, { fileName: '회의 메모.txt', mimeType: 'text/plain', size: body.length, note: '브라우저에서 글 고침' });
+  await fetch(BASE + st.upload.url, { method: 'PUT', headers: st.upload.headers, body });
+  assert.equal((await ctx.staffA.client.ok('POST', `/api/attachments/${txt}/versions/complete`, { key: st.key, fileName: '회의 메모.txt', mimeType: 'text/plain', note: '브라우저에서 글 고침', edit: 'text' })).version, 2);
+  assert.equal((await fetchBytes(ctx.staffA.client, `/api/attachments/${txt}/raw`)).toString('utf8'), body.toString('utf8'));
+  assert.deepEqual((await ctx.staffA.client.ok('GET', `/api/attachments/${txt}/versions`)).versions.map((v) => [v.version, v.kind]), [[2, 'text'], [1, 'original']]);
+  assert.equal((await ctx.staffA.client.req('POST', `/api/attachments/${txt}/pdf`, { items: [{ type: 'check', page: 1, x: 0, y: 0, w: 0.1, h: 0.1 }] })).status, 400, 'PDF 아닌 첨부');
+
+  const { PDFDocument } = await import('pdf-lib');
+  const d = await PDFDocument.create(); d.addPage([595.28, 841.89]); const pdf = Buffer.from(await d.save());
+  const pid = await upload(ctx.owner, '견적서.pdf', 'application/pdf', pdf);
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const T = { type: 'text', page: 1, x: 0.1, y: 0.2, w: 0.4, h: 0.04, value: '합계 1,200,000원' };
+  assert.equal((await ctx.staffA.client.req('POST', `/api/attachments/${pid}/pdf`, { items: [{ ...T, page: 2 }] })).status, 400, '없는 쪽');
+  assert.equal((await ctx.staffA.client.req('POST', `/api/attachments/${pid}/pdf`, { items: [{ ...T, value: '  ' }] })).status, 400, '빈 글자');
+  assert.equal((await ctx.staffA.client.req('POST', `/api/attachments/${pid}/pdf`, { items: [{ ...T, x: 0.8 }] })).status, 400, '쪽 밖');
+  assert.equal((await ctx.staffA.client.req('POST', `/api/attachments/${pid}/pdf`, { items: [{ type: 'sign', page: 1, x: 0.6, y: 0.8, w: 0.25, h: 0.07 }] })).status, 400, '서명 그림 없음');
+  assert.ok([403, 404].includes((await ctx.staffB.client.req('POST', `/api/attachments/${pid}/pdf`, { items: [T] })).status), '참여자 아니면 못 고침');
+  const items = [{ type: 'cover', page: 1, x: 0.1, y: 0.2, w: 0.4, h: 0.04 }, T, { type: 'check', page: 1, x: 0.6, y: 0.2, w: 0.03, h: 0.02 }, { type: 'sign', page: 1, x: 0.6, y: 0.8, w: 0.25, h: 0.07, image: PNG }];
+  assert.equal((await ctx.staffA.client.ok('POST', `/api/attachments/${pid}/pdf`, { items })).version, 2);
+  const out = await fetchBytes(ctx.staffA.client, `/api/attachments/${pid}/raw`);
+  assert.equal(out.subarray(0, 5).toString(), '%PDF-'); assert.notEqual(out.length, pdf.length);
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(out), useSystemFonts: false, isEvalSupported: false }).promise;
+  assert.equal(doc.numPages, 1, '쪽 수 그대로');
+  const page = await doc.getPage(1), { width: W, height: H } = page.getViewport({ scale: 1 });
+  const hit = (await page.getTextContent()).items.find((i) => i.str.includes('1,200,000'));
+  assert.ok(hit, '넣은 글자');
+  assert.ok(Math.abs(hit.transform[4] - (T.x * W + 1)) < 2, `x ${hit.transform[4]}`); // 같은 자리: 칸 왼쪽 + 1pt
+  const by = H - T.y * H - T.h * H; assert.ok(hit.transform[5] > by && hit.transform[5] < by + T.h * H, `y ${hit.transform[5]}`);
+  const v = (await ctx.staffA.client.ok('GET', `/api/attachments/${pid}/versions`)).versions;
+  assert.deepEqual(v.map((x) => [x.version, x.kind]), [[2, 'pdf'], [1, 'original']]);
+  assert.equal(v[0].note, 'PDF 에 써넣음(글자 1·체크 1·서명 1·가리기 1)');
+  assert.ok((await sql`select 1 from activities where entity_id = ${taskId} and action = 'file_edited' and changes->>'kind' = 'pdf'`).length, '업무 타임라인');
+});

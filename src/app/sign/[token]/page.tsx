@@ -142,7 +142,7 @@ function PdfSignDoc({ token, code, doc, canSign, onSigned }: { token: string; co
             const c = SIGNER_COLORS[f.signer % 6], act = canSign && f.mine;
             return (
               <button key={f.id} type="button" data-field={f.id} disabled={!act} onClick={() => setCur(f.id)} data-testid={f.mine ? 'sign-field-mine' : 'sign-field'}
-                className={cx('absolute flex items-center justify-center overflow-hidden rounded-sm px-0.5 text-[11px] leading-tight', act ? 'cursor-pointer' : 'cursor-default', cur === f.id && 'ring-2 ring-offset-1')}
+                className={cx('absolute flex items-center justify-center overflow-hidden whitespace-nowrap rounded-sm px-0.5 text-[11px] leading-tight', act ? 'cursor-pointer' : 'cursor-default', cur === f.id && 'ring-2 ring-offset-1')}
                 style={{ left: `${f.x * 100}%`, top: `${f.y * 100}%`, width: `${f.w * 100}%`, height: `${f.h * 100}%`, border: `${f.mine ? 2 : 1}px ${f.mine ? 'solid' : 'dashed'} ${c}`, background: act ? `${c}1f` : 'transparent', color: f.mine ? '#111' : c }}>
                 {f.mine && canSign && (f.type === 'sign' || f.type === 'stamp') && sig ? <img src={sig.png} alt="" className="max-h-full max-w-full object-contain" />
                   : f.type === 'text' ? (f.mine && canSign ? vals[f.id] : f.value) || (f.mine && canSign ? <span style={{ color: c }}>{f.label || '입력'}{f.required ? ' *' : ''}</span> : '')
