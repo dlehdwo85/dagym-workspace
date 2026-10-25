@@ -48,6 +48,13 @@ export async function supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await owner.goto(`${BASE}/s/sales`);
   const card = owner.getByTestId('sales-kpi-support'); await card.waitFor();
   assert.match(await card.innerText(), /마감 임박 지원사업\s+1\s+관심·준비 1 · 맞춤 0/);
+  // #647(대표 10/25 22:20): 홈 맨 위 고정 카드 '이번 주 맞는 지원사업 n건'(7일 안 마감 맞춤 — 관심·준비로 넘어간 건은 따로) + 허브 '지원사업' 탭은 지원사업 화면으로
+  const pin = owner.getByTestId('sales-support-pin'); await pin.waitFor();
+  assert.match(await pin.innerText(), /이번 주 맞는 지원사업\s*0\s*건[\s\S]*관심·준비 중 1건/);
+  await owner.goto(`${BASE}/s/sales/hub`);
+  await owner.getByTestId('sales-hub-support').click(); await owner.waitForURL(/\/s\/sales\/support/);
+  await owner.getByTestId('support-list').waitFor();
+  await owner.goto(`${BASE}/s/sales`); await card.waitFor();
   await card.click(); await owner.waitForURL(/\/s\/sales\/support\?tab=closing/);
   // 상세: AI 판단·준비 서류·진행 단계 → [신청 완료]
   await owner.getByTestId('support-list').getByTestId('support-open').filter({ hasText: 'E2E 용인 IP 전략수립' }).click();

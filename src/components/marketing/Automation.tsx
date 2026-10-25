@@ -50,6 +50,7 @@ export function Automation() {
   const [done, setDone] = useState<Record<string, { credits: string; media: { id: string; title: string }[] }>>({});
   const [topics, setTopics] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [archived, setArchived] = useState<string | null>(null); // 전면 정리 결과 한 줄
   const [nb, setNb] = useState({ name: '', test: false });
   async function addBrand() {
     const name = nb.name.trim(); if (!name) return;
@@ -61,6 +62,25 @@ export function Automation() {
   if (!data) return <Skeleton rows={6} />;
   const s = data.settings; const ed = data.canEdit;
   async function save(patch: Record<string, unknown>) { try { await api('/api/marketing/auto', { method: 'PUT', body: patch }); toast.ok('저장했습니다'); reload(); } catch (e: any) { toast.error(e.message); } }
+  // 대표 10/25 22:20 전면 정리(로컬 요청 A): 미게시 글(초안·승인 대기·수정 요청·보류)을 한 번에 '취소'로 보관 — 먼저 건수를 보고(dryRun) 확인 → 실행 → [되돌리기]
+  const ARCH_LABEL: Record<string, string> = { draft: '초안', pending: '승인 대기', changes: '수정 요청', hold: '보류', approved: '승인됨' };
+  async function archiveAll() {
+    setBusy(true);
+    try {
+      const dry = await api<any>('/api/marketing/contents/archive', { body: { dryRun: true } });
+      const parts = Object.entries(dry.byStatus ?? {}).map(([k, n]) => `${ARCH_LABEL[k] ?? k} ${n}`).join(' · ');
+      if (!dry.count) { toast.ok('보관할 미게시 글이 없습니다'); return; }
+      if (!confirm(`${parts} = 총 ${dry.count}건을 '취소'로 보관합니다. 게시됨·승인됨은 그대로 두고, 원래 상태를 기록해 [되돌리기]로 복원할 수 있습니다. 계속할까요?`)) return;
+      const r = await api<any>('/api/marketing/contents/archive', { body: {} });
+      setArchived(`${new Date().toLocaleString('ko-KR')} 보관 ${r.count}건(${parts})`); toast.ok(`${r.count}건을 보관했습니다`); reload();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  async function unarchive() {
+    if (!confirm('가장 최근에 보관한 묶음을 원래 상태(초안·승인 대기·수정 요청·보류)로 되돌릴까요?')) return;
+    setBusy(true);
+    try { const r = await api<any>('/api/marketing/contents/unarchive', { body: {} }); setArchived(`되돌림 ${r.count}건`); toast.ok(`${r.count}건을 되돌렸습니다`); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
   async function addRule(e: React.FormEvent) { e.preventDefault(); try { const r = await api<{ planned: number }>('/api/marketing/auto/rules', { body: { ...rule, brandId: rule.brandId || null, topicHint: rule.topicHint || undefined } }); toast.ok(`규칙 추가 — 앞으로 2주 ${r.planned}칸`); reload(); } catch (er: any) { toast.error(er.message); } }
   async function act(id: string, action: string) {
     const d = done[id];
@@ -130,13 +150,24 @@ export function Automation() {
           <Field label="무알림 시작(시)"><input className={inputCls} type="number" min={0} max={23} defaultValue={s.quiet_start} onBlur={(e) => save({ quietStart: Number(e.target.value) })} /></Field>
           <Field label="무알림 끝(시)"><input className={inputCls} type="number" min={0} max={23} defaultValue={s.quiet_end} onBlur={(e) => save({ quietEnd: Number(e.target.value) })} /></Field>
           {data.full !== false && <Field label="마케팅 AI 월 한도($, 비우면 요금제)"><input className={inputCls} type="number" min={0} step="0.5" defaultValue={s.ai_monthly_usd ?? ''} onBlur={(e) => save({ aiMonthlyUsd: e.target.value === '' ? null : Number(e.target.value) })} data-testid="auto-ai-limit" /></Field>}
-          <Field label="AI 표기 문구"><input className={inputCls} defaultValue={s.ai_label} onBlur={(e) => e.target.value.trim() && save({ aiLabel: e.target.value.trim() })} /></Field>
+          {/* 대표 10/25 22:20 결정 15-15: 'AI 도움을 받아 제작' 고지 문구는 더 붙이지 않음 — 입력 칸 뺌(예전 글의 줄은 다듬을 때 뗌) */}
           <div className="space-y-1 pt-5 text-xs">
+            <label className="flex items-center gap-1.5 font-semibold text-red-700" title="대표 결정(10/25 22:20): 마케팅실 전면 디벨롭 동안 정기 칸 만들기·자동 제작·밤사이 비서·주간 계획·운영 제안 카드를 모두 멈춥니다. 사람이 누르는 [지금 만들기]·[승인 요청]·수정 요청 반영은 그대로. 대표가 새 방향을 승인하면 끄세요."><input type="checkbox" checked={!!s.auto_pause} onChange={(e) => { if (!e.target.checked && !confirm('자동 생성을 다시 켤까요? 대표가 디벨롭한 방향을 승인한 뒤에만 켜세요.')) return; save({ autoPause: e.target.checked }); }} data-testid="auto-pause" />자동 생성 일시정지(대표 방향 승인 전){s.auto_pause ? ' — 지금 멈춤' : ''}</label>
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_generated_people} onChange={(e) => save({ allowGeneratedPeople: e.target.checked })} />생성 인물 허용</label>
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_slideshow} onChange={(e) => save({ allowSlideshow: e.target.checked })} />슬라이드쇼 허용</label>
             <label className="flex items-center gap-1.5" title="대표 결정(10/24): 브랜드 템플릿이 나올 때까지 정기·밤사이 자동 제작 시안은 승인함에 올리지 않고 초안으로 둡니다. 승인함 아래 '초안 보관'에서 [승인 요청]으로 올릴 수 있습니다."><input type="checkbox" checked={!!s.auto_hold} onChange={(e) => save({ autoHold: e.target.checked })} data-testid="auto-hold" />자동 시안은 초안으로 보관(브랜드 템플릿 전)</label>
             <label className="flex items-center gap-1.5" title="승인된 최신 버전이 예정 시각이 되면 연결된 계정(인스타·페북·스레드·유튜브)에 워크인 서버가 올립니다. 승인이 곧 게시 결정입니다."><input type="checkbox" checked={!!s.auto_publish} onChange={(e) => save({ autoPublish: e.target.checked })} data-testid="auto-publish" />승인되면 예정 시각에 자동 게시(연결 채널)</label>
           </div>
+        </div>
+      </section>}
+
+      {ed && <section className="rounded-card border border-red-200 bg-white p-4 shadow-card" data-testid="auto-archive">
+        <h2 className="text-sm font-semibold text-red-700">전면 정리 <span className="font-normal text-ink-3">— 대표 10/25 22:20: 미게시 시안 전부 치우고 디벨롭한 방향을 검토받은 뒤 다시 올림</span></h2>
+        <p className="mt-1 text-xs text-ink-2">미게시 글(초안·승인 대기·수정 요청·보류)을 한 번에 취소 상태로 보관합니다. 게시됨·승인됨은 그대로. 원래 상태를 기록해 두어 [되돌리기]로 복원할 수 있습니다.</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="danger" onClick={archiveAll} disabled={busy} data-testid="auto-archive-run">미게시 글 전부 보관</Button>
+          <Button size="sm" variant="secondary" onClick={unarchive} disabled={busy} data-testid="auto-archive-undo">되돌리기(가장 최근 묶음)</Button>
+          {archived && <span className="text-xs text-ink-2" data-testid="auto-archive-result">{archived}</span>}
         </div>
       </section>}
 

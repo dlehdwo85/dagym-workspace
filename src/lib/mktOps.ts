@@ -551,6 +551,7 @@ export async function opsTick(tenant: string, now = new Date()) {
   out.recharge = await (await import('./mktRecharge')).rechargeCheck(tenant).catch((e) => ({ error: String(e?.message ?? e) })); // 대표 10/21 14:30 #411 매체 잔액 → 충전 필요 카드 → 충전 감지 자동 완료
   const T = await import('./mktTeam'); // #499-7 AI 마케팅팀: 예산 담당 기록 · 기획 담당(켠 회사만, 서울 07~21시, 점검마다 한 브랜드)
   await T.noteBudget(tenant, out.guard, out.recharge).catch(() => {});
+  if (await (await import('./mktAuto')).autoPaused(tenant)) return { ...out, skipped: 'paused' }; // 대표 10/25 22:20(15-16): 소진율·충전 감시는 그대로, 기획·분석·방향·주간 제안·예산 초안 카드는 멈춤
   out.planner = await T.plannerTick(tenant, now).catch((e) => ({ error: String(e?.message ?? e) }));
   if (h < 9 || (h >= 22 && !night)) return { ...out, skipped: 'hour' };
   const sql = db(); const dow = new Date(`${ymd(now)}T00:00:00Z`).getUTCDay(); const day = Number(ymd(now).slice(8));

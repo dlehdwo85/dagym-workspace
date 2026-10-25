@@ -277,6 +277,12 @@ export function SalesHome() {
           {/* #408 온보딩 업종 템플릿: 업종을 고르면 영업 화면 용어가 따라옴 — 데이터 설정에서 바꿀 수 있음 */}
           <p className="mt-2 text-xs text-ink-2" data-testid="sales-setup-template">업종 템플릿: <b>{T.label}</b> — 화면 용어({T.kind.building}·{T.kind.facility}·{T.kind.vendor})를 업종에 맞춥니다. <Link href="/s/sales/sources#template" className={linkCls}>바꾸기</Link></p>
         </section>)}
+      {/* #647(대표 10/25 22:20): 앱에서 지원사업이 잘 안 보여서 — 홈 상단 고정 카드 '이번 주 맞는 지원사업 n건'(7일 안 마감 맞춤) + 허브 '지원사업' 탭 */}
+      {data.support && <Link href="/s/sales/support?tab=fit" className="flex items-center gap-3 rounded-card border-2 border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 shadow-card hover:border-blue-400" data-testid="sales-support-pin">
+        <div className="min-w-0 flex-1"><div className="text-sm font-semibold text-[#1D4ED8]">이번 주 맞는 지원사업 <span className="text-lg tabular-nums" data-testid="sales-support-pin-n">{data.support.fit}</span>건</div>
+          <div className="truncate text-[11px] text-ink-2">7일 안 마감 기준 · 신청할 수 있는 맞춤 {data.support.fitOpen ?? 0}건 · 관심·준비 중 {data.support.mineOpen ?? data.support.mine}건</div></div>
+        <span className="shrink-0 text-xs font-medium text-[#1D4ED8]">지원사업 보기 →</span>
+      </Link>}
       {data.today && <TodayRow date={data.today.date} cards={[
         ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/hub?tab=bids&sub=today'] as [string, number, string]] : []), // #537 영업기회 › 입찰 › 오늘 새 공고
         ['오늘 새 영업 DB', data.today.newDb.buildings + data.today.newDb.facilities + data.today.newDb.vendors, `/s/sales/hub?day=today&tab=${data.today.newDb.facilities >= data.today.newDb.buildings && data.today.newDb.facilities >= data.today.newDb.vendors ? 'facilities' : data.today.newDb.vendors > data.today.newDb.buildings ? 'vendors' : 'buildings'}`,
@@ -1013,7 +1019,8 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
   useEffect(() => setSel([]), [tab, box]);
   const reopen = useRef(sub ? null : sp.get('id')); // 주소 ?id= 상세(새로 고침·뒤로가기) — 목록을 불러온 뒤 그 줄로
   useEffect(() => { if (!reopen.current || !data?.items) return; const r = data.items.find((x: any) => String(x.id) === reopen.current); reopen.current = null; if (r) setDetail({ tab, r }); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
-  const tabRow = (cls: (on: boolean) => string, style?: (on: boolean) => React.CSSProperties | undefined) => <div className="flex flex-wrap gap-1.5">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-hub-${k}`} className={cls(tab === k)} style={style?.(tab === k)}>{l}</button>)}</div>;
+  const tabRow = (cls: (on: boolean) => string, style?: (on: boolean) => React.CSSProperties | undefined) => <div className="flex flex-wrap gap-1.5">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-hub-${k}`} className={cls(tab === k)} style={style?.(tab === k)}>{l}</button>)}
+    <Link href="/s/sales/support" data-testid="sales-hub-support" className={cls(false)} style={style?.(false)}>지원사업</Link></div>; // #647(대표 10/25 22:20): 앱 하단 '영업기회'에서도 지원사업 화면으로 — 수집 DB 종류 설정과 무관하게 항상
   if (sub) return (
     <div className="space-y-3" data-testid="sales-hub">
       {tabRow((on) => cx('rounded-full border px-3 py-1 text-xs', on ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white'))}

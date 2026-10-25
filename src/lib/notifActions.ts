@@ -39,10 +39,9 @@ export function actionsFor(n: NotifRow): NotifAction[] {
       if (n.meta?.alarm) return ALARM;
       return [ACK, { id: 'snooze', label: '10분 뒤', done: '10분 뒤 다시 알림' }];
     case 'due_soon':
-      if (n.task_status === 'done') return [ACK];
-      if (n.meta?.alarm) return ALARM;
-      // [완료] = 업무 완료(검토 필수면 검토 요청, 함께 맡은 업무면 내 몫 완료) — 담당자에게만
-      return n.entity_type === 'task' && n.entity_id && n.task_mine !== false ? [ACK, { id: 'done', label: '완료', done: '완료함' }] : [ACK];
+      // 대표 10/25 22:20 결정 15-13: 마감 알림에 [완료] 단추를 넣지 않음(알람형은 [해제]·[10분 뒤]로 충분) — [확인]만
+      if (n.meta?.alarm && n.task_status !== 'done') return ALARM;
+      return [ACK];
     default: return [ACK];
   }
 }

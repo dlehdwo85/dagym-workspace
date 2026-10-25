@@ -10,7 +10,7 @@ export const WN_SETS: WnAction[][] = [
   [{ id: 'ack', label: '확인' }, { id: 'today', label: '오늘 할 일에 넣기' }],
   [{ id: 'ack', label: '확인' }],
   [{ id: 'ack', label: '확인' }, { id: 'snooze', label: '10분 뒤' }],
-  [{ id: 'ack', label: '확인' }, { id: 'done', label: '완료' }],
+  // 대표 10/25 22:20(15-13): 마감 [확인][완료] 묶음은 뺌 — 마감 알림은 [확인]만(알람형은 [해제][10분 뒤])
   [{ id: 'ack', label: '확인' }, { id: 'open', label: '승인함 열기', open: true }],
   [{ id: 'ack', label: '확인' }, { id: 'view', label: '열기', open: true }],
 ];

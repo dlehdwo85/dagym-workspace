@@ -59,9 +59,12 @@ export async function creditCost(): Promise<CreditCost> {
   return { imageCredits: 6.5, videoCredits: 80, krwPerCreditMin: 43, krwPerCreditMax: 70, ...(r?.value ?? {}) };
 }
 export type MktSettings = { plan?: PlanRow | null; plan_code: keyof typeof MKT_PLANS | null; monthly_credits: number | null; weekly_credits: number | null; video_monthly: number | null; regen_monthly: number | null;
-  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null; ai_monthly_usd: number | null; auto_publish: boolean; auto_hold: boolean; write_tier: WriteTier | null };
+  approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null; ai_monthly_usd: number | null; auto_publish: boolean; auto_hold: boolean; write_tier: WriteTier | null;
+  /** 대표 10/25 22:20(15-16): 전면 디벨롭 동안 자동 생성(정기 칸·제작·밤사이·주간 계획·운영 제안) 멈춤 — 203 마이그레이션으로 규칙 있는 회사는 켬 */ auto_pause: boolean };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
-  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false, write_tier: null };
+  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false, write_tier: null, auto_pause: false };
+/** 자동 생성 일시정지 중인가(정기 실행·목표/운영 제안 tick 이 먼저 본다) */
+export const autoPaused = async (tenant: string) => !!(await settingsOf(tenant)).auto_pause;
 export async function settingsOf(tenant: string): Promise<MktSettings> {
   const [s] = await db()<any[]>`select * from mkt_settings where tenant = ${tenant}`;
   if (!s) return { ...DEFAULTS };
@@ -191,7 +194,8 @@ export function qualityCheck(body: string, brief: string, s: MktSettings, banned
   if (!s.allow_generated_people && /(실제\s*(고객|회원)|고객\s*후기|회원\s*후기|체험담|"[^"]{5,}"\s*[-—]\s*\S+\s*(님|회원))/.test(body)) issues.push('생성 인물·후기를 실제 고객처럼 씀');
   if (!s.allow_slideshow && (kind === 'reels' || kind === 'video' || kind === 'shorts') && /슬라이드\s*쇼|사진\s*넘기기|느린\s*줌/.test(brief)) issues.push('슬라이드쇼(사진 + 느린 줌) 금지');
   if (emptyBody(body, s.ai_label)) return { passed: false, issues: [...issues, '본문이 비었거나 너무 짧음'], body: body.trim() }; // QA 10/24 ①: 빈 글에 AI 표시 줄만 붙여 '내용 있는 글'로 만들지 않음
-  const fixed = body.includes(s.ai_label) ? body : `${body.trim()}\n\n${s.ai_label}`;
+  // 대표 10/25 22:20 결정 15-15: 'AI 도움을 받아 제작' 고지 줄을 붙이지 않는다(AI 기본법 제31조 위험 고지함 — 대표 판단). 예전 글에 남은 줄은 뗀다
+  const fixed = (s.ai_label ? body.split(s.ai_label).join('') : body).replace(/\n{3,}/g, '\n\n').trim();
   return { passed: issues.length === 0, issues, body: fixed };
 }
 
@@ -780,6 +784,8 @@ async function produceDue(tenant: string, actorId: string | undefined, budgetMs:
   return L.isBusy(r) ? { produced: [] as any[], left: 0, busy: true } : r;
 }
 export async function runTenant(tenant: string, actorId?: string, opt: { later?: boolean } = {}) {
+  // 대표 10/25 22:20(15-16) 자동 생성 일시정지: 칸 만들기·제작·시안 그리기·마감 정리를 모두 건너뜀(사람이 누르는 [지금 만들기]는 produceContent 로 따로)
+  if (await autoPaused(tenant)) return { paused: true, planned: 0, produced: [] as any[], visuals: [] as any[], redraws: [] as any[] };
   // 예전 칸 제목의 '[시험] [시험] ' 겹침 정리(브랜드 이름에 [시험]이 들어 있던 때 만든 아직 안 만든 칸)
   await db()`update mkt_contents set title = regexp_replace(title, '^\\[시험\\]\\s*\\[시험\\]\\s*', '[시험] ') where tenant = ${tenant} and title like '[시험]%[시험]%' and produced_at is null`;
   const planned = await planSlots(tenant);
@@ -989,7 +995,7 @@ function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 �
 const nInt = (a: number, b: number) => z.number().int().min(a).max(b);
 export const settingsInput = z.object({ planCode: z.enum(['basic', 'standard', 'pro']).nullable().optional(), monthlyCredits: z.number().min(0).max(100000).nullable().optional(), weeklyCredits: z.number().min(0).max(100000).nullable().optional(),
   videoMonthly: nInt(0, 1000).nullable().optional(), regenMonthly: nInt(0, 1000).nullable().optional(), approvalHour: nInt(0, 23).optional(), leadDays: nInt(0, 14).optional(), leadHour: nInt(0, 23).optional(),
-  remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional(), aiMonthlyUsd: z.number().min(0).max(10000).nullable().optional(), autoPublish: z.boolean().optional(), autoHold: z.boolean().optional() });
+  remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional(), aiMonthlyUsd: z.number().min(0).max(10000).nullable().optional(), autoPublish: z.boolean().optional(), autoPause: z.boolean().optional(), autoHold: z.boolean().optional() });
 export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const cur = await settingsOf(tenantOf(u));
@@ -997,13 +1003,15 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
     video_monthly: i.videoMonthly !== undefined ? i.videoMonthly : cur.video_monthly, regen_monthly: i.regenMonthly !== undefined ? i.regenMonthly : cur.regen_monthly, approval_hour: i.approvalHour ?? cur.approval_hour,
     lead_days: i.leadDays ?? cur.lead_days, lead_hour: i.leadHour ?? cur.lead_hour, remind_hours: i.remindHours ?? cur.remind_hours, quiet_start: i.quietStart ?? cur.quiet_start, quiet_end: i.quietEnd ?? cur.quiet_end,
     allow_generated_people: i.allowGeneratedPeople ?? cur.allow_generated_people, allow_slideshow: i.allowSlideshow ?? cur.allow_slideshow, ai_label: i.aiLabel ?? cur.ai_label,
-    notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids, ai_monthly_usd: i.aiMonthlyUsd !== undefined ? i.aiMonthlyUsd : cur.ai_monthly_usd, auto_publish: i.autoPublish ?? cur.auto_publish, auto_hold: i.autoHold ?? cur.auto_hold };
+    notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids, ai_monthly_usd: i.aiMonthlyUsd !== undefined ? i.aiMonthlyUsd : cur.ai_monthly_usd, auto_publish: i.autoPublish ?? cur.auto_publish, auto_hold: i.autoHold ?? cur.auto_hold,
+    auto_pause: i.autoPause ?? cur.auto_pause };
   const sql = db();
   await sql`insert into mkt_settings ${sql({ tenant: tenantOf(u), ...v, updated_by: u.id } as never)}
     on conflict (tenant) do update set plan_code = excluded.plan_code, monthly_credits = excluded.monthly_credits, weekly_credits = excluded.weekly_credits, video_monthly = excluded.video_monthly,
       regen_monthly = excluded.regen_monthly, approval_hour = excluded.approval_hour, lead_days = excluded.lead_days, lead_hour = excluded.lead_hour, remind_hours = excluded.remind_hours,
       quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids, ai_monthly_usd = excluded.ai_monthly_usd, auto_publish = excluded.auto_publish, auto_hold = excluded.auto_hold,
-      updated_by = excluded.updated_by, updated_at = now()`;
+      auto_pause = excluded.auto_pause, updated_by = excluded.updated_by, updated_at = now()`;
+  if (i.autoPause !== undefined && i.autoPause !== cur.auto_pause) await (await import('./log')).audit(sql, u.id, i.autoPause ? 'mkt.auto_pause' : 'mkt.auto_resume', 'tenant', tenantOf(u), {}).catch(() => {});
   // 제작 시점(게시 D-n·시각)이 바뀌면 아직 만들지 않은 자동 칸도 다시 계산(지난 시각이면 지금)
   const re = v.lead_days !== cur.lead_days || v.lead_hour !== cur.lead_hour
     ? await sql`update mkt_contents set produce_at = greatest(now(), (((scheduled_at at time zone 'Asia/Seoul')::date - ${v.lead_days}::int) + make_time(${v.lead_hour}::int, 0, 0)) at time zone 'Asia/Seoul')
@@ -1186,6 +1194,42 @@ export async function actContent(u: SessionUser, id: string, i: z.infer<typeof c
   if (!c.auto) throw badRequest('자동 제작 시안만 다시 만들 수 있습니다');
   if (c.status === 'approved') throw badRequest('승인된 시안은 다시 만들지 않습니다');
   return produceContent(c, u.id);
+}
+
+// ---------------- 대표 10/25 22:20 전면 정리(결정 15-16 · 로컬 23:10 요청 A) ----------------
+export const archiveAllInput = z.object({ statuses: z.array(z.enum(['draft', 'pending', 'changes', 'hold', 'approved'])).min(1).max(5).default(['draft', 'pending', 'changes', 'hold']),
+  reason: z.string().trim().min(1).max(200).default('대표 10/25 22:20 전면 정리'), dryRun: z.boolean().optional() });
+/** 미게시 글(초안·승인 대기·수정 요청·보류 — 고르면 승인됨까지)을 한 번에 '취소'로 보관. quality 에 archived_from(원래 상태)·archived_at(묶음 키)·archived_reason 을 남겨 [되돌리기]가 됨.
+ *  게시됨은 손대지 않음 · 열린 제작 요청 카드도 취소 · 감사 기록 */
+export async function archiveAll(u: SessionUser, i: z.infer<typeof archiveAllInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db();
+  const rows = await sql<{ status: string; n: number }[]>`select status, count(*)::int n from mkt_contents where tenant = ${t} and status = any(${i.statuses}) group by status`;
+  const byStatus = Object.fromEntries(rows.map((r) => [r.status, r.n])); const count = rows.reduce((n, r) => n + r.n, 0);
+  if (i.dryRun) return { dryRun: true, count, byStatus };
+  const at = new Date().toISOString();
+  await sql.begin(async (tx) => {
+    await tx`update mkt_production_requests set status = 'canceled', decided_by = ${u.id}, decided_at = now()
+      where status in ('open', 'needs_approval') and content_id in (select id from mkt_contents where tenant = ${t} and status = any(${i.statuses}))`;
+    await tx`update mkt_contents set status = 'canceled', reminded_at = null, updated_at = now(),
+      quality = coalesce(quality, '{}'::jsonb) || jsonb_build_object('archived_from', status, 'archived_at', ${at}::text, 'archived_reason', ${i.reason}::text, 'archived_by', ${u.id}::text)
+      where tenant = ${t} and status = any(${i.statuses})`;
+    await (await import('./log')).audit(tx, u.id, 'mkt.archive_all', 'tenant', t, { count, byStatus, reason: i.reason, at });
+  });
+  return { count, byStatus, at };
+}
+export const unarchiveInput = z.object({ at: z.string().max(40).optional() });
+/** [되돌리기]: 같은 묶음(archived_at)으로 보관한 글을 원래 상태로 — at 을 안 주면 가장 최근 묶음. 제작 요청 카드는 되살리지 않음(필요하면 [다시 만들기]) */
+export async function unarchiveAll(u: SessionUser, i: z.infer<typeof unarchiveInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db();
+  const at = i.at ?? (await sql<{ at: string }[]>`select quality->>'archived_at' as at from mkt_contents where tenant = ${t} and status = 'canceled' and quality->>'archived_at' is not null order by quality->>'archived_at' desc limit 1`)[0]?.at;
+  if (!at) throw badRequest('되돌릴 보관 묶음이 없습니다');
+  const rows = await sql`update mkt_contents set status = quality->>'archived_from', updated_at = now(),
+      quality = (quality - 'archived_from' - 'archived_at' - 'archived_reason' - 'archived_by') || jsonb_build_object('unarchived_at', ${new Date().toISOString()}::text)
+    where tenant = ${t} and status = 'canceled' and quality->>'archived_at' = ${at} and quality->>'archived_from' in ('draft', 'pending', 'changes', 'hold', 'approved') returning id`;
+  await (await import('./log')).audit(sql, u.id, 'mkt.unarchive_all', 'tenant', t, { count: rows.length, at });
+  return { count: rows.length, at };
 }
 
 export const brandKitInput = z.object({ tone: z.string().max(200).nullable().optional(), intro: z.string().max(1000).nullable().optional(), products: z.string().max(1000).nullable().optional(), weeklyTopic: z.string().max(300).nullable().optional(), bannedWords: z.array(z.string().trim().min(1).max(30)).max(50).optional(),

@@ -27,10 +27,14 @@ export async function calEditFlow({ browser, desk, owner, ctx, sql, BASE, SHOTS 
     // 방금 만든 일정 → 미리보기 → [편집] (편집 창은 ?event= 로 열리는 같은 EventEditor)
     await m.locator('[data-ev-block]').filter({ hasText: 'E2E 생성 직후 편집' }).first().tap();
     await m.getByTestId('event-preview').waitFor();
-    await m.getByTestId('event-preview').getByRole('button', { name: '일정 편집' }).tap().catch(() => {});
-    let dlg = m.getByRole('dialog', { name: '일정 수정' });
-    if (!(await dlg.isVisible().catch(() => false))) { await m.goto(`${BASE}/calendar?event=${created.id}`); dlg = m.getByRole('dialog', { name: '일정 수정' }); }
+    // #648(대표 10/25 23:20): 미리보기 [일정 편집] → 편집 창이 바로 열려야 한다(미리보기의 뒤로가기 칸 정리와 겹쳐 편집 창이 열리자마자 닫히던 버그 — 예전엔 ?event= 로 다시 열어 넘어감)
+    await m.getByTestId('event-preview').getByRole('button', { name: '일정 편집' }).tap();
+    const dlg = m.getByRole('dialog', { name: '일정 수정' });
     await dlg.waitFor();
+    await m.getByTestId('event-preview').waitFor({ state: 'detached' });
+    await m.waitForTimeout(600); // 미리보기의 되돌리기(popstate)가 지나간 뒤에도 편집 창이 그대로
+    assert.ok(await dlg.isVisible(), '편집 창이 열린 채로 남음');
+    assert.match(m.url(), /\/calendar\?view=timeGridWeek/, '주소는 캘린더 그대로');
     const title = dlg.getByLabel('제목'); await title.waitFor();
     await dlg.getByTestId('event-color').waitFor(); // 편집 첫 화면에도 색 줄
     await title.fill('E2E 생성 직후 편집 — 고침');

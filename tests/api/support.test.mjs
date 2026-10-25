@@ -263,7 +263,8 @@ test('마감 알림: 7일 안 → D-7 한 번 · 3일 안에 처음 잡힌 건�
   await tick();
   assert.deepEqual(await notes(), ['지원사업 마감 D-2: E2E 알림 시험 2', '지원사업 마감 D-3: E2E 알림 시험 1', '지원사업 마감 D-5: E2E 알림 시험 1']);
   const h = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
-  assert.deepEqual(h.support, { closing: 3, mine: 2, fit: 1 }, '7일 안: 관심·준비 2(알림 시험) + 맞춤 1(경기 마케팅 D-6)');
+  assert.deepEqual([h.support.closing, h.support.mine, h.support.fit], [3, 2, 1], '7일 안: 관심·준비 2(알림 시험) + 맞춤 1(경기 마케팅 D-6)');
+  assert.ok(h.support.fitOpen >= h.support.fit && h.support.mineOpen >= h.support.mine, `#647 홈 고정 카드: 신청 가능 맞춤·관심 수 ${JSON.stringify(h.support)}`);
 });
 
 test('#568 주 1회 묶음: 1차 ✅·AI 판단 없는 공고를 자동 판단(최대 5, 접목할 점 포함) → 이번 주 맞는 공고 묶음 기록 + 관리자·담당 알림 1건(주마다 한 번) · 목록 응답 weekly · [지금 다시 묶기]는 관리자만', async () => {

@@ -250,7 +250,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     // — 영업기회 칸은 허브·입찰·계약만료·공공데이터·지원사업 화면에서도 켜짐
     ? [{ href: '/s/sales', label: '홈', icon: TrendingUp },
         { href: session.features.salesBids ? '/s/sales/hub?tab=bids&bt=today' : '/s/sales/hub', label: '영업기회', icon: Building2, /* #613: 허브 입찰 기본은 '진행 중'이지만 앱 하단 칸은 그대로 오늘 새 공고로 */ badge: spaceInfo.data?.summary.sales?.badge ?? 0, match: ['/s/sales/hub', '/s/sales/bids', '/s/sales/contracts', '/s/sales/prospects', '/s/sales/support', '/s/sales/regions'] },
-        { href: '/s/sales/leads', label: '리드', icon: Users }, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { ...byHref('/messages'), badge: chatUnread }]
+        { href: '/s/sales/leads', label: '영업 진행', icon: Users } /* 대표 10/25 22:20 결정 15-14(#642): '리드' → '영업 진행' — 5탭 통일(#630)은 대표 확인 뒤 */, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { ...byHref('/messages'), badge: chatUnread }]
     : tabSpace === 'marketing'
       ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]

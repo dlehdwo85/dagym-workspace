@@ -36,7 +36,7 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   assert.ok(bad && bad.quality.issues.some((x) => x.includes('최저가')), '금지어 → 수정 요청');
   assert.ok(good, '통과본은 승인 대기');
   const [gv] = await sql`select body from mkt_versions where content_id = ${good.id} and version = 1`;
-  assert.match(gv.body, /AI 도움을 받아 제작했습니다$/, 'AI 표기 자동');
+  assert.doesNotMatch(gv.body, /AI 도움을 받아 제작했습니다/, '15-15(대표 10/25 22:20): AI 제작 고지 줄을 붙이지 않음'); assert.equal(gv.body.trim(), '가을 맞이 안내\n이번 주 토요일까지 현관에서 안내합니다.');
   // #516: 피드 시안은 서버가 바로 그려 붙임(크레딧 0) — 이미지 제작 요청 카드 없이 승인 대기
   assert.equal((await sql`select cardinality(media_ids)::int n from mkt_versions where content_id = ${good.id} and version = 1`)[0].n, 1, '시안 1장');
   assert.equal((await sql`select count(*)::int n from mkt_production_requests where content_id = ${good.id} and kind = 'image'`)[0].n, 0, '이미지 제작 요청 카드 없음');
