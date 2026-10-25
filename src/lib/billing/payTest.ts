@@ -38,6 +38,33 @@ export async function listTestTenants(u: SessionUser) {
   return { tenants, plans, liveAvailable: !!npLiveConf() };
 }
 
+/**
+ * #566(대표 10/24) 결제 시험 회사 [지우기] — 시험 회사(is_test)만. 결제 기록이 하나라도 있으면 기록을 남기려고 '숨기기'(삭제 표시, 목록에서 빠짐),
+ * 없으면 완전히 지움(다른 기록이 걸려 있으면 숨기기로). 취소 안 된 결제(실결제 100원 포함)·1시간 안에 연 결제창이 있으면 막음
+ */
+export async function removeTestTenant(u: SessionUser, tenant: string, ip: string | null) {
+  requirePlatform(u);
+  const sql = db();
+  const [t] = await sql<{ name: string }[]>`select name from tenants where id = ${tenant} and is_test and deleted_at is null`;
+  if (!t) throw notFound('결제 시험 회사가 아닙니다');
+  const pays = await sql<{ status: string; created_at: Date }[]>`select status, created_at from payments where tenant = ${tenant}`;
+  if (pays.some((p) => ['paid', 'partial_canceled'].includes(p.status))) throw badRequest('아직 취소하지 않은 시험 결제가 있습니다 — [시험 결제 취소] 뒤에 지워 주세요');
+  if (pays.some((p) => p.status === 'pending' && Date.now() - new Date(p.created_at).getTime() < 3_600_000)) throw badRequest('결제창을 연 지 1시간이 안 된 시험 결제가 있습니다 — 잠시 뒤에 지워 주세요');
+  let mode: 'deleted' | 'hidden' = pays.length ? 'hidden' : 'deleted';
+  if (mode === 'deleted') {
+    try {
+      await sql.begin(async (tx) => {
+        await tx`delete from org_units where tenant = ${tenant}`;
+        await tx`delete from tenant_subscriptions where tenant = ${tenant}`;
+        await tx`delete from tenants where id = ${tenant} and is_test`;
+      });
+    } catch { mode = 'hidden'; } // 다른 기록이 이 회사를 가리키면 지우지 않고 숨김
+  }
+  if (mode === 'hidden') await sql`update tenants set status = 'deleted', deleted_at = now() where id = ${tenant} and is_test`;
+  await audit(sql, u.id, `platform.test_tenant_${mode}`, 'tenant', null, { tenant, name: t.name, payments: pays.length }, ip);
+  return { ok: true, mode };
+}
+
 type Check = { key: string; label: string; state: 'ok' | 'fail' | 'wait' | 'later'; detail?: string };
 /** 결제 뒤 자동 확인 */
 export async function testCheck(u: SessionUser, paymentId: string) {

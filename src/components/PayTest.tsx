@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { CheckCircle2, CircleDashed, Clock, FlaskConical, Loader2, Plus, RotateCcw, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleDashed, Clock, FlaskConical, Loader2, Plus, RotateCcw, Trash2, XCircle } from 'lucide-react';
 import { api, useApi } from './client';
 import { launchNicepay } from './Billing';
 import { Button, cx, fmtDateTime, inputCls, toast } from './ui';
@@ -29,6 +29,11 @@ export function PayTest() {
     if (sp.get('tab') === 'paytest') document.getElementById('paytest')?.scrollIntoView({ block: 'start' });
     const f = sp.get('payfail'); if (f) toast.error(`결제 실패: ${f}`);
   }, [sp]);
+  async function remove(t: any) { // #566: 시험 회사만, 결제 기록이 있으면 숨기기
+    if (!confirm(`'${t.name}' 시험 회사를 지울까요?\n결제 기록이 있으면 기록은 남기고 목록에서만 숨깁니다.`)) return;
+    setBusy(true);
+    try { const r = await api<{ mode: 'deleted' | 'hidden' }>(`/api/platform/pay-test/${encodeURIComponent(t.id)}`, { method: 'DELETE' }); list.reload(); toast.ok(r.mode === 'hidden' ? '결제 기록이 있어 목록에서 숨겼습니다(결제 내역은 남음)' : '지웠습니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
   async function create() {
     setBusy(true);
     try { await api('/api/platform/pay-test', { body: {} }); list.reload(); toast.ok('결제 시험 회사를 만들었습니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
@@ -88,6 +93,7 @@ export function PayTest() {
                 <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={o.pm} onChange={(e) => set({ pm: e.target.value as never })} aria-label="결제 수단"><option value="CARD">카드</option><option value="BANK">계좌이체</option><option value="VBANK">가상계좌</option></select>
                 <Button size="sm" onClick={() => pay(t)} disabled={busy} data-testid="pay-test-open">이 회사로 결제창 열기</Button>
                 {list.data?.liveAvailable && <Button size="sm" variant="danger" onClick={() => live(t)} disabled={busy} data-testid="pay-live-open">실결제 100원 시험</Button>}
+                <Button size="sm" variant="ghost" className="ml-auto text-red-600" onClick={() => remove(t)} disabled={busy} title="결제 기록이 있으면 기록은 남기고 목록에서만 숨깁니다" data-testid="pay-test-remove"><Trash2 />지우기</Button>
               </div>
               {(t.payments ?? []).length > 0 && (
                 <ul className="space-y-0.5 text-xs">

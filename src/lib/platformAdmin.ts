@@ -32,6 +32,7 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
       (select coalesce(sum(a.cost_krw), 0)::float8 from ai_usage a where a.tenant = t.id and a.created_at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul') as ai_krw
     from tenants t left join users ow on ow.id = t.owner_user_id left join tenant_subscriptions ts on ts.tenant = t.id
     where (${term} = '' or t.name ilike ${like} or t.id ilike ${like} or coalesce(ow.email, '') ilike ${like})
+      and not (t.is_test and t.deleted_at is not null) -- #566 숨긴 결제 시험 회사는 목록에서 뺌(결제 기록은 결제 내역에 남음)
       and (${q.status ?? ''} = '' or t.status = ${q.status ?? ''} or (${q.status ?? ''} = 'trial' and ts.status in ('trial', 'expired')) or (${q.status ?? ''} = 'deleting' and t.delete_scheduled_at is not null))
     order by (t.id in ('default', 'demo')) desc, t.created_at desc limit 300`;
   // #412 회사별 AI 잔여(업무·영업 공유 요청 수 · 마케팅 크레딧) + 플랫폼 전체 원가·마진 한 줄(이달 AI 원가 합계 vs 요금 합계 VAT 제외)
