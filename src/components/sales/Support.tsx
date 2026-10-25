@@ -10,12 +10,14 @@ import { PortalApplyLink, portalService } from './PortalApply';
 /** #450 영업실 '지원사업' — 기업마당·K-Startup·기관 공지 공고를 회사 프로필로 맞춤(1차 규칙 + AI 세일즈 판단) → 관심·신청 준비(담당 업무·마감 알림) → 신청·선정·탈락 기록 */
 const C = '#2563EB';
 type Flag = { level: 'ok' | 'warn' | 'no'; text: string };
-type Ai = { verdict: 'fit' | 'maybe' | 'no'; reasons: string[]; brands: string[]; docs: string[]; summary: string | null; at: string | null };
+type Ai = { verdict: 'fit' | 'maybe' | 'no'; reasons: string[]; brands: string[]; docs: string[]; summary: string | null; at: string | null; use: string[]; schedule: string | null; auto: boolean };
+/** #568 주 1회 묶음 — 이번 주 맞는 공고(AI ✅ 또는 1차 ✅) 상위 10건 */
+type Weekly = { week: string; items: { id: string; title: string; by: 'ai' | 'rule'; dday: number | null; applyEnd: string | null; agency: string | null; brands: string[]; use: string | null; auto: boolean }[]; aiCount: number; aiFailed: number; sentTo: number; createdAt: string };
 type Work = { id: string; status: string; statusLabel: string; ownerId: string | null; ownerName: string | null; taskId: string | null; brands: string[]; appliedAt: string | null; resultAt: string | null; amountAwarded: string | null; resultMemo: string | null; memo: string | null };
 type Item = { id: string; title: string; agency: string | null; executor: string | null; category: string | null; source: string; sourceLabel: string; regions: string[]; nationwide: boolean; applyStart: string | null; applyEnd: string | null;
   applyText: string | null; dday: number | null; amount: string | null; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[];
   rule: { score: number; verdict: 'fit' | 'maybe' | 'no'; flags: Flag[] }; ai: Ai | null; hidden: boolean; work: Work | null };
-type ListData = { tab: string; today: string; items: Item[]; total: number; counts: Record<string, number>; hiddenNo: number; canEdit: boolean; platformAdmin: boolean; aiOn: boolean; people: { id: string; name: string }[];
+type ListData = { tab: string; today: string; items: Item[]; total: number; counts: Record<string, number>; hiddenNo: number; weekly: Weekly | null; canEdit: boolean; platformAdmin: boolean; aiOn: boolean; people: { id: string; name: string }[];
   profile: { saved: boolean; filled: boolean; region: string | null; sigungu: string | null; size: string | null; founded: string | null; interests: string[]; brands: string[] };
   sources: { slug: string; label: string; last_run_at: string | null; last_status: string | null; summary: string | null }[]; keys: { bizinfo: boolean; datago: boolean }; statusLabel: Record<string, string> };
 
@@ -69,6 +71,11 @@ export function Support() {
     try { const r = await api<{ asked: number; done: number; failed: number; error: string | null }>('/api/sales/support/analyze-top', { body: {} }); if (r.failed) toast.error(`${r.done}건 판단 · ${r.failed}건 실패${r.error ? ` — ${r.error}` : ''}`); else toast.ok(r.asked ? `위에서 ${r.done}건을 AI 세일즈가 판단했습니다` : '판단할 공고가 없습니다'); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
+  async function weeklyNow() {
+    setBusy('weekly');
+    try { const r = await api<{ items: number; aiCount: number; aiFailed: number; aiError: string | null }>('/api/sales/support/weekly', { body: {} }); toast.ok(`이번 주 맞는 공고 ${r.items}건으로 묶었습니다${r.aiCount ? ` · AI 세일즈가 새로 판단 ${r.aiCount}건` : ''}${r.aiFailed ? ` · 판단 실패 ${r.aiFailed}건${r.aiError ? ` — ${r.aiError}` : ''}` : ''}`); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
   if (error) return <ErrorBox error={error} retry={reload} />;
   const noKeys = data && !data.keys.bizinfo && !data.keys.datago;
   return (
@@ -87,6 +94,7 @@ export function Support() {
       <div className="flex flex-wrap gap-1.5" role="tablist">{TABS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => go({ tab: k === 'fit' ? null : k })}
         className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent font-semibold text-white' : 'border-line bg-white')} style={tab === k ? { background: C } : undefined} data-testid={`support-tab-${k}`}>{l} <span className="tabular-nums">{data?.counts?.[k] ?? ''}</span></button>)}</div>
       {!data ? <Skeleton rows={5} /> : <>
+        {tab === 'fit' && (data.weekly || (data.canEdit && data.aiOn)) && <WeeklyBox weekly={data.weekly} canEdit={data.canEdit && data.aiOn} busy={busy === 'weekly'} onNow={weeklyNow} onOpen={(id) => go({ id })} />}
         {tab === 'fit' && <p className="text-xs text-ink-3">맞는 순: AI 판단(✅ → ⚠) → 1차 규칙 점수 → 마감 가까운 순. 1차 규칙 = 본점 지역·시·군, 업력, 규모·상시근로자, 인증, 관심 분야.{data.hiddenNo > 0 && <> 자격이 안 맞는 공고 {data.hiddenNo}건은 빼고 보여 줍니다 — <button type="button" className="underline" onClick={() => setShowNo(true)} data-testid="support-show-no">보기</button></>}{showNo && <> · <button type="button" className="underline" onClick={() => setShowNo(false)}>다시 빼기</button></>}</p>}
         <ul className="space-y-2" data-testid="support-list">{data.items.map((it) => (
           <li key={it.id} className={cx('rounded-card border bg-white p-3 shadow-card', it.work ? 'border-blue-200' : 'border-line')} data-testid="support-item" data-id={it.id} data-status={it.work?.status ?? ''}>
@@ -100,7 +108,7 @@ export function Support() {
               it.applyEnd ? `마감 ${kday(it.applyEnd)}` : it.applyText, it.amount && `지원 ${it.amount}`].filter(Boolean).join(' · ')}
               <span className="text-ink-3"> · 출처 {it.sourceLabel}{it.alsoOn.length ? `(+${it.alsoOn.join('·')})` : ''}</span></p>
             <div className="mt-1.5"><Flags flags={it.rule.flags} max={4} /></div>
-            {it.ai && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-ai-line"><Sparkles className="mr-0.5 inline size-3 text-violet-600" aria-hidden />{it.ai.reasons[0] ?? it.ai.summary}{it.ai.brands.length > 0 && <span className="ml-1">{it.ai.brands.map((b) => <span key={b} className="ml-1 rounded-full bg-violet-50 px-1.5 text-[11px] text-violet-800">{b}</span>)}</span>}</p>}
+            {it.ai && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-ai-line"><Sparkles className="mr-0.5 inline size-3 text-violet-600" aria-hidden />{it.ai.use[0] ? `접목: ${it.ai.use[0]}` : it.ai.reasons[0] ?? it.ai.summary}{it.ai.brands.length > 0 && <span className="ml-1">{it.ai.brands.map((b) => <span key={b} className="ml-1 rounded-full bg-violet-50 px-1.5 text-[11px] text-violet-800">{b}</span>)}</span>}</p>}
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {it.work ? <><span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', STATUS_CLS[it.work.status])} data-testid="support-status">{it.work.statusLabel}</span>
                 <span className="text-xs text-ink-2">{it.work.ownerName ? `담당 ${it.work.ownerName}` : ''}{it.work.appliedAt ? ` · 신청 ${kday(it.work.appliedAt)}` : ''}{it.work.resultMemo ? ` · ${it.work.resultMemo.slice(0, 40)}` : ''}</span>
@@ -121,6 +129,24 @@ export function Support() {
       {adding && <ManualAdd people={data?.people ?? []} onClose={() => setAdding(false)} onDone={(id) => { setAdding(false); reload(); go({ id }); }} />}
       {openId && <Detail id={openId} onClose={() => go({ id: null })} onChanged={reload} />}
     </div>
+  );
+}
+
+/** #568 이번 주 맞는 지원사업 묶음(월요일 아침 자동, 관리자는 [지금 다시 묶기]) — 칩을 누르면 상세 */
+function WeeklyBox({ weekly, canEdit, busy, onNow, onOpen }: { weekly: Weekly | null; canEdit: boolean; busy: boolean; onNow: () => void; onOpen: (id: string) => void }) {
+  const lead = weekly?.items.find((x) => x.use);
+  return (
+    <section className="rounded-card border border-emerald-200 bg-emerald-50/50 p-3 text-sm" data-testid="support-weekly" data-week={weekly?.week ?? ''}>
+      <div className="flex flex-wrap items-center gap-2">
+        <b className="text-emerald-900">이번 주 맞는 지원사업 {weekly ? `${weekly.items.length}건` : ''}</b>
+        <span className="text-xs text-ink-2">{weekly ? `${kday(weekly.week)} 주 기준${weekly.aiCount ? ` · AI 세일즈가 새로 판단 ${weekly.aiCount}건` : ''}` : '월요일 아침마다 1차 조건에 맞는 공고를 AI 세일즈가 판단해 묶어 드립니다'}</span>
+        {canEdit && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={onNow} data-testid="support-weekly-now"><Sparkles className="size-3.5" aria-hidden />{busy ? '묶는 중…' : weekly ? '지금 다시 묶기' : '이번 주 묶음 만들기'}</Button>}
+      </div>
+      {weekly && weekly.items.length > 0 && <ul className="mt-1.5 flex flex-wrap gap-1.5">{weekly.items.map((x) => (
+        <li key={x.id}><button type="button" onClick={() => onOpen(x.id)} className="rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs hover:underline" data-testid="support-weekly-item" data-by={x.by}>{x.by === 'ai' ? '✅ ' : ''}{x.title.slice(0, 40)}{x.dday != null ? ` · ${x.dday === 0 ? 'D-day' : `D-${x.dday}`}` : ''}</button></li>))}</ul>}
+      {weekly && !weekly.items.length && <p className="mt-1 text-xs text-ink-3">이번 주에는 1차 조건·AI 판단에 맞는 공고가 없습니다.</p>}
+      {lead?.use && <p className="mt-1 text-xs text-ink-2">접목: {lead.use}</p>}
+    </section>
   );
 }
 
@@ -228,6 +254,8 @@ function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; o
           {it.ai ? <div className="mt-1.5 space-y-1.5 text-xs">
             <p><span className={cx('rounded-full border px-2 py-0.5 font-semibold', VERDICT[it.ai.verdict][2])}>{VERDICT[it.ai.verdict][0]} {VERDICT[it.ai.verdict][1]}</span>{it.ai.summary && <span className="ml-1.5 text-ink-2">{it.ai.summary}</span>}</p>
             {it.ai.reasons.length > 0 && <ul className="list-disc space-y-0.5 pl-4" data-testid="support-ai-reasons">{it.ai.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+            {it.ai.use.length > 0 && <div className="rounded-input border border-violet-200 bg-white p-2"><b className="text-violet-900">우리 회사에 접목할 점</b><ul className="mt-0.5 list-disc space-y-0.5 pl-4" data-testid="support-ai-use">{it.ai.use.map((r, i) => <li key={i}>{r}</li>)}</ul></div>}
+            {it.ai.schedule && <p data-testid="support-ai-schedule"><span className="text-ink-3">마감·일정</span> {it.ai.schedule}</p>}
             {it.ai.brands.length > 0 && <p>맞는 브랜드: {it.ai.brands.map((b) => <span key={b} className="ml-1 rounded-full bg-white px-1.5 text-violet-800">{b}</span>)}</p>}
             <div><span className="text-ink-3">준비 서류</span>{it.ai.docs.length ? <ul className="mt-0.5 list-disc pl-4" data-testid="support-ai-docs">{it.ai.docs.map((d, i) => <li key={i}>{d}</li>)}</ul> : <span className="ml-1 text-ink-3">공고에 서류 목록이 없음 — 원문·첨부 확인</span>}</div>
           </div> : <p className="mt-1 text-xs text-ink-3">{data.aiOn ? '[AI 판단]을 누르면 해당 여부·이유·맞는 브랜드·준비 서류를 정리합니다(회사 AI 한도에서).' : 'AI 가 설정되지 않았습니다.'}</p>}

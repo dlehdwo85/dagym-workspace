@@ -55,7 +55,7 @@ before(async () => {
   }).listen(PORT);
   await resetDb(); fg = await startFakeGoogle();
   // 기업마당 키는 일부러 없음 → 처음엔 공공데이터포털(15157820) 경로, 플랫폼 설정에 키를 넣으면 기업마당 직접
-  srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, DATA_GO_KR_SERVICE_KEY: 'dg-key', SUPPORT_REMIND_HOURS: '0-24' });
+  srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, DATA_GO_KR_SERVICE_KEY: 'dg-key', SUPPORT_REMIND_HOURS: '0-24', SUPPORT_WEEKLY: 'any' });
   sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['sales'] });
@@ -183,16 +183,17 @@ test('맞춤 목록: 1차 규칙(지역·시·군·업력·근로자·소상공�
 });
 
 test('AI 판단: 회사 프로필·공고·자격 항목이 프롬프트에 · 브랜드는 회사 목록 안에서만 · 사용량 sales_support · 맞춤 맨 위 · 기관 공지는 본문을 읽어 판단', async () => {
-  await queue([say({ verdict: 'fit', reasons: ['용인시 소재 중소기업 대상 — 본점 용인시라 해당', '기출원 건 지원 불가 — 출원 전에 신청'], brands: ['하이링크', '없는브랜드'], docs: ['사업자등록증', '중소기업 확인서'], summary: 'IP 전략 컨설팅 지원', amount: '최대 1,000만원' })]);
+  await queue([say({ verdict: 'fit', reasons: ['용인시 소재 중소기업 대상 — 본점 용인시라 해당', '기출원 건 지원 불가 — 출원 전에 신청'], brands: ['하이링크', '없는브랜드'], docs: ['사업자등록증', '중소기업 확인서'], use: ['IP 전략 컨설팅으로 앱 상표·특허 포트폴리오를 정리', '출원 비용 지원은 신규 브랜드 상표 등록에'], schedule: '신청 마감 D-10 · 선정 뒤 협약 체결 후 출원', summary: 'IP 전략 컨설팅 지원', amount: '최대 1,000만원' })]);
   const r = await ctx.staffA.client.ok('POST', `/api/sales/support/${P.b1}/analyze`, {});
   assert.deepEqual([r.ai.verdict, r.ai.brands, r.ai.docs], ['fit', ['하이링크'], ['사업자등록증', '중소기업 확인서']]); assert.ok(r.costKrw >= 1);
+  assert.deepEqual([r.ai.use.length, r.ai.schedule], [2, '신청 마감 D-10 · 선정 뒤 협약 체결 후 출원'], '#568 접목할 점·마감 한 줄');
   const req = (await fakeState()).anthropic.at(-1).body;
-  assert.match(req.system, /기출원 건 지원 불가/); assert.match(req.system, /다짐, 하이링크, 워크인/); assert.match(req.system, /SW사업자 신고/);
+  assert.match(req.system, /기출원 건 지원 불가/); assert.match(req.system, /접목할 점 2~4줄/); assert.match(req.system, /다짐, 하이링크, 워크인/); assert.match(req.system, /SW사업자 신고/);
   const text = req.messages[0].content[0].text;
   assert.match(text, /\[회사 프로필\]\n본점: 경기 용인시/); assert.match(text, /보유 인증: 벤처기업/); assert.match(text, /\[공고\]\n공고명: \[경기\] 2026년 용인IP지원센터/); assert.match(text, /용인시 소재 중소기업 IP 전략수립/);
   assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support'`)[0].n, 1);
   const v = await ctx.staffA.client.ok('GET', '/api/sales/support');
-  assert.equal(v.items[0].id, P.b1, 'AI 가 ✅ 로 본 공고가 맨 위'); assert.equal(v.items[0].ai.verdict, 'fit');
+  assert.equal(v.items[0].id, P.b1, 'AI 가 ✅ 로 본 공고가 맨 위'); assert.equal(v.items[0].ai.verdict, 'fit'); assert.equal(v.items[0].ai.use[0], 'IP 전략 컨설팅으로 앱 상표·특허 포트폴리오를 정리'); assert.equal(v.items[0].ai.auto, false);
   await queue([say({ verdict: 'maybe', reasons: ['경기도 소재 중소기업 대상 — 해당'], brands: [], docs: ['신청서', '사업자등록증 사본'], summary: '상표·디자인 출원 비용 지원', amount: '최대 300만원' })]);
   const w = await ctx.owner.ok('POST', `/api/sales/support/${P.watch}/analyze`, {});
   assert.equal(w.ai.verdict, 'maybe');
@@ -263,4 +264,37 @@ test('마감 알림: 7일 안 → D-7 한 번 · 3일 안에 처음 잡힌 건�
   assert.deepEqual(await notes(), ['지원사업 마감 D-2: E2E 알림 시험 2', '지원사업 마감 D-3: E2E 알림 시험 1', '지원사업 마감 D-5: E2E 알림 시험 1']);
   const h = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
   assert.deepEqual(h.support, { closing: 3, mine: 2, fit: 1 }, '7일 안: 관심·준비 2(알림 시험) + 맞춤 1(경기 마케팅 D-6)');
+});
+
+test('#568 주 1회 묶음: 1차 ✅·AI 판단 없는 공고를 자동 판단(최대 5, 접목할 점 포함) → 이번 주 맞는 공고 묶음 기록 + 관리자·담당 알림 1건(주마다 한 번) · 목록 응답 weekly · [지금 다시 묶기]는 관리자만', async () => {
+  await sql`delete from support_weekly`; await sql`delete from notifications where type = 'support_weekly'`; // 앞 시험의 tick 이 만든 묶음(가짜 AI 답 없음 → 판단 실패)은 치움
+  const before = await ctx.owner.ok('GET', '/api/sales/support?limit=200');
+  const todo = before.items.filter((x) => !x.ai && x.rule.verdict === 'fit').slice(0, 5);
+  assert.ok(todo.length >= 1, '자동 판단할 1차 ✅ 공고가 있어야');
+  await ctx.staffA.client.ok('POST', `/api/sales/support/${todo[0].id}/work`, { status: 'interest' }); // 관심·준비 담당(staffA)도 묶음 알림을 받는지(앞 시험에서 staffA 의 열린 건은 모두 닫힘)
+  await queue(todo.map((x, i) => say({ verdict: i === 0 ? 'fit' : 'maybe', reasons: ['경기 소재 중소기업 — 해당'], brands: ['워크인'], docs: ['신청서'], summary: `요약 ${i}`, amount: null, use: [`접목 ${i}: 온라인 광고비로`], schedule: `마감 ${x.applyEnd ?? '미정'}` })));
+  const r = await tick();
+  assert.ok(r.detail?.supportWeekly?.tenants >= 1, JSON.stringify(r.detail?.supportWeekly));
+  const rows = await sql`select week::text as week, items, ai_count, ai_failed, sent_to from support_weekly`;
+  assert.equal(rows.length, 1); const w = rows[0];
+  assert.deepEqual([w.ai_count, w.ai_failed], [todo.length, 0]);
+  assert.ok(w.items.length >= 1 && w.items.length <= 10);
+  const first = w.items.find((x) => x.id === todo[0].id);
+  assert.deepEqual([first?.by, first?.auto, first?.use], ['ai', true, '접목 0: 온라인 광고비로'], JSON.stringify(w.items));
+  assert.ok(w.items.every((x) => x.by === 'rule' || x.by === 'ai'));
+  assert.equal((await sql`select ai_auto from support_matches where program_id = ${todo[0].id}`)[0].ai_auto, true, '자동 판단 표시');
+  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support' and user_id = ${ctx.ownerId}`)[0].n >= todo.length, true, '자동 판단 사용량은 관리자(대표) 이름으로');
+  const n = await sql`select user_id, title, body, link from notifications where type = 'support_weekly'`;
+  assert.ok(n.some((x) => x.user_id === ctx.ownerId), '대표에게'); assert.ok(n.some((x) => x.user_id === ctx.staffA.id), '관심·준비 담당(staffA)에게도');
+  assert.match(n[0].title, /^이번 주 맞는 지원사업 \d+건$/); assert.match(n[0].body, /AI 세일즈가 새로 판단 \d+건/); assert.equal(n[0].link, '/s/sales/support?tab=fit');
+  assert.ok(w.sent_to >= 2);
+  const v = await ctx.staffA.client.ok('GET', '/api/sales/support');
+  assert.deepEqual([v.weekly.week, v.weekly.aiCount, v.weekly.items.length], [w.week, todo.length, w.items.length]);
+  await tick();
+  assert.equal((await sql`select count(*)::int n from support_weekly`)[0].n, 1, '같은 주엔 한 번');
+  assert.equal((await sql`select count(*)::int n from notifications where type = 'support_weekly' and user_id = ${ctx.ownerId}`)[0].n, 1);
+  assert.equal((await ctx.staffA.client.req('POST', '/api/sales/support/weekly', {})).status, 403, '관리자만');
+  const m = await ctx.owner.ok('POST', '/api/sales/support/weekly', {});
+  assert.equal(m.week, w.week); assert.ok(m.weekly.items.length >= 1); assert.equal(m.aiCount, 0, '다시 묶어도 이미 판단한 건은 다시 안 돌림');
+  assert.equal((await sql`select count(*)::int n from notifications where type = 'support_weekly' and user_id = ${ctx.ownerId}`)[0].n, 1, '수동으로 다시 만들어도 알림은 주마다 한 번');
 });

@@ -201,7 +201,8 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
 }
 
 // ---------------- 목록·상세 ----------------
-type Match = { program_id: string; ai_verdict: 'fit' | 'maybe' | 'no' | null; ai_reasons: string[]; ai_brands: string[]; ai_docs: string[]; ai_summary: string | null; ai_amount: string | null; ai_at: string | null; hidden: boolean };
+type Match = { program_id: string; ai_verdict: 'fit' | 'maybe' | 'no' | null; ai_reasons: string[]; ai_brands: string[]; ai_docs: string[]; ai_summary: string | null; ai_amount: string | null; ai_at: string | null; hidden: boolean;
+  ai_use?: string[]; ai_schedule?: string | null; ai_auto?: boolean };
 type Work = { id: string; program_id: string; status: string; owner_id: string | null; owner_name: string | null; task_id: string | null; brands: string[]; applied_at: string | null; result_at: string | null; amount_awarded: string | null; result_memo: string | null; memo: string | null; updated_at: string };
 const RANK: Record<string, number> = { fit: 0, maybe: 1, none: 2, no: 3 };
 async function disabledSources(sql: Sql, t: string) {
@@ -216,7 +217,7 @@ function itemOf(p: Prog, rule: Rule, m: Match | undefined, w: Work | undefined, 
     id: p.id, title: p.title, agency: p.agency, executor: p.executor, category: p.category, source: p.source, sourceLabel: SOURCE_LABEL[p.source] ?? p.source, regions: p.regions ?? [], nationwide: p.nationwide,
     applyStart: p.apply_start, applyEnd: p.apply_end, applyText: p.apply_text, dday, amount: m?.ai_amount || p.amount, url: p.url, applyUrl: p.apply_url, manual: !!p.tenant, mine: p.created_by === me,
     isNew: Date.now() - new Date(p.first_seen_at).getTime() < 2 * 864e5 && !p.tenant, target: p.target, seen: p.first_seen_at, alsoOn: [] as string[],
-    rule, ai: m?.ai_verdict ? { verdict: m.ai_verdict, reasons: m.ai_reasons ?? [], brands: m.ai_brands ?? [], docs: m.ai_docs ?? [], summary: m.ai_summary, at: m.ai_at } : null, hidden: !!m?.hidden,
+    rule, ai: m?.ai_verdict ? { verdict: m.ai_verdict, reasons: m.ai_reasons ?? [], brands: m.ai_brands ?? [], docs: m.ai_docs ?? [], summary: m.ai_summary, at: m.ai_at, use: Array.isArray(m.ai_use) ? m.ai_use : [], schedule: m.ai_schedule ?? null, auto: !!m.ai_auto } : null, hidden: !!m?.hidden,
     work: w ? { id: w.id, status: w.status, statusLabel: STATUS_LABEL[w.status] ?? w.status, ownerId: w.owner_id, ownerName: w.owner_name, taskId: w.task_id, brands: w.brands ?? [], appliedAt: w.applied_at, resultAt: w.result_at,
       amountAwarded: w.amount_awarded, resultMemo: w.result_memo, memo: w.memo } : null,
   };
@@ -243,7 +244,7 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   const t = tenantOf(u); const sql = db(); const today = ymd();
   const tab = ['fit', 'closing', 'mine', 'results', 'all'].includes(q.tab ?? '') ? q.tab! : 'fit';
   const [{ profile, saved }, off, matches, works] = await Promise.all([profileOf(t, sql), disabledSources(sql, t),
-    sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden from support_matches where tenant = ${t}`,
+    sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto from support_matches where tenant = ${t}`,
     sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t}`]);
   const mm = new Map(matches.map((m) => [m.program_id, m])); const wm = new Map(works.map((w) => [w.program_id, w]));
   const workIds = works.map((w) => w.program_id);
@@ -279,7 +280,8 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   return { tab, today, items, total, counts, hiddenNo, profile: { saved, filled: !!pr, region: profile.region_sido, sigungu: profile.region_sigungu, size: profile.size, founded: profile.founded, interests: profile.interests, brands: profile.brands },
     sources: sources.map((s) => ({ ...s, label: SOURCE_LABEL[Object.entries(SOURCE_SLUG).find(([, v]) => v === s.slug)?.[0] ?? ''] ?? s.slug })), off,
     canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, aiOn: aiEnabled(), people: await peopleOf(sql, t), statusLabel: STATUS_LABEL,
-    keys: await supportKeyStatus().then((k) => ({ bizinfo: k.bizinfo.present, datago: k.datago.present })).catch(() => ({ bizinfo: false, datago: false })) };
+    keys: await supportKeyStatus().then((k) => ({ bizinfo: k.bizinfo.present, datago: k.datago.present })).catch(() => ({ bizinfo: false, datago: false })),
+    weekly: await latestWeekly(sql, t) };
 }
 async function programFor(sql: Sql, t: string, id: string, summaryLen = 20000): Promise<Prog> {
   if (!UUID.test(id)) throw notFound();
@@ -292,7 +294,7 @@ export async function detailView(u: SessionUser, id: string) {
   const t = tenantOf(u); const sql = db(); const today = ymd();
   const p = await programFor(sql, t, id);
   const { profile, saved } = await profileOf(t, sql);
-  const [m] = await sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden from support_matches where tenant = ${t} and program_id = ${id}`;
+  const [m] = await sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto from support_matches where tenant = ${t} and program_id = ${id}`;
   const [w] = await sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.program_id = ${id}`;
   const log = w ? await sql`select l.from_status, l.to_status, l.note, l.changed_at, us.name as by from support_work_log l left join users us on us.id = l.changed_by where l.work_id = ${w.id} order by l.changed_at desc limit 30` : [];
   const [task] = w?.task_id ? await sql<{ id: string; title: string; status: string; due_date: string | null; total: number; done: number }[]>`select t.id, t.title, t.status, t.due_date::text,
@@ -303,9 +305,10 @@ export async function detailView(u: SessionUser, id: string) {
 }
 
 // ---------------- AI 판단 ----------------
-const SCHEMA = { type: 'object', additionalProperties: false, required: ['verdict', 'reasons', 'brands', 'docs', 'summary', 'amount'], properties: {
+const SCHEMA = { type: 'object', additionalProperties: false, required: ['verdict', 'reasons', 'brands', 'docs', 'summary', 'amount', 'use', 'schedule'], properties: {
   verdict: { type: 'string', enum: ['fit', 'maybe', 'no'] }, reasons: { type: 'array', items: { type: 'string' } }, brands: { type: 'array', items: { type: 'string' } },
-  docs: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' }, amount: { type: ['string', 'null'] } } };
+  docs: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' }, amount: { type: ['string', 'null'] },
+  use: { type: 'array', items: { type: 'string' } }, schedule: { type: ['string', 'null'] } } };
 const profileText = (pr: Profile, today: string) => [
   `본점: ${[pr.region_sido, pr.region_sigungu].filter(Boolean).join(' ') || '(모름)'}`, `설립일: ${pr.founded ? `${pr.founded} (업력 ${yearsSince(pr.founded, today)}년)` : '(모름)'}`,
   `규모: ${pr.size ?? '(모름)'}${pr.employees != null ? ` · 상시 근로자 ${pr.employees}명` : ''}${pr.revenue_krw != null ? ` · 연 매출 약 ${Math.round(pr.revenue_krw / 1e8 * 10) / 10}억 원` : ''}`,
@@ -316,7 +319,7 @@ const programText = (p: Prog) => [`공고명: ${p.title}`, `원천: ${SOURCE_LAB
   `신청 기간: ${p.apply_text ?? ([p.apply_start, p.apply_end].filter(Boolean).join(' ~ ') || '표시 없음')}`, p.amount && `지원 규모(공고 문구): ${p.amount}`, (p.hashtags ?? []).length && `해시태그: ${p.hashtags.join(', ')}`,
   `공고 내용:\n${(p.summary ?? '(본문 없음 — 제목·기관만 있음)').slice(0, 9000)}`].filter(Boolean).join('\n');
 /** 공고 1건 AI 판단 — 회사 AI 한도(AI 세일즈)·사람별 한도. 결과는 회사별로 저장(다시 누르면 새로 판단) */
-export async function analyzeProgram(u: SessionUser, id: string, provider: AiProvider = anthropicProvider({ tier: 'fast' })) {
+export async function analyzeProgram(u: SessionUser, id: string, provider: AiProvider = anthropicProvider({ tier: 'fast' }), opt: { auto?: boolean } = {}) {
   await assertSpace(u, 'sales');
   if (!aiEnabled()) throw new HttpError(503, 'ai_off', 'AI 가 설정되지 않았습니다 — 플랫폼 운영자에게 요청해 주세요');
   const t = tenantOf(u); const sql = db(); const today = ymd();
@@ -340,6 +343,8 @@ JSON 으로만 답하세요:
 - docs: 공고에 적힌 신청·제출 서류(최대 12개, 짧게). 공고에 서류 목록이 없으면 빈 배열
 - summary: 공고 요약 2~3문장(무엇을, 누구에게, 얼마나)
 - amount: 지원 규모 한 줄(공고 문구 그대로 요약), 없으면 null
+- use: 우리 회사에 접목할 점 2~4줄 — 이 지원을 회사의 어떤 사업·브랜드에 어떻게 쓸 수 있는지(예: 온라인 광고비·특허 출원 비용·채용 인건비·설비·컨설팅), 공고 내용과 회사 프로필(업종·키워드·브랜드·관심 분야·회사 소개)에 근거해 구체적으로. 쓸 데가 없거나 자격이 안 되면 빈 배열
+- schedule: 마감·일정 한 줄(신청 마감·발표·협약·사업 기간 — 공고에 적힌 날짜만), 없으면 null
 오늘: ${today} (Asia/Seoul).`;
   const ask = `[회사 프로필]\n${profileText(profile, today)}\n\n[공고]\n${programText(p)}`;
   let r;
@@ -354,11 +359,11 @@ JSON 으로만 답하세요:
   const lines = (v: unknown, n: number, len: number) => (Array.isArray(v) ? v : []).map((x) => String(x ?? '').trim().slice(0, len)).filter(Boolean).slice(0, n);
   const verdict = ['fit', 'maybe', 'no'].includes(j.verdict) ? j.verdict : 'maybe';
   const out = { verdict, reasons: lines(j.reasons, 5, 300), brands: lines(j.brands, 6, 40).filter((b) => brands.includes(b)), docs: lines(j.docs, 12, 120), summary: String(j.summary ?? '').slice(0, 800) || null,
-    amount: j.amount ? String(j.amount).slice(0, 120) : null };
-  await sql`insert into support_matches (tenant, program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_model, ai_cost_usd, ai_by, ai_at)
-    values (${t}, ${p.id}, ${out.verdict}, ${sql.json(out.reasons)}, ${out.brands}, ${sql.json(out.docs)}, ${out.summary}, ${out.amount}, ${r.model ?? provider.model}, ${usd}, ${u.id}, now())
+    amount: j.amount ? String(j.amount).slice(0, 120) : null, use: lines(j.use, 4, 300), schedule: j.schedule ? String(j.schedule).slice(0, 200) : null, auto: !!opt.auto };
+  await sql`insert into support_matches (tenant, program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_model, ai_cost_usd, ai_by, ai_at, ai_use, ai_schedule, ai_auto)
+    values (${t}, ${p.id}, ${out.verdict}, ${sql.json(out.reasons)}, ${out.brands}, ${sql.json(out.docs)}, ${out.summary}, ${out.amount}, ${r.model ?? provider.model}, ${usd}, ${u.id}, now(), ${sql.json(out.use)}, ${out.schedule}, ${out.auto})
     on conflict (tenant, program_id) do update set ai_verdict = excluded.ai_verdict, ai_reasons = excluded.ai_reasons, ai_brands = excluded.ai_brands, ai_docs = excluded.ai_docs, ai_summary = excluded.ai_summary,
-      ai_amount = excluded.ai_amount, ai_model = excluded.ai_model, ai_cost_usd = excluded.ai_cost_usd, ai_by = excluded.ai_by, ai_at = now(), updated_at = now()`;
+      ai_amount = excluded.ai_amount, ai_model = excluded.ai_model, ai_cost_usd = excluded.ai_cost_usd, ai_by = excluded.ai_by, ai_at = now(), ai_use = excluded.ai_use, ai_schedule = excluded.ai_schedule, ai_auto = excluded.ai_auto, updated_at = now()`;
   await (await import('../ai/guard')).userBudgetAlerts(u, sql).catch(() => {});
   const { usdKrw } = await import('../ai/provider');
   return { ok: true, ai: { ...out, at: new Date().toISOString() }, costKrw: Math.max(1, Math.round(usd * usdKrw())) };
@@ -490,6 +495,87 @@ export async function deleteManual(u: SessionUser, id: string) {
   await sql`delete from support_programs where id = ${p.id} and tenant = ${t}`;
   await audit(sql, u.id, 'support.manual_delete', 'support_program', p.id, { title: p.title.slice(0, 80) }).catch(() => {});
   return { ok: true };
+}
+
+// ---------------- 주 1회 '이번 주 맞는 지원사업' 묶음 (#568, 대표 10/24 저녁) ----------------
+export type WeeklyItem = { id: string; title: string; by: 'ai' | 'rule'; dday: number | null; applyEnd: string | null; agency: string | null; brands: string[]; use: string | null; auto: boolean };
+type WeeklyRow = { id: number; week: string; items: WeeklyItem[]; ai_count: number; ai_failed: number; sent_to: number; created_at: string };
+/** 그 주 월요일(KST) — 묶음은 회사·주마다 하나 */
+export const weekMonday = (day: string) => { const d = new Date(Date.parse(`${day}T12:00:00+09:00`)); return addDays(day, -((d.getUTCDay() + 6) % 7)); };
+async function latestWeekly(sql: Sql, t: string) {
+  const [w] = await sql<WeeklyRow[]>`select id, week::text, items, ai_count, ai_failed, sent_to, created_at from support_weekly where tenant = ${t} order by week desc limit 1`;
+  return w ? { week: w.week, items: Array.isArray(w.items) ? w.items : [], aiCount: w.ai_count, aiFailed: w.ai_failed, sentTo: w.sent_to, createdAt: w.created_at } : null;
+}
+/** 회사 관리자(대표 → 관리자 순) 한 명을 세션 없이 실행 주체로 — 자동 판단의 AI 사용량이 이 사람 이름으로 남는다 */
+async function adminActor(sql: Sql, t: string): Promise<SessionUser | null> {
+  const [a] = await sql<{ id: string }[]>`select id from users where tenant = ${t} and status = 'active' and role in ('owner', 'admin') order by (role = 'owner') desc, created_at limit 1`;
+  if (!a) return null;
+  return (await import('../mktStudio')).actorFor(a.id).catch(() => null);
+}
+/**
+ * 회사 하나의 주간 묶음: 1차 조건 통과(✅)인데 AI 판단이 없는 공고를 최대 N건(SUPPORT_WEEKLY_AI_MAX, 기본 5) 자동 판단(회사 AI 한도·사람별 한도·크레딧 안, 한도에 걸리면 멈춤)
+ * → 맞는 공고(AI ✅, 없으면 1차 ✅) 상위 10건을 기록하고 관리자·관심/준비 담당에게 알림 1건(주마다 한 번). 프로필이 비어 있으면 묶지 않는다.
+ */
+export async function weeklyBundle(t: string, opt: { now?: Date; actor?: SessionUser; aiMax?: number; force?: boolean } = {}) {
+  const sql = db(); const today = ymd(opt.now ?? new Date()); const week = weekMonday(today);
+  const [exists] = await sql<{ id: number }[]>`select id from support_weekly where tenant = ${t} and week = ${week}::date`;
+  if (exists && !opt.force) return { skipped: 'done', week };
+  const actor = opt.actor ?? (await adminActor(sql, t));
+  if (!actor) return { skipped: 'no_admin', week };
+  const { profile, saved } = await profileOf(t, sql);
+  if (!(saved || profile.region_sido || profile.industries.length || profile.interests.length)) return { skipped: 'no_profile', week };
+  const max = Math.max(0, opt.aiMax ?? Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 5));
+  let aiCount = 0, aiFailed = 0, aiError: string | null = null; const auto = new Set<string>();
+  if (aiEnabled() && max > 0) {
+    const v = await listView(actor, { tab: 'fit', limit: 200 });
+    for (const x of v.items.filter((y) => !y.ai && y.rule.verdict === 'fit').slice(0, max)) {
+      try { await analyzeProgram(actor, x.id, undefined, { auto: true }); aiCount++; auto.add(x.id); }
+      catch (e) {
+        aiFailed++; aiError ??= String((e as Error)?.message ?? e).slice(0, 160);
+        if ([402, 429].includes((e as HttpError)?.status) || (e as HttpError)?.code === 'ai_off') break; // 한도·크레딧 — 더 안 돌림
+      }
+    }
+  }
+  const v2 = await listView(actor, { tab: 'fit', limit: 200 });
+  const items: WeeklyItem[] = v2.items.filter((x) => (x.ai ? x.ai.verdict === 'fit' : x.rule.verdict === 'fit')).slice(0, 10)
+    .map((x) => ({ id: x.id, title: x.title, by: x.ai ? 'ai' : 'rule', dday: x.dday, applyEnd: x.applyEnd, agency: x.agency, brands: x.ai?.brands ?? [], use: x.ai?.use[0] ?? null, auto: auto.has(x.id) }));
+  const admins = await sql<{ id: string }[]>`select id from users where tenant = ${t} and status = 'active' and role in ('owner', 'admin')`;
+  const owners = await sql<{ owner_id: string }[]>`select distinct owner_id from support_work where tenant = ${t} and status in ('interest', 'preparing') and owner_id is not null`;
+  const to = [...new Set([...admins.map((a) => a.id), ...owners.map((o) => o.owner_id)])];
+  let sentTo = 0;
+  if (items.length && to.length) {
+    const top = items.slice(0, 3).map((x) => `${x.title.slice(0, 40)}${x.dday != null ? ` (D-${x.dday})` : ''}`).join(' · ');
+    sentTo = (await notify(sql, { userIds: to, type: 'support_weekly', space: 'sales', title: `이번 주 맞는 지원사업 ${items.length}건`, body: `${top}${aiCount ? ` · AI 세일즈가 새로 판단 ${aiCount}건` : ''}`,
+      link: '/s/sales/support?tab=fit', dedupeKey: `support_weekly:${t}:${week}`, push: true } as never).catch(() => [] as string[])).length;
+  }
+  await sql`insert into support_weekly (tenant, week, items, ai_count, ai_failed, sent_to) values (${t}, ${week}::date, ${sql.json(items)}, ${aiCount}, ${aiFailed}, ${sentTo})
+    on conflict (tenant, week) do update set items = excluded.items, ai_count = support_weekly.ai_count + excluded.ai_count, ai_failed = support_weekly.ai_failed + excluded.ai_failed, sent_to = greatest(support_weekly.sent_to, excluded.sent_to), updated_at = now()`;
+  return { week, items: items.length, aiCount, aiFailed, aiError, sentTo };
+}
+/** 정기 실행: 월요일(KST) 08시 이후 첫 tick 에 영업 공간을 켠 회사마다 한 번(SUPPORT_WEEKLY = '요일-시' 기본 '1-8', 'any' = 늘, 'off' = 안 함) */
+export async function supportWeeklyTick(opt: { now?: Date } = {}) {
+  const now = opt.now ?? new Date(); const gate = process.env.SUPPORT_WEEKLY ?? '1-8';
+  if (gate === 'off') return { skipped: 'off' };
+  if (gate !== 'any') {
+    const [dow, hour] = gate.split('-').map(Number);
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(now);
+    const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts.find((p) => p.type === 'weekday')?.value ?? ''); const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
+    if (wd !== dow || h < hour) return { skipped: 'time' };
+  }
+  const sql = db(); const week = weekMonday(ymd(now));
+  const tenants = await sql<{ id: string }[]>`select t.id from tenants t where 'sales' = any(t.spaces) and t.status = 'active'
+    and not exists (select 1 from support_weekly w where w.tenant = t.id and w.week = ${week}::date) order by t.id limit 50`;
+  const out: Record<string, unknown> = {};
+  for (const t of tenants) out[t.id] = await weeklyBundle(t.id, { now }).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }));
+  return { week, tenants: tenants.length, out };
+}
+/** [이번 주 묶음 지금 만들기] — 관리자. 이번 주 묶음을 다시 만들고(자동 판단 포함) 알림은 주마다 한 번만 */
+export async function sendWeeklyManual(u: SessionUser) {
+  await assertSpace(u, 'sales');
+  if (!isAdmin(u)) throw forbidden('주간 묶음은 관리자만 만들 수 있습니다');
+  const r = await weeklyBundle(tenantOf(u), { actor: u, force: true });
+  if ('skipped' in r && r.skipped === 'no_profile') throw badRequest('회사 프로필(본점 지역·업종·관심 분야)을 먼저 채워 주세요');
+  return { ...r, weekly: await latestWeekly(db(), tenantOf(u)) };
 }
 
 // ---------------- 알림·홈 카드 ----------------
