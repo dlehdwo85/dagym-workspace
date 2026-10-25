@@ -105,8 +105,9 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     if (srcLeak.length) note('§2 원천 주소·내부 상세', srcLeak.map((x) => x.slug).join(', '));
     const applies = await p.locator('[data-testid="sales-collector-how"]').count();
     console.log('    #599 수집기 상태 칩', `신청 필요 ${await p.locator('[data-state="apply_needed"]').count()}개(방법 보기 ${applies}개) · 연결됨 ${await p.locator('[data-state="connected"]').count()}개 · 잠시 중단 ${await p.locator('[data-state="off"]').count()}개`);
-    const errChips = cols.filter((x) => /실패|오류|일부/.test(x.text));
-    if (errChips.length) note('§3-2 수집기 실패·오류 표시', `${errChips.length}개(${errChips.map((x) => x.slug).join(', ')}) — 원인은 슈퍼관리자만`);
+    // #602 고객 화면의 결과 말('받음·일부 받음·못 받음', 요약의 '실패')은 허용 — 걸리는 것은 원인·내부 상세(오류 n건 펼침·키 이름·HTTP 코드·영문 오류 코드). 공용 수집 기록(앞 단계가 넣은 것 포함)이 있어도 같은 기준
+    const errChips = cols.filter((x) => /오류 \d+건|SERVICE_KEY|HTTP ?\d{3}|_ERROR\b|Error:/i.test(x.text));
+    if (errChips.length) note('§3-2 수집기 오류 원인 표시', `${errChips.length}개(${errChips.map((x) => x.slug).join(', ')}) — 원인은 슈퍼관리자만`);
     const runs = await p.locator('[data-testid="sales-collector-runs"] li').count();
     if (runs) note('§2 공용 실행 기록', `최근 실행 ${runs}건이 새 회사에도 보임(공용 수집 기록·오류 원인)`);
     if (await p.locator('[data-testid="sales-collector-sent"], [data-testid="sales-collector-keys"]').count()) note('§2 보낸 주소·칸 이름', '원천 주소·첫 줄 칸 이름 상세가 고객 관리자에게 보임');
