@@ -201,6 +201,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('salesCollectors', async () => (await import('./sales/collectors')).collectorsTick()); // 대표 10/21 08:45: 영업 수집기 12개(KST 시각 이후 하루 1회, tick 당 하나)
   await step('salesCollectorAlerts', async () => (await import('./sales/collectors')).collectorAlertTick()); // #522 하루 한 번 누락 점검(24시간 넘게 성공 없음·2회 연속 실패 → 관리자 알림)
   await step('supportDeadlines', async () => (await import('./sales/support')).supportTick()); // #450 지원사업: 관심·신청 준비 공고 마감 7일·3일 전 담당자 알림(KST 08~20시)
+  await step('supportWeekly', async () => (await import('./sales/support')).supportWeeklyTick()); // #568 지원사업 주간 묶음(월요일 KST 08시 뒤 첫 tick): 1차 ✅ 공고 자동 AI 판단 → 맞는 공고 묶어 관리자·담당 알림
   await step('salesDigest', async () => (await import('./sales/digest')).salesDigestTick()); // 당일 입찰 다이제스트(회사 설정 시각, 메일·알림·푸시)
   await step('notices', async () => (await import('./announcements')).noticesJob()); // V30 ② 예약 게시
   await step('textExtract', async () => (await import('./library')).textExtractJob()); // V14 32: HWP·PDF 본문 재추출(기존 파일, 한 번에 15개)

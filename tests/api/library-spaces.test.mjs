@@ -39,3 +39,22 @@ test('공간별 자료실', async () => {
   assert.ok(!(await names(ctx.staffA.client, 'space=all')).includes('가을 행사 시안.txt'));
   assert.equal((await sql`select count(*)::int n from library_files where id = ${mk} and deleted_at is null`)[0].n, 1);
 });
+
+test('#615 ① 폴더 → 공간: 마케팅/… 폴더로 옮기면 마케팅 공간(그 공간을 쓸 수 있는 사람만) · PATCH space · 꺼진 공간·배정 없는 직원은 그대로', async () => {
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  const a = await up(ctx.owner, '매장 실사.txt');
+  await ctx.owner.ok('POST', '/api/library/move', { ids: [a], folder: '마케팅/실사' });
+  assert.deepEqual((await sql`select space, folder from library_files where id = ${a}`)[0], { space: 'marketing', folder: '마케팅/실사' });
+  assert.ok((await ctx.owner.ok('GET', '/api/library?space=marketing')).files.some((f) => f.id === a), '마케팅 공간 목록에');
+  await ctx.owner.ok('PATCH', `/api/library/${a}`, { space: 'work' });
+  assert.equal((await sql`select space from library_files where id = ${a}`)[0].space, 'work', '명시 PATCH 로 되돌림');
+  await ctx.owner.ok('POST', '/api/library/move', { ids: [a], folder: '영업/제안' });
+  assert.equal((await sql`select space from library_files where id = ${a}`)[0].space, 'work', '영업 공간이 꺼져 있으면 그대로');
+  await ctx.owner.ok('POST', '/api/library/move', { ids: [a], folder: '마케팅/실사' });
+  await ctx.owner.ok('POST', '/api/library/move', { ids: [a], folder: '일반' });
+  assert.equal((await sql`select space from library_files where id = ${a}`)[0].space, 'marketing', '공간 이름이 아닌 폴더로 옮기면 공간은 그대로(넓어지지 않음)');
+  const b = await up(ctx.staffB.client, '내 메모.txt');
+  await ctx.staffB.client.ok('POST', '/api/library/move', { ids: [b], folder: '마케팅/메모' });
+  assert.equal((await sql`select space from library_files where id = ${b}`)[0].space, 'work', '마케팅 배정이 없는 직원은 폴더만 바뀜');
+  assert.equal((await ctx.staffB.client.req('PATCH', `/api/library/${b}`, { space: 'marketing' })).status, 404, '못 쓰는 공간은 존재도 숨김');
+});

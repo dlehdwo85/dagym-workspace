@@ -37,7 +37,10 @@ export const libraryPatch = z.object({
   tags: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
   description: z.string().max(2000).nullable().optional(),
   security: z.enum(['public', 'internal', 'confidential']).optional(), // V14 15번 — 올리기는 편집자, 기밀을 내리거나 확인은 기밀 편집 권한
+  space: z.enum(['work', 'sales', 'marketing']).optional(), // #615 ①(로컬 10/25 18:00): 공간 바꾸기 — 그 공간을 쓸 수 있는 사람만
 });
+/** #615 ①: 맨 위 폴더 이름이 공간 이름이면 그 공간 — '마케팅/…' → marketing, '영업/…' → sales (자동 제작 사진 고르기·영업 자료는 space 칸으로 봄) */
+export const spaceForFolder = (folder: string): 'sales' | 'marketing' | null => { const top = folder.split('/')[0]?.trim(); return top === '마케팅' ? 'marketing' : top === '영업' ? 'sales' : null; };
 
 const COLS = `f.id, f.folder, f.security, f.security_suggested, f.security_confirmed, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
   (f.text_content is not null) as has_text, f.text_error, f.text_tried_at, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error, f.task_id, f.source, f.vision`;
@@ -337,6 +340,10 @@ export async function updateLibraryFile(u: SessionUser, id: string, i: z.infer<t
   if (!canEdit(u, f)) throw forbidden('올린 사람 또는 관리자만 고칠 수 있습니다');
   const folder = i.folder !== undefined ? cleanFolder(i.folder) : f.folder;
   if (folder !== f.folder) await requireFolder(u, folder, 'edit');
+  // #615 ①: 공간 — 명시하면 그 공간(쓸 수 있는 사람만), 폴더를 '마케팅/…'·'영업/…' 아래로 옮기면 그 공간으로(그 공간을 못 쓰면 그대로)
+  let space: string = f.space ?? 'work';
+  if (i.space && i.space !== space) { if (i.space !== 'work' && !(await librarySpaces(u)).includes(i.space)) throw notFound('자료가 없습니다'); space = i.space; }
+  else if (folder !== f.folder) { const auto = spaceForFolder(folder); if (auto && auto !== space && (await librarySpaces(u)).includes(auto)) space = auto; }
   const tags = i.tags ?? f.tags;
   const sql = db();
   let security: Security = f.security, confirmed: boolean = f.security_confirmed;
@@ -348,8 +355,15 @@ export async function updateLibraryFile(u: SessionUser, id: string, i: z.infer<t
     const { audit } = await import('./log');
     await audit(sql, u.id, 'library.security_set', 'library_file', id, { from: f.security, to: i.security }, null);
   } else if (i.security && (await secCtx(u)).confEdit) confirmed = true; // 같은 등급 저장 = 확인
-  await sql`update library_files set title = ${i.title ?? f.title}, folder = ${folder}, tags = ${tags}, description = ${i.description !== undefined ? i.description : f.description},
+  await sql`update library_files set title = ${i.title ?? f.title}, folder = ${folder}, space = ${space}, tags = ${tags}, description = ${i.description !== undefined ? i.description : f.description},
     needs_review = false, security = ${security}, security_confirmed = ${confirmed}, updated_at = now() where id = ${id}`;
+  if (space === 'marketing' && f.space !== 'marketing') { // 마케팅 공간으로 들어온 사진은 응답 뒤에 AI 사진 설명(올릴 때와 같게) — 한도·AI 꺼짐이면 건너뜀
+    const Ph = await import('./mktPhotos');
+    if (Ph.isMarketingPhoto({ ...f, space })) (await import('./later')).runLater('mktVision', async () => {
+      try { await (await import('./mktAuto')).assertMktAi(f.tenant); return { id, vision: await Ph.describePhoto(f.tenant, id, u.id) }; }
+      catch (e: any) { return { id, skipped: String(e?.message ?? e).slice(0, 160) }; }
+    });
+  }
   // 자동 정리된 파일을 사람이 고치면 회사별 학습 예시로 남긴다 → 다음 정리에 반영
   if (f.organized_by && (folder !== f.folder || String(tags) !== String(f.tags)))
     await sql`insert into library_rules (tenant, file_name, mime_type, folder, tags, created_by) values (${tenantOf(u)}, ${f.file_name}, ${f.mime_type}, ${folder}, ${tags}, ${u.id})`;
