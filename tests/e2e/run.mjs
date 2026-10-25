@@ -55,6 +55,7 @@ import { bidGroups } from './bidGroups.step.mjs';
 import { messengerV4 } from './messengerV4.step.mjs';
 import { prespecLink } from './prespecLink.step.mjs';
 import { hubArchive } from './hubArchive.step.mjs';
+import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
 import { econtractPdf } from './econtractPdf.step.mjs';
@@ -2839,6 +2840,7 @@ await step('대표 10/24 추가 ② 입찰 같은 제목: 취소 공고 = 원 �
 await step('메신저 2차(대표 10/20 카톡 수준 B8~B11·C13): 여기까지 읽음 선·긴 글 전체 보기·[+] 투표(실시간·누가·마감)·일정 잡기 카드·스티커·사진 3장 한 묶음·좌우 뷰어·@전체·메시지→일정(날짜·시각)·자주 쓰는 반응·답장 원문 이동(최신으로)·휴대폰 [+]·방 목록 밀기', () => messengerV4({ owner, ctx, sql, BASE, SHOTS }));
 await step('137차 사전규격 ↔ 본 공고 같은 사업: 본 공고를 대상 아님 → 사전규격도 전체 탭에서 빠짐 → [대상 아님] 탭 한 장(같은 사업이라 함께 숨김) → [되돌리기] 둘 다', () => prespecLink({ owner, ctx, sql, BASE, SHOTS }));
 await step('151차 영업 허브(대표 10/25 ①②④⑤⑥⑦⑨): 1열 · 정렬 주소 저장 · 시설 대상 아님 → 보관함(사유·누가) → 되돌리기 · 현 위탁사·계약만료일 · 넘긴 공고 [되돌리기] · 리드 [영업 진행으로]·실패 → 보류·실패 보관함 → 되돌리기 · 사이드바 입찰·공고 없음', () => hubArchive({ owner, ctx, sql, BASE, SHOTS }));
+await step('154차 자료실 상세(대표 10/25 #615 ②·④): 사진 앱 안 보기창([← 목록]·뒤로가기로 닫힘·주소 ?file=) · 얼굴 실사 배지·촬영 동의 경고 · 문서 화면 [← 목록] → 폴더·줄 강조', () => libraryDetail({ owner, ctx, sql, BASE, SHOTS }));
 await step('메신저 3차(대표 10/20 카톡 수준 C12·D14·D15): 머리줄 알림 메뉴(전체·멘션만·끄기)·목록 줄 표시·방 안 찾기(▲▼·강조·처음 화면 밖)·전체 검색 결과 → 그 메시지로·방 정보 알림 3칸·방장만 관리·방장 넘기기·방 사진', () => messengerV5({ owner, ctx, sql, BASE, SHOTS }));
 await step('#533 업무 첨부 [고치기](대표 10/23 23:50): 첨부 있는 업무 제목·설명 고쳐 저장 → 그대로 · 글 고쳐 v2(글 고침) · 사진 돌리기·펜 v2(가로·세로 바뀜, 크기 표시 바로 — #258) · PDF 글자·체크 v2(긴 글 줄바꿈·글자 줄이기, 넘치면 저장 막기 — #258) · 저장 PDF 다시 읽기(글 그대로·한글 그려짐 — 147차) · 한글 = 내려받아 고친 뒤 올리기 안내 → v2 · 휴대폰 폭 [고치기]', () => attachEdit({ owner, ctx, BASE, SHOTS }));
 await step('139차 전자계약 2차 화면: [새 계약] PDF 올리기 → 서명자 → 칸 놓기(쪽 그림·서명·글자) → 보내기 → 받은 사람 휴대폰 화면 PDF 쪽·칸 채우기·서명 완료', () => econtractPdf({ owner, ctx, sql, BASE, SHOTS }));
