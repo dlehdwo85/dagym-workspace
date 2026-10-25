@@ -11,7 +11,8 @@ import { tenantOf, type SessionUser } from './types';
  * 자료실 마케팅 사진(jpg·png·webp, AI 가 만든 그림 제외)을 빠른 모델이 사진마다 한 번 보고 library_files.vision 에 둔다(1장 1원 안팎):
  *   caption(블로그 사진 아래 한 줄) · scene(장면 2~3문장) · tags · kind(실사/그래픽/화면/그림/문서) · text(글자 양) · promo(글자 든 홍보물) · seen(읽히는 글자) · people · faces · quality
  * 쓰는 곳: 시안 바탕(글자 없는 실사만 — 폴더·태그로 고른 사진에 더해) · 블로그 본문 사진 고르기(홍보물·그래픽 빼기, 설명 낱말로 글과 맞추기) · 원고 재료의 사진 목록.
- * 사람이 고친 판정이 먼저: 태그 '글자없음'(바탕으로 씀) · '글자있음'(바탕·본문에서 뺌). 이름 규칙(썸네일·카드뉴스…)은 그대로 — 둘 중 하나라도 그래픽이면 뺌.
+ * 사람이 고친 판정이 먼저: 태그 '글자없음'(바탕으로 씀) · '글자있음'(바탕에서만 뺌 — 블로그 본문에는 씀) · '쓰지않음'(바탕·본문 모두 뺌). 이름 규칙(썸네일·카드뉴스…)은 그대로 — 둘 중 하나라도 그래픽이면 뺌.
+ * 로컬 10/25 11:15: 안내판 글자가 많이 찍힌 현장 실사는 바탕에서만 빼고 블로그 본문에는 씀(본문 순위만 조금 뒤로) — 본문에서 빼는 것은 홍보물·실사가 아닌 것.
  * 언제: 마케팅 사진을 올리면 응답 뒤에 · 정기 실행마다 설명 없는 사진 6장 · 자동 제작 › 사진 AI 설명 [설명하기]. 실패는 세 번까지만 다시.
  */
 const KINDS = ['photo', 'graphic', 'screen', 'illustration', 'document'] as const;
@@ -20,11 +21,12 @@ export type VisionErr = { v: 1; at: string; error: string; tries: number };
 export const KIND_LABEL: Record<VisionOk['kind'], string> = { photo: '실사', graphic: '글자 그래픽', screen: '화면 캡처', illustration: '그림', document: '문서' };
 export const visionOk = (x: unknown): x is VisionOk => !!x && typeof x === 'object' && typeof (x as VisionOk).caption === 'string' && !('error' in (x as object));
 const tagOn = (tags: string[] | null | undefined, t: string) => (tags ?? []).some((x) => String(x).replace(/\s+/g, '') === t);
-/** 사람이 고친 판정 — 태그 '글자없음' = 바탕으로 씀 · '글자있음' = 바탕·본문에서 뺌 */
+/** 사람이 고친 판정 — 태그 '글자없음' = 바탕으로 씀 · '글자있음' = 바탕에서만 뺌(본문에는 씀) · '쓰지않음' = 바탕·본문 모두 뺌 */
 export const markedNoText = (tags: string[] | null | undefined) => tagOn(tags, '글자없음');
 export const markedText = (tags: string[] | null | undefined) => tagOn(tags, '글자있음');
-/** AI 판정 글자 든 그래픽(바탕·블로그 본문 모두 안 씀) — 홍보물·글자 많음·실사가 아닌 것 */
-export const visionGraphic = (v: VisionOk) => v.promo || v.text === 'much' || v.kind !== 'photo';
+export const markedSkip = (tags: string[] | null | undefined) => tagOn(tags, '쓰지않음');
+/** AI 판정 글자 든 그래픽(바탕·블로그 본문 모두 안 씀) — 홍보물·실사가 아닌 것. 글자 많은 실사(안내판이 찍힌 현장)는 바탕에서만 빠짐(visionBackdrop) */
+export const visionGraphic = (v: VisionOk) => v.promo || v.kind !== 'photo';
 /** AI 판정 시안 바탕 후보 — 글자 없는 실사·화질 괜찮음·얼굴을 알아볼 사람 없음(바탕은 크게 쓰여 초상권 조심) */
 export const visionBackdrop = (v: VisionOk) => v.kind === 'photo' && v.text === 'none' && !v.promo && v.quality !== 'poor' && !v.faces;
 /** 고르기·글 맞추기에 쓰는 설명 글 */
@@ -131,7 +133,7 @@ export async function photoLines(tenant: string, brand: string, others: string[]
   const rows = await sql<PhotoRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at from library_files where ${photoCond(sql, tenant)} order by created_at desc limit 80`;
   const hay = (r: PhotoRow) => `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase();
   const mine = (r: PhotoRow) => !!brand && hay(r).includes(brand.toLowerCase());
-  const pick = rows.filter((r) => !V.textGraphic(r) && !others.some((o) => !!o && hay(r).includes(o.toLowerCase())))
+  const pick = rows.filter((r) => V.bodyOk(r) && !others.some((o) => !!o && hay(r).includes(o.toLowerCase())))
     .map((r, k) => ({ r, k })).sort((a, b) => Number(mine(b.r)) - Number(mine(a.r)) || a.k - b.k).slice(0, n);
   return pick.map(({ r }) => `- ${r.title}: ${visionOk(r.vision) ? `${r.vision.caption}${r.vision.scene ? ` — ${clip(r.vision.scene.split(/(?<=[.!?])\s/)[0], 80)}` : ''}` : clip(r.description, 120) || '(설명 없음)'}`);
 }
@@ -141,14 +143,14 @@ async function perPhotoKrw() {
   const P = await import('./ai/provider');
   return Math.round(P.costUsd(P.modelFor('fast'), { input_tokens: 1700, output_tokens: 250 }) * P.usdKrw() * 10) / 10;
 }
-export type PhotoItem = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | VisionErr | null; mark: 'none' | 'has' | null; cover: boolean; body: boolean; at: string };
+export type PhotoItem = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | VisionErr | null; mark: 'none' | 'has' | 'skip' | null; cover: boolean; body: boolean; at: string };
 /** 자동 제작 › 사진 AI 설명: 숫자(전체·설명·아직·실패·바탕 가능·그래픽) + 최근 60장(설명·판정·쓰임) */
 export async function photosView(u: SessionUser) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u); const V = await import('./mktAutoVisual');
   const rows = await sql<PhotoRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at from library_files where ${photoCond(sql, t)} order by created_at desc limit 400`;
-  const items: PhotoItem[] = rows.map((r) => ({ id: r.id, title: r.title, folder: r.folder, tags: r.tags ?? [], vision: r.vision ?? null, mark: markedNoText(r.tags) ? 'none' : markedText(r.tags) ? 'has' : null,
-    cover: V.backdropOk(r), body: !V.textGraphic(r), at: new Date(r.created_at).toISOString() }));
+  const items: PhotoItem[] = rows.map((r) => ({ id: r.id, title: r.title, folder: r.folder, tags: r.tags ?? [], vision: r.vision ?? null, mark: markedSkip(r.tags) ? 'skip' : markedNoText(r.tags) ? 'none' : markedText(r.tags) ? 'has' : null,
+    cover: V.backdropOk(r), body: V.bodyOk(r), at: new Date(r.created_at).toISOString() }));
   const n = (f: (x: PhotoItem) => boolean) => items.filter(f).length;
   const P = await import('./ai/provider');
   return { total: items.length, described: n((x) => visionOk(x.vision)), pending: n((x) => !x.vision), failed: n((x) => !!x.vision && 'error' in x.vision),
@@ -165,8 +167,8 @@ export async function describeNow(u: SessionUser, i: z.infer<typeof describeInpu
   return describeBatch(t, { ids: i.ids, limit: i.ids?.length ? 20 : 12, budgetMs: 25e3, actorId: u.id });
 }
 
-export const markInput = z.object({ text: z.enum(['auto', 'none', 'has']) });
-/** 사람이 고친 판정: none = 글자 없음(시안 바탕으로 씀) · has = 글자 있음(바탕·본문에서 뺌) · auto = AI 판정대로 — 자료실 태그 '글자없음'·'글자있음'으로 남김 */
+export const markInput = z.object({ text: z.enum(['auto', 'none', 'has', 'skip']) });
+/** 사람이 고친 판정: none = 글자 없음(시안 바탕으로 씀) · has = 글자 있음(바탕에서만 뺌 — 블로그 본문에는 씀) · skip = 쓰지 않음(바탕·본문 모두 뺌) · auto = AI 판정대로 — 자료실 태그 '글자없음'·'글자있음'·'쓰지않음'으로 남김 */
 export async function markPhoto(u: SessionUser, id: string, i: z.infer<typeof markInput>) {
   await assertSpace(u, 'marketing');
   if (!isAdmin(u)) throw forbidden('사진 판정은 관리자만 바꿀 수 있습니다');
@@ -174,7 +176,7 @@ export async function markPhoto(u: SessionUser, id: string, i: z.infer<typeof ma
   const sql = db();
   const [f] = await sql<{ tags: string[] }[]>`select tags from library_files where id = ${id} and ${photoCond(sql, tenantOf(u))}`;
   if (!f) throw notFound('사진을 찾을 수 없습니다');
-  const tags = [...(f.tags ?? []).filter((x) => !['글자없음', '글자있음'].includes(String(x).replace(/\s+/g, ''))), ...(i.text === 'none' ? ['글자없음'] : i.text === 'has' ? ['글자있음'] : [])];
+  const tags = [...(f.tags ?? []).filter((x) => !['글자없음', '글자있음', '쓰지않음'].includes(String(x).replace(/\s+/g, ''))), ...(i.text === 'none' ? ['글자없음'] : i.text === 'has' ? ['글자있음'] : i.text === 'skip' ? ['쓰지않음'] : [])];
   await sql`update library_files set tags = ${tags}, updated_at = now() where id = ${id}`;
   return { tags };
 }

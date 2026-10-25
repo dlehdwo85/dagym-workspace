@@ -270,11 +270,12 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
 /** 대표 10/24 추가 ①: 회사별 마케팅 자동 제작 글 모델(원고·약한 첫 줄 다시 쓰기·수정본·블로그). 비우면 마케팅 요금제 값(없으면 빠른 모델) */
 type Tier = 'fast' | 'default' | 'deep';
 const TIER: Record<Tier, string> = { fast: '빠른 모델', default: '표준 모델', deep: '최상 모델' };
-function MktWriteBox({ id, w, pick, setPick, run }: { id: string; w: { company: Tier | null; plan: { label: string; tier: Tier | null } | null; tier: Tier; source: string; model: string; perDraftKrw: number; byTier: Record<Tier, number> }; pick: string | null; setPick: (v: string) => void; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+function MktWriteBox({ id, w, pick, setPick, run }: { id: string; w: { company: Tier | null; plan: { label: string; tier: Tier | null } | null; tier: Tier; source: string; model: string; perDraftKrw: number; byTier: Record<Tier, number>; blog?: { tier: Tier; perDraftKrw: number; upgraded: boolean; extraKrw: number } }; pick: string | null; setPick: (v: string) => void; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
   const v = pick ?? w.company ?? '';
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-input border border-line p-3 text-xs" data-testid="company-mkt-write">
-      <span className="min-w-0 flex-1 text-ink-2">마케팅 자동 제작 글 모델(원고·수정본·블로그) — 지금 <b className="text-ink" data-testid="company-mkt-write-now">{TIER[w.tier]}</b> ({w.model}) · 글 1건 약 {w.perDraftKrw.toLocaleString('ko-KR')}원 · {w.source === 'company' ? '회사 지정' : w.source === 'plan' ? `마케팅 요금제(${w.plan?.label ?? ''})` : '기본값'} · 품질 검사는 빠른 모델</span>
+      <span className="min-w-0 flex-1 text-ink-2">마케팅 자동 제작 글 모델(원고·수정본) — 지금 <b className="text-ink" data-testid="company-mkt-write-now">{TIER[w.tier]}</b> ({w.model}) · 글 1건 약 {w.perDraftKrw.toLocaleString('ko-KR')}원 · {w.source === 'company' ? '회사 지정' : w.source === 'plan' ? `마케팅 요금제(${w.plan?.label ?? ''})` : '기본값'} · 품질 검사는 빠른 모델
+        {w.blog && <> · 네이버 블로그는 {TIER[w.blog.tier]}(1건 약 {w.blog.perDraftKrw.toLocaleString('ko-KR')}원{w.blog.upgraded ? `, 빠른 모델보다 약 ${w.blog.extraKrw.toLocaleString('ko-KR')}원 더` : ''})</>}</span>
       <select className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={v} onChange={(e) => setPick(e.target.value)} aria-label="마케팅 글 모델" data-testid="company-mkt-write-tier">
         <option value="">요금제 값({w.plan ? `${w.plan.label}: ${TIER[w.plan.tier ?? 'fast']}` : '빠른 모델'})</option>
         {(['fast', 'default', 'deep'] as const).map((k) => <option key={k} value={k}>{TIER[k]} · 글 1건 약 {w.byTier[k].toLocaleString('ko-KR')}원</option>)}

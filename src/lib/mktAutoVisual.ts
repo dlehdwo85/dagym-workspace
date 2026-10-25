@@ -5,7 +5,7 @@ import { isAdmin } from './access';
 import { badRequest, forbidden, notFound } from './errors';
 import { tenantOf, type SessionUser } from './types';
 import { otherBrandNames, otherBrands } from './mktQuality';
-import { markedNoText, markedText, visionBackdrop, visionGraphic, visionOk, visionText } from './mktPhotos';
+import { markedNoText, markedSkip, markedText, visionBackdrop, visionGraphic, visionOk, visionText } from './mktPhotos';
 
 /**
  * #516 자동 제작 시안 = 우리 서버가 그림(외부 유료 생성 없음, 크레딧 0) — 대표 10/24 "승인 대기 시안이 안 보임".
@@ -34,19 +34,21 @@ const words = (s: string) => new Set((s.match(/[\p{L}\p{N}]{2,}/gu) ?? []).map((
 const GRAPHIC = /thumb|썸네일|(^|[^a-z])pin([^a-z]|$)|(^|[^a-z])cover|표지|카드\s*뉴스|card\s*news|배너|banner|포스터|poster|shorts|reels|쇼츠|릴스|목업|mockup|캡처|screenshot|스크린샷|시안/i;
 const GRAPHIC_FOLDER = /^마케팅\/(자동 시안|카드뉴스)/;
 const SENTENCE = /[?？!！]|(니다|세요|나요|까요|어요|아요|해요|에요|예요|습니까)\s*\.?$/;
-/** #235 ⓒ 사진 AI 설명(vision)이 있으면 그 판정도 — 이름 규칙·AI 판정 중 하나라도 그래픽이면 뺌. 사람이 단 태그('글자있음'·'글자없음')가 먼저 */
+/** #235 ⓒ 사진 AI 설명(vision)이 있으면 그 판정도 — 이름 규칙·AI 판정 중 하나라도 그래픽이면 뺌. 사람이 단 태그 '글자없음'이 먼저
+ *  (로컬 10/25 11:15: '글자있음'은 바탕에서만 빼는 표시라 여기서는 보지 않음 — 본문까지 빼는 것은 '쓰지않음', bodyOk) */
 export function textGraphic(r: { title: string; file_name?: string | null; folder: string; tags?: string[] | null; vision?: unknown }) {
-  if (markedText(r.tags)) return true;
   if (markedNoText(r.tags)) return false;
   const names = [r.title, r.file_name ?? ''].map((x) => x.replace(/\.[a-z0-9]{2,5}$/i, '').trim()).filter(Boolean);
   return GRAPHIC_FOLDER.test(r.folder ?? '') || names.some((x) => GRAPHIC.test(x) || SENTENCE.test(x)) || (r.tags ?? []).some((t) => GRAPHIC.test(t)) || (visionOk(r.vision) && visionGraphic(r.vision));
 }
+/** 블로그 본문·원고 사진 목록에 쓸 수 있는 사진 — 사람이 '쓰지 않음'으로 표시하지 않았고 글자 든 그래픽(홍보물·실사 아님·이름 규칙)이 아님 */
+export const bodyOk = (r: Parameters<typeof textGraphic>[0]) => !markedSkip(r.tags) && !textGraphic(r);
 /** 실사 원본 우선(로컬 요청: '실제 운영 현장 사진'·브랜드 사진 폴더) — 블로그 본문 사진 고르기에 씀 */
 const REAL = /현장|실사|사진|photo/i;
 /** #516 후속 2(로컬 10/24 08:15 '이름 규칙으로는 글자 그래픽이 안 걸러짐'): 시안 바탕은 브랜드 색이 기본 — 사진은 대표·로컬이 고른 것
  *  (자료실 '마케팅/시안 바탕…' 폴더 또는 태그 '글자없음') + #235 ⓒ(대표 #563) 사진 AI 설명이 '글자 없는 실사'로 본 사진(이름 규칙에도 안 걸리고 얼굴 알아볼 사람 없음). 태그 '글자있음'이면 뺌 */
 export const BACKDROP_FOLDER = '마케팅/시안 바탕(글자 없는 사진)';
-export const backdropOk = (r: { title?: string; file_name?: string | null; folder: string; tags?: string[] | null; vision?: unknown }) => !markedText(r.tags)
+export const backdropOk = (r: { title?: string; file_name?: string | null; folder: string; tags?: string[] | null; vision?: unknown }) => !markedText(r.tags) && !markedSkip(r.tags)
   && ((r.folder ?? '').startsWith('마케팅/시안 바탕') || markedNoText(r.tags) || (visionOk(r.vision) && visionBackdrop(r.vision) && !textGraphic({ title: r.title ?? '', file_name: r.file_name, folder: r.folder, tags: r.tags, vision: r.vision })));
 /** 쓸 사진 고르기: 글자 든 그래픽은 빼고 · 같은 브랜드(제목·폴더·태그·설명에 이름) +6 · 실사(현장·사진) +2 · 글과 겹치는 낱말 +1씩 · 다른 브랜드 이름 −10 · 최근 30일 다른 게시에 쓴 사진 −4 · exclude = 이 글에 이미 써 본 사진 */
 async function pickPhoto(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover') {
@@ -64,9 +66,9 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
   const want = words(text);
   // #235 ⓒ 사진 AI 설명(한 줄·장면·태그·읽히는 글자)도 브랜드·낱말 맞추기에 — 낱말 점수는 +5까지(설명이 긴 사진이 브랜드 사진을 앞지르지 않게) · 흐린 사진 −3
   const has = (r: (typeof rows)[number], name: string) => !!name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase().includes(name.toLowerCase());
-  const out: { id: string; title: string; score: number; k: number }[] = [];
+  const out: { id: string; title: string; score: number; k: number; vision: unknown; description: string | null }[] = [];
   for (const [k, r] of rows.entries()) {
-    if (exclude.has(r.id) || (mode === 'cover' ? !backdropOk(r) : textGraphic(r))) continue; // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽만 빼고
+    if (exclude.has(r.id) || (mode === 'cover' ? !backdropOk(r) : !bodyOk(r))) continue; // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽·'쓰지 않음'만 빼고
     let score = has(r, brand) ? 6 : 0;
     if (others.some((o) => has(r, o))) score -= 10;
     else if (REAL.test(`${r.title} ${r.folder} ${(r.tags ?? []).join(' ')}`) || (visionOk(r.vision) && r.vision.kind === 'photo')) score += 2;
@@ -74,8 +76,9 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     for (const w of words(`${r.title} ${r.description ?? ''} ${(r.tags ?? []).join(' ')} ${visionText(r.vision)}`)) if (want.has(w)) hit++;
     score += Math.min(5, hit);
     if (visionOk(r.vision) && r.vision.quality === 'poor') score -= 3;
+    if (mode === 'body' && visionOk(r.vision) && r.vision.text === 'much') score -= 2; // 로컬 10/25: 안내판 글자가 많은 실사는 본문에 쓰되 뒤로
     if (used.has(r.id)) score -= 4;
-    if (score > -5) out.push({ id: r.id, title: r.title, score, k });
+    if (score > -5) out.push({ id: r.id, title: r.title, score, k, vision: r.vision, description: r.description });
   }
   return out.sort((a, b) => b.score - a.score || a.k - b.k); // 같은 점수면 최근 사진(목록 순서)
 }
@@ -90,11 +93,28 @@ export function headlineOf(title: string, body: string) {
   return { head: cutAt(head, 44), sub: head === t || !t ? '' : cutAt(t, 40) };
 }
 
-type DrawOpts = { actor?: SessionUser | null; exclude?: Set<string>; brandOnly?: boolean; photoId?: string | null; photoIds?: string[] | null; template?: string | null; notTemplate?: string | null };
+/** #235 ⓑ 블로그 본문 사진 후보(원고 AI 가 장면 순서로 골라 '[사진 P번호]' 줄로 넣음) — 본문 규칙(글자 든 그래픽·'쓰지 않음'·다른 브랜드 빼고, 이 브랜드·글과 맞는 사진 먼저) 순위 앞 n장.
+ *  caption = 사진 AI 설명 한 줄(없으면 자료실 설명·이름) — 블로그 사진 아래 줄로도 씀 */
+export type BlogPhoto = { id: string; title: string; caption: string; scene: string };
+export async function blogPhotoCandidates(c: Content, text: string, n = 20): Promise<BlogPhoto[]> {
+  const [b] = c.brand_id ? await db()<{ name: string }[]>`select name from mkt_brands where id = ${c.brand_id}` : [];
+  const brand = (b?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
+  const others = otherBrandNames(await otherBrands(c.tenant, c.brand_id, { site: false })).filter((x) => x !== brand);
+  const one = (x: string) => x.replace(/\s+/g, ' ').trim();
+  return (await rankPhotos(c, brand, others, text, new Set(), 'body')).slice(0, n).map((r) => {
+    const v = visionOk(r.vision) ? r.vision : null;
+    return { id: r.id, title: r.title, caption: cutAt(one(v?.caption || r.description || r.title.replace(/\.[a-z0-9]{2,5}$/i, '')), 60), scene: v ? cutAt(one(v.scene.split(/(?<=[.!?])\s/)[0] ?? ''), 80) : '' };
+  });
+}
+
+/** bodyIds = #235 ⓑ 블로그 원고가 고른 본문 사진(장면 순서) — 그대로 붙이고 표지 바탕으로는 다시 쓰지 않음 */
+type DrawOpts = { actor?: SessionUser | null; exclude?: Set<string>; brandOnly?: boolean; photoId?: string | null; photoIds?: string[] | null; template?: string | null; notTemplate?: string | null; bodyIds?: string[] | null };
 /** 한 장 그려 자료실(마케팅/자동 시안)에 저장 → 파일 id. 블로그는 대표 이미지(정사각) + 본문 사진(그림에 쓴 것과 다른 실사, 없으면 null)
  *  #544 브랜드 키트 '피드 틀'을 고른 브랜드는 그 틀을 돌려 씀(최근 3개와 같은 틀·사진 금지) — template = 그 틀 그대로(글만 고친 수정본), notTemplate = 다른 틀로 다시 그리기 */
 export async function drawAutoVisual(c: Content, body: string, opts: DrawOpts = {}) {
   const sql = db();
+  const given = c.channel === 'blog' && opts.bodyIds?.length ? opts.bodyIds : null;
+  if (given) opts = { ...opts, exclude: new Set([...(opts.exclude ?? []), ...given]) };
   const [b] = c.brand_id ? await sql<{ name: string; color: string | null; video: any; feed: any }[]>`select name, color, video, feed from mkt_brands where id = ${c.brand_id}` : [];
   const brand = (b?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
   const others = otherBrandNames(await otherBrands(c.tenant, c.brand_id, { site: false })).filter((n) => n !== brand); // 137차: 영문·다른 이름 포함
@@ -124,10 +144,10 @@ export async function drawAutoVisual(c: Content, body: string, opts: DrawOpts = 
   const label = template ? F.FEED_TEMPLATES[template].label : null;
   const f = await saveGeneratedFile(actor, { fileName: `${safe}_${story ? '스토리' : blog ? '블로그 표지' : '피드'}.jpg`, mime: 'image/jpeg', data: jpg, title: `${safe} — 자동 시안`, folder: '마케팅/자동 시안',
     tags: ['자동 시안', ...(brand ? [brand] : [])], description: `서버 그리기(크레딧 0)${label ? ` · 틀: ${label}` : ''} · ${photo ? `사진: ${photo.title}` : '사진 없음 — 브랜드 색 바탕'}`, source: 'ai', space: 'marketing', meta: { contentId: c.id, photoId, kind: story ? 'story' : blog ? 'blog' : 'feed', ...(template ? { template } : {}) } });
-  // 블로그 본문 사진: 표지에 쓴 것과 다른 실사(같은 규칙 — 글자 든 그래픽·다른 브랜드 빼고)
-  const bodyId = blog ? await pickPhoto(c, brand, others, `${c.title} ${body}`, new Set([...(opts.exclude ?? []), ...(photoId ? [photoId] : [])]), 'body') : null;
-  const [bp] = bodyId ? await sql<{ title: string }[]>`select coalesce(nullif(title, ''), file_name) as title from library_files where id = ${bodyId}` : [];
-  return { fileId: f.id, photoId, photoTitle: photo?.title ?? null, bodyId, bodyTitle: bp?.title ?? null, template, templateLabel: label, photoIds };
+  // 블로그 본문 사진: 원고가 고른 사진들(bodyIds) — 없으면 표지에 쓴 것과 다른 실사 1장(같은 규칙 — 글자 든 그래픽·다른 브랜드 빼고)
+  const bodyIds = given ?? (blog ? [await pickPhoto(c, brand, others, `${c.title} ${body}`, new Set([...(opts.exclude ?? []), ...(photoId ? [photoId] : [])]), 'body')].filter((x): x is string => !!x) : []);
+  const [bp] = bodyIds.length ? await sql<{ title: string }[]>`select coalesce(nullif(title, ''), file_name) as title from library_files where id = ${bodyIds[0]}` : [];
+  return { fileId: f.id, photoId, photoTitle: photo?.title ?? null, bodyId: bodyIds[0] ?? null, bodyIds, bodyTitle: bp ? `${bp.title}${bodyIds.length > 1 ? ` 외 ${bodyIds.length - 1}장` : ''}` : null, template, templateLabel: label, photoIds };
 }
 
 /** #544 피드 틀로 그리기: 같은 브랜드에서 게시 시각이 가까운 3개 글의 틀·사진은 빼고 → 칸(AI card·글)·사진·화면 캡처로 쓸 수 있는 틀 중 덜 쓴 것 */
@@ -198,7 +218,7 @@ async function attachVisual(c: Content, fileId: string, note: string, actorId: s
  *  정기 실행 한 번(60초)에 다른 일도 있으므로 한 번에 4건·20초까지 — 남은 것은 다음 실행(15분)에 */
 export async function fillMissingVisuals(tenant: string, limit = 4, budgetMs = 20000) {
   const sql = db(); const t0 = Date.now();
-  const rows = await sql<(Content & { status: string })[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status from mkt_contents c
+  const rows = await sql<(Content & { status: string; quality: any })[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status, c.quality from mkt_contents c
     join mkt_versions v on v.content_id = c.id and v.version = c.current_version
     where c.tenant = ${tenant} and c.auto and c.status in ('pending', 'changes') and cardinality(v.media_ids) = 0 and c.channel in ('instagram', 'facebook', 'blog')
       and coalesce(c.kind, '') not in ('reels', 'shorts', 'video') and (c.scheduled_at is null or c.scheduled_at > now() - interval '1 day')
@@ -210,8 +230,8 @@ export async function fillMissingVisuals(tenant: string, limit = 4, budgetMs = 2
     if (Date.now() - t0 > budgetMs) break;
     try {
       const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
-      const d = await drawAutoVisual(c, v?.body ?? '');
-      const r = await attachVisual(c, d.fileId, `시안 자동 그리기(서버·크레딧 0)${d.templateLabel ? ` — 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` — 사진: ${d.photoTitle}` : ' — 브랜드 색 바탕'}${d.bodyTitle ? ` · 본문 사진: ${d.bodyTitle}` : c.channel === 'blog' ? ' · 본문 사진 없음(실사를 붙여 주세요)' : ''}`, c.created_by, d.photoId, false, d.bodyId ? [d.bodyId] : [], { template: d.template, photoIds: d.photoIds });
+      const d = await drawAutoVisual(c, v?.body ?? '', { bodyIds: c.quality?.bodyPlan ?? null }); // #235 ⓑ 원고가 고른 블로그 사진(그릴 때 실패해 못 붙였던 것)
+      const r = await attachVisual(c, d.fileId, `시안 자동 그리기(서버·크레딧 0)${d.templateLabel ? ` — 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` — 사진: ${d.photoTitle}` : ' — 브랜드 색 바탕'}${d.bodyTitle ? ` · 본문 사진: ${d.bodyTitle}` : c.channel === 'blog' ? ' · 본문 사진 없음(실사를 붙여 주세요)' : ''}`, c.created_by, d.photoId, false, d.bodyIds, { template: d.template, photoIds: d.photoIds });
       if (!r) continue;
       out.push({ id: c.id, version: r.version });
       if (r.status === 'pending') await M.mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `시안을 붙여 다시 올렸습니다(v${r.version}): ${c.title}`, body: '시안 없이 올라갔던 자동 제작 글에 서버가 그린 이미지를 붙였습니다 — 승인해 주세요',
@@ -328,8 +348,10 @@ export async function makeVisualNow(u: SessionUser, id: string, opts: { redraw?:
     if (f?.photo && !vis.photoId) await sql`update mkt_contents set quality = jsonb_set(quality, '{visual}', (quality->'visual') || ${sql.json({ photoId: f.photo } as never)}::jsonb) where id = ${id}`;
   }
   // 로컬 08:15 (c): [브랜드 색으로 다시 그리기] · #544 피드 틀이 있는 브랜드는 [다른 틀로 다시 그리기](지금 틀은 빼고)
-  const d = await drawAutoVisual(c, v?.body ?? '', { actor: u, exclude, brandOnly: !!opts.redraw, notTemplate: opts.redraw ? vis?.template ?? null : null });
-  const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.templateLabel ? ` · 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}${d.bodyTitle ? ` · 본문 사진: ${d.bodyTitle}` : ''}`, u.id, d.photoId, !!opts.redraw, !opts.redraw && d.bodyId ? [d.bodyId] : [], { template: d.template, photoIds: d.photoIds });
+  // #235 ⓑ 블로그: 다시 그리기는 붙어 있는 본문 사진을 표지 바탕으로 다시 쓰지 않음 · 처음 그리기는 원고가 고른 사진(bodyPlan)을 붙임
+  const bodyIds = opts.redraw ? (v?.media_ids ?? []).slice(1).map(String) : (c.quality?.bodyPlan ?? null);
+  const d = await drawAutoVisual(c, v?.body ?? '', { actor: u, exclude, brandOnly: !!opts.redraw, notTemplate: opts.redraw ? vis?.template ?? null : null, bodyIds });
+  const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.templateLabel ? ` · 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}${d.bodyTitle && !opts.redraw ? ` · 본문 사진: ${d.bodyTitle}` : ''}`, u.id, d.photoId, !!opts.redraw, opts.redraw ? [] : d.bodyIds, { template: d.template, photoIds: d.photoIds });
   if (!r) throw badRequest('그사이 콘텐츠가 바뀌었습니다 — 새로 고쳐 다시');
   await audit(sql, u.id, opts.redraw ? 'mkt.visual_redraw' : 'mkt.visual_now', 'mkt_content', id, { version: r.version, photoId: d.photoId }).catch(() => {});
   return { version: r.version, status: r.status, fileId: d.fileId, photo: d.photoTitle, template: d.templateLabel };

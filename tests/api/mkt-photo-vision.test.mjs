@@ -81,14 +81,17 @@ test('사진 설명: 줄인 JPEG·빠른 모델로 한 번 · 저장(설명이 �
   assert.equal(sv.canEdit, false);
   assert.equal((await ctx.staffA.client.req('POST', '/api/marketing/photos/describe', {})).status, 403);
   assert.equal((await ctx.staffA.client.req('PATCH', `/api/marketing/photos/${P.face}`, { text: 'none' })).status, 403);
-  // 판정 고치기: 얼굴 보이는 사진을 '글자 없음' = 바탕으로 씀 · 깨끗한 사진을 '글자 있음' = 바탕·본문 모두 뺌 · 'auto' = 되돌림
+  // 판정 고치기: 얼굴 보이는 사진을 '글자 없음' = 바탕으로 씀 · 깨끗한 사진을 '글자 있음' = 바탕에서만 뺌(로컬 10/25: 본문에는 씀) · '쓰지 않음' = 바탕·본문 모두 뺌 · 'auto' = 되돌림
   assert.deepEqual((await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.face}`, { text: 'none' })).tags, ['글자없음']);
   await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.clean}`, { text: 'has' });
   const v2 = Object.fromEntries((await ctx.owner.ok('GET', '/api/marketing/photos')).items.map((x) => [x.id, x]));
-  assert.deepEqual([v2[P.face].cover, v2[P.face].mark, v2[P.clean].cover, v2[P.clean].body, v2[P.clean].mark], [true, 'none', false, false, 'has']);
+  assert.deepEqual([v2[P.face].cover, v2[P.face].mark, v2[P.clean].cover, v2[P.clean].body, v2[P.clean].mark], [true, 'none', false, true, 'has']);
+  assert.deepEqual((await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.clean}`, { text: 'skip' })).tags, ['쓰지않음']);
+  const v3 = Object.fromEntries((await ctx.owner.ok('GET', '/api/marketing/photos')).items.map((x) => [x.id, x]));
+  assert.deepEqual([v3[P.clean].cover, v3[P.clean].body, v3[P.clean].mark], [false, false, 'skip']);
   await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.face}`, { text: 'auto' });
   await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.clean}`, { text: 'auto' });
-  assert.deepEqual((await vis(P.face)).tags, []);
+  assert.deepEqual([(await vis(P.face)).tags, (await vis(P.clean)).tags], [[], []]);
   // 다른 회사·없는 사진·마케팅 공간이 아닌 사진 = 404
   const [t2] = await sql`insert into tenants (id, name) values ('pv-other', '다른회사') on conflict (id) do update set name = excluded.name returning id`;
   const [o] = await sql`insert into library_files (tenant, space, folder, title, file_name, mime_type, size_bytes, created_by, upload_status, source) values (${t2.id}, 'marketing', '', 'x', 'x.jpg', 'image/jpeg', 10, ${ctx.ownerId}, 'ready', 'upload') returning id`;

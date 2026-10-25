@@ -175,7 +175,8 @@ export async function getContent(u: SessionUser, id: string) {
   // #499-1 용도를 바꿨으면(콘텐츠형↔광고형) 제작 때 보고서의 훅 후보·장면으로 그 기준에 맞춰 다시 채점(자동 수정 기록은 그대로)
   const qualityReport = saved && Q.asMode(saved.mode) === mode ? saved
     : cur ? { ...Q.qualityReport({ channel: c.channel, kind: c.kind, title: c.title, body: cur.body ?? '', keywords: kw, voice: c.brand_voice, cross: c.cross_channels ?? [], mode,
-        hooks: saved?.hooks?.map((h: { text: string }) => h.text), script: c.quality?.script ?? saved?.timing?.rows?.map((r: { line: string }) => r.line) }, rules).report, ...(saved ? { v: saved.v, notes: saved.notes } : {}), ...(preflight ? { preflight } : {}) } : null;
+        hooks: saved?.hooks?.map((h: { text: string }) => h.text), script: c.quality?.script ?? saved?.timing?.rows?.map((r: { line: string }) => r.line),
+        mainKeyword: saved?.keyword ?? null, subKeywords: saved?.blog?.subKeywords, persona: saved?.blog?.persona }, rules).report, ...(saved ? { v: saved.v, notes: saved.notes } : {}), ...(preflight ? { preflight } : {}) } : null;
   c.is_example = Array.isArray(c.brand_examples) && c.brand_examples.some((e: { contentId?: string }) => e?.contentId === c.id); // #235 ⓔ 좋은 예시로 저장됨
   delete c.brand_voice; delete c.brand_facts; delete c.brand_examples;
   return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };

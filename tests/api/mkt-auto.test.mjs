@@ -227,7 +227,7 @@ test('상용화 ⑦ 마케팅 AI 월 한도: 넘으면 제작 멈춤·하루 한
   assert.ok(ok.produced.some((p) => !p.error), JSON.stringify(ok));
 });
 
-test('로컬 검수 10/19: 블로그 원고 한 덩어리 → 소제목·문단 빈 줄, 피드는 줄바꿈 그대로', async () => {
+test('로컬 검수 10/19 + #235 ⓑ: 블로그 원고 한 덩어리 → 소제목·문단 빈 줄·한 문장 한 줄, 피드는 줄바꿈 그대로', async () => {
   await ctx.owner.ok('PUT', '/api/marketing/auto', { aiMonthlyUsd: 100 });
   const b = (await ctx.owner.ok('POST', '/api/marketing/auto/brands', { name: '문단 브랜드' })).brand;
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b.id}`, { intro: '문단 시험' });
@@ -239,6 +239,6 @@ test('로컬 검수 10/19: 블로그 원고 한 덩어리 → 소제목·문단 
   const [v] = await sql`select v.body from mkt_versions v join mkt_contents c on c.id = v.content_id where c.rule_id = ${r.id}`;
   assert.ok(v, '제작됨');
   const { layoutBody } = await import('../../src/lib/mktText.ts'); // Node 22 형식 제거로 .ts 직접 불러옴
-  assert.equal(layoutBody('blog', '앞 문장. ■ 소제목 첫 문장입니다. 둘째. 셋째.'), '앞 문장.\n\n■ 소제목 첫 문장입니다.\n\n둘째. 셋째.', '짧은 소제목 블록도 첫 문장을 뗌');
-  assert.match(v.body, /^첫 문장입니다\. 둘째 문장입니다\.\n\n■ 소제목 하나 셋째 문장입니다\.\n\n넷째 문장입니다\. 다섯째 문장입니다\.\n\n여섯째 문장입니다\./, JSON.stringify(v.body));
+  assert.equal(layoutBody('blog', '앞 문장. ■ 소제목 첫 문장입니다. 둘째. 셋째.'), '앞 문장.\n\n■ 소제목 첫 문장입니다.\n\n둘째.\n셋째.', '짧은 소제목 블록도 첫 문장을 뗌 · 한 문장 한 줄');
+  assert.match(v.body, /^첫 문장입니다\.\n둘째 문장입니다\.\n\n■ 소제목 하나 셋째 문장입니다\.\n\n넷째 문장입니다\.\n다섯째 문장입니다\.\n여섯째 문장입니다\./, JSON.stringify(v.body));
 });

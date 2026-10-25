@@ -86,7 +86,7 @@ async function promptCtx(tenant: string, b: any, brand: any) {
       and coalesce(security, 'internal') <> 'confidential' order by created_at desc limit 80`;
   const { visionText } = await import('./mktPhotos'); // #235 ⓒ 사진 AI 설명도 브랜드 맞추기에
   const score = (r: (typeof rows)[number]) => (V.backdropOk(r) ? 3 : 0) + (name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase().includes(name) ? 6 : 0);
-  const candidates = rows.filter((r) => !V.textGraphic(r)).map((r) => ({ r, s: score(r) })).sort((x, y) => y.s - x.s).slice(0, 3).map(({ r }) => ({ id: r.id, title: r.title, description: r.description }));
+  const candidates = rows.filter((r) => V.bodyOk(r)).map((r) => ({ r, s: score(r) })).sort((x, y) => y.s - x.s).slice(0, 3).map(({ r }) => ({ id: r.id, title: r.title, description: r.description }));
   return { ctx: { aspect: spec.aspect, px: spec.px, video: spec.media === 'video', brandColors: color ? [color] : [], refAvailable: candidates.length } as import('./mktPromptCheck').PromptCtx, candidates };
 }
 

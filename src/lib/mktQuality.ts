@@ -3,6 +3,7 @@ import { db } from './db';
 import { notFound } from './errors';
 import { assertSpace } from './spaces';
 import { tenantOf, type SessionUser } from './types';
+import { HEAD_LINE, blogStats, specialLine } from './mktText';
 
 /**
  * #426 P1 글 품질 엔진(docs/handoff/MKT_AGENT_SKILLS_2026-10-22.md 2장) — 자동 제작·제작의뢰실·광고 문구가 같이 쓰는 순수 검사기.
@@ -15,13 +16,15 @@ import { tenantOf, type SessionUser } from './types';
 export type QualityRules = {
   hook: { min: number; maxSec: number }; human: { min: number }; script: { syllPerMin: number; sceneMaxSec: number; maxTotalSec: number };
   instagram: { preview: number; hashtags: number; cta: number }; threads: { max: number; links: number }; facebook: { previewLines: number; lineChars: number };
-  youtube: { title: number; titleFront: number; descLines: number }; blog: { titleFront: number; minHeadings: number; keywordPer1000: number; minChars: number };
+  youtube: { title: number; titleFront: number; descLines: number };
+  blog: { titleFront: number; minHeadings: number; keywordPer1000: number; minChars: number; maxChars: number; keywordMin: number; keywordMax: number; minPhotos: number; maxPhotos: number; minQuotes: number; maxQuotes: number; maxTextRun: number };
   ads: { googleHeadline: number; googleDesc: number; naverHeadline: number; naverDesc: number; metaPrimary: number };
 };
 export const DEFAULT_RULES: QualityRules = {
   hook: { min: 40, maxSec: 3 }, human: { min: 70 }, script: { syllPerMin: 300, sceneMaxSec: 4, maxTotalSec: 60 },
   instagram: { preview: 125, hashtags: 5, cta: 1 }, threads: { max: 500, links: 1 }, facebook: { previewLines: 2, lineChars: 60 },
-  youtube: { title: 100, titleFront: 40, descLines: 2 }, blog: { titleFront: 15, minHeadings: 2, keywordPer1000: 6, minChars: 1800 }, // 로컬 QA 10/24 ②: 블로그 1,800자 미만은 승인함에 안 올림
+  youtube: { title: 100, titleFront: 40, descLines: 2 }, // 로컬 QA 10/24 ②: 블로그 1,800자 미만은 승인함에 안 올림 · #235 ⓑ 네이버 형식(대표 노션): 1,800~2,500자 · 메인 키워드 5~7회 · 사진 8~15장 · 인용구 2~4개 · 글자만 500자 넘게 이어지면 막음
+  blog: { titleFront: 15, minHeadings: 2, keywordPer1000: 6, minChars: 1800, maxChars: 2500, keywordMin: 5, keywordMax: 7, minPhotos: 8, maxPhotos: 15, minQuotes: 2, maxQuotes: 4, maxTextRun: 500 },
   ads: { googleHeadline: 30, googleDesc: 90, naverHeadline: 15, naverDesc: 45, metaPrimary: 125 },
 };
 type Sec = keyof QualityRules;
@@ -36,6 +39,9 @@ export const RULE_FIELDS: [Sec, string, string, number, number, string][] = [
   ['facebook', 'previewLines', '미리보기 줄', 1, 10, '줄'], ['facebook', 'lineChars', '한 줄 글자', 20, 200, '자'],
   ['youtube', 'title', '제목 글자', 20, 100, '자'], ['youtube', 'titleFront', '핵심 키워드는 제목 앞', 10, 100, '자'], ['youtube', 'descLines', '설명 첫 줄 수', 1, 10, '줄'],
   ['blog', 'titleFront', '키워드는 제목 앞', 5, 60, '자'], ['blog', 'minHeadings', '소제목 최소', 0, 10, '개'], ['blog', 'keywordPer1000', '키워드 반복 최대(1000자당)', 1, 50, '회'], ['blog', 'minChars', '본문 최소 글자(승인함 올리기 전)', 300, 5000, '자'],
+  ['blog', 'maxChars', '본문 권장 최대 글자', 1000, 10000, '자'], ['blog', 'keywordMin', '메인 키워드 최소(본문)', 0, 20, '회'], ['blog', 'keywordMax', '메인 키워드 최대(본문)', 1, 30, '회'],
+  ['blog', 'minPhotos', '본문 사진 권장 최소', 0, 30, '장'], ['blog', 'maxPhotos', '본문 사진 최대(원고에 넣는 수)', 1, 30, '장'], ['blog', 'minQuotes', '인용구 최소', 0, 10, '개'], ['blog', 'maxQuotes', '인용구 최대', 0, 20, '개'],
+  ['blog', 'maxTextRun', '글자만 이어지는 최대(넘으면 승인함에 안 올림)', 200, 3000, '자'],
   ['ads', 'googleHeadline', '구글 제목(한글 2배폭)', 10, 90, '폭'], ['ads', 'googleDesc', '구글 설명(한글 2배폭)', 30, 180, '폭'],
   ['ads', 'naverHeadline', '네이버 제목', 5, 50, '자'], ['ads', 'naverDesc', '네이버 설명', 10, 100, '자'], ['ads', 'metaPrimary', "Meta 기본 문구 '더 보기' 전", 40, 500, '자'],
 ];
@@ -263,7 +269,7 @@ export function trimHashtags(body: string, max: number) {
   let k = 0; const out = body.replace(HASHTAG, (m) => (++k > max ? '' : m));
   return { body: k > max ? out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim() : body, removed: Math.max(0, k - max) };
 }
-export function checkChannel(channel: string, kind: string | null | undefined, i: { title?: string; body: string; keywords?: string[]; mainKeyword?: string | null }, rules: QualityRules = DEFAULT_RULES) {
+export function checkChannel(channel: string, kind: string | null | undefined, i: { title?: string; body: string; keywords?: string[]; mainKeyword?: string | null; subKeywords?: string[] }, rules: QualityRules = DEFAULT_RULES) {
   const issues: ChannelIssue[] = []; const text = String(i.body ?? '').trim(); const L = lines(text); const title = String(i.title ?? '').trim();
   const urls = text.match(/https?:\/\/\S+/g) ?? []; const tags = (text.match(HASHTAG) ?? []).length;
   const kw = (i.keywords ?? []).map((k) => k.trim()).filter((k) => len(k) >= 2); let preview: string | null = null;
@@ -295,14 +301,29 @@ export function checkChannel(channel: string, kind: string | null | undefined, i
     if (!L.length) issues.push({ level: 'warn', msg: `설명 첫 ${R.descLines}줄이 비어 있음` });
     preview = L.slice(0, R.descLines).join('\n') || null;
   } else if (channel === 'blog') {
-    const R = rules.blog; const main = (i.mainKeyword ?? '').trim();
+    const R = rules.blog; const main = (i.mainKeyword ?? '').trim(); const st = blogStats(text);
     if (title && main) { const at = title.indexOf(main); if (at < 0 || at > R.titleFront) issues.push({ level: 'warn', msg: `제목 앞쪽(${R.titleFront}자 안)에 키워드 '${main}'` }); }
-    const heads = L.filter((l) => /^(?:■|##|\[소제목\])/.test(l)).length;
-    if (heads < R.minHeadings) issues.push({ level: 'warn', msg: `소제목 ${heads}개 — ${R.minHeadings}개 이상(■ 소제목)` });
-    for (const k of [...new Set([main, ...kw].filter((k) => len(k) >= 2))]) {
+    const heads = L.filter((l) => HEAD_LINE.test(l));
+    if (heads.length < R.minHeadings) issues.push({ level: 'warn', msg: `소제목 ${heads.length}개 — ${R.minHeadings}개 이상(■ 소제목)` });
+    // #235 ⓑ 메인 키워드(지역+업종): 첫 문단·끝 문단(연락처 줄 포함 마지막 두 문단)·본문 5~7회 · 서브 키워드는 소제목에
+    if (main && len(main) >= 2) {
+      const paras = text.split(/\n{2,}/).map((b) => b.split('\n').map((l) => l.trim()).filter((l) => l && !specialLine(l)).join('\n')).filter((b) => len(b) >= 10);
+      if (paras.length && !paras[0].includes(main)) issues.push({ level: 'warn', msg: `첫 문단에 메인 키워드 '${main}'` });
+      if (paras.length > 1 && !paras.slice(-2).some((x) => x.includes(main))) issues.push({ level: 'warn', msg: `끝 문단에 메인 키워드 '${main}'` });
+      const c = text.split(main).length - 1;
+      if (c < R.keywordMin) issues.push({ level: 'warn', msg: `메인 키워드 '${main}' 본문 ${c}회 — ${R.keywordMin}~${R.keywordMax}회` });
+      else if (c > R.keywordMax) issues.push({ level: 'warn', msg: `메인 키워드 '${main}' 본문 ${c}회 — ${R.keywordMax}회 이하(반복 과다 — 네이버 저품질 위험)` });
+    }
+    const miss = [...new Set((i.subKeywords ?? []).map((k) => k.trim()).filter((k) => len(k) >= 2 && k !== main && !heads.some((h) => h.includes(k))))];
+    if (miss.length) issues.push({ level: 'warn', msg: `서브 키워드가 소제목에 없음: ${miss.map((k) => `'${k}'`).join(', ')}` });
+    for (const k of [...new Set(kw.filter((k) => len(k) >= 2 && k !== main))]) {
       const c = text.split(k).length - 1;
       if (c >= 5 && c / Math.max(1, len(text) / 1000) > R.keywordPer1000) issues.push({ level: 'warn', msg: `'${k}' ${c}회 — 반복 과다(네이버 저품질 위험)` });
     }
+    if (st.chars > R.maxChars) issues.push({ level: 'warn', msg: `본문 ${st.chars.toLocaleString('ko-KR')}자 — ${R.maxChars.toLocaleString('ko-KR')}자 이하 권장` });
+    if (st.photos < R.minPhotos) issues.push({ level: 'warn', msg: `본문 사진 자리([사진 n] 줄) ${st.photos}개 — ${R.minPhotos}~${R.maxPhotos}장 권장(자료실 마케팅 사진이 모자라면 더 올려 주세요)` });
+    else if (st.photos > R.maxPhotos) issues.push({ level: 'warn', msg: `본문 사진 ${st.photos}장 — ${R.maxPhotos}장 이하` });
+    if (st.quotes < R.minQuotes || st.quotes > R.maxQuotes) issues.push({ level: 'warn', msg: `인용구 ${st.quotes}개 — ${R.minQuotes}~${R.maxQuotes}개(“ ”로 감싼 한 줄)` });
   }
   return { issues, preview };
 }
@@ -363,13 +384,14 @@ export const factsInput = z.object({
   hours: z.string().trim().max(200).optional(), prices: z.string().trim().max(500).optional(), numbers: z.string().trim().max(1000).optional(),
   avoidNames: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   aliases: z.array(z.string().trim().min(1).max(40)).max(10).optional(), // 137차: 이 브랜드의 다른 이름(영문·약칭) — 다른 브랜드 글에서 거름
+  keywords: z.array(z.string().trim().min(2).max(30)).max(5).optional(), // #235 ⓑ 블로그 메인 키워드 후보(지역+업종, 예: 송도 헬스장) — 원고가 주제에 맞는 것 하나를 고름
   // #235 ⓐ 이번 달 실제 소식(이벤트·사례·새 소식) — 기간 안에서 주제 풀보다 먼저 주제로, 재료에는 사실로(끝나는 날 없으면 저장 때 30일 뒤)
   news: z.array(z.object({ text: z.string().trim().min(1).max(200), from: zDay.optional(), to: zDay.optional() })).max(12).optional(),
 });
 export type Facts = z.infer<typeof factsInput>;
 /** 저장 값(옛 값·빈 값 포함) → 카드. 형식이 안 맞으면 빈 카드 — 원고 쓰기를 막지 않음 */
 export const factsOf = (v: unknown): Facts => { const r = factsInput.safeParse(v ?? {}); return r.success ? r.data : {}; };
-const FACT_LABEL: [Exclude<keyof Facts, 'avoidNames' | 'aliases' | 'news'>, string][] = [['phone', '전화'], ['link', '문의·예약 링크'], ['website', '홈페이지'], ['address', '주소'], ['hours', '운영 시간'], ['prices', '요금·가격'], ['numbers', '써도 되는 숫자·근거']];
+const FACT_LABEL: [Exclude<keyof Facts, 'avoidNames' | 'aliases' | 'news' | 'keywords'>, string][] = [['phone', '전화'], ['link', '문의·예약 링크'], ['website', '홈페이지'], ['address', '주소'], ['hours', '운영 시간'], ['prices', '요금·가격'], ['numbers', '써도 되는 숫자·근거']];
 /** 원고 재료에 넣는 사실 카드 */
 export function factsText(f: Facts) {
   const rows = FACT_LABEL.filter(([k]) => String(f[k] ?? '').trim()).map(([k, l]) => `- ${l}: ${String(f[k]).trim()}`);
@@ -577,7 +599,11 @@ export function preflight(i: PreflightInput, rules: QualityRules = DEFAULT_RULES
   if (IMG_CONTACT.test(all)) out.push("연락처를 '이미지 참조'로 돌림 — 글 안에 직접");
   else if (!story && i.channel !== 'threads' && hasContacts(f) && !contactIn(all, f)) out.push(`연락처 없음 — 사실 카드의 ${f.phone ? '전화' : f.link ? '문의 링크' : '홈페이지'}를 글 안에 직접`);
   else if (PHONE_ASK.test(content) && !PHONE.test(all) && !contactIn(all, f)) out.push("'전화 문의'인데 번호가 없음"); // 스티커 제안 줄(투표·질문)·'전화 예약 vs 앱 예약' 같은 비교는 권유가 아님
-  if (blog) { const n = len(content.replace(/\n/g, '')); if (n < rules.blog.minChars) out.push(`블로그 본문 ${n.toLocaleString('ko-KR')}자 — ${rules.blog.minChars.toLocaleString('ko-KR')}자 이상`); }
+  if (blog) { // #235 ⓑ 글자 수는 사진 자리 줄을 빼고 · 글자만 500자 넘게 이어지면(소제목·인용구·사진 줄 없이) 휴대폰에서 읽기 어려워 막음
+    const st = blogStats(content);
+    if (st.chars < rules.blog.minChars) out.push(`블로그 본문 ${st.chars.toLocaleString('ko-KR')}자 — ${rules.blog.minChars.toLocaleString('ko-KR')}자 이상`);
+    if (st.maxRun > rules.blog.maxTextRun) out.push(`글자만 ${st.maxRun.toLocaleString('ko-KR')}자 이어짐('${[...st.runStart].slice(0, 14).join('')}…'부터) — ${rules.blog.maxTextRun}자 안에 소제목·인용구·사진 줄로 끊기`);
+  }
   if (story) { if (body.length > 2) out.push(`스토리 문구 ${body.length}줄 — 1~2줄`); if (!all.split('\n').some((l) => STICKER_LINE.test(l))) out.push("스토리 '스티커 제안:' 줄 없음"); }
   if (video) {
     const cuts = (i.script ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
@@ -609,21 +635,27 @@ export type QualityReportData = {
   v?: number; human: { score: number; pass: boolean; issues: string[] }; needsPolish: boolean; hook: HookScore | null; hooks: HookScore[];
   channel: ChannelIssue[]; preview: string | null; timing: Timing | null; voice: string[]; keyword?: string | null; mode?: HookMode;
   preflight?: string[]; // 로컬 QA 10/24 ②: 올리기 전 검사에 걸린 것(자동 제작 글은 이게 있으면 승인함 대신 '수정 요청')
+  blog?: BlogReport; // #235 ⓑ 네이버 블로그 형식 숫자
 };
-export function qualityReport(i: { channel: string; kind?: string | null; title?: string; body: string; hooks?: string[]; script?: string[]; keywords?: string[]; mainKeyword?: string | null; voice?: Partial<Voice> | null; cross?: string[]; mode?: HookMode | null }, rules: QualityRules = DEFAULT_RULES): { body: string; report: QualityReportData } {
+/** #235 ⓑ 블로그 형식 요약(승인함 상세 '글 품질'): 메인·서브 키워드 · 검색자(페르소나) · 글자 수(사진 줄 빼고) · 사진 자리 · 인용구 · 소제목 · 글자만 이어진 가장 긴 덩어리 */
+export type BlogReport = { keyword: string | null; keywordCount: number; subKeywords: string[]; persona: string; chars: number; photos: number; quotes: number; heads: number; maxRun: number };
+export function qualityReport(i: { channel: string; kind?: string | null; title?: string; body: string; hooks?: string[]; script?: string[]; keywords?: string[]; mainKeyword?: string | null; subKeywords?: string[]; persona?: string | null; voice?: Partial<Voice> | null; cross?: string[]; mode?: HookMode | null }, rules: QualityRules = DEFAULT_RULES): { body: string; report: QualityReportData } {
   const mode: HookMode = i.mode === 'ad' ? 'ad' : 'content';
   const kind = i.kind ?? null; const h = humanize(i.body, rules); const title = String(i.title ?? '').replace(/^\s*\[시험\]\s*/, '');
   const script = i.script?.filter((x) => String(x ?? '').trim()).map((x) => String(x).trim()) ?? [];
   const sc = script.length >= 2 ? script : kind && VIDEO.has(kind) ? scriptLines(h.text) : [];
   const keywords = [i.mainKeyword ?? '', ...(i.keywords ?? [])].filter(Boolean);
   const hookText = hookOf(kind, title, h.text, sc);
-  const ch = checkChannel(i.channel, kind, { title, body: h.text, keywords, mainKeyword: i.mainKeyword }, rules);
+  const ch = checkChannel(i.channel, kind, { title, body: h.text, keywords, mainKeyword: i.mainKeyword, subKeywords: i.subKeywords }, rules);
+  const main = (i.mainKeyword ?? '').trim(); const bs = i.channel === 'blog' ? blogStats(h.text) : null;
+  const blog: BlogReport | undefined = bs ? { keyword: main || null, keywordCount: main ? h.text.split(main).length - 1 : 0, subKeywords: (i.subKeywords ?? []).filter(Boolean).slice(0, 3), persona: String(i.persona ?? '').trim(),
+    chars: bs.chars, photos: bs.photos, quotes: bs.quotes, heads: bs.heads, maxRun: bs.maxRun } : undefined;
   // '스레드에도'·'페이스북에도' 같이 올리는 채널은 막는 문제(error)만
   for (const x of (i.cross ?? []).filter((c) => c !== i.channel)) for (const e of checkChannel(x, kind, { title, body: h.text }, rules).issues) if (e.level === 'error') ch.issues.push({ level: 'error', msg: `${x === 'threads' ? '스레드' : x === 'facebook' ? '페이스북' : x}: ${e.msg}` });
   return { body: h.text, report: {
     human: { score: h.score, pass: h.pass, issues: h.issues }, needsPolish: !h.pass, hook: hookText ? scoreHook(hookText, rules, keywords, mode) : null,
     hooks: (i.hooks ?? []).map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 3).map((x) => scoreHook(x, rules, keywords, mode)),
-    channel: ch.issues, preview: ch.preview, timing: sc.length >= 2 ? scriptTiming(sc, rules, mode) : null, voice: voiceIssues(h.text, i.voice), keyword: i.mainKeyword ?? null, mode,
+    channel: ch.issues, preview: ch.preview, timing: sc.length >= 2 ? scriptTiming(sc, rules, mode) : null, voice: voiceIssues(h.text, i.voice), keyword: i.mainKeyword ?? null, mode, ...(blog ? { blog } : {}),
   } };
 }
 

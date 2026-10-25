@@ -1,6 +1,6 @@
 'use client';
 import { Button, btnCls, toast } from '@/components/ui';
-import { layoutBody, publishTitle } from '@/lib/mktText';
+import { HEAD_LINE, PHOTO_LINE, QUOTE_LINE, layoutBody, publishTitle } from '@/lib/mktText';
 
 const NAVER_WRITE = 'https://blog.naver.com/GoBlogWrite.naver';
 /** 본문을 네이버 편집기에 붙여 넣을 때 문단이 유지되도록 HTML(문단) + 일반 글자 둘 다 복사 */
@@ -13,7 +13,14 @@ async function copy(text: string, html?: string) {
   } catch { toast.error('복사하지 못했습니다 — 글을 직접 선택해 복사해 주세요'); }
 }
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const paragraphs = (body: string) => body.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+/** 문단 HTML — #235 ⓑ 블로그: 소제목(■) 굵게 · 인용구(“ ”) 인용 상자 · 사진 자리([사진 n] 설명)는 회색 안내 문단(붙여 넣은 뒤 그 자리에 n번 사진) */
+const paragraphs = (body: string, blog = false) => body.split(/\n{2,}/).map((raw) => {
+  const p = raw.trim();
+  if (blog && PHOTO_LINE.test(p)) return `<p style="color:#9ca3af">${esc(p)}</p>`;
+  if (blog && QUOTE_LINE.test(p)) return `<blockquote><p>${esc(p)}</p></blockquote>`;
+  if (blog && HEAD_LINE.test(p)) return `<p><b>${esc(p)}</b></p>`;
+  return `<p>${esc(p).replace(/\n/g, '<br>')}</p>`;
+}).join('');
 
 /** 채널별 작성 화면(PC) — 휴대폰은 [앱으로 공유](공유 시트)로 사진·영상을 넘김 */
 const WRITE: Record<string, { label: string; url: string }> = {
@@ -53,19 +60,21 @@ async function shareToApp(caption: string, media: { id: string; title: string }[
 export function PublishHelper({ channel, title, body: raw, media, published = false }: { channel: string; title: string; body: string; media: { id: string; title: string }[]; published?: boolean }) {
   const naver = channel === 'blog';
   const social = ['instagram', 'facebook', 'threads'].includes(channel);
-  const body = layoutBody(channel, raw); // 블로그: 소제목·문단 사이 빈 줄(예전 원고도 복사할 때 정리)
+  const body = layoutBody(channel, raw); // 블로그: 한 문장 한 줄·소제목·인용구·사진 자리는 제 줄(예전 원고도 복사할 때 정리)
   const w = WRITE[channel];
+  const photoSpots = naver ? body.split('\n').filter((l) => PHOTO_LINE.test(l.trim())).length : 0;
   return (
     <div className="space-y-2 rounded-input border border-emerald-200 bg-emerald-50/40 p-3 text-xs" data-testid="publish-helper" data-channel={channel}>
       <p className="font-semibold text-emerald-900">{published ? '게시된 글 다시 쓰기(복사)' : `${NAME[channel] ?? ''} 게시 도우미`.trim()}</p>
       <ol className="list-decimal space-y-1.5 pl-4">
         <li className="flex flex-wrap items-center gap-2">
           {!social && <Button size="sm" variant="secondary" onClick={() => copy(publishTitle(title))} data-testid="ph-copy-title">제목 복사</Button>}
-          <Button size="sm" variant="secondary" onClick={() => copy(body, paragraphs(body))} data-testid="ph-copy-body">{social ? '캡션 복사' : '본문 복사'}</Button>
+          <Button size="sm" variant="secondary" onClick={() => copy(body, paragraphs(body, naver))} data-testid="ph-copy-body">{social ? '캡션 복사' : '본문 복사'}</Button>
         </li>
-        <li>{media.length ? <span className="flex flex-wrap items-center gap-1.5">사진·영상 순서대로:{media.map((m, k) => <a key={m.id} href={`/api/library/${m.id}/download`} className="rounded-full bg-white px-2 py-0.5 underline" data-testid="ph-media">{k + 1}. {m.title}</a>)}
+        <li>{media.length ? <span className="flex flex-wrap items-center gap-1.5">사진·영상 순서대로:{media.map((m, k) => <a key={m.id} href={`/api/library/${m.id}/download`} className="rounded-full bg-white px-2 py-0.5 underline" data-testid="ph-media">{naver ? (k ? `사진 ${k}` : '표지') : `${k + 1}.`} {m.title}</a>)}
           {media.length > 1 && <button type="button" className="rounded-full border border-emerald-300 bg-white px-2 py-0.5 font-medium text-emerald-800" onClick={() => downloadAll(media)} data-testid="ph-download-all">모두 내려받기</button>}</span>
           : <span className="text-amber-700">붙일 사진이 없습니다</span>}</li>
+        {naver && photoSpots > 0 && <li data-testid="ph-photo-guide">본문의 &lsquo;[사진 n]&rsquo; 자리마다 n번 사진을 넣고, 그 줄은 사진 설명으로 쓰거나 지웁니다(사진 {photoSpots}장 · 표지는 대표 이미지로).</li>}
         {!published && social && media.length > 0 && isPhone() && <li><Button size="sm" onClick={() => shareToApp(body, media)} data-testid="ph-share">{NAME[channel]} 앱으로 공유</Button> — 글은 자동으로 복사됩니다. 앱에서 붙여 넣고 올리기</li>}
         {!published && w && <li><a href={w.url} target="_blank" rel="noopener" className={btnCls('primary', 'sm')} data-testid={naver ? 'ph-open-naver' : 'ph-open-write'}>{w.label}</a> — 붙여 넣고 사진·영상을 순서대로 올린 뒤 직접 게시</li>}
         {!published && <li>올린 글 주소를 아래에 붙여 넣고 [게시 확인]</li>}

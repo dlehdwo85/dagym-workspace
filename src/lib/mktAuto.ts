@@ -5,7 +5,7 @@ import { isAdmin } from './access';
 import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
 import { zUuid } from './api';
-import { layoutBody } from './mktText';
+import { layoutBody, placePhotos } from './mktText';
 import { JSON_LIKE, avoidOf, voiceInput, factsInput, otherBrands, otherBrandNames, otherBrandLabels, activeNews, newsText, dayAdd, todayKst, factsOf,
   exampleInput, examplesOf, exampleKindOf, examplesPrompt, EXAMPLE_KINDS, EXAMPLE_PER_KIND } from './mktQuality';
 import { FEED_STYLES, FEED_TEMPLATES, NEED_LABEL, TEMPLATE_IDS, feedInput, normalizeFeed } from './mktFeedTemplates';
@@ -97,10 +97,24 @@ export async function makeTier(tenant: string, floor: WriteTier = 'fast'): Promi
   const t = writeTierOf(await settingsOf(tenant)).tier;
   return TIER_RANK[t] >= TIER_RANK[floor] ? t : floor;
 }
+/** #235 ⓑ(대표: '블로그만은 fast 대신 상위 모델 — 비용 차이를 표시'): 블로그 원고·수정본·제목 다시 쓰기는 표준 모델 이상 */
+export const BLOG_TIER: WriteTier = 'default';
+const isBlog = (c: { channel?: string | null; kind?: string | null }) => c.kind === 'blog' || c.channel === 'blog';
+export function draftTierOf(s: Pick<MktSettings, 'write_tier' | 'plan'>, c: { channel?: string | null; kind?: string | null }): WriteTier {
+  const t = writeTierOf(s).tier;
+  return isBlog(c) && TIER_RANK[t] < TIER_RANK[BLOG_TIER] ? BLOG_TIER : t;
+}
+/** 블로그 1건 원가(원) 어림 — 1,800~2,500자 원고 + 사진 후보 목록(입력 7천·출력 3.5천 토큰) */
+async function blogCostKrw(): Promise<Record<WriteTier, number>> {
+  const P = await import('./ai/provider'); const usage = { input_tokens: 7000, output_tokens: 3500 };
+  const krw = (t: WriteTier) => Math.max(1, Math.round(P.costUsd(P.modelFor(t), usage) * P.usdKrw()));
+  return { fast: krw('fast'), default: krw('default'), deep: krw('deep') };
+}
 export async function writeModelInfo(s: Pick<MktSettings, 'write_tier' | 'plan'>) {
   const P = await import('./ai/provider');
-  const w = writeTierOf(s); const cost = await writeCostKrw();
-  return { ...w, label: WRITE_TIER_LABEL[w.tier], model: P.modelFor(w.tier), perDraftKrw: cost[w.tier], byTier: cost };
+  const w = writeTierOf(s); const cost = await writeCostKrw(); const bc = await blogCostKrw(); const bt = draftTierOf(s, { kind: 'blog' });
+  return { ...w, label: WRITE_TIER_LABEL[w.tier], model: P.modelFor(w.tier), perDraftKrw: cost[w.tier], byTier: cost,
+    blog: { tier: bt, label: WRITE_TIER_LABEL[bt], model: P.modelFor(bt), perDraftKrw: bc[bt], upgraded: bt !== w.tier, extraKrw: Math.max(0, bc[bt] - bc[w.tier]), byTier: bc } };
 }
 /** #103 회사 화면 '이번 달 남은 제작 n건' — 남은 크레딧을 이미지·영상 장수로 환산, 주간 종류별 한도 대비 이번 주 제작 수, 초과 안내(초과 크레딧 금액) */
 export async function productionLeft(tenant: string) {
@@ -254,7 +268,10 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
   const ob = brand ? await otherBrands(c.tenant, brand.id) : []; const others = otherBrandNames(ob); // 137차: 영문·다른 이름(HILINK 등) 포함
   const brandOnly = !!brand && !!(brand.intro || brand.products);
   // #235 ⓒ 쓸 수 있는 사진 = 사진 AI 설명(없으면 자료실 설명) — 글자 든 그래픽·다른 브랜드 사진 빼고 이 브랜드 사진 먼저
-  const photos = await (await import('./mktPhotos')).photoLines(c.tenant, brandName(brand), others);
+  // #235 ⓑ 블로그 새 원고는 번호 붙은 본문 사진 후보(최대 20장) — 원고가 장면 순서로 '[사진 P번호]' 줄을 넣음. 블로그 수정본은 지난 원고의 사진 줄을 그대로 둠(목록 없음)
+  const blog = c.kind === 'blog' || c.channel === 'blog';
+  const blogPhotos = blog && !o.keep ? await (await import('./mktAutoVisual')).blogPhotoCandidates(c, `${c.title} ${topic}`).catch(() => [] as import('./mktAutoVisual').BlogPhoto[]) : [];
+  const photos = blog ? [] : await (await import('./mktPhotos')).photoLines(c.tenant, brandName(brand), others);
   const Q = await import('./mktQuality'); const facts = Q.factsOf(brand?.facts); // 로컬 QA 10/24 ⑤ 사실 카드
   // 로컬 QA 10/24 ③: 같은 주 다른 브랜드 글 제목 — 같은 주제·같은 제목을 피하게
   const peers = c.brand_id ? await sql<{ title: string; brand: string }[]>`select x.title, b.name as brand from mkt_contents x join mkt_brands b on b.id = x.brand_id
@@ -278,12 +295,13 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
     newsText(activeNews(facts, day)), // #235 ⓐ 이번 달 실제 소식
     goal && goal.status !== 'pending' ? `이달 운영 목표: ${(goal.goals?.objectives ?? []).join(' / ')}${goal.goals?.message ? ` · 핵심 메시지: ${goal.goals.message}` : ''}` : '',
     photos.length ? `쓸 수 있는 실사 사진(자료실 · AI 사진 설명 — 보이는 장면만 글에 씀):\n${photos.join('\n')}` : '',
+    blogPhotos.length ? `[블로그 사진 후보 — 자료실 실사 · AI 사진 설명. 장면이 맞는 사진을 '[사진 P번호]' 한 줄로 넣고, 사진에 보이는 것만 글에 씀]\n${blogPhotos.map((p, k) => `P${k + 1}: ${p.caption}${p.scene ? ` — ${p.scene}` : ''}`).join('\n')}` : '',
     recent.length ? `최근 게시 제목(겹치지 않게):\n${recent.map((r) => `- ${r.title}`).join('\n')}` : '',
     peers.length ? `같은 주 다른 브랜드 글(같은 주제·제목을 피함):\n${peers.map((r) => `- ${brandName({ name: r.brand })}: ${r.title}`).join('\n')}` : '',
     near.length ? `이 브랜드 가까운 날 다른 글의 첫 줄(같은 주제여도 첫 줄·문장·구성은 새로 씀 — 그대로 옮기거나 낱말 몇 개만 바꾸지 않음):\n${near.map((r) => `- ${CH_NAME[r.channel] ?? r.channel}${r.kind ? ` ${KIND_LABEL[r.kind as Kind] ?? r.kind}` : ''}: ${firstLine(r.body)}`).join('\n')}` : '',
   ].filter(Boolean);
   // 주제가 없고 브랜드·회사 소개도 없으면 재료 부족 — 일반론 원고 대신 '주제 필요' 카드로 질문
-  return { enough: !!topic || about.length > 0, text: lines.join('\n'), topic, topicFrom: pick.from, name: brandName(brand) || co.name, goal: goal && goal.status !== 'pending' ? goal : null, week: gweek, others, facts };
+  return { enough: !!topic || about.length > 0, text: lines.join('\n'), topic, topicFrom: pick.from, name: brandName(brand) || co.name, goal: goal && goal.status !== 'pending' ? goal : null, week: gweek, others, facts, blogPhotos };
 }
 type TopicFrom = 'answer' | 'kept' | 'goal' | 'brand' | 'news' | 'pool' | 'rule' | 'company' | '';
 /** 로컬 QA 10/24 ③ 브랜드마다 주제(월 목표 주간 주제가 모든 브랜드에 내려가 18건이 같은 주제였음):
@@ -328,7 +346,8 @@ const fillName = (t: string, name: string) => (name ? t.replace(/\[(브랜드|�
 
 /** 로컬 QA 10/24 ①: 빈 글(공백·AI 표시 줄만)·JSON 모양 본문(JSON_LIKE, mktQuality)은 글로 저장하지 않음 */
 export const emptyBody = (t: string, aiLabel?: string) => (aiLabel ? t.split(aiLabel).join('') : t).replace(/\s/g, '').length < 5;
-type Draft = { title: string; body: string; brief: string; why: string; hooks: string[]; keyword: string; script: string[]; card?: import('./mktFeedTemplates').FeedCard }; // card = #544 시안 그림 칸
+type Draft = { title: string; body: string; brief: string; why: string; hooks: string[]; keyword: string; script: string[]; card?: import('./mktFeedTemplates').FeedCard; // card = #544 시안 그림 칸
+  persona?: string; subKeywords?: string[]; photos?: string[] }; // #235 ⓑ 블로그: 검색자 한 명·서브 키워드·본문 사진(글에 나온 순서의 자료실 id)
 const VIDEO_KINDS = ['reels', 'shorts', 'video'];
 /** #426 훅 자리: 릴스·쇼츠·영상 = 첫 장면(3초), 블로그 = 제목, 그 밖 = 본문 첫 줄 */
 const hookAt = (kind: string) => (VIDEO_KINDS.includes(kind) ? '첫 장면(첫 3초)' : kind === 'blog' ? '제목' : '본문 첫 줄');
@@ -342,17 +361,27 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
   const m = mat ?? (await materialOf(c, brand, rule, { keep: !!extra }));
   const P = await import('./ai/provider'); const Q = await import('./mktQuality');
   // 로컬 QA 10/24 ②·⑥: 블로그 1,800~2,500자 · 릴스·쇼츠는 대본(script)과 캡션(body)을 따로 · 스토리는 문구 1~2줄 + '스티커 제안:' 줄
-  const kindRule = { feed: '인스타그램 피드 캡션 4~6줄', blog: '네이버 블로그 원고(제목 1줄 + 본문 1,800~2,500자: 도입 2~3문장 → "■ 소제목" 한 줄씩 3~4개, 소제목마다 3~5문장 → 마무리. 문단은 2~3문장씩 빈 줄로 나눔)', reels: '인스타 릴스 — script 는 자막 대본(5~7컷, 컷마다 한 줄), body 는 게시 캡션 2~3줄만(컷 대본·장면 설명은 body 에 쓰지 않음)', video: '15~20초 광고 영상 — script 는 컷 구성(4~5컷), body 는 캡션 3줄만(컷은 body 에 쓰지 않음)', shorts: '유튜브 쇼츠(세로 영상 15~45초) — script 는 자막 대본(5~8컷, 컷마다 한 줄), title 은 쇼츠 제목 1줄, body 는 설명 2줄만(컷 대본은 body 에 쓰지 않음)', story: '인스타·페이스북 스토리(세로 1080×1920, 24시간) — body 는 그림에 올릴 문구 1~2줄 + 마지막 줄 "스티커 제안: (투표·질문 스티커 내용)" 한 줄' }[c.kind as Kind] ?? '게시물 글';
-  const video = VIDEO_KINDS.includes(c.kind);
+  const kindRule = { feed: '인스타그램 피드 캡션 4~6줄', blog: '네이버 블로그 원고(제목 1줄 + 본문 1,800~2,500자 — 아래 네이버 블로그 형식대로)', reels: '인스타 릴스 — script 는 자막 대본(5~7컷, 컷마다 한 줄), body 는 게시 캡션 2~3줄만(컷 대본·장면 설명은 body 에 쓰지 않음)', video: '15~20초 광고 영상 — script 는 컷 구성(4~5컷), body 는 캡션 3줄만(컷은 body 에 쓰지 않음)', shorts: '유튜브 쇼츠(세로 영상 15~45초) — script 는 자막 대본(5~8컷, 컷마다 한 줄), title 은 쇼츠 제목 1줄, body 는 설명 2줄만(컷 대본은 body 에 쓰지 않음)', story: '인스타·페이스북 스토리(세로 1080×1920, 24시간) — body 는 그림에 올릴 문구 1~2줄 + 마지막 줄 "스티커 제안: (투표·질문 스티커 내용)" 한 줄' }[c.kind as Kind] ?? '게시물 글';
+  const video = VIDEO_KINDS.includes(c.kind); const blog = isBlog(c);
   if (!P.aiEnabled()) return { title: c.title, body: extra ? extra.prev : `[AI 비서 꺼짐] ${rule?.topic_hint ?? c.title}`, brief: '', why: '', hooks: [], keyword: '', script: [] };
   await assertMktAi(c.tenant);
-  const tier = writeTierOf(s).tier;
-  const p = P.anthropicProvider({ tier, ...(tier === 'fast' && (c.kind === 'blog' || c.channel === 'blog') ? { maxTokens: 12000 } : {}) }); // 대표 10/24 추가 ①: 회사·요금제가 정한 글 모델 · 블로그 1,800자 이상은 빠른 모델이어도 잘리지 않게
+  const p = P.anthropicProvider({ tier: draftTierOf(s, c) }); // 대표 10/24 추가 ①: 회사·요금제가 정한 글 모델 · #235 ⓑ 블로그는 표준 모델 이상
   const contact = Q.contactLine(m.facts); // 로컬 QA 10/24 ⑤ 사실 카드 연락처
   const voice = Q.voicePrompt(brand?.voice);
   const ex = examplesPrompt(examplesOf(brand?.examples), exampleKindOf(c.channel, c.kind)); // #235 ⓔ 같은 형식 잘 된 예시 글(구성 참고)
   const mem = await (await import('./mktTeam')).memoryText(c.tenant, 'designer', c.brand_id ?? null).catch(() => ''); // #534 지난 수정 요청 사유(디자인 담당 기억)를 다음 원고에
   const F = await import('./mktFeedTemplates'); // #544 피드 틀 칸(머리말·핵심·비교·강조 낱말·기간·가격 — 금액·기간은 재료에 있는 것만)
+  // #235 ⓑ(대표 노션 '네이버 블로그 자동 작성 툴'): 메인 키워드(지역+업종) 자리·횟수 · 서브 키워드는 소제목 · 검색자 한 명 · 한 문장 한 줄 · 300~400자마다 끊기 · 인용구 · 사진 8~15장(장면 순서) — 숫자는 글 품질 규칙표와 같음
+  const R = (await Q.qualityRules()).blog; const kws = (m.facts.keywords ?? []).filter(Boolean); const nPh = m.blogPhotos?.length ?? 0;
+  const blogGuide = !blog ? '' : `
+- 네이버 블로그 형식(검색 상위 노출):
+  · 메인 키워드 = 지역+업종(지역 이름 뒤에 업종 낱말)${kws.length ? ` — 사실 카드의 블로그 키워드(${kws.join(', ')}) 중 주제에 맞는 것 하나` : ' — 재료의 주소·지역과 업종으로'}. keyword 칸에 쓰고, 제목 맨 앞쪽(${R.titleFront}자 안)·첫 문단·마지막 문단에 꼭 넣으며 본문 전체에 ${R.keywordMin}~${R.keywordMax}번(문장에 자연스럽게).
+  · 서브 키워드 2~3개(메인 키워드와 함께 찾는 말 — 가격·시간·처음·준비물처럼 재료에 있는 것) → subKeywords 칸. 소제목마다 하나씩 넣습니다.
+  · 이 글을 검색한 사람 한 명을 정해 persona 칸에 한 줄(누가·어떤 상황에서). 첫 문단은 그 사람의 상황에 공감하고 이 글의 결론을 먼저 알려 줍니다.
+  · 휴대폰에서 읽기 쉽게: 한 문장을 쓰면 줄을 바꾸고(한 줄에 한 문장) 3~5줄마다 빈 줄. 소제목은 "■ 소제목" 한 줄로 4~6개.
+  · 300~400자마다 소제목·인용구·사진 줄 중 하나로 끊습니다 — 글자만 ${R.maxTextRun}자 넘게 이어지면 실패입니다.
+  · 인용구 ${R.minQuotes}~${R.maxQuotes}개: “ ”로 감싼 한 줄(이 글의 요점 한 문장 — 고객 후기·남의 말처럼 지어내지 않음).
+  · ${extra ? '지난 원고의 "[사진 n] …" 줄은 번호·설명·순서 그대로 둡니다(새 사진 줄을 만들지 않음).' : nPh ? `사진: [블로그 사진 후보]에서 장면이 맞는 사진을 골라 그 자리에 "[사진 P번호]" 한 줄만 씁니다(예: [사진 P3]) — ${nPh > R.minPhotos ? `${R.minPhotos}~${Math.min(R.maxPhotos, nPh)}장` : `후보 ${nPh}장 모두`}, 같은 사진 두 번 금지, 글 흐름(장면) 순서대로.` : '사진 후보가 없어 사진 줄은 쓰지 않습니다(표지·사진은 따로 붙임).'}`;
   const req: Parameters<typeof p.chat>[0] = {
     system: `회사 마케팅 담당 AI 비서입니다. ${kindRule}를 씁니다. JSON 만.
 - 한국어, 브랜드 말투: ${brand?.tone || '친절하고 담백하게'}. 금지어: ${bannedOf(brand).join(', ') || '없음'}.
@@ -362,7 +391,7 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
 - brief 에는 이미지/영상 제작 지시(실사 사진 + 글자 렌더 우선, 촬영 구도·필요한 사진)를 씁니다.
 - why 에는 '왜 이 글인가'를 한 문장(이달 목표·이번 주 주제와 어떻게 이어지는지)으로 씁니다.
 ${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}
-- keyword: 검색 키워드 1개(재료의 브랜드·지역·상품에서, 2~12자).${video ? '\n- script: 컷 줄(화면 자막·내레이션) 배열 — 한 컷 2~4초(분당 300음절), 첫 컷은 3초 안, 마지막 컷은 첫 컷과 이어지게(반복 시청).' : `\n${F.CARD_GUIDE}`}
+- keyword: ${blog ? '메인 키워드 1개(지역+업종, 2~15자)' : '검색 키워드 1개(재료의 브랜드·지역·상품에서, 2~12자)'}.${blogGuide}${video ? '\n- script: 컷 줄(화면 자막·내레이션) 배열 — 한 컷 2~4초(분당 300음절), 첫 컷은 3초 안, 마지막 컷은 첫 컷과 이어지게(반복 시청).' : `\n${F.CARD_GUIDE}`}
 - 사람이 쓴 글처럼: 상투어(다양한·혁신적인·놓치지 마세요·지금 바로·~해 보는 건 어떨까요)·느낌표/이모지 나열·특수 대시(—)는 쓰지 않고, 문장 길이를 섞습니다.
 - 문구 기준(표시광고법·신뢰): 최고·1위·유일·최초·100%·무조건·완벽·국내 최대는 [재료]에 근거가 없으면 쓰지 않고, 효과·결과를 단정하지 않으며(매출 2배 보장 같은 말), 다른 회사를 깎아내리지 않습니다. 차세대·올인원 솔루션·시너지·극대화 같은 빈 말도 쓰지 않습니다.
 - 요금·무료 범위·가격·혜택·기간은 [재료]의 상품 설명·[사실 카드]에 적힌 그대로만 씁니다(추측해서 바꾸지 않음). 한 브랜드 글에 다른 브랜드의 이름·명의를 섞지 않습니다.
@@ -370,8 +399,9 @@ ${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}
 - 연락처: ${contact ? `[사실 카드]의 '${contact}'를 본문 마지막 줄에 그대로 씁니다(스토리 제외)` : '재료에 없는 전화번호·링크는 지어내지 않습니다'}. '이미지 참조'·'이미지에 안내된 연락처'·'사진 속 번호'처럼 연락처를 그림으로 돌리지 않습니다.
 - 채널 틀: 인스타·페이스북은 첫 줄(약 125자 안)에 핵심·해시태그 5개 이하·행동 권유 1개, 블로그는 검색 키워드를 제목과 첫 문단에, 숏폼·릴스는 첫 3초 질문으로 열고 마지막에 행동 권유 하나.${voice ? `\n${voice}` : ''}${ex ? `\n${ex}` : ''}${mem ? `\n${mem}` : ''}`,
     tools: [], messages: [{ role: 'user', content: `[재료]\n${m.text}\n\n` + (extra ? `[지난 원고]\n${extra.prev}\n\n[수정 요청]\n${extra.comment}\n\n수정 요청을 반영해 다시 써 주세요.` : `채널: ${c.channel}\n게시일: ${ymd(new Date(c.scheduled_at))}\n주제: ${m.topic || '재료의 브랜드·상품 소개에서 이번 주에 알릴 만한 것 하나'}`) }],
-    format: { type: 'object', additionalProperties: false, required: ['title', 'body', 'brief', 'why', 'hooks', 'keyword', ...(video ? ['script'] : ['card'])],
-      properties: { title: { type: 'string' }, body: { type: 'string' }, brief: { type: 'string' }, why: { type: 'string' }, hooks: { type: 'array', items: { type: 'string' } }, keyword: { type: 'string' }, ...(video ? { script: { type: 'array', items: { type: 'string' } } } : { card: F.CARD_FORMAT }) } },
+    format: { type: 'object', additionalProperties: false, required: ['title', 'body', 'brief', 'why', 'hooks', 'keyword', ...(video ? ['script'] : ['card']), ...(blog ? ['persona', 'subKeywords'] : [])],
+      properties: { title: { type: 'string' }, body: { type: 'string' }, brief: { type: 'string' }, why: { type: 'string' }, hooks: { type: 'array', items: { type: 'string' } }, keyword: { type: 'string' }, ...(video ? { script: { type: 'array', items: { type: 'string' } } } : { card: F.CARD_FORMAT }),
+        ...(blog ? { persona: { type: 'string' }, subKeywords: { type: 'array', items: { type: 'string' } } } : {}) } },
   };
   const strip = (t: string) => fillName(t.replace(/^\s*\[시험\]\s*/, ''), m.name);
   const arr = (x: unknown) => (Array.isArray(x) ? x.map((y) => fillName(String(y ?? ''), m.name).trim()).filter(Boolean) : []);
@@ -380,7 +410,11 @@ ${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}
     if (r.stop_reason === 'max_tokens') return null;
     let o: any; try { o = JSON.parse(textOf(r)); } catch { return null; }
     if (!o || typeof o !== 'object' || emptyBody(String(o.body ?? ''), s.ai_label) || JSON_LIKE.test(String(o.body ?? ''))) return null;
-    return { title: strip(String(o.title || c.title)).slice(0, 200), body: layoutBody(c.kind, fillName(String(o.body ?? ''), m.name)), brief: fillName(String(o.brief ?? ''), m.name), why: fillName(String(o.why ?? ''), m.name).slice(0, 300), hooks: arr(o.hooks).slice(0, 3), keyword: String(o.keyword ?? '').trim().slice(0, 30), script: arr(o.script).slice(0, 12), card: video ? undefined : F.cardFrom(o.card, m.text) };
+    const laid = layoutBody(blog ? 'blog' : c.kind, fillName(String(o.body ?? ''), m.name));
+    // #235 ⓑ 사진 줄: 새 원고 '[사진 P번호]' → '[사진 n] AI 사진 설명'(글에 나온 순서) · 수정본은 지난 원고의 사진 줄을 번호로 되살림
+    const ph = blog ? placePhotos(laid, m.blogPhotos ?? [], extra?.prev ?? '', R.maxPhotos) : null;
+    return { title: strip(String(o.title || c.title)).slice(0, 200), body: ph ? ph.body : laid, brief: fillName(String(o.brief ?? ''), m.name), why: fillName(String(o.why ?? ''), m.name).slice(0, 300), hooks: arr(o.hooks).slice(0, 3), keyword: String(o.keyword ?? '').trim().slice(0, 30), script: arr(o.script).slice(0, 12), card: video ? undefined : F.cardFrom(o.card, m.text),
+      ...(blog ? { persona: fillName(String(o.persona ?? ''), m.name).trim().slice(0, 120), subKeywords: arr(o.subKeywords).map((x) => x.slice(0, 30)).slice(0, 3), photos: ph?.ids ?? [] } : {}) };
   };
   let d: Draft | null = null;
   for (let k = 0; k < 2 && !d; k++) { const r = await p.chat(req); await logAi(c, p, r, P); d = parse(r); }
@@ -393,7 +427,7 @@ async function rewriteHooks(c: any, brand: any, cur: string, prev: string[], why
   const P = await import('./ai/provider'); const Q = await import('./mktQuality');
   if (!P.aiEnabled()) return [];
   await assertMktAi(c.tenant);
-  const p = P.anthropicProvider({ tier: writeTierOf(await settingsOf(c.tenant)).tier }); // 원고와 같은 글 모델
+  const p = P.anthropicProvider({ tier: draftTierOf(await settingsOf(c.tenant), c) }); // 원고와 같은 글 모델(블로그는 표준 모델 이상)
   const r = await p.chat({
     system: `회사 마케팅 담당 AI 비서입니다. 약한 훅을 다시 씁니다. JSON 만.\n${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}\n- 브랜드 말투: ${brand?.tone || '친절하고 담백하게'}. 재료에 없는 숫자·결과·가격은 쓰지 않습니다.`,
     tools: [], messages: [{ role: 'user', content: `글 제목: ${c.title}\n지금 훅: ${cur}\n앞서 낸 후보(모두 약함): ${prev.join(' / ') || '(없음)'}\n약한 이유: ${why}\n\n${Q.asMode(c.mode) === 'ad' ? '누구에게(직업·상황·단지를 구체적으로) 무엇을 주는지(제안·혜택·가격 — 재료에 있는 것만) 2초 안에 말하는 광고형 훅' : '더 구체적이고(숫자·장면·대상) 궁금하게 만드는 훅'} 3개를 다시 써 주세요.` }],
@@ -437,7 +471,7 @@ async function refineDraft(c: any, d: Draft, brand: any, opt: { keepTitle?: bool
       notes.push(`약한 훅(${curScore.score}점)을 바꿈: '${[...cur].slice(0, 30).join('')}' → '${[...best].slice(0, 30).join('')}'`);
     } else notes.push(`훅 후보가 모두 약함(${curScore.score}점) — 다른 훅으로 수정 요청해 주세요`);
   }
-  const rep = Q.qualityReport({ channel: c.channel, kind: c.kind, title, body, hooks, script, keywords: kw, mainKeyword: d.keyword || null, voice: brand?.voice, cross: c.cross_channels ?? [], mode }, rules);
+  const rep = Q.qualityReport({ channel: c.channel, kind: c.kind, title, body, hooks, script, keywords: kw, mainKeyword: d.keyword || null, subKeywords: d.subKeywords, persona: d.persona, voice: brand?.voice, cross: c.cross_channels ?? [], mode }, rules);
   return { title, body: rep.body, script, report: { ...rep.report, notes }, errors: rep.report.channel.filter((x) => x.level === 'error').map((x) => x.msg), timing: rep.report.timing ? Q.timingText(rep.report.timing) : '' };
 }
 /** 연락처 줄을 본문 끝(해시태그 줄 앞)에 */
@@ -488,11 +522,12 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   if (pre.length) { q.passed = false; q.issues = [...new Set([...q.issues, ...pre])]; }
   const script = VIDEO_KINDS.includes(kind) && f.script.length >= 2 ? f.script : null; // 로컬 QA 10/24 ⑥ 대본 칸(영상 제작용 — 게시 글에는 안 들어감)
   // #516 시안이 붙은 뒤에만 승인함: 피드·스토리(인스타·페북)는 서버가 바로 그림(크레딧 0), 영상은 제작 요청 카드로 만든 뒤 붙으면 승인 대기
-  // 블로그(로컬 10/24 (c)): 대표 이미지를 그리고 본문 사진 1장(실사)을 붙임 — 둘 다 붙어야 승인 대기(대표 10/20 18:45 ③), 실사가 없으면 '수정 요청'에서 사진을 기다림
+  // 블로그(로컬 10/24 (c)): 대표 이미지를 그리고 본문 사진(실사)을 붙임 — 둘 다 붙어야 승인 대기(대표 10/20 18:45 ③), 실사가 없으면 '수정 요청'에서 사진을 기다림
+  // #235 ⓑ 원고가 '[사진 n]' 줄로 고른 사진들(장면 순서) = 본문 사진(표지 바탕으로는 다시 안 씀) · 고른 사진이 없으면 예전처럼 1장
   const V = await import('./mktAutoVisual');
   let mediaIds: string[] = []; let visualNote = ''; let photoId: string | null = null; let bodyIds: string[] = []; let template: string | null = null; let photoIds: string[] = [];
   if (V.serverVisual({ channel: c.channel, kind })) {
-    try { const dv = await V.drawAutoVisual({ ...c, title: f.title, card: d.card }, q.body); bodyIds = dv.bodyId ? [dv.bodyId] : []; mediaIds = [dv.fileId, ...bodyIds]; photoId = dv.photoId; template = dv.template; photoIds = dv.photoIds;
+    try { const dv = await V.drawAutoVisual({ ...c, title: f.title, card: d.card }, q.body, d.photos?.length ? { bodyIds: d.photos } : {}); bodyIds = dv.bodyIds; mediaIds = [dv.fileId, ...bodyIds]; photoId = dv.photoId; template = dv.template; photoIds = dv.photoIds;
       visualNote = ` · 시안 서버 그리기(${[dv.templateLabel ? `틀: ${dv.templateLabel}` : '', dv.photoTitle ? `사진: ${dv.photoTitle}` : '브랜드 색 바탕'].filter(Boolean).join(' · ')})` + (dv.bodyTitle ? ` · 본문 사진: ${dv.bodyTitle}` : ''); }
     catch (e: any) { visualNote = ` · 시안 그리기 실패: ${String(e?.message ?? e).slice(0, 80)}`; }
   }
@@ -510,11 +545,12 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   await sql.begin(async (tx) => {
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${mediaIds}, ${(v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기') + visualNote}, ${c.created_by})`;
     if (v > 1) await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('image', 'video') and status in ('open', 'needs_approval')`;
-    await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${held ? 'draft' : q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief, report: { ...f.report, v, preflight: pre }, ...(pre.length ? { preflight: pre } : {}), ...(script ? { script } : {}), ...(d.card ? { card: d.card } : {}), ...(held ? { held: { at: new Date().toISOString(), reason: 'template' } } : {}), ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 3, tried: photoId ? [photoId] : [], ...(bodyIds.length ? { bodyIds } : {}), ...(template ? { template } : {}), ...(photoIds.length > 1 ? { photoIds } : {}) } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
+    await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${held ? 'draft' : q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief, report: { ...f.report, v, preflight: pre }, ...(pre.length ? { preflight: pre } : {}), ...(script ? { script } : {}), ...(d.card ? { card: d.card } : {}), ...(held ? { held: { at: new Date().toISOString(), reason: 'template' } } : {}),
+      ...(!mediaIds.length && d.photos?.length ? { bodyPlan: d.photos } : {}), ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 3, tried: photoId ? [photoId] : [], ...(bodyIds.length ? { bodyIds } : {}), ...(template ? { template } : {}), ...(photoIds.length > 1 ? { photoIds } : {}) } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임) — #544 초안 보관이면 만들지 않음(쓰지 않을 영상에 비용 X)
     // #426: 영상은 초 단위 장면표(분당 300음절)를 그대로 넘김 — Higgsfield 연동 뒤에는 장면별 프롬프트로
-    const base = (kind === 'blog' ? `표지 1장 + 본문 사진 1장 이상(실사). ${d.brief ?? ''}`.trim() : d.brief) || (kind === 'story' ? '세로 1080×1920 실사 + 글자 렌더(24시간 스토리)' : '실사 사진 + 글자 렌더');
+    const base = (kind === 'blog' ? `표지 1장 + 본문 사진 1장 이상(실사)${d.photos?.length ? ` — 원고의 [사진 1~${d.photos.length}] 자리에 넣을 사진은 이미 골라 두었습니다` : ''}. ${d.brief ?? ''}`.trim() : d.brief) || (kind === 'story' ? '세로 1080×1920 실사 + 글자 렌더(24시간 스토리)' : '실사 사진 + 글자 렌더');
     if (!mediaIds.length && !held) await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', f.timing ? `${base}\n\n${f.timing}` : base, kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
     else await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'generate_image', 0, '시안 서버 그리기 — 크레딧 0', ${f.title})`;
   });
@@ -883,8 +919,9 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     // #544 피드 틀: 글만 고치면 같은 틀·같은 사진 · 사진을 바꾸라면 사진 틀은 그대로 새 사진으로, 사진 없는 틀이면 다른 틀로
     const F = await import('./mktFeedTemplates'); const t = visual?.template as string | undefined;
     const keepT = o.photo ? (t && F.usesPhoto(t) ? { template: t } : { notTemplate: t ?? null }) : { template: t ?? null };
-    drawn = await V.drawAutoVisual({ ...c, title: c.title, card }, body, o.photo ? { exclude: tried, ...keepT } : visual && 'photoId' in visual ? { photoId: visual.photoId ?? null, photoIds: visual.photoIds ?? null, ...keepT } : keepT);
-    media = [drawn.fileId, ...(media.length ? media.slice(1) : drawn.bodyId ? [drawn.bodyId] : [])];
+    const bodyKeep = media.length ? media.slice(1) : ((c.quality?.bodyPlan ?? []) as string[]); // #235 ⓑ 블로그 본문 사진은 그대로(표지 바탕으로 다시 안 씀)
+    drawn = await V.drawAutoVisual({ ...c, title: c.title, card }, body, { ...(o.photo ? { exclude: tried, ...keepT } : visual && 'photoId' in visual ? { photoId: visual.photoId ?? null, photoIds: visual.photoIds ?? null, ...keepT } : keepT), bodyIds: bodyKeep.length ? bodyKeep : null });
+    media = [drawn.fileId, ...(media.length ? media.slice(1) : drawn.bodyIds)];
     visual = { by: 'server', fileId: drawn.fileId, at: new Date().toISOString(), photoId: drawn.photoId, rv: 3, tried: [...new Set([...tried, ...(drawn.photoId ? [drawn.photoId] : [])])].slice(-20), ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}),
       ...(drawn.template ? { template: drawn.template } : {}), ...(drawn.photoIds.length > 1 ? { photoIds: drawn.photoIds } : {}) };
     const left = q.issues.filter((x) => !V.VISUAL_ISSUE.test(x));

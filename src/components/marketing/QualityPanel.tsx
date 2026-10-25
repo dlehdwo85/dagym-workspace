@@ -8,7 +8,9 @@ export type Timing = { rows: { line: string; from: number; to: number; sec: numb
 export type QReport = { v?: number; human: { score: number; pass: boolean; issues: string[] }; needsPolish: boolean; hook: HookS | null; hooks?: HookS[];
   channel?: { level: 'error' | 'warn'; msg: string }[]; preview?: string | null; timing?: Timing | null; voice?: string[]; notes?: string[]; mode?: Mode;
   /** 로컬 QA 10/24 ②: 올리기 전 자동 검사(빈 글·끊긴 문장·해시태그·권유·연락처·형식·틀 문구·다른 브랜드) — 걸린 줄. 없으면 검사 전 글 */
-  preflight?: string[] };
+  preflight?: string[];
+  /** #235 ⓑ 네이버 블로그 형식 숫자 */
+  blog?: { keyword: string | null; keywordCount: number; subKeywords: string[]; persona: string; chars: number; photos: number; quotes: number; heads: number; maxRun: number } };
 const PART: Record<string, string> = { front: '앞부분', specific: '구체성', stakes: '걸린 것', callout: '대상 호명', curiosity: '궁금증', offer: '제안' };
 const weak = (h: HookS) => Object.entries(h.parts ?? {}).filter(([, v]) => !v).map(([k]) => PART[k] ?? k).join('·');
 
@@ -62,6 +64,9 @@ export function QualityPanel({ r, channel, onPolish, onPickHook, onMode, busy }:
         </div>)}
       {(errs.length > 0 || warns.length > 0) && <ul className="mt-2 space-y-0.5" data-testid="quality-channel">
         {errs.map((e) => <li key={e.msg} className="text-red-700"><b>막음</b> {e.msg}</li>)}{warns.map((e) => <li key={e.msg} className="text-ink-2"><b className="text-amber-800">권장</b> {e.msg}</li>)}</ul>}
+      {r.blog && <p className="mt-2 rounded-input bg-slate-50 px-2 py-1.5 text-ink-2" data-testid="quality-blog"><b className="text-ink">블로그 형식</b> · 본문 {r.blog.chars.toLocaleString('ko-KR')}자 · 사진 {r.blog.photos}장 · 인용구 {r.blog.quotes}개 · 소제목 {r.blog.heads}개 · 글자만 이어진 가장 긴 덩어리 {r.blog.maxRun}자
+        {r.blog.keyword && <> · 메인 키워드 &lsquo;{r.blog.keyword}&rsquo; {r.blog.keywordCount}회</>}{!!r.blog.subKeywords.length && <> · 서브 키워드 {r.blog.subKeywords.join('·')}</>}
+        {r.blog.persona && <span className="block text-ink-3">검색한 사람: {r.blog.persona}</span>}</p>}
       {r.preview && (channel === 'instagram' || channel === 'facebook') && <div className="mt-2" data-testid="quality-preview"><div className="text-ink-3">&lsquo;더 보기&rsquo; 전 미리보기</div>
         <p className="mt-0.5 whitespace-pre-wrap rounded-input bg-slate-50 p-2">{r.preview}<span className="text-ink-3"> … 더 보기</span></p></div>}
       {r.timing && <TimingTable t={r.timing} />}

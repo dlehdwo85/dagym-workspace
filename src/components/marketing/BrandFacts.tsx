@@ -8,7 +8,7 @@ import { Button, cx, inputCls, toast } from '@/components/ui';
  *  주제 풀: 한 줄에 하나 — 이 브랜드만의 주제를 돌아가며 씀(같은 날 묶음은 같은 주제, 다른 브랜드가 앞뒤 3일 안에 쓴 주제는 건너뜀). [AI로 주제 20개 제안] = 초안만(고쳐서 [저장]) */
 /** #235 ⓐ 이번 달 소식(이벤트·사례·새 소식) — 기간 안에서 주제 풀보다 먼저 씀 */
 export type News = { text: string; from?: string; to?: string };
-export type Facts = { phone?: string; link?: string; website?: string; address?: string; hours?: string; prices?: string; numbers?: string; avoidNames?: string[]; aliases?: string[]; news?: News[] };
+export type Facts = { phone?: string; link?: string; website?: string; address?: string; hours?: string; prices?: string; numbers?: string; avoidNames?: string[]; aliases?: string[]; keywords?: string[]; news?: News[] };
 const LINES: ['phone' | 'link' | 'website' | 'address' | 'hours', string, number][] = [
   ['phone', '대표 전화(예: 02-000-0000)', 40], ['link', '상담·예약 링크(카카오 채널·예약 페이지)', 200], ['website', '홈페이지 주소', 200], ['address', '주소', 200], ['hours', '운영 시간', 200],
 ];
@@ -20,6 +20,7 @@ const rows = (s: string) => [...new Set(s.split('\n').map((x) => [...x.trim()].s
 export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: string; facts?: Facts | null; topic_pool?: string[] | null }; onSaved: () => void }) {
   const init: Facts = brand.facts ?? {};
   const [f, setF] = useState<Facts>(init); const [avoid, setAvoid] = useState((init.avoidNames ?? []).join(', ')); const [aliases, setAliases] = useState((init.aliases ?? []).join(', '));
+  const [keywords, setKeywords] = useState((init.keywords ?? []).join(', '));
   const [topics, setTopics] = useState((brand.topic_pool ?? []).join('\n')); const [busy, setBusy] = useState(false);
   const [news, setNews] = useState<News[]>(init.news ?? []);
   const today = kstDay(); const liveNews = (init.news ?? []).filter((x) => !x.to || x.to >= today).length;
@@ -37,6 +38,7 @@ export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: stri
     setBusy(true);
     try {
       const facts: Facts = { ...Object.fromEntries((['phone', 'link', 'website', 'address', 'hours', 'prices', 'numbers'] as const).map((k) => [k, (f[k] ?? '').trim()])), avoidNames: avoid.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20), aliases: aliases.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 10),
+        keywords: keywords.split(',').map((x) => x.trim()).filter((x) => [...x].length >= 2).map((x) => [...x].slice(0, 30).join('')).slice(0, 5),
         news: news.map((x) => ({ text: x.text.trim(), ...(x.from ? { from: x.from } : {}), ...(x.to ? { to: x.to } : {}) })).filter((x) => x.text).slice(0, NEWS_MAX) };
       await api(`/api/marketing/auto/brands/${brand.id}`, { method: 'PATCH', body: { facts, topicPool: rows(topics).slice(0, POOL_MAX) } });
       toast.ok('사실 카드·주제 풀을 저장했습니다(이번 달 소식 포함) — 다음 원고부터 씁니다'); onSaved();
@@ -52,6 +54,8 @@ export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: stri
         <input className={small} value={avoid} onChange={(e) => setAvoid(e.target.value)} placeholder="섞으면 안 되는 이름(쉼표) — 다른 회사·옛 이름" aria-label="섞으면 안 되는 이름" data-testid="facts-avoid" />
         {/* 137차: 이 브랜드의 영문·다른 이름 — 다른 브랜드 글에 섞이면 올리기 전 검사가 막음(피드 머리줄 영문·홈페이지 주소 이름은 자동으로 함께) */}
         <input className={small} value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="이 브랜드의 다른 이름(쉼표) — 영문·약칭" aria-label="이 브랜드의 다른 이름" title="다른 브랜드 글에 이 이름이 섞이면 올리기 전 검사가 막습니다. 피드 머리줄의 영문 이름과 홈페이지 주소 이름은 따로 적지 않아도 함께 거릅니다." data-testid="facts-aliases" />
+        {/* #235 ⓑ 네이버 블로그 메인 키워드(지역+업종) — 원고가 주제에 맞는 것 하나를 골라 제목 앞쪽·첫 문단·끝 문단·본문 5~7회 */}
+        <input className={small} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="블로그 검색 키워드(쉼표) — 지역+업종, 예: 송도 헬스장" aria-label="블로그 검색 키워드" title="네이버 블로그 원고의 메인 키워드 후보입니다(5개까지). 비워 두면 주소·업종으로 AI 가 정합니다." data-testid="facts-keywords" />
       </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <textarea className={cx(inputCls, 'min-h-14 text-xs')} value={f.prices ?? ''} onChange={(e) => setF({ ...f, prices: e.target.value })} maxLength={500} placeholder="요금·혜택 — 원고는 여기 적힌 것만 씀" aria-label="요금·혜택" data-testid="facts-prices" />

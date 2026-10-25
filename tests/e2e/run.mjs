@@ -61,6 +61,7 @@ import { payTestRemove } from './payTestRemove.step.mjs';
 import { platformTabs } from './platformTabs.step.mjs';
 import { mktDraftQuality } from './mktDraftQuality.step.mjs';
 import { mktPhotos } from './mktPhotos.step.mjs';
+import { mktBlog } from './mktBlog.step.mjs';
 import { revenueAuto } from './revenueAuto.step.mjs';
 import { mktStudio } from './mktStudio.step.mjs';
 import { mktOps } from './mktOps.step.mjs';
@@ -2841,6 +2842,7 @@ await step('#566 결제 시험 회사 [지우기](대표 10/24 저녁 3): 확인
 await step('#565 플랫폼 운영 정리(대표 10/24 저녁 1): 오늘 볼 것 5개 → 누르면 그 탭 · 종류별 탭 5개·한 줄 설명·주소 유지 · 예전 주소(paytest·#support) · 휴대폰 폭', () => platformTabs({ owner, ctx, sql, BASE, SHOTS }));
 await step('#235 마케팅 시안 품질 ⓐ·ⓔ(로컬 10/24 저녁 6): 브랜드 키트 이번 달 소식(기간 기본 30일)·잘 된 예시 글(형식별·좋은 점·빼기) → 승인한 글 [좋은 예시로 저장]·[예시에서 빼기] → 휴대폰 넘침 없음', () => mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }));
 await step('#235 ⓒ 사진 AI 설명(대표 #563): 자동 제작 › 사진 AI 설명 [설명 없는 사진 설명하기] → 숫자·사진별 설명·종류·글자·홍보물·쓰임 → 판정 고치기(글자 없음 = 바탕으로 씀)·되돌리기 → 자료실 AI 사진 설명 줄 → 휴대폰 넘침 없음', () => mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }));
+await step('#235 ⓑ 블로그 네이버 형식(대표 #256): 글 모델 블로그 줄(비용) · 사실 카드 블로그 검색 키워드 · 사진 판정 쓰지 않음(로컬 10/25) → 승인한 블로그 상세 블로그 형식 줄 · 게시 도우미 표지·사진 n 순서·[사진 n] 안내 → 휴대폰 넘침 없음', () => mktBlog({ owner, ctx, BASE, SHOTS, sql }));
 
 await browser.close();
 srv.proc.kill();

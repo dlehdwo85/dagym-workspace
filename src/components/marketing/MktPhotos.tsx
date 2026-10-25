@@ -4,12 +4,15 @@ import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, cx, inputCls, toast } from '@/components/ui';
 
 /** #235 ⓒ 사진 AI 설명 — 자료실 마케팅 사진을 AI 가 한 번 보고 한 줄 설명·태그·글자 여부를 답니다.
- *  시안 바탕(글자 없는 실사)·블로그 본문 사진 고르기·원고의 사진 설명에 쓰고, 판정이 틀리면 사진마다 고칩니다(자료실 태그 '글자없음'·'글자있음') */
+ *  시안 바탕(글자 없는 실사)·블로그 본문 사진 고르기·원고의 사진 설명에 쓰고, 판정이 틀리면 사진마다 고칩니다(자료실 태그 '글자없음'·'글자있음'·'쓰지않음').
+ *  로컬 10/25: 글자 있음 = 바탕에서만 뺌(블로그 본문에는 씀) · 쓰지 않음 = 바탕·본문 모두 뺌 */
 type VisionOk = { caption: string; scene: string; tags: string[]; kind: 'photo' | 'graphic' | 'screen' | 'illustration' | 'document'; text: 'none' | 'little' | 'much'; promo: boolean; seen: string; people: number; faces: boolean; quality: 'good' | 'ok' | 'poor' };
-type Item = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | { error: string; tries: number } | null; mark: 'none' | 'has' | null; cover: boolean; body: boolean; at: string };
+type Mark = 'none' | 'has' | 'skip';
+type Item = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | { error: string; tries: number } | null; mark: Mark | null; cover: boolean; body: boolean; at: string };
 type View = { total: number; described: number; pending: number; failed: number; cover: number; graphic: number; ai: boolean; perPhotoKrw: number; canEdit: boolean; items: Item[] };
 const KIND: Record<VisionOk['kind'], string> = { photo: '실사', graphic: '글자 그래픽', screen: '화면 캡처', illustration: '그림', document: '문서' };
 const TEXT: Record<VisionOk['text'], string> = { none: '글자 없음', little: '글자 조금', much: '글자 많음' };
+const MARKED: Record<Mark | 'auto', string> = { auto: 'AI 판정대로 씁니다', none: '글자 없는 사진으로 고쳤습니다 — 시안 바탕으로 씁니다', has: '글자 있는 사진으로 고쳤습니다 — 시안 바탕에는 쓰지 않고 블로그 본문에는 씁니다', skip: '쓰지 않는 사진으로 표시했습니다 — 바탕·본문 모두 뺍니다' };
 const ok = (v: Item['vision']): v is VisionOk => !!v && 'caption' in v;
 const chip = 'rounded px-1.5 py-px text-[11px]';
 
@@ -29,8 +32,8 @@ export function MktPhotos() {
       if (done || failed) toast.ok(`사진 ${done}장을 설명했습니다${failed ? ` · 설명 못 함 ${failed}장` : ''}`);
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(''); reload(); }
   }
-  async function mark(id: string, text: 'auto' | 'none' | 'has') {
-    try { await api(`/api/marketing/photos/${id}`, { method: 'PATCH', body: { text } }); toast.ok(text === 'auto' ? 'AI 판정대로 씁니다' : text === 'none' ? '글자 없는 사진으로 고쳤습니다 — 시안 바탕으로 씁니다' : '글자 있는 사진으로 고쳤습니다 — 바탕·본문에 쓰지 않습니다'); reload(); }
+  async function mark(id: string, text: Mark | 'auto') {
+    try { await api(`/api/marketing/photos/${id}`, { method: 'PATCH', body: { text } }); toast.ok(MARKED[text]); reload(); }
     catch (e) { toast.error((e as Error).message); }
   }
   if (error) return <ErrorBox error={error} />;
@@ -38,7 +41,7 @@ export function MktPhotos() {
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-photos">
       <h2 className="text-sm font-semibold">사진 AI 설명 <span className="font-normal text-ink-3">— 자료실 마케팅 사진을 AI 가 한 번 보고 한 줄 설명·태그·글자 여부를 답니다. 시안 바탕(글자 없는 실사)·블로그 본문 사진 고르기와 원고의 사진 설명에 씁니다.</span></h2>
-      <p className="mt-2 text-sm" data-testid="photos-summary">마케팅 사진 {data.total}장 · 설명 {data.described}장 · 아직 {data.pending}장{data.failed ? ` · 설명 못 함 ${data.failed}장` : ''} · 시안 바탕으로 쓸 수 있는 사진 {data.cover}장 · 쓰지 않는 글자 그래픽 {data.graphic}장</p>
+      <p className="mt-2 text-sm" data-testid="photos-summary">마케팅 사진 {data.total}장 · 설명 {data.described}장 · 아직 {data.pending}장{data.failed ? ` · 설명 못 함 ${data.failed}장` : ''} · 시안 바탕으로 쓸 수 있는 사진 {data.cover}장 · 블로그 본문에 쓸 수 있는 사진 {data.total - data.graphic}장 · 쓰지 않는 사진(글자 그래픽·쓰지 않음 표시) {data.graphic}장</p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {data.canEdit && <Button size="sm" onClick={() => describe()} disabled={!!busy || !data.ai || !(data.pending + data.failed)} data-testid="photos-describe">{busy === 'all' ? '설명하는 중…' : `설명 없는 사진 설명하기${data.pending + data.failed ? ` (${data.pending + data.failed}장)` : ''}`}</Button>}
         <span className="text-xs text-ink-3">{data.ai ? `사진 1장 약 ${data.perPhotoKrw < 1 ? '1원 미만' : `${data.perPhotoKrw}원`}(빠른 모델) · 새로 올린 마케팅 사진은 올리자마자, 남은 사진은 정기 실행마다 6장씩 설명합니다.` : 'AI 가 꺼져 있어 설명하지 않습니다.'}</span>
@@ -65,8 +68,8 @@ export function MktPhotos() {
                 {ok(v) && !!v.tags.length && <div className="mt-1 break-words text-ink-3">{v.tags.map((t) => `#${t}`).join(' ')}</div>}
                 {data.canEdit && (
                   <div className="mt-1 flex items-center gap-1">
-                    <span className="min-w-0 flex-1"><select className={cx(inputCls, 'h-7 py-0 text-[11px]')} value={it.mark ?? 'auto'} onChange={(e) => mark(it.id, e.target.value as 'auto' | 'none' | 'has')} aria-label={`${it.title} 글자 판정`} data-testid="photo-mark">
-                      <option value="auto">AI 판정대로</option><option value="none">글자 없음 — 바탕으로 씀</option><option value="has">글자 있음 — 쓰지 않음</option></select></span>
+                    <span className="min-w-0 flex-1"><select className={cx(inputCls, 'h-7 py-0 text-[11px]')} value={it.mark ?? 'auto'} onChange={(e) => mark(it.id, e.target.value as Mark | 'auto')} aria-label={`${it.title} 글자 판정`} data-testid="photo-mark">
+                      <option value="auto">AI 판정대로</option><option value="none">글자 없음 — 바탕으로 씀</option><option value="has">글자 있음 — 바탕에만 안 씀</option><option value="skip">쓰지 않음 — 바탕·본문 모두</option></select></span>
                     <button type="button" className="shrink-0 text-ink-3 underline disabled:opacity-50" disabled={!!busy || !data.ai} onClick={() => describe([it.id])} data-testid="photo-redo">{busy === it.id ? '…' : '다시'}</button>
                   </div>)}
               </li>);

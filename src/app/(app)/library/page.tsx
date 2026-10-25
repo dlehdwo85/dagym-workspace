@@ -443,7 +443,7 @@ function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder,
           {fmtSize(Number(f.size_bytes))} · {f.created_by_name} · {fmtDateTime(f.created_at)}
         </div>
         {f.snippet && <div className="mt-0.5 line-clamp-1 text-xs text-ink-2">…{f.snippet}…</div>}
-        {f.vision?.caption && <div className="mt-0.5 truncate text-xs text-ink-2" title={f.vision.scene} data-testid="photo-vision">AI 사진 설명: {f.vision.caption}{f.vision.promo || f.vision.text === 'much' || (f.vision.kind && f.vision.kind !== 'photo') ? ' · 글자 든 그래픽(시안·블로그에 안 씀)' : f.vision.text === 'none' ? ' · 글자 없는 실사' : ''}</div>}
+        {f.vision?.caption && <div className="mt-0.5 truncate text-xs text-ink-2" title={f.vision.scene} data-testid="photo-vision">AI 사진 설명: {f.vision.caption}{f.vision.promo || (f.vision.kind && f.vision.kind !== 'photo') ? ' · 글자 든 그래픽(시안·블로그에 안 씀)' : f.vision.text === 'much' ? ' · 글자 많은 실사(블로그 본문에만 씀)' : f.vision.text === 'none' ? ' · 글자 없는 실사' : ''}</div>}
         {f.organize_status === 'pending' && <div className="mt-0.5 flex items-center gap-1 text-xs text-violet-700" data-testid="organize-pending"><Loader2 className="size-3 animate-spin" />AI 정리 중…</div>}
         {f.organize_status === 'done' && f.organized_by === 'ai' && (
           <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-violet-700" data-testid="organize-done">
