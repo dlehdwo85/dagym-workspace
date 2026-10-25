@@ -335,9 +335,9 @@ function InquiryLink() {
 
 /** #565 '오늘 볼 것' 숫자 — 누르면 그 탭으로 */
 function TodayCards({ go }: { go: (k: TabKey) => void }) {
-  const { data } = useApi<{ signups: number; payFailed: number; pastDue: number; openTickets: number; collectorFailed: number; aiKrw: number }>('/api/platform/today');
+  const { data } = useApi<{ signups: number; payFailed: number; pastDue: number; openTickets: number; collectorFailed: number; aiKrw: number; contactDue?: number }>('/api/platform/today');
   const cards: { k: TabKey; label: string; value: string; sub: string; warn: boolean }[] = [
-    { k: 'company', label: '새로 가입한 회사', value: `${data?.signups ?? '–'}곳`, sub: '최근 7일', warn: false },
+    { k: 'company', label: '새로 가입한 회사', value: `${data?.signups ?? '–'}곳`, sub: data?.contactDue ? `최근 7일 · 오늘까지 연락할 곳 ${data.contactDue}곳` : '최근 7일', warn: !!data?.contactDue }, // #656
     { k: 'billing', label: '결제 실패', value: `${data?.payFailed ?? '–'}건`, sub: data ? `최근 7일 · 밀린 결제 ${data.pastDue}곳` : '최근 7일', warn: !!data && (data.payFailed > 0 || data.pastDue > 0) },
     { k: 'support', label: '답하지 않은 문의', value: `${data?.openTickets ?? '–'}건`, sub: '지금', warn: !!data && data.openTickets > 0 },
     { k: 'sales', label: '공고 수집 실패', value: `${data?.collectorFailed ?? '–'}개`, sub: '최근 24시간', warn: !!data && data.collectorFailed > 0 },

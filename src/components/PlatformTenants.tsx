@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Eye, KeyRound, Lock, LockOpen, Plus, Search, ShieldOff, Trash2 } from 'lucide-react';
+import { Download, Eye, KeyRound, Lock, LockOpen, Plus, Search, ShieldOff, Trash2 } from 'lucide-react';
 import { INDUSTRIES } from '@/lib/industries';
 import { api, useApi } from './client';
 import { fmtBytes } from './usage';
@@ -11,25 +11,42 @@ const SPACE_LABEL: Record<string, string> = { sales: '영업', marketing: '마�
 const cell = 'px-2 py-1.5';
 const STATUS: Record<string, string> = { active: '사용 중', blocked: '정지', deleted: '삭제' };
 const SUB: Record<string, string> = { trial: '체험', expired: '체험 끝(읽기 전용)', active: '사용', suspended: '중지' };
+// #656 고객사 단계(체험/유료/보류/해지)·구분(설계 파트너 체험단/일반)·연락 종류
+const STAGE: Record<string, string> = { trial: '체험', paid: '유료', hold: '보류', churned: '해지' };
+const STAGE_CLS: Record<string, string> = { trial: 'bg-sky-50 text-sky-800', paid: 'bg-emerald-50 text-emerald-800', hold: 'bg-amber-50 text-amber-800', churned: 'bg-slate-200 text-ink-2' };
+const SEGMENT_LABEL: Record<string, string> = { partner: '설계 파트너', customer: '일반' };
+const KIND_LABEL: Record<string, string> = { call: '전화', mail: '메일', meeting: '미팅', kakao: '카카오톡', memo: '메모' };
+const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
 /** V28-3 슈퍼 계정: 회사 목록(검색·필터) → 상세(요금제·정지·체험·읽기 전용·삭제 예약·한도·사용자·지원 모드) */
 export function PlatformTenants() {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
-  const list = useApi<{ tenants: any[]; summary?: { month: string; aiCostKrw: number; customerAiCostKrw: number; revenueKrw: number; marginKrw: number; marginPct: number | null; customers: number; paying: number } }>(`/api/platform/tenants?q=${encodeURIComponent(query)}&status=${status}`, [query, status]);
+  const [segment, setSegment] = useState(''); // #656 구분(설계 파트너/일반)
+  const [stage, setStage] = useState(''); // #656 단계(체험/유료/보류/해지)
+  const qs = `q=${encodeURIComponent(query)}&status=${status}&segment=${segment}&stage=${stage}`;
+  const list = useApi<{ tenants: any[]; summary?: { month: string; aiCostKrw: number; customerAiCostKrw: number; revenueKrw: number; marginKrw: number; marginPct: number | null; customers: number; paying: number; contactDue?: number } }>(`/api/platform/tenants?${qs}`, [qs]);
   const sm = list.data?.summary;
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false); // 대표 10/20 ① [고객사 추가]
+  const today = todayKst();
   return (
     <section className="rounded-card border border-line bg-white shadow-card" data-testid="platform-company-list">
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
-        <h2 className="text-sm font-semibold">회사 관리 {list.data && <span className="text-xs font-normal text-ink-3">{list.data.tenants.length}곳</span>}</h2>
+        <h2 className="text-sm font-semibold">고객사 관리 {list.data && <span className="text-xs font-normal text-ink-3">{list.data.tenants.length}곳</span>}</h2>
         <Button size="sm" onClick={() => setAdding(true)} data-testid="platform-add-company"><Plus />고객사 추가</Button>
+        <a className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-xs font-medium text-ink-2 hover:bg-slate-50" href={`/api/platform/tenants/export?${qs}`} data-testid="platform-export-companies" title="지금 보이는 목록을 엑셀로 내려받습니다 (?format=csv 로 CSV)"><Download className="size-3.5" />내보내기</a>
         <form className="ml-auto flex gap-1.5" onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }}>
           <input className={cx(inputCls, 'h-8 w-48 py-1 text-xs')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="회사·대표 이메일·id" aria-label="회사 찾기" />
           <Button size="sm" type="submit" variant="secondary"><Search />찾기</Button>
         </form>
+        <select className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={segment} onChange={(e) => setSegment(e.target.value)} aria-label="구분" data-testid="platform-filter-segment">
+          <option value="">구분: 전체</option><option value="partner">설계 파트너 체험단</option><option value="customer">일반 고객</option>
+        </select>
+        <select className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={stage} onChange={(e) => setStage(e.target.value)} aria-label="단계" data-testid="platform-filter-stage">
+          <option value="">단계: 전체</option>{Object.entries(STAGE).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
         <select className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="상태">
           <option value="">전체</option><option value="active">사용 중</option><option value="blocked">정지</option><option value="trial">체험·체험 끝</option><option value="deleting">삭제 예약</option>
         </select>
@@ -39,18 +56,21 @@ export function PlatformTenants() {
           {sm.month} AI 원가(고객사) <b>{sm.customerAiCostKrw.toLocaleString('ko-KR')}원</b>{sm.aiCostKrw !== sm.customerAiCostKrw && <span className="text-ink-3"> (우리 회사·시험 포함 {sm.aiCostKrw.toLocaleString('ko-KR')}원)</span>}
           {' '}vs 요금 합계(월 환산·VAT 제외) <b>{sm.revenueKrw.toLocaleString('ko-KR')}원</b> → 마진 <b className={sm.marginKrw < 0 ? 'text-red-600' : 'text-emerald-700'}>{sm.marginKrw.toLocaleString('ko-KR')}원{sm.marginPct !== null ? ` (${sm.marginPct}%)` : ''}</b>
           <span className="text-ink-3"> · 고객사 {sm.customers}곳 중 결제 {sm.paying}곳</span>
+          {!!sm.contactDue && <span className="ml-1 rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-700" data-testid="platform-contact-due">오늘까지 연락할 곳 {sm.contactDue}곳</span>}
         </p>
       )}
       <div className="max-h-[28rem] overflow-auto">
-        <table className="w-full min-w-[980px] text-sm">
-          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>회사</th><th className={cell}>요금제</th><th className={cell}>상태</th><th className={cell}>인원</th><th className={cell}>저장</th><th className={cell}>AI(이번 달)</th><th className={cell}>청구·미납</th><th className={cell}>최근 접속</th><th className={cell}>가입</th><th className={cell} /></tr></thead>
+        <table className="w-full min-w-[1180px] text-sm">
+          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>회사</th><th className={cell}>단계</th><th className={cell}>담당자</th><th className={cell}>요금제</th><th className={cell}>상태</th><th className={cell}>인원</th><th className={cell}>저장</th><th className={cell}>AI(이번 달)</th><th className={cell}>청구·미납</th><th className={cell}>연락</th><th className={cell}>최근 접속</th><th className={cell}>가입</th><th className={cell} /></tr></thead>
           <tbody>
             {(list.data?.tenants ?? []).map((t) => (
               <tr key={t.id} className={cx('border-t border-line', t.status !== 'active' && 'bg-slate-50 text-ink-3')} data-tenant={t.id}>
-                <td className={cell}><div className="font-medium">{t.name}</div><div className="text-[11px] text-ink-3">{t.id} · {t.owner_email ?? '-'}</div></td>
-                <td className={cell}>{t.plan_code ?? '-'}<div className="text-[11px] text-ink-3">{SUB[t.sub_status] ?? ''}{t.sub_status === 'trial' && t.trial_ends_at ? ` ~${String(t.trial_ends_at).slice(0, 10)}` : ''}</div></td>
+                <td className={cell}><div className="font-medium">{t.name}{t.segment === 'partner' && <span className="ml-1 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-normal text-violet-800" data-testid={`company-partner-${t.id}`}>파트너</span>}{t.owner_invited && <span className="ml-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-normal text-amber-800">초대 대기</span>}</div><div className="text-[11px] text-ink-3">{t.id} · {t.owner_email ?? '-'}</div></td>
+                <td className={cell}><span className={cx('rounded-full px-2 py-0.5 text-xs', STAGE_CLS[t.stage] ?? 'bg-slate-100')} data-testid={`company-stage-${t.id}`}>{STAGE[t.stage] ?? t.stage}</span>{t.lifecycle && <div className="text-[11px] text-ink-3" title={t.lifecycle_note ?? ''}>직접 정함{t.lifecycle_note ? ` · ${t.lifecycle_note}` : ''}</div>}</td>
+                <td className={cell}>{t.contact_name || t.contact_phone ? <><div>{t.contact_name ?? '-'}{t.contact_title ? <span className="text-[11px] text-ink-3"> {t.contact_title}</span> : null}</div><div className="text-[11px] text-ink-3">{t.contact_phone ?? ''}</div></> : <span className="text-ink-3">-</span>}{t.source && <div className="text-[11px] text-ink-3">경로 {t.source}</div>}</td>
+                <td className={cell}>{t.plan_code ?? '-'}<div className="text-[11px] text-ink-3">{SUB[t.sub_status] ?? ''}{t.sub_status === 'trial' && t.trial_ends_at ? ` ~${String(t.trial_ends_at).slice(0, 10)}` : ''}{t.discount_pct ? ` · 할인 ${t.discount_pct}%` : ''}</div></td>
                 <td className={cell}>{STATUS[t.status] ?? t.status}{t.delete_scheduled_at && <div className="text-[11px] text-red-600">삭제 예정 {String(t.delete_scheduled_at).slice(0, 10)}</div>}{t.support_consent_at && <div className="text-[11px] text-emerald-700">지원 허용</div>}</td>
-                <td className={cell}>{t.users}명</td>
+                <td className={cell}>{t.users}명<div className="text-[11px] text-ink-3">7일 접속 {t.active7 ?? 0}명</div></td>
                 <td className={cell}>{t.storage_bytes != null ? fmtBytes(Number(t.storage_bytes)) : '-'}</td>
                 <td className={cell} data-testid={`company-ai-${t.id}`}>{t.ai_requests}회{t.ai_limit_requests !== null && t.ai_limit_requests !== undefined ? ` / ${t.ai_limit_requests}회` : ''} · {Math.round(Number(t.ai_krw)).toLocaleString()}원
                   <div className="text-[11px] text-ink-3">{t.ai_left_requests === null || t.ai_left_requests === undefined ? 'AI 요청 무제한' : `남은 ${t.ai_left_requests}회`}{t.mkt_credits_limit !== null && t.mkt_credits_limit !== undefined ? ` · 마케팅 ${t.mkt_credits_left}/${t.mkt_credits_limit}크레딧` : ''}</div>
@@ -60,12 +80,13 @@ export function PlatformTenants() {
                   {t.next_billing_on && <div className="text-[11px] text-ink-3">다음 {String(t.next_billing_on).slice(0, 10)}</div>}
                   {t.past_due_since && <div className="text-[11px] font-medium text-red-600">미납 {String(t.past_due_since).slice(0, 10)}~{t.billing_lock === 'suspended' ? ' · 이용 중지' : t.billing_lock === 'read_only' ? ' · 읽기 전용' : ''}</div>}
                   {t.last_payment && <div className="text-[11px] text-ink-3">최근 {String(t.last_payment.at).slice(0, 10)} {t.last_payment.status === 'paid' ? '성공' : t.last_payment.status}</div>}</td>
+                <td className={cell} data-testid={`company-contact-${t.id}`}>{t.next_contact_at ? <div className={cx('text-xs', t.next_contact_at <= today ? 'font-medium text-red-600' : 'text-ink-2')}>다음 {t.next_contact_at}</div> : null}{t.last_contact_at ? <div className="text-[11px] text-ink-3">마지막 {String(t.last_contact_at).slice(0, 10)}</div> : !t.next_contact_at ? <span className="text-ink-3">-</span> : null}</td>
                 <td className={cell}>{t.last_login_at ? fmtDateTime(t.last_login_at) : '-'}</td>
                 <td className={cell}>{String(t.created_at).slice(0, 10)}</td>
                 <td className={cell}><Button size="sm" variant="secondary" onClick={() => setOpen(t.id)} data-testid={`company-open-${t.id}`}>관리</Button></td>
               </tr>
             ))}
-            {list.data && !list.data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={10}>찾는 회사가 없습니다</td></tr>}
+            {list.data && !list.data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={13}>찾는 회사가 없습니다</td></tr>}
           </tbody>
         </table>
       </div>
@@ -158,6 +179,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </ul>
         </div>
         {!internal && <TenantOps id={id} t={t} ownerInvite={d.data.ownerInvite} run={run} />}
+        {!internal && <CrmBox key={`${t.lifecycle ?? ''}:${t.contact_phone ?? ''}:${d.data.billing?.discount_pct ?? 0}`} id={id} t={t} stage={d.data.stage} contacts={d.data.contacts ?? []} billing={d.data.billing} run={run} />}
         {!internal && (
           <div className="flex flex-wrap items-center gap-2 rounded-input border border-line p-3">
             <span className="min-w-0 flex-1 text-xs text-ink-2">지원 모드(읽기 전용 30분, 모든 조회 기록) — {t.support_consent_at ? <b className="text-emerald-700">고객 허용됨</b> : <b>고객이 허용하지 않음</b>}</span>
@@ -224,14 +246,16 @@ function TenantOps({ id, t, ownerInvite, run }: { id: string; t: any; ownerInvit
 /** 대표 10/20 ① [고객사 추가]: 회사명·업종(여러 개)·규모·대표 이름/이메일 → 대표에게 초대 메일, 요금제(비우면 체험)·체험 기간·시작 공간·메모 */
 function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
   const plans = useApi<{ plans: { code: string; name: string; active: boolean }[] }>('/api/platform');
-  const [f, setF] = useState({ company: '', industries: [] as string[], size: '2-10', ownerName: '', ownerEmail: '', planCode: 'trial', trialDays: 14, spaces: [] as string[], memo: '' });
+  const [f, setF] = useState({ company: '', industries: [] as string[], size: '2-10', ownerName: '', ownerEmail: '', planCode: 'trial', trialDays: 14, spaces: [] as string[], memo: '',
+    contactName: '', contactPhone: '', contactTitle: '', segment: 'customer', source: '' }); // #656 담당자·구분·소개 경로
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ tenant: string; inviteLink: string; mail: 'sent' | 'dev' | 'failed' } | null>(null);
   const toggle = (k: 'industries' | 'spaces', v: string) => setF({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] });
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
     try {
-      const r = await api('/api/platform/tenants', { body: { ...f, planCode: f.planCode || 'trial', trialDays: f.planCode === 'trial' ? f.trialDays : undefined, memo: f.memo || undefined } });
+      const r = await api('/api/platform/tenants', { body: { ...f, planCode: f.planCode || 'trial', trialDays: f.planCode === 'trial' ? f.trialDays : undefined, memo: f.memo || undefined,
+        contactName: f.contactName || undefined, contactPhone: f.contactPhone || undefined, contactTitle: f.contactTitle || undefined, segment: f.segment || undefined, source: f.source || undefined } });
       setResult(r); toast.ok(r.mail === 'sent' ? `${f.company} 회사를 만들고 ${f.ownerEmail} 로 초대 메일을 보냈습니다` : `${f.company} 회사를 만들었습니다 — 초대 링크를 직접 전달하세요`);
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
@@ -257,6 +281,11 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
             <Field label="시작 공간(업무는 항상)"><div className="flex items-center gap-3 py-2 text-xs">{(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={f.spaces.includes(sp)} onChange={() => toggle('spaces', sp)} data-testid={`new-company-space-${sp}`} />{SPACE_LABEL[sp]}</label>)}</div></Field>
             <Field label="대표 이름"><input className={inputCls} value={f.ownerName} onChange={(e) => setF({ ...f, ownerName: e.target.value })} required maxLength={50} data-testid="new-company-owner" /></Field>
             <Field label="대표 이메일(초대 메일 받을 주소)"><input type="email" className={inputCls} value={f.ownerEmail} onChange={(e) => setF({ ...f, ownerEmail: e.target.value })} required data-testid="new-company-email" /></Field>
+            <Field label="구분"><select className={inputCls} value={f.segment} onChange={(e) => setF({ ...f, segment: e.target.value })} data-testid="new-company-segment"><option value="customer">일반 고객</option><option value="partner">설계 파트너 체험단</option></select></Field>
+            <Field label="소개 경로(선택)"><input className={inputCls} value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} maxLength={100} placeholder="지인·하이링크 고객·홈페이지 문의·광고" data-testid="new-company-source" /></Field>
+            <Field label="담당자 이름(비우면 대표)"><input className={inputCls} value={f.contactName} onChange={(e) => setF({ ...f, contactName: e.target.value })} maxLength={50} data-testid="new-company-contact-name" /></Field>
+            <Field label="담당자 연락처(선택)"><input className={inputCls} value={f.contactPhone} onChange={(e) => setF({ ...f, contactPhone: e.target.value })} maxLength={30} placeholder="010-0000-0000" data-testid="new-company-contact-phone" /></Field>
+            <Field label="담당자 직책(선택)"><input className={inputCls} value={f.contactTitle} onChange={(e) => setF({ ...f, contactTitle: e.target.value })} maxLength={30} data-testid="new-company-contact-title" /></Field>
           </div>
           <Field label="운영 메모(선택)"><textarea className={cx(inputCls, 'min-h-[56px]')} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} maxLength={2000} data-testid="new-company-memo" /></Field>
           <p className="text-xs text-ink-3">만들면 대표에게 초대 메일(7일 유효)이 갑니다. 비밀번호는 대표가 직접 정하고, 운영자가 대신 들어가 보는 기능은 없습니다(지원 모드는 고객사가 허용한 때만).</p>
@@ -281,6 +310,67 @@ function MktWriteBox({ id, w, pick, setPick, run }: { id: string; w: { company: 
         {(['fast', 'default', 'deep'] as const).map((k) => <option key={k} value={k}>{TIER[k]} · 글 1건 약 {w.byTier[k].toLocaleString('ko-KR')}원</option>)}
       </select>
       <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/platform/tenants/${id}/mkt-write`, { method: 'PUT', body: { tier: v || null } }), '글 모델을 바꿨습니다')} data-testid="company-mkt-write-save">저장</Button>
+    </div>
+  );
+}
+
+/** #656 고객사 관리 확장(대표 10/26 00:40) — 담당자·구분·소개 경로, 단계(체험/유료/보류/해지, 직접 정하거나 자동), 할인(다음 결제부터), 연락 기록(다음 연락일) */
+function CrmBox({ id, t, stage, contacts, billing, run }: { id: string; t: any; stage: string; contacts: any[]; billing: any; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+  const [p, setP] = useState({ contactName: t.contact_name ?? '', contactPhone: t.contact_phone ?? '', contactTitle: t.contact_title ?? '', segment: t.segment ?? 'customer', source: t.source ?? '' });
+  const [st, setSt] = useState({ stage: t.lifecycle ?? '', note: t.lifecycle_note ?? '' });
+  const [dc, setDc] = useState({ pct: String(billing?.discount_pct ?? 0), until: billing?.discount_until ?? '', note: billing?.discount_note ?? '' });
+  const [log, setLog] = useState({ kind: 'call', summary: '', nextAt: '' });
+  const today = todayKst();
+  const small = cx(inputCls, 'mt-0.5 h-8 py-1 text-xs');
+  return (
+    <div className="space-y-3 rounded-input border border-line p-3" data-testid="company-crm">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-medium text-ink-2">고객사 관리</span>
+        <span className={cx('rounded-full px-2 py-0.5', STAGE_CLS[stage] ?? 'bg-slate-100 text-ink-2')} data-testid="company-stage-badge">{STAGE[stage] ?? stage}{t.lifecycle ? ' · 직접 정함' : ' · 자동'}</span>
+        {t.segment === 'partner' && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-violet-800">설계 파트너 체험단</span>}
+        {t.lifecycle_note && <span className="text-ink-3">{t.lifecycle_note}</span>}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-5">
+        <label className="text-xs">담당자 이름<input className={small} value={p.contactName} onChange={(e) => setP({ ...p, contactName: e.target.value })} placeholder="비우면 대표" maxLength={50} data-testid="company-contact-name" /></label>
+        <label className="text-xs">연락처<input className={small} value={p.contactPhone} onChange={(e) => setP({ ...p, contactPhone: e.target.value })} placeholder="010-0000-0000" maxLength={30} data-testid="company-contact-phone" /></label>
+        <label className="text-xs">직책<input className={small} value={p.contactTitle} onChange={(e) => setP({ ...p, contactTitle: e.target.value })} maxLength={30} data-testid="company-contact-title" /></label>
+        <label className="text-xs">구분<select className={small} value={p.segment} onChange={(e) => setP({ ...p, segment: e.target.value })} data-testid="company-segment"><option value="customer">일반 고객</option><option value="partner">설계 파트너 체험단</option></select></label>
+        <label className="text-xs">소개 경로<input className={small} value={p.source} onChange={(e) => setP({ ...p, source: e.target.value })} placeholder="지인·하이링크 고객·문의·광고" maxLength={100} data-testid="company-source" /></label>
+      </div>
+      <div className="flex justify-end"><Button size="sm" variant="secondary" data-testid="company-profile-save" onClick={() => run(() => api(`/api/platform/tenants/${id}/profile`, { method: 'PUT', body: { contactName: p.contactName, contactPhone: p.contactPhone, contactTitle: p.contactTitle, segment: p.segment || 'customer', source: p.source } }), '담당자 정보를 저장했습니다')}>담당자 저장</Button></div>
+      <div className="flex flex-wrap items-end gap-2 text-xs">
+        <label>단계<select className={cx(small, 'w-auto')} value={st.stage} onChange={(e) => setSt({ ...st, stage: e.target.value })} data-testid="company-stage"><option value="">자동(구독 상태 따라)</option>{Object.entries(STAGE).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <label className="min-w-[200px] flex-1">사유<input className={small} value={st.note} onChange={(e) => setSt({ ...st, note: e.target.value })} placeholder="예: 11월 결제 협의 중" maxLength={300} data-testid="company-stage-note" /></label>
+        <Button size="sm" variant="secondary" data-testid="company-stage-save" onClick={() => run(() => api(`/api/platform/tenants/${id}/lifecycle`, { method: 'PUT', body: { stage: st.stage || null, note: st.note || undefined } }), st.stage ? `단계를 '${STAGE[st.stage]}'로 정했습니다` : '단계를 자동으로 돌렸습니다')}>단계 저장</Button>
+      </div>
+      <div className="flex flex-wrap items-end gap-2 text-xs" data-testid="company-discount">
+        <label>할인(%)<input type="number" min={0} max={100} className={cx(small, 'w-20')} value={dc.pct} onChange={(e) => setDc({ ...dc, pct: e.target.value })} data-testid="company-discount-pct" /></label>
+        <label>기한(비우면 계속)<input type="date" className={cx(small, 'w-auto')} value={dc.until} onChange={(e) => setDc({ ...dc, until: e.target.value })} data-testid="company-discount-until" /></label>
+        <label className="min-w-[160px] flex-1">사유<input className={small} value={dc.note} onChange={(e) => setDc({ ...dc, note: e.target.value })} placeholder="예: 설계 파트너 3개월 30%" maxLength={200} data-testid="company-discount-note" /></label>
+        <Button size="sm" variant="secondary" data-testid="company-discount-save" onClick={() => run(() => api(`/api/platform/tenants/${id}/discount`, { method: 'PUT', body: { pct: Number(dc.pct) || 0, until: dc.until || null, note: dc.note || null } }), Number(dc.pct) ? '할인을 걸었습니다 — 다음 결제부터 적용' : '할인을 풀었습니다')}>할인 저장</Button>
+        {billing?.discountApplied ? <span className="text-emerald-700" data-testid="company-discount-now">지금 {billing.discountApplied}% 적용 중{billing.billing_cycle ? ` · 다음 결제 ${Number(billing.expectedThisMonth ?? 0).toLocaleString('ko-KR')}원` : ' (정기 결제가 시작되면 반영)'}</span> : null}
+      </div>
+      <div>
+        <p className="mb-1 text-xs font-medium text-ink-2">연락 기록 {contacts.length}건 — 전화·메일·미팅을 남기고 다음 연락일을 적으면 목록과 ‘오늘 볼 것’에 뜹니다</p>
+        <div className="flex flex-wrap items-end gap-2 text-xs">
+          <label>종류<select className={cx(small, 'w-auto')} value={log.kind} onChange={(e) => setLog({ ...log, kind: e.target.value })} data-testid="company-log-kind">{Object.entries(KIND_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+          <label className="min-w-[200px] flex-1">내용<input className={small} value={log.summary} onChange={(e) => setLog({ ...log, summary: e.target.value })} placeholder="예: 대표와 통화 — 11/3 데모 약속" maxLength={1000} data-testid="company-log-summary" /></label>
+          <label>다음 연락<input type="date" className={cx(small, 'w-auto')} value={log.nextAt} onChange={(e) => setLog({ ...log, nextAt: e.target.value })} data-testid="company-log-next" /></label>
+          <Button size="sm" data-testid="company-log-add" disabled={!log.summary.trim()} onClick={async () => { const r = await run(() => api(`/api/platform/tenants/${id}/contacts`, { body: { kind: log.kind, summary: log.summary, nextAt: log.nextAt || null } }), '연락 기록을 남겼습니다'); if (r) setLog({ ...log, summary: '', nextAt: '' }); }}>기록</Button>
+        </div>
+        <ul className="mt-2 max-h-48 divide-y divide-line overflow-y-auto rounded-input border border-line text-xs" data-testid="company-logs">
+          {contacts.map((c) => (
+            <li key={c.id} className="flex flex-wrap items-center gap-2 px-2 py-1" data-log={c.id}>
+              <span className="shrink-0 text-ink-3">{fmtDateTime(c.at)}</span><span className="shrink-0 rounded-full bg-slate-100 px-1.5">{KIND_LABEL[c.kind] ?? c.kind}</span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap">{c.summary}</span>
+              {c.next_at && <span className={cx('shrink-0', c.next_at <= today ? 'font-medium text-red-600' : 'text-ink-3')}>다음 {c.next_at}</span>}
+              {c.by_name && <span className="shrink-0 text-ink-3">{c.by_name}</span>}
+              <button type="button" className="text-ink-3 hover:text-red-600" aria-label="기록 지우기" data-testid={`company-log-delete-${c.id}`} onClick={() => confirm('이 연락 기록을 지울까요?') && run(() => api(`/api/platform/tenants/${id}/contacts/${c.id}`, { method: 'DELETE' }), '지웠습니다')}><Trash2 className="size-3.5" /></button>
+            </li>
+          ))}
+          {!contacts.length && <li className="px-2 py-2 text-ink-3">아직 기록이 없습니다</li>}
+        </ul>
+      </div>
     </div>
   );
 }

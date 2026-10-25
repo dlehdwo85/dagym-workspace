@@ -42,8 +42,12 @@ export async function quote(tenant: string, planCode: string, cycle: 'monthly' |
   const seats = p.per_user_krw ? Math.max(p.min_users ?? 1, n) : 1;
   const unit = cycle === 'annual' ? (p.per_user_krw ? p.annual_per_user_krw ?? p.per_user_krw : p.annual_monthly_krw ?? p.monthly_krw) : (p.per_user_krw ?? p.monthly_krw);
   // V27(대표 10/17): 30인 이상 10% 할인
-  const supply = Math.round(unit * seats * (cycle === 'annual' ? 12 : 1) * (p.per_user_krw && seats >= 30 ? 0.9 : 1));
-  return { plan: p, seats, unit, supply, amount: Math.round(supply * VAT), cycle, goodsName: `Workin ${p.code} ${cycle}` };
+  const list = Math.round(unit * seats * (cycle === 'annual' ? 12 : 1) * (p.per_user_krw && seats >= 30 ? 0.9 : 1));
+  // #656 회사별 할인(플랫폼 운영자가 건 것, 기한 안) — 공급가에 적용. 다음 결제부터 반영
+  const [ds] = await sql<{ discount_pct: number; discount_until: string | null }[]>`select discount_pct, to_char(discount_until, 'YYYY-MM-DD') as discount_until from tenant_subscriptions where tenant = ${tenant}`;
+  const discountPct = ds && Number(ds.discount_pct) > 0 && (!ds.discount_until || ds.discount_until >= today()) ? Number(ds.discount_pct) : 0;
+  const supply = Math.round(list * (1 - discountPct / 100));
+  return { plan: p, seats, unit, supply, listSupply: list, discountPct, amount: Math.round(supply * VAT), cycle, goodsName: `Workin ${p.code} ${cycle}` };
 }
 
 export async function billingOverview(u: SessionUser) {
