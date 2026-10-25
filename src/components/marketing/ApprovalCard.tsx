@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { MediaFull, MediaThumb, isVideoMime, mimeOf, posterFrom } from '@/components/MediaView';
 import { VideoDigestButton } from '@/components/VideoDigestButton';
 import { api } from '@/components/client';
+import { useBackClose } from '@/components/backClose';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ModeChip } from './ModeToggle';
@@ -59,7 +60,7 @@ export function whenLabel(at: string | null) {
 export const deadlineLabel = (deadline: string | null, at: string | null) => deadline && at ? `${whenLabel(deadline).replace(/^(오늘|내일) /, '$1 ')}까지 승인하면 ${hm(at)} 게시` : null;
 
 export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null; brand_logo?: string | null; handle?: string | null;
-  body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
+  body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null; faces?: boolean }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
   revision?: Revision | null; reapprove_comment?: string | null; // #545 수정본 배지(반영한 요청·AI 수정 n/3)
   brand_templates?: boolean; // #544 브랜드 키트 피드 틀이 있으면 [다른 틀로 다시 그리기]
   auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; visual?: { by: string } | null; postponed?: { from?: string | null; at?: string; restored?: boolean } | null; held?: { at?: string; reason?: string } | null; failed?: { at?: string; reason?: string; n?: number } | null; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null } } | null; production?: { kind: string; status: string } | null;
@@ -88,6 +89,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
   // #545: AI 수정본이 바로 올라오면 같은 카드가 새 버전으로 다시 그려짐 — [승인]·[수정 요청]을 다시 보이게
   useEffect(() => { setDone(null); setMode('idle'); setMemo(''); }, [c.current_version]);
   const media = c.media_ids ?? [];
+  // #631(대표 10/25 21:20 '승인함에서 뒤로가기가 승인함을 벗어남'): 카드 시안 크게 보기도 history 한 칸(?v=) — 뒤로가기·닫기 = 크게 보기만 닫힘(상세 창은 #535 ?c=)
+  useBackClose(full && media.length > 0, () => setFull(false), ['v', c.id]);
   const issues = c.quality?.passed === false ? c.quality.issues ?? [] : [];
   const rep = c.quality?.report?.v === c.current_version ? c.quality.report : null; // #426 이 버전의 품질 보고서만(사람이 고친 새 버전엔 옛 점수 안 붙임)
   const late = !!c.late;
@@ -136,6 +139,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen }: { c: CardContent;
               <MediaThumb src={`/api/library/${m}/download?inline=1`} mime={mimeOf(c.media_info, m)} poster={isVideoMime(mimeOf(c.media_info, m)) && posterFrom(c.media_info, m) ? `/api/library/${posterFrom(c.media_info, m)}/download?inline=1` : null} className="size-full object-cover" />{k === 0 && <span className="absolute left-0 top-0 rounded-br bg-violet-600 px-1 text-[10px] text-white">표지</span>}
             </button>))}</div>
           <p className="mt-0.5 text-[11px] text-ink-3">{media.length}장 — 옆으로 넘겨 보기</p>
+          {/* #615 ④(대표 10/25): 얼굴이 나온 실사 사진이 붙은 글은 승인 전에 촬영·게시 동의 확인 */}
+          {(c.media_info ?? []).some((m) => media.includes(m.id) && m.faces) && <p className="mt-1 rounded-input border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900" data-testid="approval-face-warning">얼굴이 나온 실사 사진이 있습니다 — 촬영·게시 동의를 받은 사진인지 확인한 뒤 승인해 주세요.</p>}
           {media.some((m) => isVideoMime(mimeOf(c.media_info, m))) && <VideoDigestButton fileId={media.find((m) => isVideoMime(mimeOf(c.media_info, m)))!} title={c.title} mode="review" />}
         </div>)}
       {/* 대표 재지적 10/20 18:45 ②: 시안이 없어도 카드 첫 화면에 자리(회색 상자)를 늘 보여 줌 — 제작 중이면 예정 시각

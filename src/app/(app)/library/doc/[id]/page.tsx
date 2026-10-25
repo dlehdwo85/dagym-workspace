@@ -67,7 +67,8 @@ export default function DocPage() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-2 p-3 sm:p-4" data-testid="doc-page">
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => router.push(`/library?folder=${encodeURIComponent(open.file.folder)}`)} className="inline-flex size-9 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="자료실로"><ArrowLeft className="size-5" /></button>
+        {/* #615 ②(대표 10/25): 화살표만 있던 자리를 [← 목록] 단추로 — 그 파일의 폴더로 돌아가 줄을 강조(?file=) */}
+        <button onClick={() => router.push(`/library?folder=${encodeURIComponent(open.file.folder)}&file=${id}`)} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-input px-2 text-sm font-medium text-ink-2 hover:bg-slate-100" aria-label="자료실 목록으로" data-testid="doc-back"><ArrowLeft className="size-4" />목록</button>
         <input className={cx(inputCls, 'min-w-0 flex-1 text-base font-semibold')} value={title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
           readOnly={!canEdit} aria-label="문서 제목" data-testid="doc-title" />
         <StatusBadge status={status} canEdit={open.canEdit} />

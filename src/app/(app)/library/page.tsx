@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MediaThumb } from '@/components/MediaView';
+import { MediaFull, MediaThumb } from '@/components/MediaView';
+import { useBackClose } from '@/components/backClose';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ChevronRight, Download, FilePenLine, FileSpreadsheet, FileText, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock,
+import { ArrowLeft, ChevronRight, Download, ExternalLink, FilePenLine, FileSpreadsheet, FileText, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock,
   Pencil, Search, ShieldAlert, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
@@ -15,7 +16,7 @@ type F = { id: string; folder: string; title: string; file_name: string; mime_ty
   created_at: string; updated_at: string; created_by: string; created_by_name: string; has_text: boolean; text_error: string | null; text_tried_at: string | null; snippet: string | null;
   organized_by: 'ai' | 'rule' | null; ai_confidence: number | null; needs_review: boolean; can_undo: boolean; level: string; organize_status: string | null; organize_error: string | null;
   security: Sec; security_suggested: Sec | null; security_confirmed: boolean; effective_security: Sec;
-  vision?: { caption?: string; scene?: string; kind?: string; text?: string; promo?: boolean; error?: string } | null }; // #235 ⓒ 마케팅 사진 AI 설명
+  vision?: { caption?: string; scene?: string; kind?: string; text?: string; promo?: boolean; faces?: boolean; people?: number; error?: string } | null }; // #235 ⓒ 마케팅 사진 AI 설명 · #615 ④ faces = 얼굴 나온 실사(촬영 동의 확인)
 type Fo = { folder: string; n: number; security: Sec; level: string };
 type Data = { files: F[]; folders: Fo[]; review: number; level: string; aiOrganize: boolean; confEdit: boolean; spaces?: string[]; spaceCounts?: Record<string, number> };
 const RANK: Record<string, number> = { none: 0, view: 1, edit: 2, delete: 3 };
@@ -65,6 +66,11 @@ export default function LibraryPage() {
   const [logOpen, setLogOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const hi = sp.get('file');
+  // #615 ②(대표 10/25 '파일 상세에서 뒤로가기 단추가 없어 헤맴'): 사진·영상은 새 탭 대신 앱 안 보기창 — [← 목록]·뒤로가기로 닫히고, 목록의 폴더·스크롤·강조는 그대로
+  const [viewer, setViewer] = useState<F | null>(null);
+  useBackClose(!!viewer, () => setViewer(null), ['file', viewer?.id ?? '']);
+  const scrolledTo = useRef<string | null>(null);
+  useEffect(() => { if (!hi || !data || scrolledTo.current === hi) return; const el = document.querySelector(`[data-file="${hi}"]`); if (el) { scrolledTo.current = hi; el.scrollIntoView({ block: 'center' }); } }, [hi, data]);
   useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 300); return () => clearTimeout(t); }, [q]);
   useEffect(() => { setSel(new Set()); }, [cur, query]);
   const canUpload = RANK[data?.level ?? 'edit'] >= RANK.edit;
@@ -336,7 +342,7 @@ export default function LibraryPage() {
                   </div>
                 ) : view === 'list' ? (
                   <ul className="divide-y divide-line overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="library-list">
-                    {files.map((f) => <FileRow key={f.id} f={f} hi={hi === f.id} sel={sel.has(f.id)} onSel={() => toggle(f.id)} onDrag={dragFile(f)} user={user.id} admin={admin} confEdit={!!data?.confEdit}
+                    {files.map((f) => <FileRow key={f.id} f={f} hi={hi === f.id} sel={sel.has(f.id)} onSel={() => toggle(f.id)} onDrag={dragFile(f)} user={user.id} admin={admin} confEdit={!!data?.confEdit} onView={isImg(f) || isVid(f) ? () => setViewer(f) : undefined}
                       showFolder={!!(query || review) || f.folder !== cur} onEdit={() => setEdit({ ...f, tags: f.tags.join(', ') as never })} onRemove={() => remove([f.id])} onOrganize={(a) => organize(f, a)} onSec={(s) => patchSec(f, s)} onOpenFolder={() => { setQ(''); setCur(f.folder); }} onRetext={async () => { try { const r = await api<{ hasText: boolean; chars: number; error: string | null }>(`/api/library/${f.id}/retext`, { method: 'POST', body: {} }); toast[r.hasText ? 'ok' : 'error'](r.hasText ? `본문 ${r.chars.toLocaleString('ko-KR')}자 추출` : `추출 못 함 — ${r.error ?? '이유 모름'}`); reload(); } catch (e: any) { toast.error(e.message); } }} />)}
                   </ul>
                 ) : (
@@ -344,7 +350,7 @@ export default function LibraryPage() {
                     {files.map((f) => (
                       <li key={f.id} draggable onDragStart={dragFile(f)} className={cx('group relative overflow-hidden rounded-card border bg-white shadow-card', sel.has(f.id) ? 'border-brand-600 ring-1 ring-brand-600' : 'border-line', hi === f.id && 'ring-2 ring-amber-400')}>
                         <input type="checkbox" checked={sel.has(f.id)} onChange={() => toggle(f.id)} className="absolute left-2 top-2 z-10" aria-label={`${f.title} 선택`} />
-                        <a href={openHref(f)} target={isDoc(f) ? undefined : '_blank'} rel="noreferrer" className="flex aspect-[4/3] items-center justify-center bg-slate-50">
+                        <a href={openHref(f)} target={isDoc(f) ? undefined : '_blank'} rel="noreferrer" className="flex aspect-[4/3] items-center justify-center bg-slate-50" onClick={(e) => { if (isImg(f) || isVid(f)) { e.preventDefault(); setViewer(f); } }} data-testid="library-grid-open">
                           {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : isVid(f) ? <MediaThumb src={`/api/library/${f.id}/download?inline=1`} mime={f.mime_type} className="size-full" /> : <FileIcon f={f} big />}
                         </a>
                         <div className="p-2"><div className="flex items-center gap-1 text-sm font-medium"><span className="min-w-0 flex-1 truncate">{f.title}</span>{f.effective_security !== 'internal' && <SecBadge s={f.effective_security} />}</div>
@@ -378,6 +384,21 @@ export default function LibraryPage() {
         )}
       </Modal>
       {permFolder && <FolderPerms folder={permFolder} onClose={() => setPermFolder(null)} />}
+      <Modal open={!!viewer} onClose={() => setViewer(null)} title={viewer?.title ?? '자료'} wide>
+        {viewer && (
+          <div className="space-y-2" data-testid="library-viewer">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button size="sm" variant="secondary" onClick={() => setViewer(null)} data-testid="library-viewer-back"><ArrowLeft />목록</Button>
+              <a href={`/api/library/${viewer.id}/download`} className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-sm text-ink-2 hover:bg-slate-50"><Download className="size-4" />내려받기</a>
+              <a href={openHref(viewer)} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-sm text-ink-2 hover:bg-slate-50"><ExternalLink className="size-4" />새 탭</a>
+              <span className="ml-auto text-xs text-ink-3">{viewer.folder || '최상위'} · {fmtSize(Number(viewer.size_bytes))} · {viewer.created_by_name}</span>
+            </div>
+            {viewer.vision?.faces && <p className="rounded-input border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900" data-testid="library-viewer-faces">얼굴이 나온 실사 사진입니다 — 홍보 글·시안에 쓰려면 촬영·게시 동의를 받았는지 먼저 확인하세요.</p>}
+            <MediaFull src={`/api/library/${viewer.id}/download?inline=1`} mime={viewer.mime_type} className="max-h-[70vh] w-full rounded-input bg-slate-50 object-contain" alt={viewer.title} />
+            {viewer.vision?.caption && <p className="text-xs text-ink-2">AI 사진 설명: {viewer.vision.caption}</p>}
+          </div>
+        )}
+      </Modal>
       <Modal open={!!edit} onClose={() => setEdit(null)} title="자료 고치기">
         {edit && (
           <form onSubmit={save} className="space-y-3">
@@ -420,19 +441,21 @@ function FileIcon({ f, big }: { f: F; big?: boolean }) {
   return isDoc(f) ? <FilePenLine className={cx(c, 'text-brand-600')} /> : /sheet|excel|csv/.test(f.mime_type + f.file_name) ? <FileSpreadsheet className={cx(c, 'text-green-600')} /> : /^image\//.test(f.mime_type) ? <ImageIcon className={cx(c, 'text-ink-3')} /> : <FileText className={cx(c, 'text-ink-3')} />;
 }
 
-function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder, onEdit, onRemove, onOrganize, onSec, onOpenFolder, onRetext }: {
+function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder, onEdit, onRemove, onOrganize, onSec, onOpenFolder, onRetext, onView }: {
   f: F; hi: boolean; sel: boolean; onSel: () => void; onDrag: (e: React.DragEvent) => void; user: string; admin: boolean; confEdit: boolean; showFolder: boolean;
-  onEdit: () => void; onRemove: () => void; onOrganize: (a: 'undo' | 'redo') => void; onSec: (s: Sec) => void; onOpenFolder: () => void; onRetext?: () => void }) {
+  onEdit: () => void; onRemove: () => void; onOrganize: (a: 'undo' | 'redo') => void; onSec: (s: Sec) => void; onOpenFolder: () => void; onRetext?: () => void; onView?: () => void }) {
+  const view = onView ? (e: React.MouseEvent) => { e.preventDefault(); onView(); } : undefined; // #615 ②: 사진·영상은 앱 안 보기창(새 탭 X)
   const mine = f.created_by === user;
   const suggestConf = f.security_suggested === 'confidential' && f.effective_security !== 'confidential' && !f.security_confirmed;
   return (
     <li draggable onDragStart={onDrag} className={cx('flex items-center gap-3 px-3 py-2.5', hi && 'bg-amber-50', sel && 'bg-brand-50/60')} data-file={f.id}>
       <input type="checkbox" checked={sel} onChange={onSel} aria-label={`${f.title} 선택`} />
-      <a href={openHref(f)} target={isDoc(f) ? undefined : '_blank'} rel="noreferrer" className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-input border border-line bg-slate-50">
+      <a href={openHref(f)} target={isDoc(f) || onView ? undefined : '_blank'} rel="noreferrer" onClick={view} className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-input border border-line bg-slate-50" data-testid="library-row-open">
         {isImg(f) ? <img src={`/api/library/${f.id}/download?inline=1`} alt="" className="size-full object-contain" loading="lazy" /> : isVid(f) ? <MediaThumb src={`/api/library/${f.id}/download?inline=1`} mime={f.mime_type} className="size-full" /> : <FileIcon f={f} />}
       </a>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-sm font-medium">{isDoc(f) ? <a href={openHref(f)} className="min-w-0 truncate hover:underline" data-testid="doc-open">{f.title}</a> : <span className="min-w-0 truncate">{f.title}</span>}
+        <div className="flex items-center gap-1.5 text-sm font-medium">{isDoc(f) ? <a href={openHref(f)} className="min-w-0 truncate hover:underline" data-testid="doc-open">{f.title}</a> : onView ? <a href={openHref(f)} onClick={view} className="min-w-0 truncate hover:underline" data-testid="media-open">{f.title}</a> : <span className="min-w-0 truncate">{f.title}</span>}
+          {f.vision?.faces && <span className="inline-flex shrink-0 items-center rounded bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800" title="얼굴이 나온 실사 — 홍보에 쓰려면 촬영·게시 동의를 받았는지 확인" data-testid="photo-faces">얼굴 · 동의 확인</span>}
           {f.effective_security !== 'internal' && <SecBadge s={f.effective_security} />}
           {f.organized_by && <span className={cx('inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 text-[11px] font-semibold', f.needs_review ? 'bg-amber-100 text-amber-800' : 'bg-violet-100 text-violet-700')}
             title={f.ai_confidence !== null ? `확신 ${Math.round(f.ai_confidence * 100)}%` : undefined} data-testid="ai-organized"><Sparkles className="size-3" />{f.organized_by === 'ai' ? 'AI 정리됨' : '규칙 정리'}{f.needs_review && ' · 확인 필요'}</span>}
