@@ -39,7 +39,7 @@ final class WorkinAlarms {
     private static final String PREFS = "workin_alarms";
     private static final String KEY_LIST = "alarms";
     private static final String FIRE_ACTION = "kr.co.dagym.workos.ALARM_FIRE";
-    private static final String DEFAULT_SERVER = "https://work-in.dev";
+    private static final String DEFAULT_SERVER = "https://www.work-in.dev";
     private static final long KEEP_FIRED_MS = 6 * 3600_000L; // 울린 알람은 6시간 뒤 목록에서 정리
 
     private WorkinAlarms() {}
