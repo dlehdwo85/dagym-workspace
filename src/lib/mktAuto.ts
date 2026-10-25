@@ -10,6 +10,7 @@ import { JSON_LIKE, avoidOf, voiceInput, factsInput, otherBrands, otherBrandName
   exampleInput, examplesOf, exampleKindOf, examplesPrompt, EXAMPLE_KINDS, EXAMPLE_PER_KIND } from './mktQuality';
 import { FEED_STYLES, FEED_TEMPLATES, NEED_LABEL, TEMPLATE_IDS, feedInput, normalizeFeed } from './mktFeedTemplates';
 import { tenantOf, type SessionUser } from './types';
+import { customerText, seesInternals } from './customerScope';
 
 /**
  * V41 4-3 + V43 마케팅 자동 제작(대표 방향 10/18): 브랜드·채널별 주간 규칙 → (게시 D-n 제작 시각) Claude 원고 + 이미지/영상 '제작 요청 카드'
@@ -970,7 +971,17 @@ export async function automationView(u: SessionUser) {
   // #544(로컬 13:55): 그림·프롬프트가 실제로 쓰는 바탕 색과 출처(피드 틀·영상 끝 화면·브랜드 색·회사 기본 색)를 키트 화면에 그대로
   const D = await import('./mktCarouselDraw');
   const withDraw = await Promise.all((brands as any[]).map(async (b) => ({ ...b, draw: await D.brandColorInfo(t, b).catch(() => ({ color: null, from: null })) })));
-  return { settings: s, limits: limitsOf(s), writeModel: await writeModelInfo(s), usage: { ...(await usageOf(t)), ai: await mktAiUsd(t), companyAiUsd: co.costUsd, companyAiLimitUsd: co.limitUsd, companyAi: { usedKrw: co.budget.usedKrw, limitKrw: co.budget.limitKrw, pct: co.budget.pct, resetLabel: co.budget.resetLabel } }, plans: await planTable(), production: await productionLeft(t), rules, requests, ledger, brands: withDraw, people, canEdit: isAdmin(u),
+  // #602(대표 10/25): 고객사에게는 모델 이름·원고 1건 비용·달러 한도·외부 서비스 이름을 빼고 등급 이름·원화·크레딧만(슈퍼관리자·내부 테넌트는 그대로)
+  const full = seesInternals(u); const rate = (await import('./ai/provider')).usdKrw();
+  const wm = await writeModelInfo(s); const lim = limitsOf(s); const plans = await planTable();
+  const usageAll = { ...(await usageOf(t)), ai: await mktAiUsd(t), companyAiUsd: co.costUsd, companyAiLimitUsd: co.limitUsd, companyAi: { usedKrw: co.budget.usedKrw, limitKrw: co.budget.limitKrw, pct: co.budget.pct, resetLabel: co.budget.resetLabel } };
+  const krwOf = (usd: number | null) => (usd === null ? null : Math.round(usd * rate));
+  const { ai: _ai, companyAiUsd: _cu, companyAiLimitUsd: _cl, ...usageCust } = usageAll;
+  const planCust = Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, { ...p, aiMonthlyUsd: null, aiMonthlyKrw: krwOf(p.aiMonthlyUsd) }]));
+  return { full, settings: full ? s : { ...s, ai_monthly_usd: null, plan: s.plan ? { ...s.plan, aiMonthlyUsd: null, writeTier: null } : s.plan }, limits: full ? lim : { ...lim, aiMonthlyUsd: null, aiMonthlyKrw: krwOf(lim.aiMonthlyUsd) },
+    writeModel: full ? wm : { tier: wm.tier, label: wm.label, source: wm.source, blog: { tier: wm.blog.tier, label: wm.blog.label, upgraded: wm.blog.upgraded } },
+    usage: full ? usageAll : usageCust, plans: full ? plans : planCust, production: await productionLeft(t), rules,
+    requests: full ? requests : (requests as unknown as { reason: string | null }[]).map((r) => ({ ...r, reason: customerText(r.reason) })), ledger: full ? ledger : (ledger as unknown as { note: string | null }[]).map((l) => ({ ...l, note: customerText(l.note) })), brands: withDraw, people, canEdit: isAdmin(u),
     feedCatalog: { templates: TEMPLATE_IDS.map((id) => { const x = FEED_TEMPLATES[id]; return { id, label: x.label, desc: x.desc, need: x.need ? NEED_LABEL[x.need as keyof typeof NEED_LABEL] : null }; }), styles: Object.entries(FEED_STYLES).map(([id, x]) => ({ id, label: x.label, templates: [...x.templates] as string[] })) } };
 }
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 제작 설정은 관리자가 합니다'); }

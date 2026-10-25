@@ -18,6 +18,8 @@ const lim = (v: number | null | undefined, unit: string) => (v === null || v ===
 /** V14 4번 기능 이름 */
 // 로컬 검수 10/17: 고객 화면은 한국어 기능명·원화만(내부 키·달러·운영자 문구는 /platform)
 const krw = (usd: number, rate: number) => won(Math.round(usd * rate));
+/** #602 고객사 응답은 금액이 이미 원화(currency: 'krw') — 달러·환율 칸이 없다 */
+const aiMoney = (ai: { currency?: string; usdKrw?: number }, v: number) => (ai.currency === 'krw' ? won(v) : krw(v, ai.usdKrw ?? 1400));
 
 type Budget = { source: 'plan' | 'override' | 'unlimited' | 'legacy'; limitKrw: number | null; usedKrw: number; leftKrw: number | null; pct: number | null; over: boolean; resetLabel: string;
   parts: { planKrw: number | null; perSeatKrw: number | null; seats: number | null; mktKrw: number; packKrw: number; ownerCapKrw: number | null } };
@@ -66,7 +68,7 @@ export default function UsagePage() {
         {/* 대표 10/24 ②: 회사 월 AI 예산(원) 게이지 — 80% 알림·100% 멈춤, 다음 달 1일 초기화, 영상 제작은 마케팅 크레딧으로 따로 */}
         {ab ? <Meter label="이번 달 AI 예산" icon={Sparkles} used={ab.usedKrw} limit={ab.limitKrw} usedLabel={won(ab.usedKrw)} limitLabel={ab.limitKrw === null ? '무제한' : won(ab.limitKrw)} testid="meter-ai"
           note={<span data-testid="meter-ai-note">{ab.over ? <b className="text-red-600">AI 기능 멈춤 — {ab.resetLabel}에 다시 채워짐</b> : `${ab.resetLabel}에 다시 채워짐`}{budgetWhy(ab) && ` · ${budgetWhy(ab)}`} · 영상 제작은 마케팅 크레딧으로 따로</span>} />
-          : <Meter label="이번 달 AI 비용" icon={Sparkles} used={ai.costUsd} limit={ai.limitUsd} usedLabel={`약 ${krw(ai.costUsd, ai.usdKrw)}`} limitLabel={`약 ${krw(ai.limitUsd, ai.usdKrw)}`} testid="meter-ai" />}
+          : <Meter label="이번 달 AI 비용" icon={Sparkles} used={ai.costUsd ?? ai.cost} limit={ai.limitUsd ?? ai.limit} usedLabel={`약 ${aiMoney(ai, ai.costUsd ?? ai.cost)}`} limitLabel={`약 ${aiMoney(ai, ai.limitUsd ?? ai.limit)}`} testid="meter-ai" />}
         <Meter label="사용자" icon={Users} used={usage.users} limit={limits.users} usedLabel={`${usage.users}명${usage.invited ? ` (+초대 중 ${usage.invited})` : ''}`} limitLabel={lim(limits.users, '명')} testid="meter-users" />
       </div>
       {limits.tasksTotal != null && <TaskQuota used={usage.tasks} limit={limits.tasksTotal} canEdit={canEdit} onChanged={reload} />}
@@ -78,7 +80,7 @@ export default function UsagePage() {
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">이번 달 AI 사용</h2>
           {ab ? <span className="text-xs text-ink-2" data-testid="ai-usage-pct">회사 월 AI 예산 {ab.limitKrw === null ? '무제한' : won(ab.limitKrw)} 중 <b className={cx(ab.over ? 'text-red-600' : (ab.pct ?? 0) >= 80 ? 'text-amber-700' : 'text-ink')}>{ab.pct ?? 0}%</b>{ab.leftKrw !== null && ` · 남은 ${won(ab.leftKrw)}`} · 요청 {ai.requests.toLocaleString('ko-KR')}회{ai.blocked ? ` · 차단 ${ai.blocked}건` : ''}</span>
-            : <span className="text-xs text-ink-2" data-testid="ai-usage-pct">회사 월 한도 약 {krw(ai.limitUsd, ai.usdKrw)} 중 <b className={cx(ai.pct >= 100 ? 'text-red-600' : ai.pct >= 80 ? 'text-amber-700' : 'text-ink')}>{ai.pct}%</b> · 남은 약 {krw(ai.leftUsd, ai.usdKrw)} · 요청 {ai.requests.toLocaleString('ko-KR')}회{ai.blocked ? ` · 차단 ${ai.blocked}건` : ''}</span>}
+            : <span className="text-xs text-ink-2" data-testid="ai-usage-pct">회사 월 한도 약 {aiMoney(ai, ai.limitUsd ?? ai.limit)} 중 <b className={cx(ai.pct >= 100 ? 'text-red-600' : ai.pct >= 80 ? 'text-amber-700' : 'text-ink')}>{ai.pct}%</b> · 남은 약 {aiMoney(ai, ai.leftUsd ?? ai.left)} · 요청 {ai.requests.toLocaleString('ko-KR')}회{ai.blocked ? ` · 차단 ${ai.blocked}건` : ''}</span>}
         </div>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           {([['사람별', ai.byUser.map((x: any) => ({ k: x.user_id, label: x.name, cost: x.cost, n: x.requests }))], ['기능별', byPurposeRows(ai.byPurpose)]] as const).map(([title, rows]) => {
@@ -90,7 +92,7 @@ export default function UsagePage() {
                   <li key={r.k ?? r.label} className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-2">
                     <span className="truncate">{r.label}</span>
                     <span className="h-2 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-violet-500" style={{ width: `${(r.cost / max) * 100}%` }} /></span>
-                    <span className="tabular-nums text-ink-2">{krw(r.cost, ai.usdKrw)} · {r.n}회</span>
+                    <span className="tabular-nums text-ink-2">{aiMoney(ai, r.cost)} · {r.n}회</span>
                   </li>
                 ))}{!rows.length && <li className="text-ink-3">아직 사용이 없습니다</li>}</ul>
               </div>
@@ -155,7 +157,7 @@ export default function UsagePage() {
           </table>
         </div>
         <p className="mt-2 text-xs text-ink-2">팩(여러 개 구매 가능): {addons.map((a: any) => `${a.name} 월 ${won(a.monthly_krw)}`).join(' · ')}</p>
-        <p className="mt-1 text-xs text-ink-3">카드 결제는 위 결제 칸에서 바로, 팩·인원 조정 등은 변경 요청을 보내면 운영자가 확인해 반영합니다. AI 는 회사 전체가 나눠 쓰고(대화 1회 약 50원 기준), 하루 1인 사용 횟수 제한은 AI 설정에서 바꿉니다.</p>
+        <p className="mt-1 text-xs text-ink-3">카드 결제는 위 결제 칸에서 바로, 팩·인원 조정 등은 변경 요청을 보내면 운영자가 확인해 반영합니다. AI 는 회사 전체가 나눠 쓰고, 하루 1인 사용 횟수 제한은 AI 설정에서 바꿉니다.</p>
         {!!requests.length && (
           <ul className="mt-3 space-y-1 text-xs text-ink-2">
             {requests.map((r: any) => <li key={r.id}>{fmtDateTime(r.created_at)} · {r.requested_by_name} · {r.plan_code ? plans.find((p: any) => p.code === r.plan_code)?.name ?? r.plan_code : '추가 옵션'} · <b>{{ pending: '검토 중', approved: '반영됨', rejected: '반려' }[r.status as 'pending']}</b></li>)}

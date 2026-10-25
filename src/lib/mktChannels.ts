@@ -9,6 +9,7 @@ import { audit, logError } from './log';
 import { appUrl } from './mail';
 import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
+import { seesInternals } from './customerScope';
 import { metaDialog, metaGraph } from './metaGraph';
 import { META_LEAD_SCOPES, enableLeadPage, hasLeadScopes } from './metaLeads';
 
@@ -304,22 +305,23 @@ const SIGNUP: Record<string, [string, string]> = {
   ads_google: ['https://ads.google.com/', 'Google Ads 계정이 있나요?'],
 };
 export async function homeChannels(u: SessionUser): Promise<HomeChannel[]> {
-  const sql = db(); const t = tenantOf(u);
+  const sql = db(); const t = tenantOf(u); const full = seesInternals(u); // #602: 토큰 오류 원인·앱 심사 상태는 슈퍼관리자·내부 테넌트만
   const { AD_PROVIDERS, providerReady } = await import('./marketingAds');
   const sets = new Map((await sql<{ channel: string; enabled: boolean }[]>`select channel, enabled from mkt_channel_settings where tenant = ${t}`).map((r) => [r.channel, r.enabled]));
   const pubs = await sql<{ provider: string; label: string; status: string; last_error: string | null }[]>`select provider, label, status, last_error from mkt_publish_accounts where tenant = ${t} and status <> 'disconnected' order by created_at`;
   const ads = await sql<{ provider: string; label: string; status: string; last_error: string | null }[]>`select provider, label, status, last_error from mkt_ad_accounts where tenant = ${t} and status <> 'disconnected' order by created_at`;
   const pick = (rows: typeof pubs, providers: string[]) => { const r = rows.filter((a) => providers.includes(a.provider)); const bad = r.find((a) => a.status === 'error');
-    return { state: (bad ? 'broken' : r.length ? 'connected' : 'none') as HomeChannel['state'], account: (bad ?? r[0])?.label ?? null, error: bad?.last_error ?? null }; };
+    return { state: (bad ? 'broken' : r.length ? 'connected' : 'none') as HomeChannel['state'], account: (bad ?? r[0])?.label ?? null, error: full ? (bad?.last_error ?? null) : null }; };
+  const pend = (why: string) => (full ? why : '준비 중 — 그동안 게시 도우미(복사·열기)');
   const out: HomeChannel[] = [];
   for (const k of ['instagram', 'facebook', 'threads', 'youtube'] as ChannelKey[]) {
     const c = PUBLISH_CHANNELS.find((x) => x.key === k)!;
     const ready = kindReady(c.kind);
     out.push({ key: k, label: c.label, kind: 'publish', ...pick(pubs, c.providers), connect: ready ? `/api/marketing/publish/connect/${c.kind === 'meta' ? 'meta' : c.kind === 'threads' ? 'threads' : 'youtube'}` : null,
       // 대표 10/20 6): 준비 중이면 무엇이 막는지 한 줄(로컬이 대표에게 전달)
-      pending: ready ? null : k === 'threads' ? (metaReady() ? 'Meta 앱 심사 필요: threads_basic·threads_content_publish(화면 녹화 제출) — 심사 후 열림, 그동안 게시 도우미' : 'Meta 앱 ID/시크릿 없음 → 앱 심사(threads_basic·threads_content_publish) 전 — 그동안 게시 도우미')
+      pending: ready ? null : pend(k === 'threads' ? (metaReady() ? 'Meta 앱 심사 필요: threads_basic·threads_content_publish(화면 녹화 제출) — 심사 후 열림, 그동안 게시 도우미' : 'Meta 앱 ID/시크릿 없음 → 앱 심사(threads_basic·threads_content_publish) 전 — 그동안 게시 도우미')
         : k === 'youtube' ? 'Google OAuth 클라이언트 + YouTube Data API 업로드 범위(youtube.upload) 심사 필요 — 준비 중, 그동안 게시 도우미'
-        : c.kind === 'meta' ? '심사 후 열림 — 그동안 게시 도우미' : '준비 중 — 그동안 게시 도우미', signup: SIGNUP[k][0], ask: SIGNUP[k][1] });
+        : c.kind === 'meta' ? '심사 후 열림 — 그동안 게시 도우미' : '준비 중 — 그동안 게시 도우미'), signup: SIGNUP[k][0], ask: SIGNUP[k][1] });
   }
   for (const k of ['naver_blog', 'kakao_channel'] as ChannelKey[]) {
     const c = PUBLISH_CHANNELS.find((x) => x.key === k)!;
@@ -327,7 +329,7 @@ export async function homeChannels(u: SessionUser): Promise<HomeChannel[]> {
   }
   for (const p of ['naver', 'google'] as const) {
     out.push({ key: `ads_${p}`, label: AD_PROVIDERS[p], kind: 'ads', ...pick(ads, [p]), connect: p === 'naver' ? 'naver_form' : providerReady(p) ? `/api/marketing/ads/connect/${p}` : null,
-      pending: providerReady(p) ? null : '준비 중(워크인 앱 등록·심사 대기)', signup: SIGNUP[`ads_${p}`][0], ask: SIGNUP[`ads_${p}`][1] });
+      pending: providerReady(p) ? null : pend('준비 중(워크인 앱 등록·심사 대기)'), signup: SIGNUP[`ads_${p}`][0], ask: SIGNUP[`ads_${p}`][1] });
   }
   return out;
 }

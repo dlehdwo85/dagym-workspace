@@ -5,6 +5,7 @@ import { assertSpace } from '../../spaces';
 import { forbidden, notFound } from '../../errors';
 import { audit, logError } from '../../log';
 import { tenantOf, type SessionUser } from '../../types';
+import { CUSTOMER_COPY, INTERNAL_TENANT, collectorState, seesInternals } from '../../customerScope';
 import { completeRun, mergeNoticeDuplicates, startRun } from './store';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 import { kaptBidNotices, kaptBidResults, kaptSaSun, operatingFromKapt } from './kapt';
@@ -99,19 +100,28 @@ export async function collectorAlertTick(now = new Date()) {
   const alerts = await collectorAlerts(now.getTime()); if (!alerts.length) return { alerts: 0 };
   const sql = db(); const day = kstDay(now);
   const { superAdmin } = await import('../../superAdmin'); // 142차 후속: 플랫폼 운영자 쪽은 슈퍼관리자만
-  const people = (await sql<{ id: string; email: string; pa: boolean; mine: boolean }[]>`select u.id, u.email, coalesce(u.platform_admin, false) as pa, (t.spaces @> array['sales']::text[] and u.role in ('owner', 'admin')) as mine
+  const people = (await sql<{ id: string; email: string; tenant: string; pa: boolean; mine: boolean }[]>`select u.id, u.email, u.tenant, coalesce(u.platform_admin, false) as pa, (t.spaces @> array['sales']::text[] and u.role in ('owner', 'admin')) as mine
     from users u join tenants t on t.id = u.tenant where u.status = 'active' and not coalesce(u.is_demo, false)
       and ((t.spaces @> array['sales']::text[] and u.role in ('owner', 'admin')) or coalesce(u.platform_admin, false))`).filter((p) => p.mine || superAdmin(p.email, p.pa));
   if (!people.length) return { alerts: alerts.length, notified: 0 };
   const title = `영업 DB 수집 누락 위험 ${alerts.length}곳 — ${alerts.slice(0, 2).map((a) => a.label).join(' · ')}${alerts.length > 2 ? ' 외' : ''}`;
   const body = alerts.slice(0, 6).map((a) => `${a.label}: ${a.reason}${a.error ? ` (${a.error.slice(0, 70)})` : ''}`).join('\n');
   const { notify } = await import('../../notifications');
-  const sent = await notify(sql, { userIds: people.map((p) => p.id), type: 'sales_collector_alert', title, body, link: '/s/sales/sources#collectors', entityType: 'sales_collector', actorId: null, dedupeKey: `salescol:${day}`, space: 'sales' });
+  // #602: 원천 이름·HTTP 코드·연속 실패 수는 슈퍼관리자·내부 테넌트에게만. 고객사 관리자에게는 '오늘 새 공고를 받지 못했습니다' 한 줄
+  const seesAll = (p: { email: string; pa: boolean; tenant: string }) => superAdmin(p.email, p.pa) || p.tenant === INTERNAL_TENANT;
+  const ins = people.filter(seesAll), cust = people.filter((p) => !seesAll(p));
+  const common = { type: 'sales_collector_alert', link: '/s/sales/sources#collectors', entityType: 'sales_collector', actorId: null, dedupeKey: `salescol:${day}`, space: 'sales' } as const;
+  const sent = [
+    ...(ins.length ? await notify(sql, { ...common, userIds: ins.map((p) => p.id), title, body }) : []),
+    ...(cust.length ? await notify(sql, { ...common, userIds: cust.map((p) => p.id), title: '오늘 새 공고를 받지 못했습니다', body: CUSTOMER_COPY.todayMissed }) : []),
+  ];
   return { alerts: alerts.length, notified: sent.length };
 }
-/** 회사 화면: 수집기 목록(상태·마지막 실행·회사 켜기)·최근 실행 20건·필요 env 존재 여부(값은 안 보여줌) */
+/** 회사 화면: 수집기 목록(상태·마지막 실행·회사 켜기)·최근 실행 20건·필요 env 존재 여부(값은 안 보여줌)
+ *  #602(대표 10/25): 고객사(슈퍼관리자·내부 테넌트 아님)에게는 연결 상태 3가지(연결됨 / 신청 필요 / 연결 안 됨)·연결 방법·'받았습니다 n건'만 —
+ *  키 이름·원천 주소·오류 원인·원천별 상세·공용 실행 기록은 서버가 아예 내려보내지 않는다(docs/handoff/SUPER_ADMIN_SCOPE_2026-10-25.md §2) */
 export async function collectorsView(u: SessionUser) {
-  await assertSpace(u, 'sales'); const sql = db(); const t = tenantOf(u);
+  await assertSpace(u, 'sales'); const sql = db(); const t = tenantOf(u); const full = seesInternals(u);
   const states = new Map((await sql<any[]>`select slug, enabled, last_run_at, last_status from sales_collector_state`).map((r) => [r.slug, r]));
   const mine = new Map((await sql<{ slug: string; enabled: boolean }[]>`select slug, enabled from sales_collector_settings where tenant = ${t}`).map((r) => [r.slug, r.enabled]));
   const last = new Map((await sql<any[]>`select distinct on (slug) slug, started_at, finished_at, status, inserted, updated, unchanged, errors, summary, error_log, detail from sales_collector_runs order by slug, started_at desc`).map((r) => [r.slug, r]));
@@ -119,8 +129,21 @@ export async function collectorsView(u: SessionUser) {
   const counts = Object.fromEntries((await sql<{ st: string; n: number }[]>`select row->>'source_type' as st, count(*)::int as n from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone group by 1`).map((r) => [r.st, r.n]));
   const runs = await sql<any[]>`select id, slug, trigger, started_at, finished_at, status, inserted, updated, unchanged, errors, summary, error_log from sales_collector_runs order by started_at desc limit 30`;
   const ready = new Map(await Promise.all(COLLECTORS.filter((c) => c.keyReady).map(async (c) => [c.slug, await c.keyReady!().catch(() => false)] as const))); // 플랫폼 운영에 넣은 키도 '있음'
-  return { canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, counts, alerts: await collectorAlerts().catch(() => []),
-    collectors: COLLECTORS.map((c) => ({ slug: c.slug, label: c.label, hourKst: c.hourKst, againKst: c.againKst ?? null, hours: hoursOf(c), source: c.source, bid: BID_COLLECTORS.has(c.slug), support: SUPPORT_COLLECTORS.has(c.slug), needs: (c.needs ?? []).map((k) => ({ key: k, present: env(k) || !!ready.get(c.slug) })), globalEnabled: states.get(c.slug)?.enabled ?? true, enabled: mine.get(c.slug) ?? true, lastRunAt: states.get(c.slug)?.last_run_at ?? null, lastStatus: states.get(c.slug)?.last_status ?? null, last: last.get(c.slug) ?? null })), runs };
+  const alerts = await collectorAlerts().catch(() => []);
+  const collectors = COLLECTORS.map((c) => {
+    const needs = (c.needs ?? []).map((k) => ({ key: k, present: env(k) || !!ready.get(c.slug) })); const st = states.get(c.slug); const l = last.get(c.slug) ?? null;
+    const base = { slug: c.slug, label: c.label, hourKst: c.hourKst, againKst: c.againKst ?? null, hours: hoursOf(c), bid: BID_COLLECTORS.has(c.slug), support: SUPPORT_COLLECTORS.has(c.slug), globalEnabled: st?.enabled ?? true, enabled: mine.get(c.slug) ?? true, lastRunAt: st?.last_run_at ?? null, lastStatus: st?.last_status ?? null };
+    if (full) return { ...base, source: c.source as string | null, needs, last: l, state: null as ReturnType<typeof collectorState> | null, how: null as string | null };
+    const missing = needs.filter((n) => !n.present && !/선택/.test(n.key)).length;
+    const state = collectorState({ globalEnabled: base.globalEnabled, missingKeys: missing, lastStatus: base.lastStatus });
+    return { ...base, source: null, needs: [] as typeof needs, state, how: state === 'apply_needed' ? (/watch/.test(c.slug) ? CUSTOMER_COPY.howWatch : CUSTOMER_COPY.howPublicData) : null, last: l ? customerRun(l) : null };
+  });
+  return { full, canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, counts, alerts: full ? alerts : alerts.map((a) => ({ ...a, reason: CUSTOMER_COPY.todayMissed, error: null })), collectors, runs: full ? runs : [] };
+}
+/** #602 고객용 실행 결과 한 줄: '받았습니다 n건' 또는 '못 받았습니다' — 오류 원문·원천별 상세·보낸 주소는 빠짐 */
+function customerRun(r: { status: string; started_at: Date; finished_at: Date | null; inserted: number; updated: number; unchanged: number }) {
+  const got = (r.inserted ?? 0) + (r.updated ?? 0) + (r.unchanged ?? 0);
+  return { status: r.status, started_at: r.started_at, finished_at: r.finished_at, inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: 0, summary: r.status === 'failed' ? CUSTOMER_COPY.notReceived : CUSTOMER_COPY.received(got), error_log: null, detail: null };
 }
 export async function setCollectorEnabled(u: SessionUser, slug: string, enabled: boolean, scope: 'tenant' | 'global' = 'tenant') {
   await assertSpace(u, 'sales'); if (!isAdmin(u)) throw forbidden('관리자만'); if (!find(slug)) throw notFound('그런 수집기가 없습니다');
@@ -137,5 +160,7 @@ export async function runCollectorManual(u: SessionUser, slug: string) {
   if (running) throw forbidden('이미 실행 중입니다 — 잠시 뒤 다시');
   const r = await runCollector(slug, 'manual', { deadlineMs: 40000 });
   await audit(db(), u.id, 'sales_collector.run', 'tenant', null, { slug, status: r.status }).catch(() => {});
-  return r;
+  if (seesInternals(u)) return r;
+  // #602 고객사: 결과는 '받았습니다 n건 / 못 받았습니다 — 연결을 확인해 주세요'만(오류 원문·원천별 상세 없음)
+  return { runId: r.runId, slug: r.slug, status: r.status, inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: 0, summary: r.status === 'failed' ? CUSTOMER_COPY.notReceived : CUSTOMER_COPY.received(r.inserted + r.updated + r.unchanged) };
 }

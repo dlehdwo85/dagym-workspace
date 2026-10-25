@@ -24,7 +24,7 @@ export function AiPeopleBudgets() {
   }
   return (
     <section id="ai-people" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-people">
-      <h2 className="text-sm font-semibold">사람별 AI 한도 <span className="font-normal text-ink-3">— {data.month} · 건별 결제 가정 정가 합계 {won(data.totalKrw)} (${data.totalUsd}) · 환율 {data.usdKrw.toLocaleString('ko-KR')}원</span></h2>
+      <h2 className="text-sm font-semibold">사람별 AI 한도 <span className="font-normal text-ink-3">— {data.month} · 건별 결제 가정 정가 합계 {won(data.totalKrw)}{data.totalUsd !== undefined && ` ($${data.totalUsd}) · 환율 ${(data.usdKrw ?? 0).toLocaleString('ko-KR')}원`}</span></h2>
       {data.pending.length > 0 && (
         <ul className="mt-2 space-y-1.5" data-testid="ai-limit-pending">
           {data.pending.map((r: any) => (

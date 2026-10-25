@@ -80,7 +80,11 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
     document.body.classList.add('modal-open');
     return () => { setTimeout(() => { if (!document.querySelector('[data-modal-root]')) document.body.classList.remove('modal-open'); }, 0); };
   }, [open]);
-  if (!open || typeof document === 'undefined') return null;
+  // 149차(#599 시뮬레이션에서 발견): 첫 화면부터 열린 창(온보딩)은 서버 HTML 엔 없고 수화 첫 렌더에서 포털로 생겨 React 수화 오류(#418)
+  // → 전체를 다시 그리면서 실행 애니메이션 덮개(LaunchIntro)가 스크립트 없이 다시 놓여 영영 안 걷혔다(새 회사 첫 로그인 = 흰 화면). 마운트 뒤에만 포털.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!open || !mounted) return null;
   // body 로 띄움: 업무 상세 패널(transform) 안에서 fixed·z-index 가 갇혀 스크롤이 안 되고 댓글 입력줄 아래로 깔리던 문제
   return createPortal(
     <div data-modal-root className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-[1px] sm:items-center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
