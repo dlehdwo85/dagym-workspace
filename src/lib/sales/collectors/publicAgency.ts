@@ -56,11 +56,20 @@ export function d2bPayload(it: any, kind: 'dmstc' | 'fclty'): (Record<string, un
     notice_type: kind === 'fclty' ? '시설 공사' : undefined, task_scope: line(g2b && `나라장터 공고번호 ${g2b}${pick(it, 'g2bPblancOdr') ? `-${pick(it, 'g2bPblancOdr')}` : ''}`, pick(it, 'excutTy') && `집행 ${pick(it, 'excutTy')}`), g2b_no: g2b };
 }
 /** 온비드 차세대 공고목록(15157216 OnbidPbancListSrvc2) — 공유·국유·기타일반재산 부동산 */
+/** #650(로컬 10/25 23:20): 차세대 온비드(www.onbid.co.kr/op/…)는 공고 상세가 폼 전송(onbidPbancNo·pbctNo·cltrNo 등 여러 값)이라 바로 가는 주소가 없음 — 공고 검색 화면 주소 + 공고번호 안내, 받은 번호들은 onbid_ids 에 보관 */
+export const ONBID_SEARCH_URL = 'https://www.onbid.co.kr/op/cltrpbancinf/pbanc/pbancsrch/PbancClgInqController/mvmnSrchPbancClg.do';
+const onbidIds = (it: any) => {
+  const o: Record<string, string> = {};
+  for (const [k, ...alts] of [['cltrNo', 'onbidCltrno', 'cltrno'], ['pbctNo'], ['pbctCdtnNo'], ['cltrHstrNo', 'cltrHisNo'], ['plnmNo'], ['scrnGrpCd', 'cltrScrnGrpCd'], ['prptDivCd', 'cltrPrptDivCd'], ['pbancMngNo']]) { const v = pick(it, k, ...alts); if (v) o[k] = String(v); }
+  return Object.keys(o).length ? o : null;
+};
 export function onbidPayload(it: any): Record<string, unknown> | null {
   const no = pick(it, 'onbidPbancNo', 'pbancMngNo', 'pbctNo'), title = pick(it, 'onbidPbancNm'); if (!no || !title) return null;
   const sports = title.match(SPORTS)?.[0]; const dsps = pick(it, 'dspsMthodNm');
   if (pick(it, 'dspsMthodCd') === '0001' || onbidSale({ source_type: 'onbid_lease', bid_category: dsps, title })) return null; // #537 후속2: 매각(재산 팔기)은 영업 대상 아님 — 임대·사용허가만
-  return { source_type: 'onbid_lease', source_external_id: no, notice_no: no, source_url: 'https://www.onbid.co.kr', title, issuer: pick(it, 'orgNm') ?? '온비드(한국자산관리공사)', demand_agency: pick(it, 'rspbSbrNm'),
+  const ids = onbidIds(it); const att = pick(it, 'atchFileUrl', 'attachFileUrl', 'fileUrl', 'pbancFileUrl'); // 첨부 주소 칸이 오면 저장(응답 칸 이름은 운영에서 확인)
+  return { source_type: 'onbid_lease', source_external_id: no, notice_no: no, source_url: ONBID_SEARCH_URL, ...(ids ? { onbid_ids: ids } : {}), ...(att ? { attachment_urls: [{ name: pick(it, 'atchFileNm', 'fileNm') ?? '공고문', url: String(att) }] } : {}),
+    title, issuer: pick(it, 'orgNm') ?? '온비드(한국자산관리공사)', demand_agency: pick(it, 'rspbSbrNm'),
     posted_date: pick(it, 'pbancYmd'), deadline_at: pick(it, 'cltrBidEndDt'), opening_at: pick(it, 'cltrOpbdDt'), contract_method: pick(it, 'bidDivNm'), notice_state: pick(it, 'pbancKindNm'),
     bid_category: dsps ?? '임대', notice_type: [pick(it, 'prptDivNm'), dsps].filter(Boolean).join(' ') || '공유재산 임대', task_scope: line(pick(it, 'cltrBidBgngDt') && `입찰 ${short(pick(it, 'cltrBidBgngDt'))}~${short(pick(it, 'cltrBidEndDt')) ?? ''}`, pick(it, 'pbctNsq') && `${pick(it, 'pbctNsq')}회차`),
     ...(sports ? { fit_hint: '다짐', fit_words: [sports] } : {}) };

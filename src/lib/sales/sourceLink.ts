@@ -37,6 +37,8 @@ export function searchHint(r: { source?: unknown; url?: unknown; externalId?: un
     return { site: '나라장터', home: 'https://www.g2b.go.kr', label: '사전규격 등록번호', no: reg };
   }
   let u: URL; try { u = new URL(url); } catch { return null; }
+  // #650(로컬 10/25 23:20): 차세대 온비드는 공고 상세가 폼 전송이라 바로 가는 주소가 없음 — 공고 검색 화면 주소 + 공고번호 안내
+  if (/(^|\.)onbid\.co\.kr$/i.test(u.hostname) && /PbancClgInqController/.test(u.pathname)) return { site: '온비드 공고 검색', home: url, label: '공고번호', no };
   if (u.pathname.replace(/\/+$/, '') !== '' || u.search) return null; // 첫 화면 주소만
   const h = HOMES.find(([re]) => re.test(u.hostname));
   return h ? { site: h[1], home: h[2], label: '공고번호', no } : null;

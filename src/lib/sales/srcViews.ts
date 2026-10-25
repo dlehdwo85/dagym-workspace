@@ -117,7 +117,7 @@ const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); r
   detail: { tasks: pick(r, 'main_tasks', 'scope_of_work', 'tasks'), qualification: pick(r, 'qualification', 'participation_requirements', 'bid_qualification'), performance: pick(r, 'performance_requirements', 'track_record'),
     regionLimit: pick(r, 'region_restriction', 'region_limit'), license: pick(r, 'license_requirements', 'license'), joint: pick(r, 'joint_bid', 'subcontract', 'consortium'), briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting'), presentation: pick(r, 'proposal_presentation', 'presentation') } }); };
 // S1-3: 원본 source_type 9값(kapt_bid·g2b_bid·nuri_bid·g2b_prespec·lh_bid·lh_prespec·d2b_bid·onbid_lease·vendor_recruit) + 예전 짧은 코드
-const SOURCE_LABEL: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집',
+export const SOURCE_LABEL: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집',
   kapt: 'K-apt', 'k-apt': 'K-apt', g2b: '나라장터', nara: '나라장터', g2b_pre: '나라장터 사전규격', nuri: '누리장터', lh: 'LH', lh_pre: 'LH 사전규격', defense: '국방', d2b: '국방', onbid: '온비드 임대', vendor: '협력사 모집' };
 /** 진행 중 입찰(SALES_SCREEN_INVENTORY 2-5·143행) — 현황 숫자와 입찰 '진행 중' 탭이 같은 기준: 관련 공고 · 마감·취소·낙찰·유찰 아님 · KST 마감일 ≥ 오늘(마감일 없으면 진행으로)
  * · 사전규격(입찰 예정)은 빼고 · 작업 상태 미참여·대상아님은 뺀다. 원본 상태 문구가 '공고중'만이 아니어서(운영 10/19 진행 중 0건) 닫힌 상태만 거른다 */

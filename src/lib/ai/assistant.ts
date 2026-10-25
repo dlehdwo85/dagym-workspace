@@ -17,6 +17,7 @@ import { RANK } from '../menuPerms';
 import { writeXlsx } from '../xlsx';
 import { anthropicProvider, aiEnabled, modelFor, costUsd, usdKrw, type AiMessage, type AiProvider, type AiTool } from './provider';
 import type { SessionUser } from '../types';
+import { readNotice, searchNotices } from '../sales/noticeLookup';
 
 /**
  * V9 워크인 AI 비서. 요청한 사람의 권한으로만 데이터를 읽고(서버 함수 재사용 — 권한 검사 그대로),
@@ -219,6 +220,13 @@ const WEB_TOOLS: AiTool[] = [
   { type: 'web_search_20260209', name: 'web_search', max_uses: 5 } as never,
   { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 } as never,
 ];
+// #650(대표 10/25 23:20 "AI 세일즈가 온비드 공고를 웹 검색으로 찾다 실패"): 공고 도구 — 웹 검색 전에 우리 영업 DB 의 원문·첨부부터. 영업 공간이거나 질문에 공고·입찰 낱말이 있을 때 붙고, more_tools 로도 받음
+const SALES_TOOLS: AiTool[] = [
+  { name: 'search_sales_notices', description: '우리 영업 DB(수집한 입찰·임대·협력사 모집 공고)에서 공고를 찾는다 — 공고 제목 일부·공고번호·발주처·단지 이름으로. "이 공고"·"○○ 공고문"처럼 공고를 말하면 웹 검색(web_search)보다 먼저 이 도구로 찾고, 결과 id 로 read_sales_notice 를 부른다.',
+    input_schema: { type: 'object', properties: { query: str('찾을 말(공고 제목 일부·공고번호·발주처·단지 이름)'), limit: { type: 'number', description: '최대 건수(기본 8)' } }, required: ['query'] } },
+  { name: 'read_sales_notice', description: '영업 DB 공고 한 건의 상세(발주처·마감·개찰·계약 방식·추정가·과업·참가 자격·연락처)와 첨부(공고문·과업지시서)의 본문 글자를 읽는다. 첨부는 서버가 받아 자료실 "영업/공고"에 저장한 뒤 글자를 뽑는다(최대 3개). 공고 요약·참가 자격·제안서 목차·질문 뽑기는 이 결과를 근거로 답한다.',
+    input_schema: { type: 'object', properties: { id: str('search_sales_notices 결과의 id') }, required: ['id'] } },
+];
 
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 아래 [우리 회사] 직원을 돕습니다. 그 회사의 업종·사업 방향·말투에 맞춰 답하고, 다른 회사 이야기를 지어내지 마세요.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
@@ -250,6 +258,30 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 type Ctx = { allTools?: boolean; u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean; threadId?: string; docJobs?: { id: string; title: string; kind: string; version: number; status: string }[] };
 const clip = (s: unknown, n = 400) => (typeof s === 'string' ? (s.length > n ? s.slice(0, n) + '…' : s) : s);
 const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+/** #650(대표 10/25 23:20 캡처 첫 줄 "Results are JSON strings; parse."): 모델이 도구 결과의 안내·형식 문장을 답에 옮겨 적은 줄만 지운다 — 우리 소스·SDK 에 없는 문장이라 모델이 도구 결과 설명을 그대로 쓴 것 */
+const TOOL_NOISE = /^\s*(?:results?\s+(?:are|is)\s+(?:json|text|string|a\s+json)[^\n]{0,80}|(?:the\s+)?(?:tool|function)[ _]?(?:results?|outputs?|calls?)\s*(?:are|is|were|:)[^\n]{0,80}|<\/?function_results>[^\n]*|\[?tool_results?\]?\s*:?[^\n]{0,80})\s*$/i;
+export function cleanReply(text: string): string {
+  if (!text || !/results?\s+(?:are|is)|tool|function_results/i.test(text)) return text;
+  const out = text.split('\n').filter((l) => !TOOL_NOISE.test(l)).join('\n');
+  return out === text ? text : out.replace(/^\s*\n+/, '').trim();
+}
+/** 스트리밍(#497 R44): 답 첫 줄이 끝날 때까지(또는 200자) 잠깐 모았다가 안내 문장이면 빼고 보낸다 — 그 뒤는 그대로 흘림 */
+function noiseSink(emit: (d: string) => void) {
+  let buf = ''; let checking = true;
+  return {
+    push(delta: string) {
+      if (!checking) return emit(delta);
+      buf += delta;
+      const nl = buf.indexOf('\n'); if (nl < 0 && buf.length < 200) return;
+      const first = nl < 0 ? buf : buf.slice(0, nl); const rest = nl < 0 ? '' : buf.slice(nl);
+      checking = false; buf = '';
+      const out = TOOL_NOISE.test(first) ? rest.replace(/^\n+/, '') : first + rest;
+      if (out) emit(out);
+    },
+    flush() { if (!checking) return; checking = false; const out = TOOL_NOISE.test(buf) ? '' : buf; buf = ''; if (out) emit(out); },
+    reset() { buf = ''; checking = true; },
+  };
+}
 
 /** 대표 지적(10/19 ①): "○○한테 ~하라고 해줘" = 업무 배정 — 규칙으로 의도 힌트(추가 AI 호출 없음). 메시지·문자·메일로 라고 하면 전달 */
 export function intentHint(text: string): string {
@@ -364,6 +396,8 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
   const u = c.u;
   switch (name) {
     case 'more_tools': { c.allTools = true; return { ok: true, note: '모든 도구를 붙였습니다 — 다음 단계에서 필요한 도구를 쓰세요' }; }
+    case 'search_sales_notices': return searchNotices(u, String(input.query ?? ''), Number(input.limit) || 8); // #650
+    case 'read_sales_notice': return readNotice(u, String(input.id ?? ''));
     case 'search_library': {
       const r = await listLibrary(u, { q: String(input.query ?? ''), folder: input.folder, limit: 10 }); // 등급·폴더 권한 밖 파일은 여기서 이미 빠짐
       if (r.files.some((f: any) => f.effective_security === 'confidential')) c.confidential = true;
@@ -784,7 +818,8 @@ async function spaceContext(u: SessionUser, space: 'sales' | 'marketing') {
     const [r] = await sql<{ n: number; fresh: number }[]>`select count(*)::int n, count(*) filter (where p.opened_on >= current_date - 7)::int fresh
       from prospects p join tenant_data_sources ts on ts.source_code = p.source_code and ts.tenant = ${t} and ts.enabled
       left join tenant_prospects tp on tp.prospect_id = p.id and tp.tenant = ${t} where coalesce(tp.status, 'new') in ('new', 'contacting')`;
-    return `\n지금 사용자는 '영업' 공간에서 묻고 있습니다(리드·영업기회·입찰·거래처 관점으로 답하세요). 진행 중 영업기회 ${r?.n ?? 0}건(최근 7일 새로 ${r?.fresh ?? 0}건) — 자세한 목록은 영업 › 영업기회 화면.`;
+    return `\n지금 사용자는 '영업' 공간에서 묻고 있습니다(리드·영업기회·입찰·거래처 관점으로 답하세요). 진행 중 영업기회 ${r?.n ?? 0}건(최근 7일 새로 ${r?.fresh ?? 0}건) — 자세한 목록은 영업 › 영업기회 화면.
+[공고 — #650] 공고문·공고 내용(참가 자격·과업·마감·첨부·요약)을 물으면 web_search 보다 먼저 search_sales_notices → read_sales_notice 로 우리 영업 DB 의 원문·첨부를 읽고, 거기 없을 때만 웹을 찾아 출처를 밝히세요. 도구 결과 안의 안내·형식 문장(예: "Results are JSON strings; parse.")은 답에 옮겨 적지 말고, 사용자에게 필요한 내용만 한국어로 쓰세요.`;
   }
   const [c] = await sql<{ pending: number; changes: number; calls: number }[]>`select (select count(*)::int from mkt_contents where tenant = ${t} and status = 'pending') pending,
       (select count(*)::int from mkt_contents where tenant = ${t} and status = 'changes') changes, (select count(*)::int from mkt_calls where tenant = ${t} and status = 'new') calls`;
@@ -839,11 +874,12 @@ const BUNDLES: [RegExp, string[]][] = [
 ];
 const MORE_TOOLS: AiTool = { name: 'more_tools', description: '이번 질문에는 자주 쓰는 도구만 붙어 있다. 일정·자료·문서·매출 등 필요한 도구가 목록에 없으면 먼저 이 도구를 불러 모든 도구를 받는다("안 된다"고 답하기 전에 반드시).',
   input_schema: { type: 'object', properties: { reason: { type: 'string', description: '필요한 일' } } } } as AiTool;
-export function toolsFor(text: string, hasFiles: boolean, all = false) {
-  if (all) return [...TOOLS, MORE_TOOLS].filter((t) => t.name !== 'more_tools');
+export function toolsFor(text: string, hasFiles: boolean, all = false, space?: string | null) {
+  if (all) return [...TOOLS, ...SALES_TOOLS, MORE_TOOLS].filter((t) => t.name !== 'more_tools');
   const want = new Set(CORE_TOOLS);
   for (const [re, names] of BUNDLES) if (hasFiles && names.includes('propose_organize_files') ? true : re.test(text)) names.forEach((n) => want.add(n));
-  return [...TOOLS.filter((t) => want.has(t.name)), MORE_TOOLS];
+  const sales = space === 'sales' || /공고|입찰|온비드|나라장터|k-?apt|과업|발주처/i.test(text) ? SALES_TOOLS : []; // #650
+  return [...TOOLS.filter((t) => want.has(t.name)), ...sales, MORE_TOOLS];
 }
 /** 조회만 하는 짧은 질문(만들기·바꾸기·배정 낱말 없음)은 빠른 모델 — 도구 여러 단계·문서·첨부는 기본 모델 */
 export function lightQuestion(text: string, hasFiles: boolean) {
@@ -864,7 +900,9 @@ const DOC_SYSTEM = `당신은 사내 서비스 "워크인"의 문서 담당 AI �
 export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, providerArg?: AiProvider, signal?: AbortSignal, onEvent?: (e: ChatEvent) => void) {
   // #497 R44 로컬 10/24: 첫 글자 시각 기록(서버 기준, 요청 받은 때부터) — first = 처음 보낸 글자, answer = 마지막 도구 단계 뒤 답 첫 글자(화면에 남는 답), chunks = 그 답을 몇 조각으로 보냈는지
   const t0 = Date.now(); const tm = { first: 0, answer: 0, chunks: 0 };
-  const onText = onEvent ? (delta: string) => { const now = Date.now(); if (!tm.first) tm.first = now; if (!tm.answer) tm.answer = now; tm.chunks++; onEvent({ type: 'text', delta }); } : undefined;
+  const onText0 = onEvent ? (delta: string) => { const now = Date.now(); if (!tm.first) tm.first = now; if (!tm.answer) tm.answer = now; tm.chunks++; onEvent({ type: 'text', delta }); } : undefined;
+  const sink = onText0 ? noiseSink(onText0) : null; // #650: 답 첫 줄의 도구 안내 문장은 화면에도 안 보냄
+  const onText = sink ? (d: string) => sink.push(d) : undefined;
   // 로컬 10/20(심사): 체험 계정도 대화는 됨(체험 조직 한도 안) — 제안 확인·자료로 채우기 등 바깥에 영향 주는 것은 그대로 막음(denyDemo)
   if (!aiEnabled()) throw notFound();
   await (await import('../menuPerms')).requireMenu(u, 'assistant', 'use'); // V13 메뉴 권한
@@ -931,7 +969,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   const c: Ctx = { u, proposals: [], confidential: false, threadId, docJobs: [] };
   // V22 웹 검색·페이지 읽기 (회사 설정으로 끄기)
-  const pick = () => { const base = docMode ? TOOLS.filter((t) => DOC_TOOL_NAMES.has(t.name)) : toolsFor(userText, !!i.fileIds?.length, c.allTools); return !docMode && settings.web_tools ? [...base, ...WEB_TOOLS] : base; };
+  const pick = () => { const base = docMode ? TOOLS.filter((t) => DOC_TOOL_NAMES.has(t.name)) : toolsFor(userText, !!i.fileIds?.length, c.allTools, i.space); return !docMode && settings.web_tools ? [...base, ...WEB_TOOLS] : base; };
   let tools = pick();
   if (i.fileIds?.length && fbConf) c.confidential = true;
   const sql = db();
@@ -941,18 +979,20 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   for (let step = 0; step < MAX_STEPS; step++) {
     if (signal?.aborted) break;
     tools = pick(); // more_tools 를 부르면 다음 단계부터 모든 도구
+    sink?.reset();
     const r = await provider.chat({ system, messages, tools, signal, ...(onText ? { onText } : {}) }).catch((e: any) => {
       if (signal?.aborted) return null; // 부록 A2: 사용자가 멈춤
       if (e instanceof HttpError) throw e; // V23-1: 크레딧 부족·요청 한도·일시 장애 문구
       throw new HttpError(502, 'ai_unavailable', `AI 서버 응답 오류${e?.status ? ` (${e.status})` : ''}. 잠시 후 다시 시도하세요.`);
     });
+    sink?.flush();
     if (!r) break;
     const used = r.usage;
     turnCost += costUsd(r.model ?? provider.model, used); inTok += used.input_tokens; outTok += used.output_tokens;
     await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose, web_searches)
       values (${tenant}, ${u.id}, ${requestId}, ${provider.name}, ${r.model ?? provider.model}, ${used.input_tokens}, ${used.output_tokens}, ${used.cache_read_input_tokens ?? 0},
         ${used.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? provider.model, used)}, ${i.space === 'sales' ? 'sales_assistant' : i.space === 'marketing' ? 'marketing_assistant' : 'assistant'}, ${(used as any).server_tool_use?.web_search_requests ?? 0})`; // #412 공간별 AI 사용량 구분
-    const text = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('\n').trim();
+    const text = cleanReply(r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('\n').trim()); // #650 도구 안내 문장 제거
     if (r.stop_reason === 'refusal') { reply = '이 요청은 처리할 수 없습니다. 다르게 요청해 주세요.'; break; }
     if (r.stop_reason === 'pause_turn') { messages.push({ role: 'assistant', content: r.content as never }); continue; }
     if (r.stop_reason !== 'tool_use') { reply = text || (r.stop_reason === 'max_tokens' ? '답이 너무 길어 중간에 끊겼습니다. 범위를 좁혀 다시 요청해 주세요.' : ''); break; }

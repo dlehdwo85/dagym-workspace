@@ -346,3 +346,23 @@ test('#649·#651(대표 10/25 23:20): 대상 업종 ≠ 우리 업종 → 해당
   assert.ok(h.support.pending >= 1 && h.support.fit === 0, `홈 카드: AI 판정 전은 pending 으로 ${JSON.stringify(h.support)}`);
   await sql`delete from support_programs where source_id like 'IND-%'`;
 });
+
+test('#649 후속(로컬 10/25 157차 확인 거짓 해당 없음 3건): 제외 업종 목록(음식점·미용·부동산)·"홍보 경비"는 대상 업종이 아님 · 프로필 "공동주택 커뮤니티시설 위탁운영" = 시설관리·스포츠 · 여러 업종 나열은 하나만 겹쳐도 통과', async () => {
+  await ctx.owner.ok('PUT', '/api/sales/support/profile', { regionSido: '경기', regionSigungu: '용인시', founded: d(-2200), size: '소기업', employees: 12, industries: ['운동·피트니스', '공동주택 커뮤니티시설 위탁운영', '소프트웨어·SaaS'], keywords: ['출입'], certs: ['벤처기업'], brands: ['다짐', '하이링크', '워크인'], interests: ['IP', '마케팅'], excludes: [], memo: '시험 회사 소개' });
+  const ins = (o) => sql`insert into support_programs ${sql({ source: 'bizinfo', regions: [], nationwide: true, hashtags: [], attachments: sql.json([]), apply_end: d(20), ...o })} returning id`.then((r) => r[0].id);
+  const [t8, t9, t10, t11, t12] = await Promise.all([
+    ins({ source_id: 'IND-8', title: '[시험] 스타트업 언론홍보·미디어 콘텐츠 확산 지원', target: '창업 7년 이내 중소기업 (단, 부동산업·유흥업 제외) ※ 홍보 경비 지원', summary: '언론 홍보 지원' }),
+    ins({ source_id: 'IND-9', title: '[시험] 벤처확인 인증준비기업 맞춤형 무료 진단', target: '중소기업\n※ 제외 업종: 음식점업, 미용업, 부동산업 등', summary: '진단 지원' }),
+    ins({ source_id: 'IND-10', title: '[시험] 공동주택 관리 업체 디지털 전환', target: '공동주택 위탁관리·시설관리 업체, 경비·청소 용역업', summary: '디지털 전환 지원' }),
+    ins({ source_id: 'IND-11', title: '[시험] 식품·뷰티·시설관리 수출 바우처', target: '식품·화장품·시설관리 업종 중소기업', summary: '여러 업종 나열' }),
+    ins({ source_id: 'IND-12', title: '[시험] 로컬 인디브랜드 성장 프로그램', target: '식품제조가공업·즉석판매제조가공업 기업', summary: '여전히 해당 없음' }),
+  ]);
+  const all = (await ctx.owner.ok('GET', '/api/sales/support?tab=all&limit=200')).items;
+  const by = (id) => all.find((x) => x.id === id);
+  for (const id of [t8, t9]) assert.ok(!by(id).rule.flags.some((f) => f.level === 'no' || /업종 대상\(/.test(f.text)), `제외 목록·경비는 업종 판단에 안 씀(제목 낱말 경고는 그대로) ${JSON.stringify(by(id).rule.flags)}`);
+  assert.notEqual(by(t8).rule.verdict, 'no'); assert.notEqual(by(t9).rule.verdict, 'no');
+  assert.ok(by(t10).rule.flags.some((f) => f.level === 'ok' && /대상 업종 시설관리 — 우리 업종/.test(f.text)), JSON.stringify(by(t10).rule.flags)); assert.notEqual(by(t10).rule.verdict, 'no');
+  assert.ok(by(t11).rule.flags.some((f) => f.level === 'ok' && /대상 업종 시설관리/.test(f.text)), `하나만 겹쳐도 통과 ${JSON.stringify(by(t11).rule.flags)}`); assert.notEqual(by(t11).rule.verdict, 'no');
+  assert.equal(by(t12).rule.verdict, 'no'); assert.ok(by(t12).rule.flags.some((f) => f.level === 'no' && /식품 업종 대상/.test(f.text)));
+  await sql`delete from support_programs where source_id like 'IND-%'`;
+});
