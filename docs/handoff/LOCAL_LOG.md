@@ -1247,3 +1247,9 @@
 - 서치콘솔: www.work-in.dev URL 접두어 속성 추가 진행(HTML 태그 인증 → 클라우드가 메타 태그 자리). 네이버 서치어드바이저는 첫 진입 시 '이용 동의' 창 → 대표 동의 뒤 진행.
 - 워크인 하단 상호: BizFooter 는 process.env.COMPANY_NAME 을 읽는데 Vercel 프로젝트·팀 환경 변수 목록에 COMPANY_NAME 이 보이지 않음(COMPANY_MAIL_ORDER_NO 만) → 어디서 오는지 확인 중.
 - 하이링크 영상: 레퍼런스 조사 보고(scratchpad/hilink-video/REFERENCES_2026-10-25.md) 받음 → 검수 문서로 정리 예정.
+
+## 2026-10-25 21:00 — 하이링크 영상 검수 문서, 서치콘솔 등록 ✅, 152차 접수
+- #620 HILINK_VIDEO_REVIEW_2026-10-25.md + HILINK_VIDEO_REFERENCES_2026-10-25.md(조사 보조 에이전트 결과, 타사 캡처 이미지는 저장소 제외) → 하이링크 사이트 세션 전달.
+- #627 구글 서치콘솔 www.work-in.dev 속성 자동 인증 ✅·sitemap.xml 제출. 네이버 서치어드바이저는 약관 동의 창(대표 동의 대기).
+- 워크인 하단 상호: Vercel 프로젝트 환경 변수 검색에 COMPANY_NAME 없음(BizFooter 는 process.env.COMPANY_NAME) → COMPANY_NAME='하이링크' 새로 추가 시도 + 재배포(결과 아래).
+- 152차(0b2e26b) #618 알림 [확인] 단추 배포 접수 — 로컬 몫(안드로이드 open:true 링크 열기·ack 알림 생략)은 다음 앱 빌드. 리드 보관함 [되돌리기] 고침 → 확인 예정.
