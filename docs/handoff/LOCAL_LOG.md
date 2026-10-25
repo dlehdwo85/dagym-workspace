@@ -1335,3 +1335,7 @@
 - ② 온비드 공고 url → www.onbid.co.kr/op/…/mvmnSrchPbancClg.do(공고 검색 화면) ✅ ③ 거짓 '해당 없음' 3건·'시설관리 업종 대상' no 근거 0건 ✅ ④ 온비드 API 첨부 칸은 확인 못 함(수집기 화면에 칸 이름 없음, 서비스 키 필요).
 - 표시값 의문: showNo=1 로 읽으면 counts.fit=880(all 882) — 숨김 포함 수가 '맞춤' 수로 나오는지 클라우드 확인 요청.
 - 네이버 SA: 대표가 주식회사 다짐(dagym-in) 계정으로 로그인 → www.work-in.dev 등록 ✅ → HTML 태그 새 값 → Vercel NEXT_PUBLIC_NAVER_SITE_VERIFICATION 교체 → 재배포 → 소유확인(보안문자 대표) → 사이트맵.
+
+## 2026-10-26 02:15 — 네이버 태그 교체(환경 변수 재생성)·재배포 중 · AI 공고문 두 번째 질문 중복 없음
+- Vercel 편집 창의 값 칸이 숨김(visibility hidden)이라 편집 저장이 안 됨 → NEXT_PUBLIC_NAVER_SITE_VERIFICATION 삭제 후 구성형으로 재생성(새 값, 생산) → 29332a8 재배포(3B3R7aeBv9…) 시작. 새 메타가 뜨면 네이버 [소유확인] → 보안문자(대표) → 사이트맵.
+- 158차 ① 후속: 같은 공고 '참가 자격만' 두 번째 질문 → tools 같음, 영문 안내 없음, 자료실 '영업/공고/[경기] 주민운동시설…' 첨부 2건 그대로(중복 생성 없음) ✅, costKrw 6.
