@@ -1123,7 +1123,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           {/* V36 4: 장소를 적으면 이동 일정 — 캘린더에서 📍·진한 테두리, 알림 따로 안 정하면 30분 전 알림이 더해짐 */}
           {f.location?.trim() && <p className="-mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800" data-testid="editor-travel"><MapPin className="size-3" />이동 있음{!f.reminders ? ' · 30분 전 알림 기본' : ''}</p>}
           {/* V30 ⑪ (#111) 화상 회의 링크 — 적으면 일정 상세에 [회의 참여] */}
-          <Field label="화상 회의 링크 (Zoom·Google Meet 등, 선택)"><input className={inputCls} inputMode="url" value={f.meetingUrl ?? ''} onChange={(e) => set('meetingUrl')(e.target.value)} placeholder="https://meet.google.com/…" data-testid="ev-meeting-url" /></Field>
+          <Field label="화상 회의 링크 (Zoom·Google Meet 등, 선택)" hint="없으면 비워 두세요 · 줌 회의 번호만 적어도 됩니다"><input className={inputCls} inputMode="url" value={f.meetingUrl ?? ''} onChange={(e) => set('meetingUrl')(e.target.value)} placeholder="https://meet.google.com/…" data-testid="ev-meeting-url" /></Field>
           <Field label="설명"><textarea className={inputCls} rows={3} value={f.description} onChange={(e) => set('description')(e.target.value)} /></Field>
         </fieldset>
         {myAtt && (

@@ -53,7 +53,7 @@ export default function Notifications() {
     }
     if (a.input === 'text') { const t = prompt(`${a.label} 내용`); if (t === null) return; text = t.trim(); if (!text) { toast.error(`${a.label} 내용을 적어 주세요`); return; } }
     try {
-      const r = await api<{ label: string; unread: number }>(`/api/notifications/${n.id}/action`, { body: { action: a.id, text } });
+      const r = await api<{ label: string; unread: number }>(`/api/notifications/${n.id}/action`, { body: { action: a.id, text, only: true } }); // 184차 #676: 목록의 [확인]은 이 줄만
       setData((d: any) => d && { ...d, unread: r.unread, items: d.items.map((x: any) => (x.id === n.id ? { ...x, action_done: r.label, read_at: x.read_at ?? new Date().toISOString(), actions: [] } : x)) });
       setDoneIds((d) => [...d, n.id]);
       window.dispatchEvent(new CustomEvent('wos-unread', { detail: { value: r.unread } }));

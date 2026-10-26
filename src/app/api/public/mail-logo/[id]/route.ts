@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { mailLogo } from '@/lib/mailbox';
 
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
-/** V21 메일 명함 로고 — 메일 프로그램이 로그인 없이 불러간다(서명된 주소만, 하루 캐시) */
+/** V21 메일 명함 로고 — 메일 프로그램이 로그인 없이 불러간다(서명된 주소만, 하루 캐시). 184차부터 새 메일은 [id]/[file] 주소 — 이 옛 주소는 이미 보낸 메일용(로고를 바꿔도 그때 로고·지워졌으면 지금 로고) */
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   try {

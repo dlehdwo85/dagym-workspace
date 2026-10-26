@@ -567,7 +567,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
               <div className="flex items-center gap-3 px-3 py-2">
                 <Avatar id={session.user.id} name={session.user.name} size={40} />
-                <div className="min-w-0 flex-1"><div className="flex items-center gap-1.5 font-semibold">{session.user.name}<RoleBadge role={session.user.role} /></div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
+                {/* 대표 결정 15-25(10/26 15:50, #462): 휴대폰 프로필 시트에서만 직책 배지를 뺌 — PC 메뉴·목록·메신저는 그대로 */}
+                <div className="min-w-0 flex-1"><div className="flex items-center gap-1.5 font-semibold" data-testid="more-sheet-name">{session.user.name}</div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
                 <button onClick={() => setMore(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button>
               </div>
               {/* 대표 확정 10/22(#422 b): 하단 '더보기'를 없애고 이 시트는 오른쪽 위 프로필 버튼으로 연다 — '만들기' 줄은 뺌(업무 화면 [업무 추가]·캘린더·리드 화면에 있음, 음성은 업무 등록 창 안 [음성]) */}

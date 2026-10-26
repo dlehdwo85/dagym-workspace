@@ -12,7 +12,7 @@ export const FIELD_LABEL: Record<string, string> = {
   options: '선택지', aggregate: '집계 방식', trigger: '실행 조건', conditions: '조건', actions: '동작', kind: '종류', agree: '개인정보 동의',
   photo: '사진', view: '보기', from: '시작일', to: '종료일', q: '검색어', limit: '개수', color: '색', tags: '태그', version: '버전',
   sectionId: '섹션', parentId: '상위 업무', intoId: '통합 대상 업무', comment: '의견', decision: '결재 결과', value: '값',
-  hoursBefore: '알림 시점', dueInDays: '마감까지 일수', scope: '적용 범위', occurrenceStart: '반복 회차',
+  hoursBefore: '알림 시점', dueInDays: '마감까지 일수', scope: '적용 범위', occurrenceStart: '반복 회차', meetingUrl: '화상 회의 링크',
 };
 
 const kind = (t: unknown) => (t === 'string' ? '글자' : t === 'number' ? '숫자' : t === 'boolean' ? '예/아니오' : t === 'array' ? '목록' : '값');

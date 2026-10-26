@@ -8,13 +8,24 @@ import { hasOccurrenceFrom, normalizeRule, occurrences, ruleRemainingFrom, ruleU
 import { tenantOf, type SessionUser } from './types';
 import { zUuid } from './api';
 
+/** 184차(대표 10/26 18:00 '회의 링크를 필수로 입력해야 하는 줄'): 빈칸 = 없음 · 숫자만 9~11자리 = 줌 회의 번호 → https://zoom.us/j/번호 ·
+ *  meet.google.com/…·zoom.us/j/… 처럼 주소만 적으면 https:// 를 붙임 */
+export function meetingLink(v: string | undefined) {
+  if (v === undefined) return v;
+  const s = v.trim();
+  if (!s) return '';
+  const digits = s.replace(/[\s-]/g, '');
+  if (/^\d{9,11}$/.test(digits)) return `https://zoom.us/j/${digits}`;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(s) && /^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/.test(s)) return `https://${s}`;
+  return s;
+}
 export const eventInput = z.object({
   calendarId: zUuid,
   title: z.string().trim().min(1, '제목을 입력하세요').max(200),
   description: z.string().max(20000).optional(),
   location: z.string().max(300).optional(),
   /** V30 ⑪ (#111) 화상 회의 링크(Zoom·Google Meet 등) */
-  meetingUrl: z.string().trim().max(500).optional().refine((v) => !v || /^https?:\/\/\S+$/.test(v), '화상 회의 링크는 http(s) 주소여야 합니다'),
+  meetingUrl: z.string().trim().max(500).optional().transform(meetingLink).refine((v) => !v || /^https?:\/\/\S+$/.test(v), '회의 주소를 붙여 넣어 주세요(예: https://zoom.us/j/…) — 없으면 비워 두세요'),
   kind: z.enum(['normal', 'vacation', 'half_day', 'outside', 'business_trip', 'task_block']).optional(),
   allDay: z.boolean().optional(),
   start: z.string().datetime({ offset: true }),

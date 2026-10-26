@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import nodemailer from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { db, type Sql } from './db';
 import { decrypt, encrypt, hmac, newToken, sha256 } from './crypto';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
@@ -10,6 +10,7 @@ import { notify } from './notifications';
 import { appUrl } from './mail';
 import { menuLevel, requireMenu, RANK } from './menuPerms';
 import { companyProfiles, type CompanyProfile } from './companyProfiles';
+import { krPhone } from './phone';
 import { tenantOf, type SessionUser } from './types';
 
 /**
@@ -256,7 +257,9 @@ export async function deleteMailAccount(u: SessionUser, ip: string | null) {
 
 // ---------------- 메일 명함 ----------------
 const esc = (s: string | null | undefined) => (s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-export const logoUrl = (p: { id: string; logo_file_id: string | null }) => (p.logo_file_id ? `${appUrl()}/api/public/mail-logo/${p.id}?s=${hmac(`mail-logo:${p.id}:${p.logo_file_id}`).slice(0, 24)}` : null);
+/** 184차(로컬 10/26 18:25 A안): 주소에 로고 파일 id 를 넣는다 — 로고를 바꿔도 지난 메일은 보낸 때 로고 그대로(옛 주소 형식도 mailLogo 가 계속 받음) */
+const logoSig = (profileId: string, fileId: string) => hmac(`mail-logo:${profileId}:${fileId}`).slice(0, 24);
+export const logoUrl = (p: { id: string; logo_file_id: string | null }) => (p.logo_file_id ? `${appUrl()}/api/public/mail-logo/${p.id}/${p.logo_file_id}?s=${logoSig(p.id, p.logo_file_id)}` : null);
 export const signatureInput = z.object({
   key: z.string().regex(/^[a-z0-9_-]{2,30}$/),
   sigIntro: z.string().trim().max(300).nullable().optional(),
@@ -295,7 +298,8 @@ export function cardAddress(a: string | null | undefined) {
 export function signatureHtml(p: SigProfile, s: Sender) {
   const color = p.brand_color ?? '#0F766E';
   const logo = logoUrl(p);
-  const line = (label: string, v: string | null | undefined, href?: string) => v ? `<tr><td style="padding:1px 0;color:#64748b;font-size:12px;width:44px">${label}</td><td style="padding:1px 0;font-size:12px;color:#334155">${href ? `<a href="${esc(href)}" style="color:#334155;text-decoration:none">${esc(v)}</a>` : esc(v)}</td></tr>` : '';
+  // 184차 #712(대표 10/26 18:00): 한 글자 영문 약자(T·M·F·E·W·A) 대신 한글 라벨 · 라벨 칸 폭 고정 · #711 번호는 한국 표기(하이픈)
+  const line = (label: string, v: string | null | undefined, href?: string) => v ? `<tr><td style="padding:1px 8px 1px 0;color:#94a3b8;font-size:11px;width:56px;white-space:nowrap;vertical-align:top">${label}</td><td style="padding:1px 0;font-size:12px;color:#334155">${href ? `<a href="${esc(href)}" style="color:#334155;text-decoration:none">${esc(v)}</a>` : esc(v)}</td></tr>` : '';
   const web = p.website ? (/^https?:\/\//.test(p.website) ? p.website : `https://${p.website}`) : null;
   return `<table cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;border-collapse:collapse;font-family:'Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif" data-sig="${esc(p.key)}">
 <tr><td colspan="2" style="border-top:2px solid ${color};padding:0;height:12px;line-height:12px;font-size:0">&nbsp;</td></tr>
@@ -304,20 +308,20 @@ export function signatureHtml(p: SigProfile, s: Sender) {
 <div style="font-size:15px;font-weight:bold;color:#0f172a">${esc(s.name)}${s.title ? ` <span style="font-size:12px;font-weight:normal;color:#475569">${esc(s.title)}</span>` : ''}</div>
 <div style="font-size:13px;font-weight:bold;color:${color};margin:2px 0 6px">${esc(p.name)}</div>
 <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
-${line('T', p.phone, p.phone ? `tel:${p.phone.replace(/[^0-9+]/g, '')}` : undefined)}${line('M', s.phone, s.phone ? `tel:${s.phone.replace(/[^0-9+]/g, '')}` : undefined)}${line('F', p.fax)}
-${s.email ? line('E', s.email, `mailto:${s.email}`) : ''}${line('W', p.website, web ?? undefined)}${line('A', cardAddress(p.address))}
+${line('대표번호', krPhone(p.phone), p.phone ? `tel:${p.phone.replace(/[^0-9+]/g, '')}` : undefined)}${line('휴대폰', krPhone(s.phone), s.phone ? `tel:${s.phone.replace(/[^0-9+]/g, '')}` : undefined)}${line('팩스', krPhone(p.fax))}
+${s.email ? line('이메일', s.email, `mailto:${s.email}`) : ''}${line('홈페이지', p.website, web ?? undefined)}${line('주소', cardAddress(p.address))}
 </table></td></tr>
 ${p.sig_intro ? `<tr><td colspan="2" style="padding:10px 0 0;font-size:12px;color:#475569">${esc(p.sig_intro)}</td></tr>` : ''}
 ${p.sig_disclaimer || p.sig_disclaimer_en ? `<tr><td colspan="2" style="padding:10px 0 0;font-size:10px;line-height:1.5;color:#94a3b8">${esc(p.sig_disclaimer)}${p.sig_disclaimer && p.sig_disclaimer_en ? '<br>' : ''}${esc(p.sig_disclaimer_en)}</td></tr>` : ''}
 </table>`;
 }
 export function signatureText(p: SigProfile, s: Sender) {
-  return ['--', `${s.name}${s.title ? ' ' + s.title : ''}`, p.name, [p.phone && `T ${p.phone}`, s.phone && `M ${s.phone}`].filter(Boolean).join(' · '), s.email, p.website, cardAddress(p.address)]
+  return ['--', `${s.name}${s.title ? ' ' + s.title : ''}`, p.name, [p.phone && `대표번호 ${krPhone(p.phone)}`, s.phone && `휴대폰 ${krPhone(s.phone)}`].filter(Boolean).join(' · '), s.email, p.website, cardAddress(p.address)]
     .filter(Boolean).join('\n');
 }
 /** V32 7-2 문자 서명(명함형 3줄): "이름 직급 · 회사" / "휴대폰 010-…" / "메일 …" — 보내는 직원 프로필에서, 없는 칸은 생략. 회사 대표번호는 회사 설정 '서명에 대표번호도 넣기'일 때만(기본 끔) */
 export const smsSignLine = (p: CompanyProfile, s: Sender, companyPhone = false) =>
-  [`${s.name}${s.title ? ' ' + s.title : ''} · ${p.name}`, s.phone ? `휴대폰 ${s.phone}` : '', s.email ? `메일 ${s.email}` : '', companyPhone && p.phone ? `대표 ${p.phone}` : ''].filter(Boolean).join('\n');
+  [`${s.name}${s.title ? ' ' + s.title : ''} · ${p.name}`, s.phone ? `휴대폰 ${krPhone(s.phone)}` : '', s.email ? `메일 ${s.email}` : '', companyPhone && p.phone ? `대표 ${krPhone(p.phone)}` : ''].filter(Boolean).join('\n');
 /** V32 7-2 회사 설정: 문자 서명에 회사 대표번호도 넣기 */
 export async function getSmsSign(u: SessionUser) {
   const [r] = await db()<{ sms_sign_phone: boolean }[]>`select sms_sign_phone from tenants where id = ${tenantOf(u)}`;
@@ -478,7 +482,7 @@ export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip
   if (!profile) throw notFound('회사 정보가 없습니다');
   // 명함 학습: 직급·휴대폰이 비어 있으면 이번에 받은 값을 프로필에 저장
   if (i.senderTitle || i.senderPhone || i.senderWorkEmail) {
-    await sql`update users set title = coalesce(nullif(title, ''), ${i.senderTitle || null}), phone = coalesce(nullif(phone, ''), ${i.senderPhone || null}),
+    await sql`update users set title = coalesce(nullif(title, ''), ${i.senderTitle || null}), phone = coalesce(nullif(phone, ''), ${krPhone(i.senderPhone || null)}),
       work_email = coalesce(nullif(work_email, ''), ${i.senderWorkEmail || null}), updated_at = now() where id = ${u.id}`;
   }
   const me = await sender(u.id, sql);
@@ -769,13 +773,32 @@ export async function shareDownload(token: string, n: number, ip: string | null,
   return downloadUrl(a.storage_key, f.name, false);
 }
 
-/** 메일 명함 로고(메일 프로그램이 로그인 없이 불러감) — 서명된 주소만 */
-export async function mailLogo(profileId: string, sig: string) {
-  const [p] = await db()<{ logo_file_id: string | null; storage_key: string | null; file_name: string | null }[]>`select p.logo_file_id, f.storage_key, f.file_name
-    from company_profiles p left join library_files f on f.id = p.logo_file_id where p.id = ${profileId}`;
-  if (!p?.logo_file_id || !p.storage_key || hmac(`mail-logo:${profileId}:${p.logo_file_id}`).slice(0, 24) !== sig) throw notFound();
+/** 메일 명함 로고(메일 프로그램이 로그인 없이 불러감) — 서명된 주소만.
+ *  184차(로컬 10/26 18:25): 로고를 바꾸면 지난 메일의 로고가 404 로 깨지던 것 →
+ *  새 주소 …/mail-logo/{회사정보}/{파일}?s= 는 그 파일(보낸 때 로고)을, 옛 주소 …/mail-logo/{회사정보}?s= 는 이 회사 그림 파일 중 서명이 맞는 것을 내줌.
+ *  그 파일이 자료실에서 지워졌으면 지금 로고로 대신 */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const sameSig = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+export async function mailLogo(profileId: string, sig: string, fileId?: string | null) {
+  if (!UUID_RE.test(profileId) || (fileId && !UUID_RE.test(fileId)) || !/^[A-Za-z0-9_-]{24}$/.test(sig)) throw notFound();
+  const sql = db();
+  const [p] = await sql<{ tenant: string; logo_file_id: string | null }[]>`select tenant, logo_file_id from company_profiles where id = ${profileId}`;
+  if (!p) throw notFound();
+  let signed: string | null = null;
+  if (fileId) signed = sameSig(logoSig(profileId, fileId), sig) ? fileId : null;
+  else if (p.logo_file_id && sameSig(logoSig(profileId, p.logo_file_id), sig)) signed = p.logo_file_id;
+  else { // 옛 주소 + 로고가 바뀐 뒤: 로고는 이 회사 자료실 그림 중 하나였음(회사 정보 저장 때 검사) — 지워진 파일까지 서명만 맞춰 봄
+    const cands = await sql<{ id: string }[]>`select id::text from library_files where tenant = ${p.tenant} and mime_type like 'image/%' order by created_at desc limit 5000`;
+    signed = cands.find((c) => sameSig(logoSig(profileId, c.id), sig))?.id ?? null;
+  }
+  if (!signed) throw notFound();
+  const pick = async (id: string | null) => (id ? (await sql<{ storage_key: string; file_name: string | null }[]>`select storage_key, file_name from library_files
+    where id = ${id} and tenant = ${p.tenant} and deleted_at is null and storage_key is not null`)[0] : undefined);
+  const own = await pick(signed);
+  const f = own ?? (await pick(p.logo_file_id));
+  if (!f) throw notFound();
   const { getObject } = await import('./storage');
-  return { data: await getObject(p.storage_key), name: p.file_name ?? 'logo' };
+  return { data: await getObject(f.storage_key), name: f.file_name ?? 'logo', exact: !!fileId && !!own };
 }
 
 /** 정기 실행 단계: 기한 된 행이 있으면 서울 지역 처리 주소(/api/mail/run)를 부르고, 못 부르면 여기서 직접 처리 */
@@ -929,7 +952,7 @@ export async function saveMyCard(u: SessionUser, i: z.infer<typeof myCardInput>,
     const [me] = await sql<{ work_email: string | null }[]>`select work_email from users where id = ${u.id}`;
     if ((me?.work_email ?? '') !== i.workEmail) throw forbidden('회사 설정으로 회신 주소(업무 이메일)는 관리자만 바꿀 수 있습니다');
   }
-  await sql`update users set title = coalesce(${i.title ?? null}, title), phone = coalesce(${i.phone ?? null}, phone),
+  await sql`update users set title = coalesce(${i.title ?? null}, title), phone = coalesce(${i.phone === undefined ? null : krPhone(i.phone) ?? ''}, phone),
     work_email = case when ${i.workEmail === undefined} then work_email else ${i.workEmail || null} end, updated_at = now() where id = ${u.id}`;
   await audit(sql, u.id, 'user.card', 'user', u.id, { title: i.title !== undefined, phone: i.phone !== undefined, workEmail: i.workEmail !== undefined }, ip);
   return myCard(u);

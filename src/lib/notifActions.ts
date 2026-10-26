@@ -45,10 +45,14 @@ export function actionsFor(n: NotifRow): NotifAction[] {
     default: return [ACK];
   }
 }
-/** 웹 알림 목록용: [확인]만 있는 줄은 버튼 없이(줄마다 있는 [읽음]·[보관]이 그 몫) */
-export const webActions = (a: NotifAction[]) => (a.length === 1 && a[0].id === 'ack' ? [] : a);
+/** 웹 알림 목록용 — 184차 #676(대표 10/26 15:50 '알림에서 확인 버튼이 안 뜸'): 안 읽은 줄은 [확인]만 있어도 보임(#618 모든 알림 [확인]).
+ *  읽은 줄은 [확인]만이면 버튼 없음(이미 본 알림) */
+export const webActions = (a: NotifAction[], unread = false) => (!unread && a.length === 1 && a[0].id === 'ack' ? [] : a);
+/** #676 (b) 묶음 푸시(같은 묶음 하루 2건 이상)의 버튼: [확인] = 그 묶음 오늘 안 읽은 알림 모두 읽음 · [열기] = 공통 화면(iOS 카테고리 wn.ack.view 재사용) */
+export const GROUP_ACTIONS: NotifAction[] = [ACK, { id: 'view', label: '열기', open: true }];
 
-export const actionInput = z.object({ action: z.string().min(1).max(30), text: z.string().trim().max(2000).optional() });
+/** only = 이 알림만(웹 목록의 [확인]). 없으면(푸시 버튼) 묶음 알림은 그 묶음 전체를 읽음으로 */
+export const actionInput = z.object({ action: z.string().min(1).max(30), text: z.string().trim().max(2000).optional(), only: z.boolean().optional() });
 
 /** 알림 액션 실행 → { label, unread } */
 export async function performAction(u: SessionUser, notificationId: string, i: z.infer<typeof actionInput>, ip: string | null) {
@@ -60,7 +64,7 @@ export async function performAction(u: SessionUser, notificationId: string, i: z
     from notifications n left join tasks t on n.entity_type = 'task' and t.id = n.entity_id where n.id = ${notificationId} and n.user_id = ${u.id}`;
   if (!n) throw notFound('알림을 찾을 수 없습니다');
   if (n.action_done) return { ok: true, label: n.action_done, already: true, unread: await unread(sql, u.id) };
-  const act = actionsFor(n).find((a) => a.id === i.action);
+  const act = actionsFor(n).find((a) => a.id === i.action) ?? (n.meta?.group ? GROUP_ACTIONS.find((a) => a.id === i.action) : undefined);
   if (!act) throw badRequest('이 알림에서는 할 수 없는 처리입니다 — 열어서 확인해 주세요');
   if (act.input === 'text' && !i.text) throw badRequest(`${act.label} 내용을 적어 주세요`);
   if (act.open) { // #618 [승인함 열기]·[열기]: 웹·iOS 앱은 서버를 부르지 않고 그 화면으로 간다. 옛 안드로이드 앱이 보내면 읽음만 표시하고 "눌러서 열어 주세요"(그 알림을 누르면 앱이 link 로 열림)
@@ -105,6 +109,11 @@ export async function performAction(u: SessionUser, notificationId: string, i: z
       break;
     }
     case 'ack': {
+      // #676 (b) 묶음 푸시의 [확인]: 같은 묶음·같은 날(서울) 안 읽은 알림을 이 알림까지 모두 읽음 + '확인함'
+      if (n.meta?.group && !i.only) await sql`update notifications set read_at = coalesce(read_at, now()), action_done = coalesce(action_done, ${act.done ?? '확인함'}), action_done_at = coalesce(action_done_at, now())
+        where user_id = ${u.id} and id <> ${n.id} and read_at is null and meta->>'group' = ${String(n.meta.group)}
+          and (created_at at time zone 'Asia/Seoul')::date = (select (created_at at time zone 'Asia/Seoul')::date from notifications where id = ${n.id})
+          and created_at <= (select created_at from notifications where id = ${n.id})`;
       if (n.type === 'task_assigned' && taskId) await T.ackTask(u, taskId);
       // 메신저 3차 C12: 알림 온 메시지까지 읽음(그 뒤 새 메시지는 그대로 안 읽음)
       if (n.type === 'chat' && n.entity_id) await (await import('./chat')).markRead(u, n.entity_id, /^\d{1,20}$/.test(String(n.meta?.messageId ?? '')) ? String(n.meta!.messageId) : undefined);

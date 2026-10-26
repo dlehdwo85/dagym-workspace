@@ -63,7 +63,7 @@ test('1.1.3 앱(android-actions-1) = data 전용(앱이 버튼 그림) · 옛 �
 
 // #618(대표 10/25) 모든 푸시 알림 [확인](읽음 + 지움) + 종류별 1개: 일정 [10분 뒤] · 마감 [완료](담당자만) · 승인 대기 [승인함 열기](서버 처리 없이 열기)
 // 가짜 FCM 으로 본 payload·카테고리 구조 시험 — 실제 휴대폰 버튼 표시·iOS 카테고리 등록(앱 재시작 뒤)은 로컬이 실기기에서 확인
-test('#618 [확인] 모든 알림 · 마감은 [확인]만(대표 10/25 15-13: [완료] 없음) · 일정 [10분 뒤] · 승인 대기 [승인함 열기] · 웹 목록은 [확인]만 있는 줄 버튼 없음', async () => {
+test('#618 [확인] 모든 알림 · 마감은 [확인]만(대표 10/25 15-13: [완료] 없음) · 일정 [10분 뒤] · 승인 대기 [승인함 열기] · 웹 목록은 안 읽은 줄이면 [확인]만이어도 보임(184차 #676)', async () => {
   // 기기: staffA 1.1.3 안드로이드(data 전용) · owner 아이폰(카테고리)
   const delivery = async (nid, endpoint) => {
     const [s] = await sql`select id from push_subscriptions where endpoint = ${endpoint}`;
@@ -96,10 +96,10 @@ test('#618 [확인] 모든 알림 · 마감은 [확인]만(대표 10/25 15-13: [
   assert.deepEqual([JSON.parse(mAp.data.actions).map((a) => [a.id, a.label, a.open]), mAp.apns.payload.aps.category], [[['ack', '확인', undefined], ['open', '승인함 열기', true]], 'wn.ack.open'], '승인 대기 = [확인][승인함 열기](open 표시)');
   const mAn = await sentFor('fcm-new-staffA', nAn);
   assert.deepEqual(JSON.parse(mAn.data.actions).map((a) => a.id), ['ack'], '그 밖의 알림도 [확인]');
-  // 웹 알림 목록: [확인]만 있는 줄은 버튼 없음(기존 [읽음]), 2개짜리는 그대로
+  // 웹 알림 목록(184차 #676 대표 결정): 안 읽은 줄은 [확인]만 있어도 보임(읽은 뒤에는 숨김 — fixes-184 시험), 2개짜리는 그대로
   const list = await ctx.staffA.client.ok('GET', '/api/notifications');
   const row = (id) => list.items.find((x) => x.id === id);
-  assert.deepEqual([row(nAn).actions, row(nDue).actions.map((a) => a.id), row(nEv).actions.map((a) => a.id)], [[], [], ['ack', 'snooze']]);
+  assert.deepEqual([row(nAn).actions.map((a) => a.id), row(nDue).actions.map((a) => a.id), row(nEv).actions.map((a) => a.id)], [['ack'], ['ack'], ['ack', 'snooze']]);
   // 대표 10/25 15-13: 마감 알림에 [완료]는 없음 → 서버로 보내면 400(업무는 그대로) · [확인]은 읽음 처리
   assert.equal((await ctx.staffA.client.req('POST', `/api/notifications/${nDue}/action`, { action: 'done' })).status, 400);
   assert.notEqual((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done', '업무는 완료되지 않음');

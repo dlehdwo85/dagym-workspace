@@ -31,23 +31,9 @@ export const contactInput = z.object({
 });
 export type ContactInput = z.infer<typeof contactInput>;
 
-/** 숫자만 — 010-1234-5678 · +82 10 1234 5678 · (02) 123-4567 → 01012345678 / 021234567 */
-export function normPhone(s: string | null | undefined): string | null {
-  if (!s) return null;
-  let d = s.replace(/[^0-9+]/g, '');
-  if (d.startsWith('+82')) d = '0' + d.slice(3);
-  d = d.replace(/\D/g, '');
-  return d.length >= 7 ? d : null;
-}
-/** 01012345678 → 010-1234-5678 (표시용) */
-export function fmtPhone(s: string | null | undefined): string | null {
-  const d = normPhone(s); if (!d) return s ?? null;
-  if (d.length === 11) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
-  if (d.length === 10) return d.startsWith('02') ? `${d.slice(0, 2)}-${d.slice(2, 6)}-${d.slice(6)}` : `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
-  if (d.length === 9 && d.startsWith('02')) return `${d.slice(0, 2)}-${d.slice(2, 5)}-${d.slice(5)}`;
-  if (d.length === 8) return `${d.slice(0, 4)}-${d.slice(4)}`;
-  return s ?? null;
-}
+/** 숫자만·표시용 하이픈 — 184차부터 src/lib/phone.ts 한 곳(명함·문자 서명과 같은 규칙) */
+import { normPhone, krPhone as fmtPhone } from './phone';
+export { normPhone, fmtPhone };
 function cleanInput(i: ContactInput) {
   const phone = i.phone?.trim() || null, email = i.email?.trim().toLowerCase() || null;
   if (phone && !PHONE_RE.test(phone)) throw badRequest('휴대폰 번호 형식이 아닙니다 (예: 010-1234-5678)');
