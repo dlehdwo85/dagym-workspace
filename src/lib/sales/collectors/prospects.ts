@@ -4,7 +4,8 @@ export const PROSPECT_FACILITY_TYPES = ['아파트', '오피스텔·주상복합
 export const OPERATING_STATUSES = ['운영중', '입주중', '준공', '입주예정', '미확인'] as const;
 export const SALES_LIKELIHOODS = ['상', '중', '하', '미확인'] as const;
 export const ETL_OWNED_FIELDS = ['facility_type', 'name', 'region', 'address', 'operating_status', 'completion_date', 'move_in_date', 'household_count', 'facility_scale', 'facility_scale_unit', 'scale_note', 'management_company',
-  'current_operator', 'contract_scope', 'contract_start_date', 'contract_end_date', 'source_slug', 'source_name', 'source_url', 'source_external_id', 'source_observed_at', 'sales_likelihood', 'sales_likelihood_reason', 'etl_suggested_next_action'] as const;
+  'current_operator', 'contract_scope', 'contract_start_date', 'contract_end_date', 'source_slug', 'source_name', 'source_url', 'source_external_id', 'source_observed_at', 'sales_likelihood', 'sales_likelihood_reason', 'etl_suggested_next_action',
+  'office_phone', 'amenities'] as const; // 186차: K-apt 기본·상세정보의 관리사무소 전화·부대복리시설(허브 카드 '관리사무소 전화'·'부대시설' 칸)
 export type EtlField = (typeof ETL_OWNED_FIELDS)[number];
 export const SIDO_ALIASES: Record<string, string> = { 서울특별시: '서울', 부산광역시: '부산', 대구광역시: '대구', 인천광역시: '인천', 광주광역시: '광주', 대전광역시: '대전', 울산광역시: '울산', 세종특별자치시: '세종', 경기도: '경기', 강원도: '강원',
   강원특별자치도: '강원', 충청북도: '충북', 충청남도: '충남', 전라북도: '전북', 전북특별자치도: '전북', 전라남도: '전남', 경상북도: '경북', 경상남도: '경남', 제주특별자치도: '제주', 제주도: '제주' };
@@ -50,6 +51,7 @@ export function validateProspectPayload(p: Record<string, unknown>): ValidateRes
     management_company: s(p.management_company), current_operator: s(p.current_operator), contract_scope: s(p.contract_scope), contract_start_date: ymd(p.contract_start_date), contract_end_date: ymd(p.contract_end_date),
     source_slug: sourceSlug, source_name: sourceName, source_url: sourceUrl, source_external_id: s(p.source_external_id), source_observed_at: s(p.source_observed_at),
     sales_likelihood: oneOf(p.sales_likelihood, SALES_LIKELIHOODS, '미확인'), sales_likelihood_reason: s(p.sales_likelihood_reason), etl_suggested_next_action: s(p.etl_suggested_next_action),
+    office_phone: s(p.office_phone), amenities: s(p.amenities),
     operator_explicitly_none: p.operator_explicitly_none === true && !s(p.current_operator),
   };
   if (row.contract_start_date && row.contract_end_date && String(row.contract_start_date) > String(row.contract_end_date)) return { ok: false, reason: 'contract_start_date after contract_end_date' };

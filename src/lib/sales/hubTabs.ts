@@ -5,7 +5,7 @@ import { db } from '../db';
 export const HUB_TABS = ['bids', 'buildings', 'facilities', 'vendors', 'contracts', 'prospects', 'regions'] as const;
 export type HubTab = (typeof HUB_TABS)[number];
 /** 준공·입주 시설 표(operating_facility_prospects)를 채우는 수집기 */
-const FACILITY_COLLECTORS = ['kicox_industrial_complexes', 'public_sports_facilities', 'tourist_hotels_localdata', 'reb_recent_complexes', 'operating_from_kapt', 'kapt_sa_sun'];
+const FACILITY_COLLECTORS = ['kicox_industrial_complexes', 'public_sports_facilities', 'tourist_hotels_localdata', 'reb_recent_complexes', 'kapt_new_complexes', 'operating_from_kapt', 'kapt_sa_sun'];
 
 /** 회사가 볼 허브 탭(순서는 화면 그대로). bidsOn = 입찰·공고 선택 기능(tenants.sales_bids) */
 export async function hubTabsOn(tenant: string, bidsOn: boolean): Promise<HubTab[]> {

@@ -5,7 +5,7 @@ import { sidoOf } from './sources';
 /**
  * V41 단계 3: 청약홈 분양정보 조회 서비스(data.go.kr 15098547, odcloud) 신규단지 수집기 — 영업관리 세션(applyhome_supply)에서 이식.
  * - 세 종류: 아파트 / 오피스텔·도시형·민간임대·생활숙박 / 공공지원민간임대. 업종 중립으로 다 모으고, 회사별 대상은 데이터 설정(지역·검색어·제외어)에서 거른다.
- * - 기간: 매일 최근 30일, 처음 채우기는 days=365(플랫폼 운영 화면 [처음 채우기]).
+ * - 기간: 매일 최근 30일, 처음 채우기는 days=1461(4년, 186차 로컬 10/26 19:20 B2 — 플랫폼 운영 화면 [처음 채우기 4년]). 400일 넘게 채울 때는 종류마다 60쪽(6,000건)까지.
  * - 영업 시작일 = 모집공고일(공식 값). 추정 날짜는 만들지 않음. 입주 예정월은 그 달 1일.
  * - 아파트 상세의 cond[RCRIT_PBLANC_DE::GTE] 날짜 형식은 문서에 없음 → YYYY-MM-DD 로 보내고 받은 뒤 기간을 다시 거른다(실 API 확인 필요).
  */
@@ -53,13 +53,13 @@ export async function collectApplyhome(opt: { days?: number; maxPages?: number; 
   const key = dataGoKey();
   if (!key) return { code: APPLYHOME_CODE, count: 0, error: 'DATA_GO_KR_SERVICE_KEY 없음' };
   const base = (s?.endpoint || 'https://api.odcloud.kr/api/ApplyhomeInfoDetailSvc/v1').replace(/\/$/, '');
-  const days = Math.min(Math.max(opt.days ?? 30, 1), 400);
+  const days = Math.min(Math.max(opt.days ?? 30, 1), 1500);
   const since = seoulDay(new Date(Date.now() - days * 864e5));
   let count = 0; const errors: string[] = []; const byKind: Record<string, number> = {};
   for (const kind of KINDS) {
     byKind[kind.key] = 0;
     try {
-      for (let page = 1; page <= (opt.maxPages ?? 20); page++) {
+      for (let page = 1; page <= (opt.maxPages ?? (days > 400 ? 60 : 20)); page++) {
         const u = new URL(base + kind.path);
         u.searchParams.set('page', String(page)); u.searchParams.set('perPage', '100'); u.searchParams.set('returnType', 'JSON');
         u.searchParams.set('cond[RCRIT_PBLANC_DE::GTE]', since);

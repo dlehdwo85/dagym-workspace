@@ -12,6 +12,7 @@ export const PORTAL_SERVICES: Record<string, string> = {
   kapt_bid_notices: '15058166', // 국토교통부 공동주택 입찰공고(공식 API)
   tourist_hotels_localdata: '15155090', // 행안부 관광숙박업 조회
   kstartup_support: '15125364', // 창업진흥원 K-Startup 사업공고
+  kapt_new_complexes: '15057332', 'kapt_new_complexes/apt_list': '15057332', 'kapt_new_complexes/apt_basis': '15058453', // 186차 국토교통부 공동주택 단지 목록·기본정보
 };
 
 const SERVICE_IN_TEXT = /서비스 (\d{6,9})\)/;

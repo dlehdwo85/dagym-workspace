@@ -11,7 +11,7 @@ export const GET = handler(async ({ user }) => {
   return { sources: await db()`select code, name, provider, category, endpoint, params, field_map, collect, last_run_at, last_count, last_error, (select count(*)::int from prospects p where p.source_code = s.code) as total from data_sources s order by category, name` };
 });
 const input = z.object({ code: z.string().max(20), endpoint: z.string().url().startsWith('https://').nullable().optional(), params: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
-  fieldMap: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(), collect: z.boolean().optional(), run: z.boolean().optional(), maxPages: z.number().int().min(1).max(20).optional(), days: z.number().int().min(1).max(400).optional() });
+  fieldMap: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(), collect: z.boolean().optional(), run: z.boolean().optional(), maxPages: z.number().int().min(1).max(20).optional(), days: z.number().int().min(1).max(1500).optional() }); // 186차: 청약홈 처음 채우기 4년(1,461일)
 export const POST = handler(async ({ req, user }) => {
   if (!user.platformAdmin) throw notFound();
   const i = await body(req, input);

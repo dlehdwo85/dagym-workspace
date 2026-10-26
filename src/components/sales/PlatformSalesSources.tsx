@@ -41,7 +41,7 @@ export function PlatformSalesSources() {
               <td className="whitespace-nowrap">
                 <Button size="sm" variant="secondary" disabled={busy === r.code} onClick={() => save(r, false)}>저장</Button>{' '}
                 <Button size="sm" variant="secondary" disabled={busy === r.code} onClick={() => save(r, true)}>시험 수집</Button>{' '}
-                {r.code === '15098547' && <><Button size="sm" variant="secondary" disabled={busy === r.code} onClick={() => confirm('최근 365일 분양공고를 처음으로 채웁니다(몇 분 걸릴 수 있음). 진행할까요?') && save(r, true, 365)} data-testid="applyhome-backfill">처음 채우기 365일</Button>{' '}</>}
+                {r.code === '15098547' && <><Button size="sm" variant="secondary" disabled={busy === r.code} onClick={() => confirm('최근 4년(1,461일) 분양공고를 처음으로 채웁니다(몇 분 걸릴 수 있음). 진행할까요?') && save(r, true, 1461)} data-testid="applyhome-backfill">처음 채우기 4년</Button>{' '}</>}
                 <label className="inline-flex items-center gap-1"><input type="checkbox" checked={r.collect} onChange={(x) => toggle(r, x.target.checked)} />하루 한 번</label>
               </td>
             </tr>

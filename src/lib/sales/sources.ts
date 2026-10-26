@@ -177,10 +177,18 @@ export async function removeCustomSource(u: SessionUser, id: string) {
   return { ok: true };
 }
 
+/** 입주 시기 창: 오늘(서울) 달 기준 12개월 전 1일 ~ 6개월 뒤 1일(입주 예정월은 그 달 1일로 저장) */
+export function moveInWindow(now = new Date()) {
+  const [y, m] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(now).split('-').map(Number);
+  const first = (add: number) => new Date(Date.UTC(y, m - 1 + add, 1)).toISOString().slice(0, 10);
+  return { from: first(-12), to: first(6) };
+}
 /** 영업기회 목록: 회사가 켠 원천 × (지역·검색어·제외어) — 원천 데이터는 공용, 진행 상태·메모는 회사별 */
-export async function listProspects(u: SessionUser, q: { status?: string; source?: string; q?: string; limit?: number }) {
+export async function listProspects(u: SessionUser, q: { status?: string; source?: string; q?: string; limit?: number; moveIn?: string }) {
   await assertSpace(u, 'sales');
   const sql = db(); const t = tenantOf(u);
+  // 186차(로컬 10/26 19:20 B2): 입주 시기 목록 — 입주 6개월 전 ~ 입주 후 12개월(= 입주 예정월이 12개월 전 ~ 6개월 뒤), 입주 예정월이 늦은 것부터
+  const win = q.moveIn === 'window'; const { from, to } = moveInWindow();
   const rows = await sql<any[]>`select p.id, p.name, p.address, p.sido, p.status as biz_status, to_char(p.opened_on, 'YYYY-MM-DD') as opened_on, to_char(p.closed_on, 'YYYY-MM-DD') as closed_on,
       p.category, p.detail, to_char(coalesce(p.base_date, p.fetched_at::date), 'YYYY-MM-DD') as base_date, s.code as source_code, s.name as source_name, s.provider, s.license,
       coalesce(tp.status, 'new') as status, tp.memo
@@ -194,7 +202,8 @@ export async function listProspects(u: SessionUser, q: { status?: string; source
       and (${q.q ?? ''} = '' or p.name ilike ${'%' + (q.q ?? '') + '%'} or coalesce(p.address, '') ilike ${'%' + (q.q ?? '') + '%'})
       and (${q.status ?? ''} = '' or coalesce(tp.status, 'new') = ${q.status ?? ''})
       and (${q.status ?? ''} = 'skip' or coalesce(tp.status, 'new') <> 'skip')
-    order by p.opened_on desc nulls last, p.id desc limit ${Math.min(q.limit ?? 100, 300)}`;
+      and (${win ? 1 : 0} = 0 or (p.detail->>'moveIn' >= ${from} and p.detail->>'moveIn' <= ${to}))
+    order by ${win ? sql`p.detail->>'moveIn' desc,` : sql``} p.opened_on desc nulls last, p.id desc limit ${Math.min(q.limit ?? 100, 300)}`;
   return { prospects: rows.map((r) => ({ ...r, attribution: attribution(r) })) };
 }
 export const prospectInput = z.object({ status: z.enum(['new', 'contacting', 'lead', 'skip']).optional(), memo: z.string().max(2000).optional() });

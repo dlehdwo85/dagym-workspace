@@ -116,6 +116,7 @@ import { app113 } from './app113.step.mjs';
 import { cal592 } from './cal592.step.mjs';
 import { customerSim } from './customerSim.step.mjs';
 import { captureGuard } from './captureGuard.step.mjs';
+import { moveIn186 } from './moveIn186.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -2860,6 +2861,7 @@ await step('#565 플랫폼 운영 정리(대표 10/24 저녁 1): 오늘 볼 것 
 await step('#235 마케팅 시안 품질 ⓐ·ⓔ(로컬 10/24 저녁 6): 브랜드 키트 이번 달 소식(기간 기본 30일)·잘 된 예시 글(형식별·좋은 점·빼기) → 승인한 글 [좋은 예시로 저장]·[예시에서 빼기] → 휴대폰 넘침 없음', () => mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }));
 await step('#235 ⓒ 사진 AI 설명(대표 #563): 자동 제작 › 사진 AI 설명 [설명 없는 사진 설명하기] → 숫자·사진별 설명·종류·글자·홍보물·쓰임 → 판정 고치기(글자 없음 = 바탕으로 씀)·되돌리기 → 자료실 AI 사진 설명 줄 → 휴대폰 넘침 없음', () => mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }));
 await step('#235 ⓑ 블로그 네이버 형식(대표 #256): 글 모델 블로그 줄(비용) · 사실 카드 블로그 검색 키워드 · 사진 판정 쓰지 않음(로컬 10/25) → 승인한 블로그 상세 블로그 형식 줄 · 게시 도우미 표지·사진 n 순서·[사진 n] 안내 → 휴대폰 넘침 없음', () => mktBlog({ owner, ctx, BASE, SHOTS, sql }));
+await step('186차 입주 시기 목록(로컬 10/26 19:20 B2): 영업기회 [입주 시기(6개월 전~12개월 뒤)] → 창 안 3곳만·입주 예정월 늦은 것부터·입주까지 n개월/이번 달 입주/입주 n개월 지남 → 휴대폰 넘침 없음 → 끄면 전체 · B1 수집기 칸 신규 공동주택 단지 카드(09·11·13·15시·서비스 번호)', () => moveIn186({ owner, ctx, sql, BASE, SHOTS }));
 await step('#592 휴대폰 캘린더 주 보기 구글 수준(대표 10/25): 390px 칸 40px·한 화면 14시간 이상 · 블록 11px 중간 굵기 2줄 · 앞머리 [태그] 떼기(부재 종류 유지, 일 보기 그대로) · 종일 줄 기본 켬(2개 + +1개 → 그날 목록) · 미팅 단추 둥근 48px·아래로 밀면 숨김 · 3일 48·일 64px', () => cal592({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('#599 새 고객사 시뮬레이션(대표 10/25 저녁·로컬 16:50): 시험 서버 가입 → 회사 정보·업종 → 확인 링크 → 온보딩 3단계 → 첫 화면(1366·390) → 공간 켜기 → 영업 데이터 설정 → 마케팅 첫 화면·자동 제작 → 사용량 → 알림 — SUPER_ADMIN_SCOPE §3 점검(내부 이름·수집기 문구·연결 3단계·첫날 알림·원가/모델 이름)·API 금지 낱말(#602 뒤 발견 0건 단언)', async () => {
   srv.proc.kill('SIGTERM'); await new Promise((r) => setTimeout(r, 1000));

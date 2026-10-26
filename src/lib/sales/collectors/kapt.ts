@@ -20,7 +20,7 @@ export async function kaptKey(): Promise<string | null> {
   return (await (await import('./support')).supportKeys().catch(() => null))?.datago ?? dataGoKey();
 }
 /** 활용신청 안 된 키(포털 공통 오류) → '활용신청 필요(서비스 번호)' — #172 화면이 번호로 [활용신청] 링크를 붙임 */
-const portalErr = (msg: string, service: string) => (/활용신청 필요|SERVICE_KEY_IS_NOT_REGISTERED|SERVICE ACCESS DENIED|등록되지 않은 (서비스|인증)키/i.test(msg) ? `공공데이터포털 활용신청 필요(서비스 ${service}) — 키는 그대로 두고 포털(data.go.kr)에서 [활용신청]` : msg);
+export const portalErr = (msg: string, service: string) => (/활용신청 필요|SERVICE_KEY_IS_NOT_REGISTERED|SERVICE ACCESS DENIED|등록되지 않은 (서비스|인증)키/i.test(msg) ? `공공데이터포털 활용신청 필요(서비스 ${service}) — 키는 그대로 두고 포털(data.go.kr)에서 [활용신청]` : msg);
 export const text = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
 export type KaptBidRow = { bidNum: string; system: string; awardMethod: string; title: string; deadline: string; state: string; complex: string; registeredAt: string };
 /** 목록 HTML → 행. goView('번호') 가 있는 줄만. 칸 수가 다르면 형식 변경으로 보고 버림 */
