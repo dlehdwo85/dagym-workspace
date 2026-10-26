@@ -36,7 +36,10 @@ test('시안 세트: 응답 뒤 제작은 예산 안에서만(1건) → 나머�
   let rows;
   for (let k = 0; k < 240; k++) { rows = await sql`select id, produced_at from mkt_contents where id = any(${ids}::uuid[])`; if (rows.every((x) => x.produced_at)) break; await new Promise((res) => setTimeout(res, 500)); }
   assert.ok(rows.every((x) => x.produced_at), `일시정지 중에도 시안 세트 칸은 이어서: ${JSON.stringify(rows)}`);
-  const [pr] = await sql`select detail from job_runs where job = 'mktProduce' order by id desc limit 1`;
+  // 185차 후속(CI 1478): 제작 기록(job_runs)은 runLater 가 제작을 다 마친 뒤에 남긴다 — 마지막 칸 produced_at 과 기록 사이 틈이 있어 기록도 기다린다
+  let pr;
+  for (let k = 0; k < 120 && !pr; k++) { [pr] = await sql`select detail from job_runs where job = 'mktProduce' order by id desc limit 1`; if (!pr) await new Promise((res) => setTimeout(res, 250)); }
+  assert.ok(pr, '정기 실행 제작 기록');
   assert.equal(pr.detail.sampleOnly, true); assert.equal(pr.detail.produced.length, 3, JSON.stringify(pr.detail));
   assert.equal((await sql`select count(*)::int n from mkt_contents where tenant = 'default' and rule_id is not null`)[0].n, 0, '일시정지는 그대로 — 정기 칸은 안 만듦');
 });
