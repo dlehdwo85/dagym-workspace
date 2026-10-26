@@ -4,7 +4,7 @@ import { dataGoKey } from '../collect';
 import { kaptFileList, kaptFileUrl, kaptSession } from '../files';
 import { callDataGo } from './g2b';
 import { matchFit } from './procurement';
-import { upsertKaptVendor, upsertNotices, deriveOperatingFromKapt, knownKaptVendors } from './store';
+import { upsertKaptVendor, upsertNotices, deriveOperatingFromKapt, knownKaptVendors, refitNotices } from './store';
 import { KAPT_RELEVANT_TASK } from './prospects';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 
@@ -167,10 +167,12 @@ export const kaptBidNotices: Collector = {
       try { const r = await upsertNotices(batch); inserted += r.inserted; updated += r.updated; unchanged += r.unchanged; writeErrors += r.errors; invalid += r.invalid; written += batch.length; if (r.errorLog && errors.length < 15) errors.push(r.errorLog); }
       catch (e) { writeErrors += batch.length; errors.push(`쓰기 실패 x${batch.length}: ${e instanceof Error ? e.message : String(e)}`); }
     }
+    // 185차(로컬 10/26 19:20 A4): 규칙이 바뀐 뒤에도 예전 판정('관련 아님')으로 남은 최근 공고를 다시 판정(올리기만) — 모든 원천 공고
+    const refit = left() > 4000 ? await refitNotices().catch((e) => { errors.push(`다시 판정: ${e instanceof Error ? e.message : String(e)}`); return null; }) : null;
     let direct = 0; const fitCount = { 다짐: 0, 하이링크: 0, 둘다: 0 };
     for (const r of fitRows) { const d = details.get(r.bidNum); const m = matchFit(r.title, d?.category, d?.content, '공동주택'); if (m.direct) direct++; if (m.fit === '다짐') fitCount.다짐++; else if (m.fit === '하이링크') fitCount.하이링크++; else if (m.fit) fitCount.둘다++; }
     return { inserted, updated, unchanged, errors: writeErrors + invalid + listFailures + (api.error ? 1 : 0) + (written < ordered.length ? 1 : 0), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
-      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}${filesRead || listFailed ? ` · 첨부 목록 ${filesRead}건(파일 ${listFiles}${listFailed ? `, 못 읽음 ${listFailed}` : ''})` : ''}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') };
+      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}${filesRead || listFailed ? ` · 첨부 목록 ${filesRead}건(파일 ${listFiles}${listFailed ? `, 못 읽음 ${listFailed}` : ''})` : ''}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') + (refit?.raised ? ` · 다시 판정으로 관련 ${refit.raised}건(마감 전 ${refit.reopened})` : '') };
   },
 };
 

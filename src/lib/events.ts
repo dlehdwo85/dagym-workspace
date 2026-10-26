@@ -317,7 +317,8 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
 
     const applyFields = (base: EventRow, delta?: { s: Date; e: Date }) => {
       const set: Record<string, unknown> = {};
-      for (const [k, col] of EDIT_FIELDS) if (i[k] !== undefined) set[col] = i[k];
+      // 185차(로컬 10/26 19:45): 회의 링크를 빈칸으로 고치면 빈 문자열이 아니라 '없음'(null) — 만들 때와 같게
+      for (const [k, col] of EDIT_FIELDS) if (i[k] !== undefined) set[col] = k === 'meetingUrl' ? i[k] || null : i[k];
       if (i.calendarId) set.calendar_id = i.calendarId;
       if (delta) { set.start_at = delta.s; set.end_at = delta.e; }
       return set;

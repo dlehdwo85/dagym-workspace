@@ -5,7 +5,8 @@ export const DAGYM_KEYWORDS = [
   '골프연습장', '골프장', '스크린골프', '골프', 'GX', '필라테스', '요가', '스피닝', '줌바', '커뮤니티', '주민공동시설', '주민공동', '부대복리시설', '독서실', '도서관', '작은도서관', '게스트하우스',
   '카페', '조식', '위탁운영', '운영위탁', '운영업체', '강사'] as const;
 export const HILINK_KEYWORDS = ['출입통제', '출입관리', '출입시스템', '출입구축', '출입장치', '자동출입', '통합보안', '안면인식', '얼굴인식', '생체인식', '스피드게이트', '스피드 게이트', '게이트', '키오스크', '무인', '회원관리',
-  '예약시스템', '예약 시스템', '통합관리시스템', '커뮤니티시스템', '커뮤니티 시스템', '커뮤니티 프로그램', '타석', '골프타석', '타석관제', '오토티업', 'RFID', '카드리더', '락커', '사물함', 'IoT'] as const;
+  '예약시스템', '예약 시스템', '통합관리시스템', '커뮤니티시스템', '커뮤니티 시스템', '커뮤니티 프로그램', '타석', '골프타석', '타석관제', '오토티업', 'RFID', '카드리더', '락커', '사물함', 'IoT',
+  '출입보안', '로비폰', '공동현관 출입'] as const; // 185차(로컬 10/26 19:20 A3): K-apt '출입보안 시스템 구축'·'공동현관 출입카드리더기'가 빠졌다
 export const NOISE_KEYWORDS = ['도장', '방수', '보수공사', '공사', '청소', '소독', '경비', '승강기', '전기', '소방', '도색', '조경', '수목', '전지', '급수', '배관', '누수', '하자', '옥상', '외벽', '주차', '차단기', 'CCTV', '보험',
   '회계감사', '감사', '변압기', '택배', '리모델링', '바닥재', '인테리어', '교체'] as const;
 export const EXCLUDE_TOPICS = ['어린이집', '보육', '알뜰', '장터', '야시장', '자판기', '주차관제', '주차장', '음식물', '종량기', '재활용', '택배', '이동통신', '중계기', '헬스케어', '구내식당', '급식', '매점', '학위복', '방과후',
@@ -22,21 +23,26 @@ export type FitBusiness = '다짐' | '하이링크' | '다짐·하이링크';
 export type FitResult = { fit: FitBusiness | null; matched: string[]; direct: boolean };
 const norm = (s: string) => s.toUpperCase().replace(/\s+/g, '');
 
-/** 제목·분류·내용에서 키워드를 찾아 적합 사업을 정한다(띄어쓰기 무시, 긴 단어에 포함된 짧은 단어는 하나로). */
+/** 제목·분류·내용에서 키워드를 찾아 적합 사업을 정한다(띄어쓰기 무시, 긴 단어에 포함된 짧은 단어는 하나로).
+ *  인자 순서 = 제목, 분류, 본문, 그 밖(맥락 낱말). 185차(로컬 10/26 19:20 A1·A2): 제외 주제는 제목·분류만, 잡음(공사·교체…)은 제목만 본다 —
+ *  K-apt 본문의 '지하주차장'·'주차관제' 한 낱말로 '출입통제장치' 공고 전체가 빠졌고, 분류 '사업자 - 공사 - 장기수선'의 '공사' 때문에 '커뮤니티센터 통합관리시스템 구축'이 빠졌다 */
 export function matchFit(...texts: (string | null | undefined)[]): FitResult {
   // #522 조달 사이트 이름(나라장터·누리장터)은 제외 주제 '장터'(알뜰장터 등)가 아님 — '나라장터 공고번호 …' 가 붙은 국방 공고가 통째로 빠졌다
-  const text = texts.filter(Boolean).join(' ').replace(/나라\s*장터|누리\s*장터/g, ' ');
+  const parts = texts.map((t) => String(t ?? '').replace(/나라\s*장터|누리\s*장터/g, ' '));
+  const text = parts.filter(Boolean).join(' ');
   if (!text.trim()) return { fit: null, matched: [], direct: false };
   const title = String(texts[0] ?? '');
-  const upper = norm(text);
+  const upper = norm(text), titleU = norm(parts[0] ?? ''), headU = norm(`${parts[0] ?? ''} ${parts[1] ?? ''}`);
   const has = (k: string) => upper.includes(norm(k));
-  if (EXCLUDE_TOPICS.some(has)) return { fit: null, matched: [], direct: false };
-  const noisy = NOISE_KEYWORDS.some(has);
+  if (EXCLUDE_TOPICS.some((k) => headU.includes(norm(k)))) return { fit: null, matched: [], direct: false };
+  const noisy = NOISE_KEYWORDS.some((k) => titleU.includes(norm(k)));
   const apt = APT_CONTEXT.test(text);
+  // 185차 A2: '통합관리시스템'은 제목에 '커뮤니티'가 같이 있으면 강한 낱말(커뮤니티센터 통합관리시스템 = 하이링크 핵심 공고)
+  const strongWord = (k: string) => !WEAK.has(k) || (k === '통합관리시스템' && titleU.includes(norm('커뮤니티')));
   const pick = (list: readonly string[]) => {
     const hits = list.filter(has);
     const uniq = hits.filter((k) => !hits.some((o) => o !== k && norm(o).includes(norm(k))));
-    const strong = uniq.filter((k) => !WEAK.has(k));
+    const strong = uniq.filter(strongWord);
     const ok = strong.length > 0 || (uniq.length > 0 && !noisy && apt);
     return ok ? uniq : [];
   };
@@ -155,7 +161,10 @@ export type NoticePlan = { inserts: { key: string; row: Record<string, unknown> 
 export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<string, Record<string, unknown>>, now: Date, mergeScope: 'all' | 'award' = 'all'): NoticePlan {
   const plan: NoticePlan = { inserts: [], updates: [], unchangedIds: [], invalid: 0, errLog: [] };
   const seen = new Set<string>();
-  for (const it of items) {
+  for (const it0 of items) {
+    // 185차: 이번 실행에서 상세(분류·본문)를 못 읽은 기존 공고는 저장된 분류·본문으로 판정 — 본문 낱말로 관련이 된 공고가 다음 빠른 수집에서 '관련 아님'으로 내려가지 않게
+    const pv = prev.get(String(it0.source_external_id ?? '').trim());
+    const it = pv && mergeScope === 'all' ? { ...it0, bid_category: it0.bid_category ?? pv.bid_category ?? null, task_scope: it0.task_scope ?? pv.task_scope ?? null } : it0;
     const v = validateNoticePayload(it, now);
     if (!v.ok) { plan.invalid++; if (plan.errLog.length < 20) plan.errLog.push(`invalid: ${v.reason}`); continue; }
     const key = `${v.row.source_type}|${v.row.source_external_id}`;

@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '../../db';
 import { sourceFiles } from '../files';
-import { PROCUREMENT_ETL_FIELDS, planNoticeBatch } from './procurement';
+import { PROCUREMENT_ETL_FIELDS, initialClassification, matchFit, planNoticeBatch } from './procurement';
 import { planBatch, prospectFromKaptSelection } from './prospects';
 import type { CollectorResult } from './types';
 
@@ -52,6 +52,31 @@ export async function upsertNotices(items: Record<string, unknown>[], opt: { mer
   }
   if (logs.length) out.errorLog = logs.slice(0, 20).join('\n');
   return out;
+}
+/**
+ * 185차(로컬 10/26 19:20 A4): 판정 규칙이 바뀌면(제외 주제는 제목·분류만·잡음은 제목만·검색어 추가) 이미 '관련 아님'으로 저장된 최근 공고를 지금 규칙으로 다시 판정.
+ * 관련으로 올리기만 한다(내리지 않음). 아직 마감 전인 공고는 refound_at 을 한 번만 남겨 오늘 새 공고·당일 메일에 '다시 찾은 공고'로 보이게.
+ * 행 칸(분류·본문)은 수집 때 저장된 값 그대로 — 원본 영업관리 복사 줄(origin 'src')도 같은 규칙으로 본다.
+ */
+export async function refitNotices(opt: { days?: number; now?: Date } = {}): Promise<{ checked: number; raised: number; reopened: number; ids: string[] }> {
+  const sql = db(); const now = opt.now ?? new Date(); const days = Math.min(Math.max(opt.days ?? 120, 1), 1100);
+  const from = new Date(now.getTime() - days * 864e5).toISOString();
+  const td = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(now);
+  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = ${SCOPE} and tbl = 'procurement_notices' and not gone
+    and coalesce(row->>'related', 'false') <> 'true' and coalesce(row->>'source_type', '') <> 'vendor_recruit'
+    and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${from} limit 20000`;
+  const t = now.toISOString(); const patches: { id: string; patch: Record<string, unknown> }[] = []; let reopened = 0;
+  for (const { src_id, row } of rows) {
+    if (!row?.title) continue;
+    const f = matchFit(String(row.title), row.bid_category ?? null, row.task_scope ?? null, row.source_type === 'kapt_bid' ? '공동주택' : null);
+    if (!f.fit) continue;
+    const dl = String(row.deadline_at ?? '').slice(0, 10); const open = !dl || dl >= td;
+    const again = open && !row.refound_at; if (again) reopened++;
+    const cls = !row.classification || row.classification === '참고(비관련)' ? { classification: initialClassification({ ...row, fit_business: f.fit }) } : {};
+    patches.push({ id: src_id, patch: { fit_business: f.fit, matched_keywords: f.matched, related: true, refit_at: t, ...(again ? { refound_at: t } : {}), ...cls } });
+  }
+  for (const p of patches) await sql`update sales_src_rows set row = row || ${sql.json(p.patch as never)}::jsonb, synced_at = now() where scope = ${SCOPE} and tbl = 'procurement_notices' and src_id = ${p.id}`;
+  return { checked: rows.length, raised: patches.length, reopened, ids: patches.map((p) => p.id) };
 }
 /** 공고 줄마다 진행 기록·업무 연결 수(회사 무관): 정식 진행 기록·원본 진행 칸(__progress)·opportunity_work·업무(sales_ref) */
 export async function noticeLinks(ids: string[]): Promise<Map<string, number>> {

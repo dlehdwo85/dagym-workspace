@@ -51,7 +51,7 @@ function parts(i: DigestItem, day: string) {
   if (i.section === 'result') return { l2, l3: [i.openingAt ? `개찰 ${whenLabel(i.openingAt)}` : null, [i.source, i.noticeNo].filter(Boolean).join(' ') || null].filter((x): x is string => !!x) }; // 결과는 지난 마감·참가신청 대신 개찰·출처만
   const l3 = [i.participationAt ? `참가신청마감 ${whenLabel(i.participationAt)}` : null, i.deadlineAt ? `입찰마감 ${whenLabel(i.deadlineAt)}` : null, i.openingAt ? `개찰 ${whenLabel(i.openingAt)}` : null,
     i.briefingAt ? `현장설명 ${whenLabel(i.briefingAt)}` : null, i.attachments ? `첨부 ${i.attachments}` : null, i.bidSystem ? `투찰 ${i.bidSystem}` : null,
-    [i.source, i.noticeNo].filter(Boolean).join(' ') || null, i.posted && i.posted < day ? `공고일 ${mdw(i.posted)}` : null, i.late ? `지난 메일 뒤 ${seenLabel(i.seenAt)} 수집` : null].filter((x): x is string => !!x);
+    [i.source, i.noticeNo].filter(Boolean).join(' ') || null, i.posted && i.posted < day ? `공고일 ${mdw(i.posted)}` : null, i.refound ? `다시 찾은 공고(${seenLabel(i.seenAt)} 처음 수집)` : i.late ? `지난 메일 뒤 ${seenLabel(i.seenAt)} 수집` : null].filter((x): x is string => !!x);
   return { l2, l3 };
 }
 

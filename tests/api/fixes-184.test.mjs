@@ -81,6 +81,9 @@ test('③ 화상 회의 링크: 빈칸 그대로 · 줌 번호 → zoom 주소 �
   const e1 = await mk('123 4567 8901'); assert.equal(await url(e1.body.id), 'https://zoom.us/j/12345678901');
   const e2 = await mk('meet.google.com/abc-defg-hij'); assert.equal(await url(e2.body.id), 'https://meet.google.com/abc-defg-hij');
   const e3 = await mk('https://zoom.us/j/999?pwd=x'); assert.equal(await url(e3.body.id), 'https://zoom.us/j/999?pwd=x');
+  // 185차(로컬 10/26 19:45): 수정 창에서 빈칸으로 고치면 '없음'(null) — 빈 문자열로 남지 않음
+  await ctx.owner.ok('PATCH', `/api/events/${e3.body.id}`, { meetingUrl: '' });
+  assert.equal(await url(e3.body.id), null, '수정으로 비우면 null');
   const bad = await mk('회의실 3번');
   assert.equal(bad.status, 400);
   assert.match(bad.body.error.message, /화상 회의 링크: 회의 주소를 붙여 넣어 주세요/);

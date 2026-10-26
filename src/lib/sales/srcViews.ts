@@ -21,8 +21,14 @@ const day = (v: unknown) => (!v ? null : v instanceof Date ? (Number.isNaN(v.get
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 const plus = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
 
+/** 185차(로컬 10/26 19:20 A5): 상한(limit)은 최근 것부터 채우고(처음 본 때 최근순) 공고는 3년 창 — 정렬 없이 limit 하면 행이 상한(2만)을 넘을 때 공고가 무작위로 빠진다.
+ *  돌려줄 때는 예전처럼 들어온 순서(오래된 것 → 새것, 같은 때는 저장 위치 순)로 되돌린다 — 동률 정렬(지역 묶음 순서 등)이 바뀌지 않게 */
+const WINDOW_DAYS: Record<string, number> = { procurement_notices: 1095 };
 async function rows(scope: string, tbl: string, limit = 5000) {
-  return (await db()<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = ${scope} and tbl = ${tbl} and not gone limit ${limit}`).map((r) => ({ ...r.row, __id: r.src_id }));
+  const sql = db(); const days = WINDOW_DAYS[tbl]; const since = days ? new Date(Date.now() - days * 864e5).toISOString() : null;
+  return (await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = ${scope} and tbl = ${tbl} and not gone
+    ${since ? sql`and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${since}` : sql``}
+    order by coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) desc, ctid desc limit ${limit}`).reverse().map((r) => ({ ...r.row, __id: r.src_id }));
 }
 /** 전환 뒤(쓰기 열림): 리드는 정식 표(sales_leads)가 정본 — 원본 행 칸 이름으로 맞춰 돌려줌(화면 코드 그대로) */
 /** date 칸: 운영 DB 연결은 date 를 'YYYY-MM-DD' 문자열로, 시험 DB 는 Date 로 줄 수 있음 — 둘 다(핫픽스 10/19: 문자열을 format 해 500) */
@@ -74,13 +80,16 @@ async function lastMailAt(tenant: string): Promise<number | null> {
   return at != null && at < start && start - at <= 3 * 864e5 ? at : null;
 }
 const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
-function todayReason(n: { posted: string | null; noticeDate: string | null; vendorRecruit: boolean }, firstSeenAt: unknown, since: number | null): { hit: boolean; label: string | null } {
+function todayReason(n: { posted: string | null; noticeDate: string | null; vendorRecruit: boolean }, firstSeenAt: unknown, since: number | null, refoundAt?: unknown): { hit: boolean; label: string | null } {
   if (n.vendorRecruit && !n.noticeDate) return { hit: false, label: null };
   const td = today(), yd = plus(-1);
   if (n.posted === td) return { hit: true, label: n.noticeDate && n.noticeDate < td ? `${n.noticeDate === yd ? '어제' : md(n.noticeDate)} 공고·오늘 수집` : null };
   if (n.noticeDate === td) return { hit: true, label: n.posted && n.posted < td ? `공고일 오늘·${n.posted === yd ? '어제' : md(n.posted)} 처음 수집` : null }; // 정정·재공고로 공고일이 오늘이 된 옛 공고
   const seen = Date.parse(String(firstSeenAt ?? ''));
   if (since != null && !Number.isNaN(seen) && seen >= since) return { hit: true, label: `${n.posted === yd ? '어제' : n.posted ? md(n.posted) : ''} 메일 뒤 수집`.trim() };
+  // 185차: 예전 규칙으로 '관련 아님'이었다가 다시 판정으로 찾은 공고(마감 전) — 찾은 날 오늘 새 공고에 한 번
+  const ref = Date.parse(String(refoundAt ?? ''));
+  if (!Number.isNaN(ref) && ref >= (since ?? Date.parse(`${td}T00:00:00+09:00`))) return { hit: true, label: `다시 찾은 공고${n.posted ? `(${n.posted === yd ? '어제' : md(n.posted)} 처음 수집)` : ''}` };
   return { hit: false, label: null };
 }
 /** 대표 10/24 추가 ②: 공고 id → 이 회사 진행 기록을 고친 시각 — 같은 공고 묶음(취소·정정·재게시·중복, noticeGroups)에서 카드로 쓸 줄 고르기. 분류만 있으면 0 */
@@ -258,7 +267,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       today: await (async () => { const td = today();
         const db3 = await Promise.all((['building_sales_pipeline', 'operating_facility_prospects', 'vendor_registrations'] as const).map(async (tb) => (await rows('global', tb, 20000)).filter((r) => firstSeen(r) === td).length));
         const since = await lastMailAt(t); // #476 b: 홈 '오늘 새 공고' 수 = 오늘 탭과 같은 기준
-        return { date: td, newNotices: NR.filter((r, i) => !isAwardResult(r) && todayReason(N[i], r.first_seen_at, since).hit && !bidEnded(N[i], td)).length /* 결과(낙찰·유찰)·끝난 공고는 새 공고가 아님 */, newDb: { buildings: db3[0], facilities: db3[1], vendors: db3[2] }, contact: live.filter((l) => l.next === td).length, closing: N.filter((n) => n.close === td).length }; })() };
+        return { date: td, newNotices: NR.filter((r, i) => !isAwardResult(r) && todayReason(N[i], r.first_seen_at, since, r.refound_at).hit && !bidEnded(N[i], td)).length /* 결과(낙찰·유찰)·끝난 공고는 새 공고가 아님 */, newDb: { buildings: db3[0], facilities: db3[1], vendors: db3[2] }, contact: live.filter((l) => l.next === td).length, closing: N.filter((n) => n.close === td).length }; })() };
   }
   // S2-6 계약만료·재입찰(영업관리 2-6): 타 업체 계약 종료일이 있는 공고 → 영업 시작(−12·−9개월)·제안(−6)·재입찰(−3) 역산, 단계 5, 요약 4(90/180/365일 내·지남)
   if (view === 'contracts') {
@@ -392,7 +401,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // [대상 아님] 탭: 누가·언제·사유(진행 기록) — 사유 칸이 생기기 전에 넘긴 것은 마지막으로 고친 사람·시각
     const who = tab === 'skip' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
     const td = today();
-    const all = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since); const skipped = skips.hidden(r);
+    const all = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since, r.refound_at); const skipped = skips.hidden(r);
       return { ...n0, todayHit: why.hit, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본) · #610 넘기기로 만든 리드면 카드에 [되돌리기]
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, workHandoff: !!(w?.lead_id && pick(w, 'handoff_by')), raw: r.__orig ?? r,

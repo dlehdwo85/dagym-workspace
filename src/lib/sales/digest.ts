@@ -79,7 +79,7 @@ function when(v: unknown): { d: string; t: string | null } | null {
 }
 const fmtWhen = (w: ReturnType<typeof when>) => (w ? (w.t ? `${w.d} ${w.t}` : w.d) : null);
 export type DigestSection = 'now' | 'review' | 'soon' | 'change' | 'result' | 'ref';
-export type DigestItem = { id: string; title: string; issuer: string | null; region: string | null; source: string; url: string; kind: string; fit: string | null; keywords: string[]; estimated: number | null; deadline: string | null; dday: number | null; participation: string | null; opening: string | null; attachments: number; why: string; seenAt?: string | null; late?: boolean; posted?: string | null;
+export type DigestItem = { id: string; title: string; issuer: string | null; region: string | null; source: string; url: string; kind: string; fit: string | null; keywords: string[]; estimated: number | null; deadline: string | null; dday: number | null; participation: string | null; opening: string | null; attachments: number; why: string; seenAt?: string | null; late?: boolean; /** 185차: 예전 규칙으로 빠졌다가 다시 판정으로 찾은 공고 */ refound?: boolean; posted?: string | null;
   /** #510 21라인 칸 */ section: DigestSection; noticeNo: string | null; badges: string[]; biz: { name: string; color: string }[]; tags: string[]; amount: string | null; deadlineAt: string | null; participationAt: string | null; openingAt: string | null; briefingAt: string | null; bidSystem: string | null;
   /** #543 바로 가는 상세 주소가 없는 원천 — [원문] 대신 '○○에서 번호 검색' */ search?: SearchHint | null;
   /** 결과 줄: '낙찰 ○○ · 1.2억' / '유찰' */ result?: string | null };
@@ -154,7 +154,7 @@ async function notTargets(tenant: string) {
   const project = projectSkipOf(skippedRows);
   return (id: string, r: any) => ids.has(id) || (!live.has(id) && noticeKeys(r).some((k) => keys.has(k))) || (!settled.has(id) && !!project(r));
 }
-type Cand = { id: string; r: any; isNew: boolean; kind: string; late: boolean; fit: string | null; why: string; soon?: boolean };
+type Cand = { id: string; r: any; isNew: boolean; kind: string; late: boolean; fit: string | null; why: string; soon?: boolean; refound?: boolean };
 /** 지난 메일 이후(digestSince) 처음 본 공고 + 그 뒤 정정·취소로 바뀐 공고 → 회사 맞춤 통과분 → 구역. 마감 임박 = 이미 받은 관련 공고 중 D-3 이내·진행 기록 없음 */
 export async function buildDigest(tenant: string, day = kstDay()) {
   const sql = db(); const p = await prefsOf(tenant); const cats: BizCat[] = await listBizCats(tenant).catch(() => []);
@@ -162,14 +162,15 @@ export async function buildDigest(tenant: string, day = kstDay()) {
   const since = await digestSince(tenant, day); const sinceMs = since.getTime(); const dayStart = Date.parse(`${day}T00:00:00+09:00`);
   // first_seen_at·updated_at 은 UTC ISO 문자열 — 하루 넓게 거르고(#148) 정확한 비교는 아래 시각으로
   const from = new Date(sinceMs - 864e5).toISOString().slice(0, 10);
-  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone and (row->>'first_seen_at' >= ${from} or row->>'updated_at' >= ${from}) limit 5000`;
+  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone and (row->>'first_seen_at' >= ${from} or row->>'updated_at' >= ${from} or row->>'refound_at' >= ${from}) limit 5000`;
   const skipped: Record<string, number> = {}; const skip = (why: string) => { skipped[why] = (skipped[why] ?? 0) + 1; };
   const notTarget = await notTargets(tenant);
   const cands: Cand[] = [];
   for (const { src_id, row: r } of rows) {
     const slug = SLUG_OF[String(r.source_type)] ?? ''; if (slug && off.has(slug)) continue;
     const seen = at(r.first_seen_at); const upd = at(r.updated_at);
-    const isNew = seen != null && seen >= sinceMs; const kind0 = String(r.notice_kind ?? 'new'); const result = isAwardResult(r);
+    const ref = at(r.refound_at); const refound = ref != null && ref >= sinceMs && !(seen != null && seen >= sinceMs); // 185차: 다시 판정으로 찾은 공고는 찾은 날 한 번 새 공고로
+    const isNew = (seen != null && seen >= sinceMs) || refound; const kind0 = String(r.notice_kind ?? 'new'); const result = isAwardResult(r);
     const changedToday = upd != null && upd >= sinceMs && (kind0 === 'cancel' || kind0 === 'amend' || String(r.current_status ?? '') === '취소' || result);
     if (!isNew && !changedToday) continue;
     if (r.source_type === 'vendor_recruit' && (!r.posted_date || !vendorDateOk(r))) { skip('게시일 미상'); continue; } // #476 e·후속: 게시판 날짜로 확인 못 한 협력사 줄(조각·메뉴·예전 방식)은 메일·오늘 탭에서 뺌
@@ -179,7 +180,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     if (result) { cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
     const dl = dayOf(r.deadline_at);
     if (dl && dl < day) { skip('마감 지남'); continue; } // 첫 수집일에 과거 마감 공고가 '새 공고'로 섞이지 않게(로컬 10/21 10:55)
-    cands.push({ id: String(r.id ?? src_id), r, isNew, kind: String(r.current_status ?? '') === '취소' ? 'cancel' : kind0, late: isNew && seen! < dayStart, fit: f.fit, why: f.why });
+    cands.push({ id: String(r.id ?? src_id), r, isNew, kind: String(r.current_status ?? '') === '취소' ? 'cancel' : kind0, late: isNew && !refound && seen! < dayStart, fit: f.fit, why: f.why, refound });
   }
   // 같은 공고(원천 + 번호, 나라장터는 차수 뺌) → 최신 차수 1줄 · 번호가 달라도 제목·발주처·마감·종류가 같으면 1줄(삼척 정정 001·002, 같은 취소 두 줄)
   let merged = 0;
@@ -233,7 +234,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const biz = matchBiz(r, cats).map((b) => ({ name: b.name, color: b.color }));
     items.push({ id: c.id, title: String(r.title ?? ''), issuer: r.issuer ?? r.demand_agency ?? null, region: regionOf(r), source: SRC[st] ?? st, url: fixG2bUrl(r.source_url) ?? '', search: searchHint({ source: st, url: r.source_url, externalId: r.source_external_id, noticeNo: r.notice_no }), kind: c.kind,
       fit: c.fit, keywords: Array.isArray(r.matched_keywords) ? r.matched_keywords : [], estimated: num(r.estimated_amount) ?? num(r.budget_amount), deadline: dl?.d ?? null, dday,
-      participation: dayOf(r.participation_deadline_at), opening: dayOf(r.opening_at), attachments: Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0, why: c.why, seenAt: r.first_seen_at ?? null, late: c.late, posted: dayOf(r.posted_date),
+      participation: dayOf(r.participation_deadline_at), opening: dayOf(r.opening_at), attachments: Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0, why: c.why, seenAt: r.first_seen_at ?? null, late: c.late, refound: !!c.refound, posted: dayOf(r.posted_date),
       section, noticeNo: st === 'vendor_recruit' ? null : String(r.source_external_id ?? '').trim() || null, badges, biz: biz.length ? biz : c.fit ? [{ name: c.fit, color: '#2563EB' }] : [], tags: tagsOf(r), amount: amountOf(r),
       deadlineAt: fmtWhen(dl), participationAt: fmtWhen(when(r.participation_deadline_at)), openingAt: fmtWhen(when(r.opening_at)),
       briefingAt: fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at)),
