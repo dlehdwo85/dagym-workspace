@@ -14,6 +14,8 @@ export type QReport = { v?: number; human: { score: number; pass: boolean; issue
 const PART: Record<string, string> = { front: '앞부분', specific: '구체성', stakes: '걸린 것', callout: '대상 호명', curiosity: '궁금증', offer: '제안' };
 const weak = (h: HookS) => Object.entries(h.parts ?? {}).filter(([, v]) => !v).map(([k]) => PART[k] ?? k).join('·');
 
+/** 187차 ④ 지시문에 넣은 디자인 지침·기억 개수(서버 mktTeam.designNote 와 같은 말) */
+export const designUsed = (d?: { memory?: number; guide?: number } | null) => (d && (d.guide || d.memory) ? `반영: ${[d.guide ? `디자인 지침 ${d.guide}개` : '', d.memory ? `디자인 기억 ${d.memory}개` : ''].filter(Boolean).join('·')}` : '');
 export const ScoreChip = ({ label, score, pass, testId }: { label: string; score: number; pass: boolean; testId?: string }) => (
   <span className={cx('rounded-full border px-2 py-0.5 text-[11px] font-semibold', pass ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800')} data-testid={testId} data-pass={pass || undefined}>{label ? `${label} ` : ''}{score}점</span>
 );

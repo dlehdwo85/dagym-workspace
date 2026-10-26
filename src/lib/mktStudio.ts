@@ -104,7 +104,8 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
   const picked = refs.mediaIds?.length ? await sql<{ id: string; title: string; description: string | null }[]>`select id, title, description from library_files where id = any(${refs.mediaIds}::uuid[]) and tenant = ${tenant} and deleted_at is null` : [];
   const PC = await promptCtx(tenant, b, brand); // #534 고른 참고 사진이 없으면 자료실 후보(시안 바탕·브랜드 사진)를 AI 에게 보여 주고 연결
   const photos = picked.length ? picked : PC.candidates;
-  const mem = await (await import('./mktTeam')).memoryText(tenant, 'designer', b.brand_id ?? null).catch(() => ''); // #534 수정 요청 사유 = 디자인 담당 기억
+  const design = await (await import('./mktTeam')).designBrief(tenant, b.brand_id ?? null).catch(() => ({ text: '', memory: 0, guide: 0 })); // #534 수정 요청 사유 = 디자인 담당 기억 + 187차 ④ 디자인 지침
+  const mem = design.text;
   const posts = refs.contentIds?.length ? await sql<{ title: string; body: string }[]>`select c.title, v.body from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = any(${refs.contentIds}::uuid[]) and c.tenant = ${tenant}` : [];
   const V = video ? await import('./mktVideo') : null;
   const [caps, bgms] = V ? await Promise.all([V.videoAssets(tenant, '영상 화면 캡처'), V.videoAssets(tenant, '영상 배경음')]) : [[], []];
@@ -174,7 +175,8 @@ ${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}${mem ? `\n${mem}` : ''}`,
   // #534 프롬프트 검사: 필수 칸 8개 점수 → 빠진 칸은 AI 가 쓴 칸(없으면 기본값)으로 보강 · 참고 사진을 안 골랐으면 자료실 후보 1장 연결
   if (!out.refMediaIds?.length && photos.length) out.refMediaIds = [photos[0].id];
   const pc = (await import('./mktPromptCheck')).supplementPrompt(out as { promptEn: string; negativeEn: string; refMediaIds: string[] }, PC.ctx, out.fields);
-  const saved = { ...out, promptEn: pc.promptEn, negativeEn: pc.negativeEn, check: pc.check, caption: q.caption, quality: q.quality, ...(q.timing ? { timing: q.timing } : {}) };
+  const saved = { ...out, promptEn: pc.promptEn, negativeEn: pc.negativeEn, check: pc.check, caption: q.caption, quality: q.quality, ...(q.timing ? { timing: q.timing } : {}),
+    ...(out.source === 'ai' && (design.memory || design.guide) ? { design: { memory: design.memory, guide: design.guide } } : {}) }; // 187차 ④ AI 가 쓴 프롬프트에만 '반영: …'(기본 프롬프트는 지침을 넣지 못함)
   await sql`update mkt_briefs set prompt = ${sql.json(saved as never)}, est_credits = ${est}, status = 'ready', updated_at = now() where id = ${briefId}`;
   return { ...saved, estCredits: est };
 }

@@ -35,14 +35,16 @@ export const needsVisual = (c: { channel: string; media_ids?: string[] }) => c.c
 const AI_REGEN = 'AI 이미지로 다시 만들어 주세요(사진 재생성)';
 const AI_REGEN_CREDITS = 6.5;
 
-export type DecideRevision = { kind?: string; version?: number | null; n?: number | null; max?: number; parts?: string[]; card?: unknown; error?: string; check?: Revision['check'] };
-/** #545: 수정 요청 → AI 가 글·시안을 고친 수정본을 바로 승인함에 다시 올림(3번까지) — 결정 뒤 무엇을 했는지 그대로 알림(카드·상세 공용) */
+export type DecideRevision = { kind?: string; version?: number | null; n?: number | null; parts?: string[]; card?: unknown; error?: string; check?: Revision['check']; same?: number; repeat?: number };
+/** 187차: 같은 글 요청이 연달아 반영 안 돼 AI 가 글을 다시 고치지 않은 경우의 한 줄(서버 SAME_REQUEST_STOP) */
+const repeatNote = (k: number) => `같은 요청이 ${k}번 연속 반영되지 않아 이번엔 AI 가 글을 다시 고치지 않았습니다(다르게 적어 주시거나 상세 › 수정본 올리기)`;
+/** #545: 수정 요청 → AI 가 글·시안을 고친 수정본을 바로 승인함에 다시 올림(187차: 횟수 제한 없음 · 회사 월 AI 예산 안에서) — 결정 뒤 무엇을 했는지 그대로 알림(카드·상세 공용) */
 export function decideMessage(decision: 'approve' | 'changes' | 'hold', rv?: DecideRevision | null) {
   if (decision === 'approve') return '승인했습니다';
   if (decision === 'hold') return '보류했습니다';
-  if (rv?.version) return `AI 가 고쳐 다시 올렸습니다 — 수정본 v${rv.version}(${partsLabel(rv.parts) || '글'} · AI 수정 ${rv.n}/${rv.max ?? 3})${rv.card ? ' · 사진·영상은 제작 요청 카드로' : ''}${requestNote({ check: rv.check }) ? ` — ${requestLabel({ check: rv.check })}: ${requestNote({ check: rv.check })}` : ''}`;
-  if (rv?.kind === 'limit') return `수정을 요청했습니다 — AI 수정은 ${rv.max ?? 3}번까지라 이번엔 사람이 고칩니다(상세 › 수정본 올리기)`;
-  if (rv?.card) return '수정을 요청했습니다 — 사진·영상 다시 만들기는 제작 요청 카드로 넘겼습니다';
+  if (rv?.version) return `AI 가 고쳐 다시 올렸습니다 — 수정본 v${rv.version}(${partsLabel(rv.parts) || '글'} · AI 수정 ${rv.n}번째)${rv.card ? ' · 사진·영상은 제작 요청 카드로' : ''}${requestNote({ check: rv.check }) ? ` — ${requestLabel({ check: rv.check })}: ${requestNote({ check: rv.check })}` : ''}${rv.repeat ? ` · ${repeatNote(rv.repeat)}` : ''}`;
+  if (rv?.kind === 'repeat') return `수정을 요청했습니다 — ${repeatNote(rv.same ?? 2)}`;
+  if (rv?.card) return `수정을 요청했습니다 — 사진·영상 다시 만들기는 제작 요청 카드로 넘겼습니다${rv.repeat ? ` · ${repeatNote(rv.repeat)}` : ''}`;
   if (rv?.error) return `수정을 요청했습니다 — AI 수정본은 만들지 못했습니다: ${rv.error.slice(0, 80)}`;
   return '수정을 요청했습니다';
 }
@@ -61,7 +63,7 @@ export const deadlineLabel = (deadline: string | null, at: string | null) => dea
 
 export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null; brand_logo?: string | null; handle?: string | null;
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null; faces?: boolean }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
-  revision?: Revision | null; reapprove_comment?: string | null; // #545 수정본 배지(반영한 요청·AI 수정 n/3)
+  revision?: Revision | null; reapprove_comment?: string | null; // #545 수정본 배지(반영한 요청·AI 수정 n번째)
   brand_templates?: boolean; // #544 브랜드 키트 피드 틀이 있으면 [다른 틀로 다시 그리기]
   auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; visual?: { by: string } | null; postponed?: { from?: string | null; at?: string; restored?: boolean } | null; held?: { at?: string; reason?: string } | null; failed?: { at?: string; reason?: string; n?: number } | null; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null };
     rescheduled?: { from: string; to: string } | null } | null; production?: { kind: string; status: string } | null; // 요청 C §3-6: 수정본이 승인 마감을 넘겨 다음 슬롯으로 옮겨진 경우 '원래 m/d → m/d'
@@ -130,7 +132,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
         {/* #545: '수정본 v3 — 반영한 요청: …'(AI 수정본은 반영한 요청을 버전에, 사람이 올린 수정본은 마지막 수정 요청 메모로) */}
         {(!!c.reapprove_from || !!c.revision?.request) && <span className={cx('max-w-full truncate rounded-full px-2 py-0.5 text-[11px] font-medium', c.revision?.check?.status === 'unmet' ? 'bg-red-50 text-red-800' : 'bg-amber-50 text-amber-800')} data-testid="mkt-reapprove"
           title={[req, c.revision?.check?.detail].filter(Boolean).join(' — ') || undefined}>수정본 v{c.current_version}{req ? ` — ${requestLabel(c.revision)}: ${req}${requestNote(c.revision) ? ` · ${requestNote(c.revision)}` : ''}` : ` (v${c.reapprove_from} 수정 요청)`}</span>}
-        {c.revision?.ai && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="mkt-ai-revision">AI 수정 {c.revision.n}/{c.revision.max ?? 3}{c.revision.parts?.length ? ` · ${partsLabel(c.revision.parts)}` : ''}</span>}
+        {c.revision?.ai && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="mkt-ai-revision">AI 수정 {c.revision.n}번째{c.revision.parts?.length ? ` · ${partsLabel(c.revision.parts)}` : ''}</span>}
         {/* 요청 C §3-6: 수정본은 원래 게시일 그대로 — 승인 마감이 지나 다음 슬롯으로 옮긴 글만 '원래 m/d → m/d' */}
         {c.quality?.rescheduled && c.scheduled_at && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800" data-testid="approval-rescheduled" title="승인 마감이 지나 다음 슬롯으로 옮겼습니다">원래 {md(c.quality.rescheduled.from)} → {md(c.scheduled_at)}</span>}
         {done && <span className="ml-auto text-xs font-semibold text-emerald-700" data-testid="approval-done">{done}</span>}

@@ -111,7 +111,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
-      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, v.revision, -- #545 수정본 배지(반영한 요청·AI 수정 n/3)
+      v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, v.revision, -- #545 수정본 배지(반영한 요청·AI 수정 n번째)
       jsonb_array_length(case when jsonb_typeof(b.feed->'templates') = 'array' then b.feed->'templates' else '[]'::jsonb end) > 0 as brand_templates, -- #544 피드 틀이 있으면 [다른 틀로 다시 그리기]
       (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type, 'faces', coalesce((f.vision->>'faces')::boolean, false)) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality, c.rationale,
       (select json_build_object('kind', p.kind, 'status', p.status) from mkt_production_requests p where p.content_id = c.id and p.kind in ('image', 'video', 'regen_image', 'regen_video') and p.status in ('open', 'needs_approval') order by p.created_at desc limit 1) as production,
@@ -294,7 +294,7 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
     await audit(tx as never, u.id, 'mkt.decide', 'mkt_content', id, { version: i.version, decision: i.decision }, ip);
     return { status };
   });
-  // V41 4-3/V43 5 → #545(+#534): 자동 제작 콘텐츠의 수정 요청 = AI 가 글·시안을 함께 고친 수정본(3번까지)을 승인함에 다시 · 서버가 못 그리는 시안은 제작 요청 카드(한도 확인) · 사유는 디자인 담당 기억
+  // V41 4-3/V43 5 → #545(+#534): 자동 제작 콘텐츠의 수정 요청 = AI 가 글·시안을 함께 고친 수정본(187차: 횟수 제한 없음 · 같은 요청 2번 연속 반영 안 되면 멈춤)을 승인함에 다시 · 서버가 못 그리는 시안은 제작 요청 카드(한도 확인) · 사유는 디자인 담당 기억
   if (i.decision === 'changes' && i.comment) {
     const r = await (await import('./mktAuto')).onChangesRequested(id, i.comment, { id: u.id, name: u.name }).catch((e) => ({ error: String(e?.message ?? e).slice(0, 200) }));
     if (r) return { ...res, revision: r };

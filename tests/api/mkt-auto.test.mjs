@@ -42,17 +42,18 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   assert.equal((await sql`select count(*)::int n from mkt_production_requests where content_id = ${good.id} and kind = 'image'`)[0].n, 0, '이미지 제작 요청 카드 없음');
   assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '제작 완료%'`).length, '제작 완료 알림');
   assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '승인 마감 72시간 전%'`).length, '마감 N시간 전 알림');
-  // #545(+#534) 수정 요청 → AI 가 글과 시안(서버 그림의 첫 줄)을 함께 고친 수정본 한 버전 → 바로 승인 대기 · 반영한 요청·바뀐 것·AI 수정 n/3 은 버전에 · 사유는 디자인 담당 기억
+  // #545(+#534) 수정 요청 → AI 가 글과 시안(서버 그림의 첫 줄)을 함께 고친 수정본 한 버전 → 바로 승인 대기 · 반영한 요청·바뀐 것·AI 수정 n번째(187차: 횟수 제한 없음)는 버전에 · 사유는 디자인 담당 기억
   await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트', body: '짧게 고친 안내\n이번 주 토요일까지 현관에서 안내합니다.', brief: '' })] });
   const [gv1] = await sql`select media_ids from mkt_versions where content_id = ${good.id} and version = 1`;
   const d1 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 1, decision: 'changes', comment: '첫 줄을 더 짧게' });
-  assert.deepEqual([d1.revision.kind, d1.revision.version, d1.revision.n, d1.revision.max, d1.revision.parts], ['text', 2, 1, 3, ['text', 'visual']]);
+  assert.deepEqual([d1.revision.kind, d1.revision.version, d1.revision.n, d1.revision.parts], ['text', 2, 1, ['text', 'visual']]);
+  assert.equal(d1.revision.max, undefined, '187차: 최대 횟수 없음');
   const [gv2] = await sql`select body, media_ids, note, revision from mkt_versions where content_id = ${good.id} and version = 2`;
   assert.match(gv2.body, /^짧게 고친 안내/); assert.notEqual(String(gv2.media_ids[0]), String(gv1.media_ids[0]), '시안도 새 첫 줄로 다시 그림');
   assert.deepEqual([gv2.revision.ai, gv2.revision.n, gv2.revision.from, gv2.revision.request, gv2.revision.parts], [true, 1, 1, '첫 줄을 더 짧게', ['text', 'visual']]);
   assert.ok(typeof gv2.revision.by === 'string' && gv2.revision.by.length > 0, '수정 요청한 사람');
   // 로컬 10/24(d22c7d8e): 첫 줄이 원래 8자로 짧아 AI 가 길이를 못 줄였으면 '반영한 요청'이 아니라 '요청(이미 충족)' + 무엇이 그대로인지
-  assert.equal(gv2.note, '수정본(AI 1/3) — 요청(이미 충족): 첫 줄을 더 짧게 (첫 줄은 이미 8자로 짧음(수정본 8자) — 본문만 고침) · 시안 다시 그림(브랜드 색 바탕)');
+  assert.equal(gv2.note, '수정본(AI 수정 1번째) — 요청(이미 충족): 첫 줄을 더 짧게 (첫 줄은 이미 8자로 짧음(수정본 8자) — 본문만 고침) · 시안 다시 그림(브랜드 색 바탕) · 반영: 디자인 기억 1개'); // 187차 ④ 수정 요청 사유가 먼저 기억이 되어 수정본 지시문에 들어감
   assert.deepEqual(gv2.revision.check, { status: 'already', detail: '첫 줄은 이미 8자로 짧음(수정본 8자) — 본문만 고침' });
   const [gc2] = await sql`select status, quality from mkt_contents where id = ${good.id}`;
   assert.deepEqual([gc2.status, gc2.quality.visual.by, gc2.quality.visual.fileId], ['pending', 'server', String(gv2.media_ids[0])], '새 버전은 다시 승인 대기 · 서버 그림 표시 유지');
@@ -66,7 +67,7 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   const d2 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 2, decision: 'changes', comment: '사진을 다시 만들어 주세요' });
   assert.deepEqual([d2.revision.kind, d2.revision.version, d2.revision.parts, d2.revision.card, d2.revision.backdrop], ['visual', 3, ['visual'], undefined, '브랜드 색 바탕']);
   assert.equal(d2.revision.check.status, 'unmet', '바꿀 바탕 사진이 없으면 반영 안 됨'); assert.match(d2.revision.check.detail, /^바꿀 바탕 사진이 없어 같은 바탕으로 다시 그림 — 자료실/);
-  assert.match((await sql`select note from mkt_versions where content_id = ${good.id} and version = 3`)[0].note, /^수정본\(AI 2\/3\) — 반영 안 됨: 사진을 다시 만들어 주세요 \(바꿀 바탕 사진이 없어/);
+  assert.match((await sql`select note from mkt_versions where content_id = ${good.id} and version = 3`)[0].note, /^수정본\(AI 수정 2번째\) — 반영 안 됨: 사진을 다시 만들어 주세요 \(바꿀 바탕 사진이 없어/);
   assert.equal(fake.state.anthropic.length, n0, '사진만 바꿀 때는 글을 다시 쓰지 않음');
   const [gv3] = await sql`select body, media_ids from mkt_versions where content_id = ${good.id} and version = 3`;
   assert.equal(gv3.body, gv2.body); assert.notEqual(String(gv3.media_ids[0]), String(gv2.media_ids[0]));
@@ -83,13 +84,27 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   v = await ctx.owner.ok('GET', '/api/marketing/auto');
   assert.equal(v.usage.weekCredits, 6.5); assert.equal(v.usage.monthRegens, 1);
   assert.ok(v.ledger.some((l) => l.kind === 'regen_image' && l.credits === 6.5), '원장: 게시물·버전별');
-  // AI 수정본은 3번까지 — 4번째 수정 요청은 새 버전 없이(사람이 수정본을 올림)
-  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트', body: '해시태그를 줄인 안내\n이번 주 토요일까지 현관에서 안내합니다.', brief: '' })] });
+  // 187차(대표 ③): AI 수정본 횟수 제한 없음(3번 제한 없앰) — 4번째·5번째도 AI 가 고침. 같은 글 요청이 연달아 2번 '반영 안 됨'이면 3번째는 AI 를 부르지 않음(같은 결과에 비용만)
+  const SAME = { title: '가을 이벤트', body: '해시태그를 줄인 안내\n이번 주 토요일까지 현관에서 안내합니다.', brief: '' };
+  await ctl({ anthropicReset: true, anthropicQueue: [say(SAME)] });
   const d4 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 3, decision: 'changes', comment: '해시태그를 줄여 주세요' });
   assert.deepEqual([d4.revision.version, d4.revision.n], [4, 3]);
+  await ctl({ anthropicReset: true, anthropicQueue: [say(SAME)] }); // AI 가 글을 그대로 돌려줌 → 반영 안 됨
   const d5 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 4, decision: 'changes', comment: '문장을 조금 더 짧게' });
-  assert.deepEqual([d5.revision.kind, d5.revision.used, d5.revision.max], ['limit', 3, 3]);
-  assert.deepEqual(Object.values((await sql`select current_version, status from mkt_contents where id = ${good.id}`)[0]), [4, 'changes'], '4번째는 새 버전 없이 수정 요청 상태');
+  assert.deepEqual([d5.revision.kind, d5.revision.version, d5.revision.n, d5.revision.check.status], ['text', 5, 4, 'unmet'], '4번째도 AI 수정본(제한 없음)');
+  assert.match((await sql`select note from mkt_versions where content_id = ${good.id} and version = 5`)[0].note, /^수정본\(AI 수정 4번째\) — 반영 안 됨: 문장을 조금 더 짧게/);
+  await ctl({ anthropicReset: true, anthropicQueue: [say(SAME)] });
+  const d6 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 5, decision: 'changes', comment: '문장을  조금 더 짧게.' }); // 띄어쓰기·끝 마침표만 다른 같은 요청
+  assert.deepEqual([d6.revision.version, d6.revision.n, d6.revision.check.status], [6, 5, 'unmet']);
+  const n1 = fake.state.anthropic.length;
+  const d7 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 6, decision: 'changes', comment: '문장을 조금 더 짧게' });
+  assert.deepEqual([d7.revision.kind, d7.revision.used, d7.revision.same, d7.revision.version], ['repeat', 5, 2, undefined], '같은 요청 2번 연속 반영 안 됨 → 이번엔 AI 를 다시 부르지 않음');
+  assert.equal(fake.state.anthropic.length, n1, 'AI 호출 없음(비용 0)');
+  assert.deepEqual(Object.values((await sql`select current_version, status from mkt_contents where id = ${good.id}`)[0]), [6, 'changes'], '새 버전 없이 수정 요청 상태(사람이 수정본을 올리거나 다르게 적기)');
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트', body: '친근하게 고친 안내\n이번 주 토요일까지 현관에서 기다릴게요.', brief: '' })] });
+  const d8 = await ctx.owner.ok('POST', `/api/marketing/contents/${good.id}/decide`, { version: 6, decision: 'changes', comment: '말투를 더 친근하게' });
+  assert.deepEqual([d8.revision.kind, d8.revision.version, d8.revision.n], ['text', 7, 6], '다르게 적은 요청은 다시 AI 가 고침(6번째)');
+  assert.match((await sql`select body from mkt_versions where content_id = ${good.id} and version = 7`)[0].body, /^친근하게 고친 안내/);
   // 마감 지난 자동 시안은 다음 슬롯으로 3번까지 미루고(#516, mkt-visual 시험) 그 뒤에는 '미뤄진 글'(보류·날짜 비움, 취소 아님 — 로컬 10/24 09:00), 규칙 지우면 아직 안 만든 칸만 같이 지움
   await sql`update mkt_contents set scheduled_at = now() - interval '1 day', quality = quality || '{"moved": 3}'::jsonb where id = ${bad.id}`;
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});

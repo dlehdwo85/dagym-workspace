@@ -80,10 +80,10 @@ export function kitOf(feed: FeedStored | null | undefined, color: { color: strin
 
 /** AI 가 원고와 함께 낸 시안 칸(#544) — 금액·기간은 재료에 있는 숫자만 남김 */
 export type FeedCard = { kicker?: string; points?: string[]; left?: string; right?: string; keyword?: string; period?: string; prices?: { label: string; value: string }[] };
-export const CARD_FORMAT = { type: 'object', additionalProperties: false, required: ['kicker', 'points', 'left', 'right', 'keyword', 'period', 'prices'],
-  properties: { kicker: { type: 'string' }, points: { type: 'array', items: { type: 'string' } }, left: { type: 'string' }, right: { type: 'string' }, keyword: { type: 'string' }, period: { type: 'string' },
+export const CARD_FORMAT = { type: 'object', additionalProperties: false, required: ['kicker', 'kickerAlts', 'points', 'left', 'right', 'keyword', 'period', 'prices'],
+  properties: { kicker: { type: 'string' }, kickerAlts: { type: 'array', items: { type: 'string' } }, points: { type: 'array', items: { type: 'string' } }, left: { type: 'string' }, right: { type: 'string' }, keyword: { type: 'string' }, period: { type: 'string' },
     prices: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['label', 'value'], properties: { label: { type: 'string' }, value: { type: 'string' } } } } } } as const;
-export const CARD_GUIDE = "- card: 시안 그림 칸(짧게) — kicker(시리즈 머리말 2~8자, 예: '운영 기록'·'이번 주 소식'), points(본문 핵심 3~5개, 각 18자 안, 번호·기호 없이), left·right(글이 두 가지를 견줄 때만 각 10자 안 — 아니면 빈 문자열), keyword(첫 줄에서 강조할 낱말 하나), period(재료에 기간이 있을 때만 '10/1~10/31' 꼴 — 없으면 빈 문자열), prices(재료에 있는 가격만 {label:'3개월', value:'19만원'} — 없으면 빈 배열).";
+export const CARD_GUIDE = "- card: 시안 그림 칸(짧게) — kicker(표지 위 작은 머리말 2~8자 — 이 글 내용을 한마디로, 글마다 다르게), kickerAlts(다른 머리말 후보 2개), points(본문 핵심 3~5개, 각 18자 안, 번호·기호 없이), left·right(글이 두 가지를 견줄 때만 각 10자 안 — 아니면 빈 문자열), keyword(첫 줄에서 강조할 낱말 하나), period(재료에 기간이 있을 때만 '10/1~10/31' 꼴 — 없으면 빈 문자열), prices(재료에 있는 가격만 {label:'3개월', value:'19만원'} — 없으면 빈 배열).";
 const cut = (s: unknown, n: number) => { const a = [...String(s ?? '').replace(/\s+/g, ' ').trim()]; return a.length <= n ? a.join('') : `${a.slice(0, n - 1).join('').trim()}…`; };
 const nums = (s: string) => (s.match(/\d[\d,.]*/g) ?? []).map((x) => x.replace(/[,.]/g, ''));
 export function cardFrom(o: any, material: string): FeedCard | undefined {
@@ -93,6 +93,18 @@ export function cardFrom(o: any, material: string): FeedCard | undefined {
   return { kicker: cut(o.kicker, 10), points: (Array.isArray(o.points) ? o.points : []).map((x: unknown) => cut(x, 22)).filter(Boolean).slice(0, 5), left: cut(o.left, 14), right: cut(o.right, 14), keyword: cut(o.keyword, 12),
     period: o.period && inMaterial(String(o.period)) ? cut(o.period, 24) : '',
     prices: (Array.isArray(o.prices) ? o.prices : []).filter((p: any) => p?.label && p?.value && inMaterial(String(p.value))).map((p: any) => ({ label: cut(p.label, 10), value: cut(p.value, 12) })).slice(0, 4) };
+}
+
+/** 187차 ⑤ 머리말 비교용(띄어쓰기·문장부호·대소문자 무시) */
+export const kickerKey = (s: unknown) => String(s ?? '').replace(/[\s·.,!?~'"‘’“”()\[\]「」『』<>《》-]/g, '').toLowerCase();
+/** 187차 ⑤(대표 '표지 머리말이 다 같다'): 브랜드 키트 머리말을 채웠으면 그 값으로 고정(AI 머리말은 비움 — 그림은 키트 값),
+ *  비웠으면 AI 머리말 → 게시 시각이 가까운 같은 브랜드 글 머리말과 겹치면 후보(kickerAlts)에서 → 다 겹치면 비움(같은 머리말을 또 쓰지 않음) */
+export function pickKicker(card: FeedCard | undefined, alts: unknown, near: string[], fixed: string): FeedCard | undefined {
+  if (!card) return card;
+  if (fixed.trim()) return { ...card, kicker: '' };
+  const used = new Set(near.map(kickerKey).filter(Boolean));
+  const cands = [card.kicker, ...(Array.isArray(alts) ? alts : [])].map((x) => cut(x, 10)).filter((x) => kickerKey(x).length >= 2);
+  return { ...card, kicker: cands.find((k) => !used.has(kickerKey(k))) ?? '' };
 }
 
 export type Hints = { head: string; sub: string; kicker: string; points: string[]; left: string; right: string; keyword: string; period: string; prices: { label: string; value: string }[] };
@@ -110,7 +122,7 @@ export function hintsOf(o: { head: string; sub: string; title: string; body: str
   const vs = `${o.title} ${o.head}`.match(/([^\s,.?!]{1,10}(?:\s[^\s,.?!]{1,8})?)\s*(?:vs\.?|VS|대신)\s*([^\s,.?!]{1,10}(?:\s[^\s,.?!]{1,8})?)/);
   const words = o.head.split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter((w) => [...w].length >= 2);
   const keyword = c.keyword && o.head.includes(c.keyword) ? c.keyword : words.sort((a, b) => [...b].length - [...a].length)[0] ?? '';
-  return { head: o.head, sub: o.sub, kicker: c.kicker || o.kit.kicker, points, left: c.left || vs?.[1] || '', right: c.right || vs?.[2] || '', keyword, period: cut(period, 24), prices };
+  return { head: o.head, sub: o.sub, kicker: o.kit.kicker || c.kicker || '', points, left: c.left || vs?.[1] || '', right: c.right || vs?.[2] || '', keyword, period: cut(period, 24), prices };
 }
 
 export const usesPhoto = (t: string) => ['photo', 'photos4'].includes(String(FEED_TEMPLATES[t as TemplateId]?.need ?? ''));

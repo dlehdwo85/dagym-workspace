@@ -6,7 +6,7 @@ import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { MediaPick } from './MediaPick';
-import { ScoreChip } from './QualityPanel';
+import { ScoreChip, designUsed } from './QualityPanel';
 
 /**
  * #499-5 카드뉴스 장별 생성기(자동 제작 › 카드뉴스): 제품·서비스 → [주제 후보 받기](A vs B · N가지 방법 · 유형별 추천 · 체크리스트)
@@ -17,7 +17,7 @@ type Pattern = 'vs' | 'howto' | 'types' | 'checklist';
 type Template = 'box' | 'clean' | 'bold';
 type Slide = { kind: 'cover' | 'body' | 'table' | 'cta'; title: string; body: string; rows: string[][]; imagePlan: string; imageId: string | null };
 type Score = { score: number; pass: boolean; fails: string[]; notes?: string[] };
-type Item = { id: string; brand_id: string | null; brand_name: string | null; product: string; topic: string; pattern: Pattern; input: { audience?: string; a?: string; b?: string; note?: string; changes?: string };
+type Item = { id: string; brand_id: string | null; brand_name: string | null; product: string; topic: string; pattern: Pattern; input: { audience?: string; a?: string; b?: string; note?: string; changes?: string; design?: { memory?: number; guide?: number } };
   slides: Slide[]; caption: string; keyword: string | null; template: Template; status: 'draft' | 'sent' | 'canceled'; source: 'ai' | 'template'; media_ids: string[]; content_id: string | null; content_status: string | null; content_version: number | null;
   rendered_at: string | null; created_by: string | null; created_by_name: string | null; created_at: string; updated_at: string; photos: Record<string, string>; check: { placeholders: number[]; banned: string[]; score: Score } };
 type View = { items: Item[]; brands: { id: string; name: string; color: string | null; hasLogo: boolean }[]; patterns: Record<Pattern, string>; templates: Record<Template, string>; canDecide: boolean; userId: string; aiEnabled: boolean };
@@ -184,6 +184,7 @@ function Editor({ it, view, reload }: { it: Item; view: View; reload: () => Prom
             <ScoreChip label="표지 훅" score={it.check.score.score} pass={it.check.score.pass} testId="carousel-score" />
             {it.source === 'template' && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">AI 없이 만든 빈 틀</span>}
             {it.input.changes && <span className="text-xs text-ink-2" data-testid="carousel-changes">최근 AI 수정: {it.input.changes}</span>}
+            {designUsed(it.input.design) && <span className="text-xs text-violet-800" data-testid="carousel-design-used">{designUsed(it.input.design)}</span>}
           </div>
           {(it.check.score.fails.length > 0 || (it.check.score.notes?.length ?? 0) > 0) && <p className="text-xs text-amber-800">{[...it.check.score.fails, ...(it.check.score.notes ?? [])].join(' · ')}</p>}
           {(holes.length > 0 || capHole) && <p className="rounded-input bg-amber-50 px-2 py-1 text-xs text-amber-900" data-testid="carousel-placeholders">채울 곳 {'{{ }}'}: {[...holes.map((k) => `${k}장`), ...(capHole ? ['본문'] : [])].join(' · ')} — 채워야 이미지로 만들 수 있습니다</p>}

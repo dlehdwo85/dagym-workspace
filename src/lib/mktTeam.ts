@@ -67,8 +67,8 @@ export async function ran(tenant: string, role: Role, r: { status: 'done' | 'ski
   if (r.log ?? r.status !== 'skipped') await sql`insert into mkt_team_log (tenant, role, status, title, detail, link) values (${tenant}, ${role}, ${r.status}, ${(r.title ?? r.summary).slice(0, 200)}, ${r.detail?.slice(0, 500) ?? null}, ${r.link ?? null})`;
 }
 export async function remember(tenant: string, role: Role, m: { brandId?: string | null; kind: 'adopt' | 'reject' | 'edit' | 'note'; text: string; reason?: string | null; sourceType?: string; sourceId?: string | null; by?: string | null }) {
-  const text = clip(m.text, 200); if (!text) return;
-  await db()`insert into mkt_team_memory (tenant, role, brand_id, kind, text, reason, source_type, source_id, created_by) values (${tenant}, ${role}, ${m.brandId ?? null}, ${m.kind}, ${text}, ${m.reason ? clip(m.reason, 300) : null}, ${m.sourceType ?? null}, ${m.sourceId ?? null}, ${m.by ?? null})`;
+  const text = clip(m.text, 1000); if (!text) return; // 187차 ④: 200 → 1,000자(긴 지침은 디자인 지침 칸)
+  await db()`insert into mkt_team_memory (tenant, role, brand_id, kind, text, reason, source_type, source_id, created_by) values (${tenant}, ${role}, ${m.brandId ?? null}, ${m.kind}, ${text}, ${m.reason ? clip(m.reason, 1000) : null}, ${m.sourceType ?? null}, ${m.sourceId ?? null}, ${m.by ?? null})`;
 }
 /** 그 역할의 AI 지시문에 넣을 기억(대표 메모 먼저, 그다음 최근 결정) — 브랜드가 있으면 그 브랜드 것 + 회사 전체 것 */
 export async function memoryText(tenant: string, role: Role, brandId: string | null, opts: { notesOnly?: boolean } = {}) {
@@ -79,6 +79,40 @@ export async function memoryText(tenant: string, role: Role, brandId: string | n
   const L: Record<string, string> = { note: '대표 메모', adopt: '채택', reject: '반려', edit: '수정 요청' };
   return [`[${ROLES[role].name} 기억 — 대표 메모는 꼭 따르고, 반려한 방향은 피함]`, ...rows.map((r) => `- ${L[r.kind] ?? r.kind}: ${r.kind === 'note' || r.kind === 'edit' ? r.text : `«${r.text}»`}${r.reason ? ` — ${r.reason}` : ''}`)].join('\n');
 }
+/**
+ * 187차 ④(대표 '디자인 담당 기억 — 브랜드별+공통 · 긴 지침 칸 · 모든 시안·제작의뢰 프롬프트에 · 노트에 반영 n개'): 디자인 담당 지시문 재료.
+ * - 지침 = 대표가 적은 긴 글(회사 전체 + 그 브랜드, 각 4,000자 · 한 줄에 하나씩) — mkt_team_roles(designer).settings.guides {common, <brandId>}
+ * - 기억 = 대표 메모 먼저, 그다음 최근 수정 요청·채택·반려(같은 말은 한 번) — 글자 예산 안에서. 브랜드 글 = 그 브랜드 것 + 회사 전체 것, 브랜드 없는 글 = 회사 전체 것만
+ * - 자동 제작 원고·수정본·약한 첫 줄 다시 쓰기·카드뉴스·제작의뢰실이 같은 글을 받고, 실제로 넣은 개수를 그대로 돌려줌(지침 = 줄 수, 기억 = 항목 수)
+ */
+export const GUIDE_MAX = 4000;
+export const DESIGN_MEMORY_BUDGET = 4000;
+export type DesignBrief = { text: string; memory: number; guide: number };
+const guideLines = (t: unknown) => String(t ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+export async function designGuides(tenant: string): Promise<Record<string, string>> {
+  const [r] = await db()<{ g: Record<string, string> | null }[]>`select settings->'guides' as g from mkt_team_roles where tenant = ${tenant} and role = 'designer'`.catch(() => []);
+  return r?.g && typeof r.g === 'object' ? r.g : {};
+}
+export async function designBrief(tenant: string, brandId: string | null): Promise<DesignBrief> {
+  const g = await designGuides(tenant);
+  const blocks = ([['회사 전체', g.common], ...(brandId ? [['이 브랜드', g[brandId]]] : [])] as [string, string | undefined][]).filter(([, t]) => guideLines(t).length > 0) as [string, string][];
+  const rows = await db()<{ kind: string; text: string; reason: string | null }[]>`select kind, text, reason from mkt_team_memory where tenant = ${tenant} and role = 'designer'
+    and (brand_id is null or brand_id = ${brandId}) order by (kind = 'note') desc, created_at desc limit 40`.catch(() => []);
+  const L: Record<string, string> = { note: '대표 메모', adopt: '채택', reject: '반려', edit: '수정 요청' };
+  const mem: string[] = []; const seen = new Set<string>(); let size = 0;
+  for (const r of rows) {
+    const key = `${r.kind}|${r.text.replace(/\s+/g, ' ').trim()}`; if (seen.has(key)) continue;
+    const line = `- ${L[r.kind] ?? r.kind}: ${r.kind === 'note' || r.kind === 'edit' ? r.text : `«${r.text}»`}${r.reason ? ` — ${r.reason}` : ''}`;
+    if (mem.length && size + line.length > DESIGN_MEMORY_BUDGET) break;
+    seen.add(key); mem.push(line); size += line.length;
+  }
+  const parts: string[] = [];
+  if (blocks.length) parts.push(`[디자인 지침 — 대표가 정한 기준. 글·시안 문구·제작 지시 모두 꼭 따름]\n${blocks.map(([k, t]) => `(${k})\n${t.trim()}`).join('\n')}`);
+  if (mem.length) parts.push(`[디자인 담당 기억 — 대표 메모는 꼭 따르고, 반려한 방향은 피함]\n${mem.join('\n')}`);
+  return { text: parts.join('\n'), memory: mem.length, guide: blocks.reduce((n, [, t]) => n + guideLines(t).length, 0) };
+}
+/** 버전 노트·카드에 붙이는 한 줄(넣은 것이 없으면 빈 문자열) */
+export const designNote = (b?: { memory?: number; guide?: number } | null) => (b && (b.guide || b.memory) ? ` · 반영: ${[b.guide ? `디자인 지침 ${b.guide}개` : '', b.memory ? `디자인 기억 ${b.memory}개` : ''].filter(Boolean).join('·')}` : '');
 
 // ---------------- 기획 담당: 오늘 주제 3안 ----------------
 async function plannerBrands(t: string, only?: string | null) {
@@ -256,7 +290,8 @@ export const teamAction = z.discriminatedUnion('action', [
   z.object({ action: z.literal('toggle'), role: zRole, enabled: z.boolean() }),
   z.object({ action: z.literal('run'), role: z.enum(['planner', 'researcher', 'reporter']), brandId: zUuid.optional() }),
   z.object({ action: z.literal('brands'), brandIds: z.array(zUuid).max(20) }),
-  z.object({ action: z.literal('remember'), role: zRole, text: z.string().trim().min(2, '기억시킬 말을 두 글자 이상 적어 주세요').max(200), brandId: zUuid.nullable().optional() }),
+  z.object({ action: z.literal('remember'), role: zRole, text: z.string().trim().min(2, '기억시킬 말을 두 글자 이상 적어 주세요').max(1000, '기억은 1,000자까지입니다 — 긴 기준은 디자인 지침 칸에'), brandId: zUuid.nullable().optional() }),
+  z.object({ action: z.literal('guide'), text: z.string().max(GUIDE_MAX, '디자인 지침은 4,000자까지입니다'), brandId: zUuid.nullable().optional() }), // 187차 ④ 비우면 지움
   z.object({ action: z.literal('forget'), id: zUuid })]);
 export async function teamAct(u: SessionUser, i: z.infer<typeof teamAction>) {
   await assertSpace(u, 'marketing');
@@ -277,6 +312,15 @@ export async function teamAct(u: SessionUser, i: z.infer<typeof teamAction>) {
     await sql`insert into mkt_team_roles (tenant, role, settings, updated_by, updated_at) values (${t}, 'planner', ${sql.json({ brandIds: ok.map((b) => b.id) } as never)}, ${u.id}, now())
       on conflict (tenant, role) do update set settings = mkt_team_roles.settings || excluded.settings, updated_by = excluded.updated_by, updated_at = now()`;
     return { brandIds: ok.map((b) => b.id) };
+  }
+  if (i.action === 'guide') {
+    if (i.brandId) { const [b] = await sql`select id from mkt_brands where id = ${i.brandId} and tenant = ${t}`; if (!b) throw notFound('브랜드를 찾을 수 없습니다'); }
+    const key = i.brandId ?? 'common'; const text = i.text.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
+    await sql`insert into mkt_team_roles (tenant, role, settings, updated_by, updated_at) values (${t}, 'designer', ${sql.json({ guides: text ? { [key]: text } : {} } as never)}, ${u.id}, now())
+      on conflict (tenant, role) do update set settings = jsonb_set(mkt_team_roles.settings, '{guides}', case when ${text}::text = '' then coalesce(mkt_team_roles.settings->'guides', '{}'::jsonb) - ${key}::text
+        else coalesce(mkt_team_roles.settings->'guides', '{}'::jsonb) || jsonb_build_object(${key}::text, ${text}::text) end), updated_by = excluded.updated_by, updated_at = now()`;
+    await audit(sql as never, u.id, 'mkt.team_guide', 'mkt_team_role', null, { brandId: i.brandId ?? null, chars: text.length }, null).catch(() => {});
+    return { brandId: i.brandId ?? null, chars: text.length, lines: guideLines(text).length };
   }
   if (i.action === 'remember') {
     if (!ROLES[i.role].ai) throw badRequest(`${josa(ROLES[i.role].name, '은는')} AI 를 쓰지 않아 기억이 없습니다`);
@@ -415,5 +459,5 @@ export async function teamView(u: SessionUser) {
   const Q = await import('./mktQuality'); const rules = await Q.qualityRules();
   const hookOf = (h: string | null) => (h ? Q.scoreHook(h, rules, [], 'content') : null); // 지금 채점 규칙으로 다시(규칙을 바꾸면 따라감)
   return { roles, ideas: ideas.map((x) => { const s = hookOf(x.hook); return { ...x, score: s?.score ?? null, pass: s?.pass ?? false, result_link: resultLink(x) }; }), today, brands: brands.map((b) => ({ ...b, planned: !pick.length || pick.includes(b.id) })), formats: IDEA_FORMATS, basis: BASIS,
-    canDecide: isAdmin(u), aiEnabled: (await import('./ai/provider')).aiEnabled() };
+    canDecide: isAdmin(u), aiEnabled: (await import('./ai/provider')).aiEnabled(), guides: (byRole.get('designer')?.settings?.guides ?? {}) as Record<string, string>, guideMax: GUIDE_MAX };
 }

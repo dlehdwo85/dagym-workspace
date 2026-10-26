@@ -18,7 +18,8 @@ type RoleView = { key: Role; name: string; schedule: string; job: string; owner:
 type Idea = { id: string; brand_id: string; brand_name: string; day: string; title: string; hook: string | null; format: 'carousel' | 'reels' | 'feed'; pattern: string | null; product: string | null; angle: string | null;
   basis: { kind: string; text: string }[]; score: number | null; pass: boolean; status: 'pending' | 'adopted' | 'rejected' | 'expired'; note: string | null; decided_by_name: string | null;
   result_status: 'working' | 'done' | 'draft' | 'error' | null; result_type: string | null; result_note: string | null; result_link: string | null };
-type View = { roles: RoleView[]; ideas: Idea[]; today: string; brands: { id: string; name: string; planned: boolean }[]; formats: Record<string, string>; basis: Record<string, string>; canDecide: boolean; aiEnabled: boolean };
+type View = { roles: RoleView[]; ideas: Idea[]; today: string; brands: { id: string; name: string; planned: boolean }[]; formats: Record<string, string>; basis: Record<string, string>; canDecide: boolean; aiEnabled: boolean;
+  guides: Record<string, string>; guideMax: number }; // 187차 ④ 디자인 지침 {common, <brandId>}
 
 const C = '#7C3AED';
 const ICON: Record<Role, LucideIcon> = { planner: Lightbulb, designer: Palette, researcher: Search, adsetter: Rocket, budget: Wallet, responder: Headset, reporter: BarChart3 };
@@ -115,6 +116,32 @@ function IdeaCard({ x, data, busy, call }: { x: Idea; data: View; busy: string |
   );
 }
 
+const lineCount = (t?: string | null) => String(t ?? '').split('\n').map((l) => l.trim()).filter(Boolean).length;
+/** 187차 ④(대표 '디자인 담당 기억 — 브랜드별+공통 · 긴 지침 칸'): 한 줄에 하나씩 적는 디자인 지침(회사 전체·브랜드별, 4,000자) —
+ *  자동 제작 원고·수정본·약한 첫 줄 다시 쓰기·카드뉴스·제작의뢰실 프롬프트에 그대로 들어가고, 제작 메모에 '반영: 디자인 지침 n개'로 남음 */
+function GuideBox({ data, busy, team }: { data: View; busy: string | null; team: (body: Record<string, unknown>, key: string, ok?: (r: any) => string) => Promise<any> }) {
+  const [scope, setScope] = useState(''); // '' = 회사 전체
+  const saved = data.guides[scope || 'common'] ?? '';
+  const [text, setText] = useState(saved);
+  useEffect(() => setText(data.guides[scope || 'common'] ?? ''), [scope, data.guides]);
+  const name = (k: string) => (k === 'common' ? '회사 전체' : data.brands.find((b) => b.id === k)?.name ?? '브랜드');
+  const have = Object.keys(data.guides).filter((k) => lineCount(data.guides[k]) > 0);
+  return (
+    <details className="mt-1 text-xs" data-testid="team-design-guide"><summary className="cursor-pointer text-ink-2">디자인 지침 {have.length ? have.map((k) => `${name(k)} ${lineCount(data.guides[k])}줄`).join(' · ') : '없음'}</summary>
+      <p className="mt-1 text-[11px] text-ink-3">한 줄에 하나씩 적으면 자동 제작 원고·수정본·카드뉴스·제작의뢰실 프롬프트에 그대로 들어갑니다(브랜드 글 = 회사 전체 + 그 브랜드 지침). 제작 메모에 &apos;반영: 디자인 지침 n개&apos;로 남습니다.</p>
+      {data.brands.length > 0 && <select className={cx(inputCls, 'mt-1.5 h-8 w-auto text-xs')} value={scope} onChange={(e) => setScope(e.target.value)} aria-label="지침 범위" data-testid="team-guide-scope">
+        <option value="">회사 전체{lineCount(data.guides.common) ? ` (${lineCount(data.guides.common)}줄)` : ''}</option>
+        {data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}{lineCount(data.guides[b.id]) ? ` (${lineCount(data.guides[b.id])}줄)` : ''}</option>)}</select>}
+      <textarea className={cx(inputCls, 'mt-1.5 text-xs')} rows={6} maxLength={data.guideMax} value={text} readOnly={!data.canDecide} onChange={(e) => setText(e.target.value)} aria-label="디자인 지침"
+        placeholder={'예) 표지 첫 줄은 질문으로 시작\n브랜드 색은 포인트에만, 바탕은 사진 위주\n사람 얼굴은 정면 대신 손·뒷모습'} data-testid="team-guide-input" />
+      <div className="mt-1 flex flex-wrap items-center gap-2"><span className="text-ink-3" data-testid="team-guide-count">{lineCount(text)}줄 · {text.length.toLocaleString('ko-KR')}/{data.guideMax.toLocaleString('ko-KR')}자</span>
+        {data.canDecide && <Button size="sm" variant="secondary" className="ml-auto" disabled={!!busy || text.trim() === saved.trim()} data-testid="team-guide-save"
+          onClick={() => team({ action: 'guide', brandId: scope || null, text }, 'guide', (r) => (r.chars ? `${name(scope || 'common')} 디자인 지침을 저장했습니다(${r.lines}줄)` : `${name(scope || 'common')} 디자인 지침을 비웠습니다`))}>
+          {busy === 'guide' ? '저장 중…' : '지침 저장'}</Button>}</div>
+    </details>
+  );
+}
+
 function RoleCard({ r, data, busy, team }: { r: RoleView; data: View; busy: string | null; team: (body: Record<string, unknown>, key: string, ok?: (r: any) => string) => Promise<any> }) {
   const Icon = ICON[r.key];
   const [note, setNote] = useState(''); const [brand, setBrand] = useState('');
@@ -160,12 +187,13 @@ function RoleCard({ r, data, busy, team }: { r: RoleView; data: View; busy: stri
               <span className="ml-1 text-ink-3">{m.created_by_name ?? ''} {fmtDateTime(m.created_at)}</span>
               {data.canDecide && <button type="button" className="ml-1 text-ink-3 underline" disabled={!!busy} data-testid="team-memory-forget" onClick={() => team({ action: 'forget', id: m.id }, `forget:${m.id}`, () => '기억에서 지웠습니다')}>지우기</button>}</li>)}</ul>}
         {data.canDecide && <div className="mt-1.5 flex flex-wrap gap-1">
-          <input className={cx(inputCls, 'h-8 min-w-0 flex-1 text-xs')} value={note} maxLength={200} placeholder={`${josa(r.name, '이가')} 기억할 것(예: '관리비' 대신 '운영비')`} onChange={(e) => setNote(e.target.value)} data-testid="team-memory-input" />
+          <input className={cx(inputCls, 'h-8 min-w-0 flex-1 text-xs')} value={note} maxLength={1000} placeholder={`${josa(r.name, '이가')} 기억할 것(예: '관리비' 대신 '운영비')`} onChange={(e) => setNote(e.target.value)} data-testid="team-memory-input" />
           {data.brands.length > 0 && <select className={cx(inputCls, 'h-8 w-auto text-xs')} value={brand} onChange={(e) => setBrand(e.target.value)} aria-label="브랜드" data-testid="team-memory-brand">
             <option value="">회사 전체</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>}
           <Button size="sm" variant="secondary" disabled={!!busy || note.trim().length < 2} data-testid="team-memory-add"
             onClick={async () => { const ok = await team({ action: 'remember', role: r.key, text: note.trim(), brandId: brand || null }, `mem:${r.key}`, () => `${josa(r.name, '이가')} 기억합니다`); if (ok) setNote(''); }}>기억시키기</Button></div>}
       </details>}
+      {r.key === 'designer' && <GuideBox data={data} busy={busy} team={team} />}
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
         <Link href={r.link.href} className="text-xs font-medium underline" style={{ color: C }}>{r.link.label} →</Link>
         {r.canRun && data.canDecide && r.key !== 'planner' && <Button size="sm" variant="secondary" className="ml-auto" disabled={!!busy} data-testid="team-role-run"

@@ -56,7 +56,7 @@ export function BrandFeedKit({ brand, catalog, onSaved }: { brand: { id: string;
         <div className="grid gap-2 sm:grid-cols-3">
           <input className={sm} value={f.header ?? ''} maxLength={40} onChange={(e) => setF({ ...f, header: e.target.value })} placeholder="머리줄(왼쪽 위, 비우면 브랜드 이름)" aria-label={`${brand.name} 피드 머리줄`} data-testid="brand-feed-header" />
           <input className={sm} value={f.contact ?? ''} maxLength={80} onChange={(e) => setF({ ...f, contact: e.target.value })} placeholder="아래 연락처 줄(예: 상담 전화 · 누리집 주소)" aria-label={`${brand.name} 피드 연락처 줄`} data-testid="brand-feed-contact" />
-          <input className={sm} value={f.kicker ?? ''} maxLength={16} onChange={(e) => setF({ ...f, kicker: e.target.value })} placeholder="시리즈 머리말(예: 운영 기록)" aria-label={`${brand.name} 피드 머리말`} data-testid="brand-feed-kicker" />
+          <input className={sm} value={f.kicker ?? ''} maxLength={16} onChange={(e) => setF({ ...f, kicker: e.target.value })} placeholder="표지 머리말 — 비우면 AI 가 글마다" title="채우면 모든 표지에 이 머리말로 고정 · 비우면 AI 가 글마다 다르게(게시 시각이 가까운 글과 안 겹치게)" aria-label={`${brand.name} 피드 머리말`} data-testid="brand-feed-kicker" />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" variant="secondary" onClick={preview} disabled={!!busy} data-testid="brand-feed-preview">{busy === 'preview' ? '그리는 중…' : (f.templates ?? []).length ? '고른 틀 미리보기' : '틀 12종 모두 미리보기'}</Button>

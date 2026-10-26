@@ -5,7 +5,7 @@ import { Skeleton, cx } from '@/components/ui';
 
 /** 로컬 10/24: 수정본이 요청을 실제로 반영했는지(서버 checkRevision) — 반영한 요청 / 일부 반영 / 요청(이미 충족) / 반영 안 됨 */
 export type RevisionCheck = { status: 'applied' | 'partial' | 'already' | 'unmet' | 'unknown'; detail?: string };
-export type Revision = { ai?: boolean; n?: number; max?: number; from?: number; request?: string; by?: string | null; parts?: string[]; backdrop?: string | null; check?: RevisionCheck | null };
+export type Revision = { ai?: boolean; n?: number; from?: number; request?: string; by?: string | null; parts?: string[]; backdrop?: string | null; check?: RevisionCheck | null };
 export const requestLabel = (r?: Revision | null) => (r?.check?.status === 'unmet' ? '반영 안 됨' : r?.check?.status === 'partial' ? '일부 반영' : r?.check?.status === 'already' ? '요청(이미 충족)' : '반영한 요청');
 /** 반영 안 됨·일부만이면 한 줄 설명(무엇이 그대로인지) */
 export const requestNote = (r?: Revision | null) => (r?.check?.detail && r.check.status !== 'applied' && r.check.status !== 'unknown' ? r.check.detail : '');

@@ -251,7 +251,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
           <div className="space-y-2 rounded-input border border-violet-200 p-3" data-testid="mkt-decide">
             <input className={inputCls} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="수정 요청·보류는 이유를 적어 주세요" aria-label="결정 메모" />
             <div className="flex flex-wrap gap-2"><Button onClick={() => act('approve')} disabled={acting} data-testid="mkt-approve">승인</Button><Button variant="secondary" onClick={() => act('changes')} disabled={acting} data-testid="mkt-changes">{acting ? 'AI 가 고치는 중…' : '수정 요청'}</Button><Button variant="secondary" onClick={() => act('hold')} disabled={acting} data-testid="mkt-hold">보류</Button></div>
-            {c.auto && <p className="text-[11px] text-ink-3">자동 제작 글은 수정 요청을 적으면 AI 가 글과 시안을 함께 고친 수정본을 바로 다시 올립니다(3번까지, 크레딧 0 — AI 이미지·영상 다시는 제작 요청 카드).</p>}
+            {c.auto && <p className="text-[11px] text-ink-3">자동 제작 글은 수정 요청을 적으면 AI 가 글과 시안을 함께 고친 수정본을 바로 다시 올립니다(횟수 제한 없음 · 회사 월 AI 예산 안에서, 같은 요청이 2번 연속 반영 안 되면 멈춤 · 마케팅 크레딧 0 — AI 이미지·영상 다시는 제작 요청 카드).</p>}
           </div>
         )}
         {data.canDecide && !['published', 'canceled'].includes(c.status) && (

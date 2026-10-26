@@ -44,7 +44,7 @@ export const carouselPatch = z.discriminatedUnion('action', [
 export const carouselRenderInput = z.object({ scheduledAt: z.string().datetime({ offset: true }).nullable().optional() });
 
 type Topic = { pattern: Pattern; topic: string; why: string; a: string; b: string; score?: number };
-type Row = { id: string; tenant: string; brand_id: string | null; product: string; topic: string; pattern: Pattern; input: { audience?: string; a?: string; b?: string; note?: string; changes?: string };
+type Row = { id: string; tenant: string; brand_id: string | null; product: string; topic: string; pattern: Pattern; input: { audience?: string; a?: string; b?: string; note?: string; changes?: string; design?: { memory: number; guide: number } };
   slides: Slide[]; caption: string; keyword: string | null; template: DrawOpts['template']; status: 'draft' | 'sent' | 'canceled'; source: 'ai' | 'template'; media_ids: string[]; content_id: string | null;
   rendered_at: string | null; created_by: string | null; created_at: string; updated_at: string };
 const clip = (v: unknown, n: number) => String(v ?? '').replace(/[ \t]+/g, ' ').trim().slice(0, n);
@@ -99,7 +99,7 @@ ${Q.MODE_GUIDE.content}
 }
 
 // ---------------- ② 장별 문구 ----------------
-type Gen = { slides: Slide[]; caption: string; keyword: string; source: 'ai' | 'template'; changes?: string; aiError?: string | null };
+type Gen = { slides: Slide[]; caption: string; keyword: string; source: 'ai' | 'template'; changes?: string; aiError?: string | null; design?: { memory: number; guide: number } }; // design = 187차 ④ 넣은 디자인 지침·기억 개수
 const blank = (kind: SlideKind, title: string, body = '', rows: string[][] = [], imagePlan = ''): Slide => ({ kind, title, body, rows, imagePlan, imageId: null });
 const ctaSlide = (kw: string) => blank('cta', `댓글에 '${kw}' 남겨 주세요`, `${josa(kw, '을를')} 보내 드려요\n도움이 됐다면 저장·팔로우`);
 function templateSlides(product: string, topic: string, pattern: Pattern, kw: string, a?: string, b?: string): Slide[] {
@@ -134,7 +134,8 @@ function normSlides(raw: any[], topic: string, kw: string): Slide[] {
 const slidesText = (s: Slide[]) => s.map((x, k) => `${k + 1}. [${x.kind}] ${x.title.replace(/\n/g, ' / ')}${x.body ? ` — ${x.body.replace(/\n/g, ' / ')}` : ''}${x.rows.length ? ` — 표: ${x.rows.map((r) => r.join(' | ')).join(' / ')}` : ''}`).join('\n');
 async function generate(tenant: string, actorId: string, p: { product: string; topic: string; pattern: Pattern; audience?: string; a?: string; b?: string; note?: string; keyword?: string; brandId: string | null }, prev?: { slides: Slide[]; caption: string; note: string }): Promise<Gen | null> {
   const m = await material(tenant, p.brandId);
-  const mem = await (await import('./mktTeam')).memoryText(tenant, 'designer', p.brandId).catch(() => ''); // #499-7 디자인 담당 기억(수정 요청·대표 메모)
+  const design = await (await import('./mktTeam')).designBrief(tenant, p.brandId).catch(() => ({ text: '', memory: 0, guide: 0 })); // #499-7 디자인 담당 기억 + 187차 ④ 디자인 지침(회사 전체·브랜드)
+  const mem = design.text; const used = design.memory || design.guide ? { memory: design.memory, guide: design.guide } : undefined;
   const kw0 = clip(p.keyword, 20).replace(/['"‘’“”]/g, '');
   try {
     const Q = await import('./mktQuality');
@@ -158,7 +159,7 @@ async function generate(tenant: string, actorId: string, p: { product: string; t
     const aiKw = clip(o?.keyword, 20).replace(/['"‘’“”]/g, '');
     const kw = (prev ? aiKw || kw0 : kw0 || aiKw) || '자료'; // 처음: 직원이 적은 키워드 우선 · 고칠 때: 지금 키워드를 AI 에 주고 AI 답을 따름
     const slides = normSlides(o?.slides, p.topic, kw);
-    if (slides.length >= 3) return { slides, caption: String(o?.caption ?? '').trim().slice(0, 2200) || templateCaption(p.product, p.topic, kw), keyword: kw, source: 'ai', changes: prev ? clip(o?.changes, 300) : undefined };
+    if (slides.length >= 3) return { slides, caption: String(o?.caption ?? '').trim().slice(0, 2200) || templateCaption(p.product, p.topic, kw), keyword: kw, source: 'ai', changes: prev ? clip(o?.changes, 300) : undefined, design: used };
   } catch (e) {
     if (prev) throw e instanceof HttpError && e.status === 400 ? e : badRequest(`AI 로 고치지 못했습니다 — 직접 고쳐 주세요 (${clip((e as Error)?.message ?? e, 150)})`);
     const kw = kw0 || '자료';
@@ -218,7 +219,7 @@ export async function createCarousel(u: SessionUser, i: z.infer<typeof carouselI
   await assertSpace(u, 'marketing');
   const t = tenantOf(u); const brandId = i.brandId ?? null;
   const g = (await generate(t, u.id, { ...i, brandId }))!;
-  const input = { audience: i.audience || undefined, a: i.a || undefined, b: i.b || undefined, note: i.note || undefined };
+  const input = { audience: i.audience || undefined, a: i.a || undefined, b: i.b || undefined, note: i.note || undefined, design: g.design };
   const [r] = await db()<{ id: string }[]>`insert into mkt_carousels (tenant, brand_id, product, topic, pattern, input, slides, caption, keyword, template, source, created_by)
     values (${t}, ${brandId}, ${i.product}, ${i.topic}, ${i.pattern}, ${db().json(input as never)}, ${db().json(g.slides as never)}, ${g.caption}, ${g.keyword}, ${i.template}, ${g.source}, ${u.id}) returning id`;
   return { item: (await viewRows(t, r.id))[0], aiError: g.aiError ?? null };
@@ -237,7 +238,7 @@ export async function patchCarousel(u: SessionUser, id: string, i: z.infer<typeo
     const g = (await generate(r.tenant, u.id, { product: r.product, topic: r.topic, pattern: r.pattern, ...r.input, keyword: r.keyword ?? undefined, brandId: r.brand_id }, { slides: r.slides, caption: r.caption, note: i.note }))!;
     // 고른 사진은 같은 자리(장 번호)에 남긴다
     const slides = g.slides.map((s, k) => ({ ...s, imageId: s.kind === 'cover' || s.kind === 'body' ? r.slides[k]?.imageId ?? null : null }));
-    await sql`update mkt_carousels set slides = ${sql.json(slides as never)}, caption = ${g.caption}, keyword = ${g.keyword}, source = 'ai', input = ${sql.json({ ...r.input, changes: g.changes || i.note } as never)}, updated_at = now() where id = ${id}`;
+    await sql`update mkt_carousels set slides = ${sql.json(slides as never)}, caption = ${g.caption}, keyword = ${g.keyword}, source = 'ai', input = ${sql.json({ ...r.input, changes: g.changes || i.note, design: g.design } as never)}, updated_at = now() where id = ${id}`;
     await (await import('./mktTeam')).remember(r.tenant, 'designer', { brandId: r.brand_id, kind: 'edit', text: i.note, sourceType: 'mkt_carousel', sourceId: id, by: u.id }).catch(() => {}); // #499-7 수정 이유 = 디자인 담당 기억
     return { item: (await viewRows(r.tenant, id))[0], changes: g.changes ?? null };
   }

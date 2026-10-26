@@ -1,5 +1,5 @@
 // #545(+#534) 수정 요청 → AI 수정본: 자동 제작 글(서버가 그린 시안) 카드 [수정 요청] '첫 줄을 더 짧게' → AI 가 글·시안을 함께 고친 수정본 v3 이 바로 승인함에
-// → 같은 카드에 '수정본 v3 — 반영한 요청: …' 배지·'AI 수정 1/3 · 글·시안'·[수정본 v3 승인] → [이전 버전(v2)과 나란히 비교](시안·바뀐 줄) → 같은 카드에서 다시 [수정 요청] '사진을 다시 만들어 주세요' = v4(시안만)
+// → 같은 카드에 '수정본 v3 — 반영한 요청: …' 배지·'AI 수정 1번째 · 글·시안'(187차: 횟수 제한 없음)·[수정본 v3 승인] → [이전 버전(v2)과 나란히 비교](시안·바뀐 줄) → 같은 카드에서 다시 [수정 요청] '사진을 다시 만들어 주세요' = v4(시안만)
 // → 상세에서도 나란히 비교 · 휴대폰 폭(390) 넘침 없음 (가짜 AI 구조 시험 — 실제 글·그림 품질은 운영 화면에서)
 import assert from 'node:assert/strict';
 
@@ -27,10 +27,10 @@ export async function mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await card().getByTestId('card-changes').click();
   await card().getByTestId('card-changes-memo').fill('첫 줄을 더 짧게');
   await card().getByTestId('card-changes-send').click();
-  await owner.getByText('AI 가 고쳐 다시 올렸습니다 — 수정본 v3(글·시안 · AI 수정 1/3)').waitFor({ timeout: 30000 });
+  await owner.getByText('AI 가 고쳐 다시 올렸습니다 — 수정본 v3(글·시안 · AI 수정 1번째)').waitFor({ timeout: 30000 });
   await card().getByTestId('mkt-reapprove').filter({ hasText: '수정본 v3' }).waitFor({ timeout: 15000 });
   assert.equal(await card().getByTestId('mkt-reapprove').innerText(), '수정본 v3 — 반영한 요청: 첫 줄을 더 짧게');
-  assert.equal(await card().getByTestId('mkt-ai-revision').innerText(), 'AI 수정 1/3 · 글·시안');
+  assert.equal(await card().getByTestId('mkt-ai-revision').innerText(), 'AI 수정 1번째 · 글·시안');
   assert.equal(await card().getByTestId('card-approve').innerText(), '수정본 v3 승인', '같은 카드에 [승인]이 다시');
   // ② 이전 버전(v2)과 나란히 — 시안 두 장·바뀐 줄 표시·반영한 요청
   assert.equal(await card().getByTestId('approval-compare').innerText(), '이전 버전(v2)과 나란히 비교');
@@ -56,8 +56,8 @@ export async function mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await card().getByTestId('card-changes').click();
   await card().getByTestId('card-changes-memo').fill('사진을 다시 만들어 주세요');
   await card().getByTestId('card-changes-send').click();
-  await owner.getByText('AI 가 고쳐 다시 올렸습니다 — 수정본 v4(시안 · AI 수정 2/3)').waitFor({ timeout: 30000 });
-  await card().getByTestId('mkt-ai-revision').filter({ hasText: 'AI 수정 2/3 · 시안' }).waitFor({ timeout: 15000 });
+  await owner.getByText('AI 가 고쳐 다시 올렸습니다 — 수정본 v4(시안 · AI 수정 2번째)').waitFor({ timeout: 30000 });
+  await card().getByTestId('mkt-ai-revision').filter({ hasText: 'AI 수정 2번째 · 시안' }).waitFor({ timeout: 15000 });
   // 로컬 10/24: 사진을 바꿨는지 확인 — 바꿀 바탕 사진이 없으면 '반영 안 됨'(빨강), 다른 틀로만 다시 그렸으면 '일부 반영'
   const v4 = await sql`select revision from mkt_versions where content_id = ${c.id} and version = 4`;
   const label = { applied: '반영한 요청', partial: '일부 반영', unmet: '반영 안 됨' }[v4[0].revision.check.status];

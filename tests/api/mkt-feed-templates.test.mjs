@@ -116,7 +116,7 @@ test('자동 제작: 틀을 고른 브랜드는 초안 보관 없이 승인 대�
   assert.equal(d1.revision.version, 2);
   const r1 = await cur(c0.id);
   assert.equal(r1.quality.visual.template, c0.quality.visual.template, '글만 고치면 같은 틀');
-  assert.equal(r1.quality.card.kicker, '이번 주', '새 원고의 칸');
+  assert.equal(r1.quality.card.kicker, '', '187차 ⑤: 키트 머리말(운영 기록)을 채운 브랜드는 고정 — AI 머리말(이번 주)은 쓰지 않음');
   // [다른 틀로 다시 그리기] = 지금 틀은 빼고
   const rd = await ctx.owner.ok('POST', `/api/marketing/contents/${c0.id}/visual`, { redraw: true });
   const r2 = await cur(c0.id);

@@ -6,7 +6,7 @@ import { Copy } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { MediaPick } from './MediaPick';
-import { ScoreChip, TimingTable } from './QualityPanel';
+import { ScoreChip, TimingTable, designUsed } from './QualityPanel';
 import { MODE_HINT, ModeChip, ModeToggle, type Mode } from './ModeToggle';
 
 /**
@@ -130,7 +130,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
       {b.progress && <VideoProgress p={b.progress} />}
       {pr && !edit && <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs" data-testid="studio-prompt">
         <div className="rounded-input bg-slate-50 p-2"><div className="flex items-center justify-between font-semibold text-ink-2">생성 프롬프트(EN){pr.source === 'ai' ? <span className="font-normal text-ink-3">AI 마케터</span> : pr.source === 'user' ? <span className="font-normal text-ink-3">직접 고침</span> : <span className="font-normal text-ink-3">기본</span>}<button type="button" onClick={() => copy(pr.promptEn)} className="inline-flex items-center gap-0.5 text-violet-700" aria-label="프롬프트 복사"><Copy size={12} />복사</button></div>
-          <p className="mt-1 whitespace-pre-wrap text-ink" data-testid="studio-prompt-en">{pr.promptEn}</p>{pr.negativeEn && <p className="mt-1 text-ink-3">피할 것: {pr.negativeEn}</p>}{pr.model && <p className="mt-1 text-ink-3">모델 {pr.model} · {pr.aspect}</p>}{pr.check && <PromptCheckBox c={pr.check as PCheck} />}</div>
+          <p className="mt-1 whitespace-pre-wrap text-ink" data-testid="studio-prompt-en">{pr.promptEn}</p>{pr.negativeEn && <p className="mt-1 text-ink-3">피할 것: {pr.negativeEn}</p>}{pr.model && <p className="mt-1 text-ink-3">모델 {pr.model} · {pr.aspect}</p>}{designUsed(pr.design) && <p className="mt-1 text-violet-800" data-testid="studio-design-used">{designUsed(pr.design)}</p>}{pr.check && <PromptCheckBox c={pr.check as PCheck} />}</div>
         <div className="space-y-1.5"><div className="rounded-input bg-violet-50/50 p-2"><div className="font-semibold text-violet-800">한글 의도 요약</div><p className="mt-0.5 whitespace-pre-wrap">{pr.summaryKo || '—'}</p></div>
           <div className="rounded-input border border-line p-2"><div className="font-semibold text-ink-2">자막·카피</div><p className="mt-0.5 whitespace-pre-wrap">{pr.caption || '—'}</p>
             {pr.quality && <div className="mt-1 flex flex-wrap items-center gap-1.5" data-testid="studio-quality"><ScoreChip label="사람다움" score={pr.quality.human.score} pass={pr.quality.human.pass} />{pr.quality.hook && <ScoreChip label="훅" score={pr.quality.hook.score} pass={pr.quality.hook.pass} />}
