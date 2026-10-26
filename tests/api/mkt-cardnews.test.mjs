@@ -225,24 +225,25 @@ test('171차 본문 장 실사 섞기 + 표지 사진 주제 관련도·누운 �
   // ⓒ 표지: 제목 낱말(러닝머신·유산소)과 맞는 실사 — 누운 사람(가장 최근)·어두운 사진은 뺌
   assert.equal(c.quality.visual.photoId, tread, `표지 사진 = 러닝머신 실사: ${JSON.stringify(c.quality.visual)}`);
   assert.match(c.note, /사진: 카드브랜드 러닝머신\.jpg/, c.note);
-  // ⓑ 본문 장: 행동 장 빼고 두 번째 장(해결)에 실사 1장(표지 사진·누운 사람·어두운 사진 제외 → 매장 전경) · 나머지는 색 바탕
-  assert.deepEqual(c.quality.pages.map((p) => p.photoId ?? null), [null, plain, null, null], JSON.stringify(c.quality.pages));
-  const m3 = await meta(c.media_ids[2]);
-  assert.deepEqual([m3.meta.page, m3.meta.role, m3.meta.photoId], [3, 'solution', plain]);
-  assert.equal((await meta(c.media_ids[1])).meta.photoId, null);
-  // 180차: 후보 = 표지·누운 사람·어두운 사진을 뺀 '매장 전경' 1장뿐(사진 풀 부족이 노트에 보임) · 매장 전경은 '20분 인터벌' 글과 낱말이 안 맞아 '관련 약함'
+  // ⓑ 본문 장(188차 #685: 행동 장 빼고 모든 장이 사진 자리): 후보는 매장 전경 1장뿐(표지 사진·누운 사람·어두운 사진 제외) → 첫 본문 장(문제)에 깔고 나머지는 색 바탕
+  assert.deepEqual(c.quality.pages.map((p) => p.photoId ?? null), [plain, null, null, null], JSON.stringify(c.quality.pages));
+  const m2 = await meta(c.media_ids[1]);
+  assert.deepEqual([m2.meta.page, m2.meta.role, m2.meta.photoId], [2, 'problem', plain]);
+  assert.equal((await meta(c.media_ids[2])).meta.photoId, null);
+  // 180차: 후보 = 표지·누운 사람·어두운 사진을 뺀 '매장 전경' 1장뿐(사진 풀 부족이 노트에 보임) · 매장 전경은 '유산소, 지루하죠' 글과 낱말이 안 맞아 '관련 약함'
   assert.match(c.note, /카드 5장\(실사 1장 · 후보 1장 · 관련 약함 1장\)$/, c.note);
-  assert.deepEqual([c.quality.pages[1].rel, c.quality.pages[1].pool], ['weak', 1], JSON.stringify(c.quality.pages));
+  assert.deepEqual([c.quality.pages[0].rel, c.quality.pages[0].pool], ['weak', 1], JSON.stringify(c.quality.pages));
   assert.equal(await dims(c.media_ids[2]), '1080x1350');
   assert.ok(![dark, lying].includes(c.quality.visual.photoId) && !c.quality.pages.some((p) => [dark, lying].includes(p.photoId)));
-  // 가까운 글(같은 브랜드·게시 시각 가까움): 표지는 제목(매장·입구)에 맞는 사진, 장은 앞 글의 표지·장 사진(러닝머신·매장 전경)을 다시 안 씀 → 남는 바탕 사진 없음 = 색 바탕
+  // 가까운 글(같은 브랜드·게시 시각 가까움) — 188차(#695 같은 사진 금지): 표지도 앞 글이 쓴 사진(러닝머신 표지·매장 전경 장)은 다시 안 씀 → 남는 바탕 사진 없음 = 표지·장 모두 브랜드 색
   const id2 = await slot('카드브랜드 매장 입구 안내', { at: new Date(Date.now() + 4 * 86400e3 + 3 * 3600e3) });
   await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '매장 입구 안내', body: '매장 입구가 새로 단장했습니다.\n처음 오시면 입구에서 안내를 받으세요.\n문의 032-111-2222', brief: '', why: '', hooks: [], keyword: '', card: CARD,
     slides: slides.map((x) => (x.role === 'cover' ? { ...x, title: '매장 입구 안내' } : x)) })] });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const c2 = await cur(id2);
   assert.equal(c2.media_ids.length, 5, JSON.stringify(c2.quality));
-  assert.equal(c2.quality.visual.photoId, plain, JSON.stringify(c2.quality.visual));
+  assert.equal(c2.quality.visual.photoId, null, JSON.stringify(c2.quality.visual));
+  assert.doesNotMatch(c2.note, /사진: /, c2.note);
   assert.deepEqual(c2.quality.pages.map((p) => p.photoId ?? null), [null, null, null, null], JSON.stringify(c2.quality.pages));
   assert.match(c2.note, /카드 5장\(실사 0장 · 후보 0장\)$/, c2.note); // 180차: 남은 바탕 사진이 없어서 색 바탕 — 후보 0장
 });
@@ -265,11 +266,11 @@ test('180차 장 사진은 낱말이 맞는 장부터(앞 장이 최근 사진�
   assert.ok(run.produced.some((p) => p.id === id && !p.error), JSON.stringify(run.produced));
   const c = await cur(id);
   assert.equal(c.quality.visual.photoId, gate, `표지 = 제목 낱말(출입) 사진: ${JSON.stringify(c.quality.visual)}`);
-  // 둘째 장(후기, 관련 없음)·셋째 장(얼굴 등록): 셋째 장이 '얼굴 인식 단말'을 먼저 받고 둘째 장은 남은 로비(관련 약함)
-  assert.deepEqual(c.quality.pages.map((p) => p.photoId ?? null), [null, lobby, face, null], JSON.stringify(c.quality.pages));
-  assert.deepEqual(c.quality.pages.map((p) => p.rel ?? null), [null, 'weak', null, null], JSON.stringify(c.quality.pages));
-  const m = c.note.match(/카드 5장\(실사 2장 · 후보 (\d+)장 · 관련 약함 1장\)$/);
-  assert.ok(m && Number(m[1]) >= 2, c.note);
+  // 188차(행동 장 빼고 모든 장이 사진 자리): 셋째 장(얼굴 등록)이 '얼굴 인식 단말'을 먼저 받고(앞 장이 가져가지 않음) 첫 장(카드 찍고 기다리죠, 관련 없음)은 남은 로비(관련 약함)
+  //  · 둘째 장(후기)은 남은 사진이 없어 색 바탕 — 가까운 글(171차)이 쓴 러닝머신·매장 전경은 다시 안 씀 · 사진 이름의 브랜드 낱말('카드브랜드')은 장 글('카드 …')과 맞은 것으로 안 셈
+  assert.deepEqual(c.quality.pages.map((p) => p.photoId ?? null), [lobby, null, face, null], JSON.stringify(c.quality.pages));
+  assert.deepEqual(c.quality.pages.map((p) => p.rel ?? null), ['weak', null, null, null], JSON.stringify(c.quality.pages));
+  assert.match(c.note, /카드 5장\(실사 2장 · 후보 2장 · 관련 약함 1장\)$/, c.note);
 });
 
 // 181차(로컬 10/26 14:00 관찰 ⓐⓑ): 스토리 마지막 프레임 = 행동 프레임(문의·저장·프로필)이라 사진을 안 깖 · '관련 약함' 채움은 브랜드 이름이 있는 사진만(브랜드 미지정 사진은 낱말이 맞을 때만, 후보 수에서도 뺌)
@@ -288,9 +289,10 @@ test('181차 스토리 마지막 행동 프레임엔 사진 없음 · 관련 약
   assert.ok(run.produced.some((p) => p.id === id && !p.error), JSON.stringify(run.produced));
   const c = await cur(id);
   assert.equal(c.quality.visual.photoId, lounge, `표지 = 제목 낱말(라운지) 사진: ${JSON.stringify(c.quality.visual)}`);
-  // 프레임 3장(표지 뒤): 둘째 프레임(낱말 안 맞음)에 브랜드 사진 '복도'(관련 약함) · 마지막 '저장해 두세요'는 행동 프레임 = 색 바탕 · 브랜드 이름 없는 '현장 전경'은 안 씀(후보 수에도 없음)
-  assert.deepEqual(c.quality.pages.map((p) => p.photoId ?? null), [null, hall, null], JSON.stringify(c.quality.pages));
-  assert.deepEqual(c.quality.pages.map((p) => p.rel ?? null), [null, 'weak', null]);
+  // 프레임 3장(표지 뒤, 188차: 행동 프레임 빼고 모두 사진 자리): 첫 프레임(낱말 안 맞음)에 브랜드 사진 '복도'(관련 약함) · 둘째 프레임은 남은 브랜드 사진이 없어 색 바탕(가까운 글이 쓴 사진은 다시 안 씀)
+  //  · 마지막 '저장해 두세요'는 행동 프레임 = 색 바탕 · 브랜드 이름 없는 '현장 전경'은 안 씀(후보 수에도 없음)
+  assert.deepEqual(c.quality.pages.map((p) => p.photoId ?? null), [hall, null, null], JSON.stringify(c.quality.pages));
+  assert.deepEqual(c.quality.pages.map((p) => p.rel ?? null), ['weak', null, null]);
   assert.ok(!c.quality.pages.some((p) => p.photoId === generic) && c.quality.visual.photoId !== generic, '브랜드 미지정 사진은 장에 안 깖');
   assert.match(c.note, /프레임 4장\(실사 1장 · 후보 1장 · 관련 약함 1장\)$/, c.note);
 });

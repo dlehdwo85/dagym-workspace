@@ -12,8 +12,8 @@ export async function mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   await owner.setViewportSize({ width: 1366, height: 900 });
   const [{ tenant }] = await sql`select tenant from users where id = ${ctx.ownerId}`;
-  // 앞 단계에서 올린 마케팅 사진은 설명된 것으로(이 단계 숫자만 보게) — 새 사진 3장은 가장 최근, 설명하는 순서 = 최근 것부터
-  await sql`update library_files set vision = coalesce(vision, ${sql.json({ v: 1, at: new Date().toISOString(), error: 'E2E 앞 단계 사진', tries: 3 })}) where tenant = ${tenant} and space = 'marketing'`;
+  // 앞 단계에서 올린 사진은 설명된 것으로(이 단계 숫자만 보게 — 188차부터 자료실 전체 사진이 대상이라 공간 무관) — 새 사진 3장은 가장 최근, 설명하는 순서 = 마케팅 공간·최근 것부터
+  await sql`update library_files set vision = coalesce(vision, ${sql.json({ v: 1, at: new Date().toISOString(), error: 'E2E 앞 단계 사진', tries: 3 })}) where tenant = ${tenant} and mime_type like 'image/%'`;
   const ids = {};
   for (const [k, name, color, sec] of [['face', 'E2E 수업 장면.jpg', { r: 200, g: 120, b: 80 }, 30], ['promo', 'E2E 사진 2.jpg', { r: 40, g: 40, b: 160 }, 20], ['clean', 'E2E 매장 안.jpg', { r: 60, g: 160, b: 120 }, 10]]) {
     const data = await sharp({ create: { width: 640, height: 480, channels: 3, background: color } }).jpeg().toBuffer();

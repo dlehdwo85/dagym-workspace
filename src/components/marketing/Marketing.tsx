@@ -240,6 +240,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div>
           {(data.media ?? []).some((m: any) => m.faces && v.media_ids.includes(m.id)) && <p className="mt-2 rounded-input border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900" data-testid="content-face-warning">얼굴이 나온 실사 사진이 있습니다 — 촬영·게시 동의를 받은 사진인지 확인한 뒤 승인해 주세요.</p>}</div>
+        {!!data.photoRecord?.length && <PhotoRecord rows={data.photoRecord} />}
         {/* 로컬 QA 10/24 ⑥: 릴스·쇼츠 컷 대본 — 영상 만들 때만 쓰고 게시 글(캡션)에는 안 들어감 */}
         {!!c.quality?.script?.length && <div className="rounded-input border border-line p-3 text-xs" data-testid="mkt-script"><p className="font-medium text-ink-2">대본(컷) <span className="font-normal text-ink-3">영상 제작용 — 게시 글에는 안 들어감</span></p>
           <ol className="mt-1 list-decimal space-y-0.5 pl-5">{(c.quality.script as string[]).map((l, k) => <li key={k}>{l}</li>)}</ol></div>}
@@ -749,5 +750,26 @@ export function Calls() {
           </li>))}{!data.calls.length && <li className="text-sm text-ink-3">아직 전화 문의가 없습니다</li>}</ul>
       )}
     </div>
+  );
+}
+
+/** 188차 #621(대표 10/25 '시안 기록에 어떤 사진·왜·보정 내용'): 표지·카드뉴스 장·블로그 본문마다 쓴 실사(자료실 이름·폴더)·고른 까닭·보정 — 서버가 그린 시안만 */
+type PhotoRow = { where: string; id: string | null; title: string | null; folder: string | null; space: string | null; scene: boolean; why: string; fix: string[] };
+const SPACE_KO: Record<string, string> = { work: '업무 공간', sales: '영업 공간', marketing: '마케팅 공간' };
+function PhotoRecord({ rows }: { rows: PhotoRow[] }) {
+  const real = rows.filter((r) => r.id).length;
+  return (
+    <details className="rounded-input border border-line p-3 text-xs" data-testid="mkt-photo-record">
+      <summary className="cursor-pointer font-medium text-ink-2">사진 기록 <span className="font-normal text-ink-3">— 실사 {real}장 / {rows.length}칸 · 어떤 사진을 왜 골랐고 어떻게 보정했는지</span></summary>
+      <ul className="mt-2 space-y-1">{rows.map((r, k) => (
+        <li key={k} className="flex flex-wrap items-baseline gap-x-1.5" data-testid="mkt-photo-row" data-photo={r.id ?? ''}>
+          <b className="shrink-0">{r.where}</b>
+          {r.id ? <a href={`/api/library/${r.id}/download?inline=1`} target="_blank" rel="noopener" className="break-all text-violet-800 underline">{r.title ?? '(지워진 사진)'}</a> : <span className="text-ink-3">색 바탕</span>}
+          {r.id && r.folder && <span className="text-ink-3">({r.folder}{r.space && r.space !== 'marketing' ? ` · ${SPACE_KO[r.space] ?? r.space}` : ''})</span>}
+          {r.scene && <span className="rounded bg-sky-50 px-1 text-sky-800">영상 장면</span>}
+          {r.fix.length > 0 && <span className="rounded bg-emerald-50 px-1 text-emerald-800" data-testid="mkt-photo-fix">보정: {r.fix.join('·')}</span>}
+          <span className="basis-full pl-0.5 text-ink-3">{r.why}</span>
+        </li>))}</ul>
+    </details>
   );
 }

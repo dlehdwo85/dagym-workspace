@@ -571,8 +571,9 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   // #235 ⓑ 원고가 '[사진 n]' 줄로 고른 사진들(장면 순서) = 본문 사진(표지 바탕으로는 다시 안 씀) · 고른 사진이 없으면 예전처럼 1장
   const V = await import('./mktAutoVisual');
   let mediaIds: string[] = []; let visualNote = ''; let photoId: string | null = null; let bodyIds: string[] = []; let template: string | null = null; let photoIds: string[] = [];
+  let cover: { photoFix?: string[]; scene?: boolean } = {}; // 188차 #621 시안 기록: 표지 사진 보정·영상 장면
   if (V.serverVisual({ channel: c.channel, kind })) {
-    try { const dv = await V.drawAutoVisual({ ...c, title: f.title, card: d.card }, q.body, d.photos?.length ? { bodyIds: d.photos } : {}); bodyIds = dv.bodyIds; mediaIds = [dv.fileId, ...bodyIds]; photoId = dv.photoId; template = dv.template; photoIds = dv.photoIds;
+    try { const dv = await V.drawAutoVisual({ ...c, title: f.title, card: d.card }, q.body, d.photos?.length ? { bodyIds: d.photos } : {}); bodyIds = dv.bodyIds; mediaIds = [dv.fileId, ...bodyIds]; photoId = dv.photoId; template = dv.template; photoIds = dv.photoIds; cover = dv;
       visualNote = ` · 시안 서버 그리기(${[dv.templateLabel ? `틀: ${dv.templateLabel}` : '', dv.photoTitle ? `사진: ${dv.photoTitle}` : '브랜드 색 바탕'].filter(Boolean).join(' · ')})` + (dv.bodyTitle ? ` · 본문 사진: ${dv.bodyTitle}` : ''); }
     catch (e: any) { visualNote = ` · 시안 그리기 실패: ${String(e?.message ?? e).slice(0, 80)}`; }
   }
@@ -604,7 +605,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${mediaIds}, ${(v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기') + designNote + retryNote + visualNote}, ${c.created_by})`;
     if (v > 1) await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('image', 'video') and status in ('open', 'needs_approval')`;
     await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${held ? 'draft' : q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, ...(retried ? { preflightRetry: retried } : {}), brief: d.brief, ...(d.design ? { design: d.design } : {}), report: { ...f.report, v, preflight: pre }, ...(pre.length ? { preflight: pre } : {}), ...(script ? { script } : {}), ...(d.card ? { card: d.card } : {}), ...(pages?.length ? { pages } : {}), ...(held ? { held: { at: new Date().toISOString(), reason: 'template' } } : {}),
-      ...(!mediaIds.length && d.photos?.length ? { bodyPlan: d.photos } : {}), ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 3, tried: photoId ? [photoId] : [], ...(bodyIds.length ? { bodyIds } : {}), ...(template ? { template } : {}), ...(photoIds.length > 1 ? { photoIds } : {}) } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
+      ...(!mediaIds.length && d.photos?.length ? { bodyPlan: d.photos } : {}), ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 3, tried: photoId ? [photoId] : [], ...(bodyIds.length ? { bodyIds } : {}), ...(template ? { template } : {}), ...(photoIds.length > 1 ? { photoIds } : {}), ...V.coverMark(cover) } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임) — #544 초안 보관이면 만들지 않음(쓰지 않을 영상에 비용 X)
     // #426: 영상은 초 단위 장면표(분당 300음절)를 그대로 넘김 — Higgsfield 연동 뒤에는 장면별 프롬프트로
@@ -1016,7 +1017,7 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     if (c.auto && pagedKind(c) && (body !== old || tail.length === 0)) { const Q = await import('./mktQuality'); pages = V.pagesOf(c.kind, pages, body, Q.contactLine(factsOf(brand?.facts))); media = [drawn.fileId, ...(await V.drawPages(c, pages, { exclude: new Set([...(drawn.photoId ? [drawn.photoId] : []), ...drawn.photoIds]) }))]; }
     else if (c.auto && isBlog(c) && media.length < V.BLOG_AUTO_MEDIA) media = [...media, ...(await V.drawInfoCards(c, body, V.BLOG_AUTO_MEDIA - media.length).catch(() => [] as string[]))];
     visual = { by: 'server', fileId: drawn.fileId, at: new Date().toISOString(), photoId: drawn.photoId, rv: 3, tried: [...new Set([...tried, ...(drawn.photoId ? [drawn.photoId] : [])])].slice(-20), ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}),
-      ...(drawn.template ? { template: drawn.template } : {}), ...(drawn.photoIds.length > 1 ? { photoIds: drawn.photoIds } : {}) };
+      ...(drawn.template ? { template: drawn.template } : {}), ...(drawn.photoIds.length > 1 ? { photoIds: drawn.photoIds } : {}), ...V.coverMark(drawn) };
     const left = q.issues.filter((x) => !V.VISUAL_ISSUE.test(x));
     if (!q.passed && q.issues.length && !left.length) q.passed = true; // 시안이 없어서만 막혀 있던 글
     q.issues = left;

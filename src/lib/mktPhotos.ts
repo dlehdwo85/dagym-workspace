@@ -46,9 +46,24 @@ export function photoFlags(v: unknown): { lying: boolean; back: boolean; dark: b
   return { lying: v.pose ? v.pose === 'lying' : LYING.test(s), back: v.facing ? v.facing === 'back' : BACK.test(s), dark: v.light ? v.light === 'dark' : DARK.test(s) };
 }
 
-const PHOTO_MIME = ['image/jpeg', 'image/png', 'image/webp'];
-const photoCond = (sql: ReturnType<typeof db>, tenant: string) => sql`tenant = ${tenant} and space = 'marketing' and deleted_at is null and upload_status = 'ready'
-  and coalesce(security, 'internal') <> 'confidential' and mime_type = any(${PHOTO_MIME}::text[]) and coalesce(source, '') <> 'ai'`;
+export const PHOTO_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+/**
+ * 188차(대표 #685 '폴더명 말고 모든 사진·영상' · #695 '되도록 모든 화면에 실사'): 사진 후보 = 자료실 전체(공간·폴더 무관) — 예전엔 마케팅 공간만.
+ * 빼는 것: AI 가 만든 그림·AI 비서 대화 첨부·매출 근거 · 기밀 파일·기밀 폴더(상위 폴더 등급 포함) · 격리 팀 구성원(대표·관리자 제외)이 올린 자료(마케팅 공간에 둔 것은 씀)
+ *  · 영상 장면 사진(mktScenes)은 원본 영상이 지워졌거나 기밀·'쓰지않음'이면 뺌. 마케팅 공간 밖 사진은 AI 설명이 '실사·홍보물 아님·얼굴 없음·화질 괜찮음'일 때만 시안·본문에 씀(outsideOk)
+ * library_files 를 별칭 없이 읽는 쿼리에 그대로 넣는다(하위 쿼리가 library_files.칸 으로 바깥 줄을 봄)
+ */
+export const poolCond = (sql: ReturnType<typeof db>, tenant: string) => sql`library_files.tenant = ${tenant} and library_files.deleted_at is null and library_files.upload_status = 'ready'
+  and coalesce(library_files.security, 'internal') <> 'confidential' and library_files.mime_type = any(${PHOTO_MIME}::text[]) and coalesce(library_files.source, '') not in ('ai', 'ai_attach', 'revenue')
+  and not exists (select 1 from library_folder_security fs where fs.tenant = library_files.tenant and fs.security = 'confidential' and (library_files.folder = fs.folder or left(library_files.folder, length(fs.folder) + 1) = fs.folder || '/'))
+  and (library_files.space = 'marketing' or not exists (select 1 from team_members mi join teams ti on ti.id = mi.team_id join users uu on uu.id = mi.user_id
+    where mi.user_id = library_files.created_by and ti.isolated and not ti.archived and ti.tenant = library_files.tenant and uu.role not in ('owner', 'admin')))
+  and (coalesce(library_files.source, '') <> 'video_frame' or exists (select 1 from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant
+    and pv.deleted_at is null and coalesce(pv.security, 'internal') <> 'confidential' and not ('쓰지않음' = any(coalesce(pv.tags, '{}')))))`;
+const photoCond = poolCond;
+/** 188차: 마케팅 공간 밖 사진을 시안·블로그·원고 목록에 쓸 조건 — AI 설명이 실사·홍보물 아님·얼굴 없음·화질 괜찮음(설명 전이면 안 씀) */
+export const outsideOk = (v: unknown) => visionOk(v) && v.kind === 'photo' && !v.promo && !v.faces && v.quality !== 'poor';
+export const poolUsable = (r: { space?: string | null; vision?: unknown }) => r.space === 'marketing' || outsideOk(r.vision);
 /** 올린 직후 설명할 사진인지(마케팅 공간 실사 형식·AI 가 만든 그림 아님) */
 export const isMarketingPhoto = (f: { space?: string | null; mime_type?: string | null; source?: string | null }) => f.space === 'marketing' && PHOTO_MIME.includes(String(f.mime_type)) && f.source !== 'ai';
 
@@ -95,7 +110,7 @@ export async function describePhoto(tenant: string, id: string, actorId: string 
   const P = await import('./ai/provider');
   if (!P.aiEnabled()) return null;
   const sql = db();
-  const [f] = await sql<{ id: string; storage_key: string | null; mime_type: string; title: string; file_name: string; vision: any; created_by: string | null }[]>`select id, storage_key, mime_type, coalesce(nullif(title, ''), file_name) as title, file_name, vision, created_by
+  const [f] = await sql<{ id: string; storage_key: string | null; mime_type: string; title: string; file_name: string; vision: any; created_by: string | null; source: string | null; meta: any }[]>`select id, storage_key, mime_type, coalesce(nullif(title, ''), file_name) as title, file_name, vision, created_by, source, meta
     from library_files where id = ${id} and ${photoCond(sql, tenant)}`;
   if (!f?.storage_key) return null;
   const tries = (f.vision && 'error' in f.vision ? Number(f.vision.tries) || 1 : 0) + 1;
@@ -117,6 +132,9 @@ export async function describePhoto(tenant: string, id: string, actorId: string 
   const v: VisionOk = { v: 1, at: new Date().toISOString(), ...normalize(j) };
   if (!v.caption) return fail('AI 가 설명을 비워 답했습니다');
   await sql`update library_files set vision = ${sql.json(v as never)}, description = coalesce(nullif(description, ''), ${v.caption}) where id = ${id}`;
+  // 188차(#619 '영상 = 화면 설명으로 분류'): 영상 장면 사진이면 설명이 비어 있던 원본 영상에 '영상 장면: …' 한 줄(자료실 검색·정리에 씀)
+  const vid = f.source === 'video_frame' ? String(f.meta?.video?.id ?? '') : '';
+  if (/^[0-9a-f-]{36}$/i.test(vid)) await sql`update library_files set description = coalesce(nullif(description, ''), ${`영상 장면: ${v.caption}`}) where id = ${vid} and tenant = ${tenant}`;
   return v;
 }
 
@@ -130,7 +148,7 @@ export async function describeBatch(tenant: string, o: { limit?: number; budgetM
     const rows = o.ids?.length ? await sql<{ id: string }[]>`select id from library_files where id = any(${o.ids}::uuid[]) and ${photoCond(sql, tenant)} order by created_at desc limit ${o.limit ?? 20}`
       : await sql<{ id: string }[]>`select id from library_files where ${photoCond(sql, tenant)}
           and (vision is null or (vision ? 'error' and coalesce((vision->>'tries')::int, 1) < 3 and (vision->>'at')::timestamptz < now() - interval '1 hour'))
-        order by created_at desc limit ${o.limit ?? 6}`;
+        order by (space = 'marketing') desc, created_at desc limit ${o.limit ?? 6}`; // 188차: 자료실 전체 — 마케팅 공간(영상 장면 포함) 먼저
     let done = 0; let failed = 0; let stopped: string | null = null;
     if (rows.length) {
       try { await (await import('./mktAuto')).assertMktAi(tenant); } catch (e: any) { stopped = String(e?.message ?? e); }
@@ -145,14 +163,15 @@ export async function describeBatch(tenant: string, o: { limit?: number; budgetM
   return L.isBusy(r) ? { done: 0, failed: 0, left: 0, stopped: '다른 설명 작업이 돌고 있습니다 — 잠시 뒤 다시', busy: true } : r;
 }
 
-type PhotoRow = { id: string; title: string; file_name: string; folder: string; tags: string[]; description: string | null; vision: any; created_at: Date };
+type PhotoRow = { id: string; title: string; file_name: string; folder: string; tags: string[]; description: string | null; vision: any; created_at: Date; space: string; source: string | null };
 /** 원고 재료의 사진 목록 — 글자 든 그래픽·다른 브랜드 사진은 빼고 이 브랜드 사진 먼저. AI 설명(없으면 자료실 설명) */
 export async function photoLines(tenant: string, brand: string, others: string[], n = 8) {
   const sql = db(); const V = await import('./mktAutoVisual');
-  const rows = await sql<PhotoRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at from library_files where ${photoCond(sql, tenant)} order by created_at desc limit 80`;
+  const rows = await sql<PhotoRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at, space, source from library_files where ${photoCond(sql, tenant)}
+    order by (space = 'marketing') desc, created_at desc limit 120`;
   const hay = (r: PhotoRow) => `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase();
   const mine = (r: PhotoRow) => !!brand && hay(r).includes(brand.toLowerCase());
-  const pick = rows.filter((r) => V.bodyOk(r) && !others.some((o) => !!o && hay(r).includes(o.toLowerCase())))
+  const pick = rows.filter((r) => poolUsable(r) && V.bodyOk(r) && !others.some((o) => !!o && hay(r).includes(o.toLowerCase())))
     .map((r, k) => ({ r, k })).sort((a, b) => Number(mine(b.r)) - Number(mine(a.r)) || a.k - b.k).slice(0, n);
   return pick.map(({ r }) => `- ${r.title}: ${visionOk(r.vision) ? `${r.vision.caption}${r.vision.scene ? ` — ${clip(r.vision.scene.split(/(?<=[.!?])\s/)[0], 80)}` : ''}` : clip(r.description, 120) || '(설명 없음)'}`);
 }
@@ -162,18 +181,21 @@ async function perPhotoKrw() {
   const P = await import('./ai/provider');
   return Math.round(P.costUsd(P.modelFor('fast'), { input_tokens: 1700, output_tokens: 250 }) * P.usdKrw() * 10) / 10;
 }
-export type PhotoItem = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | VisionErr | null; mark: 'none' | 'has' | 'skip' | null; cover: boolean; body: boolean; at: string };
+export type PhotoItem = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | VisionErr | null; mark: 'none' | 'has' | 'skip' | null; cover: boolean; body: boolean; at: string;
+  /** 188차: 공간(마케팅 밖이면 '업무'·'영업' 표시 — AI 설명이 실사·얼굴 없음일 때만 씀) · 영상 장면 사진 */
+  space: string; scene: boolean };
 /** 자동 제작 › 사진 AI 설명: 숫자(전체·설명·아직·실패·바탕 가능·그래픽) + 최근 60장(설명·판정·쓰임) */
 export async function photosView(u: SessionUser) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u); const V = await import('./mktAutoVisual');
-  const rows = await sql<PhotoRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at from library_files where ${photoCond(sql, t)} order by created_at desc limit 400`;
+  const rows = await sql<PhotoRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at, space, source from library_files where ${photoCond(sql, t)} order by created_at desc limit 600`;
   const items: PhotoItem[] = rows.map((r) => ({ id: r.id, title: r.title, folder: r.folder, tags: r.tags ?? [], vision: r.vision ?? null, mark: markedSkip(r.tags) ? 'skip' : markedNoText(r.tags) ? 'none' : markedText(r.tags) ? 'has' : null,
-    cover: V.backdropOk(r), body: V.bodyOk(r), at: new Date(r.created_at).toISOString() }));
+    cover: poolUsable(r) && V.backdropOk(r), body: poolUsable(r) && V.bodyOk(r), at: new Date(r.created_at).toISOString(), space: r.space, scene: r.source === 'video_frame' }));
   const n = (f: (x: PhotoItem) => boolean) => items.filter(f).length;
   const P = await import('./ai/provider');
   return { total: items.length, described: n((x) => visionOk(x.vision)), pending: n((x) => !x.vision), failed: n((x) => !!x.vision && 'error' in x.vision),
-    cover: n((x) => x.cover), graphic: n((x) => !x.body), ai: P.aiEnabled(), perPhotoKrw: await perPhotoKrw(), canEdit: isAdmin(u), items: items.slice(0, 60) };
+    cover: n((x) => x.cover), graphic: n((x) => !x.body), outside: n((x) => x.space !== 'marketing'), scenes: n((x) => x.scene),
+    videos: await (await import('./mktScenes')).scenesView(t), ai: P.aiEnabled(), perPhotoKrw: await perPhotoKrw(), canEdit: isAdmin(u), items: items.slice(0, 60) };
 }
 
 export const describeInput = z.object({ ids: z.array(z.string().uuid()).max(20).optional(), redo: z.boolean().optional() });

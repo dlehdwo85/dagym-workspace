@@ -93,14 +93,19 @@ test('사진 설명: 줄인 JPEG·빠른 모델로 한 번 · 저장(설명이 �
   await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.face}`, { text: 'auto' });
   await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.clean}`, { text: 'auto' });
   assert.deepEqual([(await vis(P.face)).tags, (await vis(P.clean)).tags], [[], []]);
-  // 다른 회사·없는 사진·마케팅 공간이 아닌 사진 = 404
+  // 다른 회사·없는 사진·AI 대화 첨부 = 404 (188차 #685: 자료실 전체가 시안 후보 — 업무 공간 사진도 설명·판정 고치기)
   const [t2] = await sql`insert into tenants (id, name) values ('pv-other', '다른회사') on conflict (id) do update set name = excluded.name returning id`;
   const [o] = await sql`insert into library_files (tenant, space, folder, title, file_name, mime_type, size_bytes, created_by, upload_status, source) values (${t2.id}, 'marketing', '', 'x', 'x.jpg', 'image/jpeg', 10, ${ctx.ownerId}, 'ready', 'upload') returning id`;
   assert.equal((await ctx.owner.req('PATCH', `/api/marketing/photos/${o.id}`, { text: 'none' })).status, 404);
   assert.equal((await ctx.owner.req('PATCH', '/api/marketing/photos/00000000-0000-4000-8000-000000000000', { text: 'none' })).status, 404);
   const work = await libFile('업무 사진.jpg', { space: 'work' });
-  assert.equal((await ctx.owner.req('PATCH', `/api/marketing/photos/${work}`, { text: 'none' })).status, 404);
-  assert.equal((await ctx.owner.ok('POST', '/api/marketing/photos/describe', { ids: [work], redo: true })).done, 0, '업무 공간 사진은 설명하지 않음');
+  assert.equal((await describe(work, V({ caption: '사무실 회의 탁자', text: 'none' }))).done, 1, '188차: 업무 공간 사진도 설명');
+  assert.deepEqual((await ctx.owner.ok('PATCH', `/api/marketing/photos/${work}`, { text: 'skip' })).tags, ['쓰지않음']);
+  await ctx.owner.ok('PATCH', `/api/marketing/photos/${work}`, { text: 'auto' });
+  const chat = await libFile('대화 첨부 사진.jpg', { space: 'work' });
+  await sql`update library_files set source = 'ai_attach' where id = ${chat}`;
+  assert.equal((await ctx.owner.req('PATCH', `/api/marketing/photos/${chat}`, { text: 'none' })).status, 404);
+  assert.equal((await ctx.owner.ok('POST', '/api/marketing/photos/describe', { ids: [chat], redo: true })).done, 0, 'AI 대화 첨부 사진은 설명하지 않음');
 });
 
 test('설명 못 함은 사진에 남김(세 번까지·1시간 뒤 다시) · 일시 장애는 사진 탓으로 남기지 않고 멈춤 · [설명하기]는 설명 없는 사진만', async () => {

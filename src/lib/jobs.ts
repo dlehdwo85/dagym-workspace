@@ -212,6 +212,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('mktGoals', async () => (await import('./mktGoals')).goalTickAll());
   await step('hfPoll', async () => (await import('./mktStudio')).hfPollTick()); // 로컬 10/22 Higgsfield 비동기 생성 결과 이어받기(완료분 자료실 저장 → 승인 대기)
   await step('mktRender', async () => (await import('./mktVideo')).renderTick()); // #454 영상: 장면 다 만든 의뢰 → 검수·합성 함수(/api/marketing/studio/render, ffmpeg)
+  await step('mktScenes', async () => (await import('./mktScenes')).scenesTick()); // 188차: 자료실 영상 → 장면 사진 2~3장(합성 함수의 ffmpeg) → 사진 AI 설명 → 시안 실사 후보
   await step('mktPublish', async () => (await import('./mktPublish')).publishTick()); // 대표 10/20 22:30 ② M1 서버 게시 실행기(승인된 글 → 인스타·페북·스레드·유튜브, 자동 게시 켠 회사는 예정 시각에)
   await step('mktPublishDeleted', async () => (await import('./mktPublish')).publishDeletedTick()); // 로컬 10/21 11:45: 게시 뒤 삭제 감지(30일·6시간마다) → 작업 deleted·콘텐츠 '게시 삭제됨'·알림
   await step('mktOps', async () => (await import('./mktOps')).opsTickAll()); // 대표 10/20 20:00 ①②: 월요일 AI 마케터 분석·방향 카드 · 매일 광고 소진율 '충전 필요' · 25일 다음 달 예산 초안 // 대표 10/20 18:00 ②: 25일 다음 달 목표 초안 · 월요일 주간 리뷰 · 월초 결산
