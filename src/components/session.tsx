@@ -17,7 +17,7 @@ export interface Sess {
   /** 선택 기능 스위치 (핵심 기능은 항상 켜짐) */
   /** V13 메뉴 권한 (revenue·team_reports·library·assistant → none/view/edit/use) */
   menus?: Record<string, string>;
-  tenant?: { /** #101 권한 배지: 영어(기본)·한글·끄기 */ roleBadge?: 'en' | 'ko' | 'off'; name: string; personal: boolean; internal: boolean; /** V21 문의(웹·전화) 받는 회사 */ inquiries?: boolean; onboarding: boolean; trial?: { trial: boolean; readOnly: boolean; daysLeft: number } | null; /** V28 B2 미납 잠금 */ billingLock?: 'read_only' | 'suspended' | null };
+  tenant?: { /** #101 권한 배지: 영어(기본)·한글·끄기 */ roleBadge?: 'en' | 'ko' | 'off'; name: string; personal: boolean; internal: boolean; /** #626 캡처 차단(외부 고객사 기본 켬 · 우리 회사/체험/슈퍼관리자 끔) · 자동화 브라우저 차단 */ captureBlock?: boolean; captureAutomation?: boolean; /** V21 문의(웹·전화) 받는 회사 */ inquiries?: boolean; onboarding: boolean; trial?: { trial: boolean; readOnly: boolean; daysLeft: number } | null; /** V28 B2 미납 잠금 */ billingLock?: 'read_only' | 'suspended' | null };
   /** V41 공간: 들어갈 수 있는 공간(업무는 늘) */
   spaces?: ('work' | 'sales' | 'marketing')[];
   /** #77 처음 사용 안내: 본 투어 · 자동으로 띄울지(시험 서버·지원 모드는 끔) */

@@ -164,6 +164,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
         </div>
         {d.data.mktWrite && <MktWriteBox id={id} w={d.data.mktWrite} pick={wt} setPick={setWt} run={run} />}
+        {!internal && <CaptureBox id={id} t={d.data.tenant} events={d.data.captureEvents30d ?? 0} run={run} />}{/* #626 캡처 차단 스위치(외부 고객사만) */}
         <div>
           <p className="mb-1 text-xs font-medium text-ink-2">사용자 {d.data.users.length}명 — 비밀번호는 보거나 정할 수 없고 재설정 메일만 보냅니다</p>
           <ul className="divide-y divide-line rounded-input border border-line" data-testid="company-users">
@@ -310,6 +311,21 @@ function MktWriteBox({ id, w, pick, setPick, run }: { id: string; w: { company: 
         {(['fast', 'default', 'deep'] as const).map((k) => <option key={k} value={k}>{TIER[k]} · 글 1건 약 {w.byTier[k].toLocaleString('ko-KR')}원</option>)}
       </select>
       <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/platform/tenants/${id}/mkt-write`, { method: 'PUT', body: { tier: v || null } }), '글 모델을 바꿨습니다')} data-testid="company-mkt-write-save">저장</Button>
+    </div>
+  );
+}
+
+/** #626 캡처 차단 스위치(외부 고객사만 보임): 기본 켬 — 끌 때 사유 한 줄(감사 기록). 최근 30일 사건 = 인쇄 시도·캡처키·자동화 감지·아이폰 캡처 기록 */
+function CaptureBox({ id, t, events, run }: { id: string; t: any; events: number; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+  const on = t?.capture_block !== false;
+  const [note, setNote] = useState('');
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-input border border-line p-3 text-xs" data-testid="company-capture">
+      <span className="min-w-0 flex-1 text-ink-2">화면 캡처 차단(워터마크·인쇄 차단·창 이탈 가림·자동화 차단, 앱은 캡처 검정) — 지금 <b className="text-ink" data-testid="company-capture-now">{on ? '켬' : '끔'}</b>{!on && t?.capture_note ? ` · 사유: ${t.capture_note}` : ''} · 최근 30일 사건 <b data-testid="company-capture-events">{events}</b>건</span>
+      {on ? <>
+        <input className={cx(inputCls, 'h-8 w-44 py-1 text-xs')} value={note} onChange={(e) => setNote(e.target.value)} placeholder="끄는 사유(화면 공유 회의 등)" maxLength={200} data-testid="company-capture-note" />
+        <Button size="sm" variant="secondary" disabled={!note.trim()} onClick={() => run(() => api(`/api/platform/tenants/${id}/capture`, { method: 'PUT', body: { on: false, note: note.trim() } }), '캡처 차단을 껐습니다')} data-testid="company-capture-off">끄기</Button>
+      </> : <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/platform/tenants/${id}/capture`, { method: 'PUT', body: { on: true } }), '캡처 차단을 켰습니다')} data-testid="company-capture-on">다시 켜기</Button>}
     </div>
   );
 }

@@ -57,6 +57,7 @@ export function serverEnv() {
     DUE_DIGEST_HOUR: '0', // 기한 지남·오늘 마감 하루 1회 알림을 시험 시각과 무관하게
     CALENDAR_JOBS: 'off', // 168차: 월요일·25일·1~3일·금요일에 매인 정기 작업(src/lib/calendarGate.ts)은 시험 서버에서 안 돎 — 시험이 도는 날·시각에 따라 tick 안의 AI 호출·기록이 달라져 깨졌음. 그 작업들은 API 로 직접 시험
     SUPPORT_WEEKLY: 'off', // 지원사업 주간 묶음(월요일 08시 뒤 첫 tick)도 같은 이유 — tests/api/support.test.mjs 만 'any'
+    CAPTURE_BLOCK: 'noauto', // #626 캡처 차단: 시험 서버는 자동화 감지·봇 UA 로그인 거부만 끔(Playwright·node fetch 가 막히지 않게) — 워터마크·인쇄 차단·창 이탈 가림은 외부 고객사 계정에 그대로(E2E 확인)
     OPENAI_BASE_URL: `${FAKE}/openai/v1`,
     ANTHROPIC_API_KEY: 'sk-ant-fake-test',
     ANTHROPIC_BASE_URL: FAKE,

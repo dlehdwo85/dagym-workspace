@@ -44,6 +44,9 @@ interface WorkinNativePlugin {
   shareToSms(o: { phones: string[]; body: string; files: { uri: string; mime: string }[] }): Promise<{ app: string; attached: number }>;
   // 메신저 3차 C12 앱 아이콘 배지('app-badge-1'): 안 읽은 알림 + 안 읽은 메시지 숫자(0 = 지움). 이 기기는 서버 푸시에도 같은 숫자가 실려 옴(aps.badge·data.badge)
   setBadge(o: { count: number }): Promise<void>;
+  // #626 캡처 차단('android-secure-1'): 창에 FLAG_SECURE → 스크린샷·화면 녹화·최근 앱 미리보기·미러링 검정. 아이폰('ios-capture-detect-1')은 캡처를 감지해 'screenshot' 이벤트만(네이티브는 로컬)
+  setSecureScreen(o: { on: boolean }): Promise<void>;
+  addListener(ev: 'screenshot', fn: L): Promise<PluginListenerHandle>;
 }
 const WorkinNative = registerPlugin<WorkinNativePlugin>('WorkinNative');
 export async function nativeCaps(): Promise<string[]> {
@@ -67,6 +70,15 @@ export async function setNativeBadge(count: number) {
 /** #194 1.1.3 바탕화면 위젯 새로고침 — 앱을 열 때·나갈 때·저장했을 때·로그아웃(위젯이 로그인 안내로) */
 export async function refreshWidget() {
   if (await hasCap('android-widget-1')) await WorkinNative.refreshWidget().catch(() => {});
+}
+/** #626 안드로이드 실제 캡처 차단(FLAG_SECURE) — 정책이 켜진 세션(외부 고객사)에서 켜고 로그아웃·정책 꺼짐이면 끔. 플러그인 없는 앱(1.1.3 이하)은 아무것도 안 함 */
+export async function setSecureScreen(on: boolean) {
+  if (await hasCap('android-secure-1')) await WorkinNative.setSecureScreen({ on }).catch(() => {});
+}
+/** #626 아이폰 캡처 감지('screenshot' 이벤트) — 돌려주는 함수로 구독 해제. 감지 플러그인이 없으면 null */
+export async function onNativeScreenshot(fn: () => void): Promise<(() => void) | null> {
+  if (!(await hasCap('ios-capture-detect-1'))) return null;
+  try { const h = await WorkinNative.addListener('screenshot', fn); return () => { h.remove(); }; } catch { return null; }
 }
 // 52ec734(로컬): filesystem·share·browser 플러그인 — 이 플러그인이 없는 예전 앱은 지금처럼 동작
 interface BrowserPlugin { open(o: { url: string; presentationStyle?: string }): Promise<void>; close(): Promise<void> }
