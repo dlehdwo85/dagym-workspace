@@ -59,7 +59,7 @@ import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
 import { econtractPdf } from './econtractPdf.step.mjs';
-import { payTestRemove } from './payTestRemove.step.mjs';
+import { payTest192 } from './payTest192.step.mjs';
 import { platformTabs } from './platformTabs.step.mjs';
 import { mktDraftQuality } from './mktDraftQuality.step.mjs';
 import { mktPhotos } from './mktPhotos.step.mjs';
@@ -1859,10 +1859,11 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await sql`update plans set monthly_krw = 79000 where code = 'business'`;
   assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = 'default'`)[0].plan_code, 'internal', '반려하면 그대로');
   await owner.screenshot({ path: `${SHOTS}/79-platform.png`, fullPage: true });
-  // V32 1 결제 시험: 시험 회사 만들기 → (결제창은 외부라 승인 결과를 기록으로 넣고) 자동 확인 화면
-  await owner.getByTestId('pay-test-create').click();
-  await owner.getByTestId('pay-test-tenant').first().waitFor();
-  const [tt] = await sql`select id from tenants where is_test order by created_at desc limit 1`;
+  // V32 1 → 192차(대표 10/27) 결제 시험: 결제 모듈 상태 + [시험 결제](숨은 시험 계정 하나 — 회사 만들기 없음) → (결제창은 외부라 승인 결과를 기록으로 넣고) 자동 확인 화면
+  await owner.getByTestId('pay-status').waitFor();
+  assert.equal(await owner.getByTestId('pay-test-create').count(), 0, '192차: 시험 회사 만들기 없음');
+  const w0 = await ctx.owner.ok('POST', '/api/platform/pay-test/tester/window', { kind: 'monthly', planCode: (await ctx.owner.ok('GET', '/api/platform/pay-test')).plans[0].code, payMethod: 'CARD' });
+  const [tt] = await sql`select tenant as id from payments where id = ${w0.paymentId}`;
   await sql`update tenant_subscriptions set plan_code = 'team', status = 'active', billing_cycle = 'monthly' where tenant = ${tt.id}`;
   const [tp] = await sql`insert into payments (tenant, kind, plan_code, moid, amount, status, paid_at, meta) values (${tt.id}, 'subscription', 'team', ${'WTE2E' + Date.now()}, 9900, 'paid', now(),
     ${sql.json({ test: true, payMethod: 'CARD', receiptSentAt: new Date().toISOString(), prev: { plan_code: 'trial', status: 'trial' } })}) returning id`;
@@ -1887,7 +1888,7 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   };`;
   await owner.route('https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js', (rt) => rt.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_NP }));
   await owner.goto(`${BASE}/platform?tab=paytest`);
-  await owner.getByTestId('pay-test-tenant').first().waitFor();
+  await owner.getByTestId('pay-test-open').waitFor();
   assert.equal(await owner.getByTestId('pay-test-pagemode').isChecked(), false);
   await owner.getByTestId('pay-test-open').first().click();
   await owner.getByTestId('pay-test-closed').waitFor();
@@ -2866,7 +2867,7 @@ await step('154차 자료실 상세(대표 10/25 #615 ②·④): 사진 앱 안 
 await step('메신저 3차(대표 10/20 카톡 수준 C12·D14·D15): 머리줄 알림 메뉴(전체·멘션만·끄기)·목록 줄 표시·방 안 찾기(▲▼·강조·처음 화면 밖)·전체 검색 결과 → 그 메시지로·방 정보 알림 3칸·방장만 관리·방장 넘기기·방 사진', () => messengerV5({ owner, ctx, sql, BASE, SHOTS }));
 await step('#533 업무 첨부 [고치기](대표 10/23 23:50): 첨부 있는 업무 제목·설명 고쳐 저장 → 그대로 · 글 고쳐 v2(글 고침) · 사진 돌리기·펜 v2(가로·세로 바뀜, 크기 표시 바로 — #258) · PDF 글자·체크 v2(긴 글 줄바꿈·글자 줄이기, 넘치면 저장 막기 — #258) · 저장 PDF 다시 읽기(글 그대로·한글 그려짐 — 147차) · 한글 = 내려받아 고친 뒤 올리기 안내 → v2 · 휴대폰 폭 [고치기]', () => attachEdit({ owner, ctx, BASE, SHOTS }));
 await step('139차 전자계약 2차 화면: [새 계약] PDF 올리기 → 서명자 → 칸 놓기(쪽 그림·서명·글자) → 보내기 → 받은 사람 휴대폰 화면 PDF 쪽·칸 채우기·서명 완료', () => econtractPdf({ owner, ctx, sql, BASE, SHOTS }));
-await step('#566 결제 시험 회사 [지우기](대표 10/24 저녁 3): 확인 창 → 지웠습니다 → 목록에서 빠짐', () => payTestRemove({ owner, ctx, sql, BASE, SHOTS }));
+await step('192차 결제 시험 화면(대표 10/27): 결제 모듈 상태(설정 필요·정상·확인 필요 + 운영 결제 방식) + [시험 결제]만 · 시험 회사 만들기·목록·지우기 없음 · 숨은 시험 계정 하나 다시 씀 · 고객사 목록에 없음 · 휴대폰 폭', () => payTest192({ owner, ctx, sql, BASE, SHOTS }));
 await step('#565 플랫폼 운영 정리(대표 10/24 저녁 1): 오늘 볼 것 5개 → 누르면 그 탭 · 종류별 탭 5개·한 줄 설명·주소 유지 · 예전 주소(paytest·#support) · 휴대폰 폭', () => platformTabs({ owner, ctx, sql, BASE, SHOTS }));
 await step('#235 마케팅 시안 품질 ⓐ·ⓔ(로컬 10/24 저녁 6): 브랜드 키트 이번 달 소식(기간 기본 30일)·잘 된 예시 글(형식별·좋은 점·빼기) → 승인한 글 [좋은 예시로 저장]·[예시에서 빼기] → 휴대폰 넘침 없음', () => mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }));
 await step('#235 ⓒ 사진 AI 설명(대표 #563): 자동 제작 › 사진 AI 설명 [설명 없는 사진 설명하기] → 숫자·사진별 설명·종류·글자·홍보물·쓰임 → 판정 고치기(글자 없음 = 바탕으로 씀)·되돌리기 → 자료실 AI 사진 설명 줄 → 휴대폰 넘침 없음', () => mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }));

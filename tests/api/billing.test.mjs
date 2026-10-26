@@ -291,4 +291,65 @@ describe('18차 나이스페이 결제', () => {
     assert.equal(state.calls.filter((x) => x.path.endsWith('cancel_process.jsp')).at(-1).f.MID, LIVE_MID, '실 상점으로 취소');
     assert.ok((await sql`select 1 from audit_logs where action = 'platform.live_smoke_started'`).length);
   });
+  test('192차 결제 시험 화면(대표 10/27): 결제 모듈 상태(정상↔확인 필요) · 숨은 시험 계정 하나를 다시 씀 · 다음 시험 전 지난 시험 결제 자동 취소 · 고객사 목록에 없음', async () => {
+    await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
+    const W = { kind: 'monthly', planCode: 'w_standard', payMethod: 'CARD' };
+    assert.equal((await ctx.staffA.client.req('GET', '/api/platform/pay-test')).status, 404, '플랫폼 운영자만');
+    assert.equal((await ctx.staffA.client.post('/api/platform/pay-test/tester/window', W)).status, 404);
+    let h = await platform.ok('GET', '/api/platform/pay-test');
+    assert.equal(h.tester, null, '처음엔 시험 계정 없음(첫 [시험 결제] 때 만듦)');
+    assert.deepEqual([h.status.mode, h.status.liveKeys], ['test', true], '운영 결제 방식 = 시험 상점(NICEPAY_MODE=test) · 실 상점 키 있음');
+    assert.ok(!JSON.stringify(h).includes('REAL-'), '키 값은 응답에 없음');
+    // 상태: 실제 회사(시험 아님)의 마지막 결제가 실패 → 확인 필요(사유) · 그 뒤 승인 → 정상
+    const mo = () => `T192${Math.random().toString(36).slice(2, 10)}`;
+    await sql`insert into payments (tenant, kind, moid, amount, status, result_msg, created_at) values (${tid}, 'subscription', ${mo()}, 14850, 'failed', '카드 한도 초과', now())`;
+    h = await platform.ok('GET', '/api/platform/pay-test');
+    assert.equal(h.status.state, 'warn');
+    assert.ok(h.status.reasons.some((r) => /최근 실제 결제가 실패로 끝났고 그 뒤 승인이 없습니다 — 카드 한도 초과/.test(r)), JSON.stringify(h.status.reasons));
+    assert.ok(h.status.fail7 >= 1);
+    await sql`insert into payments (tenant, kind, moid, amount, status, paid_at, created_at) values (${tid}, 'subscription', ${mo()}, 14850, 'paid', now() + interval '1 second', now())`;
+    h = await platform.ok('GET', '/api/platform/pay-test');
+    assert.deepEqual([h.status.state, h.status.reasons], ['ok', []], '그 뒤 승인 → 정상');
+    // [시험 결제] = 숨은 시험 계정(처음이면 만듦) → 시험 상점 결제창
+    const w = await platform.ok('POST', '/api/platform/pay-test/tester/window', W);
+    assert.deepEqual([w.mode, w.params.MID], ['test', MID]);
+    const [p1] = await sql`select tenant from payments where id = ${w.paymentId}`;
+    const [tt] = await sql`select is_test, name from tenants where id = ${p1.tenant}`;
+    assert.deepEqual([tt.is_test, tt.name], [true, '결제 시험(고정)']);
+    h = await platform.ok('GET', '/api/platform/pay-test');
+    assert.equal(h.tester.id, p1.tenant);
+    const r = await postForm('/api/billing/nicepay/return', { AuthResultCode: '0000', AuthResultMsg: '인증 성공', AuthToken: 'tok192', PayMethod: 'CARD', MID, Moid: w.params.Moid, Amt: w.params.Amt,
+      TxTid: `${MID}01012610271200001920`, Signature: sha('tok192' + MID + w.params.Amt + KEY), NextAppURL: `${NP}/webapi/pay_process.jsp`, NetCancelURL: `${NP}/webapi/cancel_process.jsp` });
+    assert.equal(r.headers.get('location'), `${BASE}/platform?tab=paytest&check=${w.paymentId}`);
+    assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = ${p1.tenant}`)[0].plan_code, 'w_standard');
+    const tests0 = (await sql`select count(*)::int n from tenants where is_test`)[0].n;
+    // 다음 시험 → 같은 계정 · 지난 시험 결제 자동 취소 · 요금제 결제 전으로
+    const w2 = await platform.ok('POST', '/api/platform/pay-test/tester/window', { ...W, kind: 'annual' });
+    assert.equal((await sql`select tenant from payments where id = ${w2.paymentId}`)[0].tenant, p1.tenant, '같은 시험 계정');
+    assert.equal((await sql`select count(*)::int n from tenants where is_test`)[0].n, tests0, '시험 회사 늘지 않음');
+    assert.equal((await sql`select status from payments where id = ${w.paymentId}`)[0].status, 'canceled', '지난 시험 결제 자동 취소');
+    assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = ${p1.tenant}`)[0].plan_code, 'trial', '요금제 결제 전으로');
+    assert.ok((await sql`select 1 from audit_logs where action = 'billing.refund' and detail->>'reason' = '다음 시험 전 자동 취소'`).length, '취소 감사 기록');
+    // 고객사 목록에 시험 계정(시험 회사 전부) 없음
+    const all = await platform.ok('GET', '/api/platform/tenants');
+    assert.ok((all.tenants ?? all.rows ?? []).every((x) => !x.is_test), '고객사 목록에 시험 회사 없음');
+    // 마지막 시험 결제 실패 → 확인 필요
+    await sql`update payments set status = 'failed', result_msg = '시험 승인 실패', updated_at = now() + interval '2 seconds' where id = ${w2.paymentId}`;
+    h = await platform.ok('GET', '/api/platform/pay-test');
+    assert.equal(h.status.state, 'warn');
+    assert.ok(h.status.reasons.some((x) => /마지막 시험 결제가 실패했습니다 — 시험 승인 실패/.test(x)));
+    assert.equal(h.status.lastTest.id, w2.paymentId);
+    assert.ok(h.payments.some((x) => x.id === w2.paymentId && x.status === 'failed'), '최근 시험 결제 목록');
+    // 실결제 100원 시험도 같은 계정으로(하루 3번 제한은 그대로 — 앞 시험분은 이틀 전으로)
+    await sql`update payments set created_at = now() - interval '2 days' where meta->>'liveSmoke' = 'true'`;
+    const lv = await platform.ok('POST', '/api/platform/pay-test/tester/live', { confirm: '실결제 100원' });
+    assert.deepEqual([lv.mode, lv.params.MID, Number(lv.params.Amt)], ['live', LIVE_MID, 100]);
+    assert.equal((await sql`select tenant from payments where id = ${lv.paymentId}`)[0].tenant, p1.tenant);
+    // 시험 계정이 지워졌으면(숨김) 다음 [시험 결제] 때 새로 만듦
+    await sql`update tenants set deleted_at = now(), status = 'deleted' where id = ${p1.tenant}`;
+    const w3 = await platform.ok('POST', '/api/platform/pay-test/tester/window', W);
+    const t3 = (await sql`select tenant from payments where id = ${w3.paymentId}`)[0].tenant;
+    assert.notEqual(t3, p1.tenant);
+    assert.equal((await platform.ok('GET', '/api/platform/pay-test')).tester.id, t3);
+  });
 });
