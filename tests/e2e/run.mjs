@@ -652,12 +652,13 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
   // #508: 목록에서 바로 빠지고 묶음 맨 아래 접힌 '완료됨 1건' — 안내 [완료됨 보기]가 펼치고, 되돌리기는 거기서
   await owner.locator(`[data-row="${id}"]`).waitFor({ state: 'detached' });
-  const fold = owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' });
-  await fold.waitFor();
-  assert.match(await fold.getByTestId('done-fold-toggle').innerText(), /완료됨 1건\s*\(오늘 1 · 이번 주 1\)/);
+  // 168차 CI: 목록이 담당자별 묶음(기본)으로 열리면 '완료됨' 칸이 묶음마다 하나씩 → 안내 [완료됨 보기]로 연 뒤 이 글이 든 칸을 고른다
+  await owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }).first().waitFor();
   assert.equal(await owner.getByRole('button', { name: '되돌리기', exact: true }).count(), 0, '안내에는 되돌리기 없음');
   await owner.getByRole('button', { name: '완료됨 보기' }).click();
-  const doneRow = fold.locator(`[data-done-id="${id}"]`); await doneRow.waitFor();
+  const doneRow = owner.locator(`[data-done-id="${id}"]`).first(); await doneRow.waitFor();
+  const fold = owner.getByTestId('done-fold').filter({ has: owner.locator(`[data-done-id="${id}"]`) }).first();
+  assert.match(await fold.getByTestId('done-fold-toggle').innerText(), /완료됨 1건\s*\(오늘 1 · 이번 주 1\)/);
   assert.equal(await fold.getByTestId('done-fold-all').getAttribute('href'), '/tasks?view=done');
   await owner.screenshot({ path: `${SHOTS}/217-done-fold.png`, clip: await fold.boundingBox() });
   await doneRow.getByTestId('done-fold-undo').click();
@@ -668,10 +669,8 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   assert.equal(await owner.getByTestId('done-fold').count(), 0, '완료가 없으면 접힌 칸도 없음');
   // 다른 화면(API)에서 보류 → 완료: 새로 불러온 '완료됨'의 [되돌리기]는 서버 활동 기록의 완료 직전 상태(보류)로
   for (const st of ['on_hold', 'done']) await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { status: st, version: (await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.version });
-  await owner.reload(); await owner.getByLabel('업무 검색').fill('원형 체크');
-  const fold2 = owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }); await fold2.waitFor();
-  await fold2.getByTestId('done-fold-toggle').click();
-  await fold2.locator(`[data-done-id="${id}"]`).getByTestId('done-fold-undo').click();
+  await owner.goto(BASE + '/tasks?mode=list&openDone=1'); await owner.getByLabel('업무 검색').fill('원형 체크'); // openDone=1 = '완료됨' 칸 펼친 채로(묶음 모드여도 이 글이 든 칸을 바로 찾음)
+  await owner.locator(`[data-done-id="${id}"]`).first().getByTestId('done-fold-undo').click();
   await owner.getByText('되돌렸습니다 — 보류').waitFor();
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'on_hold', '새로 불러와도 완료 직전 상태(보류)로');
   await owner.evaluate(() => localStorage.removeItem('wos_done_fold')); // 펼침 기억은 이 단계 안에서만
@@ -687,9 +686,10 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   await owner.waitForTimeout(4500);
   assert.equal(await th.isVisible(), true, '4.5초 뒤·새로고침 신호 뒤에도 같은 안내');
   const [nx] = await sql`select id from tasks where recurrence_source_id = ${rid} and deleted_at is null`; assert.ok(nx, '다음 회차 생김');
-  const fold3 = owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }); await fold3.waitFor();
-  await fold3.getByTestId('done-fold-toggle').click();
-  await fold3.locator(`[data-done-id="${rid}"]`).getByTestId('done-fold-undo').click();
+  await owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }).first().waitFor();
+  const row3 = owner.locator(`[data-done-id="${rid}"]`).first();
+  if (!(await row3.count())) await owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }).first().getByTestId('done-fold-toggle').click(); // 주소 openDone=1 로 이미 펼쳐져 있으면 그대로(한 번 더 누르면 닫힘)
+  await row3.getByTestId('done-fold-undo').click();
   await owner.getByText('완료 때 자동으로 만든 다음 업무 1건도 지웠습니다').waitFor();
   assert.ok((await sql`select deleted_at from tasks where id = ${nx.id}`)[0].deleted_at, '손대지 않은 다음 회차는 휴지통');
   await owner.evaluate(() => localStorage.removeItem('wos_done_fold'));

@@ -216,10 +216,13 @@ async function brandDraw(c: Content) {
   return { brand, logo: logo?.data ?? null, font: font && /\.(otf|ttf)$/i.test(font.name) ? font.data : null, color: kit.from ? kit.bg : null, D };
 }
 const safeTitle = (c: Pick<Content, 'title'>) => c.title.replace(/^\s*\[시험\]\s*/, '').replace(/[\\/:*?"<>|\n]+/g, ' ').trim().slice(0, 50) || '자동 시안';
-/** 171차(로컬 10/26 평가 ⓑ '본문 장이 전부 브랜드색 단색+글자'): 실사를 깔 장 — 행동 장은 빼고, 색 장과 번갈아 두 번째 장부터(장이 하나면 그 장) 2장까지 */
+/** 171차(로컬 10/26 평가 ⓑ '본문 장이 전부 브랜드색 단색+글자'): 실사를 깔 장 — 행동 장은 빼고, 색 장과 번갈아 두 번째 장부터(장이 하나면 그 장)
+ *  172차(로컬 10/26 ⑥ 레퍼런스 — 사례형 글은 사진 장이 절반 넘음): 본문 장의 절반(올림)까지 — 2장이면 1장, 3장이면 2장(둘째·셋째), 4장이면 2장(둘째·넷째). 사진이 모자라면 있는 만큼 */
 export function photoSlots(pages: CardPage[]): number[] {
   const idx = pages.map((p, k) => (p.role === 'cta' ? -1 : k)).filter((k) => k >= 0);
-  return idx.length <= 1 ? idx : idx.filter((_, j) => j % 2 === 1).slice(0, 2);
+  if (idx.length <= 1) return idx;
+  const odd = idx.filter((_, j) => j % 2 === 1); const even = idx.filter((_, j) => j % 2 === 0).reverse(); // 표지 바로 다음 장은 되도록 색 장으로
+  return [...odd, ...even].slice(0, Math.ceil(idx.length / 2)).sort((a, b) => a - b);
 }
 /** 장 노트 — 실사를 깐 장 수 */
 export const photoNote = (pages: CardPage[] | null | undefined) => { const k = (pages ?? []).filter((p) => p.photoId).length; return k ? `(실사 ${k}장)` : ''; };

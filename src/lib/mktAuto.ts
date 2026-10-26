@@ -531,14 +531,28 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   const [rule] = c.rule_id ? await sql<any[]>`select * from mkt_rules where id = ${c.rule_id}` : [];
   const m = await materialOf(c, brand, rule);
   if (!m.enough) return askTopic(c, actorId);
-  const d = await writeDraft(c, s, brand, rule, undefined, m).catch(async (e) => { if (e?.code === 'draft_invalid') await markFailed(c, e.message); throw e; });
-  const f = await refineDraft(c, d, brand);
+  let d = await writeDraft(c, s, brand, rule, undefined, m).catch(async (e) => { if (e?.code === 'draft_invalid') await markFailed(c, e.message); throw e; });
+  let f = await refineDraft(c, d, brand);
   const kind = c.kind as Kind;
-  const q = qualityCheck(f.body, d.brief, s, bannedOf(brand), kind, f.title);
+  let q = qualityCheck(f.body, d.brief, s, bannedOf(brand), kind, f.title);
   if (emptyBody(q.body, s.ai_label)) { await markFailed(c, '본문이 비었거나 너무 짧음'); const { HttpError } = await import('./errors'); throw new HttpError(502, 'draft_invalid', '다듬은 뒤 본문이 비어 저장하지 않았습니다(제작 실패)'); }
   if (f.errors.length) { q.passed = false; q.issues = [...q.issues, ...f.errors]; }
   // 로컬 QA 10/24 ②: 올리기 전 자동 검사에 걸리면 승인함(승인 대기) 대신 '수정 요청'에 이유와 함께 — 걸린 줄은 preflight 에도 따로(사람이 고친 수정본이 오면 지움)
-  const pre = await preflightOf(c, brand, s, { title: f.title, body: q.body, script: f.script });
+  let pre = await preflightOf(c, brand, s, { title: f.title, body: q.body, script: f.script });
+  // 172차(로컬 10/26 ①: 하이링크 스토리 '문구 3줄'·다짐 블로그 1,440자가 두 세트 연속 수정 요청으로 쌓임): 검사에 걸리면 걸린 줄을 알려 주고 1번만 다시 써 본 뒤 다시 검사 —
+  //  덜 걸리면 그 원고로(승인함), 그래도 같으면 첫 원고 그대로 수정 요청. MKT_PREFLIGHT_RETRY=0 이면 안 함(시험 서버)
+  let retried: string[] | null = null; let retryNote = '';
+  if (pre.length && process.env.MKT_PREFLIGHT_RETRY !== '0') {
+    try {
+      const d2 = await writeDraft(c, s, brand, rule, { prev: q.body, comment: `올리기 전 자동 검사에 걸렸습니다. 같은 주제·같은 재료로, 아래를 고쳐 다시 써 주세요:\n- ${pre.join('\n- ')}` }, m);
+      const f2 = await refineDraft(c, d2, brand);
+      const q2 = qualityCheck(f2.body, d2.brief, s, bannedOf(brand), kind, f2.title);
+      if (!emptyBody(q2.body, s.ai_label) && !f2.errors.length) {
+        const pre2 = await preflightOf(c, brand, s, { title: f2.title, body: q2.body, script: f2.script });
+        if (pre2.length < pre.length) { retried = pre; retryNote = ` · 검사에 걸려 1번 다시 씀(${pre.join(' · ')})`; d = d2; f = f2; q = q2; pre = pre2; }
+      }
+    } catch { /* 다시 쓰기 실패(AI 오류·크레딧)는 첫 원고로 */ }
+  }
   if (pre.length) { q.passed = false; q.issues = [...new Set([...q.issues, ...pre])]; }
   const script = VIDEO_KINDS.includes(kind) && f.script.length >= 2 ? f.script : null; // 로컬 QA 10/24 ⑥ 대본 칸(영상 제작용 — 게시 글에는 안 들어감)
   // #516 시안이 붙은 뒤에만 승인함: 피드·스토리(인스타·페북)는 서버가 바로 그림(크레딧 0), 영상은 제작 요청 카드로 만든 뒤 붙으면 승인 대기
@@ -575,9 +589,9 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   const rationale = G.rationaleFrom({ goal: m.goal, day: c.scheduled_at ? G.ymd(new Date(c.scheduled_at)) : G.ymd(new Date()), rule, channel: c.channel, kind, why: d.why || null, source: m.goal ? 'goal' : rule ? 'rule' : 'ai', topic: m.topic || null, topicFrom: m.topicFrom || null });
   // 원고·원장·제작 요청 카드를 한 번에(중간에 끊겨 원고만 남고 카드가 빠지는 일이 없게)
   await sql.begin(async (tx) => {
-    await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${mediaIds}, ${(v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기') + visualNote}, ${c.created_by})`;
+    await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${mediaIds}, ${(v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기') + retryNote + visualNote}, ${c.created_by})`;
     if (v > 1) await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('image', 'video') and status in ('open', 'needs_approval')`;
-    await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${held ? 'draft' : q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, brief: d.brief, report: { ...f.report, v, preflight: pre }, ...(pre.length ? { preflight: pre } : {}), ...(script ? { script } : {}), ...(d.card ? { card: d.card } : {}), ...(pages?.length ? { pages } : {}), ...(held ? { held: { at: new Date().toISOString(), reason: 'template' } } : {}),
+    await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${held ? 'draft' : q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, ...(retried ? { preflightRetry: retried } : {}), brief: d.brief, report: { ...f.report, v, preflight: pre }, ...(pre.length ? { preflight: pre } : {}), ...(script ? { script } : {}), ...(d.card ? { card: d.card } : {}), ...(pages?.length ? { pages } : {}), ...(held ? { held: { at: new Date().toISOString(), reason: 'template' } } : {}),
       ...(!mediaIds.length && d.photos?.length ? { bodyPlan: d.photos } : {}), ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 3, tried: photoId ? [photoId] : [], ...(bodyIds.length ? { bodyIds } : {}), ...(template ? { template } : {}), ...(photoIds.length > 1 ? { photoIds } : {}) } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임) — #544 초안 보관이면 만들지 않음(쓰지 않을 영상에 비용 X)
