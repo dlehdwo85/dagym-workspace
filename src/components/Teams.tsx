@@ -39,7 +39,8 @@ export function TeamsTab() {
     return null;
   };
   const fresh = (): Edit => {
-    const kind: OrgKind = !all.length ? 'hq' : all.some((t) => t.kind === 'dept') ? 'team' : 'dept';
+    // 195차 후속(CI 1511): 첫 단위도 기본은 '부서' — 본사는 사람이 고를 때만(빈 회사는 [일반 기업 조직도로 시작]). 예전처럼 부서가 있으면 '팀'
+    const kind: OrgKind = all.some((t) => t.kind === 'dept') ? 'team' : 'dept';
     return { name: '', color: COLORS[0], parentId: defaultParent(kind), kind, isolated: kind === 'team', defaultSpaces: ['work'], members: [], adoptTopLevel: true };
   };
   const pickKind = (k: OrgKind) => setEdit((x) => {
