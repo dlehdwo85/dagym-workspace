@@ -1,5 +1,5 @@
 // S1-2(로컬 10/20 최우선): 공용 수집 데이터 진행 기록 쓰기 — 전환 전 409 · 입찰(상태 버튼 미검토~대상아님·메모·다음 연락일, 처음 메모 → 검토중) · 시설(미연락~대상아님) · 협력사(미등록~대상 아님) ·
-// 화면(bids·hub)이 정식 표를 읽음 · [진행영업으로 넘기기](비슷한 리드 → similar, force → 리드 생성·연결·'진행영업 전환'·리드 상세 입찰 탭) · 제안·계약 등록 → 제안·계약 화면·리드 상세 · 남의 회사 404
+// 화면(bids·hub)이 정식 표를 읽음 · [진행영업으로 넘기기](비슷한 리드 → similar, force → 리드 생성·연결·'진행영업 전환'·리드 상세 원천 탭 — 입찰은 196차부터 업무로, 리드 아님) · 제안·계약 등록 → 제안·계약 화면·리드 상세 · 남의 회사 404
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
@@ -85,29 +85,31 @@ describe('S1-2 진행 기록 쓰기', () => {
     assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=vendors')).items.length, 1);
     await ctx.owner.ok('POST', '/api/sales/work', { kind: 'vendor', id: 'V1', status: '신청 준비' });
   });
-  test('진행영업으로 넘기기: 비슷한 리드 → similar, force → 리드 생성·연결·전환됨·리드 상세 입찰 탭·더 못 고침', async () => {
-    await ctx.owner.ok('POST', '/api/sales/leads', { name: '분당스포츠센터 관리단', region: '경기' });
-    const s = await ctx.owner.ok('POST', '/api/sales/work/convert', { kind: 'bid', id: 'N1' });
-    assert.ok(s.similar?.length === 1 && s.similar[0].name === '분당스포츠센터 관리단', '비슷한 이름 안내');
-    const c = await ctx.owner.ok('POST', '/api/sales/work/convert', { kind: 'bid', id: 'N1', force: true });
+  test('진행영업으로 넘기기: 비슷한 리드 → similar, force → 리드 생성·연결·전환됨·리드 상세 원천 탭·더 못 고침 · 입찰 공고는 리드로 넘기지 않음(결정 15-35)', async () => {
+    const bid = await ctx.owner.req('POST', '/api/sales/work/convert', { kind: 'bid', id: 'N1', force: true });
+    assert.equal(bid.status, 400, '입찰은 업무로(리드 아님)'); assert.match(bid.body.error.message, /입찰 업무로 넘기기/);
+    await ctx.owner.ok('POST', '/api/sales/leads', { name: '판교새단지 관리사무소', region: '경기' });
+    const s = await ctx.owner.ok('POST', '/api/sales/work/convert', { kind: 'building', id: 'B1' });
+    assert.ok(s.similar?.length === 1 && s.similar[0].name === '판교새단지 관리사무소', '비슷한 이름 안내');
+    const c = await ctx.owner.ok('POST', '/api/sales/work/convert', { kind: 'building', id: 'B1', force: true });
     assert.ok(c.leadId);
     const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${c.leadId}`);
-    assert.equal(d.lead.name, '분당 스포츠센터'); assert.equal(d.work.length, 1); assert.equal(d.work[0].status, '진행영업 전환');
-    const n = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.find((x) => x.id === 'N1');
-    assert.deepEqual([n.work, n.workLeadId], ['진행영업 전환', c.leadId]);
-    assert.equal((await ctx.owner.req('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '보류' })).status, 400, '넘긴 건은 리드에서');
-    assert.equal((await ctx.owner.ok('POST', '/api/sales/work/convert', { kind: 'bid', id: 'N1' })).already, true);
+    assert.equal(d.lead.name, '판교 새단지'); assert.equal(d.work.length, 1); assert.equal(d.work[0].status, '진행영업 전환');
+    const bd = (await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).items.find((x) => x.id === 'B1');
+    assert.deepEqual([bd.work?.status, bd.work?.leadId ?? bd.leadId], ['진행영업 전환', c.leadId]);
+    assert.equal((await ctx.owner.req('POST', '/api/sales/work', { kind: 'building', id: 'B1', status: '보류' })).status, 400, '넘긴 건은 리드에서');
+    assert.equal((await ctx.owner.ok('POST', '/api/sales/work/convert', { kind: 'building', id: 'B1' })).already, true);
     // 시설도 넘기기(비슷한 이름 없음 → 바로)
     const c2 = await ctx.owner.ok('POST', '/api/sales/work/convert', { kind: 'facility', id: 'F1' });
     assert.ok(c2.leadId); assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities')).items.find((x) => x.id === 'F1').contact, '진행영업 전환');
   });
   test('제안·계약 등록 → 제안·계약 화면(리드 이름)·리드 상세 · 담당 아닌 직원 403 · 다른 회사 404', async () => {
-    const lead = (await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads.find((l) => l.name === '분당 스포츠센터');
+    const lead = (await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads.find((l) => l.name === '판교 새단지');
     const p = await ctx.owner.ok('POST', `/api/sales/leads/${lead.id}/records`, { kind: 'proposals', title: '위탁운영 제안서 v1', amount: 385000000, date: today });
     assert.ok(p.id);
     await ctx.owner.ok('POST', `/api/sales/leads/${lead.id}/records`, { kind: 'contracts', title: '위탁운영 계약', amount: 360000000 });
     const deals = await ctx.owner.ok('GET', '/api/sales/src?view=deals');
-    assert.deepEqual([deals.proposals[0].title, deals.proposals[0].lead_name, deals.contracts[0].title], ['위탁운영 제안서 v1', '분당 스포츠센터', '위탁운영 계약']);
+    assert.deepEqual([deals.proposals[0].title, deals.proposals[0].lead_name, deals.contracts[0].title], ['위탁운영 제안서 v1', '판교 새단지', '위탁운영 계약']);
     assert.ok(deals.leads.some((l) => l.id === lead.id), '등록 폼용 리드 목록');
     const d = await ctx.owner.ok('GET', `/api/sales/src?view=lead&id=${lead.id}`);
     assert.deepEqual([d.proposals.length, d.contracts.length], [1, 1]);

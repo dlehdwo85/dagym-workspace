@@ -79,24 +79,27 @@ function MetaLeadBox({ id, raw, phone }: { id: string; raw: any; phone?: string 
 }
 /** 대표 10/21 12:00 영업 재편 1): 행마다 [영업 진행으로 넘기기] — 담당자 선택 → 리드·'영업 중'·담당 업무·일정·알림 (전화·문자 옆, 체크 선택과 별개) */
 function HandoffButton({ kind, id, name, onDone, compact }: { kind: 'bid' | 'building' | 'facility' | 'vendor'; id: string; name: string; onDone?: () => void; compact?: boolean }) {
+  const bid = kind === 'bid'; // 결정 15-35: 입찰은 업무로(리드 없음), 현장 영업은 영업 진행(리드)
   const [open, setOpen] = useState(false); const [sel, setSel] = useState<string[]>([]); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
   const people = useApi<{ people: { id: string; name: string; role: string; title: string | null }[]; me: string; suggested?: string | null }>(open ? `/api/sales/work/handoff?kind=${kind}` : (null as unknown as string), [open, kind]);
   useEffect(() => { if (people.data && !sel.length) setSel([people.data.suggested ?? people.data.me]); }, [people.data, sel.length]); // #100 원천별 담당 규칙이 있으면 그 사람이 기본
   async function go() {
     setBusy(true);
-    try { const r = await api<{ leadId: string; taskIds: string[]; eventIds: string[]; eventErrors: string[]; due: string }>('/api/sales/work/handoff', { body: { kind, id, assigneeIds: sel, note: note || undefined } });
-      toast.ok(`영업 진행으로 넘겼습니다 — 업무 ${r.taskIds.length}건(마감 ${r.due})${r.eventIds.length ? ` · 일정 ${r.eventIds.length}건` : ''}${r.eventErrors.length ? ` · 일정 못 만듦 ${r.eventErrors.length}` : ''}`);
+    try { const r = await api<{ leadId: string | null; taskIds: string[]; eventIds: string[]; eventErrors: string[]; due: string }>('/api/sales/work/handoff', { body: { kind, id, assigneeIds: sel, note: note || undefined } });
+      const tail = `${r.eventIds.length ? ` · 일정 ${r.eventIds.length}건` : ''}${r.eventErrors.length ? ` · 일정 못 만듦 ${r.eventErrors.length}` : ''}`;
+      toast.ok(bid ? `입찰 업무로 넘겼습니다 — 업무 1건(기한 ${r.due}${sel.length > 1 ? ` · 공동 담당 ${sel.length}명` : ''})${tail}` : `영업 진행으로 넘겼습니다 — 업무 ${r.taskIds.length}건(마감 ${r.due})${tail}`);
       setOpen(false); onDone?.(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   return (<>
-    <button type="button" onClick={() => setOpen(true)} className={cx(linkCls, 'border-brand-600 text-brand-700')} data-testid="sales-handoff"><ArrowRight className="size-3.5" aria-hidden />{compact ? '넘기기' : '영업 진행으로 넘기기'}</button>
-    {open && <Modal open onClose={() => setOpen(false)} title="영업 진행으로 넘기기">
+    <button type="button" onClick={() => setOpen(true)} className={cx(linkCls, 'border-brand-600 text-brand-700')} data-testid="sales-handoff"><ArrowRight className="size-3.5" aria-hidden />{compact ? '넘기기' : bid ? '입찰 업무로 넘기기' : '영업 진행으로 넘기기'}</button>
+    {open && <Modal open onClose={() => setOpen(false)} title={bid ? '입찰 업무로 넘기기' : '영업 진행으로 넘기기'}>
       <div className="space-y-3 text-sm" data-testid="sales-handoff-dialog">
-        <p className="text-xs text-ink-2"><b>{name}</b> — 담당자를 고르면 리드를 만들고 이 건은 ‘영업 중’이 됩니다. 담당자마다 ‘검토·첫 연락’ 업무(마감 = 참가신청/입찰 마감 전날)를 만들고, 공고에 현장설명회·참가신청·개찰·마감 일정이 있으면 회사 캘린더에 넣고 알립니다.</p>
+        {bid ? <p className="text-xs text-ink-2" data-testid="sales-handoff-bid-note"><b>{name}</b> — 담당자를 고르면 입찰 업무 1건을 만듭니다(처음 고른 사람이 주 담당, 나머지는 공동 담당). 기한은 참가신청·입찰 마감에 맞춰 자동으로 바뀌고, 공고가 취소되면 업무도 함께 취소됩니다. 현장설명회·참가신청·입찰 마감·개찰 일정은 회사 캘린더에 넣고 알립니다. 리드는 만들지 않습니다.</p>
+        : <p className="text-xs text-ink-2"><b>{name}</b> — 담당자를 고르면 리드를 만들고 이 건은 ‘영업 중’이 됩니다. 담당자마다 ‘검토·첫 연락’ 업무(마감 = 참가신청/입찰 마감 전날)를 만들고, 공고에 현장설명회·참가신청·개찰·마감 일정이 있으면 회사 캘린더에 넣고 알립니다.</p>}
         {!people.data ? <Skeleton rows={2} /> : <div className="flex flex-wrap gap-1.5" data-testid="sales-handoff-people">{people.data.people.map((p) => <label key={p.id} className={cx('inline-flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs', sel.includes(p.id) ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white')}>
           <input type="checkbox" className="sr-only" checked={sel.includes(p.id)} onChange={(e) => setSel(e.target.checked ? [...sel, p.id] : sel.filter((x) => x !== p.id))} />{p.name}{p.id === people.data!.me ? ' (나)' : ''}{p.title ? <span className="text-ink-3"> {p.title}</span> : null}</label>)}</div>}
-        <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="메모(선택) — 담당자 업무·리드에 남습니다" aria-label="메모" maxLength={500} />
+        <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder={bid ? '메모(선택) — 입찰 업무에 남습니다' : '메모(선택) — 담당자 업무·리드에 남습니다'} aria-label="메모" maxLength={500} />
         <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setOpen(false)}>취소</Button><Button disabled={busy || !sel.length} onClick={go} data-testid="sales-handoff-go">{busy ? '넘기는 중…' : `담당 ${sel.length}명에게 넘기기`}</Button></div>
       </div>
     </Modal>}
@@ -161,10 +164,10 @@ function WorkPanel({ kind, id, cur, onSaved }: { kind: 'bid' | 'building' | 'fac
         <div className="flex flex-col gap-1.5"><input type="date" className={cx(inputCls, 'h-9')} value={next} onChange={(e) => setNext(e.target.value)} aria-label="다음 연락일" data-testid="work-next" />
           <Button size="sm" onClick={() => save()} disabled={busy} data-testid="work-save">저장</Button></div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 border-t border-blue-100 pt-2">
+      {kind !== 'bid' ? <div className="flex flex-wrap items-center gap-2 border-t border-blue-100 pt-2">
         <Button size="sm" variant="secondary" onClick={() => convert(false)} disabled={busy} data-testid="work-convert">진행영업으로 넘기기</Button>
         <span className="text-[11px] text-ink-3">리드를 만들고 이 건을 연결합니다 (이름이 비슷한 거래처가 있으면 먼저 보여 줌)</span>
-      </div>
+      </div> : <p className="border-t border-blue-100 pt-2 text-[11px] text-ink-3" data-testid="work-bid-note">입찰 공고는 리드로 넘기지 않고 카드의 [넘기기]로 입찰 업무를 만듭니다(기한·취소·결과가 공고를 따라감).</p>}
       {similar && (
         <div className="rounded-input border border-amber-200 bg-amber-50 p-2 text-xs" data-testid="work-similar">
           <p className="mb-1 font-medium text-amber-900">이름이 비슷한 거래처가 있습니다</p>
@@ -950,6 +953,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
         {[['', '전체'], ...data.categories.map((c: any) => [c.key, c.name]), ['none', '미분류']].map(([k, l]) => <button key={k} type="button" onClick={() => setBiz(k)} data-testid={`sales-bids-biz-${k || 'all'}`} className={cx('rounded-full border px-2.5 py-0.5 text-xs', biz === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white')}>{l}</button>)}
         <Link href="/s/sales/sources#biz" className="text-[11px] text-ink-3 underline">관심 사업 설정</Link></div>}
       <Head title="입찰·공고 모니터링" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBids} compact /><Search value={s} onChange={setS} /></Head>
+      {data?.canAssign && data?.readOnly === false && <BidLeadsBanner onDone={reload} />}
       <div className="flex flex-wrap items-center gap-1.5">{chips.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}
         <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" data-testid="bids-sort">{BID_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
         {data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
@@ -985,7 +989,7 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
           ['상태', n.work], ['메모', n.workMemo], ['다음 조치', n.workNext && kd(n.workNext)]]} />
         <details className="rounded-input border border-line p-2 text-sm" data-testid="bid-detail-more"><summary className="cursor-pointer text-ink-2">과업 · 참가자격 · 요건 상세{D8.some(([, v]) => v) ? '' : ' (아직 없음 — 후속조사)'}</summary>
           <dl className="mt-2 grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1">{D8.map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="whitespace-pre-wrap break-words">{v ? String(v) : <span className="text-ink-3">{UNK2}</span>}</dd>])}</dl></details>
-        {canWrite && <WorkPanel kind="bid" id={String(n.id)} cur={{ status: n.work, memo: n.workMemo, next: n.workNext, leadId: n.workLeadId }} onSaved={() => onChange?.()} />}
+        {canWrite && (n.workBid ? <BidTaskPanel n={n} onSaved={() => onChange?.()} /> : <WorkPanel kind="bid" id={String(n.id)} cur={{ status: n.work, memo: n.workMemo, next: n.workNext, leadId: n.workLeadId }} onSaved={() => onChange?.()} />)}
         <RawFold row={n.raw} admin={admin} testId="bid-raw" />
       </div>
     </Modal>
@@ -1153,7 +1157,8 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
       <div className="mt-1.5 flex flex-wrap items-end gap-1.5 text-xs">
         <ContactRow phone={n.phone} links={[[n.search ? null : n.url, '원문'], [n.attachments?.length ? attHref(n.attachments[0], 0, bidCtx(n)) : null, n.attachments?.length > 1 ? `공고문 내려받기 ${n.attachments.length}건` : '공고문 내려받기']]} />
         {n.search && <SearchHintChip h={n.search} />}
-        {canWrite && !n.workLeadId && !n.skipped && st[0] !== '취소' && <HandoffButton kind="bid" id={String(n.id)} name={`${n.complex ? n.complex + ' ' : ''}${n.title}`} onDone={onChange} compact />}{/* 대표 10/24 추가 ②: 취소·대상 아님 공고는 넘기기 대신 [대상 아님]·[되돌리기] */}
+        {canWrite && !n.workLeadId && !n.workBid && !n.skipped && st[0] !== '취소' && <HandoffButton kind="bid" id={String(n.id)} name={`${n.complex ? n.complex + ' ' : ''}${n.title}`} onDone={onChange} compact />}
+        {n.workBid && <BidTaskChip b={n.workBid} />}{canWrite && n.workBid && !n.workBid.result && <RevertButton bidId={String(n.id)} onDone={onChange} />}{/* 결정 15-35 입찰 업무 */}{/* 대표 10/24 추가 ②: 취소·대상 아님 공고는 넘기기 대신 [대상 아님]·[되돌리기] */}
         {n.workLeadId && <Link href={`/s/sales/leads?id=${n.workLeadId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-handoff-lead">영업 중 → 리드</Link>}
         {canWrite && n.workLeadId && n.workHandoff && <RevertButton leadId={n.workLeadId} onDone={onChange} />}{/* #610 ⓐ */}
         <span className="ml-auto font-medium text-ink" data-testid="bid-deadline">{n.deadline ? `마감 ${kdt(n.deadline)}` : '마감일 미확인'}</span>
@@ -1263,12 +1268,81 @@ function ArchiveLine({ kind, id, a, canWrite, onChange, operator, contractEnd }:
     </div>
   );
 }
+/** 결정 15-35: 입찰 업무로 넘긴 공고 — 업무 열기(기한)·결과 칩·계약 업무 */
+const BID_RES: Record<string, [string, string]> = { won: ['낙찰', 'bg-emerald-50 text-emerald-800'], lost: ['미낙찰', 'bg-slate-100 text-ink-2'], failed: ['유찰', 'bg-amber-50 text-amber-800'], canceled: ['공고 취소', 'bg-red-50 text-red-700'] };
+function BidTaskChip({ b }: { b: any }) {
+  const r = b.result ? BID_RES[String(b.result)] : null;
+  return <span className="inline-flex flex-wrap items-center gap-1.5" data-testid="sales-bid-task-chip">
+    {b.result !== 'canceled' && <Link href={`/tasks/${b.taskId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-bid-task">입찰 업무{!b.result && b.due ? ` · 기한 ${kd(b.due)}` : ''} →</Link>}
+    {r && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', r[1])} data-testid="sales-bid-result">{r[0]}{b.auto && b.result !== 'canceled' ? ' · 자동 판정' : ''}</span>}
+    {b.contractTaskId && <Link href={`/tasks/${b.contractTaskId}`} className={cx(linkCls, 'text-ink-2')} data-testid="sales-bid-contract">계약 업무 →</Link>}
+  </span>;
+}
+/** 입찰 상세의 입찰 업무 칸 — 결과 [낙찰]·[미낙찰]·[유찰](자동 판정 바로잡기 포함), 낙찰은 계약 기간·금액(선택) */
+function BidTaskPanel({ n, onSaved }: { n: any; onSaved: () => void }) {
+  const b = n.workBid; const [busy, setBusy] = useState(false); const [wonOpen, setWonOpen] = useState(false); const [f, setF] = useState({ start: '', end: '', amount: '' });
+  async function result(r: 'won' | 'lost' | 'failed', extra: Record<string, unknown> = {}) {
+    setBusy(true);
+    try { const x = await api<{ status: string }>('/api/sales/work/bid-result', { body: { id: String(n.id), result: r, ...extra } });
+      toast.ok(r === 'won' ? '낙찰로 넣었습니다 — 계약 기록과 계약 업무가 있습니다' : `'${x.status}'(으)로 넣었습니다 — 입찰 업무를 마쳤습니다`); setWonOpen(false); onSaved(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  if (b.result === 'canceled') return <div className="rounded-input border border-red-200 bg-red-50 p-2 text-xs text-red-800" data-testid="bid-task-panel">발주처가 공고를 취소해 입찰 업무와 일정을 취소했습니다.</div>;
+  return (
+    <div className="space-y-2 rounded-input border border-emerald-200 bg-emerald-50/50 p-3 text-sm" data-testid="bid-task-panel">
+      <div className="flex flex-wrap items-center gap-2"><span className="font-medium text-emerald-900">{b.result ? '입찰 결과' : '입찰 업무로 진행 중'}</span><BidTaskChip b={b} /></div>
+      <p className="text-xs text-ink-2">기한은 공고 일정에 맞춰 자동으로 바뀌고, 공고가 취소되면 업무도 함께 취소됩니다. 개찰 결과가 올라오면 우리 회사 낙찰인지 자동으로 판정합니다{b.result ? ' — 판정이 틀리면 아래에서 바로잡아 주세요' : ''}.</p>
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="개찰 결과">
+        <span className="text-xs text-ink-3">결과</span>
+        <Button size="sm" variant={b.result === 'won' ? 'primary' : 'secondary'} disabled={busy} onClick={() => setWonOpen(!wonOpen)} data-testid="bid-result-won">낙찰</Button>
+        <Button size="sm" variant={b.result === 'lost' ? 'primary' : 'secondary'} disabled={busy || b.result === 'lost'} onClick={() => result('lost')} data-testid="bid-result-lost">미낙찰</Button>
+        <Button size="sm" variant={b.result === 'failed' ? 'primary' : 'secondary'} disabled={busy || b.result === 'failed'} onClick={() => result('failed')} data-testid="bid-result-failed">유찰</Button>
+      </div>
+      {wonOpen && <div className="grid gap-2 rounded-input border border-line bg-white p-2 sm:grid-cols-4" data-testid="bid-won-form">
+        <Field label="계약 시작"><input type="date" className={inputCls} value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} aria-label="계약 시작" data-testid="bid-won-start" /></Field>
+        <Field label="계약 종료"><input type="date" className={inputCls} value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} aria-label="계약 종료" data-testid="bid-won-end" /></Field>
+        <Field label="금액(원)"><input inputMode="numeric" className={inputCls} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} aria-label="계약 금액" placeholder="선택" /></Field>
+        <div className="flex items-end gap-1.5"><Button size="sm" disabled={busy} onClick={() => result('won', { contractStart: f.start || null, contractEnd: f.end || null, amount: numOf(f.amount) })} data-testid="bid-won-go">낙찰로 넣기</Button><Button size="sm" variant="ghost" onClick={() => setWonOpen(false)}>닫기</Button></div>
+        <p className="text-[11px] text-ink-3 sm:col-span-4">계약 기간을 넣으면 종료 120일 전에 재계약 준비 업무가 자동으로 생깁니다(나중에 계약 기록에서 넣어도 됩니다).</p>
+      </div>}
+    </div>
+  );
+}
+/** 결정 15-35 예전 자료 정리(관리자): 입찰 공고에서 넘어와 리드가 된 건 → 미리 보고 고른 것만 입찰 업무로 */
+function BidLeadsBanner({ onDone }: { onDone?: () => void }) {
+  const { data, reload } = useApi<{ items: { id: string; name: string; status: string | null; owner: string | null; movable: boolean; why: string | null; openTasks: number }[] }>('/api/sales/work/bid-leads');
+  const [open, setOpen] = useState(false); const [pick, setPick] = useState<string[] | null>(null); const [busy, setBusy] = useState(false);
+  const items = data?.items ?? []; if (!items.length) return null;
+  const movable = items.filter((x) => x.movable); const chosen = pick ?? movable.map((x) => x.id);
+  async function go() {
+    setBusy(true);
+    try { const r = await api<{ moved: unknown[]; skipped: unknown[] }>('/api/sales/work/bid-leads', { body: { leadIds: chosen } });
+      toast.ok(`입찰 업무로 옮겼습니다 — ${r.moved.length}건${r.skipped.length ? ` · 그대로 둠 ${r.skipped.length}건` : ''}`); setOpen(false); setPick(null); reload(); onDone?.(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-card border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="bid-leads-banner">
+      <span>입찰 공고에서 넘어와 리드가 된 건 {items.length}건 — 이제 입찰은 업무로 관리합니다.</span>
+      <button type="button" className="font-semibold underline" onClick={() => setOpen(true)} data-testid="bid-leads-open">살펴보고 옮기기</button>
+      {open && <Modal open onClose={() => setOpen(false)} title="입찰에서 넘어온 리드 정리">
+        <div className="space-y-3 text-sm" data-testid="bid-leads-dialog">
+          <p className="text-xs text-ink-2">옮기면 리드는 보관함(되돌림, 사유 기록)으로 가고, 넘길 때 만든 업무는 입찰 업무로 이어져 공고 일정·취소·결과를 따라갑니다. 상담·제안·계약 기록이 있거나 첫 연락 다음 단계까지 간 리드는 현장 영업으로 그대로 둡니다.</p>
+          <ul className="max-h-72 space-y-1 overflow-y-auto">{items.map((x) => <li key={x.id}><label className={cx('flex items-start gap-2 text-xs', !x.movable && 'text-ink-3')}>
+            <input type="checkbox" className="mt-0.5" disabled={!x.movable} checked={x.movable && chosen.includes(x.id)} onChange={(e) => setPick(e.target.checked ? [...chosen, x.id] : chosen.filter((y) => y !== x.id))} data-testid="bid-leads-item" />
+            <span><b className="font-medium">{x.name}</b> · {x.status ?? '단계 없음'} · 담당 {x.owner ?? '없음'}{x.openTasks ? ` · 열린 업무 ${x.openTasks}건` : ''}{x.why && <span className="block text-ink-3">{x.why}</span>}</span></label></li>)}</ul>
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setOpen(false)}>닫기</Button><Button disabled={busy || !chosen.length} onClick={go} data-testid="bid-leads-go">{busy ? '옮기는 중…' : `${chosen.length}건 입찰 업무로 옮기기`}</Button></div>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
 /** #610 ⓐ(대표 10/25 ⑥): [넘기기] 뒤 카드에서 바로 [되돌리기] — 리드는 보관함('되돌림'), 원천 행은 넘기기 전 상태, 업무·일정 취소(누가·언제 기록). 리드 상세의 [배정 이전으로 되돌리기]와 같은 API */
-function RevertButton({ leadId, onDone }: { leadId: string; onDone?: () => void }) {
+function RevertButton({ leadId, bidId, onDone }: { leadId?: string; bidId?: string; onDone?: () => void }) {
   const [ask, setAsk] = useState(false); const [why, setWhy] = useState(''); const [busy, setBusy] = useState(false);
   async function go() {
     setBusy(true);
-    try { const r = await api<{ tasks: number; events: number }>('/api/sales/work/handoff/revert', { body: { leadId, reason: why.trim() || undefined } }); toast.ok(`되돌렸습니다 — 리드는 보관함으로, 업무 ${r.tasks}건·일정 ${r.events}건 취소`); setAsk(false); onDone?.(); }
+    try { const r = await api<{ tasks: number; events: number }>('/api/sales/work/handoff/revert', { body: bidId ? { kind: 'bid', id: bidId, reason: why.trim() || undefined } : { leadId, reason: why.trim() || undefined } });
+      toast.ok(bidId ? `되돌렸습니다 — 입찰 업무 ${r.tasks}건·일정 ${r.events}건 취소` : `되돌렸습니다 — 리드는 보관함으로, 업무 ${r.tasks}건·일정 ${r.events}건 취소`); setAsk(false); onDone?.(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   if (!ask) return <button type="button" className={cx(linkCls, 'text-ink-2')} onClick={() => setAsk(true)} data-testid="sales-handoff-revert">되돌리기</button>;

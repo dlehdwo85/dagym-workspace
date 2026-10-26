@@ -202,7 +202,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       items.push({ date: l.next, time: tm, title: `${act ? String(act).slice(0, 20) : '연락'} · ${l.name}`, kind: 'lead', owner: l.owner ?? null, href: `/s/sales/leads?q=${encodeURIComponent(String(l.name))}` });
     }
     if (bidsOn) {
-      const W = (await rows(t, 'opportunity_work')).filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? '')));
+      // 196차: 전환 뒤 정식 진행 기록(prog) — 예전에는 원본 복사본만 읽어 워크인에서 넘긴 입찰이 빠졌음 · 결과(낙찰·유찰·취소)가 난 공고는 뺌
+      const W = (await prog('opportunity_work')).filter((w) => !/완료|미참여|대상\s?아님|done|closed|낙찰|유찰|취소/i.test(String(pick(w, 'status') ?? '')));
       const ids = new Set(W.map((w) => String(pick(w, 'notice_id', 'procurement_notice_id') ?? '')));
       if (ids.size) for (const r of await noticeRows(ids, { related: false })) {
         if (!ids.has(String(r.id ?? r.__id))) continue;
@@ -419,6 +420,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       return { ...n0, todayHit: why.hit, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본) · #610 넘기기로 만든 리드면 카드에 [되돌리기]
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, workHandoff: !!(w?.lead_id && pick(w, 'handoff_by')), raw: r.__orig ?? r,
+        // 결정 15-35: 입찰 업무로 넘긴 공고 — 업무 열기·기한·결과·[되돌리기]
+        workBid: w && pick(w, 'bid_task_id') ? { taskId: String(pick(w, 'bid_task_id')), due: pick(w, 'bid_due_auto'), result: pick(w, 'bid_result'), winner: pick(w, 'bid_winner'), amount: pick(w, 'bid_amount'), auto: !!pick(w, 'bid_result_auto'), contractTaskId: pick(w, 'bid_contract_task_id'), assignees: Array.isArray(w.assignees) ? w.assignees.length : 0 } : null,
         history: r.__history ?? null, skipped, skip: who && skipped && !folded(r) ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null,
         linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; });
     // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작

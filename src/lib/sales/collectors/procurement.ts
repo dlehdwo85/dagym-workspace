@@ -112,7 +112,7 @@ export const PROCUREMENT_ETL_FIELDS = ['source_url', 'notice_file_url', 'issuer'
   'bid_system', 'award_method', 'notice_state', 'facility_name', 'bid_category', 'office_phone', 'office_fax', 'office_address', 'household_count', 'fit_business', 'matched_keywords', 'related', 'attachment_urls',
   'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at', 'site_briefing_at', 'site_briefing_place',
   'base_amount', 'notice_no'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로 · #543 공고번호(바로 가는 주소가 없는 원천의 '번호 검색' 안내)
-export const AWARD_FIELDS = ['winner_name', 'winner_amount', 'award_date', 'current_status'] as const;
+export const AWARD_FIELDS = ['winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'current_status'] as const; // 196차: 낙찰자 사업자번호 — 입찰 업무 '우리 회사 낙찰' 판정
 export type NoticeRow = Record<string, unknown> & { source_type: string; source_external_id: string; title: string; source_url: string };
 
 const txt = (v: unknown): string | null => { if (v == null) return null; const t = String(v).replace(/\s+/g, ' ').trim(); return t ? t : null; };

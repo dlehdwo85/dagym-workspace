@@ -121,7 +121,7 @@ export function prespecPayload(it: any, cat: string): Record<string, unknown> | 
 export function awardPayload(it: any, cat: string): Record<string, unknown> | null {
   const no = str(it.bidNtceNo), ord = str(it.bidNtceOrd) ?? '00', title = str(it.bidNtceNm); if (!no || !title) return null;
   return { source_type: 'g2b_bid', source_external_id: `${no}-${ord}`, source_url: fixG2bUrl(str(it.bidNtceDtlUrl)) ?? g2bBidUrl(no, ord), title, issuer: str(it.ntceInsttNm), demand_agency: str(it.dminsttNm), bid_category: cat,
-    winner_name: str(it.bidwinnrNm) ?? str(it.sucsfBidNm), winner_amount: str(it.sucsfbidAmt), award_date: str(it.opengDt)?.slice(0, 10), posted_date: str(it.bidNtceDt)?.slice(0, 10) };
+    winner_name: str(it.bidwinnrNm) ?? str(it.sucsfBidNm), winner_biz_no: str(it.bidwinnrBizno), winner_amount: str(it.sucsfbidAmt), award_date: str(it.opengDt)?.slice(0, 10), posted_date: str(it.bidNtceDt)?.slice(0, 10) };
 }
 export const g2bPrespecAwards: Collector = {
   slug: 'g2b_prespec_awards', label: '나라장터 사전규격·낙찰정보', hourKst: 6, source: 'HrcspSsstndrdInfoService(사전규격 최근 4일 전체 → matchFit) + ScsbidInfoService(낙찰, 검색어·최근 28일 + 돌아가며 지난 1년 중 한 달)', needs: ['DATA_GO_KR_SERVICE_KEY'],

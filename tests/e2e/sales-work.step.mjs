@@ -1,4 +1,4 @@
-// S1-2(로컬 10/20 최우선) 진행 기록 쓰기 화면(390): 전환 뒤 입찰 상세에 원본 상태 버튼(미검토~대상아님)·메모·다음 연락일 → [연락중] 누르면 카드 칩 → 메모 저장 → [진행영업으로 넘기기] → 리드 상세 열림·'진행영업 전환됨'
+// S1-2(로컬 10/20 최우선) 진행 기록 쓰기 화면(390): 전환 뒤 입찰 상세에 원본 상태 버튼(미검토~대상아님)·메모·다음 연락일 → [연락중] 누르면 카드 칩 → 메모 저장 → 입찰 [넘기기] → 리드 없이 입찰 업무(결정 15-35)·입찰 업무 칸 [유찰] · 입찰 상세에는 리드 전환 대신 안내
 import assert from 'node:assert/strict';
 
 export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
@@ -34,27 +34,37 @@ export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     await p.screenshot({ path: `${SHOTS}/143-sales-work-panel.png` });
     await p.getByRole('dialog').getByLabel('닫기').tap();
     await bid.getByText('연락중').waitFor(); // 카드 상태 칩
-    // 대표 10/21 12:00 영업 재편 1): 행 [넘기기] → 담당자 선택 창 → 리드·'영업 중'·업무·일정(현장설명회·입찰 마감)·알림
+    // 결정 15-35(196차): 입찰 행 [넘기기] → 담당자 선택 창 → 리드 없이 입찰 업무 1건·'입찰 진행'·일정(현장설명회·입찰 마감)·알림
     const bid2 = p.getByTestId('sales-bid').filter({ hasText: 'E2E 넘기기 공고' }); await bid2.waitFor();
     await bid2.getByTestId('sales-handoff').tap();
     const hd = p.getByTestId('sales-handoff-dialog'); await hd.waitFor();
     await hd.getByTestId('sales-handoff-people').getByRole('checkbox').first().waitFor({ state: 'attached' });
     await p.screenshot({ path: `${SHOTS}/175-sales-handoff.png` });
+    assert.match(await hd.getByTestId('sales-handoff-bid-note').innerText(), /입찰 업무 1건/);
     await hd.getByTestId('sales-handoff-go').tap();
-    await p.getByText('영업 진행으로 넘겼습니다').first().waitFor();
-    await bid2.getByTestId('sales-handoff-lead').waitFor();
-    const [h] = await sql`select w.status, l.name, l.status as ls, (select count(*)::int from tasks t where t.lead_id = l.id) as tasks, (select count(*)::int from events e where e.title like '[영업] %E2E 넘기기%') as events from sales_work_records w join sales_leads l on l.id = w.lead_id where w.ref_id = ${id2}`;
-    assert.deepEqual([h.status, h.name, h.ls, h.tasks >= 1, h.events], ['영업 중', 'E2E 넘기기 단지 E2E 넘기기 공고', '신규리드', true, 2], '리드·영업 중·업무·일정(현장설명회·입찰 마감)');
-    // 진행영업으로 넘기기 → 리드 생성·상세 열림
+    await p.getByText('입찰 업무로 넘겼습니다').first().waitFor();
+    await bid2.getByTestId('sales-bid-task').waitFor();
+    const [h] = await sql`select w.status, w.lead_id, w.data->>'bid_task_id' as tid, (select count(*)::int from sales_leads l where l.src->>'id' = ${id2}) as leads,
+      (select title from tasks t where t.id::text = w.data->>'bid_task_id') as title, (select count(*)::int from events e where e.title like '[입찰] %E2E 넘기기%' and e.deleted_at is null) as events from sales_work_records w where w.ref_id = ${id2}`;
+    assert.deepEqual([h.status, h.lead_id, h.leads, h.title, h.events], ['입찰 진행', null, 0, '[입찰] E2E 넘기기 단지 E2E 넘기기 공고', 2], '리드 없이 입찰 업무·입찰 진행·일정(현장설명회·입찰 마감)');
+    // 입찰 상세: 입찰 업무 칸(업무 열기·결과 버튼) — [유찰] → 결과 칩
+    await bid2.getByTestId('bid-open').tap();
+    const bp = p.getByTestId('bid-task-panel'); await bp.waitFor();
+    await bp.getByTestId('sales-bid-task').waitFor();
+    await p.getByText('입찰 업무로 넘겼습니다').first().waitFor({ state: 'hidden', timeout: 12000 }).catch(() => {}); // 안내가 사라지고 시트가 다 올라온 뒤 캡처
+    await p.waitForTimeout(500);
+    await p.screenshot({ path: `${SHOTS}/537-bid-task-panel.png` });
+    await bp.getByTestId('bid-result-failed').tap();
+    await p.getByText("'유찰'(으)로 넣었습니다").first().waitFor();
+    await p.getByRole('dialog').getByLabel('닫기').tap();
+    await bid2.getByTestId('sales-bid-result').filter({ hasText: '유찰' }).waitFor();
+    // 입찰 공고는 리드로 넘기지 않음 — 상세 진행 칸에 [진행영업으로 넘기기] 대신 안내
     await bid.getByTestId('bid-open').tap();
-    await p.getByTestId('work-convert').tap();
-    await p.waitForURL(/\/s\/sales\/leads\?id=/);
-    await p.getByTestId('sales-lead-detail').waitFor();
-    assert.match(await p.getByRole('dialog').innerText(), /E2E 단지/);
-    const [l] = await sql`select l.name, w.status from sales_work_records w join sales_leads l on l.id = w.lead_id where w.ref_id = ${id}`;
-    assert.deepEqual([l.name, l.status], ['E2E 단지', '진행영업 전환']);
+    await p.getByTestId('work-bid-note').waitFor();
+    assert.equal(await p.getByTestId('work-convert').count(), 0, '입찰은 진행영업(리드) 전환 없음');
+    await p.getByRole('dialog').getByLabel('닫기').tap();
     // #507 공고 첨부: 공고에서 넘어온 업무 상세 — 자동 첨부가 없으면 [공고 파일 붙이기](공고에 파일이 없으면 안내) · 자동 첨부가 있으면 '공고 첨부(자동)' 표시·버튼 숨김
-    const [tk] = await sql`select t.id from tasks t join sales_work_records w on w.lead_id = t.lead_id where w.ref_id = ${id2} and t.deleted_at is null order by t.created_at limit 1`;
+    const [tk] = await sql`select t.id from tasks t join sales_work_records w on t.id::text = w.data->>'bid_task_id' where w.ref_id = ${id2} and t.deleted_at is null`;
     await p.evaluate(() => { try { localStorage.removeItem('wos_td_fold'); } catch {} });
     await p.goto(`${BASE}/tasks/${tk.id}`);
     const sf = p.getByTestId('task-source-files'); await sf.waitFor();
@@ -72,8 +82,8 @@ export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     await sql`delete from sales_work_records where tenant = 'default' and ref_id = ${id}`.catch(() => {});
     await sql`delete from sales_leads where tenant = 'default' and name = 'E2E 단지'`.catch(() => {});
     await sql`delete from sales_src_rows where src_id = ${id}`.catch(() => {});
-    await sql`delete from tasks where lead_id in (select id from sales_leads where tenant = 'default' and name like 'E2E 넘기기%')`.catch(() => {});
-    await sql`delete from events where title like '[영업] %E2E 넘기기%'`.catch(() => {});
+    await sql`delete from tasks where sales_ref->>'id' = ${id2}`.catch(() => {});
+    await sql`delete from events where title like '[입찰] %E2E 넘기기%'`.catch(() => {});
     await sql`delete from sales_work_records where tenant = 'default' and ref_id = ${id2}`.catch(() => {});
     await sql`delete from sales_leads where tenant = 'default' and name like 'E2E 넘기기%'`.catch(() => {});
     await sql`delete from sales_src_rows where src_id = ${id2}`.catch(() => {});
