@@ -2726,7 +2726,9 @@ await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리�
   assert.ok(!titles.includes('동료 초대·회사 설정'), '직원에게는 관리자 단계 없음');
   assert.ok(!titles.includes('바탕화면 위젯'), '웹에는 위젯 단계 없음');
   const seen = async (pg) => (await pg.evaluate(() => fetch('/api/tours').then((r) => r.json()))).seen;
-  assert.ok((await seen(p)).includes('home'), '서버에 봤음 기록');
+  // 봤음 기록은 말풍선이 닫힌 뒤 서버에 따로 저장됨 — 기록이 들어올 때까지 잠깐 기다려 읽음(CI 1493: 닫힘 직후 읽어 [] 로 실패)
+  const seenWait = async (pg, ok) => { const until = Date.now() + 10_000; let s = await seen(pg); while (!ok(s) && Date.now() < until) { await pg.waitForTimeout(200); s = await seen(pg); } return s; };
+  assert.ok((await seenWait(p, (s) => s.includes('home'))).includes('home'), '서버에 봤음 기록');
   await p.reload(); await p.waitForTimeout(2500);
   assert.equal(await tour.count(), 0, '다시 열어도 안 뜸');
   // 업무 화면 처음 → 그 화면 안내, Esc = 건너뛰기(봤음)
@@ -2735,7 +2737,7 @@ await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리�
   assert.equal(await p.getByTestId('tour-title').innerText(), '업무 추가');
   await p.keyboard.press('Escape');
   await tour.waitFor({ state: 'detached' });
-  assert.ok((await seen(p)).includes('tasks'));
+  assert.ok((await seenWait(p, (s) => s.includes('tasks'))).includes('tasks'));
   // [사용 안내 다시 보기] → 홈부터 다시
   await p.getByRole('button', { name: '내 계정 메뉴' }).click();
   await p.getByTestId('tour-restart').click();
@@ -2744,7 +2746,7 @@ await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리�
   assert.equal(await p.getByTestId('tour-title').innerText(), '워크인 사용 안내');
   await p.getByTestId('tour-skip').click();
   await tour.waitFor({ state: 'detached' });
-  assert.deepEqual(await seen(p), ['home'], '다시 보기 = 기록 초기화 후 홈만 봤음');
+  assert.deepEqual(await seenWait(p, (s) => s.length === 1 && s[0] === 'home'), ['home'], '다시 보기 = 기록 초기화 후 홈만 봤음');
   await c.close();
   // 휴대폰: 하단 탭(업무)을 가리키고 말풍선은 탭 위·화면 안, 가로 넘침 없음
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
