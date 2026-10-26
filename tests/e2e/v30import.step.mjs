@@ -48,7 +48,8 @@ export async function sheetPhone({ owner, BASE, SHOTS }) {
     if (ch === 'sms') await owner.getByTestId('mail-channel-sms').click();
     const bar = owner.getByTestId('compose-actions');
     const box = await bar.boundingBox(); const dlg = await owner.getByRole('dialog').boundingBox();
-    assert.ok(box && box.y + box.height <= Math.min(700, dlg.y + dlg.height) + 4 && box.y > 300, `${ch}: 버튼 줄이 화면 아래에 보임 (${box?.y}+${box?.height}, 시트 끝 ${dlg.y + dlg.height})`);
+    // 176차: CI 글꼴·소수점 차이로 1px 넘친 적 있어 여유 8px
+    assert.ok(box && box.y + box.height <= Math.min(700, dlg.y + dlg.height) + 8 && box.y > 300, `${ch}: 버튼 줄이 화면 아래에 보임 (${box?.y}+${box?.height}, 시트 끝 ${dlg.y + dlg.height})`);
     const scrolled = await owner.getByRole('dialog').evaluate((d) => { d.scrollTop = 10000; return d.scrollTop > 0 || d.scrollHeight <= d.clientHeight; });
     assert.ok(scrolled, `${ch}: 시트 스크롤`);
   }

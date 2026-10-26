@@ -85,8 +85,11 @@ function CalendarPage() {
   // 대표 10/22 19:47: 일·3일·주(시간 격자)에서 종일·시간 없는 업무 칸이 위를 차지해 오전 일정을 가림 → 기본 숨김, 날짜 머리 아래 '종일 n' 칩(누르면 그날 목록). 이 기기 기억
   // #592(대표 10/25 구글 주 보기 대조): 휴대폰은 종일 줄 기본 켬 — 하루 2개 + '+n개'(누르면 그날 목록)라 위를 크게 차지하지 않음. 휴대폰은 새 기억 키
   const allDayKey = typeof window !== 'undefined' && window.innerWidth < 640 ? 'wos_cal_allday_m' : 'wos_cal_allday';
-  const [showAllDay, setShowAllDay] = useState<boolean>(() => { try { const v = localStorage.getItem(allDayKey); return v === null ? allDayKey === 'wos_cal_allday_m' : v === '1'; } catch { return allDayKey === 'wos_cal_allday_m'; } });
-  useEffect(() => { try { localStorage.setItem(allDayKey, showAllDay ? '1' : '0'); } catch {} }, [showAllDay, allDayKey]);
+  const readAllDay = (k: string) => { try { const v = localStorage.getItem(k); return v === null ? k === 'wos_cal_allday_m' : v === '1'; } catch { return k === 'wos_cal_allday_m'; } };
+  const [showAllDay, setShowAllDayState] = useState<boolean>(() => readAllDay(allDayKey));
+  // 176차: 사람이 바꿀 때만 그 기기 키에 저장. 창 폭이 640 을 넘나들면(PC ↔ 휴대폰 키) 그 키의 저장값을 다시 읽음 — 예전엔 폭이 바뀔 때 PC 상태(기본 꺼짐)를 휴대폰 키에 덮어써 휴대폰 종일 줄이 꺼지는 일이 있었음(CI E2E 171·172차)
+  const setShowAllDay = (v: boolean) => { setShowAllDayState(v); try { localStorage.setItem(allDayKey, v ? '1' : '0'); } catch {} };
+  useEffect(() => { setShowAllDayState(readAllDay(allDayKey)); }, [allDayKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [allDaySheet, setAllDaySheet] = useState<string | null>(null);
   useBackClose(!!allDaySheet, () => setAllDaySheet(null)); // #242 2단계: 뒤로가기 = 종일 목록만 닫힘(캘린더 그대로)
   const [sidePanel, setSidePanel] = useState<boolean>(() => { try { const v = localStorage.getItem('wos_cal_unscheduled'); return v === null ? typeof window !== 'undefined' && window.innerWidth >= 1440 : v === '1'; } catch { return false; } });

@@ -1572,7 +1572,7 @@ await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에
   assert.equal(`${t.d} ${t.tm}`, e.s, '업무 마감 = 일정 시작');
   // 긴 제목의 종일 마감 업무도 제목이 보임(줄바꿈)
   await ctx.owner.ok('POST', '/api/tasks', { title: 'V5 마감 제목이 길어도 두 줄로 보여야 함', assigneeId: ctx.ownerId, dueDate: t.d, approvalRequired: false });
-  await m.evaluate(() => localStorage.setItem('wos_cal_allday', '1')); // 10/22 종일 칸 기본 숨김 — 아래는 켠 상태의 마감 칩 확인
+  await m.evaluate(() => { localStorage.setItem('wos_cal_allday', '1'); localStorage.setItem('wos_cal_allday_m', '1'); }); // 10/22 종일 칸 기본 숨김 — 아래는 켠 상태의 마감 칩 확인(휴대폰 키 _m 도, 176차)
   await m.goto(`${BASE}/calendar?date=${t.d}`);
   await m.getByTestId('cal-mobile-head').waitFor();
   assert.equal(await m.locator('[data-day-head]').count(), 3, '휴대폰 기본 = 3일 보기(V14 38번), 요일+날짜 머리');
