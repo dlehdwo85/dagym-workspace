@@ -163,7 +163,7 @@ export async function describeBatch(tenant: string, o: { limit?: number; budgetM
   return L.isBusy(r) ? { done: 0, failed: 0, left: 0, stopped: '다른 설명 작업이 돌고 있습니다 — 잠시 뒤 다시', busy: true } : r;
 }
 
-type PhotoRow = { id: string; title: string; file_name: string; folder: string; tags: string[]; description: string | null; vision: any; created_at: Date; space: string; source: string | null };
+type PhotoRow = { id: string; title: string; file_name: string; folder: string; tags: string[]; description: string | null; vision: any; created_at: Date; space: string; source: string | null; regen?: any };
 /** 원고 재료의 사진 목록 — 글자 든 그래픽·다른 브랜드 사진은 빼고 이 브랜드 사진 먼저. AI 설명(없으면 자료실 설명) */
 export async function photoLines(tenant: string, brand: string, others: string[], n = 8) {
   const sql = db(); const V = await import('./mktAutoVisual');
@@ -183,19 +183,23 @@ async function perPhotoKrw() {
 }
 export type PhotoItem = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | VisionErr | null; mark: 'none' | 'has' | 'skip' | null; cover: boolean; body: boolean; at: string;
   /** 188차: 공간(마케팅 밖이면 '업무'·'영업' 표시 — AI 설명이 실사·얼굴 없음일 때만 씀) · 영상 장면 사진 */
-  space: string; scene: boolean };
+  space: string; scene: boolean;
+  /** 189차: AI 생성(실사 참고) 사진 · [AI로 다시 만들기] 상태(생성 중·완료 → 새 사진 id·실패) */
+  gen: boolean; regen: { status: string; fileId: string | null } | null };
 /** 자동 제작 › 사진 AI 설명: 숫자(전체·설명·아직·실패·바탕 가능·그래픽) + 최근 60장(설명·판정·쓰임) */
 export async function photosView(u: SessionUser) {
   await assertSpace(u, 'marketing');
   const sql = db(); const t = tenantOf(u); const V = await import('./mktAutoVisual');
-  const rows = await sql<PhotoRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at, space, source from library_files where ${photoCond(sql, t)} order by created_at desc limit 600`;
+  const rows = await sql<PhotoRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at, space, source, meta->'regen' as regen from library_files where ${photoCond(sql, t)} order by created_at desc limit 600`;
   const items: PhotoItem[] = rows.map((r) => ({ id: r.id, title: r.title, folder: r.folder, tags: r.tags ?? [], vision: r.vision ?? null, mark: markedSkip(r.tags) ? 'skip' : markedNoText(r.tags) ? 'none' : markedText(r.tags) ? 'has' : null,
-    cover: poolUsable(r) && V.backdropOk(r), body: poolUsable(r) && V.bodyOk(r), at: new Date(r.created_at).toISOString(), space: r.space, scene: r.source === 'video_frame' }));
+    cover: poolUsable(r) && V.backdropOk(r), body: poolUsable(r) && V.bodyOk(r), at: new Date(r.created_at).toISOString(), space: r.space, scene: r.source === 'video_frame',
+    gen: r.source === 'ai_ref', regen: r.regen?.status ? { status: String(r.regen.status), fileId: r.regen.fileId ?? null } : null }));
   const n = (f: (x: PhotoItem) => boolean) => items.filter(f).length;
   const P = await import('./ai/provider');
+  const regen = isAdmin(u) ? await (await import('./mktPhotoGen')).regenInfo().catch(() => null) : null; // 189차 [AI로 다시 만들기] 준비됨·장당 크레딧
   return { total: items.length, described: n((x) => visionOk(x.vision)), pending: n((x) => !x.vision), failed: n((x) => !!x.vision && 'error' in x.vision),
     cover: n((x) => x.cover), graphic: n((x) => !x.body), outside: n((x) => x.space !== 'marketing'), scenes: n((x) => x.scene),
-    videos: await (await import('./mktScenes')).scenesView(t), ai: P.aiEnabled(), perPhotoKrw: await perPhotoKrw(), canEdit: isAdmin(u), items: items.slice(0, 60) };
+    videos: await (await import('./mktScenes')).scenesView(t), ai: P.aiEnabled(), perPhotoKrw: await perPhotoKrw(), canEdit: isAdmin(u), regen, gens: n((x) => x.gen), items: items.slice(0, 60) };
 }
 
 export const describeInput = z.object({ ids: z.array(z.string().uuid()).max(20).optional(), redo: z.boolean().optional() });

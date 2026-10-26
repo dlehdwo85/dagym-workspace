@@ -20,6 +20,17 @@ const fakeClip = (sec, ar) => { const [w, h] = ar === '16:9' ? [640, 360] : ar =
   return makeMedia(`clip-${sec}-${ar}.mp4`, ['-f', 'lavfi', '-i', `testsrc2=s=${w}x${h}:r=24:d=${sec}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov']); };
 const fakeMp3 = (sec, hz = 440) => makeMedia(`tone-${sec}-${hz}.mp3`, ['-f', 'lavfi', '-i', `sine=frequency=${hz}:duration=${sec}`, '-c:a', 'libmp3lame', '-b:a', '64k']);
 export { fakeMp3 };
+// 189차 참고 사진(실사 참고) 생성 결과는 진짜 PNG(서버가 JPEG 로 바꿔 빈 칸에 그림) — 비율별로 한 번만 만듦. 다른 시험의 생성 결과('fakepng')는 그대로
+const pngs = new Map();
+async function fakePng(ar) {
+  const [w, h] = ar === '9:16' ? [720, 1280] : ar === '4:5' || ar === '3:4' ? [864, 1080] : [1024, 1024];
+  const key = `${w}x${h}`; if (pngs.has(key)) return pngs.get(key);
+  const sharp = (await import('sharp')).default;
+  const raw = Buffer.alloc(w * h * 3);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 3; raw[i] = 90 + ((x * 80) / w) | 0; raw[i + 1] = 110 + ((y * 60) / h) | 0; raw[i + 2] = 130; }
+  const out = await sharp(raw, { raw: { width: w, height: h, channels: 3 } }).png().toBuffer();
+  pngs.set(key, out); return out;
+}
 /** 마케팅 원고 기본 답(넣어 둔 응답이 없을 때) — 요청 순서로 두 문장을 골라 글마다 다르게 */
 const DRAFT_LINES = ['이번 주 소식을 짧게 정리했습니다.', '처음 오시는 분이 자주 묻는 것을 모았습니다.', '현장에서 있었던 일을 한 장면으로 남깁니다.', '준비물과 순서를 차례로 적었습니다.',
   '토요일 오후 일정을 미리 알려 드립니다.', '지난주 받은 질문에 답을 달았습니다.', '사진 한 장으로 보는 이번 주 모습입니다.', '알아 두면 편한 이용 방법 두 가지입니다.'];
@@ -45,7 +56,7 @@ export function startFakeGoogle(port = 3199) {
     webpush: [],
     webpushGone: new Set(),
     requests: [],
-    hf: [], hfJobs: {}, hfMode: null, hfPolls: 1, // 로컬 10/22 가짜 Higgsfield(/hf): 제출 기록·요청 상태(hfPolls 번 in_progress 뒤 completed)
+    hf: [], hfJobs: {}, hfMode: null, hfPolls: 1, hfUploads: [], // 189차 hfUploads = 참고 사진 올리기(PUT) 기록 // 로컬 10/22 가짜 Higgsfield(/hf): 제출 기록·요청 상태(hfPolls 번 in_progress 뒤 completed)
     tts: [], // #454 가짜 TTS 요청 기록
   };
   const evs = (cal) => (state.events[cal] ??= {});
@@ -183,8 +194,16 @@ export function startFakeGoogle(port = 3199) {
     if (p.startsWith('/hf-out/')) {
       const job = state.hfJobs[p.slice(8).replace(/\.\w+$/, '')];
       const clip = p.endsWith('.mp4') && job ? fakeClip(job.seconds ?? 5, job.aspect ?? '9:16') : null;
-      res.writeHead(200, { 'content-type': p.endsWith('.mp4') ? 'video/mp4' : 'image/png' }); return res.end(clip ?? Buffer.from(p.endsWith('.mp4') ? 'fakevideo' : 'fakepng'));
+      const png = !p.endsWith('.mp4') && job?.ref ? await fakePng(job.aspect) : null;
+      res.writeHead(200, { 'content-type': p.endsWith('.mp4') ? 'video/mp4' : 'image/png' }); return res.end(clip ?? png ?? Buffer.from(p.endsWith('.mp4') ? 'fakevideo' : 'fakepng'));
     }
+    // 189차 가짜 참고 사진 올리기: generate-upload-url 이 준 주소로 PUT(생성 서비스 키 없이, 받은 머리글 그대로) · 올린 사진 주소(public_url)
+    const upm = /^\/hf-upload\/([^/]+)$/.exec(p);
+    if (upm && req.method === 'PUT') {
+      state.hfUploads.push({ id: upm[1], contentType: req.headers['content-type'] ?? null, size: Buffer.byteLength(raw ?? ''), signed: req.headers['x-test-upload'] === '1', auth: req.headers.authorization ?? null });
+      res.writeHead(200); return res.end();
+    }
+    if (p.startsWith('/hf-files/')) { res.writeHead(200, { 'content-type': 'image/jpeg' }); return res.end(Buffer.from('fakejpg')); }
     // ---- 가짜 TTS(OpenAI 형식, base = FAKE/openai/v1): Bearer test-tts-key, 글자 수 × 0.12초 사인파 mp3 ----
     if (p === '/openai/v1/audio/speech' && req.method === 'POST') {
       if (req.headers.authorization !== 'Bearer test-tts-key') return json(res, 401, { error: { message: 'Incorrect API key provided' } });
@@ -219,12 +238,17 @@ export function startFakeGoogle(port = 3199) {
         const out = status !== 'completed' ? {} : j.video ? { video: { url: `${FAKE_ORIGIN(req)}/hf-out/${sm[1]}.mp4` } } : { images: [{ url: `${FAKE_ORIGIN(req)}/hf-out/${sm[1]}.png` }] };
         return json(res, 200, { status, request_id: sm[1], status_url: `${FAKE_ORIGIN(req)}/hf/requests/${sm[1]}/status`, ...out });
       }
+      if (p === '/hf/files/generate-upload-url' && req.method === 'POST') { // 189차 참고 사진 올릴 주소(생성 요청이 아님 — state.hf 에 안 셈)
+        if (state.hfMode === 'upload') return json(res, 500, { detail: 'Upload service unavailable' });
+        const id = randomUUID();
+        return json(res, 200, { id, upload_url: `${FAKE_ORIGIN(req)}/hf-upload/${id}`, public_url: `${FAKE_ORIGIN(req)}/hf-files/${id}.jpg`, upload_headers: { 'Content-Type': body.content_type ?? 'application/octet-stream', 'x-test-upload': '1' } });
+      }
       if (req.method === 'POST') {
         if (state.hfMode === 'credits') return json(res, 403, { detail: 'Not enough credits' });
         if (state.hfMode === 'validation') return json(res, 422, { detail: [{ loc: ['body', 'aspect_ratio'], msg: 'Input should be 1:1' }] });
         const id = randomUUID();
         state.hf.push({ path: p.slice(4), body, idem: req.headers['idempotency-key'] ?? null });
-        state.hfJobs[id] = { polls: 0, need: state.hfPolls, video: /video/.test(p), final: state.hfMode === 'nsfw' ? 'nsfw' : null, seconds: body.duration ?? 5, aspect: body.aspect_ratio ?? '9:16' };
+        state.hfJobs[id] = { polls: 0, need: state.hfPolls, video: /video/.test(p), final: state.hfMode === 'nsfw' ? 'nsfw' : null, seconds: body.duration ?? 5, aspect: body.aspect_ratio ?? '9:16', ref: JSON.stringify(body ?? {}).includes('/hf-files/') };
         return json(res, 200, { status: 'queued', request_id: id, status_url: `${FAKE_ORIGIN(req)}/hf/requests/${id}/status`, cancel_url: `${FAKE_ORIGIN(req)}/hf/requests/${id}/cancel` });
       }
     }
@@ -242,7 +266,7 @@ export function startFakeGoogle(port = 3199) {
       if (body.webpushGone) state.webpushGone.add(body.webpushGone);
       if ('hfMode' in body) state.hfMode = body.hfMode;
       if ('hfPolls' in body) state.hfPolls = body.hfPolls;
-      if (body.hfReset) { state.hf.length = 0; state.hfJobs = {}; }
+      if (body.hfReset) { state.hf.length = 0; state.hfJobs = {}; state.hfUploads.length = 0; }
       if (body.ttsReset) state.tts.length = 0;
       if (body.googleEdit) { // Google 쪽에서 사용자가 직접 수정
         const e = evs(body.googleEdit.cal)[body.googleEdit.id];

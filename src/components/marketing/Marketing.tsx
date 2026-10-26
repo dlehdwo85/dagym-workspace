@@ -241,6 +241,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
           <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div>
           {(data.media ?? []).some((m: any) => m.faces && v.media_ids.includes(m.id)) && <p className="mt-2 rounded-input border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900" data-testid="content-face-warning">얼굴이 나온 실사 사진이 있습니다 — 촬영·게시 동의를 받은 사진인지 확인한 뒤 승인해 주세요.</p>}</div>
         {!!data.photoRecord?.length && <PhotoRecord rows={data.photoRecord} />}
+        {data.fill && (data.fill.status || data.fill.empty > 0) && <FillBox id={id} f={data.fill as FillView} onDone={() => { reload(); onChange(); }} />}
         {/* 로컬 QA 10/24 ⑥: 릴스·쇼츠 컷 대본 — 영상 만들 때만 쓰고 게시 글(캡션)에는 안 들어감 */}
         {!!c.quality?.script?.length && <div className="rounded-input border border-line p-3 text-xs" data-testid="mkt-script"><p className="font-medium text-ink-2">대본(컷) <span className="font-normal text-ink-3">영상 제작용 — 게시 글에는 안 들어감</span></p>
           <ol className="mt-1 list-decimal space-y-0.5 pl-5">{(c.quality.script as string[]).map((l, k) => <li key={k}>{l}</li>)}</ol></div>}
@@ -754,19 +755,46 @@ export function Calls() {
 }
 
 /** 188차 #621(대표 10/25 '시안 기록에 어떤 사진·왜·보정 내용'): 표지·카드뉴스 장·블로그 본문마다 쓴 실사(자료실 이름·폴더)·고른 까닭·보정 — 서버가 그린 시안만 */
-type PhotoRow = { where: string; id: string | null; title: string | null; folder: string | null; space: string | null; scene: boolean; why: string; fix: string[] };
+type PhotoRow = { where: string; id: string | null; title: string | null; folder: string | null; space: string | null; scene: boolean; gen?: boolean; why: string; fix: string[] };
 const SPACE_KO: Record<string, string> = { work: '업무 공간', sales: '영업 공간', marketing: '마케팅 공간' };
+/** 189차 빈 사진 칸 · 실사 참고 생성 상태(고객사엔 상태·까닭·장 수만, 우리 회사·슈퍼관리자는 detail) */
+type FillView = { status: string | null; reason: string | null; total: number; made: number; credits: number | null; by: string | null; empty: number; canStart: boolean; detail?: { model: string | null; error: string | null } };
+const FILL_KO: Record<string, string> = { generating: '만드는 중', done: '채움', failed: '못 만듦', skipped: '건너뜀', stale: '붙이지 않음', none: '빈 칸 없음' };
+function FillBox({ id, f, onDone }: { id: string; f: FillView; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function go(action: 'start' | 'check') {
+    setBusy(true);
+    try {
+      const r = await api<FillView>(`/api/marketing/contents/${id}/fill`, { body: { action } });
+      toast.ok(r.status === 'generating' ? `실사 참고 생성을 시작했습니다(${r.total}장) — 다 되면 그 칸만 다시 그려 새 버전으로 올립니다` : r.status === 'done' ? `생성 사진 ${r.made}장으로 빈 칸을 채웠습니다 — 다시 승인 대기` : r.reason ?? '확인했습니다');
+      onDone();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="rounded-input border border-line p-3 text-xs" data-testid="mkt-fill" data-status={f.status ?? ''}>
+      <p className="text-ink-2"><b>빈 사진 칸 {f.empty}칸</b>{f.status ? ` · 실사 참고 생성: ${FILL_KO[f.status] ?? f.status}` : ''}{f.status === 'generating' ? ` (${f.made}/${f.total}장)` : ''}{f.status === 'done' ? ` ${f.made}장${f.credits ? ` · 크레딧 ${f.credits}` : ''}` : ''}</p>
+      {f.reason && <p className="mt-0.5 text-ink-3" data-testid="mkt-fill-reason">{f.reason}</p>}
+      {f.detail?.error && <p className="mt-0.5 break-all text-ink-3">자세히(운영): {f.detail.model ?? ''} {f.detail.error}</p>}
+      {(f.canStart || f.status === 'generating') && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        {f.canStart && <Button size="sm" variant="secondary" disabled={busy} onClick={() => go('start')} data-testid="mkt-fill-start">{busy ? '요청하는 중…' : '빈 칸 생성으로 채우기'}</Button>}
+        {f.status === 'generating' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => go('check')} data-testid="mkt-fill-check">지금 확인</Button>}
+        {f.canStart && <span className="text-ink-3">같은 브랜드 실사(얼굴 안 보이는 사진)를 참고로 실사풍 사진을 만들어 그 칸만 다시 그립니다 — 한 글 2장까지 · 마케팅 크레딧 한도 안 · 생성 사진은 자료실 «마케팅/AI 생성(실사 참고)»에 남습니다.</span>}
+      </div>}
+    </div>
+  );
+}
 function PhotoRecord({ rows }: { rows: PhotoRow[] }) {
-  const real = rows.filter((r) => r.id).length;
+  const real = rows.filter((r) => r.id && !r.gen).length; const gens = rows.filter((r) => r.id && r.gen).length;
   return (
     <details className="rounded-input border border-line p-3 text-xs" data-testid="mkt-photo-record">
-      <summary className="cursor-pointer font-medium text-ink-2">사진 기록 <span className="font-normal text-ink-3">— 실사 {real}장 / {rows.length}칸 · 어떤 사진을 왜 골랐고 어떻게 보정했는지</span></summary>
+      <summary className="cursor-pointer font-medium text-ink-2">사진 기록 <span className="font-normal text-ink-3">— 실사 {real}장{gens ? ` · 생성 ${gens}장` : ''} / {rows.length}칸 · 어떤 사진을 왜 골랐고 어떻게 보정했는지</span></summary>
       <ul className="mt-2 space-y-1">{rows.map((r, k) => (
         <li key={k} className="flex flex-wrap items-baseline gap-x-1.5" data-testid="mkt-photo-row" data-photo={r.id ?? ''}>
           <b className="shrink-0">{r.where}</b>
           {r.id ? <a href={`/api/library/${r.id}/download?inline=1`} target="_blank" rel="noopener" className="break-all text-violet-800 underline">{r.title ?? '(지워진 사진)'}</a> : <span className="text-ink-3">색 바탕</span>}
           {r.id && r.folder && <span className="text-ink-3">({r.folder}{r.space && r.space !== 'marketing' ? ` · ${SPACE_KO[r.space] ?? r.space}` : ''})</span>}
           {r.scene && <span className="rounded bg-sky-50 px-1 text-sky-800">영상 장면</span>}
+          {r.gen && <span className="rounded bg-amber-50 px-1 text-amber-800" data-testid="mkt-photo-gen">AI 생성(실사 참고)</span>}
           {r.fix.length > 0 && <span className="rounded bg-emerald-50 px-1 text-emerald-800" data-testid="mkt-photo-fix">보정: {r.fix.join('·')}</span>}
           <span className="basis-full pl-0.5 text-ink-3">{r.why}</span>
         </li>))}</ul>

@@ -10,7 +10,8 @@ export const GET = handler(async ({ user }) => { guard(user); return view(await 
 export const PUT = handler(async ({ req, user }) => {
   guard(user);
   const i = await body(req, z.object({ apiKey: z.string().max(400).nullable().optional(), keyId: z.string().max(200).nullable().optional(), keySecret: z.string().max(400).nullable().optional(), enabled: z.boolean().optional(), base: z.string().url().max(200).nullable().optional(),
-    models: z.array(z.object({ id: z.string().trim().min(1).max(120), kind: z.enum(['image', 'video']), name: z.string().trim().min(1).max(80), credits: z.number().min(0).max(10000), usd: z.number().min(0).max(1000).nullable().optional(), enabled: z.boolean(), note: z.string().max(200).optional() })).max(20).optional(),
+    models: z.array(z.object({ id: z.string().trim().min(1).max(120), kind: z.enum(['image', 'video']), name: z.string().trim().min(1).max(80), credits: z.number().min(0).max(10000), usd: z.number().min(0).max(1000).nullable().optional(), enabled: z.boolean(), note: z.string().max(200).optional(),
+      ref: z.string().trim().max(40).regex(/^([a-z_][a-z0-9_]*(\[\])?)?$/i, '참고 사진 칸은 영문 칸 이름(예 image_url · 배열이면 image_urls[])').nullable().optional() })).max(20).optional(),
     pricing: z.enum(['credits', 'usd']).optional(), usdKrw: z.number().min(100).max(10000).optional() }));
   return view(await saveHfSettings(i, user.id));
 });

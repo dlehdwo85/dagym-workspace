@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { api, useApi } from './client';
 import { Button, Field, cx, inputCls, toast } from './ui';
 
-type Model = { id: string; kind: 'image' | 'video'; name: string; credits: number; usd?: number | null; enabled: boolean; note?: string };
+type Model = { id: string; kind: 'image' | 'video'; name: string; credits: number; usd?: number | null; enabled: boolean; note?: string; ref?: string | null };
 type S = { enabled: boolean; hasKey: boolean; keyIssue: 'missing_secret' | null; keyIdHint: string | null; lastTest: { ok: boolean; message: string; at: string } | null; base: string; models: Model[]; pricing: 'credits' | 'usd'; usdKrw: number; updatedAt: string | null };
 /** 플랫폼 운영 — Higgsfield 생성 연동(대표 10/20 제작의뢰실 3): 키는 여기서만(암호화 보관, 다시 보여 주지 않음), 모델 표(이미지·영상·크레딧)는 숫자만 바꿈. 켜기 전에는 제작의뢰실이 제작 요청 카드로 넘김
  *  로컬 10/22: 실제 API 는 키 ID + 시크릿 두 값(Authorization: Key ID:시크릿) — 두 칸(또는 'ID:시크릿' 한 칸 붙여넣기), [연결 시험] = 과금 없는 상태 조회 */
@@ -38,10 +38,11 @@ export function PlatformHiggsfield() {
         <select className={cx(inputCls, 'h-7 w-auto py-0 text-xs')} value={pricing} onChange={(e) => setPricing(e.target.value as 'credits' | 'usd')} aria-label="비용 표시 단위" data-testid="hf-pricing"><option value="credits">크레딧/건</option><option value="usd">달러 종량제(USD)</option></select>
         <span className="text-ink-2">환율(원/$)</span><input className={cx(inputCls, 'h-7 w-20 py-0 text-xs')} type="number" value={usdKrw} onChange={(e) => setUsdKrw(Number(e.target.value))} aria-label="환율" data-testid="hf-usdkrw" />
         <span className="text-ink-3">이미지 = 장당 USD, 영상 = 초당 USD(의뢰 길이 × 초). 선불 충전은 console.higgsfield.ai</span></div>
-      <table className="mt-2 w-full text-xs" data-testid="hf-models"><thead className="text-left text-ink-2"><tr><th className="p-1">모델 경로</th><th className="p-1">종류</th><th className="p-1">이름</th><th className="p-1">크레딧/건</th><th className="p-1">USD(장당·초당)</th><th className="p-1">사용</th></tr></thead>
+      <table className="mt-2 w-full text-xs" data-testid="hf-models"><thead className="text-left text-ink-2"><tr><th className="p-1">모델 경로</th><th className="p-1">종류</th><th className="p-1">이름</th><th className="p-1">크레딧/건</th><th className="p-1">USD(장당·초당)</th><th className="p-1" title="189차: 참고 사진(실사)을 넣는 입력 칸 이름 — 모델 문서의 칸 이름 그대로(예 image_url, 배열이면 image_urls[]). 적은 이미지 모델만 '사진이 모자라면 실사 참고로 생성'·'AI로 다시 만들기'에 씀">참고 사진 칸</th><th className="p-1">사용</th></tr></thead>
         <tbody>{models.map((m, i) => <tr key={m.id} className="border-t border-line"><td className="p-1 font-mono">{m.id}</td><td className="p-1">{m.kind === 'video' ? '영상' : '이미지'}</td><td className="p-1"><input className={cx(inputCls, 'h-7 py-0 text-xs')} value={m.name} onChange={(e) => setModels(models.map((x, k) => (k === i ? { ...x, name: e.target.value } : x)))} aria-label={`${m.id} 이름`} /></td>
           <td className="p-1"><input className={cx(inputCls, 'h-7 w-20 py-0 text-xs')} type="number" step="0.5" value={m.credits} onChange={(e) => setModels(models.map((x, k) => (k === i ? { ...x, credits: Number(e.target.value) } : x)))} aria-label={`${m.id} 크레딧`} data-testid={`hf-credits-${m.id}`} /></td>
           <td className="p-1"><input className={cx(inputCls, 'h-7 w-24 py-0 text-xs')} type="number" step="0.001" value={m.usd ?? ''} onChange={(e) => setModels(models.map((x, k) => (k === i ? { ...x, usd: e.target.value === '' ? null : Number(e.target.value) } : x)))} aria-label={`${m.id} 달러 단가`} data-testid={`hf-usd-${m.id}`} /></td>
+          <td className="p-1">{m.kind === 'image' ? <input className={cx(inputCls, 'h-7 w-28 py-0 font-mono text-xs')} placeholder="비움 = 안 씀" value={m.ref ?? ''} onChange={(e) => setModels(models.map((x, k) => (k === i ? { ...x, ref: e.target.value.trim() || null } : x)))} aria-label={`${m.id} 참고 사진 칸`} data-testid={`hf-ref-${m.id}`} /> : <span className="text-ink-3">—</span>}</td>
           <td className="p-1"><input type="checkbox" checked={m.enabled} onChange={(e) => setModels(models.map((x, k) => (k === i ? { ...x, enabled: e.target.checked } : x)))} aria-label={`${m.id} 사용`} /></td></tr>)}</tbody></table>
       <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5 text-xs"><span className="text-ink-2">모델 추가(문서의 Endpoint ID)</span>

@@ -80,6 +80,7 @@ import { mktAdRefs } from './mktAdRefs.step.mjs';
 import { mktTeam } from './mktTeam.step.mjs';
 import { designGuide187 } from './designGuide187.step.mjs';
 import { photo188 } from './photo188.step.mjs';
+import { photo189 } from './photo189.step.mjs';
 import { mktPreview } from './mktPreview.step.mjs';
 import { aiStream } from './aiStream.step.mjs';
 import { mktVisual } from './mktVisual.step.mjs';
@@ -2542,6 +2543,7 @@ await step('#499-6 경쟁 광고 보관함: 운영실 [광고 넣기](업체·�
 await step('#499-7 AI 마케팅팀: 사이드바 → 역할 7개(기획 담당 꺼짐·예산 담당 항상) → 켜기 → [오늘 주제 받기](3안·형식·근거) → 반려(사유 칩) → 채택(카드뉴스) → 디자인 담당이 그려서 승인 대기([열기]) → 기억시키기 · 휴대폰 폭', () => mktTeam({ owner, ctx, sql, BASE, SHOTS }));
 await step('187차 ④⑤ 디자인 지침(로컬 10/26 P1): AI 마케팅팀 › 디자인 담당 [디자인 지침] 회사 전체 3줄·브랜드 2줄 저장 → 요약·글자 수 · 기억 칸 1,000자 · 브랜드 키트 머리말 칸 안내(비우면 AI 가 글마다) · 휴대폰 폭', () => designGuide187({ owner, ctx, sql, BASE, SHOTS }));
 await step('188차 실사 전면(로컬 10/26 P1 ① · #621): 콘텐츠 상세 사진 기록(표지·장마다 사진·까닭·보정·업무 공간·행동 장 글자만) → 사진 AI 설명 자료실 영상 [영상 장면 뽑기] → 장면 사진 3장·영상 장면 칩 · 휴대폰 폭', () => photo188({ owner, ctx, BASE, FAKE, SHOTS, sql }));
+await step('189차 실사 참고 생성(대표 #685 · #621): 콘텐츠 상세 빈 사진 칸 2칸 → [빈 칸 생성으로 채우기] → [지금 확인] → 그 칸만 생성 사진으로 새 버전 · 사진 기록 AI 생성 2장 → 사진 AI 설명 AI 생성 칩 · [AI로 다시 만들기](크레딧) · 설정 기본 꺼짐 · 휴대폰 폭', () => photo189({ owner, ctx, BASE, FAKE, SHOTS, sql }));
 await step('#497 R06 채널별 실제 게시 화면 미리보기: 인스타 피드(3장 옆으로 넘기기·n/N·점·2번째 장 보임·더 보기·해시태그·계정 이름) · 승인함 카드 [게시 화면으로 보기] · 페이스북(글 위·사진 격자) · 릴스(세로·오른쪽 아이콘·팔로우) · 스레드 · 블로그(문단 사이 사진) · 유튜브 · 휴대폰 손가락 넘기기', () => mktPreview({ owner, ctx, sql, BASE, SHOTS }));
 await step('#497 R44 AI 비서 답 실시간 출력: 쓰는 중 말풍선(글이 이어서·[멈춤]) → 끝나면 서식(제목·굵게·목록·표·링크) · 도구 단계 한 줄 · 패널 같음 · 휴대폰 표 넘침 없음', () => aiStream({ browser, desk, owner, BASE, FAKE, SHOTS }));
 await step('#516 승인함 시안 없음: 승인할 시안 수에서 빼고 빨간 묶음·빨간 띠·[승인] 없음 → [지금 만들기](서버 그리기·크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧]', () => mktVisual({ owner, ctx, sql, BASE, SHOTS }));

@@ -8,9 +8,11 @@ import { Button, ErrorBox, cx, inputCls, toast } from '@/components/ui';
  *  로컬 10/25: 글자 있음 = 바탕에서만 뺌(블로그 본문에는 씀) · 쓰지 않음 = 바탕·본문 모두 뺌 */
 type VisionOk = { caption: string; scene: string; tags: string[]; kind: 'photo' | 'graphic' | 'screen' | 'illustration' | 'document'; text: 'none' | 'little' | 'much'; promo: boolean; seen: string; people: number; faces: boolean; quality: 'good' | 'ok' | 'poor' };
 type Mark = 'none' | 'has' | 'skip';
-type Item = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | { error: string; tries: number } | null; mark: Mark | null; cover: boolean; body: boolean; at: string; space: string; scene: boolean };
+type Item = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | { error: string; tries: number } | null; mark: Mark | null; cover: boolean; body: boolean; at: string; space: string; scene: boolean;
+  /** 189차: AI 생성(실사 참고) 사진 · [AI로 다시 만들기] 상태 */ gen: boolean; regen: { status: string; fileId: string | null } | null };
 type Videos = { total: number; done: number; failed: number; skipped: number; frames: number; pending: number };
-type View = { total: number; described: number; pending: number; failed: number; cover: number; graphic: number; outside: number; scenes: number; videos: Videos; ai: boolean; perPhotoKrw: number; canEdit: boolean; items: Item[] };
+type View = { total: number; described: number; pending: number; failed: number; cover: number; graphic: number; outside: number; scenes: number; videos: Videos; ai: boolean; perPhotoKrw: number; canEdit: boolean; items: Item[];
+  /** 189차 [AI로 다시 만들기] — 운영사 생성 연동이 켜져 있으면 ready · 장당 마케팅 크레딧 */ regen: { ready: boolean; credits: number | null } | null; gens: number };
 type SceneRun = { done?: number; failed?: number; skipped?: number; frames?: number; described?: number; left?: number; busy?: boolean; via?: string };
 const SPACE: Record<string, string> = { work: '업무 공간', sales: '영업 공간' };
 const KIND: Record<VisionOk['kind'], string> = { photo: '실사', graphic: '글자 그래픽', screen: '화면 캡처', illustration: '그림', document: '문서' };
@@ -18,6 +20,7 @@ const TEXT: Record<VisionOk['text'], string> = { none: '글자 없음', little: 
 const MARKED: Record<Mark | 'auto', string> = { auto: 'AI 판정대로 씁니다', none: '글자 없는 사진으로 고쳤습니다 — 시안 바탕으로 씁니다', has: '글자 있는 사진으로 고쳤습니다 — 시안 바탕에는 쓰지 않고 블로그 본문에는 씁니다', skip: '쓰지 않는 사진으로 표시했습니다 — 바탕·본문 모두 뺍니다' };
 const ok = (v: Item['vision']): v is VisionOk => !!v && 'caption' in v;
 const chip = 'rounded px-1.5 py-px text-[11px]';
+const REGEN: Record<string, string> = { generating: '다시 만드는 중', done: '다시 만듦', failed: '다시 만들지 못함' };
 
 export function MktPhotos() {
   const { data, error, reload } = useApi<View>('/api/marketing/photos');
@@ -45,6 +48,14 @@ export function MktPhotos() {
       else toast.ok(`영상 ${r.done ?? 0}편에서 장면 ${r.frames ?? 0}장을 뽑았습니다${r.described ? ` · 설명 ${r.described}장` : ''}${r.failed ? ` · 못 뽑음 ${r.failed}편` : ''}${r.left ? ` · 남은 영상 ${r.left}편` : ''}`);
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(''); reload(); }
   }
+  /** 189차 #621 [AI로 다시 만들기]: 이 사진(얼굴 안 보이는 것)을 참고로 깨끗한 실사풍 한 장 — 원본은 그대로, 새 사진은 «마케팅/AI 생성(실사 참고)» */
+  async function regen(it: Item) {
+    const cr = data?.regen?.credits;
+    if (!window.confirm(`이 사진을 참고로 AI 가 밝고 선명한 실사풍 사진을 한 장 새로 만듭니다${cr ? `(마케팅 크레딧 ${cr})` : ''}. 원본은 그대로 둡니다. 만들까요?`)) return;
+    setBusy(`regen:${it.id}`);
+    try { await api(`/api/marketing/photos/${it.id}/regen`, { body: {} }); toast.ok('다시 만들기를 시작했습니다 — 몇 분 뒤 «마케팅/AI 생성(실사 참고)» 폴더에 새 사진이 생깁니다'); }
+    catch (e) { toast.error((e as Error).message); } finally { setBusy(''); reload(); }
+  }
   async function mark(id: string, text: Mark | 'auto') {
     try { await api(`/api/marketing/photos/${id}`, { method: 'PATCH', body: { text } }); toast.ok(MARKED[text]); reload(); }
     catch (e) { toast.error((e as Error).message); }
@@ -54,7 +65,7 @@ export function MktPhotos() {
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-photos">
       <h2 className="text-sm font-semibold">사진 AI 설명 <span className="font-normal text-ink-3">— 자료실 사진(폴더·공간 무관)과 영상 장면을 AI 가 한 번 보고 한 줄 설명·태그·글자 여부를 답니다. 시안 표지·카드뉴스 장·블로그 본문 사진 고르기와 원고의 사진 설명에 씁니다. 기밀 자료·기밀 폴더·격리 팀 자료는 쓰지 않고, 마케팅 공간 밖 사진은 AI 가 실사·얼굴 없음으로 본 것만 씁니다.</span></h2>
-      <p className="mt-2 text-sm" data-testid="photos-summary">자료실 사진 {data.total}장{data.outside ? `(마케팅 공간 밖 ${data.outside}장)` : ''}{data.scenes ? ` · 영상 장면 ${data.scenes}장` : ''} · 설명 {data.described}장 · 아직 {data.pending}장{data.failed ? ` · 설명 못 함 ${data.failed}장` : ''} · 시안 바탕으로 쓸 수 있는 사진 {data.cover}장 · 블로그 본문에 쓸 수 있는 사진 {data.total - data.graphic}장 · 쓰지 않는 사진(글자 그래픽·쓰지 않음 표시·설명 전 공간 밖 사진) {data.graphic}장</p>
+      <p className="mt-2 text-sm" data-testid="photos-summary">자료실 사진 {data.total}장{data.outside ? `(마케팅 공간 밖 ${data.outside}장)` : ''}{data.scenes ? ` · 영상 장면 ${data.scenes}장` : ''}{data.gens ? ` · AI 생성(실사 참고) ${data.gens}장` : ''} · 설명 {data.described}장 · 아직 {data.pending}장{data.failed ? ` · 설명 못 함 ${data.failed}장` : ''} · 시안 바탕으로 쓸 수 있는 사진 {data.cover}장 · 블로그 본문에 쓸 수 있는 사진 {data.total - data.graphic}장 · 쓰지 않는 사진(글자 그래픽·쓰지 않음 표시·설명 전 공간 밖 사진) {data.graphic}장</p>
       <p className="mt-1 text-sm" data-testid="photos-videos">자료실 영상 {data.videos.total}편 · 장면 뽑음 {data.videos.done}편(장면 사진 {data.videos.frames}장) · 아직 {data.videos.pending}편{data.videos.failed ? ` · 못 뽑음 ${data.videos.failed}편` : ''}{data.videos.skipped ? ` · AI·합성 영상 건너뜀 ${data.videos.skipped}편` : ''}
         <span className="ml-1 text-xs text-ink-3">— 영상마다 2초·가운데·끝 무렵 장면 2~3장을 사진으로 뽑아 «마케팅/영상 장면» 폴더에 둡니다(정기 실행이 이어서 뽑음).</span></p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -74,6 +85,10 @@ export function MktPhotos() {
                 <div className="mt-1 break-words font-medium" title={ok(v) ? v.scene : undefined} data-testid="photo-caption">{ok(v) ? v.caption : it.title}</div>
                 <div className="mt-1 flex flex-wrap gap-1">
                   {it.scene && <span className={cx(chip, 'bg-sky-50 text-sky-800')} data-testid="photo-scene">영상 장면</span>}
+                  {it.gen && <span className={cx(chip, 'bg-amber-50 text-amber-800')} title="같은 브랜드 실사를 참고로 AI 가 만든 사진 — 실사가 모자랄 때만 쓰고, 사진 기록에 '생성'으로 남습니다" data-testid="photo-gen">AI 생성</span>}
+                  {it.regen && REGEN[it.regen.status] && (it.regen.status === 'done' && it.regen.fileId
+                    ? <a href={`/api/library/${it.regen.fileId}/download?inline=1`} target="_blank" rel="noopener" className={cx(chip, 'bg-emerald-50 text-emerald-800 underline')} data-testid="photo-regen-state">다시 만든 사진 보기</a>
+                    : <span className={cx(chip, it.regen.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-violet-50 text-violet-700')} data-testid="photo-regen-state">{REGEN[it.regen.status]}</span>)}
                   {it.space !== 'marketing' && <span className={cx(chip, 'bg-slate-100 text-ink-2')} title="마케팅 공간 밖 사진 — AI 가 실사·홍보물 아님·얼굴 없음으로 본 것만 씁니다" data-testid="photo-space">{SPACE[it.space] ?? it.space}</span>}
                   {!v && <span className={cx(chip, 'bg-slate-100 text-ink-3')}>설명 아직</span>}
                   {v && !ok(v) && <span className={cx(chip, 'bg-amber-100 text-amber-800')} title={v.error}>설명 못 함</span>}
@@ -90,6 +105,9 @@ export function MktPhotos() {
                       <option value="auto">AI 판정대로</option><option value="none">글자 없음 — 바탕으로 씀</option><option value="has">글자 있음 — 바탕에만 안 씀</option><option value="skip">쓰지 않음 — 바탕·본문 모두</option></select></span>
                     <button type="button" className="shrink-0 text-ink-3 underline disabled:opacity-50" disabled={!!busy || !data.ai} onClick={() => describe([it.id])} data-testid="photo-redo">{busy === it.id ? '…' : '다시'}</button>
                   </div>)}
+                {data.canEdit && data.regen?.ready && !it.gen && ok(v) && !v.faces && it.regen?.status !== 'generating' && (
+                  <button type="button" className={cx('mt-1 text-[11px] underline disabled:opacity-50', v.quality === 'poor' ? 'font-medium text-violet-800' : 'text-ink-3')} disabled={!!busy} onClick={() => regen(it)} data-testid="photo-regen">
+                    {busy === `regen:${it.id}` ? '요청하는 중…' : `AI로 다시 만들기${data.regen.credits ? ` · 크레딧 ${data.regen.credits}` : ''}`}</button>)}
               </li>);
           })}</ul>
         </details>)}

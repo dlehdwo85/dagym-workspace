@@ -61,9 +61,10 @@ export async function creditCost(): Promise<CreditCost> {
 export type MktSettings = { plan?: PlanRow | null; plan_code: keyof typeof MKT_PLANS | null; monthly_credits: number | null; weekly_credits: number | null; video_monthly: number | null; regen_monthly: number | null;
   approval_hour: number; lead_days: number; lead_hour: number; remind_hours: number; quiet_start: number; quiet_end: number; allow_generated_people: boolean; allow_slideshow: boolean; ai_label: string; notify_user_ids: string[] | null; ai_monthly_usd: number | null; auto_publish: boolean; auto_hold: boolean; write_tier: WriteTier | null;
   /** 대표 10/25 22:20(15-16): 전면 디벨롭 동안 자동 생성(정기 칸·제작·밤사이·주간 계획·운영 제안) 멈춤 — 203 마이그레이션으로 규칙 있는 회사는 켬 */ auto_pause: boolean;
-  /** 요청 C §3-1(대표 10/25 22:20): 릴스·쇼츠·생성 영상 자동 제작 중단(영상 제작 방식 결정 #580 전까지) — 정기 칸·제작에서 영상 종류를 건너뜀, 사람이 누르는 제작은 그대로 */ video_pause: boolean };
+  /** 요청 C §3-1(대표 10/25 22:20): 릴스·쇼츠·생성 영상 자동 제작 중단(영상 제작 방식 결정 #580 전까지) — 정기 칸·제작에서 영상 종류를 건너뜀, 사람이 누르는 제작은 그대로 */ video_pause: boolean;
+  /** 189차(대표 #685): 사진이 모자라면 실사 참고로 생성(크레딧 사용) — 기본 꺼짐, 관리자가 켬(209 마이그레이션) */ photo_gen: boolean };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
-  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false, write_tier: null, auto_pause: false, video_pause: true };
+  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false, write_tier: null, auto_pause: false, video_pause: true, photo_gen: false };
 /** 자동 생성 일시정지 중인가(정기 실행·목표/운영 제안 tick 이 먼저 본다) */
 export const autoPaused = async (tenant: string) => !!(await settingsOf(tenant)).auto_pause;
 export async function settingsOf(tenant: string): Promise<MktSettings> {
@@ -571,7 +572,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   // #235 ⓑ 원고가 '[사진 n]' 줄로 고른 사진들(장면 순서) = 본문 사진(표지 바탕으로는 다시 안 씀) · 고른 사진이 없으면 예전처럼 1장
   const V = await import('./mktAutoVisual');
   let mediaIds: string[] = []; let visualNote = ''; let photoId: string | null = null; let bodyIds: string[] = []; let template: string | null = null; let photoIds: string[] = [];
-  let cover: { photoFix?: string[]; scene?: boolean } = {}; // 188차 #621 시안 기록: 표지 사진 보정·영상 장면
+  let cover: { photoFix?: string[]; scene?: boolean; gen?: boolean } = {}; // 188차 #621 시안 기록: 표지 사진 보정·영상 장면
   if (V.serverVisual({ channel: c.channel, kind })) {
     try { const dv = await V.drawAutoVisual({ ...c, title: f.title, card: d.card }, q.body, d.photos?.length ? { bodyIds: d.photos } : {}); bodyIds = dv.bodyIds; mediaIds = [dv.fileId, ...bodyIds]; photoId = dv.photoId; template = dv.template; photoIds = dv.photoIds; cover = dv;
       visualNote = ` · 시안 서버 그리기(${[dv.templateLabel ? `틀: ${dv.templateLabel}` : '', dv.photoTitle ? `사진: ${dv.photoTitle}` : '브랜드 색 바탕'].filter(Boolean).join(' · ')})` + (dv.bodyTitle ? ` · 본문 사진: ${dv.bodyTitle}` : ''); }
@@ -1092,7 +1093,8 @@ const nInt = (a: number, b: number) => z.number().int().min(a).max(b);
 export const settingsInput = z.object({ planCode: z.enum(['basic', 'standard', 'pro']).nullable().optional(), monthlyCredits: z.number().min(0).max(100000).nullable().optional(), weeklyCredits: z.number().min(0).max(100000).nullable().optional(),
   videoMonthly: nInt(0, 1000).nullable().optional(), regenMonthly: nInt(0, 1000).nullable().optional(), approvalHour: nInt(0, 23).optional(), leadDays: nInt(0, 14).optional(), leadHour: nInt(0, 23).optional(),
   remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional(), aiMonthlyUsd: z.number().min(0).max(10000).nullable().optional(), autoPublish: z.boolean().optional(), autoPause: z.boolean().optional(), autoHold: z.boolean().optional(),
-  /** 요청 C §3-1: 릴스·쇼츠·생성 영상 자동 제작 중단(기본 켬) */ videoPause: z.boolean().optional() });
+  /** 요청 C §3-1: 릴스·쇼츠·생성 영상 자동 제작 중단(기본 켬) */ videoPause: z.boolean().optional(),
+  /** 189차: 사진이 모자라면 실사 참고로 생성(크레딧) */ photoGen: z.boolean().optional() });
 export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const cur = await settingsOf(tenantOf(u));
@@ -1101,15 +1103,16 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
     lead_days: i.leadDays ?? cur.lead_days, lead_hour: i.leadHour ?? cur.lead_hour, remind_hours: i.remindHours ?? cur.remind_hours, quiet_start: i.quietStart ?? cur.quiet_start, quiet_end: i.quietEnd ?? cur.quiet_end,
     allow_generated_people: i.allowGeneratedPeople ?? cur.allow_generated_people, allow_slideshow: i.allowSlideshow ?? cur.allow_slideshow, ai_label: i.aiLabel ?? cur.ai_label,
     notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids, ai_monthly_usd: i.aiMonthlyUsd !== undefined ? i.aiMonthlyUsd : cur.ai_monthly_usd, auto_publish: i.autoPublish ?? cur.auto_publish, auto_hold: i.autoHold ?? cur.auto_hold,
-    auto_pause: i.autoPause ?? cur.auto_pause, video_pause: i.videoPause ?? cur.video_pause };
+    auto_pause: i.autoPause ?? cur.auto_pause, video_pause: i.videoPause ?? cur.video_pause, photo_gen: i.photoGen ?? cur.photo_gen };
   const sql = db();
   await sql`insert into mkt_settings ${sql({ tenant: tenantOf(u), ...v, updated_by: u.id } as never)}
     on conflict (tenant) do update set plan_code = excluded.plan_code, monthly_credits = excluded.monthly_credits, weekly_credits = excluded.weekly_credits, video_monthly = excluded.video_monthly,
       regen_monthly = excluded.regen_monthly, approval_hour = excluded.approval_hour, lead_days = excluded.lead_days, lead_hour = excluded.lead_hour, remind_hours = excluded.remind_hours,
       quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids, ai_monthly_usd = excluded.ai_monthly_usd, auto_publish = excluded.auto_publish, auto_hold = excluded.auto_hold,
-      auto_pause = excluded.auto_pause, video_pause = excluded.video_pause, updated_by = excluded.updated_by, updated_at = now()`;
+      auto_pause = excluded.auto_pause, video_pause = excluded.video_pause, photo_gen = excluded.photo_gen, updated_by = excluded.updated_by, updated_at = now()`;
   if (i.autoPause !== undefined && i.autoPause !== cur.auto_pause) await (await import('./log')).audit(sql, u.id, i.autoPause ? 'mkt.auto_pause' : 'mkt.auto_resume', 'tenant', tenantOf(u), {}).catch(() => {});
   if (i.videoPause !== undefined && i.videoPause !== cur.video_pause) await (await import('./log')).audit(sql, u.id, i.videoPause ? 'mkt.video_pause' : 'mkt.video_resume', 'tenant', tenantOf(u), {}).catch(() => {});
+  if (i.photoGen !== undefined && i.photoGen !== cur.photo_gen) await (await import('./log')).audit(sql, u.id, i.photoGen ? 'mkt.photo_gen_on' : 'mkt.photo_gen_off', 'tenant', tenantOf(u), {}).catch(() => {});
   // 제작 시점(게시 D-n·시각)이 바뀌면 아직 만들지 않은 자동 칸도 다시 계산(지난 시각이면 지금)
   const re = v.lead_days !== cur.lead_days || v.lead_hour !== cur.lead_hour
     ? await sql`update mkt_contents set produce_at = greatest(now(), (((scheduled_at at time zone 'Asia/Seoul')::date - ${v.lead_days}::int) + make_time(${v.lead_hour}::int, 0, 0)) at time zone 'Asia/Seoul')

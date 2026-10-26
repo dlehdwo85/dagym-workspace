@@ -113,7 +113,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
       v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, v.revision, -- #545 수정본 배지(반영한 요청·AI 수정 n번째)
       jsonb_array_length(case when jsonb_typeof(b.feed->'templates') = 'array' then b.feed->'templates' else '[]'::jsonb end) > 0 as brand_templates, -- #544 피드 틀이 있으면 [다른 틀로 다시 그리기]
-      (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type, 'faces', coalesce((f.vision->>'faces')::boolean, false)) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, c.quality, c.rationale,
+      (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type, 'faces', coalesce((f.vision->>'faces')::boolean, false)) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, (c.quality - 'fill') as quality, c.quality->'fill'->>'status' as fill_status /* 189차: 생성 기록(모델·오류)은 빼고 상태만 */, c.rationale,
       (select json_build_object('kind', p.kind, 'status', p.status) from mkt_production_requests p where p.content_id = c.id and p.kind in ('image', 'video', 'regen_image', 'regen_video') and p.status in ('open', 'needs_approval') order by p.created_at desc limit 1) as production,
       (select max(d.version) from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version) as reapprove_from,
       (select d.comment from mkt_decisions d where d.content_id = c.id and d.decision = 'changes' and d.version < c.current_version order by d.decided_at desc limit 1) as reapprove_comment,
@@ -196,7 +196,9 @@ export async function getContent(u: SessionUser, id: string) {
   c.is_example = Array.isArray(c.brand_examples) && c.brand_examples.some((e: { contentId?: string }) => e?.contentId === c.id); // #235 ⓔ 좋은 예시로 저장됨
   delete c.brand_voice; delete c.brand_facts; delete c.brand_examples;
   const photoRecord = await (await import('./mktAutoVisual')).photoRecord(tenantOf(u), c.quality).catch(() => null); // 188차 #621 사진 기록(어떤 사진·왜·보정)
-  return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st.approval_hour), purgeAt: c.deleted_at ? purgeAt(c.deleted_at) : null /* 183차 #177 휴지통 띠 */ }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, photoRecord, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
+  const fill = await (await import('./mktPhotoGen')).fillView(u, c).catch(() => null); // 189차 빈 칸 생성 상태(고객사엔 상태·까닭·장 수만)
+  if (c.quality?.fill) { const { fill: _f, ...rest } = c.quality; c.quality = rest; }
+  return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st.approval_hour), purgeAt: c.deleted_at ? purgeAt(c.deleted_at) : null /* 183차 #177 휴지통 띠 */ }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, photoRecord, fill, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };

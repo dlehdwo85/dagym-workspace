@@ -7,7 +7,9 @@ import { decrypt, encrypt } from './crypto';
  * 비동기 — 제출하면 {status:'queued', request_id, status_url} → status_url 폴링 → completed 에서 images[].url / video.url. 실패·nsfw 는 과금 안 됨.
  */
 /** 로컬 10/20 22:30 ⑤: 구독 크레딧은 API 에 못 씀(console.higgsfield.ai 별도 선불, 달러 종량제) → 모델마다 usd(이미지 장당 / 영상 초당)도 두고 표시 단위를 고름 */
-export type HfModel = { id: string; kind: 'image' | 'video'; name: string; credits: number; usd?: number | null; enabled: boolean; note?: string };
+/** ref = 189차 '참고 사진 칸' — 참고 사진(public_url)을 넣는 입력 칸 이름(예 image_url, 배열이면 image_urls[]). 비우면 그 모델은 참고 생성에 안 씀(운영자가 모델 문서를 보고 적음) */
+export type HfModel = { id: string; kind: 'image' | 'video'; name: string; credits: number; usd?: number | null; enabled: boolean; note?: string; ref?: string | null };
+export const REF_FIELD = /^[a-z_][a-z0-9_]*(\[\])?$/i;
 export type HfPricing = 'credits' | 'usd';
 export type HfKeyIssue = 'missing_secret' | null;
 export type HfSettings = { enabled: boolean; hasKey: boolean; keyIssue: HfKeyIssue; keyIdHint: string | null; base: string; models: HfModel[]; pricing: HfPricing; usdKrw: number; updatedAt: string | null; lastTest: { ok: boolean; message: string; at: string } | null };
@@ -26,7 +28,8 @@ export const modelId = (id?: string | null) => (id ? LEGACY[id] ?? id : id ?? nu
 function normalizeModels(list: HfModel[]): HfModel[] {
   const seen = new Set<string>(); const out: HfModel[] = [];
   for (const m of list) { const id = modelId(m.id)!; if (seen.has(id)) continue; seen.add(id); const d = DEFAULT_MODELS.find((x) => x.id === id);
-    out.push(id === m.id ? m : { ...m, id, name: d?.name ?? m.name, note: d?.note ?? m.note }); }
+    const ref = m.kind === 'image' && m.ref && REF_FIELD.test(m.ref.trim()) ? m.ref.trim() : null; // 189차 참고 사진 칸(이미지 모델만)
+    out.push(id === m.id ? { ...m, ref } : { ...m, id, name: d?.name ?? m.name, note: d?.note ?? m.note, ref }); }
   return out;
 }
 /** 엔드포인트별 입력 규칙(문서 입력 스키마) — 화면 비율은 가장 가까운 허용값으로, 길이는 허용 범위로 맞춘다. 표에 없는 경로는 prompt·aspect_ratio(+duration)만 보냄 */
@@ -43,7 +46,7 @@ const ENDPOINTS: Record<string, { aspects?: string[]; dur?: [number, number]; du
   'bytedance/seedance-2.5/text-to-video': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'], dur: [4, 30], extra: { resolution: '1080p' } },
 };
 const ratio = (a: string) => { const [w, h] = a.split(':').map(Number); return w > 0 && h > 0 ? w / h : 1; };
-export function hfBody(model: string, opt: { kind: 'image' | 'video'; prompt: string; negative?: string; aspect: string; seconds?: number }) {
+export function hfBody(model: string, opt: { kind: 'image' | 'video'; prompt: string; negative?: string; aspect: string; seconds?: number; ref?: { field: string; url: string } }) {
   const e = ENDPOINTS[model] ?? {};
   const body: Record<string, unknown> = { prompt: opt.prompt, ...e.extra };
   if (!e.noAspect) body.aspect_ratio = e.aspects && !e.aspects.includes(opt.aspect) ? e.aspects.reduce((b, a) => (Math.abs(Math.log(ratio(a) / ratio(opt.aspect))) < Math.abs(Math.log(ratio(b) / ratio(opt.aspect))) ? a : b)) : opt.aspect;
@@ -52,8 +55,11 @@ export function hfBody(model: string, opt: { kind: 'image' | 'video'; prompt: st
     body.duration = e.durs ? e.durs.reduce((b, d) => (Math.abs(d - s) < Math.abs(b - s) ? d : b)) : e.dur ? Math.min(e.dur[1], Math.max(e.dur[0], s)) : s;
   }
   if (e.negative && opt.negative) body.negative_prompt = opt.negative;
+  if (opt.ref && REF_FIELD.test(opt.ref.field)) { const list = opt.ref.field.endsWith('[]'); body[opt.ref.field.replace(/\[\]$/, '')] = list ? [opt.ref.url] : opt.ref.url; } // 189차 참고 사진
   return body;
 }
+/** 189차: 참고 사진을 받는 이미지 모델(모델 표의 '참고 사진 칸'이 있는 첫 모델) */
+export const refModel = (models: HfModel[]) => models.find((m) => m.enabled && m.kind === 'image' && !!m.ref && REF_FIELD.test(m.ref)) ?? null;
 
 const KEY = 'higgsfield';
 export async function hfSettings(): Promise<HfSettings & { apiKey?: string }> {
@@ -107,7 +113,7 @@ function statusUrlFor(base: string, requestId: string, given?: string | null) {
 
 export type HfSubmit = { ok: true; requestId: string; statusUrl: string } | { ok: false; error: string };
 /** 생성 제출(과금 시작) — 연동이 켜져 있을 때만. 결과는 hfStatus 로 받는다 */
-export async function hfSubmit(opt: { kind: 'image' | 'video'; model: string; prompt: string; negative?: string; aspect: string; seconds?: number; idempotencyKey: string }): Promise<HfSubmit> {
+export async function hfSubmit(opt: { kind: 'image' | 'video'; model: string; prompt: string; negative?: string; aspect: string; seconds?: number; idempotencyKey: string; ref?: { field: string; url: string } }): Promise<HfSubmit> {
   const c = await creds();
   if (c.err) return { ok: false, error: c.err };
   if (!c.s.enabled) return { ok: false, error: 'not_configured' };
@@ -120,6 +126,25 @@ export async function hfSubmit(opt: { kind: 'image' | 'video'; model: string; pr
     if (!res.ok) return { ok: false, error: errText(res.status, j) };
     if (!j?.request_id) return { ok: false, error: `응답에 request_id 가 없습니다(${String(j?.status ?? '')})` };
     return { ok: true, requestId: String(j.request_id), statusUrl: statusUrlFor(c.base, String(j.request_id), j.status_url) };
+  } catch (e: any) { return { ok: false, error: String(e?.message ?? e).slice(0, 200) }; }
+}
+
+/** 189차 참고 사진 올리기(docs.higgsfield.ai 파일 올리기): POST /files/generate-upload-url {content_type} → upload_url 에 PUT(받은 upload_headers 그대로, 키는 안 보냄) → public_url 을 모델 입력에.
+ *  우리 자료실 주소는 로그인이 필요해 바깥에서 못 읽으므로 이 길로만 넘긴다. 올리기는 과금 없음 */
+export async function hfUploadImage(data: Buffer, mime: string): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const c = await creds();
+  if (c.err) return { ok: false, error: c.err };
+  if (!c.s.enabled) return { ok: false, error: 'not_configured' };
+  try {
+    const res = await fetch(`${c.base}/files/generate-upload-url`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', authorization: c.auth }, body: JSON.stringify({ content_type: mime }), signal: AbortSignal.timeout(30000) });
+    const j: any = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: errText(res.status, j) };
+    if (typeof j?.upload_url !== 'string' || typeof j?.public_url !== 'string' || !/^https?:\/\//.test(j.upload_url) || !/^https?:\/\//.test(j.public_url)) return { ok: false, error: '응답에 올리기 주소가 없습니다' };
+    const given = j.upload_headers && typeof j.upload_headers === 'object' ? Object.fromEntries(Object.entries(j.upload_headers).filter(([, v]) => typeof v === 'string')) as Record<string, string> : {};
+    const headers = Object.keys(given).some((k) => k.toLowerCase() === 'content-type') ? given : { ...given, 'Content-Type': mime };
+    const put = await fetch(j.upload_url, { method: 'PUT', headers, body: new Uint8Array(data), signal: AbortSignal.timeout(60000) });
+    if (!put.ok) return { ok: false, error: `참고 사진 올리기 실패 HTTP ${put.status}` };
+    return { ok: true, url: j.public_url };
   } catch (e: any) { return { ok: false, error: String(e?.message ?? e).slice(0, 200) }; }
 }
 
