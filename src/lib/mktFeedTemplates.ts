@@ -8,7 +8,7 @@ import * as D from './mktCarouselDraw';
  * 그리기: 사진·그러데이션·휴대폰 틀은 sharp, 글자·도형 층은 next/og(satori) — 카드뉴스(#499-5)와 같은 글꼴·낱말 줄바꿈.
  * 사진 틀은 자료실 '마케팅/시안 바탕(글자 없는 사진)'(또는 태그 '글자없음') 사진만 — 글자 든 그림 위에 글자를 얹지 않는다.
  */
-type Need = 'photo' | 'photos4' | 'screen' | 'points' | 'compare' | 'prices' | null;
+type Need = 'photo' | 'photos4' | 'screen' | 'screen_wide' | 'points' | 'compare' | 'prices' | null;
 export const FEED_TEMPLATES = {
   title: { label: '제목형', desc: '바탕 색 + 포인트 색 머리말 + 큰 제목', need: null },
   list: { label: '번호 목록형', desc: '제목 + 01~05 핵심 목록', need: 'points' },
@@ -17,6 +17,7 @@ export const FEED_TEMPLATES = {
   photo_caption: { label: '사진 + 작은 제목', desc: '실사를 가리지 않게 아래 한 줄 제목', need: 'photo' },
   grid4: { label: '사진 4분할', desc: '실사 4장 + 이름표 + 위 제목', need: 'photos4' },
   phone: { label: '휴대폰 화면형', desc: '휴대폰 틀 안에 실제 화면 캡처 + 제목', need: 'screen' },
+  laptop: { label: '노트북 화면형', desc: '노트북 틀 안에 PC 화면 캡처(가로) + 제목', need: 'screen_wide' }, // #262(대표 10/25 ④)
   vs: { label: 'VS 비교형', desc: '두 칸 비교 + 가운데 VS + 아래 로고', need: 'compare' },
   poster: { label: '이벤트 포스터', desc: '강한 색 세트 + 아주 큰 제목 + 혜택 + 기간·연락처', need: null },
   price: { label: '가격 카드', desc: '제목 + 기간·금액 칸(재료에 있는 금액만)', need: 'prices' },
@@ -26,15 +27,15 @@ export const FEED_TEMPLATES = {
 export type TemplateId = keyof typeof FEED_TEMPLATES;
 export const TEMPLATE_IDS = Object.keys(FEED_TEMPLATES) as [TemplateId, ...TemplateId[]];
 export const NEED_LABEL: Record<Exclude<Need, null>, string> = {
-  photo: "사진 필요 — 자료실 '마케팅/시안 바탕(글자 없는 사진)' 폴더", photos4: '시안 바탕 사진 4장 이상', screen: "화면 캡처 필요 — 자료실 '영상 화면 캡처' 폴더",
+  photo: "사진 필요 — 자료실 '마케팅/시안 바탕(글자 없는 사진)' 폴더", photos4: '시안 바탕 사진 4장 이상', screen: "화면 캡처 필요 — 자료실 '영상 화면 캡처' 폴더", screen_wide: "PC 화면 캡처(가로) 필요 — 자료실 '영상 화면 캡처' 폴더",
   points: '글에 핵심 3개 이상일 때', compare: '글이 두 가지를 견줄 때', prices: '브랜드 키트 재료(주력 상품)에 금액이 2개 이상 있을 때',
 };
 /** 브랜드 성격별 묶음(레퍼런스 문서 4번 표의 브랜드별 틀을 업종 중립 이름으로) — 고른 뒤 틀을 하나씩 켜고 끌 수 있음 */
 export const FEED_STYLES = {
   trust: { label: '신뢰형 — 진한 바탕·포인트 색·실사', templates: ['title', 'list', 'photo_fade', 'grid4'] },
-  tech: { label: '기술·앱형 — 휴대폰 화면·실사 덧칠·비교', templates: ['phone', 'photo_dim', 'vs', 'list'] },
+  tech: { label: '기술·앱형 — 휴대폰 화면·실사 덧칠·비교', templates: ['phone', 'laptop', 'photo_dim', 'vs', 'list'] },
   event: { label: '매장 이벤트형 — 강한 색 포스터·가격·사진', templates: ['poster', 'price', 'photo_caption'] },
-  product: { label: '제품 화면형 — 화면 카드·큰 글씨·리포트', templates: ['phone', 'statement', 'report'] },
+  product: { label: '제품 화면형 — 화면 카드·큰 글씨·리포트', templates: ['phone', 'laptop', 'statement', 'report'] },
 } as const satisfies Record<string, { label: string; templates: readonly TemplateId[] }>;
 export type StyleId = keyof typeof FEED_STYLES;
 /** 이벤트 포스터·가격 카드(매장 이벤트형) 색 세트 — 게시물마다 돌려 씀(바탕·글자·혜택 띠) */
@@ -113,10 +114,10 @@ export function hintsOf(o: { head: string; sub: string; title: string; body: str
 }
 
 export const usesPhoto = (t: string) => ['photo', 'photos4'].includes(String(FEED_TEMPLATES[t as TemplateId]?.need ?? ''));
-export type Assets = { photo: boolean; photos: number; screen: boolean };
+export type Assets = { photo: boolean; photos: number; screen: boolean; screenWide?: boolean };
 export function eligible(t: TemplateId, h: Hints, a: Assets) {
   const need = FEED_TEMPLATES[t].need as Need;
-  return need === null || (need === 'photo' && a.photo) || (need === 'photos4' && a.photos >= 4) || (need === 'screen' && a.screen) || (need === 'points' && h.points.length >= 3)
+  return need === null || (need === 'photo' && a.photo) || (need === 'photos4' && a.photos >= 4) || (need === 'screen' && a.screen) || (need === 'screen_wide' && !!a.screenWide) || (need === 'points' && h.points.length >= 3)
     || (need === 'compare' && !!h.left && !!h.right) || (need === 'prices' && h.prices.length >= 2);
 }
 export const hash = (s: string) => { let x = 2166136261; for (const ch of s) { x ^= ch.codePointAt(0)!; x = Math.imul(x, 16777619) >>> 0; } return x; };
@@ -210,7 +211,7 @@ async function logoOf(buf: Buffer): Promise<Logo> {
   return { ...u, lum: n ? sum / n : 0.5 };
 }
 
-export type RenderIn = { t: TemplateId; kit: Kit; brand: string; H: number; h: Hints; photo: Buffer | null; photos: { data: Buffer; label: string }[]; screen: Buffer | null; logo: Buffer | null; font: Buffer | null; set?: { bg: string; fg: string; accent: string } };
+export type RenderIn = { t: TemplateId; kit: Kit; brand: string; H: number; h: Hints; photo: Buffer | null; photos: { data: Buffer; label: string }[]; screen: Buffer | null; screenWide?: Buffer | null; logo: Buffer | null; font: Buffer | null; set?: { bg: string; fg: string; accent: string } };
 type X = RenderIn & { logoEl: Logo | null; b: ReturnType<typeof boxOf>; width: number; set: { bg: string; fg: string; accent: string }; fitT: (s: string, width: number, lines: number, max: number, min: number, o?: FitOpts) => Fitted };
 type Spec = { bg: string; layers: { input: Buffer; left: number; top: number }[]; el: (fam: string) => D.El };
 const { h } = D;
@@ -307,6 +308,23 @@ const DRAW: Record<TemplateId, (x: X) => Promise<Spec>> = {
           ...x.h.points.slice(0, 3).map((p) => h({ alignItems: 'center', columnGap: 14, marginTop: 22, fontSize: 30, color: kit.text, wordBreak: 'keep-all' }, [h({ width: 12, height: 12, borderRadius: 999, background: ink(kit.accent, kit.bg2), flexShrink: 0 }, ''), h({ flex: 1 }, p)]))].filter(Boolean)),
         kit.contact ? abs({ left: x.b.pad, width: colW, bottom: x.b.bottom }, [contactEl(x, rgba(kit.text, 0.9), colW, { weight: 700 })]) : null]) };
   },
+  /** #262(대표 10/25 20:05 ④ 노트북 목업 틀): 가로(PC) 캡처를 16:10 화면에 꽉 채운 노트북(위 가운데 카메라 점·아래 받침대) — 제목은 위, 부제는 틀 아래(자리가 있을 때), 틀이 안 들어가면 비율대로 줄임 */
+  async laptop(x) {
+    const sharp = (await import('sharp')).default; const { kit } = x; const T = x.fitT(x.h.head, x.width, 2, 84, 52); const tTop = x.b.top + 104;
+    const tBottom = tTop + (x.h.kicker ? 58 : 0) + T.lines * T.size * 1.2;
+    const bez = 18, base = 26; const lw0 = W - (x.b.pad - 12) * 2; const sh0 = Math.round((lw0 - bez * 2) * 10 / 16); const lh0 = sh0 + bez * 2 + base;
+    const ly = Math.round(tBottom + 60); const room = x.H - x.b.bottom - (kit.contact ? 56 : 0) - ly;
+    const k = Math.min(1, room / lh0); const lw = Math.round(lw0 * k), lh = Math.round(lh0 * k); const lx = Math.round((W - lw) / 2);
+    const body = await sharp(svg(lw0, lh0, `<rect width="${lw0}" height="${sh0 + bez * 2}" rx="28" ry="28" fill="#0B0B0F"/><rect x="4" y="4" width="${lw0 - 8}" height="${sh0 + bez * 2 - 8}" rx="25" ry="25" fill="none" stroke="#2A2A33" stroke-width="3"/><circle cx="${lw0 / 2}" cy="${bez / 2 + 1}" r="4" fill="#2A2A33"/><rect y="${sh0 + bez * 2 - 4}" width="${lw0}" height="${base + 4}" rx="10" ry="10" fill="#C3C7D0"/><rect x="${Math.round(lw0 / 2 - 90)}" y="${sh0 + bez * 2 - 4}" width="180" height="9" rx="4" ry="4" fill="#8E929C"/>`))
+      .composite([{ input: await cover(x.screenWide!, lw0 - bez * 2, sh0, 8), left: bez, top: bez }]).png().toBuffer();
+    const laptop = k < 1 ? await sharp(body).resize(lw, lh).png().toBuffer() : body;
+    const after = ly + lh + 36; const subRoom = x.H - x.b.bottom - (kit.contact ? 56 : 0) - after;
+    return { bg: kit.bg, layers: [{ input: vgrad(W, x.H, [[0, kit.bg, 1], [1, kit.bg2, 1]]), left: 0, top: 0 }, { input: laptop, left: lx, top: ly }],
+      el: (fam) => root(x.H, [headerAt(x, kit.text, dark(kit.bg)),
+        abs({ left: x.b.pad, right: x.b.pad, top: tTop, flexDirection: 'column' }, [kickerEl(x.h.kicker, ink(kit.accent, kit.bg)), titleEl(T.text, T.size, kit.text, fam)].filter(Boolean)),
+        subRoom >= 80 && x.h.sub ? abs({ left: x.b.pad, right: x.b.pad, top: after, flexDirection: 'column' }, [subEl(x.h.sub, 34, rgba(kit.text, 0.86), { mt: 0 })]) : null,
+        contactAt(x, kit.text)]) };
+  },
   async vs(x) {
     const { kit } = x; const T = x.fitT(x.h.head, x.width, 2, 76, 48); const tTop = x.b.top + 104;
     const cy = Math.round(tTop + (x.h.kicker ? 58 : 0) + T.lines * T.size * 1.2 + 64); const gap = 28; const cw = Math.floor((x.width - gap) / 2);
@@ -360,7 +378,7 @@ export async function renderFeed(x: RenderIn): Promise<Buffer> {
   const kit: Kit = { ...x.kit, header: c(x.kit.header), contact: c(x.kit.contact), kicker: c(x.kit.kicker) };
   const b = boxOf(x.H); const logoEl = x.logo ? await logoOf(x.logo).catch(() => null) : null;
   const need = FEED_TEMPLATES[x.t].need as Need;
-  const t: TemplateId = (need === 'photo' && !x.photo) || (need === 'photos4' && x.photos.length < 4) || (need === 'screen' && !x.screen) ? 'title' : x.t; // 사진·화면을 못 읽었으면 제목형으로
+  const t: TemplateId = (need === 'photo' && !x.photo) || (need === 'photos4' && x.photos.length < 4) || (need === 'screen' && !x.screen) || (need === 'screen_wide' && !x.screenWide) ? 'title' : x.t; // 사진·화면을 못 읽었으면 제목형으로
   const M = await meter();
   const spec = await DRAW[t]({ ...x, t, h: hh, kit, brand: c(x.brand), logoEl, b, width: W - b.pad * 2, set: x.set ?? EVENT_SETS[0], fitT: (s, w, n, max, min, o) => fitTo(M, s, w, n, max, min, o) });
   const { ImageResponse } = await import('next/og');

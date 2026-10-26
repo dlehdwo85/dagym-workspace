@@ -39,7 +39,7 @@ after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); })
 
 test('키트 피드 틀: 검증·저장(카탈로그 순서·대문자) · 바탕 색 출처 한 곳(피드 틀) · 미리보기(관리자만·틀마다 540×675)', async () => {
   let v = await ctx.owner.ok('GET', '/api/marketing/auto');
-  assert.equal(v.feedCatalog.templates.length, 12); assert.equal(v.feedCatalog.styles.length, 4);
+  assert.equal(v.feedCatalog.templates.length, 13); assert.equal(v.feedCatalog.styles.length, 4); // #262 노트북 화면형 추가
   assert.deepEqual(v.feedCatalog.styles.find((s) => s.id === 'trust').templates, ['title', 'list', 'photo_fade', 'grid4']);
   let b = v.brands.find((x) => x.id === P.brand);
   assert.equal(b.draw.from, null, '색을 아무 데도 안 정하면 출처 없음(진한 남색)');
@@ -57,7 +57,7 @@ test('키트 피드 틀: 검증·저장(카탈로그 순서·대문자) · 바�
   assert.deepEqual(pv.images.map((i) => i.template), ['title', 'list', 'price', 'statement', 'report']);
   assert.equal(pv.color.from, 'feed');
   const all = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${P.brand}/feed-preview`, { all: true, feed: { templates: [] } });
-  assert.equal(all.images.length, 12);
+  assert.equal(all.images.length, 13); // #262 노트북 화면형 추가
   const m = await sharp(Buffer.from(all.images[0].src.replace(/^data:image\/jpeg;base64,/, ''), 'base64')).metadata();
   assert.deepEqual([m.format, m.width, m.height], ['jpeg', 540, 675]);
   assert.match(all.images.find((i) => i.template === 'photo_fade').note, /시안 바탕\(글자 없는 사진\)/, '사진 자리 안내');
@@ -73,6 +73,19 @@ test('키트 피드 틀: 검증·저장(카탈로그 순서·대문자) · 바�
   const { data, info } = await sharp(Buffer.from(ph.images[0].src.replace(/^data:image\/jpeg;base64,/, ''), 'base64')).raw().toBuffer({ resolveWithObject: true });
   let red = 0; for (let k = 0; k < data.length; k += info.channels) if (data[k] > 170 && data[k + 1] < 90 && data[k + 2] < 90) red++;
   assert.ok(red > 1500, `캡처 양옆이 보임(빨간 점 ${red})`);
+  // #262(대표 10/25 ④): 노트북 화면형 — 세로 캡처만 있으면 'PC(가로) 화면' 안내(회색 자리), 가로 캡처를 올리면 노트북 틀 안에(위 빨간 띠가 보임) · 휴대폰 틀은 가로 캡처가 더 최근이어도 세로 캡처를 먼저 씀
+  const lp0 = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${P.brand}/feed-preview`, { feed: { templates: ['laptop'] } });
+  assert.match(lp0.images[0].note ?? '', /PC\(가로\) 화면/, JSON.stringify(lp0.images.map((i) => [i.template, i.note])));
+  const wide = await sharp({ create: { width: 1366, height: 768, channels: 3, background: '#FFFFFF' } })
+    .composite([{ input: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1366" height="768"><rect width="1366" height="60" fill="#DC2626"/></svg>'), left: 0, top: 0 }]).png().toBuffer();
+  const capW = await libFile(wide, 'PC 홈 화면.png', []);
+  await sql`update library_files set folder = '마케팅/영상 화면 캡처', mime_type = 'image/png' where id = ${capW}`;
+  const lp = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${P.brand}/feed-preview`, { feed: { templates: ['laptop'] } });
+  assert.deepEqual(lp.images.map((i) => [i.template, i.note]), [['laptop', null]], '가로 캡처가 있으면 안내 없음');
+  const reds = async (src) => { const { data, info } = await sharp(Buffer.from(src.replace(/^data:image\/jpeg;base64,/, ''), 'base64')).raw().toBuffer({ resolveWithObject: true }); let n = 0; for (let k = 0; k < data.length; k += info.channels) if (data[k] > 170 && data[k + 1] < 90 && data[k + 2] < 90) n++; return n; };
+  assert.ok((await reds(lp.images[0].src)) > 800, `노트북 화면 위쪽 빨간 띠가 보임(빨간 점 ${await reds(lp.images[0].src)})`);
+  const ph2 = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${P.brand}/feed-preview`, { feed: { templates: ['phone'] } });
+  assert.ok((await reds(ph2.images[0].src)) > 1500, `휴대폰 틀 = 세로 캡처(양옆 빨간 띠, 빨간 점 ${await reds(ph2.images[0].src)})`);
   assert.equal((await ctx.owner.req('POST', '/api/marketing/auto/brands/00000000-0000-0000-0000-000000000000/feed-preview', {})).status, 404);
 });
 
