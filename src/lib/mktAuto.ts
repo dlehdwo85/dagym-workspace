@@ -790,12 +790,13 @@ async function nextSlot(c: SlotPost & { rule_id: string | null; scheduled_at: st
 
 /** 정해진 시각이 된 자동 제작 칸을 만든다 — 회사마다 한 번에 하나(정기 실행 뒤 이어 만들기·밤사이 비서·[지금 실행]이 같은 글을 두 번 만들지 않게).
  *  글 모델이 최상 모델이면 1건 30~60초라 budgetMs 가 지나면 다음 건은 시작하지 않고 다음 실행에 넘긴다(left) */
-async function produceDue(tenant: string, actorId: string | undefined, budgetMs: number): Promise<{ produced: any[]; left: number; busy?: boolean }> {
+async function produceDue(tenant: string, actorId: string | undefined, budgetMs: number, opt: { sampleOnly?: boolean } = {}): Promise<{ produced: any[]; left: number; busy?: boolean }> {
   const L = await import('./later');
   const r = await L.withLock(`mktProduce:${tenant}`, async () => {
     const noVideo = (await settingsOf(tenant)).video_pause; // 요청 C §3-1: 영상 자동 제작 중단(릴스·쇼츠·생성 영상 칸은 두고 만들지 않음 — 다시 켜면 그때 제작)
     const due = await db()<any[]>`select * from mkt_contents where tenant = ${tenant} and auto and status = 'draft' and produced_at is null and produce_at <= now()
       and (${!noVideo} or coalesce(kind, '') not in ('reels', 'shorts', 'video'))
+      ${opt.sampleOnly ? db()`and (quality->>'sample' = 'true' or (rule_id is null and title like '%시안 세트%'))` : db()`and true`} -- 170차: 일시정지 중에는 시안 세트 칸만(예전 세트는 제목으로)
       and not exists (select 1 from mkt_production_requests q where q.content_id = mkt_contents.id and q.kind = 'topic' and q.status = 'open') order by produce_at limit 5`;
     const start = Date.now(); const produced: any[] = []; let k = 0;
     for (; k < due.length; k++) {
@@ -816,7 +817,12 @@ async function produceDue(tenant: string, actorId: string | undefined, budgetMs:
 }
 export async function runTenant(tenant: string, actorId?: string, opt: { later?: boolean } = {}) {
   // 대표 10/25 22:20(15-16) 자동 생성 일시정지: 칸 만들기·제작·시안 그리기·마감 정리를 모두 건너뜀(사람이 누르는 [지금 만들기]는 produceContent 로 따로)
-  if (await autoPaused(tenant)) return { paused: true, planned: 0, produced: [] as any[], visuals: [] as any[], redraws: [] as any[] };
+  if (await autoPaused(tenant)) {
+    // 170차: 일시정지 중에도 시안 세트 칸(quality.sample)만은 이어서 만든다 — 응답 뒤 제작이 시간 제한에 끊긴 나머지·2시간 뒤 재시도 칸(로컬 10/26 10:45: 13건 중 5건 초안으로 남음)
+    const made = opt.later ? null : await produceDue(tenant, actorId, 150e3, { sampleOnly: true });
+    if (opt.later) (await import('./later')).runLater('mktProduce', async () => ({ tenant, sampleOnly: true, ...(await produceDue(tenant, undefined, 120e3, { sampleOnly: true })) }));
+    return { paused: true, planned: 0, produced: made?.produced ?? ([] as any[]), visuals: [] as any[], redraws: [] as any[], ...(made ? { left: made.left, ...(made.busy ? { busy: true } : {}) } : { producing: 'later' as const }) };
+  }
   // 예전 칸 제목의 '[시험] [시험] ' 겹침 정리(브랜드 이름에 [시험]이 들어 있던 때 만든 아직 안 만든 칸)
   await db()`update mkt_contents set title = regexp_replace(title, '^\\[시험\\]\\s*\\[시험\\]\\s*', '[시험] ') where tenant = ${tenant} and title like '[시험]%[시험]%' and produced_at is null`;
   const planned = await planSlots(tenant);
@@ -835,7 +841,9 @@ export async function runTenant(tenant: string, actorId?: string, opt: { later?:
 }
 /** tick: 규칙이 있는 회사만(한 번에 3곳) — 글 제작은 응답 뒤(runLater) */
 export async function mktAutoTick() {
-  const ts = await db()<{ tenant: string }[]>`select distinct tenant from mkt_rules where active limit 3`;
+  // 170차: 규칙이 없는 회사라도 이어서 만들 시안 세트 칸이 있으면 포함(자동 생성 일시정지 중에도)
+  const ts = await db()<{ tenant: string }[]>`select tenant from (select distinct tenant from mkt_rules where active
+    union select distinct tenant from mkt_contents where auto and status = 'draft' and produced_at is null and produce_at <= now() and (quality->>'sample' = 'true' or (rule_id is null and title like '%시안 세트%'))) x order by tenant limit 3`;
   const out = [];
   for (const t of ts) out.push({ tenant: t.tenant, ...(await runTenant(t.tenant, undefined, { later: true })) });
   return out;
@@ -1446,20 +1454,25 @@ export async function sampleSet(u: SessionUser, i: z.infer<typeof sampleInput>) 
   const made: { id: string; brand: string; kind: string }[] = [];
   for (const p of plan) {
     const title = `${p.brand.test_mode ? '[시험] ' : ''}${brandName(p.brand)} ${KIND_LABEL[p.kind]} 시안 세트 ${md}`;
-    const [c] = await sql<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, kind, auto, produce_at, is_test, cross_channels, mode)
-      values (${t}, ${p.brand.id}, ${title}, ${p.channel}, ${kst(day, p.time)}, 'draft', 0, ${u.id}, ${p.kind}, true, now(), ${!!p.brand.test_mode}, ${p.cross}, 'content') returning id`;
+    const [c] = await sql<{ id: string }[]>`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, kind, auto, produce_at, is_test, cross_channels, mode, quality)
+      values (${t}, ${p.brand.id}, ${title}, ${p.channel}, ${kst(day, p.time)}, 'draft', 0, ${u.id}, ${p.kind}, true, now(), ${!!p.brand.test_mode}, ${p.cross}, 'content', ${sql.json({ sample: true } as never)}) returning id`; // quality.sample: 일시정지 중에도 이어서 만드는 표시(170차)
     made.push({ id: c.id, brand: p.brand.name, kind: p.kind });
   }
   await (await import('./log')).audit(sql, u.id, 'mkt.sample_set', 'tenant', t, { n: made.length, kinds: [...new Set(made.map((m) => m.kind))] }).catch(() => {});
   // 제작은 응답 뒤(최상 모델이면 1건 30~60초) — 만든 순서대로, 실패한 건은 '제작 실패'로 남고 나머지는 계속
+  // 170차(로컬 10/26 10:45: 13건 중 5건이 9시간 뒤에도 초안): 응답 뒤 제작은 함수 시간 제한(300초)에 끊긴다 → 시간 예산(MKT_SAMPLE_BUDGET_MS) 안에서만 만들고,
+  // 남은 칸은 정기 실행이 이어받는다 — 자동 생성 일시정지 중에도 시안 세트 칸(quality.sample)만은 runTenant 가 이어서 만든다
+  const budgetMs = Number(process.env.MKT_SAMPLE_BUDGET_MS ?? 150_000);
   (await import('./later')).runLater('mktSample', async () => {
-    const out: { id: string; ok: boolean; error?: string }[] = [];
+    const out: { id: string; ok: boolean; error?: string }[] = []; const start = Date.now(); let tried = 0;
     for (const m of made) {
+      if (tried && Date.now() - start > budgetMs) break;
       const [c] = await sql<any[]>`select * from mkt_contents where id = ${m.id} and status = 'draft' and produced_at is null`;
       if (!c) continue;
+      tried++;
       out.push(await produceContent(c, u.id, 'manual').then(() => ({ id: m.id, ok: true }), (e) => ({ id: m.id, ok: false, error: String(e?.message ?? e).slice(0, 200) })));
     }
-    return { tenant: t, out };
+    return { tenant: t, out, left: made.filter((m) => !out.some((o) => o.id === m.id)).length, budgetMs };
   });
   return { ok: true, day, contents: made, producing: 'later' as const };
 }
