@@ -59,11 +59,16 @@ export const TENANT = ['leads', 'lead_business_interests', 'sales_activities', '
 export const NOT_MOVED = ['procurement_notice_observations', 'data_source_observation', 'procurement_monitoring_runs', 'ai_usage', 'ai_proposals'];
 const idOf = (r: any) => (r?.id != null ? String(r.id) : createHash('sha256').update(JSON.stringify(r)).digest('hex').slice(0, 32));
 
+/** 191차(대표 10/27 판정 정정): 워크인 규칙으로 판정한 공고 줄(judged_at)은 원본 매일 복사가 판정 칸을 원본 값으로 되돌리지 않음 — 나머지 칸은 원본 값 */
+export const JUDGED_KEEP = ['related', 'fit_business', 'matched_keywords', 'classification', 'refit_at', 'refound_at', 'refit_lowered_at', 'refit_lowered_why', 'refit_changed_at', 'judged_at'];
 async function upsertRows(scope: string, tbl: string, rows: any[]) {
   const sql = db(); const now = new Date();
   for (let n = 0; n < rows.length; n += 500) {
     const chunk = rows.slice(n, n + 500).map((r) => ({ scope, tbl, src_id: idOf(r), row: sql.json(r), gone: false, synced_at: now }));
-    await sql`insert into sales_src_rows ${sql(chunk as never)} on conflict (scope, tbl, src_id) do update set row = excluded.row, gone = false, synced_at = excluded.synced_at`;
+    if (tbl === 'procurement_notices') await sql`insert into sales_src_rows ${sql(chunk as never)} on conflict (scope, tbl, src_id) do update set
+      row = case when sales_src_rows.row ? 'judged_at' then excluded.row - ${JUDGED_KEEP}::text[] || coalesce((select jsonb_object_agg(e.key, e.value) from jsonb_each(sales_src_rows.row) e where e.key = any(${JUDGED_KEEP}::text[])), '{}'::jsonb) else excluded.row end,
+      gone = false, synced_at = excluded.synced_at`;
+    else await sql`insert into sales_src_rows ${sql(chunk as never)} on conflict (scope, tbl, src_id) do update set row = excluded.row, gone = false, synced_at = excluded.synced_at`;
   }
   // 이번에 안 보인 행 = 원본에서 사라짐(지우지 않고 표시)
   // 10/21 수집기 이식: 워크인이 직접 모은 행(origin='workin')은 원본에 없어도 '사라짐'으로 표시하지 않음

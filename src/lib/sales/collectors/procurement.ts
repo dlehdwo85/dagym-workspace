@@ -12,7 +12,19 @@ export const NOISE_KEYWORDS = ['도장', '방수', '보수공사', '공사', '�
 export const EXCLUDE_TOPICS = ['어린이집', '보육', '알뜰', '장터', '야시장', '자판기', '주차관제', '주차장', '음식물', '종량기', '재활용', '택배', '이동통신', '중계기', '헬스케어', '구내식당', '급식', '매점', '학위복', '방과후',
   '영어마을', '정보시스템', '전산', '선거', '투표', '돼지', '가축', '축산', '양돈', '농장', '개체식별', '해외연수', '바이오헬스', '헬스산업', '조기경보', '재난', '하천', '임대공실', '공실', '점포', '장서'] as const;
 // #476 d: '주민 운동시설 위탁관리업체 선정'(K-apt 분류 '사업자-용역-주민운동시설의 위탁')이 중장기로 빠졌다 → 위탁 관리(업체)·시설의 위탁·위탁 업체/사업자 선정도 즉시 검토
-const DIRECT = /(위탁\s*운영|운영\s*위탁|운영\s*업체|운영\s*사업자|운영자|위탁\s*용역|위탁\s*관리(?:\s*업체)?|시설의\s*위탁|위탁\s*(?:업체|사업자)\s*선정|출입\s*통제|출입\s*시스템|출입시스템|출입\s*구축|출입\s*장치|자동\s*출입|통합\s*보안|안면\s*인식|얼굴\s*인식|키오스크|회원\s*관리|예약\s*시스템|타석|스크린\s*골프|커뮤니티\s*시스템)/;
+// 191차(대표 10/27 정정): 즉시 검토 낱말을 둘로 — 다짐은 운영·위탁 낱말만(예전 '스크린골프'·'타석'은 다짐 즉시 검토가 아님), 하이링크는 시스템 낱말
+const DIRECT_OPS = /(위탁\s*운영|운영\s*위탁|운영\s*업체|운영\s*사업자|운영자|위탁\s*용역|위탁\s*관리(?:\s*업체)?|시설의\s*위탁|위탁\s*(?:업체|사업자)\s*선정)/;
+const DIRECT_SYS = /(출입\s*통제|출입\s*시스템|출입시스템|출입\s*구축|출입\s*장치|자동\s*출입|통합\s*보안|안면\s*인식|얼굴\s*인식|키오스크|회원\s*관리|예약\s*시스템|타석\s*관제|커뮤니티\s*시스템)/;
+/** 191차(대표 10/27 "스크린 골프나 골프연습장 설치 및 공사는 저희가 하지 않습니다. 운영만 합니다" · "커뮤니티센터 통합관리시스템 구축 … 이건 하이링크지"):
+ *  다짐 = 시설 운영·위탁운영만. 제목에 설치·시공·공사·교체·렌탈·장비·리모델링·보수·시스템·구축 같은 말이 있으면 골프·헬스·커뮤니티라도 다짐이 아님 —
+ *  제목·분류에 운영·위탁·임대(사용 허가) 낱말이 함께 있을 때만 다짐. 하이링크 판정(출입·예약·회원관리·통합관리 시스템)은 그대로 */
+const BUILD_RE = /설치|시공|공사|교체|렌탈|리스|장비|기구|기계|리모델링|보수|구축|시스템|납품|구입|구매|제작|도입|시설\s*개선|개선\s*공사|수선|철거|증설|이전\s*설치/;
+const OPS_RE = /위탁|수탁|임대|대부|사용\s*[·ㆍ.]?\s*수익|사용\s*허가|운영(?!\s*(?:중|시스템|프로그램|솔루션|플랫폼|관리\s*(?:시스템|프로그램)|시간|비\b))/;
+/** 하이링크 '타석'·'골프타석'은 시스템 낱말(관제·시스템·예약·키오스크·무인·오토티업)이 제목·분류에 있을 때만 — 스크린골프·골프연습장 타석 설치·보수 공사는 아님 */
+const BAY_WORDS = new Set(['타석', '골프타석']);
+const BAY_SYS = /관제|시스템|예약|키오스크|무인|오토\s*티\s*업|자동\s*티/;
+/** 191차: 제목의 '커뮤니티(센터)·주민공동시설 … 시스템·프로그램' = 하이링크(예 '커뮤니티 운영 시스템 구축') — 냉난방·CCTV·방송 시스템은 아님 */
+const CMTY_SYS = /(?:커뮤니티|주민\s*공동\s*시설|주민\s*운동\s*시설)\s*(?:센터|시설)?\s*(?:(?:통합|운영|관리|예약|회원|출입)\s*)*(?:시스템|프로그램|솔루션)/;
 const WEAK = new Set(['커뮤니티', '주민공동시설', '주민공동', '부대복리시설', '카페', '강사', '골프', '게이트', '무인', '도서관', '운영업체', 'IoT', '락커', '사물함', '통합관리시스템']);
 const APT_CONTEXT = /아파트|단지|주민|입주|공동주택|커뮤니티|관리사무소|오피스텔|레지던스/;
 const CONSTRUCTION_RE = /공사|관급자재|설계|감리|측량|폐기물|골재|건립|신축|증축|개축|철거|타일|안전진단|기술지도|시공/;
@@ -20,7 +32,8 @@ const FACILITY_SERVICE_RE = /청소|경비|소독|방역|안전점검|정기점�
 const OPERATION_ONLY = new Set(['위탁운영', '운영위탁', '운영업체', '강사', '조식']);
 
 export type FitBusiness = '다짐' | '하이링크' | '다짐·하이링크';
-export type FitResult = { fit: FitBusiness | null; matched: string[]; direct: boolean };
+/** dropped = 낱말은 맞았지만 191차 규칙으로 뺀 사업과 까닭(다시 판정이 예전 판정을 내릴 때 근거) */
+export type FitResult = { fit: FitBusiness | null; matched: string[]; direct: boolean; dropped?: { business: '다짐' | '하이링크'; why: string }[] };
 const norm = (s: string) => s.toUpperCase().replace(/\s+/g, '');
 
 /** 제목·분류·내용에서 키워드를 찾아 적합 사업을 정한다(띄어쓰기 무시, 긴 단어에 포함된 짧은 단어는 하나로).
@@ -46,14 +59,25 @@ export function matchFit(...texts: (string | null | undefined)[]): FitResult {
     const ok = strong.length > 0 || (uniq.length > 0 && !noisy && apt);
     return ok ? uniq : [];
   };
-  const direct = DIRECT.test(text);
   let d = pick(DAGYM_KEYWORDS);
-  const h = pick(HILINK_KEYWORDS);
-  // 공사·설비·청소 등 시설 서비스는 DIRECT 가 아니면 다짐에서 제외(하이링크 판정은 유지)
-  if (d.length && !direct && (CONSTRUCTION_RE.test(title) || FACILITY_SERVICE_RE.test(title))) d = [];
+  let h = pick(HILINK_KEYWORDS);
+  const dropped: NonNullable<FitResult['dropped']> = [];
+  const head = `${parts[0] ?? ''} ${parts[1] ?? ''}`;
+  // 191차: 하이링크 타석은 시스템 낱말이 함께 있을 때만 · 제목의 '커뮤니티 … 시스템' 은 하이링크
+  const bayOnly = h.length > 0 && h.every((k) => BAY_WORDS.has(k));
+  if (h.length && !BAY_SYS.test(head)) h = h.filter((k) => !BAY_WORDS.has(k));
+  if (bayOnly && !h.length) dropped.push({ business: '하이링크', why: '타석만 있고 관제·시스템 낱말이 없음(골프 타석 설치·공사)' });
+  const cmty = parts[0] ? parts[0].match(CMTY_SYS)?.[0] : undefined;
+  if (cmty && !h.some((k) => norm(cmty).includes(norm(k)))) h = [...h, cmty.replace(/\s+/g, ' ').trim()];
+  // 191차: 다짐은 운영·위탁만 — 제목에 설치·시공·공사·교체·렌탈·장비·시스템·구축(그리고 예전 규칙의 공사·설계·청소·경비 같은 시설 서비스)이 있으면
+  // 제목·분류에 운영·위탁·임대 낱말이 함께 있을 때만 남김(본문의 '위탁 운영 중인 시설'만으로는 안 됨)
+  const ops = OPS_RE.test(head);
+  const build = title.match(BUILD_RE)?.[0] ?? title.match(CONSTRUCTION_RE)?.[0] ?? title.match(FACILITY_SERVICE_RE)?.[0] ?? null;
+  if (d.length && build && !ops) { dropped.push({ business: '다짐', why: `제목에 '${build}' — 다짐은 운영·위탁만` }); d = []; }
   if (d.length && d.every((k) => OPERATION_ONLY.has(k))) d = []; // 위탁운영만으로는 시설 단어 필요
   const fit: FitBusiness | null = d.length && h.length ? '다짐·하이링크' : d.length ? '다짐' : h.length ? '하이링크' : null;
-  return { fit, matched: [...d, ...h], direct: !!fit && direct };
+  const direct = (d.length > 0 && DIRECT_OPS.test(text)) || (h.length > 0 && DIRECT_SYS.test(text));
+  return { fit, matched: [...d, ...h], direct: !!fit && direct, ...(dropped.length ? { dropped } : {}) };
 }
 
 /** 로컬 10/24 12:20(#537 후속): 결과(낙찰·유찰) 줄 — 영업 기회가 아니라 결과. 오늘 새 공고·새 공고 수에서 빼고 '결과' 묶음으로(당일 메일·영업기회 오늘 탭·영업 홈 같은 기준) */
@@ -187,6 +211,12 @@ export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<stri
     if (mergeScope === 'all' && p.classification === '중장기 영업리드') {
       const merged = { ...p, ...Object.fromEntries(Object.entries(v.row).filter(([, x]) => x != null)) };
       if (initialClassification(merged) === '즉시 검토') { patch.classification = '즉시 검토'; changed.push('classification'); }
+    }
+    // 191차: 판정 칸을 워크인 규칙으로 바꾼 줄은 judged_at — 원본 영업관리 매일 복사가 이 줄의 판정을 원본 값으로 되돌리지 않게(migrate upsertRows).
+    // 관련 → 관련 아님이면 분류 '참고(비관련)'·다시 찾은 공고 표시 지움(오늘 새 공고·당일 메일에 남지 않게)
+    if (mergeScope === 'all' && ('fit_business' in patch || 'related' in patch)) {
+      patch.judged_at = now.toISOString();
+      if (patch.related === false && (p.related === true || p.related === 'true')) { patch.classification = '참고(비관련)'; if (p.refound_at) patch.refound_at = null; }
     }
     if (changed.length) plan.updates.push({ id: String(p.id), key, patch, summary: `변경: ${changed.join(', ')}` });
     else plan.unchangedIds.push(String(p.id));

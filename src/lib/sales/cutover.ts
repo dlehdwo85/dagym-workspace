@@ -77,7 +77,8 @@ export async function verifyCutover(tenant: string) {
   const [c] = await sql<any[]>`select * from sales_cutover where tenant = ${tenant}`;
   if (!c?.src_counts) throw badRequest('먼저 동결 시점 원본 건수를 기록하세요');
   const copied = Object.fromEntries((await sql<{ scope: string; tbl: string; n: number }[]>`select scope, tbl, count(*)::int n from sales_src_rows where (scope = 'global' or scope = ${tenant}) and not gone group by scope, tbl`).map((r) => [r.tbl, r.n]));
-  const [rel] = await sql<{ n: number }[]>`select count(*)::int n from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and (row->>'related')::boolean is true`;
+  // 191차: 워크인 규칙이 판정을 바꾼 줄(judged_at — 예 대표 10/27 정정으로 '관련 아님'으로 내린 원본 복사 줄)도 복사된 줄로 셈 — 이 대조는 복사가 빠짐없는지를 봄
+  const [rel] = await sql<{ n: number }[]>`select count(*)::int n from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and ((row->>'related')::boolean is true or row ? 'judged_at')`;
   const formal: Record<string, number> = { leads: (await sql<{ n: number }[]>`select count(*)::int n from sales_leads where tenant = ${tenant} and src_id is not null`)[0].n };
   for (const r of await sql<{ kind: string; n: number }[]>`select kind, count(*)::int n from sales_lead_records where tenant = ${tenant} and src_id is not null group by kind`) formal[r.kind] = r.n;
   for (const r of await sql<{ src_tbl: string; n: number }[]>`select src_tbl, count(*)::int n from sales_work_records where tenant = ${tenant} group by src_tbl`) formal[r.src_tbl] = r.n;

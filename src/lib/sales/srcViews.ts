@@ -6,7 +6,7 @@ import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
 import { isAwardResult, onbidSale } from './collectors/procurement';
-import { oneCardPerNotice, skipLinks } from './noticeGroups';
+import { groupNotices, oneCardPerNotice, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { hubTabsOn } from './hubTabs';
 
@@ -29,6 +29,18 @@ async function rows(scope: string, tbl: string, limit = 5000) {
   return (await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = ${scope} and tbl = ${tbl} and not gone
     ${since ? sql`and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${since}` : sql``}
     order by coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) desc, ctid desc limit ${limit}`).reverse().map((r) => ({ ...r.row, __id: r.src_id }));
+}
+/** 191차(로컬 10/27 — 관련으로 저장된 원본 복사 줄이 입찰 목록·검색에 안 나옴): 공고는 관련 줄과 이 회사 진행 기록·참고 줄만 DB 에서 바로 읽는다.
+ *  예전엔 모든 공고(관련 아님 포함, K-apt 전체 등)의 최신 2만 줄을 읽은 뒤 관련을 골라 — 수집 줄이 많으면 관련 줄이 읽기 상한 밖으로 밀렸다.
+ *  3년 창은 그대로(처음 본 시각이 날짜 꼴이 아닌 줄은 창으로 빼지 않음). related = false 면 ids 줄만 */
+async function noticeRows(ids: Iterable<string> = [], opt: { related?: boolean } = {}) {
+  const sql = db(); const since = new Date(Date.now() - WINDOW_DAYS.procurement_notices * 864e5).toISOString();
+  const list = [...new Set([...ids].map(String).filter(Boolean))]; const rel = opt.related !== false;
+  if (!rel && !list.length) return [];
+  return (await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone
+    and (${rel ? sql`coalesce(row->>'related', 'false') = 'true'` : sql`false`} or src_id = any(${list}::text[]) or row->>'id' = any(${list}::text[]))
+    and (coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${since} or coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) !~ '^[0-9]{4}-')
+    order by coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) desc, ctid desc limit 20000`).reverse().map((r) => ({ ...r.row, __id: r.src_id }));
 }
 /** 전환 뒤(쓰기 열림): 리드는 정식 표(sales_leads)가 정본 — 원본 행 칸 이름으로 맞춰 돌려줌(화면 코드 그대로) */
 /** date 칸: 운영 DB 연결은 date 를 'YYYY-MM-DD' 문자열로, 시험 DB 는 Date 로 줄 수 있음 — 둘 다(핫픽스 10/19: 문자열을 format 해 500) */
@@ -156,7 +168,7 @@ export function isOpenBid(n: { related?: boolean; status?: unknown; close?: stri
   return true;
 }
 
-export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string; biz?: string; sort?: string; box?: string; region?: string; hh?: string; period?: string }) {
+export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string; biz?: string; sort?: string; box?: string; region?: string; hh?: string; period?: string; trace?: string[] }) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
   const [applied] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
@@ -192,7 +204,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     if (bidsOn) {
       const W = (await rows(t, 'opportunity_work')).filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? '')));
       const ids = new Set(W.map((w) => String(pick(w, 'notice_id', 'procurement_notice_id') ?? '')));
-      if (ids.size) for (const r of await rows('global', 'procurement_notices', 20000)) {
+      if (ids.size) for (const r of await noticeRows(ids, { related: false })) {
         if (!ids.has(String(r.id ?? r.__id))) continue;
         const n = notice(r, cats);
         if (!n.close || n.close < from || n.close > to) continue;
@@ -206,7 +218,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await prog('opportunity_work'); // S2-5: 전환 뒤에는 정식 진행 기록 표(원본 행 모양)
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
-    const NR0 = oneCardPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && ((!vendorUnchecked(r) && !onbidSale(r)) || workOf.has(String(r.id ?? r.__id)))), workTime(W));
+    const NR0 = oneCardPerNotice((await noticeRows()).filter((r) => (r.related === true || r.related === 'true') && ((!vendorUnchecked(r) && !onbidSale(r)) || workOf.has(String(r.id ?? r.__id)))), workTime(W));
     const skips = skipLinks(NR0, (id) => workOf.get(id));
     const NR = NR0.filter((r) => !skips.hidden(r)); // 입찰 목록과 같은 기준(확인 안 된 협력사 줄·온비드 매각 빼기·같은 공고 한 장·대상 아님 빼기 — 137차 같은 사업 사전규격·본 공고 함께)
     const N = NR.map((r) => notice(r, cats));
@@ -275,7 +287,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
     const endOf = (r: any) => day(pick(r, 'contract_end_date', 'contract_end', 'service_end_date', 'contract_expiry_date'));
     const shift = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x); };
-    const rel = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true');
+    const rel = (await noticeRows()).filter((r) => r.related === true || r.related === 'true');
     const skips = skipLinks(rel, (id) => workOf.get(id)); // 137차: 대상 아님 + 같은 사업(사전규격 ↔ 본 공고)
     const timing = (end: string) => { const start = shift(end, -12), start2 = shift(end, -9), propose = shift(end, -6), rebid = shift(end, -3);
       return { start, start2, propose, rebid, stage: td < start ? '영업 전' : td < propose ? '영업 시작' : td < rebid ? '제안' : td <= end ? '재입찰' : '종료', daysLeft: Math.round((Date.parse(end) - Date.parse(td)) / 864e5) }; };
@@ -393,7 +405,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // #510: 메일 '참고(검색어만 일치)' [보기] = 마지막 다이제스트의 참고 줄(관련 사업은 아니고 관심 검색어만 맞은 공고)
     const refIds = tab === 'ref' ? new Set(((await db()<{ items: any }[]>`select items from sales_digests where tenant = ${t} order by day desc limit 1`)[0]?.items ?? []).filter((i: any) => i?.section === 'ref').map((i: any) => String(i.id))) : null;
     // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식)·온비드 매각 빼기 · 대표 10/24 추가 ②: 같은 공고(취소·정정 공고·재게시·완전 중복)는 카드 한 장(noticeGroups)
-    const N = oneCardPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => refIds ? refIds.has(String(r.id ?? r.__id)) : byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r) && !onbidSale(r))), workTime(W, P));
+    const read = refIds ? await noticeRows([...refIds].map(String), { related: false }) : await noticeRows(byNotice.keys());
+    const cand = read.filter((r) => refIds ? refIds.has(String(r.id ?? r.__id)) : byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r) && !onbidSale(r)));
+    const N = oneCardPerNotice(cand, workTime(W, P));
     // 137차: 대상 아님 = 자기 진행 기록 + 같은 사업(사전규격 ↔ 본 공고)으로 함께 숨김 — [대상 아님] 탭은 한 장(함께 숨긴 카드는 linked)
     const skips = skipLinks(N, (id) => pick(byNotice.get(id), 'status'));
     const folded = (r: any) => skips.under.has(String(r.id ?? r.__id));
@@ -412,6 +426,21 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       && (tb !== 'today' || (n.todayHit && (n.result || !bidEnded(n, td)))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
       && (tb !== 'soon' || (!!n.close && n.close >= td && n.close <= plus(3) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중
       && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td))); // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
+    // 191차(로컬 10/27): 플랫폼 조회 — 이 줄이 이 회사 입찰 목록(전체 탭)에 들어가는지, 빠지면 어느 단계에서(목록과 같은 계산)
+    if (q.trace?.length) {
+      const key = (r: any) => String(r.id ?? r.__id);
+      const readIds = new Set(read.map(key)), candIds = new Set(cand.map(key)), cardIds = new Set(N.map(key));
+      const repOf = new Map<string, string>();
+      for (const g of groupNotices(cand)) { const rep = g.find((r) => cardIds.has(key(r))); for (const r of g) repOf.set(key(r), rep ? key(rep) : key(r)); }
+      const shown = new Set(all.filter((n) => inTab(n, 'all')).map((n) => String(n.id)));
+      return { trace: q.trace.map((id) => {
+        if (!readIds.has(id)) return { id, listed: false, step: 'read', why: '목록 읽기에서 빠짐 — 관련 아님이고 이 회사 진행 기록이 없음(또는 사라짐·3년 창 밖)' };
+        if (!candIds.has(id)) return { id, listed: false, step: 'filter', why: '확인 안 된 협력사 모집 줄 또는 온비드 매각 공고' };
+        const card = repOf.get(id) ?? id;
+        if (!shown.has(card)) return { id, listed: false, step: 'skip', card, why: card !== id ? `같은 공고 묶음(카드 ${card})이 이 회사 [대상 아님]` : '이 회사 [대상 아님](같은 사업 사전규격·본 공고 함께 숨김 포함)' };
+        return { id, listed: true, step: 'listed', card, why: card !== id ? `같은 공고 묶음 카드(${card})로 보임` : '목록에 보임' };
+      }) };
+    }
     // #606 정렬(?sort=): 마감 D-day(deadline) · 공고일(notice) · 예산(amount) — 없으면 탭 기본(진행 중·마감순, 대상 아님·넘긴 순, 그 밖·DB 등록 최신순)
     const sortKey = ['deadline', 'notice', 'amount'].includes(String(q.sort ?? '')) ? String(q.sort) : null;
     const cmp = (a: (typeof all)[number], b: (typeof all)[number]) => sortKey === 'deadline' ? String(a.deadline ?? a.close ?? '9999').localeCompare(String(b.deadline ?? b.close ?? '9999'))
