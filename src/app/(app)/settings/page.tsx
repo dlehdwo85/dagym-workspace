@@ -148,6 +148,8 @@ export default function Settings() {
 
 /** 대표 10/20 16:00 (#104 ⑤) 공간별(영업·마케팅) 알림 방식 — 담당인 것만(기본)·모두(1시간 묶음)·받지 않음. 관리자는 회사 기본값도 */
 type SpaceRow = { space: string; label: string; mode: 'mine' | 'all' | 'off'; own: boolean; companyDefault: 'mine' | 'all' | 'off' };
+/** 회사 기본값 선택 칸은 괄호 설명을 뺀 짧은 이름(설명은 바로 위 라디오에 있음) — 긴 설명이 칸 폭을 키워 360·375px 에서 옆으로 넘쳤음(CI 1496 W-0) */
+const shortMode = (label: string) => label.replace(/\s*\(.*\)\s*$/, '');
 function SpaceNotifyPrefs({ spaces, modeLabels, canSetCompany, reload }: { spaces: SpaceRow[]; modeLabels: Record<string, string>; canSetCompany: boolean; reload: () => void }) {
   const [rows, setRows] = useState<SpaceRow[]>(spaces);
   const [busy, setBusy] = useState(false);
@@ -176,8 +178,8 @@ function SpaceNotifyPrefs({ spaces, modeLabels, canSetCompany, reload }: { space
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-ink-3">
                 {r.own ? <button type="button" className="underline" onClick={() => setRows(rows.map((x, j) => (j === i ? { ...x, own: false, mode: x.companyDefault } : x)))} data-testid={`space-use-company-${r.space}`}>회사 기본값({modeLabels[r.companyDefault]})으로</button> : <span data-testid={`space-company-${r.space}`}>회사 기본값을 따르는 중</span>}
                 {canSetCompany && <label className="flex items-center gap-1">회사 기본값
-                  <select className={cx(inputCls, 'h-7 !w-auto py-0 text-[11px]')} value={r.companyDefault} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, companyDefault: e.target.value as SpaceRow['mode'], mode: x.own ? x.mode : (e.target.value as SpaceRow['mode']) } : x)))} aria-label={`${r.label} 회사 기본값`} data-testid={`space-company-select-${r.space}`}>
-                    {MODES.map((m) => <option key={m} value={m}>{modeLabels[m]}</option>)}
+                  <select className={cx(inputCls, 'h-7 !w-auto max-w-[11rem] py-0 text-[11px]')} value={r.companyDefault} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, companyDefault: e.target.value as SpaceRow['mode'], mode: x.own ? x.mode : (e.target.value as SpaceRow['mode']) } : x)))} aria-label={`${r.label} 회사 기본값`} data-testid={`space-company-select-${r.space}`}>
+                    {MODES.map((m) => <option key={m} value={m}>{shortMode(modeLabels[m])}</option>)}
                   </select></label>}
               </div>
             </div>

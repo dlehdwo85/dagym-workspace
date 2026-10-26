@@ -6,6 +6,9 @@ import assert from 'node:assert/strict';
 export async function designGuide187({ owner, ctx, sql, BASE, SHOTS }) {
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   const brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: 'E2E 지침 브랜드' })).id;
+  // CI 1495: 만드는 중인 주제가 있으면 화면이 3초마다 다시 읽음 — 그때 쓰던 지침 글이 지워져 [지침 저장]이 꺼졌음(누르기 30초 기다림 실패)
+  const [working] = await sql`insert into mkt_team_ideas (tenant, brand_id, day, title, result_status) select tenant, id, (now() at time zone 'Asia/Seoul')::date, 'E2E 만드는 중 주제', 'working'
+    from mkt_brands where id = ${brand} returning id`;
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/s/marketing/team`);
   const card = owner.locator('[data-testid=team-role][data-role=designer]');
@@ -15,6 +18,12 @@ export async function designGuide187({ owner, ctx, sql, BASE, SHOTS }) {
   await box.locator('summary').click();
   await box.getByTestId('team-guide-input').fill('표지 첫 줄은 질문으로 시작\n브랜드 색은 포인트에만\n사람 얼굴은 손·뒷모습으로');
   assert.match(await box.getByTestId('team-guide-count').innerText(), /^3줄 · \d+\/4,000자$/);
+  try { // 다시 읽은 뒤에도 쓰던 글·[지침 저장] 그대로
+    await owner.waitForResponse((r) => new URL(r.url()).pathname === '/api/marketing/team' && r.request().method() === 'GET', { timeout: 8000 });
+    await owner.waitForTimeout(300);
+    assert.match(await box.getByTestId('team-guide-count').innerText(), /^3줄 · /, '다시 읽어도 쓰던 지침 그대로');
+    assert.equal(await box.getByTestId('team-guide-save').isEnabled(), true);
+  } finally { await sql`delete from mkt_team_ideas where id = ${working.id}`; }
   await box.getByTestId('team-guide-save').click();
   await owner.getByText('회사 전체 디자인 지침을 저장했습니다(3줄)').waitFor();
   await box.getByTestId('team-guide-scope').selectOption(brand);
