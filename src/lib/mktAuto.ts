@@ -363,11 +363,11 @@ const pagedKind = (c: { channel?: string | null; kind?: string | null }) => (c.k
 const VIDEO_KINDS = ['reels', 'shorts', 'video'];
 /** #426 훅 자리: 릴스·쇼츠·영상 = 첫 장면(3초), 블로그 = 제목, 그 밖 = 본문 첫 줄 */
 const hookAt = (kind: string) => (VIDEO_KINDS.includes(kind) ? '첫 장면(첫 3초)' : kind === 'blog' ? '제목' : '본문 첫 줄');
-async function logAi(c: any, p: { name: string; model: string }, r: any, P: typeof import('./ai/provider')) {
+export async function logAi(c: any, p: { name: string; model: string }, r: any, P: typeof import('./ai/provider')) {
   await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
     values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_produce')`;
 }
-const textOf = (r: any) => (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('');
+export const textOf = (r: any) => (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('');
 
 async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?: { prev: string; comment: string }, mat?: Awaited<ReturnType<typeof materialOf>>): Promise<Draft> {
   const m = mat ?? (await materialOf(c, brand, rule, { keep: !!extra }));
@@ -1342,7 +1342,8 @@ export const brandKitInput = z.object({ tone: z.string().max(200).nullable().opt
   feed: feedInput.optional(), // #544 피드 틀(쓸 틀·색·머리줄·연락처 줄·머리말) — 통째로 저장
   facts: factsInput.optional(), // 로컬 QA 10/24 ⑤ 사실 카드(연락처·운영 시간·요금·숫자·섞으면 안 되는 이름) — 통째로 저장
   topicPool: z.array(z.string().trim().min(1).max(120)).max(40).optional(), // 로컬 QA 10/24 ③ 브랜드 주제 풀(한 줄에 하나, 돌아가며 씀)
-  examples: z.array(exampleInput).max(12).optional() }); // #235 ⓔ 잘 된 예시 글(형식마다 3개) — 통째로 저장
+  examples: z.array(exampleInput).max(12).optional(), // #235 ⓔ 잘 된 예시 글(형식마다 3개) — 통째로 저장
+  aiFill: z.array(z.string().trim().min(1).max(24)).max(24).optional() }); // 190차 [AI로 채우기]에서 고른 칸 이름 — 감사 기록만(값은 위 칸들)
 /** #235 ⓐ 소식: 끝나는 날이 없으면 시작(없으면 오늘)부터 30일 뒤 — 지난 소식이 계속 주제로 나가지 않게 */
 function factsToSave(f: z.infer<typeof factsInput>) {
   if (!f.news) return f;
@@ -1363,6 +1364,7 @@ export async function saveBrandKit(u: SessionUser, id: string, i: z.infer<typeof
     topic_pool = ${i.topicPool === undefined ? db()`topic_pool` : [...new Set(i.topicPool)]},
     examples = ${i.examples === undefined ? db()`examples` : db().json(i.examples.map((e) => ({ ...e, at: e.at ?? new Date().toISOString() })) as never)} where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!b) throw notFound();
+  if (i.aiFill?.length) await (await import('./log')).audit(db(), u.id, 'mkt.brand_kit_ai', 'mkt_brand', id, { fields: i.aiFill });
   // 재료(소개·상품·주제)가 생기면 이 브랜드의 열린 '주제 필요' 질문은 닫고 다음 실행에 제작
   if (i.intro || i.products || i.weeklyTopic || i.topicPool?.length) await db()`update mkt_production_requests q set status = 'done', brief = q.brief || ${'\n\n브랜드 키트 재료로 대신함'}, decided_by = ${u.id}, decided_at = now()
     from mkt_contents c where c.id = q.content_id and c.brand_id = ${id} and q.kind = 'topic' and q.status = 'open'`;

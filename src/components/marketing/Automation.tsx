@@ -13,6 +13,7 @@ import { CarouselStudio } from './Carousel';
 import { BrandVoice, type Voice } from './BrandVoice';
 import { BrandFacts, type Facts } from './BrandFacts';
 import { BrandExamples, type Example } from './BrandExamples';
+import { BrandKitAi } from './BrandKitAi';
 import { MktPhotos } from './MktPhotos';
 import { MODE_HINT, ModeChip, ModeToggle, asMode, type Mode } from './ModeToggle';
 import { useSearchParams } from 'next/navigation';
@@ -52,6 +53,7 @@ export function Automation() {
   const [busy, setBusy] = useState(false);
   const [archived, setArchived] = useState<string | null>(null); // 전면 정리 결과 한 줄
   const [nb, setNb] = useState({ name: '', test: false });
+  const [kitVer, setKitVer] = useState<Record<string, number>>({}); // 190차 [AI로 채우기] 저장 뒤 그 브랜드 칸들을 새 값으로 다시 그림(입력 칸은 처음 값만 읽음)
   async function addBrand() {
     const name = nb.name.trim(); if (!name) return;
     setBusy(true);
@@ -223,10 +225,11 @@ export function Automation() {
         </div>
         {!data.brands.length && <p className="mt-2 text-xs text-ink-3">브랜드가 없습니다 — 추가하면 말투·금지어·시험 모드를 정하고 주간 규칙에서 고를 수 있습니다.</p>}
         <ul className="mt-2 space-y-2">{data.brands.map((b) => (
-          <li key={b.id} className="grid gap-2 sm:grid-cols-[8rem_1fr_1fr_auto]"><span className="pt-2 text-sm font-medium">{b.name}</span>
+          <li key={`${b.id}:${kitVer[b.id] ?? 0}`} className="grid gap-2 sm:grid-cols-[8rem_1fr_1fr_auto]"><span className="pt-2 text-sm font-medium">{b.name}</span>
             <input className={inputCls} defaultValue={b.tone ?? ''} placeholder="말투(예: 친근·전문적)" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { tone: e.target.value || null } }).then(reload)} aria-label={`${b.name} 말투`} />
             <input className={inputCls} defaultValue={b.banned_words.join(', ')} placeholder="금지어(쉼표)" onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { bannedWords: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) } }).then(reload)} aria-label={`${b.name} 금지어`} />
             <label className="flex items-center gap-1.5 text-xs" title="알림은 실행한 사람에게만, 승인함에 [시험] 표시, 게시 확인 안 됨"><input type="checkbox" checked={b.test_mode} onChange={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { testMode: e.target.checked } }).then(reload)} data-testid="auto-brand-test" />시험 모드</label>
+            <BrandKitAi brand={b} catalog={data.feedCatalog} onSaved={async () => { await reload(); setKitVer((m) => ({ ...m, [b.id]: (m[b.id] ?? 0) + 1 })); }} />
             <div className="grid gap-2 sm:col-span-4 sm:grid-cols-3 sm:pl-[8.5rem]">
               <textarea className={cx(inputCls, 'min-h-16')} defaultValue={b.intro ?? ''} placeholder="브랜드 소개(무엇을 하는 곳인지)" maxLength={1000} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { intro: e.target.value } }).then(reload)} aria-label={`${b.name} 소개`} data-testid="auto-brand-intro" />
               <textarea className={cx(inputCls, 'min-h-16')} defaultValue={b.products ?? ''} placeholder="주력 상품·서비스" maxLength={1000} onBlur={(e) => api(`/api/marketing/auto/brands/${b.id}`, { method: 'PATCH', body: { products: e.target.value } }).then(reload)} aria-label={`${b.name} 주력 상품`} />
