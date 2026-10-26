@@ -86,7 +86,9 @@ describe('V28-3 슈퍼 계정', () => {
     const me = await m.ok('GET', '/api/auth/me');
     const [t] = await sql`select signup_utm from tenants where id = ${me.user.tenant}`;
     assert.equal(t.signup_utm.source, 'meta');
-    assert.ok((await sql`select count(*)::int n from user_active_days where user_id = ${me.user.id}`)[0].n >= 1, '접속한 날 기록');
+    let activeDays = 0; // 접속한 날 기록은 응답 뒤 비동기(src/lib/auth.ts markActiveDay) — CI 부하에서 바로 조회하면 아직 없을 수 있어 잠깐 기다림(168차)
+    for (let i = 0; i < 20 && !activeDays; i++) { activeDays = (await sql`select count(*)::int n from user_active_days where user_id = ${me.user.id}`)[0].n; if (!activeDays) await new Promise((r) => setTimeout(r, 150)); }
+    assert.ok(activeDays >= 1, '접속한 날 기록');
     let f = await ctx.owner.ok('GET', '/api/platform/funnel');
     const src = (w) => Object.fromEntries(f.byWeek.flatMap((x) => x.bySource).map((s) => [s.source, s]));
     assert.equal(src().meta.signups, 1); assert.equal(src().meta.invited, 0); assert.equal(src().meta.active, 0);
