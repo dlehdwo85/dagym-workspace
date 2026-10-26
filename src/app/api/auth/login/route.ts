@@ -6,6 +6,7 @@ import { verifyPassword } from '@/lib/crypto';
 import { createSession, sessionCookie } from '@/lib/auth';
 import { HttpError } from '@/lib/errors';
 import { audit } from '@/lib/log';
+import { automatedUserAgent, capturePolicy } from '@/lib/capturePolicy';
 
 const schema = z.object({
   email: z.string().trim().toLowerCase().email(),
@@ -23,8 +24,8 @@ export const POST = handler(async ({ req }) => {
   const fails = await sql<{ c: number }[]>`select count(*)::int c from audit_logs
     where action = 'auth.login_failed' and detail->>'email' = ${i.email} and created_at > now() - interval '15 minutes'`;
   if (fails[0].c >= 10) throw new HttpError(429, 'too_many', '로그인 시도가 너무 많습니다. 15분 후 다시 시도하세요.');
-  const [u] = await sql<{ id: string; status: string; password_hash: string | null; name: string; role: string; totp_enabled_at: Date | null; signup_pending: boolean; tstatus: string }[]>`
-    select u.id, u.status, u.password_hash, u.name, u.role, u.totp_enabled_at, u.signup_pending, t.status as tstatus
+  const [u] = await sql<{ id: string; status: string; password_hash: string | null; name: string; role: string; totp_enabled_at: Date | null; signup_pending: boolean; tstatus: string; tenant: string; platform_admin: boolean; capture_block: boolean | null }[]>`
+    select u.id, u.status, u.password_hash, u.name, u.role, u.totp_enabled_at, u.signup_pending, t.status as tstatus, u.tenant, coalesce(u.platform_admin, false) as platform_admin, t.capture_block
     from users u join tenants t on t.id = u.tenant where lower(u.email) = ${i.email}`;
   const ok = u ? await verifyPassword(i.password, u.password_hash) : false;
   if (!u || !ok) {
@@ -39,6 +40,11 @@ export const POST = handler(async ({ req }) => {
   if (u.tstatus !== 'active') {
     await audit(sql, u.id, 'auth.login_blocked', 'user', u.id, { tenant: u.tstatus }, ip);
     throw new HttpError(403, 'tenant_blocked', '사용이 중지된 회사(공간)입니다. 문의: 워크인 운영팀');
+  }
+  // #626 자동화(봇·헤드리스·스크립트) 접속 거부: 외부 고객사 계정만(우리 회사·체험·슈퍼관리자·CAPTURE_BLOCK=0/noauto 는 그대로). 위장 UA 는 못 잡는다
+  if (automatedUserAgent(req.headers.get('user-agent')) && capturePolicy({ tenant: u.tenant, override: u.capture_block, email: i.email, platformAdmin: u.platform_admin }).automation) {
+    await audit(sql, u.id, 'auth.login_blocked', 'user', u.id, { automation: true }, ip);
+    throw new HttpError(401, 'automation_blocked', '자동화된 접속은 쓸 수 없습니다. 브라우저나 워크인 앱으로 로그인해 주세요.');
   }
   // V12 3번: 2단계 인증을 켠 사람은 10분짜리 "코드 대기" 세션 → /api/auth/2fa/verify 로 확인해야 로그인 완료
   if (u.totp_enabled_at) {

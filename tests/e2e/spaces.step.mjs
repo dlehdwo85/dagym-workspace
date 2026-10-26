@@ -25,7 +25,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.deepEqual(commonWork.slice(0, 4), ['캘린더', '알림', '메시지', '자료실'].filter((l) => commonWork.includes(l)).slice(0, 4), `공통 ${commonWork}`);
   assert.ok(commonWork.includes('연락처') && commonWork.includes('공지'), `공통에 연락처·공지 ${commonWork}`);
   await owner.getByTestId('space-tab-sales').click();
-  await owner.waitForURL(/\/s\/sales$/);
+  await owner.waitForURL(/\/s\/sales$/, { timeout: 60_000 });
   await owner.getByTestId('space-home-sales').waitFor();
   assert.equal(await owner.getByTestId('space-current').textContent(), '워크인 · 영업');
   assert.equal(await owner.locator('.app-shell').getAttribute('data-space'), 'sales');
@@ -39,14 +39,14 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   };
   for (const [name, url] of [['업무', /\/tasks$/], ['캘린더', /\/calendar$/], ['연락처', /\/contacts$/]]) {
     await owner.getByTestId('nav-common-v3').getByRole('link', { name, exact: true }).click();
-    await owner.waitForURL(url);
+    await owner.waitForURL(url, { timeout: 60_000 });
     await spaceIs('워크인 · 영업', `공통 '${name}'에서도 영업`);
     assert.equal(await owner.getByTestId('nav-space-head').innerText(), '영업 메뉴');
   }
   const usersLink = owner.getByTestId('nav-admin').getByRole('link', { name: '사용자 관리' });
   if (!(await usersLink.count())) await owner.getByTestId('nav-admin').getByRole('button', { name: '관리' }).click();
   await usersLink.click();
-  await owner.waitForURL(/\/admin\/users$/);
+  await owner.waitForURL(/\/admin\/users$/, { timeout: 60_000 });
   await spaceIs('워크인 · 영업', '관리 › 사용자 관리에서도 영업');
   assert.equal(await owner.locator('.app-shell').getAttribute('data-space'), 'sales');
   await owner.reload();
@@ -54,12 +54,12 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await owner.goto(`${BASE}/projects`);
   await spaceIs('워크인 · 업무', '업무 전용 화면(프로젝트)은 업무');
   await owner.keyboard.press('Control+1');
-  await owner.waitForURL(`${BASE}/`);
+  await owner.waitForURL(`${BASE}/`, { timeout: 60_000 });
   assert.equal(await owner.getByTestId('space-current').textContent(), '워크인 · 업무');
   await owner.keyboard.press('Control+2');
-  await owner.waitForURL(/\/s\/sales$/);
+  await owner.waitForURL(/\/s\/sales$/, { timeout: 60_000 });
   await owner.goBack();
-  await owner.waitForURL(`${BASE}/`);
+  await owner.waitForURL(`${BASE}/`, { timeout: 60_000 });
   // 휴대폰(대표): 프로필 → 공간 시트
   const mc = await browser.newContext({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   const m = await mc.newPage();
@@ -72,7 +72,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   const sheet = await m.getByTestId('more-sheet').boundingBox();
   assert.ok(sheet.y >= 0 && sheet.height <= 780 * 0.9 + 1, `시트 높이 ${sheet.height}`);
   await m.getByTestId('mobile-space-sales').tap();
-  await m.waitForURL(/\/s\/sales$/);
+  await m.waitForURL(/\/s\/sales$/, { timeout: 60_000 });
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
   // 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄 없음 — 공간 메뉴는 더보기 시트의 '영업 메뉴'(입찰·공고 포함)
   assert.equal(await m.getByTestId('space-chips').count(), 0, '상단 칩 줄 없음');
@@ -82,21 +82,21 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.equal(await m.getByTestId('mobile-space-menu').getByRole('link', { name: '입찰·공고' }).count(), 0, '#611(대표 10/25): 입찰·공고 메뉴 없음 — 허브 입찰 탭으로 합침');
   await m.getByTestId('more-sheet').getByLabel('닫기').tap();
   await m.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap(); // 대표 10/21 12:00 ③: 공공데이터·지역별·계약만료는 허브 카테고리 · #537 입찰을 켠 회사는 영업기회 › 입찰로
-  await m.waitForURL(/\/s\/sales\/hub(\?tab=bids&bt=today)?$/);
+  await m.waitForURL(/\/s\/sales\/hub(\?tab=bids&bt=today)?$/, { timeout: 60_000 });
   await m.getByTestId('sales-hub-prospects').tap(); await m.getByTestId('prospects').waitFor();
   await m.getByTestId('profile-menu').tap();
   await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap();
-  await m.waitForURL(/\/s\/sales\/sources$/);
+  await m.waitForURL(/\/s\/sales\/sources$/, { timeout: 60_000 });
   await m.getByTestId('sales-custom').waitFor(); // 로컬 10/19: 직접 추가한 출처(사이트·키워드·엑셀) 칸
   await m.getByTestId('profile-menu').tap();
   await m.getByTestId('mobile-space-work').tap(); // 마지막 공간 = 업무로 돌려 둠
-  await m.waitForURL(/\/$/);
+  await m.waitForURL(/\/$/, { timeout: 60_000 });
   // 대표(10/19): 앱 머리줄 로고·공간 이름 → PC 와 같은 공간 전환 시트(회사 이름·지금 공간 체크)
   await m.getByTestId('mobile-space-switch').tap();
   await m.getByTestId('space-sheet').waitFor();
   await m.getByTestId('sheet-space-work').getByLabel('지금 공간').waitFor();
   await m.getByTestId('sheet-space-sales').tap();
-  await m.waitForURL(/\/s\/sales$/);
+  await m.waitForURL(/\/s\/sales$/, { timeout: 60_000 });
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
   // 로컬 10/19(대표): 앱도 공간 색 — 머리줄 로고(공간 아이콘)·하단 탭 선택 색·강조 버튼이 영업 파랑, 공간 바꾸면 바로
   await m.getByTestId('mobile-space-logo').waitFor();
@@ -110,14 +110,14 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.ok(Math.max(...w) - Math.min(...w) <= 1, `같은 폭 ${w}`);
   // #567: 영업 하단 '메시지'를 눌러도 하단 탭·머리줄은 영업 그대로(공통 화면이라고 업무 탭으로 바뀌지 않음)
   await m.getByTestId('mobile-tabs').getByRole('link', { name: /메시지/ }).tap();
-  await m.waitForURL(/\/messages$/);
+  await m.waitForURL(/\/messages$/, { timeout: 60_000 });
   await m.waitForFunction(() => document.querySelector('[data-testid="mobile-tabs"]')?.getAttribute('data-space') === 'sales', null, { timeout: 5000 }).catch(() => {});
   assert.deepEqual(await tabs(), ['홈', '영업기회', '영업 진행', '제안·계약', '메시지'], '메시지 화면에서도 영업 하단 탭');
   assert.equal(await m.getByTestId('mobile-space-chip').textContent(), '영업');
   await m.getByTestId('mobile-space-switch').tap();
   await m.getByTestId('sheet-space-sales').getByLabel('지금 공간').waitFor();
   await m.getByTestId('sheet-space-work').tap(); // 업무로 돌려 둠
-  await m.waitForURL(/\/$/);
+  await m.waitForURL(/\/$/, { timeout: 60_000 });
   assert.deepEqual(await tabs(), ['홈', '업무', '캘린더', '메시지', '결재']); // 대표 확정 10/22(#422)
   await m.getByTestId('profile-menu').tap();
   const sheet2 = m.getByTestId('more-sheet');

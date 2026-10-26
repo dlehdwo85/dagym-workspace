@@ -8,7 +8,7 @@ import { PortalApplyLink, portalService } from './PortalApply';
 
 type Src = { label: string; ok: boolean; calls: number; received: number; kept: number; total?: number; keys?: string[]; error?: string; note?: string; sent?: string; head?: string };
 type Run = { id: number; slug: string; trigger: string; started_at: string; finished_at: string | null; status: string; inserted: number; updated: number; unchanged: number; errors: number; summary: string | null; error_log: string | null; detail?: { sources?: Record<string, Src> } | null };
-export type CollectorAlert = { slug: string; source: string | null; label: string; lastOkAt: string | null; failStreak: number; reason: string; error: string | null };
+export type CollectorAlert = { slug: string; source: string | null; label: string; lastOkAt: string | null; failStreak: number; reason: string; error: string | null; todo: string; action: string; service: string | null; link: string | null };
 type C = { slug: string; label: string; hourKst: number; againKst?: number | number[] | null; hours?: number[]; source: string | null; bid: boolean; support?: boolean; needs: { key: string; present: boolean }[]; globalEnabled: boolean; enabled: boolean; lastRunAt: string | null; lastStatus: string | null; last: Run | null;
   /** #602 고객사에게만: 연결 상태 3가지 + 방법(키 이름·원천 주소·오류 원인 대신) */ state?: 'connected' | 'disconnected' | 'apply_needed' | 'off' | null; how?: string | null };
 type Data = { full?: boolean; canEdit: boolean; platformAdmin: boolean; counts: Record<string, number>; collectors: C[]; runs: Run[]; alerts?: CollectorAlert[] };
@@ -148,7 +148,14 @@ export function CollectorAlerts({ alerts, link }: { alerts: CollectorAlert[]; li
   return (
     <div className="mb-3 rounded-input border border-red-300 bg-red-50 p-3 text-sm text-red-900" role="alert" data-testid="sales-collector-alerts">
       <p className="font-bold">영업 DB 수집 누락 위험 {alerts.length}곳 — 공고를 놓칠 수 있습니다</p>
-      <ul className="mt-1 space-y-0.5 text-xs">{alerts.slice(0, 8).map((a) => <li key={`${a.slug}:${a.source ?? ''}`} data-testid="sales-collector-alert"><b>{a.label}</b>: {a.reason}{a.lastOkAt ? ` (마지막 성공 ${fmtDateTime(a.lastOkAt)})` : ''}{a.error ? ` — ${a.error}` : ''}</li>)}</ul>
+      <ul className="mt-1 space-y-0.5 text-xs">{alerts.slice(0, 8).map((a) => <li key={`${a.slug}:${a.source ?? ''}`} data-testid="sales-collector-alert" data-action={a.action}>
+        {/* #629: 첫 줄은 '할 일' 문장 + [신청 방법]. 연속 실패 수·마지막 성공·오류 원문(영문 코드·HTTP)은 접힘 '자세히' — 고객사에게는 서버가 원문을 아예 안 보낸다(#602) */}
+        <b>{a.label}</b> — {a.todo}
+        {a.link && <>{' '}<a href={a.link} target="_blank" rel="noreferrer" className="font-semibold underline" data-testid="sales-collector-alert-link">[신청 방법]</a></>}
+        {a.error || a.todo !== a.reason
+          ? <>{' '}<details className="inline"><summary className="inline cursor-pointer list-none text-red-700/80 underline decoration-dotted" data-testid="sales-collector-alert-more">자세히</summary><span className="ml-1 text-red-800/90" data-testid="sales-collector-alert-detail">{a.reason}{a.lastOkAt ? ` · 마지막 성공 ${fmtDateTime(a.lastOkAt)}` : ''}{a.error ? ` · ${a.error}` : ''}</span></details></>
+          : a.lastOkAt ? ` (마지막 성공 ${fmtDateTime(a.lastOkAt)})` : ''}
+      </li>)}</ul>
       {link && <Link href="/s/sales/sources#collectors" className="mt-1 inline-block text-xs font-semibold underline">수집기 보기 · [지금 수집] →</Link>}
     </div>
   );

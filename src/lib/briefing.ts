@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon';
+import { calendar } from './calendarGate';
 import { db, type Sql } from './db';
 import { notify } from './notifications';
 import { occurrences } from './recurrence';
@@ -101,7 +102,7 @@ export async function buildPersonalReport(userId: string, weekStart: string) {
 /** 금요일 16:00(서울) 이후 첫 정기 실행에서 이번 주 초안을 한 번 만든다 (이미 있으면 그대로) */
 export async function personalReportJob(now = new Date()) {
   const local = DateTime.fromJSDate(now).setZone(TZ);
-  if (local.weekday !== 5 || local.toFormat('HH:mm') < '16:00') return { created: 0 };
+  if (!calendar(local.weekday === 5 && local.toFormat('HH:mm') >= '16:00')) return { created: 0 }; // 168차: CALENDAR_JOBS(시험 서버 off)
   return { created: await ensureDrafts(weekRangeSeoul(now).start) };
 }
 export async function ensureDrafts(weekStart: string, onlyUser?: string) {

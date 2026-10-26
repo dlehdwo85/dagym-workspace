@@ -10,6 +10,7 @@ import { aiEnabled } from '@/lib/ai/provider';
 import { menuLevels } from '@/lib/menuPerms';
 import { db } from '@/lib/db';
 import { tenantOf } from '@/lib/types';
+import { capturePolicy } from '@/lib/capturePolicy';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,12 +23,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (sp && (sp === 'work' || !(spaces as string[]).includes(sp))) notFound();
   const dir = await directory(user);
   const menus = await menuLevels(user); // V13 메뉴 권한
-  const [t] = await db()<{ name: string; kind: string; owner_user_id: string | null; onboarded_at: Date | null; sales_template: string | null; industries: string[] | null; industry: string | null; role_badge: string | null }[]>`select name, kind, owner_user_id, onboarded_at, sales_template, industries, industry, role_badge from tenants where id = ${tenantOf(user)}`;
+  const [t] = await db()<{ name: string; kind: string; owner_user_id: string | null; onboarded_at: Date | null; sales_template: string | null; industries: string[] | null; industry: string | null; role_badge: string | null; capture_block: boolean | null }[]>`select name, kind, owner_user_id, onboarded_at, sales_template, industries, industry, role_badge, capture_block from tenants where id = ${tenantOf(user)}`;
   // #408 업종 중립 문구: 영업 화면 용어는 회사 업종 템플릿(없으면 업종으로 추정) — 코드에 우리 회사 용어를 박지 않음
   const { salesTermsFor, tenantIndustries } = await import('@/lib/sales/terms');
   const { auto: _auto, ...salesTerms } = salesTermsFor(t?.sales_template, tenantIndustries(t));
   const trial = ['default', 'demo'].includes(tenantOf(user)) ? null : await (await import('@/lib/plans')).trialInfo(tenantOf(user)).catch(() => null);
   const billingLock = user.support ? null : await (await import('@/lib/plans')).billingLock(tenantOf(user)).catch(() => null); // V28 B2 미납
+  // #626 캡처 차단 정책(서버 판정 한 번): 외부 고객사 켬 · 우리 회사/체험/슈퍼관리자 끔 · 회사별 스위치
+  const cap = capturePolicy({ tenant: tenantOf(user), override: t?.capture_block, email: user.email, platformAdmin: !!user.platformAdmin });
   const session = {
     user: { id: user.id, name: user.name, email: user.email, role: user.role, platformAdmin: !!user.platformAdmin },
     support: user.support ?? null, // V28-3 지원 모드 빨간 띠
@@ -42,7 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     spaces, // V41 공간
     tours: { seen: await (await import('@/lib/tours')).seenTours(user.id).catch(() => []), auto: (await import('@/lib/tours')).toursAuto(user) }, // #77 처음 사용 안내
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)
-    tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)),
+    tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), captureBlock: cap.block, captureAutomation: cap.automation, inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)),
       trial: trial ? { trial: trial.trial, readOnly: trial.readOnly, daysLeft: trial.daysLeft } : null, billingLock: billingLock as 'read_only' | 'suspended' | null },
   };
   return <><LaunchIntro />{/* #443 실행 애니메이션(세션당 1번·동작 줄이기면 안 함) */}<AppShell session={session}><Suspense>{children}</Suspense></AppShell></>;

@@ -111,6 +111,7 @@ import { digestMail } from './digestMail.step.mjs';
 import { app113 } from './app113.step.mjs';
 import { cal592 } from './cal592.step.mjs';
 import { customerSim } from './customerSim.step.mjs';
+import { captureGuard } from './captureGuard.step.mjs';
 
 const SHOTS = 'docs/screens';
 mkdirSync(SHOTS, { recursive: true });
@@ -2856,6 +2857,12 @@ await step('#599 새 고객사 시뮬레이션(대표 10/25 저녁·로컬 16:50
   srv.proc.kill('SIGTERM'); await new Promise((r) => setTimeout(r, 1000));
   srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SIGNUP_IP_PER_DAY: '50' });
   await customerSim({ browser, BASE, SHOTS, sql });
+});
+
+await step('#626 캡처 차단(대표 10/25 20:05): 외부 고객사 로그인 → 워터마크(회사·이름·시각)·인쇄 차단(html.capture-block)·Ctrl+P 안내·창 이탈 가림·자동화 판정(시험 서버는 판정만) → 사건 기록 / 우리 회사(내부)는 워터마크 없음', async () => {
+  srv.proc.kill('SIGTERM'); await new Promise((r) => setTimeout(r, 1000));
+  srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SIGNUP_IP_PER_DAY: '50' });
+  await captureGuard({ browser, BASE, SHOTS, sql, Client, owner });
 });
 
 await browser.close();

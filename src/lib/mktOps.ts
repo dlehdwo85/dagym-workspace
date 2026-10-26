@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { calendar } from './calendarGate';
 import { z } from 'zod';
 import { db } from './db';
 import { isAdmin } from './access';
@@ -555,7 +556,7 @@ export async function opsTick(tenant: string, now = new Date()) {
   out.planner = await T.plannerTick(tenant, now).catch((e) => ({ error: String(e?.message ?? e) }));
   if (h < 9 || (h >= 22 && !night)) return { ...out, skipped: 'hour' };
   const sql = db(); const dow = new Date(`${ymd(now)}T00:00:00Z`).getUTCDay(); const day = Number(ymd(now).slice(8));
-  if (dow === 1) {
+  if (calendar(dow === 1)) { // 168차: CALENDAR_JOBS(시험 서버 off) — 월요일·25일 가지는 달력 게이트
     if (await T.roleOn(tenant, 'reporter')) { // #499-7 보고 담당(기본 켬 — 끄면 월요일 분석·방향 카드와 주간 운영 제안을 건너뜀)
       const [recent] = await sql<{ n: number }[]>`select count(*)::int n from mkt_proposals where tenant = ${tenant} and source <> 'user' and created_at >= now() - interval '6 days'`;
       if (!recent.n) out.proposals = await propose(tenant, ['analysis', 'direction'], null).catch((e) => ({ error: String(e?.message ?? e) }));
@@ -571,7 +572,7 @@ export async function opsTick(tenant: string, now = new Date()) {
       });
     } else out.adrefs = { skipped: 'off' };
   }
-  if (day >= 25) {
+  if (calendar(day >= 25)) {
     const next = monthKst(now, 1);
     const [ex] = await sql<{ id: string }[]>`select id from mkt_ad_budgets where tenant = ${tenant} and month = ${next}`;
     const [acc] = await sql<{ n: number }[]>`select count(*)::int n from mkt_ad_accounts where tenant = ${tenant} and status <> 'disconnected'`;

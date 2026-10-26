@@ -12,6 +12,7 @@ import { AlarmBar, type AlarmItem } from './AlarmBar';
 import { BioLock } from './BioLock';
 import { MessengerDock } from './MessengerDock';
 import { VersionWatch } from './VersionWatch';
+import { CaptureGuard } from './CaptureGuard';
 import { Onboarding } from './Onboarding';
 import { TourHost, restartTours } from './Tour';
 import { usePathname, useRouter } from 'next/navigation';
@@ -488,6 +489,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} name={aiName(space)} /></Suspense>}
         <MessengerDock aiOpen={aiDock} />
         <VersionWatch />
+        {/* #626 캡처 차단(외부 고객사만 켜짐): 워터마크·인쇄 차단·창 이탈 가림·자동화 차단, 앱은 FLAG_SECURE */}
+        <CaptureGuard on={!!session.tenant?.captureBlock} automation={!!session.tenant?.captureAutomation} company={session.tenant?.name ?? '워크인'} userName={session.user.name} />
         {/* V28-3 지원 모드: 빨간 띠(읽기 전용·남은 시간) + 끝내기 */}
         {session.support && (
           <div className="fixed inset-x-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-2 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white" data-testid="support-banner">

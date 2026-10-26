@@ -1435,7 +1435,8 @@ export const sampleInput = z.object({ brandIds: z.array(zUuid).max(10).optional(
 export async function sampleSet(u: SessionUser, i: z.infer<typeof sampleInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const sql = db(); const t = tenantOf(u);
-  const brands = await sql<{ id: string; name: string; test_mode: boolean | null }[]>`select id, name, test_mode from mkt_brands where tenant = ${t} ${i.brandIds?.length ? sql`and id = any(${i.brandIds}::uuid[])` : sql``} order by name`;
+  // 로컬 10/26(160차 확인): 브랜드를 고르지 않으면 시험 브랜드([시험], test_mode)는 세트에서 뺀다 — 대표가 볼 시안 세트에 시험 글이 섞이지 않게. 고른 브랜드(brandIds)는 그대로
+  const brands = await sql<{ id: string; name: string; test_mode: boolean | null }[]>`select id, name, test_mode from mkt_brands where tenant = ${t} ${i.brandIds?.length ? sql`and id = any(${i.brandIds}::uuid[])` : sql`and coalesce(test_mode, false) = false`} order by name`;
   const blogBrands = i.blogBrandIds?.length ? await sql<{ id: string; name: string; test_mode: boolean | null }[]>`select id, name, test_mode from mkt_brands where tenant = ${t} and id = any(${i.blogBrandIds}::uuid[]) order by name` : [];
   if (!brands.length && !blogBrands.length) throw badRequest('브랜드가 없습니다 — 브랜드 키트에서 브랜드를 먼저 만들어 주세요');
   const day = ymd(new Date(Date.now() + DAY)); const md = `${Number(day.slice(5, 7))}/${Number(day.slice(8))}`;

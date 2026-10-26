@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { calendar } from './calendarGate';
 import { z } from 'zod';
 import { db } from './db';
 import { isAdmin } from './access';
@@ -265,15 +266,15 @@ export async function goalTick(tenant: string, now = new Date()) {
   if (h < 9 || (h >= 22 && !night)) return { skipped: 'hour' };
   const out: Record<string, unknown> = {};
   const month = monthKst(now), next = monthKst(now, 1), prev = monthKst(now, -1);
-  if (dayKst(now) >= 25) {
+  if (calendar(dayKst(now) >= 25)) { // 168차: CALENDAR_JOBS(시험 서버 off) — 25일·월요일·1~3일 가지는 달력 게이트
     const [ex] = await sql<{ id: string }[]>`select id from mkt_goals where tenant = ${tenant} and month = ${next} and brand_id is null`;
     if (!ex) out.draft = (await import('./later')).runLater('mktGoalDraft', async () => ({ tenant, month: next, ...(await draftGoal(tenant, next, null, null)) })); // 글 모델(최상)은 30~60초 — 응답 뒤에
   }
-  if (dowKst(now) === 1) {
+  if (calendar(dowKst(now) === 1)) {
     const goals = await sql<any[]>`select id, weekly, reviews from mkt_goals where tenant = ${tenant} and month in (${month}, ${prev}) and status = 'approved'`;
     for (const g of goals) { const today = ymd(now); const last = [...(g.weekly ?? [])].reverse().find((w: any) => w.to < today); if (last && !(g.reviews ?? []).some((r: any) => r.week === last.week)) out.review = await reviewWeek(tenant, g.id, last.week).catch((e) => ({ error: String(e?.message ?? e) })); }
   }
-  if (dayKst(now) <= 3) {
+  if (calendar(dayKst(now) <= 3)) {
     const goals = await sql<{ id: string }[]>`select id from mkt_goals where tenant = ${tenant} and month = ${prev} and status = 'approved'`;
     for (const g of goals) out.close = await closeGoal(tenant, g.id).catch((e) => ({ error: String(e?.message ?? e) }));
   }

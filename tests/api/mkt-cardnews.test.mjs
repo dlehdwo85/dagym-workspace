@@ -182,8 +182,10 @@ test('시안 세트 API: 브랜드별 내일 피드·스토리 + 블로그 1건�
   const bodies = ['헬스장 겨울 준비 안내입니다.\n난방을 새로 점검했습니다.\n따뜻하게 운동하세요.', '겨울에도 운동하시나요?\n스티커 제안: 질문 — 겨울 운동 고민', '■ 겨울 운동\n몸을 먼저 데우세요.\n\n■ 복장\n얇게 여러 겹 입으세요.\n\n■ 시간\n저녁이 덜 춥습니다.'];
   await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '겨울 준비', body: bodies[0], brief: '', why: '', hooks: [], keyword: '', card: CARD }), say({ title: '겨울 운동', body: bodies[1], brief: '', why: '', hooks: [], keyword: '', card: CARD }),
     say({ title: '송도 헬스장 겨울 운동', body: bodies[2], brief: '', why: '', hooks: [], keyword: '송도 헬스장', card: CARD, persona: '겨울에 운동 시작하는 사람', subKeywords: ['복장'] })] });
+  await ctx.owner.ok('POST', '/api/marketing/auto/brands', { name: '세트제외 시험', testMode: true }); // 로컬 10/26: 시험 브랜드는 브랜드를 고르지 않은 세트에서 빠짐
   const r = await ctx.owner.ok('POST', '/api/marketing/auto/sample', { blogBrandIds: [P.brand] });
   assert.deepEqual(r.contents.map((c) => c.kind).sort(), ['blog', 'feed', 'story']);
+  assert.ok(r.contents.every((c) => c.brand === '카드브랜드'), `시험 브랜드 제외: ${JSON.stringify(r.contents.map((c) => c.brand))}`);
   assert.ok((await sql`select 1 from audit_logs where action = 'mkt.sample_set'`).length);
   const ids = r.contents.map((c) => c.id);
   let rows;

@@ -7,6 +7,7 @@ import { audit, logError } from '../../log';
 import { tenantOf, type SessionUser } from '../../types';
 import { CUSTOMER_COPY, INTERNAL_TENANT, collectorState, seesInternals } from '../../customerScope';
 import { completeRun, mergeNoticeDuplicates, startRun } from './store';
+import { collectorTodo, type CollectorTodo } from './todo';
 import type { Collector, CollectorCtx, CollectorResult } from './types';
 import { kaptBidNotices, kaptBidResults, kaptSaSun, operatingFromKapt } from './kapt';
 import { g2bBidNotices, g2bPrespecAwards } from './g2b';
@@ -67,13 +68,13 @@ export async function collectorsTick(opt: { now?: Date } = {}) {
  * #522 누락 점검(로컬 10/24 '실패가 3일째 조용히 지나갔다'): 켜진 수집기마다(원천이 여럿이면 원천마다) 마지막 성공·연속 실패.
  * 마지막 성공이 25시간(하루 + 1시간 여유) 넘었거나 2회 연속 실패면 문제 → 영업 홈 빨간 띠 + 하루 한 번 관리자 알림. 한 번도 안 돈 수집기는 보지 않음.
  */
-export type CollectorAlert = { slug: string; source: string | null; label: string; lastOkAt: string | null; failStreak: number; reason: string; error: string | null };
+export type CollectorAlert = { slug: string; source: string | null; label: string; lastOkAt: string | null; failStreak: number; reason: string; error: string | null } & CollectorTodo;
 export async function collectorAlerts(now = Date.now()): Promise<CollectorAlert[]> {
   const sql = db(); const LIMIT = 25 * 3600e3;
   const off = new Set((await sql<{ slug: string }[]>`select slug from sales_collector_state where not enabled`).map((r) => r.slug));
-  type RunRow = { slug: string; status: string; started_at: Date; detail: any; error_log: string | null };
-  const runs = await sql<RunRow[]>`select slug, status, started_at, detail, error_log from (
-      select r.slug, r.status, r.started_at, r.detail, r.error_log, row_number() over (partition by r.slug order by r.started_at desc) as n from sales_collector_runs r
+  type RunRow = { slug: string; status: string; started_at: Date; detail: any; error_log: string | null; summary: string | null };
+  const runs = await sql<RunRow[]>`select slug, status, started_at, detail, error_log, summary from (
+      select r.slug, r.status, r.started_at, r.detail, r.error_log, r.summary, row_number() over (partition by r.slug order by r.started_at desc) as n from sales_collector_runs r
       where r.status in ('success', 'partial', 'failed') and r.started_at > now() - interval '14 days') x where n <= 12 order by slug, started_at desc`;
   const by = new Map<string, RunRow[]>(); for (const r of runs) { if (!by.has(r.slug)) by.set(r.slug, []); by.get(r.slug)!.push(r); }
   const out: CollectorAlert[] = [];
@@ -84,12 +85,16 @@ export async function collectorAlerts(now = Date.now()): Promise<CollectorAlert[
       ? keys.map((k) => ({ source: k as string | null, label: keys.length > 1 ? `${c.label} › ${rs.find((r) => r.detail?.sources?.[k])!.detail.sources[k].label ?? k}` : c.label, ok: (r: RunRow) => (r.detail?.sources?.[k] ? !!r.detail.sources[k].ok : null), err: (r: RunRow) => (r.detail?.sources?.[k]?.error as string | undefined) ?? null }))
       : [{ source: null as string | null, label: c.label, ok: (r: RunRow) => r.status !== 'failed', err: (r: RunRow) => r.error_log }];
     for (const u of units) {
-      let streak = 0, lastOk: Date | null = null, err: string | null = null, oldest: Date | null = null;
-      for (const r of rs) { const ok = u.ok(r); if (ok === null) continue; oldest = new Date(r.started_at); if (ok) { lastOk = oldest; break; } streak++; err ??= u.err(r); }
+      let streak = 0, lastOk: Date | null = null, err: string | null = null, hint: string | null = null, oldest: Date | null = null;
+      for (const r of rs) { const ok = u.ok(r); if (ok === null) continue; oldest = new Date(r.started_at); if (ok) { lastOk = oldest; break; } streak++; err ??= u.err(r); hint ??= [r.summary, r.error_log].filter(Boolean).join(' ') || null; }
       if (!oldest) continue;
       const stale = now - (lastOk ?? oldest).getTime() > LIMIT;
-      if (streak >= 2 || stale) out.push({ slug: c.slug, source: u.source, label: u.label, lastOkAt: lastOk?.toISOString() ?? null, failStreak: streak, error: err?.split('\n')[0].slice(0, 160) ?? null,
-        reason: streak >= 2 ? `${streak}회 연속 실패` : lastOk ? `마지막 성공 ${Math.floor((now - lastOk.getTime()) / 3600e3)}시간 전` : '최근 성공 없음' });
+      if (streak >= 2 || stale) {
+        const reason = streak >= 2 ? `${streak}회 연속 실패` : lastOk ? `마지막 성공 ${Math.floor((now - lastOk.getTime()) / 3600e3)}시간 전` : '최근 성공 없음';
+        const error = err?.split('\n')[0].slice(0, 160) ?? null;
+        // #629: 첫 줄은 '할 일' 문장(todo) — 오류 원문·영문 코드·HTTP 코드는 error 로 따로(화면에서 접힘 '자세히'). 서비스 번호는 원문에 없으면 실행 요약·오류 기록(hint)에서
+        out.push({ slug: c.slug, source: u.source, label: u.label, lastOkAt: lastOk?.toISOString() ?? null, failStreak: streak, error, reason, ...collectorTodo({ slug: c.slug, source: u.source, error, hint, reason }) });
+      }
     }
   }
   return out;
@@ -105,7 +110,7 @@ export async function collectorAlertTick(now = new Date()) {
       and ((t.spaces @> array['sales']::text[] and u.role in ('owner', 'admin')) or coalesce(u.platform_admin, false))`).filter((p) => p.mine || superAdmin(p.email, p.pa));
   if (!people.length) return { alerts: alerts.length, notified: 0 };
   const title = `영업 DB 수집 누락 위험 ${alerts.length}곳 — ${alerts.slice(0, 2).map((a) => a.label).join(' · ')}${alerts.length > 2 ? ' 외' : ''}`;
-  const body = alerts.slice(0, 6).map((a) => `${a.label}: ${a.reason}${a.error ? ` (${a.error.slice(0, 70)})` : ''}`).join('\n');
+  const body = alerts.slice(0, 6).map((a) => `${a.label} — ${a.todo} (${a.reason})`).join('\n'); // #629: 알림도 '할 일' 문장 — 원문·영문 코드는 화면의 '자세히'에서
   const { notify } = await import('../../notifications');
   // #602: 원천 이름·HTTP 코드·연속 실패 수는 슈퍼관리자·내부 테넌트에게만. 고객사 관리자에게는 '오늘 새 공고를 받지 못했습니다' 한 줄
   const seesAll = (p: { email: string; pa: boolean; tenant: string }) => superAdmin(p.email, p.pa) || p.tenant === INTERNAL_TENANT;
@@ -138,7 +143,7 @@ export async function collectorsView(u: SessionUser) {
     const state = collectorState({ globalEnabled: base.globalEnabled, missingKeys: missing, lastStatus: base.lastStatus });
     return { ...base, source: null, needs: [] as typeof needs, state, how: state === 'apply_needed' ? (/watch/.test(c.slug) ? CUSTOMER_COPY.howWatch : CUSTOMER_COPY.howPublicData) : null, last: l ? customerRun(l) : null };
   });
-  return { full, canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, counts, alerts: full ? alerts : alerts.map((a) => ({ ...a, reason: CUSTOMER_COPY.todayMissed, error: null })), collectors, runs: full ? runs : [] };
+  return { full, canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, counts, alerts: full ? alerts : alerts.map((a) => ({ ...a, reason: CUSTOMER_COPY.todayMissed, error: null, todo: CUSTOMER_COPY.todayMissed, action: 'check' as const, service: null, link: null })), collectors, runs: full ? runs : [] };
 }
 /** #602 고객용 실행 결과 한 줄: '받았습니다 n건' 또는 '못 받았습니다' — 오류 원문·원천별 상세·보낸 주소는 빠짐 */
 function customerRun(r: { status: string; started_at: Date; finished_at: Date | null; inserted: number; updated: number; unchanged: number }) {

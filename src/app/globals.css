@@ -78,6 +78,11 @@ html.native-android { --sab: max(var(--safe-area-inset-bottom, env(safe-area-ins
   .print-area, .print-area * { visibility: visible !important; }
   .print-area { position: fixed; left: 50%; top: 20mm; transform: translateX(-50%); border: none !important; width: 150mm; max-width: none; }
 }
+/* #626 캡처 차단 회사(html.capture-block, 외부 고객사): 인쇄하면 본문 대신 안내 한 줄만 — QR 인쇄 영역도 숨김 */
+@media print {
+  html.capture-block body * { visibility: hidden !important; }
+  html.capture-block #capture-print-notice { visibility: visible !important; display: block !important; position: fixed; left: 20mm; top: 20mm; font-size: 14pt; }
+}
 
 /* 시간 칸 = 1시간 (V4-4). 한 시간 높이를 Google 캘린더처럼 넉넉히(48px) 두어 1시간 일정도 제목이 보이고 누르기 쉽게 */
 .fc .fc-timegrid-slot { height: 3rem; }
