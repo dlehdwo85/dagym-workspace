@@ -795,11 +795,16 @@ function UnscheduledPanel({ onClose, onOpen }: { onClose: () => void; onOpen: (i
 const fmtMinutesShort = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ''}` : `${m}분`);
 
 /** 빈 칸 클릭·끌기 → 작은 빠른 입력 창 (일정 / 업무 탭) */
-function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, calendars, onClose, onMore, onSaved, sheet, onSwitchTask }: {
+function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay: allDay0, calendars, onClose, onMore, onSaved, sheet, onSwitchTask }: {
   onSwitchTask?: () => void; x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean; calendars: any[]; onClose: () => void; onMore: (draft: any) => void; onSaved: () => void; sheet?: boolean;
 }) {
   const [start, setStart] = useState(start0);
   const [end, setEnd] = useState(end0);
+  // #480(대표 10/23): 월 칸(종일)에서 만들 때도 시작·끝 시각을 고를 수 있게 — 기본은 종일, [시간 지정]을 누르면 시각 칸(연결 업무 마감 시각도 따라감)
+  const [allDay, setAllDay] = useState(allDay0);
+  const timeable = allDay0 && (endDate ?? date) === date; // 하루짜리 종일 칸만(여러 날 끌어 고른 칸은 종일 그대로)
+  const setTimed = () => { const n = date === seoulDate(new Date()) ? nextHour() : { start: '09:00', end: '10:00' }; setStart(n.start); setEnd(n.end); setAllDay(false); };
+  const setAllDayBack = () => { setAllDay(true); setStart(undefined); setEnd(undefined); };
   const [priv, setPriv] = useState(false);
   const [rrule, setRrule] = useState<string | null>(null);
   const [alsoTask, setAlsoTask] = useState(false);
@@ -853,7 +858,11 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="제목 추가" aria-label="빠른 입력 제목" enterKeyHint="done"
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); quickForm.current?.requestSubmit(); } }}
           className="w-full border-b-2 border-line pb-1.5 text-lg font-medium placeholder:text-ink-3 focus:border-accent-500 focus:outline-none" />
-        <p className="mt-3 flex items-center gap-2 text-sm text-ink-2"><Clock className="size-4" />{allDay ? when : fmtDateK(date)}</p>
+        <p className="mt-3 flex items-center gap-2 text-sm text-ink-2"><Clock className="size-4" /><span className="min-w-0 flex-1">{allDay ? when : fmtDateK(date)}</span>
+          {timeable && (allDay
+            ? <button type="button" className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs font-medium text-ink-2 hover:bg-slate-50" onClick={setTimed} data-testid="quick-set-time">시간 지정</button>
+            : <button type="button" className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs font-medium text-ink-2 hover:bg-slate-50" onClick={setAllDayBack} data-testid="quick-all-day">종일로</button>)}
+        </p>
         {!allDay && start && end && (endDate ?? date) === date && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="quick-times">
             <TimeSelect label="시작 시각" value={start} onChange={(v) => { setEnd(shiftEnd(start, end, v)); setStart(v); }} />

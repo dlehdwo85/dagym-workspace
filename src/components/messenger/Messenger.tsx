@@ -607,6 +607,13 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
       else { await api(`/api/chat/messages/${m.id}/pin`, { body: { pin: what === 'pin' } }); reload(); }
     } catch (e: any) { toast.error(e.message); }
   }
+  // #479(대표 10/23): 이모지·스티커 창은 바깥을 누르면 닫힘(Esc·고르기 외에도) — 창 안·여는 단추는 그대로
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const h = (e: PointerEvent) => { const t = e.target as Element | null; if (t?.closest('[data-testid="chat-emoji"], [data-testid="chat-emoji-open"]')) return; setEmojiOpen(false); };
+    document.addEventListener('pointerdown', h, true);
+    return () => document.removeEventListener('pointerdown', h, true);
+  }, [emojiOpen]);
   async function react(m: Msg, emoji: string) {
     setMenu(null); setActive(null);
     setMsgs((c) => c.map((x) => {
