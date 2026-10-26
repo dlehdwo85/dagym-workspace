@@ -330,7 +330,7 @@ export function Approvals() {
   const counts = inbox.data?.counts;
   return (
     <div className="space-y-3" data-testid="mkt-approvals">
-      <div className="flex items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>{DAY_LABEL[day] ?? '승인함'}</h1>{DAY_LABEL[day] && <Link href="/s/marketing/approvals" className="text-xs underline" data-testid="mkt-day-clear">승인함 전체</Link>}
+      <div className="flex flex-wrap items-center gap-2"><h1 className="shrink-0 text-xl font-bold" style={{ color: C }}>{DAY_LABEL[day] ?? '승인함'}</h1>{DAY_LABEL[day] && <Link href="/s/marketing/approvals" className="text-xs underline" data-testid="mkt-day-clear">승인함 전체</Link>}
         <span className="ml-auto flex flex-wrap items-center gap-2">{inbox.data && <span className="text-xs text-ink-2" data-testid="mkt-inbox-total">승인할 것 <b className="text-orange-700">{inbox.data.total}건</b></span>}
           {!!(data as any)?.isOwner && <button type="button" onClick={() => setOps(ops === '1' ? '' : '1')} className="text-xs text-ink-3 underline" data-testid="mkt-ops-toggle" title="대표 화면은 [승인]·[수정 요청] 두 단추만 — 다시 그리기·AI 이미지·버전 비교 같은 운영 단추를 보려면 켜세요">{ops === '1' ? '운영 단추 숨기기' : '운영 단추 보기'}</button>}
           <AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContents} compact /><Button onClick={() => setNw(true)} data-testid="mkt-new-open">새 콘텐츠</Button></span></div>
