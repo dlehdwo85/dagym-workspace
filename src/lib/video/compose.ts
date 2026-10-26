@@ -115,7 +115,8 @@ export async function logoPng(logo: Buffer, d: Dim): Promise<Buffer> {
   return S(logo).resize(box, Math.round(box * 0.6), { fit: 'inside', withoutEnlargement: false }).png().toBuffer();
 }
 
-export type ComposeScene = { file: string; seconds: number; line: string; screenPng?: string | null };
+/** start = 원본 파일에서 이 장면이 시작하는 초(187차 ⑦ 한 편짜리 영상을 장면으로 나눠 다시 합성) */
+export type ComposeScene = { file: string; seconds: number; line: string; screenPng?: string | null; start?: number };
 export type ComposeInput = { dir: string; aspect: string; scenes: ComposeScene[]; end: { seconds: number; color: string; headline: string; cta: string; logoPng?: string | null };
   narration: ({ file: string; duration: number } | null)[]; bgm?: { file: string } | null; font: { dir: string; family: string }; out: string };
 
@@ -123,9 +124,14 @@ export type ComposeInput = { dir: string; aspect: string; scenes: ComposeScene[]
 export async function composeVideo(o: ComposeInput): Promise<{ file: string; duration: number; notes: string[] }> {
   const d = dimOf(o.aspect); const notes: string[] = []; const args: string[] = []; const f: string[] = []; let idx = 0;
   const durs: number[] = [];
-  for (const s of o.scenes) { const info = await mediaInfo(join(o.dir, s.file)); durs.push(Math.max(1.2, Math.min(s.seconds, info.duration ?? s.seconds))); }
-  // 장면 입력
-  const sceneIn = o.scenes.map((s) => { args.push('-i', s.file); return idx++; });
+  const infos = new Map<string, Awaited<ReturnType<typeof mediaInfo>>>(); // 같은 원본을 여러 장면이 나눠 쓰면 한 번만 읽음
+  for (const s of o.scenes) {
+    let info = infos.get(s.file); if (!info) { info = await mediaInfo(join(o.dir, s.file)); infos.set(s.file, info); }
+    const st = Math.max(0, s.start ?? 0);
+    durs.push(Math.max(1.2, Math.min(s.seconds, (info.duration ?? st + s.seconds) - st)));
+  }
+  // 장면 입력(원본 중간부터 쓰는 장면은 그 초로 건너뛰어 읽음)
+  const sceneIn = o.scenes.map((s) => { if (s.start && s.start > 0) args.push('-ss', s.start.toFixed(3)); args.push('-i', s.file); return idx++; });
   const devIn = o.scenes.map((s, k) => { if (!s.screenPng) return -1; args.push('-loop', '1', '-framerate', '30', '-t', String(durs[k] + 0.5), '-i', s.screenPng); return idx++; });
   const E = o.end.seconds; const endIn = idx++; args.push('-f', 'lavfi', '-i', `color=c=0x${(/^#?([0-9a-f]{6})$/i.exec(o.end.color)?.[1] ?? '111111')}:s=${d.w}x${d.h}:r=30:d=${E + 0.5}`);
   const logoIn = o.end.logoPng ? (args.push('-loop', '1', '-framerate', '30', '-t', String(E + 0.5), '-i', o.end.logoPng), idx++) : -1;

@@ -189,6 +189,8 @@ export async function actBrief(u: SessionUser, id: string, i: z.infer<typeof bri
   if (!b) throw notFound();
   const mine = b.created_by === u.id;
   if (!mine && !isAdmin(u)) throw forbidden('내 의뢰만 고칠 수 있습니다');
+  // 187차 ⑦ 다시 합성 의뢰는 새로 생성하지 않음 — 프롬프트 다시 쓰기·[생성](크레딧이 드는 생성)을 막고 취소만(다시 하려면 위 상자 [다시 시도])
+  if (b.result?.provider === 'reuse' && i.action !== 'cancel') throw badRequest('기존 영상 다시 합성 의뢰는 고치거나 새로 생성할 수 없습니다 — 제작의뢰실 위 상자에서 [다시 시도]를 눌러 주세요');
   if (i.action === 'prompt') { if (!['queued', 'ready', 'failed'].includes(b.status)) throw badRequest('프롬프트를 다시 쓸 단계가 아닙니다'); return writePrompt(t, id, u.id); }
   if (i.action === 'update') {
     if (!['ready', 'failed'].includes(b.status)) throw badRequest('생성 전에만 고칠 수 있습니다');
