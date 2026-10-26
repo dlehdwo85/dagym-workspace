@@ -218,6 +218,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('nightAssistant', async () => (await import('./mktHome')).nightAssistantTick()); // ⑥ 밤사이 비서(22~06시, 회사 AI 설정에서 켠 범위만 — 지금은 원고 초안)
   await step('mktReport', async () => (await import('./mktReport')).monthlyReportJob()); // 상용화 ⑧ 매월 1일 지난달 마케팅 보고 알림·메일
   await step('awayReturn', async () => (await import('./away')).awayReturnTick()); // #76 부재 끝난 사람에게 '부재 중 알림 n건' 1건
+  await step('mktTrash', async () => (await import('./mktTrash')).purgeTrash()); // 183차 #177 마케팅 콘텐츠 휴지통 30일 뒤 영구 삭제(이 글에만 쓰인 자동 시안 그림은 자료실 휴지통으로)
   await step('purgeAccounts', async () => (await import('./account')).purgeDeletedAccounts()); // #279 탈퇴 30일 뒤 개인정보 잔여 정리
   await step('opsPii', async () => (await import('./opsImport')).purgeOpsPii()); // V41 4-2 가져온 전화 기록 보관 기간
   await step('aiRetention', async () => ({ purged: await (await import('./ai/threads')).purgeOldThreads() })); // V14 2번 AI 대화 보관 기간

@@ -7,6 +7,7 @@ import { notify } from './notifications';
 import { audit } from './log';
 import { tenantOf, type SessionUser } from './types';
 import { zUuid } from './api';
+import { purgeAt } from './mktTrash';
 
 /** V41 단계 4-2 마케팅 공간 핵심: 콘텐츠·버전·승인함(버전 단위, 승인·수정 요청·보류)·콘텐츠 캘린더·전화 문의 → 영업 업무 */
 export const CHANNELS = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' } as const;
@@ -136,8 +137,9 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   const st = await (await import('./mktAuto')).settingsOf(t);
   const handleOf = await (await import('./mktPublish')).accountLabels(t).catch(() => () => null); // #497 R06 카드 '게시 화면으로 보기' 이름
   const now = Date.now();
+  const trash = q.view === 'approvals' && isAdmin(u) ? (await sql<{ n: number }[]>`select count(*)::int n from mkt_contents where tenant = ${t} and deleted_at is not null`)[0].n : 0; // 183차 #177 휴지통 건수(관리자 칸)
   // 요청 C §3-5: 대표(회사 소유자) 화면은 [승인]·[수정 요청] 두 단추만 — 보류·다시 그리기·버전 비교는 운영실(관리자) 화면
-  return { approvalHour: st.approval_hour, canDecide: isAdmin(u), isOwner: u.role === 'owner', paused: !!st.auto_pause /* 대표 10/25 22:20: 자동 생성 일시정지 띠 */, contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st.approval_hour) : null;
+  return { approvalHour: st.approval_hour, canDecide: isAdmin(u), isOwner: u.role === 'owner', paused: !!st.auto_pause /* 대표 10/25 22:20: 자동 생성 일시정지 띠 */, trash, contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st.approval_hour) : null;
     return { ...r, handle: handleOf(r.channel, r.brand_id), deadline, late: !!deadline && deadline.getTime() < now && ['pending', 'changes'].includes(r.status) }; }) };
 }
 
@@ -193,7 +195,7 @@ export async function getContent(u: SessionUser, id: string) {
         mainKeyword: saved?.keyword ?? null, subKeywords: saved?.blog?.subKeywords, persona: saved?.blog?.persona }, rules).report, ...(saved ? { v: saved.v, notes: saved.notes } : {}), ...(preflight ? { preflight } : {}) } : null;
   c.is_example = Array.isArray(c.brand_examples) && c.brand_examples.some((e: { contentId?: string }) => e?.contentId === c.id); // #235 ⓔ 좋은 예시로 저장됨
   delete c.brand_voice; delete c.brand_facts; delete c.brand_examples;
-  return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st.approval_hour) }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
+  return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st.approval_hour), purgeAt: c.deleted_at ? purgeAt(c.deleted_at) : null /* 183차 #177 휴지통 띠 */ }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };

@@ -2,7 +2,7 @@
 import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import { MediaThumb } from '@/components/MediaView';
 import Link from 'next/link';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useUrlState } from '@/components/urlState';
 import { api, useApi } from '@/components/client';
@@ -178,6 +178,14 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
       toast.ok(action === 'archive' ? '보관했습니다' : r.needsTopic ? '재료가 없어 주제 질문 카드를 만들었습니다' : r.passed ? '새 시안을 만들었습니다 — 다시 승인 대기' : `새 시안 품질 검사 미통과: ${r.issues.join(' · ')}`);
       if (action === 'archive') { onChange(); onClose(); } else { reload(); onChange(); } } catch (e: any) { toast.error(e.message); }
   }
+  // 183차 #177: [휴지통으로](30일 뒤 영구 삭제, 되살리기 가능) · 휴지통 글 띠의 [되살리기]
+  async function trashOne() {
+    if (!confirm(`'${c.title}' 글을 휴지통으로 옮길까요? 30일 안에는 되살릴 수 있고, 그 뒤에는 자동으로 영구 삭제됩니다.`)) return;
+    try { await api(`/api/marketing/contents/${id}`, { method: 'DELETE' }); toast.ok('휴지통으로 옮겼습니다 — 30일 안에 되살릴 수 있습니다'); onChange(); onClose(); } catch (e: any) { toast.error(e.message); }
+  }
+  async function restoreOne() {
+    try { await api('/api/marketing/contents/restore', { body: { ids: [id] } }); toast.ok('되살렸습니다 — 원래 칸으로 돌아갑니다'); reload(); onChange(); } catch (e: any) { toast.error(e.message); }
+  }
   // #426 [AI로 다듬기]: 상투어·과한 느낌표/이모지·약한 훅을 AI 가 고친 새 버전(같은 사진, 0크레딧) — 다시 승인 대기
   async function polish() {
     setQBusy(true);
@@ -209,6 +217,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
   return (
     <Modal open onClose={onClose} title={c.title} wide>
       <div className="space-y-3 text-sm" data-testid="mkt-detail">
+        {c.deleted_at && <div className="flex flex-wrap items-center gap-2 rounded-input border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800" data-testid="mkt-trashed">휴지통에 있는 글 — {c.purgeAt ? fmtDateTime(c.purgeAt) : '30일 뒤'}에 자동으로 영구 삭제됩니다.{data.canDecide && <Button size="sm" variant="secondary" onClick={restoreOne} data-testid="mkt-restore-one">되살리기</Button>}</div>}
         <AiAsk space="marketing" examples={AI_ASK_EXAMPLES.mktContent} subject={`시안 ${String(c.title).slice(0, 40)}`} compact testId="ai-ask-content" />
         <p className="text-xs text-ink-2">{CHANNELS[c.channel]} · {c.brand ?? '브랜드 없음'} · {c.scheduled_at ? `게시 ${fmtDateTime(c.scheduled_at)}` : '게시일 미정'}{c.deadline && ` · 승인 마감 ${fmtDateTime(c.deadline)}`} · <b data-testid="mkt-status">{STATUS[c.status]}</b>{c.mode === 'ad' && <> · <ModeChip mode="ad" /></>} · v{c.current_version}{c.approved_version && c.approved_version !== c.current_version ? ` (v${c.approved_version} 승인은 무효)` : ''}</p>
         {data.canDecide && c.status !== 'published' && (fixOpen ? (
@@ -250,8 +259,10 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
             {c.quality?.failed && c.status === 'draft' && <p className="basis-full text-red-700" data-testid="mkt-failed-note">제작 실패: {c.quality.failed.reason ?? '원고 형식 오류'} — 본문에 넣지 않았습니다{(c.quality.failed.n ?? 1) >= 2 ? '. 자동으로는 다시 만들지 않으니 [AI 다시 만들기]를 눌러 주세요' : '. 2시간 뒤 자동으로 한 번 더 만듭니다'}</p>}
             {c.auto && c.status !== 'approved' && <Button size="sm" variant="secondary" onClick={() => auto('regen')} data-testid="mkt-regen">AI 다시 만들기</Button>}
             <Button size="sm" variant="secondary" onClick={() => auto('archive')} data-testid="mkt-archive">보관(숨기기)</Button>
+            <Button size="sm" variant="ghost" className="text-red-700" onClick={trashOne} data-testid="mkt-trash-one">휴지통으로</Button>
           </div>
         )}
+        {data.canDecide && !c.deleted_at && (c.status === 'canceled' || (c.status === 'published' && c.published_deleted_at)) && <div className="text-xs"><Button size="sm" variant="ghost" className="text-red-700" onClick={trashOne} data-testid="mkt-trash-one">휴지통으로 (30일 뒤 영구 삭제)</Button></div>}
         {c.status !== 'published' && (ver ? (
           <div className="space-y-2 rounded-input border border-line p-3">
             <textarea className={inputCls} rows={4} value={ver.body} onChange={(e) => setVer({ ...ver, body: e.target.value })} aria-label="수정본 본문" />
@@ -329,7 +340,7 @@ export function Approvals() {
         {/* 요청 C §3-5: 대표(회사 소유자) 화면은 카드에 [승인]·[수정 요청] 두 단추만(simple) · '전체' 탭에서는 콘텐츠 묶음에 초록 띠 */}
         <div className={cx(tab === 'all' && !DAY_LABEL[day] && 'rounded-card border-l-4 border-emerald-400 pl-3')} data-testid={tab === 'all' && !DAY_LABEL[day] ? 'mkt-inbox-all-contents' : undefined}>
           {tab === 'all' && !DAY_LABEL[day] && <div className="mb-2"><KindBadge k="contents" n={counts?.contents} /></div>}
-          {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} simple={!!(data as any).isOwner && ops !== '1'} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reloadAll} />}
+          {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} simple={!!(data as any).isOwner && ops !== '1'} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reloadAll} trash={(data as any).trash ?? 0} />}
           <OpsRequests />
         </div>
         {tab === 'all' && !DAY_LABEL[day] && inbox.data && <InboxAll d={inbox.data} onChange={reloadAll} />}
@@ -394,7 +405,7 @@ function BriefDecisionCard({ b, canEdit, onChange }: { b: InboxBrief; canEdit: b
  * 승인함(운영실 명세 2-2): 게시 시각순 한 목록 · 처음 3장 펼침 + 'N건 더 보기' · 브랜드 탭 · 마감 지난 것은 숫자에서 빼고 접힌 '일정 재배치 필요'로.
  * 승인 가능 = 승인 대기·마감 안 지남. 수정 요청·보류는 아래 '수정·보류' 묶음(새 버전 기다림)
  */
-function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = false }: { contents: CardContent[]; canDecide: boolean; plain: boolean; onOpen: (id: string) => void; onDone: () => void; simple?: boolean }) {
+function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = false, trash = 0 }: { contents: CardContent[]; canDecide: boolean; plain: boolean; onOpen: (id: string) => void; onDone: () => void; simple?: boolean; trash?: number }) {
   const [brand, setBrand] = useState(''); const [more, setMore] = useState(false);
   // 대표 10/20 14:10 ②: 브랜드 탭은 회사 브랜드 전체(콘텐츠가 없는 브랜드도) · 예정(초안) 묶음 · 제작 예정이 없는 브랜드 안내
   const allBrands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
@@ -440,17 +451,73 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
       {emptyBrands.length > 0 && <p className="rounded-card border border-dashed border-amber-300 bg-amber-50/40 px-3 py-2 text-xs text-amber-900" data-testid="mkt-brand-empty">제작 예정 없음: <b>{emptyBrands.join(' · ')}</b> — <Link href="/s/marketing/automation" className="font-medium underline">자동 제작 규칙</Link>을 켜거나 <Link href="/s/marketing/ops" className="font-medium underline">운영실</Link>에서 제작을 의뢰하세요.</p>}
       {held.length > 0 && <details className="rounded-card border border-violet-200 bg-violet-50/30 p-3 text-sm" data-testid="mkt-held"><summary className="cursor-pointer font-medium text-violet-900">초안 보관 — 브랜드 템플릿 준비 전 자동 시안 {held.length}건(승인함에 올리지 않음)</summary>
         <p className="mt-1 text-xs text-ink-2">대표 결정(10/24): 브랜드별 템플릿이 나올 때까지 정기·밤사이 자동 제작 시안은 초안으로 둡니다. 쓸 만한 것만 [승인 요청]으로 올리세요. 브랜드 키트에 피드 틀을 정한 브랜드는 [새 틀로 다시 그리기] 뒤 올리면 됩니다.</p>
-        <div className="mt-2 space-y-2">{held.slice(0, 20).map((c) => <div key={c.id} className="space-y-1" data-testid="mkt-held-row"><ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />
-          {canDecide && <div className="flex flex-wrap gap-2">{c.brand_templates && c.quality?.visual?.by === 'server' && <HeldRedraw id={c.id} onDone={onDone} />}<HeldSubmit id={c.id} onDone={onDone} /></div>}</div>)}
-          {held.length > 20 && <p className="text-xs text-ink-3">최근 20건만 보입니다 — 나머지는 콘텐츠 캘린더에서 초안으로 볼 수 있습니다.</p>}</div></details>}
+        <TrashPicker list={held.slice(0, 20)} canDecide={canDecide} onDone={onDone} testId="mkt-held" render={(c) => <div className="space-y-1" data-testid="mkt-held-row"><ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />
+          {canDecide && <div className="flex flex-wrap gap-2">{c.brand_templates && c.quality?.visual?.by === 'server' && <HeldRedraw id={c.id} onDone={onDone} />}<HeldSubmit id={c.id} onDone={onDone} /></div>}</div>} />
+        {held.length > 20 && <p className="mt-1 text-xs text-ink-3">최근 20건만 보입니다 — 나머지는 콘텐츠 캘린더에서 초안으로 볼 수 있습니다.</p>}</details>}
       {postponed.length > 0 && <details open className="rounded-card border border-amber-300 bg-amber-50/60 p-3 text-sm" data-testid="mkt-postponed"><summary className="cursor-pointer font-medium text-amber-900">미뤄진 글 — 옮길 날짜가 없어 멈춘 글 {postponed.length}건(취소 아님)</summary>
         <p className="mt-1 text-xs text-amber-900">날짜를 골라 다시 올리면 승인 대기로 돌아가고, 버리면 취소됩니다. 같은 브랜드·채널·형식 글은 하루 2건까지 — 3시간 넘게 띄우고, 같은 주제·같은 사진이면 그날은 안 됩니다.</p>
         <ul className="mt-2 space-y-2">{postponed.map((c) => <PostponedRow key={c.id} c={c} canDecide={canDecide} onOpen={() => onOpen(c.id)} onDone={onDone} />)}</ul></details>}
       {waiting.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
-        <div className="mt-2 space-y-2">{waiting.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+        <TrashPicker list={waiting} canDecide={canDecide} onDone={onDone} testId="mkt-waiting" render={(c) => <ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />} /></details>}
       {late.length > 0 && <details className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" data-testid="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>
         <div className="mt-2 space-y-2">{late.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+      {!plain && canDecide && trash > 0 && <TrashBox count={trash} onDone={onDone} />}
     </div>
+  );
+}
+
+/** 183차 #177(로컬 10/23 · 대표 "비슷한 글은 하나만 남기고 나머지 삭제"): 칸 안의 글을 여러 건 골라 한 번에 휴지통으로(관리자) — 30일 안에 아래 '휴지통' 칸에서 되살림 */
+function TrashPicker({ list, canDecide, onDone, testId, render }: { list: CardContent[]; canDecide: boolean; onDone: () => void; testId: string; render: (c: CardContent) => ReactNode }) {
+  const [on, setOn] = useState(false); const [sel, setSel] = useState<Record<string, boolean>>({}); const [busy, setBusy] = useState(false);
+  const ids = list.filter((c) => sel[c.id]).map((c) => c.id);
+  async function trash() {
+    if (!ids.length) return;
+    if (!confirm(`고른 ${ids.length}건을 휴지통으로 옮길까요? 30일 안에는 되살릴 수 있고, 그 뒤에는 자동으로 영구 삭제됩니다.`)) return;
+    setBusy(true);
+    try {
+      const r = await api<{ count: number; skipped: { title: string; reason: string }[] }>('/api/marketing/contents/trash', { body: { ids } });
+      toast.ok(`${r.count}건을 휴지통으로 옮겼습니다 — 30일 안에 되살릴 수 있습니다${r.skipped.length ? ` (${r.skipped.length}건은 못 지움: ${r.skipped[0].reason})` : ''}`);
+      setSel({}); setOn(false); onDone();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="mt-2 space-y-2">
+      {canDecide && list.length > 0 && <div className="flex flex-wrap items-center gap-2 text-xs" data-testid={`${testId}-bar`}>
+        {!on ? <Button size="sm" variant="ghost" onClick={() => setOn(true)} data-testid={`${testId}-pick`}>골라서 지우기</Button> : <>
+          <label className="flex items-center gap-1.5"><input type="checkbox" className="h-4 w-4" checked={list.length > 0 && ids.length === list.length} onChange={(e) => setSel(e.target.checked ? Object.fromEntries(list.map((c) => [c.id, true])) : {})} data-testid={`${testId}-all`} /> 전체 {list.length}건</label>
+          <span className="text-ink-3">{ids.length}건 고름</span>
+          <Button size="sm" variant="danger" onClick={trash} disabled={busy || !ids.length} data-testid={`${testId}-trash`}>휴지통으로</Button>
+          <Button size="sm" variant="ghost" onClick={() => { setOn(false); setSel({}); }} data-testid={`${testId}-cancel`}>그만</Button></>}
+      </div>}
+      {list.map((c) => on ? <div key={c.id} className="flex items-start gap-2" data-testid={`${testId}-pickrow`}>
+        <input type="checkbox" className="mt-2 h-5 w-5 shrink-0" checked={!!sel[c.id]} onChange={(e) => setSel({ ...sel, [c.id]: e.target.checked })} aria-label={`${c.title} 고르기`} data-testid={`${testId}-check`} data-id={c.id} />
+        <div className="min-w-0 flex-1">{render(c)}</div></div> : <Fragment key={c.id}>{render(c)}</Fragment>)}
+    </div>
+  );
+}
+
+type TrashItem = { id: string; title: string; channel: string; kind?: string | null; brand: string | null; brand_color?: string | null; deleted_at: string; deleted_from: string | null; deleted_by_name: string | null; purge_at: string; media_count: number };
+const FROM_LABEL: Record<string, string> = { ...STATUS, canceled: '취소·보관' };
+/** 183차 #177: 승인함 맨 아래 '휴지통' — 지운 글·누가 언제·원래 칸·며칠 뒤 영구 삭제 · [되살리기](원래 상태로). 관리자만, 열 때 불러옴 */
+function TrashBox({ count, onDone }: { count: number; onDone: () => void }) {
+  const [open, setOpen] = useState(false); const [busy, setBusy] = useState<string | null>(null);
+  const { data, error, reload } = useApi<{ days: number; items: TrashItem[] }>(open ? '/api/marketing/contents/trash' : null, [open, count]);
+  async function restore(it: TrashItem) {
+    setBusy(it.id);
+    try { await api('/api/marketing/contents/restore', { body: { ids: [it.id] } }); toast.ok(`'${it.title}' 글을 되살렸습니다 — ${FROM_LABEL[it.deleted_from ?? ''] ?? '원래'} 칸으로`); reload(); onDone(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  const daysLeft = (p: string) => Math.max(0, Math.ceil((new Date(p).getTime() - Date.now()) / 864e5));
+  return (
+    <details className="rounded-card border border-line bg-slate-50/60 p-3 text-sm" onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)} data-testid="mkt-trash">
+      <summary className="cursor-pointer font-medium text-ink-2">휴지통 {count}건 — 지운 글은 30일 뒤 자동으로 영구 삭제됩니다</summary>
+      {open && (error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={2} /> : !data.items.length ? <p className="mt-2 text-xs text-ink-3">휴지통이 비어 있습니다.</p> : (
+        <ul className="mt-2 divide-y divide-line text-xs">{data.items.map((it) => <li key={it.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-trash-row">
+          <span className="min-w-0 flex-1 truncate font-medium">{it.title}</span>
+          <BrandChip name={it.brand} color={it.brand_color} />
+          <span className="text-ink-3">{channelLabel(it.channel, it.kind)} · {FROM_LABEL[it.deleted_from ?? ''] ?? it.deleted_from ?? '-'}였음 · {it.deleted_by_name ?? '-'} {fmtDateTime(it.deleted_at)} · {daysLeft(it.purge_at)}일 남음</span>
+          <Button size="sm" variant="secondary" onClick={() => restore(it)} disabled={busy === it.id} data-testid="mkt-trash-restore">되살리기</Button></li>)}</ul>))}
+    </details>
   );
 }
 
