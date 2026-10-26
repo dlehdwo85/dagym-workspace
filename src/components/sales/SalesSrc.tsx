@@ -1013,10 +1013,11 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
   const [dayQ, setDay] = useUrlState('day', ''); const day = dayQ === 'today' ? 'today' : ''; // 영업 현황 '오늘 새 영업 DB'
   const [boxQ, setBox] = useUrlState('box', ''); const box = boxQ === 'archive' ? 'archive' : ''; // #605 보관함(대상 아님·완료)
   const [sort, setSort] = useUrlState('sort', ''); const [region, setRegion] = useUrlState('region', ''); const [hh, setHh] = useUrlState('hh', ''); const [period, setPeriod] = useUrlState('period', ''); // #606
+  const [st, setSt] = useUrlState('st', ''); // #459(대표 10/23): 상태 필터 칩(주소 ?st=)
   const sub = ['bids', 'contracts', 'prospects', 'regions'].includes(tab);
-  const { data, error, reload } = useApi<any>(sub ? (null as unknown as string) : `/api/sales/src?${q({ view: 'hub', tab, q: s, day, box, sort, region, hh, period })}`, [tab, s, day, box, sort, region, hh, period]);
+  const { data, error, reload } = useApi<any>(sub ? (null as unknown as string) : `/api/sales/src?${q({ view: 'hub', tab, q: s, day, box, sort, region, hh, period, status: st })}`, [tab, s, day, box, sort, region, hh, period, st]);
   const [sel, setSel] = useState<string[]>([]); // 대표 10/20 14:15 ④ 일괄 선택
-  useEffect(() => setSel([]), [tab, box]);
+  useEffect(() => setSel([]), [tab, box, st]);
   const reopen = useRef(sub ? null : sp.get('id')); // 주소 ?id= 상세(새로 고침·뒤로가기) — 목록을 불러온 뒤 그 줄로
   useEffect(() => { if (!reopen.current || !data?.items) return; const r = data.items.find((x: any) => String(x.id) === reopen.current); reopen.current = null; if (r) setDetail({ tab, r }); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   const tabRow = (cls: (on: boolean) => string, style?: (on: boolean) => React.CSSProperties | undefined) => <div className="flex flex-wrap gap-1.5">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-hub-${k}`} className={cls(tab === k)} style={style?.(tab === k)}>{l}</button>)}
@@ -1044,6 +1045,12 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
         <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="기간 필터" data-testid="hub-f-period"><option value="">기간 전체</option><option value="1">1개월 안</option><option value="3">3개월 안</option><option value="6">6개월 안</option></select>
         {data && <span className="ml-auto text-ink-3" data-testid="hub-count">{data.items.length}건{data.items.length === 300 ? '+(최근 300)' : ''}</span>}
       </div>
+      {/* #459(대표 10/23): 상태 필터 칩 — 기본 목록은 미검토·검토중·연락중·신청·보류, 보관함은 대상 아님·완료. 0건 묶음은 숨기고 건수를 같이 보여 줌(주소 ?st=) */}
+      {data && <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="hub-status-row">
+        <button type="button" onClick={() => setSt('')} aria-pressed={!st} className={chipCls(!st)} data-testid="hub-status-all">상태 전체</button>
+        {((data.statusGroups ?? []) as [string, string][]).filter(([k]) => (data.statusCounts?.[k] ?? 0) > 0 || k === st).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setSt(st === k ? '' : k)} aria-pressed={st === k} className={chipCls(st === k)} data-testid={`hub-status-${k}`}>{l} {data.statusCounts?.[k] ?? 0}</button>))}
+      </div>}
       {/* #609(대표 10/25 ⑤): 모든 탭 1열(한 줄 한 건) */}
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-2">{data.items.map((r: any) => (
         <li key={r.id} className="relative">{data.readOnly === false && !box && !(r.work?.status === '진행영업 전환' || r.work?.leadId || r.leadId) && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(r.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, r.id] : v.filter((x) => x !== r.id))} aria-label={`${r.name} 선택`} data-testid="hub-select" />}<HubCard tab={tab} r={r} onRaw={() => setDetail({ tab, r })} onChange={reload} canWrite={data.readOnly === false} /></li>))}
