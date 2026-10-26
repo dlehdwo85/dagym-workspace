@@ -119,6 +119,8 @@ export const userPatch = z.object({
   /** 재정비(10/20): 소속(주 소속 + 겸직) 바꾸기 */
   teamIds: z.array(zUuid).max(10).optional(),
   primaryTeamId: zUuid.nullable().optional(),
+  /** #681: 이 사람이 장이던 곳에서 빠질 때 새 장(그 곳 구성원 중) — 고르지 않으면 '장 없음'으로 남고 응답 leadless 로 알려 준다 */
+  newLeads: z.array(z.object({ teamId: zUuid, userId: zUuid })).max(10).optional(),
 });
 
 export async function updateUser(actor: SessionUser, id: string, p: z.infer<typeof userPatch>, ip: string | null) {
@@ -154,7 +156,20 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
       await tx`delete from memberships where user_id = ${id}`;
       for (const o of new Set(p.orgUnitIds)) await tx`insert into memberships (user_id, org_unit_id) values (${id}, ${o})`;
     }
+    // #681(로컬 10/26 15:33 김민수 사례): 소속에서 빠지면 그곳의 장이 비는데 알 길이 없었음 → 새 장을 같이 정하거나, 빈 곳을 돌려줘 화면이 알림
+    const ledBefore = p.teamIds ? (await tx<{ team_id: string }[]>`select team_id from team_members where user_id = ${id} and is_lead`).map((r) => r.team_id) : [];
     if (p.teamIds) await (await import('./teams')).setUserTeams(tx, tenantOf(actor), id, p.teamIds, p.primaryTeamId ?? null);
+    for (const nl of p.newLeads ?? []) {
+      const [tm] = await tx<{ id: string }[]>`select id from teams where id = ${nl.teamId} and tenant = ${tenantOf(actor)} and not archived`;
+      const [nu] = await tx<{ id: string }[]>`select id from users where id = ${nl.userId} and tenant = ${tenantOf(actor)} and status = 'active'`;
+      if (!tm || !nu) throw badRequest('새 장으로 정할 수 없는 사람·조직입니다');
+      await tx`update team_members set is_lead = false where team_id = ${nl.teamId} and user_id <> ${nl.userId}`; // 단위마다 장 1명
+      await tx`insert into team_members (team_id, user_id, is_lead) values (${nl.teamId}, ${nl.userId}, true) on conflict (team_id, user_id) do update set is_lead = true`;
+      await tx`update team_members m set is_primary = true where m.team_id = ${nl.teamId} and m.user_id = ${nl.userId} and not exists (select 1 from team_members x where x.user_id = m.user_id and x.is_primary)`;
+      await tx`insert into chat_members (room_id, user_id) select r.id, ${nl.userId} from chat_rooms r where r.team_id = ${nl.teamId} on conflict do nothing`;
+    }
+    const leadless = ledBefore.length ? await tx<{ id: string; name: string; kind: string }[]>`select t.id, t.name, t.kind from teams t where t.id = any(${ledBefore}::uuid[]) and not t.archived
+      and not exists (select 1 from team_members m join users x on x.id = m.user_id and x.status = 'active' where m.team_id = t.id and m.is_lead) order by t.name` : [];
     if (p.orgUnitIds || p.role) await syncDemoFlag(tx, [id]);
     // 비활성·퇴사·권한 변경 시 기존 세션 즉시 차단
     if ((p.status && p.status !== 'active') || p.role || p.orgUnitIds) {
@@ -165,8 +180,8 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
         await tx`update google_calendar_links set status = 'paused' where user_id = ${id}`;
       }
     }
-    await audit(tx, actor.id, 'user.update', 'user', id, { before: { role: cur.role, status: cur.status }, change: p }, ip);
-    return { ok: true };
+    await audit(tx, actor.id, 'user.update', 'user', id, { before: { role: cur.role, status: cur.status }, change: p, ...(leadless.length ? { leadless: leadless.map((l) => l.name) } : {}) }, ip);
+    return { ok: true, leadless };
   });
 }
 
@@ -266,13 +281,20 @@ export async function updateOrgUnit(actor: SessionUser, id: string, i: Partial<z
 export async function directory(u: SessionUser, sql: Sql = db()) {
   const units = await accessibleUnitIds(u, sql);
   const sc = await teamScope(u, sql); // 로컬 10/19: 격리 팀 구성원에게 사람 = 같은 팀 + 대표·관리자 + 본인
+  // P2 조직 개편(대표 10/26 '하위 → 상위 직원에게 업무 요청'): 격리 팀원도 위 단위(부서·사업부·본사)의 장에게는 업무를 요청할 수 있게 사람 목록에 —
+  // 그 업무만 함께 보고(요청자·담당자), 위 단위의 다른 업무·사람은 그대로 안 보인다
+  const upLeads = sc.isolated ? (await sql<{ id: string }[]>`with recursive up as (
+      select t.parent_id as id from team_members m join teams t on t.id = m.team_id where m.user_id = ${u.id} and t.isolated and not t.archived and t.parent_id is not null
+      union select p.parent_id from teams p join up on p.id = up.id where p.parent_id is not null and not p.archived
+    ) select distinct lm.user_id as id from team_members lm join teams lt on lt.id = lm.team_id
+      where lm.is_lead and not lt.archived and lt.tenant = ${tenantOf(u)} and lm.team_id in (select id from up)`).map((r) => r.id) : [];
   const orgUnits = await sql`select id, parent_id, brand_id, type, name, active, sort from org_units
     where id = any(${units ?? []}::uuid[]) order by sort, name`;
   const users = await sql`
     select u.id, u.name, u.title, u.title_short, u.role, u.email, u.is_demo,
       coalesce(array_agg(m.org_unit_id) filter (where m.org_unit_id is not null), '{}') as org_unit_ids
     from users u left join memberships m on m.user_id = u.id
-    where u.status = 'active' and u.tenant = ${tenantOf(u)} and (u.role in ('owner','admin') or u.id = ${u.id} or u.id = any(${sc.mates}::uuid[])
+    where u.status = 'active' and u.tenant = ${tenantOf(u)} and (u.role in ('owner','admin') or u.id = ${u.id} or u.id = any(${sc.mates}::uuid[]) or u.id = any(${upLeads}::uuid[])
       or exists (select 1 from memberships mm where mm.user_id = u.id and mm.org_unit_id = any(${units ?? []}::uuid[])))
     group by u.id order by u.name`;
   // 브랜드(다짐·하이링크·바디랩)는 기존 회사 전용 — 다른 회사에는 보이지 않게(AI·음성 단어에도 섞이지 않음)

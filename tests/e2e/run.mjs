@@ -43,6 +43,7 @@ import { offboardFlow } from './offboard.step.mjs';
 import { messengerV3 } from './messengerV3.step.mjs';
 import { platformAdd } from './platformAdd.step.mjs';
 import { orgTree } from './orgTree.step.mjs';
+import { orgLevels } from './orgLevels.step.mjs';
 import { chatKeyboard } from './chatKeyboard.step.mjs';
 import { salesTodo } from './salesTodo.step.mjs';
 import { salesLeads2 } from './salesLeads2.step.mjs';
@@ -2887,6 +2888,9 @@ await step('#626 캡처 차단(대표 10/25 20:05): 외부 고객사 로그인 �
   srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SIGNUP_IP_PER_DAY: '50' });
   await captureGuard({ browser, BASE, SHOTS, sql, Client, owner });
 });
+
+// 본사가 생기면 맨 위 부서를 새로 만들 수 없어 맨 끝(앞 단계들이 맨 위 부서를 만듦)
+await step('P2 조직 개편 4단(대표 10/26 · #679~#681): 종류 카드 4개·본사 만들며 맨 위 부서 이관·사업부 위 단위는 본사만·사업부장 없음·이름-종류 검사 → 사용자 목록 왕관 칩·장 비게 됨 경고 → 업무 함께하는 부서', () => orgLevels({ owner, ctx, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

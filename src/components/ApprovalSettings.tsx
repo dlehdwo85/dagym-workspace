@@ -246,7 +246,7 @@ function FormEditor({ form, lines, canEdit, onSaved }: { form: Form; lines: { id
 
 // ───────── 팀별 배정 ─────────
 type Assign = { id: string; kind: string; team_id: string | null; team_name: string | null; line_id: string; line_name: string; steps: Step[]; active: boolean };
-type TeamRow = { id: string; name: string; path: string; kind: 'dept' | 'team'; depth: number; lead_name: string | null; members: number };
+type TeamRow = { id: string; name: string; path: string; kind: 'hq' | 'division' | 'dept' | 'team'; depth: number; lead_name: string | null; members: number };
 type Resolved = { user: { id: string; name: string }; path: string | null; results: { kind: string; lineId: string | null; lineName: string | null; sourceLabel: string | null; via: string | null; steps: { label: string; names: string[]; cond: string | null }[] }[] };
 
 function AssignTab() {

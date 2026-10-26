@@ -84,7 +84,7 @@ export async function teamChain(sql: Sql, tenant: string, userId: string) {
   return sql<{ id: string; name: string; parent_id: string | null; lead_id: string | null; depth: number }[]>`
     with recursive start as (
       select t.id from team_members m join teams t on t.id = m.team_id where m.user_id = ${userId} and t.tenant = ${tenant} and not t.archived
-      order by m.is_primary desc, t.kind = 'team' desc, t.name limit 1
+      order by m.is_primary desc, case t.kind when 'team' then 0 when 'dept' then 1 when 'division' then 2 else 3 end, t.name limit 1
     ), chain as (
       select t.id, t.name, t.parent_id, 0 as depth from teams t where t.id in (select id from start)
       union all

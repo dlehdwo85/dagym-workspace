@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { eulReul } from './orgKinds';
 import { db, type Sql } from './db';
 import { accessibleUnitIds, assertUnitAccess, loadTaskForUser, taskVisibleSql, atLeast, teamTaskLevel, subTeamsSql } from './access';
 import { HttpError, badRequest, conflict, forbidden, notFound } from './errors';
@@ -57,6 +58,8 @@ export const taskInput = z.object({
   /** V14 8번: 팀에 배정 — each = 팀원 모두에게 각각, lead = 팀장이 담당자 지정 */
   teamId: zUuid.nullable().optional(),
   teamMode: z.enum(['each', 'lead', 'tag']).optional(), // tag(R-16): 소속 팀만 붙이고 담당자는 그대로
+  /** P2 조직 개편(대표 10/26): 함께하는 부서 — 붙이면 그 부서(팀)와 위 단위가 같이 본다(주관 부서 teamId 는 그대로). 고칠 때는 전체 교체 */
+  collabTeamIds: z.array(zUuid).max(10).optional(),
   version: z.number().int().optional(),
   reviewNote: z.string().max(2000).optional(),
 });
@@ -72,6 +75,7 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   t.due_extend_count, (select json_build_object('id', x.id, 'from', to_char(x.from_date, 'YYYY-MM-DD'), 'to', to_char(x.to_date, 'YYYY-MM-DD'), 'reason', x.reason, 'by', x.requested_by, 'byName', xu.name)
     from task_due_extensions x join users xu on xu.id = x.requested_by where x.task_id = t.id and x.status = 'pending' order by x.created_at desc limit 1) as ext_pending,
   t.team_id, (select tm.name from teams tm where tm.id = t.team_id) as team_name, (select tm.color from teams tm where tm.id = t.team_id) as team_color,
+  (select coalesce(array_agg(ctm.name order by ctm.name), '{}') from task_teams ctc join teams ctm on ctm.id = ctc.team_id where ctc.task_id = t.id) as collab_teams,
   case when t.batch_id is null then null else (select json_build_object('total', count(*)::int, 'done', count(*) filter (where b.status = 'done')::int) from tasks b where b.batch_id = t.batch_id and b.deleted_at is null) end as batch,
   (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
     where be.deleted_at is null and be.kind = 'task_block' and (be.task_id = t.id or be.id in (select event_id from event_tasks where task_id = t.id and role = 'block'))) as scheduled_minutes,
@@ -150,7 +154,7 @@ export async function doneMonths(u: SessionUser, raw: Record<string, string>) {
   const units = await accessibleUnitIds(u, sql);
   const rows = await sql<{ month: string; n: number }[]>`select to_char(t.completed_at at time zone 'Asia/Seoul', 'YYYY-MM') as month, count(*)::int n
     from tasks t where t.deleted_at is null and t.status = 'done' and t.parent_id is null and t.completed_at is not null and ${taskVisibleSql(sql, u, units)}
-      ${q.assigneeId ? sql`and ${assignedSql(sql, q.assigneeId)}` : sql``} ${q.projectId ? sql`and t.project_id = ${q.projectId}` : sql``} ${q.teamId ? sql`and t.team_id = ${q.teamId}` : sql``}
+      ${q.assigneeId ? sql`and ${assignedSql(sql, q.assigneeId)}` : sql``} ${q.projectId ? sql`and t.project_id = ${q.projectId}` : sql``} ${q.teamId ? sql`and (t.team_id = ${q.teamId} or exists (select 1 from task_teams ctq where ctq.task_id = t.id and ctq.team_id = ${q.teamId}))` : sql``}
     group by 1 order by 1 desc limit 60`;
   return { months: rows };
 }
@@ -169,7 +173,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
   }
   if (q.brandId) conds.push(sql`t.brand_id = ${q.brandId}`);
   if (q.space) conds.push(q.space === 'work' ? sql`t.space is null` : sql`t.space = ${q.space}`); // 대표 확정(10/19) 업무 목록 '공간' 필터
-  if (q.teamId) conds.push(sql`t.team_id = ${q.teamId}`); // V14 8번
+  if (q.teamId) conds.push(sql`(t.team_id = ${q.teamId} or exists (select 1 from task_teams ctq where ctq.task_id = t.id and ctq.team_id = ${q.teamId}))`); // V14 8번 + 함께하는 부서
   if (q.assigneeId) conds.push(assignedSql(sql, q.assigneeId)); // #475 공동 담당 업무도 그 사람 업무로
   if (q.requestedById) conds.push(sql`t.requested_by = ${q.requestedById}`);
   if (q.status) {
@@ -257,7 +261,7 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     where t.id = ${id}`, accessibleUnitIds(u, sql)]);
   const { openRound, stepApprovers } = await import('./approvals');
   const { deadlineRisk } = await import('./availability');
-  const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks, approvals, fields, risk, batchMates] = await Promise.all([
+  const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks, approvals, fields, risk, batchMates, collabTeams, [hasTeams]] = await Promise.all([
     sql`select u.id, u.name from task_collaborators c join users u on u.id = c.user_id where c.task_id = ${id} order by u.name`,
     sql`select ci.id, ci.text, ci.done, ci.sort, ci.done_at, ci.assignee_id, au.name as assignee_name from task_checklist_items ci left join users au on au.id = ci.assignee_id where ci.task_id = ${id} order by ci.sort, ci.id`,
     sql`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where t.parent_id = ${id} and t.deleted_at is null
@@ -283,6 +287,9 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     // V6 13번: 같이 받은 사람(담당자별 1건씩 만든 묶음)
     t.batch_id ? sql`select b.id, b.status, b.assignee_id, a.name as assignee_name from tasks b left join users a on a.id = b.assignee_id
       where b.batch_id = ${t.batch_id} and b.deleted_at is null order by a.name` : Promise.resolve([]),
+    // P2 조직 개편: 함께하는 부서(조직이 있는 회사만 칸을 보임)
+    sql`select tm.id, tm.name, tm.color, tm.kind from task_teams ct join teams tm on tm.id = ct.team_id where ct.task_id = ${id} order by tm.name`,
+    sql<{ x: boolean }[]>`select exists (select 1 from teams where tenant = ${tenantOf(u)} and not archived) as x`,
   ]);
   const pending = t.status === 'review' ? approvals.find((a) => a.status === 'pending' && a.round === approvals[0]?.round) : null;
   const canDecide = pending ? (await stepApprovers(sql, t.org_unit_id, pending)).includes(u.id) : false;
@@ -302,7 +309,7 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     const [rv] = await sql<{ id: string; name: string }[]>`select u2.id, u2.name from tasks r join users u2 on u2.id = r.assignee_id where r.review_of = ${id} and r.deleted_at is null and r.status <> 'done' limit 1`;
     reviewer = rv ?? (t.requested_by && t.requested_by !== t.assignee_id ? { id: t.requested_by, name: t.requested_by_name ?? '' } : null);
   }
-  return { reviewTarget: reviewTarget ?? null, reviewer, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff, coAssign: reassign || atLeast(u, 'admin') || !t.assignee_id }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
+  return { reviewTarget: reviewTarget ?? null, reviewer, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff, coAssign: reassign || atLeast(u, 'admin') || !t.assignee_id }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, collabTeams, orgHasTeams: !!hasTeams?.x, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -395,6 +402,7 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
     for (const c of new Set(i.collaboratorIds ?? [])) {
       await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
     }
+    const collabT = i.collabTeamIds?.length ? await setCollabTeams(tx, u, { id: t.id, title: i.title, team_id: i.teamId ?? null }, i.collabTeamIds, 1) : null;
     let n = 0;
     for (const text of i.checklist ?? []) {
       await tx`insert into task_checklist_items (task_id, text, sort) values (${t.id}, ${text}, ${n++})`;
@@ -402,7 +410,7 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
     for (const d of i.dependsOn ?? []) {
       await tx`insert into task_dependencies (task_id, depends_on_id) values (${t.id}, ${d}) on conflict do nothing`;
     }
-    await activity(tx, 'task', t.id, u.id, 'created', { title: i.title, assigneeId: i.assigneeId ?? null, dueDate: i.dueDate ?? null, ...(co.length ? { coAssigneeIds: co, completeRule: i.completeRule ?? 'primary' } : {}) });
+    await activity(tx, 'task', t.id, u.id, 'created', { title: i.title, assigneeId: i.assigneeId ?? null, dueDate: i.dueDate ?? null, ...(co.length ? { coAssigneeIds: co, completeRule: i.completeRule ?? 'primary' } : {}), ...(collabT ? { collabTeams: collabT.to } : {}) });
     if (i.assigneeId && !opts.quiet) {
       await notify(tx, {
         userIds: [i.assigneeId], type: 'task_assigned', title: `새 업무 배정: ${i.title}`,
@@ -709,7 +717,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       set.status = to;
       changes.status = { from: cur.status, to };
     }
-    if (Object.keys(set).length === 0 && i.collaboratorIds === undefined && i.checklist === undefined && i.dependsOn === undefined && coNext === null) {
+    if (Object.keys(set).length === 0 && i.collaboratorIds === undefined && i.checklist === undefined && i.dependsOn === undefined && coNext === null && i.collabTeamIds === undefined) {
       return { id, version: cur.version, changed: false };
     }
     set.updated_at = new Date();
@@ -733,6 +741,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         await notify(tx, { userIds: added, type: 'task_assigned', title: `협업 요청: ${set.title ?? cur.title}`, body: `${u.name}님이 협업자로 추가했습니다`,
           link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `collab:${id}:${upd.version}` });
       }
+    }
+    if (i.collabTeamIds !== undefined) { // P2 조직 개편: 함께하는 부서 바꾸기(내용 수정 권한 = 요청자·담당자)
+      const r = await setCollabTeams(tx, u, { id, title: (set.title as string) ?? cur.title, team_id: ('team_id' in set ? set.team_id : cur.team_id) as string | null }, i.collabTeamIds, upd.version);
+      if (r) changes.collabTeams = r;
     }
     if (i.dependsOn) {
       for (const d of i.dependsOn) if (d === id) throw badRequest('자기 자신을 선행 업무로 지정할 수 없습니다');
@@ -814,6 +826,31 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     if ('section_id' in set && set.section_id) await runAutomations(tx, { trigger: 'section_moved', taskId: id, actorId: u.id });
     return { id, version: upd.version, changed: true, spawned, status: (set.status ?? cur.status) as string, ...(auto ? { autoRemoved: auto.removed, autoKept: auto.kept } : {}) };
   });
+}
+
+/**
+ * P2 조직 개편(대표 10/26 '부서 간 협업 업무'): 업무의 함께하는 부서 바꾸기 — 같은 회사·보관 안 된 부서·팀만, 주관 부서(team_id)는 빼고.
+ * 새로 붙은 부서의 장에게 알림(부서원·위 단위는 목록·부서 보드에서 봄). 기록용 이름 변화를 돌려준다(바뀐 게 없으면 null)
+ */
+async function setCollabTeams(tx: Sql, u: SessionUser, t: { id: string; title: string; team_id: string | null }, teamIds: string[], ver: number) {
+  const want = [...new Set(teamIds)].filter((x) => x !== t.team_id);
+  const ok = want.length ? await tx<{ id: string; name: string }[]>`select id, name from teams where id = any(${want}::uuid[]) and tenant = ${tenantOf(u)} and not archived order by name` : [];
+  if (ok.length !== want.length) throw badRequest('없는 부서·팀이 포함되어 있습니다');
+  const before = await tx<{ team_id: string; name: string }[]>`select ct.team_id, tm.name from task_teams ct join teams tm on tm.id = ct.team_id where ct.task_id = ${t.id} order by tm.name`;
+  const added = ok.filter((x) => !before.some((b) => b.team_id === x.id));
+  const removed = before.filter((b) => !want.includes(b.team_id));
+  if (!added.length && !removed.length) return null;
+  if (removed.length) await tx`delete from task_teams where task_id = ${t.id} and team_id = any(${removed.map((r) => r.team_id)}::uuid[])`;
+  for (const a of added) await tx`insert into task_teams (task_id, team_id, added_by) values (${t.id}, ${a.id}, ${u.id}) on conflict do nothing`;
+  if (added.length) {
+    const leads = await tx<{ user_id: string }[]>`select distinct m.user_id from team_members m join users us on us.id = m.user_id and us.status = 'active'
+      where m.team_id = any(${added.map((a) => a.id)}::uuid[]) and m.is_lead and m.user_id <> ${u.id}`;
+    const names = added.map((a) => a.name).join(', ');
+    if (leads.length) await notify(tx, { userIds: leads.map((l) => l.user_id), type: 'task_assigned', title: `함께하는 부서 업무: ${t.title}`,
+      body: `${u.name}님이 ${names}${eulReul(names)} 함께하는 부서로 붙였습니다 — 부서원과 위 단위가 같이 봅니다`,
+      link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, actorId: u.id, dedupeKey: `collab_team:${t.id}:${ver}` });
+  }
+  return { from: before.map((b) => b.name), to: ok.map((x) => x.name) };
 }
 
 /**
