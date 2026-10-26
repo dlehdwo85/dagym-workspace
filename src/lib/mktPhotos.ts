@@ -13,10 +13,14 @@ import { tenantOf, type SessionUser } from './types';
  * 쓰는 곳: 시안 바탕(글자 없는 실사만 — 폴더·태그로 고른 사진에 더해) · 블로그 본문 사진 고르기(홍보물·그래픽 빼기, 설명 낱말로 글과 맞추기) · 원고 재료의 사진 목록.
  * 사람이 고친 판정이 먼저: 태그 '글자없음'(바탕으로 씀) · '글자있음'(바탕에서만 뺌 — 블로그 본문에는 씀) · '쓰지않음'(바탕·본문 모두 뺌). 이름 규칙(썸네일·카드뉴스…)은 그대로 — 둘 중 하나라도 그래픽이면 뺌.
  * 로컬 10/25 11:15: 안내판 글자가 많이 찍힌 현장 실사는 바탕에서만 빼고 블로그 본문에는 씀(본문 순위만 조금 뒤로) — 본문에서 빼는 것은 홍보물·실사가 아닌 것.
+ * 171차(로컬 10/26 평가 ⓒ '다짐 스토리 표지에 누운 사람'): pose(자세)·facing(보이는 방향)·light(밝기) 칸 — 누운 사람·뒷모습·어두운 사진은 시안 바탕(표지·장)에서 뺌(photoFlags). 칸이 없는 예전 설명은 설명 문장으로 판정.
  * 언제: 마케팅 사진을 올리면 응답 뒤에 · 정기 실행마다 설명 없는 사진 6장 · 자동 제작 › 사진 AI 설명 [설명하기]. 실패는 세 번까지만 다시.
  */
 const KINDS = ['photo', 'graphic', 'screen', 'illustration', 'document'] as const;
-export type VisionOk = { v: 1; at: string; caption: string; scene: string; tags: string[]; kind: (typeof KINDS)[number]; text: 'none' | 'little' | 'much'; promo: boolean; seen: string; people: number; faces: boolean; quality: 'good' | 'ok' | 'poor' };
+const POSES = ['none', 'standing', 'sitting', 'lying'] as const; const FACINGS = ['none', 'front', 'side', 'back'] as const; const LIGHTS = ['bright', 'normal', 'dark'] as const;
+export type VisionOk = { v: 1; at: string; caption: string; scene: string; tags: string[]; kind: (typeof KINDS)[number]; text: 'none' | 'little' | 'much'; promo: boolean; seen: string; people: number; faces: boolean; quality: 'good' | 'ok' | 'poor';
+  /** 171차: 사람 자세·보이는 방향·사진 밝기(예전 설명에는 없음 → photoFlags 가 문장으로 판정) */
+  pose?: (typeof POSES)[number]; facing?: (typeof FACINGS)[number]; light?: (typeof LIGHTS)[number] };
 export type VisionErr = { v: 1; at: string; error: string; tries: number };
 export const KIND_LABEL: Record<VisionOk['kind'], string> = { photo: '실사', graphic: '글자 그래픽', screen: '화면 캡처', illustration: '그림', document: '문서' };
 export const visionOk = (x: unknown): x is VisionOk => !!x && typeof x === 'object' && typeof (x as VisionOk).caption === 'string' && !('error' in (x as object));
@@ -31,6 +35,16 @@ export const visionGraphic = (v: VisionOk) => v.promo || v.kind !== 'photo';
 export const visionBackdrop = (v: VisionOk) => v.kind === 'photo' && v.text === 'none' && !v.promo && v.quality !== 'poor' && !v.faces;
 /** 고르기·글 맞추기에 쓰는 설명 글 */
 export const visionText = (v: unknown) => (visionOk(v) ? `${v.caption} ${v.scene} ${v.tags.join(' ')} ${v.seen}` : '');
+/** 171차(로컬 10/26 평가 ⓒ): 시안 바탕(표지·장)에 안 쓸 사진 — 누운 사람·뒷모습·어두운 사진. 새 설명은 pose·facing·light 칸으로, 칸이 없는 예전 설명은 한 줄·장면·태그 문장으로 판정
+ *  (어두움은 '어두운 색 옷' 같은 색 표현에 안 걸리게 조명·실내·분위기 낱말과 같이 있을 때만) */
+const LYING = /누워|누운|눕는|눕고|눕기|드러누|엎드리|엎드려|엎드린|lying|lies? (down|on)/i;
+const BACK = /뒷모습|뒤에서 (본|찍|촬영)|등을 (보이|돌리|지고)|뒤돌아|등 ?뒤에서|back view|from behind|seen from (the )?back/i;
+const DARK = /어두운 (실내|조명|분위기|배경|공간|방|곳|사진|화면|밤|저녁|거리|매장|복도)|(조명|빛|실내|전체|사진|분위기|화면)[이가은는]? ?(어둡|어두워|어두운|약하|약함)|어둑|컴컴|캄캄|야간|밤 ?(에|의|시간|풍경|거리|매장)|저조도|dimly|low light|dark room|at night/i;
+export function photoFlags(v: unknown): { lying: boolean; back: boolean; dark: boolean } {
+  if (!visionOk(v)) return { lying: false, back: false, dark: false };
+  const s = `${v.caption} ${v.scene} ${v.tags.join(' ')}`;
+  return { lying: v.pose ? v.pose === 'lying' : LYING.test(s), back: v.facing ? v.facing === 'back' : BACK.test(s), dark: v.light ? v.light === 'dark' : DARK.test(s) };
+}
 
 const PHOTO_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 const photoCond = (sql: ReturnType<typeof db>, tenant: string) => sql`tenant = ${tenant} and space = 'marketing' and deleted_at is null and upload_status = 'ready'
@@ -48,11 +62,14 @@ const SYSTEM = `회사 마케팅 자료실 사진 한 장을 보고 기록합니
 - seen: 읽히는 글자(상호·간판·제목) 60자 안, 없으면 ""
 - people: 보이는 사람 수(0~20)
 - faces: 얼굴을 알아볼 수 있는 사람이 있으면 true
-- quality: good · ok · poor(흐림·너무 어두움·심하게 기울어짐)`;
-const SCHEMA = { type: 'object', additionalProperties: false, required: ['caption', 'scene', 'tags', 'kind', 'text', 'promo', 'seen', 'people', 'faces', 'quality'], properties: {
+- quality: good · ok · poor(흐림·너무 어두움·심하게 기울어짐)
+- pose: 사람 자세 — none(사람 없음) · standing(서 있음·걷기·운동 중) · sitting(앉음) · lying(누움·엎드림·기대 누움) — 여럿이면 가장 크게 보이는 사람
+- facing: 사람이 보이는 방향 — none(사람 없음) · front(얼굴·몸 앞쪽) · side(옆) · back(뒷모습·등)
+- light: 사진 밝기 — bright(밝음) · normal · dark(어두움·야간·조명 약함)`;
+const SCHEMA = { type: 'object', additionalProperties: false, required: ['caption', 'scene', 'tags', 'kind', 'text', 'promo', 'seen', 'people', 'faces', 'quality', 'pose', 'facing', 'light'], properties: {
   caption: { type: 'string' }, scene: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, kind: { type: 'string', enum: [...KINDS] },
   text: { type: 'string', enum: ['none', 'little', 'much'] }, promo: { type: 'boolean' }, seen: { type: 'string' }, people: { type: 'integer' }, faces: { type: 'boolean' },
-  quality: { type: 'string', enum: ['good', 'ok', 'poor'] } } };
+  quality: { type: 'string', enum: ['good', 'ok', 'poor'] }, pose: { type: 'string', enum: [...POSES] }, facing: { type: 'string', enum: [...FACINGS] }, light: { type: 'string', enum: [...LIGHTS] } } };
 
 /** AI 에 보내기 전 긴 변 1024px JPEG 로 줄임(토큰·전송량) — sharp 가 없거나 못 읽으면 3.5MB 아래 원본 */
 async function shrink(buf: Buffer, mime: string): Promise<{ data: Buffer; mime: string } | null> {
@@ -66,7 +83,9 @@ function normalize(j: any): Omit<VisionOk, 'v' | 'at'> {
   const pick = <T extends string>(x: unknown, ok: readonly T[], d: T) => (ok.includes(x as T) ? (x as T) : d);
   return { caption: clip(j?.caption, 60), scene: clip(j?.scene, 300), tags: [...new Set((Array.isArray(j?.tags) ? j.tags : []).map((t: unknown) => clip(t, 20).replace(/^#/, '')).filter(Boolean))].slice(0, 8) as string[],
     kind: pick(j?.kind, KINDS, 'photo'), text: pick(j?.text, ['none', 'little', 'much'] as const, 'little'), promo: j?.promo === true, seen: clip(j?.seen, 60),
-    people: Math.max(0, Math.min(20, Math.round(Number(j?.people) || 0))), faces: j?.faces === true, quality: pick(j?.quality, ['good', 'ok', 'poor'] as const, 'ok') };
+    people: Math.max(0, Math.min(20, Math.round(Number(j?.people) || 0))), faces: j?.faces === true, quality: pick(j?.quality, ['good', 'ok', 'poor'] as const, 'ok'),
+    // 171차: 자세·방향·밝기 — 답에 없으면(예전 가짜 답·옛 모델) 칸을 비워 두고 문장으로 판정
+    ...(POSES.includes(j?.pose) ? { pose: j.pose as VisionOk['pose'] } : {}), ...(FACINGS.includes(j?.facing) ? { facing: j.facing as VisionOk['facing'] } : {}), ...(LIGHTS.includes(j?.light) ? { light: j.light as VisionOk['light'] } : {}) };
 }
 /** 크레딧·요청 몰림·서버 불안정 = 사진 탓이 아님(다음에 다시) — 그 밖(형식 오류 등)은 사진에 실패로 남김 */
 const transient = (e: any) => e?.code === 'ai_credit' || e?.status === 429 || /불안정/.test(String(e?.message ?? ''));

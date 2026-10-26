@@ -61,6 +61,7 @@ test('사진 설명: 줄인 JPEG·빠른 모델로 한 번 · 저장(설명이 �
   assert.equal(img.source.media_type, 'image/jpeg');
   assert.ok(req.messages[0].content.some((b) => b.type === 'text' && b.text.includes('사진짐 매장 1.jpg')));
   assert.match(String(req.system), /글자가 든 홍보물/);
+  assert.deepEqual(['pose', 'facing', 'light'].filter((k) => req.output_config?.format?.schema?.required?.includes(k)), ['pose', 'facing', 'light'], '171차 자세·방향·밝기 칸을 구조화 답으로 받음');
   const a = await vis(P.clean);
   assert.equal(a.vision.caption, '러닝머신이 줄지어 선 매장 안'); assert.deepEqual(a.vision.tags, ['러닝머신', '매장', '창가']);
   assert.equal(a.vision.text, 'none'); assert.equal(a.description, '러닝머신이 줄지어 선 매장 안', '설명이 비어 있던 자료는 한 줄 설명으로');
@@ -170,4 +171,15 @@ test('마케팅 사진을 올리면 응답 뒤에 설명(업무 공간 사진은
   assert.equal(fake.state.vision.length, v0 + 1);
   const lib = await ctx.owner.ok('GET', '/api/library?folder=*');
   assert.equal(lib.files.find((x) => x.id === id)?.vision?.caption, '새로 올린 매장 입구 사진');
+});
+
+// 171차(로컬 10/26 평가 ⓒ): 자세·방향·밝기 칸 — 답에 있으면 저장, 없거나 이상한 값(예전 답)이면 칸 없음(사진 고르기가 설명 문장으로 판정)
+test('171차 사진 설명 자세·방향·밝기 칸 저장', async () => {
+  const id = await libFile('사진짐 매트 휴식.jpg');
+  await describe(id, V({ caption: '매트에 누운 회원', scene: '회원이 매트에 누워 쉬고 있다.', people: 1, pose: 'lying', facing: 'side', light: 'normal' }));
+  const a = (await vis(id)).vision;
+  assert.deepEqual([a.pose, a.facing, a.light], ['lying', 'side', 'normal']);
+  await describe(id, V({ caption: '매트에 누운 회원', scene: '회원이 매트에 누워 쉬고 있다.', people: 1, pose: 'odd', light: 7 }));
+  const b = (await vis(id)).vision;
+  assert.ok(!('pose' in b) && !('facing' in b) && !('light' in b), JSON.stringify(b));
 });

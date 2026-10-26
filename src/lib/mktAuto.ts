@@ -554,7 +554,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   // 요청 C §3-1·3-3(대표 10/25 22:20 '시안이 표지만 있다'): 표지 뒤 장 — 피드 = 카드뉴스 3~5장 · 스토리 = 3~5프레임(원고 AI 의 slides/frames, 없으면 본문 줄로) · 블로그 = 본문 실사가 3장이 안 되면 도표형 카드로 채움 → 못 미치면 승인함 대신 수정 요청
   let pages: import('./mktAutoVisual').CardPage[] | null = null;
   if (mediaIds.length && pagedKind(c)) {
-    try { const Q = await import('./mktQuality'); pages = V.pagesOf(kind, d.pages ?? null, q.body, Q.contactLine(factsOf(brand?.facts))); const ids = await V.drawPages({ ...c, title: f.title }, pages); mediaIds = [...mediaIds, ...ids]; visualNote += ` · ${kind === 'story' ? '프레임' : '카드'} ${mediaIds.length}장`; }
+    try { const Q = await import('./mktQuality'); pages = V.pagesOf(kind, d.pages ?? null, q.body, Q.contactLine(factsOf(brand?.facts))); const ids = await V.drawPages({ ...c, title: f.title }, pages, { exclude: new Set([...(photoId ? [photoId] : []), ...photoIds]) }); mediaIds = [...mediaIds, ...ids]; visualNote += ` · ${kind === 'story' ? '프레임' : '카드'} ${mediaIds.length}장${V.photoNote(pages)}`; }
     catch (e: any) { visualNote += ` · 장 그리기 실패: ${String(e?.message ?? e).slice(0, 80)}`; }
   }
   if (mediaIds.length && kind === 'blog' && mediaIds.length < V.BLOG_AUTO_MEDIA) {
@@ -971,7 +971,7 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     const tail = media.length ? media.slice(1) : drawn.bodyIds;
     media = [drawn.fileId, ...tail];
     // 요청 C: 피드·스토리는 글이 바뀌었거나 장이 없으면 표지 뒤 장도 새 글로 다시(사진만 바꿀 때는 장 그대로) · 블로그는 표지+3장이 안 되면 도표형 카드로 채움
-    if (c.auto && pagedKind(c) && (body !== old || tail.length === 0)) { const Q = await import('./mktQuality'); pages = V.pagesOf(c.kind, pages, body, Q.contactLine(factsOf(brand?.facts))); media = [drawn.fileId, ...(await V.drawPages(c, pages))]; }
+    if (c.auto && pagedKind(c) && (body !== old || tail.length === 0)) { const Q = await import('./mktQuality'); pages = V.pagesOf(c.kind, pages, body, Q.contactLine(factsOf(brand?.facts))); media = [drawn.fileId, ...(await V.drawPages(c, pages, { exclude: new Set([...(drawn.photoId ? [drawn.photoId] : []), ...drawn.photoIds]) }))]; }
     else if (c.auto && isBlog(c) && media.length < V.BLOG_AUTO_MEDIA) media = [...media, ...(await V.drawInfoCards(c, body, V.BLOG_AUTO_MEDIA - media.length).catch(() => [] as string[]))];
     visual = { by: 'server', fileId: drawn.fileId, at: new Date().toISOString(), photoId: drawn.photoId, rv: 3, tried: [...new Set([...tried, ...(drawn.photoId ? [drawn.photoId] : [])])].slice(-20), ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}),
       ...(drawn.template ? { template: drawn.template } : {}), ...(drawn.photoIds.length > 1 ? { photoIds: drawn.photoIds } : {}) };
