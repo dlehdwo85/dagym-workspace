@@ -27,7 +27,7 @@ export default function ContactsPage() {
   useEffect(() => { const t = setTimeout(() => setDq(q), 200); return () => clearTimeout(t); }, [q]);
   const list = useApi<List>(`/api/contacts?q=${encodeURIComponent(dq)}${tag ? `&tag=${encodeURIComponent(tag)}` : ''}${trash ? '&trash=1' : ''}`, [dq, tag, trash]);
   return (
-    <div className="mx-auto max-w-5xl space-y-3 p-3 sm:p-4" data-testid="contacts-page">
+    <div className="mx-auto max-w-5xl space-y-3" data-testid="contacts-page">
       <PageHeader title="연락처" icon={Contact} sub="고객·거래처 연락처는 문의·메일·문자·견적서를 보낼 때 자동으로 쌓이고, 받는 사람 칸에 이름을 치면 바로 채워집니다. 직원 개인 주소록은 가져오지 않습니다."
         actions={<div className="flex flex-wrap gap-1.5">
           <Button size="sm" variant="secondary" onClick={() => setImp(true)} data-testid="contacts-import"><Upload />가져오기</Button>

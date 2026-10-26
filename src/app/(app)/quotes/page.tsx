@@ -17,7 +17,7 @@ export default function QuotesPage() {
   const tpl = useApi<{ templates: { id: string; company: string; name: string; isDefault: boolean }[]; companies: { key: string; name: string; isDefault: boolean }[] }>('/api/quotes/templates');
   const [open, setOpen] = useState(false);
   return (
-    <div className="mx-auto max-w-5xl space-y-3 p-3 sm:p-4" data-testid="quotes-page">
+    <div className="mx-auto max-w-5xl space-y-3" data-testid="quotes-page">
       <PageHeader title="견적서" icon={FileText} sub="AI 비서에게 “○○에 견적서 만들어줘”라고 하거나 여기서 직접 만듭니다. 금액은 서버가 계산하고 A4 한 장으로 고정됩니다."
         actions={<Button onClick={() => setOpen(true)} data-testid="quote-new"><Plus />새 견적서</Button>} />
       {tpl.data && tpl.data.companies.length > 1 && (

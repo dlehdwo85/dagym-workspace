@@ -13,7 +13,7 @@ export default function NoticesPage() {
   const list = useApi<{ notices: Notice[]; unread: number; canWrite: boolean }>(`/api/notices${unreadOnly ? '?unread=1' : ''}`);
   const [open, setOpen] = useState(false);
   return (
-    <div className="mx-auto max-w-4xl space-y-3 p-3 sm:p-4" data-testid="notices-page">
+    <div className="mx-auto max-w-4xl space-y-3" data-testid="notices-page">
       <PageHeader title="공지" icon={Megaphone} sub={list.data ? `안 읽은 공지 ${list.data.unread}건` : undefined}
         actions={list.data?.canWrite && <Button onClick={() => setOpen(true)} data-testid="notice-new"><Plus />공지 쓰기</Button>} />
       <div className="flex gap-1.5" role="tablist">

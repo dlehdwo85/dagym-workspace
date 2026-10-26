@@ -71,7 +71,7 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
   const titleHit = (w: string) => wantTitle.some((t) => t === w || (t.length >= 2 && w.length >= 2 && (t.startsWith(w) || w.startsWith(t))));
   // #235 ⓒ 사진 AI 설명(한 줄·장면·태그·읽히는 글자)도 브랜드·낱말 맞추기에 — 낱말 점수는 제한(설명이 긴 사진이 브랜드 사진을 앞지르지 않게) · 흐린 사진 −3
   const has = (r: (typeof rows)[number], name: string) => !!name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase().includes(name.toLowerCase());
-  const out: { id: string; title: string; score: number; k: number; vision: unknown; description: string | null; hit: number }[] = []; // hit = 180차 제목·본문 낱말이 맞은 수(0 = 글과 관련 없음)
+  const out: { id: string; title: string; score: number; k: number; vision: unknown; description: string | null; hit: number; brand: boolean }[] = []; // hit = 180차 제목·본문 낱말이 맞은 수(0 = 글과 관련 없음) · brand = 181차 이 브랜드 이름이 사진에 있음
   for (const [k, r] of rows.entries()) {
     if (exclude.has(r.id) || (mode === 'cover' ? !backdropOk(r) : !bodyOk(r))) continue; // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽·'쓰지 않음'만 빼고
     const fl = photoFlags(r.vision); // 171차 ⓒ: 누운 사람·뒷모습·어두운 사진은 바탕(표지·장)에서 뺌, 블로그 본문에서는 뒤로
@@ -86,7 +86,7 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     if (visionOk(r.vision) && r.vision.quality === 'poor') score -= 3;
     if (mode === 'body' && visionOk(r.vision) && r.vision.text === 'much') score -= 2; // 로컬 10/25: 안내판 글자가 많은 실사는 본문에 쓰되 뒤로
     if (used.has(r.id)) score -= 4;
-    if (score > -5) out.push({ id: r.id, title: r.title, score, k, vision: r.vision, description: r.description, hit: hitT + hitB });
+    if (score > -5) out.push({ id: r.id, title: r.title, score, k, vision: r.vision, description: r.description, hit: hitT + hitB, brand: has(r, brand) });
   }
   return out.sort((a, b) => b.score - a.score || a.k - b.k); // 같은 점수면 최근 사진(목록 순서)
 }
@@ -218,8 +218,9 @@ async function brandDraw(c: Content) {
 const safeTitle = (c: Pick<Content, 'title'>) => c.title.replace(/^\s*\[시험\]\s*/, '').replace(/[\\/:*?"<>|\n]+/g, ' ').trim().slice(0, 50) || '자동 시안';
 /** 171차(로컬 10/26 평가 ⓑ '본문 장이 전부 브랜드색 단색+글자'): 실사를 깔 장 — 행동 장은 빼고, 색 장과 번갈아 두 번째 장부터(장이 하나면 그 장)
  *  172차(로컬 10/26 ⑥ 레퍼런스 — 사례형 글은 사진 장이 절반 넘음): 본문 장의 절반(올림)까지 — 2장이면 1장, 3장이면 2장(둘째·셋째), 4장이면 2장(둘째·넷째). 사진이 모자라면 있는 만큼 */
-export function photoSlots(pages: CardPage[]): number[] {
-  const idx = pages.map((p, k) => (p.role === 'cta' ? -1 : k)).filter((k) => k >= 0);
+export function photoSlots(pages: CardPage[], story = false): number[] {
+  // 181차(로컬 10/26 14:00 ⓐ): 스토리 마지막 프레임은 행동 프레임(원고 규칙 = 문의·저장·프로필) — 카드뉴스 cta 장처럼 사진을 안 깖
+  const idx = pages.map((p, k) => (p.role === 'cta' || (story && k === pages.length - 1) ? -1 : k)).filter((k) => k >= 0);
   if (idx.length <= 1) return idx;
   const odd = idx.filter((_, j) => j % 2 === 1); const even = idx.filter((_, j) => j % 2 === 0).reverse(); // 표지 바로 다음 장은 되도록 색 장으로
   return [...odd, ...even].slice(0, Math.ceil(idx.length / 2)).sort((a, b) => a - b);
@@ -242,20 +243,22 @@ export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: S
   if (!actor) throw badRequest('자료실에 저장할 사람이 없습니다(활성 계정 없음)');
   const { saveGeneratedFile } = await import('./library'); const { libBytes } = await import('./mktVideo');
   for (const p of pages) { delete p.photoId; delete p.rel; delete p.pool; } // 다시 그릴 때 예전 장의 사진 표시는 지우고 새로 고름
-  const slots = photoSlots(pages);
+  const slots = photoSlots(pages, c.kind === 'story');
   if (slots.length) {
     const others = otherBrandNames(await otherBrands(c.tenant, c.brand_id, { site: false })).filter((n) => n !== brand);
     const exclude = new Set([...(opts.exclude ?? []), ...(await nearPosts(c)).flatMap((r) => r.ps)]);
     // 180차(로컬 10/26 13:25 ①: 하이링크 스토리 5번째 장에 글('흐름은 프로필에서')과 관련 없는 GX룸 사진 · 다짐 피드 실사 1장이 사진 풀 부족 탓인지 노트로는 알 수 없음):
     //  장마다 후보 순위를 먼저 매기고 ① 글과 낱말이 맞는 사진(hit>0)이 있는 장부터 — 가장 잘 맞는 장이 먼저 가져감(순서대로 집으면 앞 장이 뒤 장의 '얼굴 등록' 사진을 가져감)
     //  ② 남은 장은 브랜드 실사 아무거나 깔되 rel 'weak'(관련 약함) 표시 · pool = 고를 때 쓸 수 있던 후보 수(표지·가까운 글 사진 제외 뒤) → 노트 '후보 m장'. 쓸 사진이 더 없으면 나머지 장은 색 바탕
+    //  181차(로컬 10/26 14:00 ⓑ: 브랜드 이름 없는 GX룸 사진이 다짐 피드·하이링크 스토리 양쪽에 쓰임): ②(아무거나)는 이 브랜드 이름이 있는 사진만 — 브랜드 미지정 사진은 글과 낱말이 맞을 때(①)만 쓰고, 후보 수도 그 둘만 셈
     const ranked = new Map<number, Awaited<ReturnType<typeof rankPhotos>>>();
     for (const k of slots) ranked.set(k, await rankPhotos({ ...c, title: pages[k].title }, brand, others, `${pages[k].title} ${pages[k].body} ${c.title}`, exclude));
-    const pool = Math.max(0, ...[...ranked.values()].map((r) => r.length));
+    const usable = (r: { id: string; hit: number; brand: boolean }, fit: boolean) => !exclude.has(r.id) && (fit ? r.hit > 0 : r.brand);
+    const pool = Math.max(0, ...[...ranked.values()].map((r) => r.filter((x) => x.brand || x.hit > 0).length));
     for (const k of slots) pages[k].pool = pool;
-    const best = (k: number) => ranked.get(k)?.find((r) => !exclude.has(r.id) && r.hit > 0)?.hit ?? 0;
+    const best = (k: number) => ranked.get(k)?.find((r) => usable(r, true))?.hit ?? 0;
     const take = (k: number, fit: boolean) => {
-      const top = ranked.get(k)?.find((r) => !exclude.has(r.id) && (!fit || r.hit > 0));
+      const top = ranked.get(k)?.find((r) => usable(r, fit));
       if (!top) return;
       pages[k].photoId = top.id; if (!fit) pages[k].rel = 'weak'; exclude.add(top.id);
     };
@@ -321,9 +324,25 @@ async function nearPosts(c: Content): Promise<{ t: string | null; ps: string[] }
     order by abs(extract(epoch from (coalesce(scheduled_at, created_at) - ${at}::timestamptz))) limit 5`;
   return rows.map((r) => ({ t: r.t, ps: [r.p, ...(r.ps ?? []), ...(r.pp ?? [])].filter((x): x is string => !!x) }));
 }
+/** #262(대표 10/25 ④ 노트북 목업 틀): 자료실 '영상 화면 캡처'를 읽어 세로(휴대폰 틀)·가로(노트북 틀) 캡처로 나눔 — 다른 브랜드 이름이 든 캡처는 빼고 이 브랜드 이름이 든 것 먼저, 최근 8장까지(가로·세로는 파일을 열어야 앎) */
+type Shot = { id: string; title: string; data: Buffer };
+async function screenShots(tenant: string, brand: string, others: string[]): Promise<{ any: Shot[]; tall: Shot[]; wide: Shot[] }> {
+  const { libBytes, videoAssets } = await import('./mktVideo');
+  const has = (r: { title: string; folder: string; tags?: string[] | null; description?: string | null }, n: string) => !!n && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''}`.toLowerCase().includes(n.toLowerCase());
+  const rows = (await videoAssets(tenant, '영상 화면 캡처')).filter((r) => !others.some((o) => has(r, o))).sort((x, y) => Number(has(y, brand)) - Number(has(x, brand))).slice(0, 8);
+  const sharp = (await import('sharp')).default;
+  const out = { any: [] as Shot[], tall: [] as Shot[], wide: [] as Shot[] };
+  for (const r of rows) {
+    const f = await libBytes(tenant, r.id, /^image\//).catch(() => null); if (!f) continue;
+    const m = await sharp(f.data).metadata().catch(() => null); const [w, hh] = (m?.orientation ?? 1) >= 5 ? [m?.height ?? 0, m?.width ?? 0] : [m?.width ?? 0, m?.height ?? 0];
+    const sh: Shot = { id: r.id, title: r.title, data: f.data };
+    out.any.push(sh); if (w && hh && w / hh >= 1.2) out.wide.push(sh); else if (w && hh && w / hh <= 0.8) out.tall.push(sh);
+  }
+  return out;
+}
 /** #544 피드 틀로 그리기: 같은 브랜드에서 게시 시각이 가까운 5개 글의 틀·사진은 빼고(요청 C §3-2 연속 같은 표지 금지) → 칸(AI card·글)·사진·화면 캡처로 쓸 수 있는 틀 중 덜 쓴 것 */
 async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFeedTemplates').Kit; brand: string; others: string[]; head: string; sub: string; H: number; logo: Buffer | null; font: Buffer | null; opts: DrawOpts }) {
-  const sql = db(); const F = await import('./mktFeedTemplates'); const { libBytes, videoAssets } = await import('./mktVideo');
+  const sql = db(); const F = await import('./mktFeedTemplates'); const { libBytes } = await import('./mktVideo');
   const [me] = await sql<{ card: any }[]>`select quality->'card' as card from mkt_contents where id = ${c.id}`;
   const near = await nearPosts(c);
   const usage = Object.fromEntries((c.brand_id ? await sql<{ t: string; n: number }[]>`select t, count(*)::int as n from (select quality->'visual'->>'template' as t from mkt_contents
@@ -334,17 +353,18 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
   const ranked = keep ? (await sql<{ id: string; title: string }[]>`select id::text, coalesce(nullif(title, ''), file_name) as title from library_files where id = any(${keep}::uuid[]) and tenant = ${c.tenant} and deleted_at is null`)
       .sort((x, y) => keep.indexOf(x.id) - keep.indexOf(y.id))
     : a.opts.photoId === null ? [] : await rankPhotos(c, a.brand, a.others, `${c.title} ${body}`, exclude);
-  const has = (r: { title: string; folder: string; tags?: string[] | null; description?: string | null }, n: string) => !!n && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''}`.toLowerCase().includes(n.toLowerCase());
-  const screens = a.kit.templates.includes('phone') ? (await videoAssets(c.tenant, '영상 화면 캡처')).filter((r) => !a.others.some((o) => has(r, o))).sort((x, y) => Number(has(y, a.brand)) - Number(has(x, a.brand))) : [];
+  // #262(대표 10/25 ④ 노트북 목업 틀): 화면 캡처를 세로(휴대폰 틀)·가로(노트북 틀)로 나눠 읽음 — 그 틀을 골랐을 때만
+  const shots = a.kit.templates.includes('phone') || a.kit.templates.includes('laptop') ? await screenShots(c.tenant, a.brand, a.others) : { any: [], tall: [], wide: [] };
   const hints = F.hintsOf({ head: a.head, sub: a.sub, title: c.title, body, card: c.card ?? me?.card ?? null, kit: a.kit });
-  const pool = a.kit.templates.filter((t) => F.eligible(t, hints, { photo: ranked.length > 0, photos: ranked.length, screen: screens.length > 0 }));
+  const pool = a.kit.templates.filter((t) => F.eligible(t, hints, { photo: ranked.length > 0, photos: ranked.length, screen: shots.any.length > 0, screenWide: shots.wide.length > 0 }));
   const template = F.chooseTemplate(pool, { near: near.map((r) => r.t), usage, seed: `${c.id}:${c.current_version}`, prefer: a.opts.template, avoid: a.opts.notTemplate }) ?? 'title'; // 쓸 수 있는 틀이 없으면 제목형(키트 색)
   const need = F.FEED_TEMPLATES[template].need as string | null;
   const pick = need === 'photo' ? ranked.slice(0, 1) : need === 'photos4' ? ranked.slice(0, 4) : [];
   const files = (await Promise.all(pick.map(async (p) => ({ p, f: await libBytes(c.tenant, p.id, /^image\//).catch(() => null) })))).filter((x) => x.f);
-  const screen = need === 'screen' && screens[0] ? await libBytes(c.tenant, screens[0].id, /^image\//).catch(() => null) : null;
+  const screen = need === 'screen' ? shots.tall[0] ?? shots.any[0] ?? null : null; // 휴대폰 틀은 세로 캡처 먼저
+  const screenWide = need === 'screen_wide' ? shots.wide[0] ?? null : null;
   const set = F.EVENT_SETS[F.hash(c.id) % F.EVENT_SETS.length];
-  const png = await F.renderFeed({ t: template, kit: a.kit, brand: a.brand, H: a.H, h: hints, photo: files[0]?.f?.data ?? null, photos: files.map((x) => ({ data: x.f!.data, label: F.labelOf(x.p.title) })), screen: screen?.data ?? null, logo: a.logo, font: a.font, set });
+  const png = await F.renderFeed({ t: template, kit: a.kit, brand: a.brand, H: a.H, h: hints, photo: files[0]?.f?.data ?? null, photos: files.map((x) => ({ data: x.f!.data, label: F.labelOf(x.p.title) })), screen: screen?.data ?? null, screenWide: screenWide?.data ?? null, logo: a.logo, font: a.font, set });
   return { png, template, photoIds: files.map((x) => x.p.id), photoTitle: files[0]?.p.title ?? null };
 }
 
@@ -457,7 +477,7 @@ export async function feedPreview(u: SessionUser, id: string, i: { feed?: import
   await assertSpace(u, 'marketing');
   if (!isAdmin(u)) throw forbidden('브랜드 키트는 관리자만 고칠 수 있습니다');
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('브랜드를 찾을 수 없습니다');
-  const sql = db(); const t = tenantOf(u); const F = await import('./mktFeedTemplates'); const D = await import('./mktCarouselDraw'); const { libBytes, videoAssets } = await import('./mktVideo');
+  const sql = db(); const t = tenantOf(u); const F = await import('./mktFeedTemplates'); const D = await import('./mktCarouselDraw'); const { libBytes } = await import('./mktVideo');
   const [b] = await sql<any[]>`select id, name, color, video, feed, intro from mkt_brands where id = ${id} and tenant = ${t}`;
   if (!b) throw notFound('브랜드를 찾을 수 없습니다');
   const feed = i.feed ? F.normalizeFeed(i.feed) : b.feed;
@@ -475,11 +495,10 @@ export async function feedPreview(u: SessionUser, id: string, i: { feed?: import
   const fake = { id: '00000000-0000-0000-0000-000000000000', tenant: t, brand_id: id, title, channel: 'instagram', kind: 'feed', created_by: null, current_version: 0 };
   const ranked = (await rankPhotos(fake, brand, others, `${title} ${body}`)).slice(0, 4);
   const files = (await Promise.all(ranked.map(async (p) => ({ p, f: await libBytes(t, p.id, /^image\//).catch(() => null) })))).filter((x) => x.f);
-  const has = (r: { title: string; folder: string; tags?: string[] | null; description?: string | null }, n: string) => !!n && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''}`.toLowerCase().includes(n.toLowerCase());
-  const caps = (await videoAssets(t, '영상 화면 캡처')).filter((r) => !others.some((o) => has(r, o))).sort((x, y) => Number(has(y, brand)) - Number(has(x, brand)));
-  const screen = caps[0] ? await libBytes(t, caps[0].id, /^image\//).catch(() => null) : null;
+  const shots = await screenShots(t, brand, others); const screen = shots.tall[0] ?? shots.any[0] ?? null; const screenWide = shots.wide[0] ?? null; // #262 세로 = 휴대폰 틀 · 가로 = 노트북 틀
   const sharp = (await import('sharp')).default;
   const gray = await sharp({ create: { width: 1080, height: 1350, channels: 3, background: '#9CA3AF' } }).jpeg().toBuffer(); // 사진·화면 자리(예시)
+  const grayWide = await sharp({ create: { width: 1366, height: 854, channels: 3, background: '#9CA3AF' } }).jpeg().toBuffer(); // #262 노트북 화면 자리(예시)
   const photos = files.length >= 4 ? files.map((x) => ({ data: x.f!.data, label: F.labelOf(x.p.title) })) : [...files.map((x) => ({ data: x.f!.data, label: F.labelOf(x.p.title) })), ...Array.from({ length: 4 - files.length }, () => ({ data: gray, label: '사진 자리' }))];
   const [lg, ft] = await Promise.all([libBytes(t, b.video?.logoFileId, /^image\//).catch(() => null), libBytes(t, b.video?.fontFileId, /font|\.(otf|ttf)$/i).catch(() => null)]);
   const list = i.all || !kit.templates.length ? F.TEMPLATE_IDS : kit.templates;
@@ -487,10 +506,10 @@ export async function feedPreview(u: SessionUser, id: string, i: { feed?: import
   for (const [k, tp] of list.entries()) {
     const need = F.FEED_TEMPLATES[tp].need as string | null;
     const note = need === 'photo' && !files.length ? "회색 = 사진 자리 — 자료실 '마케팅/시안 바탕(글자 없는 사진)'에 사진을 올리면 이 틀을 씁니다"
-      : need === 'photos4' && files.length < 4 ? `사진 ${files.length}장 — 시안 바탕 사진이 4장 이상일 때 이 틀을 씁니다` : need === 'screen' && !screen ? "회색 = 화면 자리 — 자료실 '영상 화면 캡처' 폴더에 화면 캡처를 올리면 이 틀을 씁니다"
+      : need === 'photos4' && files.length < 4 ? `사진 ${files.length}장 — 시안 바탕 사진이 4장 이상일 때 이 틀을 씁니다` : need === 'screen' && !screen ? "회색 = 화면 자리 — 자료실 '영상 화면 캡처' 폴더에 화면 캡처를 올리면 이 틀을 씁니다" : need === 'screen_wide' && !screenWide ? "회색 = 화면 자리 — 자료실 '영상 화면 캡처' 폴더에 PC(가로) 화면 캡처를 올리면 이 틀을 씁니다"
         : need === 'points' && real.points.length < 3 ? '예시 글 — 글에 핵심이 3개 이상일 때 이 틀을 씁니다' : need === 'compare' && !(real.left && real.right) ? '예시 글 — 글이 두 가지를 견줄 때 이 틀을 씁니다'
           : need === 'prices' && real.prices.length < 2 ? '예시 금액 — 브랜드 키트 재료(주력 상품)에 금액이 2개 이상 있을 때 이 틀을 씁니다' : null;
-    const png = await F.renderFeed({ t: tp, kit, brand, H: 1350, h, photo: photos[0].data, photos, screen: screen?.data ?? gray, logo: lg?.data ?? null, font: ft && /\.(otf|ttf)$/i.test(ft.name) ? ft.data : null, set: F.EVENT_SETS[k % F.EVENT_SETS.length] });
+    const png = await F.renderFeed({ t: tp, kit, brand, H: 1350, h, photo: photos[0].data, photos, screen: screen?.data ?? gray, screenWide: screenWide?.data ?? grayWide, logo: lg?.data ?? null, font: ft && /\.(otf|ttf)$/i.test(ft.name) ? ft.data : null, set: F.EVENT_SETS[k % F.EVENT_SETS.length] });
     const jpg = await sharp(png).resize(540).jpeg({ quality: 82 }).toBuffer();
     images.push({ template: tp, label: F.FEED_TEMPLATES[tp].label, desc: F.FEED_TEMPLATES[tp].desc, note, src: `data:image/jpeg;base64,${jpg.toString('base64')}` });
   }

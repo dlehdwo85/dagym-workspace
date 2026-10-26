@@ -36,7 +36,7 @@ export default function QuotePage() {
   };
   const smsDraft = async () => { try { setSms(await api(`/api/quotes/${id}/sms`, { body: {} })); } catch (e: any) { toast.error(e.message); } };
   return (
-    <div className="mx-auto max-w-4xl space-y-3 p-3 sm:p-4" data-testid="quote-page">
+    <div className="mx-auto max-w-4xl space-y-3" data-testid="quote-page">
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => router.push('/quotes')} className="inline-flex size-9 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="견적서 목록"><ArrowLeft className="size-5" /></button>
         <div className="min-w-0 flex-1">
