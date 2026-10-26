@@ -13,6 +13,16 @@ before(async () => {
 });
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 const deliveries = (userId, type) => sql`select d.next_attempt_at, d.status from notification_deliveries d join notifications n on n.id = d.notification_id where n.user_id = ${userId} and n.type = ${type}`;
+/** 업무 POST 등 쓰기 요청 뒤 백그라운드 발송(after → dispatchPending)이 이 알림의 배달 행을 다 다룰 때까지 기다림 —
+ *  보냄·실패 기록(이 파일엔 가짜 FCM 서버가 없어 '2분 뒤 재시도'로 남음), 또는 조용한 시간으로 미뤄져 아무도 안 건드림 */
+const settled = async (notificationId) => {
+  for (let i = 0; i < 150; i++) {
+    const rows = await sql`select attempts, status, error, next_attempt_at > now() + interval '1 minute' as deferred from notification_deliveries where notification_id = ${notificationId}`;
+    if (rows.length && rows.every((d) => (d.attempts > 0 && (d.status !== 'pending' || d.error)) || (d.attempts === 0 && d.deferred))) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.fail('업무를 만든 뒤 백그라운드 발송이 15초 안에 끝나지 않음');
+};
 
 describe('알림 다이어트', () => {
   test('종류별 푸시 기본값: 보낸 결과·자료실 정리·반복 생성은 끔, 배정·검토·멘션·일정·요청 완료는 켬 · 조용한 시간 기본 22~07(시험 서버는 QUIET_DEFAULT=off 라 null)·끄기 저장', async () => {
@@ -104,9 +114,12 @@ describe('알림에서 바로 처리', () => {
     // 처리된 알림의 대기 푸시는 보내지 않음
     const id3 = (await ctx.owner.ok('POST', '/api/tasks', { title: '푸시 전 처리', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
     const n3 = (await ctx.staffA.client.ok('GET', '/api/notifications')).items.find((x) => x.type === 'task_assigned' && x.entity_id === id3);
+    // CI 1505: 업무 POST 뒤 백그라운드 발송이 이 행을 선점해 보내는 중일 수 있다. 그 발송의 실패 기록('2분 뒤 재시도')이 아래 되돌리기보다 늦게 써지면
+    // 행이 pending·2분 뒤로 남아 [확인] 뒤 발송도 tick 도 집어 가지 못했다(배달 상태 pending 그대로) → 그 발송이 끝난 뒤에 되돌린다
+    await settled(n3.id);
     await sql`update notification_deliveries set status = 'pending', next_attempt_at = now() where notification_id = ${n3.id}`;
     await ctx.staffA.client.ok('POST', `/api/notifications/${n3.id}/action`, { action: 'ack' });
-    // 전체 스위트에서는 앞 요청의 piggyback tick 이 잠금(4분)을 쥐고 있어 이번 tick 이 '이전 실행이 진행 중'으로 건너뛸 수 있음 → 처리될 때까지 몇 번 더
+    // [확인] 응답 뒤 백그라운드 발송이나 tick 의 발송이 집어 가 '이미 처리됨'으로 건너뜀 — 백그라운드 쪽이 아직이면 처리될 때까지 tick 을 몇 번 더
     let statuses = [];
     for (let i = 0; i < 12; i++) {
       await tick();
