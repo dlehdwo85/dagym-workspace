@@ -65,7 +65,7 @@ test('피드 = 카드뉴스: 원고 slides(표지 + 4장) → 표지 뒤 4장을
   const m2 = await meta(c.media_ids[1]); const m5 = await meta(c.media_ids[4]);
   assert.deepEqual([m2.folder, m2.meta.page, m2.meta.of, m2.meta.role, m2.meta.contentId], ['마케팅/자동 시안', 2, 5, 'problem', id]);
   assert.deepEqual([m5.meta.page, m5.meta.role], [5, 'cta']);
-  assert.match(c.note, /시안 서버 그리기\(.*\) · 카드 5장$/);
+  assert.match(c.note, /시안 서버 그리기\(.*\) · 카드 5장\(실사 0장 · 후보 0장\)$/); // 180차: 바탕 사진 후보가 없으면 '후보 0장'
   // 요청 C §3-4 캡션 가독성: 한 문장이 끝나면 줄바꿈 · 문단 3줄 · 해시태그는 맨 아래 한 줄
   assert.equal(c.body, '가을엔 운동 시작하기 좋습니다.\n아침 공기가 상쾌하고 땀도 덜 납니다.\n등록하면 첫 달 안내를 드립니다.\n\n문의 032-111-2222\n\n#헬스 #가을운동');
   assert.equal((await sql`select count(*)::int n from mkt_production_requests where content_id = ${id} and kind = 'image'`)[0].n, 0, '이미지 제작 카드 없음');
@@ -86,7 +86,7 @@ test('스토리 = 프레임: frames 3개(첫 프레임 = 표지) → 표지 1920
   assert.equal(c.media_ids.length, 3, '표지 + 프레임 2(첫 프레임은 표지라 뺌)');
   assert.deepEqual(c.quality.pages.map((p) => [p.role, p.title]), [['frame', '아침 30분이면 충분해요'], ['frame', '궁금하면 물어보세요']]);
   for (const m of c.media_ids) assert.equal(await dims(m), '1080x1920');
-  assert.match(c.note, /프레임 3장$/);
+  assert.match(c.note, /프레임 3장\(실사 0장 · 후보 0장\)$/);
   assert.match(c.body, /^요즘 운동 시작하셨나요\?\n스티커 제안: /, '스티커 줄은 그대로');
 });
 
@@ -230,7 +230,9 @@ test('171차 본문 장 실사 섞기 + 표지 사진 주제 관련도·누운 �
   const m3 = await meta(c.media_ids[2]);
   assert.deepEqual([m3.meta.page, m3.meta.role, m3.meta.photoId], [3, 'solution', plain]);
   assert.equal((await meta(c.media_ids[1])).meta.photoId, null);
-  assert.match(c.note, /카드 5장\(실사 1장\)$/, c.note);
+  // 180차: 후보 = 표지·누운 사람·어두운 사진을 뺀 '매장 전경' 1장뿐(사진 풀 부족이 노트에 보임) · 매장 전경은 '20분 인터벌' 글과 낱말이 안 맞아 '관련 약함'
+  assert.match(c.note, /카드 5장\(실사 1장 · 후보 1장 · 관련 약함 1장\)$/, c.note);
+  assert.deepEqual([c.quality.pages[1].rel, c.quality.pages[1].pool], ['weak', 1], JSON.stringify(c.quality.pages));
   assert.equal(await dims(c.media_ids[2]), '1080x1350');
   assert.ok(![dark, lying].includes(c.quality.visual.photoId) && !c.quality.pages.some((p) => [dark, lying].includes(p.photoId)));
   // 가까운 글(같은 브랜드·게시 시각 가까움): 표지는 제목(매장·입구)에 맞는 사진, 장은 앞 글의 표지·장 사진(러닝머신·매장 전경)을 다시 안 씀 → 남는 바탕 사진 없음 = 색 바탕
@@ -242,5 +244,30 @@ test('171차 본문 장 실사 섞기 + 표지 사진 주제 관련도·누운 �
   assert.equal(c2.media_ids.length, 5, JSON.stringify(c2.quality));
   assert.equal(c2.quality.visual.photoId, plain, JSON.stringify(c2.quality.visual));
   assert.deepEqual(c2.quality.pages.map((p) => p.photoId ?? null), [null, null, null, null], JSON.stringify(c2.quality.pages));
-  assert.match(c2.note, /카드 5장$/, c2.note);
+  assert.match(c2.note, /카드 5장\(실사 0장 · 후보 0장\)$/, c2.note); // 180차: 남은 바탕 사진이 없어서 색 바탕 — 후보 0장
+});
+
+// 180차(로컬 10/26 13:25 ① — 하이링크 스토리 5번째 장 'GX룸' 사진이 '흐름은 프로필에서' 글과 관련 약함): 장 사진은 글과 낱말이 맞는 장부터 배정 — 순서대로 집으면
+// 앞 장(관련 없음)이 가장 최근 사진('얼굴 인식 단말')을 가져가고 뒤 장('얼굴 등록')은 다른 사진을 받음 → 1차 = 맞는 장이 먼저, 2차 = 남은 장은 브랜드 실사 아무거나 + '관련 약함' 표시
+test('180차 장 사진은 낱말이 맞는 장부터(앞 장이 최근 사진을 가져가지 않음) · 남는 장은 관련 약함 표시 · 노트에 후보 수', async () => {
+  const jpg = (r, g, b) => sharp({ create: { width: 1200, height: 1500, channels: 3, background: { r, g, b } } }).jpeg().toBuffer();
+  const V = (o) => ({ v: 1, at: new Date().toISOString(), caption: '', scene: '', tags: [], kind: 'photo', text: 'none', promo: false, seen: '', people: 0, faces: false, quality: 'good', pose: 'none', facing: 'none', light: 'bright', ...o });
+  const photo = async (name, rgb, vision) => { const id = await libFile(ctx.ownerId, await jpg(...rgb), name); await sql`update library_files set vision = ${sql.json(vision)} where id = ${id}`; return id; };
+  const lobby = await photo('카드브랜드 로비.jpg', [100, 120, 140], V({ caption: '밝은 로비', scene: '넓고 밝은 로비. 사람은 없다.', tags: ['로비'] }));
+  const face = await photo('카드브랜드 얼굴 인식 단말.jpg', [80, 90, 120], V({ caption: '얼굴 인식 단말기', scene: '벽에 붙은 얼굴 인식 단말기 가까이.', tags: ['얼굴', '등록'] })); // 로비보다 최근 — 예전 규칙이면 앞 장(후기)이 가져감
+  const gate = await photo('카드브랜드 출입 게이트.jpg', [60, 100, 110], V({ caption: '스피드게이트 출입구', scene: '밝은 출입구의 스피드게이트.', tags: ['출입', '게이트'] })); // 표지(제목 낱말 '출입')
+  await sql`update mkt_contents set produce_at = now() + interval '7 days' where tenant = 'default' and status = 'draft' and produced_at is null`;
+  const slides = [{ role: 'cover', title: '출입 더 편하게', body: '' }, { role: 'problem', title: '카드 찍고 기다리죠', body: '아침마다 줄이 깁니다' }, { role: 'solution', title: '후기 한 줄', body: '한 달 만에 가벼워졌어요' },
+    { role: 'proof', title: '얼굴 등록 한 번', body: '얼굴만 보여 주면 됩니다' }, { role: 'cta', title: '궁금하면 물어보세요', body: '문의 032-111-2222' }];
+  const id = await slot('카드브랜드 출입 더 편하게', { at: new Date(Date.now() + 9 * 86400e3) });
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '출입 더 편하게', body: '카드 대신 얼굴 등록 한 번이면 됩니다.\n아침 줄이 사라집니다.\n문의 032-111-2222', brief: '', why: '', hooks: [], keyword: '', card: CARD, slides })] });
+  const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  assert.ok(run.produced.some((p) => p.id === id && !p.error), JSON.stringify(run.produced));
+  const c = await cur(id);
+  assert.equal(c.quality.visual.photoId, gate, `표지 = 제목 낱말(출입) 사진: ${JSON.stringify(c.quality.visual)}`);
+  // 둘째 장(후기, 관련 없음)·셋째 장(얼굴 등록): 셋째 장이 '얼굴 인식 단말'을 먼저 받고 둘째 장은 남은 로비(관련 약함)
+  assert.deepEqual(c.quality.pages.map((p) => p.photoId ?? null), [null, lobby, face, null], JSON.stringify(c.quality.pages));
+  assert.deepEqual(c.quality.pages.map((p) => p.rel ?? null), [null, 'weak', null, null], JSON.stringify(c.quality.pages));
+  const m = c.note.match(/카드 5장\(실사 2장 · 후보 (\d+)장 · 관련 약함 1장\)$/);
+  assert.ok(m && Number(m[1]) >= 2, c.note);
 });

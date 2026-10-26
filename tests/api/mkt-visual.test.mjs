@@ -132,7 +132,7 @@ test('시안 없이 걸린 자동 글: 정기 실행이 그려 붙여 v2 재승�
   }
   assert.deepEqual((await cur(b)).quality.issues, [], '시안 없음 줄만 있던 글 → 줄 지우고 승인 대기');
   assert.match((await cur(fb)).note, /사진: 바디랩 운동 사진\.jpg/, '브랜드마다 자기 사진');
-  assert.match((await cur(plain)).note, /브랜드 색 바탕( · 카드 \d장)?$/, '자기 사진이 없으면(다른 브랜드 사진 −10) 브랜드 색 바탕');
+  assert.match((await cur(plain)).note, /브랜드 색 바탕( · 카드 \d장(\(실사 \d장 · 후보 \d+장\))?)?$/, '자기 사진이 없으면(다른 브랜드 사진 −10) 브랜드 색 바탕');
   assert.equal(await dims((await cur(b)).media_ids[0]), '1080x1920');
   for (const id of [human, reel]) assert.deepEqual([(await cur(id)).current_version, (await cur(id)).media_ids.length], [1, 0], '사람 수정 요청·영상은 건드리지 않음');
   // 한 번 붙이면 다시 그리지 않음
@@ -310,7 +310,7 @@ test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네
   const a = await stuck('다짐 가을 소식', { brand: dg });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const ac = await cur(a);
-  assert.match(ac.note, /사진: 다짐 실제 운영 현장 사진\.jpg · 카드 3장$/, ac.note);
+  assert.match(ac.note, /사진: 다짐 실제 운영 현장 사진\.jpg · 카드 3장\(실사 0장 · 후보 0장\)$/, ac.note); // 180차: 바탕 사진은 고른 1장뿐(표지에 씀) → 장 후보 0장
   assert.deepEqual([ac.quality.visual.rv, ac.quality.visual.photoId, ac.quality.visual.tried], [3, real, [real]]);
   assert.ok(untagged);
   // ② 예전 규칙(rv 없음)으로 그래픽 위에 그린 승인 전 시안 → 정기 실행이 다시 그림 · 실사였던 것은 그대로 · 사람이 수정 요청한 것은 안 건드림
@@ -333,7 +333,7 @@ test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네
     const c = await cur(o.id);
     assert.deepEqual([c.status, c.current_version, c.media_ids.length], ['pending', 3, 3], JSON.stringify(c.quality)); // 요청 C: 표지 1장뿐이던 예전 글은 다시 그릴 때 장도 붙임(표지 + 2)
     assert.notEqual(c.media_ids[0], o.drawn);
-    assert.match(c.note, /^시안 다시 그리기\(바탕 = 브랜드 색 또는 고른 사진·서버·크레딧 0\) — 사진: 다짐 실제 운영 현장 사진\.jpg · 카드 3장$/);
+    assert.match(c.note, /^시안 다시 그리기\(바탕 = 브랜드 색 또는 고른 사진·서버·크레딧 0\) — 사진: 다짐 실제 운영 현장 사진\.jpg · 카드 3장\(실사 0장 · 후보 0장\)$/);
     assert.equal(c.quality.visual.rv, 3); assert.equal(c.quality.visual.photoId, real);
     assert.ok(c.quality.visual.tried.includes(real) && c.quality.visual.tried.length === 2, JSON.stringify(c.quality.visual));
     assert.ok((await sql`select 1 from notifications where entity_id = ${o.id} and title like '시안을 다시 그렸습니다(v3)%'`).length, '승인자 알림');

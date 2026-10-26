@@ -71,7 +71,7 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
   const titleHit = (w: string) => wantTitle.some((t) => t === w || (t.length >= 2 && w.length >= 2 && (t.startsWith(w) || w.startsWith(t))));
   // #235 ⓒ 사진 AI 설명(한 줄·장면·태그·읽히는 글자)도 브랜드·낱말 맞추기에 — 낱말 점수는 제한(설명이 긴 사진이 브랜드 사진을 앞지르지 않게) · 흐린 사진 −3
   const has = (r: (typeof rows)[number], name: string) => !!name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase().includes(name.toLowerCase());
-  const out: { id: string; title: string; score: number; k: number; vision: unknown; description: string | null }[] = [];
+  const out: { id: string; title: string; score: number; k: number; vision: unknown; description: string | null; hit: number }[] = []; // hit = 180차 제목·본문 낱말이 맞은 수(0 = 글과 관련 없음)
   for (const [k, r] of rows.entries()) {
     if (exclude.has(r.id) || (mode === 'cover' ? !backdropOk(r) : !bodyOk(r))) continue; // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽·'쓰지 않음'만 빼고
     const fl = photoFlags(r.vision); // 171차 ⓒ: 누운 사람·뒷모습·어두운 사진은 바탕(표지·장)에서 뺌, 블로그 본문에서는 뒤로
@@ -86,7 +86,7 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     if (visionOk(r.vision) && r.vision.quality === 'poor') score -= 3;
     if (mode === 'body' && visionOk(r.vision) && r.vision.text === 'much') score -= 2; // 로컬 10/25: 안내판 글자가 많은 실사는 본문에 쓰되 뒤로
     if (used.has(r.id)) score -= 4;
-    if (score > -5) out.push({ id: r.id, title: r.title, score, k, vision: r.vision, description: r.description });
+    if (score > -5) out.push({ id: r.id, title: r.title, score, k, vision: r.vision, description: r.description, hit: hitT + hitB });
   }
   return out.sort((a, b) => b.score - a.score || a.k - b.k); // 같은 점수면 최근 사진(목록 순서)
 }
@@ -162,7 +162,7 @@ export async function drawAutoVisual(c: Content, body: string, opts: DrawOpts = 
  * 요청 C §3-1(대표 10/25 22:20 #644, 결정 15-11): 피드 = 카드뉴스 3~5장(표지 → 문제 → 해결 → 근거 → 행동) · 스토리 = 3~5프레임(질문 → 답 → 행동).
  * 표지 뒤 장은 원고 AI 의 slides/frames 로, 없으면(예전 글·형식 깨짐) 본문 줄로 만든다. 모두 서버가 브랜드 색 바탕(행동 장은 검정)으로 그림 — 크레딧 0
  */
-export type CardPage = { role: 'problem' | 'solution' | 'proof' | 'cta' | 'frame'; title: string; body: string; photoId?: string | null }; // photoId = 171차 그 장에 깐 실사(없으면 색 바탕)
+export type CardPage = { role: 'problem' | 'solution' | 'proof' | 'cta' | 'frame'; title: string; body: string; photoId?: string | null; rel?: 'weak'; pool?: number }; // photoId = 171차 그 장에 깐 실사(없으면 색 바탕) · rel 'weak' = 180차 글과 낱말이 안 맞는 사진(관련 약함) · pool = 고를 때 쓸 수 있던 실사 후보 수
 /** 표지 포함 장 수 */
 export const PAGES_MIN = 3, PAGES_MAX = 5;
 const PAGE_ROLES = ['problem', 'solution', 'proof', 'cta'];
@@ -224,8 +224,13 @@ export function photoSlots(pages: CardPage[]): number[] {
   const odd = idx.filter((_, j) => j % 2 === 1); const even = idx.filter((_, j) => j % 2 === 0).reverse(); // 표지 바로 다음 장은 되도록 색 장으로
   return [...odd, ...even].slice(0, Math.ceil(idx.length / 2)).sort((a, b) => a - b);
 }
-/** 장 노트 — 실사를 깐 장 수 */
-export const photoNote = (pages: CardPage[] | null | undefined) => { const k = (pages ?? []).filter((p) => p.photoId).length; return k ? `(실사 ${k}장)` : ''; };
+/** 장 노트 — 실사를 깐 장 수 · 180차(로컬 10/26 13:25 ①): 고를 때 쓸 수 있던 후보 수(표지·가까운 글 사진 제외 뒤)와 글과 낱말이 안 맞는 '관련 약함' 장 수도 — 실사가 적은 게 사진 풀 부족인지 바로 보이게 */
+export const photoNote = (pages: CardPage[] | null | undefined) => {
+  const ps = pages ?? []; const k = ps.filter((p) => p.photoId).length; const weak = ps.filter((p) => p.photoId && p.rel === 'weak').length;
+  const pools = ps.map((p) => p.pool).filter((n): n is number => typeof n === 'number');
+  if (!k && !pools.length) return '';
+  return `(실사 ${k}장${pools.length ? ` · 후보 ${Math.max(...pools)}장` : ''}${weak ? ` · 관련 약함 ${weak}장` : ''})`;
+};
 /** 표지 뒤 장들을 그려 자료실(마케팅/자동 시안)에 저장 → 파일 id(표지 다음 순서). 피드 1080×1350 · 스토리 1080×1920(위·아래 안전 영역 — 아래 답장 칸은 비움)
  *  171차 ⓑ: photoSlots 장에는 그 장 글과 맞는 실사(바탕 규칙 — 글자 없는 실사, 누운 사람·뒷모습·어두움 제외)를 깔고 글은 흰색(아래 그늘)·제목은 브랜드 색 상자.
  *  표지 사진(opts.exclude)·같은 브랜드 가까운 글(nearPosts)의 표지·장 사진은 안 씀. 쓴 사진은 page.photoId 에 적어 quality.pages 로 저장됨(다음 글에서 빼는 데 씀) */
@@ -236,17 +241,26 @@ export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: S
   const actor = opts.actor ?? (await actorOf(c));
   if (!actor) throw badRequest('자료실에 저장할 사람이 없습니다(활성 계정 없음)');
   const { saveGeneratedFile } = await import('./library'); const { libBytes } = await import('./mktVideo');
-  for (const p of pages) delete p.photoId; // 다시 그릴 때 예전 장의 사진 표시는 지우고 새로 고름
+  for (const p of pages) { delete p.photoId; delete p.rel; delete p.pool; } // 다시 그릴 때 예전 장의 사진 표시는 지우고 새로 고름
   const slots = photoSlots(pages);
   if (slots.length) {
     const others = otherBrandNames(await otherBrands(c.tenant, c.brand_id, { site: false })).filter((n) => n !== brand);
     const exclude = new Set([...(opts.exclude ?? []), ...(await nearPosts(c)).flatMap((r) => r.ps)]);
-    for (const k of slots) {
-      const p = pages[k];
-      const [top] = await rankPhotos({ ...c, title: p.title }, brand, others, `${p.title} ${p.body} ${c.title}`, exclude);
-      if (!top) break; // 쓸 사진이 더 없으면 나머지 장은 색 바탕
-      p.photoId = top.id; exclude.add(top.id);
-    }
+    // 180차(로컬 10/26 13:25 ①: 하이링크 스토리 5번째 장에 글('흐름은 프로필에서')과 관련 없는 GX룸 사진 · 다짐 피드 실사 1장이 사진 풀 부족 탓인지 노트로는 알 수 없음):
+    //  장마다 후보 순위를 먼저 매기고 ① 글과 낱말이 맞는 사진(hit>0)이 있는 장부터 — 가장 잘 맞는 장이 먼저 가져감(순서대로 집으면 앞 장이 뒤 장의 '얼굴 등록' 사진을 가져감)
+    //  ② 남은 장은 브랜드 실사 아무거나 깔되 rel 'weak'(관련 약함) 표시 · pool = 고를 때 쓸 수 있던 후보 수(표지·가까운 글 사진 제외 뒤) → 노트 '후보 m장'. 쓸 사진이 더 없으면 나머지 장은 색 바탕
+    const ranked = new Map<number, Awaited<ReturnType<typeof rankPhotos>>>();
+    for (const k of slots) ranked.set(k, await rankPhotos({ ...c, title: pages[k].title }, brand, others, `${pages[k].title} ${pages[k].body} ${c.title}`, exclude));
+    const pool = Math.max(0, ...[...ranked.values()].map((r) => r.length));
+    for (const k of slots) pages[k].pool = pool;
+    const best = (k: number) => ranked.get(k)?.find((r) => !exclude.has(r.id) && r.hit > 0)?.hit ?? 0;
+    const take = (k: number, fit: boolean) => {
+      const top = ranked.get(k)?.find((r) => !exclude.has(r.id) && (!fit || r.hit > 0));
+      if (!top) return;
+      pages[k].photoId = top.id; if (!fit) pages[k].rel = 'weak'; exclude.add(top.id);
+    };
+    for (const k of [...slots].sort((a, b) => best(b) - best(a) || a - b)) if (best(k) > 0) take(k, true);
+    for (const k of slots) if (!pages[k].photoId) take(k, false);
   }
   const safe = safeTitle(c); const n = pages.length + 1; const ids: string[] = [];
   for (const [k, p] of pages.entries()) {
