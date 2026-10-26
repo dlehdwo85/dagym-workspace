@@ -580,6 +580,8 @@ export type PreflightInput = { channel: string; kind?: string | null; title?: st
   examples?: string[] | null; allow?: string[] | null }; // #235 ⓔ 잘 된 예시 글(베끼기 검사) · 재료(소개·사실 카드 — 같아도 됨)
 /** 승인함(승인 대기)에 올리기 전에 막는 문제 — 걸리면 '수정 요청' 칸에 이유와 함께(자동 제작). 사람이 올린 글은 상세에 보여 주기만.
  *  빈 글·한 줄·끊긴 문장·JSON 모양·[시험]·해시태그 초과·권유 2가지 이상·연락처(이미지 참조·사실 카드)·블로그 길이·스토리 형식·릴스/쇼츠 대본·틀 문구·다른 브랜드 이름 */
+const WORKIN_BRAND = /워크인|work-?in/i;
+const OLD_FREE = /5\s*명\s*(?:까지|이하)?\s*(?:영구|평생)?\s*무료|(?:영구|평생)\s*무료/;
 export function preflight(i: PreflightInput, rules: QualityRules = DEFAULT_RULES): string[] {
   const kind = i.kind ?? null; const story = kind === 'story'; const video = !!kind && VIDEO.has(kind); const blog = i.channel === 'blog' || kind === 'blog';
   let all = String(i.body ?? '').replace(/\r\n/g, '\n');
@@ -589,6 +591,8 @@ export function preflight(i: PreflightInput, rules: QualityRules = DEFAULT_RULES
   const out: string[] = [];
   if (JSON_LIKE.test(all)) out.push('본문이 코드(JSON) 모양 — 원고 칸 이름이 섞임');
   if (/\[시험\]/.test(all) || (!i.isTest && /\[시험\]/.test(i.title ?? ''))) out.push("'[시험]' 표시가 섞임");
+  // #178(#466 대표 결정 10/23: '5명 무료' 폐지 → 14일 무료 체험): 워크인 글에 옛 요금 문구가 남으면 막음 — 다른 브랜드 글에는 안 봄(업종 중립)
+  if (WORKIN_BRAND.test(i.brandName ?? '') && OLD_FREE.test(`${i.title ?? ''}\n${all}`)) out.push("옛 요금 문구('5명까지 무료'·'영구 무료') — 지금은 '14일 무료 체험'(#466)");
   const body = lines(all).filter((l) => !/^(?:#[^\s#]+\s*)+$/.test(l) && !STICKER_LINE.test(l)); // 해시태그만 있는 줄·스티커 제안 줄 빼고
   const content = body.join('\n');
   if (!story && !video && !blog && i.channel !== 'threads' && sentences(content).length < 2 && len(content) < 80) out.push('한 줄짜리 글(내용 부족) — 두 문장 이상');

@@ -191,3 +191,15 @@ test('제작의뢰실: 영상은 장면별 자막 → 초 단위 장면표(넘�
   assert.match(card.brief, /Shot list \(keep this timing\):\n1\. 0\.0-2\.7s Close-up of running shoes being tied/);
   assert.match(card.brief, /장면 구성\(초 단위·분당 낭독 속도 기준, 전체 [\d.]+초\):\n1\) 0\.0~2\.7초 «퇴근 후 20분이면 충분한 이유»/);
 });
+
+// #178(#466 대표 결정 10/23: '5명 무료' 폐지 → 14일 무료 체험): 워크인 글에 옛 요금 문구가 남으면 올리기 전 검사에 걸림 — 다른 브랜드 글은 그대로(업종 중립)
+test('#178 워크인 옛 요금 문구(5명까지 무료·영구 무료)는 검사에 걸림 · 다른 브랜드는 그대로', async () => {
+  const workin = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '워크인' })).id;
+  const body = '업무·영업·마케팅을 한 화면에서 정리하는 워크인입니다.\n5명까지 무료로 시작할 수 있습니다.\n문의는 홈페이지에서 받습니다.';
+  const w = await check(ctx.owner, { channel: 'instagram', kind: 'feed', body, brandId: workin });
+  assert.ok(w.preflight.some((x) => /옛 요금 문구/.test(x) && /14일 무료 체험/.test(x)), JSON.stringify(w.preflight));
+  const w2 = await check(ctx.owner, { channel: 'instagram', kind: 'feed', body: body.replace('5명까지 무료로', '14일 무료 체험으로'), brandId: workin });
+  assert.ok(!w2.preflight.some((x) => /옛 요금 문구/.test(x)), JSON.stringify(w2.preflight));
+  const d = await check(ctx.owner, { channel: 'instagram', kind: 'feed', body: '다짐 회원권 안내입니다.\n5명까지 무료 체험 수업을 드립니다.\n문의는 전화로 받습니다.', brandId: P.brand });
+  assert.ok(!d.preflight.some((x) => /옛 요금 문구/.test(x)), `다른 브랜드는 안 봄: ${JSON.stringify(d.preflight)}`);
+});
