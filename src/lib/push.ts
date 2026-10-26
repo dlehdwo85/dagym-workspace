@@ -1,7 +1,7 @@
 import webpush from 'web-push';
 import { importPKCS8, SignJWT } from 'jose';
 import { db } from './db';
-import { actionsFor } from './notifActions';
+import { actionsFor, GROUP_ACTIONS } from './notifActions';
 import { WN_CATEGORY_IDS, wnCategory } from './notifCategories';
 import { logError } from './log';
 
@@ -102,7 +102,7 @@ async function sendFcm(token: string, p: Payload, caps: string[] = []) {
 
 const kstDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 /**
- * #542 묶음 푸시: 오늘 안 읽은 같은 묶음이 2건 이상이면 '승인 마감 6시간 전: 6건 — 퇴근길 운동 외 5건'(링크 = 공통 화면, 버튼 없음).
+ * #542 묶음 푸시: 오늘 안 읽은 같은 묶음이 2건 이상이면 '승인 마감 6시간 전: 6건 — 퇴근길 운동 외 5건'(링크 = 공통 화면) · 184차 #676 버튼 [확인](묶음 전체 읽음)·[열기].
  * (c) tag = 묶음+날짜 — 1.1.2(시스템 알림)·웹은 같은 tag 가 앞 알림을 바꿔 그날 그 묶음은 알림창에 1개만 남음
  */
 async function groupPayload(sql: ReturnType<typeof db>, userId: string, meta: { group: string; head?: string; item?: string }, day: string): Promise<Partial<Payload>> {
@@ -115,7 +115,7 @@ async function groupPayload(sql: ReturnType<typeof db>, userId: string, meta: { 
   const space = meta.group.split(':')[0];
   return { ...base, title: `${meta.head ?? meta.group}: ${rows.length}건 — ${items[0]} 외 ${rows.length - 1}건`.slice(0, 200),
     body: items.slice(0, 5).map((x) => `· ${x}`).join('\n') + (rows.length > 5 ? `\n외 ${rows.length - 5}건` : ''),
-    link: paths.size === 1 ? [...paths][0] : `/notifications?space=${space}`, actions: [], taskId: null };
+    link: paths.size === 1 ? [...paths][0] : `/notifications?space=${space}`, actions: GROUP_ACTIONS.map(({ id, label, open }) => ({ id, label, ...(open ? { open } : {}) })), taskId: null };
 }
 
 /**

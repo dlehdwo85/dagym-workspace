@@ -26,5 +26,5 @@ export const GET = handler(async ({ req, user }) => {
   // #114 ⑦ 휴대폰 상단 '결재할 것 n건' — 같은 폴링에 실어 보낸다(별도 폴링 없음)
   const approvalsTodo = unreadOnly ? await (await import('@/lib/approvalForms')).todoCount(sql, user).catch(() => 0) : undefined;
   // #618: 푸시는 모든 알림에 [확인]이 붙지만, 웹 목록은 줄마다 [읽음]·[보관]이 있으므로 [확인]만 있는 줄은 버튼 없이(webActions)
-  return { items: items.map((n) => ({ ...n, actions: webActions(actionsFor(n as NotifRow)) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}) };
+  return { items: items.map((n) => ({ ...n, actions: webActions(actionsFor(n as NotifRow), !(n as { read_at?: string | null }).read_at) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}) };
 });

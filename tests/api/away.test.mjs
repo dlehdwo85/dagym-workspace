@@ -79,12 +79,12 @@ describe('#76 부재중 설정', () => {
 });
 
 describe('#111 일정 화상 회의 링크', () => {
-  test('만들기·목록·수정 · http(s) 아니면 400', async () => {
+  test('만들기·목록·수정 · 주소가 아니면 400(184차: 주소만 적으면 https:// 를 붙여 받음)', async () => {
     const cals = (await ctx.owner.ok('GET', '/api/calendars')).calendars;
     const mine = cals.find((c) => c.type === 'personal' && c.owner_user_id === ctx.ownerId) ?? cals.find((c) => c.type === 'personal');
     const day = addDays(today, 3);
     const body = { calendarId: mine.id, title: '화상 회의', start: `${day}T10:00:00+09:00`, end: `${day}T11:00:00+09:00` };
-    assert.equal((await ctx.owner.post('/api/events', { ...body, meetingUrl: 'zoom.us/j/123' })).status, 400);
+    assert.equal((await ctx.owner.post('/api/events', { ...body, meetingUrl: '회의실 3번' })).status, 400);
     const id = (await ctx.owner.ok('POST', '/api/events', { ...body, meetingUrl: 'https://meet.google.com/abc-defg-hij' })).id;
     const list = () => ctx.owner.ok('GET', `/api/events?from=${encodeURIComponent(`${day}T00:00:00+09:00`)}&to=${encodeURIComponent(`${addDays(day, 1)}T00:00:00+09:00`)}`);
     assert.equal((await list()).events.find((e) => e.id === id)?.meetingUrl, 'https://meet.google.com/abc-defg-hij');

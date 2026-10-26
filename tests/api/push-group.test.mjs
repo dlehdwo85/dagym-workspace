@@ -55,7 +55,8 @@ test('승인 마감 알림 3건(같은 정기 실행) → 목록은 3줄 · 푸�
   await sql`delete from job_locks where name = 'tick' and holder = 'push-group-test'`;
   const [m, ...more] = await flush(1);
   assert.equal(more.length, 0, '푸시는 1건');
-  assert.deepEqual([m.notification.title, m.data.link, m.android.notification.tag, m.data.actions], ['승인 마감 72시간 전: 3건 — 퇴근길 운동 외 2건', '/s/marketing/approvals', `${G}:${day}`, '[]']);
+  assert.deepEqual([m.notification.title, m.data.link, m.android.notification.tag, m.data.actions], ['승인 마감 72시간 전: 3건 — 퇴근길 운동 외 2건', '/s/marketing/approvals', `${G}:${day}`, JSON.stringify([{ id: 'ack', label: '확인' }, { id: 'view', label: '열기', open: true }])]); // 184차 #676: 묶음 푸시도 [확인](묶음 전체 읽음)·[열기]
+  assert.equal(m.apns.payload.aps.category, 'wn.ack.view', 'iOS 는 이미 등록된 [확인][열기] 묶음');
   assert.equal(m.notification.body, '· 퇴근길 운동\n· 주말 필라테스\n· 가을 회원 모집');
   const st = await sql`select d.status, d.error from notification_deliveries d join notifications n on n.id = d.notification_id where n.meta->>'group' = ${G} order by d.id`;
   assert.deepEqual(st.map((d) => d.status).sort(), ['sent', 'skipped', 'skipped']);
@@ -73,5 +74,5 @@ test('승인 마감 알림 3건(같은 정기 실행) → 목록은 3줄 · 푸�
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const one = (await flush(3)).at(-1);
   assert.deepEqual([one.notification.title, one.data.link, one.android.notification.tag], ['승인 마감 72시간 전: 설 연휴 운영 안내', `/s/marketing/approvals?c=${last}`, `${G}:${day}`]);
-  assert.notEqual(one.data.actions, '[]', '한 건이면 예전처럼 버튼');
+  assert.notEqual(one.data.actions, JSON.stringify([{ id: 'ack', label: '확인' }, { id: 'view', label: '열기', open: true }]), '한 건이면 그 알림 종류의 버튼(승인함 열기 등)');
 });
