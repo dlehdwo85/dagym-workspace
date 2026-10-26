@@ -10,10 +10,18 @@ export async function cal480({ owner, sql, BASE, SHOTS, addDays, today }) {
   await owner.locator('.fc-dayGridMonth-view').waitFor();
   await owner.waitForLoadState('networkidle');
   const cell = owner.locator(`.fc-dayGridMonth-view .fc-daygrid-day[data-date="${d}"]`);
-  const box = await cell.boundingBox();
-  await owner.mouse.click(box.x + box.width / 2, box.y + box.height - 10); // 칸 아래쪽 빈 곳(날짜 숫자·일정 피함)
   const qc = owner.getByTestId('quick-create');
-  await qc.waitFor();
+  // 179차: 칸 왼쪽 위 빈 곳(날짜 숫자는 오른쪽 위, 일정 칩은 그 아래)을 누른다 — 처음 잰 아래쪽 좌표를 다시 쓰면 방금 만든 칩에 닿아
+  // 미리보기가 열리고 빠른 입력이 안 뜸(CI 174·176 main 실패 화면). 미리보기·팝오버가 열렸으면 Esc 로 닫고 2번 더.
+  const clickEmpty = async () => {
+    for (let k = 0; k < 3; k++) {
+      await cell.click({ position: { x: 14, y: 10 } });
+      if (await qc.waitFor({ timeout: 5000 }).then(() => true, () => false)) return;
+      await owner.keyboard.press('Escape');
+    }
+    await qc.waitFor();
+  };
+  await clickEmpty();
   await qc.getByTestId('quick-save').waitFor();
   await qc.getByText(/종일$/).first().waitFor();
   assert.equal(await qc.getByTestId('quick-times').count(), 0, '월 칸 = 기본 종일(시각 칸 없음)');
@@ -38,9 +46,9 @@ export async function cal480({ owner, sql, BASE, SHOTS, addDays, today }) {
   assert.equal(ev.s, `${d} 14:00`); assert.equal(ev.e, '15:00');
   const [t] = await sql`select to_char(due_date, 'YYYY-MM-DD') due, to_char(due_time, 'HH24:MI') tm from tasks where title = '월 칸 시각 업무' and deleted_at is null`;
   assert.equal(t.due, d); assert.equal(t.tm, '14:00', '연결 업무 마감 시각 = 고른 시작 시각');
-  // 그대로 저장하면 종일(기본값 유지)
-  await owner.mouse.click(box.x + box.width / 2, box.y + box.height - 10);
-  await qc.waitFor();
+  // 그대로 저장하면 종일(기본값 유지) — 방금 만든 칩이 칸에 그려진 뒤(칸 높이가 바뀜) 빈 곳을 다시 누른다
+  await cell.getByText('월 칸 시각 업무').first().waitFor();
+  await clickEmpty();
   await qc.getByLabel('빠른 입력 제목').fill('월 칸 종일 일정');
   await qc.getByTestId('quick-save').click();
   await qc.waitFor({ state: 'detached' });

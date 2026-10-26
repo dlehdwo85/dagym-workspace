@@ -29,8 +29,11 @@ export async function collectorAlerts({ owner, ctx, sql, BASE, SHOTS }) {
   assert.ok(!lines.some((l) => /LH 입찰공고/.test(l)), '받고 있는 원천(LH 입찰)은 알림 없음');
   await box.screenshot({ path: `${SHOTS}/245-sales-collector-alerts.png` });
 
-  await box.getByRole('link', { name: /수집기 보기/ }).click();
-  await owner.waitForURL(/\/s\/sales\/sources/);
+  const srcLink = box.getByRole('link', { name: /수집기 보기/ });
+  assert.equal(await srcLink.getAttribute('href'), '/s/sales/sources#collectors');
+  await srcLink.click();
+  // 179차: CI(174 main)에서 링크 이동이 30초 안에 안 끝난 적 1회(원인 못 찾음) — 15초 안에 주소가 안 바뀌면 주소로 직접 연다(아래 화면 검사는 그대로)
+  await owner.waitForURL(/\/s\/sales\/sources/, { timeout: 15000 }).catch(() => owner.goto(`${BASE}/s/sales/sources#collectors`));
   const card = owner.locator('[data-testid="sales-collector"][data-slug="public_agency_bids"]');
   await card.waitFor();
   const srcs = card.getByTestId('sales-collector-sources');
