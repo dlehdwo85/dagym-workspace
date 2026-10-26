@@ -744,8 +744,9 @@ describe('알림: 서버 정기 실행·중복 방지·푸시 발송·실패 기
     // 2026-10-15 대표: 마감 하루 전 알림은 기본 꺼짐 — 켠 사람에게만
     const pre = await ctx.staffA.client.ok('GET', '/api/notifications/prefs');
     assert.equal(pre.settings.dueSoonHours, 0, '마감 임박(하루 전) 기본 끔');
-    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...pre.settings, dueSoonHours: 48 } }); // 48시간: 자정 직후에도 "내일 00:30" 이 창 안
-    const soon = (await ctx.owner.ok('POST', '/api/tasks', { title: '곧 마감', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 1), dueTime: '00:30' })).id;
+    await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...pre.settings, dueSoonHours: 48 } }); // 48시간: 자정 직후에도 "내일 20:00" 이 창 안
+    // 내일 20:00 — '내일 00:30' 이면 KST 23:30~00:30 에 도는 시험에서 기본 '1시간 전' 알림(due_soon)이 함께 나가 2건이 됨(188차 CI 1489)
+    const soon = (await ctx.owner.ok('POST', '/api/tasks', { title: '곧 마감', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 1), dueTime: '20:00' })).id;
     await tick(); await tick();
     assert.equal((await sql`select count(*)::int c from notifications where entity_id = ${old2} and type = 'overdue'`)[0].c, 0, '기한 초과는 첫날 1번만(이틀 지난 업무는 안 보냄)');
     const [{ c }] = await sql`select count(*)::int c from notifications where entity_id = ${id} and type = 'overdue' and user_id = ${ctx.staffA.id}`;

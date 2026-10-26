@@ -120,7 +120,8 @@ describe('메신저 2차', () => {
   });
 
   test('B9 일정 잡기: 내 개인 캘린더에 일정(참석자 = 방 참여자·고르기·글 붙임) + 방에 일정 카드, 참석 → 카드 참석 수, 방에 없는 사람 400, 대화 알림 대신 일정 초대 알림, 종일', async () => {
-    const start = new Date(Date.now() + 2 * 864e5); start.setUTCMinutes(0, 0, 0);
+    // 모레 오후 3시(KST) 고정 — '지금+2일 정각'이면 시험이 밤 11시(KST)에 돌 때 23:00~00:00 이 이틀에 걸쳐 카드 문구가 달라짐(188차 CI 1489·1490)
+    const start = new Date(`${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + 2 * 864e5))}T15:00:00+09:00`);
     const end = new Date(start.getTime() + 3600e3);
     assert.equal((await ctx.owner.req('POST', `/api/chat/rooms/${P.g}/event`, { title: '외부인', start: start.toISOString(), end: end.toISOString(), attendeeIds: [ctx.managerA.id] })).status, 400, '방에 없는 사람');
     const m0 = (await ctx.owner.ok('POST', `/api/chat/rooms/${P.g}/messages`, { body: '모레 오후 3시 현장 점검 같이 가요' })).id;
