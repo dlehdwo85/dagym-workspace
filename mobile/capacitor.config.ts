@@ -12,7 +12,8 @@ const config: CapacitorConfig = {
   server: {
     url: appUrl,
     cleartext: appUrl.startsWith('http://'),
-    allowNavigation: [...new Set([new URL(appUrl).host, 'work-in.dev', 'www.work-in.dev'])],
+    // 198차 결정 15-29 주소 분리: 1.1.4 부터 app.work-in.dev 도 앱 안에서 연다(빌드 때 APP_URL=https://app.work-in.dev 로 바꾸면 server.url 도 app.)
+    allowNavigation: [...new Set([new URL(appUrl).host, 'work-in.dev', 'www.work-in.dev', 'app.work-in.dev'])],
     errorPath: 'offline.html',
   },
   // 스토어 심사(10/19): 웹이 앱 안인지 알아보는 표시(결제 화면 숨김) — isNativePlatform 과 함께 씀
