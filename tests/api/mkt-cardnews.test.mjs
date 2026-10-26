@@ -202,3 +202,45 @@ test('시안 세트 API: 브랜드별 내일 피드·스토리 + 블로그 1건�
   assert.ok(new Date(feed.scheduled_at).getTime() > Date.now(), '내일 게시');
   assert.ok((await sql`select 1 from audit_logs where action = 'mkt.sample_set'`).length);
 });
+
+// 171차(로컬 10/26 시안 세트 평가 ⓑⓒ): 본문 장(카드·프레임)에 실사 1~2장(행동 장 빼고 색 장과 번갈아, 표지·가까운 글 사진 제외) · 표지 사진은 제목 낱말 관련도(+2씩)
+// · 누운 사람(예전 설명 = 자세 칸 없음 → 문장으로 판정)·어두운 사진(light dark)은 바탕(표지·장)에서 뺌
+test('171차 본문 장 실사 섞기 + 표지 사진 주제 관련도·누운 사람/어두운 사진 배제 · 가까운 글은 같은 사진 안 씀', async () => {
+  const jpg = (r, g, b) => sharp({ create: { width: 1200, height: 1500, channels: 3, background: { r, g, b } } }).jpeg().toBuffer();
+  const V = (o) => ({ v: 1, at: new Date().toISOString(), caption: '', scene: '', tags: [], kind: 'photo', text: 'none', promo: false, seen: '', people: 0, faces: false, quality: 'good', ...o });
+  const photo = async (name, rgb, vision) => { const id = await libFile(ctx.ownerId, await jpg(...rgb), name); await sql`update library_files set vision = ${sql.json(vision)} where id = ${id}`; return id; };
+  const plain = await photo('카드브랜드 매장 전경.jpg', [90, 110, 130], V({ caption: '매장 입구 전경', scene: '밝은 낮 매장 입구. 사람은 없다.', tags: ['매장', '입구'], pose: 'none', facing: 'none', light: 'bright' }));
+  const tread = await photo('카드브랜드 러닝머신.jpg', [70, 120, 90], V({ caption: '러닝머신 위에서 걷는 회원', scene: '밝은 실내에서 회원이 러닝머신 위를 걷는다.', tags: ['러닝머신', '유산소'], people: 1, pose: 'standing', facing: 'side', light: 'bright' }));
+  const dark = await photo('카드브랜드 야간 매장.jpg', [30, 30, 40], V({ caption: '러닝머신이 있는 야간 매장', scene: '조명을 끈 어두운 실내.', tags: ['러닝머신', '야간'], pose: 'none', facing: 'none', light: 'dark' }));
+  const lying = await photo('카드브랜드 매트 휴식.jpg', [120, 100, 90], V({ caption: '러닝머신 옆 매트에 누워 쉬는 회원', scene: '회원이 매트에 누워 쉬고 있다. 밝은 실내.', tags: ['러닝머신', '매트'], people: 1 })); // 가장 최근 + 제목 낱말 겹침 — 예전 규칙이면 이 사진이 표지
+  await sql`update mkt_contents set produce_at = now() + interval '7 days' where tenant = 'default' and status = 'draft' and produced_at is null`; // 앞 시험이 남긴 정기 칸이 같은 실행에서 먼저 만들어지며 가짜 답을 가져가지 않게
+  const slides = [{ role: 'cover', title: '러닝머신 유산소', body: '' }, { role: 'problem', title: '유산소, 지루하죠', body: '러닝머신만 타면 금방 질려요' }, { role: 'solution', title: '20분 인터벌', body: '빠르게 1분, 천천히 2분' },
+    { role: 'proof', title: '회원 후기', body: '한 달 만에 가벼워졌어요' }, { role: 'cta', title: '궁금하면 물어보세요', body: '문의 032-111-2222' }];
+  const id = await slot('카드브랜드 러닝머신 유산소 시작', { at: new Date(Date.now() + 4 * 86400e3) });
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '러닝머신 유산소 시작', body: '러닝머신 유산소, 20분이면 충분합니다.\n인터벌로 지루하지 않게 하세요.\n문의 032-111-2222', brief: '', why: '', hooks: [], keyword: '', card: CARD, slides })] });
+  const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  assert.ok(run.produced.some((p) => p.id === id && !p.error), JSON.stringify(run.produced));
+  const c = await cur(id);
+  assert.equal(c.media_ids.length, 5, JSON.stringify(c.quality));
+  // ⓒ 표지: 제목 낱말(러닝머신·유산소)과 맞는 실사 — 누운 사람(가장 최근)·어두운 사진은 뺌
+  assert.equal(c.quality.visual.photoId, tread, `표지 사진 = 러닝머신 실사: ${JSON.stringify(c.quality.visual)}`);
+  assert.match(c.note, /사진: 카드브랜드 러닝머신\.jpg/, c.note);
+  // ⓑ 본문 장: 행동 장 빼고 두 번째 장(해결)에 실사 1장(표지 사진·누운 사람·어두운 사진 제외 → 매장 전경) · 나머지는 색 바탕
+  assert.deepEqual(c.quality.pages.map((p) => p.photoId ?? null), [null, plain, null, null], JSON.stringify(c.quality.pages));
+  const m3 = await meta(c.media_ids[2]);
+  assert.deepEqual([m3.meta.page, m3.meta.role, m3.meta.photoId], [3, 'solution', plain]);
+  assert.equal((await meta(c.media_ids[1])).meta.photoId, null);
+  assert.match(c.note, /카드 5장\(실사 1장\)$/, c.note);
+  assert.equal(await dims(c.media_ids[2]), '1080x1350');
+  assert.ok(![dark, lying].includes(c.quality.visual.photoId) && !c.quality.pages.some((p) => [dark, lying].includes(p.photoId)));
+  // 가까운 글(같은 브랜드·게시 시각 가까움): 표지는 제목(매장·입구)에 맞는 사진, 장은 앞 글의 표지·장 사진(러닝머신·매장 전경)을 다시 안 씀 → 남는 바탕 사진 없음 = 색 바탕
+  const id2 = await slot('카드브랜드 매장 입구 안내', { at: new Date(Date.now() + 4 * 86400e3 + 3 * 3600e3) });
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '매장 입구 안내', body: '매장 입구가 새로 단장했습니다.\n처음 오시면 입구에서 안내를 받으세요.\n문의 032-111-2222', brief: '', why: '', hooks: [], keyword: '', card: CARD,
+    slides: slides.map((x) => (x.role === 'cover' ? { ...x, title: '매장 입구 안내' } : x)) })] });
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const c2 = await cur(id2);
+  assert.equal(c2.media_ids.length, 5, JSON.stringify(c2.quality));
+  assert.equal(c2.quality.visual.photoId, plain, JSON.stringify(c2.quality.visual));
+  assert.deepEqual(c2.quality.pages.map((p) => p.photoId ?? null), [null, null, null, null], JSON.stringify(c2.quality.pages));
+  assert.match(c2.note, /카드 5장$/, c2.note);
+});

@@ -47,7 +47,12 @@ interface WorkinNativePlugin {
   // #626 캡처 차단('android-secure-1'): 창에 FLAG_SECURE → 스크린샷·화면 녹화·최근 앱 미리보기·미러링 검정. 아이폰('ios-capture-detect-1')은 캡처를 감지해 'screenshot' 이벤트만(네이티브는 로컬)
   setSecureScreen(o: { on: boolean }): Promise<void>;
   addListener(ev: 'screenshot', fn: L): Promise<PluginListenerHandle>;
+  // #528 처음 시작 '휴대폰 알림 맞추기'('android-permissions-1', 로컬 7819a4c): 상태 한 번에 읽기 · '워크인 오늘' 위젯 추가 창 · 앱 알림 설정 화면(권한을 한 번 거절해 시스템 창이 다시 안 뜰 때)
+  permissionStatus(): Promise<PermissionStatus>;
+  requestPinWidget(): Promise<{ requested: boolean }>;
+  openNotificationSettings(): Promise<void>;
 }
+export type PermissionStatus = { notifications: boolean; fullScreen: boolean; exact: boolean; widgets: number; widgetPin: boolean; sdk?: number };
 const WorkinNative = registerPlugin<WorkinNativePlugin>('WorkinNative');
 export async function nativeCaps(): Promise<string[]> {
   if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('WorkinNative')) return [];
@@ -63,6 +68,18 @@ export async function alarmDeviceStatus() {
 }
 /** 안드로이드 14+ '전체화면 알림 허용' 설정 화면(그 아래 버전은 앱 알림 설정) */
 export const openAlarmSettings = () => WorkinNative.openAlarmSettings();
+const PERMISSIONS_CAP = 'android-permissions-1';
+/** #528 처음 시작 권한 상태 — 앱 1.1.3 안드로이드('android-permissions-1')만, 그 밖(웹·옛 앱·아이폰)은 null */
+export async function permissionStatus(): Promise<PermissionStatus | null> {
+  if (!(await hasCap(PERMISSIONS_CAP))) return null;
+  try { return await WorkinNative.permissionStatus(); } catch { return null; }
+}
+export async function openNotificationSettings() { if (await hasCap(PERMISSIONS_CAP)) await WorkinNative.openNotificationSettings(); }
+/** '워크인 오늘' 위젯 추가 시스템 창 — 런처가 지원하지 않으면 false(길게 눌러 추가 안내) */
+export async function requestPinWidget(): Promise<boolean> {
+  if (!(await hasCap(PERMISSIONS_CAP))) return false;
+  try { return !!(await WorkinNative.requestPinWidget()).requested; } catch { return false; }
+}
 /** 메신저 3차 C12: 앱 아이콘 배지 = 안 읽은 알림 + 안 읽은 메시지(배지를 맞출 줄 아는 앱만, 아니면 아무것도 안 함) */
 export async function setNativeBadge(count: number) {
   if (await hasCap('app-badge-1')) await WorkinNative.setBadge({ count: Math.max(0, Math.min(9999, Math.floor(count))) }).catch(() => {});
@@ -208,7 +225,7 @@ export async function initNative(router: Router) {
   if (perm.receive === 'granted') { await enableNativePush().catch(() => {}); return; }
   let asked = false;
   try { asked = localStorage.getItem('wos_push_asked') === '1'; } catch {}
-  if (perm.receive !== 'denied' && !asked) window.dispatchEvent(new Event('wos-push-ask'));
+  if (perm.receive !== 'denied' && !asked && !(await hasCap(PERMISSIONS_CAP))) window.dispatchEvent(new Event('wos-push-ask')); // #528: 권한 안내 창이 있는 앱은 그 창이 알림 허용까지 맡음
 }
 
 /** 앱 알림 켜기: 권한 요청 → FCM 토큰 등록. 거부되면 오류 */

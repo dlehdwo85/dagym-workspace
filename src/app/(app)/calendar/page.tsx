@@ -85,8 +85,11 @@ function CalendarPage() {
   // 대표 10/22 19:47: 일·3일·주(시간 격자)에서 종일·시간 없는 업무 칸이 위를 차지해 오전 일정을 가림 → 기본 숨김, 날짜 머리 아래 '종일 n' 칩(누르면 그날 목록). 이 기기 기억
   // #592(대표 10/25 구글 주 보기 대조): 휴대폰은 종일 줄 기본 켬 — 하루 2개 + '+n개'(누르면 그날 목록)라 위를 크게 차지하지 않음. 휴대폰은 새 기억 키
   const allDayKey = typeof window !== 'undefined' && window.innerWidth < 640 ? 'wos_cal_allday_m' : 'wos_cal_allday';
-  const [showAllDay, setShowAllDay] = useState<boolean>(() => { try { const v = localStorage.getItem(allDayKey); return v === null ? allDayKey === 'wos_cal_allday_m' : v === '1'; } catch { return allDayKey === 'wos_cal_allday_m'; } });
-  useEffect(() => { try { localStorage.setItem(allDayKey, showAllDay ? '1' : '0'); } catch {} }, [showAllDay, allDayKey]);
+  const readAllDay = (k: string) => { try { const v = localStorage.getItem(k); return v === null ? k === 'wos_cal_allday_m' : v === '1'; } catch { return k === 'wos_cal_allday_m'; } };
+  const [showAllDay, setShowAllDayState] = useState<boolean>(() => readAllDay(allDayKey));
+  // 176차: 사람이 바꿀 때만 그 기기 키에 저장. 창 폭이 640 을 넘나들면(PC ↔ 휴대폰 키) 그 키의 저장값을 다시 읽음 — 예전엔 폭이 바뀔 때 PC 상태(기본 꺼짐)를 휴대폰 키에 덮어써 휴대폰 종일 줄이 꺼지는 일이 있었음(CI E2E 171·172차)
+  const setShowAllDay = (v: boolean) => { setShowAllDayState(v); try { localStorage.setItem(allDayKey, v ? '1' : '0'); } catch {} };
+  useEffect(() => { setShowAllDayState(readAllDay(allDayKey)); }, [allDayKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [allDaySheet, setAllDaySheet] = useState<string | null>(null);
   useBackClose(!!allDaySheet, () => setAllDaySheet(null)); // #242 2단계: 뒤로가기 = 종일 목록만 닫힘(캘린더 그대로)
   const [sidePanel, setSidePanel] = useState<boolean>(() => { try { const v = localStorage.getItem('wos_cal_unscheduled'); return v === null ? typeof window !== 'undefined' && window.innerWidth >= 1440 : v === '1'; } catch { return false; } });
@@ -795,11 +798,16 @@ function UnscheduledPanel({ onClose, onOpen }: { onClose: () => void; onOpen: (i
 const fmtMinutesShort = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ''}` : `${m}분`);
 
 /** 빈 칸 클릭·끌기 → 작은 빠른 입력 창 (일정 / 업무 탭) */
-function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, calendars, onClose, onMore, onSaved, sheet, onSwitchTask }: {
+function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay: allDay0, calendars, onClose, onMore, onSaved, sheet, onSwitchTask }: {
   onSwitchTask?: () => void; x: number; y: number; date: string; start?: string; end?: string; endDate?: string; allDay: boolean; calendars: any[]; onClose: () => void; onMore: (draft: any) => void; onSaved: () => void; sheet?: boolean;
 }) {
   const [start, setStart] = useState(start0);
   const [end, setEnd] = useState(end0);
+  // #480(대표 10/23): 월 칸(종일)에서 만들 때도 시작·끝 시각을 고를 수 있게 — 기본은 종일, [시간 지정]을 누르면 시각 칸(연결 업무 마감 시각도 따라감)
+  const [allDay, setAllDay] = useState(allDay0);
+  const timeable = allDay0 && (endDate ?? date) === date; // 하루짜리 종일 칸만(여러 날 끌어 고른 칸은 종일 그대로)
+  const setTimed = () => { const n = date === seoulDate(new Date()) ? nextHour() : { start: '09:00', end: '10:00' }; setStart(n.start); setEnd(n.end); setAllDay(false); };
+  const setAllDayBack = () => { setAllDay(true); setStart(undefined); setEnd(undefined); };
   const [priv, setPriv] = useState(false);
   const [rrule, setRrule] = useState<string | null>(null);
   const [alsoTask, setAlsoTask] = useState(false);
@@ -853,7 +861,11 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay, ca
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="제목 추가" aria-label="빠른 입력 제목" enterKeyHint="done"
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); quickForm.current?.requestSubmit(); } }}
           className="w-full border-b-2 border-line pb-1.5 text-lg font-medium placeholder:text-ink-3 focus:border-accent-500 focus:outline-none" />
-        <p className="mt-3 flex items-center gap-2 text-sm text-ink-2"><Clock className="size-4" />{allDay ? when : fmtDateK(date)}</p>
+        <p className="mt-3 flex items-center gap-2 text-sm text-ink-2"><Clock className="size-4" /><span className="min-w-0 flex-1">{allDay ? when : fmtDateK(date)}</span>
+          {timeable && (allDay
+            ? <button type="button" className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs font-medium text-ink-2 hover:bg-slate-50" onClick={setTimed} data-testid="quick-set-time">시간 지정</button>
+            : <button type="button" className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs font-medium text-ink-2 hover:bg-slate-50" onClick={setAllDayBack} data-testid="quick-all-day">종일로</button>)}
+        </p>
         {!allDay && start && end && (endDate ?? date) === date && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="quick-times">
             <TimeSelect label="시작 시각" value={start} onChange={(v) => { setEnd(shiftEnd(start, end, v)); setStart(v); }} />

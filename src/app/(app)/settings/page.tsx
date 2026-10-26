@@ -112,6 +112,7 @@ export default function Settings() {
               <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={s.alarmImportant ?? true} onChange={(e) => setS({ ...s, alarmImportant: e.target.checked })} aria-label="중요 업무 알람" data-testid="alarm-important" />높음·긴급 업무</label>
             </span>
             <FullScreenAlarmNotice />
+            {isNativeApp() && <button type="button" className="mt-2 text-xs font-medium text-brand-700 underline" onClick={() => window.dispatchEvent(new Event('wos-perm-intro'))} data-testid="perm-intro-open">휴대폰 알림 맞추기(권한 안내) 다시 보기</button>}{/* #528 */}
           </Field>
           <Field label="조용한 시간 (기본 22:00~07:00)">
             <span className="flex flex-wrap items-center gap-2">

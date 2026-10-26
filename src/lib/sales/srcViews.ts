@@ -421,6 +421,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const dayOk = (r: any) => q.day !== 'today' || firstSeen(r) === td; // 오늘 새 영업 DB
     // #605(대표 10/25): '대상 아님'·완료(영업완료·등록 완료)로 넘긴 건은 기본 목록에서 빠지고 보관함(?box=archive)에 누가·언제·사유 + [되돌리기]
     const box = q.box === 'archive' ? 'archive' : 'open';
+    // #459(대표 10/23): 상태 필터 칩(?status=) — 회사 진행 상태 글자로 묶음. 기본 목록은 미검토·검토중·연락중·신청·보류(·완료·전환), 보관함은 대상 아님·완료. 묶음별 건수도 돌려줌
+    const STATUS_GROUPS: [string, string, RegExp | null][] = [['unreviewed', '미검토', null], ['review', '검토중', /검토/], ['contact', '연락중', /연락\s?중/], ['apply', '신청', /신청/], ['hold', '보류', /보류/], ['skip', '대상 아님', /대상\s?아님|미참여/], ['done', '완료·전환', /완료|전환/]];
+    const stKey = STATUS_GROUPS.some(([k]) => k === q.status) ? String(q.status) : '';
+    const stMatch = (k: string, st: unknown) => { const v = String(st ?? '').trim(); const re = STATUS_GROUPS.find(([x]) => x === k)?.[2]; return re ? re.test(v) : !v || /미검토|미연락|미등록/.test(v); };
     const done = (st: unknown) => /^(대상\s?아님|영업완료|등록 완료)$/.test(String(st ?? '').trim());
     const who = box === 'archive' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
     const archiveOf = (p: any) => (who && p && done(pick(p, 'status', 'contact_status')) ? { status: pick(p, 'status', 'contact_status'), by: who.get(String(pick(p, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(p, 'skip_at', '__updated_at', 'updated_at'), reason: pick(p, 'skip_reason'), prev: pick(p, 'skip_prev') } : null);
@@ -432,10 +436,12 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const hhOk = (x: { households?: unknown }) => !hh || Number(x.households) >= hh;
     const asc = (a: unknown, b: unknown) => String(a ?? '9999-99').localeCompare(String(b ?? '9999-99')); const desc = (a: unknown, b: unknown) => String(b ?? '').localeCompare(String(a ?? '')); const numDesc = (a: unknown, b: unknown) => (Number(b) || 0) - (Number(a) || 0);
     const tabs = await hubTabsOn(t, bidsOn);
-    const pack = <T extends { region?: unknown }>(list: T[], isDone: (x: T) => boolean, keep: (x: T) => boolean, sorter: ((a: T, b: T) => number) | null) => {
+    const pack = <T extends { region?: unknown }>(list: T[], isDone: (x: T) => boolean, keep: (x: T) => boolean, sorter: ((a: T, b: T) => number) | null, stOf: (x: T) => unknown) => {
       const regions = [...new Set(list.map((x) => String(x.region ?? '').trim()).filter((x) => x && x.length <= 8))].sort((a, b) => a.localeCompare(b, 'ko'));
-      const archived = list.filter(isDone); const out = (box === 'archive' ? archived : list.filter((x) => !isDone(x))).filter(keep);
-      return { ...meta, tab, box, tabs, sort: sortKey, filters: { region: region || null, hh: hh || null, period: months || null }, regions, archiveCount: archived.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
+      const archived = list.filter(isDone); const base = (box === 'archive' ? archived : list.filter((x) => !isDone(x))).filter(keep);
+      const statusCounts = Object.fromEntries(STATUS_GROUPS.map(([k]) => [k, base.filter((x) => stMatch(k, stOf(x))).length])); // #459 칩 건수(상태 필터 전)
+      const out = stKey ? base.filter((x) => stMatch(stKey, stOf(x))) : base;
+      return { ...meta, tab, box, tabs, sort: sortKey, status: stKey || null, statusGroups: STATUS_GROUPS.map(([k, l]) => [k, l]), statusCounts, filters: { region: region || null, hh: hh || null, period: months || null }, regions, archiveCount: archived.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
     };
     // S1-2: 신규단지 진행(opportunity_work · source_id = 단지 id)
     const BW = new Map((await prog('opportunity_work')).filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w]));
@@ -455,7 +461,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           firstSeen: firstSeen(r), raw: r }; });
       type B = (typeof list)[number];
       const sorter: Record<string, (a: B, b: B) => number> = { completion: (a, b) => asc(a.completion, b.completion), moveIn: (a, b) => asc(a.moveIn, b.moveIn), households: (a, b) => numDesc(a.households, b.households), firstSeen: (a, b) => desc(a.firstSeen, b.firstSeen) };
-      return pack(list, (x) => done(x.work?.status), (x) => regionOk(x) && hhOk(x) && inPeriod(x.completion, x.moveIn, x.firstSeen), sorter[sortKey ?? ''] ?? null);
+      return pack(list, (x) => done(x.work?.status), (x) => regionOk(x) && hhOk(x) && inPeriod(x.completion, x.moveIn, x.firstSeen), sorter[sortKey ?? ''] ?? null, (x) => x.work?.status);
     }
     if (tab === 'facilities') {
       const P = new Map((await prog('operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
@@ -474,7 +480,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       type Fc = (typeof list)[number];
       const sorter: Record<string, (a: Fc, b: Fc) => number> = { completion: (a, b) => asc(a.date, b.date), moveIn: (a, b) => asc(a.moveIn, b.moveIn), elapsed: (a, b) => numDesc(a.elapsedDays, b.elapsedDays), households: (a, b) => numDesc(a.households, b.households), next: (a, b) => asc(a.next, b.next) };
       return pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen),
-        sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))));
+        sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))), (x) => x.contact);
     }
     if (tab === 'vendors') {
       const P = new Map((await prog('vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
@@ -488,7 +494,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       type V = (typeof list)[number];
       const rankNo = (v: unknown) => { const n = Number(String(v ?? '').replace(/[^0-9.]/g, '')); return n > 0 ? n : 1e9; };
       const sorter: Record<string, (a: V, b: V) => number> = { period: (a, b) => String(a.period ?? '').localeCompare(String(b.period ?? ''), 'ko'), rank: (a, b) => rankNo(a.rank) - rankNo(b.rank), firstSeen: (a, b) => desc(a.firstSeen, b.firstSeen) };
-      return pack(list, (x) => done(x.status), (x) => inPeriod(x.firstSeen), sorter[sortKey ?? ''] ?? null);
+      return pack(list, (x) => done(x.status), (x) => inPeriod(x.firstSeen), sorter[sortKey ?? ''] ?? null, (x) => x.status);
     }
     throw notFound();
   }

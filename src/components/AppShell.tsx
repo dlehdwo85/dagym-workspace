@@ -15,7 +15,7 @@ import { VersionWatch } from './VersionWatch';
 import { CaptureGuard } from './CaptureGuard';
 import { Onboarding } from './Onboarding';
 import { TourHost, restartTours } from './Tour';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, FileText, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
@@ -23,7 +23,7 @@ import {
   type LucideIcon,
   MessageCircle, Mail,
   TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon, Phone, ClipboardCheck, Link2,
-  History, Rocket, Target, Briefcase, Landmark, Bot,
+  History, Rocket, Target, Briefcase, Landmark, Bot, Wand2,
 Contact, Globe, FileSignature, } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
@@ -33,6 +33,8 @@ import { ROLE_LABEL } from '@/lib/types';
 import { clearReminders, enableNativePush, initNative, refreshWidget, setNativeBadge } from './native';
 import { restoreScroll, useSheetBack } from './backClose';
 import { QuickAddTask } from './QuickAddTask';
+import { DailyWelcome } from './DailyWelcome';
+import { PermissionIntro } from './PermissionIntro';
 import { CommandPalette } from './CommandPalette';
 import { VoiceAddTask } from './VoiceAddTask';
 
@@ -68,6 +70,7 @@ function writePref(k: string, v: string) { try { localStorage.setItem(k, v); } c
 
 export function AppShell({ session, children }: { session: Sess; children: ReactNode }) {
   const path = usePathname();
+  const query = useSearchParams().toString(); // #481: ?tab= 메뉴(제작의뢰실·영업기회 입찰) 강조가 주소 칸만 바뀌어도 따라가게
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 결제 링크·버튼 없음
   const router = useRouter();
   const [unread, setUnread] = useState(0);
@@ -151,10 +154,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
   // 대표 10/21 12:00 영업 재편 3): 홈 → 영업 기회 허브(모든 원천 입구: 신규 현장·시설·협력사·계약만료·공공데이터·지역별) → 입찰·공고 → 리드·거래처(진행 단계 포함) → 제안·계약 → 데이터 설정. '파이프라인' 메뉴 없음(리드 안 단계별 보기)
-  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/hub', label: '영업 기회 허브', icon: Building2 } /* #611(대표 10/25): '입찰·공고' 메뉴는 허브 '입찰' 탭으로 합침(옛 주소는 넘김) */, { href: '/s/sales/leads', label: '영업 진행', icon: Users } /* #614 대표 결정 10/25 19:00: '리드·거래처' → '영업 진행' */, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/support', label: '지원사업', icon: Landmark } /* #450 — 하단 탭에는 안 넣음(#438) */, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [{ href: '/s/marketing', label: '홈', icon: Megaphone, group: '운영' }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, group: '운영' }, { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '운영' },
-    { href: '/s/marketing/goals', label: '월 운영 목표', icon: Target, group: '운영' }, { href: '/s/marketing/ops', label: '운영실', icon: Briefcase, group: '운영' }, { href: '/s/marketing/team', label: 'AI 마케팅팀', icon: Bot, group: '운영' } /* #499-7 */, { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' },
-    { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/sites', label: '사이트별 집계', icon: Globe, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 운영', icon: Rocket, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []), { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' },
-    { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '설정' }, ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '운영실 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
+  const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/hub', label: '영업 기회 허브', icon: Building2 } /* #611(대표 10/25): '입찰·공고' 메뉴는 허브 '입찰' 탭으로 합침(옛 주소는 넘김) */, { href: '/s/sales/leads', label: '영업 진행', icon: Users } /* #614 대표 결정 10/25 19:00: '리드·거래처' → '영업 진행' */, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/support', label: '지원사업', icon: Landmark } /* #450 — 하단 탭에는 안 넣음(#438) */, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [
+    // #481(대표 10/23 승인 · docs/handoff/MARKETING_MENU_AUDIT_2026-10-21.md): 계획 → 제작 → 게시 → 성과 흐름으로 묶고, 이름 4개(운영실→운영 계획 · 광고 운영→광고 집행 · 승인 대기→승인함 · 운영실 기록→이전 요청 기록), 제작의뢰실은 탭에서 메뉴로(주소 ?tab=studio 그대로)
+    { href: '/s/marketing', label: '홈', icon: Megaphone },
+    { href: '/s/marketing/goals', label: '월 운영 목표', icon: Target, group: '계획' }, { href: '/s/marketing/ops', label: '운영 계획', icon: Briefcase, group: '계획' }, { href: '/s/marketing/team', label: 'AI 마케팅팀', icon: Bot, group: '계획' } /* #499-7 */,
+    { href: '/s/marketing/approvals', label: '승인함', icon: ClipboardCheck, group: '제작' }, { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' }, { href: '/s/marketing/automation?tab=studio', label: '제작의뢰실', icon: Wand2, group: '제작' },
+    { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '게시' }, { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '게시' },
+    { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 집행', icon: Rocket, group: '성과' }, { href: '/s/marketing/sites', label: '사이트별 집계', icon: Globe, group: '성과' }, { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []),
+    ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '이전 요청 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
 
   const commonNav: NavItem[] = [{ href: '/tasks', label: '업무', icon: CircleCheck }, { href: '/calendar', label: '캘린더', icon: CalendarDays }, { href: '/messages', label: '메시지', icon: MessageCircle },
     ...(session.features.library ? [{ href: `/library?space=${space}`, label: '자료실', icon: Library }] : []), ...(session.features.ai ? [{ href: `/assistant?space=${space}`, label: aiName(space), icon: Sparkles }] : [])];
@@ -253,7 +260,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         { href: session.features.salesBids ? '/s/sales/hub?tab=bids&bt=today' : '/s/sales/hub', label: '영업기회', icon: Building2, /* #613: 허브 입찰 기본은 '진행 중'이지만 앱 하단 칸은 그대로 오늘 새 공고로 */ badge: spaceInfo.data?.summary.sales?.badge ?? 0, match: ['/s/sales/hub', '/s/sales/bids', '/s/sales/contracts', '/s/sales/prospects', '/s/sales/support', '/s/sales/regions'] },
         { href: '/s/sales/leads', label: '영업 진행', icon: Users } /* 대표 10/25 22:20 결정 15-14(#642): '리드' → '영업 진행' — 5탭 통일(#630)은 대표 확인 뒤 */, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { ...byHref('/messages'), badge: chatUnread }]
     : tabSpace === 'marketing'
-      ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인 대기', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
+      ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인함', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
       // 대표 핫픽스 10/20 19:10(앱 캡처): 업무 공간 하단 = 홈 · 업무 · 캘린더 · 결재 · 더보기 — 프로젝트는 더보기 › 업무 메뉴로. 탭 구성 변경은 앞으로 대표 확인 뒤에만
       // 대표 확정 10/22(#422): 업무 공간 하단 = 홈 · 업무 · 캘린더 · 메시지 · 결재, 더보기 없음 — 나머지 메뉴는 오른쪽 위 프로필 버튼 시트로
@@ -267,7 +274,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
     const [p, q] = href.split('?');
     if (p === '/') return path === '/';
     if (/^\/s\/[a-z]+$/.test(p)) return path === p; // 로컬 검수 10/17: 공간 첫 화면(영업 홈 등)은 하위 메뉴에 있을 때 같이 강조하지 않음
-    if (q) return path === p && typeof window !== 'undefined' && window.location.search.includes(q);
+    if (q) return path === p && query.includes(q);
+    // #481: 같은 주소에 ?tab= 메뉴(제작의뢰실)가 따로 있으면 그 탭을 보는 동안 상위 메뉴(자동 제작)는 강조하지 않음
+    if (path === p && spaceNav.some((o) => o.href !== href && o.href.startsWith(p + '?') && query.includes(o.href.split('?')[1]))) return false;
     return path.startsWith(p);
   };
 
@@ -352,7 +361,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               : space !== 'work' && !collapsed && <div className="px-2.5 pb-1 pt-0.5 text-[11px] font-semibold text-slate-400">{sm.short}</div>}
             {(v3 ? spaceMenuV3 : space === 'work' ? nav : [...spaceNav, ...commonNav]).map((n, k) => (
               <div key={n.href}>
-                {/* 로컬 검수 10/19: 마케팅 메뉴 묶음(운영·제작·성과·설정) */}
+                {/* 로컬 검수 10/19 → #481(대표 10/23): 마케팅 메뉴 묶음 계획·제작·게시·성과·설정 */}
                 {k < spaceNav.length && n.group && n.group !== spaceNav[k - 1]?.group && <div className={cx('px-2.5 pb-1 pt-2.5 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-group">{n.group}</div>}
                 {!v3 && space !== 'work' && k === spaceNav.length && <div className={cx('px-2.5 pb-1 pt-3 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-common">공통</div>}
                 {navLink(n, n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0)}
@@ -490,6 +499,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
         <MessengerDock aiOpen={aiDock} />
         <VersionWatch />
         {/* #626 캡처 차단(외부 고객사만 켜짐): 워터마크·인쇄 차단·창 이탈 가림·자동화 차단, 앱은 FLAG_SECURE */}
+        <DailyWelcome userId={session.user.id} name={session.user.name} />{/* #483 하루 첫 진입 인사 0.8초 */}
+        <PermissionIntro userId={session.user.id} />{/* #528 앱 처음 시작 휴대폰 알림 맞추기(권한 안내) */}
         <CaptureGuard on={!!session.tenant?.captureBlock} automation={!!session.tenant?.captureAutomation} company={session.tenant?.name ?? '워크인'} userName={session.user.name} />
         {/* V28-3 지원 모드: 빨간 띠(읽기 전용·남은 시간) + 끝내기 */}
         {session.support && (

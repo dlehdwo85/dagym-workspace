@@ -5,7 +5,7 @@ import { requireMenu } from '@/lib/menuPerms';
 export const GET = handler(async ({ user }) => {
   await requireMenu(user, 'ops', 'view');
   const sql = db();
-  const [jobs, errors, deliveries, syncErrors, counts, recent, noDevice] = await Promise.all([
+  const [jobs, errors, deliveries, syncErrors, counts, recent, noDevice, dbLocale] = await Promise.all([
     sql`select id, job, trigger, started_at, finished_at, status, detail from job_runs order by id desc limit 30`,
     sql`select id, source, message, context, created_at from error_logs order by id desc limit 50`,
     sql`select status, count(*)::int c from notification_deliveries where created_at > now() - interval '7 days' group by status`,
@@ -24,6 +24,8 @@ export const GET = handler(async ({ user }) => {
     // 알림을 받을 기기가 하나도 없는 사람 (앱 알림 켜기 안내 대상)
     sql`select u.id, u.name from users u where u.status = 'active' and u.tenant = 'default'
         and not exists (select 1 from push_subscriptions p where p.user_id = u.id and p.disabled_at is null) order by u.name`,
+    // 163차 ①(로컬 10/26 ⑤): 운영 DB 정렬 규칙 — en_US.utf8 이면 한글 이름순이 가나다순이 아닐 수 있음(C.UTF-8·ko_KR 이면 괜찮음)
+    sql<{ datcollate: string; datctype: string; version: string }[]>`select datcollate, datctype, version() as version from pg_database where datname = current_database()`,
   ]);
-  return { jobs, errors, deliveries, syncErrors, counts: counts[0], recent, noDevice };
+  return { jobs, errors, deliveries, syncErrors, counts: counts[0], recent, noDevice, dbLocale: dbLocale[0] ?? null };
 });

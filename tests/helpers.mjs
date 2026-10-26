@@ -58,6 +58,7 @@ export function serverEnv() {
     CALENDAR_JOBS: 'off', // 168차: 월요일·25일·1~3일·금요일에 매인 정기 작업(src/lib/calendarGate.ts)은 시험 서버에서 안 돎 — 시험이 도는 날·시각에 따라 tick 안의 AI 호출·기록이 달라져 깨졌음. 그 작업들은 API 로 직접 시험
     SUPPORT_WEEKLY: 'off', // 지원사업 주간 묶음(월요일 08시 뒤 첫 tick)도 같은 이유 — tests/api/support.test.mjs 만 'any'
     CAPTURE_BLOCK: 'noauto', // #626 캡처 차단: 시험 서버는 자동화 감지·봇 UA 로그인 거부만 끔(Playwright·node fetch 가 막히지 않게) — 워터마크·인쇄 차단·창 이탈 가림은 외부 고객사 계정에 그대로(E2E 확인)
+    MKT_PREFLIGHT_RETRY: '0', // 172차: 올리기 전 검사에 걸리면 1번 다시 쓰는 것(mktAuto produceContent)은 시험 서버에서 끔 — 줄 세운 가짜 답이 한 건씩 맞아야 하므로. tests/api/mkt-preflight-retry.test.mjs 만 '1'
     OPENAI_BASE_URL: `${FAKE}/openai/v1`,
     ANTHROPIC_API_KEY: 'sk-ant-fake-test',
     ANTHROPIC_BASE_URL: FAKE,

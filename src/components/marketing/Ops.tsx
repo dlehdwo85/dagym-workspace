@@ -53,7 +53,7 @@ export function Ops() {
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="mkt-ops">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-xl font-bold" style={{ color: C }}>운영실 <span className="text-sm font-normal text-ink-2">AI 마케터</span></h1>
+        <h1 className="text-xl font-bold" style={{ color: C }}>운영 계획 <span className="text-sm font-normal text-ink-2">AI 마케터</span></h1>
         <Link href="/s/marketing/team" className="text-xs text-ink-2 underline" data-testid="ops-team-link">AI 마케팅팀(역할·일정·기억) →</Link>
         <select className={cx(inputCls, 'h-8 w-auto py-0 text-sm')} value={data?.month ?? ''} onChange={(e) => setMonth(e.target.value)} aria-label="달" data-testid="ops-month">{(data?.months ?? []).map((m) => <option key={m} value={m}>{mk(m)}</option>)}</select>
         {data?.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={weekly} disabled={busy} data-testid="ops-weekly">주간 제안 만들기</Button>}

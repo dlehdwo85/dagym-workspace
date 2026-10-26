@@ -94,6 +94,9 @@ import { backKeep } from './backKeep.step.mjs';
 import { attachLibrary } from './attachLibrary.step.mjs';
 import { inbox } from './inbox.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
+import { cal480 } from './cal480.step.mjs';
+import { welcome483 } from './welcome483.step.mjs';
+import { permIntro528 } from './permIntro528.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
 import { spaces } from './spaces.step.mjs';
@@ -652,12 +655,13 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
   // #508: 목록에서 바로 빠지고 묶음 맨 아래 접힌 '완료됨 1건' — 안내 [완료됨 보기]가 펼치고, 되돌리기는 거기서
   await owner.locator(`[data-row="${id}"]`).waitFor({ state: 'detached' });
-  const fold = owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' });
-  await fold.waitFor();
-  assert.match(await fold.getByTestId('done-fold-toggle').innerText(), /완료됨 1건\s*\(오늘 1 · 이번 주 1\)/);
+  // 168차 CI: 목록이 담당자별 묶음(기본)으로 열리면 '완료됨' 칸이 묶음마다 하나씩 → 안내 [완료됨 보기]로 연 뒤 이 글이 든 칸을 고른다
+  await owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }).first().waitFor();
   assert.equal(await owner.getByRole('button', { name: '되돌리기', exact: true }).count(), 0, '안내에는 되돌리기 없음');
   await owner.getByRole('button', { name: '완료됨 보기' }).click();
-  const doneRow = fold.locator(`[data-done-id="${id}"]`); await doneRow.waitFor();
+  const doneRow = owner.locator(`[data-done-id="${id}"]`).first(); await doneRow.waitFor();
+  const fold = owner.getByTestId('done-fold').filter({ has: owner.locator(`[data-done-id="${id}"]`) }).first();
+  assert.match(await fold.getByTestId('done-fold-toggle').innerText(), /완료됨 1건\s*\(오늘 1 · 이번 주 1\)/);
   assert.equal(await fold.getByTestId('done-fold-all').getAttribute('href'), '/tasks?view=done');
   await owner.screenshot({ path: `${SHOTS}/217-done-fold.png`, clip: await fold.boundingBox() });
   await doneRow.getByTestId('done-fold-undo').click();
@@ -668,10 +672,8 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   assert.equal(await owner.getByTestId('done-fold').count(), 0, '완료가 없으면 접힌 칸도 없음');
   // 다른 화면(API)에서 보류 → 완료: 새로 불러온 '완료됨'의 [되돌리기]는 서버 활동 기록의 완료 직전 상태(보류)로
   for (const st of ['on_hold', 'done']) await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { status: st, version: (await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.version });
-  await owner.reload(); await owner.getByLabel('업무 검색').fill('원형 체크');
-  const fold2 = owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }); await fold2.waitFor();
-  await fold2.getByTestId('done-fold-toggle').click();
-  await fold2.locator(`[data-done-id="${id}"]`).getByTestId('done-fold-undo').click();
+  await owner.goto(BASE + '/tasks?mode=list&openDone=1'); await owner.getByLabel('업무 검색').fill('원형 체크'); // openDone=1 = '완료됨' 칸 펼친 채로(묶음 모드여도 이 글이 든 칸을 바로 찾음)
+  await owner.locator(`[data-done-id="${id}"]`).first().getByTestId('done-fold-undo').click();
   await owner.getByText('되돌렸습니다 — 보류').waitFor();
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'on_hold', '새로 불러와도 완료 직전 상태(보류)로');
   await owner.evaluate(() => localStorage.removeItem('wos_done_fold')); // 펼침 기억은 이 단계 안에서만
@@ -687,9 +689,10 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   await owner.waitForTimeout(4500);
   assert.equal(await th.isVisible(), true, '4.5초 뒤·새로고침 신호 뒤에도 같은 안내');
   const [nx] = await sql`select id from tasks where recurrence_source_id = ${rid} and deleted_at is null`; assert.ok(nx, '다음 회차 생김');
-  const fold3 = owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }); await fold3.waitFor();
-  await fold3.getByTestId('done-fold-toggle').click();
-  await fold3.locator(`[data-done-id="${rid}"]`).getByTestId('done-fold-undo').click();
+  await owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }).first().waitFor();
+  const row3 = owner.locator(`[data-done-id="${rid}"]`).first();
+  if (!(await row3.count())) await owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }).first().getByTestId('done-fold-toggle').click(); // 주소 openDone=1 로 이미 펼쳐져 있으면 그대로(한 번 더 누르면 닫힘)
+  await row3.getByTestId('done-fold-undo').click();
   await owner.getByText('완료 때 자동으로 만든 다음 업무 1건도 지웠습니다').waitFor();
   assert.ok((await sql`select deleted_at from tasks where id = ${nx.id}`)[0].deleted_at, '손대지 않은 다음 회차는 휴지통');
   await owner.evaluate(() => localStorage.removeItem('wos_done_fold'));
@@ -1057,6 +1060,9 @@ await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없
   assert.equal(t.due, d); assert.equal(t.tm, '10:00');
   await owner.screenshot({ path: `${SHOTS}/v14-35-calendar-task.png` });
 });
+await step('#480 월 보기 빈 칸: 기본 종일 + [시간 지정] 시작·끝 시각(연결 업무 마감 시각 따라감) · [종일로] 되돌리기', () => cal480({ owner, sql, BASE, SHOTS, addDays, today }));
+await step('#483 하루 첫 진입 환영 문구: 새 브라우저 로그인 → 인사 한 줄 0.8초(조작 안 막음) → 같은 날 다시 들어오면 없음 · 동작 줄이기면 움직임 없음', () => welcome483({ browser, BASE, SHOTS }));
+await step('#528 앱 처음 시작 휴대폰 알림 맞추기(권한 안내, 웹 몫): 꺼진 줄 단추·이유 → 허용된 줄 체크 → [나중에] 같은 날 다시 없음 → 다 돼 있으면 안 뜸 (390 시연 상태)', () => permIntro528({ browser, desk, BASE, SHOTS }));
 await step('V14 36~39 캘린더: 업무 동그라미 없음·블록 12px 여러 줄·계단 겹침·휴대폰 3일·좌우 밀어 이동·뒤로가기는 상세만 닫고 날짜·보기·스크롤 유지', () => v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDays, today }));
 await step('V19 부록 A: AI 비서 PC Enter 보내기·Shift+Enter 줄바꿈, 휴대폰 Enter 줄바꿈·자동 높이, [수정]·[다시 답하기]·[복사]·[멈춤], 패널 같은 동작 / 보기 칩 다시 누르면 해제', () => v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('캘린더: 완료한 업무의 시간 블록은 숨김(완료 보기 켜면 완료 모양), 삭제한 업무의 블록은 사라지고 휴지통 복원 시 다시 보임', () => blocksStep({ owner, ctx, BASE, SHOTS, addDays, today }));
@@ -1568,7 +1574,7 @@ await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에
   assert.equal(`${t.d} ${t.tm}`, e.s, '업무 마감 = 일정 시작');
   // 긴 제목의 종일 마감 업무도 제목이 보임(줄바꿈)
   await ctx.owner.ok('POST', '/api/tasks', { title: 'V5 마감 제목이 길어도 두 줄로 보여야 함', assigneeId: ctx.ownerId, dueDate: t.d, approvalRequired: false });
-  await m.evaluate(() => localStorage.setItem('wos_cal_allday', '1')); // 10/22 종일 칸 기본 숨김 — 아래는 켠 상태의 마감 칩 확인
+  await m.evaluate(() => { localStorage.setItem('wos_cal_allday', '1'); localStorage.setItem('wos_cal_allday_m', '1'); }); // 10/22 종일 칸 기본 숨김 — 아래는 켠 상태의 마감 칩 확인(휴대폰 키 _m 도, 176차)
   await m.goto(`${BASE}/calendar?date=${t.d}`);
   await m.getByTestId('cal-mobile-head').waitFor();
   assert.equal(await m.locator('[data-day-head]').count(), 3, '휴대폰 기본 = 3일 보기(V14 38번), 요일+날짜 머리');

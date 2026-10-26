@@ -205,7 +205,7 @@ export function MarketingHome() {
         </svg>
       </div>
       <div className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-ads">
-        <h2 className="flex items-center justify-between text-base font-bold"><span>광고</span><Link href="/s/marketing/ad-ops" className="text-xs font-medium" style={{ color: C }}>광고 운영 →</Link></h2>
+        <h2 className="flex items-center justify-between text-base font-bold"><span>광고</span><Link href="/s/marketing/ad-ops" className="text-xs font-medium" style={{ color: C }}>광고 집행 →</Link></h2>
         {data.ads ? <>
           <p className="mt-1 text-sm">캠페인 켜짐 <b>{data.ads.on}</b> · 꺼짐 {data.ads.off}{data.ads.monthlyCap !== null && <> · 월 상한 {won(data.ads.monthlyCap)}{data.ads.stopped && <span className="ml-1 rounded-full bg-red-50 px-1.5 text-[11px] text-red-700">상한 도달</span>}</>} · 오늘 지출 {won(data.ads.today)}</p>
           {data.ads.campaigns.length > 0 && <ul className="mt-1 divide-y divide-line text-xs">{data.ads.campaigns.map((c) => <li key={c.id} className="flex items-center gap-2 py-1"><span className="min-w-0 flex-1 truncate">{c.name}</span><span className="tabular-nums text-ink-2">CTR {c.ctr ?? '—'}%</span><span className="tabular-nums text-ink-2">CPC {c.cpc !== null ? won(c.cpc) : '—'}</span></li>)}</ul>}

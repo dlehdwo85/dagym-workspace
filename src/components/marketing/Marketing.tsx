@@ -355,15 +355,15 @@ function InboxAll({ d, onChange }: { d: Inbox; onChange: () => void }) {
 function InboxTab({ tab, d, onChange }: { tab: string; d: Inbox; onChange: () => void }) {
   const empty = (t: string, href: string, label: string) => <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3" data-testid="mkt-inbox-empty">{t} <Link href={href} className="underline">{label}</Link></p>;
   if (tab === 'proposals') return d.proposals.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-proposals">{d.proposals.map((p) => <ProposalCard key={p.id} p={p} kinds={d.kinds} canEdit={d.canEdit} onChange={onChange} />)}</div>
-    : empty('대기 중인 운영 제안 카드가 없습니다.', '/s/marketing/ops', '운영실에서 [AI 마케터 제안 받기] →');
+    : empty('대기 중인 운영 제안 카드가 없습니다.', '/s/marketing/ops', '운영 계획에서 [AI 마케터 제안 받기] →');
   if (tab === 'budget') return d.budgets.length ? <div className="space-y-3" data-testid="mkt-inbox-budget">{d.budgets.map((b) => <BudgetCard key={b.id} b={b} month={b.month} canEdit={d.canEdit} busy={false} onDraft={() => {}} onChange={onChange} compact />)}</div>
-    : empty('승인 대기 중인 광고 예산 계획이 없습니다.', '/s/marketing/ops', '운영실에서 계획 만들기 →');
+    : empty('승인 대기 중인 광고 예산 계획이 없습니다.', '/s/marketing/ops', '운영 계획에서 예산 계획 만들기 →');
   // #494 메타 광고 초안(Meta 에 꺼진 채로 만든 것) — 승인하면 서버가 상한을 다시 확인하고 켬
   if (tab === 'ads') return d.ads.length ? <div className="grid gap-3 xl:grid-cols-2" data-testid="mkt-inbox-ads">{d.ads.map((r) => <MetaDraftCard key={r.id} r={r} canEdit={d.canEdit} onChange={onChange} />)}</div>
-    : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops', '광고 운영에서 메타 광고 세팅 →');
+    : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops', '광고 집행에서 메타 광고 세팅 →');
   // #499-4 상황 매트릭스: 1~4개 채택 → 광고형 제작 의뢰 · 반려 사유 → AI 고친 안
   if (tab === 'concepts') return d.concepts.length ? <div className="space-y-3" data-testid="mkt-inbox-concepts">{d.concepts.map((s) => <ConceptSetCard key={s.id} s={s} canDecide={d.canEdit} userId={d.userId} maxRevisions={d.maxRevisions} onChange={onChange} />)}</div>
-    : empty('채택을 기다리는 광고 컨셉이 없습니다.', '/s/marketing/ops#concepts', '운영실에서 상황 매트릭스 만들기 →');
+    : empty('채택을 기다리는 광고 컨셉이 없습니다.', '/s/marketing/ops#concepts', '운영 계획에서 상황 매트릭스 만들기 →');
   if (tab === 'goals') return d.goals.length ? <div className="space-y-3" data-testid="mkt-inbox-goals">{d.goals.map((g) => <GoalCard key={g.id} g={g} canEdit={d.canEdit} today={d.today} onChange={onChange} />)}</div>
     : empty('승인 대기 중인 월 운영 목표 초안이 없습니다.', '/s/marketing/goals', '월 운영 목표 →');
   return d.briefs.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-briefs">{d.briefs.map((b) => <BriefDecisionCard key={b.id} b={b} canEdit={d.canEdit} onChange={onChange} />)}</div>
@@ -587,7 +587,8 @@ export function ContentCalendar() {
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold" style={{ color: C }}>콘텐츠 캘린더</h1>
         <span className="inline-flex overflow-hidden rounded-input border border-line text-xs">{(['week', 'month'] as const).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cx('px-2.5 py-1', view === v ? 'bg-violet-600 font-semibold text-white' : 'bg-white text-ink-2')} data-testid={`mkt-cal-view-${v}`}>{v === 'week' ? '주' : '월'}</button>)}</span>
-        {view === 'week' && <span className="inline-flex overflow-hidden rounded-input border border-line text-xs">{(['brand', 'channel'] as const).map((v) => <button key={v} type="button" onClick={() => setAxis(v)} className={cx('px-2.5 py-1', axis === v ? 'bg-slate-700 font-semibold text-white' : 'bg-white text-ink-2')} data-testid={`mkt-cal-axis-${v}`}>{v === 'brand' ? '브랜드 행' : '채널 행'}</button>)}</span>}
+        {view === 'week' && <span className="inline-flex overflow-hidden rounded-input border border-line text-xs">{(['brand', 'channel'] as const).map((v) => <button key={v} type="button" onClick={() => setAxis(v)} className={cx('px-2.5 py-1', axis === v ? 'bg-slate-700 font-semibold text-white' : 'bg-white text-ink-2')} data-testid={`mkt-cal-axis-${v}`}
+          title={v === 'brand' ? '줄마다 브랜드 하나(다짐·하이링크…) — 브랜드별로 한 주에 무엇이 나가는지 볼 때' : '줄마다 채널 하나(인스타그램·페이스북·블로그…) — 채널별로 빈 날을 찾을 때'} aria-label={v === 'brand' ? '줄 기준: 브랜드' : '줄 기준: 채널'}>{v === 'brand' ? '줄 = 브랜드' : '줄 = 채널'}</button>)}</span>}
         <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={brand} onChange={(e) => setBrand(e.target.value)} aria-label="브랜드" data-testid="mkt-cal-brand"><option value="">브랜드 전체</option>{brandOptions.map((b) => <option key={b} value={b}>{b}</option>)}<option value="none">브랜드 없음</option></select>
         <span className="ml-auto flex items-center gap-1"><Button size="sm" variant="secondary" onClick={() => shift(-1)} aria-label={view === 'week' ? '이전 주' : '이전 달'}>‹</Button><button type="button" onClick={goToday} className="min-w-24 text-center text-sm font-medium tabular-nums hover:underline" data-testid="mkt-cal-label" title="오늘로">{label}</button><Button size="sm" variant="secondary" onClick={() => shift(1)} aria-label={view === 'week' ? '다음 주' : '다음 달'}>›</Button></span>
       </div>

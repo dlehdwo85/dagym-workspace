@@ -148,3 +148,24 @@ test('#605~#613(대표 10/25) 허브 정렬·필터(지역·세대수·기간)·
   assert.ok((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).tabs.includes('prospects'));
   await sql`delete from sales_src_rows where src_id = 'F3'`;
 });
+
+test('#459(대표 10/23) 허브 상태 필터 칩: ?status= 묶음(미검토·검토중·연락중·신청·보류 / 보관함 대상 아님·완료) + 묶음별 건수 · 모르는 값은 전체', async () => {
+  const put = (scope, tbl, row) => sql`insert into sales_src_rows (scope, tbl, src_id, row) values (${scope}, ${tbl}, ${String(row.id)}, ${sql.json(row)})`;
+  for (const [id, nm] of [['B2', '검토'], ['B3', '연락'], ['B4', '제외'], ['B5', '아직']]) await put('global', 'building_sales_pipeline', { id, name: `상태시험단지 ${nm}`, household_count: 500, address: '경기 성남', current_stage: '착공' });
+  await put('default', 'opportunity_work', { id: 'WB2', source_type: 'building', source_id: 'B2', status: '검토중' });
+  await put('default', 'opportunity_work', { id: 'WB3', source_type: 'building', source_id: 'B3', status: '연락중' });
+  await put('default', 'opportunity_work', { id: 'WB4', source_type: 'building', source_id: 'B4', status: '대상아님' });
+  const all = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings&q=상태시험단지');
+  assert.equal(all.status, null);
+  assert.deepEqual(all.statusGroups.map((g) => g[0]), ['unreviewed', 'review', 'contact', 'apply', 'hold', 'skip', 'done']);
+  assert.deepEqual([all.statusCounts.unreviewed, all.statusCounts.review, all.statusCounts.contact, all.statusCounts.skip], [1, 1, 1, 0], '기본 목록 건수(대상 아님은 보관함에)');
+  assert.deepEqual(all.items.map((x) => x.id).sort(), ['B2', 'B3', 'B5']);
+  const r = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings&q=상태시험단지&status=review');
+  assert.deepEqual([r.status, r.items.map((x) => x.id)], ['review', ['B2']]);
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings&q=상태시험단지&status=contact')).items.map((x) => x.id), ['B3']);
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings&q=상태시험단지&status=unreviewed')).items.map((x) => x.id), ['B5'], '미검토 = 진행 상태 없음');
+  const a = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings&q=상태시험단지&box=archive&status=skip');
+  assert.deepEqual([a.items.map((x) => x.id), a.statusCounts.skip], [['B4'], 1], '보관함에서 대상 아님만');
+  const w = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings&q=상태시험단지&status=weird');
+  assert.equal(w.status, null); assert.equal(w.items.length, 3, '모르는 상태는 전체');
+});

@@ -45,7 +45,7 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.goto(`${BASE}/s/marketing`);
   await owner.screenshot({ path: `${SHOTS}/146-mkt-home.png` });
   assert.equal(await owner.evaluate(() => document.documentElement.dataset.space), 'marketing', '공간 강조색 = 마케팅 보라(버튼·모달 공통)');
-  await owner.getByRole('link', { name: '승인 대기' }).first().click();
+  await owner.getByRole('link', { name: '승인함' }).first().click(); // #481: 메뉴 이름 '승인함'
   await owner.waitForURL(/\/s\/marketing\/approvals$/);
   if (await owner.getByTestId('ai-ask').count()) assert.equal(await owner.getByTestId('ai-ask').innerText(), 'AI에게 요청', '대표 10/20 5): 콘텐츠 목록 상단 AI 요청 진입점'); // AI 켜진 회사만
   await owner.getByTestId('mkt-new-open').click();
@@ -147,8 +147,8 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.locator('aside').getByRole('link', { name: '광고 성과' }).click(); await owner.getByTestId('mkt-ads').waitFor(); // 원래 흐름으로
   await owner.getByTestId('ads-days-7').click();
   await owner.getByText('최근 7일', { exact: true }).first().waitFor();
-  // 로컬 검수 10/19: 사이드바 묶음(운영·제작·성과·설정)·계정 연결은 설정 › 연결 계정
-  assert.deepEqual(await owner.locator('aside').getByTestId('nav-group').allInnerTexts(), ['운영', '제작', '성과', '설정']);
+  // 로컬 검수 10/19 → #481(대표 10/23): 사이드바 묶음 계획·제작·게시·성과·설정 · 계정 연결은 게시 › 연결 계정
+  assert.deepEqual(await owner.locator('aside').getByTestId('nav-group').allInnerTexts(), ['계획', '제작', '게시', '성과', '설정']);
   await owner.getByTestId('ads-accounts-link').getByRole('link', { name: /연결 계정/ }).click();
   await owner.getByTestId('mkt-connections').waitFor();
   // ⑤-2(대표 10/19): 채널마다 사용·[연결] 하나, 심사 전에는 게시 도우미
@@ -166,10 +166,19 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await thRow.getByTestId('publish-channel-toggle').check();
   await thRow.getByTestId('publish-channel-mode').filter({ hasText: '게시 도우미' }).waitFor();
   await thRow.getByTestId('publish-channel-toggle').uncheck();
-  // 운영실 기록(관리자): 설정 묶음 메뉴 → 빈 안내
-  await owner.locator('aside').getByRole('link', { name: '운영실 기록' }).click();
+  // 이전 요청 기록(관리자, 옛 이름 운영실 기록): 설정 묶음 메뉴 → 빈 안내
+  await owner.locator('aside').getByRole('link', { name: '이전 요청 기록' }).click();
   await owner.getByTestId('ops-history').getByText('옮겨 온 기록이 없습니다').waitFor();
   await owner.goBack(); await owner.getByTestId('mkt-connections').waitFor();
+  // #481: 제작의뢰실은 메뉴로(주소 ?tab=studio 그대로) — 누르면 자동 제작 화면의 제작의뢰실 탭
+  await owner.locator('aside').getByRole('link', { name: '제작의뢰실' }).click();
+  await owner.waitForURL(/\/s\/marketing\/automation\?tab=studio$/);
+  await owner.getByRole('heading', { level: 1, name: '제작의뢰실' }).waitFor();
+  assert.equal(await owner.locator('aside').getByRole('link', { name: '제작의뢰실' }).getAttribute('aria-current'), 'page', '제작의뢰실 메뉴 강조');
+  assert.equal(await owner.locator('aside').getByRole('link', { name: '자동 제작', exact: true }).getAttribute('aria-current'), null, '탭을 보는 동안 자동 제작은 강조 안 됨');
+  await owner.locator('aside').getByRole('link', { name: '자동 제작', exact: true }).click();
+  await owner.waitForURL(/\/s\/marketing\/automation$/);
+  assert.equal(await owner.locator('aside').getByRole('link', { name: '자동 제작', exact: true }).getAttribute('aria-current'), 'page', '주소 칸만 바뀌어도 강조가 따라감');
   // V44 ① 광고 운영: 상한 없으면 안내 → 상한 저장 → 막대 표시(네이버 계정 없으면 새 세팅안 잠김)
   await owner.goto(`${BASE}/s/marketing/ad-ops`);
   await owner.getByTestId('ad-cap-required').waitFor();

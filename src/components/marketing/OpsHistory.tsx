@@ -16,8 +16,8 @@ const KEY_INFO: Record<string, [string, string]> = {
   'mkt:media-outputs:v1': ['미디어 결과물', '자료실'],
   'mkt:media-approval:v1': ['미디어 승인', '승인 기록'],
   'mkt:library:v1': ['자료 목록', '자료실(이미 옮김)'],
-  'mkt:ads:structure-decision:v1': ['광고 구조 결정', '광고 운영(V44) 변경 기록'],
-  'mkt:ads:apply-log:v1': ['광고 반영 기록', '광고 운영(V44) 변경 기록'],
+  'mkt:ads:structure-decision:v1': ['광고 구조 결정', '광고 집행(V44) 변경 기록'],
+  'mkt:ads:apply-log:v1': ['광고 반영 기록', '광고 집행(V44) 변경 기록'],
   'mkt:call-records:v1': ['전화 기록(번호 가림)', '전화 문의'],
   'mkt:call-clicks:v1': ['전화 버튼 클릭', '전화 문의 · 월간 보고'],
   'mkt:call-clicks:first-seen:v1': ['클릭 첫 확인', '전화 문의 · 월간 보고'],
@@ -42,7 +42,7 @@ export function OpsHistory() {
   const cols = (cur?.fields ?? []).slice(0, 6).map((f) => f.name);
   return (
     <div className="space-y-4" data-testid="ops-history">
-      <div><h1 className="text-xl font-bold" style={{ color: C }}>운영실 기록</h1>
+      <div><h1 className="text-xl font-bold" style={{ color: C }}>이전 요청 기록</h1>
         <p className="text-xs text-ink-2">예전 마케팅 운영실에서 옮겨 온 원본입니다. 워크인 화면(콘텐츠·승인·전화 문의 등)으로 정식 연결하기 전까지 여기서 봅니다. 전화번호는 가려서 옮겼습니다.</p></div>
       {data.keys.length > 0 && <ConvertPanel />}
       {!data.keys.length ? <p className="rounded-card border border-line bg-white p-4 text-sm text-ink-3">옮겨 온 기록이 없습니다</p> : (
