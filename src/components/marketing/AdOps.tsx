@@ -123,7 +123,7 @@ export function AdOps() {
   const reverted = new Set(data.changes.map((c) => c.revert_of).filter(Boolean));
   return (
     <div className="space-y-4" data-testid="ad-ops">
-      <div><h1 className="text-xl font-bold" style={{ color: C }}>광고 운영</h1>
+      <div><h1 className="text-xl font-bold" style={{ color: C }}>광고 집행</h1>
         <p className="text-xs text-ink-2">세팅안을 만들고 [승인하고 시작]을 누르면 네이버 검색광고에 <b>꺼진 상태</b>로 만들어집니다. 확인한 뒤 [켜기]를 눌러야 광고비가 나갑니다. 모든 변경은 아래 기록에 남고 되돌릴 수 있습니다.</p></div>
 
       <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ad-cap">

@@ -47,7 +47,7 @@ export function Team() {
     <div className="mx-auto max-w-6xl space-y-4" data-testid="team">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="flex items-center gap-2 text-xl font-bold" style={{ color: C }}><Bot className="size-5" />AI 마케팅팀</h1>
-        <Link href="/s/marketing/ops" className="ml-auto text-xs text-ink-2 underline">운영실 →</Link>
+        <Link href="/s/marketing/ops" className="ml-auto text-xs text-ink-2 underline">운영 계획 →</Link>
       </div>
       <p className="text-xs text-ink-2">역할마다 일정·기록·기억을 따로 둡니다. AI 가 초안을 만들고, 결정은 대표가 합니다 — 광고 켜기·증액·영상 [생성]처럼 돈이 나가는 일은 지금처럼 승인 뒤에만. 가장 귀찮은 일부터 하나씩 켜세요.</p>
       {!data ? <Skeleton rows={6} /> : <>

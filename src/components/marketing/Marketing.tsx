@@ -355,15 +355,15 @@ function InboxAll({ d, onChange }: { d: Inbox; onChange: () => void }) {
 function InboxTab({ tab, d, onChange }: { tab: string; d: Inbox; onChange: () => void }) {
   const empty = (t: string, href: string, label: string) => <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3" data-testid="mkt-inbox-empty">{t} <Link href={href} className="underline">{label}</Link></p>;
   if (tab === 'proposals') return d.proposals.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-proposals">{d.proposals.map((p) => <ProposalCard key={p.id} p={p} kinds={d.kinds} canEdit={d.canEdit} onChange={onChange} />)}</div>
-    : empty('대기 중인 운영 제안 카드가 없습니다.', '/s/marketing/ops', '운영실에서 [AI 마케터 제안 받기] →');
+    : empty('대기 중인 운영 제안 카드가 없습니다.', '/s/marketing/ops', '운영 계획에서 [AI 마케터 제안 받기] →');
   if (tab === 'budget') return d.budgets.length ? <div className="space-y-3" data-testid="mkt-inbox-budget">{d.budgets.map((b) => <BudgetCard key={b.id} b={b} month={b.month} canEdit={d.canEdit} busy={false} onDraft={() => {}} onChange={onChange} compact />)}</div>
-    : empty('승인 대기 중인 광고 예산 계획이 없습니다.', '/s/marketing/ops', '운영실에서 계획 만들기 →');
+    : empty('승인 대기 중인 광고 예산 계획이 없습니다.', '/s/marketing/ops', '운영 계획에서 예산 계획 만들기 →');
   // #494 메타 광고 초안(Meta 에 꺼진 채로 만든 것) — 승인하면 서버가 상한을 다시 확인하고 켬
   if (tab === 'ads') return d.ads.length ? <div className="grid gap-3 xl:grid-cols-2" data-testid="mkt-inbox-ads">{d.ads.map((r) => <MetaDraftCard key={r.id} r={r} canEdit={d.canEdit} onChange={onChange} />)}</div>
-    : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops', '광고 운영에서 메타 광고 세팅 →');
+    : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops', '광고 집행에서 메타 광고 세팅 →');
   // #499-4 상황 매트릭스: 1~4개 채택 → 광고형 제작 의뢰 · 반려 사유 → AI 고친 안
   if (tab === 'concepts') return d.concepts.length ? <div className="space-y-3" data-testid="mkt-inbox-concepts">{d.concepts.map((s) => <ConceptSetCard key={s.id} s={s} canDecide={d.canEdit} userId={d.userId} maxRevisions={d.maxRevisions} onChange={onChange} />)}</div>
-    : empty('채택을 기다리는 광고 컨셉이 없습니다.', '/s/marketing/ops#concepts', '운영실에서 상황 매트릭스 만들기 →');
+    : empty('채택을 기다리는 광고 컨셉이 없습니다.', '/s/marketing/ops#concepts', '운영 계획에서 상황 매트릭스 만들기 →');
   if (tab === 'goals') return d.goals.length ? <div className="space-y-3" data-testid="mkt-inbox-goals">{d.goals.map((g) => <GoalCard key={g.id} g={g} canEdit={d.canEdit} today={d.today} onChange={onChange} />)}</div>
     : empty('승인 대기 중인 월 운영 목표 초안이 없습니다.', '/s/marketing/goals', '월 운영 목표 →');
   return d.briefs.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-briefs">{d.briefs.map((b) => <BriefDecisionCard key={b.id} b={b} canEdit={d.canEdit} onChange={onChange} />)}</div>
