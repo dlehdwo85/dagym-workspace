@@ -96,6 +96,7 @@ import { inbox } from './inbox.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { cal480 } from './cal480.step.mjs';
 import { welcome483 } from './welcome483.step.mjs';
+import { permIntro528 } from './permIntro528.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
 import { spaces } from './spaces.step.mjs';
@@ -1061,6 +1062,7 @@ await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없
 });
 await step('#480 월 보기 빈 칸: 기본 종일 + [시간 지정] 시작·끝 시각(연결 업무 마감 시각 따라감) · [종일로] 되돌리기', () => cal480({ owner, sql, BASE, SHOTS, addDays, today }));
 await step('#483 하루 첫 진입 환영 문구: 새 브라우저 로그인 → 인사 한 줄 0.8초(조작 안 막음) → 같은 날 다시 들어오면 없음 · 동작 줄이기면 움직임 없음', () => welcome483({ browser, BASE, SHOTS }));
+await step('#528 앱 처음 시작 휴대폰 알림 맞추기(권한 안내, 웹 몫): 꺼진 줄 단추·이유 → 허용된 줄 체크 → [나중에] 같은 날 다시 없음 → 다 돼 있으면 안 뜸 (390 시연 상태)', () => permIntro528({ browser, desk, BASE, SHOTS }));
 await step('V14 36~39 캘린더: 업무 동그라미 없음·블록 12px 여러 줄·계단 겹침·휴대폰 3일·좌우 밀어 이동·뒤로가기는 상세만 닫고 날짜·보기·스크롤 유지', () => v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDays, today }));
 await step('V19 부록 A: AI 비서 PC Enter 보내기·Shift+Enter 줄바꿈, 휴대폰 Enter 줄바꿈·자동 높이, [수정]·[다시 답하기]·[복사]·[멈춤], 패널 같은 동작 / 보기 칩 다시 누르면 해제', () => v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('캘린더: 완료한 업무의 시간 블록은 숨김(완료 보기 켜면 완료 모양), 삭제한 업무의 블록은 사라지고 휴지통 복원 시 다시 보임', () => blocksStep({ owner, ctx, BASE, SHOTS, addDays, today }));
