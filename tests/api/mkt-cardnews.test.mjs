@@ -271,3 +271,26 @@ test('180차 장 사진은 낱말이 맞는 장부터(앞 장이 최근 사진�
   const m = c.note.match(/카드 5장\(실사 2장 · 후보 (\d+)장 · 관련 약함 1장\)$/);
   assert.ok(m && Number(m[1]) >= 2, c.note);
 });
+
+// 181차(로컬 10/26 14:00 관찰 ⓐⓑ): 스토리 마지막 프레임 = 행동 프레임(문의·저장·프로필)이라 사진을 안 깖 · '관련 약함' 채움은 브랜드 이름이 있는 사진만(브랜드 미지정 사진은 낱말이 맞을 때만, 후보 수에서도 뺌)
+test('181차 스토리 마지막 행동 프레임엔 사진 없음 · 관련 약함 채움은 브랜드 사진만(브랜드 미지정 사진 제외·후보 수도)', async () => {
+  const jpg = (r, g, b) => sharp({ create: { width: 1200, height: 1500, channels: 3, background: { r, g, b } } }).jpeg().toBuffer();
+  const V = (o) => ({ v: 1, at: new Date().toISOString(), caption: '', scene: '', tags: [], kind: 'photo', text: 'none', promo: false, seen: '', people: 0, faces: false, quality: 'good', pose: 'none', facing: 'none', light: 'bright', ...o });
+  const photo = async (name, rgb, vision) => { const id = await libFile(ctx.ownerId, await jpg(...rgb), name); await sql`update library_files set vision = ${sql.json(vision)} where id = ${id}`; return id; };
+  const generic = await photo('현장 전경.jpg', [120, 120, 120], V({ caption: '넓은 실내 전경', scene: '밝은 실내.', tags: ['전경'] })); // 브랜드 이름 없음 — 가장 오래된 것부터
+  const hall = await photo('카드브랜드 복도.jpg', [110, 100, 130], V({ caption: '밝은 복도', scene: '긴 복도. 사람은 없다.', tags: ['복도'] }));
+  const lounge = await photo('카드브랜드 라운지.jpg', [90, 130, 120], V({ caption: '새로 꾸민 라운지', scene: '창가 책상과 의자.', tags: ['라운지'] })); // 표지(제목 낱말 '라운지')
+  await sql`update mkt_contents set produce_at = now() + interval '7 days' where tenant = 'default' and status = 'draft' and produced_at is null`;
+  const frames = [{ title: '라운지 새 단장', body: '' }, { title: '조용한 공부 자리', body: '창가에 책상 6개' }, { title: '커피는 무료', body: '아침 8시부터' }, { title: '저장해 두세요', body: '프로필 링크' }];
+  const id = await slot('카드브랜드 라운지 새 단장', { channel: 'instagram', kind: 'story', at: new Date(Date.now() + 11 * 86400e3), cross: [] });
+  await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '라운지 새 단장', body: '라운지 새 단장\n창가 자리와 무료 커피.\n문의 032-111-2222', brief: '', why: '', hooks: [], keyword: '', card: CARD, frames })] });
+  const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  assert.ok(run.produced.some((p) => p.id === id && !p.error), JSON.stringify(run.produced));
+  const c = await cur(id);
+  assert.equal(c.quality.visual.photoId, lounge, `표지 = 제목 낱말(라운지) 사진: ${JSON.stringify(c.quality.visual)}`);
+  // 프레임 3장(표지 뒤): 둘째 프레임(낱말 안 맞음)에 브랜드 사진 '복도'(관련 약함) · 마지막 '저장해 두세요'는 행동 프레임 = 색 바탕 · 브랜드 이름 없는 '현장 전경'은 안 씀(후보 수에도 없음)
+  assert.deepEqual(c.quality.pages.map((p) => p.photoId ?? null), [null, hall, null], JSON.stringify(c.quality.pages));
+  assert.deepEqual(c.quality.pages.map((p) => p.rel ?? null), [null, 'weak', null]);
+  assert.ok(!c.quality.pages.some((p) => p.photoId === generic) && c.quality.visual.photoId !== generic, '브랜드 미지정 사진은 장에 안 깖');
+  assert.match(c.note, /프레임 4장\(실사 1장 · 후보 1장 · 관련 약함 1장\)$/, c.note);
+});

@@ -21,7 +21,7 @@ export default function NoticePage() {
   const { notice: n, files, canEdit, canSeeReads } = st.data;
   const remove = async () => { if (!confirm('이 공지를 지울까요?')) return; try { await api(`/api/notices/${id}`, { method: 'DELETE' }); toast.ok('지웠습니다'); router.push('/notices'); } catch (e: any) { toast.error(e.message); } };
   return (
-    <div className="mx-auto max-w-3xl space-y-3 p-3 sm:p-4" data-testid="notice-page">
+    <div className="mx-auto max-w-3xl space-y-3" data-testid="notice-page">
       <div className="flex items-start gap-2">
         <button onClick={() => router.push('/notices')} className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="공지 목록"><ArrowLeft className="size-5" /></button>
         <div className="min-w-0 flex-1">

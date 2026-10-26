@@ -54,7 +54,7 @@ export default function ApprovalsPage() {
     try { await api(`/api/approvals/drafts/${r.id}`, { method: 'DELETE' }); toast.ok('임시 저장을 지웠습니다'); list.reload(); } catch (e: any) { toast.error(e.message); }
   };
   return (
-    <div className="mx-auto max-w-4xl space-y-3 p-3 sm:p-4" data-testid="approvals-page">
+    <div className="mx-auto max-w-4xl space-y-3" data-testid="approvals-page">
       <PageHeader title="결재" icon={Stamp} sub="회사 양식으로 올리면 결재선을 따라 승인됩니다. 휴가가 승인되면 연차·반차가 캘린더에 자동 등록됩니다."
         actions={<div className="flex flex-wrap gap-1.5">{forms.data?.forms.map((f) => <Button key={f.kind} size="sm" variant={f.kind === 'leave' ? 'primary' : 'secondary'} onClick={() => setOpen({ form: f })} data-testid={`approval-new-${f.kind}`}><Plus />{f.name}</Button>)}
           {/* #429 관리자: 결재선·양식·팀별 배정을 여기서 바로 */}
