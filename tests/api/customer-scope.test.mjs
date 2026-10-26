@@ -42,7 +42,8 @@ describe('#602 슈퍼관리자만 아는 것 — 고객사 응답 범위', () =>
     const g2b = c.collectors.find((x) => x.slug === 'g2b_bid_notices');
     assert.equal(g2b.last.summary, '못 받았습니다 — 연결을 확인해 주세요'); assert.equal(g2b.last.error_log, null); assert.equal(g2b.last.detail, null); assert.equal(g2b.last.status, 'failed');
     assert.ok(['apply_needed', 'disconnected'].includes(g2b.state), `실패 원천 상태 ${g2b.state}`);
-    for (const a of c.alerts) { assert.equal(a.error, null); assert.equal(a.reason, '오늘 새 공고를 받지 못했습니다. 데이터 설정에서 연결을 확인해 주세요'); }
+    assert.ok(c.alerts.length >= 1, '공용 실패 기록 → 고객 배너 줄');
+    for (const a of c.alerts) { assert.equal(a.error, null); assert.equal(a.reason, '오늘 새 공고를 받지 못했습니다. 데이터 설정에서 연결을 확인해 주세요'); assert.equal(a.todo, a.reason, '#629 고객 배너 첫 줄도 같은 한 줄'); assert.equal(a.link, null); assert.equal(a.service, null); }
     clean('수집기(고객)', c);
     // 내부 테넌트(우리 회사) 관리자 = 예외
     const f = await ctx.owner.ok('GET', '/api/sales/collectors');
@@ -50,6 +51,10 @@ describe('#602 슈퍼관리자만 아는 것 — 고객사 응답 범위', () =>
     const g = f.collectors.find((x) => x.slug === 'g2b_bid_notices');
     assert.match(g.last.error_log, /403/); assert.ok(g.last.detail.sources.g2b.sent.includes('apis.data.go.kr')); assert.ok(g.needs.length >= 1); assert.match(g.source, /누리장터|data\.go\.kr|g2b/i);
     assert.equal(g.state, null);
+    // #629 우리 회사 배너: 첫 줄은 '할 일' 문장(금지 낱말 없음), 오류 원문(HTTP·영문 코드)은 error 에만 → 화면에서 접힘 '자세히'. 서비스 번호는 실행 요약에서
+    const ga = f.alerts.find((x) => x.slug === 'g2b_bid_notices'); assert.ok(ga, JSON.stringify(f.alerts));
+    assert.equal(ga.todo, '공공데이터포털 활용신청(서비스 15129394)이 필요합니다'); assert.equal(ga.action, 'apply'); assert.equal(ga.link, 'https://www.data.go.kr/data/15129394/openapi.do'); assert.match(ga.error, /HTTP 403/);
+    assert.deepEqual(forbidden(JSON.stringify(f.alerts.map((x) => [x.label, x.todo]))), [], '내부 배너 첫 줄에도 원문·코드 없음');
   });
 
   test('사용량·요금제: 고객에게는 원화·%·횟수만(달러·원가 단가·운영 메모 없음) / 내부는 달러 그대로', async () => {

@@ -440,6 +440,8 @@ test('#522 관광숙박업 오류 응답(JSON)도 코드·사유 그대로 · �
   v = await ctx.owner.ok('GET', '/api/sales/collectors');
   const al = v.alerts.find((x) => x.slug === 'tourist_hotels_localdata');
   assert.ok(al, JSON.stringify(v.alerts)); assert.equal(al.reason, '2회 연속 실패'); assert.match(al.error, /활용신청 필요/); assert.match(al.label, /관광숙박업/);
+  // #629 첫 줄 = 할 일 문장(원문·HTTP 코드 없음) + 코드에 적힌 서비스 번호로 [신청 방법] 링크
+  assert.equal(al.todo, '공공데이터포털 활용신청(서비스 15155090)이 필요합니다'); assert.equal(al.action, 'apply'); assert.equal(al.link, 'https://www.data.go.kr/data/15155090/openapi.do');
   const home = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
   assert.ok(home.collectorAlerts.some((x) => x.slug === 'tourist_hotels_localdata'), '영업 홈 빨간 띠 자료');
   // 마지막 성공이 25시간 넘음 → 문제(연속 실패가 아니어도)

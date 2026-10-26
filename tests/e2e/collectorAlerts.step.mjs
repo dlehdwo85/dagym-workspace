@@ -18,8 +18,14 @@ export async function collectorAlerts({ owner, ctx, sql, BASE, SHOTS }) {
   const box = owner.getByTestId('space-home-sales').getByTestId('sales-collector-alerts');
   await box.waitFor();
   const lines = await box.getByTestId('sales-collector-alert').allInnerTexts();
-  assert.ok(lines.some((l) => /LH·국방·온비드 공고 › 온비드 공고\(차세대\): 2회 연속 실패/.test(l) && /활용신청 필요/.test(l)), lines.join('\n'));
-  assert.ok(lines.some((l) => /^관광숙박업\(호텔·리조트\): 최근 성공 없음/.test(l)), `원천 하나뿐인 수집기는 수집기 이름만 · ${lines.join('\n')}`);
+  // #629(대표 10/25 21:20): 첫 줄은 '할 일' 문장 — 연속 실패 수·영문 오류 코드·HTTP 코드는 접힘 '자세히'에만, 서비스 번호를 알면 [신청 방법] 링크
+  assert.ok(lines.some((l) => /^LH·국방·온비드 공고 › 온비드 공고\(차세대\) — 공공데이터포털 활용신청이 필요합니다/.test(l)), lines.join('\n'));
+  assert.ok(lines.some((l) => /^관광숙박업\(호텔·리조트\) — 공공데이터포털 활용신청\(서비스 15155090\)이 필요합니다 \[신청 방법\]/.test(l)), `원천 하나뿐인 수집기는 수집기 이름만 + 코드에 적힌 서비스 번호 · ${lines.join('\n')}`);
+  assert.ok(!lines.some((l) => /SERVICE_KEY|HTTP ?\d{3}|_ERROR|연속 실패/.test(l)), `접기 전 첫 줄에 원문·코드 없음 · ${lines.join('\n')}`);
+  const hotelLine = box.getByTestId('sales-collector-alert').filter({ hasText: '관광숙박업' });
+  assert.equal(await hotelLine.getByTestId('sales-collector-alert-link').getAttribute('href'), 'https://www.data.go.kr/data/15155090/openapi.do');
+  await hotelLine.getByTestId('sales-collector-alert-more').click();
+  assert.match(await hotelLine.getByTestId('sales-collector-alert-detail').innerText(), /최근 성공 없음 · 활용신청 필요\(HTTP 401\): 30 SERVICE_KEY_IS_NOT_REGISTERED_ERROR/);
   assert.ok(!lines.some((l) => /LH 입찰공고/.test(l)), '받고 있는 원천(LH 입찰)은 알림 없음');
   await box.screenshot({ path: `${SHOTS}/245-sales-collector-alerts.png` });
 
