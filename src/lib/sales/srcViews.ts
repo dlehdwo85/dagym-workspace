@@ -49,7 +49,7 @@ async function formalLeads(tenant: string, id?: string) {
   const r = await db()<any[]>`select l.*, u.name as owner_name, (select max(x.occurred_at) from sales_lead_records x where x.lead_id = l.id and x.kind in ('sales_activities', 'proposals', 'contracts')) as last_activity_at from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} and l.deleted_at is null ${id ? db()`and l.id = ${id}` : db()``} order by l.updated_at desc limit 5000`;
   return r.map((l) => ({ ...(l.src ?? {}), __id: l.id, __src_id: l.src_id, __owner: l.owner_name ?? '', __owner_id: l.owner_id, name: l.name, sales_status: l.status, priority: l.priority, facility_type: l.facility_type, region: l.region,
     next_contact_date: ymdOf(l.next_contact_date), contact_name: l.contact_name, phone: l.phone, expected_revenue: l.expected_revenue, email: l.email, scale: l.scale, homepage: l.homepage ?? l.src?.homepage ?? null,
-    memo: l.memo, updated_at: l.updated_at, created_at: l.created_at, last_activity_at: l.last_activity_at }));
+    memo: l.memo, updated_at: l.updated_at, created_at: l.created_at, last_activity_at: l.last_activity_at, next_action: l.next_action ?? null, revisit_date: ymdOf(l.revisit_date) }));
 }
 async function userNames(tenant: string) {
   const m = await db()<{ src_user_id: string; name: string | null }[]>`select m.src_user_id, coalesce(u.name, m.name) as name from sales_user_map m left join users u on u.id = m.user_id where m.tenant = ${tenant}`;
@@ -75,6 +75,7 @@ const lead = (r: any, names: Map<string, string>) => ({
   homepage: pick(r, 'homepage', 'website', 'url'), // 대표 검수 10/20 ②: 앱 목록 홈페이지 칩
   // S2 2차: 이메일·규모·등록일·최근 활동(상담·제안·계약 최신, 없으면 수정일)
   email: pick(r, 'email', 'contact_email'), scale: pick(r, 'scale', 'facility_scale', 'size'), created: day(pick(r, 'created_at')), lastActivity: day(pick(r, 'last_activity_at', 'last_activity_date', 'last_contact_at')) ?? day(pick(r, 'updated_at', 'created_at')),
+  nextAction: pick(r, 'next_action'), revisit: day(pick(r, 'revisit_date')), // 197차(#461): 다음 할 일(다음 연락일과 한 쌍) · 다시 볼 날(보류·실패)
 });
 /** 영업관리 기준(SALES_SCREEN_INVENTORY 10/19): '오늘 등록'·'새 공고'는 원본 first_seen_at 하나만(KST 날짜). posted_date·created_at 은 쓰지 않음.
  * 옮긴 행은 원본 first_seen_at 을 그대로 가져오므로 옮긴 날로 바뀌지 않는다(값이 없으면 신규 판단에서 빠짐) */
@@ -317,7 +318,11 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       from sales_status_log g join sales_leads l on l.id = g.lead_id left join users u on u.id = g.changed_by where l.tenant = ${t} and l.deleted_at is null and l.status in ('보류', '실패', '되돌림') order by g.lead_id, g.changed_at desc`).map((g) => [g.lead_id, g])) : new Map();
     const archiveOf = (l: { id: unknown; status: unknown }) => { if (!ARCHIVED_STAGES.has(String(l.status))) return null; const g = logs.get(String(l.id)); const same = g?.to_status === String(l.status);
       return { reason: same ? g!.reason ?? null : null, by: same ? g!.by ?? null : null, at: same && g!.changed_at ? new Date(g!.changed_at).toISOString() : null, prev: same && g!.from_status && !ARCHIVED_STAGES.has(g!.from_status) ? g!.from_status : null }; };
-    return { ...meta, stages: STAGES, canAssign, people, me: u.id, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [], archive: archiveOf(l) })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
+    // 197차(#461): 목록 칸(단계 머문 날·다음 할 일·마지막 접촉·출처·종결일·다시 볼 날) + 내 저장된 보기·열(기기 간 유지)
+    const { leadExtras, getLeadViews } = await import('./leadList');
+    const X = formal ? await leadExtras(sql, t, terms) : new Map();
+    const myViews = await getLeadViews(sql, u.id);
+    return { ...meta, stages: STAGES, canAssign, people, me: u.id, myViews, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [], archive: archiveOf(l), ...(X.get(String(l.id)) ?? {}) })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
   }
   if (view === 'lead') {
     if (!q.id) throw badRequest('id 가 필요합니다');
@@ -335,6 +340,12 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       // S2 2차: 업무 탭 = 워크인 업무(lead_id) + 옮겨 온 원본 업무, 타임라인 = 상담·상태 변경·업무·제안·계약 통합(최신순)
       const wTasks = await sql<any[]>`select t.id, t.title, t.status, t.due_date::text as due_date, t.created_at, t.completed_at, au.name as assignee, t.sales_ref from tasks t left join users au on au.id = t.assignee_id where t.lead_id = ${lid} and t.deleted_at is null order by (t.status = 'done'), t.due_date nulls last limit 100`;
       const acts = await recs('sales_activities'), props = await recs('proposals'), cons = await recs('contracts');
+      // 197차(#460): 리드 업무의 댓글·첨부도 거래처 타임라인에(업무에서 진행한 기록을 따로 옮겨 적지 않게)
+      const tids = wTasks.map((x: any) => x.id);
+      const tcom = tids.length ? await sql<any[]>`select c.id, c.task_id, c.body, c.created_at, au.name as by, t.title from comments c join tasks t on t.id = c.task_id left join users au on au.id = c.author_id
+        where c.task_id = any(${tids}::uuid[]) and c.deleted_at is null order by c.created_at desc limit 100` : [];
+      const tfile = tids.length ? await sql<any[]>`select f.id, f.task_id, coalesce(f.file_name, f.doc_title, f.url) as name, f.created_at, au.name as by, t.title from attachments f join tasks t on t.id = f.task_id left join users au on au.id = f.created_by
+        where f.task_id = any(${tids}::uuid[]) and f.deleted_at is null and f.upload_status = 'ready' order by f.created_at desc limit 100` : [];
       // 영업 재편 5): 리드 일정(넘기기 자동 일정·리드에서 만든 일정) — 다가오는 것 먼저
       const events = await sql<any[]>`select e.id, e.title, e.start_at, e.end_at, e.all_day, c.name as calendar from events e join calendars c on c.id = e.calendar_id where e.lead_id = ${lid} and e.deleted_at is null order by e.start_at desc limit 50`;
       const timeline = [...acts.map((a: any) => ({ kind: 'act', at: a.activity_date ?? a.created_at, title: `${a.activity_type ?? '상담'} · ${String(a.content ?? '').slice(0, 80)}`, by: a.created_by_name ?? null, id: a.__id })),
@@ -342,7 +353,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         ...wTasks.map((x: any) => ({ kind: 'task', at: x.completed_at ?? x.created_at, title: `${x.status === 'done' ? '완료' : '업무'} · ${x.title}`, by: x.assignee ?? null, id: x.id, href: `/tasks/${x.id}` })),
         ...props.map((p: any) => ({ kind: 'proposal', at: p.proposal_date, title: `제안 · ${p.title}${p.amount ? ` ${Number(p.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: p.__id })),
         ...cons.map((c: any) => ({ kind: 'contract', at: c.contract_date ?? c.start_date, title: `계약 · ${c.title}${c.amount ? ` ${Number(c.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: c.__id })),
-        ...events.map((e: any) => ({ kind: 'event', at: e.start_at, title: `일정 · ${e.title}`, by: null, id: e.id, href: `/calendar?event=${e.id}` }))]
+        ...events.map((e: any) => ({ kind: 'event', at: e.start_at, title: `일정 · ${e.title}`, by: null, id: e.id, href: `/calendar?event=${e.id}` })),
+        ...tcom.map((c: any) => ({ kind: 'comment', at: c.created_at, title: `댓글 · ${String(c.body).replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/gi, '@$1').slice(0, 120)}`, by: c.by ?? null, id: c.id, href: `/tasks/${c.task_id}`, task: c.title })),
+        ...tfile.map((f: any) => ({ kind: 'file', at: f.created_at, title: `첨부 · ${String(f.name ?? '파일').slice(0, 80)}`, by: f.by ?? null, id: f.id, href: `/tasks/${f.task_id}`, task: f.title }))]
         .filter((x) => x.at).map((x) => ({ ...x, at: x.at instanceof Date ? x.at.toISOString() : String(x.at) })) // #148: Date 는 ISO 로(String(Date) 는 'Tue Oct…' 라 정렬이 틀림)
         .sort((a, b) => String(b.at).localeCompare(String(a.at)));
       return { ...meta, lead: lead(r, names), raw: Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith('__'))), activities: acts, timing: await recs('lead_opportunity_timing'),

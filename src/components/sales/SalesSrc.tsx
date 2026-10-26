@@ -427,7 +427,20 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
   );
 }
 
-const TL_ICON: Record<string, string> = { act: '💬', status: '🔁', task: '✅', proposal: '📄', contract: '🤝', event: '📅' };
+const TL_ICON: Record<string, string> = { act: '💬', status: '🔁', task: '✅', proposal: '📄', contract: '🤝', event: '📅', comment: '🗨️', file: '📎' };
+/** 197차(#460): 타임라인 종류 거르기 — 업무 댓글·첨부도 거래처 이력에 */
+const TL_KINDS: [string, string, string[]][] = [['', '전체', []], ['act', '상담', ['act']], ['task', '업무', ['task', 'comment', 'file']], ['status', '단계', ['status']], ['event', '일정', ['event']], ['deal', '제안·계약', ['proposal', 'contract']]];
+function LeadTimeline({ items }: { items: any[] }) {
+  const [k, setK] = useState('');
+  const kinds = TL_KINDS.find(([x]) => x === k)?.[2] ?? [];
+  const shown = kinds.length ? items.filter((x) => kinds.includes(x.kind)) : items;
+  return (
+    <div className="space-y-2" data-testid="lead-timeline-box">
+      <div className="flex flex-wrap gap-1 text-xs" role="group" aria-label="종류">{TL_KINDS.map(([x, lb, ks]) => { const n = ks.length ? items.filter((y) => ks.includes(y.kind)).length : items.length; return <button key={x} type="button" onClick={() => setK(x)} className={chipCls(k === x)} aria-pressed={k === x} data-testid={`lead-tl-kind-${x || 'all'}`}>{lb} {n}</button>; })}</div>
+      <ol className="space-y-1.5 text-sm" data-testid="lead-timeline">{shown.map((x: any) => <li key={x.kind + x.id} className="flex gap-2 rounded-input border border-line p-2" data-testid={`lead-tl-${x.kind}`}><span aria-hidden>{TL_ICON[x.kind] ?? '•'}</span><span className="min-w-0 flex-1">{x.href ? <Link href={x.href} className="underline">{x.title}</Link> : x.title}{x.task && <span className="ml-1 text-xs text-ink-3">· {x.task}</span>}{x.by && <span className="ml-1 text-xs text-ink-3">{x.by}</span>}</span><span className="shrink-0 text-xs tabular-nums text-ink-3">{kdt(x.at)}</span></li>)}{!shown.length && <li className="text-xs text-ink-3">아직 기록이 없습니다</li>}</ol>
+    </div>
+  );
+}
 /** S2 2차: 업무 탭 — 워크인 업무(lead_id) 목록 + 추가, 아래에 옮겨 온 원본 업무 */
 function LeadTasks({ id, data, onSaved }: { id: string; data: any; onSaved: () => void }) {
   const [t, setT] = useState({ title: '', due: '', assignee: '' });
@@ -477,7 +490,7 @@ function ActForm({ id, onSaved }: { id: string; onSaved: () => void }) {
   );
 }
 const CLOSED_STAGES = ['보류', '실패', '되돌림'];
-const plusDays = (n: number) => { const d = new Date(`${today()}T00:00:00+09:00`); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const plusDays = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.parse(`${today()}T12:00:00+09:00`) + n * 864e5)); // 197차: 서울 날짜로(예전 식은 UTC 로 잘라 하루 일렀음 — '내일' 칩이 오늘)
 const fmtEv = (e: any) => { const d = new Date(e.start_at); const day = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }).format(d); return e.all_day ? day : `${day} ${new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d)}`; };
 /**
  * 영업 재편 5) 리드·거래처 '진행' 탭 — 파이프라인 메뉴에서 빠진 단계 이동을 흡수해 한 화면에: 단계 띠(누르면 이동, 보류·실패는 사유) · 다음 연락(날짜 + 오늘/내일/3일/1주 칩) · 메모 · 상담 기록 ·
@@ -485,10 +498,10 @@ const fmtEv = (e: any) => { const d = new Date(e.start_at); const day = new Intl
  */
 function LeadProgress({ id, data, onSaved, go }: { id: string; data: any; onSaved: () => void; go: (tab: string) => void }) {
   const l = data.lead; const ed = data.readOnly === false;
-  const [pending, setPending] = useState<string | null>(null); const [reason, setReason] = useState('');
-  const [next, setNext] = useState(l.next ?? ''); const [memo, setMemo] = useState(l.memo ?? ''); const [ev, setEv] = useState({ title: '', date: '', time: '' });
+  const [pending, setPending] = useState<string | null>(null); const [reason, setReason] = useState(''); const [revisit, setRevisit] = useState(''); // 197차: 보류·실패 '다시 볼 날'(선택)
+  const [next, setNext] = useState(l.next ?? ''); const [nact, setNact] = useState(l.nextAction ?? ''); const [memo, setMemo] = useState(l.memo ?? ''); const [ev, setEv] = useState({ title: '', date: '', time: '' });
   const patch = async (body: Record<string, unknown>, msg: string) => { try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body }); toast.ok(msg); onSaved(); } catch (e: any) { toast.error(e.message); } };
-  const move = (st: string) => { if (st === l.status) return; if (st === '보류' || st === '실패') { setPending(st); setReason(''); return; } void patch({ status: st }, `${st}(으)로 옮겼습니다`); };
+  const move = (st: string) => { if (st === l.status) return; if (st === '보류' || st === '실패') { setPending(st); setReason(''); setRevisit(''); return; } void patch({ status: st }, `${st}(으)로 옮겼습니다`); };
   async function addEvent(e: React.FormEvent) {
     e.preventDefault(); if (!ev.title.trim() || !ev.date) return;
     try { await api(`/api/sales/leads/${id}/events`, { body: { title: ev.title.trim(), date: ev.date, time: ev.time || null } }); setEv({ title: '', date: '', time: '' }); toast.ok('일정을 만들었습니다'); onSaved(); } catch (er: any) { toast.error(er.message); }
@@ -513,16 +526,20 @@ function LeadProgress({ id, data, onSaved, go }: { id: string; data: any; onSave
         </div>
         {pending && <div className="mt-2 flex flex-wrap items-center gap-2 rounded-input bg-amber-50 p-2 text-xs" data-testid="lead-stage-reason-box">
           <span className="text-amber-900">{pending} 사유(필수)</span><input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-stage-reason" />
-          <Button size="sm" disabled={!reason.trim()} onClick={() => { void patch({ status: pending, reason: reason.trim() }, `${pending}(으)로 옮겼습니다`); setPending(null); }} data-testid="lead-stage-reason-go">옮기기</Button><Button size="sm" variant="secondary" onClick={() => setPending(null)}>취소</Button></div>}
+          <label className="flex items-center gap-1 text-amber-900">다시 볼 날<input type="date" min={plusDays(1)} className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={revisit} onChange={(e) => setRevisit(e.target.value)} aria-label="다시 볼 날(선택)" data-testid="lead-stage-revisit" /></label>
+          <button type="button" onClick={() => setRevisit(revisit === plusDays(182) ? '' : plusDays(182))} className={cx('rounded-full border px-2 py-0.5', revisit === plusDays(182) ? 'border-amber-500 bg-white font-semibold' : 'border-amber-200')} data-testid="lead-stage-revisit-6m">6개월 뒤</button>
+          <Button size="sm" disabled={!reason.trim()} onClick={() => { void patch({ status: pending, reason: reason.trim(), ...(revisit ? { revisitDate: revisit } : {}) }, `${pending}(으)로 옮겼습니다${revisit ? ` — 다시 볼 날 ${kd(revisit)}` : ''}`); setPending(null); }} data-testid="lead-stage-reason-go">옮기기</Button><Button size="sm" variant="secondary" onClick={() => setPending(null)}>취소</Button></div>}
+        {l.revisit && CLOSED_STAGES.includes(String(l.status)) && <p className="mt-1.5 text-xs text-ink-2" data-testid="lead-revisit-note">다시 볼 날 {kd(l.revisit)} — 그날 담당자에게 ‘다시 연락(재접촉 검토)’ 업무가 생깁니다</p>}
       </div>
       {/* 다음 연락 + 메모 */}
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="rounded-input border border-line p-2" data-testid="lead-next-box">
-          <div className="flex flex-wrap items-center gap-1.5 text-xs"><span className="font-semibold">다음 연락</span>{l.next && <span className={l.next < td ? 'font-semibold text-red-600' : 'text-ink-2'}>{kd(l.next)}{l.next < td ? ' · 지남' : ''}</span>}</div>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs"><span className="font-semibold">다음 행동</span>{l.next ? <span className={l.next < td ? 'font-semibold text-red-600' : 'text-ink-2'}>{kd(l.next)}{l.next < td ? ' · 지남' : ''}{l.nextAction ? ` · ${l.nextAction}` : ''}</span> : !CLOSED_STAGES.includes(String(l.status)) && l.status !== '계약완료' && <span className="font-semibold text-red-600" data-testid="lead-next-missing">⚠ 다음 행동 없음</span>}</div>
           {ed && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <input type="date" className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={next} onChange={(e) => setNext(e.target.value)} aria-label="다음 연락일" data-testid="lead-next-date" />
             {([['오늘', 0], ['내일', 1], ['3일 뒤', 3], ['1주 뒤', 7]] as [string, number][]).map(([lb, n]) => <button key={lb} type="button" onClick={() => { setNext(plusDays(n)); void patch({ nextContactDate: plusDays(n) }, `다음 연락 ${lb}`); }} className="rounded-full border border-line px-2 py-0.5 text-xs hover:border-blue-300" data-testid={`lead-next-chip-${n}`}>{lb}</button>)}
-            <Button size="sm" variant="secondary" disabled={(next || '') === (l.next ?? '')} onClick={() => patch({ nextContactDate: next || null }, '다음 연락일을 저장했습니다')} data-testid="lead-next-save">저장</Button>
+            <span className="flex w-full gap-1.5"><input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1 text-xs')} value={nact} onChange={(e) => setNact(e.target.value)} maxLength={200} placeholder="다음 할 일(예: 견적서 보내기)" aria-label="다음 할 일" data-testid="lead-next-action" />
+            <Button size="sm" variant="secondary" disabled={(next || '') === (l.next ?? '') && nact.trim() === (l.nextAction ?? '')} onClick={() => patch({ nextContactDate: next || null, ...(next ? { nextAction: nact.trim() || null } : {}) }, next ? '다음 행동을 저장했습니다' : '다음 연락일을 지웠습니다')} data-testid="lead-next-save">저장</Button></span>
           </div>}
         </div>
         <div className="rounded-input border border-line p-2" data-testid="lead-memo-box">
@@ -592,7 +609,7 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
             {canRevert && (rv === null ? <Button size="sm" variant="secondary" onClick={() => setRv('')} data-testid="lead-revert">배정 이전으로 되돌리기</Button>
               : <span className="flex flex-1 flex-wrap items-center gap-1.5"><input className={cx(inputCls, 'h-8 min-w-40 flex-1 py-1 text-xs')} value={rv} onChange={(e) => setRv(e.target.value)} placeholder="사유(선택)" aria-label="되돌리기 사유" maxLength={300} data-testid="lead-revert-reason" /><Button size="sm" onClick={revert} data-testid="lead-revert-go">되돌리기</Button><Button size="sm" variant="secondary" onClick={() => setRv(null)}>취소</Button></span>)}</div>}
           {data.raw?.from === 'meta_lead' && <MetaLeadBox id={id} raw={data.raw} phone={data.lead.phone} />}
-          <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {kd(data.lead.next)}</span>}</div>
+          <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {kd(data.lead.next)}{data.lead.nextAction ? ` · ${data.lead.nextAction}` : ''}</span>}</div>
           <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-line px-1">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('shrink-0 px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`lead-tab-${k}`}>{l}</button>)}</div>
           {tab === 'progress' ? <LeadProgress key={data.lead.status} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} go={setTab} />
             : tab === 'events' ? <LeadEvents data={data} />
@@ -610,7 +627,7 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
               : <div className="flex flex-wrap items-center gap-2 rounded-input border border-red-200 bg-red-50 p-2 text-xs" data-testid="lead-delete-box"><span className="text-red-700">삭제 사유(필수) — 기록이 남고 목록에서 사라집니다</span><input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={del} onChange={(e) => setDel(e.target.value)} maxLength={500} aria-label="삭제 사유" data-testid="lead-delete-reason" autoFocus />
                 <Button size="sm" variant="danger" onClick={remove} disabled={!del.trim()} data-testid="lead-delete-go">삭제</Button><Button size="sm" variant="secondary" onClick={() => setDel(null)}>취소</Button></div>)}</>
             : tab === 'tasks' ? <LeadTasks id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />
-            : tab === 'timeline' ? <ol className="space-y-1.5 text-sm" data-testid="lead-timeline">{(data.timeline ?? []).map((x: any) => <li key={x.kind + x.id} className="flex gap-2 rounded-input border border-line p-2"><span aria-hidden>{TL_ICON[x.kind] ?? '•'}</span><span className="min-w-0 flex-1">{x.href ? <Link href={x.href} className="underline">{x.title}</Link> : x.title}{x.by && <span className="ml-1 text-xs text-ink-3">{x.by}</span>}</span><span className="shrink-0 text-xs tabular-nums text-ink-3">{kdt(x.at)}</span></li>)}{!(data.timeline ?? []).length && <li className="text-xs text-ink-3">아직 기록이 없습니다</li>}</ol>
+            : tab === 'timeline' ? <LeadTimeline items={data.timeline ?? []} />
             : <ul className="space-y-2">{(tab === 'props' || tab === 'cons') && data.readOnly === false && <li><RecordForm kind={tab === 'props' ? 'proposals' : 'contracts'} leads={[]} leadId={id} onSaved={() => { reload(); onChange?.(); }} /></li>}
               {(list ?? []).map((r: any) => <li key={r.__id} className="rounded-input border border-line p-2"><Rec row={r} admin={data.canAssign} /></li>)}
               {!(list ?? []).length && <li className="text-xs text-ink-3">없음</li>}</ul>}
@@ -622,8 +639,20 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
 
 /** S2 2차(감사 1-13·1-15): 거래처 보기 4(표·카드·단계별·간단) · 빠른 칩 6 · 정렬 5 · 필터(단계·우선·담당·지역) · 단계 요약 · CSV 내보내기/가져오기 · 새 리드 13칸(비슷한 거래처 경고) */
 const LEAD_VIEWS: [string, string][] = [['table', '표'], ['cards', '카드'], ['stages', '단계별'], ['compact', '간단']];
-const LEAD_CHIPS: [string, string][] = [['mine', '내 담당'], ['today', '오늘 연락'], ['overdue', '연락 지남'], ['week', '이번 주 연락'], ['stale', '30일 조용함'], ['high', '우선 높음']];
-const LEAD_SORTS: [string, string][] = [['activity', '최근 활동순'], ['next', '다음 연락순'], ['name', '이름순'], ['revenue', '예상매출순'], ['created', '등록순']];
+// 197차(#461 영업 진행 목록 개편 1단계): '오늘 볼 것' 띠 · 보기 탭 7개(+ 내 보기, 서버에 저장·기기 간 유지) · 표 열(단계 머문 날·다음 행동·마지막 접촉·출처) · 열 머리 정렬 · 열 고르기.
+// 예전 빠른 칩 '내 담당·오늘 연락·연락 지남·30일 조용함'은 탭·띠로 옮김. 원칙: 진행 중 거래처는 다음 행동이 있거나, 종결 사유가 있다
+const LEAD_CHIPS: [string, string][] = [['week', '이번 주 연락'], ['high', '우선 높음']];
+const LEAD_TABS: [string, string][] = [['mine', '내 거래처'], ['due', '오늘·지남'], ['none', '다음 행동 없음'], ['new', '새 리드'], ['open', '전체 진행 중'], ['closed', '종결'], ['all', '전체']];
+const TAB_SORT: Record<string, string> = { mine: 'next', due: 'next', none: 'contact', new: 'created', open: 'stage', closed: 'closed', all: 'activity' };
+const LEAD_STRIP: [string, string][] = [['today', '오늘 연락'], ['overdue', '기한 지남'], ['none', '다음 행동 없음'], ['stale', '14일 넘게 연락 없음'], ['new', '새 리드(7일)'], ['unassigned', '담당 없음']];
+const LEAD_SORTS: [string, string][] = [['', '보기 기본 순서'], ['activity', '최근 활동순'], ['next', '다음 연락순'], ['contact', '연락 없은 지 오래된 순'], ['stage', '단계순'], ['name', '이름순'], ['revenue', '예상매출순'], ['created', '등록순'], ['closed', '종결 최근순']];
+const DESC_SORTS = new Set(['activity', 'revenue', 'created', 'closed']);
+const LEAD_COLS: [string, string][] = [['source', '출처'], ['contact', '마지막 접촉'], ['revenue', '예상 금액'], ['owner', '담당'], ['priority', '우선'], ['interest', '관심 사업'], ['facility', '시설'], ['region', '지역']];
+const DEFAULT_COLS = ['source', 'contact', 'revenue', 'owner', 'priority'];
+const LEAD_CLOSED = new Set(['계약완료', '보류', '실패', '되돌림']);
+const kstDay = (v: unknown) => { if (!v) return null; const d = new Date(String(v)); return Number.isNaN(d.getTime()) ? null : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d); };
+const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00+09:00`) - Date.parse(`${from}T12:00:00+09:00`)) / 864e5);
+const shiftDay = (d: string, n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.parse(`${d}T12:00:00+09:00`) + n * 864e5));
 const PRI_KO: Record<string, string> = { urgent: '긴급', high: '높음', medium: '보통', low: '낮음' };
 const CSV_COLS: [string, string][] = [['name', '거래처명'], ['status', '단계'], ['priority', '우선순위'], ['facility', '시설'], ['region', '지역'], ['scale', '규모'], ['owner', '담당'], ['contact', '고객 담당자'], ['phone', '연락처'], ['email', '이메일'], ['homepage', '홈페이지'], ['revenue', '예상매출'], ['next', '다음 연락일'], ['lastActivity', '최근 활동'], ['created', '등록일'], ['memo', '메모']];
 const csvCell = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -648,12 +677,16 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const sp = useSearchParams();
   const [s, setS] = useUrlState('q', ''); const [status, setStatus] = useUrlState('status', ''); const [open, setOpen] = useState<string | null>(initialId ?? sp.get('id'));
   const [dayQ, setDay] = useUrlState('day', ''); const day = dayQ === 'today' ? 'today' : ''; // 영업 현황 '오늘 연락할 리드'
-  const [boxQ, setBox] = useUrlState('box', ''); // #610 ⓒ·#614(대표 10/25): 보류·실패·되돌림은 기본 목록에서 빠져 보관함(?box=archive)
+  const [boxQ, setBox] = useUrlState('box', ''); // #610 ⓒ·#614 예전 보관함 주소(?box=archive) → 197차 '종결' 보기
+  const [lvQ, setLv] = useUrlState('lv', 'open'); // 197차(#461): 보기 탭(내 거래처·오늘·지남·다음 행동 없음·새 리드·전체 진행 중·종결·전체)
+  const [focus, setFocus] = useUrlState('focus', ''); // 197차: '오늘 볼 것' 띠에서 누른 조건(진행 중 거래처 안에서)
   const [chipsQ, setChipsQ] = useUrlState('chips', ''); const chips = chipsQ ? chipsQ.split(',') : []; const setChips = (c: string[]) => setChipsQ(c.join(','));
-  const [view, setView] = useState(initialView && LEAD_VIEWS.some(([k]) => k === initialView) ? initialView : 'table'); const [sort, setSort] = useUrlState('sort', 'activity');
-  const [fPri, setFPri] = useUrlState('pri', ''); const [fOwner, setFOwner] = useUrlState('owner', ''); const [fRegion, setFRegion] = useUrlState('region', '');
+  const [view, setView] = useState(initialView && LEAD_VIEWS.some(([k]) => k === initialView) ? initialView : 'table');
+  const [sort, setSort] = useUrlState('sort', ''); const [rev, setRev] = useUrlState('rev', ''); // 197차: 정렬 '' = 보기 기본 순서 · rev=1 거꾸로(열 머리 두 번)
+  const [fPri, setFPri] = useUrlState('pri', ''); const [fOwner, setFOwner] = useUrlState('owner', ''); const [fRegion, setFRegion] = useUrlState('region', ''); const [fSrc, setFSrc] = useUrlState('src', '');
+  const [mv, setMv] = useState<{ id: string; name: string; q: Record<string, string> }[] | null>(null); const [cols, setCols] = useState<string[] | null>(null); const [saving, setSaving] = useState<string | null>(null); // 197차: 내 보기·열(저장 뒤 화면에 바로)
   const [imp, setImp] = useState<{ rows: Record<string, unknown>[]; file: string; skipped: string[]; done?: { created: number; skipped: string[] } } | null>(null);
-  const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, status, day })}`, [s, status, day]);
+  const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, day })}`, [s, day]); // 197차: 단계는 화면에서 거름 — 띠·탭 숫자는 늘 전체 기준
   useEffect(() => { if (initialView) return; try { const v = localStorage.getItem('sales-leads-view'); if (v && LEAD_VIEWS.some(([k]) => k === v)) setView(v); } catch { /* 없음 */ } }, [initialView]);
   const pickView = (v: string) => { setView(v); try { localStorage.setItem('sales-leads-view', v); } catch { /* 없음 */ } };
   // 로컬 검수 10/19: prompt() 는 브라우저·자동화 환경에서 막힐 수 있어 입력 창으로
@@ -701,69 +734,141 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
     if (!imp) return;
     try { const r = await api<{ created: number; skipped: string[] }>('/api/sales/leads/import', { body: { rows: imp.rows } }); setImp({ ...imp, done: r }); toast.ok(`${r.created}건 가져왔습니다`); reload(); } catch (e: any) { toast.error(e.message); }
   }
+  // 197차: 휴대폰은 보기 탭이 가로로 밀려 켜진 탭이 화면 밖일 수 있음 — 탭 줄만 옆으로 옮겨 보이게(화면 위아래는 그대로)
+  const tabsRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { const box = tabsRef.current; const on = box?.querySelector<HTMLElement>('[aria-selected="true"]'); if (box && on && (on.offsetLeft < box.scrollLeft || on.offsetLeft + on.offsetWidth > box.scrollLeft + box.clientWidth)) box.scrollLeft = Math.max(0, on.offsetLeft - 8); });
   if (error) return <ErrorBox error={error} retry={reload} />;
   const all: any[] = data?.leads ?? []; const td = today(); const me = data?.me;
-  const isArch = (l: any) => ARCHIVED_STAGES.has(String(l.status)); const box = boxQ === 'archive' || ARCHIVED_STAGES.has(status) ? 'archive' : ''; // 위 단계 고르기에서 보류·실패를 고르면 보관함으로
-  const pool = all.filter((l) => (box === 'archive') === isArch(l)); const archivedCount = all.filter(isArch).length;
-  const stageCount = new Map<string, number>(); for (const l of pool) stageCount.set(String(l.status ?? '미정'), (stageCount.get(String(l.status ?? '미정')) ?? 0) + 1);
+  const isArch = (l: any) => ARCHIVED_STAGES.has(String(l.status)); const isClosed = (l: any) => LEAD_CLOSED.has(String(l.status));
+  // 197차(#461): 띠 = 진행 중 거래처의 오늘 연락·기한 지남·다음 행동 없음·14일 넘게 연락 없음·새 리드·담당 없음 — 누르면 '전체 진행 중'에서 그 조건만
+  const d7 = shiftDay(td, 7), d7ago = shiftDay(td, -7), d14ago = shiftDay(td, -14);
+  const lastDay = (l: any) => kstDay(l.lastContact?.at) ?? l.created ?? null;
+  const STRIP_FN: Record<string, (l: any) => boolean> = { today: (l) => l.next === td, overdue: (l) => !!l.next && l.next < td, none: (l) => !l.next, stale: (l) => { const d = lastDay(l); return !!d && d < d14ago; },
+    new: (l) => l.status === '신규리드' && (l.created ?? '') >= d7ago, unassigned: (l) => !l.ownerId };
+  const TAB_FN: Record<string, (l: any) => boolean> = { mine: (l) => !isClosed(l) && !!me && l.ownerId === me, due: (l) => !isClosed(l) && !!l.next && l.next <= td, none: (l) => !isClosed(l) && !l.next,
+    new: (l) => !isClosed(l) && STRIP_FN.new(l), open: (l) => !isClosed(l), closed: isClosed, all: () => true };
+  const lv = boxQ === 'archive' ? 'closed' : TAB_FN[lvQ] ? lvQ : 'open';
+  const live = all.filter((l) => !isClosed(l));
+  const stripN: Record<string, number> = Object.fromEntries(LEAD_STRIP.map(([k]) => [k, live.filter(STRIP_FN[k]).length]));
+  const tabN: Record<string, number> = Object.fromEntries(LEAD_TABS.map(([k]) => [k, all.filter(TAB_FN[k]).length]));
+  const base = all.filter((l) => TAB_FN[lv](l) && (!focus || !STRIP_FN[focus] || (!isClosed(l) && STRIP_FN[focus](l))));
+  const stageCount = new Map<string, number>(); for (const l of base) stageCount.set(String(l.status ?? '미정'), (stageCount.get(String(l.status ?? '미정')) ?? 0) + 1);
   const statuses = [...new Set(all.map((l: any) => String(l.status ?? '미정')))] as string[];
   const owners = [...new Map(all.filter((l) => l.ownerId).map((l) => [l.ownerId, l.owner])).entries()] as [string, string][]; const regions = [...new Set(all.map((l) => l.region).filter(Boolean))] as string[];
-  const d7 = new Date(`${td}T00:00:00+09:00`); d7.setDate(d7.getDate() + 7); const wk = d7.toISOString().slice(0, 10); const d30 = new Date(`${td}T00:00:00+09:00`); d30.setDate(d30.getDate() - 30); const stale = d30.toISOString().slice(0, 10);
-  const CHIP_FN: Record<string, (l: any) => boolean> = { mine: (l) => !!me && l.ownerId === me, today: (l) => l.next === td, overdue: (l) => !!l.next && l.next < td, week: (l) => !!l.next && l.next >= td && l.next <= wk, stale: (l) => !l.lastActivity || l.lastActivity < stale, high: (l) => ['urgent', 'high'].includes(String(l.priorityCode)) };
-  const PRI_ORD: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-  const SORT_FN: Record<string, (a: any, b: any) => number> = { activity: (a, b) => String(b.lastActivity ?? '').localeCompare(String(a.lastActivity ?? '')), next: (a, b) => String(a.next ?? '9999').localeCompare(String(b.next ?? '9999')), name: (a, b) => String(a.name).localeCompare(String(b.name), 'ko'), revenue: (a, b) => (Number(b.revenue) || 0) - (Number(a.revenue) || 0), created: (a, b) => String(b.created ?? '').localeCompare(String(a.created ?? '')) };
-  const shown = pool.filter((l) => chips.every((c) => CHIP_FN[c]?.(l)) && (!fPri || l.priorityCode === fPri) && (!fOwner || l.ownerId === fOwner) && (!fRegion || l.region === fRegion)).sort(SORT_FN[sort] ?? SORT_FN.activity);
+  const sources = [...new Map(all.filter((l) => l.source?.kind).map((l) => [l.source.kind, l.source.label])).entries()] as [string, string][];
+  const CHIP_FN: Record<string, (l: any) => boolean> = { week: (l) => !!l.next && l.next >= td && l.next <= d7, high: (l) => ['urgent', 'high'].includes(String(l.priorityCode)) };
+  const stageIdx = (l: any) => { const i = (data?.stages ?? []).indexOf(String(l.status)); return i < 0 ? 99 : i; };
+  const SORT_FN: Record<string, (a: any, b: any) => number> = { activity: (a, b) => String(b.lastContact?.at ?? b.lastActivity ?? '').localeCompare(String(a.lastContact?.at ?? a.lastActivity ?? '')), next: (a, b) => String(a.next ?? '9999').localeCompare(String(b.next ?? '9999')),
+    contact: (a, b) => String(lastDay(a) ?? '').localeCompare(String(lastDay(b) ?? '')), stage: (a, b) => stageIdx(a) - stageIdx(b) || String(a.next ?? '9999').localeCompare(String(b.next ?? '9999')),
+    name: (a, b) => String(a.name).localeCompare(String(b.name), 'ko'), revenue: (a, b) => (Number(b.revenue) || 0) - (Number(a.revenue) || 0), created: (a, b) => String(b.created ?? '').localeCompare(String(a.created ?? '')),
+    closed: (a, b) => String(b.closedAt ?? '').localeCompare(String(a.closedAt ?? '')), source: (a, b) => String(a.source?.label ?? '').localeCompare(String(b.source?.label ?? ''), 'ko'), owner: (a, b) => String(a.owner ?? '힣').localeCompare(String(b.owner ?? '힣'), 'ko') };
+  const sortKey = sort && SORT_FN[sort] ? sort : TAB_SORT[lv];
+  const shown = base.filter((l) => (!status || String(l.status ?? '미정') === status) && chips.every((c) => !CHIP_FN[c] || CHIP_FN[c](l)) && (!fPri || l.priorityCode === fPri) && (!fOwner || (fOwner === '-' ? !l.ownerId : l.ownerId === fOwner))
+    && (!fRegion || l.region === fRegion) && (!fSrc || l.source?.kind === fSrc)).sort((a, b) => (rev === '1' ? -1 : 1) * (SORT_FN[sortKey] ?? SORT_FN.activity)(a, b));
+  const sumRevenue = shown.reduce((n, l) => n + (Number(l.revenue) || 0), 0);
   const ed = data?.readOnly === false;
-  // 로컬 10/25 20:00 ①: 보관함은 '단계별'·'간단' 보기여도 표(PC)·카드(휴대폰)로 — [되돌리기]가 있는 보기
+  const box = lv === 'closed' ? 'archive' : '';
+  // 로컬 10/25 20:00 ①: 종결(예전 보관함)은 '단계별'·'간단' 보기여도 표(PC)·카드(휴대폰)로 — [되돌리기]가 있는 보기
   const v = box === 'archive' && (view === 'stages' || view === 'compact') ? 'table' : view;
+  // 197차: 내 저장된 보기·열(user_settings — 기기 간 유지). 지금 고른 조건과 똑같은 저장 보기가 있으면 그 탭이 켜짐
+  const myViews: { id: string; name: string; q: Record<string, string> }[] = mv ?? data?.myViews?.views ?? [];
+  const colsOn: string[] = cols ?? data?.myViews?.cols ?? DEFAULT_COLS; const col = (k: string) => colsOn.includes(k);
+  const curQ: Record<string, string> = Object.fromEntries(Object.entries({ lv, focus, chips: chipsQ, status, sort, rev, pri: fPri, owner: fOwner, region: fRegion, src: fSrc }).filter(([, x]) => x));
+  const activeUv = myViews.find((x) => { const e = Object.entries(x.q ?? {}).filter(([, y]) => y); return e.length === Object.keys(curQ).length && e.every(([k, y]) => curQ[k] === y); })?.id ?? null;
+  const pickTab = (k: string) => { setLv(k); setFocus(''); setBox(''); setSort(''); setRev(''); if (status && (k === 'closed') !== LEAD_CLOSED.has(status) && k !== 'all') setStatus(''); };
+  const pickStatus = (x: string) => { setStatus(x); if (x && LEAD_CLOSED.has(x) && lv !== 'closed' && lv !== 'all') { setLv('closed'); setFocus(''); } else if (x && !LEAD_CLOSED.has(x) && lv === 'closed') setLv('open'); };
+  const pickStrip = (k: string) => { const on = focus === k && lv === 'open'; setFocus(on ? '' : k); setLv('open'); setBox(''); setSort(''); setRev(''); if (status && LEAD_CLOSED.has(status)) setStatus(''); };
+  const applyView = (x: { q: Record<string, string> }) => { const g = (k: string) => x.q?.[k] ?? ''; setLv(g('lv') || 'open'); setFocus(g('focus')); setChipsQ(g('chips')); setStatus(g('status')); setSort(g('sort')); setRev(g('rev')); setFPri(g('pri')); setFOwner(g('owner')); setFRegion(g('region')); setFSrc(g('src')); setBox(''); };
+  const onSort = (k: string) => { if (sortKey === k) setRev(rev === '1' ? '' : '1'); else { setSort(k); setRev(''); } };
+  async function saveViews(body: { views?: { id: string; name: string; q: Record<string, string> }[]; cols?: string[] }, msg?: string) {
+    try { const r = await api<{ views: any[]; cols: string[] | null }>('/api/sales/leads/views', { method: 'PUT', body }); setMv(r.views ?? []); if (r.cols) setCols(r.cols); if (msg) toast.ok(msg); } catch (e: any) { toast.error(e.message); }
+  }
+  const toggleCol = (k: string) => { const next = col(k) ? colsOn.filter((x) => x !== k) : [...colsOn, k]; setCols(next); void saveViews({ cols: next }); };
+  const addView = () => { const name = (saving ?? '').trim(); if (!name) return; void saveViews({ views: [...myViews, { id: Math.random().toString(36).slice(2, 10), name, q: curQ }] }, `'${name}' 보기를 저장했습니다 — 다른 기기에서도 보입니다`); setSaving(null); };
+  const delView = (x: { id: string; name: string }) => { if (!confirm(`'${x.name}' 보기를 지울까요?`)) return; void saveViews({ views: myViews.filter((y) => y.id !== x.id) }, '보기를 지웠습니다'); };
   // #610 ⓒ 보관함 [되돌리기] = 마지막 기록의 이전 단계(그것도 보류·실패면 신규리드)로 — 단계 기록에 사유가 남음
   const prevOf = (l: any) => (l.archive?.prev && !ARCHIVED_STAGES.has(l.archive.prev) ? l.archive.prev : '신규리드');
   const restoreLead = async (l: any) => { try { await api(`/api/sales/leads/${l.id}`, { method: 'PATCH', body: { status: prevOf(l), reason: '보관함에서 되돌림' } }); toast.ok(`되돌렸습니다 — '${prevOf(l)}'로 기본 목록에 나옵니다`); reload(); } catch (e: any) { toast.error(e.message); } };
-  const rowExtra = (l: any) => (box === 'archive' ? <LeadArchiveCell l={l} ed={ed} onRestore={() => restoreLead(l)} /> : ed && l.status === '신규리드' ? <AdvanceButton l={l} people={data?.canAssign ? data.people ?? [] : null} me={me} onDone={reload} /> : null);
+  const rowExtra = (l: any) => (isArch(l) ? <LeadArchiveCell l={l} ed={ed} onRestore={() => restoreLead(l)} /> : ed && l.status === '신규리드' ? <AdvanceButton l={l} people={data?.canAssign ? data.people ?? [] : null} me={me} onDone={reload} /> : null);
+  // 197차(#461) 칸: 다음 행동(지남 빨강·오늘 주황·없으면 경고) · 마지막 접촉(n일 전 · 종류, 14일 넘으면 '오래 쉼') · 단계 머문 날 · 출처(공고 링크)
+  const nextNote = (l: any) => (isClosed(l) ? (l.revisit ? <span className="text-ink-2" data-testid="lead-revisit">다시 볼 날 {kd(l.revisit)}</span> : null)
+    : !l.next ? <span className="font-semibold text-red-600" data-testid="lead-no-next">⚠ 다음 행동 없음</span>
+    : <span className={cx(l.next < td ? 'font-semibold text-red-600' : l.next === td ? 'font-semibold text-amber-600' : 'text-ink-2')}>{l.next < td ? '지남' : l.next === td ? '오늘' : ''}{l.nextAction ? <span className="font-normal text-ink-2">{l.next <= td ? ' · ' : ''}{l.nextAction}</span> : null}</span>);
+  const nextCell = (l: any) => (isClosed(l) ? nextNote(l) ?? <span className="text-ink-3">—</span> : !l.next ? nextNote(l)
+    : <span className={cx(l.next < td ? 'font-semibold text-red-600' : l.next === td ? 'font-semibold text-amber-600' : 'text-ink-2')}>{kd(l.next)}{l.next < td ? ' · 지남' : l.next === td ? ' · 오늘' : ''}{l.nextAction ? <span className="font-normal text-ink-2"> · {l.nextAction}</span> : null}</span>);
+  const contactCell = (l: any) => { const d = kstDay(l.lastContact?.at); const n = d ? dayDiff(d, td) : null;
+    return <span className="inline-flex flex-wrap items-center gap-1">{d ? <span className="tabular-nums">{n === 0 ? '오늘' : `${n}일 전`} · {l.lastContact.kind}</span> : <span className="text-ink-3">기록 없음</span>}{!isClosed(l) && STRIP_FN.stale(l) && <span className="rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-800" data-testid="lead-stale">오래 쉼</span>}</span>; };
+  const stageDays = (l: any) => { const d = kstDay(l.stageSince); const n = d ? dayDiff(d, td) : 0; return n >= 1 ? <span className="text-[10px] tabular-nums text-ink-3" title="이 단계에 머문 날" data-testid="lead-stage-days">{n}일</span> : null; };
+  const srcCell = (l: any) => (!l.source ? null : l.source.href ? <Link href={l.source.href} className="underline" style={{ color: C }} onClick={(e) => e.stopPropagation()} data-testid="lead-source">{l.source.label}</Link> : <span data-testid="lead-source">{l.source.label}</span>);
+  const th = (k: string, label: string) => <th key={k} className="whitespace-nowrap p-2" aria-sort={sortKey === k ? ((rev === '1') !== DESC_SORTS.has(k) ? 'descending' : 'ascending') : undefined}>
+    <button type="button" onClick={() => onSort(k)} className="inline-flex items-center gap-0.5 hover:text-ink" data-testid={`leads-th-${k}`}>{label}{sortKey === k && <span aria-hidden className="text-[10px]">{(rev === '1') !== DESC_SORTS.has(k) ? '▼' : '▲'}</span>}</button></th>;
   const card = (l: any) => (
     <li key={l.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-lead-card"><button type="button" onClick={() => setOpen(l.id)} className="block w-full text-left" data-testid="sales-lead-open">
-      <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(l.status)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
-      <span className="mt-0.5 block text-xs text-ink-2">{[l.facility, l.region, l.scale, l.contact, l.owner && `담당 ${l.owner}`].filter(Boolean).join(' · ')}</span>
-      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">{interests(l.interests)}{l.next && <span className={l.next < td ? 'font-semibold text-red-600' : 'text-ink-2'}>다음 연락 {kd(l.next)}</span>}{l.revenue ? <span className="text-ink-3">{won(l.revenue)}</span> : null}{l.lastActivity && <span className="text-ink-3">활동 {kd(l.lastActivity)}</span>}</span>
+      <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(l.status)}{stageDays(l)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
+      <span className="mt-0.5 block text-xs" data-testid="lead-card-next">{nextCell(l)}</span>
+      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-2">{contactCell(l)}{l.source && <span className="text-ink-3">· {l.source.label}</span>}{l.owner && <span className="text-ink-3">· 담당 {l.owner}</span>}</span>
+      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">{interests(l.interests)}{[l.facility, l.region, l.scale, l.contact].filter(Boolean).join(' · ')}{l.revenue ? <span>{won(l.revenue)}</span> : null}</span>
     </button><div className="mt-2 flex flex-wrap items-center gap-1.5"><ContactRow phone={l.phone} links={[[l.homepage, '홈페이지']]} />{rowExtra(l)}</div></li>);
   const NLF = (k: string, label: string, extra: Record<string, unknown> = {}) => <Field label={label}><input className={inputCls} value={nl?.[k] ?? ''} onChange={(e) => setNl({ ...nl!, [k]: e.target.value })} aria-label={label} data-testid={`lead-new-${k}`} {...extra} /></Field>;
   return (
     <div className="space-y-3" data-testid="sales-leads">
       <Head title="영업 진행" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesLeads} compact />{ed && <Button size="sm" onClick={() => { setNl({ ...EMPTY_NL }); setForceNew(false); setSimilar(null); }} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} />{day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="leads-day-today">오늘 연락할 리드 ✕</button>}
-        <select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
+        <select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => pickStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
       {!data ? <Skeleton rows={5} /> : (
         <>
-        {/* 단계 요약 줄(누르면 단계 필터) + 빠른 칩 6 + 보기 4·정렬 5·필터(우선·담당·지역)·CSV */}
-        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-xs" data-testid="leads-stage-summary">{(data.stages ?? statuses).filter((st: string) => stageCount.get(st)).map((st: string) => <button key={st} type="button" onClick={() => setStatus(status === st ? '' : st)} className={cx('shrink-0 rounded-full border px-2.5 py-0.5', status === st ? 'border-transparent text-white' : 'border-line bg-white')} style={status === st ? { background: C } : undefined} data-testid="leads-stage-chip">{st} <b>{stageCount.get(st)}</b></button>)}</div>
+        {/* 197차(#461) '오늘 볼 것' 띠 — 진행 중 거래처 기준, 누르면 '전체 진행 중'에서 그 조건만(다시 누르면 풂) */}
+        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" aria-label="오늘 볼 것" data-testid="leads-strip">
+          {LEAD_STRIP.filter(([k]) => k !== 'unassigned' || stripN.unassigned > 0).map(([k, label]) => { const n = stripN[k] ?? 0; const on = focus === k && lv === 'open';
+            const hot = n > 0 && (k === 'overdue' || k === 'none' || k === 'unassigned') ? 'text-red-600' : n > 0 && (k === 'today' || k === 'stale') ? 'text-amber-600' : 'text-ink';
+            return <button key={k} type="button" onClick={() => pickStrip(k)} className={cx('min-w-[6.5rem] shrink-0 rounded-card border px-3 py-1.5 text-left', on ? 'border-brand-600 bg-brand-50' : 'border-line bg-white hover:border-brand-300', !n && !on && 'opacity-60')} aria-pressed={on} data-testid={`leads-strip-${k}`}>
+              <span className="block text-[11px] text-ink-2">{label}</span><b className={cx('text-lg leading-tight tabular-nums', hot)} data-testid={`leads-strip-${k}-n`}>{n}</b></button>; })}
+        </div>
+        {/* 보기 탭 7개 + 내 보기(서버 저장 — 다른 기기에서도 그대로) */}
+        <div ref={tabsRef} className="-mx-1 flex items-end gap-0.5 overflow-x-auto border-b border-line px-1" role="tablist" aria-label="보기" data-testid="leads-tabs">
+          {LEAD_TABS.map(([k, label]) => { const on = !activeUv && lv === k; return <button key={k} type="button" role="tab" aria-selected={on} onClick={() => pickTab(k)} className={cx('shrink-0 border-b-2 px-2.5 py-1.5 text-sm', on ? 'font-semibold' : 'border-transparent text-ink-2 hover:text-ink')} style={on ? { borderColor: C, color: C } : undefined} data-testid={`leads-tab-${k}`}>{label} <span className="text-xs tabular-nums text-ink-3">{tabN[k] ?? 0}</span></button>; })}
+          {myViews.map((x) => { const on = activeUv === x.id; return <span key={x.id} className={cx('flex shrink-0 items-center border-b-2', on ? '' : 'border-transparent')} style={on ? { borderColor: C } : undefined}>
+            <button type="button" role="tab" aria-selected={on} onClick={() => applyView(x)} className={cx('py-1.5 pl-2.5 pr-1 text-sm', on ? 'font-semibold' : 'text-ink-2 hover:text-ink')} style={on ? { color: C } : undefined} data-testid="leads-uview">{x.name}</button>
+            <button type="button" onClick={() => delView(x)} className="px-1 text-xs text-ink-3 hover:text-red-600" aria-label={`${x.name} 보기 지우기`} data-testid="leads-uview-del">✕</button></span>; })}
+          {saving === null ? <button type="button" onClick={() => setSaving('')} className="shrink-0 px-2 py-1.5 text-xs font-medium hover:underline" style={{ color: C }} data-testid="leads-view-save">+ 보기 저장</button>
+            : <form onSubmit={(e) => { e.preventDefault(); addView(); }} className="flex shrink-0 items-center gap-1 py-1"><input className={cx(inputCls, 'h-7 w-32 py-0 text-xs')} value={saving} onChange={(e) => setSaving(e.target.value)} maxLength={30} placeholder="보기 이름" aria-label="보기 이름" autoFocus data-testid="leads-view-name" />
+              <Button size="sm" disabled={!saving.trim()} data-testid="leads-view-save-go">저장</Button><button type="button" onClick={() => setSaving(null)} className="text-xs text-ink-3">취소</button></form>}
+        </div>
+        {focus && STRIP_FN[focus] && lv === 'open' && <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2" data-testid="leads-focus">‘{LEAD_STRIP.find(([k]) => k === focus)?.[1]}’만 보는 중<button type="button" onClick={() => setFocus('')} className="underline" style={{ color: C }}>모두 보기</button></p>}
+        {/* 단계 요약 줄(누르면 단계 필터) + 빠른 칩 + 정렬·필터(우선·담당·지역·출처)·보기·열·CSV */}
+        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-xs" data-testid="leads-stage-summary">{(data.stages ?? statuses).filter((st: string) => stageCount.get(st)).map((st: string) => <button key={st} type="button" onClick={() => pickStatus(status === st ? '' : st)} className={cx('shrink-0 rounded-full border px-2.5 py-0.5', status === st ? 'border-transparent text-white' : 'border-line bg-white')} style={status === st ? { background: C } : undefined} data-testid="leads-stage-chip">{st} <b>{stageCount.get(st)}</b></button>)}</div>
         <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="leads-toolbar">
           {LEAD_CHIPS.map(([k, l]) => { const on = chips.includes(k); return <button key={k} type="button" onClick={() => setChips(on ? chips.filter((x) => x !== k) : [...chips, k])} className={cx('rounded-full border px-2.5 py-0.5', on ? 'border-blue-300 bg-blue-50 font-semibold text-blue-800' : 'border-line bg-white text-ink-2')} aria-pressed={on} data-testid={`leads-chip-${k}`}>{l}</button>; })}
           <span className="mx-1 hidden h-4 w-px bg-line sm:block" />
-          {/* #610 ⓒ·#614: 보관함 — 보류·실패·되돌림은 기본 목록에서 빠지고 여기서 사유·누가·언제 + [되돌리기] */}
-          <button type="button" onClick={() => { setBox(''); if (ARCHIVED_STAGES.has(status)) setStatus(''); }} className={chipCls(!box)} aria-pressed={!box} data-testid="leads-box-open">기본 목록</button>
-          <button type="button" onClick={() => setBox('archive')} className={chipCls(box === 'archive')} aria-pressed={box === 'archive'} data-testid="leads-box-archive">보류·실패 {archivedCount}건</button>
-          <span className="mx-1 hidden h-4 w-px bg-line sm:block" />
-          <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" data-testid="leads-sort">{LEAD_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+          <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={sort} onChange={(e) => { setSort(e.target.value); setRev(''); }} aria-label="정렬" data-testid="leads-sort">{LEAD_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={fPri} onChange={(e) => setFPri(e.target.value)} aria-label="우선순위 필터" data-testid="leads-f-priority"><option value="">우선 전체</option>{Object.entries(PRI_KO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-          {owners.length > 0 && <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={fOwner} onChange={(e) => setFOwner(e.target.value)} aria-label="담당 필터" data-testid="leads-f-owner"><option value="">담당 전체</option>{owners.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>}
+          {owners.length > 0 && <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={fOwner} onChange={(e) => setFOwner(e.target.value)} aria-label="담당 필터" data-testid="leads-f-owner"><option value="">담당 전체</option>{owners.map(([id, n]) => <option key={id} value={id}>{n}</option>)}<option value="-">담당 없음</option></select>}
           {regions.length > 0 && <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={fRegion} onChange={(e) => setFRegion(e.target.value)} aria-label="지역 필터" data-testid="leads-f-region"><option value="">지역 전체</option>{regions.map((r) => <option key={r}>{r}</option>)}</select>}
+          {sources.length > 1 && <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={fSrc} onChange={(e) => setFSrc(e.target.value)} aria-label="출처 필터" data-testid="leads-f-source"><option value="">출처 전체</option>{sources.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select>}
           <span className="hidden gap-0.5 rounded-input border border-line bg-white p-0.5 md:inline-flex" role="group" aria-label="보기">{LEAD_VIEWS.map(([k, l]) => <button key={k} type="button" onClick={() => pickView(k)} className={cx('rounded px-2 py-0.5', view === k ? 'text-white' : 'text-ink-2')} style={view === k ? { background: C } : undefined} aria-pressed={view === k} data-testid={`leads-view-${k}`}>{l}</button>)}</span>
-          <span className="ml-auto flex items-center gap-1.5"><span className="text-ink-3" data-testid="leads-count">{shown.length}건</span>
+          {v === 'table' && <details className="relative hidden md:block" data-testid="leads-cols"><summary className={cx(linkCls, 'cursor-pointer list-none')}>열</summary>
+            <div className="absolute left-0 z-20 mt-1 w-44 space-y-1 rounded-card border border-line bg-white p-2 shadow-pop">{LEAD_COLS.map(([k, l]) => <label key={k} className="flex items-center gap-2"><input type="checkbox" checked={col(k)} onChange={() => toggleCol(k)} data-testid={`leads-col-${k}`} />{l}</label>)}
+              <p className="text-[10px] text-ink-3">거래처·단계·다음 행동은 늘 보입니다. 고른 열은 다른 기기에서도 그대로입니다.</p></div></details>}
+          <span className="ml-auto flex items-center gap-1.5"><span className="text-ink-3" data-testid="leads-count">{shown.length}건{sumRevenue ? ` · 예상 ${won(sumRevenue)}` : ''}</span>
             <button type="button" onClick={exportCsv} className={linkCls} data-testid="leads-csv-export"><Download size={12} /> CSV</button>
             {ed && data.canAssign && <label className={cx(linkCls, 'cursor-pointer')} data-testid="leads-csv-import">CSV 가져오기<input type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pickCsv(f); }} aria-label="CSV 파일" data-testid="leads-csv-file" /></label>}</span>
         </div>
-        {/* 영업관리 2-13 표 칸: 거래처명(담당·최근 활동·금액) · 관심 사업 · 시설 · 지역 · 단계 · 우선 · 예상매출 · 다음 연락 · 최근 활동 · 담당 — 휴대폰은 카드 */}
-        {v === 'table' && <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block"><table className="w-full min-w-[960px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>{['거래처명', '관심 사업', '시설', '지역', '단계', '우선', '예상매출', '다음 연락', '최근 활동', '담당'].map((h) => <th key={h} className="whitespace-nowrap p-2">{h}</th>)}</tr></thead>
-          <tbody>{shown.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line hover:bg-slate-50" onClick={(e) => { if (!(e.target as HTMLElement).closest('input,select,button')) setOpen(l.id); }} data-testid="sales-lead-row">
-            {/* 대표 요청(영업관리 거래처 장): 표 안에서 바로 고치기 — 거래처명·단계·우선·다음 연락·담당(관리자). 바뀌면 바로 저장 */}
-            <td className="p-2 font-medium">{ed ? <CellInput value={l.name} onSave={(v) => patchLead(l.id, { name: v })} label="거래처명" testId="cell-name" /> : l.name}{l.contact && <span className="block text-[11px] font-normal text-ink-3">{l.contact}{l.phone ? ` · ${l.phone}` : ''}</span>}</td>
-            <td className="p-2">{interests(l.interests)}</td><td className="p-2 text-xs">{l.facility ?? ''}</td><td className="p-2 text-xs">{l.region ?? ''}</td>
-            <td className="p-2">{box === 'archive' ? rowExtra(l) : <span className="flex flex-wrap items-center gap-1">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.status ?? ''} aria-label="단계" data-testid="cell-status" onChange={(e) => { const v = e.target.value; const reason = ['보류', '실패'].includes(v) ? prompt(`'${v}' 사유`) ?? '' : undefined; if (reason === '') return; void patchLead(l.id, { status: v, ...(reason ? { reason } : {}) }); }}>{(data.stages ?? []).map((s: string) => <option key={s}>{s}</option>)}</select> : chip(l.status)}{rowExtra(l)}</span>}</td>
-            <td className="p-2 text-xs">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.priorityCode ?? ''} aria-label="우선" data-testid="cell-priority" onChange={(e) => patchLead(l.id, { priority: e.target.value || null })}><option value="">—</option>{Object.entries(PRI_KO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> : l.priority ?? ''}</td>
-            <td className="p-2 text-xs tabular-nums">{won(l.revenue) || '-'}</td>
-            <td className={cx('p-2 text-xs tabular-nums', l.next && l.next < td ? 'font-semibold text-red-600' : '')}>{ed ? <input type="date" className="rounded border border-line bg-white px-1 py-0.5 text-xs" defaultValue={l.next ?? ''} aria-label="다음 연락" data-testid="cell-next" onChange={(e) => patchLead(l.id, { nextContactDate: e.target.value || null })} /> : kd(l.next)}</td>
-            <td className="p-2 text-xs tabular-nums text-ink-3" data-testid="cell-activity">{kd(l.lastActivity ?? l.updated)}</td>
-            <td className="p-2 text-xs">{ed && data.canAssign ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.ownerId ?? ''} aria-label="담당" data-testid="cell-owner" onChange={(e) => patchLead(l.id, { ownerId: e.target.value || null })}><option value="">없음</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select> : l.owner ?? ''}</td></tr>)}
-            {!shown.length && <tr><td colSpan={10} className="p-6 text-center text-ink-3">{box === 'archive' ? '보관함이 비어 있습니다 — 보류·실패로 바꾼 리드와 되돌린 리드가 여기에 모입니다' : '리드가 없습니다'}</td></tr>}</tbody></table></div>}
+        {!shown.length && all.length > 0 && (s || status || focus || chips.length || fPri || fOwner || fRegion || fSrc) && lv !== 'all' && <p className="rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="leads-empty-hint">이 보기에는 맞는 거래처가 없습니다 — <button type="button" onClick={() => pickTab('all')} className="underline" style={{ color: C }}>전체 보기에서 찾기</button></p>}
+        {/* 197차(#461) 표: 거래처·담당자(아래 작은 글씨 지역·분류) · 단계(머문 날) · 다음 행동(날짜 + 할 일, 지남 빨강·오늘 주황·없으면 경고) · 고른 열(출처·마지막 접촉·예상 금액·담당·우선·관심 사업·시설·지역) — 열 머리를 누르면 정렬(두 번 = 거꾸로). 표 안에서 바로 고치기(거래처명·단계·다음 연락·우선·담당)는 그대로. 휴대폰은 카드 */}
+        {v === 'table' && <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block" data-testid="leads-table"><table className="w-full min-w-[880px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>
+            {th('name', '거래처·담당자')}{th('stage', '단계')}{th('next', '다음 행동')}{col('source') && th('source', '출처')}{col('contact') && th('contact', '마지막 접촉')}{col('revenue') && th('revenue', '예상 금액')}{col('owner') && th('owner', '담당')}
+            {col('priority') && <th className="whitespace-nowrap p-2">우선</th>}{col('interest') && <th className="whitespace-nowrap p-2">관심 사업</th>}{col('facility') && <th className="whitespace-nowrap p-2">시설</th>}{col('region') && <th className="whitespace-nowrap p-2">지역</th>}</tr></thead>
+          <tbody>{shown.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line align-top hover:bg-slate-50" onClick={(e) => { if (!(e.target as HTMLElement).closest('input,select,button,a')) setOpen(l.id); }} data-testid="sales-lead-row">
+            <td className="p-2 font-medium">{ed ? <CellInput value={l.name} onSave={(v) => patchLead(l.id, { name: v })} label="거래처명" testId="cell-name" /> : l.name}{l.contact && <span className="block text-[11px] font-normal text-ink-3">{l.contact}{l.phone ? ` · ${l.phone}` : ''}</span>}
+              {(!col('facility') || !col('region')) && (l.facility || l.region) && <span className="block text-[11px] font-normal text-ink-3">{[l.facility, l.region].filter(Boolean).join(' · ')}</span>}</td>
+            <td className="p-2">{isArch(l) ? rowExtra(l) : <span className="flex flex-wrap items-center gap-1">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.status ?? ''} aria-label="단계" data-testid="cell-status" onChange={(e) => { const v = e.target.value; const reason = ['보류', '실패'].includes(v) ? prompt(`'${v}' 사유`) ?? '' : undefined; if (reason === '') return; void patchLead(l.id, { status: v, ...(reason ? { reason } : {}) }); }}>{(data.stages ?? []).map((s: string) => <option key={s}>{s}</option>)}</select> : chip(l.status)}{stageDays(l)}{rowExtra(l)}</span>}</td>
+            <td className="p-2 text-xs" data-testid="cell-next-action">{ed && !isClosed(l) ? <span className="flex flex-col gap-0.5"><input key={`${l.id}:${l.next ?? ''}`} type="date" className={cx('w-fit rounded border bg-white px-1 py-0.5 text-xs', l.next && l.next < td ? 'border-red-300 text-red-700' : l.next === td ? 'border-amber-300 text-amber-700' : 'border-line')} defaultValue={l.next ?? ''} aria-label="다음 연락" data-testid="cell-next" onChange={(e) => patchLead(l.id, { nextContactDate: e.target.value || null })} />{nextNote(l)}</span> : nextCell(l)}</td>
+            {col('source') && <td className="whitespace-nowrap p-2 text-xs">{srcCell(l)}</td>}
+            {col('contact') && <td className="p-2 text-xs text-ink-2" data-testid="cell-contact">{contactCell(l)}</td>}
+            {col('revenue') && <td className="p-2 text-xs tabular-nums">{won(l.revenue) || '-'}</td>}
+            {col('owner') && <td className="p-2 text-xs">{ed && data.canAssign ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.ownerId ?? ''} aria-label="담당" data-testid="cell-owner" onChange={(e) => patchLead(l.id, { ownerId: e.target.value || null })}><option value="">없음</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select> : l.owner ?? <span className="text-red-600">없음</span>}</td>}
+            {col('priority') && <td className="p-2 text-xs">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.priorityCode ?? ''} aria-label="우선" data-testid="cell-priority" onChange={(e) => patchLead(l.id, { priority: e.target.value || null })}><option value="">—</option>{Object.entries(PRI_KO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> : l.priority ?? ''}</td>}
+            {col('interest') && <td className="p-2">{interests(l.interests)}</td>}{col('facility') && <td className="p-2 text-xs">{l.facility ?? ''}</td>}{col('region') && <td className="p-2 text-xs">{l.region ?? ''}</td>}</tr>)}
+            {!shown.length && <tr><td colSpan={11} className="p-6 text-center text-ink-3">{lv === 'closed' ? '종결한 거래처가 없습니다 — 계약완료·보류·실패로 닫은 리드와 되돌린 리드가 여기에 모입니다' : lv === 'none' ? '다음 행동이 없는 진행 중 거래처가 없습니다' : '리드가 없습니다'}</td></tr>}</tbody></table></div>}
         {/* 대표 10/21 12:00 영업 재편 3): 진행 단계(예전 '파이프라인' 메뉴)는 리드·거래처 안 '단계별' 보기 — PC 칸반·휴대폰 단계 칩 목록 */}
         {v === 'stages' && <Pipeline embedded />}
         {v === 'compact' && <ul className="hidden divide-y divide-line rounded-card border border-line bg-white text-sm shadow-card md:block" data-testid="leads-compact">{shown.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50"><span className="min-w-0 flex-1 truncate font-medium">{l.name}</span>{chip(l.status)}<span className="w-28 truncate text-xs text-ink-2">{l.owner ?? ''}</span><span className={cx('w-24 text-xs tabular-nums', l.next && l.next < td ? 'font-semibold text-red-600' : 'text-ink-3')}>{kd(l.next)}</span><span className="hidden w-24 text-right text-xs tabular-nums text-ink-3 lg:block">{won(l.revenue) || '-'}</span></button></li>)}{!shown.length && <li className="p-6 text-center text-ink-3">리드가 없습니다</li>}</ul>}
@@ -1104,7 +1209,12 @@ export function Regions() {
 const won = (v: unknown) => (v == null || v === '' || Number(v) === 0 ? '' : Number(v) ? `${Number(v).toLocaleString('ko-KR')}원` : String(v));
 const kd = (v: unknown) => { const s = String(v ?? ''); if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return s; const d = new Date(`${s.slice(0, 10)}T00:00:00Z`); const y = d.getUTCFullYear() !== Number(today().slice(0, 4)) ? `${d.getUTCFullYear()}. ` : ''; return `${y}${d.getUTCMonth() + 1}. ${d.getUTCDate()}.(${'일월화수목금토'[d.getUTCDay()]})`; }; // 올해가 아니면 연도 앞에(2024. 5. 13.(월))
 /** 날짜+시각: 10. 25.(토) 10:00 (시각 없거나 00:00 이면 날짜만) */
-const kdt = (v: unknown) => { const s = String(v ?? ''); if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return s; const t = s.slice(11, 16); return kd(s) + (/^\d\d:\d\d$/.test(t) && t !== '00:00' ? ` ${t}` : ''); };
+const kdt = (v: unknown) => {
+  const s = String(v ?? '');
+  // 197차: 시각대가 붙은 ISO(…Z·+09:00)는 서울 날짜·시각으로(예전엔 UTC 시각을 그대로 잘라 9시간 일렀음)
+  if (/T\d\d:\d\d/.test(s) && /(Z|[+-]\d\d:?\d\d)$/.test(s)) { const d = new Date(s); if (!Number.isNaN(d.getTime())) { const t = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d); return kd(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d)) + (t !== '00:00' ? ` ${t}` : ''); } }
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return s; const t = s.slice(11, 16); return kd(s) + (/^\d\d:\d\d$/.test(t) && t !== '00:00' ? ` ${t}` : '');
+};
 /** 표 칸 글 고치기: 엔터·밖 누르면 저장, Esc 취소 */
 function CellInput({ value, onSave, label, testId }: { value: string; onSave: (v: string) => void; label: string; testId: string }) {
   const [v, setV] = useState(value ?? '');

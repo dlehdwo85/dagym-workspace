@@ -14,6 +14,7 @@ import { useRowOpen } from '@/components/rowOpen';
 import { ConnectCard } from '@/components/ConnectCard';
 import { HomeMonth } from '@/components/HomeMonth';
 import { useRouter } from 'next/navigation';
+import { followUpMsg, useLeadFollowUp } from '@/components/sales/LeadFollowUp';
 
 const seoulDay = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const fmtHM = (d: Date | string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
@@ -140,6 +141,7 @@ export default function Dashboard() {
   const myTeams = useApi<{ teams: { id: string; name: string; color: string }[]; tasks: any[] }>('/api/teams/today'); // V14 8번 우리 팀
   // 내 미완료 업무 전체: 이번 주 마감(요일별 표시)·마감 없는 새 업무(48시간)
   const myOpen = useApi<{ tasks: any[] }>('/api/tasks?view=my&limit=300');
+  const fu = useLeadFollowUp(); // 197차(#460): 리드 업무 완료 때 다음 연락일·종결
   const today = data?.today ?? seoulDay(new Date());
   // 대표 확정(10/19): 홈은 '이번 주 일정' 하나(오늘 칸 강조·업무 포함) — '오늘'·'이달' 칸 없앰
   // V7: "이번 주 일정" = 오늘부터 7일
@@ -161,8 +163,11 @@ export default function Dashboard() {
 
   async function done(t: any) {
     const toReview = !!t.approval_line_id || (t.approval_required && user.role === 'staff');
+    const c = !toReview && t.lead_id ? await fu.ask(t) : 'skip';
+    if (c === null) return;
     try {
-      await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: toReview ? 'review' : 'done' } });
+      const r = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: toReview ? 'review' : 'done', ...(c !== 'skip' ? { leadFollowUp: c } : {}) } });
+      const fm = followUpMsg(r); if (fm) toast.info(fm);
       // #508: 완료는 업무 목록 맨 아래 '완료됨'으로 — 되돌리기는 거기서([완료됨 보기])
       if (toReview) toast.ok('검토를 요청했습니다', { label: '되돌리기', run: async () => { await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: t.status } }).catch(() => {}); reload(); mine.reload(); } });
       else toast.ok('완료했습니다 — 완료됨으로 옮겼습니다', { label: '완료됨 보기', run: () => router.push('/tasks?view=my&openDone=1') });
@@ -223,6 +228,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-3 sm:space-y-5">
+      {fu.node}
       <div>
         <p className="text-sm text-ink-2">{fmtDate(data.today)} · {greet}, {user.name}님</p>
         <h1 className="mt-0.5 text-xl font-bold tracking-tight sm:text-2xl">{company ? '전체 현황' : `${user.name}님의 업무 현황`}</h1>

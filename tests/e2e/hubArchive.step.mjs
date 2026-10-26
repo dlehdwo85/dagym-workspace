@@ -101,10 +101,10 @@ export async function hubArchive({ owner, ctx, sql, BASE, SHOTS }) {
     assert.equal(await rows.first().getByTestId('lead-advance').count(), 0, '1차연락완료가 되면 [영업 진행으로] 없음');
     await ctx.owner.ok('PATCH', `/api/sales/leads/${leadId}`, { status: '실패', reason: '예산 없음' }); // 표의 단계 선택은 prompt() 라 API 로
     await owner.reload();
-    await leads.getByTestId('leads-box-archive').filter({ hasText: /보류·실패 [1-9]\d*건/ }).waitFor();
-    assert.equal(await rows.count(), 0, '실패는 기본 목록에서 빠짐');
-    await leads.getByTestId('leads-box-archive').click();
-    await owner.waitForURL(/box=archive/);
+    await leads.getByTestId('leads-tab-closed').filter({ hasText: /종결 [1-9]\d*/ }).waitFor(); // 197차(#461): 예전 '보류·실패 n건' 보관함 → '종결' 보기 탭
+    assert.equal(await rows.count(), 0, '실패는 기본 보기(전체 진행 중)에서 빠짐');
+    await leads.getByTestId('leads-tab-closed').click();
+    await owner.waitForURL(/lv=closed/);
     const arow = rows.filter({ hasText: '예산 없음' }); await arow.waitFor();
     assert.equal(await arow.getByTestId('lead-archive-reason').innerText(), '사유: 예산 없음');
     assert.ok((await arow.getByTestId('lead-archive').innerText()).includes(ownerName), '누가');
@@ -123,7 +123,7 @@ export async function hubArchive({ owner, ctx, sql, BASE, SHOTS }) {
     await arow.getByTestId('lead-archive-restore').click();
     await owner.getByText('되돌렸습니다 — ').first().waitFor();
     await arow.waitFor({ state: 'detached' });
-    await leads.getByTestId('leads-box-open').click();
+    await leads.getByTestId('leads-tab-open').click();
     await rows.first().waitFor(); assert.equal(await rows.count(), 1, '되돌린 리드가 기본 목록에');
     const [lst] = await sql`select status from sales_leads where id = ${leadId}`; assert.equal(lst.status, '1차연락완료', '되돌리기 = 이전 단계');
   } finally {

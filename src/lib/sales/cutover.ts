@@ -136,7 +136,9 @@ async function assertWritesOpen(tenant: string) {
 const leadFields = { facilityType: z.string().trim().max(100).nullable().optional(), region: z.string().trim().max(50).nullable().optional(), scale: z.string().trim().max(60).nullable().optional(), expectedRevenue: z.number().min(0).max(1e13).nullable().optional(),
   contactName: z.string().trim().max(100).nullable().optional(), phone: z.string().trim().max(40).nullable().optional(), email: z.string().trim().max(200).nullable().optional(), homepage: z.string().trim().max(300).nullable().optional() }; // S2 2차 리드 폼 13칸
 export const leadPatch = z.object({ ...leadFields, name: z.string().trim().min(1).max(300).optional(), priority: z.enum(['urgent', 'high', 'medium', 'low']).nullable().optional(), status: z.enum(STAGES as [string, ...string[]]).optional(), reason: z.string().trim().max(500).optional(),
-  nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), memo: z.string().max(5000).nullable().optional(), ownerId: z.string().uuid().nullable().optional() });
+  nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), memo: z.string().max(5000).nullable().optional(), ownerId: z.string().uuid().nullable().optional(),
+  /** 197차(#461): 다음 할 일(다음 연락일과 한 쌍 — 연락일을 지우면 같이 지움) · 다시 볼 날(보류·실패로 닫을 때, 그날 담당자 업무) */
+  nextAction: z.string().trim().max(200).nullable().optional(), revisitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional() });
 export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof leadPatch>) {
   await assertSpace(u, 'sales');
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
@@ -145,6 +147,9 @@ export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof l
   if (!l) throw notFound();
   await assertWritesOpen(t);
   if (i.status && ['보류', '실패'].includes(i.status) && !i.reason) throw badRequest(`'${i.status}'(으)로 바꿀 때는 사유가 필요합니다`);
+  const closing = ['보류', '실패'].includes(i.status ?? l.status ?? '');
+  if (i.revisitDate && !closing) throw badRequest("다시 볼 날은 '보류'·'실패'로 닫을 때만 정합니다");
+  if (i.revisitDate && i.revisitDate <= new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())) throw badRequest('다시 볼 날은 내일 이후로 골라 주세요');
   const admin = ['owner', 'admin'].includes(u.role);
   if (i.ownerId !== undefined && !admin) throw new HttpError(403, 'forbidden', '담당자 변경은 관리자가 합니다');
   if (!admin && l.owner_id && l.owner_id !== u.id) throw new HttpError(403, 'forbidden', '담당 리드만 고칠 수 있습니다');
@@ -152,6 +157,8 @@ export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof l
   await sql.begin(async (tx) => {
     await tx`update sales_leads set status = coalesce(${i.status ?? null}, status), name = coalesce(${i.name ?? null}, name), priority = ${i.priority === undefined ? tx`priority` : i.priority},
       next_contact_date = ${i.nextContactDate === undefined ? tx`next_contact_date` : i.nextContactDate}, memo = ${i.memo === undefined ? tx`memo` : i.memo},
+      next_action = ${i.nextAction !== undefined ? i.nextAction || null : i.nextContactDate === null ? null : tx`next_action`},
+      revisit_date = ${i.revisitDate !== undefined ? i.revisitDate : i.status && !['보류', '실패'].includes(i.status) ? null : tx`revisit_date`},
       owner_id = ${i.ownerId === undefined ? tx`owner_id` : i.ownerId},
       facility_type = ${i.facilityType === undefined ? tx`facility_type` : i.facilityType}, region = ${i.region === undefined ? tx`region` : i.region}, scale = ${i.scale === undefined ? tx`scale` : i.scale},
       expected_revenue = ${i.expectedRevenue === undefined ? tx`expected_revenue` : i.expectedRevenue}, contact_name = ${i.contactName === undefined ? tx`contact_name` : i.contactName},
@@ -161,8 +168,8 @@ export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof l
   });
   // 대표 10/20 14:15: 보류·실패·계약완료 → 열린 영업 업무 보류·완료, 다음 연락일 바꾸면 업무 마감도
   if (i.status || i.nextContactDate !== undefined) {
-    const [cur] = await sql<{ name: string; status: string; next: string | null; owner_id: string | null }[]>`select name, status, next_contact_date::text as next, owner_id from sales_leads where id = ${id}`;
-    await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: 'lead', id, name: cur.name, status: cur.status, nextDate: cur.next, assigneeId: cur.owner_id, leadId: id });
+    const [cur] = await sql<{ name: string; status: string; next: string | null; next_action: string | null; owner_id: string | null }[]>`select name, status, next_contact_date::text as next, next_action, owner_id from sales_leads where id = ${id}`;
+    await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: 'lead', id, name: cur.name, status: cur.status, nextDate: cur.next, nextAction: cur.next_action, assigneeId: cur.owner_id, leadId: id });
   }
   return { ok: true };
 }
@@ -276,7 +283,7 @@ export async function addActivity(u: SessionUser, leadId: string, i: z.infer<typ
   const [r] = await sql<{ id: string }[]>`insert into sales_lead_records (tenant, kind, lead_id, occurred_at, data) values (${t}, 'sales_activities', ${leadId}, ${new Date(`${day}T12:00:00+09:00`)},
     ${sql.json({ activity_type: i.type, content: i.content, activity_date: day, next_contact_date: i.nextDate ?? null, next_action: i.nextAction ?? null, customer_request: i.request ?? null, created_by: u.id, created_by_name: u.name })}) returning id`;
   // 상담에서 다음 연락 예정일을 적으면 리드의 다음 연락일·영업 업무 마감도 같이
-  if (i.nextDate) { await sql`update sales_leads set next_contact_date = ${i.nextDate}, updated_at = now() where id = ${leadId}`; await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: 'lead', id: leadId, name: l.name, status: l.status, nextDate: i.nextDate, nextAction: i.nextAction ?? null, assigneeId: l.owner_id, leadId }); }
+  if (i.nextDate) { await sql`update sales_leads set next_contact_date = ${i.nextDate}, next_action = ${i.nextAction || null}, updated_at = now() where id = ${leadId}`; await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: 'lead', id: leadId, name: l.name, status: l.status, nextDate: i.nextDate, nextAction: i.nextAction ?? null, assigneeId: l.owner_id, leadId }); }
   else await sql`update sales_leads set updated_at = now() where id = ${leadId}`;
   return { id: r.id };
 }

@@ -73,12 +73,12 @@ const bidLink = (id: string) => `/s/sales/hub?tab=bids&bt=working&bq=${encodeURI
 const won = (n: unknown) => { const v = Number(String(n ?? '').replace(/[^0-9.]/g, '')); return Number.isFinite(v) && v > 0 ? `${Math.round(v).toLocaleString('ko-KR')}원` : null; };
 
 /** 세션 없이(정기 점검) 업무를 만들 때 쓰는 사람 — 계정이 막혔으면 null */
-async function actorOf(sql: Sql, userId: string | null | undefined): Promise<SessionUser | null> {
+export async function actorOf(sql: Sql, userId: string | null | undefined): Promise<SessionUser | null> {
   if (!userId) return null;
   const [r] = await sql<any[]>`select u.id, u.email, u.name, u.role, u.status, u.timezone, u.is_demo, u.platform_admin, u.tenant, t.kind from users u join tenants t on t.id = u.tenant where u.id = ${userId} and u.status = 'active'`;
   return r ? ({ id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: '', isDemo: r.is_demo, platformAdmin: r.platform_admin, tenant: r.tenant, personal: r.kind === 'personal' } as SessionUser) : null;
 }
-async function adminOf(sql: Sql, tenant: string) {
+export async function adminOf(sql: Sql, tenant: string) {
   const [r] = await sql<{ id: string }[]>`select id from users where tenant = ${tenant} and status = 'active' and role in ('owner', 'admin') and not is_demo order by (role = 'owner') desc, created_at limit 1`;
   return actorOf(sql, r?.id);
 }

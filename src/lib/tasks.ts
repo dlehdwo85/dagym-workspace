@@ -62,6 +62,11 @@ export const taskInput = z.object({
   collabTeamIds: z.array(zUuid).max(10).optional(),
   version: z.number().int().optional(),
   reviewNote: z.string().max(2000).optional(),
+  /** 197차(#460): 리드 업무 [완료] 때 고른 다음 행동 — 다음 연락일(+ 할 일) 또는 종결(성사·보류·실패, 보류·실패는 사유) · 다시 볼 날. 없으면 예전처럼 자동 7일 */
+  leadFollowUp: z.union([
+    z.object({ nextDate: zDate, nextAction: z.string().trim().max(200).optional() }),
+    z.object({ close: z.enum(['계약완료', '보류', '실패']), reason: z.string().trim().max(500).optional(), revisitDate: zDate.nullable().optional() }),
+  ]).optional(),
 });
 export type TaskInput = z.infer<typeof taskInput>;
 
@@ -528,7 +533,8 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const multi = !!cur.assignee_id && (await coIds(tx, id)).length > 0;
     const isCo = cur.assignee_id !== u.id && (await isCoAssignee(tx, id, u.id));
     const mine = cur.assignee_id === u.id || isCo;
-    const partOnly = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'myPart'].includes(k));
+    const leadFu = i.leadFollowUp; // 197차(#460): 아래에서 i 를 다시 짜도(내 몫 완료 → 업무 완료) 고른 다음 행동은 그대로
+    const partOnly = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'myPart', 'leadFollowUp'].includes(k));
     let partStatus = false; // 담당자가 내 몫으로 바꾸는 업무 상태(마지막 사람의 완료·내 몫 취소로 다시 열기) — 버전·첫 담당자 확인 없이
     if (i.myPart !== undefined || (multi && mine && partOnly && i.status)) {
       if (!mine) throw forbidden('담당자만 내 몫 완료를 표시할 수 있어요');
@@ -564,7 +570,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     // #475(로컬 10/23): 관리자는 남의 업무에도 공동 담당 추가·빼기·완료 규칙만은 바꿀 수 있다(내용·일정은 그대로 요청자·담당자만)
     const coAdminOnly = atLeast(u, 'admin') && Object.entries(i).every(([k, v]) => v === undefined || ['coAssigneeIds', 'completeRule', 'version'].includes(k));
     if (!perms.edit && !leadFirstAssign && !coAdminOnly) {
-      const onlyStatus = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote'].includes(k));
+      const onlyStatus = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'leadFollowUp'].includes(k));
       throw forbidden(onlyStatus ? '상태는 담당자만 바꿀 수 있어요' : '이 업무를 수정할 권한이 없습니다 — 업무 내용·일정은 요청자·담당자만 바꿀 수 있습니다');
     }
     const changes: Record<string, { from: unknown; to: unknown }> = {};
@@ -815,16 +821,19 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     let spawned: string | null = null;
     if (set.status === 'done') spawned = await spawnNextRecurrence(tx, id, u.id);
     // 대표 10/21 22:00 ⑧(#421) 영업 2차 추적: 리드에서 나온 업무를 완료하면 리드 '다음 연락'으로 자동 이어짐(다음 연락일 → 다음 조치 업무)
-    const fu = set.status === 'done' && cur.lead_id ? await (await import('./sales/autoTasks')).followUpAfterTaskDone(tx, u, { taskId: id, title, leadId: cur.lead_id }).catch(async (e) => { const { logError } = await import('./log'); await logError('sales-followup', e).catch(() => {}); return null; }) : null;
+    // 197차(#460): 화면에서 고른 다음 행동(leadFollowUp)이 잘못이면(사유 없음·지난 날·단계 권한) 완료도 하지 않고 그 까닭을 돌려줌 — 고르지 않은 완료의 실패만 기록하고 넘어감
+    const fu = set.status === 'done' && cur.lead_id ? await (await import('./sales/autoTasks')).followUpAfterTaskDone(tx, u, { taskId: id, title, leadId: cur.lead_id, choice: leadFu }).catch(async (e) => { if (leadFu && e instanceof HttpError) throw e; const { logError } = await import('./log'); await logError('sales-followup', e).catch(() => {}); return null; }) : null;
     // #508 후속(로컬 10/23): 이 완료로 자동으로 생긴 업무(반복 다음 회차·리드 '다음 연락')를 기록 — 완료를 되돌리면 손대지 않은 것은 같이 정리(undoAutoSpawned)
     const lead = fu && fu.action === 'followup' && fu.created && fu.taskId ? fu : null;
+    const closed = fu && fu.action === 'closed' ? fu : null; // 197차: 종결로 닫은 리드 — 완료를 되돌리면 단계도 되돌림
     const made = [spawned, lead?.taskId ?? null].filter((x): x is string => !!x);
-    if (made.length) await activity(tx, 'task', id, u.id, 'auto_spawned', { taskIds: made, ...(lead ? { lead: { id: lead.leadId, from: lead.prev, to: lead.next } } : {}) });
+    if (made.length || closed) await activity(tx, 'task', id, u.id, 'auto_spawned', { taskIds: made, ...(lead ? { lead: { id: lead.leadId, from: lead.prev, to: lead.next, fromAction: lead.prevAction } } : {}), ...(closed ? { leadClose: { id: closed.leadId, from: closed.from, to: closed.to } } : {}) });
     // B-10 자동화 (사람이 한 변경에만 반응, 규칙이 한 변경은 다시 부르지 않음)
     const { runAutomations } = await import('./automation');
     if (set.status) await runAutomations(tx, { trigger: set.status === 'done' ? 'task_completed' : 'status_changed', taskId: id, actorId: u.id, fromStatus: cur.status });
     if ('section_id' in set && set.section_id) await runAutomations(tx, { trigger: 'section_moved', taskId: id, actorId: u.id });
-    return { id, version: upd.version, changed: true, spawned, status: (set.status ?? cur.status) as string, ...(auto ? { autoRemoved: auto.removed, autoKept: auto.kept } : {}) };
+    return { id, version: upd.version, changed: true, spawned, status: (set.status ?? cur.status) as string, ...(auto ? { autoRemoved: auto.removed, autoKept: auto.kept, ...(auto.leadReverted ? { leadReverted: auto.leadReverted } : {}) } : {}),
+      ...(fu && fu.action !== 'none' ? { leadFollowUp: fu.action === 'closed' ? { action: 'closed', to: fu.to, revisit: fu.revisit } : { action: 'followup', next: fu.next, nextAction: fu.nextAction, created: fu.created } } : {}) };
   });
 }
 
@@ -861,7 +870,9 @@ async function setCollabTeams(tx: Sql, u: SessionUser, t: { id: string; title: s
 async function undoAutoSpawned(tx: Sql, u: SessionUser, id: string) {
   const [a] = await tx<{ action: string; changes: any }[]>`select action, changes from activities where entity_type = 'task' and entity_id = ${id} and action in ('auto_spawned', 'reopened') order by id desc limit 1`;
   const ids: string[] = a?.action === 'auto_spawned' && Array.isArray(a.changes?.taskIds) ? a.changes.taskIds : [];
-  if (!ids.length) return null;
+  const lc = a?.action === 'auto_spawned' ? a.changes?.leadClose : null; // 197차: 완료 때 종결로 닫은 리드
+  const leadReverted = lc?.id ? await revertLeadClose(tx, u, lc) : null;
+  if (!ids.length) return leadReverted ? { removed: [], kept: [], leadReverted } : null;
   const rows = await tx<{ id: string; title: string; recur: boolean; touched: boolean }[]>`select t.id, t.title, t.recurrence_source_id is not null as recur,
       (t.status <> 'todo'
         or exists (select 1 from comments c where c.task_id = t.id and c.deleted_at is null)
@@ -878,9 +889,17 @@ async function undoAutoSpawned(tx: Sql, u: SessionUser, id: string) {
     await activity(tx, 'task', id, u.id, 'auto_removed', { taskIds: gids });
     if (gone.some((g) => g.recur)) await tx`update tasks set recurrence_stopped = false where id = ${id} and recurrence_rule is not null`;
     const lead = a.changes?.lead;
-    if (lead?.id && lead.to && gone.some((g) => !g.recur)) await tx`update sales_leads set next_contact_date = ${lead.from ?? null}, updated_at = now() where id = ${lead.id} and next_contact_date = ${lead.to}::date`;
+    if (lead?.id && lead.to && gone.some((g) => !g.recur)) await tx`update sales_leads set next_contact_date = ${lead.from ?? null}, next_action = ${lead.fromAction === undefined ? tx`next_action` : lead.fromAction}, updated_at = now() where id = ${lead.id} and next_contact_date = ${lead.to}::date`;
   }
-  return { removed: gone.map(({ id: x, title }) => ({ id: x, title })), kept: rows.filter((r) => r.touched).map(({ id: x, title }) => ({ id: x, title })) };
+  return { removed: gone.map(({ id: x, title }) => ({ id: x, title })), kept: rows.filter((r) => r.touched).map(({ id: x, title }) => ({ id: x, title })), leadReverted };
+}
+/** 197차(#460): 업무 완료 때 종결(성사·보류·실패)로 닫은 리드 — 완료를 되돌리면 그 뒤로 단계가 안 바뀌었을 때만 예전 단계로(기록 남김), 다시 볼 날도 지움 */
+async function revertLeadClose(tx: Sql, u: SessionUser, lc: { id: string; from: string | null; to: string }) {
+  const [l] = await tx<{ status: string | null; tenant: string }[]>`select status, tenant from sales_leads where id = ${lc.id} and deleted_at is null`;
+  if (!l || l.status !== lc.to || !lc.from) return null;
+  await tx`update sales_leads set status = ${lc.from}, revisit_date = null, updated_at = now() where id = ${lc.id}`;
+  await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${l.tenant}, ${lc.id}, ${lc.to}, ${lc.from}, '업무 완료를 되돌려 단계도 되돌림', ${u.id})`;
+  return { from: lc.to, to: lc.from };
 }
 
 /**

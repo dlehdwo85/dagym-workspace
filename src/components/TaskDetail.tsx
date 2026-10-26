@@ -32,6 +32,7 @@ import { VoiceButton } from '@/components/voice';
 import { MeetingDialog } from '@/components/MeetingDialog';
 import { requestTour } from '@/components/Tour';
 import { Assignees, PartBox, coOf, multiOf, partMsg, partsOf } from '@/components/CoAssignees';
+import { followUpMsg, useLeadFollowUp } from '@/components/sales/LeadFollowUp';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
@@ -53,6 +54,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const { user, dir, features, menus } = useSession();
   const [mailDraft, setMailDraft] = useState<AssistDraft | null>(null); // V28-1 업무 AI 비서 초안 → 시안 창
   const { data, error, loading, reload, setData } = useApi<any>(`/api/tasks/${id}`);
+  const fu = useLeadFollowUp(); // 197차(#460): 리드 업무 완료 때 다음 연락일·종결을 묻는 창
   useEffect(() => { requestTour('task'); }, []); // #77 업무 상세를 처음 열 때 안내(본 사람은 안 뜸)
   const [cprog, setCprog] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const projects = useApi<{ projects: any[] }>('/api/projects');
@@ -172,11 +174,19 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     catch (e: any) { toast.error(e.message); reload(); }
   }
   async function patch(body: Record<string, unknown>, okMsg?: string | ((r: any) => string)) {
+    // 197차(#460): 리드 업무를 완료하면 먼저 '다음 연락일 또는 종결'을 묻는다([취소] = 완료하지 않음)
+    if (body.status === 'done' && t.status !== 'done' && t.lead_id && !body.leadFollowUp) {
+      const c = await fu.ask(t);
+      if (c === null) return;
+      if (c !== 'skip') body = { ...body, leadFollowUp: c };
+    }
     try {
       const r = await api(`/api/tasks/${id}`, { method: 'PATCH', body: { ...body, version: t.version } });
       // 대표 10/24: 담당자가 여럿이면 [완료] = 내 몫 완료 — 남은 사람 안내(마지막 사람이면 원래 안내)
       if (r.part) toast.ok(partMsg(r)); else if (okMsg) toast.ok(typeof okMsg === 'function' ? okMsg(r) : okMsg);
       if (r.spawned) toast.info('반복 업무의 다음 회차가 생성되었습니다');
+      const fm = followUpMsg(r); if (fm) toast.info(fm);
+      if (r.leadReverted) toast.info(`거래처 단계도 '${r.leadReverted.to}'(으)로 되돌렸습니다`);
       // #508 후속: 완료를 되돌리면 그 완료 때 자동으로 생긴 다음 회차·리드 후속 업무 — 손대지 않은 것은 지움, 손댄 것은 그대로
       if (r.autoKept?.length) toast.info('다음 회차/후속 업무는 그대로 두었습니다', { label: '열기', run: () => router.push(`/tasks/${r.autoKept[0].id}`) });
       else if (r.autoRemoved?.length) toast.info(`완료 때 자동으로 만든 다음 업무 ${r.autoRemoved.length}건도 지웠습니다(휴지통)`);
@@ -366,6 +376,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const commentForm = mobile && typeof document !== 'undefined' ? createPortal(commentFormEl, document.body) : commentFormEl;
   return (
     <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(4.5rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
+      {fu.node}
       {/* 상단 도구 막대 */}
       <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
         {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-green-50 px-2.5 text-sm font-semibold text-green-700"><CircleCheck className="size-4" />완료됨</span>}

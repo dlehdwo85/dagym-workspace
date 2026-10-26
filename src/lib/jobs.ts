@@ -206,6 +206,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('bidTasks', async () => (await import('./sales/bidTasks')).bidTasksTick()); // 결정 15-35 입찰 업무: 공고 취소 → 업무·일정 취소 · 정정 → 기한·일정 · 개찰 결과 → 낙찰이면 계약
   await step('contractCare', async () => (await import('./sales/bidTasks')).contractCareTick()); // 결정 15-35 재계약 사후관리: 계약 종료 120일 전 '재계약 준비' 업무 1건
   await step('leadNext', async () => (await import('./sales/bidTasks')).leadNextTick()); // 결정 15-35 업무가 없던 리드의 가까운 다음 연락 → '다음 연락' 업무(알림 없이)
+  await step('leadRevisit', async () => (await import('./sales/leadList')).leadRevisitTick()); // 197차(#461): 보류·실패로 닫으며 고른 '다시 볼 날' → 담당자 업무 1건 + 알림
   await step('notices', async () => (await import('./announcements')).noticesJob()); // V30 ② 예약 게시
   await step('textExtract', async () => (await import('./library')).textExtractJob()); // V14 32: HWP·PDF 본문 재추출(기존 파일, 한 번에 15개)
   await step('revenueAuto', async () => (await import('./revenueAuto')).revenueAutoTick()); // #161 V25 매출 자료: 끊긴 숫자 읽기 이어서 · 10분 모은 같은 달 분석

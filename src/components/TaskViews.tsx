@@ -25,6 +25,7 @@ import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, Ord
 import { coOf, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
 import { QuickAddTask } from './QuickAddTask';
 import { CarriedBadge } from './carried';
+import { followUpMsg, useLeadFollowUp } from './sales/LeadFollowUp';
 
 export type Task = {
   space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
@@ -118,6 +119,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [sortBy, setSortBy] = useState<SortKey>(() => { try { const v = localStorage.getItem('wos_task_sort2'); return SORTS.includes(v as SortKey) ? (v as SortKey) : 'due'; } catch { return 'due'; } });
   const pickSort = (k: SortKey) => { setSortBy(k); try { localStorage.setItem('wos_task_sort2', k); } catch {} };
   const [quickOpen, setQuickOpen] = useState(false);
+  const fu = useLeadFollowUp(); // 197차(#460): 리드 업무 완료 때 다음 연락일·종결을 묻는 창
   const kbProxy = useRef<HTMLInputElement>(null);
   const [moreMenu, setMoreMenu] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -169,15 +171,23 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
 
   /** 모든 보기에서 같은 경로로 원본 업무를 수정 → 다른 보기에도 즉시 반영 */
   async function patch(t: Task, body: Record<string, unknown>) {
+    // 197차(#460): 리드 업무를 완료하면 먼저 '다음 연락일 또는 종결'을 묻는다([취소] = 완료하지 않음, 리드가 닫혔으면 묻지 않음)
+    if (body.status === 'done' && t.status !== 'done' && t.lead_id && !body.leadFollowUp) {
+      const c = await fu.ask(t);
+      if (c === null) return false;
+      if (c !== 'skip') body = { ...body, leadFollowUp: c };
+    }
     const before = data;
     // #508: 완료하면 목록에서 빠져 묶음 맨 아래 '완료됨'으로 — 되돌리기는 거기서(바로 전 상태 기억)
     if (body.status === 'done' && t.status !== 'done') PREV_STATUS.set(t.id, t.status);
-    setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, ...snake(body), ...(body.status === 'done' && t.status !== 'done' ? { completed_at: new Date().toISOString() } : {}) } : x)) });
+    const { leadFollowUp: _fu, ...shown } = body;
+    setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, ...snake(shown), ...(body.status === 'done' && t.status !== 'done' ? { completed_at: new Date().toISOString() } : {}) } : x)) });
     try {
       const r = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { ...body, version: t.version } });
       if (!r.part && r.status === 'done' && t.status !== 'done') PREV_STATUS.set(t.id, t.status); // 마지막 담당자가 내 몫을 끝내 업무 완료
       setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? withPart({ ...x, version: r.version }, r, sess.user.id) : x)) });
       if (r.spawned) toast.info('반복 업무의 다음 회차가 생성되었습니다');
+      const m = followUpMsg(r); if (m) toast.info(m);
       broadcastRefresh();
       return r ?? true; // #508 후속: 되돌리기 안내가 자동 후속 업무 정리 결과(autoRemoved·autoKept)를 씀
     } catch (e: any) {
@@ -495,6 +505,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     </div>
     {exportOpen && <ExportTasks qs={qs} onClose={() => setExportOpen(false)} />}
     <QuickAddTask open={quickOpen} onClose={() => setQuickOpen(false)} defaults={{ projectId, assigneeId: filters.assigneeId || undefined }} onCreated={() => { setQuickOpen(false); reload(); }} />
+    {fu.node}
     {panelId && (
       <aside className="fixed inset-0 z-40 animate-slide-in overflow-y-auto bg-white shadow-pop sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(560px,100vw-240px)] sm:border-l sm:border-line" data-testid="task-panel" aria-label="업무 상세 패널">
         <TaskDetail key={panelId} id={panelId} inPanel onClose={closePanel} />

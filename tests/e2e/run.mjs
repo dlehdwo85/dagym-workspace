@@ -56,6 +56,7 @@ import { bidGroups } from './bidGroups.step.mjs';
 import { messengerV4 } from './messengerV4.step.mjs';
 import { prespecLink } from './prespecLink.step.mjs';
 import { hubArchive } from './hubArchive.step.mjs';
+import { leadList197 } from './leadList197.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2891,6 +2892,7 @@ await step('#626 캡처 차단(대표 10/25 20:05): 외부 고객사 로그인 �
 
 // 본사가 생기면 맨 위 부서를 새로 만들 수 없어 맨 끝(앞 단계들이 맨 위 부서를 만듦)
 await step('P2 조직 개편 4단(대표 10/26 · #679~#681): 종류 카드 4개·본사 만들며 맨 위 부서 이관·사업부 위 단위는 본사만·사업부장 없음·이름-종류 검사 → 사용자 목록 왕관 칩·장 비게 됨 경고 → 업무 함께하는 부서', () => orgLevels({ owner, ctx, BASE, SHOTS }));
+await step('197차 영업 진행 목록 개편(#461·#460): 오늘 볼 것 띠 → 다음 행동 없음 경고 → 열 머리 정렬 · 열 고르기 · 보기 저장(새로 고침에도) → 업무 [완료] 다음 행동 창(1주 뒤 + 할 일 · 종결 보류·사유·다시 볼 날) → 종결 보기 · 휴대폰 카드', () => leadList197({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();
