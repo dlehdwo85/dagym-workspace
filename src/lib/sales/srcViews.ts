@@ -9,6 +9,7 @@ import { isAwardResult, onbidSale } from './collectors/procurement';
 import { groupNotices, oneCardPerNotice, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { hubTabsOn } from './hubTabs';
+import { LEAD_STAGES, stageName } from './terms';
 import { sourceAsOf } from './collectors/store';
 
 /**
@@ -58,7 +59,7 @@ async function userNames(tenant: string) {
 }
 
 /** 영업관리 11단계(원본 leads.sales_status) · 종결 단계 · 우선순위 한글 */
-export const STAGES = ['신규리드', '1차연락완료', '미팅예정', '현장방문완료', '제안서작성중', '제안서발송완료', '견적협의', '계약검토', '계약완료', '보류', '실패', '되돌림']; // 되돌림 = 영업 재편 2) 배정 이전으로 되돌린 리드
+export const STAGES: string[] = [...LEAD_STAGES]; // 되돌림 = 영업 재편 2) 배정 이전으로 되돌린 리드 · 207차: 목록은 terms.ts(화면 이름·색·숨김은 회사 설정)
 const CLOSED = new Set(['계약완료', '보류', '실패', '되돌림']);
 /** #610·#614 리드 보관함(보류·실패·되돌림) — 계약완료는 대표 결정(⑩ 이름·숨김) 전까지 기본 목록에 그대로 */
 const ARCHIVED_STAGES = new Set(['보류', '실패', '되돌림']);
@@ -357,7 +358,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       // 영업 재편 5): 리드 일정(넘기기 자동 일정·리드에서 만든 일정) — 다가오는 것 먼저
       const events = await sql<any[]>`select e.id, e.title, e.start_at, e.end_at, e.all_day, c.name as calendar from events e join calendars c on c.id = e.calendar_id where e.lead_id = ${lid} and e.deleted_at is null order by e.start_at desc limit 50`;
       const timeline = [...acts.map((a: any) => ({ kind: 'act', at: a.activity_date ?? a.created_at, title: `${a.activity_type ?? '상담'} · ${String(a.content ?? '').slice(0, 80)}`, by: a.created_by_name ?? null, id: a.__id })),
-        ...log.map((g: any) => ({ kind: 'status', at: g.changed_at, title: `${g.from_status ?? '—'} → ${g.to_status}${g.reason ? ` (${g.reason})` : ''}`, by: g.by ?? null, id: String(g.changed_at) })),
+        ...log.map((g: any) => ({ kind: 'status', at: g.changed_at, title: `${g.from_status ? stageName(terms.stages, g.from_status) : '—'} → ${stageName(terms.stages, g.to_status)}${g.reason ? ` (${g.reason})` : ''}` /* 207차: 회사 단계 이름 */, by: g.by ?? null, id: String(g.changed_at) })),
         ...wTasks.map((x: any) => ({ kind: 'task', at: x.completed_at ?? x.created_at, title: `${x.status === 'done' ? '완료' : '업무'} · ${x.title}`, by: x.assignee ?? null, id: x.id, href: `/tasks/${x.id}` })),
         ...props.map((p: any) => ({ kind: 'proposal', at: p.proposal_date, title: `제안 · ${p.title}${p.amount ? ` ${Number(p.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: p.__id })),
         ...cons.map((c: any) => ({ kind: 'contract', at: c.contract_date ?? c.start_date, title: `계약 · ${c.title}${c.amount ? ` ${Number(c.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: c.__id })),

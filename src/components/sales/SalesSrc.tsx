@@ -15,6 +15,7 @@ import { CollectorAlerts } from '@/components/sales/Collectors';
 import { BulkLeadDialog, LeadQuickDialog, StageMoveDialog, type BulkResult } from '@/components/sales/LeadFollowUp';
 import { LeadImportDialog, type ImportRows } from '@/components/sales/LeadImport';
 import { LeadMergeBox } from '@/components/sales/LeadMerge';
+import { StageChip, useStages } from '@/components/sales/stages';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
@@ -392,7 +393,7 @@ function BulkBar({ kind, ids, onDone, onClear }: { kind: 'bid' | 'building' | 'f
 }
 /** 전환 뒤: 단계(보류·실패는 사유 필수)·다음 연락일·메모·담당(관리자) 고치기 + 상담 기록 추가 */
 function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () => void }) {
-  const l = data.lead;
+  const l = data.lead; const ST = useStages(); // 207차: 단계 이름은 회사 설정
   const [f, setF] = useState({ status: l.status ?? '신규리드', reason: '', next: l.next ?? '', memo: l.memo ?? '', owner: l.ownerId ?? '',
     facility: l.facility ?? '', region: l.region ?? '', scale: l.scale ?? '', revenue: l.revenue ? String(l.revenue) : '', contact: l.contact ?? '', phone: l.phone ?? '', email: l.email ?? '', homepage: l.homepage ?? '', biz: l.bizNo ?? '' });
   const needReason = (f.status === '보류' || f.status === '실패') && f.status !== l.status;
@@ -406,11 +407,11 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
   return (
     <div className="space-y-2 rounded-input border border-blue-200 bg-blue-50/40 p-3 text-sm" data-testid="sales-lead-edit">
       <div className="grid gap-2 sm:grid-cols-3">
-        <Field label="단계"><select className={inputCls} value={f.status} onChange={S('status')} aria-label="단계" data-testid="lead-status">{data.stages.map((s: string) => <option key={s}>{s}</option>)}</select></Field>
+        <Field label="단계"><select className={inputCls} value={f.status} onChange={S('status')} aria-label="단계" data-testid="lead-status">{ST.pickable(data.stages, l.status).map((s: string) => <option key={s} value={s}>{ST.name(s)}</option>)}</select></Field>
         <Field label="다음 연락일"><input type="date" className={inputCls} value={f.next} onChange={S('next')} aria-label="다음 연락일" data-testid="lead-next" /></Field>
         {data.canAssign && <Field label="담당"><select className={inputCls} value={f.owner} onChange={S('owner')} aria-label="담당" data-testid="lead-owner"><option value="">없음</option>{data.people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>}
       </div>
-      {needReason && <Field label={`${f.status} 사유(필수)`}><input className={inputCls} value={f.reason} onChange={S('reason')} maxLength={500} aria-label="사유" data-testid="lead-reason" /></Field>}
+      {needReason && <Field label={`${ST.name(f.status)} 사유(필수)`}><input className={inputCls} value={f.reason} onChange={S('reason')} maxLength={500} aria-label="사유" data-testid="lead-reason" /></Field>}
       {/* S2 2차(감사 1-13): 리드 폼 칸 — 시설·지역·규모·예상매출·고객 담당자·연락처·이메일·홈페이지 */}
       <details className="rounded-input border border-blue-100 bg-white/60 p-2" data-testid="lead-info-edit"><summary className="cursor-pointer text-xs text-ink-2">정보 수정 — 시설·지역·규모·예상매출·연락처·이메일·홈페이지·사업자번호</summary>
         <div className="mt-2 grid gap-2 sm:grid-cols-4">
@@ -426,7 +427,7 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
         </div></details>
       <Field label="메모"><textarea className={inputCls} rows={2} value={f.memo} onChange={S('memo')} maxLength={5000} aria-label="메모" /></Field>
       <div className="flex justify-end"><Button size="sm" onClick={save} disabled={needReason && !f.reason.trim()} data-testid="lead-save">저장</Button></div>
-      {!!data.statusLog?.length && <ul className="space-y-0.5 text-[11px] text-ink-2">{data.statusLog.map((g: any, i: number) => <li key={i}>{fmtDateTime(g.changed_at)} · {g.by ?? ''} · {g.from_status ?? '—'} → {g.to_status}{g.reason ? ` (${g.reason})` : ''}</li>)}</ul>}
+      {!!data.statusLog?.length && <ul className="space-y-0.5 text-[11px] text-ink-2">{data.statusLog.map((g: any, i: number) => <li key={i}>{fmtDateTime(g.changed_at)} · {g.by ?? ''} · {g.from_status ? ST.name(g.from_status) : '—'} → {ST.name(g.to_status)}{g.reason ? ` (${g.reason})` : ''}</li>)}</ul>}
     </div>
   );
 }
@@ -501,38 +502,38 @@ const fmtEv = (e: any) => { const d = new Date(e.start_at); const day = new Intl
  * 열린 업무 · 다가오는 일정(+ 추가). 정보 수정은 '정보' 탭, 전체 목록은 상담·업무·일정 탭.
  */
 function LeadProgress({ id, data, onSaved, go }: { id: string; data: any; onSaved: () => void; go: (tab: string) => void }) {
-  const l = data.lead; const ed = data.readOnly === false;
+  const l = data.lead; const ed = data.readOnly === false; const ST = useStages();
   const [pending, setPending] = useState<string | null>(null); const [reason, setReason] = useState(''); const [revisit, setRevisit] = useState(''); // 197차: 보류·실패 '다시 볼 날'(선택)
   const [next, setNext] = useState(l.next ?? ''); const [nact, setNact] = useState(l.nextAction ?? ''); const [memo, setMemo] = useState(l.memo ?? ''); const [ev, setEv] = useState({ title: '', date: '', time: '' });
   const patch = async (body: Record<string, unknown>, msg: string) => { try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body }); toast.ok(msg); onSaved(); } catch (e: any) { toast.error(e.message); } };
-  const move = (st: string) => { if (st === l.status) return; if (st === '보류' || st === '실패') { setPending(st); setReason(''); setRevisit(''); return; } void patch({ status: st }, `${st}(으)로 옮겼습니다`); };
+  const move = (st: string) => { if (st === l.status) return; if (st === '보류' || st === '실패') { setPending(st); setReason(''); setRevisit(''); return; } void patch({ status: st }, `${ST.name(st)}(으)로 옮겼습니다`); };
   async function addEvent(e: React.FormEvent) {
     e.preventDefault(); if (!ev.title.trim() || !ev.date) return;
     try { await api(`/api/sales/leads/${id}/events`, { body: { title: ev.title.trim(), date: ev.date, time: ev.time || null } }); setEv({ title: '', date: '', time: '' }); toast.ok('일정을 만들었습니다'); onSaved(); } catch (er: any) { toast.error(er.message); }
   }
   const open = (data.wTasks ?? []).filter((x: any) => x.status !== 'done'); const td = today();
   const upcoming = (data.events ?? []).filter((x: any) => new Date(x.end_at ?? x.start_at).getTime() >= Date.now() - 86400000).sort((a: any, b: any) => String(a.start_at).localeCompare(String(b.start_at)));
-  const stages: string[] = (data.stages ?? []).filter((x: string) => !CLOSED_STAGES.includes(x)); const idx = stages.indexOf(l.status);
+  const stages: string[] = ST.pickable((data.stages ?? []).filter((x: string) => !CLOSED_STAGES.includes(x)), l.status); const idx = stages.indexOf(l.status);
   const prevRaw = (data.statusLog ?? []).find((g: any) => g.to_status === l.status)?.from_status; const prevStage = prevRaw && !CLOSED_STAGES.includes(prevRaw) ? prevRaw : '신규리드';
   return (
     <div className="space-y-3 text-sm" data-testid="lead-progress">
       {/* 단계 띠: 지난 단계 채움, 현재 강조, 누르면 이동 */}
       <div className="rounded-input border border-line p-2">
         <div className="-mx-1 flex gap-1 overflow-x-auto px-1" role="group" aria-label="단계 이동" data-testid="lead-stage-strip">
-          {stages.map((st, i) => <button key={st} type="button" disabled={!ed} onClick={() => move(st)} className={cx('shrink-0 rounded-full border px-2.5 py-1 text-xs', st === l.status ? 'border-transparent font-semibold text-white' : i < idx ? 'border-transparent bg-blue-100 text-blue-900' : 'border-line bg-white text-ink-2 hover:border-blue-300')} style={st === l.status ? { background: C } : undefined} aria-pressed={st === l.status} data-testid={`lead-stage-${st}`}>{st}</button>)}
+          {stages.map((st, i) => <button key={st} type="button" disabled={!ed} onClick={() => move(st)} className={cx('shrink-0 rounded-full border px-2.5 py-1 text-xs', st === l.status ? 'border-transparent font-semibold text-white' : i < idx ? 'border-transparent bg-blue-100 text-blue-900' : 'border-line bg-white text-ink-2 hover:border-blue-300')} style={st === l.status ? { background: C } : undefined} aria-pressed={st === l.status} data-testid={`lead-stage-${st}`}>{ST.name(st)}</button>)}
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-ink-3">현재 <b className="text-ink">{l.status ?? '미정'}</b>{idx >= 0 && ` · ${idx + 1}/${stages.length} 단계`}</span>
-          {ed && CLOSED_STAGES.filter((x) => x !== '되돌림').map((st) => <button key={st} type="button" onClick={() => move(st)} className={cx('rounded-full border px-2 py-0.5', l.status === st ? 'border-red-300 bg-red-50 font-semibold text-red-700' : 'border-line text-ink-3 hover:text-red-700')} data-testid={`lead-stage-${st}`}>{st}</button>)}
-          {l.status === '되돌림' && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">되돌림</span>}
+          <span className="text-ink-3">현재 <b className="text-ink">{l.status ? ST.name(l.status) : '미정'}</b>{idx >= 0 && ` · ${idx + 1}/${stages.length} 단계`}</span>
+          {ed && CLOSED_STAGES.filter((x) => x !== '되돌림').map((st) => <button key={st} type="button" onClick={() => move(st)} className={cx('rounded-full border px-2 py-0.5', l.status === st ? 'border-red-300 bg-red-50 font-semibold text-red-700' : 'border-line text-ink-3 hover:text-red-700')} data-testid={`lead-stage-${st}`}>{ST.name(st)}</button>)}
+          {l.status === '되돌림' && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">{ST.name('되돌림')}</span>}
           {/* 로컬 10/25 20:00 ①: 보관함(보류·실패·되돌림) 리드는 상세에서도 [되돌리기] — 마지막 기록의 이전 단계(그것도 보류·실패면 신규리드) */}
-          {ed && CLOSED_STAGES.includes(String(l.status)) && <button type="button" onClick={() => void patch({ status: prevStage, reason: '보관함에서 되돌림' }, `되돌렸습니다 — '${prevStage}'`)} className="rounded-full border border-line bg-white px-2 py-0.5 font-semibold text-brand-700 hover:bg-brand-50" data-testid="lead-detail-restore">되돌리기 → {prevStage}</button>}
+          {ed && CLOSED_STAGES.includes(String(l.status)) && <button type="button" onClick={() => void patch({ status: prevStage, reason: '보관함에서 되돌림' }, `되돌렸습니다 — '${ST.name(prevStage)}'`)} className="rounded-full border border-line bg-white px-2 py-0.5 font-semibold text-brand-700 hover:bg-brand-50" data-testid="lead-detail-restore">되돌리기 → {ST.name(prevStage)}</button>}
         </div>
         {pending && <div className="mt-2 flex flex-wrap items-center gap-2 rounded-input bg-amber-50 p-2 text-xs" data-testid="lead-stage-reason-box">
-          <span className="text-amber-900">{pending} 사유(필수)</span><input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-stage-reason" />
+          <span className="text-amber-900">{ST.name(pending)} 사유(필수)</span><input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-stage-reason" />
           <label className="flex items-center gap-1 text-amber-900">다시 볼 날<input type="date" min={plusDays(1)} className={cx(inputCls, 'h-8 w-auto py-1 text-xs')} value={revisit} onChange={(e) => setRevisit(e.target.value)} aria-label="다시 볼 날(선택)" data-testid="lead-stage-revisit" /></label>
           <button type="button" onClick={() => setRevisit(revisit === plusDays(182) ? '' : plusDays(182))} className={cx('rounded-full border px-2 py-0.5', revisit === plusDays(182) ? 'border-amber-500 bg-white font-semibold' : 'border-amber-200')} data-testid="lead-stage-revisit-6m">6개월 뒤</button>
-          <Button size="sm" disabled={!reason.trim()} onClick={() => { void patch({ status: pending, reason: reason.trim(), ...(revisit ? { revisitDate: revisit } : {}) }, `${pending}(으)로 옮겼습니다${revisit ? ` — 다시 볼 날 ${kd(revisit)}` : ''}`); setPending(null); }} data-testid="lead-stage-reason-go">옮기기</Button><Button size="sm" variant="secondary" onClick={() => setPending(null)}>취소</Button></div>}
+          <Button size="sm" disabled={!reason.trim()} onClick={() => { void patch({ status: pending, reason: reason.trim(), ...(revisit ? { revisitDate: revisit } : {}) }, `${ST.name(pending)}(으)로 옮겼습니다${revisit ? ` — 다시 볼 날 ${kd(revisit)}` : ''}`); setPending(null); }} data-testid="lead-stage-reason-go">옮기기</Button><Button size="sm" variant="secondary" onClick={() => setPending(null)}>취소</Button></div>}
         {l.revisit && CLOSED_STAGES.includes(String(l.status)) && <p className="mt-1.5 text-xs text-ink-2" data-testid="lead-revisit-note">다시 볼 날 {kd(l.revisit)} — 그날 담당자에게 ‘다시 연락(재접촉 검토)’ 업무가 생깁니다</p>}
       </div>
       {/* 다음 연락 + 메모 */}
@@ -587,7 +588,7 @@ function LeadEvents({ data }: { data: any }) {
 
 function LeadDetail({ id, onClose, onChange, onOpen }: { id: string; onClose: () => void; onChange?: () => void; onOpen?: (id: string) => void }) {
   useBackClose(true, onClose, ['id', id]); // #535: 휴대폰 뒤로가기 = 상세만 닫힘(주소 ?id= 로 새로 고침·공유해도 같은 상세)
-  const { data, error, reload } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`);
+  const { data, error, reload } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`); const stageLabel = useStages().name;
   const merged: string | undefined = data?.mergedInto; // 206차: 합쳐서 빠진 거래처(예전 링크) → 남긴 거래처로
   useEffect(() => { if (!merged) return; toast.ok('합쳐진 거래처로 옮겼습니다'); if (onOpen) onOpen(merged); else onClose(); }, [merged]); // eslint-disable-line react-hooks/exhaustive-deps
   const [tab, setTab] = useUrlState('lt', 'progress'); // 영업 재편 5): 진행 탭이 첫 화면. #242 2단계: 탭은 주소(?lt=)에 — 업무·일정을 열었다 뒤로 와도 같은 탭
@@ -615,14 +616,14 @@ function LeadDetail({ id, onClose, onChange, onOpen }: { id: string; onClose: ()
             {canRevert && (rv === null ? <Button size="sm" variant="secondary" onClick={() => setRv('')} data-testid="lead-revert">배정 이전으로 되돌리기</Button>
               : <span className="flex flex-1 flex-wrap items-center gap-1.5"><input className={cx(inputCls, 'h-8 min-w-40 flex-1 py-1 text-xs')} value={rv} onChange={(e) => setRv(e.target.value)} placeholder="사유(선택)" aria-label="되돌리기 사유" maxLength={300} data-testid="lead-revert-reason" /><Button size="sm" onClick={revert} data-testid="lead-revert-go">되돌리기</Button><Button size="sm" variant="secondary" onClick={() => setRv(null)}>취소</Button></span>)}</div>}
           {data.raw?.from === 'meta_lead' && <MetaLeadBox id={id} raw={data.raw} phone={data.lead.phone} />}
-          <div className="flex flex-wrap gap-1.5 text-xs">{chip(data.lead.status)}{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {kd(data.lead.next)}{data.lead.nextAction ? ` · ${data.lead.nextAction}` : ''}</span>}</div>
+          <div className="flex flex-wrap gap-1.5 text-xs"><StageChip k={data.lead.status} />{chip(data.lead.priority)}{chip(data.lead.facility)}{chip(data.lead.region)}{data.lead.owner && <span className="text-ink-2">담당 {data.lead.owner}</span>}{data.lead.next && <span className="text-ink-2">다음 연락 {kd(data.lead.next)}{data.lead.nextAction ? ` · ${data.lead.nextAction}` : ''}</span>}</div>
           <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-line px-1">{tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cx('shrink-0 px-2 py-1 text-xs', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`lead-tab-${k}`}>{l}</button>)}</div>
           {tab === 'progress' ? <LeadProgress key={data.lead.status} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} go={setTab} />
             : tab === 'events' ? <LeadEvents data={data} />
             : tab === 'info' ? <>{data.readOnly === false && <LeadEdit key={data.lead.status + (data.lead.next ?? '') + (data.lead.updated ?? '')} id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />}
             {/* 로컬 10/19: 사람이 보는 칸만 한국어로 — 내부 id·원본 키는 숨기고, 원본 전체는 관리자만 접힘 안에 */}
             <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1 text-sm" data-testid="lead-info">
-              {([['거래처명', data.lead.name], ['단계', data.lead.status], ['우선순위', data.lead.priority], ['시설', data.lead.facility], ['지역', data.lead.region], ['규모', data.lead.scale], ['담당', data.lead.owner], ['다음 연락', data.lead.next && kd(data.lead.next)],
+              {([['거래처명', data.lead.name], ['단계', data.lead.status && stageLabel(data.lead.status)], ['우선순위', data.lead.priority], ['시설', data.lead.facility], ['지역', data.lead.region], ['규모', data.lead.scale], ['담당', data.lead.owner], ['다음 연락', data.lead.next && kd(data.lead.next)],
                 ['연락처', [data.lead.contact, data.lead.phone].filter(Boolean).join(' · ')], ['사업자번호', data.lead.bizNo], ['이메일', data.lead.email && <a href={`mailto:${data.lead.email}`} className="underline" style={{ color: C }}>{data.lead.email}</a>], ['홈페이지', data.lead.homepage && <a href={data.lead.homepage} target="_blank" rel="noopener noreferrer" className="underline" style={{ color: C }}>{String(data.lead.homepage).replace(/^https?:\/\//, '')}</a>], ['예상매출', won(data.lead.revenue)], ['최근 활동', data.lead.lastActivity && kd(data.lead.lastActivity)], ['등록일', data.lead.created && kd(data.lead.created)], ['메모', data.lead.memo]] as [string, unknown][])
                 .filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + ':v'} className="whitespace-pre-wrap break-words">{typeof v === 'string' || typeof v === 'number' ? String(v) : (v as React.ReactNode)}</dd>])}
             </dl>
@@ -719,6 +720,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const [fPri, setFPri] = useUrlState('pri', ''); const [fOwner, setFOwner] = useUrlState('owner', ''); const [fRegion, setFRegion] = useUrlState('region', ''); const [fSrc, setFSrc] = useUrlState('src', '');
   const [mv, setMv] = useState<{ id: string; name: string; q: Record<string, string> }[] | null>(null); const [cols, setCols] = useState<string[] | null>(null); const [saving, setSaving] = useState<string | null>(null); // 197차: 내 보기·열(저장 뒤 화면에 바로)
   const [imp, setImp] = useState<ImportRows | null>(null); // 205차: 파일을 읽으면 미리보기(겹침 표시) 창
+  const ST = useStages(); // 207차: 단계 이름·숨김은 회사 설정
   const [quick, setQuick] = useState<{ mode: 'next' | 'log'; lead: any } | null>(null); // 202차: 휴대폰 카드 밀기 창
   // 204차(#461 ⑦): 표에서 여러 건 골라 한 번에(담당·단계·다음 연락일·CSV) · 표의 단계 바꾸기도 묻는 창(예전 prompt)
   const [sel, setSel] = useState<string[]>([]); const [bulk, setBulk] = useState<'' | 'stage' | 'next'>(''); const [stMove, setStMove] = useState<{ lead: any; to: string } | null>(null);
@@ -751,7 +753,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
       setNl(null); setForceNew(false); setSimilar(null); reload(); if (r.id) setOpen(r.id); } catch (er: any) { toast.error(er.message); }
   }
   function exportCsv(list: any[] = shown) {
-    const rows = [CSV_COLS.map(([, h]) => h).join(','), ...list.map((l: any) => CSV_COLS.map(([k]) => csvCell(k === 'priority' ? l.priority : k === 'revenue' ? (l.revenue ? Number(l.revenue) : '') : l[k])).join(','))];
+    const rows = [CSV_COLS.map(([, h]) => h).join(','), ...list.map((l: any) => CSV_COLS.map(([k]) => csvCell(k === 'status' ? ST.name(l.status) : k === 'priority' ? l.priority : k === 'revenue' ? (l.revenue ? Number(l.revenue) : '') : l[k])).join(','))];
     const blob = new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `거래처_${today()}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
   async function pickCsv(file: File) {
@@ -762,7 +764,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
     const rows: Record<string, unknown>[] = []; const skipped: string[] = [];
     for (const r of grid.slice(1)) { const o: Record<string, unknown> = {};
       head.forEach((k, idx) => { const v = (r[idx] ?? '').trim(); if (!k || !v || o[k] !== undefined) return;
-        if (k === 'status') { if ((data?.stages ?? []).includes(v)) o.status = v; } else if (k === 'priority') { if (PRI_CODE[v]) o.priority = PRI_CODE[v]; } else if (k === 'expectedRevenue') { const n = numOf(v); if (n !== null && Number.isFinite(n)) o.expectedRevenue = n; }
+        if (k === 'status') { const key = ST.keyOf(v); if (key && (data?.stages ?? []).includes(key)) o.status = key; } // 207차: 회사 단계 이름도 else if (k === 'priority') { if (PRI_CODE[v]) o.priority = PRI_CODE[v]; } else if (k === 'expectedRevenue') { const n = numOf(v); if (n !== null && Number.isFinite(n)) o.expectedRevenue = n; }
         else if (k === 'nextContactDate') { const m = v.match(/(\d{4})[.\-/]\s?(\d{1,2})[.\-/]\s?(\d{1,2})/); if (m) o.nextContactDate = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; } else o[k] = v.slice(0, IMPORT_MAX[k] ?? 300); });
       if (typeof o.name === 'string' && o.name) rows.push(o); else skipped.push(r.join(',').slice(0, 40)); }
     setImp({ rows, file: file.name, skipped });
@@ -833,7 +835,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const delView = (x: { id: string; name: string }) => { if (!confirm(`'${x.name}' 보기를 지울까요?`)) return; void saveViews({ views: myViews.filter((y) => y.id !== x.id) }, '보기를 지웠습니다'); };
   // #610 ⓒ 보관함 [되돌리기] = 마지막 기록의 이전 단계(그것도 보류·실패면 신규리드)로 — 단계 기록에 사유가 남음
   const prevOf = (l: any) => (l.archive?.prev && !ARCHIVED_STAGES.has(l.archive.prev) ? l.archive.prev : '신규리드');
-  const restoreLead = async (l: any) => { try { await api(`/api/sales/leads/${l.id}`, { method: 'PATCH', body: { status: prevOf(l), reason: '보관함에서 되돌림' } }); toast.ok(`되돌렸습니다 — '${prevOf(l)}'로 기본 목록에 나옵니다`); reload(); } catch (e: any) { toast.error(e.message); } };
+  const restoreLead = async (l: any) => { try { await api(`/api/sales/leads/${l.id}`, { method: 'PATCH', body: { status: prevOf(l), reason: '보관함에서 되돌림' } }); toast.ok(`되돌렸습니다 — '${ST.name(prevOf(l))}'로 기본 목록에 나옵니다`); reload(); } catch (e: any) { toast.error(e.message); } };
   const rowExtra = (l: any) => (isArch(l) ? <LeadArchiveCell l={l} ed={ed} onRestore={() => restoreLead(l)} /> : ed && l.status === '신규리드' ? <AdvanceButton l={l} people={data?.canAssign ? data.people ?? [] : null} me={me} onDone={reload} /> : null);
   // 197차(#461) 칸: 다음 행동(지남 빨강·오늘 주황·없으면 경고) · 마지막 접촉(n일 전 · 종류, 14일 넘으면 '오래 쉼') · 단계 머문 날 · 출처(공고 링크)
   const nextNote = (l: any) => (isClosed(l) ? (l.revisit ? <span className="text-ink-2" data-testid="lead-revisit">다시 볼 날 {kd(l.revisit)}</span> : null)
@@ -849,7 +851,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
     <button type="button" onClick={(e) => onSort(k, e.shiftKey)} title="누르면 정렬 · 한 번 더 = 거꾸로 · Shift+클릭 = 2차 정렬" className="inline-flex items-center gap-0.5 hover:text-ink" data-testid={`leads-th-${k}`}>{label}{sort2 === k && sort2 !== sortKey && <span className="text-[10px] text-ink-3" data-testid="leads-th-sort2">{(rev2 === '1') !== DESC_SORTS.has(k) ? '▼' : '▲'}2</span>}{sortKey === k && <span aria-hidden className="text-[10px]">{(rev === '1') !== DESC_SORTS.has(k) ? '▼' : '▲'}</span>}</button></th>;
   const card = (l: any) => (
     <li key={l.id} className="text-sm" data-testid="sales-lead-card"><SwipeCard on={ed && !isClosed(l)} onLeft={() => setQuick({ mode: 'next', lead: l })} onRight={() => setQuick({ mode: 'log', lead: l })}><div className="rounded-card border border-line bg-white p-3"><button type="button" onClick={() => setOpen(l.id)} className="block w-full text-left" data-testid="sales-lead-open">
-      <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(l.status)}{stageDays(l)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
+      <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b><StageChip k={l.status} />{stageDays(l)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
       <span className="mt-0.5 block text-xs" data-testid="lead-card-next">{!isClosed(l) && l.next && <span className="text-ink-3">다음 연락 </span>}{nextCell(l)}</span>
       <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-2">{contactCell(l)}{l.source && <span className="text-ink-3">· {l.source.label}</span>}{l.owner && <span className="text-ink-3">· 담당 {l.owner}</span>}</span>
       <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">{interests(l.interests)}{[l.facility, l.region, l.scale, l.contact].filter(Boolean).join(' · ')}{l.revenue ? <span>{won(l.revenue)}</span> : null}</span>
@@ -858,7 +860,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   return (
     <div className="space-y-3" data-testid="sales-leads">
       <Head title="영업 진행" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesLeads} compact />{ed && <Button size="sm" onClick={() => { setNl({ ...EMPTY_NL }); setForceNew(false); setSimilar(null); }} data-testid="lead-new">새 리드</Button>}<Search value={s} onChange={setS} />{day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="leads-day-today">오늘 연락할 리드 ✕</button>}
-        <select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => pickStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x}>{x}</option>)}</select></Head>
+        <select className={cx(inputCls, 'h-8 w-32 py-1 text-sm')} value={status} onChange={(e) => pickStatus(e.target.value)} aria-label="단계"><option value="">전체 단계</option>{statuses.map((x) => <option key={x} value={x}>{ST.name(x)}</option>)}</select></Head>
       {!data ? <Skeleton rows={5} /> : (
         <>
         {/* 197차(#461) '오늘 볼 것' 띠 — 진행 중 거래처 기준, 누르면 '전체 진행 중'에서 그 조건만(다시 누르면 풂) */}
@@ -880,7 +882,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
         </div>
         {focus && STRIP_FN[focus] && lv === 'open' && <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2" data-testid="leads-focus">‘{LEAD_STRIP.find(([k]) => k === focus)?.[1]}’만 보는 중<button type="button" onClick={() => setFocus('')} className="underline" style={{ color: C }}>모두 보기</button></p>}
         {/* 단계 요약 줄(누르면 단계 필터) + 빠른 칩 + 정렬·필터(우선·담당·지역·출처)·보기·열·CSV */}
-        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-xs" data-testid="leads-stage-summary">{(data.stages ?? statuses).filter((st: string) => stageCount.get(st)).map((st: string) => <button key={st} type="button" onClick={() => pickStatus(status === st ? '' : st)} className={cx('shrink-0 rounded-full border px-2.5 py-0.5', status === st ? 'border-transparent text-white' : 'border-line bg-white')} style={status === st ? { background: C } : undefined} data-testid="leads-stage-chip">{st} <b>{stageCount.get(st)}</b></button>)}</div>
+        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 text-xs" data-testid="leads-stage-summary">{(data.stages ?? statuses).filter((st: string) => stageCount.get(st)).map((st: string) => <button key={st} type="button" onClick={() => pickStatus(status === st ? '' : st)} className={cx('shrink-0 rounded-full border px-2.5 py-0.5', status === st ? 'border-transparent text-white' : 'border-line bg-white')} style={status === st ? { background: C } : undefined} data-testid="leads-stage-chip">{ST.name(st)} <b>{stageCount.get(st)}</b></button>)}</div>
         <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="leads-toolbar">
           {LEAD_CHIPS.map(([k, l]) => { const on = chips.includes(k); return <button key={k} type="button" onClick={() => setChips(on ? chips.filter((x) => x !== k) : [...chips, k])} className={cx('rounded-full border px-2.5 py-0.5', on ? 'border-blue-300 bg-blue-50 font-semibold text-blue-800' : 'border-line bg-white text-ink-2')} aria-pressed={on} data-testid={`leads-chip-${k}`}>{l}</button>; })}
           <span className="mx-1 hidden h-4 w-px bg-line sm:block" />
@@ -914,7 +916,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
             {ed && <td className="w-8 p-2">{!isClosed(l) && <input type="checkbox" checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} aria-label={`${l.name} 고르기`} data-testid="lead-sel" />}</td>}
             <td className="p-2 font-medium">{ed ? <CellInput value={l.name} onSave={(v) => patchLead(l.id, { name: v })} label="거래처명" testId="cell-name" /> : l.name}{l.contact && <span className="block text-[11px] font-normal text-ink-3">{l.contact}{l.phone ? ` · ${l.phone}` : ''}</span>}
               {(!col('facility') || !col('region')) && (l.facility || l.region) && <span className="block text-[11px] font-normal text-ink-3">{[l.facility, l.region].filter(Boolean).join(' · ')}</span>}</td>
-            <td className="p-2">{isArch(l) ? rowExtra(l) : <span className="flex flex-wrap items-center gap-1">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.status ?? ''} aria-label="단계" data-testid="cell-status" onChange={(e) => { const v = e.target.value; if (v !== l.status) setStMove({ lead: l, to: v }); }}>{(data.stages ?? []).map((s: string) => <option key={s}>{s}</option>)}</select> : chip(l.status)}{stageDays(l)}{rowExtra(l)}</span>}</td>
+            <td className="p-2">{isArch(l) ? rowExtra(l) : <span className="flex flex-wrap items-center gap-1">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.status ?? ''} aria-label="단계" data-testid="cell-status" onChange={(e) => { const v = e.target.value; if (v !== l.status) setStMove({ lead: l, to: v }); }}>{ST.pickable(data.stages ?? [], l.status).map((s: string) => <option key={s} value={s}>{ST.name(s)}</option>)}</select> : <StageChip k={l.status} />}{stageDays(l)}{rowExtra(l)}</span>}</td>
             <td className="p-2 text-xs" data-testid="cell-next-action">{ed && !isClosed(l) ? <span className="flex flex-col gap-0.5"><input key={`${l.id}:${l.next ?? ''}`} type="date" className={cx('w-fit rounded border bg-white px-1 py-0.5 text-xs', l.next && l.next < td ? 'border-red-300 text-red-700' : l.next === td ? 'border-amber-300 text-amber-700' : 'border-line')} defaultValue={l.next ?? ''} aria-label="다음 연락" data-testid="cell-next" onChange={(e) => patchLead(l.id, { nextContactDate: e.target.value || null })} />{nextNote(l)}</span> : nextCell(l)}</td>
             {col('source') && <td className="whitespace-nowrap p-2 text-xs">{srcCell(l)}</td>}
             {col('contact') && <td className="p-2 text-xs text-ink-2" data-testid="cell-contact">{contactCell(l)}</td>}
@@ -925,7 +927,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
             {!shown.length && <tr><td colSpan={11} className="p-6 text-center text-ink-3">{lv === 'closed' ? '종결한 거래처가 없습니다 — 계약완료·보류·실패로 닫은 리드와 되돌린 리드가 여기에 모입니다' : lv === 'none' ? '다음 행동이 없는 진행 중 거래처가 없습니다' : '리드가 없습니다'}</td></tr>}</tbody></table></div>}
         {/* 대표 10/21 12:00 영업 재편 3): 진행 단계(예전 '파이프라인' 메뉴)는 리드·거래처 안 '단계별' 보기 — PC 칸반·휴대폰 단계 칩 목록 */}
         {v === 'stages' && <Pipeline embedded />}
-        {v === 'compact' && <ul className="hidden divide-y divide-line rounded-card border border-line bg-white text-sm shadow-card md:block" data-testid="leads-compact">{shown.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50"><span className="min-w-0 flex-1 truncate font-medium">{l.name}</span>{chip(l.status)}<span className="w-28 truncate text-xs text-ink-2">{l.owner ?? ''}</span><span className={cx('w-24 text-xs tabular-nums', l.next && l.next < td ? 'font-semibold text-red-600' : 'text-ink-3')}>{kd(l.next)}</span><span className="hidden w-24 text-right text-xs tabular-nums text-ink-3 lg:block">{won(l.revenue) || '-'}</span></button></li>)}{!shown.length && <li className="p-6 text-center text-ink-3">리드가 없습니다</li>}</ul>}
+        {v === 'compact' && <ul className="hidden divide-y divide-line rounded-card border border-line bg-white text-sm shadow-card md:block" data-testid="leads-compact">{shown.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50"><span className="min-w-0 flex-1 truncate font-medium">{l.name}</span><StageChip k={l.status} /><span className="w-28 truncate text-xs text-ink-2">{l.owner ?? ''}</span><span className={cx('w-24 text-xs tabular-nums', l.next && l.next < td ? 'font-semibold text-red-600' : 'text-ink-3')}>{kd(l.next)}</span><span className="hidden w-24 text-right text-xs tabular-nums text-ink-3 lg:block">{won(l.revenue) || '-'}</span></button></li>)}{!shown.length && <li className="p-6 text-center text-ink-3">리드가 없습니다</li>}</ul>}
         {/* 대표 검수 10/20 ②: 전화·문자 줄과 홈페이지 칩을 카드 안에, 날짜 10. 22.(목). 휴대폰은 늘 카드 */}
         {ed && v !== 'stages' && !!shown.length && <p className="text-[11px] text-ink-3 md:hidden" data-testid="lead-swipe-hint">카드를 오른쪽으로 밀면 연락함 기록 · 왼쪽으로 밀면 다음 연락일 바꾸기</p>}
         <ul className={cx('space-y-2', v === 'cards' ? 'md:grid md:grid-cols-2 md:gap-2 md:space-y-0 xl:grid-cols-3' : 'md:hidden', v === 'stages' && 'hidden')} data-testid="sales-lead-cards">{shown.map(card)}{!shown.length && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
@@ -940,9 +942,9 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
           <form onSubmit={newLead} className="grid gap-3 text-sm" data-testid="lead-new-form">
             {NLF('name', '거래처(리드) 이름', { required: true, maxLength: 300, autoFocus: true })}
             {!!similar?.length && <div className="rounded-input border border-amber-300 bg-amber-50 p-2 text-xs" data-testid="lead-new-similar"><b className="text-amber-800">비슷한 거래처 {similar.length}곳</b> — 이미 있으면 그 거래처를 열어 이어서 적으세요
-              <ul className="mt-1 space-y-0.5">{similar.map((x) => <li key={x.id}><button type="button" onClick={() => { setNl(null); setOpen(x.id); }} className="underline">{x.name}</button> {x.status ? chip(x.status) : null} <span className="text-ink-3">{x.region ?? ''}</span>{x.by && x.by !== 'name' && <span className="ml-1 font-semibold text-amber-800" data-testid="lead-new-same">같은 {SAME_BY[x.by] ?? x.by}</span>}</li>)}</ul></div>}
+              <ul className="mt-1 space-y-0.5">{similar.map((x) => <li key={x.id}><button type="button" onClick={() => { setNl(null); setOpen(x.id); }} className="underline">{x.name}</button> <StageChip k={x.status} /> <span className="text-ink-3">{x.region ?? ''}</span>{x.by && x.by !== 'name' && <span className="ml-1 font-semibold text-amber-800" data-testid="lead-new-same">같은 {SAME_BY[x.by] ?? x.by}</span>}</li>)}</ul></div>}
             <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="단계"><select className={inputCls} value={nl.status} onChange={(e) => setNl({ ...nl, status: e.target.value })} aria-label="단계" data-testid="lead-new-status">{(data?.stages ?? ['신규리드']).map((x: string) => <option key={x}>{x}</option>)}</select></Field>
+              <Field label="단계"><select className={inputCls} value={nl.status} onChange={(e) => setNl({ ...nl, status: e.target.value })} aria-label="단계" data-testid="lead-new-status">{ST.pickable(data?.stages ?? ['신규리드'], nl.status).map((x: string) => <option key={x} value={x}>{ST.name(x)}</option>)}</select></Field>
               <Field label="우선순위"><select className={inputCls} value={nl.priority} onChange={(e) => setNl({ ...nl, priority: e.target.value })} aria-label="우선순위"><option value="">—</option>{Object.entries(PRI_KO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
               {data?.canAssign ? <Field label="담당"><select className={inputCls} value={nl.ownerId} onChange={(e) => setNl({ ...nl, ownerId: e.target.value })} aria-label="담당"><option value="">나</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field> : NLF('nextContactDate', '다음 연락일', { type: 'date' })}
             </div>
@@ -961,8 +963,8 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
 
 /** #610 ⓒ·#614 보관함 줄 — 단계·사유·누가·언제 + [되돌리기](이전 단계로, 없으면 신규리드) */
 function LeadArchiveCell({ l, ed, onRestore }: { l: any; ed: boolean; onRestore: () => void }) {
-  const a = l.archive ?? {};
-  return <span className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="lead-archive">{chip(l.status)}{a.reason && <span className="text-ink-2" data-testid="lead-archive-reason">사유: {a.reason}</span>}{(a.by || a.at) && <span className="text-ink-3">{[a.by, a.at && fmtDateTime(a.at)].filter(Boolean).join(' · ')}</span>}{ed && <Button size="sm" variant="secondary" onClick={(e) => { e.stopPropagation(); onRestore(); }} data-testid="lead-archive-restore">되돌리기{a.prev ? `(${a.prev})` : ''}</Button>}</span>;
+  const a = l.archive ?? {}; const ST = useStages();
+  return <span className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="lead-archive"><StageChip k={l.status} />{a.reason && <span className="text-ink-2" data-testid="lead-archive-reason">사유: {a.reason}</span>}{(a.by || a.at) && <span className="text-ink-3">{[a.by, a.at && fmtDateTime(a.at)].filter(Boolean).join(' · ')}</span>}{ed && <Button size="sm" variant="secondary" onClick={(e) => { e.stopPropagation(); onRestore(); }} data-testid="lead-archive-restore">되돌리기{a.prev ? `(${ST.name(a.prev)})` : ''}</Button>}</span>;
 }
 /** #610 ⓑ(대표 10/25 ⑥): 리드 목록 표·카드 [영업 진행으로] — 신규리드를 1차연락완료로 올리며 담당(관리자)·다음 연락일 지정(담당자에게 다음 연락 업무 자동) */
 function AdvanceButton({ l, people, me, onDone }: { l: any; people: { id: string; name: string }[] | null; me?: string; onDone: () => void }) {
@@ -993,7 +995,7 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
   const [open, setOpen] = useState<string | null>(null);
   const [stage, setStage] = useUrlState('pst', ''); // 앱 단계 칩. #242 2단계: 주소(?pst=)에 — 리드를 열었다 뒤로 와도 같은 단계
   // 202차(#461 ⑥): 단계 이동(PC 칸반 끌어 놓기·카드 select) = 묻는 창 — 진행 단계로 = 다음 연락일(+ 할 일), 종결로 = 사유(보류·실패 필수)·다시 볼 날
-  const [move, setMove] = useState<{ lead: any; to: string } | null>(null);
+  const [move, setMove] = useState<{ lead: any; to: string } | null>(null); const ST = useStages();
   const [drag, setDrag] = useState<{ id: string; from: string } | null>(null); const [over, setOver] = useState('');
   const moveStage = (l: any, from: string, to: string) => { if (to && to !== from) setMove({ lead: l, to }); };
   // 끌어 놓을 곳(단계 칸 · 끄는 동안 아래에 뜨는 종결 칸) — 놓으면 묻는 창
@@ -1012,21 +1014,21 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
         {/* 영업 재편 5) 전환율(파이프라인 메뉴에서 흡수): 단계마다 지금 n · 거쳐 간 n(비율) + 계약 전환율 */}
         {data.funnel && <div className="rounded-card border border-line bg-white p-2 text-xs" data-testid="pipeline-funnel">
           <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">전환율</span><span className="text-ink-2">리드 {data.funnel.total} → 계약완료 {data.funnel.won}{data.funnel.conversion !== null && <> (<b style={{ color: C }}>{data.funnel.conversion}%</b>)</>}</span>{data.funnel.lost > 0 && <span className="text-ink-3">· 실패 {data.funnel.lost}</span>}<span className="ml-auto text-ink-3">막대 = 그 단계를 거쳐 간 리드 비율</span></div>
-          <div className="mt-1.5 grid gap-1" style={{ gridTemplateColumns: `repeat(${data.funnel.stages.length}, minmax(0, 1fr))` }}>{data.funnel.stages.map((f: any) => <div key={f.status} className="min-w-0" title={`${f.status}: 지금 ${f.now} · 거쳐 간 ${f.reached} (${f.pct}%)`} data-testid="funnel-stage"><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${f.pct}%`, background: C }} /></div><div className="mt-0.5 truncate text-[10px] text-ink-2">{f.status}</div><div className="text-[10px] tabular-nums text-ink-3">{f.now}<span className="text-ink-3">/{f.reached}</span></div></div>)}</div>
+          <div className="mt-1.5 grid gap-1" style={{ gridTemplateColumns: `repeat(${data.funnel.stages.length}, minmax(0, 1fr))` }}>{data.funnel.stages.map((f: any) => <div key={f.status} className="min-w-0" title={`${ST.name(f.status)}: 지금 ${f.now} · 거쳐 간 ${f.reached} (${f.pct}%)`} data-testid="funnel-stage"><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${f.pct}%`, background: C }} /></div><div className="mt-0.5 truncate text-[10px] text-ink-2">{ST.name(f.status)}</div><div className="text-[10px] tabular-nums text-ink-3">{f.now}<span className="text-ink-3">/{f.reached}</span></div></div>)}</div>
         </div>}
         {/* 대표 검수 10/20 ②: 휴대폰은 가로 칸반(빈 칸 많고 좁음) 대신 단계 칩 + 목록, PC 는 칸반 그대로 */}
         <div className="md:hidden" data-testid="pipeline-list">
-          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">{([['', `전체 ${total}`], ...used.map((c) => [c.status, `${c.status} ${c.items.length}`])] as [string, string][]).map(([k, l]) => (
+          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">{([['', `전체 ${total}`], ...used.map((c) => [c.status, `${ST.name(c.status)} ${c.items.length}`])] as [string, string][]).map(([k, l]) => (
             <button key={k} type="button" onClick={() => setStage(k)} className={cx('shrink-0 rounded-full border px-3 py-1 text-xs', stage === k ? 'border-transparent text-white' : 'border-line bg-white')} style={stage === k ? { background: C } : undefined} data-testid="pipeline-stage">{l}</button>))}</div>
           <ul className="mt-2 space-y-2">{shown.flatMap((c) => c.items.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-card border border-line bg-white p-3 text-left text-sm" data-testid="pipeline-item">
-            <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(c.status)}</span>
+            <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b><StageChip k={c.status} /></span>
             <span className="mt-0.5 block text-xs text-ink-2">{[l.owner && `담당 ${l.owner}`, l.next && `다음 연락 ${kd(l.next)}`].filter(Boolean).join(' · ')}</span></button></li>))}
             {!shown.some((c) => c.items.length) && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
         </div>
-        <div className="hidden gap-3 overflow-x-auto pb-2 md:flex">{cols.map((c: any) => (
-          <section key={c.status} className={cx('w-60 shrink-0 rounded-card border border-line bg-slate-50 p-2', over === c.status && 'border-brand-400 bg-brand-50 ring-2 ring-brand-300')} data-testid="pipeline-col" data-status={c.status} {...dropProps(c.status, c.status)}><h2 className="mb-2 text-xs font-semibold">{c.status} <span className="text-ink-3">{c.items.length}</span></h2>
+        <div className="hidden gap-3 overflow-x-auto pb-2 md:flex">{cols.filter((c: any) => !ST.hidden(c.status) || c.items.length).map((c: any) => ( /* 207차: 숨긴 단계 칸은 거래처가 있을 때만 */
+          <section key={c.status} className={cx('w-60 shrink-0 rounded-card border border-line bg-slate-50 p-2', over === c.status && 'border-brand-400 bg-brand-50 ring-2 ring-brand-300')} data-testid="pipeline-col" data-status={c.status} {...dropProps(c.status, c.status)}><h2 className="mb-2 text-xs font-semibold">{ST.name(c.status)} <span className="text-ink-3">{c.items.length}</span></h2>
             <ul className="space-y-1.5">{c.items.map((l: any) => <li key={l.id} draggable={data.readOnly === false} data-testid="pipeline-card" className={cx(data.readOnly === false && 'cursor-grab', drag?.id === l.id && 'opacity-50')}
-              onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', l.id); setDrag({ id: l.id, from: c.status }); }} onDragEnd={() => { setDrag(null); setOver(''); }}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-input border border-line bg-white p-2 text-left text-sm hover:border-blue-300"><span className="block truncate font-medium">{l.name}</span><span className="block truncate text-[11px] text-ink-2">{[l.owner, l.next && `연락 ${kd(l.next)}`].filter(Boolean).join(' · ')}</span></button>{data.readOnly === false && <select className={cx(inputCls, 'mt-1 h-7 w-full py-0 text-[11px]')} value={c.status} onChange={(e) => moveStage(l, c.status, e.target.value)} aria-label={`${l.name} 단계 이동`} data-testid="pipeline-move">{(data.stages ?? STAGE_FALLBACK).map((st: string) => <option key={st}>{st}</option>)}</select>}</li>)}</ul></section>))}</div>
+              onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', l.id); setDrag({ id: l.id, from: c.status }); }} onDragEnd={() => { setDrag(null); setOver(''); }}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-input border border-line bg-white p-2 text-left text-sm hover:border-blue-300"><span className="block truncate font-medium">{l.name}</span><span className="block truncate text-[11px] text-ink-2">{[l.owner, l.next && `연락 ${kd(l.next)}`].filter(Boolean).join(' · ')}</span></button>{data.readOnly === false && <select className={cx(inputCls, 'mt-1 h-7 w-full py-0 text-[11px]')} value={c.status} onChange={(e) => moveStage(l, c.status, e.target.value)} aria-label={`${l.name} 단계 이동`} data-testid="pipeline-move">{ST.pickable(data.stages ?? STAGE_FALLBACK, c.status).map((st: string) => <option key={st} value={st}>{ST.name(st)}</option>)}</select>}</li>)}</ul></section>))}</div>
       </>}
       {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} onOpen={setOpen} />}
       {/* 끄는 동안 아래에 종결 칸(성사·보류·실패) — 단계가 12칸이라 오른쪽 끝 칸까지 끌고 가지 않아도 되게(Pipedrive 의 끌기 중 '성사·실패' 칸과 같은 흐름) */}
@@ -1034,7 +1036,7 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
         <span className="px-1 text-xs text-ink-3">여기에 놓아 종결</span>
         {(['계약완료', '보류', '실패'] as const).filter((st) => st !== drag.from).map((st) => (
           <div key={st} data-testid="pipeline-drop" data-status={st} {...dropProps(st, `bar:${st}`)}
-            className={cx('min-w-28 rounded-input border-2 border-dashed px-4 py-3 text-center text-sm font-semibold', over === `bar:${st}` ? 'border-brand-500 bg-brand-50 text-brand-800' : st === '계약완료' ? 'border-emerald-300 text-emerald-800' : 'border-line text-ink-2')}>{st === '계약완료' ? '성사(계약완료)' : st}</div>))}
+            className={cx('min-w-28 rounded-input border-2 border-dashed px-4 py-3 text-center text-sm font-semibold', over === `bar:${st}` ? 'border-brand-500 bg-brand-50 text-brand-800' : st === '계약완료' ? 'border-emerald-300 text-emerald-800' : 'border-line text-ink-2')}>{st === '계약완료' ? `성사(${ST.name(st)})` : ST.name(st)}</div>))}
       </div></div>}
       {move && <StageMoveDialog lead={{ id: move.lead.id, name: move.lead.name, next: move.lead.next }} to={move.to} onClose={() => setMove(null)} onDone={(m) => { setMove(null); toast.ok(m); reload(); }} />}
     </div>

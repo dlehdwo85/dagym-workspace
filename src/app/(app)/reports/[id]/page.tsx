@@ -4,11 +4,12 @@ import { use } from 'react';
 import { AlertTriangle, ChevronLeft, Printer } from 'lucide-react';
 import { useApi } from '@/components/client';
 import { Button, DueChip, ErrorBox, PriorityTag, Skeleton, fmtDate, fmtDateTime } from '@/components/ui';
+import { useStages } from '@/components/sales/stages';
 
 /** B-15 주간 보고 — 인쇄 또는 "PDF 로 저장"(브라우저 인쇄 대화상자) */
 export default function ReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { data, error, loading } = useApi<{ report: any }>(`/api/reports/${id}`);
+  const { data, error, loading } = useApi<{ report: any }>(`/api/reports/${id}`); const stageName = useStages().name; // 207차: 단계 이름은 회사 설정
   if (error) return <ErrorBox error={error} />;
   if (loading && !data) return <Skeleton rows={8} />;
   const r = data!.report;
@@ -70,7 +71,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
                 {d.sales.staleTop.map((l: any) => (
                   <li key={l.id} className="flex flex-wrap items-center gap-2 py-2">
                     <Link href={`/s/sales/leads?id=${l.id}`} className="font-medium hover:underline">{l.name}</Link>
-                    <span className="text-xs text-ink-2">{l.status ?? '단계 없음'} · {l.owner ?? '담당 없음'}</span>
+                    <span className="text-xs text-ink-2">{l.status ? stageName(l.status) : '단계 없음'} · {l.owner ?? '담당 없음'}</span>
                     <span className="ml-auto text-xs text-amber-700">{l.last ? `마지막 접촉 ${fmtDate(l.last)} ${l.lastKind}` : `연락 기록 없음 · 등록 ${fmtDate(l.created)}`}</span>
                   </li>
                 ))}

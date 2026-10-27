@@ -4,7 +4,7 @@ import { Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { useSalesTerms } from '@/components/session';
-import type { SalesTerms } from '@/lib/sales/terms';
+import { HIDEABLE_STAGES, LEAD_STAGES, STAGE_LABEL_MAX, type SalesTerms, type StageCfg } from '@/lib/sales/terms';
 import { BidPrefs, Collectors } from './Collectors';
 
 type S = { code: string; name: string; provider: string; grp: string; category: string; refresh: string; enabled: boolean; common: boolean; keywords: string[]; regions: string[]; excludes: string[]; total: number; attribution: string; last_run_at: string | null };
@@ -145,7 +145,40 @@ function SalesOptions() {
         </div>
         <p className="mt-1.5 text-[11px] text-ink-3" data-testid="sales-template-preview">미리보기: {t.buildingsTab} · {t.facilitiesTab} · {t.vendorsTab} / 칸 이름 {t.unitName}·{t.office}·{t.operator}</p>
       </div>
+      <StageNames terms={t} canEdit={data.canEdit} />
     </section>
+  );
+}
+
+/** 207차(#461, SALES_LEADS_REVAMP 2-3 '단계 = 칩(회사 설정 단계명·색)'): 리드 단계 이름·색·숨김. 저장 값은 그대로 — 화면 이름만 회사 말로.
+ *  쓰지 않는 중간 단계는 숨김(고르는 칸에서만 빠지고 그 단계 거래처는 그대로 보임). 처음·종결 단계는 규칙(사유 필수·보관함)이 있어 이름·색만 */
+function StageNames({ terms, canEdit }: { terms: SalesTerms; canEdit: boolean }) {
+  const [rows, setRows] = useState<StageCfg | null>(null); const [busy, setBusy] = useState(false);
+  const cfg = rows ?? terms.stages;
+  const set = (k: string, patch: Partial<StageCfg[string]>) => setRows({ ...cfg, [k]: { ...cfg[k], ...patch } });
+  async function save(reset = false) {
+    setBusy(true);
+    try {
+      await api('/api/sales/options', { method: 'PUT', body: { stages: reset ? null : Object.fromEntries(LEAD_STAGES.map((k) => [k, { label: cfg[k].label.trim(), color: cfg[k].color, hidden: cfg[k].hidden }])) } });
+      toast.ok(reset ? '단계 이름을 기본으로 되돌렸습니다' : '단계 이름을 저장했습니다 — 영업 화면에 바로 보입니다'); setTimeout(() => window.location.reload(), 600);
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div id="stages" className="mt-3 border-t border-line pt-3" data-testid="sales-stage-names">
+      <div className="text-sm font-medium">리드 단계 이름</div>
+      <p className="mt-1 text-xs text-ink-2">영업 진행의 단계 이름·색을 우리 회사 말로 바꿉니다. 쓰지 않는 중간 단계는 숨길 수 있습니다(그 단계에 있는 거래처는 그대로 보입니다). 처음·종결 단계는 규칙(사유 필수·보관함)이 있어 이름·색만 바꿉니다.</p>
+      <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">{LEAD_STAGES.map((k) => { const c = cfg[k]; return (
+        <li key={k} className="grid grid-cols-[2.25rem_minmax(0,1fr)_6.5rem] items-center gap-1.5" data-testid="sales-stage-row" data-stage={k}>
+          <input type="color" className="h-8 w-9 cursor-pointer rounded border border-line" value={c.color ?? '#1D4ED8'} onChange={(e) => set(k, { color: e.target.value })} aria-label={`${k} 색`} disabled={!canEdit} />
+          <div className="min-w-0"><input className={cx(inputCls, 'h-8 py-1')} value={c.label} onChange={(e) => set(k, { label: e.target.value })} maxLength={STAGE_LABEL_MAX} aria-label={`${k} 이름`} disabled={!canEdit} data-testid="sales-stage-label" />
+            {c.label.trim() !== k && <p className="mt-0.5 truncate text-[10px] text-ink-3">원래 이름: {k}</p>}</div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+            {HIDEABLE_STAGES.has(k) && <label className="inline-flex items-center gap-1"><input type="checkbox" checked={c.hidden} onChange={(e) => set(k, { hidden: e.target.checked })} disabled={!canEdit} data-testid="sales-stage-hide" />숨김</label>}
+            {c.color && canEdit && <button type="button" className="text-[11px] text-ink-3 underline" onClick={() => set(k, { color: null })}>기본 색</button>}</div>
+        </li>); })}</ul>
+      {canEdit && <div className="mt-2 flex flex-wrap gap-2"><Button onClick={() => save()} disabled={busy || rows === null} data-testid="sales-stage-save">{busy ? '저장 중…' : '저장'}</Button>
+        <Button variant="secondary" onClick={() => save(true)} disabled={busy} data-testid="sales-stage-reset">기본 이름으로</Button></div>}
+    </div>
   );
 }
 

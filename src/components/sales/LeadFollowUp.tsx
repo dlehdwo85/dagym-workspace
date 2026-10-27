@@ -2,6 +2,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { api } from '@/components/client';
 import { Button, Field, Modal, cx, inputCls } from '@/components/ui';
+import { useStages } from '@/components/sales/stages';
 
 /**
  * 197차(#460) 영업 2차 관리 — 리드 업무 [완료] 때 묻는 창: '다음 연락일(+ 할 일)' 또는 '종결(성사·보류·실패 + 사유·다시 볼 날)'.
@@ -44,6 +45,7 @@ export function useLeadFollowUp() {
 }
 
 function LeadFollowUpDialog({ title, brief, onDone }: { title: string; brief: Brief; onDone: (v: LeadFollowUpChoice | null) => void }) {
+  const ST = useStages(); // 207차: 단계 이름은 회사 설정
   const td = todayKst();
   const [mode, setMode] = useState<'next' | 'close'>('next');
   const [date, setDate] = useState(''); const [action, setAction] = useState('');
@@ -72,7 +74,7 @@ function LeadFollowUpDialog({ title, brief, onDone }: { title: string; brief: Br
           <p className="text-[11px] text-ink-3">그날 담당{brief.owner ? `(${brief.owner})` : ''}에게 ‘{brief.name} — {action.trim() || '다음 연락'}’ 업무가 생깁니다.</p>
         </div> : !brief.canStage ? <p className="rounded-input bg-amber-50 p-2 text-xs text-amber-900" data-testid="lead-fu-no-stage">거래처 종결(단계 바꾸기)은 리드 담당{brief.owner ? `(${brief.owner})` : ''}·관리자만 할 수 있습니다 — 다음 연락일을 골라 주세요.</p>
           : <div className="space-y-2" data-testid="lead-fu-close">
-            <div className="flex flex-wrap gap-1.5">{(['계약완료', '보류', '실패'] as const).map((st) => <button key={st} type="button" onClick={() => setClose(st)} className={chip(close === st)} aria-pressed={close === st} data-testid={`lead-fu-close-${st}`}>{st === '계약완료' ? '성사(계약완료)' : st}</button>)}</div>
+            <div className="flex flex-wrap gap-1.5">{(['계약완료', '보류', '실패'] as const).map((st) => <button key={st} type="button" onClick={() => setClose(st)} className={chip(close === st)} aria-pressed={close === st} data-testid={`lead-fu-close-${st}`}>{st === '계약완료' ? `성사(${ST.name(st)})` : ST.name(st)}</button>)}</div>
             {close === '계약완료' && <p className="text-[11px] text-ink-3">제안·계약 화면에 계약 기간을 적어 두면 끝나기 120일 전 ‘재계약 준비’ 업무가 자동으로 생깁니다.</p>}
             {(close === '보류' || close === '실패') && <>
               <div className="flex flex-wrap gap-1.5">{REASONS.map((r) => <button key={r} type="button" onClick={() => setReason(r)} className={chip(reason === r)} data-testid="lead-fu-reason-chip">{r}</button>)}</div>
@@ -115,7 +117,7 @@ function NextPick({ td, keep, date, setDate, action, setAction }: { td: string; 
 
 /** 칸반에서 단계를 옮길 때 묻는 창 — 진행 단계로 = 다음 연락일(+ 할 일), 종결(계약완료·보류·실패·되돌림)로 = 사유(보류·실패 필수)·다시 볼 날. [취소] = 옮기지 않음 */
 export function StageMoveDialog({ lead, to, onClose, onDone }: { lead: QuickLead; to: string; onClose: () => void; onDone: (msg: string) => void }) {
-  const td = todayKst(); const closing = CLOSE_STAGES.includes(to); const needReason = to === '보류' || to === '실패';
+  const td = todayKst(); const ST = useStages(); const toName = ST.name(to); const closing = CLOSE_STAGES.includes(to); const needReason = to === '보류' || to === '실패';
   const keep = lead.next && lead.next >= td ? lead.next : null;
   const [date, setDate] = useState(keep ?? ''); const [action, setAction] = useState('');
   const [reason, setReason] = useState(''); const [revisit, setRevisit] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
@@ -125,17 +127,17 @@ export function StageMoveDialog({ lead, to, onClose, onDone }: { lead: QuickLead
     try {
       await api(`/api/sales/leads/${lead.id}`, { method: 'PATCH', body: { status: to, ...(closing ? { ...(reason.trim() ? { reason: reason.trim() } : {}), ...(needReason && revisit ? { revisitDate: revisit } : {}) }
         : { nextContactDate: date, ...(action.trim() ? { nextAction: action.trim() } : {}) }) } });
-      onDone(closing ? `'${to}'(으)로 옮겼습니다${needReason && revisit ? ` — 다시 볼 날 ${md(revisit)}` : ''}` : `'${to}'(으)로 옮겼습니다 — 다음 연락 ${md(date)}`);
+      onDone(closing ? `'${toName}'(으)로 옮겼습니다${needReason && revisit ? ` — 다시 볼 날 ${md(revisit)}` : ''}` : `'${toName}'(으)로 옮겼습니다 — 다음 연락 ${md(date)}`);
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   }
   return (
-    <Modal open onClose={onClose} title={`단계 옮기기 — ${to}`}>
+    <Modal open onClose={onClose} title={`단계 옮기기 — ${toName}`}>
       <div className="space-y-3 text-sm" data-testid="lead-move">
-        <p className="text-xs text-ink-2"><b className="text-ink">{lead.name}</b>을(를) ‘{to}’(으)로 옮깁니다. {closing ? (needReason ? '종결하는 사유를 남겨 주세요.' : '종결합니다.') : '놓치지 않게 다음 연락일을 정해 주세요.'}</p>
+        <p className="text-xs text-ink-2"><b className="text-ink">{lead.name}</b>을(를) ‘{toName}’(으)로 옮깁니다. {closing ? (needReason ? '종결하는 사유를 남겨 주세요.' : '종결합니다.') : '놓치지 않게 다음 연락일을 정해 주세요.'}</p>
         {!closing ? <NextPick td={td} keep={keep} date={date} setDate={setDate} action={action} setAction={setAction} />
           : needReason ? <div className="space-y-2" data-testid="lead-move-close">
             <div className="flex flex-wrap gap-1.5">{REASONS.map((r) => <button key={r} type="button" onClick={() => setReason(r)} className={chip(reason === r)} data-testid="lead-move-reason-chip">{r}</button>)}</div>
-            <Field label={`${to} 사유(필수)`}><input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-move-reason" /></Field>
+            <Field label={`${toName} 사유(필수)`}><input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-move-reason" /></Field>
             <div className="flex flex-wrap items-end gap-1.5">
               <Field label="다시 볼 날(선택)" className="w-40"><input type="date" min={plus(1)} className={inputCls} value={revisit} onChange={(e) => setRevisit(e.target.value)} aria-label="다시 볼 날" data-testid="lead-move-revisit" /></Field>
               {REVISIT_CHIPS.map(([lb, f]) => <button key={lb} type="button" onClick={() => setRevisit(revisit === f() ? '' : f())} className={cx(chip(revisit === f()), 'mb-1')} data-testid="lead-move-revisit-chip">{lb}</button>)}
@@ -191,7 +193,7 @@ export function LeadQuickDialog({ mode, lead, onClose, onDone }: { mode: 'next' 
 /** 204차(#461 ⑦ 일괄 작업): 고른 거래처 여러 건 — 단계 바꾸기(보류·실패 사유 필수·다시 볼 날, 진행 단계는 다음 연락일 선택) · 다음 연락일 일괄 지정. 서버가 한 건씩 같은 규칙으로 바꾸고 못 바꾼 건을 돌려줌 */
 export type BulkResult = { ok: number; failed: { id: string; name: string | null; message: string }[] };
 export function BulkLeadDialog({ mode, ids, stages, onClose, onDone }: { mode: 'stage' | 'next'; ids: string[]; stages: string[]; onClose: () => void; onDone: (r: BulkResult) => void }) {
-  const td = todayKst();
+  const td = todayKst(); const ST = useStages();
   const [to, setTo] = useState(''); const closing = CLOSE_STAGES.includes(to); const needReason = to === '보류' || to === '실패';
   const [date, setDate] = useState(''); const [action, setAction] = useState('');
   const [reason, setReason] = useState(''); const [revisit, setRevisit] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
@@ -205,10 +207,10 @@ export function BulkLeadDialog({ mode, ids, stages, onClose, onDone }: { mode: '
   return (
     <Modal open onClose={onClose} title={mode === 'next' ? `다음 연락일 일괄 지정 — ${ids.length}건` : `단계 일괄 바꾸기 — ${ids.length}건`}>
       <div className="space-y-3 text-sm" data-testid={`lead-bulk-${mode}`}>
-        {mode === 'stage' && <Field label="바꿀 단계"><select className={inputCls} value={to} onChange={(e) => { setTo(e.target.value); setReason(''); setRevisit(''); }} aria-label="바꿀 단계" data-testid="lead-bulk-to"><option value="">고르세요</option>{stages.map((st) => <option key={st}>{st}</option>)}</select></Field>}
+        {mode === 'stage' && <Field label="바꿀 단계"><select className={inputCls} value={to} onChange={(e) => { setTo(e.target.value); setReason(''); setRevisit(''); }} aria-label="바꿀 단계" data-testid="lead-bulk-to"><option value="">고르세요</option>{ST.pickable(stages).map((st) => <option key={st} value={st}>{ST.name(st)}</option>)}</select></Field>}
         {mode === 'stage' && needReason && <div className="space-y-2">
           <div className="flex flex-wrap gap-1.5">{REASONS.map((r) => <button key={r} type="button" onClick={() => setReason(r)} className={chip(reason === r)} data-testid="lead-bulk-reason-chip">{r}</button>)}</div>
-          <Field label={`${to} 사유(필수, 모두 같은 사유)`}><input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-bulk-reason" /></Field>
+          <Field label={`${ST.name(to)} 사유(필수, 모두 같은 사유)`}><input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-bulk-reason" /></Field>
           <div className="flex flex-wrap items-end gap-1.5">
             <Field label="다시 볼 날(선택)" className="w-40"><input type="date" min={plus(1)} className={inputCls} value={revisit} onChange={(e) => setRevisit(e.target.value)} aria-label="다시 볼 날" /></Field>
             {REVISIT_CHIPS.map(([lb, f]) => <button key={lb} type="button" onClick={() => setRevisit(revisit === f() ? '' : f())} className={cx(chip(revisit === f()), 'mb-1')} data-testid="lead-bulk-revisit-chip">{lb}</button>)}

@@ -65,6 +65,7 @@ import { leadMove203 } from './leadMove203.step.mjs';
 import { leadBulk204 } from './leadBulk204.step.mjs';
 import { leadImport205 } from './leadImport205.step.mjs';
 import { leadMerge206 } from './leadMerge206.step.mjs';
+import { stageNames207 } from './stageNames207.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2911,6 +2912,7 @@ await step('203차 #461 ⑥ 칸반 끌어 놓기·휴대폰 카드 밀기: 끌�
 await step('204차 #461 ⑦ 표 일괄 작업: 체크 → 아래 막대 · 다음 연락일 일괄 · 단계 일괄(보류 사유 필수) · 2차 정렬(Shift+클릭) · 표의 단계 바꾸기 = 묻는 창 · 종결 보기엔 체크 칸 없음', () => leadBulk204({ owner, ctx, sql, BASE, SHOTS }));
 await step('205차 #461 ⑦ CSV 가져오기 미리보기: 이미 있음 = 기본 합치기(빈 칸만) · 같은 연락처(사업자번호) = 기본 새로 → 합치기 · 파일 안 겹침 = 건너뛰기 · 상세 사업자번호', () => leadImport205({ owner, ctx, sql, BASE, SHOTS }));
 await step('206차 #461 ⑦ 기존 거래처끼리 합치기: 상세 › 중복 합치기 → 같은 전화 후보 → 남길 쪽 제안·채울 칸 → 합치기 → 남긴 쪽 상세 · 예전 링크도 남긴 쪽 · 목록에서 빠짐', () => leadMerge206({ owner, ctx, sql, BASE, SHOTS }));
+await step('207차 #461 회사별 단계 이름: 데이터 설정 › 이름·색·숨김 저장 → 영업 진행 표·상세 칩·진행 단계 칸에 회사 이름 · 숨긴 단계는 고르는 칸에서 빠짐 · 저장 값 그대로', () => stageNames207({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

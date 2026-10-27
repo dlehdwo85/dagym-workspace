@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/components/client';
 import { Button, Modal, cx, inputCls, toast } from '@/components/ui';
+import { useStages } from '@/components/sales/stages';
 
 /**
  * 205차(#461 ⑦ 가져오기, SALES_LEADS_REVAMP 4·5절): CSV 가져오기 '미리보기 → 중복 표시 → 반영'.
@@ -27,7 +28,7 @@ const mergeNote = (m: Match) => [m.fill.length ? `채움: ${m.fill.join('·')}` 
 export function LeadImportDialog({ data, onClose, onDone }: { data: ImportRows; onClose: () => void; onDone: () => void }) {
   const [plan, setPlan] = useState<{ rows: Plan[]; counts: Record<string, number> } | null>(null);
   const [acts, setActs] = useState<string[]>([]);
-  const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [done, setDone] = useState<Done | null>(null);
+  const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [done, setDone] = useState<Done | null>(null); const ST = useStages();
   useEffect(() => {
     let live = true;
     api<{ rows: Plan[]; counts: Record<string, number> }>('/api/sales/leads/import/preview', { body: { rows: data.rows } })
@@ -78,7 +79,7 @@ export function LeadImportDialog({ data, onClose, onDone }: { data: ImportRows; 
                       <div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{String(r.name)}</b>{sub && <span className="text-ink-3">{sub}</span>}<span className={cx('rounded-full px-1.5', KIND[k][1])}>{KIND[k][0]}</span></div>
                       {k === 'file' ? <p className="mt-0.5 text-ink-3">파일 안에 같은 이름 줄이 먼저 있습니다</p>
                         : <ul className="mt-1 space-y-0.5">{(p.matches ?? []).map((m) => (
-                          <li key={m.id}><span className="font-medium">{m.name}</span>{m.status && <span className="ml-1 text-ink-3">{m.status}</span>}{m.owner && <span className="ml-1 text-ink-3">· {m.owner}</span>}
+                          <li key={m.id}><span className="font-medium">{m.name}</span>{m.status && <span className="ml-1 text-ink-3">{ST.name(m.status)}</span>}{m.owner && <span className="ml-1 text-ink-3">· {m.owner}</span>}
                             {m.by.length > 0 && <span className="ml-1 text-amber-800">· 같은 {m.by.map((b) => BY[b] ?? b).join('·')}</span>}
                             <span className="ml-1 text-ink-2">· 합치면 {mergeNote(m)}</span>
                             {m.diff.length > 0 && <span className="block text-ink-3">다른 값(바꾸지 않고 메모에): {m.diff.join(' · ')}</span>}</li>))}</ul>}

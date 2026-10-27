@@ -18,9 +18,32 @@ export type SalesTerms = {
   todo: { followUp: string; facilities: string; vendors: string };
   /** 입력 칸 예시(placeholder) — 회사 이름·브랜드 없이 업종 기준 */
   examples: { industry: string; product: string; business: string; keywords: string; excludes: string; aiProfile: string };
+  /** 207차: 리드 단계 표시 이름·색·숨김(회사 설정, tenants.sales_stages) */
+  stages: StageCfg;
 };
 
-const T: Record<SalesTemplate, SalesTerms> = {
+/**
+ * 207차(#461, SALES_LEADS_REVAMP 2-3 '단계 = 칩(회사 설정 단계명·색)'): 리드 단계. 저장 값(키)은 그대로, 회사는 화면 이름·색·숨김만 정한다.
+ * 처음(신규리드)·종결(계약완료·보류·실패·되돌림) 단계는 규칙(사유 필수·보관함·되돌리기)이 걸려 있어 숨기지 않는다 — 이름·색만.
+ */
+export const LEAD_STAGES = ['신규리드', '1차연락완료', '미팅예정', '현장방문완료', '제안서작성중', '제안서발송완료', '견적협의', '계약검토', '계약완료', '보류', '실패', '되돌림'] as const;
+export const HIDEABLE_STAGES: ReadonlySet<string> = new Set(['1차연락완료', '미팅예정', '현장방문완료', '제안서작성중', '제안서발송완료', '견적협의', '계약검토']);
+export type StageCfg = Record<string, { label: string; color: string | null; hidden: boolean }>;
+export const STAGE_LABEL_MAX = 20;
+/** 저장값 → 단계 설정(없는 단계·잘못된 값은 기본) */
+export function stageCfgFor(raw: unknown): StageCfg {
+  const src = raw && typeof raw === 'object' ? (raw as Record<string, { label?: unknown; color?: unknown; hidden?: unknown }>) : {};
+  return Object.fromEntries(LEAD_STAGES.map((k) => {
+    const x = src[k] ?? {}; const label = typeof x.label === 'string' && x.label.trim() ? x.label.trim().slice(0, STAGE_LABEL_MAX) : k;
+    return [k, { label, color: typeof x.color === 'string' && /^#[0-9a-f]{6}$/i.test(x.color) ? x.color : null, hidden: HIDEABLE_STAGES.has(k) && x.hidden === true }];
+  }));
+}
+/** 단계 키 → 화면 이름(모르는 값은 그대로) */
+export const stageName = (cfg: StageCfg | undefined, k: unknown) => { const s = String(k ?? ''); return cfg?.[s]?.label ?? s; };
+/** 화면 이름(또는 키) → 단계 키 — CSV 가져오기 */
+export const stageKeyOf = (cfg: StageCfg | undefined, v: string) => { const t = v.trim(); return (LEAD_STAGES as readonly string[]).includes(t) ? t : Object.entries(cfg ?? {}).find(([, c]) => c.label === t)?.[0] ?? null; };
+
+const T: Record<SalesTemplate, Omit<SalesTerms, 'stages'>> = {
   facility: {
     template: 'facility', label: '시설 운영·위탁', desc: '아파트·커뮤니티·체육시설 위탁 운영, 시설 관리',
     kind: { bid: '입찰', building: '신규단지', facility: '시설', vendor: '협력사', lead: '리드' },
@@ -60,7 +83,7 @@ const T: Record<SalesTemplate, SalesTerms> = {
 };
 
 export const salesTemplateList = () => SALES_TEMPLATES.map((code) => ({ code, label: T[code].label, desc: T[code].desc }));
-export const termsOf = (code: SalesTemplate): SalesTerms => T[code];
+export const termsOf = (code: SalesTemplate, stages?: unknown): SalesTerms => ({ ...T[code], stages: stageCfgFor(stages) });
 export const isSalesTemplate = (v: unknown): v is SalesTemplate => (SALES_TEMPLATES as readonly string[]).includes(String(v));
 
 /** 회사 업종(industries·industry)으로 템플릿 추정 — 온보딩에서 업종만 골라도 영업 화면 용어가 맞춰진다 */
@@ -75,8 +98,8 @@ export function inferSalesTemplate(industries: readonly string[] | null | undefi
 /** 회사 업종 목록: industries[](여러 개)가 있으면 그것만, 없으면 예전 industry 한 칸 */
 export const tenantIndustries = (t: { industries?: string[] | null; industry?: string | null } | null | undefined): string[] => (t?.industries?.length ? t.industries : t?.industry ? [t.industry] : []);
 /** 저장값(null 이면 추정) → 용어 */
-export function salesTermsFor(saved: string | null | undefined, industries: readonly string[] | null | undefined): SalesTerms & { auto: boolean } {
+export function salesTermsFor(saved: string | null | undefined, industries: readonly string[] | null | undefined, stages?: unknown): SalesTerms & { auto: boolean } {
   const auto = !isSalesTemplate(saved);
-  return { ...termsOf(auto ? inferSalesTemplate(industries) : (saved as SalesTemplate)), auto };
+  return { ...termsOf(auto ? inferSalesTemplate(industries) : (saved as SalesTemplate), stages), auto };
 }
 export const DEFAULT_TERMS = termsOf('general');
