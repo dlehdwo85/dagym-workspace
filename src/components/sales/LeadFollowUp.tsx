@@ -92,3 +92,98 @@ function LeadFollowUpDialog({ title, brief, onDone }: { title: string; brief: Br
     </Modal>
   );
 }
+
+// ── 202차(#461 ⑥, SALES_LEADS_REVAMP 2-3·2-4): 칸반 끌기 사유 창 · 휴대폰 카드 밀기(← 다음 연락일 · → 연락함 기록) ──────────────
+const CLOSE_STAGES = ['계약완료', '보류', '실패', '되돌림'];
+const LOG_TYPES = ['전화', '문자', '방문', '미팅', '메일'];
+const LOG_CHIPS = ['통화함', '부재중', '문자 보냄', '자료 보냄'];
+type QuickLead = { id: string; name: string; next?: string | null; nextAction?: string | null };
+function NextPick({ td, keep, date, setDate, action, setAction }: { td: string; keep: string | null; date: string; setDate: (v: string) => void; action: string; setAction: (v: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {keep && <button type="button" onClick={() => setDate(keep)} className={chip(date === keep)} data-testid="lead-q-keep">그대로 {md(keep)}</button>}
+        {NEXT_CHIPS.map(([lb, f]) => <button key={lb} type="button" onClick={() => setDate(f())} className={chip(date === f())} data-testid="lead-q-chip">{lb}</button>)}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
+        <Field label="다음 연락일"><input type="date" min={td} className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} aria-label="다음 연락일" data-testid="lead-q-date" /></Field>
+        <Field label="다음 할 일(선택)"><input className={inputCls} value={action} onChange={(e) => setAction(e.target.value)} maxLength={200} placeholder="예: 견적서 보내기" aria-label="다음 할 일" data-testid="lead-q-action" /></Field>
+      </div>
+    </div>
+  );
+}
+
+/** 칸반에서 단계를 옮길 때 묻는 창 — 진행 단계로 = 다음 연락일(+ 할 일), 종결(계약완료·보류·실패·되돌림)로 = 사유(보류·실패 필수)·다시 볼 날. [취소] = 옮기지 않음 */
+export function StageMoveDialog({ lead, to, onClose, onDone }: { lead: QuickLead; to: string; onClose: () => void; onDone: (msg: string) => void }) {
+  const td = todayKst(); const closing = CLOSE_STAGES.includes(to); const needReason = to === '보류' || to === '실패';
+  const keep = lead.next && lead.next >= td ? lead.next : null;
+  const [date, setDate] = useState(keep ?? ''); const [action, setAction] = useState('');
+  const [reason, setReason] = useState(''); const [revisit, setRevisit] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const ok = closing ? (!needReason || !!reason.trim()) && (!revisit || revisit > td) : !!date && date >= td;
+  async function save() {
+    setBusy(true); setErr('');
+    try {
+      await api(`/api/sales/leads/${lead.id}`, { method: 'PATCH', body: { status: to, ...(closing ? { ...(reason.trim() ? { reason: reason.trim() } : {}), ...(needReason && revisit ? { revisitDate: revisit } : {}) }
+        : { nextContactDate: date, ...(action.trim() ? { nextAction: action.trim() } : {}) }) } });
+      onDone(closing ? `'${to}'(으)로 옮겼습니다${needReason && revisit ? ` — 다시 볼 날 ${md(revisit)}` : ''}` : `'${to}'(으)로 옮겼습니다 — 다음 연락 ${md(date)}`);
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title={`단계 옮기기 — ${to}`}>
+      <div className="space-y-3 text-sm" data-testid="lead-move">
+        <p className="text-xs text-ink-2"><b className="text-ink">{lead.name}</b>을(를) ‘{to}’(으)로 옮깁니다. {closing ? (needReason ? '종결하는 사유를 남겨 주세요.' : '종결합니다.') : '놓치지 않게 다음 연락일을 정해 주세요.'}</p>
+        {!closing ? <NextPick td={td} keep={keep} date={date} setDate={setDate} action={action} setAction={setAction} />
+          : needReason ? <div className="space-y-2" data-testid="lead-move-close">
+            <div className="flex flex-wrap gap-1.5">{REASONS.map((r) => <button key={r} type="button" onClick={() => setReason(r)} className={chip(reason === r)} data-testid="lead-move-reason-chip">{r}</button>)}</div>
+            <Field label={`${to} 사유(필수)`}><input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="사유" data-testid="lead-move-reason" /></Field>
+            <div className="flex flex-wrap items-end gap-1.5">
+              <Field label="다시 볼 날(선택)" className="w-40"><input type="date" min={plus(1)} className={inputCls} value={revisit} onChange={(e) => setRevisit(e.target.value)} aria-label="다시 볼 날" data-testid="lead-move-revisit" /></Field>
+              {REVISIT_CHIPS.map(([lb, f]) => <button key={lb} type="button" onClick={() => setRevisit(revisit === f() ? '' : f())} className={cx(chip(revisit === f()), 'mb-1')} data-testid="lead-move-revisit-chip">{lb}</button>)}
+            </div>
+          </div>
+          : <Field label="메모(선택)"><input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="메모" data-testid="lead-move-reason" /></Field>}
+        {to === '계약완료' && <p className="text-[11px] text-ink-3">제안·계약 화면에 계약 기간을 적어 두면 끝나기 120일 전 ‘재계약 준비’ 업무가 자동으로 생깁니다.</p>}
+        {err && <p className="text-xs text-red-600" role="alert">{err}</p>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} data-testid="lead-move-cancel">취소</Button>
+          <Button onClick={save} disabled={!ok || busy} data-testid="lead-move-save">옮기기</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** 휴대폰 카드 밀기 창 — next = 다음 연락일 바꾸기(← 밀기) · log = 연락함 기록(→ 밀기: 종류·내용 + 다음 연락일) */
+export function LeadQuickDialog({ mode, lead, onClose, onDone }: { mode: 'next' | 'log'; lead: QuickLead; onClose: () => void; onDone: (msg: string) => void }) {
+  const td = todayKst(); const keep = lead.next && lead.next >= td ? lead.next : null;
+  const [date, setDate] = useState(''); const [action, setAction] = useState(mode === 'next' ? lead.nextAction ?? '' : '');
+  const [type, setType] = useState('전화'); const [content, setContent] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const ok = mode === 'next' ? !!date && date >= td : !!content.trim() && (!date || date >= td);
+  async function save() {
+    setBusy(true); setErr('');
+    try {
+      if (mode === 'next') await api(`/api/sales/leads/${lead.id}`, { method: 'PATCH', body: { nextContactDate: date, nextAction: action.trim() || null } });
+      else await api(`/api/sales/leads/${lead.id}/activities`, { body: { type, content: content.trim(), nextDate: date || null, ...(date && action.trim() ? { nextAction: action.trim() } : {}) } });
+      onDone(mode === 'next' ? `다음 연락 ${md(date)}${action.trim() ? ` · ${action.trim()}` : ''}` : `${type} 기록을 남겼습니다${date ? ` — 다음 연락 ${md(date)}` : ''}`);
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title={mode === 'next' ? '다음 연락일 바꾸기' : '연락함 기록'}>
+      <div className="space-y-3 text-sm" data-testid={`lead-quick-${mode}`}>
+        <p className="text-xs text-ink-2"><b className="text-ink">{lead.name}</b>{mode === 'next' ? (lead.next ? ` — 지금 다음 연락 ${md(lead.next)}` : ' — 지금 다음 연락일 없음') : ' — 방금 한 연락을 남기면 마지막 접촉이 오늘로 바뀝니다'}</p>
+        {mode === 'log' && <>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="연락 종류">{LOG_TYPES.map((x) => <button key={x} type="button" onClick={() => setType(x)} className={chip(type === x)} aria-pressed={type === x} data-testid="lead-log-type">{x}</button>)}</div>
+          <div className="flex flex-wrap gap-1.5">{LOG_CHIPS.map((x) => <button key={x} type="button" onClick={() => setContent(x)} className={chip(content === x)} data-testid="lead-log-chip">{x}</button>)}</div>
+          <Field label="내용"><input className={inputCls} value={content} onChange={(e) => setContent(e.target.value)} maxLength={500} aria-label="내용" data-testid="lead-log-content" /></Field>
+          <p className="text-[11px] text-ink-3">다음 연락일(선택) — 고르면 리드의 다음 연락일과 영업 업무 마감도 같이 바뀝니다.</p>
+        </>}
+        <NextPick td={td} keep={mode === 'next' ? keep : null} date={date} setDate={setDate} action={action} setAction={setAction} />
+        {err && <p className="text-xs text-red-600" role="alert">{err}</p>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} data-testid="lead-quick-cancel">취소</Button>
+          <Button onClick={save} disabled={!ok || busy} data-testid="lead-quick-save">{mode === 'next' ? '바꾸기' : '기록'}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}

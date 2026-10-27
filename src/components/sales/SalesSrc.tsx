@@ -12,6 +12,7 @@ import { api, useApi } from '@/components/client';
 import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
 import { CollectorAlerts } from '@/components/sales/Collectors';
+import { LeadQuickDialog, StageMoveDialog } from '@/components/sales/LeadFollowUp';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
@@ -672,6 +673,28 @@ async function readCsvFile(file: File) {
 }
 const IMPORT_MAP: [RegExp, string][] = [[/거래처|회사|이름|^name$|company/i, 'name'], [/단계|상태|status|stage/i, 'status'], [/우선|priority/i, 'priority'], [/시설|유형|facility|type/i, 'facilityType'], [/지역|region|area/i, 'region'], [/규모|scale|size|세대/i, 'scale'],
   [/고객.?담당|담당자|contact.?name|manager/i, 'contactName'], [/연락처|전화|phone|tel/i, 'phone'], [/이메일|e-?mail/i, 'email'], [/홈페이지|website|url|homepage/i, 'homepage'], [/매출|금액|revenue|amount/i, 'expectedRevenue'], [/다음.?연락|next/i, 'nextContactDate'], [/메모|비고|memo|note/i, 'memo']];
+/** 202차(#461 ⑥, SALES_LEADS_REVAMP 2-4): 휴대폰 리드 카드 밀기 — → 연락함 기록 · ← 다음 연락일 바꾸기. 손가락(또는 휴대폰 폭)에서만, 세로 스크롤은 그대로 */
+const SWIPE_PX = 72;
+function SwipeCard({ on, onLeft, onRight, children }: { on: boolean; onLeft: () => void; onRight: () => void; children: React.ReactNode }) {
+  const st = useRef<{ x: number; y: number; dx: number; lock: '' | 'h' } | null>(null); const eat = useRef(false);
+  const [dx, setDx] = useState(0);
+  const end = () => { const s = st.current; st.current = null; setDx(0); if (s?.lock !== 'h') return; eat.current = true; setTimeout(() => { eat.current = false; }, 0); if (s.dx <= -SWIPE_PX) onLeft(); else if (s.dx >= SWIPE_PX) onRight(); };
+  return (
+    <div className="relative overflow-hidden rounded-card" data-testid="lead-swipe">
+      {dx !== 0 && <div aria-hidden className={cx('absolute inset-0 flex items-center px-4 text-xs font-semibold', dx > 0 ? 'justify-start bg-emerald-50 text-emerald-800' : 'justify-end bg-sky-50 text-sky-800')} data-testid="lead-swipe-hint-bg">{dx > 0 ? '연락함 기록' : '다음 연락일 바꾸기'}</div>}
+      <div className={cx('relative', on && 'touch-pan-y')} style={dx ? { transform: `translateX(${dx}px)` } : { transition: 'transform .15s' }}
+        onPointerDown={(e) => { if (!on || e.button > 0 || (e.pointerType === 'mouse' && !window.matchMedia('(max-width: 767px)').matches)) return; st.current = { x: e.clientX, y: e.clientY, dx: 0, lock: '' }; }}
+        onPointerMove={(e) => {
+          const s = st.current; if (!s) return; const mx = e.clientX - s.x, my = e.clientY - s.y;
+          if (!s.lock) { if (Math.abs(mx) > 10 && Math.abs(mx) > Math.abs(my)) { s.lock = 'h'; e.currentTarget.setPointerCapture?.(e.pointerId); } else if (Math.abs(my) > 10) { st.current = null; return; } else return; }
+          s.dx = Math.max(-110, Math.min(110, mx)); setDx(s.dx);
+        }}
+        onPointerUp={end} onPointerCancel={() => { st.current = null; setDx(0); }}
+        onClickCapture={(e) => { if (eat.current) { e.preventDefault(); e.stopPropagation(); } }}>{children}</div>
+    </div>
+  );
+}
+
 export function Leads({ initialId, initialView }: { initialId?: string; initialDay?: string; initialView?: string }) { // initialDay 는 주소(?day)에서 직접 읽음
   // #242 2단계: 검색어·단계·오늘·칩·정렬·우선·담당·지역은 주소에 — 리드에서 업무·일정을 열었다 뒤로 와도 같은 목록. ?id= 는 뒤로가기로 돌아온 상세(서버가 준 값이 없을 때)
   const sp = useSearchParams();
@@ -686,6 +709,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const [fPri, setFPri] = useUrlState('pri', ''); const [fOwner, setFOwner] = useUrlState('owner', ''); const [fRegion, setFRegion] = useUrlState('region', ''); const [fSrc, setFSrc] = useUrlState('src', '');
   const [mv, setMv] = useState<{ id: string; name: string; q: Record<string, string> }[] | null>(null); const [cols, setCols] = useState<string[] | null>(null); const [saving, setSaving] = useState<string | null>(null); // 197차: 내 보기·열(저장 뒤 화면에 바로)
   const [imp, setImp] = useState<{ rows: Record<string, unknown>[]; file: string; skipped: string[]; done?: { created: number; skipped: string[] } } | null>(null);
+  const [quick, setQuick] = useState<{ mode: 'next' | 'log'; lead: any } | null>(null); // 202차: 휴대폰 카드 밀기 창
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, day })}`, [s, day]); // 197차: 단계는 화면에서 거름 — 띠·탭 숫자는 늘 전체 기준
   useEffect(() => { if (initialView) return; try { const v = localStorage.getItem('sales-leads-view'); if (v && LEAD_VIEWS.some(([k]) => k === v)) setView(v); } catch { /* 없음 */ } }, [initialView]);
   const pickView = (v: string) => { setView(v); try { localStorage.setItem('sales-leads-view', v); } catch { /* 없음 */ } };
@@ -803,12 +827,12 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const th = (k: string, label: string) => <th key={k} className="whitespace-nowrap p-2" aria-sort={sortKey === k ? ((rev === '1') !== DESC_SORTS.has(k) ? 'descending' : 'ascending') : undefined}>
     <button type="button" onClick={() => onSort(k)} className="inline-flex items-center gap-0.5 hover:text-ink" data-testid={`leads-th-${k}`}>{label}{sortKey === k && <span aria-hidden className="text-[10px]">{(rev === '1') !== DESC_SORTS.has(k) ? '▼' : '▲'}</span>}</button></th>;
   const card = (l: any) => (
-    <li key={l.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-lead-card"><button type="button" onClick={() => setOpen(l.id)} className="block w-full text-left" data-testid="sales-lead-open">
+    <li key={l.id} className="text-sm" data-testid="sales-lead-card"><SwipeCard on={ed && !isClosed(l)} onLeft={() => setQuick({ mode: 'next', lead: l })} onRight={() => setQuick({ mode: 'log', lead: l })}><div className="rounded-card border border-line bg-white p-3"><button type="button" onClick={() => setOpen(l.id)} className="block w-full text-left" data-testid="sales-lead-open">
       <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(l.status)}{stageDays(l)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
       <span className="mt-0.5 block text-xs" data-testid="lead-card-next">{!isClosed(l) && l.next && <span className="text-ink-3">다음 연락 </span>}{nextCell(l)}</span>
       <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-2">{contactCell(l)}{l.source && <span className="text-ink-3">· {l.source.label}</span>}{l.owner && <span className="text-ink-3">· 담당 {l.owner}</span>}</span>
       <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">{interests(l.interests)}{[l.facility, l.region, l.scale, l.contact].filter(Boolean).join(' · ')}{l.revenue ? <span>{won(l.revenue)}</span> : null}</span>
-    </button><div className="mt-2 flex flex-wrap items-center gap-1.5"><ContactRow phone={l.phone} links={[[l.homepage, '홈페이지']]} />{rowExtra(l)}</div></li>);
+    </button><div className="mt-2 flex flex-wrap items-center gap-1.5"><ContactRow phone={l.phone} links={[[l.homepage, '홈페이지']]} />{rowExtra(l)}</div></div></SwipeCard></li>);
   const NLF = (k: string, label: string, extra: Record<string, unknown> = {}) => <Field label={label}><input className={inputCls} value={nl?.[k] ?? ''} onChange={(e) => setNl({ ...nl!, [k]: e.target.value })} aria-label={label} data-testid={`lead-new-${k}`} {...extra} /></Field>;
   return (
     <div className="space-y-3" data-testid="sales-leads">
@@ -873,10 +897,12 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
         {v === 'stages' && <Pipeline embedded />}
         {v === 'compact' && <ul className="hidden divide-y divide-line rounded-card border border-line bg-white text-sm shadow-card md:block" data-testid="leads-compact">{shown.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50"><span className="min-w-0 flex-1 truncate font-medium">{l.name}</span>{chip(l.status)}<span className="w-28 truncate text-xs text-ink-2">{l.owner ?? ''}</span><span className={cx('w-24 text-xs tabular-nums', l.next && l.next < td ? 'font-semibold text-red-600' : 'text-ink-3')}>{kd(l.next)}</span><span className="hidden w-24 text-right text-xs tabular-nums text-ink-3 lg:block">{won(l.revenue) || '-'}</span></button></li>)}{!shown.length && <li className="p-6 text-center text-ink-3">리드가 없습니다</li>}</ul>}
         {/* 대표 검수 10/20 ②: 전화·문자 줄과 홈페이지 칩을 카드 안에, 날짜 10. 22.(목). 휴대폰은 늘 카드 */}
+        {ed && v !== 'stages' && !!shown.length && <p className="text-[11px] text-ink-3 md:hidden" data-testid="lead-swipe-hint">카드를 오른쪽으로 밀면 연락함 기록 · 왼쪽으로 밀면 다음 연락일 바꾸기</p>}
         <ul className={cx('space-y-2', v === 'cards' ? 'md:grid md:grid-cols-2 md:gap-2 md:space-y-0 xl:grid-cols-3' : 'md:hidden', v === 'stages' && 'hidden')} data-testid="sales-lead-cards">{shown.map(card)}{!shown.length && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
         </>
       )}
       {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
+      {quick && <LeadQuickDialog mode={quick.mode} lead={{ id: quick.lead.id, name: quick.lead.name, next: quick.lead.next, nextAction: quick.lead.nextAction }} onClose={() => setQuick(null)} onDone={(m) => { setQuick(null); toast.ok(m); reload(); }} />}
       {nl && (
         <Modal open onClose={() => setNl(null)} title="새 리드" wide>
           <form onSubmit={newLead} className="grid gap-3 text-sm" data-testid="lead-new-form">
@@ -944,11 +970,16 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
   const { data, error, reload } = useApi<any>('/api/sales/src?view=pipeline');
   const [open, setOpen] = useState<string | null>(null);
   const [stage, setStage] = useUrlState('pst', ''); // 앱 단계 칩. #242 2단계: 주소(?pst=)에 — 리드를 열었다 뒤로 와도 같은 단계
-  // 영업 재편 5) 단계 이동(칸반 카드 select): 보류·실패는 사유가 필요해 상세에서
-  async function moveStage(id: string, st: string) {
-    if (st === '보류' || st === '실패') { toast.error(`${st}(으)로 옮기려면 사유가 필요합니다 — 상세 '진행' 탭에서`); setOpen(id); return; }
-    try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body: { status: st } }); toast.ok(`${st}(으)로 옮겼습니다`); reload(); } catch (e: any) { toast.error(e.message); }
-  }
+  // 202차(#461 ⑥): 단계 이동(PC 칸반 끌어 놓기·카드 select) = 묻는 창 — 진행 단계로 = 다음 연락일(+ 할 일), 종결로 = 사유(보류·실패 필수)·다시 볼 날
+  const [move, setMove] = useState<{ lead: any; to: string } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; from: string } | null>(null); const [over, setOver] = useState('');
+  const moveStage = (l: any, from: string, to: string) => { if (to && to !== from) setMove({ lead: l, to }); };
+  // 끌어 놓을 곳(단계 칸 · 끄는 동안 아래에 뜨는 종결 칸) — 놓으면 묻는 창
+  const dropProps = (st: string, key: string) => ({
+    onDragOver: (e: React.DragEvent) => { if (drag && drag.from !== st) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (over !== key) setOver(key); } },
+    onDragLeave: (e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver((o) => (o === key ? '' : o)); },
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); const d = drag; setOver(''); setDrag(null); const it = d ? (data?.columns ?? []).flatMap((x: any) => x.items).find((x: any) => x.id === d.id) : null; if (d && it) moveStage(it, d.from, st); },
+  });
   if (error) return <ErrorBox error={error} retry={reload} />;
   const cols: any[] = data?.columns ?? []; const used = cols.filter((c) => c.items.length); const total = used.reduce((n, c) => n + c.items.length, 0);
   const shown = stage ? cols.filter((c) => c.status === stage) : used;
@@ -971,10 +1002,19 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
             {!shown.some((c) => c.items.length) && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
         </div>
         <div className="hidden gap-3 overflow-x-auto pb-2 md:flex">{cols.map((c: any) => (
-          <section key={c.status} className="w-60 shrink-0 rounded-card border border-line bg-slate-50 p-2"><h2 className="mb-2 text-xs font-semibold">{c.status} <span className="text-ink-3">{c.items.length}</span></h2>
-            <ul className="space-y-1.5">{c.items.map((l: any) => <li key={l.id}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-input border border-line bg-white p-2 text-left text-sm hover:border-blue-300"><span className="block truncate font-medium">{l.name}</span><span className="block truncate text-[11px] text-ink-2">{[l.owner, l.next && `연락 ${kd(l.next)}`].filter(Boolean).join(' · ')}</span></button>{data.readOnly === false && <select className={cx(inputCls, 'mt-1 h-7 w-full py-0 text-[11px]')} value={c.status} onChange={(e) => moveStage(l.id, e.target.value)} aria-label={`${l.name} 단계 이동`} data-testid="pipeline-move">{(data.stages ?? STAGE_FALLBACK).map((st: string) => <option key={st}>{st}</option>)}</select>}</li>)}</ul></section>))}</div>
+          <section key={c.status} className={cx('w-60 shrink-0 rounded-card border border-line bg-slate-50 p-2', over === c.status && 'border-brand-400 bg-brand-50 ring-2 ring-brand-300')} data-testid="pipeline-col" data-status={c.status} {...dropProps(c.status, c.status)}><h2 className="mb-2 text-xs font-semibold">{c.status} <span className="text-ink-3">{c.items.length}</span></h2>
+            <ul className="space-y-1.5">{c.items.map((l: any) => <li key={l.id} draggable={data.readOnly === false} data-testid="pipeline-card" className={cx(data.readOnly === false && 'cursor-grab', drag?.id === l.id && 'opacity-50')}
+              onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', l.id); setDrag({ id: l.id, from: c.status }); }} onDragEnd={() => { setDrag(null); setOver(''); }}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-input border border-line bg-white p-2 text-left text-sm hover:border-blue-300"><span className="block truncate font-medium">{l.name}</span><span className="block truncate text-[11px] text-ink-2">{[l.owner, l.next && `연락 ${kd(l.next)}`].filter(Boolean).join(' · ')}</span></button>{data.readOnly === false && <select className={cx(inputCls, 'mt-1 h-7 w-full py-0 text-[11px]')} value={c.status} onChange={(e) => moveStage(l, c.status, e.target.value)} aria-label={`${l.name} 단계 이동`} data-testid="pipeline-move">{(data.stages ?? STAGE_FALLBACK).map((st: string) => <option key={st}>{st}</option>)}</select>}</li>)}</ul></section>))}</div>
       </>}
       {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
+      {/* 끄는 동안 아래에 종결 칸(성사·보류·실패) — 단계가 12칸이라 오른쪽 끝 칸까지 끌고 가지 않아도 되게(Pipedrive 의 끌기 중 '성사·실패' 칸과 같은 흐름) */}
+      {drag && <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 hidden justify-center md:flex"><div className="pointer-events-auto flex items-center gap-2 rounded-card border border-line bg-white p-2 shadow-lg" data-testid="pipeline-drop-bar">
+        <span className="px-1 text-xs text-ink-3">여기에 놓아 종결</span>
+        {(['계약완료', '보류', '실패'] as const).filter((st) => st !== drag.from).map((st) => (
+          <div key={st} data-testid="pipeline-drop" data-status={st} {...dropProps(st, `bar:${st}`)}
+            className={cx('min-w-28 rounded-input border-2 border-dashed px-4 py-3 text-center text-sm font-semibold', over === `bar:${st}` ? 'border-brand-500 bg-brand-50 text-brand-800' : st === '계약완료' ? 'border-emerald-300 text-emerald-800' : 'border-line text-ink-2')}>{st === '계약완료' ? '성사(계약완료)' : st}</div>))}
+      </div></div>}
+      {move && <StageMoveDialog lead={{ id: move.lead.id, name: move.lead.name, next: move.lead.next }} to={move.to} onClose={() => setMove(null)} onDone={(m) => { setMove(null); toast.ok(m); reload(); }} />}
     </div>
   );
 }
