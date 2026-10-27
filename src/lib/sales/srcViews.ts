@@ -50,7 +50,7 @@ async function formalLeads(tenant: string, id?: string) {
   const r = await db()<any[]>`select l.*, u.name as owner_name, (select max(x.occurred_at) from sales_lead_records x where x.lead_id = l.id and x.kind in ('sales_activities', 'proposals', 'contracts')) as last_activity_at from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} and l.deleted_at is null ${id ? db()`and l.id = ${id}` : db()``} order by l.updated_at desc limit 5000`;
   return r.map((l) => ({ ...(l.src ?? {}), __id: l.id, __src_id: l.src_id, __owner: l.owner_name ?? '', __owner_id: l.owner_id, name: l.name, sales_status: l.status, priority: l.priority, facility_type: l.facility_type, region: l.region,
     next_contact_date: ymdOf(l.next_contact_date), contact_name: l.contact_name, phone: l.phone, expected_revenue: l.expected_revenue, email: l.email, scale: l.scale, homepage: l.homepage ?? l.src?.homepage ?? null,
-    memo: l.memo, updated_at: l.updated_at, created_at: l.created_at, last_activity_at: l.last_activity_at, next_action: l.next_action ?? null, revisit_date: ymdOf(l.revisit_date) }));
+    memo: l.memo, updated_at: l.updated_at, created_at: l.created_at, last_activity_at: l.last_activity_at, next_action: l.next_action ?? null, revisit_date: ymdOf(l.revisit_date), biz_no: l.biz_no ?? null }));
 }
 async function userNames(tenant: string) {
   const m = await db()<{ src_user_id: string; name: string | null }[]>`select m.src_user_id, coalesce(u.name, m.name) as name from sales_user_map m left join users u on u.id = m.user_id where m.tenant = ${tenant}`;
@@ -74,6 +74,7 @@ const lead = (r: any, names: Map<string, string>) => ({
   owner: r.__owner !== undefined ? r.__owner || null : names.get(String(pick(r, 'owner_id', 'assigned_to', 'sales_owner_id', 'user_id') ?? '')) ?? null, ownerId: r.__owner_id ?? null, memo: r.__id && r.__owner !== undefined ? r.memo ?? null : undefined, revenue: pick(r, 'expected_revenue', 'expected_amount', 'estimated_revenue'),
   updated: day(pick(r, 'updated_at', 'created_at')), phone: pick(r, 'phone', 'contact_phone'), contact: pick(r, 'contact_name', 'manager_name'),
   homepage: pick(r, 'homepage', 'website', 'url'), // 대표 검수 10/20 ②: 앱 목록 홈페이지 칩
+  bizNo: pick(r, 'biz_no', 'business_number', 'business_no'), // 205차: 사업자번호(중복 대조)
   // S2 2차: 이메일·규모·등록일·최근 활동(상담·제안·계약 최신, 없으면 수정일)
   email: pick(r, 'email', 'contact_email'), scale: pick(r, 'scale', 'facility_scale', 'size'), created: day(pick(r, 'created_at')), lastActivity: day(pick(r, 'last_activity_at', 'last_activity_date', 'last_contact_at')) ?? day(pick(r, 'updated_at', 'created_at')),
   nextAction: pick(r, 'next_action'), revisit: day(pick(r, 'revisit_date')), // 197차(#461): 다음 할 일(다음 연락일과 한 쌍) · 다시 볼 날(보류·실패)

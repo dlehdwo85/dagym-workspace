@@ -134,7 +134,8 @@ async function assertWritesOpen(tenant: string) {
 
 // ---------------- 쓰기(전환 뒤) — V39 D: 보류·실패는 사유 필수, 담당 변경 권한은 서버 검사 ----------------
 const leadFields = { facilityType: z.string().trim().max(100).nullable().optional(), region: z.string().trim().max(50).nullable().optional(), scale: z.string().trim().max(60).nullable().optional(), expectedRevenue: z.number().min(0).max(1e13).nullable().optional(),
-  contactName: z.string().trim().max(100).nullable().optional(), phone: z.string().trim().max(40).nullable().optional(), email: z.string().trim().max(200).nullable().optional(), homepage: z.string().trim().max(300).nullable().optional() }; // S2 2차 리드 폼 13칸
+  contactName: z.string().trim().max(100).nullable().optional(), phone: z.string().trim().max(40).nullable().optional(), email: z.string().trim().max(200).nullable().optional(), homepage: z.string().trim().max(300).nullable().optional(),
+  bizNo: z.string().trim().max(20).nullable().optional() }; // S2 2차 리드 폼 13칸 · 205차 사업자번호(선택, 중복 대조)
 export const leadPatch = z.object({ ...leadFields, name: z.string().trim().min(1).max(300).optional(), priority: z.enum(['urgent', 'high', 'medium', 'low']).nullable().optional(), status: z.enum(STAGES as [string, ...string[]]).optional(), reason: z.string().trim().max(500).optional(),
   nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), memo: z.string().max(5000).nullable().optional(), ownerId: z.string().uuid().nullable().optional(),
   /** 197차(#461): 다음 할 일(다음 연락일과 한 쌍 — 연락일을 지우면 같이 지움) · 다시 볼 날(보류·실패로 닫을 때, 그날 담당자 업무) */
@@ -179,7 +180,8 @@ export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof l
       owner_id = ${i.ownerId === undefined ? tx`owner_id` : i.ownerId},
       facility_type = ${i.facilityType === undefined ? tx`facility_type` : i.facilityType}, region = ${i.region === undefined ? tx`region` : i.region}, scale = ${i.scale === undefined ? tx`scale` : i.scale},
       expected_revenue = ${i.expectedRevenue === undefined ? tx`expected_revenue` : i.expectedRevenue}, contact_name = ${i.contactName === undefined ? tx`contact_name` : i.contactName},
-      phone = ${i.phone === undefined ? tx`phone` : i.phone}, email = ${i.email === undefined ? tx`email` : i.email}, homepage = ${i.homepage === undefined ? tx`homepage` : i.homepage}, updated_at = now() where id = ${id}`;
+      phone = ${i.phone === undefined ? tx`phone` : i.phone}, email = ${i.email === undefined ? tx`email` : i.email}, homepage = ${i.homepage === undefined ? tx`homepage` : i.homepage},
+      biz_no = ${i.bizNo === undefined ? tx`biz_no` : i.bizNo}, updated_at = now() where id = ${id}`;
     if (i.status && i.status !== l.status) await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${id}, ${l.status}, ${i.status}, ${i.reason ?? null}, ${u.id})`;
     if (i.ownerId !== undefined && i.ownerId !== l.owner_id) await audit(tx, u.id, 'sales.lead_owner', 'sales_lead', id, { from: l.owner_id, to: i.ownerId }, null); // 담당자 변경 로그
   });
@@ -195,21 +197,45 @@ export const leadCreate = z.object({ ...leadFields, name: z.string().trim().min(
   nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), memo: z.string().max(5000).optional(), ownerId: z.string().uuid().optional(), reason: z.string().max(500).optional(),
   force: z.boolean().optional() /* 비슷한 거래처가 있어도 새로 */ });
 const normName = (s: string) => s.replace(/[\s()（）·\-_,.]/g, '').toLowerCase();
+/** 비슷한 이름 열쇠(앞 4자) — 205차: 회사 형태((주)·㈜·주식회사·유한회사·재단·사단법인)는 빼고 본다(이것만 같아도 '비슷함'이던 것) */
+const simKey = (s: string) => normName(s.replace(/[(（]\s*주\s*[)）]|㈜|주식회사|유한회사|재단법인|사단법인/g, '')).slice(0, 4);
 /** S2 2차: 비슷한 이름의 거래처(앞 4자, 최대 5곳) — 새 리드 중복 경고·[진행영업으로 넘기기]와 같은 규칙 */
 export async function similarLeads(sql: ReturnType<typeof db>, tenant: string, name: string, excludeId?: string) {
-  const key = normName(name).slice(0, 4);
+  const key = simKey(name);
   if (key.length < 2) return [];
   return sql<{ id: string; name: string; status: string | null; region: string | null }[]>`select id, name, status, region from sales_leads where tenant = ${tenant} and deleted_at is null and id is distinct from ${excludeId ?? null}
     and replace(replace(replace(lower(name), ' ', ''), '(', ''), ')', '') like ${'%' + key + '%'} order by updated_at desc limit 5`;
+}
+/** 205차(#461 ⑦ 중복 방지, SALES_LEADS_REVAMP 4절): 전화는 숫자만(+82 → 0, 9자리 이상 — 대표번호 8자리는 빼고) · 사업자번호는 숫자 10자리 · 메일은 소문자 */
+const digitsOf = (s: unknown) => String(s ?? '').replace(/\D/g, '');
+const phoneKey = (s: unknown) => { let d = digitsOf(s); if (d.startsWith('82') && d.length >= 11) d = `0${d.slice(2)}`; return d.length >= 9 ? d : ''; };
+const bizKey = (s: unknown) => { const d = digitsOf(s); return d.length === 10 ? d : ''; };
+const mailKey = (s: unknown) => { const m = String(s ?? '').trim().toLowerCase(); return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m) ? m : ''; };
+/** 같은 사업자번호·전화·메일인 거래처(최대 5곳, 이름은 달라도) — by = 무엇이 같은지 */
+async function sameContactLeads(sql: ReturnType<typeof db>, tenant: string, c: { phone?: string | null; bizNo?: string | null; email?: string | null }) {
+  const p = phoneKey(c.phone), b = bizKey(c.bizNo), m = mailKey(c.email);
+  if (!p && !b && !m) return [];
+  const rows = await sql<{ id: string; name: string; status: string | null; region: string | null; phone: string | null; biz_no: string | null; email: string | null }[]>`select id, name, status, region, phone, biz_no, email from sales_leads
+    where tenant = ${tenant} and deleted_at is null
+      and (${p ? sql`right(regexp_replace(coalesce(phone, ''), '\\D', '', 'g'), 8) = ${p.slice(-8)}` : sql`false`} or ${b ? sql`regexp_replace(coalesce(biz_no, ''), '\\D', '', 'g') = ${b}` : sql`false`}
+        or ${m ? sql`lower(trim(email)) = ${m}` : sql`false`})
+    order by updated_at desc limit 20`;
+  return rows.map((l) => ({ id: l.id, name: l.name, status: l.status, region: l.region, by: b && bizKey(l.biz_no) === b ? 'bizNo' : p && phoneKey(l.phone) === p ? 'phone' : m && mailKey(l.email) === m ? 'email' : '' }))
+    .filter((l) => l.by).slice(0, 5);
+}
+/** 새 리드 중복 경고(205차): 같은 사업자번호·전화·메일(이름이 달라도) 먼저 + 비슷한 이름 — 최대 5곳. 전화·메일은 요청 본문으로만 받는다(주소에 고객 연락처를 싣지 않음) */
+async function dupCandidates(sql: ReturnType<typeof db>, tenant: string, c: { name: string; phone?: string | null; bizNo?: string | null; email?: string | null }) {
+  const contact = await sameContactLeads(sql, tenant, c); const seen = new Set(contact.map((x) => x.id));
+  return [...contact, ...(await similarLeads(sql, tenant, c.name)).filter((x) => !seen.has(x.id)).map((x) => ({ ...x, by: 'name' }))].slice(0, 5);
 }
 /** 새 리드(전환 뒤) — 담당 = 만든 사람(관리자는 지정 가능). 비슷한 거래처가 있으면 먼저 알려 주고(force 로 그래도 새로) */
 export async function createLead(u: SessionUser, i: z.infer<typeof leadCreate>) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); await assertWritesOpen(t);
-  if (!i.force) { const similar = await similarLeads(db(), t, i.name); if (similar.length) return { similar }; }
+  if (!i.force) { const similar = await dupCandidates(db(), t, i); if (similar.length) return { similar }; }
   const owner = i.ownerId && ['owner', 'admin'].includes(u.role) ? i.ownerId : u.id;
-  const [r] = await db()<{ id: string }[]>`insert into sales_leads (tenant, name, status, priority, facility_type, region, scale, expected_revenue, owner_id, next_contact_date, contact_name, phone, email, homepage, memo)
-    values (${t}, ${i.name}, ${i.status}, ${i.priority ?? null}, ${i.facilityType ?? null}, ${i.region ?? null}, ${i.scale ?? null}, ${i.expectedRevenue ?? null}, ${owner}, ${i.nextContactDate ?? null}, ${i.contactName ?? null}, ${i.phone ?? null}, ${i.email ?? null}, ${i.homepage ?? null}, ${i.memo ?? null}) returning id`;
+  const [r] = await db()<{ id: string }[]>`insert into sales_leads (tenant, name, status, priority, facility_type, region, scale, expected_revenue, owner_id, next_contact_date, contact_name, phone, email, homepage, biz_no, memo)
+    values (${t}, ${i.name}, ${i.status}, ${i.priority ?? null}, ${i.facilityType ?? null}, ${i.region ?? null}, ${i.scale ?? null}, ${i.expectedRevenue ?? null}, ${owner}, ${i.nextContactDate ?? null}, ${i.contactName ?? null}, ${i.phone ?? null}, ${i.email ?? null}, ${i.homepage ?? null}, ${i.bizNo ?? null}, ${i.memo ?? null}) returning id`;
   if (i.reason || i.status !== '신규리드') await db()`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${t}, ${r.id}, null, ${i.status}, ${i.reason ?? null}, ${u.id})`;
   // 대표 10/20 14:15(원본 규칙 '[첫 연락]' 업무 자동): 새 리드 → 담당자 업무
   await (await import('./autoTasks')).syncSalesTask(db(), u, { kind: 'lead', id: r.id, name: i.name, status: i.status, nextDate: i.nextContactDate ?? null, nextAction: '첫 연락', leadId: r.id, assigneeId: owner });
@@ -244,23 +270,107 @@ export async function addLeadTask(u: SessionUser, leadId: string, i: z.infer<typ
   await sql`update sales_leads set updated_at = now() where id = ${leadId}`;
   return { id: r.id };
 }
-/** S2 2차: CSV 가져오기(관리자) — 같은 이름(공백·괄호 무시)이 있으면 건너뜀 */
-export const importInput = z.object({ rows: z.array(leadCreate.omit({ force: true, ownerId: true, reason: true })).min(1).max(2000) });
-export async function importLeads(u: SessionUser, i: z.infer<typeof importInput>) {
+/**
+ * CSV 가져오기(관리자). S2 2차: 같은 이름(공백·괄호 무시)이 있으면 건너뜀.
+ * 205차(#461 ⑦, SALES_LEADS_REVAMP 4·5절 '미리보기 → 중복 표시 → 반영'): 줄마다 action — merge(mergeId 거래처의 빈 칸 채우기) · new(그래도 새로) · skip.
+ * action 이 없는 줄은 예전 그대로(같은 이름이면 건너뜀).
+ */
+const importRow = leadCreate.omit({ force: true, ownerId: true, reason: true }).extend({ action: z.enum(['new', 'merge', 'skip']).optional(), mergeId: z.string().uuid().optional() });
+export const importInput = z.object({ rows: z.array(importRow).min(1).max(2000) });
+type ImportRow = z.infer<typeof importRow>;
+/** 합칠 때 채우는 칸 — 거래처에 비어 있으면 채우고, 이미 다른 값이면 바꾸지 않고 메모에 한 줄로 남김(단계는 손대지 않음) */
+const MERGE_FIELDS = [['bizNo', 'biz_no', '사업자번호'], ['phone', 'phone', '연락처'], ['email', 'email', '이메일'], ['contactName', 'contact_name', '고객 담당자'], ['region', 'region', '지역'],
+  ['facilityType', 'facility_type', '시설'], ['scale', 'scale', '규모'], ['homepage', 'homepage', '홈페이지'], ['expectedRevenue', 'expected_revenue', '예상매출'], ['priority', 'priority', '우선순위'],
+  ['nextContactDate', 'next_contact_date', '다음 연락일']] as const;
+const PRI_KO: Record<string, string> = { urgent: '긴급', high: '높음', medium: '보통', low: '낮음' };
+const sameVal = (k: string, a: unknown, b: unknown) => k === 'phone' ? digitsOf(a) === digitsOf(b) || (!!phoneKey(a) && phoneKey(a) === phoneKey(b)) : k === 'bizNo' ? digitsOf(a) === digitsOf(b)
+  : k === 'expectedRevenue' ? Number(a) === Number(b) : String(a).replace(/\s+/g, '').toLowerCase() === String(b).replace(/\s+/g, '').toLowerCase();
+const mergeLeads = (sql: ReturnType<typeof db>, tenant: string, ids: string[]) => sql<any[]>`select l.id, l.name, l.status, l.region, l.facility_type, l.scale, l.contact_name, l.phone, l.email, l.homepage, l.biz_no,
+  l.expected_revenue::float8 as expected_revenue, l.priority, l.next_contact_date::text as next_contact_date, l.memo, u.name as owner
+  from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} and l.deleted_at is null and l.id = any(${ids}::uuid[])`;
+function mergePlan(l: any, r: ImportRow, day: string) {
+  const patch: Record<string, unknown> = {}; const fill: string[] = []; const diff: string[] = [];
+  const closed = ['계약완료', '보류', '실패', '되돌림'].includes(String(l.status ?? ''));
+  for (const [k, col, label] of MERGE_FIELDS) {
+    const v = r[k]; if (v == null || v === '' || (k === 'nextContactDate' && closed)) continue; // 종결 거래처엔 다음 연락일을 넣지 않음
+    const cur = l[col];
+    if (cur == null || cur === '') { patch[k] = v; fill.push(label); } else if (!sameVal(k, cur, v)) diff.push(`${label} ${k === 'priority' ? PRI_KO[String(v)] ?? v : k === 'expectedRevenue' ? Number(v).toLocaleString('ko-KR') : v}`);
+  }
+  const memo = String(l.memo ?? ''); const note = diff.length ? `[가져오기 ${day}] 다른 값 — ${diff.join(' · ')}` : '';
+  const add = [r.memo?.trim() && !memo.includes(r.memo.trim()) ? r.memo.trim() : '', note && !memo.includes(note) ? note : ''].filter(Boolean);
+  if (add.length) patch.memo = [memo, ...add].filter(Boolean).join('\n').slice(0, 5000);
+  return { patch, fill, diff, memo: add.length > 0 };
+}
+const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+async function assertImporter(u: SessionUser) {
   await assertSpace(u, 'sales');
   if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden', 'CSV 가져오기는 관리자만');
-  const t = tenantOf(u); await assertWritesOpen(t); const sql = db();
-  const have = new Set((await sql<{ name: string }[]>`select name from sales_leads where tenant = ${t} and deleted_at is null`).map((x) => normName(x.name)));
-  let created = 0; const skipped: string[] = [];
-  for (const r of i.rows) {
-    const k = normName(r.name);
-    if (!k || have.has(k)) { skipped.push(r.name); continue; }
-    have.add(k);
-    await createLead(u, { ...r, force: true });
-    created++;
+  const t = tenantOf(u); await assertWritesOpen(t); return t;
+}
+/**
+ * 205차 미리보기: 줄마다 무엇과 겹치는지 — same(같은 이름 거래처) · file(파일 안 앞 줄과 같은 이름) · contact(이름은 달라도 같은 사업자번호·전화·메일) · similar(비슷한 이름, 앞 4자) · new.
+ * 후보마다 합치면 채울 칸(fill)·바꾸지 않고 메모에 남길 다른 값(diff). 쓰기는 하지 않음
+ */
+export async function previewImport(u: SessionUser, i: z.infer<typeof importInput>) {
+  const t = await assertImporter(u); const sql = db();
+  const all = await sql<{ id: string; name: string; phone: string | null; email: string | null; biz_no: string | null }[]>`select id, name, phone, email, biz_no from sales_leads where tenant = ${t} and deleted_at is null order by updated_at desc`;
+  const idx = { name: new Map<string, string[]>(), phone: new Map<string, string[]>(), bizNo: new Map<string, string[]>(), email: new Map<string, string[]>() };
+  const put = (m: Map<string, string[]>, k: string, id: string) => { if (k) m.set(k, [...(m.get(k) ?? []), id]); };
+  for (const l of all) { put(idx.name, normName(l.name), l.id); put(idx.phone, phoneKey(l.phone), l.id); put(idx.bizNo, bizKey(l.biz_no), l.id); put(idx.email, mailKey(l.email), l.id); }
+  const names = all.map((l) => [l.id, normName(l.name)] as const);
+  const firstRow = new Map<string, number>();
+  const found = i.rows.map((r, n) => {
+    const k = normName(r.name); const dupOf = k ? firstRow.get(k) : undefined; if (k && dupOf === undefined) firstRow.set(k, n);
+    const by = new Map<string, string[]>();
+    for (const [what, key] of [['name', k], ['bizNo', bizKey(r.bizNo)], ['phone', phoneKey(r.phone)], ['email', mailKey(r.email)]] as const) for (const id of key ? idx[what].get(key) ?? [] : []) by.set(id, [...(by.get(id) ?? []), what]);
+    const hits = [...by].sort((a, b) => Number(b[1].includes('name')) - Number(a[1].includes('name')) || b[1].length - a[1].length).slice(0, 3);
+    if (hits.some(([, w]) => w.includes('name'))) return { kind: 'same' as const, hits };
+    if (dupOf !== undefined) return { kind: 'file' as const, hits: [], dupOf };
+    if (hits.length) return { kind: 'contact' as const, hits };
+    const key = simKey(r.name); const sim: [string, string[]][] = [];
+    if (key.length >= 2) for (const [id, nm] of names) if (nm.includes(key) && sim.push([id, []]) === 3) break;
+    return sim.length ? { kind: 'similar' as const, hits: sim } : { kind: 'new' as const, hits: [] };
+  });
+  const hitIds = [...new Set(found.flatMap((f) => f.hits.map(([id]) => id)))];
+  const full = new Map((hitIds.length ? await mergeLeads(sql, t, hitIds) : []).map((l) => [l.id, l]));
+  const day = todayKst(); const counts = { new: 0, same: 0, file: 0, contact: 0, similar: 0 };
+  const rows = found.map((f, n) => {
+    counts[f.kind]++;
+    if (f.kind === 'new') return { kind: f.kind };
+    const matches = f.hits.map(([id, by]) => { const l = full.get(id); if (!l) return null; const p = mergePlan(l, i.rows[n], day);
+      return { id, name: l.name as string, status: l.status as string | null, region: l.region as string | null, owner: l.owner as string | null, by, fill: p.fill, diff: p.diff, memo: p.memo }; }).filter(Boolean);
+    return { kind: f.kind, matches, ...('dupOf' in f ? { dupOf: f.dupOf } : {}) };
+  });
+  return { rows, counts };
+}
+/** 고른 거래처에 합치기 — 빈 칸만 채우고(다음 연락일이면 영업 업무 마감도), 다른 값은 메모 한 줄. 권한·기록은 updateLead 그대로 */
+async function mergeIntoLead(u: SessionUser, id: string, r: ImportRow) {
+  const t = tenantOf(u); const sql = db();
+  const [l] = await mergeLeads(sql, t, [id]); if (!l) throw notFound('합칠 거래처를 찾을 수 없습니다');
+  const p = mergePlan(l, r, todayKst());
+  if (Object.keys(p.patch).length) {
+    await updateLead(u, id, p.patch as z.infer<typeof leadPatch>);
+    await audit(sql, u.id, 'sales.lead_merge', 'sales_lead', id, { from: 'csv', fill: p.fill, diff: p.diff.length }, null); // 값(전화·메일)은 기록에 싣지 않음 — 칸 이름·개수만
   }
-  await audit(sql, u.id, 'sales.lead_import', 'sales_lead', null, { created, skipped: skipped.length }, null);
-  return { ok: true, created, skipped };
+  return p;
+}
+export async function importLeads(u: SessionUser, i: z.infer<typeof importInput>) {
+  const t = await assertImporter(u); const sql = db();
+  const have = new Set((await sql<{ name: string }[]>`select name from sales_leads where tenant = ${t} and deleted_at is null`).map((x) => normName(x.name)));
+  let created = 0, merged = 0; const skipped: string[] = []; const failed: { name: string; message: string }[] = [];
+  for (const { action, mergeId, ...r } of i.rows) {
+    try {
+      if (action === 'skip') { skipped.push(r.name); continue; }
+      if (action === 'merge') { if (!mergeId) throw badRequest('합칠 거래처를 고르지 않았습니다'); await mergeIntoLead(u, mergeId, r); merged++; continue; }
+      const k = normName(r.name);
+      if (action !== 'new' && (!k || have.has(k))) { skipped.push(r.name); continue; } // 고르지 않은 줄 = 예전 그대로
+      have.add(k);
+      await createLead(u, { ...r, force: true });
+      created++;
+    } catch (e) { failed.push({ name: r.name, message: e instanceof HttpError ? e.message : '가져오지 못했습니다' }); }
+  }
+  await audit(sql, u.id, 'sales.lead_import', 'sales_lead', null, { created, merged, skipped: skipped.length, failed: failed.length }, null);
+  return { ok: true, created, merged, skipped, failed };
 }
 export const activityInput = z.object({ type: z.enum(['전화', '방문', '미팅', '메일', '문자', '기타']).default('전화'), content: z.string().trim().min(1).max(5000), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), nextAction: z.string().trim().max(200).optional(), request: z.string().trim().max(2000).optional() /* S2 2차: 다음 연락 예정일·다음 액션·고객 요청 */ });

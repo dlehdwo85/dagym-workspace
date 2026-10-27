@@ -13,6 +13,7 @@ import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
 import { CollectorAlerts } from '@/components/sales/Collectors';
 import { BulkLeadDialog, LeadQuickDialog, StageMoveDialog, type BulkResult } from '@/components/sales/LeadFollowUp';
+import { LeadImportDialog, type ImportRows } from '@/components/sales/LeadImport';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
@@ -392,12 +393,12 @@ function BulkBar({ kind, ids, onDone, onClear }: { kind: 'bid' | 'building' | 'f
 function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () => void }) {
   const l = data.lead;
   const [f, setF] = useState({ status: l.status ?? '신규리드', reason: '', next: l.next ?? '', memo: l.memo ?? '', owner: l.ownerId ?? '',
-    facility: l.facility ?? '', region: l.region ?? '', scale: l.scale ?? '', revenue: l.revenue ? String(l.revenue) : '', contact: l.contact ?? '', phone: l.phone ?? '', email: l.email ?? '', homepage: l.homepage ?? '' });
+    facility: l.facility ?? '', region: l.region ?? '', scale: l.scale ?? '', revenue: l.revenue ? String(l.revenue) : '', contact: l.contact ?? '', phone: l.phone ?? '', email: l.email ?? '', homepage: l.homepage ?? '', biz: l.bizNo ?? '' });
   const needReason = (f.status === '보류' || f.status === '실패') && f.status !== l.status;
   const S = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   async function save() {
     try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body: { ...(f.status !== l.status ? { status: f.status, reason: f.reason || undefined } : {}), nextContactDate: f.next || null, memo: f.memo || null, ...(data.canAssign && f.owner !== (l.ownerId ?? '') ? { ownerId: f.owner || null } : {}),
-      facilityType: f.facility || null, region: f.region || null, scale: f.scale || null, expectedRevenue: numOf(f.revenue), contactName: f.contact || null, phone: f.phone || null, email: f.email || null, homepage: f.homepage || null } });
+      facilityType: f.facility || null, region: f.region || null, scale: f.scale || null, expectedRevenue: numOf(f.revenue), contactName: f.contact || null, phone: f.phone || null, email: f.email || null, homepage: f.homepage || null, bizNo: f.biz || null } });
       toast.ok('저장했습니다'); setF({ ...f, reason: '' }); onSaved(); } catch (e: any) { toast.error(e.message); }
   }
 
@@ -410,7 +411,7 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
       </div>
       {needReason && <Field label={`${f.status} 사유(필수)`}><input className={inputCls} value={f.reason} onChange={S('reason')} maxLength={500} aria-label="사유" data-testid="lead-reason" /></Field>}
       {/* S2 2차(감사 1-13): 리드 폼 칸 — 시설·지역·규모·예상매출·고객 담당자·연락처·이메일·홈페이지 */}
-      <details className="rounded-input border border-blue-100 bg-white/60 p-2" data-testid="lead-info-edit"><summary className="cursor-pointer text-xs text-ink-2">정보 수정 — 시설·지역·규모·예상매출·연락처·이메일·홈페이지</summary>
+      <details className="rounded-input border border-blue-100 bg-white/60 p-2" data-testid="lead-info-edit"><summary className="cursor-pointer text-xs text-ink-2">정보 수정 — 시설·지역·규모·예상매출·연락처·이메일·홈페이지·사업자번호</summary>
         <div className="mt-2 grid gap-2 sm:grid-cols-4">
           <Field label="시설 유형"><input className={inputCls} value={f.facility} onChange={S('facility')} maxLength={100} aria-label="시설 유형" data-testid="lead-facility" /></Field>
           <Field label="지역"><input className={inputCls} value={f.region} onChange={S('region')} maxLength={50} aria-label="지역" /></Field>
@@ -420,6 +421,7 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
           <Field label="연락처"><input className={inputCls} value={f.phone} onChange={S('phone')} maxLength={40} inputMode="tel" aria-label="연락처" /></Field>
           <Field label="이메일"><input className={inputCls} value={f.email} onChange={S('email')} maxLength={200} inputMode="email" aria-label="이메일" data-testid="lead-email" /></Field>
           <Field label="홈페이지"><input className={inputCls} value={f.homepage} onChange={S('homepage')} maxLength={300} inputMode="url" aria-label="홈페이지" /></Field>
+          <Field label="사업자번호"><input className={inputCls} value={f.biz} onChange={S('biz')} maxLength={20} inputMode="numeric" placeholder="123-45-67890" aria-label="사업자번호" data-testid="lead-biz" /></Field>
         </div></details>
       <Field label="메모"><textarea className={inputCls} rows={2} value={f.memo} onChange={S('memo')} maxLength={5000} aria-label="메모" /></Field>
       <div className="flex justify-end"><Button size="sm" onClick={save} disabled={needReason && !f.reason.trim()} data-testid="lead-save">저장</Button></div>
@@ -618,7 +620,7 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
             {/* 로컬 10/19: 사람이 보는 칸만 한국어로 — 내부 id·원본 키는 숨기고, 원본 전체는 관리자만 접힘 안에 */}
             <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1 text-sm" data-testid="lead-info">
               {([['거래처명', data.lead.name], ['단계', data.lead.status], ['우선순위', data.lead.priority], ['시설', data.lead.facility], ['지역', data.lead.region], ['규모', data.lead.scale], ['담당', data.lead.owner], ['다음 연락', data.lead.next && kd(data.lead.next)],
-                ['연락처', [data.lead.contact, data.lead.phone].filter(Boolean).join(' · ')], ['이메일', data.lead.email && <a href={`mailto:${data.lead.email}`} className="underline" style={{ color: C }}>{data.lead.email}</a>], ['홈페이지', data.lead.homepage && <a href={data.lead.homepage} target="_blank" rel="noopener noreferrer" className="underline" style={{ color: C }}>{String(data.lead.homepage).replace(/^https?:\/\//, '')}</a>], ['예상매출', won(data.lead.revenue)], ['최근 활동', data.lead.lastActivity && kd(data.lead.lastActivity)], ['등록일', data.lead.created && kd(data.lead.created)], ['메모', data.lead.memo]] as [string, unknown][])
+                ['연락처', [data.lead.contact, data.lead.phone].filter(Boolean).join(' · ')], ['사업자번호', data.lead.bizNo], ['이메일', data.lead.email && <a href={`mailto:${data.lead.email}`} className="underline" style={{ color: C }}>{data.lead.email}</a>], ['홈페이지', data.lead.homepage && <a href={data.lead.homepage} target="_blank" rel="noopener noreferrer" className="underline" style={{ color: C }}>{String(data.lead.homepage).replace(/^https?:\/\//, '')}</a>], ['예상매출', won(data.lead.revenue)], ['최근 활동', data.lead.lastActivity && kd(data.lead.lastActivity)], ['등록일', data.lead.created && kd(data.lead.created)], ['메모', data.lead.memo]] as [string, unknown][])
                 .filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + ':v'} className="whitespace-pre-wrap break-words">{typeof v === 'string' || typeof v === 'number' ? String(v) : (v as React.ReactNode)}</dd>])}
             </dl>
             <ContactRow phone={data.lead.phone} />
@@ -655,7 +657,7 @@ const kstDay = (v: unknown) => { if (!v) return null; const d = new Date(String(
 const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00+09:00`) - Date.parse(`${from}T12:00:00+09:00`)) / 864e5);
 const shiftDay = (d: string, n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.parse(`${d}T12:00:00+09:00`) + n * 864e5));
 const PRI_KO: Record<string, string> = { urgent: '긴급', high: '높음', medium: '보통', low: '낮음' };
-const CSV_COLS: [string, string][] = [['name', '거래처명'], ['status', '단계'], ['priority', '우선순위'], ['facility', '시설'], ['region', '지역'], ['scale', '규모'], ['owner', '담당'], ['contact', '고객 담당자'], ['phone', '연락처'], ['email', '이메일'], ['homepage', '홈페이지'], ['revenue', '예상매출'], ['next', '다음 연락일'], ['lastActivity', '최근 활동'], ['created', '등록일'], ['memo', '메모']];
+const CSV_COLS: [string, string][] = [['name', '거래처명'], ['status', '단계'], ['priority', '우선순위'], ['facility', '시설'], ['region', '지역'], ['scale', '규모'], ['owner', '담당'], ['contact', '고객 담당자'], ['phone', '연락처'], ['email', '이메일'], ['homepage', '홈페이지'], ['bizNo', '사업자번호'], ['revenue', '예상매출'], ['next', '다음 연락일'], ['lastActivity', '최근 활동'], ['created', '등록일'], ['memo', '메모']];
 const csvCell = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 /** CSV 한 줄씩(따옴표·줄바꿈 처리) */
 function parseCsv(text: string): string[][] {
@@ -671,7 +673,10 @@ async function readCsvFile(file: File) {
   const buf = await file.arrayBuffer();
   try { return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^﻿/, ''); } catch { return new TextDecoder('euc-kr').decode(buf); }
 }
-const IMPORT_MAP: [RegExp, string][] = [[/거래처|회사|이름|^name$|company/i, 'name'], [/단계|상태|status|stage/i, 'status'], [/우선|priority/i, 'priority'], [/시설|유형|facility|type/i, 'facilityType'], [/지역|region|area/i, 'region'], [/규모|scale|size|세대/i, 'scale'],
+/** 205차: 가져오기 칸 길이(서버 검사와 같음 — 긴 칸 하나로 파일 전체가 막히지 않게 잘라 넣음) · 같은 연락처 경고 이름 */
+const IMPORT_MAX: Record<string, number> = { name: 300, region: 50, scale: 60, facilityType: 100, contactName: 100, phone: 40, email: 200, homepage: 300, bizNo: 20, memo: 5000 };
+const SAME_BY: Record<string, string> = { bizNo: '사업자번호', phone: '전화', email: '메일' };
+const IMPORT_MAP: [RegExp, string][] = [[/사업자.?(등록)?.?번호|등록번호|biz.?no|business.?(no|number)/i, 'bizNo'], [/거래처|회사|이름|^name$|company/i, 'name'], [/단계|상태|status|stage/i, 'status'], [/우선|priority/i, 'priority'], [/시설|유형|facility|type/i, 'facilityType'], [/지역|region|area/i, 'region'], [/규모|scale|size|세대/i, 'scale'],
   [/고객.?담당|담당자|contact.?name|manager/i, 'contactName'], [/연락처|전화|phone|tel/i, 'phone'], [/이메일|e-?mail/i, 'email'], [/홈페이지|website|url|homepage/i, 'homepage'], [/매출|금액|revenue|amount/i, 'expectedRevenue'], [/다음.?연락|next/i, 'nextContactDate'], [/메모|비고|memo|note/i, 'memo']];
 /** 202차(#461 ⑥, SALES_LEADS_REVAMP 2-4): 휴대폰 리드 카드 밀기 — → 연락함 기록 · ← 다음 연락일 바꾸기. 손가락(또는 휴대폰 폭)에서만, 세로 스크롤은 그대로 */
 const SWIPE_PX = 72;
@@ -709,7 +714,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const [sort2, setSort2] = useUrlState('sort2', ''); const [rev2, setRev2] = useUrlState('rev2', ''); // 204차: 2차 정렬(열 머리 Shift+클릭)
   const [fPri, setFPri] = useUrlState('pri', ''); const [fOwner, setFOwner] = useUrlState('owner', ''); const [fRegion, setFRegion] = useUrlState('region', ''); const [fSrc, setFSrc] = useUrlState('src', '');
   const [mv, setMv] = useState<{ id: string; name: string; q: Record<string, string> }[] | null>(null); const [cols, setCols] = useState<string[] | null>(null); const [saving, setSaving] = useState<string | null>(null); // 197차: 내 보기·열(저장 뒤 화면에 바로)
-  const [imp, setImp] = useState<{ rows: Record<string, unknown>[]; file: string; skipped: string[]; done?: { created: number; skipped: string[] } } | null>(null);
+  const [imp, setImp] = useState<ImportRows | null>(null); // 205차: 파일을 읽으면 미리보기(겹침 표시) 창
   const [quick, setQuick] = useState<{ mode: 'next' | 'log'; lead: any } | null>(null); // 202차: 휴대폰 카드 밀기 창
   // 204차(#461 ⑦): 표에서 여러 건 골라 한 번에(담당·단계·다음 연락일·CSV) · 표의 단계 바꾸기도 묻는 창(예전 prompt)
   const [sel, setSel] = useState<string[]>([]); const [bulk, setBulk] = useState<'' | 'stage' | 'next'>(''); const [stMove, setStMove] = useState<{ lead: any; to: string } | null>(null);
@@ -719,9 +724,9 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const pickView = (v: string) => { setView(v); try { localStorage.setItem('sales-leads-view', v); } catch { /* 없음 */ } };
   // 로컬 검수 10/19: prompt() 는 브라우저·자동화 환경에서 막힐 수 있어 입력 창으로
   const [nl, setNl] = useState<Record<string, string> | null>(null);
-  const [similar, setSimilar] = useState<{ id: string; name: string; status: string | null; region: string | null }[] | null>(null); // 비슷한 거래처(미리 보기 + 만들기 때 경고)
+  const [similar, setSimilar] = useState<{ id: string; name: string; status: string | null; region: string | null; by?: string }[] | null>(null); // 비슷한 거래처(미리 보기 + 만들기 때 경고 — 205차: 같은 사업자번호·전화·메일도)
   const [forceNew, setForceNew] = useState(false);
-  const EMPTY_NL = { name: '', status: '신규리드', priority: '', facilityType: '', region: '', scale: '', expectedRevenue: '', contactName: '', phone: '', email: '', homepage: '', nextContactDate: '', memo: '', ownerId: '' };
+  const EMPTY_NL = { name: '', status: '신규리드', priority: '', facilityType: '', region: '', scale: '', expectedRevenue: '', contactName: '', phone: '', email: '', homepage: '', bizNo: '', nextContactDate: '', memo: '', ownerId: '' };
   // 앱 더보기 › 만들기 › 새 리드(?new=1): 쓰기 열린 회사면 입력 창 바로
   async function patchLead(id: string, body: Record<string, unknown>) {
     try { await api(`/api/sales/leads/${id}`, { method: 'PATCH', body }); toast.ok('저장했습니다'); reload(); } catch (e: any) { toast.error(e.message); reload(); }
@@ -735,7 +740,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   async function newLead(e: React.FormEvent) {
     e.preventDefault(); if (!nl?.name.trim()) return;
     const body: Record<string, unknown> = { name: nl.name.trim(), status: nl.status, force: forceNew };
-    for (const k of ['priority', 'facilityType', 'region', 'scale', 'contactName', 'phone', 'email', 'homepage', 'nextContactDate', 'memo', 'ownerId'] as const) if (nl[k]) body[k] = nl[k];
+    for (const k of ['priority', 'facilityType', 'region', 'scale', 'contactName', 'phone', 'email', 'homepage', 'bizNo', 'nextContactDate', 'memo', 'ownerId'] as const) if (nl[k]) body[k] = nl[k];
     if (nl.expectedRevenue) body.expectedRevenue = numOf(nl.expectedRevenue);
     try { const r = await api<{ id?: string; similar?: any[] }>('/api/sales/leads', { body });
       if (r.similar) { setSimilar(r.similar); setForceNew(true); toast.error(`비슷한 거래처가 ${r.similar.length}곳 있습니다 — 확인한 뒤 [그래도 만들기]`); return; }
@@ -754,13 +759,9 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
     for (const r of grid.slice(1)) { const o: Record<string, unknown> = {};
       head.forEach((k, idx) => { const v = (r[idx] ?? '').trim(); if (!k || !v || o[k] !== undefined) return;
         if (k === 'status') { if ((data?.stages ?? []).includes(v)) o.status = v; } else if (k === 'priority') { if (PRI_CODE[v]) o.priority = PRI_CODE[v]; } else if (k === 'expectedRevenue') { const n = numOf(v); if (n !== null && Number.isFinite(n)) o.expectedRevenue = n; }
-        else if (k === 'nextContactDate') { const m = v.match(/(\d{4})[.\-/]\s?(\d{1,2})[.\-/]\s?(\d{1,2})/); if (m) o.nextContactDate = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; } else o[k] = v; });
+        else if (k === 'nextContactDate') { const m = v.match(/(\d{4})[.\-/]\s?(\d{1,2})[.\-/]\s?(\d{1,2})/); if (m) o.nextContactDate = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; } else o[k] = v.slice(0, IMPORT_MAX[k] ?? 300); });
       if (typeof o.name === 'string' && o.name) rows.push(o); else skipped.push(r.join(',').slice(0, 40)); }
     setImp({ rows, file: file.name, skipped });
-  }
-  async function runImport() {
-    if (!imp) return;
-    try { const r = await api<{ created: number; skipped: string[] }>('/api/sales/leads/import', { body: { rows: imp.rows } }); setImp({ ...imp, done: r }); toast.ok(`${r.created}건 가져왔습니다`); reload(); } catch (e: any) { toast.error(e.message); }
   }
   // 197차: 휴대폰은 보기 탭이 가로로 밀려 켜진 탭이 화면 밖일 수 있음 — 탭 줄만 옆으로 옮겨 보이게(화면 위아래는 그대로)
   const tabsRef = useRef<HTMLDivElement | null>(null);
@@ -935,7 +936,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
           <form onSubmit={newLead} className="grid gap-3 text-sm" data-testid="lead-new-form">
             {NLF('name', '거래처(리드) 이름', { required: true, maxLength: 300, autoFocus: true })}
             {!!similar?.length && <div className="rounded-input border border-amber-300 bg-amber-50 p-2 text-xs" data-testid="lead-new-similar"><b className="text-amber-800">비슷한 거래처 {similar.length}곳</b> — 이미 있으면 그 거래처를 열어 이어서 적으세요
-              <ul className="mt-1 space-y-0.5">{similar.map((x) => <li key={x.id}><button type="button" onClick={() => { setNl(null); setOpen(x.id); }} className="underline">{x.name}</button> {x.status ? chip(x.status) : null} <span className="text-ink-3">{x.region ?? ''}</span></li>)}</ul></div>}
+              <ul className="mt-1 space-y-0.5">{similar.map((x) => <li key={x.id}><button type="button" onClick={() => { setNl(null); setOpen(x.id); }} className="underline">{x.name}</button> {x.status ? chip(x.status) : null} <span className="text-ink-3">{x.region ?? ''}</span>{x.by && x.by !== 'name' && <span className="ml-1 font-semibold text-amber-800" data-testid="lead-new-same">같은 {SAME_BY[x.by] ?? x.by}</span>}</li>)}</ul></div>}
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="단계"><select className={inputCls} value={nl.status} onChange={(e) => setNl({ ...nl, status: e.target.value })} aria-label="단계" data-testid="lead-new-status">{(data?.stages ?? ['신규리드']).map((x: string) => <option key={x}>{x}</option>)}</select></Field>
               <Field label="우선순위"><select className={inputCls} value={nl.priority} onChange={(e) => setNl({ ...nl, priority: e.target.value })} aria-label="우선순위"><option value="">—</option>{Object.entries(PRI_KO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
@@ -943,23 +944,13 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
             </div>
             <div className="grid gap-3 sm:grid-cols-4">{NLF('facilityType', '시설 유형', { maxLength: 100, placeholder: '아파트·오피스텔…' })}{NLF('region', '지역', { maxLength: 50 })}{NLF('scale', '규모', { maxLength: 60, placeholder: '1,200세대' })}{NLF('expectedRevenue', '예상매출(원)', { inputMode: 'numeric' })}</div>
             <div className="grid gap-3 sm:grid-cols-4">{NLF('contactName', '고객 담당자', { maxLength: 100 })}{NLF('phone', '연락처', { maxLength: 40, inputMode: 'tel' })}{NLF('email', '이메일', { maxLength: 200, inputMode: 'email' })}{NLF('homepage', '홈페이지', { maxLength: 300, inputMode: 'url' })}</div>
-            {data?.canAssign && NLF('nextContactDate', '다음 연락일', { type: 'date' })}
+            <div className="grid gap-3 sm:grid-cols-4">{NLF('bizNo', '사업자번호', { maxLength: 20, inputMode: 'numeric', placeholder: '123-45-67890' })}{data?.canAssign && NLF('nextContactDate', '다음 연락일', { type: 'date' })}</div>
             <Field label="메모"><textarea className={inputCls} rows={2} value={nl.memo} onChange={(e) => setNl({ ...nl, memo: e.target.value })} maxLength={5000} aria-label="메모" /></Field>
             <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setNl(null)}>취소</Button><Button type="submit" disabled={!nl.name.trim()} data-testid="lead-new-save">{forceNew && similar?.length ? '그래도 만들기' : '만들기'}</Button></div>
           </form>
         </Modal>
       )}
-      {imp && (
-        <Modal open onClose={() => setImp(null)} title="CSV 가져오기">
-          <div className="space-y-2 text-sm" data-testid="leads-import">
-            {imp.done ? <p data-testid="leads-import-done"><b>{imp.done.created}건</b> 가져왔습니다{imp.done.skipped.length ? ` · 같은 이름이라 건너뜀 ${imp.done.skipped.length}건` : ''}</p>
-              : <><p>{imp.file} — <b>{imp.rows.length}건</b>을 새 리드로 만듭니다{imp.skipped.length ? ` (거래처명이 없는 ${imp.skipped.length}줄은 건너뜀)` : ''}. 같은 이름(공백·괄호 무시)이 이미 있으면 건너뜁니다.</p>
-              <ul className="max-h-40 overflow-y-auto rounded-input border border-line p-2 text-xs">{imp.rows.slice(0, 30).map((r, i) => <li key={i}>{String(r.name)}{r.region ? ` · ${r.region}` : ''}{r.phone ? ` · ${r.phone}` : ''}</li>)}{imp.rows.length > 30 && <li className="text-ink-3">… 외 {imp.rows.length - 30}건</li>}</ul></>}
-            {imp.done?.skipped.length ? <details className="text-xs"><summary className="cursor-pointer text-ink-3">건너뛴 이름</summary><p className="mt-1">{imp.done.skipped.join(', ')}</p></details> : null}
-            <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setImp(null)}>{imp.done ? '닫기' : '취소'}</Button>{!imp.done && <Button onClick={runImport} data-testid="leads-import-go">{imp.rows.length}건 가져오기</Button>}</div>
-          </div>
-        </Modal>
-      )}
+      {imp && <LeadImportDialog data={imp} onClose={() => setImp(null)} onDone={reload} />}
     </div>
   );
 }
