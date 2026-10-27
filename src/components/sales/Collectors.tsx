@@ -126,6 +126,7 @@ export function BidPrefs() {
         <Field label="추정가격 최소(원)"><input className={inputCls} inputMode="numeric" value={form.amount_min} onChange={(e) => set('amount_min', e.target.value.replace(/\D/g, ''))} disabled={!data.canEdit} /></Field>
         <Field label="추정가격 최대(원)"><input className={inputCls} inputMode="numeric" value={form.amount_max} onChange={(e) => set('amount_max', e.target.value.replace(/\D/g, ''))} disabled={!data.canEdit} /></Field>
       </div>
+      <KwSuggest onApplied={() => { setF(null); reload(); }} />
       <div className="mt-2 flex flex-wrap gap-1 text-xs" data-testid="prefs-regions">{SIDO.map((s) => <button key={s} type="button" disabled={!data.canEdit} onClick={() => toggleRegion(s)} className={cx('rounded-full border px-2 py-0.5', p.regions.includes(s) ? 'border-[#2563EB] bg-white font-semibold text-[#1D4ED8]' : 'border-line bg-white text-ink-2')}>{s}</button>)}<span className="self-center text-ink-3">{p.regions.length ? '' : '지역 제한 없음(전국)'}</span></div>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium">다이제스트</span>
@@ -147,6 +148,48 @@ export function BidPrefs() {
       <p className="mt-2 text-xs"><a href="/api/sales/digest?preview=html" target="_blank" rel="noopener noreferrer" className="font-medium text-[#1D4ED8] underline" data-testid="prefs-preview">오늘 메일 미리보기</a><span className="text-ink-3"> — 지금 보내면 이렇게 갑니다(보내지 않음)</span></p>
       {data.last && <p className="mt-2 text-xs text-ink-2" data-testid="prefs-last-digest">마지막 다이제스트 {data.last.day}: 새 공고 {data.last.counts?.new ?? 0}{data.last.counts?.now != null ? `(즉시 검토 ${data.last.counts.now} · 검토 ${data.last.counts.review ?? 0})` : ''} · 정정 {data.last.counts?.amend ?? 0} · 취소 {data.last.counts?.cancel ?? 0}{data.last.counts?.soon ? ` · 마감 임박 ${data.last.counts.soon}` : ''} · 메일 {data.last.mailed}{data.last.counts?.mailVia ? <span className="text-ink-3"> ({VIA[String(data.last.counts.mailVia)] ?? String(data.last.counts.mailVia)})</span> : null}{data.last.counts?.mailError && <span className="text-red-600" title={String(data.last.counts.mailError)}> (메일 실패: {String(data.last.counts.mailError).slice(0, 60)})</span>} · 알림 {data.last.notified}</p>}
     </section>
+  );
+}
+
+type KwItem = { word: string; why: string; pos: number; neg: number; more: number; hidden: number; risky?: boolean };
+type KwSug = { at: string; via: 'ai' | 'rules'; add: KwItem[]; exclude: KwItem[]; remove: KwItem[]; missed: { id: string; title: string; word: string }[]; base: { pos: number; neg: number; pool: number } };
+const KW_KIND: [keyof Pick<KwSug, 'add' | 'exclude' | 'remove'>, string][] = [['add', '넣을 관심 검색어'], ['exclude', '넣을 제외어'], ['remove', '뺄 관심 검색어']];
+/** 224차 #457: 관심 검색어·제외어 추천 — 진행한 공고 ↔ 대상 아님 공고 근거와 숫자(서버가 셈) · 고른 것만 반영(관리자) · 월 1회는 AI 없이 놓친 공고 후보 알림 */
+function KwSuggest({ onApplied }: { onApplied: () => void }) {
+  const { data, reload, setData } = useApi<{ suggestion: KwSug | null; canEdit: boolean }>('/api/sales/kw-suggest');
+  const [busy, setBusy] = useState(false); const [picked, setPicked] = useState<Record<string, boolean> | null>(null);
+  const s = data?.suggestion ?? null;
+  const pk = (kind: string, w: string) => `${kind}:${w}`;
+  const chosen = picked ?? Object.fromEntries(s ? KW_KIND.flatMap(([k]) => s[k].filter((x) => !x.risky).map((x) => [pk(k, x.word), true])) : []);
+  async function run() { setBusy(true); try { const r = await api<{ suggestion: KwSug; canEdit: boolean }>('/api/sales/kw-suggest', { body: {} }); setData(r); setPicked(null); toast.ok(r.suggestion.via === 'ai' ? 'AI 추천을 만들었습니다' : '추천을 만들었습니다(AI 없이 낱말 세기)'); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
+  async function apply() {
+    if (!s) return; setBusy(true);
+    try { const body = Object.fromEntries(KW_KIND.map(([k]) => [k, s[k].filter((x) => chosen[pk(k, x.word)]).map((x) => x.word)]));
+      await api('/api/sales/kw-suggest/apply', { body }); toast.ok('고른 추천을 맞춤 설정에 반영했습니다'); setPicked({}); onApplied(); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  if (!data) return null;
+  const any = !!s && KW_KIND.some(([k]) => s[k].length > 0);
+  return (
+    <div className="mt-3 rounded-input border border-violet-200 bg-white p-3 text-xs" id="kw-suggest" data-testid="kw-suggest">
+      <div className="flex flex-wrap items-center gap-2"><b className="text-sm text-violet-800">관심 검색어 추천</b>
+        <span className="text-ink-3">진행한 공고와 &apos;대상 아님&apos; 공고를 비교해 넣을·뺄 낱말을 고릅니다 · 매달 1일 놓친 공고 후보도 알려 드립니다</span>
+        {data.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={run} disabled={busy} data-testid="kw-run">{busy ? '만드는 중…' : s ? '다시 추천 받기' : '추천 받기'}</Button>}</div>
+      {s && <p className="mt-1 text-ink-3" data-testid="kw-base">{fmtDateTime(s.at)} · {s.via === 'ai' ? 'AI 추천' : 'AI 없이 낱말 세기'} · 근거: 진행한 공고 {s.base.pos}건 · 대상 아님 {s.base.neg}건 · 지난 30일 공고 {s.base.pool}건</p>}
+      {s && !any && <p className="mt-2 text-ink-2" data-testid="kw-empty">지금 넣거나 뺄 낱말이 없습니다{s.base.pos + s.base.neg < 5 ? ' — 공고를 [검토중]·[대상 아님]으로 더 정리하면 추천이 정확해집니다' : ''}</p>}
+      {s && any && <div className="mt-2 grid gap-2 md:grid-cols-3">{KW_KIND.map(([k, label]) => (
+        <div key={k}><p className="font-semibold text-ink">{label} <span className="font-normal text-ink-3">{s[k].length}</span></p>
+          <ul className="mt-1 space-y-1">{s[k].map((x) => (
+            <li key={x.word} className={cx('rounded border px-2 py-1', x.risky ? 'border-amber-300 bg-amber-50' : 'border-line')} data-testid="kw-item" data-kind={k} data-word={x.word}>
+              <label className="flex items-start gap-1.5"><input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-violet-600" disabled={!data.canEdit} checked={!!chosen[pk(k, x.word)]} onChange={(e) => setPicked({ ...chosen, [pk(k, x.word)]: e.target.checked })} data-testid="kw-check" />
+                <span className="min-w-0"><b className="text-ink">{x.word}</b><span className="block text-ink-2">{x.why}</span>
+                  <span className="block text-ink-3">진행 {x.pos} · 대상 아님 {x.neg}{k === 'add' ? ` · 지난 30일 더 보일 공고 ${x.more}` : ` · 지난 30일 가려질 공고 ${x.hidden}`}</span>
+                  {x.risky && <span className="block font-medium text-amber-800">진행한 공고 {x.pos}건도 가려집니다 — 확인 뒤 고르세요</span>}</span></label>
+            </li>))}{!s[k].length && <li className="text-ink-3">없음</li>}</ul></div>))}</div>}
+      {s && s.missed.length > 0 && <details className="mt-2" data-testid="kw-missed"><summary className="cursor-pointer font-medium text-ink">지난 30일 놓친 공고 후보 {s.missed.length}건</summary>
+        <ul className="mt-1 space-y-0.5 pl-3 text-ink-2">{s.missed.map((m) => <li key={m.id} className="truncate">· {m.title} <span className="text-ink-3">(&apos;{m.word}&apos;)</span></li>)}</ul></details>}
+      {s && any && data.canEdit && <div className="mt-2 flex justify-end"><Button size="sm" onClick={apply} disabled={busy || !Object.values(chosen).some(Boolean)} data-testid="kw-apply">고른 것 반영</Button></div>}
+    </div>
   );
 }
 
