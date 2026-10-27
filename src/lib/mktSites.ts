@@ -6,6 +6,7 @@ import { HttpError, unauthorized } from './errors';
 import { assertSpace } from './spaces';
 import { tenantOf, type SessionUser } from './types';
 import { adAttrib, isTelLabel, kwKey } from './adAttrib';
+import { adCampaignBrands, campBrandExpr, campBrandJoin } from './adBrand';
 
 /**
  * 대표 10/20 14:10 ①: 사이트별 운영 집계 — 브랜드(사이트)마다 주 단위로 방문자·CTA 클릭·게시·광고(비용·클릭)·문의를 한 표에, 이번 주 요약 한 줄(주간 보고용).
@@ -64,7 +65,10 @@ export async function sitesView(u: SessionUser, weeks = 4) {
   const from0 = wk[wk.length - 1].from, to0 = wk[0].to;
   const ev = await sql<{ site: string; day: string; event: string; n: number }[]>`select site, to_char(day, 'YYYY-MM-DD') as day, event, sum(n)::int n from mkt_site_events where tenant = ${t} and day between ${from0}::date and ${to0}::date group by site, day, event`;
   const posts = await sql<{ brand_id: string | null; day: string; n: number }[]>`select brand_id, to_char((coalesce(published_at, scheduled_at) at time zone 'Asia/Seoul')::date, 'YYYY-MM-DD') as day, count(*)::int n from mkt_contents where tenant = ${t} and not is_test and status = 'published' and (coalesce(published_at, scheduled_at) at time zone 'Asia/Seoul')::date between ${from0}::date and ${to0}::date group by brand_id, 2`;
-  const ads = await sql<{ brand_id: string | null; day: string; cost: number; clicks: number }[]>`select a.brand_id, to_char(s.day, 'YYYY-MM-DD') as day, sum(s.cost_krw)::float8 cost, sum(s.clicks)::float8 clicks from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.day between ${from0}::date and ${to0}::date group by a.brand_id, s.day`;
+  // 221차 #531: 광고비도 캠페인 단위 브랜드로(여러 브랜드가 같이 쓰는 계정은 캠페인 이름·직접 지정으로 나눔)
+  const cb = await adCampaignBrands(sql, t);
+  const ads = await sql<{ brand_id: string | null; day: string; cost: number; clicks: number }[]>`select ${campBrandExpr(sql)} as brand_id, to_char(s.day, 'YYYY-MM-DD') as day, sum(s.cost_krw)::float8 cost, sum(s.clicks)::float8 clicks
+    from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id ${campBrandJoin(sql, cb)} where a.tenant = ${t} and s.day between ${from0}::date and ${to0}::date group by 1, 2`;
   const calls = await sql<{ brand_id: string | null; day: string; n: number }[]>`select brand_id, to_char((called_at at time zone 'Asia/Seoul')::date, 'YYYY-MM-DD') as day, count(*)::int n from mkt_calls where tenant = ${t} and status <> 'excluded' and (called_at at time zone 'Asia/Seoul')::date between ${from0}::date and ${to0}::date group by brand_id, 2`;
   const inq = await sql<{ site: string; day: string; n: number }[]>`select site, to_char((created_at at time zone 'Asia/Seoul')::date, 'YYYY-MM-DD') as day, count(*)::int n from inquiries where tenant = ${t} and (created_at at time zone 'Asia/Seoul')::date between ${from0}::date and ${to0}::date group by site, 2`;
   const sites = [...new Set([...ev.map((e) => e.site), ...inq.map((i) => i.site)])];

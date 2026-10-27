@@ -10,6 +10,7 @@ import { appUrl } from './mail';
 import { zUuid } from './api';
 import { tenantOf, type SessionUser } from './types';
 import { metaDialog, metaGraph } from './metaGraph';
+import { adCampaignBrands, campBrandExpr, campBrandJoin } from './adBrand';
 
 /**
  * V41 4-2 광고 성과 읽기 — 회사별 직접 연결(F-5, Windsor 등 중개 없음). 읽기 전용: 광고를 바꾸는 기능은 없다.
@@ -279,13 +280,17 @@ export async function adsOverview(u: SessionUser, q: { days?: number; month?: st
   const from = month ? `${month}-01` : daysBack(n)[0]; const to = month ? lastDayOf(month) : today;
   const accounts = await sql`select a.id, a.provider, a.external_id, a.label, a.status, a.last_sync_at, a.last_error, b.name as brand from mkt_ad_accounts a left join mkt_brands b on b.id = a.brand_id
     where a.tenant = ${t} order by a.provider, a.label`;
-  const base = (f = from, tt = to) => sql`from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id left join mkt_brands b on b.id = a.brand_id where a.tenant = ${t} and s.day between ${f}::date and ${tt}::date
-    and (${brand} = '' or (${brand} = 'none' and a.brand_id is null) or a.brand_id::text = ${brand}) and (${provider} = '' or a.provider = ${provider})`;
+  // 221차 #531: 브랜드는 캠페인 단위(직접 지정 > 계정 브랜드 > 캠페인 이름) — 여러 브랜드가 같이 쓰는 계정도 브랜드로 나뉨
+  const cb = await adCampaignBrands(sql, t); const EB = campBrandExpr(sql);
+  const base = (f = from, tt = to) => sql`from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id ${campBrandJoin(sql, cb)} left join mkt_brands b on b.id = ${EB} where a.tenant = ${t} and s.day between ${f}::date and ${tt}::date
+    and (${brand} = '' or (${brand} = 'none' and ${EB} is null) or ${EB}::text = ${brand}) and (${provider} = '' or a.provider = ${provider})`;
   const SUM = sql`coalesce(sum(impressions), 0)::float8 impressions, coalesce(sum(clicks), 0)::float8 clicks, coalesce(sum(cost_krw), 0)::float8 cost, coalesce(sum(conversions), 0)::float8 conversions`;
   const [tot] = await sql`select ${SUM} ${base()}`;
-  const campaigns = await sql`select a.id as account_id, a.provider, a.label, b.name as brand, s.campaign_id, max(s.campaign_name) campaign_name, max(s.currency) currency,
+  const cbOf = new Map(cb.map((x) => [`${x.account_id}:${x.campaign_id}`, x]));
+  const campaigns = (await sql`select a.id as account_id, a.provider, a.label, ${EB} as brand_id, b.name as brand, s.campaign_id, max(s.campaign_name) campaign_name, max(s.currency) currency,
       sum(impressions)::float8 impressions, sum(clicks)::float8 clicks, sum(cost_krw)::float8 cost, sum(conversions)::float8 conversions ${base()}
-    group by a.id, a.provider, a.label, b.name, s.campaign_id order by sum(cost_krw) desc limit 200`;
+    group by a.id, a.provider, a.label, e.account_id, e.brand_id, b.name, s.campaign_id order by sum(cost_krw) desc limit 200`)
+    .map((c: any) => { const x = cbOf.get(`${c.account_id}:${c.campaign_id}`); return { ...c, brand_source: x?.source ?? (c.brand_id ? 'account' : null), auto_brand_id: x ? x.auto_brand_id : c.brand_id, auto_source: x ? x.auto_source : (c.brand_id ? 'account' : null) }; });
   const daily = await sql`select to_char(s.day, 'YYYY-MM-DD') as day, sum(clicks)::float8 clicks, sum(cost_krw)::float8 cost, sum(conversions)::float8 conversions ${base()} group by s.day order by s.day`;
   const top5 = campaigns.slice(0, 5).map((c: any) => String(c.campaign_id));
   const campaignDaily = top5.length ? await sql`select s.campaign_id, max(s.campaign_name) campaign_name, a.provider, to_char(s.day, 'YYYY-MM-DD') as day, sum(cost_krw)::float8 cost, sum(clicks)::float8 clicks, sum(impressions)::float8 impressions ${base()} and s.campaign_id = any(${top5}) group by s.campaign_id, a.provider, s.day order by s.campaign_id, s.day` : [];
@@ -293,25 +298,27 @@ export async function adsOverview(u: SessionUser, q: { days?: number; month?: st
   // #98 ③ 키워드/소재 표(캠페인 아래 단위, 같은 기간·브랜드·매체 필터, 광고비 순 150개)
   const items = (kind: 'keyword' | 'ad') => sql`select a.provider, a.label, b.name as brand, s.item_id, max(s.item_name) item_name, max(s.campaign_name) campaign_name, max(s.adgroup_name) adgroup_name, max(s.currency) currency,
       sum(impressions)::float8 impressions, sum(clicks)::float8 clicks, sum(cost_krw)::float8 cost, sum(conversions)::float8 conversions
-    from mkt_ad_items s join mkt_ad_accounts a on a.id = s.account_id left join mkt_brands b on b.id = a.brand_id where a.tenant = ${t} and s.kind = ${kind} and s.day between ${from}::date and ${to}::date
-      and (${brand} = '' or (${brand} = 'none' and a.brand_id is null) or a.brand_id::text = ${brand}) and (${provider} = '' or a.provider = ${provider})
+    from mkt_ad_items s join mkt_ad_accounts a on a.id = s.account_id ${campBrandJoin(sql, cb)} left join mkt_brands b on b.id = ${EB} where a.tenant = ${t} and s.kind = ${kind} and s.day between ${from}::date and ${to}::date
+      and (${brand} = '' or (${brand} = 'none' and ${EB} is null) or ${EB}::text = ${brand}) and (${provider} = '' or a.provider = ${provider})
     group by a.id, a.provider, a.label, b.name, s.item_id order by sum(cost_krw) desc, sum(clicks) desc limit 150`;
   const keywords = await items('keyword'); const creatives = await items('ad');
-  const brandList = await sql`select b.id, b.name from mkt_brands b where b.tenant = ${t} order by b.name`;
+  const brandList = await sql`select b.id, b.name, b.color, b.ad_aliases as aliases from mkt_brands b where b.tenant = ${t} order by b.name`;
+  // 221차 #531: 브랜드별(전체 화면 카드)·브랜드×매체 표 — 기간 보기에서도
+  const byBrand = await sql`select ${EB} as brand_id, coalesce(b.name, '(브랜드 없음)') as brand, ${SUM} ${base()} group by 1, 2 order by sum(cost_krw) desc`;
+  const byBrandProvider = await sql`select ${EB} as brand_id, coalesce(b.name, '(브랜드 없음)') as brand, a.provider, ${SUM} ${base()} group by 1, 2, 3 order by sum(cost_krw) desc`;
   const prevFrom = month ? null : daysBack(n * 2)[0]; const prevTo = month ? null : ymd(new Date(Date.parse(`${from}T12:00:00+09:00`) - 864e5));
   const [prevDays] = prevFrom && prevTo ? await sql`select ${SUM} ${base(prevFrom, prevTo)}` : [null];
   const balances = await (await import('./mktRecharge')).balancesView(t);
   const savings = await (await import('./adOps')).agencySavings(t, Number(tot?.cost ?? 0)); // 광고 최적화 1차 ④ 이 기간 광고비 × 대행 수수료율(추정)
-  const common = { accounts, balances, savings, totals: tot, campaigns, keywords, creatives, daily, campaignDaily, byProvider: byProviderAll, brands: brandList, filter: { brand, provider }, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
+  const common = { accounts, balances, savings, totals: tot, campaigns, keywords, creatives, daily, campaignDaily, byProvider: byProviderAll, byBrand, byBrandProvider, brands: brandList, filter: { brand, provider }, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
     // 로컬 검수: 콘솔에 등록할 콜백 주소를 화면에 그대로(APP_URL 기준 — 도메인 바꾸면 이 주소도 바뀜)
     callbacks: u.platformAdmin ? { meta: callback('meta'), google: callback('google'), metaPublish: `${appUrl()}/api/marketing/publish/callback/meta` } : null }; // 콘솔 등록 값은 플랫폼 관리자에게만(고객 화면에서 기술 단계 숨김)
   if (!month) return { days: n, from, to, month: null, prev: prevDays, prevFrom, prevTo, ...common };
   const prevM = monthShift(month, -1);
   const [prev] = await sql`select ${SUM} ${base(`${prevM}-01`, lastDayOf(prevM))}`;
-  const byBrand = await sql`select coalesce(b.name, '(브랜드 없음)') as brand, ${SUM} ${base()} group by b.name order by sum(cost_krw) desc`;
   const months = [...new Set([month, ...Array.from({ length: 6 }, (_, i) => monthShift(today.slice(0, 7), -i))])].sort().reverse();
   const [an] = await sql<{ value: any }[]>`select value from app_settings where key = ${`mkt_ads_analysis:${t}:${month}`}`;
-  return { days: null, from, to, month, prevMonth: prevM, prev, byBrand, months, analysis: an?.value ?? null, ...common };
+  return { days: null, from, to, month, prevMonth: prevM, prev, months, analysis: an?.value ?? null, ...common };
 }
 export { lastDayOf as adsLastDayOf, monthShift as adsMonthShift };
 
@@ -336,6 +343,31 @@ export async function updateAccount(u: SessionUser, id: string, i: z.infer<typeo
   const [a] = await db()`update mkt_ad_accounts set label = coalesce(${i.label ?? null}, label), brand_id = ${i.brandId === undefined ? db()`brand_id` : i.brandId} where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!a) throw notFound();
   return { ok: true };
+}
+/** 221차 #531: 캠페인 브랜드 직접 지정(관리자) — brandId = 브랜드 / null = 공통(브랜드 없음) / 'auto' = 직접 지정 지우기(계정 브랜드·캠페인 이름으로) */
+export const campaignBrandInput = z.object({ accountId: zUuid, campaignId: z.string().trim().min(1).max(200), brandId: z.union([zUuid, z.literal('auto'), z.null()]) });
+export async function setCampaignBrand(u: SessionUser, i: z.infer<typeof campaignBrandInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const sql = db(); const t = tenantOf(u);
+  const [c] = await sql`select 1 from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.account_id = ${i.accountId} and s.campaign_id = ${i.campaignId} limit 1`;
+  if (!c) throw notFound('캠페인을 찾을 수 없습니다');
+  if (i.brandId && i.brandId !== 'auto' && !(await sql`select 1 from mkt_brands where id = ${i.brandId} and tenant = ${t}`).length) throw notFound('브랜드를 찾을 수 없습니다');
+  if (i.brandId === 'auto') await sql`delete from mkt_ad_campaign_brands where account_id = ${i.accountId} and campaign_id = ${i.campaignId}`;
+  else await sql`insert into mkt_ad_campaign_brands (account_id, campaign_id, brand_id, set_by) values (${i.accountId}, ${i.campaignId}, ${i.brandId}, ${u.id})
+    on conflict (account_id, campaign_id) do update set brand_id = excluded.brand_id, set_by = excluded.set_by, set_at = now()`;
+  await audit(sql, u.id, 'mkt_ads.campaign_brand', 'mkt_ad_account', i.accountId, { campaignId: i.campaignId, brandId: i.brandId }).catch(() => {});
+  const x = (await adCampaignBrands(sql, t)).find((r) => r.account_id === i.accountId && r.campaign_id === i.campaignId);
+  return { brandId: x?.brand_id ?? null, source: x?.source ?? null };
+}
+/** 221차 #531: 브랜드마다 캠페인 이름에서 찾는 낱말(관리자) — 브랜드 이름은 늘 찾음, 여기는 더 찾을 낱말(예: HILINK·하이링크SA) */
+export const brandAliasesInput = z.object({ brandId: zUuid, aliases: z.array(z.string().trim().min(2, '찾는 낱말은 2자 이상입니다').max(30, '찾는 낱말은 30자까지입니다')).max(12, '찾는 낱말은 12개까지입니다') });
+export async function setBrandAliases(u: SessionUser, i: z.infer<typeof brandAliasesInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const seen = new Set<string>(); const aliases = i.aliases.filter((x) => { const k = x.toLowerCase().replace(/\s+/g, ''); return !seen.has(k) && !!seen.add(k); }); // 대소문자·띄어쓰기만 다르면 처음 것 하나
+  const [b] = await db()<{ id: string; ad_aliases: string[] }[]>`update mkt_brands set ad_aliases = ${aliases}::text[] where id = ${i.brandId} and tenant = ${tenantOf(u)} returning id, ad_aliases`;
+  if (!b) throw notFound('브랜드를 찾을 수 없습니다');
+  await audit(db(), u.id, 'mkt_ads.brand_aliases', 'mkt_brand', b.id, { aliases }).catch(() => {});
+  return { id: b.id, aliases: b.ad_aliases };
 }
 /** 연결 끊기: 비밀값 지우고 모은 성과도 함께 지움 */
 export async function removeAccount(u: SessionUser, id: string) {

@@ -8,7 +8,9 @@ import { Button, ErrorBox, Field, Modal, PendingButton, Skeleton, btnCls, cx, fm
 const C = '#7C3AED';
 const P_COLOR: Record<string, string> = { naver: '#03C75A', google: '#4285F4', meta: '#1877F2' };
 type Acc = { id: string; provider: string; external_id: string; label: string; status: string; last_sync_at: string | null; last_error: string | null; brand: string | null };
-type Camp = { account_id: string; provider: string; label: string; campaign_id: string; campaign_name: string; currency: string; impressions: number; clicks: number; cost: number; conversions: number };
+type Src = 'manual' | 'account' | 'name' | null;
+type Camp = { account_id: string; provider: string; label: string; campaign_id: string; campaign_name: string; currency: string; impressions: number; clicks: number; cost: number; conversions: number;
+  brand?: string | null; brand_id?: string | null; brand_source?: Src; auto_brand_id?: string | null; auto_source?: Src };
 type Balance = { id: string; provider: string; label: string; balance: number; currency: string; source: 'manual' | 'api'; checked_at: string; pace: number; days: number | null; level: 'ok' | 'warn' | 'action'; link: string; how: string };
 type Item = { provider: string; label: string; brand: string | null; item_id: string; item_name: string; campaign_name: string; adgroup_name: string; currency: string; impressions: number; clicks: number; cost: number; conversions: number };
 type Data = { days: number; accounts: Acc[]; balances?: Balance[]; totals: { impressions: number; clicks: number; cost: number; conversions: number }; campaigns: Camp[]; keywords?: Item[]; creatives?: Item[];
@@ -71,8 +73,10 @@ const connectMsg = (sp: URLSearchParams) => (sp.get('published') ? `인스타그
 
 type Sum = { impressions: number; clicks: number; cost: number; conversions: number };
 type Analysis = { month: string; summary: string; good: string[]; bad: string[]; proposals: { title: string; detail: string; expected: string }[]; source: 'ai' | 'template'; generatedAt: string; cardId?: string | null };
-type MonthData = Data & { savings?: { pct: number; spend: number; amount: number }; from: string; to: string; month: string | null; prevMonth: string; prev: Sum | null; prevFrom?: string | null; prevTo?: string | null; byProvider: (Sum & { provider: string })[]; byBrand: (Sum & { brand: string })[]; months: string[]; analysis: Analysis | null;
-  brands: { id: string; name: string }[]; filter: { brand: string; provider: string }; campaignDaily: { campaign_id: string; campaign_name: string; provider: string; day: string; cost: number; clicks: number; impressions: number }[] };
+type Brand = { id: string; name: string; color: string; aliases: string[] };
+type BrandSum = Sum & { brand: string; brand_id: string | null };
+type MonthData = Data & { savings?: { pct: number; spend: number; amount: number }; from: string; to: string; month: string | null; prevMonth: string; prev: Sum | null; prevFrom?: string | null; prevTo?: string | null; byProvider: (Sum & { provider: string })[]; byBrand: BrandSum[]; byBrandProvider: (BrandSum & { provider: string })[]; months: string[]; analysis: Analysis | null;
+  brands: Brand[]; filter: { brand: string; provider: string }; campaignDaily: { campaign_id: string; campaign_name: string; provider: string; day: string; cost: number; clicks: number; impressions: number }[] };
 /** 대표 10/20 14:10 ③: 캠페인 표 CSV(엑셀용 BOM) */
 function toCsv(rows: Camp[], label: string) {
   const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -124,6 +128,70 @@ function SumTable({ rows, head, testid, label }: { rows: Sum[]; head: string; te
   );
 }
 
+const SRC: Record<string, string> = { manual: '직접', account: '계정', name: '이름' };
+const NONE_COLOR = '#9ca3af';
+/** 221차 #531: 전체 화면 브랜드별 카드(광고비 순) — 누르면 그 브랜드만 */
+function BrandCards({ rows, total, brands, onPick }: { rows: BrandSum[]; total: number; brands: Brand[]; onPick: (id: string) => void }) {
+  const none = rows.find((r) => !r.brand_id);
+  return (
+    <section data-testid="ads-brand-cards">
+      <h2 className="mb-1.5 text-sm font-semibold">브랜드별 <span className="text-xs font-normal text-ink-3">광고비 순 · 누르면 그 브랜드만</span></h2>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">{rows.map((r) => (
+        <button key={r.brand_id ?? 'none'} type="button" onClick={() => onPick(r.brand_id ?? 'none')} className={cx('rounded-card border bg-white p-2.5 text-left shadow-card hover:border-violet-400', r.brand_id ? 'border-line' : 'border-amber-300 bg-amber-50/40')} data-testid="ads-brand-card" data-brand={r.brand}>
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-2"><span className="size-2 shrink-0 rounded-full" style={{ background: brands.find((b) => b.id === r.brand_id)?.color ?? NONE_COLOR }} /><span className="truncate">{r.brand}</span></span>
+          <span className="mt-0.5 block text-base font-bold tabular-nums" style={{ color: C }}>{won(r.cost)}</span>
+          <span className="block text-[11px] text-ink-3">클릭 {n0(r.clicks)} · 전환 {n0(r.conversions)}{total ? ` · ${Math.round((r.cost / total) * 100)}%` : ''}</span>
+        </button>))}</div>
+      {none && <p className="mt-1 text-[11px] text-amber-800" data-testid="ads-brand-none-hint">(브랜드 없음) = 브랜드가 정해지지 않은 캠페인입니다 — 아래 캠페인 표에서 브랜드를 고르거나, 브랜드마다 &apos;찾는 낱말&apos;을 넣으면 나뉩니다.</p>}
+    </section>
+  );
+}
+/** 221차 #531: 브랜드 × 매체 표(광고비·클릭) + 합계 */
+function BrandMatrix({ rows, byBrand, byProvider, label }: { rows: (BrandSum & { provider: string })[]; byBrand: BrandSum[]; byProvider: (Sum & { provider: string })[]; label: (p: string) => string }) {
+  const provs = byProvider.map((p) => p.provider).filter((p) => rows.some((r) => r.provider === p));
+  const cell = (b: string | null, p: string) => rows.find((r) => r.brand_id === b && r.provider === p);
+  const tot = byBrand.reduce((a, r) => ({ cost: a.cost + r.cost, clicks: a.clicks + r.clicks, conversions: a.conversions + r.conversions }), { cost: 0, clicks: 0, conversions: 0 });
+  return (
+    <section className="overflow-x-auto rounded-card border border-line bg-white shadow-card">
+      <table className="w-full min-w-[560px] text-sm" data-testid="ads-by-brand"><thead className="bg-slate-50 text-xs text-ink-2"><tr><th className="p-2 text-left">브랜드 × 매체</th>
+        {provs.map((p) => <th key={p} className="p-2 text-right"><span className="mr-1 inline-block size-2 rounded-full" style={{ background: P_COLOR[p] }} />{label(p)}</th>)}<th className="p-2 text-right">합계</th><th className="p-2 text-right">전환(건당)</th></tr></thead>
+        <tbody>{byBrand.map((b) => (
+          <tr key={b.brand_id ?? 'none'} className="border-t border-line" data-testid="ads-brand-row" data-brand={b.brand}><td className={cx('p-2', !b.brand_id && 'text-amber-800')}>{b.brand}</td>
+            {provs.map((p) => { const c = cell(b.brand_id, p); return <td key={p} className="p-2 text-right tabular-nums">{c ? <>{won(c.cost)}<span className="block text-[11px] text-ink-3">클릭 {n0(c.clicks)}</span></> : <span className="text-ink-3">—</span>}</td>; })}
+            <td className="p-2 text-right font-semibold tabular-nums">{won(b.cost)}<span className="block text-[11px] font-normal text-ink-3">클릭 {n0(b.clicks)}</span></td>
+            <td className="p-2 text-right tabular-nums">{n0(b.conversions)}{b.conversions ? <span className="block text-[11px] text-ink-3">{won(b.cost / b.conversions)}</span> : null}</td></tr>))}
+          {!byBrand.length && <tr><td colSpan={provs.length + 3} className="p-4 text-center text-xs text-ink-3">이 기간 기록이 없습니다</td></tr>}</tbody>
+        {byBrand.length > 1 && <tfoot className="border-t-2 border-line bg-slate-50/60 text-xs"><tr><td className="p-2 font-semibold">합계</td>
+          {provs.map((p) => { const x = byProvider.find((r) => r.provider === p); return <td key={p} className="p-2 text-right tabular-nums">{x ? won(x.cost) : '—'}</td>; })}
+          <td className="p-2 text-right font-semibold tabular-nums">{won(tot.cost)}</td><td className="p-2 text-right tabular-nums">{n0(tot.conversions)}</td></tr></tfoot>}</table>
+    </section>
+  );
+}
+/** 221차 #531: 브랜드마다 캠페인 이름에서 찾는 낱말(관리자) — 브랜드 이름은 늘 찾음 */
+function AliasPanel({ brands, onSaved }: { brands: Brand[]; onSaved: () => void }) {
+  return (
+    <details className="rounded-card border border-line bg-white p-3 text-xs shadow-card" data-testid="ads-aliases"><summary className="cursor-pointer text-sm font-semibold">캠페인 이름으로 브랜드 나누기 <span className="text-xs font-normal text-ink-3">찾는 낱말</span></summary>
+      <p className="mt-1.5 text-ink-2">여러 브랜드가 같이 쓰는 광고 계정은 캠페인 이름에 들어 있는 브랜드 이름으로 나눕니다. 이름이 다르게 들어가 있으면(예: 영문 HILINK) 찾는 낱말을 더해 주세요. 두 브랜드가 함께 들어간 캠페인은 정하지 않으니 캠페인 표에서 직접 골라 주세요. 계정에 브랜드를 정해 둔 계정은 그 브랜드가 먼저입니다.</p>
+      <ul className="mt-2 space-y-1.5">{brands.map((b) => <AliasRow key={b.id} b={b} onSaved={onSaved} />)}</ul>
+    </details>
+  );
+}
+function AliasRow({ b, onSaved }: { b: Brand; onSaved: () => void }) {
+  const [v, setV] = useState(b.aliases.join(', ')); const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    try { const aliases = v.split(/[,\n]/).map((x) => x.trim()).filter(Boolean); const r = await api<{ aliases: string[] }>('/api/marketing/ads/brand-aliases', { method: 'PUT', body: { brandId: b.id, aliases } }); setV(r.aliases.join(', ')); toast.ok(`${b.name} 찾는 낱말을 저장했습니다 — 캠페인 브랜드를 다시 나눴습니다`); onSaved(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <li className="flex flex-wrap items-center gap-1.5" data-testid="ads-alias-row" data-brand={b.name}>
+      <span className="flex w-28 shrink-0 items-center gap-1.5 truncate font-medium"><span className="size-2 shrink-0 rounded-full" style={{ background: b.color }} />{b.name}</span>
+      <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-0 text-xs')} value={v} onChange={(e) => setV(e.target.value)} placeholder="예: HILINK, 하이링크SA (쉼표로 나눔)" aria-label={`${b.name} 찾는 낱말`} data-testid="ads-alias-input" />
+      <Button size="sm" variant="secondary" onClick={save} disabled={busy} data-testid="ads-alias-save">{busy ? '저장 중…' : '저장'}</Button>
+    </li>
+  );
+}
+
 /** 대표 10/21 ①: 월마다 AI 마케터(30년차) 분석 — 좋았던 점·나빴던 점·다음 달 제안 3개 → [승인 요청 카드로 보내기] */
 function MonthAnalysis({ month, analysis, canEdit, onChange }: { month: string; analysis: Analysis | null; canEdit: boolean; onChange: (a: Analysis) => void }) {
   const [busy, setBusy] = useState<'' | 'run' | 'card'>('');
@@ -163,6 +231,10 @@ export function Ads() {
   const { data, error, reload, setData } = useApi<MonthData>(`/api/marketing/ads?${query}`, [query]);
   const [tab, setTab] = useState<'campaign' | 'keyword' | 'ad'>('campaign'); // #98 ③ 캠페인 / 키워드 / 소재 표
   const msg = connectMsg(sp);
+  async function setCampBrand(c: Camp, v: string) { // 221차 #531: 캠페인 브랜드 직접 지정(관리자) — 'auto' = 자동(계정·이름)
+    try { await api('/api/marketing/ads/campaign-brand', { method: 'PUT', body: { accountId: c.account_id, campaignId: c.campaign_id, brandId: v === 'auto' ? 'auto' : v === 'none' ? null : v } }); toast.ok(v === 'auto' ? '자동(계정·캠페인 이름)으로 돌렸습니다' : '캠페인 브랜드를 정했습니다'); reload(); }
+    catch (e: any) { toast.error(e.message); }
+  }
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={5} />;
   const t = data.totals; const p = data.prev; const dl = data.month ? '전월' : `이전 ${data.days}일`;
@@ -197,11 +269,11 @@ export function Ads() {
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, v, d]) => <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ads-card"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div>{d && <div className="mt-0.5 text-[11px]">{d}</div>}</div>)}</div>
       {!!data.savings?.amount && <p className="text-xs text-ink-2" data-testid="ads-savings">대행사 대비 절감액(추정) <b className="text-emerald-800">{won(data.savings.amount)}</b> — 이 기간 광고비 {won(data.savings.spend)} × 대행 수수료율 {data.savings.pct}%(통상 15~20%, 광고 운영에서 바꿀 수 있음)</p>}
+      {!brand && (data.byBrand ?? []).length > 0 && <BrandCards rows={data.byBrand} total={t.cost} brands={data.brands ?? []} onPick={setBrand} />}
       {data.month && <MonthAnalysis month={data.month} analysis={data.analysis} canEdit={data.canEdit} onChange={(a) => setData({ ...data, analysis: a })} />}
-      <div className="grid gap-3 lg:grid-cols-2">
-        <SumTable rows={data.byProvider ?? []} head="매체" testid="ads-by-provider" label={(r) => <><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[r.provider] }} />{data.providers.find((x) => x.key === r.provider)?.label ?? r.provider}</> as unknown as string} />
-        {data.month && <SumTable rows={data.byBrand} head="브랜드" testid="ads-by-brand" label={(r) => r.brand} />}
-      </div>
+      <SumTable rows={data.byProvider ?? []} head="매체" testid="ads-by-provider" label={(r) => <><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[r.provider] }} />{data.providers.find((x) => x.key === r.provider)?.label ?? r.provider}</> as unknown as string} />
+      {!brand && <BrandMatrix rows={data.byBrandProvider ?? []} byBrand={data.byBrand ?? []} byProvider={data.byProvider ?? []} label={(p) => data.providers.find((x) => x.key === p)?.label ?? p} />}
+      {!brand && data.canEdit && (data.brands ?? []).length > 0 && <AliasPanel brands={data.brands} onSaved={reload} />}
       {!!data.daily.length && (
         <section className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">날짜별 광고비</h2>
           <div className="flex h-24 items-end gap-1">{data.daily.map((d) => <div key={d.day} className="flex-1 rounded-t" style={{ height: `${Math.max(3, (d.cost / max) * 100)}%`, background: C, opacity: 0.75 }} title={`${d.day} · ${won(d.cost)} · 클릭 ${n0(d.clicks)} · 전환 ${n0(d.conversions)}`} />)}</div>
@@ -219,12 +291,18 @@ export function Ads() {
         <button key={k} type="button" onClick={() => setTab(k)} className={cx('rounded-full border px-2.5 py-1', tab === k ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white text-ink-2')} data-testid={`ads-tab-${k}`}>{l} <span className="text-ink-3">{n}</span></button>))}
         <span className="text-[11px] text-ink-3">키워드·소재는 네이버(키워드·소재)·구글(키워드·광고)·Meta(광고) 매일 아침 동기화</span></div>
       {tab === 'campaign' && <section className="overflow-x-auto rounded-card border border-line bg-white shadow-card">
-        <table className="w-full min-w-[640px] text-sm" data-testid="ads-table"><thead className="bg-slate-50 text-xs text-ink-2"><tr><th className="p-2 text-left">캠페인</th><th className="p-2 text-right">노출</th><th className="p-2 text-right">클릭(CTR)</th><th className="p-2 text-right">광고비</th><th className="p-2 text-right">CPC</th><th className="p-2 text-right">전환</th></tr></thead>
+        {data.campaigns.some((c) => !c.brand_id) && <p className="border-b border-line bg-amber-50 px-3 py-1.5 text-xs text-amber-900" data-testid="ads-camp-unbranded">브랜드가 정해지지 않은 캠페인 {data.campaigns.filter((c) => !c.brand_id).length}개{data.canEdit ? ' — 브랜드 칸에서 골라 주세요' : ' — 관리자가 브랜드를 정할 수 있습니다'}</p>}
+        <table className="w-full min-w-[820px] text-sm" data-testid="ads-table"><thead className="bg-slate-50 text-xs text-ink-2"><tr><th className="p-2 text-left">캠페인</th><th className="p-2 text-left">브랜드</th><th className="p-2 text-right">노출</th><th className="p-2 text-right">클릭(CTR)</th><th className="p-2 text-right">광고비</th><th className="p-2 text-right">CPC</th><th className="p-2 text-right">전환</th></tr></thead>
           <tbody>{data.campaigns.map((c) => (
-            <tr key={`${c.account_id}:${c.campaign_id}`} className="border-t border-line"><td className="p-2"><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[c.provider] }} />{c.campaign_name || c.campaign_id}<span className="ml-1 text-xs text-ink-3">{c.label}{(c as any).brand ? ` · ${(c as any).brand}` : ''}</span></td>
+            <tr key={`${c.account_id}:${c.campaign_id}`} className="border-t border-line" data-testid="ads-camp-row"><td className="p-2"><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[c.provider] }} />{c.campaign_name || c.campaign_id}<span className="ml-1 text-xs text-ink-3">{c.label}</span></td>
+              <td className="p-2 text-xs" data-testid="ads-camp-brand-cell" data-source={c.brand_source ?? ''}>{data.canEdit
+                ? <select className={cx(inputCls, 'h-8 w-40 py-0 text-xs', !c.brand_id && 'border-amber-400 text-amber-900')} value={c.brand_source === 'manual' ? (c.brand_id ?? 'none') : 'auto'} onChange={(e) => setCampBrand(c, e.target.value)} aria-label={`${c.campaign_name || c.campaign_id} 브랜드`} data-testid="ads-camp-brand">
+                    <option value="auto">자동 · {c.auto_brand_id ? `${(data.brands ?? []).find((b) => b.id === c.auto_brand_id)?.name ?? '?'}(${SRC[c.auto_source ?? ''] ?? ''})` : '정하지 않음'}</option>
+                    {(data.brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}<option value="none">공통(브랜드 없음)</option></select>
+                : c.brand_id ? <>{c.brand}<span className="ml-1 text-ink-3">({SRC[c.brand_source ?? ''] ?? '계정'})</span></> : <span className="text-amber-800">{c.brand_source === 'manual' ? '공통(브랜드 없음)' : '정하지 않음'}</span>}</td>
               <td className="p-2 text-right tabular-nums">{n0(c.impressions)}</td><td className="p-2 text-right tabular-nums">{n0(c.clicks)} <span className="text-ink-3">({pct(c.clicks, c.impressions)})</span></td>
               <td className="p-2 text-right tabular-nums">{won(c.cost, c.currency)}</td><td className="p-2 text-right tabular-nums">{c.clicks ? won(c.cost / c.clicks, c.currency) : '—'}</td><td className="p-2 text-right tabular-nums">{n0(c.conversions)}</td></tr>))}
-            {!data.campaigns.length && <tr><td colSpan={6} className="p-6 text-center text-ink-3">{data.accounts.length ? '이 기간 성과가 없습니다' : '광고 계정을 연결하면 매일 아침 성과가 들어옵니다'}</td></tr>}</tbody></table>
+            {!data.campaigns.length && <tr><td colSpan={7} className="p-6 text-center text-ink-3">{data.accounts.length ? '이 기간 성과가 없습니다' : '광고 계정을 연결하면 매일 아침 성과가 들어옵니다'}</td></tr>}</tbody></table>
       </section>}
       {tab !== 'campaign' && <ItemTable kind={tab} rows={(tab === 'keyword' ? data.keywords : data.creatives) ?? []} hasAccounts={data.accounts.length > 0} />}
       {/* 로컬 검수 10/19: 계정 연결은 설정 › 연결 계정으로 — 여기는 숫자만 */}

@@ -74,6 +74,7 @@ import { research212 } from './research212.step.mjs';
 import { photos213 } from './photos213.step.mjs';
 import { digest215 } from './digest215.step.mjs';
 import { meet219 } from './meet219.step.mjs';
+import { adsBrand221 } from './adsBrand221.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2928,6 +2929,7 @@ await step('211차 대표 10/27: ② 업무 사진 14장(휴대폰) → 한 줄 
 await step('212차 #612 후속조사: 머리 줄 [이번 주 묶음 지금 만들기] → 업무 하나 · 카드 미확인·조사 예정 날짜(담당) · 업무 완료 창에 곳마다 값 → 카드 현 위탁사·계약만료 · 비운 곳 확인 못함', () => research212({ owner, ctx, sql, BASE, SHOTS }));
 await step('213차 대표 10/27 18:35 아이폰 사진 147장: [사진·영상] 고르기 창 → 준비 중 띠(취소하면 걷힘·파일이 들어오면 진행) · 메신저 35장 한 묶음(30장 잘림 없앰)·고른 순서', () => photos213({ owner, ctx, sql, BASE, SHOTS }));
 await step('215차 #530 당일 공고 메일 21라인 이상: 받은 기간·맞춤 조건 상자·금액 나눔·지역 제한 참가 가능/불가·일정 줄·배지·사업별 묶음·낙찰률, 휴대폰 폭 · 정기 시각 전 [나에게 시험 발송](오늘 기록 없음)', () => digest215({ owner, ctx, sql, BASE, SHOTS }));
+await step('221차 #531 광고 성과 캠페인 단위 브랜드: 공용 계정 캠페인 이름으로 브랜드 나눔 → 전체 화면 브랜드별 카드·브랜드×매체 표 → 캠페인 [브랜드] 직접 고르기 → 찾는 낱말 저장 → 카드 누르면 그 브랜드만 · 휴대폰 폭', () => adsBrand221({ owner, ctx, sql, BASE, SHOTS }));
 // 219차 화상회의: 시험 서버를 화상회의 스위치(가짜 엔진)를 켠 채 다시 띄워 확인하고, 끝나면 앞 단계 설정으로 되돌림
 await step('219차 워크인 화상회의(가짜 엔진): 일정 창 [워크인 화상회의] → 손님 이름 입장·대기 → 주최자 참가·허락 → 손님 회의 화면(휴대폰 폭) → 잠금·끝내기 → 일정 미리보기 회의 기록', async () => {
   // 옛 서버가 완전히 내려간 뒤 새로 띄움(열린 연결이 남아 옛 서버가 잠깐 더 답하는 일 막기 — 10초 넘으면 강제 종료)
