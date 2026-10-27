@@ -6,7 +6,8 @@ import { toggleSpace } from './marketing.step.mjs';
  *  → 같은 동작을 10초마다 다시(최대 6번) 하고, 주소가 바뀌는 순간(commit)까지만 기다림 — 화면 요소는 다음 줄의 waitFor 가 기다린다 */
 async function go(page, act, url) {
   for (let k = 0; ; k++) {
-    await act();
+    // 213차(CI 1550): 시트가 열리는 동안 다시 그려져 누를 칸이 떨어지면(element was detached) 누르기가 실패 — 그 판은 버리고 시트를 다시 열어 누름
+    try { await act(); } catch (e) { if (k >= 5) throw e; await page.waitForTimeout(500); continue; }
     try { await page.waitForURL(url, { timeout: 10_000, waitUntil: 'commit' }); return; } catch (e) { if (k >= 5) throw e; }
   }
 }
@@ -88,7 +89,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await go(m, () => m.getByTestId('mobile-tabs').getByRole('link', { name: '영업기회' }).tap(), /\/s\/sales\/hub(\?tab=bids&bt=today)?$/); // 대표 10/21 12:00 ③: 공공데이터·지역별·계약만료는 허브 카테고리 · #537 입찰을 켠 회사는 영업기회 › 입찰로
   await m.getByTestId('sales-hub-prospects').tap(); await m.getByTestId('prospects').waitFor();
   await m.getByTestId('profile-menu').tap();
-  await go(m, async () => { await sheetOpen('mobile-space-menu', 'profile-menu'); await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap(); }, /\/s\/sales\/sources$/);
+  await go(m, async () => { await sheetOpen('mobile-space-menu', 'profile-menu'); await m.getByTestId('mobile-space-menu').getByRole('link', { name: '데이터 설정' }).tap({ timeout: 8_000 }); }, /\/s\/sales\/sources$/);
   await m.getByTestId('sales-custom').waitFor(); // 로컬 10/19: 직접 추가한 출처(사이트·키워드·엑셀) 칸
   await m.getByTestId('profile-menu').tap();
   await go(m, async () => { await sheetOpen('mobile-spaces', 'profile-menu'); await m.getByTestId('mobile-space-work').tap(); }, /\/$/); // 마지막 공간 = 업무로 돌려 둠
