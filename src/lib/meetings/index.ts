@@ -139,12 +139,12 @@ export async function setEventMeeting(u: SessionUser, eventId: string, on: boole
     const m = cur ? (await sql<MeetingRow[]>`update meetings set status = case when status = 'ended' then 'open' else status end, ended_at = case when status = 'ended' then null else ended_at end,
         title = ${e.title}, expires_at = now() + interval '90 days', updated_at = now() where id = ${cur.id} returning *`)[0]
       : (await sql<MeetingRow[]>`insert into meetings (tenant, code, kind, event_id, title, host_id, created_by) values (${t}, ${newCode()}, 'event', ${master}, ${e.title}, ${e.created_by}, ${u.id}) returning *`)[0];
-    await sql`update events set meeting_url = ${meetUrl(m.code)}, updated_at = now(), version = version + 1 where id = ${master} or recurring_event_id = ${master}`;
+    await sql`update events set meeting_url = ${meetUrl(m.code)}, updated_at = now() where id = ${master} or recurring_event_id = ${master}`; // 판 번호는 그대로 — 일정 창의 자동 저장이 '다른 사람이 고침'(409)으로 막히지 않게
     await log(sql, m.id, cur ? 'reopen' : 'create', { by: u.id, data: { kind: 'event' } });
     return eventMeeting(u, eventId);
   }
   if (cur && cur.status !== 'ended') await endNow(sql, cur, u.id);
-  if (cur) await sql`update events set meeting_url = null, updated_at = now(), version = version + 1 where (id = ${master} or recurring_event_id = ${master}) and meeting_url = ${meetUrl(cur.code)}`;
+  if (cur) await sql`update events set meeting_url = null, updated_at = now() where (id = ${master} or recurring_event_id = ${master}) and meeting_url = ${meetUrl(cur.code)}`;
   return eventMeeting(u, eventId);
 }
 
@@ -188,6 +188,7 @@ export async function staffSeen(u: SessionUser, id: string, leave = false) {
   return seen(sql, m, p, leave, u.id);
 }
 async function seen(sql: Sql, m: MeetingRow, p: PartRow, leave: boolean, by: string | null) {
+  if (m.status === 'ended') return { state: 'ended' as const }; // 끝난 회의에 늦게 온 신호로 다시 입장 처리하지 않음
   if (leave) { await leftAt(sql, p.id, new Date()); await log(sql, m.id, 'leave', { participantId: p.id, by, data: { via: 'client' } }); return { state: 'left' as const }; }
   if (p.state === 'admitted' || p.state === 'left') {
     await sql`update meeting_participants set state = 'joined', first_joined_at = coalesce(first_joined_at, now()), last_joined_at = now(), left_at = null, last_seen_at = now() where id = ${p.id} and state in ('admitted', 'left')`;
