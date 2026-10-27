@@ -6,11 +6,19 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Loading, cx, fmtDateTime, toast } from '@/components/ui';
 import { NOTIFICATION_TYPES } from '@/lib/types';
 import { cameBack, useUrlState } from '@/components/urlState';
+import { isInApp } from '@/components/inApp';
+import { AlertTriangle, BarChart3, Bell, Briefcase, CalendarDays, ClipboardCheck, Clock, Folder, Layers, ListChecks, Mail, Megaphone, MessageCircle, type LucideIcon } from 'lucide-react';
 
 const SPACE_CHIP: Record<string, string> = { sales: '영업', marketing: '마케팅', work: '업무' };
 type Tab = 'unread' | 'all' | 'archived' | 'activity';
 const TABS: Tab[] = ['unread', 'all', 'archived', 'activity'];
 const SWIPE = 70; // px — 왼쪽으로 밀면 읽음, 오른쪽으로 밀면 보관
+/** 222차 #477 카톡형 방 목록: 종류별 아이콘(색은 디자인 문서 브랜드 색 하나) */
+const ROOM_ICON: [RegExp, LucideIcon][] = [[/chat|mention|comment/, MessageCircle], [/due|overdue|reminder|briefing|sms_due/, Clock], [/review|account_request|approval/, ClipboardCheck],
+  [/event|meeting/, CalendarDays], [/task|recurring/, ListChecks], [/report|month_close|revenue|usage/, BarChart3], [/mail/, Mail], [/announcement/, Megaphone],
+  [/lead|bid|support|sales/, Briefcase], [/error/, AlertTriangle], [/library/, Folder], [/digest/, Layers]];
+const roomIcon = (type: string) => ROOM_ICON.find(([re]) => re.test(type))?.[1] ?? Bell;
+const roomName = (label: string) => label.split('(')[0].trim(); // 설명 괄호는 빼고 짧게
 const LONG_PRESS = 500; // ms — 길게 누르면 다중 선택
 
 export default function Notifications() {
@@ -23,6 +31,16 @@ export default function Notifications() {
   const [tabQ, setTabQ] = useUrlState('tab', 'unread');
   const tab = (TABS.includes(tabQ as Tab) ? tabQ : 'unread') as Tab;
   const setTab = (t: Tab) => setTabQ(t);
+  // 222차 #477(대표 10/23): 카톡 대화방처럼 종류별 방 목록 → 방을 누르면 그 종류만(뒤로가기 = 방 목록). 앱은 '방'이 기본, 웹은 '목록'(바꾸면 이 기기 기억)
+  const [roomQ, setRoomQ] = useUrlState('room', '');
+  const [view, setViewS] = useState<'rooms' | 'list'>('list');
+  useEffect(() => { let v: string | null = null; try { v = localStorage.getItem('notif-view'); } catch { /* 무시 */ } setViewS(v === 'rooms' || v === 'list' ? v : isInApp() ? 'rooms' : 'list'); }, []);
+  const roomsOn = view === 'rooms' && (tab === 'unread' || tab === 'all');
+  const room = roomsOn && roomQ ? roomQ : null;
+  const pushedRoom = useRef(false);
+  const setView = (v: 'rooms' | 'list') => { setViewS(v); try { localStorage.setItem('notif-view', v); } catch { /* 무시 */ } if (v === 'list' && roomQ) setRoomQ(''); };
+  const openRoom = (type: string) => { const p = new URLSearchParams(location.search); p.set('room', type); pushedRoom.current = true; router.push(`/notifications?${p}`); };
+  const closeRoom = () => { if (pushedRoom.current) { pushedRoom.current = false; router.back(); } else setRoomQ(''); };
   const { data, error, loading, reload, setData } = useApi<any>(`/api/notifications${tab === 'archived' ? '?archived=1' : space ? `?space=${space}` : ''}`);
   // 로컬 10/19(대표) 홈 개편: 홈 '최근 활동' 카드가 여기 '활동' 탭으로
   const [doneIds, setDoneIds] = useState<string[]>([]); // 이 화면에서 방금 처리한 알림 — 다시 불러와도 안 읽음 탭에 "…함 ✓"로 남김
@@ -102,7 +120,7 @@ export default function Notifications() {
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold">알림 {data?.unread ? <span className="text-sm text-red-600">{data.unread}</span> : null}{space && <span className="ml-1 rounded-full bg-brand-50 px-2 text-xs font-normal text-brand-700" data-testid="notif-space-filter">{SPACE_CHIP[space]}만 <button type="button" className="underline" onClick={() => setSpaceQ('')}>해제</button></span>}</h1>
         <div className="flex gap-2"><Link href="/settings" className="text-sm text-brand-600 hover:underline">알림 설정</Link>
-          {tab !== 'activity' && tab !== 'archived' && <Button size="sm" variant="secondary" onClick={() => { setSelecting((s) => !s); setPicked([]); }} data-testid="notif-select" aria-pressed={selecting}>{selecting ? '선택 끝' : '선택'}</Button>}
+          {tab !== 'activity' && tab !== 'archived' && !(roomsOn && !room) && <Button size="sm" variant="secondary" onClick={() => { setSelecting((s) => !s); setPicked([]); }} data-testid="notif-select" aria-pressed={selecting}>{selecting ? '선택 끝' : '선택'}</Button>}
           <Button size="sm" variant="secondary" onClick={() => read()} disabled={!data?.unread} data-testid="read-all">모두 읽음</Button></div>
       </div>
       <div className="flex gap-1 text-sm" role="tablist" aria-label="알림 보기">
@@ -112,6 +130,9 @@ export default function Notifications() {
         ))}
         <button role="tab" aria-selected={tab === 'activity'} onClick={() => setTab('activity')} data-testid="notif-activity"
           className={cx('rounded-full px-3 py-1', tab === 'activity' ? 'bg-brand-600 text-white' : 'bg-white text-ink-2 ring-1 ring-line')}>활동</button>
+        {(tab === 'unread' || tab === 'all') && <span className="ml-auto inline-flex rounded-full bg-white p-0.5 text-xs ring-1 ring-line" role="group" aria-label="보기 방식">
+          {([['rooms', '방'], ['list', '목록']] as const).map(([k, l]) => <button key={k} type="button" onClick={() => setView(k)} aria-pressed={view === k} data-testid={`notif-view-${k}`}
+            className={cx('rounded-full px-2.5 py-0.5', view === k ? 'bg-ink text-white' : 'text-ink-2')}>{l}</button>)}</span>}
       </div>
       {/* #110 다중 선택 띠 */}
       {selecting && tab !== 'activity' && (
@@ -119,7 +140,7 @@ export default function Notifications() {
           <span className="font-medium">{picked.length}건 선택</span>
           <Button size="sm" onClick={() => read(pickedUnread)} disabled={!pickedUnread.length} data-testid="notif-sel-read">읽음</Button>
           <Button size="sm" variant="secondary" onClick={() => read(picked, true)} disabled={!picked.length} data-testid="notif-sel-archive">보관</Button>
-          <button type="button" className="text-xs text-ink-2 underline" onClick={() => setPicked(visible.map((n) => n.id))}>모두 선택</button>
+          <button type="button" className="text-xs text-ink-2 underline" onClick={() => setPicked((room ? visible.filter((n) => n.type === room) : visible).map((n) => n.id))}>모두 선택</button>
           <button type="button" className="text-xs text-ink-2 underline" onClick={() => { setSelecting(false); setPicked([]); }}>취소</button>
           <span className="ml-auto text-[11px] text-ink-3">휴대폰: 왼쪽으로 밀면 읽음 · 오른쪽으로 밀면 보관 · 길게 누르면 선택</span>
         </div>)}
@@ -138,6 +159,12 @@ export default function Notifications() {
           </ul>)
       ) : error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : !visible.length ? (
         <Empty title={tab === 'archived' ? '보관한 알림이 없습니다' : tab === 'all' ? '알림이 없습니다' : '새 알림이 없습니다'}>{tab === 'unread' && data.items.length > 0 && <button className="text-sm text-brand-600 underline" onClick={() => setTab('all')}>읽은 알림 보기</button>}</Empty>
+      ) : roomsOn && !room ? (
+        <RoomList groups={groups} onOpen={openRoom} />
+      ) : roomsOn && room ? (
+        <RoomView label={roomName(groups.find((g) => g.key === room)?.label ?? NOTIFICATION_TYPES[room as keyof typeof NOTIFICATION_TYPES] ?? room)} type={room} items={groups.find((g) => g.key === room)?.items ?? []} onBack={closeRoom} onReadAll={(ids) => read(ids)}
+          row={(n: any) => <Row key={n.id} n={n} archived={false} selecting={selecting} picked={picked.includes(n.id)} onPick={() => pickToggle(n.id)} onLongPress={() => { setSelecting(true); setPicked((p) => (p.includes(n.id) ? p : [...p, n.id])); }}
+            onRead={() => read([n.id])} onArchive={() => read([n.id], true)} onUnarchive={() => unarchive([n.id])} onOpen={() => !n.read_at && read([n.id])} runAction={runAction} />} />
       ) : (
         <div className="space-y-2" data-testid="notifications">
           {groups.map((g) => { const unread = g.items.filter((n) => !n.read_at).map((n) => n.id); const open = !collapsed[g.key];
@@ -160,6 +187,45 @@ export default function Notifications() {
         </div>
       )}
     </div>
+  );
+}
+
+/** 222차 #477 카톡형 방 목록 — 종류마다 한 줄(아이콘·이름·건수·최근 알림·시각·안 읽은 수), 최근 알림 순 */
+function RoomList({ groups, onOpen }: { groups: { key: string; label: string; items: any[] }[]; onOpen: (type: string) => void }) {
+  return (
+    <ul className="divide-y rounded-lg border bg-white" data-testid="notif-rooms">
+      {groups.map((g) => { const last = g.items[0]; const unread = g.items.filter((n) => !n.read_at).length; const Icon = roomIcon(g.key);
+        return (
+          <li key={g.key}>
+            <button type="button" onClick={() => onOpen(g.key)} className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 active:bg-slate-100" data-testid="notif-room" data-type={g.key} data-unread={unread}>
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700"><Icon className="size-5" /></span>
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-center gap-1.5"><b className="truncate text-sm font-semibold">{roomName(g.label)}</b><span className="shrink-0 text-xs text-ink-3">{g.items.length}</span></span>
+                <span className="block truncate text-sm text-ink-2" data-testid="notif-room-last">{last.title}</span>
+              </span>
+              <span className="flex shrink-0 flex-col items-end gap-1">
+                <span className="text-[11px] text-ink-3">{relTime(last.created_at)}</span>
+                {unread > 0 ? <span className="min-w-5 rounded-full bg-red-500 px-1.5 text-center text-[11px] font-semibold leading-5 text-white" data-testid="notif-room-unread">{unread > 99 ? '99+' : unread}</span> : <span className="h-5" />}
+              </span>
+            </button>
+          </li>);
+      })}
+    </ul>
+  );
+}
+/** 222차 #477 방 안 — 머리줄(뒤로·이름·건수·[이 방 읽음]) + 그 종류 알림(바로 처리 버튼·밀기·선택 그대로) */
+function RoomView({ label, type, items, onBack, onReadAll, row }: { label: string; type: string; items: any[]; onBack: () => void; onReadAll: (ids: string[]) => void; row: (n: any) => React.ReactNode }) {
+  const Icon = roomIcon(type); const unread = items.filter((n) => !n.read_at).map((n) => n.id);
+  return (
+    <section className="rounded-lg border bg-white" data-testid="notif-room-view" data-type={type}>
+      <div className="flex items-center gap-2 border-b px-2 py-1.5">
+        <button type="button" onClick={onBack} className="rounded-full px-2.5 py-1 text-xl leading-none text-ink-2 hover:bg-slate-50" aria-label="방 목록으로" data-testid="notif-room-back">‹</button>
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700"><Icon className="size-4" /></span>
+        <b className="min-w-0 truncate text-sm">{label}</b><span className="shrink-0 text-xs text-ink-3">{items.length}건{unread.length ? ` · 안 읽음 ${unread.length}` : ''}</span>
+        {unread.length > 0 && <button type="button" className="ml-auto shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs hover:bg-slate-50" onClick={() => onReadAll(unread)} data-testid="notif-room-read" title="이 방(이 종류) 알림만 읽음">이 방 읽음</button>}
+      </div>
+      {items.length ? <ul className="divide-y">{items.map((n) => row(n))}</ul> : <p className="px-4 py-6 text-center text-sm text-ink-3" data-testid="notif-room-empty">이 방에 새 알림이 없습니다</p>}
+    </section>
   );
 }
 
