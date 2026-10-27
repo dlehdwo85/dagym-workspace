@@ -9,6 +9,7 @@ import { isAwardResult, onbidSale } from './collectors/procurement';
 import { groupNotices, oneCardPerNotice, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { hubTabsOn } from './hubTabs';
+import { sourceAsOf } from './collectors/store';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -533,8 +534,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           elapsedDays: daysSince(day(pick(r, 'move_in_date', 'move_in_start')) ?? day(pick(r, 'completion_date', 'use_approval_date', 'completed_at'))), raw: r }; });
       type Fc = (typeof list)[number];
       const sorter: Record<string, (a: Fc, b: Fc) => number> = { completion: (a, b) => asc(a.date, b.date), moveIn: (a, b) => asc(a.moveIn, b.moveIn), elapsed: (a, b) => numDesc(a.elapsedDays, b.elapsedDays), households: (a, b) => numDesc(a.households, b.households), next: (a, b) => asc(a.next, b.next) };
-      return pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen),
-        sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))), (x) => x.contact);
+      // 200차 #699: 원본 기준일 한 줄 — 준공·입주 단지 원천의 기준일(우선순위 순: K-apt 자료실 주 1회 · K-apt 단지 목록 매일 · 한국부동산원 연 1회)
+      return { ...pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen),
+        sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))), (x) => x.contact),
+        sourceAsOf: await sourceAsOf(['kapt_weekly_complexes', 'kapt_new_complexes', 'reb_recent_complexes']) };
     }
     if (tab === 'vendors') {
       const P = new Map((await prog('vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));

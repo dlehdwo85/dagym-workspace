@@ -34,7 +34,9 @@ export function PayTest() {
   const home = useApi<Home>('/api/platform/pay-test');
   const [checkId, setCheckId] = useState<string | null>(sp.get('check'));
   const [busy, setBusy] = useState(false);
-  const [pick, setPick] = useState<{ plan: string; kind: 'monthly' | 'annual'; pm: 'CARD' | 'BANK' | 'VBANK' }>({ plan: '', kind: 'monthly', pm: 'CARD' });
+  const [pick, setPick] = useState<{ plan: string; kind: 'monthly' | 'annual'; pm: 'CARD' | 'BANK' | 'VBANK' | 'naverpay' | 'kakaopay' | 'tosspay' }>({ plan: '', kind: 'monthly', pm: 'CARD' });
+  // 200차 #706: 간편결제 바로 열기(나이스페이 결제창 생략) — 켜기(NICEPAY_EASY_PAY) 전에 상점이 그 간편결제를 쓸 수 있는지 시험
+  const easy = pick.pm === 'naverpay' || pick.pm === 'kakaopay' || pick.pm === 'tosspay';
   // #413: PC 레이어(iframe)가 열리자마자 닫히는 환경 — 나이스페이 모바일 방식(MobileYN=Y)으로 같은 탭 이동. 바로 닫히면 자동으로 켠다
   const [pageMode, setPageMode] = useState(false);
   const [lastClose, setLastClose] = useState<{ code: string; message: string; quick: boolean; at: string } | null>(null);
@@ -48,7 +50,7 @@ export function PayTest() {
     if (!plan) return;
     setBusy(true);
     try {
-      const r = await api(`/api/platform/pay-test/tester/window`, { body: { kind: pick.kind, planCode: plan, payMethod: pick.pm } });
+      const r = await api(`/api/platform/pay-test/tester/window`, { body: { kind: pick.kind, planCode: plan, ...(easy ? { payMethod: 'CARD', easyPay: pick.pm, agree: true } : { payMethod: pick.pm }) } });
       if (r.mode !== 'test') throw new Error('시험 상점이 아닙니다 — 결제창을 열지 않습니다');
       home.reload();
       await launch(r);
@@ -60,7 +62,7 @@ export function PayTest() {
     if (c === null) return;
     setBusy(true);
     try {
-      const r = await api(`/api/platform/pay-test/tester/live`, { body: { confirm: c } });
+      const r = await api(`/api/platform/pay-test/tester/live`, { body: { confirm: c, ...(easy ? { easyPay: pick.pm } : pick.pm === 'BANK' ? { payMethod: 'BANK' } : {}) } });
       if (r.mode !== 'live' || Number(r.params.Amt) !== 100) throw new Error('실결제 소액 시험 조건이 아닙니다 — 결제창을 열지 않습니다');
       home.reload();
       await launch(r);
@@ -90,7 +92,7 @@ export function PayTest() {
             {home.data?.plans.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
           </select>
           <select className={cx(inputCls, 'h-8 !w-auto py-0 text-xs')} value={pick.kind} onChange={(e) => setPick({ ...pick, kind: e.target.value as never })} aria-label="주기"><option value="monthly">월</option><option value="annual">연간</option></select>
-          <select className={cx(inputCls, 'h-8 !w-auto py-0 text-xs')} value={pick.pm} onChange={(e) => setPick({ ...pick, pm: e.target.value as never })} aria-label="결제 수단"><option value="CARD">카드</option><option value="BANK">계좌이체</option><option value="VBANK">가상계좌</option></select>
+          <select className={cx(inputCls, 'h-8 !w-auto py-0 text-xs')} value={pick.pm} onChange={(e) => setPick({ ...pick, pm: e.target.value as never })} aria-label="결제 수단"><option value="CARD">카드</option><option value="BANK">계좌이체</option><option value="VBANK">가상계좌</option><option value="naverpay">네이버페이(바로)</option><option value="kakaopay">카카오페이(바로)</option><option value="tosspay">토스페이(바로)</option></select>
           <Button size="sm" onClick={pay} disabled={busy || !plan} data-testid="pay-test-open">시험 결제창 열기</Button>
           {home.data?.liveAvailable && <Button size="sm" variant="danger" onClick={live} disabled={busy} data-testid="pay-live-open">실결제 100원 시험</Button>}
         </div>

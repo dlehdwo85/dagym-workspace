@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../../db';
 import { sourceFiles } from '../files';
 import { DAGYM_KEYWORDS, HILINK_KEYWORDS, PROCUREMENT_ETL_FIELDS, initialClassification, matchFit, planNoticeBatch } from './procurement';
-import { planBatch, prospectFromKaptSelection } from './prospects';
+import { COMPLEX_RANK, complexMatchKeys, planBatch, prospectFromKaptSelection } from './prospects';
 import type { CollectorResult } from './types';
 
 const SCOPE = 'global';
@@ -32,7 +32,7 @@ async function touchRows(tbl: string, ids: string[]) {
   for (let n = 0; n < ids.length; n += 500) await sql`update sales_src_rows set row = row || ${sql.json({ last_seen_at: t, last_seen_date: d } as never)}::jsonb, gone = false, synced_at = now() where scope = ${SCOPE} and tbl = ${tbl} and src_id = any(${ids.slice(n, n + 500)})`;
 }
 
-export type WriteSummary = { inserted: number; updated: number; unchanged: number; errors: number; invalid: number; duplicatesMerged: number; errorLog?: string };
+export type WriteSummary = { inserted: number; updated: number; unchanged: number; errors: number; invalid: number; duplicatesMerged: number; errorLog?: string; crossMatched?: number };
 /** 입찰공고 N건(같은 source_type 여러 개 섞여도 됨). mergeScope='award' 면 낙찰 칸만 병합 */
 export async function upsertNotices(items: Record<string, unknown>[], opt: { mergeScope?: 'all' | 'award' } = {}): Promise<WriteSummary> {
   const now = new Date(); const out: WriteSummary = { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0, duplicatesMerged: 0 }; const logs: string[] = [];
@@ -193,19 +193,51 @@ export async function upsertProspects(items: Record<string, unknown>[]): Promise
   // dedupe_key 는 validate 가 계산 → 먼저 후보 키를 뽑기 위해 planBatch 를 빈 prev 로 한 번 돌려 키를 얻는다
   const pre = planBatch(items, new Map(), today);
   const wantKeys = [...new Set([...keys, ...pre.inserts.map((i) => i.key)])];
-  const prevRows = wantKeys.length ? await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'operating_facility_prospects' and scope = ${SCOPE} and row->>'dedupe_key' = any(${wantKeys}) and not gone` : [];
+  // 200차: 다른 원천이 먼저 넣은 같은 단지 줄에 합쳐진 키는 그 줄의 별칭(alias_keys, 212 색인)으로도 찾음 — 다음 실행부터는 키로 바로 같은 줄
+  const prevRows = wantKeys.length ? await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'operating_facility_prospects' and scope = ${SCOPE}
+    and (row->>'dedupe_key' = any(${wantKeys}) or row->'alias_keys' ?| ${wantKeys}::text[]) and not gone` : [];
   const prev = new Map(prevRows.map((r) => [String(r.row.dedupe_key), { ...r.row, id: r.row.id ?? r.src_id }]));
+  for (const r of prevRows) for (const k of Array.isArray(r.row.alias_keys) ? r.row.alias_keys : []) if (!prev.has(String(k))) prev.set(String(k), { ...r.row, id: r.row.id ?? r.src_id });
+  // 200차: 키로 못 찾은 단지 — 다른 원천(K-apt 단지 코드 ↔ 한국부동산원 단지 번호)이 이미 넣은 같은 단지(지역 + 단지명·도로명주소 + 사용승인일)에 합치고 이 키를 별칭으로
+  const aliasAdds = new Map<string, Set<string>>();
+  const lone = pre.inserts.filter((i) => !prev.has(i.key) && COMPLEX_RANK[String(i.patch.source_slug)] && i.patch.completion_date);
+  if (lone.length) {
+    const dates = [...new Set(lone.map((i) => String(i.patch.completion_date)))];
+    const cands = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'operating_facility_prospects' and scope = ${SCOPE} and not gone
+      and row->>'completion_date' = any(${dates}) and row->>'source_slug' = any(${Object.keys(COMPLEX_RANK)})`;
+    const idx = new Map<string, Record<string, unknown>>();
+    for (const c of cands) for (const k of complexMatchKeys(c.row)) if (!idx.has(k)) idx.set(k, { ...c.row, id: c.row.id ?? c.src_id });
+    for (const i of lone) {
+      const hit = complexMatchKeys(i.patch).map((k) => idx.get(k)).find((h) => h && h.source_slug !== i.patch.source_slug);
+      if (!hit) continue;
+      prev.set(i.key, hit); const id = String(hit.id); aliasAdds.set(id, (aliasAdds.get(id) ?? new Set()).add(i.key));
+    }
+  }
   const plan = planBatch(items, prev, today);
-  const out: WriteSummary = { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: plan.invalid, duplicatesMerged: plan.duplicatesMerged };
+  const out: WriteSummary = { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: plan.invalid, duplicatesMerged: plan.duplicatesMerged, crossMatched: aliasAdds.size };
   const t = nowIso(), d = todayKst();
   try {
     await writeRows('operating_facility_prospects', plan.inserts.map((i) => { const id = randomUUID(); return { id, row: { id, ...i.patch, next_action: null, next_action_date: null, notes: null, assigned_to: null, lead_id: null, verification_status: 'raw', verified_at: null, first_seen_at: t, last_seen_at: t, last_seen_date: d, created_at: t, updated_at: t } }; }));
     await patchRows('operating_facility_prospects', plan.updates.map((u) => ({ id: u.id, patch: { ...u.patch, last_seen_at: t, last_seen_date: d, updated_at: t } })));
     await touchRows('operating_facility_prospects', plan.unchangedIds);
+    for (const [id, ks] of aliasAdds) await sql`update sales_src_rows set row = jsonb_set(row, '{alias_keys}', (select coalesce(jsonb_agg(distinct x), '[]'::jsonb)
+      from jsonb_array_elements_text(coalesce(row->'alias_keys', '[]'::jsonb) || ${sql.json([...ks] as never)}::jsonb) as x)), synced_at = now() where scope = ${SCOPE} and tbl = 'operating_facility_prospects' and src_id = ${id}`;
     out.inserted = plan.inserts.length; out.updated = plan.updates.length; out.unchanged = plan.unchangedIds.length;
   } catch (e) { out.errors += items.length; out.errorLog = `쓰기 실패: ${e instanceof Error ? e.message : String(e)}`; }
   if (plan.errLog.length) out.errorLog = [out.errorLog, ...plan.errLog].filter(Boolean).join('\n');
   return out;
+}
+/** 200차 #699 원본 기준일 — 수집기가 원천의 기준일(K-apt 자료실 추출일·data.go.kr 파일 수정일·단지 목록 확인일)을 남기고, 준공·입주 시설 탭이 한 줄로 보여 줌 */
+export const ASOF_LABEL: Record<string, string> = { kapt_weekly_complexes: 'K-apt 자료실', kapt_new_complexes: 'K-apt 단지 목록', reb_recent_complexes: '한국부동산원' };
+export async function setSourceAsOf(slug: string, day: string, note?: string | null) {
+  const sql = db();
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values (${SCOPE}, 'collector_asof', ${slug}, ${sql.json({ day, note: note ?? null, at: nowIso() } as never)}, 'workin')
+    on conflict (scope, tbl, src_id) do update set row = excluded.row, synced_at = now()`;
+}
+export async function sourceAsOf(slugs: string[]): Promise<{ slug: string; label: string; day: string; note: string | null }[]> {
+  const rows = await db()<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = ${SCOPE} and tbl = 'collector_asof' and src_id = any(${slugs})`;
+  const m = new Map(rows.map((r) => [r.src_id, r.row]));
+  return slugs.flatMap((s) => { const r = m.get(s); return r?.day ? [{ slug: s, label: ASOF_LABEL[s] ?? s, day: String(r.day), note: r.note ?? null }] : []; });
 }
 /** K-apt 사업자선정 결과 1건 — (source_type, source_external_id) 키, 수동 필드(evaluation_notes·verification_status·lead_id) 보존 */
 export async function upsertKaptVendor(r: Record<string, unknown>): Promise<{ result: 'insert' | 'update' | 'skip'; id: string; changeSummary?: string }> {

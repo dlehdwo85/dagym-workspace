@@ -9,7 +9,7 @@ import { callDataGo, type DataGoStats } from './g2b';
 import { kaptKey, portalErr } from './kapt';
 import { RECENT_COMPLETION_DAYS } from './prospects';
 import { addDaysYmd, regionFromAddress, todayKst, toYmd } from './files';
-import { upsertProspects } from './store';
+import { setSourceAsOf, upsertProspects } from './store';
 import type { Collector, CollectorCtx, CollectorResult, SourceStat } from './types';
 
 export const KAPT_LIST_SERVICE = '15057332';
@@ -82,7 +82,7 @@ export const kaptNewComplexes: Collector = {
         list.kept += ins.length; if (st.baseline_done) fresh += ins.length;
       }
       const done = !items.length || (st.total ? st.page * st.per >= st.total : items.length < st.per);
-      if (done) { baselineJustDone = !st.baseline_done; st.page = 1; st.scans++; st.baseline_done = true; st.last_full_scan_day = today; await save(); break; }
+      if (done) { baselineJustDone = !st.baseline_done; st.page = 1; st.scans++; st.baseline_done = true; st.last_full_scan_day = today; await save(); await setSourceAsOf('kapt_new_complexes', today, '확인(매일)'); break; }
       st.page++; await save();
     }
     // 2) 새로 등록된 단지 기본정보 확인(한 번에 40곳·시간 안에서) — 활용신청이 안 됐으면 이번 실행은 멈춤, 한 단지만 문제면 3번까지 다시

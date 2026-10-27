@@ -58,6 +58,8 @@ import { prespecLink } from './prespecLink.step.mjs';
 import { hubArchive } from './hubArchive.step.mjs';
 import { leadList197 } from './leadList197.step.mjs';
 import { calSnap199 } from './calSnap199.step.mjs';
+import { kaptWeekly200 } from './kaptWeekly200.step.mjs';
+import { easyPay200 } from './easyPay200.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2897,6 +2899,8 @@ await step('#626 캡처 차단(대표 10/25 20:05): 외부 고객사 로그인 �
 await step('P2 조직 개편 4단(대표 10/26 · #679~#681): 종류 카드 4개·본사 만들며 맨 위 부서 이관·사업부 위 단위는 본사만·사업부장 없음·이름-종류 검사 → 사용자 목록 왕관 칩·장 비게 됨 경고 → 업무 함께하는 부서', () => orgLevels({ owner, ctx, BASE, SHOTS }));
 await step('197차 영업 진행 목록 개편(#461·#460): 오늘 볼 것 띠 → 다음 행동 없음 경고 → 열 머리 정렬 · 열 고르기 · 보기 저장(새로 고침에도) → 업무 [완료] 다음 행동 창(1주 뒤 + 할 일 · 종결 보류·사유·다시 볼 날) → 종결 보기 · 휴대폰 카드', () => leadList197({ owner, ctx, sql, BASE, SHOTS }));
 await step('#690 캘린더 끌기 15분 단위(대표 10/26): 주 보기 일정 15분만큼 끌기 → 10:15(잡은 자리 그대로) · 클릭 = 정시 1시간 · 끌어 그리기 14:15~15:00 · PC [끌기 단위 30분] → 15분 끌어도 10:45 · 휴대폰 칩도 같은 기억', () => calSnap199({ owner, ctx, sql, BASE }));
+await step('200차 #699 준공·입주 시설 원본 기준일(대표 10/26): K-apt 자료실 추출일(주 1회) · 한국부동산원 파일 수정일(연 1회) 한 줄 · 자료실 단지 카드(전화·세대수·주민운동시설) · 1366·390 넘침 없음 · 기준일 없으면 줄 없음', () => kaptWeekly200({ owner, ctx, sql, BASE, SHOTS }));
+await step('200차 #706 간편결제 바로 열기(대표 10/26): 켠 간편결제만 버튼 · [필수] 결제 대행 약관 동의 없으면 안 열림 · 결제창 요청 = 카드 + 간편결제 + 동의 · 다른 수단 고르면 풀림 · 결제 내역 간편결제 이름 · 1366·390', () => easyPay200({ owner, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

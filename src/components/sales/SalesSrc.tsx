@@ -1160,6 +1160,8 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
         {((data.statusGroups ?? []) as [string, string][]).filter(([k]) => (data.statusCounts?.[k] ?? 0) > 0 || k === st).map(([k, l]) => (
           <button key={k} type="button" onClick={() => setSt(st === k ? '' : k)} aria-pressed={st === k} className={chipCls(st === k)} data-testid={`hub-status-${k}`}>{l} {data.statusCounts?.[k] ?? 0}</button>))}
       </div>}
+      {/* 200차 #699: 원본 기준일 — 준공·입주 단지가 언제 자료인지(K-apt 자료실 주 1회 · 한국부동산원 연 1회) */}
+      {tab === 'facilities' && !!data?.sourceAsOf?.length && <p className="text-[11px] text-ink-3" data-testid="hub-source-asof">원본 기준일 · {(data.sourceAsOf as { label: string; day: string; note: string | null }[]).map((x) => `${x.label} ${kd(x.day)}${x.note ? ` ${x.note}` : ''}`).join(' · ')}</p>}
       {/* #609(대표 10/25 ⑤): 모든 탭 1열(한 줄 한 건) */}
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-2">{data.items.map((r: any) => (
         <li key={r.id} className="relative">{data.readOnly === false && !box && !(r.work?.status === '진행영업 전환' || r.work?.leadId || r.leadId) && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(r.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, r.id] : v.filter((x) => x !== r.id))} aria-label={`${r.name} 선택`} data-testid="hub-select" />}<HubCard tab={tab} r={r} onRaw={() => setDetail({ tab, r })} onChange={reload} canWrite={data.readOnly === false} /></li>))}

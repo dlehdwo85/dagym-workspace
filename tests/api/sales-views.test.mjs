@@ -132,7 +132,7 @@ test('#605~#613(대표 10/25) 허브 정렬·필터(지역·세대수·기간)·
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all&sort=notice')).sort, 'notice');
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all&sort=weird')).sort, null, '모르는 정렬은 기본');
   // #611 허브 탭 = 회사가 켠 수집 DB 종류: 시설 수집기를 모두 끄면 '준공·입주 시설' 탭이 빠지고, 하나라도 켜면 다시 보임
-  const FAC = ['kicox_industrial_complexes', 'public_sports_facilities', 'tourist_hotels_localdata', 'reb_recent_complexes', 'kapt_new_complexes', 'operating_from_kapt', 'kapt_sa_sun'];
+  const FAC = ['kicox_industrial_complexes', 'public_sports_facilities', 'tourist_hotels_localdata', 'kapt_weekly_complexes', 'reb_recent_complexes', 'kapt_new_complexes', 'operating_from_kapt', 'kapt_sa_sun'];
   for (const slug of FAC) await ctx.owner.ok('PUT', '/api/sales/collectors', { slug, enabled: false });
   assert.ok(!(await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).tabs.includes('facilities'), '시설 수집기 전부 끄면 탭 숨김');
   await ctx.owner.ok('PUT', '/api/sales/collectors', { slug: 'reb_recent_complexes', enabled: true });

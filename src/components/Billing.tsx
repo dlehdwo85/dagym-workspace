@@ -8,6 +8,7 @@ import { TaxInvoiceButton } from './PlatformSettlement';
 const won = (n: number | null | undefined) => (n == null ? '-' : `${n.toLocaleString('ko-KR')}원`);
 const STATUS: Record<string, string> = { pending: '대기', paid: '결제 완료', failed: '실패', canceled: '환불', partial_canceled: '부분 환불' };
 const KIND: Record<string, string> = { subscription: '월 구독', annual: '연간', addon: '팩' };
+const EASY_LABEL: Record<string, string> = { naverpay: '네이버페이', kakaopay: '카카오페이', tosspay: '토스페이' }; // 200차 #706 결제 내역의 간편결제 이름
 
 declare global { interface Window { goPay?: (f: HTMLFormElement) => void; nicepaySubmit?: () => void; nicepayClose?: () => void } }
 
@@ -53,6 +54,8 @@ export function BillingSection() {
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState('');
   const [pm, setPm] = useState<'CARD' | 'BANK' | 'VBANK'>('CARD'); // V29 결제창 결제 수단
+  // 200차 #706: 간편결제 바로 열기(나이스페이 결제창 생략 — 결제 대행 약관 동의는 여기서). 켠 간편결제(data.easyPays)만 보임
+  const [ep, setEp] = useState<string | null>(null); const [epOk, setEpOk] = useState(false);
   const [renewOk, setRenewOk] = useState(false); // V34-B (#282) 정기결제 별도 동의(체크해야 결제)
   const [pageMode, setPageMode] = useState(false); // #413 레이어가 바로 닫히는 환경 — 같은 탭 이동 방식
   useEffect(() => {
@@ -80,9 +83,10 @@ export function BillingSection() {
     try { await api('/api/billing/subscribe', { body: { planCode: code, consent: true } }); toast.ok('구독을 시작했습니다'); location.reload(); } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   async function openWindow(body: any) {
+    if (ep && !epOk) { toast.error('간편결제는 결제 대행 약관에 동의해야 열 수 있습니다'); return; }
     setBusy(true);
     try {
-      await launchNicepay(await api('/api/billing/window', { body: { ...body, payMethod: pm } }), { page: pageMode, onClose: (i) => { if (i.quick) setPageMode(true); } });
+      await launchNicepay(await api('/api/billing/window', { body: { ...body, payMethod: ep ? 'CARD' : pm, ...(ep ? { easyPay: ep, agree: epOk } : {}) } }), { page: pageMode, onClose: (i) => { if (i.quick) setPageMode(true); } });
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   return (
@@ -133,13 +137,23 @@ export function BillingSection() {
             <div className="flex flex-wrap items-center gap-1.5 text-xs" role="radiogroup" aria-label="결제창 결제 수단" data-testid="billing-paymethod">
               <span className="font-semibold text-ink-2">결제창 결제 수단</span>
               {([['CARD', '카드'], ['BANK', '계좌이체'], ['VBANK', '가상계좌(무통장)']] as const).map(([k, l]) => (
-                <button key={k} type="button" role="radio" aria-checked={pm === k} onClick={() => setPm(k)} className={cx('rounded-full border px-2.5 py-0.5', pm === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line text-ink-2')}>{l}</button>
+                <button key={k} type="button" role="radio" aria-checked={!ep && pm === k} onClick={() => { setPm(k); setEp(null); }} className={cx('rounded-full border px-2.5 py-0.5', !ep && pm === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line text-ink-2')}>{l}</button>
               ))}
-              {pm === 'VBANK' && <span className="text-ink-3">계좌를 받은 뒤 3일 안에 입금하면 자동 적용</span>}
+              {((data.easyPays ?? []) as { key: string; label: string }[]).map((e) => (
+                <button key={e.key} type="button" role="radio" aria-checked={ep === e.key} onClick={() => { setEp(e.key); setEpOk(false); }} data-testid={`billing-easypay-${e.key}`}
+                  className={cx('rounded-full border px-2.5 py-0.5', ep === e.key ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-line text-ink-2')}>{e.label}</button>
+              ))}
+              {!ep && pm === 'VBANK' && <span className="text-ink-3">계좌를 받은 뒤 3일 안에 입금하면 자동 적용</span>}
               <label className="ml-auto flex items-center gap-1 text-ink-3" title="결제창이 열리자마자 닫히면 켜세요 — 이 탭이 나이스페이 결제 화면으로 이동했다가 결제 뒤 돌아옵니다">
                 <input type="checkbox" checked={pageMode} onChange={(e) => setPageMode(e.target.checked)} data-testid="billing-pagemode" />같은 탭에서 열기
               </label>
             </div>
+            {ep && <label className="flex items-start gap-2 rounded-input border border-line bg-slate-50 p-2 text-xs text-ink-2" data-testid="billing-easypay-consent">
+              <input type="checkbox" className="mt-0.5" checked={epOk} onChange={(e) => setEpOk(e.target.checked)} aria-label="결제 대행 약관 동의" />
+              <span><b className="text-ink-1">[필수] 결제 대행 약관 동의</b> — {((data.easyPays ?? []) as { key: string; label: string }[]).find((x) => x.key === ep)?.label} 결제 화면을 바로 엽니다(나이스페이 결제창 생략).
+                결제 대행사 나이스페이(나이스정보통신)의 <a className="underline" href="https://www.nicepay.co.kr/cs/terms/policy1.do" target="_blank" rel="noreferrer">전자금융거래 기본약관</a>·<a className="underline" href="https://www.nicepay.co.kr/cs/terms/private.do" target="_blank" rel="noreferrer">개인정보처리방침</a>에 동의합니다.
+                정기결제(자동 결제)는 카드 등록으로만 됩니다.</span>
+            </label>}
             <div>
               <p className="text-xs font-semibold text-ink-2">연간 결제 (결제창, 할인가)</p>
               <div className="mt-1 flex flex-wrap gap-1.5">{annual.map((q: any) => <Button key={q.planCode} size="sm" variant="secondary" disabled={busy} onClick={() => openWindow({ kind: 'annual', planCode: q.planCode })}>{q.name} 1년 {won(q.amount)}</Button>)}</div>
@@ -154,7 +168,7 @@ export function BillingSection() {
                 {data.payments.map((p: any) => (
                   <li key={p.id} className="flex flex-wrap items-center gap-2 px-2 py-1.5">
                     <span className="w-28 shrink-0 text-ink-3">{fmtDateTime(p.paid_at ?? p.created_at)}</span>
-                    <span className="flex-1">{KIND[p.kind]} {p.plan_code ?? p.addon_code ?? ''} · {won(p.amount)}{p.pay_method && p.pay_method !== 'CARD' ? ` · ${p.pay_method === 'BANK' ? '계좌이체' : '가상계좌'}` : ''}{p.card_no ? ` · ${p.card_name ?? ''} ${p.card_no}` : ''}
+                    <span className="flex-1">{KIND[p.kind]} {p.plan_code ?? p.addon_code ?? ''} · {won(p.amount)}{p.pay_method && p.pay_method !== 'CARD' ? ` · ${p.pay_method === 'BANK' ? '계좌이체' : '가상계좌'}` : ''}{p.easy_pay ? ` · ${EASY_LABEL[p.easy_pay] ?? p.easy_pay}` : ''}{p.card_no ? ` · ${p.card_name ?? ''} ${p.card_no}` : ''}
                       {p.status === 'pending' && p.vbank && <span className="block text-amber-700" data-testid="billing-vbank">입금 대기: {p.vbank.bank} {p.vbank.num}{p.vbank.exp ? ` · ${String(p.vbank.exp).slice(0, 4)}-${String(p.vbank.exp).slice(4, 6)}-${String(p.vbank.exp).slice(6, 8)}까지` : ''}</span>}
                       {p.status === 'paid' && p.tid && <a className="ml-1 text-brand-700 underline" href={`https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0`} target="_blank" rel="noreferrer">영수증</a>}{' '}<TaxInvoiceButton payment={p} /></span>
                     <span className={cx('rounded-full px-1.5', p.status === 'paid' ? 'bg-green-50 text-green-700' : p.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2')} title={p.result_msg ?? ''}>{STATUS[p.status]}</span>

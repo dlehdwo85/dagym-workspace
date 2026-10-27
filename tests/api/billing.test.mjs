@@ -76,6 +76,8 @@ describe('18차 나이스페이 결제', () => {
     assert.deepEqual((await ctx.owner.ok('GET', '/api/billing')), { enabled: false, internal: true }, '내부 요금제 회사 — 결제 없음(404 아님)');
     const b = await owner.ok('GET', '/api/billing');
     assert.equal(b.enabled, true); assert.equal(b.mode, 'test');
+    assert.deepEqual(b.easyPays, [], '200차 #706 간편결제는 NICEPAY_EASY_PAY 로 켜지 않으면 없음');
+    assert.equal((await owner.post('/api/billing/window', { kind: 'monthly', planCode: 'w_standard', easyPay: 'naverpay', agree: true })).status, 400, '켜지 않은 간편결제는 안 열림');
     const team = b.quotes.find((q) => q.planCode === 'w_standard' && q.cycle === 'monthly');
     assert.equal(team.seats, 3); assert.equal(team.amount, Math.round(4500 * 3 * 1.1));
     assert.equal(b.quotes.find((q) => q.planCode === 'w_standard' && q.cycle === 'annual').amount, Math.round(3600 * 3 * 12 * 1.1));

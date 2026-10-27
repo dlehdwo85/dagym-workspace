@@ -90,12 +90,21 @@ export async function removeBillKey(c: NpConf, bid: string, moid: string) {
 }
 /** 결제창(goPay) 파라미터 — SignData 는 서버에서만 */
 export type PayMethod = 'CARD' | 'BANK' | 'VBANK';
-export function windowParams(c: NpConf, i: { moid: string; amount: number; goodsName: string; returnUrl: string; buyerEmail?: string; buyerName?: string; payMethod?: PayMethod }) {
+/**
+ * 200차 #706(대표 10/26 '간편결제 창 띄울 수 있을 것'): 간편결제 제휴사 결제창 직접 호출(공식 문서 developers.nicepay.co.kr/docs/pg/auth/payment-window-skip)
+ * — PayMethod·DirectShowOpt = CARD, DirectEasyPay = 제휴사 코드(네이버페이는 EasyPayMethod 'E020=CARD' 필수). 나이스페이 결제창이 생략되므로 결제 약관 동의는 우리 화면에서 받는다.
+ * 상점(MID)마다 계약된 간편결제만 열리므로 NICEPAY_EASY_PAY(쉼표로 naverpay·kakaopay·tosspay)에 넣은 것만 버튼으로 — 비어 있으면 지금처럼 카드·계좌이체·가상계좌만.
+ */
+export const EASY_PAYS = { naverpay: { label: '네이버페이', code: 'E020', method: 'E020=CARD' }, kakaopay: { label: '카카오페이', code: 'E016', method: null }, tosspay: { label: '토스페이', code: 'E025', method: null } } as const;
+export type EasyPay = keyof typeof EASY_PAYS;
+export const easyPaysOn = (): EasyPay[] => [...new Set((process.env.NICEPAY_EASY_PAY ?? '').split(',').map((x) => x.trim().toLowerCase()))].filter((x): x is EasyPay => Object.hasOwn(EASY_PAYS, x));
+export function windowParams(c: NpConf, i: { moid: string; amount: number; goodsName: string; returnUrl: string; buyerEmail?: string; buyerName?: string; payMethod?: PayMethod; easyPay?: EasyPay }) {
   const edi = ediDate();
-  const pm = i.payMethod ?? 'CARD';
+  const ep = i.easyPay ? EASY_PAYS[i.easyPay] : null;
+  const pm = ep ? 'CARD' : i.payMethod ?? 'CARD';
   // 가상계좌: 입금 기한 3일(서울)
   const vexp = pm === 'VBANK' ? new Date(Date.now() + 3 * 86400_000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }).replace(/-/g, '') : null;
-  return { PayMethod: pm, ...(vexp ? { VbankExpDate: vexp } : {}), GoodsName: i.goodsName, Amt: String(i.amount), MID: c.mid, Moid: i.moid, EdiDate: edi, SignData: sha(edi + c.mid + String(i.amount) + c.key),
+  return { PayMethod: pm, ...(vexp ? { VbankExpDate: vexp } : {}), ...(ep ? { DirectShowOpt: 'CARD', DirectEasyPay: ep.code, ...(ep.method ? { EasyPayMethod: ep.method } : {}) } : {}), GoodsName: i.goodsName, Amt: String(i.amount), MID: c.mid, Moid: i.moid, EdiDate: edi, SignData: sha(edi + c.mid + String(i.amount) + c.key),
     ReturnURL: i.returnUrl, CharSet: 'utf-8', ...(i.buyerEmail ? { BuyerEmail: i.buyerEmail } : {}), ...(i.buyerName ? { BuyerName: i.buyerName } : {}) };
 }
 const NICE_HOST = /^https:\/\/(dc1-api|dc2-api|pg-api|webapi)\.nicepay\.co\.kr\//;
