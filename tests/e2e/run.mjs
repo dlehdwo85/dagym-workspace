@@ -66,6 +66,7 @@ import { leadBulk204 } from './leadBulk204.step.mjs';
 import { leadImport205 } from './leadImport205.step.mjs';
 import { leadMerge206 } from './leadMerge206.step.mjs';
 import { stageNames207 } from './stageNames207.step.mjs';
+import { partner208 } from './partner208.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2913,6 +2914,7 @@ await step('204차 #461 ⑦ 표 일괄 작업: 체크 → 아래 막대 · 다�
 await step('205차 #461 ⑦ CSV 가져오기 미리보기: 이미 있음 = 기본 합치기(빈 칸만) · 같은 연락처(사업자번호) = 기본 새로 → 합치기 · 파일 안 겹침 = 건너뛰기 · 상세 사업자번호', () => leadImport205({ owner, ctx, sql, BASE, SHOTS }));
 await step('206차 #461 ⑦ 기존 거래처끼리 합치기: 상세 › 중복 합치기 → 같은 전화 후보 → 남길 쪽 제안·채울 칸 → 합치기 → 남긴 쪽 상세 · 예전 링크도 남긴 쪽 · 목록에서 빠짐', () => leadMerge206({ owner, ctx, sql, BASE, SHOTS }));
 await step('207차 #461 회사별 단계 이름: 데이터 설정 › 이름·색·숨김 저장 → 영업 진행 표·상세 칩·진행 단계 칸에 회사 이름 · 숨긴 단계는 고르는 칸에서 빠짐 · 저장 값 그대로', () => stageNames207({ owner, ctx, sql, BASE, SHOTS }));
+await step('208차 #667 설계 파트너: [고객사 추가] 구분 = 설계 파트너 → 기간 꼭 적기(기본값 없음)·체험 고정 → AI 월 5,000원·마케팅 크레딧 0 상자 → 끝 3일 전 슈퍼관리자 알림 링크로 그 회사 창 → 기간 +30일·지금 종료 → 파트너 화면 읽기 전용 띠', () => partner208({ owner, browser, ctx, sql, BASE, SHOTS, tick, Client }));
 
 await browser.close();
 srv.proc.kill();

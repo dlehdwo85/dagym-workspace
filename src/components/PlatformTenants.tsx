@@ -1,7 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Download, Eye, KeyRound, Lock, LockOpen, Plus, Search, ShieldOff, Trash2 } from 'lucide-react';
 import { INDUSTRIES } from '@/lib/industries';
+import { PARTNER } from '@/lib/partner';
 import { api, useApi } from './client';
 import { fmtBytes } from './usage';
 import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
@@ -17,6 +19,7 @@ const STAGE_CLS: Record<string, string> = { trial: 'bg-sky-50 text-sky-800', pai
 const SEGMENT_LABEL: Record<string, string> = { partner: '설계 파트너', customer: '일반' };
 const KIND_LABEL: Record<string, string> = { call: '전화', mail: '메일', meeting: '미팅', kakao: '카카오톡', memo: '메모' };
 const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+const kstDate = (v: string | Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(v));
 
 /** V28-3 슈퍼 계정: 회사 목록(검색·필터) → 상세(요금제·정지·체험·읽기 전용·삭제 예약·한도·사용자·지원 모드) */
 export function PlatformTenants() {
@@ -29,6 +32,8 @@ export function PlatformTenants() {
   const list = useApi<{ tenants: any[]; summary?: { month: string; aiCostKrw: number; customerAiCostKrw: number; revenueKrw: number; marginKrw: number; marginPct: number | null; customers: number; paying: number; contactDue?: number } }>(`/api/platform/tenants?${qs}`, [qs]);
   const sm = list.data?.summary;
   const [open, setOpen] = useState<string | null>(null);
+  const sp = useSearchParams(); // 208차 #667: 알림 링크(?tenant=)로 오면 그 회사 관리 창을 바로 연다
+  useEffect(() => { const id = sp.get('tenant'); if (id) setOpen(id); }, [sp]);
   const [adding, setAdding] = useState(false); // 대표 10/20 ① [고객사 추가]
   const today = todayKst();
   return (
@@ -124,6 +129,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             <Button size="sm" variant="ghost" onClick={() => { const code = prompt('바꿀 요금제 코드 (예: personal · team · business · trial)', d.data.subscription.planCode); if (code) run(() => api(`/api/platform/tenants/${id}`, { method: 'PUT', body: { planCode: code, addons: d.data.subscription.addons ?? {}, status: code === 'trial' ? 'trial' : 'active' } }), '요금제를 바꿨습니다'); }}>요금제 변경</Button>
           </div>
         )}
+        {!internal && d.data.partner && <PartnerBox id={id} p={d.data.partner} aiKrw={o.aiBudgetKrw} run={run} />}
         {d.data.billing && (
           <div className="rounded-input border border-line p-3" data-testid="company-billing">
             <p className="text-xs font-medium text-ink-2">요금·결제</p>
@@ -207,6 +213,28 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
+type PartnerInfo = { trial: { trial: boolean; readOnly: boolean; daysLeft: number; endsAt: string | null; chosenPlan: string | null } | null; mktCredits: number | null };
+/** 208차 #667 설계 파트너(결정 15-30): 기간·기본값(AI 월 예산·마케팅 크레딧) 상태 + [기간 연장]·[유료 전환]·[지금 종료] — 끝나기 3일 전 슈퍼관리자 알림이 이 창으로 온다 */
+function PartnerBox({ id, p, aiKrw, run }: { id: string; p: PartnerInfo; aiKrw: number | null | undefined; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+  const tr = p.trial;
+  const period = !tr ? '유료 사용 중' : tr.readOnly ? `끝남 — 읽기 전용${tr.endsAt ? ` (${kstDate(tr.endsAt)})` : ''}` : `~${tr.endsAt ? kstDate(tr.endsAt) : '-'} · ${tr.daysLeft === 0 ? '오늘 끝' : `D-${tr.daysLeft}`}`;
+  const preset = aiKrw === PARTNER.aiBudgetKrw && p.mktCredits === PARTNER.mktCredits;
+  return (
+    <div className={cx('space-y-2 rounded-input border p-3', tr && (tr.readOnly || tr.daysLeft <= PARTNER.alertDays) ? 'border-amber-300 bg-amber-50/60' : 'border-violet-200 bg-violet-50/50')} data-testid="company-partner">
+      <p className="text-xs text-ink-2"><span className="font-medium text-violet-900">설계 파트너 기간</span> <b className="text-ink" data-testid="company-partner-period">{period}</b></p>
+      <p className="text-xs text-ink-2" data-testid="company-partner-preset">AI 월 예산 {aiKrw === undefined ? '요금제 값' : aiKrw === null ? '무제한' : `${aiKrw.toLocaleString('ko-KR')}원`} · 마케팅 월 크레딧 {p.mktCredits ?? '요금제 값'}{preset ? ' (파트너 기본값)' : ''}
+        <span className="text-ink-3"> · 끝나기 {PARTNER.alertDays}일 전 슈퍼관리자 알림 · 끝나면 읽기 전용</span></p>
+      {tr && (
+        <div className="flex flex-wrap gap-1.5">
+          {[30, 90].map((x) => <Button key={x} size="sm" variant="secondary" data-testid={`partner-extend-${x}`} onClick={() => run(() => api(`/api/platform/tenants/${id}/trial`, { body: { action: 'extend', days: x } }), `파트너 기간을 ${x}일 늘렸습니다`)}>기간 +{x}일</Button>)}
+          <Button size="sm" variant="secondary" data-testid="partner-convert" onClick={() => { const code = prompt('전환할 유료 요금제 코드 (예: team · business)', tr.chosenPlan ?? ''); if (code?.trim()) run(() => api(`/api/platform/tenants/${id}/trial`, { body: { action: 'convert', planCode: code.trim() } }), '유료로 전환했습니다 — 파트너 기본값을 걷고 요금제 한도를 따릅니다'); }}>유료 전환</Button>
+          {!tr.readOnly && <Button size="sm" variant="ghost" data-testid="partner-end" onClick={() => confirm('파트너 기간을 지금 끝낼까요? 바로 읽기 전용(보기·내보내기만)이 됩니다.') && run(() => api(`/api/platform/tenants/${id}/trial`, { body: { action: 'end' } }), '파트너 기간을 끝냈습니다 — 읽기 전용')}>지금 종료</Button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 대표 10/20 ① 고객사 상세 — 대표 초대 상태·공간·메모·감사 기록 (대신 보기 없음) */
 function TenantOps({ id, t, ownerInvite, run }: { id: string; t: any; ownerInvite: { pending: boolean; expiresAt?: string | null; expired?: boolean }; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
   const [memo, setMemo] = useState<string>(t.platform_memo ?? '');
@@ -247,15 +275,17 @@ function TenantOps({ id, t, ownerInvite, run }: { id: string; t: any; ownerInvit
 /** 대표 10/20 ① [고객사 추가]: 회사명·업종(여러 개)·규모·대표 이름/이메일 → 대표에게 초대 메일, 요금제(비우면 체험)·체험 기간·시작 공간·메모 */
 function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
   const plans = useApi<{ plans: { code: string; name: string; active: boolean }[] }>('/api/platform');
-  const [f, setF] = useState({ company: '', industries: [] as string[], size: '2-10', ownerName: '', ownerEmail: '', planCode: 'trial', trialDays: 14, spaces: [] as string[], memo: '',
+  const [f, setF] = useState({ company: '', industries: [] as string[], size: '2-10', ownerName: '', ownerEmail: '', planCode: 'trial', trialDays: '14', spaces: [] as string[], memo: '',
     contactName: '', contactPhone: '', contactTitle: '', segment: 'customer', source: '' }); // #656 담당자·구분·소개 경로
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ tenant: string; inviteLink: string; mail: 'sent' | 'dev' | 'failed' } | null>(null);
   const toggle = (k: 'industries' | 'spaces', v: string) => setF({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] });
+  const partner = f.segment === 'partner'; // 208차 #667: 체험으로 시작 · 기간은 꼭 적음(기본값 없음 — 손대지 않은 기본 14일은 비우고, 적어 둔 값은 그대로)
+  const setSegment = (v: string) => setF({ ...f, segment: v, planCode: v === 'partner' ? 'trial' : f.planCode, trialDays: v === 'partner' ? (f.trialDays === '14' ? '' : f.trialDays) : f.trialDays || '14' });
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
     try {
-      const r = await api('/api/platform/tenants', { body: { ...f, planCode: f.planCode || 'trial', trialDays: f.planCode === 'trial' ? f.trialDays : undefined, memo: f.memo || undefined,
+      const r = await api('/api/platform/tenants', { body: { ...f, planCode: f.planCode || 'trial', trialDays: f.planCode === 'trial' ? Number(f.trialDays) || undefined : undefined, memo: f.memo || undefined,
         contactName: f.contactName || undefined, contactPhone: f.contactPhone || undefined, contactTitle: f.contactTitle || undefined, segment: f.segment || undefined, source: f.source || undefined } });
       setResult(r); toast.ok(r.mail === 'sent' ? `${f.company} 회사를 만들고 ${f.ownerEmail} 로 초대 메일을 보냈습니다` : `${f.company} 회사를 만들었습니다 — 초대 링크를 직접 전달하세요`);
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
@@ -276,18 +306,19 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
               className={cx('rounded-full border px-2.5 py-0.5 text-xs', f.industries.includes(k) ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2')}>{k}{f.industries[0] === k && f.industries.length > 1 ? ' · 주' : ''}</button>)}</div>
           </Field>
           <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="구분"><select className={inputCls} value={f.segment} onChange={(e) => setSegment(e.target.value)} data-testid="new-company-segment"><option value="customer">일반 고객</option><option value="partner">설계 파트너 체험단</option></select></Field>
             <Field label="규모"><select className={inputCls} value={f.size} onChange={(e) => setF({ ...f, size: e.target.value })} data-testid="new-company-size">{Object.entries(SIZE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
-            <Field label="요금제"><select className={inputCls} value={f.planCode} onChange={(e) => setF({ ...f, planCode: e.target.value })} data-testid="new-company-plan"><option value="trial">체험(카드 없음)</option>{(plans.data?.plans ?? []).filter((p) => p.active && p.code !== 'trial').map((p) => <option key={p.code} value={p.code}>{p.name}({p.code})</option>)}</select></Field>
-            {f.planCode === 'trial' && <Field label="체험 기간(일)"><input type="number" min={1} max={90} className={inputCls} value={f.trialDays} onChange={(e) => setF({ ...f, trialDays: Number(e.target.value) })} data-testid="new-company-trial-days" /></Field>}
+            <Field label="요금제"><select className={inputCls} value={f.planCode} disabled={partner} title={partner ? '설계 파트너는 체험으로 시작합니다 — 유료 전환은 고객사 관리에서' : undefined} onChange={(e) => setF({ ...f, planCode: e.target.value })} data-testid="new-company-plan"><option value="trial">체험(카드 없음)</option>{(plans.data?.plans ?? []).filter((p) => p.active && p.code !== 'trial').map((p) => <option key={p.code} value={p.code}>{p.name}({p.code})</option>)}</select></Field>
+            {f.planCode === 'trial' && <Field label={partner ? `파트너 기간(일, 꼭 적기 · ${PARTNER.maxDays}일까지)` : '체험 기간(일)'}><input type="number" min={1} max={partner ? PARTNER.maxDays : 90} required={partner} placeholder={partner ? '기간을 적어 주세요' : undefined} className={inputCls} value={f.trialDays} onChange={(e) => setF({ ...f, trialDays: e.target.value })} data-testid="new-company-trial-days" /></Field>}
             <Field label="시작 공간(업무는 항상)"><div className="flex items-center gap-3 py-2 text-xs">{(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={f.spaces.includes(sp)} onChange={() => toggle('spaces', sp)} data-testid={`new-company-space-${sp}`} />{SPACE_LABEL[sp]}</label>)}</div></Field>
             <Field label="대표 이름"><input className={inputCls} value={f.ownerName} onChange={(e) => setF({ ...f, ownerName: e.target.value })} required maxLength={50} data-testid="new-company-owner" /></Field>
             <Field label="대표 이메일(초대 메일 받을 주소)"><input type="email" className={inputCls} value={f.ownerEmail} onChange={(e) => setF({ ...f, ownerEmail: e.target.value })} required data-testid="new-company-email" /></Field>
-            <Field label="구분"><select className={inputCls} value={f.segment} onChange={(e) => setF({ ...f, segment: e.target.value })} data-testid="new-company-segment"><option value="customer">일반 고객</option><option value="partner">설계 파트너 체험단</option></select></Field>
             <Field label="소개 경로(선택)"><input className={inputCls} value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} maxLength={100} placeholder="지인·하이링크 고객·홈페이지 문의·광고" data-testid="new-company-source" /></Field>
             <Field label="담당자 이름(비우면 대표)"><input className={inputCls} value={f.contactName} onChange={(e) => setF({ ...f, contactName: e.target.value })} maxLength={50} data-testid="new-company-contact-name" /></Field>
             <Field label="담당자 연락처(선택)"><input className={inputCls} value={f.contactPhone} onChange={(e) => setF({ ...f, contactPhone: e.target.value })} maxLength={30} placeholder="010-0000-0000" data-testid="new-company-contact-phone" /></Field>
             <Field label="담당자 직책(선택)"><input className={inputCls} value={f.contactTitle} onChange={(e) => setF({ ...f, contactTitle: e.target.value })} maxLength={30} data-testid="new-company-contact-title" /></Field>
           </div>
+          {partner && <p className="rounded-input border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-900" data-testid="new-company-partner-note">설계 파트너는 체험으로 시작하고 AI 월 예산 {PARTNER.aiBudgetKrw.toLocaleString('ko-KR')}원 · 마케팅 크레딧 {PARTNER.mktCredits}으로 자동 설정됩니다. 끝나기 {PARTNER.alertDays}일 전 슈퍼관리자에게 [유료 전환]·[기간 연장]·[지금 종료] 알림이 가고, 그대로 두면 끝나는 날 읽기 전용이 됩니다.</p>}
           <Field label="운영 메모(선택)"><textarea className={cx(inputCls, 'min-h-[56px]')} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} maxLength={2000} data-testid="new-company-memo" /></Field>
           <p className="text-xs text-ink-3">만들면 대표에게 초대 메일(7일 유효)이 갑니다. 비밀번호는 대표가 직접 정하고, 운영자가 대신 들어가 보는 기능은 없습니다(지원 모드는 고객사가 허용한 때만).</p>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy} data-testid="new-company-go">회사 만들기 · 초대 메일</Button></div>

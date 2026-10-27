@@ -4,6 +4,7 @@ import { db, type Sql } from './db';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { audit } from './log';
 import { notify } from './notifications';
+import { PARTNER } from './partner';
 import type { SessionUser } from './types';
 
 /**
@@ -235,6 +236,7 @@ export async function setSubscription(u: SessionUser, tenant: string, i: z.infer
     values (${tenant}, ${i.planCode}, ${sql.json(i.addons)}, ${i.periodEnd ?? null}, ${i.status}, ${i.note ?? null}, ${u.id})
     on conflict (tenant) do update set plan_code = excluded.plan_code, addons = excluded.addons, period_end = excluded.period_end, status = excluded.status,
       note = excluded.note, updated_by = excluded.updated_by, updated_at = now(), period_start = case when tenant_subscriptions.plan_code <> excluded.plan_code then current_date else tenant_subscriptions.period_start end`;
+  if (i.status === 'active') await liftPartnerIfPaid(tenant, i.planCode, sql); // #667
   await audit(sql, u.id, 'platform.subscription', null, null, { tenant, ...i }, null);
   return { ok: true };
 }
@@ -348,18 +350,35 @@ export async function setTenantStatus(u: SessionUser, tenant: string, status: 'a
 
 // ---------------- 17차: 14일 무료 체험 · 끝나면 읽기 전용 ----------------
 export const TRIAL_DAYS = 14;
+// 208차 #667 설계 파트너(결정 15-30): 기간은 슈퍼관리자가 정함(필수·기본값 없음, 최대 1년) · AI 월 5,000원 · 마케팅 크레딧 0 · 끝 3일 전 슈퍼관리자 알림 · 끝나면 읽기 전용 (값은 ./partner)
+const FREE_PLANS = ['trial', 'free', 'team_free', 'w_free'];
+/** 파트너 기본값 넣기 — AI 예산은 회사별 조정 값으로(플랫폼 회사 관리 '한도 개별 조정'에 보임), 마케팅 크레딧은 마케팅 설정 월 크레딧 */
+export async function applyPartnerPreset(tenant: string, sql: Sql = db()) {
+  await sql`update tenant_subscriptions set limit_overrides = limit_overrides || ${sql.json({ aiBudgetKrw: PARTNER.aiBudgetKrw })} where tenant = ${tenant}`;
+  await sql`insert into mkt_settings (tenant, monthly_credits) values (${tenant}, ${PARTNER.mktCredits}) on conflict (tenant) do update set monthly_credits = excluded.monthly_credits, updated_at = now()`;
+}
+/** 파트너 기본값 걷기(유료 전환·일반 고객으로 변경) — 기본값과 같은 값일 때만, 운영자가 따로 바꾼 값은 그대로 */
+export async function liftPartnerPreset(tenant: string, sql: Sql = db()) {
+  await sql`update tenant_subscriptions set limit_overrides = limit_overrides - 'aiBudgetKrw' where tenant = ${tenant} and (limit_overrides->>'aiBudgetKrw')::numeric = ${PARTNER.aiBudgetKrw}`;
+  await sql`update mkt_settings set monthly_credits = null, updated_at = now() where tenant = ${tenant} and monthly_credits = ${PARTNER.mktCredits}`;
+}
+/** 유료 요금제로 바뀐 파트너면 기본값을 걷는다(결제·운영자 전환·요금제 변경 공통) */
+export async function liftPartnerIfPaid(tenant: string, planCode: string, sql: Sql = db()) {
+  if (FREE_PLANS.includes(planCode)) return;
+  if ((await sql`select 1 from tenants where id = ${tenant} and segment = 'partner'`).length) await liftPartnerPreset(tenant, sql);
+}
 /** 체험 상태: 남은 날(서울 날짜 기준, 0 = 오늘 끝남), 끝났으면 readOnly */
 export async function trialInfo(tenant: string, sql: Sql = db()) {
-  const [s] = await sql<{ status: string; plan_code: string; trial_ends_at: Date | null; chosen_plan: string | null }[]>`
-    select status, plan_code, trial_ends_at, chosen_plan from tenant_subscriptions where tenant = ${tenant}`;
+  const [s] = await sql<{ status: string; plan_code: string; trial_ends_at: Date | null; chosen_plan: string | null; segment: string | null }[]>`
+    select s.status, s.plan_code, s.trial_ends_at, s.chosen_plan, t.segment from tenant_subscriptions s left join tenants t on t.id = s.tenant where s.tenant = ${tenant}`;
   if (!s) return null;
   const ended = s.status === 'expired' || (s.status === 'trial' && !!s.trial_ends_at && s.trial_ends_at.getTime() <= Date.now());
   if (s.status !== 'trial' && s.status !== 'expired') return null;
   const days = s.trial_ends_at ? Math.max(0, Math.ceil(DateTime.fromJSDate(s.trial_ends_at).setZone(TZ).startOf('day').diff(DateTime.now().setZone(TZ).startOf('day'), 'days').days)) : 0;
-  return { trial: !ended, readOnly: ended, daysLeft: ended ? 0 : days, endsAt: s.trial_ends_at, chosenPlan: s.chosen_plan };
+  return { trial: !ended, readOnly: ended, daysLeft: ended ? 0 : days, endsAt: s.trial_ends_at, chosenPlan: s.chosen_plan, partner: s.segment === 'partner' /* #667 */ };
 }
 
-const roCache = new Map<string, { at: number; ro: boolean; lock: string | null }>();
+const roCache = new Map<string, { at: number; ro: boolean; lock: string | null; partner: boolean }>();
 /** 읽기 전용(체험 끝·미납 7일)이면 쓰기 요청을 막는다. 보기·내보내기·로그인·요금제 신청·알림 읽음·탈퇴는 허용 */
 const RO_ALLOW = [/^\/api\/billing/, /^\/api\/auth\//, /^\/api\/account\//, /^\/api\/plan/, /^\/api\/usage/, /^\/api\/push\//, /\/read$/, /^\/api\/notifications/, /^\/api\/export/, /^\/api\/support/, /^\/api\/me\//];
 /** V28 B2: 미납 30일 이용 중지 — 로그인해도 결제 안내만(결제·로그인·내보내기·요금 화면만 열림) */
@@ -369,7 +388,8 @@ async function roState(t: string) {
   if (c && Date.now() - c.at < 15_000) return c;
   const [s] = await db()<{ billing_lock: string | null }[]>`select billing_lock from tenant_subscriptions where tenant = ${t}`;
   const lock = s?.billing_lock ?? null;
-  const v = { at: Date.now(), ro: !!lock || !!(await trialInfo(t))?.readOnly, lock };
+  const info = lock ? null : await trialInfo(t);
+  const v = { at: Date.now(), ro: !!lock || !!info?.readOnly, lock, partner: !!info?.partner };
   roCache.set(t, v);
   return v;
 }
@@ -379,7 +399,7 @@ export async function assertWritable(u: SessionUser, path: string) {
   if (t === 'default' || t === 'demo' || RO_ALLOW.some((r) => r.test(path))) return;
   const st = await roState(t);
   if (st.lock === 'suspended') throw new HttpError(402, 'suspended', '미납 30일로 이용이 중지되었습니다 — 관리자가 결제하면 바로 다시 쓸 수 있어요(데이터는 그대로).');
-  if (st.ro) throw new HttpError(402, 'read_only', st.lock ? '미납 7일로 읽기 전용입니다 — 결제하면 바로 다시 쓸 수 있어요 (보기·내보내기는 그대로).' : '무료 체험이 끝나 읽기 전용입니다. 요금제를 선택하면 다시 쓸 수 있어요 (보기·내보내기는 그대로).');
+  if (st.ro) throw new HttpError(402, 'read_only', st.lock ? '미납 7일로 읽기 전용입니다 — 결제하면 바로 다시 쓸 수 있어요 (보기·내보내기는 그대로).' : `${st.partner ? '설계 파트너 기간' : '무료 체험'}이 끝나 읽기 전용입니다. 요금제를 선택하면 다시 쓸 수 있어요 (보기·내보내기는 그대로).`);
 }
 /** 이용 중지 회사는 보기 요청도 막는다(결제 안내만) */
 export async function assertNotSuspended(u: SessionUser, path: string) {
@@ -389,13 +409,14 @@ export async function assertNotSuspended(u: SessionUser, path: string) {
 }
 export const clearReadOnlyCache = (t?: string) => (t ? roCache.delete(t) : roCache.clear());
 
-/** 정기 실행: 종료 3·1·0일 전 알림(공간 관리자에게 앱+메일), 끝난 체험은 expired */
+/** 정기 실행: 종료 3·1·0일 전 알림(공간 관리자에게 앱+메일), 끝난 체험은 expired · #667 설계 파트너는 3일 전(이내) 슈퍼관리자에게 전환·연장·종료 알림 */
 export async function trialJob() {
   const sql = db();
-  const subs = await sql<{ tenant: string; trial_ends_at: Date; trial_notified: Record<string, boolean>; name: string }[]>`
-    select s.tenant, s.trial_ends_at, s.trial_notified, t.name from tenant_subscriptions s join tenants t on t.id = s.tenant
+  const subs = await sql<{ tenant: string; trial_ends_at: Date; trial_notified: Record<string, boolean>; name: string; segment: string | null }[]>`
+    select s.tenant, s.trial_ends_at, s.trial_notified, t.name, t.segment from tenant_subscriptions s join tenants t on t.id = s.tenant
     where s.status = 'trial' and s.trial_ends_at is not null and t.deleted_at is null`;
-  let notified = 0, expired = 0;
+  let notified = 0, expired = 0, partnerAlerts = 0;
+  let supers: string[] | null = null;
   for (const s of subs) {
     if (s.trial_ends_at.getTime() <= Date.now()) {
       await sql`update tenant_subscriptions set status = 'expired', updated_at = now() where tenant = ${s.tenant} and status = 'trial'`;
@@ -403,22 +424,33 @@ export async function trialJob() {
     }
     const info = await trialInfo(s.tenant, sql);
     const d = info?.readOnly ? 0 : info?.daysLeft ?? 99;
+    const partner = s.segment === 'partner';
+    const until = s.trial_ends_at.toISOString().slice(0, 10); // 연장하면 새 기간으로 다시 알림
+    if (partner && d <= PARTNER.alertDays && !s.trial_notified?.partner) {
+      supers ??= await (await import('./superAdmin')).platformAdminIds(sql);
+      const when = info?.readOnly ? '끝났습니다' : d === 0 ? '오늘 끝납니다' : `${d}일 남았습니다`;
+      await notify(sql, { userIds: supers, type: 'usage_alert', title: `설계 파트너 기간이 ${when} — ${s.name}`, body: '고객사 관리에서 [유료 전환]·[기간 연장]·[지금 종료] 중 하나를 골라 주세요. 그대로 두면 끝나는 날 읽기 전용이 됩니다.',
+        link: `/platform?tab=company&tenant=${encodeURIComponent(s.tenant)}`, dedupeKey: `partner:${s.tenant}:${until}` });
+      await sql`update tenant_subscriptions set trial_notified = trial_notified || ${sql.json({ partner: true })} where tenant = ${s.tenant}`;
+      partnerAlerts++;
+    }
     const key = d === 0 ? 'd0' : d === 1 ? 'd1' : d <= 3 ? 'd3' : null;
     if (!key || s.trial_notified?.[key]) continue;
     const admins = await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${s.tenant} and status = 'active' and role in ('owner','admin')`;
-    const title = d === 0 ? '무료 체험이 오늘 끝납니다' : `무료 체험이 ${d}일 남았습니다`;
+    const name = partner ? '설계 파트너 기간' : '무료 체험';
+    const title = d === 0 ? `${name}이 오늘 끝납니다` : `${name}이 ${d}일 남았습니다`;
     const body = d === 0 ? '오늘이 지나면 읽기 전용(보기·내보내기만)이 됩니다 — 요금제를 선택해 주세요' : '요금제를 선택하면 끊김 없이 계속 쓸 수 있어요';
-    await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title, body, link: '/admin/usage', dedupeKey: `trial:${s.tenant}:${key}` });
+    await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title, body, link: '/admin/usage', dedupeKey: `trial:${s.tenant}:${key}:${until}` });
     const { sendMail } = await import('./mail');
     for (const a of admins) await sendMail(a.email, `[워크인] ${title}`, `${s.name}\n${body}\n${process.env.APP_URL ?? ''}/admin/usage`).catch(() => {});
     await sql`update tenant_subscriptions set trial_notified = trial_notified || ${sql.json({ [key]: true })} where tenant = ${s.tenant}`;
     notified++;
   }
-  return { trials: subs.length, notified, expired };
+  return { trials: subs.length, notified, expired, partnerAlerts };
 }
 
-export const trialActionInput = z.object({ action: z.enum(['extend', 'end', 'convert']), days: z.number().int().min(1).max(60).optional(), planCode: z.string().max(40).optional() });
-/** 플랫폼 운영: 체험 연장(+7/+14일)·즉시 종료(읽기 전용)·유료 전환 */
+export const trialActionInput = z.object({ action: z.enum(['extend', 'end', 'convert']), days: z.number().int().min(1).max(PARTNER.maxDays).optional(), planCode: z.string().max(40).optional() });
+/** 플랫폼 운영: 체험 연장(+7/+14일, 설계 파트너 +30/+90일)·즉시 종료(읽기 전용)·유료 전환 */
 export async function platformTrial(u: SessionUser, tenant: string, i: z.infer<typeof trialActionInput>) {
   requirePlatform(u);
   const sql = db();
@@ -432,8 +464,9 @@ export async function platformTrial(u: SessionUser, tenant: string, i: z.infer<t
     await sql`update tenant_subscriptions set status = 'expired', trial_ends_at = least(coalesce(trial_ends_at, now()), now()), updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
   } else {
     const code = i.planCode ?? s.chosen_plan;
-    if (!code || !(await sql`select 1 from plans where code = ${code} and code not in ('trial','free','team_free','w_free')`).length) throw badRequest('전환할 유료 요금제를 고르세요');
+    if (!code || !(await sql`select 1 from plans where code = ${code} and code <> all(${FREE_PLANS})`).length) throw badRequest('전환할 유료 요금제를 고르세요');
     await sql`update tenant_subscriptions set plan_code = ${code}, status = 'active', period_start = current_date, period_end = null, updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
+    await liftPartnerIfPaid(tenant, code, sql);
   }
   clearReadOnlyCache(tenant);
   await audit(sql, u.id, `platform.trial_${i.action}`, 'tenant', null, { tenant, ...i }, null);

@@ -531,7 +531,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {session.tenant?.trial && (
           <div className={cx('fixed inset-x-0 top-0 z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',
             session.tenant.trial.readOnly ? 'bg-red-600 text-white' : session.tenant.trial.daysLeft <= 3 ? 'bg-warm-500 text-white' : 'bg-brand-50 text-brand-800')} data-testid="trial-banner">
-            {session.tenant.trial.readOnly ? '무료 체험이 끝나 읽기 전용입니다' : session.tenant.trial.daysLeft === 0 ? '무료 체험 오늘 종료' : `무료 체험 D-${session.tenant.trial.daysLeft}`}
+            {(() => { const n = session.tenant.trial.partner ? '설계 파트너 기간' : '무료 체험'; /* #667 */ return session.tenant.trial.readOnly ? `${n}이 끝나 읽기 전용입니다` : session.tenant.trial.daysLeft === 0 ? `${n} 오늘 종료` : `${n} D-${session.tenant.trial.daysLeft}`; })()}
             {inApp ? <span className="font-normal">· {IN_APP_BILLING_NOTE}</span> : <Link href="/admin/usage" className="underline">요금제 선택</Link>}
           </div>
         )}

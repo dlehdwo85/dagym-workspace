@@ -4,6 +4,7 @@ import { newToken, sha256 } from './crypto';
 import { HttpError, badRequest, conflict, forbidden, notFound } from './errors';
 import { audit } from './log';
 import { appUrl, sendMail } from './mail';
+import { PARTNER } from './partner';
 import { tenantOf, type SessionUser } from './types';
 
 /**
@@ -108,7 +109,9 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   const [inv] = await sql<{ expires_at: Date; created_at: Date }[]>`select expires_at, created_at from invitations where user_id = ${t.owner_user_id} and accepted_at is null and revoked_at is null order by created_at desc limit 1`;
   const ownerInvite = t.owner_user_id && users.find((x: any) => x.id === t.owner_user_id)?.status === 'invited' ? { pending: true, expiresAt: inv?.expires_at ?? null, expired: !inv || new Date(inv.expires_at) < new Date() } : { pending: false };
   const captureEvents30d = await (await import('./capturePolicy')).captureEventCount(tenant, sql); // #626 최근 30일 캡처·인쇄·자동화 사건 수
-  return { ownerInvite, captureEvents30d, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
+  // 208차 #667 설계 파트너: 기간(체험 정보 — 유료로 바뀌면 null)·마케팅 월 크레딧
+  const partner = t.segment === 'partner' ? { trial: await P.trialInfo(tenant, sql), mktCredits: (await sql<{ c: number | null }[]>`select monthly_credits::float8 c from mkt_settings where tenant = ${tenant}`)[0]?.c ?? null } : null;
+  return { ownerInvite, captureEvents30d, partner, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
     mktWrite: await (await import('./mktPlans')).tenantWriteView(tenant).catch(() => null) }; // 대표 10/24 추가 ① 마케팅 글 모델
 }
 
@@ -243,10 +246,15 @@ export const newTenantInput = z.object({
   company: z.string().trim().min(1, '회사명을 적어 주세요').max(60), industries: z.array(z.string().trim().min(1).max(30)).max(8).default([]), size: z.enum(['1', '2-10', '11-30', '31-100', '100+']).optional(),
   ownerName: z.string().trim().min(1, '대표 이름을 적어 주세요').max(50), ownerEmail: z.string().trim().toLowerCase().email('대표 이메일을 확인해 주세요').max(200),
   planCode: z.string().trim().max(40).optional(), // 비우거나 'trial' = 14일 체험(trialDays 로 조정)
-  trialDays: z.number().int().min(1).max(90).optional(), spaces: z.array(z.enum(['sales', 'marketing'])).max(2).default([]), memo: z.string().max(2000).optional(),
+  trialDays: z.number().int().min(1).max(PARTNER.maxDays).optional(), spaces: z.array(z.enum(['sales', 'marketing'])).max(2).default([]), memo: z.string().max(2000).optional(),
   // #656: 담당자(비우면 대표)·연락처·직책, 구분(설계 파트너 체험단/일반), 소개 경로
   contactName: z.string().trim().max(50).optional(), contactPhone: z.string().trim().max(30).optional(), contactTitle: z.string().trim().max(30).optional(),
-  segment: z.enum(['partner', 'customer']).optional(), source: z.string().trim().max(100).optional() });
+  segment: z.enum(['partner', 'customer']).optional(), source: z.string().trim().max(100).optional() })
+  .superRefine((v, ctx) => { // 208차 #667 설계 파트너: 체험으로 시작 · 기간(일)은 슈퍼관리자가 꼭 적음(기본값 없음, 1년까지) — 일반 체험은 90일까지
+    if (v.segment !== 'partner') { if ((v.trialDays ?? 0) > 90) ctx.addIssue({ code: 'custom', path: ['trialDays'], message: '체험 기간은 90일까지입니다' }); return; }
+    if (v.planCode && v.planCode !== 'trial') ctx.addIssue({ code: 'custom', path: ['planCode'], message: '설계 파트너는 체험으로 시작합니다 — 유료 전환은 고객사 관리에서 해 주세요' });
+    if (!v.trialDays) ctx.addIssue({ code: 'custom', path: ['trialDays'], message: '설계 파트너 기간(일)을 적어 주세요' });
+  });
 const inviteMail = (company: string, ownerName: string, link: string) => `${ownerName}님, 워크인에 "${company}" 회사가 만들어졌습니다.\n아래 링크에서 비밀번호를 정하면 대표 계정으로 바로 시작할 수 있습니다 (7일 유효).\n\n${link}\n\n모르는 초대라면 이 메일을 무시해 주세요.`;
 /** 메일이 안 가도(미설정·발송 실패) 회사 만들기는 성공 — 운영자가 링크를 직접 전달한다 */
 async function tryMail(to: string, subject: string, text: string): Promise<'sent' | 'dev' | 'failed'> { try { return await sendMail(to, subject, text); } catch { return 'failed'; } }
@@ -268,9 +276,10 @@ export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof n
       contact_name = ${i.contactName?.trim() || null}, contact_phone = ${i.contactPhone?.trim() || null}, contact_title = ${i.contactTitle?.trim() || null}, segment = ${i.segment ?? null}, source = ${i.source?.trim() || null} where id = ${tenant}`; // #656
     if (plan) await tx`update tenant_subscriptions set plan_code = ${plan}, status = 'active', trial_ends_at = null, period_end = null where tenant = ${tenant}`;
     else if (i.trialDays) await tx`update tenant_subscriptions set trial_ends_at = now() + ${i.trialDays} * interval '1 day', period_end = (now() + ${i.trialDays} * interval '1 day')::date where tenant = ${tenant}`;
+    if (i.segment === 'partner') await (await import('./plans')).applyPartnerPreset(tenant, tx); // #667 AI 월 5,000원·마케팅 크레딧 0
     const [hq] = await tx<{ id: string }[]>`select id from org_units where tenant = ${tenant} and type = 'hq' order by sort limit 1`;
     await tx`insert into invitations (email, name, role, org_unit_ids, token_hash, invited_by, user_id, expires_at) values (${i.ownerEmail}, ${i.ownerName}, 'owner', ${hq ? [hq.id] : []}, ${sha256(token)}, ${u.id}, ${userId}, now() + interval '7 days')`;
-    await audit(tx, u.id, 'platform.tenant_create', 'tenant', tenant, { company: i.company, ownerEmail: i.ownerEmail, plan: plan ?? `trial${i.trialDays ? `(${i.trialDays}d)` : ''}`, spaces: i.spaces, industries: inds, segment: i.segment ?? null }, ip);
+    await audit(tx, u.id, 'platform.tenant_create', 'tenant', tenant, { company: i.company, ownerEmail: i.ownerEmail, plan: plan ?? `trial${i.trialDays ? `(${i.trialDays}d)` : ''}`, spaces: i.spaces, industries: inds, segment: i.segment ?? null, ...(i.segment === 'partner' ? { preset: PARTNER } : {}) }, ip);
     return { tenant, userId };
   });
   const m = await tryMail(i.ownerEmail, `[워크인] ${i.company} 대표 계정 초대`, inviteMail(i.company, i.ownerName, `${appUrl()}/invite/${token}`));
@@ -359,6 +368,7 @@ export async function setTenantProfile(u: SessionUser, tenant: string, i: z.infe
   requirePlatform(u); await requireTenant(tenant);
   const sql = db();
   const v = (x: string | null | undefined) => (x === undefined ? null : x?.trim() || null);
+  const [before] = await sql<{ segment: string | null; sub_status: string | null }[]>`select t.segment, s.status as sub_status from tenants t left join tenant_subscriptions s on s.tenant = t.id where t.id = ${tenant}`;
   await sql`update tenants set
       contact_name = case when ${i.contactName === undefined} then contact_name else ${v(i.contactName)}::text end,
       contact_phone = case when ${i.contactPhone === undefined} then contact_phone else ${v(i.contactPhone)}::text end,
@@ -366,7 +376,13 @@ export async function setTenantProfile(u: SessionUser, tenant: string, i: z.infe
       segment = case when ${i.segment === undefined} then segment else ${i.segment ?? null}::text end,
       source = case when ${i.source === undefined} then source else ${v(i.source)}::text end
     where id = ${tenant}`;
-  await audit(sql, u.id, 'platform.tenant_profile', 'tenant', tenant, { fields: Object.keys(i), segment: i.segment === undefined ? undefined : i.segment ?? null }, ip);
+  // 208차 #667: 체험 중(또는 체험 끝)인 회사를 설계 파트너로 바꾸면 파트너 기본값, 일반으로 되돌리면 걷음 — 유료 회사는 그대로
+  let preset: 'applied' | 'lifted' | undefined;
+  if (i.segment !== undefined && (i.segment ?? null) !== (before?.segment ?? null) && ['trial', 'expired'].includes(before?.sub_status ?? '')) {
+    const P = await import('./plans');
+    if (i.segment === 'partner') { await P.applyPartnerPreset(tenant, sql); preset = 'applied'; } else if (before?.segment === 'partner') { await P.liftPartnerPreset(tenant, sql); preset = 'lifted'; }
+  }
+  await audit(sql, u.id, 'platform.tenant_profile', 'tenant', tenant, { fields: Object.keys(i), segment: i.segment === undefined ? undefined : i.segment ?? null, preset }, ip);
   return { ok: true };
 }
 

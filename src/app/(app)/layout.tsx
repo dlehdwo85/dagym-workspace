@@ -48,7 +48,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     tours: { seen: await (await import('@/lib/tours')).seenTours(user.id).catch(() => []), auto: (await import('@/lib/tours')).toursAuto(user) }, // #77 처음 사용 안내
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)
     tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), captureBlock: cap.block, captureAutomation: cap.automation, inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)),
-      trial: trial ? { trial: trial.trial, readOnly: trial.readOnly, daysLeft: trial.daysLeft } : null, billingLock: billingLock as 'read_only' | 'suspended' | null },
+      trial: trial ? { trial: trial.trial, readOnly: trial.readOnly, daysLeft: trial.daysLeft, partner: trial.partner } : null, billingLock: billingLock as 'read_only' | 'suspended' | null },
   };
   return <><LaunchIntro />{/* #443 실행 애니메이션(세션당 1번·동작 줄이기면 안 함) */}<AppShell session={session}><Suspense>{children}</Suspense></AppShell></>;
 }

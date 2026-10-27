@@ -105,7 +105,9 @@ async function activate(sql: Sql, tenant: string, planCode: string, cycle: 'mont
   await sql`update tenant_subscriptions set plan_code = ${planCode}, status = 'active', billing_cycle = ${cycle}, billing_amount = ${amount}, next_billing_on = ${addPeriod(today(), cycle)},
     period_start = current_date, period_end = ${addPeriod(today(), cycle)}, cancel_at_period_end = false, past_due_since = null, retry_count = 0, next_retry_on = null,
     billing_lock = null, billing_grace_until = null, updated_at = now() where tenant = ${tenant}`;
-  (await import('../plans')).clearReadOnlyCache(tenant); // B2: 결제되면 읽기 전용·이용 중지 즉시 복구
+  const P = await import('../plans');
+  P.clearReadOnlyCache(tenant); // B2: 결제되면 읽기 전용·이용 중지 즉시 복구
+  await P.liftPartnerIfPaid(tenant, planCode, sql); // #667 설계 파트너가 결제하면 파트너 기본값(AI 월 5,000원·마케팅 크레딧 0)을 걷고 요금제 한도로
 }
 
 const PM_LABEL: Record<string, string> = { CARD: '카드', BANK: '계좌이체', VBANK: '가상계좌' };
