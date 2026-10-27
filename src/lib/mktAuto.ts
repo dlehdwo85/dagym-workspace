@@ -1338,7 +1338,9 @@ export const brandKitInput = z.object({ tone: z.string().max(200).nullable().opt
   testMode: z.boolean().optional(), voice: voiceInput.optional(), // #426 말투 프로필
   // #454 영상 끝 화면·자막: 로고(자료실 이미지)·끝 화면 한 줄·CTA·배경색·글꼴(자료실 OTF/TTF)
   video: z.object({ logoFileId: z.string().uuid().nullable().optional(), headline: z.string().trim().max(30).nullable().optional(), cta: z.string().trim().max(60).nullable().optional(),
-    endColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(), fontFileId: z.string().uuid().nullable().optional() }).optional(),
+    endColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(), fontFileId: z.string().uuid().nullable().optional(),
+    // 209차 #666 ⑤ 출연진 고정: 주인공 사진(자료실 이미지) · 묘사(영문이면 장면 지시에 그대로) · 생성 인물 / 실존 인물(광고 사용 동의를 받았을 때만)
+    castFileId: z.string().uuid().nullable().optional(), castEn: z.string().trim().max(300).nullable().optional(), castKind: z.enum(['generated', 'real']).nullable().optional(), castConsent: z.boolean().optional() }).optional(),
   feed: feedInput.optional(), // #544 피드 틀(쓸 틀·색·머리줄·연락처 줄·머리말) — 통째로 저장
   facts: factsInput.optional(), // 로컬 QA 10/24 ⑤ 사실 카드(연락처·운영 시간·요금·숫자·섞으면 안 되는 이름) — 통째로 저장
   topicPool: z.array(z.string().trim().min(1).max(120)).max(40).optional(), // 로컬 QA 10/24 ③ 브랜드 주제 풀(한 줄에 하나, 돌아가며 씀)
@@ -1354,7 +1356,11 @@ export async function saveBrandKit(u: SessionUser, id: string, i: z.infer<typeof
   await assertSpace(u, 'marketing'); adminOnly(u);
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
   // #454 영상 키트 파일은 이 회사 자료실(기밀 아님)만
-  for (const fid of [i.video?.logoFileId, i.video?.fontFileId]) if (fid && !(await db()`select 1 from library_files where id = ${fid} and tenant = ${tenantOf(u)} and deleted_at is null and coalesce(security, 'internal') <> 'confidential'`).length) throw badRequest('자료실에서 고른 파일만 쓸 수 있습니다(기밀 파일 제외)');
+  for (const fid of [i.video?.logoFileId, i.video?.fontFileId, i.video?.castFileId]) if (fid && !(await db()`select 1 from library_files where id = ${fid} and tenant = ${tenantOf(u)} and deleted_at is null and coalesce(security, 'internal') <> 'confidential'`).length) throw badRequest('자료실에서 고른 파일만 쓸 수 있습니다(기밀 파일 제외)');
+  if (i.video?.castFileId && !(await db()`select 1 from library_files where id = ${i.video.castFileId} and mime_type like 'image/%'`).length) throw badRequest('주인공은 사진 파일만 고를 수 있습니다');
+  // 209차 ⑤ 실존 인물 사진은 광고 사용 동의를 받았다고 표시해야 씀(동의한 시각·사람을 남김) — 생성 인물은 그대로
+  if (i.video?.castKind === 'real' && !i.video.castConsent) throw badRequest('실존 인물 사진은 광고에 써도 된다는 동의를 받은 뒤에 쓸 수 있습니다 — 동의를 받았으면 표시해 주세요');
+  if (i.video) { const { castConsent, ...rest } = i.video; i = { ...i, video: { ...rest, ...(i.video.castKind ? { castConsentAt: castConsent && i.video.castKind === 'real' ? new Date().toISOString() : null, castConsentBy: castConsent && i.video.castKind === 'real' ? u.id : null } : {}) } as typeof i.video }; }
   if (i.examples) for (const k of Object.keys(EXAMPLE_KINDS) as (keyof typeof EXAMPLE_KINDS)[]) if (i.examples.filter((e) => e.kind === k).length > EXAMPLE_PER_KIND) throw badRequest(`${EXAMPLE_KINDS[k]} 예시는 ${EXAMPLE_PER_KIND}개까지입니다`);
   const [b] = await db()`update mkt_brands set tone = ${i.tone === undefined ? db()`tone` : i.tone}, intro = ${i.intro === undefined ? db()`intro` : i.intro || null}, products = ${i.products === undefined ? db()`products` : i.products || null},
     weekly_topic = ${i.weeklyTopic === undefined ? db()`weekly_topic` : i.weeklyTopic || null}, banned_words = coalesce(${i.bannedWords ?? null}::text[], banned_words), test_mode = coalesce(${i.testMode ?? null}, test_mode),

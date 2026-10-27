@@ -7,7 +7,8 @@ import { decrypt, encrypt } from './crypto';
  * 비동기 — 제출하면 {status:'queued', request_id, status_url} → status_url 폴링 → completed 에서 images[].url / video.url. 실패·nsfw 는 과금 안 됨.
  */
 /** 로컬 10/20 22:30 ⑤: 구독 크레딧은 API 에 못 씀(console.higgsfield.ai 별도 선불, 달러 종량제) → 모델마다 usd(이미지 장당 / 영상 초당)도 두고 표시 단위를 고름 */
-/** ref = 189차 '참고 사진 칸' — 참고 사진(public_url)을 넣는 입력 칸 이름(예 image_url, 배열이면 image_urls[]). 비우면 그 모델은 참고 생성에 안 씀(운영자가 모델 문서를 보고 적음) */
+/** ref = 189차 '참고 사진 칸' — 참고 사진(public_url)을 넣는 입력 칸 이름(예 image_url, 배열이면 image_urls[]). 비우면 그 모델은 참고 생성에 안 씀(운영자가 모델 문서를 보고 적음).
+ *  209차: 영상 모델이면 이미지→영상의 '시작 사진 칸'(출연진 고정 — 장면 첫 사진으로 영상을 만듦) */
 export type HfModel = { id: string; kind: 'image' | 'video'; name: string; credits: number; usd?: number | null; enabled: boolean; note?: string; ref?: string | null };
 export const REF_FIELD = /^[a-z_][a-z0-9_]*(\[\])?$/i;
 export type HfPricing = 'credits' | 'usd';
@@ -28,7 +29,7 @@ export const modelId = (id?: string | null) => (id ? LEGACY[id] ?? id : id ?? nu
 function normalizeModels(list: HfModel[]): HfModel[] {
   const seen = new Set<string>(); const out: HfModel[] = [];
   for (const m of list) { const id = modelId(m.id)!; if (seen.has(id)) continue; seen.add(id); const d = DEFAULT_MODELS.find((x) => x.id === id);
-    const ref = m.kind === 'image' && m.ref && REF_FIELD.test(m.ref.trim()) ? m.ref.trim() : null; // 189차 참고 사진 칸(이미지 모델만)
+    const ref = m.ref && REF_FIELD.test(m.ref.trim()) ? m.ref.trim() : null; // 189차 참고 사진 칸(이미지) · 209차 시작 사진 칸(영상)
     out.push(id === m.id ? { ...m, ref } : { ...m, id, name: d?.name ?? m.name, note: d?.note ?? m.note, ref }); }
   return out;
 }
@@ -60,6 +61,9 @@ export function hfBody(model: string, opt: { kind: 'image' | 'video'; prompt: st
 }
 /** 189차: 참고 사진을 받는 이미지 모델(모델 표의 '참고 사진 칸'이 있는 첫 모델) */
 export const refModel = (models: HfModel[]) => models.find((m) => m.enabled && m.kind === 'image' && !!m.ref && REF_FIELD.test(m.ref)) ?? null;
+/** 209차: 영상 모델 고르기 — withRef = 시작 사진 칸이 있는 이미지→영상 모델(출연진 고정), 아니면 글로만 만드는 모델. want 가 맞으면 그것 */
+export const videoModelFor = (models: HfModel[], withRef: boolean, want?: string | null) => { const id = modelId(want); const ok = (m: HfModel) => m.enabled && m.kind === 'video' && (!!m.ref && REF_FIELD.test(m.ref)) === withRef;
+  return models.find((m) => ok(m) && m.id === id) ?? models.find(ok) ?? null; };
 
 const KEY = 'higgsfield';
 export async function hfSettings(): Promise<HfSettings & { apiKey?: string }> {

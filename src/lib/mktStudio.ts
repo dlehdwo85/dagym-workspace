@@ -125,9 +125,11 @@ export async function writePrompt(tenant: string, briefId: string, actorId: stri
       const target = Math.round((spec.seconds ?? 15) - 2.5 + 0.5 + 3 * 0.4);
       const videoRules = `- 국내 대기업 TV·디지털 광고 수준: 메시지 하나, 첫 3초 훅, 인물의 작은 감정 변화, 제품·서비스가 문제를 푸는 순간, 마지막은 브랜드(끝 화면은 합성 단계가 따로 붙임).
 - 모든 인물은 한국인, 배경은 한국(한국 아파트·사무실·카페·거리). 서양식 주택·외국어 간판·영문 화면 금지.
-- 화면 안에 글자를 넣지 않음(간판·화면 UI·자막·로고·숫자 모두). 한국어 자막·로고는 합성 단계가 넣음. 휴대폰·모니터 화면은 '부드러운 빛'만.
-- character: 모든 장면에 똑같이 쓸 출연진 묘사(영문: 한국인, 나이대·옷·머리). look: 전 장면 공통 색·빛·분위기(영문).
-- scenes: 3~5개, 장면마다 seconds 3~5(정수), 합계 약 ${target}초. 한 장면 = 한 동작·한 감정.
+- 화면 안에 글자를 넣지 않음(간판·화면 UI·자막·로고·숫자 모두). 한국어 자막·로고는 합성 단계가 넣음. 휴대폰·키오스크·모니터 화면은 꺼진 회색 화면(실제 화면은 합성 단계가 얹음).
+- character: 모든 장면에 똑같이 쓸 출연진 묘사(영문: 한국인, 나이대·옷·머리)${kit.castEn ? ` — 브랜드 키트 주인공 '${String(kit.castEn).slice(0, 200)}' 그대로` : ''}. look: 전 장면 공통 색·빛·분위기(영문, 밝은 낮 자연광 — 어두운 컷 없음).
+- 장면 순서(광고 문법, beat 칸): ① hook = 첫 장면, 주인공 정면(눈높이)·표정 + 상황을 묻는 한 문장(풍경·뒷모습으로 시작 금지) ② situation = 같은 주인공·같은 공간에서 겪는 불편 한 가지
+  ③ solution = 제품·서비스로 푸는 순간, 아래 '실제 화면 캡처'가 있으면 이 장면에 얹음 ④ result = 마지막 장면, 같은 주인공 정면·작은 미소·행동이 끝남(숫자는 재료에 있는 것만). 끝 화면(로고·한 줄·전화)은 합성 단계가 붙임.
+- scenes: 3~5개(hook·situation(1~2)·solution(1~2)·result 순서), 장면마다 seconds 3~5(정수), 합계 약 ${target}초. 한 장면 = 한 동작·한 감정.
   line = 그 장면 한국어 자막 겸 내레이션 한 줄(분당 300음절: 3초 15음절·4초 20음절·5초 25음절 안쪽). 첫 장면 line 이 훅 — 인사·"스크롤 멈추세요" 금지, 구체적 상황·숫자·대상으로.
   visualEn = 그 장면만 읽어도 찍을 수 있는 영문 지시(구도·렌즈·카메라 움직임·빛·동작).
   screenMediaId·device = 아래 '실제 화면 캡처'를 휴대폰(phone)·노트북(laptop) 화면으로 얹을 장면이면 그 id(1~2장면만), 아니면 '' 와 'none'. 얹는 장면의 visualEn 은 흐릿하게 깔릴 배경(책상·사무실 등).
@@ -152,21 +154,27 @@ ${REFERENCE_STYLE}${voice ? `\n${voice}` : ''}${mem ? `\n${mem}` : ''}`,
               lens: { type: 'string' }, angle: { type: 'string' }, movement: { type: 'string' }, light: { type: 'string' }, props: { type: 'array', items: { type: 'string' } } } },
             ...(video ? { character: { type: 'string' }, look: { type: 'string' }, bgmId: { type: 'string' },
               endCard: { type: 'object', additionalProperties: false, required: ['headline', 'cta'], properties: { headline: { type: 'string' }, cta: { type: 'string' } } },
-              scenes: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['line', 'visualEn', 'seconds', 'screenMediaId', 'device'],
-                properties: { line: { type: 'string' }, visualEn: { type: 'string' }, seconds: { type: 'integer' }, screenMediaId: { type: 'string' }, device: { type: 'string', enum: ['phone', 'laptop', 'none'] } } } } } : {}) } },
+              scenes: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['beat', 'line', 'visualEn', 'seconds', 'screenMediaId', 'device'],
+                properties: { beat: { type: 'string', enum: ['hook', 'situation', 'solution', 'result'] }, line: { type: 'string' }, visualEn: { type: 'string' }, seconds: { type: 'integer' }, screenMediaId: { type: 'string' }, device: { type: 'string', enum: ['phone', 'laptop', 'none'] } } } } } : {}) } },
       });
       await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
         values (${tenant}, ${actorId}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, ${video ? 'marketing_video_plan' : 'marketing_studio'})`;
       const o = JSON.parse((r.content as any[]).filter((x) => x.type === 'text').map((x) => x.text).join(''));
       const okIds = new Set(photos.map((p) => p.id)); const capIds = new Set(caps.map((c) => c.id)); let screens = 0;
-      const scenes = video && Array.isArray(o.scenes) ? o.scenes.map((x: any) => {
-        const screen = capIds.has(String(x?.screenMediaId ?? '')) && x?.device !== 'none' && screens < 2 ? (screens++, { mediaId: String(x.screenMediaId), device: x.device === 'laptop' ? 'laptop' : 'phone' }) : null;
-        return { line: String(x?.line ?? '').trim().slice(0, 120), visualEn: String(x?.visualEn ?? '').trim().slice(0, 700), seconds: Math.min(5, Math.max(3, Math.round(Number(x?.seconds) || 4))), screen };
-      }).filter((x: { line: string; visualEn: string }) => x.line || x.visualEn).slice(0, 5) : [];
+      type Sc = { line: string; visualEn: string; seconds: number; screen: { mediaId: string; device: 'phone' | 'laptop' } | null; beat: string };
+      const raw: Sc[] = video && Array.isArray(o.scenes) ? o.scenes.map((x: any): Sc => {
+        const screen = capIds.has(String(x?.screenMediaId ?? '')) && x?.device !== 'none' && screens < 2 ? (screens++, { mediaId: String(x.screenMediaId), device: (x.device === 'laptop' ? 'laptop' : 'phone') as 'laptop' | 'phone' }) : null;
+        return { line: String(x?.line ?? '').trim().slice(0, 120), visualEn: String(x?.visualEn ?? '').trim().slice(0, 700), seconds: Math.min(5, Math.max(3, Math.round(Number(x?.seconds) || 4))), screen, beat: String(x?.beat ?? '') };
+      }).filter((x: Sc) => x.line || x.visualEn).slice(0, 5) : [];
+      const scenes = V ? V.orderBeats(raw) : raw; // 209차 ① 광고 문법 순서(첫 = 훅, 끝 = 결과, 가운데 해결 하나 이상)
+      // 209차 ① 실제 화면 장면이 하나도 없으면 이 브랜드 폴더·태그의 캡처를 '해결' 장면에(다른 브랜드 화면이 들어가지 않게 브랜드가 맞는 것만)
+      const mine = brand?.name ? caps.filter((c) => c.folder.includes(brand.name) || (c.tags ?? []).includes(brand.name)) : [];
+      const fix = scenes.find((x) => x.beat === 'solution' && !x.screen);
+      if (!screens && mine.length && fix) fix.screen = { mediaId: mine[0].id, device: 'phone' };
       out = { promptEn: String(o.promptEn ?? fallback.promptEn).slice(0, 4000), negativeEn: String(o.negativeEn ?? fallback.negativeEn).slice(0, 1000), summaryKo: String(o.summaryKo ?? '').slice(0, 1000), caption: String(o.caption ?? b.message).slice(0, 2000),
         refMediaIds: (Array.isArray(o.refMediaIds) ? o.refMediaIds.filter((x: string) => okIds.has(x)) : fallback.refMediaIds), aspect: spec.aspect, model: model?.id ?? null, source: 'ai',
         ...(o.fields && typeof o.fields === 'object' ? { fields: o.fields } : {}),
-        ...(scenes.length ? { scenes } : {}), ...(video ? { character: String(o.character ?? '').slice(0, 400), look: String(o.look ?? '').slice(0, 300),
+        ...(scenes.length ? { scenes } : {}), ...(video ? { character: String(kit.castEn || o.character || '').slice(0, 400), look: String(o.look ?? '').slice(0, 300),
           endCard: { headline: String(o.endCard?.headline ?? '').slice(0, 30), cta: String(kit.cta || o.endCard?.cta || '').slice(0, 60) }, bgmId: bgms.some((x) => x.id === o.bgmId) ? o.bgmId : null } : {}) };
     } catch { /* AI 실패·한도 → 기본 프롬프트 */ }
   }

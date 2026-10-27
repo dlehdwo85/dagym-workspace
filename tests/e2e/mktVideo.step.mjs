@@ -42,7 +42,7 @@ export async function mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   const logo = await upload('E2E 워크인 로고.png', 'image/png', png(600, 200), '마케팅');
   const cap = await upload('E2E 홈 화면 캡처.png', 'image/png', png(1170, 2532), '영상 화면 캡처');
   await upload('E2E 밝은 피아노.mp3', 'audio/mpeg', fakeMp3(20, 262), '영상 배경음');
-  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${brand}`, { video: { logoFileId: logo, endColor: '#0F766E' } });
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${brand}`, { video: { logoFileId: logo, endColor: '#0F766E' }, facts: { phone: '02-1234-5678' } }); // 209차 끝 화면 전화(검수 기준)
   // 브랜드 키트 화면: 끝 화면 한 줄·CTA
   await owner.goto(`${BASE}/s/marketing/automation`);
   const kit = owner.getByTestId('brand-video-E2E 워크인'); await kit.waitFor();
@@ -60,7 +60,7 @@ export async function mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
       { line: '승인도 휴대폰에서 끝', visualEn: 'Close-up of a thumb tapping a phone, screen glow only.', seconds: 3, screenMediaId: '', device: 'none' },
       { line: '오늘도 제시간에 퇴근', visualEn: 'Wide shot, she leaves the office smiling at golden hour.', seconds: 3, screenMediaId: '', device: 'none' }],
     endCard: { headline: '일은 한 화면에서', cta: '14일 무료 체험' }, bgmId: '' }),
-  say({ scenes: [1, 2, 3, 4].map((scene) => ({ scene, foreignText: false, nonKorean: false, westernSetting: false, broken: false, issues: [] })) })] });
+  say({ scenes: [1, 2, 3, 4].map((scene) => ({ scene, foreignText: false, nonKorean: false, westernSetting: false, broken: false, frontFace: scene === 1 || scene === 4, issues: [] })) })] }); // 209차 첫·마지막 장면 정면
   await owner.goto(`${BASE}/s/marketing/automation?tab=studio`);
   await owner.getByTestId('mkt-studio').waitFor();
   await owner.getByTestId('studio-brand').selectOption({ label: 'E2E 워크인' });
@@ -81,6 +81,7 @@ export async function mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   assert.match(await chips.nth(1).innerText(), /실제 화면[\s\S]*검수 ✓/);
   await v.getByTestId('studio-video-file').waitFor();
   assert.equal(await v.getByTestId('studio-review').count(), 0, '검수 통과 → 사람 검수 줄 없음');
+  assert.deepEqual(await v.getByTestId('studio-checks').locator('[data-ok]').evaluateAll((els) => els.map((e) => e.getAttribute('data-ok'))), ['true', 'true', 'true', 'true', 'true'], '209차 검수 기준 5개 통과');
   await card.screenshot({ path: `${SHOTS}/212-studio-video.png` });
   // 휴대폰 폭: 가로 넘침 없음
   await owner.setViewportSize({ width: 390, height: 844 });

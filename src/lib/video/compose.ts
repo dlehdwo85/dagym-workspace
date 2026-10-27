@@ -57,7 +57,7 @@ const assColor = (hex: string, alpha = 0) => { const h = /^#?([0-9a-f]{6})$/i.ex
 export const isLight = (hex: string) => { const h = /^#?([0-9a-f]{6})$/i.exec(hex)?.[1]; if (!h) return false; const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255); return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.62; };
 
 export function buildAss(o: { dim: Dim; font: string; subs: { start: number; end: number; text: string }[]; end?: { start: number; end: number; headline: string; cta: string; logo: boolean; color: string } }) {
-  const b = subBox(o.dim); const notes: string[] = [];
+  const b = subBox(o.dim); const notes: string[] = []; let minSize = 0; // 209차 ⑦ 자막 크기 검수(가장 작은 자막)
   const ink = o.end && isLight(o.end.color) ? '#161616' : '#FFFFFF';
   const head = Math.round(Math.min(o.dim.w, o.dim.h) * 0.068); const cta = Math.round(Math.min(o.dim.w, o.dim.h) * 0.044);
   const lines = [
@@ -73,6 +73,7 @@ export function buildAss(o: { dim: Dim; font: string; subs: { start: number; end
     if (!s.text.trim() || s.end - s.start < 0.4) return;
     const f = fitLines(assText(s.text), b.perLine, b.size);
     if (f.over) notes.push(`장면 ${k + 1} 자막이 길어 세 줄까지만 넣었습니다`);
+    minSize = minSize ? Math.min(minSize, f.size) : f.size;
     lines.push(`Dialogue: 0,${assTime(s.start)},${assTime(s.end)},Sub,,0,0,0,,{\\fad(120,120)${f.size !== b.size ? `\\fs${f.size}` : ''}}${f.lines.join('\\N')}`);
   });
   if (o.end) {
@@ -81,7 +82,7 @@ export function buildAss(o: { dim: Dim; font: string; subs: { start: number; end
     if (hl.length) lines.push(`Dialogue: 1,${assTime(o.end.start + 0.25)},${assTime(o.end.end)},Head,,0,0,0,,{\\pos(${cx},${y0})\\fad(250,0)}${hl.join('\\N')}`);
     if (o.end.cta.trim()) lines.push(`Dialogue: 1,${assTime(o.end.start + 0.45)},${assTime(o.end.end)},Cta,,0,0,0,,{\\pos(${cx},${y0 + Math.round(head * (hl.length > 1 ? 1.9 : 1.25) + cta)})\\fad(250,0)}${assText(o.end.cta)}`);
   }
-  return { ass: lines.join('\n') + '\n', notes };
+  return { ass: lines.join('\n') + '\n', notes, subPct: minSize ? Math.round((minSize / Math.min(o.dim.w, o.dim.h)) * 1000) / 10 : null };
 }
 
 let sharpMod: any;
@@ -121,7 +122,7 @@ export type ComposeInput = { dir: string; aspect: string; scenes: ComposeScene[]
   narration: ({ file: string; duration: number } | null)[]; bgm?: { file: string } | null; font: { dir: string; family: string }; out: string };
 
 /** 한 편 합성 → { 파일, 길이, 알림 } */
-export async function composeVideo(o: ComposeInput): Promise<{ file: string; duration: number; notes: string[] }> {
+export async function composeVideo(o: ComposeInput): Promise<{ file: string; duration: number; notes: string[]; subPct: number | null }> {
   const d = dimOf(o.aspect); const notes: string[] = []; const args: string[] = []; const f: string[] = []; let idx = 0;
   const durs: number[] = [];
   const infos = new Map<string, Awaited<ReturnType<typeof mediaInfo>>>(); // 같은 원본을 여러 장면이 나눠 쓰면 한 번만 읽음
@@ -174,5 +175,5 @@ export async function composeVideo(o: ComposeInput): Promise<{ file: string; dur
   await ffmpegOk([...args, '-/filter_complex', 'graph.txt', '-map', '[vout]', '-map', '[aout]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-r', '30', '-g', '60',
     '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', '-t', total.toFixed(3), o.out], { cwd: o.dir, timeoutMs: 250_000 });
   const info = await mediaInfo(join(o.dir, o.out));
-  return { file: o.out, duration: info.duration ?? total, notes };
+  return { file: o.out, duration: info.duration ?? total, notes, subPct: a.subPct };
 }

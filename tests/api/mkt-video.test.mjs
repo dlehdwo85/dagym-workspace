@@ -40,12 +40,14 @@ const scenesAi = (capId, bgmId) => say({ promptEn: 'A warm Korean office story: 
     { line: '승인도 휴대폰에서 끝', visualEn: 'Close-up of her thumb tapping a phone, screen glow only, shallow depth of field.', seconds: 3, screenMediaId: '', device: 'none' },
     { line: '오늘도 제시간에 퇴근', visualEn: 'Wide shot, she leaves the office smiling, golden hour street of Seoul.', seconds: 3, screenMediaId: 'not-a-capture', device: 'laptop' }],
   endCard: { headline: '일은 한 화면에서', cta: 'AI 가 쓴 CTA' }, bgmId });
-const qa = (rows) => say({ scenes: rows.map(([scene, flag]) => ({ scene, foreignText: flag === 'text', nonKorean: flag === 'person', westernSetting: false, broken: false, issues: flag ? ['간판에 영어 글자'] : [] })) });
+// 209차: frontFace(주인공 정면) — 첫·마지막 장면은 정면(광고 문법 검수 기준 2/2)
+const qa = (rows) => say({ scenes: rows.map(([scene, flag]) => ({ scene, foreignText: flag === 'text', nonKorean: flag === 'person', westernSetting: false, broken: false, frontFace: scene === 1 || scene === 4, issues: flag ? ['간판에 영어 글자'] : [] })) });
 
 before(async () => { await resetDb(); await ensureTls(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', quietStart: 0, quietEnd: 0 });
   P.brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '워크인' })).id;
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${P.brand}`, { facts: { phone: '02-1234-5678' } }); // 끝 화면 전화(209차 검수 기준)
   P.logo = await upload('워크인 로고.png', 'image/png', png(600, 200), '마케팅');
   P.cap = await upload('홈 화면 캡처.png', 'image/png', png(1170, 2532), '영상 화면 캡처');
   P.bgm = await upload('밝은 피아노.mp3', 'audio/mpeg', fakeMp3(20, 262), '영상 배경음');

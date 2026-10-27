@@ -37,21 +37,34 @@ type View = { briefs: Brief[]; brands: { id: string; name: string; tone: string 
 const STATUS: Record<string, [string, string]> = { queued: ['대기', 'bg-slate-100 text-ink-2'], prompting: ['프롬프트 작성 중', 'bg-sky-50 text-sky-800'], ready: ['프롬프트 준비', 'bg-violet-50 text-violet-800'], generating: ['생성 중', 'bg-amber-50 text-amber-800'], review: ['승인 대기', 'bg-orange-50 text-orange-800'], published: ['게시됨', 'bg-emerald-50 text-emerald-800'], rejected: ['반려', 'bg-red-50 text-red-800'], failed: ['실패', 'bg-red-50 text-red-800'] };
 const labelOf = (b: Brief) => (b.content_status === 'published' ? STATUS.published : b.content_status === 'changes' && b.status === 'review' ? ['수정 요청', 'bg-slate-100 text-ink-2'] : STATUS[b.status] ?? [b.status, 'bg-slate-100 text-ink-2']);
 
-type SceneP = { k: number; seconds: number; line: string; status: string; screen: boolean; regens: number; qa: { checked: boolean; ok: boolean; issues: string[] } | null };
-type Progress = { stage: string; label: string; done: number; total: number; review: string[]; notes: string[]; audio: { narration: string | null; bgm: string | null } | null; reuse?: boolean;
+type SceneP = { k: number; seconds: number; line: string; status: string; screen: boolean; regens: number; qa: { checked: boolean; ok: boolean; issues: string[] } | null; beat?: string | null; kf?: string | null; castOff?: boolean };
+/** 209차 #666 ⑦ 하이링크 검수 기준(정면 컷·실제 화면·어두운 장면·자막 크기·끝 화면) */
+type Checks = { front: { n: number; need: number; known: boolean }; screens: { n: number; need: number }; dark: number; subPct: number | null; end: { logo: boolean; headline: boolean; phone: boolean }; fails: string[] };
+type Progress = { stage: string; label: string; done: number; total: number; review: string[]; checkFails?: string[]; notes: string[]; audio: { narration: string | null; bgm: string | null } | null; reuse?: boolean; cast?: 'ref' | 'text' | null; checks?: Checks | null;
   variants: { n: number; mediaId: string | null; duration: number | null; error: string | null; renderError: string | null; scenes: SceneP[] }[] };
-const SC: Record<string, string> = { completed: 'bg-emerald-50 text-emerald-800', queued: 'bg-slate-100 text-ink-2', in_progress: 'bg-amber-50 text-amber-800', pending: 'bg-slate-100 text-ink-2' };
+const SC: Record<string, string> = { completed: 'bg-emerald-50 text-emerald-800', queued: 'bg-slate-100 text-ink-2', in_progress: 'bg-amber-50 text-amber-800', pending: 'bg-slate-100 text-ink-2', keyframe: 'bg-amber-50 text-amber-800' };
+/** 209차 ① 광고 문법 자리(훅 → 상황 → 해결 → 결과) */
+const BEAT: Record<string, string> = { hook: '훅', situation: '상황', solution: '해결', result: '결과' };
+function CheckChips({ c }: { c: Checks }) {
+  const end = [c.end.logo && '로고', c.end.headline && '한 줄', c.end.phone && '전화'].filter(Boolean).join('·');
+  const rows: [string, string, boolean | null][] = [['주인공 정면', c.front.known ? `${c.front.n}/${c.front.need}` : '못 봄', c.front.known ? c.front.n >= c.front.need : null],
+    ['실제 화면', `${c.screens.n}/${c.screens.need}`, c.screens.n >= c.screens.need], ['어두운 장면', String(c.dark), c.dark === 0],
+    ['자막', c.subPct === null ? '없음' : `${c.subPct}%`, c.subPct === null || c.subPct >= 5], ['끝 화면', end || '없음', c.end.logo && c.end.headline && c.end.phone]];
+  return (<div className="flex flex-wrap items-center gap-1" data-testid="studio-checks"><span className="text-ink-3">검수 기준</span>
+    {rows.map(([l, v, ok]) => <span key={l} className={cx('rounded-full px-2 py-0.5', ok === null ? 'bg-slate-100 text-ink-2' : ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800')} data-ok={ok === null ? 'unknown' : String(ok)}>{ok === null ? '·' : ok ? '✓' : '✕'} {l} {v}</span>)}</div>);
+}
 /** #454 영상 진행: 단계 · 장면 칩(상태·검수) · 사람 검수 필요 · 알림(내레이션 키·배경음) · 완성 영상 */
 function VideoProgress({ p }: { p: Progress }) {
   return (
     <div className="mt-2 space-y-1.5 rounded-input border border-violet-100 bg-violet-50/30 p-2 text-xs" data-testid="studio-video" data-stage={p.stage}>
-      <div className="font-semibold text-violet-900" data-testid="studio-video-stage">{p.label}</div>
+      <div className="font-semibold text-violet-900" data-testid="studio-video-stage">{p.label}{p.cast === 'ref' && <span className="ml-1.5 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-normal text-violet-800" data-testid="studio-cast">출연진 고정</span>}</div>
       {p.reuse && <div className="text-ink-2">이미 만든 영상을 새로 만들지 않고 다시 합성합니다(생성 크레딧 0)</div>}
       {p.variants.map((v) => <div key={v.n} className="flex flex-wrap items-center gap-1">{p.variants.length > 1 && <span className="text-ink-3">{v.n + 1}편</span>}
-        {v.scenes.map((s) => <span key={s.k} title={s.line} className={cx('rounded-full px-2 py-0.5', s.qa && !s.qa.ok ? 'bg-red-50 text-red-800' : SC[s.status] ?? 'bg-red-50 text-red-800')} data-testid="studio-scene" data-status={s.status}>
-          장면 {s.k + 1} · {s.seconds}초{s.screen ? ' · 실제 화면' : ''}{s.regens ? ' · 다시 만듦' : ''}{s.qa ? (s.qa.ok ? ' · 검수 ✓' : ' · 검수 ✕') : ''}</span>)}
+        {v.scenes.map((s) => <span key={s.k} title={s.line} className={cx('rounded-full px-2 py-0.5', s.qa && !s.qa.ok ? 'bg-red-50 text-red-800' : SC[s.status] ?? 'bg-red-50 text-red-800')} data-testid="studio-scene" data-status={s.status} data-beat={s.beat ?? ''}>
+          장면 {s.k + 1}{s.beat && BEAT[s.beat] ? ` ${BEAT[s.beat]}` : ''} · {s.seconds}초{s.status === 'keyframe' ? ' · 첫 사진' : ''}{s.screen ? ' · 실제 화면' : ''}{s.castOff ? ' · 글 묘사' : ''}{s.regens ? ' · 다시 만듦' : ''}{s.qa ? (s.qa.ok ? ' · 검수 ✓' : ' · 검수 ✕') : ''}</span>)}
         {v.duration ? <span className="text-ink-3">완성 {v.duration.toFixed(1)}초</span> : null}{v.error ? <span className="text-red-700">{v.error}</span> : v.renderError ? <span className="text-amber-800">합성 다시 시도: {v.renderError}</span> : null}</div>)}
-      {p.review.length > 0 && <div className="rounded-input bg-red-50 px-2 py-1 text-red-900" data-testid="studio-review"><b>사람 검수 필요</b> — {p.review.join(' · ')}</div>}
+      {p.checks && <CheckChips c={p.checks} />}
+      {(p.review.length > 0 || !!p.checkFails?.length) && <div className="rounded-input bg-red-50 px-2 py-1 text-red-900" data-testid="studio-review"><b>사람 검수 필요</b> — {[...p.review, ...(p.checkFails ?? [])].join(' · ')}</div>}
       {p.notes.length > 0 && <ul className="list-disc pl-4 text-ink-2" data-testid="studio-video-notes">{p.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
       {p.variants.some((v) => v.mediaId) && <div className="flex flex-wrap gap-2">{p.variants.filter((v) => v.mediaId).map((v) => <video key={v.n} src={`/api/library/${v.mediaId}/download?inline=1`} controls playsInline preload="metadata" className="max-h-72 rounded-input bg-black" data-testid="studio-video-file" />)}</div>}
     </div>
@@ -193,7 +206,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
             {pr.quality && <div className="mt-1 flex flex-wrap items-center gap-1.5" data-testid="studio-quality"><ScoreChip label="사람다움" score={pr.quality.human.score} pass={pr.quality.human.pass} />{pr.quality.hook && <ScoreChip label="훅" score={pr.quality.hook.score} pass={pr.quality.hook.pass} />}
               {(pr.quality.human.issues ?? []).length > 0 && <span className="text-ink-3">{pr.quality.human.issues.join(' · ')}</span>}{pr.quality.hook && !pr.quality.hook.pass && pr.quality.hook.fails?.length > 0 && <span className="text-amber-800">{pr.quality.hook.fails.join(' · ')}</span>}</div>}</div>
           {!!pr.refMediaIds?.length && <div className="flex gap-1.5">{pr.refMediaIds.map((m: string) => <img key={m} src={`/api/library/${m}/download?inline=1`} alt="" className="size-14 rounded-input object-cover" loading="lazy" />)}</div>}</div>
-        {pr.timing && <div className="md:col-span-2"><TimingTable t={pr.timing} visuals={(pr.scenes ?? []).map((x: { visualEn: string }) => x.visualEn)} secs={(pr.scenes ?? []).map((x: { seconds?: number }) => x.seconds ?? 0)} /></div>}
+        {pr.timing && <div className="md:col-span-2"><TimingTable t={pr.timing} visuals={(pr.scenes ?? []).map((x: { visualEn: string }) => x.visualEn)} secs={(pr.scenes ?? []).map((x: { seconds?: number }) => x.seconds ?? 0)} beats={(pr.scenes ?? []).map((x: { beat?: string }) => (x.beat ? BEAT[x.beat] ?? null : null))} /></div>}
       </div>}
       {edit && <div className="mt-2 space-y-2 text-xs" data-testid="studio-edit">
         <Field label="생성 프롬프트(EN)"><textarea className={inputCls} rows={5} value={p.promptEn} onChange={(e) => setP({ ...p, promptEn: e.target.value })} aria-label="프롬프트" data-testid="studio-edit-prompt" /></Field>
