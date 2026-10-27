@@ -66,7 +66,7 @@ after(async () => { srv?.proc.kill(); src?.close(); fg?.server.close(); await sq
 
 test('수집기 15개(지원사업 3개 · 08·14시 두 번) · 회사 프로필: 기본값 → 관리자만 저장 · 시·도는 목록에서', async () => {
   const v = await ctx.owner.ok('GET', '/api/sales/collectors');
-  assert.equal(v.collectors.length, 16); // 186차 신규 공동주택 단지 수집기 포함
+  assert.equal(v.collectors.length, 17); // 186차 신규 공동주택 단지 · 200차 K-apt 자료실 주간 엑셀 수집기 포함
   const bz = v.collectors.find((c) => c.slug === 'bizinfo_support');
   assert.deepEqual([bz.support, bz.hourKst, bz.againKst], [true, 8, 14]);
   assert.equal(bz.needs[0].present, true, '기업마당 키가 없어도 공공데이터포털 키로 대체 경로가 있으면 준비됨');
