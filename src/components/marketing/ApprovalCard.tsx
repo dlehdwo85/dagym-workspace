@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { MediaFull, MediaThumb, isVideoMime, mimeOf, posterFrom } from '@/components/MediaView';
 import { VideoDigestButton } from '@/components/VideoDigestButton';
@@ -88,12 +88,14 @@ export function WhyBox({ r, compact }: { r?: CardContent['rationale']; compact?:
 const md = (d: string) => { const y = ymd(d); return `${Number(y.slice(5, 7))}/${Number(y.slice(8, 10))}`; };
 /** 승인 카드: 머리 칩(브랜드·채널+형식·제목·상태·vN·재승인) · 게시 시각·마감 · 미디어 넘겨 보기 · 문안 · 제작 메모 · 결정 기록 · [승인]/[수정 요청]
  *  simple(요청 C §3-5): 대표(회사 소유자) 화면 — [승인]·[수정 요청] 두 단추만, 다시 그리기·AI 이미지·버전 비교는 운영실(관리자) 몫 */
+/** #210(로컬 10/24 '승인함 첫 표시 14초'): 접힌 묶음(수정 요청·보류·예정 지남·초안 보관·마감 지남) 안 카드는 펼치기 전까지 시안(사진·영상)을 그리지 않음 — 승인함을 열 때마다 원본 사진 수백 장을 받던 것 */
+export const CardMediaGate = createContext(true);
 export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: { c: CardContent; canDecide: boolean; onDone: () => void; onOpen?: () => void; simple?: boolean }) {
   const [mode, setMode] = useState<'idle' | 'changes'>('idle'); const [memo, setMemo] = useState(''); const [done, setDone] = useState<string | null>(null);
   const [full, setFull] = useState(false); const [idx, setIdx] = useState(0); const [bodyOpen, setBodyOpen] = useState(false); const [look, setLook] = useState(false); const [cmp, setCmp] = useState(false); const [busy, setBusy] = useState(false);
   // #545: AI 수정본이 바로 올라오면 같은 카드가 새 버전으로 다시 그려짐 — [승인]·[수정 요청]을 다시 보이게
   useEffect(() => { setDone(null); setMode('idle'); setMemo(''); }, [c.current_version]);
-  const media = c.media_ids ?? [];
+  const media = c.media_ids ?? []; const showMedia = useContext(CardMediaGate);
   // #631(대표 10/25 21:20 '승인함에서 뒤로가기가 승인함을 벗어남'): 카드 시안 크게 보기도 history 한 칸(?v=) — 뒤로가기·닫기 = 크게 보기만 닫힘(상세 창은 #535 ?c=)
   useBackClose(full && media.length > 0, () => setFull(false), ['v', c.id]);
   const issues = c.quality?.passed === false ? c.quality.issues ?? [] : [];
@@ -139,7 +141,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
       </div>
       <button type="button" onClick={onOpen} className="mt-1 block text-left font-semibold hover:underline" data-testid="mkt-row">{c.title}</button>
       <p className="text-xs text-ink-2">{whenLabel(c.scheduled_at)} 게시{c.deadline && !['published'].includes(c.status) && <> · <span className={late ? 'font-bold text-red-600' : ''} data-testid="mkt-deadline">{late ? '마감 지남 — 다음 날로 이동 필요' : deadlineLabel(c.deadline, c.scheduled_at)}</span></>}</p>
-      {media.length > 0 && (
+      {media.length > 0 && !showMedia && <p className="mt-2 text-[11px] text-ink-3" data-testid="approval-media-later">시안 {media.length}장</p>}
+      {media.length > 0 && showMedia && (
         <div className="mt-2">
           {/* 요청 C §3-5(대표 10/25 22:20 '승인함에서 전체 장을 넘겨 보기'): 카드뉴스·스토리 프레임·블로그 사진을 카드 안에서 손가락·화살표로 넘김(한 장짜리는 썸네일만) */}
           {media.length > 1 && <div className="mx-auto mb-2 max-w-[280px]" data-testid="approval-pages" data-count={media.length}><Slides media={media} info={c.media_info ?? []} aspect={c.kind === 'story' || c.kind === 'reels' || c.kind === 'shorts' ? 'aspect-[9/16]' : c.channel === 'blog' ? 'aspect-square' : 'aspect-[4/5]'} dots="below" tid="approval-pages" /></div>}

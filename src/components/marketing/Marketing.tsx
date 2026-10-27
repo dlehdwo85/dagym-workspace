@@ -11,7 +11,7 @@ import { useBackClose } from '@/components/backClose';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PublishHelper } from './PublishHelper';
 import { MediaPick } from './MediaPick';
-import { ApprovalCard, BrandChip, decideMessage, needsVisual, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, type DecideRevision, WhyBox } from './ApprovalCard';
+import { ApprovalCard, BrandChip, CardMediaGate, decideMessage, needsVisual, StatusChip, channelLabel, deadlineLabel, formatLabel, whenLabel, type CardContent, type DecideRevision, WhyBox } from './ApprovalCard';
 import { VersionCompare, requestLabel } from './VersionCompare';
 import { ProposalCard, BudgetCard } from './Ops';
 import { GoalCard, type Goal } from './Goals';
@@ -445,27 +445,33 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
         <div className="mt-2 space-y-2">{(moreApproved ? approvedWait : approvedWait.slice(0, 10)).map((c) => <div key={c.id} className="space-y-1"><ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />
           {canDecide && <Button size="sm" variant="secondary" onClick={() => onOpen(c.id)} data-testid="mkt-approved-publish">열어서 게시 →</Button>}</div>)}
           {!moreApproved && approvedWait.length > 10 && <Button variant="secondary" className="w-full" onClick={() => setMoreApproved(true)} data-testid="mkt-approved-more">{approvedWait.length - 10}건 더 보기</Button>}</div></details>}
-      {approvedPast.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-approved-past"><summary className="cursor-pointer font-medium text-ink-2">승인됨 · 예정 지남 {approvedPast.length}건 — 열어서 “브랜드·게시 예정 바로잡기”로 재배치</summary>
-        <div className="mt-2 space-y-2">{approvedPast.slice(0, 30).map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+      {approvedPast.length > 0 && <Fold className="rounded-card border border-line bg-white p-3 text-sm" testId="mkt-approved-past"><summary className="cursor-pointer font-medium text-ink-2">승인됨 · 예정 지남 {approvedPast.length}건 — 열어서 “브랜드·게시 예정 바로잡기”로 재배치</summary>
+        <div className="mt-2 space-y-2">{approvedPast.slice(0, 30).map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></Fold>}
       {drafts.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-drafts"><summary className="cursor-pointer font-medium text-ink-2">예정(초안) {drafts.length}건 — 제작 예정, 시안이 오면 승인 대기로</summary>
         <ul className="mt-2 divide-y divide-line text-xs">{drafts.slice(0, 30).map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-draft"><button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button><span className="text-ink-3">{[c.brand, channelLabel(c.channel, c.kind), whenLabel(c.scheduled_at), c.auto ? '자동 제작' : null].filter(Boolean).join(' · ')}</span>
           {c.quality?.failed && <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800" data-testid="mkt-draft-failed">제작 실패{(c.quality.failed.n ?? 1) >= 2 ? ' — 열어서 [AI 다시 만들기]' : ' — 2시간 뒤 다시 만듦'}</span>}</li>)}</ul></details>}
       {emptyBrands.length > 0 && <p className="rounded-card border border-dashed border-amber-300 bg-amber-50/40 px-3 py-2 text-xs text-amber-900" data-testid="mkt-brand-empty">제작 예정 없음: <b>{emptyBrands.join(' · ')}</b> — <Link href="/s/marketing/automation" className="font-medium underline">자동 제작 규칙</Link>을 켜거나 <Link href="/s/marketing/ops" className="font-medium underline">운영실</Link>에서 제작을 의뢰하세요.</p>}
-      {held.length > 0 && <details className="rounded-card border border-violet-200 bg-violet-50/30 p-3 text-sm" data-testid="mkt-held"><summary className="cursor-pointer font-medium text-violet-900">초안 보관 — 브랜드 템플릿 준비 전 자동 시안 {held.length}건(승인함에 올리지 않음)</summary>
+      {held.length > 0 && <Fold className="rounded-card border border-violet-200 bg-violet-50/30 p-3 text-sm" testId="mkt-held"><summary className="cursor-pointer font-medium text-violet-900">초안 보관 — 브랜드 템플릿 준비 전 자동 시안 {held.length}건(승인함에 올리지 않음)</summary>
         <p className="mt-1 text-xs text-ink-2">대표 결정(10/24): 브랜드별 템플릿이 나올 때까지 정기·밤사이 자동 제작 시안은 초안으로 둡니다. 쓸 만한 것만 [승인 요청]으로 올리세요. 브랜드 키트에 피드 틀을 정한 브랜드는 [새 틀로 다시 그리기] 뒤 올리면 됩니다.</p>
         <TrashPicker list={held.slice(0, 20)} canDecide={canDecide} onDone={onDone} testId="mkt-held" render={(c) => <div className="space-y-1" data-testid="mkt-held-row"><ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />
           {canDecide && <div className="flex flex-wrap gap-2">{c.brand_templates && c.quality?.visual?.by === 'server' && <HeldRedraw id={c.id} onDone={onDone} />}<HeldSubmit id={c.id} onDone={onDone} /></div>}</div>} />
-        {held.length > 20 && <p className="mt-1 text-xs text-ink-3">최근 20건만 보입니다 — 나머지는 콘텐츠 캘린더에서 초안으로 볼 수 있습니다.</p>}</details>}
+        {held.length > 20 && <p className="mt-1 text-xs text-ink-3">최근 20건만 보입니다 — 나머지는 콘텐츠 캘린더에서 초안으로 볼 수 있습니다.</p>}</Fold>}
       {postponed.length > 0 && <details open className="rounded-card border border-amber-300 bg-amber-50/60 p-3 text-sm" data-testid="mkt-postponed"><summary className="cursor-pointer font-medium text-amber-900">미뤄진 글 — 옮길 날짜가 없어 멈춘 글 {postponed.length}건(취소 아님)</summary>
         <p className="mt-1 text-xs text-amber-900">날짜를 골라 다시 올리면 승인 대기로 돌아가고, 버리면 취소됩니다. 같은 브랜드·채널·형식 글은 하루 2건까지 — 3시간 넘게 띄우고, 같은 주제·같은 사진이면 그날은 안 됩니다.</p>
         <ul className="mt-2 space-y-2">{postponed.map((c) => <PostponedRow key={c.id} c={c} canDecide={canDecide} onOpen={() => onOpen(c.id)} onDone={onDone} />)}</ul></details>}
-      {waiting.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
-        <TrashPicker list={waiting} canDecide={canDecide} onDone={onDone} testId="mkt-waiting" render={(c) => <ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />} /></details>}
-      {late.length > 0 && <details className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" data-testid="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>
-        <div className="mt-2 space-y-2">{late.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
+      {waiting.length > 0 && <Fold className="rounded-card border border-line bg-white p-3 text-sm" testId="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
+        <TrashPicker list={waiting} canDecide={canDecide} onDone={onDone} testId="mkt-waiting" render={(c) => <ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />} /></Fold>}
+      {late.length > 0 && <Fold className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" testId="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>
+        <div className="mt-2 space-y-2">{late.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></Fold>}
       {!plain && canDecide && trash > 0 && <TrashBox count={trash} onDone={onDone} />}
     </div>
   );
+}
+
+/** #210: 승인함 접힌 묶음 — 펼치기 전에는 안 카드의 시안(사진·영상)을 그리지 않음(한 번 펼치면 계속 보임). 카드 글·단추는 그대로 */
+function Fold({ className, testId, children }: { className: string; testId: string; children: ReactNode }) {
+  const [seen, setSeen] = useState(false);
+  return <details className={className} data-testid={testId} onToggle={(e) => { if (e.currentTarget.open) setSeen(true); }}><CardMediaGate.Provider value={seen}>{children}</CardMediaGate.Provider></details>;
 }
 
 /** 183차 #177(로컬 10/23 · 대표 "비슷한 글은 하나만 남기고 나머지 삭제"): 칸 안의 글을 여러 건 골라 한 번에 휴지통으로(관리자) — 30일 안에 아래 '휴지통' 칸에서 되살림 */

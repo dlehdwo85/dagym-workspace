@@ -223,13 +223,15 @@ describe('V21 보관함 발송', () => {
     box.mode = [];
   });
 
-  test('인증 실패(535) → 재시도 없이 즉시 실패 + 알림 + 다시 보내기', async () => {
-    box.pass = 'changed';
+  test('인증 실패(535) → 재시도 없이 즉시 실패 + 알림 + 다시 보내기', async (t) => {
+    box.pass = 'changed'; t.after(() => { box.pass = PASS; }); // 중간에 실패해도 다음 시험이 틀린 비밀번호로 이어지지 않게(10/28 자동 검사 1576번: 뒤 시험 2개가 연달아 실패)
     const r = await ctx.owner.ok('POST', '/api/mail/send', { taskId, company: 'hilink', to: ['customer@client.test'], subject: '인증 실패 시험', body: '본문' });
     const o = await waitStatus(r.id, ['failed']);
     assert.equal(o.error_kind, 'auth'); assert.equal(o.attempts, 1); assert.match(o.last_error, /로그인 실패/);
     assert.equal((await sql`select count(*)::int n from notifications where type = 'mail_status' and user_id = ${ctx.ownerId}`)[0].n >= 1, true);
-    assert.match((await sql`select last_error from mail_accounts`)[0].last_error, /로그인 실패/);
+    // 계정 오류 문구는 보관함 상태 다음에 적힘 — 적힐 때까지 기다림(1576번: 상태만 보고 바로 읽어 빈 값)
+    let accErr = null; for (let k = 0; k < 100 && !accErr; k++) { accErr = (await sql`select last_error from mail_accounts`)[0].last_error; if (!accErr) await new Promise((res) => setTimeout(res, 100)); }
+    assert.match(accErr ?? '', /로그인 실패/);
     const h = await ctx.owner.ok('GET', `/api/tasks/${taskId}/mail?history=1`);
     assert.equal(h.items.find((i) => i.id === r.id).status, 'failed');
     box.pass = PASS; box.mails = [];

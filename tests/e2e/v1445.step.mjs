@@ -15,6 +15,8 @@ export async function v1445({ owner, BASE, SHOTS }) {
   const pop = owner.locator('[data-popover]').last();
   await pop.waitFor();
   await pop.getByRole('button', { name: /^내일/ }).click();
+  // 창이 떠오르는 움직임(0.16초 · 아래에서 6px)이 끝난 뒤 잰다 — 움직이는 중에 재면 칩과 2px 겹쳐 보임(10/28 자동 검사 1575번)
+  await pop.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
   const [c, p, vh] = await Promise.all([chip.boundingBox(), pop.boundingBox(), owner.evaluate(() => window.innerHeight)]);
   assert.ok(p.y >= 0 && p.y + p.height <= vh + 0.5, `창이 화면 안 (${p.y}~${p.y + p.height} / ${vh})`);
   assert.ok(Math.abs(p.x - c.x) <= 8 || p.x === 8, `칩 왼쪽에 맞춤 (${p.x} vs ${c.x})`);

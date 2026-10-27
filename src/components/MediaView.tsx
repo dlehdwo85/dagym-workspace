@@ -24,7 +24,8 @@ export function MediaThumb({ src, mime, poster, className, alt = '' }: { src: st
     </span>
   );
 }
-export function MediaFull({ src, mime, poster, className, alt = '', onClick }: { src: string; mime: string | null | undefined; poster?: string | null; className?: string; alt?: string; onClick?: (e: React.MouseEvent) => void }) {
-  if (!isVideoMime(mime)) return <img src={src} alt={alt} className={className} onClick={onClick} />;
-  return <video src={src} poster={poster ?? undefined} controls playsInline preload="metadata" className={cx('bg-black', className)} onClick={onClick} data-testid="media-video" aria-label={alt || '영상'} />;
+/** lazy(#210 승인함): 사진은 화면 가까이 올 때 받고, 영상은 누를 때 받음(넘겨 보기 둘째 장부터·블로그 본문 사진) */
+export function MediaFull({ src, mime, poster, className, alt = '', onClick, lazy = false }: { src: string; mime: string | null | undefined; poster?: string | null; className?: string; alt?: string; onClick?: (e: React.MouseEvent) => void; lazy?: boolean }) {
+  if (!isVideoMime(mime)) return <img src={src} alt={alt} className={className} onClick={onClick} loading={lazy ? 'lazy' : undefined} />;
+  return <video src={src} poster={poster ?? undefined} controls playsInline preload={lazy ? 'none' : 'metadata'} className={cx('bg-black', className)} onClick={onClick} data-testid="media-video" aria-label={alt || '영상'} />;
 }

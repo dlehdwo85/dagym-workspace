@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { Bookmark, ChevronLeft, ChevronRight, Globe2, Heart, MessageCircle, MoreHorizontal, Music2, Repeat2, Send, Share2, ThumbsDown, ThumbsUp } from 'lucide-react';
-import { MediaFull, mimeOf, posterFrom, type MediaInfo } from '@/components/MediaView';
+import { MediaFull, isVideoMime, mimeOf, posterFrom, type MediaInfo } from '@/components/MediaView';
 import { cx } from '@/components/ui';
 
 /**
@@ -69,7 +69,7 @@ export function Slides({ media, info, aspect, fit = false, dots = 'below', count
           onScroll={(e) => { const el = e.currentTarget; const k = Math.round(el.scrollLeft / Math.max(1, el.clientWidth)); if (k !== i) setI(k); }}>
           {media.map((m, k) => (
             <div key={m + k} className={cx('w-full shrink-0 snap-center bg-black', !ratio && aspect)} style={ratio ? { aspectRatio: String(ratio) } : undefined} data-testid={`${tid}-slide`}>
-              <MediaFull src={src(m)} mime={mimeOf(info, m)} poster={posterFrom(info, m) ? src(posterFrom(info, m)!) : null} className="size-full object-cover" alt={`${k + 1}번째`} />
+              <MediaFull src={src(m)} mime={mimeOf(info, m)} poster={posterFrom(info, m) ? src(posterFrom(info, m)!) : null} className="size-full object-cover" alt={`${k + 1}번째`} lazy={!(k === 0 && isVideoMime(mimeOf(info, m)))} />
             </div>))}
         </div>
         {media.length > 1 && <>
@@ -123,8 +123,8 @@ export function ChannelPreview(p: PreviewProps) {
         <div className="flex items-center gap-2 border-b border-line pb-3 text-[11px] text-ink-3"><Avatar logo={p.logo} color={p.color} name={name} size={22} /><span className="font-medium text-ink-2">{name}</span><span>· 방금</span></div>
         {p.media[0] ? <MediaFull src={src(p.media[0])} mime={mimeOf(p.info, p.media[0])} className="w-full rounded-input object-cover" alt="표지" /> : <Empty className="aspect-video w-full rounded-input" />}
         {shown.map((t, k) => <div key={k} className="space-y-2"><p className="whitespace-pre-wrap text-[13px] leading-relaxed">{t}</p>
-          {rest[k] && <MediaFull src={src(rest[k])} mime={mimeOf(p.info, rest[k])} className="w-full rounded-input object-cover" alt={`본문 사진 ${k + 1}`} />}</div>)}
-        {more && rest.slice(shown.length).map((m) => <MediaFull key={m} src={src(m)} mime={mimeOf(p.info, m)} className="w-full rounded-input object-cover" alt="" />)}
+          {rest[k] && <MediaFull src={src(rest[k])} mime={mimeOf(p.info, rest[k])} className="w-full rounded-input object-cover" alt={`본문 사진 ${k + 1}`} lazy />}</div>)}
+        {more && rest.slice(shown.length).map((m) => <MediaFull key={m} src={src(m)} mime={mimeOf(p.info, m)} className="w-full rounded-input object-cover" alt="" lazy />)}
         {paras.length > 3 && <button type="button" onClick={toggle} className="text-xs font-medium text-emerald-700" data-testid="mkt-preview-more">{more ? '접기' : `본문 더 보기(${paras.length - 3}문단)`}</button>}
         <div className="flex gap-4 border-t border-line pt-2 text-[11px] text-ink-3"><span className="flex items-center gap-1"><Heart className="size-3.5" />공감</span><span className="flex items-center gap-1"><MessageCircle className="size-3.5" />댓글</span></div>
       </div>
