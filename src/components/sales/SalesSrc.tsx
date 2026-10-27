@@ -14,6 +14,7 @@ import { Prospects } from '@/components/sales/Prospects';
 import { CollectorAlerts } from '@/components/sales/Collectors';
 import { BulkLeadDialog, LeadQuickDialog, StageMoveDialog, type BulkResult } from '@/components/sales/LeadFollowUp';
 import { LeadImportDialog, type ImportRows } from '@/components/sales/LeadImport';
+import { LeadMergeBox } from '@/components/sales/LeadMerge';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
@@ -584,9 +585,11 @@ function LeadEvents({ data }: { data: any }) {
   );
 }
 
-function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void; onChange?: () => void }) {
+function LeadDetail({ id, onClose, onChange, onOpen }: { id: string; onClose: () => void; onChange?: () => void; onOpen?: (id: string) => void }) {
   useBackClose(true, onClose, ['id', id]); // #535: 휴대폰 뒤로가기 = 상세만 닫힘(주소 ?id= 로 새로 고침·공유해도 같은 상세)
   const { data, error, reload } = useApi<any>(`/api/sales/src?view=lead&id=${encodeURIComponent(id)}`);
+  const merged: string | undefined = data?.mergedInto; // 206차: 합쳐서 빠진 거래처(예전 링크) → 남긴 거래처로
+  useEffect(() => { if (!merged) return; toast.ok('합쳐진 거래처로 옮겼습니다'); if (onOpen) onOpen(merged); else onClose(); }, [merged]); // eslint-disable-line react-hooks/exhaustive-deps
   const [tab, setTab] = useUrlState('lt', 'progress'); // 영업 재편 5): 진행 탭이 첫 화면. #242 2단계: 탭은 주소(?lt=)에 — 업무·일정을 열었다 뒤로 와도 같은 탭
   useEffect(() => () => { const p = new URLSearchParams(location.search); if (p.has('lt')) { p.delete('lt'); replaceUrl(`${location.pathname}${p.size ? `?${p}` : ''}`); } }, []); // 닫으면 탭 값은 지움
   const [del, setDel] = useState<string | null>(null);
@@ -596,7 +599,7 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
     catch (e: any) { toast.error(e.message); }
   }
   const handoffSrc = data?.raw?.handoff ? data.raw : null; /* 리드 view 의 raw 는 src jsonb 가 펼쳐져 있음 */ const canRevert = !!handoffSrc?.handoff && data?.lead?.status !== '되돌림' && data?.readOnly === false && (data.canAssign || data.me === data.lead?.ownerId || handoffSrc?.by === data.me || (handoffSrc?.assignees ?? []).includes(data.me));
-  const tabs: [string, string, any[] | null][] = data ? [['progress', '진행', null], ['info', '정보', null], ['acts', `상담 ${data.activities.length}`, data.activities], ['tasks', `업무 ${(data.wTasks ?? []).length + data.tasks.length}`, null], ['events', `일정 ${(data.events ?? []).length}`, null], ['timeline', `타임라인 ${(data.timeline ?? []).length}`, null],
+  const tabs: [string, string, any[] | null][] = data && !merged ? [['progress', '진행', null], ['info', '정보', null], ['acts', `상담 ${data.activities.length}`, data.activities], ['tasks', `업무 ${(data.wTasks ?? []).length + data.tasks.length}`, null], ['events', `일정 ${(data.events ?? []).length}`, null], ['timeline', `타임라인 ${(data.timeline ?? []).length}`, null],
     ['props', `제안 ${data.proposals.length}`, data.proposals], ['cons', `계약 ${data.contracts.length}`, data.contracts], ['timing', `시점 ${data.timing.length}`, data.timing], ['work', `입찰 ${data.work.length}`, data.work], ['int', `관심사업 ${data.interests.length}`, data.interests]] : [];
   async function remove() {
     if (!del?.trim()) return;
@@ -604,8 +607,8 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
   }
   const list = tabs.find((t) => t[0] === tab)?.[2];
   return (
-    <Modal open onClose={onClose} title={data?.lead.name ?? '리드'} wide>
-      {error ? <ErrorBox error={error} /> : !data ? <Skeleton rows={4} /> : (
+    <Modal open onClose={onClose} title={data?.lead?.name ?? '리드'} wide>
+      {error ? <ErrorBox error={error} /> : !data || merged ? <Skeleton rows={4} /> : (
         <div className="space-y-3" data-testid="sales-lead-detail">
           <AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesLead} subject={`거래처 ${data.lead.name}`} compact testId="ai-ask-lead" />
           {handoffSrc?.handoff && <div className="flex flex-wrap items-center gap-2 rounded-input bg-slate-50 px-3 py-2 text-xs" data-testid="lead-handoff-box"><span className="text-ink-2">{data.lead.status === '되돌림' ? `배정 이전으로 되돌린 리드입니다${handoffSrc.reverted?.reason ? ` — ${handoffSrc.reverted.reason}` : ''}` : `넘기기로 만든 리드 — 담당 ${(handoffSrc.assignees ?? []).length}명, 업무 ${(handoffSrc.taskIds ?? []).length}건·일정 ${(handoffSrc.eventIds ?? []).length}건`}</span>
@@ -628,7 +631,8 @@ function LeadDetail({ id, onClose, onChange }: { id: string; onClose: () => void
             {/* S2 2차(감사 1-14): 삭제 — 사유 필수, 감사 기록, 열린 영업 업무 완료 처리 */}
             {data.readOnly === false && data.canDelete && (del === null ? <div className="flex justify-end"><button type="button" onClick={() => setDel('')} className="text-xs text-red-600 underline" data-testid="lead-delete">리드 삭제</button></div>
               : <div className="flex flex-wrap items-center gap-2 rounded-input border border-red-200 bg-red-50 p-2 text-xs" data-testid="lead-delete-box"><span className="text-red-700">삭제 사유(필수) — 기록이 남고 목록에서 사라집니다</span><input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1')} value={del} onChange={(e) => setDel(e.target.value)} maxLength={500} aria-label="삭제 사유" data-testid="lead-delete-reason" autoFocus />
-                <Button size="sm" variant="danger" onClick={remove} disabled={!del.trim()} data-testid="lead-delete-go">삭제</Button><Button size="sm" variant="secondary" onClick={() => setDel(null)}>취소</Button></div>)}</>
+                <Button size="sm" variant="danger" onClick={remove} disabled={!del.trim()} data-testid="lead-delete-go">삭제</Button><Button size="sm" variant="secondary" onClick={() => setDel(null)}>취소</Button></div>)}
+            {data.readOnly === false && data.canAssign && <LeadMergeBox id={id} onMerged={(into) => { onChange?.(); if (onOpen) onOpen(into); else onClose(); }} />}</>
             : tab === 'tasks' ? <LeadTasks id={id} data={data} onSaved={() => { reload(); onChange?.(); }} />
             : tab === 'timeline' ? <LeadTimeline items={data.timeline ?? []} />
             : <ul className="space-y-2">{(tab === 'props' || tab === 'cons') && data.readOnly === false && <li><RecordForm kind={tab === 'props' ? 'proposals' : 'contracts'} leads={[]} leadId={id} onSaved={() => { reload(); onChange?.(); }} /></li>}
@@ -927,7 +931,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
         <ul className={cx('space-y-2', v === 'cards' ? 'md:grid md:grid-cols-2 md:gap-2 md:space-y-0 xl:grid-cols-3' : 'md:hidden', v === 'stages' && 'hidden')} data-testid="sales-lead-cards">{shown.map(card)}{!shown.length && <li className="text-sm text-ink-3">리드가 없습니다</li>}</ul>
         </>
       )}
-      {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
+      {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} onOpen={setOpen} />}
       {stMove && <StageMoveDialog lead={{ id: stMove.lead.id, name: stMove.lead.name, next: stMove.lead.next }} to={stMove.to} onClose={() => setStMove(null)} onDone={(m) => { setStMove(null); toast.ok(m); reload(); }} />}
       {bulk && <BulkLeadDialog mode={bulk} ids={sel} stages={data?.stages ?? []} onClose={() => setBulk('')} onDone={bulkDone} />}
       {quick && <LeadQuickDialog mode={quick.mode} lead={{ id: quick.lead.id, name: quick.lead.name, next: quick.lead.next, nextAction: quick.lead.nextAction }} onClose={() => setQuick(null)} onDone={(m) => { setQuick(null); toast.ok(m); reload(); }} />}
@@ -1024,7 +1028,7 @@ export function Pipeline({ embedded }: { embedded?: boolean } = {}) {
             <ul className="space-y-1.5">{c.items.map((l: any) => <li key={l.id} draggable={data.readOnly === false} data-testid="pipeline-card" className={cx(data.readOnly === false && 'cursor-grab', drag?.id === l.id && 'opacity-50')}
               onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', l.id); setDrag({ id: l.id, from: c.status }); }} onDragEnd={() => { setDrag(null); setOver(''); }}><button type="button" onClick={() => setOpen(l.id)} className="w-full rounded-input border border-line bg-white p-2 text-left text-sm hover:border-blue-300"><span className="block truncate font-medium">{l.name}</span><span className="block truncate text-[11px] text-ink-2">{[l.owner, l.next && `연락 ${kd(l.next)}`].filter(Boolean).join(' · ')}</span></button>{data.readOnly === false && <select className={cx(inputCls, 'mt-1 h-7 w-full py-0 text-[11px]')} value={c.status} onChange={(e) => moveStage(l, c.status, e.target.value)} aria-label={`${l.name} 단계 이동`} data-testid="pipeline-move">{(data.stages ?? STAGE_FALLBACK).map((st: string) => <option key={st}>{st}</option>)}</select>}</li>)}</ul></section>))}</div>
       </>}
-      {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
+      {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} onOpen={setOpen} />}
       {/* 끄는 동안 아래에 종결 칸(성사·보류·실패) — 단계가 12칸이라 오른쪽 끝 칸까지 끌고 가지 않아도 되게(Pipedrive 의 끌기 중 '성사·실패' 칸과 같은 흐름) */}
       {drag && <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 hidden justify-center md:flex"><div className="pointer-events-auto flex items-center gap-2 rounded-card border border-line bg-white p-2 shadow-lg" data-testid="pipeline-drop-bar">
         <span className="px-1 text-xs text-ink-3">여기에 놓아 종결</span>

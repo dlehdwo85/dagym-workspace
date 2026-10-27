@@ -212,11 +212,11 @@ const phoneKey = (s: unknown) => { let d = digitsOf(s); if (d.startsWith('82') &
 const bizKey = (s: unknown) => { const d = digitsOf(s); return d.length === 10 ? d : ''; };
 const mailKey = (s: unknown) => { const m = String(s ?? '').trim().toLowerCase(); return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m) ? m : ''; };
 /** 같은 사업자번호·전화·메일인 거래처(최대 5곳, 이름은 달라도) — by = 무엇이 같은지 */
-async function sameContactLeads(sql: ReturnType<typeof db>, tenant: string, c: { phone?: string | null; bizNo?: string | null; email?: string | null }) {
+async function sameContactLeads(sql: ReturnType<typeof db>, tenant: string, c: { phone?: string | null; bizNo?: string | null; email?: string | null }, excludeId?: string) {
   const p = phoneKey(c.phone), b = bizKey(c.bizNo), m = mailKey(c.email);
   if (!p && !b && !m) return [];
   const rows = await sql<{ id: string; name: string; status: string | null; region: string | null; phone: string | null; biz_no: string | null; email: string | null }[]>`select id, name, status, region, phone, biz_no, email from sales_leads
-    where tenant = ${tenant} and deleted_at is null
+    where tenant = ${tenant} and deleted_at is null and id is distinct from ${excludeId ?? null}
       and (${p ? sql`right(regexp_replace(coalesce(phone, ''), '\\D', '', 'g'), 8) = ${p.slice(-8)}` : sql`false`} or ${b ? sql`regexp_replace(coalesce(biz_no, ''), '\\D', '', 'g') = ${b}` : sql`false`}
         or ${m ? sql`lower(trim(email)) = ${m}` : sql`false`})
     order by updated_at desc limit 20`;
@@ -224,9 +224,9 @@ async function sameContactLeads(sql: ReturnType<typeof db>, tenant: string, c: {
     .filter((l) => l.by).slice(0, 5);
 }
 /** 새 리드 중복 경고(205차): 같은 사업자번호·전화·메일(이름이 달라도) 먼저 + 비슷한 이름 — 최대 5곳. 전화·메일은 요청 본문으로만 받는다(주소에 고객 연락처를 싣지 않음) */
-async function dupCandidates(sql: ReturnType<typeof db>, tenant: string, c: { name: string; phone?: string | null; bizNo?: string | null; email?: string | null }) {
-  const contact = await sameContactLeads(sql, tenant, c); const seen = new Set(contact.map((x) => x.id));
-  return [...contact, ...(await similarLeads(sql, tenant, c.name)).filter((x) => !seen.has(x.id)).map((x) => ({ ...x, by: 'name' }))].slice(0, 5);
+async function dupCandidates(sql: ReturnType<typeof db>, tenant: string, c: { name: string; phone?: string | null; bizNo?: string | null; email?: string | null }, excludeId?: string) {
+  const contact = await sameContactLeads(sql, tenant, c, excludeId); const seen = new Set(contact.map((x) => x.id));
+  return [...contact, ...(await similarLeads(sql, tenant, c.name, excludeId)).filter((x) => !seen.has(x.id)).map((x) => ({ ...x, by: 'name' }))].slice(0, 5);
 }
 /** 새 리드(전환 뒤) — 담당 = 만든 사람(관리자는 지정 가능). 비슷한 거래처가 있으면 먼저 알려 주고(force 로 그래도 새로) */
 export async function createLead(u: SessionUser, i: z.infer<typeof leadCreate>) {
@@ -285,10 +285,13 @@ const MERGE_FIELDS = [['bizNo', 'biz_no', '사업자번호'], ['phone', 'phone',
 const PRI_KO: Record<string, string> = { urgent: '긴급', high: '높음', medium: '보통', low: '낮음' };
 const sameVal = (k: string, a: unknown, b: unknown) => k === 'phone' ? digitsOf(a) === digitsOf(b) || (!!phoneKey(a) && phoneKey(a) === phoneKey(b)) : k === 'bizNo' ? digitsOf(a) === digitsOf(b)
   : k === 'expectedRevenue' ? Number(a) === Number(b) : String(a).replace(/\s+/g, '').toLowerCase() === String(b).replace(/\s+/g, '').toLowerCase();
+const importNote = (day: string) => (diff: string[]) => (diff.length ? `[가져오기 ${day}] 다른 값 — ${diff.join(' · ')}` : '');
 const mergeLeads = (sql: ReturnType<typeof db>, tenant: string, ids: string[]) => sql<any[]>`select l.id, l.name, l.status, l.region, l.facility_type, l.scale, l.contact_name, l.phone, l.email, l.homepage, l.biz_no,
-  l.expected_revenue::float8 as expected_revenue, l.priority, l.next_contact_date::text as next_contact_date, l.memo, u.name as owner
+  l.expected_revenue::float8 as expected_revenue, l.priority, l.next_contact_date::text as next_contact_date, l.memo, u.name as owner,
+  l.owner_id, l.next_action, l.created_at, l.src_id
   from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} and l.deleted_at is null and l.id = any(${ids}::uuid[])`;
-function mergePlan(l: any, r: ImportRow, day: string) {
+/** 거래처 l 에 r 을 합칠 때: 빈 칸만 채우고(fill), 이미 다른 값(diff)은 바꾸지 않고 note(diff) 한 줄로 메모에 — 가져오기·거래처 합치기 공용 */
+function fillPlan(l: any, r: Record<string, any>, note: (diff: string[]) => string) {
   const patch: Record<string, unknown> = {}; const fill: string[] = []; const diff: string[] = [];
   const closed = ['계약완료', '보류', '실패', '되돌림'].includes(String(l.status ?? ''));
   for (const [k, col, label] of MERGE_FIELDS) {
@@ -296,15 +299,15 @@ function mergePlan(l: any, r: ImportRow, day: string) {
     const cur = l[col];
     if (cur == null || cur === '') { patch[k] = v; fill.push(label); } else if (!sameVal(k, cur, v)) diff.push(`${label} ${k === 'priority' ? PRI_KO[String(v)] ?? v : k === 'expectedRevenue' ? Number(v).toLocaleString('ko-KR') : v}`);
   }
-  const memo = String(l.memo ?? ''); const note = diff.length ? `[가져오기 ${day}] 다른 값 — ${diff.join(' · ')}` : '';
-  const add = [r.memo?.trim() && !memo.includes(r.memo.trim()) ? r.memo.trim() : '', note && !memo.includes(note) ? note : ''].filter(Boolean);
+  const memo = String(l.memo ?? ''); const line = note(diff); const rm = typeof r.memo === 'string' ? r.memo.trim() : '';
+  const add = [line && !memo.includes(line) ? line : '', rm && !memo.includes(rm) ? rm : ''].filter(Boolean);
   if (add.length) patch.memo = [memo, ...add].filter(Boolean).join('\n').slice(0, 5000);
   return { patch, fill, diff, memo: add.length > 0 };
 }
 const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-async function assertImporter(u: SessionUser) {
+async function assertAdminWrite(u: SessionUser, msg: string) {
   await assertSpace(u, 'sales');
-  if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden', 'CSV 가져오기는 관리자만');
+  if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden', msg);
   const t = tenantOf(u); await assertWritesOpen(t); return t;
 }
 /**
@@ -312,7 +315,7 @@ async function assertImporter(u: SessionUser) {
  * 후보마다 합치면 채울 칸(fill)·바꾸지 않고 메모에 남길 다른 값(diff). 쓰기는 하지 않음
  */
 export async function previewImport(u: SessionUser, i: z.infer<typeof importInput>) {
-  const t = await assertImporter(u); const sql = db();
+  const t = await assertAdminWrite(u, 'CSV 가져오기는 관리자만'); const sql = db();
   const all = await sql<{ id: string; name: string; phone: string | null; email: string | null; biz_no: string | null }[]>`select id, name, phone, email, biz_no from sales_leads where tenant = ${t} and deleted_at is null order by updated_at desc`;
   const idx = { name: new Map<string, string[]>(), phone: new Map<string, string[]>(), bizNo: new Map<string, string[]>(), email: new Map<string, string[]>() };
   const put = (m: Map<string, string[]>, k: string, id: string) => { if (k) m.set(k, [...(m.get(k) ?? []), id]); };
@@ -337,7 +340,7 @@ export async function previewImport(u: SessionUser, i: z.infer<typeof importInpu
   const rows = found.map((f, n) => {
     counts[f.kind]++;
     if (f.kind === 'new') return { kind: f.kind };
-    const matches = f.hits.map(([id, by]) => { const l = full.get(id); if (!l) return null; const p = mergePlan(l, i.rows[n], day);
+    const matches = f.hits.map(([id, by]) => { const l = full.get(id); if (!l) return null; const p = fillPlan(l, i.rows[n], importNote(day));
       return { id, name: l.name as string, status: l.status as string | null, region: l.region as string | null, owner: l.owner as string | null, by, fill: p.fill, diff: p.diff, memo: p.memo }; }).filter(Boolean);
     return { kind: f.kind, matches, ...('dupOf' in f ? { dupOf: f.dupOf } : {}) };
   });
@@ -347,7 +350,7 @@ export async function previewImport(u: SessionUser, i: z.infer<typeof importInpu
 async function mergeIntoLead(u: SessionUser, id: string, r: ImportRow) {
   const t = tenantOf(u); const sql = db();
   const [l] = await mergeLeads(sql, t, [id]); if (!l) throw notFound('합칠 거래처를 찾을 수 없습니다');
-  const p = mergePlan(l, r, todayKst());
+  const p = fillPlan(l, r, importNote(todayKst()));
   if (Object.keys(p.patch).length) {
     await updateLead(u, id, p.patch as z.infer<typeof leadPatch>);
     await audit(sql, u.id, 'sales.lead_merge', 'sales_lead', id, { from: 'csv', fill: p.fill, diff: p.diff.length }, null); // 값(전화·메일)은 기록에 싣지 않음 — 칸 이름·개수만
@@ -355,7 +358,7 @@ async function mergeIntoLead(u: SessionUser, id: string, r: ImportRow) {
   return p;
 }
 export async function importLeads(u: SessionUser, i: z.infer<typeof importInput>) {
-  const t = await assertImporter(u); const sql = db();
+  const t = await assertAdminWrite(u, 'CSV 가져오기는 관리자만'); const sql = db();
   const have = new Set((await sql<{ name: string }[]>`select name from sales_leads where tenant = ${t} and deleted_at is null`).map((x) => normName(x.name)));
   let created = 0, merged = 0; const skipped: string[] = []; const failed: { name: string; message: string }[] = [];
   for (const { action, mergeId, ...r } of i.rows) {
@@ -371,6 +374,110 @@ export async function importLeads(u: SessionUser, i: z.infer<typeof importInput>
   }
   await audit(sql, u.id, 'sales.lead_import', 'sales_lead', null, { created, merged, skipped: skipped.length, failed: failed.length }, null);
   return { ok: true, created, merged, skipped, failed };
+}
+
+/**
+ * 206차(#461 ⑦ 기존 거래처끼리 합치기, SALES_LEADS_REVAMP 4절·7절 7번) — 관리자. 같은 곳이 두 번 들어간 거래처를 하나로:
+ * 합칠 거래처의 상담·제안·계약 등 기록 · 단계 기록 · 업무(설명 속 링크도) · 일정 · 입찰 연결 · 광고 문의 · 견적을 남길 거래처로 옮기고,
+ * 남길 거래처의 빈 칸만 채운다(다른 값은 메모 한 줄, 담당·다음 연락일이 비었으면 가져옴). 합친 거래처는 목록에서 빠지고 merged_into 로 남길 쪽을 가리킨다(예전 링크는 남긴 쪽으로).
+ * 자동 영업 업무는 하나만 — 남길 쪽에 열린 것이 있으면 합칠 쪽 것은 완료, 없으면 합칠 쪽 것을 이어받는다. 되돌리기는 없다(미리보기에서 확인)
+ */
+const leadIdOk = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
+const MERGE_MSG = '거래처 합치기는 관리자만';
+/** 합칠 후보: q(2자 이상)면 이름 찾기, 없으면 겹쳐 보이는 거래처(같은 사업자번호·전화·메일 / 비슷한 이름) */
+export async function mergeCandidates(u: SessionUser, id: string, q: string) {
+  const t = await assertAdminWrite(u, MERGE_MSG); const sql = db();
+  if (!leadIdOk(id)) throw notFound();
+  const [l] = await sql<{ name: string; phone: string | null; biz_no: string | null; email: string | null }[]>`select name, phone, biz_no, email from sales_leads where id = ${id} and tenant = ${t} and deleted_at is null`;
+  if (!l) throw notFound();
+  const key = q.replace(/[\s()]/g, '').toLowerCase();
+  if (key.length >= 2) return { candidates: (await sql<{ id: string; name: string; status: string | null; region: string | null }[]>`select id, name, status, region from sales_leads where tenant = ${t} and deleted_at is null and id <> ${id}
+    and position(${key} in replace(replace(replace(lower(name), ' ', ''), '(', ''), ')', '')) > 0 order by updated_at desc limit 10`).map((x) => ({ ...x, by: 'search' })) };
+  return { candidates: await dupCandidates(sql, t, { name: l.name, phone: l.phone, bizNo: l.biz_no, email: l.email }, id) };
+}
+/** 거래처에 딸린 것 수(합치면 옮겨지는 것) */
+async function leadFootprint(sql: ReturnType<typeof db>, t: string, id: string) {
+  const [c] = await sql<Record<string, number>[]>`select
+    (select count(*)::int from sales_lead_records where tenant = ${t} and lead_id = ${id} and kind = 'sales_activities') as acts,
+    (select count(*)::int from sales_lead_records where tenant = ${t} and lead_id = ${id} and kind in ('proposals', 'contracts')) as deals,
+    (select count(*)::int from sales_lead_records where tenant = ${t} and lead_id = ${id} and kind not in ('sales_activities', 'proposals', 'contracts')) as records,
+    (select count(*)::int from tasks where lead_id = ${id} and deleted_at is null) as tasks,
+    (select count(*)::int from events where lead_id = ${id} and deleted_at is null) as events,
+    (select count(*)::int from sales_work_records where tenant = ${t} and lead_id = ${id}) as work,
+    (select count(*)::int from mkt_meta_leads where lead_id = ${id}) as "adLeads",
+    (select count(*)::int from quotes where lead_id = ${id}) as quotes,
+    (select count(*)::int from sales_status_log where tenant = ${t} and lead_id = ${id}) as "statusLog"`;
+  return c;
+}
+const asLeadRow = (l: any) => ({ bizNo: l.biz_no, phone: l.phone, email: l.email, contactName: l.contact_name, region: l.region, facilityType: l.facility_type, scale: l.scale, homepage: l.homepage,
+  expectedRevenue: l.expected_revenue, priority: l.priority, nextContactDate: l.next_contact_date, memo: l.memo });
+const mergeNote = (from: { name: string }, day: string) => (diff: string[]) => `[합침 ${day}] ${from.name}${diff.length ? ` — 다른 값: ${diff.join(' · ')}` : ''}`;
+const ymdKst = (v: unknown) => (v instanceof Date ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(v) : String(v ?? '').slice(0, 10));
+/** 미리보기(쓰기 없음): 두 거래처 요약·딸린 것 수 · 어느 쪽으로 합치든 채울 칸·다른 값 · 남길 쪽 제안(딸린 것이 많은 쪽, 같으면 먼저 등록한 쪽) */
+export async function mergePreview(u: SessionUser, id: string, withId: string) {
+  const t = await assertAdminWrite(u, MERGE_MSG); const sql = db();
+  if (!leadIdOk(id) || !leadIdOk(withId)) throw notFound();
+  if (id === withId) throw badRequest('같은 거래처끼리는 합칠 수 없습니다');
+  const rows = await mergeLeads(sql, t, [id, withId]);
+  const a = rows.find((x) => x.id === id), b = rows.find((x) => x.id === withId);
+  if (!a || !b) throw notFound();
+  const fa = await leadFootprint(sql, t, id), fb = await leadFootprint(sql, t, withId);
+  const total = (f: Record<string, number>) => Object.entries(f).reduce((n, [k, v]) => (k === 'statusLog' ? n : n + v), 0);
+  const day = todayKst();
+  const side = (l: any, f: Record<string, number>) => ({ id: l.id as string, name: l.name as string, status: l.status as string | null, region: l.region as string | null, owner: l.owner as string | null, next: l.next_contact_date as string | null, created: ymdKst(l.created_at), counts: f });
+  const plan = (into: any, from: any) => { const p = fillPlan(into, asLeadRow(from), mergeNote(from, day)); return { fill: p.fill, diff: p.diff, owner: !into.owner_id && !!from.owner_id }; };
+  const keep = total(fa) !== total(fb) ? (total(fa) > total(fb) ? 'a' : 'b') : new Date(a.created_at) <= new Date(b.created_at) ? 'a' : 'b';
+  return { a: side(a, fa), b: side(b, fb), keep, aIntoB: plan(b, a), bIntoA: plan(a, b) };
+}
+export const mergeInput = z.object({ into: z.string().uuid() });
+/** id 거래처를 into 거래처로 합친다 */
+export async function mergeLead(u: SessionUser, id: string, into: string) {
+  const t = await assertAdminWrite(u, MERGE_MSG); const sql = db();
+  if (!leadIdOk(id)) throw notFound();
+  if (id === into) throw badRequest('같은 거래처끼리는 합칠 수 없습니다');
+  const rows = await mergeLeads(sql, t, [id, into]);
+  const src = rows.find((x) => x.id === id), tgt = rows.find((x) => x.id === into);
+  if (!src || !tgt) throw notFound();
+  const p = fillPlan(tgt, asLeadRow(src), mergeNote(src, todayKst()));
+  const cols: Record<string, unknown> = {};
+  for (const [k, col] of MERGE_FIELDS) if (p.patch[k] !== undefined) cols[col] = p.patch[k];
+  if (p.patch.memo !== undefined) cols.memo = p.patch.memo;
+  const ownerFill = !tgt.owner_id && src.owner_id ? (src.owner_id as string) : null;
+  if (ownerFill) cols.owner_id = ownerFill;
+  if (cols.next_contact_date && src.next_action && !tgt.next_action) cols.next_action = src.next_action; // 다음 연락일을 가져오면 그 할 일도
+  const openAuto = async (lid: string) => (await sql<{ id: string }[]>`select id from tasks where deleted_at is null and status <> 'done' and sales_ref->>'kind' = 'lead' and sales_ref->>'id' = ${lid}
+    and coalesce(sales_ref->>'manual', '') <> 'true' order by created_at desc`).map((x) => x.id);
+  const srcOpen = await openAuto(id), tgtOpen = await openAuto(into);
+  const inherit = tgtOpen.length ? null : srcOpen[0] ?? null; // 남길 쪽에 열린 자동 업무가 없으면 합칠 쪽 것을 이어받음
+  const close = srcOpen.filter((x) => x !== inherit);
+  const moved = await sql.begin(async (tx) => {
+    if (close.length) await tx`update tasks set status = 'done', completed_at = now(), updated_at = now(), version = version + 1 where id = any(${close}::uuid[])`;
+    const m = {
+      records: (await tx`update sales_lead_records set lead_id = ${into} where tenant = ${t} and lead_id = ${id}`).count,
+      statusLog: (await tx`update sales_status_log set lead_id = ${into} where tenant = ${t} and lead_id = ${id}`).count,
+      tasks: (await tx`update tasks set lead_id = ${into},
+          sales_ref = case when sales_ref->>'kind' = 'lead' and sales_ref->>'id' = ${id} then sales_ref || ${tx.json({ id: into, name: tgt.name })} else sales_ref end,
+          title = case when id = ${inherit}::uuid then replace(title, ${src.name}, ${tgt.name}) else title end,
+          description = replace(description, ${id}, ${into}), updated_at = now(), version = version + 1
+        where deleted_at is null and (lead_id = ${id} or (sales_ref->>'kind' = 'lead' and sales_ref->>'id' = ${id}))`).count,
+      events: (await tx`update events set lead_id = ${into} where lead_id = ${id}`).count,
+      work: (await tx`update sales_work_records set lead_id = ${into}, data = case when data ? 'lead_id' then jsonb_set(data, '{lead_id}', to_jsonb(${into}::text)) else data end, updated_at = now()
+        where tenant = ${t} and lead_id = ${id}`).count,
+      adLeads: (await tx`update mkt_meta_leads set lead_id = ${into} where lead_id = ${id}`).count,
+      quotes: (await tx`update quotes set lead_id = ${into} where lead_id = ${id}`).count,
+    };
+    await tx`update mkt_capi_events set lead_id = ${into} where lead_id = ${id}`;
+    await tx`update sales_leads set merged_into = ${into} where tenant = ${t} and merged_into = ${id}`; // 앞서 이 거래처로 합친 것도 남길 쪽을 가리키게
+    if (Object.keys(cols).length) await tx`update sales_leads set ${tx(cols as never)}, updated_at = now() where id = ${into}`;
+    await tx`update sales_leads set deleted_at = now(), deleted_reason = ${`합침 → ${tgt.name}`.slice(0, 500)}, merged_into = ${into}, updated_at = now() where id = ${id}`;
+    return m;
+  });
+  await audit(sql, u.id, 'sales.lead_merge', 'sales_lead', into, { from: id, fromName: src.name, moved, fill: p.fill, diff: p.diff.length, closedTasks: close.length }, null);
+  if (ownerFill) await audit(sql, u.id, 'sales.lead_owner', 'sales_lead', into, { from: null, to: ownerFill, merge: id }, null);
+  // 남긴 거래처 기준으로 자동 영업 업무 맞춤(다음 연락일·종결 단계) — 합치기로 알림이 가지 않게 조용히
+  const [cur] = await sql<{ name: string; status: string; next: string | null; next_action: string | null; owner_id: string | null }[]>`select name, status, next_contact_date::text as next, next_action, owner_id from sales_leads where id = ${into}`;
+  await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: 'lead', id: into, name: cur.name, status: cur.status, nextDate: cur.next, nextAction: cur.next_action, assigneeId: cur.owner_id, leadId: into, quiet: true });
+  return { ok: true, into, moved };
 }
 export const activityInput = z.object({ type: z.enum(['전화', '방문', '미팅', '메일', '문자', '기타']).default('전화'), content: z.string().trim().min(1).max(5000), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   nextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), nextAction: z.string().trim().max(200).optional(), request: z.string().trim().max(2000).optional() /* S2 2차: 다음 연락 예정일·다음 액션·고객 요청 */ });

@@ -331,11 +331,17 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     if (formal) {
       if (!/^[0-9a-f-]{36}$/i.test(q.id)) throw notFound();
       const [r] = await formalLeads(t, q.id);
-      if (!r) throw notFound();
+      if (!r) { // 206차: 합쳐서 빠진 거래처(예전 링크) → 남긴 거래처로
+        const [m] = await sql<{ merged_into: string }[]>`select merged_into from sales_leads where id = ${q.id} and tenant = ${t} and deleted_at is not null and merged_into is not null`;
+        if (m) return { ...meta, mergedInto: m.merged_into };
+        throw notFound();
+      }
       const srcId = r.__src_id as string | null;
       const lid = q.id;
+      const mergedSrc = (await sql<{ src_id: string }[]>`select src_id from sales_leads where tenant = ${t} and merged_into = ${lid} and src_id is not null`).map((x) => x.src_id); // 합친 거래처의 옛 영업관리 원본 업무도
       const recs = async (kind: string) => (await sql<any[]>`select id, data, occurred_at from sales_lead_records where tenant = ${t} and lead_id = ${lid} and kind = ${kind} order by occurred_at desc nulls last`).map((x) => ({ ...x.data, __id: x.id }));
-      const relSrc = async (tbl: string) => (srcId ? (await rows(t, tbl)).filter((x) => String(pick(x, 'lead_id')) === srcId) : []);
+      const srcIds = new Set([srcId, ...mergedSrc].filter(Boolean).map(String));
+      const relSrc = async (tbl: string) => (srcIds.size ? (await rows(t, tbl)).filter((x) => srcIds.has(String(pick(x, 'lead_id')))) : []);
       const log = await sql`select g.from_status, g.to_status, g.reason, g.changed_at, u.name as by from sales_status_log g left join users u on u.id = g.changed_by where g.lead_id = ${lid} order by g.changed_at desc limit 50`;
       const people = await sql`select id, name from users where tenant = ${t} and status = 'active' and not is_demo order by name`;
       const { src: _s, ...raw } = r;
