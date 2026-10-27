@@ -68,6 +68,7 @@ import { leadMerge206 } from './leadMerge206.step.mjs';
 import { stageNames207 } from './stageNames207.step.mjs';
 import { partner208 } from './partner208.step.mjs';
 import { mktVideo209 } from './mktVideo209.step.mjs';
+import { library210 } from './library210.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2917,6 +2918,7 @@ await step('206차 #461 ⑦ 기존 거래처끼리 합치기: 상세 › 중복 
 await step('207차 #461 회사별 단계 이름: 데이터 설정 › 이름·색·숨김 저장 → 영업 진행 표·상세 칩·진행 단계 칸에 회사 이름 · 숨긴 단계는 고르는 칸에서 빠짐 · 저장 값 그대로', () => stageNames207({ owner, ctx, sql, BASE, SHOTS }));
 await step('208차 #667 설계 파트너: [고객사 추가] 구분 = 설계 파트너 → 기간 꼭 적기(기본값 없음)·체험 고정 → AI 월 5,000원·마케팅 크레딧 0 상자 → 끝 3일 전 슈퍼관리자 알림 링크로 그 회사 창 → 기간 +30일·지금 종료 → 파트너 화면 읽기 전용 띠', () => partner208({ owner, browser, ctx, sql, BASE, SHOTS, tick, Client }));
 await step('209차 #666 영상 선행 조건: 브랜드 키트 주인공(실존 인물은 동의 표시 뒤에만 사진) → 출연진 고정 릴스(장면 첫 사진 → 이미지→영상) · 장면 칩 훅·해결·상황·결과 · 검수 기준 5개 통과 → 휴대폰 폭', () => mktVideo209({ owner, ctx, sql, BASE, FAKE, SHOTS }));
+await step('210차 #619 자료실 자동 분류: 영상 올리면 장면 사진 2장(처음 쪽·가운데)을 AI 정리에 · 확신 70% 미만만 정리 필요 → 안내 줄·모두 선택·[정리 맞음] 묶어서 확인 → 보기에서 나옴 · 휴대폰 폭', () => library210({ owner, sql, BASE, FAKE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

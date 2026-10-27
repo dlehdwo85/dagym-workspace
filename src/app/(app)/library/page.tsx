@@ -4,7 +4,7 @@ import { MediaFull, MediaThumb } from '@/components/MediaView';
 import { useBackClose } from '@/components/backClose';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Download, ExternalLink, FilePenLine, FileSpreadsheet, FileText, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock,
-  Pencil, Search, ShieldAlert, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react';
+  Check, Pencil, Search, ShieldAlert, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { DropZone, UploadProgress, fileHash, putFile } from '@/components/upload';
@@ -73,6 +73,7 @@ export default function LibraryPage() {
   useEffect(() => { if (!hi || !data || scrolledTo.current === hi) return; const el = document.querySelector(`[data-file="${hi}"]`); if (el) { scrolledTo.current = hi; el.scrollIntoView({ block: 'center' }); } }, [hi, data]);
   useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 300); return () => clearTimeout(t); }, [q]);
   useEffect(() => { setSel(new Set()); }, [cur, query]);
+  useEffect(() => { if (review && data && !data.review) setReview(false); }, [review, data]); // 210차: 다 확인하면 '정리 필요' 보기에서 나옴
   const canUpload = RANK[data?.level ?? 'edit'] >= RANK.edit;
 
   // 폴더 나무: 보이는 폴더 + 그 상위 경로
@@ -112,9 +113,12 @@ export default function LibraryPage() {
           if (e.code !== 'duplicate' || !confirm(`${e.message}\n그래도 한 번 더 올릴까요?`)) throw e;
           return api('/api/library', { body: { ...meta, allowDuplicate: true } });
         });
+        // 210차 #619: 영상은 장면 사진 2장(처음 쪽·가운데)으로 무엇을 찍었는지 보고 정리 — 올리는 동안 뽑음, 영상 자체는 AI 에 안 보냄
+        const shots = /^video\//.test(file.type) ? import('@/components/videoDigest').then((m) => m.twoFrames(file)).catch(() => [] as string[]) : null;
         await putFile(r.upload, file, (pct) => upd(n, { pct }));
         setBusy(`${file.name} AI 정리 중…`);
-        const c = await api(`/api/library/${r.id}/complete`, { body: {} });
+        const frames = (await shots) ?? [];
+        const c = await api(`/api/library/${r.id}/complete`, { body: frames.length ? { frames } : {} });
         setRecent((s) => new Set(s).add(r.id));
         const dest = c.organized?.folder ?? folder;
         const open = () => { setQ(''); setReview(false); setCur(dest); history.replaceState(null, '', `/library?folder=${encodeURIComponent(dest)}&file=${r.id}`); };
@@ -198,7 +202,17 @@ export default function LibraryPage() {
     setSel(new Set()); reload();
   }
   async function organize(f: F, action: 'undo' | 'redo') {
-    try { await api(`/api/library/${f.id}/organize`, { body: { action } }); reload(); toast.ok(action === 'undo' ? '정리 전으로 되돌렸습니다' : '다시 정리했습니다'); } catch (e: any) { toast.error(e.message); }
+    try {
+      const frames = action === 'redo' && isVid(f) ? await (await import('@/components/videoDigest')).twoFrames(`/api/library/${f.id}/download?inline=1`) : []; // 210차: 영상은 장면 사진 2장(못 읽으면 없이)
+      await api(`/api/library/${f.id}/organize`, { body: { action, ...(frames.length ? { frames } : {}) } }); reload(); toast.ok(action === 'undo' ? '정리 전으로 되돌렸습니다' : '다시 정리했습니다');
+    } catch (e: any) { toast.error(e.message); }
+  }
+  // 210차 #619: '정리 필요' 묶어서 확인 — 폴더·태그가 맞으면 그대로 확인 표시(틀리면 [옮기기] → 회사 학습 예시로 남음)
+  async function approve(ids: string[]) {
+    let ok = 0;
+    for (const id of ids) { try { await api(`/api/library/${id}`, { method: 'PATCH', body: {} }); ok++; } catch (e: any) { toast.error(e.message); } }
+    if (ok) toast.ok(`${ok}개 정리를 확인했습니다`);
+    setSel(new Set()); reload();
   }
   // ---- 관리자 전체 정리: 미리보기 → 고른 것만 적용 ----
   const [allBusy, setAllBusy] = useState('');
@@ -305,9 +319,16 @@ export default function LibraryPage() {
             {!!data?.review && <button onClick={() => setReview(!review)} aria-pressed={review} data-testid="library-review"
               className={cx('hit ml-auto rounded-full border px-3 py-1 text-xs', review ? 'border-amber-500 bg-amber-50 font-semibold text-amber-800' : 'border-amber-200 text-amber-800')}>정리 필요 {data.review}</button>}
           </div>
+          {review && files.length > 0 && ( // 210차 #619: AI 확신 70% 미만(library.ts REVIEW_BELOW)만 여기 — 묶어서 확인
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-card border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="library-review-bar">
+              <span>AI 확신이 70% 아래라 사람 확인이 필요한 자료입니다. 폴더가 맞으면 <b>[정리 맞음]</b>, 아니면 <b>[옮기기]</b> — 옮긴 것은 다음 정리에 배웁니다.</span>
+              <button className="hit ml-auto font-semibold underline" onClick={() => setSel(new Set(files.map((f) => f.id)))} data-testid="library-review-all">보이는 {files.length}개 모두 선택</button>
+            </div>
+          )}
           {sel.size > 0 && (
             <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-card border border-brand-200 bg-brand-50 px-3 py-2 text-sm shadow-card" data-testid="library-bulk">
               <b>{sel.size}개 선택</b>
+              {review && <Button size="sm" onClick={() => approve([...sel])} data-testid="library-bulk-approve"><Check />정리 맞음</Button>}
               <Button size="sm" variant="secondary" onClick={() => setDlg({ kind: 'move', value: cur })}><FolderInput />옮기기</Button>
               <Button size="sm" variant="secondary" onClick={() => remove([...sel])}><Trash2 />지우기</Button>
               <button className="ml-auto inline-flex size-8 items-center justify-center rounded-input hover:bg-white" onClick={() => setSel(new Set())} aria-label="선택 해제"><X className="size-4" /></button>

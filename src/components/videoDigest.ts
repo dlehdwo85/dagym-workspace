@@ -61,6 +61,30 @@ export async function extractFrames(file: Blob, onProgress?: (pct: number) => vo
   } finally { v.removeAttribute('src'); v.load(); URL.revokeObjectURL(url); }
 }
 
+/** 210차 #619 자료실 자동 정리 — 처음 쪽(2초 또는 20% 지점)·가운데 장면 2장(640px JPEG base64). 못 뽑으면 빈 배열(정리는 사진 없이 진행 — 오래 기다리지 않게 짧게 끊음).
+ *  주소(이미 올린 영상)는 저장소가 다른 출처면 CORS 가 허용될 때만 그림을 읽을 수 있다 */
+export async function twoFrames(src: Blob | string): Promise<string[]> {
+  const url = typeof src === 'string' ? src : URL.createObjectURL(src);
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.preload = 'auto';
+  if (typeof src === 'string') v.crossOrigin = 'anonymous';
+  v.src = url;
+  try {
+    await until<void>((ok, no) => { v.onloadedmetadata = () => ok(); v.onerror = () => no(new Error('이 영상 형식은 브라우저가 열지 못합니다')); }, 8000);
+    const d = Number.isFinite(v.duration) ? v.duration : 0;
+    const out = document.createElement('canvas'); const oc = out.getContext('2d')!;
+    const shots: string[] = [];
+    for (const t of new Set([Math.min(2, d * 0.2), d / 2].map((x) => Math.max(0, Math.min(x, d - 0.05))))) {
+      await until<void>((ok, no) => { v.onseeked = () => ok(); v.onerror = () => no(new Error('영상을 읽지 못했습니다')); v.currentTime = t; }, 5000);
+      if (!v.videoWidth) break; // 소리만 있는 파일
+      const scale = Math.min(1, OUT_W / v.videoWidth); out.width = Math.max(1, Math.round(v.videoWidth * scale)); out.height = Math.max(1, Math.round(v.videoHeight * scale));
+      oc.drawImage(v, 0, 0, out.width, out.height);
+      shots.push(out.toDataURL('image/jpeg', 0.7).split(',')[1]);
+    }
+    return shots;
+  } catch { return []; } finally { v.removeAttribute('src'); v.load(); if (typeof src !== 'string') URL.revokeObjectURL(url); }
+}
+
 /** 음성 트랙 → 16kHz 모노 WAV (없거나 못 풀면 null) */
 export async function extractAudioWav(file: Blob): Promise<Blob | null> {
   const AC: typeof AudioContext | undefined = (window as any).AudioContext || (window as any).webkitAudioContext;

@@ -5,6 +5,7 @@ export async function libraryOrganizeNotice({ owner, BASE, FAKE, SHOTS }) {
   const organized = (folder) => ({ content: [{ type: 'text', text: JSON.stringify({ folder, tags: ['시험'], title: '', summary: '시험', confidence: 0.9, security: 'internal' }) }], stop_reason: 'end_turn' });
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: [organized('인사/근로계약')] }) });
   await owner.goto(BASE + '/library');
+  await owner.locator('[data-testid="library-list"], [data-testid="library-empty"]').first().waitFor(); // 화면 준비(목록을 불러옴) 전에 고르면 받는 쪽이 아직 없어 무시됨
   await owner.getByTestId('library-file').setInputFiles([{ name: '근로계약서 E2E.txt', mimeType: 'text/plain', buffer: Buffer.from('근로계약서 본문') }]);
   await owner.getByText(/근로계약서 E2E\.txt → 인사\/근로계약 으로 정리했어요/).waitFor();
   assert.ok(await owner.getByRole('button', { name: '열기' }).first().isVisible(), '토스트 열기 버튼');
@@ -15,6 +16,7 @@ export async function libraryOrganizeNotice({ owner, BASE, FAKE, SHOTS }) {
   // 여러 개 → 요약
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: [organized('운영/업무 보고'), organized('운영/업무 보고'), organized('재무/관리비')] }) });
   await owner.goto(BASE + '/library');
+  await owner.locator('[data-testid="library-list"], [data-testid="library-empty"]').first().waitFor(); // 화면 준비(목록을 불러옴) 전에 고르면 받는 쪽이 아직 없어 무시됨
   await owner.getByTestId('library-file').setInputFiles([
     { name: '업무보고 1.txt', mimeType: 'text/plain', buffer: Buffer.from('a') }, { name: '업무보고 2.txt', mimeType: 'text/plain', buffer: Buffer.from('b') }, { name: '관리비.txt', mimeType: 'text/plain', buffer: Buffer.from('c') }]);
   await owner.getByText(/3개 정리: 업무 보고 2 · 관리비 1/).waitFor();

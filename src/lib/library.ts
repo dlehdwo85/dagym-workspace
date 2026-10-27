@@ -260,7 +260,7 @@ export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open
 }
 const canEdit = (u: SessionUser, f: { created_by?: string | null }) => f.created_by === u.id || isAdmin(u);
 
-export async function completeLibraryFile(u: SessionUser, id: string, uploadId?: string) {
+export async function completeLibraryFile(u: SessionUser, id: string, uploadId?: string, frames?: string[]) {
   const f = await loadLibraryFile(u, id);
   if (f.created_by !== u.id) throw forbidden();
   if (f.upload_status === 'ready') return { ok: true, id };
@@ -270,7 +270,7 @@ export async function completeLibraryFile(u: SessionUser, id: string, uploadId?:
   const tx = await getObject(f.storage_key).then((b) => extractTextResult(b, f.file_name, f.mime_type)).catch((e) => ({ text: null, error: `파일 읽기 실패: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) })); // V14 32: HWP·HWPX·PDF 본문도
   await db()`update library_files set upload_status = 'ready', size_bytes = ${size}, text_content = ${tx.text}, text_error = ${tx.error}, text_tried_at = now(), updated_at = now() where id = ${id}`;
   // V13 3번: 올리자마자 자동 정리(AI, 한도 소진·AI 꺼짐이면 파일명 규칙). 정리 실패는 올리기 성공에 영향 없음
-  const organized = f.source === 'revenue' || f.source === 'ai_attach' ? null : await organizeLibraryFile(u, id, { keepFolder: !!f.folder }).catch(async (e: any) => {
+  const organized = f.source === 'revenue' || f.source === 'ai_attach' ? null : await organizeLibraryFile(u, id, { keepFolder: !!f.folder, frames }).catch(async (e: any) => {
     await db()`update library_files set organize_status = 'failed', organize_error = ${String(e?.message ?? '정리 오류').slice(0, 200)} where id = ${id}`;
     return { by: 'rule' as const, error: String(e?.message ?? '정리 오류') };
   });
@@ -420,6 +420,22 @@ export async function assertConfidentialAudience(taskId: string, extraUserIds: s
 }
 
 // ---------------- V13 3번 자료실 자동 정리 ----------------
+/** 210차 #619: 이 확신 아래면 '정리 필요'(확인 대기) — 그 위는 바로 정리 */
+export const REVIEW_BELOW = 0.7;
+/** 영상 장면 사진(화면이 뽑은 JPEG base64, 처음 쪽·가운데 2장) — 영상 자체는 AI 에 보내지 않음. 정리 단서일 뿐이라 형식이 틀리면 버리고(나머지 본문은 그대로) 진행 */
+export const framesInput = z.array(z.string().max(400_000).regex(/^[A-Za-z0-9+/=]+$/)).max(2).optional().catch(undefined);
+/** 회사 브랜드(마케팅 브랜드 이름·다른 표기 — brandAliases, 주소 이름 빼고)가 파일 이름·제목·사진 설명에 있으면 그 브랜드. 코드에 회사 낱말을 두지 않음.
+ *  영문은 앞뒤에 영문·숫자가 붙지 않을 때(abc_로고 O · abcd X), 두 글자 한글은 앞뒤에 한글이 붙지 않을 때만(일반 낱말과 구분) */
+async function brandHits(tenant: string, hay: string) {
+  const { brandAliases } = await import('./mktQuality');
+  const rows = await db()<{ name: string; facts: unknown; feed: unknown }[]>`select name, facts, feed from mkt_brands where tenant = ${tenant}`.catch(() => []);
+  const hit = (w: string) => {
+    const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const g = /[A-Za-z]/.test(w) ? 'A-Za-z0-9' : [...w].length >= 3 ? '' : '가-힣';
+    return new RegExp(g ? `(?<![${g}])${esc}(?![${g}])` : esc, 'i').test(hay);
+  };
+  return [...new Set(rows.map((b) => brandAliases(b, { site: false })).filter((all) => all.some(hit)).map((all) => all[0]))];
+}
 const tokens = (name: string) => name.replace(/\.[^.]+$/, '').toLowerCase().split(/[\s_\-.()[\]]+/).filter((t) => t.length >= 2);
 /** AI 없이: 회사가 고친 예시 중 파일명 낱말이 가장 많이 겹치는 것의 폴더·태그를 따른다 */
 function ruleGuess(fileName: string, rules: { file_name: string; folder: string; tags: string[] }[]) {
@@ -435,7 +451,7 @@ const ORG_SYSTEM = `회사 자료실 정리 담당입니다. 파일 하나의 �
 - 태그는 3~6개, # 없이 짧게. 제목은 사람이 읽기 좋게(확장자 없이). 요약은 한 문장.
 - confidence 는 0~1, 내용을 확인하지 못했거나 애매하면 0.5 이하.
 - security(보안 등급): 매출·급여·인사·계약서·주민번호·계좌·견적 단가·정산·손익 등 민감하면 "confidential", 회사 내부용이면 "internal", 누구에게 보여도 되는 홍보물·로고면 "public".`;
-export async function organizeLibraryFile(u: SessionUser, id: string, opt: { keepFolder?: boolean; preview?: boolean } = {}) {
+export async function organizeLibraryFile(u: SessionUser, id: string, opt: { keepFolder?: boolean; preview?: boolean; frames?: string[] } = {}) {
   const sql = db();
   const [f] = await sql<any[]>`select * from library_files where id = ${id} and tenant = ${tenantOf(u)} and deleted_at is null`;
   if (!f) throw notFound();
@@ -447,6 +463,12 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   ]);
   let out: { folder: string; tags: string[]; title?: string; summary?: string; confidence: number; security?: Security } | null = null;
   let by: 'ai' | 'rule' = 'rule';
+  // 210차 #619: 사진은 AI 사진 설명(있으면) · 브랜드 규칙표(브랜드 이름·다른 이름)
+  const vis = f.vision && !f.vision.error && f.vision.caption ? f.vision as { caption: string; scene?: string; tags?: string[]; kind?: string } : null;
+  // 영상: 화면이 장면 사진을 안 보냈으면(다시 정리가 저장소 주소를 못 읽음·관리자 전체 정리) 이미 뽑아 둔 장면 사진(188차)의 AI 설명
+  const scenes = /^video\//.test(f.mime_type) && !opt.frames?.length ? (await sql<{ c: string }[]>`select vision->>'caption' as c from library_files where tenant = ${tenantOf(u)} and source = 'video_frame'
+    and meta->'video'->>'id' = ${id} and deleted_at is null and vision->>'caption' is not null order by created_at limit 4`).map((r) => r.c) : [];
+  const brands = await brandHits(tenantOf(u), `${f.file_name} ${f.title ?? ''} ${vis ? `${vis.caption} ${(vis.tags ?? []).join(' ')}` : ''} ${scenes.join(' ')}`);
   let reason: string | null = null; // V14 3번: AI 로 정리하지 못한 이유(화면에 표시)
   if (!opt.preview) await sql`update library_files set organize_status = 'pending', organize_error = null where id = ${id}`;
   const { aiEnabled, anthropicProvider, costUsd } = await import('./ai/provider');
@@ -454,17 +476,28 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   if (quota) reason = quota;
   else {
     const provider = anthropicProvider({ tier: 'fast' });
-    const isImg = /^image\/(png|jpe?g|gif|webp)$/.test(f.mime_type) && Number(f.size_bytes) <= 3_500_000;
+    // 210차: 큰 사진(3.5MB 넘음)·다른 형식도 줄여서 보냄(25MB 까지) · 영상은 화면이 뽑은 장면 사진 2장
+    const imgOk = /^image\/(png|jpe?g|gif|webp)$/.test(f.mime_type) && Number(f.size_bytes) <= 3_500_000;
+    const imgBig = !imgOk && /^image\//.test(f.mime_type) && Number(f.size_bytes) <= 25_000_000;
     const isPdf = f.mime_type === 'application/pdf' && !f.text_content && Number(f.size_bytes) <= 8_000_000;
-    const bin = isImg || isPdf ? await getObject(f.storage_key).catch(() => null) : null;
+    let bin = imgOk || imgBig || isPdf ? await getObject(f.storage_key).catch(() => null) : null;
+    let imgType: string = f.mime_type === 'image/jpg' ? 'image/jpeg' : f.mime_type;
+    if (bin && imgBig) bin = await (await import('sharp')).default(bin).rotate().resize({ width: 1568, height: 1568, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer().then((b) => { imgType = 'image/jpeg'; return b; }, () => null);
+    const isImg = imgOk || (imgBig && !!bin);
+    const frames = /^video\//.test(f.mime_type) ? (opt.frames ?? []).slice(0, 2) : [];
     const info = `파일명: ${f.file_name}\n종류: ${f.mime_type}\n지금 폴더: ${f.folder || '(없음)'}\n이미 있는 폴더: ${folders.map((x) => x.folder).join(', ') || '(없음)'}\n` +
       `회사가 고친 예시: ${rules.slice(0, 20).map((r) => `${r.file_name} → ${r.folder} [${r.tags.join(',')}]`).join(' / ') || '(없음)'}\n` +
+      (vis ? `사진 설명(AI): ${vis.caption}${vis.scene ? ` — ${vis.scene}` : ''}${vis.tags?.length ? ` [${vis.tags.join(',')}]` : ''}\n` : '') +
+      (frames.length ? `영상 장면 사진 ${frames.length}장(처음 쪽·가운데)을 함께 보냅니다 — 무엇을 찍은 영상인지 보고 정하세요\n` : '') +
+      (scenes.length ? `영상 장면 설명(AI): ${scenes.join(' / ')}\n` : '') +
+      (brands.length ? `브랜드 단서: ${brands.join(', ')} — 이 브랜드 자료면 폴더 이름에 브랜드를 넣으세요(이미 있는 폴더 중 그 브랜드 이름이 든 곳 먼저)\n` : '') +
       (f.text_content ? `본문 일부:\n${String(f.text_content).slice(0, 2500)}` : '(본문 글자 없음)');
     const schema = { type: 'object', additionalProperties: false, required: ['folder', 'tags', 'title', 'summary', 'confidence', 'security'], properties: {
       folder: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, title: { type: 'string' }, summary: { type: 'string' }, confidence: { type: 'number' },
       security: { type: 'string', enum: ['public', 'internal', 'confidential'] } } };
     const content = [
-      ...(bin && isImg ? [{ type: 'image', source: { type: 'base64', media_type: f.mime_type === 'image/jpg' ? 'image/jpeg' : f.mime_type, data: bin.toString('base64') } }] : []),
+      ...(bin && isImg ? [{ type: 'image', source: { type: 'base64', media_type: imgType, data: bin.toString('base64') } }] : []),
+      ...frames.map((data) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } })),
       ...(bin && isPdf ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: bin.toString('base64') } }] : []),
       { type: 'text', text: info }] as never;
     const ask = (format: boolean) => provider.chat({ system: ORG_SYSTEM + (format ? '' : '\n반드시 {"folder","tags","title","summary","confidence","security"} JSON 하나만 답하세요.'), tools: [], ...(format ? { format: schema } : {}), messages: [{ role: 'user', content }] });
@@ -494,7 +527,7 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   }
   let folder = opt.keepFolder ? f.folder : cleanFolder(out.folder) || f.folder;
   if (folder !== f.folder && RANK[await folderLevel(u, folder)] < RANK.edit) folder = f.folder; // 권한 없는 폴더로는 옮기지 않는다
-  const tags = [...new Set([...f.tags, ...out.tags.map((t) => t.replace(/^#/, '').trim().slice(0, 30)).filter(Boolean)])].slice(0, 20);
+  const tags = [...new Set([...f.tags, ...out.tags.map((t) => t.replace(/^#/, '').trim().slice(0, 30)).filter(Boolean), ...brands])].slice(0, 20); // 210차: 브랜드 이름은 AI 가 빠뜨려도 태그로
   const title = (out.title || '').trim().slice(0, 200) || f.title;
   const description = f.description || (out.summary || '').trim().slice(0, 500) || null;
   const confidence = Math.max(0, Math.min(1, out.confidence));
@@ -506,10 +539,10 @@ export async function organizeLibraryFile(u: SessionUser, id: string, opt: { kee
   const result = { by, folder, tags, title, description, confidence, reason, suggested };
   if (opt.preview) { // V14 18번: 관리자 전체 정리 미리보기 — 적용 전까지 아무것도 바꾸지 않는다
     await sql`update library_files set organize_preview = ${sql.json(result as never)} where id = ${id}`;
-    return { by, folder, tags, title, description, confidence, needsReview: confidence < 0.6, error: reason, security, suggestedSecurity: suggested, preview: true };
+    return { by, folder, tags, title, description, confidence, needsReview: confidence < REVIEW_BELOW, error: reason, security, suggestedSecurity: suggested, preview: true };
   }
   await applyOrganize(id, prev, result);
-  return { by, folder, tags, title, description, confidence, needsReview: confidence < 0.6, error: reason, security, suggestedSecurity: suggested };
+  return { by, folder, tags, title, description, confidence, needsReview: confidence < REVIEW_BELOW, error: reason, security, suggestedSecurity: suggested };
 }
 export async function undoOrganize(u: SessionUser, id: string) {
   const f = await loadLibraryFile(u, id);
@@ -520,17 +553,17 @@ export async function undoOrganize(u: SessionUser, id: string) {
     organized_by = null, ai_confidence = null, needs_review = false, ai_prev = null, updated_at = now() where id = ${id}`;
   return { ok: true };
 }
-export async function reorganize(u: SessionUser, id: string) {
+export async function reorganize(u: SessionUser, id: string, frames?: string[]) {
   const f = await loadLibraryFile(u, id);
   await requireMenu(u, 'library', 'edit');
   if (!canEdit(u, f)) throw forbidden('올린 사람 또는 관리자만 다시 정리할 수 있습니다');
-  return organizeLibraryFile(u, id);
+  return organizeLibraryFile(u, id, { frames });
 }
 
 type OrgResult = { by: string; folder: string; tags: string[]; title: string; description: string | null; confidence: number; reason: string | null; suggested: Security };
 async function applyOrganize(id: string, prev: unknown, r: OrgResult) {
   await db()`update library_files set security_suggested = ${r.suggested}, folder = ${r.folder}, tags = ${r.tags}, title = ${r.title}, description = ${r.description}, organized_by = ${r.by},
-    ai_confidence = ${r.confidence}, needs_review = ${r.confidence < 0.6}, ai_prev = ${db().json(prev as never)}, updated_at = now(), organize_preview = null,
+    ai_confidence = ${r.confidence}, needs_review = ${r.confidence < REVIEW_BELOW}, ai_prev = ${db().json(prev as never)}, updated_at = now(), organize_preview = null,
     organize_status = ${r.by === 'ai' ? 'done' : 'failed'}, organize_error = ${r.reason} where id = ${id}`;
 }
 /** 전체 정리 미리보기를 고른 것만 적용 */
