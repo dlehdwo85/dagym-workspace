@@ -174,11 +174,46 @@ async function insertInquiry(sql: ReturnType<typeof db>, a: { site: Site; type: 
       await runAutomations(tx, { trigger: 'task_created', taskId: t.id, actorId: null });
     }
     await tx`update inquiries set task_id = ${taskIds[0]} where id = ${ins.id}`;
+    // 대표 10/27 ③: 영업 진행(리드)에도 올리고 업무를 잇는다 — 완료할 때 다음 연락일·종결을 묻고 후속 업무로(#460). 실패해도 문의 접수는 그대로(savepoint)
+    const lead = await (tx as any).savepoint((sp: Sql) => attachInquiryLead(sp, { site, type, i, org, channel: a.channel, ownerId: people[0], due, inquiryId: ins.id, taskIds, actorId: a.actorId }))
+      .catch((e: Error) => { console.warn('[inquiry] lead link failed', e.message); return null; });
     // V31 ① 문의자(이름·연락처·이메일·기관) → 회사 연락처 자동 등록 + 업무 연결
     try { await (await import('./contacts')).rememberContacts(tx, INQUIRY_TENANT, a.actorId, [{ name: i.name, organization: i.organization, phone: i.phone, email: i.email }], { source: 'inquiry', taskId: taskIds[0] }); } catch (e) { console.warn('[contacts] inquiry remember failed', (e as Error).message); }
-    return { ok: true, duplicate: false, taskId: taskIds[0], taskIds, ceoId: ceo.id };
+    return { ok: true, duplicate: false, taskId: taskIds[0], taskIds, ceoId: ceo.id, leadId: (lead?.leadId ?? null) as string | null };
   });
   return out;
+}
+
+/** 문의 1건 → 영업 진행 리드(같은 전화번호면 그 리드) + 업무 연결. 리드 이름 = 회사/단지명(없으면 문의자) */
+async function attachInquiryLead(sql: Sql, a: { site: Site; type: InquiryType; i: InquiryInput; org: string; channel: Channel; ownerId: string; due: string; inquiryId: string; taskIds: string[]; actorId: string | null }) {
+  const label = `${SITES[a.site].label} ${a.channel === 'phone' ? '대표번호 전화' : '웹사이트'} 문의`;
+  const memo = [`${label} · ${a.i.inquiry_type || a.type}`, a.i.facility_scale ? `규모: ${a.i.facility_scale}` : '', a.i.message ? String(a.i.message).slice(0, 1500) : ''].filter(Boolean).join('\n');
+  return (await import('./sales/inbound')).attachInboundLead(sql, { tenant: INQUIRY_TENANT, name: a.org, contactName: a.i.name, phone: a.i.phone, email: a.i.email, region: a.i.region,
+    ownerId: a.ownerId, nextDate: a.due, memo, src: { from: a.channel === 'phone' ? 'phone_inquiry' : 'website_inquiry', site: a.site, inquiryId: a.inquiryId, externalLeadId: a.i.lead_id, type: a.type },
+    taskIds: a.taskIds, reason: `${label} 자동 등록`, actorId: a.actorId });
+}
+/**
+ * 대표 10/27 ③: 이미 들어와 있던 문의 중 아직 끝나지 않은 업무도 영업 진행에 잇는다(정기 실행, 한 번에 20건 — 이은 업무는 lead_id 가 있어 다시 안 봄).
+ * 담당·마감은 그 업무 그대로(마감이 지났으면 오늘을 다음 연락일로). 영업 공간을 안 켰으면 하지 않음
+ */
+export async function inquiryLeadsTick() {
+  const sql = db();
+  const [t] = await sql<{ on: boolean }[]>`select 'sales' = any(spaces) as on from tenants where id = ${INQUIRY_TENANT}`;
+  if (!t?.on) return { skipped: 'no_sales' };
+  const rows = await sql<{ id: string; site: Site; inquiry_type: string; organization: string | null; payload: any; created_at: Date; phone: boolean; task_id: string; batch_id: string | null; assignee_id: string | null; due: string | null; created_by: string }[]>`
+    select q.id, q.site, q.inquiry_type, q.organization, q.payload, q.created_at, q.token_id is null as phone, t.id as task_id, t.batch_id, t.assignee_id, t.due_date::text as due, t.created_by
+    from inquiries q join tasks t on t.id = q.task_id
+    where q.tenant = ${INQUIRY_TENANT} and t.deleted_at is null and t.status <> 'done' and t.lead_id is null order by q.created_at limit 20`;
+  const today = toSeoulDate(new Date()); let linked = 0;
+  for (const r of rows) {
+    const i = inquiryInput.safeParse(r.payload ?? {}); if (!i.success) continue;
+    const taskIds = r.batch_id ? (await sql<{ id: string }[]>`select id from tasks where batch_id = ${r.batch_id} and deleted_at is null and status <> 'done' and lead_id is null`).map((x) => x.id) : [r.task_id];
+    const channel: Channel = r.phone ? 'phone' : 'web'; // 대표번호 전화 문의는 연동 토큰 없이 접수
+    const lead = await sql.begin((tx) => attachInquiryLead(tx as unknown as Sql, { site: r.site, type: normalizeType(r.inquiry_type), i: i.data, org: r.organization || i.data.name || '이름 없는 문의', channel,
+      ownerId: r.assignee_id ?? r.created_by, due: r.due && r.due > today ? r.due : today, inquiryId: r.id, taskIds: taskIds.length ? taskIds : [r.task_id], actorId: null })).catch((e) => { console.warn('[inquiry] backfill', (e as Error).message); return null; });
+    if (lead) linked++;
+  }
+  return { checked: rows.length, linked };
 }
 
 /** 설명 맨 위에 AI 한 줄 요약(선택). 응답 뒤에 실행 — 실패·한도 초과면 조용히 건너뜀 */

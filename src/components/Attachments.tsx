@@ -1,10 +1,11 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
-import { api, broadcastRefresh } from './client';
-import { Camera, Download, Eye, FileText, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload, Video } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ApiError, api, broadcastRefresh } from './client';
+import { Camera, Check, Download, Eye, FileText, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload, Video } from 'lucide-react';
 import { isNativeApp } from './native';
 import { MediaFull } from './MediaView';
 import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
+import { useBackClose } from './backClose';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
 import { AttachEditModal, editModeOf } from './AttachEdit';
 
@@ -13,40 +14,70 @@ export async function shrinkImage(file: File): Promise<File> {
   if (!/^image\/(jpeg|png|webp|heic|heif)$/i.test(file.type) || file.size < 400 * 1024 || typeof createImageBitmap !== 'function') return file;
   try {
     const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
-    if (scale === 1 && file.size < 1.5 * 1024 * 1024) return file;
+    // 대표 10/27(휴대폰 사진 150장 안 올라감): 풀어 놓은 사진·그림판을 바로 비움 — 안 비우면 장수가 많을 때 휴대폰 메모리가 모자라 화면이 멈춤
     const c = document.createElement('canvas');
-    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
-    c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
+    try {
+      const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      if (scale === 1 && file.size < 1.5 * 1024 * 1024) return file;
+      c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+      c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
+    } finally { bmp.close(); }
     const blob: Blob | null = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
+    c.width = 0; c.height = 0;
     if (!blob || blob.size >= file.size) return file;
     return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg', lastModified: file.lastModified });
   } catch { return file; }
 }
 
-/** V12 9번: 업무·일정 첨부 올리기(여러 개·진행률·알기 쉬운 실패 원인) — 첨부 칸·댓글 칸 끌어 놓기 공용 */
+/** 일시적인 실패(연결 끊김·서버 5xx·잠시 막힘)만 한 번 더 — 크기 초과·실행 파일 같은 거절은 바로 실패 */
+const retryable = (e: unknown) => !(e instanceof ApiError) || e.status >= 500 || e.status === 429;
+/**
+ * V12 9번: 업무·일정 첨부 올리기(여러 개·진행률·알기 쉬운 실패 원인) — 첨부 칸·댓글 칸 끌어 놓기 공용.
+ * 대표 10/27(휴대폰 사진 150장): 3개씩 함께 올리고(사진 줄이기는 한 장씩), 일시 실패는 한 번 더, 올리는 동안 화면이 꺼지지 않게,
+ * 실패 알림은 장수가 많으면 끝에 한 번만(몇 장 실패했는지·이름은 진행 목록에서)
+ */
 export async function uploadTaskFiles(list: File[], target: { taskId?: string; eventId?: string }, setProg: (f: (x: { name: string; pct: number; error?: string }[]) => { name: string; pct: number; error?: string }[]) => void) {
   const start = list.map((f) => ({ name: f.name, pct: 0 }));
   setProg(() => start);
   const upd = (i: number, patch: Partial<{ pct: number; error: string }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
-  let ok = 0;
-  for (const [n, raw] of list.entries()) {
-    try {
-      const file = await shrinkImage(raw);
-      // B-7 촬영(파일 수정) 시각을 함께 기록 — 사진 증빙의 시점 확인용
-      const capturedAt = raw.lastModified ? new Date(raw.lastModified).toISOString() : undefined;
-      const r = await api('/api/attachments', { body: { ...target, kind: 'file', fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, capturedAt } });
-      const { uploadId } = await putFile(r.upload, file, (pct) => upd(n, { pct }));
-      await api(`/api/attachments/${r.id}/complete`, { body: uploadId ? { uploadId } : {} });
-      upd(n, { pct: 100 }); ok++;
-    } catch (e: any) { upd(n, { error: e.message }); toast.error(`${raw.name}: ${e.message}`); }
-  }
+  const many = list.length > 3;
+  let lock: { release: () => Promise<void> } | null = null;
+  if (many) lock = await (navigator as any).wakeLock?.request('screen').catch(() => null) ?? null;
+  let shrinking: Promise<unknown> = Promise.resolve(); // 사진 줄이기는 한 번에 한 장(메모리)
+  const one = async (n: number) => {
+    const raw = list[n];
+    const file = await (shrinking = shrinking.then(() => shrinkImage(raw), () => shrinkImage(raw))) as File;
+    // B-7 촬영(파일 수정) 시각을 함께 기록 — 사진 증빙의 시점 확인용
+    const capturedAt = raw.lastModified ? new Date(raw.lastModified).toISOString() : undefined;
+    for (let tryN = 0; ; tryN++) {
+      try {
+        const r = await api('/api/attachments', { body: { ...target, kind: 'file', fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, capturedAt } });
+        const { uploadId } = await putFile(r.upload, file, (pct) => upd(n, { pct }));
+        await api(`/api/attachments/${r.id}/complete`, { body: uploadId ? { uploadId } : {} });
+        return;
+      } catch (e) { if (tryN >= 1 || !retryable(e)) throw e; upd(n, { pct: 0 }); await new Promise((r) => setTimeout(r, 1500)); }
+    }
+  };
+  let ok = 0, next = 0; const failed: string[] = [];
+  const worker = async () => {
+    while (next < list.length) {
+      const n = next++;
+      try { await one(n); upd(n, { pct: 100 }); ok++; }
+      catch (e: any) { upd(n, { error: e.message }); failed.push(list[n].name); if (!many) toast.error(`${list[n].name}: ${e.message}`); }
+    }
+  };
+  try { await Promise.all(Array.from({ length: Math.min(3, list.length) }, worker)); } finally { await lock?.release().catch(() => {}); }
+  if (failed.length && many) toast.error(`${list.length}개 중 ${failed.length}개를 올리지 못했습니다 — 진행 목록에서 이유를 보고 다시 올려 주세요`);
   if (ok) toast.ok(`${ok}개 첨부 완료`);
   if (ok === list.length) setTimeout(() => setProg(() => []), 1500);
   return ok;
 }
 
 const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '');
+/** 대표 10/27(사진 150장이 지저분하지 않게): 사진 칸에 바로 보이는 수(넘으면 마지막 칸 '+n' → 사진첩) · 사진이 이보다 많으면 파일 목록의 사진 줄은 '사진 n장' 한 줄로 */
+const PHOTO_PREVIEW = 12, PHOTO_ROWS_MAX = 6;
+const seoulDay = (v: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(v));
+const dayLabel = (d: string) => `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일 (${'일월화수목금토'[new Date(`${d}T12:00:00+09:00`).getUTCDay()]})`;
 const isVideo = (a: any) => a.kind === 'file' && /^video\//.test(a.mime_type ?? ''); // 대표 10/21 02:00: 영상은 보기 창에서 재생
 
 const SOURCE_LABEL: Record<string, string> = { upload: '업로드', google_drive: 'Google Drive', chatgpt: 'ChatGPT 결과물', notion: 'Notion', web: '웹 링크', other: '기타', library: '자료실', sales_auto: '공고 첨부(자동)' };
@@ -76,6 +107,9 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       toast.ok(`v${r.version} 으로 저장했습니다(이전 버전 보관)`); onChange(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } finally { setBusy(''); if (verRef.current) verRef.current.value = ''; }
   }
   const photos = items.filter(isImage);
+  const [album, setAlbum] = useState(false);
+  const manyPhotos = photos.length > PHOTO_ROWS_MAX;
+  const canDel = (a: any) => a.created_by === meId || canEdit;
   const albumRef = useRef<HTMLInputElement>(null);
   const vidRef = useRef<HTMLInputElement>(null); // #109 영상 촬영
 
@@ -110,24 +144,41 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
     await openFileExternally(`/api/attachments/${id}/download${q}`); // 기기 브라우저로(내려받기·공유)
   }
   async function remove(id: string) {
-    if (!confirm('첨부를 삭제할까요?')) return;
-    try { await api(`/api/attachments/${id}`, { method: 'DELETE' }); onChange(); } catch (e: any) { toast.error(e.message); }
+    if (!confirm('첨부를 삭제할까요?')) return false;
+    try { await api(`/api/attachments/${id}`, { method: 'DELETE' }); onChange(); return true; } catch (e: any) { toast.error(e.message); return false; }
   }
 
   return (
     <DropZone onFiles={(f) => upload(f)} disabled={!canEdit || !!busy} label={taskId ? '놓으면 이 업무에 첨부됩니다' : '놓으면 이 일정에 첨부됩니다'} testid="attach-drop">
-      {items.some(isImage) && (
-        <div className="mb-2 grid grid-cols-3 gap-2 sm:grid-cols-4" data-testid="photo-grid">
-          {items.filter(isImage).map((a) => (
-            <a key={a.id} href={`/api/attachments/${a.id}/download?inline=1`} onClick={(e) => { e.preventDefault(); setView(a); }} className="group relative block aspect-square overflow-hidden rounded-input border border-line bg-slate-100" title={a.file_name} data-photo={a.id}>
-              <img src={`/api/attachments/${a.id}/download?inline=1`} alt={a.file_name} loading="lazy" className="size-full object-cover transition-transform group-hover:scale-105" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-              <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/60 to-transparent px-1.5 pb-1 pt-4 text-[10px] text-white">{a.captured_at ? fmtDateTime(a.captured_at) : a.file_name}</span>
-            </a>
-          ))}
+      {photos.length > 0 && (
+        <div className="mb-2" data-testid="photo-section">
+          {photos.length > PHOTO_PREVIEW && <div className="mb-1 flex items-center gap-2 text-xs text-ink-2"><b className="text-ink">사진 {photos.length}장</b>
+            <button type="button" className="ml-auto font-semibold text-accent-700 underline" onClick={() => setAlbum(true)} data-testid="photo-album-open">사진첩으로 모두 보기</button></div>}
+          <div className={cx('grid gap-2', photos.length > PHOTO_ROWS_MAX ? 'grid-cols-4 gap-1.5 sm:grid-cols-6' : 'grid-cols-3 sm:grid-cols-4')} data-testid="photo-grid">
+            {photos.slice(0, photos.length > PHOTO_PREVIEW ? PHOTO_PREVIEW - 1 : PHOTO_PREVIEW).map((a) => (
+              <a key={a.id} href={`/api/attachments/${a.id}/download?inline=1`} onClick={(e) => { e.preventDefault(); setView(a); }} className="group relative block aspect-square overflow-hidden rounded-input border border-line bg-slate-100" title={a.file_name} data-photo={a.id}>
+                <img src={`/api/attachments/${a.id}/download?inline=1`} alt={a.file_name} loading="lazy" className="size-full object-cover transition-transform group-hover:scale-105" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/60 to-transparent px-1.5 pb-1 pt-4 text-[10px] text-white">{a.captured_at ? fmtDateTime(a.captured_at) : a.file_name}</span>
+              </a>
+            ))}
+            {photos.length > PHOTO_PREVIEW && (
+              <button type="button" onClick={() => setAlbum(true)} className="relative block aspect-square overflow-hidden rounded-input border border-line bg-slate-100" aria-label={`사진 ${photos.length}장 모두 보기`} data-testid="photo-more">
+                <img src={`/api/attachments/${photos[PHOTO_PREVIEW - 1].id}/download?inline=1`} alt="" loading="lazy" className="size-full object-cover" />
+                <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-lg font-bold text-white">+{photos.length - (PHOTO_PREVIEW - 1)}</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
       <ul className="space-y-1.5" data-testid="attachments">
-        {items.map((a) => (
+        {manyPhotos && (
+          <li className="flex items-center gap-2.5 rounded-input border border-line px-2.5 py-2 text-sm" data-testid="att-photo-summary">
+            <ImageIcon className="size-4 shrink-0 text-ink-3" />
+            <span className="min-w-0 flex-1"><b>사진 {photos.length}장</b> <span className="text-xs text-ink-2">위 사진 칸·사진첩에서 크게 보기·고치기·내려받기·지우기</span></span>
+            <button type="button" onClick={() => setAlbum(true)} className="shrink-0 rounded-input border border-line px-2 py-1 text-xs font-medium hover:bg-slate-50" data-testid="att-photo-album">사진첩</button>
+          </li>
+        )}
+        {(manyPhotos ? items.filter((a) => !isImage(a)) : items).map((a) => (
           <li key={a.id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-input border border-line px-2.5 py-2 text-sm">
             <FileKindIcon a={a} />
             {/* #533: 버튼이 많아도 이름이 사라지지 않게 — 이름 최소 폭, 모자라면 버튼 묶음이 다음 줄로 */}
@@ -180,12 +231,15 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
         <Button size="sm" variant="secondary" onClick={() => setLinkOpen(true)}><Link2 />문서 링크 연결</Button>
         {busy && <span className="inline-flex items-center gap-1.5 text-xs text-ink-2"><Loader2 className="size-3.5 animate-spin" />{busy}</span>}
       </div>
-      {/* 사진 크게 보기: 좌우로 넘기기 */}
+      {album && <PhotoAlbum photos={photos} canDel={canDel} onOpen={setView} onClose={() => setAlbum(false)} onChange={() => { onChange(); broadcastRefresh(); }} />}
+      {/* 사진 크게 보기: 좌우로 넘기기 · 대표 10/27: 사진은 여기서 고치기·지우기(사진이 많으면 목록 줄이 없음) */}
       {view && (
         <div className="fixed inset-0 z-[80] flex flex-col bg-black/90" role="dialog" aria-label="사진 보기" data-testid="photo-viewer" onClick={() => setView(null)}>
-          <div className="flex items-center justify-between px-4 pb-2 pt-[calc(var(--sat)+8px)] text-sm text-white">
-            <span className="truncate">{view.file_name}{view.captured_at && isImage(view) ? ` · 촬영 ${fmtDateTime(view.captured_at)}` : ''}</span>
-            <button type="button" className="rounded px-2 py-1 text-white/90" aria-label="사진 닫기" onClick={() => setView(null)}>닫기</button>
+          <div className="flex items-center gap-2 px-4 pb-2 pt-[calc(var(--sat)+8px)] text-sm text-white" onClick={(e) => e.stopPropagation()}>
+            <span className="min-w-0 flex-1 truncate">{isImage(view) && photos.length > 1 && <b className="mr-1.5 tabular-nums" data-testid="photo-viewer-index">{photos.findIndex((p) => p.id === view.id) + 1}/{photos.length}</b>}{view.file_name}{view.captured_at && isImage(view) ? ` · 촬영 ${fmtDateTime(view.captured_at)}` : ''}</span>
+            {isImage(view) && canEdit && <button type="button" className="shrink-0 rounded px-2 py-1 text-white/90 hover:bg-white/10" onClick={() => { const a = view; setView(null); startEdit(a); }} data-testid="photo-viewer-edit">고치기</button>}
+            {isImage(view) && canDel(view) && <button type="button" className="shrink-0 rounded px-2 py-1 text-white/90 hover:bg-white/10" onClick={async () => { if (await remove(view.id)) setView(null); }} data-testid="photo-viewer-delete">지우기</button>}
+            <button type="button" className="shrink-0 rounded px-2 py-1 text-white/90" aria-label="사진 닫기" onClick={() => setView(null)}>닫기</button>
           </div>
           <div className="relative flex min-h-0 flex-1 items-center justify-center" onClick={(e) => e.stopPropagation()}>
             <MediaFull src={`/api/attachments/${view.id}/download?inline=1`} mime={view.mime_type} alt={view.file_name} className="max-h-full max-w-full object-contain" />
@@ -225,6 +279,58 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
         let ok = 0; for (const f of files) { try { await api(`/api/library/${f.id}/attach`, { body: { taskId } }); ok++; } catch (e: any) { toast.error(`${f.title}: ${e.message}`); } }
         if (ok) toast.ok(`자료실 파일 ${ok}건을 첨부했습니다`); setLibOpen(false); onChange(); broadcastRefresh(); }} />}
     </DropZone>
+  );
+}
+
+/** 대표 10/27(사진 150장): 사진첩 — 날짜(촬영일, 없으면 올린 날)별로 모아 보기 · [고르기] → 여러 장 지우기(올린 사람·편집 권한만) */
+function PhotoAlbum({ photos, canDel, onOpen, onClose, onChange }: { photos: any[]; canDel: (a: any) => boolean; onOpen: (a: any) => void; onClose: () => void; onChange: () => void }) {
+  useBackClose(true, onClose);
+  const [pick, setPick] = useState<Set<string> | null>(null); // null = 보기, Set = 고르기
+  const [busy, setBusy] = useState(false);
+  const groups = useMemo(() => {
+    const m = new Map<string, any[]>();
+    for (const a of photos) { const d = seoulDay(a.captured_at ?? a.created_at); m.set(d, [...(m.get(d) ?? []), a]); }
+    return [...m.entries()].sort((x, y) => y[0].localeCompare(x[0]));
+  }, [photos]);
+  const deletable = photos.filter(canDel);
+  const toggle = (id: string) => setPick((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  async function removePicked() {
+    const ids = [...(pick ?? [])];
+    if (!ids.length || !confirm(`사진 ${ids.length}장을 지울까요?`)) return;
+    setBusy(true); let ok = 0;
+    for (const id of ids) { try { await api(`/api/attachments/${id}`, { method: 'DELETE' }); ok++; } catch (e: any) { toast.error(e.message); } }
+    setBusy(false); if (ok) toast.ok(`사진 ${ok}장을 지웠습니다`); setPick(null); onChange();
+  }
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col bg-white" role="dialog" aria-label="사진첩" data-testid="photo-album">
+      <div className="flex items-center gap-2 border-b border-line px-4 pb-2 pt-[calc(var(--sat)+10px)]">
+        <b className="text-base">사진 {photos.length}장</b>
+        {deletable.length > 0 && <button type="button" className={cx('ml-auto rounded-full border px-3 py-1 text-xs', pick ? 'border-accent-500 bg-accent-50 font-semibold text-accent-700' : 'border-line')} onClick={() => setPick(pick ? null : new Set())} data-testid="photo-album-pick">{pick ? '고르기 끝' : '고르기'}</button>}
+        <button type="button" className={cx('rounded px-2 py-1 text-sm text-ink-2 hover:bg-slate-100', !deletable.length && 'ml-auto')} onClick={onClose} data-testid="photo-album-close">닫기</button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        {groups.map(([d, list]) => (
+          <section key={d} data-testid="photo-album-day">
+            <h3 className="sticky top-0 z-10 bg-white/95 py-2 text-xs font-semibold text-ink-2">{dayLabel(d)} · {list.length}장</h3>
+            <div className="grid grid-cols-4 gap-1 sm:grid-cols-6 lg:grid-cols-8">
+              {list.map((a) => { const on = !!pick?.has(a.id); return (
+                <button key={a.id} type="button" onClick={() => (pick ? canDel(a) && toggle(a.id) : onOpen(a))} aria-pressed={pick ? on : undefined} aria-label={a.file_name} title={a.file_name}
+                  className={cx('relative aspect-square overflow-hidden rounded bg-slate-100', on && 'ring-2 ring-accent-500 ring-offset-1')} data-testid="photo-album-item">
+                  <img src={`/api/attachments/${a.id}/download?inline=1`} alt="" loading="lazy" className={cx('size-full object-cover', on && 'opacity-75')} onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }} />
+                  {pick && canDel(a) && <span className={cx('absolute right-1 top-1 flex size-5 items-center justify-center rounded-full border-2 border-white', on ? 'bg-accent-600' : 'bg-black/30')}>{on && <Check className="size-3 text-white" />}</span>}
+                </button>); })}
+            </div>
+          </section>
+        ))}
+      </div>
+      {pick && (
+        <div className="flex items-center gap-3 border-t border-line px-4 pb-[calc(var(--sab)+10px)] pt-2 text-sm" data-testid="photo-album-bar">
+          <b className="tabular-nums" data-testid="photo-album-count">{pick.size}장 선택</b>
+          <button type="button" className="text-xs text-ink-2 underline" onClick={() => setPick(new Set(pick.size === deletable.length ? [] : deletable.map((a) => a.id)))} data-testid="photo-album-all">{pick.size === deletable.length ? '선택 해제' : '모두 선택'}</button>
+          <Button size="sm" variant="danger" className="ml-auto" disabled={!pick.size || busy} onClick={removePicked} data-testid="photo-album-delete"><Trash2 />{busy ? '지우는 중…' : '지우기'}</Button>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -10,6 +10,7 @@ import { byPurposeRows } from '@/components/aiPurpose';
 import { TaskQuota } from '@/components/TaskQuota';
 import { UsageStats } from '@/components/UsageStats';
 import { AiLimitsTable, AiPlanMatrix } from '@/components/AiLimitsTable';
+import { MktPlanSection } from '@/components/marketing/MktPlanSection';
 import { IN_APP_BILLING_NOTE, useInApp } from '@/components/inApp';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -165,6 +166,8 @@ export default function UsagePage() {
         )}
       </section>}
       {!inApp && data.aiLimits?.plans && <AiPlanMatrix matrix={data.aiLimits.plans} currentCode={s.planCode} />}
+      {/* 대표 10/27 ⑤: 요금제는 한곳에 — 마케팅 제작 요금제도 여기서(자동 제작실은 제작만) */}
+      {!inApp && <MktPlanSection />}
       </>}
       <Modal open={!!req && !inApp} onClose={() => setReq(null)} title="요금제 변경 요청">
         {req && (

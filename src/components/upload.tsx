@@ -83,6 +83,29 @@ export function DropZone({ onFiles, children, className, label = '여기에 놓�
 /** 여러 파일 진행률 줄 */
 export function UploadProgress({ items }: { items: { name: string; pct: number; error?: string; note?: string; onOpen?: () => void }[] }) {
   if (!items.length) return null;
+  // 대표 10/27(사진 150장): 6개 이상이면 한 줄 요약(올린 수/전체 · 실패 수 · 전체 진행 막대) + 펼치면 파일별(실패 먼저)
+  if (items.length > 5) {
+    const done = items.filter((x) => !x.error && x.pct >= 100).length, bad = items.filter((x) => x.error).length;
+    const pct = Math.round(items.reduce((a, x) => a + (x.error ? 100 : x.pct), 0) / items.length);
+    const busy = done + bad < items.length;
+    return (
+      <div className="mt-2 rounded-input border border-line bg-white p-2 text-xs" data-testid="upload-progress" data-summary="1" aria-live="polite">
+        <div className="flex flex-wrap items-center gap-x-2"><b className="tabular-nums" data-testid="upload-summary">{busy ? '올리는 중' : '올리기 끝'} {done}/{items.length}</b>
+          {bad > 0 && <span className="font-semibold text-red-600" role="alert" data-testid="upload-failed">실패 {bad}</span>}
+          {busy && <span className="text-ink-3">화면을 닫지 말고 기다려 주세요</span>}</div>
+        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={cx('h-full transition-[width]', bad ? 'bg-amber-500' : 'bg-accent-500')} style={{ width: `${pct}%` }} /></div>
+        <details className="mt-1" open={!busy && bad > 0}>
+          <summary className="cursor-pointer text-ink-2">파일별 보기</summary>
+          <ul className="mt-1 max-h-48 space-y-0.5 overflow-y-auto">
+            {[...items].sort((a, b) => Number(!!b.error) - Number(!!a.error)).map((it, i) => (
+              <li key={i} className="flex justify-between gap-2"><span className="truncate">{it.name}</span>
+                <span className={it.error ? 'shrink-0 text-red-600' : 'shrink-0 tabular-nums text-ink-2'} title={it.error}>{it.error ? `실패 — ${it.error}` : it.note ?? `${it.pct}%`}</span></li>
+            ))}
+          </ul>
+        </details>
+      </div>
+    );
+  }
   return (
     <ul className="mt-2 space-y-1 text-xs" data-testid="upload-progress" aria-live="polite">
       {items.map((it, i) => (

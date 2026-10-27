@@ -1087,6 +1087,15 @@ export async function automationView(u: SessionUser) {
     requests: full ? requests : (requests as unknown as { reason: string | null }[]).map((r) => ({ ...r, reason: customerText(r.reason) })), ledger: full ? ledger : (ledger as unknown as { note: string | null }[]).map((l) => ({ ...l, note: customerText(l.note) })), brands: withDraw, people, canEdit: isAdmin(u),
     feedCatalog: { templates: TEMPLATE_IDS.map((id) => { const x = FEED_TEMPLATES[id]; return { id, label: x.label, desc: x.desc, need: x.need ? NEED_LABEL[x.need as keyof typeof NEED_LABEL] : null }; }), styles: Object.entries(FEED_STYLES).map(([id, x]) => ({ id, label: x.label, templates: [...x.templates] as string[] })) } };
 }
+/** 대표 10/27 ⑤('요금제는 한곳에 — 자동 제작실은 제작만'): 사용량·요금제 화면의 마케팅 제작 요금제 — 요금제 표·이번 달 쓴 크레딧·직접 정한 한도만(자동 제작실 전체는 안 불러옴) */
+export async function mktPlanView(u: SessionUser) {
+  await assertSpace(u, 'marketing');
+  const t = tenantOf(u); const s = await settingsOf(t); const plans = await planTable(); const use = await usageOf(t);
+  const full = seesInternals(u); const rate = (await import('./ai/provider')).usdKrw();
+  return { planCode: s.plan_code, overrides: { monthlyCredits: s.monthly_credits, weeklyCredits: s.weekly_credits, videoMonthly: s.video_monthly, regenMonthly: s.regen_monthly },
+    plans: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, full ? p : { ...p, aiMonthlyUsd: null, aiMonthlyKrw: p.aiMonthlyUsd === null ? null : Math.round(p.aiMonthlyUsd * rate), writeTier: null }])),
+    used: { monthCredits: use.monthCredits, monthVideos: use.monthVideos, monthRegens: use.monthRegens }, canEdit: isAdmin(u) };
+}
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 제작 설정은 관리자가 합니다'); }
 
 const nInt = (a: number, b: number) => z.number().int().min(a).max(b);

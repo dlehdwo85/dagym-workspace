@@ -198,16 +198,24 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const from = ok(q.from) ? q.from! : today(), to = ok(q.to) ? q.to! : plus(7);
     const raw = await leadRows();
     const items: { date: string; time: string | null; title: string; kind: string; owner: string | null; href: string }[] = [];
+    // 대표 10/27 ④('입찰 마감이 업무·일정·영업에 세 번 뜸 — 하나만'): 끝나지 않은 업무가 이미 있는 리드·입찰은 주요 일정에 다시 넣지 않음(그 업무·입찰 일정이 캘린더에 보임)
+    const busy = await sql<{ lead: string | null; bid: string | null }[]>`select lead_id::text as lead, case when sales_ref->>'kind' = 'bid' then sales_ref->>'id' end as bid from tasks
+      where deleted_at is null and status <> 'done' and (lead_id is not null or sales_ref->>'kind' = 'bid') and created_by in (select id from users where tenant = ${t})`;
+    const leadBusy = new Set(busy.map((b) => b.lead).filter(Boolean)), bidBusy = new Set(busy.map((b) => b.bid).filter(Boolean));
     for (const r of raw) {
       const l = lead(r, names);
       if (!l.next || l.next < from || l.next > to || CLOSED.has(String(l.status))) continue;
+      if (r.__id && leadBusy.has(String(r.__id))) continue;
       const act = pick(r, 'next_action', 'next_step', 'next_action_type');
       const tm = String(pick(r, 'next_contact_at', 'next_action_at') ?? '').match(/[T ](\d{2}:\d{2})/)?.[1] ?? null;
       items.push({ date: l.next, time: tm, title: `${act ? String(act).slice(0, 20) : '연락'} · ${l.name}`, kind: 'lead', owner: l.owner ?? null, href: `/s/sales/leads?q=${encodeURIComponent(String(l.name))}` });
     }
     if (bidsOn) {
       // 196차: 전환 뒤 정식 진행 기록(prog) — 예전에는 원본 복사본만 읽어 워크인에서 넘긴 입찰이 빠졌음 · 결과(낙찰·유찰·취소)가 난 공고는 뺌
-      const W = (await prog('opportunity_work')).filter((w) => !/완료|미참여|대상\s?아님|done|closed|낙찰|유찰|취소/i.test(String(pick(w, 'status') ?? '')));
+      const W = (await prog('opportunity_work')).filter((w) => !/완료|미참여|대상\s?아님|done|closed|낙찰|유찰|취소/i.test(String(pick(w, 'status') ?? '')))
+        // 대표 10/27 ④: 입찰 업무로 넘긴 공고(업무·입찰 일정이 있음)·예전에 리드로 넘겨 그 리드에 열린 업무가 있는 공고·상태 단추로 업무가 생긴 공고는 빼고, 업무·일정이 없는 것만
+        // (전환 전 원본 복사본의 lead_id 는 원본 리드라 워크인 업무가 없음 → 그대로 넣음)
+        .filter((w) => !pick(w, 'bid_task_id') && !(w.bid_events && Object.keys(w.bid_events).length) && !leadBusy.has(String(pick(w, 'lead_id') ?? '')) && !bidBusy.has(String(pick(w, 'notice_id', 'procurement_notice_id') ?? '')));
       const ids = new Set(W.map((w) => String(pick(w, 'notice_id', 'procurement_notice_id') ?? '')));
       if (ids.size) for (const r of await noticeRows(ids, { related: false })) {
         if (!ids.has(String(r.id ?? r.__id))) continue;

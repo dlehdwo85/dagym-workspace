@@ -233,16 +233,32 @@ function CalendarPage() {
   const syncedIds = new Set(events.flatMap((e) => [e.linkedTask?.id, ...(e.linkedTaskIds ?? [])]).filter(Boolean));
   // V14 47: 연결 안 됐어도 같은 날·같은 제목의 일정이 있으면 업무는 따로 그리지 않고 일정 줄에 "업무 n" 으로 묶는다
   const normT = (x: string) => cleanTitle(x).replace(/\s+/g, ' ').trim().toLowerCase();
-  const evKey = new Set(events.filter((e) => !e.masked && e.kind !== 'task_block' && !(ABSENCE_KINDS as readonly string[]).includes(e.kind)).map((e) => `${seoulDate(e.start)}|${normT(e.title)}`));
+  // 대표 10/27 ④('입찰 마감이 업무·일정·영업에 여러 번 뜸 — 하나만'): 같은 입찰·리드는 하루 한 줄. 제목 앞 [영업]·[입찰] 머리, '입찰 마감 · '·'현장설명회 · ' 같은 일정 이름,
+  // 업무 끝의 ' — 다음 조치'를 떼고 남은 이름(단지·리드 이름)이 같으면 같은 건 — 업무는 일정 줄에 '업무 n'으로 묶고, 영업 주요 일정은 빼냄
+  const coreKey = (x: string) => cleanTitle(x).replace(/^(\[[^\]]*\]\s*)+/, '').replace(/^(입찰 마감|참가신청 마감|현장설명회|개찰|다음 연락|연락)\s*·\s*/, '').replace(/\s+—\s+.*$/, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const sameCore = (a: string, b: string) => a.length >= 5 && b.length >= 5 && (a === b || a.startsWith(b) || b.startsWith(a));
+  const evByDay = new Map<string, { key: string; core: string }[]>();
+  for (const e of events.filter((e) => !e.masked && e.kind !== 'task_block' && !(ABSENCE_KINDS as readonly string[]).includes(e.kind))) {
+    const d = seoulDate(e.start); evByDay.set(d, [...(evByDay.get(d) ?? []), { key: normT(e.title), core: coreKey(e.title) }]);
+  }
   // V37 2: 마감 시각이 있는 업무에 같은 날 업무 시간 블록이 있으면 블록 하나만(중복 블록 금지)
   const blockedDay = new Set(events.filter((e) => e.kind === 'task_block' && e.blockTask?.id).map((e) => `${e.blockTask.id}|${seoulDate(e.start)}`));
-  const dupTasks = new Map<string, number>();
-  for (const t of tasks) if (t.due_date && !syncedIds.has(t.id) && evKey.has(`${t.due_date}|${normT(t.title)}`)) dupTasks.set(`${t.due_date}|${normT(t.title)}`, (dupTasks.get(`${t.due_date}|${normT(t.title)}`) ?? 0) + 1);
+  const dupTasks = new Map<string, number>(); const foldedTasks = new Set<string>();
+  for (const t of tasks) {
+    if (!t.due_date || syncedIds.has(t.id)) continue;
+    const day = evByDay.get(t.due_date) ?? []; const k = normT(t.title), c = coreKey(t.title);
+    const hit = day.find((x) => x.key === k) ?? day.find((x) => sameCore(x.core, c));
+    if (hit) { dupTasks.set(`${t.due_date}|${hit.key}`, (dupTasks.get(`${t.due_date}|${hit.key}`) ?? 0) + 1); foldedTasks.add(t.id); }
+  }
+  const taskCores = new Map<string, string[]>();
+  for (const t of tasks) if (t.due_date && (showDone || t.status !== 'done')) taskCores.set(t.due_date, [...(taskCores.get(t.due_date) ?? []), coreKey(t.title)]);
+  /** 영업 주요 일정('미팅 · 이름'·'입찰 마감 · 단지명') — 같은 날 같은 건의 일정·업무가 있으면 빼냄 */
+  const spaceDup = (x: { date: string; title: string }) => { const c = coreKey(x.title.replace(/^[^·]{1,24}\s·\s/, '')); return (evByDay.get(x.date) ?? []).some((e) => sameCore(e.core, c)) || (taskCores.get(x.date) ?? []).some((tc) => sameCore(tc, c)); };
   // 다른 사람 표시: 약칭 '민수 · ' 또는(설정) 색 점 — 점 색은 그 사람 색(없으면 사람 고유색)
   const whoOf = (id: string | null | undefined, name?: string | null) => (!id ? { who: '' } : calColors.whoDot ? { who: '', whoDot: calColors.people?.[id] ?? avatarColor(id), whoName: name ?? '' } : { who: `${initials(name ?? '')} · ` });
   const spaceColor = (k: 'sales' | 'marketing') => calColors.cals?.[`space:${k}`] ?? SPACE_META[k].color;
   const fcEvents = useMemo(() => [
-    ...(agenda.data?.items ?? []).filter((x) => !hidden.includes(`space:${x.space}`)).map((x, i) => ({ id: `space|${x.space}|${i}`, title: `${SPACE_META[x.space].short} · ${x.title}`,
+    ...(agenda.data?.items ?? []).filter((x) => !hidden.includes(`space:${x.space}`) && !spaceDup(x)).map((x, i) => ({ id: `space|${x.space}|${i}`, title: `${SPACE_META[x.space].short} · ${x.title}`,
       start: x.time ? `${x.date}T${x.time}:00+09:00` : x.date, ...(x.time ? { end: new Date(Date.parse(`${x.date}T${x.time}:00+09:00`) + 30 * 60000).toISOString() } : {}), allDay: !x.time,
       editable: false, durationEditable: false, backgroundColor: spaceColor(x.space), borderColor: 'transparent', textColor: '#ffffff', classNames: ['space-item'], extendedProps: { type: 'space', item: x } })),
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
@@ -258,7 +274,7 @@ function CalendarPage() {
       extendedProps: { type: 'event', ev: e, ...whoOf(e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? e.ownerId : null, e.ownerName) }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
-    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id) && !dupTasks.has(`${t.due_date}|${normT(t.title)}`) && !(t.due_time && blockedDay.has(`${t.id}|${t.due_date}`))).map((t) => ({
+    ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id) && !foldedTasks.has(t.id) && !(t.due_time && blockedDay.has(`${t.id}|${t.due_date}`))).map((t) => ({
       // V7 4번: 일정과 같은 모양 — 업무는 왼쪽 굵은 선(V14 37번, 동그라미 없음), 다른 사람 업무는 머리글자
       id: `task|${t.id}`, title: t.title,
       // V14 13번: 시간 있는 업무는 마감 직전 1시간 블록(한 칸 높이) — 얇게 찌그러지지 않게

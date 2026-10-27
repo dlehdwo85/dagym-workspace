@@ -855,7 +855,8 @@ function HistLine({ h, userName }: { h: any; userName: (id: string | null) => st
     {h.action === 'file_edited' && <span className="ml-1">{h.changes?.name} v{h.changes?.version}</span>}
     {['assignee_added', 'assignee_removed'].includes(h.action) && <span className="ml-1" data-testid="hist-co">{(h.changes?.users ?? []).map(userName).join(', ')}</span>}
     {h.action === 'file_attached' && h.changes?.from === 'library' && <span className="ml-1 rounded bg-slate-100 px-1 text-[11px] text-ink-2">자료실에서</span>}
-    {['file_attached', 'file_opened_doc', 'file_downloaded', 'link_attached', 'attachment_removed', 'checklist_added', 'checklist_done', 'checklist_undone', 'checklist_removed'].includes(h.action) && <span className="ml-1">{h.changes?.name ?? h.changes?.title ?? h.changes?.text}</span>}
+    {h.files?.length > 1 ? <span className="ml-1" data-testid="hist-files">{h.files.length}개 — {h.files.slice(0, 3).join(', ')}{h.files.length > 3 ? ` 외 ${h.files.length - 3}개` : ''}</span>
+      : ['file_attached', 'file_opened_doc', 'file_downloaded', 'link_attached', 'attachment_removed', 'checklist_added', 'checklist_done', 'checklist_undone', 'checklist_removed'].includes(h.action) && <span className="ml-1">{h.changes?.name ?? h.changes?.title ?? h.changes?.text}</span>}
   </>;
 }
 const TASK_TYPE_LABEL: Record<string, string> = { normal: '일반', milestone: '마일스톤', approval: '결재', inspection: '점검' };

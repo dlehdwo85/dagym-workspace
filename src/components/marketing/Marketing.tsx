@@ -725,7 +725,7 @@ export function Calls() {
   const { data, error, reload } = useApi<{ adKeywords?: string[]; calls: { id: string; phone: string; called_at: string; source: string | null; status: string; memo: string | null; task_id: string | null; brand: string | null; ad_keyword?: string | null }[] }>('/api/marketing/calls');
   const [f, setF] = useState({ phone: '', source: '', memo: '', adKeyword: '' });
   async function add(e: React.FormEvent) { e.preventDefault(); try { await api('/api/marketing/calls', { body: { phone: f.phone, source: f.source || undefined, memo: f.memo || undefined, adKeyword: f.adKeyword.trim() || undefined } }); setF({ phone: '', source: '', memo: '', adKeyword: '' }); reload(); } catch (er: any) { toast.error(er.message); } }
-  async function convert(id: string) { try { const r = await api<{ taskId: string }>(`/api/marketing/calls/${id}/convert`, { body: {} }); toast.ok('영업 업무로 만들었습니다'); reload(); return r; } catch (e: any) { toast.error(e.message); } }
+  async function convert(id: string) { try { const r = await api<{ taskId: string; leadId: string | null }>(`/api/marketing/calls/${id}/convert`, { body: {} }); toast.ok(r.leadId ? '영업 진행(리드)에 올리고 업무를 만들었습니다 — 완료할 때 다음 연락일을 묻습니다' : '영업 업무로 만들었습니다'); reload(); return r; } catch (e: any) { toast.error(e.message); } }
   async function exclude(id: string, status: string) { try { await api(`/api/marketing/calls/${id}`, { method: 'PATCH', body: { status } }); reload(); } catch (e: any) { toast.error(e.message); } }
   return (
     <div className="space-y-3" data-testid="mkt-calls">

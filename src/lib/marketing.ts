@@ -370,7 +370,13 @@ export async function convertCall(u: SessionUser, id: string, i: z.infer<typeof 
     assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, approvalRequired: false, space: 'marketing' } as never);
   if (rule) await sql`update tasks set assigned_by_rule = ${rule.ruleId} where id = ${(r as any).id}`;
   await sql`update mkt_calls set status = 'lead', task_id = ${(r as any).id} where id = ${id}`;
-  return { taskId: (r as any).id };
+  // 대표 10/27 ③: [영업 리드로] = 영업 진행(리드)에도 — 업무를 잇고 완료할 때 다음 연락일·종결을 물음(영업 공간을 켠 회사만, 같은 번호면 그 리드)
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const { krPhone } = await import('./phone');
+  const lead = await (await import('./sales/inbound')).attachInboundLead(sql, { tenant: tenantOf(u), name: `${c.brand ? `${c.brand} ` : ''}전화 문의 ${krPhone(c.phone) ?? c.phone}`, phone: c.phone,
+    ownerId: i.assigneeId ?? rule?.userId ?? u.id, nextDate: today, memo: [`마케팅 전화 문의${c.brand ? ` · ${c.brand}` : ''}`, c.source ? `들어온 곳: ${c.source}` : '', c.ad_keyword ? `광고 키워드: ${c.ad_keyword}` : '', c.memo ?? ''].filter(Boolean).join('\n'),
+    src: { from: 'marketing_call', callId: id, brandId: c.brand_id ?? null }, taskIds: [(r as any).id], reason: '마케팅 전화 문의 → 영업 리드', actorId: u.id }).catch(() => null);
+  return { taskId: (r as any).id, leadId: lead?.leadId ?? null };
 }
 
 // ---------------- V41 4-2 마케팅 AI 비서: 캡션·해시태그 초안(게시는 승인 대기를 거쳐 사람이) ----------------

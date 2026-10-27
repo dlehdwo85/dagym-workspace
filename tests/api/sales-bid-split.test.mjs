@@ -61,7 +61,9 @@ describe('입찰 업무로 넘기기', () => {
     const cv = await ctx.owner.req('POST', '/api/sales/work/convert', { kind: 'bid', id: 'B1', force: true });
     assert.equal(cv.status, 400); assert.match(cv.body.error.message, /입찰 업무로 넘기기/);
     const ag = await ctx.owner.ok('GET', `/api/sales/src?view=agenda&from=${today}&to=${addDays(today, 14)}`);
-    assert.ok(ag.items.some((x) => x.kind === 'bid' && x.title.startsWith('입찰 마감 · 분당 스포츠센터')), '홈 영업 주요 일정에 입찰 마감(정식 진행 기록에서)');
+    // 대표 10/27 ④('입찰 마감이 업무·일정·영업에 여러 번 뜸 — 하나만'): 입찰 업무로 넘긴 공고는 회사 캘린더 '입찰 마감' 일정이 있으므로 영업 주요 일정에는 다시 안 넣음
+    assert.ok(!ag.items.some((x) => x.kind === 'bid' && x.title.startsWith('입찰 마감 · 분당 스포츠센터')), '넘긴 공고는 주요 일정에서 빠짐(일정이 대신)');
+    assert.ok((await sql`select 1 from events where title like '[입찰] 입찰 마감 · %분당 스포츠센터%' and deleted_at is null`).length, '입찰 마감은 회사 캘린더 일정으로 한 번');
   });
   test('정기 점검 — 공고 정정(날짜) → 일정·기한 따라감 · 사람이 바꾼 기한은 그대로', async () => {
     const w0 = await work('B1'); const taskId = w0.data.bid_task_id; const applyEv = w0.data.bid_events.apply;

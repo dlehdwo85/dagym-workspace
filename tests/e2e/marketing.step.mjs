@@ -203,8 +203,10 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.goto(`${BASE}/s/marketing/automation`);
   await owner.getByTestId('auto-usage').first().waitFor();
   assert.equal(await owner.getByTestId('auto-usage').count(), 5);
-  await owner.getByTestId('auto-plan-standard').waitFor();
   await owner.getByTestId('auto-production').waitFor(); // #103 이번 달 남은 제작(요금제 전에는 안내 문구)
+  // 대표 10/27 ⑤: 요금제 고르기는 사용량·요금제 화면 한곳에서 — 자동 제작실에는 '요금제 보기·바꾸기' 링크만
+  assert.equal(await owner.getByTestId('auto-plan-standard').count(), 0, '자동 제작실에 요금제 고르기 없음');
+  assert.equal(await owner.getByTestId('auto-plan-link').getAttribute('href'), '/admin/usage#mkt-plan');
   // 대표 10/24 추가 ①: 우리 회사(본사 조직)는 자동 제작 글을 최상 모델로(193) — 모델·원고 1건 원가 한 줄
   assert.match(await owner.getByTestId('auto-write-model').innerText(), /^글 모델: 최상 모델 \(.+\) · 원고 1건 약 [\d,]+원 — 운영사가 이 회사에 정한 값/);
   await owner.getByTestId('auto-brand-name').fill('E2E 시험 브랜드');

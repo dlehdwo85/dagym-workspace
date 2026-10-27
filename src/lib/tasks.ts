@@ -283,8 +283,8 @@ export async function getTaskDetail(u: SessionUser, id: string) {
           and (c.deleted_at is null or exists (select 1 from comments r where r.parent_id = c.id and r.deleted_at is null)) order by c.created_at`,
     sql`select a.*, u.name as created_by_name from attachments a join users u on u.id = a.created_by
         where a.task_id = ${id} and a.deleted_at is null and a.upload_status = 'ready' order by a.created_at`,
-    sql`select a.id, a.action, a.changes, a.created_at, u.name as actor_name from activities a left join users u on u.id = a.actor_id
-        where a.entity_type = 'task' and a.entity_id = ${id} order by a.created_at desc limit 100`,
+    sql`select a.id, a.action, a.changes, a.created_at, a.actor_id, u.name as actor_name from activities a left join users u on u.id = a.actor_id
+        where a.entity_type = 'task' and a.entity_id = ${id} order by a.created_at desc limit 600`, // 대표 10/27: 첨부 150장도 한 줄로 묶은 뒤 100줄
     sql`select id, start_at, end_at, title from events where task_id = ${id} and deleted_at is null order by start_at`,
     openRound(sql, id),
     t.project_id ? sql`select id, name, type, options, aggregate from project_fields where project_id = ${t.project_id} order by sort, created_at` : Promise.resolve([]),
@@ -314,7 +314,7 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     const [rv] = await sql<{ id: string; name: string }[]>`select u2.id, u2.name from tasks r join users u2 on u2.id = r.assignee_id where r.review_of = ${id} and r.deleted_at is null and r.status <> 'done' limit 1`;
     reviewer = rv ?? (t.requested_by && t.requested_by !== t.assignee_id ? { id: t.requested_by, name: t.requested_by_name ?? '' } : null);
   }
-  return { reviewTarget: reviewTarget ?? null, reviewer, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff, coAssign: reassign || atLeast(u, 'admin') || !t.assignee_id }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, collabTeams, orgHasTeams: !!hasTeams?.x, checklist, subtasks, dependencies: deps, comments, attachments, history, timeBlocks: blocks, approvals, fields, risk, batchMates };
+  return { reviewTarget: reviewTarget ?? null, reviewer, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff, coAssign: reassign || atLeast(u, 'admin') || !t.assignee_id }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, collabTeams, orgHasTeams: !!hasTeams?.x, checklist, subtasks, dependencies: deps, comments, attachments, history: groupFileHistory(history as unknown as { action: string; actor_id: string | null; created_at: Date; changes: any }[]).slice(0, 100), timeBlocks: blocks, approvals, fields, risk, batchMates };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -900,6 +900,21 @@ async function revertLeadClose(tx: Sql, u: SessionUser, lc: { id: string; from: 
   await tx`update sales_leads set status = ${lc.from}, revisit_date = null, updated_at = now() where id = ${lc.id}`;
   await tx`insert into sales_status_log (tenant, lead_id, from_status, to_status, reason, changed_by) values (${l.tenant}, ${lc.id}, ${lc.to}, ${lc.from}, '업무 완료를 되돌려 단계도 되돌림', ${u.id})`;
   return { from: lc.to, to: lc.from };
+}
+
+/** 대표 10/27(사진 150장): 같은 사람이 잇달아(앞뒤 10분 안) 올린 '파일 첨부'는 한 줄로 — files 에 이름들(화면: 'n개 — 이름, 이름 외 n개'). 자료실·공고 자동 첨부는 따로 */
+export function groupFileHistory<T extends { action: string; actor_id?: string | null; created_at: Date | string; changes?: any }>(rows: T[]): (T & { files?: string[] })[] {
+  const out: (T & { files?: string[] })[] = [];
+  for (const h of rows) {
+    const last = out[out.length - 1];
+    if (h.action === 'file_attached' && !h.changes?.from && last && last.action === 'file_attached' && !last.changes?.from && last.actor_id === h.actor_id
+      && Math.abs(new Date(last.created_at).getTime() - new Date(h.created_at).getTime()) <= 10 * 60e3) {
+      last.files = [...(last.files ?? [String(last.changes?.name ?? '')]), String(h.changes?.name ?? '')];
+      continue;
+    }
+    out.push({ ...h });
+  }
+  return out;
 }
 
 /**

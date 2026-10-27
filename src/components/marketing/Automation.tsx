@@ -1,5 +1,5 @@
 'use client';
-import { IN_APP_BILLING_NOTE, useInApp } from '@/components/inApp';
+import { useInApp } from '@/components/inApp';
 import { CompanyAiProfile } from '@/components/CompanyAiProfile';
 import { useState } from 'react';
 import { api, useApi } from '@/components/client';
@@ -37,7 +37,7 @@ const lim = (used: number, max: number | null) => (max === null ? `${used} (한�
 export function Automation() {
   const tabQ = useSearchParams().get('tab'); const tab = tabQ === 'studio' || tabQ === 'cards' ? tabQ : 'rules'; // 대표 10/20 19:00: '제작의뢰실' 탭 · #499-5 '카드뉴스' 탭
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
-  const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 고르기 없음
+  const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 링크 없음(요금제 고르기는 사용량·요금제 화면 — 대표 10/27 ⑤)
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '', mode: 'content' as Mode });
   // 로컬 10/20 보완: 묶음은 n일마다(+주말 건너뛰기) 또는 요일 지정(월·수·금), 종류별 시각 한 번에
   const [bundle, setBundle] = useState({ brandId: '', mode: 'interval' as 'interval' | 'weekdays', intervalDays: 3, skipWeekend: false /* 대표 15:40: 기본 끔 */, weekdays: [1, 3, 5] as number[], startDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), times: { ...BUNDLE_TIMES } });
@@ -111,28 +111,12 @@ export function Automation() {
       {data.production && (
         <section className={cx('rounded-card border p-3 shadow-card', data.production.over ? 'border-red-200 bg-red-50/40' : 'border-violet-200 bg-violet-50/30')} data-testid="auto-production">
           <div className="flex flex-wrap items-center gap-2 text-sm"><b>이번 달 남은 제작</b>
-            {data.production.leftCredits === null ? <span className="text-ink-2">요금제를 고르면 남은 제작 수가 보입니다</span> : <span className="tabular-nums" data-testid="auto-production-left">크레딧 {data.production.leftCredits} / {data.production.monthlyCredits} → 이미지 <b>{data.production.images}장</b> 또는 영상 <b>{data.production.videos}편</b>{data.production.videosLeft !== null && ` · 생성 영상 ${data.production.videosLeft}편`}{data.production.regensLeft !== null && ` · 재생성 ${data.production.regensLeft}회`}</span>}
-            {data.production.planLabel && <span className="ml-auto text-xs text-ink-3">{data.production.planLabel}</span>}</div>
+            {data.production.leftCredits === null ? <span className="text-ink-2">마케팅 제작 요금제를 고르면 남은 제작 수가 보입니다</span> : <span className="tabular-nums" data-testid="auto-production-left">크레딧 {data.production.leftCredits} / {data.production.monthlyCredits} → 이미지 <b>{data.production.images}장</b> 또는 영상 <b>{data.production.videos}편</b>{data.production.videosLeft !== null && ` · 생성 영상 ${data.production.videosLeft}편`}{data.production.regensLeft !== null && ` · 재생성 ${data.production.regensLeft}회`}</span>}
+            {/* 대표 10/27 ⑤: 요금제 고르기·한도는 사용량·요금제 화면 한곳에서 — 여기는 제작만 */}
+            <span className="ml-auto text-xs text-ink-3">{data.production.planLabel ? `${data.production.planLabel} 요금제` : '요금제 없음'}{ed && !inApp && <> · <Link href="/admin/usage#mkt-plan" className="font-semibold text-violet-700 underline" data-testid="auto-plan-link">요금제 보기·바꾸기</Link></>}</span></div>
           {data.production.weekly.length > 0 && <div className="mt-1 flex flex-wrap gap-1.5 text-xs" data-testid="auto-production-weekly">{data.production.weekly.map((w) => <span key={w.kind} className={cx('rounded-full border px-2 py-0.5', w.used >= w.limit ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-line bg-white')}>이번 주 {w.label} {w.used}/{w.limit}</span>)}</div>}
           {data.production.overMessage && <p className="mt-1 text-xs text-red-800" data-testid="auto-production-over">{data.production.overMessage}</p>}
         </section>)}
-      <section className="rounded-card border border-line bg-white p-4 shadow-card">
-        <h2 className="text-sm font-semibold">{inApp ? '한도' : '요금제·한도'}</h2>
-        {inApp ? <p className="mt-1 text-xs text-ink-2" data-testid="in-app-billing-note">{IN_APP_BILLING_NOTE}</p> : <div className="mt-2 grid gap-2 sm:grid-cols-3">{Object.entries(data.plans).map(([k, p]) => (
-          <button key={k} type="button" disabled={!ed} onClick={() => save({ planCode: s.plan_code === k ? null : k })} data-testid={`auto-plan-${k}`}
-            className={cx('rounded-input border p-3 text-left text-xs', s.plan_code === k ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
-            <div className="text-sm font-semibold">{p.label} <span className="font-normal text-ink-3">· 가격 {p.price ? `${Number(p.price).toLocaleString('ko-KR')}원/월` : '결정 전'}</span></div>
-            <div className="mt-1 text-ink-2">주간 {Object.entries(p.weekly).map(([kk, n]) => `${KIND[kk]} ${n}`).join(' · ')}</div>
-            <div className="text-ink-2">월 크레딧 {p.monthlyCredits} · 생성 영상 {p.videoMonthly}편 · 재생성 {p.regenMonthly}회</div>
-          </button>))}</div>}
-        {ed && <div className="mt-2 grid gap-2 sm:grid-cols-4">
-          <Field label="월 크레딧(비우면 요금제)"><input className={inputCls} type="number" defaultValue={s.monthly_credits ?? ''} onBlur={(e) => save({ monthlyCredits: num(e.target.value) })} /></Field>
-          <Field label="주 크레딧(비우면 월÷4.3)"><input className={inputCls} type="number" defaultValue={s.weekly_credits ?? ''} onBlur={(e) => save({ weeklyCredits: num(e.target.value) })} /></Field>
-          <Field label="월 생성 영상"><input className={inputCls} type="number" defaultValue={s.video_monthly ?? ''} onBlur={(e) => save({ videoMonthly: num(e.target.value) })} /></Field>
-          <Field label="월 재생성"><input className={inputCls} type="number" defaultValue={s.regen_monthly ?? ''} onBlur={(e) => save({ regenMonthly: num(e.target.value) })} /></Field>
-        </div>}
-      </section>
-
       {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-recipients">
         <h2 className="text-sm font-semibold">알림·승인 받는 사람</h2>
         <p className="mt-1 text-xs text-ink-2">고르지 않으면 관리자 전원. 시험 모드 브랜드는 여기와 상관없이 실행한 사람에게만 갑니다.</p>
