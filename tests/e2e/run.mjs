@@ -70,6 +70,7 @@ import { partner208 } from './partner208.step.mjs';
 import { mktVideo209 } from './mktVideo209.step.mjs';
 import { library210 } from './library210.step.mjs';
 import { ceo211 } from './ceo211.step.mjs';
+import { research212 } from './research212.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2921,6 +2922,7 @@ await step('208차 #667 설계 파트너: [고객사 추가] 구분 = 설계 파
 await step('209차 #666 영상 선행 조건: 브랜드 키트 주인공(실존 인물은 동의 표시 뒤에만 사진) → 출연진 고정 릴스(장면 첫 사진 → 이미지→영상) · 장면 칩 훅·해결·상황·결과 · 검수 기준 5개 통과 → 휴대폰 폭', () => mktVideo209({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('210차 #619 자료실 자동 분류: 영상 올리면 장면 사진 2장(처음 쪽·가운데)을 AI 정리에 · 확신 70% 미만만 정리 필요 → 안내 줄·모두 선택·[정리 맞음] 묶어서 확인 → 보기에서 나옴 · 휴대폰 폭', () => library210({ owner, sql, BASE, FAKE, SHOTS }));
 await step('211차 대표 10/27: ② 업무 사진 14장(휴대폰) → 한 줄 진행·사진 n장 묶음(+3)·사진첩 고르기 → 지우기·활동 기록 한 줄 · ④ 같은 입찰 일정+업무 = 캘린더 한 줄 · ⑤ 마케팅 요금제는 사용량·요금제 화면', () => ceo211({ owner, ctx, sql, BASE, SHOTS }));
+await step('212차 #612 후속조사: 머리 줄 [이번 주 묶음 지금 만들기] → 업무 하나 · 카드 미확인·조사 예정 날짜(담당) · 업무 완료 창에 곳마다 값 → 카드 현 위탁사·계약만료 · 비운 곳 확인 못함', () => research212({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

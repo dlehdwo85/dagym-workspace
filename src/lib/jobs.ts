@@ -202,6 +202,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('salesCollectorAlerts', async () => (await import('./sales/collectors')).collectorAlertTick()); // #522 하루 한 번 누락 점검(24시간 넘게 성공 없음·2회 연속 실패 → 관리자 알림)
   await step('supportDeadlines', async () => (await import('./sales/support')).supportTick()); // #450 지원사업: 관심·신청 준비 공고 마감 7일·3일 전 담당자 알림(KST 08~20시)
   await step('supportWeekly', async () => (await import('./sales/support')).supportWeeklyTick()); // #568 지원사업 주간 묶음(월요일 KST 08시 뒤 첫 tick): 1차 ✅ 공고 자동 AI 판단 → 맞는 공고 묶어 관리자·담당 알림
+  await step('salesResearch', async () => (await import('./sales/research')).researchWeeklyTick()); // 212차 #612 후속조사 주간 묶음(월요일 KST 08시 뒤 첫 tick): 준공·입주 시설의 미확인 값(현 위탁사·계약만료일·관리사무소 번호) n곳 → 업무 하나
   await step('salesDigest', async () => (await import('./sales/digest')).salesDigestTick()); // 당일 입찰 다이제스트(회사 설정 시각, 메일·알림·푸시)
   await step('bidTasks', async () => (await import('./sales/bidTasks')).bidTasksTick()); // 결정 15-35 입찰 업무: 공고 취소 → 업무·일정 취소 · 정정 → 기한·일정 · 개찰 결과 → 낙찰이면 계약
   await step('contractCare', async () => (await import('./sales/bidTasks')).contractCareTick()); // 결정 15-35 재계약 사후관리: 계약 종료 120일 전 '재계약 준비' 업무 1건

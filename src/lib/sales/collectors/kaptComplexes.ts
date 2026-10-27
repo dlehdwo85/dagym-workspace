@@ -4,6 +4,8 @@
 // · 새 단지는 기본정보로 사용승인일·세대수·관리방식·관리사무소 전화를, 상세정보로 부대·복리시설을 확인 → 사용승인 18개월 안(또는 1년 안 예정)이면
 //   '준공·입주 시설'(operating_facility_prospects)에 한 줄 — 단지 코드로 묶어 K-apt 사업자선정 파생 줄과 같은 단지면 한 줄.
 // · 부동산원 CSV(reb_recent_complexes, 연 1회)는 그대로. 기준 목록에 이미 있던 최근 준공 단지는 부동산원 파일·청약홈 입주 시기 목록이 맡는다.
+// · 212차 #612 ①(대표 결정 10/25 '매주 진행'): 빈 칸 다시 확인 — K-apt 단지 코드가 있는 준공·입주 시설 줄에 관리사무소 전화·부대시설·세대수가
+//   비었으면 단지마다 주 1회 기본·상세정보를 다시 읽어 빈 칸만 채운다(있는 값은 안 바꿈). 다시 읽은 때는 sales_src_rows(kapt_recheck).
 import { db } from '../../db';
 import { callDataGo, type DataGoStats } from './g2b';
 import { kaptKey, portalErr } from './kapt';
@@ -17,8 +19,8 @@ export const KAPT_BASIS_SERVICE = '15058453';
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
 const LIST_API = () => (T() ? `${T()}/aptlist` : process.env.KAPT_LIST_API_BASE?.trim() || 'https://apis.data.go.kr/1613000/AptListService4');
 const BASIS_API = () => (T() ? `${T()}/aptbasis` : process.env.KAPT_BASIS_API_BASE?.trim() || 'https://apis.data.go.kr/1613000/AptBasisInfoServiceV5');
-const CODES = 'kapt_complex_codes', SCAN = 'kapt_complex_scan';
-const PER_PAGE = 1000, UPCOMING_DAYS = 365, CHECKS_PER_RUN = 40, MAX_TRIES = 3;
+const CODES = 'kapt_complex_codes', SCAN = 'kapt_complex_scan', RECHECK = 'kapt_recheck';
+const PER_PAGE = 1000, UPCOMING_DAYS = 365, CHECKS_PER_RUN = 40, MAX_TRIES = 3, RECHECKS_PER_RUN = 20;
 const str = (v: unknown) => { if (v == null) return null; const s = String(v).trim(); return s ? s : null; };
 const int = (v: unknown) => { const t = String(v ?? '').replace(/,/g, '').trim(); if (!/^\d+(\.\d+)?$/.test(t)) return null; return Math.round(Number(t)); };
 type ScanState = { page: number; per: number; total: number; scans: number; baseline_done: boolean; last_full_scan_day: string | null };
@@ -115,6 +117,46 @@ export const kaptNewComplexes: Collector = {
     // 3) 준공·입주 시설 표에 쓰기(단지 코드로 묶음)
     const w = payloads.length ? await upsertProspects(payloads) : { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0, errorLog: undefined as string | undefined };
     if (w.errorLog) errs.push(w.errorLog);
+    // 4) 212차 #612 ①: 빈 칸 다시 확인(단지마다 주 1회, 한 번에 20곳·시간 안에서 — 최근 준공부터). 기본정보 활용신청이 막혔으면 안 함
+    let rechecked = 0, refilled = 0;
+    if (basis.ok && left() > 8000) {
+      const weekAgo = new Date(ctx.now() - 7 * 864e5).toISOString();
+      // 단지 코드: 줄의 facility_code, 없으면 같은 단지 키(dedupe_key '아파트|code:A…') — 수집 줄은 코드를 키에만 남김
+      const gaps = await sql<{ src_id: string; row: any; code: string }[]>`with g as (select p.src_id, p.row,
+          coalesce(nullif(p.row->>'facility_code', ''), substring(p.row->>'dedupe_key' from 'code:(A[0-9]{6,10})$')) as code
+        from sales_src_rows p where p.scope = 'global' and p.tbl = 'operating_facility_prospects' and not p.gone
+          and (coalesce(p.row->>'office_phone', '') = '' or coalesce(p.row->>'amenities', '') = '' or p.row->>'household_count' is null))
+        select g.src_id, g.row, g.code from g where g.code ~ '^A[0-9]{6,10}$'
+          and not exists (select 1 from sales_src_rows c where c.scope = 'global' and c.tbl = ${RECHECK} and c.src_id = g.code and c.row->>'at' > ${weekAgo})
+        order by coalesce(g.row->>'completion_date', '') desc, g.src_id limit ${RECHECKS_PER_RUN}`;
+      const seen = new Set<string>();
+      for (const g of gaps) {
+        const code = g.code; if (seen.has(code)) continue; seen.add(code);
+        if (left() < 4000) break;
+        let note: Record<string, unknown> = { at };
+        try {
+          const b = await call('getAphusBassInfoV5', code);
+          const d = b ? await call('getAphusDtlInfoV5', code).catch(() => null) : null;
+          const fill: Record<string, unknown> = {};
+          const phone = b ? str(b.kaptTel) : null, households = b ? int(b.kaptdaCnt) : null, amen = d ? str(d.welfareFacility) : null;
+          if (phone && !str(g.row.office_phone)) fill.office_phone = phone;
+          if (amen && !str(g.row.amenities)) fill.amenities = amen;
+          if (households != null && g.row.household_count == null) fill.household_count = households;
+          if (Object.keys(fill).length) {
+            await sql`update sales_src_rows set row = row || ${sql.json({ ...fill, updated_at: at } as never)}::jsonb, synced_at = now() where scope = 'global' and tbl = 'operating_facility_prospects' and src_id = ${g.src_id}`;
+            refilled++;
+          }
+          note = { at, filled: Object.keys(fill) };
+        } catch (e) {
+          const raw = mask(e instanceof Error ? e.message : String(e)); const msg = portalErr(raw, KAPT_BASIS_SERVICE);
+          if (/활용신청 필요/.test(msg) && !/NODATA|NO_DATA|데이터\s*없음/i.test(raw)) break;
+          note = { at, error: msg.slice(0, 120) };
+        }
+        await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', ${RECHECK}, ${code}, ${sql.json(note as never)}, 'workin')
+          on conflict (scope, tbl, src_id) do update set row = excluded.row, synced_at = now()`;
+        rechecked++;
+      }
+    }
     const [{ n: pending }] = await sql<{ n: number }[]>`select count(*)::int as n from sales_src_rows where scope = 'global' and tbl = ${CODES} and row->>'fresh' = 'true' and row->>'checked_at' is null`;
     const n = (v: number) => v.toLocaleString('ko-KR');
     const listPart = !scanToday ? '단지 목록 오늘 한 바퀴 읽음'
@@ -124,7 +166,8 @@ export const kaptNewComplexes: Collector = {
     return {
       inserted: w.inserted, updated: w.updated, unchanged: w.unchanged, errors: errs.length + w.invalid, errorLog: errs.length ? errs.join('\n') : undefined, providerMode: 'api',
       sources: { apt_list: list, apt_basis: basis },
-      summary: `${listPart} · 새로 등록된 단지 ${fresh}곳 · 기본정보 확인 ${checked}곳(남은 ${pending}) → 사용승인 18개월 안 ${payloads.length}곳(신규 ${w.inserted} · 갱신 ${w.updated})`,
+      summary: `${listPart} · 새로 등록된 단지 ${fresh}곳 · 기본정보 확인 ${checked}곳(남은 ${pending}) → 사용승인 18개월 안 ${payloads.length}곳(신규 ${w.inserted} · 갱신 ${w.updated})`
+        + (rechecked ? ` · 빈 칸 다시 확인 ${rechecked}곳(채움 ${refilled})` : ''),
     };
   },
 };

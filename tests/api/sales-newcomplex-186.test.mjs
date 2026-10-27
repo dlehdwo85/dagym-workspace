@@ -109,6 +109,29 @@ test('B1: 처음 한 바퀴 = 기준 목록(새 단지 0) · 같은 날 다시 �
   assert.ok(hub.items.some((x) => x.name === '수서 예정단지'));
 });
 
+test('B3(212차 #612 ①): 빈 칸 다시 확인 — K-apt 단지 코드(같은 단지 키)가 있는 준공·입주 시설 줄의 빈 전화·부대시설·세대수만 채움 · 단지마다 7일에 한 번', async () => {
+  BASIS.A2000009 = { kaptCode: 'A2000009', kaptName: '빈칸 단지', kaptdaCnt: '777', kaptTel: '02-999-0009', kaptUsedate: ymd8(plusDays(-30)) };
+  DETAIL.A2000009 = { kaptCode: 'A2000009', welfareFacility: '경로당, 피트니스' };
+  const base = { facility_type: '아파트', operating_status: '입주중', source_slug: 'kapt_new_complexes', source_name: 'K-apt', source_url: 'https://x', completion_date: plusDays(-30) };
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'operating_facility_prospects', 'F-GAP',
+    ${sql.json({ id: 'F-GAP', ...base, dedupe_key: '아파트|code:A2000009', name: '빈칸 단지', office_phone: null, current_operator: '있는 값' })}, 'workin')`;
+  const basisHits = () => hits.filter((h) => h.path.startsWith('/aptbasis/')).length;
+  const h0 = basisHits();
+  const r = await run();
+  assert.match(r.summary, /빈 칸 다시 확인 1곳\(채움 1\)/, r.summary);
+  assert.equal(basisHits() - h0, 2, '기본·상세 한 번씩');
+  const row = async () => (await sql`select row from sales_src_rows where src_id = 'F-GAP'`)[0].row;
+  const g = await row();
+  assert.deepEqual([g.office_phone, g.household_count, g.amenities, g.current_operator, g.name], ['02-999-0009', 777, '경로당, 피트니스', '있는 값', '빈칸 단지'], '빈 칸만 채움');
+  await sql`update sales_src_rows set row = row - 'amenities' where src_id = 'F-GAP'`;
+  const r2 = await run();
+  assert.doesNotMatch(r2.summary, /빈 칸 다시 확인/, '7일 안에는 다시 안 읽음');
+  await sql`update sales_src_rows set row = jsonb_set(row, '{at}', to_jsonb(${new Date(Date.now() - 8 * 864e5).toISOString()}::text)) where tbl = 'kapt_recheck' and src_id = 'A2000009'`;
+  const r3 = await run();
+  assert.match(r3.summary, /빈 칸 다시 확인 1곳\(채움 1\)/, r3.summary);
+  assert.equal((await row()).amenities, '경로당, 피트니스');
+});
+
 test('B2: 청약홈 처음 채우기 4년(1,461일) — 400일 넘으면 종류마다 60쪽까지 · 1,500일 넘으면 400', async () => {
   const before4 = hits.length;
   const r = await ctx.owner.ok('POST', '/api/platform/sales-sources', { code: '15098547', run: true, days: 1461 });

@@ -307,7 +307,11 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const bidItems = rel.filter((r) => endOf(r) && !skips.hidden(r)).map((r) => { const n = notice(r); const end = endOf(r)!;
       return { id: n.id, kind: 'bid', name: `${n.complex ? n.complex + ' ' : ''}${n.title}`, agency: n.agency, region: n.region, winner: n.winner, amount: n.awardAmount ?? n.amount, end, ...timing(end), work: workOf.get(String(n.id)) ?? null, url: n.url, href: '/s/sales/hub?tab=bids&bt=all&bq=' + encodeURIComponent(String(n.title)) }; });
     // #605(대표 10/25 ①): 시설 보관함(대상 아님 = 이미 위탁 중)에서 적은 '현 위탁사·계약만료일'(회사 진행 기록) → 같은 역산으로 이 탭에
-    const FP = (await prog('operating_facility_prospects__progress', 20000)).filter((p) => day(pick(p, 'contract_end_date')));
+    const FP0 = await prog('operating_facility_prospects__progress', 20000); const FP = FP0.filter((p) => day(pick(p, 'contract_end_date')));
+    // 212차 #612: 후속조사로 적은 계약만료일(회사 진행 기록에 없는 시설만 — 전환 전에는 진행 기록에 못 씀)
+    const fpIds = new Set(FP.map((p) => String(p.id ?? p.__id)));
+    for (const [id, x] of await (await import('./research')).researchState(sql, t)) if (x.result.contractEnd && !fpIds.has(id)) {
+      const p0 = FP0.find((p) => String(p.id ?? p.__id) === id); FP.push({ ...(p0 ?? {}), id, contract_end_date: x.result.contractEnd, current_operator: pick(p0, 'current_operator') ?? x.result.operator ?? null }); }
     const facRows = FP.length ? new Map((await rows('global', 'operating_facility_prospects', 20000)).map((r) => [String(r.id ?? r.__id), r])) : new Map<string, any>();
     const facItems = FP.flatMap((p) => { const id = String(p.id ?? p.__id); const r = facRows.get(id); if (!r) return []; const end = day(pick(p, 'contract_end_date'))!; const name = String(pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)'); const st = pick(p, 'contact_status', 'status');
       return [{ id: `facility:${id}`, kind: 'facility', name, agency: null, region: pick(r, 'region'), winner: pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator', 'management_company'), amount: null, end, ...timing(end), work: st, url: null,
@@ -536,7 +540,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     }
     if (tab === 'facilities') {
       const P = new Map((await prog('operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
-      const list = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
+      const RS = await (await import('./research')).researchState(sql, t); // 212차 #612 후속조사(조사 예정·조사함·확인 못함 + 적은 값)
+      const list = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id)); const rs = RS.get(String(r.__id)) ?? null;
         return { id: r.__id, name: pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)', address: pick(r, 'address', 'road_address'), score: Number(pick(r, 'score', 'priority_score') ?? 0) || null,
           lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'completion_date', 'use_approval_date', 'completed_at', 'move_in_date')),
           contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null), leadId: p?.lead_id ?? null, handoff: !!(p?.lead_id && pick(p, 'handoff_by')), archive: archiveOf(p),
@@ -544,7 +549,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           // S1-3: 원본 칸 household_count·facility_scale(+facility_scale_unit)·completion_date, 다음 조치는 회사 진행(__progress.next_action) → 수집기 제안(etl_suggested_next_action) 순, 최근 기록 notes
           verdict: pick(r, 'verdict', 'judgment', 'stage_label', 'opportunity_label'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), scale: scaleOf(r),
           // #605 보관함에서 적은 현 위탁사·계약만료일(회사 진행 기록)이 원본 칸보다 먼저 — 계약만료·재입찰 탭으로 이어짐
-          operator: pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator', 'management_company'), contractEnd: day(pick(p, 'contract_end_date')), phone: pick(r, 'office_phone', 'management_phone', 'phone'), amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
+          // 212차 #612: 후속조사로 적은 값은 회사 진행 기록·원천 칸이 없을 때(현 위탁사는 관리 회사 칸보다 먼저 — 전화로 확인한 값)
+          operator: pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator') ?? rs?.result.operator ?? pick(r, 'management_company'), contractEnd: day(pick(p, 'contract_end_date')) ?? rs?.result.contractEnd ?? null,
+          phone: pick(r, 'office_phone', 'management_phone', 'phone') ?? rs?.result.phone ?? null, amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
+          research: rs ? { status: rs.status, due: rs.due, assignee: rs.assignee, taskId: rs.taskId, doneAt: rs.doneAt, missing: rs.missing, note: rs.result.note ?? null } : null,
           firstSeen: firstSeen(r), moveIn: day(pick(r, 'move_in_date', 'move_in_start')), lastNote: p?.notes ?? p?.last_note ?? p?.memo ?? null,
           nextAction: p?.next_action ?? pick(r, 'etl_suggested_next_action', 'next_action', 'recommended_action'), nextActionFrom: p?.next_action ? '진행 기록' : pick(r, 'etl_suggested_next_action') ? '수집기 제안' : null,
           elapsedDays: daysSince(day(pick(r, 'move_in_date', 'move_in_start')) ?? day(pick(r, 'completion_date', 'use_approval_date', 'completed_at'))), raw: r }; });

@@ -33,6 +33,7 @@ import { MeetingDialog } from '@/components/MeetingDialog';
 import { requestTour } from '@/components/Tour';
 import { Assignees, PartBox, coOf, multiOf, partMsg, partsOf } from '@/components/CoAssignees';
 import { followUpMsg, useLeadFollowUp } from '@/components/sales/LeadFollowUp';
+import { useResearchAsk } from '@/components/sales/ResearchAsk';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
@@ -55,6 +56,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [mailDraft, setMailDraft] = useState<AssistDraft | null>(null); // V28-1 업무 AI 비서 초안 → 시안 창
   const { data, error, loading, reload, setData } = useApi<any>(`/api/tasks/${id}`);
   const fu = useLeadFollowUp(); // 197차(#460): 리드 업무 완료 때 다음 연락일·종결을 묻는 창
+  const rs = useResearchAsk(); // 212차 #612: 후속조사 업무 완료 때 곳마다 조사한 값을 적는 창
   useEffect(() => { requestTour('task'); }, []); // #77 업무 상세를 처음 열 때 안내(본 사람은 안 뜸)
   const [cprog, setCprog] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const projects = useApi<{ projects: any[] }>('/api/projects');
@@ -180,6 +182,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       if (c === null) return;
       if (c !== 'skip') body = { ...body, leadFollowUp: c };
     }
+    if (body.status === 'done' && t.status !== 'done' && t.sales_ref?.kind === 'research' && (await rs.ask({ id, title: t.title, sales_ref: t.sales_ref })) === null) return;
     try {
       const r = await api(`/api/tasks/${id}`, { method: 'PATCH', body: { ...body, version: t.version } });
       // 대표 10/24: 담당자가 여럿이면 [완료] = 내 몫 완료 — 남은 사람 안내(마지막 사람이면 원래 안내)
@@ -376,7 +379,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const commentForm = mobile && typeof document !== 'undefined' ? createPortal(commentFormEl, document.body) : commentFormEl;
   return (
     <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(4.5rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
-      {fu.node}
+      {fu.node}{rs.node}
       {/* 상단 도구 막대 */}
       <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
         {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-green-50 px-2.5 text-sm font-semibold text-green-700"><CircleCheck className="size-4" />완료됨</span>}

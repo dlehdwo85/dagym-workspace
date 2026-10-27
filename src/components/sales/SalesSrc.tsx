@@ -1225,6 +1225,7 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
           <button key={k} type="button" onClick={() => setSt(st === k ? '' : k)} aria-pressed={st === k} className={chipCls(st === k)} data-testid={`hub-status-${k}`}>{l} {data.statusCounts?.[k] ?? 0}</button>))}
       </div>}
       {/* 200차 #699: 원본 기준일 — 준공·입주 단지가 언제 자료인지(K-apt 자료실 주 1회 · 한국부동산원 연 1회) */}
+      {tab === 'facilities' && !box && <ResearchBar onDone={reload} />}
       {tab === 'facilities' && !!data?.sourceAsOf?.length && <p className="text-[11px] text-ink-3" data-testid="hub-source-asof">원본 기준일 · {(data.sourceAsOf as { label: string; day: string; note: string | null }[]).map((x) => `${x.label} ${kd(x.day)}${x.note ? ` ${x.note}` : ''}`).join(' · ')}</p>}
       {/* #609(대표 10/25 ⑤): 모든 탭 1열(한 줄 한 건) */}
       {!data ? <Skeleton rows={6} /> : <ul className="space-y-2">{data.items.map((r: any) => (
@@ -1243,7 +1244,7 @@ function HubDetail({ tab, r, admin, canWrite, onChange, onClose }: { tab: string
     ? [[T.unitName, r.name], ['상태', r.status], ['유형', r.kind], ['우선순위', r.priority], ['지역', r.region], ['주소', r.address], ...(r.dates ?? []).map(([k, v]: [string, unknown]) => [k, k === '세대수' ? (D(v) ? `${D(v)}세대` : UNK) : (D(v) ? kd(D(v)) : UNK)] as [string, React.ReactNode]), ['DB 등록', r.firstSeen && kd(r.firstSeen)], ['비고', r.estimated && '날짜는 시점 추정치'],
         ['문서', (r.url || r.attachments?.length) && <ContactRow key="d" links={[[r.url, '공식 승인 원문'], ...((r.attachments ?? []) as any[]).map((a, i) => [attHref(a, i, { title: r.name, origin: r.url }), attName(a, i)] as [string, string])]} />]]
     : tab === 'facilities'
-      ? [[T.facilityName, r.name], ['판정', r.verdict], ['연락 상태', r.contact], ['유형', r.lane], ['지역', r.region], ['세대수', r.households && `${r.households}세대`], ['규모', r.scale], [T.operator, r.operator], ['주소', r.address], [T.office, r.phone ? <ContactRow phone={r.phone} /> : UNK],
+      ? [[T.facilityName, r.name], ['판정', r.verdict], ['연락 상태', r.contact], ['유형', r.lane], ['지역', r.region], ['세대수', r.households && `${r.households}세대`], ['규모', r.scale], [T.operator, r.operator], ['계약만료일', r.contractEnd && kd(r.contractEnd)], ['후속조사', r.research && <ResearchChip key="rs" r={r} />], ['주소', r.address], [T.office, r.phone ? <ContactRow phone={r.phone} /> : UNK],
         ['부대시설', r.amenities && String(r.amenities)], ['준공(사용승인)', r.date && kd(r.date)], ['입주', r.moveIn && kd(r.moveIn)], ['경과', r.elapsedDays !== null && r.elapsedDays !== undefined && `입주·준공 뒤 ${r.elapsedDays}일`], ['DB 등록', r.firstSeen && kd(r.firstSeen)], ['다음 연락', r.next && kd(r.next)], ['최근 기록', r.lastNote], ['다음 조치', r.nextAction && `${r.nextAction}${r.nextActionFrom ? ` (${r.nextActionFrom})` : ''}`]]
       : [['회사', r.name], ['구분', r.division], ['순위', r.rank && `${r.rank}위`], ['상태', r.status], ['모집 공지', openLabel(r.open)], ['모집 시기', r.period], ['등록 요건', r.requirement], ['공동인증서', r.cert], ['비고', r.note], ['공지', r.notice],
         ['링크', <ContactRow key="l" links={[[r.url, '공지 원문'], [r.applyUrl, '등록 신청'], [r.portalUrl, '협력사 포털'], [r.homepage, '홈페이지']]} />], ['메모', r.memo], ['다음', r.next && kd(r.next)], ['DB 등록', r.firstSeen && kd(r.firstSeen)]];
@@ -1380,7 +1381,46 @@ function BidSkip({ n, onChange, canWrite }: { n: any; onChange?: () => void; can
     </div>
   ) : <div className="mt-1.5"><button type="button" className={cx(linkCls, 'text-ink-2')} onClick={() => setAsk(true)} data-testid="bid-skip-open">취소 확인 · 대상 아님으로</button></div>;
 }
-const UNK = <span className="text-ink-3">미확인 · 후속조사</span>;
+// 212차 #612: 원천에서 다시 읽어 채우는 칸은 '미확인'만 — 전화로 조사하는 시설 값은 카드의 '미확인 · 조사 예정 날짜(담당)'(ResearchChip)
+const UNK = <span className="text-ink-3" title="원천에서 값이 들어오면 자동으로 채워집니다">미확인</span>;
+const seoulYmd = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso));
+const mdd = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+/** 212차 #612 ③(대표 결정 10/25): 빈 값(현 위탁사·계약만료일·관리사무소 번호)이 남은 시설 — '미확인 · 조사 예정 10/30(담당 ○○)'(업무로), 조사한 뒤 '확인 못함' */
+function ResearchChip({ r }: { r: any }) {
+  const T = useSalesTerms(); const x = r.research;
+  const miss = [!r.operator && T.operator, !r.contractEnd && '계약만료일', !r.phone && `${T.office} 번호`].filter(Boolean) as string[];
+  if (!x || (!miss.length && x.status !== 'open')) return null;
+  const tip = miss.length ? `미확인: ${miss.join('·')}` : undefined;
+  if (x.status === 'open') {
+    const body = `미확인 · 조사 예정 ${x.due ? mdd(x.due) : ''}${x.assignee ? `(담당 ${x.assignee})` : ''}`;
+    return x.taskId ? <Link href={`/tasks/${x.taskId}`} title={tip} className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:underline" data-testid="hub-research-chip">{body}</Link>
+      : <span title={tip} className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900" data-testid="hub-research-chip">{body}</span>;
+  }
+  const at = x.doneAt ? `${mdd(seoulYmd(x.doneAt))} ` : '';
+  return <span title={[tip, x.note && `메모: ${x.note}`].filter(Boolean).join(' · ') || undefined} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2" data-testid="hub-research-chip">{x.status === 'none' ? `미확인 · ${at}조사함(확인 못함)` : `일부 미확인 · ${at}조사함`}</span>;
+}
+/** 212차 #612: 허브 '준공·입주 시설' 머리 줄 — 이번 주 후속조사 묶음(담당·마감·조사한 수·업무), 관리자는 이번 주 묶음이 없을 때 [지금 만들기] */
+function ResearchBar({ onDone }: { onDone?: () => void }) {
+  const { data, reload } = useApi<any>('/api/sales/research');
+  const T = useSalesTerms(); const [busy, setBusy] = useState(false);
+  if (!data) return null;
+  const l = data.latest;
+  async function run() {
+    setBusy(true);
+    try { const r = await api<any>('/api/sales/research', { body: {} }); toast.ok(r.items ? `이번 주 후속조사 ${r.items}곳을 업무로 묶었습니다` : '이번 주 조사할 곳이 없습니다 — 빈 값이 있는 곳은 이미 조사했거나 조사 중입니다'); reload(); onDone?.(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-input bg-amber-50/70 px-2.5 py-1.5 text-xs text-ink-2" data-testid="hub-research">
+      <b className="text-amber-900">후속조사</b>
+      {l?.thisWeek && l.items ? <>
+        <span data-testid="hub-research-week">이번 주 {l.items}곳{l.assignee ? ` · 담당 ${l.assignee}` : ''}{l.due ? ` · ${mdd(l.due)}까지` : ''}{l.done || l.none ? ` · 조사함 ${l.done + l.none}곳${l.none ? `(확인 못함 ${l.none})` : ''}` : ''}{l.taskDone ? ' · 업무 완료' : ''}</span>
+        {l.taskId && <Link href={`/tasks/${l.taskId}`} className="font-medium text-amber-900 underline" data-testid="hub-research-task">업무 열기</Link>}
+      </> : <span data-testid="hub-research-week">{l?.thisWeek ? '이번 주 조사할 곳 없음 · ' : ''}{T.operator}·계약만료일·{T.office} 번호가 빈 큰 단지부터 {data.max}곳을 {data.auto ? '매주 월요일 아침' : '관리자가 만들 때'} 업무 하나로 묶습니다</span>}
+      {data.canRun && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={run} data-testid="hub-research-run">이번 주 묶음 지금 만들기</Button>}
+    </div>
+  );
+}
 /** S1-3: 협력사 모집 공지 공개 여부 — 원본 recruit_visibility(글자) 그대로, 예전 참/거짓 값은 공개·비공개 */
 const openLabel = (v: unknown) => (v === null || v === undefined || v === '' ? null : v === true || v === 'true' ? '공개' : v === false || v === 'false' ? '비공개' : String(v));
 const keyDates = (dates?: [string, unknown][]) => { const has = (dates ?? []).filter(([, v]) => D(v));
@@ -1405,10 +1445,10 @@ function HubCard({ tab, r, onRaw, onChange, canWrite }: { tab: string; r: any; o
         <div className="mt-auto flex flex-wrap items-end gap-1.5 pt-1.5">{(r.url || r.attachments?.length) ? <ContactRow links={[[r.url, '공식 승인 원문'], ...((r.attachments ?? []) as any[]).map((a: any, i: number) => [attHref(a, i, { title: r.name, origin: r.url }), attName(a, i)] as [string, string])]} /> : null}{handoff}</div>
       </>) : tab === 'facilities' ? (<>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" onClick={onRaw} className="text-left font-semibold hover:underline">{r.name}</button>{r.verdict && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800">{r.verdict}</span>}{r.contact && chip(r.contact)}</div>
-        <p className="text-xs text-ink-2">{[r.lane, r.region, r.households && `${r.households}세대`, r.scale, r.operator && `${T.operator} ${r.operator}`].filter(Boolean).join(' · ')}</p>
+        <p className="text-xs text-ink-2">{[r.lane, r.region, r.households && `${r.households}세대`, r.scale, r.operator && `${T.operator} ${r.operator}`, r.contractEnd && `계약만료 ${kd(r.contractEnd)}`].filter(Boolean).join(' · ')}</p>
         {r.address && <p className="hidden text-xs text-ink-3 md:block">{r.address}</p>}
         {/* 대표 검수 10/20 ②: 관리사무소 전화 → 전화·문자 줄, 앞에 '·' 가 붙던 준공·입주 줄 정리, 날짜 한국어 */}
-        <div className="mt-1.5 flex flex-wrap items-end gap-1.5">{r.phone ? <ContactRow phone={r.phone} /> : <p className="hidden text-xs text-ink-3 md:block">대표 번호 미확인</p>}{handoff}</div>
+        <div className="mt-1.5 flex flex-wrap items-end gap-1.5">{r.phone ? <ContactRow phone={r.phone} /> : <p className="hidden text-xs text-ink-3 md:block">대표 번호 미확인</p>}<ResearchChip r={r} />{handoff}</div>
         {r.amenities && <p className="hidden text-xs text-ink-3 md:block">부대시설: {String(r.amenities)}</p>}
         <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-3"><span>{[r.firstSeen && `DB 등록 ${kd(r.firstSeen)}`, r.date && `준공(사용승인) ${kd(r.date)}`, r.moveIn && `입주 ${kd(r.moveIn)}`, r.elapsedDays !== null && r.elapsedDays !== undefined && `${r.elapsedDays}일 경과`].filter(Boolean).join(' · ')}</span>{r.firstSeen === today0 && <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-semibold text-white">오늘 등록</span>}</p>
         {r.next && <p className="text-xs">다음 연락 {kd(r.next)}</p>}{r.lastNote && <p className="hidden text-xs text-ink-2 md:block">최근 기록: {r.lastNote}</p>}{r.nextAction && <p className="hidden text-xs text-ink-2 md:block">다음 조치: {r.nextAction}{r.nextActionFrom && ` (${r.nextActionFrom})`}</p>}
