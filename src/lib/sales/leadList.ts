@@ -61,7 +61,7 @@ export async function leadExtras(sql: Sql, tenant: string, terms: Terms, ids?: s
 }
 
 // ── 사용자별 목록 설정(저장된 보기·열) — user_settings.list_views.leads ──────────────
-const viewQuery = z.object({ lv: z.string().max(40).optional(), focus: z.string().max(20).optional(), chips: z.string().max(200).optional(), status: z.string().max(40).optional(), sort: z.string().max(20).optional(), rev: z.string().max(2).optional(),
+const viewQuery = z.object({ lv: z.string().max(40).optional(), focus: z.string().max(20).optional(), chips: z.string().max(200).optional(), status: z.string().max(40).optional(), sort: z.string().max(20).optional(), rev: z.string().max(2).optional(), sort2: z.string().max(20).optional(), rev2: z.string().max(2).optional(),
   pri: z.string().max(20).optional(), owner: z.string().max(40).optional(), region: z.string().max(60).optional(), src: z.string().max(20).optional(), q: z.string().max(100).optional() });
 export const leadViewsInput = z.object({
   views: z.array(z.object({ id: z.string().regex(/^[a-z0-9]{4,16}$/), name: z.string().trim().min(1, '보기 이름을 적어 주세요').max(30), q: viewQuery })).max(12, '저장된 보기는 12개까지입니다').optional(),

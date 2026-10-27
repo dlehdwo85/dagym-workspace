@@ -62,6 +62,7 @@ import { kaptWeekly200 } from './kaptWeekly200.step.mjs';
 import { easyPay200 } from './easyPay200.step.mjs';
 import { salesBrief202 } from './salesBrief202.step.mjs';
 import { leadMove203 } from './leadMove203.step.mjs';
+import { leadBulk204 } from './leadBulk204.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2905,6 +2906,7 @@ await step('200차 #699 준공·입주 시설 원본 기준일(대표 10/26): K-
 await step('200차 #706 간편결제 바로 열기(대표 10/26): 켠 간편결제만 버튼 · [필수] 결제 대행 약관 동의 없으면 안 열림 · 결제창 요청 = 카드 + 간편결제 + 동의 · 다른 수단 고르면 풀림 · 결제 내역 간편결제 이름 · 1366·390', () => easyPay200({ owner, BASE, SHOTS }));
 await step('202차 #461 ⑤ 본사 주간 보고 영업 진행(놓침 방지): 연락일 지남·다음 행동 없음·오래 쉼(14일)·담당 없음 + 오래 쉼 목록(단계·담당·마지막 접촉·리드 링크) · 1366·390', () => salesBrief202({ owner, ctx, sql, BASE, SHOTS }));
 await step('203차 #461 ⑥ 칸반 끌어 놓기·휴대폰 카드 밀기: 끌면 묻는 창(다음 연락일 / 보류 사유·다시 볼 날) · 취소 = 그대로 · select 도 같은 창 · 390 → 연락함 기록 · ← 다음 연락일 · 종결은 밀기 없음', () => leadMove203({ owner, ctx, sql, BASE, SHOTS }));
+await step('204차 #461 ⑦ 표 일괄 작업: 체크 → 아래 막대 · 다음 연락일 일괄 · 단계 일괄(보류 사유 필수) · 2차 정렬(Shift+클릭) · 표의 단계 바꾸기 = 묻는 창 · 종결 보기엔 체크 칸 없음', () => leadBulk204({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

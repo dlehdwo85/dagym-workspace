@@ -139,6 +139,23 @@ export const leadPatch = z.object({ ...leadFields, name: z.string().trim().min(1
   nextContactDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), memo: z.string().max(5000).nullable().optional(), ownerId: z.string().uuid().nullable().optional(),
   /** 197차(#461): 다음 할 일(다음 연락일과 한 쌍 — 연락일을 지우면 같이 지움) · 다시 볼 날(보류·실패로 닫을 때, 그날 담당자 업무) */
   nextAction: z.string().trim().max(200).nullable().optional(), revisitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional() });
+/**
+ * 204차(#461 ⑦ 일괄 작업, SALES_LEADS_REVAMP 5절): 여러 거래처를 한 번에 — 담당·단계(보류·실패 사유·다시 볼 날)·다음 연락일(+ 할 일).
+ * 한 건씩 updateLead 로 바꿔 권한(담당만·담당 변경은 관리자)·단계 기록·영업 업무 맞춤이 한 건 고칠 때와 똑같다. 못 바꾼 건은 이름·이유와 함께 돌려준다(나머지는 그대로 진행)
+ */
+export const bulkLeadsInput = z.object({ ids: z.array(z.string().uuid()).min(1).max(100),
+  patch: leadPatch.pick({ ownerId: true, status: true, reason: true, revisitDate: true, nextContactDate: true, nextAction: true }) })
+  .refine((i) => Object.values(i.patch).some((v) => v !== undefined), { message: '바꿀 칸이 없습니다' });
+export async function bulkLeads(u: SessionUser, i: z.infer<typeof bulkLeadsInput>) {
+  await assertSpace(u, 'sales');
+  const ids = [...new Set(i.ids)];
+  const names = new Map((await db()<{ id: string; name: string }[]>`select id, name from sales_leads where id = any(${ids}) and tenant = ${tenantOf(u)} and deleted_at is null`).map((r) => [r.id, r.name]));
+  let ok = 0; const failed: { id: string; name: string | null; message: string }[] = [];
+  for (const id of ids) {
+    try { await updateLead(u, id, i.patch); ok++; } catch (e) { failed.push({ id, name: names.get(id) ?? null, message: e instanceof HttpError ? e.message : '바꾸지 못했습니다' }); }
+  }
+  return { ok, failed };
+}
 export async function updateLead(u: SessionUser, id: string, i: z.infer<typeof leadPatch>) {
   await assertSpace(u, 'sales');
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();

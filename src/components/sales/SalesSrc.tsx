@@ -12,7 +12,7 @@ import { api, useApi } from '@/components/client';
 import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
 import { CollectorAlerts } from '@/components/sales/Collectors';
-import { LeadQuickDialog, StageMoveDialog } from '@/components/sales/LeadFollowUp';
+import { BulkLeadDialog, LeadQuickDialog, StageMoveDialog, type BulkResult } from '@/components/sales/LeadFollowUp';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
@@ -706,10 +706,14 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const [chipsQ, setChipsQ] = useUrlState('chips', ''); const chips = chipsQ ? chipsQ.split(',') : []; const setChips = (c: string[]) => setChipsQ(c.join(','));
   const [view, setView] = useState(initialView && LEAD_VIEWS.some(([k]) => k === initialView) ? initialView : 'table');
   const [sort, setSort] = useUrlState('sort', ''); const [rev, setRev] = useUrlState('rev', ''); // 197차: 정렬 '' = 보기 기본 순서 · rev=1 거꾸로(열 머리 두 번)
+  const [sort2, setSort2] = useUrlState('sort2', ''); const [rev2, setRev2] = useUrlState('rev2', ''); // 204차: 2차 정렬(열 머리 Shift+클릭)
   const [fPri, setFPri] = useUrlState('pri', ''); const [fOwner, setFOwner] = useUrlState('owner', ''); const [fRegion, setFRegion] = useUrlState('region', ''); const [fSrc, setFSrc] = useUrlState('src', '');
   const [mv, setMv] = useState<{ id: string; name: string; q: Record<string, string> }[] | null>(null); const [cols, setCols] = useState<string[] | null>(null); const [saving, setSaving] = useState<string | null>(null); // 197차: 내 보기·열(저장 뒤 화면에 바로)
   const [imp, setImp] = useState<{ rows: Record<string, unknown>[]; file: string; skipped: string[]; done?: { created: number; skipped: string[] } } | null>(null);
   const [quick, setQuick] = useState<{ mode: 'next' | 'log'; lead: any } | null>(null); // 202차: 휴대폰 카드 밀기 창
+  // 204차(#461 ⑦): 표에서 여러 건 골라 한 번에(담당·단계·다음 연락일·CSV) · 표의 단계 바꾸기도 묻는 창(예전 prompt)
+  const [sel, setSel] = useState<string[]>([]); const [bulk, setBulk] = useState<'' | 'stage' | 'next'>(''); const [stMove, setStMove] = useState<{ lead: any; to: string } | null>(null);
+  useEffect(() => { setSel([]); }, [lvQ, focus, s, status, chipsQ]); // 보기·조건이 바뀌면 고른 것 풀기
   const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'leads', q: s, day })}`, [s, day]); // 197차: 단계는 화면에서 거름 — 띠·탭 숫자는 늘 전체 기준
   useEffect(() => { if (initialView) return; try { const v = localStorage.getItem('sales-leads-view'); if (v && LEAD_VIEWS.some(([k]) => k === v)) setView(v); } catch { /* 없음 */ } }, [initialView]);
   const pickView = (v: string) => { setView(v); try { localStorage.setItem('sales-leads-view', v); } catch { /* 없음 */ } };
@@ -737,8 +741,8 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
       if (r.similar) { setSimilar(r.similar); setForceNew(true); toast.error(`비슷한 거래처가 ${r.similar.length}곳 있습니다 — 확인한 뒤 [그래도 만들기]`); return; }
       setNl(null); setForceNew(false); setSimilar(null); reload(); if (r.id) setOpen(r.id); } catch (er: any) { toast.error(er.message); }
   }
-  function exportCsv() {
-    const rows = [CSV_COLS.map(([, h]) => h).join(','), ...shown.map((l: any) => CSV_COLS.map(([k]) => csvCell(k === 'priority' ? l.priority : k === 'revenue' ? (l.revenue ? Number(l.revenue) : '') : l[k])).join(','))];
+  function exportCsv(list: any[] = shown) {
+    const rows = [CSV_COLS.map(([, h]) => h).join(','), ...list.map((l: any) => CSV_COLS.map(([k]) => csvCell(k === 'priority' ? l.priority : k === 'revenue' ? (l.revenue ? Number(l.revenue) : '') : l[k])).join(','))];
     const blob = new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `거래처_${today()}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
   async function pickCsv(file: File) {
@@ -788,8 +792,17 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
     closed: (a, b) => String(b.closedAt ?? '').localeCompare(String(a.closedAt ?? '')), source: (a, b) => String(a.source?.label ?? '').localeCompare(String(b.source?.label ?? ''), 'ko'), owner: (a, b) => String(a.owner ?? '힣').localeCompare(String(b.owner ?? '힣'), 'ko') };
   const sortKey = sort && SORT_FN[sort] ? sort : TAB_SORT[lv];
   const shown = base.filter((l) => (!status || String(l.status ?? '미정') === status) && chips.every((c) => !CHIP_FN[c] || CHIP_FN[c](l)) && (!fPri || l.priorityCode === fPri) && (!fOwner || (fOwner === '-' ? !l.ownerId : l.ownerId === fOwner))
-    && (!fRegion || l.region === fRegion) && (!fSrc || l.source?.kind === fSrc)).sort((a, b) => (rev === '1' ? -1 : 1) * (SORT_FN[sortKey] ?? SORT_FN.activity)(a, b));
+    && (!fRegion || l.region === fRegion) && (!fSrc || l.source?.kind === fSrc)).sort((a, b) => (rev === '1' ? -1 : 1) * (SORT_FN[sortKey] ?? SORT_FN.activity)(a, b)
+      || (sort2 && sort2 !== sortKey && SORT_FN[sort2] ? (rev2 === '1' ? -1 : 1) * SORT_FN[sort2](a, b) : 0));
   const sumRevenue = shown.reduce((n, l) => n + (Number(l.revenue) || 0), 0);
+  const selectable = shown.filter((l) => !isClosed(l)); const allSel = selectable.length > 0 && selectable.every((l) => sel.includes(l.id)); // 종결 거래처는 고르지 않음(종결 보기엔 체크 칸 없음)
+  function bulkDone(r: BulkResult) {
+    setBulk(''); reload();
+    if (r.ok) toast.ok(`${r.ok}건 바꿨습니다`);
+    if (r.failed.length) toast.error(`${r.failed.length}건은 못 바꿨습니다 — ${r.failed[0].name ?? '거래처'}: ${r.failed[0].message}${r.failed.length > 1 ? ' 외' : ''}`);
+    setSel(r.failed.map((f) => f.id)); // 못 바꾼 건만 골라 둔 채로
+  }
+  async function bulkOwner(v: string) { if (!v) return; try { bulkDone(await api<BulkResult>('/api/sales/leads/bulk', { body: { ids: sel, patch: { ownerId: v === '-' ? null : v } } })); } catch (e: any) { toast.error(e.message); } }
   const ed = data?.readOnly === false;
   const box = lv === 'closed' ? 'archive' : '';
   // 로컬 10/25 20:00 ①: 종결(예전 보관함)은 '단계별'·'간단' 보기여도 표(PC)·카드(휴대폰)로 — [되돌리기]가 있는 보기
@@ -797,13 +810,16 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   // 197차: 내 저장된 보기·열(user_settings — 기기 간 유지). 지금 고른 조건과 똑같은 저장 보기가 있으면 그 탭이 켜짐
   const myViews: { id: string; name: string; q: Record<string, string> }[] = mv ?? data?.myViews?.views ?? [];
   const colsOn: string[] = cols ?? data?.myViews?.cols ?? DEFAULT_COLS; const col = (k: string) => colsOn.includes(k);
-  const curQ: Record<string, string> = Object.fromEntries(Object.entries({ lv, focus, chips: chipsQ, status, sort, rev, pri: fPri, owner: fOwner, region: fRegion, src: fSrc }).filter(([, x]) => x));
+  const curQ: Record<string, string> = Object.fromEntries(Object.entries({ lv, focus, chips: chipsQ, status, sort, rev, sort2, rev2, pri: fPri, owner: fOwner, region: fRegion, src: fSrc }).filter(([, x]) => x));
   const activeUv = myViews.find((x) => { const e = Object.entries(x.q ?? {}).filter(([, y]) => y); return e.length === Object.keys(curQ).length && e.every(([k, y]) => curQ[k] === y); })?.id ?? null;
   const pickTab = (k: string) => { setLv(k); setFocus(''); setBox(''); setSort(''); setRev(''); if (status && (k === 'closed') !== LEAD_CLOSED.has(status) && k !== 'all') setStatus(''); };
   const pickStatus = (x: string) => { setStatus(x); if (x && LEAD_CLOSED.has(x) && lv !== 'closed' && lv !== 'all') { setLv('closed'); setFocus(''); } else if (x && !LEAD_CLOSED.has(x) && lv === 'closed') setLv('open'); };
   const pickStrip = (k: string) => { const on = focus === k && lv === 'open'; setFocus(on ? '' : k); setLv('open'); setBox(''); setSort(''); setRev(''); if (status && LEAD_CLOSED.has(status)) setStatus(''); };
-  const applyView = (x: { q: Record<string, string> }) => { const g = (k: string) => x.q?.[k] ?? ''; setLv(g('lv') || 'open'); setFocus(g('focus')); setChipsQ(g('chips')); setStatus(g('status')); setSort(g('sort')); setRev(g('rev')); setFPri(g('pri')); setFOwner(g('owner')); setFRegion(g('region')); setFSrc(g('src')); setBox(''); };
-  const onSort = (k: string) => { if (sortKey === k) setRev(rev === '1' ? '' : '1'); else { setSort(k); setRev(''); } };
+  const applyView = (x: { q: Record<string, string> }) => { const g = (k: string) => x.q?.[k] ?? ''; setLv(g('lv') || 'open'); setFocus(g('focus')); setChipsQ(g('chips')); setStatus(g('status')); setSort(g('sort')); setRev(g('rev')); setSort2(g('sort2')); setRev2(g('rev2')); setFPri(g('pri')); setFOwner(g('owner')); setFRegion(g('region')); setFSrc(g('src')); setBox(''); };
+  const onSort = (k: string, shift = false) => {
+    if (shift && k !== sortKey) { if (sort2 === k) setRev2(rev2 === '1' ? '' : '1'); else { setSort2(k); setRev2(''); } return; } // Shift+클릭 = 2차 정렬(다시 = 거꾸로)
+    if (sortKey === k) setRev(rev === '1' ? '' : '1'); else { setSort(k); setRev(''); setSort2(''); setRev2(''); }
+  };
   async function saveViews(body: { views?: { id: string; name: string; q: Record<string, string> }[]; cols?: string[] }, msg?: string) {
     try { const r = await api<{ views: any[]; cols: string[] | null }>('/api/sales/leads/views', { method: 'PUT', body }); setMv(r.views ?? []); if (r.cols) setCols(r.cols); if (msg) toast.ok(msg); } catch (e: any) { toast.error(e.message); }
   }
@@ -825,7 +841,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const stageDays = (l: any) => { const d = kstDay(l.stageSince); const n = d ? dayDiff(d, td) : 0; return n >= 1 ? <span className="text-[10px] tabular-nums text-ink-3" title="이 단계에 머문 날" data-testid="lead-stage-days">{n}일</span> : null; };
   const srcCell = (l: any) => (!l.source ? null : l.source.href ? <Link href={l.source.href} className="underline" style={{ color: C }} onClick={(e) => e.stopPropagation()} data-testid="lead-source">{l.source.label}</Link> : <span data-testid="lead-source">{l.source.label}</span>);
   const th = (k: string, label: string) => <th key={k} className="whitespace-nowrap p-2" aria-sort={sortKey === k ? ((rev === '1') !== DESC_SORTS.has(k) ? 'descending' : 'ascending') : undefined}>
-    <button type="button" onClick={() => onSort(k)} className="inline-flex items-center gap-0.5 hover:text-ink" data-testid={`leads-th-${k}`}>{label}{sortKey === k && <span aria-hidden className="text-[10px]">{(rev === '1') !== DESC_SORTS.has(k) ? '▼' : '▲'}</span>}</button></th>;
+    <button type="button" onClick={(e) => onSort(k, e.shiftKey)} title="누르면 정렬 · 한 번 더 = 거꾸로 · Shift+클릭 = 2차 정렬" className="inline-flex items-center gap-0.5 hover:text-ink" data-testid={`leads-th-${k}`}>{label}{sort2 === k && sort2 !== sortKey && <span className="text-[10px] text-ink-3" data-testid="leads-th-sort2">{(rev2 === '1') !== DESC_SORTS.has(k) ? '▼' : '▲'}2</span>}{sortKey === k && <span aria-hidden className="text-[10px]">{(rev === '1') !== DESC_SORTS.has(k) ? '▼' : '▲'}</span>}</button></th>;
   const card = (l: any) => (
     <li key={l.id} className="text-sm" data-testid="sales-lead-card"><SwipeCard on={ed && !isClosed(l)} onLeft={() => setQuick({ mode: 'next', lead: l })} onRight={() => setQuick({ mode: 'log', lead: l })}><div className="rounded-card border border-line bg-white p-3"><button type="button" onClick={() => setOpen(l.id)} className="block w-full text-left" data-testid="sales-lead-open">
       <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(l.status)}{stageDays(l)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
@@ -873,18 +889,27 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
             <div className="absolute left-0 z-20 mt-1 w-44 space-y-1 rounded-card border border-line bg-white p-2 shadow-pop">{LEAD_COLS.map(([k, l]) => <label key={k} className="flex items-center gap-2"><input type="checkbox" checked={col(k)} onChange={() => toggleCol(k)} data-testid={`leads-col-${k}`} />{l}</label>)}
               <p className="text-[10px] text-ink-3">거래처·단계·다음 행동은 늘 보입니다. 고른 열은 다른 기기에서도 그대로입니다.</p></div></details>}
           <span className="ml-auto flex items-center gap-1.5"><span className="text-ink-3" data-testid="leads-count">{shown.length}건{sumRevenue ? ` · 예상 ${won(sumRevenue)}` : ''}</span>
-            <button type="button" onClick={exportCsv} className={linkCls} data-testid="leads-csv-export"><Download size={12} /> CSV</button>
+            <button type="button" onClick={() => exportCsv()} className={linkCls} data-testid="leads-csv-export"><Download size={12} /> CSV</button>
             {ed && data.canAssign && <label className={cx(linkCls, 'cursor-pointer')} data-testid="leads-csv-import">CSV 가져오기<input type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pickCsv(f); }} aria-label="CSV 파일" data-testid="leads-csv-file" /></label>}</span>
         </div>
         {!shown.length && all.length > 0 && (s || status || focus || chips.length || fPri || fOwner || fRegion || fSrc) && lv !== 'all' && <p className="rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="leads-empty-hint">이 보기에는 맞는 거래처가 없습니다 — <button type="button" onClick={() => pickTab('all')} className="underline" style={{ color: C }}>전체 보기에서 찾기</button></p>}
         {/* 197차(#461) 표: 거래처·담당자(아래 작은 글씨 지역·분류) · 단계(머문 날) · 다음 행동(날짜 + 할 일, 지남 빨강·오늘 주황·없으면 경고) · 고른 열(출처·마지막 접촉·예상 금액·담당·우선·관심 사업·시설·지역) — 열 머리를 누르면 정렬(두 번 = 거꾸로). 표 안에서 바로 고치기(거래처명·단계·다음 연락·우선·담당)는 그대로. 휴대폰은 카드 */}
+        {ed && v === 'table' && sel.length > 0 && <div className="sticky top-0 z-10 hidden flex-wrap items-center gap-2 rounded-card border border-brand-200 bg-brand-50 p-2 text-sm md:flex" data-testid="leads-bulk-bar">
+          <b>{sel.length}건 선택</b>
+          {data.canAssign && <select className={cx(inputCls, 'h-8 !w-auto py-0 text-xs')} value="" onChange={(e) => void bulkOwner(e.target.value)} aria-label="담당 일괄 바꾸기" data-testid="leads-bulk-owner"><option value="">담당 바꾸기…</option><option value="-">담당 없음</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
+          <Button size="sm" variant="secondary" onClick={() => setBulk('stage')} data-testid="leads-bulk-stage">단계 바꾸기</Button>
+          <Button size="sm" variant="secondary" onClick={() => setBulk('next')} data-testid="leads-bulk-next">다음 연락일</Button>
+          <button type="button" onClick={() => exportCsv(shown.filter((l) => sel.includes(l.id)))} className={linkCls} data-testid="leads-bulk-csv"><Download size={12} /> 고른 것 CSV</button>
+          <button type="button" onClick={() => setSel([])} className="ml-auto text-xs text-ink-2 hover:underline" data-testid="leads-bulk-clear">선택 해제</button>
+        </div>}
         {v === 'table' && <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block" data-testid="leads-table"><table className="w-full min-w-[880px] text-sm"><thead className="bg-slate-50 text-left text-xs text-ink-2"><tr>
-            {th('name', '거래처·담당자')}{th('stage', '단계')}{th('next', '다음 행동')}{col('source') && th('source', '출처')}{col('contact') && th('contact', '마지막 접촉')}{col('revenue') && th('revenue', '예상 금액')}{col('owner') && th('owner', '담당')}
+            {ed && <th className="w-8 p-2">{selectable.length > 0 && <input type="checkbox" checked={allSel} onChange={(e) => setSel(e.target.checked ? selectable.map((l: any) => l.id) : [])} aria-label="보이는 진행 중 거래처 모두 고르기" data-testid="leads-sel-all" />}</th>}{th('name', '거래처·담당자')}{th('stage', '단계')}{th('next', '다음 행동')}{col('source') && th('source', '출처')}{col('contact') && th('contact', '마지막 접촉')}{col('revenue') && th('revenue', '예상 금액')}{col('owner') && th('owner', '담당')}
             {col('priority') && <th className="whitespace-nowrap p-2">우선</th>}{col('interest') && <th className="whitespace-nowrap p-2">관심 사업</th>}{col('facility') && <th className="whitespace-nowrap p-2">시설</th>}{col('region') && <th className="whitespace-nowrap p-2">지역</th>}</tr></thead>
           <tbody>{shown.map((l: any) => <tr key={l.id} className="cursor-pointer border-t border-line align-top hover:bg-slate-50" onClick={(e) => { if (!(e.target as HTMLElement).closest('input,select,button,a')) setOpen(l.id); }} data-testid="sales-lead-row">
+            {ed && <td className="w-8 p-2">{!isClosed(l) && <input type="checkbox" checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} aria-label={`${l.name} 고르기`} data-testid="lead-sel" />}</td>}
             <td className="p-2 font-medium">{ed ? <CellInput value={l.name} onSave={(v) => patchLead(l.id, { name: v })} label="거래처명" testId="cell-name" /> : l.name}{l.contact && <span className="block text-[11px] font-normal text-ink-3">{l.contact}{l.phone ? ` · ${l.phone}` : ''}</span>}
               {(!col('facility') || !col('region')) && (l.facility || l.region) && <span className="block text-[11px] font-normal text-ink-3">{[l.facility, l.region].filter(Boolean).join(' · ')}</span>}</td>
-            <td className="p-2">{isArch(l) ? rowExtra(l) : <span className="flex flex-wrap items-center gap-1">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.status ?? ''} aria-label="단계" data-testid="cell-status" onChange={(e) => { const v = e.target.value; const reason = ['보류', '실패'].includes(v) ? prompt(`'${v}' 사유`) ?? '' : undefined; if (reason === '') return; void patchLead(l.id, { status: v, ...(reason ? { reason } : {}) }); }}>{(data.stages ?? []).map((s: string) => <option key={s}>{s}</option>)}</select> : chip(l.status)}{stageDays(l)}{rowExtra(l)}</span>}</td>
+            <td className="p-2">{isArch(l) ? rowExtra(l) : <span className="flex flex-wrap items-center gap-1">{ed ? <select className="rounded border border-line bg-white px-1 py-0.5 text-xs" value={l.status ?? ''} aria-label="단계" data-testid="cell-status" onChange={(e) => { const v = e.target.value; if (v !== l.status) setStMove({ lead: l, to: v }); }}>{(data.stages ?? []).map((s: string) => <option key={s}>{s}</option>)}</select> : chip(l.status)}{stageDays(l)}{rowExtra(l)}</span>}</td>
             <td className="p-2 text-xs" data-testid="cell-next-action">{ed && !isClosed(l) ? <span className="flex flex-col gap-0.5"><input key={`${l.id}:${l.next ?? ''}`} type="date" className={cx('w-fit rounded border bg-white px-1 py-0.5 text-xs', l.next && l.next < td ? 'border-red-300 text-red-700' : l.next === td ? 'border-amber-300 text-amber-700' : 'border-line')} defaultValue={l.next ?? ''} aria-label="다음 연락" data-testid="cell-next" onChange={(e) => patchLead(l.id, { nextContactDate: e.target.value || null })} />{nextNote(l)}</span> : nextCell(l)}</td>
             {col('source') && <td className="whitespace-nowrap p-2 text-xs">{srcCell(l)}</td>}
             {col('contact') && <td className="p-2 text-xs text-ink-2" data-testid="cell-contact">{contactCell(l)}</td>}
@@ -902,6 +927,8 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
         </>
       )}
       {open && <LeadDetail id={open} onClose={() => setOpen(null)} onChange={reload} />}
+      {stMove && <StageMoveDialog lead={{ id: stMove.lead.id, name: stMove.lead.name, next: stMove.lead.next }} to={stMove.to} onClose={() => setStMove(null)} onDone={(m) => { setStMove(null); toast.ok(m); reload(); }} />}
+      {bulk && <BulkLeadDialog mode={bulk} ids={sel} stages={data?.stages ?? []} onClose={() => setBulk('')} onDone={bulkDone} />}
       {quick && <LeadQuickDialog mode={quick.mode} lead={{ id: quick.lead.id, name: quick.lead.name, next: quick.lead.next, nextAction: quick.lead.nextAction }} onClose={() => setQuick(null)} onDone={(m) => { setQuick(null); toast.ok(m); reload(); }} />}
       {nl && (
         <Modal open onClose={() => setNl(null)} title="새 리드" wide>
