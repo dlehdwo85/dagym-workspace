@@ -24,7 +24,7 @@ type Terms = { kind: Record<string, string>; buildingsTab: string; facilitiesTab
  * 리드 id → 목록 칸. 마지막 접촉 = 상담 기록(종류) · 사람이 끝낸 리드 업무 · 사람이 바꾼 단계 중 가장 늦은 것(처음 만든 기록·자동 기록은 빼고).
  * 출처 = 영업기회 허브에서 넘긴 건(공고·단지·시설·협력사, 링크) · 리드 광고 · 이전 자료(옮겨 온 리드) · 직접 등록
  */
-export async function leadExtras(sql: Sql, tenant: string, terms: Terms) {
+export async function leadExtras(sql: Sql, tenant: string, terms: Terms, ids?: string[]) {
   const rows = await sql<{ id: string; status: string | null; next_action: string | null; revisit: string | null; created_at: Date; src_id: string | null; src_from: string | null; src_ref: string | null; name: string;
     stage_at: Date | null; act_at: Date | null; act_kind: string | null; task_at: Date | null; status_at: Date | null }[]>`
     select l.id, l.status, l.next_action, l.revisit_date::text as revisit, l.created_at, l.src_id, l.src->>'from' as src_from, l.src->>'id' as src_ref, l.name,
@@ -35,7 +35,7 @@ export async function leadExtras(sql: Sql, tenant: string, terms: Terms) {
       (select max(g.changed_at) from sales_status_log g where g.lead_id = l.id and g.from_status is not null and g.changed_by is not null) as status_at
     from sales_leads l
     left join lateral (select x.occurred_at as at, x.data->>'activity_type' as kind from sales_lead_records x where x.lead_id = l.id and x.kind = 'sales_activities' order by x.occurred_at desc nulls last limit 1) act on true
-    where l.tenant = ${tenant} and l.deleted_at is null limit 5000`;
+    where l.tenant = ${tenant} and l.deleted_at is null ${ids ? sql`and l.id = any(${ids})` : sql``} limit 5000`; // 202차: ids = 보고서가 고른 거래처만
   const HUB: Record<string, [string, (id: string, name: string) => string]> = {
     bid: [`${terms.kind.bid} 공고`, (id) => `/s/sales/hub?tab=bids&bt=working&bq=${encodeURIComponent(id)}`],
     building: [terms.buildingsTab, (_id, name) => `/s/sales/hub?tab=buildings&q=${encodeURIComponent(name)}`],
@@ -122,4 +122,74 @@ export async function leadRevisitTick(now = new Date()) {
     await sql`update sales_leads set revisit_date = null, updated_at = now() where id = ${l.id}`;
   }
   return { checked: rows.length, made };
+}
+
+// ── 202차(#461 ⑤ 놓침 방지 — SALES_LEADS_REVAMP 4절): 아침 브리핑 영업 한 줄 · 주간 보고 '다음 행동 없음'·'오래 쉼' ──────────────
+type SalesPerson = { id: string; tenant: string; role: string };
+const isMgr = (u: SalesPerson) => u.role === 'owner' || u.role === 'admin';
+const shiftDay = (d: string, n: number) => ymd(new Date(Date.parse(`${d}T12:00:00+09:00`) + n * 864e5));
+/** 목록 띠 '14일 넘게 연락 없음'과 같은 날 수 */
+export const STALE_DAYS = 14;
+
+/** 영업 공간을 쓰는 사람: 회사가 영업 공간을 켰고 쓰기가 열렸으며(전환 뒤) 관리자이거나 영업 공간에 배정된 사람 */
+export async function usesSales(sql: Sql, u: SalesPerson) {
+  const [r] = await sql<{ ok: boolean }[]>`select ('sales' = any(t.spaces) and exists (select 1 from sales_cutover c where c.tenant = t.id and c.writes_open)
+      and (${isMgr(u)}::boolean or exists (select 1 from space_members m where m.user_id = ${u.id} and m.tenant = t.id and 'sales' = any(m.spaces)))) as ok
+    from tenants t where t.id = ${u.tenant}`;
+  return !!r?.ok;
+}
+
+/** 아침 브리핑 영업 한 줄 — 진행 중 거래처 중 내 담당(대표·관리자는 회사 전체 + 담당 없음)의 오늘 연락·연락일 지남·다음 행동 없음. 모두 0이면 null */
+export async function salesBriefLine(sql: Sql, u: SalesPerson, today: string): Promise<string | null> {
+  if (!(await usesSales(sql, u))) return null;
+  const all = isMgr(u);
+  const [c] = await sql<{ today: number; over: number; none: number; unassigned: number }[]>`select
+      count(*) filter (where l.next_contact_date = ${today}::date)::int as today, count(*) filter (where l.next_contact_date < ${today}::date)::int as over,
+      count(*) filter (where l.next_contact_date is null)::int as none, count(*) filter (where l.owner_id is null)::int as unassigned
+    from sales_leads l where l.tenant = ${u.tenant} and l.deleted_at is null and not (coalesce(l.status, '') = any(${CLOSED_STAGES}))
+      and ${all ? sql`true` : sql`l.owner_id = ${u.id}`}`;
+  const bits = [c.today ? `오늘 연락 ${c.today}` : '', c.over ? `연락일 지남 ${c.over}` : '', c.none ? `다음 행동 없음 ${c.none}` : '', all && c.unassigned ? `담당 없음 ${c.unassigned}` : ''].filter(Boolean);
+  return bits.length ? `영업(${all ? '회사 전체' : '내 담당'}) ${bits.join(', ')}` : null;
+}
+
+export type OpenLeadItem = { id: string; name: string; status: string | null; owner: string | null; created: string; last: string | null; lastKind: string | null };
+/**
+ * 진행 중 거래처 요약 — 목록 띠와 같은 기준: 오늘 연락·연락일 지남·다음 행동 없음·담당 없음 ·
+ * 오래 쉼 = 마지막 접촉(상담 기록·사람이 끝낸 업무·사람이 바꾼 단계, 없으면 만든 날)이 14일 넘음. ownerId 를 주면 그 사람 담당만, 목록은 top 개(오래된 순)
+ */
+export async function openLeadSummary(sql: Sql, tenant: string, today: string, opt: { ownerId?: string; top?: number } = {}) {
+  const rows = await sql<{ id: string; name: string; status: string | null; owner_id: string | null; owner: string | null; next: string | null; created: string }[]>`
+    select l.id, l.name, l.status, l.owner_id, u.name as owner, l.next_contact_date::text as next, to_char(l.created_at at time zone 'Asia/Seoul', 'YYYY-MM-DD') as created
+    from sales_leads l left join users u on u.id = l.owner_id
+    where l.tenant = ${tenant} and l.deleted_at is null and not (coalesce(l.status, '') = any(${CLOSED_STAGES})) and ${opt.ownerId ? sql`l.owner_id = ${opt.ownerId}` : sql`true`}
+    order by l.created_at limit 5000`;
+  const X = rows.length ? await leadExtras(sql, tenant, await (await import('./options')).salesTerms(tenant), rows.map((r) => r.id)) : new Map<string, LeadExtra>();
+  const cut = shiftDay(today, -STALE_DAYS), top = opt.top ?? 10;
+  const items = rows.map((r) => { const lc = X.get(r.id)?.lastContact ?? null; const it: OpenLeadItem = { id: r.id, name: r.name, status: r.status, owner: r.owner, created: r.created, last: lc ? ymd(new Date(lc.at)) : null, lastKind: lc?.kind ?? null }; return { r, it }; });
+  const none = items.filter((x) => !x.r.next).map((x) => x.it);
+  const stale = items.filter((x) => (x.it.last ?? x.it.created) < cut).map((x) => x.it).sort((a, b) => (a.last ?? a.created).localeCompare(b.last ?? b.created));
+  return { open: rows.length, today: rows.filter((r) => r.next === today).length, over: rows.filter((r) => !!r.next && r.next < today).length, none: none.length,
+    unassigned: rows.filter((r) => !r.owner_id).length, stale: stale.length, noneTop: none.slice(0, top), staleTop: stale.slice(0, top) };
+}
+
+const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+/** 개인 주간 보고 초안 '영업' 칸 — 내 담당 진행 중 거래처의 다음 행동 없음·오래 쉼(이름 10개까지). 영업 공간을 안 쓰거나 둘 다 0이면 null */
+export async function salesWeekLines(sql: Sql, u: SalesPerson, today: string): Promise<{ lines: string[]; none: number; stale: number } | null> {
+  if (!(await usesSales(sql, u))) return null;
+  const s = await openLeadSummary(sql, u.tenant, today, { ownerId: u.id });
+  if (!s.none && !s.stale) return null;
+  const more = (n: number, shown: number) => (n > shown ? [`   … 외 ${n - shown}건`] : []);
+  const lines = [
+    ...(s.none ? [`■ 영업 — 다음 행동 없음 (${s.none}건): 다음 연락일을 정하거나 종결해 주세요`, ...s.noneTop.map((l) => `  - ${l.name} (${l.status ?? '단계 없음'})`), ...more(s.none, s.noneTop.length), ''] : []),
+    ...(s.stale ? [`■ 영업 — 오래 쉼: ${STALE_DAYS}일 넘게 연락 없음 (${s.stale}건)`, ...s.staleTop.map((l) => `  - ${l.name} (${l.last ? `마지막 접촉 ${md(l.last)} ${l.lastKind}` : `연락 기록 없음 · 등록 ${md(l.created)}`})`), ...more(s.stale, s.staleTop.length), ''] : []),
+  ];
+  return { lines, none: s.none, stale: s.stale };
+}
+
+/** 본사 주간 보고 '영업 진행'(회사 전체) — 영업 공간을 켜고 쓰기가 열린 회사만, 만든 날 기준 */
+export async function salesReportBlock(sql: Sql, tenant: string, today: string) {
+  const [t] = await sql<{ ok: boolean }[]>`select ('sales' = any(t.spaces) and exists (select 1 from sales_cutover c where c.tenant = t.id and c.writes_open)) as ok from tenants t where t.id = ${tenant}`;
+  if (!t?.ok) return null;
+  const s = await openLeadSummary(sql, tenant, today);
+  return { asOf: today, open: s.open, today: s.today, over: s.over, none: s.none, stale: s.stale, unassigned: s.unassigned, staleTop: s.staleTop };
 }
