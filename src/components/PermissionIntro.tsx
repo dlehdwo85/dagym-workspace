@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { AlarmClock, Bell, Check, LayoutGrid } from 'lucide-react';
-import { enableNativePush, openAlarmSettings, openNotificationSettings, permissionStatus, requestPinWidget, type PermissionStatus } from './native';
+import { AlarmClock, Bell, Check, LayoutGrid, Moon } from 'lucide-react';
+import { enableNativePush, openAlarmSettings, openNotificationSettings, permissionStatus, requestAlarmAuthorization, requestPinWidget, type PermissionStatus } from './native';
 import { cx, toast } from './ui';
 
 /**
@@ -11,15 +11,24 @@ import { cx, toast } from './ui';
  * - 실행 애니메이션(#443)·다른 창(회사 첫 안내·투어 등) 뒤에 뜨고, 이 창이 떠 있는 동안 투어(#83)는 기다림(role=dialog).
  * - 설정 › 알림 [휴대폰 알림 맞추기 다시 보기] → 'wos-perm-intro' 이벤트로 다시 염.
  * - 시연·E2E: localStorage wos_perm_demo 에 상태 JSON 을 넣으면 네이티브 없이도 그림(단추는 안내만).
+ * - 결정 15-27(대표 10/26): 아이폰 앱도 같은 창 — 알림 허용(거절했으면 [설정 열기]) · 네이티브가 알려 줄 때만 집중 모드에서도 알람(시간 민감 알림)·
+ *   잠금 화면 알람(AlarmKit, iOS 26+)·홈 화면 위젯 줄. 정확한 시각 줄은 안드로이드만(아이폰 예약 알림은 늘 제시각).
  */
-export type PermRow = { key: 'notifications' | 'fullScreen' | 'exact' | 'widgets'; title: string; why: string; ok: boolean; action?: string; hint?: string };
+export type PermRow = { key: 'notifications' | 'focus' | 'fullScreen' | 'exact' | 'widgets'; title: string; why: string; ok: boolean; action?: string; hint?: string };
 const KEY = (uid: string) => `wos_perm_intro:${uid}`;
 const DEMO = 'wos_perm_demo';
 const LATER_MS = 24 * 60 * 60 * 1000;
 
 export function rowsOf(s: PermissionStatus): PermRow[] {
+  const notif: PermRow = { key: 'notifications', title: '알림 허용', why: '일정 시작 전·업무 배정·멘션·마감을 앱이 닫혀 있어도 알려 드립니다', ok: !!s.notifications, action: s.notifState === 'denied' ? '설정 열기' : '허용' };
+  if (s.platform === 'ios') return [
+    notif,
+    ...(s.focus != null && s.notifications ? [{ key: 'focus' as const, title: '집중 모드에서도 알람', why: "방해 금지·집중 모드에서도 '알람처럼 울리기' 일정·마감은 바로 뜹니다(알림 › 시간 민감 알림)", ok: !!s.focus, action: '설정 열기' }] : []),
+    ...(s.alarmKit != null ? [{ key: 'fullScreen' as const, title: '잠금 화면 알람', why: "'알람처럼 울리기'를 켠 일정·마감은 잠금 화면에 알람으로 뜹니다", ok: s.alarmKit === 'granted', action: s.alarmKit === 'denied' ? '설정 열기' : '허용' }] : []),
+    ...(s.widgetSupported ? [{ key: 'widgets' as const, title: '홈 화면 위젯', why: "앱을 열지 않아도 '워크인 오늘'(오늘 할 일·일정)이 홈 화면에 보입니다", ok: (s.widgets ?? 0) > 0, hint: '홈 화면 빈 곳을 길게 눌러 [편집] → [위젯 추가] → 워크인' }] : []),
+  ];
   return [
-    { key: 'notifications', title: '알림 허용', why: '일정 시작 전·업무 배정·멘션·마감을 앱이 닫혀 있어도 알려 드립니다', ok: !!s.notifications, action: '허용' },
+    notif,
     { key: 'fullScreen', title: '잠금 화면 알람', why: '알람처럼 울리기를 켠 일정·마감은 잠금 화면 위에 전체 화면으로 뜹니다', ok: !!s.fullScreen, action: '설정 열기' },
     { key: 'exact', title: '정확한 시각 알람', why: '꺼져 있으면 알람이 몇 분 늦게 울릴 수 있습니다', ok: !!s.exact, action: '설정 열기' },
     { key: 'widgets', title: '바탕화면 위젯', why: "앱을 열지 않아도 '워크인 오늘'(오늘 할 일·일정)이 바탕화면에 보입니다", ok: (s.widgets ?? 0) > 0, action: s.widgetPin ? '위젯 추가' : undefined, hint: s.widgetPin ? undefined : '홈 화면을 길게 눌러 위젯 → 워크인 오늘' },
@@ -52,7 +61,7 @@ export function PermissionIntro({ userId }: { userId: string }) {
   }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const re = () => { if (open && document.visibilityState === 'visible') read().then((s) => s && setSt(s)); }; // 설정에서 허용하고 돌아오면
-    const show = () => read().then((s) => { if (s) { setSt(s); setOpen(true); } else toast.error('앱(안드로이드 1.1.3 이상)에서만 볼 수 있습니다'); });
+    const show = () => read().then((s) => { if (s) { setSt(s); setOpen(true); } else toast.error('앱(안드로이드 1.1.3 이상·아이폰)에서만 볼 수 있습니다'); });
     document.addEventListener('visibilitychange', re); window.addEventListener('wos-perm-intro', show);
     return () => { document.removeEventListener('visibilitychange', re); window.removeEventListener('wos-perm-intro', show); };
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -65,13 +74,17 @@ export function PermissionIntro({ userId }: { userId: string }) {
     if (demo) { toast.ok(`(시연) ${r.title}: ${r.action}`); return; }
     setBusy(r.key);
     try {
-      if (r.key === 'notifications') { try { await enableNativePush(); toast.ok('이 기기에서 알림을 받습니다'); } catch (e: any) { toast.error(e.message); await openNotificationSettings().catch(() => {}); } }
+      // 아이폰은 한 번 거절하면 시스템 창이 다시 안 뜸 → 바로 설정(알림)으로
+      if (r.key === 'notifications' && st?.notifState === 'denied') await openNotificationSettings();
+      else if (r.key === 'notifications') { try { await enableNativePush(); toast.ok('이 기기에서 알림을 받습니다'); } catch (e: any) { toast.error(e.message); await openNotificationSettings().catch(() => {}); } }
       else if (r.key === 'widgets') { if (!(await requestPinWidget())) toast.ok('홈 화면을 길게 눌러 위젯 → 워크인 오늘을 추가해 주세요'); }
+      else if (r.key === 'focus' || (r.key === 'fullScreen' && st?.platform === 'ios' && st.alarmKit === 'denied')) await openNotificationSettings();
+      else if (r.key === 'fullScreen' && st?.platform === 'ios') { if (!(await requestAlarmAuthorization())) toast.error('이 앱 버전에서는 아직 쓸 수 없습니다'); }
       else await openAlarmSettings().catch(() => toast.error('설정 화면을 열 수 없습니다'));
       const s = await read(); if (s) setSt(s);
     } finally { setBusy(null); }
   };
-  const Icon = ({ k }: { k: PermRow['key'] }) => (k === 'notifications' ? <Bell className="size-5" /> : k === 'widgets' ? <LayoutGrid className="size-5" /> : <AlarmClock className="size-5" />);
+  const Icon = ({ k }: { k: PermRow['key'] }) => (k === 'notifications' ? <Bell className="size-5" /> : k === 'widgets' ? <LayoutGrid className="size-5" /> : k === 'focus' ? <Moon className="size-5" /> : <AlarmClock className="size-5" />);
   return (
     <div className="fixed inset-0 z-[70] bg-black/40" onClick={later} data-testid="perm-intro-backdrop">
       <div role="dialog" aria-modal="true" aria-labelledby="perm-intro-title" data-perm-intro data-testid="perm-intro" onClick={(e) => e.stopPropagation()}
@@ -88,7 +101,7 @@ export function PermissionIntro({ userId }: { userId: string }) {
                 : r.action ? <button type="button" disabled={busy === r.key} onClick={() => act(r)} className="h-8 shrink-0 rounded-input bg-brand-600 px-3 text-xs font-semibold text-white disabled:opacity-60" data-testid={`perm-act-${r.key}`}>{busy === r.key ? '여는 중…' : r.action}</button> : null}
             </li>))}
         </ul>
-        <p className="mt-2 text-[11px] text-ink-3">허용은 언제든 휴대폰 설정 › 앱 › 워크인에서 바꿀 수 있습니다. 설정 › 알림에서 이 안내를 다시 볼 수 있습니다.</p>
+        <p className="mt-2 text-[11px] text-ink-3">허용은 언제든 {st.platform === 'ios' ? '아이폰 설정 › 워크인' : '휴대폰 설정 › 앱 › 워크인'}에서 바꿀 수 있습니다. 설정 › 알림에서 이 안내를 다시 볼 수 있습니다.</p>
         <div className="mt-3 flex justify-end gap-2">
           {!done && <button type="button" onClick={later} className="h-9 rounded-input px-3 text-sm text-ink-2 hover:bg-slate-100" data-testid="perm-later">나중에</button>}
           <button type="button" onClick={finish} className="h-9 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white" data-testid="perm-done">{done ? '확인' : '다 했어요'}</button>

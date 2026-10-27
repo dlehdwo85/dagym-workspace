@@ -57,6 +57,7 @@ import { messengerV4 } from './messengerV4.step.mjs';
 import { prespecLink } from './prespecLink.step.mjs';
 import { hubArchive } from './hubArchive.step.mjs';
 import { leadList197 } from './leadList197.step.mjs';
+import { calSnap199 } from './calSnap199.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -105,6 +106,7 @@ import { cal1019 } from './cal1019.step.mjs';
 import { cal480 } from './cal480.step.mjs';
 import { welcome483 } from './welcome483.step.mjs';
 import { permIntro528 } from './permIntro528.step.mjs';
+import { permIntroIos199 } from './permIntroIos199.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
 import { spaces } from './spaces.step.mjs';
@@ -1072,6 +1074,7 @@ await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없
 await step('#480 월 보기 빈 칸: 기본 종일 + [시간 지정] 시작·끝 시각(연결 업무 마감 시각 따라감) · [종일로] 되돌리기', () => cal480({ owner, sql, BASE, SHOTS, addDays, today }));
 await step('#483 하루 첫 진입 환영 문구: 새 브라우저 로그인 → 인사 한 줄 0.8초(조작 안 막음) → 같은 날 다시 들어오면 없음 · 동작 줄이기면 움직임 없음', () => welcome483({ browser, BASE, SHOTS }));
 await step('#528 앱 처음 시작 휴대폰 알림 맞추기(권한 안내, 웹 몫): 꺼진 줄 단추·이유 → 허용된 줄 체크 → [나중에] 같은 날 다시 없음 → 다 돼 있으면 안 뜸 (390 시연 상태)', () => permIntro528({ browser, desk, BASE, SHOTS }));
+await step('결정 15-27 아이폰 휴대폰 알림 맞추기(웹 몫): 지금 앱 = 알림 허용 한 줄·거절했으면 [설정 열기] → 1.1.4 네이티브 = 집중 모드·잠금 화면 알람·홈 화면 위젯(단추 없이 안내) (390 시연 상태)', () => permIntroIos199({ browser, desk, BASE, SHOTS }));
 await step('V14 36~39 캘린더: 업무 동그라미 없음·블록 12px 여러 줄·계단 겹침·휴대폰 3일·좌우 밀어 이동·뒤로가기는 상세만 닫고 날짜·보기·스크롤 유지', () => v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDays, today }));
 await step('V19 부록 A: AI 비서 PC Enter 보내기·Shift+Enter 줄바꿈, 휴대폰 Enter 줄바꿈·자동 높이, [수정]·[다시 답하기]·[복사]·[멈춤], 패널 같은 동작 / 보기 칩 다시 누르면 해제', () => v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('캘린더: 완료한 업무의 시간 블록은 숨김(완료 보기 켜면 완료 모양), 삭제한 업무의 블록은 사라지고 휴지통 복원 시 다시 보임', () => blocksStep({ owner, ctx, BASE, SHOTS, addDays, today }));
@@ -2893,6 +2896,7 @@ await step('#626 캡처 차단(대표 10/25 20:05): 외부 고객사 로그인 �
 // 본사가 생기면 맨 위 부서를 새로 만들 수 없어 맨 끝(앞 단계들이 맨 위 부서를 만듦)
 await step('P2 조직 개편 4단(대표 10/26 · #679~#681): 종류 카드 4개·본사 만들며 맨 위 부서 이관·사업부 위 단위는 본사만·사업부장 없음·이름-종류 검사 → 사용자 목록 왕관 칩·장 비게 됨 경고 → 업무 함께하는 부서', () => orgLevels({ owner, ctx, BASE, SHOTS }));
 await step('197차 영업 진행 목록 개편(#461·#460): 오늘 볼 것 띠 → 다음 행동 없음 경고 → 열 머리 정렬 · 열 고르기 · 보기 저장(새로 고침에도) → 업무 [완료] 다음 행동 창(1주 뒤 + 할 일 · 종결 보류·사유·다시 볼 날) → 종결 보기 · 휴대폰 카드', () => leadList197({ owner, ctx, sql, BASE, SHOTS }));
+await step('#690 캘린더 끌기 15분 단위(대표 10/26): 주 보기 일정 15분만큼 끌기 → 10:15(잡은 자리 그대로) · 클릭 = 정시 1시간 · 끌어 그리기 14:15~15:00 · PC [끌기 단위 30분] → 15분 끌어도 10:45 · 휴대폰 칩도 같은 기억', () => calSnap199({ owner, ctx, sql, BASE }));
 
 await browser.close();
 srv.proc.kill();

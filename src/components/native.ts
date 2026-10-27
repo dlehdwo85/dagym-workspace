@@ -48,11 +48,17 @@ interface WorkinNativePlugin {
   setSecureScreen(o: { on: boolean }): Promise<void>;
   addListener(ev: 'screenshot', fn: L): Promise<PluginListenerHandle>;
   // #528 처음 시작 '휴대폰 알림 맞추기'('android-permissions-1', 로컬 7819a4c): 상태 한 번에 읽기 · '워크인 오늘' 위젯 추가 창 · 앱 알림 설정 화면(권한을 한 번 거절해 시스템 창이 다시 안 뜰 때)
+  // 결정 15-27 아이폰('ios-permissions-1', 로컬 1.1.4 예정 — docs/research/IOS_PERMISSIONS_SHEET_2026-10-27.md): 같은 세 메서드 + 잠금 화면 알람(AlarmKit, 'ios-alarmkit-1') 허용 요청
   permissionStatus(): Promise<PermissionStatus>;
   requestPinWidget(): Promise<{ requested: boolean }>;
   openNotificationSettings(): Promise<void>;
+  requestAlarmAuthorization(): Promise<{ state: 'prompt' | 'denied' | 'granted' }>;
 }
-export type PermissionStatus = { notifications: boolean; fullScreen: boolean; exact: boolean; widgets: number; widgetPin: boolean; sdk?: number };
+/** 안드로이드: notifications·fullScreen·exact·widgets·widgetPin · 아이폰(platform 'ios'): notifications·notifState·focus(시간 민감 알림, 못 쓰면 null)·alarmKit(못 쓰면 null)·widgetSupported·widgets */
+export type PermissionStatus = {
+  platform?: 'android' | 'ios'; notifications: boolean; fullScreen?: boolean; exact?: boolean; widgets: number; widgetPin: boolean; sdk?: number;
+  notifState?: 'prompt' | 'denied' | 'granted'; focus?: boolean | null; alarmKit?: 'prompt' | 'denied' | 'granted' | null; widgetSupported?: boolean;
+};
 const WorkinNative = registerPlugin<WorkinNativePlugin>('WorkinNative');
 export async function nativeCaps(): Promise<string[]> {
   if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('WorkinNative')) return [];
@@ -69,12 +75,29 @@ export async function alarmDeviceStatus() {
 /** 안드로이드 14+ '전체화면 알림 허용' 설정 화면(그 아래 버전은 앱 알림 설정) */
 export const openAlarmSettings = () => WorkinNative.openAlarmSettings();
 const PERMISSIONS_CAP = 'android-permissions-1';
-/** #528 처음 시작 권한 상태 — 앱 1.1.3 안드로이드('android-permissions-1')만, 그 밖(웹·옛 앱·아이폰)은 null */
+const IOS_PERMISSIONS_CAP = 'ios-permissions-1';
+const nativePerms = async () => (await hasCap(PERMISSIONS_CAP)) || (await hasCap(IOS_PERMISSIONS_CAP));
+const isIos = () => Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
+/** #528 처음 시작 권한 상태 — 앱 1.1.3 안드로이드('android-permissions-1')·아이폰 네이티브('ios-permissions-1').
+ *  결정 15-27: 아이폰 앱은 네이티브 메서드가 없어도(지금 1.1.x) 알림 허용 한 줄만 — 푸시 플러그인 권한으로 읽음. 웹·옛 안드로이드 앱은 null */
 export async function permissionStatus(): Promise<PermissionStatus | null> {
-  if (!(await hasCap(PERMISSIONS_CAP))) return null;
-  try { return await WorkinNative.permissionStatus(); } catch { return null; }
+  if (await nativePerms()) { try { return await WorkinNative.permissionStatus(); } catch { return null; } }
+  if (!isIos() || !Capacitor.isPluginAvailable('FirebaseMessaging')) return null;
+  try {
+    const r = (await FirebaseMessaging.checkPermissions()).receive;
+    return { platform: 'ios', notifications: r === 'granted', notifState: r === 'granted' ? 'granted' : r === 'denied' ? 'denied' : 'prompt', focus: null, alarmKit: null, widgetSupported: false, widgets: 0, widgetPin: false };
+  } catch { return null; }
 }
-export async function openNotificationSettings() { if (await hasCap(PERMISSIONS_CAP)) await WorkinNative.openNotificationSettings(); }
+/** 앱 알림 설정 화면 — 네이티브 메서드가 없는 아이폰 앱은 'app-settings:'(Capacitor 가 앱 밖 주소를 시스템에 넘김 → 설정 › 워크인) */
+export async function openNotificationSettings() {
+  if (await nativePerms()) { await WorkinNative.openNotificationSettings(); return; }
+  if (isIos()) window.location.href = 'app-settings:';
+}
+/** 15-27 아이폰 잠금 화면 알람(AlarmKit, iOS 26+) 허용 창 — 'ios-alarmkit-1' 앱만, 아니면 null */
+export async function requestAlarmAuthorization(): Promise<string | null> {
+  if (!(await hasCap('ios-alarmkit-1'))) return null;
+  try { return (await WorkinNative.requestAlarmAuthorization()).state; } catch { return null; }
+}
 /** '워크인 오늘' 위젯 추가 시스템 창 — 런처가 지원하지 않으면 false(길게 눌러 추가 안내) */
 export async function requestPinWidget(): Promise<boolean> {
   if (!(await hasCap(PERMISSIONS_CAP))) return false;
@@ -225,7 +248,8 @@ export async function initNative(router: Router) {
   if (perm.receive === 'granted') { await enableNativePush().catch(() => {}); return; }
   let asked = false;
   try { asked = localStorage.getItem('wos_push_asked') === '1'; } catch {}
-  if (perm.receive !== 'denied' && !asked && !(await hasCap(PERMISSIONS_CAP))) window.dispatchEvent(new Event('wos-push-ask')); // #528: 권한 안내 창이 있는 앱은 그 창이 알림 허용까지 맡음
+  // #528: 권한 안내 창이 있는 앱(안드로이드 1.1.3+ · 결정 15-27 아이폰)은 그 창이 알림 허용까지 맡음 — 옛 안드로이드 앱만 예전 '알림 받기' 창
+  if (perm.receive !== 'denied' && !asked && !(await hasCap(PERMISSIONS_CAP)) && !isIos()) window.dispatchEvent(new Event('wos-push-ask'));
 }
 
 /** 앱 알림 켜기: 권한 요청 → FCM 토큰 등록. 거부되면 오류 */
