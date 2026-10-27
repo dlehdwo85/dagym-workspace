@@ -4,10 +4,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { ArrowLeft, AtSign, BarChart3, CalendarPlus, Check, ChevronLeft, ChevronRight, Crown, Headphones, Lock, MapPin, Mic, Pencil, Play, Bell, BellOff, Camera, Image as ImageIcon, ChevronDown, ChevronUp, CornerUpLeft, Download, FileText, Forward, Hash, Info, Link2, Loader2, LogOut, Maximize2, MessageCircle, MoreHorizontal, Paperclip, Pin, PinOff, Plus, Search, Send, SmilePlus, SquarePen, Sticker as StickerIcon, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
-import { api, broadcastRefresh, useApi } from '@/components/client';
+import { ApiError, api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { cameBack } from '@/components/urlState';
 import { DropZone, UploadProgress, putFile } from '@/components/upload';
+import { holdScreen } from '@/components/awake';
+import { usePickWait } from '@/components/pickWait';
+import { shrinkImage } from '@/components/shrink';
+import { CHAT_FILES_MAX } from '@/lib/chatShared';
 import { Avatar, Button, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { VoiceButton } from '@/components/voice';
@@ -561,24 +565,52 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
     else { stopSpeaking(); setVPhase('idle'); setHeard(''); }
   }
   useEffect(() => { if (voice) keepScreenOn(true); return () => { keepScreenOn(false); stopSpeaking(); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const pick = usePickWait(); // 213차: 아이폰은 사진을 많이 고르면 [추가] 뒤 몇 분 동안 아무 표시가 없음 → '준비 중' 띠
   async function upload(files: FileList | File[]) {
-    const list = Array.from(files).slice(0, 30);
+    pick.stop();
+    // 213차(대표 10/27 아이폰 147장 '안 보내짐'): 예전엔 30장이 넘으면 나머지를 말없이 버림 → 한 번에 CHAT_FILES_MAX(200)장까지, 넘으면 알림
+    const all = Array.from(files); const list = all.slice(0, CHAT_FILES_MAX);
+    if (all.length > list.length) toast.info(`한 번에 ${CHAT_FILES_MAX}개까지 보냅니다 — 나머지 ${all.length - list.length}개는 다시 골라 주세요`);
     if (!list.length) return;
     // B8 사진·영상을 여러 장 고르면 한 묶음(대화창 한 칸·알림 1번·안 읽은 수 1)
     const media = list.filter((f) => /^(image|video)\//.test(f.type));
     const batch = media.length > 1 ? uuid() : null;
     setProg(list.map((f) => ({ name: f.name, pct: 0 })));
-    for (const [n, f] of list.entries()) {
+    const upd = (n: number, patch: { pct?: number; error?: string }) => setProg((x) => x.map((y, j) => (j === n ? { ...y, ...patch } : y)));
+    // 213차: 사진은 줄여서(업무 첨부와 같이 긴 변 1600px — 한 번에 한 장), 올리기는 3개씩 함께·일시 실패는 한 번 더, 메시지는 고른 순서대로. 그동안 화면 꺼짐 막기
+    const release = list.length > 3 ? await holdScreen() : null;
+    let shrinking: Promise<unknown> = Promise.resolve(); let running = 0; const waiting: (() => void)[] = [];
+    const retryable = (e: unknown) => !(e instanceof ApiError) || e.status >= 500 || e.status === 429;
+    const put1 = async (raw: File, n: number) => {
+      while (running >= 3) await new Promise<void>((r) => waiting.push(r));
+      running++;
       try {
+        const f = /^image\//.test(raw.type) ? (await (shrinking = shrinking.then(() => shrinkImage(raw), () => shrinkImage(raw)))) as File : raw;
         const name = f.name || `붙여넣은 이미지.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`;
-        const t = await api(`/api/chat/rooms/${id}/files`, { body: { fileName: name, mime: f.type || 'application/octet-stream', size: f.size } });
-        const { uploadId } = await putFile(t.upload, f, (pct) => setProg((x) => x.map((y, j) => (j === n ? { ...y, pct } : y))));
-        const file = { key: t.key, name, mime: f.type || 'application/octet-stream', size: f.size, ...(uploadId ? { uploadId } : {}) }; // #109: 영상 조각 업로드면 서버가 합침
-        const inBatch = batch && media.includes(f);
-        const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body: '', file, ...(inBatch ? { batch, batchSize: media.length } : {}) } });
-        afterSend(r.id, { file_name: name, file_mime: file.mime, file_size: f.size, batch_id: inBatch ? batch : null });
-      } catch (er: any) { setProg((x) => x.map((y, j) => (j === n ? { ...y, error: er.message } : y))); }
-    }
+        for (let tryN = 0; ; tryN++) {
+          try {
+            const t = await api(`/api/chat/rooms/${id}/files`, { body: { fileName: name, mime: f.type || 'application/octet-stream', size: f.size } });
+            const { uploadId } = await putFile(t.upload, f, (pct) => upd(n, { pct }));
+            return { name, size: f.size, file: { key: t.key, name, mime: f.type || 'application/octet-stream', size: f.size, ...(uploadId ? { uploadId } : {}) } }; // #109: 영상 조각 업로드면 서버가 합침
+          } catch (e) { if (tryN >= 1 || !retryable(e)) throw e; upd(n, { pct: 0 }); await new Promise((r) => setTimeout(r, 1500)); }
+        }
+      } catch (er: any) { upd(n, { error: er.message }); return null; }
+      finally { running--; waiting.shift()?.(); }
+    };
+    const ups = list.map((f, n) => put1(f, n));
+    let failed = 0;
+    try {
+      for (const [n, p] of ups.entries()) {
+        const u = await p;
+        if (!u) { failed++; continue; }
+        try {
+          const inBatch = batch && media.includes(list[n]);
+          const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body: '', file: u.file, ...(inBatch ? { batch, batchSize: media.length } : {}) } });
+          afterSend(r.id, { file_name: u.name, file_mime: u.file.mime, file_size: u.size, batch_id: inBatch ? batch : null });
+        } catch (er: any) { upd(n, { error: er.message }); failed++; }
+      }
+    } finally { release?.(); }
+    if (failed && list.length > 5) toast.error(`${list.length}개 중 ${failed}개를 보내지 못했습니다 — 진행 목록에서 이유를 보고 다시 보내 주세요`);
     if (fileRef.current) fileRef.current.value = '';
     if (camRef.current) camRef.current.value = '';
     if (galleryRef.current) galleryRef.current.value = '';
@@ -896,6 +928,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
         {(unseen > 0 || detached) && <button type="button" onClick={detached ? goLatest : toBottom} className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-pop" data-testid="chat-new-below">{unseen > 0 ? `새 메시지 ${unseen} ↓` : '최신 메시지로 ↓'}</button>}
         </div>
         <div className="h-5 bg-slate-50/60 px-3 text-xs text-ink-3" aria-live="polite" data-testid="chat-typing">{typing.length ? `${typing.join(', ')} 님이 입력 중…` : ''}</div>
+        {pick.node && <div className="px-3 pt-2">{pick.node}</div>}
         <UploadProgress items={prog} />
         {replyTo && (
           <div className="flex items-center gap-2 border-t border-line bg-teal-50/60 px-3 py-1.5 text-xs" data-testid="chat-replying">
@@ -940,9 +973,9 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
             // C13 입력창 [+]: 사진·카메라·파일·투표·일정·업무·스티커·음성 모드(휴대폰은 여기서, PC 는 📎·😊·@ 도 그대로)
             <div className="absolute bottom-full left-2 right-2 z-20 mb-1 grid grid-cols-4 gap-1 rounded-card border border-line bg-white p-2 shadow-pop sm:right-auto sm:w-80" data-testid="chat-plus-panel" onClick={() => setPlusOpen(false)}>
               {([
-                ['photo', '사진·영상', ImageIcon, () => galleryRef.current?.click(), 'bg-sky-50 text-sky-700'],
-                ['camera', '카메라', Camera, () => camRef.current?.click(), 'bg-teal-50 text-teal-700'],
-                ['file', '파일', Paperclip, () => fileRef.current?.click(), 'bg-slate-100 text-slate-700'],
+                ['photo', '사진·영상', ImageIcon, () => pick.open(galleryRef), 'bg-sky-50 text-sky-700'],
+                ['camera', '카메라', Camera, () => pick.open(camRef), 'bg-teal-50 text-teal-700'],
+                ['file', '파일', Paperclip, () => pick.open(fileRef), 'bg-slate-100 text-slate-700'],
                 ['poll', '투표', BarChart3, () => setPollOpen(true), 'bg-violet-50 text-violet-700'],
                 ['event', '일정', CalendarPlus, () => { const today = dayKey(new Date().toISOString()); setEventDraft({ title: '', date: today, time: null }); }, 'bg-amber-50 text-amber-700'],
                 ['task', '업무', SquarePen, () => setNewTask(true), 'bg-rose-50 text-rose-700'],
@@ -956,7 +989,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
             </div>
           )}
           <button type="button" className={iconBtn} onClick={() => { setPlusOpen((v) => !v); setEmojiOpen(false); }} aria-label="더 보내기(사진·파일·투표·일정·업무)" aria-expanded={plusOpen} title="사진·파일·투표·일정·업무" data-testid="chat-plus"><Plus className={cx('size-[18px] transition-transform', plusOpen && 'rotate-45')} /></button>
-          <button type="button" className={cx(iconBtn, 'hidden sm:inline-flex')} onClick={() => fileRef.current?.click()} aria-label="파일 보내기" title="파일 보내기"><Paperclip className="size-[18px]" /></button>
+          <button type="button" className={cx(iconBtn, 'hidden sm:inline-flex')} onClick={() => pick.open(fileRef)} aria-label="파일 보내기" title="파일 보내기"><Paperclip className="size-[18px]" /></button>
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-file" />
           <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
           <input ref={galleryRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} data-testid="chat-gallery-input" />

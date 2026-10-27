@@ -44,6 +44,16 @@ describe('메신저 2차', () => {
     await ctx.staffA.client.ok('POST', `/api/chat/rooms/${P.g}/read`, {});
   });
 
+  test('213차(대표 10/27 아이폰 사진 147장): 한 묶음 장 수는 200까지(예전 30 — 화면이 넘는 사진을 말없이 버렸음) · 201 이면 400 · 알림 글 "사진 147장"', async () => {
+    const batch = crypto.randomUUID();
+    const f = await up(ctx.owner, P.g, '많은사진.jpg', 'image/jpeg');
+    await ctx.owner.ok('POST', `/api/chat/rooms/${P.g}/messages`, { body: '', file: f, batch, batchSize: 147 });
+    assert.equal(await lastChatNotif(ctx.staffA.id, P.g), '김대표: 📷 사진 147장');
+    const f2 = await up(ctx.owner, P.g, '넘침.jpg', 'image/jpeg');
+    assert.equal((await ctx.owner.req('POST', `/api/chat/rooms/${P.g}/messages`, { body: '', file: f2, batch: crypto.randomUUID(), batchSize: 201 })).status, 400);
+    await ctx.staffA.client.ok('POST', `/api/chat/rooms/${P.g}/read`, {});
+  });
+
   test('답장 인용 라벨(로컬 10/25 사소 ②): 사진 묶음에 답장하면 reply.mime·n(장 수) — 화면은 파일 이름 대신 "📷 사진 3장" · 글에 답장은 n 1', async () => {
     const batch = crypto.randomUUID(); const ids = [];
     for (const n of ['x.jpg', 'y.jpg', 'z.jpg']) {

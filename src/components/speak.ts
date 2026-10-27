@@ -1,15 +1,14 @@
 'use client';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { listen, voiceAvailable, type VoiceResult } from './voice';
+import { holdScreen } from './awake';
 
 /**
  * V38 3 음성 대화(운전 중): 소리로 읽어 주기(TTS)·화면 꺼짐 방지·한 번 듣기.
  * 앱 = @capacitor-community/text-to-speech·keep-awake(로컬 7063bea 설치), 웹 = speechSynthesis·Wake Lock. 둘 다 없으면 조용히 건너뜀.
  */
 interface TtsPlugin { speak(o: { text: string; lang?: string; rate?: number; pitch?: number; volume?: number; category?: string }): Promise<void>; stop(): Promise<void> }
-interface AwakePlugin { keepAwake(): Promise<void>; allowSleep(): Promise<void> }
 const Tts = registerPlugin<TtsPlugin>('TextToSpeech');
-const Awake = registerPlugin<AwakePlugin>('KeepAwake');
 const nativeTts = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('TextToSpeech');
 
 declare global { interface Window { __spoken?: string[] } }
@@ -34,15 +33,11 @@ export function stopSpeaking() {
   try { window.speechSynthesis?.cancel(); } catch { /* 없음 */ }
 }
 
-let wake: { release(): Promise<void> } | null = null;
-/** 음성 모드 동안 화면이 꺼지지 않게 */
+let voiceHold: (() => void) | null = null;
+/** 음성 모드 동안 화면이 꺼지지 않게 — 213차: 사진 올리기와 함께 잡아도 서로 풀지 않게 awake.ts 를 같이 씀 */
 export async function keepScreenOn(on: boolean) {
-  try {
-    if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('KeepAwake')) { await (on ? Awake.keepAwake() : Awake.allowSleep()); return; }
-    const wl = (navigator as any).wakeLock;
-    if (on && wl && !wake) wake = await wl.request('screen');
-    if (!on && wake) { await wake.release(); wake = null; }
-  } catch { /* 지원 안 함 */ }
+  if (on && !voiceHold) { const held = holdScreen(); voiceHold = () => { held.then((release) => release()); }; await held; }
+  else if (!on && voiceHold) { voiceHold(); voiceHold = null; }
 }
 
 /** 한 번 듣고 글자로(못 들으면 null) */

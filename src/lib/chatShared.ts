@@ -28,6 +28,8 @@ export const ALL_ID = '00000000-0000-0000-0000-000000000000';
 /** 투표 보기 수 */
 export const POLL_MIN = 2;
 export const POLL_MAX = 10;
+/** 213차(대표 10/27 아이폰 사진 147장): 한 번에 보내는 파일 수(예전 30 — 넘는 것을 말없이 버렸음). 묶음 장 수(batchSize)도 같은 상한 */
+export const CHAT_FILES_MAX = 200;
 
 /** 일정 카드 시각 글: '10월 25일 (토) 오후 2:00~오후 3:00' · 종일 '10월 25일 (토) 종일'(끝은 다음 날 0시 = 그날까지) — 서울 기준 */
 const kday = (d: Date) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short' }).format(d);
