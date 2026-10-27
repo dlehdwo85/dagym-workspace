@@ -27,7 +27,7 @@ export const GET = handler(async ({ user }) => {
   });
   return {
     spaces, modeLabels: SPACE_MODE_LABEL, canSetCompany: isAdmin(user),
-    types: Object.entries(NOTIFICATION_TYPES).filter(([type]) => type !== 'server_error' || user.platformAdmin).map(([type, label]) => {
+    types: Object.entries(NOTIFICATION_TYPES).filter(([type]) => (type !== 'server_error' || user.platformAdmin) && (type !== 'meeting_lobby' || process.env.FEATURE_MEETINGS === '1')).map(([type, label]) => { // 218차: 화상회의 스위치가 꺼져 있으면 대기실 알림 설정도 숨김
       const p = prefs.find((x) => x.type === type);
       return { type, label, inApp: p?.in_app ?? true, push: p?.push ?? defaultPush(type), pushDefault: defaultPush(type) };
     }),

@@ -74,5 +74,6 @@ export const NOTIFICATION_TYPES = {
   support_weekly: '지원사업 주간 묶음(월요일 아침 — 이번 주 맞는 공고·AI 자동 판단, 관리자·관심/준비 담당)',
   sales_collector_alert: '영업 DB 수집 누락 위험(원천이 24시간 넘게 성공 없음·2회 연속 실패 — 영업 관리자·플랫폼 운영자, 하루 한 번)',
   sales_research_weekly: '영업 후속조사 주간 묶음(월요일 아침 — 이번 주 조사할 준공·입주 시설, 담당)',
+  meeting_lobby: '화상회의 대기실(손님·직원이 들어오길 기다림 — 주최자·공동 주최자)',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;
