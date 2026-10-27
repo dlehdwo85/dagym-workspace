@@ -8,26 +8,11 @@ import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from 
 import { useBackClose } from './backClose';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
 import { AttachEditModal, editModeOf } from './AttachEdit';
+import { holdScreen } from './awake';
+import { usePickWait } from './pickWait';
+import { shrinkImage } from './shrink';
 
-/** V8 5번: 사진은 올리기 전에 긴 변 1600px·JPEG 85% 로 줄인다(휴대폰 원본 5~10MB → 수백 KB). GIF·작은 사진·실패 시 원본 */
-export async function shrinkImage(file: File): Promise<File> {
-  if (!/^image\/(jpeg|png|webp|heic|heif)$/i.test(file.type) || file.size < 400 * 1024 || typeof createImageBitmap !== 'function') return file;
-  try {
-    const bmp = await createImageBitmap(file);
-    // 대표 10/27(휴대폰 사진 150장 안 올라감): 풀어 놓은 사진·그림판을 바로 비움 — 안 비우면 장수가 많을 때 휴대폰 메모리가 모자라 화면이 멈춤
-    const c = document.createElement('canvas');
-    try {
-      const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
-      if (scale === 1 && file.size < 1.5 * 1024 * 1024) return file;
-      c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
-      c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
-    } finally { bmp.close(); }
-    const blob: Blob | null = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
-    c.width = 0; c.height = 0;
-    if (!blob || blob.size >= file.size) return file;
-    return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg', lastModified: file.lastModified });
-  } catch { return file; }
-}
+export { shrinkImage } from './shrink'; // 213차: 메신저도 쓰므로 작은 파일로 옮김(예전 가져오기 그대로)
 
 /** 일시적인 실패(연결 끊김·서버 5xx·잠시 막힘)만 한 번 더 — 크기 초과·실행 파일 같은 거절은 바로 실패 */
 const retryable = (e: unknown) => !(e instanceof ApiError) || e.status >= 500 || e.status === 429;
@@ -35,14 +20,14 @@ const retryable = (e: unknown) => !(e instanceof ApiError) || e.status >= 500 ||
  * V12 9번: 업무·일정 첨부 올리기(여러 개·진행률·알기 쉬운 실패 원인) — 첨부 칸·댓글 칸 끌어 놓기 공용.
  * 대표 10/27(휴대폰 사진 150장): 3개씩 함께 올리고(사진 줄이기는 한 장씩), 일시 실패는 한 번 더, 올리는 동안 화면이 꺼지지 않게,
  * 실패 알림은 장수가 많으면 끝에 한 번만(몇 장 실패했는지·이름은 진행 목록에서)
+ * 213차(아이폰 147장): 화면 꺼짐 막기는 앱이면 keep-awake 플러그인(아이폰 앱 화면은 웹 Wake Lock 이 없어 화면이 꺼지면 올리기가 멈춤)
  */
 export async function uploadTaskFiles(list: File[], target: { taskId?: string; eventId?: string }, setProg: (f: (x: { name: string; pct: number; error?: string }[]) => { name: string; pct: number; error?: string }[]) => void) {
   const start = list.map((f) => ({ name: f.name, pct: 0 }));
   setProg(() => start);
   const upd = (i: number, patch: Partial<{ pct: number; error: string }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
   const many = list.length > 3;
-  let lock: { release: () => Promise<void> } | null = null;
-  if (many) lock = await (navigator as any).wakeLock?.request('screen').catch(() => null) ?? null;
+  const release = many ? await holdScreen() : null;
   let shrinking: Promise<unknown> = Promise.resolve(); // 사진 줄이기는 한 번에 한 장(메모리)
   const one = async (n: number) => {
     const raw = list[n];
@@ -66,7 +51,7 @@ export async function uploadTaskFiles(list: File[], target: { taskId?: string; e
       catch (e: any) { upd(n, { error: e.message }); failed.push(list[n].name); if (!many) toast.error(`${list[n].name}: ${e.message}`); }
     }
   };
-  try { await Promise.all(Array.from({ length: Math.min(3, list.length) }, worker)); } finally { await lock?.release().catch(() => {}); }
+  try { await Promise.all(Array.from({ length: Math.min(3, list.length) }, worker)); } finally { release?.(); }
   if (failed.length && many) toast.error(`${list.length}개 중 ${failed.length}개를 올리지 못했습니다 — 진행 목록에서 이유를 보고 다시 올려 주세요`);
   if (ok) toast.ok(`${ok}개 첨부 완료`);
   if (ok === list.length) setTimeout(() => setProg(() => []), 1500);
@@ -114,7 +99,9 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   const vidRef = useRef<HTMLInputElement>(null); // #109 영상 촬영
 
   const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
+  const pick = usePickWait(); // 213차: 아이폰은 사진을 많이 고르면 [추가] 뒤 몇 분 동안 아무 표시가 없음 → '준비 중' 띠
   async function upload(files: FileList | null) {
+    pick.stop();
     if (!files?.length) return;
     setBusy('올리는 중…');
     await uploadTaskFiles(Array.from(files), { taskId, eventId }, setProg);
@@ -217,17 +204,18 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
         ))}
         {!items.length && <li className="text-xs text-ink-3">첨부된 자료가 없습니다</li>}
       </ul>
-      {canEdit && <div className="mt-2"><DropHint onClick={() => fileRef.current?.click()} disabled={!!busy} /></div>}
+      {canEdit && <div className="mt-2"><DropHint onClick={() => pick.open(fileRef)} disabled={!!busy} /></div>}
+      {pick.node && <div className="mt-2">{pick.node}</div>}
       <div className="mt-2 flex flex-wrap gap-1.5">
         <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="file-input" />
         <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
         <input ref={albumRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="album-input" />
         <input ref={vidRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => upload(e.target.files)} data-testid="video-input" />
-        <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={!!busy}><Paperclip />파일 첨부</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(fileRef)} disabled={!!busy}><Paperclip />파일 첨부</Button>
         {taskId && <Button size="sm" variant="secondary" onClick={() => setLibOpen(true)} disabled={!!busy} title="자료실에 있는 파일을 이 업무에 연결(복사 아님, 자료실 권한 그대로)" data-testid="att-from-library"><FolderOpen />자료실에서</Button>}
-        <Button size="sm" variant="secondary" onClick={() => camRef.current?.click()} disabled={!!busy}><Camera />사진 촬영</Button>
-        <Button size="sm" variant="secondary" onClick={() => albumRef.current?.click()} disabled={!!busy}><ImageIcon />사진·영상</Button>
-        <Button size="sm" variant="secondary" onClick={() => vidRef.current?.click()} disabled={!!busy} className="sm:hidden" title="영상 촬영(100MB 까지)" data-testid="att-video-capture"><Video />영상 촬영</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(camRef)} disabled={!!busy}><Camera />사진 촬영</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(albumRef)} disabled={!!busy} data-testid="att-album"><ImageIcon />사진·영상</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(vidRef)} disabled={!!busy} className="sm:hidden" title="영상 촬영(100MB 까지)" data-testid="att-video-capture"><Video />영상 촬영</Button>
         <Button size="sm" variant="secondary" onClick={() => setLinkOpen(true)}><Link2 />문서 링크 연결</Button>
         {busy && <span className="inline-flex items-center gap-1.5 text-xs text-ink-2"><Loader2 className="size-3.5 animate-spin" />{busy}</span>}
       </div>

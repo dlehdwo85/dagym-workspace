@@ -7,7 +7,7 @@ import { notify } from './notifications';
 import { audit } from './log';
 import { completeMultipart, downloadUrl, getObject, maxUploadBytes, objectSize, putObject, tooLargeMsg, uploadTargetFor } from './storage';
 import type { SessionUser } from './types';
-import { ALL_ID, POLL_MAX, POLL_MIN, QUICK_DEFAULT, REACTIONS, stickerOf, whenText } from './chatShared';
+import { ALL_ID, CHAT_FILES_MAX, POLL_MAX, POLL_MIN, QUICK_DEFAULT, REACTIONS, stickerOf, whenText } from './chatShared';
 
 /**
  * V13 10번 사내 메신저. 방 종류: 1:1(dm) · 그룹(group) · 회사 전체(company, 자동) · 업무별(task).
@@ -380,7 +380,7 @@ export const messageInput = z.object({
   replyTo: z.string().regex(/^\d+$/).max(20).optional(),
   /** 메신저 2차 B8: 한 번에 고른 사진·영상(같은 값끼리 한 칸) · 묶음 장 수(알림 글 '사진 3장'용) */
   batch: z.string().uuid().optional(),
-  batchSize: z.number().int().min(1).max(30).optional(),
+  batchSize: z.number().int().min(1).max(CHAT_FILES_MAX).optional(),
   /** B10 회사 기본 스티커 코드 */
   sticker: z.string().max(30).optional(),
   /** B9 투표 */
