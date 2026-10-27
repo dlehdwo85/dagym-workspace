@@ -8,7 +8,9 @@ import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, ref
 import { TeamPath, TeamPicker } from '@/components/TeamPicker';
 import { ROLE_LABEL, type Role } from '@/lib/types';
 import { MenuPermsTab } from '@/components/MenuPerms';
-import { TeamsTab } from '@/components/Teams';
+import { LeadChip, TeamsTab } from '@/components/Teams';
+import { iGa, leadTitle } from '@/lib/orgKinds';
+import { AlertTriangle } from 'lucide-react';
 import { OffboardModal } from '@/components/admin/Offboard';
 import { AssigneeRulesTab } from '@/components/admin/AssigneeRules';
 import { ContractsTab, SendContractModal, type ContractPreset } from '@/components/admin/Contracts'; // #116 전자계약서
@@ -84,8 +86,19 @@ function Users() {
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    try { await api(`/api/admin/users/${edit.id}`, { method: 'PATCH', body: { name: edit.name, title: edit.title, titleShort: edit.title_short ?? null, role: edit.role, status: edit.status === 'invited' ? undefined : edit.status, orgUnitIds: edit.org_unit_ids , ...(edit.teamIds ? { teamIds: edit.teamIds, primaryTeamId: edit.primaryTeamId ?? null } : {})} }); toast.ok('저장했습니다'); setEdit(null); reload(); refreshBadges(); } catch (er: any) { toast.error(er.message); }
+    // #681: 이 사람이 장이던 곳에서 빼면 새 장을 같이 정함(고르지 않으면 '장 없음'으로 남고 알림)
+    const lostIds = new Set(lostLeads(edit).map((t: any) => t.id));
+    const newLeads = Object.entries((edit.newLeads ?? {}) as Record<string, string>).filter(([tid, uid]) => uid && lostIds.has(tid)).map(([teamId, userId]) => ({ teamId, userId }));
+    try {
+      const r = await api(`/api/admin/users/${edit.id}`, { method: 'PATCH', body: { name: edit.name, title: edit.title, titleShort: edit.title_short ?? null, role: edit.role, status: edit.status === 'invited' ? undefined : edit.status, orgUnitIds: edit.org_unit_ids , ...(edit.teamIds ? { teamIds: edit.teamIds, primaryTeamId: edit.primaryTeamId ?? null } : {}), ...(newLeads.length ? { newLeads } : {})} });
+      const empty: { name: string; kind: string }[] = r?.leadless ?? [];
+      if (empty.length) toast.info(`저장했습니다 — ${empty.map((t) => `${t.name}의 ${leadTitle(t.kind)}`).join(', ')}${iGa(leadTitle(empty[empty.length - 1].kind))} 비었습니다. 부서·팀 탭에서 정하세요`);
+      else toast.ok('저장했습니다');
+      setEdit(null); reload(); teamsList.reload(); refreshBadges();
+    } catch (er: any) { toast.error(er.message); }
   }
+  /** #681 편집 중 소속에서 빠지는데 이 사람이 장인 곳 */
+  const lostLeads = (e: any) => { const ids: string[] = e.teamIds ?? (e.teams ?? []).map((t: any) => t.id); return (e.teams ?? []).filter((t: any) => t.lead && !ids.includes(t.id)); };
   async function reset(u: any) {
     try { const r = await api(`/api/admin/users/${u.id}/reset-password`, { body: {} }); setLink(location.origin + r.path); } catch (er: any) { toast.error(er.message); }
   }
@@ -121,7 +134,7 @@ function Users() {
               <tr key={u.id} className={cx(u.status !== 'active' && u.status !== 'invited' && 'text-slate-400')}>
                 <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}{u.title_short ? ` (${u.title_short})` : ''}</div></td>
                 <td className="p-2"><span className="flex items-center gap-1.5"><RoleBadge role={u.role} guest={u.is_demo} size="sm" /><span className="text-xs text-ink-2">{ROLE_LABEL[u.role as Role]}</span></span></td>
-                <td className="p-2 text-xs">{(u.teams ?? []).length ? (u.teams as any[]).map((t, i) => <span key={t.id} className="mr-1.5 inline-flex items-center gap-0.5"><TeamPath path={t.path} />{t.primary && (u.teams as any[]).length > 1 && <span className="rounded bg-brand-50 px-1 text-[10px] text-brand-700">주</span>}{t.lead && <span className="text-[10px] text-amber-700">장</span>}{i < (u.teams as any[]).length - 1 ? '' : ''}</span>) : <span className="text-ink-3">{u.org_unit_ids.map(unitName).join(', ') || '-'}</span>}</td>
+                <td className="p-2 text-xs">{(u.teams ?? []).length ? (u.teams as any[]).map((t, i) => <span key={t.id} className="mr-1.5 inline-flex items-center gap-0.5"><TeamPath path={t.path} />{t.primary && (u.teams as any[]).length > 1 && <span className="rounded bg-brand-50 px-1 text-[10px] text-brand-700">주</span>}{t.lead && <LeadChip kind={t.kind} />}{i < (u.teams as any[]).length - 1 ? '' : ''}</span>) : <span className="text-ink-3">{u.org_unit_ids.map(unitName).join(', ') || '-'}</span>}</td>
                 <td className="p-2" data-testid="user-status">{u.status === 'left' && u.left_at ? `퇴사(${u.left_at.slice(5).replace('-', '/')})` : STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}{u.status === 'left' && u.rejoin_until && u.rejoin_until >= todayK && <div className="text-xs text-slate-400">복직 가능 ~{u.rejoin_until.slice(5).replace('-', '/')}</div>}</td>
                 <td className="p-2 text-xs">{u.last_login_at ? fmtDateTime(u.last_login_at) : '-'}</td>
                 <td className="p-2 text-right whitespace-nowrap">{canEdit && <>
@@ -189,6 +202,23 @@ function Users() {
           <fieldset data-testid="edit-teams"><legend className="mb-1 text-xs font-medium text-slate-600">소속</legend>
             <TeamPicker testid="edit-team" teamIds={edit.teamIds ?? (edit.teams ?? []).map((t: any) => t.id)} primaryTeamId={edit.primaryTeamId ?? (edit.teams ?? []).find((t: any) => t.primary)?.id ?? null}
               onChange={({ teamIds, primaryTeamId }) => setEdit({ ...edit, teamIds, primaryTeamId })} /></fieldset>
+          {lostLeads(edit).length > 0 && (
+            <div className="space-y-1 rounded-input border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900" data-testid="lead-loss">
+              {lostLeads(edit).map((t: any) => {
+                const title = leadTitle(t.kind);
+                const cands = ((teamsList.data?.teams ?? []).find((x: any) => x.id === t.id)?.members ?? []).filter((m: any) => m.id !== edit.id);
+                return (
+                  <div key={t.id} className="flex flex-wrap items-center gap-1.5">
+                    <AlertTriangle className="size-3.5 shrink-0" /><span><b>{t.name}</b>의 {title}{iGa(title)} 비게 됩니다</span>
+                    <select className="h-7 rounded border border-amber-300 bg-white px-1 text-xs" value={edit.newLeads?.[t.id] ?? ''} onChange={(e) => setEdit({ ...edit, newLeads: { ...(edit.newLeads ?? {}), [t.id]: e.target.value } })} aria-label={`${t.name} 새 ${title}`} data-testid="lead-loss-pick">
+                      <option value="">{title} 없이 두기</option>
+                      {cands.map((m: any) => <option key={m.id} value={m.id}>새 {title}: {m.name}</option>)}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <details className="text-xs"><summary className="cursor-pointer text-slate-600">고급 — 접근 가능한 조직</summary><div className="mt-1"><UnitChecks value={edit.org_unit_ids} onChange={(v) => setEdit({ ...edit, org_unit_ids: v })} /></div></details>
           <UserContracts userId={edit.id} />
           <p className="text-xs text-slate-500">사용 중지·퇴사로 바꾸면 모든 기기에서 즉시 로그아웃되고 푸시·Google 동기화도 멈춥니다. 작성한 업무 기록은 남습니다.</p>

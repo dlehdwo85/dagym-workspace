@@ -38,11 +38,13 @@ export async function briefingJob(now = new Date()) {
   if (nowHM >= '22:00') return { sent: 0 };
   const weekend = local.weekday >= 6;
   const [hol] = await sql`select name from holidays where date = ${today}`;
-  const users = await sql<{ id: string; t: string; weekend: boolean }[]>`
-    select u.id, to_char(coalesce(s.briefing_time, time '08:30'), 'HH24:MI') as t, coalesce(s.briefing_weekend, false) as weekend
+  const users = await sql<{ id: string; tenant: string; role: string; t: string; weekend: boolean }[]>`
+    select u.id, u.tenant, u.role, to_char(coalesce(s.briefing_time, time '08:30'), 'HH24:MI') as t, coalesce(s.briefing_weekend, false) as weekend
     from users u left join user_settings s on s.user_id = u.id
-    where u.status = 'active' and not u.is_demo and coalesce(s.briefing_enabled, true)`;
+    where u.status = 'active' and not u.is_demo and coalesce(s.briefing_enabled, true)
+      and not exists (select 1 from notifications n where n.user_id = u.id and n.dedupe_key = 'briefing:' || u.id::text || ':' || ${today})`; // 202차: 오늘 이미 보낸 사람은 다시 세지 않음(15분마다 실행 — DB 부담)
   let sent = 0;
+  const { salesBriefLine } = await import('./sales/leadList');
   for (const u of users) {
     if (nowHM < u.t) continue;
     if ((weekend || hol) && !u.weekend) continue;
@@ -51,9 +53,12 @@ export async function briefingJob(now = new Date()) {
       from tasks t where t.deleted_at is null and ${assignedOpenSql(sql, u.id)} and t.status not in ('done', 'on_hold')
         and (t.due_date <= ${today} or t.start_date <= ${today})`; // #475 공동 담당(내 몫 완료 전)도
     const evs = await eventsOfDay(sql, u.id, today);
-    if (!c.open && !evs.length) continue;
+    // 202차(#461 ⑤): 영업 공간을 쓰는 사람은 진행 중 거래처의 오늘 연락·연락일 지남·다음 행동 없음(대표·관리자는 회사 전체 + 담당 없음)
+    const sales = await salesBriefLine(sql, u, today).catch(() => null);
+    if (!c.open && !evs.length && !sales) continue;
     const first = evs.find((e) => !e.allDay) ?? evs[0];
-    const parts = [`오늘의 일정 ${c.open}건${c.over ? `(기한 지남 ${c.over})` : ''}`, `일정 ${evs.length}건`];
+    const parts = c.open || evs.length ? [`오늘의 일정 ${c.open}건${c.over ? `(기한 지남 ${c.over})` : ''}`, `일정 ${evs.length}건`] : [];
+    if (sales) parts.push(sales);
     // 로컬 10/20 알림 다이어트: 개별 마감 예고 푸시 대신 아침 브리핑에 오늘 마감·기한 지남 업무 이름(최대 3개)
     const dueList = await sql<{ title: string; late: boolean }[]>`select t.title, (t.due_date < ${today}) as late from tasks t where t.deleted_at is null and ${assignedOpenSql(sql, u.id)} and t.status not in ('done', 'on_hold') and t.due_date <= ${today}
       order by t.priority = 'urgent' desc, t.priority = 'high' desc, t.due_date limit 3`;
@@ -81,6 +86,9 @@ export async function buildPersonalReport(userId: string, weekStart: string) {
   const evs: { title: string; day: string }[] = [];
   for (let d = weekStart; d <= weekEnd; d = addDays(d, 1)) for (const e of await eventsOfDay(sql, userId, d)) evs.push({ title: e.title, day: d });
   const today = todaySeoul();
+  // 202차(#461 ⑤): 영업 공간을 쓰는 사람 — 내 담당 진행 중 거래처의 다음 행동 없음·오래 쉼(14일 넘게 연락 없음)
+  const [me] = await sql<{ tenant: string; role: string }[]>`select tenant, role from users where id = ${userId}`;
+  const sales = me ? await (await import('./sales/leadList')).salesWeekLines(sql, { id: userId, tenant: me.tenant, role: me.role }, today).catch(() => null) : null;
   const byProject = new Map<string, string[]>();
   for (const t of done) byProject.set(t.project ?? '프로젝트 없음', [...(byProject.get(t.project ?? '프로젝트 없음') ?? []), t.title]);
   const lines = [
@@ -93,10 +101,11 @@ export async function buildPersonalReport(userId: string, weekStart: string) {
     `■ 다음 주 마감 (${next.length}건)`,
     ...next.map((t) => `  - ${t.title} (${t.due_date})`),
     '',
+    ...(sales?.lines ?? []),
     `■ 이번 주 일정 (${evs.length}건)`,
     ...evs.slice(0, 30).map((e) => `  - ${e.day.slice(5)} ${e.title}`),
   ];
-  return { data: { weekStart, done: done.length, open: open.length, overdue: open.filter((t) => t.due_date && t.due_date < today).length, next: next.length, events: evs.length }, body: lines.join('\n') };
+  return { data: { weekStart, done: done.length, open: open.length, overdue: open.filter((t) => t.due_date && t.due_date < today).length, next: next.length, events: evs.length, ...(sales ? { salesNone: sales.none, salesStale: sales.stale } : {}) }, body: lines.join('\n') };
 }
 
 /** 금요일 16:00(서울) 이후 첫 정기 실행에서 이번 주 초안을 한 번 만든다 (이미 있으면 그대로) */

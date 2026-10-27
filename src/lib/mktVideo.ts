@@ -27,8 +27,12 @@ const FIX_EN: Record<string, string> = { '화면 안 글자': 'remove every visi
 
 export type V2Scene = { k: number; seconds: number; line: string; visualEn: string; screen: { mediaId: string; device: 'phone' | 'laptop' } | null;
   status: HfState | 'pending' | 'timeout'; requestId?: string; statusUrl?: string; submittedAt?: string; key?: string | null; prevKey?: string | null;
-  tries: number; generated?: number; failRetries?: number; regens?: number; error?: string | null; qa?: SceneQa | null; lastIssues?: string[] };
-export type V2Variant = { n: number; scenes: V2Scene[]; mediaId?: string | null; duration?: number | null; notes?: string[]; error?: string | null; renderTries?: number; renderError?: string | null };
+  tries: number; generated?: number; failRetries?: number; regens?: number; error?: string | null; qa?: SceneQa | null; lastIssues?: string[];
+  /** 187차 ⑦ 다시 합성: 한 편짜리 원본에서 이 장면이 시작하는 초(같은 원본을 장면마다 나눠 씀) */
+  start?: number };
+/** source = 187차 ⑦ 한 편짜리 원본(자료실) — 합성 때 길이를 재서 장면으로 나눔 · aspect = 원본 화면 비율(의뢰 종류와 다를 때) */
+export type V2Variant = { n: number; scenes: V2Scene[]; mediaId?: string | null; duration?: number | null; notes?: string[]; error?: string | null; renderTries?: number; renderError?: string | null;
+  source?: { key: string; fileId: string; lines: string[] } | null; aspect?: string | null; origin?: string | null };
 type PlanScene = Pick<V2Scene, 'k' | 'seconds' | 'line' | 'visualEn' | 'screen'>;
 
 /** 장면 계획: AI 장면(3~5초 정수, 3~5개) → 규격 길이(끝 화면 2.5초·겹침 포함)에 맞춘다. AI 가 없으면 메시지로 4장면 */
@@ -56,6 +60,29 @@ export function scenePrompt(sc: { visualEn: string; screen?: unknown }, p: any, 
   return [LOOK, p?.look ? `Look: ${p.look}` : '', p?.character ? `Cast: ${p.character}` : '', `Shot: ${sc.visualEn}`,
     sc.screen ? 'This shot is a calm background plate: uncluttered composition, soft subject, gentle motion.' : '', NO_TEXT, COMPOSITION,
     `Avoid: ${[p?.negativeEn, NEGATIVE].filter(Boolean).join(', ')}`, fix?.length ? `Fix from the previous attempt: ${fix.join('; ')}` : ''].filter(Boolean).join('\n').slice(0, 2400);
+}
+/** 187차 ⑦ 한 편짜리 영상 → 장면 n개(2.5초에 하나, 최대 4) · 자막 줄은 말 빠르기(초당 5음절) 안에 드는 만큼만 앞에서부터.
+ *  장면 k = 원본 [k·(길이−겹침), +길이] — 장면 사이 겹쳐 넘기는 0.4초가 원본의 같은 구간이라 화면이 끊기지 않고 이어짐 */
+export function splitClip(duration: number, lines: string[], syl: (s: string) => number) {
+  const maxN = Math.max(1, Math.min(4, Math.floor(duration / 2.5)));
+  const budget = Math.max(5, (duration - 0.4) * 5);
+  const take: string[] = []; let used = 0;
+  for (const l of lines.map((x) => String(x ?? '').trim()).filter(Boolean)) { const n = syl(l); if (take.length >= maxN || (take.length && used + n > budget)) break; take.push(l); used += n; }
+  const n = Math.max(1, take.length); const seg = (duration + (n - 1) * XFADE) / n;
+  return Array.from({ length: n }, (_, k) => ({ k, start: Math.round(k * (seg - XFADE) * 1000) / 1000, seconds: Math.round(seg * 1000) / 1000, line: take[k] ?? '' }));
+}
+/** 원본 가로·세로 → 화면 비율(모르면 의뢰 종류 비율) */
+export function aspectOf(w: number | null, h: number | null, fallback: string) {
+  if (!w || !h) return fallback;
+  const r = w / h; return r < 0.7 ? '9:16' : r < 0.9 ? '4:5' : r <= 1.1 ? '1:1' : '16:9';
+}
+/** 대표 10/25 22:20 결정 15-15: 끝 화면 행동 권유 = 홈페이지 주소 대신 브랜드 사실 카드의 대표 전화(영상에서 주소는 누를 수 없음). 전화가 없으면 주소 아닌 문구만 */
+export function endCtaOf(rawCta: string, phone: string) {
+  const raw = rawCta.trim(); const tel = phone.trim();
+  const isUrl = /https?:\/\/|www\.|\.(com|kr|net|dev|io|co)(\/|\s|$)/i.test(raw);
+  const cta = tel ? (isUrl || !raw ? `문의 ${tel}` : raw) : (isUrl ? '' : raw);
+  const note = isUrl ? (tel ? `끝 화면 주소 대신 전화번호(${tel})를 넣었습니다` : '끝 화면의 홈페이지 주소를 뺐습니다 — 브랜드 사실 카드에 전화번호를 넣으면 그 번호가 들어갑니다') : null;
+  return { cta, note };
 }
 async function submitScene(sc: V2Scene, p: any, aspect: string, model: string, errors: string[], fix?: string[]) {
   const r = await hfSubmit({ kind: 'video', model, prompt: scenePrompt(sc, p, fix), negative: [p?.negativeEn, NEGATIVE].filter(Boolean).join(', '), aspect, seconds: sc.seconds, idempotencyKey: randomUUID() });
@@ -212,25 +239,33 @@ async function pickBgm(b: any, brandName: string | null, chosen: string | null |
 
 /** 한 편 합성 → 자료실 저장 */
 async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
-  const sql = db(); const spec = KIND_SPEC[b.kind]; const p = b.prompt ?? {}; const d = dimOf(spec.aspect); const notes: string[] = [];
+  const sql = db(); const spec = KIND_SPEC[b.kind]; const p = b.prompt ?? {}; const notes: string[] = [];
   const { getObject } = await import('./storage'); const C = await import('./video/compose');
+  // 같은 저장소 파일은 한 번만 내려받음(187차 ⑦ 한 편짜리 원본을 장면마다 나눠 씀)
+  const got = new Map<string, string>();
+  const fetchKey = async (key: string) => { let f = got.get(key); if (!f) { f = `k${v.n}-${got.size}.mp4`; await writeFile(join(dir, f), await getObject(key)); got.set(key, f); } return f; };
+  if (v.source && !v.scenes.length) { // 187차 ⑦ 한 편짜리 원본 → 길이를 재서 장면으로(자막 한 줄씩)
+    const { mediaInfo } = await import('./video/ffmpeg'); const { syllables } = await import('./mktQuality');
+    const info = await mediaInfo(join(dir, await fetchKey(v.source.key)));
+    if (!info.video || !info.duration) throw new Error('원본 영상의 길이를 읽지 못했습니다');
+    v.aspect = aspectOf(info.width, info.height, spec.aspect);
+    v.scenes = splitClip(info.duration, v.source.lines, syllables).map((s) => ({ ...s, visualEn: '', screen: null, status: 'completed' as const, tries: 0, key: v.source!.key }));
+  }
+  const aspect = v.aspect ?? spec.aspect; const d = dimOf(aspect);
   const [brand] = b.brand_id ? await sql<{ name: string; color: string; video: any; facts: any }[]>`select name, color, video, facts from mkt_brands where id = ${b.brand_id}` : [];
   const kit = brand?.video ?? {};
   // 대표 10/25 22:20 결정 15-15: 끝 화면 행동 권유는 홈페이지 주소 대신 브랜드 사실 카드의 대표 전화(영상에서 주소는 누를 수 없음). 전화가 없으면 주소 아닌 문구만
-  const phone = String(brand?.facts?.phone ?? '').trim();
-  const rawCta = String(kit.cta || p.endCard?.cta || '').trim();
-  const isUrl = /https?:\/\/|www\.|\.(com|kr|net|dev|io|co)(\/|\s|$)/i.test(rawCta);
-  const endCta = phone ? (isUrl || !rawCta ? `문의 ${phone}` : rawCta) : (isUrl ? '' : rawCta);
-  if (isUrl) notes.push(phone ? `끝 화면 주소 대신 전화번호(${phone})를 넣었습니다` : '끝 화면의 홈페이지 주소를 뺐습니다 — 브랜드 사실 카드에 전화번호를 넣으면 그 번호가 들어갑니다');
+  const end = endCtaOf(String(kit.cta || p.endCard?.cta || ''), String(brand?.facts?.phone ?? ''));
+  const endCta = end.cta; if (end.note) notes.push(end.note);
   const scenes: ComposeScene[] = [];
   for (const s of v.scenes) {
-    const file = `c${v.n}-${s.k}.mp4`; await writeFile(join(dir, file), await getObject(s.key!));
+    const file = await fetchKey(s.key!);
     let screenPng: string | null = null;
     if (s.screen?.mediaId) {
       const img = await libBytes(b.tenant, s.screen.mediaId, /^image\//);
       if (img) { screenPng = `dev${v.n}-${s.k}.png`; await writeFile(join(dir, screenPng), await C.deviceMock(img.data, s.screen.device, d)); } else notes.push(`장면 ${s.k + 1} 화면 캡처를 찾지 못해 합성하지 않았습니다`);
     }
-    scenes.push({ file, seconds: s.seconds, line: s.line, screenPng });
+    scenes.push({ file, seconds: s.seconds, line: s.line, screenPng, start: s.start ?? 0 });
   }
   await mkdir(join(dir, 'fonts'), { recursive: true }); let family = 'Noto Sans KR';
   const font = await libBytes(b.tenant, kit.fontFileId, /font|\.(otf|ttf)$/i);
@@ -244,15 +279,16 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
   if (lg) { logo = 'logo.png'; await writeFile(join(dir, logo), await C.logoPng(lg.data, d)); } else if (kit.logoFileId) notes.push('끝 화면 로고 파일을 찾지 못했습니다');
   const nar = await narrate(b, v, dir, notes);
   const bgm = await pickBgm(b, brand?.name ?? null, p.bgmId, dir, notes);
-  const out = await C.composeVideo({ dir, aspect: spec.aspect, scenes, narration: nar.list, bgm, font: { dir: 'fonts', family }, out: `out-${v.n}.mp4`,
+  const out = await C.composeVideo({ dir, aspect, scenes, narration: nar.list, bgm, font: { dir: 'fonts', family }, out: `out-${v.n}.mp4`,
     end: { seconds: END_SEC, color: kit.endColor || brand?.color || '#111111', headline: kit.headline || p.endCard?.headline || brand?.name || '', cta: endCta, logoPng: logo } });
   const data = await readFile(join(dir, out.file));
   const actor = await actorFor(b.created_by);
   const { saveGeneratedFile } = await import('./library');
-  const title = `${spec.label} 영상${b.quantity > 1 ? ` ${v.n + 1}` : ''} — ${String(b.message).slice(0, 30)}`;
-  const f = await saveGeneratedFile(actor, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.mp4`, mime: 'video/mp4', data, title, folder: '마케팅', tags: ['제작의뢰실', 'AI 생성', '합성'], source: 'ai', space: 'marketing',
-    meta: { video: { pipeline: 'v2', scenes: v.scenes.length, duration: out.duration, narration: nar.provider, bgm: bgm?.title ?? null, font: family } } });
-  return { mediaId: f.id, duration: out.duration, notes: [...notes, ...out.notes], audio: { narration: nar.provider, chars: nar.chars, bgm: bgm?.title ?? null } };
+  const reuse = r.reuse ?? null; // 187차 ⑦ 다시 합성 — 원본 영상·원장 줄을 meta 에(다시 합성 목록이 이 파일을 원본으로 다시 고르지 않게)
+  const title = `${spec.label} 영상${b.quantity > 1 ? ` ${v.n + 1}` : ''} — ${String(b.message).slice(0, 30)}${reuse ? ' (다시 합성)' : ''}`;
+  const f = await saveGeneratedFile(actor, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.mp4`, mime: 'video/mp4', data, title, folder: '마케팅', tags: ['제작의뢰실', 'AI 생성', '합성', ...(reuse ? ['다시 합성'] : [])], source: 'ai', space: 'marketing',
+    meta: { video: { pipeline: 'v2', scenes: v.scenes.length, duration: out.duration, narration: nar.provider, bgm: bgm?.title ?? null, font: family, ...(reuse ? { reuse: { ledger: reuse.ledger, from: v.origin ?? v.source?.fileId ?? null } } : {}) } } });
+  return { mediaId: f.id, duration: out.duration, notes: [...notes, ...out.notes], audio: { narration: nar.provider, chars: nar.chars, bgm: bgm?.title ?? null }, endCta };
 }
 
 /** 검수·합성 한 걸음(합성 함수에서). 잠금(renderAt 6분)으로 동시에 둘이 돌지 않게, 시간이 모자라면 다음 호출이 남은 편을 이어받는다 */
@@ -290,7 +326,7 @@ export async function renderStep(briefId: string, budgetMs = Number(process.env.
     for (const v of r.variants as V2Variant[]) {
       if (v.error || v.mediaId) continue;
       if (Date.now() - t0 > budgetMs - 90_000) break; // 남은 편은 다음 호출에서
-      try { const o = await renderVariant(b, r, v, dir); v.mediaId = o.mediaId; v.duration = o.duration; v.notes = o.notes; v.renderError = null; r.audio = o.audio; }
+      try { const o = await renderVariant(b, r, v, dir); v.mediaId = o.mediaId; v.duration = o.duration; v.notes = o.notes; v.renderError = null; r.audio = o.audio; r.endCta = o.endCta; }
       catch (e: any) { v.renderTries = (v.renderTries ?? 0) + 1; v.renderError = String(e?.message ?? e).slice(0, 300); if (v.renderTries >= 2) v.error = `합성 실패: ${v.renderError}`; }
       await save(briefId, r);
     }
@@ -315,9 +351,17 @@ async function finalize(b: any, r: any) {
   const notes = [...new Set(variants.flatMap((v) => v.notes ?? []))];
   const actor = await actorFor(b.created_by);
   const { addVersion } = await import('./marketing');
-  const scenesN = variants[0]?.scenes.length ?? 0;
-  const ver = await addVersion(actor, b.content_id, { body: p.caption ?? b.message, mediaIds, note: `제작의뢰실 영상 ${mediaIds.length}편(장면 ${scenesN}개 합성 · ${r.model}) · ${review.length ? `사람 검수 필요 ${review.length}곳` : 'AI 검수 통과'}` });
+  const scenesN = variants[0]?.scenes.length ?? 0; const reuse = r.reuse ?? null;
+  // 187차 ⑦ 다시 합성: 새로 만든 것 없음(생성 크레딧 0) — 들어간 것만 정직하게(자막 줄이 있을 때만 '자막', 전화가 들어갔을 때만 '끝 화면 전화')
+  const reuseNote = () => { const subs = variants.some((v) => v.scenes.some((x) => x.line.trim())); const tel = /\d{2,4}-\d{3,4}|\d{8,11}/.test(String(r.endCta ?? ''));
+    return `기존 영상 새 방식으로 다시 합성(생성 크레딧 0) · ${[subs ? '자막' : '', tel ? '끝 화면 전화' : '끝 화면', r.audio?.narration ? '내레이션' : '', r.audio?.bgm ? '배경음' : ''].filter(Boolean).join('·')}`; };
+  const ver = await addVersion(actor, b.content_id, { body: p.caption ?? b.message, mediaIds, note: reuse ? reuseNote() : `제작의뢰실 영상 ${mediaIds.length}편(장면 ${scenesN}개 합성 · ${r.model}) · ${review.length ? `사람 검수 필요 ${review.length}곳` : 'AI 검수 통과'}` });
   await sql`update mkt_contents set rationale = coalesce(rationale, '{}'::jsonb) || ${sql.json({ qa: { needsHuman: review.length > 0, issues: review.slice(0, 12), notes: notes.slice(0, 8), at: new Date().toISOString() } } as never)} where id = ${b.content_id}`;
+  if (reuse) { // 보관(10/25 전면 정리)했던 글이면 보관 표시를 지움 — 새 버전이 승인함에 올라감. 크레딧 원장은 그대로(새로 생성한 것 없음)
+    await sql`update mkt_contents set quality = (coalesce(quality, '{}'::jsonb) - 'archived_from' - 'archived_at' - 'archived_reason' - 'archived_by') || ${sql.json({ reused: { at: new Date().toISOString(), ledger: reuse.ledger, version: (ver as any)?.version ?? null } } as never)} where id = ${b.content_id}`;
+    await save(b.id, { ...r, stage: 'done', mediaIds, review, notes, renderAt: null }, { status: 'review', error: variants.some((v) => v.error) ? variants.map((v) => v.error).filter(Boolean).join(' / ').slice(0, 500) : null });
+    return { status: 'review', stage: 'done', mediaIds };
+  }
   const planned = variants.reduce((a, v) => a + v.scenes.reduce((x, s) => x + s.seconds, 0), 0);
   const used = variants.reduce((a, v) => a + v.scenes.reduce((x, s) => x + s.seconds * Math.max(1, s.generated ?? 1), 0), 0); // 실패·검수 거절(nsfw)은 과금 안 됨 → 완성된 클립만 셈
   const credits = Math.round(Number(b.est_credits) * (planned ? used / planned : 1) * 10) / 10;
@@ -333,8 +377,9 @@ export function v2Progress(r: any) {
   if (r?.pipeline !== 'v2') return null;
   const vs: V2Variant[] = r.variants ?? []; const scenes = vs.flatMap((v) => v.scenes ?? []);
   const done = scenes.filter((s) => s.status === 'completed').length; const again = scenes.filter((s) => (s.regens ?? 0) > 0 && s.status !== 'completed').length;
-  const label = ({ clips: `장면 만드는 중 ${done}/${scenes.length}${again ? ` · 검수에 걸려 다시 만드는 장면 ${again}` : ''}`, qa: 'AI 검수 중(외국어 글자·외국인·깨진 화면)', render: '합성 중(이어 붙이기·자막·소리·끝 화면)', done: '완료', failed: '실패' } as Record<string, string>)[r.stage] ?? r.stage;
-  return { stage: r.stage, label, done, total: scenes.length, review: r.review ?? [], notes: r.notes ?? [], audio: r.audio ?? null,
+  const reuse = !!r.reuse; // 187차 ⑦ 기존 영상 다시 합성(새로 만들지 않음)
+  const label = ({ clips: `장면 만드는 중 ${done}/${scenes.length}${again ? ` · 검수에 걸려 다시 만드는 장면 ${again}` : ''}`, qa: 'AI 검수 중(외국어 글자·외국인·깨진 화면)', render: reuse ? '기존 영상 다시 합성 중(자막·소리·끝 화면)' : '합성 중(이어 붙이기·자막·소리·끝 화면)', done: '완료', failed: '실패' } as Record<string, string>)[r.stage] ?? r.stage;
+  return { stage: r.stage, label, done, total: scenes.length, review: r.review ?? [], notes: r.notes ?? [], audio: r.audio ?? null, reuse,
     variants: vs.map((v) => ({ n: v.n, mediaId: v.mediaId ?? null, duration: v.duration ?? null, error: v.error ?? null, renderError: v.renderError ?? null,
-      scenes: v.scenes.map((s) => ({ k: s.k, seconds: s.seconds, line: s.line, status: s.status, screen: !!s.screen, regens: s.regens ?? 0, qa: s.qa ?? null })) })) };
+      scenes: v.scenes.map((s) => ({ k: s.k, seconds: Math.round(s.seconds * 10) / 10, line: s.line, status: s.status, screen: !!s.screen, regens: s.regens ?? 0, qa: s.qa ?? null })) })) };
 }

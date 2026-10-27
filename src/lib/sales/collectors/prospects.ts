@@ -117,9 +117,22 @@ export function prospectFromKaptSelection(r: any): Record<string, unknown> | nul
     source_external_id: r.source_external_id ?? r.complex_code ?? r.id, facility_code: r.complex_code ?? null };
 }
 export type PrepareResult = { ok: true; row: ProspectRow; plan: MergePlan } | { ok: false; reason: string };
+/** 200차 #699 준공·입주 단지 원천 우선순위(숫자가 작을수록 먼저): K-apt 자료실 주간 엑셀 > K-apt 단지 목록·기본정보 > 한국부동산원(연 1회).
+ *  더 높은 원천이 쓴 줄에 낮은 원천은 빈 칸만 채움 — 부동산원 순환 실행과 K-apt 주간 실행이 같은 줄을 번갈아 덮어쓰지 않게 */
+export const COMPLEX_RANK: Record<string, number> = { kapt_weekly_complexes: 1, kapt_new_complexes: 2, reb_recent_complexes: 3 };
+/** 200차: 원천마다 단지 번호가 달라(K-apt 단지 코드 · 한국부동산원 단지 번호) 키로는 같은 단지를 못 찾음 — 지역 + (단지명 또는 도로명주소) + 사용승인일이 같으면 같은 단지 */
+export function complexMatchKeys(p: Record<string, unknown>): string[] {
+  const d = s(p.completion_date); if (!d) return [];
+  const region = normalizeRegion(s(p.region), s(p.address)); const name = s(p.name) ? normalizeName(String(p.name)) : '';
+  const road = String(p.address ?? '').match(/\(([^()]+)\)\s*$/)?.[1]?.normalize('NFKC').replace(/\s+/g, '') ?? '';
+  return [name && region ? `n|${region}|${name}|${d}` : '', road ? `r|${road}|${d}` : ''].filter(Boolean);
+}
 export function prepareProspectWrite(payload: Record<string, unknown>, prev: Record<string, unknown> | null, today: string): PrepareResult {
   const v = validateProspectPayload(payload); if (!v.ok) return v;
-  const row = v.row; const merged: Record<string, unknown> = { ...row };
+  const row = v.row;
+  const pr = COMPLEX_RANK[String(prev?.source_slug ?? '')], nr = COMPLEX_RANK[row.source_slug];
+  if (prev && pr && nr && nr > pr) for (const f of ETL_OWNED_FIELDS) if (prev[f] != null) (row as Record<string, unknown>)[f] = prev[f];
+  const merged: Record<string, unknown> = { ...row };
   if (prev) { for (const f of ETL_OWNED_FIELDS) if (merged[f] == null && prev[f] != null) merged[f] = prev[f]; if (row.operator_explicitly_none) merged.current_operator = null; }
   const a = assessProspect({ ...merged, id: String(prev?.id ?? 'new'), verification_status: String(prev?.verification_status ?? 'raw'), next_action: null, next_action_date: prev?.next_action_date ?? null, etl_suggested_next_action: null, lead_id: prev?.lead_id ?? null }, today);
   row.sales_likelihood = a.likelihood.grade; row.sales_likelihood_reason = a.likelihood.reasons.join(' · ') || null;

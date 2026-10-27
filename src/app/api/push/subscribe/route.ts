@@ -13,6 +13,13 @@ const schema = z.object({
   caps: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
 });
 
+/** 198차 주소 분리: 이 사람의 받는 중인 구독 수(웹 푸시·앱) — app. 으로 옮긴 뒤 브라우저 알림 다시 켜기 안내에 씀 */
+export const GET = handler(async ({ user }) => {
+  const [r] = await db()<{ web: number; fcm: number }[]>`select count(*) filter (where kind = 'webpush')::int as web, count(*) filter (where kind = 'fcm')::int as fcm
+    from push_subscriptions where user_id = ${user.id} and disabled_at is null`;
+  return { web: r?.web ?? 0, fcm: r?.fcm ?? 0 };
+});
+
 /** 같은 기기 토큰이 다른 계정에 남아 있으면 현재 사용자로 옮긴다 (공용 기기 로그인 전환 대응) */
 export const POST = handler(async ({ req, user }) => {
   const i = await body(req, schema);

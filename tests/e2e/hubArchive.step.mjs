@@ -71,19 +71,19 @@ export async function hubArchive({ owner, ctx, sql, BASE, SHOTS }) {
     assert.match(await hub.getByTestId('hub-box-archive').innerText(), /대상 아님·완료 0건/);
     const [wrec] = await sql`select status, data from sales_work_records where tenant = 'default' and ref_id = ${ids[0]}`;
     assert.deepEqual([wrec.status, wrec.data.current_operator, wrec.data.contract_end_date], ['미연락', 'E2E 현위탁', ymd(120)], '되돌려도 현 위탁사·계약만료일은 남음');
-    // #610 ⓐ 넘긴 공고 카드 [되돌리기] → 원천 카드 원복
+    // #610 ⓐ 넘긴 공고 카드 [되돌리기] → 원천 카드 원복 (196차 결정 15-35: 입찰은 입찰 업무로 — 되돌리면 업무·일정 취소)
     const h = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: ids[2], assigneeIds: [ctx.ownerId] });
     await owner.goto(`${BASE}/s/sales/hub?tab=bids&bt=working&bq=${encodeURIComponent('E2E 보관함 공고')}`);
     const bid = owner.getByTestId('sales-bid').filter({ hasText: 'E2E 보관함 공고' }); await bid.waitFor();
-    await bid.getByTestId('sales-handoff-lead').waitFor();
+    await bid.getByTestId('sales-bid-task').waitFor();
     await bid.getByTestId('sales-handoff-revert').click();
     await bid.getByTestId('sales-handoff-revert-reason').fill('담당 재검토');
     await bid.getByTestId('sales-handoff-revert-go').click();
-    await owner.getByText('되돌렸습니다 — 리드는 보관함으로').first().waitFor();
+    await owner.getByText('되돌렸습니다 — 입찰 업무').first().waitFor();
     await bid.waitFor({ state: 'detached' }); // 넘기기 전 진행 기록이 없던 공고라 '진행 기록 있음' 탭에서 빠짐
     await owner.goto(`${BASE}/s/sales/hub?tab=bids&bq=${encodeURIComponent('E2E 보관함 공고')}`); // 기본(진행 중) 탭
     await owner.getByTestId('sales-bid').filter({ hasText: 'E2E 보관함 공고' }).getByTestId('sales-handoff').waitFor(); // 다시 [넘기기]
-    const [rl] = await sql`select status from sales_leads where id = ${h.leadId}`; assert.equal(rl.status, '되돌림');
+    const [rt] = await sql`select deleted_at from tasks where id = ${h.taskId}`; assert.ok(rt.deleted_at, '입찰 업무 취소'); assert.equal(h.leadId, null, '입찰은 리드를 만들지 않음');
     // #610 ⓑⓒ·#614 리드: 신규리드 [영업 진행으로] → 1차연락완료 · 실패(사유) → 기본 목록에서 빠지고 '보류·실패 n건' → [되돌리기]
     const r = await ctx.owner.ok('POST', '/api/sales/leads', { name: 'E2E 보관함 거래처', status: '신규리드', force: true }); leadId = r.id;
     await owner.goto(`${BASE}/s/sales/leads?q=${encodeURIComponent('E2E 보관함')}`);
@@ -101,10 +101,10 @@ export async function hubArchive({ owner, ctx, sql, BASE, SHOTS }) {
     assert.equal(await rows.first().getByTestId('lead-advance').count(), 0, '1차연락완료가 되면 [영업 진행으로] 없음');
     await ctx.owner.ok('PATCH', `/api/sales/leads/${leadId}`, { status: '실패', reason: '예산 없음' }); // 표의 단계 선택은 prompt() 라 API 로
     await owner.reload();
-    await leads.getByTestId('leads-box-archive').filter({ hasText: /보류·실패 [1-9]\d*건/ }).waitFor();
-    assert.equal(await rows.count(), 0, '실패는 기본 목록에서 빠짐');
-    await leads.getByTestId('leads-box-archive').click();
-    await owner.waitForURL(/box=archive/);
+    await leads.getByTestId('leads-tab-closed').filter({ hasText: /종결 [1-9]\d*/ }).waitFor(); // 197차(#461): 예전 '보류·실패 n건' 보관함 → '종결' 보기 탭
+    assert.equal(await rows.count(), 0, '실패는 기본 보기(전체 진행 중)에서 빠짐');
+    await leads.getByTestId('leads-tab-closed').click();
+    await owner.waitForURL(/lv=closed/);
     const arow = rows.filter({ hasText: '예산 없음' }); await arow.waitFor();
     assert.equal(await arow.getByTestId('lead-archive-reason').innerText(), '사유: 예산 없음');
     assert.ok((await arow.getByTestId('lead-archive').innerText()).includes(ownerName), '누가');
@@ -123,7 +123,7 @@ export async function hubArchive({ owner, ctx, sql, BASE, SHOTS }) {
     await arow.getByTestId('lead-archive-restore').click();
     await owner.getByText('되돌렸습니다 — ').first().waitFor();
     await arow.waitFor({ state: 'detached' });
-    await leads.getByTestId('leads-box-open').click();
+    await leads.getByTestId('leads-tab-open').click();
     await rows.first().waitFor(); assert.equal(await rows.count(), 1, '되돌린 리드가 기본 목록에');
     const [lst] = await sql`select status from sales_leads where id = ${leadId}`; assert.equal(lst.status, '1차연락완료', '되돌리기 = 이전 단계');
   } finally {

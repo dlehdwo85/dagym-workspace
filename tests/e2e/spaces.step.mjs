@@ -1,6 +1,7 @@
 // V41 단계 1 공간 틀: 관리 › 사용자 › 공간에서 영업 켜기 → PC 공간 카드 드롭다운으로 영업(파란 강조) → Ctrl+1 로 업무 →
 // 휴대폰 프로필 시트 공간 전환 → 뒤로가기 = 업무 · 영업 미배정 직원은 공간 카드 없음·주소 404 → 끄기
 import assert from 'node:assert/strict';
+import { toggleSpace } from './marketing.step.mjs';
 /** 168차 CI(V41 단계 1 '화면 이동 기다림 60초 넘김', 두 실행): 화면이 아직 반응하기 전(하이드레이션 전)에 누른 클릭·탭·단축키는 길을 못 바꾼다
  *  → 같은 동작을 10초마다 다시(최대 6번) 하고, 주소가 바뀌는 순간(commit)까지만 기다림 — 화면 요소는 다음 줄의 waitFor 가 기다린다 */
 async function go(page, act, url) {
@@ -17,7 +18,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
-  await owner.getByTestId('space-toggle-sales').click(); // 저장 → 화면 새로고침(사이드바에 공간 카드)
+  await toggleSpace(owner, 'sales'); // 저장 → 화면 새로고침(사이드바에 공간 카드)
   await owner.getByTestId('space-tabs').waitFor();
   await owner.goto(`${BASE}/`);
   // ⑦ 사이드바 3구역(대표 승인 10/20 오후): ① 맨 위 공간 전환 탭(요약은 title) ② '업무 메뉴'(홈·업무·프로젝트·내 주간 보고·결재) ③ '공통'(캘린더·알림·메시지·자료실·연락처·공지·AI 비서) + 관리(접힘)
@@ -163,6 +164,6 @@ async function spacesTeardown({ owner, BASE }) {
   await owner.evaluate(() => localStorage.setItem('wos_space', 'work'));
   await owner.goto(`${BASE}/admin/users`);
   await owner.getByTestId('tab-spaces').click();
-  await owner.getByTestId('space-toggle-sales').click();
+  await toggleSpace(owner, 'sales');
   await owner.getByTestId('space-switch').waitFor({ state: 'detached' });
 }

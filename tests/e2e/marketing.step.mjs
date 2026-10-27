@@ -1,12 +1,19 @@
 // V41 4-2 마케팅 공간: 켜기 → 개요 카드 → 승인 대기에서 새 콘텐츠(시안 없음) → 상세에서 승인하면 거절 안내 → 수정 요청(이유) →
 // 캘린더에 칩 → 전화 문의 추가 → [영업 리드로] → 업무 보기 링크 → 끄기
 import assert from 'node:assert/strict';
+/** 공간 켜기/끄기는 저장 뒤 화면을 새로 고침(location.reload) — 새로 고침이 끝나기 전에 다음 goto 를 하면 ERR_ABORTED(CI 1496:
+ *  앞 단계에서 이미 보이던 공간 탭을 기다림으로 써서 새로 고침 전에 넘어감) → 그 새 화면의 load 까지 기다림 */
+export async function toggleSpace(page, space) {
+  const loaded = page.waitForEvent('load', { timeout: 20_000 });
+  await page.getByTestId(`space-toggle-${space}`).click();
+  await loaded;
+}
 export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   // 전체 실행에서 앞 단계가 남긴 공간 자동 이동(router.replace)과 겹치면 goto 가 ERR_ABORTED → 한 번 더
   for (let k = 0; k < 2; k++) { try { await owner.goto(`${BASE}/admin/users`); break; } catch (e) { if (k) throw e; await owner.waitForTimeout(800); } }
   await owner.getByTestId('tab-spaces').click();
-  await owner.getByTestId('space-toggle-marketing').click();
+  await toggleSpace(owner, 'marketing');
   await owner.getByTestId('space-tabs').waitFor();
   await owner.goto(`${BASE}/s/marketing`);
   await owner.getByTestId('space-home-marketing').waitFor();
@@ -251,6 +258,6 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first().getByTestId('assignee-clear').click();
   await owner.getByTestId('assignee-sales_source').getByTestId('assignee-row').first().getByTestId('assignee-set').waitFor({ state: 'detached' });
   await owner.getByTestId('tab-spaces').click();
-  await owner.getByTestId('space-toggle-marketing').click();
+  await toggleSpace(owner, 'marketing');
   await owner.getByTestId('space-tabs').waitFor({ state: 'detached' });
 }

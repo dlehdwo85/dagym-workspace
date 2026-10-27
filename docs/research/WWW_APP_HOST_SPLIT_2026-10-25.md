@@ -152,3 +152,58 @@
 - 나이스페이에 돌아올 주소 도메인 등록이 있는지.
 - 카카오·네이버 로그인 앱의 서비스 URL 칸에 app. 추가가 필요한지(네이버는 '서비스 URL'·'Callback URL' 둘 다 있음).
 - GA4·광고 픽셀의 교차 도메인 설정(마케팅 쪽).
+
+## 8. 198차 구현(결정 15-29 A안 · #664·#683) — 스위치 꺼진 채 배포
+
+대표 10/26 14:20 결정 15-29(A안), 16:40 #683 "이해 — 진행". 재로그인 1회는 받아들이는 것으로 보고(새벽 전환) 세션 이어 주기(§3-2 1회용 표)는 만들지 않았다.
+
+| 무엇 | 어디 | 켜기 전(지금) | 켠 뒤(`APP_HOST_SPLIT=1`) |
+|---|---|---|---|
+| 호스트 갈림 | `src/lib/hostSplit.ts` · `src/middleware.ts`(모든 화면 주소, API·Next 정적 파일 제외) | 지금과 똑같음 | www = `/`(로그인했어도 소개)·`/welcome`·`/landing/*`·`/privacy`·`/terms`·`/account-deletion`·`/data-deletion`·`/ai-notice`·API·정적 파일만 그대로, 그 밖(로그인·가입·초대·업무·영업·서명 …)은 app. 으로 **308**(경로·검색어 그대로) |
+| 옛 앱 유예 | `APP_HOST_SPLIT_APP_GRACE_UNTIL=YYYY-MM-DD`(서울 날짜, 그날 포함) | — | 그날까지 앱(WebView, `WorkInApp`·`; wv)`)은 www 에서 그대로. 지나면 앱도 app. 으로(첫 화면 포함) |
+| app. 의 소개 화면 | 미들웨어 | — | `/welcome`·`/landing/*`·약관 → www 308 · `/` 는 로그인 전이면 `/login`(307) |
+| 검색 제외 | 미들웨어 | — | app. 모든 화면 `X-Robots-Tag: noindex, nofollow` · app. `robots.txt` = `Disallow: /`(www robots 는 그대로) |
+| API | — | 두 호스트 모두 응답 | 그대로(하이링크 문의 연동·사이트 집계 비콘·ICS·콘솔 콜백이 www 주소를 써도 깨지지 않음) |
+| 브라우저 알림 다시 켜기 | `src/components/PushRehome.tsx` · `GET /api/push/subscribe`(받는 중인 구독 수) | 안 뜸 | app. 에서, 다른 곳에서 웹 푸시를 받던 사람이고 이 브라우저는 아직 묻지 않았으면 한 줄 안내 [알림 켜기]·[나중에]. 브라우저 알림 허용은 주소마다 따로라 **자동으로는 못 켬**(§3-4 의 '권한 그대로 자동 재구독'은 불가 — 고침) |
+| 앱 허용 주소 | `mobile/capacitor.config.ts` `allowNavigation` | `app.work-in.dev` 추가(다음 빌드부터) | 1.1.4 빌드는 `APP_URL=https://app.work-in.dev` 로 |
+| 소셜 로그인 시작 | `src/app/api/auth/oauth/[provider]/start` | 그대로 | www 에서 시작하면 app. 의 같은 시작 주소로 307 — 상태 쿠키(시작 호스트 전용)와 콜백(APP_URL = app.)이 같은 호스트가 되게(유예 중 옛 앱의 시스템 브라우저 로그인 포함) |
+
+시험: `tests/api/host-split.test.mjs`(스위치 켬·유예 앞/끝·꺼짐 3가지 서버) · E2E 로그인·초대 가입·소개 사이트·전자계약 서명·가입 전환 태그(꺼진 상태 그대로).
+
+## 9. 새벽 전환 절차서(로컬·대표) — 순서대로, 각 단계 확인 뒤 다음
+
+준비(낮에, 서비스 영향 없음)
+1. **Vercel 도메인**: 프로젝트 `dagym-workspace` › Domains 에 `app.work-in.dev` 추가 → DNS(가비아 등) CNAME `app` → Vercel 이 알려 주는 값. 확인: `curl -sI https://app.work-in.dev/api/health` 200(스위치 꺼짐이라 www 와 똑같이 동작).
+2. **외부 콘솔 콜백에 app. 추가**(www 는 지우지 않음 — 되돌리기용):
+   - 구글 로그인(GCP OAuth 클라이언트) `https://app.work-in.dev/api/auth/oauth/google/callback`
+   - 카카오 로그인 `…/api/auth/oauth/kakao/callback` (+ 사이트 도메인 칸에 app.)
+   - 네이버 로그인 `…/api/auth/oauth/naver/callback` (+ 서비스 URL 칸)
+   - 구글 캘린더(켠 경우) `…/api/google/callback`
+   - Meta·Threads 게시 `…/api/marketing/publish/callback/meta`·`/threads` · 데이터 삭제 콜백
+   - YouTube `…/api/marketing/publish/callback/youtube`
+   - 네이버·구글 광고 `…/api/marketing/ads/callback/naver`·`/google`
+   - 나이스페이: 돌아올 주소는 결제 요청 때 보냄 — 콘솔 허용 도메인 칸이 있으면 app. 추가(확인 못함)
+   - GA4·광고 픽셀: 교차 도메인에 두 호스트(마케팅)
+3. **앱 1.1.4**(네이티브·로컬): `APP_URL=https://app.work-in.dev` 로 빌드(server.url = app., allowNavigation 은 이미 app. 포함) · AndroidManifest intent-filter 호스트 `${appHost}` · iOS Associated Domains `applinks:app.work-in.dev` · 안드로이드 `DEFAULT_SERVER` 3곳(WorkinAlarms·NotificationActionReceiver·TodayWidget) → `https://app.work-in.dev` → 내부 테스트 → 스토어 배포. **스토어에 올라간 뒤**에 아래 전환.
+
+새벽 전환(02~05시)
+4. Vercel 환경 변수(Production):
+   - `APP_URL` = `https://app.work-in.dev`
+   - `APP_HOST_SPLIT` = `1`
+   - `APP_HOST_SPLIT_APP_GRACE_UNTIL` = 전환일 + 14일(예: `2026-11-12`)
+   - `NEXT_PUBLIC_SITE_URL` 은 `https://www.work-in.dev` 그대로
+   → **다시 배포(Redeploy)**(환경 변수는 새 배포부터 적용).
+5. 확인(누구나, 로그인 없이):
+   - `curl -sI https://www.work-in.dev/tasks` → `308` · `location: https://app.work-in.dev/tasks`
+   - `curl -sI https://www.work-in.dev/` → `200`(소개)
+   - `curl -sI https://app.work-in.dev/welcome` → `308` → www
+   - `curl -s https://app.work-in.dev/robots.txt` → `Disallow: /`
+   - `curl -sI https://app.work-in.dev/login` → `x-robots-tag: noindex, nofollow`
+   - `curl -s https://www.work-in.dev/api/health` → 200(API 는 그대로)
+6. 확인(로그인): app. 에서 이메일 로그인 → 홈 · 구글/카카오/네이버 로그인 1회씩 · 알림 메일 링크가 app. 인지 · 웹에서 브라우저 알림 [알림 켜기] 안내가 뜨는지(웹 푸시를 쓰던 계정) · 하이링크 홈페이지 문의 1건이 업무로 오는지(www API 그대로).
+7. 직원 공지: "주소가 app.work-in.dev 로 바뀝니다. 한 번 다시 로그인해 주세요. PC 브라우저 알림은 화면 위 [알림 켜기]를 한 번 눌러 주세요. 휴대폰 앱은 업데이트(1.1.4)만 하면 됩니다."
+8. 14일 뒤: 유예가 자동으로 끝남(날짜 env). 옛 앱(1.1.3)은 그 뒤 앱 화면을 앱 밖 브라우저로 열 수 있으니 업데이트 안내.
+   - 유예 중 옛 앱(www)에서 할 수 없는 것: 앱 안에서 구글 캘린더·Meta·광고 계정 **연결하기**(연결 콜백이 app. 으로 와서 www 로그인 쿠키를 못 읽음) — 관리자 연결 작업은 PC(app.)에서. 소셜 로그인은 위 307 로 됨.
+
+되돌리기(문제가 생기면 언제든)
+- `APP_HOST_SPLIT` 를 지우거나 `0` → 다시 배포 → 갈림이 꺼져 www 가 예전처럼 전부 서비스. `APP_URL` 도 `https://www.work-in.dev` 로 되돌리면 메일·콜백이 www 로(콘솔에 www 콜백을 남겨 두었으므로 그대로 동작). app. 에서 새로 로그인한 쿠키는 app. 전용이라 www 에서는 다시 로그인.

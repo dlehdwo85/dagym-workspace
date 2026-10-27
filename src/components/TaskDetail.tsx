@@ -32,6 +32,7 @@ import { VoiceButton } from '@/components/voice';
 import { MeetingDialog } from '@/components/MeetingDialog';
 import { requestTour } from '@/components/Tour';
 import { Assignees, PartBox, coOf, multiOf, partMsg, partsOf } from '@/components/CoAssignees';
+import { followUpMsg, useLeadFollowUp } from '@/components/sales/LeadFollowUp';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
@@ -42,7 +43,7 @@ const ACTION_LABEL: Record<string, string> = {
 const FIELD_LABEL: Record<string, string> = {
   title: '제목', description: '설명', assigneeId: '담당자', requestedById: '요청자', priority: '우선순위', startDate: '시작일', dueDate: '마감일', dueTime: '마감 시각', status: '상태',
   tags: '태그', projectId: '프로젝트', sectionId: '섹션', brandId: '브랜드', orgUnitId: '소속', collaborators: '협업자', approvalRequired: '검토 필요', recurrenceRule: '반복', dependsOn: '선행 업무',
-  coAssignees: '공동 담당', coAssigneeIds: '공동 담당', completeRule: '완료 규칙',
+  coAssignees: '공동 담당', coAssigneeIds: '공동 담당', completeRule: '완료 규칙', collabTeams: '함께하는 부서',
 };
 
 /** 업무 상세. 전체 화면(/tasks/:id)과 목록 옆 오른쪽 패널(inPanel) 공용 */
@@ -53,6 +54,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const { user, dir, features, menus } = useSession();
   const [mailDraft, setMailDraft] = useState<AssistDraft | null>(null); // V28-1 업무 AI 비서 초안 → 시안 창
   const { data, error, loading, reload, setData } = useApi<any>(`/api/tasks/${id}`);
+  const fu = useLeadFollowUp(); // 197차(#460): 리드 업무 완료 때 다음 연락일·종결을 묻는 창
   useEffect(() => { requestTour('task'); }, []); // #77 업무 상세를 처음 열 때 안내(본 사람은 안 뜸)
   const [cprog, setCprog] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const projects = useApi<{ projects: any[] }>('/api/projects');
@@ -172,11 +174,19 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     catch (e: any) { toast.error(e.message); reload(); }
   }
   async function patch(body: Record<string, unknown>, okMsg?: string | ((r: any) => string)) {
+    // 197차(#460): 리드 업무를 완료하면 먼저 '다음 연락일 또는 종결'을 묻는다([취소] = 완료하지 않음)
+    if (body.status === 'done' && t.status !== 'done' && t.lead_id && !body.leadFollowUp) {
+      const c = await fu.ask(t);
+      if (c === null) return;
+      if (c !== 'skip') body = { ...body, leadFollowUp: c };
+    }
     try {
       const r = await api(`/api/tasks/${id}`, { method: 'PATCH', body: { ...body, version: t.version } });
       // 대표 10/24: 담당자가 여럿이면 [완료] = 내 몫 완료 — 남은 사람 안내(마지막 사람이면 원래 안내)
       if (r.part) toast.ok(partMsg(r)); else if (okMsg) toast.ok(typeof okMsg === 'function' ? okMsg(r) : okMsg);
       if (r.spawned) toast.info('반복 업무의 다음 회차가 생성되었습니다');
+      const fm = followUpMsg(r); if (fm) toast.info(fm);
+      if (r.leadReverted) toast.info(`거래처 단계도 '${r.leadReverted.to}'(으)로 되돌렸습니다`);
       // #508 후속: 완료를 되돌리면 그 완료 때 자동으로 생긴 다음 회차·리드 후속 업무 — 손대지 않은 것은 지움, 손댄 것은 그대로
       if (r.autoKept?.length) toast.info('다음 회차/후속 업무는 그대로 두었습니다', { label: '열기', run: () => router.push(`/tasks/${r.autoKept[0].id}`) });
       else if (r.autoRemoved?.length) toast.info(`완료 때 자동으로 만든 다음 업무 ${r.autoRemoved.length}건도 지웠습니다(휴지통)`);
@@ -366,6 +376,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const commentForm = mobile && typeof document !== 'undefined' ? createPortal(commentFormEl, document.body) : commentFormEl;
   return (
     <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(4.5rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
+      {fu.node}
       {/* 상단 도구 막대 */}
       <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
         {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-green-50 px-2.5 text-sm font-semibold text-green-700"><CircleCheck className="size-4" />완료됨</span>}
@@ -697,6 +708,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </Prop>
             {/* R-15 6번: 1명 배정 뒤에도 협업자 추가 */}
             <Prop icon={Users} label="협업자" hint="보기·댓글 알림만" asDiv><MultiUserSelect value={data.collaborators.map((c: any) => c.id)} onChange={(v) => patch({ collaboratorIds: v })} /></Prop>
+            {/* P2 조직 개편(대표 10/26): 부서 간 협업 — 붙이면 그 부서(팀)와 위 단위가 같이 봄. 바꾸기는 요청자·담당자 */}
+            {(t.team_id || data.collabTeams?.length > 0 || data.orgHasTeams) && <Prop icon={Building2} label="함께하는 부서" hint="그 부서와 위 단위도 이 업무를 봅니다" asDiv>
+              <CollabTeams value={data.collabTeams ?? []} ownerTeamId={t.team_id ?? null} canEdit={!!perms.edit} onChange={(ids) => patch({ collabTeamIds: ids }, '함께하는 부서를 바꿨습니다')} /></Prop>}
             <Prop icon={Megaphone} label="요청자">
               <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
             </Prop>
@@ -848,6 +862,27 @@ const TASK_TYPE_LABEL: Record<string, string> = { normal: '일반', milestone: '
 const ghostCls = 'h-8 w-full min-w-0 rounded-input border border-transparent bg-transparent px-2 text-sm text-ink transition-colors hover:border-line hover:bg-white focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent-500/20 disabled:cursor-not-allowed disabled:text-ink-2 disabled:hover:border-transparent';
 
 /** "라벨: 값" 한 줄. 라벨을 누르면 값으로 이동(접근성: label 로 연결) */
+/** P2 조직 개편: 업무의 '함께하는 부서' 칩 + [부서 추가](부서 목록은 누를 때만 불러옴) */
+function CollabTeams({ value, ownerTeamId, canEdit, onChange }: { value: { id: string; name: string; color: string }[]; ownerTeamId: string | null; canEdit: boolean; onChange: (ids: string[]) => void }) {
+  const [adding, setAdding] = useState(false);
+  const teams = useApi<{ teams: { id: string; path: string }[] }>(adding ? '/api/teams' : null);
+  const ids = value.map((v) => v.id);
+  const opts = (teams.data?.teams ?? []).filter((x) => x.id !== ownerTeamId && !ids.includes(x.id));
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-1.5 pl-2" data-testid="collab-teams">
+      {value.map((v) => <span key={v.id} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${v.color}1a`, color: v.color }} data-testid="collab-team">{v.name}
+        {canEdit && <button type="button" onClick={() => onChange(ids.filter((x) => x !== v.id))} aria-label={`${v.name} 빼기`} className="rounded-full hover:bg-black/5"><X className="size-3" /></button>}</span>)}
+      {!value.length && !adding && <span className="text-xs text-ink-3">없음</span>}
+      {canEdit && (adding
+        ? <select autoFocus className="h-7 max-w-[14rem] rounded-input border border-line bg-white px-1.5 text-xs" value="" onChange={(e) => { if (e.target.value) onChange([...ids, e.target.value]); setAdding(false); }} onBlur={() => setAdding(false)} aria-label="함께하는 부서 추가" data-testid="collab-team-pick">
+            <option value="">{teams.data ? (opts.length ? '부서·팀 고르기' : '더 붙일 부서·팀이 없습니다') : '불러오는 중…'}</option>
+            {opts.map((x) => <option key={x.id} value={x.id}>{x.path}</option>)}
+          </select>
+        : <button type="button" onClick={() => setAdding(true)} className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-line px-2 py-0.5 text-xs text-ink-2 hover:border-slate-400" data-testid="collab-team-add"><Plus className="size-3" />부서 추가</button>)}
+    </span>
+  );
+}
+
 function Prop({ icon: Icon, label, children, asDiv, className, hint }: { icon: LucideIcon; label: string; children: React.ReactNode; asDiv?: boolean; className?: string; hint?: string }) {
   const head = <><Icon className="size-4 shrink-0 text-ink-3" />{label}</>;
   const inner = (

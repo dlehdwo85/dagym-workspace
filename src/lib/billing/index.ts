@@ -7,7 +7,7 @@ import { audit, logError } from '../log';
 import { notify } from '../notifications';
 import { tenantOf, type SessionUser } from '../types';
 import { TERMS_VERSION } from '../signup';
-import { approveAuth, approveBilling, cancelPayment, npConf, npLiveConf, npTestConf, parseNiceForm, registerBillKey, removeBillKey, windowParams, type NpConf } from './nicepay';
+import { EASY_PAYS, approveAuth, approveBilling, cancelPayment, easyPaysOn, npConf, npLiveConf, npTestConf, parseNiceForm, registerBillKey, removeBillKey, windowParams, type NpConf } from './nicepay';
 
 /**
  * 18차 결제(나이스페이). 금액은 VAT 별도 요금 × 1.1 (원 단위 반올림).
@@ -58,14 +58,15 @@ export async function billingOverview(u: SessionUser) {
   const [[card], [sub], payments, plans, addons, [consent]] = await Promise.all([
     sql`select card_name, card_last4, created_at from billing_cards where tenant = ${t} and removed_at is null`,
     sql`select plan_code, status, billing_cycle, next_billing_on, billing_amount, cancel_at_period_end, past_due_since, next_retry_on, trial_ends_at, billing_lock, billing_grace_until from tenant_subscriptions where tenant = ${t}`,
-    sql`select id, kind, plan_code, addon_code, amount, status, canceled_amount, result_msg, card_name, card_no, paid_at, created_at, tid, meta->>'payMethod' as pay_method, meta->'vbank' as vbank from payments where tenant = ${t} order by created_at desc limit 30`,
+    sql`select id, kind, plan_code, addon_code, amount, status, canceled_amount, result_msg, card_name, card_no, paid_at, created_at, tid, meta->>'payMethod' as pay_method, meta->>'easyPay' as easy_pay, meta->'vbank' as vbank from payments where tenant = ${t} order by created_at desc limit 30`,
     sql<{ code: string }[]>`select code from plans where public and active and code not in ('trial', 'free', 'team_free', 'w_free') order by sort`,
     sql`select code, name, monthly_krw from plan_addons where active order by sort`,
     sql`select plan_code, amount_krw, cycle, created_at from billing_consents where tenant = ${t} order by created_at desc limit 1`, // V34-B 마지막 정기결제 동의
   ]);
   const quotes = [];
   for (const p of plans) for (const cy of ['monthly', 'annual'] as const) { const q = await quote(t, p.code, cy, sql); quotes.push({ planCode: p.code, name: q.plan.name, cycle: cy, seats: q.seats, supply: q.supply, amount: q.amount }); }
-  return { enabled: !!npConf(), mode: npConf()?.mode ?? null, card: card ?? null, sub: sub ?? null, payments, quotes, autoRenewConsent: consent ?? null, addons: addons.map((a: any) => ({ ...a, amount: Math.round(a.monthly_krw * VAT) })) };
+  return { enabled: !!npConf(), mode: npConf()?.mode ?? null, card: card ?? null, sub: sub ?? null, payments, quotes, autoRenewConsent: consent ?? null, addons: addons.map((a: any) => ({ ...a, amount: Math.round(a.monthly_krw * VAT) })),
+    easyPays: easyPaysOn().map((k) => ({ key: k, label: EASY_PAYS[k].label })) /* 200차 #706 켠 간편결제만 */ };
 }
 
 export const cardInput = z.object({
@@ -144,12 +145,16 @@ export async function subscribeMonthly(u: SessionUser, i: z.infer<typeof subscri
 }
 
 const payMethod = z.enum(['CARD', 'BANK', 'VBANK']).default('CARD');
+// 200차 #706: 간편결제 직접 호출(easyPay) — 나이스페이 결제창이 생략되므로 결제 대행 약관 동의(agree)가 있어야 열림
+const easy = { easyPay: z.enum(['naverpay', 'kakaopay', 'tosspay']).optional(), agree: z.boolean().optional() };
 export const windowInput = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('annual'), planCode: z.string().max(40), payMethod }),
-  z.object({ kind: z.literal('addon'), addonCode: z.string().max(40), payMethod }),
+  z.object({ kind: z.literal('annual'), planCode: z.string().max(40), payMethod, ...easy }),
+  z.object({ kind: z.literal('addon'), addonCode: z.string().max(40), payMethod, ...easy }),
   // V29: 첫 결제·요금제 변경을 결제창으로(카드 등록 없이) — 다음 달부터 자동 결제는 카드 등록 필요
-  z.object({ kind: z.literal('monthly'), planCode: z.string().max(40), payMethod }),
+  z.object({ kind: z.literal('monthly'), planCode: z.string().max(40), payMethod, ...easy }),
 ]);
+/** 200차 #706 간편결제 직접 호출 때 우리 화면에서 받는 결제 대행 약관 동의(나이스페이 공개 약관) — 결제 기록 meta 에 문구·시각을 남김 */
+export const EASY_PAY_TERMS = '나이스페이(나이스정보통신) 전자금융거래 기본약관·개인정보처리방침에 동의하고 간편결제 창을 바로 엽니다';
 /** 연간·팩: 결제창 파라미터(서명 포함) — 결제 기록은 대기(pending)로 먼저 남긴다 */
 export async function startWindow(u: SessionUser, i: z.infer<typeof windowInput>, origin: string) {
   const t = await requireBillingAdmin(u);
@@ -158,6 +163,9 @@ export async function startWindow(u: SessionUser, i: z.infer<typeof windowInput>
 /** 결제창 열기(회사 관리자 · V32 1 플랫폼 시험). 취소 때 되돌릴 수 있게 결제 전 구독 상태를 함께 남긴다 */
 async function openWindow(t: string, u: SessionUser, i: z.infer<typeof windowInput>, origin: string, c: NpConf, test: boolean) {
   const sql = db();
+  // 플랫폼 결제 시험(test)은 켜기 전 확인용이라 NICEPAY_EASY_PAY 와 관계없이 열 수 있음
+  if (i.easyPay && !test && !easyPaysOn().includes(i.easyPay)) throw badRequest(`${EASY_PAYS[i.easyPay].label}는 아직 열리지 않았습니다`);
+  if (i.easyPay && !i.agree) throw badRequest('간편결제는 결제 대행 약관(나이스페이)에 동의해야 열 수 있습니다');
   let amount: number, goodsName: string, plan: string | null = null, addon: string | null = null;
   if (i.kind === 'annual' || i.kind === 'monthly') { const q = await quote(t, i.planCode, i.kind, sql); amount = q.amount; goodsName = q.goodsName; plan = i.planCode; }
   else {
@@ -169,9 +177,10 @@ async function openWindow(t: string, u: SessionUser, i: z.infer<typeof windowInp
   const m = moid(kind);
   const [prev] = await sql`select plan_code, status, billing_cycle, billing_amount, next_billing_on::text, period_start::text, period_end::text, trial_ends_at, addons from tenant_subscriptions where tenant = ${t}`;
   const [pay] = await sql<{ id: string }[]>`insert into payments (tenant, kind, plan_code, addon_code, moid, amount, created_by, meta)
-    values (${t}, ${kind}, ${plan}, ${addon}, ${m}, ${amount}, ${u.id}, ${sql.json({ window: true, payMethod: i.payMethod, prev: prev ?? null, ...(test ? { test: true } : {}) } as never)}) returning id`;
+    values (${t}, ${kind}, ${plan}, ${addon}, ${m}, ${amount}, ${u.id}, ${sql.json({ window: true, payMethod: i.easyPay ? 'CARD' : i.payMethod, prev: prev ?? null, ...(test ? { test: true } : {}),
+      ...(i.easyPay ? { easyPay: i.easyPay, easyPayAgree: { text: EASY_PAY_TERMS, at: new Date().toISOString(), by: u.id } } : {}) } as never)}) returning id`;
   const base = process.env.APP_URL || origin;
-  return { paymentId: pay.id, mode: c.mode, script: 'https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js', params: windowParams(c, { moid: m, amount, goodsName, returnUrl: `${base}/api/billing/nicepay/return`, buyerEmail: u.email, payMethod: i.payMethod }) };
+  return { paymentId: pay.id, mode: c.mode, script: 'https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js', params: windowParams(c, { moid: m, amount, goodsName, returnUrl: `${base}/api/billing/nicepay/return`, buyerEmail: u.email, payMethod: i.payMethod, easyPay: i.easyPay }) };
 }
 /** V32 1 플랫폼: 결제 시험 회사로 결제창(시험 상점 강제) */
 export async function platformTestWindow(u: SessionUser, tenant: string, i: z.infer<typeof windowInput>, origin: string) {
@@ -186,7 +195,7 @@ export async function platformTestWindow(u: SessionUser, tenant: string, i: z.in
  * 요금제는 바꾸지 않으며 승인 1시간 뒤 정기 실행이 자동 취소한다(시험 결제 자동 취소와 같은 경로). 감사 기록.
  */
 export const LIVE_SMOKE_AMOUNT = 100;
-export const liveSmokeInput = z.object({ confirm: z.string(), payMethod: z.enum(['CARD', 'BANK']).default('CARD') });
+export const liveSmokeInput = z.object({ confirm: z.string(), payMethod: z.enum(['CARD', 'BANK']).default('CARD'), easyPay: easy.easyPay /* 200차 #706 실 상점에서 간편결제 창이 열리는지 확인(켜기 전) */ });
 export async function platformLiveSmoke(u: SessionUser, tenant: string, i: z.infer<typeof liveSmokeInput>, origin: string, ip: string | null) {
   if (!u.platformAdmin || u.support) throw notFound();
   if (i.confirm.trim() !== '실결제 100원') throw badRequest('확인 문구 "실결제 100원"을 그대로 입력하세요');
@@ -199,11 +208,11 @@ export async function platformLiveSmoke(u: SessionUser, tenant: string, i: z.inf
   if (n >= 3) throw new HttpError(429, 'too_many', '실결제 소액 시험은 하루 3번까지입니다');
   const m = moid('addon');
   const [pay] = await sql<{ id: string }[]>`insert into payments (tenant, kind, moid, amount, created_by, meta)
-    values (${tenant}, 'addon', ${m}, ${LIVE_SMOKE_AMOUNT}, ${u.id}, ${sql.json({ window: true, payMethod: i.payMethod, liveSmoke: true } as never)}) returning id`;
+    values (${tenant}, 'addon', ${m}, ${LIVE_SMOKE_AMOUNT}, ${u.id}, ${sql.json({ window: true, payMethod: i.easyPay ? 'CARD' : i.payMethod, liveSmoke: true, ...(i.easyPay ? { easyPay: i.easyPay } : {}) } as never)}) returning id`;
   await audit(sql, u.id, 'platform.live_smoke_started', 'payment', pay.id, { tenant, amount: LIVE_SMOKE_AMOUNT, mid: c.mid }, ip);
   const base = process.env.APP_URL || origin;
   return { paymentId: pay.id, mode: c.mode, script: 'https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js',
-    params: windowParams(c, { moid: m, amount: LIVE_SMOKE_AMOUNT, goodsName: 'Workin live smoke', returnUrl: `${base}/api/billing/nicepay/return`, buyerEmail: u.email, payMethod: i.payMethod }) };
+    params: windowParams(c, { moid: m, amount: LIVE_SMOKE_AMOUNT, goodsName: 'Workin live smoke', returnUrl: `${base}/api/billing/nicepay/return`, buyerEmail: u.email, payMethod: i.payMethod, easyPay: i.easyPay }) };
 }
 
 /** 전체 취소된 결제가 요금제를 바꿨다면 결제 전 상태로 되돌림 */

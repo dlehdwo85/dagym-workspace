@@ -139,7 +139,9 @@ export async function buildWeeklyReport(weekStart: string) {
     order by a.created_at desc limit 8`;
   const tot = sites.reduce((a, s) => ({ done: a.done + s.done, created: a.created + s.created, overdue: a.overdue + s.overdue, review: a.review + s.review, complaints: a.complaints + s.open_complaints }),
     { done: 0, created: 0, overdue: 0, review: 0, complaints: 0 });
-  return { weekStart, weekEnd: end, totals: tot, sites: sites.filter((s) => s.done || s.created || s.overdue || s.review || s.open_complaints), issues, photos };
+  // 202차(#461 ⑤): 영업 진행(회사 전체) — 진행 중·연락일 지남·다음 행동 없음·오래 쉼(14일 넘게 연락 없음)·담당 없음 + 오래 쉼 거래처 10곳
+  const sales = await (await import('./sales/leadList')).salesReportBlock(sql, 'default', todaySeoul()).catch(() => null);
+  return { weekStart, weekEnd: end, totals: tot, sites: sites.filter((s) => s.done || s.created || s.overdue || s.review || s.open_complaints), issues, photos, sales };
 }
 
 /** 정기 실행: 월요일 08:00(서울) 이후 지난주 보고가 없으면 1번 만들고 대표·본사 관리자에게 알림 */
@@ -156,7 +158,7 @@ export async function weeklyReportJob(now = new Date()) {
   if (!r) return { skipped: 'race' };
   const admins = (await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active' and tenant = 'default'`).map((x) => x.id);
   await notify(sql, { userIds: admins, type: 'weekly_report', title: `주간 보고 (${lastMonday.slice(5).replace('-', '/')} 주)`,
-    body: `완료 ${data.totals.done} · 새 업무 ${data.totals.created} · 지연 ${data.totals.overdue} · 미해결 민원 ${data.totals.complaints}`,
+    body: `완료 ${data.totals.done} · 새 업무 ${data.totals.created} · 지연 ${data.totals.overdue} · 미해결 민원 ${data.totals.complaints}${data.sales ? ` · 영업 오래 쉼 ${data.sales.stale} · 다음 행동 없음 ${data.sales.none}` : ''}`,
     link: `/reports/${r.id}`, entityType: 'weekly_report', entityId: r.id, actorId: null, dedupeKey: `weekly:${lastMonday}` });
   return { created: r.id };
 }

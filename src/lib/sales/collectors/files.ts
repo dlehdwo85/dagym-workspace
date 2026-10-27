@@ -77,8 +77,13 @@ export async function runFileProspectCollector(spec: FileSourceSpec, fetchImpl: 
 }
 /** data.go.kr 파일데이터 페이지의 메타데이터(contentUrl)에서 최신 다운로드 URL(분기마다 바뀜). 실패하면 마지막 확인값 */
 export async function resolveDataGoKrFileUrl(pageUrl: string, fallback: string, fetchImpl: typeof fetch = fetch): Promise<string> {
-  try { const res = await fetchImpl(pageUrl, { signal: AbortSignal.timeout(5000) }); if (!res.ok) return fallback; const html = await res.text();
-    const m = html.match(/"contentUrl"\s*:\s*"(https:\/\/www\.data\.go\.kr\/cmm\/cmm\/fileDownload\.do\?atchFileId=FILE_\d+&(?:amp;)?fileDetailSn=\d+[^"]*)"/); return m ? m[1].replace(/&amp;/g, '&') : fallback; } catch { return fallback; }
+  return (await resolveDataGoKrFile(pageUrl, fallback, fetchImpl)).url;
+}
+/** 200차: 같은 메타데이터의 수정일(dateModified) = 원본 기준일(예: 한국부동산원 단지 식별정보 2026-09-01) */
+export async function resolveDataGoKrFile(pageUrl: string, fallback: string, fetchImpl: typeof fetch = fetch): Promise<{ url: string; modified: string | null }> {
+  try { const res = await fetchImpl(pageUrl, { signal: AbortSignal.timeout(5000) }); if (!res.ok) return { url: fallback, modified: null }; const html = await res.text();
+    const m = html.match(/"contentUrl"\s*:\s*"(https:\/\/www\.data\.go\.kr\/cmm\/cmm\/fileDownload\.do\?atchFileId=FILE_\d+&(?:amp;)?fileDetailSn=\d+[^"]*)"/);
+    return { url: m ? m[1].replace(/&amp;/g, '&') : fallback, modified: html.match(/"dateModified"\s*:\s*"(\d{4}-\d{2}-\d{2})/)?.[1] ?? null }; } catch { return { url: fallback, modified: null }; }
 }
 export const todayIndex = () => Math.floor((Date.now() + 9 * 3600_000) / 86_400_000);
 export function rotatingWindow(total: number, size: number, dayIndex: number) {

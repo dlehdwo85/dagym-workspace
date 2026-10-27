@@ -123,7 +123,13 @@ function GuideBox({ data, busy, team }: { data: View; busy: string | null; team:
   const [scope, setScope] = useState(''); // '' = 회사 전체
   const saved = data.guides[scope || 'common'] ?? '';
   const [text, setText] = useState(saved);
-  useEffect(() => setText(data.guides[scope || 'common'] ?? ''), [scope, data.guides]);
+  // 범위를 바꾸면 그 범위의 저장된 지침으로. 같은 범위에서 저장된 값이 바뀌면(저장 뒤 다시 읽기·다른 사람 저장) 고치던 글이 없을 때만 따라감 —
+  // 만드는 중일 때 3초마다 다시 읽으면서 쓰던 글이 지워지고 [지침 저장]이 꺼지던 것(CI 1495)
+  const [seen, setSeen] = useState({ scope, saved });
+  if (seen.scope !== scope || seen.saved !== saved) {
+    setSeen({ scope, saved });
+    if (seen.scope !== scope || text === seen.saved) setText(saved);
+  }
   const name = (k: string) => (k === 'common' ? '회사 전체' : data.brands.find((b) => b.id === k)?.name ?? '브랜드');
   const have = Object.keys(data.guides).filter((k) => lineCount(data.guides[k]) > 0);
   return (

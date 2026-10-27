@@ -1,8 +1,8 @@
 // 운영시설 파일형 수집기 4종 — 산업단지(KICOX CSV)·공공체육시설(문체부 XLSX)·관광숙박업(행안부 OpenAPI)·신규 준공 공동주택(부동산원 CSV 40MB). 원본 이식(10/21).
 import { dataGoKey } from '../collect';
 import { RECENT_COMPLETION_DAYS } from './prospects';
-import { addDaysYmd, parseCsv, regionFromAddress, resolveDataGoKrFileUrl, rotatingWindow, runFileProspectCollector, todayIndex, todayKst, toYmd, type Extracted, type FileSourceSpec, type ProspectPayload } from './files';
-import { upsertProspects } from './store';
+import { addDaysYmd, parseCsv, regionFromAddress, resolveDataGoKrFile, resolveDataGoKrFileUrl, rotatingWindow, runFileProspectCollector, todayIndex, todayKst, toYmd, type Extracted, type FileSourceSpec, type ProspectPayload } from './files';
+import { setSourceAsOf, upsertProspects } from './store';
 import { readXlsx } from './xlsx';
 import type { Collector, CollectorCtx, CollectorResult, SourceStat } from './types';
 
@@ -153,7 +153,10 @@ export const rebRecent: Collector = {
   slug: 'reb_recent_complexes', label: '신규 준공 공동주택(한국부동산원)', hourKst: 7, source: 'data.go.kr 공동주택 단지 식별정보 CSV(약 40MB, 연 1회) — 사용승인 최근 18개월',
   async run(ctx: CollectorCtx): Promise<CollectorResult> {
     const today = todayKst(); const from = addDaysYmd(today, -RECENT_COMPLETION_DAYS);
-    const url = T() ? `${T()}/files/reb.csv` : await resolveDataGoKrFileUrl(REB_PAGE, REB_FALLBACK, ctx.fetchImpl);
-    return runFileProspectCollector({ slug: 'reb_recent_complexes', sourceName: '한국부동산원 공동주택 단지 식별정보', pageUrl: REB_PAGE, files: [{ label: '단지 기본정보', pageUrl: REB_PAGE, url }], extract: (b) => extractReb(b, from, today), maxRowsPerRun: 1000, downloadTimeoutMs: 40000 }, ctx.fetchImpl, ctx.deadlineMs, ctx.now);
+    // 200차: 같은 페이지의 수정일(dateModified) = 원본 기준일 줄('한국부동산원 9. 1.(화) 파일(연 1회, 전년도 사용승인분)')
+    const f = T() ? await resolveDataGoKrFile(`${T()}/files/reb-page.html`, `${T()}/files/reb.csv`, ctx.fetchImpl) : await resolveDataGoKrFile(REB_PAGE, REB_FALLBACK, ctx.fetchImpl);
+    const r = await runFileProspectCollector({ slug: 'reb_recent_complexes', sourceName: '한국부동산원 공동주택 단지 식별정보', pageUrl: REB_PAGE, files: [{ label: '단지 기본정보', pageUrl: REB_PAGE, url: f.url }], extract: (b) => extractReb(b, from, today), maxRowsPerRun: 1000, downloadTimeoutMs: 40000 }, ctx.fetchImpl, ctx.deadlineMs, ctx.now);
+    if (f.modified && r.inserted + r.updated + r.unchanged > 0) await setSourceAsOf('reb_recent_complexes', f.modified, '파일(연 1회, 전년도 사용승인분)');
+    return r;
   },
 };

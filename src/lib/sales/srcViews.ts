@@ -6,9 +6,10 @@ import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
 import { isAwardResult, onbidSale } from './collectors/procurement';
-import { oneCardPerNotice, skipLinks } from './noticeGroups';
+import { groupNotices, oneCardPerNotice, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { hubTabsOn } from './hubTabs';
+import { sourceAsOf } from './collectors/store';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -30,6 +31,18 @@ async function rows(scope: string, tbl: string, limit = 5000) {
     ${since ? sql`and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${since}` : sql``}
     order by coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) desc, ctid desc limit ${limit}`).reverse().map((r) => ({ ...r.row, __id: r.src_id }));
 }
+/** 191차(로컬 10/27 — 관련으로 저장된 원본 복사 줄이 입찰 목록·검색에 안 나옴): 공고는 관련 줄과 이 회사 진행 기록·참고 줄만 DB 에서 바로 읽는다.
+ *  예전엔 모든 공고(관련 아님 포함, K-apt 전체 등)의 최신 2만 줄을 읽은 뒤 관련을 골라 — 수집 줄이 많으면 관련 줄이 읽기 상한 밖으로 밀렸다.
+ *  3년 창은 그대로(처음 본 시각이 날짜 꼴이 아닌 줄은 창으로 빼지 않음). related = false 면 ids 줄만 */
+async function noticeRows(ids: Iterable<string> = [], opt: { related?: boolean } = {}) {
+  const sql = db(); const since = new Date(Date.now() - WINDOW_DAYS.procurement_notices * 864e5).toISOString();
+  const list = [...new Set([...ids].map(String).filter(Boolean))]; const rel = opt.related !== false;
+  if (!rel && !list.length) return [];
+  return (await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone
+    and (${rel ? sql`coalesce(row->>'related', 'false') = 'true'` : sql`false`} or src_id = any(${list}::text[]) or row->>'id' = any(${list}::text[]))
+    and (coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${since} or coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) !~ '^[0-9]{4}-')
+    order by coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) desc, ctid desc limit 20000`).reverse().map((r) => ({ ...r.row, __id: r.src_id }));
+}
 /** 전환 뒤(쓰기 열림): 리드는 정식 표(sales_leads)가 정본 — 원본 행 칸 이름으로 맞춰 돌려줌(화면 코드 그대로) */
 /** date 칸: 운영 DB 연결은 date 를 'YYYY-MM-DD' 문자열로, 시험 DB 는 Date 로 줄 수 있음 — 둘 다(핫픽스 10/19: 문자열을 format 해 500) */
 const ymdOf = (v: unknown) => (v == null || v === '' ? null : typeof v === 'string' ? v.slice(0, 10) : v instanceof Date && !Number.isNaN(v.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(v) : null);
@@ -37,7 +50,7 @@ async function formalLeads(tenant: string, id?: string) {
   const r = await db()<any[]>`select l.*, u.name as owner_name, (select max(x.occurred_at) from sales_lead_records x where x.lead_id = l.id and x.kind in ('sales_activities', 'proposals', 'contracts')) as last_activity_at from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} and l.deleted_at is null ${id ? db()`and l.id = ${id}` : db()``} order by l.updated_at desc limit 5000`;
   return r.map((l) => ({ ...(l.src ?? {}), __id: l.id, __src_id: l.src_id, __owner: l.owner_name ?? '', __owner_id: l.owner_id, name: l.name, sales_status: l.status, priority: l.priority, facility_type: l.facility_type, region: l.region,
     next_contact_date: ymdOf(l.next_contact_date), contact_name: l.contact_name, phone: l.phone, expected_revenue: l.expected_revenue, email: l.email, scale: l.scale, homepage: l.homepage ?? l.src?.homepage ?? null,
-    memo: l.memo, updated_at: l.updated_at, created_at: l.created_at, last_activity_at: l.last_activity_at }));
+    memo: l.memo, updated_at: l.updated_at, created_at: l.created_at, last_activity_at: l.last_activity_at, next_action: l.next_action ?? null, revisit_date: ymdOf(l.revisit_date), biz_no: l.biz_no ?? null }));
 }
 async function userNames(tenant: string) {
   const m = await db()<{ src_user_id: string; name: string | null }[]>`select m.src_user_id, coalesce(u.name, m.name) as name from sales_user_map m left join users u on u.id = m.user_id where m.tenant = ${tenant}`;
@@ -61,8 +74,10 @@ const lead = (r: any, names: Map<string, string>) => ({
   owner: r.__owner !== undefined ? r.__owner || null : names.get(String(pick(r, 'owner_id', 'assigned_to', 'sales_owner_id', 'user_id') ?? '')) ?? null, ownerId: r.__owner_id ?? null, memo: r.__id && r.__owner !== undefined ? r.memo ?? null : undefined, revenue: pick(r, 'expected_revenue', 'expected_amount', 'estimated_revenue'),
   updated: day(pick(r, 'updated_at', 'created_at')), phone: pick(r, 'phone', 'contact_phone'), contact: pick(r, 'contact_name', 'manager_name'),
   homepage: pick(r, 'homepage', 'website', 'url'), // 대표 검수 10/20 ②: 앱 목록 홈페이지 칩
+  bizNo: pick(r, 'biz_no', 'business_number', 'business_no'), // 205차: 사업자번호(중복 대조)
   // S2 2차: 이메일·규모·등록일·최근 활동(상담·제안·계약 최신, 없으면 수정일)
   email: pick(r, 'email', 'contact_email'), scale: pick(r, 'scale', 'facility_scale', 'size'), created: day(pick(r, 'created_at')), lastActivity: day(pick(r, 'last_activity_at', 'last_activity_date', 'last_contact_at')) ?? day(pick(r, 'updated_at', 'created_at')),
+  nextAction: pick(r, 'next_action'), revisit: day(pick(r, 'revisit_date')), // 197차(#461): 다음 할 일(다음 연락일과 한 쌍) · 다시 볼 날(보류·실패)
 });
 /** 영업관리 기준(SALES_SCREEN_INVENTORY 10/19): '오늘 등록'·'새 공고'는 원본 first_seen_at 하나만(KST 날짜). posted_date·created_at 은 쓰지 않음.
  * 옮긴 행은 원본 first_seen_at 을 그대로 가져오므로 옮긴 날로 바뀌지 않는다(값이 없으면 신규 판단에서 빠짐) */
@@ -156,7 +171,7 @@ export function isOpenBid(n: { related?: boolean; status?: unknown; close?: stri
   return true;
 }
 
-export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string; biz?: string; sort?: string; box?: string; region?: string; hh?: string; period?: string }) {
+export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string; biz?: string; sort?: string; box?: string; region?: string; hh?: string; period?: string; trace?: string[] }) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
   const [applied] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
@@ -190,9 +205,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       items.push({ date: l.next, time: tm, title: `${act ? String(act).slice(0, 20) : '연락'} · ${l.name}`, kind: 'lead', owner: l.owner ?? null, href: `/s/sales/leads?q=${encodeURIComponent(String(l.name))}` });
     }
     if (bidsOn) {
-      const W = (await rows(t, 'opportunity_work')).filter((w) => !/완료|미참여|대상아님|done|closed/i.test(String(pick(w, 'status') ?? '')));
+      // 196차: 전환 뒤 정식 진행 기록(prog) — 예전에는 원본 복사본만 읽어 워크인에서 넘긴 입찰이 빠졌음 · 결과(낙찰·유찰·취소)가 난 공고는 뺌
+      const W = (await prog('opportunity_work')).filter((w) => !/완료|미참여|대상\s?아님|done|closed|낙찰|유찰|취소/i.test(String(pick(w, 'status') ?? '')));
       const ids = new Set(W.map((w) => String(pick(w, 'notice_id', 'procurement_notice_id') ?? '')));
-      if (ids.size) for (const r of await rows('global', 'procurement_notices', 20000)) {
+      if (ids.size) for (const r of await noticeRows(ids, { related: false })) {
         if (!ids.has(String(r.id ?? r.__id))) continue;
         const n = notice(r, cats);
         if (!n.close || n.close < from || n.close > to) continue;
@@ -206,7 +222,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const L = (await leadRows()).map((r) => lead(r, names));
     const W = await prog('opportunity_work'); // S2-5: 전환 뒤에는 정식 진행 기록 표(원본 행 모양)
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
-    const NR0 = oneCardPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => (r.related === true || r.related === 'true') && ((!vendorUnchecked(r) && !onbidSale(r)) || workOf.has(String(r.id ?? r.__id)))), workTime(W));
+    const NR0 = oneCardPerNotice((await noticeRows()).filter((r) => (r.related === true || r.related === 'true') && ((!vendorUnchecked(r) && !onbidSale(r)) || workOf.has(String(r.id ?? r.__id)))), workTime(W));
     const skips = skipLinks(NR0, (id) => workOf.get(id));
     const NR = NR0.filter((r) => !skips.hidden(r)); // 입찰 목록과 같은 기준(확인 안 된 협력사 줄·온비드 매각 빼기·같은 공고 한 장·대상 아님 빼기 — 137차 같은 사업 사전규격·본 공고 함께)
     const N = NR.map((r) => notice(r, cats));
@@ -275,7 +291,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
     const endOf = (r: any) => day(pick(r, 'contract_end_date', 'contract_end', 'service_end_date', 'contract_expiry_date'));
     const shift = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x); };
-    const rel = (await rows('global', 'procurement_notices', 20000)).filter((r) => r.related === true || r.related === 'true');
+    const rel = (await noticeRows()).filter((r) => r.related === true || r.related === 'true');
     const skips = skipLinks(rel, (id) => workOf.get(id)); // 137차: 대상 아님 + 같은 사업(사전규격 ↔ 본 공고)
     const timing = (end: string) => { const start = shift(end, -12), start2 = shift(end, -9), propose = shift(end, -6), rebid = shift(end, -3);
       return { start, start2, propose, rebid, stage: td < start ? '영업 전' : td < propose ? '영업 시작' : td < rebid ? '제안' : td <= end ? '재입찰' : '종료', daysLeft: Math.round((Date.parse(end) - Date.parse(td)) / 864e5) }; };
@@ -304,24 +320,40 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       from sales_status_log g join sales_leads l on l.id = g.lead_id left join users u on u.id = g.changed_by where l.tenant = ${t} and l.deleted_at is null and l.status in ('보류', '실패', '되돌림') order by g.lead_id, g.changed_at desc`).map((g) => [g.lead_id, g])) : new Map();
     const archiveOf = (l: { id: unknown; status: unknown }) => { if (!ARCHIVED_STAGES.has(String(l.status))) return null; const g = logs.get(String(l.id)); const same = g?.to_status === String(l.status);
       return { reason: same ? g!.reason ?? null : null, by: same ? g!.by ?? null : null, at: same && g!.changed_at ? new Date(g!.changed_at).toISOString() : null, prev: same && g!.from_status && !ARCHIVED_STAGES.has(g!.from_status) ? g!.from_status : null }; };
-    return { ...meta, stages: STAGES, canAssign, people, me: u.id, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [], archive: archiveOf(l) })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
+    // 197차(#461): 목록 칸(단계 머문 날·다음 할 일·마지막 접촉·출처·종결일·다시 볼 날) + 내 저장된 보기·열(기기 간 유지)
+    const { leadExtras, getLeadViews } = await import('./leadList');
+    const X = formal ? await leadExtras(sql, t, terms) : new Map();
+    const myViews = await getLeadViews(sql, u.id);
+    return { ...meta, stages: STAGES, canAssign, people, me: u.id, myViews, leads: L.map(({ raw, ...l }) => ({ ...l, interests: I.get(String(raw.__src_id ?? raw.id ?? l.id)) ?? [], archive: archiveOf(l), ...(X.get(String(l.id)) ?? {}) })).sort((a, b) => String(b.updated).localeCompare(String(a.updated))) };
   }
   if (view === 'lead') {
     if (!q.id) throw badRequest('id 가 필요합니다');
     if (formal) {
       if (!/^[0-9a-f-]{36}$/i.test(q.id)) throw notFound();
       const [r] = await formalLeads(t, q.id);
-      if (!r) throw notFound();
+      if (!r) { // 206차: 합쳐서 빠진 거래처(예전 링크) → 남긴 거래처로
+        const [m] = await sql<{ merged_into: string }[]>`select merged_into from sales_leads where id = ${q.id} and tenant = ${t} and deleted_at is not null and merged_into is not null`;
+        if (m) return { ...meta, mergedInto: m.merged_into };
+        throw notFound();
+      }
       const srcId = r.__src_id as string | null;
       const lid = q.id;
+      const mergedSrc = (await sql<{ src_id: string }[]>`select src_id from sales_leads where tenant = ${t} and merged_into = ${lid} and src_id is not null`).map((x) => x.src_id); // 합친 거래처의 옛 영업관리 원본 업무도
       const recs = async (kind: string) => (await sql<any[]>`select id, data, occurred_at from sales_lead_records where tenant = ${t} and lead_id = ${lid} and kind = ${kind} order by occurred_at desc nulls last`).map((x) => ({ ...x.data, __id: x.id }));
-      const relSrc = async (tbl: string) => (srcId ? (await rows(t, tbl)).filter((x) => String(pick(x, 'lead_id')) === srcId) : []);
+      const srcIds = new Set([srcId, ...mergedSrc].filter(Boolean).map(String));
+      const relSrc = async (tbl: string) => (srcIds.size ? (await rows(t, tbl)).filter((x) => srcIds.has(String(pick(x, 'lead_id')))) : []);
       const log = await sql`select g.from_status, g.to_status, g.reason, g.changed_at, u.name as by from sales_status_log g left join users u on u.id = g.changed_by where g.lead_id = ${lid} order by g.changed_at desc limit 50`;
       const people = await sql`select id, name from users where tenant = ${t} and status = 'active' and not is_demo order by name`;
       const { src: _s, ...raw } = r;
       // S2 2차: 업무 탭 = 워크인 업무(lead_id) + 옮겨 온 원본 업무, 타임라인 = 상담·상태 변경·업무·제안·계약 통합(최신순)
       const wTasks = await sql<any[]>`select t.id, t.title, t.status, t.due_date::text as due_date, t.created_at, t.completed_at, au.name as assignee, t.sales_ref from tasks t left join users au on au.id = t.assignee_id where t.lead_id = ${lid} and t.deleted_at is null order by (t.status = 'done'), t.due_date nulls last limit 100`;
       const acts = await recs('sales_activities'), props = await recs('proposals'), cons = await recs('contracts');
+      // 197차(#460): 리드 업무의 댓글·첨부도 거래처 타임라인에(업무에서 진행한 기록을 따로 옮겨 적지 않게)
+      const tids = wTasks.map((x: any) => x.id);
+      const tcom = tids.length ? await sql<any[]>`select c.id, c.task_id, c.body, c.created_at, au.name as by, t.title from comments c join tasks t on t.id = c.task_id left join users au on au.id = c.author_id
+        where c.task_id = any(${tids}::uuid[]) and c.deleted_at is null order by c.created_at desc limit 100` : [];
+      const tfile = tids.length ? await sql<any[]>`select f.id, f.task_id, coalesce(f.file_name, f.doc_title, f.url) as name, f.created_at, au.name as by, t.title from attachments f join tasks t on t.id = f.task_id left join users au on au.id = f.created_by
+        where f.task_id = any(${tids}::uuid[]) and f.deleted_at is null and f.upload_status = 'ready' order by f.created_at desc limit 100` : [];
       // 영업 재편 5): 리드 일정(넘기기 자동 일정·리드에서 만든 일정) — 다가오는 것 먼저
       const events = await sql<any[]>`select e.id, e.title, e.start_at, e.end_at, e.all_day, c.name as calendar from events e join calendars c on c.id = e.calendar_id where e.lead_id = ${lid} and e.deleted_at is null order by e.start_at desc limit 50`;
       const timeline = [...acts.map((a: any) => ({ kind: 'act', at: a.activity_date ?? a.created_at, title: `${a.activity_type ?? '상담'} · ${String(a.content ?? '').slice(0, 80)}`, by: a.created_by_name ?? null, id: a.__id })),
@@ -329,7 +361,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         ...wTasks.map((x: any) => ({ kind: 'task', at: x.completed_at ?? x.created_at, title: `${x.status === 'done' ? '완료' : '업무'} · ${x.title}`, by: x.assignee ?? null, id: x.id, href: `/tasks/${x.id}` })),
         ...props.map((p: any) => ({ kind: 'proposal', at: p.proposal_date, title: `제안 · ${p.title}${p.amount ? ` ${Number(p.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: p.__id })),
         ...cons.map((c: any) => ({ kind: 'contract', at: c.contract_date ?? c.start_date, title: `계약 · ${c.title}${c.amount ? ` ${Number(c.amount).toLocaleString('ko-KR')}원` : ''}`, by: null, id: c.__id })),
-        ...events.map((e: any) => ({ kind: 'event', at: e.start_at, title: `일정 · ${e.title}`, by: null, id: e.id, href: `/calendar?event=${e.id}` }))]
+        ...events.map((e: any) => ({ kind: 'event', at: e.start_at, title: `일정 · ${e.title}`, by: null, id: e.id, href: `/calendar?event=${e.id}` })),
+        ...tcom.map((c: any) => ({ kind: 'comment', at: c.created_at, title: `댓글 · ${String(c.body).replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/gi, '@$1').slice(0, 120)}`, by: c.by ?? null, id: c.id, href: `/tasks/${c.task_id}`, task: c.title })),
+        ...tfile.map((f: any) => ({ kind: 'file', at: f.created_at, title: `첨부 · ${String(f.name ?? '파일').slice(0, 80)}`, by: f.by ?? null, id: f.id, href: `/tasks/${f.task_id}`, task: f.title }))]
         .filter((x) => x.at).map((x) => ({ ...x, at: x.at instanceof Date ? x.at.toISOString() : String(x.at) })) // #148: Date 는 ISO 로(String(Date) 는 'Tue Oct…' 라 정렬이 틀림)
         .sort((a, b) => String(b.at).localeCompare(String(a.at)));
       return { ...meta, lead: lead(r, names), raw: Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith('__'))), activities: acts, timing: await recs('lead_opportunity_timing'),
@@ -393,7 +427,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // #510: 메일 '참고(검색어만 일치)' [보기] = 마지막 다이제스트의 참고 줄(관련 사업은 아니고 관심 검색어만 맞은 공고)
     const refIds = tab === 'ref' ? new Set(((await db()<{ items: any }[]>`select items from sales_digests where tenant = ${t} order by day desc limit 1`)[0]?.items ?? []).filter((i: any) => i?.section === 'ref').map((i: any) => String(i.id))) : null;
     // 확인 안 된 협력사 줄(메뉴·안내문 조각·예전 방식)·온비드 매각 빼기 · 대표 10/24 추가 ②: 같은 공고(취소·정정 공고·재게시·완전 중복)는 카드 한 장(noticeGroups)
-    const N = oneCardPerNotice((await rows('global', 'procurement_notices', 20000)).filter((r) => refIds ? refIds.has(String(r.id ?? r.__id)) : byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r) && !onbidSale(r))), workTime(W, P));
+    const read = refIds ? await noticeRows([...refIds].map(String), { related: false }) : await noticeRows(byNotice.keys());
+    const cand = read.filter((r) => refIds ? refIds.has(String(r.id ?? r.__id)) : byNotice.has(String(r.id ?? r.__id)) || ((r.related === true || r.related === 'true') && !vendorUnchecked(r) && !onbidSale(r)));
+    const N = oneCardPerNotice(cand, workTime(W, P));
     // 137차: 대상 아님 = 자기 진행 기록 + 같은 사업(사전규격 ↔ 본 공고)으로 함께 숨김 — [대상 아님] 탭은 한 장(함께 숨긴 카드는 linked)
     const skips = skipLinks(N, (id) => pick(byNotice.get(id), 'status'));
     const folded = (r: any) => skips.under.has(String(r.id ?? r.__id));
@@ -405,6 +441,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       return { ...n0, todayHit: why.hit, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본) · #610 넘기기로 만든 리드면 카드에 [되돌리기]
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, workHandoff: !!(w?.lead_id && pick(w, 'handoff_by')), raw: r.__orig ?? r,
+        // 결정 15-35: 입찰 업무로 넘긴 공고 — 업무 열기·기한·결과·[되돌리기]
+        workBid: w && pick(w, 'bid_task_id') ? { taskId: String(pick(w, 'bid_task_id')), due: pick(w, 'bid_due_auto'), result: pick(w, 'bid_result'), winner: pick(w, 'bid_winner'), amount: pick(w, 'bid_amount'), auto: !!pick(w, 'bid_result_auto'), contractTaskId: pick(w, 'bid_contract_task_id'), assignees: Array.isArray(w.assignees) ? w.assignees.length : 0 } : null,
         history: r.__history ?? null, skipped, skip: who && skipped && !folded(r) ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null,
         linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; });
     // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작
@@ -412,6 +450,21 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       && (tb !== 'today' || (n.todayHit && (n.result || !bidEnded(n, td)))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
       && (tb !== 'soon' || (!!n.close && n.close >= td && n.close <= plus(3) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중
       && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td))); // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
+    // 191차(로컬 10/27): 플랫폼 조회 — 이 줄이 이 회사 입찰 목록(전체 탭)에 들어가는지, 빠지면 어느 단계에서(목록과 같은 계산)
+    if (q.trace?.length) {
+      const key = (r: any) => String(r.id ?? r.__id);
+      const readIds = new Set(read.map(key)), candIds = new Set(cand.map(key)), cardIds = new Set(N.map(key));
+      const repOf = new Map<string, string>();
+      for (const g of groupNotices(cand)) { const rep = g.find((r) => cardIds.has(key(r))); for (const r of g) repOf.set(key(r), rep ? key(rep) : key(r)); }
+      const shown = new Set(all.filter((n) => inTab(n, 'all')).map((n) => String(n.id)));
+      return { trace: q.trace.map((id) => {
+        if (!readIds.has(id)) return { id, listed: false, step: 'read', why: '목록 읽기에서 빠짐 — 관련 아님이고 이 회사 진행 기록이 없음(또는 사라짐·3년 창 밖)' };
+        if (!candIds.has(id)) return { id, listed: false, step: 'filter', why: '확인 안 된 협력사 모집 줄 또는 온비드 매각 공고' };
+        const card = repOf.get(id) ?? id;
+        if (!shown.has(card)) return { id, listed: false, step: 'skip', card, why: card !== id ? `같은 공고 묶음(카드 ${card})이 이 회사 [대상 아님]` : '이 회사 [대상 아님](같은 사업 사전규격·본 공고 함께 숨김 포함)' };
+        return { id, listed: true, step: 'listed', card, why: card !== id ? `같은 공고 묶음 카드(${card})로 보임` : '목록에 보임' };
+      }) };
+    }
     // #606 정렬(?sort=): 마감 D-day(deadline) · 공고일(notice) · 예산(amount) — 없으면 탭 기본(진행 중·마감순, 대상 아님·넘긴 순, 그 밖·DB 등록 최신순)
     const sortKey = ['deadline', 'notice', 'amount'].includes(String(q.sort ?? '')) ? String(q.sort) : null;
     const cmp = (a: (typeof all)[number], b: (typeof all)[number]) => sortKey === 'deadline' ? String(a.deadline ?? a.close ?? '9999').localeCompare(String(b.deadline ?? b.close ?? '9999'))
@@ -488,8 +541,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           elapsedDays: daysSince(day(pick(r, 'move_in_date', 'move_in_start')) ?? day(pick(r, 'completion_date', 'use_approval_date', 'completed_at'))), raw: r }; });
       type Fc = (typeof list)[number];
       const sorter: Record<string, (a: Fc, b: Fc) => number> = { completion: (a, b) => asc(a.date, b.date), moveIn: (a, b) => asc(a.moveIn, b.moveIn), elapsed: (a, b) => numDesc(a.elapsedDays, b.elapsedDays), households: (a, b) => numDesc(a.households, b.households), next: (a, b) => asc(a.next, b.next) };
-      return pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen),
-        sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))), (x) => x.contact);
+      // 200차 #699: 원본 기준일 한 줄 — 준공·입주 단지 원천의 기준일(우선순위 순: K-apt 자료실 주 1회 · K-apt 단지 목록 매일 · 한국부동산원 연 1회)
+      return { ...pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen),
+        sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))), (x) => x.contact),
+        sourceAsOf: await sourceAsOf(['kapt_weekly_complexes', 'kapt_new_complexes', 'reb_recent_complexes']) };
     }
     if (tab === 'vendors') {
       const P = new Map((await prog('vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));

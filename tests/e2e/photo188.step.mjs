@@ -83,6 +83,8 @@ export async function photo188({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   assert.ok(over <= 1, `휴대폰 가로 넘침 ${over}px`);
   await owner.keyboard.press('Escape');
   await owner.setViewportSize({ width: 1366, height: 900 });
-  // 정리: 이 단계 글은 승인함 숫자에 섞이지 않게 취소
+  // 정리: 이 단계 글은 승인함 숫자에 섞이지 않게 취소 · 브랜드 이름 없는 업무 공간 사진(창고)은 지움 — 남겨 두면 뒤 단계의 다른 브랜드 시안·피드 틀 미리보기가
+  //  자료실 전체 후보(188차)로 이 사진을 바탕에 써서 '사진 없음' 전제가 깨짐(CI 1491·1492·1494 #544 피드 틀 '회색 = 사진 자리')
   await sql`update mkt_contents set status = 'canceled' where id = ${c.id}`;
+  await sql`update library_files set deleted_at = now() where id = ${store}`;
 }

@@ -11,6 +11,7 @@ import { menuLevels } from '@/lib/menuPerms';
 import { db } from '@/lib/db';
 import { tenantOf } from '@/lib/types';
 import { capturePolicy } from '@/lib/capturePolicy';
+import { hostSplit } from '@/lib/hostSplit';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +41,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       // #611(대표 10/25 ⑦): 허브 탭 = 회사가 켠 수집 DB 종류(데이터 설정에서 끈 종류의 탭은 숨김)
       salesHubTabs: (spaces as string[]).includes('sales') ? await (await import('@/lib/sales/hubTabs')).hubTabsOn(tenantOf(user), await (await import('@/lib/sales/options')).salesBidsOn(tenantOf(user))).catch(() => null) : null,
       salesTerms,
-      sidebar3: process.env.FEATURE_SIDEBAR3 !== '0' /* ⑦ 사이드바 3구역 — 되돌리려면 FEATURE_SIDEBAR3=0 */ },
+      sidebar3: process.env.FEATURE_SIDEBAR3 !== '0' /* ⑦ 사이드바 3구역 — 되돌리려면 FEATURE_SIDEBAR3=0 */,
+      appHost: (() => { const h = hostSplit(); return h.on ? h.app : null; })() /* 198차 결정 15-29 주소 분리(켰을 때만) */ },
     menus,
     spaces, // V41 공간
     tours: { seen: await (await import('@/lib/tours')).seenTours(user.id).catch(() => []), auto: (await import('@/lib/tours')).toursAuto(user) }, // #77 처음 사용 안내

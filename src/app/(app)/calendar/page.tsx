@@ -11,7 +11,8 @@ import interactionPlugin, { Draggable } from '@fullcalendar/interaction';
 import luxonPlugin from '@fullcalendar/luxon3';
 import koLocale from '@fullcalendar/core/locales/ko';
 import dynamic from 'next/dynamic';
-import type { EventDropArg, DatesSetArg, EventClickArg } from '@fullcalendar/core';
+import { createPlugin, type EventDropArg, type DatesSetArg, type EventClickArg } from '@fullcalendar/core';
+import { Interaction, type InteractionSettings } from '@fullcalendar/core/internal';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, Video, X } from 'lucide-react';
@@ -29,6 +30,17 @@ import { CalColorsDialog, ColorDot, PALETTE_NAMES, eventColorOf, isPersonalTask,
 import { assignedTo } from '@/components/CoAssignees';
 
 type Scope = 'this' | 'following' | 'all';
+
+/** 199차 #690: FullCalendar 는 시간 칸(1시간) 안에서 일정 '가운데'를 잡은 것처럼 계산해서(useEventCenter), 끌기 단위(15·30분)가 칸보다 작으면
+ *  잡은 자리에 따라 끌기 시작하자마자 15~30분 튀어 버린다. 시간 칸(주·일 보기 본문)만 잡은 자리 그대로 따라가게 끈다(종일 줄·월 보기는 그대로).
+ *  끌기 처리(EventDragging)보다 먼저 만들어져야 하므로 plugins 맨 앞에 둔다 */
+class GrabWhereHeld extends Interaction {
+  constructor(settings: InteractionSettings) {
+    super(settings);
+    if (settings.el.classList.contains('fc-timegrid-body')) settings.useEventCenter = false;
+  }
+}
+const grabWhereHeld = createPlugin({ name: 'wos-grab-where-held', componentInteractions: [GrabWhereHeld] });
 const seoulDate = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const seoulTime = (d: Date | string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
@@ -81,6 +93,9 @@ function CalendarPage() {
   const [showTasks, setShowTasks] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_tasks') !== '0'; } catch { return true; } });
   // V14 20번(대표 결정): 완료된 업무·일정은 기본으로 숨기고 "완료 보기"로만 (이 기기 기억)
   const [showDone, setShowDone] = useState<boolean>(() => { try { return localStorage.getItem('wos_cal_done') === '1'; } catch { return false; } });
+  // 대표 10/26 #690(구글 캘린더 레퍼런스): 일정을 끌어 옮기기·늘리기·새로 그리기 단위 — 기본 15분, 칩으로 30분(이 기기 기억). 예전엔 1시간
+  const [snap, setSnapState] = useState<15 | 30>(() => { try { return localStorage.getItem('wos_cal_snap') === '30' ? 30 : 15; } catch { return 15; } });
+  const setSnap = (n: 15 | 30) => { setSnapState(n); try { localStorage.setItem('wos_cal_snap', String(n)); } catch {} };
   useEffect(() => { try { localStorage.setItem('wos_cal_done', showDone ? '1' : '0'); } catch {} }, [showDone]);
   // 대표 10/22 19:47: 일·3일·주(시간 격자)에서 종일·시간 없는 업무 칸이 위를 차지해 오전 일정을 가림 → 기본 숨김, 날짜 머리 아래 '종일 n' 칩(누르면 그날 목록). 이 기기 기억
   // #592(대표 10/25 구글 주 보기 대조): 휴대폰은 종일 줄 기본 켬 — 하루 2개 + '+n개'(누르면 그날 목록)라 위를 크게 차지하지 않음. 휴대폰은 새 기억 키
@@ -124,6 +139,7 @@ function CalendarPage() {
   };
   const showTask = (t: any) => who === 'all' || (who === 'mine' ? assignedTo(t, user.id) : who.some((w) => assignedTo(t, w))); // #475 공동 담당 업무도
   const calRef = useRef<FullCalendar>(null);
+  const clickAt = useRef<{ x: number; y: number } | null>(null); // 199차 #690: 한 번 누름(dateClick) 자리 → 빠른 입력 위치
   // V14 36번: 좌우로 밀어 이전·다음 기간(휴대폰), 트랙패드 가로 스크롤(PC)
   const swipeWrap = useRef<HTMLDivElement>(null);
   const calApi = useCallback(() => calRef.current?.getApi(), []);
@@ -429,6 +445,8 @@ function CalendarPage() {
             <button onClick={() => setShowAllDay(!showAllDay)} aria-pressed={showAllDay} data-testid="cal-show-allday" title="일·3일·주 보기 위쪽에 종일·시간 없는 업무 칸 보이기" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showAllDay ? 'border-accent-400 text-accent-700' : 'border-line text-ink-3')}>종일 칸</button>
             <button onClick={() => setShowDone(!showDone)} aria-pressed={showDone} data-testid="cal-show-done" className={cx('hit inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium', showDone ? 'border-green-400 text-green-700' : 'border-line text-ink-3')}><Check className="size-3.5" />완료 보기</button>
 
+            <button onClick={() => setSnap(snap === 15 ? 30 : 15)} title="일정을 끌어서 옮기거나 늘릴 때 시간 단위 — 누르면 15분 ↔ 30분" aria-label={`일정 옮기는 단위 ${snap}분 — 누르면 ${snap === 15 ? 30 : 15}분`} data-testid="cal-snap"
+              className="hit inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 font-medium text-ink-2"><Clock className="size-3.5" />{snap}분 단위</button>
             {range && <a href={`/api/export/calendar?start=${seoulDate(range.from)}&end=${addDays(seoulDate(range.to), -1)}${who === 'mine' ? `&who=${user.id}` : Array.isArray(who) ? `&who=${who.join(',')}` : ''}`}
               className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:hidden" data-testid="cal-export-mobile"><FileSpreadsheet className="size-3.5 text-green-700" />엑셀</a>}{/* #592 휴대폰: 제목 줄을 숨겨 엑셀은 칩 줄로 */}
             <button onClick={() => setColorDlg(true)} className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2" aria-label="캘린더 색 설정" data-testid="cal-colors"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
@@ -499,6 +517,16 @@ function CalendarPage() {
                   <span>종일 칸 보기</span>
                 </label>
               </li>
+              {/* 199차 #690: PC 는 왼쪽 목록에서 끌기 단위 고르기(휴대폰·태블릿은 칩 줄의 'N분 단위' 칩) */}
+              <li className="flex items-center gap-2 px-2 py-1.5 text-sm" title="일정을 끌어서 옮기거나 늘릴 때 시간 단위(이 기기 기억)">
+                <Clock className="size-3.5 text-ink-3" /><span className="min-w-0 flex-1">끌기 단위</span>
+                <span className="inline-flex shrink-0 rounded-full border border-line p-0.5 text-xs" role="group" aria-label="일정 끌기 단위" data-testid="cal-snap-side">
+                  {([15, 30] as const).map((n) => (
+                    <button key={n} type="button" onClick={() => setSnap(n)} aria-pressed={snap === n}
+                      className={cx('rounded-full px-2 py-0.5 font-medium', snap === n ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{n}분</button>
+                  ))}
+                </span>
+              </li>
             </ul>
           </div>
           {people.length > 1 && (
@@ -544,7 +572,7 @@ function CalendarPage() {
           <div ref={swipeWrap} className={cx('overflow-x-clip', mobile && 'cal-phone', mobile && range?.view && `cal-v-${range.view}`)} data-testid="cal-swipe">
           <FullCalendar
             ref={calRef}
-            plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
+            plugins={[grabWhereHeld, dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
             timeZone="Asia/Seoul" locale={koLocale} firstDay={0} height={(range?.view ?? initView).startsWith('timeGrid') ? calH : 'auto'} nowIndicator
             initialView={initView}
             initialDate={/^\d{4}-\d{2}-\d{2}$/.test(sp.get('date') ?? '') ? sp.get('date')! : undefined}
@@ -576,8 +604,8 @@ function CalendarPage() {
             // #592: 시간 격자 종일 줄은 하루 2개까지 — '+n개' 는 그날 종일 목록(휴대폰 시트), 월 보기는 그대로 풍선. 끝에 참 값을 돌려주면 FullCalendar 는 아무것도 하지 않음
             moreLinkClick={(a) => { if (!a.view.type.startsWith('timeGrid')) return 'popover'; setAllDaySheet(seoulDate(a.date)); return true as never; }}
             // 대표 지적(10/19 ① d): 겹친 일정·업무는 나란히(겹쳐 그리면 위에 깔린 항목이 눌려 다른 상세가 열림)
-            slotDuration="01:00:00" snapDuration="01:00:00" slotEventOverlap={false} eventMinHeight={mobile ? 34 : 28} eventShortHeight={30}
-            editable selectable selectMirror droppable longPressDelay={350}
+            slotDuration="01:00:00" snapDuration={snap === 30 ? '00:30:00' : '00:15:00'} slotEventOverlap={false} eventMinHeight={mobile ? 34 : 28} eventShortHeight={30}
+            editable selectable selectMirror droppable longPressDelay={350} selectMinDistance={touch ? 0 : 4}
             events={fcEvents}
             datesSet={(a: DatesSetArg) => { setAgRange({ from: seoulDate(a.start), to: seoulDate(new Date(a.end.getTime() - 1)) }); setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view2', a.view.type); } catch {} keepInUrl({ view: a.view.type, date: seoulDate(a.view.calendar.getDate()) }); }}
             eventClick={onClick}
@@ -655,15 +683,18 @@ function CalendarPage() {
             eventDrop={moveEvent}
             eventResize={moveEvent}
             // 휴대폰: 빈 칸 한 번 탭 = 그 시각 1시간 임시 블록 + 빠른 등록 (길게 누를 필요 없음). 월 보기 날짜 탭 = 그날 종일
+            // 199차 #690: 끌기 단위가 15분이 된 뒤에도 한 번 누름(PC 클릭 포함)은 예전처럼 그 시각 정시부터 1시간 — 끌어서 그리면 15분 단위(PC 는 4px 넘게 끌어야 선택)
             dateClick={(info) => {
-              if (!touch) return; // PC 는 클릭·끌기 선택(select)으로 처리
               const api = calRef.current?.getApi(); if (!api) return;
-              if (info.allDay) api.select(info.dateStr.slice(0, 10));
-              else api.select(info.date, new Date(info.date.getTime() + 3600000));
+              clickAt.current = { x: info.jsEvent.clientX, y: info.jsEvent.clientY };
+              const h = Math.floor(info.date.getTime() / 3600000) * 3600000; // 서울은 시차가 정시 단위라 그대로 그 시각 정시
+              // 손 뗌을 다 처리한 뒤에 고름 — 같은 손 뗌에서 바로 고르면 '빈 곳 누름 = 선택 풀기'에 곧바로 풀림
+              setTimeout(() => { if (info.allDay) api.select(info.dateStr.slice(0, 10)); else api.select(new Date(h), new Date(h + 3600000)); }, 0);
             }}
             select={(s) => {
               const js = (s.jsEvent as MouseEvent | undefined);
-              const x = js?.clientX ?? window.innerWidth / 2, y = js?.clientY ?? 200;
+              const pt = js ? { x: js.clientX, y: js.clientY } : clickAt.current; clickAt.current = null;
+              const x = pt?.x ?? window.innerWidth / 2, y = pt?.y ?? 200;
               setQuick({ x: Math.min(window.innerWidth - 336, Math.max(16, x - 160)), y: Math.min(window.innerHeight - 380, Math.max(16, y + 8)), date: seoulDate(s.start), allDay: s.allDay, kind: 'event', // 캘린더 = 일정만(10/16 대표 결정). 연결된 할 일이 필요하면 "할 일로도 만들기"
                 start: s.allDay ? undefined : seoulTime(s.start), end: s.allDay ? undefined : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) });
             }}

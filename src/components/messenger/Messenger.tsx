@@ -298,9 +298,15 @@ type RoomData = { room: { id: string; kind: RoomRow['kind']; name: string; taskI
     notify?: Level; photo?: string | null; ownerOnly?: boolean; canEdit?: boolean; canPhoto?: boolean };
   messages: Msg[]; members: Member[]; pinned: Msg[]; hasOlder?: boolean; hasNewer?: boolean; lastRead?: string; quickReactions?: string[] };
 
-/** 132차 확인 후속(로컬 10/24 ⑧): 주소를 새로 열어 다른 화면에 갔다가 브라우저 뒤로가기로 이 페이지를 다시 연 경우(전체 새로고침) — 그때 처음 여는 방만 '돌아옴'으로 */
-let firstRoom = true;
-const loadedBack = () => { if (!firstRoom) return false; firstRoom = false; try { return performance.now() < 8000 && (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type === 'back_forward'; } catch { return false; } }; // 페이지를 연 직후에 여는 방만
+/** 132차 확인 후속(로컬 10/24 ⑧): 주소를 새로 열어 다른 화면에 갔다가 브라우저 뒤로가기로 이 페이지를 다시 연 경우(전체 새로고침) — 그 주소(?room=)의 방을 처음 열 때만 '돌아옴'으로.
+ *  CI 1497: 예전엔 그리는 도중에 모듈 값(firstRoom)을 바꿔서, React 가 첫 그리기를 버리고 다시 그리면 두 번째 그리기는 '돌아옴'이 아니라 맨 아래로 갔음(영업·마케팅 공간은
+ *  열자마자 공간 값이 바뀌어 다시 그려짐) → 그리기는 읽기만, 다 썼다는 표시는 화면에 붙은 뒤(effect). 느린 기기에서 8초가 넘으면 안 되던 시간 제한도 뺌(주소의 방으로 판단) */
+let landing: string | null | undefined; let landingUsed = false;
+const landingRoom = () => {
+  if (typeof window === 'undefined') return null;
+  if (landing === undefined) { landing = null; try { if ((performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type === 'back_forward') landing = new URLSearchParams(window.location.search).get('room'); } catch { /* 없음 */ } }
+  return landingUsed ? null : landing;
+};
 
 /** 대화방 */
 export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose, backAlways, jump }: { id: string; live: Live; onRead: () => void; onBack: () => void; compact?: boolean; onExpand?: () => void; onClose?: () => void; backAlways?: boolean;
@@ -390,10 +396,12 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const toBottom = useCallback(() => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; atBottom.current = true; setUnseen(0); }, []);
   // #242 2단계: 대화에서 업무·링크를 열었다 뒤로가기로 오면 보던 자리로(맨 아래가 아니었을 때만, 이 창 동안) — 예전엔 늘 맨 아래로
   const posKey = `wos_chat_pos:${id}`; const fromBottom = useRef(0); const back = useRef<boolean | null>(null);
-  if (back.current === null) back.current = cameBack() || loadedBack();
-  // 방을 닫을 때 + 주소를 새로 열어 페이지를 떠날 때(pagehide — 이때는 React 정리가 안 돎) 보던 자리를 적어 둠
+  if (back.current === null) back.current = cameBack() || landingRoom() === id;
+  useEffect(() => { if (landingRoom() === id) landingUsed = true; }, [id]);
+  // 방을 닫을 때 + 주소를 새로 열어 페이지를 떠날 때(pagehide — 이때는 React 정리가 안 돎) 보던 자리를 적어 둠.
+  // 메시지를 한 번도 그리지 못한 채 닫히면(열자마자 다시 그려짐 등) 적어 둔 자리를 건드리지 않음 — 처음 값 '맨 아래'로 지워 버리지 않게
   useEffect(() => {
-    const save = () => { try { if (atBottom.current) sessionStorage.removeItem(posKey); else sessionStorage.setItem(posKey, String(Math.round(fromBottom.current))); } catch { /* 저장 못 해도 됨 */ } };
+    const save = () => { if (!edge.current.last) return; try { if (atBottom.current) sessionStorage.removeItem(posKey); else sessionStorage.setItem(posKey, String(Math.round(fromBottom.current))); } catch { /* 저장 못 해도 됨 */ } };
     window.addEventListener('pagehide', save);
     return () => { window.removeEventListener('pagehide', save); save(); };
   }, [posKey]);

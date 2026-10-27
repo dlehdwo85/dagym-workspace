@@ -70,6 +70,7 @@ export const NOTIFICATION_TYPES = {
   revenue: '매출 자료 숫자 확인·분석 완료(매출 권한자만)',
   lead_ad: '리드 광고 새 신청(5분 안에 연락)·연락 전 재알림(영업)',
   support_deadline: '지원사업 신청 마감 7일·3일 전(관심·신청 준비 중인 공고 담당)',
+  bid_update: '입찰 업무 변경(공고 취소·개찰 결과 — 입찰 담당·넘긴 사람)',
   support_weekly: '지원사업 주간 묶음(월요일 아침 — 이번 주 맞는 공고·AI 자동 판단, 관리자·관심/준비 담당)',
   sales_collector_alert: '영업 DB 수집 누락 위험(원천이 24시간 넘게 성공 없음·2회 연속 실패 — 영업 관리자·플랫폼 운영자, 하루 한 번)',
 } as const;

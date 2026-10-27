@@ -25,6 +25,7 @@ import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, Ord
 import { coOf, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
 import { QuickAddTask } from './QuickAddTask';
 import { CarriedBadge } from './carried';
+import { followUpMsg, useLeadFollowUp } from './sales/LeadFollowUp';
 
 export type Task = {
   space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
@@ -32,7 +33,7 @@ export type Task = {
   assigned_by_rule?: string | null; // #100 담당자 지정 규칙으로 배정됨
   co_assignees?: Co[] | null; assignee_done?: boolean | null; complete_rule?: 'primary' | 'all'; // 대표 10/23 #475 함께 맡은 담당자 · 10/24 첫 담당자의 내 몫 완료
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
-  team_id?: string | null; team_name?: string | null; team_color?: string | null;
+  team_id?: string | null; team_name?: string | null; team_color?: string | null; collab_teams?: string[];
   org_unit_id: string; org_unit_name: string; brand_id: string | null; assignee_id: string | null; assignee_name: string | null;
   start_date: string | null; due_date: string | null; due_time: string | null; version: number; subtask_count: number; subtask_done: number;
   checklist_total: number; checklist_done: number; comment_count: number; attachment_count: number; share_state?: 'sent' | 'opened' | null; blocked_by_count: number;
@@ -118,6 +119,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [sortBy, setSortBy] = useState<SortKey>(() => { try { const v = localStorage.getItem('wos_task_sort2'); return SORTS.includes(v as SortKey) ? (v as SortKey) : 'due'; } catch { return 'due'; } });
   const pickSort = (k: SortKey) => { setSortBy(k); try { localStorage.setItem('wos_task_sort2', k); } catch {} };
   const [quickOpen, setQuickOpen] = useState(false);
+  const fu = useLeadFollowUp(); // 197차(#460): 리드 업무 완료 때 다음 연락일·종결을 묻는 창
   const kbProxy = useRef<HTMLInputElement>(null);
   const [moreMenu, setMoreMenu] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -169,15 +171,23 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
 
   /** 모든 보기에서 같은 경로로 원본 업무를 수정 → 다른 보기에도 즉시 반영 */
   async function patch(t: Task, body: Record<string, unknown>) {
+    // 197차(#460): 리드 업무를 완료하면 먼저 '다음 연락일 또는 종결'을 묻는다([취소] = 완료하지 않음, 리드가 닫혔으면 묻지 않음)
+    if (body.status === 'done' && t.status !== 'done' && t.lead_id && !body.leadFollowUp) {
+      const c = await fu.ask(t);
+      if (c === null) return false;
+      if (c !== 'skip') body = { ...body, leadFollowUp: c };
+    }
     const before = data;
     // #508: 완료하면 목록에서 빠져 묶음 맨 아래 '완료됨'으로 — 되돌리기는 거기서(바로 전 상태 기억)
     if (body.status === 'done' && t.status !== 'done') PREV_STATUS.set(t.id, t.status);
-    setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, ...snake(body), ...(body.status === 'done' && t.status !== 'done' ? { completed_at: new Date().toISOString() } : {}) } : x)) });
+    const { leadFollowUp: _fu, ...shown } = body;
+    setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, ...snake(shown), ...(body.status === 'done' && t.status !== 'done' ? { completed_at: new Date().toISOString() } : {}) } : x)) });
     try {
       const r = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { ...body, version: t.version } });
       if (!r.part && r.status === 'done' && t.status !== 'done') PREV_STATUS.set(t.id, t.status); // 마지막 담당자가 내 몫을 끝내 업무 완료
       setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? withPart({ ...x, version: r.version }, r, sess.user.id) : x)) });
       if (r.spawned) toast.info('반복 업무의 다음 회차가 생성되었습니다');
+      const m = followUpMsg(r); if (m) toast.info(m);
       broadcastRefresh();
       return r ?? true; // #508 후속: 되돌리기 안내가 자동 후속 업무 정리 결과(autoRemoved·autoKept)를 씀
     } catch (e: any) {
@@ -495,6 +505,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     </div>
     {exportOpen && <ExportTasks qs={qs} onClose={() => setExportOpen(false)} />}
     <QuickAddTask open={quickOpen} onClose={() => setQuickOpen(false)} defaults={{ projectId, assigneeId: filters.assigneeId || undefined }} onCreated={() => { setQuickOpen(false); reload(); }} />
+    {fu.node}
     {panelId && (
       <aside className="fixed inset-0 z-40 animate-slide-in overflow-y-auto bg-white shadow-pop sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(560px,100vw-240px)] sm:border-l sm:border-line" data-testid="task-panel" aria-label="업무 상세 패널">
         <TaskDetail key={panelId} id={panelId} inPanel onClose={closePanel} />
@@ -540,6 +551,7 @@ function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (
       {/* V32 4: 연장 요청 대기(요청자가 목록에서 바로 알아봄). 로컬 검수 10/17: 휴대폰 둘째 줄이 넘치면 잘리므로 상태 칩 바로 다음·짧게("연장→10/20") */}
       {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장<span className="max-lg:hidden"> 요청</span> → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
       {t.team_name && <span className="inline-flex min-w-0 max-w-[6rem] truncate items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
+      {(t.collab_teams?.length ?? 0) > 0 && <span className="inline-flex min-w-0 max-w-[8rem] truncate rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2 max-lg:hidden" title={`함께하는 부서: ${t.collab_teams!.join(', ')}`} data-testid="collab-chip">+{t.collab_teams![0]}{t.collab_teams!.length > 1 ? ` 외 ${t.collab_teams!.length - 1}` : ''}</span>}
       {t.project_name && <span className="inline-flex min-w-0 items-center gap-1 max-lg:hidden"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
       {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 요청자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
       {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate max-lg:hidden xl:hidden" title="요청자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
@@ -1247,7 +1259,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
             {/* 대표(10/16): 제목은 한 줄 전체 폭·길면 … (두 줄은 목록이 길어져 눈이 피로) — 전체 제목은 줄을 눌러 상세에서 */}
             <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
-            {t.sales_ref?.kind && <span className="shrink-0 rounded-full bg-blue-50 px-1.5 text-[10px] font-medium text-blue-800" title={t.sales_ref.name ?? ''} data-testid="row-sales-ref">{(ST.kind as Record<string, string>)[t.sales_ref.kind] ?? (t.sales_ref.kind === 'support' ? '지원사업' : t.sales_ref.kind)}</span>}
+            {t.sales_ref?.kind && <span className="shrink-0 rounded-full bg-blue-50 px-1.5 text-[10px] font-medium text-blue-800" title={t.sales_ref.name ?? ''} data-testid="row-sales-ref">{(ST.kind as Record<string, string>)[t.sales_ref.kind] ?? (t.sales_ref.kind === 'support' ? '지원사업' : t.sales_ref.kind === 'contract' ? '계약' : t.sales_ref.kind)}</span>}
             {t.assigned_by_rule && <span className="shrink-0 rounded-full bg-violet-50 px-1.5 text-[10px] font-medium text-violet-800" title="담당자 지정 규칙으로 배정됨" data-testid="row-rule-badge">규칙 배정</span>}
             {t.space && SPACE_META[t.space as 'sales' | 'marketing'] && <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: SPACE_META[t.space as 'sales' | 'marketing'].soft, color: SPACE_META[t.space as 'sales' | 'marketing'].color }} data-testid="row-space">{SPACE_META[t.space as 'sales' | 'marketing'].short}</span>}
           </span>

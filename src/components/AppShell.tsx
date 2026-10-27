@@ -31,6 +31,7 @@ import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './cl
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
 import { clearReminders, enableNativePush, initNative, refreshWidget, setNativeBadge } from './native';
+import { PushRehome } from './PushRehome';
 import { restoreScroll, useSheetBack } from './backClose';
 import { QuickAddTask } from './QuickAddTask';
 import { DailyWelcome } from './DailyWelcome';
@@ -487,6 +488,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
             </Link>
           )}
           {/* 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄은 없앰 — 하단 탭 + 더보기 › 공간 메뉴로(하단 탭과 겹치고 깔끔하지 않음) */}
+          <PushRehome appHost={session.features.appHost} />{/* 198차 주소 분리: app. 에서 브라우저 알림 다시 켜기 안내(스위치 켰을 때만) */}
           <AlarmBar items={alarms} onChange={(id) => { setAlarms((a) => a.filter((x) => x.id !== id)); window.dispatchEvent(new Event('wos-refresh')); }} />
           <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>

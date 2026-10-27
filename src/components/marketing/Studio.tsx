@@ -1,8 +1,8 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Copy } from 'lucide-react';
+import { Copy, Play } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { MediaPick } from './MediaPick';
@@ -38,7 +38,7 @@ const STATUS: Record<string, [string, string]> = { queued: ['대기', 'bg-slate-
 const labelOf = (b: Brief) => (b.content_status === 'published' ? STATUS.published : b.content_status === 'changes' && b.status === 'review' ? ['수정 요청', 'bg-slate-100 text-ink-2'] : STATUS[b.status] ?? [b.status, 'bg-slate-100 text-ink-2']);
 
 type SceneP = { k: number; seconds: number; line: string; status: string; screen: boolean; regens: number; qa: { checked: boolean; ok: boolean; issues: string[] } | null };
-type Progress = { stage: string; label: string; done: number; total: number; review: string[]; notes: string[]; audio: { narration: string | null; bgm: string | null } | null;
+type Progress = { stage: string; label: string; done: number; total: number; review: string[]; notes: string[]; audio: { narration: string | null; bgm: string | null } | null; reuse?: boolean;
   variants: { n: number; mediaId: string | null; duration: number | null; error: string | null; renderError: string | null; scenes: SceneP[] }[] };
 const SC: Record<string, string> = { completed: 'bg-emerald-50 text-emerald-800', queued: 'bg-slate-100 text-ink-2', in_progress: 'bg-amber-50 text-amber-800', pending: 'bg-slate-100 text-ink-2' };
 /** #454 영상 진행: 단계 · 장면 칩(상태·검수) · 사람 검수 필요 · 알림(내레이션 키·배경음) · 완성 영상 */
@@ -46,6 +46,7 @@ function VideoProgress({ p }: { p: Progress }) {
   return (
     <div className="mt-2 space-y-1.5 rounded-input border border-violet-100 bg-violet-50/30 p-2 text-xs" data-testid="studio-video" data-stage={p.stage}>
       <div className="font-semibold text-violet-900" data-testid="studio-video-stage">{p.label}</div>
+      {p.reuse && <div className="text-ink-2">이미 만든 영상을 새로 만들지 않고 다시 합성합니다(생성 크레딧 0)</div>}
       {p.variants.map((v) => <div key={v.n} className="flex flex-wrap items-center gap-1">{p.variants.length > 1 && <span className="text-ink-3">{v.n + 1}편</span>}
         {v.scenes.map((s) => <span key={s.k} title={s.line} className={cx('rounded-full px-2 py-0.5', s.qa && !s.qa.ok ? 'bg-red-50 text-red-800' : SC[s.status] ?? 'bg-red-50 text-red-800')} data-testid="studio-scene" data-status={s.status}>
           장면 {s.k + 1} · {s.seconds}초{s.screen ? ' · 실제 화면' : ''}{s.regens ? ' · 다시 만듦' : ''}{s.qa ? (s.qa.ok ? ' · 검수 ✓' : ' · 검수 ✕') : ''}</span>)}
@@ -54,6 +55,60 @@ function VideoProgress({ p }: { p: Progress }) {
       {p.notes.length > 0 && <ul className="list-disc pl-4 text-ink-2" data-testid="studio-video-notes">{p.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
       {p.variants.some((v) => v.mediaId) && <div className="flex flex-wrap gap-2">{p.variants.filter((v) => v.mediaId).map((v) => <video key={v.n} src={`/api/library/${v.mediaId}/download?inline=1`} controls playsInline preload="metadata" className="max-h-72 rounded-input bg-black" data-testid="studio-video-file" />)}</div>}
     </div>
+  );
+}
+
+/** 187차 ⑦ 이번 달 만든 영상 다시 합성(관리자): 원장 줄마다 원래 영상·계획(장면 그대로 / 한 편 나누기)·자막 줄·끝 화면 문구 → [다시 합성] · [가능한 n편 모두] */
+type ReuseRow = { ledgerId: number; contentId: string; title: string; brand: string | null; at: string; credits: number; status: 'ready' | 'failed' | 'working' | 'done' | 'published' | 'deleted' | 'missing';
+  reason: string | null; plan: 'scenes' | 'clip' | null; videos: number; scenes: number | null; seconds: number | null; lines: string[]; fileId: string | null; endCta: string | null; reuseBriefId: string | null };
+type ReuseView = { rows: ReuseRow[]; ready: number; narration: boolean; bgm: number };
+const RS: Record<ReuseRow['status'], [string, string]> = { ready: ['다시 합성 가능', 'bg-violet-50 text-violet-800'], failed: ['지난번 실패', 'bg-red-50 text-red-800'], working: ['다시 합성 중', 'bg-amber-50 text-amber-800'],
+  done: ['다시 합성됨', 'bg-emerald-50 text-emerald-800'], published: ['이미 게시', 'bg-slate-100 text-ink-2'], deleted: ['휴지통', 'bg-slate-100 text-ink-2'], missing: ['영상 없음', 'bg-slate-100 text-ink-2'] };
+const planText = (r: ReuseRow) => r.plan === 'scenes' ? `장면 ${r.scenes}개를 그대로 다시 합성${r.videos > 1 ? ` · ${r.videos}편` : ''}${r.seconds ? ` · 약 ${r.seconds}초` : ''}`
+  : r.plan === 'clip' ? `한 편을 장면 ${r.scenes ?? 1}개로 나눠 자막 한 줄씩${r.videos > 1 ? ` · ${r.videos}편` : ''}${r.seconds ? ` · 약 ${r.seconds}초` : ' · 길이는 합성 때 맞춤'}` : r.reason ?? '';
+function ReuseBox({ onStarted, stamp }: { onStarted: () => void; stamp: unknown }) {
+  const { data, reload } = useApi<ReuseView>('/api/marketing/studio/reuse');
+  const [busy, setBusy] = useState<string | null>(null);
+  const first = useRef(true); // 의뢰 목록을 다시 읽으면(상태 확인 등) 이 목록도 — 처음 그릴 때는 이미 읽었으니 건너뜀
+  useEffect(() => { if (first.current) { first.current = false; return; } reload(); }, [stamp]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!data?.rows.length) return null;
+  async function start(ids: number[], key: string) {
+    setBusy(key);
+    try {
+      const r = await api<{ started: number; skipped: { reason: string }[] }>('/api/marketing/studio/reuse', { body: { ledgerIds: ids } });
+      if (r.started) toast.ok(`${r.started}편 다시 합성을 시작했습니다 — 끝나면 새 버전으로 승인함에 올라갑니다`); else toast.error(`시작한 영상이 없습니다${r.skipped[0] ? ` — ${r.skipped[0].reason}` : ''}`);
+      reload(); onStarted();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  const can = data.rows.filter((r) => r.status === 'ready' || r.status === 'failed');
+  return (
+    <details className="rounded-card border border-violet-200 bg-white p-3 text-sm shadow-card" data-testid="studio-reuse" open={can.length > 0}>
+      <summary className="cursor-pointer font-semibold text-violet-900">이번 달 만든 영상 다시 합성 <span className="font-normal text-ink-2" data-testid="reuse-count">— {data.rows.length}편 중 {can.length}편 가능</span></summary>
+      <p className="mt-1.5 text-xs text-ink-2">이미 만든 영상을 새로 만들지 않고 새 방식(한국어 자막 · 끝 화면 전화{data.narration ? ' · 내레이션' : ''}{data.bgm ? ' · 배경음' : ''})으로 다시 합성합니다. 생성 크레딧은 들지 않습니다. 결과는 새 버전으로 승인함에 올라가고 원래 영상은 이전 버전에 남습니다.</p>
+      {!data.narration && <p className="mt-1 text-xs text-amber-800" data-testid="reuse-no-narration">내레이션 키가 없어 자막만 넣습니다(플랫폼 운영 › 영상 내레이션).</p>}
+      <ul className="mt-2 divide-y divide-line">{data.rows.map((r) => {
+        const [label, cls] = RS[r.status];
+        return (
+          <li key={r.ledgerId} className="flex flex-wrap items-start gap-x-2 gap-y-1 py-2" data-testid="reuse-row" data-status={r.status} data-plan={r.plan ?? ''}>
+            {/* 원래 영상: 작은 고정 칸(휴대폰에서도 글 칸이 좁아지지 않게) — 누르면 새 탭에서 재생 */}
+            {r.fileId ? <a href={`/api/library/${r.fileId}/download?inline=1`} target="_blank" rel="noreferrer" className="relative block h-24 w-14 shrink-0 overflow-hidden rounded-input bg-black" aria-label="원래 영상 보기" data-testid="reuse-preview">
+                <video src={`/api/library/${r.fileId}/download?inline=1#t=0.5`} preload="metadata" muted playsInline className="h-full w-full object-cover" />
+                <Play size={18} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 fill-white text-white drop-shadow" aria-hidden /></a>
+              : <span className="flex h-24 w-14 shrink-0 items-center justify-center rounded-input bg-slate-100 text-[11px] text-ink-3">없음</span>}
+            <div className="min-w-0 flex-1 basis-[calc(100%-4rem)] space-y-0.5 sm:basis-0">
+              <div className="flex flex-wrap items-center gap-1.5"><span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', cls)} data-testid="reuse-status">{label}</span>{r.brand && <span className="text-[11px] text-ink-3">{r.brand}</span>}<b className="min-w-0 break-words">{r.title}</b></div>
+              <div className="text-xs text-ink-2" data-testid="reuse-plan">{planText(r)}</div>
+              {r.lines.length > 0 && <div className="break-words text-[11px] text-ink-3" data-testid="reuse-lines">자막: {r.lines.join(' / ')}</div>}
+              <div className="break-words text-[11px] text-ink-3">{fmtDateTime(r.at)} 생성 · {r.credits}크레딧{r.endCta ? ` · 끝 화면 '${r.endCta}'` : ''}{r.plan && r.reason ? ` · ${r.reason}` : ''}</div>
+            </div>
+            <div className="ml-16 shrink-0 sm:ml-0">{r.status === 'ready' || r.status === 'failed'
+              ? <Button size="sm" onClick={() => start([r.ledgerId], String(r.ledgerId))} disabled={!!busy} data-testid="reuse-start">{busy === String(r.ledgerId) ? '시작 중…' : r.status === 'failed' ? '다시 시도' : '다시 합성'}</Button>
+              : r.status === 'done' ? <Link href={`/s/marketing/approvals?c=${r.contentId}`} className="inline-block rounded-input border border-line px-2.5 py-1 text-xs" data-testid="reuse-open">승인함에서 보기</Link> : null}</div>
+          </li>
+        );
+      })}</ul>
+      {can.length > 1 && <div className="mt-2 flex justify-end"><Button size="sm" onClick={() => start(can.map((r) => r.ledgerId), 'all')} disabled={!!busy} data-testid="reuse-start-all">{busy === 'all' ? '시작 중…' : `가능한 ${can.length}편 모두 다시 합성`}</Button></div>}
+    </details>
   );
 }
 
@@ -79,6 +134,7 @@ export function Studio() {
   const model = data.models.find((m) => m.kind === spec?.media);
   return (
     <div className="space-y-4" data-testid="mkt-studio">
+      {data.canGenerate && <ReuseBox onStarted={reload} stamp={data} />}
       <p className="text-xs text-ink-2">의도를 적으면 AI 마케터가 <b>경력 30년 마케터·아트디렉터</b>로 생성 프롬프트(영문)·한글 의도 요약·참고 사진·자막을 씁니다. 확인한 뒤 [생성]을 누르면 {data.provider === 'higgsfield' ? 'Higgsfield 로 만들어 자료실에 저장하고' : '제작 요청 카드(프롬프트·참고 사진 포함)로 넘어가 만든 뒤'} 승인 대기에 올라갑니다. 크레딧은 월 한도 안에서.</p>
       <form onSubmit={submit} className="space-y-3 rounded-card border border-violet-200 bg-violet-50/30 p-4" data-testid="studio-form">
         <div className="grid gap-2 sm:grid-cols-4">
@@ -123,12 +179,13 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
         {b.brand && <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-semibold text-white">{b.brand}</span>}
         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-800">{spec?.label ?? b.kind} · {view.purposes[b.purpose] ?? b.purpose}</span>
         <ModeChip mode={b.mode} />
+        {b.result?.provider === 'reuse' && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800" data-testid="studio-reuse-chip">기존 영상 다시 합성</span>}
         <b className="min-w-0 flex-1 truncate">{b.message}</b>
-        <span className="text-[11px] text-ink-3">{b.created_by_name ?? ''} · {fmtDateTime(b.created_at)}{b.quantity > 1 ? ` · ${b.quantity}장` : ''}{b.due_date ? ` · 마감 ${b.due_date}` : ''}{b.est_credits ? ` · 예상 ${view.pricing === 'usd' && view.models.find((m) => m.id === (b.prompt?.model ?? '')) ? estLabel(view.models.find((m) => m.id === b.prompt?.model)!, b.quantity, view) : `${b.est_credits}크레딧`}` : ''}</span>
+        <span className="text-[11px] text-ink-3">{b.created_by_name ?? ''} · {fmtDateTime(b.created_at)}{b.quantity > 1 ? ` · ${b.quantity}장` : ''}{b.due_date ? ` · 마감 ${b.due_date}` : ''}{Number(b.est_credits) ? ` · 예상 ${view.pricing === 'usd' && view.models.find((m) => m.id === (b.prompt?.model ?? '')) ? estLabel(view.models.find((m) => m.id === b.prompt?.model)!, b.quantity, view) : `${b.est_credits}크레딧`}` : ''}</span>
       </div>
       {b.error && <p className="mt-1 text-xs text-red-700">{b.error}</p>}
       {b.progress && <VideoProgress p={b.progress} />}
-      {pr && !edit && <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs" data-testid="studio-prompt">
+      {pr && !edit && b.result?.provider !== 'reuse' && <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs" data-testid="studio-prompt">
         <div className="rounded-input bg-slate-50 p-2"><div className="flex items-center justify-between font-semibold text-ink-2">생성 프롬프트(EN){pr.source === 'ai' ? <span className="font-normal text-ink-3">AI 마케터</span> : pr.source === 'user' ? <span className="font-normal text-ink-3">직접 고침</span> : <span className="font-normal text-ink-3">기본</span>}<button type="button" onClick={() => copy(pr.promptEn)} className="inline-flex items-center gap-0.5 text-violet-700" aria-label="프롬프트 복사"><Copy size={12} />복사</button></div>
           <p className="mt-1 whitespace-pre-wrap text-ink" data-testid="studio-prompt-en">{pr.promptEn}</p>{pr.negativeEn && <p className="mt-1 text-ink-3">피할 것: {pr.negativeEn}</p>}{pr.model && <p className="mt-1 text-ink-3">모델 {pr.model} · {pr.aspect}</p>}{designUsed(pr.design) && <p className="mt-1 text-violet-800" data-testid="studio-design-used">{designUsed(pr.design)}</p>}{pr.check && <PromptCheckBox c={pr.check as PCheck} />}</div>
         <div className="space-y-1.5"><div className="rounded-input bg-violet-50/50 p-2"><div className="font-semibold text-violet-800">한글 의도 요약</div><p className="mt-0.5 whitespace-pre-wrap">{pr.summaryKo || '—'}</p></div>
@@ -147,7 +204,7 @@ function BriefCard({ b, view, onChange }: { b: Brief; view: View; onChange: () =
         <div className="flex gap-1.5"><Button size="sm" onClick={() => act({ action: 'update', promptEn: p.promptEn, negativeEn: p.negativeEn, summaryKo: p.summaryKo, caption: p.caption, model: p.model || null }, '저장했습니다')} disabled={busy || p.promptEn.trim().length < 5} data-testid="studio-edit-save">저장</Button><Button size="sm" variant="secondary" onClick={() => setEdit(false)}>취소</Button></div>
       </div>}
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {['ready', 'failed'].includes(b.status) && !edit && <><Button size="sm" variant="secondary" onClick={() => setEdit(true)} data-testid="studio-edit-open">수정</Button><Button size="sm" variant="secondary" onClick={() => act({ action: 'prompt' }, '프롬프트를 다시 썼습니다')} disabled={busy}>AI 다시 쓰기</Button>
+        {['ready', 'failed'].includes(b.status) && !edit && b.result?.provider !== 'reuse' && <><Button size="sm" variant="secondary" onClick={() => setEdit(true)} data-testid="studio-edit-open">수정</Button><Button size="sm" variant="secondary" onClick={() => act({ action: 'prompt' }, '프롬프트를 다시 썼습니다')} disabled={busy}>AI 다시 쓰기</Button>
           {view.canGenerate && <Button size="sm" onClick={() => act({ action: 'generate' }, '생성했습니다')} disabled={busy} data-testid="studio-generate">{view.provider === 'higgsfield' ? '생성' : '제작 요청 카드로 보내기'}</Button>}</>}
         {b.status === 'queued' && <Button size="sm" variant="secondary" onClick={() => act({ action: 'prompt' }, '프롬프트를 썼습니다')} disabled={busy} data-testid="studio-prompt-retry">프롬프트 쓰기</Button>}
         {b.status === 'generating' && <span className="text-xs text-ink-2" data-testid="studio-generating">{b.progress ? <>{b.progress.label} <button type="button" className="underline" onClick={onChange}>상태 확인</button></> : (b as any).result?.provider === 'higgsfield' ? <>Higgsfield 생성 중 {((b as any).result.jobs ?? []).filter((j: any) => j.status === 'completed').length}/{((b as any).result.jobs ?? []).length} <button type="button" className="underline" onClick={onChange}>상태 확인</button></> : <>제작 요청 카드 {b.open_requests}건 — 로컬 도우미가 만들어 붙이면 승인 대기로 <Link href="/s/marketing/automation#requests" className="underline">카드 보기</Link></>}</span>}

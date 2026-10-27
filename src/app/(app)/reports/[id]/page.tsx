@@ -56,6 +56,28 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
             {!d.issues.length && <li className="py-3 text-ink-3">주요 이슈가 없습니다</li>}
           </ul>
         </section>
+        {d.sales && (
+          <section data-testid="weekly-report-sales">
+            {/* 202차(#461 ⑤): 영업 진행(회사 전체, 만든 날 기준) — 놓친 거래처(연락일 지남·다음 행동 없음·오래 쉼·담당 없음) */}
+            <h2 className="mb-2 font-semibold">영업 진행 <span className="text-xs font-normal text-ink-3">{fmtDate(d.sales.asOf)} 기준 · 진행 중 {d.sales.open}곳</span></h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[['연락일 지남', d.sales.over, 'text-red-600'], ['다음 행동 없음', d.sales.none, 'text-red-600'], ['오래 쉼(14일 넘게 연락 없음)', d.sales.stale, 'text-amber-600'], ['담당 없음', d.sales.unassigned, 'text-red-600']].map(([l, v, c]) => (
+                <div key={l as string} className="rounded-input border border-line p-3"><div className="text-xs text-ink-2">{l}</div><div className={`mt-1 text-2xl font-bold tabular-nums ${(v as number) ? c : ''}`}>{v as number}</div></div>
+              ))}
+            </div>
+            {d.sales.staleTop.length > 0 && (
+              <ul className="mt-2 divide-y divide-line text-sm">
+                {d.sales.staleTop.map((l: any) => (
+                  <li key={l.id} className="flex flex-wrap items-center gap-2 py-2">
+                    <Link href={`/s/sales/leads?id=${l.id}`} className="font-medium hover:underline">{l.name}</Link>
+                    <span className="text-xs text-ink-2">{l.status ?? '단계 없음'} · {l.owner ?? '담당 없음'}</span>
+                    <span className="ml-auto text-xs text-amber-700">{l.last ? `마지막 접촉 ${fmtDate(l.last)} ${l.lastKind}` : `연락 기록 없음 · 등록 ${fmtDate(l.created)}`}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
         {d.photos.length > 0 && (
           <section>
             <h2 className="mb-2 font-semibold">현장 사진</h2>

@@ -24,13 +24,13 @@ after(async () => { srv?.proc.kill(); await sql?.end(); });
 const openTask = (kind, id) => sql`select id, title, status, due_date::text as due, assignee_id, requested_by, space, sales_ref, lead_id from tasks where sales_ref->>'kind' = ${kind} and sales_ref->>'id' = ${id} and deleted_at is null order by created_at desc limit 1`;
 
 describe('영업 진행 → 업무 자동 리스트업', () => {
-  test('입찰 연락중(다음 연락일) → "[영업] …" 업무(담당·요청자 = 바꾼 사람, 마감 = 다음 연락일, space sales, 원천 배지) · 검토중은 업무 없음 → 다음 연락일 바꾸면 마감 따라감', async () => {
+  test('입찰 연락중(다음 연락일) → "[입찰] …" 업무(결정 15-35 — 담당·요청자 = 바꾼 사람, 마감 = 다음 연락일, space sales, 원천 배지) · 검토중은 업무 없음 → 다음 연락일 바꾸면 마감 따라감', async () => {
     const r0 = await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '미검토' });
     assert.equal(r0.task.action, 'none'); assert.equal((await openTask('bid', 'N1')).length, 0, '미검토는 업무 없음');
     const r = await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '연락중', nextDate: addDays(today, 3) });
     assert.equal(r.task.action, 'created');
     const [t] = await openTask('bid', 'N1');
-    assert.ok(t.title.startsWith('[영업] 분당 스포츠센터 성남시 체육시설 위탁운영'), t.title);
+    assert.ok(t.title.startsWith('[입찰] 분당 스포츠센터 성남시 체육시설 위탁운영 — 입찰 준비'), t.title);
     assert.deepEqual([t.status, t.due, t.assignee_id, t.requested_by, t.space, t.sales_ref.kind, t.sales_ref.id], ['todo', addDays(today, 3), ctx.ownerId, ctx.ownerId, 'sales', 'bid', 'N1']);
     const r2 = await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', nextDate: addDays(today, 6) });
     assert.equal(r2.task.action, 'updated'); assert.equal((await openTask('bid', 'N1'))[0].due, addDays(today, 6), '마감 따라감');

@@ -43,6 +43,7 @@ import { offboardFlow } from './offboard.step.mjs';
 import { messengerV3 } from './messengerV3.step.mjs';
 import { platformAdd } from './platformAdd.step.mjs';
 import { orgTree } from './orgTree.step.mjs';
+import { orgLevels } from './orgLevels.step.mjs';
 import { chatKeyboard } from './chatKeyboard.step.mjs';
 import { salesTodo } from './salesTodo.step.mjs';
 import { salesLeads2 } from './salesLeads2.step.mjs';
@@ -55,11 +56,20 @@ import { bidGroups } from './bidGroups.step.mjs';
 import { messengerV4 } from './messengerV4.step.mjs';
 import { prespecLink } from './prespecLink.step.mjs';
 import { hubArchive } from './hubArchive.step.mjs';
+import { leadList197 } from './leadList197.step.mjs';
+import { calSnap199 } from './calSnap199.step.mjs';
+import { kaptWeekly200 } from './kaptWeekly200.step.mjs';
+import { easyPay200 } from './easyPay200.step.mjs';
+import { salesBrief202 } from './salesBrief202.step.mjs';
+import { leadMove203 } from './leadMove203.step.mjs';
+import { leadBulk204 } from './leadBulk204.step.mjs';
+import { leadImport205 } from './leadImport205.step.mjs';
+import { leadMerge206 } from './leadMerge206.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
 import { econtractPdf } from './econtractPdf.step.mjs';
-import { payTestRemove } from './payTestRemove.step.mjs';
+import { payTest192 } from './payTest192.step.mjs';
 import { platformTabs } from './platformTabs.step.mjs';
 import { mktDraftQuality } from './mktDraftQuality.step.mjs';
 import { mktPhotos } from './mktPhotos.step.mjs';
@@ -92,6 +102,7 @@ import { collectorAlerts } from './collectorAlerts.step.mjs';
 import { backClose } from './backClose.step.mjs';
 import { supportPrograms } from './support.step.mjs';
 import { mktVideo } from './mktVideo.step.mjs';
+import { mktVideoReuse } from './mktVideoReuse.step.mjs';
 import { coAssign } from './coAssign.step.mjs';
 import { aiBudget } from './aiBudget.step.mjs';
 import { listKeep } from './listKeep.step.mjs';
@@ -102,6 +113,7 @@ import { cal1019 } from './cal1019.step.mjs';
 import { cal480 } from './cal480.step.mjs';
 import { welcome483 } from './welcome483.step.mjs';
 import { permIntro528 } from './permIntro528.step.mjs';
+import { permIntroIos199 } from './permIntroIos199.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { meeting } from './meeting.step.mjs';
 import { spaces } from './spaces.step.mjs';
@@ -1069,6 +1081,7 @@ await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없
 await step('#480 월 보기 빈 칸: 기본 종일 + [시간 지정] 시작·끝 시각(연결 업무 마감 시각 따라감) · [종일로] 되돌리기', () => cal480({ owner, sql, BASE, SHOTS, addDays, today }));
 await step('#483 하루 첫 진입 환영 문구: 새 브라우저 로그인 → 인사 한 줄 0.8초(조작 안 막음) → 같은 날 다시 들어오면 없음 · 동작 줄이기면 움직임 없음', () => welcome483({ browser, BASE, SHOTS }));
 await step('#528 앱 처음 시작 휴대폰 알림 맞추기(권한 안내, 웹 몫): 꺼진 줄 단추·이유 → 허용된 줄 체크 → [나중에] 같은 날 다시 없음 → 다 돼 있으면 안 뜸 (390 시연 상태)', () => permIntro528({ browser, desk, BASE, SHOTS }));
+await step('결정 15-27 아이폰 휴대폰 알림 맞추기(웹 몫): 지금 앱 = 알림 허용 한 줄·거절했으면 [설정 열기] → 1.1.4 네이티브 = 집중 모드·잠금 화면 알람·홈 화면 위젯(단추 없이 안내) (390 시연 상태)', () => permIntroIos199({ browser, desk, BASE, SHOTS }));
 await step('V14 36~39 캘린더: 업무 동그라미 없음·블록 12px 여러 줄·계단 겹침·휴대폰 3일·좌우 밀어 이동·뒤로가기는 상세만 닫고 날짜·보기·스크롤 유지', () => v1436({ browser, desk, owner, ctx, sql, BASE, SHOTS, addDays, today }));
 await step('V19 부록 A: AI 비서 PC Enter 보내기·Shift+Enter 줄바꿈, 휴대폰 Enter 줄바꿈·자동 높이, [수정]·[다시 답하기]·[복사]·[멈춤], 패널 같은 동작 / 보기 칩 다시 누르면 해제', () => v19a({ browser, desk, owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('캘린더: 완료한 업무의 시간 블록은 숨김(완료 보기 켜면 완료 모양), 삭제한 업무의 블록은 사라지고 휴지통 복원 시 다시 보임', () => blocksStep({ owner, ctx, BASE, SHOTS, addDays, today }));
@@ -1859,10 +1872,11 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await sql`update plans set monthly_krw = 79000 where code = 'business'`;
   assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = 'default'`)[0].plan_code, 'internal', '반려하면 그대로');
   await owner.screenshot({ path: `${SHOTS}/79-platform.png`, fullPage: true });
-  // V32 1 결제 시험: 시험 회사 만들기 → (결제창은 외부라 승인 결과를 기록으로 넣고) 자동 확인 화면
-  await owner.getByTestId('pay-test-create').click();
-  await owner.getByTestId('pay-test-tenant').first().waitFor();
-  const [tt] = await sql`select id from tenants where is_test order by created_at desc limit 1`;
+  // V32 1 → 192차(대표 10/27) 결제 시험: 결제 모듈 상태 + [시험 결제](숨은 시험 계정 하나 — 회사 만들기 없음) → (결제창은 외부라 승인 결과를 기록으로 넣고) 자동 확인 화면
+  await owner.getByTestId('pay-status').waitFor();
+  assert.equal(await owner.getByTestId('pay-test-create').count(), 0, '192차: 시험 회사 만들기 없음');
+  const w0 = await ctx.owner.ok('POST', '/api/platform/pay-test/tester/window', { kind: 'monthly', planCode: (await ctx.owner.ok('GET', '/api/platform/pay-test')).plans[0].code, payMethod: 'CARD' });
+  const [tt] = await sql`select tenant as id from payments where id = ${w0.paymentId}`;
   await sql`update tenant_subscriptions set plan_code = 'team', status = 'active', billing_cycle = 'monthly' where tenant = ${tt.id}`;
   const [tp] = await sql`insert into payments (tenant, kind, plan_code, moid, amount, status, paid_at, meta) values (${tt.id}, 'subscription', 'team', ${'WTE2E' + Date.now()}, 9900, 'paid', now(),
     ${sql.json({ test: true, payMethod: 'CARD', receiptSentAt: new Date().toISOString(), prev: { plan_code: 'trial', status: 'trial' } })}) returning id`;
@@ -1887,7 +1901,7 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   };`;
   await owner.route('https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js', (rt) => rt.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_NP }));
   await owner.goto(`${BASE}/platform?tab=paytest`);
-  await owner.getByTestId('pay-test-tenant').first().waitFor();
+  await owner.getByTestId('pay-test-open').waitFor();
   assert.equal(await owner.getByTestId('pay-test-pagemode').isChecked(), false);
   await owner.getByTestId('pay-test-open').first().click();
   await owner.getByTestId('pay-test-closed').waitFor();
@@ -2517,7 +2531,7 @@ await step('대표 검수 10/20 체크리스트(360): 항목별 미팅 버튼 �
 
 await step('로컬 10/20 알람처럼 울리기(웹): 설정 기본값 3칸 → 업무 상세 알람 선택 → 알람 알림 띠([해제][10분 뒤][열기]) → 해제 → 활동 탭 기록', () => alarmFlow({ staff, ctx, sql, BASE, SHOTS }));
 
-await step('S1-2 진행 기록 쓰기(390): 입찰 상세 원본 상태 버튼·메모·다음 연락일 저장 → 카드 칩 → 진행영업으로 넘기기 → 리드 상세·전환됨', () => salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }));
+await step('S1-2 진행 기록 쓰기(390): 입찰 상세 원본 상태 버튼·메모·다음 연락일 저장 → 카드 칩 → 196차 입찰 [넘기기] → 리드 없이 입찰 업무·입찰 업무 칸 [유찰] · 입찰은 리드 전환 없음', () => salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }));
 
 await step('로컬 10/20 캘린더 재발: 빠른 입력 첫 화면 색 줄 → 생성 직후 편집(새로고침 신호에도 입력 유지·저장) → 다른 기기 충돌 뒤 [완료] 자동 재시도', () => calEditFlow({ browser, desk, owner, ctx, sql, BASE, SHOTS }));
 await step('대표 10/20 4) 팀별 보기: 업무 화면 팀 칩(볼 수 있는 팀만) → 칩으로 그 팀 업무만 → 메뉴 권한 \'팀 업무 보기\' 지정 팀 → 직원 화면에 그 팀 칩', () => teamChipsFlow({ browser, owner, ctx, sql, BASE, SHOTS, login }));
@@ -2557,6 +2571,7 @@ await step('#535 승인함·콘텐츠 캘린더 상세 뒤로가기: 열면 ?c �
 await step('#494 메타 광고 자동 세팅: 광고 운영 메타 칸(초안 대기 줄·승인함 링크·권한 다시 연결) → [새 메타 광고] 창(양식 번호 직접·개인정보 확인·자료실 소재·반경·자동 일시정지) 저장 → 승인함 광고 초안 탭(배지·요약·피드 미리보기·확인 문구) → 휴대폰 폭 → [반려] 사유 → 보관', () => metaAuto({ owner, ctx, sql, BASE, SHOTS }));
 await step('#450 영업실 지원사업: 사이드바 메뉴 → 맞춤 목록(1차 판단·조건 칩·D-day·자격 안 맞는 공고 빼기) → [AI 판단] → [신청 준비] 담당 업무 → 영업 홈 마감 임박 카드 → 상세(준비 서류·진행) → [신청 완료] → [직접 추가] 지난 신청 → 신청·결과 탭 → 휴대폰 폭', () => supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#454 영상 파이프라인 v2: 플랫폼 운영 내레이션(TTS) 카드·연결 시험 → 브랜드 키트 영상 끝 화면·자막 → 제작의뢰실 릴스 준비 상태 → [생성] 장면별 생성·검수·합성 → 장면 칩(실제 화면·검수 ✓)·완성 영상·승인 대기 → 휴대폰 폭', () => mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }));
+await step('187차 ⑦ 이번 달 만든 영상 다시 합성: 제작의뢰실 상자(원래 영상·계획·자막 줄·끝 화면 전화·내레이션 키 안내) → [다시 합성] → 다시 합성됨·승인함 링크·의뢰 카드(장면 2개·생성 크레딧 0) → 새 버전 승인 대기·보관 표시 지움·원장 그대로 → 휴대폰 폭', () => mktVideoReuse({ owner, ctx, sql, BASE, SHOTS }));
 await step('#475 업무 공동 배정(10/24 다시 설계): 업무 등록 시트 여러 명 = 기본 함께 담당(1건·완료 규칙 칸 없음) → 상세 담당자 칸 하나에 칩 3개 빼기·[+] 추가·활동 기록 → 담당자별 묶음 3곳·+2 → 휴대폰 [내 몫 완료] → 내 몫 완료 · 1/3(목록에 남음)·상세 진행 상자', () => coAssign({ owner, staff, ctx, sql, BASE, SHOTS }));
 await step('대표 10/24 ② 회사 월 AI 예산(원): 사용량 화면 게이지(84% 주황·다시 채워지는 날·영상 제작 따로) → AI 비서 회사 사용량 한 줄 → 100% 빨간 안내(다음 달 1일)·입력 막힘 → 플랫폼 운영 요금제 표 원 칸·회사 목록', () => aiBudget({ owner, sql, BASE, SHOTS }));
 await step('대표 23:40·23:55 마감일 버튼 크기 + 업무 첨부 자료실에서 가져오기(검색·체크 → 연결·타임라인)', () => attachLibrary({ owner, ctx, BASE, SHOTS }));
@@ -2726,7 +2741,9 @@ await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리�
   assert.ok(!titles.includes('동료 초대·회사 설정'), '직원에게는 관리자 단계 없음');
   assert.ok(!titles.includes('바탕화면 위젯'), '웹에는 위젯 단계 없음');
   const seen = async (pg) => (await pg.evaluate(() => fetch('/api/tours').then((r) => r.json()))).seen;
-  assert.ok((await seen(p)).includes('home'), '서버에 봤음 기록');
+  // 봤음 기록은 말풍선이 닫힌 뒤 서버에 따로 저장됨 — 기록이 들어올 때까지 잠깐 기다려 읽음(CI 1493: 닫힘 직후 읽어 [] 로 실패)
+  const seenWait = async (pg, ok) => { const until = Date.now() + 10_000; let s = await seen(pg); while (!ok(s) && Date.now() < until) { await pg.waitForTimeout(200); s = await seen(pg); } return s; };
+  assert.ok((await seenWait(p, (s) => s.includes('home'))).includes('home'), '서버에 봤음 기록');
   await p.reload(); await p.waitForTimeout(2500);
   assert.equal(await tour.count(), 0, '다시 열어도 안 뜸');
   // 업무 화면 처음 → 그 화면 안내, Esc = 건너뛰기(봤음)
@@ -2735,7 +2752,7 @@ await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리�
   assert.equal(await p.getByTestId('tour-title').innerText(), '업무 추가');
   await p.keyboard.press('Escape');
   await tour.waitFor({ state: 'detached' });
-  assert.ok((await seen(p)).includes('tasks'));
+  assert.ok((await seenWait(p, (s) => s.includes('tasks'))).includes('tasks'));
   // [사용 안내 다시 보기] → 홈부터 다시
   await p.getByRole('button', { name: '내 계정 메뉴' }).click();
   await p.getByTestId('tour-restart').click();
@@ -2744,7 +2761,7 @@ await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리�
   assert.equal(await p.getByTestId('tour-title').innerText(), '워크인 사용 안내');
   await p.getByTestId('tour-skip').click();
   await tour.waitFor({ state: 'detached' });
-  assert.deepEqual(await seen(p), ['home'], '다시 보기 = 기록 초기화 후 홈만 봤음');
+  assert.deepEqual(await seenWait(p, (s) => s.length === 1 && s[0] === 'home'), ['home'], '다시 보기 = 기록 초기화 후 홈만 봤음');
   await c.close();
   // 휴대폰: 하단 탭(업무)을 가리키고 말풍선은 탭 위·화면 안, 가로 넘침 없음
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
@@ -2864,7 +2881,7 @@ await step('154차 자료실 상세(대표 10/25 #615 ②·④): 사진 앱 안 
 await step('메신저 3차(대표 10/20 카톡 수준 C12·D14·D15): 머리줄 알림 메뉴(전체·멘션만·끄기)·목록 줄 표시·방 안 찾기(▲▼·강조·처음 화면 밖)·전체 검색 결과 → 그 메시지로·방 정보 알림 3칸·방장만 관리·방장 넘기기·방 사진', () => messengerV5({ owner, ctx, sql, BASE, SHOTS }));
 await step('#533 업무 첨부 [고치기](대표 10/23 23:50): 첨부 있는 업무 제목·설명 고쳐 저장 → 그대로 · 글 고쳐 v2(글 고침) · 사진 돌리기·펜 v2(가로·세로 바뀜, 크기 표시 바로 — #258) · PDF 글자·체크 v2(긴 글 줄바꿈·글자 줄이기, 넘치면 저장 막기 — #258) · 저장 PDF 다시 읽기(글 그대로·한글 그려짐 — 147차) · 한글 = 내려받아 고친 뒤 올리기 안내 → v2 · 휴대폰 폭 [고치기]', () => attachEdit({ owner, ctx, BASE, SHOTS }));
 await step('139차 전자계약 2차 화면: [새 계약] PDF 올리기 → 서명자 → 칸 놓기(쪽 그림·서명·글자) → 보내기 → 받은 사람 휴대폰 화면 PDF 쪽·칸 채우기·서명 완료', () => econtractPdf({ owner, ctx, sql, BASE, SHOTS }));
-await step('#566 결제 시험 회사 [지우기](대표 10/24 저녁 3): 확인 창 → 지웠습니다 → 목록에서 빠짐', () => payTestRemove({ owner, ctx, sql, BASE, SHOTS }));
+await step('192차 결제 시험 화면(대표 10/27): 결제 모듈 상태(설정 필요·정상·확인 필요 + 운영 결제 방식) + [시험 결제]만 · 시험 회사 만들기·목록·지우기 없음 · 숨은 시험 계정 하나 다시 씀 · 고객사 목록에 없음 · 휴대폰 폭', () => payTest192({ owner, ctx, sql, BASE, SHOTS }));
 await step('#565 플랫폼 운영 정리(대표 10/24 저녁 1): 오늘 볼 것 5개 → 누르면 그 탭 · 종류별 탭 5개·한 줄 설명·주소 유지 · 예전 주소(paytest·#support) · 휴대폰 폭', () => platformTabs({ owner, ctx, sql, BASE, SHOTS }));
 await step('#235 마케팅 시안 품질 ⓐ·ⓔ(로컬 10/24 저녁 6): 브랜드 키트 이번 달 소식(기간 기본 30일)·잘 된 예시 글(형식별·좋은 점·빼기) → 승인한 글 [좋은 예시로 저장]·[예시에서 빼기] → 휴대폰 넘침 없음', () => mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }));
 await step('#235 ⓒ 사진 AI 설명(대표 #563): 자동 제작 › 사진 AI 설명 [설명 없는 사진 설명하기] → 숫자·사진별 설명·종류·글자·홍보물·쓰임 → 판정 고치기(글자 없음 = 바탕으로 씀)·되돌리기 → 자료실 AI 사진 설명 줄 → 휴대폰 넘침 없음', () => mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }));
@@ -2882,6 +2899,18 @@ await step('#626 캡처 차단(대표 10/25 20:05): 외부 고객사 로그인 �
   srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SIGNUP_IP_PER_DAY: '50' });
   await captureGuard({ browser, BASE, SHOTS, sql, Client, owner });
 });
+
+// 본사가 생기면 맨 위 부서를 새로 만들 수 없어 맨 끝(앞 단계들이 맨 위 부서를 만듦)
+await step('P2 조직 개편 4단(대표 10/26 · #679~#681): 종류 카드 4개·본사 만들며 맨 위 부서 이관·사업부 위 단위는 본사만·사업부장 없음·이름-종류 검사 → 사용자 목록 왕관 칩·장 비게 됨 경고 → 업무 함께하는 부서', () => orgLevels({ owner, ctx, BASE, SHOTS }));
+await step('197차 영업 진행 목록 개편(#461·#460): 오늘 볼 것 띠 → 다음 행동 없음 경고 → 열 머리 정렬 · 열 고르기 · 보기 저장(새로 고침에도) → 업무 [완료] 다음 행동 창(1주 뒤 + 할 일 · 종결 보류·사유·다시 볼 날) → 종결 보기 · 휴대폰 카드', () => leadList197({ owner, ctx, sql, BASE, SHOTS }));
+await step('#690 캘린더 끌기 15분 단위(대표 10/26): 주 보기 일정 15분만큼 끌기 → 10:15(잡은 자리 그대로) · 클릭 = 정시 1시간 · 끌어 그리기 14:15~15:00 · PC [끌기 단위 30분] → 15분 끌어도 10:45 · 휴대폰 칩도 같은 기억', () => calSnap199({ owner, ctx, sql, BASE }));
+await step('200차 #699 준공·입주 시설 원본 기준일(대표 10/26): K-apt 자료실 추출일(주 1회) · 한국부동산원 파일 수정일(연 1회) 한 줄 · 자료실 단지 카드(전화·세대수·주민운동시설) · 1366·390 넘침 없음 · 기준일 없으면 줄 없음', () => kaptWeekly200({ owner, ctx, sql, BASE, SHOTS }));
+await step('200차 #706 간편결제 바로 열기(대표 10/26): 켠 간편결제만 버튼 · [필수] 결제 대행 약관 동의 없으면 안 열림 · 결제창 요청 = 카드 + 간편결제 + 동의 · 다른 수단 고르면 풀림 · 결제 내역 간편결제 이름 · 1366·390', () => easyPay200({ owner, BASE, SHOTS }));
+await step('202차 #461 ⑤ 본사 주간 보고 영업 진행(놓침 방지): 연락일 지남·다음 행동 없음·오래 쉼(14일)·담당 없음 + 오래 쉼 목록(단계·담당·마지막 접촉·리드 링크) · 1366·390', () => salesBrief202({ owner, ctx, sql, BASE, SHOTS }));
+await step('203차 #461 ⑥ 칸반 끌어 놓기·휴대폰 카드 밀기: 끌면 묻는 창(다음 연락일 / 보류 사유·다시 볼 날) · 취소 = 그대로 · select 도 같은 창 · 390 → 연락함 기록 · ← 다음 연락일 · 종결은 밀기 없음', () => leadMove203({ owner, ctx, sql, BASE, SHOTS }));
+await step('204차 #461 ⑦ 표 일괄 작업: 체크 → 아래 막대 · 다음 연락일 일괄 · 단계 일괄(보류 사유 필수) · 2차 정렬(Shift+클릭) · 표의 단계 바꾸기 = 묻는 창 · 종결 보기엔 체크 칸 없음', () => leadBulk204({ owner, ctx, sql, BASE, SHOTS }));
+await step('205차 #461 ⑦ CSV 가져오기 미리보기: 이미 있음 = 기본 합치기(빈 칸만) · 같은 연락처(사업자번호) = 기본 새로 → 합치기 · 파일 안 겹침 = 건너뛰기 · 상세 사업자번호', () => leadImport205({ owner, ctx, sql, BASE, SHOTS }));
+await step('206차 #461 ⑦ 기존 거래처끼리 합치기: 상세 › 중복 합치기 → 같은 전화 후보 → 남길 쪽 제안·채울 칸 → 합치기 → 남긴 쪽 상세 · 예전 링크도 남긴 쪽 · 목록에서 빠짐', () => leadMerge206({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

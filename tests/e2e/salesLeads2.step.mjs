@@ -85,7 +85,7 @@ export async function salesLeads2({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   // 삭제(사유)
   await owner.goto(`${BASE}/s/sales/leads`);
-  await owner.getByTestId('sales-lead-row').filter({ has: owner.locator('input[value="E2E 동탄센트럴 커뮤니티 2차"]') }).locator('td').nth(2).click(); // 이름 칸은 표 안 편집 입력이라 시설 칸을 누름
+  await owner.getByTestId('sales-lead-row').filter({ has: owner.locator('input[value="E2E 동탄센트럴 커뮤니티 2차"]') }).getByTestId('cell-contact').click(); // 이름·다음 연락 칸은 표 안 편집 입력이라 마지막 접촉 칸을 누름(197차 표 열)
   await owner.getByTestId('sales-lead-detail').waitFor();
   await owner.getByTestId('lead-tab-info').click(); // 기본 탭이 '진행'이라 삭제 버튼(정보 탭)으로
   await owner.getByTestId('lead-delete').click();

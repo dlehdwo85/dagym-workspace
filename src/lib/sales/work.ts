@@ -20,6 +20,8 @@ export const WORK_STATUS: Record<WorkKind, string[]> = {
   vendor: ['미등록', '신청 준비', '신청 완료', '등록 완료', '대상 아님'],
 };
 export const CONVERTED = '진행영업 전환';
+/** 결정 15-35: 입찰 업무로 넘긴 공고(bidTasks) — 진행은 업무에서, 결과는 [낙찰]·[미낙찰]·[유찰] */
+export const BID_STATUS = '입찰 진행';
 /** #408 종류 이름은 회사 업종 템플릿에서(입찰은 공통) */
 const kindName = async (tenant: string, k: WorkKind) => (k === 'bid' ? '입찰 공고' : (await (await import('./options')).salesTerms(tenant)).kind[k]);
 const SRC_TBL: Record<WorkKind, string> = { bid: 'opportunity_work', building: 'opportunity_work', facility: 'operating_facility_prospects__progress', vendor: 'vendor_registrations__progress' };
@@ -71,6 +73,7 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>, opt
   if (i.status !== undefined && !WORK_STATUS[i.kind].includes(i.status)) throw badRequest(`상태는 ${WORK_STATUS[i.kind].join('·')} 중 하나입니다`);
   const cur = await workRecord(sql, t, i.kind, i.id);
   if (cur?.status === CONVERTED) throw badRequest('진행영업으로 넘긴 건입니다 — 리드에서 고쳐 주세요');
+  if (cur?.status === BID_STATUS) throw badRequest('입찰 업무로 넘긴 공고입니다 — 업무에서 진행하고, 결과는 [낙찰]·[미낙찰]·[유찰]로 넣어 주세요');
   const first = WORK_STATUS[i.kind][0], review = i.kind === 'facility' ? '연락중' : i.kind === 'vendor' ? '신청 준비' : '검토중';
   let status = i.status ?? cur?.status ?? first;
   if (i.restore) {
@@ -109,6 +112,8 @@ const norm = (s: string) => s.replace(/[\s()（）·\-_,.]/g, '').toLowerCase();
 /** [진행영업으로 넘기기]: 비슷한 이름의 리드가 있으면 최대 5곳을 먼저(force 로 그래도 새로 만들기) → 리드 생성·연결·상태 '진행영업 전환' */
 export async function convertToLead(u: SessionUser, i: z.infer<typeof convertInput>) {
   await assertSpace(u, 'sales');
+  // 결정 15-35(대표 10/26 17:00): 입찰 공고는 리드로 넘기지 않음 — [입찰 업무로 넘기기](업무)로
+  if (i.kind === 'bid') throw badRequest('입찰 공고는 리드로 넘기지 않습니다 — [입찰 업무로 넘기기]로 업무를 만드세요');
   const t = tenantOf(u); const sql = db();
   const r = await item(sql, i.kind, i.id);
   await assertWritesOpen(t);

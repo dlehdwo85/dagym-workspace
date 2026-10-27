@@ -65,6 +65,84 @@ export async function removeTestTenant(u: SessionUser, tenant: string, ip: strin
   return { ok: true, mode };
 }
 
+/**
+ * 192차(대표 10/27 "결제 시험회사 숨겨도 됩니다. 결제 모듈 상태가 정상인지만 표기하는 걸 냅두고 그 밑에 테스트만 냅둡니다. 굳이 테스트 결제 회사를 추가해야 할 이유를 모르겠네요."):
+ * 시험 결제는 고정 시험 회사 하나로(처음 한 번만 만들고 다시 씀 — 화면에는 회사 목록이 없음). 새 시험 결제창을 열기 전에 그 회사에 남은 승인 결제를 취소해
+ * '결제 전 요금제'가 늘 시험 전 상태가 되게 한다. 화면 위에는 결제 모듈 상태(운영 결제 방식·실 상점 키·최근 승인·실패·마지막 시험 결과)
+ */
+const TESTER_KEY = 'pay_tester';
+export async function testerId(sql: ReturnType<typeof db> = db()): Promise<string | null> {
+  const [s] = await sql<{ value: any }[]>`select value from app_settings where key = ${TESTER_KEY}`;
+  const id = s?.value?.tenant ? String(s.value.tenant) : null;
+  if (!id) return null;
+  const [t] = await sql`select 1 from tenants where id = ${id} and is_test and deleted_at is null`;
+  return t ? id : null;
+}
+export async function ensureTester(u: SessionUser, ip: string | null): Promise<string> {
+  requirePlatform(u);
+  const sql = db();
+  const have = await testerId(sql); if (have) return have;
+  const t = await createTestTenant(u, { name: '결제 시험(고정)' }, ip);
+  // 동시에 두 번 눌러도 하나만: 저장된 시험 회사가 살아 있으면 덮지 않고, 방금 만든 회사는 숨김
+  const [saved] = await sql`insert into app_settings (key, value) values (${TESTER_KEY}, ${sql.json({ tenant: t.id } as never)})
+    on conflict (key) do update set value = excluded.value, updated_at = now()
+      where not exists (select 1 from tenants x where x.id = app_settings.value->>'tenant' and x.is_test and x.deleted_at is null) returning key`;
+  if (saved) return t.id;
+  await sql`update tenants set status = 'deleted', deleted_at = now() where id = ${t.id} and is_test`;
+  return (await testerId(sql)) ?? t.id;
+}
+/** 고정 시험 회사에 남은 승인 결제(취소 안 된 것)를 취소 — 요금제도 결제 전으로. 취소가 안 되는 결제가 있어도 시험은 막지 않음(1시간 자동 취소가 다시 시도) */
+export async function settleTester(u: SessionUser, tenant: string, ip: string | null) {
+  const sql = db();
+  const left = await sql<{ id: string }[]>`select id from payments where tenant = ${tenant} and status in ('paid', 'partial_canceled') order by created_at desc`;
+  if (!left.length) return { canceled: 0, failed: 0 };
+  const { refundPayment } = await import('./index');
+  let canceled = 0; let failed = 0;
+  for (const p of left) { try { await refundPayment(u, p.id, { reason: '다음 시험 전 자동 취소', revertPlan: true }, ip); canceled++; } catch { failed++; } }
+  return { canceled, failed };
+}
+/**
+ * 결제 모듈 상태 — 운영 결제 방식(실 상점·시험 상점·꺼짐) · 실제 회사 결제(시험 회사 제외)의 최근 7일 승인·실패 · 마지막 승인 · 마지막 시험 결과.
+ *  설정 필요 = 실 상점 키가 없어 결제가 꺼짐 · 확인 필요 = 마지막 시험 결제가 실패했거나, 최근 7일 안 실제 결제가 실패로 끝나고 그 뒤 승인이 없음
+ *  (실패 = 승인 단계 실패·자동 결제 실패 — 결제창을 닫은 것은 대기로 남아 빼짐)
+ */
+export async function payStatus() {
+  const sql = db();
+  const { npConf, npLiveConf } = await import('./nicepay');
+  const conf = npConf();
+  const mode: 'live' | 'test' | 'off' = conf ? conf.mode : 'off';
+  const [r] = await sql<{ ok7: number; fail7: number; last_paid: Date | null }[]>`select
+      count(*) filter (where p.status in ('paid', 'canceled', 'partial_canceled') and p.paid_at > now() - interval '7 days')::int as ok7,
+      count(*) filter (where p.status = 'failed' and p.created_at > now() - interval '7 days')::int as fail7,
+      max(p.paid_at) as last_paid
+    from payments p join tenants t on t.id = p.tenant where not t.is_test`;
+  const [lf] = await sql<{ msg: string | null; at: Date }[]>`select p.result_msg as msg, p.created_at as at from payments p join tenants t on t.id = p.tenant
+    where not t.is_test and p.status = 'failed' order by p.created_at desc limit 1`;
+  const [lt] = await sql<{ id: string; status: string; at: Date; msg: string | null; live: boolean }[]>`select p.id, p.status, coalesce(p.paid_at, p.updated_at, p.created_at) as at, p.result_msg as msg,
+      coalesce((p.meta->>'liveSmoke') = 'true', false) as live from payments p join tenants t on t.id = p.tenant where t.is_test and p.status <> 'pending' order by coalesce(p.paid_at, p.updated_at, p.created_at) desc limit 1`;
+  const failOpen = !!lf && Date.now() - new Date(lf.at).getTime() < 7 * 86_400_000 && (!r.last_paid || new Date(r.last_paid) < new Date(lf.at));
+  const reasons: string[] = [];
+  if (mode === 'off') reasons.push('실 상점 키가 없어 결제가 꺼져 있습니다 — 고객이 결제할 수 없습니다');
+  if (lt?.status === 'failed') reasons.push(`마지막 시험 결제가 실패했습니다${lt.msg ? ` — ${lt.msg}` : ''}`);
+  if (failOpen) reasons.push(`최근 실제 결제가 실패로 끝났고 그 뒤 승인이 없습니다${lf?.msg ? ` — ${lf.msg}` : ''}`);
+  const state: 'ok' | 'warn' | 'setup' = mode === 'off' ? 'setup' : reasons.length ? 'warn' : 'ok';
+  return { state, mode, liveKeys: !!npLiveConf(), reasons, ok7: r.ok7, fail7: r.fail7, lastPaid: r.last_paid, lastFail: lf ? { msg: lf.msg, at: lf.at } : null,
+    lastTest: lt ? { id: lt.id, status: lt.status, at: lt.at, msg: lt.msg, live: lt.live } : null };
+}
+/** 결제 시험 화면 한 번에: 상태 · 고정 시험 회사(없으면 null — 처음 [시험 결제] 때 만듦) · 최근 시험 결제 10건 · 요금제 */
+export async function payTestHome(u: SessionUser) {
+  requirePlatform(u);
+  const sql = db();
+  const tester = await testerId(sql);
+  const [sub] = tester ? await sql<any[]>`select plan_code, status, billing_cycle from tenant_subscriptions where tenant = ${tester}` : [];
+  const payments = await sql`select p.id, p.kind, p.plan_code, p.addon_code, p.amount, p.status, coalesce((p.meta->>'liveSmoke') = 'true', false) as live, p.canceled_amount, p.result_msg, p.paid_at, p.created_at,
+      p.meta->>'payMethod' as pay_method, coalesce((p.meta->>'window') = 'true', false) as via_window
+    from payments p join tenants t on t.id = p.tenant where t.is_test order by p.created_at desc limit 10`;
+  const old = await listTestTenants(u);
+  return { status: await payStatus(), tester: tester ? { id: tester, plan_code: sub?.plan_code ?? null, status: sub?.status ?? null, billing_cycle: sub?.billing_cycle ?? null } : null,
+    payments, plans: old.plans, liveAvailable: old.liveAvailable, tenants: old.tenants };
+}
+
 type Check = { key: string; label: string; state: 'ok' | 'fail' | 'wait' | 'later'; detail?: string };
 /** 결제 뒤 자동 확인 */
 export async function testCheck(u: SessionUser, paymentId: string) {

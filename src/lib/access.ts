@@ -74,14 +74,11 @@ const TEAM_DEF: Record<string, [string, string]> = { owner: ['edit', 'edit'], ad
 export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null) {
   // 대표·본사 관리자(전체)에게도 앱 심사용 데모 조직 업무는 섞지 않는다
   if (units === null) return sql`not exists (select 1 from org_units dz where dz.id = t.org_unit_id and dz.is_demo)`;
-  const [dTeam, dAll] = TEAM_DEF[u.role] ?? ['view', 'none'];
   return sql`(
     (t.team_id is null and t.org_unit_id = any(${units}::uuid[]))
-    or (t.team_id is not null and exists (select 1 from teams tt where tt.id = t.team_id and tt.tenant = ${tenantOf(u)}) and (
-      (${menuLevelSql(sql, u, 'team_tasks', dTeam)} <> 'none' and exists (select 1 from team_members tm where tm.team_id = t.team_id and tm.user_id = ${u.id}))
-      or t.team_id in (${subTeamsSql(sql, u)})
-      -- 대표 10/20 4): '팀 업무 보기' 전체(team_tasks_all) 또는 지정 팀(team_view_grants) — 격리 팀원은 자기 팀만(넓어지지 않음)
-      or (not ${isolatedSql(sql, u)} and (${menuLevelSql(sql, u, 'team_tasks_all', dAll)} <> 'none' or t.team_id in (select g.team_id from team_view_grants g where g.user_id = ${u.id})))))
+    or (t.team_id is not null and ${teamSeenSql(sql, u, sql`t.team_id`)})
+    -- P2 조직 개편(대표 10/26): '함께하는 부서'(task_teams)를 붙인 업무는 그 부서(팀)를 볼 수 있는 사람(구성원·위 단위·전체/지정 보기)도 본다
+    or exists (select 1 from task_teams ctt where ctt.task_id = t.id and ${teamSeenSql(sql, u, sql`ctt.team_id`)})
     or t.assignee_id = ${u.id}
     or exists (select 1 from task_assignees tas where tas.task_id = t.id and tas.user_id = ${u.id})
     or t.created_by = ${u.id}
@@ -92,6 +89,17 @@ export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null)
   )`;
 }
 
+/**
+ * 이 부서·팀(teamCol) 업무를 볼 수 있는지 — 같은 회사 · 구성원('팀 업무' 조회 이상) · 위 단위 구성원(위는 아래를 봄, 아래는 위를 못 봄) ·
+ * '팀 업무 보기' 전체(team_tasks_all) 또는 지정 팀(team_view_grants) — 격리 팀원은 자기 팀만(넓어지지 않음)
+ */
+function teamSeenSql(sql: Sql, u: SessionUser, teamCol: ReturnType<Sql>) {
+  const [dTeam, dAll] = TEAM_DEF[u.role] ?? ['view', 'none'];
+  return sql`(exists (select 1 from teams tt where tt.id = ${teamCol} and tt.tenant = ${tenantOf(u)}) and (
+      (${menuLevelSql(sql, u, 'team_tasks', dTeam)} <> 'none' and exists (select 1 from team_members tm where tm.team_id = ${teamCol} and tm.user_id = ${u.id}))
+      or ${teamCol} in (${subTeamsSql(sql, u)})
+      or (not ${isolatedSql(sql, u)} and (${menuLevelSql(sql, u, 'team_tasks_all', dAll)} <> 'none' or ${teamCol} in (select g.team_id from team_view_grants g where g.user_id = ${u.id})))))`;
+}
 /** 격리 팀('회사 안의 작은 회사') 구성원인지 — 동기 SQL 조건용 */
 export function isolatedSql(sql: Sql, u: SessionUser) {
   return sql`exists (select 1 from teams ti join team_members mi on mi.team_id = ti.id where mi.user_id = ${u.id} and ti.isolated and not ti.archived and ti.tenant = ${tenantOf(u)})`;
@@ -168,14 +176,19 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
   const del = requester === u.id;
   // 부서장: 자기 부서원이 담당·요청한 업무(부서 간 협업 포함)
   const deptLead = (await sql`select 1 from tasks t where t.id = ${t.id} and ${leadOfInvolvedSql(sql, u)}`).length > 0;
+  // P2 조직 개편: 함께하는 부서(task_teams)를 볼 수 있는 사람은 보기·댓글(수정은 위 규칙 그대로)
+  let collabSeen = false;
+  for (const r of await sql<{ team_id: string }[]>`select team_id from task_teams where task_id = ${t.id}`) {
+    if ((await teamTaskLevel(u, r.team_id, sql)) !== 'none') { collabSeen = true; break; }
+  }
   if (t.team_id) { // V14 8번 팀 업무: 보기는 팀 권한, 수정은 위 규칙
     const lv = await teamTaskLevel(u, t.team_id, sql);
     const [lead] = await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`;
     const teamManager = isAdmin(u) || (!!lead && lv === 'edit');
-    return { view: lv !== 'none' || involved || deptLead, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del, co: isCo };
+    return { view: lv !== 'none' || involved || deptLead || collabSeen, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del, co: isCo };
   }
   const manager = inUnit && atLeast(u, 'site_manager');
-  return { view: inUnit || involved || deptLead, edit, approve: manager, delete: del, co: isCo };
+  return { view: inUnit || involved || deptLead || collabSeen, edit, approve: manager, delete: del, co: isCo };
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
