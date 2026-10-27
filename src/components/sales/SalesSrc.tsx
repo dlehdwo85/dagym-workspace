@@ -805,7 +805,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
   const card = (l: any) => (
     <li key={l.id} className="rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-lead-card"><button type="button" onClick={() => setOpen(l.id)} className="block w-full text-left" data-testid="sales-lead-open">
       <span className="flex flex-wrap items-center gap-1.5"><b>{l.name}</b>{chip(l.status)}{stageDays(l)}{l.priority && <span className="text-[11px] text-ink-2">{l.priority}</span>}</span>
-      <span className="mt-0.5 block text-xs" data-testid="lead-card-next">{nextCell(l)}</span>
+      <span className="mt-0.5 block text-xs" data-testid="lead-card-next">{!isClosed(l) && l.next && <span className="text-ink-3">다음 연락 </span>}{nextCell(l)}</span>
       <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-2">{contactCell(l)}{l.source && <span className="text-ink-3">· {l.source.label}</span>}{l.owner && <span className="text-ink-3">· 담당 {l.owner}</span>}</span>
       <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">{interests(l.interests)}{[l.facility, l.region, l.scale, l.contact].filter(Boolean).join(' · ')}{l.revenue ? <span>{won(l.revenue)}</span> : null}</span>
     </button><div className="mt-2 flex flex-wrap items-center gap-1.5"><ContactRow phone={l.phone} links={[[l.homepage, '홈페이지']]} />{rowExtra(l)}</div></li>);
