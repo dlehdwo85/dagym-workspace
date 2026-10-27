@@ -4,6 +4,11 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { Client, bootstrap, resetDb, startServer, tick, testDb, seoulToday, addDays, BASE, FAKE, FAKE_TLS, ensureTls } from '../helpers.mjs';
 import { startFakeGoogle } from '../fake-google.mjs';
+/** 215차(CI 1560): 가짜 푸시 서버에 원하는 메시지가 올 때까지(최대 10초, 0.3초마다 정기 실행 한 번) — 정해진 시간만 기다리면 느린 자동 검사 서버에서 푸시가 늦게 와 실패 */
+async function fakeUntil(pred, ms = 10_000) {
+  const end = Date.now() + ms;
+  for (;;) { const st = await fetch(`${FAKE}/__state`).then((r) => r.json()); if (pred(st) || Date.now() > end) return st; await new Promise((r) => setTimeout(r, 300)); await tick(); }
+}
 
 let srv, fake, ctx, sql;
 const today = seoulToday();
@@ -1701,7 +1706,7 @@ describe('WORKIN 휴대폰 예약 알림', () => {
     const t = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: '예약 기기 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: day, dueTime: hm, reminderMinutes: [30], approvalRequired: false })).id;
     await new Promise((r) => setTimeout(r, 1500));
     await tick(); await tick();
-    const st = await fetch(`${FAKE}/__state`).then((r) => r.json());
+    const st = await fakeUntil((x) => { const m = x.fcm.filter((y) => y.token === 'fcm-local-a'); return m.some((y) => y.data?.type === 'reminders-changed' && !y.notification) && m.some((y) => y.data?.link === `/tasks/${t}` && y.notification); });
     const mine = st.fcm.filter((m) => m.token === 'fcm-local-a');
     assert.ok(mine.some((m) => m.data?.type === 'reminders-changed' && !m.notification), '조용한 재예약 메시지');
     assert.ok(mine.some((m) => m.data?.link === `/tasks/${t}` && m.notification), '배정 알림은 그대로 옴');
@@ -2346,7 +2351,7 @@ describe('V13 10번 사내 메신저', () => {
     const notes = await ctx.staffA.client.ok('GET', '/api/notifications');
     assert.ok(!notes.items.some((n) => n.type === 'chat'), '알림 목록에는 메신저 안 쌓임');
     await new Promise((r) => setTimeout(r, 800)); await tick();
-    const st = await fetch(`${FAKE}/__state`).then((r) => r.json());
+    const st = await fakeUntil((x) => x.fcm.some((m) => m.token === 'fcm-chat-a' && m.data?.link === `/messages?room=${dm}`));
     assert.ok(st.fcm.some((m) => m.token === 'fcm-chat-a' && m.data.link === `/messages?room=${dm}`), '푸시 → 그 대화방으로');
     const r2 = await ctx.staffA.client.ok('POST', `/api/chat/rooms/${dm}/messages`, { body: '네 준비하겠습니다' });
     await ctx.staffA.client.ok('POST', `/api/chat/rooms/${dm}/read`, {});
