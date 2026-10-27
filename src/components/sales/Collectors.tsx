@@ -70,6 +70,8 @@ type Prefs = { keywords: string[]; excludes: string[]; regions: string[]; issuer
 type MailRoute = { channel: 'email:workin' | 'email:smtp' | null; smtpFrom: string | null; fallback: 'resend' | 'dev' | null; fromName: string; replyTo: string | null };
 type PD = { prefs: Prefs; people: { id: string; name: string; email: string; role: string }[]; last: { day: string; counts: any; items: any[]; mailed: number; notified: number; created_at: string } | null; canEdit: boolean; mail?: MailRoute };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const kstHourNow = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
+const kstToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 const VIA: Record<string, string> = { 'email:smtp': '회사 메일 계정', 'email:workin': '워크인 발송', sent: '워크인 기본 발송', dev: '개발 모드' };
 /** #509 d: 당일 메일이 어느 길로 나가는지 — 회사 SMTP 면 회사 메일함엔 보낸메일함에만 남는다는 안내 */
 function MailRouteNote({ m }: { m: MailRoute }) {
@@ -104,7 +106,12 @@ export function BidPrefs() {
     if (emails.length >= 5) { toast.error('메일 주소는 5개까지 넣을 수 있습니다'); return; }
     if (await save({ digestEmails: [...emails, v] })) setAddr('');
   }
-  async function sendNow() { setBusy(true); try { const r = await api<any>('/api/sales/digest/send', { body: {} }); toast.ok(`오늘 다이제스트 ${r.counts?.total ?? 0}건 — 메일 ${r.mailed} · 알림 ${r.notified}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
+  // 215차(#530): 정기 시각 전(새벽)에는 시험 발송(누른 사람에게만 · 정기 메일은 그대로) — 예전엔 그날 정기 메일이 '이미 보냄'으로 건너뛰었음
+  const hh = String(p.digest_hour).padStart(2, '0');
+  const early = p.digest_enabled && kstHourNow() < p.digest_hour && data.last?.day !== kstToday();
+  async function sendNow() { setBusy(true); try { const r = await api<any>('/api/sales/digest/send', { body: {} });
+    if (r.test) toast.ok(`시험 발송 — 나에게 메일 ${r.mailed}통 · 오늘 ${hh}:00 정기 메일은 그대로 갑니다`);
+    else toast.ok(`오늘 다이제스트 ${r.counts?.total ?? 0}건 — 메일 ${r.mailed} · 알림 ${r.notified}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
   const toggleRegion = (s: string) => save({ regions: p.regions.includes(s) ? p.regions.filter((x) => x !== s) : [...p.regions, s] });
   const togglePerson = (id: string) => save({ digestTo: p.digest_to.includes(id) ? p.digest_to.filter((x) => x !== id) : [...p.digest_to, id] });
   return (
@@ -125,7 +132,7 @@ export function BidPrefs() {
         {data.canEdit && <label className="inline-flex items-center gap-1.5 text-xs"><input type="checkbox" className="size-4 accent-brand-600" checked={p.digest_enabled} onChange={() => save({ digestEnabled: !p.digest_enabled })} data-testid="prefs-digest-enabled" />매일 보내기</label>}
         <label className="inline-flex items-center gap-1 whitespace-nowrap text-xs">시각 <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={form.digest_hour} onChange={(e) => set('digest_hour', e.target.value)} disabled={!data.canEdit} data-testid="prefs-digest-hour">{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h.toString().padStart(2, '0')}:00</option>)}</select></label>
         {data.canEdit && <label className="inline-flex items-center gap-1.5 text-xs"><input type="checkbox" className="size-4 accent-brand-600" checked={p.digest_mail} onChange={() => save({ digestMail: !p.digest_mail })} />메일도 보내기</label>}
-        <span className="ml-auto flex gap-1.5">{data.canEdit && <Button size="sm" onClick={() => save()} disabled={busy} data-testid="prefs-save">저장</Button>}{data.canEdit && <Button size="sm" variant="secondary" onClick={sendNow} disabled={busy} data-testid="prefs-send-now">지금 보내기</Button>}</span>
+        <span className="ml-auto flex gap-1.5">{data.canEdit && <Button size="sm" onClick={() => save()} disabled={busy} data-testid="prefs-save">저장</Button>}{data.canEdit && <Button size="sm" variant="secondary" onClick={sendNow} disabled={busy} title={early ? `정기 시각(${hh}:00) 전이라 나에게만 시험으로 보냅니다 — 정기 메일은 그대로 갑니다` : undefined} data-testid="prefs-send-now">{early ? '나에게 시험 발송' : '지금 보내기'}</Button>}</span>
       </div>
       <div className="mt-2 text-xs"><span className="text-ink-2">받는 사람(비우면 대표·관리자): </span>{data.people.map((u) => <button key={u.id} type="button" disabled={!data.canEdit} onClick={() => togglePerson(u.id)} className={cx('mr-1 rounded-full border px-2 py-0.5', p.digest_to.includes(u.id) ? 'border-[#2563EB] bg-white font-semibold text-[#1D4ED8]' : 'border-line bg-white text-ink-2')}>{u.name}</button>)}</div>
       <div className="mt-2 flex flex-wrap items-center gap-1 text-xs" data-testid="prefs-emails"><span className="text-ink-2">메일 주소 직접 추가({emails.length}/5): </span>

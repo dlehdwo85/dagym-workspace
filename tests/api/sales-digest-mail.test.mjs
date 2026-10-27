@@ -7,7 +7,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { SMTPServer } from 'smtp-server';
 import { simpleParser } from 'mailparser';
-import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { BASE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
 const SMTP_PORT = 2533, RESEND_PORT = 3243;
 const PASS = 'digest-pass-1234';
@@ -86,7 +86,8 @@ test('#509 b·c 맞춤 설정: 메일 주소 직접 추가(소문자·중복 정
   const bad = await ctx.owner.req('PUT', '/api/sales/digest/prefs', { digestEmails: ['메일아님'] });
   assert.equal(bad.status, 400); assert.match(JSON.stringify(bad.body), /메일 주소 형식/);
   assert.equal((await ctx.owner.req('PUT', '/api/sales/digest/prefs', { digestReplyTo: 'reply-bad' })).status, 400);
-  const p = await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: ['시험키워드'], excludes: ['제외단어'], digestFromName: ` ${FROM_NAME} `, digestEmails: ['office@mail.test', 'Boss@Client.test', 'boss@client.test'], digestReplyTo: '' });
+  // 215차: 정기 시각 0시 — 정기 시각 전 [지금 보내기]는 시험 발송이라, 새벽에 도는 자동 검사에서도 아래 시험들의 '보내기'가 정식 발송이 되게
+  const p = await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: ['시험키워드'], excludes: ['제외단어'], digestFromName: ` ${FROM_NAME} `, digestEmails: ['office@mail.test', 'Boss@Client.test', 'boss@client.test'], digestReplyTo: '', digestHour: 0 });
   assert.deepEqual([p.digest_emails, p.digest_from_name, p.digest_reply_to], [['office@mail.test', 'boss@client.test'], FROM_NAME, null]);
   const g = await ctx.owner.ok('GET', '/api/sales/digest/prefs');
   assert.deepEqual([g.mail.channel, g.mail.fallback, g.mail.fromName, g.mail.replyTo], [null, 'dev', FROM_NAME, null], '메일 계정·워크인 발송 없음 = 개발 모드');
@@ -199,4 +200,81 @@ test('로컬 22:45 ③ 마감 임박은 10건까지 · 나머지 n건 — [보�
   assert.equal((html.match(/data-digest-item="soon"/g) ?? []).length, 10, '줄은 10건까지');
   assert.ok(html.includes('data-digest-more="soon"') && html.includes('나머지 2건 — <a href=') && html.includes('/s/sales/hub?tab=bids&amp;bt=open'));
   assert.ok(text.includes('■ 진행 중(D-3 안) (12)') && text.includes('나머지 2건 — 보기: ') && text.includes('/s/sales/hub?tab=bids&bt=open'));
+});
+
+// 215차(#530 로컬 10/24 21라인 실메일 대조 ①~⑨ + 주의): 받은 기간 · 맞춤 조건 상자 · 금액 나눔 · 지역 제한 + 본사 기준 참가 가능/불가 · 일정 줄 · 배지 확대 · 구역 안 사업별 묶음 · 진행·담당 ·
+// 결과 낙찰률·참가 수(결과는 처음 안 때 기준 — 예전 결과가 다시 고쳐져도 다시 안 오름) · 정기 시각 전 [지금 보내기] = 시험 발송(누른 사람에게만·기록 없음 → 정기 메일 그대로)
+test('215차 #530 21라인 이상: 받은 기간·맞춤 조건·금액 나눔·참가 가능·일정·배지·사업별 묶음·진행 담당·낙찰률 · 새벽 [지금 보내기] = 시험 발송', async (t) => {
+  await ctx.owner.ok('PUT', '/api/sales/business-categories', { items: [{ key: 'biz-a', name: '시험사업A', color: '#2563EB', keywords: ['피트니스'] }, { key: 'biz-b', name: '시험사업B', color: '#DC2626', keywords: ['출입통제'] }] });
+  await ctx.owner.ok('PUT', '/api/sales/support/profile', { regionSido: '경기', regionSigungu: '용인시' });
+  const g = { source_type: 'g2b_bid', fit_business: '다짐', classification: '즉시 검토', bid_category: '용역', first_seen_at: ago(1), updated_at: ago(1) };
+  await ins(51, { ...g, source_external_id: 'R215-1-000', title: '시험시 피트니스센터 위탁운영 215 서울 제한', issuer: '서울특별시 시험구', region: '서울특별시', region_restriction: '서울특별시', estimated_amount: 50000000,
+    site_briefing_at: at(plus(4), '10:00'), participation_deadline_at: at(plus(8), '18:00'), deadline_at: at(plus(12), '10:00'), opening_at: at(plus(12), '11:00'), source_url: 'https://www.g2b.go.kr/link/R215-1' });
+  await ins(52, { ...g, source_external_id: 'R215-2-000', title: '시험시 피트니스 위탁 215 경기 제한', issuer: '경기도 시험시', region: '경기도', region_restriction: '경기도', base_amount: 100000000, estimated_amount: 90909091, budget_amount: 100000000,
+    contract_method: '수의계약', site_briefing_at: at(plus(-1), '10:00'), deadline_at: at(plus(11), '10:00'), source_url: 'https://www.g2b.go.kr/link/R215-2' }); // 현장설명이 이미 지남 → 배지 없음(일정 줄에는 남음)
+  await ins(53, { ...g, fit_business: '하이링크', source_external_id: 'R215-3-000', title: '시험 단지 출입통제 시스템 구축 215', issuer: '시험 관리사무소', deadline_at: at(plus(13), '10:00'), source_url: 'https://www.g2b.go.kr/link/R215-3' });
+  await ins(54, { ...g, source_external_id: 'R215-4-000', title: '피트니스 출입통제 통합 구축 215', issuer: '시험 관리사무소', deadline_at: at(plus(14), '10:00'), source_url: 'https://www.g2b.go.kr/link/R215-4' });
+  // ⑨ 진행·담당: 진행 기록(검토중) + 입찰 업무 담당
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('default', 'opportunity_work', 'w215-3', ${sql.json({ id: 'w215-3', notice_id: ID(53), status: '검토중' })}, 'workin')`;
+  const tk = await ctx.owner.ok('POST', '/api/tasks', { title: '출입통제 215 입찰 준비', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false });
+  await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: ID(53) })} where id = ${tk.id}`;
+  const [{ name: staffName }] = await sql`select name from users where id = ${ctx.staffA.id}`;
+  // ⑥ 결과: 처음 안 때(result_at)가 지난 메일 뒤면 결과 구역 — 낙찰률·참가 수 · 예전 결과가 다시 고쳐진 줄(result_at 예전·개찰 30일 전 예전 줄)은 안 나옴
+  const r = { source_type: 'g2b_bid', fit_business: '다짐', bid_category: '용역', current_status: '낙찰', first_seen_at: ago(240), updated_at: ago(1), deadline_at: at(plus(-5), '10:00') };
+  await ins(55, { ...r, source_external_id: 'R215-5-000', title: '시험구 체육관 위탁운영 215 결과', winner_name: '시험낙찰(주)', winner_amount: 120000000, winner_rate: 88.123, bidders: 7, award_date: today, result_at: ago(1), source_url: 'https://www.g2b.go.kr/link/R215-5' });
+  await ins(56, { ...r, source_external_id: 'R215-6-000', title: '시험구 체육관 위탁운영 215 예전 결과 다시 고침', winner_name: '예전낙찰(주)', winner_amount: 90000000, award_date: plus(-20), result_at: ago(240), source_url: 'https://www.g2b.go.kr/link/R215-6' });
+  await ins(57, { ...r, source_external_id: 'R215-7-000', title: '시험구 체육관 위탁운영 215 예전 줄(결과 시각 없음)', winner_name: '옛낙찰(주)', award_date: plus(-30), source_url: 'https://www.g2b.go.kr/link/R215-7' });
+
+  const html = (await ctx.owner.req('GET', '/api/sales/digest?preview=html')).body; const text = (await ctx.owner.req('GET', '/api/sales/digest?preview=text')).body;
+  const item = (title) => { const k = html.indexOf(title); assert.ok(k > 0, title); return html.slice(html.lastIndexOf('<tr>', k), html.indexOf('</td></tr>', k)); };
+  // ① 받은 기간(지난 메일 = 어제 08:00 ~ 지금) ② 맞춤 조건 상자 + [바꾸기]
+  assert.match(html, new RegExp(`data-digest-period="1">받은 기간 ${mdw(plus(-1)).replace(/[()]/g, '\\$&')} 08:00 ~ ${mdw(today).replace(/[()]/g, '\\$&')} \\d{2}:\\d{2}<`));
+  assert.ok(html.includes('data-digest-cond="1"><b style="color:#111827;margin-right:4px">맞춤 조건</b>관심 사업 시험사업A·시험사업B · 관심 검색어 1개 · 제외어 1개 · 지역 전국 · 금액 제한 없음 · 본사 경기 용인시 — <a href="'), html.slice(html.indexOf('data-digest-cond'), html.indexOf('data-digest-cond') + 400));
+  // ③ 금액 나눔 ④ 지역 제한 + 본사 기준(같은 시·도 하나면 지역은 한 번만) ⑦ 배지
+  const x1 = item('시험시 피트니스센터 위탁운영 215 서울 제한');
+  assert.ok(x1.includes('서울특별시 시험구 · 추정가격 5,000만원 · <b style="color:#B91C1C" data-digest-limit="no">지역 제한 서울 — 참가 불가(본사 경기 용인시)</b>') && !x1.includes('서울특별시 ·'), x1);
+  assert.ok(x1.includes('>현장설명</span>'), '현장설명 배지');
+  // ⑤ 일정 줄: 현장설명 → 참가신청마감 → 입찰마감 D-day → 개찰
+  assert.ok(x1.includes(`data-digest-sched="1"><b style="color:#6B7280;margin-right:4px">일정</b>현장설명 ${mdw(plus(4))} 10:00 · 참가신청마감 ${mdw(plus(8))} 18:00 · 입찰마감 ${mdw(plus(12))} 10:00 <b style="color:#374151">D-12</b> · 개찰 ${mdw(plus(12))} 11:00</div>`), x1);
+  const x2 = item('시험시 피트니스 위탁 215 경기 제한');
+  assert.ok(x2.includes('경기도 시험시 · 기초금액 1억 · 추정가격 9,091만원 · 배정예산 1억 · <b style="color:#047857" data-digest-limit="ok">지역 제한 경기 — 참가 가능</b>'), x2);
+  assert.ok(x2.includes('>수의계약</span>') && !x2.includes('>현장설명</span>') && x2.includes(`일정</b>현장설명 ${mdw(plus(-1))} 10:00 · 입찰마감`), '지난 현장설명은 배지 없이 일정 줄에만');
+  // ⑨ 진행·담당
+  assert.ok(item('시험 단지 출입통제 시스템 구축 215').includes(`<b style="color:#047857" data-digest-progress="1">진행 검토중 · 담당 ${staffName}</b>`));
+  // ⑧ 구역 안 사업별 묶음(관심 사업 순서 → 사업 이름 없이 적합만 → 여러 사업) · 머리 사업별 건수 · 번호는 구역 안에서 이어서
+  const now = html.slice(html.indexOf('data-digest-section="now"'), html.indexOf('data-digest-section="review"'));
+  assert.deepEqual([...now.matchAll(/data-digest-group="([^"]+)"/g)].map((m) => m[1]), ['시험사업A', '시험사업B', '다짐', '시험사업A·시험사업B']);
+  assert.deepEqual([...now.matchAll(/font-weight:600;margin-right:4px">(\d+)\.<\/span>/g)].map((m) => Number(m[1])), [1, 2, 3, 4, 5, 6]);
+  assert.match(now, /data-digest-group="시험사업A">[\s\S]*?3건<\/span>/);
+  assert.match(html, /data-digest-biz="1">사업별 새 공고 시험사업A 3 · 시험사업B 1 · 다짐 2 · 시험사업A·시험사업B 1</);
+  // ⑥ 결과: 낙찰 배지·낙찰률·참가 수 · 예전 결과는 안 나옴
+  const res = html.slice(html.indexOf('data-digest-section="result"'));
+  assert.ok(res.includes('>낙찰</span>') && res.includes('낙찰 시험낙찰(주) · 낙찰금액 1.2억 · 낙찰률 88.123% · 참가 7곳'), res.slice(0, 1500));
+  assert.ok(!html.includes('예전 결과 다시 고침') && !html.includes('예전 줄(결과 시각 없음)'), '예전 결과는 다시 안 오름');
+  // 텍스트판
+  assert.ok(text.split('\n')[1].startsWith(`받은 기간 ${mdw(plus(-1))} 08:00 ~ `), text.slice(0, 200));
+  assert.ok(text.includes('맞춤 조건: 관심 사업 시험사업A·시험사업B · 관심 검색어 1개 · 제외어 1개 · 지역 전국 · 금액 제한 없음 · 본사 경기 용인시 — 바꾸기: '));
+  assert.ok(text.includes('  ◇ 시험사업A 3건') && text.includes(`   일정: 현장설명 ${mdw(plus(4))} 10:00 · 참가신청마감 ${mdw(plus(8))} 18:00 · 입찰마감 ${mdw(plus(12))} 10:00 D-12 · 개찰`));
+  assert.ok(text.includes('지역 제한 서울 — 참가 불가(본사 경기 용인시)') && text.includes(`진행 검토중 · 담당 ${staffName}`));
+
+  // 주의(로컬 10/24): 정기 시각 전 [지금 보내기] → 시험 발송(누른 사람에게만, 기록·알림 없음) → 정기 실행은 그대로 보냄
+  const kh = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
+  if (kh >= 23) { t.diagnostic('서울 23시 — 정기 시각 전을 만들 수 없어 시험 발송 확인은 건너뜀'); return; }
+  await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { digestHour: 23, digestEmails: ['office@mail.test'] });
+  await sql`delete from sales_digests where tenant = 'default' and day = ${today}`;
+  const nb = (await sql`select count(*)::int n from notifications where type = 'briefing'`)[0].n;
+  resent.length = 0;
+  const tr = await ctx.owner.ok('POST', '/api/sales/digest/send', {});
+  assert.deepEqual([tr.test, tr.hour, tr.mailed, tr.notified], [true, 23, 1, 0], JSON.stringify(tr));
+  assert.equal(resent.length, 1); assert.deepEqual(resent[0].to, ['ceo@dagym.test'], '누른 사람에게만(직접 넣은 주소·담당에게는 안 감)');
+  assert.ok(resent[0].subject.startsWith(`[시험 발송] [${FROM_NAME}] `) && resent[0].html.includes('data-digest-test="1"') && resent[0].html.includes('오늘 23:00 정기 메일은 그대로 갑니다'), resent[0].subject);
+  assert.equal((await sql`select count(*)::int n from sales_digests where day = ${today}`)[0].n, 0, '오늘 기록 없음 → 정기 발송이 건너뛰지 않음');
+  assert.equal((await sql`select count(*)::int n from notifications where type = 'briefing'`)[0].n, nb, '시험 발송은 알림 없음');
+  // 정기 시각이 되면(여기서는 0시로 바꿔) 정기 실행이 그대로 보냄
+  await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { digestHour: 0 });
+  resent.length = 0;
+  const tick = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } });
+  assert.equal(tick.status, 200);
+  const [row] = await sql`select mailed, notified from sales_digests where tenant = 'default' and day = ${today}`;
+  assert.ok(row && row.mailed >= 1, JSON.stringify(row)); assert.ok(resent.some((m) => !m.subject.startsWith('[시험 발송]') && m.to.includes('office@mail.test')), JSON.stringify(resent.map((m) => [m.subject, m.to])));
 });

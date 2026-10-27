@@ -42,7 +42,7 @@ before(async () => {
     if (u.pathname.startsWith('/g2b/ao/PrvtBidNtceService/')) return nuriMode === 'denied' ? send(200, '<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>30</returnReasonCode><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>', 'application/xml')
       : send(200, dataGo(nuriMode === 'odd' ? [{ ntceNo: 'N-1', ntceNm: '시험 민간 입찰' }] : nuriMode === 'ok' && u.searchParams.get('bidNtceNm') === '커뮤니티' && u.pathname.endsWith('ServcPPSSrch') ? [{ bidNtceNo: 'R26BK00000001', bidNtceOrd: '000', bidNtceClsfc: '용역', nticeDt: `${today} 09:30:00`, refNo: '관리-12', ntceNm: '광교 센트럴 커뮤니티센터 피트니스 위탁운영 업체 선정', ntceDivNm: '일반공고', ntceInsttNm: '광교센트럴 입주자대표회의', bidMethdNm: '전자입찰', cntrctMthdNm: '제한경쟁', sucsfbidMthdNm: '적격심사최저가', rbidDivNm: '재입찰 허용', bidQlfctNm: '공고규격서 참조', ofclNm: '홍길동', ofclTelNo: '010-1234-5678', ofclEmail: 'hong@example.com', bidBeginDt: `${today} 10:00:00`, bidClseDt: `${plus(8)} 17:00:00`, opengDt: `${plus(9)} 11:00:00`, refAmtOpenYn: 'Y', refAmt: '180000000', asignBdgtAmt: '200000000', rgnLmtDivNm: '공고서 참조', servcDtlList: '커뮤니티센터 피트니스·GX 위탁운영', ntceSpecDocUrl1: 'https://nuri.g2b.go.kr/f/spec1.hwp', ntceSpecDocNm1: '공고문.hwp', aptHsmpNm: '광교 센트럴', aptCeoAdrs: '경기도 수원시 영통구 광교중앙로 1', aptMngOfficeTelNo: '0312223333', aptHshldNum: '1,200', rgstDt: `${today} 09:30:00` }] : []), 'application/json');
     if (u.pathname.startsWith('/g2b/ao/HrcspSsstndrdInfoService/')) return send(200, dataGo([{ bfSpecRgstNo: 'PRE-1', prdctClsfcNoNm: '커뮤니티센터 운영 위탁 용역 사전규격', orderInsttNm: 'LH', rcptDt: `${today} 08:00:00`, opninRgstClseDt: `${plus(4)} 18:00:00`, asignBdgtAmt: '90000000' }, { bfSpecRgstNo: 'PRE-2', prdctClsfcNoNm: '도로 포장 공사 사전규격', orderInsttNm: '도로공사' }]), 'application/json');
-    if (u.pathname.startsWith('/g2b/as/ScsbidInfoService/')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', bidwinnrNm: '하이링크', sucsfbidAmt: '240000000', opengDt: `${today} 11:00:00` }] : []), 'application/json');
+    if (u.pathname.startsWith('/g2b/as/ScsbidInfoService/')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', bidwinnrNm: '하이링크', bidwinnrBizno: '1234567890', sucsfbidAmt: '240000000', sucsfbidRate: '87.745', prtcptCnum: '12', opengDt: `${today} 11:00:00` }] : []), 'application/json');
     if (agencyV2 && u.pathname.startsWith('/agency/')) return agency522(u, send);
     if (u.pathname === '/agency/lh_bid') return send(200, dataGo([{ bidNum: 'LH-1', bidNm: '행복주택 커뮤니티시설 운영 위탁', ognzNm: 'LH', clseDt: `${plus(6)} 17:00`, bidAmt: '50000000' }]), 'application/json');
     if (u.pathname.startsWith('/agency/')) return send(403, '<r><returnReasonCode>SERVICE ACCESS DENIED</returnReasonCode></r>', 'application/xml');
@@ -102,6 +102,9 @@ test('나라장터(검색어 × 4대상) + 누리장터 활용신청 필요 → 
   assert.equal(pre.length, 1, '도로 포장 공사는 걸러짐'); assert.equal(pre[0].row.current_status, '예정');
   const [g2] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = 'g2b_bid'`;
   assert.equal(g2.row.winner_name, '하이링크'); assert.equal(g2.row.current_status, '낙찰'); assert.equal(g2.row.winner_amount, 240000000);
+  // 215차: 낙찰자 사업자번호(196차 '우리 회사 낙찰' 판정 근거)가 저장 단계에서 빠지던 것 · #530 낙찰률·참가 업체 수 · 결과를 처음 안 때(당일 메일 결과 구역 기준)
+  assert.deepEqual([g2.row.winner_biz_no, g2.row.winner_rate, g2.row.bidders], ['1234567890', 87.745, 12]);
+  assert.ok(Date.parse(g2.row.result_at) > Date.now() - 600e3, JSON.stringify(g2.row.result_at));
   const a = await ctx.owner.ok('POST', '/api/sales/collectors/public_agency_bids/run', {});
   assert.equal(a.inserted, 1, JSON.stringify(a)); assert.match(a.summary, /활용신청·주소 확인 필요: lh_prespec/);
   const k = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_results/run', {});
@@ -142,8 +145,9 @@ test('영업 DB 수집기: 산업단지 CSV·부동산원 CSV(18개월)·관광�
 
 test('맞춤 설정(검색어·제외어·지역) → 당일 다이제스트(새 공고·취소 구분, 메일·알림) → 하루 1건 · 회사별 수집기 끄기 → 다이제스트에서 제외', async () => {
   assert.equal((await ctx.staffA.client.req('PUT', '/api/sales/digest/prefs', { keywords: ['x'] })).status, 403);
-  const pr = await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: ['행복주택'], excludes: ['사전규격'], regions: ['서울', '경기'], digestHour: 7 });
-  assert.deepEqual(pr.keywords, ['행복주택']); assert.equal(pr.digest_hour, 7);
+  // 215차: 정기 시각 0시 — 정기 시각 전 [지금 보내기]는 시험 발송(누른 사람에게만·기록 없음)이라, 새벽에 도는 자동 검사에서도 아래 '보내기'가 정식 발송이 되게
+  const pr = await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: ['행복주택'], excludes: ['사전규격'], regions: ['서울', '경기'], digestHour: 0 });
+  assert.deepEqual(pr.keywords, ['행복주택']); assert.equal(pr.digest_hour, 0);
   // 과거 마감 공고(오늘 처음 봄)는 '새 공고'에 섞이지 않는다
   await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', ${'00000000-0000-4000-8000-00000000c0de'}, ${sql.json({ id: '00000000-0000-4000-8000-00000000c0de', source_type: 'g2b_bid', source_external_id: 'OLD-1', source_url: 'https://g2b.go.kr/old', title: '구청 헬스장 운동기구 구매(마감 지남)', fit_business: 'dagym', matched_keywords: ['헬스'], deadline_at: `${new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10)} 10:00`, first_seen_at: new Date().toISOString(), updated_at: new Date().toISOString(), notice_kind: 'new', current_status: '마감' })}, 'workin') on conflict do nothing`;
   const pv = await ctx.owner.ok('GET', '/api/sales/digest');

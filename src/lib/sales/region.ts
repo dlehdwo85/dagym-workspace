@@ -29,3 +29,22 @@ export function sidoIn(...texts: (string | null | undefined)[]): string | null {
   }
   return null;
 }
+
+/** #530(로컬 10/24 ④): 참가 제한 지역 → 본사 기준 참가 가능 여부. 글 = '서울특별시' · '경기도, 인천광역시' · '경상남도 김해시' 같은 시·도(와 시·군·구) 목록.
+ * 비었거나 '전국'·'제한 없음'이면 null(제한 없음) · ok = 참가 가능 true / 불가 false / 판단 못 함 null(본사를 모르거나 시·군까지 제한인데 본사 시·군을 모름) */
+export type RegionLimit = { label: string; ok: boolean | null };
+export function regionLimit(limit: unknown, hq: { sido: string | null; sigungu: string | null } | null): RegionLimit | null {
+  const s = String(limit ?? '').replace(/\s+/g, ' ').trim();
+  if (!s || s === '-' || /전국|제한\s*없음/.test(s)) return null;
+  const zones: { sido: string; sigungu: string | null }[] = [];
+  for (const p of s.split(/\s*[,·/|]\s*|\s+및\s+/)) {
+    const sg = p.split(' ').find((t) => /(시|군|구)$/.test(t) && !SIDO_ALIASES[t] && !new RegExp(`^(${SHORT})(시|도)$`).test(t)) ?? null;
+    const sido = sidoIn(p) ?? (sg && zones.length ? zones[zones.length - 1].sido : null); // '서울 강남구·서초구' → 서초구도 서울
+    if (sido) zones.push({ sido, sigungu: sg });
+  }
+  if (!zones.length) return { label: s.slice(0, 30), ok: null };
+  const label = [...new Set(zones.map((z) => (z.sigungu ? `${z.sido} ${z.sigungu}` : z.sido)))].join('·');
+  if (!hq?.sido) return { label, ok: null };
+  const each = zones.map((z) => (z.sido !== hq.sido ? false : !z.sigungu ? true : !hq.sigungu ? null : z.sigungu === hq.sigungu));
+  return { label, ok: each.includes(true) ? true : each.includes(null) ? null : false };
+}

@@ -111,12 +111,14 @@ export function noticeKind(title: string | null, kindName: string | null): 'new'
 export const PROCUREMENT_ETL_FIELDS = ['source_url', 'notice_file_url', 'issuer', 'title', 'region', 'notice_type', 'posted_date', 'deadline_at', 'budget_amount', 'estimated_amount', 'contract_method', 'current_status', 'task_scope',
   'bid_system', 'award_method', 'notice_state', 'facility_name', 'bid_category', 'office_phone', 'office_fax', 'office_address', 'household_count', 'fit_business', 'matched_keywords', 'related', 'attachment_urls',
   'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at', 'site_briefing_at', 'site_briefing_place',
-  'base_amount', 'notice_no'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로 · #543 공고번호(바로 가는 주소가 없는 원천의 '번호 검색' 안내)
-export const AWARD_FIELDS = ['winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'current_status'] as const; // 196차: 낙찰자 사업자번호 — 입찰 업무 '우리 회사 낙찰' 판정
+  'base_amount', 'notice_no', 'winner_biz_no', 'winner_rate', 'bidders'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로 · #543 공고번호(바로 가는 주소가 없는 원천의 '번호 검색' 안내)
+export const AWARD_FIELDS = ['winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'current_status', 'winner_rate', 'bidders'] as const; // 196차: 낙찰자 사업자번호 — 입찰 업무 '우리 회사 낙찰' 판정 · #530 낙찰률·참가 업체 수(당일 메일 결과 구역)
 export type NoticeRow = Record<string, unknown> & { source_type: string; source_external_id: string; title: string; source_url: string };
 
 const txt = (v: unknown): string | null => { if (v == null) return null; const t = String(v).replace(/\s+/g, ' ').trim(); return t ? t : null; };
 const num = (v: unknown): number | null => { if (v == null || v === '') return null; const n = Number(String(v).replace(/[,원\s]/g, '')); return Number.isFinite(n) && n >= 0 ? n : null; };
+/** 낙찰률(%) — '87.745' · '87.745%' → 87.745, 0·200 넘는 값은 버림 */
+const rate = (v: unknown): number | null => { if (v == null || v === '') return null; const n = Number(String(v).replace(/[%\s,]/g, '')); return Number.isFinite(n) && n > 0 && n <= 200 ? n : null; };
 export const ymdOf = (v: unknown): string | null => { const m = String(v ?? '').match(/^(\d{4})-?(\d{2})-?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : null; };
 /** 원천 시각(한국) → ISO(+09:00). '2026-10-21 14:00' · '20261021 1400' · '2026/10/21' 모두 */
 export const ts = (v: unknown): string | null => {
@@ -161,6 +163,7 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
     fit_business: fit.fit, matched_keywords: fit.matched, related: !!fit.fit || sourceType === 'vendor_recruit', attachment_urls: urls(p.attachment_urls),
     notice_kind: noticeKind(title, state), participation_deadline_at: ts(p.participation_deadline_at), opening_at: ts(p.opening_at), demand_agency: txt(p.demand_agency), region_restriction: txt(p.region_restriction),
     industry_code: txt(p.industry_code), winner_name: winner, winner_amount: num(p.winner_amount), award_date: ymdOf(p.award_date),
+    winner_biz_no: txt(p.winner_biz_no), winner_rate: rate(p.winner_rate), bidders: num(p.bidders), // 215차: 사업자번호가 저장 단계에서 빠지던 것(196차 '우리 회사 낙찰' 판정이 이름으로만 되던 원인) · #530 낙찰률·참가 수
     files_checked_at: txt(p.files_checked_at), // #507 후속: K-apt 첨부 목록을 읽은 때(다음 수집에서 다시 읽지 않음)
     site_briefing_at: ts(p.site_briefing_at), site_briefing_place: txt(p.site_briefing_place), // #510 현장설명(나라장터 dcmtgOprtnDt·Plce)
     base_amount: num(p.base_amount),
@@ -196,7 +199,7 @@ export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<stri
     const p = prev.get(v.row.source_external_id);
     if (!p) {
       if (mergeScope === 'award' && !v.row.winner_name) continue; // 낙찰 병합인데 기존 공고가 없고 낙찰자도 없으면 버림
-      plan.inserts.push({ key, row: { ...v.row, classification: initialClassification(v.row) } }); continue;
+      plan.inserts.push({ key, row: { ...v.row, classification: initialClassification(v.row), ...(isAwardResult(v.row) ? { result_at: now.toISOString() } : {}) } }); continue;
     }
     const patch: Record<string, unknown> = {}; const changed: string[] = [];
     const fields = mergeScope === 'award' ? AWARD_FIELDS : PROCUREMENT_ETL_FIELDS;
@@ -218,6 +221,8 @@ export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<stri
       patch.judged_at = now.toISOString();
       if (patch.related === false && (p.related === true || p.related === 'true')) { patch.classification = '참고(비관련)'; if (p.refound_at) patch.refound_at = null; }
     }
+    // 215차(#530): 결과(낙찰·유찰)를 처음 알게 된 때 — 당일 메일 '결과' 구역은 이 시각으로(낙찰률 채우기 같은 고침으로 예전 결과가 다시 오르지 않게)
+    if (changed.length && !isAwardResult(p) && isAwardResult({ ...p, ...patch })) { patch.result_at = now.toISOString(); changed.push('result_at'); }
     if (changed.length) plan.updates.push({ id: String(p.id), key, patch, summary: `변경: ${changed.join(', ')}` });
     else plan.unchangedIds.push(String(p.id));
   }

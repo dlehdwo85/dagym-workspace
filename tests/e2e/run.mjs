@@ -72,6 +72,7 @@ import { library210 } from './library210.step.mjs';
 import { ceo211 } from './ceo211.step.mjs';
 import { research212 } from './research212.step.mjs';
 import { photos213 } from './photos213.step.mjs';
+import { digest215 } from './digest215.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2925,6 +2926,7 @@ await step('210차 #619 자료실 자동 분류: 영상 올리면 장면 사진 
 await step('211차 대표 10/27: ② 업무 사진 14장(휴대폰) → 한 줄 진행·사진 n장 묶음(+3)·사진첩 고르기 → 지우기·활동 기록 한 줄 · ④ 같은 입찰 일정+업무 = 캘린더 한 줄 · ⑤ 마케팅 요금제는 사용량·요금제 화면', () => ceo211({ owner, ctx, sql, BASE, SHOTS }));
 await step('212차 #612 후속조사: 머리 줄 [이번 주 묶음 지금 만들기] → 업무 하나 · 카드 미확인·조사 예정 날짜(담당) · 업무 완료 창에 곳마다 값 → 카드 현 위탁사·계약만료 · 비운 곳 확인 못함', () => research212({ owner, ctx, sql, BASE, SHOTS }));
 await step('213차 대표 10/27 18:35 아이폰 사진 147장: [사진·영상] 고르기 창 → 준비 중 띠(취소하면 걷힘·파일이 들어오면 진행) · 메신저 35장 한 묶음(30장 잘림 없앰)·고른 순서', () => photos213({ owner, ctx, sql, BASE, SHOTS }));
+await step('215차 #530 당일 공고 메일 21라인 이상: 받은 기간·맞춤 조건 상자·금액 나눔·지역 제한 참가 가능/불가·일정 줄·배지·사업별 묶음·낙찰률, 휴대폰 폭 · 정기 시각 전 [나에게 시험 발송](오늘 기록 없음)', () => digest215({ owner, ctx, sql, BASE, SHOTS }));
 
 await browser.close();
 srv.proc.kill();

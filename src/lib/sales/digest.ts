@@ -16,7 +16,7 @@ import { CLOSED_STATUS, initialClassification, isAwardResult, matchFit, onbidSal
 import { vendorDateOk } from './collectors/vendorRules';
 import { BID_COLLECTORS } from './collectors';
 import { listBizCats, matchBiz, type BizCat } from './bizCats';
-import { sidoIn } from './region';
+import { regionLimit, sidoIn, type RegionLimit } from './region';
 import { digestMail } from './digestMail';
 import { SKIP_ONLY, noKey, noticeKeys, projectSkipOf, settledWork, titleKey } from './noticeGroups';
 import { fixG2bUrl, searchHint, type SearchHint } from './sourceLink';
@@ -82,7 +82,10 @@ export type DigestSection = 'now' | 'review' | 'soon' | 'change' | 'result' | 'r
 export type DigestItem = { id: string; title: string; issuer: string | null; region: string | null; source: string; url: string; kind: string; fit: string | null; keywords: string[]; estimated: number | null; deadline: string | null; dday: number | null; participation: string | null; opening: string | null; attachments: number; why: string; seenAt?: string | null; late?: boolean; /** 185차: 예전 규칙으로 빠졌다가 다시 판정으로 찾은 공고 */ refound?: boolean; posted?: string | null;
   /** #510 21라인 칸 */ section: DigestSection; noticeNo: string | null; badges: string[]; biz: { name: string; color: string }[]; tags: string[]; amount: string | null; deadlineAt: string | null; participationAt: string | null; openingAt: string | null; briefingAt: string | null; bidSystem: string | null;
   /** #543 바로 가는 상세 주소가 없는 원천 — [원문] 대신 '○○에서 번호 검색' */ search?: SearchHint | null;
-  /** 결과 줄: '낙찰 ○○ · 1.2억' / '유찰' */ result?: string | null };
+  /** 결과 줄: '낙찰 ○○ · 1.2억' / '유찰' */ result?: string | null;
+  /** 215차(#530 로컬 10/24 ③④⑨): 금액 칸 나눔(기초금액·추정가격·배정예산) · 참가 제한 지역과 본사 기준 참가 가능 · 이 회사 진행(상태·담당) */ amounts?: string[]; limit?: RegionLimit | null; progress?: string | null };
+/** 215차(#530 ①②): 메일 머리 — 받은 기간·맞춤 조건 상자 */
+export type DigestCond = { biz: string[]; keywords: number; excludes: number; regions: string[]; issuers: number; itemCodes: number; amountMin: number | null; amountMax: number | null; hq: string | null };
 /** #476 a: 지난 메일(그 전날까지의 마지막 다이제스트) 이후 처음 본 공고 — 그날 메일 뒤에 들어온 공고가 다음 날 메일에서 빠지지 않게. 3일 넘게 비었거나 처음이면 그날 0시(KST)부터 */
 export async function digestSince(tenant: string, day: string): Promise<Date> {
   const start = new Date(`${day}T00:00:00+09:00`);
@@ -110,9 +113,13 @@ const num = (v: unknown) => { if (v == null || v === '') return null; const n = 
 const won = (n: number) => (n >= 1e8 ? `${(n / 1e8).toFixed(1).replace(/\.0$/, '')}억` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString('ko-KR')}만원` : `${n.toLocaleString('ko-KR')}원`);
 /** 결과 한 줄: '낙찰 ○○ · 낙찰금액 1.2억' / '유찰' */
 const resultOf = (r: any) => { const w = String(r.winner_name ?? r.award_company ?? r.successful_bidder ?? '').trim(); const a = num(r.winner_amount ?? r.award_amount);
-  return w ? `낙찰 ${w}${a && a > 0 ? ` · 낙찰금액 ${won(a)}` : ''}` : /유찰/.test(String(r.current_status ?? '')) ? '유찰' : '낙찰'; };
-/** 추정가격(없으면 배정예산). 0 은 '미공개'('0만원' 금지), 없으면 칸을 숨김(null) */
-const amountOf = (r: any) => { const est = num(r.estimated_amount), bud = num(r.budget_amount); return est && est > 0 ? `추정가격 ${won(est)}` : bud && bud > 0 ? `배정예산 ${won(bud)}` : est === 0 || bud === 0 ? '추정가격 미공개' : null; };
+  const rate = num(r.winner_rate), n = num(r.bidders); // #530 ⑥: 낙찰률·참가 업체 수(나라장터 낙찰정보에 있을 때)
+  const tail = `${rate && rate > 0 ? ` · 낙찰률 ${Math.round(rate * 1000) / 1000}%` : ''}${n && n > 0 ? ` · 참가 ${n.toLocaleString('ko-KR')}곳` : ''}`;
+  return w ? `낙찰 ${w}${a && a > 0 ? ` · 낙찰금액 ${won(a)}` : ''}${tail}` : /유찰/.test(String(r.current_status ?? '')) ? `유찰${tail}` : `낙찰${tail}`; };
+/** #530 ③(로컬 10/24): 금액 칸을 나눔 — 기초금액·추정가격·배정예산(사전규격·나라장터)을 있는 것만. 모두 0 이면 '미공개'('0만원' 금지), 없으면 칸을 숨김 */
+const amountsOf = (r: any) => { const base = num(r.base_amount), est = num(r.estimated_amount), bud = num(r.budget_amount);
+  const out = [base && base > 0 ? `기초금액 ${won(base)}` : null, est && est > 0 ? `추정가격 ${won(est)}` : null, bud && bud > 0 ? `배정예산 ${won(bud)}` : null].filter((x): x is string => !!x);
+  return out.length ? out : est === 0 || bud === 0 || base === 0 ? ['추정가격 미공개'] : []; };
 /** 지역: 원천 지역 → 비면(나라장터 '지역 -') 참가가능지역·발주처·수요기관·주소·단지·제목에서 시도 */
 const regionOf = (r: any) => { const v = String(r.region ?? '').trim(); return v && v !== '-' ? v : sidoIn(r.region_restriction, r.issuer, r.demand_agency, r.office_address, r.facility_name, r.title); };
 /** 업종 태그: 입찰 분류(K-apt '사업자 - 공사 - 일반보수'·'용역 > 주민운동시설의 위탁' 은 나눠서, 앞의 '사업자' 뺌) + 업종 제한 이름(숫자 코드는 뺌), 3개까지 */
@@ -127,17 +134,25 @@ const sysKey = (v: unknown) => String(v ?? '').toUpperCase().replace(/[^0-9A-Z�
  * 그리고 회사 판단으로 바꾼 분류(procurement_notices__progress.classification — '즉시 검토' 구역 판단에 우선)
  */
 async function tenantLinks(tenant: string, ids: string[]) {
-  const linked = new Set<string>(); const cls = new Map<string, string>();
-  if (!ids.length) return { linked, cls };
-  const rows = await db()<{ id: string | null; kind: string; cls: string | null }[]>`
-    select coalesce(data->>'notice_id', ref_id, src_id) as id, src_tbl as kind, data->>'classification' as cls from sales_work_records
+  const linked = new Set<string>(); const cls = new Map<string, string>(); const work = new Map<string, { status: string | null; who: string | null }>();
+  if (!ids.length) return { linked, cls, work };
+  const rows = await db()<{ id: string | null; kind: string; cls: string | null; status: string | null; who: string | null }[]>`
+    select coalesce(data->>'notice_id', ref_id, src_id) as id, src_tbl as kind, data->>'classification' as cls, status, null::text as who from sales_work_records
       where tenant = ${tenant} and src_tbl in ('opportunity_work', 'procurement_notices__progress') and (ref_id = any(${ids}::text[]) or src_id = any(${ids}::text[]) or data->>'notice_id' = any(${ids}::text[]))
-    union all select coalesce(w.row->>'notice_id', w.row->>'procurement_notice_id', w.src_id), w.tbl, w.row->>'classification' from sales_src_rows w
+    union all select coalesce(w.row->>'notice_id', w.row->>'procurement_notice_id', w.src_id), w.tbl, w.row->>'classification', w.row->>'status', null::text from sales_src_rows w
       where w.scope = ${tenant} and w.tbl in ('opportunity_work', 'procurement_notices__progress') and (w.src_id = any(${ids}::text[]) or w.row->>'notice_id' = any(${ids}::text[]) or w.row->>'procurement_notice_id' = any(${ids}::text[]))
-    union all select t.sales_ref->>'id', 'task', null from tasks t join org_units o on o.id = t.org_unit_id
+    union all select t.sales_ref->>'id', 'task', null::text, null::text, u.name from tasks t join org_units o on o.id = t.org_unit_id left join users u on u.id = t.assignee_id
       where o.tenant = ${tenant} and t.deleted_at is null and t.sales_ref->>'kind' = 'bid' and t.sales_ref->>'id' = any(${ids}::text[])`;
-  for (const r of rows) { if (!r.id) continue; if (r.kind === 'procurement_notices__progress') { if (r.cls) cls.set(r.id, r.cls); } else linked.add(r.id); }
-  return { linked, cls };
+  for (const r of rows) {
+    if (!r.id) continue;
+    if (r.kind === 'procurement_notices__progress') { if (r.cls) cls.set(r.id, r.cls); continue; }
+    linked.add(r.id);
+    // 215차(#530 ⑨): 메일 줄에 이 회사 진행(미검토·대상 아님 말고 상태) · 입찰 업무 담당
+    const w = work.get(r.id) ?? { status: null, who: null };
+    if (r.kind === 'task') w.who ??= r.who; else if (settledWork(r.status)) w.status ??= String(r.status).trim();
+    work.set(r.id, w);
+  }
+  return { linked, cls, work };
 }
 /** 대표 10/24 추가 ②: 이 회사가 '대상 아님'으로 넘긴 공고 — 같은 공고의 다른 게시(같은 번호 취소·정정 공고, 같은 제목·기관·마감 재게시)도 메일에서 뺌. 그 게시에 다른 진행 기록이 있으면 그대로.
  * 137차: 같은 사업(사전규격 ↔ 본 공고, noticeGroups.sameProject)도 — 목록과 같은 기준(미검토 말고 진행 기록이 있으면 그대로) */
@@ -171,13 +186,16 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const seen = at(r.first_seen_at); const upd = at(r.updated_at);
     const ref = at(r.refound_at); const refound = ref != null && ref >= sinceMs && !(seen != null && seen >= sinceMs); // 185차: 다시 판정으로 찾은 공고는 찾은 날 한 번 새 공고로
     const isNew = (seen != null && seen >= sinceMs) || refound; const kind0 = String(r.notice_kind ?? 'new'); const result = isAwardResult(r);
-    const changedToday = upd != null && upd >= sinceMs && (kind0 === 'cancel' || kind0 === 'amend' || String(r.current_status ?? '') === '취소' || result);
+    // 215차(#530): 결과는 처음 알게 된 때(result_at) 기준 — 낙찰률 채우기·금액 고침으로 결과 줄이 다시 고쳐져도 예전 결과가 '오늘 결과'로 다시 오르지 않게(result_at 없는 예전 줄은 개찰 3일 안만)
+    const resAt = at(r.result_at); const awardDay = dayOf(r.award_date);
+    const resultToday = result && (resAt != null ? resAt >= sinceMs : upd != null && upd >= sinceMs && !(awardDay && awardDay < plusDays(day, -3)));
+    const changedToday = (upd != null && upd >= sinceMs && (kind0 === 'cancel' || kind0 === 'amend' || String(r.current_status ?? '') === '취소')) || resultToday;
     if (!isNew && !changedToday) continue;
     if (r.source_type === 'vendor_recruit' && (!r.posted_date || !vendorDateOk(r))) { skip('게시일 미상'); continue; } // #476 e·후속: 게시판 날짜로 확인 못 한 협력사 줄(조각·메뉴·예전 방식)은 메일·오늘 탭에서 뺌
     if (onbidSale(r)) { skip('온비드 매각'); continue; } // #537 후속2(로컬 10/24 12:58): 온비드는 임대·사용허가만
     if (notTarget(String(r.id ?? src_id), r)) { skip('대상 아님'); continue; }
     const f = passPrefs(r, p); if (!f.ok) { skip(f.why); continue; }
-    if (result) { cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
+    if (result) { if (isNew || resultToday) cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
     const dl = dayOf(r.deadline_at);
     if (dl && dl < day) { skip('마감 지남'); continue; } // 첫 수집일에 과거 마감 공고가 '새 공고'로 섞이지 않게(로컬 10/21 10:55)
     cands.push({ id: String(r.id ?? src_id), r, isNew, kind: String(r.current_status ?? '') === '취소' ? 'cancel' : kind0, late: isNew && !refound && seen! < dayStart, fit: f.fit, why: f.why, refound });
@@ -218,7 +236,10 @@ export async function buildDigest(tenant: string, day = kstDay()) {
       if (c && String(row.id ?? src_id) !== c.id && nk(row, String(row.id ?? src_id)) !== nk(c.r, c.id) && seen != null && seen < (at(c.r.first_seen_at) ?? 0)) reposted.add(c.id);
     }
   }
-  const { linked, cls } = await tenantLinks(tenant, [...today, ...soon].map((c) => c.id));
+  const { linked, cls, work } = await tenantLinks(tenant, [...today, ...soon].map((c) => c.id));
+  // #530 ②④: 본사 시·도(영업 › 지원사업 회사 프로필, 없으면 회사 정보 주소) — 참가 제한 지역 공고의 참가 가능 판단·맞춤 조건 상자
+  const prof = (await (await import('./support')).profileOf(tenant).catch(() => null))?.profile;
+  const hq = prof?.region_sido ? { sido: prof.region_sido, sigungu: prof.region_sigungu ?? null } : null;
   const items: DigestItem[] = [];
   for (const c of [...today, ...soon]) {
     const r = c.r; const st = String(r.source_type ?? ''); const isChange = c.kind === 'amend' || c.kind === 'cancel';
@@ -230,14 +251,21 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     else section = (cls.get(c.id) ?? r.classification ?? initialClassification({ ...r, fit_business: c.fit })) === '즉시 검토' ? 'now' : 'review';
     const dl = when(r.deadline_at); const dd = dl ? Math.round((Date.parse(dl.d) - Date.parse(day)) / 864e5) : null; const dday = c.kind === 'cancel' || (dd != null && dd < 0) ? null : dd; // 결과 줄은 마감이 지났음 — D-day 없음 · 로컬 10/25 10:55 취소 공고는 'D-n · 준비 시작' 없이 마감일만
     const state = String(r.notice_state ?? '');
-    const badges = [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : reposted.has(c.id) ? '재게시' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null].filter((x): x is string => !!x);
+    const method = `${r.contract_method ?? ''} ${r.award_method ?? ''}`; const briefing = fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at));
+    // #530 ⑦(로컬 10/24): 21라인 범례처럼 공고 유형 배지 — 정정·취소·재공고·재게시·긴급 + 수의계약·견적·현장설명 · 결과는 낙찰/유찰
+    const badges = c.kind === 'result' ? [/유찰/.test(String(r.current_status ?? '')) && !String(r.winner_name ?? '').trim() ? '유찰' : '낙찰']
+      : [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : reposted.has(c.id) ? '재게시' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null,
+        /수의/.test(method) ? '수의계약' : null, /견적/.test(`${method} ${r.title ?? ''}`) ? '견적' : null, briefing && briefing.slice(0, 10) >= day && c.kind !== 'cancel' ? '현장설명' : null].filter((x): x is string => !!x); // 현장설명 배지는 아직 안 지난 것만
+    const amounts = amountsOf(r); const wk = work.get(c.id);
+    const progress = wk && (wk.status || wk.who) ? [wk.status ? `진행 ${wk.status}` : '진행 기록 있음', wk.who ? `담당 ${wk.who}` : null].filter(Boolean).join(' · ') : null;
     const biz = matchBiz(r, cats).map((b) => ({ name: b.name, color: b.color }));
     items.push({ id: c.id, title: String(r.title ?? ''), issuer: r.issuer ?? r.demand_agency ?? null, region: regionOf(r), source: SRC[st] ?? st, url: fixG2bUrl(r.source_url) ?? '', search: searchHint({ source: st, url: r.source_url, externalId: r.source_external_id, noticeNo: r.notice_no }), kind: c.kind,
       fit: c.fit, keywords: Array.isArray(r.matched_keywords) ? r.matched_keywords : [], estimated: num(r.estimated_amount) ?? num(r.budget_amount), deadline: dl?.d ?? null, dday,
       participation: dayOf(r.participation_deadline_at), opening: dayOf(r.opening_at), attachments: Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0, why: c.why, seenAt: r.first_seen_at ?? null, late: c.late, refound: !!c.refound, posted: dayOf(r.posted_date),
-      section, noticeNo: st === 'vendor_recruit' ? null : String(r.source_external_id ?? '').trim() || null, badges, biz: biz.length ? biz : c.fit ? [{ name: c.fit, color: '#2563EB' }] : [], tags: tagsOf(r), amount: amountOf(r),
+      section, noticeNo: st === 'vendor_recruit' ? null : String(r.source_external_id ?? '').trim() || null, badges, biz: biz.length ? biz : c.fit ? [{ name: c.fit, color: '#2563EB' }] : [], tags: tagsOf(r), amount: amounts.join(' · ') || null, amounts,
+      limit: c.kind === 'result' || c.kind === 'cancel' ? null : regionLimit(r.region_restriction, hq), progress,
       deadlineAt: fmtWhen(dl), participationAt: fmtWhen(when(r.participation_deadline_at)), openingAt: fmtWhen(when(r.opening_at)),
-      briefingAt: fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at)),
+      briefingAt: briefing,
       bidSystem: st === 'kapt_bid' && r.bid_system && sysKey(r.bid_system) !== sysKey(SRC[st]) ? String(r.bid_system) : null, // 투찰처가 원천(K-APT)과 같으면 숨김 — KG2B 같은 다른 곳만
       result: c.kind === 'result' ? resultOf(r) : null });
   }
@@ -246,26 +274,32 @@ export async function buildDigest(tenant: string, day = kstDay()) {
   const by = (s: DigestSection) => items.filter((i) => i.section === s).length;
   const now = by('now'), review = by('review'), change = items.filter((i) => i.section === 'change');
   const counts = { total: now + review + change.length, new: now + review, now, review, soon: by('soon'), result: by('result'), ref: by('ref'), amend: change.filter((i) => i.kind !== 'cancel').length, cancel: change.filter((i) => i.kind === 'cancel').length, merged, skipped };
-  return { day, since: since.toISOString(), items: items.slice(0, 300), counts, prefs: p };
+  const cond: DigestCond = { biz: cats.map((c) => c.name), keywords: p.keywords.length, excludes: p.excludes.length, regions: p.regions, issuers: p.issuers.length, itemCodes: p.item_codes.length, amountMin: p.amount_min, amountMax: p.amount_max,
+    hq: hq ? `${hq.sido}${hq.sigungu ? ` ${hq.sigungu}` : ''}` : null };
+  return { day, since: since.toISOString(), until: new Date().toISOString(), items: items.slice(0, 300), counts, prefs: p, cond };
 }
 /** 보내기(하루 1건, force 면 다시 만들어 덮어쓰고 다시 보냄). 받는 사람: digest_to 또는 영업 담당 규칙·대표 + 직접 넣은 주소 */
 export async function sendDigest(tenant: string, opt: { force?: boolean; day?: string; actorId?: string | null } = {}) {
   const sql = db(); const day = opt.day ?? kstDay(); const p = await prefsOf(tenant);
   const [exists] = await sql<{ id: string }[]>`select id from sales_digests where tenant = ${tenant} and day = ${day}`;
   if (exists && !opt.force) return { sent: false, reason: 'already' };
+  // 215차(#530 로컬 10/24 주의): 정기 시각 전(새벽)에 [지금 보내기]를 누르면 그날 정기 메일이 '이미 보냄'으로 건너뛰던 것 —
+  // 정기 시각 전 수동 발송은 시험 발송: 누른 사람에게만 메일(제목 앞 [시험 발송]) · 알림·기록 없음 → 정기 메일·다음 날 받은 기간은 그대로
+  const test = !!opt.actorId && !opt.day && !exists && p.digest_enabled && kstHour() < p.digest_hour;
   const d = await buildDigest(tenant, day);
   const company = await companyName(tenant);
   // #100: 받는 사람을 따로 안 정했으면 영업 담당 규칙(입찰) → 없으면 대표·관리자
   const rule = p.digest_to.length ? null : await (await import('../assignees')).resolveAssignee(sql, tenant, 'sales_source', 'bid').catch(() => null);
-  const to = p.digest_to.length ? await sql<{ id: string; email: string }[]>`select id, email from users where id = any(${p.digest_to}::uuid[]) and tenant = ${tenant} and status = 'active'`
+  const to = test ? await sql<{ id: string; email: string }[]>`select id, email from users where id = ${opt.actorId!} and tenant = ${tenant}`
+    : p.digest_to.length ? await sql<{ id: string; email: string }[]>`select id, email from users where id = any(${p.digest_to}::uuid[]) and tenant = ${tenant} and status = 'active'`
     : rule ? await sql<{ id: string; email: string }[]>`select id, email from users where id = ${rule.userId}`
     : await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${tenant} and status = 'active' and not is_demo and role in ('owner', 'admin') order by (role = 'owner') desc, created_at asc limit 1`; // #104: 담당 미지정이면 관리자 1명(대표 우선)에게만
-  const emails = [...new Set([...to.map((u) => u.email), ...p.digest_emails].map((e) => String(e ?? '').trim().toLowerCase()).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))];
+  const emails = [...new Set([...to.map((u) => u.email), ...(test ? [] : p.digest_emails)].map((e) => String(e ?? '').trim().toLowerCase()).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))];
   let mailed = 0, notified = 0; let mailError: string | null = null; let mailVia: string | null = null;
   const shown = d.items.filter((i) => i.section !== 'ref');
   if (shown.length) {
     const fromName = fromNameOf(p, company);
-    const mail = digestMail(fromName, d, appUrl());
+    const mail = digestMail(fromName, d, appUrl(), test ? { testHour: p.digest_hour } : undefined);
     if (p.digest_mail && emails.length && to.length) {
       const { queueSystemMail, systemChannel } = await import('../mailbox');
       const replyTo = p.digest_reply_to || (await systemChannel(tenant)).smtpFrom;
@@ -276,9 +310,13 @@ export async function sendDigest(tenant: string, opt: { force?: boolean; day?: s
       else for (const e of emails) { try { mailVia = await sendMail(e, mail.subject, mail.text, mail.html); mailed++; } catch (err) { mailError ??= err instanceof Error ? err.message : String(err); /* 메일 경로 없음·실패면 알림만 — 사유는 기록 */ } }
     }
     const first = (d.counts.total ? shown.find((i) => i.section !== 'soon' && i.section !== 'result') : null) ?? shown[0];
-    notified = (await notify(sql, { userIds: to.map((u) => u.id), type: 'briefing', space: 'sales',
+    if (!test) notified = (await notify(sql, { userIds: to.map((u) => u.id), type: 'briefing', space: 'sales',
       title: d.counts.total ? `오늘 새 공고 ${d.counts.total}건 — ${first.title.slice(0, 40)}${shown.length > 1 ? ' 외' : ''}` : d.counts.soon ? `마감 임박 공고 ${d.counts.soon}건 — ${first.title.slice(0, 40)}` : `입찰 결과(낙찰·유찰) ${d.counts.result}건 — ${first.title.slice(0, 40)}`,
       body: shown.slice(0, 3).map((i) => `${i.badges.map((b) => `[${b}] `).join('')}${i.title}${i.dday != null ? ` (${i.dday === 0 ? 'D-day' : `D-${i.dday}`})` : ''}`).join('\n'), link: '/s/sales/hub?tab=bids&bt=today', push: true, dedupeKey: `salesdigest:${tenant}:${day}${opt.force ? `:${Date.now()}` : ''}` }).catch(() => [])).length;
+  }
+  if (test) {
+    await audit(sql, opt.actorId!, 'sales_digest.test', 'tenant', null, { day, total: d.counts.total, mailed, hour: p.digest_hour }).catch(() => {});
+    return { sent: true, test: true, hour: p.digest_hour, day, counts: { ...d.counts, mailError, mailVia, mailTo: emails.length }, mailed, notified, mailError, mailVia, items: d.items.slice(0, 50) };
   }
   await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified) values (${tenant}, ${day}, ${sql.json(d.items as never)}, ${sql.json({ ...d.counts, mailError, mailVia, mailTo: emails.length } as never)}, ${mailed}, ${notified}) on conflict (tenant, day) do update set items = excluded.items, counts = excluded.counts, mailed = excluded.mailed, notified = excluded.notified, created_at = now()`;
   if (opt.actorId) await audit(sql, opt.actorId, 'sales_digest.send', 'tenant', null, { day, total: d.counts.total, mailed, notified }).catch(() => {});
