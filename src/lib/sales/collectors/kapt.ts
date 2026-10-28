@@ -36,7 +36,38 @@ export function parseKaptBidList(html: string): { rows: KaptBidRow[]; malformed:
   return { rows, malformed };
 }
 export type KaptBidDetail = { manager?: string; officeAddress?: string; phone?: string; fax?: string; households?: number; category?: string; bidKind?: string; content?: string; attachments?: string[];
-  /** #507 후속: 첨부 목록 API(bidFileListData.do)로 읽은 원래 이름·파일 번호 */ files?: { name: string | null; url: string }[] };
+  /** #507 후속: 첨부 목록 API(bidFileListData.do)로 읽은 원래 이름·파일 번호 */ files?: { name: string | null; url: string }[];
+  /** 239차(#743·#744): 참가 조건·현장설명 칸 */ terms?: KaptBidTerms;
+  /** #751(로컬 10/28 17:25): 마감 전에 취소된 공고 — '낙찰업체 정보' 표에 '취소된 계약 입니다' · '낙찰/유찰/취소 사유' */ canceled?: boolean; cancelReason?: string | null };
+/** 239차(#743·#744 로컬 10/28 19:30·19:45): 입찰공고 상세의 참가 조건·현장설명 — 파일을 열지 않고 목록 줄·상세·메일에 */
+export type KaptBidTerms = { briefingKind: '필수' | '임의' | '없음' | '공고문 참조' | null; briefingAt: string | null; briefingPlace: string | null; bidDocs: string | null; creditCert: string | null;
+  perfCert: string | null; bidBond: string | null; docsDeadline: string | null; bidMethod: string | null; urgent: boolean | null; payTerms: string | null };
+/** 칸 이름은 줄바꿈(<br>)·빈칸을 빼고 비교('신용평가등급확인서<br>제출여부'). 고르기 칸은 checked='checked' 인 것 — K-apt 는 안 고른 칸에 checked="" 를 씀(10/28 실제 화면).
+ *  숨긴 줄(display:none — '입찰구비서류'는 2023-02-20 전 공고에만 화면 스크립트가 보여 줌)은 읽지 않음 */
+export function parseKaptBidTerms(html0: string): KaptBidTerms {
+  const html = html0.replace(/<tr[^>]*display\s*:\s*none[^>]*>[\s\S]*?<\/tr>/gi, '');
+  const cells = new Map([...html.matchAll(/<th[^>]*>([\s\S]*?)<\/th>\s*<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => [text(m[1]).replace(/\s/g, ''), m[2]]));
+  const cell = (name: string) => cells.get(name.replace(/\s/g, ''));
+  const plain = (h: string | undefined) => (h == null ? null : text(h.replace(/<p[^>]*font_red[^>]*>[\s\S]*?<\/p>/g, '')) || null); // 빨간 안내 문장('불참업체는 불이익…')은 뺌
+  // #743 개인정보: 장소·지급조건 칸에 함께 적힌 담당자·전화는 지움('관리사무소 (담당 ○○○ 02-…)')
+  const scrub = (v: string | null) => { if (!v) return null; const t = v.replace(/\(?\s*(?:담당자?|문의|연락처|전화|☎|tel\.?)\s*[:：]?[^)·,]*\)?/gi, ' ').replace(/\d{2,4}[-.)\s]\d{3,4}[-.\s]\d{4}/g, ' ').replace(/\s+/g, ' ').replace(/[\s,·(]+$/, '').trim(); return t || null; };
+  const picked = (h: string | undefined) => { if (!h) return null; const m = [...h.matchAll(/<input[^>]*>/g)].map((x) => x[0]).find((x) => /\bchecked\s*=\s*['"]checked['"]/i.test(x)); return m ? (m.match(/\bid\s*=\s*['"]([^'"]+)/)?.[1] ?? null) : null; };
+  const ref = (v: string | null) => !!v && /공고문\s*참조/.test(v);
+  const when = (v: string | null) => { const m = String(v ?? '').match(/(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/); return m ? `${m[1]}T${m[2]}:${m[3]}:00+09:00` : null; };
+  const yn = (v: string | null) => (v == null ? null : ref(v) ? '공고문 참조' : /미\s*제출|제출\s*안/.test(v) ? '미제출' : /제출/.test(v) ? '제출' : v.slice(0, 40));
+  const sb = cell('현장설명'); const sbPick = picked(sb);
+  const kinds: Record<string, '필수' | '임의' | '없음'> = { isFiledDesP: '필수', isFiledDesY: '임의', isFiledDesN: '없음' };
+  const place = scrub(plain(cell('현장설명장소'))); const docs = cell('입찰구비서류'); const dp = picked(docs); const bond = plain(cell('입찰보증금')); const em = picked(cell('긴급입찰여부')); const pay = scrub(plain(cell('지급조건')));
+  return {
+    briefingKind: sbPick ? kinds[sbPick] ?? null : ref(plain(sb)) ? '공고문 참조' : null,
+    briefingAt: when(plain(cell('현장설명일시'))), briefingPlace: place && !ref(place) ? place.slice(0, 100) : null,
+    bidDocs: [dp === 'bidReqDocsY' ? '있음' : dp === 'bidReqDocsN' ? '없음' : null, ref(plain(docs)) ? '공고문 참조' : null].filter(Boolean).join(' · ') || null,
+    creditCert: yn(plain(cell('신용평가등급확인서 제출여부'))), perfCert: yn(plain(cell('관리(공사용역) 실적증명서 제출여부'))),
+    bidBond: bond ? bond.replace(/\[\s*([\d.]+)\s*\]/g, ' $1').replace(/\s+/g, ' ').trim().slice(0, 80) : null, // '입찰가격의[5]% 이상 제출' → '입찰가격의 5% 이상 제출'
+    docsDeadline: when(plain(cell('서류제출마감일'))), bidMethod: plain(cell('입찰방법'))?.slice(0, 40) ?? null,
+    urgent: em === 'emrgBidY' ? true : em === 'emrgBidN' ? false : null, payTerms: pay ? pay.slice(0, 100) : null,
+  };
+}
 export function parseKaptBidDetail(html: string): KaptBidDetail {
   const d: KaptBidDetail = {};
   const t = html.match(/<tr>\s*(?:<th[^>]*>[\s\S]*?<\/th>\s*)+<\/tr>\s*<tr>([\s\S]*?)<\/tr>/); const head = html.match(/<tr>\s*((?:<th[^>]*>[\s\S]*?<\/th>\s*)+)<\/tr>\s*<tr>/);
@@ -51,15 +82,23 @@ export function parseKaptBidDetail(html: string): KaptBidDetail {
   const pre = html.match(/<th[^>]*>\s*내용\s*<\/th>[\s\S]*?<pre>([\s\S]*?)<\/pre>/); if (pre) d.content = text(pre[1]).slice(0, 2000) || undefined;
   const files = [...html.matchAll(/href="([^"]*(?:fileDown|download|attach)[^"]*)"/gi)].map((m) => m[1].replace(/&amp;/g, '&')).filter((u) => !/^\s*javascript:/i.test(u)).map((u) => (u.startsWith('http') ? u : `${BASE()}${u.startsWith('/') ? '' : '/'}${u}`)).slice(0, 10);
   if (files.length) d.attachments = files;
+  if (/현장설명|입찰보증금|신용평가/.test(html)) d.terms = parseKaptBidTerms(html);
+  // #751(광명자이더샵포레나 kg2b_142624): K-apt 목록은 취소된 공고도 '신규공고'로 두고 상세에만 '취소된 계약 입니다'·사유를 보여 줌
+  if (/취소된\s*계약/.test(html)) { d.canceled = true; d.cancelReason = parseKaptAwardDetail(html).reason; }
   return d;
 }
 export const regionFromTitle = (title: string) => title.match(/^\s*\[([^\]]{1,12})\]/)?.[1]?.trim() ?? null;
 export function toPayload(r: KaptBidRow, d?: KaptBidDetail): Record<string, unknown> {
   return { source_type: 'kapt_bid', source_external_id: r.bidNum, source_url: `${BASE().replace(/\/kapt$/, T() ? '/kapt' : '')}/bid/bidDetail.do?bidNum=${encodeURIComponent(r.bidNum)}`, issuer: r.complex || null, facility_name: r.complex || null, title: r.title, region: regionFromTitle(r.title),
-    posted_date: r.registeredAt.slice(0, 10), deadline_at: r.deadline, notice_state: r.state, bid_system: r.system, award_method: r.awardMethod, contract_method: d?.bidKind ?? null, bid_category: d?.category ?? null, task_scope: d?.content ?? null,
+    posted_date: r.registeredAt.slice(0, 10), deadline_at: r.deadline, notice_state: d?.canceled ? '취소' : r.state, bid_system: r.system, award_method: r.awardMethod, contract_method: d?.bidKind ?? null, bid_category: d?.category ?? null, task_scope: d?.content ?? null,
     office_phone: d?.phone ?? null, office_fax: d?.fax ?? null, office_address: d?.officeAddress ?? null, household_count: d?.households ?? null,
     // 첨부는 첨부 목록 API 로 읽은 것만(상세 HTML 의 링크는 화면 스크립트가 그려 실제 K-apt 에선 비거나 엉뚱한 주소 — 10/23 a7e4efad·086aeff2)
-    attachment_urls: d?.files ? d.files.map((f) => (f.name ? { name: f.name, url: f.url } : f.url)) : [], files_checked_at: d?.files ? new Date().toISOString() : null };
+    attachment_urls: d?.files ? d.files.map((f) => (f.name ? { name: f.name, url: f.url } : f.url)) : [], files_checked_at: d?.files ? new Date().toISOString() : null,
+    // 239차(#743·#744): 참가 조건·현장설명(상세를 읽은 때만 — 못 읽은 실행은 칸을 안 보내 저장된 값을 지우지 않음)
+    ...(d?.canceled && d.cancelReason ? { result_note: d.cancelReason } : {}), // #751 취소 사유(상태 '취소'·공고구분 'cancel' 은 notice_state 로 계산)
+    ...(d?.terms ? { site_briefing_kind: d.terms.briefingKind, site_briefing_at: d.terms.briefingAt, site_briefing_place: d.terms.briefingPlace, bid_docs: d.terms.bidDocs,
+      credit_rating_cert: d.terms.creditCert, performance_cert: d.terms.perfCert, bid_bond: d.terms.bidBond, docs_deadline_at: d.terms.docsDeadline, bid_method: d.terms.bidMethod,
+      urgent_bid: d.terms.urgent, payment_terms: d.terms.payTerms, terms_read_at: new Date().toISOString() } : {}) };
 }
 // #507 후속(로컬 10/23): 관련 공고의 첨부 목록 — 상세를 열 때 받은 세션으로 POST bidFileListData.do. 새 공고만(첨부가 있거나 이미 읽은 공고는 건너뜀), 하루 300건·한 번에 80건
 const FILE_LIST_DAY = 300, FILE_LIST_RUN = 80;
@@ -139,9 +178,12 @@ export const kaptBidNotices: Collector = {
     const seen = new Set<string>(); const uniq = all.filter((r) => (seen.has(r.bidNum) ? false : (seen.add(r.bidNum), true)));
     const fitRows = uniq.filter((r) => matchFit(r.title, '공동주택').fit); const details = new Map<string, KaptBidDetail>();
     // 상세 = K-apt 세션(쿠키·_csrf). #507 후속: 새 관련 공고는 같은 세션으로 첨부 목록(이름·파일 번호)까지 — 하루 상한
-    const need = await filesNeeded(fitRows.slice(0, DETAIL_LIMIT).map((r) => r.bidNum)).catch(() => new Set<string>());
+    // 239차(#743 로컬 10/28 19:30): 상세(참가 조건·현장설명)는 아직 마감 안 된 관련 공고부터 — 한 번에 읽는 수(DETAIL_LIMIT) 안에서 지난 공고에 밀리지 않게
+    const td = kstYmd(new Date(now())); const ended = (r: KaptBidRow) => r.deadline.slice(0, 10) < td || /마감(?!임박)|종료|취소|낙찰|유찰/.test(r.state);
+    const detailRows = [...fitRows.filter((r) => !ended(r)), ...fitRows.filter(ended)].slice(0, DETAIL_LIMIT);
+    const need = await filesNeeded(detailRows.map((r) => r.bidNum)).catch(() => new Set<string>());
     let budget = need.size ? await fileListBudget().catch(() => 0) : 0; let filesRead = 0, listFiles = 0, listFailed = 0;
-    await pool(fitRows.slice(0, DETAIL_LIMIT), 6, async (r) => {
+    await pool(detailRows, 6, async (r) => {
       if (left() < 15000) return;
       try {
         const s = await kaptSession(r.bidNum, fetchImpl, 8000); if (s.status !== 200) throw new Error(`HTTP ${s.status}`);

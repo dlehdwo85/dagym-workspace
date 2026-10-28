@@ -10,7 +10,7 @@ import { useSession } from '@/components/session';
 import { cameBack } from '@/components/urlState';
 import { DropZone, UploadProgress, putFile } from '@/components/upload';
 import { holdScreen } from '@/components/awake';
-import { usePickWait } from '@/components/pickWait';
+import { IosPickHint, usePickWait } from '@/components/pickWait';
 import { shrinkImage } from '@/components/shrink';
 import { CHAT_FILES_MAX } from '@/lib/chatShared';
 import { Avatar, Button, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -987,6 +987,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                   <span className={cx('inline-flex size-10 items-center justify-center rounded-2xl', tone)}><Icon className="size-5" /></span>{label}
                 </button>
               ))}
+              <IosPickHint className="col-span-4 px-1 pt-1 text-[11px] leading-snug text-ink-3" />
             </div>
           )}
           <button type="button" className={iconBtn} onClick={() => { setPlusOpen((v) => !v); setEmojiOpen(false); }} aria-label="더 보내기(사진·파일·투표·일정·업무)" aria-expanded={plusOpen} title="사진·파일·투표·일정·업무" data-testid="chat-plus"><Plus className={cx('size-[18px] transition-transform', plusOpen && 'rotate-45')} /></button>

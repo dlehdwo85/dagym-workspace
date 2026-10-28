@@ -47,7 +47,12 @@ const MS: [MilestoneKey, string, string[]][] = [
   ['open', '개찰', ['opening_at', 'open_at', 'opening_date']],
 ];
 /** 공고 일정(원천마다 칸 이름이 달라 후보 순서로) */
-export const bidMilestones = (r: any): Milestone[] => MS.flatMap(([key, label, keys]) => { const w = when(pick(r, ...keys)); return w ? [{ key, label, w }] : []; });
+// 239차(#744 로컬 10/28 19:45): 현장설명이 '없음'이면 일정에서 빼고, 필수·임의면 이름에 붙임('현장설명회(필수)') — K-apt 상세 칸
+export const bidMilestones = (r: any): Milestone[] => MS.flatMap(([key, label, keys]) => {
+  if (key === 'briefing' && r?.site_briefing_kind === '없음') return [];
+  const w = when(pick(r, ...keys)); if (!w) return [];
+  return [{ key, label: key === 'briefing' && (r?.site_briefing_kind === '필수' || r?.site_briefing_kind === '임의') ? `${label}(${r.site_briefing_kind})` : label, w }];
+});
 /** 기한: 다가오는 참가신청(없으면 입찰) 마감의 전날(오늘보다 앞이면 마감일) → 마감이 다 지났으면 개찰일 → 그것도 지났으면 null(그대로 둠) */
 export function bidDue(ms: Milestone[], today: string): string | null {
   const next = (k: MilestoneKey) => ms.find((m) => m.key === k && m.w.day >= today);
@@ -81,6 +86,17 @@ export async function actorOf(sql: Sql, userId: string | null | undefined): Prom
 export async function adminOf(sql: Sql, tenant: string) {
   const [r] = await sql<{ id: string }[]>`select id from users where tenant = ${tenant} and status = 'active' and role in ('owner', 'admin') and not is_demo order by (role = 'owner') desc, created_at limit 1`;
   return actorOf(sql, r?.id);
+}
+/** 239차(#744): 넘긴 뒤에 알게 된 일정(K-apt 상세에서 읽은 현장설명 등) — 넘길 때와 같은 회사 공용 캘린더·담당자 참석. 넘긴 사람(없으면 관리자) 이름으로 */
+async function addBidEvent(sql: Sql, tenant: string, d: any, m: Milestone, noticeId: string): Promise<string | null> {
+  const ids: string[] = Array.isArray(d.assignees) ? d.assignees.filter((x: unknown): x is string => typeof x === 'string') : [];
+  const u = (await actorOf(sql, d.handoff_by)) ?? (await adminOf(sql, tenant)); if (!u || u.tenant !== tenant || !ids.length) return null;
+  const [cal] = await sql<{ id: string }[]>`select id from calendars where type = 'company' and tenant = ${tenant} order by created_at limit 1`; if (!cal) return null;
+  const people = await sql<{ name: string }[]>`select name from users where tenant = ${tenant} and id = any(${ids}::uuid[])`;
+  const { createEvent } = await import('../events');
+  const ev: any = await createEvent(u, { calendarId: cal.id, title: `[입찰] ${m.label} · ${String(d.bid_name ?? '입찰')}`.slice(0, 200), description: `입찰 일정 — 담당 ${people.map((p) => p.name).join('·')}\n업무: /tasks/${d.bid_task_id}\n공고: ${bidLink(noticeId)}`,
+    start: m.w.start, end: m.w.end, allDay: m.w.allDay, attendeeIds: ids, reminderMinutes: m.w.allDay ? [1440] : [1440, 60] } as never);
+  return String(ev?.id ?? ev?.event?.id ?? '') || null;
 }
 const soonEvents = (d: any) => Object.values(d?.bid_events ?? {}).filter((x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x));
 /** 열린 입찰 업무·일정 취소(소프트 삭제 + 활동 기록) */
@@ -317,11 +333,13 @@ export async function bidTasksTick(now = new Date()) {
       // 날짜 정정 → 일정 옮김 · 기한 따라감
       const live = latestLive(g) ?? g[0]; const ms = bidMilestones(live);
       const dates = Object.fromEntries(ms.map((m) => [m.key, m.w.start])) as Record<string, string>;
-      let touched = false;
+      let touched = false; const added: Record<string, string> = {};
       for (const m of ms) {
         if ((d.bid_dates ?? {})[m.key] === m.w.start) continue; touched = true;
         const ev = (d.bid_events ?? {})[m.key];
         if (ev) await sql`update events set start_at = ${m.w.start}, end_at = ${m.w.end}, all_day = ${m.w.allDay}, updated_at = now(), version = version + 1 where id = ${ev} and deleted_at is null`;
+        // 239차(#744): 넘긴 뒤에 새로 알게 된 일정은 한 번 만듦(날짜를 아래에서 기억하므로 다음 점검에서 다시 만들지 않음)
+        else if (m.w.day >= today) { const eid = await addBidEvent(sql, rec.tenant, d, m, id).catch((e) => { errors.push(`${id} 일정: ${String((e as Error)?.message ?? e).slice(0, 80)}`); return null; }); if (eid) added[m.key] = eid; }
       }
       const auto = bidDue(ms, today);
       if (auto && auto !== d.bid_due_auto) {
@@ -330,7 +348,7 @@ export async function bidTasksTick(now = new Date()) {
         for (const x of mv) await activity(sql, 'task', x.id, null, 'updated', { dueDate: { from: d.bid_due_auto ?? null, to: auto }, reason: 'bid_schedule' });
         if (mv.length) moved++;
       }
-      if (touched) await sql`update sales_work_records set data = ${sql.json({ ...d, bid_dates: { ...(d.bid_dates ?? {}), ...dates }, bid_due_auto: auto ?? d.bid_due_auto ?? null })}, updated_at = now()
+      if (touched) await sql`update sales_work_records set data = ${sql.json({ ...d, bid_dates: { ...(d.bid_dates ?? {}), ...dates }, bid_events: { ...(d.bid_events ?? {}), ...added }, bid_due_auto: auto ?? d.bid_due_auto ?? null })}, updated_at = now()
         where tenant = ${rec.tenant} and src_tbl = ${SRC} and src_id = ${rec.src_id}`;
     } catch (e) { errors.push(`${id}: ${String((e as Error)?.message ?? e).slice(0, 120)}`); }
   }
@@ -446,7 +464,7 @@ export async function moveBidLeads(u: SessionUser, i: z.infer<typeof moveBidLead
       const evIds: string[] = Array.isArray(r.src?.eventIds) ? r.src.eventIds.filter((x: unknown) => typeof x === 'string') : [];
       const evs = evIds.length ? await tx<{ id: string; title: string }[]>`select id, title from events where id = any(${evIds}::uuid[]) and deleted_at is null` : [];
       const events: Record<string, string> = {};
-      for (const e of evs) { const label = e.title.replace(/^\[[^\]]*\]\s*/, '').split(' · ')[0]; const k = MS.find(([, l]) => l === label)?.[0]; if (k) events[k] = e.id; }
+      for (const e of evs) { const label = e.title.replace(/^\[[^\]]*\]\s*/, '').split(' · ')[0]; const k = MS.find(([, l]) => l === label || label.startsWith(`${l}(`))?.[0]; if (k) events[k] = e.id; } // 239차 '현장설명회(필수)'
       await tx`update events set lead_id = null where lead_id = ${r.id}`;
       const wd = { ...(r.work_data ?? {}) }; for (const k of ['lead_id', 'converted_by', 'converted_at']) delete wd[k];
       const assignees: string[] = Array.isArray(r.src?.assignees) && r.src.assignees.length ? r.src.assignees : r.owner_id ? [r.owner_id] : [];

@@ -80,7 +80,7 @@ function when(v: unknown): { d: string; t: string | null } | null {
 const fmtWhen = (w: ReturnType<typeof when>) => (w ? (w.t ? `${w.d} ${w.t}` : w.d) : null);
 export type DigestSection = 'now' | 'review' | 'soon' | 'change' | 'result' | 'ref';
 export type DigestItem = { id: string; title: string; issuer: string | null; region: string | null; source: string; url: string; kind: string; fit: string | null; keywords: string[]; estimated: number | null; deadline: string | null; dday: number | null; participation: string | null; opening: string | null; attachments: number; why: string; seenAt?: string | null; late?: boolean; /** 185차: 예전 규칙으로 빠졌다가 다시 판정으로 찾은 공고 */ refound?: boolean; posted?: string | null;
-  /** #510 21라인 칸 */ section: DigestSection; noticeNo: string | null; badges: string[]; biz: { name: string; color: string }[]; tags: string[]; amount: string | null; deadlineAt: string | null; participationAt: string | null; openingAt: string | null; briefingAt: string | null; bidSystem: string | null;
+  /** #510 21라인 칸 */ section: DigestSection; noticeNo: string | null; badges: string[]; biz: { name: string; color: string }[]; tags: string[]; amount: string | null; deadlineAt: string | null; participationAt: string | null; openingAt: string | null; briefingAt: string | null; /** 239차(#744): 현장설명 필수·임의·공고문 참조 · 장소 */ briefingKind?: string | null; briefingPlace?: string | null; bidSystem: string | null;
   /** #543 바로 가는 상세 주소가 없는 원천 — [원문] 대신 '○○에서 번호 검색' */ search?: SearchHint | null;
   /** 결과 줄: '낙찰 ○○ · 1.2억' / '유찰' */ result?: string | null;
   /** 215차(#530 로컬 10/24 ③④⑨): 금액 칸 나눔(기초금액·추정가격·배정예산) · 참가 제한 지역과 본사 기준 참가 가능 · 이 회사 진행(상태·담당) */ amounts?: string[]; limit?: RegionLimit | null; progress?: string | null };
@@ -228,8 +228,10 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     (c) => `${norm(String(c.r.title ?? ''))}|${norm(String(c.r.issuer ?? c.r.demand_agency ?? ''))}|${dayOf(c.r.deadline_at) ?? ''}|${c.kind === 'amend' || c.kind === 'cancel' || c.kind === 'result' ? c.kind : 'new'}`, () => 0);
   // 마감 임박: 이미 받은 공고(지난 메일 전에 처음 본) 중 관련 사업·D-3 이내·취소/마감 아님·진행 기록 없음
   const end = plusDays(day, 4); const todayKeys = new Set(today.map((c) => nk(c.r, c.id)));
+  // 239차(#744): 필수 현장설명이 D-3 안이면 입찰 마감이 멀어도 함께(현장설명에 빠지면 입찰 못 함)
   const soonRows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone
-    and row->>'deadline_at' >= ${plusDays(day, -1)} and row->>'deadline_at' < ${end} limit 3000`;
+    and ((row->>'deadline_at' >= ${plusDays(day, -1)} and row->>'deadline_at' < ${end})
+      or (row->>'site_briefing_kind' = '필수' and row->>'site_briefing_at' >= ${plusDays(day, -1)} and row->>'site_briefing_at' < ${end} and row->>'deadline_at' >= ${day})) limit 3000`;
   const soonCands: Cand[] = [];
   for (const { src_id, row: r } of soonRows) {
     const slug = SLUG_OF[String(r.source_type)] ?? ''; if (slug && off.has(slug)) continue;
@@ -238,8 +240,9 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     if (r.source_type === 'vendor_recruit' || String(r.notice_kind ?? '') === 'cancel' || CLOSED_STATUS.test(String(r.current_status ?? '')) || onbidSale(r)) continue; // '마감임박'은 진행 중(#537 후속2)
     const f = passPrefs(r, p); if (!f.ok || !f.fit) continue;
     const dl = when(r.deadline_at); if (!dl) continue;
-    const dday = Math.round((Date.parse(dl.d) - Date.parse(day)) / 864e5); if (dday < 0 || dday > 3) continue;
-    if (dday === 0 && dl.t && Date.parse(`${dl.d}T${dl.t}:00+09:00`) < Date.now()) continue; // 오늘 마감인데 시각이 지남
+    const ahead = (w: NonNullable<ReturnType<typeof when>>) => { const n = Math.round((Date.parse(w.d) - Date.parse(day)) / 864e5); return n >= 0 && n <= 3 && !(n === 0 && w.t && Date.parse(`${w.d}T${w.t}:00+09:00`) < Date.now()); }; // 오늘인데 시각이 지남은 뺌
+    const bf = r.site_briefing_kind === '필수' ? when(r.site_briefing_at) : null;
+    if (!ahead(dl) && !(bf && ahead(bf) && dl.d >= day)) continue;
     soonCands.push({ id: String(r.id ?? src_id), r, isNew: false, kind: String(r.notice_kind ?? 'new'), late: false, fit: f.fit, why: f.why, soon: true });
   }
   const soon = latest(soonCands, (c) => nk(c.r, c.id), (c) => noKey(c.r).ord);
@@ -272,7 +275,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     // #530 ⑦(로컬 10/24): 21라인 범례처럼 공고 유형 배지 — 정정·취소·재공고·재게시·긴급 + 수의계약·견적·현장설명 · 결과는 낙찰/유찰
     const badges = c.kind === 'result' ? [/유찰/.test(String(r.current_status ?? '')) && !String(r.winner_name ?? '').trim() ? '유찰' : '낙찰', ...(c.filled ? ['보완'] : [])]
       : [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : reposted.has(c.id) ? '재게시' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null,
-        /수의/.test(method) ? '수의계약' : null, /견적/.test(`${method} ${r.title ?? ''}`) ? '견적' : null, briefing && briefing.slice(0, 10) >= day && c.kind !== 'cancel' ? '현장설명' : null].filter((x): x is string => !!x); // 현장설명 배지는 아직 안 지난 것만
+        /수의/.test(method) ? '수의계약' : null, /견적/.test(`${method} ${r.title ?? ''}`) ? '견적' : null, briefing && briefing.slice(0, 10) >= day && c.kind !== 'cancel' ? (r.site_briefing_kind === '필수' ? '현장설명 필수' : '현장설명') : null].filter((x): x is string => !!x); // 현장설명 배지는 아직 안 지난 것만
     const amounts = amountsOf(r); const wk = work.get(c.id);
     const progress = wk && (wk.status || wk.who) ? [wk.status ? `진행 ${wk.status}` : '진행 기록 있음', wk.who ? `담당 ${wk.who}` : null].filter(Boolean).join(' · ') : null;
     const biz = matchBiz(r, cats).map((b) => ({ name: b.name, color: b.color }));
@@ -282,9 +285,9 @@ export async function buildDigest(tenant: string, day = kstDay()) {
       section, noticeNo: st === 'vendor_recruit' ? null : String(r.source_external_id ?? '').trim() || null, badges, biz: biz.length ? biz : c.fit ? [{ name: c.fit, color: '#2563EB' }] : [], tags: tagsOf(r), amount: amounts.join(' · ') || null, amounts,
       limit: c.kind === 'result' || c.kind === 'cancel' ? null : regionLimit(r.region_restriction, hq), progress,
       deadlineAt: fmtWhen(dl), participationAt: fmtWhen(when(r.participation_deadline_at)), openingAt: fmtWhen(when(r.opening_at)),
-      briefingAt: briefing,
+      briefingAt: briefing, briefingKind: r.site_briefing_kind ?? null, briefingPlace: r.site_briefing_place ?? null, // 239차(#744)
       bidSystem: st === 'kapt_bid' && r.bid_system && sysKey(r.bid_system) !== sysKey(SRC[st]) ? String(r.bid_system) : null, // 투찰처가 원천(K-APT)과 같으면 숨김 — KG2B 같은 다른 곳만
-      result: c.kind === 'result' ? resultOf(r) : null });
+      result: c.kind === 'result' ? resultOf(r) : c.kind === 'cancel' && r.result_note ? `취소 사유: ${String(r.result_note).slice(0, 80)}` : null }); // #751 취소 사유(K-apt 상세)
   }
   // 구역 순서 → 구역 안 마감 임박 순(마감 모르면 뒤) → 제목
   items.sort((a, b) => SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section) || String(a.deadlineAt ?? '9999').localeCompare(String(b.deadlineAt ?? '9999')) || a.title.localeCompare(b.title));

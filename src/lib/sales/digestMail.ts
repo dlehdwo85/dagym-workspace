@@ -21,7 +21,7 @@ const http = (u: string) => (/^https?:\/\//i.test(u) ? u : null);
 const tint = (hex: string) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex); if (!m) return '#EFF6FF'; const n = parseInt(m[1], 16); const mix = (c: number) => Math.round(c + (255 - c) * 0.88); return `#${[(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => mix(c).toString(16).padStart(2, '0')).join('')}`; };
 const C = { ink: '#111827', ink2: '#374151', ink3: '#6B7280', line: '#E5E7EB', bg: '#F3F4F6', brand: '#2563EB', brandInk: '#1D4ED8', soft: '#EFF6FF' };
 const BADGE: Record<string, [string, string]> = { 취소: ['#374151', '#E5E7EB'], 정정: ['#B45309', '#FEF3C7'], 긴급: ['#B91C1C', '#FEE2E2'], 재공고: ['#6D28D9', '#EDE9FE'], 재게시: ['#6D28D9', '#EDE9FE'],
-  수의계약: ['#1D4ED8', '#DBEAFE'], 견적: ['#3730A3', '#E0E7FF'], 현장설명: ['#0E7490', '#CFFAFE'], 낙찰: ['#047857', '#D1FAE5'], 유찰: ['#4B5563', '#F3F4F6'] };
+  수의계약: ['#1D4ED8', '#DBEAFE'], 견적: ['#3730A3', '#E0E7FF'], 현장설명: ['#0E7490', '#CFFAFE'], '현장설명 필수': ['#B45309', '#FEF3C7'], 낙찰: ['#047857', '#D1FAE5'], 유찰: ['#4B5563', '#F3F4F6'] };
 const kstDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 /** ISO → '10/26(월) 08:00'(서울) */
 const stamp = (iso: string | undefined) => { if (!iso) return null; const d = new Date(iso); return Number.isNaN(d.getTime()) ? null : `${mdw(kstDay(d))} ${seenLabel(iso)}`; };
@@ -52,7 +52,7 @@ const ddColor = (n: number) => (n <= 3 ? '#DC2626' : n <= 10 ? '#D97706' : C.ink
 export const SECTIONS: { key: Exclude<DigestSection, 'ref'>; title: string; sub: string }[] = [
   { key: 'now', title: '★ 즉시 검토', sub: '' },
   { key: 'review', title: '검토', sub: '관련 사업이지만 공사·장비·조건을 확인할 공고' },
-  { key: 'soon', title: '진행 중(D-3 안)', sub: '이미 받은 공고 중 D-3 이내 · 진행 기록 없음' }, // #608(대표 10/25): 화면 칩 '마감 임박'을 없애며 메일 구역 이름도 같이
+  { key: 'soon', title: '진행 중(D-3 안)', sub: '이미 받은 공고 중 마감·필수 현장설명 D-3 이내 · 진행 기록 없음' }, // #608(대표 10/25): 화면 칩 '마감 임박'을 없애며 메일 구역 이름도 같이
   { key: 'change', title: '정정·취소', sub: '관련 사업이거나 진행 기록이 있는 공고만' },
   { key: 'result', title: '결과(낙찰·유찰)', sub: '영업 기회가 아닌 결과 — 새 공고 수에는 넣지 않음' }, // 로컬 10/24 12:20(#537 후속·#530)
 ];
@@ -83,7 +83,8 @@ function parts(i: DigestItem, day: string, hq: string | null) {
   const lim = i.limit ? limitText(i.limit, hq) : null;
   const src = [i.source, i.noticeNo].filter(Boolean).join(' ') || null;
   if (i.section === 'result') return { l2, lim, sched: i.openingAt ? [`개찰 ${whenLabel(i.openingAt)}`] : [], l4: src ? [src] : [] }; // 결과는 지난 마감·참가신청 대신 개찰·출처만
-  const sched = [i.briefingAt ? `현장설명 ${whenLabel(i.briefingAt)}` : null, i.participationAt ? `참가신청마감 ${whenLabel(i.participationAt)}` : null, i.deadlineAt ? `입찰마감 ${whenLabel(i.deadlineAt)}` : null,
+  // 239차(#744): 현장설명 필수·임의 · 장소까지(K-apt 상세 칸)
+  const sched = [i.briefingAt ? `현장설명${i.briefingKind === '필수' || i.briefingKind === '임의' ? `(${i.briefingKind})` : ''} ${whenLabel(i.briefingAt)}${i.briefingPlace ? ` ${i.briefingPlace}` : ''}` : null, i.participationAt ? `참가신청마감 ${whenLabel(i.participationAt)}` : null, i.deadlineAt ? `입찰마감 ${whenLabel(i.deadlineAt)}` : null,
     i.openingAt ? `개찰 ${whenLabel(i.openingAt)}` : null].filter((x): x is string => !!x);
   const l4 = [i.attachments ? `첨부 ${i.attachments}` : null, i.bidSystem ? `투찰 ${i.bidSystem}` : null, src, i.posted && i.posted < day ? `공고일 ${mdw(i.posted)}` : null,
     i.refound ? `다시 찾은 공고(${seenLabel(i.seenAt)} 처음 수집)` : i.late ? `지난 메일 뒤 ${seenLabel(i.seenAt)} 수집` : null].filter((x): x is string => !!x);

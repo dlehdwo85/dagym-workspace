@@ -45,7 +45,7 @@ export async function upsertNotices(items: Record<string, unknown>[], opt: { mer
     const t = nowIso(), d = todayKst();
     try {
       await writeRows('procurement_notices', plan.inserts.map((i) => { const id = randomUUID(); return { id, row: { id, lead_id: null, ...i.row, first_seen_at: t, last_seen_at: t, last_seen_date: d, created_at: t, updated_at: t } }; }));
-      await patchRows('procurement_notices', plan.updates.map((u) => ({ id: u.id, patch: { ...u.patch, last_seen_at: t, last_seen_date: d, updated_at: t } })));
+      await patchRows('procurement_notices', plan.updates.map((u) => ({ id: u.id, patch: { ...u.patch, last_seen_at: t, last_seen_date: d, ...(u.quiet ? {} : { updated_at: t }) } })));
       await touchRows('procurement_notices', plan.unchangedIds);
       out.inserted += plan.inserts.length; out.updated += plan.updates.length; out.unchanged += plan.unchangedIds.length;
     } catch (e) { out.errors += list.length; logs.push(`쓰기 실패(${st}): ${e instanceof Error ? e.message : String(e)}`); }

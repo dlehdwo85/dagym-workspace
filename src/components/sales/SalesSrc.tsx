@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Copy, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
 import type { SearchHint } from '@/lib/sales/sourceLink';
+import { mdhm } from '@/lib/sales/bidTerms';
 import { api, useApi } from '@/components/client';
 import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
@@ -1157,12 +1158,15 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
       <div className="space-y-3" data-testid="bid-detail">
         <AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBid} subject={`공고 ${String(n.title).slice(0, 40)}`} compact testId="ai-ask-bid" />
         <div className="flex flex-wrap gap-1.5 text-[11px]">{[n.classification ?? n.category, n.businesses?.map((b: any) => b.name).join('·') || null, n.status, n.fit !== null && n.fit !== undefined && `적합 ${n.fit}`, n.sourceLabel && `${n.sourceLabel}${n.noticeNo ? ` ${n.noticeNo}` : ''}`].filter(Boolean).map((b, i) => <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">{String(b)}</span>)}</div>
-        <KoDl rows={[['공고명', n.title], ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.businesses?.length ? n.businesses.map((b: { name: string }) => b.name).join(' · ') : n.fitBusiness],
+        <KoDl rows={[['공고명', n.title], ...(n.cancelReason || n.prevCancel ? [['취소', n.cancelReason ? `취소 사유: ${n.cancelReason}${n.renotice ? ` · 재공고 올라옴${n.renotice.close ? `(마감 ${kd(n.renotice.close)})` : ''}` : ''}`
+            : `재공고 — 이전 공고 취소${n.prevCancel.day ? `(${kd(n.prevCancel.day)})` : ''}${n.prevCancel.reason ? ` · 사유: ${n.prevCancel.reason}` : ''}`] as [string, string]] : []), ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.businesses?.length ? n.businesses.map((b: { name: string }) => b.name).join(' · ') : n.fitBusiness],
           ['마감', n.deadline ? kdt(n.deadline) : unk(null)], ['예산', won(n.amount) || (n.amount ? String(n.amount) : unk(null))], ['낙찰', n.winner ? [n.winner, won(n.awardAmount), n.awardDate && kd(n.awardDate)].filter(Boolean).join(' · ') : unk(null)],
           ['추정가격', won(n.estimated) || unk(n.estimated)], ['계약방식', unk(n.contractMethod)], ['계약기간', unk(n.contractPeriod)], ['공고일', n.noticeDate ? kd(n.noticeDate) : unk(null)], ['DB 등록', n.posted ? kd(n.posted) : unk(null)],
           ['세대수', n.households && `${n.households}세대`], ['업종', n.industry !== n.noticeType && n.industry], ['키워드', n.keywords], ['대표 판단', n.judgment && `${n.judgment}${n.salesPoint ? ` · 영업 포인트: ${n.salesPoint}` : ''}`], ['부족 자격', n.qualificationGap],
           ['문서', docs.length ? <span className="flex flex-wrap gap-1.5">{docs}</span> : null], ['연락처', (n.phone || n.address || n.fax) && <span className="space-y-1"><ContactRow phone={n.phone} />{n.address && <span className="block text-xs text-ink-2">{String(n.address)}</span>}{n.fax && <span className="block text-xs text-ink-3">팩스 {String(n.fax)}</span>}</span>],
           ['상태', n.work], ['메모', n.workMemo], ['다음 조치', n.workNext && kd(n.workNext)]]} />
+        {(n.termRows?.length ?? 0) > 0 && <div className="rounded-input border border-line p-2 text-sm" data-testid="bid-terms-detail"><p className="mb-1 font-medium">참가 조건 · 현장설명 <span className="text-xs font-normal text-ink-3">(공고 원문 칸 — 자세한 자격은 공고문)</span></p>
+          <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-1">{(n.termRows as [string, string][]).map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="break-words">{v}</dd>])}</dl></div>}
         <details className="rounded-input border border-line p-2 text-sm" data-testid="bid-detail-more"><summary className="cursor-pointer text-ink-2">과업 · 참가자격 · 요건 상세{D8.some(([, v]) => v) ? '' : ' (아직 없음 — 후속조사)'}</summary>
           <dl className="mt-2 grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1">{D8.map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="whitespace-pre-wrap break-words">{v ? String(v) : <span className="text-ink-3">{UNK2}</span>}</dd>])}</dl></details>
         {canWrite && (n.workBid ? <BidTaskPanel n={n} onSaved={() => onChange?.()} /> : <WorkPanel kind="bid" id={String(n.id)} cur={{ status: n.work, memo: n.workMemo, next: n.workNext, leadId: n.workLeadId }} onSaved={() => onChange?.()} />)}
@@ -1306,6 +1310,21 @@ const CAT_CLS: Record<string, string> = { '즉시 검토': 'bg-rose-50 text-rose
 /** 대표 10/24 추가 ③: 마감 D-10 안 = 입찰 준비 기간(D-4~D-10 주황 강조, 입찰 탭 '준비 기간(D-10 안)' 필터·당일 메일 배지와 같은 기준) */
 const PREP_DAYS = 10;
 /** 입찰 카드(영업관리 2-5, PC·휴대폰 같음): 상태 → 사업 → 분류 → 출처 → 단지·공고명 → 기관·지역·세대·업종 → 낙찰 → 공고·DB 등록(오늘 등록) → 키워드 → [전화][원문][첨부]·마감 */
+/** 239차(#743·#744 대표 10/28): 파일을 열기 전에 — 현장설명(필수면 D-n 배지) · 참가 조건 한 줄 · [자격·조건] 펼치기(원문 칸 그대로) */
+function BidTermsLine({ n, bdd }: { n: any; bdd: number | null }) {
+  const b = n.briefing as { kind: string | null; at: string | null; place: string | null; required: boolean } | null;
+  const past = bdd !== null && bdd < 0;
+  return (
+    <div className="mt-1 space-y-0.5 text-xs" data-testid="bid-terms">
+      {b && <div className="flex flex-wrap items-center gap-1.5" data-testid="bid-briefing">
+        <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', past ? 'bg-slate-100 text-ink-3' : b.required ? (bdd !== null && bdd <= 3 ? 'bg-red-600 text-white' : 'bg-amber-100 text-amber-800') : 'bg-slate-100 text-ink-2')}>
+          현장설명{b.kind && b.kind !== '공고문 참조' ? ` ${b.kind}` : ''}{!past && bdd !== null ? (bdd === 0 ? ' 오늘' : ` D-${bdd}`) : past ? ' 지남' : ''}</span>
+        <span className="text-ink-2">{[b.at ? mdhm(b.at) : b.kind === '공고문 참조' ? '일시 공고문 참조' : null, b.place, b.at && b.kind === '공고문 참조' ? '필수 여부 공고문 참조' : null].filter(Boolean).join(' · ')}</span></div>}
+      {n.terms && <details className="group" data-testid="bid-terms-more"><summary className="cursor-pointer list-none text-ink-2 [&::-webkit-details-marker]:hidden"><span className="font-medium text-ink">자격·조건</span> {n.terms} <span className="text-ink-3 group-open:hidden">▾</span></summary>
+        <dl className="mt-1 grid grid-cols-[7rem_1fr] gap-x-2 gap-y-0.5 rounded-input bg-slate-50 p-2">{(n.termRows as [string, string][] ?? []).map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="break-words">{v}</dd>])}</dl></details>}
+    </div>
+  );
+}
 function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => void; onChange?: () => void; canWrite?: boolean }) {
   const td = today();
   const dd = n.close ? Math.round((Date.parse(n.close) - Date.parse(td)) / 864e5) : null;
@@ -1316,8 +1335,10 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
     // 대표 10/24 추가 ③: 입찰 준비는 9~10일 전부터 — D-4~D-10 주황·굵게 '준비 시작' + 카드 왼쪽 주황 줄
     : dd !== null && dd <= PREP_DAYS ? [`D-${dd} · 준비 시작`, 'bg-amber-100 font-bold text-amber-800'] : dd !== null ? [`D-${dd}`, 'bg-slate-100 text-ink-2'] : ['진행중', 'bg-slate-100 text-ink-2'];
   const prep = dd !== null && dd > 3 && dd <= PREP_DAYS && st[0].endsWith('준비 시작');
+  // 239차(#744): 필수 현장설명이 3일 안이면 마감 임박처럼(입찰 마감보다 먼저 다가옴)
+  const bdd = n.briefing?.at && !/취소|낙찰/.test(st[0]) ? Math.round((Date.parse(String(n.briefing.at).slice(0, 10)) - Date.parse(td)) / 864e5) : null;
   // #608(대표 10/25 ④): 카드 왼쪽 줄 = D-0~3 빨강 · D-4~10 노랑(취소·마감·낙찰은 없음), 배지 글자는 그대로
-  const urgent = dd !== null && dd >= 0 && dd <= 3 && /^(D-\d|오늘 마감)/.test(st[0]);
+  const urgent = (dd !== null && dd >= 0 && dd <= 3 && /^(D-\d|오늘 마감)/.test(st[0])) || (!!n.briefing?.required && bdd !== null && bdd >= 0 && bdd <= 3);
   const cat = n.classification ?? n.category;
   return (
     <li className={cx('rounded-card border border-line bg-white p-3 text-sm', urgent && 'border-l-4 border-l-red-500', prep && 'border-l-4 border-l-amber-300')} data-testid="sales-bid" data-prep={prep ? '1' : undefined} data-urgent={urgent ? '1' : undefined}>
@@ -1333,6 +1354,10 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
       {/* 대표 검수 10/20 ②: 제목을 누르면 한국어 상세(원문은 칩으로), 예산·원문·공고문 내려받기는 휴대폰에도, 날짜 10. 25.(토) 10:00 */}
       <div className="mt-1"><button type="button" onClick={onOpen} className="text-left font-medium hover:underline" data-testid="bid-open">{n.complex && <b className="mr-1">{n.complex}</b>}{n.title}</button></div>
       <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.region, n.households && `${n.households}세대`, n.industry].filter(Boolean).join(' · ')}</div>
+      {/* #751(로컬 10/28 17:25): 마감 전에 취소된 공고 · 재공고 잇기 */}
+      {(n.cancelReason || n.renotice) && <div className="mt-0.5 text-xs text-slate-600" data-testid="bid-cancel">{n.cancelReason ? `취소 사유: ${n.cancelReason}` : '취소된 공고'}{n.renotice ? ` · 재공고 올라옴${n.renotice.close ? `(마감 ${kd(n.renotice.close)})` : ''}` : ''}</div>}
+      {n.prevCancel && <div className="mt-0.5 text-xs text-amber-800" data-testid="bid-prev-cancel">재공고 — 이전 공고 취소{n.prevCancel.day ? `(${kd(n.prevCancel.day)})` : ''}{n.prevCancel.reason ? ` · 사유: ${n.prevCancel.reason}` : ''}</div>}
+      {(n.briefing || n.terms) && <BidTermsLine n={n} bdd={bdd} />}
       {(won(n.amount) || n.winner) && <div className="mt-0.5 text-xs text-ink-2">{won(n.amount) && <>예산 {won(n.amount)}</>}{n.winner && <>{won(n.amount) ? ' · ' : ''}낙찰 {n.winner}{won(n.awardAmount) ? ` · ${won(n.awardAmount)}` : ''}{n.awardDate ? ` (${kd(n.awardDate)})` : ''}</>}</div>}
       <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3" data-testid="bid-dates"><span className="hidden md:inline">{[n.noticeDate && `공고 ${kd(n.noticeDate)}`, n.posted && `DB 등록 ${kd(n.posted)}`].filter(Boolean).join(' · ')}</span>{n.todayNew && <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white" data-testid="bid-today">오늘 등록</span>}{n.todayLabel && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900" title="오늘 탭에 있는 까닭 — 공고일과 수집 시각이 다름" data-testid="bid-today-why">{n.todayLabel}</span>}</div>
       <BidHistory h={n.history} />

@@ -6,11 +6,12 @@ import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
 import { isAwardResult, onbidSale } from './collectors/procurement';
-import { groupNotices, oneCardPerNotice, skipLinks } from './noticeGroups';
+import { groupNotices, isCancel, oneCardPerNotice, plainTitle, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { hubTabsOn } from './hubTabs';
 import { LEAD_STAGES, stageName } from './terms';
 import { sourceAsOf } from './collectors/store';
+import { briefingLine, briefingOf, termsLine, termsRows } from './bidTerms';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -139,13 +140,35 @@ const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); r
   noticeNo: pick(r, 'source_external_id', 'notice_no', 'bid_no', 'external_id'), noticeType: pick(r, 'notice_type', 'bid_category'), fitBusiness: pick(r, 'fit_business'),
   estimated: pick(r, 'estimated_amount', 'estimated_price', 'presumed_price', 'base_amount'), contractMethod: pick(r, 'contract_method', 'award_method', 'bid_system', 'contract_type'), contractPeriod: pick(r, 'contract_period', 'contract_term', 'service_period'),
   address: pick(r, 'office_address', 'address'), fax: pick(r, 'office_fax', 'fax'), salesPoint: pick(r, 'sales_point'), qualificationGap: pick(r, 'qualification_gap'),
-  detail: { tasks: pick(r, 'main_tasks', 'scope_of_work', 'tasks'), qualification: pick(r, 'qualification', 'participation_requirements', 'bid_qualification'), performance: pick(r, 'performance_requirements', 'track_record'),
-    regionLimit: pick(r, 'region_restriction', 'region_limit'), license: pick(r, 'license_requirements', 'license'), joint: pick(r, 'joint_bid', 'subcontract', 'consortium'), briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting'), presentation: pick(r, 'proposal_presentation', 'presentation') } }); };
+  // 239차(#743·#744): 참가 조건 한 줄·펼치기 표·현장설명(종류·일시·장소) — K-apt 상세 칸·나라장터 API 칸에서(파일 안 열고)
+  terms: termsLine(r), termRows: termsRows(r), briefing: briefingOf(r),
+  // #751(로컬 10/28 17:25): 취소 사유(K-apt 상세 '낙찰/유찰/취소 사유')
+  cancelReason: /취소/.test(String(r.current_status ?? '')) ? pick(r, 'result_note') : null,
+  detail: { tasks: pick(r, 'main_tasks', 'scope_of_work', 'tasks') ?? (/^\s*(첨부\s*)?공고문\s*참조\s*$/.test(String(r.task_scope ?? '')) ? null : pick(r, 'task_scope')),
+    qualification: pick(r, 'qualification', 'participation_requirements', 'bid_qualification') ?? termsLine(r), performance: pick(r, 'performance_requirements', 'track_record') ?? (r.performance_cert ? `실적증명서 ${r.performance_cert}` : null),
+    regionLimit: pick(r, 'region_restriction', 'region_limit'), license: pick(r, 'license_requirements', 'license', 'license_limit', 'industry_code'), joint: pick(r, 'joint_bid', 'subcontract', 'consortium'),
+    briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting') ?? briefingLine(r), presentation: pick(r, 'proposal_presentation', 'presentation') } }); };
 // S1-3: 원본 source_type 9값(kapt_bid·g2b_bid·nuri_bid·g2b_prespec·lh_bid·lh_prespec·d2b_bid·onbid_lease·vendor_recruit) + 예전 짧은 코드
 export const SOURCE_LABEL: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집',
   kapt: 'K-apt', 'k-apt': 'K-apt', g2b: '나라장터', nara: '나라장터', g2b_pre: '나라장터 사전규격', nuri: '누리장터', lh: 'LH', lh_pre: 'LH 사전규격', defense: '국방', d2b: '국방', onbid: '온비드 임대', vendor: '협력사 모집' };
 /** 진행 중 입찰(SALES_SCREEN_INVENTORY 2-5·143행) — 현황 숫자와 입찰 '진행 중' 탭이 같은 기준: 관련 공고 · 마감·취소·낙찰·유찰 아님 · KST 마감일 ≥ 오늘(마감일 없으면 진행으로)
  * · 사전규격(입찰 예정)은 빼고 · 작업 상태 미참여·대상아님은 뺀다. 원본 상태 문구가 '공고중'만이 아니어서(운영 10/19 진행 중 0건) 닫힌 상태만 거른다 */
+/** #751: 취소 공고와 그 재공고 — 같은 원천 + 같은 제목(표시 뺌) + 같은 기관, 취소 공고보다 늦게 게시(처음 본 때)된 취소 아닌 공고. 마감일이 달라도 이음(K-apt 재공고는 마감이 바뀜) */
+function renoticeLinks(rows: any[]) {
+  const key = (r: any) => { const t = plainTitle(pick(r, 'title', 'notice_title')); const a = String(pick(r, 'issuer', 'facility_name', 'complex_name', 'agency') ?? '').replace(/[^0-9A-Za-z가-힣]/g, ''); return t.length >= 6 ? `${r.source_type ?? ''}|${t}|${a}` : null; };
+  const at = (r: any) => String(r.posted_date ?? r.first_seen_at ?? '');
+  const cancels = new Map<string, any[]>(); const lives = new Map<string, any[]>();
+  for (const r of rows) { const k = key(r); if (!k) continue; const m = isCancel(r) ? cancels : lives; (m.get(k) ?? m.set(k, []).get(k)!).push(r); }
+  return (r: any): { prevCancel?: { title: string; reason: string | null; day: string | null }; renotice?: { title: string; close: string | null } } => {
+    const k = key(r); if (!k) return {};
+    if (isCancel(r)) { const next = (lives.get(k) ?? []).filter((x) => at(x) >= at(r)).sort((a, b) => at(b).localeCompare(at(a)))[0];
+      return next ? { renotice: { title: String(pick(next, 'title') ?? ''), close: day(pick(next, 'deadline_at')) } } : {}; }
+    const prev = (cancels.get(k) ?? []).filter((x) => at(x) <= at(r)).sort((a, b) => at(b).localeCompare(at(a)))[0];
+    return prev ? { prevCancel: { title: String(pick(prev, 'title') ?? ''), reason: pick(prev, 'result_note'), day: day(pick(prev, 'posted_date', 'first_seen_at')) } } : {};
+  };
+}
+/** 239차(#744): 필수 현장설명이 오늘~3일 안 — 입찰 마감보다 먼저 다가와 '마감 임박'에 함께 */
+const briefSoon = (n: { briefing?: { required: boolean; at: string | null } | null }, td: string) => { const d = n.briefing?.required && n.briefing.at ? String(n.briefing.at).slice(0, 10) : null; return !!d && d >= td && d <= plus(3); };
 const CLOSED_NOTICE = /마감(?!임박)|종료|취소|낙찰|유찰|개찰완료|closed|cancel|award|expired|done/i; // '마감임박'(3일 안 마감)은 진행 중(#537 후속2)
 const SKIP_WORK = /미참여|대상아님|not[_\s-]?target|skip/i;
 /** 마감 시각(KST) → epoch ms. 시각이 없거나 읽을 수 없으면 null. 오프셋 없는 'YYYY-MM-DD HH:MM' 은 서울 시각으로 */
@@ -450,6 +473,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // [대상 아님] 탭: 누가·언제·사유(진행 기록) — 사유 칸이 생기기 전에 넘긴 것은 마지막으로 고친 사람·시각
     const who = tab === 'skip' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
     const td = today();
+    // #751: 취소된 공고 ↔ 같은 원천·같은 제목(취소·긴급·재공고 표시 뺌)·같은 기관으로 그 뒤에 올라온 공고(재공고) — 서로 잇는 한 줄
+    const relink = renoticeLinks(cand);
     const all = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since, r.refound_at); const skipped = skips.hidden(r);
       // 234차: 처음 본 날이 오늘이어도 결과를 안 때(result_at)가 지난 메일 전이면(오래된 결과를 이제야 모은 것) 오늘 결과 묶음에 넣지 않음 — 당일 메일과 같은 기준
       const oldResult = isAwardResult(r) && since != null && Date.parse(String(r.result_at ?? '')) < since;
@@ -458,12 +483,12 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, workHandoff: !!(w?.lead_id && pick(w, 'handoff_by')), raw: r.__orig ?? r,
         // 결정 15-35: 입찰 업무로 넘긴 공고 — 업무 열기·기한·결과·[되돌리기]
         workBid: w && pick(w, 'bid_task_id') ? { taskId: String(pick(w, 'bid_task_id')), due: pick(w, 'bid_due_auto'), result: pick(w, 'bid_result'), winner: pick(w, 'bid_winner'), amount: pick(w, 'bid_amount'), auto: !!pick(w, 'bid_result_auto'), contractTaskId: pick(w, 'bid_contract_task_id'), assignees: Array.isArray(w.assignees) ? w.assignees.length : 0 } : null,
-        history: r.__history ?? null, skipped, skip: who && skipped && !folded(r) ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null,
+        history: r.__history ?? null, ...relink(r), skipped, skip: who && skipped && !folded(r) ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null,
         linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; });
     // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작
     const inTab = (n: (typeof all)[number], tb: string) => (tb === 'skip' ? n.skipped && !!n.skip : !n.skipped) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
       && (tb !== 'today' || (n.todayHit && (n.result || !bidEnded(n, td)))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
-      && (tb !== 'soon' || (!!n.close && n.close >= td && n.close <= plus(3) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중
+      && (tb !== 'soon' || (((!!n.close && n.close >= td && n.close <= plus(3)) || briefSoon(n, td)) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중 · 239차 필수 현장설명 3일 안
       && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td))); // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
     // 191차(로컬 10/27): 플랫폼 조회 — 이 줄이 이 회사 입찰 목록(전체 탭)에 들어가는지, 빠지면 어느 단계에서(목록과 같은 계산)
     if (q.trace?.length) {

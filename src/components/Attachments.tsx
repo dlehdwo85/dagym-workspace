@@ -10,7 +10,7 @@ import { useBackClose } from './backClose';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
 import { AttachEditModal, editModeOf } from './AttachEdit';
 import { holdScreen } from './awake';
-import { usePickWait } from './pickWait';
+import { IosPickHint, usePickWait } from './pickWait';
 import { shrinkImage } from './shrink';
 
 export { shrinkImage } from './shrink'; // 213차: 메신저도 쓰므로 작은 파일로 옮김(예전 가져오기 그대로)
@@ -220,6 +220,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
         <Button size="sm" variant="secondary" onClick={() => setLinkOpen(true)}><Link2 />문서 링크 연결</Button>
         {busy && <span className="inline-flex items-center gap-1.5 text-xs text-ink-2"><Loader2 className="size-3.5 animate-spin" />{busy}</span>}
       </div>
+      {canEdit && <IosPickHint className="mt-1 text-[11px] text-ink-3" />}
       {album && <PhotoAlbum photos={photos} canDel={canDel} onOpen={setView} onClose={() => setAlbum(false)} onChange={() => { onChange(); broadcastRefresh(); }} />}
       {/* 사진 크게 보기: 좌우로 넘기기 · 대표 10/27: 사진은 여기서 고치기·지우기(사진이 많으면 목록 줄이 없음) */}
       {view && (
