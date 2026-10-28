@@ -1868,3 +1868,8 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 
 ## 2026-10-29 00:40 — 지원사업 자동 AI 판단 운영 확인(#785 ✅)
 - /api/admin/ops tick supportAuto default: 00:09 done 10·left 88 / 00:24 done 10·left 102 / 00:35 done 10·left 92, failed 0. 맞춤 90 · ai.effect 23건. usage sales_support 189건 $0.191(30건 $0.044).
+
+## 2026-10-29 00:44 — 대표 승인 #789: 감시 3곳·정부24 지원금
+- curl(수집기 UA) 시험: ybs.ypa.or.kr/application.do 200·제목 10(링크 javascript:void(0)·메뉴 글자 섞임, fn_viewDetail → /poratlAppFormDtl.do?regNo=) · spobiz.kspo.or.kr 200·제목 9(fn_noticeView → sportsBissNoticeDetail.do?suppBusiInfoSeq=) · nipa.kr/home/2-2 200·제목 7(/home/2-2/번호 정상). 원본 HTML 운영 폴더 artifacts/watch/.
+- PUT /api/platform/sales-collectors supportWatchPages = NIPA 1곳 → POST /api/sales/collectors/support_watch/run runId 206 success 신규 7. 목록 기관 공지 7건(applyEnd 없음, 제목 '[사업화] --> ', 종류 모두 돈, 운영 용역 1건).
+- KSPO·용인 등록 보류(메뉴 글자 공고화 방지) → 클라우드 수집기 고침 요청. 정부24 진행 전달.
