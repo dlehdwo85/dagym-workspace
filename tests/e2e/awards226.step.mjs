@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 
 export async function awards226({ owner, ctx, sql, BASE, SHOTS }) {
-  const ID = (n) => `00000000-0000-4000-8000-000000226${String(n).padStart(3, '0')}`; const ids = [1, 2, 3, 4, 5].map(ID);
+  const ID = (n) => `00000000-0000-4000-8000-000000226${String(n).padStart(3, '0')}`; const ids = [1, 2, 3, 4, 5, 6].map(ID);
   const ymd = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() - n * 864e5));
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   const orig = (await ctx.owner.ok('GET', '/api/sales/digest/prefs')).prefs;
@@ -17,6 +17,9 @@ export async function awards226({ owner, ctx, sql, BASE, SHOTS }) {
   await res(3, '[인천] 모의삼아파트 헬스장 위탁운영', 9, { winner_name: '모의관리', winner_amount: 40000000, region: '인천' });
   await res(4, '[경기] 모의사아파트 헬스장 위탁운영', 2, { winner_name: 'E2E우리회사', winner_biz_no: '9876543210', region: '경기' });
   await res(5, '[경기] 모의오아파트 헬스장 위탁운영', 6, { current_status: '유찰' });
+  // 231차: 우리 회사가 참여했지만 남이 낙찰(K-apt 참여업체 표) → '진 입찰' · 1위와 응찰금액 차
+  await res(6, '[경기] 모의육아파트 헬스장 위탁운영', 3, { winner_name: '육모의서비스(주)', winner_amount: 95000000, bidders: 2, region: '경기', participants: [
+    { name: 'E2E우리회사(주)', bizNo: '9876543210', amount: 99000000, won: false, invalid: false }, { name: '육모의서비스(주)', bizNo: '1112223334', amount: 95000000, won: true, invalid: false }] });
   await sql`insert into company_profiles (tenant, key, name, biz_no, is_default) values ('default', 'e2eaward226', 'E2E우리회사(주)', '987-65-43210', false)`;
   await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: [], excludes: [], regions: [], issuers: [], itemCodes: [], amountMin: null, amountMax: null });
   try {
@@ -34,6 +37,11 @@ export async function awards226({ owner, ctx, sql, BASE, SHOTS }) {
     assert.equal(await box.getByTestId('award-row').filter({ hasText: '모의관리' }).count(), 1);
     assert.match(await box.getByTestId('award-summary').innerText(), /관련 결과 \d+건 · 낙찰 \d+ · 유찰 \d+ · 낙찰 업체 \d+곳.* · 우리 회사 낙찰 \d+건/);
     assert.match(await box.getByTestId('award-me').innerText(), /우리 회사로 보는 기준: .*E2E우리회사\(주\).* · 사업자번호 \d+개/, '227차: 무엇을 우리 회사로 보는지 안내');
+    // 231차: 우리 회사 참여 · 진 입찰 — 펼치면 1위·우리 금액·차이·참가 수
+    const lost = box.getByTestId('award-lost');
+    assert.match(await lost.locator('summary').innerText(), /우리 회사 참여 \d+건 · 낙찰 \d+건 · 진 입찰 1건/);
+    await lost.locator('summary').click();
+    assert.match(await lost.getByTestId('award-lost-row').first().innerText(), /모의육아파트 헬스장 위탁운영[\s\S]*1위 육모의서비스\(주\) 9,500만원 · 우리 9,900만원 · 차이 \+400만원 · 참가 2곳/);
     await mo.locator('button[aria-expanded]').click();
     const recent = mo.getByTestId('award-recent'); await recent.waitFor();
     assert.equal(await recent.getByTestId('award-recent-open').count(), 2);

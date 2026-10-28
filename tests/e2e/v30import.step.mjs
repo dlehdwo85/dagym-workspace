@@ -80,7 +80,8 @@ export async function notifRead({ owner, BASE, SHOTS, ctx }) {
   await owner.getByTestId('notif-select').click();
   await list.locator('[data-testid="notif-item"]', { hasText: '알림읽음 시험 D' }).getByTestId('notif-check').check();
   await owner.getByTestId('notif-sel-bar').getByText('1건 선택').waitFor();
-  await owner.getByTestId('notif-sel-archive').click();
+  // 화면은 바로 빼고 저장은 그 뒤 — 저장 응답 전에 보관함을 열면 D 가 아직 없음(자동 검사 1587번: 보관함에서 D 를 30초 기다림)
+  await Promise.all([owner.waitForResponse((r) => r.url().includes('/api/notifications/read') && r.request().method() === 'POST'), owner.getByTestId('notif-sel-archive').click()]);
   await owner.getByTestId('notif-unread').getByText('안 읽음 2').waitFor();
   assert.equal(await list.getByText('알림읽음 시험 D', { exact: false }).count(), 0, '보관한 알림은 목록에서 빠짐');
   await owner.getByTestId('notif-archived').click();

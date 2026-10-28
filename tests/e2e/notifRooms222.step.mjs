@@ -29,7 +29,8 @@ export async function notifRooms222({ owner, ctx, sql, BASE, SHOTS }) {
   assert.equal(await view.getByTestId('notif-item').count(), 3);
   assert.ok((await view.getByTestId('notif-item').allInnerTexts()).every((t) => t.includes('새 업무')), '업무 배정 알림만');
   await owner.screenshot({ path: `${SHOTS}/576-notif-room-open-390.png` });
-  await view.getByTestId('notif-room-read').click();
+  // 화면은 누르자마자 읽음으로 바꾸고 저장은 그 뒤 — 저장 응답을 기다린 뒤 DB 확인(자동 검사 1590번: 저장 전에 봐서 3 !== 0)
+  await Promise.all([owner.waitForResponse((r) => r.url().includes('/api/notifications/read') && r.request().method() === 'POST'), view.getByTestId('notif-room-read').click()]);
   await view.getByTestId('notif-room-read').waitFor({ state: 'detached' });
   assert.equal((await sql`select count(*)::int n from notifications where user_id = ${ctx.ownerId} and type = 'task_assigned' and archived_at is null and read_at is null`)[0].n, 0, '[이 방 읽음] = 그 종류만 읽음');
   assert.equal((await sql`select count(*)::int n from notifications where user_id = ${ctx.ownerId} and type = 'due_soon' and archived_at is null and read_at is null`)[0].n, 2, '다른 방은 그대로');

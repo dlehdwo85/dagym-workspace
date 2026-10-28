@@ -106,6 +106,7 @@ export function onbidSale(r: { source_type?: unknown; bid_category?: unknown; no
 export function noticeStatus(state: string | null, deadlineAt: string | null, now: Date, opt: { winner?: string | null; sourceType?: string } = {}): string {
   if (state && /취소/.test(state)) return '취소';
   if (opt.winner) return '낙찰';
+  if (state && /유찰/.test(state)) return '유찰'; // 231차: K-apt 상세 사유가 유찰
   if (opt.sourceType && /prespec|plan/.test(opt.sourceType)) return '예정';
   if (deadlineAt) { const t = Date.parse(deadlineAt); if (!Number.isNaN(t)) { if (t < now.getTime()) return '마감'; if (t - now.getTime() <= 3 * 86_400_000) return '마감임박'; } }
   return '진행중';
@@ -124,7 +125,7 @@ export const PROCUREMENT_ETL_FIELDS = ['source_url', 'notice_file_url', 'issuer'
   'bid_system', 'award_method', 'notice_state', 'facility_name', 'bid_category', 'office_phone', 'office_fax', 'office_address', 'household_count', 'fit_business', 'matched_keywords', 'related', 'attachment_urls',
   'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at', 'site_briefing_at', 'site_briefing_place',
   'base_amount', 'notice_no', 'winner_biz_no', 'winner_rate', 'bidders'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로 · #543 공고번호(바로 가는 주소가 없는 원천의 '번호 검색' 안내)
-export const AWARD_FIELDS = ['winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'current_status', 'winner_rate', 'bidders'] as const; // 196차: 낙찰자 사업자번호 — 입찰 업무 '우리 회사 낙찰' 판정 · #530 낙찰률·참가 업체 수(당일 메일 결과 구역)
+export const AWARD_FIELDS = ['winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'current_status', 'winner_rate', 'bidders', 'participants', 'result_note', 'kapt_detail_at'] as const; // 196차: 낙찰자 사업자번호 — 입찰 업무 '우리 회사 낙찰' 판정 · #530 낙찰률·참가 업체 수(당일 메일 결과 구역) · 231차 K-apt 상세 참여업체(대표자·전화 없음)·사유·읽은 때
 export type NoticeRow = Record<string, unknown> & { source_type: string; source_external_id: string; title: string; source_url: string };
 
 const txt = (v: unknown): string | null => { if (v == null) return null; const t = String(v).replace(/\s+/g, ' ').trim(); return t ? t : null; };
@@ -180,6 +181,9 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
     site_briefing_at: ts(p.site_briefing_at), site_briefing_place: txt(p.site_briefing_place), // #510 현장설명(나라장터 dcmtgOprtnDt·Plce)
     base_amount: num(p.base_amount),
     notice_no: txt(p.notice_no), // #543 차수·구분 없는 공고번호(온비드·국방·LH — 원천 사이트에서 검색할 번호)
+    // 231차 K-apt 상세: 참여업체(이름·사업자번호·응찰금액·낙찰 여부·무효만 — 대표자·전화 칸은 받지 않음)·낙찰/유찰/취소 사유·상세 읽은 때
+    ...(Array.isArray(p.participants) ? { participants: (p.participants as any[]).slice(0, 60).map((b) => ({ name: txt(b?.name)?.slice(0, 100) ?? '', bizNo: txt(b?.bizNo), amount: num(b?.amount), won: b?.won === true, invalid: b?.invalid === true })).filter((b) => b.name) } : {}),
+    ...(txt(p.result_note) ? { result_note: txt(p.result_note)!.slice(0, 200) } : {}), ...(txt(p.kapt_detail_at) ? { kapt_detail_at: txt(p.kapt_detail_at) } : {}),
   };
   return { ok: true, row };
 }
