@@ -35,29 +35,7 @@ async function raw(url: string, method: string, body?: unknown, key?: string, si
     }
     throw new ApiError(res.status, j?.error?.code ?? 'error', j?.error?.message ?? (res.status >= 500 ? `서버가 잠시 응답하지 않습니다 (${res.status}). 잠시 후 다시 시도하세요.` : `요청을 처리하지 못했습니다 (${res.status})`), j?.error?.detail);
   }
-  if (method !== 'GET') forgetShared(url);
   return j;
-}
-
-/**
- * 238차(#742 대표 10/28 '화면 전환이 느림'): 여러 화면·부품이 같이 쓰는 공통 자료(캘린더 목록·색·공휴일·프로젝트·팀·공간 요약·메시지 안 읽은 수)는
- * 같은 때 여러 곳이 불러도 요청 1번 · 화면을 다시 열면 지난 값을 먼저 보여 주고 늘 새로 받음(useApi). 같은 묶음(/api/<이름>)에 쓰기가 성공하면 지난 값을 버림
- */
-const SHARED = /^\/api\/(calendars|calendar-colors|holidays|projects|teams|spaces|chat\/unread)(\?|$)/;
-const sharedMemo = new Map<string, unknown>();
-const sharedInflight = new Map<string, Promise<unknown>>();
-function forgetShared(url: string) {
-  const seg = url.match(/^\/api\/[^/?]+/)?.[0];
-  if (!seg) return;
-  for (const m of [sharedMemo, sharedInflight]) for (const k of [...m.keys()]) if (k === seg || k.startsWith(seg + '/') || k.startsWith(seg + '?')) m.delete(k);
-}
-/** 공통 자료 GET — fresh 가 아니면 같은 주소의 진행 중 요청을 같이 씀 */
-export function apiShared<T = any>(url: string, fresh = false): Promise<T> {
-  const cur = sharedInflight.get(url);
-  if (cur && !fresh) return cur as Promise<T>;
-  const p: Promise<T> = api<T>(url).then((d) => { sharedMemo.set(url, d); return d; }).finally(() => { if (sharedInflight.get(url) === p) sharedInflight.delete(url); });
-  sharedInflight.set(url, p);
-  return p;
 }
 
 /**
@@ -157,21 +135,18 @@ export function useOutboxCount() {
 }
 
 export function useApi<T = any>(url: string | null, deps: unknown[] = []) {
-  const shared = !!url && SHARED.test(url);
-  const [data, setData] = useState<T | null>(() => (url && shared ? (sharedMemo.get(url) as T | undefined) ?? null : null));
+  const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(!!url);
   const seq = useRef(0);
   const hasData = useRef(false);
   const loadedUrl = useRef<string | null>(null);
-  /** first = 화면을 처음 열 때(같은 주소 진행 중 요청을 같이 씀). 다시 불러오기·wos-refresh 는 늘 새로 */
-  const load = useCallback(async (first?: unknown) => {
+  const load = useCallback(async () => {
     if (!url) return;
     const my = ++seq.current;
-    if (shared && loadedUrl.current !== url && sharedMemo.has(url)) { setData(sharedMemo.get(url) as T); setError(null); hasData.current = true; loadedUrl.current = url; }
     setLoading(true);
     try {
-      const d = shared ? await apiShared<T>(url, first !== true) : await api<T>(url);
+      const d = await api<T>(url);
       if (my === seq.current) { setData(d); setError(null); hasData.current = true; loadedUrl.current = url; }
     } catch (e) {
       // 같은 화면을 다시 불러오다 실패(오프라인·일시 장애)하면 이미 보이는 내용과 입력 중인 내용을 지우지 않는다.
@@ -184,7 +159,7 @@ export function useApi<T = any>(url: string | null, deps: unknown[] = []) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ...deps]);
-  useEffect(() => { load(true); }, [load]);
+  useEffect(() => { load(); }, [load]);
   useEffect(() => {
     const h = () => load();
     window.addEventListener('wos-refresh', h);

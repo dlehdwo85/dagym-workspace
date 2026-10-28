@@ -1,7 +1,5 @@
-// 238차(#742 대표 10/28 '버튼을 누르고 화면 전환이 오래 걸림 — 즉시 넘어가게'): 서버 응답(다음 화면 자료)을 3초 늦춰도
-// ① PC 왼쪽 메뉴: 누르자마자 그 메뉴가 강조되고 다음 화면 틀(route-loading)이 보임 → 자료가 오면 화면
-// ② 휴대폰 아래 탭: 누르자마자 그 칸이 강조됨 → 화면이 오면 그대로
-// 미리 받기(prefetch)는 늦추지 않음(실제 운영처럼 첫 화면 뒤 미리 받아 둔 상태)
+// 238차 되돌림(로컬 10/28 16:55 긴급 — 운영에서 238차 뒤 메뉴 이동 5.4초·가끔 60초 넘게 안 넘어감): 238차의 누를 때 틀(useLinkStatus)·아래 탭 미리 받기·공통 자료 공유를 빼고 237차 동작으로.
+// 로컬이 정한 시험: 첫 화면을 연 뒤 0.5초·2초·5초에 메뉴를 눌러 3초 안에 넘어가는지(PC 왼쪽 메뉴·휴대폰 아래 탭) + 업무 → 캘린더 → 메시지 → 결재 → 홈을 연달아 눌러 모두 넘어가는지
 import assert from 'node:assert/strict';
 
 async function login(context, BASE, email, password) {
@@ -13,49 +11,37 @@ async function login(context, BASE, email, password) {
   await page.waitForURL(BASE + '/');
   return page;
 }
-const slowDown = (page, paths, ms) => page.route((u) => paths.includes(new URL(u).pathname), async (route) => {
-  const h = route.request().headers();
-  if (h['rsc'] === '1' && !h['next-router-prefetch']) await new Promise((r) => setTimeout(r, ms));
-  await route.continue().catch(() => {});
-});
+/** 첫 화면 → wait 뒤 업무 메뉴 → 3초 안에 주소가 /tasks · 이어서 캘린더 → 메시지 → 결재 → 홈 */
+async function run(page, BASE, linkOf, label) {
+  const first = [];
+  for (const wait of [500, 2000, 5000]) {
+    await page.goto(BASE + '/', { waitUntil: 'load' });
+    await page.waitForTimeout(wait);
+    const t0 = Date.now();
+    await linkOf('/tasks').click();
+    await page.waitForURL((u) => u.pathname === '/tasks', { timeout: 3000 }).catch(() => { throw new Error(`${label}: 첫 화면 ${wait}ms 뒤 업무 메뉴 — 3초 안에 안 넘어감`); });
+    first.push(`${wait}ms 뒤 ${Date.now() - t0}ms`);
+  }
+  const chain = [];
+  for (const href of ['/calendar', '/messages', '/approvals', '/']) {
+    const t0 = Date.now();
+    await linkOf(href).click();
+    await page.waitForURL((u) => u.pathname === href, { timeout: 5000 }).catch(() => { throw new Error(`${label}: 연달아 ${href} — 5초 안에 안 넘어감`); });
+    chain.push(`${href} ${Date.now() - t0}ms`);
+  }
+  assert.equal(await page.getByTestId('route-loading').count(), 0, '238차 틀은 없음');
+  console.log(`    ${label}: ${first.join(' · ')} | 연달아 ${chain.join(' · ')}`);
+}
 
-export async function nav742({ browser, devices, BASE, SHOTS }) {
+export async function nav742({ browser, devices, BASE }) {
   const desk = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   try {
     const p = await login(desk, BASE, 'ceo@dagym.test', 'owner-pass-1234');
-    await p.goto(BASE + '/tasks');
-    await p.getByRole('heading', { name: '업무', exact: true }).first().waitFor();
-    await p.waitForTimeout(2000); // 메뉴 링크 미리 받기(다음 화면 틀까지)
-    await slowDown(p, ['/notices'], 3000);
-    const link = p.locator('nav[aria-label="주 메뉴"] a[href="/notices"]');
-    const t0 = Date.now();
-    await link.click();
-    await p.getByTestId('route-loading').waitFor({ timeout: 1500 });
-    const frame = Date.now() - t0;
-    assert.equal(await link.getAttribute('aria-current'), 'page', '누른 메뉴가 바로 강조');
-    assert.ok(await p.getByTestId('route-loading').isVisible(), '서버 응답 전 다음 화면 틀');
-    await p.screenshot({ path: `${SHOTS}/582-nav-loading-frame.png` });
-    await p.getByTestId('notices-page').waitFor({ timeout: 15000 });
-    assert.ok(Date.now() - t0 >= 2500, '자료는 늦춘 만큼 뒤에 옴(틀이 먼저)');
-    assert.equal(await p.getByTestId('route-loading').count(), 0, '화면이 오면 틀은 사라짐');
-    console.log(`    PC 메뉴 → 틀 ${frame}ms`);
+    await run(p, BASE, (h) => p.locator(`nav[aria-label="주 메뉴"] a[href="${h}"]`).first(), 'PC 메뉴');
   } finally { await desk.close(); }
-
   const mob = await browser.newContext({ ...devices['iPhone 13'], locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   try {
     const m = await login(mob, BASE, 'ceo@dagym.test', 'owner-pass-1234');
-    await m.waitForTimeout(2000);
-    await slowDown(m, ['/calendar'], 3000);
-    const tabs = m.getByTestId('mobile-tabs');
-    const cal = tabs.getByRole('link', { name: '캘린더', exact: true });
-    const t0 = Date.now();
-    await cal.click();
-    await m.waitForFunction(() => document.querySelector('[data-testid="mobile-tabs"] a[href="/calendar"]')?.className.includes('font-bold'), null, { timeout: 1000 });
-    const lit = Date.now() - t0;
-    assert.ok(!(await tabs.getByRole('link', { name: '홈', exact: true }).getAttribute('class'))?.includes('font-bold'), '앞 칸(홈) 강조는 바로 꺼짐');
-    await m.waitForURL((u) => u.pathname === '/calendar', { timeout: 15000 });
-    await m.locator('.fc').first().waitFor({ timeout: 15000 });
-    assert.ok((await cal.getAttribute('class'))?.includes('font-bold'), '도착 뒤에도 강조 유지');
-    console.log(`    휴대폰 아래 탭 → 강조 ${lit}ms`);
+    await run(m, BASE, (h) => m.locator(`[data-testid="mobile-tabs"] a[href="${h}"]`).first(), '휴대폰 아래 탭');
   } finally { await mob.close(); }
 }
