@@ -115,6 +115,8 @@ async function fetchSource(url: URL, ctx: CollectorCtx, secret: string, timeoutM
   catch (e) { throw new Error(`요청 실패 (${e instanceof Error ? e.name : 'Error'})`); }
   const text = decodeKoreanText(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type')).text; // #651: charset 헤더 우선, 없으면 한글 비율
   if (/SERVICE_KEY_IS_NOT_REGISTERED|SERVICE ACCESS DENIED|등록되지 않은 (서비스|인증)키/i.test(text)) throw new Error(`공공데이터포털 활용신청 필요${service ? `(서비스 ${service})` : ''} — 키는 그대로 두고 포털(data.go.kr)에서 [활용신청]`);
+  // 254b(로컬 01:55 운영 정부24: HTTP 401 '유효하지 않은 인증키 입니다.') — api.odcloud.kr 은 활용신청 전 키도 이렇게 답함
+  if (/유효하지 않은 인증키|INVALID[_ ]?(SERVICE[_ ]?)?KEY/i.test(text)) throw new Error(`공공데이터포털 활용신청 필요${service ? `(서비스 ${service})` : ''} 또는 인증키 확인 — 활용신청 전 키도 '유효하지 않은 인증키'로 나옵니다. 포털(data.go.kr)에서 [활용신청] 뒤 다시`);
   let json: any = null; try { json = JSON.parse(text); } catch { /* XML·HTML */ }
   if (!json) {
     const code = text.match(/<returnReasonCode>([^<]+)</)?.[1] ?? text.match(/<resultCode>([^<]+)</)?.[1] ?? '';

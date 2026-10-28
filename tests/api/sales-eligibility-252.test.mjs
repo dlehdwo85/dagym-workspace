@@ -178,6 +178,10 @@ test('#790 사진 공고문: 글이 없으면 AI 비전으로 참가자격 절�
   assert.equal((await rowOf(N.PHOTO.id)).eligibility.error, NO_PAYER, '비용을 낼 회사(영업 전환 연 회사)가 없으면 사진 읽기 안 함');
   // 254차(로컬 01:25 운영: 이유 없이 안 읽힘): [다시 읽기]를 여러 번 눌러도 설정 이유면 횟수가 안 쌓여 나중에 읽을 수 있음
   for (let i = 0; i < 3; i++) assert.equal((await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.PHOTO.id })).eligibility.tries, 0);
+  // 254b(로컬 01:55 운영 '관리자 계정을 못 찾음'): 체험 조직(demo)이 먼저 잡히지 않게 — demo 는 영업 전환을 열어 둬도 비용 낼 회사가 아님
+  await sql`insert into tenants (id, name, spaces) values ('demo', '체험', '{work,sales}') on conflict (id) do update set spaces = '{work,sales}'`;
+  await sql`insert into sales_cutover (tenant, writes_open, ok) values ('demo', true, true) on conflict (tenant) do update set writes_open = true`;
+  assert.equal((await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.PHOTO.id })).eligibility.error, NO_PAYER, 'demo 만 열려 있으면 비용 낼 회사 없음');
   await sql`insert into sales_cutover (tenant, writes_open, ok) values ('default', true, true) on conflict (tenant) do update set writes_open = true, ok = true`;
   const bad = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.BAD.id })).eligibility;
   assert.match(bad.error, /^공고문이 사진\(스캔\)으로만 되어 있음 · AI 사진 읽기 안 함: 그림 1장을 AI 용으로 못 바꿈\(.+\)$/, bad.error); assert.equal(bad.tries, 0);

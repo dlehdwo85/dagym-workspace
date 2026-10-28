@@ -36,9 +36,13 @@ export async function visionBlocks(f: PhotoDoc): Promise<{ blocks: Record<string
 }
 /** 비용을 낼 회사 — 영업 공간을 쓰는(전환 열림) 운영 회사의 관리자(시험·체험 조직 빼고). 공고는 모든 회사가 같이 보는 원천 */
 export async function visionPayer(sql: Sql = db()): Promise<SessionUser | { why: string }> {
-  const [t] = await sql<{ id: string }[]>`select t.id from tenants t join sales_cutover c on c.tenant = t.id where 'sales' = any(t.spaces) and t.status = 'active' and not coalesce(t.is_test, false) and c.writes_open order by t.created_at limit 1`;
-  if (!t) return { why: '비용 낼 회사 없음(영업 공간·전환 열린 운영 회사)' };
-  return (await (await import('./support')).adminActor(sql, t.id)) ?? { why: '비용 낼 회사의 관리자 계정을 못 찾음' };
+  // 254b(로컬 01:55 운영: '관리자 계정을 못 찾음'): 체험 조직(demo)은 빼고, 관리자를 찾은 첫 회사(우리 회사 default 먼저)
+  const ts = await sql<{ id: string }[]>`select t.id from tenants t join sales_cutover c on c.tenant = t.id where 'sales' = any(t.spaces) and t.status = 'active' and not coalesce(t.is_test, false) and t.id <> 'demo' and c.writes_open
+    order by (t.id = 'default') desc, t.created_at limit 5`;
+  if (!ts.length) return { why: '비용 낼 회사 없음(영업 공간·전환 열린 운영 회사)' };
+  const { adminActor } = await import('./support');
+  for (const t of ts) { const a = await adminActor(sql, t.id); if (a) return a; }
+  return { why: `비용 낼 회사의 관리자 계정을 못 찾음(${ts.map((t) => t.id).join('·')})` };
 }
 /** 사진 읽기를 못 하는 설정 이유(없으면 null) — 이 이유로 건너뛴 것은 '읽기 시도'로 세지 않는다 */
 export const visionOff = (): string | null => process.env.SALES_ELIGIBILITY_VISION === 'off' ? 'AI 사진 읽기를 꺼 둠' : !aiEnabled() ? 'AI 키가 없음' : null;

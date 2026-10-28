@@ -36,6 +36,7 @@ before(async () => {
     const u = new URL(req.url, 'http://x'); const q = u.searchParams; calls.push({ path: u.pathname, q: Object.fromEntries(q) });
     const json = (o, s = 200) => { res.writeHead(s, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(o)); };
     if (mode === 'unregistered') return json({ code: -4, msg: '등록되지 않은 인증키 입니다.' }, 401); // odcloud 실제 응답 꼴
+    if (mode === 'invalid') return json({ code: -401, msg: '유효하지 않은 인증키 입니다.' }, 401); // 254b 운영 응답 그대로
     if (u.pathname === '/agency/gov24_support/serviceList') { const since = q.get('cond[수정일시::GTE]'); return json(odc(since ? LIST.filter((x) => x.수정일시 >= since) : LIST, q)); }
     if (u.pathname === '/agency/gov24_support/supportConditions') { const id = q.get('cond[서비스ID::EQ]'); return json(odc(id ? CONDS.filter((x) => x.서비스ID === id) : CONDS, q)); }
     res.writeHead(404); res.end('nope');
@@ -105,8 +106,10 @@ test('두 번째부터는 수정일시 이후만 · 바뀐 서비스의 지원 �
   assert.deepEqual(calls.filter((c) => c.path.endsWith('/supportConditions')).map((c) => c.q['cond[서비스ID::EQ]']), ['G2'], '그 뒤에 바뀐 서비스의 지원 조건만');
   const g2 = (await gov()).find((x) => x.source_id === 'G2'); assert.deepEqual([g2.title, g2.conditions], ['시험 중소기업 정보통신 바우처(2차)', ['JA2101', 'JA2201']]);
   mode = 'unregistered';
-  const bad = await run(); mode = 'ok';
+  const bad = await run(); mode = 'invalid';
   assert.equal(bad.status, 'failed'); assert.equal(bad.summary, '정부24: 공공데이터포털 활용신청 필요(서비스 15113968) — 키는 그대로 두고 포털(data.go.kr)에서 [활용신청]');
+  const bad2 = await run(); mode = 'ok'; // 254b(로컬 01:55 운영): odcloud 는 활용신청 전 키에 401 '유효하지 않은 인증키 입니다.'
+  assert.equal(bad2.summary, "정부24: 공공데이터포털 활용신청 필요(서비스 15113968) 또는 인증키 확인 — 활용신청 전 키도 '유효하지 않은 인증키'로 나옵니다. 포털(data.go.kr)에서 [활용신청] 뒤 다시");
   const col = (await ctx.owner.ok('GET', '/api/sales/collectors')).collectors.find((c) => c.slug === 'gov24_support');
   assert.deepEqual([col.label, col.needs[0].present], ['지원사업 · 정부24 지원금', true]);
 });
