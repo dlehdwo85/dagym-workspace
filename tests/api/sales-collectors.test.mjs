@@ -116,6 +116,7 @@ test('나라장터(검색어 × 4대상) + 누리장터 활용신청 필요 → 
   assert.equal(a.inserted, 1, JSON.stringify(a)); assert.match(a.summary, /활용신청·주소 확인 필요: lh_prespec/);
   const k = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_results/run', {});
   assert.deepEqual([k.updated, k.inserted], [1, 1], JSON.stringify(k)); assert.match(k.summary, /관련 2건/, '승강기 교체 공사는 관련 아님 · 제목은 입찰공고명 칸(세대수 아님)');
+  assert.ok(!String(k.errorLog ?? '').includes('결과 목록 0건'), `235차: 표 머리만 오고 줄이 없는 검색어(17개)는 정상 0건 — ${k.errorLog}`);
   const [kr] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = '20261021000001'`;
   assert.equal(kr.row.winner_name, '다짐'); assert.equal(kr.row.current_status, '낙찰'); assert.equal(kr.row.classification, '즉시 검토', '담당자 분류는 그대로');
   assert.deepEqual([kr.row.winner_amount, kr.row.award_date], [120000000, today]);
