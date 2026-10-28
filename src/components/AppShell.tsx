@@ -5,7 +5,7 @@ import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
 import { IN_APP_BILLING_NOTE, useInApp } from './inApp';
 import { ADMIN_PAGES } from '@/lib/adminPages';
-import Link from 'next/link';
+import Link, { useLinkStatus } from 'next/link';
 import { Fragment, Suspense } from 'react';
 import { AiDock } from './AiDock';
 import { AlarmBar, type AlarmItem } from './AlarmBar';
@@ -300,7 +300,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
     const on = active(n.href);
     return (
       <Link key={n.href} href={n.href} prefetch={NAV_PREFETCH.has(n.href) ? undefined : false} aria-current={on ? 'page' : undefined} title={collapsed ? n.label : undefined} style={on && space !== 'work' ? { background: sm.color } : undefined}
-        className={cx('group flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm transition-colors', on ? 'bg-brand-600 font-semibold text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-ink', collapsed && 'justify-center px-0')}>
+        className={cx('group relative flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm transition-colors', on ? 'bg-brand-600 font-semibold text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-ink', collapsed && 'justify-center px-0')}>
+        <NavPending className="inset-x-2 bottom-0.5" />
         <n.icon className={cx('size-[18px] shrink-0', on ? 'text-white' : 'text-slate-400 group-hover:text-slate-600')} aria-hidden />
         {!collapsed && <span className="flex-1 truncate">{n.label}</span>}
         {!!badge && <span className={cx('rounded-full bg-red-500 text-[10px] font-semibold leading-4 text-white tabular-nums', collapsed ? 'absolute ml-5 -mt-5 px-1' : 'px-1.5')}>{badge > 99 ? '99+' : badge}</span>}
@@ -649,9 +650,16 @@ export function AppShell({ session, children }: { session: Sess; children: React
 const NAV_PREFETCH = new Set(['/', '/tasks', '/calendar', '/messages', '/approvals']);
 // 241차(로컬 10/28 19:20 '다섯 곳으로 줄인 뒤에도 첫 화면 요청 19개'): 홈 목록(업무·일정·공지·팀)·알림·설정·프로젝트·더보기 링크도 자동 미리 받기 끔 — 누를 때 받음
 
+/** 243차 #763(대표 '앱에서는 아직 화면이 바로바로 넘어가지 않는다'): 누른 메뉴·탭에 바로 '받는 중' 표시 — 238차 교훈대로 이전 화면은 그대로 두고 그 메뉴 위에만 얇은 막대 */
+function NavPending({ className }: { className?: string }) {
+  const { pending } = useLinkStatus();
+  return <span aria-hidden data-pending={pending ? '1' : undefined} className={cx('pointer-events-none absolute h-0.5 rounded-full bg-brand-600 transition-opacity duration-100', pending ? 'animate-pulse opacity-100' : 'opacity-0', className)} />;
+}
+
 function TabLink({ n, on, badge }: { n: NavItem; on: boolean; badge?: number }) {
   return (
-    <Link href={n.href} className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs', on ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
+    <Link href={n.href} className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs active:bg-slate-100', on ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
+      <NavPending className="inset-x-4 top-0" />
       <n.icon className="size-6" strokeWidth={on ? 2.4 : 1.8} aria-hidden />{n.label}
       {!!badge && <span className="absolute left-1/2 top-1 ml-2 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{badge > 99 ? '99+' : badge}</span>}
     </Link>

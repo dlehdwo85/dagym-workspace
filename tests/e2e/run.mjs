@@ -87,6 +87,7 @@ import { cal755 } from './cal755.step.mjs';
 import { aiFind753 } from './aiFind753.step.mjs';
 import { trash241 } from './trash241.step.mjs';
 import { movein759 } from './movein759.step.mjs';
+import { hub764 } from './hub764.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2954,6 +2955,7 @@ await step('#755·#756·#757 캘린더 구글처럼(대표 10/28): 이어진 30�
 await step('#753 AI 비서 자료실 찾기: 답 아래 자료 카드(이름·폴더) · [열기] = 자료실 그 폴더·그 파일 강조 · [내려받기] · [업무에 붙이기] = 입력칸에 부탁 글 · 패널(✨)도 같음', () => aiFind753({ owner, ctx, BASE, FAKE, SHOTS }));
 await step('241차 지운 일정(로컬 10/28 19:20 일정 사라짐): 캘린더 [지운 일정] → 지운 사람·때 → [되살리기] · 미리보기에서 지우면 안내 [되돌리기] · 휴대폰 칩 줄', () => trash241({ owner, ctx, sql, BASE, SHOTS }));
 await step('#759 2026년 입주 목록(대표 10/28 최우선): [올해 입주] 건수·가까운 순·아파트만 · 달 칩 · 더 보기(100건 넘게) · K-apt 준공·입주 단지 칸 → 허브 · 휴대폰 폭', () => movein759({ owner, ctx, sql, BASE, SHOTS }));
+await step('#764·#765 영업기회 허브 [전체] 한 번에 찾기(입찰·신규 단지·시설 → 상세) · 입찰 [대상 아님] 한 번·[되돌리기] · 휴대폰 탭 한 줄', () => hub764({ owner, ctx, sql, BASE, SHOTS }));
 // 219차 화상회의: 시험 서버를 화상회의 스위치(가짜 엔진)를 켠 채 다시 띄워 확인하고, 끝나면 앞 단계 설정으로 되돌림
 await step('219차 워크인 화상회의(가짜 엔진): 일정 창 [워크인 화상회의] → 손님 이름 입장·대기 → 주최자 참가·허락 → 손님 회의 화면(휴대폰 폭) → 잠금·끝내기 → 일정 미리보기 회의 기록', async () => {
   // 옛 서버가 완전히 내려간 뒤 새로 띄움(열린 연결이 남아 옛 서버가 잠깐 더 답하는 일 막기 — 10초 넘으면 강제 종료)

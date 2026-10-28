@@ -104,7 +104,7 @@ async function write(items: Record<string, unknown>[], errors: string[], opt: { 
  */
 const LIMIT_OPS = { license: 'ad/BidPublicInfoService/getBidPblancListInfoLicenseLimit', region: 'ad/BidPublicInfoService/getBidPblancListInfoPrtcptPsblRgn' } as const;
 export async function readG2bLimits(items: Record<string, unknown>[], ctx: CollectorCtx, key: string, errors: string[], max = 30) {
-  const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const out = { read: 0, found: 0, keys: [] as string[] };
+  const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const out = { read: 0, found: 0, keys: [] as string[], diag: '' };
   const open = items.filter((p) => p.source_type === 'g2b_bid' && matchFit(String(p.title), String(p.bid_category ?? '')).fit && (!p.deadline_at || !(Date.parse(String(p.deadline_at)) < Date.now())));
   if (!open.length) return out;
   const exts = open.map((p) => String(p.source_external_id));
@@ -116,7 +116,10 @@ export async function readG2bLimits(items: Record<string, unknown>[], ctx: Colle
     if (left() < 8000) break;
     const [no, ord] = String(p.source_external_id).split('-');
     const ask = (op: string) => { const u = new URL(`${API()}/${op}`); for (const [k, v] of Object.entries({ serviceKey: key, numOfRows: '50', pageNo: '1', type: 'json', inqryDiv: '2', bidNtceNo: no })) u.searchParams.set(k, v);
-      const st: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 }; return callDataGo(u, ctx.fetchImpl, key, Math.min(8000, left() - 2000), st).then((list) => { if (st.keys && !out.keys.length && list.length) out.keys = st.keys.slice(0, 12); return list; }); };
+      const st: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 }; return callDataGo(u, ctx.fetchImpl, key, Math.min(8000, left() - 2000), st).then((list) => { if (st.keys && !out.keys.length && list.length) out.keys = st.keys.slice(0, 12);
+        // 243차(로컬 20:28 '참가 제한 조회 5건(값 0)·오류 줄 없음'): 빈 응답이면 첫 건의 결과 코드·전체 건수·받은 줄·응답 앞부분(키는 가림)을 남김
+        if (!list.length && !out.diag) out.diag = `${op.replace('getBidPblancListInfo', '')} ${no}: 코드 ${JSON.stringify(st.codes)} · 전체 ${st.total} · 받은 줄 ${st.raw}${st.head ? ` · 앞부분 ${st.head.split(key).join('***').replace(/\s+/g, ' ').slice(0, 160)}` : ''}`;
+        return list; }); };
     try {
       const [lic, rgn] = await Promise.all([ask(LIMIT_OPS.license), ask(LIMIT_OPS.region)]);
       const same = (x: any) => !str(x?.bidNtceOrd) || str(x.bidNtceOrd) === ord;
@@ -145,9 +148,9 @@ export const g2bBidNotices: Collector = {
     const a = await searchAll(BID_OPS, G2B_WORDS, days, (it, cat) => g2bPayload(it, 'g2b_bid', cat), ctx, key);
     const b = await searchAll(await nuriOps(), G2B_WORDS, days, nuriPayload, ctx, key);
     const errors = [...a.errors, ...b.errors]; const items = [...a.items, ...b.items];
-    const lim = await readG2bLimits(a.items, ctx, key, errors).catch((e) => { errors.push(`제한 조회: ${e instanceof Error ? e.message : String(e)}`); return { read: 0, found: 0, keys: [] as string[] }; });
+    const lim = await readG2bLimits(a.items, ctx, key, errors).catch((e) => { errors.push(`제한 조회: ${e instanceof Error ? e.message : String(e)}`); return { read: 0, found: 0, keys: [] as string[], diag: '' }; });
     const r = await write(items, errors);
-    if (lim.read && !lim.found && lim.keys.length) errors.push(`제한 조회 ${lim.read}건 — 값을 못 읽음(받은 칸: ${lim.keys.join(', ')})`);
+    if (lim.read && !lim.found) errors.push(`제한 조회 ${lim.read}건 — 값을 못 읽음${lim.keys.length ? `(받은 칸: ${lim.keys.join(', ')})` : ''}${lim.diag ? ` · ${lim.diag}` : ''}`);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + a.denied.length + b.denied.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
       summary: `${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건(${statLine(b.stats, b.items.length)}) (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (lim.read ? ` · 참가 제한 조회 ${lim.read}건(값 ${lim.found})` : '') + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
   },
