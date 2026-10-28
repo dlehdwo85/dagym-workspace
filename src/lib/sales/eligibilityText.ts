@@ -19,6 +19,9 @@ export function eligibilitySection(text: string | null | undefined): string | nu
     const lineStart = (m.index ?? 0) === 0 || m[0].startsWith('\n') || t[(m.index ?? 0) - 1] === '\n'; // 번호·기호 없는 머리는 줄 처음일 때만(글이 한 줄로 이어진 공고문도 '5. 참가자격'은 찾음)
     const after = t.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 12);
     if (/^\s*(?:이|을|를|은|는|에|의\s*(?!제한)|과|와|이\s*없|을\s*갖|확인|심사|여부|미달|상실)/.test(after) && !m[1] && !m[2] && !m[3]) continue; // 본문 속 낱말
+    // 256차(로컬 10/29 08:35 나라장터 'GH 주민공동시설 현황조사' 용역): '○ 입찰참가자격 등록, 나라장터 시스템: 나라장터 콜센터(☎ 1588-0800)' = 등록 절차 안내 — 절 머리 아님
+    const nl = t.indexOf('\n', at); const headLine = t.slice(at, nl < 0 ? at + 120 : Math.min(nl, at + 120));
+    if (/^\s*(?:등록|신청\s*(?:방법|안내|절차))|^\s*(?:\([^)]{0,20}\))?\s*(?:등록|확인)\s*(?:방법|안내|절차)/.test(after) || /콜센터|☎|고객\s*센터/.test(headLine)) continue;
     const numbered = !!(m[1] || m[2] || m[3]);
     if (!numbered && (best || !lineStart)) continue;
     best = { at, num: m[1] ? Number(m[1]) : null, roman: m[2] ?? null, sym: m[3] ?? null, head: m[0].trim() };
@@ -51,15 +54,20 @@ export function eligibilityItems(section: string | null | undefined): EligItem[]
   const cap = t.match(/자본금[^.;]{0,24}?(\d+(?:[.,]\d+)?)\s*(억|천만|백만)\s*원?\s*(이상|초과)?/);
   if (cap) out.push({ k: 'capital', label: `자본금 ${cap[1]}${cap[2]}${cap[3] ? ' 이상' : ''}` });
   const lic = new Set<string>();
-  for (const w of LIC_WORDS) if (t.replace(/\s/g, '').includes(w.replace(/\s/g, ''))) lic.add(w === '주민운동시설 위탁운영 등록' ? '주민운동시설 위탁운영 등록업체' : w);
-  for (const m of t.matchAll(/([가-힣]{2,10}(?:공사업|사업자|관리업|용역업))(?=\s*(?:등록|면허|허가|신고|,|·|및|를|을|\)|$))/g)) if (![...lic].some((x) => x.includes(m[1]) || m[1].includes(x)) && !/^(?:해당|모든|입찰|참가|당해|기타)/.test(m[1])) lic.add(m[1]);
+  // 256차(로컬 10/29 08:35 '주택관리업' 거짓 면허): 「주택관리업자 및 사업자 선정지침」 같은 지침·고시 이름 안 낱말은 면허로 안 봄
+  const tl = t.replace(/「[^」]{0,80}」/g, ' ').replace(/[가-힣]+\s*(?:및\s*[가-힣]+\s*)?선정\s*지침/g, ' ');
+  for (const w of LIC_WORDS) if (tl.replace(/\s/g, '').includes(w.replace(/\s/g, ''))) lic.add(w === '주민운동시설 위탁운영 등록' ? '주민운동시설 위탁운영 등록업체' : w);
+  for (const m of tl.matchAll(/([가-힣]{2,10}(?:공사업|사업자|관리업|용역업))(?=\s*(?:등록|면허|허가|신고|,|·|및|를|을|\)|$))/g)) if (![...lic].some((x) => x.includes(m[1]) || m[1].includes(x)) && !/^(?:해당|모든|입찰|참가|당해|기타)/.test(m[1])) lic.add(m[1]);
   if (lic.size) { const names = [...lic]; out.push({ k: 'license', label: `${names.join('·')}${/면허/.test(t) && !names.some((n) => /등록업체$/.test(n)) ? ' 면허' : ''}` }); }
   // 실적 — ① 'N년(간) … N개 단지 이상 (위탁)운영 실적'(숫자가 '실적' 앞, 252차 운영 hwp·hwpx 공고문) ② '최근 N년간 공사 실적 N건'·'실적 … N건'
   const UNIT = '\\d[\\d,]*\\s*(?:개\\s*)?(?:건|개소|단지|회|세대|곳|개)\\s*(?:이상)?';
   const p1 = t.match(new RegExp(`((?:최근|과거|현재로부터|공고일\\s*(?:현재|기준)(?:로부터)?)?\\s*\\d+\\s*년\\s*(?:간|이내|동안|내)?)\\s*([^.;]{0,40}?)(${UNIT})\\s*([^.;]{0,24}?)\\s*(?:의\\s*)?실적`));
   if (p1) {
     const per = p1[1].replace(/현재로부터|공고일\s*(?:현재|기준)(?:로부터)?/g, '').replace(/(\d+)\s*년\s*(?:간|동안)/, '$1년').trim();
-    out.push({ k: 'perf', label: one(`실적 ${per} ${p1[2]} ${p1[3]} ${p1[4]}`).replace(/\s*(?:이|가|의|을|를)$/, '').slice(0, 60) });
+    // 256차(로컬 10/29 08:35 '… 위탁운영 완료실적이 3 건 이상'): '실적' 뒤 건수도 붙임('완료'·'완료실적만 인정'은 원문에만)
+    const cnt = t.slice((p1.index ?? 0) + p1[0].length, (p1.index ?? 0) + p1[0].length + 16).match(/^\s*(?:이|가|은|는)?\s*(\d[\d,]*)\s*(건|개소|단지|회|곳|개)\s*(이상)?/);
+    const base = one(`실적 ${per} ${p1[2]} ${p1[3]} ${p1[4].replace(/\s*완료$/, '')}`).replace(/\s*(?:이|가|의|을|를)$/, '').replace(/(\d)\s+(건|개소|단지|회|세대|곳|개)/g, '$1$2').slice(0, cnt ? 52 : 60);
+    out.push({ k: 'perf', label: cnt ? `${base} ${cnt[1]}${cnt[2]}${cnt[3] ? ' 이상' : ''}` : base });
   } else {
     const perf = t.match(new RegExp(`((?:최근|과거)\\s*\\d+\\s*년\\s*(?:간|이내|동안)?[^.;]{0,40}?${UNIT})`)) ?? t.match(new RegExp(`(실적[^.;]{0,50}?${UNIT})`));
     if (perf && /실적|수행|위탁\s*운영|용역|공사/.test(perf[1] + t.slice(Math.max(0, (perf.index ?? 0) - 15), perf.index ?? 0) + t.slice((perf.index ?? 0) + perf[0].length, (perf.index ?? 0) + perf[0].length + 20))) out.push({ k: 'perf', label: `실적 ${one(perf[1].replace(/(?:사업\s*)?실적\s*[:：]?\s*/g, ' ').replace(/(\d+)\s*년\s*간/, '$1년').replace(/\s*이상$/, ' 이상'))}` });
@@ -86,7 +94,7 @@ export function eligibilityLine(items: EligItem[], section: string | null | unde
   const order: EligItem['k'][] = ['capital', 'perf', 'license', 'staff', 'credit', 'region', 'briefing', 'joint'];
   const parts = [...order.flatMap((k) => items.filter((x) => x.k === k).map((x) => x.label)), ...extra.filter(Boolean)];
   if (parts.length) return parts.join(' · ').slice(0, 200);
-  const rest = String(section ?? '').split(/\n|(?=\s[가-하]\.\s)|(?=‣|•)/).map(one).filter((x) => x && !COMMON_CLAUSE.test(x) && !/^(?:\d{1,2}[.)]\s*)?(?:입찰\s*)?참가\s*자격/.test(x));
+  const rest = String(section ?? '').split(/\n|(?=\s[가-하]\.\s)|(?=‣|•)/).map(one).filter((x) => x && !COMMON_CLAUSE.test(x) && !/^(?:\d{1,2}[.)]\s*)?(?:입찰\s*)?참가\s*자격/.test(x) && !/콜센터|☎|등록\s*방법/.test(x));
   return rest.length ? rest.join(' ').slice(0, 90) : null;
 }
 /** 못 찾았을 때 말(목록·상세·당일 메일·공고 조회 같은 말) */
@@ -120,6 +128,8 @@ export function lineOf(text: string, r: Record<string, any> = {}): string {
 export function eligView(r: any): { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl: string | null; readAt: string | null; vision: boolean } {
   const e = r?.eligibility; const extra = apiExtra(r ?? {}, []);
   if (!e) return { line: extra.length ? extra.join(' · ') : null, text: null, error: null, file: null, fileUrl: null, readAt: null, vision: false };
+  if (e.text && e.by !== 'vision' && !eligibilitySection(e.text)) // 256차: 예전 규칙으로 잘라 저장한 절이 지금 규칙으로는 절 머리가 아님(등록 절차 안내 등) — 없는 것으로(정기 실행이 다시 읽음)
+    return { line: extra.length ? extra.join(' · ') : null, text: null, error: '공고문에서 참가자격 절을 못 찾음', file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: false };
   return { line: e.text ? lineOf(e.text, r) : e.line ?? null, text: e.text ?? null, error: e.error ?? null, file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: e.by === 'vision' };
 }
 /** #790 사진 공고문을 AI 가 읽은 것 — 원문 옆 안내 */

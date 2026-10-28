@@ -76,6 +76,18 @@ test('자르기·뽑기(규칙): 세 가지 공고문 꼴 → 절(머리부터 �
   assert.equal(E.lineOf(E.eligibilitySection(R1)), '자본금 5억 이상 · 실적 최근 5년 아파트 커뮤니티 시설 5개 단지 이상 위탁운영');
   assert.equal(E.lineOf(E.eligibilitySection(R2)), '자본금 2억 이상 · 실적 5년 공동주택 1개 단지 수영장운용');
   assert.equal(E.lineOf(E.eligibilitySection(COMMON)), E.COMMON_ONLY);
+  // 256차(로컬 10/29 08:35 운영 오탐 3종) a) 지침 이름 「주택관리업자 및 사업자 선정지침」 속 '주택관리업'은 면허 아님 b) '완료실적이 3 건 이상' 건수 붙임 c) '입찰참가자격 등록 … 콜센터' 줄은 절 머리 아님
+  const R3 = `3. 입찰 참가자격\n가. 「주택관리업자 및 사업자 선정지침」 제26조에 해당하지 않는 사업자\n나. 입찰공고일 현재 자본금 5억원 이상인 사업자\n다. 입찰공고일 현재 최근 5년간 900 세대 이상 공동주택의 주민공동시설 위탁운영 완료실적이 3 건 이상인 사업자\n※ 실적은 계약기간이 끝난 실적만 인정\n4. 현장설명`;
+  assert.equal(E.lineOf(E.eligibilitySection(R3)), '자본금 5억 이상 · 실적 최근 5년 900세대 이상 공동주택의 주민공동시설 위탁운영 3건 이상');
+  assert.ok(E.eligibilitySection(R3).includes('완료실적이 3 건 이상') && E.eligibilitySection(R3).includes('끝난 실적만 인정'), '원문엔 그대로');
+  assert.equal(E.lineOf(E.eligibilitySection('5. 입찰참가자격\n가. 「주택관리업자 및 사업자 선정지침」 제26조 제1항 각 호에 해당하지 않는 자\n나. 정보통신공사업 등록 업체\n6. 제출서류')), '정보통신공사업');
+  assert.equal(E.lineOf(E.eligibilitySection('4. 참가자격\n가. 주택관리업자 및 사업자 선정지침 제26조에 해당하지 않는 자\n5. 기타')), E.COMMON_ONLY, '꺾쇠 없는 지침 이름도');
+  assert.equal(E.lineOf(E.eligibilitySection('5. 참가자격\n가. 주택관리업 등록업체로서 자본금 2억원 이상\n6. 기타')), '자본금 2억 이상 · 주택관리업', '진짜 주택관리업 등록 요건은 그대로');
+  const G2 = `1. 용역명: GH 주민공동시설 현황조사\n○ 입찰참가자격 등록, 나라장터 시스템: 나라장터 콜센터(☎ 1588-0800)\n○ 계약방법: 일반경쟁`;
+  assert.equal(E.eligibilitySection(G2), null);
+  assert.equal(E.eligibilitySection(`${G2}\n3. 입찰참가자격\n가. 엔지니어링산업 진흥법에 따른 엔지니어링사업자\n4. 입찰보증금`), '3. 입찰참가자격\n가. 엔지니어링산업 진흥법에 따른 엔지니어링사업자', '등록 안내 줄 다음의 진짜 절');
+  const old = E.eligView({ eligibility: { text: '○ 입찰참가자격 등록, 나라장터 시스템: 나라장터 콜센터(☎ 1588-0800)', sig: 'x' }, license_limit: '엔지니어링사업자(1234)', region_restriction: '경기도' });
+  assert.deepEqual([old.line, old.text, old.error], ['업종 엔지니어링사업자 · 지역 경기도', null, '공고문에서 참가자격 절을 못 찾음'], '예전 규칙으로 잘못 저장한 절 = 나라장터 업종·지역 먼저(정기 실행이 다시 읽음)');
 });
 
 // ---- 공고문 읽기(정기 실행·다시 읽기) ----
@@ -164,6 +176,7 @@ test("화면 자료·공고 조회·당일 메일: '참가자격' 한 줄과 원
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === N.KA.bid).elig.line, LINE_A);
   const it = (await ctx.owner.ok('GET', `/api/platform/sales-notices?no=${N.KA.bid}`)).items[0];
   assert.deepEqual([it.eligibility?.say, it.eligibility?.file?.name, it.eligibility?.due, it.terms], [LINE_A, '입찰공고문.txt', false, '적격심사 · 제한경쟁']);
+  await sql`delete from sales_digests where day = ${today}`; // 256차: 서울 08시 뒤에 돌면 첫 정기 실행이 참가자격을 읽기 전에 오늘 묶음을 저장함 — 시각과 무관하게 지금 기준으로
   const d = await ctx.owner.ok('GET', '/api/sales/digest');
   const da = d.items.find((x) => x.noticeNo === N.KA.bid), dc = d.items.find((x) => x.noticeNo === N.KC.bid);
   assert.ok(da && dc, JSON.stringify(d.items.map((x) => x.noticeNo)));

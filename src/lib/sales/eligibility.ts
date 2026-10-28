@@ -105,6 +105,7 @@ export function eligibilityDue(r: Row, now = Date.now()): boolean {
   const e = r.eligibility as Eligibility | undefined;
   if (!e) return true;
   if (e.sig !== filesSig(r)) return true;
+  if (e.text && e.by !== 'vision' && !eligibilitySection(e.text)) return true; // 256차: 예전 규칙으로 잘못 자른 절(등록 절차 안내 등)은 다시 읽음
   return !e.text && (e.tries ?? 0) < 3 && now - Date.parse(e.readAt ?? '') > 20 * 3600e3;
 }
 /** 정기 실행(tick) — 열린 관련 공고(마감 전·취소/낙찰/유찰 아님)를 마감 가까운 순으로 한 건씩(K-apt 는 빠른 연속 요청을 끊음). SALES_ELIGIBILITY=off 면 안 돎 */
