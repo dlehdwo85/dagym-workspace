@@ -1860,3 +1860,7 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - q 검색: 스포츠산업 1 · 국민체육진흥공단 2(기업마당) · IP지원센터 0 · NIPA 0 · 용인 8(직접 입력 2 포함).
 - 웹 확인: ybs.ypa.or.kr/application.do(용인 지원사업 공고) · spobiz.kspo.or.kr(스포츠테크 신기술 통합공모 상시~12/31, 예비 선도기업 서비스·시설업 매출 3~30억) · nipa.kr/home/2-2.
 - 클라우드에 게시판 읽기 시험·본문으로 마감·대상 채우기·출처별 숫자 한 줄 요청. 감시 목록 등록(standing 설정)은 대표 승인 뒤.
+
+## 2026-10-29 00:39 — 대표 #788 소상공인·기업 정부지원금
+- data.go.kr/data/15113968/openapi.do: 행정안전부_대한민국 공공서비스(혜택) 정보, 자동승인. swaggerUrl infuser.odcloud.kr/api/stages/44436/api-docs → api.odcloud.kr/api/gov24/v3/serviceList·serviceDetail·supportConditions. serviceList 칸: 지원유형·지원대상·선정기준·지원내용·신청기한·사용자구분·서비스분야·신청기한유형 등. supportConditions: JA1101~JA1299(소상공인), JA2101~JA2299(법인·단체, JA2203 정보통신업).
+- 클라우드 요청: gov24 원천·규칙·대상 칩·AI 자동 판단·키 확인(미등록이면 대표 활용신청).
