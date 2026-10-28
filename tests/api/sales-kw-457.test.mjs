@@ -12,7 +12,8 @@ const ID = (n) => `00000000-0000-4000-8000-000000457${String(n).padStart(3, '0')
 const ins = (n, title) => sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', ${ID(n)}, ${sql.json({ id: ID(n), source_type: 'kapt_bid', title, notice_kind: 'new', current_status: '진행중' })}, 'workin')`;
 const work = (n, status, reason = null) => sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, data) values ('default', 'opportunity_work', ${`w:bid:${ID(n)}`}, ${ID(n)}, ${status}, ${sql.json(reason ? { skip_reason: reason } : {})})`;
 before(async () => {
-  await resetDb(); fake = await startFakeGoogle(); srv = await startServer({ SALES_KW_MONTHLY: 'any' }); sql = testDb(); ctx = await bootstrap();
+  // tick 안 수집기가 진짜 원천에서 공고를 받아 오지 않게(10/28 자동 검사 1582번: KST 06시대에 K-apt 공고가 들어와 놓친 공고 후보 0 → 3)
+  await resetDb(); fake = await startFakeGoogle(); srv = await startServer({ SALES_KW_MONTHLY: 'any', SALES_COLLECT_TEST_BASE: 'http://127.0.0.1:9' }); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['sales'] });
   await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: ['수질검사', '승강기'], excludes: [] });

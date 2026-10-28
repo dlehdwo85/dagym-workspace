@@ -40,7 +40,7 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.match(await p.getByTestId('sales-hub-bids').getAttribute('class'), /border-brand-600/, '입찰 칩 선택');
     // #608·#611(대표 10/25): 허브 입찰 탭 = 전체 기능, 칩에 '마감 임박'·'준비 기간' 없음, '오늘 새 공고 n' 건수, 입찰·공고 전체 보기 링크 없음(페이지 합침)
     await p.waitForFunction(() => /\d+건/.test(document.querySelector('[data-testid="sales-bids-tab-skip"]')?.textContent ?? '')); // 목록을 불러오면 칩에 건수
-    assert.deepEqual((await hb.locator('button[data-testid^="sales-bids-tab-"]').allInnerTexts()).map((x) => x.replace(/\d+/g, 'n').trim()), ['진행 중(마감 임박순)', '오늘 새 공고 n', '진행 기록 있음', '관련 전체', '오늘 마감', '협력사 모집', '대상 아님 n건']);
+    assert.deepEqual((await hb.locator('button[data-testid^="sales-bids-tab-"]').allInnerTexts()).map((x) => x.replace(/\d+/g, 'n').trim()), ['진행 중(마감 임박순)', '오늘 새 공고 n', '진행 기록 있음', '관련 전체', '오늘 마감', '협력사 모집', '낙찰 분석', '대상 아님 n건']);
     assert.equal(await hb.getByTestId('bids-all-link').count(), 0);
     assert.match(await hb.getByTestId('sales-bids-tab-today').innerText(), /^오늘 새 공고 [1-9]\d*$/, '오늘 새 공고 건수 배지');
     const res = hb.getByTestId('bids-results'); await res.waitFor();
