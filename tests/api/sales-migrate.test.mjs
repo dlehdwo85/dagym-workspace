@@ -6,9 +6,9 @@ import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
 const PORT = 3221, KEY = 'sb_secret_testsalessrc0123456789';
 const COUNTS = { leads: 21, procurement_notices: 4356, procurement_reclass_backup_20261014: 10 };
-let leadsN = 21, ownerEmail = 'x@y';
+let leadsN = 21, ownerEmail = 'x@y', noticeOver = {};
 const rowsOf = (t) => t === 'leads' ? Array.from({ length: leadsN }, (_, i) => ({ id: `L${i}`, name: `거래처 ${i}`, owner_id: 'P1' }))
-  : t === 'procurement_notices' ? Array.from({ length: 4356 }, (_, i) => ({ id: i + 1, title: `공고 ${i}`, related: i < 654, classification: i % 10 === 0 ? '회사분류' : null, lead_id: null }))
+  : t === 'procurement_notices' ? Array.from({ length: 4356 }, (_, i) => ({ id: i + 1, title: `공고 ${i}`, related: i < 654, classification: i % 10 === 0 ? '회사분류' : null, lead_id: null, ...(noticeOver[i + 1] ?? {}) }))
   : t === 'profiles' ? [{ id: 'P1', email: ownerEmail.toUpperCase(), full_name: '대표' }, { id: 'P2', email: 'nobody@example.com', full_name: '퇴사자' }] : null;
 let srv, ctx, sql, fake, hits = [], specFail = false;
 before(async () => {
@@ -176,4 +176,28 @@ test('전환 T-5: 쓰기 열면 화면이 정식 표를 읽음 · 새 리드·�
   await ctx.owner.ok('POST', '/api/platform/sales-cutover', { action: 'close', tenant: 'default' });
   assert.equal((await ctx.owner.req('POST', '/api/sales/leads', { name: 'x' })).status, 409);
   assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=leads')).readOnly, true, '닫으면 다시 원본(옮긴 행) 읽기 전용');
+});
+
+test('232차(로컬 10/28 15:40 남원시) 원본 매일 복사: 워크인이 채운 결과 칸은 원본이 비어 있으면 남김 · 원본에 값이 있으면 원본 값 · 결과 상태를 되돌리지 않음 · 원본 복사로 결과를 처음 알면 그때가 결과 시각', async () => {
+  const at0 = '2026-10-27T23:11:00.000Z';
+  const put = (id, o) => sql`update sales_src_rows set row = row || ${sql.json(o)}::jsonb where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`;
+  const row = async (id) => (await sql`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`)[0].row;
+  await put('11', { winner_name: '워크인낙찰(주)', winner_biz_no: '1234567890', winner_amount: 26156000, award_date: '2026-10-26', winner_rate: 88.019, bidders: 38, current_status: '낙찰', result_at: at0, result_filled_at: at0,
+    kapt_detail_at: at0, participants: [{ name: '워크인낙찰(주)', bizNo: '1234567890', amount: 26156000, won: true }], result_note: '적격심사 1순위' });
+  await put('12', { current_status: '유찰', notice_state: '유찰', result_at: at0, result_note: '응찰 업체 부족', kapt_detail_at: at0 });
+  noticeOver = { 11: { title: '원본 제목 바뀜', winner_rate: 90.5, bidders: null, winner_name: '', current_status: '진행중' }, 12: { current_status: '마감', notice_state: '일반' }, 13: { winner_name: '원본낙찰(주)', current_status: '낙찰' } };
+  try {
+    const t0 = Date.now();
+    await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'apply', tenant: 'default' });
+    const a = await row('11');
+    assert.deepEqual([a.title, a.winner_rate, a.bidders, a.winner_name, a.winner_biz_no, a.current_status, a.result_at, a.result_filled_at, a.kapt_detail_at, a.participants?.length, a.result_note],
+      ['원본 제목 바뀜', 90.5, 38, '워크인낙찰(주)', '1234567890', '낙찰', at0, at0, at0, 1, '적격심사 1순위'], '원본에 값이 있으면 원본(제목·낙찰률) · 비면 워크인 값 · 결과 상태 그대로');
+    const b = await row('12');
+    assert.deepEqual([b.current_status, b.notice_state, b.result_at, b.result_note, b.kapt_detail_at], ['유찰', '유찰', at0, '응찰 업체 부족', at0], '유찰을 원본의 마감으로 되돌리지 않음');
+    const c = await row('13');
+    assert.equal(c.winner_name, '원본낙찰(주)'); assert.ok(Date.parse(c.result_at) >= t0 - 1000, `원본 복사로 결과를 처음 앎 → 결과 시각 ${c.result_at}`);
+    await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'apply', tenant: 'default' });
+    assert.equal((await row('13')).result_at, c.result_at, '다시 적용해도 결과 시각 그대로');
+    assert.equal((await row('14')).result_at, undefined, '결과가 아닌 줄은 결과 시각 없음');
+  } finally { noticeOver = {}; }
 });

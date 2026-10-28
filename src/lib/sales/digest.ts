@@ -116,6 +116,8 @@ const resultOf = (r: any) => { const w = String(r.winner_name ?? r.award_company
   const rate = num(r.winner_rate), n = num(r.bidders); // #530 ⑥: 낙찰률·참가 업체 수(나라장터 낙찰정보에 있을 때)
   const tail = `${rate && rate > 0 ? ` · 낙찰률 ${Math.round(rate * 1000) / 1000}%` : ''}${n && n > 0 ? ` · 참가 ${n.toLocaleString('ko-KR')}곳` : ''}`;
   return w ? `낙찰 ${w}${a && a > 0 ? ` · 낙찰금액 ${won(a)}` : ''}${tail}` : /유찰/.test(String(r.current_status ?? '')) ? `유찰${tail}` : `낙찰${tail}`; };
+/** 232차: 지난 메일 결과 줄(resultOf 문장)에 없던 낙찰자·낙찰금액·낙찰률·참가 수가 생겼나 */
+const gained = (was: string, now: string) => (/^낙찰 (?!·)/.test(now) && !/^낙찰 (?!·)/.test(was)) || [' · 낙찰금액', ' · 낙찰률', ' · 참가 '].some((w) => now.includes(w) && !was.includes(w));
 /** #530 ③(로컬 10/24): 금액 칸을 나눔 — 기초금액·추정가격·배정예산(사전규격·나라장터)을 있는 것만. 모두 0 이면 '미공개'('0만원' 금지), 없으면 칸을 숨김 */
 const amountsOf = (r: any) => { const base = num(r.base_amount), est = num(r.estimated_amount), bud = num(r.budget_amount);
   const out = [base && base > 0 ? `기초금액 ${won(base)}` : null, est && est > 0 ? `추정가격 ${won(est)}` : null, bud && bud > 0 ? `배정예산 ${won(bud)}` : null].filter((x): x is string => !!x);
@@ -177,7 +179,16 @@ export async function buildDigest(tenant: string, day = kstDay()) {
   const since = await digestSince(tenant, day); const sinceMs = since.getTime(); const dayStart = Date.parse(`${day}T00:00:00+09:00`);
   // first_seen_at·updated_at 은 UTC ISO 문자열 — 하루 넓게 거르고(#148) 정확한 비교는 아래 시각으로
   const from = new Date(sinceMs - 864e5).toISOString().slice(0, 10);
-  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone and (row->>'first_seen_at' >= ${from} or row->>'updated_at' >= ${from} or row->>'refound_at' >= ${from}) limit 5000`;
+  // 232차(로컬 10/28 15:40 남원시 '결과를 처음 안 때'가 빔 — 원본 영업관리 복사 줄): 지난 4일 메일에 이미 나간 결과 — result_at 이 없는 줄(215차 전에 알게 된 결과·원본 복사 줄)도
+  // 같은 결과를 다시 '오늘 결과'로 내지 않고, 바로 전 메일 결과 줄에 없던 낙찰자·낙찰금액·낙찰률·참가 수가 생겼으면 '보완' 한 줄로(그 전 메일 줄은 다시 안 내기만). 원본 매일 복사가 updated_at 을 원본 값으로 돌려도 그 줄들은 읽음
+  const sent = new Map<string, { v: string; last: boolean }>(); const sentIds = new Set<string>(), sentNos = new Set<string>();
+  const past = await sql<{ day: string; items: any }[]>`select day::text as day, items from sales_digests where tenant = ${tenant} and day < ${day} and day >= ${plusDays(day, -4)} order by day`;
+  for (const d of past) for (const it of Array.isArray(d.items) ? d.items : []) if (it?.section === 'result') {
+    const e = { v: String(it.result ?? ''), last: d.day === past[past.length - 1].day }; sent.set(String(it.id), e); sentIds.add(String(it.id));
+    if (it.noticeNo) { sent.set(`${it.source}|${it.noticeNo}`, e); sentNos.add(String(it.noticeNo)); }
+  }
+  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone and (row->>'first_seen_at' >= ${from} or row->>'updated_at' >= ${from} or row->>'refound_at' >= ${from}
+    or row->>'result_at' >= ${from} or row->>'result_filled_at' >= ${from} or src_id = any(${[...sentIds]}::text[]) or row->>'source_external_id' = any(${[...sentNos]}::text[])) limit 5000`;
   const skipped: Record<string, number> = {}; const skip = (why: string) => { skipped[why] = (skipped[why] ?? 0) + 1; };
   const notTarget = await notTargets(tenant);
   const cands: Cand[] = [];
@@ -188,9 +199,12 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const isNew = (seen != null && seen >= sinceMs) || refound; const kind0 = String(r.notice_kind ?? 'new'); const result = isAwardResult(r);
     // 215차(#530): 결과는 처음 알게 된 때(result_at) 기준 — 낙찰률 채우기·금액 고침으로 결과 줄이 다시 고쳐져도 예전 결과가 '오늘 결과'로 다시 오르지 않게(result_at 없는 예전 줄은 개찰 3일 안만)
     const resAt = at(r.result_at); const awardDay = dayOf(r.award_date);
-    const resultToday = result && (resAt != null ? resAt >= sinceMs : upd != null && upd >= sinceMs && !(awardDay && awardDay < plusDays(day, -3)));
+    const was = result ? sent.get(String(r.id ?? src_id)) ?? sent.get(`${SRC[String(r.source_type)] ?? r.source_type}|${String(r.source_external_id ?? '').trim()}`) : undefined;
+    const resultToday = result && was === undefined && (resAt != null ? resAt >= sinceMs : upd != null && upd >= sinceMs && !(awardDay && awardDay < plusDays(day, -3)));
     // 230차(로컬 10/28 14:40 남원시): 지난 메일에 낙찰자·금액만 나간 결과에 낙찰률·참가 수가 뒤늦게 채워지면 '보완' 한 줄로 한 번 더
-    const filledAt = at(r.result_filled_at); const filledToday = result && !resultToday && resAt != null && filledAt != null && filledAt >= sinceMs;
+    // 232차: 지난 메일에 나간 결과는 그 메일 결과 줄과 비교(result_at 이 없어도) · 안 나간 결과는 230차대로 result_filled_at
+    const filledAt = at(r.result_filled_at);
+    const filledToday = result && !resultToday && (was !== undefined ? was.last && gained(was.v, resultOf(r)) : resAt != null && filledAt != null && filledAt >= sinceMs);
     const changedToday = (upd != null && upd >= sinceMs && (kind0 === 'cancel' || kind0 === 'amend' || String(r.current_status ?? '') === '취소')) || resultToday || filledToday;
     if (!isNew && !changedToday) continue;
     if (r.source_type === 'vendor_recruit' && (!r.posted_date || !vendorDateOk(r))) { skip('게시일 미상'); continue; } // #476 e·후속: 게시판 날짜로 확인 못 한 협력사 줄(조각·메뉴·예전 방식)은 메일·오늘 탭에서 뺌

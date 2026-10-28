@@ -72,6 +72,18 @@ test('229차 플랫폼 공고 조회에 낙찰 칸(낙찰자·금액·낙찰률�
   assert.equal((await ctx.owner.ok('GET', `/api/platform/sales-notices?q=${encodeURIComponent('카타아파트')}`)).items[0].award, null, '낙찰자 없는 유찰 줄은 비움');
 });
 
+test('232차(로컬 10/28 15:40) 공고 조회: 결과 칸(보완 시각·상세 읽은 때·참여업체 수·사유) · 마지막 고친 때는 award 밖 · 이 회사 지난 14일 메일에 나간 구역·결과 문장', async () => {
+  await sql`update sales_src_rows set row = row || ${sql.json({ result_filled_at: '2026-10-28T08:50:00+09:00', kapt_detail_at: '2026-10-28T07:05:00+09:00', participants: [{ name: '(주)가나스포츠', won: true }, { name: '다른곳', won: false }], result_note: '최저가' })}::jsonb where src_id = ${ID(1)}`;
+  await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified) values ('default', ${today}, ${sql.json([{ id: ID(1), section: 'result', badges: ['낙찰'], result: '낙찰 (주)가나스포츠 · 낙찰금액 1.2억원', title: 'x' }, { id: 'other', section: 'now', title: 'y' }])}, '{}', 1, 1)`;
+  try {
+    const it = (await ctx.owner.ok('GET', `/api/platform/sales-notices?q=${encodeURIComponent('가나아파트')}`)).items[0];
+    assert.deepEqual([it.award.resultFilledAt, it.award.detailAt, it.award.participants, it.award.note], ['2026-10-28T08:50:00+09:00', '2026-10-28T07:05:00+09:00', 2, '최저가']);
+    assert.ok('updatedAt' in it && !('updatedAt' in it.award), JSON.stringify(Object.keys(it)));
+    assert.deepEqual(it.mailed, [{ day: today, section: 'result', badges: ['낙찰'], result: '낙찰 (주)가나스포츠 · 낙찰금액 1.2억원' }]);
+    assert.deepEqual((await ctx.owner.ok('GET', `/api/platform/sales-notices?q=${encodeURIComponent('다라아파트')}`)).items[0].mailed, []);
+  } finally { await sql`delete from sales_digests where tenant = 'default' and day = ${today}`; }
+});
+
 test('권한: 영업 공간 밖 404 · 입찰을 쓰지 않는 회사 403', async () => {
   assert.equal((await ctx.staffB.client.req('GET', '/api/sales/award-stats')).status, 404);
   await sql`update tenants set sales_bids = false where id = 'default'`;

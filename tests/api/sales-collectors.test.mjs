@@ -480,3 +480,31 @@ test('230차(로컬 10/28 14:40 남원시) 결과에 낙찰률·참가 수가 �
   const [g3] = await sql`select row from sales_src_rows where src_id = ${g.src_id}`;
   assert.equal(g3.row.result_filled_at, g2.row.result_filled_at, '값이 같으면 보완 시각을 다시 찍지 않음');
 });
+
+test('232차(로컬 10/28 15:40 남원시 결과 시각 빔) result_at 없는 결과 줄: 안 나간 결과는 전처럼(개찰 3일 안) · 지난 메일에 나간 결과는 그 메일 결과 줄과 비교 — 낙찰률·참가 수가 새로 붙으면 보완 한 줄, 같으면 다시 안 냄(공고 번호로도 찾음)', async () => {
+  const [g] = await sql`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = '20261021001-00'`;
+  const id = String(g.row.id ?? g.src_id); const yd = plus(-1);
+  // 215차 전에 알게 된 결과·원본 복사 줄 모양: result_at·result_filled_at 없음 · 오늘 다른 칸이 고쳐져 updated_at 만 새로
+  const { result_at: _a, result_filled_at: _f, ...rest } = g.row;
+  await sql`update sales_src_rows set row = ${sql.json({ ...rest, first_seen_at: new Date(Date.now() - 5 * 864e5).toISOString(), updated_at: new Date().toISOString(), award_date: yd })} where src_id = ${g.src_id}`;
+  const mailYd = (items) => sql`update sales_digests set items = ${sql.json(items)} where tenant = 'default' and day = ${yd}`;
+  const preview = async () => { await sql`delete from sales_digests where tenant = 'default' and day = ${today}`; return (await ctx.owner.ok('GET', '/api/sales/digest')).items.filter((i) => i.section === 'result' && i.title.includes('국민체육센터 피트니스')); };
+  try {
+    await mailYd([]);
+    const [c] = await preview();
+    assert.deepEqual(c?.badges, ['낙찰'], '어제 메일에 없던 결과 = 오늘 결과(전처럼)'); assert.match(c.result, / · 낙찰률 87\.745% · 참가 12곳$/);
+    await mailYd([{ id, section: 'result', source: c.source, noticeNo: c.noticeNo, result: c.result.replace(/ · 낙찰률.*$/, '') }]);
+    const [f] = await preview();
+    assert.deepEqual([f?.badges, f?.result], [['낙찰', '보완'], c.result], '어제 메일에 낙찰자·금액만 → 보완 한 줄');
+    await mailYd([{ id, section: 'result', source: c.source, noticeNo: c.noticeNo, result: c.result }]);
+    assert.deepEqual(await preview(), [], '어제 메일과 같은 결과 → 다시 안 냄(updated_at 이 새로워도)');
+    // 원본 매일 복사가 updated_at 을 원본 값(며칠 전)으로 돌려놓아도 지난 메일에 나간 결과 줄은 읽음(운영 남원시 = 원본 영업관리 복사 줄)
+    await sql`update sales_src_rows set row = row || ${sql.json({ updated_at: new Date(Date.now() - 6 * 864e5).toISOString() })}::jsonb where src_id = ${g.src_id}`;
+    await mailYd([{ id: 'other-row', section: 'result', source: c.source, noticeNo: c.noticeNo, result: c.result.replace(/ · 참가.*$/, '') }]);
+    assert.deepEqual((await preview()).map((i) => i.badges), [['낙찰', '보완']], '다른 줄 id 로 나갔어도 원천·공고 번호가 같으면 같은 공고 · updated_at 이 오래돼도');
+    // 그저께 메일에 금액만 나갔고 어제 메일엔 없음 → 보완은 바로 전 메일 줄과만(한꺼번에 몰리지 않게) · 다시 '오늘 결과'로도 안 냄
+    await mailYd([]);
+    await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified) values ('default', ${plus(-2)}, ${sql.json([{ id, section: 'result', source: c.source, noticeNo: c.noticeNo, result: c.result.replace(/ · 낙찰률.*$/, '') }])}, '{}', 1, 1)`;
+    assert.deepEqual(await preview(), [], '그 전 메일에 나간 결과는 다시 안 냄');
+  } finally { await mailYd([]); await sql`delete from sales_digests where tenant = 'default' and (day = ${today} or day = ${plus(-2)})`; }
+});

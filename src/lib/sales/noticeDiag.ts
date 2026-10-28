@@ -1,6 +1,6 @@
 // 185차(로컬 10/26 19:20 A4): 플랫폼 운영자 — 공고 번호·제목으로 영업 DB(공용 공고 줄)를 찾아 '왜 영업실 목록에 없나'를 한눈에.
 // 운영 DB 를 직접 열지 않고 확인하는 길(로컬이 대표 크롬에서 주소를 열어 봄). 공용 표라 회사 구분 없음 — 플랫폼 운영자만.
-import type { SessionUser } from '../types';
+import { tenantOf, type SessionUser } from '../types';
 import { db } from '../db';
 import { badRequest } from '../errors';
 import { matchFit, onbidSale } from './collectors/procurement';
@@ -40,6 +40,11 @@ export async function lookupNotices(q: { no?: string | null; q?: string | null }
     order by synced_at desc limit 30`;
   // 191차: 목록 쪽 실제 결과 — 회사 영업 공간·입찰 기능이 꺼져 있으면 null
   const traced = u && rows.length ? await (await import('./srcViews')).salesView(u, 'bids', { tab: 'all', trace: rows.map((x) => x.src_id) }).then((v: any) => new Map<string, any>((v?.trace ?? []).map((t: any) => [t.id, t])), () => null) : null;
+  // 232차(로컬 10/28 15:40 남원시): 조회한 사람 회사의 지난 14일 당일 메일에 이 공고가 어느 구역·어떤 결과 문장으로 나갔는지 — 결과 시각이 빈 줄 대조용
+  const mails = u && rows.length ? await sql<{ day: string; items: any }[]>`select day::text as day, items from sales_digests where tenant = ${tenantOf(u)} and day >= ${new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10)} order by day` : [];
+  const mailedOf = (id: string, r: Row) => mails.flatMap((m) => (Array.isArray(m.items) ? m.items : [])
+    .filter((it: any) => it?.id === id || (r.id && it?.id === String(r.id)) || (it?.noticeNo && r.source_external_id && it.noticeNo === String(r.source_external_id).trim()))
+    .map((it: any) => ({ day: m.day, section: it.section ?? null, badges: Array.isArray(it.badges) ? it.badges : [], result: it.result ?? null })));
   return {
     items: rows.map(({ src_id, row: r, gone, origin, synced_at }) => ({
       id: src_id, origin: origin === 'workin' ? '워크인 수집' : '원본 영업관리 복사', gone, mergedInto: r.merged_into ?? null,
@@ -48,7 +53,10 @@ export async function lookupNotices(q: { no?: string | null; q?: string | null }
       postedDate: r.posted_date ?? null, deadlineAt: r.deadline_at ?? null, status: r.current_status ?? null,
       // 229차(로컬 10/28 13:55 '남원시 결과 줄에 낙찰률·참가 수 빠짐'): 낙찰 칸과 결과를 처음 안 때·마지막 고친 때 — 메일 결과 줄과 대조용
       award: r.winner_name || r.winner_amount || r.winner_rate || r.bidders ? { winner: r.winner_name ?? null, winnerBizNo: r.winner_biz_no ?? null, amount: r.winner_amount ?? null, rate: r.winner_rate ?? null,
-        bidders: r.bidders ?? null, awardDate: r.award_date ?? null, resultAt: r.result_at ?? null } : null, updatedAt: r.updated_at ?? null,
+        bidders: r.bidders ?? null, awardDate: r.award_date ?? null, resultAt: r.result_at ?? null,
+        // 232차: 낙찰률·참가 수를 뒤늦게 채운 때 · K-apt 상세를 읽은 때·참여업체 수·사유 — resultAt 이 비면 결과를 215차(10/27 18시) 전에 알았거나 원본 복사로 들어온 줄
+        resultFilledAt: r.result_filled_at ?? null, detailAt: r.kapt_detail_at ?? null, participants: Array.isArray(r.participants) ? r.participants.length : null, note: r.result_note ?? null } : null,
+      updatedAt: r.updated_at ?? null, mailed: mailedOf(src_id, r),
       firstSeenAt: r.first_seen_at ?? r.created_at ?? null, lastSeenAt: r.last_seen_at ?? null, refitAt: r.refit_at ?? null, refoundAt: r.refound_at ?? null, syncedAt: synced_at,
       nowRule: (() => { const f = matchFit(String(r.title ?? ''), r.bid_category ?? null, r.task_scope ?? null, r.source_type === 'kapt_bid' ? '공동주택' : null); return { fit: f.fit, matched: f.matched, dropped: f.dropped ?? [] }; })(),
       refitLoweredAt: r.refit_lowered_at ?? null, refitLoweredWhy: r.refit_lowered_why ?? null, judgedAt: r.judged_at ?? null,
