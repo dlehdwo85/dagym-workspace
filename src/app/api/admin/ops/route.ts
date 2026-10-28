@@ -5,9 +5,9 @@ import { requireMenu } from '@/lib/menuPerms';
 export const GET = handler(async ({ user }) => {
   await requireMenu(user, 'ops', 'view');
   const sql = db();
-  const [jobs, errors, deliveries, syncErrors, counts, recent, noDevice, dbLocale] = await Promise.all([
+  const [jobs, errors, deliveries, syncErrors, counts, recent, noDevice, dbLocale, pickDiag] = await Promise.all([
     sql`select id, job, trigger, started_at, finished_at, status, detail from job_runs order by id desc limit 30`,
-    sql`select id, source, message, context, created_at from error_logs order by id desc limit 50`,
+    sql`select id, source, message, context, created_at from error_logs where source not like 'diag:%' order by id desc limit 50`,
     sql`select status, count(*)::int c from notification_deliveries where created_at > now() - interval '7 days' group by status`,
     sql`select l.id, l.action, l.status, l.detail, l.created_at, u.name from sync_logs l left join users u on u.id = l.user_id
         where l.status in ('error','conflict') order by l.id desc limit 30`,
@@ -26,6 +26,8 @@ export const GET = handler(async ({ user }) => {
         and not exists (select 1 from push_subscriptions p where p.user_id = u.id and p.disabled_at is null) order by u.name`,
     // 163차 ①(로컬 10/26 ⑤): 운영 DB 정렬 규칙 — en_US.utf8 이면 한글 이름순이 가나다순이 아닐 수 있음(C.UTF-8·ko_KR 이면 괜찮음)
     sql<{ datcollate: string; datctype: string; version: string }[]>`select datcollate, datctype, version() as version from pg_database where datname = current_database()`,
+    // 248차 #780: 휴대폰 사진 고르기 진단 최근 20건(사람 이름·기기)
+    sql`select e.id, e.message, e.context, e.created_at, u.name from error_logs e left join users u on u.id::text = e.context->>'userId' where e.source = 'diag:pick' order by e.id desc limit 20`,
   ]);
-  return { jobs, errors, deliveries, syncErrors, counts: counts[0], recent, noDevice, dbLocale: dbLocale[0] ?? null };
+  return { jobs, errors, deliveries, syncErrors, counts: counts[0], recent, noDevice, dbLocale: dbLocale[0] ?? null, pickDiag };
 });

@@ -10,7 +10,7 @@ import { useBackClose } from './backClose';
 import { DropHint, DropZone, UploadProgress, putFile } from './upload';
 import { AttachEditModal, editModeOf } from './AttachEdit';
 import { holdScreen } from './awake';
-import { IosPickHint, usePickWait } from './pickWait';
+import { IosPickHint, PHOTO_ACCEPT, usePickWait } from './pickWait';
 import { shrinkImage } from './shrink';
 
 export { shrinkImage } from './shrink'; // 213차: 메신저도 쓰므로 작은 파일로 옮김(예전 가져오기 그대로)
@@ -59,7 +59,9 @@ export async function uploadTaskFiles(list: File[], target: { taskId?: string; e
   return ok;
 }
 
-const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '');
+const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '') && !isHeic(a);
+/** 248차 #780: 줄이기(JPEG)에 실패해 아이폰 원본(HEIC)이 그대로 올라간 사진 — PC 브라우저에서 안 보일 수 있어 사진 칸 대신 파일 줄('내려받아 보기') */
+const isHeic = (a: any) => /^image\/hei[cf]$/i.test(a.mime_type ?? '') || /\.(heic|heif)$/i.test(a.file_name ?? '');
 /** 대표 10/27(사진 150장이 지저분하지 않게): 사진 칸에 바로 보이는 수(넘으면 마지막 칸 '+n' → 사진첩) · 사진이 이보다 많으면 파일 목록의 사진 줄은 '사진 n장' 한 줄로 */
 const PHOTO_PREVIEW = 12, PHOTO_ROWS_MAX = 6;
 const seoulDay = (v: string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(v));
@@ -98,15 +100,19 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   const canDel = (a: any) => a.created_by === meId || canEdit;
   const albumRef = useRef<HTMLInputElement>(null);
   const vidRef = useRef<HTMLInputElement>(null); // #109 영상 촬영
+  const vidAlbumRef = useRef<HTMLInputElement>(null); // 248차 #780 영상은 사진과 따로 고르기
 
   const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
-  const pick = usePickWait(); // 213차: 아이폰은 사진을 많이 고르면 [추가] 뒤 몇 분 동안 아무 표시가 없음 → '준비 중' 띠
+  const pick = usePickWait('task'); // 213차: 아이폰은 사진을 많이 고르면 [추가] 뒤 몇 분 동안 아무 표시가 없음 → '준비 중' 띠 · 248차 고르기 진단
   async function upload(files: FileList | null) {
-    pick.stop();
+    pick.received(files);
     if (!files?.length) return;
+    const list = Array.from(files);
     setBusy('올리는 중…');
-    await uploadTaskFiles(Array.from(files), { taskId, eventId }, setProg);
+    const ok = await uploadTaskFiles(list, { taskId, eventId }, setProg);
+    pick.done({ ok, fail: list.length - ok });
     setBusy('');
+    if (vidAlbumRef.current) vidAlbumRef.current.value = '';
     if (fileRef.current) fileRef.current.value = '';
     if (camRef.current) camRef.current.value = '';
     if (albumRef.current) albumRef.current.value = '';
@@ -180,6 +186,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
                 {a.doc_base_date && <span>기준일 {fmtDate(a.doc_base_date)}</span>}
                 {a.doc_owner && <span>문서 담당 {a.doc_owner}</span>}
                 {a.size_bytes ? <span>{fmtSize(Number(a.size_bytes))}</span> : null}
+                {isHeic(a) && <span className="text-amber-700" data-testid="att-heic">아이폰 사진(HEIC) — PC 에서 안 보이면 내려받아 보기</span>}
                 {a.captured_at && isImage(a) && <span>촬영 {fmtDateTime(a.captured_at)}</span>}{/* 로컬 검수 10/17: 문서(txt 등)는 "촬영" 아님 */}
                 <span>{a.created_by_name}</span>
                 {a.kind === 'link' && <span className="truncate">원본: {(() => { try { return new URL(a.url).hostname; } catch { return ''; } })()}</span>}
@@ -210,13 +217,15 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       <div className="mt-2 flex flex-wrap gap-1.5">
         <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="file-input" />
         <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
-        <input ref={albumRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="album-input" />
+        <input ref={albumRef} type="file" accept={PHOTO_ACCEPT} multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="album-input" />
+        <input ref={vidAlbumRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="video-album-input" />
         <input ref={vidRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => upload(e.target.files)} data-testid="video-input" />
-        <Button size="sm" variant="secondary" onClick={() => pick.open(fileRef)} disabled={!!busy}><Paperclip />파일 첨부</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(fileRef, 'file')} disabled={!!busy}><Paperclip />파일 첨부</Button>
         {taskId && <Button size="sm" variant="secondary" onClick={() => setLibOpen(true)} disabled={!!busy} title="자료실에 있는 파일을 이 업무에 연결(복사 아님, 자료실 권한 그대로)" data-testid="att-from-library"><FolderOpen />자료실에서</Button>}
-        <Button size="sm" variant="secondary" onClick={() => pick.open(camRef)} disabled={!!busy}><Camera />사진 촬영</Button>
-        <Button size="sm" variant="secondary" onClick={() => pick.open(albumRef)} disabled={!!busy} data-testid="att-album"><ImageIcon />사진·영상</Button>
-        <Button size="sm" variant="secondary" onClick={() => pick.open(vidRef)} disabled={!!busy} className="sm:hidden" title="영상 촬영(100MB 까지)" data-testid="att-video-capture"><Video />영상 촬영</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(camRef, 'camera')} disabled={!!busy}><Camera />사진 촬영</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(albumRef, 'photo')} disabled={!!busy} data-testid="att-album"><ImageIcon />사진</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(vidAlbumRef, 'video')} disabled={!!busy} title="영상 고르기(100MB 까지)" data-testid="att-video-album"><Video />영상</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(vidRef, 'video')} disabled={!!busy} className="sm:hidden" title="영상 촬영(100MB 까지)" data-testid="att-video-capture"><Video />영상 촬영</Button>
         <Button size="sm" variant="secondary" onClick={() => setLinkOpen(true)}><Link2 />문서 링크 연결</Button>
         {busy && <span className="inline-flex items-center gap-1.5 text-xs text-ink-2"><Loader2 className="size-3.5 animate-spin" />{busy}</span>}
       </div>
@@ -260,6 +269,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setLinkOpen(false)}>취소</Button><Button type="submit">연결</Button></div>
         </form>
       </Modal>
+      {prog.length > 1 && <p className="mt-2 text-xs text-ink-2" data-testid="pick-received">받은 파일 <b>{prog.length}개</b> · 올린 것 {prog.filter((p) => p.pct >= 100).length}/{prog.length}{prog.some((p) => p.error) ? ` · 못 올린 것 ${prog.filter((p) => p.error).length}` : ''}</p>}
       <UploadProgress items={prog} />
       <input ref={verRef} type="file" className="hidden" onChange={(e) => uploadVersion(verTarget, e.target.files?.[0])} aria-label="새 버전 파일" data-testid="att-version-file" />
       {editOf && <AttachEditModal a={editOf} onClose={() => setEditOf(null)} onSaved={() => { onChange(); broadcastRefresh(); }} onDownload={() => openFile(editOf.id, false)} onUploadNew={() => { setVerTarget(editOf); verRef.current?.click(); }} />}

@@ -87,6 +87,12 @@ export default function Ops() {
         <ul className="space-y-1 text-xs">{data.syncErrors.map((s: any) => <li key={s.id}>{fmtDateTime(s.created_at)} · {s.name} · {s.action} · {s.status} {s.detail?.error ?? ''}</li>)}{!data.syncErrors.length && <li className="text-slate-400">없음</li>}</ul>
       </section>
       <section className="rounded-lg border bg-white p-4">
+        <h2 className="mb-2 text-sm font-semibold">휴대폰 사진 고르기 진단 (최근 20건)</h2>
+        <ul className="space-y-1 text-xs" data-testid="ops-pick-diag">{(data.pickDiag ?? []).map((e: any) => { const c = e.context ?? {}; const k = c.kinds ?? {};
+          return <li key={e.id}>{fmtDateTime(e.created_at)} · {e.name ?? '?'} · {c.where === 'chat' ? '메신저' : '업무'} · {e.message}{c.kinds ? ` · HEIC ${k.heic ?? 0}·JPEG ${k.jpeg ?? 0}·PNG ${k.png ?? 0}·영상 ${k.video ?? 0}` : ''}{c.bytes ? ` · ${(c.bytes / 1048576).toFixed(1)}MB` : ''}{c.firstError ? ` · 첫 오류 ${c.firstError}` : ''} · {c.app ? '앱' : '웹'} · {String(c.ua ?? '').match(/(iPhone OS|Android) [\d_.]+/)?.[0]?.replace(/_/g, '.') ?? ''}</li>; })}
+          {!(data.pickDiag ?? []).length && <li className="text-slate-400">없음</li>}</ul>
+      </section>
+      <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">오류 기록</h2>
         <ul className="space-y-1 text-xs">{data.errors.map((e: any) => <li key={e.id} className="text-red-700">{fmtDateTime(e.created_at)} · [{e.source}] {e.message}</li>)}{!data.errors.length && <li className="text-slate-400">없음</li>}</ul>
       </section>
