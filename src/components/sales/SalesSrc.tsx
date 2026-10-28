@@ -188,7 +188,10 @@ const REC_EMPTY = { leadId: '', title: '', amount: '', date: '', memo: '', versi
 const PROPOSAL_STATUS = ['제안', '검토중', '수정 요청', '채택', '탈락'];
 const CONTRACT_STATUS = ['계약', '진행중', '종료', '해지'];
 const RENEW_STAGE = ['영업 전', '영업 시작', '제안', '재입찰', '종료'];
-const numOf = (v: string) => (v.trim() ? Number(v.replace(/[,\s원]/g, '')) : null);
+/** 금액 칸: 쉼표·원 무시 · 228차 '1,000만원'·'5천만'·'1.5억'·'3억 5,000만' 같은 한글 단위도 */
+const numOf = (v: string) => { const s = v.replace(/[,\s원₩]/g, ''); if (!s) return null;
+  const m = s.match(/^(?:(\d+(?:\.\d+)?)억)?(?:(\d+(?:\.\d+)?천?)만)?(\d+)?$/); const man = (x?: string) => (x ? (x.endsWith('천') ? Number(x.slice(0, -1)) * 1000 : Number(x)) : 0);
+  return m && (m[1] || m[2]) ? Math.round(Number(m[1] ?? 0) * 1e8 + man(m[2]) * 1e4 + Number(m[3] ?? 0)) : Number(s); };
 function RecordForm({ kind, leads, onSaved, leadId }: { kind: 'proposals' | 'contracts'; leads: { id: string; name: string }[]; onSaved: () => void; leadId?: string }) {
   const T = useSalesTerms(); // #408 업종 템플릿 예시 문구
   const [f, setF] = useState({ ...REC_EMPTY, leadId: leadId ?? '' }); const [busy, setBusy] = useState(false); const [more, setMore] = useState(false);
@@ -765,7 +768,9 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
     const rows: Record<string, unknown>[] = []; const skipped: string[] = [];
     for (const r of grid.slice(1)) { const o: Record<string, unknown> = {};
       head.forEach((k, idx) => { const v = (r[idx] ?? '').trim(); if (!k || !v || o[k] !== undefined) return;
-        if (k === 'status') { const key = ST.keyOf(v); if (key && (data?.stages ?? []).includes(key)) o.status = key; } // 207차: 회사 단계 이름도 else if (k === 'priority') { if (PRI_CODE[v]) o.priority = PRI_CODE[v]; } else if (k === 'expectedRevenue') { const n = numOf(v); if (n !== null && Number.isFinite(n)) o.expectedRevenue = n; }
+        // 207차: 단계는 회사 단계 이름도 · 228차(로컬 10/28 13:00): 이 주석이 줄 가운데 있어 우선순위·예상매출 바꾸기가 꺼져 있었음 — 내보낸 CSV(긴급·높음·보통, 0·쉼표 숫자)를 다시 넣으면 막힘
+        if (k === 'status') { const key = ST.keyOf(v); if (key && (data?.stages ?? []).includes(key)) o.status = key; }
+        else if (k === 'priority') { if (PRI_CODE[v]) o.priority = PRI_CODE[v]; } else if (k === 'expectedRevenue') { const n = numOf(v); if (n !== null && Number.isFinite(n) && n >= 0) o.expectedRevenue = n; }
         else if (k === 'nextContactDate') { const m = v.match(/(\d{4})[.\-/]\s?(\d{1,2})[.\-/]\s?(\d{1,2})/); if (m) o.nextContactDate = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; } else o[k] = v.slice(0, IMPORT_MAX[k] ?? 300); });
       if (typeof o.name === 'string' && o.name) rows.push(o); else skipped.push(r.join(',').slice(0, 40)); }
     setImp({ rows, file: file.name, skipped });
