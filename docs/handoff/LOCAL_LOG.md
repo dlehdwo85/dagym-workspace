@@ -1849,3 +1849,8 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - /api/health 1f5f627 · migration 222. 프로필 PUT certsNone true(대표 '인증 별도로 없음') — 다른 칸 그대로 확인, blanks 0.
 - 맞춤 90(102에서), 5건 빠짐, 규칙과 다름 0, 돈 칩 27. auto.queue 122.
 - 신청 목록: 공공조달 멘토링 담기→list 1→export CSV 200(BOM EF BB BF, 15칸)→빼기→list 0. 디스크 저장 없이 fetch 로 확인. [업무로] 시험 안 함.
+
+## 2026-10-29 00:15 — 대표 #786 입찰 참가자격 = 공고문 자격 요건(자본금·기술인력·실적)
+- /api/sales/src?view=bids 열린 46건: detail.qualification = bidTerms.termsLine(award_method·contract_method·신용평가/실적증명 제출·보증금) → '적격심사 · 제한경쟁 · 신용평가 제출 · 실적증명 제출 · 보증금 5%'. raw eligibility·required_licenses·performance_requirement null. 첨부는 hwp·hwpx·docx.
+- /api/library?q=참가자격: 영업/공고 저장본 5건에 절 있음(래미안세레니티 자본금 5억·등록업체, 시스템 구축 실적 5년 5건·면허, 기흥더샵프라임뷰 현설 참가 업체).
+- 클라우드 요청 00:20: 참가자격 절 저장(공통 제26조 문구는 한 줄에서 뺌)·항목 뽑기(자본금·실적·인력·등록면허·신용·지역·현설·공동도급)·목록 줄 교체·열린 공고 채우기·3단계 회사 자격 대조(qualificationGap).
