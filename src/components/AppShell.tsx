@@ -5,7 +5,7 @@ import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
 import { IN_APP_BILLING_NOTE, useInApp } from './inApp';
 import { ADMIN_PAGES } from '@/lib/adminPages';
-import Link, { useLinkStatus } from 'next/link';
+import Link from 'next/link';
 import { Fragment, Suspense } from 'react';
 import { AiDock } from './AiDock';
 import { AlarmBar, type AlarmItem } from './AlarmBar';
@@ -16,7 +16,7 @@ import { CaptureGuard } from './CaptureGuard';
 import { Onboarding } from './Onboarding';
 import { TourHost, restartTours } from './Tour';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, FileText, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
   Building2, Compass, HelpCircle, ListTodo, Library, LogOut, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
@@ -27,8 +27,7 @@ import {
 Contact, Globe, FileSignature, } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
-import { api, apiShared, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
-import { RouteLoading } from './RouteLoading';
+import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
 import { clearReminders, enableNativePush, initNative, refreshWidget, setNativeBadge } from './native';
@@ -92,39 +91,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
     window.addEventListener('popstate', onPop);
     return () => { document.removeEventListener('click', save, true); window.removeEventListener('popstate', onPop); };
   }, []);
-  // 238차(#742 대표 10/28 '화면이 즉시 넘어가게'): 메뉴·아래 탭을 누르면 다음 화면이 오기 전에 누른 칸부터 강조 — 주소가 바뀌면(또는 8초 뒤) 원래 계산으로
-  const [navTo, setNavTo] = useState<{ p: string; q: string } | null>(null);
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
-      if (!a || (a.target && a.target !== '_self') || a.hasAttribute('download')) return;
-      const u = new URL(a.href, location.href);
-      if (u.origin !== location.origin || (u.pathname === location.pathname && u.search === location.search)) return;
-      setNavTo({ p: u.pathname, q: u.search.slice(1) });
-    };
-    document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
-  }, []);
-  useEffect(() => { setNavTo(null); }, [path, query]);
-  useEffect(() => { if (!navTo) return; const h = setTimeout(() => setNavTo(null), 8000); return () => clearTimeout(h); }, [navTo]);
-  const curPath = navTo?.p ?? path, curQuery = navTo?.q ?? query;
-  // 메뉴·아래 탭으로 다른 화면에 가는 중(Next 가 아직 이동 중) 0.12초가 넘으면 본문 자리에 다음 화면 틀 — 이전 화면은 숨김만(이동이 취소되면 그대로 다시 보임).
-  // Next 의 loading.tsx 는 쓰지 않음: 틀을 먼저 그리고 주소를 바꾸는 방식이라, 화면이 오기 전에 [뒤로]를 누르면 주소는 앞 화면인데 뒤 화면이 그려지는 문제가 있었음(E2E #242)
-  const [menuPending, setMenuPending] = useState(0);
-  const onMenuPending = useCallback((on: boolean) => setMenuPending((n) => Math.max(0, n + (on ? 1 : -1))), []);
-  const [frame, setFrame] = useState(false);
-  useEffect(() => {
-    if (!menuPending) { setFrame(false); return; }
-    const h = setTimeout(() => setFrame(true), 120);
-    return () => clearTimeout(h);
-  }, [menuPending]);
   // 메시지 화면을 오가면 메시지 배지를 바로 새로
-  useEffect(() => { apiShared<{ unread: number }>('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}); }, [path]); // 238차: 메시지 화면이 같은 때 부르면 요청 1번
+  useEffect(() => { api('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}); }, [path]);
   // 메신저 3차 C12: 대화방에서 읽거나 방 알림 단계를 바꾸면(wos-chat-read) 메시지 배지·앱 아이콘 배지를 곧바로
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
-    const h = () => { clearTimeout(t); t = setTimeout(() => apiShared<{ unread: number }>('/api/chat/unread', true).then((c) => setChatUnread(c.unread)).catch(() => {}), 400); };
+    const h = () => { clearTimeout(t); t = setTimeout(() => api('/api/chat/unread').then((c) => setChatUnread(c.unread)).catch(() => {}), 400); };
     window.addEventListener('wos-chat-read', h);
     return () => { clearTimeout(t); window.removeEventListener('wos-chat-read', h); };
   }, []);
@@ -230,7 +202,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     const poll = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // 10/21 DB 쿼터 장애: 가려진 탭은 폴링하지 않음
       try { const r = await api('/api/notifications?unread=1'); if (alive) { setUnread(r.unread); setAlarms(r.alarms ?? []); setApprovalsTodo(r.approvalsTodo ?? 0); } } catch {}
-      try { const c = await apiShared<{ unread: number }>('/api/chat/unread', true); if (alive) setChatUnread(c.unread); } catch {}
+      try { const c = await api('/api/chat/unread'); if (alive) setChatUnread(c.unread); } catch {}
     };
     poll();
     const t = setInterval(poll, 120_000); // 10/21: 60초 → 120초(탭 포커스·wos-refresh 때는 바로)
@@ -295,27 +267,18 @@ export function AppShell({ session, children }: { session: Sess; children: React
       // 대표 확정 10/22(#422): 업무 공간 하단 = 홈 · 업무 · 캘린더 · 메시지 · 결재, 더보기 없음 — 나머지 메뉴는 오른쪽 위 프로필 버튼 시트로
       : v3 ? [byHref('/'), byHref('/tasks'), byHref('/calendar'), { ...byHref('/messages'), badge: chatUnread }, { ...byHref('/approvals'), badge: approvalsTodo }] : [NAV[0], NAV[1], NAV[3], { ...NAV[4], badge: chatUnread }];
   const tabHrefs = new Set(mobileTabs.map((n) => n.href.split('?')[0]));
-  // 238차(#742): 휴대폰 아래 탭 화면은 첫 화면이 뜬 뒤 한가할 때 미리 받아 둠(화면 코드까지) — 눌렀을 때 서버 응답·화면 코드를 기다리지 않게
-  const tabKey = mobileTabs.map((n) => n.href).join(' ');
-  useEffect(() => {
-    if (!window.matchMedia?.('(max-width: 639px)').matches) return;
-    const run = () => { for (const h of tabKey.split(' ')) if (h.split('?')[0] !== location.pathname) { try { router.prefetch(h); } catch { /* 미리 받기 실패는 무시 */ } } };
-    const idle = 'requestIdleCallback' in window; // 아이폰 사파리는 없음
-    const id = idle ? window.requestIdleCallback(run, { timeout: 4000 }) : window.setTimeout(run, 1500);
-    return () => { if (idle) window.cancelIdleCallback(id); else clearTimeout(id); };
-  }, [tabKey, router]);
   // 프로필 시트: 하단 탭·머리줄(알림·AI)과 겹치는 메뉴는 빼고, 남은 공통 메뉴 + 설정만(#422 b·d)
   const sheetLinks: NavItem[] = [...commonV3.filter((n) => !tabHrefs.has(n.href.split('?')[0]) && n.href !== '/notifications' && !n.href.startsWith('/assistant')), { href: '/settings', label: '설정·알림', icon: Settings }];
   // #422 c: 업무 공간 메뉴 칸은 '내 주간 보고'(+ 매출 권한)만 — 홈·업무·결재는 하단 탭, 프로젝트는 업무 화면 안에서
   const sheetSpaceMenu: NavItem[] = (v3 ? spaceMenuV3 : spaceNav).filter((n) => !tabHrefs.has(n.href.split('?')[0]) && !(space === 'work' && n.href === '/projects'));
   const active = (href: string) => {
     const [p, q] = href.split('?');
-    if (p === '/') return curPath === '/';
-    if (/^\/s\/[a-z]+$/.test(p)) return curPath === p; // 로컬 검수 10/17: 공간 첫 화면(영업 홈 등)은 하위 메뉴에 있을 때 같이 강조하지 않음
-    if (q) return curPath === p && curQuery.includes(q);
+    if (p === '/') return path === '/';
+    if (/^\/s\/[a-z]+$/.test(p)) return path === p; // 로컬 검수 10/17: 공간 첫 화면(영업 홈 등)은 하위 메뉴에 있을 때 같이 강조하지 않음
+    if (q) return path === p && query.includes(q);
     // #481: 같은 주소에 ?tab= 메뉴(제작의뢰실)가 따로 있으면 그 탭을 보는 동안 상위 메뉴(자동 제작)는 강조하지 않음
-    if (curPath === p && spaceNav.some((o) => o.href !== href && o.href.startsWith(p + '?') && curQuery.includes(o.href.split('?')[1]))) return false;
-    return curPath.startsWith(p);
+    if (path === p && spaceNav.some((o) => o.href !== href && o.href.startsWith(p + '?') && query.includes(o.href.split('?')[1]))) return false;
+    return path.startsWith(p);
   };
 
   async function logout() {
@@ -339,7 +302,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
       <Link key={n.href} href={n.href} aria-current={on ? 'page' : undefined} title={collapsed ? n.label : undefined} style={on && space !== 'work' ? { background: sm.color } : undefined}
         className={cx('group flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm transition-colors', on ? 'bg-brand-600 font-semibold text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-ink', collapsed && 'justify-center px-0')}>
         <n.icon className={cx('size-[18px] shrink-0', on ? 'text-white' : 'text-slate-400 group-hover:text-slate-600')} aria-hidden />
-        {!collapsed && <span className="flex-1 truncate">{n.label}</span>}<NavPending onPending={onMenuPending} />
+        {!collapsed && <span className="flex-1 truncate">{n.label}</span>}
         {!!badge && <span className={cx('rounded-full bg-red-500 text-[10px] font-semibold leading-4 text-white tabular-nums', collapsed ? 'absolute ml-5 -mt-5 px-1' : 'px-1.5')}>{badge > 99 ? '99+' : badge}</span>}
       </Link>
     );
@@ -527,7 +490,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           {/* 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄은 없앰 — 하단 탭 + 더보기 › 공간 메뉴로(하단 탭과 겹치고 깔끔하지 않음) */}
           <PushRehome appHost={session.features.appHost} />{/* 198차 주소 분리: app. 에서 브라우저 알림 다시 켜기 안내(스위치 켰을 때만) */}
           <AlarmBar items={alarms} onChange={(id) => { setAlarms((a) => a.filter((x) => x.id !== id)); window.dispatchEvent(new Event('wos-refresh')); }} />
-          <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{frame && <RouteLoading />}<div className={frame ? 'hidden' : 'contents'}>{children}</div></main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
+          <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>
 
         {session.tenant?.onboarding && <Onboarding />}
@@ -575,7 +538,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         {/* 대표 결정(10/19): 가운데 + 버튼 없이 공간마다 같은 크기 5칸 — 4개 메뉴 + 더보기(그 공간 나머지 메뉴·공통·공간 전환·만들기) */}
         <nav className={cx('fixed bottom-0 left-0 right-0 z-40 grid border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden [[data-chat-room]_&]:hidden', mobileTabs.length >= 5 ? 'grid-cols-5' : 'grid-cols-4')} aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
-          {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={n.match ? n.match.some((m) => curPath.startsWith(m)) : active(n.href)} badge={n.badge} onPending={onMenuPending} />)}
+          {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={n.match ? n.match.some((m) => path.startsWith(m)) : active(n.href)} badge={n.badge} />)}
         </nav>
         {/* 대표 10/20 16:20 (#106) 휴대폰 오른쪽 아래 말풍선 — 최근 대화방 바로·안 읽은 수·길게 누르면 AI 비서, 대화방·키보드·알람 띠에서 숨김 */}
         <ChatBubble unread={chatUnread} ai={!!session.features.ai} alarm={alarms.length > 0} />
@@ -682,17 +645,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
   );
 }
 
-/** 238차(#742): 메뉴·아래 탭 링크의 이동이 진행 중인지(Next useLinkStatus) — AppShell 이 0.12초 넘게 진행 중이면 본문 자리에 다음 화면 틀 */
-function NavPending({ onPending }: { onPending: (on: boolean) => void }) {
-  const { pending } = useLinkStatus();
-  useEffect(() => { if (!pending) return; onPending(true); return () => onPending(false); }, [pending, onPending]);
-  return null;
-}
-
-function TabLink({ n, on, badge, onPending }: { n: NavItem; on: boolean; badge?: number; onPending: (on: boolean) => void }) {
+function TabLink({ n, on, badge }: { n: NavItem; on: boolean; badge?: number }) {
   return (
     <Link href={n.href} className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs', on ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
-      <n.icon className="size-6" strokeWidth={on ? 2.4 : 1.8} aria-hidden />{n.label}<NavPending onPending={onPending} />
+      <n.icon className="size-6" strokeWidth={on ? 2.4 : 1.8} aria-hidden />{n.label}
       {!!badge && <span className="absolute left-1/2 top-1 ml-2 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{badge > 99 ? '99+' : badge}</span>}
     </Link>
   );
