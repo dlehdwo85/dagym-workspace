@@ -85,7 +85,7 @@ export async function support249({ owner, ctx, sql, BASE, FAKE, SHOTS, tick }) {
     // 251차 #783·#784: 카드 '받는 것' 줄 → [목록에 담기] → 신청 목록 탭 표(받는 것·예상 금액·자부담·준비 시간) → 담당 골라 [업무로] → 신청 준비 · [엑셀로]
     assert.match(await ia.getByTestId('support-effect-line').innerText(), /받는 것 온라인 마케팅 비용 지원 · 최대 300만 원 · 준비 약 4시간/);
     await ia.getByTestId('support-list-toggle').click(); await owner.getByText('이번 주 신청 목록에 담았습니다').waitFor();
-    assert.equal(await ia.getByTestId('support-list-toggle').getAttribute('data-on'), '1');
+    await ia.locator('[data-testid="support-list-toggle"][data-on="1"]').waitFor(); // 알림이 먼저 뜨고 목록을 다시 읽은 뒤 바뀜(253차: 바로 읽으면 가끔 '0')
     await owner.getByTestId('support-tab-list').click(); await owner.waitForURL(/tab=list/);
     const row = owner.getByTestId('support-apply-row').filter({ hasText: 'E2E249 용인시 마케팅 지원' }); await row.waitFor();
     assert.match(await row.getByTestId('support-apply-receive').innerText(), /온라인 마케팅 비용 지원[\s\S]*워크인 검색 광고비/);

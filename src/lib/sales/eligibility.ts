@@ -3,10 +3,13 @@
 // 정기 실행: 열린 관련 공고 중 아직 안 읽었거나 첨부가 바뀐 것(정정 공고)·못 읽은 것(20시간 뒤, 3번까지)을 마감 가까운 순으로 한 번에 몇 건씩.
 import { sha256 } from '../crypto';
 import { db } from '../db';
-import { apiExtra, eligibilityItems, eligibilityLine, eligibilitySection, type EligItem } from './eligibilityText';
+import { extractTextResult, unzip } from '../textExtract';
+import { apiExtra, COMMON_ONLY, eligibilityItems, eligibilityLine, eligibilitySection, lineOf, type EligItem } from './eligibilityText';
+import { visionOn, visionRead, type PhotoDoc } from './eligibilityVision';
 import { sourceFiles, type SrcFile } from './files';
 
-export type Eligibility = { text: string | null; items: EligItem[]; line: string | null; error: string | null; file: { name: string | null; url: string } | null; readAt: string; sig: string; tries: number };
+export type Eligibility = { text: string | null; items: EligItem[]; line: string | null; error: string | null; file: { name: string | null; url: string } | null; readAt: string; sig: string; tries: number;
+  /** 253차 #790 사진 공고문을 AI 비전으로 읽음(숫자는 원문 확인) */ by?: 'vision'; visionUsd?: number };
 type Row = Record<string, any>;
 const kstDay = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 
@@ -28,40 +31,65 @@ export function rankFiles(files: SrcFile[]): SrcFile[] {
 export function eligibilityOf(text: string | null | undefined, r: Row = {}): { text: string; items: EligItem[]; line: string } | null {
   const sec = eligibilitySection(text); if (!sec) return null;
   const items = eligibilityItems(sec);
-  return { text: sec, items, line: eligibilityLine(items, sec, apiExtra(r, items)) ?? '공통 자격(사업자선정지침)만 적힘 — 별도 요건 없음' };
+  return { text: sec, items, line: eligibilityLine(items, sec, apiExtra(r, items)) ?? COMMON_ONLY };
 }
-const fileErr = (e: string | null) => !e ? '본문 글자 없음' : /스캔|글자가 없는/.test(e) ? '글자가 없는 PDF(스캔본)' : /추출 오류/.test(e) ? '글 뽑기 오류' : /커서/.test(e) ? '파일이 너무 큼' : e.slice(0, 40);
+export const PHOTO_ONLY = '공고문이 사진(스캔)으로만 되어 있음';
+/** 글이 없는 이유 — 스캔 PDF·그림만 든 docx/hwpx(word/media·BinData)는 '사진(스캔)으로만' (253차 로컬 운영 확인: docx 에 그림 16장·글 0) */
+function fileErr(e: string | null, data: Buffer, name: string): string {
+  if (e && /스캔|글자가 없는/.test(e)) return PHOTO_ONLY;
+  if (/\.(jpe?g|png|gif|bmp|webp|tiff?)$/i.test(name)) return PHOTO_ONLY;
+  if (/\.(docx|hwpx|pptx)$/i.test(name)) { try { if ([...unzip(data).keys()].some((k) => /(^|\/)(media|BinData)\//i.test(k))) return PHOTO_ONLY; } catch { /* 아래 */ } }
+  return !e ? '본문 글자 없음' : /추출 오류/.test(e) ? '글 뽑기 오류' : /커서/.test(e) ? '파일이 너무 큼' : e.slice(0, 40);
+}
 
 /** 한 공고 읽기 — 같은 공고번호의 다른 줄(원본 복사·워크인 수집)에도 같은 결과를 씀. 반환: 저장한 결과(공고가 없으면 null) */
-export async function readEligibility(id: string, opt: { maxFiles?: number } = {}): Promise<Eligibility | null> {
+export async function readEligibility(id: string, opt: { maxFiles?: number; vision?: boolean } = {}): Promise<Eligibility | null> {
   const sql = db();
   const [r0] = await sql<{ row: Row }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`;
   if (!r0) return null;
   const { noticeFiles, reasonOf } = await import('./autoAttach');
   const { fetchFile } = await import('./files');
-  const { extractTextResult } = await import('../textExtract');
   const src = await noticeFiles(id).catch((e) => ({ files: [] as SrcFile[], bid: null, listError: String((e as Error)?.message ?? e).slice(0, 80) }));
   const [r1] = await sql<{ row: Row }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`; // K-apt 목록을 읽으면 첨부 칸이 바뀜
   const row = r1?.row ?? r0.row; const prev = (row.eligibility ?? null) as Eligibility | null;
   const files = rankFiles(src?.files ?? []).slice(0, opt.maxFiles ?? 3);
-  let found: { text: string; items: EligItem[]; line: string } | null = null; let used: SrcFile | null = null; const errs: string[] = [];
+  let found: { text: string; items: EligItem[]; line: string } | null = null; let used: SrcFile | null = null; let tried: SrcFile | null = null; const errs: string[] = [];
+  let photo: { f: SrcFile; doc: PhotoDoc } | null = null; let by: 'vision' | undefined; let visionUsd: number | undefined; let visionDone = false;
   for (const f of files) {
+    tried = tried ?? f;
     try {
       let text: string | null = null; let terr: string | null = null;
       const ref = `salesfile:${sha256(f.url).slice(0, 40)}`;
       const [lib] = await sql<{ text_content: string | null }[]>`select text_content from library_files where ext_ref = ${ref} and source = 'sales_auto' and deleted_at is null and text_content is not null limit 1`; // 업무로 넘길 때 받아 둔 같은 공고 첨부(공개 공고문)
       if (lib?.text_content) text = lib.text_content;
-      else { const got = await fetchFile(f.url, f.name, { bid: src?.bid ?? null }); const x = await extractTextResult(got.data, got.fileName, got.mime); text = x.text; terr = x.text ? null : fileErr(x.error); f.name = f.name ?? got.fileName; }
+      else { const got = await fetchFile(f.url, f.name, { bid: src?.bid ?? null }); const x = await extractTextResult(got.data, got.fileName, got.mime); text = x.text; terr = x.text ? null : fileErr(x.error, got.data, got.fileName); f.name = f.name ?? got.fileName;
+        if (terr === PHOTO_ONLY && !photo) photo = { f, doc: { data: got.data, fileName: got.fileName, mime: got.mime } }; }
       if (!text) { errs.push(terr ?? '본문 글자 없음'); continue; }
       found = eligibilityOf(text, row); used = f;
       if (found) break;
       errs.push('참가자격 절 없음');
     } catch (e) { errs.push(`공고문 못 받음(${reasonOf(e)})`); }
   }
+  // #790 글자가 없는 공고문(사진·스캔)은 AI 비전으로 — 공고당 한 번(첨부가 바뀌면 다시), 회사 AI 예산 안
+  const sigNow = filesSig(row);
+  if (!found && photo && prev?.by === 'vision' && prev.sig === sigNow && prev.text) { // 이미 사진으로 읽은 공고 — 다시 부르지 않고 그 글을 씀([공고문 다시 읽기]도)
+    found = { text: prev.text, items: eligibilityItems(prev.text), line: lineOf(prev.text, row) }; used = photo.f; by = 'vision'; visionUsd = prev.visionUsd;
+  } else if (!found && photo && opt.vision !== false && visionOn() && !(prev?.sig === sigNow && (prev?.tries ?? 0) >= 3)) {
+    try {
+      const v = await visionRead(photo.doc, String(row.title ?? ''));
+      if (v) {
+        visionDone = true; visionUsd = v.usd;
+        const sec = v.text ? eligibilitySection(v.text) ?? v.text : null;
+        if (sec) { found = eligibilityOf(sec, row) ?? { text: sec.slice(0, 1500), items: eligibilityItems(sec), line: lineOf(sec, row) }; used = photo.f; by = 'vision'; }
+        else errs.push('사진에서도 참가자격 절을 못 찾음');
+      }
+    } catch (e) { errs.push(`AI 사진 읽기 못함(${String((e as Error)?.message ?? e).slice(0, 40)})`); }
+  }
   const extra = apiExtra(row, []);
   const error = found ? null : !files.length ? (src?.listError ? '첨부 목록을 못 읽음' : '첨부 공고문 없음') : [...new Set(errs)].join(' · ').slice(0, 120) || '공고문에서 참가자격 절을 못 찾음';
-  const out: Eligibility = { text: found?.text ?? null, items: found?.items ?? [], line: found?.line ?? (extra.length ? extra.join(' · ') : null), error, file: used ? { name: used.name, url: used.url } : null,
-    readAt: new Date().toISOString(), sig: filesSig(row), tries: found ? 0 : (prev && !prev.text && prev.sig === filesSig(row) ? (prev.tries ?? 0) + 1 : 1) };
+  const out: Eligibility = { text: found?.text ?? null, items: found?.items ?? [], line: found?.line ?? (extra.length ? extra.join(' · ') : null), error, file: (used ?? tried) ? { name: (used ?? tried)!.name, url: (used ?? tried)!.url } : null, // 못 읽었어도 어떤 파일을 봤는지
+    readAt: new Date().toISOString(), sig: filesSig(row), tries: found ? 0 : visionDone ? 3 : (prev && !prev.text && prev.sig === filesSig(row) ? (prev.tries ?? 0) + 1 : 1), // 사진 읽기를 한 공고는 첨부가 바뀔 때까지 다시 안 함
+    ...(by ? { by } : {}), ...(visionUsd != null ? { visionUsd } : {}) };
   const st = String(row.source_type ?? ''); const ext = String(row.source_external_id ?? '');
   await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: out } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices'
     and (src_id = ${id} ${st && ext ? sql`or (row->>'source_type' = ${st} and row->>'source_external_id' = ${ext})` : sql``})`; // synced_at 은 그대로(메일 '고침'으로 안 셈)

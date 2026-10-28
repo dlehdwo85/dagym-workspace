@@ -54,8 +54,16 @@ export function eligibilityItems(section: string | null | undefined): EligItem[]
   for (const w of LIC_WORDS) if (t.replace(/\s/g, '').includes(w.replace(/\s/g, ''))) lic.add(w === '주민운동시설 위탁운영 등록' ? '주민운동시설 위탁운영 등록업체' : w);
   for (const m of t.matchAll(/([가-힣]{2,10}(?:공사업|사업자|관리업|용역업))(?=\s*(?:등록|면허|허가|신고|,|·|및|를|을|\)|$))/g)) if (![...lic].some((x) => x.includes(m[1]) || m[1].includes(x)) && !/^(?:해당|모든|입찰|참가|당해|기타)/.test(m[1])) lic.add(m[1]);
   if (lic.size) { const names = [...lic]; out.push({ k: 'license', label: `${names.join('·')}${/면허/.test(t) && !names.some((n) => /등록업체$/.test(n)) ? ' 면허' : ''}` }); }
-  const perf = t.match(/((?:최근|과거)\s*\d+\s*년\s*(?:간|이내|동안)?[^.;]{0,40}?\d[\d,]*\s*(?:건|개소|단지|회|세대|곳)\s*(?:이상)?)/) ?? t.match(/(실적[^.;]{0,50}?\d[\d,]*\s*(?:건|개소|단지|회|세대|곳)\s*(?:이상)?)/);
-  if (perf && /실적|수행|위탁\s*운영|용역|공사/.test(perf[1] + t.slice(Math.max(0, (perf.index ?? 0) - 15), perf.index ?? 0))) out.push({ k: 'perf', label: `실적 ${one(perf[1].replace(/(?:사업\s*)?실적\s*[:：]?\s*/g, ' ').replace(/(\d+)\s*년\s*간/, '$1년').replace(/\s*이상$/, ' 이상'))}` });
+  // 실적 — ① 'N년(간) … N개 단지 이상 (위탁)운영 실적'(숫자가 '실적' 앞, 252차 운영 hwp·hwpx 공고문) ② '최근 N년간 공사 실적 N건'·'실적 … N건'
+  const UNIT = '\\d[\\d,]*\\s*(?:개\\s*)?(?:건|개소|단지|회|세대|곳|개)\\s*(?:이상)?';
+  const p1 = t.match(new RegExp(`((?:최근|과거|현재로부터|공고일\\s*(?:현재|기준)(?:로부터)?)?\\s*\\d+\\s*년\\s*(?:간|이내|동안|내)?)\\s*([^.;]{0,40}?)(${UNIT})\\s*([^.;]{0,24}?)\\s*(?:의\\s*)?실적`));
+  if (p1) {
+    const per = p1[1].replace(/현재로부터|공고일\s*(?:현재|기준)(?:로부터)?/g, '').replace(/(\d+)\s*년\s*(?:간|동안)/, '$1년').trim();
+    out.push({ k: 'perf', label: one(`실적 ${per} ${p1[2]} ${p1[3]} ${p1[4]}`).replace(/\s*(?:이|가|의|을|를)$/, '').slice(0, 60) });
+  } else {
+    const perf = t.match(new RegExp(`((?:최근|과거)\\s*\\d+\\s*년\\s*(?:간|이내|동안)?[^.;]{0,40}?${UNIT})`)) ?? t.match(new RegExp(`(실적[^.;]{0,50}?${UNIT})`));
+    if (perf && /실적|수행|위탁\s*운영|용역|공사/.test(perf[1] + t.slice(Math.max(0, (perf.index ?? 0) - 15), perf.index ?? 0) + t.slice((perf.index ?? 0) + perf[0].length, (perf.index ?? 0) + perf[0].length + 20))) out.push({ k: 'perf', label: `실적 ${one(perf[1].replace(/(?:사업\s*)?실적\s*[:：]?\s*/g, ' ').replace(/(\d+)\s*년\s*간/, '$1년').replace(/\s*이상$/, ' 이상'))}` });
+  }
   const staff: string[] = [];
   for (const w of STAFF_WORDS) {
     const m = t.match(new RegExp(`${w}[^.;]{0,20}?(\\d+)\\s*(?:명|인)\\s*(이상)?`));
@@ -101,9 +109,18 @@ export function apiExtra(r: Record<string, any>, items: EligItem[]): string[] {
   if (rg && !items.some((x) => x.k === 'region')) out.push(`지역 ${rg.slice(0, 30)}`);
   return out;
 }
-/** 252차 #786 참가자격 칸(목록 줄·펼치기·상세·공고 조회 같은 말) */
-export function eligView(r: any): { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl: string | null; readAt: string | null } {
-  const e = r?.eligibility; const extra = apiExtra(r ?? {}, []);
-  if (!e) return { line: extra.length ? extra.join(' · ') : null, text: null, error: null, file: null, fileUrl: null, readAt: null };
-  return { line: e.line ?? null, text: e.text ?? null, error: e.error ?? null, file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null };
+/** 절에 공통 문구(제26조)만 있을 때 한 줄 */
+export const COMMON_ONLY = '공통 자격(사업자선정지침)만 적힘 — 별도 요건 없음';
+/** 원문 절 → 화면 한 줄(뽑은 요건 + 나라장터 API 업종·지역) */
+export function lineOf(text: string, r: Record<string, any> = {}): string {
+  const items = eligibilityItems(text);
+  return eligibilityLine(items, text, apiExtra(r, items)) ?? COMMON_ONLY;
 }
+/** 252차 #786 참가자격 칸(목록 줄·펼치기·상세·공고 조회 같은 말) — 한 줄은 저장한 원문에서 매번 다시 뽑음(뽑기 규칙을 고치면 공고문을 다시 받지 않고 바로 반영, 253차) */
+export function eligView(r: any): { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl: string | null; readAt: string | null; vision: boolean } {
+  const e = r?.eligibility; const extra = apiExtra(r ?? {}, []);
+  if (!e) return { line: extra.length ? extra.join(' · ') : null, text: null, error: null, file: null, fileUrl: null, readAt: null, vision: false };
+  return { line: e.text ? lineOf(e.text, r) : e.line ?? null, text: e.text ?? null, error: e.error ?? null, file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: e.by === 'vision' };
+}
+/** #790 사진 공고문을 AI 가 읽은 것 — 원문 옆 안내 */
+export const VISION_NOTE = 'AI 가 사진에서 읽음 — 숫자는 원문 확인';

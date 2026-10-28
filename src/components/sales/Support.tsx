@@ -27,7 +27,7 @@ type ListData = { tab: string; today: string; items: Item[]; total: number; coun
   view: View; sortUsed: string; chips: { dd: Record<string, number>; kind: Record<string, number> } | null; kindLabel: Record<string, string>; pendingCount: number; blanks: Blanks; aiCostKrw: number | null; weeklyAiMax: number;
   auto: { on: boolean; enabled: boolean; saved: boolean; queue: number; stopped: string | null; left: number; at: string | null; done: number };
   profile: { saved: boolean; filled: boolean; autoAi: boolean; region: string | null; sigungu: string | null; size: string | null; founded: string | null; interests: string[]; brands: string[] };
-  sources: { slug: string; label: string; last_run_at: string | null; last_status: string | null; summary: string | null }[]; keys: { bizinfo: boolean; datago: boolean }; statusLabel: Record<string, string> };
+  sources: { slug: string; label: string; last_run_at: string | null; last_status: string | null; summary: string | null }[]; bySource?: { counts: { source: string; label: string; n: number }[]; lastAt: string | null }; keys: { bizinfo: boolean; datago: boolean }; statusLabel: Record<string, string> };
 
 const TABS: [string, string][] = [['fit', '맞춤'], ['closing', '마감 임박'], ['list', '신청 목록'], ['mine', '관심·준비'], ['results', '신청·결과'], ['all', '전체']];
 /** #781 정렬·D-day·종류(사람별 기억) */
@@ -133,6 +133,7 @@ export function Support() {
       <div className="flex flex-wrap gap-1.5" role="tablist">{TABS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => go({ tab: k === 'fit' ? null : k })}
         className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent font-semibold text-white' : 'border-line bg-white')} style={tab === k ? { background: C } : undefined} data-testid={`support-tab-${k}`}>{l} <span className="tabular-nums">{data?.counts?.[k] ?? ''}</span></button>)}</div>
       {!data ? <Skeleton rows={5} /> : <>
+        {data.bySource && <p className="text-[11px] text-ink-3" data-testid="support-source-counts">출처(열린 공고) {data.bySource.counts.map((c) => `${c.label} ${c.n}`).join(' · ')}{data.bySource.lastAt ? ` · 마지막 수집 ${fmtDateTime(data.bySource.lastAt)}` : ''}</p>}
         {data.chips && <ViewBar data={data} cur={cur} onPick={pickView} />}
         {tab === 'fit' && (data.weekly || (data.canEdit && data.aiOn)) && <WeeklyBox weekly={data.weekly} canEdit={data.canEdit && data.aiOn} auto={data.weeklyAiMax} busy={busy === 'weekly'} onNow={weeklyNow} onOpen={(id) => go({ id })} />}
         {tab === 'fit' && <AutoNote data={data} />}
@@ -279,7 +280,7 @@ function WeeklyBox({ weekly, canEdit, auto, busy, onNow, onOpen }: { weekly: Wee
 function SourceLine({ sources }: { sources: ListData['sources'] }) {
   return (
     <footer className="space-y-0.5 border-t border-line pt-2 text-[11px] text-ink-3" data-testid="support-sources">
-      <p>공고 원문 출처: 기업마당(bizinfo.go.kr) · K-Startup(k-startup.go.kr) · 각 기관 공지. 공고 내용은 원문 그대로 옮기고, 자세한 조건은 원문 링크에서 확인하세요. 1차 판단·AI 판단은 참고용입니다.</p>
+      <p>공고 원문 출처: 기업마당(bizinfo.go.kr) · K-Startup(k-startup.go.kr) · 각 기관 공지(플랫폼 운영 › 지원사업 감시 페이지). 공고 내용은 원문 그대로 옮기고, 자세한 조건은 원문 링크에서 확인하세요. 1차 판단·AI 판단은 참고용입니다.</p>
       {sources.map((s) => <p key={s.slug} className={cx(portalService(s.summary) && 'text-amber-900')}>{s.label}: {s.last_run_at ? `마지막 수집 ${fmtDateTime(s.last_run_at)}` : '아직 수집 전'}{s.summary ? ` — ${s.summary}` : ''}<PortalApplyLink summary={s.summary} /></p>)}
     </footer>
   );

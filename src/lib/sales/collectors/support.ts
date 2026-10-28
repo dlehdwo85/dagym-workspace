@@ -19,7 +19,7 @@ const ENT: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quo
 /** HTML → 줄바꿈을 살린 글(문단·목록·줄바꿈 태그는 줄로) */
 export function plain(html: string | null | undefined): string {
   if (!html) return '';
-  return String(html).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr|h\d)>/gi, '\n').replace(/<li[^>]*>/gi, '· ')
+  return String(html).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr|h\d)>/gi, '\n').replace(/<li[^>]*>/gi, '· ')
     .replace(/<[^>]+>/g, ' ').replace(/&(#x?[0-9a-f]+|\w+);/gi, (m, e: string) => (e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e.toLowerCase()] ?? m))
     .replace(/[ \t ]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -277,46 +277,111 @@ export const kstartupSupport: Collector = {
 };
 
 // ---------- 지원사업 감시 페이지(지자체·RIPC·진흥원 공지 게시판) ----------
-export type SupportWatchPage = { name: string; url: string; region?: string | null };
+/** detail: 상세가 자바스크립트 함수(fn_noticeView('1675'))인 게시판의 상세 주소 꼴('{id}' 자리에 함수 첫 인자) · all: 지원사업만 올리는 게시판(제목 낱말로 거르지 않음) */
+export type SupportWatchPage = { name: string; url: string; region?: string | null; detail?: string | null; all?: boolean };
+/** #787(로컬 10/29 00:50, 대표 승인 세 기관): 알려진 게시판 — 감시 목록에 주소만 넣어도 상세 주소·전용 게시판 규칙이 붙음 */
+const KNOWN_BOARDS: { host: RegExp; detail?: string; all?: boolean }[] = [
+  { host: /(^|\.)spobiz\.kspo\.or\.kr$/i, detail: '/front/sportsHistory/sportsBissMng/sportsBissNoticeDetail.do?suppBusiInfoSeq={id}', all: true }, // 국민체육진흥공단 스포츠산업지원 지원사업공고
+  { host: /(^|\.)ybs\.ypa\.or\.kr$/i, detail: '/poratlAppFormDtl.do?regNo={id}', all: true }, // 용인기업지원시스템 지원사업 공고
+  { host: /(^|\.)nipa\.kr$/i, all: true }, // 정보통신산업진흥원 사업공고
+];
+export function boardRule(p: Pick<SupportWatchPage, 'url' | 'detail' | 'all'>): { detail: string | null; all: boolean } {
+  let host = ''; try { host = new URL(p.url).hostname; } catch { /* 아래 */ }
+  const k = KNOWN_BOARDS.find((b) => b.host.test(host));
+  return { detail: p.detail ?? k?.detail ?? null, all: p.all ?? k?.all ?? false };
+}
 export async function supportWatchPages(): Promise<SupportWatchPage[]> {
-  if (process.env.SALES_COLLECT_TEST_BASE) return [{ name: '시험 지식재산센터', url: `${process.env.SALES_COLLECT_TEST_BASE.replace(/\/$/, '')}/support/board`, region: '경기' }];
   const [s] = await db()<{ value: SupportWatchPage[] }[]>`select value from app_settings where key = 'support_watch_pages'`;
-  return Array.isArray(s?.value) ? s.value.filter((p) => p && /^https?:\/\//.test(String(p.url))) : [];
+  const saved = Array.isArray(s?.value) ? s.value.filter((p) => p && /^https?:\/\//.test(String(p.url))) : [];
+  if (process.env.SALES_COLLECT_TEST_BASE) return saved.length ? saved : [{ name: '시험 지식재산센터', url: `${process.env.SALES_COLLECT_TEST_BASE.replace(/\/$/, '')}/support/board`, region: '경기' }];
+  return saved;
 }
 export const SUPPORT_RE = /(지원\s*사업|지원사업|참여\s*기업|수혜\s*기업|모집|공모|바우처|긴급\s*지원|지원\s*대상|신청\s*안내)/;
-const NOT_SUPPORT_RE = /(결과\s*(발표|공고|안내)|선정\s*결과|최종\s*선정|합격|채용|입찰|낙찰|직원\s*모집|인턴|강사\s*모집|취소\s*공고)/;
-/** 게시판 HTML → 지원사업 글(제목·링크·글에 적힌 날짜) */
-export function parseSupportBoard(html: string, base: string): { title: string; url: string; posted: string | null }[] {
-  const out: { title: string; url: string; posted: string | null }[] = []; const seen = new Set<string>();
-  const add = (inner: string, href: string | null, row: string) => {
-    const t = plain(inner).replace(/\s+/g, ' ').slice(0, 200); if (!t || t.length < 6 || !SUPPORT_RE.test(t) || NOT_SUPPORT_RE.test(t) || seen.has(t)) return; seen.add(t);
-    out.push({ title: t, url: absUrl(href, base) ?? base, posted: datesIn(plain(row))[0]?.day ?? null });
+/** 지원사업이 아닌 글 — 결과 발표·채용·입찰·용역 계약(#787 NIPA '포럼 운영 용역 모집') */
+export const NOT_SUPPORT_RE = /(결과\s*(발표|공고|안내)|선정\s*결과|최종\s*선정|합격|채용|입찰|낙찰|직원\s*모집|인턴|강사\s*모집|취소\s*공고|용역|설문\s*조사|만족도\s*조사)/;
+export type BoardItem = { title: string; url: string; posted: string | null; start: string | null; end: string | null; period: string | null; org: string | null; cat: string | null };
+const DAY = String.raw`20\d{2}\s*[.\-/]\s*\d{1,2}\s*[.\-/]\s*\d{1,2}\.?`;
+const PERIOD = new RegExp(`(${DAY})(?:\\s*\\(?[월화수목금토일]\\)?)?(?:\\s*\\d{1,2}:\\d{2})?\\s*[~∼-]\\s*(${DAY})(?:\\s*\\(?[월화수목금토일]\\)?)?(?:\\s*\\d{1,2}(?::\\d{2}|시)(?:\\s*까지)?)?`);
+const cls = (row: string, re: RegExp) => { const m = row.match(new RegExp(`<(\\w+)\\b[^>]*class="[^"]*\\b(?:${re.source})\\b[^"]*"[^>]*>([\\s\\S]*?)</\\1>`, 'i')); return m ? plain(m[2]).replace(/\s+/g, ' ').trim() || null : null; };
+/** 게시판 HTML → 지원사업 글(제목·상세 주소·게시일·신청 기간·기관·분류). #787: 주석 속 꼬리표(NIPA '<!-- [사업화] -->')는 지움 · 상세가 자바스크립트면 상세 주소 꼴로 ·
+ *  상세 주소를 못 만드는 줄(메뉴·'#'·javascript:void(0))은 버림 · 날짜가 있는 줄이 있는 게시판이면 날짜 없는 줄(메뉴)도 버림 */
+export function parseSupportBoard(html: string, base: string, opt: { detail?: string | null; all?: boolean } = {}): BoardItem[] {
+  const src = html.replace(/<!--[\s\S]*?-->/g, ' ');
+  const rows: { title: string; url: string; text: string; org: string | null; cat: string | null }[] = []; const seen = new Set<string>();
+  const add = (inner: string, attrs: string, row: string) => {
+    const attr = (k: string) => attrs.match(new RegExp(`\\b${k}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, 'i'))?.[2]?.trim() ?? ''; // 속성 안의 다른 따옴표(onclick="fn_viewDetail('RGS_…')")까지
+    const href = attr('href'); const onclick = attr('onclick');
+    let url: string | null = null;
+    if (href && !/^(javascript:|#)/i.test(href)) url = absUrl(href, base);
+    else if (opt.detail) { const arg = `${href} ${onclick}`.match(/\b[A-Za-z_$][\w$]*\s*\(\s*['"]([^'"]+)['"]/)?.[1]; if (arg) url = absUrl(opt.detail.replace('{id}', encodeURIComponent(arg)), base); }
+    if (!url || url.split('#')[0] === base.split('#')[0]) return;
+    const t = (cls(inner, /pjtit|subject|tit|title/) ?? plain(inner)).replace(/\s+/g, ' ').replace(/^(?:\[?(?:공지|일반|긴급|N|NEW)\]?\s+)+/i, '').trim().slice(0, 200);
+    if (!t || t.length < 6 || (!opt.all && !SUPPORT_RE.test(t)) || NOT_SUPPORT_RE.test(t) || seen.has(t)) return; seen.add(t);
+    rows.push({ title: t, url, text: plain(row).replace(/\s+/g, ' '), org: cls(inner, /colorbox/) ?? cls(row, /colorbox/), cat: cls(inner, /linebox/) ?? cls(row, /linebox/) });
   };
-  for (const m of html.matchAll(/<(tr|li)\b[^>]*>([\s\S]*?)<\/\1>/gi)) { const a = m[2].match(/<a\b[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i); if (a) add(a[2], a[1], m[2]); }
-  for (const m of html.matchAll(/<a\b[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi)) add(m[2], m[1], '');
-  return out.slice(0, 40);
+  for (const m of src.matchAll(/<(tr|li)\b[^>]*>([\s\S]*?)<\/\1>/gi)) { const a = m[2].match(/<a\b([^>]*)>([\s\S]*?)<\/a>/i); if (a) add(a[2], a[1], m[2]); }
+  if (!rows.length) for (const m of src.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) add(m[2], m[1], '');
+  const out = rows.map((r) => {
+    const pm = r.text.match(PERIOD); const per = pm ? parsePeriod(pm[0]) : null;
+    const rest = pm ? r.text.replace(pm[0], ' ') : r.text; const posted = datesIn(rest)[0]?.day ?? null;
+    return { title: r.title, url: r.url, posted: posted ?? per?.start ?? null, start: per?.start ?? null, end: per?.end ?? null, period: pm ? pm[0].replace(/\s+/g, ' ').trim() : null, org: r.org, cat: r.cat, dated: !!(pm || posted) };
+  });
+  const anyDated = out.some((x) => x.dated);
+  return out.filter((x) => !anyDated || x.dated).map(({ dated: _d, ...x }) => x).slice(0, 40);
 }
+/** 상세 본문 → 신청 기간·지원 대상(#787: 감시 글은 목록에 기간·대상이 없을 때가 많아 1차 규칙이 약함) */
+export function watchDetailFields(text: string): { start: string | null; end: string | null; period: string | null; target: string | null } {
+  const t = String(text ?? '');
+  const pm = t.match(/(?:신청|접수|모집|공모)\s*(?:기간|일정|기한)\s*[:：]?\s*\n?\s*([^\n]{4,80})/); const per = pm ? parsePeriod(pm[1]) : null;
+  const tm = t.match(/(?:지원|신청|참여|모집|사업|참가)\s*대상\s*[:：]?\s*\n?\s*([^\n]{2,200})/);
+  return { start: per?.start ?? null, end: per?.end ?? null, period: per && (per.start || per.end) ? pm![1].trim().slice(0, 80) : null, target: tm ? tm[1].trim().slice(0, 300) : null };
+}
+const WATCH_DETAIL_MAX = 8; // 한 번에 새 글 본문 읽기 수(게시판 기관에 부담 주지 않게)
 export const supportWatch: Collector = {
-  slug: 'support_watch', label: '지원사업 · 감시 페이지', hourKst: 8, againKst: 14, source: '지자체·지역지식재산센터(RIPC)·진흥원 공지 게시판(플랫폼 운영 › 지원사업 감시 페이지) — 지원·모집 글 제목',
+  slug: 'support_watch', label: '지원사업 · 감시 페이지', hourKst: 8, againKst: 14, source: '지자체·지역지식재산센터(RIPC)·진흥원 공지 게시판(플랫폼 운영 › 지원사업 감시 페이지) — 지원·모집 글 제목·신청 기간(새 글은 본문의 기간·대상)',
   async run(ctx) {
     const pages = await supportWatchPages();
     if (!pages.length) return done({ inserted: 0, updated: 0, unchanged: 0 }, [], '감시 페이지 목록이 비어 있습니다(플랫폼 운영 › 지원사업 감시 페이지)', 'web_scrape');
-    const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const errors: string[] = []; const items: ProgramIn[] = [];
+    const sql = db(); const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const errors: string[] = []; const items: ProgramIn[] = []; const perPage: string[] = [];
+    const UA = { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' };
     for (const p of pages) {
       if (left() < 6000) { errors.push(`시간 한도 근접 — ${p.name} 부터는 다음 실행에서`); break; }
       try {
-        const res = await ctx.fetchImpl(p.url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' }, signal: AbortSignal.timeout(Math.min(10000, left() - 2000)) });
+        const res = await ctx.fetchImpl(p.url, { headers: UA, signal: AbortSignal.timeout(Math.min(10000, left() - 2000)) });
         if (!res.ok) { errors.push(`${p.name}: HTTP ${res.status}`); continue; }
         const { text } = decodeKoreanText(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type'));
         const region = p.region && SIDO.includes(p.region) ? [p.region] : sidoIn(p.name);
-        for (const r of parseSupportBoard(text, p.url)) {
-          items.push({ source: 'watch', source_id: `${h16(p.url)}-${h16(r.title)}`, title: r.title, agency: p.name, executor: null, category: null, target: null, regions: region, nationwide: !region.length, summary: null,
-            apply_start: null, apply_end: null, apply_text: null, amount: amountIn(r.title), biz_years: null, url: r.url, apply_url: null, attachments: [], hashtags: [], raw: { page: p.url, name: p.name }, posted_at: r.posted });
+        const found = parseSupportBoard(text, p.url, boardRule(p)); perPage.push(`${p.name} ${found.length}`);
+        // 같은 상세 주소의 예전 글(제목 꼬리표가 붙어 들어온 것)은 그 번호 그대로 고침 — 같은 글이 둘이 되지 않게
+        const prev = new Map((await sql<{ source_id: string; url: string }[]>`select source_id, url from support_programs where tenant is null and source = 'watch' and url = any(${found.map((r) => r.url)}::text[])`).map((x) => [x.url, x.source_id]));
+        for (const r of found) {
+          items.push({ source: 'watch', source_id: prev.get(r.url) ?? `${h16(p.url)}-${h16(r.url)}`, title: r.title, agency: p.name, executor: r.org, category: r.cat, target: null, regions: region, nationwide: !region.length, summary: null,
+            apply_start: r.start, apply_end: r.end, apply_text: r.period, amount: amountIn(r.title), biz_years: null, url: r.url, apply_url: null, attachments: [], hashtags: [], raw: { page: p.url, name: p.name }, posted_at: r.posted });
         }
       } catch (e) { errors.push(`${p.name}: ${e instanceof Error ? e.message : String(e)}`); }
     }
+    // 새 글(본문을 아직 안 읽은 것)은 상세 본문에서 신청 기간·대상·본문 앞부분을 채움 — 한 번에 몇 건만
+    const have = new Map((await sql<{ source_id: string; summary: string | null; target: string | null; apply_start: string | null; apply_end: string | null; apply_text: string | null; amount: string | null }[]>`select source_id, summary, target,
+      apply_start::text, apply_end::text, apply_text, amount from support_programs where tenant is null and source = 'watch' and source_id = any(${items.map((x) => x.source_id)}::text[])`).map((x) => [x.source_id, x]));
+    let read = 0;
+    for (const it of items) {
+      const h = have.get(it.source_id);
+      if (h?.summary) { // 이미 읽은 본문에서 채운 칸은 그대로(목록에 없다고 지우지 않음 — 바뀜으로 안 셈)
+        it.summary = h.summary; it.target = it.target ?? h.target; it.amount = it.amount ?? h.amount;
+        if (!it.apply_end) { it.apply_start = it.apply_start ?? h.apply_start; it.apply_end = h.apply_end; it.apply_text = it.apply_text ?? h.apply_text; }
+        continue;
+      }
+      if (!it.url || read >= WATCH_DETAIL_MAX || left() < 8000) continue;
+      read++;
+      const body = await watchDetailText(it.url, ctx.fetchImpl).catch(() => null);
+      if (!body) continue;
+      const i = body.lastIndexOf(it.title.slice(0, 15)); const main = (i >= 0 ? body.slice(i) : body).slice(0, 4000);
+      const f = watchDetailFields(main);
+      it.summary = main; it.target = f.target; if (!it.apply_end && f.end) { it.apply_start = it.apply_start ?? f.start; it.apply_end = f.end; it.apply_text = it.apply_text ?? f.period; }
+      it.amount = it.amount ?? amountIn(main);
+    }
     const r = items.length ? await upsertPrograms(items) : { inserted: 0, updated: 0, unchanged: 0 };
-    return done(r, errors, `감시 ${pages.length}곳 · 지원사업 글 ${items.length}건 · 신규 ${r.inserted} · 변화없음 ${r.unchanged}`, 'web_scrape');
+    return done(r, errors, `감시 ${pages.length}곳(${perPage.join(' · ')}) · 지원사업 글 ${items.length}건 · 본문 읽음 ${read} · 신규 ${r.inserted} · 바뀜 ${r.updated} · 변화없음 ${r.unchanged}`, 'web_scrape');
   },
 };
 /** 감시 페이지 글의 본문(AI 판단용) — 등록된 감시 페이지와 같은 호스트만 읽는다 */

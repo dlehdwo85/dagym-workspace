@@ -15,7 +15,7 @@ export async function elig252({ owner, ctx, sql, BASE, SHOTS }) {
   const put = (n, row) => sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', ${ID(n)}, ${sql.json({ id: ID(n), notice_kind: 'new', current_status: '공고중', related: true, fit_business: '다짐',
     first_seen_at: now, posted_date: kst(0), contract_method: '제한경쟁', ...row })}, 'workin')`;
   await put(1, { source_type: 'kapt_bid', source_external_id: 'E2E252-1', title: '[경기용인] 모의252아파트 주민운동시설 위탁운영 사업자 선정', issuer: '모의252아파트', deadline_at: `${kst(9)}T17:00:00+09:00`, award_method: '적격심사',
-    eligibility: { text: TEXT, items: [{ k: 'capital', label: '자본금 5억 이상' }, { k: 'license', label: '주민운동시설 위탁운영 등록업체' }], line: LINE, error: null, file: { name: '입찰공고문.hwp', url: 'https://www.k-apt.go.kr/cmm/file/BID/fileDownload.do?key=1&bidNum=E2E252-1' }, readAt: now, sig: '', tries: 0 } });
+    eligibility: { text: TEXT, items: [{ k: 'capital', label: '자본금 5억 이상' }, { k: 'license', label: '주민운동시설 위탁운영 등록업체' }], line: LINE, error: null, file: { name: '입찰공고문.hwp', url: 'https://www.k-apt.go.kr/cmm/file/BID/fileDownload.do?key=1&bidNum=E2E252-1' }, readAt: now, sig: '', tries: 0, by: 'vision' } }); // 253차 #790 사진 공고문을 AI 가 읽은 것
   await put(2, { source_type: 'g2b_bid', source_external_id: 'E2E252-2-000', title: '모의252 체육센터 운영 용역', issuer: '모의252시청', deadline_at: `${kst(12)}T10:00:00+09:00`, award_method: '협상에 의한 계약', region_restriction: '경기도' });
   await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: [], excludes: [], regions: [], issuers: [], itemCodes: [], amountMin: null, amountMax: null });
   try {
@@ -30,7 +30,7 @@ export async function elig252({ owner, ctx, sql, BASE, SHOTS }) {
     assert.equal(await el.getByTestId('bid-elig-text').isVisible(), false);
     await el.locator('summary').click();
     assert.equal(await el.getByTestId('bid-elig-text').innerText(), TEXT);
-    assert.match(await el.innerText(), /공고문: 입찰공고문\.hwp/);
+    assert.match(await el.innerText(), /공고문: 입찰공고문\.hwp · AI 가 사진에서 읽음 — 숫자는 원문 확인/);
     // 아직 안 읽은 나라장터 공고 = API 지역만
     assert.equal(await two.getByTestId('bid-elig-line').innerText(), '지역 경기도');
     await one.scrollIntoViewIfNeeded();
@@ -42,6 +42,7 @@ export async function elig252({ owner, ctx, sql, BASE, SHOTS }) {
     assert.equal(await box.getByTestId('bid-elig-detail-line').innerText(), LINE);
     assert.equal(await box.getByTestId('bid-elig-detail-text').innerText(), TEXT);
     assert.match(await box.innerText(), /공고문: 입찰공고문\.hwp · 읽은 때/);
+    assert.equal(await box.getByTestId('bid-elig-vision').innerText(), 'AI 가 사진에서 읽음 — 숫자는 원문 확인');
     assert.match(await det.getByTestId('bid-terms-detail').innerText(), /^입찰 방식 · 조건 · 현장설명/);
     await owner.screenshot({ path: `${SHOTS}/601-bid-elig-detail.png` });
     await owner.keyboard.press('Escape'); await det.waitFor({ state: 'detached' });

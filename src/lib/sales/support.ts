@@ -10,7 +10,7 @@ import { audit } from '../log';
 import { notify } from '../notifications';
 import { aiEnabled, anthropicProvider, costUsd, modelFor, usdKrw, type AiProvider } from '../ai/provider';
 import { tenantOf, type SessionUser } from '../types';
-import { SIDO, supportKeyStatus, watchDetailText } from './collectors/support';
+import { NOT_SUPPORT_RE, SIDO, supportKeyStatus, watchDetailText } from './collectors/support';
 import { SIDO_ALIASES } from './collectors/prospects';
 import { garbledText } from './collectors/files';
 
@@ -539,7 +539,10 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   const sources = await sql<{ slug: string; last_run_at: string | null; last_status: string | null; summary: string | null }[]>`select s.slug, s.last_run_at, s.last_status, r.summary from sales_collector_state s
     left join lateral (select summary from sales_collector_runs x where x.slug = s.slug order by started_at desc limit 1) r on true where s.slug = any(${Object.values(SOURCE_SLUG)})`;
   const aiOn = aiEnabled();
-  return { tab, today, items, total, counts, hiddenNo, view, sortUsed, chips, kindLabel: KIND_LABEL, pendingCount, blanks, aiCostKrw: aiOn ? await aiCostKrw(sql, t) : null,
+  // #787(대표 "K-Startup 에서만 발췌하는지?"): 출처별 열린 공고 수 + 마지막 수집 — 화면 위 한 줄
+  const per = new Map<string, number>(); for (const x of all) if (open(x) && !x.hidden) per.set(x.source, (per.get(x.source) ?? 0) + 1);
+  const bySource = { counts: Object.keys(SOURCE_LABEL).map((k) => ({ source: k, label: SOURCE_LABEL[k], n: per.get(k) ?? 0 })), lastAt: sources.map((s) => s.last_run_at).filter(Boolean).sort().pop() ?? null };
+  return { tab, today, items, total, counts, hiddenNo, view, sortUsed, chips, kindLabel: KIND_LABEL, pendingCount, blanks, aiCostKrw: aiOn ? await aiCostKrw(sql, t) : null, bySource,
     auto: { on: autoOn, enabled: autoAi, saved, queue: autoQueue, stopped: autoOn ? autoState?.stopped ?? null : null, left: autoState?.left ?? 0, at: autoState?.at ?? null, done: autoState?.done ?? 0 },
     weeklyAiMax: Math.max(0, Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 5) || 0), profile: { saved, filled: !!pr, autoAi, region: profile.region_sido, sigungu: profile.region_sigungu, size: profile.size, founded: profile.founded, interests: profile.interests, brands: profile.brands },
     sources: sources.map((s) => ({ ...s, label: SOURCE_LABEL[Object.entries(SOURCE_SLUG).find(([, v]) => v === s.slug)?.[0] ?? ''] ?? s.slug })), off,
@@ -567,7 +570,9 @@ async function supportAll(sql: Sql, t: string, uid: string, today: string) {
       and ((p.apply_end is null or p.apply_end >= ${today}::date) and (p.tenant is not null or p.last_seen_at > now() - interval '45 days') or p.id = any(${workIds}::uuid[]))
     order by p.first_seen_at desc limit 5000`;
   const pr = saved || profile.region_sido || profile.industries.length || profile.interests.length ? profile : null;
-  const all = dedupe(rows.map((p) => itemOf(p, ruleMatch(p, pr, today), mm.get(p.id), wm.get(p.id), today, uid, basisAt)));
+  // #787: 기관 공지 중 지원사업이 아닌 글(용역·설문·결과 발표 — 거르기 규칙을 넓히기 전에 들어온 것)은 진행 중이 아니면 빼고 봄
+  const keep = rows.filter((p) => p.source !== 'watch' || !NOT_SUPPORT_RE.test(p.title) || wm.has(p.id));
+  const all = dedupe(keep.map((p) => itemOf(p, ruleMatch(p, pr, today), mm.get(p.id), wm.get(p.id), today, uid, basisAt)));
   return { all, profile, saved, pr, off, wm, autoAi, basisAt, autoState };
 }
 async function programFor(sql: Sql, t: string, id: string, summaryLen = 20000): Promise<Prog> {
@@ -845,7 +850,7 @@ async function latestWeekly(sql: Sql, t: string) {
   return w ? { week: w.week, items: Array.isArray(w.items) ? w.items : [], aiCount: w.ai_count, aiFailed: w.ai_failed, sentTo: w.sent_to, createdAt: w.created_at } : null;
 }
 /** 회사 관리자(대표 → 관리자 순) 한 명을 세션 없이 실행 주체로 — 자동 판단의 AI 사용량이 이 사람 이름으로 남는다 */
-async function adminActor(sql: Sql, t: string): Promise<SessionUser | null> {
+export async function adminActor(sql: Sql, t: string): Promise<SessionUser | null> {
   const [a] = await sql<{ id: string }[]>`select id from users where tenant = ${t} and status = 'active' and role in ('owner', 'admin') order by (role = 'owner') desc, created_at limit 1`;
   if (!a) return null;
   return (await import('../mktStudio')).actorFor(a.id).catch(() => null);

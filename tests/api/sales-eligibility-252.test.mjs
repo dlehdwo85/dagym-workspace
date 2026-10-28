@@ -4,8 +4,9 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { BASE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { BASE, FAKE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 import { fakeKapt } from '../fakeKapt.mjs';
+import { startFakeGoogle } from '../fake-google.mjs';
 
 const E = await import('../../src/lib/sales/eligibilityText.ts'); // 다른 모듈을 안 부르는 잎 모듈 — Node 22 형식 제거로 .ts 직접
 const PORT = 3282;
@@ -18,6 +19,28 @@ const B = `7. 입찰방법 : 제한경쟁\n8. 입찰참가자격(입찰공고일
 const C = `3. 현장설명 : 2026. 11. 2.\n4. 입찰 참가자격\n가. 국토교통부고시 제2024-196호 제26조 ①항에 해당하지 않는 업체\n나. 현장설명회에 참가한 업체\n5. 입찰서 제출`;
 const COMMON = `5. 참가자격\n가. 사업자선정지침 제26조제1항 각호에 해당하지 않는 사업자\n6. 제출서류`;
 const LINE_A = '자본금 5억 이상 · 주민운동시설 위탁운영 등록업체';
+// 253차(로컬 10/29 00:58 운영 hwp·hwpx 공고문): 숫자가 '실적' 앞에 오는 꼴 — '5개 단지 이상 위탁운영 실적'
+const R1 = `4. 입찰참가 자격\n가. 국토교통부고시 제2024-196호 제26조 ①항에 해당하지 않는 업체\n나. 입찰 공고일 현재로부터 최근 5년간 아파트 커뮤니티 시설 5개 단지 이상 위탁운영             실적이 있는 업체\n다. 자본금 5억 이상 업체\n5. 입찰서 제출`;
+const R2 = `3. 입찰 참가자격\n가. 사업자선정지침 제26조에 해당하지 않는 자\n나. 입찰 공고일 현재 자본금  2억원 이상인 업체\n다. 입찰 공고일 현재로부터 5년간 공동주택 1개 단지 수영장운용 실적이 있는 업체\n4. 현장설명`;
+function zip(files) { // 저장(압축 없음) zip — tests/api/library-text.test.mjs 와 같은 꼴
+  const parts = [], central = []; let off = 0;
+  for (const [name, data] of files) {
+    const n = Buffer.from(name), d = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt32LE(d.length, 18); lh.writeUInt32LE(d.length, 22); lh.writeUInt16LE(n.length, 26);
+    const ch = Buffer.alloc(46); ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt32LE(d.length, 20); ch.writeUInt32LE(d.length, 24); ch.writeUInt16LE(n.length, 28); ch.writeUInt32LE(off, 42);
+    parts.push(lh, n, d); central.push(ch, n); off += 30 + n.length + d.length;
+  }
+  const cd = Buffer.concat(central);
+  const eocd = Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(files.length, 8); eocd.writeUInt16LE(files.length, 10); eocd.writeUInt32LE(cd.length, 12); eocd.writeUInt32LE(off, 16);
+  return Buffer.concat([...parts, cd, eocd]);
+}
+const sharp = (await import('sharp')).default;
+const PNG = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#ffffff' } }).png().toBuffer();
+// 253차(로컬 운영 docx: 글 0·그림 16장) — 그림 7장 = 앞 6장만 AI 에
+const PHOTO_DOCX = zip([['[Content_Types].xml', '<Types/>'], ['word/document.xml', '<w:document><w:body><w:p><w:r><w:drawing/></w:r></w:p></w:body></w:document>'],
+  ...[1, 2, 3, 4, 5, 6, 7].map((n) => [`word/media/image${n}.png`, PNG])]);
+const say = (o) => ({ content: [{ type: 'text', text: JSON.stringify(o) }], stop_reason: 'end_turn' });
+const queue = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: items }) });
 
 test('자르기·뽑기(규칙): 세 가지 공고문 꼴 → 절(머리부터 다음 번호 앞까지, 원문 그대로) · 요건 항목 · 한 줄(공통 문구 제26조는 줄에서 빼고 원문엔 남김)', () => {
   const a = E.eligibilitySection(A);
@@ -46,6 +69,10 @@ test('자르기·뽑기(규칙): 세 가지 공고문 꼴 → 절(머리부터 �
   assert.deepEqual(E.apiExtra({ license_limit: '정보통신공사업(0036)', region_restriction: '경기도' }, E.eligibilityItems(b)), ['지역 경기도']);
   assert.equal(E.eligSay({ error: '첨부 공고문 없음' }), '공고문에서 참가자격을 못 찾음 — 원문 확인(이유: 첨부 공고문 없음)');
   assert.equal(E.eligSay({ line: '업종 체육시설업', error: '글 뽑기 오류' }), '업종 체육시설업 · 공고문에서 참가자격을 못 찾음 — 원문 확인(이유: 글 뽑기 오류)');
+  // 253차 운영 공고문 꼴 — 실적이 빠지던 것
+  assert.equal(E.lineOf(E.eligibilitySection(R1)), '자본금 5억 이상 · 실적 최근 5년 아파트 커뮤니티 시설 5개 단지 이상 위탁운영');
+  assert.equal(E.lineOf(E.eligibilitySection(R2)), '자본금 2억 이상 · 실적 5년 공동주택 1개 단지 수영장운용');
+  assert.equal(E.lineOf(E.eligibilitySection(COMMON)), E.COMMON_ONLY);
 });
 
 // ---- 공고문 읽기(정기 실행·다시 읽기) ----
@@ -56,10 +83,11 @@ const N = {
   KD: { id: '00000000-0000-4000-8000-000000252004', bid: 'E252004', files: [{ seq: 25204, fileName: '입찰공고문.txt', body: Buffer.from(COMMON) }] },
   CLOSED: { id: '00000000-0000-4000-8000-000000252005', bid: 'E252005', files: [{ seq: 25205, fileName: '입찰공고문.txt', body: Buffer.from(A) }], closed: true },
   OTHER: { id: '00000000-0000-4000-8000-000000252006', bid: 'E252006', files: [{ seq: 25206, fileName: '입찰공고문.txt', body: Buffer.from(A) }], unrelated: true },
+  PHOTO: { id: '00000000-0000-4000-8000-000000252007', bid: 'E252007', files: [{ seq: 25207, fileName: '입찰공고문.docx', body: PHOTO_DOCX }] }, // 253차: 그림만 든 docx
 };
 const G = { id: '00000000-0000-4000-8000-000000252010', no: 'R26BK252010-000' };
 const docs = { '/g2b/notice-b.txt': B, '/g2b/notice-c.txt': C };
-let srv, ctx, sql, fake;
+let srv, ctx, sql, fake, fg;
 const rowOf = async (id) => (await sql`select row from sales_src_rows where src_id = ${id}`)[0]?.row;
 const tick = async () => { const r = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(r.status, 200); };
 const put = (id, row) => sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', ${id}, ${sql.json({ id, ...row })}, 'workin')`;
@@ -74,9 +102,10 @@ before(async () => {
     if (kapt.handle(req, res, body)) return;
     res.writeHead(404); res.end('nope');
   }).listen(PORT);
-  await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, SALES_ELIGIBILITY: 'on' }); sql = testDb(); ctx = await bootstrap();
+  fg = await startFakeGoogle();
+  await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, SALES_ELIGIBILITY: 'on', SALES_ELIGIBILITY_MAX: '10' }); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
-  await sql`insert into sales_cutover (tenant, writes_open, ok) values ('default', true, true) on conflict (tenant) do update set writes_open = true, ok = true`;
+  await sql`delete from sales_cutover`; // #790 사진 읽기는 비용을 낼 회사(영업 전환 연 회사)가 있을 때만 — 마지막 시험에서 연다(다른 시험 파일이 남긴 줄 지움)
   await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified, created_at) values ('default', ${plus(-1)}, '[]', '{}', 1, 1, ${new Date(`${plus(-1)}T08:00:00+09:00`)})`;
   for (const [k, o] of Object.entries(N)) await put(o.id, { source_type: 'kapt_bid', source_external_id: o.bid, title: `[경기] 시험252 ${k} 단지 주민운동시설 위탁운영 사업자 선정`, issuer: `시험252 ${k} 단지`, related: !o.unrelated, fit_business: '다짐', classification: '검토',
     current_status: '공고중', notice_kind: 'new', posted_date: today, deadline_at: `${o.closed ? plus(-2) : plus(10)}T17:00:00+09:00`, first_seen_at: new Date().toISOString(), award_method: '적격심사', contract_method: '제한경쟁' });
@@ -84,7 +113,7 @@ before(async () => {
     posted_date: today, deadline_at: `${plus(8)}T10:00:00+09:00`, first_seen_at: new Date().toISOString(), license_limit: '정보통신공사업(0036)', region_restriction: '경기도',
     attachment_urls: [{ name: '입찰공고서.txt', url: `http://127.0.0.1:${PORT}/g2b/notice-b.txt` }, { name: '과업지시서.hwp', url: `http://127.0.0.1:${PORT}/g2b/task.hwp` }] });
 });
-after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
+after(async () => { srv?.proc.kill(); fake?.close(); fg?.server.close(); await sql?.end(); });
 
 test('정기 실행: 열린 관련 공고만 읽음(마감 지남·관련 아님 제외) · 공고문일 법한 파일 먼저 · 원문·항목·한 줄·파일 이름 저장 · 나라장터는 API 지역을 합침 · 못 찾으면 이유', async () => {
   await tick();
@@ -97,6 +126,8 @@ test('정기 실행: 열린 관련 공고만 읽음(마감 지남·관련 아님
   assert.equal(kb.text, null); assert.ok(kb.error && kb.tries === 1, JSON.stringify(kb));
   assert.equal((await rowOf(N.KC.id)).eligibility.error, '첨부 공고문 없음');
   assert.equal((await rowOf(N.KD.id)).eligibility.line, '공통 자격(사업자선정지침)만 적힘 — 별도 요건 없음');
+  const ph = (await rowOf(N.PHOTO.id)).eligibility;
+  assert.deepEqual([ph.text, ph.error, ph.file?.name], [null, '공고문이 사진(스캔)으로만 되어 있음', '입찰공고문.docx'], '못 읽어도 어떤 파일을 봤는지');
   assert.equal((await rowOf(N.CLOSED.id)).eligibility, undefined, '마감 지난 공고는 안 읽음');
   assert.equal((await rowOf(N.OTHER.id)).eligibility, undefined, '관련 아닌 공고는 안 읽음');
   // 다시 돌아도 같은 공고는 안 읽음(못 읽은 것도 20시간 뒤에)
@@ -123,6 +154,9 @@ test("화면 자료·공고 조회·당일 메일: '참가자격' 한 줄과 원
   assert.deepEqual([ka.elig.line, ka.elig.file, ka.terms], [LINE_A, '입찰공고문.txt', '적격심사 · 제한경쟁']);
   assert.equal(ka.elig.text, E.eligibilitySection(A)); assert.equal(ka.detail.qualification, ka.elig.text);
   assert.deepEqual([kc.elig.line, kc.elig.error], [null, '첨부 공고문 없음']);
+  // 253차: 한 줄은 저장한 원문에서 다시 뽑음 — 예전 규칙으로 저장된 줄이어도 화면은 지금 규칙
+  await sql`update sales_src_rows set row = jsonb_set(row, '{eligibility,line}', '"예전 줄"'::jsonb) where src_id = ${N.KA.id}`;
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === N.KA.bid).elig.line, LINE_A);
   const it = (await ctx.owner.ok('GET', `/api/platform/sales-notices?no=${N.KA.bid}`)).items[0];
   assert.deepEqual([it.eligibility?.say, it.eligibility?.file?.name, it.eligibility?.due, it.terms], [LINE_A, '입찰공고문.txt', false, '적격심사 · 제한경쟁']);
   const d = await ctx.owner.ok('GET', '/api/sales/digest');
@@ -133,4 +167,23 @@ test("화면 자료·공고 조회·당일 메일: '참가자격' 한 줄과 원
   assert.ok(text.includes(`참가자격: ${LINE_A}`), text);
   const html = (await ctx.owner.req('GET', '/api/sales/digest?preview=html')).body;
   assert.ok(html.includes('data-digest-elig="1"') && html.includes(LINE_A));
+});
+
+test('#790 사진 공고문: 글이 없으면 AI 비전으로 참가자격 절을 옮겨 적음(앞 6장) · 운영 회사 AI 예산·사용량 이름 · 같은 첨부면 다시 안 부름 · 화면 안내', async () => {
+  assert.equal((await rowOf(N.PHOTO.id)).eligibility.error, '공고문이 사진(스캔)으로만 되어 있음', '비용을 낼 회사(영업 전환 연 회사)가 없으면 사진 읽기 안 함');
+  await sql`insert into sales_cutover (tenant, writes_open, ok) values ('default', true, true) on conflict (tenant) do update set writes_open = true, ok = true`;
+  await queue([say({ found: true, text: R1 })]);
+  const r = await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.PHOTO.id });
+  assert.deepEqual([r.eligibility.by, r.eligibility.text, r.eligibility.error, r.eligibility.file?.name], ['vision', E.eligibilitySection(R1), null, '입찰공고문.docx']);
+  const st = await (await fetch(`${FAKE}/__state`)).json();
+  const req = st.anthropic.at(-1).body; const imgs = req.messages[0].content.filter((b) => b.type === 'image');
+  assert.equal(imgs.length, 6, '그림은 앞 6장만');
+  const used = await sql`select tenant, purpose from ai_usage where purpose = 'sales_eligibility_vision'`;
+  assert.deepEqual(used.map((x) => [x.tenant, x.purpose]), [['default', 'sales_eligibility_vision']]);
+  await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.PHOTO.id }); // 같은 첨부 — 다시 부르지 않고 읽은 글 그대로
+  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_eligibility_vision'`)[0].n, 1);
+  const it = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === N.PHOTO.bid);
+  assert.deepEqual([it.elig.vision, it.elig.line], [true, '자본금 5억 이상 · 실적 최근 5년 아파트 커뮤니티 시설 5개 단지 이상 위탁운영']);
+  const { aiPurposeLabel } = await import('../../src/components/aiPurpose.ts');
+  assert.equal(aiPurposeLabel('sales_eligibility_vision'), '입찰 참가자격 사진 읽기');
 });
