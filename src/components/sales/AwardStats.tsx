@@ -10,7 +10,7 @@ import { ErrorBox, Skeleton, cx } from '@/components/ui';
 type Rec = { id: string; title: string; date: string | null; amount: number | null; rate: number | null; bidders: number | null; region: string | null; issuer: string | null; url: string | null };
 type Co = { key: string; rank: number; name: string; ours: boolean; wins: number; amount: number | null; rate: number | null; bidders: number | null; regions: string[]; last: string | null; recent: Rec[] };
 type Lost = { id: string; title: string; date: string | null; issuer: string | null; url: string | null; our: number | null; winner: string | null; winnerAmount: number | null; gap: number | null; bidders: number | null;
-  score?: { top: number | null; our: number; gap: number | null; rank: number; of: number } | null };
+  score?: { top: number | null; our: number; gap: number | null; rank: number; of: number } | null; docs?: boolean | null; hidden?: boolean };
 type Stats = { days: number; total: number; awarded: number; failed: number; companies: number; ours: number; top5Share: number; items: Co[]; me?: { names: string[]; biz: number; noBiz: string[] };
   participated?: number; lostCount?: number; lost?: Lost[] };
 const C = '#2563EB'; // 영업 색(SalesSrc 와 같음)
@@ -35,8 +35,9 @@ export function AwardStats({ onOpen }: { onOpen: (id: string) => void }) {
           {(data.lost ?? []).length > 0 && <ul className="mt-1.5 space-y-1">{(data.lost ?? []).map((x) => (
             <li key={x.id} className="flex min-w-0 items-start gap-1.5"><button type="button" onClick={() => onOpen(x.id)} className="min-w-0 flex-1 text-left hover:underline" data-testid="award-lost-row">
               <span className="text-ink-3">{md(x.date) ?? '날짜 없음'}</span> {x.title}
-              <span className="block text-ink-2">{[x.winner && `1위 ${x.winner}${won(x.winnerAmount) ? ` ${won(x.winnerAmount)}` : ''}`, won(x.our) && `우리 ${won(x.our)}`, x.gap != null && `차이 ${x.gap > 0 ? '+' : x.gap < 0 ? '−' : ''}${won(Math.abs(x.gap)) ?? '0원'}`, x.bidders && `참가 ${x.bidders}곳`].filter(Boolean).join(' · ')}</span>
-              {x.score && <span className="block text-ink-2" data-testid="award-lost-score">적격심사 점수 — {[x.score.top != null && `1위 ${x.score.top}`, `우리 ${x.score.our}(${x.score.rank}위/${x.score.of}곳)`,
+              <span className="block text-ink-2">{[x.winner && `1위 ${x.winner}${won(x.winnerAmount) ? ` ${won(x.winnerAmount)}` : ''}`, won(x.our) ? `우리 ${won(x.our)}` : x.hidden && '우리 금액 비공개', x.gap != null && `차이 ${x.gap > 0 ? '+' : x.gap < 0 ? '−' : ''}${won(Math.abs(x.gap)) ?? '0원'}`, x.bidders && `참가 ${x.bidders}곳`].filter(Boolean).join(' · ')}</span>
+              {x.docs === false ? <span className="block text-amber-800" data-testid="award-lost-docs">서류 부적합으로 평가 제외(입찰구비서류 적정 여부 N)</span>
+                : x.score && <span className="block text-ink-2" data-testid="award-lost-score">적격심사 점수 — {[x.score.top != null && `1위 ${x.score.top}`, `우리 ${x.score.our}(${x.score.rank}위/${x.score.of}곳)`,
                 x.score.gap != null && (x.score.gap > 0 ? `${x.score.gap}점 낮음` : x.score.gap < 0 ? `${-x.score.gap}점 높음` : '같은 점수')].filter(Boolean).join(' · ')}</span>}</button>
               {x.url && <a href={x.url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-ink-3 hover:text-ink" aria-label="원문 보기"><ExternalLink className="size-3.5" /></a>}</li>))}</ul>}
         </details>}

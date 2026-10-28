@@ -17,12 +17,14 @@ export const AWARD_DAYS = [30, 90, 180, 365] as const;
 type Rec = { id: string; title: string; date: string | null; amount: number | null; rate: number | null; bidders: number | null; region: string | null; issuer: string | null; url: string | null };
 /** 231차: 우리 회사가 참여했지만 남이 낙찰한 입찰(K-apt 참여업체 표) — 1위와 응찰금액 차(우리 − 1위) */
 type Lost = { id: string; title: string; date: string | null; issuer: string | null; url: string | null; our: number | null; winner: string | null; winnerAmount: number | null; gap: number | null; bidders: number | null;
-  /** 234차: 적격심사 평가 점수(참여업체 표에 있을 때) — 1위 점수·우리 점수·차이(1위 − 우리)·우리 점수 순위 */ score?: { top: number | null; our: number; gap: number | null; rank: number; of: number } | null };
+  /** 234차: 적격심사 평가 점수(참여업체 표에 있을 때) — 1위 점수·우리 점수·차이(1위 − 우리)·우리 점수 순위 */ score?: { top: number | null; our: number; gap: number | null; rank: number; of: number } | null;
+  /** 237차: 우리 입찰구비서류 적정 여부(N 이면 평가 제외) · 우리 응찰금액이 가려졌거나 칸이 없음 */ docs?: boolean | null; hidden?: boolean };
 const num = (v: unknown) => { if (v == null || v === '') return null; const x = Number(String(v).replace(/[,원%\s]/g, '')); return Number.isFinite(x) && x > 0 ? x : null; };
 /** 234차(로컬 10/28 16:20 힐스테이트관악센트씨엘 — 금액 차 4.8만원보다 점수 차 2.67점): 참여업체 평가 점수가 있으면 1위(낙찰 표시, 없으면 최고점)·우리·차이·우리 순위(무효 뺌) */
 const scoreOf = (ps: any[], us: any, top: any) => {
   const our = num(us?.score); if (our == null) return null;
-  const valid = ps.filter((x) => !x?.invalid && num(x?.score) != null); const best = num(top?.score) ?? Math.max(...valid.map((x) => num(x.score) as number));
+  // 237차: 서류 부적합(N) 업체는 순위에서 뺌
+  const valid = ps.filter((x) => !x?.invalid && x?.docs !== false && num(x?.score) != null); const best = num(top?.score) ?? Math.max(...valid.map((x) => num(x.score) as number));
   return { top: Number.isFinite(best) ? best : null, our, gap: Number.isFinite(best) ? Math.round((best - our) * 100) / 100 : null, rank: valid.filter((x) => (num(x.score) as number) > our).length + 1, of: valid.length };
 };
 const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
@@ -50,7 +52,8 @@ export async function awardStats(u: SessionUser, days0: number) {
     if (us || mine) participated++;
     if (us && !mine && name) { const top = ps.find((x) => x?.won && !x?.invalid); const our = num(us.amount), wa = num(r.winner_amount) ?? num(top?.amount);
       lost.push({ id: String(r.id ?? id), title: String(r.title ?? '').trim(), date: String(r.award_date ?? r.posted_date ?? '').slice(0, 10) || null, issuer: String(r.issuer ?? r.facility_name ?? '').trim() || null,
-        url: String(r.source_url ?? '').trim() || null, our, winner: name, winnerAmount: wa, gap: our != null && wa != null ? our - wa : null, bidders: ps.length || num(r.bidders), score: scoreOf(ps, us, top) }); }
+        url: String(r.source_url ?? '').trim() || null, our, winner: name, winnerAmount: wa, gap: our != null && wa != null ? our - wa : null, bidders: ps.length || num(r.bidders), score: scoreOf(ps, us, top),
+        ...(typeof us.docs === 'boolean' ? { docs: us.docs } : {}), ...(us.hidden === true || (our == null && us.amount == null) ? { hidden: true } : {}) }); }
     if (!mine && !passPrefs(r, p).ok) continue; // 227차: 우리 회사 낙찰은 맞춤 조건(지역·검색어 등) 밖이어도 셈
     total++;
     if (!name) { failed++; continue; }
