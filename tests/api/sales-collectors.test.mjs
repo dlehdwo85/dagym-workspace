@@ -459,3 +459,24 @@ test('#522 관광숙박업 오류 응답(JSON)도 코드·사유 그대로 · �
   assert.match(v.alerts.find((x) => x.slug === 'tourist_hotels_localdata').reason, /^마지막 성공 2\d시간 전$/);
   hotelMode = 'ok';
 });
+
+test('230차(로컬 10/28 14:40 남원시) 결과에 낙찰률·참가 수가 뒤늦게 채워지면 result_filled_at(결과를 처음 안 때는 그대로) → 다음 당일 메일 결과 구역에 보완 한 줄 · 다시 돌려도 그대로', async () => {
+  await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: [], excludes: [], regions: [], issuers: [], itemCodes: [], amountMin: null, amountMax: null });
+  const [g] = await sql`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = '20261021001-00'`;
+  const old = new Date(Date.now() - 3 * 864e5).toISOString();
+  // 며칠 전부터 있던 공고에 낙찰자·금액만 먼저 들어와 지난 메일에 나간 상태(운영 남원시와 같은 모양)로 되돌림
+  const { winner_rate: _r, bidders: _b, result_filled_at: _f, ...rest } = g.row;
+  await sql`update sales_src_rows set row = ${sql.json({ ...rest, first_seen_at: old, result_at: old, updated_at: old })} where src_id = ${g.src_id}`;
+  await ctx.owner.ok('POST', '/api/sales/collectors/g2b_prespec_awards/run', {});
+  const [g2] = await sql`select row from sales_src_rows where src_id = ${g.src_id}`;
+  assert.deepEqual([g2.row.winner_rate, g2.row.bidders, g2.row.result_at], [87.745, 12, old], '결과를 처음 안 때는 그대로');
+  assert.ok(Date.parse(g2.row.result_filled_at) > Date.now() - 600e3, JSON.stringify(g2.row.result_filled_at));
+  await sql`delete from sales_digests where tenant = 'default' and day = ${today}`; // 오늘 이미 만든 메일 말고 지금 기준 미리보기(다음 메일)
+  const pv = await ctx.owner.ok('GET', '/api/sales/digest');
+  const it = pv.items.find((i) => i.section === 'result' && i.title.includes('국민체육센터 피트니스'));
+  assert.ok(it, JSON.stringify(pv.items.map((i) => [i.section, i.title, i.result, i.badges])));
+  assert.deepEqual(it.badges, ['낙찰', '보완']); assert.match(it.result, /낙찰률 87\.745% · 참가 12곳/);
+  await ctx.owner.ok('POST', '/api/sales/collectors/g2b_prespec_awards/run', {});
+  const [g3] = await sql`select row from sales_src_rows where src_id = ${g.src_id}`;
+  assert.equal(g3.row.result_filled_at, g2.row.result_filled_at, '값이 같으면 보완 시각을 다시 찍지 않음');
+});

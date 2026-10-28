@@ -77,6 +77,14 @@ describe('#461 목록 칸 · 저장된 보기', () => {
     assert.deepEqual([lc(e)?.kind, kst(lc(e)?.at)], ['전화', today], '워크인 상담이 더 늦으면 그것');
   });
 
+  test('230차 시설 칸 = 거래처의 시설만 — 문의로 만든 거래처의 문의 종류(원본 type)를 시설로 보이거나 내보내지 않음(로컬 10/28 14:40 CSV 합치기 1곳)', async () => {
+    const { id } = await ctx.owner.ok('POST', '/api/sales/leads', { name: '문의 리드 F230', force: true });
+    await sql`update sales_leads set src = ${sql.json({ from: 'website_inquiry', site: 'dagym', type: '위탁운영' })} where id = ${id}`;
+    const { id: id2 } = await ctx.owner.ok('POST', '/api/sales/leads', { name: '시설 있는 리드 G230', facilityType: '헬스장', force: true });
+    const L = (await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads;
+    assert.deepEqual([L.find((l) => l.id === id).facility ?? null, L.find((l) => l.id === id2).facility], [null, '헬스장']);
+  });
+
   test('내 저장된 보기·열 — 사람마다 따로 · 기기 간 유지(서버) · 12개까지 · 영업 공간 밖은 404', async () => {
     const r = await ctx.staffA.client.ok('PUT', '/api/sales/leads/views', { views: [{ id: 'gangnam1', name: '강남 높음', q: { lv: 'mine', pri: 'high', region: '강남' } }], cols: ['source', 'contact'] });
     assert.deepEqual([r.views.length, r.cols], [1, ['source', 'contact']]);

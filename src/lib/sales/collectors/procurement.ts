@@ -196,6 +196,7 @@ export function initialClassification(row: { title?: unknown; bid_category?: unk
   return f.direct ? '즉시 검토' : '중장기 영업리드';
 }
 export type NoticePlan = { inserts: { key: string; row: Record<string, unknown> }[]; updates: { id: string; key: string; patch: Record<string, unknown>; summary: string }[]; unchangedIds: string[]; invalid: number; errLog: string[] };
+const filled = (v: unknown) => v != null && String(v).trim() !== '' && Number(String(v).replace(/[,%\s]/g, '')) !== 0;
 /** prev: source_external_id → 기존 행(같은 source_type). 신규는 insert, 기존은 '새 값이 있고 달라진 것'만 patch. 낙찰된 공고는 되돌리지 않음. mergeScope='award' 면 낙찰 칸만 */
 export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<string, Record<string, unknown>>, now: Date, mergeScope: 'all' | 'award' = 'all'): NoticePlan {
   const plan: NoticePlan = { inserts: [], updates: [], unchangedIds: [], invalid: 0, errLog: [] };
@@ -235,6 +236,8 @@ export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<stri
     }
     // 215차(#530): 결과(낙찰·유찰)를 처음 알게 된 때 — 당일 메일 '결과' 구역은 이 시각으로(낙찰률 채우기 같은 고침으로 예전 결과가 다시 오르지 않게)
     if (changed.length && !isAwardResult(p) && isAwardResult({ ...p, ...patch })) { patch.result_at = now.toISOString(); changed.push('result_at'); }
+    // 230차(로컬 10/28 14:40 남원시): 이미 결과였던 줄에 낙찰률·참가 수가 뒤늦게 채워진 때 — 다음 당일 메일 결과 구역에 '보완' 한 줄로 다시 냄
+    else if (isAwardResult(p) && ((patch.winner_rate != null && !filled(p.winner_rate)) || (patch.bidders != null && !filled(p.bidders)))) { patch.result_filled_at = now.toISOString(); changed.push('result_filled_at'); }
     if (changed.length) plan.updates.push({ id: String(p.id), key, patch, summary: `변경: ${changed.join(', ')}` });
     else plan.unchangedIds.push(String(p.id));
   }

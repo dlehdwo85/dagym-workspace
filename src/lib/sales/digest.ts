@@ -169,7 +169,7 @@ async function notTargets(tenant: string) {
   const project = projectSkipOf(skippedRows);
   return (id: string, r: any) => ids.has(id) || (!live.has(id) && noticeKeys(r).some((k) => keys.has(k))) || (!settled.has(id) && !!project(r));
 }
-type Cand = { id: string; r: any; isNew: boolean; kind: string; late: boolean; fit: string | null; why: string; soon?: boolean; refound?: boolean };
+type Cand = { id: string; r: any; isNew: boolean; kind: string; late: boolean; fit: string | null; why: string; soon?: boolean; refound?: boolean; filled?: boolean };
 /** 지난 메일 이후(digestSince) 처음 본 공고 + 그 뒤 정정·취소로 바뀐 공고 → 회사 맞춤 통과분 → 구역. 마감 임박 = 이미 받은 관련 공고 중 D-3 이내·진행 기록 없음 */
 export async function buildDigest(tenant: string, day = kstDay()) {
   const sql = db(); const p = await prefsOf(tenant); const cats: BizCat[] = await listBizCats(tenant).catch(() => []);
@@ -189,13 +189,15 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     // 215차(#530): 결과는 처음 알게 된 때(result_at) 기준 — 낙찰률 채우기·금액 고침으로 결과 줄이 다시 고쳐져도 예전 결과가 '오늘 결과'로 다시 오르지 않게(result_at 없는 예전 줄은 개찰 3일 안만)
     const resAt = at(r.result_at); const awardDay = dayOf(r.award_date);
     const resultToday = result && (resAt != null ? resAt >= sinceMs : upd != null && upd >= sinceMs && !(awardDay && awardDay < plusDays(day, -3)));
-    const changedToday = (upd != null && upd >= sinceMs && (kind0 === 'cancel' || kind0 === 'amend' || String(r.current_status ?? '') === '취소')) || resultToday;
+    // 230차(로컬 10/28 14:40 남원시): 지난 메일에 낙찰자·금액만 나간 결과에 낙찰률·참가 수가 뒤늦게 채워지면 '보완' 한 줄로 한 번 더
+    const filledAt = at(r.result_filled_at); const filledToday = result && !resultToday && resAt != null && filledAt != null && filledAt >= sinceMs;
+    const changedToday = (upd != null && upd >= sinceMs && (kind0 === 'cancel' || kind0 === 'amend' || String(r.current_status ?? '') === '취소')) || resultToday || filledToday;
     if (!isNew && !changedToday) continue;
     if (r.source_type === 'vendor_recruit' && (!r.posted_date || !vendorDateOk(r))) { skip('게시일 미상'); continue; } // #476 e·후속: 게시판 날짜로 확인 못 한 협력사 줄(조각·메뉴·예전 방식)은 메일·오늘 탭에서 뺌
     if (onbidSale(r)) { skip('온비드 매각'); continue; } // #537 후속2(로컬 10/24 12:58): 온비드는 임대·사용허가만
     if (notTarget(String(r.id ?? src_id), r)) { skip('대상 아님'); continue; }
     const f = passPrefs(r, p); if (!f.ok) { skip(f.why); continue; }
-    if (result) { if (isNew || resultToday) cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
+    if (result) { if (isNew || resultToday || filledToday) cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why, ...(filledToday && !isNew ? { filled: true } : {}) }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
     const dl = dayOf(r.deadline_at);
     if (dl && dl < day) { skip('마감 지남'); continue; } // 첫 수집일에 과거 마감 공고가 '새 공고'로 섞이지 않게(로컬 10/21 10:55)
     cands.push({ id: String(r.id ?? src_id), r, isNew, kind: String(r.current_status ?? '') === '취소' ? 'cancel' : kind0, late: isNew && !refound && seen! < dayStart, fit: f.fit, why: f.why, refound });
@@ -253,7 +255,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const state = String(r.notice_state ?? '');
     const method = `${r.contract_method ?? ''} ${r.award_method ?? ''}`; const briefing = fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at));
     // #530 ⑦(로컬 10/24): 21라인 범례처럼 공고 유형 배지 — 정정·취소·재공고·재게시·긴급 + 수의계약·견적·현장설명 · 결과는 낙찰/유찰
-    const badges = c.kind === 'result' ? [/유찰/.test(String(r.current_status ?? '')) && !String(r.winner_name ?? '').trim() ? '유찰' : '낙찰']
+    const badges = c.kind === 'result' ? [/유찰/.test(String(r.current_status ?? '')) && !String(r.winner_name ?? '').trim() ? '유찰' : '낙찰', ...(c.filled ? ['보완'] : [])]
       : [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : reposted.has(c.id) ? '재게시' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null,
         /수의/.test(method) ? '수의계약' : null, /견적/.test(`${method} ${r.title ?? ''}`) ? '견적' : null, briefing && briefing.slice(0, 10) >= day && c.kind !== 'cancel' ? '현장설명' : null].filter((x): x is string => !!x); // 현장설명 배지는 아직 안 지난 것만
     const amounts = amountsOf(r); const wk = work.get(c.id);
