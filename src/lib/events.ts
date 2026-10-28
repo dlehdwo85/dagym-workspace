@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
-import { accessibleUnitIds, calendarPerms, myTeamsSql, teamScope, type CalendarRow } from './access';
+import { accessibleUnitIds, calendarPerms, ensurePersonalCalendar, myTeamsSql, teamScope, type CalendarRow } from './access';
 import { badRequest, conflict, forbidden, notFound } from './errors';
 import { activity } from './log';
 import { notify } from './notifications';
@@ -20,7 +20,8 @@ export function meetingLink(v: string | undefined) {
   return s;
 }
 export const eventInput = z.object({
-  calendarId: zUuid,
+  /** 236차(대표 10/28 '일정생성불가함'): 새 일정에 캘린더가 없으면(빈 값 포함) 본인 개인 캘린더 — 화면이 캘린더 목록을 받기 전에 저장해도 막히지 않게 */
+  calendarId: z.preprocess((v) => (v === '' || v === null ? undefined : v), zUuid.optional()),
   title: z.string().trim().min(1, '제목을 입력하세요').max(200),
   description: z.string().max(20000).optional(),
   location: z.string().max(300).optional(),
@@ -251,7 +252,8 @@ async function setAttendees(sql: Sql, eventId: string, ids: string[]) {
 
 export async function createEvent(u: SessionUser, i: EventInput) {
   const sql = db();
-  const cal = await loadCalendar(sql, i.calendarId);
+  const calendarId = i.calendarId ?? (await ensurePersonalCalendar(u.id, u.name, sql));
+  const cal = await loadCalendar(sql, calendarId);
   const cp = await calendarPerms(u, cal);
   if (!cp.edit) throw forbidden('이 캘린더에 일정을 등록할 권한이 없습니다');
   const { s, e } = validateTimes(i);
@@ -264,7 +266,7 @@ export async function createEvent(u: SessionUser, i: EventInput) {
   const out: { id: string; taskId?: string } = await sql.begin(async (tx) => {
     const [ev] = await tx<{ id: string }[]>`
       insert into events (calendar_id, title, description, location, meeting_url, kind, all_day, start_at, end_at, rrule, task_id, created_by, reminder_minutes, is_private, color, alarm, lead_id)
-      values (${i.calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.meetingUrl || null}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
+      values (${calendarId}, ${i.title}, ${i.description ?? ''}, ${i.location ?? ''}, ${i.meetingUrl || null}, ${i.kind ?? (i.taskId ? 'task_block' : 'normal')},
         ${i.allDay ?? false}, ${s}, ${e}, ${rule}, ${i.taskId ?? null}, ${u.id}, ${normReminders(i.reminderMinutes)}, ${i.isPrivate ?? false}, ${i.color ?? null}, ${i.alarm ?? null}, ${i.leadId ?? null})
       returning id`;
     if (i.taskId) await tx`insert into event_tasks (event_id, task_id, role, created_by) values (${ev.id}, ${i.taskId}, 'block', ${u.id}) on conflict do nothing`;
@@ -285,7 +287,7 @@ export async function createEvent(u: SessionUser, i: EventInput) {
     for (const a of who) ids.push((await createSyncTask(u, out.id, a, { requestedById: i.taskRequestedById, priority: i.taskPriority })).id);
     out.taskId = ids[0]; (out as { taskIds?: string[] }).taskIds = ids;
   }
-  return out;
+  return { ...out, calendarId };
 }
 
 const EDIT_FIELDS: [keyof EventInput, string][] = [
