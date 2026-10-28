@@ -1864,3 +1864,6 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 ## 2026-10-29 00:39 — 대표 #788 소상공인·기업 정부지원금
 - data.go.kr/data/15113968/openapi.do: 행정안전부_대한민국 공공서비스(혜택) 정보, 자동승인. swaggerUrl infuser.odcloud.kr/api/stages/44436/api-docs → api.odcloud.kr/api/gov24/v3/serviceList·serviceDetail·supportConditions. serviceList 칸: 지원유형·지원대상·선정기준·지원내용·신청기한·사용자구분·서비스분야·신청기한유형 등. supportConditions: JA1101~JA1299(소상공인), JA2101~JA2299(법인·단체, JA2203 정보통신업).
 - 클라우드 요청: gov24 원천·규칙·대상 칩·AI 자동 판단·키 확인(미등록이면 대표 활용신청).
+
+## 2026-10-29 00:40 — 지원사업 자동 AI 판단 운영 확인(#785 ✅)
+- /api/admin/ops tick supportAuto default: 00:09 done 10·left 88 / 00:24 done 10·left 102 / 00:35 done 10·left 92, failed 0. 맞춤 90 · ai.effect 23건. usage sales_support 189건 $0.191(30건 $0.044).
