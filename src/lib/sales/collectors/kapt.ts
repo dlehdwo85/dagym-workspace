@@ -275,8 +275,10 @@ export const kaptBidResults: Collector = {
         const body = new URLSearchParams({ bidTitle: w, searchDateGb: 'reg', dateStart: from, dateEnd: to, tabNum: '1', codeWay: '', sortType: '01', pageNo: '1', pageSelect: '100', ...(csrf ? { _csrf: csrf } : {}) });
         const res = await fetchImpl(`${BASE()}/bid/bidResultListAjax.do`, { method: 'POST', headers: { ...HEADERS, 'content-type': 'application/x-www-form-urlencoded', ...(cookie ? { cookie } : {}), ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}) }, body, signal: AbortSignal.timeout(10000) });
         if (!res.ok) { errors.push(`'${w}': HTTP ${res.status}`); continue; }
-        const rows = parseKaptResultRows(await res.text()); listed += rows.length; if (!rows.length && errors.length < 12) errors.push(`'${w}': 결과 목록 0건(응답 형식 확인 필요)`);
-        for (const r of rows) { if (seen.has(r.bidNum) || !matchFit(r.title, '공동주택').fit) continue; seen.add(r.bidNum);
+        // 235차(로컬 10/28 16:55 '체력단련 0건'): 표 머리(입찰공고명)는 왔는데 줄이 없으면 정상 0건 — 표 자체가 없을 때만 형식 확인 오류
+        const html = await res.text(); const rows = parseKaptResultRows(html); listed += rows.length; if (!rows.length && !html.includes('입찰공고명') && !/^\s*\[/.test(html) && errors.length < 12) errors.push(`'${w}': 결과 목록 0건(응답 형식 확인 필요)`);
+        // 235차: 낙찰업체가 빈 줄은 결과가 아님 — 마감일 없이 병합되면 상태 계산이 '진행중'으로 되돌릴 수 있어 건너뜀(유찰은 상세 읽기가 사유로 앎)
+        for (const r of rows) { if (seen.has(r.bidNum) || !r.winner || !matchFit(r.title, '공동주택').fit) continue; seen.add(r.bidNum);
           items.push({ source_type: 'kapt_bid', source_external_id: r.bidNum, source_url: `${BASE()}/bid/bidDetail.do?bidNum=${encodeURIComponent(r.bidNum)}`, title: r.title, issuer: r.complex || null, facility_name: r.complex || null, region: regionFromTitle(r.title), winner_name: r.winner, winner_amount: r.amount, award_date: r.date }); }
       } catch (e) { errors.push(`'${w}': ${e instanceof Error ? e.message : String(e)}`); }
     }
