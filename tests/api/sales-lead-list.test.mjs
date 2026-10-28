@@ -57,6 +57,26 @@ describe('#461 목록 칸 · 저장된 보기', () => {
     assert.equal((await leadRow(a.id)).revisit, null, '다시 진행 단계로 가면 다시 볼 날은 지움');
   });
 
+  test('229차 이관 거래처 마지막 접촉 = 원본 마지막 활동일 → 없으면 원본 수정일(옮긴 날 아님) · 워크인 상담이 더 늦으면 그것 · 직접 등록은 원본 칸을 안 봄', async () => {
+    const kst = (iso) => (iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso)) : null);
+    const mk = async (name, src) => { const { id } = await ctx.owner.ok('POST', '/api/sales/leads', { name, force: true }); await sql`update sales_leads set src_id = ${`old-${name}`}, src = ${sql.json(src)}, created_at = now() - interval '200 days' where id = ${id}`; return id; };
+    const e = await mk('이관 E229', { last_activity_at: `${addDays(today, -49)}T10:00:00+09:00`, updated_at: `${addDays(today, -3)}T10:00:00+09:00` });
+    const f = await mk('이관 F229', { updated_at: `${addDays(today, -20)}T10:00:00+09:00` });
+    const g = await mk('이관 G229', { last_activity_date: addDays(today, -7) });
+    const h = await mk('이관 H229', {});
+    const { id: d } = await ctx.owner.ok('POST', '/api/sales/leads', { name: '직접 D229', force: true });
+    await sql`update sales_leads set src = ${sql.json({ updated_at: `${addDays(today, -5)}T10:00:00+09:00` })} where id = ${d}`; // 원본 번호(src_id) 없음 = 직접 등록
+    let L = (await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads; const lc = (id) => L.find((l) => l.id === id).lastContact;
+    assert.deepEqual([lc(e)?.kind, kst(lc(e)?.at)], ['이전 자료', addDays(today, -49)], '마지막 활동일이 있으면 수정일보다 먼저');
+    assert.deepEqual([lc(f)?.kind, kst(lc(f)?.at)], ['이전 자료', addDays(today, -20)], '활동일이 없으면 원본 수정일');
+    assert.deepEqual([lc(g)?.kind, kst(lc(g)?.at)], ['이전 자료', addDays(today, -7)], '날짜만 있는 칸도');
+    assert.equal(lc(h), null, '원본 날짜가 없으면 기록 없음(옮긴 날을 쓰지 않음)');
+    assert.equal(lc(d), null, '직접 등록 거래처는 원본 칸을 보지 않음');
+    await ctx.owner.ok('POST', `/api/sales/leads/${e}/activities`, { type: '전화', content: '이관 뒤 첫 통화' });
+    L = (await ctx.owner.ok('GET', '/api/sales/src?view=leads')).leads;
+    assert.deepEqual([lc(e)?.kind, kst(lc(e)?.at)], ['전화', today], '워크인 상담이 더 늦으면 그것');
+  });
+
   test('내 저장된 보기·열 — 사람마다 따로 · 기기 간 유지(서버) · 12개까지 · 영업 공간 밖은 404', async () => {
     const r = await ctx.staffA.client.ok('PUT', '/api/sales/leads/views', { views: [{ id: 'gangnam1', name: '강남 높음', q: { lv: 'mine', pri: 'high', region: '강남' } }], cols: ['source', 'contact'] });
     assert.deepEqual([r.views.length, r.cols], [1, ['source', 'contact']]);

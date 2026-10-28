@@ -22,17 +22,20 @@ type Terms = { kind: Record<string, string>; buildingsTab: string; facilitiesTab
 
 /**
  * 리드 id → 목록 칸. 마지막 접촉 = 상담 기록(종류) · 사람이 끝낸 리드 업무 · 사람이 바꾼 단계 중 가장 늦은 것(처음 만든 기록·자동 기록은 빼고).
+ * 229차(로컬 10/28 13:55 '197 이관 거래처'): 옛 영업관리에서 옮긴 거래처는 원본의 마지막 활동일(없으면 원본 마지막 수정일)도 '이전 자료' 접촉으로 —
+ * 원본 등록일로 계산돼 '14일 넘게 연락 없음'에 몰리던 것. 옮긴 날은 고객 접촉이 아니라 쓰지 않음.
  * 출처 = 영업기회 허브에서 넘긴 건(공고·단지·시설·협력사, 링크) · 리드 광고 · 이전 자료(옮겨 온 리드) · 직접 등록
  */
 export async function leadExtras(sql: Sql, tenant: string, terms: Terms, ids?: string[]) {
   const rows = await sql<{ id: string; status: string | null; next_action: string | null; revisit: string | null; created_at: Date; src_id: string | null; src_from: string | null; src_ref: string | null; name: string;
-    stage_at: Date | null; act_at: Date | null; act_kind: string | null; task_at: Date | null; status_at: Date | null }[]>`
+    stage_at: Date | null; act_at: Date | null; act_kind: string | null; task_at: Date | null; status_at: Date | null; moved_at: string | null }[]>`
     select l.id, l.status, l.next_action, l.revisit_date::text as revisit, l.created_at, l.src_id, l.src->>'from' as src_from, l.src->>'id' as src_ref, l.name,
       (select g.changed_at from sales_status_log g where g.lead_id = l.id and g.to_status = coalesce(l.status, '') order by g.changed_at desc limit 1) as stage_at,
       act.at as act_at, act.kind as act_kind,
       (select max(v.created_at) from tasks t join activities v on v.entity_type = 'task' and v.entity_id = t.id and v.action in ('completed', 'approved')
         where t.lead_id = l.id and t.deleted_at is null and t.status = 'done') as task_at, -- 사람이 끝낸 업무만(리드를 닫을 때 자동으로 마친 영업 업무는 접촉이 아님)
-      (select max(g.changed_at) from sales_status_log g where g.lead_id = l.id and g.from_status is not null and g.changed_by is not null) as status_at
+      (select max(g.changed_at) from sales_status_log g where g.lead_id = l.id and g.from_status is not null and g.changed_by is not null) as status_at,
+      case when l.src_id is not null then coalesce(nullif(l.src->>'last_activity_at', ''), nullif(l.src->>'last_activity_date', ''), nullif(l.src->>'last_contact_at', ''), nullif(l.src->>'updated_at', '')) end as moved_at
     from sales_leads l
     left join lateral (select x.occurred_at as at, x.data->>'activity_type' as kind from sales_lead_records x where x.lead_id = l.id and x.kind = 'sales_activities' order by x.occurred_at desc nulls last limit 1) act on true
     where l.tenant = ${tenant} and l.deleted_at is null ${ids ? sql`and l.id = any(${ids})` : sql``} limit 5000`; // 202차: ids = 보고서가 고른 거래처만
@@ -48,6 +51,8 @@ export async function leadExtras(sql: Sql, tenant: string, terms: Terms, ids?: s
     if (r.act_at) cand.push({ at: new Date(r.act_at).getTime(), kind: r.act_kind || '상담' });
     if (r.task_at) cand.push({ at: new Date(r.task_at).getTime(), kind: '업무' });
     if (r.status_at) cand.push({ at: new Date(r.status_at).getTime(), kind: '단계' });
+    const moved = r.moved_at ? Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(r.moved_at) ? `${r.moved_at}T12:00:00+09:00` : r.moved_at) : NaN; // 날짜만 있으면 한국 시각 그날
+    if (Number.isFinite(moved) && moved <= Date.now()) cand.push({ at: moved, kind: '이전 자료' });
     const last = cand.sort((a, b) => b.at - a.at)[0];
     const hub = r.src_from ? HUB[r.src_from] : undefined;
     const source: LeadSource = hub && r.src_ref ? { kind: r.src_from as LeadSource['kind'], label: hub[0], href: hub[1](r.src_ref, r.name) }
