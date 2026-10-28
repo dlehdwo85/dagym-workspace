@@ -1821,3 +1821,9 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - /api/health 124aa5f. 업무 상세 input: album-input accept=image/jpeg,image/heic,image/heif,image/png,image/webp,image/gif · video-album-input video/* · 촬영 image/* capture. 메신저 chat-gallery-input 같은 목록 · chat-video-input video/*. /api/admin/ops pickDiag [] (0건). 아이폰 앱 capacitor.config server.url=https://www.work-in.dev → 앱 다시 열면 적용.
 - 247차: /api/sales/research auto=false. /s/sales/hub?tab=facilities [후속조사 넘기기] 289개, 창 담당 단추 aria-checked 김소담 부사장 · 기본 → [취소]. 처음 1초 만에 읽었을 때 첫 단추 글자를 선택값으로 잘못 읽어 '이동재 선택'으로 보였음 — 측정 실수, 결함 아님.
 - 246차는 다음 정기 점검 뒤 확인.
+
+## 2026-10-28 22:47 — 대표 지원사업 4건(#781~#784): D-day 정렬·'AI 확인 중' 원인·참여 가능 분석·리스트업 기능
+- /api/sales/support?tab=fit: 맞춤 148 · pending(AI 확인 중) 109 · AI 판단 11 · 7일 안 48 · 마감 없음 27 · 숨긴 해당 없음 750. 원인: support.ts itemOf pending = AI 없음 && 규칙 fit, 자동 판단은 weeklyBundle SUPPORT_WEEKLY_AI_MAX 5.
+- 프로필(/api/sales/support/profile): 경기 용인시 · 설립 2022-01-28 · size·employees·revenue·certs 비어 있음.
+- 148건 마감 순 전수 + 19건 상세 원문 → docs/handoff/SUPPORT_ANALYSIS_2026-10-28.md(바로 검토 9 · 회사 정보 확인 3 · 해당 없음 사례). 앱 AI 판단은 회사 비용이라 안 씀. 원본 자료는 운영 폴더 artifacts/support_fit_1028.json·support_detail_1028.json(저장소 밖).
+- 클라우드 요청 22:45: 정렬·D-day·종류 칩, 표시 바로잡기, 규칙 오탐 6종, 기대 효과 칸·이번 주 신청 목록·엑셀, 프로필 빈칸 안내.
