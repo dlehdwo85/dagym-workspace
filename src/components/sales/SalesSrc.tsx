@@ -12,6 +12,7 @@ import { api, useApi } from '@/components/client';
 import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
 import { CollectorAlerts } from '@/components/sales/Collectors';
+import { AwardStats } from '@/components/sales/AwardStats';
 import { BulkLeadDialog, LeadQuickDialog, StageMoveDialog, type BulkResult } from '@/components/sales/LeadFollowUp';
 import { LeadImportDialog, type ImportRows } from '@/components/sales/LeadImport';
 import { LeadMergeBox } from '@/components/sales/LeadMerge';
@@ -1097,7 +1098,7 @@ function Deals() {
 export { Deals };
 
 /** #611(대표 10/25 ⑦): 입찰·공고 = 영업기회 허브 '입찰' 탭 하나(검색·사업 칩·일괄·상세 전부). embedded = 허브 안(주소 칸 bt·bq·bz·bs — 허브의 tab·q 와 겹치지 않게). 옛 /s/sales/bids 주소는 여기로 넘어옴 */
-const BID_CHIPS: [string, string][] = [['open', '진행 중(마감 임박순)'], ['today', '오늘 새 공고'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['closing', '오늘 마감'], ['recruit', '협력사 모집']]; // #608: '마감 임박'·'준비 기간' 칩은 뺌(카드 왼쪽 줄로)
+const BID_CHIPS: [string, string][] = [['open', '진행 중(마감 임박순)'], ['today', '오늘 새 공고'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['closing', '오늘 마감'], ['recruit', '협력사 모집'], ['awards', '낙찰 분석']]; // 226차 #497 R21-4 // #608: '마감 임박'·'준비 기간' 칩은 뺌(카드 왼쪽 줄로)
 const BID_SORTS: [string, string][] = [['', '기본 순서'], ['deadline', '마감 D-day순'], ['notice', '공고일 최신순'], ['amount', '예산 큰 순']];
 export function Bids({ initialTab, initialId, embedded }: { initialTab?: string; initialId?: string; embedded?: boolean }) {
   // #242 2단계: 탭·검색어·사업·정렬은 주소에 — 공고에서 업무·리드로 갔다 뒤로 와도 같은 목록
@@ -1105,7 +1106,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
   const sp = useSearchParams();
   const [tab, setTab] = useUrlState(embedded ? 'bt' : 'tab', embedded ? (initialTab ?? 'open') : 'open'); const [s, setS] = useUrlState(embedded ? 'bq' : 'q', ''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useUrlState(embedded ? 'bz' : 'biz', '');
   const [sort, setSort] = useUrlState(embedded ? 'bs' : 'sort', ''); // #606 정렬(주소에 저장 — 새로 고침해도 유지)
-  const { data, error, reload } = useApi<any>(`/api/sales/src?${q({ view: 'bids', tab, q: s, biz, sort })}`, [tab, s, biz, sort]);
+  const { data, error, reload } = useApi<any>(tab === 'awards' ? null : `/api/sales/src?${q({ view: 'bids', tab, q: s, biz, sort })}`, [tab, s, biz, sort]); // [낙찰 분석]은 목록 대신 업체별 묶음
   // #510: 당일 공고 메일 제목(?id=) → 그 공고 상세를 바로 — 지금 탭 목록에 없어도 한 건 찾아서. #242 2단계: 허브 안·뒤로가기로 돌아온 상세도(?id=)
   const [deep, setDeep] = useState<string | null>(initialId ?? sp.get('id'));
   const one = useApi<any>(deep ? `/api/sales/src?${q({ view: 'bids', tab: 'all', q: deep })}` : null, [deep]);
@@ -1124,9 +1125,9 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
       <Head title="입찰·공고 모니터링" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBids} compact /><Search value={s} onChange={setS} /></Head>
       {data?.canAssign && data?.readOnly === false && <BidLeadsBanner onDone={reload} />}
       <div className="flex flex-wrap items-center gap-1.5">{chips.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}
-        <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" data-testid="bids-sort">{BID_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        {tab !== 'awards' && <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" data-testid="bids-sort">{BID_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
         {data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
-      {!data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => <li key={n.id} className="relative">{data.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data.readOnly === false} /></li>)}
+      {tab === 'awards' ? <AwardStats onOpen={setDeep} /> : !data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => <li key={n.id} className="relative">{data.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data.readOnly === false} /></li>)}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
       {/* 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 뺀 결과(낙찰·유찰) — 당일 메일 '결과' 구역과 같은 기준, 접어 둠 */}
       {tab === 'today' && !!data?.results?.length && <details className="rounded-card border border-line bg-slate-50 p-2" data-testid="bids-results">

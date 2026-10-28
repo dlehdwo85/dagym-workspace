@@ -15,6 +15,7 @@ import { createPlugin, type EventDropArg, type DatesSetArg, type EventClickArg }
 import { Interaction, type InteractionSettings } from '@fullcalendar/core/internal';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
+import { MeetingRecordLine, WorkinMeetingToggle, enableEventMeeting, isWorkinMeet } from '@/components/meet/EventMeeting';
 import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, Video, X } from 'lucide-react';
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
 import { TaskDetail } from '@/components/TaskDetail';
@@ -982,7 +983,8 @@ function ColorRow({ value, onChange, testId }: { value: string | null; onChange:
 }
 
 function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }: { id?: string; occurrenceStart?: string; draft?: any; calendars: any[]; onClose: () => void; onSaved: () => void; dirUsers: any[] }) {
-  const { user } = useSession();
+  const { user, features } = useSession();
+  const meetOn = !!features.meetings; const [meetNew, setMeetNew] = useState(false); // 219차 [워크인 화상회의](새 일정은 저장할 때 켬)
   const existing = useApi<any>(id ? `/api/events/${id}` : null);
   const [f, setF] = useState<any>(null);
   const prepList = useApi<{ presets: { id: string; label: string }[] }>(!id ? '/api/events/_/prep' : (null as unknown as string)); // 준비 업무 묶음(새 일정일 때만)
@@ -1080,6 +1082,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
       if (!id) {
         const made = await api<{ id?: string }>('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } }); pushRecentColor(f.color);
+        if (meetOn && meetNew && made?.id) await enableEventMeeting(made.id);
         // 대표 10/21 12:20 ②: 준비 업무는 '선택 창(체크, 기본 꺼짐)' — 자동 생성 없음. 체크했을 때만 묶음으로 만든다
         if (f.prep && made?.id) { try { const pr = await api<{ ids: string[] }>(`/api/events/${made.id}/prep`, { body: { preset: f.prep } }); toast.ok(`준비 업무 ${pr.ids?.length ?? 0}건을 만들었습니다`); } catch (e: any) { toast.error(`준비 업무를 만들지 못했습니다: ${e.message}`); } }
       } else {
@@ -1169,8 +1172,10 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           <Field label="장소"><input className={inputCls} value={f.location} onChange={(e) => set('location')(e.target.value)} placeholder="예: 음성 아이파크 — 적으면 이동 일정" /></Field>
           {/* V36 4: 장소를 적으면 이동 일정 — 캘린더에서 📍·진한 테두리, 알림 따로 안 정하면 30분 전 알림이 더해짐 */}
           {f.location?.trim() && <p className="-mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800" data-testid="editor-travel"><MapPin className="size-3" />이동 있음{!f.reminders ? ' · 30분 전 알림 기본' : ''}</p>}
+          {/* 219차 [워크인 화상회의] — 켜면 회의 주소 칸에 워크인 회의 주소(직접 붙여 넣는 칸은 숨김) */}
+          {meetOn && <WorkinMeetingToggle eventId={id} canEdit={!!canEdit} url={f.meetingUrl ?? ''} onUrl={(u) => set('meetingUrl')(u)} newOn={meetNew} setNewOn={setMeetNew} />}
           {/* V30 ⑪ (#111) 화상 회의 링크 — 적으면 일정 상세에 [회의 참여] */}
-          <Field label="화상 회의 링크 (Zoom·Google Meet 등, 선택)" hint="없으면 비워 두세요 · 줌 회의 번호만 적어도 됩니다"><input className={inputCls} inputMode="url" value={f.meetingUrl ?? ''} onChange={(e) => set('meetingUrl')(e.target.value)} placeholder="https://meet.google.com/…" data-testid="ev-meeting-url" /></Field>
+          {!(meetOn && (id ? isWorkinMeet(f.meetingUrl) : meetNew)) && <Field label="화상 회의 링크 (Zoom·Google Meet 등, 선택)" hint="없으면 비워 두세요 · 줌 회의 번호만 적어도 됩니다"><input className={inputCls} inputMode="url" value={f.meetingUrl ?? ''} onChange={(e) => set('meetingUrl')(e.target.value)} placeholder="https://meet.google.com/…" data-testid="ev-meeting-url" /></Field>}
           <Field label="설명"><textarea className={inputCls} rows={3} value={f.description} onChange={(e) => set('description')(e.target.value)} /></Field>
         </fieldset>
         {myAtt && (
@@ -1234,7 +1239,7 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged, onOp
   const tasks = linked.data?.tasks ?? [];
   const block = ev.kind === 'task_block' ? tasks.find((t) => t.link_role === 'block') ?? tasks[0] : null;
   const going = (ev.attendees ?? []).filter((a: any) => a.response !== 'declined');
-  const { user } = useSession();
+  const { user, features } = useSession(); const meetOn = !!features.meetings;
   // 다른 사람의 개인 일정: 보기만 (참석자면 편집 창에서 참석 여부만 응답)
   const othersPersonal = ev.calendarType === 'personal' && ev.ownerId !== user.id && ev.createdBy !== user.id && !(ev.attendees ?? []).some((a: any) => a.user_id === user.id);
   async function remove() {
@@ -1276,6 +1281,7 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged, onOp
             <p className="mt-1 text-sm text-ink-2" data-testid="preview-time">{fmtTimeRange(ev.start, ev.end, { allDay: ev.allDay })}</p>
             {ev.location && <p className="mt-0.5 flex items-center gap-1 text-sm text-ink-2"><MapPin className="size-3.5" />{ev.location}</p>}
             {ev.meetingUrl && <a href={ev.meetingUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex h-8 items-center gap-1 rounded-input bg-brand-600 px-2.5 text-xs font-medium text-white hover:bg-brand-700" data-testid="ev-join"><Video className="size-3.5" />회의 참여</a>}
+            {meetOn && !ev.masked && isWorkinMeet(ev.meetingUrl) && <MeetingRecordLine eventId={ev.id} />}
             <p className="mt-1 text-xs text-ink-3">{ev.calendarType === 'personal' && ev.ownerName ? `${ev.ownerName}님 일정` : calendarName}{ev.recurring ? ' · 반복 일정' : ''}{ev.isPrivate ? ' · 비공개' : ''}</p>
             {ev.masked && <p className="mt-1 text-xs text-ink-2" data-testid="masked-note">비공개 일정이라 시간만 보입니다</p>}
           </div>

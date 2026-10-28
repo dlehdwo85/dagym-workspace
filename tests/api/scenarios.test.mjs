@@ -584,7 +584,9 @@ describe('Asana 이상 P2 (B-14~B-17)', () => {
     // 오늘은 지난 시간을 빼고 계산하므로 미팅은 오늘이 아닌 날에 둔다 (시각에 따라 실패하던 문제)
     const meetDay = addDays(mon, 1) === today ? addDays(mon, 3) : addDays(mon, 1);
     await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '외부 미팅', start: `${meetDay}T10:00:00+09:00`, end: `${meetDay}T13:00:00+09:00` });
-    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '연차', kind: 'vacation', allDay: true, start: `${addDays(mon, 2)}T00:00:00+09:00`, end: `${addDays(mon, 3)}T00:00:00+09:00` });
+    // 연차도 오늘이 아닌 날에 둔다 — 오늘이면 그날 직원A 푸시가 '부재 중 보류'가 되어 뒤 시험(예약 알림 기기·메신저 1:1)이 수요일마다 실패(10/28 자동 검사 1560~1571번)
+    const vacDay = addDays(mon, 2) === today ? addDays(mon, 3) : addDays(mon, 2);
+    await ctx.staffA.client.ok('POST', '/api/events', { calendarId: cal, title: '연차', kind: 'vacation', allDay: true, start: `${vacDay}T00:00:00+09:00`, end: `${addDays(vacDay, 1)}T00:00:00+09:00` });
     const mine = await ctx.staffA.client.ok('GET', '/api/insights/workload');
     assert.equal(mine.people.length, 1, '직원은 자기 것만');
     const me = mine.people[0];

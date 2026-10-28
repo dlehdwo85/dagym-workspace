@@ -24,7 +24,7 @@ export interface NotifyInput {
  * 로컬 10/20 알림 다이어트 — 종류별 푸시 기본값. 끔(목록에만): 내가 한 일의 결과·시스템 결과. 사용자가 알림 설정에서 켤 수 있다.
  * 푸시 유지: 나에게 온 요청(배정·검토·결재·연장·멘션·메시지)·내 일정·요청한 업무 완료·중요 공지·한도.
  */
-export const PUSH_OFF_DEFAULT = new Set<string>(['mail_sent', 'library_organized', 'recurring_created', 'month_close', 'weekly_report']);
+export const PUSH_OFF_DEFAULT = new Set<string>(['mail_sent', 'library_organized', 'recurring_created', 'month_close', 'weekly_report', 'sales_kw_suggest']);
 export const defaultPush = (type: string) => !PUSH_OFF_DEFAULT.has(type);
 /** 조용한 시간 기본값 22:00~07:00 (시험에서는 QUIET_DEFAULT=off 로 끔). 사용자가 끄면(quiet_off) 적용 안 함 */
 export const QUIET_DEFAULT = process.env.QUIET_DEFAULT === 'off' ? null : { start: '22:00', end: '07:00' };
