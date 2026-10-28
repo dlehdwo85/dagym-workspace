@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -29,7 +30,7 @@ function useCtx(): Ctx {
     if (task) return { page: 'task', taskId: task };
     if (path === '/') return { page: 'home' };
     if (path.startsWith('/tasks') || path.startsWith('/projects')) return { page: 'tasks' };
-    if (path.startsWith('/calendar')) return { page: 'calendar', id: sp.get('date') ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()) };
+    if (path.startsWith('/calendar')) return { page: 'calendar', id: sp.get('date') ?? dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()) };
     if (path.startsWith('/library')) return { page: 'library', id: sp.get('file') ?? undefined };
     if (path.startsWith('/revenue')) return { page: 'revenue' };
     if (path.startsWith('/reports')) return { page: 'reports' };
@@ -194,7 +195,7 @@ function ThreadList({ ctx, current, onPick }: { ctx: Ctx; current: string | null
   const related = (t: Thread) => (ctx.taskId ? t.task_id === ctx.taskId : t.context_page === ctx.page && (!ctx.id || t.context_id === ctx.id));
   const all = data?.threads ?? [];
   const mine = all.filter(related), rest = all.filter((t) => !related(t));
-  const when = (s: string) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }).format(new Date(s));
+  const when = (s: string) => dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }).format(new Date(s));
   const row = (t: Thread) => (
     <li key={t.id}><button onClick={() => onPick(t.id)} className={cx('flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50', current === t.id && 'bg-violet-50')} data-testid="ai-dock-thread">
       <span className="min-w-0 flex-1"><span className="flex items-center gap-1"><span className="truncate text-sm font-medium">{t.title}</span>{t.pinned && <Pin className="size-3 shrink-0 text-violet-600" />}</span>

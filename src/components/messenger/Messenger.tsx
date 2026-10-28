@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { RoleBadge } from '@/components/RoleBadge';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -68,13 +69,13 @@ const lastPreview = (r: RoomRow) => {
   return plain(r.last_body);
 };
 const TZ = 'Asia/Seoul';
-const dayKey = (s: string) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date(s));
-const timeOf = (s: string) => new Intl.DateTimeFormat('ko-KR', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(s));
+const dayKey = (s: string) => dtf('en-CA', { timeZone: TZ }).format(new Date(s));
+const timeOf = (s: string) => dtf('ko-KR', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(s));
 export const shortTime = (s: string | null) => {
   if (!s) return '';
-  return dayKey(s) === dayKey(new Date().toISOString()) ? timeOf(s) : new Intl.DateTimeFormat('ko-KR', { timeZone: TZ, month: 'numeric', day: 'numeric' }).format(new Date(s));
+  return dayKey(s) === dayKey(new Date().toISOString()) ? timeOf(s) : dtf('ko-KR', { timeZone: TZ, month: 'numeric', day: 'numeric' }).format(new Date(s));
 };
-const dayLabel = (s: string) => new Intl.DateTimeFormat('ko-KR', { timeZone: TZ, year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(s));
+const dayLabel = (s: string) => dtf('ko-KR', { timeZone: TZ, year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(s));
 const plain = (s: string | null) => (s ?? '').replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/g, '@$1');
 /** 답장 인용·전달 미리보기의 파일 글(로컬 10/25 사소 ②): 사진 묶음은 파일 이름 대신 '📷 사진 3장' — 알림·방 목록 미리보기와 같은 꼴 */
 const fileText = (name: string | null, mime?: string | null, n = 1) => !name ? '' : /^image\//.test(mime ?? '') ? (n > 1 ? `📷 사진 ${n}장` : '📷 사진') : /^video\//.test(mime ?? '') ? (n > 1 ? `🎬 동영상 ${n}개` : '🎬 동영상') : `📎 ${name}`;
@@ -1246,7 +1247,7 @@ function PollModal({ roomId, onClose, onSent }: { roomId: string; onClose: () =>
 
 /** B9 일정 잡기: 캘린더 일정(참석자 = 방 참여자, 뺄 수 있음) + 방에 일정 카드. 메시지에서 열면 글의 날짜·시각을 미리 채움 */
 function EventModal({ roomId, draft, members, me, onClose, onSent }: { roomId: string; draft: { title: string; date: string; time: string | null; fromMessage?: string }; members: Member[]; me: string; onClose: () => void; onSent: (id: string, p: Partial<Msg>) => void }) {
-  const nextHour = () => { const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(new Date())); return `${String(Math.min(23, h + 1)).padStart(2, '0')}:00`; };
+  const nextHour = () => { const h = Number(dtf('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(new Date())); return `${String(Math.min(23, h + 1)).padStart(2, '0')}:00`; };
   const plus1 = (t: string) => { const [h, m] = t.split(':').map(Number); return `${String(Math.min(23, h + 1)).padStart(2, '0')}:${String(h >= 23 ? 59 : m).padStart(2, '0')}`; };
   const [title, setTitle] = useState(draft.title);
   const [date, setDate] = useState(draft.date);

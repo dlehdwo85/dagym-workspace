@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { ErrorBox, Skeleton, cx, inputCls, toast } from '@/components/ui';
@@ -10,7 +11,7 @@ type P = { id: number; name: string; address: string | null; sido: string | null
 /** V41 단계 3 영업기회(공공데이터): 회사가 켠 원천의 새로 연 곳·영업 중·폐업 — 카드마다 출처·데이터 기준일, 진행 상태·메모는 회사별 */
 /** 186차(로컬 10/26 19:20 B2): 입주 예정월(YYYY-MM-01)까지 남은 달 — 서울 기준 이번 달과 비교 */
 function moveInLabel(moveIn: string) {
-  const [y, m] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(new Date()).split('-').map(Number);
+  const [y, m] = dtf('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(new Date()).split('-').map(Number);
   const diff = (Number(moveIn.slice(0, 4)) * 12 + Number(moveIn.slice(5, 7))) - (y * 12 + m);
   return diff > 0 ? `입주까지 ${diff}개월` : diff === 0 ? '이번 달 입주' : `입주 ${-diff}개월 지남`;
 }

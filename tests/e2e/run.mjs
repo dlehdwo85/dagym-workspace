@@ -80,6 +80,7 @@ import { notifRooms222 } from './notifRooms222.step.mjs';
 import { kwSuggest224 } from './kwSuggest224.step.mjs';
 import { awards226 } from './awards226.step.mjs';
 import { calendarLate236 } from './calendarLate236.step.mjs';
+import { nav742 } from './nav742.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2940,6 +2941,7 @@ await step('222차 #477 알림 카톡형 방 목록: [방] → 종류별 방(최
 await step('224차 #457 관심 검색어 추천: 맞춤 상자 [추천 받기](가짜 AI) → 넣을·뺄 낱말·근거 숫자 · 위험 제외어는 미리 안 고름 → [고른 것 반영] → 검색어 칸에 들어가고 추천에서 빠짐 · 휴대폰 폭', () => kwSuggest224({ owner, ctx, sql, BASE, SHOTS, FAKE }));
 await step('226차 #497 낙찰 분석: 영업기회 › 입찰 [낙찰 분석] → 업체별 줄(법인 표시 빼고 묶음·금액 합·평균 낙찰률·지역) · 우리 회사 표시 → 펼치기 → 최근 낙찰 → 공고 상세 · 기간 칩 · 휴대폰 폭', () => awards226({ owner, ctx, sql, BASE, SHOTS }));
 await step('236차 일정 등록: 캘린더 목록이 늦게 와도 내 개인 일정으로 저장(대표 10/28 일정생성불가 재현) · 목록 전 [완료]도 서버가 내 개인 일정', () => calendarLate236({ owner, ctx, BASE }));
+await step('238차 #742 화면 전환 즉시: 서버가 늦어도 PC 메뉴를 누르자마자 강조 + 다음 화면 틀 · 휴대폰 아래 탭 누르자마자 강조', () => nav742({ browser, devices, BASE, SHOTS }));
 // 219차 화상회의: 시험 서버를 화상회의 스위치(가짜 엔진)를 켠 채 다시 띄워 확인하고, 끝나면 앞 단계 설정으로 되돌림
 await step('219차 워크인 화상회의(가짜 엔진): 일정 창 [워크인 화상회의] → 손님 이름 입장·대기 → 주최자 참가·허락 → 손님 회의 화면(휴대폰 폭) → 잠금·끝내기 → 일정 미리보기 회의 기록', async () => {
   // 옛 서버가 완전히 내려간 뒤 새로 띄움(열린 연결이 남아 옛 서버가 잠깐 더 답하는 일 막기 — 10초 넘으면 강제 종료)

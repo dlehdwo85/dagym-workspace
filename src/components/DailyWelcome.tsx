@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useEffect, useState } from 'react';
 import { todayStr } from './ui';
 
@@ -18,8 +19,8 @@ export function DailyWelcome({ userId, name }: { userId: string; name: string })
     const key = `wos_welcome_${userId}`;
     try { if (localStorage.getItem(key) === today) return; localStorage.setItem(key, today); } catch { return; }
     const now = new Date();
-    const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(now)) % 24;
-    setLine({ hello: greet(hour), date: new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'long' }).format(now) });
+    const hour = Number(dtf('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(now)) % 24;
+    setLine({ hello: greet(hour), date: dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'long' }).format(now) });
     let t: ReturnType<typeof setTimeout> | undefined;
     const start = () => {
       // #443 실행 애니메이션이 아직 그려지는 중이면 끝난 뒤에(겹치지 않게)

@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { uploadToLibrary } from './libraryUpload';
@@ -46,7 +47,7 @@ export function useAiAttach() {
     const imgs = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'));
     if (!imgs.length) return;
     e.preventDefault();
-    const stamp = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'medium' }).format(new Date()).replace(/[: ]/g, '-');
+    const stamp = dtf('sv-SE', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'medium' }).format(new Date()).replace(/[: ]/g, '-');
     attach(imgs.map((f, i) => (/^image\.\w+$/i.test(f.name) || !f.name ? new File([f], `붙여넣은 이미지 ${stamp}${imgs.length > 1 ? `-${i + 1}` : ''}.${f.type.split('/')[1] || 'png'}`, { type: f.type }) : f)));
   }
   const remove = (id: string) => setFiles((x) => x.filter((y) => y.id !== id));

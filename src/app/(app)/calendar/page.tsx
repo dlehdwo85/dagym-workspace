@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DateField, TimeSelect, nextHour, shiftEnd } from '@/components/DateTimePickers';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -42,8 +43,8 @@ class GrabWhereHeld extends Interaction {
   }
 }
 const grabWhereHeld = createPlugin({ name: 'wos-grab-where-held', componentInteractions: [GrabWhereHeld] });
-const seoulDate = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
-const seoulTime = (d: Date | string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
+const seoulDate = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
+const seoulTime = (d: Date | string) => dtf('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 
 /** V5 연결된 업무가 있는 일정을 지울 때: 업무도 지울지 (반복 일정은 전체 삭제일 때만 물음) */
@@ -638,7 +639,7 @@ function CalendarPage() {
               const timed = arg.view.type.startsWith('timeGrid') && !arg.event.allDay;
               const month = arg.view.type === 'dayGridMonth';
               const mins = arg.event.end && arg.event.start ? (+arg.event.end - +arg.event.start) / 60000 : 60;
-              const hm = (x: Date | null) => (x ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }).format(x) : '');
+              const hm = (x: Date | null) => (x ? dtf('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' }).format(x) : '');
               // 휴대폰(좁은 칸)은 시작 시각만 "13:00" — "오후 1:00 - 오후 2…"처럼 잘리지 않게
               const when0 = isTask ? (t.due_time ? `${t.due_time.slice(0, 5)} 마감` : '') : mobile && timed ? hm(arg.event.start) : arg.timeText;
               // V36 4: 장소가 있는 일정 = 이동 — 📍 + (넓은 칸) 장소·출발 권장(시작 40분 전, 지도 계산 없음)

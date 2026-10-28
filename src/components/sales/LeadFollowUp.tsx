@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useCallback, useRef, useState } from 'react';
 import { api } from '@/components/client';
 import { Button, Field, Modal, cx, inputCls } from '@/components/ui';
@@ -13,8 +14,8 @@ export type LeadFollowUpChoice = { nextDate: string; nextAction?: string } | { c
 type Brief = { id: string; name: string; status: string | null; next: string | null; nextAction: string | null; owner: string | null; closed: boolean; canStage: boolean };
 type Ask = LeadFollowUpChoice | null | 'skip';
 
-const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-const plus = (days: number, months = 0) => { const d = new Date(`${todayKst()}T12:00:00+09:00`); d.setUTCMonth(d.getUTCMonth() + months); d.setUTCDate(d.getUTCDate() + days); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d); };
+const todayKst = () => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+const plus = (days: number, months = 0) => { const d = new Date(`${todayKst()}T12:00:00+09:00`); d.setUTCMonth(d.getUTCMonth() + months); d.setUTCDate(d.getUTCDate() + days); return dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(d); };
 const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
 const NEXT_CHIPS: [string, () => string][] = [['내일', () => plus(1)], ['3일 뒤', () => plus(3)], ['1주 뒤', () => plus(7)], ['2주 뒤', () => plus(14)], ['1달 뒤', () => plus(0, 1)]];
 const REASONS = ['대상 아님(반려)', '연락 두절', '경쟁사 선정', '시기 안 맞음', '예산 없음'];

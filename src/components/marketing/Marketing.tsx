@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import { MediaThumb } from '@/components/MediaView';
 import Link from 'next/link';
@@ -612,8 +613,8 @@ function OpsRequests() {
 /** 콘텐츠 캘린더 — 대표 10/20 16:10 (#105): 주 보기(기본) = 요일 7열 × 브랜드(또는 채널) 행, 칸에 썸네일·상태·게시 시각, 끌어서 날짜 이동·[옮기기] 상자(날짜·시각), 오늘 열 강조, 브랜드 필터, 휴대폰은 가로 스크롤. 월 보기는 전과 같음 */
 type CalContent = Content & { kind?: string | null; brand_color?: string | null; media_info?: { id: string; mime: string }[] | null; is_test?: boolean };
 const KST = 'Asia/Seoul';
-const ymdK = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: KST }).format(d);
-const hmK = (iso: string) => new Intl.DateTimeFormat('en-GB', { timeZone: KST, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+const ymdK = (d: Date) => dtf('en-CA', { timeZone: KST }).format(d);
+const hmK = (iso: string) => dtf('en-GB', { timeZone: KST, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 const addDaysYmd = (ymd: string, n: number) => ymdK(new Date(Date.parse(`${ymd}T12:00:00+09:00`) + n * 864e5));
 /** 그 주(일요일 시작)의 7일 */
 const weekOf = (ymd: string) => { const dow = new Date(`${ymd}T12:00:00+09:00`).getUTCDay(); /* KST 정오 = UTC 03시, 같은 날 */ const start = addDaysYmd(ymd, -dow); return Array.from({ length: 7 }, (_, i) => addDaysYmd(start, i)); };

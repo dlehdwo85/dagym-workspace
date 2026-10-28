@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Download, FileUp, Info, Sparkles } from 'lucide-react';
 import { DropHint, UploadProgress, putFile } from '@/components/upload';
@@ -79,11 +80,11 @@ function Chart({ year, thisY, prevY, target }: { year: number; thisY: number[]; 
 
 export default function RevenuePage() {
   const { dir } = useSession();
-  const thisYear = Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric' }).format(new Date()));
+  const thisYear = Number(dtf('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric' }).format(new Date()));
   const [year, setYear] = useState(thisYear);
   const [brand, setBrand] = useState('');
   const [unit, setUnit] = useState('');
-  const [month, setMonth] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7));
+  const [month, setMonth] = useState(() => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7));
   const { data, error, loading, reload } = useApi<{ year: number; units: any[]; rows: Row[]; aiEnabled?: boolean; canEdit?: boolean }>(`/api/revenue?year=${year}`, [year]);
   const [drafts, setDrafts] = useState<Record<string, any>>({});
   const [csv, setCsv] = useState<{ name: string; text: string; result?: any } | null>(null);

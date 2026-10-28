@@ -1,10 +1,11 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useEffect, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, Field, Modal, Skeleton, cx, inputCls, toast } from '@/components/ui';
 
 type Summary = { user: { id: string; name: string; status: string; left_at: string | null; rejoin_until: string | null; handover_to: string | null; canRejoin: boolean }; items: { key: string; label: string; count: number }[]; candidates: { id: string; name: string; title: string | null }[] };
-const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+const today = () => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
 /**
  * 대표 10/20 오후 7) [퇴사 처리] / [인수인계] 창 — 한 창에서 날짜(퇴사 처리일 때)·받을 사람·항목별 체크(개수)·[이전].

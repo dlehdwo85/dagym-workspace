@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { RoleBadge } from '@/components/RoleBadge';
 import { useEffect, useState } from 'react';
 import { SpacesTab } from '@/components/SpacesTab';
@@ -74,7 +75,7 @@ function Users() {
   const [off, setOff] = useState<{ id: string; mode: 'leave' | 'handover' } | null>(null);
   const [showLeft, setShowLeft] = useState(false);
   const leftN = data?.users.filter((u: any) => u.status === 'left').length ?? 0;
-  const todayK = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const todayK = dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
   async function rejoin(u: any) { if (!confirm(`${u.name}님을 복직 처리할까요? (퇴사일부터 30일 안)`)) return; try { await api(`/api/admin/users/${u.id}/rejoin`, { body: {} }); toast.ok('복직 처리했습니다'); reload(); } catch (e: any) { toast.error(e.message); } }
   const demoN = data?.users.filter((u: any) => u.is_demo).length ?? 0;
   const allUnits = useApi<{ units: any[] }>('/api/admin/org-units');

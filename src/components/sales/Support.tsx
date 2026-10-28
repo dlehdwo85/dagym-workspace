@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -27,7 +28,7 @@ const FLAG_CLS: Record<Flag['level'], string> = { ok: 'bg-emerald-50 text-emeral
 const STATUS_CLS: Record<string, string> = { interest: 'bg-sky-50 text-sky-800', preparing: 'bg-blue-600 text-white', applied: 'bg-violet-50 text-violet-800', selected: 'bg-emerald-600 text-white', rejected: 'bg-slate-200 text-ink-2', dropped: 'bg-slate-100 text-ink-3' };
 const STEPS: [string, string][] = [['interest', '관심'], ['preparing', '신청 준비'], ['applied', '신청 완료'], ['selected', '선정'], ['rejected', '탈락'], ['dropped', '포기']];
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
-const kday = (d: string | null) => (d ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }).format(new Date(`${d}T12:00:00+09:00`)) : '');
+const kday = (d: string | null) => (d ? dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }).format(new Date(`${d}T12:00:00+09:00`)) : '');
 const linkCls = 'inline-flex min-h-[32px] items-center gap-1 rounded-input border border-line bg-white px-2.5 text-xs font-medium text-ink-2';
 const csv = (s: string) => s.split(/[,，\n]/).map((x) => x.trim()).filter(Boolean);
 

@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useInApp } from '@/components/inApp';
 import { CompanyAiProfile } from '@/components/CompanyAiProfile';
 import { useState } from 'react';
@@ -40,7 +41,7 @@ export function Automation() {
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 링크 없음(요금제 고르기는 사용량·요금제 화면 — 대표 10/27 ⑤)
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '', mode: 'content' as Mode });
   // 로컬 10/20 보완: 묶음은 n일마다(+주말 건너뛰기) 또는 요일 지정(월·수·금), 종류별 시각 한 번에
-  const [bundle, setBundle] = useState({ brandId: '', mode: 'interval' as 'interval' | 'weekdays', intervalDays: 3, skipWeekend: false /* 대표 15:40: 기본 끔 */, weekdays: [1, 3, 5] as number[], startDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), times: { ...BUNDLE_TIMES } });
+  const [bundle, setBundle] = useState({ brandId: '', mode: 'interval' as 'interval' | 'weekdays', intervalDays: 3, skipWeekend: false /* 대표 15:40: 기본 끔 */, weekdays: [1, 3, 5] as number[], startDate: dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), times: { ...BUNDLE_TIMES } });
   async function addBundle(e: React.FormEvent) {
     e.preventDefault();
     try {

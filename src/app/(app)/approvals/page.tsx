@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 // V30 ④ 결재: 휴가·지출결의·품의 요청(회사 양식) = 결재 업무(기존 결재선) · 승인 건 엑셀
 // 로컬 10/20 19:10 (#114): ① 결재할 것·올린 것·참조 탭 ② 작성 화면 결재선 미리 보기·변경·참조자 ③ 상태 뱃지(대기·진행 중·승인·반려)+멈춘 단계
 // ④ 임시 저장·문서번호·반려 사유 ⑤ 양식 6종(출장·구매·경조사 추가) ⑥ 빈 상태 안내 ⑦ 휴대폰 상단 '결재할 것 n건'(AppShell)
@@ -18,7 +19,7 @@ type Req = { id: string; kind: string; data: Record<string, any>; amount: string
 type View = 'todo' | 'mine' | 'cc' | 'all';
 const KIND: Record<string, string> = { leave: '휴가', expense: '지출결의', general: '품의', trip: '출장', purchase: '구매', family: '경조사' };
 const KINDS = Object.keys(KIND);
-const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const todayKst = () => dtf('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const daysAgo = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400e3));
 
 /** ③ 상태 뱃지: 임시 저장 · 대기(아직 아무 단계도 승인 전) · 진행 중(한 단계 이상 승인) · 승인 · 반려 · 취소 */

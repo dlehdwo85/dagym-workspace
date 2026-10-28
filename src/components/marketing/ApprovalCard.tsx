@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { createContext, useContext, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { MediaFull, MediaThumb, isVideoMime, mimeOf, posterFrom } from '@/components/MediaView';
@@ -48,8 +49,8 @@ export function decideMessage(decision: 'approve' | 'changes' | 'hold', rv?: Dec
   if (rv?.error) return `수정을 요청했습니다 — AI 수정본은 만들지 못했습니다: ${rv.error.slice(0, 80)}`;
   return '수정을 요청했습니다';
 }
-const kst = (d: Date | string, o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', ...o }).format(new Date(d));
-const ymd = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
+const kst = (d: Date | string, o: Intl.DateTimeFormatOptions) => dtf('ko-KR', { timeZone: 'Asia/Seoul', ...o }).format(new Date(d));
+const ymd = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const hm = (d: Date | string) => kst(d, { hour: '2-digit', minute: '2-digit', hour12: false });
 /** '오늘 18:00' / '내일 10:00' / '10/21(화) 10:00' */
 export function whenLabel(at: string | null) {

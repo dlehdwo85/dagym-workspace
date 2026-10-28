@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleCheck, Hourglass, MapPin, Megaphone, MessageSquare, PlusCircle, Sparkles, Users, Activity as ActivityIcon } from 'lucide-react';
@@ -16,8 +17,8 @@ import { HomeMonth } from '@/components/HomeMonth';
 import { useRouter } from 'next/navigation';
 import { followUpMsg, useLeadFollowUp } from '@/components/sales/LeadFollowUp';
 
-const seoulDay = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
-const fmtHM = (d: Date | string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
+const seoulDay = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
+const fmtHM = (d: Date | string) => dtf('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const dow = (d: string) => new Date(d + 'T00:00:00Z').getUTCDay();
@@ -223,7 +224,7 @@ export default function Dashboard() {
   const hqPeople = dir.users.filter((u) => u.org_unit_ids?.some((id) => hqIds.has(id)));
   const zero = { open: 0, overdue: 0, due_today: 0, done_week: 0, this_week: 0 };
   const people = (hqPeople.length ? hqPeople.map((u) => ({ id: u.id, name: u.name, ...zero, ...(data.workload.find((w: any) => w.id === u.id) ?? {}) })) : data.workload.slice(0, 6)) as any[];
-  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date()));
+  const hour = Number(dtf('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date()));
   const greet = hour < 11 ? '좋은 아침입니다' : hour < 17 ? '안녕하세요' : '오늘도 수고 많으셨습니다';
 
   return (

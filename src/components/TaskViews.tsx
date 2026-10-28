@@ -1,18 +1,14 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { SPACE_META } from './spaceMeta';
 import { PhoneInquiryButton } from './PhoneInquiry';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useRowOpen } from './rowOpen';
 import { DndContext, MouseSensor, PointerSensor, TouchSensor, rectIntersection, useDraggable, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import FullCalendar from '@fullcalendar/react';
-import dayGridPlugin from '@fullcalendar/daygrid';
-import interactionPlugin from '@fullcalendar/interaction';
-import listPlugin from '@fullcalendar/list';
-import luxonPlugin from '@fullcalendar/luxon3';
-import koLocale from '@fullcalendar/core/locales/ko';
+import dynamic from 'next/dynamic';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSalesTerms, useSession } from './session';
 import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock } from 'lucide-react';
@@ -206,6 +202,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     setData((d) => d && { tasks: d.tasks.map((x) => { const i = ids.indexOf(x.id); return i >= 0 ? { ...x, sort_order: i } : x; }) });
     try { await api('/api/tasks/reorder', { body: { ids } }); broadcastRefresh(); } catch (e: any) { toast.error(e.message); reload(); }
   }
+  // 238차(#742): 줄(ListRow)에 늘 같은 함수를 넘겨, 건수·팀 목록이 도착해 화면이 다시 그려질 때 업무 줄 전체를 다시 그리지 않게
+  const patchRef = useRef(patch); patchRef.current = patch;
+  const onPatch = useCallback((t: Task, b: Record<string, unknown>) => patchRef.current(t, b), []);
 
   // 오른쪽 패널
   const [panelId, setPanelId] = useState<string | null>(null);
@@ -479,9 +478,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             reload(); broadcastRefresh();
           }} />}
           <SelectCtx.Provider value={mode === 'list' || mode === 'board' ? selCtx : null}>
-          {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={patch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
-            : curView === 'done' ? <DoneArchive thisMonth={tasks} filterQs={new URLSearchParams(Object.entries({ assigneeId: filters.assigneeId, teamId: filters.teamId, projectId: fixed?.projectId }).filter(([, v]) => v) as [string, string][]).toString()} onPatch={patch} />
-            : <GroupedTasks tasks={tasks} group={group} view={curView} assigneeFilter={filters.assigneeId || null} onPatch={patch} onAcked={reload}
+          {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={onPatch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
+            : curView === 'done' ? <DoneArchive thisMonth={tasks} filterQs={new URLSearchParams(Object.entries({ assigneeId: filters.assigneeId, teamId: filters.teamId, projectId: fixed?.projectId }).filter(([, v]) => v) as [string, string][]).toString()} onPatch={onPatch} />
+            : <GroupedTasks tasks={tasks} group={group} view={curView} assigneeFilter={filters.assigneeId || null} onPatch={onPatch} onAcked={reload}
                 people={people} sortBy={sortBy} onSort={pickSort} onReorder={reorder}
                 top={adding ? <InlineAddTask key={addKey} autoFocus defaultAssignee={filters.assigneeId || undefined} onEscape={() => setAdding(false)} placeholder="업무 이름 입력 후 Enter — 저장하고 다음 줄, Esc 로 끝내기" /> : null} />)}
           {mode === 'board' && projectId && (
@@ -491,7 +490,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
               </select>
             </div>
           )}
-          {mode === 'board' && (boardBy === 'section' && projectId ? <SectionBoard sections={sections} tasks={tasks} onPatch={patch} /> : <BoardView tasks={tasks} onPatch={patch} />)}
+          {mode === 'board' && (boardBy === 'section' && projectId ? <SectionBoard sections={sections} tasks={tasks} onPatch={onPatch} /> : <BoardView tasks={tasks} onPatch={onPatch} />)}
           </SelectCtx.Provider>
           {/* V14 20번: 처음 쓰는 사람에게 "선택" 안내 (목록 아래 — 늦게 떠도 행이 밀리지 않게) */}
           {!selOn && selTip && (mode === 'list' || mode === 'board') && (
@@ -501,8 +500,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             </p>
           )}
 
-          {mode === 'calendar' && <CalendarView tasks={tasks} onPatch={patch} />}
-          {mode === 'timeline' && <TimelineView tasks={tasks} onPatch={patch} />}
+          {mode === 'calendar' && <CalendarView tasks={tasks} onPatch={onPatch} />}
+          {mode === 'timeline' && <TimelineView tasks={tasks} onPatch={onPatch} />}
         </>
       )}
     </div>
@@ -537,8 +536,8 @@ function snake(b: Record<string, unknown>) {
 /** 미팅 시각: 오늘이면 시:분, 아니면 월/일 시:분 (서울) */
 function meetingWhen(iso: string) {
   const d = new Date(iso);
-  const ymd = (x: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x);
-  const hm = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  const ymd = (x: Date) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(x);
+  const hm = dtf('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
   const day = ymd(d);
   return day === ymd(new Date()) ? hm : `${Number(day.slice(5, 7))}/${Number(day.slice(8))} ${hm}`;
 }
@@ -584,8 +583,8 @@ const undoTo = (t: Task): TaskStatus => PREV_STATUS.get(t.id) ?? (t.prev_status 
 /** 안내 [완료됨 보기] → 그 업무가 든 '완료됨'을 펼치고 그 자리로(id 없으면 모두 펼침) */
 export const openDoneFold = (id?: string) => window.dispatchEvent(new CustomEvent('wos-done-open', { detail: { id } }));
 const toastDone = (id: string) => toast.ok('완료했습니다 — 완료됨으로 옮겼습니다', { label: '완료됨 보기', run: () => openDoneFold(id) });
-const seoulDay = (iso?: string | null) => (iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso)) : '');
-const doneWhen = (iso?: string | null) => { const d = seoulDay(iso); if (!d) return ''; return d === todayStr() ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso!)) : `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`; };
+const seoulDay = (iso?: string | null) => (iso ? dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso)) : '');
+const doneWhen = (iso?: string | null) => { const d = seoulDay(iso); if (!d) return ''; return d === todayStr() ? dtf('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso!)) : `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`; };
 /** 묶음 맨 아래 접힌 '완료됨 n건 (오늘 a · 이번 주 n)' — 줄마다 [되돌리기](담당자만), [완료 전체 보기 →]. 펼침은 이 기기에 기억 */
 function DoneFold({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => any }) {
   const { user } = useSession();
@@ -914,7 +913,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     // V6 5번 완료 보관: 완료일 기준 월별 (최신 달 먼저)
     const m = new Map<string, G>();
     for (const t of tasks) {
-      const k = (t.completed_at ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(t.completed_at)) : '0000-00').slice(0, 7);
+      const k = (t.completed_at ? dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(t.completed_at)) : '0000-00').slice(0, 7);
       if (!m.has(k)) m.set(k, { key: k, label: k === '0000-00' ? '완료일 없음' : `${k.slice(0, 4)}년 ${Number(k.slice(5))}월`, items: [], add: {} });
       m.get(k)!.items.push(t);
     }
@@ -1171,14 +1170,15 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortab
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((t) => <SortableRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} onMove={onMove} />)}
         </SortableContext>
-      ) : tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} dragHint={dragHint} handle={<span className="hidden w-4 shrink-0 sm:inline-flex" />} />)}
+      ) : tasks.map((t) => <ListRow key={t.id} t={t} onPatch={onPatch} onAck={onAck} dragHint={dragHint} handle={NO_HANDLE} />)}
       {tail}
     </div>
   );
 }
 
-/** 목록 행. 모바일에서는 오른쪽으로 밀면 완료(또는 검토 요청), 왼쪽으로 밀면 보류 */
-function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; handle?: React.ReactNode; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void; dragHint?: boolean }) {
+const NO_HANDLE = <span className="hidden w-4 shrink-0 sm:inline-flex" />; // 끌기 손잡이 없는 줄의 같은 폭 빈 자리(238차: 줄 memo 가 깨지지 않게 상수)
+/** 목록 행. 모바일에서는 오른쪽으로 밀면 완료(또는 검토 요청), 왼쪽으로 밀면 보류. 238차(#742): memo — 같은 업무·같은 함수면 다시 그리지 않음 */
+const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; handle?: React.ReactNode; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void; dragHint?: boolean }) {
   const ST = useSalesTerms(); // #408 영업 원천 배지 이름은 회사 업종 템플릿
   // 방금 추가한 업무는 2초 강조
   const [fresh, setFresh] = useState(() => isFresh(t.id));
@@ -1278,7 +1278,7 @@ function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onP
       </div>
     </div>
   );
-}
+});
 
 function BoardCard({ t }: { t: Task }) {
   const selc = useContext(SelectCtx);
@@ -1351,40 +1351,11 @@ function addDays(d: string, n: number) {
 }
 function diffDays(a: string, b: string) { return Math.round((Date.parse(b) - Date.parse(a)) / 86400000); }
 
+// 238차(#742): 달력 보기는 누를 때 받음(FullCalendar 를 목록 화면 코드에서 뺌)
+const TaskMonthCalendar = dynamic(() => import('./TaskMonthCalendar').then((m) => m.TaskMonthCalendar), { ssr: false, loading: () => <Skeleton rows={6} /> });
 function CalendarView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => void }) {
   const openTask = useContext(OpenTaskCtx);
-  const events = tasks.filter((t) => t.due_date).map((t) => ({
-    id: t.id, title: `${t.status === 'done' ? '✓ ' : ''}${t.title}`, allDay: true,
-    start: t.start_date && t.start_date < t.due_date! ? t.start_date : t.due_date!,
-    end: addDays(t.due_date!, 1), extendedProps: { task: t },
-    backgroundColor: t.status === 'done' ? '#94a3b8' : t.due_date! < todayStr() ? '#dc2626' : t.project_color ?? '#0F766E',
-    borderColor: 'transparent',
-  }));
-  return (
-    <div className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="task-calendar">
-      <FullCalendar
-        plugins={[dayGridPlugin, interactionPlugin, listPlugin, luxonPlugin]}
-        initialView="dayGridMonth" locale={koLocale} timeZone="Asia/Seoul" height="auto" firstDay={0} editable eventDurationEditable
-        headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,listMonth' }}
-        buttonText={{ today: '오늘', month: '월', list: '목록' }} events={events} dayMaxEvents={4}
-        eventClick={(i) => { i.jsEvent.preventDefault(); openTask(i.event.id); }}
-        eventDrop={(i) => {
-          const t = i.event.extendedProps.task as Task;
-          const delta = i.delta.days + i.delta.months * 30; // 월 단위 이동은 날짜로 다시 계산
-          const newStart = i.event.startStr.slice(0, 10);
-          const oldStart = t.start_date && t.start_date < t.due_date! ? t.start_date : t.due_date!;
-          const shift = diffDays(oldStart, newStart) || delta;
-          onPatch(t, { dueDate: addDays(t.due_date!, shift), ...(t.start_date ? { startDate: addDays(t.start_date, shift) } : {}) });
-        }}
-        eventResize={(i) => {
-          const t = i.event.extendedProps.task as Task;
-          const end = addDays(i.event.endStr.slice(0, 10), -1);
-          const start = i.event.startStr.slice(0, 10);
-          onPatch(t, { dueDate: end, startDate: start < end ? start : null });
-        }}
-      />
-    </div>
-  );
+  return <TaskMonthCalendar tasks={tasks} onPatch={onPatch} onOpen={openTask} />;
 }
 
 /**
@@ -1410,7 +1381,7 @@ function TimelineView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b:
   const colW = () => (gridRef.current ? gridRef.current.clientWidth / DAYS : 30);
   const today = todayStr();
   const pickZoom = (z: Zoom) => { setZoom(z); try { localStorage.setItem('wos_tl_zoom', z); } catch {} };
-  const dayOf = (iso?: string | null) => (iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso)) : null);
+  const dayOf = (iso?: string | null) => (iso ? dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso)) : null);
   function span(t: Task) {
     const s = t.start_date && (!t.due_date || t.start_date <= t.due_date) ? t.start_date : (t.due_date ?? t.start_date)!;
     const e = t.due_date ?? s;

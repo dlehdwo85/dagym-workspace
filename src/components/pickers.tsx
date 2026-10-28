@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { RoleBadge } from '@/components/RoleBadge';
 import { useMemo, useState } from 'react';
 import { useSession } from './session';
@@ -180,7 +181,7 @@ export function splitRule(rule: string | null): { base: string | null; until: st
     const m = /^UNTIL=(\d{8})(T(\d{6})Z?)?$/i.exec(p);
     if (m) {
       const iso = m[2] ? `${m[1].slice(0, 4)}-${m[1].slice(4, 6)}-${m[1].slice(6, 8)}T${m[3].slice(0, 2)}:${m[3].slice(2, 4)}:${m[3].slice(4, 6)}Z` : `${m[1].slice(0, 4)}-${m[1].slice(4, 6)}-${m[1].slice(6, 8)}T00:00:00+09:00`;
-      until = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso));
+      until = dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso));
       return false;
     }
     const c = /^COUNT=(\d+)$/i.exec(p);

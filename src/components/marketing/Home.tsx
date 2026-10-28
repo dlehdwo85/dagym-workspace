@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { RevenueGoal } from './RevenueGoal';
 import { MediaThumb } from '@/components/MediaView';
@@ -17,7 +18,7 @@ const CH_COLOR: Record<string, string> = { instagram: '#DB2777', facebook: '#256
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 const dayShort = (d: string) => { const x = new Date(`${d}T00:00:00+09:00`); return `${x.getMonth() + 1}/${x.getDate()}`; };
 const wd = (d: string) => '일월화수목금토'[new Date(`${d}T00:00:00+09:00`).getDay()];
-const hm = (at: string) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(at));
+const hm = (at: string) => dtf('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(at));
 
 type Home = {
   canEdit: boolean; cards: { cards: string[]; mine: boolean; company: string[] | null }; cardLabels: Record<string, string>;

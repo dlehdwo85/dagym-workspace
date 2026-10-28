@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useState } from 'react';
 import Link from 'next/link';
 import { api, useApi } from '@/components/client';
@@ -70,8 +71,8 @@ type Prefs = { keywords: string[]; excludes: string[]; regions: string[]; issuer
 type MailRoute = { channel: 'email:workin' | 'email:smtp' | null; smtpFrom: string | null; fallback: 'resend' | 'dev' | null; fromName: string; replyTo: string | null };
 type PD = { prefs: Prefs; people: { id: string; name: string; email: string; role: string }[]; last: { day: string; counts: any; items: any[]; mailed: number; notified: number; created_at: string } | null; canEdit: boolean; mail?: MailRoute };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const kstHourNow = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
-const kstToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+const kstHourNow = () => Number(dtf('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
+const kstToday = () => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 const VIA: Record<string, string> = { 'email:smtp': '회사 메일 계정', 'email:workin': '워크인 발송', sent: '워크인 기본 발송', dev: '개발 모드' };
 /** #509 d: 당일 메일이 어느 길로 나가는지 — 회사 SMTP 면 회사 메일함엔 보낸메일함에만 남는다는 안내 */
 function MailRouteNote({ m }: { m: MailRoute }) {

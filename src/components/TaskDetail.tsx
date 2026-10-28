@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { RoleBadge } from '@/components/RoleBadge';
 import Link from 'next/link';
 import { CarriedBadge } from './carried';
@@ -1053,7 +1054,7 @@ function TimeBlockModal({ open, onClose, task, onDone }: { open: boolean; onClos
   const unitCal = editable.find((c) => c.type === 'org_unit' && c.org_unit_id === task.org_unit_id);
   const defaultCal = forOther ? unitCal ?? personal : personal;
   const avail = useApi<{ days: any[] }>(open && f.date && assignee ? `/api/availability?userId=${assignee}&date=${f.date}` : null, [f.date]);
-  useEffect(() => { if (open) { const d = task.due_date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()); setF({ date: d, start: '09:00', end: endOf('09:00', Math.min(remaining, 240)), calendarId: '' }); } }, [open, task.due_date]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { const d = task.due_date ?? dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()); setF({ date: d, start: '09:00', end: endOf('09:00', Math.min(remaining, 240)), calendarId: '' }); } }, [open, task.due_date]); // eslint-disable-line react-hooks/exhaustive-deps
   const calId = f.calendarId || defaultCal?.id || '';
   const chosen = editable.find((c) => c.id === calId);
   const addAttendee = forOther && !(chosen?.type === 'personal' && chosen?.owner_user_id === assignee);

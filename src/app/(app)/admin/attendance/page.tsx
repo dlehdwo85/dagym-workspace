@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 // V30 ③ 관리자 근태: 날짜별 출퇴근표(지각·미기록·현장 밖·연차/출장) · 월 요약 · 엑셀 · 현장(주소·위치·반경) · 설정(켬/끔·지각 기준)
 import { useState } from 'react';
 import { Download, MapPin, Plus, Trash2 } from 'lucide-react';
@@ -8,7 +9,7 @@ import { Button, Field, PageHeader, Skeleton, cx, inputCls, toast } from '@/comp
 type DayRow = { id: string; name: string; title: string | null; inTime: string | null; inSite: string | null; inInside: boolean | null; inReason: string | null; outTime: string | null; outSite: string | null; outInside: boolean | null; outReason: string | null; late: boolean; missing: boolean; away: string | null };
 type MonRow = { id: string; name: string; title: string | null; present: number; late: number; outside: number; away: number; missing: number };
 type Site = { id: string; name: string; address: string | null; lat: number; lng: number; radius_m: number; active: boolean };
-const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const todayKst = () => dtf('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
 export default function AttendanceAdminPage() {
   const [tab, setTab] = useState<'day' | 'month' | 'sites'>('day');

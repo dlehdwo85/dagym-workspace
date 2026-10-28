@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, MessageCircle, CheckCircle2, Eye, Library, Loader2, Mail, MessageSquare, Paperclip, RotateCcw, Search, Send, Sparkles, Upload } from 'lucide-react';
@@ -30,7 +31,7 @@ const INTENTS = { send: '자료 보냄', progress: '진행 안내', schedule: '�
 const PH = /\[[^\]\n]{1,12}\]/; // V32 7-1: [날짜] 같은 빈칸
 
 // ---- 대표 요청(10/19) 예약 보내기: KST 날짜·시각 → ISO(+09:00), 빠른 선택, 밤·주말 경고 ----
-const kstParts = (d = new Date()) => { const f = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' }).formatToParts(d);
+const kstParts = (d = new Date()) => { const f = dtf('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' }).formatToParts(d);
   const g = (t: string) => f.find((x) => x.type === t)?.value ?? ''; return { date: `${g('year')}-${g('month')}-${g('day')}`, hm: `${g('hour').replace('24', '00')}:${g('minute')}`, wd: g('weekday') }; };
 const addDaysKst = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00+09:00`) + n * 86400000);
 export const kstIso = (date: string, hm: string) => `${date}T${hm}:00+09:00`;

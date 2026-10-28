@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api, broadcastRefresh } from './client';
 import { Camera, Check, Download, Eye, FileText, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload, Video } from 'lucide-react';
@@ -61,7 +62,7 @@ export async function uploadTaskFiles(list: File[], target: { taskId?: string; e
 const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '');
 /** 대표 10/27(사진 150장이 지저분하지 않게): 사진 칸에 바로 보이는 수(넘으면 마지막 칸 '+n' → 사진첩) · 사진이 이보다 많으면 파일 목록의 사진 줄은 '사진 n장' 한 줄로 */
 const PHOTO_PREVIEW = 12, PHOTO_ROWS_MAX = 6;
-const seoulDay = (v: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(v));
+const seoulDay = (v: string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(v));
 const dayLabel = (d: string) => `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일 (${'일월화수목금토'[new Date(`${d}T12:00:00+09:00`).getUTCDay()]})`;
 const isVideo = (a: any) => a.kind === 'file' && /^video\//.test(a.mime_type ?? ''); // 대표 10/21 02:00: 영상은 보기 창에서 재생
 

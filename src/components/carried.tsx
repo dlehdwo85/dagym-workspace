@@ -1,9 +1,10 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 /**
  * V20 이월 표시: 끝나지 않은 업무 중 마감일(없으면 만든 날)이 이번 달 이전이면 "이월 · 9월부터", 2개월 이상이면 "이월 2개월".
  * 데이터를 옮기지 않고 화면에서 계산(서울 기준 달). 지연(마감 지남) 빨간 표시는 따로 그대로 — 이 표시는 회색.
  */
-const ymOf = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(typeof d === 'string' ? new Date(d.length === 10 ? d + 'T12:00:00+09:00' : d) : d);
+const ymOf = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(typeof d === 'string' ? new Date(d.length === 10 ? d + 'T12:00:00+09:00' : d) : d);
 export function carriedMonths(t: { status: string; due_date?: string | null; created_at?: string | null }, now = new Date()): { months: number; from: number } | null {
   if (t.status === 'done') return null;
   const base = t.due_date || t.created_at;

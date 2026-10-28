@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -117,7 +118,7 @@ export function shiftEnd(oldStart: string, oldEnd: string, newStart: string) {
 }
 /** 지금 기준 다음 정각 */
 export function nextHour() {
-  const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date()));
+  const h = Number(dtf('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date()));
   const s = Math.min(22, (h + 1) % 24);
   return { start: `${pad2(s)}:00`, end: `${pad2(s + 1)}:00` };
 }

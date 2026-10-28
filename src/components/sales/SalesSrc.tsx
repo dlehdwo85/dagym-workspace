@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useBackClose } from '@/components/backClose';
 import { replaceUrl, useUrlState } from '@/components/urlState';
 import { useSearchParams } from 'next/navigation';
@@ -499,8 +500,8 @@ function ActForm({ id, onSaved }: { id: string; onSaved: () => void }) {
   );
 }
 const CLOSED_STAGES = ['보류', '실패', '되돌림'];
-const plusDays = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.parse(`${today()}T12:00:00+09:00`) + n * 864e5)); // 197차: 서울 날짜로(예전 식은 UTC 로 잘라 하루 일렀음 — '내일' 칩이 오늘)
-const fmtEv = (e: any) => { const d = new Date(e.start_at); const day = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }).format(d); return e.all_day ? day : `${day} ${new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d)}`; };
+const plusDays = (n: number) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.parse(`${today()}T12:00:00+09:00`) + n * 864e5)); // 197차: 서울 날짜로(예전 식은 UTC 로 잘라 하루 일렀음 — '내일' 칩이 오늘)
+const fmtEv = (e: any) => { const d = new Date(e.start_at); const day = dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }).format(d); return e.all_day ? day : `${day} ${dtf('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d)}`; };
 /**
  * 영업 재편 5) 리드·거래처 '진행' 탭 — 파이프라인 메뉴에서 빠진 단계 이동을 흡수해 한 화면에: 단계 띠(누르면 이동, 보류·실패는 사유) · 다음 연락(날짜 + 오늘/내일/3일/1주 칩) · 메모 · 상담 기록 ·
  * 열린 업무 · 다가오는 일정(+ 추가). 정보 수정은 '정보' 탭, 전체 목록은 상담·업무·일정 탭.
@@ -662,9 +663,9 @@ const DESC_SORTS = new Set(['activity', 'revenue', 'created', 'closed']);
 const LEAD_COLS: [string, string][] = [['source', '출처'], ['contact', '마지막 접촉'], ['revenue', '예상 금액'], ['owner', '담당'], ['priority', '우선'], ['interest', '관심 사업'], ['facility', '시설'], ['region', '지역']];
 const DEFAULT_COLS = ['source', 'contact', 'revenue', 'owner', 'priority'];
 const LEAD_CLOSED = new Set(['계약완료', '보류', '실패', '되돌림']);
-const kstDay = (v: unknown) => { if (!v) return null; const d = new Date(String(v)); return Number.isNaN(d.getTime()) ? null : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d); };
+const kstDay = (v: unknown) => { if (!v) return null; const d = new Date(String(v)); return Number.isNaN(d.getTime()) ? null : dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(d); };
 const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00+09:00`) - Date.parse(`${from}T12:00:00+09:00`)) / 864e5);
-const shiftDay = (d: string, n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.parse(`${d}T12:00:00+09:00`) + n * 864e5));
+const shiftDay = (d: string, n: number) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.parse(`${d}T12:00:00+09:00`) + n * 864e5));
 const PRI_KO: Record<string, string> = { urgent: '긴급', high: '높음', medium: '보통', low: '낮음' };
 const CSV_COLS: [string, string][] = [['name', '거래처명'], ['status', '단계'], ['priority', '우선순위'], ['facility', '시설'], ['region', '지역'], ['scale', '규모'], ['owner', '담당'], ['contact', '고객 담당자'], ['phone', '연락처'], ['email', '이메일'], ['homepage', '홈페이지'], ['bizNo', '사업자번호'], ['revenue', '예상매출'], ['next', '다음 연락일'], ['lastActivity', '최근 활동'], ['created', '등록일'], ['memo', '메모']];
 const csvCell = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -1285,7 +1286,7 @@ const kd = (v: unknown) => { const s = String(v ?? ''); if (!/^\d{4}-\d{2}-\d{2}
 const kdt = (v: unknown) => {
   const s = String(v ?? '');
   // 197차: 시각대가 붙은 ISO(…Z·+09:00)는 서울 날짜·시각으로(예전엔 UTC 시각을 그대로 잘라 9시간 일렀음)
-  if (/T\d\d:\d\d/.test(s) && /(Z|[+-]\d\d:?\d\d)$/.test(s)) { const d = new Date(s); if (!Number.isNaN(d.getTime())) { const t = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d); return kd(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d)) + (t !== '00:00' ? ` ${t}` : ''); } }
+  if (/T\d\d:\d\d/.test(s) && /(Z|[+-]\d\d:?\d\d)$/.test(s)) { const d = new Date(s); if (!Number.isNaN(d.getTime())) { const t = dtf('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d); return kd(dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(d)) + (t !== '00:00' ? ` ${t}` : ''); } }
   if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return s; const t = s.slice(11, 16); return kd(s) + (/^\d\d:\d\d$/.test(t) && t !== '00:00' ? ` ${t}` : '');
 };
 /** 표 칸 글 고치기: 엔터·밖 누르면 저장, Esc 취소 */
@@ -1298,7 +1299,7 @@ function CellInput({ value, onSave, label, testId }: { value: string; onSave: (v
 }
 const interests = (a?: string[]) => (a?.length ? <span className="inline-flex flex-wrap gap-1">{a.slice(0, 2).map((x) => <span key={x} className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-800">{x}</span>)}{a.length > 2 && <span className="text-[10px] text-ink-3">+{a.length - 2}</span>}</span> : null);
 const D = (v: unknown) => (v == null || v === '' ? null : String(v));
-const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+const today = () => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 /** 대표 10/21 12:00 영업 재편 4): 사업 배지는 회사 관심 사업(카테고리) 설정에서 — 이름·색 모두 자료(코드에 회사 이름 없음) */
 const BizBadges = ({ items, testid }: { items?: { key: string; name: string; color: string }[]; testid?: string }) => items?.length ? <span className="inline-flex flex-wrap gap-1" data-testid={testid}>{items.map((b) => <span key={b.key} className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white" style={{ background: b.color }} data-testid={testid ? `${testid}-item` : undefined}>{b.name}</span>)}</span> : null;
 const CAT_CLS: Record<string, string> = { '즉시 검토': 'bg-rose-50 text-rose-800', '협력사 필요': 'bg-amber-50 text-amber-800' };
@@ -1389,7 +1390,7 @@ function BidSkip({ n, onChange, canWrite }: { n: any; onChange?: () => void; can
 }
 // 212차 #612: 원천에서 다시 읽어 채우는 칸은 '미확인'만 — 전화로 조사하는 시설 값은 카드의 '미확인 · 조사 예정 날짜(담당)'(ResearchChip)
 const UNK = <span className="text-ink-3" title="원천에서 값이 들어오면 자동으로 채워집니다">미확인</span>;
-const seoulYmd = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso));
+const seoulYmd = (iso: string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso));
 const mdd = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
 /** 212차 #612 ③(대표 결정 10/25): 빈 값(현 위탁사·계약만료일·관리사무소 번호)이 남은 시설 — '미확인 · 조사 예정 10/30(담당 ○○)'(업무로), 조사한 뒤 '확인 못함' */
 function ResearchChip({ r }: { r: any }) {

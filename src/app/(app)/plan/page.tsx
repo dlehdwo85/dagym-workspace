@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
@@ -12,7 +13,7 @@ import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { DueChip, PageHeader, PriorityTag, Skeleton, cx, fmtMinutes, fmtTime, toast } from '@/components/ui';
 
-const seoulDate = (d: Date | string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
+const seoulDate = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const WORK: [number, number][] = [[9 * 60, 12 * 60], [13 * 60, 18 * 60]];
 
 /** 오늘 근무 시간 중 비어 있는 구간 (30분 이상) */

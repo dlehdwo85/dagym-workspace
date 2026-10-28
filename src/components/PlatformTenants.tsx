@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Download, Eye, KeyRound, Lock, LockOpen, Plus, Search, ShieldOff, Trash2 } from 'lucide-react';
@@ -18,8 +19,8 @@ const STAGE: Record<string, string> = { trial: '체험', paid: '유료', hold: '
 const STAGE_CLS: Record<string, string> = { trial: 'bg-sky-50 text-sky-800', paid: 'bg-emerald-50 text-emerald-800', hold: 'bg-amber-50 text-amber-800', churned: 'bg-slate-200 text-ink-2' };
 const SEGMENT_LABEL: Record<string, string> = { partner: '설계 파트너', customer: '일반' };
 const KIND_LABEL: Record<string, string> = { call: '전화', mail: '메일', meeting: '미팅', kakao: '카카오톡', memo: '메모' };
-const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-const kstDate = (v: string | Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(v));
+const todayKst = () => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+const kstDate = (v: string | Date) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(v));
 
 /** V28-3 슈퍼 계정: 회사 목록(검색·필터) → 상세(요금제·정지·체험·읽기 전용·삭제 예약·한도·사용자·지원 모드) */
 export function PlatformTenants() {

@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import clsx from 'clsx';
 import { useSheetBack } from './backClose';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -361,16 +362,16 @@ export function fmtDate(d: string | null | undefined) {
   return `${thisYear ? '' : y + '. '}${m}. ${day}. (${w})`;
 }
 export function fmtDateTime(iso: string | Date) {
-  return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+  return dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 }
 /** S-4 시간 표기 통일: "10. 14. (수) 오후 2:00~3:00", 오전/오후가 바뀌면 "오전 11:00~오후 1:00", 날짜가 바뀌면 날짜도 */
 export function fmtTime(d: Date | string) {
-  return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' }).format(new Date(d));
+  return dtf('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' }).format(new Date(d));
 }
 export function fmtTimeRange(start: Date | string, end: Date | string, opts: { allDay?: boolean; withDate?: boolean } = {}) {
-  const sd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(start));
+  const sd = dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(start));
   const edRaw = new Date(new Date(end).getTime() - (opts.allDay ? 1 : 0));
-  const ed = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(edRaw);
+  const ed = dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(edRaw);
   if (opts.allDay) return sd === ed ? `${fmtDate(sd)} 종일` : `${fmtDate(sd)} ~ ${fmtDate(ed)} 종일`;
   const a = fmtTime(start), b = fmtTime(end);
   const sameMer = a.slice(0, 2) === b.slice(0, 2);
@@ -387,7 +388,7 @@ export function fmtShort(d: string) {
   return new Date().getFullYear() === y ? `${m}월 ${day}일` : `${String(y).slice(2)}.${m}.${day}`;
 }
 export function todayStr() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  return dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 }
 export function dueClass(due: string | null, status: string) {
   if (!due || status === 'done') return 'text-slate-500';

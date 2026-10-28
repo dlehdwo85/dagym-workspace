@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 // V32 2 정산(플랫폼 운영): 월 선택 → 집계 카드(총결제·취소·순매출·VAT·PG 수수료 추정·입금 예정) · 수단별/요금제별 · 장부(정산 상태·직접 표시) · 엑셀 ·
 // 입금 대사(나이스페이 정산 내역 엑셀/CSV 올리기 → 맞음/차이/장부에 없음) · 미수(던닝) · 세금계산서 요청(발행 체크)
 import { useRef, useState } from 'react';
@@ -11,7 +12,7 @@ type Row = { id: string; tenant_name: string; what: string; pay_method_label: st
 type Agg = { count: number; gross: number; canceled: number; net: number; supply: number; vat: number; fee: number; deposit: number; settled: number; pending: number; mismatch: number; byMethod: { key: string; count: number; net: number; fee: number; deposit: number }[]; byPlan: { key: string; count: number; net: number; fee: number; deposit: number }[] };
 type Data = { month: string; fee: { cardPct: number; bankPct: number; vbankKrw: number; settleDays: number }; summary: Agg; prev: Agg; daily: { day: string; count: number; net: number }[]; ledger: Row[]; late: { tenant: string; name: string; plan_code: string; unpaid: number; days: number; retry_count: number; next_retry_on: string | null; billing_lock: string | null; owner_email: string | null }[]; taxOpen: number };
 const S: Record<string, [string, string]> = { pending: ['대기', 'bg-slate-100 text-ink-2'], settled: ['정산 완료', 'bg-emerald-50 text-emerald-700'], mismatch: ['차이', 'bg-red-50 text-red-700'], canceled: ['취소', 'bg-slate-100 text-ink-3'] };
-const thisMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7);
+const thisMonth = () => dtf('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7);
 const shift = (m: string, n: number) => { const d = new Date(`${m}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 7); };
 const diff = (a: number, b: number) => (b ? `${a >= b ? '+' : ''}${Math.round(((a - b) / b) * 100)}%` : a ? '신규' : '—');
 const toBase64 = (f: File) => new Promise<string>((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] ?? ''); r.onerror = () => fail(r.error); r.readAsDataURL(f); });
@@ -26,7 +27,7 @@ export function PlatformSettlement() {
   if (!d) return null;
   const s = d.summary;
   const mark = async (r: Row, status: 'settled' | 'pending') => {
-    try { await api(`/api/platform/settlement/${r.id}`, { method: 'PATCH', body: { status, settledOn: status === 'settled' ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()) : null } }); toast.ok(status === 'settled' ? '정산 완료로 표시했습니다' : '대기로 되돌렸습니다'); st.reload(); } catch (e: any) { toast.error(e.message); }
+    try { await api(`/api/platform/settlement/${r.id}`, { method: 'PATCH', body: { status, settledOn: status === 'settled' ? dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()) : null } }); toast.ok(status === 'settled' ? '정산 완료로 표시했습니다' : '대기로 되돌렸습니다'); st.reload(); } catch (e: any) { toast.error(e.message); }
   };
   return (
     <section className="rounded-card border border-line bg-white shadow-card" data-testid="platform-settlement">

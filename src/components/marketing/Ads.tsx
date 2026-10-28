@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -108,7 +109,7 @@ function ItemTable({ kind, rows, hasAccounts }: { kind: 'keyword' | 'ad'; rows: 
   );
 }
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
-const thisMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7);
+const thisMonth = () => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7);
 const monthLabel = (m: string) => `${m.slice(0, 4)}년 ${Number(m.slice(5, 7))}월`;
 /** 전월 대비 — 비용·클릭은 ±%, 0 이면 '신규'/'—' */
 function Delta({ now, prev, invert, label = '전월' }: { now: number; prev: number; invert?: boolean; label?: string }) {

@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 // 219차 일정 [워크인 화상회의](결정 15-37, 설계 docs/research/VIDEO_MEETINGS_DESIGN_2026-10-28.md 6-1) — 기능 스위치 FEATURE_MEETINGS 일 때만 보임.
 // 켜면 서버가 회의를 만들고 일정 '회의 주소' 칸에 /meet/<code> 를 넣는다(184차 칸 그대로 — 알림·초대·내보내기가 그 주소를 보여 줌). 끄면 칸을 비움.
 import { useState } from 'react';
@@ -11,7 +12,7 @@ export const isWorkinMeet = (url: string | null | undefined) => { if (!url) retu
 
 type EM = { enabled: boolean; canEdit?: boolean; on?: boolean; meeting?: { url: string; code: string } | null; record?: Rec | null };
 type Rec = { started: string | null; ended: string | null; minutes: number; staff: number; guests: number; people: { name: string; guest: boolean; first: string | null; left: string | null; minutes: number }[] };
-const hm = (v: string | null) => (v ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(v)) : '');
+const hm = (v: string | null) => (v ? dtf('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(v)) : '');
 
 /** 일정 창: [워크인 화상회의] 켜기 — 이미 있는 일정은 바로 켜고 끔, 새 일정은 저장할 때 켬(newOn) */
 export function WorkinMeetingToggle({ eventId, canEdit, url, onUrl, newOn, setNewOn }: { eventId?: string; canEdit: boolean; url: string; onUrl: (u: string) => void; newOn: boolean; setNewOn: (v: boolean) => void }) {

@@ -1,4 +1,5 @@
 'use client';
+import { dtf } from '@/lib/dtf';
 import { aiName } from '@/lib/aiNames';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -168,7 +169,7 @@ export default function AssistantPage() {
           <li key={t.id} className={cx('group flex items-center gap-1 rounded-input px-2 py-1.5 text-sm', threadId === t.id ? 'bg-brand-50 font-medium' : 'hover:bg-slate-50')}>
             <button className="min-w-0 flex-1 text-left" onClick={() => openThread(t.id)}>
               <span className="flex items-center gap-1">{t.pinned && <Pin className="size-3 shrink-0 text-amber-600" />}<span className="truncate">{t.title}</span></span>
-              <span className="block truncate text-[11px] text-ink-3">{t.task_title ? `📌 ${t.task_title} · ` : ''}{t.turns}번 · {new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }).format(new Date(t.updated_at))}</span>
+              <span className="block truncate text-[11px] text-ink-3">{t.task_title ? `📌 ${t.task_title} · ` : ''}{t.turns}번 · {dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }).format(new Date(t.updated_at))}</span>
             </button>
             <span className="flex shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
               <button className="rounded p-1 text-ink-3 hover:text-ink" onClick={() => threadAct(t, 'pin')} aria-label={t.pinned ? '고정 해제' : '고정'}><Pin className="size-3.5" /></button>
