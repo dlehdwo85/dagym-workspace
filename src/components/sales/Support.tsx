@@ -11,18 +11,19 @@ import { PortalApplyLink, portalService } from './PortalApply';
 /** #450 영업실 '지원사업' — 기업마당·K-Startup·기관 공지 공고를 회사 프로필로 맞춤(1차 규칙 + AI 세일즈 판단) → 관심·신청 준비(담당 업무·마감 알림) → 신청·선정·탈락 기록 */
 const C = '#2563EB';
 type Flag = { level: 'ok' | 'warn' | 'no'; text: string; need?: string };
-type Ai = { verdict: 'fit' | 'maybe' | 'no'; reasons: string[]; brands: string[]; docs: string[]; summary: string | null; at: string | null; use: string[]; schedule: string | null; auto: boolean };
+type Ai = { verdict: 'fit' | 'maybe' | 'no'; reasons: string[]; brands: string[]; docs: string[]; summary: string | null; at: string | null; use: string[]; schedule: string | null; auto: boolean; stale?: boolean };
 /** #568 주 1회 묶음 — 이번 주 맞는 공고(AI ✅ 또는 1차 ✅) 상위 10건 */
 type Weekly = { week: string; items: { id: string; title: string; by: 'ai' | 'rule'; dday: number | null; applyEnd: string | null; agency: string | null; brands: string[]; use: string | null; auto: boolean }[]; aiCount: number; aiFailed: number; sentTo: number; createdAt: string };
 type Work = { id: string; status: string; statusLabel: string; ownerId: string | null; ownerName: string | null; taskId: string | null; brands: string[]; appliedAt: string | null; resultAt: string | null; amountAwarded: string | null; resultMemo: string | null; memo: string | null };
 type Item = { id: string; title: string; agency: string | null; executor: string | null; category: string | null; source: string; sourceLabel: string; regions: string[]; nationwide: boolean; applyStart: string | null; applyEnd: string | null;
-  applyText: string | null; dday: number | null; amount: string | null; amountKrw: number | null; kinds: string[]; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[]; pending?: boolean;
+  applyText: string | null; dday: number | null; amount: string | null; amountKrw: number | null; kinds: string[]; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[]; pending?: boolean; queued?: boolean;
   rule: { score: number; verdict: 'fit' | 'maybe' | 'no'; flags: Flag[] }; ai: Ai | null; hidden: boolean; work: Work | null };
 type View = { sort: string | null; dd: string; kind: string };
 type Blanks = { fields: { key: string; label: string; items: number }[]; items: number };
 type ListData = { tab: string; today: string; items: Item[]; total: number; counts: Record<string, number>; hiddenNo: number; weekly: Weekly | null; canEdit: boolean; platformAdmin: boolean; aiOn: boolean; people: { id: string; name: string }[];
   view: View; sortUsed: string; chips: { dd: Record<string, number>; kind: Record<string, number> } | null; kindLabel: Record<string, string>; pendingCount: number; blanks: Blanks; aiCostKrw: number | null; weeklyAiMax: number;
-  profile: { saved: boolean; filled: boolean; region: string | null; sigungu: string | null; size: string | null; founded: string | null; interests: string[]; brands: string[] };
+  auto: { on: boolean; enabled: boolean; saved: boolean; queue: number; stopped: string | null; left: number; at: string | null; done: number };
+  profile: { saved: boolean; filled: boolean; autoAi: boolean; region: string | null; sigungu: string | null; size: string | null; founded: string | null; interests: string[]; brands: string[] };
   sources: { slug: string; label: string; last_run_at: string | null; last_status: string | null; summary: string | null }[]; keys: { bizinfo: boolean; datago: boolean }; statusLabel: Record<string, string> };
 
 const TABS: [string, string][] = [['fit', '맞춤'], ['closing', '마감 임박'], ['mine', '관심·준비'], ['results', '신청·결과'], ['all', '전체']];
@@ -44,9 +45,11 @@ function Dday({ d, text }: { d: number | null; text?: string | null }) {
   const cls = d < 0 ? 'bg-slate-100 text-ink-3' : d <= 3 ? 'bg-red-600 text-white' : d <= 7 ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-ink-2';
   return <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums', cls)} data-testid="support-dday">{d < 0 ? '마감' : d === 0 ? 'D-day' : `D-${d}`}</span>;
 }
-function Verdict({ it }: { it: Pick<Item, 'ai' | 'rule'> }) {
+function Verdict({ it }: { it: Pick<Item, 'ai' | 'rule' | 'queued'> }) {
   const v = it.ai?.verdict ?? it.rule.verdict;
-  // #649 ③: 1차 규칙만 맞는 공고는 '해당'이 아님 — #782(대표 10/28 "AI 확인 중이라고 왜?"): 돌고 있는 것처럼 보이던 'AI 확인 중' → '규칙상 맞음 · AI 판단 전'(사람이 [AI 판단]을 눌러야 정해짐)
+  if (it.queued && !it.ai) return <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800" data-testid="support-verdict" data-verdict={v} data-by="rule" data-queued="1"
+    title="새 공고 자동 AI 판단 차례 — 정기 실행(15분마다) 때 차례로 판단합니다(회사 AI 예산에서)">⏳ AI 확인 중</span>; // #785: 실제로 판단 차례에 있을 때만
+  // #649 ③: 1차 규칙만 맞는 공고는 '해당'이 아님 — #782(대표 10/28 "AI 확인 중이라고 왜?"): 판단 차례가 아니면 '규칙상 맞음 · AI 판단 전'(사람이 [AI 판단]을 눌러야 정해짐)
   const pending = !it.ai && v === 'fit';
   const [icon, label, cls] = pending ? ['', '규칙상 맞음 · AI 판단 전', 'border-sky-200 bg-sky-50 text-sky-800'] : VERDICT[v];
   return <span className={cx('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold', cls)} data-testid="support-verdict" data-verdict={v} data-by={it.ai ? 'ai' : 'rule'} data-pending={pending ? '1' : undefined}
@@ -116,12 +119,13 @@ export function Support() {
       {!data ? <Skeleton rows={5} /> : <>
         {data.chips && <ViewBar data={data} cur={cur} onPick={pickView} />}
         {tab === 'fit' && (data.weekly || (data.canEdit && data.aiOn)) && <WeeklyBox weekly={data.weekly} canEdit={data.canEdit && data.aiOn} auto={data.weeklyAiMax} busy={busy === 'weekly'} onNow={weeklyNow} onOpen={(id) => go({ id })} />}
-        {tab === 'fit' && data.pendingCount > 0 && <p className="rounded-input border border-sky-200 bg-sky-50/60 px-2.5 py-1.5 text-xs text-sky-900" data-testid="support-pending-note"><b>규칙상 맞음 · AI 판단 전 {data.pendingCount}건</b> — 지역·업력·규모·업종 규칙으로만 맞는 공고입니다. 참여할 수 있는지는 공고마다 [AI 판단]을 눌러야 정해집니다{data.aiCostKrw != null ? `(건당 ${won(data.aiCostKrw)}, 회사 AI 예산에서)` : ''}. 자동 판단은 꺼져 있습니다{data.canEdit && data.aiOn ? ' — 여러 건은 [여러 건 AI 판단]' : ''}.</p>}
+        {tab === 'fit' && <AutoNote data={data} />}
         {tab === 'fit' && <p className="text-xs text-ink-3">1차 규칙 = 본점 지역·시·군, 업력, 규모·상시근로자, 업종, 인증, 관심 분야.{data.hiddenNo > 0 && <> 자격이 안 맞는 공고 {data.hiddenNo}건은 빼고 보여 줍니다 — <button type="button" className="underline" onClick={() => setShowNo(true)} data-testid="support-show-no">보기</button></>}{showNo && <> · <button type="button" className="underline" onClick={() => setShowNo(false)}>다시 빼기</button></>}</p>}
         <ul className="space-y-2" data-testid="support-list">{data.items.map((it) => (
           <li key={it.id} className={cx('rounded-card border bg-white p-3 shadow-card', it.work ? 'border-blue-200' : 'border-line')} data-testid="support-item" data-id={it.id} data-status={it.work?.status ?? ''}>
             <div className="flex flex-wrap items-start gap-1.5">
               <Verdict it={it} />
+              {it.ai?.stale && <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] text-ink-2" data-testid="support-ai-stale" title="AI 판단 뒤 회사 프로필(지역·규모·근로자·매출·업종·인증)이 바뀌었습니다">{it.queued ? '예전 프로필 기준 · 다시 판단 차례' : '예전 프로필 기준'}</span>}
               <button type="button" onClick={() => go({ id: it.id })} className="min-w-0 flex-1 text-left text-sm font-semibold hover:underline" data-testid="support-open">{it.title}</button>
               {it.isNew && <span className="rounded-full bg-rose-50 px-1.5 text-[10px] font-bold text-rose-700">NEW</span>}
               <Dday d={it.dday} text={it.applyText} />
@@ -172,6 +176,16 @@ function ViewBar({ data, cur, onPick }: { data: ListData; cur: View; onPick: (p:
   );
 }
 
+/** #782·#785 AI 판단 안내 한 줄 — 자동 판단 중(판단 차례 n건) · 예산에 걸려 멈춤 · 꺼짐(규칙상 맞음 · AI 판단 전 n건은 [AI 판단]) */
+function AutoNote({ data }: { data: ListData }) {
+  const a = data.auto; const cost = data.aiCostKrw != null ? `건당 ${won(data.aiCostKrw)}` : '';
+  const box = 'rounded-input border px-2.5 py-1.5 text-xs';
+  if (a.on && a.stopped) return <p className={cx(box, 'border-amber-300 bg-amber-50 text-amber-900')} data-testid="support-auto-note" data-state="stopped"><b>AI 자동 판단을 멈췄습니다</b> — 이번 달 회사 AI 예산(또는 한도)을 다 썼습니다. 남은 {a.left}건은 예산이 채워지면 이어서 판단합니다. 급한 공고는 공고마다 [AI 판단]을 누르세요.</p>;
+  if (a.on) return a.queue > 0 || data.pendingCount > 0 ? <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="on"><b>AI 세일즈가 새 공고를 자동으로 판단합니다</b>{cost ? `(${cost}, 회사 AI 예산에서)` : ''}{a.queue > 0 ? ` — 지금 판단 차례 ${a.queue}건, 15분마다 차례로(‘AI 확인 중’)` : ''}.</p> : null;
+  if (!data.pendingCount) return null;
+  return <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="off"><b>규칙상 맞음 · AI 판단 전 {data.pendingCount}건</b> — 지역·업력·규모·업종 규칙으로만 맞는 공고입니다. 참여할 수 있는지는 공고마다 [AI 판단]을 눌러야 정해집니다{cost ? `(${cost}, 회사 AI 예산에서)` : ''}. {a.saved ? '새 공고 자동 판단이 꺼져 있습니다 — 회사 프로필에서 켤 수 있습니다' : '회사 프로필을 저장하면 새 공고를 자동으로 판단합니다'}{data.canEdit && data.aiOn ? ' · 여러 건은 [여러 건 AI 판단]' : ''}.</p>;
+}
+
 /** #782 여러 건 AI 판단(관리자) — 몇 건·예상 비용을 보고 누를 때만 */
 function BulkAi({ pending, cost, busy, onRun, onClose }: { pending: number; cost: number | null; busy: boolean; onRun: (n: number) => void; onClose: () => void }) {
   const opts = [...new Set([5, 10, 20].map((n) => Math.min(n, pending)))].filter((n) => n > 0);
@@ -192,7 +206,7 @@ function WeeklyBox({ weekly, canEdit, auto, busy, onNow, onOpen }: { weekly: Wee
     <section className="rounded-card border border-emerald-200 bg-emerald-50/50 p-3 text-sm" data-testid="support-weekly" data-week={weekly?.week ?? ''}>
       <div className="flex flex-wrap items-center gap-2">
         <b className="text-emerald-900">이번 주 맞는 지원사업 {weekly ? `${weekly.items.length}건` : ''}</b>
-        <span className="text-xs text-ink-2">{weekly ? `${kday(weekly.week)} 주 기준${weekly.aiCount ? ` · AI 세일즈가 새로 판단 ${weekly.aiCount}건` : ''}` : auto > 0 ? `월요일 아침마다 1차 조건에 맞는 공고 ${auto}건까지 AI 세일즈가 판단해 묶어 드립니다` : '월요일 아침마다 AI 판단에서 ‘해당’이 나온 공고를 묶어 드립니다(자동 판단은 꺼짐)'}</span>
+        <span className="text-xs text-ink-2">{weekly ? `${kday(weekly.week)} 주 기준${weekly.aiCount ? ` · AI 세일즈가 새로 판단 ${weekly.aiCount}건` : ''}` : `월요일 아침마다 AI 판단에서 ‘해당’이 나온 공고를 묶어 드립니다${auto > 0 ? `(판단 전 공고는 ${auto}건까지 그때 판단)` : ''}`}</span>
         {canEdit && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={onNow} data-testid="support-weekly-now"><Sparkles className="size-3.5" aria-hidden />{busy ? '묶는 중…' : weekly ? '지금 다시 묶기' : '이번 주 묶음 만들기'}</Button>}
       </div>
       {weekly && weekly.items.length > 0 && <ul className="mt-1.5 flex flex-wrap gap-1.5">{weekly.items.map((x) => (
@@ -218,16 +232,17 @@ function ProfileBox({ summary, blanks, onSaved }: { summary: ListData['profile']
   const { data, reload } = useApi<any>(open ? '/api/sales/support/profile' : null);
   const [f, setF] = useState<Record<string, any> | null>(null); const [busy, setBusy] = useState(false);
   useEffect(() => { if (data && !f) { const p = data.profile; setF({ regionSido: p.region_sido ?? '', regionSigungu: p.region_sigungu ?? '', founded: p.founded ?? '', size: p.size ?? '', employees: p.employees == null ? '' : String(p.employees), revenue: p.revenue_krw == null ? '' : String(p.revenue_krw),
-    industries: p.industries.join(', '), keywords: p.keywords.join(', '), certs: p.certs, brands: p.brands.join(', '), interests: p.interests, excludes: p.excludes.join(', '), memo: p.memo ?? '' }); } }, [data, f]);
+    industries: p.industries.join(', '), keywords: p.keywords.join(', '), certs: p.certs, brands: p.brands.join(', '), interests: p.interests, excludes: p.excludes.join(', '), memo: p.memo ?? '', autoAi: data.autoAi !== false }); } }, [data, f]);
   if (!summary) return null;
-  const line = summary.filled ? [summary.region && `${summary.region}${summary.sigungu ? ` ${summary.sigungu}` : ''}`, summary.size, summary.founded && `설립 ${summary.founded.slice(0, 4)}년`, summary.interests.length && `관심 ${summary.interests.join('·')}`, summary.brands.length && `브랜드 ${summary.brands.join('·')}`].filter(Boolean).join(' · ') : '';
+  const line = summary.filled ? [summary.region && `${summary.region}${summary.sigungu ? ` ${summary.sigungu}` : ''}`, summary.size, summary.founded && `설립 ${summary.founded.slice(0, 4)}년`, summary.interests.length && `관심 ${summary.interests.join('·')}`, summary.brands.length && `브랜드 ${summary.brands.join('·')}`,
+    summary.saved && (summary.autoAi ? '새 공고 AI 자동 판단' : 'AI 자동 판단 꺼짐')].filter(Boolean).join(' · ') : '';
   const set = (k: string, v: any) => setF((x) => ({ ...(x ?? {}), [k]: v }));
   const toggle = (k: 'certs' | 'interests', v: string) => set(k, (f?.[k] as string[]).includes(v) ? (f?.[k] as string[]).filter((x) => x !== v) : [...(f?.[k] as string[]), v]);
   async function save() {
     if (!f) return; setBusy(true);
     try {
       await api('/api/sales/support/profile', { method: 'PUT', body: { regionSido: f.regionSido || null, regionSigungu: f.regionSigungu || null, founded: f.founded || null, size: f.size || null, employees: f.employees === '' ? null : Number(f.employees), revenueKrw: f.revenue === '' ? null : Number(f.revenue),
-        industries: csv(f.industries), keywords: csv(f.keywords), certs: f.certs, brands: csv(f.brands), interests: f.interests, excludes: csv(f.excludes), memo: f.memo || null } });
+        industries: csv(f.industries), keywords: csv(f.keywords), certs: f.certs, brands: csv(f.brands), interests: f.interests, excludes: csv(f.excludes), memo: f.memo || null, autoAi: !!f.autoAi } });
       toast.ok('회사 프로필을 저장했습니다 — 맞춤 순서를 다시 계산했습니다'); setF(null); reload(); onSaved(); setOpen(false);
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
@@ -258,6 +273,8 @@ function ProfileBox({ summary, blanks, onSaved }: { summary: ListData['profile']
           <Field label="빼는 낱말(쉼표)"><input className={inputCls} value={f.excludes} onChange={(e) => set('excludes', e.target.value)} placeholder="예: 농업, 어업" disabled={ro} /></Field>
         </div>
         <Field label="회사 소개(AI 판단에 함께 줌)"><textarea className={inputCls} rows={2} maxLength={1000} value={f.memo} onChange={(e) => set('memo', e.target.value)} disabled={ro} /></Field>
+        <label className="flex items-start gap-2 text-xs text-ink-2"><input type="checkbox" className="mt-0.5" checked={!!f.autoAi} onChange={(e) => set('autoAi', e.target.checked)} disabled={ro} data-testid="profile-auto-ai" />
+          <span><b className="text-ink">새 공고 AI 자동 판단</b> — 공고가 올라오면 AI 세일즈가 우리 회사 프로필로 참여 가능 여부를 판단합니다(회사 AI 예산에서, 15분마다 차례로). 지역·설립일·규모·근로자·매출·업종·인증을 바꾸면 열린 공고를 다시 판단합니다.</span></label>
         {ro ? <p className="text-xs text-ink-3">프로필은 관리자가 고칩니다.</p> : <div className="flex justify-end"><Button size="sm" disabled={busy} onClick={save} data-testid="profile-save">저장</Button></div>}
       </div>)}
     </section>

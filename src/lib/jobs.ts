@@ -200,6 +200,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('salesSync', async () => (await import('./sales/migrate')).salesSyncDaily()); // V41 단계 2 전환일까지 매일 영업관리 차이분
   await step('salesCollectors', async () => (await import('./sales/collectors')).collectorsTick()); // 대표 10/21 08:45: 영업 수집기 12개(KST 시각 이후 하루 1회, tick 당 하나)
   await step('salesCollectorAlerts', async () => (await import('./sales/collectors')).collectorAlertTick()); // #522 하루 한 번 누락 점검(24시간 넘게 성공 없음·2회 연속 실패 → 관리자 알림)
+  await step('supportAuto', async () => (await import('./sales/support')).supportAutoTick()); // #785 지원사업 새 공고·예전 프로필 기준 판단 → AI 판단(자동 판단 켠 회사, 회사 AI 예산 안, 한 번에 10건·25초)
   await step('supportDeadlines', async () => (await import('./sales/support')).supportTick()); // #450 지원사업: 관심·신청 준비 공고 마감 7일·3일 전 담당자 알림(KST 08~20시)
   await step('supportWeekly', async () => (await import('./sales/support')).supportWeeklyTick()); // #568 지원사업 주간 묶음(월요일 KST 08시 뒤 첫 tick): 1차 ✅ 공고 자동 AI 판단 → 맞는 공고 묶어 관리자·담당 알림
   await step('salesResearch', async () => (await import('./sales/research')).researchWeeklyTick()); // 212차 #612 후속조사 주간 묶음(월요일 KST 08시 뒤 첫 tick): 준공·입주 시설의 미확인 값(현 위탁사·계약만료일·관리사무소 번호) n곳 → 업무 하나

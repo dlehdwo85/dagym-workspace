@@ -164,12 +164,23 @@ export const profileInput = z.object({
   founded: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), size: z.enum(SIZES).nullable().optional(),
   employees: z.number().int().min(0).max(1_000_000).nullable().optional(), revenueKrw: z.number().int().min(0).max(1e15).nullable().optional(),
   industries: arr, keywords: arr, certs: arr, brands: arr, interests: arr, excludes: arr, memo: z.string().trim().max(1000).nullable().optional(),
+  autoAi: z.boolean().optional(), // #785 새 공고 자동 AI 판단(회사 AI 예산에서)
 });
+/** #785 판단 기준 칸 — 이것이 바뀌면 그 전 AI 판단은 '예전 프로필 기준'(다시 판단) */
+const basisKey = (x: { region_sido?: string | null; region_sigungu?: string | null; founded?: string | null; size?: string | null; employees?: number | null; revenue_krw?: number | null; industries?: string[]; certs?: string[] }) =>
+  JSON.stringify([x.region_sido ?? null, x.region_sigungu ?? null, x.founded ?? null, x.size ?? null, x.employees ?? null, x.revenue_krw == null ? null : Number(x.revenue_krw), [...(x.industries ?? [])].sort(), [...(x.certs ?? [])].sort()]);
 const clean = (xs: string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
 /** 저장된 프로필, 없으면 회사 정보에서 채운 기본값(업종·본점 주소 시·도·관심 사업 이름·사업 소개) */
-export async function profileOf(t: string, sql: Sql = db()): Promise<{ profile: Profile; saved: boolean; updatedAt: string | null }> {
-  const [r] = await sql<any[]>`select region_sido, region_sigungu, founded::text, size, employees, revenue_krw::float8 as revenue_krw, industries, keywords, certs, brands, interests, excludes, memo, updated_at from support_profiles where tenant = ${t}`;
-  if (r) return { profile: { ...r, revenue_krw: r.revenue_krw == null ? null : Number(r.revenue_krw) }, saved: true, updatedAt: r.updated_at };
+/** #785 마지막 자동 판단 결과(회사별) — stopped = 회사 AI 예산·한도·크레딧에 걸려 멈춤(다음 정기 실행 때 다시 해 봄) */
+export type AutoState = { at: string; done: number; failed: number; left: number; stopped: string | null; error: string | null; fp?: string };
+type ProfileOf = { profile: Profile; saved: boolean; updatedAt: string | null; autoAi: boolean; basisAt: string | null; autoState: AutoState | null };
+export async function profileOf(t: string, sql: Sql = db()): Promise<ProfileOf> {
+  const [r] = await sql<any[]>`select region_sido, region_sigungu, founded::text, size, employees, revenue_krw::float8 as revenue_krw, industries, keywords, certs, brands, interests, excludes, memo, updated_at,
+    auto_ai, basis_at, auto_state from support_profiles where tenant = ${t}`;
+  if (r) {
+    const { auto_ai, basis_at, auto_state, updated_at, ...pf } = r;
+    return { profile: { ...pf, revenue_krw: pf.revenue_krw == null ? null : Number(pf.revenue_krw) }, saved: true, updatedAt: updated_at, autoAi: auto_ai !== false, basisAt: basis_at ? new Date(basis_at).toISOString() : null, autoState: auto_state ?? null };
+  }
   const [tn] = await sql<{ industries: string[]; industry: string | null; ai_business: string | null }[]>`select industries, industry, ai_business from tenants where id = ${t}`;
   const [cp] = await sql<{ address: string | null }[]>`select address from company_profiles where tenant = ${t} order by is_default desc, key limit 1`;
   const brands = (await sql<{ name: string }[]>`select name from sales_business_categories where tenant = ${t} and active order by sort, name`).map((x) => x.name);
@@ -178,7 +189,7 @@ export async function profileOf(t: string, sql: Sql = db()): Promise<{ profile: 
   const sido = SIDO_ALIASES[first[0] ?? ''] ?? SIDO.find((s) => (first[0] ?? '').startsWith(s)) ?? null;
   const sigungu = first[1] && /(시|군|구)$/.test(first[1]) ? first[1] : null;
   return { profile: { region_sido: sido, region_sigungu: sigungu, founded: null, size: null, employees: null, revenue_krw: null, industries: clean(tn?.industries?.length ? tn.industries : tn?.industry ? [tn.industry] : []),
-    keywords: [], certs: [], brands, interests: [], excludes: [], memo: tn?.ai_business ? tn.ai_business.slice(0, 1000) : null }, saved: false, updatedAt: null };
+    keywords: [], certs: [], brands, interests: [], excludes: [], memo: tn?.ai_business ? tn.ai_business.slice(0, 1000) : null }, saved: false, updatedAt: null, autoAi: true, basisAt: null, autoState: null };
 }
 export async function getProfile(u: SessionUser) {
   await assertSpace(u, 'sales');
@@ -192,10 +203,14 @@ export async function saveProfile(u: SessionUser, i: z.infer<typeof profileInput
   const t = tenantOf(u); const sql = db();
   const v = { region_sido: i.regionSido ?? null, region_sigungu: i.regionSigungu || null, founded: i.founded ?? null, size: i.size ?? null, employees: i.employees ?? null, revenue_krw: i.revenueKrw ?? null,
     industries: clean(i.industries), keywords: clean(i.keywords), certs: clean(i.certs), brands: clean(i.brands), interests: clean(i.interests), excludes: clean(i.excludes), memo: i.memo || null };
-  await sql`insert into support_profiles ${sql({ tenant: t, ...v, updated_by: u.id } as never)}
+  const [prev] = await sql<any[]>`select region_sido, region_sigungu, founded::text, size, employees, revenue_krw::float8 as revenue_krw, industries, certs, basis_at, auto_ai from support_profiles where tenant = ${t}`;
+  const changed = !!prev && basisKey(prev) !== basisKey(v); // #785 판단 기준이 바뀌면 열린 공고의 AI 판단을 다시(자동 판단 차례로)
+  const auto = { auto_ai: i.autoAi ?? prev?.auto_ai ?? true, basis_at: changed ? new Date() : prev?.basis_at ?? null };
+  await sql`insert into support_profiles ${sql({ tenant: t, ...v, ...auto, updated_by: u.id } as never)}
     on conflict (tenant) do update set region_sido = excluded.region_sido, region_sigungu = excluded.region_sigungu, founded = excluded.founded, size = excluded.size, employees = excluded.employees, revenue_krw = excluded.revenue_krw,
-      industries = excluded.industries, keywords = excluded.keywords, certs = excluded.certs, brands = excluded.brands, interests = excluded.interests, excludes = excluded.excludes, memo = excluded.memo, updated_by = excluded.updated_by, updated_at = now()`;
-  await audit(sql, u.id, 'support.profile', 'tenant', null, { region: v.region_sido, size: v.size, interests: v.interests.length }).catch(() => {});
+      industries = excluded.industries, keywords = excluded.keywords, certs = excluded.certs, brands = excluded.brands, interests = excluded.interests, excludes = excluded.excludes, memo = excluded.memo,
+      auto_ai = excluded.auto_ai, basis_at = excluded.basis_at, updated_by = excluded.updated_by, updated_at = now()`;
+  await audit(sql, u.id, 'support.profile', 'tenant', null, { region: v.region_sido, size: v.size, interests: v.interests.length, basisChanged: changed, autoAi: auto.auto_ai }).catch(() => {});
   return getProfile(u);
 }
 
@@ -356,7 +371,7 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
 
 // ---------------- 목록·상세 ----------------
 type Match = { program_id: string; ai_verdict: 'fit' | 'maybe' | 'no' | null; ai_reasons: string[]; ai_brands: string[]; ai_docs: string[]; ai_summary: string | null; ai_amount: string | null; ai_at: string | null; hidden: boolean;
-  ai_use?: string[]; ai_schedule?: string | null; ai_auto?: boolean };
+  ai_use?: string[]; ai_schedule?: string | null; ai_auto?: boolean; auto_fail?: number };
 type Work = { id: string; program_id: string; status: string; owner_id: string | null; owner_name: string | null; task_id: string | null; brands: string[]; applied_at: string | null; result_at: string | null; amount_awarded: string | null; result_memo: string | null; memo: string | null; updated_at: string };
 const RANK: Record<string, number> = { fit: 0, maybe: 1, none: 2, no: 3 };
 async function disabledSources(sql: Sql, t: string) {
@@ -422,7 +437,8 @@ async function aiCostKrw(sql: Sql, t: string) {
 }
 const NEED_LABEL: Record<string, string> = { profile: '회사 프로필', region_sido: '본점 시·도', region_sigungu: '본점 시·군', founded: '설립일', employees: '상시근로자 수', size: '규모', industries: '업종', certs: '보유 인증' };
 
-function itemOf(p: Prog, rule: Rule, m: Match | undefined, w: Work | undefined, today: string, me: string) {
+function itemOf(p: Prog, rule: Rule, m: Match | undefined, w: Work | undefined, today: string, me: string, basisAt: string | null = null) {
+  const stale = !!(m?.ai_verdict && m.ai_at && basisAt && new Date(m.ai_at).getTime() < new Date(basisAt).getTime()); // #785 판단 뒤 프로필 기준 칸이 바뀜
   const dday = p.apply_end ? daysBetween(today, p.apply_end) : null;
   const amount = m?.ai_amount || p.amount;
   return {
@@ -430,7 +446,8 @@ function itemOf(p: Prog, rule: Rule, m: Match | undefined, w: Work | undefined, 
     applyStart: p.apply_start, applyEnd: p.apply_end, applyText: p.apply_text, dday, amount, amountKrw: amountKrw(amount) ?? amountKrw(p.amount), kinds: kindsOf(p, amount), url: p.url, applyUrl: p.apply_url, manual: !!p.tenant, mine: p.created_by === me,
     isNew: Date.now() - new Date(p.first_seen_at).getTime() < 2 * 864e5 && !p.tenant, target: p.target, seen: p.first_seen_at, alsoOn: [] as string[],
     garbled: garbledText(p.title), pending: !m?.ai_verdict && rule.verdict === 'fit', // #651 깨진 제목 · #649 ③ 1차 맞춤이지만 AI 판정 전(#782 '규칙상 맞음 · AI 판단 전')
-    rule, ai: m?.ai_verdict ? { verdict: m.ai_verdict, reasons: m.ai_reasons ?? [], brands: m.ai_brands ?? [], docs: m.ai_docs ?? [], summary: m.ai_summary, at: m.ai_at, use: Array.isArray(m.ai_use) ? m.ai_use : [], schedule: m.ai_schedule ?? null, auto: !!m.ai_auto } : null, hidden: !!m?.hidden,
+    rule, ai: m?.ai_verdict ? { verdict: m.ai_verdict, reasons: m.ai_reasons ?? [], brands: m.ai_brands ?? [], docs: m.ai_docs ?? [], summary: m.ai_summary, at: m.ai_at, use: Array.isArray(m.ai_use) ? m.ai_use : [], schedule: m.ai_schedule ?? null, auto: !!m.ai_auto, stale } : null, hidden: !!m?.hidden,
+    queued: false, autoFail: m?.auto_fail ?? 0, // #785 자동 판단 차례(listView 가 채움) · 자동 판단 실패 횟수
     work: w ? { id: w.id, status: w.status, statusLabel: STATUS_LABEL[w.status] ?? w.status, ownerId: w.owner_id, ownerName: w.owner_name, taskId: w.task_id, brands: w.brands ?? [], appliedAt: w.applied_at, resultAt: w.result_at,
       amountAwarded: w.amount_awarded, resultMemo: w.result_memo, memo: w.memo } : null,
   };
@@ -460,23 +477,16 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   const remembered = q.sort === undefined && q.dd === undefined && q.kind === undefined ? await supportViewOf(sql, u.id) : null;
   const pick = <T extends string>(v: string | undefined, all: readonly T[], d: T | null) => (all.includes(v as T) ? (v as T) : d);
   const view: SupportView = { sort: pick(q.sort ?? remembered?.sort ?? undefined, SORTS, null), dd: pick(q.dd ?? remembered?.dd, DDS, 'all')!, kind: pick(q.kind ?? remembered?.kind, KIND_KEYS, 'all')! };
-  const [{ profile, saved }, off, matches, works] = await Promise.all([profileOf(t, sql), disabledSources(sql, t),
-    sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto from support_matches where tenant = ${t}`,
-    sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t}`]);
-  const mm = new Map(matches.map((m) => [m.program_id, m])); const wm = new Map(works.map((w) => [w.program_id, w]));
-  const workIds = works.map((w) => w.program_id);
-  // 열린 공고(마감 전·마감 미정) + 우리 회사 진행 중인 것(마감 지나도)
-  const rows = await sql<Prog[]>`select ${COLS(sql)} from support_programs p
-    where (p.tenant is null or p.tenant = ${t}) and not (p.source = any(${off}))
-      and ((p.apply_end is null or p.apply_end >= ${today}::date) and (p.tenant is not null or p.last_seen_at > now() - interval '45 days') or p.id = any(${workIds}::uuid[]))
-    order by p.first_seen_at desc limit 5000`;
-  const pr = saved || profile.region_sido || profile.industries.length || profile.interests.length ? profile : null;
-  const all = dedupe(rows.map((p) => itemOf(p, ruleMatch(p, pr, today), mm.get(p.id), wm.get(p.id), today, u.id)));
+  const { all, profile, saved, pr, off, wm, autoAi, autoState } = await supportAll(sql, t, u.id, today);
+  // #785 자동 판단 차례 — 자동 판단을 켠 회사(프로필 저장)·AI 켜짐·예산에 걸려 멈추지 않았을 때만 'AI 확인 중'
+  const autoOn = saved && autoAi && aiEnabled() && process.env.SUPPORT_AUTO_AI !== 'off';
+  let autoQueue = 0;
+  if (autoOn && !autoState?.stopped) for (const x of all) if (autoCandidate(x, today)) { x.queued = true; autoQueue++; }
   const term = (q.q ?? '').trim().toLowerCase();
   const hit = (x: SupportItem) => !term || `${x.title} ${x.agency ?? ''} ${x.executor ?? ''} ${x.category ?? ''} ${x.target ?? ''}`.toLowerCase().includes(term);
-  const open = (x: SupportItem) => x.applyEnd == null || x.applyEnd >= today;
+  const open = (x: SupportItem) => isOpen(x, today);
   const isNo = (x: SupportItem) => (x.ai ? x.ai.verdict === 'no' : x.rule.verdict === 'no');
-  const fitBase = (x: SupportItem) => open(x) && !x.hidden && (!x.work || OPEN_WORK.includes(x.work.status));
+  const fitBase = (x: SupportItem) => fitBaseAt(x, today);
   const inTab: Record<string, (x: SupportItem) => boolean> = {
     fit: (x) => fitBase(x) && !isNo(x),
     closing: (x) => x.dday != null && x.dday >= 0 && x.dday <= 14 && !x.hidden && !isNo(x) && (!x.work || OPEN_WORK.includes(x.work.status)),
@@ -514,11 +524,32 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
     left join lateral (select summary from sales_collector_runs x where x.slug = s.slug order by started_at desc limit 1) r on true where s.slug = any(${Object.values(SOURCE_SLUG)})`;
   const aiOn = aiEnabled();
   return { tab, today, items, total, counts, hiddenNo, view, sortUsed, chips, kindLabel: KIND_LABEL, pendingCount, blanks, aiCostKrw: aiOn ? await aiCostKrw(sql, t) : null,
-    weeklyAiMax: Math.max(0, Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 0) || 0), profile: { saved, filled: !!pr, region: profile.region_sido, sigungu: profile.region_sigungu, size: profile.size, founded: profile.founded, interests: profile.interests, brands: profile.brands },
+    auto: { on: autoOn, enabled: autoAi, saved, queue: autoQueue, stopped: autoOn ? autoState?.stopped ?? null : null, left: autoState?.left ?? 0, at: autoState?.at ?? null, done: autoState?.done ?? 0 },
+    weeklyAiMax: Math.max(0, Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 5) || 0), profile: { saved, filled: !!pr, autoAi, region: profile.region_sido, sigungu: profile.region_sigungu, size: profile.size, founded: profile.founded, interests: profile.interests, brands: profile.brands },
     sources: sources.map((s) => ({ ...s, label: SOURCE_LABEL[Object.entries(SOURCE_SLUG).find(([, v]) => v === s.slug)?.[0] ?? ''] ?? s.slug })), off,
     canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, aiOn, people: await peopleOf(sql, t), statusLabel: STATUS_LABEL,
     keys: await supportKeyStatus().then((k) => ({ bizinfo: k.bizinfo.present, datago: k.datago.present })).catch(() => ({ bizinfo: false, datago: false })),
     weekly: await latestWeekly(sql, t) };
+}
+const isOpen = (x: SupportItem, today: string) => x.applyEnd == null || x.applyEnd >= today;
+const fitBaseAt = (x: SupportItem, today: string) => isOpen(x, today) && !x.hidden && (!x.work || OPEN_WORK.includes(x.work.status));
+/** #785 자동 판단 차례 — 열린 공고·숨김 아님·깨진 제목 아님·1차 규칙 '해당 없음' 아님 · AI 판단이 없거나 '예전 프로필 기준' · 자동 판단 3번 실패한 건 뺌 */
+const autoCandidate = (x: SupportItem, today: string) => fitBaseAt(x, today) && !x.garbled && x.rule.verdict !== 'no' && (!x.ai || !!x.ai.stale) && x.autoFail < 3;
+/** 회사 하나의 공고 전부(열린 것 + 진행 중) — 1차 규칙·AI 판단·진행을 붙이고 같은 공고는 하나로 */
+async function supportAll(sql: Sql, t: string, uid: string, today: string) {
+  const [{ profile, saved, autoAi, basisAt, autoState }, off, matches, works] = await Promise.all([profileOf(t, sql), disabledSources(sql, t),
+    sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto, auto_fail from support_matches where tenant = ${t}`,
+    sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t}`]);
+  const mm = new Map(matches.map((m) => [m.program_id, m])); const wm = new Map(works.map((w) => [w.program_id, w]));
+  const workIds = works.map((w) => w.program_id);
+  // 열린 공고(마감 전·마감 미정) + 우리 회사 진행 중인 것(마감 지나도)
+  const rows = await sql<Prog[]>`select ${COLS(sql)} from support_programs p
+    where (p.tenant is null or p.tenant = ${t}) and not (p.source = any(${off}))
+      and ((p.apply_end is null or p.apply_end >= ${today}::date) and (p.tenant is not null or p.last_seen_at > now() - interval '45 days') or p.id = any(${workIds}::uuid[]))
+    order by p.first_seen_at desc limit 5000`;
+  const pr = saved || profile.region_sido || profile.industries.length || profile.interests.length ? profile : null;
+  const all = dedupe(rows.map((p) => itemOf(p, ruleMatch(p, pr, today), mm.get(p.id), wm.get(p.id), today, uid, basisAt)));
+  return { all, profile, saved, pr, off, wm, autoAi, basisAt, autoState };
 }
 async function programFor(sql: Sql, t: string, id: string, summaryLen = 20000): Promise<Prog> {
   if (!UUID.test(id)) throw notFound();
@@ -530,14 +561,14 @@ export async function detailView(u: SessionUser, id: string) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db(); const today = ymd();
   const p = await programFor(sql, t, id);
-  const { profile, saved } = await profileOf(t, sql);
-  const [m] = await sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto from support_matches where tenant = ${t} and program_id = ${id}`;
+  const { profile, saved, basisAt } = await profileOf(t, sql);
+  const [m] = await sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto, auto_fail from support_matches where tenant = ${t} and program_id = ${id}`;
   const [w] = await sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.program_id = ${id}`;
   const log = w ? await sql`select l.from_status, l.to_status, l.note, l.changed_at, us.name as by from support_work_log l left join users us on us.id = l.changed_by where l.work_id = ${w.id} order by l.changed_at desc limit 30` : [];
   const [task] = w?.task_id ? await sql<{ id: string; title: string; status: string; due_date: string | null; total: number; done: number }[]>`select t.id, t.title, t.status, t.due_date::text,
     (select count(*)::int from task_checklist_items ci where ci.task_id = t.id) total, (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.done) done from tasks t where t.id = ${w.task_id} and t.deleted_at is null` : [];
   const pr = saved || profile.region_sido || profile.industries.length || profile.interests.length ? profile : null;
-  return { item: itemOf(p, ruleMatch(p, pr, today), m, w, today, u.id), summary: p.summary, target: p.target, hashtags: p.hashtags ?? [], attachments: p.attachments ?? [], applyText: p.apply_text, bizYears: p.biz_years,
+  return { item: itemOf(p, ruleMatch(p, pr, today), m, w, today, u.id, basisAt), summary: p.summary, target: p.target, hashtags: p.hashtags ?? [], attachments: p.attachments ?? [], applyText: p.apply_text, bizYears: p.biz_years,
     log, task: task ?? null, canEdit: isAdmin(u), canEditProgram: !!p.tenant && (p.created_by === u.id || isAdmin(u)), aiOn: aiEnabled(), people: await peopleOf(sql, t), statusLabel: STATUS_LABEL };
 }
 
@@ -754,7 +785,7 @@ async function adminActor(sql: Sql, t: string): Promise<SessionUser | null> {
   return (await import('../mktStudio')).actorFor(a.id).catch(() => null);
 }
 /**
- * 회사 하나의 주간 묶음: 1차 조건 통과(✅)인데 AI 판단이 없는 공고를 최대 N건(SUPPORT_WEEKLY_AI_MAX, 기본 0 = 자동 판단 안 함 — #782 대표 승인 전까지 꺼 둠) 자동 판단(회사 AI 한도·사람별 한도·크레딧 안, 한도에 걸리면 멈춤)
+ * 회사 하나의 주간 묶음: 1차 조건 통과(✅)인데 AI 판단이 없는 공고를 최대 N건(SUPPORT_WEEKLY_AI_MAX, 기본 5 — #785 뒤로는 새 공고 자동 판단(supportAutoTick)이 주 경로, 여기는 남은 것 채우기) 자동 판단(회사 AI 한도·사람별 한도·크레딧 안, 한도에 걸리면 멈춤)
  * → 맞는 공고(AI ✅, 없으면 1차 ✅) 상위 10건을 기록하고 관리자·관심/준비 담당에게 알림 1건(주마다 한 번). 프로필이 비어 있으면 묶지 않는다.
  */
 export async function weeklyBundle(t: string, opt: { now?: Date; actor?: SessionUser; aiMax?: number; force?: boolean } = {}) {
@@ -765,7 +796,7 @@ export async function weeklyBundle(t: string, opt: { now?: Date; actor?: Session
   if (!actor) return { skipped: 'no_admin', week };
   const { profile, saved } = await profileOf(t, sql);
   if (!(saved || profile.region_sido || profile.industries.length || profile.interests.length)) return { skipped: 'no_profile', week };
-  const max = Math.max(0, opt.aiMax ?? (Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 0) || 0));
+  const max = Math.max(0, opt.aiMax ?? (Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 5) || 0));
   let aiCount = 0, aiFailed = 0, aiError: string | null = null; const auto = new Set<string>();
   if (aiEnabled() && max > 0) {
     const v = await listView(actor, { tab: 'fit', limit: 200, sort: 'fit', dd: 'all', kind: 'all' });
@@ -792,6 +823,54 @@ export async function weeklyBundle(t: string, opt: { now?: Date; actor?: Session
   await sql`insert into support_weekly (tenant, week, items, ai_count, ai_failed, sent_to) values (${t}, ${week}::date, ${sql.json(items)}, ${aiCount}, ${aiFailed}, ${sentTo})
     on conflict (tenant, week) do update set items = excluded.items, ai_count = support_weekly.ai_count + excluded.ai_count, ai_failed = support_weekly.ai_failed + excluded.ai_failed, sent_to = greatest(support_weekly.sent_to, excluded.sent_to), updated_at = now()`;
   return { week, items: items.length, aiCount, aiFailed, aiError, sentTo };
+}
+/**
+ * #785(대표 10/28 23:00 "항상 지원사업 올릴 때 AI 비서 돌리세요"): 정기 실행마다(수집기 다음) 회사 프로필을 저장하고 자동 판단을 켠 회사의
+ * 새 공고(1차 규칙 '해당 없음' 아님)·'예전 프로필 기준' 판단을 AI 로 — 회사 AI 예산·사람별 한도 안, 한 번에 최대 SUPPORT_AUTO_AI_MAX(기본 10)건을 5건씩, budgetMs 안에서.
+ * 예산·한도·크레딧에 걸리면 그 회사는 '멈춤'(다음 실행 때 다시 해 봄, 화면 안내), 다른 실패는 공고마다 3번까지. 새 공고·프로필이 그대로면 공고를 다시 읽지 않음(fp)
+ */
+export async function supportAutoTick(opt: { budgetMs?: number; max?: number } = {}) {
+  if (process.env.SUPPORT_AUTO_AI === 'off') return { skipped: 'off' };
+  if (!aiEnabled()) return { skipped: 'ai_off' };
+  const sql = db(); const t0 = Date.now(); const budget = opt.budgetMs ?? 25_000; const today = ymd();
+  const max = Math.max(0, opt.max ?? (Number(process.env.SUPPORT_AUTO_AI_MAX ?? 10) || 0));
+  const tenants = await sql<{ tenant: string; updated_at: string; basis_at: string | null; auto_state: AutoState | null }[]>`select sp.tenant, sp.updated_at, sp.basis_at, sp.auto_state from support_profiles sp join tenants t on t.id = sp.tenant
+    where sp.auto_ai and 'sales' = any(t.spaces) and t.status = 'active' order by sp.tenant limit 50`;
+  const out: Record<string, unknown> = {};
+  for (const tp of tenants) {
+    const t = tp.tenant;
+    if (Date.now() - t0 > budget) { out[t] = { skipped: 'time' }; continue; }
+    // 새 공고·프로필이 지난번 그대로이고 남은 것·멈춤이 없으면 건너뜀(공고 5,000건을 15분마다 다시 읽지 않게)
+    const [c] = await sql<{ n: number; last: string | null; m: string | null }[]>`select count(*)::int n, max(p.first_seen_at)::text last,
+      (select max(updated_at)::text from support_matches where tenant = ${t}) m from support_programs p
+      where (p.tenant is null or p.tenant = ${t}) and (p.apply_end is null or p.apply_end >= ${today}::date) and (p.tenant is not null or p.last_seen_at > now() - interval '45 days')`;
+    const fp = `${today}|${c.n}|${c.last}|${c.m}|${new Date(tp.updated_at).toISOString()}|${tp.basis_at ? new Date(tp.basis_at).toISOString() : ''}`;
+    const prev = tp.auto_state;
+    if (prev && prev.fp === fp && !prev.left && !prev.stopped) { out[t] = { skipped: 'same' }; continue; }
+    const actor = await adminActor(sql, t); if (!actor) { out[t] = { skipped: 'no_admin' }; continue; }
+    const { all } = await supportAll(sql, t, actor.id, today);
+    const todo = all.filter((x) => autoCandidate(x, today)) // 판단 없는 것 먼저 → 마감 가까운 순 → 새로 올라온 순
+      .sort((a, b) => Number(!!a.ai) - Number(!!b.ai) || (a.applyEnd ?? '9999-12-31').localeCompare(b.applyEnd ?? '9999-12-31') || String(b.seen).localeCompare(String(a.seen)));
+    let done = 0, failed = 0, i = 0; let stopped: string | null = null, error: string | null = null;
+    const n = Math.min(max, todo.length);
+    while (i < n && !stopped && Date.now() - t0 < budget) {
+      const batch = todo.slice(i, Math.min(i + 5, n)); i += batch.length;
+      const rs = await Promise.allSettled(batch.map((x) => analyzeProgram(actor, x.id, undefined, { auto: true })));
+      for (const [k, r] of rs.entries()) {
+        if (r.status === 'fulfilled') { done++; continue; }
+        const e = r.reason as HttpError;
+        if ([402, 429].includes(e?.status) || e?.code === 'ai_off') { stopped = e?.code || 'budget'; error = String(e?.message ?? e).slice(0, 200); continue; } // 한도 — 공고 실패로 안 셈
+        failed++; error ??= String(e?.message ?? e).slice(0, 200);
+        await sql`insert into support_matches (tenant, program_id, auto_fail) values (${t}, ${batch[k].id}, 1)
+          on conflict (tenant, program_id) do update set auto_fail = support_matches.auto_fail + 1, updated_at = now()`;
+      }
+    }
+    // 판단·실패로 support_matches 가 바뀌었으니 fp 는 다음 실행이 다시 계산(남은 것이 없으면 그때 '같음')
+    const state: AutoState = { at: new Date().toISOString(), done, failed, left: Math.max(0, todo.length - done), stopped, error, fp: done || failed ? '' : fp };
+    await sql`update support_profiles set auto_state = ${sql.json(state as never)} where tenant = ${t}`;
+    out[t] = { done, failed, left: state.left, stopped };
+  }
+  return { tenants: tenants.length, out };
 }
 /** 정기 실행: 월요일(KST) 08시 이후 첫 tick 에 영업 공간을 켠 회사마다 한 번(SUPPORT_WEEKLY = '요일-시' 기본 '1-8', 'any' = 늘, 'off' = 안 함) */
 export async function supportWeeklyTick(opt: { now?: Date } = {}) {

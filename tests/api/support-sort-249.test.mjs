@@ -15,7 +15,7 @@ const ins = (o) => sql`insert into support_programs ${sql({ source: 'bizinfo', r
 const PROFILE = { regionSido: '경기', regionSigungu: '용인시', founded: d(-1735), size: null, employees: null, industries: ['운동·피트니스', '공동주택 커뮤니티시설 위탁운영', '소프트웨어·SaaS'], keywords: ['출입'], certs: [], brands: ['다짐', '하이링크', '워크인'], interests: ['IP', '마케팅'], excludes: [], memo: '시험 회사 소개' };
 
 before(async () => {
-  await resetDb(); fg = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap(); // SUPPORT_WEEKLY_AI_MAX 없음 = 주간 자동 판단 꺼짐(기본)
+  await resetDb(); fg = await startFakeGoogle(); srv = await startServer({ SUPPORT_WEEKLY_AI_MAX: '0', SUPPORT_AUTO_AI: 'off' }); sql = testDb(); ctx = await bootstrap(); // 250차부터 주간 채우기 기본 5·새 공고 자동 판단 켬 — 여기서는 끈 상태(사람이 누르는 판단)
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['sales'] });
   await ctx.owner.ok('PUT', '/api/sales/support/profile', PROFILE);
@@ -123,7 +123,7 @@ test('#782 규칙상 맞음 · AI 판단 전: pending 수·건당 예상 비용 
   const v = await ctx.owner.ok('GET', '/api/sales/support?tab=fit&limit=200&sort=fit&dd=all&kind=all');
   assert.equal(v.pendingCount, 4, JSON.stringify(v.items.map((x) => [x.title, x.rule.verdict, x.pending])));
   assert.ok(v.items.filter((x) => ids.includes(x.id)).every((x) => x.pending && !x.ai));
-  assert.ok(v.aiCostKrw >= 1, `건당 예상 비용 ${v.aiCostKrw}`); assert.equal(v.weeklyAiMax, 0, '주간 자동 판단 기본 꺼짐');
+  assert.ok(v.aiCostKrw >= 1, `건당 예상 비용 ${v.aiCostKrw}`); assert.equal(v.weeklyAiMax, 0, '주간 자동 판단 끔(SUPPORT_WEEKLY_AI_MAX=0)'); assert.equal(v.auto.on, false, '새 공고 자동 판단 끔(SUPPORT_AUTO_AI=off)');
   // 주간 묶음 — 자동 판단 안 함(가짜 AI 줄은 그대로)
   await queue([]);
   const w = await ctx.owner.ok('POST', '/api/sales/support/weekly', {});

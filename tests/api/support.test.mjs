@@ -55,7 +55,7 @@ before(async () => {
   }).listen(PORT);
   await resetDb(); fg = await startFakeGoogle();
   // 기업마당 키는 일부러 없음 → 처음엔 공공데이터포털(15157820) 경로, 플랫폼 설정에 키를 넣으면 기업마당 직접
-  srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, DATA_GO_KR_SERVICE_KEY: 'dg-key', SUPPORT_REMIND_HOURS: '0-24', SUPPORT_WEEKLY: 'any', SUPPORT_WEEKLY_AI_MAX: '5' }); // 249차부터 주간 자동 판단 기본 꺼짐 — 켰을 때 동작은 여기서
+  srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, DATA_GO_KR_SERVICE_KEY: 'dg-key', SUPPORT_REMIND_HOURS: '0-24', SUPPORT_WEEKLY: 'any', SUPPORT_WEEKLY_AI_MAX: '5', SUPPORT_AUTO_AI: 'off' }); // 주간 묶음의 자동 판단은 여기서 · 250차 새 공고 자동 판단은 support-auto-250 에서(여기서는 끔)
   sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['sales'] });
