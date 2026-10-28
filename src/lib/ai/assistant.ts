@@ -227,6 +227,15 @@ const SALES_TOOLS: AiTool[] = [
   { name: 'read_sales_notice', description: '영업 DB 공고 한 건의 상세(발주처·마감·개찰·계약 방식·추정가·과업·참가 자격·연락처)와 첨부(공고문·과업지시서)의 본문 글자를 읽는다. 첨부는 서버가 받아 자료실 "영업/공고"에 저장한 뒤 글자를 뽑는다(최대 3개). 공고 요약·참가 자격·제안서 목차·질문 뽑기는 이 결과를 근거로 답한다.',
     input_schema: { type: 'object', properties: { id: str('search_sales_notices 결과의 id') }, required: ['id'] } },
 ];
+// 255차 #793(대표 10/29 01:45 'AI 마케터가 승인함을 조회할 도구가 없다며 현 문제를 모름'): 마케팅 운영 상태 읽기 — 마케팅 공간이거나 승인·시안·게시·자동 제작 낱말이 있을 때 붙고, more_tools 로도 받음
+const MKT_TOOLS: AiTool[] = [
+  { name: 'marketing_inbox_status', description: '마케팅 승인함 현황(승인함 화면과 같은 계산): 승인할 시안 수(게시일 지난 것 포함)·시안 없음·수정 요청(AI 수정본 처리 상태)·보류·미뤄진 글·초안 보관·승인됨 게시 전·제작 요청 카드·운영 제안/예산/목표 대기 수와, 승인 대기가 0이거나 적은 이유(why). "승인할 게 왜 없지", "승인함", "게시가 안 된다"는 질문에 먼저 쓴다.',
+    input_schema: { type: 'object', properties: {} } },
+  { name: 'marketing_content_status', description: '마케팅 콘텐츠(게시물) 상태: 상태·버전·게시 예정·승인 마감·게시일 지남·마지막 결정(승인/수정 요청/보류)과 의견·AI 수정본 결과·제작 요청 카드(영상·이미지 다시 만들기 비용)·검사 문제. 제목 일부나 콘텐츠 id 로 찾고, 비우면 승인 대기·수정 요청 글.',
+    input_schema: { type: 'object', properties: { query: str('제목 일부 또는 콘텐츠 id(비우면 승인 대기·수정 요청 글)'), limit: { type: 'number', description: '최대 건수(기본 5, 최대 10)' } } } },
+  { name: 'marketing_auto_status', description: '마케팅 자동 제작 상태: 일시정지 여부·언제·누가(어느 결정)·멈춘 동안 멈추는 일·다음 자동 제작 예정·7일 안 계획 칸·마지막 제작·켜진 규칙 수·글 모델·이번 달 남은 크레딧/영상/재생성.',
+    input_schema: { type: 'object', properties: {} } },
+];
 
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 아래 [우리 회사] 직원을 돕습니다. 그 회사의 업종·사업 방향·말투에 맞춰 답하고, 다른 회사 이야기를 지어내지 마세요.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
@@ -399,6 +408,9 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
     case 'more_tools': { c.allTools = true; return { ok: true, note: '모든 도구를 붙였습니다 — 다음 단계에서 필요한 도구를 쓰세요' }; }
     case 'search_sales_notices': return searchNotices(u, String(input.query ?? ''), Number(input.limit) || 8); // #650
     case 'read_sales_notice': return readNotice(u, String(input.id ?? ''));
+    case 'marketing_inbox_status': return (await import('../mktStatus')).inboxStatus(u); // 255차 #793
+    case 'marketing_content_status': return (await import('../mktStatus')).contentStatus(u, String(input.query ?? ''), Number(input.limit) || 5);
+    case 'marketing_auto_status': return (await import('../mktStatus')).autoStatus(u);
     case 'search_library': {
       const q = String(input.query ?? '');
       let r = await listLibrary(u, { q, folder: input.folder, limit: 10 }); // 등급·폴더 권한 밖 파일은 여기서 이미 빠짐
@@ -835,7 +847,7 @@ async function spaceContext(u: SessionUser, space: 'sales' | 'marketing') {
       (select count(*)::int from mkt_contents where tenant = ${t} and status = 'changes') changes, (select count(*)::int from mkt_calls where tenant = ${t} and status = 'new') calls`;
   const [a] = await sql<{ cost: number; clicks: number; conv: number }[]>`select coalesce(sum(s.cost_krw), 0)::float8 cost, coalesce(sum(s.clicks), 0)::float8 clicks, coalesce(sum(s.conversions), 0)::float8 conv
       from mkt_ad_stats s join mkt_ad_accounts ac on ac.id = s.account_id where ac.tenant = ${t} and s.day >= current_date - 7`;
-  return `\n지금 사용자는 '마케팅' 공간에서 묻고 있습니다(콘텐츠·게시 일정·광고 성과·전화 문의 관점으로 답하세요). 승인 대기 ${c?.pending ?? 0}건, 수정 요청 ${c?.changes ?? 0}건, 새 전화 문의 ${c?.calls ?? 0}건, 최근 7일 광고비 ${Math.round(a?.cost ?? 0).toLocaleString('ko-KR')}원·클릭 ${Math.round(a?.clicks ?? 0)}·전환 ${Math.round(a?.conv ?? 0)}. 게시·광고 변경은 직접 하지 말고 화면에서 사람이 하도록 안내하세요.`;
+  return `\n지금 사용자는 '마케팅' 공간에서 묻고 있습니다(콘텐츠·게시 일정·광고 성과·전화 문의 관점으로 답하세요). 승인함·콘텐츠·자동 제작 상태는 marketing_inbox_status·marketing_content_status·marketing_auto_status 도구로 확인하고 결과의 숫자·이유(why)를 그대로 말하세요 — "조회할 도구가 없다"고 하지 마세요(255차 #793). 승인 대기 ${c?.pending ?? 0}건, 수정 요청 ${c?.changes ?? 0}건, 새 전화 문의 ${c?.calls ?? 0}건, 최근 7일 광고비 ${Math.round(a?.cost ?? 0).toLocaleString('ko-KR')}원·클릭 ${Math.round(a?.clicks ?? 0)}·전환 ${Math.round(a?.conv ?? 0)}. 게시·광고 변경은 직접 하지 말고 화면에서 사람이 하도록 안내하세요.`;
 }
 
 const IMG = /^image\/(png|jpe?g|gif|webp)$/;
@@ -885,11 +897,12 @@ const BUNDLES: [RegExp, string[]][] = [
 const MORE_TOOLS: AiTool = { name: 'more_tools', description: '이번 질문에는 자주 쓰는 도구만 붙어 있다. 일정·자료·문서·매출 등 필요한 도구가 목록에 없으면 먼저 이 도구를 불러 모든 도구를 받는다("안 된다"고 답하기 전에 반드시).',
   input_schema: { type: 'object', properties: { reason: { type: 'string', description: '필요한 일' } } } } as AiTool;
 export function toolsFor(text: string, hasFiles: boolean, all = false, space?: string | null) {
-  if (all) return [...TOOLS, ...SALES_TOOLS, MORE_TOOLS].filter((t) => t.name !== 'more_tools');
+  if (all) return [...TOOLS, ...SALES_TOOLS, ...MKT_TOOLS, MORE_TOOLS].filter((t) => t.name !== 'more_tools');
   const want = new Set(CORE_TOOLS);
   for (const [re, names] of BUNDLES) if (hasFiles && names.includes('propose_organize_files') ? true : re.test(text)) names.forEach((n) => want.add(n));
   const sales = space === 'sales' || /공고|입찰|온비드|나라장터|k-?apt|과업|발주처/i.test(text) ? SALES_TOOLS : []; // #650
-  return [...TOOLS.filter((t) => want.has(t.name)), ...sales, MORE_TOOLS];
+  const mkt = space === 'marketing' || /승인함|승인\s*대기|시안|게시물|자동\s*제작|수정\s*요청|마케팅|릴스|카드뉴스/.test(text) ? MKT_TOOLS : []; // 255차 #793
+  return [...TOOLS.filter((t) => want.has(t.name)), ...sales, ...mkt, MORE_TOOLS];
 }
 /** 조회만 하는 짧은 질문(만들기·바꾸기·배정 낱말 없음)은 빠른 모델 — 도구 여러 단계·문서·첨부는 기본 모델 */
 export function lightQuestion(text: string, hasFiles: boolean) {

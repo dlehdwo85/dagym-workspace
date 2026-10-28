@@ -122,6 +122,7 @@ import { mktPreview } from './mktPreview.step.mjs';
 import { aiStream } from './aiStream.step.mjs';
 import { mktVisual } from './mktVisual.step.mjs';
 import { mktRevision } from './mktRevision.step.mjs';
+import { mktInbox255 } from './mktInbox255.step.mjs';
 import { mktTrash } from './mktTrash.step.mjs';
 import { mktFeedKit } from './mktFeedKit.step.mjs';
 import { collectorAlerts } from './collectorAlerts.step.mjs';
@@ -2590,6 +2591,7 @@ await step('#497 R06 채널별 실제 게시 화면 미리보기: 인스타 피�
 await step('#497 R44 AI 비서 답 실시간 출력: 쓰는 중 말풍선(글이 이어서·[멈춤]) → 끝나면 서식(제목·굵게·목록·표·링크) · 도구 단계 한 줄 · 패널 같음 · 휴대폰 표 넘침 없음', () => aiStream({ browser, desk, owner, BASE, FAKE, SHOTS }));
 await step('#516 승인함 시안 없음: 승인할 시안 수에서 빼고 빨간 묶음·빨간 띠·[승인] 없음 → [지금 만들기](서버 그리기·크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧]', () => mktVisual({ owner, ctx, sql, BASE, SHOTS }));
 await step('#545(+#534) 수정 요청 → AI 수정본: 카드 [수정 요청] → AI 가 글·시안을 함께 고친 수정본 v3 바로 승인함 → 배지 \'수정본 v3 — 반영한 요청\'·AI 수정 1번째·[수정본 v3 승인] → 이전 버전과 나란히 비교(시안·바뀐 줄) → 같은 카드 다시 수정 요청(사진만 = v4) → 상세 비교 · 휴대폰 폭', () => mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }));
+await step('255차 #791·#792 승인함: 게시일 지난 승인 대기 → 게시일 지남 띠·[승인] = 다음 빈 게시 칸 · 영상 다시 만들기 비용 카드([승인하고 제작 요청]·[이미지 카드뉴스로]) · 처리 안 된 수정 요청 [AI 수정본 만들기] · 휴대폰 폭', () => mktInbox255({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('#544 브랜드 키트 피드 틀: 성격(신뢰형) → 틀 4개 → 색·머리줄·연락처 → 미리보기(틀마다 한 장·사진 자리 안내) → 저장(4종 사용 중) → 승인함 초안 보관 글 [새 틀로 다시 그리기](보관 그대로) · 휴대폰 폭', () => mktFeedKit({ owner, ctx, sql, BASE, SHOTS }));
 await step('#177 휴지통(로컬 10/23 · 대표 "비슷한 글은 하나만"): 승인함 수정 요청·보류 칸 [골라서 지우기] → 2건 → [휴지통으로] → 칸에서 빠짐 · 휴지통 칸 [되살리기] → 보류 복귀 · 상세 [휴지통으로] → 띠 [되살리기]', () => mktTrash({ owner, ctx, sql, BASE, SHOTS }));
 await step('#522 영업 DB 누락 점검: 원천 2회 연속 실패·24시간 넘게 성공 없음 → 영업 홈 빨간 띠(받는 원천은 빼기·원천 하나뿐이면 수집기 이름) → [수집기 보기] → 수집기 칸 같은 띠·원천별 줄(받은 줄·관련·실패 빨간 줄)·첫 줄 칸 이름(값 없이) 펼치기', () => collectorAlerts({ owner, ctx, sql, BASE, SHOTS }));

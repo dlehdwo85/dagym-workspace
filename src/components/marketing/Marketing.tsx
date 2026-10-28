@@ -405,8 +405,8 @@ function BriefDecisionCard({ b, canEdit, onChange }: { b: InboxBrief; canEdit: b
 }
 
 /**
- * 승인함(운영실 명세 2-2): 게시 시각순 한 목록 · 처음 3장 펼침 + 'N건 더 보기' · 브랜드 탭 · 마감 지난 것은 숫자에서 빼고 접힌 '일정 재배치 필요'로.
- * 승인 가능 = 승인 대기·마감 안 지남. 수정 요청·보류는 아래 '수정·보류' 묶음(새 버전 기다림)
+ * 승인함(운영실 명세 2-2): 게시 시각순 한 목록 · 처음 3장 펼침 + 'N건 더 보기' · 브랜드 탭.
+ * 승인 가능 = 승인 대기(255차 #791: 게시일이 지난 것도 '게시일 지남' 띠와 함께 — 승인하면 가장 가까운 빈 게시 칸으로). 수정 요청·보류는 아래 '수정·보류' 묶음(새 버전 기다림)
  */
 function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = false, trash = 0 }: { contents: CardContent[]; canDecide: boolean; plain: boolean; onOpen: (id: string) => void; onDone: () => void; simple?: boolean; trash?: number }) {
   const [brand, setBrand] = useState(''); const [more, setMore] = useState(false);
@@ -419,11 +419,10 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
   const held = plain ? [] : list.filter((c) => c.status === 'draft' && c.quality?.held).sort(byWhen); // #544 브랜드 템플릿 전 자동 시안 = 초안 보관(승인 숫자·승인함 위쪽에 안 올림)
   const emptyBrands = plain ? [] : (allBrands.data?.brands ?? []).map((b) => b.name).filter((n) => !contents.some((c) => c.brand === n && ['draft', 'pending', 'changes', 'hold', 'approved'].includes(c.status)));
   // #516·#455: 시안 없이는 승인할 수 없는 글은 '승인할 시안' 수에서 빼고 따로(빨간 칸 — [지금 만들기])
-  const ready = plain ? list : list.filter((c) => c.status === 'pending' && !c.late && !needsVisual(c));
-  const noVisual = plain ? [] : list.filter((c) => c.status === 'pending' && !c.late && needsVisual(c));
+  const ready = plain ? list : list.filter((c) => c.status === 'pending' && !needsVisual(c));
+  const noVisual = plain ? [] : list.filter((c) => c.status === 'pending' && needsVisual(c));
   const postponed = plain ? [] : list.filter((c) => c.status === 'hold' && c.quality?.postponed); // 로컬 10/24 09:00: 옮길 날짜가 없어 멈춘 글(취소 아님)
-  const waiting = plain ? [] : list.filter((c) => (c.status === 'changes' || (c.status === 'hold' && !c.quality?.postponed)) && !c.late);
-  const late = plain ? [] : list.filter((c) => c.late);
+  const waiting = plain ? [] : list.filter((c) => c.status === 'changes' || (c.status === 'hold' && !c.quality?.postponed));
   // 로컬 10/21 08:10·09:20: 승인됐지만 아직 게시 전 — 예정 시각 임박·미래 순, 지난 건은 '예정 지남' 접힘, 기본 10건 + 더보기(브랜드 필터 적용)
   const nowMs = Date.now(); const [moreApproved, setMoreApproved] = useState(false);
   const approvedAll = plain ? [] : list.filter((c) => c.status === 'approved').sort((a, b) => String(a.scheduled_at ?? '9999').localeCompare(String(b.scheduled_at ?? '9999')));
@@ -434,7 +433,7 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
     <div className="space-y-3">
       {brands.length > 1 && <div className="flex flex-wrap gap-1.5" data-testid="mkt-brand-tabs">{['', ...brands].map((b) => (
         <button key={b || 'all'} type="button" onClick={() => setBrand(b)} className={cx('rounded-full border px-3 py-1 text-xs', brand === b ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white')}>
-          {b || '전체'} {contents.filter((c) => (!b || c.brand === b) && c.status === 'pending' && !c.late && !needsVisual(c)).length}</button>))}</div>}
+          {b || '전체'} {contents.filter((c) => (!b || c.brand === b) && c.status === 'pending' && !needsVisual(c)).length}</button>))}</div>}
       {!plain && <p className="text-sm" data-testid="mkt-approvable-count">승인할 시안 <b className="text-orange-700">{ready.length}건</b></p>}
       {!ready.length ? <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3">{plain ? '해당 콘텐츠가 없습니다' : '지금 승인할 최종 시안이 없습니다.'}</p> : (
         <div className="space-y-2">{shown.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}
@@ -462,8 +461,6 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
         <ul className="mt-2 space-y-2">{postponed.map((c) => <PostponedRow key={c.id} c={c} canDecide={canDecide} onOpen={() => onOpen(c.id)} onDone={onDone} />)}</ul></details>}
       {waiting.length > 0 && <Fold className="rounded-card border border-line bg-white p-3 text-sm" testId="mkt-waiting"><summary className="cursor-pointer font-medium">수정 요청·보류 — 새 버전 기다림 {waiting.length}건</summary>
         <TrashPicker list={waiting} canDecide={canDecide} onDone={onDone} testId="mkt-waiting" render={(c) => <ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />} /></Fold>}
-      {late.length > 0 && <Fold className="rounded-card border border-red-200 bg-red-50/40 p-3 text-sm" testId="mkt-late"><summary className="cursor-pointer font-medium text-red-800">승인 마감 지남 — 일정 재배치 필요 {late.length}건 (승인 숫자에서 뺌)</summary>
-        <div className="mt-2 space-y-2">{late.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></Fold>}
       {!plain && canDecide && trash > 0 && <TrashBox count={trash} onDone={onDone} />}
     </div>
   );

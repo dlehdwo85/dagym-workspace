@@ -369,7 +369,7 @@ export async function logAi(c: any, p: { name: string; model: string }, r: any, 
 }
 export const textOf = (r: any) => (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('');
 
-async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?: { prev: string; comment: string }, mat?: Awaited<ReturnType<typeof materialOf>>): Promise<Draft> {
+async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?: { prev: string; comment: string; tier?: WriteTier }, mat?: Awaited<ReturnType<typeof materialOf>>): Promise<Draft> {
   const m = mat ?? (await materialOf(c, brand, rule, { keep: !!extra }));
   const P = await import('./ai/provider'); const Q = await import('./mktQuality');
   // 로컬 QA 10/24 ②·⑥: 블로그 1,800~2,500자 · 릴스·쇼츠는 대본(script)과 캡션(body)을 따로 · 스토리는 문구 1~2줄 + '스티커 제안:' 줄
@@ -378,7 +378,7 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
   const V = await import('./mktAutoVisual');
   if (!P.aiEnabled()) return { title: c.title, body: extra ? extra.prev : `[AI 비서 꺼짐] ${rule?.topic_hint ?? c.title}`, brief: '', why: '', hooks: [], keyword: '', script: [] };
   await assertMktAi(c.tenant);
-  const p = P.anthropicProvider({ tier: draftTierOf(s, c) }); // 대표 10/24 추가 ①: 회사·요금제가 정한 글 모델 · #235 ⓑ 블로그는 표준 모델 이상
+  const p = P.anthropicProvider({ tier: extra?.tier ?? draftTierOf(s, c) }); // 대표 10/24 추가 ①: 회사·요금제가 정한 글 모델 · #235 ⓑ 블로그는 표준 모델 이상 · 255차 수정 요청 수정본은 최상 모델
   const contact = Q.contactLine(m.facts); // 로컬 QA 10/24 ⑤ 사실 카드 연락처
   const voice = Q.voicePrompt(brand?.voice);
   const ex = examplesPrompt(examplesOf(brand?.examples), exampleKindOf(c.channel, c.kind)); // #235 ⓔ 같은 형식 잘 된 예시 글(구성 참고)
@@ -524,12 +524,18 @@ async function preflightOf(c: any, brand: any, s: MktSettings, x: { title: strin
 const bannedOf = (brand: any): string[] => [...(brand?.banned_words ?? []), ...avoidOf(brand?.voice)];
 
 /** 제작 요청 카드 — 한도를 넘으면 needs_approval(제작 전 승인 요청) */
-export async function requestCard(c: any, version: number, kind: 'image' | 'video' | 'regen_image' | 'regen_video', brief: string, est: number, tx?: any) {
+export async function requestCard(c: any, version: number, kind: 'image' | 'video' | 'regen_image' | 'regen_video', brief: string, est: number, tx?: any, o: { ask?: boolean } = {}) {
   const sql = tx ?? db(); const s = await settingsOf(c.tenant); const lim = limitsOf(s); const use = await usageOf(c.tenant);
   let reason: string | null = null;
   if (kind === 'video' && est >= EST.video && lim.videoMonthly !== null && use.monthVideos >= lim.videoMonthly) reason = `이번 달 생성 영상 ${lim.videoMonthly}편을 다 썼습니다`;
   else if (kind.startsWith('regen') && lim.regenMonthly !== null && use.monthRegens >= lim.regenMonthly) reason = `이번 달 재생성 ${lim.regenMonthly}회를 다 썼습니다 — 추가 1회 = 약 ${est}크레딧`;
   else if (est > 0 && lim.weeklyCredits !== null && use.weekCredits + est > lim.weeklyCredits) reason = `이번 주 크레딧 한도(${lim.weeklyCredits}) 초과 예상 — 약 ${est}크레딧`;
+  if (o.ask) { // 255차 #792: 수정 요청으로 영상·AI 이미지를 다시 만들 때는 늘 대표 승인 먼저 — 비용(크레딧·원)과 이번 달 남은 수
+    const cc = await creditCost(); const won = `약 ${Math.round(est * cc.krwPerCreditMin).toLocaleString('ko-KR')}~${Math.round(est * cc.krwPerCreditMax).toLocaleString('ko-KR')}원`;
+    const videosLeft = lim.videoMonthly === null ? null : Math.max(0, lim.videoMonthly - use.monthVideos); const regensLeft = lim.regenMonthly === null ? null : Math.max(0, lim.regenMonthly - use.monthRegens);
+    const left = kind === 'regen_video' ? `이번 달 남은 영상 ${videosLeft ?? '제한 없음'}${videosLeft === null ? '' : '편'} · 재생성 ${regensLeft ?? '제한 없음'}${regensLeft === null ? '' : '회'}` : `이번 달 남은 재생성 ${regensLeft ?? '제한 없음'}${regensLeft === null ? '' : '회'}`;
+    reason = `${reason ? `${reason} · ` : ''}다시 만들기 약 ${est}크레딧(${won}) · ${left} — 승인하면 제작`;
+  }
   const [q] = await sql<{ id: string }[]>`insert into mkt_production_requests (tenant, content_id, version, kind, brief, est_credits, status, reason)
     values (${c.tenant}, ${c.id}, ${version}, ${kind}, ${brief.slice(0, 4000)}, ${est}, ${reason ? 'needs_approval' : 'open'}, ${reason}) returning id`;
   if (reason) await mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `제작 전 승인 필요: ${c.title}`, body: reason, link: '/s/marketing/automation', entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktreq:${q.id}` });
@@ -793,7 +799,7 @@ export async function assertSlot(sql: any, c: SlotPost, at: Date, s?: Pick<MktSe
   throw badRequest(`${issue} — ${alt ? `그날은 ${hm(alt)}에 넣을 수 있습니다` : '그날은 더 넣을 수 없습니다. 다른 날을 골라 주세요'}`);
 }
 /** #516 다음 슬롯: 하루씩 뒤로(규칙의 요일·주말 건너뛰기 지킴) — #540 그날 같은 브랜드·채널·형식 글이 있으면 원래 시각에서 3시간씩 옮겨 보고(하루 2건까지·같은 주제/시안 X), 같은 규칙 칸과 같은 시각은 피함 — 승인 마감이 아직 안 지난 날만, 14일 안 */
-async function nextSlot(c: SlotPost & { rule_id: string | null; scheduled_at: string | Date }, s: MktSettings) {
+export async function nextSlot(c: SlotPost & { rule_id: string | null; scheduled_at: string | Date }, s: MktSettings) {
   const sql = db();
   const [rule] = c.rule_id ? await sql<{ weekdays: number[]; skip_weekend: boolean }[]>`select weekdays, skip_weekend from mkt_rules where id = ${c.rule_id}` : [];
   const from = new Date(c.scheduled_at); const time = hm(from);
@@ -878,11 +884,13 @@ export async function mktAutoTick() {
 }
 
 /** 수정 요청 나누기(V43 5 → #545·#534): 글(문구·첫 줄·해시태그·말투…) · 사진(바탕·이미지 바꾸기) · AI 이미지(Higgsfield 재생성) · 영상 다시 — 한 요청에 여럿이면 함께 */
-export function revisionParts(comment: string) {
-  const video = /(영상|동영상|컷|클립).{0,12}(다시|새로|바꿔|교체|재생성)|재촬영/.test(comment);
+const REV_TEXT = /(글|문구|문장|카피|제목|첫\s*줄|훅|본문|해시태그|말투|표현|오타|맞춤법|짧게|길게|줄여|늘려)/;
+export function revisionParts(comment: string, kind?: string | null) {
+  // 255차(대표 10/28 릴스 의견 '영상 퀄리티가… 외국이네요 배경은 공사현장'): 영상 글은 영상·화면·배경·인물·화질을 말하면 영상 다시 만들기
+  const video = /(영상|동영상|컷|클립).{0,12}(다시|새로|바꿔|교체|재생성)|재촬영/.test(comment) || (VIDEO_KINDS.includes(kind ?? '') && /영상|화면|장면|배경|퀄리티|품질|화질|인물|외국|촬영|분위기/.test(comment));
   const ai = !video && /AI\s*이미지/i.test(comment); // 승인함 [AI 이미지로 다시](크레딧) 버튼 문구
   const photo = !video && (ai || /(사진|이미지|그림|썸네일|배경|바탕).{0,12}(다시|새로|바꿔|교체|재생성|다른)|재생성/.test(comment));
-  const text = !(video || photo) || /(글|문구|문장|카피|제목|첫\s*줄|훅|본문|해시태그|말투|표현|오타|맞춤법|짧게|길게|줄여|늘려)/.test(comment);
+  const text = !(video || photo) || REV_TEXT.test(comment);
   return { text, photo, video, ai };
 }
 export function classifyRevision(comment: string): 'text' | 'regen_image' | 'regen_video' {
@@ -958,8 +966,13 @@ export async function onChangesRequested(contentId: string, comment: string, by?
   const [c] = await sql<any[]>`select * from mkt_contents where id = ${contentId}`;
   if (!c) return null;
   await (await import('./mktTeam')).remember(c.tenant, 'designer', { brandId: c.brand_id, kind: 'edit', text: comment, sourceType: 'mkt_content', sourceId: c.id, by: by?.id ?? null }).catch(() => {});
-  if (!c.auto) return null;
-  const parts = revisionParts(comment);
+  // 255차 #792(대표 10/29 01:45 '수정 요청을 남기면 최상 모델이 점검해 시안을 만들어 승인함에'): 사람이 쓴 글도 — 예전에는 자동 제작 글만 수정본을 만들었음
+  let parts = revisionParts(comment, c.kind);
+  // 사람이 쓴 글의 사진 바꾸기·사진/파일 넣기는 작성자가(AI 가 대신 붙일 수 없음) — 글도 고치라면 글만 수정본, 아니면 예전처럼 작성자의 새 버전을 기다림
+  if (!c.auto && !parts.video && !parts.ai && (parts.photo || /(사진|이미지|그림|파일|자료).{0,8}(넣|추가|첨부|붙이|붙여|올려)/.test(comment))) {
+    if (!REV_TEXT.test(comment)) return null;
+    parts = { ...parts, photo: false, text: true };
+  }
   const prior = await sql<{ request: string | null; status: string | null }[]>`select revision->>'request' as request, revision->'check'->>'status' as status from mkt_versions
     where content_id = ${c.id} and coalesce((revision->>'ai')::boolean, false) order by version desc`;
   const n = prior.length;
@@ -972,7 +985,8 @@ export async function onChangesRequested(contentId: string, comment: string, by?
   const drawable = V.serverVisual(c) && (!media.length || (c.quality?.visual?.by === 'server' && media[0] === c.quality.visual.fileId));
   if (parts.video || parts.ai || (parts.photo && !drawable)) { // 서버가 다시 그릴 수 없는 시안 = 제작 요청 카드 — 글도 고치라면 글은 지금 수정본으로
     const kind = parts.video ? 'regen_video' : 'regen_image';
-    const card = await requestCard(c, c.current_version, kind, comment, kind === 'regen_video' ? EST.regen_video : EST.regen_image);
+    await sql`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '새 수정 요청으로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('regen_image', 'regen_video') and status in ('open', 'needs_approval')`;
+    const card = await requestCard(c, c.current_version, kind, comment, kind === 'regen_video' ? EST.regen_video : EST.regen_image, undefined, { ask: true }); // 255차: 비용·이번 달 남은 수를 적고 대표 승인 뒤 제작
     if (!parts.text || repeat) return { kind, card, ...(repeat ? { repeat: same } : {}) };
     return { kind, card, ...(await reviseText(c, comment, { photo: false, by, n: n + 1 })) };
   }
@@ -983,17 +997,18 @@ export async function onChangesRequested(contentId: string, comment: string, by?
 /** 글·시안 고치기(수정 요청·AI로 다듬기 공용) → 새 버전 1개 · 0크레딧 원장.
  *  글 = AI 가 다시 씀(품질 엔진) · 서버가 그린 시안 = 새 글(첫 줄)로 다시 그림(같은 바탕 사진), photo = 이 글에 써 본 바탕 사진은 빼고 새로
  *  n(#545 수정 요청 몇 번째) = 버전에 반영한 요청·바뀐 것을 남기고 승인자에게 '수정본 승인 요청' 알림 */
-async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: boolean; by?: By; n?: number; note?: string; ledgerNote?: string; actorId?: string | null } = {}) {
+async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: boolean; by?: By; n?: number; note?: string; ledgerNote?: string; actorId?: string | null; fresh?: boolean } = {}) {
   const sql = db(); const s = await settingsOf(c.tenant);
   const [brand] = c.brand_id ? await sql<any[]>`select * from mkt_brands where id = ${c.brand_id}` : [];
   const [prev] = await sql<{ body: string; media_ids: string[] }[]>`select body, media_ids from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
   const v = c.current_version + 1; const M = await import('./marketing'); const V = await import('./mktAutoVisual');
   const old = prev?.body ?? ''; let body = old; let q: { passed: boolean; issues: string[] }; let report: any = c.quality?.report ? { ...c.quality.report, v } : undefined; let brief = c.quality?.brief; let card = c.quality?.card;
-  let script: string[] | null = c.quality?.script ?? null; let pre: string[] = c.quality?.preflight ?? [];
-  let pages: import('./mktAutoVisual').CardPage[] | null = c.quality?.pages ?? null; // 요청 C: 카드뉴스 장·스토리 프레임(글을 다시 쓰면 새 원고의 장으로)
+  // 255차 fresh = 영상 글을 이미지 카드뉴스로 바꿔 만들기 — 예전 시안(영상)·대본·장은 버리고 서버가 표지·장을 새로 그림
+  let script: string[] | null = o.fresh ? null : c.quality?.script ?? null; let pre: string[] = c.quality?.preflight ?? [];
+  let pages: import('./mktAutoVisual').CardPage[] | null = o.fresh ? null : c.quality?.pages ?? null; // 요청 C: 카드뉴스 장·스토리 프레임(글을 다시 쓰면 새 원고의 장으로)
   let design: { memory: number; guide: number } | null = null; // 187차 ④ 이 수정본 지시문에 넣은 디자인 지침·기억
   if (o.text !== false) {
-    const d = await writeDraft(c, s, brand, null, { prev: old, comment }); design = d.design ?? null;
+    const d = await writeDraft(c, s, brand, null, { prev: old, comment, ...(o.n ? { tier: 'deep' as WriteTier } : {}) }); design = d.design ?? null; // 255차 #792 수정 요청 수정본 = 최상 모델
     const f = await refineDraft(c, { ...d, title: c.title }, brand, { keepTitle: true });
     const qc = qualityCheck(f.body, d.brief, s, bannedOf(brand), c.kind);
     if (f.errors.length) { qc.passed = false; qc.issues = [...qc.issues, ...f.errors]; }
@@ -1003,8 +1018,8 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     body = qc.body; q = { passed: qc.passed, issues: qc.issues }; report = { ...f.report, v, preflight: pre }; brief = d.brief || brief; card = d.card ?? card; if (d.pages?.length) pages = d.pages;
   } else q = { passed: c.quality?.passed !== false, issues: [...(c.quality?.issues ?? [])] };
   // 시안: 서버가 그린 시안이면(없으면 새로) 새 글로 다시 그림 — 사람이 붙인 사진·영상은 그대로
-  let media = (prev?.media_ids ?? []).map(String); let visual = c.quality?.visual ?? null; let drawn: Awaited<ReturnType<typeof V.drawAutoVisual>> | null = null;
-  const server = V.serverVisual(c) && (media.length ? visual?.by === 'server' && media[0] === visual.fileId : !!c.auto); // 시안 없는 글은 자동 제작 글만 새로 그림(사람이 쓴 글에 그림을 붙이지 않음)
+  let media = o.fresh ? [] : (prev?.media_ids ?? []).map(String); let visual = o.fresh ? null : c.quality?.visual ?? null; let drawn: Awaited<ReturnType<typeof V.drawAutoVisual>> | null = null;
+  const server = V.serverVisual(c) && (o.fresh || (media.length ? visual?.by === 'server' && media[0] === visual.fileId : !!c.auto)); // 시안 없는 글은 자동 제작 글만 새로 그림(사람이 쓴 글에 그림을 붙이지 않음) · 카드뉴스로 바꿀 때는 새로
   if (server && (o.photo || body !== old || !media.length)) {
     const tried = new Set<string>([...((visual?.tried ?? []) as string[]), ...(visual?.photoId ? [visual.photoId as string] : [])]);
     // #544 피드 틀: 글만 고치면 같은 틀·같은 사진 · 사진을 바꾸라면 사진 틀은 그대로 새 사진으로, 사진 없는 틀이면 다른 틀로
@@ -1015,7 +1030,7 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     const tail = media.length ? media.slice(1) : drawn.bodyIds;
     media = [drawn.fileId, ...tail];
     // 요청 C: 피드·스토리는 글이 바뀌었거나 장이 없으면 표지 뒤 장도 새 글로 다시(사진만 바꿀 때는 장 그대로) · 블로그는 표지+3장이 안 되면 도표형 카드로 채움
-    if (c.auto && pagedKind(c) && (body !== old || tail.length === 0)) { const Q = await import('./mktQuality'); pages = V.pagesOf(c.kind, pages, body, Q.contactLine(factsOf(brand?.facts))); media = [drawn.fileId, ...(await V.drawPages(c, pages, { exclude: new Set([...(drawn.photoId ? [drawn.photoId] : []), ...drawn.photoIds]) }))]; }
+    if ((c.auto || o.fresh) && pagedKind(c) && (body !== old || tail.length === 0)) { const Q = await import('./mktQuality'); pages = V.pagesOf(c.kind, pages, body, Q.contactLine(factsOf(brand?.facts))); media = [drawn.fileId, ...(await V.drawPages(c, pages, { exclude: new Set([...(drawn.photoId ? [drawn.photoId] : []), ...drawn.photoIds]) }))]; }
     else if (c.auto && isBlog(c) && media.length < V.BLOG_AUTO_MEDIA) media = [...media, ...(await V.drawInfoCards(c, body, V.BLOG_AUTO_MEDIA - media.length).catch(() => [] as string[]))];
     visual = { by: 'server', fileId: drawn.fileId, at: new Date().toISOString(), photoId: drawn.photoId, rv: 3, tried: [...new Set([...tried, ...(drawn.photoId ? [drawn.photoId] : [])])].slice(-20), ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}),
       ...(drawn.template ? { template: drawn.template } : {}), ...(drawn.photoIds.length > 1 ? { photoIds: drawn.photoIds } : {}), ...V.coverMark(drawn) };
@@ -1025,12 +1040,13 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
   }
   // 요청 C §3-3: 사진 수 규칙(자동 제작 피드 3~5장·스토리 3~5프레임·블로그 표지+3장, 사람 글 블로그 2장) — 못 미치면 승인함 대신 수정 요청
   q.issues = q.issues.filter((x) => !M.MEDIA_RULES.includes(x));
-  const mediaIssue = M.mediaRule(c.channel, c.kind, media.length, !!c.auto);
+  const mediaIssue = M.mediaRule(c.channel, c.kind, media.length, !!c.auto || !!o.fresh);
   if (mediaIssue) { q.passed = false; q.issues.push(mediaIssue); }
   const status = q.passed ? 'pending' : 'changes';
   // 요청 C §3-6(대표 10/25 22:20 '원래 게시일 유지'): 수정본은 원래 게시 시각 그대로 — 승인 마감이 이미 지났으면 다음 슬롯(#540 규칙)으로 옮기고 카드에 '원래 m/d → m/d'
   const movedN = Number(c.quality?.moved ?? 0);
-  const moveTo = status === 'pending' && c.auto && c.scheduled_at && deadlineOf(c.scheduled_at, s).getTime() <= Date.now() && movedN < 3 ? await nextSlot(c, s).catch(() => null) : null;
+  // 255차 #791: 수정 요청 수정본은 사람이 쓴 글도·몇 번 옮겼어도 원 게시일이 지났으면 다음 빈 칸으로(자동 다듬기는 예전처럼 자동 글 3번까지)
+  const moveTo = status === 'pending' && c.scheduled_at && deadlineOf(c.scheduled_at, s).getTime() <= Date.now() && (o.n ? true : c.auto && movedN < 3) ? await nextSlot(c, s).catch(() => null) : null;
   const rescheduled = moveTo ? { from: new Date(c.scheduled_at).toISOString(), to: moveTo.toISOString(), at: new Date().toISOString() } : null;
   const changed = [...(body !== old ? ['text'] : []), ...(drawn ? ['visual'] : [])];
   const check = o.n ? checkRevision(comment, { body: old, photoId: c.quality?.visual?.photoId ?? null, template: c.quality?.visual?.template ?? null },
@@ -1046,6 +1062,10 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     await tx`update mkt_contents set current_version = ${v}, status = ${status}, quality = ${tx.json({ passed: q.passed, issues: q.issues, ...(brief ? { brief } : {}), ...(design ? { design } : c.quality?.design ? { design: c.quality.design } : {}), ...(report ? { report } : {}), ...(card ? { card } : {}), ...(visual ? { visual } : {}), ...(script ? { script } : {}), ...(pre.length ? { preflight: pre } : {}), ...(pages?.length ? { pages } : {}),
       ...(rescheduled ? { rescheduled, moved: movedN + 1, movedFrom: rescheduled.from } : c.quality?.moved ? { moved: c.quality.moved, movedFrom: c.quality.movedFrom ?? null } : {}) } as never)}, reminded_at = null, updated_at = now() where id = ${c.id}`;
     if (moveTo) await tx`update mkt_contents set scheduled_at = ${moveTo} where id = ${c.id}`;
+    if (o.fresh) { // 255차: 영상 → 이미지 카드뉴스(형식 바꿈 · 열린 영상 제작 요청은 취소)
+      await tx`update mkt_contents set kind = ${c.kind} where id = ${c.id}`;
+      await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '이미지 카드뉴스로 바꿔 만듦'), decided_at = now() where content_id = ${c.id} and kind in ('video', 'regen_video', 'image', 'regen_image') and status in ('open', 'needs_approval')`;
+    }
     if (body !== old) await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${o.ledgerNote ?? '수정 요청 — 글자'}, ${c.title})`;
     if (drawn) await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'generate_image', 0, '수정 요청 — 시안 서버 다시 그리기(크레딧 0)', ${c.title})`;
     return true;
@@ -1259,7 +1279,7 @@ export async function actRequest(u: SessionUser, id: string, i: z.infer<typeof r
   return { status: 'done', credits };
 }
 
-export const contentActInput = z.object({ action: z.enum(['regen', 'archive', 'polish', 'submit']) });
+export const contentActInput = z.object({ action: z.enum(['regen', 'archive', 'polish', 'submit', 'revise', 'to_cards']) });
 /** 시안 다시 만들기(자동 제작 시안: 지금 재료로 새 버전 — 이전 이미지·영상 카드는 취소) · 보관(취소 상태 = 목록에서 숨김, 지우지 않음) · #426 AI로 다듬기(사람이 쓴 글도, 같은 사진으로 새 버전) */
 export async function actContent(u: SessionUser, id: string, i: z.infer<typeof contentActInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
@@ -1274,6 +1294,24 @@ export async function actContent(u: SessionUser, id: string, i: z.infer<typeof c
       await tx`update mkt_production_requests set status = 'canceled', decided_by = ${u.id}, decided_at = now() where content_id = ${id} and status in ('open', 'needs_approval')`;
     });
     return { status: 'canceled' };
+  }
+  if (i.action === 'revise' || i.action === 'to_cards') {
+    // 255차 #792: [AI 수정본 만들기] = 이 버전에 남은 수정 요청을 지금 처리(255차 전 사람이 쓴 글은 수정본을 안 만들었음)
+    //   [이미지 카드뉴스로 바꿔 만들기 · 0크레딧] = 영상 글(인스타·페이스북)을 카드뉴스로 — 최상 모델이 캡션·장을 다시 쓰고 서버가 표지·장을 그림(영상 제작 요청은 취소)
+    const [d] = await sql<{ comment: string | null }[]>`select comment from mkt_decisions where content_id = ${id} and version = ${c.current_version} and decision = 'changes' order by decided_at desc limit 1`;
+    if (i.action === 'revise') {
+      if (c.status !== 'changes' || !d?.comment) throw badRequest('이 버전에 처리할 수정 요청이 없습니다 — 새로 고쳐 확인해 주세요');
+      const r = await onChangesRequested(id, d.comment, { id: u.id, name: u.name });
+      await (await import('./log')).audit(sql, u.id, 'mkt.revise_now', 'mkt_content', id, { kind: (r as any)?.kind ?? null }).catch(() => {});
+      return { revision: r };
+    }
+    if (!VIDEO_KINDS.includes(c.kind) || !['instagram', 'facebook'].includes(c.channel)) throw badRequest('인스타그램·페이스북 영상 글만 이미지 카드뉴스로 바꿀 수 있습니다');
+    if (c.status === 'approved') throw badRequest('승인된 글은 바꾸지 않습니다 — [게시 전 수정 요청] 뒤에');
+    const [n] = await sql<{ n: number }[]>`select count(*)::int as n from mkt_versions where content_id = ${id} and coalesce((revision->>'ai')::boolean, false)`;
+    const ask = `${d?.comment ? `${d.comment}\n\n` : ''}영상 대신 이미지 카드뉴스(표지 + 3~5장)로 바꿔 만듭니다 — 캡션도 카드뉴스에 맞게(장마다 한 가지 내용, 첫 장은 훅).`;
+    const r = await reviseText({ ...c, kind: 'feed' }, ask, { text: true, photo: true, fresh: true, by: { id: u.id, name: u.name }, n: n.n + 1, actorId: u.id, ledgerNote: '이미지 카드뉴스로 바꿔 만들기 — 글자' });
+    await (await import('./log')).audit(sql, u.id, 'mkt.to_cards', 'mkt_content', id, { from: c.kind, version: r.version }).catch(() => {});
+    return { revision: { kind: 'cards', ...r } };
   }
   if (i.action === 'submit') {
     // #544 초안 보관 자동 시안 → 사람이 [승인 요청]: 승인 대기(검사 미통과면 수정 요청 칸) · 승인자 알림 · 감사 기록

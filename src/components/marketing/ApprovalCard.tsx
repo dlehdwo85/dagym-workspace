@@ -67,7 +67,7 @@ export type CardContent = { id: string; title: string; channel: string; kind?: s
   revision?: Revision | null; reapprove_comment?: string | null; // #545 수정본 배지(반영한 요청·AI 수정 n번째)
   brand_templates?: boolean; // #544 브랜드 키트 피드 틀이 있으면 [다른 틀로 다시 그리기]
   auto?: boolean; produce_at?: string | null; produced_at?: string | null; quality?: { passed?: boolean; issues?: string[]; visual?: { by: string } | null; postponed?: { from?: string | null; at?: string; restored?: boolean } | null; held?: { at?: string; reason?: string } | null; failed?: { at?: string; reason?: string; n?: number } | null; report?: { v?: number; needsPolish?: boolean; human?: { score: number }; hook?: { score: number; pass: boolean } | null };
-    rescheduled?: { from: string; to: string } | null } | null; production?: { kind: string; status: string } | null; // 요청 C §3-6: 수정본이 승인 마감을 넘겨 다음 슬롯으로 옮겨진 경우 '원래 m/d → m/d'
+    rescheduled?: { from: string; to: string } | null } | null; production?: { id?: string; kind: string; status: string; est?: number | null; reason?: string | null } | null; // 요청 C §3-6: 수정본이 승인 마감을 넘겨 다음 슬롯으로 옮겨진 경우 '원래 m/d → m/d'
   rationale?: { purpose?: string | null; metric?: string | null; message?: string | null; why?: string | null; topic?: string | null; topicFrom?: string | null; week?: number | null; qa?: { needsHuman?: boolean; issues?: string[]; notes?: string[] } | null } | null;
   last_decision?: { decision: string; comment: string | null; at: string; version: number; by: string | null } | null };
 
@@ -105,9 +105,11 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
   const noVisual = needsVisual(c); const drawable = canDrawVisual(c); const [making, setMaking] = useState(false);
   async function decide(decision: 'approve' | 'changes', comment = memo.trim()) {
     setBusy(true);
-    try { const r = await api<{ revision?: DecideRevision }>(`/api/marketing/contents/${c.id}/decide`, { body: { version: c.current_version, decision, comment: decision === 'changes' ? comment : undefined } });
+    try { const r = await api<{ revision?: DecideRevision; rescheduled?: { from: string; to: string } }>(`/api/marketing/contents/${c.id}/decide`, { body: { version: c.current_version, decision, comment: decision === 'changes' ? comment : undefined } });
       const rv = r.revision;
-      setDone(decision === 'approve' ? '✓ 승인됨' : comment === AI_REGEN ? 'AI 이미지 요청함' : rv?.version ? `수정본 v${rv.version} 올라감` : '수정 요청 보냄'); toast.ok(comment === AI_REGEN && decision === 'changes' ? 'AI 이미지 제작을 요청했습니다 — 붙으면 다시 승인 요청이 옵니다' : decideMessage(decision, rv)); setTimeout(onDone, 900); }
+      // 255차 #791: 게시일이 지난 글을 승인하면 서버가 가장 가까운 빈 게시 칸으로 옮김
+      setDone(decision === 'approve' ? (r.rescheduled ? `✓ 승인 · ${whenLabel(r.rescheduled.to)} 게시` : '✓ 승인됨') : comment === AI_REGEN ? 'AI 이미지 요청함' : rv?.version ? `수정본 v${rv.version} 올라감` : '수정 요청 보냄');
+      toast.ok(comment === AI_REGEN && decision === 'changes' ? 'AI 이미지 제작을 요청했습니다 — 붙으면 다시 승인 요청이 옵니다' : r.rescheduled ? `승인했습니다 — 게시일이 지나 ${whenLabel(r.rescheduled.to)} 게시로 옮겼습니다` : decideMessage(decision, rv)); setTimeout(onDone, 900); }
     catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   }
@@ -119,6 +121,19 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
     catch (e: any) { toast.error(e.message); }
     finally { setMaking(false); }
   }
+  // 255차 #792: 수정 요청이 아직 AI 수정본으로 안 만들어진 글 [AI 수정본 만들기] · 영상·AI 이미지 다시 만들기 비용 승인 · 영상 → 이미지 카드뉴스(0크레딧)
+  const [acting, setActing] = useState<string | null>(null);
+  async function act(kind: 'revise' | 'to_cards' | 'approve_regen') {
+    setActing(kind);
+    try {
+      if (kind === 'approve_regen') { await api(`/api/marketing/auto/requests/${c.production!.id}`, { method: 'PATCH', body: { action: 'approve' } }); toast.ok('제작을 승인했습니다 — 다시 만든 영상·이미지가 붙으면 승인 요청이 옵니다'); }
+      else { const r = await api<{ revision?: DecideRevision & { kind?: string } }>(`/api/marketing/auto/contents/${c.id}`, { body: { action: kind } }); toast.ok(kind === 'to_cards' ? `이미지 카드뉴스로 다시 만들었습니다${r.revision?.version ? ` — 수정본 v${r.revision.version}` : ''}` : decideMessage('changes', r.revision)); }
+      onDone();
+    } catch (e: any) { toast.error(e.message); } finally { setActing(null); }
+  }
+  const unprocessed = c.status === 'changes' && c.last_decision?.decision === 'changes' && c.last_decision.version === c.current_version && !c.production;
+  const regenAsk = c.production?.status === 'needs_approval' && c.production.kind.startsWith('regen') && !!c.production.id;
+  const cardsAlt = VIDEO_KINDS.includes(c.kind ?? '') && ['instagram', 'facebook'].includes(c.channel);
   const canAct = canDecide && !done && ['pending', 'changes', 'approved'].includes(c.status);
   const d = c.last_decision;
   const req = c.revision?.request ?? c.reapprove_comment ?? null; const from = c.revision?.from ?? c.reapprove_from ?? null; // #545
@@ -128,7 +143,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
         <BrandChip name={c.brand} color={c.brand_color} />
         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="mkt-channel-label">{channelLabel(c.channel, c.kind)}</span>
         <ModeChip mode={c.mode} />
-        <StatusChip s={late ? 'late' : c.status} />
+        <StatusChip s={c.status} />
+        {late && <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-800" data-testid="approval-late-chip">게시일 지남</span>}
         <span className="text-[11px] text-ink-3">v{c.current_version}</span>
         {rep?.needsPolish && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-polish-badge" title="사람다움 점수가 기준보다 낮습니다 — 상세에서 [AI로 다듬기]">다듬기 필요{rep.human ? ` · ${rep.human.score}점` : ''}</span>}
         {rep?.hook && !rep.hook.pass && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-weak-hook">훅 약함 {rep.hook.score}점</span>}
@@ -141,7 +157,18 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
         {done && <span className="ml-auto text-xs font-semibold text-emerald-700" data-testid="approval-done">{done}</span>}
       </div>
       <button type="button" onClick={onOpen} className="mt-1 block text-left font-semibold hover:underline" data-testid="mkt-row">{c.title}</button>
-      <p className="text-xs text-ink-2">{whenLabel(c.scheduled_at)} 게시{c.deadline && !['published'].includes(c.status) && <> · <span className={late ? 'font-bold text-red-600' : ''} data-testid="mkt-deadline">{late ? '마감 지남 — 다음 날로 이동 필요' : deadlineLabel(c.deadline, c.scheduled_at)}</span></>}</p>
+      <p className="text-xs text-ink-2">{whenLabel(c.scheduled_at)} 게시{c.deadline && !['published'].includes(c.status) && <> · <span className={late ? 'font-bold text-red-600' : ''} data-testid="mkt-deadline">{late ? '게시일 지남 — 승인하면 가장 가까운 빈 게시 칸으로' : deadlineLabel(c.deadline, c.scheduled_at)}</span></>}</p>
+      {late && ['pending', 'changes'].includes(c.status) && <p className="mt-1 rounded-input border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800" data-testid="approval-late-band">게시일 지남(원래 {whenLabel(c.scheduled_at)}) — {c.status === 'pending' ? '승인하면 가장 가까운 빈 게시 칸으로 옮겨 게시합니다' : '수정본이 올라오면 가장 가까운 빈 게시 칸으로 옮깁니다'}</p>}
+      {regenAsk && <div className="mt-1 rounded-input border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900" data-testid="approval-regen-ask">
+        <p className="font-semibold">{c.production!.kind === 'regen_video' ? '영상' : 'AI 이미지'} 다시 만들기 — 승인해야 제작합니다</p>
+        {c.production!.reason && <p className="mt-0.5" data-testid="approval-regen-reason">{c.production!.reason}</p>}
+        {canDecide && !done && <div className="mt-1.5 flex flex-wrap gap-1.5">
+          <Button size="sm" variant="secondary" onClick={() => act('approve_regen')} disabled={!!acting} data-testid="approval-regen-approve">{acting === 'approve_regen' ? '승인하는 중…' : `승인하고 제작 요청${c.production!.est ? ` · 약 ${c.production!.est}크레딧` : ''}`}</Button>
+          {cardsAlt && <Button size="sm" onClick={() => act('to_cards')} disabled={!!acting} data-testid="approval-to-cards">{acting === 'to_cards' ? 'AI 가 만드는 중…' : '이미지 카드뉴스로 바꿔 만들기 · 0크레딧'}</Button>}</div>}
+      </div>}
+      {unprocessed && canDecide && !done && <div className="mt-1 flex flex-wrap items-center gap-2 rounded-input border border-violet-200 bg-violet-50 px-2 py-1.5 text-[11px] text-violet-900" data-testid="approval-revise-pending">
+        <span className="min-w-0 flex-1">수정 요청이 아직 AI 수정본으로 만들어지지 않았습니다{c.last_decision?.comment ? ` — "${c.last_decision.comment.slice(0, 60)}"` : ''}</span>
+        <Button size="sm" onClick={() => act('revise')} disabled={!!acting} data-testid="approval-revise-now">{acting === 'revise' ? 'AI 가 고치는 중…' : 'AI 수정본 만들기'}</Button></div>}
       {media.length > 0 && !showMedia && <p className="mt-2 text-[11px] text-ink-3" data-testid="approval-media-later">시안 {media.length}장</p>}
       {media.length > 0 && showMedia && (
         <div className="mt-2">
@@ -184,7 +211,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
       </div>}
       {c.version_note && bodyOpen && <p className="mt-1 text-xs text-ink-2">제작 메모: {c.version_note}</p>}
       {d && d.version === c.current_version && <p className="mt-1 text-[11px] text-ink-3" data-testid="mkt-decision-line">{({ approve: '승인', changes: '수정 요청', hold: '보류' } as Record<string, string>)[d.decision] ?? d.decision} · {kst(d.at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })} KST{d.by ? ` · ${d.by}` : ''}{d.comment ? ` · 메모: ${d.comment}` : ''}{c.published_url ? <> · <a href={c.published_url} target="_blank" rel="noopener" className="underline">게시물 열기</a></> : null}</p>}
-      {canAct && !late && (mode === 'idle' ? (
+      {canAct && (mode === 'idle' ? (
         <div className="mt-2 flex flex-wrap gap-2">
           {c.status !== 'approved' && !noVisual && <Button size="sm" onClick={() => decide('approve')} data-testid="card-approve">{c.reapprove_from ? `수정본 v${c.current_version} 승인` : '승인'}</Button>}
           <Button size="sm" variant="secondary" onClick={() => setMode('changes')} data-testid="card-changes">{c.status === 'approved' ? '게시 전 수정 요청' : '수정 요청'}</Button>
