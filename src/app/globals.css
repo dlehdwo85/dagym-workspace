@@ -86,6 +86,11 @@ html.native-android { --sab: max(var(--safe-area-inset-bottom, env(safe-area-ins
 
 /* 시간 칸 = 1시간 (V4-4). 한 시간 높이를 Google 캘린더처럼 넉넉히(48px) 두어 1시간 일정도 제목이 보이고 누르기 쉽게 */
 .fc .fc-timegrid-slot { height: 3rem; }
+/* #755(대표 10/28 '시간이 칸에 있어서 헷갈림 — 구글처럼 줄에'): 시간 글자를 그 시각 가로줄 높이 가운데에 걸치게, 시간 열에는 가로줄 없음, 맨 위 첫 글자는 숨김(구글과 같음) */
+.fc .fc-timegrid-slot-label { vertical-align: top; border-top-color: transparent; }
+.fc .fc-timegrid-slot-label-frame { overflow: visible; }
+.fc .fc-timegrid-slot-label-cushion { display: inline-block; transform: translateY(-50%); line-height: 1.2; background: var(--fc-page-bg-color, #fff); }
+.fc .fc-timegrid-slots tbody tr:first-child .fc-timegrid-slot-label-cushion { visibility: hidden; }
 
 /* V5 Google 형 주 보기: 색을 채운 둥근 블록·흰 글자·제목 줄바꿈, 좁은 시간 열, 현재 시각 선, 오늘 동그라미 */
 .fc .fc-timegrid-event { border-radius: 4px; padding: 2px 3px; box-shadow: 0 0 0 1px #fff; }
@@ -105,7 +110,6 @@ html.native-android { --sab: max(var(--safe-area-inset-bottom, env(safe-area-ins
 .fc .fc-timegrid-event.fc-event-mirror .fc-event-main { color: #4338ca; }
 @media (max-width: 640px) {
   .fc .fc-timegrid-slot-label-cushion, .fc .fc-timegrid-axis-cushion { font-size: 11px; padding: 0 2px; }
-  .fc .fc-timegrid-slot-label { vertical-align: top; }
   .fc .fc-col-header-cell { font-size: 12px; }
   .fc .fc-timegrid-event { padding: 1px 2px; }
 }

@@ -96,6 +96,7 @@ export function toPayload(r: KaptBidRow, d?: KaptBidDetail): Record<string, unkn
     attachment_urls: d?.files ? d.files.map((f) => (f.name ? { name: f.name, url: f.url } : f.url)) : [], files_checked_at: d?.files ? new Date().toISOString() : null,
     // 239차(#743·#744): 참가 조건·현장설명(상세를 읽은 때만 — 못 읽은 실행은 칸을 안 보내 저장된 값을 지우지 않음)
     ...(d?.canceled && d.cancelReason ? { result_note: d.cancelReason } : {}), // #751 취소 사유(상태 '취소'·공고구분 'cancel' 은 notice_state 로 계산)
+    ...(d?.canceled ? { kapt_cancel_at: new Date().toISOString() } : {}), // #751 후속: 상세로 취소를 안 때(처음 한 번) — 원본 매일 복사가 '진행중'으로 되돌리지 않게
     ...(d?.terms ? { site_briefing_kind: d.terms.briefingKind, site_briefing_at: d.terms.briefingAt, site_briefing_place: d.terms.briefingPlace, bid_docs: d.terms.bidDocs,
       credit_rating_cert: d.terms.creditCert, performance_cert: d.terms.perfCert, bid_bond: d.terms.bidBond, docs_deadline_at: d.terms.docsDeadline, bid_method: d.terms.bidMethod,
       urgent_bid: d.terms.urgent, payment_terms: d.terms.payTerms, terms_read_at: new Date().toISOString() } : {}) };

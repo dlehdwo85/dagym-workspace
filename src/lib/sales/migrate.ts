@@ -63,7 +63,9 @@ const idOf = (r: any) => (r?.id != null ? String(r.id) : createHash('sha256').up
 export const JUDGED_KEEP = ['related', 'fit_business', 'matched_keywords', 'classification', 'refit_at', 'refound_at', 'refit_lowered_at', 'refit_lowered_why', 'refit_changed_at', 'judged_at'];
 /** 232차(로컬 10/28 15:40 남원시 '결과를 처음 안 때'가 빔): 워크인 수집기·K-apt 상세가 채운 결과 칸 — 원본 매일 복사가 원본의 빈 값으로 지우지 않음(원본에 값이 있으면 원본 값).
  *  낙찰·유찰로 안 결과는 원본이 아직 결과 전이어도 상태를 되돌리지 않고, 원본 복사로 결과를 처음 알면 그때를 result_at 으로(234차: 낙찰일·마감일이 7일보다 오래된 결과는 찍지 않음 — 당일 메일에 한꺼번에 오르지 않게) */
-export const RESULT_KEEP = ['result_at', 'result_filled_at', 'kapt_detail_at', 'kapt_detail_v', 'participants', 'result_note', 'winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'winner_rate', 'bidders'];
+export const RESULT_KEEP = ['result_at', 'result_filled_at', 'kapt_detail_at', 'kapt_detail_v', 'participants', 'result_note', 'winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'winner_rate', 'bidders',
+  // 239차·#751 후속(로컬 10/28 18:22): K-apt 상세가 채운 참가 조건·현장설명 칸과 취소를 안 때도 같은 규칙(원본이 비었으면 워크인 값)
+  'site_briefing_kind', 'site_briefing_at', 'site_briefing_place', 'bid_docs', 'credit_rating_cert', 'performance_cert', 'bid_bond', 'docs_deadline_at', 'bid_method', 'urgent_bid', 'payment_terms', 'terms_read_at', 'kapt_cancel_at'];
 async function upsertRows(scope: string, tbl: string, rows: any[]) {
   const sql = db(); const now = new Date(); const weekAgo = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(now.getTime() - 7 * 864e5));
   for (let n = 0; n < rows.length; n += 500) {
@@ -75,6 +77,9 @@ async function upsertRows(scope: string, tbl: string, rows: any[]) {
         || (case when (coalesce(sales_src_rows.row->>'current_status', '') ~ '낙찰|유찰' or coalesce(sales_src_rows.row->>'winner_name', '') <> '')
             and not (coalesce(excluded.row->>'current_status', '') ~ '낙찰|유찰' or coalesce(excluded.row->>'winner_name', '') <> '')
           then jsonb_strip_nulls(jsonb_build_object('current_status', sales_src_rows.row->'current_status', 'notice_state', sales_src_rows.row->'notice_state')) else '{}'::jsonb end)
+        || (case when sales_src_rows.row ? 'kapt_cancel_at' and coalesce(sales_src_rows.row->>'current_status', '') ~ '취소'
+            and not (coalesce(excluded.row->>'current_status', '') ~ '취소|낙찰|유찰' or coalesce(excluded.row->>'winner_name', '') <> '')
+          then jsonb_strip_nulls(jsonb_build_object('current_status', sales_src_rows.row->'current_status', 'notice_state', sales_src_rows.row->'notice_state', 'notice_kind', sales_src_rows.row->'notice_kind')) else '{}'::jsonb end)
         || (case when not (sales_src_rows.row ? 'result_at') and not (coalesce(sales_src_rows.row->>'current_status', '') ~ '낙찰|유찰' or coalesce(sales_src_rows.row->>'winner_name', '') <> '')
             and (coalesce(excluded.row->>'current_status', '') ~ '낙찰|유찰' or coalesce(excluded.row->>'winner_name', '') <> '')
             and not coalesce(coalesce(nullif(left(excluded.row->>'award_date', 10), ''), left(excluded.row->>'deadline_at', 10)) < ${weekAgo}, false)

@@ -76,8 +76,8 @@ const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h
 export const timeLabel = (t: string) => { const h = Number(t.slice(0, 2)), m = t.slice(3, 5); return `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}:${m}`; };
 const durLabel = (min: number) => (min <= 0 ? '' : min < 60 ? `${min}분` : min % 60 ? `${Math.floor(min / 60)}시간 ${min % 60}분` : `${min / 60}시간`);
 
-/** V36 5: 기본은 07:00~22:00(30분), [그 외 시간 보기…]로 하루 전체(15분). 고른 값이 목록 밖이면 그 값도 넣는다 */
-export const DAY_TIMES = TIMES.filter((t) => t >= '07:00' && t <= '22:00' && /:(00|30)$/.test(t));
+/** V36 5: 기본은 07:00~22:00, [그 외 시간 보기…]로 하루 전체. 고른 값이 목록 밖이면 그 값도 넣는다 · #756(대표 10/28 '15분 단위도 설정 가능하도록'): 기본 목록도 15분(:15·:45) */
+export const DAY_TIMES = TIMES.filter((t) => t >= '07:00' && t <= '22:00');
 const MORE = '__more';
 function useTimes(value: string | null | undefined) {
   const [all, setAll] = useState(false);

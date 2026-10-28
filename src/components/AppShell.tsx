@@ -299,7 +299,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const navLink = (n: NavItem, badge?: number) => {
     const on = active(n.href);
     return (
-      <Link key={n.href} href={n.href} aria-current={on ? 'page' : undefined} title={collapsed ? n.label : undefined} style={on && space !== 'work' ? { background: sm.color } : undefined}
+      <Link key={n.href} href={n.href} prefetch={NAV_PREFETCH.has(n.href) ? undefined : false} aria-current={on ? 'page' : undefined} title={collapsed ? n.label : undefined} style={on && space !== 'work' ? { background: sm.color } : undefined}
         className={cx('group flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm transition-colors', on ? 'bg-brand-600 font-semibold text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-ink', collapsed && 'justify-center px-0')}>
         <n.icon className={cx('size-[18px] shrink-0', on ? 'text-white' : 'text-slate-400 group-hover:text-slate-600')} aria-hidden />
         {!collapsed && <span className="flex-1 truncate">{n.label}</span>}
@@ -644,6 +644,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
     </SessionCtx.Provider>
   );
 }
+
+/** 로컬 10/28 17:45(238차 되돌림 뒤 운영 측정): 첫 화면 직후 사이드바 링크 자동 미리 받기로 서버 요청이 19~33개 몰려 그동안 누르면 느려짐 — 자주 쓰는 다섯 곳만 미리 받음(나머지는 누를 때) */
+const NAV_PREFETCH = new Set(['/', '/tasks', '/calendar', '/messages', '/approvals']);
 
 function TabLink({ n, on, badge }: { n: NavItem; on: boolean; badge?: number }) {
   return (

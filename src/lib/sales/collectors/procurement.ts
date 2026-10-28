@@ -135,7 +135,7 @@ export const PROCUREMENT_ETL_FIELDS = ['source_url', 'notice_file_url', 'issuer'
   'base_amount', 'notice_no', 'winner_biz_no', 'winner_rate', 'bidders',
   // 239차(#743·#744): 참가 조건·현장설명(K-apt 상세 칸)
   'site_briefing_kind', 'bid_docs', 'credit_rating_cert', 'performance_cert', 'bid_bond', 'docs_deadline_at', 'bid_method', 'urgent_bid', 'payment_terms', 'terms_read_at',
-  'result_note'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로 · #543 공고번호(바로 가는 주소가 없는 원천의 '번호 검색' 안내)
+  'result_note', 'kapt_cancel_at'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로 · #543 공고번호(바로 가는 주소가 없는 원천의 '번호 검색' 안내)
 const TERMS_FIELDS = ['site_briefing_kind', 'site_briefing_at', 'site_briefing_place', 'bid_docs', 'credit_rating_cert', 'performance_cert', 'bid_bond', 'docs_deadline_at', 'bid_method', 'urgent_bid', 'payment_terms'];
 export const AWARD_FIELDS = ['winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'current_status', 'winner_rate', 'bidders', 'participants', 'result_note', 'kapt_detail_at', 'kapt_detail_v'] as const; // 196차: 낙찰자 사업자번호 — 입찰 업무 '우리 회사 낙찰' 판정 · #530 낙찰률·참가 업체 수(당일 메일 결과 구역) · 231차 K-apt 상세 참여업체(대표자·전화 없음)·사유·읽은 때
 export type NoticeRow = Record<string, unknown> & { source_type: string; source_external_id: string; title: string; source_url: string };
@@ -195,7 +195,7 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
     site_briefing_kind: ['필수', '임의', '없음', '공고문 참조'].includes(String(p.site_briefing_kind)) ? String(p.site_briefing_kind) : null,
     bid_docs: txt(p.bid_docs)?.slice(0, 60) ?? null, credit_rating_cert: txt(p.credit_rating_cert)?.slice(0, 40) ?? null, performance_cert: txt(p.performance_cert)?.slice(0, 40) ?? null,
     bid_bond: txt(p.bid_bond)?.slice(0, 80) ?? null, docs_deadline_at: ts(p.docs_deadline_at), bid_method: txt(p.bid_method)?.slice(0, 40) ?? null,
-    urgent_bid: typeof p.urgent_bid === 'boolean' ? p.urgent_bid : null, payment_terms: txt(p.payment_terms)?.slice(0, 100) ?? null, terms_read_at: txt(p.terms_read_at), // 읽은 때는 ISO(UTC) 그대로 — ts() 는 서울 시각으로 봄
+    urgent_bid: typeof p.urgent_bid === 'boolean' ? p.urgent_bid : null, payment_terms: txt(p.payment_terms)?.slice(0, 100) ?? null, terms_read_at: txt(p.terms_read_at), kapt_cancel_at: txt(p.kapt_cancel_at), // 읽은 때는 ISO(UTC) 그대로 — ts() 는 서울 시각으로 봄
     base_amount: num(p.base_amount),
     notice_no: txt(p.notice_no), // #543 차수·구분 없는 공고번호(온비드·국방·LH — 원천 사이트에서 검색할 번호)
     // 231차 K-apt 상세: 참여업체(이름·사업자번호·응찰금액·낙찰 여부·무효만 — 대표자·전화 칸은 받지 않음)·낙찰/유찰/취소 사유·상세 읽은 때
@@ -210,9 +210,20 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stri
 /** #476 d: K-apt 입찰분류에 '주민운동시설의 위탁'·커뮤니티(공사 제외)가 있으면 즉시 검토 */
 const IMMEDIATE_CATEGORY = /주민\s*운동\s*시설의\s*위탁|커뮤니티/;
 /** 처음 적재할 때의 분류(담당자 판단은 회사별 진행 칸에 — 공용 행은 규칙이 바뀌면 '중장기 → 즉시 검토'로만 올림, planNoticeBatch) */
+/** #752(로컬 10/28 17:25 · 대표 '하이링크는 보통 수의계약, 공개 입찰은 면허를 가진 업체와 협력을 준비하는 단계'): 하이링크 공고 중 공사(제목·업무 구분·업종 제한에
+ *  '공사' — 로비폰·출입통제 교체·설치 공사 등)는 지금은 단독 입찰이 어려움 → 빼지 않고 '면허 업체 협력 필요' 표시로 검토에(★즉시 검토로 올리지 않음).
+ *  발주 기관 이름의 '공사'(한국토지주택공사·○○도시공사 등)는 공사가 아님 · 다짐이 함께 맞은 공고(운영·위탁 낱말)는 그대로 */
+export const PARTNER_NOTE = '면허 업체 협력 필요';
+const ORG_GONGSA = /(?:주택|도시|토지|도로|철도|수자원|전력|가스|관광|공항|항만|교통|농어촌|석유|광물|에너지|개발)\s*공사/g;
+export function partnerNeed(r: { fit_business?: unknown; title?: unknown; bid_category?: unknown; license_limit?: unknown; industry_code?: unknown } | null | undefined): string | null {
+  if (String(r?.fit_business ?? '') !== '하이링크') return null;
+  const t = `${r?.title ?? ''} ${r?.bid_category ?? ''} ${r?.license_limit ?? ''} ${r?.industry_code ?? ''}`.replace(ORG_GONGSA, ' ');
+  return /공사/.test(t) ? PARTNER_NOTE : null;
+}
 export function initialClassification(row: { title?: unknown; bid_category?: unknown; task_scope?: unknown; fit_business?: unknown; source_type?: unknown }): string {
   if (row.source_type === 'vendor_recruit') return '중장기 영업리드'; // #476 후속 d(로컬 10/23): 협력사 모집은 등록 준비 — 즉시 검토로 두지 않음
   if (!row.fit_business) return '참고(비관련)';
+  if (partnerNeed(row)) return '중장기 영업리드'; // #752 면허 업체 협력 필요 — 검토
   const cat = String(row.bid_category ?? '');
   if (IMMEDIATE_CATEGORY.test(cat) && !/공사/.test(cat)) return '즉시 검토';
   const f = matchFit(String(row.title ?? ''), row.bid_category as string | null, row.task_scope as string | null);
@@ -247,6 +258,7 @@ export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<stri
       // #751: 취소된 공고도 되돌리지 않음 — K-apt 목록은 취소된 공고를 계속 '신규공고'로 두고(상세에만 취소), 상세를 못 읽은 수집이 '진행중'으로 되돌리면 안 됨
       if (p.current_status === '취소' && ((f === 'current_status' && nv !== '취소') || (f === 'notice_kind' && nv !== 'cancel') || (f === 'notice_state' && !/취소/.test(String(nv))))) continue;
       if (f === 'terms_read_at' && p.terms_read_at != null && String(p.terms_read_at) !== '') continue; // 239차: 아래(조건 칸이 바뀐 때만)
+      if (f === 'kapt_cancel_at' && p.kapt_cancel_at != null && String(p.kapt_cancel_at) !== '') continue; // #751 취소를 처음 안 때 — 한 번만
       if (!same(nv, p[f])) { patch[f] = nv; changed.push(f); }
     }
     // 239차: 참가 조건을 읽은 때는 처음·조건이 바뀐 때만 — 수집마다 고침으로 세면 updated_at 이 매번 바뀌어 정정 공고가 날마다 메일 '변경'에 다시 오름

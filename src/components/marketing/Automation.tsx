@@ -15,6 +15,7 @@ import { BrandVoice, type Voice } from './BrandVoice';
 import { BrandFacts, type Facts } from './BrandFacts';
 import { BrandExamples, type Example } from './BrandExamples';
 import { BrandKitAi } from './BrandKitAi';
+import { BrandMerge } from './BrandMerge';
 import { MktPhotos } from './MktPhotos';
 import { MODE_HINT, ModeChip, ModeToggle, asMode, type Mode } from './ModeToggle';
 import { useSearchParams } from 'next/navigation';
@@ -229,7 +230,8 @@ export function Automation() {
             <BrandVideoKit brand={b} onSaved={reload} />
             <BrandFacts brand={b} onSaved={reload} />
             <BrandExamples brand={b} onSaved={reload} />
-            <BrandVoice brand={b} onSaved={reload} /></li>))}</ul>
+            <BrandVoice brand={b} onSaved={reload} />
+            <BrandMerge brand={b} brands={data.brands} onDone={reload} /></li>))}</ul>
         <p className="mt-2 text-xs text-ink-3">원고 재료: 브랜드 소개·주력 상품·이번 주 주제(없으면 이번 달 소식 → 주제 풀) + 사실 카드 + 같은 형식 잘 된 예시 글 + 회사 AI 프로필 + 마케팅 자료실 사진의 AI 설명(아래 &lsquo;사진 AI 설명&rsquo;). 재료가 없으면 시안 대신 “주제 필요” 카드로 묻습니다. 말투 프로필은 모든 원고·자막이 읽고, 다 쓴 원고는 글 품질 엔진(훅 점수·사람다움 점수·채널 검사)을 거칩니다.</p>
       </section>}
 

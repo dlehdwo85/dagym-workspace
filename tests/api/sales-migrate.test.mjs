@@ -78,6 +78,9 @@ test('적용: 공용/회사별·진행 칸 분리·멱등·사라진 행·사용
   // 191차(대표 10/27 판정 정정): 워크인 규칙으로 판정한 공고 줄(judged_at)은 매일 복사가 판정 칸을 원본 값으로 되돌리지 않음 — 다른 칸은 원본 값
   await sql`update sales_src_rows set row = row || ${sql.json({ related: false, fit_business: null, matched_keywords: [], classification: '참고(비관련)', refit_lowered_at: '2026-10-27T00:00:00Z', judged_at: '2026-10-27T00:00:00Z', title: '바뀌기 전 제목' })}::jsonb where scope = 'global' and tbl = 'procurement_notices' and src_id = '2'`;
   await sql`update sales_src_rows set row = row || ${sql.json({ related: false })}::jsonb where scope = 'global' and tbl = 'procurement_notices' and src_id = '3'`;
+  // #751 후속(로컬 10/28 18:22 광명자이더샵포레나): 워크인 K-apt 상세가 안 취소(kapt_cancel_at)·참가 조건 칸은 매일 복사가 되돌리지 않음 — 다른 칸은 원본 값
+  await sql`update sales_src_rows set row = row || ${sql.json({ current_status: '취소', notice_state: '취소', notice_kind: 'cancel', kapt_cancel_at: '2026-10-28T09:15:59Z', result_note: '계약기간 표시 오류',
+    site_briefing_kind: '필수', urgent_bid: false, terms_read_at: '2026-10-28T09:15:59Z', title: '바뀌기 전 제목' })}::jsonb where scope = 'global' and tbl = 'procurement_notices' and src_id = '4'`;
   // 다시 눌러도 중복 없음 · 원본에서 하나 사라지면 '사라짐' 표시 후 대조 일치
   leadsN = 20;
   const r2 = await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'apply', tenant: 'default' });
@@ -88,6 +91,9 @@ test('적용: 공용/회사별·진행 칸 분리·멱등·사라진 행·사용
   assert.deepEqual([j2.row.related, j2.row.fit_business, j2.row.classification, j2.row.judged_at, j2.row.title], [false, null, '참고(비관련)', '2026-10-27T00:00:00Z', '공고 1'], '판정 칸은 워크인 값 · 제목은 원본 값');
   const [j3] = await sql`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = '3'`;
   assert.equal(j3.row.related, true, '워크인이 판정하지 않은 줄은 원본 값 그대로');
+  const [j4] = await sql`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = '4'`;
+  assert.deepEqual([j4.row.current_status, j4.row.notice_state, j4.row.notice_kind, j4.row.kapt_cancel_at, j4.row.result_note, j4.row.site_briefing_kind, j4.row.urgent_bid, j4.row.terms_read_at, j4.row.title],
+    ['취소', '취소', 'cancel', '2026-10-28T09:15:59Z', '계약기간 표시 오류', '필수', false, '2026-10-28T09:15:59Z', '공고 3'], '워크인이 안 취소·참가 조건은 그대로 · 제목은 원본 값');
   // 로컬 요청 10/19: 이메일로 못 찾은 원본 사용자(P2)를 워크인 사용자에 직접 연결 → 다시 적용해도 유지(멱등)
   assert.equal((await ctx.owner.req('POST', '/api/platform/sales-migrate', { action: 'map', tenant: 'default', srcUserId: 'P2', userId: '00000000-0000-0000-0000-000000000000' })).status, 400, '그 회사 사용자만');
   await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'map', tenant: 'default', srcUserId: 'P2', userId: ctx.staffA.id });

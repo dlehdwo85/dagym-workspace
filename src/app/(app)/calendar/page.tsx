@@ -45,6 +45,8 @@ class GrabWhereHeld extends Interaction {
 const grabWhereHeld = createPlugin({ name: 'wos-grab-where-held', componentInteractions: [GrabWhereHeld] });
 const seoulDate = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const seoulTime = (d: Date | string) => dtf('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
+/** #757 구글처럼 짧은 블록 한 줄의 시각 — '오후 2:30' */
+const koTime = (d: Date) => dtf('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' }).format(d);
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 
 /** V5 연결된 업무가 있는 일정을 지울 때: 업무도 지울지 (반복 일정은 전체 삭제일 때만 물음) */
@@ -622,7 +624,9 @@ function CalendarPage() {
             // #592: 시간 격자 종일 줄은 하루 2개까지 — '+n개' 는 그날 종일 목록(휴대폰 시트), 월 보기는 그대로 풍선. 끝에 참 값을 돌려주면 FullCalendar 는 아무것도 하지 않음
             moreLinkClick={(a) => { if (!a.view.type.startsWith('timeGrid')) return 'popover'; setAllDaySheet(seoulDate(a.date)); return true as never; }}
             // 대표 지적(10/19 ① d): 겹친 일정·업무는 나란히(겹쳐 그리면 위에 깔린 항목이 눌려 다른 상세가 열림)
-            slotDuration="01:00:00" snapDuration={snap === 30 ? '00:30:00' : '00:15:00'} slotEventOverlap={false} eventMinHeight={mobile ? 34 : 28} eventShortHeight={30}
+            // #757(대표 10/28 사진: 14:00~16:00 30분 면접 4건이 좌우로 쪼개짐): 최소 높이(28·휴대폰 34px)가 30분 높이(PC 24·휴대폰 주 20px)보다 커서 다음 일정과 겹친 것으로 계산됐음
+            // → 최소 높이를 30분 높이 아래로(PC 22·휴대폰 18) — 안 겹치는 일정은 칸 너비 전체로 위아래로 이어짐. 실제로 겹치는 일정만 나란히(10/19 대표 결정 그대로)
+            slotDuration="01:00:00" snapDuration={snap === 30 ? '00:30:00' : '00:15:00'} slotEventOverlap={false} eventMinHeight={mobile ? 18 : 22} eventShortHeight={30}
             editable selectable selectMirror droppable longPressDelay={350} selectMinDistance={touch ? 0 : 4}
             events={fcEvents}
             datesSet={(a: DatesSetArg) => { setAgRange({ from: seoulDate(a.start), to: seoulDate(new Date(a.end.getTime() - 1)) }); setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view2', a.view.type); } catch {} keepInUrl({ view: a.view.type, date: seoulDate(a.view.calendar.getDate()) }); }}
@@ -660,7 +664,7 @@ function CalendarPage() {
               );
               if (narrow && timed) {
                 const showTime = mins >= 90 && !!when;
-                const lines = Math.max(1, Math.floor((Math.max(34, (mins / 60) * (arg.view.type === 'timeGridWeek' ? 40 : 48)) - 4 - (showTime ? 12 : 0)) / 13.2));
+                const lines = Math.max(1, Math.floor((Math.max(18, (mins / 60) * (arg.view.type === 'timeGridWeek' ? 40 : 48)) - 4 - (showTime ? 12 : 0)) / 13.2)); // #757 실제 블록 높이(최소 18px)로
                 return (
                   <div className="flex h-full min-w-0 flex-col overflow-hidden text-[11px] leading-[1.2]" data-narrow-block="1" {...attrs}>
                     <span className={cx('line-clamp-2 min-h-0 overflow-hidden whitespace-normal break-all font-medium', done && 'line-through opacity-80')} style={{ WebkitLineClamp: lines }}>{dot}{icon}{label}</span>
@@ -668,7 +672,12 @@ function CalendarPage() {
                   </div>
                 );
               }
-              // V36 6: 휴대폰 일 보기 짧은 블록 — 시각은 제목 옆 작게(아래 줄로 내려 제목을 가리지 않음)
+              // V36 6: 휴대폰 일 보기 짧은 블록 — 시각은 제목 옆 작게(아래 줄로 내려 제목을 가리지 않음) · #757 30분 이하는 한 줄
+              if (mobile && timed && mins <= 30) return (
+                <div className="min-w-0 truncate px-[3px] text-[12px] leading-[1.25]" {...attrs} data-short-block="1">
+                  <span className={cx('font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>{arg.event.start && <span className="text-[10.5px] font-normal opacity-85">, {koTime(arg.event.start)}</span>}
+                </div>
+              );
               if (mobile && timed && mins < 90) return (
                 <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-all px-[3px] text-[12px] leading-[1.2]" {...attrs}>
                   <span className={cx('font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>{when && <span className="ml-1 text-[10.5px] font-normal opacity-85" data-block-time>{when}</span>}
@@ -679,6 +688,12 @@ function CalendarPage() {
                 <div className="flex h-full min-w-0 flex-col overflow-hidden px-[3px] text-[12px] leading-[1.2]" {...attrs} data-chip-dense="1">
                   <span className={cx('min-h-0 shrink overflow-hidden whitespace-normal break-all font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
                   {when && <span className="shrink-0 truncate text-[10.5px] font-normal opacity-85">{when}</span>}
+                </div>
+              );
+              // #757(구글처럼): 30분 이하 블록은 한 줄 '제목, 오후 2:30'(블록 높이가 한 줄뿐)
+              if (timed && mins <= 30) return (
+                <div className="min-w-0 truncate px-[3px] text-[12px] leading-[1.25]" {...attrs} data-chip-dense="1" data-short-block="1">
+                  <span className={cx('font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>{arg.event.start && <span className="font-normal opacity-85">, {koTime(arg.event.start)}</span>}
                 </div>
               );
               // 짧은 블록(45분 미만)도 2줄까지 — 시간은 제목 뒤 작게
@@ -701,11 +716,11 @@ function CalendarPage() {
             eventDrop={moveEvent}
             eventResize={moveEvent}
             // 휴대폰: 빈 칸 한 번 탭 = 그 시각 1시간 임시 블록 + 빠른 등록 (길게 누를 필요 없음). 월 보기 날짜 탭 = 그날 종일
-            // 199차 #690: 끌기 단위가 15분이 된 뒤에도 한 번 누름(PC 클릭 포함)은 예전처럼 그 시각 정시부터 1시간 — 끌어서 그리면 15분 단위(PC 는 4px 넘게 끌어야 선택)
+            // #756(대표 10/28 '캘린더 생성도 15분 단위로 클릭해서 생성'): 한 번 누름도 누른 자리의 끌기 단위(15분, 30분으로 바꿨으면 30분) 칸부터 1시간 — 199차의 '정시부터'를 바꿈
             dateClick={(info) => {
               const api = calRef.current?.getApi(); if (!api) return;
               clickAt.current = { x: info.jsEvent.clientX, y: info.jsEvent.clientY };
-              const h = Math.floor(info.date.getTime() / 3600000) * 3600000; // 서울은 시차가 정시 단위라 그대로 그 시각 정시
+              const h = info.date.getTime(); // FullCalendar 가 누른 자리를 끌기 단위(snapDuration)로 맞춘 시각
               // 손 뗌을 다 처리한 뒤에 고름 — 같은 손 뗌에서 바로 고르면 '빈 곳 누름 = 선택 풀기'에 곧바로 풀림
               setTimeout(() => { if (info.allDay) api.select(info.dateStr.slice(0, 10)); else api.select(new Date(h), new Date(h + 3600000)); }, 0);
             }}

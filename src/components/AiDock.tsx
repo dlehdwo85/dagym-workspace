@@ -9,7 +9,7 @@ import { DocJobCard } from '@/components/DocJobCard';
 import { VoiceButton } from './voice';
 import { dockHideCls, useDockHide } from './useDockHide';
 import { AiBudgetBar, type Budget, type CompanyAi } from './AiBudget';
-import { ChatComposer, DoneSummary, LiveAnswer, MsgTools, ReplyMeta, useAiConversation, type ChatMsg } from './aiChat';
+import { ChatComposer, DoneSummary, FoundFiles, LiveAnswer, MsgTools, ReplyMeta, useAiConversation, type ChatMsg } from './aiChat';
 import { AiText } from './AiText';
 import { AI_ACCEPT } from './libraryUpload';
 import { DropZone } from './upload';
@@ -65,7 +65,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
   const conv = useAiConversation<M>({
     body: (t, fileIds) => { const c = ctxRef.current; return { text: t, ...(threadRef.current ? { threadId: threadRef.current } : {}), ...(fileIds.length ? { fileIds } : {}), ...(c.taskId ? { taskId: c.taskId } : { context: { page: c.page, ...(c.id ? { id: c.id } : {}) } }) }; },
     onReply: (r) => { if (r.threadId) setThreadId(r.threadId); aiStatusRef.current?.(); },
-    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked, docJobs: r.docJobs?.map((j: any) => j.id), costKrw: r.costKrw }),
+    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked, docJobs: r.docJobs?.map((j: any) => j.id), costKrw: r.costKrw, found: r.files }),
   });
   const { msgs, setMsgs, busy } = conv;
   const [text, setText] = useState('');
@@ -155,6 +155,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
                   </div>
                   {m.role === 'assistant' && <DoneSummary proposals={m.proposals as any} />}
                   {m.docJobs?.map((id) => <DocJobCard key={id} id={id} onRefine={(t) => { setText(t); inputRef.current?.focus(); }} />)}
+                  <FoundFiles files={m.found} onAttach={(t) => { setText(t); inputRef.current?.focus(); }} />
                   {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
                   <ReplyMeta m={m} />
                   </>}

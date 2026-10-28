@@ -26,14 +26,14 @@ export async function calSnap199({ owner, ctx, sql, BASE }) {
     await drag(0.25); // 15분만큼 아래로
     for (let i = 0; i < 20 && (await startOf()) === '10:00'; i++) await owner.waitForTimeout(200);
     assert.equal(await startOf(), '10:15', '15분 단위로 옮겨짐(예전 1시간 단위면 제자리 · 잡은 자리 보정이 없으면 45분 튐)');
-    // 한 번 클릭은 예전처럼 그 시각 정시부터 1시간 · 끌어서 그리면 15분 단위
+    // #756(대표 10/28): 한 번 클릭도 누른 자리 15분 칸부터 1시간(199차의 '정시부터'를 바꿈) · 끌어서 그리면 15분 단위
     const lane = owner.locator('td.fc-timegrid-slot-lane[data-time="14:00:00"]').first();
     await lane.evaluate((el) => el.scrollIntoView({ block: 'center' })); await owner.waitForTimeout(200);
     const col = await owner.locator(`td.fc-timegrid-col[data-date="${d}"]`).boundingBox();
     const lb = await lane.boundingBox();
     await owner.mouse.click(col.x + col.width / 2, lb.y + lb.height * 0.7); // 14:40 쯤
     let qc = owner.getByTestId('quick-create'); await qc.waitFor();
-    assert.deepEqual([await qc.getByLabel('시작 시각').inputValue(), await qc.getByLabel('종료 시각').inputValue()], ['14:00', '15:00'], '클릭 = 정시부터 1시간');
+    assert.deepEqual([await qc.getByLabel('시작 시각').inputValue(), await qc.getByLabel('종료 시각').inputValue()], ['14:30', '15:30'], '클릭 = 누른 자리 15분 칸(14:40 → 14:30)부터 1시간');
     await qc.getByLabel('빠른 입력 제목').press('Escape'); await qc.waitFor({ state: 'detached' });
     await owner.mouse.move(col.x + col.width / 2, lb.y + lb.height * 0.34); await owner.mouse.down(); // 14:20 → 14:15 칸
     await owner.mouse.move(col.x + col.width / 2, lb.y + lb.height * 0.6, { steps: 5 });

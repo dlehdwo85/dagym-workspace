@@ -1159,7 +1159,7 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
         <AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBid} subject={`공고 ${String(n.title).slice(0, 40)}`} compact testId="ai-ask-bid" />
         <div className="flex flex-wrap gap-1.5 text-[11px]">{[n.classification ?? n.category, n.businesses?.map((b: any) => b.name).join('·') || null, n.status, n.fit !== null && n.fit !== undefined && `적합 ${n.fit}`, n.sourceLabel && `${n.sourceLabel}${n.noticeNo ? ` ${n.noticeNo}` : ''}`].filter(Boolean).map((b, i) => <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">{String(b)}</span>)}</div>
         <KoDl rows={[['공고명', n.title], ...(n.cancelReason || n.prevCancel ? [['취소', n.cancelReason ? `취소 사유: ${n.cancelReason}${n.renotice ? ` · 재공고 올라옴${n.renotice.close ? `(마감 ${kd(n.renotice.close)})` : ''}` : ''}`
-            : `재공고 — 이전 공고 취소${n.prevCancel.day ? `(${kd(n.prevCancel.day)})` : ''}${n.prevCancel.reason ? ` · 사유: ${n.prevCancel.reason}` : ''}`] as [string, string]] : []), ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.businesses?.length ? n.businesses.map((b: { name: string }) => b.name).join(' · ') : n.fitBusiness],
+            : `재공고 — 이전 공고 취소${n.prevCancel.day ? `(${kd(n.prevCancel.day)})` : ''}${n.prevCancel.reason ? ` · 사유: ${n.prevCancel.reason}` : ''}`] as [string, string]] : []), ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.businesses?.length ? n.businesses.map((b: { name: string }) => b.name).join(' · ') : n.fitBusiness], ['참가 방법', n.partner && `${n.partner} — 공사 공고라 단독 입찰이 어려워 면허를 가진 업체와 함께 참가를 준비합니다`],
           ['마감', n.deadline ? kdt(n.deadline) : unk(null)], ['예산', won(n.amount) || (n.amount ? String(n.amount) : unk(null))], ['낙찰', n.winner ? [n.winner, won(n.awardAmount), n.awardDate && kd(n.awardDate)].filter(Boolean).join(' · ') : unk(null)],
           ['추정가격', won(n.estimated) || unk(n.estimated)], ['계약방식', unk(n.contractMethod)], ['계약기간', unk(n.contractPeriod)], ['공고일', n.noticeDate ? kd(n.noticeDate) : unk(null)], ['DB 등록', n.posted ? kd(n.posted) : unk(null)],
           ['세대수', n.households && `${n.households}세대`], ['업종', n.industry !== n.noticeType && n.industry], ['키워드', n.keywords], ['대표 판단', n.judgment && `${n.judgment}${n.salesPoint ? ` · 영업 포인트: ${n.salesPoint}` : ''}`], ['부족 자격', n.qualificationGap],
@@ -1346,6 +1346,7 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
         <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', st[1])} data-testid="bid-status">{st[0]}</span>
         <BizBadges items={n.businesses} testid="bid-business" />
         {cat && <span className={cx('hidden rounded-full px-2 py-0.5 text-[11px] font-medium md:inline', CAT_CLS[String(cat)] ?? 'bg-slate-100 text-ink-2')}>{String(cat)}</span>}
+        {n.partner && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-800" title="공사 공고 — 면허를 가진 업체와 함께 참가를 준비합니다" data-testid="bid-partner">{n.partner}</span>}
         {n.vendorRecruit && <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] text-teal-800 md:hidden" data-testid="bid-recruit">협력사 모집</span>}
         {n.sourceLabel && <span className="hidden rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-2 md:inline">{String(n.sourceLabel)}</span>}
         {n.work && chip(n.work)}
@@ -1420,7 +1421,10 @@ const mdd = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
 /** 212차 #612 ③(대표 결정 10/25): 빈 값(현 위탁사·계약만료일·관리사무소 번호)이 남은 시설 — '미확인 · 조사 예정 10/30(담당 ○○)'(업무로), 조사한 뒤 '확인 못함' */
 function ResearchChip({ r }: { r: any }) {
   const T = useSalesTerms(); const x = r.research;
-  const miss = [!r.operator && T.operator, !r.contractEnd && '계약만료일', !r.phone && `${T.office} 번호`].filter(Boolean) as string[];
+  const na = x?.mode === '직영' || x?.mode === '미개관'; // #758 직영·미개관이면 위탁사·계약 만료일은 묻지 않음
+  const miss = [!na && !r.operator && T.operator, !na && !r.contractEnd && '계약만료일', !r.phone && `${T.office} 번호`].filter(Boolean) as string[];
+  const mode = x?.mode ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800" data-testid="hub-research-mode">{x.mode}{x.mode === '미개관' && x.firstPick ? ` · 첫 운영사 선정 ${x.firstPick}` : ''}</span> : null;
+  if (mode && !miss.length && x.status !== 'open') return mode;
   if (!x || (!miss.length && x.status !== 'open')) return null;
   const tip = miss.length ? `미확인: ${miss.join('·')}` : undefined;
   if (x.status === 'open') {
@@ -1429,6 +1433,7 @@ function ResearchChip({ r }: { r: any }) {
       : <span title={tip} className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900" data-testid="hub-research-chip">{body}</span>;
   }
   const at = x.doneAt ? `${mdd(seoulYmd(x.doneAt))} ` : '';
+  if (mode) return <>{mode}<span title={tip} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2" data-testid="hub-research-chip">{`일부 미확인 · ${at}조사함`}</span></>;
   return <span title={[tip, x.note && `메모: ${x.note}`].filter(Boolean).join(' · ') || undefined} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2" data-testid="hub-research-chip">{x.status === 'none' ? `미확인 · ${at}조사함(확인 못함)` : `일부 미확인 · ${at}조사함`}</span>;
 }
 /** 212차 #612: 허브 '준공·입주 시설' 머리 줄 — 이번 주 후속조사 묶음(담당·마감·조사한 수·업무), 관리자는 이번 주 묶음이 없을 때 [지금 만들기] */
@@ -1480,7 +1485,7 @@ function HubCard({ tab, r, onRaw, onChange, canWrite }: { tab: string; r: any; o
         <p className="text-xs text-ink-2">{[r.lane, r.region, r.households && `${r.households}세대`, r.scale, r.operator && `${T.operator} ${r.operator}`, r.contractEnd && `계약만료 ${kd(r.contractEnd)}`].filter(Boolean).join(' · ')}</p>
         {r.address && <p className="hidden text-xs text-ink-3 md:block">{r.address}</p>}
         {/* 대표 검수 10/20 ②: 관리사무소 전화 → 전화·문자 줄, 앞에 '·' 가 붙던 준공·입주 줄 정리, 날짜 한국어 */}
-        <div className="mt-1.5 flex flex-wrap items-end gap-1.5">{r.phone ? <ContactRow phone={r.phone} /> : <p className="hidden text-xs text-ink-3 md:block">대표 번호 미확인</p>}<ResearchChip r={r} />{handoff}</div>
+        <div className="mt-1.5 flex flex-wrap items-end gap-1.5">{r.phone ? <ContactRow phone={r.phone} /> : <p className="hidden text-xs text-ink-3 md:block">대표 번호 미확인</p>}<ResearchChip r={r} />{r.notices > 0 && <Link href={`/s/sales/hub?tab=bids&q=${encodeURIComponent(String(r.name))}`} className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-800 hover:underline" data-testid="hub-facility-notices">관련 공고 {r.notices}건</Link>}{handoff}</div>
         {r.amenities && <p className="hidden text-xs text-ink-3 md:block">부대시설: {String(r.amenities)}</p>}
         <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-3"><span>{[r.firstSeen && `DB 등록 ${kd(r.firstSeen)}`, r.date && `준공(사용승인) ${kd(r.date)}`, r.moveIn && `입주 ${kd(r.moveIn)}`, r.elapsedDays !== null && r.elapsedDays !== undefined && `${r.elapsedDays}일 경과`].filter(Boolean).join(' · ')}</span>{r.firstSeen === today0 && <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-semibold text-white">오늘 등록</span>}</p>
         {r.next && <p className="text-xs">다음 연락 {kd(r.next)}</p>}{r.lastNote && <p className="hidden text-xs text-ink-2 md:block">최근 기록: {r.lastNote}</p>}{r.nextAction && <p className="hidden text-xs text-ink-2 md:block">다음 조치: {r.nextAction}{r.nextActionFrom && ` (${r.nextActionFrom})`}</p>}

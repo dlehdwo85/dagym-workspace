@@ -11,10 +11,20 @@ const SCOPE = 'global';
 const nowIso = () => new Date().toISOString();
 const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
+/** 같은 원천·번호의 기존 줄. #751 후속(로컬 10/28 18:22 광명자이더샵포레나 kg2b_142624): 같은 공고가 두 줄(원본 영업관리 복사 + 워크인 수집)이면
+ *  예전엔 아무 한 줄만 고쳐서 다른 줄이 '진행중'으로 남고 목록 카드가 그 줄 상태를 보였다 — 첫 줄(워크인 수집 우선)은 prev, 나머지 줄은 more[0..] 에 담아 같은 계산으로 함께 고침.
+ *  id 는 실제 줄 번호(src_id) — 고치기·만지기가 이 번호로 찾음 */
 async function prevNotices(sourceType: string, extIds: string[]) {
-  if (!extIds.length) return new Map<string, Record<string, unknown>>();
-  const rows = await db()<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = ${SCOPE} and row->>'source_type' = ${sourceType} and row->>'source_external_id' = any(${extIds}) and not gone`;
-  return new Map(rows.map((r) => [String(r.row.source_external_id), { ...r.row, id: r.row.id ?? r.src_id }]));
+  const prev = new Map<string, Record<string, unknown>>(); const more: Map<string, Record<string, unknown>>[] = [];
+  if (!extIds.length) return { prev, more };
+  const rows = await db()<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = ${SCOPE} and row->>'source_type' = ${sourceType} and row->>'source_external_id' = any(${extIds}) and not gone
+    order by (origin = 'workin') desc nulls last, synced_at desc nulls last`;
+  for (const r of rows) {
+    const ext = String(r.row.source_external_id); const v = { ...r.row, id: r.src_id };
+    if (!prev.has(ext)) { prev.set(ext, v); continue; }
+    let k = 0; while (more[k]?.has(ext)) k++; (more[k] ??= new Map()).set(ext, v);
+  }
+  return { prev, more };
 }
 async function writeRows(tbl: string, rows: { id: string; row: Record<string, unknown> }[]) {
   const sql = db(); const now = new Date();
@@ -39,14 +49,17 @@ export async function upsertNotices(items: Record<string, unknown>[], opt: { mer
   const byType = new Map<string, Record<string, unknown>[]>();
   for (const it of items) { const st = String(it.source_type ?? ''); if (!byType.has(st)) byType.set(st, []); byType.get(st)!.push(it); }
   for (const [st, list] of byType) {
-    const prev = await prevNotices(st, [...new Set(list.map((x) => String(x.source_external_id ?? '')).filter(Boolean))]);
+    const { prev, more } = await prevNotices(st, [...new Set(list.map((x) => String(x.source_external_id ?? '').trim()).filter(Boolean))]);
     const plan = planNoticeBatch(list, prev, now, opt.mergeScope ?? 'all');
+    // #751 후속: 같은 공고의 다른 줄도 같은 계산으로 고침(이미 있는 줄이라 새 줄은 생기지 않음) — 건수는 첫 줄 기준
+    const extra = more.map((m) => planNoticeBatch(list.filter((x) => m.has(String(x.source_external_id ?? '').trim())), m, now, opt.mergeScope ?? 'all'));
+    const updates = [...plan.updates, ...extra.flatMap((e) => e.updates)], unchangedIds = [...plan.unchangedIds, ...extra.flatMap((e) => e.unchangedIds)];
     out.invalid += plan.invalid; logs.push(...plan.errLog);
     const t = nowIso(), d = todayKst();
     try {
       await writeRows('procurement_notices', plan.inserts.map((i) => { const id = randomUUID(); return { id, row: { id, lead_id: null, ...i.row, first_seen_at: t, last_seen_at: t, last_seen_date: d, created_at: t, updated_at: t } }; }));
-      await patchRows('procurement_notices', plan.updates.map((u) => ({ id: u.id, patch: { ...u.patch, last_seen_at: t, last_seen_date: d, ...(u.quiet ? {} : { updated_at: t }) } })));
-      await touchRows('procurement_notices', plan.unchangedIds);
+      await patchRows('procurement_notices', updates.map((u) => ({ id: u.id, patch: { ...u.patch, last_seen_at: t, last_seen_date: d, ...(u.quiet ? {} : { updated_at: t }) } })));
+      await touchRows('procurement_notices', unchangedIds);
       out.inserted += plan.inserts.length; out.updated += plan.updates.length; out.unchanged += plan.unchangedIds.length;
     } catch (e) { out.errors += list.length; logs.push(`쓰기 실패(${st}): ${e instanceof Error ? e.message : String(e)}`); }
   }

@@ -3,7 +3,7 @@
 import { tenantOf, type SessionUser } from '../types';
 import { db } from '../db';
 import { badRequest } from '../errors';
-import { matchFit, onbidSale } from './collectors/procurement';
+import { matchFit, onbidSale, partnerNeed } from './collectors/procurement';
 import { vendorDateOk } from './collectors/vendorRules';
 import { briefingOf, termsLine } from './bidTerms';
 
@@ -62,7 +62,7 @@ export async function lookupNotices(q: { no?: string | null; q?: string | null }
           docs: typeof b?.docs === 'boolean' ? b.docs : null, site: typeof b?.site === 'boolean' ? b.site : null, hidden: b?.hidden === true, amount: b?.amount ?? null, score: b?.score ?? null })) : null } : null,
       updatedAt: r.updated_at ?? null, mailed: mailedOf(src_id, r),
       // 239차(#743·#744): 현장설명(종류·일시·장소)·참가 조건 한 줄·조건 칸을 읽은 때 — K-apt 상세 화면과 대조용
-      briefing: briefingOf(r), terms: termsLine(r), termsReadAt: r.terms_read_at ?? null,
+      briefing: briefingOf(r), terms: termsLine(r), termsReadAt: r.terms_read_at ?? null, partner: partnerNeed(r), // #752
       firstSeenAt: r.first_seen_at ?? r.created_at ?? null, lastSeenAt: r.last_seen_at ?? null, refitAt: r.refit_at ?? null, refoundAt: r.refound_at ?? null, syncedAt: synced_at,
       nowRule: (() => { const f = matchFit(String(r.title ?? ''), r.bid_category ?? null, r.task_scope ?? null, r.source_type === 'kapt_bid' ? '공동주택' : null); return { fit: f.fit, matched: f.matched, dropped: f.dropped ?? [] }; })(),
       refitLoweredAt: r.refit_lowered_at ?? null, refitLoweredWhy: r.refit_lowered_why ?? null, judgedAt: r.judged_at ?? null,

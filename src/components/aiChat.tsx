@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Copy, Loader2, Pencil, RotateCw, Send, Square } from 'lucide-react';
+import { Copy, FileText, Loader2, Pencil, RotateCw, Send, Square } from 'lucide-react';
 import Link from 'next/link';
 import { apiStream } from './client';
 import { AiText } from './AiText';
@@ -14,7 +14,25 @@ import { Button, cx, inputCls, toast } from './ui';
  * A3 마지막 내 말 [수정]·AI 답 [다시 답하기]·모든 말 [복사]
  * #497 R44 답을 글자 단위로 이어서 보여 준다(서버 SSE) — 도구를 쓰는 동안은 무엇을 하는지 한 줄, 끝나면 정식 답으로 바꾼다
  */
-export type ChatMsg = { role: 'user' | 'assistant'; text: string; files?: string[]; proposals?: any[]; error?: boolean; blocked?: boolean; stopped?: boolean; note?: boolean; docJobs?: string[]; costKrw?: number; timing?: ReplyTiming };
+export type ChatMsg = { role: 'user' | 'assistant'; text: string; files?: string[]; proposals?: any[]; error?: boolean; blocked?: boolean; stopped?: boolean; note?: boolean; docJobs?: string[]; costKrw?: number; timing?: ReplyTiming;
+  /** #753 AI 가 자료실에서 찾은 자료(답에 이름이 나온 것) */ found?: FoundFile[] };
+export type FoundFile = { id: string; title: string; folder: string | null; fileName: string | null; mime: string | null };
+/** #753(대표 10/28 '자료실에서 필요한 자료를 찾아 달라고 하면 찾아 주는 기능'): 답 아래 자료 카드 — [열기](자료실 그 파일)·[내려받기]·[업무에 붙이기](AI 에게 첨부 제안을 부탁하는 글을 입력칸에). 권한 밖 자료는 서버가 이미 뺌 */
+export function FoundFiles({ files, onAttach }: { files?: FoundFile[]; onAttach: (text: string) => void }) {
+  if (!files?.length) return null;
+  return (
+    <ul className="mt-1.5 space-y-1" data-testid="ai-found-files">{files.map((f) => (
+      <li key={f.id} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-input border border-line bg-white px-2 py-1.5 text-xs" data-testid="ai-found-file">
+        <FileText className="size-4 shrink-0 text-ink-3" aria-hidden />
+        <span className="min-w-0 flex-1"><b className="block truncate text-ink">{f.title}</b>{f.folder && <span className="block truncate text-[11px] text-ink-3">{f.folder}</span>}</span>
+        <span className="flex shrink-0 items-center gap-0.5">
+          <Link href={`/library?${new URLSearchParams({ ...(f.folder ? { folder: f.folder } : {}), file: f.id })}`} className="rounded px-1.5 py-1 font-medium text-brand-700 hover:bg-slate-100">열기</Link>
+          <a href={`/api/library/${f.id}/download`} className="rounded px-1.5 py-1 font-medium text-brand-700 hover:bg-slate-100">내려받기</a>
+          <button type="button" onClick={() => onAttach(`'${f.title}' 자료를 업무에 첨부해 줘 — 업무: `)} className="rounded px-1.5 py-1 font-medium text-brand-700 hover:bg-slate-100" data-testid="ai-found-attach">업무에 붙이기</button>
+        </span>
+      </li>))}</ul>
+  );
+}
 /**
  * #497 R44 로컬 10/24: 답이 언제 보이기 시작했는지(화면 기준, [보내기] 누른 때부터) — firstMs = 마지막 도구 단계 뒤 답 첫 글자, chunks = 그 답이 몇 조각으로 왔는지
  * (1조각이면 한꺼번에 온 것). server = 서버가 잰 같은 값(요청 받은 때부터)

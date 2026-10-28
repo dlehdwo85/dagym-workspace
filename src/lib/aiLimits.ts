@@ -104,6 +104,14 @@ export function customerAiLimits<T extends { usdKrw: number; rows: AiLimitRow[];
       marketing: p.marketing ? { ...p.marketing, aiMonthlyUsd: null, aiMonthlyKrw: p.marketing.aiMonthlyUsd === null ? null : Math.round(p.marketing.aiMonthlyUsd * v.usdKrw) } : null })) } };
 }
 
+/** #602(대표 10/25 '고객에게 원가·단가를 보이지 않기'): 로그인 없는 소개 사이트용 기준표 — 요금제·한도·크레딧만. 요청당 평균 원가(rates)·크레딧 원가(cost)·환율·'1회 약 n원'·마케팅 AI 달러는 뺌 */
+export function publicAiPlans(m: Awaited<ReturnType<typeof aiPlanMatrix>>) {
+  return {
+    plans: m.plans.map((p) => ({ ...p, work: { ...p.work, feelPerUser: p.work.feelPerUser.map((f) => ({ ...f, per: '' })) },
+      marketing: p.marketing ? { ...p.marketing, aiMonthlyUsd: null } : null })),
+    packs: m.packs, note: m.note,
+  };
+}
 export type AiPlanRow = {
   code: string; name: string; perUserKrw: number | null; monthlyKrw: number | null; minUsers: number | null; description: string | null;
   work: { perUserAi: number | null; aiRequests: number | null; feelPerUser: Feel[]; budgetKrw: number | null; perUserBudgetKrw: number | null };

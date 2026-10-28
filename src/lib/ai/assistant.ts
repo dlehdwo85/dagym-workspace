@@ -255,7 +255,8 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 답은 한국어로 짧고 분명하게. 2~3문장마다 빈 줄로 단락을 나누고, 여러 항목은 줄머리표(-)로 한 줄씩.`;
 
 /** confidential: 이번 차례에 기밀 자료(기밀 파일·매출)를 읽었는지 — 결과물·제안이 같은 등급을 따른다(V14 15번) */
-type Ctx = { allTools?: boolean; u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean; threadId?: string; docJobs?: { id: string; title: string; kind: string; version: number; status: string }[] };
+type Ctx = { allTools?: boolean; u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean;
+  /** #753 이번 대화에서 search_library 로 찾은 자료(답에 이름이 나온 것만 카드로) */ found?: { id: string; title: string; folder: string | null; fileName: string | null; mime: string | null }[]; threadId?: string; docJobs?: { id: string; title: string; kind: string; version: number; status: string }[] };
 const clip = (s: unknown, n = 400) => (typeof s === 'string' ? (s.length > n ? s.slice(0, n) + '…' : s) : s);
 const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 /** #650(대표 10/25 23:20 캡처 첫 줄 "Results are JSON strings; parse."): 모델이 도구 결과의 안내·형식 문장을 답에 옮겨 적은 줄만 지운다 — 우리 소스·SDK 에 없는 문장이라 모델이 도구 결과 설명을 그대로 쓴 것 */
@@ -399,8 +400,17 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
     case 'search_sales_notices': return searchNotices(u, String(input.query ?? ''), Number(input.limit) || 8); // #650
     case 'read_sales_notice': return readNotice(u, String(input.id ?? ''));
     case 'search_library': {
-      const r = await listLibrary(u, { q: String(input.query ?? ''), folder: input.folder, limit: 10 }); // 등급·폴더 권한 밖 파일은 여기서 이미 빠짐
+      const q = String(input.query ?? '');
+      let r = await listLibrary(u, { q, folder: input.folder, limit: 10 }); // 등급·폴더 권한 밖 파일은 여기서 이미 빠짐
+      // #753(대표 10/28): 낱말이 여럿인데 모두 맞는 자료가 없으면 낱말마다 찾아 많이 맞은 순('다짐 로고 원본 파일'처럼 말해도 찾게)
+      const terms = q.trim().split(/\s+/).filter((x) => x.length >= 2).slice(0, 4);
+      if (!r.files.length && terms.length > 1) {
+        const hit = new Map<string, { f: any; n: number }>();
+        for (const t of terms) for (const f of (await listLibrary(u, { q: t, folder: input.folder, limit: 10 })).files) { const h = hit.get(f.id); if (h) h.n++; else hit.set(f.id, { f, n: 1 }); }
+        r = { ...r, files: [...hit.values()].sort((a, b) => b.n - a.n).slice(0, 10).map((x) => x.f) };
+      }
       if (r.files.some((f: any) => f.effective_security === 'confidential')) c.confidential = true;
+      for (const f of r.files) if (!(c.found ??= []).some((x) => x.id === f.id)) c.found.push({ id: f.id, title: f.title, folder: f.folder ?? null, fileName: f.file_name ?? null, mime: f.mime_type ?? null });
       return r.files.map((f: any) => ({ id: f.id, title: f.title, folder: f.folder, tags: f.tags, fileName: f.file_name, type: f.mime_type, snippet: clip(f.snippet, 200) }));
     }
     case 'read_library_file': {
@@ -1025,7 +1035,10 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   if (c.confidential) await sql`update ai_threads set confidential = true where id = ${threadId}`; // 사용 내역에서 기밀 권한 없는 사람에게 내용 가림
   await T.maybeSummarize(u, threadId);
   const budget = await G.userBudgetAlerts(u).catch(() => null); // 80%·100% 알림
-  return { reply, proposals: c.proposals, tools: steps, threadId, costKrw: Math.round(turnCost * usdKrw()), budget, timing, ...(kept.length ? { kept } : {}), ...(c.docJobs?.length ? { docJobs: c.docJobs } : {}) };
+  // #753 자료 카드: 찾은 자료 중 답에 이름이 나온 것(최대 8) — 답이 '자료실에서 찾았다'고만 하면 찾은 순서대로
+  const named = (c.found ?? []).filter((f) => (f.title && reply.includes(f.title)) || (f.fileName && reply.includes(f.fileName)));
+  const files = (named.length ? named : /자료실/.test(reply) ? c.found ?? [] : []).slice(0, 8);
+  return { reply, proposals: c.proposals, tools: steps, threadId, costKrw: Math.round(turnCost * usdKrw()), budget, timing, ...(kept.length ? { kept } : {}), ...(c.docJobs?.length ? { docJobs: c.docJobs } : {}), ...(files.length ? { files } : {}) };
 }
 
 // ---------------- 제안 실행 (사람이 [확인]) ----------------

@@ -53,10 +53,14 @@ export const isCancel = (r: any) => s(r?.notice_kind) === 'cancel' || /취소/.t
 const postDay = (r: any) => kday(pick(r, 'posted_date', 'notice_date', 'posted_at', 'published_at', 'bid_notice_date')) ?? kday(r?.first_seen_at);
 const order = (a: any, b: any) => s(postDay(a)).localeCompare(s(postDay(b))) || noKey(a).ord - noKey(b).ord || (Date.parse(s(a?.first_seen_at)) || 0) - (Date.parse(s(b?.first_seen_at)) || 0);
 
+/** #751 후속(로컬 10/28 18:22 광명자이더샵포레나): 같은 원천·번호의 줄이 둘(원본 영업관리 복사 + 워크인 수집)인데 한 줄만 취소면 둘 다 취소 —
+ *  예전엔 취소가 아닌 다른 줄이 '가장 나중 게시'로 잡혀 카드가 '진행중'으로 남았다 */
+const rowKey = (r: any) => { const st = s(r?.source_type), ext = s(r?.source_external_id); return st && ext ? `${st}|${ext}` : null; };
+const cancelOf = (rows: any[]) => { const c = new Set(rows.filter(isCancel).map(rowKey).filter(Boolean)); return (r: any) => isCancel(r) || (!!rowKey(r) && c.has(rowKey(r))); };
 /** 196차(결정 15-35): 같은 공고 묶음(같은 번호·차수만 다름)에서 가장 나중 게시가 취소인가 — 입찰 업무 정기 점검(취소 연동) */
-export const latestCancelled = (rows: any[]) => { const all = [...rows].sort(order); return all.length > 0 && isCancel(all[all.length - 1]); };
+export const latestCancelled = (rows: any[]) => { const all = [...rows].sort(order); const c = cancelOf(all); return all.length > 0 && c(all[all.length - 1]); };
 /** 같은 묶음에서 취소가 아닌 가장 나중 게시(정정 공고의 바뀐 날짜를 따라감) — 없으면 null */
-export const latestLive = (rows: any[]) => { const live = [...rows].sort(order).filter((r) => !isCancel(r)); return live[live.length - 1] ?? null; };
+export const latestLive = (rows: any[]) => { const all = [...rows].sort(order); const c = cancelOf(all); const live = all.filter((r) => !c(r)); return live[live.length - 1] ?? null; };
 
 /** 카드에 붙는 묶음 정보 — 화면: '10/23 취소 공고' · '2회 게시(10/20 취소·10/22)' · '정정 10/22' */
 export type NoticeHistory = { merged: number; cancelDay: string | null; cancelNotice: boolean; posts: { day: string | null; cancelled: boolean }[]; amendDay: string | null };
@@ -70,14 +74,14 @@ export function oneCardPerNotice(list: any[], workAt: (id: string) => number | n
   const out: any[] = [];
   for (const g of groupNotices(list)) {
     if (g.length === 1) { out.push(g[0]); continue; }
-    const all = [...g].sort(order); const latest = all[all.length - 1];
-    const live = all.filter((r) => !isCancel(r)); const lastLive = live[live.length - 1] ?? null;
+    const all = [...g].sort(order); const latest = all[all.length - 1]; const cancelRow = cancelOf(all);
+    const live = all.filter((r) => !cancelRow(r)); const lastLive = live[live.length - 1] ?? null;
     const linked = all.map((r, i) => ({ r, i, at: workAt(idOf(r)) })).filter((x) => x.at !== null).sort((a, b) => b.at! - a.at! || b.i - a.i);
     const rep = linked[0]?.r ?? lastLive ?? latest;
-    const cancelled = isCancel(latest);
+    const cancelled = cancelRow(latest);
     // 취소·정정 공고가 아닌 게시(재게시 포함)를 게시일마다 하나로 — 같은 게시가 두 줄(원본 복사 + 워크인 수집)이어도 1회, 그날 마지막 줄의 취소 여부
     const byDay = new Map<string | null, boolean>();
-    for (const r of all) if (!['cancel', 'amend'].includes(s(r.notice_kind))) byDay.set(postDay(r), isCancel(r));
+    for (const r of all) if (!['cancel', 'amend'].includes(s(r.notice_kind))) byDay.set(postDay(r), cancelRow(r));
     const posts = [...byDay].map(([day, cancelled]) => ({ day, cancelled }));
     const amend = [...all].reverse().find((r) => s(r.notice_kind) === 'amend');
     const history: NoticeHistory = { merged: g.length, cancelDay: cancelled ? postDay(latest) : null, cancelNotice: cancelled && s(latest.notice_kind) === 'cancel',

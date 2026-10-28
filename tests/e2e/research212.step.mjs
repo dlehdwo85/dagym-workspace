@@ -37,6 +37,15 @@ export async function research212({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.getByTestId('next-action').click();
   const dlg = owner.getByTestId('research-ask'); await dlg.waitFor();
   const rowA = dlg.getByTestId('research-ask-row').filter({ hasText: 'E2E212 광교 단지' });
+  // #758(대표 10/28): 먼저 운영 방식 — 위탁이면 현 위탁사·계약 만료일, 미개관이면 첫 운영사 선정 예정 시기(현 위탁사 칸 대신)
+  const rowB = dlg.getByTestId('research-ask-row').filter({ hasText: 'E2E212 동탄 단지' });
+  await rowB.getByTestId('research-ask-mode-미개관').click();
+  await rowB.getByTestId('research-ask-first').waitFor();
+  assert.equal(await rowB.getByTestId('research-ask-operator').count(), 0, '미개관이면 현 위탁사 칸 없음');
+  await rowB.getByTestId('research-ask-mode-미개관').click(); // 다시 누르면 고르기 취소(이 곳은 확인 못함으로 남김)
+  await rowB.getByTestId('research-ask-operator').waitFor();
+  await rowA.getByTestId('research-ask-mode-위탁').click();
+  assert.equal(await rowA.getByTestId('research-ask-mode-위탁').getAttribute('aria-checked'), 'true');
   await rowA.getByTestId('research-ask-operator').fill('E2E바른운영');
   await rowA.getByTestId('research-ask-end').fill('2027-06-30');
   await rowA.getByTestId('research-ask-phone').fill('031-212-9999');
@@ -47,7 +56,7 @@ export async function research212({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.getByText(/후속조사 \d+곳을 적었습니다 — 확인 1곳/).first().waitFor();
   await owner.waitForFunction(async (id) => (await (await fetch(`/api/tasks/${id}`)).json()).task?.status === 'done', taskId, { timeout: 15_000 });
   const [ra] = await sql`select status, result from sales_research where src_id = 'E2E212-A' order by id desc limit 1`;
-  assert.deepEqual([ra.status, ra.result.operator, ra.result.contractEnd, ra.result.phone], ['done', 'E2E바른운영', '2027-06-30', '031-212-9999']);
+  assert.deepEqual([ra.status, ra.result.mode, ra.result.operator, ra.result.contractEnd, ra.result.phone], ['done', '위탁', 'E2E바른운영', '2027-06-30', '031-212-9999']);
   const [rb] = await sql`select status from sales_research where src_id = 'E2E212-B' order by id desc limit 1`;
   assert.equal(rb.status, 'none', '비운 곳은 확인 못함');
   // 카드: 현 위탁사·계약만료 · 칩 없음(다 채움) / 비운 곳은 '조사함(확인 못함)'
@@ -55,6 +64,7 @@ export async function research212({ owner, ctx, sql, BASE, SHOTS }) {
   await card.waitFor();
   assert.match(await card.innerText(), /현 위탁사 E2E바른운영 · 계약만료 2027\. 6\. 30\./);
   assert.equal(await card.getByTestId('hub-research-chip').count(), 0);
+  assert.equal(await card.getByTestId('hub-research-mode').innerText(), '위탁', '#758 운영 방식 표시');
   const cardB = owner.getByTestId('sales-hub-item').filter({ hasText: 'E2E212 동탄 단지' });
   assert.match(await cardB.getByTestId('hub-research-chip').innerText(), /^미확인 · \d+\/\d+ 조사함\(확인 못함\)$/);
 }

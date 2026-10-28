@@ -21,7 +21,8 @@ const http = (u: string) => (/^https?:\/\//i.test(u) ? u : null);
 const tint = (hex: string) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex); if (!m) return '#EFF6FF'; const n = parseInt(m[1], 16); const mix = (c: number) => Math.round(c + (255 - c) * 0.88); return `#${[(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => mix(c).toString(16).padStart(2, '0')).join('')}`; };
 const C = { ink: '#111827', ink2: '#374151', ink3: '#6B7280', line: '#E5E7EB', bg: '#F3F4F6', brand: '#2563EB', brandInk: '#1D4ED8', soft: '#EFF6FF' };
 const BADGE: Record<string, [string, string]> = { 취소: ['#374151', '#E5E7EB'], 정정: ['#B45309', '#FEF3C7'], 긴급: ['#B91C1C', '#FEE2E2'], 재공고: ['#6D28D9', '#EDE9FE'], 재게시: ['#6D28D9', '#EDE9FE'],
-  수의계약: ['#1D4ED8', '#DBEAFE'], 견적: ['#3730A3', '#E0E7FF'], 현장설명: ['#0E7490', '#CFFAFE'], '현장설명 필수': ['#B45309', '#FEF3C7'], 낙찰: ['#047857', '#D1FAE5'], 유찰: ['#4B5563', '#F3F4F6'] };
+  수의계약: ['#1D4ED8', '#DBEAFE'], 견적: ['#3730A3', '#E0E7FF'], 현장설명: ['#0E7490', '#CFFAFE'], '현장설명 필수': ['#B45309', '#FEF3C7'], 낙찰: ['#047857', '#D1FAE5'], 유찰: ['#4B5563', '#F3F4F6'],
+  '면허 업체 협력 필요': ['#92400E', '#FFEDD5'] }; // #752
 const kstDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 /** ISO → '10/26(월) 08:00'(서울) */
 const stamp = (iso: string | undefined) => { if (!iso) return null; const d = new Date(iso); return Number.isNaN(d.getTime()) ? null : `${mdw(kstDay(d))} ${seenLabel(iso)}`; };

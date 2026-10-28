@@ -59,6 +59,10 @@ test('사용량·요금제: 세 AI 줄 — 공간별 쓴 양(purpose 로 구분)
 test('소개 사이트·요금 안내 같은 데이터: /api/public/ai-plans 로그인 없이, 고객 화면 기준표와 같은 값', async () => {
   const r = await fetch(`${BASE}/api/public/ai-plans`); assert.equal(r.status, 200);
   const m = await r.json();
+  // #602: 로그인 없는 기준표에는 원가·단가·환율이 없음(요청당 평균 원가·크레딧 원가·'1회 약 n원'·마케팅 AI 달러)
+  assert.deepEqual(Object.keys(m).sort(), ['note', 'packs', 'plans']);
+  assert.ok(!/usd|krwPerCredit|"per":"1/i.test(JSON.stringify(m.plans.map((p) => ({ ...p, marketing: p.marketing && { ...p.marketing, aiMonthlyUsd: undefined } })))), JSON.stringify(m.plans[0]));
+  assert.ok(m.plans.every((p) => !p.marketing || p.marketing.aiMonthlyUsd === null));
   const u = await ctx.owner.ok('GET', '/api/usage');
   assert.deepEqual(m.plans.map((p) => [p.code, p.work.perUserAi, p.work.aiRequests, p.marketing?.monthlyCredits ?? null]), u.aiLimits.plans.plans.map((p) => [p.code, p.work.perUserAi, p.work.aiRequests, p.marketing?.monthlyCredits ?? null]));
   // 플랫폼 운영에서 마케팅 표 숫자를 바꾸면 두 곳 다 바뀐다(배포 없음)

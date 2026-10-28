@@ -15,7 +15,7 @@ import { VoiceButton } from '@/components/voice';
 import { hearOnce, keepScreenOn, speak, stopSpeaking, yesNo } from '@/components/speak';
 import { AiBudgetBar, type Budget, type CompanyAi } from '@/components/AiBudget';
 import { DocJobCard } from '@/components/DocJobCard';
-import { ChatComposer, DoneSummary, LiveAnswer, MsgTools, ReplyMeta, useAiConversation, type ChatMsg } from '@/components/aiChat';
+import { ChatComposer, DoneSummary, FoundFiles, LiveAnswer, MsgTools, ReplyMeta, useAiConversation, type ChatMsg } from '@/components/aiChat';
 import { AiText } from '@/components/AiText';
 import { SpecialProposal } from '@/components/ProposalCard';
 
@@ -68,7 +68,7 @@ export default function AssistantPage() {
       if (r.threadId && r.threadId !== threadRef.current) { setThreadId(r.threadId); router.replace(`/assistant?${new URLSearchParams({ ...(taskId ? { task: taskId } : {}), thread: r.threadId })}`); }
       status.reload(); threads.reload();
     },
-    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked, docJobs: r.docJobs?.map((j: any) => j.id), costKrw: r.costKrw }),
+    toAssistant: (r) => ({ role: 'assistant', text: r.reply || '(답 없음)', proposals: r.proposals, blocked: r.blocked, docJobs: r.docJobs?.map((j: any) => j.id), costKrw: r.costKrw, found: r.files }),
   });
   const { msgs, setMsgs, busy } = conv;
   const [text, setText] = useState('');
@@ -238,6 +238,7 @@ export default function AssistantPage() {
             </div>
             {m.role === 'assistant' && <DoneSummary proposals={m.proposals as any} />}
             {m.docJobs?.map((id) => <DocJobCard key={id} id={id} onRefine={(t) => { setText(t); inputRef.current?.focus(); }} />)}
+            <FoundFiles files={m.found} onAttach={(t) => { setText(t); inputRef.current?.focus(); }} />
             {!m.error && <MsgTools text={m.text} right={m.role === 'user'} onEdit={i === lastUserIdx ? editLast : undefined} onRegenerate={i === lastAiIdx && i > lastUserIdx && !m.blocked ? conv.regenerate : undefined} />}
             <ReplyMeta m={m} />
             </>}

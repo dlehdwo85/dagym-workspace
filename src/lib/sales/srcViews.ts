@@ -5,7 +5,7 @@ import { badRequest, notFound } from '../errors';
 import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
-import { isAwardResult, onbidSale } from './collectors/procurement';
+import { isAwardResult, onbidSale, partnerNeed } from './collectors/procurement';
 import { groupNotices, isCancel, oneCardPerNotice, plainTitle, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { hubTabsOn } from './hubTabs';
@@ -138,6 +138,7 @@ const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); r
   // S1-3(로컬 10/20): 감사(AUDIT_SALES_MIGRATION)에 적힌 원본 실제 칸을 후보 맨 앞에 — source_type(9값)·household_count·winner_amount·notice_type·fit_business. 나머지 추측 칸은 원본 스키마 복사(docs/sales-src)가 오면 다시 맞춤
   vendorRecruit: /vendor_recruit|협력사/.test(String(pick(r, 'source_type', 'notice_type', 'bid_category', 'source') ?? '')),
   noticeNo: pick(r, 'source_external_id', 'notice_no', 'bid_no', 'external_id'), noticeType: pick(r, 'notice_type', 'bid_category'), fitBusiness: pick(r, 'fit_business'),
+  partner: partnerNeed(r), // #752 하이링크 공사 공고 — '면허 업체 협력 필요'
   estimated: pick(r, 'estimated_amount', 'estimated_price', 'presumed_price', 'base_amount'), contractMethod: pick(r, 'contract_method', 'award_method', 'bid_system', 'contract_type'), contractPeriod: pick(r, 'contract_period', 'contract_term', 'service_period'),
   address: pick(r, 'office_address', 'address'), fax: pick(r, 'office_fax', 'fax'), salesPoint: pick(r, 'sales_point'), qualificationGap: pick(r, 'qualification_gap'),
   // 239차(#743·#744): 참가 조건 한 줄·펼치기 표·현장설명(종류·일시·장소) — K-apt 상세 칸·나라장터 API 칸에서(파일 안 열고)
@@ -478,7 +479,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const all = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since, r.refound_at); const skipped = skips.hidden(r);
       // 234차: 처음 본 날이 오늘이어도 결과를 안 때(result_at)가 지난 메일 전이면(오래된 결과를 이제야 모은 것) 오늘 결과 묶음에 넣지 않음 — 당일 메일과 같은 기준
       const oldResult = isAwardResult(r) && since != null && Date.parse(String(r.result_at ?? '')) < since;
-      return { ...n0, todayHit: why.hit && !oldResult, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
+      return { ...n0, todayHit: why.hit && !oldResult, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null,
+        // #752: 면허 업체 협력이 필요한 공사 공고는 규칙이 붙인 '즉시 검토'를 검토(중장기)로 — 회사가 직접 바꾼 분류는 그대로
+        classification: p?.classification ?? (n0.partner && pick(r, 'classification') === '즉시 검토' ? '중장기 영업리드' : pick(r, 'classification')), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본) · #610 넘기기로 만든 리드면 카드에 [되돌리기]
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, workHandoff: !!(w?.lead_id && pick(w, 'handoff_by')), raw: r.__orig ?? r,
         // 결정 15-35: 입찰 업무로 넘긴 공고 — 업무 열기·기한·결과·[되돌리기]
@@ -567,7 +570,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     }
     if (tab === 'facilities') {
       const P = new Map((await prog('operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
-      const RS = await (await import('./research')).researchState(sql, t); // 212차 #612 후속조사(조사 예정·조사함·확인 못함 + 적은 값)
+      const RM = await import('./research'); const RS = await RM.researchState(sql, t); // 212차 #612 후속조사(조사 예정·조사함·확인 못함 + 적은 값)
+      const NC = await RM.relatedNoticeCounts(sql).catch(() => new Map<string, number>()); // #758 단지 이름별 관련 공고 수
       const list = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id)); const rs = RS.get(String(r.__id)) ?? null;
         return { id: r.__id, name: pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)', address: pick(r, 'address', 'road_address'), score: Number(pick(r, 'score', 'priority_score') ?? 0) || null,
           lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'completion_date', 'use_approval_date', 'completed_at', 'move_in_date')),
@@ -579,7 +583,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           // 212차 #612: 후속조사로 적은 값은 회사 진행 기록·원천 칸이 없을 때(현 위탁사는 관리 회사 칸보다 먼저 — 전화로 확인한 값)
           operator: pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator') ?? rs?.result.operator ?? pick(r, 'management_company'), contractEnd: day(pick(p, 'contract_end_date')) ?? rs?.result.contractEnd ?? null,
           phone: pick(r, 'office_phone', 'management_phone', 'phone') ?? rs?.result.phone ?? null, amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
-          research: rs ? { status: rs.status, due: rs.due, assignee: rs.assignee, taskId: rs.taskId, doneAt: rs.doneAt, missing: rs.missing, note: rs.result.note ?? null } : null,
+          research: rs ? { status: rs.status, due: rs.due, assignee: rs.assignee, taskId: rs.taskId, doneAt: rs.doneAt, missing: rs.missing, note: rs.result.note ?? null, mode: rs.result.mode ?? null, firstPick: rs.result.firstPick ?? null } : null,
+          notices: RM.noticeCountOf(NC, pick(r, 'name', 'facility_name', 'complex_name')), // #758 '이 단지 관련 공고 n건'
           firstSeen: firstSeen(r), moveIn: day(pick(r, 'move_in_date', 'move_in_start')), lastNote: p?.notes ?? p?.last_note ?? p?.memo ?? null,
           nextAction: p?.next_action ?? pick(r, 'etl_suggested_next_action', 'next_action', 'recommended_action'), nextActionFrom: p?.next_action ? '진행 기록' : pick(r, 'etl_suggested_next_action') ? '수집기 제안' : null,
           elapsedDays: daysSince(day(pick(r, 'move_in_date', 'move_in_start')) ?? day(pick(r, 'completion_date', 'use_approval_date', 'completed_at'))), raw: r }; });
