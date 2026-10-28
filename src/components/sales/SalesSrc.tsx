@@ -7,7 +7,7 @@ import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import { RevenueGoal } from '@/components/marketing/RevenueGoal';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Copy, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
+import { ArrowRight, ClipboardList, Copy, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
 import type { SearchHint } from '@/lib/sales/sourceLink';
 import { mdhm } from '@/lib/sales/bidTerms';
 import { api, useApi } from '@/components/client';
@@ -409,6 +409,7 @@ function BulkBar({ kind, ids, onDone, onClear }: { kind: 'bid' | 'building' | 'f
       <b>{ids.length}건 선택</b>
       <input type="date" className={cx(inputCls, 'h-8 !w-auto')} value={next} onChange={(e) => setNext(e.target.value)} aria-label="다음 연락일" />
       <Button size="sm" disabled={busy} onClick={() => go(progress)} data-testid="sales-bulk-go">영업 진행으로({progress}) · 업무 만들기</Button>
+      {kind === 'facility' && <ResearchHandoff ids={ids} onDone={() => { onDone(); onClear(); }} />}
       <Button size="sm" variant="secondary" disabled={busy} onClick={() => go(kind === 'facility' || kind === 'vendor' ? '대상아님' : '대상아님')}>대상아님</Button>
       <button type="button" className="text-xs text-ink-2 underline" onClick={onClear}>선택 해제</button>
     </div>
@@ -1473,18 +1474,47 @@ function ResearchChip({ r }: { r: any }) {
   const T = useSalesTerms(); const x = r.research;
   const na = x?.mode === '직영' || x?.mode === '미개관'; // #758 직영·미개관이면 위탁사·계약 만료일은 묻지 않음
   const miss = [!na && !r.operator && T.operator, !na && !r.contractEnd && '계약만료일', !r.phone && `${T.office} 번호`].filter(Boolean) as string[];
-  const mode = x?.mode ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800" data-testid="hub-research-mode">{x.mode}{x.mode === '미개관' && x.firstPick ? ` · 첫 운영사 선정 ${x.firstPick}` : ''}</span> : null;
+  const contact = x && (x.reaction || x.meetingAt) ? <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800" data-testid="hub-research-contact">{[x.contactTitle, x.reaction && `반응 ${x.reaction}`, x.meetingAt && `미팅 ${mdd(x.meetingAt)} ${x.meetingAt.slice(11, 16)}`].filter(Boolean).join(' · ')}</span> : null; // 247차 #778
+  const mode0 = x?.mode ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800" data-testid="hub-research-mode">{x.mode}{x.mode === '미개관' && x.firstPick ? ` · 첫 운영사 선정 ${x.firstPick}` : ''}</span> : null;
+  const mode = mode0 || contact ? <>{mode0}{contact}</> : null;
   if (mode && !miss.length && x.status !== 'open') return mode;
   if (!x || (!miss.length && x.status !== 'open')) return null;
   const tip = miss.length ? `미확인: ${miss.join('·')}` : undefined;
   if (x.status === 'open') {
-    const body = `미확인 · 조사 예정 ${x.due ? mdd(x.due) : ''}${x.assignee ? `(담당 ${x.assignee})` : ''}`;
+    const body = `후속조사 중${x.assignee ? ` · 담당 ${x.assignee}` : ''}${x.due ? ` · ${mdd(x.due)}까지` : ''}`; // 247차 #777
     return x.taskId ? <Link href={`/tasks/${x.taskId}`} title={tip} className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:underline" data-testid="hub-research-chip">{body}</Link>
       : <span title={tip} className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900" data-testid="hub-research-chip">{body}</span>;
   }
   const at = x.doneAt ? `${mdd(seoulYmd(x.doneAt))} ` : '';
   if (mode) return <>{mode}<span title={tip} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2" data-testid="hub-research-chip">{`일부 미확인 · ${at}조사함`}</span></>;
   return <span title={[tip, x.note && `메모: ${x.note}`].filter(Boolean).join(' · ') || undefined} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2" data-testid="hub-research-chip">{x.status === 'none' ? `미확인 · ${at}조사함(확인 못함)` : `일부 미확인 · ${at}조사함`}</span>;
+}
+/** 247차 #777(대표 10/28 21:35 '단지 정보를 확인 후 업무로 넘기는건 사람이 합니다 · 전화 담당'): [후속조사 넘기기] — 담당 기본 = 담당자 지정 '영업 원천 · 시설', 바꿀 수 있음 */
+function ResearchHandoff({ ids, name, onDone }: { ids: string[]; name?: string; onDone?: () => void }) {
+  const [open, setOpen] = useState(false); const [who, setWho] = useState(''); const [busy, setBusy] = useState(false);
+  const people = useApi<{ people: { id: string; name: string; title: string | null }[]; me: string; suggested?: string | null }>(open ? '/api/sales/work/handoff?kind=facility' : (null as unknown as string), [open]);
+  useEffect(() => { if (people.data && !who) setWho(people.data.suggested ?? people.data.me); }, [people.data, who]);
+  async function go() {
+    setBusy(true);
+    try { const r = await api<{ taskId: string | null; items: number; skipped: { name: string; why: string }[] }>('/api/sales/research/handoff', { body: { ids, assigneeId: who || undefined } });
+      const nm = people.data?.people.find((p) => p.id === who)?.name;
+      if (r.items) toast.ok(`후속조사 ${r.items}곳을 넘겼습니다${nm ? ` — 담당 ${nm}` : ''}${r.skipped.length ? ` · 이미 조사 중 ${r.skipped.length}곳 건너뜀` : ''}`, r.taskId ? { label: '업무 열기', run: () => { window.location.href = `/tasks/${r.taskId}`; } } : undefined);
+      else toast.info(`넘길 곳이 없습니다 — ${r.skipped.map((x) => `${x.name} ${x.why}`).join(' · ')}`);
+      setOpen(false); onDone?.(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (<>
+    <button type="button" onClick={() => setOpen(true)} className={cx(linkCls, 'border-amber-500 text-amber-800')} data-testid="research-handoff"><ClipboardList className="size-3.5" aria-hidden />후속조사 넘기기{ids.length > 1 ? ` ${ids.length}곳` : ''}</button>
+    {open && <Modal open onClose={() => setOpen(false)} title="후속조사 업무로 넘기기">
+      <div className="space-y-3 text-sm" data-testid="research-handoff-dialog">
+        <p className="text-xs text-ink-2">{ids.length > 1 ? `고른 ${ids.length}곳` : <b>{name}</b>}을(를) 후속조사 업무 하나로 넘깁니다. 담당자가 관리사무소에 전화해 운영 방식·담당하시는 분을 확인하고 미팅을 잡습니다(마감 7일). 업무를 마치면 곳마다 연락 결과를 적습니다.</p>
+        {!people.data ? <Skeleton rows={2} /> : <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="담당">{people.data.people.map((p) => <button key={p.id} type="button" role="radio" aria-checked={who === p.id} onClick={() => setWho(p.id)} data-testid="research-handoff-person"
+          className={cx('rounded-full border px-2.5 py-1 text-xs', who === p.id ? 'border-amber-600 bg-amber-50 font-semibold text-amber-900' : 'border-line bg-white')}>{p.name}{p.title ? ` ${p.title}` : ''}{people.data?.suggested === p.id ? ' · 기본' : ''}</button>)}</div>}
+        <p className="text-[11px] text-ink-3">기본 담당은 관리 › 담당자 지정의 ‘영업 원천 · 시설’ 규칙입니다.</p>
+        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setOpen(false)}>취소</Button><Button onClick={go} disabled={busy || !who} data-testid="research-handoff-go">넘기기</Button></div>
+      </div>
+    </Modal>}
+  </>);
 }
 /** 212차 #612: 허브 '준공·입주 시설' 머리 줄 — 이번 주 후속조사 묶음(담당·마감·조사한 수·업무), 관리자는 이번 주 묶음이 없을 때 [지금 만들기] */
 function ResearchBar({ onDone }: { onDone?: () => void }) {
@@ -1503,8 +1533,8 @@ function ResearchBar({ onDone }: { onDone?: () => void }) {
       {l?.thisWeek && l.items ? <>
         <span data-testid="hub-research-week">이번 주 {l.items}곳{l.assignee ? ` · 담당 ${l.assignee}` : ''}{l.due ? ` · ${mdd(l.due)}까지` : ''}{l.done || l.none ? ` · 조사함 ${l.done + l.none}곳${l.none ? `(확인 못함 ${l.none})` : ''}` : ''}{l.taskDone ? ' · 업무 완료' : ''}</span>
         {l.taskId && <Link href={`/tasks/${l.taskId}`} className="font-medium text-amber-900 underline" data-testid="hub-research-task">업무 열기</Link>}
-      </> : <span data-testid="hub-research-week">{l?.thisWeek ? '이번 주 조사할 곳 없음 · ' : ''}{T.operator}·계약만료일·{T.office} 번호가 빈 큰 단지부터 {data.max}곳을 {data.auto ? '매주 월요일 아침' : '관리자가 만들 때'} 업무 하나로 묶습니다</span>}
-      {data.canRun && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={run} data-testid="hub-research-run">이번 주 묶음 지금 만들기</Button>}
+      </> : <span data-testid="hub-research-week">{l?.thisWeek ? '이번 주 조사할 곳 없음 · ' : ''}{data.auto ? `${T.operator}·계약만료일·${T.office} 번호가 빈 큰 단지부터 ${data.max}곳을 매주 월요일 아침 업무 하나로 묶습니다` : '카드를 확인한 뒤 [후속조사 넘기기](여러 개는 체크 → 아래 줄)로 사람이 넘깁니다 — 자동 묶음 꺼짐'}</span>}
+      {data.canRun && data.auto && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={run} data-testid="hub-research-run">이번 주 묶음 지금 만들기</Button>}
     </div>
   );
 }
@@ -1552,7 +1582,7 @@ function HubCard({ tab, r, onRaw, onChange, canWrite }: { tab: string; r: any; o
   const today0 = today(); const T = useSalesTerms();
   const leadId = r.work?.leadId ?? r.leadId ?? null; const kind = tab === 'buildings' ? 'building' : tab === 'facilities' ? 'facility' : 'vendor';
   const handedOff = !!(r.work?.handoff ?? r.handoff); // 넘기기로 만든 리드(진행영업 전환은 되돌리기 없음)
-  const handoff = canWrite && !leadId ? <><HandoffButton kind={kind} id={String(r.id)} name={String(r.name ?? '')} onDone={onChange} compact />{!r.archive && <SkipButton kind={kind} id={String(r.id)} onDone={onChange} />}</>
+  const handoff = canWrite && !leadId ? <><HandoffButton kind={kind} id={String(r.id)} name={String(r.name ?? '')} onDone={onChange} compact />{kind === 'facility' && r.research?.status !== 'open' && !r.archive && <ResearchHandoff ids={[String(r.id)]} name={String(r.name ?? '')} onDone={onChange} />}{!r.archive && <SkipButton kind={kind} id={String(r.id)} onDone={onChange} />}</>
     : leadId ? <><Link href={`/s/sales/leads?id=${leadId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-handoff-lead">영업 중 → 리드</Link>{canWrite && handedOff && <RevertButton leadId={leadId} onDone={onChange} />}</> : null; // #610 ⓐ
   return (
     <div className="flex h-full flex-col rounded-card border border-line bg-white p-3 text-sm" data-testid="sales-hub-item">
