@@ -64,7 +64,7 @@ test('[AI로 채우기] · [컨셉 만들기](직원도) → 정리(아이디·�
   const inbox = await ctx.owner.ok('GET', '/api/marketing/inbox');
   assert.equal(inbox.counts.concepts, 1); assert.equal(inbox.concepts[0].id, set.id);
   const sp = await ctx.owner.ok('GET', '/api/spaces');
-  assert.equal(sp.summary.marketing.badge, 1, '사이드바·하단 탭 승인 대기 배지에도'); assert.match(sp.summary.marketing.text, /운영 승인 1/);
+  assert.equal(sp.summary.marketing.badge, 1, '사이드바·하단 탭 승인 대기 배지에도'); assert.match(sp.summary.marketing.text, /승인할 것 1건\(시안 0 · 운영 1\)/);
   const v = await ctx.staffA.client.ok('GET', '/api/marketing/concepts');
   assert.equal(v.canDecide, false); assert.equal(v.sets[0].id, set.id); assert.deepEqual(v.brands.map((b) => b.name).sort(), ['다짐', '하이링크']);
 });

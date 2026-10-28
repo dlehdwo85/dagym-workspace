@@ -67,10 +67,10 @@ test('#537 입찰 마감 임박(3일) 탭 · 앱 하단 영업기회 배지 = �
   assert.ok(soon.includes('시험 마감 임박 체육관 위탁'), soon.join(' / '));
   assert.ok(!soon.includes('시험시 체육센터 헬스장 위탁운영 용역'), '6일 뒤 마감은 빠짐');
   assert.ok(!soon.includes('시험 마감 지난 공고'), '마감 지난 공고는 빠짐');
-  assert.deepEqual((await ctx.owner.ok('GET', '/api/spaces')).summary.sales, { text: '오늘 새 공고 없음', badge: 0 });
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/spaces')).summary.sales, { text: '오늘 새 공고 없음', badge: 0, label: '오늘 새 공고', href: '/s/sales/hub?tab=bids&bt=today' });
   await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified) values ('default', ${today}, '[]', ${sql.json({ total: 3 })}, 1, 1)
     on conflict (tenant, day) do update set counts = excluded.counts`;
-  assert.deepEqual((await ctx.owner.ok('GET', '/api/spaces')).summary.sales, { text: '오늘 새 공고 3건', badge: 3 });
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/spaces')).summary.sales, { text: '오늘 새 공고 3건', badge: 3, label: '오늘 새 공고', href: '/s/sales/hub?tab=bids&bt=today' }); // 246차 #774 배지 이름·목록
 });
 
 test('#537 후속(로컬 10/24 12:20): 결과(낙찰·유찰)는 오늘 새 공고에서 빼고 아래 결과 묶음 · 홈 수도 빼고 · 당일 메일은 결과 구역(새 공고 수 밖)', async () => {

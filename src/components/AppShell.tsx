@@ -138,7 +138,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
   useSheetBack(spaceSheet, () => setSpaceSheet(false)); // #242 2단계: 앱 뒤로 버튼 = 시트만 닫힘(화면 그대로)
   useSheetBack(more, () => setMore(false));
   const v3 = session.features.sidebar3 !== false; // ⑦ 사이드바 3구역(대표 승인 10/20 오후). FEATURE_SIDEBAR3=0 → 예전 모양
-  const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number }> }>(spaces.length > 1 && (v3 || spaceMenu || more || spaceSheet || space === 'marketing') ? '/api/spaces' : null, [space]);
+  const atSpaceHome = space !== 'work' && path === sm.home; // 246차 #774: 공간 첫 화면 맨 위 '배지 숫자 = 무엇' 한 줄
+  const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number; label?: string; href?: string }> }>(spaces.length > 1 && (v3 || spaceMenu || more || spaceSheet || space === 'marketing' || atSpaceHome) ? '/api/spaces' : null, [space]);
+  const homeInfo = atSpaceHome ? spaceInfo.data?.summary[space] : undefined;
   const goSpace = (sp: SpaceKey) => { setSpaceMenu(false); try { localStorage.setItem('wos_space', sp); } catch {} router.push(SPACE_META[sp].home); };
   useEffect(() => { // 앱을 처음 열 때 마지막으로 쓴 공간으로
     if (path !== '/') return;
@@ -322,7 +324,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                   <button key={sp} role="tab" aria-selected={on} onClick={() => goSpace(sp)} data-testid={`space-tab-${sp}`} title={`${SPACE_META[sp].label}${info?.text ? ` · ${info.text}` : ''} (Ctrl ${i + 1})`}
                     className={cx('relative flex h-8 items-center justify-center gap-1 rounded-[8px] text-xs font-semibold transition-colors', on ? 'text-white shadow-sm' : 'text-slate-500 hover:text-ink')} style={on ? { background: SPACE_META[sp].color } : undefined}>
                     <SpaceIcon s={sp} />{!collapsed && <span>{SPACE_META[sp].short}</span>}
-                    {!on && !!info?.badge && <span className="absolute -right-0.5 -top-1 min-w-[16px] rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{info.badge}</span>}
+                    {!on && !!info?.badge && <SpaceBadge sp={sp} n={info.badge} label={info.label} className="absolute -right-0.5 -top-1 min-w-[16px] px-1 text-[10px] leading-4" />}
                   </button>); })}
               </div>
               {!collapsed && <div className="truncate px-1 pt-1.5 text-[11px] text-slate-500"><span data-testid="space-current">{sm.label}</span>{session.tenant?.name && session.tenant.name !== '워크인' && <span> · {session.tenant.name}</span>}</div>}
@@ -491,7 +493,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
           {/* 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄은 없앰 — 하단 탭 + 더보기 › 공간 메뉴로(하단 탭과 겹치고 깔끔하지 않음) */}
           <PushRehome appHost={session.features.appHost} />{/* 198차 주소 분리: app. 에서 브라우저 알림 다시 켜기 안내(스위치 켰을 때만) */}
           <AlarmBar items={alarms} onChange={(id) => { setAlarms((a) => a.filter((x) => x.id !== id)); window.dispatchEvent(new Event('wos-refresh')); }} />
-          <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
+          <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{!!homeInfo?.badge && homeInfo.href && <Link href={homeInfo.href} prefetch={false} data-testid="space-badge-line"
+            className="mb-3 flex items-center gap-2 rounded-card border px-3 py-2 text-xs text-ink-2 hover:bg-white" style={{ borderColor: sm.border, background: sm.soft }}>
+            <SpaceBadge sp={space} n={homeInfo.badge} label={homeInfo.label} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />
+            <span className="min-w-0 flex-1"><b className="text-ink">{homeInfo.label} {homeInfo.badge}건</b> — 공간 전환 칸의 {sm.short} 숫자는 이 숫자입니다(알림 종 숫자와 다름)</span><span className="shrink-0 font-medium" style={{ color: sm.color }}>보기 →</span></Link>}{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>
 
         {session.tenant?.onboarding && <Onboarding />}
@@ -556,7 +561,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                   <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-white" style={{ background: SPACE_META[sp].color }}><SpaceIcon s={sp} /></span>
                   <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-xs text-ink-2">{spaceInfo.data.summary[sp].text}</span>}</span>
                   {sp === space && <Check className="size-5" style={{ color: SPACE_META[sp].color }} aria-label="지금 공간" />}
-                  {sp !== space && !!spaceInfo.data?.summary[sp]?.badge && <span className="min-w-[22px] rounded-full bg-red-600 px-1.5 text-center text-xs font-bold leading-[22px] text-white">{spaceInfo.data.summary[sp].badge}</span>}
+                  {sp !== space && !!spaceInfo.data?.summary[sp]?.badge && <SpaceBadge sp={sp} n={spaceInfo.data.summary[sp].badge} label={spaceInfo.data.summary[sp].label} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />}
                 </button>))}</div>
               <p className="px-2 pt-2 text-[11px] text-ink-3">{admin ? '관리자는 켠 공간을 모두 봅니다' : '배정된 공간만 보입니다'}</p>
             </div>
@@ -584,7 +589,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                       <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-white" style={{ background: SPACE_META[sp].color }}><SpaceIcon s={sp} /></span>
                       <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-xs text-ink-2">{spaceInfo.data.summary[sp].text}</span>}</span>
                       {sp === space && <Check className="size-5" style={{ color: SPACE_META[sp].color }} aria-label="지금 공간" />}
-                      {sp !== space && !!spaceInfo.data?.summary[sp]?.badge && <span className="min-w-[22px] rounded-full bg-red-600 px-1.5 text-center text-xs font-bold leading-[22px] text-white">{spaceInfo.data.summary[sp].badge}</span>}
+                      {sp !== space && !!spaceInfo.data?.summary[sp]?.badge && <SpaceBadge sp={sp} n={spaceInfo.data.summary[sp].badge} label={spaceInfo.data.summary[sp].label} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />}
                     </button>
                   ))}
                 </div>
@@ -670,4 +675,9 @@ function TabLink({ n, on, badge }: { n: NavItem; on: boolean; badge?: number }) 
 function SpaceIcon({ s }: { s: SpaceKey }) {
   const I = s === 'sales' ? TrendingUp : s === 'marketing' ? Megaphone : CalendarCheck;
   return <I className="size-[18px]" aria-hidden />;
+}
+
+/** 246차 #774(대표 '영업 16 · 마케팅 4 가 알림 수와 다름'): 공간 배지는 알림(빨간 동그라미)과 다른 모양 — 공간 색 네모, 무엇을 센 숫자인지 이름표 */
+function SpaceBadge({ sp, n, label, className }: { sp: SpaceKey; n: number; label?: string; className?: string }) {
+  return <span className={cx('rounded-[5px] text-center font-bold text-white', className)} style={{ background: SPACE_META[sp].color }} title={`${label ?? '확인할 것'} ${n}건`} aria-label={`${label ?? '확인할 것'} ${n}건`} data-testid={`space-badge-${sp}`}>{n}</span>;
 }

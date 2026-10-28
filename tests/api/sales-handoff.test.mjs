@@ -44,20 +44,21 @@ describe('영업 진행으로 넘기기', () => {
     assert.equal((await ctx.owner.req('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N1', assigneeIds: [] })).status, 400, '담당자 1명 이상');
     assert.equal((await ctx.owner.req('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N1', assigneeIds: [ctx.staffB.id] })).status, 400, '영업 밖 직원 배정 불가');
   });
-  test('공고(결정 15-35): 리드 없이 입찰 업무 1건(주 담당 + 공동 담당, 기한 = 참가신청 마감 전날) + 입찰 진행 + 일정 4건(회사 캘린더) + 알림 · 다시 넘기면 409', async () => {
+  test('공고(결정 15-35): 리드 없이 입찰 업무 1건(주 담당 + 공동 담당, 246차 #772 마감 = 입찰 마감일 당일·마감 시각) + 입찰 진행 + 일정 2건(#771 현장설명회·입찰 마감) + 알림 · 다시 넘기면 409', async () => {
     const r = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'N1', assigneeIds: [ctx.staffA.id, ctx.ownerId], note: '현장설명회 꼭 참석' });
-    assert.deepEqual([r.status, r.leadId, r.due, r.taskIds.length], ['입찰 진행', null, addDays(today, 5), 1]);
-    assert.deepEqual(r.eventErrors, []); assert.equal(r.eventIds.length, 4, '현장설명회·참가신청·입찰 마감·개찰');
+    assert.deepEqual([r.status, r.leadId, r.due, r.dueTime, r.taskIds.length], ['입찰 진행', null, addDays(today, 8), '10:00', 1]);
+    assert.match(r.dueText, /^\d+\/\d+\(.\) 10:00$/);
+    assert.deepEqual(r.eventErrors, []); assert.equal(r.eventIds.length, 2, '현장설명회·입찰 마감만(참가신청·개찰은 업무 체크리스트에)');
     assert.deepEqual(r.dates.map((d) => d.label), ['현장설명회', '참가신청 마감', '입찰 마감', '개찰']);
     assert.equal((await sql`select count(*)::int c from sales_leads where src->>'id' = 'N1'`)[0].c, 0, '리드 없음');
     const [w] = await sql`select status, lead_id, data from sales_work_records where tenant = 'default' and src_tbl = 'opportunity_work' and ref_id = 'N1'`;
     assert.deepEqual([w.status, w.lead_id, w.data.notice_id, w.data.bid_task_id], ['입찰 진행', null, 'N1', r.taskIds[0]]);
-    const [t] = await sql`select title, assignee_id, due_date::text as due, space, sales_ref, lead_id, requested_by, description from tasks where id = ${r.taskIds[0]}`;
-    assert.deepEqual([t.title, t.assignee_id, t.due, t.space, t.lead_id, t.sales_ref.kind, t.requested_by], ['[입찰] 분당 스포츠센터 체육시설 위탁운영 용역', ctx.staffA.id, addDays(today, 5), 'sales', null, 'bid', ctx.ownerId]);
+    const [t] = await sql`select title, assignee_id, due_date::text as due, to_char(due_time, 'HH24:MI') as tm, space, sales_ref, lead_id, requested_by, description from tasks where id = ${r.taskIds[0]}`;
+    assert.deepEqual([t.title, t.assignee_id, t.due, t.tm, t.space, t.lead_id, t.sales_ref.kind, t.requested_by], ['[입찰] 분당 스포츠센터 체육시설 위탁운영 용역', ctx.staffA.id, addDays(today, 8), '10:00', 'sales', null, 'bid', ctx.ownerId]);
     assert.ok(t.description.includes('현장설명회 꼭 참석'));
     assert.deepEqual((await sql`select user_id from task_assignees where task_id = ${r.taskIds[0]}`).map((x) => x.user_id), [ctx.ownerId], '두 번째 담당자는 공동 담당');
     const evs = await sql`select e.title, e.all_day, c.type, (select count(*)::int from event_attendees a where a.event_id = e.id) as att from events e join calendars c on c.id = e.calendar_id where e.id = any(${r.eventIds}::uuid[]) order by e.start_at`;
-    assert.deepEqual(evs.map((e) => [e.title.split(' · ')[0], e.type, e.att]), [['[입찰] 현장설명회', 'company', 2], ['[입찰] 참가신청 마감', 'company', 2], ['[입찰] 입찰 마감', 'company', 2], ['[입찰] 개찰', 'company', 2]]);
+    assert.deepEqual(evs.map((e) => [e.title.split(' · ')[0], e.type, e.att]), [['[입찰] 현장설명회', 'company', 2], ['[입찰] 입찰 마감', 'company', 2]]);
     const [n] = await sql`select type, title, link from notifications where user_id = ${ctx.staffA.id} and title like '입찰 업무:%' order by created_at desc limit 1`;
     assert.ok(n, '배정 알림'); assert.equal(n.link, `/tasks/${r.taskIds[0]}`);
     assert.equal((await sql`select count(*)::int as c from notifications where user_id = ${ctx.ownerId} and title like '입찰 업무:%'`)[0].c, 0, '넘긴 본인에게는 알림 없음');

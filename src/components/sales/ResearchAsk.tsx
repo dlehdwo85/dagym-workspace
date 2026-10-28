@@ -10,7 +10,7 @@ import { Button, Modal, cx, inputCls, toast } from '@/components/ui';
  * 비운 곳은 '확인 못함'(12주 뒤 다시 묶음에). [취소] = 완료하지 않음. 묶인 시설이 없거나 못 읽으면 묻지 않고 완료
  */
 type Mode = '' | '직영' | '위탁' | '미개관';
-type Item = { id: number; srcId: string; name: string; region: string | null; households: number | null; missing: string[]; status: string; phone: string | null; operator: string | null; mgmt?: string | null; notices?: number;
+type Item = { id: number; srcId: string; name: string; region: string | null; households: number | null; missing: string[]; status: string; phone: string | null; operator: string | null; mgmt?: string | null; notices?: number; moveIn?: string | null; approval?: string | null;
   result: { operator?: string | null; contractEnd?: string | null; phone?: string | null; note?: string | null; mode?: Mode | null; firstPick?: string | null } };
 type Data = { terms: { operator: string; office: string; opCheck?: string; facility?: string }; items: Item[] };
 type Ask = 'ok' | 'skip' | null;
@@ -71,6 +71,8 @@ function ResearchDialog({ title, data, onDone }: { title: string; data: Data; on
                   </>}
                 <input type="tel" className={cx(inputCls, 'h-8 text-xs')} value={rows[i].phone} onChange={(e) => set(i, 'phone', e.target.value)} maxLength={40} placeholder={`${T.office} 번호`} aria-label={`${T.office} 번호`} data-testid="research-ask-phone" />
               </div>
+              <Questions x={x} T={T} />
+              <p className="mt-1 text-[11px] text-ink-2" data-testid="research-ask-summary">정리: {summaryOf(rows[i], T)}</p>
               <input className={cx(inputCls, 'mt-1.5 h-8 text-xs')} value={rows[i].note} onChange={(e) => set(i, 'note', e.target.value)} maxLength={500} placeholder="메모(선택) — 예: 내년 3월 입찰 예정, 관리소장 통화" aria-label="메모" data-testid="research-ask-note" />
             </li>))}
         </ul>
@@ -83,4 +85,30 @@ function ResearchDialog({ title, data, onDone }: { title: string; data: Data; on
       </div>
     </Modal>
   );
+}
+
+/** 246차 #775(대표 '후속조사 담당자는 ai 가 하는거 아닌가요?'): 관리사무소에 전화하는 일은 사람이 함(전화 기능 없음) — 대신 공개 자료로 아는 것(관리사무소 번호·관리회사·관련 공고·입주/사용승인)과
+ *  곳마다 물어볼 말 세 줄을 미리 보여 줌. AI 호출 없이 규칙으로 만듦(회사 AI 예산 안 씀) */
+function Questions({ x, T }: { x: Item; T: Data['terms'] }) {
+  const fac = T.facility ?? '커뮤니티 시설';
+  const known = [x.phone && `${T.office} ${x.phone}`, x.mgmt && `관리회사 ${x.mgmt}`, (x.notices ?? 0) > 0 && `관련 공고 ${x.notices}건`, x.moveIn && `입주 ${x.moveIn}`, !x.moveIn && x.approval && `사용승인 ${x.approval}`].filter(Boolean);
+  const q = [`${fac} 운영은 관리사무소에서 직접 하시나요, 위탁 업체에 맡기시나요?`,
+    x.mgmt ? `관리회사(${x.mgmt})와 별도로 ${fac} 위탁 업체가 있나요? 있으면 업체 이름과 계약이 끝나는 때를 여쭤봐도 될까요?` : `위탁이면 업체 이름과 계약이 끝나는 때를 여쭤봐도 될까요?`,
+    (x.notices ?? 0) > 0 ? `다음 위탁 업체 선정(입찰) 공고는 언제쯤 내실 예정인가요? (지난 관련 공고 ${x.notices}건)` : x.moveIn && x.moveIn > new Date().toISOString().slice(0, 10) ? `아직 개관 전이면 ${fac} 운영사는 언제쯤 정하시나요?` : `다음 위탁 업체 선정(입찰)은 언제쯤 하실 예정인가요?`];
+  return (
+    <details className="mt-1.5 rounded-input bg-slate-50 px-2 py-1 text-[11px] text-ink-2" data-testid="research-ask-help">
+      <summary className="cursor-pointer">통화 도움 — 미리 아는 것{known.length ? ` ${known.length}가지` : ' 없음'} · 물어볼 말 3줄</summary>
+      {known.length > 0 && <p className="mt-1" data-testid="research-ask-known">공개 자료: {known.join(' · ')}</p>}
+      <ol className="mt-1 list-decimal space-y-0.5 pl-4" data-testid="research-ask-questions">{q.map((s) => <li key={s}>{s}</li>)}</ol>
+    </details>);
+}
+/** 적은 답을 한 줄로 정리 — 저장하면 어디에 쓰이는지 */
+function summaryOf(r: { mode: Mode; operator: string; contractEnd: string; phone: string; firstPick: string }, T: Data['terms']) {
+  if (r.mode === '직영') return '직영 — 위탁 업체 없음';
+  if (r.mode === '미개관') return `미개관 · 첫 운영사 선정 ${r.firstPick.trim() || '시기 확인 못함'} — 그 무렵 다시 조사`;
+  if (r.mode === '위탁' || r.operator.trim() || r.contractEnd) {
+    const m = r.contractEnd ? Math.round((Date.parse(`${r.contractEnd}T00:00:00+09:00`) - Date.now()) / (30.4 * 864e5)) : null;
+    return `위탁 · ${r.operator.trim() || `${T.operator} 확인 못함`} · ${r.contractEnd ? `${r.contractEnd} 만료${m != null ? (m >= 0 ? `(약 ${m}개월 뒤)` : '(지남)') : ''}` : '만료일 확인 못함'} — 저장하면 시설 카드·계약만료·재입찰 목록에 반영`;
+  }
+  return r.phone.trim() ? `번호만 확인(${r.phone.trim()}) — 운영 방식은 다음 조사에서` : '확인 못함 — 다음 묶음(12주 뒤)에 다시';
 }

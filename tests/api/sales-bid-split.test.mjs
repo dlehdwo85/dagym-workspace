@@ -26,18 +26,18 @@ before(async () => {
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 
 describe('입찰 업무로 넘기기', () => {
-  test('리드 없이 입찰 업무 1건(주 담당 + 공동 담당) · 기한 = 참가신청 마감 전날 · 체크리스트 · 일정 4건 · 상태 버튼 자동 업무는 이어받음 · 리드 전환·상태 버튼 막힘 · 홈 일정', async () => {
+  test('리드 없이 입찰 업무 1건(주 담당 + 공동 담당) · 246차 #772 마감 = 입찰 마감일 당일·마감 시각 · 체크리스트 · #771 일정 2건(현장설명회·입찰 마감) · 상태 버튼 자동 업무는 이어받음 · 리드 전환·상태 버튼 막힘 · 홈 일정', async () => {
     await put({ id: 'B1', title: '체육시설 위탁운영 용역', complex_name: '분당 스포츠센터', issuer: '성남시청', related: true, first_seen_at: today,
       site_briefing_at: `${addDays(today, 2)}T14:00`, participation_deadline_at: `${addDays(today, 6)}T18:00`, deadline_at: `${addDays(today, 8)}T10:00`, opening_at: `${addDays(today, 8)}T11:00` });
     await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'B1', status: '검토중', memo: '검토 시작' });
     const [auto] = await sql`select id, title from tasks where sales_ref->>'kind' = 'bid' and sales_ref->>'id' = 'B1' and deleted_at is null`;
     assert.ok(auto?.title.startsWith('[입찰] '), `상태 버튼 자동 업무도 [입찰]: ${auto?.title}`);
     const r = await handoff(ctx.owner, 'B1', [ctx.staffA.id, ctx.ownerId], '현장설명회 꼭 참석');
-    assert.deepEqual([r.status, r.leadId, r.taskIds.length, r.due, r.eventIds.length, r.merged], ['입찰 진행', null, 1, addDays(today, 5), 4, 1]);
+    assert.deepEqual([r.status, r.leadId, r.taskIds.length, r.due, r.dueTime, r.eventIds.length, r.merged], ['입찰 진행', null, 1, addDays(today, 8), '10:00', 2, 1]);
     assert.deepEqual(r.dates.map((d) => d.label), ['현장설명회', '참가신청 마감', '입찰 마감', '개찰']);
     assert.equal((await sql`select count(*)::int c from sales_leads where src->>'id' = 'B1'`)[0].c, 0, '리드를 만들지 않음');
-    const [t] = await sql`select id, title, assignee_id, due_date::text as due, space, sales_ref, lead_id, requested_by, description from tasks where id = ${r.taskId}`;
-    assert.deepEqual([t.title, t.assignee_id, t.due, t.space, t.sales_ref.kind, t.sales_ref.bid, t.lead_id, t.requested_by], ['[입찰] 분당 스포츠센터 체육시설 위탁운영 용역', ctx.staffA.id, addDays(today, 5), 'sales', 'bid', true, null, ctx.ownerId]);
+    const [t] = await sql`select id, title, assignee_id, due_date::text as due, to_char(due_time, 'HH24:MI') as tm, space, sales_ref, lead_id, requested_by, description from tasks where id = ${r.taskId}`;
+    assert.deepEqual([t.title, t.assignee_id, t.due, t.tm, t.space, t.sales_ref.kind, t.sales_ref.bid, t.lead_id, t.requested_by], ['[입찰] 분당 스포츠센터 체육시설 위탁운영 용역', ctx.staffA.id, addDays(today, 8), '10:00', 'sales', 'bid', true, null, ctx.ownerId]);
     assert.match(t.description, /메모: 현장설명회 꼭 참석/); assert.match(t.description, /공고가 취소되면 이 업무도 함께 취소/);
     assert.deepEqual((await sql`select user_id from task_assignees where task_id = ${t.id}`).map((x) => x.user_id), [ctx.ownerId], '공동 담당');
     const items = (await sql`select text from task_checklist_items where task_id = ${t.id} order by sort`).map((x) => x.text);
@@ -46,15 +46,15 @@ describe('입찰 업무로 넘기기', () => {
     const [old] = await sql`select deleted_at from tasks where id = ${auto.id}`; assert.ok(old.deleted_at, '상태 버튼으로 생긴 자동 업무는 이어받아 정리');
     assert.equal((await sql`select count(*)::int c from activities where entity_id = ${auto.id} and action = 'merged_into'`)[0].c, 1);
     const evs = await sql`select e.title, c.type, (select count(*)::int from event_attendees a where a.event_id = e.id) as att from events e join calendars c on c.id = e.calendar_id where e.id = any(${r.eventIds}::uuid[]) order by e.start_at`;
-    assert.deepEqual(evs.map((e) => [e.title.split(' · ')[0], e.type, e.att]), [['[입찰] 현장설명회', 'company', 2], ['[입찰] 참가신청 마감', 'company', 2], ['[입찰] 입찰 마감', 'company', 2], ['[입찰] 개찰', 'company', 2]]);
+    assert.deepEqual(evs.map((e) => [e.title.split(' · ')[0], e.type, e.att]), [['[입찰] 현장설명회', 'company', 2], ['[입찰] 입찰 마감', 'company', 2]]);
     const w = await work('B1');
-    assert.deepEqual([w.status, w.lead_id, w.data.bid_task_id, w.data.bid_due_auto, w.data.handoff_prev_status, w.data.memo], ['입찰 진행', null, t.id, addDays(today, 5), '검토중', '검토 시작']);
+    assert.deepEqual([w.status, w.lead_id, w.data.bid_task_id, w.data.bid_due_auto, w.data.bid_due_time, w.data.handoff_prev_status, w.data.memo], ['입찰 진행', null, t.id, addDays(today, 8), '10:00', '검토중', '검토 시작']);
     assert.deepEqual(w.data.assignees, [ctx.staffA.id, ctx.ownerId]);
     const [n] = await sql`select type, link from notifications where user_id = ${ctx.staffA.id} and title like '입찰 업무:%'`;
     assert.deepEqual([n?.type, n?.link], ['task_assigned', `/tasks/${t.id}`]);
     assert.equal((await sql`select count(*)::int c from notifications where user_id = ${ctx.ownerId} and title like '입찰 업무:%'`)[0].c, 0, '넘긴 본인 제외');
     const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.find((x) => x.id === 'B1');
-    assert.deepEqual([card.work, card.workLeadId, card.workBid?.taskId, card.workBid?.due, card.workBid?.result ?? null, card.workBid?.assignees], ['입찰 진행', null, t.id, addDays(today, 5), null, 2]);
+    assert.deepEqual([card.work, card.workLeadId, card.workBid?.taskId, card.workBid?.due, card.workBid?.dueTime, card.workBid?.result ?? null, card.workBid?.assignees], ['입찰 진행', null, t.id, addDays(today, 8), '10:00', null, 2]);
     const again = await ctx.owner.req('POST', '/api/sales/work/handoff', { kind: 'bid', id: 'B1', assigneeIds: [ctx.staffA.id] });
     assert.equal(again.status, 409); assert.equal(again.body.error.code, 'already');
     assert.equal((await ctx.owner.req('POST', '/api/sales/work', { kind: 'bid', id: 'B1', status: '보류' })).status, 400, '넘긴 공고는 업무에서');
@@ -65,20 +65,38 @@ describe('입찰 업무로 넘기기', () => {
     assert.ok(!ag.items.some((x) => x.kind === 'bid' && x.title.startsWith('입찰 마감 · 분당 스포츠센터')), '넘긴 공고는 주요 일정에서 빠짐(일정이 대신)');
     assert.ok((await sql`select 1 from events where title like '[입찰] 입찰 마감 · %분당 스포츠센터%' and deleted_at is null`).length, '입찰 마감은 회사 캘린더 일정으로 한 번');
   });
-  test('정기 점검 — 공고 정정(날짜) → 일정·기한 따라감 · 사람이 바꾼 기한은 그대로', async () => {
-    const w0 = await work('B1'); const taskId = w0.data.bid_task_id; const applyEv = w0.data.bid_events.apply;
-    await patch('B1', { participation_deadline_at: `${addDays(today, 9)}T18:00`, deadline_at: `${addDays(today, 11)}T10:00` });
+  test('정기 점검 — 공고 정정(날짜·시각) → 일정·기한(마감일 당일·마감 시각) 따라감 · 사람이 바꾼 기한은 그대로', async () => {
+    const w0 = await work('B1'); const taskId = w0.data.bid_task_id; const closeEv = w0.data.bid_events.close;
+    assert.equal(w0.data.bid_events.apply, undefined, '246차 #771 참가신청 일정은 만들지 않음');
+    await patch('B1', { participation_deadline_at: `${addDays(today, 9)}T18:00`, deadline_at: `${addDays(today, 11)}T17:00` });
     const d1 = await tick(); assert.ok(d1.bidTasks?.checked >= 1, JSON.stringify(d1.bidTasks));
-    assert.equal((await sql`select due_date::text d from tasks where id = ${taskId}`)[0].d, addDays(today, 8), '참가신청 마감 전날로');
-    assert.equal((await sql`select ${kday('start_at')} d from events where id = ${applyEv}`)[0].d, addDays(today, 9), '일정도 옮김');
+    assert.deepEqual(Object.values((await sql`select due_date::text d, to_char(due_time, 'HH24:MI') t from tasks where id = ${taskId}`)[0]), [addDays(today, 11), '17:00'], '입찰 마감일 당일·17시로');
+    assert.equal((await sql`select ${kday('start_at')} d from events where id = ${closeEv}`)[0].d, addDays(today, 11), '일정도 옮김');
+    assert.equal((await work('B1')).data.bid_events.apply, undefined, '정기 점검도 참가신청 일정은 안 만듦');
     const [act] = await sql`select changes from activities where entity_id = ${taskId} and action = 'updated' and changes->>'reason' = 'bid_schedule' order by id desc limit 1`;
-    assert.deepEqual([act.changes.dueDate.from, act.changes.dueDate.to], [addDays(today, 5), addDays(today, 8)]);
+    assert.deepEqual([act.changes.dueDate.from, act.changes.dueDate.to, act.changes.dueTime.from, act.changes.dueTime.to], [addDays(today, 8), addDays(today, 11), '10:00', '17:00']);
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${taskId}`, { dueDate: addDays(today, 3) }); // 사람이 바꾼 기한
-    await patch('B1', { participation_deadline_at: `${addDays(today, 10)}T18:00` });
+    await patch('B1', { deadline_at: `${addDays(today, 12)}T14:00` });
     await tick();
     assert.equal((await sql`select due_date::text d from tasks where id = ${taskId}`)[0].d, addDays(today, 3), '사람이 바꾼 기한은 그대로');
-    assert.equal((await sql`select ${kday('start_at')} d from events where id = ${applyEv}`)[0].d, addDays(today, 10));
-    assert.equal((await work('B1')).data.bid_due_auto, addDays(today, 9));
+    assert.equal((await sql`select ${kday('start_at')} d from events where id = ${closeEv}`)[0].d, addDays(today, 12));
+    assert.deepEqual([(await work('B1')).data.bid_due_auto, (await work('B1')).data.bid_due_time], [addDays(today, 12), '14:00']);
+  });
+  test('246차 #772: 예전 규칙(마감 전날)으로 만든 열린 입찰 업무는 정기 점검이 한 번 새 규칙으로 다시 계산(사람이 옮긴 기한도) · 다음부터는 사람이 바꾼 기한 그대로', async () => {
+    await put({ id: 'B8', title: '예전 규칙 공고', issuer: '시청', related: true, first_seen_at: today, deadline_at: `${addDays(today, 7)}T17:00` });
+    const r = await handoff(ctx.owner, 'B8', [ctx.staffA.id]);
+    // 배포 전 규칙으로 만든 것처럼: 기한 = 마감 전날, 규칙 표시 없음 · 사람이 하루 더 옮김
+    const w = await work('B8'); const d = { ...w.data }; delete d.bid_due_rule; delete d.bid_due_time;
+    await sql`update sales_work_records set data = ${sql.json({ ...d, bid_due_auto: addDays(today, 6) })} where tenant = 'default' and src_tbl = 'opportunity_work' and ref_id = 'B8'`;
+    await sql`update tasks set due_date = ${addDays(today, 5)}, due_time = null where id = ${r.taskId}`;
+    await tick();
+    assert.deepEqual(Object.values((await sql`select due_date::text d, to_char(due_time, 'HH24:MI') t from tasks where id = ${r.taskId}`)[0]), [addDays(today, 7), '17:00']);
+    const [act] = await sql`select changes from activities where entity_id = ${r.taskId} and action = 'updated' and changes->>'reason' = 'bid_rule_close_day'`;
+    assert.deepEqual([act.changes.dueDate.from, act.changes.dueDate.to], [addDays(today, 5), addDays(today, 7)]);
+    assert.equal((await work('B8')).data.bid_due_rule, 'close_day');
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.taskId}`, { dueDate: addDays(today, 6) });
+    await tick();
+    assert.equal((await sql`select due_date::text d from tasks where id = ${r.taskId}`)[0].d, addDays(today, 6), '한 번만 — 그 뒤 사람이 바꾼 기한은 그대로');
   });
   test('정기 점검 — 나라장터 같은 번호 취소 공고 → 업무·일정 취소 · 공고 취소 · 알림', async () => {
     await put({ id: 'B2', source_type: 'g2b_bid', source_external_id: 'R26BK0001-000', title: '주민운동시설 위탁 운영', issuer: '구청', related: true, first_seen_at: today, posted_date: addDays(today, -1),
@@ -200,7 +218,7 @@ describe('예전 자료 정리 · 리드 다음 연락 업무', () => {
     const [t] = await sql`select lead_id, sales_ref from tasks where id = ${tk.id}`; assert.deepEqual([t.lead_id, t.sales_ref.bid, t.sales_ref.kind], [null, true, 'bid']);
     assert.equal((await sql`select lead_id from events where id = ${evId}`)[0].lead_id, null);
     const w = await work('L1');
-    assert.deepEqual([w.status, w.lead_id, w.data.bid_task_id, w.data.bid_events.apply, w.data.moved_from_lead, w.data.bid_due_auto], ['입찰 진행', null, tk.id, evId, l1.id, addDays(today, 3)]);
+    assert.deepEqual([w.status, w.lead_id, w.data.bid_task_id, w.data.bid_events.apply, w.data.moved_from_lead, w.data.bid_due_auto], ['입찰 진행', null, tk.id, evId, l1.id, addDays(today, 3)], '넘기기로 만든 입찰 업무는 옮길 때 기한 그대로');
     assert.equal((await ctx.owner.ok('GET', '/api/sales/work/bid-leads')).items.length, 2, '옮긴 리드는 목록에서 빠짐');
     const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.find((x) => x.id === 'L1'); assert.equal(card?.workBid?.taskId, tk.id);
     // 243차 #761(로컬 10/28 19:50 '이미 넘긴 입찰 업무도 정기 점검이 채우기'): 옮긴 입찰은 날짜를 기억해도 일정이 없던 다가오는 일정(입찰 마감)을 정기 점검이 한 번 만듦
@@ -209,9 +227,12 @@ describe('예전 자료 정리 · 리드 다음 연락 업무', () => {
     assert.ok(w2.data.bid_events.close && w2.data.bid_events.close !== evId, JSON.stringify(w2.data.bid_events));
     assert.equal(w2.data.bid_events.apply, evId, '있던 일정은 그대로');
     assert.match((await sql`select title from events where id = ${w2.data.bid_events.close}`)[0].title, /^\[입찰\] 입찰 마감 · 옛 공고 하나/);
+    // 246차 #772: 규칙 표시가 없는(예전) 입찰 업무 → 정기 점검이 한 번 입찰 마감일 당일·마감 시각으로
+    assert.deepEqual(Object.values((await sql`select due_date::text d, to_char(due_time, 'HH24:MI') t from tasks where id = ${tk.id}`)[0]), [addDays(today, 6), '10:00']);
+    assert.deepEqual([w2.data.bid_due_auto, w2.data.bid_due_time, w2.data.bid_due_rule], [addDays(today, 6), '10:00', 'close_day']);
     await tick(); assert.equal((await work('L1')).data.bid_events.close, w2.data.bid_events.close, '두 번 만들지 않음');
   });
-  test('243차 #762: 리드 업무를 입찰 업무로 옮길 때 기한도 넘기기 규칙(입찰 마감 전날)으로 · 제목 [입찰]', async () => {
+  test('243차 #762 → 246차 #772: 리드 업무를 입찰 업무로 옮길 때 기한도 넘기기 규칙(입찰 마감일 당일·마감 시각)으로 · 제목 [입찰]', async () => {
     await put({ id: 'L9', title: '옛 공고 아홉', issuer: '군청', related: true, first_seen_at: today, deadline_at: `${addDays(today, 9)}T10:00` });
     const [l9] = await sql`insert into sales_leads (tenant, name, status, owner_id, src) values ('default', '옛 공고 아홉', '신규리드', ${ctx.staffA.id},
       ${sql.json({ from: 'bid', id: 'L9', handoff: true, assignees: [ctx.staffA.id], by: ctx.ownerId })}) returning id`;
@@ -220,9 +241,9 @@ describe('예전 자료 정리 · 리드 다음 연락 업무', () => {
     await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, lead_id, data) values ('default', 'opportunity_work', 'w:bid:L9', 'L9', '영업 중', ${l9.id},
       ${sql.json({ status: '영업 중', lead_id: l9.id, notice_id: 'L9', handoff_by: ctx.ownerId, assignees: [ctx.staffA.id] })})`;
     await ctx.owner.ok('POST', '/api/sales/work/bid-leads', { leadIds: [l9.id] });
-    const [t] = await sql`select title, due_date::text as due from tasks where id = ${tk.id}`;
-    assert.deepEqual([t.title, t.due], ['[입찰] 옛 공고 아홉', addDays(today, 8)], '리드 업무 기한(내일) 대신 입찰 마감 전날');
-    assert.equal((await work('L9')).data.bid_due_auto, addDays(today, 8));
+    const [t] = await sql`select title, due_date::text as due, to_char(due_time, 'HH24:MI') as tm from tasks where id = ${tk.id}`;
+    assert.deepEqual([t.title, t.due, t.tm], ['[입찰] 옛 공고 아홉', addDays(today, 9), '10:00'], '리드 업무 기한(내일) 대신 입찰 마감일 당일·마감 시각');
+    assert.equal((await work('L9')).data.bid_due_auto, addDays(today, 9));
   });
   test('243차 #761: 넘기기 창 미리 보기 — 만들 일정(현장설명회(공고문 참조) 포함) · 이미 지난 일정은 빠짐', async () => {
     await put({ id: 'L8', title: '현설 공고', issuer: '구청', related: true, first_seen_at: today, site_briefing_kind: '공고문 참조', site_briefing_at: `${addDays(today, 2)}T10:00`,

@@ -104,8 +104,10 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>, opt
   // 대표 10/20 14:15: 영업 진행(연락중 등)으로 바뀌면 업무 자동 생성, 보류·미참여·완료면 업무도 함께
   const r = row0;
   const bidName = [pick(r, 'complex_name', 'facility_name'), pick(r, 'title', 'notice_title', 'bid_name')].filter(Boolean).join(' '); // 입찰은 '단지 공고명'
+  // 246차 #772: 입찰 업무 기한 = 입찰 마감일 당일·마감 시각(서울 시각으로 읽음)
+  const dl = i.kind === 'bid' ? (await import('./bidTasks')).bidDue((await import('./bidTasks')).bidMilestones(r).filter((m) => m.key === 'close'), '0000-00-00') : null;
   const task = await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: i.kind, id: i.id, name: (i.kind === 'bid' ? bidName : String(pick(r, 'name', 'complex_name', 'company', 'company_name', 'facility_name', 'title') ?? '')) || (await kindName(t, i.kind)), status, nextDate: next,
-    deadline: i.kind === 'bid' ? (String(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date') ?? '').slice(0, 10) || null) : null, nextAction: pick(cur?.data, 'next_action') });
+    deadline: dl?.day ?? null, deadlineTime: dl?.time ?? null, nextAction: pick(cur?.data, 'next_action') });
   return { ok: true, status, memo, nextDate: next, task, ...(together.length ? { together } : {}) };
 }
 const norm = (s: string) => s.replace(/[\s()（）·\-_,.]/g, '').toLowerCase();

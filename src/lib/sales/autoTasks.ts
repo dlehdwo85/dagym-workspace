@@ -17,9 +17,8 @@ const HOLD = new Set(['보류']);
 const DONE = new Set(['미참여', '대상아님', '대상 아님', '영업완료', '등록 완료', '실패', '계약완료']);
 const LINK: Record<SalesKind, (id: string) => string> = { bid: (id) => `/s/sales/hub?tab=bids&bt=working&bq=${encodeURIComponent(id)}`, building: () => '/s/sales/hub?tab=buildings', facility: () => '/s/sales/hub?tab=facilities', vendor: () => '/s/sales/hub?tab=vendors', lead: (id) => `/s/sales/leads?id=${id}` };
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
-const minusDays = (day: string, n: number) => ymd(new Date(Date.parse(`${day}T12:00:00+09:00`) - n * 864e5));
 
-export type SyncInput = { kind: SalesKind; id: string; name: string; status: string | null; nextDate?: string | null; nextAction?: string | null; deadline?: string | null; assigneeId?: string | null; leadId?: string | null;
+export type SyncInput = { kind: SalesKind; id: string; name: string; status: string | null; nextDate?: string | null; nextAction?: string | null; deadline?: string | null; deadlineTime?: string | null; assigneeId?: string | null; leadId?: string | null;
   /** 196차: 배정 알림 없이(정기 실행이 예전 리드에 업무를 채울 때) */ quiet?: boolean };
 /** 열린(완료 아님) 자동 업무 찾기 */
 async function openTask(sql: Sql, tenant: string, kind: SalesKind, id: string) {
@@ -46,12 +45,13 @@ export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Pro
     return { taskId: cur.id, action: 'held' };
   }
   const progress = PROGRESS.has(st) || i.kind === 'lead';
-  // 마감: 다음 연락일 > 입찰 마감 D-1 > (리드) 내일
-  const due = i.nextDate ?? (i.deadline ? minusDays(i.deadline, 1) : i.kind === 'lead' ? ymd(new Date(Date.now() + 864e5)) : null);
+  // 마감: 다음 연락일 > 입찰 마감일 당일·마감 시각(246차 #772, 예전 D-1) > (리드) 내일
+  const due = i.nextDate ?? (i.deadline ? i.deadline : i.kind === 'lead' ? ymd(new Date(Date.now() + 864e5)) : null);
+  const dueTime = !i.nextDate && i.deadline ? i.deadlineTime ?? null : null;
   if (cur) {
     if (!progress) return { taskId: cur.id, action: 'none' };
     const back = cur.status === 'on_hold' ? sql`, status = 'todo'` : sql``;
-    if ((due && due !== cur.due_date) || cur.status === 'on_hold') { await sql`update tasks set due_date = coalesce(${due}::date, due_date) ${back}, updated_at = now(), version = version + 1 where id = ${cur.id}`; return { taskId: cur.id, action: 'updated' }; }
+    if ((due && due !== cur.due_date) || cur.status === 'on_hold') { await sql`update tasks set due_date = coalesce(${due}::date, due_date) ${dueTime ? sql`, due_time = ${dueTime}::time` : sql``} ${back}, updated_at = now(), version = version + 1 where id = ${cur.id}`; return { taskId: cur.id, action: 'updated' }; }
     return { taskId: cur.id, action: 'none' };
   }
   if (!progress) return { taskId: null, action: 'none' };
@@ -62,7 +62,7 @@ export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Pro
   // 결정 15-35: 입찰은 업무로(현장 영업과 구분) — 입찰 공고에서 생긴 업무는 [입찰]
   const title = `${i.kind === 'bid' ? '[입찰]' : '[영업]'} ${i.name.slice(0, 120)} — ${(i.nextAction ?? (i.kind === 'lead' ? '첫 연락' : st === '검토중' ? '검토' : i.kind === 'vendor' ? '등록 신청' : i.kind === 'bid' ? '입찰 준비' : '다음 조치')).slice(0, 40)}`;
   const desc = `${KIND_LABEL[i.kind]} 건에서 자동으로 만든 ${i.kind === 'bid' ? '입찰' : '영업'} 업무입니다 — 원천: ${LINK[i.kind](i.id)}${i.deadline ? `\n입찰 마감: ${i.deadline}` : ''}\n(상태를 보류·미참여·대상아님·완료로 바꾸면 이 업무도 함께 보류·완료됩니다)`;
-  const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', KIND_LABEL[i.kind]] }, { quiet: !!i.quiet, skipQuota: true });
+  const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, dueDate: due, dueTime, approvalRequired: false, tags: ['영업', KIND_LABEL[i.kind]] }, { quiet: !!i.quiet, skipQuota: true });
   await sql`update tasks set sales_ref = ${sql.json({ kind: i.kind, id: i.id, name: i.name })}, lead_id = ${i.leadId ?? (i.kind === 'lead' ? i.id : null)}, assigned_by_rule = ${rule?.ruleId ?? null} where id = ${r.id}`;
   if (i.kind === 'bid') (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'bid', id: i.id, taskIds: [r.id] }); // #507 공고 첨부 자동
   return { taskId: r.id, action: 'created' };

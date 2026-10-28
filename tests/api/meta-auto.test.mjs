@@ -146,7 +146,7 @@ test('메타 광고 자동 세팅: 연결 권한 → 검사 → 꺼진 초안(PA
   // 승인함 '광고 초안'
   const inbox = await ctx.owner.ok('GET', '/api/marketing/inbox');
   assert.equal(inbox.counts.ads, 1); assert.deepEqual([inbox.ads[0].id, inbox.ads[0].page_label, inbox.ads[0].creative_mime], [made.id, '다짐 본점', 'image/png']);
-  const sp = (await ctx.owner.ok('GET', '/api/spaces')).summary.marketing; assert.deepEqual([sp.badge, sp.text], [1, '운영 승인 1'], '사이드바·앱 탭 배지에도 광고 초안');
+  const sp = (await ctx.owner.ok('GET', '/api/spaces')).summary.marketing; assert.deepEqual([sp.badge, sp.text], [1, '승인할 것 1건(시안 0 · 운영 1)'], '사이드바·앱 탭 배지에도 광고 초안');
   assert.equal((await ctx.staffA.client.req('POST', `/api/marketing/ad-ops/meta/${made.id}/approve`, {})).status, 403, '직원은 승인 못 함');
   // Meta 쪽 상한이 승인할 값보다 크면(누가 바꿈) 켜지 않음
   metaCap = 999999; calls = [];

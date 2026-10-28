@@ -50,6 +50,11 @@ export async function research212({ owner, ctx, sql, BASE, SHOTS }) {
   await rowA.getByTestId('research-ask-end').fill('2027-06-30');
   await rowA.getByTestId('research-ask-phone').fill('031-212-9999');
   await rowA.getByTestId('research-ask-note').fill('직영 아님 — 내년 상반기 입찰');
+  // 246차 #775: 적은 답 한 줄 정리 · 통화 도움(공개 자료로 아는 것 · 물어볼 말 3줄, AI 호출 없음)
+  assert.match(await rowA.getByTestId('research-ask-summary').innerText(), /^정리: 위탁 · E2E바른운영 · 2027-06-30 만료\(약 \d+개월 뒤\) — 저장하면 시설 카드/);
+  assert.match(await rowB.getByTestId('research-ask-summary').innerText(), /^정리: 확인 못함/);
+  await rowA.getByTestId('research-ask-help').locator('summary').click();
+  assert.equal(await rowA.getByTestId('research-ask-questions').locator('li').count(), 3);
   assert.match(await dlg.getByTestId('research-ask-count').innerText(), /^확인 1곳 · 확인 못함 \d+곳$/);
   await owner.screenshot({ path: `${SHOTS}/561-research-complete.png` });
   await dlg.getByTestId('research-ask-save').click();

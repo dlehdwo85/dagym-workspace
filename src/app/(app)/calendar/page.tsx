@@ -191,7 +191,7 @@ function CalendarPage() {
       setQuick({ x: 16, y: 120, date: d, start: h.start, end: h.end, endDate: d, allDay: false }); router.replace(`/calendar?date=${d}`);
     }
   }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [preview, setPreview] = useState<{ ev: any; x: number; y: number } | null>(null);
+  const [preview, setPreview] = useState<{ ev: any; x: number; y: number; folded?: any[] } | null>(null);
   // 시간 보기 높이 = 화면 높이 - 달력 위쪽 - (휴대폰 하단 탭) → FullCalendar 가 시간 칸 안에서 스크롤해 scrollTime 이 먹음
   const calBox = useRef<HTMLDivElement>(null);
   const [calH, setCalH] = useState(640);
@@ -249,13 +249,15 @@ function CalendarPage() {
   }
   // V37 2: 마감 시각이 있는 업무에 같은 날 업무 시간 블록이 있으면 블록 하나만(중복 블록 금지)
   const blockedDay = new Set(events.filter((e) => e.kind === 'task_block' && e.blockTask?.id).map((e) => `${e.blockTask.id}|${seoulDate(e.start)}`));
-  const dupTasks = new Map<string, number>(); const foldedTasks = new Set<string>();
+  // 246차 #770(대표 '11/2 로 옮긴 입찰 업무가 앱 스케줄에서 안 보임'): 묶인 업무는 일정 줄에 담당·완료 여부를 붙이고, 일정을 누르면 미리보기에 업무 줄([업무 열기]·[완료])
+  const foldedBy = new Map<string, any[]>(); const foldedTasks = new Set<string>();
   for (const t of tasks) {
-    if (!t.due_date || syncedIds.has(t.id)) continue;
+    if (!t.due_date || syncedIds.has(t.id) || !(showDone || t.status !== 'done')) continue;
     const day = evByDay.get(t.due_date) ?? []; const k = normT(t.title), c = coreKey(t.title);
     const hit = day.find((x) => x.key === k) ?? day.find((x) => sameCore(x.core, c));
-    if (hit) { dupTasks.set(`${t.due_date}|${hit.key}`, (dupTasks.get(`${t.due_date}|${hit.key}`) ?? 0) + 1); foldedTasks.add(t.id); }
+    if (hit) { const key = `${t.due_date}|${hit.key}`; foldedBy.set(key, [...(foldedBy.get(key) ?? []), t]); foldedTasks.add(t.id); }
   }
+  const foldTail = (fs: any[]) => (!fs.length ? '' : fs.length > 1 ? ` · 업무 ${fs.length}` : ` · 업무 ${fs[0].status === 'done' ? '완료' : fs[0].assignee_name ? `${fs[0].assignee_name}` : '담당 없음'}`);
   const taskCores = new Map<string, string[]>();
   for (const t of tasks) if (t.due_date && (showDone || t.status !== 'done')) taskCores.set(t.due_date, [...(taskCores.get(t.due_date) ?? []), coreKey(t.title)]);
   /** 영업 주요 일정('미팅 · 이름'·'입찰 마감 · 단지명') — 같은 날 같은 건의 일정·업무가 있으면 빼냄 */
@@ -270,14 +272,14 @@ function CalendarPage() {
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e) && (showDone || (e.linkedTask ?? e.blockTask)?.status !== 'done')).map((e) => ({ // 완료된 업무의 일정·업무 시간 블록은 "완료 보기"를 켤 때만
-      id: `${e.id}|${e.originalStart ?? ''}`, title: `${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}${dupTasks.get(`${seoulDate(e.start)}|${normT(e.title)}`) ? ` · 업무 ${dupTasks.get(`${seoulDate(e.start)}|${normT(e.title)}`)}` : ''}`,
-      classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(!e.masked && e.location?.trim() ? ['is-travel'] : []), /* V36 4: 장소 있음 = 이동 일정 */ ...(e.linkedTask ? ['has-task'] : []), ...((e.linkedTask ?? e.blockTask)?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
+      id: `${e.id}|${e.originalStart ?? ''}`, title: `${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}${foldTail(foldedBy.get(`${seoulDate(e.start)}|${normT(e.title)}`) ?? [])}`,
+      classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(!e.masked && e.location?.trim() ? ['is-travel'] : []), /* V36 4: 장소 있음 = 이동 일정 */ ...(e.linkedTask || foldedBy.has(`${seoulDate(e.start)}|${normT(e.title)}`) ? ['has-task'] : []), ...((e.linkedTask ?? e.blockTask)?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
       // V7 4번: 색은 개인/회사 두 가지만(사람 구분은 제목 앞 머리글자)
       // 대표 지적(10/19 ②): 일정별 색 → 사람 색 → 캘린더 색 → 개인/회사 기본
       backgroundColor: eventColorOf(e, calColors, user.id), borderColor: 'transparent', textColor: '#ffffff',
       // V14 41번: 사람 머리글자는 제목이 아니라 따로 — 휴대폰 주·3일 보기에선 빼고(색·필터로 구분), 일 보기·PC 에선 앞에 붙인다
-      extendedProps: { type: 'event', ev: e, ...whoOf(e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? e.ownerId : null, e.ownerName) }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
+      extendedProps: { type: 'event', ev: e, folded: foldedBy.get(`${seoulDate(e.start)}|${normT(e.title)}`) ?? [], ...whoOf(e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? e.ownerId : null, e.ownerName) }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
     ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id) && !foldedTasks.has(t.id) && !(t.due_time && blockedDay.has(`${t.id}|${t.due_date}`))).map((t) => ({
@@ -306,7 +308,7 @@ function CalendarPage() {
     const p = e.extendedProps; setAllDaySheet(null);
     if (p.type === 'space') router.push(p.item.href);
     else if (p.type === 'task') setOpenTask(p.task.id);
-    else if (p.type === 'event') setPreview({ ev: p.ev, x: 16, y: 120 });
+    else if (p.type === 'event') setPreview({ ev: p.ev, x: 16, y: 120, folded: p.folded });
   };
 
   async function completeTask(t: any) {
@@ -409,7 +411,7 @@ function CalendarPage() {
       setOpenTask(p.task.id); return;
     }
     const r = (i.el as HTMLElement).getBoundingClientRect();
-    setPreview({ ev: p.ev, x: Math.min(window.innerWidth - 376, Math.max(16, r.left)), y: Math.min(window.innerHeight - 380, r.bottom + 6) });
+    setPreview({ ev: p.ev, x: Math.min(window.innerWidth - 376, Math.max(16, r.left)), y: Math.min(window.innerHeight - 380, r.bottom + 6), folded: p.folded });
   }
 
   // 미배정 업무를 시간 칸으로 끌어 놓기 → 업무 시간 블록 (기존 /plan 기능)
@@ -774,7 +776,7 @@ function CalendarPage() {
       )}
       {quick && <QuickCreate {...quick} sheet={touch} calendars={cals.data?.calendars ?? []} onClose={() => { setQuick(null); calRef.current?.getApi().unselect(); }}
         onMore={(draft) => { setQuick(null); setEditor({ draft }); }} onSaved={() => { setQuick(null); calRef.current?.getApi().unselect(); load(); broadcastRefresh(); }} />}
-      {preview && <EventPreview ev={preview.ev} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}
+      {preview && <EventPreview ev={preview.ev} folded={preview.folded} x={preview.x} y={preview.y} calendarName={cals.data?.calendars.find((c) => c.id === preview.ev.calendarId)?.name}
         onClose={() => setPreview(null)} onEdit={() => { setEditor({ id: preview.ev.id, occurrenceStart: preview.ev.originalStart ?? undefined }); setPreview(null); }} onChanged={() => { setPreview(null); load(); broadcastRefresh(); }}
         onOpenTask={(id) => { setOpenTask(id); setPreview(null); }} />}
       {editor && <EventEditor {...editor} calendars={cals.data?.calendars ?? []} onClose={() => { setEditor(null); if (sp.get('event')) { const p = new URLSearchParams(location.search); p.delete('event'); replaceUrl(`/calendar${p.size ? `?${p}` : ''}`); } }} onSaved={() => { load(); broadcastRefresh(); }} dirUsers={dir.users} />}
@@ -1267,7 +1269,7 @@ function narrowTitle(t: string) {
 }
 
 /** 일정 미리보기: 시간·장소·참석자·연결 업무, 업무 시간 블록이면 그 업무의 상태·완료 */
-function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged, onOpenTask }: { ev: any; x: number; y: number; calendarName?: string; onClose: () => void; onEdit: () => void; onChanged: () => void; onOpenTask: (id: string) => void }) {
+function EventPreview({ ev, folded = [], x, y, calendarName, onClose, onEdit, onChanged, onOpenTask }: { ev: any; folded?: any[]; x: number; y: number; calendarName?: string; onClose: () => void; onEdit: () => void; onChanged: () => void; onOpenTask: (id: string) => void }) {
   // #242 2단계: 업무 시간 블록의 업무는 캘린더 위 업무 패널로(예전엔 페이지를 새로 불러와 닫으면 업무 목록으로 감). Ctrl·⌘·가운데 클릭은 새 탭
   const openIn = (e: React.MouseEvent, id: string) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; e.preventDefault(); onOpenTask(id); };
   const occ = ev.recurring && !ev.exception && ev.originalStart ? `?occurrenceStart=${encodeURIComponent(new Date(ev.originalStart).toISOString())}` : '';
@@ -1289,11 +1291,12 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged, onOp
       toast.ok('삭제했습니다', scope === 'all' ? undoDelete(ev.id) : undefined); onChanged();
     } catch (e: any) { toast.error(e.message); }
   }
+  const [doneIds, setDoneIds] = useState<string[]>([]);
   async function complete(t: any) {
     const to = t.status === 'review' ? 'done' : t.approval_line_id || t.approval_required ? 'review' : 'done';
     try {
       await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: to, version: t.version } });
-      toast.ok(to === 'review' ? '검토를 요청했습니다' : '업무를 완료했습니다'); linked.reload(); onChanged();
+      toast.ok(to === 'review' ? '검토를 요청했습니다' : '업무를 완료했습니다'); setDoneIds((xs) => [...xs, t.id]); linked.reload(); onChanged();
     } catch (e: any) {
       if (e.status === 403 && to === 'done') {
         try { await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: 'review', version: t.version } }); toast.ok('검토를 요청했습니다'); linked.reload(); onChanged(); return; } catch (e2: any) { toast.error(e2.message); return; }
@@ -1343,6 +1346,24 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged, onOp
           <div className="mt-3">
             <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-ink-2"><ClipboardList className="size-3.5" />연결 업무 {tasks.length}건{tasks.some((t) => t.status !== 'done' && t.due_date && t.due_date < new Date().toISOString().slice(0, 10)) ? ' · 지연 있음' : ''}</p>
             <LinkedTaskList tasks={tasks.slice(0, 4)} compact />
+          </div>
+        )}
+        {folded.length > 0 && (
+          <div className="mt-3 space-y-1.5" data-testid="preview-folded">
+            <p className="flex items-center gap-1 text-xs font-semibold text-ink-2"><ClipboardList className="size-3.5" />같은 건 업무 {folded.length}건 — 이 일정 줄에 함께 보입니다</p>
+            {folded.map((t) => { const done = t.status === 'done' || doneIds.includes(t.id); return (
+              <div key={t.id} className="rounded-input border border-line p-2.5" data-testid="preview-folded-task">
+                <div className="flex items-center gap-2 text-sm">
+                  <StatusBadge status={done ? 'done' : t.status} />
+                  <a href={`/tasks/${t.id}`} onClick={(e) => openIn(e, t.id)} className="min-w-0 flex-1 truncate font-medium hover:underline">{cleanTitle(t.title)}</a>
+                  <span className="shrink-0 text-xs text-ink-2">{t.due_time ? `마감 ${t.due_time.slice(0, 5)}` : ''}</span>
+                </div>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <Avatar id={t.assignee_id} name={t.assignee_name} size={20} /><span className="flex-1 truncate text-xs text-ink-2">{t.assignee_name ?? '담당자 없음'}</span>
+                  <a href={`/tasks/${t.id}`} onClick={(e) => openIn(e, t.id)} data-testid="preview-folded-open"><Button type="button" size="sm" variant="ghost"><ExternalLink />업무 열기</Button></a>
+                  {!done && <Button type="button" size="sm" onClick={() => complete(t)} data-testid="preview-folded-done"><CircleCheck />{t.status === 'review' ? '최종 완료' : '완료'}</Button>}
+                </div>
+              </div>); })}
           </div>
         )}
         <div className="mt-3 flex justify-end">

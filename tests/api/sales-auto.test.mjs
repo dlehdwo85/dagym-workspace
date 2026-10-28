@@ -39,7 +39,7 @@ describe('영업 진행 → 업무 자동 리스트업', () => {
     const mine = (list.tasks ?? list).find((x) => x.id === t.id);
     assert.ok(mine && mine.sales_ref?.kind === 'bid', '업무 목록 공간 필터·원천');
   });
-  test('보류 → 업무 보류, 다시 연락중 → 되살림, 미참여 → 완료 / 다음 연락일 없는 입찰은 마감 = 입찰 마감 D-1', async () => {
+  test('보류 → 업무 보류, 다시 연락중 → 되살림, 미참여 → 완료 / 다음 연락일 없는 입찰은 마감 = 입찰 마감일 당일·마감 시각(246차 #772)', async () => {
     assert.equal((await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '보류' })).task.action, 'held');
     assert.equal((await openTask('bid', 'N1'))[0].status, 'on_hold');
     assert.equal((await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '연락중' })).task.action, 'updated');
@@ -48,7 +48,8 @@ describe('영업 진행 → 업무 자동 리스트업', () => {
     const [t] = await sql`select status, completed_at from tasks where sales_ref->>'id' = 'N1' order by created_at desc limit 1`;
     assert.equal(t.status, 'done'); assert.ok(t.completed_at);
     await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N2', status: '연락중' });
-    assert.equal((await openTask('bid', 'N2'))[0].due, today, '내일 마감 → D-1 = 오늘');
+    const [t2] = await openTask('bid', 'N2');
+    assert.deepEqual([t2.due, (await sql`select to_char(due_time, 'HH24:MI') t from tasks where id = ${t2.id}`)[0].t], [addDays(today, 1), '17:00'], '내일 17시 마감 → 업무 마감 내일 17:00');
   });
   test('시설 연락중·협력사 신청 준비 → 업무, 영업완료·등록 완료 → 완료 / 전환하면 원천 업무 완료 + 리드 "첫 연락" 업무(lead_id)', async () => {
     await ctx.owner.ok('POST', '/api/sales/work', { kind: 'facility', id: 'F1', status: '연락중', nextDate: today });

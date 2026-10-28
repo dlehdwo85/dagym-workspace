@@ -177,6 +177,8 @@ export async function researchForTask(u: SessionUser, taskId: string) {
     items: items.map((x) => { const r = src.get(x.src_id) ?? {};
       return { id: x.id, srcId: x.src_id, name: x.name, region: r.region ?? null, households: r.household_count ?? null, missing: x.missing, status: x.status, notices: noticeCountOf(counts, x.name),
         phone: r.office_phone ?? r.management_phone ?? r.phone ?? null, operator: communityOperator(x.result?.operator ?? r.current_operator, r.management_company), mgmt: r.management_company ?? null,
+        // 246차 #775: 공개 자료로 미리 아는 것 — 입주·사용승인(준공) 시기
+        moveIn: String(r.move_in_date ?? r.expected_move_in_date ?? '').slice(0, 10) || null, approval: String(r.approval_date ?? r.completion_date ?? r.expected_completion_date ?? '').slice(0, 10) || null,
         result: x.result ?? {} }; }) };
 }
 

@@ -105,9 +105,9 @@ function HandoffButton({ kind, id, name, onDone, compact }: { kind: 'bid' | 'bui
   useEffect(() => { if (people.data && !sel.length) setSel([people.data.suggested ?? people.data.me]); }, [people.data, sel.length]); // #100 원천별 담당 규칙이 있으면 그 사람이 기본
   async function go() {
     setBusy(true);
-    try { const r = await api<{ leadId: string | null; taskIds: string[]; eventIds: string[]; eventErrors: string[]; due: string }>('/api/sales/work/handoff', { body: { kind, id, assigneeIds: sel, note: note || undefined } });
+    try { const r = await api<{ leadId: string | null; taskIds: string[]; eventIds: string[]; eventErrors: string[]; due: string; dueText?: string }>('/api/sales/work/handoff', { body: { kind, id, assigneeIds: sel, note: note || undefined } });
       const tail = `${r.eventIds.length ? ` · 일정 ${r.eventIds.length}건` : ''}${r.eventErrors.length ? ` · 일정 못 만듦 ${r.eventErrors.length}` : ''}`;
-      toast.ok(bid ? `입찰 업무로 넘겼습니다 — 업무 1건(기한 ${r.due}${sel.length > 1 ? ` · 공동 담당 ${sel.length}명` : ''})${tail}` : `영업 진행으로 넘겼습니다 — 업무 ${r.taskIds.length}건(마감 ${r.due})${tail}`);
+      toast.ok(bid ? `입찰 업무로 넘겼습니다 — 업무 1건(마감 ${r.dueText ?? r.due}${sel.length > 1 ? ` · 공동 담당 ${sel.length}명` : ''})${tail}` : `영업 진행으로 넘겼습니다 — 업무 ${r.taskIds.length}건(마감 ${r.due})${tail}`);
       setOpen(false); onDone?.(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
@@ -115,7 +115,7 @@ function HandoffButton({ kind, id, name, onDone, compact }: { kind: 'bid' | 'bui
     <button type="button" onClick={() => setOpen(true)} className={cx(linkCls, 'border-brand-600 text-brand-700')} data-testid="sales-handoff"><ArrowRight className="size-3.5" aria-hidden />{compact ? '넘기기' : bid ? '입찰 업무로 넘기기' : '영업 진행으로 넘기기'}</button>
     {open && <Modal open onClose={() => setOpen(false)} title={bid ? '입찰 업무로 넘기기' : '영업 진행으로 넘기기'}>
       <div className="space-y-3 text-sm" data-testid="sales-handoff-dialog">
-        {bid ? <p className="text-xs text-ink-2" data-testid="sales-handoff-bid-note"><b>{name}</b> — 담당자를 고르면 입찰 업무 1건을 만듭니다(처음 고른 사람이 주 담당, 나머지는 공동 담당). 기한은 참가신청·입찰 마감에 맞춰 자동으로 바뀌고, 공고가 취소되면 업무도 함께 취소됩니다. 현장설명회·참가신청·입찰 마감·개찰 일정은 회사 캘린더에 넣고 알립니다. 리드는 만들지 않습니다.</p>
+        {bid ? <p className="text-xs text-ink-2" data-testid="sales-handoff-bid-note"><b>{name}</b> — 담당자를 고르면 입찰 업무 1건을 만듭니다(처음 고른 사람이 주 담당, 나머지는 공동 담당). 업무 마감은 입찰 마감 일시(마감일 당일·마감 시각)에 맞춰 자동으로 바뀌고, 공고가 취소되면 업무도 함께 취소됩니다. 입찰 마감 일정과 현장설명회 일정(일시가 있을 때만)은 회사 캘린더에 넣고 알립니다. 리드는 만들지 않습니다.</p>
         : <p className="text-xs text-ink-2"><b>{name}</b> — 담당자를 고르면 리드를 만들고 이 건은 ‘영업 중’이 됩니다. 담당자마다 ‘검토·첫 연락’ 업무(마감 = 참가신청/입찰 마감 전날)를 만들고, 공고에 현장설명회·참가신청·개찰·마감 일정이 있으면 회사 캘린더에 넣고 알립니다.</p>}
         {/* 242차 #761(대표 '현설 있으면 현설 일정도 함께 생성 — 현설 불참하면 참석 불가한 공고들도 많습니다'): 만들 일정 미리 보기 */}
         {bid && people.data && <p className="rounded-input bg-slate-50 px-2.5 py-1.5 text-xs text-ink-2" data-testid="sales-handoff-schedule">{people.data.schedule?.length
@@ -1141,6 +1141,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
   // 메일·홈 링크로 온 soon(마감 임박)·prep(준비 기간)·ref(참고) 탭은 칩에 없지만 그 탭에 있는 동안만 칩으로 보여 줌
   const extra: [string, string][] = tab === 'ref' ? [['ref', '참고(검색어만 일치)']] : tab === 'soon' ? [['soon', '마감 임박(3일)']] : tab === 'prep' ? [['prep', '준비 기간(D-10 안)']] : [];
   const chips: [string, string][] = [...BID_CHIPS.map(([k, l]) => [k, k === 'today' && data ? `${l} ${data.todayCount ?? 0}` : l] as [string, string]), ...extra, ['skip', `대상 아님${data ? ` ${data.skipCount ?? 0}건` : ''}`]];
+  const row = (n: any) => <li key={n.id} className="relative">{data?.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data?.readOnly === false} /></li>;
   return (
     <div className="space-y-3" data-testid="sales-bids">
       {!!data?.categories?.length && <div className="flex flex-wrap items-center gap-1.5" data-testid="sales-bids-biz"><span className="text-[11px] text-ink-3">사업</span>
@@ -1151,7 +1152,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
       <div className="flex flex-wrap items-center gap-1.5">{chips.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}
         {tab !== 'awards' && <select className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" data-testid="bids-sort">{BID_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
         {data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
-      {tab === 'awards' ? <AwardStats onOpen={setDeep} /> : !data ? <Skeleton rows={6} /> : <ul className="space-y-1.5">{data.items.map((n: any) => <li key={n.id} className="relative">{data.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data.readOnly === false} /></li>)}
+      {tab === 'awards' ? <AwardStats onOpen={setDeep} /> : !data ? <Skeleton rows={6} /> : tab === 'skip' && data.items.length > 0 ? <SkipGroups items={data.items} row={row} /> : <ul className="space-y-1.5">{data.items.map(row)}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
       {/* 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 뺀 결과(낙찰·유찰) — 당일 메일 '결과' 구역과 같은 기준, 접어 둠 */}
       {tab === 'today' && !!data?.results?.length && <details className="rounded-card border border-line bg-slate-50 p-2" data-testid="bids-results">
@@ -1161,6 +1162,27 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
       {open && <BidDetail n={data?.items.find((x: any) => x.id === open.id) ?? open} admin={data?.canAssign} canWrite={data?.readOnly === false} onChange={reload} onClose={() => setOpen(null)} />}
     </div>
   );
+}
+/** 246차 #773(대표 결정 10/28 21:10 '대상 아님 88건' — 권장 방식): 지우지 않고 마감 달마다 묶음 머리 · 마감 지난 것은 기본 접힘 · 사유 칩으로 거르기 */
+function SkipGroups({ items, row }: { items: any[]; row: (n: any) => React.ReactNode }) {
+  const [why, setWhy] = useState<string | null>(null);
+  const t = today(); const reasonOf = (n: any) => String(n.skip?.reason ?? '').trim() || '사유 없음';
+  const reasons = [...items.reduce((m: Map<string, number>, n: any) => m.set(reasonOf(n), (m.get(reasonOf(n)) ?? 0) + 1), new Map<string, number>())].sort((a, b) => b[1] - a[1]);
+  const list = why ? items.filter((n) => reasonOf(n) === why) : items;
+  const dayOf = (n: any) => kstDay(n.deadline) ?? '';
+  const past = list.filter((n) => dayOf(n) && dayOf(n) < t), live = list.filter((n) => !dayOf(n) || dayOf(n) >= t);
+  const months = (xs: any[], desc: boolean) => { const m = new Map<string, any[]>(); for (const n of xs) { const k = dayOf(n).slice(0, 7) || 'none'; m.set(k, [...(m.get(k) ?? []), n]); }
+    return [...m].sort(([a], [b]) => (a === 'none' ? 1 : b === 'none' ? -1 : desc ? b.localeCompare(a) : a.localeCompare(b))); };
+  const label = (k: string) => (k === 'none' ? '마감일 없음' : `${Number(k.slice(0, 4))}년 ${Number(k.slice(5, 7))}월 마감`);
+  const block = (xs: any[], desc: boolean) => months(xs, desc).map(([k, ns]) => (
+    <section key={k} className="space-y-1.5" data-testid="skip-month"><h3 className="sticky top-0 z-[1] bg-white/95 py-1 text-xs font-semibold text-ink-2">{label(k)} <span className="font-normal text-ink-3">{ns.length}건</span></h3><ul className="space-y-1.5">{ns.map(row)}</ul></section>));
+  return (
+    <div className="space-y-3" data-testid="skip-groups">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="skip-reasons"><span className="text-[11px] text-ink-3">사유</span>
+        {([[null, '전체', items.length], ...reasons.map(([r, c]) => [r, r, c])] as [string | null, string, number][]).map(([k, l, c]) => <button key={l} type="button" onClick={() => setWhy(k)} className={chipCls(why === k)} data-testid="skip-reason-chip">{l} {c}</button>)}</div>
+      {live.length ? block(live, false) : <p className="text-sm text-ink-3" data-testid="skip-live-empty">마감 전인 대상 아님 공고가 없습니다</p>}
+      {past.length > 0 && <details className="rounded-card border border-line bg-slate-50 p-2" data-testid="skip-past"><summary className="cursor-pointer text-sm font-semibold text-ink-2">마감 지난 공고 {past.length}건 <span className="font-normal text-ink-3">— 접어 둠(지우지 않음)</span></summary><div className="mt-2 space-y-3">{block(past, true)}</div></details>}
+    </div>);
 }
 /** 대표 검수 10/20 ②: 입찰 상세 — 한국어 칸만(공고명·단지·발주처·마감·예산·문서·연락처·상태·메모·다음 조치), 관리자 '원본 보기' 접힘 */
 function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
@@ -1588,7 +1610,7 @@ const BID_RES: Record<string, [string, string]> = { won: ['낙찰', 'bg-emerald-
 function BidTaskChip({ b }: { b: any }) {
   const r = b.result ? BID_RES[String(b.result)] : null;
   return <span className="inline-flex flex-wrap items-center gap-1.5" data-testid="sales-bid-task-chip">
-    {b.result !== 'canceled' && <Link href={`/tasks/${b.taskId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-bid-task">입찰 업무{!b.result && b.due ? ` · 기한 ${kd(b.due)}` : ''} →</Link>}
+    {b.result !== 'canceled' && <Link href={`/tasks/${b.taskId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-bid-task">입찰 업무{!b.result && b.due ? ` · 마감 ${kd(b.due)}${b.dueTime ? ` ${b.dueTime}` : ''}` : ''} →</Link>}
     {r && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', r[1])} data-testid="sales-bid-result">{r[0]}{b.auto && b.result !== 'canceled' ? ' · 자동 판정' : ''}</span>}
     {b.contractTaskId && <Link href={`/tasks/${b.contractTaskId}`} className={cx(linkCls, 'text-ink-2')} data-testid="sales-bid-contract">계약 업무 →</Link>}
   </span>;

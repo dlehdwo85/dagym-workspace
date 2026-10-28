@@ -23,8 +23,10 @@ export { BID_STATUS };
 export const BID_RESULT_STATUS = { won: '낙찰', lost: '미낙찰', failed: '유찰', canceled: '공고 취소' } as const;
 export type BidResult = 'won' | 'lost' | 'failed';
 const SRC = 'opportunity_work';
+/** 246차 #772 기한 규칙 표시 — 이 값이 없는 예전 입찰 업무는 정기 점검이 한 번 새 규칙(마감일 당일·마감 시각)으로 다시 계산 */
+const DUE_RULE = 'close_day';
 /** 넘기기로 붙는 진행 기록 칸 — 되돌리면 지움 */
-const BID_KEYS = ['bid_task_id', 'bid_due_auto', 'bid_name', 'bid_agency', 'bid_dates', 'bid_events', 'bid_result', 'handoff_by', 'handoff_at', 'assignees', 'handoff_prev_status'];
+const BID_KEYS = ['bid_task_id', 'bid_due_auto', 'bid_due_time', 'bid_due_rule', 'bid_name', 'bid_agency', 'bid_dates', 'bid_events', 'bid_result', 'handoff_by', 'handoff_at', 'assignees', 'handoff_prev_status'];
 
 export const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = o?.[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return null; };
 export const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
@@ -54,18 +56,27 @@ export const bidMilestones = (r: any): Milestone[] => MS.flatMap(([key, label, k
   // 242차 #761: 필수·임의·공고문 참조 모두 이름에 붙여 일정에서 바로 알게
   return [{ key, label: key === 'briefing' && ['필수', '임의', '공고문 참조'].includes(String(r?.site_briefing_kind ?? '')) ? `${label}(${r.site_briefing_kind})` : label, w }];
 });
-/** 기한: 다가오는 참가신청(없으면 입찰) 마감의 전날(오늘보다 앞이면 마감일) → 마감이 다 지났으면 개찰일 → 그것도 지났으면 null(그대로 둠) */
-export function bidDue(ms: Milestone[], today: string): string | null {
+const hm = (iso: string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+export type Due = { day: string; time: string | null };
+/** 246차 #772(대표 결정 10/28 21:10 '공고 마감일 당일 · 14시인지 17시인지 마감 시각에 맞춰'): 기한 = 다가오는 입찰 마감(없으면 참가신청 마감)의 날·시각
+ *  → 마감이 다 지났으면 개찰일 → 그것도 지났으면 null(그대로 둠). (예전 규칙: 참가신청·입찰 마감 전날) */
+export function bidDue(ms: Milestone[], today: string): Due | null {
   const next = (k: MilestoneKey) => ms.find((m) => m.key === k && m.w.day >= today);
-  const dl = next('apply') ?? next('close');
-  if (dl) { const prev = addDay(dl.w.day, -1); return prev >= today ? prev : dl.w.day; }
-  return next('open')?.w.day ?? null;
+  const m = next('close') ?? next('apply') ?? next('open');
+  return m ? { day: m.w.day, time: m.w.allDay ? null : hm(m.w.start) } : null;
 }
+/** 246차 #771(대표 '입찰마감일정에 맞게 일정과 업무 · 현장설명회 일시가 있으면 현설 일정도 · 현설이 없으면 안 만듦'): 회사 캘린더에 만드는 일정 = 입찰 마감(없으면 참가신청 마감) + 현장설명회(일시가 있고 '없음'이 아닐 때) */
+export function bidEventMs(ms: Milestone[]): Milestone[] {
+  const close = ms.find((m) => m.key === 'close') ?? ms.find((m) => m.key === 'apply');
+  return ms.filter((m) => m.key === 'briefing' || m === close);
+}
+/** '11/2(월) 17:00' — 기한 표시 */
+export const fmtDue = (d: Due) => fmtWhen(d.time ? { day: d.day, start: new Date(`${d.day}T${d.time}:00+09:00`).toISOString(), end: '', allDay: false } : { day: d.day, start: '', end: '', allDay: true });
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 export function fmtWhen(w: When) {
   const md = `${Number(w.day.slice(5, 7))}/${Number(w.day.slice(8, 10))}(${DOW[new Date(`${w.day}T12:00:00+09:00`).getUTCDay()]})`;
   if (w.allDay) return md;
-  return `${md} ${new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(w.start))}`;
+  return `${md} ${hm(w.start)}`;
 }
 const ITEM: Record<MilestoneKey, string> = { briefing: '현장설명회 참석', apply: '참가신청', close: '입찰서 제출', open: '개찰 결과 확인' };
 /** 체크리스트: 공고 검토 + 아직 오지 않은 일정 + (개찰 일정이 없으면) 결과 확인 */
@@ -74,12 +85,12 @@ export function bidChecklist(ms: Milestone[], today: string) {
   if (!ms.some((m) => m.key === 'open' && m.w.day >= today)) items.push('개찰 결과 확인');
   return items;
 }
-/** 242차 #761: 넘기기 창 미리 보기 — 이 공고로 만들 다가오는 일정(현장설명회·참가신청·입찰 마감·개찰). 공고 줄은 공용 자료 */
+/** 242차 #761: 넘기기 창 미리 보기 — 이 공고로 만들 다가오는 일정(246차 #771: 현장설명회·입찰 마감만). 공고 줄은 공용 자료 */
 export async function bidSchedulePreview(id: string) {
   const [r] = await db()<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id.slice(0, 200)}`;
   if (!r) return [];
   const today = ymd(new Date());
-  return bidMilestones(r.row).filter((m) => m.w.day >= today).map((m) => ({ key: m.key, label: m.label, when: fmtWhen(m.w) }));
+  return bidEventMs(bidMilestones(r.row)).filter((m) => m.w.day >= today).map((m) => ({ key: m.key, label: m.label, when: fmtWhen(m.w) }));
 }
 export const bidName = (r: any) => [pick(r, 'complex_name', 'facility_name'), pick(r, 'title', 'notice_title', 'bid_name')].filter(Boolean).join(' ').trim() || '입찰 공고';
 const bidLink = (id: string) => `/s/sales/hub?tab=bids&bt=working&bq=${encodeURIComponent(id)}`;
@@ -132,14 +143,14 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
   if (people.length !== ids.length) throw badRequest('담당자는 영업 공간 구성원·관리자 중에서 골라야 합니다');
   const name = bidName(r); const today = ymd(new Date());
   const ms = bidMilestones(r); const future = ms.filter((m) => m.w.day >= today);
-  const due = bidDue(ms, today) ?? addDay(today, 3);
+  const dueAt = bidDue(ms, today); const due = dueAt?.day ?? addDay(today, 3); const dueTime = dueAt?.time ?? null;
   const agency = pick(r, 'issuer', 'agency', 'demand_agency', 'org_name');
   const link = bidLink(i.id);
-  const desc = ['입찰 공고에서 넘어온 업무입니다. 기한은 공고 일정(참가신청·입찰 마감)에 맞춰 자동으로 바뀌고, 공고가 취소되면 이 업무도 함께 취소됩니다.',
+  const desc = ['입찰 공고에서 넘어온 업무입니다. 기한은 입찰 마감 일시에 맞춰 자동으로 바뀌고, 공고가 취소되면 이 업무도 함께 취소됩니다.',
     agency ? `기관: ${agency}` : null, future.length ? `일정: ${future.map((m) => `${m.label} ${fmtWhen(m.w)}`).join(' · ')}` : null,
     i.note ? `메모: ${i.note}` : null, `공고: ${link}`].filter(Boolean).join('\n');
   const { createTask } = await import('../tasks');
-  const task = await createTask(u, { title: `[입찰] ${name}`.slice(0, 200), description: desc, space: 'sales', assigneeId: ids[0], coAssigneeIds: ids.slice(1), requestedById: u.id, dueDate: due,
+  const task = await createTask(u, { title: `[입찰] ${name}`.slice(0, 200), description: desc, space: 'sales', assigneeId: ids[0], coAssigneeIds: ids.slice(1), requestedById: u.id, dueDate: due, dueTime,
     approvalRequired: false, tags: ['입찰'], checklist: bidChecklist(ms, today) } as never, { quiet: true, skipQuota: true });
   await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: i.id, name, bid: true, handoff: true })} where id = ${task.id}`;
   // 넘기기 전에 상태 버튼(검토중·연락중)으로 생긴 자동 업무는 이 업무가 이어받음(같은 공고 업무 두 건 방지)
@@ -148,17 +159,18 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
   for (const p of prev) await activity(sql, 'task', p.id, u.id, 'merged_into', { into: task.id, reason: 'bid_handoff' });
   // 일정: 회사 공용 캘린더(없으면 건너뜀) — 참석 = 담당자, 알림 하루 전·1시간 전
   const events: Partial<Record<MilestoneKey, string>> = {}; const eventErrors: string[] = [];
-  if (future.length) {
+  const evMs = bidEventMs(ms).filter((m) => m.w.day >= today); // 246차 #771: 입찰 마감 + 현장설명회(일시가 있을 때)만
+  if (evMs.length) {
     const [cal] = await sql<{ id: string }[]>`select id from calendars where type = 'company' and tenant = ${t} order by created_at limit 1`;
     if (cal) { const { createEvent } = await import('../events');
-      for (const m of future) {
+      for (const m of evMs) {
         try { const ev: any = await createEvent(u, { calendarId: cal.id, title: `[입찰] ${m.label} · ${name}`.slice(0, 200), description: `입찰 일정 — 담당 ${people.map((p) => p.name).join('·')}\n업무: /tasks/${task.id}\n공고: ${link}`,
           start: m.w.start, end: m.w.end, allDay: m.w.allDay, attendeeIds: ids, reminderMinutes: m.w.allDay ? [1440] : [1440, 60] } as never); const eid = String(ev?.id ?? ev?.event?.id ?? ''); if (eid) events[m.key] = eid; }
         catch (e: any) { eventErrors.push(`${m.label}: ${String(e?.message ?? e).slice(0, 120)}`); }
       }
     } else eventErrors.push('회사 공용 캘린더가 없어 일정은 만들지 않았습니다');
   }
-  const d = { ...(cur?.data ?? {}), status: BID_STATUS, notice_id: i.id, bid_task_id: task.id, bid_due_auto: due, bid_name: name, bid_agency: agency ?? null,
+  const d = { ...(cur?.data ?? {}), status: BID_STATUS, notice_id: i.id, bid_task_id: task.id, bid_due_auto: due, bid_due_time: dueTime, bid_due_rule: DUE_RULE, bid_name: name, bid_agency: agency ?? null,
     bid_dates: Object.fromEntries(ms.map((m) => [m.key, m.w.start])), bid_events: events, bid_result: null, handoff_by: u.id, handoff_at: new Date().toISOString(), assignees: ids, handoff_prev_status: cur?.status ?? null };
   await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, lead_id, data) values (${t}, ${SRC}, ${cur?.src_id ?? `w:bid:${i.id}`}, ${i.id}, ${BID_STATUS}, null, ${sql.json(d)})
     on conflict (tenant, src_tbl, src_id) do update set status = excluded.status, lead_id = null, data = excluded.data, updated_at = now()`;
@@ -167,8 +179,8 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
   const files = auto.sourceFiles(r.attachment_urls ?? r.attachments, r.notice_file_url).length;
   auto.attachSourceFilesLater(u, { kind: 'bid', id: i.id, taskIds: [task.id] });
   await notify(sql, { userIds: ids.filter((x) => x !== u.id), type: 'task_assigned', space: 'sales', title: `입찰 업무: ${name.slice(0, 60)}`,
-    body: `${u.name}님이 입찰 공고를 업무로 넘겼습니다 — 기한 ${due}${ids.length > 1 ? ` · 공동 담당 ${ids.length}명` : ''}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, push: true, dedupeKey: `sales:bid:${i.id}:${task.id}` } as never).catch(() => {});
-  return { status: BID_STATUS, leadId: null, taskId: task.id, taskIds: [task.id], eventIds: Object.values(events), eventErrors, due, dates: future.map((m) => ({ label: m.label, day: m.w.day })), files, merged: prev.length };
+    body: `${u.name}님이 입찰 공고를 업무로 넘겼습니다 — 기한 ${fmtDue({ day: due, time: dueTime })}${ids.length > 1 ? ` · 공동 담당 ${ids.length}명` : ''}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, push: true, dedupeKey: `sales:bid:${i.id}:${task.id}` } as never).catch(() => {});
+  return { status: BID_STATUS, leadId: null, taskId: task.id, taskIds: [task.id], eventIds: Object.values(events), eventErrors, due, dueTime, dueText: fmtDue({ day: due, time: dueTime }), dates: future.map((m) => ({ label: m.label, day: m.w.day })), files, merged: prev.length };
 }
 
 export const bidRevertInput = z.object({ kind: z.literal('bid'), id: z.string().min(1).max(100), reason: z.string().trim().max(300).optional() });
@@ -342,23 +354,31 @@ export async function bidTasksTick(now = new Date()) {
       const live = latestLive(g) ?? g[0]; const ms = bidMilestones(live);
       const dates = Object.fromEntries(ms.map((m) => [m.key, m.w.start])) as Record<string, string>;
       let touched = false; const added: Record<string, string> = {}; const none: Record<string, boolean> = {};
+      const want = new Set(bidEventMs(ms).map((m) => m.key)); // 246차 #771: 새로 만드는 일정은 입찰 마감·현장설명회만(예전에 만든 참가신청·개찰 일정은 날짜만 따라감)
       for (const m of ms) {
         const ev = (d.bid_events ?? {})[m.key]; const same = (d.bid_dates ?? {})[m.key] === m.w.start;
         // 242차 #761: 날짜는 그대로여도 일정이 없는 다가오는 일정(리드에서 옮긴 입찰 등)은 한 번 만듦 — 못 만들면(캘린더·담당 없음) 표시해 다시 시도하지 않음
-        const missing = !ev && m.w.day >= today && !(d.bid_event_none ?? {})[m.key];
+        const missing = !ev && want.has(m.key) && m.w.day >= today && !(d.bid_event_none ?? {})[m.key];
         if (same && !missing) continue; touched = true;
         if (ev) await sql`update events set start_at = ${m.w.start}, end_at = ${m.w.end}, all_day = ${m.w.allDay}, updated_at = now(), version = version + 1 where id = ${ev} and deleted_at is null`;
         // 239차(#744): 넘긴 뒤에 새로 알게 된 일정은 한 번 만듦(날짜를 아래에서 기억하므로 다음 점검에서 다시 만들지 않음)
-        else if (m.w.day >= today) { const eid = await addBidEvent(sql, rec.tenant, d, m, id).catch((e) => { errors.push(`${id} 일정: ${String((e as Error)?.message ?? e).slice(0, 80)}`); return null; }); if (eid) added[m.key] = eid; else none[m.key] = true; }
+        else if (want.has(m.key) && m.w.day >= today) { const eid = await addBidEvent(sql, rec.tenant, d, m, id).catch((e) => { errors.push(`${id} 일정: ${String((e as Error)?.message ?? e).slice(0, 80)}`); return null; }); if (eid) added[m.key] = eid; else none[m.key] = true; }
       }
       const auto = bidDue(ms, today);
-      if (auto && auto !== d.bid_due_auto) {
+      // 246차 #772: 예전 규칙(마감 전날)으로 만든 열린 업무는 한 번 새 규칙(마감일 당일·마감 시각)으로 — 사람이 옮긴 기한도(대표 '이미 만든 입찰 업무도 다시 계산')
+      const relaid = d.bid_due_rule !== DUE_RULE;
+      if (auto && (relaid || auto.day !== d.bid_due_auto || auto.time !== (d.bid_due_time ?? null))) {
         touched = true;
-        const mv = await sql<{ id: string }[]>`update tasks set due_date = ${auto}, updated_at = now(), version = version + 1 where id = ${d.bid_task_id} and deleted_at is null and status <> 'done' and due_date = ${d.bid_due_auto ?? null}::date returning id`;
-        for (const x of mv) await activity(sql, 'task', x.id, null, 'updated', { dueDate: { from: d.bid_due_auto ?? null, to: auto }, reason: 'bid_schedule' });
+        const mv = await sql<{ id: string; from: string | null; fromTime: string | null }[]>`update tasks x set due_date = ${auto.day}, due_time = ${auto.time}::time, updated_at = now(), version = x.version + 1
+          from tasks o where o.id = x.id and x.id = ${d.bid_task_id} and x.deleted_at is null and x.status <> 'done'
+            and (${relaid} or (x.due_date = ${d.bid_due_auto ?? null}::date and to_char(x.due_time, 'HH24:MI') is not distinct from ${d.bid_due_time ?? null}::text))
+            and (x.due_date is distinct from ${auto.day}::date or to_char(x.due_time, 'HH24:MI') is distinct from ${auto.time}::text)
+          returning x.id, o.due_date::text as from, to_char(o.due_time, 'HH24:MI') as "fromTime"`;
+        for (const x of mv) await activity(sql, 'task', x.id, null, 'updated', { dueDate: { from: x.from, to: auto.day }, dueTime: { from: x.fromTime, to: auto.time }, reason: relaid ? 'bid_rule_close_day' : 'bid_schedule' });
         if (mv.length) moved++;
       }
-      if (touched) await sql`update sales_work_records set data = ${sql.json({ ...d, bid_dates: { ...(d.bid_dates ?? {}), ...dates }, bid_events: { ...(d.bid_events ?? {}), ...added }, ...(Object.keys(none).length ? { bid_event_none: { ...(d.bid_event_none ?? {}), ...none } } : {}), bid_due_auto: auto ?? d.bid_due_auto ?? null })}, updated_at = now()
+      if (touched || relaid) await sql`update sales_work_records set data = ${sql.json({ ...d, bid_dates: { ...(d.bid_dates ?? {}), ...dates }, bid_events: { ...(d.bid_events ?? {}), ...added }, ...(Object.keys(none).length ? { bid_event_none: { ...(d.bid_event_none ?? {}), ...none } } : {}),
+        bid_due_auto: auto?.day ?? d.bid_due_auto ?? null, bid_due_time: auto ? auto.time : d.bid_due_time ?? null, bid_due_rule: DUE_RULE })}, updated_at = now()
         where tenant = ${rec.tenant} and src_tbl = ${SRC} and src_id = ${rec.src_id}`;
     } catch (e) { errors.push(`${id}: ${String((e as Error)?.message ?? e).slice(0, 120)}`); }
   }
@@ -454,7 +474,7 @@ export async function moveBidLeads(u: SessionUser, i: z.infer<typeof moveBidLead
     const noticeId = r.ref_id;
     const [nrow] = await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${noticeId}`;
     const ms = nrow ? bidMilestones(nrow.row) : [];
-    const due = bidDue(ms, ymd(new Date())); // 242차 #762: 리드 업무를 입찰 업무로 바꿀 때 기한도 넘기기와 같은 규칙(참가신청·입찰 마감 전날)으로
+    const due = bidDue(ms, ymd(new Date())); // 242차 #762 → 246차 #772: 리드 업무를 입찰 업무로 바꿀 때 기한도 넘기기와 같은 규칙(입찰 마감일 당일·마감 시각)으로
     const taskId = await sql.begin(async (tx) => {
       // 넘기기로 만든 입찰 업무(담당자마다 1건이던 예전 방식) — 리드 연결만 끊음
       const bidT = await tx<{ id: string; status: string; due: string | null }[]>`update tasks set lead_id = null, sales_ref = coalesce(sales_ref, '{}'::jsonb) || ${tx.json({ bid: true })}, updated_at = now(), version = version + 1
@@ -465,8 +485,8 @@ export async function moveBidLeads(u: SessionUser, i: z.infer<typeof moveBidLead
       for (const lt of await tx<{ id: string; status: string; due: string | null }[]>`select id, status, due_date::text as due from tasks where deleted_at is null and lead_id = ${r.id} and status <> 'done' order by created_at`) {
         if (!main) {
           await tx`update tasks set title = ${`[입찰] ${r.name}`.slice(0, 200)}, lead_id = null, sales_ref = ${tx.json({ kind: 'bid', id: noticeId, name: r.name, bid: true })},
-            due_date = coalesce(${due}::date, due_date), updated_at = now(), version = version + 1 where id = ${lt.id}`;
-          await activity(tx as unknown as Sql, 'task', lt.id, u.id, 'updated', { reason: 'moved_to_bid', leadId: r.id, ...(due && due !== lt.due ? { due: { from: lt.due, to: due } } : {}) }); main = { ...lt, due: due ?? lt.due };
+            due_date = coalesce(${due?.day ?? null}::date, due_date), due_time = case when ${due?.day ?? null}::date is null then due_time else ${due?.time ?? null}::time end, updated_at = now(), version = version + 1 where id = ${lt.id}`;
+          await activity(tx as unknown as Sql, 'task', lt.id, u.id, 'updated', { reason: 'moved_to_bid', leadId: r.id, ...(due && due.day !== lt.due ? { due: { from: lt.due, to: due.day } } : {}) }); main = { ...lt, due: due?.day ?? lt.due };
         } else {
           await tx`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = ${lt.id}`;
           await activity(tx as unknown as Sql, 'task', lt.id, u.id, 'merged_into', { into: main.id, reason: 'moved_to_bid' });
@@ -482,7 +502,7 @@ export async function moveBidLeads(u: SessionUser, i: z.infer<typeof moveBidLead
       const assignees: string[] = Array.isArray(r.src?.assignees) && r.src.assignees.length ? r.src.assignees : r.owner_id ? [r.owner_id] : [];
       const prevSt = typeof wd.handoff_prev_status === 'string' && wd.handoff_prev_status ? wd.handoff_prev_status : '검토중';
       const st = main ? BID_STATUS : prevSt;
-      const nd = main ? { ...wd, status: st, notice_id: noticeId, bid_task_id: main.id, bid_due_auto: main.due ?? null, bid_name: r.name, bid_agency: wd.bid_agency ?? null, bid_dates: Object.fromEntries(ms.map((m) => [m.key, m.w.start])),
+      const nd = main ? { ...wd, status: st, notice_id: noticeId, bid_task_id: main.id, bid_due_auto: main.due ?? null, bid_due_time: due && main.due === due.day ? due.time : null, bid_name: r.name, bid_agency: wd.bid_agency ?? null, bid_dates: Object.fromEntries(ms.map((m) => [m.key, m.w.start])),
         bid_events: events, bid_result: null, handoff_by: r.src?.by ?? wd.handoff_by ?? u.id, handoff_at: wd.handoff_at ?? new Date(r.created_at).toISOString(), assignees, handoff_prev_status: null, moved_from_lead: r.id }
         : { ...wd, status: st, moved_from_lead: r.id };
       await tx`update sales_work_records set status = ${st}, lead_id = null, data = ${tx.json(nd)}, updated_at = now() where tenant = ${t} and src_tbl = ${SRC} and src_id = ${r.src_id}`;
