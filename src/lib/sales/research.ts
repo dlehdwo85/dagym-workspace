@@ -23,7 +23,11 @@ const AGAIN_DAYS = 84;
 export type Missing = 'operator' | 'contract' | 'phone';
 /** #758(대표 10/28): mode = 운영 방식(직영·위탁·미개관) · firstPick = 미개관이면 첫 운영사 선정 예정 시기(자유 글) */
 export const RESEARCH_MODES = ['직영', '위탁', '미개관'] as const;
-export type ResearchResult = { operator?: string | null; contractEnd?: string | null; phone?: string | null; note?: string | null; mode?: (typeof RESEARCH_MODES)[number] | null; firstPick?: string | null };
+/** 247차 #778(대표 10/28 21:35 '계약 만료일은 잘 안 알려 줌 — 컨택해서 미팅 유도'): 연락 결과 — 통화·통화한 분 직함(개인 전화는 저장 안 함)·반응·미팅 약속(일정)·다음 연락일(업무) */
+export const RESEARCH_CALLS = ['통화함', '안 받음', '번호 틀림'] as const;
+export const RESEARCH_REACTIONS = ['관심 있음', '보통', '관심 없음'] as const;
+export type ResearchResult = { operator?: string | null; contractEnd?: string | null; phone?: string | null; note?: string | null; mode?: (typeof RESEARCH_MODES)[number] | null; firstPick?: string | null;
+  call?: (typeof RESEARCH_CALLS)[number] | null; contactTitle?: string | null; reaction?: (typeof RESEARCH_REACTIONS)[number] | null; meetingAt?: string | null; nextDate?: string | null; meetingEventId?: string | null; nextTaskId?: string | null };
 export type ResearchState = { id: number; week: string; status: 'open' | 'done' | 'none'; due: string | null; taskId: string | null; assignee: string | null; doneAt: string | null; missing: Missing[];
   /** 지금까지 적은 값(최근 것 먼저 — 칸마다) */ result: ResearchResult };
 
@@ -45,7 +49,7 @@ export async function researchState(sql: Sql, t: string): Promise<Map<string, Re
   const out = new Map<string, ResearchState>();
   for (const r of rows) {
     const cur = out.get(r.src_id);
-    if (cur) { for (const k of ['operator', 'contractEnd', 'phone', 'note', 'mode', 'firstPick'] as const) if (!cur.result[k] && r.result?.[k]) (cur.result as Record<string, unknown>)[k] = r.result[k]; continue; }
+    if (cur) { for (const k of ['operator', 'contractEnd', 'phone', 'note', 'mode', 'firstPick', 'call', 'contactTitle', 'reaction', 'meetingAt', 'nextDate'] as const) if (!cur.result[k] && r.result?.[k]) (cur.result as Record<string, unknown>)[k] = r.result[k]; continue; }
     const closed = r.status === 'open' && (!r.task_id || r.deleted || r.task_status === 'done');
     const doneAt = r.done_at ?? (closed ? r.completed_at ?? null : null);
     out.set(r.src_id, { id: r.id, week: r.week, status: closed ? 'none' : (r.status as ResearchState['status']), due: r.due, taskId: r.deleted ? null : r.task_id, assignee: r.assignee,
@@ -125,9 +129,11 @@ export async function researchWeekly(t: string, opt: { now?: Date; actor?: Sessi
   return { week, items: picked.length, taskId: task.id, assigneeId, due };
 }
 
-/** 정기 실행: 월요일(KST) 08시 이후 첫 tick 에 영업 공간을 켠 회사마다 한 번(SALES_RESEARCH_WEEKLY = '요일-시' 기본 '1-8', 'any' = 늘, 'off' = 안 함) */
+/** 정기 실행: SALES_RESEARCH_WEEKLY = '요일-시'(예 '1-8' = 월요일 08시 뒤 첫 tick) · 'any' = 늘 · 'off' = 안 함.
+ *  247차 #777(대표 10/28 21:35 'db가 생성될 때마다 업무를 부여하는게 아니라 단지 정보를 확인 후 업무로 넘기는건 사람이 합니다'): 기본 'off' — 카드·여러 개 체크 [후속조사 넘기기]로 사람이 넘김 */
+export const RESEARCH_WEEKLY_GATE = () => process.env.SALES_RESEARCH_WEEKLY ?? 'off';
 export async function researchWeeklyTick(opt: { now?: Date } = {}) {
-  const now = opt.now ?? new Date(); const gate = process.env.SALES_RESEARCH_WEEKLY ?? '1-8';
+  const now = opt.now ?? new Date(); const gate = RESEARCH_WEEKLY_GATE();
   if (gate === 'off') return { skipped: 'off' };
   if (gate !== 'any') {
     const [dow, hour] = gate.split('-').map(Number);
@@ -151,7 +157,7 @@ export async function researchOverview(u: SessionUser) {
     select w.week::text as week, w.task_id, w.items, tk.due_date::text as due, a.name as assignee, tk.status as task_status, tk.deleted_at is not null as deleted
     from sales_research_weekly w left join tasks tk on tk.id = w.task_id left join users a on a.id = tk.assignee_id where w.tenant = ${t} order by w.week desc limit 1`;
   const [n] = w?.task_id ? await sql<{ done: number; none: number }[]>`select count(*) filter (where status = 'done')::int as done, count(*) filter (where status = 'none')::int as none from sales_research where task_id = ${w.task_id}` : [{ done: 0, none: 0 }];
-  const gate = process.env.SALES_RESEARCH_WEEKLY ?? '1-8';
+  const gate = RESEARCH_WEEKLY_GATE();
   return { latest: w ? { week: w.week, thisWeek: w.week === week, taskId: w.deleted ? null : w.task_id, items: w.items, due: w.due, assignee: w.assignee, taskDone: w.task_status === 'done', done: n.done, none: n.none } : null,
     max: RESEARCH_MAX(), auto: gate !== 'off', canRun: isAdmin(u) && w?.week !== week };
 }
@@ -160,6 +166,49 @@ export async function runResearchManual(u: SessionUser) {
   await assertSpace(u, 'sales');
   if (!isAdmin(u)) throw forbidden('후속조사 묶음은 관리자만 만들 수 있습니다');
   return researchWeekly(tenantOf(u), { actor: u });
+}
+
+/** 247차 #777: [후속조사 넘기기] — 사람이 고른 준공·입주 시설(카드 하나 또는 여러 개 체크)을 후속조사 업무 하나로. 담당 기본 = 담당자 지정 '영업 원천 · 시설'(바꿀 수 있음, 영업 공간 사람만).
+ *  이미 후속조사 중인 곳은 건너뜀. 묶인 시설은 sales_research 에 한 줄씩(카드 '후속조사 중 · 담당', 업무 [완료] 때 연락 결과 창) */
+export const researchHandoffInput = z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(50), assigneeId: z.string().uuid().optional() });
+export async function handoffResearch(u: SessionUser, i: z.infer<typeof researchHandoffInput>) {
+  await assertSpace(u, 'sales');
+  const sql = db(); const t = tenantOf(u); const today = ymd(); const week = weekMonday(today);
+  const ids = [...new Set(i.ids)];
+  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'operating_facility_prospects' and src_id = any(${ids}::text[])`;
+  if (!rows.length) throw notFound('시설을 찾을 수 없습니다');
+  const { handoffPeople } = await import('./handoff');
+  const ppl = await handoffPeople(u, 'facility');
+  const assigneeId = i.assigneeId ?? ppl.suggested ?? u.id;
+  if (!ppl.people.some((p) => p.id === assigneeId)) throw badRequest('담당자는 영업 공간 구성원·관리자 중에서 골라야 합니다');
+  const state = await researchState(sql, t);
+  const skipped: { id: string; name: string; why: string }[] = []; const picked: { id: string; name: string; r: any }[] = [];
+  for (const { src_id, row: r } of rows) {
+    const name = String(r.name ?? r.facility_name ?? r.complex_name ?? '(이름 없음)'); const s = state.get(src_id);
+    if (s?.status === 'open' && s.taskId) skipped.push({ id: src_id, name, why: `이미 후속조사 중${s.assignee ? `(담당 ${s.assignee})` : ''}` }); else picked.push({ id: src_id, name, r });
+  }
+  if (!picked.length) return { taskId: null, items: 0, skipped };
+  const terms = await (await import('./options')).salesTerms(t);
+  const counts = await relatedNoticeCounts(sql).catch(() => new Map<string, number>());
+  const hh = (n: unknown) => (Number(n) > 0 ? `${Number(n).toLocaleString('ko-KR')}세대` : null);
+  const lines = picked.map(({ name, r }, k) => { const phone = r.office_phone ?? r.management_phone ?? r.phone; const n = noticeCountOf(counts, name);
+    return `${k + 1}. ${name}${[r.region, hh(r.household_count)].filter(Boolean).length ? ` (${[r.region, hh(r.household_count)].filter(Boolean).join(' · ')})` : ''}${phone ? ` · ${terms.office} ${phone}` : ''}${n ? ` · 관련 공고 ${n}건` : ''}`
+      + `\n   /s/sales/hub?tab=facilities&q=${encodeURIComponent(name)}`; });
+  const title = picked.length === 1 ? `[후속조사] ${picked[0].name} — 연락(전화)` : `[후속조사] ${terms.kind.facility} ${picked.length}곳 — 연락(전화)`;
+  const description = `${u.name}님이 넘긴 후속조사 ${picked.length}곳입니다 — ${terms.office}에 전화해 ${terms.opCheck}(직영·위탁·미개관)과 담당하시는 분을 확인하고, 미팅을 잡아 주세요.\n`
+    + `업무를 [완료]하면 곳마다 연락 결과(통화·통화한 분 직함·반응·미팅 약속·다음 연락일)를 적는 창이 뜹니다. 계약 만료일은 알려 주면 적고, 몰라도 됩니다. 개인 휴대폰 번호는 적지 않습니다.\n\n${lines.join('\n')}`;
+  const { createTask } = await import('../tasks');
+  const task = await createTask(u, { title: title.slice(0, 200), description, space: 'sales', assigneeId, requestedById: u.id, dueDate: addDays(today, RESEARCH_DUE_DAYS), approvalRequired: false, tags: ['영업', '후속조사'] }, { quiet: true, skipQuota: true });
+  await sql`update tasks set sales_ref = ${sql.json({ kind: 'research', id: `facility:handoff:${task.id}`, name: `${terms.facilitiesTab} 후속조사` })}, assigned_by_rule = ${!i.assigneeId && ppl.suggested === assigneeId ? ppl.suggestedByRule ?? null : null} where id = ${task.id}`;
+  for (const { id, name, r } of picked) {
+    const missing = missingOf({ operator: communityOperator(r.current_operator, r.management_company), contractEnd: r.contract_end_date ?? r.contract_end ?? null, phone: r.office_phone ?? r.management_phone ?? r.phone });
+    await sql`insert into sales_research (tenant, kind, src_id, name, week, task_id, missing) values (${t}, 'facility', ${id}, ${name.slice(0, 300)}, ${week}::date, ${task.id}, ${missing})
+      on conflict (tenant, kind, src_id, week) do update set task_id = excluded.task_id, missing = excluded.missing, status = 'open', updated_at = now()`;
+  }
+  if (assigneeId !== u.id) await notify(sql, { userIds: [assigneeId], type: 'task_assigned', space: 'sales', title: `후속조사: ${title.replace(/^\[후속조사\]\s*/, '').slice(0, 60)}`,
+    body: `${u.name}님이 후속조사 ${picked.length}곳을 넘겼습니다 — ${md(addDays(today, RESEARCH_DUE_DAYS))}까지 연락`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, push: true, dedupeKey: `sales_research:handoff:${task.id}` } as never).catch(() => []);
+  await audit(sql, u.id, 'sales_research.handoff', 'task', task.id, { items: picked.map((x) => x.id), assigneeId, skipped: skipped.length }).catch(() => {});
+  return { taskId: task.id, items: picked.length, skipped, assigneeId };
 }
 
 /** 업무 [완료] 창: 이 업무에 묶인 시설과 지금 값(적은 값 먼저) */
@@ -193,7 +242,9 @@ export function communityOperator(op: unknown, mgmt: unknown): string | null {
 const ymdRe = /^\d{4}-\d{2}-\d{2}$/;
 export const researchInput = z.object({ operator: z.string().trim().max(100).nullable().optional(), contractEnd: z.string().regex(ymdRe).nullable().optional().or(z.literal('').transform(() => null)),
   phone: z.string().trim().max(40).regex(/^[0-9+\-() ]*$/, '전화번호는 숫자와 - 만 적어 주세요').nullable().optional(), note: z.string().trim().max(500).nullable().optional(),
-  mode: z.enum(RESEARCH_MODES).nullable().optional(), firstPick: z.string().trim().max(40).nullable().optional() });
+  mode: z.enum(RESEARCH_MODES).nullable().optional(), firstPick: z.string().trim().max(40).nullable().optional(),
+  call: z.enum(RESEARCH_CALLS).nullable().optional(), contactTitle: z.string().trim().max(40).nullable().optional(), reaction: z.enum(RESEARCH_REACTIONS).nullable().optional(),
+  meetingAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/).nullable().optional().or(z.literal('').transform(() => null)), nextDate: z.string().regex(ymdRe).nullable().optional().or(z.literal('').transform(() => null)) });
 /**
  * 시설 하나의 조사 결과 저장 — 값이 하나라도 있으면 '조사함', 모두 비면 '확인 못함'. 업무를 볼 수 있는 사람만(못 보면 404).
  * 전환 뒤(쓰기 열림)에는 현 위탁사·계약만료일을 회사 진행 기록에도 — 계약만료·재입찰 탭·시설 보관함과 같은 값
@@ -202,13 +253,38 @@ export async function saveResearch(u: SessionUser, id: number, i: z.infer<typeof
   await assertSpace(u, 'sales');
   const sql = db(); const t = tenantOf(u);
   if (!Number.isInteger(id) || id <= 0) throw notFound('후속조사 건을 찾을 수 없습니다');
-  const [r] = await sql<{ id: number; src_id: string; name: string; task_id: string | null }[]>`select id, src_id, name, task_id from sales_research where id = ${id} and tenant = ${t}`;
+  const [r] = await sql<{ id: number; src_id: string; name: string; task_id: string | null; prev: ResearchResult | null }[]>`select id, src_id, name, task_id, result as prev from sales_research where id = ${id} and tenant = ${t}`;
   if (!r) throw notFound('후속조사 건을 찾을 수 없습니다');
   if (r.task_id) await loadTaskForUser(u, r.task_id); else if (!isAdmin(u)) throw notFound('후속조사 건을 찾을 수 없습니다');
   const result: ResearchResult = { operator: i.operator?.trim() || null, contractEnd: i.contractEnd || null, phone: i.phone?.trim() || null, note: i.note?.trim() || null,
-    mode: i.mode ?? null, firstPick: i.mode === '미개관' ? i.firstPick?.trim() || null : null }; // #758 첫 운영사 선정 예정 시기는 미개관일 때만
+    mode: i.mode ?? null, firstPick: i.mode === '미개관' ? i.firstPick?.trim() || null : null, // #758 첫 운영사 선정 예정 시기는 미개관일 때만
+    call: i.call ?? null, contactTitle: i.contactTitle?.trim() || null, reaction: i.reaction ?? null, meetingAt: i.meetingAt || null, nextDate: i.nextDate || null };
   if (result.contractEnd && Number.isNaN(Date.parse(`${result.contractEnd}T00:00:00Z`))) throw badRequest('계약만료일이 올바르지 않습니다');
-  const status = result.operator || result.contractEnd || result.phone || result.mode ? 'done' : 'none';
+  // 247차 #778: 통화가 안 됐고(안 받음·번호 틀림) 다른 값도 없으면 '확인 못함'
+  const status = result.operator || result.contractEnd || result.phone || result.mode || result.call === '통화함' || result.contactTitle || result.reaction || result.meetingAt || result.nextDate ? 'done' : 'none';
+  // 미팅 약속 → 일정 하나(회사 공용 캘린더, 없으면 내 캘린더) · 다음 연락일 → 업무 하나 — 같은 값으로 다시 저장하면 다시 만들지 않음
+  const prev = r.prev ?? {};
+  if (result.meetingAt) {
+    if (prev.meetingAt === result.meetingAt && prev.meetingEventId) result.meetingEventId = prev.meetingEventId;
+    else {
+      const [cal] = await sql<{ id: string }[]>`select id from calendars where type = 'company' and tenant = ${t} order by created_at limit 1`;
+      const st = new Date(`${result.meetingAt}:00+09:00`); const { createEvent } = await import('../events');
+      const mk = (calendarId?: string) => createEvent(u, { ...(calendarId ? { calendarId } : {}), title: `[영업] 미팅 · ${r.name}`.slice(0, 200), start: st.toISOString(), end: new Date(st.getTime() + 3600e3).toISOString(), allDay: false,
+        description: `후속조사에서 잡은 미팅${result.contactTitle ? ` — ${result.contactTitle}` : ''}${result.reaction ? ` · 반응 ${result.reaction}` : ''}\n시설: /s/sales/hub?tab=facilities&q=${encodeURIComponent(r.name)}`, attendeeIds: [u.id], reminderMinutes: [1440, 60] } as never);
+      // 회사 캘린더에 쓸 권한이 없으면(직원) 내 캘린더에 — 일정을 못 만들어도 조사 결과는 저장
+      const ev: any = await mk(cal?.id).catch(() => (cal ? mk().catch(() => null) : null));
+      result.meetingEventId = String(ev?.id ?? ev?.event?.id ?? '') || null;
+    }
+  }
+  if (result.nextDate) {
+    if (prev.nextDate === result.nextDate && prev.nextTaskId) result.nextTaskId = prev.nextTaskId;
+    else {
+      const tk = await (await import('../tasks')).createTask(u, { title: `[영업] ${r.name} — 다음 연락`.slice(0, 200), description: `후속조사 다음 연락${result.contactTitle ? ` — ${result.contactTitle}` : ''}${result.reaction ? ` · 반응 ${result.reaction}` : ''}${result.note ? `\n메모: ${result.note}` : ''}\n시설: /s/sales/hub?tab=facilities&q=${encodeURIComponent(r.name)}`,
+        space: 'sales', assigneeId: u.id, requestedById: u.id, dueDate: result.nextDate, approvalRequired: false, tags: ['영업', '후속조사'] } as never, { quiet: true, skipQuota: true });
+      await sql`update tasks set sales_ref = ${sql.json({ kind: 'facility', id: r.src_id, name: r.name })} where id = ${tk.id}`;
+      result.nextTaskId = tk.id;
+    }
+  }
   await sql`update sales_research set status = ${status}, result = ${sql.json(result as never)}, done_by = ${u.id}, done_at = now(), updated_at = now() where id = ${r.id}`;
   let saved = false;
   if (result.operator || result.contractEnd) {

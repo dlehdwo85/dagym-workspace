@@ -588,7 +588,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           operator: RM.communityOperator(pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator') ?? rs?.result.operator, pick(r, 'management_company')), mgmt: pick(r, 'management_company') ?? null, // #760 관리회사 ≠ 커뮤니티 운영사
           contractEnd: day(pick(p, 'contract_end_date')) ?? rs?.result.contractEnd ?? null,
           phone: pick(r, 'office_phone', 'management_phone', 'phone') ?? rs?.result.phone ?? null, amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
-          research: rs ? { status: rs.status, due: rs.due, assignee: rs.assignee, taskId: rs.taskId, doneAt: rs.doneAt, missing: rs.missing, note: rs.result.note ?? null, mode: rs.result.mode ?? null, firstPick: rs.result.firstPick ?? null } : null,
+          research: rs ? { status: rs.status, due: rs.due, assignee: rs.assignee, taskId: rs.taskId, doneAt: rs.doneAt, missing: rs.missing, note: rs.result.note ?? null, mode: rs.result.mode ?? null, firstPick: rs.result.firstPick ?? null,
+            reaction: rs.result.reaction ?? null, meetingAt: rs.result.meetingAt ?? null, contactTitle: rs.result.contactTitle ?? null, nextDate: rs.result.nextDate ?? null } : null, // 247차 #778 연락 결과
           notices: RM.noticeCountOf(NC, pick(r, 'name', 'facility_name', 'complex_name')), // #758 '이 단지 관련 공고 n건'
           firstSeen: firstSeen(r), moveIn: day(pick(r, 'move_in_date', 'move_in_start')), lastNote: p?.notes ?? p?.last_note ?? p?.memo ?? null,
           nextAction: p?.next_action ?? pick(r, 'etl_suggested_next_action', 'next_action', 'recommended_action'), nextActionFrom: p?.next_action ? '진행 기록' : pick(r, 'etl_suggested_next_action') ? '수집기 제안' : null,

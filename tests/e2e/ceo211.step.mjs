@@ -57,7 +57,7 @@ export async function ceo211({ owner, ctx, sql, BASE, SHOTS }) {
   await items.first().waitFor();
   await owner.waitForTimeout(300);
   assert.equal(await items.count(), 1, '같은 입찰은 한 줄');
-  assert.match(await items.first().innerText(), /업무 1/);
+  assert.match(await items.first().innerText(), /· 업무 \S+/, '246차 #770 묶인 업무 담당(1건이면 이름)');
 
   // ⑤ 요금제는 사용량·요금제 화면 한곳에(마케팅 공간을 켠 회사)
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
