@@ -191,7 +191,8 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
     notice_no: txt(p.notice_no), // #543 차수·구분 없는 공고번호(온비드·국방·LH — 원천 사이트에서 검색할 번호)
     // 231차 K-apt 상세: 참여업체(이름·사업자번호·응찰금액·낙찰 여부·무효만 — 대표자·전화 칸은 받지 않음)·낙찰/유찰/취소 사유·상세 읽은 때
     ...(Array.isArray(p.participants) ? { participants: (p.participants as any[]).slice(0, 60).map((b) => ({ name: txt(b?.name)?.slice(0, 100) ?? '', bizNo: txt(b?.bizNo), amount: num(b?.amount), won: b?.won === true, invalid: b?.invalid === true,
-      ...(num(b?.score) != null ? { score: num(b?.score) } : {}) })).filter((b) => b.name) } : {}), // 234차: 적격심사 평가 점수(있을 때만)
+      ...(num(b?.score) != null ? { score: num(b?.score) } : {}), ...(typeof b?.docs === 'boolean' ? { docs: b.docs } : {}), ...(typeof b?.site === 'boolean' ? { site: b.site } : {}),
+      ...(b?.hidden === true ? { hidden: true } : {}) })).filter((b) => b.name) } : {}), // 234차: 적격심사 평가 점수 · 237차: 서류 적정·현장설명 참석·금액 비공개(있을 때만)
     ...(txt(p.result_note) ? { result_note: txt(p.result_note)!.slice(0, 200) } : {}), ...(txt(p.kapt_detail_at) ? { kapt_detail_at: txt(p.kapt_detail_at) } : {}), ...(num(p.kapt_detail_v) != null ? { kapt_detail_v: num(p.kapt_detail_v) } : {}),
   };
   return { ok: true, row };

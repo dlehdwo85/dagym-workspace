@@ -55,7 +55,10 @@ export async function lookupNotices(q: { no?: string | null; q?: string | null }
       award: r.winner_name || r.winner_amount || r.winner_rate || r.bidders ? { winner: r.winner_name ?? null, winnerBizNo: r.winner_biz_no ?? null, amount: r.winner_amount ?? null, rate: r.winner_rate ?? null,
         bidders: r.bidders ?? null, awardDate: r.award_date ?? null, resultAt: r.result_at ?? null,
         // 232차: 낙찰률·참가 수를 뒤늦게 채운 때 · K-apt 상세를 읽은 때·참여업체 수·사유 — resultAt 이 비면 결과를 215차(10/27 18시) 전에 알았거나 원본 복사로 들어온 줄
-        resultFilledAt: r.result_filled_at ?? null, detailAt: r.kapt_detail_at ?? null, participants: Array.isArray(r.participants) ? r.participants.length : null, note: r.result_note ?? null } : null,
+        resultFilledAt: r.result_filled_at ?? null, detailAt: r.kapt_detail_at ?? null, participants: Array.isArray(r.participants) ? r.participants.length : null, note: r.result_note ?? null,
+        // 237차: 참여업체 줄마다 서류 적정·현장설명 참석·금액 비공개·점수 — 운영에서 K-apt 상세 화면과 대조용(대표자·전화는 원래 저장 안 함)
+        participantRows: Array.isArray(r.participants) ? r.participants.slice(0, 60).map((b: any) => ({ name: b?.name ?? null, won: b?.won === true, invalid: b?.invalid === true,
+          docs: typeof b?.docs === 'boolean' ? b.docs : null, site: typeof b?.site === 'boolean' ? b.site : null, hidden: b?.hidden === true, amount: b?.amount ?? null, score: b?.score ?? null })) : null } : null,
       updatedAt: r.updated_at ?? null, mailed: mailedOf(src_id, r),
       firstSeenAt: r.first_seen_at ?? r.created_at ?? null, lastSeenAt: r.last_seen_at ?? null, refitAt: r.refit_at ?? null, refoundAt: r.refound_at ?? null, syncedAt: synced_at,
       nowRule: (() => { const f = matchFit(String(r.title ?? ''), r.bid_category ?? null, r.task_scope ?? null, r.source_type === 'kapt_bid' ? '공동주택' : null); return { fit: f.fit, matched: f.matched, dropped: f.dropped ?? [] }; })(),

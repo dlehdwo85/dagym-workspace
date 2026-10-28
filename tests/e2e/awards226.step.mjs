@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 
 export async function awards226({ owner, ctx, sql, BASE, SHOTS }) {
-  const ID = (n) => `00000000-0000-4000-8000-000000226${String(n).padStart(3, '0')}`; const ids = [1, 2, 3, 4, 5, 6].map(ID);
+  const ID = (n) => `00000000-0000-4000-8000-000000226${String(n).padStart(3, '0')}`; const ids = [1, 2, 3, 4, 5, 6, 7].map(ID);
   const ymd = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() - n * 864e5));
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   const orig = (await ctx.owner.ok('GET', '/api/sales/digest/prefs')).prefs;
@@ -20,6 +20,9 @@ export async function awards226({ owner, ctx, sql, BASE, SHOTS }) {
   // 231차: 우리 회사가 참여했지만 남이 낙찰(K-apt 참여업체 표) → '진 입찰' · 1위와 응찰금액 차
   await res(6, '[경기] 모의육아파트 헬스장 위탁운영', 3, { winner_name: '육모의서비스(주)', winner_amount: 95000000, bidders: 2, region: '경기', participants: [
     { name: 'E2E우리회사(주)', bizNo: '9876543210', amount: 99000000, won: false, invalid: false, score: 95.04 }, { name: '육모의서비스(주)', bizNo: '1112223334', amount: 95000000, won: true, invalid: false, score: 97.71 }] }); // 234차 적격심사 평가 점수
+  // 237차(로컬 10/28 17:25): 우리 입찰구비서류 N · 응찰금액 가림('*') → '우리 금액 비공개' · '서류 부적합으로 평가 제외'(점수 줄 대신)
+  await res(7, '[경기] 모의칠아파트 헬스장 위탁운영', 5, { winner_name: '칠모의서비스(주)', winner_amount: 70000000, bidders: 2, region: '경기', participants: [
+    { name: 'E2E우리회사(주)', bizNo: '9876543210', amount: null, won: false, invalid: false, site: true, docs: false, hidden: true }, { name: '칠모의서비스(주)', bizNo: '1112223335', amount: 70000000, won: true, invalid: false, score: 92.1, site: true, docs: true }] });
   await sql`insert into company_profiles (tenant, key, name, biz_no, is_default) values ('default', 'e2eaward226', 'E2E우리회사(주)', '987-65-43210', false)`;
   await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: [], excludes: [], regions: [], issuers: [], itemCodes: [], amountMin: null, amountMax: null });
   try {
@@ -39,10 +42,14 @@ export async function awards226({ owner, ctx, sql, BASE, SHOTS }) {
     assert.match(await box.getByTestId('award-me').innerText(), /우리 회사로 보는 기준: .*E2E우리회사\(주\).* · 사업자번호 \d+개/, '227차: 무엇을 우리 회사로 보는지 안내');
     // 231차: 우리 회사 참여 · 진 입찰 — 펼치면 1위·우리 금액·차이·참가 수
     const lost = box.getByTestId('award-lost');
-    assert.match(await lost.locator('summary').innerText(), /우리 회사 참여 \d+건 · 낙찰 \d+건 · 진 입찰 1건/);
+    assert.match(await lost.locator('summary').innerText(), /우리 회사 참여 \d+건 · 낙찰 \d+건 · 진 입찰 2건/);
     await lost.locator('summary').click();
-    assert.match(await lost.getByTestId('award-lost-row').first().innerText(), /모의육아파트 헬스장 위탁운영[\s\S]*1위 육모의서비스\(주\) 9,500만원 · 우리 9,900만원 · 차이 \+400만원 · 참가 2곳/);
-    assert.equal(await lost.getByTestId('award-lost-score').first().innerText(), '적격심사 점수 — 1위 97.71 · 우리 95.04(2위/2곳) · 2.67점 낮음');
+    const six = lost.getByTestId('award-lost-row').filter({ hasText: '모의육아파트' }), seven = lost.getByTestId('award-lost-row').filter({ hasText: '모의칠아파트' });
+    assert.match(await six.innerText(), /모의육아파트 헬스장 위탁운영[\s\S]*1위 육모의서비스\(주\) 9,500만원 · 우리 9,900만원 · 차이 \+400만원 · 참가 2곳/);
+    assert.equal(await six.getByTestId('award-lost-score').innerText(), '적격심사 점수 — 1위 97.71 · 우리 95.04(2위/2곳) · 2.67점 낮음');
+    assert.match(await seven.innerText(), /모의칠아파트 헬스장 위탁운영[\s\S]*1위 칠모의서비스\(주\) 7,000만원 · 우리 금액 비공개 · 참가 2곳/, '237차 가린 금액은 빈칸 대신 비공개');
+    assert.equal(await seven.getByTestId('award-lost-docs').innerText(), '서류 부적합으로 평가 제외(입찰구비서류 적정 여부 N)');
+    assert.equal(await seven.getByTestId('award-lost-score').count(), 0, '서류 부적합이면 점수 줄 대신 평가 제외');
     await mo.locator('button[aria-expanded]').click();
     const recent = mo.getByTestId('award-recent'); await recent.waitFor();
     assert.equal(await recent.getByTestId('award-recent-open').count(), 2);

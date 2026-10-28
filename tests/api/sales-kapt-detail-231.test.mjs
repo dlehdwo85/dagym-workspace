@@ -63,9 +63,9 @@ test('상세 읽기: 참여업체(대표자·전화 빼고)·참가 수·낙찰�
   assert.match(r.summary, /상세 4건\(참여업체 표 1 · 유찰 1 · 고침 4\)/, r.summary);
   const a = await rowOf('20261028000001');
   assert.deepEqual(a.participants, [
-    { name: '(주)우리시험', bizNo: '1234567890', amount: 300000000, won: false, invalid: false, score: 95.04 },
-    { name: '가나관리(주)', bizNo: '2222222222', amount: 280000000, won: true, invalid: false, score: 97.71 },
-    { name: '다라(주)', bizNo: '3333333333', amount: 310000000, won: false, invalid: true, score: 99.5 }]);
+    { name: '(주)우리시험', bizNo: '1234567890', amount: 300000000, won: false, invalid: false, score: 95.04, site: true, docs: true },
+    { name: '가나관리(주)', bizNo: '2222222222', amount: 280000000, won: true, invalid: false, score: 97.71, site: true, docs: true },
+    { name: '다라(주)', bizNo: '3333333333', amount: 310000000, won: false, invalid: true, score: 99.5, site: true, docs: false }], '237차: 현장설명 참석·서류 적정도');
   assert.deepEqual([a.bidders, a.winner_biz_no, a.winner_amount, a.result_note, a.current_status], [3, '2222222222', 280000000, '적격심사 낙찰', '낙찰']);
   const b = await rowOf('kg2b_900001');
   assert.deepEqual([b.winner_name, b.winner_biz_no, b.winner_amount, b.result_note, b.participants ?? null], ['마바서비스(주)', '4444444444', 10040000, '최고가 낙찰', null]);
@@ -93,7 +93,7 @@ test('다시 돌리면 읽은 것은 안 읽음 · 결과 없는 공고는 3일 
   const before1 = detailCalls('20261028000001');
   await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_results/run', {});
   const a1 = await rowOf('20261028000001');
-  assert.deepEqual([detailCalls('20261028000001') - before1, a1.kapt_detail_v, a1.participants.map((x) => x.score)], [1, 2, [95.04, 97.71, 99.5]]);
+  assert.deepEqual([detailCalls('20261028000001') - before1, a1.kapt_detail_v, a1.participants.map((x) => x.score)], [1, 3, [95.04, 97.71, 99.5]], '237차부터 판 3');
   await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_results/run', {});
   assert.equal(detailCalls('20261028000001') - before1, 1, '새 판으로 읽은 뒤에는 다시 안 읽음');
 });

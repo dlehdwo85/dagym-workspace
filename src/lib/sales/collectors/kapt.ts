@@ -196,7 +196,8 @@ export function parseKaptResultRows(body: string): { bidNum: string; title: stri
 }
 /** 231차(로컬 10/28 11:45 '참여업체 정보' 제안): 결과가 난 K-apt 입찰 상세 — 낙찰업체 정보(다른 입찰 사이트를 거친 건) · 참여업체 정보(K-apt 전자입찰) · 낙찰/유찰/취소 사유.
  *  표 머리 칸 이름으로 열을 찾음. 대표자·대표명·전화·연락처·회사주소 칸은 읽지 않음(로컬 10/28 "대표자 이름 · 전화는 저장하지 마세요") */
-export type KaptAwardBidder = { name: string; bizNo: string | null; amount: number | null; won: boolean; invalid: boolean; score?: number | null };
+export type KaptAwardBidder = { name: string; bizNo: string | null; amount: number | null; won: boolean; invalid: boolean; score?: number | null;
+  /** 237차(로컬 10/28 17:25): 입찰구비서류 적정·현장설명 참석(잠긴 고르기 칸의 선택값) · 응찰금액 칸이 없거나 '*' 로 가려짐 */ docs?: boolean | null; site?: boolean | null; hidden?: boolean };
 export type KaptAwardDetail = { winner: { name: string; bizNo: string | null; amount: number | null; method: string | null } | null; bidders: KaptAwardBidder[] | null; reason: string | null };
 export function parseKaptAwardDetail(html: string): KaptAwardDetail {
   const table = (title: string) => { const i = html.indexOf(title); if (i < 0) return null; const s = html.lastIndexOf('<table', i), e = html.indexOf('</table>', i); return s >= 0 && e > i ? html.slice(s, e) : null; };
@@ -219,17 +220,26 @@ export function parseKaptAwardDetail(html: string): KaptAwardDetail {
     const iName = col(heads, '응찰회사', '회사명', '업체명'), iBiz = col(heads, '사업자등록번호'), iAmt = col(heads, '응찰금액', '투찰금액'), iWon = col(heads, '낙찰여부'), iBad = col(heads, '낙찰무효');
     // 234차(로컬 10/28 16:20): 적격심사 입찰은 '평가점수' 칸 — 1위는 금액이 아니라 점수로 정해짐
     const iScore = col(heads, '평가점수'); const score = (v: string | undefined) => { const n = Number(String(v ?? '').replace(/[^\d.]/g, '')); return String(v ?? '').trim() && Number.isFinite(n) && n > 0 ? n : null; };
-    if (iName >= 0) bidders = rs.map((r) => cells(r, 'td')).filter((v) => v.length > iName && v[iName]).slice(0, 60)
-      .map((v) => ({ name: v[iName], bizNo: iBiz >= 0 ? biz(v[iBiz]) : null, amount: iAmt >= 0 ? money(v[iAmt]) : null, won: iWon >= 0 && yes(v[iWon]), invalid: iBad >= 0 && yes(v[iBad]),
-        ...(iScore >= 0 && score(v[iScore]) != null ? { score: score(v[iScore]) } : {}) }));
+    // 237차(로컬 10/28 17:25): 서류·현장설명 칸은 잠긴 고르기(select disabled) — 글자로는 'Y N'이 다 보이므로 선택된 값을 읽음. 응찰금액 칸이 없거나(다른 입찰 사이트 건) '*' 로 가렸으면 비공개
+    const iDocs = col(heads, '입찰구비서류적정여부', '입찰구비서류', '구비서류'), iSite = col(heads, '현장설명참석여부', '현장설명');
+    // 고르기 칸인데 선택 표시가 없으면 모름('Y N' 글자를 Y 로 읽지 않음)
+    const chosen = (h: string | undefined) => { const s = String(h ?? ''); const o = s.match(/<option[^>]*\bselected\b[^>]*>([\s\S]*?)<\/option>/i);
+      return (o ? text(o[1]) || (o[0].match(/\bvalue\s*=\s*["']?([^"'\s>]+)/i)?.[1] ?? '') : /<option/i.test(s) ? '' : text(s)).trim(); };
+    const yn = (h: string | undefined) => { const v = chosen(h); return /^(Y|예|O|적정|참석)/i.test(v) ? true : /^(N|아니|X|부적|불참|미참)/i.test(v) ? false : null; };
+    const raws = (row: string) => [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1]);
+    if (iName >= 0) bidders = rs.map((r) => ({ v: cells(r, 'td'), raw: raws(r) })).filter(({ v }) => v.length > iName && v[iName]).slice(0, 60)
+      .map(({ v, raw }) => ({ name: v[iName], bizNo: iBiz >= 0 ? biz(v[iBiz]) : null, amount: iAmt >= 0 ? money(v[iAmt]) : null, won: iWon >= 0 && yes(chosen(raw[iWon])), invalid: iBad >= 0 && yes(chosen(raw[iBad])),
+        ...(iScore >= 0 && score(v[iScore]) != null ? { score: score(v[iScore]) } : {}),
+        ...(iDocs >= 0 ? { docs: yn(raw[iDocs]) } : {}), ...(iSite >= 0 ? { site: yn(raw[iSite]) } : {}),
+        ...(iAmt < 0 || (/\*/.test(v[iAmt] ?? '') && !/\d/.test(v[iAmt] ?? '')) ? { hidden: true } : {}) }));
     const top = bidders?.find((b) => b.won && !b.invalid); if (!winner && top) winner = { name: top.name, bizNo: top.bizNo, amount: top.amount, method: null };
   }
   const rz = table('낙찰/유찰/취소 사유'); const reason = rz ? rowsOf(rz).map((r) => cells(r, 'td').join(' ').trim()).find(Boolean) ?? null : null;
   return { winner, bidders, reason: reason ? reason.slice(0, 200) : null };
 }
 const DETAIL_RESULT_RUN = 60;
-/** 234차: 상세 읽기 판 — 2 = 평가점수 칸. 참여업체 표를 예전 판으로 읽은 줄은 한 번 더 읽음(231차 첫 읽기 때는 점수를 안 읽었다) */
-const DETAIL_V = 2;
+/** 234차: 상세 읽기 판 — 2 = 평가점수 칸, 3(237차) = 서류·현장설명·금액 비공개. 참여업체 표를 예전 판으로 읽은 줄은 한 번 더 읽음 */
+const DETAIL_V = 3;
 /** 231차: 관련 K-apt 결과(낙찰자 있음)와 마감 지난 관련 공고(결과 미상, 45일 안)의 상세를 실행당 60건 — 아직 안 읽은 것부터, 결과 미상은 3일마다 다시.
  *  참가 업체 수·참여업체(이름·사업자번호·응찰금액·낙찰 여부·무효)·낙찰업체 사업자번호·사유 → 유찰 사유면 상태 '유찰' */
 async function awardDetails(fetchImpl: typeof fetch, left: () => number, now: Date) {
