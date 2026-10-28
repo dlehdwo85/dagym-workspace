@@ -1357,7 +1357,7 @@ await step('V4 캘린더: 휴대폰 빈 칸 한 번 탭 → 빠른 등록 시트
   // 휴대폰 기본 = 주 보기(V5): 그 날짜 열의 14시 칸을 탭
   const colBox = await m.locator(`td.fc-timegrid-col[data-date="${d}"]`).boundingBox();
   const laneBox = await lane.boundingBox();
-  await m.touchscreen.tap(colBox.x + colBox.width / 2, laneBox.y + laneBox.height / 2);
+  await m.touchscreen.tap(colBox.x + colBox.width / 2, laneBox.y + laneBox.height * 0.1); // #756: 탭 = 누른 자리 15분 칸부터 1시간 — 14시 칸 맨 위쪽(14:06)
   const sheet = m.getByTestId('quick-create');
   await sheet.waitFor();
   await sheet.getByLabel('빠른 입력 제목').fill('V4 탭 등록');

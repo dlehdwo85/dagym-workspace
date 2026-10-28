@@ -26,7 +26,7 @@ export async function v1441({ browser, desk, ctx, BASE, SHOTS, addDays, today })
     assert.equal(await m.locator('[data-narrow-block]').filter({ hasText: '고천' }).locator('[data-block-time]').count(), 0, '짧은 블록은 시각 생략');
     const slot = await m.locator('.fc-timegrid-slot').first().evaluate((el) => el.getBoundingClientRect().height);
     assert.ok(Math.abs(slot - 40) <= 1, `주 칸 40px ${slot}`);
-    assert.match(await m.locator('[data-axis-label]').first().innerText(), /오[전후]\s*\d+시/);
+    assert.match(await m.locator('[data-axis-label]').nth(1).innerText(), /오[전후]\s*\d+시/); // #755 맨 위 첫 시간 글자는 숨김 — 둘째 글자로
     assert.equal(await m.getByRole('button', { name: '캘린더 색 설정' }).filter({ visible: true }).count(), 1, '색 설정 단추 하나(#592 머리줄 → 아래 칩 줄)');
     await m.screenshot({ path: `${SHOTS}/v14-41-phone-week.png`, fullPage: false });
     await m.goto(`${BASE}/calendar?view=timeGrid3&date=${d}`);
