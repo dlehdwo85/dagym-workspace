@@ -1836,3 +1836,9 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - /api/sales/support?tab=fit 다시: total 102 · pending 0 · hiddenNo 796.
 - 클라우드 #785 요청: 수집 직후 자동 판단·주간 상한은 남은 것 채우기·프로필 바뀌면 다시 판단·'확인 중'은 대기열일 때만·사용량 표시.
 - 기억 추가: support-ai-always(새 공고는 매번 AI 판단, 신청·담당은 대표가 직접).
+
+## 2026-10-28 23:45 — 249·250차 운영 확인(지원사업 정렬·칩·규칙·자동 판단)
+- /api/health 337ede2 · migration 221. /s/sales/support 화면: 정렬·마감 칩·종류 칩·빈칸 안내(보유 인증 1개 — 대표는 '없음'이라 했으나 빈칸과 구분 안 됨)·'AI 확인 중' 0. 사진 artifacts/1028-support-249.png.
+- 맞춤 102 그대로, 빠진 것 0: 새 규칙 no 5건(울산·남동발전·강동구·경북 창업-BuS·서초 클리닉)이 AI maybe 에 덮임. 경남·강원·대구·충남 행사 5건은 규칙 fit 그대로(전국 참가 가능성, 급하지 않음).
+- 250차: auto on·queue 0·at null, 마지막 tick 23:34(배포 전). /api/usage sales_support 159건 $0.147. /api/platform/tenants 2곳(default·demo) — 고객사 없음.
+- 클라우드에 규칙 no 우선·돈 칩 기준·인증 없음 칸·is_test 제외·신청 목록은 사람이 누를 때만 전달 23:50.
