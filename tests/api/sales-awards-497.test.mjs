@@ -66,6 +66,12 @@ test('227차 우리 회사(로컬 10/28 \'하이링크 낙찰 0\'): 사업자번
   }
 });
 
+test('229차 플랫폼 공고 조회에 낙찰 칸(낙찰자·금액·낙찰률·참가 수) — 메일 결과 줄과 대조용', async () => {
+  const it = (await ctx.owner.ok('GET', `/api/platform/sales-notices?q=${encodeURIComponent('가나아파트')}`)).items[0];
+  assert.deepEqual([it.award?.winner, it.award?.amount, it.award?.rate, it.award?.bidders], ['(주)가나스포츠', 120000000, 87.5, 4]);
+  assert.equal((await ctx.owner.ok('GET', `/api/platform/sales-notices?q=${encodeURIComponent('카타아파트')}`)).items[0].award, null, '낙찰자 없는 유찰 줄은 비움');
+});
+
 test('권한: 영업 공간 밖 404 · 입찰을 쓰지 않는 회사 403', async () => {
   assert.equal((await ctx.staffB.client.req('GET', '/api/sales/award-stats')).status, 404);
   await sql`update tenants set sales_bids = false where id = 'default'`;

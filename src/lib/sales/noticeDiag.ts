@@ -46,6 +46,9 @@ export async function lookupNotices(q: { no?: string | null; q?: string | null }
       sourceType: r.source_type ?? null, sourceNo: r.source_external_id ?? null, title: r.title ?? null, bidCategory: r.bid_category ?? null, body: clip(r.task_scope, 300),
       related: r.related === true || r.related === 'true', fitBusiness: r.fit_business ?? null, matchedKeywords: Array.isArray(r.matched_keywords) ? r.matched_keywords : [], classification: r.classification ?? null,
       postedDate: r.posted_date ?? null, deadlineAt: r.deadline_at ?? null, status: r.current_status ?? null,
+      // 229차(로컬 10/28 13:55 '남원시 결과 줄에 낙찰률·참가 수 빠짐'): 낙찰 칸과 결과를 처음 안 때·마지막 고친 때 — 메일 결과 줄과 대조용
+      award: r.winner_name || r.winner_amount || r.winner_rate || r.bidders ? { winner: r.winner_name ?? null, winnerBizNo: r.winner_biz_no ?? null, amount: r.winner_amount ?? null, rate: r.winner_rate ?? null,
+        bidders: r.bidders ?? null, awardDate: r.award_date ?? null, resultAt: r.result_at ?? null } : null, updatedAt: r.updated_at ?? null,
       firstSeenAt: r.first_seen_at ?? r.created_at ?? null, lastSeenAt: r.last_seen_at ?? null, refitAt: r.refit_at ?? null, refoundAt: r.refound_at ?? null, syncedAt: synced_at,
       nowRule: (() => { const f = matchFit(String(r.title ?? ''), r.bid_category ?? null, r.task_scope ?? null, r.source_type === 'kapt_bid' ? '공동주택' : null); return { fit: f.fit, matched: f.matched, dropped: f.dropped ?? [] }; })(),
       refitLoweredAt: r.refit_lowered_at ?? null, refitLoweredWhy: r.refit_lowered_why ?? null, judgedAt: r.judged_at ?? null,
