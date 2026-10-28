@@ -1895,3 +1895,13 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - /api/marketing/contents: published 42 · pending 10(auto, scheduled 10/21~10/23, 10/28 다시 만듦) · changes 1(워크인 릴스 auto=false, 10/28 12:18 대표 의견). inbox counts.contents 0 = APPROVABLE_SQL 이 지난 게시일 제외.
 - 수정 요청 처리 코드: auto 아니면 return null. production videosLeft 0.
 - 클라우드 요청: 지난 게시일도 승인함·승인 시 재배정 · 모든 수정 요청 Opus 점검·새 시안 · 영상 비용 카드·카드뉴스 대안 · AI 마케터 도구 4종. 자동 제작 재개는 대표 결정.
+
+## 2026-10-29 08:26 — 254차 운영 확인(정부24 원천·사진 읽기 이유)
+- /api/health d7a48c5 · 223_support_gov24. eligibility 20261022180315277 4.1초 → '… AI 사진 읽기 안 함: 비용 낼 회사의 관리자 계정을 못 찾음'.
+- POST /api/sales/collectors/gov24_support/run → runId 208 failed 'HTTP 401 {code:-401, msg:유효하지 않은 인증키 입니다.}'.
+- 대표 개인 크롬(Claude in Chrome) data.go.kr/data/15113968/openapi.do 열림 · 로그인 링크 보임(로그아웃 상태) → 대표 로그인 요청.
+
+## 2026-10-29 08:33 — 254b·255차 운영 확인(사진 공고문 읽기·승인함·AI 마케터)
+- (노트북이 01:55~08:26 사이 꺼져 있던 것으로 보임 — 그 사이 클라우드 254b·255 배포.)
+- eligibility 20261022180315277: by vision 7.3초 visionUsd 0.00186. 열린 42건: 찾음 26·대기 6·첨부 없음 7·절 없음 2·못 받음 1. 오탐 3종 클라우드 전달.
+- /api/marketing/inbox contents 10(late true) · 릴스 changes 1. /api/ai/chat space marketing → 도구 marketing_inbox_status·marketing_auto_status, 6.3초, 4원, 답 정확.
