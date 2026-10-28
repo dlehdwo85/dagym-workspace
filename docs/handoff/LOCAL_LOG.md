@@ -1882,3 +1882,14 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 
 ## 2026-10-29 01:07 — 대표 승인 #790 사진 공고문 AI 비전 읽기
 - 클라우드 전달: 대상(글자 없는 공고문)·앞 6쪽·'AI 가 사진에서 읽음' 표시·비용 기록·실적 꼴 고침과 같이 배포.
+
+## 2026-10-29 01:26 — 253차 운영 확인(참가자격 실적·사진 공고문·감시 3곳)
+- eligibility 다시 읽기: hwp·hwpx 실적 줄 ✅. docx 20261022180315277 error '공고문이 사진(스캔)으로만 되어 있음'·2.37초·text 없음·by 없음·usage sales_eligibility_vision 없음, 저장 tries 2 → AI 안 불림. sales-cutover writes_open true. 더 누르면 tries 3 으로 잠겨 클라우드 고침까지 대기.
+- PUT supportWatchPages 3곳(NIPA·체육공단 sportsBissNoticeList·용인 application.do 경기) → support_watch run 207: 21건·본문 8·신규 15·바뀜 6. 상세 주소·마감 정상, 메뉴 0.
+- bySource 기업마당 668 · K-Startup 199 · 기관 공지 15 · 직접 입력 0. fit 101 · 돈 26 · pendingCount 3.
+
+## 2026-10-29 01:39 — 대표 마케팅실 3건(#791~#793): 승인함 0 원인
+- /api/admin/ops tick: mktAuto paused·planned 0 · mktProduce sampleOnly left 0 · mktOps/mktGoals skipped paused. /api/marketing/auto settings.auto_pause true, approval_hour 9, writeModel deep claude-opus-5-5 70원.
+- /api/marketing/contents: published 42 · pending 10(auto, scheduled 10/21~10/23, 10/28 다시 만듦) · changes 1(워크인 릴스 auto=false, 10/28 12:18 대표 의견). inbox counts.contents 0 = APPROVABLE_SQL 이 지난 게시일 제외.
+- 수정 요청 처리 코드: auto 아니면 return null. production videosLeft 0.
+- 클라우드 요청: 지난 게시일도 승인함·승인 시 재배정 · 모든 수정 요청 Opus 점검·새 시안 · 영상 비용 카드·카드뉴스 대안 · AI 마케터 도구 4종. 자동 제작 재개는 대표 결정.
