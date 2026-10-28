@@ -1842,4 +1842,28 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - /api/health 337ede2 · migration 221. /s/sales/support 화면: 정렬·마감 칩·종류 칩·빈칸 안내(보유 인증 1개 — 대표는 '없음'이라 했으나 빈칸과 구분 안 됨)·'AI 확인 중' 0. 사진 artifacts/1028-support-249.png.
 - 맞춤 102 그대로, 빠진 것 0: 새 규칙 no 5건(울산·남동발전·강동구·경북 창업-BuS·서초 클리닉)이 AI maybe 에 덮임. 경남·강원·대구·충남 행사 5건은 규칙 fit 그대로(전국 참가 가능성, 급하지 않음).
 - 250차: auto on·queue 0·at null, 마지막 tick 23:34(배포 전). /api/usage sales_support 159건 $0.147. /api/platform/tenants 2곳(default·demo) — 고객사 없음.
-- 클라우드에 규칙 no 우선·돈 칩 기준·인증 없음 칸·is_test 제외·신청 목록은 사람이 누를 때만 전달 23:50.
+- 클라우드에 규칙 no 우선·돈 칩 기준·인증 없음 칸·is_test 제외·신청 목록은 사람이 누를 때만 전달(실제 23:44경, 메시지 머리 23:50).
+
+## 2026-10-29 00:10 — 251차 운영 확인(규칙 해당 없음 우선·기대 효과·신청 목록) · 자정 자동 판단
+- 00:05 tick supportAuto {default: done 0, left 0, failed 0, stopped null}, tenants 1 (250차 첫 실행, 251 배포 직전).
+- /api/health 1f5f627 · migration 222. 프로필 PUT certsNone true(대표 '인증 별도로 없음') — 다른 칸 그대로 확인, blanks 0.
+- 맞춤 90(102에서), 5건 빠짐, 규칙과 다름 0, 돈 칩 27. auto.queue 122.
+- 신청 목록: 공공조달 멘토링 담기→list 1→export CSV 200(BOM EF BB BF, 15칸)→빼기→list 0. 디스크 저장 없이 fetch 로 확인. [업무로] 시험 안 함.
+
+## 2026-10-29 00:15 — 대표 #786 입찰 참가자격 = 공고문 자격 요건(자본금·기술인력·실적)
+- /api/sales/src?view=bids 열린 46건: detail.qualification = bidTerms.termsLine(award_method·contract_method·신용평가/실적증명 제출·보증금) → '적격심사 · 제한경쟁 · 신용평가 제출 · 실적증명 제출 · 보증금 5%'. raw eligibility·required_licenses·performance_requirement null. 첨부는 hwp·hwpx·docx.
+- /api/library?q=참가자격: 영업/공고 저장본 5건에 절 있음(래미안세레니티 자본금 5억·등록업체, 시스템 구축 실적 5년 5건·면허, 기흥더샵프라임뷰 현설 참가 업체).
+- 클라우드 요청 00:20: 참가자격 절 저장(공통 제26조 문구는 한 줄에서 뺌)·항목 뽑기(자본금·실적·인력·등록면허·신용·지역·현설·공동도급)·목록 줄 교체·열린 공고 채우기·3단계 회사 자격 대조(qualificationGap).
+
+## 2026-10-29 00:30 — 대표 #787 지원사업 출처(K-Startup 만인지)
+- /api/sales/support sources: 기업마당 '공공데이터포털: 포털 전체 1·2쪽·경기 1쪽 900건'(keys.bizinfo false, datago true) · K-Startup '3쪽 210건' · 기관 공지 '감시 페이지 목록이 비어 있습니다'. fit 90 = K-Startup 79 · 기업마당 11. all 869.
+- q 검색: 스포츠산업 1 · 국민체육진흥공단 2(기업마당) · IP지원센터 0 · NIPA 0 · 용인 8(직접 입력 2 포함).
+- 웹 확인: ybs.ypa.or.kr/application.do(용인 지원사업 공고) · spobiz.kspo.or.kr(스포츠테크 신기술 통합공모 상시~12/31, 예비 선도기업 서비스·시설업 매출 3~30억) · nipa.kr/home/2-2.
+- 클라우드에 게시판 읽기 시험·본문으로 마감·대상 채우기·출처별 숫자 한 줄 요청. 감시 목록 등록(standing 설정)은 대표 승인 뒤.
+
+## 2026-10-29 00:39 — 대표 #788 소상공인·기업 정부지원금
+- data.go.kr/data/15113968/openapi.do: 행정안전부_대한민국 공공서비스(혜택) 정보, 자동승인. swaggerUrl infuser.odcloud.kr/api/stages/44436/api-docs → api.odcloud.kr/api/gov24/v3/serviceList·serviceDetail·supportConditions. serviceList 칸: 지원유형·지원대상·선정기준·지원내용·신청기한·사용자구분·서비스분야·신청기한유형 등. supportConditions: JA1101~JA1299(소상공인), JA2101~JA2299(법인·단체, JA2203 정보통신업).
+- 클라우드 요청: gov24 원천·규칙·대상 칩·AI 자동 판단·키 확인(미등록이면 대표 활용신청).
+
+## 2026-10-29 00:40 — 지원사업 자동 AI 판단 운영 확인(#785 ✅)
+- /api/admin/ops tick supportAuto default: 00:09 done 10·left 88 / 00:24 done 10·left 102 / 00:35 done 10·left 92, failed 0. 맞춤 90 · ai.effect 23건. usage sales_support 189건 $0.191(30건 $0.044).
