@@ -881,7 +881,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay: al
       // 하나의 일정 양식 + "업무에도 추가" 스위치 (V6 3번)
       const s = allDay ? `${date}T00:00:00+09:00` : `${date}T${start}:00+09:00`;
       const en = allDay ? `${addDays(endDate ?? date, 1)}T00:00:00+09:00` : `${endDate ?? date}T${end}:00+09:00`;
-      await api('/api/events', { body: { calendarId, title: title.trim(), start: s, end: en, allDay, isPrivate: priv, rrule, alsoTask, color,
+      await api('/api/events', { body: { calendarId: calendarId || undefined, title: title.trim(), start: s, end: en, allDay, isPrivate: priv, rrule, alsoTask, color, // 236차: 목록 전이면 서버가 내 개인 일정으로
         ...(remind !== 'default' ? { reminderMinutes: remind === 'none' ? [] : [Number(remind)] } : {}),
         ...(alsoTask ? { taskAssigneeId: taskWho ?? user.id, taskRequestedById: taskReq ?? user.id, taskPriority: taskPrio } : {}) } });
       pushRecentColor(color);
@@ -921,6 +921,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay: al
           </div>
         )}
         <select className={cx(inputCls, 'mt-2 h-9')} value={calendarId} onChange={(e) => setCalendarId(e.target.value)} aria-label="캘린더">
+          {!calendarId && <option value="">{editable.length ? '내 일정(기본)' : '캘린더 불러오는 중…'}</option>}
           {editable.map((c) => <option key={c.id} value={c.id}>{c.type === 'personal' ? '내 일정' : c.name}</option>)}
         </select>
         <div className="mt-2"><ColorRow value={color} onChange={setColor} testId="quick-color" /></div>
@@ -1011,10 +1012,17 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
         description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version, reminders: e.reminder_minutes ?? null, alarm: e.alarm ?? null, isPrivate: !!e.is_private, color: e.color ?? null });
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
-      setF({ title: draft?.title ?? '', calendarId: draft?.calendarId ?? personal?.id ?? editable[0]?.id, allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
+      setF({ title: draft?.title ?? '', calendarId: draft?.calendarId || personal?.id || editable[0]?.id || '', allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
         endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', meetingUrl: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, prep: '', color: draft?.color ?? null, alsoTask: !!draft?.alsoTask });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 236차(대표 10/28 '일정생성불가함' — 로컬 재현): 창이 캘린더 목록보다 먼저 열리면 새 일정의 캘린더가 빈 채로 남고, 고르기 칸은 첫 캘린더를 보여 줘
+  // 저장이 '캘린더: 필수 항목'으로 막혔다 — 목록이 오면 내 개인 일정(없으면 쓸 수 있는 첫 캘린더)으로 채움
+  useEffect(() => {
+    if (id || !f || f.calendarId) return;
+    const c = (calendars.find((x) => x.type === 'personal') ?? editable[0])?.id;
+    if (c) setF((p: any) => (p && !p.calendarId ? { ...p, calendarId: c } : p));
+  }, [calendars, id, f?.calendarId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const times = () => f.allDay
     ? { start: `${f.date}T00:00:00+09:00`, end: `${addDays(f.endDate || f.date, 1)}T00:00:00+09:00` }
@@ -1079,7 +1087,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     setBusy(true);
     await autoRun.current;
     try {
-      const body = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
+      const body = { title: f.title, calendarId: f.calendarId || undefined, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
       if (!id) {
         const made = await api<{ id?: string }>('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } }); pushRecentColor(f.color);
         if (meetOn && meetNew && made?.id) await enableEventMeeting(made.id);
@@ -1123,7 +1131,8 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
           <Field label="제목"><input className={inputCls} value={f.title} onChange={(e) => set('title')(e.target.value)} required autoFocus={!id} /></Field>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Field label="캘린더">
-              <select className={inputCls} value={f.calendarId} onChange={(e) => set('calendarId')(e.target.value)}>
+              <select className={inputCls} value={f.calendarId ?? ''} onChange={(e) => set('calendarId')(e.target.value)}>
+                {!f.calendarId && <option value="">{calendars.length ? '내 개인 일정(기본)' : '캘린더 불러오는 중…'}</option>}
                 {(canEdit ? editable : calendars).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </Field>

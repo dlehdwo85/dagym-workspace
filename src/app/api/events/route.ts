@@ -19,7 +19,7 @@ export const POST = handler(async ({ req, user }) => {
   const i = await body(req, eventInput);
   const out = await createEvent(user, i);
   after(() => dispatchPending().catch(() => {}));
-  after(() => syncCalendarSoon(i.calendarId).catch(() => {}));
+  after(() => syncCalendarSoon(out.calendarId).catch(() => {})); // 236차: 캘린더가 비어 온 새 일정은 서버가 정한 개인 캘린더
   after(async () => { const id = (out as { id?: string }).id; if (id) await remindersChanged(await affectedByEvent(id)).catch(() => {}); });
   return out;
 }, { idempotent: true });
