@@ -14,11 +14,14 @@ const dataGo = (items) => JSON.stringify({ response: { header: { resultCode: '00
 const FIT = { bidNtceNo: 'R26BK0074301', bidNtceOrd: '000', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', ntceInsttNm: '시험시청', dminsttNm: '시험시청', bidNtceDt: `${today} 09:00:00`,
   bidClseDt: `${plus(10)} 10:00:00`, prtcptLmtRgnNm: '경기도', cntrctCnclsMthdNm: '제한경쟁' };
 const OTHER = { bidNtceNo: 'R26BK0074302', bidNtceOrd: '000', bidNtceNm: '청사 소독 용역(피트니스 아님)', ntceInsttNm: '시험구청', bidNtceDt: `${today} 09:00:00`, bidClseDt: `${plus(10)} 10:00:00` };
+const EMPTY = 'R26BK0074303'; // 이미 물었는데 값이 없던 공고(245차 진단)
 let srv, ctx, sql, fake; const calls = [];
 before(async () => {
   fake = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'); for await (const _ of req) { /* 본문 없음 */ }
     const send = (text) => { res.statusCode = 200; res.setHeader('content-type', 'application/json'); res.end(text); };
+    // 245차 진단: 게시일 기간(inqryDiv 1)으로 물으면 번호로는 안 나오던 공고 줄이 나오는 경우
+    if (u.searchParams.get('inqryDiv') === '1' && /LicenseLimit|PrtcptPsblRgn$/.test(u.pathname)) return send(dataGo(u.pathname.endsWith('/getBidPblancListInfoLicenseLimit') ? [{ bidNtceNo: EMPTY, bidNtceOrd: '000', lcnsLmtNm: '체육시설업(4993)' }, { bidNtceNo: 'R26BK0099999', bidNtceOrd: '000', lcnsLmtNm: '남의 공고' }] : []));
     if (u.pathname.endsWith('/getBidPblancListInfoLicenseLimit')) { calls.push(['license', u.searchParams.get('bidNtceNo'), u.searchParams.get('inqryDiv')]);
       return send(dataGo(u.searchParams.get('bidNtceNo') === FIT.bidNtceNo ? [{ bidNtceNo: FIT.bidNtceNo, bidNtceOrd: '000', lmtGrpNo: '1', lcnsLmtNm: '체육시설업(4993)', permsnIndstrytyList: '체육시설업' },
         { bidNtceNo: FIT.bidNtceNo, bidNtceOrd: '001', lcnsLmtNm: '다른 차수 면허' }] : [])); }
@@ -51,4 +54,35 @@ test('다시 수집: 다시 안 묻고 목록의 짧은 값(경기도)으로 덮
   assert.deepEqual([a1.region_restriction, a1.license_limit, a1.limits_read_at, a1.updated_at], [a0.region_restriction, a0.license_limit, a0.limits_read_at, a0.updated_at]);
   const it = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => String(x.noticeNo ?? '').startsWith(FIT.bidNtceNo));
   assert.match(it?.terms ?? '', /업종 제한 체육시설업\(4993\)/); assert.match(it?.terms ?? '', /지역 제한 경기도 · 서울특별시/);
+});
+
+test('245차 플랫폼 공고 조회 g2b=1: 이미 물었는데 값이 없는 공고를 세 가지 방법으로 다시 물어 응답만(저장 안 함 · 키 가림) · 번호 지정', async () => {
+  const id = '00000000-0000-4000-8000-000000245001';
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', ${id}, ${sql.json({ id, source_type: 'g2b_bid', source_external_id: `${EMPTY}-000`, title: '시험 체육관 위탁운영 용역',
+    posted_date: today, limits_read_at: new Date().toISOString() })}, 'workin')`;
+  const before = (await sql`select row, synced_at from sales_src_rows where src_id = ${id}`)[0];
+  const r = (await ctx.owner.ok('GET', '/api/platform/sales-notices?g2b=1')).g2b;
+  assert.equal(r.picked, 'read-but-empty');
+  assert.deepEqual(r.notices.map((n) => n.no), [`${EMPTY}-000`], '값을 읽은 공고(FIT)는 안 고름');
+  const t = r.notices[0].tries; const one = (kind, how) => t.find((x) => x.kind === kind && x.how === how);
+  assert.equal(t.length, 6, '두 조회 × 공고번호·공고번호+차수·게시일 기간');
+  assert.deepEqual([one('license', '공고번호').raw, one('license', '공고번호').same, one('license', '공고번호').codes], [0, 0, { '00': 1 }]);
+  assert.deepEqual([one('license', '게시일 기간').raw, one('license', '게시일 기간').same], [2, 1], '같은 공고 줄만 셈');
+  assert.match(one('license', '게시일 기간').first, /체육시설업\(4993\)/);
+  assert.ok(t.every((x) => !JSON.stringify(x).includes('test-key')), '키 가림');
+  const after = (await sql`select row, synced_at from sales_src_rows where src_id = ${id}`)[0];
+  assert.deepEqual([after.row, after.synced_at], [before.row, before.synced_at], '저장 안 함');
+  const g = (await ctx.owner.ok('GET', `/api/platform/sales-notices?g2b=1&no=${FIT.bidNtceNo}`)).g2b;
+  assert.deepEqual([g.picked, g.notices[0].no, g.notices[0].tries.find((x) => x.kind === 'region' && x.how === '공고번호').same], ['given', `${FIT.bidNtceNo}-000`, 2]);
+  assert.equal((await ctx.owner.ok('GET', `/api/platform/sales-notices?g2b=1&no=${encodeURIComponent('../x')}`)).g2b, undefined, '이상한 번호는 진단 없음');
+});
+
+test('245차: 예전에 저장된 줄(limits_read_at 빈 값)은 아직 안 읽은 것 — 다음 수집에서 물음', async () => {
+  await sql`update sales_src_rows set row = row || '{"limits_read_at": null, "license_limit": null}'::jsonb where tbl = 'procurement_notices' and row->>'source_external_id' = ${`${FIT.bidNtceNo}-000`}`;
+  const n0 = calls.length;
+  const r = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
+  assert.match(r.summary, /참가 제한 조회 1건\(값 1\)/, r.summary);
+  assert.deepEqual(calls.slice(n0).map((c) => c.join('|')).sort(), [`license|${FIT.bidNtceNo}|2`, `region|${FIT.bidNtceNo}|2`]);
+  const a = await rowOf(FIT.bidNtceNo);
+  assert.deepEqual([a.license_limit, !!a.limits_read_at], ['체육시설업(4993) / 체육시설업', true]);
 });

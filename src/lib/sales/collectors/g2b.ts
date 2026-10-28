@@ -109,7 +109,7 @@ export async function readG2bLimits(items: Record<string, unknown>[], ctx: Colle
   if (!open.length) return out;
   const exts = open.map((p) => String(p.source_external_id));
   const done = new Set((await db()<{ ext: string }[]>`select row->>'source_external_id' as ext from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and row->>'source_type' = 'g2b_bid'
-    and row->>'source_external_id' = any(${exts}::text[]) and row ? 'limits_read_at'`).map((r) => r.ext));
+    and row->>'source_external_id' = any(${exts}::text[]) and coalesce(row->>'limits_read_at', '') <> ''`).map((r) => r.ext)); // 245차: 저장 줄엔 limits_read_at 칸이 늘 있음(빈 값) — 값이 있어야 읽은 것
   for (const p of open) if (done.has(String(p.source_external_id))) delete p.region_restriction; // 읽은 값을 목록의 짧은 값으로 덮지 않음
   const pick = (x: any, names: string[], re: RegExp) => { for (const n of names) { const v = str(x?.[n]); if (v) return v; } const k = Object.keys(x ?? {}).find((k) => re.test(k)); return k ? str(x[k]) : null; };
   for (const p of open.filter((x) => !done.has(String(x.source_external_id))).slice(0, max)) {
@@ -136,6 +136,35 @@ export async function readG2bLimits(items: Record<string, unknown>[], ctx: Colle
     }
   }
   return out;
+}
+/** 245차(로컬 20:55 '값 0 이던 공고를 한 번 더 — 저장 안 하는 진단'): 플랫폼 운영 공고 조회 g2b=1 — 공고번호(없으면 이미 물었는데 값이 없는 최근 3건)를
+ *  면허제한·참가가능지역 두 조회에 세 가지 방법(공고번호 / 공고번호+차수 / 게시일 하루 기간)으로 물어 결과 코드·전체·받은 줄·같은 공고 줄·칸 이름·첫 줄 값·응답 앞부분(키·메일·전화 가림)만 돌려줌 */
+export async function probeG2bLimits(no: string | null) {
+  const key = dataGoKey(); const at = new Date().toISOString();
+  if (!key) return { at, error: 'DATA_GO_KR_SERVICE_KEY 미설정' };
+  const rows = no ? await db()<{ ext: string; posted: string | null }[]>`select row->>'source_external_id' as ext, row->>'posted_date' as posted from sales_src_rows where scope = 'global' and tbl = 'procurement_notices'
+      and row->>'source_type' = 'g2b_bid' and (row->>'source_external_id' = ${no} or split_part(row->>'source_external_id', '-', 1) = ${no}) limit 1`
+    : await db()<{ ext: string; posted: string | null }[]>`select row->>'source_external_id' as ext, row->>'posted_date' as posted from sales_src_rows where scope = 'global' and tbl = 'procurement_notices'
+      and row->>'source_type' = 'g2b_bid' and coalesce(row->>'limits_read_at', '') <> '' and coalesce(row->>'license_limit', '') = '' and coalesce(row->>'region_restriction', '') = '' order by row->>'limits_read_at' desc limit 3`;
+  const targets = rows.length ? rows : no ? [{ ext: no, posted: null }] : [];
+  const mask = (t: string) => noPii(t.split(key).join('***').split(encodeURIComponent(key)).join('***')).replace(/\s+/g, ' ');
+  const notices = [];
+  for (const t of targets) {
+    const [bno, ord] = t.ext.split('-'); const day = t.posted?.match(/^\d{4}-\d{2}-\d{2}/)?.[0]?.replace(/-/g, '');
+    const ways: [string, Record<string, string>][] = [['공고번호', { inqryDiv: '2', bidNtceNo: bno }], ...(ord ? [['공고번호+차수', { inqryDiv: '2', bidNtceNo: bno, bidNtceOrd: ord }] as [string, Record<string, string>]] : []),
+      ...(day ? [['게시일 기간', { inqryDiv: '1', inqryBgnDt: `${day}0000`, inqryEndDt: `${day}2359` }] as [string, Record<string, string>]] : [])];
+    const tries = await Promise.all(Object.entries(LIMIT_OPS).flatMap(([kind, op]) => ways.map(async ([how, q]) => {
+      const u = new URL(`${API()}/${op}`); for (const [k, v] of Object.entries({ serviceKey: key, numOfRows: '100', pageNo: '1', type: 'json', ...q })) u.searchParams.set(k, v);
+      let head = ''; const f: typeof fetch = async (i, init) => { const r = await fetch(i, init); head = (await r.clone().text()).slice(0, 2000); return r; };
+      const st: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 };
+      try {
+        const list = await callDataGo(u, f, key, 8000, st); const mine = list.filter((x) => str(x?.bidNtceNo) === bno);
+        return { kind, how, codes: st.codes, total: st.total, raw: st.raw, same: mine.length, keys: st.keys?.slice(0, 20) ?? [], first: mine[0] ? mask(JSON.stringify(mine[0])).slice(0, 300) : null, head: mask(head).slice(0, 300) };
+      } catch (e) { return { kind, how, error: mask(e instanceof Error ? e.message : String(e)).slice(0, 200), head: mask(head).slice(0, 300) }; }
+    })));
+    notices.push({ no: t.ext, posted: t.posted, tries });
+  }
+  return { at, picked: no ? 'given' : 'read-but-empty', notices };
 }
 const noKey = (label: string): CollectorResult => ({ inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `${label}: DATA_GO_KR_SERVICE_KEY 미설정 — 건너뜀`, providerMode: 'api' });
 

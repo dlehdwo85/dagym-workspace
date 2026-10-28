@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 
 export async function meet219({ owner, ctx, sql, BASE, SHOTS, browser }) {
   const day = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
-  const d = day(3);
+  let d = day(3); // 245차: 겹친 일정(구글식 겹쳐 놓기)이 위에 그려져 클릭을 가로채지 않게 13~16시가 빈 날을 고름
+  for (let n = 3; n < 40; n++) { d = day(n); const [x] = await sql`select count(*)::int c from events where deleted_at is null and start_at < ${`${d}T16:00:00+09:00`} and end_at > ${`${d}T13:00:00+09:00`}`; if (!x.c) break; }
   const cals = (await ctx.owner.ok('GET', '/api/calendars')).calendars;
   const cal = (cals.find((c) => c.type === 'personal' && c.owner_user_id === ctx.ownerId) ?? cals.find((c) => c.type === 'personal')).id;
   const ev = (await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: 'E2E 219 고객사 화상 미팅', start: `${d}T14:00:00+09:00`, end: `${d}T15:00:00+09:00` })).id;

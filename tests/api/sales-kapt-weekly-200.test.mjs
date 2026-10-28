@@ -136,7 +136,7 @@ test('K-apt 자료실 주간 엑셀: 목록 → 글 보기 → 파일 목록 →
   const hub = await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=facilities');
   assert.deepEqual(hub.sourceAsOf, [{ slug: 'kapt_weekly_complexes', label: 'K-apt 자료실', day: '2026-10-26', note: '추출(주 1회)' }, { slug: 'reb_recent_complexes', label: '한국부동산원', day: '2026-09-01', note: '파일(연 1회, 전년도 사용승인분)' }]);
   const card = hub.items.find((x) => x.name === '구리새단지시그니처아파트'); assert.ok(card);
-  assert.deepEqual([card.phone, card.households, card.operator], ['031-555-1234', 752, '(주)좋은관리']);
+  assert.deepEqual([card.phone, card.households, card.operator, card.mgmt], ['031-555-1234', 752, null, '(주)좋은관리'], '243차 #760 관리회사(주택관리업자)는 운영사가 아니라 따로');
 
   // 새 글(다음 주) → 다시 받아 갱신
   K2['세대수'] = '320.0'; posts.unshift({ seq: '900003', day: '2026.10.30.', file: '20261030_단지_기본정보.xlsx', rows: [K1, K2, K4] });

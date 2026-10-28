@@ -11,9 +11,11 @@ export const maxDuration = 60;
 export const GET = handler(async ({ req, user }) => {
   if (!user.platformAdmin) throw notFound();
   const u = new URL(req.url);
+  const no = String(u.searchParams.get('no') ?? '').trim();
+  // 245차(로컬 20:55): g2b=1 이면 나라장터 참가 제한 조회를 지금 다시 물어 응답만(저장 안 함) — 번호가 없으면 이미 물었는데 값이 없는 최근 3건
+  if (u.searchParams.get('g2b') === '1' && (!no || /^[A-Za-z0-9]{6,24}(?:-\d{1,3})?$/.test(no))) return { g2b: await (await import('@/lib/sales/collectors/g2b')).probeG2bLimits(no || null) };
   const out = await lookupNotices({ no: u.searchParams.get('no'), q: u.searchParams.get('q') }, user);
   // 241차(로컬 10/28 19:20): probe=1 이면 K-apt 상세를 지금 받아 응답 코드·길이·취소 여부만(저장 안 함) — 수집이 그 번호 상세를 받는지 확인용
-  const no = String(u.searchParams.get('no') ?? '').trim();
   if (u.searchParams.get('probe') === '1' && /^(?:A?\d{10,20}|kg2b_\d{1,12}|[A-Za-z]{1,6}\d{4,20})$/.test(no)) return { ...out, probe: await (await import('@/lib/sales/collectors/kapt')).probeKaptDetail(no) };
   return out;
 });
