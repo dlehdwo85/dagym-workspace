@@ -10,7 +10,7 @@ import { Button, Modal, cx, inputCls, toast } from '@/components/ui';
  * 비운 곳은 '확인 못함'(12주 뒤 다시 묶음에). [취소] = 완료하지 않음. 묶인 시설이 없거나 못 읽으면 묻지 않고 완료
  */
 type Mode = '' | '직영' | '위탁' | '미개관';
-type Item = { id: number; srcId: string; name: string; region: string | null; households: number | null; missing: string[]; status: string; phone: string | null; operator: string | null; notices?: number;
+type Item = { id: number; srcId: string; name: string; region: string | null; households: number | null; missing: string[]; status: string; phone: string | null; operator: string | null; mgmt?: string | null; notices?: number;
   result: { operator?: string | null; contractEnd?: string | null; phone?: string | null; note?: string | null; mode?: Mode | null; firstPick?: string | null } };
 type Data = { terms: { operator: string; office: string; opCheck?: string; facility?: string }; items: Item[] };
 type Ask = 'ok' | 'skip' | null;
@@ -55,6 +55,7 @@ function ResearchDialog({ title, data, onDone }: { title: string; data: Data; on
             <li key={x.id} className="rounded-input border border-line p-2" data-testid="research-ask-row">
               <div className="flex flex-wrap items-baseline gap-x-1.5 text-xs"><b className="text-sm text-ink">{x.name}</b>
                 <span className="text-ink-3">{[x.region, x.households ? `${x.households}세대` : null, x.phone && `${T.office} ${x.phone}`].filter(Boolean).join(' · ')}</span>
+                {x.mgmt && <span className="basis-full text-[11px] text-ink-3" data-testid="research-ask-mgmt">관리회사(주택관리업자) {x.mgmt} — {T.operator}와 다를 수 있음</span>}
                 {(x.notices ?? 0) > 0 && <Link href={`/s/sales/hub?tab=bids&q=${encodeURIComponent(x.name)}`} target="_blank" className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-800 hover:underline" data-testid="research-ask-notices">관련 공고 {x.notices}건</Link>}
                 <Link href={`/s/sales/hub?tab=facilities&q=${encodeURIComponent(x.name)}`} target="_blank" className="ml-auto text-[11px] text-ink-3 underline">카드 보기</Link></div>
               <div className="mt-1.5 flex flex-wrap gap-1" role="radiogroup" aria-label={T.opCheck ?? '운영 방식'} data-testid="research-ask-mode">

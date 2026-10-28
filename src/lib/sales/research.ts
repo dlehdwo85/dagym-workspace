@@ -176,10 +176,18 @@ export async function researchForTask(u: SessionUser, taskId: string) {
   return { terms: { operator: terms.operator, office: terms.office, opCheck: terms.opCheck, facility: terms.kind.facility },
     items: items.map((x) => { const r = src.get(x.src_id) ?? {};
       return { id: x.id, srcId: x.src_id, name: x.name, region: r.region ?? null, households: r.household_count ?? null, missing: x.missing, status: x.status, notices: noticeCountOf(counts, x.name),
-        phone: r.office_phone ?? r.management_phone ?? r.phone ?? null, operator: x.result?.operator ?? r.current_operator ?? r.management_company ?? null,
+        phone: r.office_phone ?? r.management_phone ?? r.phone ?? null, operator: communityOperator(x.result?.operator ?? r.current_operator, r.management_company), mgmt: r.management_company ?? null,
         result: x.result ?? {} }; }) };
 }
 
+/** 242차 #760(대표 10/28 '위탁사가 관리주체 즉 관리사무소를 뜻하는건데? db에서 위탁이라는 단어를 전부 커뮤니티 위탁으로 착각?'): K-apt 주택관리업자(관리회사)는
+ *  커뮤니티 운영사가 아님 — 운영사 칸에 관리회사 이름을 쓰지 않고, 예전에 같은 이름으로 채운 값도 운영사로 보지 않음(관리회사는 따로 '관리회사(주택관리업자)') */
+const coName = (s: unknown) => String(s ?? '').replace(/\(주\)|㈜|주식회사|\s+/g, '').toLowerCase();
+export function communityOperator(op: unknown, mgmt: unknown): string | null {
+  const o = op == null ? '' : String(op).trim();
+  if (!o) return null;
+  return mgmt && coName(o) === coName(mgmt) ? null : o;
+}
 const ymdRe = /^\d{4}-\d{2}-\d{2}$/;
 export const researchInput = z.object({ operator: z.string().trim().max(100).nullable().optional(), contractEnd: z.string().regex(ymdRe).nullable().optional().or(z.literal('').transform(() => null)),
   phone: z.string().trim().max(40).regex(/^[0-9+\-() ]*$/, '전화번호는 숫자와 - 만 적어 주세요').nullable().optional(), note: z.string().trim().max(500).nullable().optional(),

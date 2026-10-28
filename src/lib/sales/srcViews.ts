@@ -334,11 +334,12 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const FP0 = await prog('operating_facility_prospects__progress', 20000); const FP = FP0.filter((p) => day(pick(p, 'contract_end_date')));
     // 212차 #612: 후속조사로 적은 계약만료일(회사 진행 기록에 없는 시설만 — 전환 전에는 진행 기록에 못 씀)
     const fpIds = new Set(FP.map((p) => String(p.id ?? p.__id)));
-    for (const [id, x] of await (await import('./research')).researchState(sql, t)) if (x.result.contractEnd && !fpIds.has(id)) {
+    const RS0 = await import('./research'); // #760 관리회사 ≠ 커뮤니티 운영사
+    for (const [id, x] of await RS0.researchState(sql, t)) if (x.result.contractEnd && !fpIds.has(id)) {
       const p0 = FP0.find((p) => String(p.id ?? p.__id) === id); FP.push({ ...(p0 ?? {}), id, contract_end_date: x.result.contractEnd, current_operator: pick(p0, 'current_operator') ?? x.result.operator ?? null }); }
     const facRows = FP.length ? new Map((await rows('global', 'operating_facility_prospects', 20000)).map((r) => [String(r.id ?? r.__id), r])) : new Map<string, any>();
     const facItems = FP.flatMap((p) => { const id = String(p.id ?? p.__id); const r = facRows.get(id); if (!r) return []; const end = day(pick(p, 'contract_end_date'))!; const name = String(pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)'); const st = pick(p, 'contact_status', 'status');
-      return [{ id: `facility:${id}`, kind: 'facility', name, agency: null, region: pick(r, 'region'), winner: pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator', 'management_company'), amount: null, end, ...timing(end), work: st, url: null,
+      return [{ id: `facility:${id}`, kind: 'facility', name, agency: null, region: pick(r, 'region'), winner: RS0.communityOperator(pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator'), pick(r, 'management_company')), amount: null, end, ...timing(end), work: st, url: null,
         href: `/s/sales/hub?tab=facilities${/^(대상\s?아님|영업완료)$/.test(String(st ?? '')) ? '&box=archive' : ''}&q=${encodeURIComponent(name)}` }]; });
     const items = [...bidItems, ...facItems].filter(hit).sort((a, b) => a.end.localeCompare(b.end));
     const within = (n: number) => items.filter((x) => x.daysLeft >= 0 && x.daysLeft <= n).length;
@@ -584,7 +585,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           verdict: pick(r, 'verdict', 'judgment', 'stage_label', 'opportunity_label'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), scale: scaleOf(r),
           // #605 보관함에서 적은 현 위탁사·계약만료일(회사 진행 기록)이 원본 칸보다 먼저 — 계약만료·재입찰 탭으로 이어짐
           // 212차 #612: 후속조사로 적은 값은 회사 진행 기록·원천 칸이 없을 때(현 위탁사는 관리 회사 칸보다 먼저 — 전화로 확인한 값)
-          operator: pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator') ?? rs?.result.operator ?? pick(r, 'management_company'), contractEnd: day(pick(p, 'contract_end_date')) ?? rs?.result.contractEnd ?? null,
+          operator: RM.communityOperator(pick(p, 'current_operator') ?? pick(r, 'current_operator', 'operator') ?? rs?.result.operator, pick(r, 'management_company')), mgmt: pick(r, 'management_company') ?? null, // #760 관리회사 ≠ 커뮤니티 운영사
+          contractEnd: day(pick(p, 'contract_end_date')) ?? rs?.result.contractEnd ?? null,
           phone: pick(r, 'office_phone', 'management_phone', 'phone') ?? rs?.result.phone ?? null, amenities: pick(r, 'amenities', 'facilities', 'community_facilities'),
           research: rs ? { status: rs.status, due: rs.due, assignee: rs.assignee, taskId: rs.taskId, doneAt: rs.doneAt, missing: rs.missing, note: rs.result.note ?? null, mode: rs.result.mode ?? null, firstPick: rs.result.firstPick ?? null } : null,
           notices: RM.noticeCountOf(NC, pick(r, 'name', 'facility_name', 'complex_name')), // #758 '이 단지 관련 공고 n건'

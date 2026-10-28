@@ -203,6 +203,35 @@ describe('예전 자료 정리 · 리드 다음 연락 업무', () => {
     assert.deepEqual([w.status, w.lead_id, w.data.bid_task_id, w.data.bid_events.apply, w.data.moved_from_lead, w.data.bid_due_auto], ['입찰 진행', null, tk.id, evId, l1.id, addDays(today, 3)]);
     assert.equal((await ctx.owner.ok('GET', '/api/sales/work/bid-leads')).items.length, 2, '옮긴 리드는 목록에서 빠짐');
     const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.find((x) => x.id === 'L1'); assert.equal(card?.workBid?.taskId, tk.id);
+    // 243차 #761(로컬 10/28 19:50 '이미 넘긴 입찰 업무도 정기 점검이 채우기'): 옮긴 입찰은 날짜를 기억해도 일정이 없던 다가오는 일정(입찰 마감)을 정기 점검이 한 번 만듦
+    await tick();
+    const w2 = await work('L1');
+    assert.ok(w2.data.bid_events.close && w2.data.bid_events.close !== evId, JSON.stringify(w2.data.bid_events));
+    assert.equal(w2.data.bid_events.apply, evId, '있던 일정은 그대로');
+    assert.match((await sql`select title from events where id = ${w2.data.bid_events.close}`)[0].title, /^\[입찰\] 입찰 마감 · 옛 공고 하나/);
+    await tick(); assert.equal((await work('L1')).data.bid_events.close, w2.data.bid_events.close, '두 번 만들지 않음');
+  });
+  test('243차 #762: 리드 업무를 입찰 업무로 옮길 때 기한도 넘기기 규칙(입찰 마감 전날)으로 · 제목 [입찰]', async () => {
+    await put({ id: 'L9', title: '옛 공고 아홉', issuer: '군청', related: true, first_seen_at: today, deadline_at: `${addDays(today, 9)}T10:00` });
+    const [l9] = await sql`insert into sales_leads (tenant, name, status, owner_id, src) values ('default', '옛 공고 아홉', '신규리드', ${ctx.staffA.id},
+      ${sql.json({ from: 'bid', id: 'L9', handoff: true, assignees: [ctx.staffA.id], by: ctx.ownerId })}) returning id`;
+    const tk = await ctx.owner.ok('POST', '/api/tasks', { title: '[영업] 옛 공고 아홉 — 검토·첫 연락', assigneeId: ctx.staffA.id, dueDate: addDays(today, 1), approvalRequired: false });
+    await sql`update tasks set space = 'sales', lead_id = ${l9.id} where id = ${tk.id}`;
+    await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, lead_id, data) values ('default', 'opportunity_work', 'w:bid:L9', 'L9', '영업 중', ${l9.id},
+      ${sql.json({ status: '영업 중', lead_id: l9.id, notice_id: 'L9', handoff_by: ctx.ownerId, assignees: [ctx.staffA.id] })})`;
+    await ctx.owner.ok('POST', '/api/sales/work/bid-leads', { leadIds: [l9.id] });
+    const [t] = await sql`select title, due_date::text as due from tasks where id = ${tk.id}`;
+    assert.deepEqual([t.title, t.due], ['[입찰] 옛 공고 아홉', addDays(today, 8)], '리드 업무 기한(내일) 대신 입찰 마감 전날');
+    assert.equal((await work('L9')).data.bid_due_auto, addDays(today, 8));
+  });
+  test('243차 #761: 넘기기 창 미리 보기 — 만들 일정(현장설명회(공고문 참조) 포함) · 이미 지난 일정은 빠짐', async () => {
+    await put({ id: 'L8', title: '현설 공고', issuer: '구청', related: true, first_seen_at: today, site_briefing_kind: '공고문 참조', site_briefing_at: `${addDays(today, 2)}T10:00`,
+      participation_deadline_at: `${addDays(today, -1)}T18:00`, deadline_at: `${addDays(today, 7)}T10:00` });
+    const p = await ctx.owner.ok('GET', '/api/sales/work/handoff?kind=bid&id=L8');
+    assert.deepEqual(p.schedule.map((x) => x.label), ['현장설명회(공고문 참조)', '입찰 마감']);
+    assert.ok(p.people.length > 0);
+    assert.equal((await ctx.owner.ok('GET', '/api/sales/work/handoff?kind=bid&id=없는공고')).schedule.length, 0);
+    assert.equal((await ctx.owner.ok('GET', '/api/sales/work/handoff?kind=building')).schedule, undefined);
   });
   test('업무가 한 번도 없던 진행 중 리드 — 다음 연락일이 가까우면 정기 실행이 [영업] 다음 연락 업무를 조용히 만듦(한 번만, 지운 업무는 되살리지 않음)', async () => {
     const [a] = await sql`insert into sales_leads (tenant, name, status, owner_id, next_contact_date) values ('default', '옛 거래처', '1차연락완료', ${ctx.staffA.id}, ${addDays(today, 2)}) returning id`;

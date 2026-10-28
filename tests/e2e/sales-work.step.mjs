@@ -41,6 +41,7 @@ export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     await hd.getByTestId('sales-handoff-people').getByRole('checkbox').first().waitFor({ state: 'attached' });
     await p.screenshot({ path: `${SHOTS}/175-sales-handoff.png` });
     assert.match(await hd.getByTestId('sales-handoff-bid-note').innerText(), /입찰 업무 1건/);
+    assert.match(await hd.getByTestId('sales-handoff-schedule').innerText(), /회사 캘린더에 일정도 만듭니다[\s\S]*현장설명회[\s\S]*입찰 마감/, '243차 #761 만들 일정 미리 보기');
     await hd.getByTestId('sales-handoff-go').tap();
     await p.getByText('입찰 업무로 넘겼습니다').first().waitFor();
     await bid2.getByTestId('sales-bid-task').waitFor();
