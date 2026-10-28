@@ -1816,3 +1816,8 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 클라우드 요청(실제 22:07, 메시지 머리에 22:40 으로 잘못 적음): accept 명시 목록(HEIC 포함)·영상 따로 고르기·HEIC 줄이기 실패 대비·진단 기록(received/cancel/lost/done·기기)·받은 장수 즉시 표시.
 - #779: 246차(9f40581) 비용 0 안 = P2P(최대 4명, TURN 없으면 10~20% 실패 추정) + 오라클 무료 서버 라이브킷(용량 없음·유휴 회수 위험). 로컬 의견으로 클라우드플레어 Realtime SFU·TURN(월 1,000GB 무료, 이후 $0.05/GB, 서버 없음) 검토 요청.
 - 246차 운영 확인은 다음 순서.
+
+## 2026-10-28 22:40 — 248·247차 운영 확인(#780 사진 칸 · #777·#778 후속조사)
+- /api/health 124aa5f. 업무 상세 input: album-input accept=image/jpeg,image/heic,image/heif,image/png,image/webp,image/gif · video-album-input video/* · 촬영 image/* capture. 메신저 chat-gallery-input 같은 목록 · chat-video-input video/*. /api/admin/ops pickDiag [] (0건). 아이폰 앱 capacitor.config server.url=https://www.work-in.dev → 앱 다시 열면 적용.
+- 247차: /api/sales/research auto=false. /s/sales/hub?tab=facilities [후속조사 넘기기] 289개, 창 담당 단추 aria-checked 김소담 부사장 · 기본 → [취소]. 처음 1초 만에 읽었을 때 첫 단추 글자를 선택값으로 잘못 읽어 '이동재 선택'으로 보였음 — 측정 실수, 결함 아님.
+- 246차는 다음 정기 점검 뒤 확인.
