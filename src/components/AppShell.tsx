@@ -370,7 +370,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 {n.href === '/projects' && !collapsed && favorites.length > 0 && (
                   <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l border-line pl-2">
                     {favorites.map((p) => (
-                      <Link key={p.id} href={`/projects/${p.id}`} className={cx('flex h-7 items-center gap-2 rounded-input px-2 text-[13px]', path === `/projects/${p.id}` ? 'bg-brand-50 font-semibold text-brand-700' : 'text-slate-600 hover:bg-slate-100 hover:text-ink')}>
+                      <Link prefetch={false} key={p.id} href={`/projects/${p.id}`} className={cx('flex h-7 items-center gap-2 rounded-input px-2 text-[13px]', path === `/projects/${p.id}` ? 'bg-brand-50 font-semibold text-brand-700' : 'text-slate-600 hover:bg-slate-100 hover:text-ink')}>
                         <span className="size-2 shrink-0 rounded-[3px]" style={{ background: p.color }} /><span className="truncate">{p.name}</span>
                       </Link>
                     ))}
@@ -428,7 +428,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 </>
               )}
             </div>
-            <Link href="/notifications" aria-label={`알림${unread ? ` ${unread}건` : ''}`} className="relative inline-flex size-9 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100">
+            <Link prefetch={false} href="/notifications" aria-label={`알림${unread ? ` ${unread}건` : ''}`} className="relative inline-flex size-9 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100">
               <Bell className="size-[18px]" />{unread > 0 && <span className="absolute right-1 top-1 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{unread > 99 ? '99+' : unread}</span>}
             </Link>
             <div className="relative">
@@ -444,8 +444,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
                       <div className="min-w-0"><div className="flex items-center gap-1.5 truncate text-sm font-semibold">{session.user.name}<RoleBadge role={session.user.role} /></div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
                     </div>
                     <div className="my-1 border-t border-line" />
-                    <Link role="menuitem" href="/settings" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Settings className="size-4 text-ink-2" />설정·알림</Link>
-                    <Link role="menuitem" href="/help" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><HelpCircle className="size-4 text-ink-2" />도움말·문의</Link>
+                    <Link prefetch={false} role="menuitem" href="/settings" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Settings className="size-4 text-ink-2" />설정·알림</Link>
+                    <Link prefetch={false} role="menuitem" href="/help" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><HelpCircle className="size-4 text-ink-2" />도움말·문의</Link>
                     <button role="menuitem" onClick={() => { setUserMenu(false); restartTours(); }} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50" data-testid="tour-restart"><Compass className="size-4 text-ink-2" />사용 안내 다시 보기</button>
                     <button role="menuitem" onClick={() => { setUserMenu(false); setHelp(true); }} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Keyboard className="size-4 text-ink-2" /><span className="flex-1 text-left">단축키</span><Kbd>?</Kbd></button>
                     <button role="menuitem" onClick={logout} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm text-red-600 hover:bg-red-50"><LogOut className="size-4" />로그아웃</button>
@@ -474,7 +474,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               <span className="flex items-center gap-2" data-testid="mobile-header-actions">
                 <button onClick={() => setPalette(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-[22px]" /></button>
                 {session.features.ai && <button onClick={() => setAiDock(true)} className="inline-flex size-11 items-center justify-center rounded-full text-violet-600 active:bg-violet-50" aria-label={aiName(space)} data-testid="mobile-ai"><Sparkles className="size-[22px]" /></button>}
-                <Link href="/notifications" className="relative inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label={`알림${unread ? ` ${unread}건` : ''}`} data-testid="mobile-bell">
+                <Link prefetch={false} href="/notifications" className="relative inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label={`알림${unread ? ` ${unread}건` : ''}`} data-testid="mobile-bell">
                   <Bell className="size-[22px]" />{unread > 0 && <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{unread > 99 ? '99+' : unread}</span>}
                 </Link>
                 <button onClick={() => setMore(true)} className="relative inline-flex size-11 items-center justify-center rounded-full active:bg-slate-100" aria-label="프로필·메뉴" data-testid="profile-menu"><Avatar id={session.user.id} name={session.user.name} size={30} /></button>
@@ -483,7 +483,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           </header>
           {/* #114 ⑦ 휴대폰 상단 '결재할 것 n건' — 내 결재 차례가 있을 때만, 누르면 결재 › 내가 결재할 것 */}
           {approvalsTodo > 0 && !path.startsWith('/approvals') && (
-            <Link href="/approvals?view=todo" className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 sm:hidden" data-testid="approvals-todo-bar">
+            <Link prefetch={false} href="/approvals?view=todo" className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 sm:hidden" data-testid="approvals-todo-bar">
               <span className="inline-flex items-center gap-1.5"><Stamp className="size-4 text-amber-700" aria-hidden />결재할 것 {approvalsTodo}건</span><span className="text-amber-700">결재하기 ›</span>
             </Link>
           )}
@@ -532,7 +532,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <div className={cx('fixed inset-x-0 top-0 z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',
             session.tenant.trial.readOnly ? 'bg-red-600 text-white' : session.tenant.trial.daysLeft <= 3 ? 'bg-warm-500 text-white' : 'bg-brand-50 text-brand-800')} data-testid="trial-banner">
             {(() => { const n = session.tenant.trial.partner ? '설계 파트너 기간' : '무료 체험'; /* #667 */ return session.tenant.trial.readOnly ? `${n}이 끝나 읽기 전용입니다` : session.tenant.trial.daysLeft === 0 ? `${n} 오늘 종료` : `${n} D-${session.tenant.trial.daysLeft}`; })()}
-            {inApp ? <span className="font-normal">· {IN_APP_BILLING_NOTE}</span> : <Link href="/admin/usage" className="underline">요금제 선택</Link>}
+            {inApp ? <span className="font-normal">· {IN_APP_BILLING_NOTE}</span> : <Link prefetch={false} href="/admin/usage" className="underline">요금제 선택</Link>}
           </div>
         )}
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
@@ -592,14 +592,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <div className="border-t border-line px-1 pb-1 pt-2" data-testid="mobile-space-menu">
                   <div className="px-2 text-xs text-ink-3">{sm.short} 메뉴</div>
                   <div className="mt-1 grid grid-cols-2 gap-1.5">{sheetSpaceMenu.map((n) => (
-                    <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
+                    <Link prefetch={false} key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
                       <n.icon className="size-4 shrink-0" style={{ color: sm.color }} aria-hidden /><span className="truncate">{n.label}</span></Link>))}</div>
                 </div>
               )}
               {/* #422 d: 하단 탭·머리줄(알림·AI 비서)과 겹치지 않는 공통 메뉴 + 설정 */}
               <div className="border-t border-line px-1 pb-1 pt-2" data-testid="profile-links">
                 <div className="mt-1 grid grid-cols-2 gap-1.5">{sheetLinks.map((n) => { const b = n.href === '/messages' ? chatUnread : 0; return (
-                  <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
+                  <Link prefetch={false} key={n.href} href={n.href} onClick={() => setMore(false)} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-line px-3 text-sm" style={active(n.href) ? { background: sm.soft, borderColor: sm.color } : undefined}>
                     <n.icon className="size-4 shrink-0 text-ink-2" aria-hidden /><span className="truncate">{n.label}</span>{!!b && <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[10px] font-semibold leading-4 text-white">{b}</span>}</Link>); })}</div>
               </div>
               <div className="my-1 border-t border-line" />
@@ -609,7 +609,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 ...(session.features.googleSync ? [['/settings/google', 'Google Calendar 연동(선택)', CalendarDays]] : []),
                 ...(admin ? adminMenu.map((n) => [n.href, n.label, n.icon]) : nav.filter((n) => n.href === '/revenue').map((n) => [n.href, n.label, n.icon])), ...(session.user.platformAdmin ? [['/platform', '플랫폼 운영', Building2]] : [])] as [string, string, LucideIcon][]).map(([h, l, I], i) => (<Fragment key={h}>
                 {v3 && admin && i === 1 + (session.features.googleSync ? 1 : 0) && adminMenu.length > 0 && <div className="px-3 pt-2 text-xs text-ink-3" data-testid="mobile-admin-head">관리</div>}
-                <Link href={h} onClick={() => { if (path === h) setMore(false); }} className="flex items-center gap-3 rounded-input px-3 py-3 text-sm active:bg-slate-100"><I className="size-5 text-ink-2" />{l}</Link>
+                <Link prefetch={false} href={h} onClick={() => { if (path === h) setMore(false); }} className="flex items-center gap-3 rounded-input px-3 py-3 text-sm active:bg-slate-100"><I className="size-5 text-ink-2" />{l}</Link>
               </Fragment>))}
               <button onClick={() => { setMore(false); restartTours(); }} className="flex w-full items-center gap-3 rounded-input px-3 py-3 text-left text-sm active:bg-slate-100" data-testid="tour-restart-m"><Compass className="size-5 text-ink-2" />사용 안내 다시 보기</button>
               <button onClick={logout} className="flex w-full items-center gap-3 rounded-input px-3 py-3 text-left text-sm text-red-600 active:bg-red-50"><LogOut className="size-5" />로그아웃</button>
@@ -647,6 +647,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
 /** 로컬 10/28 17:45(238차 되돌림 뒤 운영 측정): 첫 화면 직후 사이드바 링크 자동 미리 받기로 서버 요청이 19~33개 몰려 그동안 누르면 느려짐 — 자주 쓰는 다섯 곳만 미리 받음(나머지는 누를 때) */
 const NAV_PREFETCH = new Set(['/', '/tasks', '/calendar', '/messages', '/approvals']);
+// 241차(로컬 10/28 19:20 '다섯 곳으로 줄인 뒤에도 첫 화면 요청 19개'): 홈 목록(업무·일정·공지·팀)·알림·설정·프로젝트·더보기 링크도 자동 미리 받기 끔 — 누를 때 받음
 
 function TabLink({ n, on, badge }: { n: NavItem; on: boolean; badge?: number }) {
   return (

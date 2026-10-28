@@ -83,12 +83,12 @@ export function HomeMonth({ today, className }: { today: string; className?: str
       <p className="px-4 pb-1 text-[11px] text-ink-3"><span className="mr-2 inline-block size-1.5 rounded-full" style={{ background: C.event }} />일정<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: C.task }} />업무<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: C.overdue }} />지난 업무<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: SPACE_META.sales.color }} />영업<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: SPACE_META.marketing.color }} />마케팅 · 한 번 더 누르면 캘린더</p>
       {sel && (
         <div className="border-t border-line px-2 pb-2 pt-1" data-testid="home-month-list">
-          <p className="px-2 py-1 text-xs font-semibold text-ink-2">{Number(sel.slice(5, 7))}/{Number(sel.slice(8))}({'일월화수목금토'[dow(sel)]}) · {list.length}건 <Link href={`/calendar?view=dayGridMonth&date=${sel}`} className="ml-1 font-medium text-brand-600 hover:underline">캘린더에서 보기</Link></p>
+          <p className="px-2 py-1 text-xs font-semibold text-ink-2">{Number(sel.slice(5, 7))}/{Number(sel.slice(8))}({'일월화수목금토'[dow(sel)]}) · {list.length}건 <Link prefetch={false} href={`/calendar?view=dayGridMonth&date=${sel}`} className="ml-1 font-medium text-brand-600 hover:underline">캘린더에서 보기</Link></p>
           {list.length ? <ul className="divide-y divide-line">{list.map((it) => (
-            <li key={it.key}><Link href={it.href} className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50">
+            <li key={it.key}><Link prefetch={false} href={it.href} className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50">
               <span className="size-2 shrink-0 rounded-full" style={{ background: it.color }} /><span className="w-11 shrink-0 text-xs tabular-nums text-ink-2">{it.time ?? '종일'}</span>
               <span className={cx('min-w-0 flex-1 truncate', it.kind === 'overdue' && 'text-red-700')}>{it.title}</span>{it.sub && <span className="shrink-0 text-[11px] text-ink-3">{it.sub}</span>}</Link></li>))}</ul>
-            : <p className="px-2 py-2 text-xs text-ink-3">이날은 비어 있습니다 — <Link href={`/calendar?quick=1&date=${sel}`} className="underline">일정 추가</Link></p>}
+            : <p className="px-2 py-2 text-xs text-ink-3">이날은 비어 있습니다 — <Link prefetch={false} href={`/calendar?quick=1&date=${sel}`} className="underline">일정 추가</Link></p>}
         </div>)}
     </Card>
   );

@@ -451,7 +451,7 @@ export async function deleteEvent(u: SessionUser, id: string, scope: z.infer<typ
     if (!perms.edit) throw forbidden('이 일정을 삭제할 권한이 없습니다');
     const master = e.recurring_event_id ? (await tx<EventRow[]>`select * from events where id = ${e.recurring_event_id}`)[0] : e;
     if (!master.rrule || scope.scope === 'all') {
-      await tx`update events set deleted_at = now(), version = version + 1 where id = ${master.id} or recurring_event_id = ${master.id}`;
+      await tx`update events set deleted_at = now(), version = version + 1 where (id = ${master.id} or recurring_event_id = ${master.id}) and deleted_at is null`; // 241차: 앞서 지운 회차는 그때 시각 그대로(되살릴 때 같이 안 살아나게)
     } else if (scope.scope === 'this') {
       const occ = e.recurring_event_id ? e.original_start! : scope.occurrenceStart ? new Date(scope.occurrenceStart) : null;
       if (!occ) throw badRequest('삭제할 회차(occurrenceStart)가 필요합니다');
@@ -461,7 +461,7 @@ export async function deleteEvent(u: SessionUser, id: string, scope: z.infer<typ
       const occ = e.recurring_event_id ? e.original_start! : scope.occurrenceStart ? new Date(scope.occurrenceStart) : null;
       if (!occ) throw badRequest('기준 회차(occurrenceStart)가 필요합니다');
       if (occ <= master.start_at) {
-        await tx`update events set deleted_at = now(), version = version + 1 where id = ${master.id} or recurring_event_id = ${master.id}`;
+        await tx`update events set deleted_at = now(), version = version + 1 where (id = ${master.id} or recurring_event_id = ${master.id}) and deleted_at is null`;
       } else {
         await tx`update events set rrule = ${ruleUntilBefore(master.rrule, occ)}, version = version + 1, updated_at = now() where id = ${master.id}`;
         await tx`update events set deleted_at = now() where recurring_event_id = ${master.id} and original_start >= ${occ}`;
@@ -473,6 +473,58 @@ export async function deleteEvent(u: SessionUser, id: string, scope: z.infer<typ
       link: `/calendar`, entityType: 'event', entityId: master.id, actorId: u.id, dedupeKey: `evdel:${master.id}:${scope.scope}:${scope.occurrenceStart ?? ''}` });
     await activity(tx, 'event', master.id, u.id, 'deleted', { scope: scope.scope, occurrenceStart: scope.occurrenceStart ?? null });
     return { ok: true };
+  });
+}
+
+/**
+ * 241차(로컬 10/28 19:20 '10/29 면접 일정 1건이 사라짐 — 누가·언제 지웠는지 · 휴지통(되살리기)'): 최근 n일 안에 지운 일정(반복은 통째로 지운 것) —
+ * 내가 고칠 수 있는 일정만, 지운 사람·때는 활동 기록(deleted). 남의 비공개 일정은 '바쁨'
+ */
+export async function listDeletedEvents(u: SessionUser, days = 30) {
+  const sql = db(); const t = tenantOf(u); const n = Math.min(Math.max(Math.round(days) || 30, 1), 90);
+  // 지운 사람: 일정 삭제(deleted) 또는 입찰·영업 연동 취소(canceled) 활동 기록. 업무를 지워 함께 숨은 '업무 시간' 칸(hidden_by_task)은 업무를 되살리면 돌아오므로 뺌
+  const rows = await sql<(EventRow & { deleted_at: Date; cal_name: string; cal_type: string; cal_owner_name: string | null; deleted_by_name: string | null; del_action: string | null })[]>`
+    select e.*, c.name as cal_name, c.type as cal_type, co.name as cal_owner_name, du.name as deleted_by_name, d.action as del_action
+    from events e join calendars c on c.id = e.calendar_id left join users co on co.id = c.owner_user_id
+      left join lateral (select a.actor_id, a.action from activities a where a.entity_type = 'event' and a.entity_id = e.id and a.action in ('deleted', 'canceled') order by a.created_at desc limit 1) d on true
+      left join users du on du.id = d.actor_id
+    where e.deleted_at is not null and e.deleted_at > now() - make_interval(days => ${n}) and e.recurring_event_id is null and e.hidden_by_task is null
+      and ((c.type = 'company' and c.tenant = ${t}) or (c.type = 'personal' and co.tenant = ${t})
+        or (c.type = 'org_unit' and exists (select 1 from org_units o where o.id = c.org_unit_id and o.tenant = ${t}))
+        or (c.type = 'team' and exists (select 1 from teams tm where tm.id = c.team_id and tm.tenant = ${t})))
+    order by e.deleted_at desc limit 200`;
+  // eventPerms 와 같은 판단(고치기 = 캘린더 고치기 권한 또는 만든 사람, 비공개는 주인·만든 사람·참석자 말고 '바쁨') — 캘린더별 한 번, 참석 여부는 한 번에
+  const att = new Set(rows.length ? (await sql<{ event_id: string }[]>`select event_id from event_attendees where user_id = ${u.id} and event_id = any(${rows.map((e) => e.id)}::uuid[])`).map((r) => r.event_id) : []);
+  const cals = new Map<string, { edit: boolean; owner: string | null }>();
+  const items = [];
+  for (const e of rows) {
+    let c = cals.get(e.calendar_id);
+    if (!c) { const cal = await loadCalendar(sql, e.calendar_id); c = { edit: (await calendarPerms(u, cal)).edit, owner: cal.owner_user_id }; cals.set(e.calendar_id, c); }
+    if (!c.edit && e.created_by !== u.id) continue;
+    const masked = !!(e as any).is_private && c.owner !== u.id && e.created_by !== u.id && !att.has(e.id);
+    const calendar = e.cal_type === 'personal' ? (c.owner === u.id ? '내 일정' : `${e.cal_owner_name ?? '다른 사람'} 일정`) : e.cal_name;
+    items.push({ id: e.id, title: masked ? '바쁨' : e.title, start: e.start_at, end: e.end_at, allDay: e.all_day, repeat: !!e.rrule, calendar, deletedAt: e.deleted_at, deletedBy: e.deleted_by_name,
+      ...(e.del_action === 'canceled' ? { auto: '입찰·영업 연동으로 함께 취소' } : {}) });
+  }
+  return { days: n, items };
+}
+/** 241차: 지운 일정 되살리기 — 고칠 수 있는 사람만(못 보면 404). 같이 지워진 반복 회차 예외 줄도 함께, 활동 기록 'restored' */
+export async function restoreEvent(u: SessionUser, id: string) {
+  if (!zUuid.safeParse(id).success) throw notFound('지운 일정을 찾을 수 없습니다');
+  return db().begin(async (tx) => {
+    const [e] = await tx<(EventRow & { deleted_at: Date })[]>`select * from events where id = ${id} and deleted_at is not null and recurring_event_id is null and hidden_by_task is null`;
+    if (!e) throw notFound('지운 일정을 찾을 수 없습니다');
+    if (!(await eventPerms(u, e, tx)).edit) throw notFound('지운 일정을 찾을 수 없습니다');
+    // 같이 지워진 회차 변경 줄만(그 전에 '이번 일정만' 지운 회차 = 제외 날짜에 든 줄은 그대로 둠)
+    await tx`update events x set deleted_at = null, version = x.version + 1, updated_at = now()
+      where (x.id = ${e.id} or (x.recurring_event_id = ${e.id} and not coalesce((select x.original_start = any(m.exdates) from events m where m.id = ${e.id}), false)))
+        and x.deleted_at >= ${e.deleted_at}::timestamptz - interval '5 seconds'`;
+    // 지울 때 '일정 취소' 알림을 받은 참석자에게 다시 잡혔다고 알림
+    const attendeeIds = (await tx<{ user_id: string }[]>`select user_id from event_attendees where event_id = ${e.id}`).map((r) => r.user_id);
+    await notify(tx, { userIds: attendeeIds, type: 'event_changed', title: `일정 다시 잡힘: ${e.title}`, body: `${u.name}님이 지운 일정을 되살렸습니다`,
+      link: `/calendar`, entityType: 'event', entityId: e.id, actorId: u.id, dedupeKey: `evrestore:${e.id}:${Date.now()}` });
+    await activity(tx, 'event', e.id, u.id, 'restored', {});
+    return { ok: true, id: e.id, calendarId: e.calendar_id };
   });
 }
 

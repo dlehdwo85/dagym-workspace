@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 
 export async function cal755({ owner, ctx, sql, BASE, SHOTS }) {
   const ymd = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
-  const d = ymd(3);
+  // 다른 단계가 만든 일정과 겹치지 않는 날(13~17시가 빈 날) — 겹치면 겹쳐 쌓여(241차) 이 시험의 전제(칸 너비 그대로)가 깨짐
+  let d = ymd(23);
+  for (let n = 23; n < 60; n++) { d = ymd(n); const [x] = await sql`select count(*)::int c from events where deleted_at is null and start_at < ${`${d}T17:00:00+09:00`} and end_at > ${`${d}T13:00:00+09:00`}`; if (!x.c) break; }
   const [cal] = await sql`select id from calendars where type = 'personal' and owner_user_id = ${ctx.ownerId}`;
   const ids = [];
   for (const [k, s, e] of [[1, '14:00', '14:30'], [2, '14:30', '15:00'], [3, '15:00', '15:30'], [4, '15:30', '16:00']]) {

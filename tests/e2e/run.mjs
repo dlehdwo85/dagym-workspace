@@ -85,6 +85,7 @@ import { terms239 } from './terms239.step.mjs';
 import { photos749 } from './photos749.step.mjs';
 import { cal755 } from './cal755.step.mjs';
 import { aiFind753 } from './aiFind753.step.mjs';
+import { trash241 } from './trash241.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -1148,7 +1149,7 @@ await step('로컬 10/19 자동 로그인: 로그인 창 [로그인 유지] 기�
   assert.ok(ck2 && ck2.expires > Date.now() / 1000 + 29 * 86400, '기본 로그인은 30일 쿠키');
 });
 await step('스토어 심사 10/19: 앱 안에서는 요금제·결제·가격 숨김(사용량만), 웹은 그대로', () => inApp({ browser, BASE, devices, owner }));
-await step('대표 지적 10/19 캘린더: 겹친 일정 나란히·누른 일정 미리보기, 자동 저장 뒤 [완료] 409 없음, 일정 색·캘린더 색 점, 월 보기 +N개', () => cal1019({ owner, ctx, sql, BASE }));
+await step('대표 지적 10/19 캘린더: 겹친 일정 겹쳐 쌓기(241차 구글식)·누른 일정 미리보기, 자동 저장 뒤 [완료] 409 없음, 일정 색·캘린더 색 점, 월 보기 +N개', () => cal1019({ owner, ctx, sql, BASE }));
 await step('V37 8 미팅 일정: 업무 상세 [미팅 일정 만들기] → 목록 📍장소·시간 칩 · 등록 창 "방문" → 미팅 일정 제안 → 연결 일정', () => meeting({ owner, ctx, sql, BASE }));
 await step('V41 단계 1 공간: 영업 켜기 → PC 공간 카드로 영업(파란 강조)·Ctrl+1/2·뒤로가기 → 휴대폰 프로필 시트 전환 → 미배정 직원 카드 없음·주소 404', () => spaces({ browser, desk, owner, staff, BASE, sql, SHOTS }));
 await step('V41 4-2 마케팅: 개요 카드 → 새 콘텐츠 → 시안 없으면 승인 거절 → 수정 요청(이유) → 캘린더 칩 → 전화 문의 → 영업 리드(업무)', () => marketing({ owner, BASE, sql, SHOTS }));
@@ -2950,6 +2951,7 @@ await step('239차 #743·#744 입찰 카드: 현장설명 필수 D-n(3일 안 �
 await step('#749 아이폰 사진 147장(휴대폰 흉내·실제 크기 사진): 업무 첨부·메신저 모두 끝까지 · 긴 작업 · 버튼 다시 누를 수 있음 · 아이폰 고르기 전 한 줄 안내', () => photos749({ browser, devices, ctx, sql, BASE }));
 await step('#755·#756·#757 캘린더 구글처럼(대표 10/28): 이어진 30분 일정 4건 좌우로 안 쪼개짐·한 줄 \'제목, 오후 2:30\' · 시간 글자 가로줄 가운데·첫 글자 숨김 · 빈 칸 클릭 = 15분 칸부터 1시간 · 시각 :15·:45 · 휴대폰 폭', () => cal755({ owner, ctx, sql, BASE, SHOTS }));
 await step('#753 AI 비서 자료실 찾기: 답 아래 자료 카드(이름·폴더) · [열기] = 자료실 그 폴더·그 파일 강조 · [내려받기] · [업무에 붙이기] = 입력칸에 부탁 글 · 패널(✨)도 같음', () => aiFind753({ owner, ctx, BASE, FAKE, SHOTS }));
+await step('241차 지운 일정(로컬 10/28 19:20 일정 사라짐): 캘린더 [지운 일정] → 지운 사람·때 → [되살리기] · 미리보기에서 지우면 안내 [되돌리기] · 휴대폰 칩 줄', () => trash241({ owner, ctx, sql, BASE, SHOTS }));
 // 219차 화상회의: 시험 서버를 화상회의 스위치(가짜 엔진)를 켠 채 다시 띄워 확인하고, 끝나면 앞 단계 설정으로 되돌림
 await step('219차 워크인 화상회의(가짜 엔진): 일정 창 [워크인 화상회의] → 손님 이름 입장·대기 → 주최자 참가·허락 → 손님 회의 화면(휴대폰 폭) → 잠금·끝내기 → 일정 미리보기 회의 기록', async () => {
   // 옛 서버가 완전히 내려간 뒤 새로 띄움(열린 연결이 남아 옛 서버가 잠깐 더 답하는 일 막기 — 10초 넘으면 강제 종료)

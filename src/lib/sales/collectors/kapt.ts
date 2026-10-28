@@ -1,7 +1,7 @@
 // K-apt(공동주택) 수집기 3종 — 전국 입찰공고 HTML(키 불필요) · 입찰결과 HTML(낙찰 병합) · 사업자선정 결과 OpenAPI(KAPT_SERVICE_KEY). 원본 lib/collectors/kapt_* 이식(10/21).
 import { db } from '../../db';
 import { dataGoKey } from '../collect';
-import { kaptFileList, kaptFileUrl, kaptSession } from '../files';
+import { kaptDetailUrl, kaptFileList, kaptFileUrl, kaptSession } from '../files';
 import { callDataGo } from './g2b';
 import { matchFit } from './procurement';
 import { upsertKaptVendor, upsertNotices, deriveOperatingFromKapt, knownKaptVendors, refitNotices } from './store';
@@ -11,7 +11,7 @@ import type { Collector, CollectorCtx, CollectorResult } from './types';
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
 const BASE = () => (T() ? `${T()}/kapt` : 'https://www.k-apt.go.kr');
 const HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)', 'Accept-Language': 'ko-KR' };
-const PAGE_SIZE = 100, MAX_PAGES = 40, QUICK_PAGES = 5, DETAIL_LIMIT = 150, CHUNK = 500;
+const PAGE_SIZE = 100, MAX_PAGES = 40, QUICK_PAGES = 5, DETAIL_LIMIT = 150, CHUNK = 500, WATCH_LIMIT = 40;
 const kstHourNow = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
 const kstYmd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 /** #476 f: K-apt 공공데이터 키 — KAPT_SERVICE_KEY 가 없으면 같은 포털 키(플랫폼 운영에 넣은 공공데이터포털 키 → DATA_GO_KR_SERVICE_KEY) */
@@ -86,6 +86,16 @@ export function parseKaptBidDetail(html: string): KaptBidDetail {
   // #751(광명자이더샵포레나 kg2b_142624): K-apt 목록은 취소된 공고도 '신규공고'로 두고 상세에만 '취소된 계약 입니다'·사유를 보여 줌
   if (/취소된\s*계약/.test(html)) { d.canceled = true; d.cancelReason = parseKaptAwardDetail(html).reason; }
   return d;
+}
+/** 241차(로컬 10/28 19:20 'kg2b_142624 상세 요청의 응답 코드·길이·취소된 계약 포함 여부'): 플랫폼 공고 조회의 [상세 지금 받아 보기] — 저장하지 않음.
+ *  화면 글·대표자·전화는 돌려주지 않고 응답 코드·길이·취소 여부·사유·참가 조건을 읽었는지만 */
+export async function probeKaptDetail(bid: string) {
+  const at = new Date().toISOString();
+  try {
+    const s = await kaptSession(bid, fetch, 10000); const d = parseKaptBidDetail(s.html);
+    return { at, url: kaptDetailUrl(bid), status: s.status, length: s.html.length, canceledText: /취소된\s*계약/.test(s.html), canceled: !!d.canceled, reason: d.cancelReason ?? null,
+      termsFound: !!d.terms, briefing: d.terms?.briefingKind ?? null, title: /입찰제목/.test(s.html) };
+  } catch (e) { return { at, url: kaptDetailUrl(bid), status: 0, length: 0, error: (e instanceof Error ? e.message : String(e)).slice(0, 200) }; }
 }
 export const regionFromTitle = (title: string) => title.match(/^\s*\[([^\]]{1,12})\]/)?.[1]?.trim() ?? null;
 export function toPayload(r: KaptBidRow, d?: KaptBidDetail): Record<string, unknown> {
@@ -198,11 +208,35 @@ export const kaptBidNotices: Collector = {
       } catch (e) { if (errors.length < 15) errors.push(`상세 ${r.bidNum}: ${e instanceof Error ? e.message : String(e)}`); }
     });
     await fileListUsed(filesRead + listFailed).catch(() => {});
+    // 241차 #751 후속(로컬 10/28 19:20 kg2b_142624 — 빠른 수집 목록(최신 500건) 밖으로 밀린 공고는 상세를 다시 못 읽어 취소를 놓침): 이번에 상세를 못 읽은
+    // 마감 전 관련 K-apt 공고를 DB 에서 상세를 오래전에 읽은 순으로 한 번에 40건 다시 읽음 — 목록 칸은 저장된 값 그대로, 상세 칸(취소·참가 조건)만 고침
+    const watched: Record<string, unknown>[] = []; let watchCanceled = 0;
+    if (left() > 20000) {
+      const skip = [...new Set([...details.keys(), ...detailRows.map((r) => r.bidNum)])];
+      const rows0 = await db()<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'source_type' = 'kapt_bid'
+          and coalesce(row->>'related', 'false') = 'true' and coalesce(row->>'deadline_at', '') >= ${td} and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰'
+          and not (row->>'source_external_id' = any(${skip}::text[]))
+        order by row->>'detail_seen_at' asc nulls first, row->>'deadline_at' asc limit ${WATCH_LIMIT * 2}`.catch(() => []);
+      const seenExt = new Set<string>();
+      const wl = rows0.map((x) => x.row).filter((x) => { const k = String(x?.source_external_id ?? ''); if (!k || seenExt.has(k)) return false; seenExt.add(k); return true; }).slice(0, WATCH_LIMIT);
+      await pool(wl, 6, async (x) => {
+        if (left() < 15000) return;
+        try {
+          const s = await kaptSession(String(x.source_external_id), fetchImpl, 8000); if (s.status !== 200) throw new Error(`HTTP ${s.status}`);
+          const d = parseKaptBidDetail(s.html); if (d.canceled) watchCanceled++;
+          // 목록 칸(제목·마감·공고 구분·주소·지역·발주처)은 저장된 값 그대로 — 상태·공고 종류 계산이 목록에서 읽을 때와 같고, 표기 차이로 '변경'이 되지 않게. 상세 칸만 새로
+          const p = toPayload({ bidNum: String(x.source_external_id), title: String(x.title ?? ''), deadline: String(x.deadline_at ?? ''), state: String(x.notice_state ?? ''),
+            complex: String(x.facility_name ?? x.issuer ?? ''), registeredAt: String(x.posted_date ?? ''), system: String(x.bid_system ?? ''), awardMethod: String(x.award_method ?? '') }, d);
+          watched.push({ ...p, source_url: x.source_url || p.source_url, region: x.region ?? p.region, issuer: x.issuer ?? p.issuer, facility_name: x.facility_name ?? p.facility_name,
+            detail_seen_at: new Date().toISOString() }); // 다시 확인한 때 — 다음 실행은 오래전에 확인한 공고부터
+        } catch (e) { if (errors.length < 15) errors.push(`다시 확인 ${x.source_external_id}: ${e instanceof Error ? e.message : String(e)}`); }
+      });
+    }
     const fitIds = new Set(fitRows.map((r) => r.bidNum));
     const listed = new Set(uniq.map((r) => r.bidNum));
     // 공식 API 에만 있는 공고(목록 화면 쪽에서 놓친 것)를 앞에 — 같은 입찰번호는 목록 화면 값(상세 포함)이 기준
     const apiOnly = api.items.filter((p) => !listed.has(String(p.source_external_id)));
-    const ordered = [...apiOnly.filter((p) => matchFit(String(p.title), '공동주택').fit), ...fitRows.map((r) => toPayload(r, details.get(r.bidNum))), ...apiOnly.filter((p) => !matchFit(String(p.title), '공동주택').fit), ...uniq.filter((r) => !fitIds.has(r.bidNum)).map((r) => toPayload(r, details.get(r.bidNum)))];
+    const ordered = [...watched, ...apiOnly.filter((p) => matchFit(String(p.title), '공동주택').fit), ...fitRows.map((r) => toPayload(r, details.get(r.bidNum))), ...apiOnly.filter((p) => !matchFit(String(p.title), '공동주택').fit), ...uniq.filter((r) => !fitIds.has(r.bidNum)).map((r) => toPayload(r, details.get(r.bidNum)))];
     let inserted = 0, updated = 0, unchanged = 0, writeErrors = 0, invalid = 0, written = 0;
     for (let i = 0; i < ordered.length; i += CHUNK) {
       if (left() < 5000) { errors.push(`시간 한도 근접 — ${ordered.length - i}건(비관련 공고)은 다음 실행에서`); break; }
@@ -215,7 +249,7 @@ export const kaptBidNotices: Collector = {
     let direct = 0; const fitCount = { 다짐: 0, 하이링크: 0, 둘다: 0 };
     for (const r of fitRows) { const d = details.get(r.bidNum); const m = matchFit(r.title, d?.category, d?.content, '공동주택'); if (m.direct) direct++; if (m.fit === '다짐') fitCount.다짐++; else if (m.fit === '하이링크') fitCount.하이링크++; else if (m.fit) fitCount.둘다++; }
     return { inserted, updated, unchanged, errors: writeErrors + invalid + listFailures + (api.error ? 1 : 0) + (written < ordered.length ? 1 : 0), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
-      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}${filesRead || listFailed ? ` · 첨부 목록 ${filesRead}건(파일 ${listFiles}${listFailed ? `, 못 읽음 ${listFailed}` : ''})` : ''}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') + (refit?.raised ? ` · 다시 판정으로 관련 ${refit.raised}건(마감 전 ${refit.reopened})` : '') + (refit?.lowered || refit?.changed ? ` · 다시 판정으로 내림 ${refit.lowered}건·사업 바꿈 ${refit.changed}건` : '') };
+      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}${watched.length ? ` · 목록 밖 마감 전 공고 다시 확인 ${watched.length}건${watchCanceled ? `(취소 ${watchCanceled})` : ''}` : ''}${filesRead || listFailed ? ` · 첨부 목록 ${filesRead}건(파일 ${listFiles}${listFailed ? `, 못 읽음 ${listFailed}` : ''})` : ''}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') + (refit?.raised ? ` · 다시 판정으로 관련 ${refit.raised}건(마감 전 ${refit.reopened})` : '') + (refit?.lowered || refit?.changed ? ` · 다시 판정으로 내림 ${refit.lowered}건·사업 바꿈 ${refit.changed}건` : '') };
   },
 };
 

@@ -19,9 +19,10 @@ export async function cal1019({ owner, ctx, sql, BASE }) {
   const ga = owner.locator('[data-ev-block]').filter({ hasText: 'E2E 겹침 가' }), gb = owner.locator('[data-ev-block]').filter({ hasText: 'E2E 겹침 나' });
   await ga.waitFor(); await gb.waitFor();
   const [ba, bb] = [await ga.boundingBox(), await gb.boundingBox()];
-  assert.ok(ba.x + ba.width <= bb.x + 1 || bb.x + bb.width <= ba.x + 1, `겹친 일정은 나란히 (${JSON.stringify([ba, bb])})`);
+  // 241차(대표 10/28 '구글 캘린더 레퍼런스'): 겹친 일정은 뒤 일정이 오른쪽으로 비켜 겹쳐 쌓임 — 앞 일정 왼쪽이 보이고 그 부분을 누르면 앞 일정
+  assert.ok(bb.x > ba.x + 4 && ba.x + ba.width > bb.x + 4, `겹친 일정은 오른쪽으로 비켜 겹쳐 쌓임 (${JSON.stringify([ba, bb])})`);
   for (const t of ['E2E 겹침 가', 'E2E 겹침 나']) {
-    await owner.locator('[data-ev-block]').filter({ hasText: t }).click();
+    await owner.locator('[data-ev-block]').filter({ hasText: t }).click({ position: { x: 6, y: 8 } });
     await owner.getByTestId('event-preview').getByText(t).waitFor();
     await owner.getByRole('button', { name: '미리보기 닫기' }).click(); await owner.getByTestId('event-preview').waitFor({ state: 'detached' });
   }

@@ -60,7 +60,9 @@ export async function upsertNotices(items: Record<string, unknown>[], opt: { mer
       await writeRows('procurement_notices', plan.inserts.map((i) => { const id = randomUUID(); return { id, row: { id, lead_id: null, ...i.row, first_seen_at: t, last_seen_at: t, last_seen_date: d, created_at: t, updated_at: t } }; }));
       await patchRows('procurement_notices', updates.map((u) => ({ id: u.id, patch: { ...u.patch, last_seen_at: t, last_seen_date: d, ...(u.quiet ? {} : { updated_at: t }) } })));
       await touchRows('procurement_notices', unchangedIds);
-      out.inserted += plan.inserts.length; out.updated += plan.updates.length; out.unchanged += plan.unchangedIds.length;
+      // 241차: 다시 확인한 때만 바뀐 줄(touchOnly)은 '그대로'로 셈
+      const touched = plan.updates.filter((u) => u.touchOnly).length;
+      out.inserted += plan.inserts.length; out.updated += plan.updates.length - touched; out.unchanged += plan.unchangedIds.length + touched;
     } catch (e) { out.errors += list.length; logs.push(`쓰기 실패(${st}): ${e instanceof Error ? e.message : String(e)}`); }
   }
   if (logs.length) out.errorLog = logs.slice(0, 20).join('\n');

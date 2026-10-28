@@ -41,7 +41,7 @@ function Section({ title, count, children, href, icon: Icon, className, actions,
         <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold">{Icon && <Icon className="size-4 shrink-0 text-ink-3" />}<span className="truncate">{title}</span>{count !== undefined && <span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums">{count}</span>}</h2>
         <div className="flex shrink-0 items-center gap-2">
           {actions}
-          {href && <Link href={href} className="inline-flex items-center gap-0.5 text-xs font-medium text-accent-600 hover:underline">전체<ArrowRight className="size-3" /></Link>}
+          {href && <Link prefetch={false} href={href} className="inline-flex items-center gap-0.5 text-xs font-medium text-accent-600 hover:underline">전체<ArrowRight className="size-3" /></Link>}
         </div>
       </div>
       <div className="min-w-0 flex-1 px-2 pb-2">{children}</div>
@@ -56,9 +56,9 @@ function NoticeCard() {
   if (!st.data?.unread) return null;
   return (
     <section className="rounded-card border border-amber-200 bg-amber-50/60 p-3 shadow-card" data-testid="home-notices">
-      <div className="mb-1 flex items-center gap-2"><Megaphone className="size-4 text-amber-700" /><h2 className="text-sm font-semibold">안 읽은 공지 {st.data.unread}건</h2><Link href="/notices?unread=1" className="ml-auto text-xs font-medium text-amber-800 underline">모두 보기</Link></div>
+      <div className="mb-1 flex items-center gap-2"><Megaphone className="size-4 text-amber-700" /><h2 className="text-sm font-semibold">안 읽은 공지 {st.data.unread}건</h2><Link prefetch={false} href="/notices?unread=1" className="ml-auto text-xs font-medium text-amber-800 underline">모두 보기</Link></div>
       <ul className="divide-y divide-amber-100 text-sm">
-        {st.data.notices.map((n) => <li key={n.id}><Link href={`/notices/${n.id}`} className="flex items-center gap-1.5 py-1.5 hover:underline">{n.important && <span className="rounded bg-red-100 px-1.5 text-[11px] font-semibold text-red-700">중요</span>}<span className="min-w-0 flex-1 truncate">{n.title}</span><span className="shrink-0 text-xs text-ink-3">{n.created_by_name}</span></Link></li>)}
+        {st.data.notices.map((n) => <li key={n.id}><Link prefetch={false} href={`/notices/${n.id}`} className="flex items-center gap-1.5 py-1.5 hover:underline">{n.important && <span className="rounded bg-red-100 px-1.5 text-[11px] font-semibold text-red-700">중요</span>}<span className="min-w-0 flex-1 truncate">{n.title}</span><span className="shrink-0 text-xs text-ink-3">{n.created_by_name}</span></Link></li>)}
       </ul>
     </section>
   );
@@ -69,7 +69,7 @@ function TodayRow({ t, className }: { t: any; className?: string }) {
   return (
     <li {...rowOpen} className={cx(className, "flex min-w-0 cursor-pointer items-center gap-2.5 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50")} data-home-task={t.id}>
       <div className="min-w-0 flex-1">
-        <Link href={`/tasks/${t.id}`} className="block truncate font-medium hover:text-accent-600 hover:underline">{t.title}</Link>
+        <Link prefetch={false} href={`/tasks/${t.id}`} className="block truncate font-medium hover:text-accent-600 hover:underline">{t.title}</Link>
         <div className="truncate text-xs text-ink-2">{t.assignee_name ?? '담당자 없음'}{t.org_unit_name ? ` · ${t.org_unit_name}` : ''}</div>
       </div>
       <PriorityTag p={t.priority} label={false} />
@@ -84,7 +84,7 @@ function EventRow({ e, withDate }: { e: any; withDate?: boolean }) {
       <span className="mt-0.5 h-8 w-1 shrink-0 rounded-full" style={{ background: e.color }} />
       <span className="w-14 shrink-0 pt-0.5 text-xs tabular-nums text-ink-2">{withDate && <span className="block">{Number(seoulDay(e.start).slice(5, 7))}/{Number(seoulDay(e.start).slice(8))}</span>}{e.allDay ? '종일' : fmtTime(e.start)}</span>
       <div className="min-w-0 flex-1">
-        <Link href={`/calendar?date=${seoulDay(e.start)}&event=${e.id}`} className="block truncate font-medium hover:underline">{cleanTitle(e.title)}</Link>
+        <Link prefetch={false} href={`/calendar?date=${seoulDay(e.start)}&event=${e.id}`} className="block truncate font-medium hover:underline">{cleanTitle(e.title)}</Link>
         {e.location && <span className="flex min-w-0 items-center gap-1 text-xs text-ink-2"><MapPin className="size-3 shrink-0" /><span className="truncate">{e.location}</span></span>}
       </div>
     </li>
@@ -115,7 +115,7 @@ function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: CalColors; onDone
     <li className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50" data-week-item={r.tag} data-week-space={r.space}>
       <span className="w-10 shrink-0 text-xs tabular-nums text-ink-2">{r.time || '종일'}</span>
       <span className="size-2.5 shrink-0 rounded-full" style={{ background: c }} aria-hidden />
-      <Link href={r.href} className="min-w-0 flex-1 truncate font-medium hover:underline">{r.title}</Link>
+      <Link prefetch={false} href={r.href} className="min-w-0 flex-1 truncate font-medium hover:underline">{r.title}</Link>
       <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: sm.soft, color: sm.color }}>{sm.short}</span>
     </li>); }
   return (
@@ -125,7 +125,7 @@ function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: CalColors; onDone
       {r.task && r.tag !== '일정·업무'
         ? <span className="h-3.5 w-1 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden data-week-bar />
         : <span className="size-2.5 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden />}
-      <Link href={r.href} className={cx('min-w-0 flex-1 truncate font-medium hover:underline', done && 'text-ink-3 line-through')}>{r.title}</Link>
+      <Link prefetch={false} href={r.href} className={cx('min-w-0 flex-1 truncate font-medium hover:underline', done && 'text-ink-3 line-through')}>{r.title}</Link>
       <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', r.kind === 'overdue' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2')}>{r.tag}</span>
     </li>
   );
@@ -236,7 +236,7 @@ export default function Dashboard() {
       </div>
       <ConnectCard />
       {tot.overdue > 0 && (
-        <Link href="/tasks?view=overdue" className="flex items-center gap-2 rounded-card border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100" data-testid="overdue-banner">
+        <Link prefetch={false} href="/tasks?view=overdue" className="flex items-center gap-2 rounded-card border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100" data-testid="overdue-banner">
           <AlertTriangle className="size-5 shrink-0" />기한 지난 업무 {tot.overdue}건<span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium">확인하기<ArrowRight className="size-3.5" /></span>
         </Link>
       )}
@@ -253,12 +253,12 @@ export default function Dashboard() {
       {(myTeams.data?.teams.length ?? 0) > 0 && (
         <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="home-team">
           <div className="mb-2 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">우리 팀 오늘의 일정</h2>
-            {myTeams.data!.teams.map((t) => <Link key={t.id} href={`/teams/${t.id}`} className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs hover:bg-slate-50"><span className="size-2 rounded-full" style={{ background: t.color }} />{t.name} 보드</Link>)}</div>
+            {myTeams.data!.teams.map((t) => <Link prefetch={false} key={t.id} href={`/teams/${t.id}`} className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs hover:bg-slate-50"><span className="size-2 rounded-full" style={{ background: t.color }} />{t.name} 보드</Link>)}</div>
           <ul className="divide-y divide-line text-sm">
             {myTeams.data!.tasks.slice(0, 8).map((t) => (
               <li key={t.id} className="flex items-center gap-2 py-1.5">
                 <span className="size-2 shrink-0 rounded-full" style={{ background: t.team_color ?? '#0F766E' }} />
-                <Link href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate hover:underline">{t.title}</Link>
+                <Link prefetch={false} href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate hover:underline">{t.title}</Link>
                 <span className="shrink-0 text-xs text-ink-3">{t.assignee_name ?? '담당 미정'}</span><DueChip due={t.due_date} status={t.status} />
               </li>
             ))}
@@ -300,7 +300,7 @@ export default function Dashboard() {
         <Section title="담당자별 현황" icon={Users} href="/tasks" className="lg:col-span-2 lg:row-span-2" testid="home-people">
           <div className="grid gap-2 px-1 sm:grid-cols-2 xl:grid-cols-3">
             {people.map((p) => (
-              <Link key={p.id} href={`/tasks?assigneeId=${p.id}`} className="min-w-0 rounded-input border border-line p-3 hover:border-slate-300 hover:shadow-card">
+              <Link prefetch={false} key={p.id} href={`/tasks?assigneeId=${p.id}`} className="min-w-0 rounded-input border border-line p-3 hover:border-slate-300 hover:shadow-card">
                 <div className="flex min-w-0 items-center gap-2"><Avatar id={p.id} name={p.name} size={28} /><span className="truncate font-semibold">{p.name}</span></div>
                 <dl className="mt-2 grid grid-cols-4 gap-1 text-center">
                   {([['진행', p.open, ''], ['오늘 마감', p.due_today, p.due_today ? 'text-amber-700' : ''], ['지연', p.overdue, p.overdue ? 'text-red-600' : ''], ['주간 완료', p.done_week, 'text-green-600']] as const).map(([l, v, tone]) => (
@@ -315,11 +315,11 @@ export default function Dashboard() {
 
         <Section title="기한 지남 · 검토 대기" icon={AlertTriangle} className="lg:col-start-3" testid="home-alerts">
           <div className="grid grid-cols-2 gap-2 px-1">
-            <Link href="/tasks?view=overdue" className="rounded-input border border-line p-3 hover:border-red-200 hover:bg-red-50/40">
+            <Link prefetch={false} href="/tasks?view=overdue" className="rounded-input border border-line p-3 hover:border-red-200 hover:bg-red-50/40">
               <span className="flex items-center gap-1 text-xs text-ink-2"><AlertTriangle className="size-3.5 text-red-500" />기한 지남</span>
               <span className={cx('text-2xl font-bold tabular-nums', tot.overdue ? 'text-red-600' : 'text-ink')}>{tot.overdue}</span>
             </Link>
-            <Link href="/tasks?view=review" className="rounded-input border border-line p-3 hover:border-amber-200 hover:bg-amber-50/40">
+            <Link prefetch={false} href="/tasks?view=review" className="rounded-input border border-line p-3 hover:border-amber-200 hover:bg-amber-50/40">
               <span className="flex items-center gap-1 text-xs text-ink-2"><Hourglass className="size-3.5 text-amber-500" />검토 대기</span>
               <span className={cx('text-2xl font-bold tabular-nums', tot.review ? 'text-amber-700' : 'text-ink')}>{tot.review}</span>
             </Link>
@@ -328,7 +328,7 @@ export default function Dashboard() {
             <ul className="mt-2">
               {data.review.slice(0, 3).map((t: any) => (
                 <li key={t.id} className="flex min-w-0 flex-wrap items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50">
-                  <Link href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{t.title}</Link>
+                  <Link prefetch={false} href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{t.title}</Link>
                   {/* V12 11번: 검토 승인·반려는 그 업무의 요청자만 */}
                   {t.requested_by === user.id ? <span className="flex gap-1"><Button size="sm" onClick={() => approve(t, true)}>완료 확인</Button><Button size="sm" variant="secondary" onClick={() => approve(t, false)}>보완 요청</Button></span>
                     : <span className="text-xs text-ink-3">요청자 확인 대기{t.requested_by_name ? ` · ${t.requested_by_name}` : ''}</span>}

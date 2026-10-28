@@ -1,5 +1,6 @@
 // 나라장터·누리장터 입찰공고 + 사전규격 + 낙찰정보 — data.go.kr OpenAPI(DATA_GO_KR_SERVICE_KEY). 원본 g2b_bid_notices·g2b_prespec_awards 이식(10/21, 명세는 FEATURES 4장).
 // 운영 참고: 서비스마다 활용신청이 필요하다. 'SERVICE ACCESS DENIED' 등은 '활용신청 필요'로 기록하고 다른 서비스는 계속 돈다.
+import { db } from '../../db';
 import { dataGoKey } from '../collect';
 import { matchFit } from './procurement';
 import { upsertNotices } from './store';
@@ -96,6 +97,43 @@ async function searchAll(ops: readonly (readonly [string, string])[], words: str
 /** 요약 한 줄: '검색 30회 · 응답 00 · 전체 0건' — 받은 줄이 있는데 하나도 못 읽었으면 첫 줄 칸 이름(형식 확인용) */
 const statLine = (s: DataGoStats, read: number) => !s.calls ? '응답 없음' : `검색 ${s.calls}회 · 응답 ${Object.entries(s.codes).map(([c, n]) => (Object.keys(s.codes).length > 1 ? `${c}×${n}` : c)).join('·')} · 전체 ${s.total}건` + (s.raw && !read ? ` · 받은 ${s.raw}줄을 못 읽음(칸: ${(s.keys ?? []).slice(0, 15).join(',')})` : '');
 async function write(items: Record<string, unknown>[], errors: string[], opt: { mergeScope?: 'all' | 'award' } = {}) { if (!items.length) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0 }; const r = await upsertNotices(items, opt); if (r.errorLog) errors.push(r.errorLog); return r; }
+/**
+ * #743 1단계(대표 결정 15-38 '파일 열기 전에 참가자격'): 나라장터 공고의 면허(업종) 제한·참가 가능 지역 — 목록 응답에 없거나 일부만 있어 관련 공고(마감 전)마다
+ * 입찰공고정보서비스 면허제한·참가가능지역 조회를 공고번호로 한 번씩 묻는다(한 번 읽으면 limits_read_at — 다시 안 묻고 목록 값으로 덮지 않음, 한 번에 30건).
+ * 응답 칸 이름이 명세와 다르면 요약에 받은 칸 이름을 남긴다(운영 키로만 확인 가능)
+ */
+const LIMIT_OPS = { license: 'ad/BidPublicInfoService/getBidPblancListInfoLicenseLimit', region: 'ad/BidPublicInfoService/getBidPblancListInfoPrtcptPsblRgn' } as const;
+export async function readG2bLimits(items: Record<string, unknown>[], ctx: CollectorCtx, key: string, errors: string[], max = 30) {
+  const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const out = { read: 0, found: 0, keys: [] as string[] };
+  const open = items.filter((p) => p.source_type === 'g2b_bid' && matchFit(String(p.title), String(p.bid_category ?? '')).fit && (!p.deadline_at || !(Date.parse(String(p.deadline_at)) < Date.now())));
+  if (!open.length) return out;
+  const exts = open.map((p) => String(p.source_external_id));
+  const done = new Set((await db()<{ ext: string }[]>`select row->>'source_external_id' as ext from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and row->>'source_type' = 'g2b_bid'
+    and row->>'source_external_id' = any(${exts}::text[]) and row ? 'limits_read_at'`).map((r) => r.ext));
+  for (const p of open) if (done.has(String(p.source_external_id))) delete p.region_restriction; // 읽은 값을 목록의 짧은 값으로 덮지 않음
+  const pick = (x: any, names: string[], re: RegExp) => { for (const n of names) { const v = str(x?.[n]); if (v) return v; } const k = Object.keys(x ?? {}).find((k) => re.test(k)); return k ? str(x[k]) : null; };
+  for (const p of open.filter((x) => !done.has(String(x.source_external_id))).slice(0, max)) {
+    if (left() < 8000) break;
+    const [no, ord] = String(p.source_external_id).split('-');
+    const ask = (op: string) => { const u = new URL(`${API()}/${op}`); for (const [k, v] of Object.entries({ serviceKey: key, numOfRows: '50', pageNo: '1', type: 'json', inqryDiv: '2', bidNtceNo: no })) u.searchParams.set(k, v);
+      const st: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 }; return callDataGo(u, ctx.fetchImpl, key, Math.min(8000, left() - 2000), st).then((list) => { if (st.keys && !out.keys.length && list.length) out.keys = st.keys.slice(0, 12); return list; }); };
+    try {
+      const [lic, rgn] = await Promise.all([ask(LIMIT_OPS.license), ask(LIMIT_OPS.region)]);
+      const same = (x: any) => !str(x?.bidNtceOrd) || str(x.bidNtceOrd) === ord;
+      const licenses = [...new Set(lic.filter(same).flatMap((x) => [pick(x, ['lcnsLmtNm'], /lcns.*Nm$/i), pick(x, ['permsnIndstrytyList'], /indstryty.*List$/i)]).filter((v): v is string => !!v))];
+      const regions = [...new Set(rgn.filter(same).map((x) => pick(x, ['prtcptPsblRgnNm'], /rgn.*nm$/i)).filter((v): v is string => !!v))];
+      if (licenses.length) p.license_limit = licenses.join(' / ').slice(0, 300);
+      if (regions.length) p.region_restriction = regions.join(' · ').slice(0, 200);
+      if (licenses.length || regions.length) out.found++;
+      p.limits_read_at = new Date().toISOString(); out.read++;
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (errors.length < 15) errors.push(`제한 조회 ${p.source_external_id}: ${m}`);
+      if (/활용신청 필요|주소 확인 필요/.test(m)) break; // 서비스 단위 오류 — 나머지 공고도 같음
+    }
+  }
+  return out;
+}
 const noKey = (label: string): CollectorResult => ({ inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `${label}: DATA_GO_KR_SERVICE_KEY 미설정 — 건너뜀`, providerMode: 'api' });
 
 export const g2bBidNotices: Collector = {
@@ -107,9 +145,11 @@ export const g2bBidNotices: Collector = {
     const a = await searchAll(BID_OPS, G2B_WORDS, days, (it, cat) => g2bPayload(it, 'g2b_bid', cat), ctx, key);
     const b = await searchAll(await nuriOps(), G2B_WORDS, days, nuriPayload, ctx, key);
     const errors = [...a.errors, ...b.errors]; const items = [...a.items, ...b.items];
+    const lim = await readG2bLimits(a.items, ctx, key, errors).catch((e) => { errors.push(`제한 조회: ${e instanceof Error ? e.message : String(e)}`); return { read: 0, found: 0, keys: [] as string[] }; });
     const r = await write(items, errors);
+    if (lim.read && !lim.found && lim.keys.length) errors.push(`제한 조회 ${lim.read}건 — 값을 못 읽음(받은 칸: ${lim.keys.join(', ')})`);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + a.denied.length + b.denied.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
-      summary: `${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건(${statLine(b.stats, b.items.length)}) (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
+      summary: `${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건(${statLine(b.stats, b.items.length)}) (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (lim.read ? ` · 참가 제한 조회 ${lim.read}건(값 ${lim.found})` : '') + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
   },
 };
 export function prespecPayload(it: any, cat: string): Record<string, unknown> | null {

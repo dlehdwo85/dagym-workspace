@@ -28,6 +28,7 @@ import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/comp
 import { Attachments } from '@/components/Attachments';
 import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
 import { SPACE_META } from '@/components/spaceMeta';
+import { DeletedEvents } from '@/components/DeletedEvents';
 import { CalColorsDialog, ColorDot, PALETTE_NAMES, eventColorOf, isPersonalTask, saveColorPart, useCalColors } from '@/components/calColors';
 import { assignedTo } from '@/components/CoAssignees';
 
@@ -149,6 +150,7 @@ function CalendarPage() {
   const calApi = useCallback(() => calRef.current?.getApi(), []);
   const { colors: calColors } = useCalColors();
   const [colorDlg, setColorDlg] = useState(false);
+  const [trashDlg, setTrashDlg] = useState(false); // 241차 지운 일정(휴지통)
   const mobile = typeof window !== 'undefined' && window.innerWidth < 640;
   // 휴대폰: 보기(일·3일·주·월·목록)를 이 기기에 기억, 처음은 주. PC 는 늘 주 보기로 시작
   const VIEWS = ['timeGridDay', 'timeGrid3', 'timeGridWeek', 'dayGridMonth', 'listWeek'];
@@ -470,6 +472,7 @@ function CalendarPage() {
             {range && <a href={`/api/export/calendar?start=${seoulDate(range.from)}&end=${addDays(seoulDate(range.to), -1)}${who === 'mine' ? `&who=${user.id}` : Array.isArray(who) ? `&who=${who.join(',')}` : ''}`}
               className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2 sm:hidden" data-testid="cal-export-mobile"><FileSpreadsheet className="size-3.5 text-green-700" />엑셀</a>}{/* #592 휴대폰: 제목 줄을 숨겨 엑셀은 칩 줄로 */}
             <button onClick={() => setColorDlg(true)} className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2" aria-label="캘린더 색 설정" data-testid="cal-colors"><span className="size-2.5 rounded-full" style={{ background: calColors.personal }} /><span className="size-2.5 rounded-full" style={{ background: calColors.company }} />색</button>
+            <button onClick={() => setTrashDlg(true)} className="inline-flex items-center gap-1 hit rounded-full border border-line px-2.5 py-1 font-medium text-ink-2" data-testid="cal-trash"><Trash2 className="size-3.5" />지운 일정</button>{/* 241차 */}
           </div>
   );
 
@@ -547,6 +550,12 @@ function CalendarPage() {
                   ))}
                 </span>
               </li>
+              {/* 241차(로컬 10/28 19:20 '일정이 사라짐'): 지운 일정 — 누가·언제 지웠는지 보고 되살리기 */}
+              <li>
+                <button type="button" onClick={() => setTrashDlg(true)} className="flex w-full items-center gap-2 rounded-input px-2 py-1.5 text-left text-sm hover:bg-slate-50" data-testid="cal-trash-side">
+                  <Trash2 className="size-3.5 text-ink-3" /><span>지운 일정</span>
+                </button>
+              </li>
             </ul>
           </div>
           {people.length > 1 && (
@@ -623,10 +632,11 @@ function CalendarPage() {
             dayMaxEvents={4} moreLinkContent={(a) => `+${a.num}개`}
             // #592: 시간 격자 종일 줄은 하루 2개까지 — '+n개' 는 그날 종일 목록(휴대폰 시트), 월 보기는 그대로 풍선. 끝에 참 값을 돌려주면 FullCalendar 는 아무것도 하지 않음
             moreLinkClick={(a) => { if (!a.view.type.startsWith('timeGrid')) return 'popover'; setAllDaySheet(seoulDate(a.date)); return true as never; }}
-            // 대표 지적(10/19 ① d): 겹친 일정·업무는 나란히(겹쳐 그리면 위에 깔린 항목이 눌려 다른 상세가 열림)
             // #757(대표 10/28 사진: 14:00~16:00 30분 면접 4건이 좌우로 쪼개짐): 최소 높이(28·휴대폰 34px)가 30분 높이(PC 24·휴대폰 주 20px)보다 커서 다음 일정과 겹친 것으로 계산됐음
-            // → 최소 높이를 30분 높이 아래로(PC 22·휴대폰 18) — 안 겹치는 일정은 칸 너비 전체로 위아래로 이어짐. 실제로 겹치는 일정만 나란히(10/19 대표 결정 그대로)
-            slotDuration="01:00:00" snapDuration={snap === 30 ? '00:30:00' : '00:15:00'} slotEventOverlap={false} eventMinHeight={mobile ? 18 : 22} eventShortHeight={30}
+            // → 최소 높이를 30분 높이 아래로(PC 22·휴대폰 18) — 안 겹치는 일정은 칸 너비 전체로 위아래로 이어짐
+            // 241차(대표 10/28 '겹치면 다르게 구현되는거 같은데 구글 캘린더 레퍼런스 해주세요' — 10/19 '나란히' 대신): 실제로 겹치는 일정은 뒤 일정이 오른쪽으로 비켜
+            // 겹쳐 쌓임(앞 일정 왼쪽 부분이 보이고 그 부분을 누르면 앞 일정 — 흰 테두리로 구분)
+            slotDuration="01:00:00" snapDuration={snap === 30 ? '00:30:00' : '00:15:00'} slotEventOverlap eventMinHeight={mobile ? 18 : 22} eventShortHeight={30}
             editable selectable selectMirror droppable longPressDelay={350} selectMinDistance={touch ? 0 : 4}
             events={fcEvents}
             datesSet={(a: DatesSetArg) => { setAgRange({ from: seoulDate(a.start), to: seoulDate(new Date(a.end.getTime() - 1)) }); setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view2', a.view.type); } catch {} keepInUrl({ view: a.view.type, date: seoulDate(a.view.calendar.getDate()) }); }}
@@ -744,6 +754,7 @@ function CalendarPage() {
       <button type="button" onClick={() => openMeeting()} aria-label="미팅 일정" title="미팅 일정" data-hidden={fabHidden ? '1' : '0'}
         className={cx('fixed bottom-[calc(var(--sab)+76px)] right-4 z-30 inline-flex size-12 items-center justify-center rounded-full bg-rose-600 text-white shadow-pop transition-[opacity,transform] duration-200 lg:hidden', fabHidden && 'pointer-events-none translate-y-3 opacity-0')} data-testid="cal-meeting-fab"><MapPin className="size-5" /></button>
       {colorDlg && <CalColorsDialog onClose={() => setColorDlg(false)} />}
+      {trashDlg && <DeletedEvents onClose={() => setTrashDlg(false)} />}
       {/* 대표 결정(10/16): 캘린더에서는 일정만 등록 — 업무는 업무 화면·홈 [+업무]. 일정과 함께 할 일이 필요하면 "업무 리스트에도 추가" */}
       {allDaySheet && (
         <div className="fixed inset-0 z-50 bg-slate-900/40" onClick={() => setAllDaySheet(null)}>
@@ -1129,7 +1140,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     const alsoTask = askAlsoTask(d.syncTask, scope, isRecurring);
     try {
       await api(`/api/events/${id}?scope=${scope}${occurrenceStart ? `&occurrenceStart=${encodeURIComponent(occurrenceStart)}` : ''}${alsoTask ? '&alsoTask=1' : ''}`, { method: 'DELETE' });
-      toast.ok('삭제했습니다'); onSaved(); onClose();
+      toast.ok('삭제했습니다', id && scope === 'all' ? undoDelete(id) : undefined); onSaved(); onClose();
     } catch (er: any) { toast.error(er.message); }
   }
   async function respond(r: string) {
@@ -1275,7 +1286,7 @@ function EventPreview({ ev, x, y, calendarName, onClose, onEdit, onChanged, onOp
     const alsoTask = askAlsoTask(ev.linkedTask, scope, !!ev.recurring);
     try {
       await api(`/api/events/${ev.id}?scope=${scope}${ev.originalStart ? `&occurrenceStart=${encodeURIComponent(new Date(ev.originalStart).toISOString())}` : ''}${alsoTask ? '&alsoTask=1' : ''}`, { method: 'DELETE' });
-      toast.ok('삭제했습니다'); onChanged();
+      toast.ok('삭제했습니다', scope === 'all' ? undoDelete(ev.id) : undefined); onChanged();
     } catch (e: any) { toast.error(e.message); }
   }
   async function complete(t: any) {
@@ -1347,6 +1358,11 @@ function PeopleChip({ on, onClick, children, label }: { on: boolean; onClick: ()
     <button type="button" onClick={onClick} aria-pressed={on} aria-label={label}
       className={cx('inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 font-medium', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:border-slate-300')}>{children}</button>
   );
+}
+
+/** 241차: 통째로 지운 일정은 안내의 [되돌리기]로 바로 되살림(나중에는 캘린더 › 지운 일정) */
+function undoDelete(id: string) {
+  return { label: '되돌리기', run: () => { api(`/api/events/${id}/restore`, { method: 'POST' }).then(() => { toast.ok('일정을 되살렸습니다'); broadcastRefresh(); }, (e: Error) => toast.error(e.message)); } };
 }
 
 export default dynamic(() => Promise.resolve(CalendarPage), { ssr: false });
