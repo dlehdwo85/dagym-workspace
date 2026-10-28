@@ -1827,3 +1827,10 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 프로필(/api/sales/support/profile): 경기 용인시 · 설립 2022-01-28 · size·employees·revenue·certs 비어 있음.
 - 148건 마감 순 전수 + 19건 상세 원문 → docs/handoff/SUPPORT_ANALYSIS_2026-10-28.md(바로 검토 9 · 회사 정보 확인 3 · 해당 없음 사례). 앱 AI 판단은 회사 비용이라 안 씀. 원본 자료는 운영 폴더 artifacts/support_fit_1028.json·support_detail_1028.json(저장소 밖).
 - 클라우드 요청 22:45: 정렬·D-day·종류 칩, 표시 바로잡기, 규칙 오탐 6종, 기대 효과 칸·이번 주 신청 목록·엑셀, 프로필 빈칸 안내.
+
+## 2026-10-28 23:17 — #785 지원사업 프로필 채움 · AI 일괄 판단 137건 · 상시 자동 판단 요청
+- PUT /api/sales/support/profile: size 소기업·근로자·매출·certs [] (값은 저장소에 안 적음, 나머지 칸 그대로 — memo 같음 확인).
+- POST /api/sales/support/{id}/analyze 137건(4개씩 동시): 성공 137·실패 0·costKrw 합 167·236초. 결과 fit 15+기존 3 · maybe · no 46.
+- /api/sales/support?tab=fit 다시: total 102 · pending 0 · hiddenNo 796.
+- 클라우드 #785 요청: 수집 직후 자동 판단·주간 상한은 남은 것 채우기·프로필 바뀌면 다시 판단·'확인 중'은 대기열일 때만·사용량 표시.
+- 기억 추가: support-ai-always(새 공고는 매번 AI 판단, 신청·담당은 대표가 직접).
