@@ -143,14 +143,14 @@ test('B2: 청약홈 처음 채우기 4년(1,461일) — 400일 넘으면 종류�
   assert.equal((await ctx.owner.req('POST', '/api/platform/sales-sources', { code: '15098547', run: true, days: 1501 })).status, 400);
 });
 
-test('B2: 입주 시기 목록 — 입주 예정월이 12개월 전 ~ 6개월 뒤인 청약홈 단지만, 입주 예정월이 늦은 것부터', async () => {
+test('B2: 입주 시기 목록 — 입주 예정월이 12개월 전 ~ 6개월 뒤인 청약홈 단지만, 입주가 가까운 순(242차)', async () => {
   for (const [k, add] of [['M-13', -13], ['M-12', -12], ['M-3', -3], ['M0', 0], ['M+6', 6], ['M+7', 7]]) {
     await sql`insert into prospects (source_code, ext_id, name, sido, status, opened_on, category, detail, raw, base_date)
       values ('15098547', ${'win:' + k}, ${'입주 ' + k}, '서울', '모집공고', ${today}, '민영', ${sql.json({ moveIn: ym(add) })}, ${sql.json({})}, current_date)`;
   }
   await ctx.owner.ok('PUT', '/api/sales/sources/15098547', { enabled: true });
   const win = (await ctx.owner.ok('GET', '/api/sales/prospects?moveIn=window')).prospects;
-  assert.deepEqual(win.map((x) => x.name), ['입주 M+6', '입주 M0', '입주 M-3', '입주 M-12'], '2029년 입주 분양 2,150건·창 밖은 빠짐');
+  assert.deepEqual(win.map((x) => x.name), ['입주 M0', '입주 M-3', '입주 M+6', '입주 M-12'], '2029년 입주 분양 2,150건·창 밖은 빠짐 · 242차 #759 입주가 가까운 순');
   const all = (await ctx.owner.ok('GET', '/api/sales/prospects')).prospects;
   assert.ok(all.length > win.length, '필터 없으면 전체');
 });

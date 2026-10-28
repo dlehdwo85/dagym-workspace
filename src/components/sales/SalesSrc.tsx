@@ -1198,8 +1198,9 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
   const [boxQ, setBox] = useUrlState('box', ''); const box = boxQ === 'archive' ? 'archive' : ''; // #605 보관함(대상 아님·완료)
   const [sort, setSort] = useUrlState('sort', ''); const [region, setRegion] = useUrlState('region', ''); const [hh, setHh] = useUrlState('hh', ''); const [period, setPeriod] = useUrlState('period', ''); // #606
   const [st, setSt] = useUrlState('st', ''); // #459(대표 10/23): 상태 필터 칩(주소 ?st=)
+  const [my, setMy] = useUrlState('my', ''); // 242차 #759: 입주(없으면 준공) 연도·달 — 영업기회 '2026년 입주'에서 넘어옴
   const sub = ['bids', 'contracts', 'prospects', 'regions'].includes(tab);
-  const { data, error, reload } = useApi<any>(sub ? (null as unknown as string) : `/api/sales/src?${q({ view: 'hub', tab, q: s, day, box, sort, region, hh, period, status: st })}`, [tab, s, day, box, sort, region, hh, period, st]);
+  const { data, error, reload } = useApi<any>(sub ? (null as unknown as string) : `/api/sales/src?${q({ view: 'hub', tab, q: s, day, box, sort, region, hh, period, status: st, my })}`, [tab, s, day, box, sort, region, hh, period, st, my]);
   const [sel, setSel] = useState<string[]>([]); // 대표 10/20 14:15 ④ 일괄 선택
   useEffect(() => setSel([]), [tab, box, st]);
   const reopen = useRef(sub ? null : sp.get('id')); // 주소 ?id= 상세(새로 고침·뒤로가기) — 목록을 불러온 뒤 그 줄로
@@ -1216,6 +1217,7 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
   return (
     <div className="space-y-3" data-testid="sales-hub">
       <Head title="영업기회 허브" meta={data}><Search value={s} onChange={setS} />
+        {my && <button type="button" onClick={() => setMy('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="hub-my">{my.length === 4 ? `${my}년` : `${my.slice(0, 4)}년 ${Number(my.slice(5, 7))}월`} 입주·준공 ✕</button>}
         {day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="hub-day-today">오늘 새로 들어온 것만 ✕</button>}</Head>
       {tabRow((on) => cx('rounded-full border px-3 py-1 text-xs', on ? 'border-transparent text-white' : 'border-line'), (on) => (on ? { background: C } : undefined))}
       {/* #605 보관함 칩 · #606 정렬·필터(지역·세대수·기간) — 모두 주소에 저장(새로 고침·뒤로가기에도 같은 목록) */}
@@ -1227,7 +1229,7 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
         {tab !== 'vendors' && <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={region} onChange={(e) => setRegion(e.target.value)} aria-label="지역 필터" data-testid="hub-f-region"><option value="">지역 전체</option>{regions.map((r) => <option key={r} value={r}>{r}</option>)}{region && !regions.includes(region) && <option value={region}>{region}</option>}</select>}
         {tab !== 'vendors' && <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={hh} onChange={(e) => setHh(e.target.value)} aria-label="세대수 필터" data-testid="hub-f-hh"><option value="">세대수 전체</option>{[['300', '300세대 이상'], ['500', '500세대 이상'], ['1000', '1,000세대 이상']].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
         <select className={cx(inputCls, 'h-7 !w-auto py-0 text-xs')} value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="기간 필터" data-testid="hub-f-period"><option value="">기간 전체</option><option value="1">1개월 안</option><option value="3">3개월 안</option><option value="6">6개월 안</option></select>
-        {data && <span className="ml-auto text-ink-3" data-testid="hub-count">{data.items.length}건{data.items.length === 300 ? '+(최근 300)' : ''}</span>}
+        {data && <span className="ml-auto text-ink-3" data-testid="hub-count">{(data.total ?? data.items.length).toLocaleString('ko-KR')}건{(data.total ?? 0) > data.items.length ? ` (앞 ${data.items.length}건 표시)` : ''}</span>}
       </div>
       {/* #459(대표 10/23): 상태 필터 칩 — 기본 목록은 미검토·검토중·연락중·신청·보류, 보관함은 대상 아님·완료. 0건 묶음은 숨기고 건수를 같이 보여 줌(주소 ?st=) */}
       {data && <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="hub-status-row">

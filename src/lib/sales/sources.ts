@@ -183,28 +183,49 @@ export function moveInWindow(now = new Date()) {
   const first = (add: number) => new Date(Date.UTC(y, m - 1 + add, 1)).toISOString().slice(0, 10);
   return { from: first(-12), to: first(6) };
 }
-/** 영업기회 목록: 회사가 켠 원천 × (지역·검색어·제외어) — 원천 데이터는 공용, 진행 상태·메모는 회사별 */
-export async function listProspects(u: SessionUser, q: { status?: string; source?: string; q?: string; limit?: number; moveIn?: string }) {
+/** 242차 #759(대표 10/28 '26년도 입주 아파트 리스트'): 입주 고르기 — window(6개월 전~12개월 뒤) · YYYY(한 해) · YYYY-YYYY(여러 해, 5년까지) · YYYY-MM(한 달). 입주 예정월은 그 달 1일 */
+export function moveInRange(v?: string | null, now = new Date()): { from: string; to: string } | null {
+  if (!v) return null;
+  if (v === 'window') return moveInWindow(now);
+  let m = /^(\d{4})$/.exec(v); if (m) return { from: `${m[1]}-01-01`, to: `${m[1]}-12-01` };
+  m = /^(\d{4})-(\d{4})$/.exec(v); if (m && +m[1] <= +m[2] && +m[2] - +m[1] <= 5) return { from: `${m[1]}-01-01`, to: `${m[2]}-12-01` };
+  m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(v); if (m) return { from: `${v}-01`, to: `${v}-01` };
+  return null;
+}
+/** 영업기회 목록: 회사가 켠 원천 × (지역·검색어·제외어) — 원천 데이터는 공용, 진행 상태·메모는 회사별.
+ *  242차 #759: 입주 고르기면 입주가 오늘에 가까운 순 · 전체 건수(total)·월별 건수(months) · 더 보기(offset) · 아파트만(apt)·세대수 이상(minHh) */
+export async function listProspects(u: SessionUser, q: { status?: string; source?: string; q?: string; limit?: number; offset?: number; moveIn?: string; apt?: boolean; minHh?: number }) {
   await assertSpace(u, 'sales');
   const sql = db(); const t = tenantOf(u);
-  // 186차(로컬 10/26 19:20 B2): 입주 시기 목록 — 입주 6개월 전 ~ 입주 후 12개월(= 입주 예정월이 12개월 전 ~ 6개월 뒤), 입주 예정월이 늦은 것부터
-  const win = q.moveIn === 'window'; const { from, to } = moveInWindow();
-  const rows = await sql<any[]>`select p.id, p.name, p.address, p.sido, p.status as biz_status, to_char(p.opened_on, 'YYYY-MM-DD') as opened_on, to_char(p.closed_on, 'YYYY-MM-DD') as closed_on,
-      p.category, p.detail, to_char(coalesce(p.base_date, p.fetched_at::date), 'YYYY-MM-DD') as base_date, s.code as source_code, s.name as source_name, s.provider, s.license,
-      coalesce(tp.status, 'new') as status, tp.memo
-    from prospects p join data_sources s on s.code = p.source_code
-    join tenant_data_sources ts on ts.source_code = p.source_code and ts.tenant = ${t} and ts.enabled
-    left join tenant_prospects tp on tp.prospect_id = p.id and tp.tenant = ${t}
-    where (cardinality(ts.regions) = 0 or p.sido = any(ts.regions))
+  const mi = moveInRange(q.moveIn);
+  const [ny, nm] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(new Date()).split('-').map(Number);
+  const minHh = Math.max(0, Math.min(Math.round(Number(q.minHh) || 0), 100000));
+  const lim = Math.min(Math.max(Math.round(Number(q.limit) || 100), 1), 300), off = Math.min(Math.max(Math.round(Number(q.offset) || 0), 0), 20000);
+  const hhOf = sql`coalesce(nullif(regexp_replace(coalesce(p.detail->>'households', ''), '[^0-9]', '', 'g'), '')::numeric, 0)`;
+  const cond = sql`(cardinality(ts.regions) = 0 or p.sido = any(ts.regions))
       and (cardinality(ts.keywords) = 0 or s.category = 'permit' or exists (select 1 from unnest(ts.keywords) k where p.name ilike '%' || k || '%' or coalesce(p.category, '') ilike '%' || k || '%'))
       and not exists (select 1 from unnest(ts.excludes) x where p.name ilike '%' || x || '%')
       and (${q.source ?? ''} = '' or p.source_code = ${q.source ?? ''})
       and (${q.q ?? ''} = '' or p.name ilike ${'%' + (q.q ?? '') + '%'} or coalesce(p.address, '') ilike ${'%' + (q.q ?? '') + '%'})
       and (${q.status ?? ''} = '' or coalesce(tp.status, 'new') = ${q.status ?? ''})
       and (${q.status ?? ''} = 'skip' or coalesce(tp.status, 'new') <> 'skip')
-      and (${win ? 1 : 0} = 0 or (p.detail->>'moveIn' >= ${from} and p.detail->>'moveIn' <= ${to}))
-    order by ${win ? sql`p.detail->>'moveIn' desc,` : sql``} p.opened_on desc nulls last, p.id desc limit ${Math.min(q.limit ?? 100, 300)}`;
-  return { prospects: rows.map((r) => ({ ...r, attribution: attribution(r) })) };
+      and ${q.apt ? sql`coalesce(p.detail->>'kind', '아파트') = '아파트'` : sql`true`} and ${minHh ? sql`${hhOf} >= ${minHh}` : sql`true`}`;
+  const from = sql`from prospects p join data_sources s on s.code = p.source_code
+    join tenant_data_sources ts on ts.source_code = p.source_code and ts.tenant = ${t} and ts.enabled
+    left join tenant_prospects tp on tp.prospect_id = p.id and tp.tenant = ${t}`;
+  const inMove = mi ? sql`and p.detail->>'moveIn' >= ${mi.from} and p.detail->>'moveIn' <= ${mi.to}` : sql``;
+  // 입주가 오늘(서울 이번 달)에 가까운 순 → 같은 거리면 이른 달·세대수 많은 순
+  const dist = sql`abs((substr(p.detail->>'moveIn', 1, 4)::int * 12 + substr(p.detail->>'moveIn', 6, 2)::int) - ${ny * 12 + nm})`;
+  const rows = await sql<any[]>`select p.id, p.name, p.address, p.sido, p.status as biz_status, to_char(p.opened_on, 'YYYY-MM-DD') as opened_on, to_char(p.closed_on, 'YYYY-MM-DD') as closed_on,
+      p.category, p.detail, to_char(coalesce(p.base_date, p.fetched_at::date), 'YYYY-MM-DD') as base_date, s.code as source_code, s.name as source_name, s.provider, s.license,
+      coalesce(tp.status, 'new') as status, tp.memo, count(*) over() as total
+    ${from}
+    where ${cond} ${inMove}
+    order by ${mi ? sql`${dist}, p.detail->>'moveIn', ${hhOf} desc,` : sql``} p.opened_on desc nulls last, p.id desc limit ${lim} offset ${off}`;
+  // 여러 달을 고른 때: 달마다 건수(칩) — 같은 거르기 그대로
+  const months = mi && mi.from !== mi.to ? (await sql<{ ym: string; n: number }[]>`select substr(p.detail->>'moveIn', 1, 7) as ym, count(*)::int as n ${from} where ${cond} ${inMove} group by 1 order by 1`) : [];
+  const total = rows.length ? Number(rows[0].total) : off ? Number((await sql<{ n: number }[]>`select count(*)::int as n ${from} where ${cond} ${inMove}`)[0].n) : 0;
+  return { total, offset: off, limit: lim, ...(mi ? { moveIn: { ...mi, months } } : {}), prospects: rows.map(({ total: _t, ...r }) => ({ ...r, attribution: attribution(r) })) };
 }
 export const prospectInput = z.object({ status: z.enum(['new', 'contacting', 'lead', 'skip']).optional(), memo: z.string().max(2000).optional() });
 export async function setProspect(u: SessionUser, id: number, i: z.infer<typeof prospectInput>) {

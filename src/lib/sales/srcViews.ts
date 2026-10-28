@@ -196,7 +196,7 @@ export function isOpenBid(n: { related?: boolean; status?: unknown; close?: stri
   return true;
 }
 
-export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string; biz?: string; sort?: string; box?: string; region?: string; hh?: string; period?: string; trace?: string[] }) {
+export async function salesView(u: SessionUser, view: string, q: { q?: string; id?: string; status?: string; tab?: string; day?: string; from?: string; to?: string; biz?: string; sort?: string; box?: string; region?: string; hh?: string; period?: string; my?: string; trace?: string[] }) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
   const [applied] = await sql<{ value: any }[]>`select value from app_settings where key = 'sales_migrate_applied'`;
@@ -537,6 +537,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const sortKey = String(q.sort ?? '') || null; const region = String(q.region ?? '').trim(); const hh = Number(q.hh) > 0 ? Number(q.hh) : 0; const months = [1, 3, 6].includes(Number(q.period)) ? Number(q.period) : 0;
     const lo = months ? shiftMonths(td, -months) : null, hi = months ? shiftMonths(td, months) : null;
     const inPeriod = (...dates: (string | null | undefined)[]) => !months || dates.some((d) => !!d && d >= lo! && d <= hi!);
+    // 242차 #759: 입주(없으면 준공·사용승인) 연도·달(?my=YYYY|YYYY-MM) — 영업기회 '2026년 입주' 목록에 K-apt 준공·입주 단지를 함께
+    const my = /^\d{4}(-(0[1-9]|1[0-2]))?$/.test(String(q.my ?? '')) ? String(q.my) : '';
+    const myOk = (d: string | null | undefined) => !my || (!!d && d.startsWith(my));
     const regionOk = (x: { region?: unknown; address?: unknown }) => !region || String(x.region ?? '').includes(region) || String(x.address ?? '').includes(region);
     const hhOk = (x: { households?: unknown }) => !hh || Number(x.households) >= hh;
     const asc = (a: unknown, b: unknown) => String(a ?? '9999-99').localeCompare(String(b ?? '9999-99')); const desc = (a: unknown, b: unknown) => String(b ?? '').localeCompare(String(a ?? '')); const numDesc = (a: unknown, b: unknown) => (Number(b) || 0) - (Number(a) || 0);
@@ -546,7 +549,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       const archived = list.filter(isDone); const base = (box === 'archive' ? archived : list.filter((x) => !isDone(x))).filter(keep);
       const statusCounts = Object.fromEntries(STATUS_GROUPS.map(([k]) => [k, base.filter((x) => stMatch(k, stOf(x))).length])); // #459 칩 건수(상태 필터 전)
       const out = stKey ? base.filter((x) => stMatch(stKey, stOf(x))) : base;
-      return { ...meta, tab, box, tabs, sort: sortKey, status: stKey || null, statusGroups: STATUS_GROUPS.map(([k, l]) => [k, l]), statusCounts, filters: { region: region || null, hh: hh || null, period: months || null }, regions, archiveCount: archived.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
+      return { ...meta, tab, box, tabs, sort: sortKey, status: stKey || null, statusGroups: STATUS_GROUPS.map(([k, l]) => [k, l]), statusCounts, filters: { region: region || null, hh: hh || null, period: months || null, my: my || null }, regions, archiveCount: archived.length, total: out.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
     };
     // S1-2: 신규단지 진행(opportunity_work · source_id = 단지 id)
     const BW = new Map((await prog('opportunity_work')).filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w]));
@@ -566,7 +569,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           firstSeen: firstSeen(r), raw: r }; });
       type B = (typeof list)[number];
       const sorter: Record<string, (a: B, b: B) => number> = { completion: (a, b) => asc(a.completion, b.completion), moveIn: (a, b) => asc(a.moveIn, b.moveIn), households: (a, b) => numDesc(a.households, b.households), firstSeen: (a, b) => desc(a.firstSeen, b.firstSeen) };
-      return pack(list, (x) => done(x.work?.status), (x) => regionOk(x) && hhOk(x) && inPeriod(x.completion, x.moveIn, x.firstSeen), sorter[sortKey ?? ''] ?? null, (x) => x.work?.status);
+      return pack(list, (x) => done(x.work?.status), (x) => regionOk(x) && hhOk(x) && inPeriod(x.completion, x.moveIn, x.firstSeen) && myOk(x.moveIn ?? x.completion), sorter[sortKey ?? ''] ?? null, (x) => x.work?.status);
     }
     if (tab === 'facilities') {
       const P = new Map((await prog('operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
@@ -591,7 +594,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       type Fc = (typeof list)[number];
       const sorter: Record<string, (a: Fc, b: Fc) => number> = { completion: (a, b) => asc(a.date, b.date), moveIn: (a, b) => asc(a.moveIn, b.moveIn), elapsed: (a, b) => numDesc(a.elapsedDays, b.elapsedDays), households: (a, b) => numDesc(a.households, b.households), next: (a, b) => asc(a.next, b.next) };
       // 200차 #699: 원본 기준일 한 줄 — 준공·입주 단지 원천의 기준일(우선순위 순: K-apt 자료실 주 1회 · K-apt 단지 목록 매일 · 한국부동산원 연 1회)
-      return { ...pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen),
+      return { ...pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen) && myOk(x.moveIn ?? x.date),
         sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))), (x) => x.contact),
         sourceAsOf: await sourceAsOf(['kapt_weekly_complexes', 'kapt_new_complexes', 'reb_recent_complexes']) };
     }

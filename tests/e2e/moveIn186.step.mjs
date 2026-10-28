@@ -28,10 +28,10 @@ export async function moveIn186({ owner, ctx, sql, BASE, SHOTS }) {
   await box.getByTestId('prospects-movein-count').waitFor();
   assert.equal(await chip.getAttribute('aria-pressed'), 'true');
   await owner.waitForFunction(() => document.querySelectorAll('[data-testid="prospect-card"]').length === 3);
-  assert.equal(await box.getByTestId('prospects-movein-count').innerText(), '입주 시기에 맞는 단지 3곳 · 입주 예정월이 늦은 것부터');
+  assert.equal(await box.getByTestId('prospects-movein-count').innerText(), '입주 시기에 맞는 단지 3곳 · 입주가 가까운 순 · 아파트만');
   const names = await cards.evaluateAll((els) => els.map((e) => (e.textContent ?? '').match(/입주E2E [^·\n]*?입주/)?.[0] ?? ''));
-  assert.deepEqual(names, ['입주E2E 6개월 뒤 입주', '입주E2E 이번 달 입주', '입주E2E 3개월 전 입주'], '창 밖(13개월 전·7개월 뒤)은 빠지고 입주 예정월이 늦은 것부터');
-  assert.deepEqual(await box.getByTestId('prospect-movein-label').allInnerTexts(), ['· 입주까지 6개월', '· 이번 달 입주', '· 입주 3개월 지남']);
+  assert.deepEqual(names, ['입주E2E 이번 달 입주', '입주E2E 3개월 전 입주', '입주E2E 6개월 뒤 입주'], '창 밖(13개월 전·7개월 뒤)은 빠지고 입주가 가까운 순(242차)');
+  assert.deepEqual(await box.getByTestId('prospect-movein-label').allInnerTexts(), ['· 이번 달 입주', '· 입주 3개월 지남', '· 입주까지 6개월']);
   await box.screenshot({ path: `${SHOTS}/186-prospects-movein.png` });
 
   // 휴대폰 폭: 칩이 줄바꿈되고 좌우로 밀리지 않음
