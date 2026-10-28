@@ -1873,3 +1873,11 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - curl(수집기 UA) 시험: ybs.ypa.or.kr/application.do 200·제목 10(링크 javascript:void(0)·메뉴 글자 섞임, fn_viewDetail → /poratlAppFormDtl.do?regNo=) · spobiz.kspo.or.kr 200·제목 9(fn_noticeView → sportsBissNoticeDetail.do?suppBusiInfoSeq=) · nipa.kr/home/2-2 200·제목 7(/home/2-2/번호 정상). 원본 HTML 운영 폴더 artifacts/watch/.
 - PUT /api/platform/sales-collectors supportWatchPages = NIPA 1곳 → POST /api/sales/collectors/support_watch/run runId 206 success 신규 7. 목록 기관 공지 7건(applyEnd 없음, 제목 '[사업화] --> ', 종류 모두 돈, 운영 용역 1건).
 - KSPO·용인 등록 보류(메뉴 글자 공고화 방지) → 클라우드 수집기 고침 요청. 정부24 진행 전달.
+
+## 2026-10-29 00:53 — 252차 #786 운영 확인(공고문 참가자격 절)
+- POST /api/sales/eligibility: 20261021092205298(hwp) 절 찾음 line '자본금 5억 이상'(실적 5년 5개 단지 빠짐) · 20261022135202498(hwpx) 절 찾음 line '자본금 2억 이상'(실적 수영장 1개 단지 빠짐) · 20261022180315277(docx) '본문 글자 없음'.
+- docx 확인: /api/bids/kapt-file?bid=20261022180315277&seq=4333285 2,556,916바이트 zip 35개 · document.xml w:t 0 · 그림 16(jpg) → 사진만 있는 공고문.
+- 클라우드에 실적 꼴·이유 문구·AI 비전 읽기(기본 끔, 대표 승인 뒤) 전달.
+
+## 2026-10-29 01:07 — 대표 승인 #790 사진 공고문 AI 비전 읽기
+- 클라우드 전달: 대상(글자 없는 공고문)·앞 6쪽·'AI 가 사진에서 읽음' 표시·비용 기록·실적 꼴 고침과 같이 배포.
