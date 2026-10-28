@@ -1854,3 +1854,9 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - /api/sales/src?view=bids 열린 46건: detail.qualification = bidTerms.termsLine(award_method·contract_method·신용평가/실적증명 제출·보증금) → '적격심사 · 제한경쟁 · 신용평가 제출 · 실적증명 제출 · 보증금 5%'. raw eligibility·required_licenses·performance_requirement null. 첨부는 hwp·hwpx·docx.
 - /api/library?q=참가자격: 영업/공고 저장본 5건에 절 있음(래미안세레니티 자본금 5억·등록업체, 시스템 구축 실적 5년 5건·면허, 기흥더샵프라임뷰 현설 참가 업체).
 - 클라우드 요청 00:20: 참가자격 절 저장(공통 제26조 문구는 한 줄에서 뺌)·항목 뽑기(자본금·실적·인력·등록면허·신용·지역·현설·공동도급)·목록 줄 교체·열린 공고 채우기·3단계 회사 자격 대조(qualificationGap).
+
+## 2026-10-29 00:30 — 대표 #787 지원사업 출처(K-Startup 만인지)
+- /api/sales/support sources: 기업마당 '공공데이터포털: 포털 전체 1·2쪽·경기 1쪽 900건'(keys.bizinfo false, datago true) · K-Startup '3쪽 210건' · 기관 공지 '감시 페이지 목록이 비어 있습니다'. fit 90 = K-Startup 79 · 기업마당 11. all 869.
+- q 검색: 스포츠산업 1 · 국민체육진흥공단 2(기업마당) · IP지원센터 0 · NIPA 0 · 용인 8(직접 입력 2 포함).
+- 웹 확인: ybs.ypa.or.kr/application.do(용인 지원사업 공고) · spobiz.kspo.or.kr(스포츠테크 신기술 통합공모 상시~12/31, 예비 선도기업 서비스·시설업 매출 3~30억) · nipa.kr/home/2-2.
+- 클라우드에 게시판 읽기 시험·본문으로 마감·대상 채우기·출처별 숫자 한 줄 요청. 감시 목록 등록(standing 설정)은 대표 승인 뒤.
