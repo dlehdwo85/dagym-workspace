@@ -3,7 +3,7 @@ import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { ExternalLink, Plus, Sparkles } from 'lucide-react';
+import { Check, Download, ExternalLink, ListPlus, Plus, Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PortalApplyLink, portalService } from './PortalApply';
@@ -11,12 +11,15 @@ import { PortalApplyLink, portalService } from './PortalApply';
 /** #450 영업실 '지원사업' — 기업마당·K-Startup·기관 공지 공고를 회사 프로필로 맞춤(1차 규칙 + AI 세일즈 판단) → 관심·신청 준비(담당 업무·마감 알림) → 신청·선정·탈락 기록 */
 const C = '#2563EB';
 type Flag = { level: 'ok' | 'warn' | 'no'; text: string; need?: string };
-type Ai = { verdict: 'fit' | 'maybe' | 'no'; reasons: string[]; brands: string[]; docs: string[]; summary: string | null; at: string | null; use: string[]; schedule: string | null; auto: boolean; stale?: boolean };
+/** #783 기대 효과 */
+type Effect = { receive: string; amount: string | null; selfPay: string | null; prepHours: number | null; perBusiness: { brand: string; line: string }[]; confirm: string[] };
+type Ai = { verdict: 'fit' | 'maybe' | 'no'; reasons: string[]; brands: string[]; docs: string[]; summary: string | null; at: string | null; use: string[]; schedule: string | null; auto: boolean; stale?: boolean; effect?: Effect | null };
 /** #568 주 1회 묶음 — 이번 주 맞는 공고(AI ✅ 또는 1차 ✅) 상위 10건 */
 type Weekly = { week: string; items: { id: string; title: string; by: 'ai' | 'rule'; dday: number | null; applyEnd: string | null; agency: string | null; brands: string[]; use: string | null; auto: boolean }[]; aiCount: number; aiFailed: number; sentTo: number; createdAt: string };
 type Work = { id: string; status: string; statusLabel: string; ownerId: string | null; ownerName: string | null; taskId: string | null; brands: string[]; appliedAt: string | null; resultAt: string | null; amountAwarded: string | null; resultMemo: string | null; memo: string | null };
 type Item = { id: string; title: string; agency: string | null; executor: string | null; category: string | null; source: string; sourceLabel: string; regions: string[]; nationwide: boolean; applyStart: string | null; applyEnd: string | null;
-  applyText: string | null; dday: number | null; amount: string | null; amountKrw: number | null; kinds: string[]; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[]; pending?: boolean; queued?: boolean;
+  applyText: string | null; dday: number | null; amount: string | null; amountKrw: number | null; kinds: string[]; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[]; pending?: boolean; queued?: boolean; listed?: boolean; listedAt?: string | null;
+  final?: { verdict: 'fit' | 'maybe' | 'no'; by: 'ai' | 'rule'; conflict: boolean };
   rule: { score: number; verdict: 'fit' | 'maybe' | 'no'; flags: Flag[] }; ai: Ai | null; hidden: boolean; work: Work | null };
 type View = { sort: string | null; dd: string; kind: string };
 type Blanks = { fields: { key: string; label: string; items: number }[]; items: number };
@@ -26,7 +29,7 @@ type ListData = { tab: string; today: string; items: Item[]; total: number; coun
   profile: { saved: boolean; filled: boolean; autoAi: boolean; region: string | null; sigungu: string | null; size: string | null; founded: string | null; interests: string[]; brands: string[] };
   sources: { slug: string; label: string; last_run_at: string | null; last_status: string | null; summary: string | null }[]; keys: { bizinfo: boolean; datago: boolean }; statusLabel: Record<string, string> };
 
-const TABS: [string, string][] = [['fit', '맞춤'], ['closing', '마감 임박'], ['mine', '관심·준비'], ['results', '신청·결과'], ['all', '전체']];
+const TABS: [string, string][] = [['fit', '맞춤'], ['closing', '마감 임박'], ['list', '신청 목록'], ['mine', '관심·준비'], ['results', '신청·결과'], ['all', '전체']];
 /** #781 정렬·D-day·종류(사람별 기억) */
 const SORTS: [string, string][] = [['fit', '맞춤 순'], ['deadline', '마감 임박 순'], ['new', '새로 올라온 순'], ['amount', '지원 금액 큰 순']];
 const DDS: [string, string, string][] = [['all', '전체', ''], ['d3', 'D-3', '오늘부터 3일 안 마감'], ['d7', 'D-7', '7일 안 마감'], ['d14', 'D-14', '14일 안 마감'], ['d30', 'D-30', '30일 안 마감'], ['open', '상시·예산 소진', '마감일 없음(상시·예산 소진 시·마감 미정)']];
@@ -45,15 +48,18 @@ function Dday({ d, text }: { d: number | null; text?: string | null }) {
   const cls = d < 0 ? 'bg-slate-100 text-ink-3' : d <= 3 ? 'bg-red-600 text-white' : d <= 7 ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-ink-2';
   return <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums', cls)} data-testid="support-dday">{d < 0 ? '마감' : d === 0 ? 'D-day' : `D-${d}`}</span>;
 }
-function Verdict({ it }: { it: Pick<Item, 'ai' | 'rule' | 'queued'> }) {
-  const v = it.ai?.verdict ?? it.rule.verdict;
+function Verdict({ it }: { it: Pick<Item, 'ai' | 'rule' | 'queued' | 'final'> }) {
+  // 로컬 10/28 23:50: 규칙 '해당 없음'이 AI '확인 필요'보다 앞섬(서버 final) — AI '해당'인데 규칙 '해당 없음'이면 옆에 '규칙과 다름 · 확인'
+  const f = it.final ?? { verdict: it.ai?.verdict ?? it.rule.verdict, by: it.ai ? 'ai' : 'rule', conflict: false };
+  const v = f.verdict;
   if (it.queued && !it.ai) return <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800" data-testid="support-verdict" data-verdict={v} data-by="rule" data-queued="1"
     title="새 공고 자동 AI 판단 차례 — 정기 실행(15분마다) 때 차례로 판단합니다(회사 AI 예산에서)">⏳ AI 확인 중</span>; // #785: 실제로 판단 차례에 있을 때만
   // #649 ③: 1차 규칙만 맞는 공고는 '해당'이 아님 — #782(대표 10/28 "AI 확인 중이라고 왜?"): 판단 차례가 아니면 '규칙상 맞음 · AI 판단 전'(사람이 [AI 판단]을 눌러야 정해짐)
   const pending = !it.ai && v === 'fit';
   const [icon, label, cls] = pending ? ['', '규칙상 맞음 · AI 판단 전', 'border-sky-200 bg-sky-50 text-sky-800'] : VERDICT[v];
-  return <span className={cx('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold', cls)} data-testid="support-verdict" data-verdict={v} data-by={it.ai ? 'ai' : 'rule'} data-pending={pending ? '1' : undefined}
-    title={it.ai ? 'AI 세일즈 판단' : pending ? '지역·업력·규모·업종 규칙으로는 맞음 — 참여 가능 여부는 [AI 판단]을 눌러야 정해집니다(자동 판단 꺼짐)' : '1차 규칙 판단(지역·업력·규모·업종·관심 분야)'}>{icon ? `${icon} ` : ''}{label}{!pending && <span className="ml-1 font-normal opacity-70">{it.ai ? 'AI' : '1차'}</span>}</span>;
+  return <><span className={cx('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold', cls)} data-testid="support-verdict" data-verdict={v} data-by={f.by} data-pending={pending ? '1' : undefined}
+    title={f.by === 'ai' ? 'AI 세일즈 판단' : it.ai ? `1차 규칙이 자격 '해당 없음'으로 봄(AI 는 '${VERDICT[it.ai.verdict][1]}')` : pending ? '지역·업력·규모·업종 규칙으로는 맞음 — 참여 가능 여부는 [AI 판단]을 눌러야 정해집니다' : '1차 규칙 판단(지역·업력·규모·업종·관심 분야)'}>{icon ? `${icon} ` : ''}{label}{!pending && <span className="ml-1 font-normal opacity-70">{f.by === 'ai' ? 'AI' : '1차'}</span>}</span>
+    {f.conflict && <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-900" data-testid="support-rule-conflict" title="AI 는 '해당', 1차 규칙(지역·대상·업종 등)은 '해당 없음' — 원문으로 확인하세요">규칙과 다름 · 확인</span>}</>;
 }
 const Flags = ({ flags, max }: { flags: Flag[]; max?: number }) => (
   <div className="flex flex-wrap gap-1" data-testid="support-flags">{flags.slice(0, max ?? flags.length).map((f, i) => <span key={i} className={cx('rounded-full px-1.5 py-0.5 text-[11px]', FLAG_CLS[f.level])} data-level={f.level}>{f.level === 'ok' ? '✓' : f.level === 'no' ? '✕' : '!'} {f.text}</span>)}
@@ -81,6 +87,16 @@ export function Support() {
   async function analyze(it: Item) {
     setBusy(`${it.id}:ai`);
     try { const r = await api<{ costKrw: number }>(`/api/sales/support/${it.id}/analyze`, { body: {} }); toast.ok(`AI 세일즈가 판단했습니다(${won(r.costKrw)})`); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  async function listIt(it: Item, on: boolean) {
+    setBusy(`${it.id}:list`);
+    try { await api(`/api/sales/support/${it.id}/list`, { body: { on } }); toast.ok(on ? '이번 주 신청 목록에 담았습니다' : '신청 목록에서 뺐습니다', on ? { label: '목록 보기', run: () => go({ tab: 'list' }) } : undefined); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  async function toTask(it: Item, ownerId: string) {
+    setBusy(`${it.id}:task`);
+    try { await api(`/api/sales/support/${it.id}/work`, { body: { status: 'preparing', ...(ownerId ? { ownerId } : {}) } }); toast.ok('담당에게 신청 준비 업무를 넘겼습니다 — 서류 체크리스트·마감 7일·3일 전 알림'); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function hide(it: Item, hidden: boolean) {
@@ -121,7 +137,8 @@ export function Support() {
         {tab === 'fit' && (data.weekly || (data.canEdit && data.aiOn)) && <WeeklyBox weekly={data.weekly} canEdit={data.canEdit && data.aiOn} auto={data.weeklyAiMax} busy={busy === 'weekly'} onNow={weeklyNow} onOpen={(id) => go({ id })} />}
         {tab === 'fit' && <AutoNote data={data} />}
         {tab === 'fit' && <p className="text-xs text-ink-3">1차 규칙 = 본점 지역·시·군, 업력, 규모·상시근로자, 업종, 인증, 관심 분야.{data.hiddenNo > 0 && <> 자격이 안 맞는 공고 {data.hiddenNo}건은 빼고 보여 줍니다 — <button type="button" className="underline" onClick={() => setShowNo(true)} data-testid="support-show-no">보기</button></>}{showNo && <> · <button type="button" className="underline" onClick={() => setShowNo(false)}>다시 빼기</button></>}</p>}
-        <ul className="space-y-2" data-testid="support-list">{data.items.map((it) => (
+        {tab === 'list' && <ApplyList data={data} busy={busy} onOpen={(id) => go({ id })} onTask={toTask} onUnlist={(it) => listIt(it, false)} />}
+        <ul className={cx('space-y-2', tab === 'list' && 'hidden')} data-testid="support-list">{tab !== 'list' && data.items.map((it) => (
           <li key={it.id} className={cx('rounded-card border bg-white p-3 shadow-card', it.work ? 'border-blue-200' : 'border-line')} data-testid="support-item" data-id={it.id} data-status={it.work?.status ?? ''}>
             <div className="flex flex-wrap items-start gap-1.5">
               <Verdict it={it} />
@@ -135,6 +152,7 @@ export function Support() {
               {it.kinds.length > 0 && <span className="ml-1 inline-flex flex-wrap gap-0.5 align-middle" data-testid="support-kinds">{it.kinds.map((k) => <span key={k} className="rounded bg-slate-100 px-1 text-[10px] text-ink-2">{data.kindLabel[k] ?? k}</span>)}</span>}
               <span className="text-ink-3"> · 출처 {it.sourceLabel}{it.alsoOn.length ? `(+${it.alsoOn.join('·')})` : ''}</span></p>
             <div className="mt-1.5"><Flags flags={it.rule.flags} max={4} /></div>
+            {it.ai?.effect?.receive && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-effect-line"><b className="font-semibold text-ink">받는 것</b> {it.ai.effect.receive}{it.ai.effect.amount ? ` · ${it.ai.effect.amount}` : ''}{it.ai.effect.prepHours ? ` · 준비 약 ${it.ai.effect.prepHours}시간` : ''}</p>}
             {it.ai && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-ai-line"><Sparkles className="mr-0.5 inline size-3 text-violet-600" aria-hidden />{it.ai.use[0] ? `접목: ${it.ai.use[0]}` : it.ai.reasons[0] ?? it.ai.summary}{it.ai.brands.length > 0 && <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">{it.ai.brands.map((b) => <span key={b} className="rounded-full border border-violet-200 bg-violet-50 px-1.5 text-[11px] text-violet-800">{b}</span>)}</span>}</p>}
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {it.work ? <><span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', STATUS_CLS[it.work.status])} data-testid="support-status">{it.work.statusLabel}</span>
@@ -144,11 +162,12 @@ export function Support() {
                 : <><Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'interest')} data-testid="support-interest">{busy === `${it.id}:interest` ? '…' : '관심'}</Button>
                   <Button size="sm" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">{busy === `${it.id}:preparing` ? '…' : '신청 준비'}</Button></>}
               {data.aiOn && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => analyze(it)} data-testid="support-analyze" title={data.aiCostKrw != null ? `회사 AI 예산에서 ${won(data.aiCostKrw)}` : undefined}><Sparkles className="size-3.5" aria-hidden />{busy === `${it.id}:ai` ? '판단 중…' : it.ai ? '다시 판단' : `AI 판단${data.aiCostKrw != null ? ` · ${won(data.aiCostKrw)}` : ''}`}</Button>}
+              {(!it.work || ['interest', 'preparing'].includes(it.work.status)) && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => listIt(it, !it.listed)} data-testid="support-list-toggle" data-on={it.listed ? '1' : '0'}>{it.listed ? <><Check className="size-3.5" aria-hidden />목록에 담음</> : <><ListPlus className="size-3.5" aria-hidden />목록에 담기</>}</Button>}
               {it.url && <a href={it.url} target="_blank" rel="noopener noreferrer" className={linkCls}><ExternalLink className="size-3.5" aria-hidden />원문</a>}
               {!it.work && !it.manual && <button type="button" className="ml-auto text-xs text-ink-3 underline" onClick={() => hide(it, !it.hidden)} data-testid="support-hide">{it.hidden ? '숨김 풀기' : '숨기기'}</button>}
             </div>
           </li>))}
-          {!data.items.length && <li className="rounded-card border border-dashed border-line p-6 text-center text-sm text-ink-3" data-testid="support-empty">{tab === 'mine' ? '관심·신청 준비 중인 공고가 없습니다 — 맞춤 탭에서 [관심]·[신청 준비]를 누르세요' : tab === 'results' ? '신청·결과 기록이 없습니다 — 지난 신청은 [직접 추가]로 넣을 수 있습니다' : '조건에 맞는 공고가 없습니다'}</li>}
+          {tab !== 'list' && !data.items.length && <li className="rounded-card border border-dashed border-line p-6 text-center text-sm text-ink-3" data-testid="support-empty">{tab === 'mine' ? '관심·신청 준비 중인 공고가 없습니다 — 맞춤 탭에서 [관심]·[신청 준비]를 누르세요' : tab === 'results' ? '신청·결과 기록이 없습니다 — 지난 신청은 [직접 추가]로 넣을 수 있습니다' : '조건에 맞는 공고가 없습니다'}</li>}
         </ul>
         {data.total > data.items.length && <p className="text-center text-xs text-ink-3">위 {data.items.length}건 · 모두 {data.total}건 — 찾기·칩으로 좁혀 보세요</p>}
         <SourceLine sources={data.sources} />
@@ -173,6 +192,46 @@ function ViewBar({ data, cur, onPick }: { data: ListData; cur: View; onPick: (p:
       <div className="flex flex-wrap items-center gap-1"><span className="w-10 shrink-0 text-[11px] text-ink-3">종류</span>
         {[['all', '전체'] as [string, string], ...Object.entries(data.kindLabel)].map(([k, l]) => <button key={k} type="button" aria-pressed={cur.kind === k} className={chip(cur.kind === k)} onClick={() => onPick({ kind: k })} data-testid={`support-kind-${k}`}>{l} <span className="tabular-nums">{data.chips?.kind[k] ?? 0}</span></button>)}</div>
     </div>
+  );
+}
+
+/** #784 이번 주 신청 목록 — 담은 공고를 마감 순 표로(받는 것·예상 금액·자부담·준비 시간) · [엑셀로] · 담당 고르고 [업무로] = 신청 준비 업무 · [빼기] */
+function ApplyList({ data, busy, onOpen, onTask, onUnlist }: { data: ListData; busy: string | null; onOpen: (id: string) => void; onTask: (it: Item, ownerId: string) => void; onUnlist: (it: Item) => void }) {
+  const [owner, setOwner] = useState<Record<string, string>>({});
+  const hours = data.items.reduce((n, x) => n + (x.ai?.effect?.prepHours ?? 0), 0);
+  const th = 'px-2 py-1.5 text-left text-[11px] font-semibold text-ink-3 whitespace-nowrap';
+  return (
+    <section className="rounded-card border border-line bg-white p-3" data-testid="support-apply-list">
+      <div className="flex flex-wrap items-center gap-2">
+        <b className="text-sm">이번 주 신청 목록 {data.items.length}건</b>
+        <span className="text-xs text-ink-2">마감 순{hours ? ` · 준비 시간 합계 약 ${hours}시간` : ''} · 받는 것·금액·자부담·준비 시간은 AI 판단(참고용) — 원문으로 꼭 확인</span>
+        <a href={`/api/sales/support/export`} className={cx(linkCls, 'ml-auto')} data-testid="support-list-export"><Download className="size-3.5" aria-hidden />엑셀로 내려받기</a>
+      </div>
+      {!data.items.length ? <p className="mt-2 rounded-input border border-dashed border-line p-5 text-center text-sm text-ink-3" data-testid="support-list-empty">담은 공고가 없습니다 — 맞춤 탭 카드에서 [목록에 담기]를 누르세요</p> : (
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full min-w-[860px] border-collapse text-xs" data-testid="support-apply-table">
+            <thead><tr className="border-b border-line">{['공고', '마감', '받는 것', '예상 금액', '자부담', '준비', '담당·업무', ''].map((h, i) => <th key={i} className={th}>{h}</th>)}</tr></thead>
+            <tbody>{data.items.map((it) => { const e = it.ai?.effect; const w = it.work; return (
+              <tr key={it.id} className="border-b border-line align-top last:border-0" data-testid="support-apply-row" data-id={it.id}>
+                <td className="max-w-[260px] px-2 py-2"><button type="button" className="text-left font-semibold hover:underline" onClick={() => onOpen(it.id)}>{it.title}</button>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-ink-3"><Verdict it={it} />{it.agency}</div>
+                  {!!e?.confirm.length && <p className="mt-1 text-[11px] text-amber-900" data-testid="support-apply-confirm">확인할 것: {e.confirm.join(' · ')}</p>}</td>
+                <td className="whitespace-nowrap px-2 py-2"><Dday d={it.dday} text={it.applyText} /><div className="mt-0.5 text-[11px] text-ink-3">{it.applyEnd ? kday(it.applyEnd) : ''}</div></td>
+                <td className="max-w-[220px] px-2 py-2" data-testid="support-apply-receive">{e?.receive || <span className="text-ink-3">{it.ai ? '—' : 'AI 판단 전'}</span>}
+                  {!!e?.perBusiness.length && <ul className="mt-1 space-y-0.5 text-[11px] text-ink-2">{e.perBusiness.map((b) => <li key={b.brand}><span className="rounded border border-violet-200 bg-violet-50 px-1 text-violet-800">{b.brand}</span> {b.line}</li>)}</ul>}</td>
+                <td className="max-w-[160px] px-2 py-2">{e?.amount ?? it.amount ?? '—'}</td>
+                <td className="max-w-[140px] px-2 py-2">{e?.selfPay ?? '—'}</td>
+                <td className="whitespace-nowrap px-2 py-2">{e?.prepHours ? `약 ${e.prepHours}시간` : '—'}</td>
+                <td className="px-2 py-2">{w?.status === 'preparing' ? <span className="whitespace-nowrap text-ink-2" data-testid="support-apply-owner">신청 준비 · {w.ownerName ?? '담당 없음'}</span> : (
+                  <div className="flex items-center gap-1"><select className={cx(inputCls, 'h-8 w-28 py-0 text-xs')} value={owner[it.id] ?? w?.ownerId ?? ''} onChange={(ev) => setOwner({ ...owner, [it.id]: ev.target.value })} aria-label="담당" data-testid="support-apply-owner-pick">
+                    <option value="">나</option>{data.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+                    <Button size="sm" disabled={!!busy} onClick={() => onTask(it, owner[it.id] ?? w?.ownerId ?? '')} data-testid="support-apply-task">{busy === `${it.id}:task` ? '…' : '업무로'}</Button></div>)}</td>
+                <td className="px-2 py-2"><button type="button" className="text-[11px] text-ink-3 underline" disabled={!!busy} onClick={() => onUnlist(it)} data-testid="support-apply-remove">빼기</button></td>
+              </tr>); })}</tbody>
+          </table>
+        </div>)}
+      <p className="mt-2 text-[11px] text-ink-3">[업무로] = 고른 담당에게 ‘신청 준비’ 업무(준비 서류 체크리스트·마감 7일·3일 전 알림). 신청하면 [진행 기록]에서 ‘신청 완료’로 바꾸면 목록에서 빠집니다.</p>
+    </section>
   );
 }
 
@@ -232,17 +291,17 @@ function ProfileBox({ summary, blanks, onSaved }: { summary: ListData['profile']
   const { data, reload } = useApi<any>(open ? '/api/sales/support/profile' : null);
   const [f, setF] = useState<Record<string, any> | null>(null); const [busy, setBusy] = useState(false);
   useEffect(() => { if (data && !f) { const p = data.profile; setF({ regionSido: p.region_sido ?? '', regionSigungu: p.region_sigungu ?? '', founded: p.founded ?? '', size: p.size ?? '', employees: p.employees == null ? '' : String(p.employees), revenue: p.revenue_krw == null ? '' : String(p.revenue_krw),
-    industries: p.industries.join(', '), keywords: p.keywords.join(', '), certs: p.certs, brands: p.brands.join(', '), interests: p.interests, excludes: p.excludes.join(', '), memo: p.memo ?? '', autoAi: data.autoAi !== false }); } }, [data, f]);
+    industries: p.industries.join(', '), keywords: p.keywords.join(', '), certs: p.certs, brands: p.brands.join(', '), interests: p.interests, excludes: p.excludes.join(', '), memo: p.memo ?? '', autoAi: data.autoAi !== false, certsNone: !!p.certs_none }); } }, [data, f]);
   if (!summary) return null;
   const line = summary.filled ? [summary.region && `${summary.region}${summary.sigungu ? ` ${summary.sigungu}` : ''}`, summary.size, summary.founded && `설립 ${summary.founded.slice(0, 4)}년`, summary.interests.length && `관심 ${summary.interests.join('·')}`, summary.brands.length && `브랜드 ${summary.brands.join('·')}`,
     summary.saved && (summary.autoAi ? '새 공고 AI 자동 판단' : 'AI 자동 판단 꺼짐')].filter(Boolean).join(' · ') : '';
   const set = (k: string, v: any) => setF((x) => ({ ...(x ?? {}), [k]: v }));
-  const toggle = (k: 'certs' | 'interests', v: string) => set(k, (f?.[k] as string[]).includes(v) ? (f?.[k] as string[]).filter((x) => x !== v) : [...(f?.[k] as string[]), v]);
+  const toggle = (k: 'certs' | 'interests', v: string) => setF((x) => ({ ...(x ?? {}), [k]: (x?.[k] as string[]).includes(v) ? (x?.[k] as string[]).filter((y) => y !== v) : [...(x?.[k] as string[]), v], ...(k === 'certs' ? { certsNone: false } : {}) }));
   async function save() {
     if (!f) return; setBusy(true);
     try {
       await api('/api/sales/support/profile', { method: 'PUT', body: { regionSido: f.regionSido || null, regionSigungu: f.regionSigungu || null, founded: f.founded || null, size: f.size || null, employees: f.employees === '' ? null : Number(f.employees), revenueKrw: f.revenue === '' ? null : Number(f.revenue),
-        industries: csv(f.industries), keywords: csv(f.keywords), certs: f.certs, brands: csv(f.brands), interests: f.interests, excludes: csv(f.excludes), memo: f.memo || null, autoAi: !!f.autoAi } });
+        industries: csv(f.industries), keywords: csv(f.keywords), certs: f.certs, brands: csv(f.brands), interests: f.interests, excludes: csv(f.excludes), memo: f.memo || null, autoAi: !!f.autoAi, certsNone: !!f.certsNone && !f.certs.length } });
       toast.ok('회사 프로필을 저장했습니다 — 맞춤 순서를 다시 계산했습니다'); setF(null); reload(); onSaved(); setOpen(false);
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
@@ -265,7 +324,8 @@ function ProfileBox({ summary, blanks, onSaved }: { summary: ListData['profile']
           <Field label="최근 연 매출(원, 선택)"><input className={inputCls} inputMode="numeric" value={f.revenue} onChange={(e) => set('revenue', e.target.value.replace(/\D/g, ''))} disabled={ro} /></Field>
           <Field label="업종(쉼표)" className="sm:col-span-2"><input className={inputCls} value={f.industries} onChange={(e) => set('industries', e.target.value)} disabled={ro} /></Field>
         </div>
-        <Field label="보유 인증"><div className="flex flex-wrap gap-1">{(data.certOptions as string[]).map((c) => <button key={c} type="button" disabled={ro} onClick={() => toggle('certs', c)} className={cx('rounded-full border px-2 py-0.5 text-xs', f.certs.includes(c) ? 'border-[#2563EB] bg-white font-semibold text-[#1D4ED8]' : 'border-line bg-white text-ink-2')} data-testid="profile-cert">{c}</button>)}</div></Field>
+        <Field label="보유 인증"><div className="flex flex-wrap gap-1">{(data.certOptions as string[]).map((c) => <button key={c} type="button" disabled={ro} onClick={() => toggle('certs', c)} className={cx('rounded-full border px-2 py-0.5 text-xs', f.certs.includes(c) ? 'border-[#2563EB] bg-white font-semibold text-[#1D4ED8]' : 'border-line bg-white text-ink-2')} data-testid="profile-cert">{c}</button>)}
+          <label className="ml-1 inline-flex items-center gap-1 text-xs text-ink-2"><input type="checkbox" checked={!!f.certsNone && !f.certs.length} disabled={ro} onChange={(e) => setF((x) => ({ ...(x ?? {}), certsNone: e.target.checked, ...(e.target.checked ? { certs: [] } : {}) }))} data-testid="profile-certs-none" />보유 인증 없음</label></div></Field>
         <Field label="관심 분야"><div className="flex flex-wrap gap-1">{[...new Set([...(data.interestOptions as string[]), ...(f.interests as string[])])].map((c) => <button key={c} type="button" disabled={ro} onClick={() => toggle('interests', c)} className={cx('rounded-full border px-2 py-0.5 text-xs', f.interests.includes(c) ? 'border-[#2563EB] bg-white font-semibold text-[#1D4ED8]' : 'border-line bg-white text-ink-2')} data-testid="profile-interest">{c}</button>)}</div></Field>
         <div className="grid gap-2 sm:grid-cols-3">
           <Field label="브랜드·사업부(쉼표)"><input className={inputCls} value={f.brands} onChange={(e) => set('brands', e.target.value)} disabled={ro} data-testid="profile-brands" /></Field>
@@ -327,6 +387,12 @@ function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; o
             {it.ai.reasons.length > 0 && <ul className="list-disc space-y-0.5 pl-4" data-testid="support-ai-reasons">{it.ai.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
             {it.ai.use.length > 0 ? <div className="rounded-input border border-violet-200 bg-white p-2"><b className="text-violet-900">우리 회사에 접목할 점</b><ul className="mt-0.5 list-disc space-y-0.5 pl-4" data-testid="support-ai-use">{it.ai.use.map((r, i) => <li key={i}>{r}</li>)}</ul></div>
               : <p className="text-[11px] text-ink-3" data-testid="support-ai-use-missing">‘우리 회사에 접목할 점’·‘마감·일정’은 10/25 이전 판단에는 없습니다 — [다시 판단]을 누르면 채워집니다.</p>}{/* 로컬 10/25 18:50 ③: 상세에 접목 줄이 없는 까닭을 화면에 */}
+            {it.ai.effect ? <div className="rounded-input border border-emerald-200 bg-white p-2" data-testid="support-ai-effect"><b className="text-emerald-900">기대 효과</b>
+              <dl className="mt-0.5 grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-0.5">{([['받는 것', it.ai.effect.receive], ['예상 금액', it.ai.effect.amount], ['자부담', it.ai.effect.selfPay], ['준비 시간', it.ai.effect.prepHours ? `약 ${it.ai.effect.prepHours}시간` : null]] as [string, string | null][])
+                .filter(([, v]) => v).map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={`${k}:v`}>{v}</dd>])}</dl>
+              {it.ai.effect.perBusiness.length > 0 && <ul className="mt-1 space-y-0.5">{it.ai.effect.perBusiness.map((b) => <li key={b.brand}><span className="rounded border border-violet-200 bg-violet-50 px-1 text-violet-800">{b.brand}</span> {b.line}</li>)}</ul>}
+              {it.ai.effect.confirm.length > 0 && <p className="mt-1 text-amber-900">신청 전 확인: {it.ai.effect.confirm.join(' · ')}</p>}</div>
+              : <p className="text-[11px] text-ink-3" data-testid="support-ai-effect-missing">‘기대 효과’(받는 것·예상 금액·자부담·준비 시간)는 10/29 이전 판단에는 없습니다 — 자동 판단이 차례로 채우거나 [다시 판단]을 누르면 채워집니다.</p>}
             {it.ai.schedule && <p data-testid="support-ai-schedule"><span className="text-ink-3">마감·일정</span> {it.ai.schedule}</p>}
             {it.ai.brands.length > 0 && <p className="flex flex-wrap items-center gap-1">맞는 브랜드: {it.ai.brands.map((b) => <span key={b} className="rounded-full border border-violet-200 bg-white px-1.5 text-violet-800">{b}</span>)}</p>}{/* 로컬 10/25 18:50: 칩이 글자에 붙어 보임 → 간격·테두리 */}
             <div><span className="text-ink-3">준비 서류</span>{it.ai.docs.length ? <ul className="mt-0.5 list-disc pl-4" data-testid="support-ai-docs">{it.ai.docs.map((d, i) => <li key={i}>{d}</li>)}</ul> : <span className="ml-1 text-ink-3">공고에 서류 목록이 없음 — 원문·첨부 확인</span>}</div>

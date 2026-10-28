@@ -8,7 +8,8 @@ import { startFakeGoogle } from '../fake-google.mjs';
 
 let srv, ctx, sql, fg;
 const today = seoulToday(); const d = (n) => addDays(today, n);
-const say = (o) => ({ content: [{ type: 'text', text: JSON.stringify({ reasons: ['경기 소재 중소기업 — 해당'], brands: [], docs: [], summary: '요약', amount: null, use: [], schedule: null, ...o }) }], stop_reason: 'end_turn' });
+const EFFECT = { receive: '마케팅 비용 지원', amount: null, selfPay: '공고문 확인', prepHours: 4, perBusiness: [], confirm: [] }; // 251차부터 기대 효과가 없는 판단은 자동으로 한 번 다시 — 시험 답에는 늘 넣음
+const say = (o) => ({ content: [{ type: 'text', text: JSON.stringify({ reasons: ['경기 소재 중소기업 — 해당'], brands: [], docs: [], summary: '요약', amount: null, use: [], schedule: null, effect: EFFECT, ...o }) }], stop_reason: 'end_turn' });
 const queue = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: items }) });
 const ins = (o) => sql`insert into support_programs ${sql({ source: 'bizinfo', regions: ['경기'], nationwide: false, hashtags: [], attachments: sql.json([]), apply_end: d(20), target: '중소기업', agency: '경기도', ...o })} returning id`.then((r) => r[0].id);
 const PROFILE = { regionSido: '경기', regionSigungu: '용인시', founded: d(-1735), size: '소기업', employees: 8, industries: ['소프트웨어'], keywords: [], certs: [], brands: ['워크인'], interests: ['마케팅'], excludes: [], memo: '시험 회사' };
@@ -40,7 +41,7 @@ test('프로필 저장 전에는 안 함 → 저장(자동 판단 기본 켬) �
   assert.deepEqual(r1.out.default, { done: 2, failed: 0, left: 0, stopped: null }, JSON.stringify(r1));
   assert.deepEqual([(await ai(a)).ai_auto, (await ai(b)).ai_auto, await ai(c)], [true, true, null]);
   assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support' and user_id = ${ctx.ownerId}`)[0].n, 2, '사용량은 회사 대표 이름으로');
-  L = await list(); assert.deepEqual([L[a].queued, L[a].ai.verdict, L[b].ai.verdict], [false, 'fit', 'maybe']);
+  L = await list(); assert.deepEqual([L[a].queued, L[b].queued, [L[a].ai.verdict, L[b].ai.verdict].sort()], [false, false, ['fit', 'maybe']]); // 5건씩 함께 보내 답 순서는 정해지지 않음
   v = await ctx.owner.ok('GET', '/api/sales/support?tab=fit&limit=200&sort=fit&dd=all&kind=all'); assert.deepEqual([v.auto.queue, v.auto.done], [0, 2]);
   // 다음 실행: 남은 것 없음 → 한 번 확인하고(지문 저장) → 그다음부터는 공고를 다시 읽지 않음
   await queue([]);
