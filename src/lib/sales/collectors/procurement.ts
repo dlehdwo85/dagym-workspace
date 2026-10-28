@@ -18,7 +18,7 @@ const DIRECT_SYS = /(출입\s*통제|출입\s*시스템|출입시스템|출입\s
 /** 191차(대표 10/27 "스크린 골프나 골프연습장 설치 및 공사는 저희가 하지 않습니다. 운영만 합니다" · "커뮤니티센터 통합관리시스템 구축 … 이건 하이링크지"):
  *  다짐 = 시설 운영·위탁운영만. 제목에 설치·시공·공사·교체·렌탈·장비·리모델링·보수·시스템·구축 같은 말이 있으면 골프·헬스·커뮤니티라도 다짐이 아님 —
  *  제목·분류에 운영·위탁·임대(사용 허가) 낱말이 함께 있을 때만 다짐. 하이링크 판정(출입·예약·회원관리·통합관리 시스템)은 그대로 */
-const BUILD_RE = /설치|시공|공사|교체|렌탈|리스|장비|기구|기계|리모델링|보수|구축|시스템|납품|구입|구매|제작|도입|시설\s*개선|개선\s*공사|수선|철거|증설|이전\s*설치/;
+const BUILD_RE = /설치|시공|공사|교체|렌탈|리스|장비|기구|기계|리모델링|보수|구축|시스템|납품|구입|구매|제작|도입|시설\s*개선|개선\s*공사|수선|철거|증설|이전\s*설치|조성|정비|포장|토목|세굴/; // 227차: 조성·정비·포장·토목·세굴(로컬 10/28 '파크골프장시설물조성(세굴방지공)')
 const OPS_RE = /위탁|수탁|임대|대부|사용\s*[·ㆍ.]?\s*수익|사용\s*허가|운영(?!\s*(?:중|시스템|프로그램|솔루션|플랫폼|관리\s*(?:시스템|프로그램)|시간|비\b))/;
 /** 하이링크 '타석'·'골프타석'은 시스템 낱말(관제·시스템·예약·키오스크·무인·오토티업)이 제목·분류에 있을 때만 — 스크린골프·골프연습장 타석 설치·보수 공사는 아님 */
 const BAY_WORDS = new Set(['타석', '골프타석']);
@@ -30,6 +30,8 @@ const APT_CONTEXT = /아파트|단지|주민|입주|공동주택|커뮤니티|�
 const CONSTRUCTION_RE = /공사|관급자재|설계|감리|측량|폐기물|골재|건립|신축|증축|개축|철거|타일|안전진단|기술지도|시공/;
 const FACILITY_SERVICE_RE = /청소|경비|소독|방역|안전점검|정기점검|점검용역|제습|공조기|냉난방|보일러|여과기|승강기/;
 const OPERATION_ONLY = new Set(['위탁운영', '운영위탁', '운영업체', '강사', '조식']);
+/** 227차(로컬 10/28 ①② '국회도서관 정보기기·보안관제 위탁운영'): 위탁 대상이 시설이 아니라 정보기기·전산·관제·유지관리·콜센터인 공고 */
+const IT_TARGET = /정보\s*기기|전산|정보\s*(?:시스템|화|통신|보호)|보안\s*관제|관제\s*(?:시스템|센터|용역|업무)|유지\s*관리|유지\s*보수|콜\s*센터|서버|네트워크|홈페이지|소프트웨어/;
 
 export type FitBusiness = '다짐' | '하이링크' | '다짐·하이링크';
 /** dropped = 낱말은 맞았지만 191차 규칙으로 뺀 사업과 까닭(다시 판정이 예전 판정을 내릴 때 근거) */
@@ -74,7 +76,17 @@ export function matchFit(...texts: (string | null | undefined)[]): FitResult {
   const ops = OPS_RE.test(head);
   const build = title.match(BUILD_RE)?.[0] ?? title.match(CONSTRUCTION_RE)?.[0] ?? title.match(FACILITY_SERVICE_RE)?.[0] ?? null;
   if (d.length && build && !ops) { dropped.push({ business: '다짐', why: `제목에 '${build}' — 다짐은 운영·위탁만` }); d = []; }
+  // 227차(로컬 10/28 ③): 제목에 '공사'가 없어도 업무 구분(분류)이 공사면 운영·위탁 낱말 없을 때 다짐 아님
+  if (d.length && !ops && /공사/.test(parts[1] ?? '')) { dropped.push({ business: '다짐', why: '업무 구분이 공사 — 다짐은 운영·위탁만' }); d = []; }
   if (d.length && d.every((k) => OPERATION_ONLY.has(k))) d = []; // 위탁운영만으로는 시설 단어 필요
+  // 227차(로컬 10/28 ①②): 시설 낱말이 약한 낱말(도서관·카페·골프)뿐이면 아파트·주민 맥락이 있어야 하고, 위탁 대상이 정보기기·전산·관제·유지관리면 다짐 아님
+  // (위탁운영이 강한 낱말로 잡혀 '국회도서관 정보기기 위탁운영'이 맥락 확인 없이 다짐 즉시 검토가 됐다 — 작은도서관·체육센터 같은 강한 시설 낱말은 그대로)
+  const fac = d.filter((k) => !OPERATION_ONLY.has(k));
+  if (fac.length && fac.every((k) => WEAK.has(k))) {
+    const it = title.match(IT_TARGET)?.[0];
+    const why = !apt ? `시설 낱말이 '${fac.join('·')}'뿐이고 아파트·주민 맥락이 없음` : it ? `위탁 대상이 '${it}' — 다짐은 시설 운영만` : null;
+    if (why) { dropped.push({ business: '다짐', why }); d = []; }
+  }
   const fit: FitBusiness | null = d.length && h.length ? '다짐·하이링크' : d.length ? '다짐' : h.length ? '하이링크' : null;
   const direct = (d.length > 0 && DIRECT_OPS.test(text)) || (h.length > 0 && DIRECT_SYS.test(text));
   return { fit, matched: [...d, ...h], direct: !!fit && direct, ...(dropped.length ? { dropped } : {}) };

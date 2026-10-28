@@ -9,7 +9,7 @@ import { sidoIn } from './region';
 
 /**
  * 226차 #497 R21-4(21라인 레퍼런스 '낙찰 결과·낙찰가·경쟁업체 분석'): 관련 공고(맞춤 조건 — 업종 적합·관심 검색어·지역 등)의 낙찰 결과를 업체별로 묶음.
- * 업체 = 법인 표시(㈜·주식회사 등)를 뺀 이름 · 낙찰 건수·낙찰금액 합·평균 낙찰률·평균 참가 업체·주 지역·최근 낙찰 · 우리 회사(회사 정보 이름·사업자번호) · 유찰(낙찰자 없음).
+ * 업체 = 법인 표시(㈜·주식회사 등)를 뺀 이름 · 낙찰 건수·낙찰금액 합·평균 낙찰률·평균 참가 업체·주 지역·최근 낙찰 · 우리 회사(회사 정보 이름·사업자번호 — 맞춤 조건 밖 낙찰도 셈) · 유찰(낙찰자 없음).
  * 원천 = 수집한 결과(K-apt 입찰결과·나라장터 낙찰정보 등) — 원천에 없는 칸(낙찰률·참가 수·금액)은 비움(평균에서 뺌).
  */
 export const AWARD_DAYS = [30, 90, 180, 365] as const;
@@ -32,15 +32,15 @@ export async function awardStats(u: SessionUser, days0: number) {
   const groups = new Map<string, { names: Map<string, number>; latest: Map<string, string>; ours: boolean; recs: Rec[] }>();
   let total = 0, failed = 0;
   for (const { id, row: r } of rows) {
-    if (!passPrefs(r, p).ok) continue;
-    total++;
     const name = String(r.winner_name ?? r.award_company ?? r.successful_bidder ?? '').trim();
+    const mine = !!name && isOurs({ name, biz: r.winner_biz_no }, me);
+    if (!mine && !passPrefs(r, p).ok) continue; // 227차: 우리 회사 낙찰은 맞춤 조건(지역·검색어 등) 밖이어도 셈
+    total++;
     if (!name) { failed++; continue; }
-    const key = corpName(name) || name.toLowerCase();
-    const g = groups.get(key) ?? { names: new Map<string, number>(), latest: new Map<string, string>(), ours: false, recs: [] as Rec[] }; groups.set(key, g);
+    const key = (mine ? 'ours:' : '') + (corpName(name) || name.toLowerCase()); // 같은 이름의 다른 회사(사업자번호 다름)와 섞지 않음
+    const g = groups.get(key) ?? { names: new Map<string, number>(), latest: new Map<string, string>(), ours: mine, recs: [] as Rec[] }; groups.set(key, g);
     const day = String(r.award_date ?? r.posted_date ?? '').slice(0, 10);
     g.names.set(name, (g.names.get(name) ?? 0) + 1); if (day > (g.latest.get(name) ?? '')) g.latest.set(name, day);
-    if (!g.ours && isOurs({ name, biz: r.winner_biz_no }, me)) g.ours = true;
     const rate = num(r.winner_rate);
     g.recs.push({ id: String(r.id ?? id), title: String(r.title ?? '').trim(), date: day || null, amount: num(r.winner_amount ?? r.award_amount),
       rate: rate != null && rate <= 200 ? rate : null, bidders: num(r.bidders), region: regionOf(r), issuer: String(r.issuer ?? r.demand_agency ?? r.facility_name ?? '').trim() || null, url: String(r.source_url ?? '').trim() || null });
@@ -56,5 +56,6 @@ export async function awardStats(u: SessionUser, days0: number) {
   const awarded = total - failed;
   const shown = list.slice(0, 30); for (const x of list) if (x.ours && !shown.includes(x)) shown.push(x); // 우리 회사는 30위 밖이어도 보임
   return { days, since, total, awarded, failed, companies: list.length, ours: list.filter((x) => x.ours).reduce((s, x) => s + x.wins, 0),
-    top5Share: awarded ? Math.round((list.slice(0, 5).reduce((s, x) => s + x.wins, 0) / awarded) * 100) : 0, items: shown };
+    top5Share: awarded ? Math.round((list.slice(0, 5).reduce((s, x) => s + x.wins, 0) / awarded) * 100) : 0, items: shown,
+    me: { names: me.labels, biz: me.biz.size, noBiz: me.noBiz } }; // 화면 안내: 무엇을 우리 회사로 보는지(사업자번호 값은 안 보냄)
 }

@@ -9,7 +9,7 @@ import { ErrorBox, Skeleton, cx } from '@/components/ui';
 
 type Rec = { id: string; title: string; date: string | null; amount: number | null; rate: number | null; bidders: number | null; region: string | null; issuer: string | null; url: string | null };
 type Co = { key: string; rank: number; name: string; ours: boolean; wins: number; amount: number | null; rate: number | null; bidders: number | null; regions: string[]; last: string | null; recent: Rec[] };
-type Stats = { days: number; total: number; awarded: number; failed: number; companies: number; ours: number; top5Share: number; items: Co[] };
+type Stats = { days: number; total: number; awarded: number; failed: number; companies: number; ours: number; top5Share: number; items: Co[]; me?: { names: string[]; biz: number; noBiz: string[] } };
 const C = '#2563EB'; // 영업 색(SalesSrc 와 같음)
 const DAYS: [string, string][] = [['30', '30일'], ['90', '90일'], ['180', '180일'], ['365', '1년']];
 const won = (n: number | null) => (n == null ? null : n >= 1e8 ? `${(n / 1e8).toFixed(1).replace(/\.0$/, '')}억` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString('ko-KR')}만원` : `${n.toLocaleString('ko-KR')}원`);
@@ -43,7 +43,9 @@ export function AwardStats({ onOpen }: { onOpen: (id: string) => void }) {
                   {r.url && <a href={r.url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-ink-3 hover:text-ink" aria-label="원문 보기"><ExternalLink className="size-3.5" /></a>}</li>))}
                 {x.wins > x.recent.length && <li className="text-ink-3">그 밖 {x.wins - x.recent.length}건</li>}</ul>}
             </li>); })}</ol>}
-        <p className="text-[11px] text-ink-3">맞춤 조건(관심 검색어·제외어·지역 등)에 맞는 공고의 결과만 셉니다 · 업체는 법인 표시(㈜·주식회사 등)를 빼고 같은 이름끼리 묶습니다 · 낙찰률·참가 수·금액은 원천에 있을 때만</p>
+        {data.me && <p className="text-[11px] text-ink-3" data-testid="award-me">우리 회사로 보는 기준: {data.me.names.length ? data.me.names.join(' · ') : '이름 없음'}{data.me.biz ? ` · 사업자번호 ${data.me.biz}개` : ''}
+          {data.me.noBiz.length > 0 && <span className="text-amber-700"> — {data.me.noBiz.map((n) => `'${n}'`).join(' · ')} 회사 정보에 사업자번호가 없어 이름으로만 찾습니다(관리 › 회사 정보·디자인에 넣으면 같은 이름의 다른 회사와 구분)</span>}</p>}
+        <p className="text-[11px] text-ink-3">맞춤 조건(관심 검색어·제외어·지역 등)에 맞는 공고의 결과만 셉니다(우리 회사 낙찰은 모두) · 업체는 법인 표시(㈜·주식회사 등)를 빼고 같은 이름끼리 묶습니다 · 낙찰률·참가 수·금액은 원천에 있을 때만</p>
       </>}
     </div>
   );

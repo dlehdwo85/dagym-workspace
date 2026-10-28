@@ -175,18 +175,23 @@ const CORP = /\(주\)|㈜|주식회사|\(유\)|유한회사|유한책임회사|�
 /** 회사 이름 비교용: 법인 표시·띄어쓰기·기호를 뺀 이름 */
 export const corpName = (v: unknown) => String(v ?? '').replace(CORP, '').replace(/[^0-9A-Za-z가-힣]/g, '').toLowerCase();
 const digits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
-/** 이 회사 이름들(회사 정보·회사 프로필·지원사업 프로필의 브랜드)과 사업자번호 */
+/** 이 회사 이름들(회사 정보·회사 프로필·지원사업 프로필의 브랜드)과 사업자번호 · 이름별로 아는 사업자번호 · 사업자번호 없는 회사 프로필(화면 안내) */
 export async function ourIdentity(sql: Sql, tenant: string) {
-  const names = new Set<string>(); const biz = new Set<string>();
-  const add = (v: unknown) => { const n = corpName(v); if (n.length >= 2) names.add(n); };
+  const names = new Set<string>(); const biz = new Set<string>(); const nameBiz = new Map<string, Set<string>>(); const labels = new Map<string, string>(); const noBiz: string[] = [];
+  const add = (v: unknown, b = '') => { const n = corpName(v); if (n.length < 2) return; names.add(n); if (!labels.has(n)) labels.set(n, String(v).trim());
+    if (b) nameBiz.set(n, (nameBiz.get(n) ?? new Set<string>()).add(b)); };
   const [tn] = await sql<{ name: string | null }[]>`select name from tenants where id = ${tenant}`; add(tn?.name);
-  for (const p of await sql<{ name: string | null; biz_no: string | null }[]>`select name, biz_no from company_profiles where tenant = ${tenant}`) { add(p.name); const b = digits(p.biz_no); if (b.length === 10) biz.add(b); }
+  for (const p of await sql<{ name: string | null; biz_no: string | null }[]>`select name, biz_no from company_profiles where tenant = ${tenant} order by is_default desc, key`) {
+    const b = digits(p.biz_no); if (b.length === 10) biz.add(b); else if (p.name) noBiz.push(p.name); add(p.name, b.length === 10 ? b : ''); }
   for (const s of await sql<{ brands: string[] | null }[]>`select brands from support_profiles where tenant = ${tenant}`) for (const b of s.brands ?? []) add(b);
-  return { names, biz };
+  return { names, biz, nameBiz, labels: [...labels.values()], noBiz };
 }
-export function isOurs(award: { name?: unknown; biz?: unknown }, me: { names: Set<string>; biz: Set<string> }) {
-  const b = digits(award.biz); if (b.length === 10 && me.biz.size) return me.biz.has(b);
-  const n = corpName(award.name); return n.length >= 2 && me.names.has(n);
+/** 사업자번호가 우리 것 → 우리 회사 · 이름이 같으면 우리 회사 — 단 그 이름의 사업자번호를 알고 있는데 낙찰 사업자번호가 다르면 같은 이름의 다른 회사
+ *  (227차 로컬 10/28 '하이링크 낙찰 0': 전에는 우리 사업자번호가 하나라도 있으면 사업자번호만 봐서, 사업자번호를 안 넣은 회사 프로필의 낙찰을 못 찾음) */
+export function isOurs(award: { name?: unknown; biz?: unknown }, me: { names: Set<string>; biz: Set<string>; nameBiz?: Map<string, Set<string>> }) {
+  const b = digits(award.biz); if (b.length === 10 && me.biz.has(b)) return true;
+  const n = corpName(award.name); if (n.length < 2 || !me.names.has(n)) return false;
+  return b.length !== 10 || !me.nameBiz?.get(n)?.size;
 }
 type ResultIn = { result: BidResult; winner?: string | null; winnerBiz?: string | null; amount?: number | string | null; awardDate?: string | null; contractStart?: string | null; contractEnd?: string | null; note?: string | null };
 /** 결과 반영(사람 또는 정기 점검) — 입찰 업무 마침 · 낙찰이면 계약 기록 + 계약 업무 · 낙찰이 아니게 바뀌면 자동 계약 기록·업무 정리 · 알림 */

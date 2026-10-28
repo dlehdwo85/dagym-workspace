@@ -45,6 +45,27 @@ test('기간(1년이면 오래된 결과 포함) · 맞춤 조건 제외어 반�
   await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { excludes: [] });
 });
 
+test('227차 우리 회사(로컬 10/28 \'하이링크 낙찰 0\'): 사업자번호 없는 회사 프로필은 이름으로 · 맞춤 조건 밖 낙찰도 셈 · 이름이 같아도 사업자번호가 다르면 남의 회사 · 기준 안내', async () => {
+  await sql`insert into company_profiles (tenant, key, name, is_default) values ('default', 'awardtest2', '(주)하이링크테스트', false)`;
+  await res(9, '[부산] 차카아파트 외벽 도색', 4, { winner_name: '하이링크테스트 주식회사', winner_biz_no: '555-55-55555' }); // 업종 무관 제목 · 모르는 사업자번호
+  await res(10, '[경기] 파하아파트 헬스장 위탁운영', 6, { winner_name: '다짐테스트(주)', winner_biz_no: '9999999999' }); // 우리와 같은 이름 · 다른 사업자번호
+  try {
+    const d = await ctx.owner.ok('GET', '/api/sales/award-stats');
+    assert.deepEqual([d.total, d.awarded, d.companies, d.ours], [8, 7, 5, 2], JSON.stringify({ ...d, items: undefined }));
+    assert.deepEqual(d.items.filter((x) => x.ours).map((x) => [x.name, x.wins]).sort(), [['다짐테스트', 1], ['하이링크테스트 주식회사', 1]], '사업자번호 없는 회사 프로필 = 이름으로 · 업종 무관 제목이어도 우리 낙찰은 셈');
+    const other = d.items.find((x) => !x.ours && x.name === '다짐테스트(주)'); assert.equal(other?.wins, 1, '같은 이름 · 다른 사업자번호 = 남의 회사(우리 줄과 따로)');
+    assert.deepEqual([d.me.biz, d.me.noBiz], [1, ['(주)하이링크테스트']]);
+    assert.ok(['다짐테스트(주)', '(주)하이링크테스트'].every((n) => d.me.names.includes(n)), JSON.stringify(d.me));
+    assert.ok(!JSON.stringify(d.me).includes('1234567890'), '사업자번호 값은 안 보냄');
+    await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { regions: ['서울'] });
+    const r = await ctx.owner.ok('GET', '/api/sales/award-stats');
+    assert.deepEqual([r.ours, r.items.filter((x) => x.ours).length], [2, 2], '지역 조건(서울) 밖 우리 낙찰도 셈');
+  } finally {
+    await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { regions: [] });
+    await sql`delete from sales_src_rows where src_id = any(${[ID(9), ID(10)]})`; await sql`delete from company_profiles where key = 'awardtest2'`;
+  }
+});
+
 test('권한: 영업 공간 밖 404 · 입찰을 쓰지 않는 회사 403', async () => {
   assert.equal((await ctx.staffB.client.req('GET', '/api/sales/award-stats')).status, 404);
   await sql`update tenants set sales_bids = false where id = 'default'`;

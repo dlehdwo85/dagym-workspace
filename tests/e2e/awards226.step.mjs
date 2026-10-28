@@ -33,6 +33,7 @@ export async function awards226({ owner, ctx, sql, BASE, SHOTS }) {
     await ours.getByTestId('award-ours').waitFor();
     assert.equal(await box.getByTestId('award-row').filter({ hasText: '모의관리' }).count(), 1);
     assert.match(await box.getByTestId('award-summary').innerText(), /관련 결과 \d+건 · 낙찰 \d+ · 유찰 \d+ · 낙찰 업체 \d+곳.* · 우리 회사 낙찰 \d+건/);
+    assert.match(await box.getByTestId('award-me').innerText(), /우리 회사로 보는 기준: .*E2E우리회사\(주\).* · 사업자번호 \d+개/, '227차: 무엇을 우리 회사로 보는지 안내');
     await mo.locator('button[aria-expanded]').click();
     const recent = mo.getByTestId('award-recent'); await recent.waitFor();
     assert.equal(await recent.getByTestId('award-recent-open').count(), 2);
