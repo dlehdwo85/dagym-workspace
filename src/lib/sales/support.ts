@@ -8,9 +8,10 @@ import { assertSpace } from '../spaces';
 import { HttpError, badRequest, forbidden, notFound } from '../errors';
 import { audit } from '../log';
 import { notify } from '../notifications';
-import { aiEnabled, anthropicProvider, costUsd, type AiProvider } from '../ai/provider';
+import { aiEnabled, anthropicProvider, costUsd, modelFor, usdKrw, type AiProvider } from '../ai/provider';
 import { tenantOf, type SessionUser } from '../types';
 import { SIDO, supportKeyStatus, watchDetailText } from './collectors/support';
+import { SIDO_ALIASES } from './collectors/prospects';
 import { garbledText } from './collectors/files';
 
 const ymd = (d: Date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
@@ -42,7 +43,7 @@ export const INDUSTRY_GROUPS: Record<string, string[]> = {
   관광: ['관광', '숙박', '여행사', '관광기업'],
   콘텐츠: ['콘텐츠', '게임', '영상 제작', '웹툰', '출판', '방송', '음악', '애니메이션', '미디어'],
   소프트웨어: ['소프트웨어', 'SW', 'IT', '정보통신', 'ICT', '플랫폼', '앱', '인공지능', 'AI', '데이터', '클라우드', '핀테크', '에듀테크', '프롭테크', '솔루션'],
-  에너지환경: ['에너지', '환경', '신재생', '탄소', '친환경', '기후'],
+  에너지환경: ['에너지', '환경', '신재생', '탄소', '친환경', '기후', '배출시설', '방지시설', '배출사업장', '대기오염', '오염물질', '발전사', '발전소', '발전 분야', '발전분야', '전력산업', '전력 산업'], // #781 IoT 측정기기(대기 배출시설)·발전사 상생 공고
   물류운송: ['물류', '운송', '운수', '택배', '모빌리티', '자동차'],
   유통: ['유통', '도소매', '소매업', '도매업', '온라인 쇼핑몰', '이커머스', '수출입', '무역'],
   교육: ['교육', '학원', '에듀', '교육서비스'],
@@ -51,13 +52,15 @@ export const INDUSTRY_GROUPS: Record<string, string[]> = {
   시설관리: ['시설관리', '시설 관리', '시설운영', '시설 운영', '경비업', '경비 용역', '경비용역', '청소업', '청소 용역', '청소용역', '주택관리', '건물관리', '건물 관리', '부동산업', '부동산 관리', '부동산관리', '위탁관리', '위탁 관리', '위탁운영', '위탁 운영', '커뮤니티시설', '커뮤니티 시설', '관리사무소', '공동주택', '아파트 관리'],
 };
 /** 업종 제한이 아닌 문구(전 업종·서비스업 전체·모든 중소기업) */
-const GENERIC_TARGET = /전\s*업종|업종\s*(무관|제한\s*없음|불문)|모든\s*업종|서비스업|전체\s*중소기업|모든\s*중소기업/;
+const GENERIC_TARGET = /전\s*업종|업종\s*(무관|제한\s*없음|불문)|모든\s*업종|서비스업|전체\s*중소기업|모든\s*중소기업|전\s*산업|모든\s*(?:분야|산업)|분야\s*(?:무관|제한\s*없음)/;
 /** #649 후속: '지원 대상' 글에서 업종 판단에 쓰면 안 되는 구절을 뗌 — 제외·불가 구절(괄호 "(단, 부동산업 제외)" · 꼬리 "단, … 제외" · "※ 제외 업종: 음식점업, 미용업, 부동산업" 줄)과 우대·가점·우선 구절.
  * 로컬 10/25 157차 확인: 제외 업종 목록의 음식점·미용·부동산을 '대상 업종'으로 읽어 "식품·뷰티·시설관리 업종 대상 → 해당 없음"이 됨 */
 export function targetText(t: string) {
   const EXCL = /제외|불가|비대상|해당\s*없음/;
-  return t.replace(/\([^()]*(?:제외|불가|비대상|해당\s*없음)[^()]*\)/g, ' ')
-    .split(/\n|※/).map((line) => { const x = EXCL.test(line) ? line.replace(/(?:단|다만)\s*,?[^\n]*$/, ' ') : line; return EXCL.test(x) ? '' : x; }).join('\n')
+  // #781(로컬 10/28): '(청년창업기업·지식서비스 등은) 1인 이상도 가능' 같은 예외·특례 구절의 업종은 대상 업종이 아님 — 청년일자리도약장려금 거짓 '해당 없음'
+  const EXC = /1인\s*이상|도\s*(?:신청\s*|지원\s*|참여\s*)?가능|예외|특례/;
+  return t.replace(/\([^()]*(?:제외|불가|비대상|해당\s*없음|1인\s*이상|도\s*가능|예외|특례)[^()]*\)/g, ' ')
+    .split(/\n|※/).map((line) => { const x = EXCL.test(line) ? line.replace(/(?:단|다만)\s*,?[^\n]*$/, ' ') : line; return EXCL.test(x) || EXC.test(x) ? '' : x; }).join('\n')
     .replace(/[^.,·\n()]*(우대|가점|우선)[^.,·\n()]*/g, ' ');
 }
 /** 시·군 이름(광역시·특별시·도 제외) — 제목·대상·기관에 다른 시·군이 적힌 지자체 공고를 가려내는 데 씀 */
@@ -67,6 +70,84 @@ export const SIGUNGU = new Set(('수원시 성남시 의정부시 안양시 부�
   + '목포시 여수시 순천시 나주시 광양시 담양군 곡성군 구례군 고흥군 보성군 화순군 장흥군 강진군 해남군 영암군 무안군 함평군 영광군 장성군 완도군 진도군 신안군 포항시 경주시 김천시 안동시 구미시 영주시 영천시 상주시 문경시 경산시 '
   + '의성군 청송군 영양군 영덕군 청도군 고령군 성주군 칠곡군 예천군 봉화군 울진군 울릉군 창원시 진주시 통영시 사천시 김해시 밀양시 거제시 양산시 의령군 함안군 창녕군 남해군 하동군 산청군 함양군 거창군 합천군 '
   + '제주시 서귀포시 기장군 달성군 군위군 강화군 옹진군 울주군').split(' '));
+
+// ---------------- #781 지역 단서(원천 지역 칸이 비어 있을 때) ----------------
+// 로컬 10/28: [전남광주]·○○통합특별시·기관 이름(울산경제일자리진흥원·강원창조경제혁신센터)·서울 서초구·'○○ 소재 기업'에만 지역이 적힌 공고가 맞춤에 들어옴
+/** 광역시 자치구 → 시·도, 시의 일반구 → 시. 여러 광역시에 같은 이름인 중구·동구·서구·남구·북구는 뺌 */
+const GU = new Map<string, { sido: string[]; city?: string }>();
+for (const [sido, names] of [['서울', '종로구 용산구 성동구 광진구 동대문구 중랑구 성북구 강북구 도봉구 노원구 은평구 서대문구 마포구 양천구 구로구 금천구 영등포구 동작구 관악구 서초구 강남구 송파구 강동구'],
+  ['부산', '영도구 부산진구 동래구 해운대구 사하구 금정구 연제구 수영구 사상구'], ['대구', '수성구 달서구'], ['인천', '미추홀구 연수구 남동구 부평구 계양구'], ['광주', '광산구'], ['대전', '유성구 대덕구']]) for (const n of names.split(' ')) GU.set(n, { sido: [sido] });
+GU.set('강서구', { sido: ['서울', '부산'] });
+for (const [sido, city, names] of [['경기', '수원시', '장안구 권선구 팔달구 영통구'], ['경기', '성남시', '수정구 중원구 분당구'], ['경기', '안양시', '만안구 동안구'], ['경기', '안산시', '상록구 단원구'], ['경기', '고양시', '덕양구 일산동구 일산서구'],
+  ['경기', '용인시', '처인구 기흥구 수지구'], ['충북', '청주시', '상당구 서원구 흥덕구 청원구'], ['충남', '천안시', '동남구 서북구'], ['전북', '전주시', '완산구 덕진구'], ['경남', '창원시', '의창구 성산구 마산합포구 마산회원구 진해구']]) for (const n of names.split(' ')) GU.set(n, { sido: [sido], city });
+const GU_LONG = [...GU.keys()].sort((a, b) => b.length - a.length);
+/** 시·군 이름에서 '시·군'을 뗀 이름 → 시·군(대괄호 꼬리표 '[용인]'·'용인 소재'). 보통 낱말과 같은 이름(화성·예산·강화·고령·음성·부여…)은 본문에서는 안 씀 */
+const SGG_BASE = new Map<string, string[]>();
+for (const n of SIGUNGU) { const b = n.replace(/[시군]$/, ''); if (b.length >= 2 && !SIDO.includes(b)) SGG_BASE.set(b, [...(SGG_BASE.get(b) ?? []), n]); }
+const AMBIG_BASE = new Set('화성 예산 강화 고령 음성 부여 장수 상주 영양 진도 영광 구리 공주 동해 고성 광명 신안 보성 성주 완도 하동 남해 금산 청도 영동 정선 장성 의성 단양 화천'.split(' '));
+type Place = { sido: string[]; sgg: string[] };
+/** '전남광주'·'대구경북'처럼 시·도 짧은 이름만으로 이어진 낱말 → 시·도들 */
+function sidoCombo(w: string): string[] | null {
+  const out: string[] = []; let x = w;
+  while (x) { const n = SIDO.find((v) => x.startsWith(v)); if (!n) return null; out.push(n); x = x.slice(n.length); }
+  return out.length ? out : null;
+}
+/** 낱말 하나 → 시·도 / 시·군(꼬리표면 보통 낱말과 같은 시·군 이름도) */
+function placeOf(w0: string, tag = false): Place | null {
+  const w = w0.trim(); if (w.length < 2) return null;
+  if (SIDO_ALIASES[w]) return { sido: [SIDO_ALIASES[w]], sgg: [] };
+  if (SIGUNGU.has(w)) return { sido: [], sgg: [w] };
+  const g = GU.get(w); if (g) return { sido: g.sido, sgg: g.city ? [g.city] : [] };
+  const c = sidoCombo(w.replace(/(?:특별자치도|특별자치시|특별시|광역시|도|시)$/, '')); if (c) return { sido: c, sgg: [] };
+  const b = SGG_BASE.get(w); if (b && (tag || !AMBIG_BASE.has(w))) return { sido: [], sgg: b };
+  return null;
+}
+export type RegionHints = { sido: string[]; sgg: string[]; agency: string[]; national: boolean; capitalOut: boolean };
+/** 공고 글 속 지역 단서 — sido·sgg = 강한 단서(제목 꼬리표·통합특별시·제목/대상의 시·도·구 이름·'○○ 소재/관내/지역 기업'), agency = 기관·수행기관 이름 앞 시·도 */
+export function regionHints(p: { title: string; target: string | null; summary: string | null; agency: string | null; executor: string | null; hashtags?: string[] | null; category?: string | null }): RegionHints {
+  const sido = new Set<string>(); const sgg = new Set<string>(); const agency = new Set<string>();
+  const add = (x: Place | null) => { if (x) { x.sido.forEach((v) => sido.add(v)); x.sgg.forEach((v) => sgg.add(v)); } };
+  // 1) 제목 앞 [꼬리표] — [전남광주] [대구·경북] [용인]
+  let rest = p.title;
+  for (let m = rest.match(/^\s*[[(【]([^\])】]{1,20})[\])】]/); m; m = rest.match(/^\s*[[(【]([^\])】]{1,20})[\])】]/)) {
+    for (const w of m[1].split(/[\s·,ㆍ/]+/)) add(placeOf(w, true));
+    rest = rest.slice(m[0].length);
+  }
+  // 2) ○○통합특별시
+  for (const m of `${p.title} ${p.target ?? ''} ${p.agency ?? ''} ${p.executor ?? ''}`.matchAll(/([가-힣]{2,8})통합특별시/g)) add(placeOf(m[1], true));
+  // 3) 제목·대상의 시·도 이름(낱말 하나로) — 행사 장소가 적힌 제목은 뺌, '대전'(○○ 대전)·'세종'(세종학당)·경기(경기 활성화·스포츠 경기)는 꼴로만
+  const tgt = targetText(String(p.target ?? ''));
+  const venue = /코엑스|킨텍스|벡스코|엑스코|세텍|aT\s*센터|DDP|박람회|전시회|페어|엑스포|EXPO|개최/i.test(rest);
+  for (const [txt, isTitle] of [[rest, true], [tgt, false]] as const) {
+    if (isTitle && venue) continue;
+    const ws = txt.split(/[\s,·ㆍ/()[\]「」<>'"‘’“”~:;!?-]+/).filter(Boolean);
+    ws.forEach((w0, i) => {
+      const w = w0.replace(/(?:지역|권역|소재|관내|형|내|의|에서|에|은|는|이|가)$/, '');
+      const bare = w === w0;
+      if (bare && (w === '대전' || w === '세종')) return;
+      if (w === '경기' && (/^(활성화|침체|부양|회복|둔화|불황|하강|전망|변동|대회|운영|일정|결과|규칙|장|중)/.test(ws[i + 1] ?? '') || /(스포츠|체육|축구|야구|농구|배구|e스포츠)$/.test(ws[i - 1] ?? ''))) return;
+      if (SIDO.includes(w) || SIDO_ALIASES[w] || sidoCombo(w.replace(/(?:특별자치도|특별자치시|특별시|광역시|도|시)$/, '')) && w !== '광주시') add(placeOf(w));
+    });
+    let x = txt; for (const n of GU_LONG) if (x.includes(n)) { add(placeOf(n)); x = x.split(n).join(' '); }
+  }
+  // 4) 대상·본문의 '○○ 소재 기업'·'○○ 관내 업체'·'○○ 지역 중소기업'·'○○에 본사를 둔 기업'(목록 '서울·경기·인천 소재'도)
+  const body = targetText(`${p.target ?? ''}\n${String(p.summary ?? '').slice(0, 3000)}`);
+  for (const m of body.matchAll(/\s*(?:내\s*)?(?:소재|관내|지역|에\s*(?:본사|본점|주사무소|사업장)[을를이가]?\s*(?:둔|두고|있는|소재한|위치한))\s*(?:의\s*)?(?:중소\s*|중견\s*|창업\s*|청년\s*)?(?:기업|업체|사업자|소상공인|스타트업|법인|사업장|창업자)/g)) {
+    const ws = body.slice(Math.max(0, (m.index ?? 0) - 40), m.index).split(/[\s,·ㆍ/]+|및/).filter(Boolean);
+    for (let i = ws.length - 1; i >= 0; i--) { const pl = placeOf(ws[i]); if (!pl) break; add(pl); }
+  }
+  // 5) 기관·수행기관 이름 앞 시·도(울산경제일자리진흥원·강원창조경제혁신센터·서초구청) — 공항·항만 공사는 전국
+  for (const w of `${p.agency ?? ''} ${p.executor ?? ''}`.split(/[\s,·()/]+/).filter(Boolean)) {
+    if (/^(인천국제공항|인천공항|인천항|부산항|울산항|여수광양항)/.test(w)) continue;
+    const long = Object.keys(SIDO_ALIASES).find((k) => w.startsWith(k)); if (long) { agency.add(SIDO_ALIASES[long]); continue; }
+    const gu = GU_LONG.find((n) => w.startsWith(n)); if (gu) { GU.get(gu)!.sido.forEach((v) => agency.add(v)); continue; }
+    const n = SIDO.find((v) => w.startsWith(v) && w.length > v.length);
+    if (n && !(n === '세종' && !/^세종(시|특별자치시)/.test(w)) && !/^광주시/.test(w)) agency.add(n);
+  }
+  const national = /전국/.test(`${p.title} ${p.target ?? ''} ${(p.hashtags ?? []).join(' ')} ${p.category ?? ''}`);
+  const capitalOut = /비\s*수도권|수도권\s*(?:소재\s*)?(?:기업\s*)?(?:외|이외|제외)/.test(`${p.title} ${p.target ?? ''}`);
+  return { sido: SIDO.filter((v) => sido.has(v)), sgg: [...sgg], agency: SIDO.filter((v) => agency.has(v)), national, capitalOut };
+}
 
 export type Profile = { region_sido: string | null; region_sigungu: string | null; founded: string | null; size: string | null; employees: number | null; revenue_krw: number | null; industries: string[]; keywords: string[];
   certs: string[]; brands: string[]; interests: string[]; excludes: string[]; memo: string | null };
@@ -119,7 +200,8 @@ export async function saveProfile(u: SessionUser, i: z.infer<typeof profileInput
 }
 
 // ---------------- 1차 규칙 맞춤 ----------------
-export type Flag = { level: 'ok' | 'warn' | 'no'; text: string };
+/** need = 이 경고를 풀려면 채울 회사 프로필 칸(#784 '빈칸 n개를 채우면 n건 더 판단') */
+export type Flag = { level: 'ok' | 'warn' | 'no'; text: string; need?: string };
 export type Rule = { score: number; verdict: 'fit' | 'maybe' | 'no'; flags: Flag[] };
 const yearsSince = (founded: string, today: string) => Math.max(0, Math.floor((daysBetween(founded, today) / 365.25) * 10) / 10);
 /** 업력 상한(년) — K-Startup 업력 칸(예: 예비창업자,1년미만,…,7년미만) · '창업 N년 이내·미만' 문구 · '창업기업'(법정 업력 7년 이내). 10년이상이 있으면 제한 없음 */
@@ -134,6 +216,9 @@ export function maxYears(p: Pick<Prog, 'biz_years' | 'target' | 'title' | 'summa
   const text = `${p.title} ${p.target ?? ''} ${(p.summary ?? '').slice(0, 2000)}`;
   const m = text.match(/(?:창업|업력|설립)\s*(?:후\s*)?(\d{1,2})\s*년\s*(이내|미만|이하)/);
   if (m) return { max: Number(m[1]), strict: m[2] === '미만', preOnly: false };
+  // #781(로컬 10/28): 제목·대상이 예비창업자만(예비창업패키지 아카데미·예비창업자 교육) — 기업·창업기업·업력 문구가 함께 있으면 아님
+  const tt = `${p.title} ${p.target ?? ''}`;
+  if (/예비\s*창업/.test(tt) && !/기업|창업자\s*및|초기|재창업|소상공인|사업자|업력|기\s*창업/.test(tt.replace(/예비\s*창업(?:자|패키지)?/g, ' '))) return { max: 0, strict: false, preOnly: true, why: '예비창업자' };
   if (/(?<!예비\s*)창업\s*기업/.test(`${p.title} ${p.target ?? ''}`)) return { max: 7, strict: false, preOnly: false, why: '창업기업' }; // 중소기업창업 지원법: 업력 7년 이내
   return null;
 }
@@ -163,25 +248,34 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
   // 기출원 건 지원 불가(IP) — 프로필과 무관하게 늘 경고
   if (/(기\s*출원|이미\s*출원|출원\s*(?:완료|된|한)\s*건)[^.\n]{0,30}(불가|제외|지원하지|지원\s*안|않)/.test(body) || /협약\s*(?:체결\s*)?(?:이\s*)?후\s*출원/.test(body))
     flags.push({ level: 'warn', text: '이미 출원한 건은 지원 불가 — 선정·협약 전에 출원하지 않기' });
-  if (!pr) return { score: 0, verdict: 'maybe', flags: [...flags, { level: 'warn', text: '회사 프로필을 채우면 맞춤 판단' }] };
+  if (!pr) return { score: 0, verdict: 'maybe', flags: [...flags, { level: 'warn', text: '회사 프로필을 채우면 맞춤 판단', need: 'profile' }] };
   const has = (c: string) => pr.certs.some((x) => x.replace(/\s/g, '').includes(c));
   // 제외어
   const ex = pr.excludes.find((w) => title.includes(w.toLowerCase()) || String(p.target ?? '').toLowerCase().includes(w.toLowerCase()));
   if (ex) { flags.push({ level: 'no', text: `제외어 '${ex}'` }); score -= 100; }
-  // 지역 — 시·도
-  if (p.regions?.length && pr.region_sido) {
-    if (p.regions.includes(pr.region_sido)) { flags.push({ level: 'ok', text: `${pr.region_sido} 지역 공고` }); score += 20; }
-    else { flags.push({ level: 'no', text: `${p.regions.join('·')} 기업 대상(우리 ${pr.region_sido})` }); score -= 100; }
-  } else if (p.regions?.length && !pr.region_sido) flags.push({ level: 'warn', text: `${p.regions.join('·')} 지역 공고 — 본점 지역을 넣으면 판단` });
-  // 지역 — 시·군(제목·대상·해시태그에 적힌 시·군은 강한 신호, 기관 이름에만 있으면 확인 필요)
-  const strong = sigunguIn(`${p.title} ${p.target ?? ''} ${(p.hashtags ?? []).map((h) => (SIGUNGU.has(`${h}시`) ? `${h}시` : SIGUNGU.has(`${h}군`) ? `${h}군` : h)).join(' ')}`);
+  // 지역 — 시·도(원천 지역 칸, 비어 있으면 #781 글 속 단서: 제목 [꼬리표]·통합특별시·시·도·구 이름·'○○ 소재 기업' → 다음으로 기관 이름 앞 시·도)
+  const hint = regionHints(p);
+  const regs = p.regions?.length ? p.regions : hint.sido;
+  if (regs.length && pr.region_sido) {
+    if (regs.includes(pr.region_sido)) { flags.push({ level: 'ok', text: `${pr.region_sido} 지역 공고` }); score += 20; }
+    else { flags.push({ level: 'no', text: `${regs.join('·')} 기업 대상(우리 ${pr.region_sido})` }); score -= 100; }
+  } else if (regs.length) flags.push({ level: 'warn', text: `${regs.join('·')} 지역 공고 — 본점 지역을 넣으면 판단`, need: 'region_sido' });
+  else if (hint.agency.length) {
+    if (!pr.region_sido) flags.push({ level: 'warn', text: `${hint.agency.join('·')} 기관 공고 — 본점 지역을 넣으면 판단`, need: 'region_sido' });
+    else if (hint.agency.includes(pr.region_sido)) { flags.push({ level: 'ok', text: `${pr.region_sido} 기관 공고` }); score += 10; }
+    else if (hint.national) flags.push({ level: 'warn', text: `${hint.agency.join('·')} 기관 공고 — 지역 제한 확인` });
+    else { flags.push({ level: 'no', text: `${hint.agency.join('·')} 기관 공고(우리 ${pr.region_sido})` }); score -= 100; }
+  }
+  if (hint.capitalOut && pr.region_sido && ['서울', '경기', '인천'].includes(pr.region_sido)) { flags.push({ level: 'no', text: `비수도권 기업 대상(우리 ${pr.region_sido})` }); score -= 100; }
+  // 지역 — 시·군(제목·대상·해시태그·'○○ 소재'·[꼬리표]에 적힌 시·군은 강한 신호, 기관 이름에만 있으면 확인 필요)
+  const strong = [...new Set([...sigunguIn(`${p.title} ${p.target ?? ''} ${(p.hashtags ?? []).map((h) => (SIGUNGU.has(`${h}시`) ? `${h}시` : SIGUNGU.has(`${h}군`) ? `${h}군` : h)).join(' ')}`), ...hint.sgg])];
   const weak = sigunguIn(`${p.agency ?? ''} ${p.executor ?? ''}`).filter((n) => !strong.includes(n));
   const mine = pr.region_sigungu ? base(pr.region_sigungu.split(/\s+/)[0]) : null;
   const isMine = (n: string) => !!mine && base(n) === mine;
   if (strong.length) {
     if (strong.some(isMine)) { flags.push({ level: 'ok', text: `${pr.region_sigungu} 공고` }); score += 25; }
     else if (mine) { flags.push({ level: 'no', text: `${strong.slice(0, 2).join('·')} 공고(우리 ${pr.region_sigungu})` }); score -= 100; }
-    else flags.push({ level: 'warn', text: `${strong.slice(0, 2).join('·')} 공고 — 본점 시·군을 넣으면 판단` });
+    else flags.push({ level: 'warn', text: `${strong.slice(0, 2).join('·')} 공고 — 본점 시·군을 넣으면 판단`, need: 'region_sigungu' });
   } else if (weak.length) {
     if (weak.some(isMine)) { flags.push({ level: 'ok', text: `${pr.region_sigungu} 기관 공고` }); score += 15; }
     else flags.push({ level: 'warn', text: `${weak[0]} 기관 공고 — 지역 제한 확인` });
@@ -190,8 +284,8 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
   const my = maxYears(p);
   if (my) {
     const yrs = pr.founded ? yearsSince(pr.founded, today) : null; const cond = `${my.why ? `${my.why}(업력 ${my.max}년 이내)` : `업력 ${my.max}년 ${my.strict ? '미만' : '이내'}`}`;
-    if (my.preOnly) { if (pr.founded) { flags.push({ level: 'no', text: '예비창업자 대상' }); score -= 100; } else flags.push({ level: 'warn', text: '예비창업자 대상' }); }
-    else if (yrs == null) flags.push({ level: 'warn', text: `${cond} — 설립일을 넣으면 판단` });
+    if (my.preOnly) { if (pr.founded) { flags.push({ level: 'no', text: '예비창업자 대상' }); score -= 100; } else flags.push({ level: 'warn', text: '예비창업자 대상', need: 'founded' }); }
+    else if (yrs == null) flags.push({ level: 'warn', text: `${cond} — 설립일을 넣으면 판단`, need: 'founded' });
     else if (my.strict ? yrs < my.max : yrs <= my.max) { flags.push({ level: 'ok', text: `${cond} — 우리 ${yrs}년` }); score += 10; }
     else { flags.push({ level: 'no', text: `${cond}만 — 우리 ${yrs}년` }); score -= 100; }
   }
@@ -199,7 +293,7 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
   const wr = workerRules(`${p.target ?? ''} ${(p.summary ?? '').slice(0, 2000)}`);
   if (wr.length) {
     const cond = `상시근로자 ${wr.map((r) => `${r.n}인 ${r.op}`).join(' ')}`;
-    if (pr.employees == null) flags.push({ level: 'warn', text: `${cond} — 근로자 수를 넣으면 판단` });
+    if (pr.employees == null) flags.push({ level: 'warn', text: `${cond} — 근로자 수를 넣으면 판단`, need: 'employees' });
     else if (wr.every((r) => workerOk(pr.employees!, r))) { flags.push({ level: 'ok', text: `${cond} — 우리 ${pr.employees}명` }); score += 5; }
     else { flags.push({ level: 'no', text: `${cond}만 — 우리 ${pr.employees}명` }); score -= 100; }
   }
@@ -208,19 +302,28 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
   if (/소상공인/.test(tg) && !/중소기업|중소·|기업\s*및|중견/.test(tg.replace(/소상공인/g, ''))) {
     if (pr.size && ['중기업', '중견기업'].includes(pr.size)) { flags.push({ level: 'no', text: `소상공인 대상(우리 ${pr.size})` }); score -= 100; }
     else if (pr.size && ['소상공인', '소기업'].includes(pr.size)) { flags.push({ level: 'ok', text: '소상공인 대상' }); score += 5; }
-    else flags.push({ level: 'warn', text: '소상공인 대상 — 규모를 넣으면 판단' });
+    else flags.push({ level: 'warn', text: '소상공인 대상 — 규모를 넣으면 판단', need: 'size' });
+  }
+  // #781(로컬 10/28): 1인 창조기업 대상(1인 또는 5인 미만 공동 창업) — 상시근로자 5명 이상·중기업 이상이면 해당 없음
+  const tt1 = `${p.title} ${p.target ?? ''}`;
+  if (/1인\s*창조\s*기업/.test(tt1) && !/(?:중소|일반|창업)\s*기업|소상공인/.test(tt1.replace(/1인\s*창조\s*기업/g, ' '))) {
+    if (pr.employees != null) { if (pr.employees >= 5) { flags.push({ level: 'no', text: `1인 창조기업 대상(우리 상시근로자 ${pr.employees}명)` }); score -= 100; } else { flags.push({ level: 'ok', text: '1인 창조기업 대상' }); score += 5; } }
+    else if (pr.size && ['중기업', '중견기업'].includes(pr.size)) { flags.push({ level: 'no', text: `1인 창조기업 대상(우리 ${pr.size})` }); score -= 100; }
+    else flags.push({ level: 'warn', text: '1인 창조기업 대상 — 상시근로자 수를 넣으면 판단', need: 'employees' });
   }
   if (/중견기업/.test(tg) && !/중소/.test(tg) && pr.size && ['소상공인', '소기업', '예비창업'].includes(pr.size)) flags.push({ level: 'warn', text: '중견기업 대상' });
   if (/(대학생|대학원생|청년\s*개인|농업인|어업인|임업인)/.test(String(p.target ?? '')) && !/기업/.test(String(p.target ?? ''))) flags.push({ level: 'warn', text: '개인·특정 대상 공고' });
   // #649 업종: '지원 대상'(우대·가점·제외 구절은 뺌)에 적힌 업종이 우리 프로필 업종과 하나도 안 겹치면 해당 없음(여러 업종이 나열되면 하나만 겹쳐도 통과), 프로필 업종이 비어 있으면 확인 필요, 제목에만 있으면 확인 필요
-  const tgt = targetText(String(p.target ?? ''));
+  // #781: 본문의 '○○ 분야(업종·산업) 기업' 구절도 대상 업종(남동발전 '발전·에너지 분야 중소기업') · 제목의 대기 배출시설·방지시설 낱말(IoT 측정기기 부착 지원)
+  const phr = [...targetText(String(p.summary ?? '').slice(0, 4000)).matchAll(/([가-힣A-Za-z·ㆍ,\s]{2,24}?)\s*(?:분야|업종|산업)\s*(?:의\s*)?(?:중소\s*|중견\s*|창업\s*|영위\s*)?(?:기업|사업자|업체)/g)].map((m) => m[1]).join(' · ');
+  const tgt = [targetText(String(p.target ?? '')), phr, /배출시설|방지시설|배출사업장|대기오염|오염물질/.test(p.title) ? p.title : ''].join('\n');
   const tg2 = groupsIn(tgt); const mineG = groupsIn(pr.industries.join(' '));
   let industryOk = false;
   if (tg2.length && !GENERIC_TARGET.test(tgt)) {
     const hit = tg2.filter((g) => mineG.includes(g));
     if (hit.length) { flags.push({ level: 'ok', text: `대상 업종 ${hit.join('·')} — 우리 업종` }); score += 15; industryOk = true; }
     else if (mineG.length) { flags.push({ level: 'no', text: `${tg2.slice(0, 3).join('·')} 업종 대상(우리 ${pr.industries.slice(0, 2).join('·')})` }); score -= 100; }
-    else flags.push({ level: 'warn', text: `${tg2.slice(0, 3).join('·')} 업종 대상 — 프로필에 업종을 넣으면 판단` });
+    else flags.push({ level: 'warn', text: `${tg2.slice(0, 3).join('·')} 업종 대상 — 프로필에 업종을 넣으면 판단`, need: 'industries' });
   } else if (!tg2.length) {
     const tt = groupsIn(p.title);
     if (tt.length && mineG.length && !tt.some((g) => mineG.includes(g))) flags.push({ level: 'warn', text: `제목에 ${tt.slice(0, 2).join('·')} 업종 — 대상 확인 필요` });
@@ -228,16 +331,16 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
   // 연구소·전담부서 / 벤처·이노비즈 / SW사업자 — 요구(또는 우대) 문구가 있을 때
   if (/(기업부설\s*연구소|연구개발\s*전담\s*부서)[^.\n]{0,20}(보유|설립|인정|있는|갖춘)/.test(body)) {
     if (has('기업부설연구소') || has('연구개발전담부서')) { flags.push({ level: 'ok', text: '연구소·전담부서 보유' }); score += 10; }
-    else flags.push({ level: 'warn', text: '기업부설연구소·연구개발전담부서 보유 기업 대상(또는 우대)' });
+    else flags.push({ level: 'warn', text: '기업부설연구소·연구개발전담부서 보유 기업 대상(또는 우대)', ...(pr.certs.length ? {} : { need: 'certs' }) });
   }
   const vc = ['벤처기업', '이노비즈', '메인비즈'].filter((c) => new RegExp(`${c}[^.\\n]{0,20}(인증|확인|보유|대상|우대)`).test(body));
   if (vc.length) {
     if (vc.some(has)) { flags.push({ level: 'ok', text: `${vc.filter(has).join('·')} 인증 보유` }); score += 10; }
-    else flags.push({ level: 'warn', text: `${vc.join('·')} 인증 기업 대상(또는 우대)` });
+    else flags.push({ level: 'warn', text: `${vc.join('·')} 인증 기업 대상(또는 우대)`, ...(pr.certs.length ? {} : { need: 'certs' }) });
   }
   if (/(SW|소프트웨어)\s*사업자/.test(`${p.title} ${body}`)) {
     if (has('SW사업자') || has('소프트웨어사업자')) { flags.push({ level: 'ok', text: 'SW사업자 신고 기업' }); score += 5; }
-    else flags.push({ level: 'warn', text: 'SW사업자 신고 필요' });
+    else flags.push({ level: 'warn', text: 'SW사업자 신고 필요', ...(pr.certs.length ? {} : { need: 'certs' }) });
   }
   const certHit = pr.certs.filter((c) => !/벤처|이노비즈|메인비즈|연구소|전담부서|SW|소프트웨어/.test(c) && text.includes(c.toLowerCase()));
   if (certHit.length) { flags.push({ level: 'ok', text: `${certHit.join('·')} 대상·우대 — 보유` }); score += 10; }
@@ -262,13 +365,71 @@ async function disabledSources(sql: Sql, t: string) {
   const slugs = new Set([...off, ...g].map((x) => x.slug));
   return Object.entries(SOURCE_SLUG).filter(([, s]) => slugs.has(s)).map(([src]) => src);
 }
+// ---------------- #781 정렬·D-day·종류 ----------------
+/** 지원 금액(원) — 금액 문구에서 가장 큰 금액('1억 5천만원'·'최대 720만 원'·'1,000,000원'), 모르면 null(정렬 맨 뒤) */
+export function amountKrw(s: string | null | undefined): number | null {
+  const t = String(s ?? '').replace(/(\d),(?=\d{3})/g, '$1');
+  const U: Record<string, number> = { 억: 1e8, 천만: 1e7, 백만: 1e6, 십만: 1e5, 만: 1e4, 천: 1e3 };
+  let best = 0, run = 0, unit = Infinity, end = -1;
+  for (const m of t.matchAll(/(\d+(?:\.\d+)?)\s*(억|천만|백만|십만|만|천)?\s*(원)?/g)) {
+    const u = m[2] ? U[m[2]] : m[3] ? 1 : 0; const at = m.index ?? 0;
+    if (!u) { run = 0; unit = Infinity; end = -1; continue; }
+    if (at !== end || u >= unit) run = 0; // '1억 5천만원' 처럼 붙은 큰 단위 → 작은 단위만 이어 셈
+    run += Number(m[1]) * u; unit = u; end = at + m[0].length;
+    if (m[3]) { best = Math.max(best, run); run = 0; unit = Infinity; end = -1; }
+  }
+  return best > 0 ? Math.round(best) : null;
+}
+export const KIND_LABEL = { money: '돈', free: '무료 서비스', space: '공간', invest: '투자·IR', event: '행사·교육' } as const;
+export type Kind = keyof typeof KIND_LABEL;
+/** 공고 종류(여럿 가능) — 제목·지원 분야(K-Startup 분류 포함)·금액 문구로. 아무것도 아니면 [] */
+export function kindsOf(p: { title: string; category: string | null }, amount: string | null): Kind[] {
+  const t = `${p.title} ${p.category ?? ''}`; const out: Kind[] = [];
+  if (/자금|융자|보조금|지원금|장려금|사업화|사업비|바우처|보증|대출|R&D|연구\s*개발|기술\s*개발|비용\s*지원|인건비|임차료|상금|포상|금융/.test(t) || amountKrw(amount)) out.push('money');
+  if (/컨설팅|멘토링|자문|진단|코칭|상담(?!회)|무료|무상|법률|노무|세무|회계|채용관|홍보\s*지원|언론\s*홍보|기사|시제품|디자인\s*지원|인증\s*(?:획득\s*)?지원/.test(t)) out.push('free');
+  if (/입주|공간|사무실|보육|오피스|테스트베드|팝업\s*스토어|센터\s*운영기업/.test(t)) out.push('space');
+  if (/투자|(?:^|[^A-Za-z])IR(?:[^A-Za-z]|$)|데모\s*데이|액셀러레이|엑셀러레이|펀드|창공|벤처\s*캐피탈|VC(?:[^A-Za-z]|$)/i.test(t)) out.push('invest');
+  if (/교육|아카데미|세미나|포럼|설명회|박람회|전시회|전시\s*참가|참관|컨퍼런스|콘퍼런스|공모전|경진\s*대회|캠프|행사|상담회|네트워킹|네트워크|교육생|강좌|특강|워크숍|워크샵|학교/.test(t)) out.push('event');
+  return out;
+}
+export const SORTS = ['fit', 'deadline', 'new', 'amount'] as const;
+export const DDS = ['all', 'd3', 'd7', 'd14', 'd30', 'open'] as const;
+const KIND_KEYS = ['all', ...Object.keys(KIND_LABEL)] as [string, ...string[]];
+/** 탭마다 기본 정렬(사람이 고르면 그 정렬을 기억해 모든 탭에) */
+const TAB_SORT: Record<string, string> = { fit: 'fit', closing: 'deadline', mine: 'deadline', all: 'new' };
+export const supportViewInput = z.object({ sort: z.enum(SORTS).nullable().optional(), dd: z.enum(DDS).optional(), kind: z.enum(KIND_KEYS).optional() });
+type SupportView = { sort: (typeof SORTS)[number] | null; dd: (typeof DDS)[number]; kind: string };
+/** 사람별 정렬·필터 기억 — user_settings.list_views.support(어느 기기에서나 같게) */
+async function supportViewOf(sql: Sql, userId: string): Promise<SupportView> {
+  const [r] = await sql<{ v: any }[]>`select list_views->'support' as v from user_settings where user_id = ${userId}`;
+  const v = supportViewInput.safeParse(r?.v ?? {}); const d = v.success ? v.data : {};
+  return { sort: d.sort ?? null, dd: d.dd ?? 'all', kind: d.kind ?? 'all' };
+}
+export async function saveSupportView(u: SessionUser, i: z.infer<typeof supportViewInput>) {
+  await assertSpace(u, 'sales');
+  const sql = db(); const cur = await supportViewOf(sql, u.id);
+  const next: SupportView = { sort: i.sort !== undefined ? i.sort : cur.sort, dd: i.dd ?? cur.dd, kind: i.kind ?? cur.kind };
+  await sql`insert into user_settings (user_id, list_views) values (${u.id}, ${sql.json({ support: next } as never)})
+    on conflict (user_id) do update set list_views = coalesce(user_settings.list_views, '{}'::jsonb) || ${sql.json({ support: next } as never)}`;
+  return next;
+}
+/** AI 판단 1건 예상 비용(원) — 이 회사 최근 지원사업 판단 30건 평균(없으면 모든 회사, 그것도 없으면 보통 길이로 계산) */
+async function aiCostKrw(sql: Sql, t: string) {
+  const avg = async (mine: boolean) => (await sql<{ a: number | null }[]>`select avg(cost_usd)::float8 as a from (select cost_usd from ai_usage where purpose = 'sales_support' and (${!mine} or tenant = ${t}) order by created_at desc limit 30) x`)[0]?.a ?? null;
+  const usd = (await avg(true)) ?? (await avg(false)) ?? costUsd(modelFor('fast'), { input_tokens: 6000, output_tokens: 900 });
+  const krw = usd * usdKrw();
+  return krw < 10 ? Math.max(1, Math.round(krw)) : Math.round(krw / 10) * 10;
+}
+const NEED_LABEL: Record<string, string> = { profile: '회사 프로필', region_sido: '본점 시·도', region_sigungu: '본점 시·군', founded: '설립일', employees: '상시근로자 수', size: '규모', industries: '업종', certs: '보유 인증' };
+
 function itemOf(p: Prog, rule: Rule, m: Match | undefined, w: Work | undefined, today: string, me: string) {
   const dday = p.apply_end ? daysBetween(today, p.apply_end) : null;
+  const amount = m?.ai_amount || p.amount;
   return {
     id: p.id, title: p.title, agency: p.agency, executor: p.executor, category: p.category, source: p.source, sourceLabel: SOURCE_LABEL[p.source] ?? p.source, regions: p.regions ?? [], nationwide: p.nationwide,
-    applyStart: p.apply_start, applyEnd: p.apply_end, applyText: p.apply_text, dday, amount: m?.ai_amount || p.amount, url: p.url, applyUrl: p.apply_url, manual: !!p.tenant, mine: p.created_by === me,
+    applyStart: p.apply_start, applyEnd: p.apply_end, applyText: p.apply_text, dday, amount, amountKrw: amountKrw(amount) ?? amountKrw(p.amount), kinds: kindsOf(p, amount), url: p.url, applyUrl: p.apply_url, manual: !!p.tenant, mine: p.created_by === me,
     isNew: Date.now() - new Date(p.first_seen_at).getTime() < 2 * 864e5 && !p.tenant, target: p.target, seen: p.first_seen_at, alsoOn: [] as string[],
-    garbled: garbledText(p.title), pending: !m?.ai_verdict && rule.verdict === 'fit', // #651 깨진 제목 · #649 ③ 1차 맞춤이지만 AI 판정 전('확인 중')
+    garbled: garbledText(p.title), pending: !m?.ai_verdict && rule.verdict === 'fit', // #651 깨진 제목 · #649 ③ 1차 맞춤이지만 AI 판정 전(#782 '규칙상 맞음 · AI 판단 전')
     rule, ai: m?.ai_verdict ? { verdict: m.ai_verdict, reasons: m.ai_reasons ?? [], brands: m.ai_brands ?? [], docs: m.ai_docs ?? [], summary: m.ai_summary, at: m.ai_at, use: Array.isArray(m.ai_use) ? m.ai_use : [], schedule: m.ai_schedule ?? null, auto: !!m.ai_auto } : null, hidden: !!m?.hidden,
     work: w ? { id: w.id, status: w.status, statusLabel: STATUS_LABEL[w.status] ?? w.status, ownerId: w.owner_id, ownerName: w.owner_name, taskId: w.task_id, brands: w.brands ?? [], appliedAt: w.applied_at, resultAt: w.result_at,
       amountAwarded: w.amount_awarded, resultMemo: w.result_memo, memo: w.memo } : null,
@@ -290,11 +451,15 @@ async function peopleOf(sql: Sql, t: string) {
   return sql<{ id: string; name: string }[]>`select us.id, us.name from users us left join space_members m on m.user_id = us.id and m.tenant = us.tenant
     where us.tenant = ${t} and us.status = 'active' and (us.role in ('owner', 'admin') or 'sales' = any(coalesce(m.spaces, '{}'::text[]))) order by us.name`;
 }
-/** 탭: fit(맞춤 — 기본) · closing(마감 14일 안) · mine(관심·준비) · results(신청·결과) · all(전체 공고, 새로 들어온 순) */
-export async function listView(u: SessionUser, q: { tab?: string; q?: string; showNo?: boolean; limit?: number } = {}) {
+/** 탭: fit(맞춤 — 기본) · closing(마감 14일 안) · mine(관심·준비) · results(신청·결과) · all(전체 공고, 새로 들어온 순)
+ * #781 정렬(맞춤·마감 임박·새로 올라온·지원 금액) · D-day 칩(3·7·14·30일 안·상시/예산 소진) · 종류 칩(돈·무료 서비스·공간·투자·IR·행사·교육) — 셋 다 안 주면 그 사람이 마지막에 고른 것 */
+export async function listView(u: SessionUser, q: { tab?: string; q?: string; showNo?: boolean; limit?: number; sort?: string; dd?: string; kind?: string } = {}) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db(); const today = ymd();
   const tab = ['fit', 'closing', 'mine', 'results', 'all'].includes(q.tab ?? '') ? q.tab! : 'fit';
+  const remembered = q.sort === undefined && q.dd === undefined && q.kind === undefined ? await supportViewOf(sql, u.id) : null;
+  const pick = <T extends string>(v: string | undefined, all: readonly T[], d: T | null) => (all.includes(v as T) ? (v as T) : d);
+  const view: SupportView = { sort: pick(q.sort ?? remembered?.sort ?? undefined, SORTS, null), dd: pick(q.dd ?? remembered?.dd, DDS, 'all')!, kind: pick(q.kind ?? remembered?.kind, KIND_KEYS, 'all')! };
   const [{ profile, saved }, off, matches, works] = await Promise.all([profileOf(t, sql), disabledSources(sql, t),
     sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto from support_matches where tenant = ${t}`,
     sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t}`]);
@@ -322,18 +487,36 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   // 탭 숫자(맞춤 n)는 '해당 없음 보기'(showNo)와 무관 — 로컬 10/25 158차 확인: showNo=1 로 읽으면 맞춤 수가 112 → 880(숨긴 '해당 없음'까지 센 것)이 되던 것
   const counts = Object.fromEntries(Object.entries(inTab).map(([k, f]) => [k, all.filter((x) => f(x) && hit(x)).length]));
   let items = all.filter((x) => (tab === 'fit' && q.showNo ? fitBase(x) : inTab[tab](x)) && hit(x));
+  // #781 칩 숫자: D-day 칩은 고른 종류 안에서, 종류 칩은 고른 D-day 안에서 셈(신청·결과 탭은 칩 없음)
+  const ddOk = (x: SupportItem, k: string) => k === 'all' || (k === 'open' ? x.dday == null : x.dday != null && x.dday >= 0 && x.dday <= Number(k.slice(1)));
+  const kindOk = (x: SupportItem, k: string) => k === 'all' || x.kinds.includes(k as Kind);
+  const chips = tab === 'results' ? null : { dd: Object.fromEntries(DDS.map((k) => [k, items.filter((x) => ddOk(x, k) && kindOk(x, view.kind)).length])), kind: Object.fromEntries(KIND_KEYS.map((k) => [k, items.filter((x) => kindOk(x, k) && ddOk(x, view.dd)).length])) };
+  if (chips) items = items.filter((x) => ddOk(x, view.dd) && kindOk(x, view.kind));
   const end = (x: SupportItem) => x.applyEnd ?? '9999-12-31';
-  if (tab === 'fit') items.sort((a, b) => rankOf(a) - rankOf(b) || b.rule.score - a.rule.score || end(a).localeCompare(end(b)));
-  else if (tab === 'closing' || tab === 'mine') items.sort((a, b) => end(a).localeCompare(end(b)));
-  else if (tab === 'results') items.sort((a, b) => String(wm.get(b.id)?.updated_at ?? '').localeCompare(String(wm.get(a.id)?.updated_at ?? '')));
+  const sortUsed = tab === 'results' ? 'results' : view.sort ?? TAB_SORT[tab];
+  const byFit = (a: SupportItem, b: SupportItem) => rankOf(a) - rankOf(b) || b.rule.score - a.rule.score || end(a).localeCompare(end(b));
+  if (sortUsed === 'fit') items.sort(byFit);
+  else if (sortUsed === 'deadline') items.sort((a, b) => end(a).localeCompare(end(b)) || rankOf(a) - rankOf(b)); // 마감 임박 — 상시·예산 소진(마감일 없음)은 맨 뒤
+  else if (sortUsed === 'amount') items.sort((a, b) => (b.amountKrw ?? -1) - (a.amountKrw ?? -1) || byFit(a, b));
+  else if (sortUsed === 'results') items.sort((a, b) => String(wm.get(b.id)?.updated_at ?? '').localeCompare(String(wm.get(a.id)?.updated_at ?? '')));
   else items.sort((a, b) => String(b.seen).localeCompare(String(a.seen)));
   const total = items.length; items = items.slice(0, Math.min(200, q.limit ?? 60));
+  // #782 '규칙상 맞음 · AI 판단 전' 수(맞춤 탭 기준, 찾기·칩과 무관) · #784 프로필 빈칸 — 빈 칸 때문에 '확인 필요'로 남은 공고 수
+  const fitOpenAll = all.filter((x) => fitBase(x) && !isNo(x));
+  const pendingCount = fitOpenAll.filter((x) => x.pending).length;
+  const blankOf = (k: string) => (k === 'profile' ? !pr : k === 'region_sido' ? !profile.region_sido : k === 'region_sigungu' ? !profile.region_sigungu : k === 'founded' ? !profile.founded
+    : k === 'employees' ? profile.employees == null : k === 'size' ? !profile.size : k === 'industries' ? !profile.industries.length : k === 'certs' ? !profile.certs.length : false);
+  const needs = new Map<string, number>(); let needItems = 0;
+  for (const x of fitOpenAll) { const ks = [...new Set(x.rule.flags.map((f) => f.need).filter((k): k is string => !!k && blankOf(k)))]; if (ks.length) needItems++; for (const k of ks) needs.set(k, (needs.get(k) ?? 0) + 1); }
+  const blanks = { fields: [...needs.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ key: k, label: NEED_LABEL[k] ?? k, items: n })), items: needItems };
   const hiddenNo = tab === 'fit' && !q.showNo ? all.filter((x) => open(x) && !x.hidden && !x.work && isNo(x) && hit(x)).length : 0;
   const sources = await sql<{ slug: string; last_run_at: string | null; last_status: string | null; summary: string | null }[]>`select s.slug, s.last_run_at, s.last_status, r.summary from sales_collector_state s
     left join lateral (select summary from sales_collector_runs x where x.slug = s.slug order by started_at desc limit 1) r on true where s.slug = any(${Object.values(SOURCE_SLUG)})`;
-  return { tab, today, items, total, counts, hiddenNo, profile: { saved, filled: !!pr, region: profile.region_sido, sigungu: profile.region_sigungu, size: profile.size, founded: profile.founded, interests: profile.interests, brands: profile.brands },
+  const aiOn = aiEnabled();
+  return { tab, today, items, total, counts, hiddenNo, view, sortUsed, chips, kindLabel: KIND_LABEL, pendingCount, blanks, aiCostKrw: aiOn ? await aiCostKrw(sql, t) : null,
+    weeklyAiMax: Math.max(0, Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 0) || 0), profile: { saved, filled: !!pr, region: profile.region_sido, sigungu: profile.region_sigungu, size: profile.size, founded: profile.founded, interests: profile.interests, brands: profile.brands },
     sources: sources.map((s) => ({ ...s, label: SOURCE_LABEL[Object.entries(SOURCE_SLUG).find(([, v]) => v === s.slug)?.[0] ?? ''] ?? s.slug })), off,
-    canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, aiOn: aiEnabled(), people: await peopleOf(sql, t), statusLabel: STATUS_LABEL,
+    canEdit: isAdmin(u), platformAdmin: !!u.platformAdmin, aiOn, people: await peopleOf(sql, t), statusLabel: STATUS_LABEL,
     keys: await supportKeyStatus().then((k) => ({ bizinfo: k.bizinfo.present, datago: k.datago.present })).catch(() => ({ bizinfo: false, datago: false })),
     weekly: await latestWeekly(sql, t) };
 }
@@ -422,15 +605,19 @@ JSON 으로만 답하세요:
   const { usdKrw } = await import('../ai/provider');
   return { ok: true, ai: { ...out, at: new Date().toISOString() }, costKrw: Math.max(1, Math.round(usd * usdKrw())) };
 }
-/** 맞춤 순 위에서 아직 판단 안 한 공고 최대 5건 — 관리자 */
+/** #782 '규칙상 맞음 · AI 판단 전' 공고를 맞춤 순 위에서 N건(5·10·20) AI 판단 — 관리자가 [몇 건 판단]을 눌렀을 때만(자동 판단은 꺼 둠). 5건씩, 한도에 걸리면 멈춤 */
 export async function analyzeTop(u: SessionUser, n = 5) {
   await assertSpace(u, 'sales');
   if (!isAdmin(u)) throw forbidden('여러 건 판단은 관리자만');
-  const v = await listView(u, { tab: 'fit', limit: 200 });
-  const todo = v.items.filter((x) => !x.ai && x.rule.verdict !== 'no').slice(0, Math.min(5, n));
-  const rs = await Promise.allSettled(todo.map((x) => analyzeProgram(u, x.id)));
-  const failed = rs.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
-  return { asked: todo.length, done: rs.length - failed.length, failed: failed.length, error: failed[0] ? String(failed[0].reason?.message ?? failed[0].reason) : null };
+  const v = await listView(u, { tab: 'fit', limit: 200, sort: 'fit', dd: 'all', kind: 'all' });
+  const todo = v.items.filter((x) => x.pending).slice(0, Math.max(1, Math.min(20, Math.floor(n) || 5)));
+  let done = 0, costKrw = 0; const errors: string[] = [];
+  for (let i = 0; i < todo.length; i += 5) {
+    const rs = await Promise.allSettled(todo.slice(i, i + 5).map((x) => analyzeProgram(u, x.id)));
+    for (const r of rs) if (r.status === 'fulfilled') { done++; costKrw += r.value.costKrw; } else errors.push(String((r.reason as Error)?.message ?? r.reason));
+    if (rs.some((r) => r.status === 'rejected' && ([402, 429].includes((r.reason as HttpError)?.status) || (r.reason as HttpError)?.code === 'ai_off'))) break; // 한도·크레딧 — 더 안 돌림
+  }
+  return { asked: todo.length, done, failed: errors.length, costKrw, error: errors[0] ?? null };
 }
 
 // ---------------- 진행(관심 → 신청 준비 → 신청 → 선정/탈락) ----------------
@@ -567,7 +754,7 @@ async function adminActor(sql: Sql, t: string): Promise<SessionUser | null> {
   return (await import('../mktStudio')).actorFor(a.id).catch(() => null);
 }
 /**
- * 회사 하나의 주간 묶음: 1차 조건 통과(✅)인데 AI 판단이 없는 공고를 최대 N건(SUPPORT_WEEKLY_AI_MAX, 기본 5) 자동 판단(회사 AI 한도·사람별 한도·크레딧 안, 한도에 걸리면 멈춤)
+ * 회사 하나의 주간 묶음: 1차 조건 통과(✅)인데 AI 판단이 없는 공고를 최대 N건(SUPPORT_WEEKLY_AI_MAX, 기본 0 = 자동 판단 안 함 — #782 대표 승인 전까지 꺼 둠) 자동 판단(회사 AI 한도·사람별 한도·크레딧 안, 한도에 걸리면 멈춤)
  * → 맞는 공고(AI ✅, 없으면 1차 ✅) 상위 10건을 기록하고 관리자·관심/준비 담당에게 알림 1건(주마다 한 번). 프로필이 비어 있으면 묶지 않는다.
  */
 export async function weeklyBundle(t: string, opt: { now?: Date; actor?: SessionUser; aiMax?: number; force?: boolean } = {}) {
@@ -578,10 +765,10 @@ export async function weeklyBundle(t: string, opt: { now?: Date; actor?: Session
   if (!actor) return { skipped: 'no_admin', week };
   const { profile, saved } = await profileOf(t, sql);
   if (!(saved || profile.region_sido || profile.industries.length || profile.interests.length)) return { skipped: 'no_profile', week };
-  const max = Math.max(0, opt.aiMax ?? Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 5));
+  const max = Math.max(0, opt.aiMax ?? (Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 0) || 0));
   let aiCount = 0, aiFailed = 0, aiError: string | null = null; const auto = new Set<string>();
   if (aiEnabled() && max > 0) {
-    const v = await listView(actor, { tab: 'fit', limit: 200 });
+    const v = await listView(actor, { tab: 'fit', limit: 200, sort: 'fit', dd: 'all', kind: 'all' });
     for (const x of v.items.filter((y) => !y.ai && y.rule.verdict === 'fit').slice(0, max)) {
       try { await analyzeProgram(actor, x.id, undefined, { auto: true }); aiCount++; auto.add(x.id); }
       catch (e) {
@@ -590,7 +777,7 @@ export async function weeklyBundle(t: string, opt: { now?: Date; actor?: Session
       }
     }
   }
-  const v2 = await listView(actor, { tab: 'fit', limit: 200 });
+  const v2 = await listView(actor, { tab: 'fit', limit: 200, sort: 'fit', dd: 'all', kind: 'all' });
   const items: WeeklyItem[] = v2.items.filter((x) => x.ai?.verdict === 'fit').slice(0, 10) // #649 ③: 주간 묶음은 AI 가 '맞음'으로 판정한 공고만(1차 규칙만 맞는 건은 '확인 중')
     .map((x) => ({ id: x.id, title: x.title, by: x.ai ? 'ai' : 'rule', dday: x.dday, applyEnd: x.applyEnd, agency: x.agency, brands: x.ai?.brands ?? [], use: x.ai?.use[0] ?? null, auto: auto.has(x.id) }));
   const admins = await sql<{ id: string }[]>`select id from users where tenant = ${t} and status = 'active' and role in ('owner', 'admin')`;

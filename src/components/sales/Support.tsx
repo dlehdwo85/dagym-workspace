@@ -10,19 +10,26 @@ import { PortalApplyLink, portalService } from './PortalApply';
 
 /** #450 영업실 '지원사업' — 기업마당·K-Startup·기관 공지 공고를 회사 프로필로 맞춤(1차 규칙 + AI 세일즈 판단) → 관심·신청 준비(담당 업무·마감 알림) → 신청·선정·탈락 기록 */
 const C = '#2563EB';
-type Flag = { level: 'ok' | 'warn' | 'no'; text: string };
+type Flag = { level: 'ok' | 'warn' | 'no'; text: string; need?: string };
 type Ai = { verdict: 'fit' | 'maybe' | 'no'; reasons: string[]; brands: string[]; docs: string[]; summary: string | null; at: string | null; use: string[]; schedule: string | null; auto: boolean };
 /** #568 주 1회 묶음 — 이번 주 맞는 공고(AI ✅ 또는 1차 ✅) 상위 10건 */
 type Weekly = { week: string; items: { id: string; title: string; by: 'ai' | 'rule'; dday: number | null; applyEnd: string | null; agency: string | null; brands: string[]; use: string | null; auto: boolean }[]; aiCount: number; aiFailed: number; sentTo: number; createdAt: string };
 type Work = { id: string; status: string; statusLabel: string; ownerId: string | null; ownerName: string | null; taskId: string | null; brands: string[]; appliedAt: string | null; resultAt: string | null; amountAwarded: string | null; resultMemo: string | null; memo: string | null };
 type Item = { id: string; title: string; agency: string | null; executor: string | null; category: string | null; source: string; sourceLabel: string; regions: string[]; nationwide: boolean; applyStart: string | null; applyEnd: string | null;
-  applyText: string | null; dday: number | null; amount: string | null; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[];
+  applyText: string | null; dday: number | null; amount: string | null; amountKrw: number | null; kinds: string[]; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[]; pending?: boolean;
   rule: { score: number; verdict: 'fit' | 'maybe' | 'no'; flags: Flag[] }; ai: Ai | null; hidden: boolean; work: Work | null };
+type View = { sort: string | null; dd: string; kind: string };
+type Blanks = { fields: { key: string; label: string; items: number }[]; items: number };
 type ListData = { tab: string; today: string; items: Item[]; total: number; counts: Record<string, number>; hiddenNo: number; weekly: Weekly | null; canEdit: boolean; platformAdmin: boolean; aiOn: boolean; people: { id: string; name: string }[];
+  view: View; sortUsed: string; chips: { dd: Record<string, number>; kind: Record<string, number> } | null; kindLabel: Record<string, string>; pendingCount: number; blanks: Blanks; aiCostKrw: number | null; weeklyAiMax: number;
   profile: { saved: boolean; filled: boolean; region: string | null; sigungu: string | null; size: string | null; founded: string | null; interests: string[]; brands: string[] };
   sources: { slug: string; label: string; last_run_at: string | null; last_status: string | null; summary: string | null }[]; keys: { bizinfo: boolean; datago: boolean }; statusLabel: Record<string, string> };
 
 const TABS: [string, string][] = [['fit', '맞춤'], ['closing', '마감 임박'], ['mine', '관심·준비'], ['results', '신청·결과'], ['all', '전체']];
+/** #781 정렬·D-day·종류(사람별 기억) */
+const SORTS: [string, string][] = [['fit', '맞춤 순'], ['deadline', '마감 임박 순'], ['new', '새로 올라온 순'], ['amount', '지원 금액 큰 순']];
+const DDS: [string, string, string][] = [['all', '전체', ''], ['d3', 'D-3', '오늘부터 3일 안 마감'], ['d7', 'D-7', '7일 안 마감'], ['d14', 'D-14', '14일 안 마감'], ['d30', 'D-30', '30일 안 마감'], ['open', '상시·예산 소진', '마감일 없음(상시·예산 소진 시·마감 미정)']];
+const won = (n: number) => `약 ${n.toLocaleString('ko-KR')}원`;
 const VERDICT: Record<string, [string, string, string]> = { fit: ['✅', '해당', 'border-emerald-200 bg-emerald-50 text-emerald-800'], maybe: ['⚠', '확인 필요', 'border-amber-200 bg-amber-50 text-amber-800'], no: ['❌', '해당 없음', 'border-red-200 bg-red-50 text-red-700'] };
 const FLAG_CLS: Record<Flag['level'], string> = { ok: 'bg-emerald-50 text-emerald-800', warn: 'bg-amber-50 text-amber-800', no: 'bg-red-50 text-red-700' };
 const STATUS_CLS: Record<string, string> = { interest: 'bg-sky-50 text-sky-800', preparing: 'bg-blue-600 text-white', applied: 'bg-violet-50 text-violet-800', selected: 'bg-emerald-600 text-white', rejected: 'bg-slate-200 text-ink-2', dropped: 'bg-slate-100 text-ink-3' };
@@ -39,10 +46,11 @@ function Dday({ d, text }: { d: number | null; text?: string | null }) {
 }
 function Verdict({ it }: { it: Pick<Item, 'ai' | 'rule'> }) {
   const v = it.ai?.verdict ?? it.rule.verdict;
-  const pending = !it.ai && v === 'fit'; // #649 ③(대표 10/25 23:20): 1차 규칙만 맞는 공고는 AI 판정 전까지 '확인 중' — '해당'은 AI 가 판정한 것만
-  const [icon, label, cls] = pending ? ['⏳', 'AI 확인 중', 'border-amber-200 bg-amber-50 text-amber-800'] : VERDICT[v];
+  // #649 ③: 1차 규칙만 맞는 공고는 '해당'이 아님 — #782(대표 10/28 "AI 확인 중이라고 왜?"): 돌고 있는 것처럼 보이던 'AI 확인 중' → '규칙상 맞음 · AI 판단 전'(사람이 [AI 판단]을 눌러야 정해짐)
+  const pending = !it.ai && v === 'fit';
+  const [icon, label, cls] = pending ? ['', '규칙상 맞음 · AI 판단 전', 'border-sky-200 bg-sky-50 text-sky-800'] : VERDICT[v];
   return <span className={cx('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold', cls)} data-testid="support-verdict" data-verdict={v} data-by={it.ai ? 'ai' : 'rule'} data-pending={pending ? '1' : undefined}
-    title={it.ai ? 'AI 세일즈 판단' : pending ? '1차 규칙은 맞음 — [AI 판단]으로 확인하면 해당 여부가 정해집니다' : '1차 규칙 판단(지역·업력·규모·업종·관심 분야)'}>{icon} {label}{!pending && <span className="ml-1 font-normal opacity-70">{it.ai ? 'AI' : '1차'}</span>}</span>;
+    title={it.ai ? 'AI 세일즈 판단' : pending ? '지역·업력·규모·업종 규칙으로는 맞음 — 참여 가능 여부는 [AI 판단]을 눌러야 정해집니다(자동 판단 꺼짐)' : '1차 규칙 판단(지역·업력·규모·업종·관심 분야)'}>{icon ? `${icon} ` : ''}{label}{!pending && <span className="ml-1 font-normal opacity-70">{it.ai ? 'AI' : '1차'}</span>}</span>;
 }
 const Flags = ({ flags, max }: { flags: Flag[]; max?: number }) => (
   <div className="flex flex-wrap gap-1" data-testid="support-flags">{flags.slice(0, max ?? flags.length).map((f, i) => <span key={i} className={cx('rounded-full px-1.5 py-0.5 text-[11px]', FLAG_CLS[f.level])} data-level={f.level}>{f.level === 'ok' ? '✓' : f.level === 'no' ? '✕' : '!'} {f.text}</span>)}
@@ -53,8 +61,14 @@ export function Support() {
   const sp = useSearchParams(); const router = useRouter();
   const tab = TABS.some(([k]) => k === sp.get('tab')) ? sp.get('tab')! : 'fit'; const openId = sp.get('id');
   const [q, setQ] = useState(''); const [showNo, setShowNo] = useState(false); const [adding, setAdding] = useState(false); const [busy, setBusy] = useState<string | null>(null);
-  const qs = new URLSearchParams({ tab, ...(q.trim() ? { q: q.trim() } : {}), ...(showNo ? { showNo: '1' } : {}) }).toString();
-  const { data, error, reload } = useApi<ListData>(`/api/sales/support?${qs}`);
+  const [view, setView] = useState<View | null>(null); const [bulk, setBulk] = useState(false); // view = 이 화면에서 고친 정렬·칩(처음엔 서버가 기억한 것)
+  const qs = new URLSearchParams({ tab, ...(q.trim() ? { q: q.trim() } : {}), ...(showNo ? { showNo: '1' } : {}), ...(view ? { sort: view.sort ?? '', dd: view.dd, kind: view.kind } : {}) }).toString();
+  const { data: fresh, error, reload } = useApi<ListData>(`/api/sales/support?${qs}`);
+  const [last, setLast] = useState<ListData | null>(null); // 칩을 바꾸는 동안 앞 목록을 그대로 보여 줌(깜빡임 없이)
+  useEffect(() => { if (fresh) setLast(fresh); }, [fresh]);
+  const data = fresh ?? last;
+  const cur: View = view ?? data?.view ?? { sort: null, dd: 'all', kind: 'all' };
+  function pickView(p: Partial<View>) { const next = { ...cur, ...p }; setView(next); api('/api/sales/support/view', { method: 'PUT', body: next }).catch(() => {}); }
   const go = (p: Record<string, string | null>) => { const n = new URLSearchParams(sp.toString()); for (const [k, v] of Object.entries(p)) { if (v == null) n.delete(k); else n.set(k, v); } router.replace(`/s/sales/support${n.toString() ? `?${n}` : ''}`, { scroll: false }); };
   async function act(it: Item, status: 'interest' | 'preparing') {
     setBusy(`${it.id}:${status}`);
@@ -63,24 +77,26 @@ export function Support() {
   }
   async function analyze(it: Item) {
     setBusy(`${it.id}:ai`);
-    try { const r = await api<{ costKrw: number }>(`/api/sales/support/${it.id}/analyze`, { body: {} }); toast.ok(`AI 세일즈가 판단했습니다(약 ${r.costKrw.toLocaleString('ko-KR')}원)`); reload(); }
+    try { const r = await api<{ costKrw: number }>(`/api/sales/support/${it.id}/analyze`, { body: {} }); toast.ok(`AI 세일즈가 판단했습니다(${won(r.costKrw)})`); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function hide(it: Item, hidden: boolean) {
     try { await api(`/api/sales/support/${it.id}/hide`, { body: { hidden } }); reload(); if (hidden) toast.ok('맞춤 목록에서 숨겼습니다', { label: '되돌리기', run: () => { api(`/api/sales/support/${it.id}/hide`, { body: { hidden: false } }).then(reload).catch(() => {}); } }); }
     catch (e: any) { toast.error(e.message); }
   }
-  async function analyzeTop() {
+  async function analyzeTop(n: number) {
     setBusy('top');
-    try { const r = await api<{ asked: number; done: number; failed: number; error: string | null }>('/api/sales/support/analyze-top', { body: {} }); if (r.failed) toast.error(`${r.done}건 판단 · ${r.failed}건 실패${r.error ? ` — ${r.error}` : ''}`); else toast.ok(r.asked ? `위에서 ${r.done}건을 AI 세일즈가 판단했습니다` : '판단할 공고가 없습니다'); reload(); }
-    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+    try {
+      const r = await api<{ asked: number; done: number; failed: number; costKrw: number; error: string | null }>('/api/sales/support/analyze-top', { body: { n } }); setBulk(false);
+      if (r.failed) toast.error(`${r.done}건 판단 · ${r.failed}건 실패${r.error ? ` — ${r.error}` : ''}`); else toast.ok(r.asked ? `위에서 ${r.done}건을 AI 세일즈가 판단했습니다(${won(r.costKrw)})` : '판단할 공고가 없습니다'); reload();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function weeklyNow() {
     setBusy('weekly');
     try { const r = await api<{ items: number; aiCount: number; aiFailed: number; aiError: string | null }>('/api/sales/support/weekly', { body: {} }); toast.ok(`이번 주 맞는 공고 ${r.items}건으로 묶었습니다${r.aiCount ? ` · AI 세일즈가 새로 판단 ${r.aiCount}건` : ''}${r.aiFailed ? ` · 판단 실패 ${r.aiFailed}건${r.aiError ? ` — ${r.aiError}` : ''}` : ''}`); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
-  if (error) return <ErrorBox error={error} retry={reload} />;
+  if (error && !data) return <ErrorBox error={error} retry={reload} />;
   const noKeys = data && !data.keys.bizinfo && !data.keys.datago;
   return (
     <div className="mx-auto max-w-5xl space-y-3" data-testid="sales-support">
@@ -89,17 +105,19 @@ export function Support() {
         <span className="text-xs text-ink-2">정부·지자체 지원사업 공고를 우리 회사 기준으로 걸러 봅니다</span>
         <span className="ml-auto flex flex-wrap gap-1.5">
           <input className={cx(inputCls, 'h-8 w-40 py-1 text-sm')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="찾기" aria-label="공고 찾기" data-testid="support-search" />
-          {data?.canEdit && data.aiOn && <Button size="sm" variant="secondary" disabled={busy === 'top'} onClick={analyzeTop} data-testid="support-analyze-top"><Sparkles className="size-3.5" aria-hidden />{busy === 'top' ? '판단 중…' : '위 5건 AI 판단'}</Button>}
+          {data?.canEdit && data.aiOn && data.pendingCount > 0 && <Button size="sm" variant="secondary" disabled={busy === 'top'} onClick={() => setBulk(true)} data-testid="support-analyze-top"><Sparkles className="size-3.5" aria-hidden />{busy === 'top' ? '판단 중…' : '여러 건 AI 판단'}</Button>}
           <Button size="sm" onClick={() => setAdding(true)} data-testid="support-add"><Plus className="size-3.5" aria-hidden />직접 추가</Button>
         </span>
       </div>
       {noKeys && <div className="rounded-card border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="support-keys-needed"><b>원천 인증키 입력 필요</b> — 기업마당 인증키(또는 공공데이터포털 인증키)가 들어가면 하루 두 번(08·14시) 새 공고를 가져옵니다. {data!.platformAdmin ? <Link href="/platform" className="underline">플랫폼 운영 › 영업 수집기 설정</Link> : '플랫폼 운영자에게 요청해 주세요.'} 그 전에도 [직접 추가]로 공고·지난 신청 이력을 넣을 수 있습니다.</div>}
-      <ProfileBox summary={data?.profile ?? null} onSaved={reload} />
+      <ProfileBox summary={data?.profile ?? null} blanks={data?.blanks ?? null} onSaved={reload} />
       <div className="flex flex-wrap gap-1.5" role="tablist">{TABS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => go({ tab: k === 'fit' ? null : k })}
         className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent font-semibold text-white' : 'border-line bg-white')} style={tab === k ? { background: C } : undefined} data-testid={`support-tab-${k}`}>{l} <span className="tabular-nums">{data?.counts?.[k] ?? ''}</span></button>)}</div>
       {!data ? <Skeleton rows={5} /> : <>
-        {tab === 'fit' && (data.weekly || (data.canEdit && data.aiOn)) && <WeeklyBox weekly={data.weekly} canEdit={data.canEdit && data.aiOn} busy={busy === 'weekly'} onNow={weeklyNow} onOpen={(id) => go({ id })} />}
-        {tab === 'fit' && <p className="text-xs text-ink-3">맞는 순: AI 판단(✅ → ⚠) → 1차 규칙 점수 → 마감 가까운 순. 1차 규칙 = 본점 지역·시·군, 업력, 규모·상시근로자, 인증, 관심 분야.{data.hiddenNo > 0 && <> 자격이 안 맞는 공고 {data.hiddenNo}건은 빼고 보여 줍니다 — <button type="button" className="underline" onClick={() => setShowNo(true)} data-testid="support-show-no">보기</button></>}{showNo && <> · <button type="button" className="underline" onClick={() => setShowNo(false)}>다시 빼기</button></>}</p>}
+        {data.chips && <ViewBar data={data} cur={cur} onPick={pickView} />}
+        {tab === 'fit' && (data.weekly || (data.canEdit && data.aiOn)) && <WeeklyBox weekly={data.weekly} canEdit={data.canEdit && data.aiOn} auto={data.weeklyAiMax} busy={busy === 'weekly'} onNow={weeklyNow} onOpen={(id) => go({ id })} />}
+        {tab === 'fit' && data.pendingCount > 0 && <p className="rounded-input border border-sky-200 bg-sky-50/60 px-2.5 py-1.5 text-xs text-sky-900" data-testid="support-pending-note"><b>규칙상 맞음 · AI 판단 전 {data.pendingCount}건</b> — 지역·업력·규모·업종 규칙으로만 맞는 공고입니다. 참여할 수 있는지는 공고마다 [AI 판단]을 눌러야 정해집니다{data.aiCostKrw != null ? `(건당 ${won(data.aiCostKrw)}, 회사 AI 예산에서)` : ''}. 자동 판단은 꺼져 있습니다{data.canEdit && data.aiOn ? ' — 여러 건은 [여러 건 AI 판단]' : ''}.</p>}
+        {tab === 'fit' && <p className="text-xs text-ink-3">1차 규칙 = 본점 지역·시·군, 업력, 규모·상시근로자, 업종, 인증, 관심 분야.{data.hiddenNo > 0 && <> 자격이 안 맞는 공고 {data.hiddenNo}건은 빼고 보여 줍니다 — <button type="button" className="underline" onClick={() => setShowNo(true)} data-testid="support-show-no">보기</button></>}{showNo && <> · <button type="button" className="underline" onClick={() => setShowNo(false)}>다시 빼기</button></>}</p>}
         <ul className="space-y-2" data-testid="support-list">{data.items.map((it) => (
           <li key={it.id} className={cx('rounded-card border bg-white p-3 shadow-card', it.work ? 'border-blue-200' : 'border-line')} data-testid="support-item" data-id={it.id} data-status={it.work?.status ?? ''}>
             <div className="flex flex-wrap items-start gap-1.5">
@@ -110,6 +128,7 @@ export function Support() {
             </div>
             <p className="mt-1 text-xs text-ink-2">{[it.agency, it.executor && it.executor !== it.agency ? it.executor : null, it.regions.length ? it.regions.join('·') : it.nationwide ? '전국' : null,
               it.applyEnd ? `마감 ${kday(it.applyEnd)}` : it.applyText, it.amount && `지원 ${it.amount}`].filter(Boolean).join(' · ')}
+              {it.kinds.length > 0 && <span className="ml-1 inline-flex flex-wrap gap-0.5 align-middle" data-testid="support-kinds">{it.kinds.map((k) => <span key={k} className="rounded bg-slate-100 px-1 text-[10px] text-ink-2">{data.kindLabel[k] ?? k}</span>)}</span>}
               <span className="text-ink-3"> · 출처 {it.sourceLabel}{it.alsoOn.length ? `(+${it.alsoOn.join('·')})` : ''}</span></p>
             <div className="mt-1.5"><Flags flags={it.rule.flags} max={4} /></div>
             {it.ai && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-ai-line"><Sparkles className="mr-0.5 inline size-3 text-violet-600" aria-hidden />{it.ai.use[0] ? `접목: ${it.ai.use[0]}` : it.ai.reasons[0] ?? it.ai.summary}{it.ai.brands.length > 0 && <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">{it.ai.brands.map((b) => <span key={b} className="rounded-full border border-violet-200 bg-violet-50 px-1.5 text-[11px] text-violet-800">{b}</span>)}</span>}</p>}
@@ -120,35 +139,65 @@ export function Support() {
                 <Button size="sm" variant="secondary" onClick={() => go({ id: it.id })}>진행 기록</Button></>
                 : <><Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'interest')} data-testid="support-interest">{busy === `${it.id}:interest` ? '…' : '관심'}</Button>
                   <Button size="sm" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">{busy === `${it.id}:preparing` ? '…' : '신청 준비'}</Button></>}
-              {data.aiOn && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => analyze(it)} data-testid="support-analyze"><Sparkles className="size-3.5" aria-hidden />{busy === `${it.id}:ai` ? '판단 중…' : it.ai ? '다시 판단' : 'AI 판단'}</Button>}
+              {data.aiOn && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => analyze(it)} data-testid="support-analyze" title={data.aiCostKrw != null ? `회사 AI 예산에서 ${won(data.aiCostKrw)}` : undefined}><Sparkles className="size-3.5" aria-hidden />{busy === `${it.id}:ai` ? '판단 중…' : it.ai ? '다시 판단' : `AI 판단${data.aiCostKrw != null ? ` · ${won(data.aiCostKrw)}` : ''}`}</Button>}
               {it.url && <a href={it.url} target="_blank" rel="noopener noreferrer" className={linkCls}><ExternalLink className="size-3.5" aria-hidden />원문</a>}
               {!it.work && !it.manual && <button type="button" className="ml-auto text-xs text-ink-3 underline" onClick={() => hide(it, !it.hidden)} data-testid="support-hide">{it.hidden ? '숨김 풀기' : '숨기기'}</button>}
             </div>
           </li>))}
           {!data.items.length && <li className="rounded-card border border-dashed border-line p-6 text-center text-sm text-ink-3" data-testid="support-empty">{tab === 'mine' ? '관심·신청 준비 중인 공고가 없습니다 — 맞춤 탭에서 [관심]·[신청 준비]를 누르세요' : tab === 'results' ? '신청·결과 기록이 없습니다 — 지난 신청은 [직접 추가]로 넣을 수 있습니다' : '조건에 맞는 공고가 없습니다'}</li>}
         </ul>
-        {data.total > data.items.length && <p className="text-center text-xs text-ink-3">위 {data.items.length}건 · 모두 {data.total}건 — 찾기로 좁혀 보세요</p>}
+        {data.total > data.items.length && <p className="text-center text-xs text-ink-3">위 {data.items.length}건 · 모두 {data.total}건 — 찾기·칩으로 좁혀 보세요</p>}
         <SourceLine sources={data.sources} />
       </>}
       {adding && <ManualAdd people={data?.people ?? []} onClose={() => setAdding(false)} onDone={(id) => { setAdding(false); reload(); go({ id }); }} />}
+      {bulk && data && <BulkAi pending={data.pendingCount} cost={data.aiCostKrw} busy={busy === 'top'} onRun={analyzeTop} onClose={() => setBulk(false)} />}
       {openId && <Detail id={openId} onClose={() => go({ id: null })} onChanged={reload} />}
     </div>
   );
 }
 
 /** #568 이번 주 맞는 지원사업 묶음(월요일 아침 자동, 관리자는 [지금 다시 묶기]) — 칩을 누르면 상세 */
-function WeeklyBox({ weekly, canEdit, busy, onNow, onOpen }: { weekly: Weekly | null; canEdit: boolean; busy: boolean; onNow: () => void; onOpen: (id: string) => void }) {
+/** #781 정렬·D-day·종류 칩(숫자 = 지금 탭·찾기 기준) — 고른 것은 사람별로 기억 */
+function ViewBar({ data, cur, onPick }: { data: ListData; cur: View; onPick: (p: Partial<View>) => void }) {
+  const chip = (on: boolean) => cx('rounded-full border px-2.5 py-0.5 text-xs', on ? 'border-[#2563EB] bg-[#EFF6FF] font-semibold text-[#1D4ED8]' : 'border-line bg-white text-ink-2');
+  return (
+    <div className="space-y-1.5 rounded-card border border-line bg-white p-2" data-testid="support-viewbar">
+      <div className="flex flex-wrap items-center gap-1"><span className="w-10 shrink-0 text-[11px] text-ink-3">정렬</span>
+        {SORTS.map(([k, l]) => <button key={k} type="button" aria-pressed={data.sortUsed === k} className={chip(data.sortUsed === k)} onClick={() => onPick({ sort: k })} data-testid={`support-sort-${k}`}>{l}</button>)}</div>
+      <div className="flex flex-wrap items-center gap-1"><span className="w-10 shrink-0 text-[11px] text-ink-3">마감</span>
+        {DDS.map(([k, l, t]) => <button key={k} type="button" aria-pressed={cur.dd === k} title={t || undefined} className={chip(cur.dd === k)} onClick={() => onPick({ dd: k })} data-testid={`support-dd-${k}`}>{l} <span className="tabular-nums">{data.chips?.dd[k] ?? 0}</span></button>)}</div>
+      <div className="flex flex-wrap items-center gap-1"><span className="w-10 shrink-0 text-[11px] text-ink-3">종류</span>
+        {[['all', '전체'] as [string, string], ...Object.entries(data.kindLabel)].map(([k, l]) => <button key={k} type="button" aria-pressed={cur.kind === k} className={chip(cur.kind === k)} onClick={() => onPick({ kind: k })} data-testid={`support-kind-${k}`}>{l} <span className="tabular-nums">{data.chips?.kind[k] ?? 0}</span></button>)}</div>
+    </div>
+  );
+}
+
+/** #782 여러 건 AI 판단(관리자) — 몇 건·예상 비용을 보고 누를 때만 */
+function BulkAi({ pending, cost, busy, onRun, onClose }: { pending: number; cost: number | null; busy: boolean; onRun: (n: number) => void; onClose: () => void }) {
+  const opts = [...new Set([5, 10, 20].map((n) => Math.min(n, pending)))].filter((n) => n > 0);
+  return (
+    <Modal open onClose={onClose} title="여러 건 AI 판단">
+      <div className="space-y-3 text-sm" data-testid="support-bulk">
+        <p className="text-xs text-ink-2">‘규칙상 맞음 · AI 판단 전’ {pending}건 가운데 맞춤 순 위에서부터 판단합니다. 비용은 회사 AI 예산에서 나갑니다{cost != null ? `(건당 ${won(cost)})` : ''}. 한도에 걸리면 멈춥니다.</p>
+        <div className="flex flex-wrap gap-2">{opts.map((n) => <Button key={n} size="sm" variant={n === opts[0] ? 'primary' : 'secondary'} disabled={busy} onClick={() => onRun(n)} data-testid={`support-bulk-${n}`}>{busy ? '판단 중…' : `${n}건 판단${cost != null ? ` · ${won(cost * n)}` : ''}`}</Button>)}</div>
+        <div className="flex justify-end"><Button size="sm" variant="secondary" onClick={onClose}>닫기</Button></div>
+      </div>
+    </Modal>
+  );
+}
+
+function WeeklyBox({ weekly, canEdit, auto, busy, onNow, onOpen }: { weekly: Weekly | null; canEdit: boolean; auto: number; busy: boolean; onNow: () => void; onOpen: (id: string) => void }) {
   const lead = weekly?.items.find((x) => x.use);
   return (
     <section className="rounded-card border border-emerald-200 bg-emerald-50/50 p-3 text-sm" data-testid="support-weekly" data-week={weekly?.week ?? ''}>
       <div className="flex flex-wrap items-center gap-2">
         <b className="text-emerald-900">이번 주 맞는 지원사업 {weekly ? `${weekly.items.length}건` : ''}</b>
-        <span className="text-xs text-ink-2">{weekly ? `${kday(weekly.week)} 주 기준${weekly.aiCount ? ` · AI 세일즈가 새로 판단 ${weekly.aiCount}건` : ''}` : '월요일 아침마다 1차 조건에 맞는 공고를 AI 세일즈가 판단해 묶어 드립니다'}</span>
+        <span className="text-xs text-ink-2">{weekly ? `${kday(weekly.week)} 주 기준${weekly.aiCount ? ` · AI 세일즈가 새로 판단 ${weekly.aiCount}건` : ''}` : auto > 0 ? `월요일 아침마다 1차 조건에 맞는 공고 ${auto}건까지 AI 세일즈가 판단해 묶어 드립니다` : '월요일 아침마다 AI 판단에서 ‘해당’이 나온 공고를 묶어 드립니다(자동 판단은 꺼짐)'}</span>
         {canEdit && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={onNow} data-testid="support-weekly-now"><Sparkles className="size-3.5" aria-hidden />{busy ? '묶는 중…' : weekly ? '지금 다시 묶기' : '이번 주 묶음 만들기'}</Button>}
       </div>
       {weekly && weekly.items.length > 0 && <ul className="mt-1.5 flex flex-wrap gap-1.5">{weekly.items.map((x) => (
         <li key={x.id}><button type="button" onClick={() => onOpen(x.id)} className="rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs hover:underline" data-testid="support-weekly-item" data-by={x.by}>{x.by === 'ai' ? '✅ ' : ''}{x.title.slice(0, 40)}{x.dday != null ? ` · ${x.dday === 0 ? 'D-day' : `D-${x.dday}`}` : ''}</button></li>))}</ul>}
-      {weekly && !weekly.items.length && <p className="mt-1 text-xs text-ink-3">이번 주에는 1차 조건·AI 판단에 맞는 공고가 없습니다.</p>}
+      {weekly && !weekly.items.length && <p className="mt-1 text-xs text-ink-3">이번 주에는 AI 판단에서 ‘해당’이 나온 공고가 없습니다.</p>}
       {lead?.use && <p className="mt-1 text-xs text-ink-2">접목: {lead.use}</p>}
     </section>
   );
@@ -164,7 +213,7 @@ function SourceLine({ sources }: { sources: ListData['sources'] }) {
 }
 
 /** 회사 지원사업 프로필 — 요약 한 줄(접힘) · 관리자는 펼쳐서 고침 */
-function ProfileBox({ summary, onSaved }: { summary: ListData['profile'] | null; onSaved: () => void }) {
+function ProfileBox({ summary, blanks, onSaved }: { summary: ListData['profile'] | null; blanks: Blanks | null; onSaved: () => void }) {
   const [open, setOpen] = useState(false);
   const { data, reload } = useApi<any>(open ? '/api/sales/support/profile' : null);
   const [f, setF] = useState<Record<string, any> | null>(null); const [busy, setBusy] = useState(false);
@@ -190,6 +239,7 @@ function ProfileBox({ summary, onSaved }: { summary: ListData['profile'] | null;
         <span className="min-w-0 flex-1 truncate text-xs text-ink-2" data-testid="support-profile-line">{line || '아직 비어 있음 — 본점 지역·설립일·규모·관심 분야를 넣으면 맞는 공고부터 보여 줍니다'}{summary.filled && !summary.saved ? ' (회사 정보에서 채운 기본값)' : ''}</span>
         <Button size="sm" variant="secondary" onClick={() => setOpen(!open)} data-testid="support-profile-toggle">{open ? '접기' : summary.saved ? '프로필 보기·고치기' : '프로필 채우기'}</Button>
       </div>
+      {blanks && blanks.items > 0 && <p className="mt-1 text-xs text-amber-900" data-testid="support-profile-blanks">빈칸 {blanks.fields.length}개({blanks.fields.map((f) => f.label).join('·')})를 채우면 {blanks.items}건 더 판단합니다 — 지금은 ‘확인 필요’로 남아 있습니다.</p>}
       {open && (!f ? <Skeleton rows={3} className="mt-2" /> : <div className="mt-3 space-y-2" data-testid="support-profile-form">
         <div className="grid gap-2 sm:grid-cols-4">
           <Field label="본점 시·도"><select className={inputCls} value={f.regionSido} onChange={(e) => set('regionSido', e.target.value)} disabled={ro} data-testid="profile-sido"><option value="">고르기</option>{SIDO.map((s) => <option key={s}>{s}</option>)}</select></Field>
