@@ -183,13 +183,20 @@ export function parseKaptResultRows(body: string): { bidNum: string; title: stri
   let j: any = null; try { j = JSON.parse(body); } catch { /* HTML */ }
   const list = Array.isArray(j) ? j : Array.isArray(j?.list) ? j.list : Array.isArray(j?.resultList) ? j.resultList : Array.isArray(j?.data) ? j.data : null;
   if (list) { for (const it of list) { const bidNum = String(it.bidNum ?? it.BID_NUM ?? it.bidNo ?? ''); if (!bidNum) continue; out.push({ bidNum, title: String(it.bidTitle ?? it.BID_TITLE ?? it.title ?? ''), complex: String(it.kaptName ?? it.KAPT_NAME ?? it.complexName ?? ''), winner: it.sucsBidder ?? it.SUCS_BIDDER ?? it.winner ?? null, amount: it.sucsAmt ?? it.SUCS_AMT ?? it.amount ?? null, date: it.sucsDate ?? it.SUCS_DATE ?? it.openDate ?? null }); } return out; }
+  // 234차(로컬 10/28 16:20 '목록 1,800 · 관련 0'): 지금 K-apt 결과 표는 순번·단지명·세대수·입찰공고명·입찰마감일·낙찰금액·낙찰업체·응찰금액·낙찰 업체 —
+  // 칸 자리로 읽어 세대수를 제목으로 판정하던 것 → 표 머리 칸 이름으로 찾음(머리가 없으면 예전 자리)
+  const heads = [...body.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map((m) => text(m[1]).replace(/\s/g, ''));
+  const at = (...names: string[]) => heads.findIndex((h) => names.includes(h));
+  const ix = { title: at('입찰공고명', '공고명'), complex: at('단지명'), winner: at('낙찰업체'), amount: at('낙찰금액'), date: at('낙찰일', '입찰마감일') };
   for (const m of body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)) { const tr = m[1]; const id = m[0].match(/goView\('([^']+)'\)|bidNum=([^&'"]+)/); /* 원본 K-apt 는 <tr onclick="goView('…')"> — 행 여는 태그까지 본다 */ const bidNum = id?.[1] ?? id?.[2]; if (!bidNum) continue; const cells = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) => text(c[1])); if (cells.length < 5) continue;
-    out.push({ bidNum, title: cells[2] ?? '', complex: cells[1] ?? '', winner: cells[cells.length - 3] || null, amount: cells[cells.length - 2] || null, date: cells[cells.length - 1] || null }); }
+    const c = (i: number) => (i >= 0 ? cells[i] || null : null);
+    if (ix.title >= 0) out.push({ bidNum, title: cells[ix.title] ?? '', complex: cells[ix.complex] ?? '', winner: c(ix.winner), amount: c(ix.amount), date: c(ix.date)?.slice(0, 10) ?? null });
+    else out.push({ bidNum, title: cells[2] ?? '', complex: cells[1] ?? '', winner: cells[cells.length - 3] || null, amount: cells[cells.length - 2] || null, date: cells[cells.length - 1] || null }); }
   return out;
 }
 /** 231차(로컬 10/28 11:45 '참여업체 정보' 제안): 결과가 난 K-apt 입찰 상세 — 낙찰업체 정보(다른 입찰 사이트를 거친 건) · 참여업체 정보(K-apt 전자입찰) · 낙찰/유찰/취소 사유.
  *  표 머리 칸 이름으로 열을 찾음. 대표자·대표명·전화·연락처·회사주소 칸은 읽지 않음(로컬 10/28 "대표자 이름 · 전화는 저장하지 마세요") */
-export type KaptAwardBidder = { name: string; bizNo: string | null; amount: number | null; won: boolean; invalid: boolean };
+export type KaptAwardBidder = { name: string; bizNo: string | null; amount: number | null; won: boolean; invalid: boolean; score?: number | null };
 export type KaptAwardDetail = { winner: { name: string; bizNo: string | null; amount: number | null; method: string | null } | null; bidders: KaptAwardBidder[] | null; reason: string | null };
 export function parseKaptAwardDetail(html: string): KaptAwardDetail {
   const table = (title: string) => { const i = html.indexOf(title); if (i < 0) return null; const s = html.lastIndexOf('<table', i), e = html.indexOf('</table>', i); return s >= 0 && e > i ? html.slice(s, e) : null; };
@@ -210,14 +217,19 @@ export function parseKaptAwardDetail(html: string): KaptAwardDetail {
   if (p) {
     const rs = rowsOf(p); const heads = rs.map((r) => cells(r, 'th')).find((h) => h.length > 1) ?? [];
     const iName = col(heads, '응찰회사', '회사명', '업체명'), iBiz = col(heads, '사업자등록번호'), iAmt = col(heads, '응찰금액', '투찰금액'), iWon = col(heads, '낙찰여부'), iBad = col(heads, '낙찰무효');
+    // 234차(로컬 10/28 16:20): 적격심사 입찰은 '평가점수' 칸 — 1위는 금액이 아니라 점수로 정해짐
+    const iScore = col(heads, '평가점수'); const score = (v: string | undefined) => { const n = Number(String(v ?? '').replace(/[^\d.]/g, '')); return String(v ?? '').trim() && Number.isFinite(n) && n > 0 ? n : null; };
     if (iName >= 0) bidders = rs.map((r) => cells(r, 'td')).filter((v) => v.length > iName && v[iName]).slice(0, 60)
-      .map((v) => ({ name: v[iName], bizNo: iBiz >= 0 ? biz(v[iBiz]) : null, amount: iAmt >= 0 ? money(v[iAmt]) : null, won: iWon >= 0 && yes(v[iWon]), invalid: iBad >= 0 && yes(v[iBad]) }));
+      .map((v) => ({ name: v[iName], bizNo: iBiz >= 0 ? biz(v[iBiz]) : null, amount: iAmt >= 0 ? money(v[iAmt]) : null, won: iWon >= 0 && yes(v[iWon]), invalid: iBad >= 0 && yes(v[iBad]),
+        ...(iScore >= 0 && score(v[iScore]) != null ? { score: score(v[iScore]) } : {}) }));
     const top = bidders?.find((b) => b.won && !b.invalid); if (!winner && top) winner = { name: top.name, bizNo: top.bizNo, amount: top.amount, method: null };
   }
   const rz = table('낙찰/유찰/취소 사유'); const reason = rz ? rowsOf(rz).map((r) => cells(r, 'td').join(' ').trim()).find(Boolean) ?? null : null;
   return { winner, bidders, reason: reason ? reason.slice(0, 200) : null };
 }
 const DETAIL_RESULT_RUN = 60;
+/** 234차: 상세 읽기 판 — 2 = 평가점수 칸. 참여업체 표를 예전 판으로 읽은 줄은 한 번 더 읽음(231차 첫 읽기 때는 점수를 안 읽었다) */
+const DETAIL_V = 2;
 /** 231차: 관련 K-apt 결과(낙찰자 있음)와 마감 지난 관련 공고(결과 미상, 45일 안)의 상세를 실행당 60건 — 아직 안 읽은 것부터, 결과 미상은 3일마다 다시.
  *  참가 업체 수·참여업체(이름·사업자번호·응찰금액·낙찰 여부·무효)·낙찰업체 사업자번호·사유 → 유찰 사유면 상태 '유찰' */
 async function awardDetails(fetchImpl: typeof fetch, left: () => number, now: Date) {
@@ -225,7 +237,8 @@ async function awardDetails(fetchImpl: typeof fetch, left: () => number, now: Da
   const rows = await db()<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'source_type' = 'kapt_bid'
       and (row->>'related' = 'true' or coalesce(row->>'fit_business', '') <> '')
       and (coalesce(row->>'winner_name', '') <> '' or (left(coalesce(row->>'deadline_at', ''), 10) < ${day} and left(coalesce(row->>'deadline_at', ''), 10) >= ${kstYmd(new Date(now.getTime() - 45 * 864e5))}))
-      and (row->>'kapt_detail_at' is null or (coalesce(row->>'winner_name', '') = '' and coalesce(row->>'current_status', '') !~ '유찰' and row->>'kapt_detail_at' < ${new Date(now.getTime() - 3 * 864e5).toISOString()}))
+      and (row->>'kapt_detail_at' is null or (coalesce(row->>'winner_name', '') = '' and coalesce(row->>'current_status', '') !~ '유찰' and row->>'kapt_detail_at' < ${new Date(now.getTime() - 3 * 864e5).toISOString()})
+        or (jsonb_typeof(row->'participants') = 'array' and coalesce(row->>'kapt_detail_v', '1') < ${String(DETAIL_V)}))
     order by coalesce(row->>'award_date', row->>'deadline_at') desc nulls last limit ${DETAIL_RESULT_RUN}`;
   const out: Record<string, unknown>[] = []; let withBidders = 0, failed = 0, missed = 0;
   await pool(rows.map((x) => x.row), 4, async (r) => {
@@ -235,7 +248,7 @@ async function awardDetails(fetchImpl: typeof fetch, left: () => number, now: Da
       const s = await kaptSession(bid, fetchImpl, 8000); if (s.status !== 200) { missed++; return; }
       const d = parseKaptAwardDetail(s.html);
       // 마감일을 같이 넘겨 상태 계산(낙찰자 없으면 '마감')이 지금 상태를 '진행중'으로 바꾸지 않게
-      const p: Record<string, unknown> = { source_type: 'kapt_bid', source_external_id: bid, title: r.title, source_url: r.source_url, deadline_at: r.deadline_at ?? null, kapt_detail_at: now.toISOString() };
+      const p: Record<string, unknown> = { source_type: 'kapt_bid', source_external_id: bid, title: r.title, source_url: r.source_url, deadline_at: r.deadline_at ?? null, kapt_detail_at: now.toISOString(), kapt_detail_v: DETAIL_V };
       if (d.winner) { p.winner_name = d.winner.name; if (d.winner.bizNo) p.winner_biz_no = d.winner.bizNo; if (d.winner.amount) p.winner_amount = d.winner.amount; }
       if (d.bidders) { p.participants = d.bidders; p.bidders = d.bidders.length; withBidders++; }
       if (d.reason) p.result_note = d.reason;
@@ -258,7 +271,8 @@ export const kaptBidResults: Collector = {
     for (const w of KAPT_RESULT_WORDS) {
       if (left() < 8000) { errors.push(`시간 한도 근접 — 검색어 '${w}' 부터는 다음 실행에서`); break; }
       try {
-        const body = new URLSearchParams({ searchKeyword: w, sortType: '01', pageNo: '1', pageSelect: '100', startDate: from, endDate: to, ...(csrf ? { _csrf: csrf } : {}) });
+        // 234차: K-apt 결과 화면 검색 칸 이름 그대로(bidTitle·searchDateGb·dateStart·dateEnd) — searchKeyword·startDate 는 무시되어 검색어마다 같은 최신 100건이 왔다
+        const body = new URLSearchParams({ bidTitle: w, searchDateGb: 'reg', dateStart: from, dateEnd: to, tabNum: '1', codeWay: '', sortType: '01', pageNo: '1', pageSelect: '100', ...(csrf ? { _csrf: csrf } : {}) });
         const res = await fetchImpl(`${BASE()}/bid/bidResultListAjax.do`, { method: 'POST', headers: { ...HEADERS, 'content-type': 'application/x-www-form-urlencoded', ...(cookie ? { cookie } : {}), ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}) }, body, signal: AbortSignal.timeout(10000) });
         if (!res.ok) { errors.push(`'${w}': HTTP ${res.status}`); continue; }
         const rows = parseKaptResultRows(await res.text()); listed += rows.length; if (!rows.length && errors.length < 12) errors.push(`'${w}': 결과 목록 0건(응답 형식 확인 필요)`);

@@ -32,12 +32,14 @@ const josa = (w: string, pair: '을를' | '이가') => { const c = w.trim().slic
 export function Team() {
   const { data, error, reload } = useApi<View>('/api/marketing/team');
   const [busy, setBusy] = useState<string | null>(null);
-  const working = !!data?.ideas.some((x) => x.result_status === 'working');
-  useEffect(() => { if (!working) return; const h = setInterval(() => reload(), 3000); return () => clearInterval(h); }, [working, reload]);
+  // 233차(CI 1603 #499-7): 채택·맡기기 직후 다시 읽기가 디자인 담당의 '만드는 중' 표시보다 먼저 오면 3초 다시 읽기가 안 걸려 '대기'에 멈추던 것 — 맡긴 뒤 2분은 결과가 생길 때까지 다시 읽음
+  const [expect, setExpect] = useState(0);
+  const working = !!data?.ideas.some((x) => x.result_status === 'working') || (expect > 0 && !!data?.ideas.some((x) => x.status === 'adopted' && x.result_status === null));
+  useEffect(() => { if (!working) return; const h = setInterval(() => { if (expect && Date.now() > expect) setExpect(0); reload(); }, 3000); return () => clearInterval(h); }, [working, reload, expect]);
   if (error) return <ErrorBox error={error} retry={reload} />;
   async function call(key: string, url: string, body: Record<string, unknown>, ok?: (r: any) => string) {
     setBusy(key);
-    try { const r = await api<any>(url, { body }); if (ok) toast.ok(ok(r)); await reload(); return r; } catch (e: any) { toast.error(e.message); return null; } finally { setBusy(null); }
+    try { const r = await api<any>(url, { body }); if (ok) toast.ok(ok(r)); if (r?.designer === 'queued') setExpect(Date.now() + 120_000); await reload(); return r; } catch (e: any) { toast.error(e.message); return null; } finally { setBusy(null); }
   }
   const team = (body: Record<string, unknown>, key: string, ok?: (r: any) => string) => call(key, '/api/marketing/team', body, ok);
   const planner = data?.roles.find((r) => r.key === 'planner');

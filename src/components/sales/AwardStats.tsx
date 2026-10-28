@@ -9,7 +9,8 @@ import { ErrorBox, Skeleton, cx } from '@/components/ui';
 
 type Rec = { id: string; title: string; date: string | null; amount: number | null; rate: number | null; bidders: number | null; region: string | null; issuer: string | null; url: string | null };
 type Co = { key: string; rank: number; name: string; ours: boolean; wins: number; amount: number | null; rate: number | null; bidders: number | null; regions: string[]; last: string | null; recent: Rec[] };
-type Lost = { id: string; title: string; date: string | null; issuer: string | null; url: string | null; our: number | null; winner: string | null; winnerAmount: number | null; gap: number | null; bidders: number | null };
+type Lost = { id: string; title: string; date: string | null; issuer: string | null; url: string | null; our: number | null; winner: string | null; winnerAmount: number | null; gap: number | null; bidders: number | null;
+  score?: { top: number | null; our: number; gap: number | null; rank: number; of: number } | null };
 type Stats = { days: number; total: number; awarded: number; failed: number; companies: number; ours: number; top5Share: number; items: Co[]; me?: { names: string[]; biz: number; noBiz: string[] };
   participated?: number; lostCount?: number; lost?: Lost[] };
 const C = '#2563EB'; // 영업 색(SalesSrc 와 같음)
@@ -30,11 +31,13 @@ export function AwardStats({ onOpen }: { onOpen: (id: string) => void }) {
       {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={5} /> : <>
         <p className="text-xs text-ink-2" data-testid="award-summary">관련 결과 <b>{data.total}</b>건 · 낙찰 {data.awarded} · 유찰 {data.failed} · 낙찰 업체 {data.companies}곳{data.awarded ? ` · 상위 5곳이 낙찰의 ${data.top5Share}%` : ''} · 우리 회사 낙찰 <b>{data.ours}</b>건</p>
         {(data.participated ?? 0) > 0 && <details className="rounded-card border border-blue-200 bg-blue-50/40 px-3 py-2 text-xs" data-testid="award-lost">
-          <summary className="cursor-pointer text-ink-2">우리 회사 참여 <b>{data.participated}</b>건 · 낙찰 {data.ours}건 · 진 입찰 <b>{data.lostCount ?? 0}</b>건{(data.lostCount ?? 0) > 0 ? ' — 1위와 응찰금액 차 보기' : ''}</summary>
+          <summary className="cursor-pointer text-ink-2">우리 회사 참여 <b>{data.participated}</b>건 · 낙찰 {data.ours}건 · 진 입찰 <b>{data.lostCount ?? 0}</b>건{(data.lostCount ?? 0) > 0 ? ' — 1위와 응찰금액·점수 차 보기' : ''}</summary>
           {(data.lost ?? []).length > 0 && <ul className="mt-1.5 space-y-1">{(data.lost ?? []).map((x) => (
             <li key={x.id} className="flex min-w-0 items-start gap-1.5"><button type="button" onClick={() => onOpen(x.id)} className="min-w-0 flex-1 text-left hover:underline" data-testid="award-lost-row">
               <span className="text-ink-3">{md(x.date) ?? '날짜 없음'}</span> {x.title}
-              <span className="block text-ink-2">{[x.winner && `1위 ${x.winner}${won(x.winnerAmount) ? ` ${won(x.winnerAmount)}` : ''}`, won(x.our) && `우리 ${won(x.our)}`, x.gap != null && `차이 ${x.gap > 0 ? '+' : x.gap < 0 ? '−' : ''}${won(Math.abs(x.gap)) ?? '0원'}`, x.bidders && `참가 ${x.bidders}곳`].filter(Boolean).join(' · ')}</span></button>
+              <span className="block text-ink-2">{[x.winner && `1위 ${x.winner}${won(x.winnerAmount) ? ` ${won(x.winnerAmount)}` : ''}`, won(x.our) && `우리 ${won(x.our)}`, x.gap != null && `차이 ${x.gap > 0 ? '+' : x.gap < 0 ? '−' : ''}${won(Math.abs(x.gap)) ?? '0원'}`, x.bidders && `참가 ${x.bidders}곳`].filter(Boolean).join(' · ')}</span>
+              {x.score && <span className="block text-ink-2" data-testid="award-lost-score">적격심사 점수 — {[x.score.top != null && `1위 ${x.score.top}`, `우리 ${x.score.our}(${x.score.rank}위/${x.score.of}곳)`,
+                x.score.gap != null && (x.score.gap > 0 ? `${x.score.gap}점 낮음` : x.score.gap < 0 ? `${-x.score.gap}점 높음` : '같은 점수')].filter(Boolean).join(' · ')}</span>}</button>
               {x.url && <a href={x.url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-ink-3 hover:text-ink" aria-label="원문 보기"><ExternalLink className="size-3.5" /></a>}</li>))}</ul>}
         </details>}
         {!data.items.length ? <p className="rounded-card border border-dashed border-line bg-white p-4 text-center text-sm text-ink-3" data-testid="award-empty">이 기간 관련 공고의 낙찰 결과가 없습니다. 낙찰 결과는 수집기(K-apt 입찰결과·나라장터 낙찰정보 등)가 모읍니다 — <Link href="/s/sales/sources#collectors" className="underline">데이터 설정 › 수집기</Link></p>

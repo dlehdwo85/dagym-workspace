@@ -56,14 +56,17 @@ export async function backClose({ owner, ctx, BASE }) {
   await far().scrollIntoViewIfNeeded();
   const y0 = await owner.evaluate(() => Math.round(window.scrollY));
   assert.ok(y0 > 300, `목록을 충분히 내림(${y0})`);
+  // 233차(CI 1603): 스크롤 값이 아니라 누른 카드가 화면에서 같은 자리인지 — 위쪽 묶음(수정 요청·지난 기록)이 늦게 늘면 브라우저가 화면을 지키려 스크롤 값을 늘림(4574 → 4670)
+  const top = async () => Math.round((await far().boundingBox()).y);
+  const top0 = await top();
   for (const how of ['back', 'button']) {
     await far().click();
     await detail.waitFor();
     if (how === 'back') await owner.goBack(); else await owner.getByRole('dialog').getByRole('button', { name: '닫기' }).click();
     await detail.waitFor({ state: 'hidden' });
     await owner.waitForTimeout(400);
-    const y = await owner.evaluate(() => Math.round(window.scrollY));
-    assert.ok(Math.abs(y - y0) <= 4, `${how === 'back' ? '뒤로가기' : '닫기 단추'} 뒤 스크롤 위치 그대로(${y0} → ${y})`);
+    const t = await top(); const y = await owner.evaluate(() => Math.round(window.scrollY));
+    assert.ok(Math.abs(t - top0) <= 4 && y > 300, `${how === 'back' ? '뒤로가기' : '닫기 단추'} 뒤 연 카드가 화면 같은 자리(화면 위에서 ${top0} → ${t} · 스크롤 ${y0} → ${y})`);
   }
   // 업무 목록(휴대폰은 상세가 목록을 덮음)도 같음: 아래 업무를 열고 뒤로가기 → 연 자리
   for (let i = 1; i <= 16; i++) await ctx.owner.ok('POST', '/api/tasks', { title: `E2E 뒤로가기 업무 ${String(i).padStart(2, '0')}`, assigneeId: ctx.ownerId, approvalRequired: false });

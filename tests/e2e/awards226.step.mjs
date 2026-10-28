@@ -19,7 +19,7 @@ export async function awards226({ owner, ctx, sql, BASE, SHOTS }) {
   await res(5, '[경기] 모의오아파트 헬스장 위탁운영', 6, { current_status: '유찰' });
   // 231차: 우리 회사가 참여했지만 남이 낙찰(K-apt 참여업체 표) → '진 입찰' · 1위와 응찰금액 차
   await res(6, '[경기] 모의육아파트 헬스장 위탁운영', 3, { winner_name: '육모의서비스(주)', winner_amount: 95000000, bidders: 2, region: '경기', participants: [
-    { name: 'E2E우리회사(주)', bizNo: '9876543210', amount: 99000000, won: false, invalid: false }, { name: '육모의서비스(주)', bizNo: '1112223334', amount: 95000000, won: true, invalid: false }] });
+    { name: 'E2E우리회사(주)', bizNo: '9876543210', amount: 99000000, won: false, invalid: false, score: 95.04 }, { name: '육모의서비스(주)', bizNo: '1112223334', amount: 95000000, won: true, invalid: false, score: 97.71 }] }); // 234차 적격심사 평가 점수
   await sql`insert into company_profiles (tenant, key, name, biz_no, is_default) values ('default', 'e2eaward226', 'E2E우리회사(주)', '987-65-43210', false)`;
   await ctx.owner.ok('PUT', '/api/sales/digest/prefs', { keywords: [], excludes: [], regions: [], issuers: [], itemCodes: [], amountMin: null, amountMax: null });
   try {
@@ -42,6 +42,7 @@ export async function awards226({ owner, ctx, sql, BASE, SHOTS }) {
     assert.match(await lost.locator('summary').innerText(), /우리 회사 참여 \d+건 · 낙찰 \d+건 · 진 입찰 1건/);
     await lost.locator('summary').click();
     assert.match(await lost.getByTestId('award-lost-row').first().innerText(), /모의육아파트 헬스장 위탁운영[\s\S]*1위 육모의서비스\(주\) 9,500만원 · 우리 9,900만원 · 차이 \+400만원 · 참가 2곳/);
+    assert.equal(await lost.getByTestId('award-lost-score').first().innerText(), '적격심사 점수 — 1위 97.71 · 우리 95.04(2위/2곳) · 2.67점 낮음');
     await mo.locator('button[aria-expanded]').click();
     const recent = mo.getByTestId('award-recent'); await recent.waitFor();
     assert.equal(await recent.getByTestId('award-recent-open').count(), 2);

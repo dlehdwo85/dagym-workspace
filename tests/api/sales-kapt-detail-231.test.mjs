@@ -13,12 +13,14 @@ const plus = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' })
 const tbl = (title, heads, rows) => `<table class="contTbl txtC"><thead><tr><th colspan="${heads.length}">${title}</th></tr><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 const reason = (t) => `<table class="contTbl txtC"><tbody><tr><th>낙찰/유찰/취소 사유</th></tr><tr><td>${t}</td></tr></tbody></table>`;
 const HEADS = ['순번', '응찰회사', '사업자등록번호', '대표자', '전화', '응찰일시', '현장설명<br>참석여부', '입찰구비서류<br>적정여부', '응찰금액', '낙찰<br>여부', '낙찰<br>무효'];
+// 234차(로컬 10/28 16:20 힐스테이트관악센트씨엘): 적격심사 입찰은 응찰금액 다음에 '평가점수' 칸
+const HEADS_SCORE = ['순번', '응찰회사', '사업자등록번호', '대표자', '전화', '응찰일시', '현장설명<br>참석여부', '입찰구비서류<br>적정여부', '응찰금액', '평가점수', '낙찰<br>여부', '낙찰<br>무효'];
 const PRIVATE = ['홍시험', '010-1234-5678', '김시험', '02-000-0000', '시험구 시험로 1'];
 const DETAIL = {
-  '20261028000001': tbl('참여업체 정보', HEADS, [
-    ['1', '(주)우리시험', '123-45-67890', '홍시험', '010-1234-5678', '2026-10-27 10:00', 'Y', 'Y', '300,000,000원', 'N', ''],
-    ['2', '가나관리(주)', '222-22-22222', '홍시험', '010-1234-5678', '2026-10-27 10:01', 'Y', 'Y', '280,000,000원', 'Y', ''],
-    ['3', '다라(주)', '3333333333', '홍시험', '010-1234-5678', '2026-10-27 10:02', 'Y', 'N', '310,000,000원', 'N', 'Y']]) + reason('적격심사 낙찰'),
+  '20261028000001': tbl('참여업체 정보', HEADS_SCORE, [
+    ['1', '(주)우리시험', '123-45-67890', '홍시험', '010-1234-5678', '2026-10-27 10:00', 'Y', 'Y', '300,000,000원', '95.04', 'N', ''],
+    ['2', '가나관리(주)', '222-22-22222', '홍시험', '010-1234-5678', '2026-10-27 10:01', 'Y', 'Y', '280,000,000원', '97.71', 'Y', ''],
+    ['3', '다라(주)', '3333333333', '홍시험', '010-1234-5678', '2026-10-27 10:02', 'Y', 'N', '310,000,000원', '99.5', 'N', 'Y']]) + reason('적격심사 낙찰'),
   kg2b_900001: tbl('낙찰업체 정보', ['회사명', '사업자등록번호', '회사주소', '연락처', '대표명', '계약금액<br>(VAT 별도)', '계약선정방법'],
     [['마바서비스(주)', '4444444444', '서울 시험구 시험로 1', '02-000-0000', '김시험', '10,040,000원', '경쟁입찰']]) + reason('최고가 낙찰&nbsp;'),
   '20261028000003': reason('유찰 - 응찰업체 부족(1개 업체)'),
@@ -61,9 +63,9 @@ test('상세 읽기: 참여업체(대표자·전화 빼고)·참가 수·낙찰�
   assert.match(r.summary, /상세 4건\(참여업체 표 1 · 유찰 1 · 고침 4\)/, r.summary);
   const a = await rowOf('20261028000001');
   assert.deepEqual(a.participants, [
-    { name: '(주)우리시험', bizNo: '1234567890', amount: 300000000, won: false, invalid: false },
-    { name: '가나관리(주)', bizNo: '2222222222', amount: 280000000, won: true, invalid: false },
-    { name: '다라(주)', bizNo: '3333333333', amount: 310000000, won: false, invalid: true }]);
+    { name: '(주)우리시험', bizNo: '1234567890', amount: 300000000, won: false, invalid: false, score: 95.04 },
+    { name: '가나관리(주)', bizNo: '2222222222', amount: 280000000, won: true, invalid: false, score: 97.71 },
+    { name: '다라(주)', bizNo: '3333333333', amount: 310000000, won: false, invalid: true, score: 99.5 }]);
   assert.deepEqual([a.bidders, a.winner_biz_no, a.winner_amount, a.result_note, a.current_status], [3, '2222222222', 280000000, '적격심사 낙찰', '낙찰']);
   const b = await rowOf('kg2b_900001');
   assert.deepEqual([b.winner_name, b.winner_biz_no, b.winner_amount, b.result_note, b.participants ?? null], ['마바서비스(주)', '4444444444', 10040000, '최고가 낙찰', null]);
@@ -84,12 +86,23 @@ test('다시 돌리면 읽은 것은 안 읽음 · 결과 없는 공고는 3일 
   await sql`update sales_src_rows set row = ${sql.json({ ...d[0].row, kapt_detail_at: new Date(Date.now() - 4 * 864e5).toISOString() })} where src_id = ${d[0].src_id}`;
   await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_results/run', {});
   assert.deepEqual([detailCalls() - before0, detailCalls('20261028000004') >= 2], [1, true], '결과 미상 공고만 다시');
+  // 234차: 231차 판(점수 칸 안 읽음)으로 참여업체 표를 읽은 줄은 한 번 더 — 점수가 채워짐 · 그 뒤로는 다시 안 읽음
+  const a0 = await rowOf('20261028000001');
+  const old = { ...a0, participants: a0.participants.map(({ score: _s, ...x }) => x) }; delete old.kapt_detail_v;
+  await sql`update sales_src_rows set row = ${sql.json(old)} where row->>'source_external_id' = '20261028000001'`;
+  const before1 = detailCalls('20261028000001');
+  await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_results/run', {});
+  const a1 = await rowOf('20261028000001');
+  assert.deepEqual([detailCalls('20261028000001') - before1, a1.kapt_detail_v, a1.participants.map((x) => x.score)], [1, 2, [95.04, 97.71, 99.5]]);
+  await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_results/run', {});
+  assert.equal(detailCalls('20261028000001') - before1, 1, '새 판으로 읽은 뒤에는 다시 안 읽음');
 });
 
 test('낙찰 분석: 우리 회사 참여 · 진 입찰(1위·금액 차·참가 수) · 유찰 셈 · 참가 수 평균', async () => {
   const s = await ctx.owner.ok('GET', '/api/sales/award-stats?days=30');
   assert.deepEqual([s.participated, s.lostCount], [1, 1], JSON.stringify({ ...s, items: undefined }));
   assert.deepEqual([s.lost[0].title, s.lost[0].our, s.lost[0].winner, s.lost[0].winnerAmount, s.lost[0].gap, s.lost[0].bidders], ['[경기] 시험일아파트 헬스장 위탁운영 사업자 선정', 300000000, '가나관리(주)', 280000000, 20000000, 3]);
+  assert.deepEqual(s.lost[0].score, { top: 97.71, our: 95.04, gap: 2.67, rank: 2, of: 2 }, '234차 적격심사 점수 — 1위(낙찰) 97.71 · 우리 95.04 · 2.67점 · 무효 업체(99.5)는 순위에서 뺌');
   assert.ok(s.failed >= 1, '유찰 1건');
   assert.equal(s.items.find((x) => x.name === '가나관리(주)')?.bidders, 3);
 });

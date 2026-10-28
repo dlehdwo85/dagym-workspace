@@ -185,7 +185,8 @@ test('232차(로컬 10/28 15:40 남원시) 원본 매일 복사: 워크인이 �
   await put('11', { winner_name: '워크인낙찰(주)', winner_biz_no: '1234567890', winner_amount: 26156000, award_date: '2026-10-26', winner_rate: 88.019, bidders: 38, current_status: '낙찰', result_at: at0, result_filled_at: at0,
     kapt_detail_at: at0, participants: [{ name: '워크인낙찰(주)', bizNo: '1234567890', amount: 26156000, won: true }], result_note: '적격심사 1순위' });
   await put('12', { current_status: '유찰', notice_state: '유찰', result_at: at0, result_note: '응찰 업체 부족', kapt_detail_at: at0 });
-  noticeOver = { 11: { title: '원본 제목 바뀜', winner_rate: 90.5, bidders: null, winner_name: '', current_status: '진행중' }, 12: { current_status: '마감', notice_state: '일반' }, 13: { winner_name: '원본낙찰(주)', current_status: '낙찰' } };
+  noticeOver = { 11: { title: '원본 제목 바뀜', winner_rate: 90.5, bidders: null, winner_name: '', current_status: '진행중' }, 12: { current_status: '마감', notice_state: '일반' }, 13: { winner_name: '원본낙찰(주)', current_status: '낙찰' },
+    15: { winner_name: '옛낙찰(주)', current_status: '낙찰', award_date: '2026-01-10' } }; // 234차: 오래된 결과는 결과 시각을 찍지 않음
   try {
     const t0 = Date.now();
     await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'apply', tenant: 'default' });
@@ -199,5 +200,6 @@ test('232차(로컬 10/28 15:40 남원시) 원본 매일 복사: 워크인이 �
     await ctx.owner.ok('POST', '/api/platform/sales-migrate', { action: 'apply', tenant: 'default' });
     assert.equal((await row('13')).result_at, c.result_at, '다시 적용해도 결과 시각 그대로');
     assert.equal((await row('14')).result_at, undefined, '결과가 아닌 줄은 결과 시각 없음');
+    const e = await row('15'); assert.deepEqual([e.winner_name, e.result_at], ['옛낙찰(주)', undefined], '234차: 낙찰일이 7일보다 오래된 결과를 원본 복사로 처음 알면 결과 시각을 찍지 않음(당일 메일에 한꺼번에 오르지 않게)');
   } finally { noticeOver = {}; }
 });
