@@ -43,9 +43,11 @@ async function sourceOf(tenant: string, kind: SourceKind, id: string): Promise<{
   return { name: p.title || '지원사업', files: sourceFiles(p.attachments), link: `/s/sales/support?id=${id}` };
 }
 
-const reasonOf = (e: unknown) => e instanceof HttpError ? (e.status === 413 ? '30MB 넘음' : e.status === 403 ? '허용하지 않은 사이트' : /redirect/.test(e.code ?? '') ? '다른 주소로 넘어감' : e.code === 'file_page' ? '파일 대신 웹페이지(로그인·세션 필요)'
+export const reasonOf = (e: unknown) => e instanceof HttpError ? (e.status === 413 ? '30MB 넘음' : e.status === 403 ? '허용하지 않은 사이트' : /redirect/.test(e.code ?? '') ? '다른 주소로 넘어감' : e.code === 'file_page' ? '파일 대신 웹페이지(로그인·세션 필요)'
   : e.code === 'kapt_list' ? 'K-apt 첨부 목록 못 읽음' : e.code === 'kapt_missing' ? '공고 첨부 목록에 없음(정정·삭제)' : e.code === 'kapt_no_bid' ? 'K-apt 공고번호 모름' : e.message.replace(/ — .*$/, '').slice(0, 60))
   : String((e as Error)?.message ?? e).slice(0, 60);
+/** 252차 #786 공고문 참가자격 읽기 — 입찰 공고의 첨부 목록(K-apt 는 그 자리 목록 포함) */
+export async function noticeFiles(id: string) { const s = await sourceOf('', 'bid', id); return s && { files: s.files, bid: s.bid ?? null, listError: s.listError }; }
 const fileLabel = (f: SrcFile, n: number) => f.name || (() => { try { const p = decodeURIComponent(new URL(f.url).pathname.split('/').pop() || ''); return /\.(do|jsp|aspx?|php)$/i.test(p) || !p ? `첨부 ${n}` : p; } catch { return `첨부 ${n}`; } })();
 const FAIL_RE = '\n?공고 첨부 [0-9]+건 중 [0-9]+건 자동 첨부 실패[^\n]*';
 

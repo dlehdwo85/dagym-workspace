@@ -24,8 +24,9 @@ export function briefingLine(r: Row): string | null {
   return [`현장설명${b.kind && !ref ? ` ${b.kind}` : ''}${b.at ? ` ${mdhm(b.at)}` : ''}`, b.place, ref ? '필수 여부 공고문 참조' : null].filter(Boolean).join(' · ');
 }
 const yes = (v: unknown) => s0(v) === '제출';
-/** 참가 조건 한 줄 — '적격심사 · 제한경쟁 · 신용평가 제출 · 실적증명 제출 · 보증금 5% · 업종 제한 ○○ · 지역 제한 ○○ · 공고문 참조: 구비서류' */
-export function termsLine(r: Row): string | null {
+/** 참가 조건 한 줄 — '적격심사 · 제한경쟁 · 신용평가 제출 · 실적증명 제출 · 보증금 5% · 업종 제한 ○○ · 지역 제한 ○○ · 공고문 참조: 구비서류'
+ *  252차 #786: 화면 이름은 '입찰 방식' — limits:false 면 업종·지역·공동수급(참가자격 줄로 옮김)은 뺌 */
+export function termsLine(r: Row, o: { limits?: boolean } = {}): string | null {
   const parts: string[] = []; const refs: string[] = [];
   const award = s0(r.award_method); if (award) parts.push(award);
   const kind = s0(r.contract_method); if (kind && kind !== award) parts.push(kind);
@@ -33,9 +34,11 @@ export function termsLine(r: Row): string | null {
   cert(r.credit_rating_cert, '신용평가'); cert(r.performance_cert, '실적증명');
   const docs = s0(r.bid_docs); if (docs && /공고문/.test(docs)) refs.push('구비서류');
   const bond = s0(r.bid_bond); if (bond) { const pct = bond.match(/(\d+(?:\.\d+)?)\s*%/); if (pct) parts.push(`보증금 ${pct[1]}%`); else if (/공고문/.test(bond)) refs.push('보증금'); }
-  const lic = s0(r.license_limit ?? r.industry_code); if (lic) parts.push(`업종 제한 ${lic.slice(0, 40)}`);
-  const reg = s0(r.region_restriction); if (reg) parts.push(`지역 제한 ${reg.slice(0, 30)}`);
-  const joint = s0(r.joint_bid); if (joint) parts.push(`공동수급 ${joint.slice(0, 20)}`);
+  if (o.limits !== false) {
+    const lic = s0(r.license_limit ?? r.industry_code); if (lic) parts.push(`업종 제한 ${lic.slice(0, 40)}`);
+    const reg = s0(r.region_restriction); if (reg) parts.push(`지역 제한 ${reg.slice(0, 30)}`);
+    const joint = s0(r.joint_bid); if (joint) parts.push(`공동수급 ${joint.slice(0, 20)}`);
+  }
   if (refs.length) parts.push(`공고문 참조: ${refs.join('·')}`);
   return parts.length ? parts.join(' · ') : null;
 }

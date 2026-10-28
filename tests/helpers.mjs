@@ -58,6 +58,7 @@ export function serverEnv() {
     CALENDAR_JOBS: 'off', // 168차: 월요일·25일·1~3일·금요일에 매인 정기 작업(src/lib/calendarGate.ts)은 시험 서버에서 안 돎 — 시험이 도는 날·시각에 따라 tick 안의 AI 호출·기록이 달라져 깨졌음. 그 작업들은 API 로 직접 시험
     SUPPORT_WEEKLY: 'off', // 지원사업 주간 묶음(월요일 08시 뒤 첫 tick)도 같은 이유 — tests/api/support.test.mjs 만 'any'
     SALES_RESEARCH_WEEKLY: 'off', // 212차 후속조사 주간 묶음(월요일 08시 뒤 첫 tick)도 같은 이유 — tests/api/sales-research-212.test.mjs 만 'any'
+    SALES_ELIGIBILITY: 'off', // 252차 첨부 공고문 참가자격 읽기(정기 실행)는 시험 서버에서 끔 — 다른 시험의 공고 줄이 바깥 공고문 사이트로 나가지 않게. tests/api/sales-eligibility-252.test.mjs 만 켬
     SALES_KW_MONTHLY: 'off', // 224차 관심 검색어 월 추천(매달 1일 09시 뒤 첫 tick)도 같은 이유 — tests/api/sales-kw-457.test.mjs 만 'any'
     CAPTURE_BLOCK: 'noauto', // #626 캡처 차단: 시험 서버는 자동화 감지·봇 UA 로그인 거부만 끔(Playwright·node fetch 가 막히지 않게) — 워터마크·인쇄 차단·창 이탈 가림은 외부 고객사 계정에 그대로(E2E 확인)
     MKT_SCENES_TICK: '0', // 188차: 자료실 영상 장면 뽑기(ffmpeg)는 정기 실행에서 안 돎 — 다른 시험의 가짜 영상('fake-mp4')을 건드리지 않게. tests/api/mkt-photo-188.test.mjs 가 API 로 직접

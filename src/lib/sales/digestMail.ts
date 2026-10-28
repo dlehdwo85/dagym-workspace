@@ -83,18 +83,18 @@ function parts(i: DigestItem, day: string, hq: string | null) {
   const l2 = [i.result, i.issuer, region, ...(i.amounts ?? (i.amount ? [i.amount] : []))].filter((x): x is string => !!x && x.trim() !== '' && x.trim() !== '-');
   const lim = i.limit ? limitText(i.limit, hq) : null;
   const src = [i.source, i.noticeNo].filter(Boolean).join(' ') || null;
-  if (i.section === 'result') return { l2, lim, sched: i.openingAt ? [`개찰 ${whenLabel(i.openingAt)}`] : [], l4: src ? [src] : [] }; // 결과는 지난 마감·참가신청 대신 개찰·출처만
+  if (i.section === 'result') return { l2, lim, sched: i.openingAt ? [`개찰 ${whenLabel(i.openingAt)}`] : [], l4: src ? [src] : [], elig: null }; // 결과는 지난 마감·참가신청 대신 개찰·출처만
   // 239차(#744): 현장설명 필수·임의 · 장소까지(K-apt 상세 칸)
   const sched = [i.briefingAt ? `현장설명${i.briefingKind === '필수' || i.briefingKind === '임의' ? `(${i.briefingKind})` : ''} ${whenLabel(i.briefingAt)}${i.briefingPlace ? ` ${i.briefingPlace}` : ''}` : null, i.participationAt ? `참가신청마감 ${whenLabel(i.participationAt)}` : null, i.deadlineAt ? `입찰마감 ${whenLabel(i.deadlineAt)}` : null,
     i.openingAt ? `개찰 ${whenLabel(i.openingAt)}` : null].filter((x): x is string => !!x);
   const l4 = [i.attachments ? `첨부 ${i.attachments}` : null, i.bidSystem ? `투찰 ${i.bidSystem}` : null, src, i.posted && i.posted < day ? `공고일 ${mdw(i.posted)}` : null,
     i.refound ? `다시 찾은 공고(${seenLabel(i.seenAt)} 처음 수집)` : i.late ? `지난 메일 뒤 ${seenLabel(i.seenAt)} 수집` : null].filter((x): x is string => !!x);
-  return { l2, lim, sched, l4 };
+  return { l2, lim, sched, l4, elig: i.kind === 'cancel' ? null : i.elig ?? null }; // 252차 #786 참가자격(공고문 절에서 뽑은 요건 · 못 찾으면 이유)
 }
 const pill = (b: { name: string; color: string }, ml = 4) => `<span style="display:inline-block;padding:1px 7px;margin-left:${ml}px;border-radius:9px;font-size:11px;font-weight:700;line-height:16px;color:${esc(b.color)};background:${tint(b.color)}">${esc(b.name)}</span>`;
 
 function itemHtml(i: DigestItem, n: number, base: string, day: string, hq: string | null) {
-  const { l2, lim, sched, l4 } = parts(i, day, hq);
+  const { l2, lim, sched, l4, elig } = parts(i, day, hq);
   const badges = i.badges.map((b) => { const [fg, bg] = BADGE[b] ?? [C.ink2, C.bg]; return `<span style="display:inline-block;padding:1px 6px;margin-right:4px;border-radius:4px;font-size:11px;font-weight:700;line-height:16px;color:${fg};background:${bg}">${esc(b)}</span>`; }).join('');
   const biz = i.biz.map((b) => pill(b)).join('');
   const link = `${base}/s/sales/hub?tab=bids&bt=all&id=${encodeURIComponent(i.id)}`;
@@ -110,6 +110,7 @@ function itemHtml(i: DigestItem, n: number, base: string, day: string, hq: strin
 <div style="font-size:15px;line-height:22px;font-weight:700;color:${C.ink}"><span style="color:${C.ink3};font-weight:600;margin-right:4px">${n}.</span>${badges}<a href="${esc(link)}" style="color:${C.ink};text-decoration:${i.kind === 'cancel' ? 'line-through' : 'none'}">${esc(i.title)}</a>${biz}</div>
 ${l2html || tags ? `<div style="margin-top:3px;font-size:13px;line-height:20px;color:${C.ink2}">${l2html}${tags}</div>` : ''}
 ${schedHtml ? `<div style="margin-top:3px;font-size:12px;line-height:19px;color:${C.ink2}" data-digest-sched="1"><b style="color:${C.ink3};margin-right:4px">일정</b>${schedHtml}</div>` : ''}
+${elig ? `<div style="margin-top:2px;font-size:12px;line-height:19px;color:${C.ink2}" data-digest-elig="1"><b style="color:${C.ink3};margin-right:4px">참가자격</b>${esc(elig)}</div>` : ''}
 ${l4html || orig ? `<div style="margin-top:2px;font-size:12px;line-height:19px;color:${C.ink3}">${l4html}${orig}</div>` : ''}</td></tr>`;
 }
 const button = (href: string, label: string, primary: boolean) => `<a href="${esc(href)}" style="display:inline-block;margin:4px 6px 0 0;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:700;text-decoration:none;${primary ? `background:${C.brand};color:#FFFFFF` : `background:#FFFFFF;color:${C.brandInk};border:1px solid #BFDBFE`}">${esc(label)}</a>`;
@@ -148,10 +149,11 @@ ${cond ? `<tr><td style="padding:10px 16px;border-top:1px solid ${C.line};backgr
 ${sections}${ref}${empty}
 <tr><td style="padding:14px 16px 18px;border-top:1px solid ${C.line};font-size:12px;line-height:19px;color:${C.ink3}">${esc(skippedLine(d))}${d.counts.merged ? ` · 같은 공고 ${d.counts.merged}줄은 최신 차수 하나로` : ''} — <a href="${esc(prefs)}" style="color:${C.brand}">맞춤 설정에서 바꾸기</a>${hqHint ? `<br><a href="${esc(profile)}" style="color:${C.brand}" data-digest-hq-hint="1">${esc(hqHint)}</a>` : ''}<br>이 메일은 워크인 영업실 당일 공고 알림입니다.</td></tr>
 </table></td></tr></table></body></html>`;
-  const txt = (i: DigestItem, n: number) => { const { l2, lim, sched, l4 } = parts(i, d.day, hq);
+  const txt = (i: DigestItem, n: number) => { const { l2, lim, sched, l4, elig } = parts(i, d.day, hq);
     return [`${n}. ${i.badges.map((b) => `[${b}] `).join('')}${i.title}${i.biz.length ? ` [${bizName(i)}]` : ''}`,
       l2.length || lim || i.tags.length ? `   ${[...l2, ...(lim ? [lim] : []), ...i.tags].join(' · ')}` : null,
       sched.length ? `   일정: ${sched.map((x) => (x.startsWith('입찰마감 ') && i.dday != null ? `${x} ${ddText(i.dday)}` : x)).join(' · ')}` : null,
+      elig ? `   참가자격: ${elig}` : null,
       i.progress || l4.length ? `   ${[i.progress, ...l4].filter(Boolean).join(' · ')}` : null,
       `   보기: ${base}/s/sales/hub?tab=bids&bt=all&id=${encodeURIComponent(i.id)}`].filter(Boolean).join('\n'); };
   const text = [subject, ...(period ? [period] : []), ...(testNote ? [testNote] : []), '', summary(d), ...(bizs ? [bizs] : []), ...(cond ? [`맞춤 조건: ${cond.join(' · ')} — 바꾸기: ${prefs}`] : []), `오늘 공고 전체 보기: ${today}`, `맞춤 설정: ${prefs}`,

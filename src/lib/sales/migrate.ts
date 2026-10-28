@@ -65,7 +65,8 @@ export const JUDGED_KEEP = ['related', 'fit_business', 'matched_keywords', 'clas
  *  낙찰·유찰로 안 결과는 원본이 아직 결과 전이어도 상태를 되돌리지 않고, 원본 복사로 결과를 처음 알면 그때를 result_at 으로(234차: 낙찰일·마감일이 7일보다 오래된 결과는 찍지 않음 — 당일 메일에 한꺼번에 오르지 않게) */
 export const RESULT_KEEP = ['result_at', 'result_filled_at', 'kapt_detail_at', 'kapt_detail_v', 'participants', 'result_note', 'winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'winner_rate', 'bidders',
   // 239차·#751 후속(로컬 10/28 18:22): K-apt 상세가 채운 참가 조건·현장설명 칸과 취소를 안 때도 같은 규칙(원본이 비었으면 워크인 값)
-  'site_briefing_kind', 'site_briefing_at', 'site_briefing_place', 'bid_docs', 'credit_rating_cert', 'performance_cert', 'bid_bond', 'docs_deadline_at', 'bid_method', 'urgent_bid', 'payment_terms', 'terms_read_at', 'kapt_cancel_at'];
+  'site_briefing_kind', 'site_briefing_at', 'site_briefing_place', 'bid_docs', 'credit_rating_cert', 'performance_cert', 'bid_bond', 'docs_deadline_at', 'bid_method', 'urgent_bid', 'payment_terms', 'terms_read_at', 'kapt_cancel_at',
+  'eligibility']; // 252차 #786 첨부 공고문에서 읽은 참가자격(원본에는 없는 칸)
 async function upsertRows(scope: string, tbl: string, rows: any[]) {
   const sql = db(); const now = new Date(); const weekAgo = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(now.getTime() - 7 * 864e5));
   for (let n = 0; n < rows.length; n += 500) {

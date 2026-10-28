@@ -9,6 +9,7 @@ import { fetchFile, sourceFiles, type SrcFile } from './files';
 import { salesBidsOn } from './options';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { SOURCE_LABEL } from './srcViews';
+import { eligSay, eligView } from './eligibilityText';
 
 type Row = Record<string, any>;
 const pick = (r: Row, ...keys: string[]) => { for (const k of keys) { const v = r?.[k]; if (v !== undefined && v !== null && v !== '') return v; } return null; };
@@ -29,6 +30,7 @@ function brief(r: Row) {
     id: String(r.__id), title: titleOf(r), source: SOURCE_LABEL[st.toLowerCase()] ?? st, issuer: pick(r, 'issuer', 'agency', 'demand_agency', 'org_name'), noticeNo: pick(r, 'notice_no', 'source_external_id'),
     posted: pick(r, 'posted_date', 'notice_date', 'posted_at'), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'participation_deadline_at'), opening: pick(r, 'opening_at', 'open_at'), status: pick(r, 'current_status', 'status'),
     url: hint ? null : fixG2bUrl(raw), search: hint ? `${hint.site}에서 ${hint.label} '${hint.no}' 검색 (${hint.home})` : null, attachments: filesOf(r).length,
+    eligibility: eligSay(eligView(r)), // 252차 #786 공고문 '참가자격' 절에서 뽑은 요건(목록·메일과 같은 말)
   };
 }
 
@@ -71,7 +73,7 @@ export async function readNotice(u: SessionUser, id: string, opt: { maxFiles?: n
   const detail = {
     ...b, contractMethod: pick(r, 'contract_method', 'award_method', 'bid_system', 'contract_type'), contractPeriod: pick(r, 'contract_period', 'contract_term', 'service_period'), category: pick(r, 'bid_category', 'notice_type', 'classification'),
     estimated: pick(r, 'estimated_amount', 'estimated_price', 'presumed_price', 'base_amount', 'budget', 'amount'), region: pick(r, 'region'), complex: pick(r, 'complex_name', 'facility_name', 'apartment_name'), households: pick(r, 'household_count', 'households'),
-    taskScope: clipText(pick(r, 'task_scope', 'main_tasks', 'scope_of_work'), 2000), qualification: clipText(pick(r, 'qualification', 'participation_requirements', 'bid_qualification'), 2000), briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting'),
+    taskScope: clipText(pick(r, 'task_scope', 'main_tasks', 'scope_of_work'), 2000), qualification: clipText(r.eligibility?.text ?? pick(r, 'qualification', 'participation_requirements', 'bid_qualification'), 2000), briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting'),
     phone: pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone'), address: pick(r, 'office_address', 'address'), body: clipText(pick(r, 'notice_text', 'body', 'content', 'description', 'summary'), 6000),
     onbidIds: r.onbid_ids ?? null, // #650 온비드 번호들(cltrNo·pbctNo…) — 온비드 공고 검색 화면에서 공고번호로 찾을 때 참고
   };

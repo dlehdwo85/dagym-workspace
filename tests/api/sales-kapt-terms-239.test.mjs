@@ -116,8 +116,8 @@ test('입찰 목록: 현장설명(종류·일시·장소·필수) · 자격·조
   assert.equal(a.terms, '적격심사 · 제한경쟁 · 신용평가 제출 · 실적증명 제출 · 보증금 5%');
   assert.deepEqual(a.termRows, [['낙찰 방법', '적격심사'], ['입찰 종류', '제한경쟁'], ['입찰 방법', '전자입찰'], ['신용평가등급확인서', '제출'], ['실적증명서', '제출'], ['입찰 보증금', '입찰가격의 5% 이상 제출'],
     ['현장설명', `필수 ${mdw(plus(3))} 14:00 · 생활지원센터 회의실`], ['지급 조건', '당단지 지급조건에 따름']], '서류 제출 마감이 입찰 마감과 같으면 뺌');
-  assert.deepEqual([a.detail.qualification, a.detail.performance, a.detail.briefing, a.detail.tasks ?? null],
-    [a.terms, '실적증명서 제출', `현장설명 필수 ${mdw(plus(3))} 14:00 · 생활지원센터 회의실`, null], "'첨부 공고문 참조' 는 과업 칸에 안 넣음");
+  assert.deepEqual([a.detail.qualification, a.detail.performance, a.detail.briefing, a.detail.tasks ?? null], // 252차: 참가 자격 = 공고문 '참가자격' 절(입찰 방식 줄이 아님 — 아직 안 읽었으면 빔)
+    [null, '실적증명서 제출', `현장설명 필수 ${mdw(plus(3))} 14:00 · 생활지원센터 회의실`, null], "'첨부 공고문 참조' 는 과업 칸에 안 넣음");
   assert.deepEqual(b.briefing, { kind: '공고문 참조', at: `${plus(5)}T14:00:00+09:00`, place: '입주자대표회의실', required: false });
   assert.equal(b.terms, '최저가 · 제한경쟁 · 공고문 참조: 신용평가·실적증명·보증금');
   assert.equal(b.detail.briefing, `현장설명 ${mdw(plus(5))} 14:00 · 입주자대표회의실 · 필수 여부 공고문 참조`);

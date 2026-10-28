@@ -1,0 +1,109 @@
+// 252차 #786(대표 10/29 00:20 "입찰 참가자격 요건(자본금·기술인력·실적 등)이 공고상에 적혀 있다 — 그걸 표기, 지금은 적격심사 같은 입찰 종류가 적혀 있음"):
+// 공고문 글에서 '참가자격' 절을 잘라(원문 그대로, 1,500자) 요건 항목을 규칙으로 뽑는다 — AI·비용 없음. 다른 모듈을 불러오지 않는 잎 모듈(시험이 바로 불러 씀)
+export type EligItem = { k: 'capital' | 'license' | 'perf' | 'staff' | 'credit' | 'region' | 'briefing' | 'joint'; label: string };
+const MAX = 1500;
+const ROMAN = 'ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ';
+/** 절 머리 — '5. 참가자격' · '8. 입찰참가자격(입찰공고일 현재기준)' · '4. 입찰 참가자격' · '□ 참가자격의 제한' · 'Ⅲ. 입찰참가자격' */
+const HEAD = new RegExp(`(?:^|\\n|[ \\t])[ \\t]*(?:(\\d{1,2})[.)]|([${ROMAN}]+)[.)]?|([□■◆◇▣○●◎※▶►]))?[ \\t]*(?:입찰\\s*)?참가\\s*자격(?:\\s*(?:의\\s*)?(?:제한|요건|조건|사항))?`, 'g');
+/** 모든 공고에 있는 공통 문구(사업자선정지침 제26조 '해당하지 않는' 사업자) — 화면 한 줄에서는 빼고 원문에만 */
+export const COMMON_CLAUSE = /(?:제\s*26\s*조|선정\s*지침|국토교통부\s*고시)[^\n]{0,80}?해당(?:하|되)지\s*않/;
+
+/** 공고문 글 → '참가자격' 절(머리부터 다음 같은 급 번호 머리 앞까지, 최대 1,500자). 없으면 null */
+export function eligibilitySection(text: string | null | undefined): string | null {
+  const t = String(text ?? '').replace(/\r\n?/g, '\n').replace(/ /g, ' ');
+  if (!t) return null;
+  // 본문 안의 '참가자격이 없는 자의 입찰은 무효' 같은 말은 빼고, 머리 꼴(번호·기호로 시작하거나 줄 처음)인 것 중 첫째
+  let best: { at: number; num: number | null; roman: string | null; sym: string | null; head: string } | null = null;
+  for (const m of t.matchAll(HEAD)) {
+    const at = (m.index ?? 0) + (m[0].length - m[0].trimStart().length);
+    const lineStart = (m.index ?? 0) === 0 || m[0].startsWith('\n') || t[(m.index ?? 0) - 1] === '\n'; // 번호·기호 없는 머리는 줄 처음일 때만(글이 한 줄로 이어진 공고문도 '5. 참가자격'은 찾음)
+    const after = t.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 12);
+    if (/^\s*(?:이|을|를|은|는|에|의\s*(?!제한)|과|와|이\s*없|을\s*갖|확인|심사|여부|미달|상실)/.test(after) && !m[1] && !m[2] && !m[3]) continue; // 본문 속 낱말
+    const numbered = !!(m[1] || m[2] || m[3]);
+    if (!numbered && (best || !lineStart)) continue;
+    best = { at, num: m[1] ? Number(m[1]) : null, roman: m[2] ?? null, sym: m[3] ?? null, head: m[0].trim() };
+    if (numbered) break;
+  }
+  if (!best) return null;
+  const body = t.slice(best.at);
+  let end = Math.min(body.length, MAX);
+  const from = best.head.length + 4;
+  const cut = (re: RegExp, ok: (m: RegExpMatchArray) => boolean = () => true) => {
+    for (const m of body.slice(from).matchAll(re)) if (ok(m)) { end = Math.min(end, from + (m.index ?? 0)); return; }
+  };
+  if (best.num != null) cut(/(?:^|\n|\s{2,}|[ \t])(\d{1,2})[.)]\s*(?=[가-힣(「\[])/g, (m) => Number(m[1]) === best!.num! + 1 || (Number(m[1]) > best!.num! && Number(m[1]) <= best!.num! + 3 && /\n/.test(m[0])));
+  else if (best.roman) cut(new RegExp(`(?:^|\\n)[ \\t]*[${ROMAN}]+[.)]?\\s*[가-힣]`, 'g'));
+  else if (best.sym) cut(new RegExp(`\\n[ \\t]*\\${best.sym}\\s*[가-힣]`, 'g'));
+  else cut(/\n[ \t]*(?:\d{1,2}[.)]|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+[.)]?|[□■◆▣])\s*[가-힣]/g);
+  const sec = body.slice(0, end).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return sec.length > best.head.length + 2 ? sec.slice(0, MAX) : null;
+}
+
+const one = (s: string) => s.replace(/\s+/g, ' ').trim();
+/** 등록·면허 — 자주 나오는 이름(업종 중립: 회사 이름 아님) + 'OO공사업·OO사업자·OO관리업' 꼴 */
+const LIC_WORDS = ['주민운동시설 위탁운영 등록', '체육시설업', '소프트웨어사업자', '정보통신공사업', '전기공사업', '소방시설공사업', '소방시설관리업', '경비업', '주택관리업', '실내건축공사업', '시설물유지관리업', '기계설비공사업',
+  '건물위생관리업', '엔지니어링사업자', '직접생산확인', '정보보호전문서비스', '전문건설업', '종합건설업', '조경공사업', '승강기'];
+const STAFF_WORDS = ['생활체육지도자', '건강운동관리사', '스포츠지도사', '체육지도자', '정보처리기사', '정보통신기사', '전기기사', '소방설비기사', '전기산업기사', '기술자', '기술인력', '전문인력', '관리사무소장', '주택관리사'];
+/** 절 → 요건 항목(자본금·등록·면허·실적·인력·신용등급·지역·현장설명 참가·공동도급). 공통 문구(제26조)만 있으면 [] */
+export function eligibilityItems(section: string | null | undefined): EligItem[] {
+  const t = one(String(section ?? '')); if (!t) return [];
+  const out: EligItem[] = [];
+  const cap = t.match(/자본금[^.;]{0,24}?(\d+(?:[.,]\d+)?)\s*(억|천만|백만)\s*원?\s*(이상|초과)?/);
+  if (cap) out.push({ k: 'capital', label: `자본금 ${cap[1]}${cap[2]}${cap[3] ? ' 이상' : ''}` });
+  const lic = new Set<string>();
+  for (const w of LIC_WORDS) if (t.replace(/\s/g, '').includes(w.replace(/\s/g, ''))) lic.add(w === '주민운동시설 위탁운영 등록' ? '주민운동시설 위탁운영 등록업체' : w);
+  for (const m of t.matchAll(/([가-힣]{2,10}(?:공사업|사업자|관리업|용역업))(?=\s*(?:등록|면허|허가|신고|,|·|및|를|을|\)|$))/g)) if (![...lic].some((x) => x.includes(m[1]) || m[1].includes(x)) && !/^(?:해당|모든|입찰|참가|당해|기타)/.test(m[1])) lic.add(m[1]);
+  if (lic.size) { const names = [...lic]; out.push({ k: 'license', label: `${names.join('·')}${/면허/.test(t) && !names.some((n) => /등록업체$/.test(n)) ? ' 면허' : ''}` }); }
+  const perf = t.match(/((?:최근|과거)\s*\d+\s*년\s*(?:간|이내|동안)?[^.;]{0,40}?\d[\d,]*\s*(?:건|개소|단지|회|세대|곳)\s*(?:이상)?)/) ?? t.match(/(실적[^.;]{0,50}?\d[\d,]*\s*(?:건|개소|단지|회|세대|곳)\s*(?:이상)?)/);
+  if (perf && /실적|수행|위탁\s*운영|용역|공사/.test(perf[1] + t.slice(Math.max(0, (perf.index ?? 0) - 15), perf.index ?? 0))) out.push({ k: 'perf', label: `실적 ${one(perf[1].replace(/(?:사업\s*)?실적\s*[:：]?\s*/g, ' ').replace(/(\d+)\s*년\s*간/, '$1년').replace(/\s*이상$/, ' 이상'))}` });
+  const staff: string[] = [];
+  for (const w of STAFF_WORDS) {
+    const m = t.match(new RegExp(`${w}[^.;]{0,20}?(\\d+)\\s*(?:명|인)\\s*(이상)?`));
+    if (staff.some((x) => x.includes(w))) continue; // '생활체육지도자' 안의 '체육지도자'
+    if (m) staff.push(`${w} ${m[1]}명${m[2] ? ' 이상' : ''}`);
+    else if (t.includes(w) && !staff.some((x) => x.includes(w)) && !/기술자|기술인력|전문인력/.test(w)) staff.push(w);
+  }
+  if (staff.length) out.push({ k: 'staff', label: staff.slice(0, 3).join('·') });
+  const cr = t.match(/신용\s*(?:평가\s*)?등급[^.;]{0,12}?([A-D]{1,3}[+-]?0?)\s*(?:등급\s*)?(이상)/);
+  if (cr) out.push({ k: 'credit', label: `신용등급 ${cr[1]} 이상` });
+  const rg = t.match(/([가-힣]{2,8}(?:특별시|광역시|특별자치시|특별자치도|도|시|군))\s*(?:내|관내)?\s*(?:에\s*)?(?:주된\s*영업소|본사|본점|사업장)?\s*(?:를|가|이)?\s*(?:소재|둔|두고|있는)/);
+  if (rg && !/^(?:입찰|해당|공고|현재)/.test(rg[1])) out.push({ k: 'region', label: `${rg[1]} 소재` });
+  if (/현장\s*설명(?:회)?에\s*(?:참가|참석)(?:한|하여|한\s*업체)/.test(t)) out.push({ k: 'briefing', label: '현장설명 참가 업체' });
+  const jt = t.match(/공동\s*(?:도급|수급|계약)[^.;]{0,15}?(불가|불허|허용하지\s*않|금지|가능|허용)/);
+  if (jt) out.push({ k: 'joint', label: /불가|불허|않|금지/.test(jt[1]) ? '공동도급 불가' : '공동도급 가능' });
+  return out;
+}
+/** 화면 한 줄 — 뽑은 요건(자본금 → 실적 → 등록·면허 → 인력 → 신용 → 지역 → 현장설명 → 공동도급), 못 뽑았으면 공통 문구를 뺀 원문 앞부분 */
+export function eligibilityLine(items: EligItem[], section: string | null | undefined, extra: string[] = []): string | null {
+  const order: EligItem['k'][] = ['capital', 'perf', 'license', 'staff', 'credit', 'region', 'briefing', 'joint'];
+  const parts = [...order.flatMap((k) => items.filter((x) => x.k === k).map((x) => x.label)), ...extra.filter(Boolean)];
+  if (parts.length) return parts.join(' · ').slice(0, 200);
+  const rest = String(section ?? '').split(/\n|(?=\s[가-하]\.\s)|(?=‣|•)/).map(one).filter((x) => x && !COMMON_CLAUSE.test(x) && !/^(?:\d{1,2}[.)]\s*)?(?:입찰\s*)?참가\s*자격/.test(x));
+  return rest.length ? rest.join(' ').slice(0, 90) : null;
+}
+/** 못 찾았을 때 말(목록·상세·당일 메일·공고 조회 같은 말) */
+export const ELIG_MISS = '공고문에서 참가자격을 못 찾음 — 원문 확인';
+/** 참가자격 한 줄 — 읽었으면 뽑은 요건, 못 찾았으면 이유(나라장터 업종·지역이 있으면 앞에), 아직 안 읽었으면 나라장터 업종·지역만(없으면 null) */
+export function eligSay(e: { line?: string | null; text?: string | null; error?: string | null } | null | undefined): string | null {
+  if (!e) return null;
+  if (e.text) return e.line ?? null;
+  if (e.error) return `${e.line ? `${e.line} · ` : ''}${ELIG_MISS}(이유: ${e.error})`;
+  return e.line ?? null;
+}
+
+const s0 = (v: unknown) => { const t = v == null ? '' : String(v).replace(/\s+/g, ' ').trim(); return t || null; };
+/** 나라장터 API 칸(업종 제한·참가 지역) — 공고문에서 같은 종류를 이미 뽑았으면 겹쳐 쓰지 않음 */
+export function apiExtra(r: Record<string, any>, items: EligItem[]): string[] {
+  const out: string[] = [];
+  const lic = [...new Set(String(r.license_limit ?? '').split(/\s*[/,]\s*/).map((x) => s0(x.replace(/\(\d{3,5}\)/g, ''))).filter((x): x is string => !!x))].join('·'); // '체육시설업(4993) / 체육시설업' → '체육시설업'
+  if (lic && !items.some((x) => x.k === 'license')) out.push(`업종 ${lic.slice(0, 60)}`);
+  const rg = s0(String(r.region_restriction ?? '').replace(/\s*·\s*/g, '·'));
+  if (rg && !items.some((x) => x.k === 'region')) out.push(`지역 ${rg.slice(0, 30)}`);
+  return out;
+}
+/** 252차 #786 참가자격 칸(목록 줄·펼치기·상세·공고 조회 같은 말) */
+export function eligView(r: any): { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl: string | null; readAt: string | null } {
+  const e = r?.eligibility; const extra = apiExtra(r ?? {}, []);
+  if (!e) return { line: extra.length ? extra.join(' · ') : null, text: null, error: null, file: null, fileUrl: null, readAt: null };
+  return { line: e.line ?? null, text: e.text ?? null, error: e.error ?? null, file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null };
+}

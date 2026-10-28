@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, ClipboardList, Copy, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
 import type { SearchHint } from '@/lib/sales/sourceLink';
 import { mdhm } from '@/lib/sales/bidTerms';
+import { ELIG_MISS } from '@/lib/sales/eligibilityText';
 import { api, useApi } from '@/components/client';
 import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
@@ -1185,6 +1186,28 @@ function SkipGroups({ items, row }: { items: any[]; row: (n: any) => React.React
       {past.length > 0 && <details className="rounded-card border border-line bg-slate-50 p-2" data-testid="skip-past"><summary className="cursor-pointer text-sm font-semibold text-ink-2">마감 지난 공고 {past.length}건 <span className="font-normal text-ink-3">— 접어 둠(지우지 않음)</span></summary><div className="mt-2 space-y-3">{block(past, true)}</div></details>}
     </div>);
 }
+/** 252차 #786 상세 — 공고문 '참가자격' 절 원문 · 뽑은 요건 · 못 찾은 이유 · [공고문 다시 읽기](정정으로 첨부가 바뀌면 정기 실행도 다시 읽음) */
+function EligBox({ n, onChange }: { n: any; onChange?: () => void }) {
+  const [got, setGot] = useState<Elig | null>(null); const [busy, setBusy] = useState(false);
+  const e: Elig | null = got ?? n.elig ?? null;
+  const read = async () => {
+    setBusy(true);
+    try { const r = await api<{ eligibility: Elig & { file: { name: string | null; url: string } | null } }>('/api/sales/eligibility', { body: { id: String(n.id) } }); const x = r.eligibility;
+      setGot({ line: x.line, text: x.text, error: x.error, file: x.file?.name ?? null, readAt: x.readAt }); toast.ok(x.text ? '공고문에서 참가자격을 읽었습니다' : `${ELIG_MISS}(이유: ${x.error ?? '알 수 없음'})`); onChange?.(); }
+    catch (err: any) { toast.error(err.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="rounded-input border border-line p-2 text-sm" data-testid="bid-elig-detail">
+      <div className="mb-1 flex flex-wrap items-center gap-2"><p className="font-medium">참가자격 <span className="text-xs font-normal text-ink-3">(첨부 공고문 「참가자격」 절 — 원문 그대로)</span></p>
+        <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={read} data-testid="bid-elig-read">{busy ? '읽는 중…' : e?.readAt ? '공고문 다시 읽기' : '공고문 읽기'}</Button></div>
+      {e?.line && <p className="font-medium text-ink" data-testid="bid-elig-detail-line">{e.line}</p>}
+      {e?.text ? <p className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-input bg-slate-50 p-2 text-xs text-ink" data-testid="bid-elig-detail-text">{e.text}</p>
+        : e?.error ? <p className="text-amber-800" data-testid="bid-elig-detail-miss">{ELIG_MISS}(이유: {e.error})</p>
+        : <p className="text-ink-3">아직 공고문을 읽지 않았습니다 — 마감 전 관련 공고는 정기 실행이 차례로 읽습니다.</p>}
+      {(e?.file || e?.readAt) && <p className="mt-1 text-[11px] text-ink-3">{[e.file && `공고문: ${e.file}`, e.readAt && `읽은 때 ${fmtDateTime(e.readAt)}`].filter(Boolean).join(' · ')}</p>}
+    </div>
+  );
+}
 /** 대표 검수 10/20 ②: 입찰 상세 — 한국어 칸만(공고명·단지·발주처·마감·예산·문서·연락처·상태·메모·다음 조치), 관리자 '원본 보기' 접힘 */
 function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
   useBackClose(true, onClose, ['id', String(n.id)]); // #535: 휴대폰 뒤로가기 = 공고 상세만 닫힘(메일 링크 ?id= 와 같은 주소)
@@ -1192,7 +1215,7 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
   const docs = [n.search ? <SearchHintChip key="u" h={n.search} /> : n.url && <a key="u" href={n.url} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-url"><ExternalLink className="size-3.5" aria-hidden />공식 원문</a>,
     ...(n.attachments ?? []).map((a: any, i: number) => attUrl(a) && <a key={i} href={attHref(a, i, bidCtx(n))} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-file"><Download className="size-3.5" aria-hidden />{attName(a, i)}</a>)].filter(Boolean);
   const unk = (v: unknown) => (v === null || v === undefined || v === '' ? <span className="text-ink-3">{UNK2}</span> : v as React.ReactNode);
-  const D8: [string, unknown][] = [['주요 과업', n.detail?.tasks], ['참가 자격', n.detail?.qualification], ['실적 요건', n.detail?.performance], ['지역 제한', n.detail?.regionLimit], ['면허·등록', n.detail?.license], ['공동수급·하도급', n.detail?.joint], ['현장설명회', n.detail?.briefing], ['제안 발표', n.detail?.presentation]];
+  const D8: [string, unknown][] = [['주요 과업', n.detail?.tasks], ['참가 자격', n.detail?.qualification && n.detail.qualification === n.elig?.text ? '위 「참가자격」 칸(공고문 원문)' : n.detail?.qualification], ['실적 요건', n.detail?.performance], ['지역 제한', n.detail?.regionLimit], ['면허·등록', n.detail?.license], ['공동수급·하도급', n.detail?.joint], ['현장설명회', n.detail?.briefing], ['제안 발표', n.detail?.presentation]];
   return (
     <Modal open onClose={onClose} title={n.title} wide>
       <div className="space-y-3" data-testid="bid-detail">
@@ -1205,7 +1228,8 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
           ['세대수', n.households && `${n.households}세대`], ['업종', n.industry !== n.noticeType && n.industry], ['키워드', n.keywords], ['대표 판단', n.judgment && `${n.judgment}${n.salesPoint ? ` · 영업 포인트: ${n.salesPoint}` : ''}`], ['부족 자격', n.qualificationGap],
           ['문서', docs.length ? <span className="flex flex-wrap gap-1.5">{docs}</span> : null], ['연락처', (n.phone || n.address || n.fax) && <span className="space-y-1"><ContactRow phone={n.phone} />{n.address && <span className="block text-xs text-ink-2">{String(n.address)}</span>}{n.fax && <span className="block text-xs text-ink-3">팩스 {String(n.fax)}</span>}</span>],
           ['상태', n.work], ['메모', n.workMemo], ['다음 조치', n.workNext && kd(n.workNext)]]} />
-        {(n.termRows?.length ?? 0) > 0 && <div className="rounded-input border border-line p-2 text-sm" data-testid="bid-terms-detail"><p className="mb-1 font-medium">참가 조건 · 현장설명 <span className="text-xs font-normal text-ink-3">(공고 원문 칸 — 자세한 자격은 공고문)</span></p>
+        <EligBox n={n} onChange={onChange} />
+        {(n.termRows?.length ?? 0) > 0 && <div className="rounded-input border border-line p-2 text-sm" data-testid="bid-terms-detail"><p className="mb-1 font-medium">입찰 방식 · 조건 · 현장설명 <span className="text-xs font-normal text-ink-3">(공고 원문 칸)</span></p>
           <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-1">{(n.termRows as [string, string][]).map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="break-words">{v}</dd>])}</dl></div>}
         <details className="rounded-input border border-line p-2 text-sm" data-testid="bid-detail-more"><summary className="cursor-pointer text-ink-2">과업 · 참가자격 · 요건 상세{D8.some(([, v]) => v) ? '' : ' (아직 없음 — 후속조사)'}</summary>
           <dl className="mt-2 grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1">{D8.map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="whitespace-pre-wrap break-words">{v ? String(v) : <span className="text-ink-3">{UNK2}</span>}</dd>])}</dl></details>
@@ -1360,7 +1384,20 @@ const CAT_CLS: Record<string, string> = { '즉시 검토': 'bg-rose-50 text-rose
 /** 대표 10/24 추가 ③: 마감 D-10 안 = 입찰 준비 기간(D-4~D-10 주황 강조, 입찰 탭 '준비 기간(D-10 안)' 필터·당일 메일 배지와 같은 기준) */
 const PREP_DAYS = 10;
 /** 입찰 카드(영업관리 2-5, PC·휴대폰 같음): 상태 → 사업 → 분류 → 출처 → 단지·공고명 → 기관·지역·세대·업종 → 낙찰 → 공고·DB 등록(오늘 등록) → 키워드 → [전화][원문][첨부]·마감 */
-/** 239차(#743·#744 대표 10/28): 파일을 열기 전에 — 현장설명(필수면 D-n 배지) · 참가 조건 한 줄 · [자격·조건] 펼치기(원문 칸 그대로) */
+type Elig = { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl?: string | null; readAt: string | null };
+/** 252차 #786 참가자격 한 줄 — 뽑은 요건(자본금·실적·면허·인력…) · 못 찾았으면 이유. 펼치면 공고문 '참가자격' 절 원문 */
+function EligLine({ e }: { e: Elig }) {
+  const miss = !e.text && !!e.error;
+  if (!e.text && !e.line && !miss) return null;
+  return (
+    <details className="group" data-testid="bid-elig"><summary className="cursor-pointer list-none text-ink-2 [&::-webkit-details-marker]:hidden"><span className="font-medium text-ink">참가자격</span>{' '}
+      {e.line && <span data-testid="bid-elig-line">{e.line}</span>}{miss && <span className="text-amber-800" data-testid="bid-elig-miss">{e.line ? ' · ' : ''}{ELIG_MISS}(이유: {e.error})</span>} {e.text && <span className="text-ink-3 group-open:hidden">▾ 원문</span>}</summary>
+      {e.text && <div className="mt-1 rounded-input bg-slate-50 p-2"><p className="max-h-60 overflow-auto whitespace-pre-wrap break-words text-ink" data-testid="bid-elig-text">{e.text}</p>
+        {e.file && <p className="mt-1 text-[11px] text-ink-3">공고문: {e.file}</p>}</div>}</details>
+  );
+}
+/** 239차(#743·#744 대표 10/28): 파일을 열기 전에 — 현장설명(필수면 D-n 배지) · 참가 조건 한 줄 · [자격·조건] 펼치기(원문 칸 그대로)
+ *  252차 #786: '자격·조건'(적격심사·제한경쟁 …)은 '입찰 방식'으로 이름을 바꿔 따로, 참가자격은 공고문 절에서 */
 function BidTermsLine({ n, bdd }: { n: any; bdd: number | null }) {
   const b = n.briefing as { kind: string | null; at: string | null; place: string | null; required: boolean } | null;
   const past = bdd !== null && bdd < 0;
@@ -1370,7 +1407,8 @@ function BidTermsLine({ n, bdd }: { n: any; bdd: number | null }) {
         <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', past ? 'bg-slate-100 text-ink-3' : b.required ? (bdd !== null && bdd <= 3 ? 'bg-red-600 text-white' : 'bg-amber-100 text-amber-800') : 'bg-slate-100 text-ink-2')}>
           현장설명{b.kind && b.kind !== '공고문 참조' ? ` ${b.kind}` : ''}{!past && bdd !== null ? (bdd === 0 ? ' 오늘' : ` D-${bdd}`) : past ? ' 지남' : ''}</span>
         <span className="text-ink-2">{[b.at ? mdhm(b.at) : b.kind === '공고문 참조' ? '일시 공고문 참조' : null, b.place, b.at && b.kind === '공고문 참조' ? '필수 여부 공고문 참조' : null].filter(Boolean).join(' · ')}</span></div>}
-      {n.terms && <details className="group" data-testid="bid-terms-more"><summary className="cursor-pointer list-none text-ink-2 [&::-webkit-details-marker]:hidden"><span className="font-medium text-ink">자격·조건</span> {n.terms} <span className="text-ink-3 group-open:hidden">▾</span></summary>
+      {n.elig && <EligLine e={n.elig} />}
+      {n.terms && <details className="group" data-testid="bid-terms-more"><summary className="cursor-pointer list-none text-ink-2 [&::-webkit-details-marker]:hidden"><span className="font-medium text-ink">입찰 방식</span> {n.terms} <span className="text-ink-3 group-open:hidden">▾</span></summary>
         <dl className="mt-1 grid grid-cols-[7rem_1fr] gap-x-2 gap-y-0.5 rounded-input bg-slate-50 p-2">{(n.termRows as [string, string][] ?? []).map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="break-words">{v}</dd>])}</dl></details>}
     </div>
   );
@@ -1408,7 +1446,7 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
       {/* #751(로컬 10/28 17:25): 마감 전에 취소된 공고 · 재공고 잇기 */}
       {(n.cancelReason || n.renotice) && <div className="mt-0.5 text-xs text-slate-600" data-testid="bid-cancel">{n.cancelReason ? `취소 사유: ${n.cancelReason}` : '취소된 공고'}{n.renotice ? ` · 재공고 올라옴${n.renotice.close ? `(마감 ${kd(n.renotice.close)})` : ''}` : ''}</div>}
       {n.prevCancel && <div className="mt-0.5 text-xs text-amber-800" data-testid="bid-prev-cancel">재공고 — 이전 공고 취소{n.prevCancel.day ? `(${kd(n.prevCancel.day)})` : ''}{n.prevCancel.reason ? ` · 사유: ${n.prevCancel.reason}` : ''}</div>}
-      {(n.briefing || n.terms) && <BidTermsLine n={n} bdd={bdd} />}
+      {(n.briefing || n.terms || n.elig?.line || n.elig?.text || n.elig?.error) && <BidTermsLine n={n} bdd={bdd} />}
       {(won(n.amount) || n.winner) && <div className="mt-0.5 text-xs text-ink-2">{won(n.amount) && <>예산 {won(n.amount)}</>}{n.winner && <>{won(n.amount) ? ' · ' : ''}낙찰 {n.winner}{won(n.awardAmount) ? ` · ${won(n.awardAmount)}` : ''}{n.awardDate ? ` (${kd(n.awardDate)})` : ''}</>}</div>}
       <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3" data-testid="bid-dates"><span className="hidden md:inline">{[n.noticeDate && `공고 ${kd(n.noticeDate)}`, n.posted && `DB 등록 ${kd(n.posted)}`].filter(Boolean).join(' · ')}</span>{n.todayNew && <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white" data-testid="bid-today">오늘 등록</span>}{n.todayLabel && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900" title="오늘 탭에 있는 까닭 — 공고일과 수집 시각이 다름" data-testid="bid-today-why">{n.todayLabel}</span>}</div>
       <BidHistory h={n.history} />

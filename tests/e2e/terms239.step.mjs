@@ -33,9 +33,9 @@ export async function terms239({ owner, ctx, sql, BASE, SHOTS }) {
     // 공고문 참조: 일시·장소 + '필수 여부 공고문 참조' · 배지는 회색 D-5
     assert.match(await two.getByTestId('bid-briefing').innerText(), new RegExp(`현장설명 D-5\\s*${mdw(kst(5)).replace(/[()]/g, '\\$&')} 14:00 · 입주자대표회의실 · 필수 여부 공고문 참조`));
     assert.equal(await two.getAttribute('data-urgent'), null);
-    // 자격·조건 한 줄 → 펼치기
+    // 입찰 방식 한 줄(252차: '자격·조건' → '입찰 방식', 참가자격은 공고문 절) → 펼치기
     const more = one.getByTestId('bid-terms-more');
-    assert.match(await more.locator('summary').innerText(), /자격·조건 적격심사 · 제한경쟁 · 신용평가 제출 · 실적증명 제출 · 보증금 5%/);
+    assert.match(await more.locator('summary').innerText(), /입찰 방식 적격심사 · 제한경쟁 · 신용평가 제출 · 실적증명 제출 · 보증금 5%/);
     assert.match(await two.getByTestId('bid-terms-more').locator('summary').innerText(), /최저가 · 제한경쟁 · 공고문 참조: 신용평가·실적증명·보증금/);
     await more.locator('summary').click();
     const dl = more.locator('dl'); await dl.waitFor();
@@ -44,14 +44,14 @@ export async function terms239({ owner, ctx, sql, BASE, SHOTS }) {
     assert.ok(!t.includes('서류 제출 마감'), '입찰 마감과 같으면 뺌');
     await one.scrollIntoViewIfNeeded();
     await owner.screenshot({ path: `${SHOTS}/583-bid-terms.png`, clip: await one.boundingBox() });
-    // 상세: '참가 조건 · 현장설명' 표 · 8칸 펼치기의 참가자격·현장설명
+    // 상세: '입찰 방식 · 조건 · 현장설명' 표 · 8칸 펼치기의 현장설명(참가 자격 칸은 공고문 절 — 입찰 방식 줄을 넣지 않음)
     await one.getByTestId('bid-open').click();
     const det = owner.getByTestId('bid-detail'); await det.waitFor();
     const td = det.getByTestId('bid-terms-detail'); await td.waitFor();
-    assert.match(await td.innerText(), /참가 조건 · 현장설명[\s\S]*낙찰 방법[\s\S]*적격심사[\s\S]*입찰 보증금[\s\S]*입찰가격의 5% 이상 제출/);
+    assert.match(await td.innerText(), /입찰 방식 · 조건 · 현장설명[\s\S]*낙찰 방법[\s\S]*적격심사[\s\S]*입찰 보증금[\s\S]*입찰가격의 5% 이상 제출/);
     await det.getByTestId('bid-detail-more').locator('summary').click();
     const d8 = await det.getByTestId('bid-detail-more').innerText();
-    assert.ok(d8.includes('적격심사 · 제한경쟁 · 신용평가 제출 · 실적증명 제출 · 보증금 5%') && d8.includes(`현장설명 필수 ${mdw(kst(2))} 10:00 · 생활지원센터 회의실`), d8);
+    assert.ok(!d8.includes('적격심사 · 제한경쟁 · 신용평가 제출') && d8.includes(`현장설명 필수 ${mdw(kst(2))} 10:00 · 생활지원센터 회의실`), d8);
     assert.ok(!d8.includes('첨부 공고문 참조'), "과업 칸에 '첨부 공고문 참조'를 넣지 않음");
     await owner.keyboard.press('Escape'); await det.waitFor({ state: 'detached' });
     // 휴대폰 폭

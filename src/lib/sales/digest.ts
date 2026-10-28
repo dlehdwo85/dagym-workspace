@@ -18,6 +18,7 @@ import { BID_COLLECTORS } from './collectors';
 import { listBizCats, matchBiz, type BizCat } from './bizCats';
 import { regionLimit, sidoIn, type RegionLimit } from './region';
 import { digestMail } from './digestMail';
+import { eligSay, eligView } from './eligibilityText';
 import { SKIP_ONLY, noKey, noticeKeys, projectSkipOf, settledWork, titleKey } from './noticeGroups';
 import { fixG2bUrl, searchHint, type SearchHint } from './sourceLink';
 
@@ -80,7 +81,7 @@ function when(v: unknown): { d: string; t: string | null } | null {
 const fmtWhen = (w: ReturnType<typeof when>) => (w ? (w.t ? `${w.d} ${w.t}` : w.d) : null);
 export type DigestSection = 'now' | 'review' | 'soon' | 'change' | 'result' | 'ref';
 export type DigestItem = { id: string; title: string; issuer: string | null; region: string | null; source: string; url: string; kind: string; fit: string | null; keywords: string[]; estimated: number | null; deadline: string | null; dday: number | null; participation: string | null; opening: string | null; attachments: number; why: string; seenAt?: string | null; late?: boolean; /** 185차: 예전 규칙으로 빠졌다가 다시 판정으로 찾은 공고 */ refound?: boolean; posted?: string | null;
-  /** #510 21라인 칸 */ section: DigestSection; noticeNo: string | null; badges: string[]; biz: { name: string; color: string }[]; tags: string[]; amount: string | null; deadlineAt: string | null; participationAt: string | null; openingAt: string | null; briefingAt: string | null; /** 239차(#744): 현장설명 필수·임의·공고문 참조 · 장소 */ briefingKind?: string | null; briefingPlace?: string | null; bidSystem: string | null;
+  /** #510 21라인 칸 */ section: DigestSection; noticeNo: string | null; badges: string[]; biz: { name: string; color: string }[]; tags: string[]; amount: string | null; deadlineAt: string | null; participationAt: string | null; openingAt: string | null; briefingAt: string | null; /** 239차(#744): 현장설명 필수·임의·공고문 참조 · 장소 */ briefingKind?: string | null; briefingPlace?: string | null; /** 252차 #786 참가자격 한 줄(공고문 절) */ elig?: string | null; bidSystem: string | null;
   /** #543 바로 가는 상세 주소가 없는 원천 — [원문] 대신 '○○에서 번호 검색' */ search?: SearchHint | null;
   /** 결과 줄: '낙찰 ○○ · 1.2억' / '유찰' */ result?: string | null;
   /** 215차(#530 로컬 10/24 ③④⑨): 금액 칸 나눔(기초금액·추정가격·배정예산) · 참가 제한 지역과 본사 기준 참가 가능 · 이 회사 진행(상태·담당) */ amounts?: string[]; limit?: RegionLimit | null; progress?: string | null };
@@ -286,6 +287,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
       limit: c.kind === 'result' || c.kind === 'cancel' ? null : regionLimit(r.region_restriction, hq), progress,
       deadlineAt: fmtWhen(dl), participationAt: fmtWhen(when(r.participation_deadline_at)), openingAt: fmtWhen(when(r.opening_at)),
       briefingAt: briefing, briefingKind: r.site_briefing_kind ?? null, briefingPlace: r.site_briefing_place ?? null, // 239차(#744)
+      elig: c.kind === 'result' || c.kind === 'cancel' ? null : eligSay(eligView(r)), // 252차 #786 — 목록 줄과 같은 말
       bidSystem: st === 'kapt_bid' && r.bid_system && sysKey(r.bid_system) !== sysKey(SRC[st]) ? String(r.bid_system) : null, // 투찰처가 원천(K-APT)과 같으면 숨김 — KG2B 같은 다른 곳만
       result: c.kind === 'result' ? resultOf(r) : c.kind === 'cancel' && r.result_note ? `취소 사유: ${String(r.result_note).slice(0, 80)}` : null }); // #751 취소 사유(K-apt 상세)
   }

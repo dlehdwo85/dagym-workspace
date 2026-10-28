@@ -90,6 +90,7 @@ import { movein759 } from './movein759.step.mjs';
 import { hub764 } from './hub764.step.mjs';
 import { bid246 } from './bid246.step.mjs';
 import { support249 } from './support249.step.mjs';
+import { elig252 } from './elig252.step.mjs';
 import { libraryDetail } from './libraryDetail.step.mjs';
 import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
@@ -2960,6 +2961,7 @@ await step('#759 2026년 입주 목록(대표 10/28 최우선): [올해 입주] 
 await step('#764·#765 영업기회 허브 [전체] 한 번에 찾기(입찰·신규 단지·시설 → 상세) · 입찰 [대상 아님] 한 번·[되돌리기] · 휴대폰 탭 한 줄', () => hub764({ owner, ctx, sql, BASE, SHOTS }));
 await step('246차 #770·#773·#774 묶인 입찰 업무 미리보기 [완료] · [대상 아님] 달마다 묶음·지난 것 접힘·사유 칩 · 공간 배지 공간 색 네모·첫 화면 한 줄', () => bid246({ owner, ctx, sql, BASE, SHOTS }));
 await step('249차 #781·#782·#784 지원사업 정렬·마감·종류 칩(다시 열어도 그대로) · 규칙상 맞음 · AI 판단 전(건당 약 n원) · [여러 건 AI 판단] 창 · 프로필 빈칸 안내 · 휴대폰 폭', () => support249({ owner, ctx, sql, BASE, FAKE, SHOTS, tick }));
+await step('252차 #786 입찰 참가자격: 목록 한 줄(공고문 절에서 뽑은 요건) → 원문 · 입찰 방식 따로 · 못 찾음 이유 · 상세 원문·[공고문 다시 읽기] · 휴대폰 폭', () => elig252({ owner, ctx, sql, BASE, SHOTS }));
 // 219차 화상회의: 시험 서버를 화상회의 스위치(가짜 엔진)를 켠 채 다시 띄워 확인하고, 끝나면 앞 단계 설정으로 되돌림
 await step('219차 워크인 화상회의(가짜 엔진): 일정 창 [워크인 화상회의] → 손님 이름 입장·대기 → 주최자 참가·허락 → 손님 회의 화면(휴대폰 폭) → 잠금·끝내기 → 일정 미리보기 회의 기록', async () => {
   // 옛 서버가 완전히 내려간 뒤 새로 띄움(열린 연결이 남아 옛 서버가 잠깐 더 답하는 일 막기 — 10초 넘으면 강제 종료)

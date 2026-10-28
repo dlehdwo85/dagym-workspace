@@ -53,7 +53,8 @@ test('다시 수집: 다시 안 묻고 목록의 짧은 값(경기도)으로 덮
   const a1 = await rowOf(FIT.bidNtceNo);
   assert.deepEqual([a1.region_restriction, a1.license_limit, a1.limits_read_at, a1.updated_at], [a0.region_restriction, a0.license_limit, a0.limits_read_at, a0.updated_at]);
   const it = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => String(x.noticeNo ?? '').startsWith(FIT.bidNtceNo));
-  assert.match(it?.terms ?? '', /업종 제한 체육시설업\(4993\)/); assert.match(it?.terms ?? '', /지역 제한 경기도 · 서울특별시/);
+  // 252차 #786: 업종·지역 제한은 '입찰 방식' 줄이 아니라 '참가자격' 줄로(공고문을 아직 안 읽었으면 API 칸만)
+  assert.equal(it?.elig?.line, '업종 체육시설업 · 지역 경기도·서울특별시'); assert.ok(!/업종 제한|지역 제한/.test(it?.terms ?? ''), it?.terms);
 });
 
 test('245차 플랫폼 공고 조회 g2b=1: 이미 물었는데 값이 없는 공고를 세 가지 방법으로 다시 물어 응답만(저장 안 함 · 키 가림) · 번호 지정', async () => {

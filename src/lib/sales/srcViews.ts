@@ -12,6 +12,7 @@ import { hubTabsOn } from './hubTabs';
 import { LEAD_STAGES, stageName } from './terms';
 import { sourceAsOf } from './collectors/store';
 import { briefingLine, briefingOf, termsLine, termsRows } from './bidTerms';
+import { eligView } from './eligibilityText';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -142,11 +143,13 @@ const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); r
   estimated: pick(r, 'estimated_amount', 'estimated_price', 'presumed_price', 'base_amount'), contractMethod: pick(r, 'contract_method', 'award_method', 'bid_system', 'contract_type'), contractPeriod: pick(r, 'contract_period', 'contract_term', 'service_period'),
   address: pick(r, 'office_address', 'address'), fax: pick(r, 'office_fax', 'fax'), salesPoint: pick(r, 'sales_point'), qualificationGap: pick(r, 'qualification_gap'),
   // 239차(#743·#744): 참가 조건 한 줄·펼치기 표·현장설명(종류·일시·장소) — K-apt 상세 칸·나라장터 API 칸에서(파일 안 열고)
-  terms: termsLine(r), termRows: termsRows(r), briefing: briefingOf(r),
+  terms: termsLine(r, { limits: false }), termRows: termsRows(r), briefing: briefingOf(r),
+  // 252차 #786: 참가자격 = 첨부 공고문 '참가자격' 절(원문·뽑은 요건 한 줄·못 찾은 이유) — 아직 안 읽었으면 나라장터 API 업종·지역만
+  elig: eligView(r),
   // #751(로컬 10/28 17:25): 취소 사유(K-apt 상세 '낙찰/유찰/취소 사유')
   cancelReason: /취소/.test(String(r.current_status ?? '')) ? pick(r, 'result_note') : null,
   detail: { tasks: pick(r, 'main_tasks', 'scope_of_work', 'tasks') ?? (/^\s*(첨부\s*)?공고문\s*참조\s*$/.test(String(r.task_scope ?? '')) ? null : pick(r, 'task_scope')),
-    qualification: pick(r, 'qualification', 'participation_requirements', 'bid_qualification') ?? termsLine(r), performance: pick(r, 'performance_requirements', 'track_record') ?? (r.performance_cert ? `실적증명서 ${r.performance_cert}` : null),
+    qualification: r.eligibility?.text ?? pick(r, 'qualification', 'participation_requirements', 'bid_qualification'), performance: pick(r, 'performance_requirements', 'track_record') ?? (r.performance_cert ? `실적증명서 ${r.performance_cert}` : null),
     regionLimit: pick(r, 'region_restriction', 'region_limit'), license: pick(r, 'license_requirements', 'license', 'license_limit', 'industry_code'), joint: pick(r, 'joint_bid', 'subcontract', 'consortium'),
     briefing: pick(r, 'site_briefing', 'pre_bid_meeting', 'site_meeting') ?? briefingLine(r), presentation: pick(r, 'proposal_presentation', 'presentation') } }); };
 // S1-3: 원본 source_type 9값(kapt_bid·g2b_bid·nuri_bid·g2b_prespec·lh_bid·lh_prespec·d2b_bid·onbid_lease·vendor_recruit) + 예전 짧은 코드
