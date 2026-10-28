@@ -36,7 +36,14 @@ before(async () => {
     if (u.pathname === '/kaptbidapi/getPblAncDeSearchV3') return send(200, dataGo(kaptApiItems), 'application/json');
     if (kapt.handle(req, res, body)) return;
     if (u.pathname === '/kapt/bid/bidResultList.do') return send(200, '<html><input name="_csrf" value="csrf-1"></html>');
-    if (u.pathname === '/kapt/bid/bidResultListAjax.do') { const kw = new URLSearchParams(body).get('searchKeyword'); return send(200, JSON.stringify(kw === '커뮤니티' ? [{ bidNum: '20261021000001', bidTitle: '[서울강남] 커뮤니티 피트니스센터 위탁운영 사업자 선정', kaptName: '래미안 강남', sucsBidder: '다짐', sucsAmt: '120000000', sucsDate: today }] : []), 'application/json'); }
+    // 234차(로컬 10/28 16:20 '목록 1,800 · 관련 0'): 실제 K-apt 결과 화면 — 검색 칸은 bidTitle·dateStart(searchKeyword 는 무시되어 검색어마다 같은 최신 목록) · 표 9칸(세대수가 3번째 칸)
+    if (u.pathname === '/kapt/bid/bidResultListAjax.do') {
+      const f = new URLSearchParams(body); const kw = f.get('bidTitle');
+      const tr = (id, apt, hh, title, dl, amt, win) => `<tr onclick="javascript:goView('${id}')" class="notice-row"><td>1</td><td class="txtL">${apt}</td><td class="txtC">${hh}</td><td class="txtL">${title}</td><td>${dl} 15:00:00</td><td class="txtR">${amt}</td><td class="txtL tab2_class">${win}</td><td class="txtR tab2_class tab3_ex_class">${amt}</td><td class="txtL tab3_ex_class">${win}</td></tr>`;
+      const rows = kw === '커뮤니티' && f.get('dateStart') ? [tr('20261021000001', '래미안 강남', '1,234', '[서울강남] 커뮤니티 피트니스센터 위탁운영 사업자 선정', today, '120,000,000', '다짐'),
+        tr('20261021000099', '래미안 강남', '1,234', '커뮤니티 승강기 교체 공사', today, '90,000,000', '승강기(주)'), tr('20260901000777', '시험오래된아파트', '800', '[경기] 시험오래된아파트 커뮤니티 헬스장 위탁운영 업체 선정', plus(-30), '50,000,000', '옛운영(주)')] : [];
+      return send(200, `<table id="tblBidList"><thead><tr><th scope="col">순번</th><th scope="col">단지명</th><th scope="col">세대수</th><th scope="col">입찰공고명</th><th scope="col"><span id="dItemNm">입찰마감일</span></th><th scope="col">낙찰금액</th><th scope="col" class="tab2_class">낙찰업체</th><th scope="col" class="tab2_class tab3_ex_class">응찰금액</th><th scope="col" class="tab3_ex_class"><span class="tab4_class">낙찰</span>업체</th></tr></thead><tbody>${rows.join('')}</tbody></table>`);
+    }
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', ntceInsttNm: '성남시', dminsttNm: '성남시체육회', bidNtceDt: `${today} 09:00:00`, bidClseDt: `${plus(9)} 10:00:00`, opengDt: `${plus(9)} 11:00:00`, presmptPrce: '250000000', ntceKindNm: '일반', cntrctCnclsMthdNm: '제한경쟁', prtcptLmtRgnNm: '경기도', bidNtceDtlUrl: 'https://www.g2b.go.kr/x/1', ntceSpecDocUrl1: 'https://www.g2b.go.kr/f/1.hwp' }] : []), 'application/json');
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/')) return send(200, dataGo([]), 'application/json');
     if (u.pathname.startsWith('/g2b/ao/PrvtBidNtceService/')) return nuriMode === 'denied' ? send(200, '<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>30</returnReasonCode><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>', 'application/xml')
@@ -108,9 +115,14 @@ test('나라장터(검색어 × 4대상) + 누리장터 활용신청 필요 → 
   const a = await ctx.owner.ok('POST', '/api/sales/collectors/public_agency_bids/run', {});
   assert.equal(a.inserted, 1, JSON.stringify(a)); assert.match(a.summary, /활용신청·주소 확인 필요: lh_prespec/);
   const k = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_results/run', {});
-  assert.equal(k.updated, 1, JSON.stringify(k));
+  assert.deepEqual([k.updated, k.inserted], [1, 1], JSON.stringify(k)); assert.match(k.summary, /관련 2건/, '승강기 교체 공사는 관련 아님 · 제목은 입찰공고명 칸(세대수 아님)');
   const [kr] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = '20261021000001'`;
   assert.equal(kr.row.winner_name, '다짐'); assert.equal(kr.row.current_status, '낙찰'); assert.equal(kr.row.classification, '즉시 검토', '담당자 분류는 그대로');
+  assert.deepEqual([kr.row.winner_amount, kr.row.award_date], [120000000, today]);
+  assert.ok(Date.parse(kr.row.result_at) > Date.now() - 600e3, '오늘 낙찰 = 결과를 처음 안 때 지금');
+  // 234차: 한 달 전 결과를 이제야 모음(목록을 고친 뒤 1년치) → 결과 시각은 그날 끝 — 당일 메일 '오늘 결과'·오늘 탭 결과 묶음에 한꺼번에 오르지 않게
+  const [ko] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = '20260901000777'`;
+  assert.deepEqual([ko.row.winner_name, ko.row.facility_name, ko.row.result_at], ['옛운영(주)', '시험오래된아파트', new Date(`${plus(-30)}T23:59:59+09:00`).toISOString()]);
   const vr = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
   assert.equal(vr.inserted, 1, JSON.stringify(vr));
   const [v] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = 'vendor_recruit'`;

@@ -211,7 +211,8 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     if (onbidSale(r)) { skip('온비드 매각'); continue; } // #537 후속2(로컬 10/24 12:58): 온비드는 임대·사용허가만
     if (notTarget(String(r.id ?? src_id), r)) { skip('대상 아님'); continue; }
     const f = passPrefs(r, p); if (!f.ok) { skip(f.why); continue; }
-    if (result) { if (isNew || resultToday || filledToday) cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why, ...(filledToday && !isNew ? { filled: true } : {}) }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
+    // 234차: 결과 줄은 처음 본 날이 아니라 결과를 안 때로 — 새로 들어온 오래된 결과(result_at 이 그날 끝)는 오늘 결과가 아님
+    if (result) { if ((isNew && resAt == null) || resultToday || filledToday) cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why, ...(filledToday && !isNew ? { filled: true } : {}) }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
     const dl = dayOf(r.deadline_at);
     if (dl && dl < day) { skip('마감 지남'); continue; } // 첫 수집일에 과거 마감 공고가 '새 공고'로 섞이지 않게(로컬 10/21 10:55)
     cands.push({ id: String(r.id ?? src_id), r, isNew, kind: String(r.current_status ?? '') === '취소' ? 'cancel' : kind0, late: isNew && !refound && seen! < dayStart, fit: f.fit, why: f.why, refound });

@@ -451,7 +451,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const who = tab === 'skip' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
     const td = today();
     const all = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since, r.refound_at); const skipped = skips.hidden(r);
-      return { ...n0, todayHit: why.hit, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
+      // 234차: 처음 본 날이 오늘이어도 결과를 안 때(result_at)가 지난 메일 전이면(오래된 결과를 이제야 모은 것) 오늘 결과 묶음에 넣지 않음 — 당일 메일과 같은 기준
+      const oldResult = isAwardResult(r) && since != null && Date.parse(String(r.result_at ?? '')) < since;
+      return { ...n0, todayHit: why.hit && !oldResult, todayLabel: why.label, result: isAwardResult(r), work: w ? pick(w, 'status') : null, classification: p?.classification ?? pick(r, 'classification'), judgment: p?.representative_judgment ?? pick(r, 'representative_judgment'),
         // 대표 검수 10/20 ②: 입찰 상세(메모·다음 조치·원본) · #610 넘기기로 만든 리드면 카드에 [되돌리기]
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, workHandoff: !!(w?.lead_id && pick(w, 'handoff_by')), raw: r.__orig ?? r,
         // 결정 15-35: 입찰 업무로 넘긴 공고 — 업무 열기·기한·결과·[되돌리기]

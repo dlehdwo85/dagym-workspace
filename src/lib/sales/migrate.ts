@@ -62,10 +62,10 @@ const idOf = (r: any) => (r?.id != null ? String(r.id) : createHash('sha256').up
 /** 191차(대표 10/27 판정 정정): 워크인 규칙으로 판정한 공고 줄(judged_at)은 원본 매일 복사가 판정 칸을 원본 값으로 되돌리지 않음 — 나머지 칸은 원본 값 */
 export const JUDGED_KEEP = ['related', 'fit_business', 'matched_keywords', 'classification', 'refit_at', 'refound_at', 'refit_lowered_at', 'refit_lowered_why', 'refit_changed_at', 'judged_at'];
 /** 232차(로컬 10/28 15:40 남원시 '결과를 처음 안 때'가 빔): 워크인 수집기·K-apt 상세가 채운 결과 칸 — 원본 매일 복사가 원본의 빈 값으로 지우지 않음(원본에 값이 있으면 원본 값).
- *  낙찰·유찰로 안 결과는 원본이 아직 결과 전이어도 상태를 되돌리지 않고, 원본 복사로 결과를 처음 알면 그때를 result_at 으로 */
-export const RESULT_KEEP = ['result_at', 'result_filled_at', 'kapt_detail_at', 'participants', 'result_note', 'winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'winner_rate', 'bidders'];
+ *  낙찰·유찰로 안 결과는 원본이 아직 결과 전이어도 상태를 되돌리지 않고, 원본 복사로 결과를 처음 알면 그때를 result_at 으로(234차: 낙찰일·마감일이 7일보다 오래된 결과는 찍지 않음 — 당일 메일에 한꺼번에 오르지 않게) */
+export const RESULT_KEEP = ['result_at', 'result_filled_at', 'kapt_detail_at', 'kapt_detail_v', 'participants', 'result_note', 'winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'winner_rate', 'bidders'];
 async function upsertRows(scope: string, tbl: string, rows: any[]) {
-  const sql = db(); const now = new Date();
+  const sql = db(); const now = new Date(); const weekAgo = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(now.getTime() - 7 * 864e5));
   for (let n = 0; n < rows.length; n += 500) {
     const chunk = rows.slice(n, n + 500).map((r) => ({ scope, tbl, src_id: idOf(r), row: sql.json(r), gone: false, synced_at: now }));
     if (tbl === 'procurement_notices') await sql`insert into sales_src_rows ${sql(chunk as never)} on conflict (scope, tbl, src_id) do update set
@@ -77,6 +77,7 @@ async function upsertRows(scope: string, tbl: string, rows: any[]) {
           then jsonb_strip_nulls(jsonb_build_object('current_status', sales_src_rows.row->'current_status', 'notice_state', sales_src_rows.row->'notice_state')) else '{}'::jsonb end)
         || (case when not (sales_src_rows.row ? 'result_at') and not (coalesce(sales_src_rows.row->>'current_status', '') ~ '낙찰|유찰' or coalesce(sales_src_rows.row->>'winner_name', '') <> '')
             and (coalesce(excluded.row->>'current_status', '') ~ '낙찰|유찰' or coalesce(excluded.row->>'winner_name', '') <> '')
+            and not coalesce(coalesce(nullif(left(excluded.row->>'award_date', 10), ''), left(excluded.row->>'deadline_at', 10)) < ${weekAgo}, false)
           then jsonb_build_object('result_at', ${now.toISOString()}::text) else '{}'::jsonb end),
       gone = false, synced_at = excluded.synced_at`;
     else await sql`insert into sales_src_rows ${sql(chunk as never)} on conflict (scope, tbl, src_id) do update set row = excluded.row, gone = false, synced_at = excluded.synced_at`;

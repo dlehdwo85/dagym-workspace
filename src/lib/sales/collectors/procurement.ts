@@ -93,6 +93,12 @@ export function matchFit(...texts: (string | null | undefined)[]): FitResult {
 }
 
 /** 로컬 10/24 12:20(#537 후속): 결과(낙찰·유찰) 줄 — 영업 기회가 아니라 결과. 오늘 새 공고·새 공고 수에서 빼고 '결과' 묶음으로(당일 메일·영업기회 오늘 탭·영업 홈 같은 기준) */
+/** 234차: 결과를 처음 안 때 — 낙찰일(없으면 마감일)이 7일보다 오래된 결과를 이제야 안 것(K-apt 결과 목록을 고친 뒤 1년치처럼)은 그날 끝으로 남겨 당일 메일 '오늘 결과'로 한꺼번에 오르지 않게 */
+export function resultAtOf(r: any, now: Date) {
+  const d = String(r?.award_date ?? '').slice(0, 10).match(/^\d{4}-\d{2}-\d{2}$/)?.[0] ?? String(r?.deadline_at ?? '').slice(0, 10).match(/^\d{4}-\d{2}-\d{2}$/)?.[0];
+  const end = d ? Date.parse(`${d}T23:59:59+09:00`) : NaN;
+  return Number.isFinite(end) && end < now.getTime() - 7 * 864e5 ? new Date(end).toISOString() : now.toISOString();
+}
 export const isAwardResult = (r: any) => /낙찰|유찰/.test(String(r?.current_status ?? '')) || ['winner_name', 'award_company', 'successful_bidder'].some((k) => String(r?.[k] ?? '').trim() !== '');
 /** 닫힌 공고 상태 — '마감임박'(3일 안 마감, 아직 진행 중)은 닫힘이 아님(로컬 10/24 12:58: 마감 10/26 공고가 '마감·취소'로 보였음) */
 export const CLOSED_STATUS = /마감(?!임박)|종료|취소|낙찰|유찰|개찰완료/;
@@ -125,7 +131,7 @@ export const PROCUREMENT_ETL_FIELDS = ['source_url', 'notice_file_url', 'issuer'
   'bid_system', 'award_method', 'notice_state', 'facility_name', 'bid_category', 'office_phone', 'office_fax', 'office_address', 'household_count', 'fit_business', 'matched_keywords', 'related', 'attachment_urls',
   'notice_kind', 'participation_deadline_at', 'opening_at', 'demand_agency', 'region_restriction', 'industry_code', 'winner_name', 'winner_amount', 'award_date', 'files_checked_at', 'site_briefing_at', 'site_briefing_place',
   'base_amount', 'notice_no', 'winner_biz_no', 'winner_rate', 'bidders'] as const; // #522 기초금액(LH fdmtlAmt·국방 기초예비가격) — 추정가격·배정예산과 따로 · #543 공고번호(바로 가는 주소가 없는 원천의 '번호 검색' 안내)
-export const AWARD_FIELDS = ['winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'current_status', 'winner_rate', 'bidders', 'participants', 'result_note', 'kapt_detail_at'] as const; // 196차: 낙찰자 사업자번호 — 입찰 업무 '우리 회사 낙찰' 판정 · #530 낙찰률·참가 업체 수(당일 메일 결과 구역) · 231차 K-apt 상세 참여업체(대표자·전화 없음)·사유·읽은 때
+export const AWARD_FIELDS = ['winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'current_status', 'winner_rate', 'bidders', 'participants', 'result_note', 'kapt_detail_at', 'kapt_detail_v'] as const; // 196차: 낙찰자 사업자번호 — 입찰 업무 '우리 회사 낙찰' 판정 · #530 낙찰률·참가 업체 수(당일 메일 결과 구역) · 231차 K-apt 상세 참여업체(대표자·전화 없음)·사유·읽은 때
 export type NoticeRow = Record<string, unknown> & { source_type: string; source_external_id: string; title: string; source_url: string };
 
 const txt = (v: unknown): string | null => { if (v == null) return null; const t = String(v).replace(/\s+/g, ' ').trim(); return t ? t : null; };
@@ -182,8 +188,9 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
     base_amount: num(p.base_amount),
     notice_no: txt(p.notice_no), // #543 차수·구분 없는 공고번호(온비드·국방·LH — 원천 사이트에서 검색할 번호)
     // 231차 K-apt 상세: 참여업체(이름·사업자번호·응찰금액·낙찰 여부·무효만 — 대표자·전화 칸은 받지 않음)·낙찰/유찰/취소 사유·상세 읽은 때
-    ...(Array.isArray(p.participants) ? { participants: (p.participants as any[]).slice(0, 60).map((b) => ({ name: txt(b?.name)?.slice(0, 100) ?? '', bizNo: txt(b?.bizNo), amount: num(b?.amount), won: b?.won === true, invalid: b?.invalid === true })).filter((b) => b.name) } : {}),
-    ...(txt(p.result_note) ? { result_note: txt(p.result_note)!.slice(0, 200) } : {}), ...(txt(p.kapt_detail_at) ? { kapt_detail_at: txt(p.kapt_detail_at) } : {}),
+    ...(Array.isArray(p.participants) ? { participants: (p.participants as any[]).slice(0, 60).map((b) => ({ name: txt(b?.name)?.slice(0, 100) ?? '', bizNo: txt(b?.bizNo), amount: num(b?.amount), won: b?.won === true, invalid: b?.invalid === true,
+      ...(num(b?.score) != null ? { score: num(b?.score) } : {}) })).filter((b) => b.name) } : {}), // 234차: 적격심사 평가 점수(있을 때만)
+    ...(txt(p.result_note) ? { result_note: txt(p.result_note)!.slice(0, 200) } : {}), ...(txt(p.kapt_detail_at) ? { kapt_detail_at: txt(p.kapt_detail_at) } : {}), ...(num(p.kapt_detail_v) != null ? { kapt_detail_v: num(p.kapt_detail_v) } : {}),
   };
   return { ok: true, row };
 }
@@ -216,7 +223,7 @@ export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<stri
     const p = prev.get(v.row.source_external_id);
     if (!p) {
       if (mergeScope === 'award' && !v.row.winner_name) continue; // 낙찰 병합인데 기존 공고가 없고 낙찰자도 없으면 버림
-      plan.inserts.push({ key, row: { ...v.row, classification: initialClassification(v.row), ...(isAwardResult(v.row) ? { result_at: now.toISOString() } : {}) } }); continue;
+      plan.inserts.push({ key, row: { ...v.row, classification: initialClassification(v.row), ...(isAwardResult(v.row) ? { result_at: resultAtOf(v.row, now) } : {}) } }); continue;
     }
     const patch: Record<string, unknown> = {}; const changed: string[] = [];
     const fields = mergeScope === 'award' ? AWARD_FIELDS : PROCUREMENT_ETL_FIELDS;
@@ -239,7 +246,7 @@ export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<stri
       if (patch.related === false && (p.related === true || p.related === 'true')) { patch.classification = '참고(비관련)'; if (p.refound_at) patch.refound_at = null; }
     }
     // 215차(#530): 결과(낙찰·유찰)를 처음 알게 된 때 — 당일 메일 '결과' 구역은 이 시각으로(낙찰률 채우기 같은 고침으로 예전 결과가 다시 오르지 않게)
-    if (changed.length && !isAwardResult(p) && isAwardResult({ ...p, ...patch })) { patch.result_at = now.toISOString(); changed.push('result_at'); }
+    if (changed.length && !isAwardResult(p) && isAwardResult({ ...p, ...patch })) { patch.result_at = resultAtOf({ ...p, ...patch }, now); changed.push('result_at'); }
     // 230차(로컬 10/28 14:40 남원시): 이미 결과였던 줄에 낙찰률·참가 수가 뒤늦게 채워진 때 — 다음 당일 메일 결과 구역에 '보완' 한 줄로 다시 냄
     else if (isAwardResult(p) && ((patch.winner_rate != null && !filled(p.winner_rate)) || (patch.bidders != null && !filled(p.bidders)))) { patch.result_filled_at = now.toISOString(); changed.push('result_filled_at'); }
     if (changed.length) plan.updates.push({ id: String(p.id), key, patch, summary: `변경: ${changed.join(', ')}` });
