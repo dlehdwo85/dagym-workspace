@@ -103,15 +103,15 @@ test('#781 정렬(마감 임박 — 상시는 맨 뒤 · 지원 금액 큰 순 �
   assert.deepEqual(order(mk), ['s1']); assert.equal(mk.chips.dd.d14, 2, 'D-day 칩 숫자는 고른 종류 안에서'); assert.equal(mk.chips.kind.invest, 1, '종류 칩 숫자는 고른 D-day 안에서');
   // 사람별 기억 — staffA 가 고른 것은 staffA 에게만
   const saved = await ctx.staffA.client.ok('PUT', '/api/sales/support/view', { sort: 'amount', dd: 'd30', kind: 'money' });
-  assert.deepEqual(saved, { sort: 'amount', dd: 'd30', kind: 'money' });
+  assert.deepEqual(saved, { sort: 'amount', dd: 'd30', kind: 'money', aud: 'all' }); // 254차 대상 칩(aud) 추가
   assert.equal((await ctx.staffA.client.req('PUT', '/api/sales/support/view', { sort: 'cheap' })).status, 400);
   const sa = await ctx.staffA.client.ok('GET', `/api/sales/support?tab=all&q=${encodeURIComponent('정렬시험')}`);
-  assert.deepEqual([sa.view, sa.sortUsed, order(sa)], [{ sort: 'amount', dd: 'd30', kind: 'money' }, 'amount', ['s2', 's1']]);
+  assert.deepEqual([sa.view, sa.sortUsed, order(sa)], [{ sort: 'amount', dd: 'd30', kind: 'money', aud: 'all' }, 'amount', ['s2', 's1']]);
   const ow = await ctx.owner.ok('GET', `/api/sales/support?tab=all&q=${encodeURIComponent('정렬시험')}`);
-  assert.deepEqual([ow.view, ow.sortUsed, ow.items.length], [{ sort: null, dd: 'all', kind: 'all' }, 'new', 6], '다른 사람은 그대로(탭 기본 정렬)');
+  assert.deepEqual([ow.view, ow.sortUsed, ow.items.length], [{ sort: null, dd: 'all', kind: 'all', aud: 'all' }, 'new', 6], '다른 사람은 그대로(탭 기본 정렬)');
   await ctx.staffA.client.ok('PUT', '/api/sales/support/view', { sort: null });
   const sb = await ctx.staffA.client.ok('GET', `/api/sales/support?tab=all&q=${encodeURIComponent('정렬시험')}`);
-  assert.deepEqual([sb.view, sb.sortUsed], [{ sort: null, dd: 'd30', kind: 'money' }, 'new'], '정렬만 풀면 칩은 그대로');
+  assert.deepEqual([sb.view, sb.sortUsed], [{ sort: null, dd: 'd30', kind: 'money', aud: 'all' }, 'new'], '정렬만 풀면 칩은 그대로');
   assert.equal((await ctx.staffA.client.ok('GET', '/api/sales/support?tab=results')).chips, null, '신청·결과 탭은 칩 없음');
   await ctx.staffA.client.ok('PUT', '/api/sales/support/view', { dd: 'all', kind: 'all' });
   await sql`delete from support_programs where source_id like 'S%'`;

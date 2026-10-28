@@ -36,9 +36,12 @@ function zip(files) { // 저장(압축 없음) zip — tests/api/library-text.te
 }
 const sharp = (await import('sharp')).default;
 const PNG = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#ffffff' } }).png().toBuffer();
-// 253차(로컬 운영 docx: 글 0·그림 16장) — 그림 7장 = 앞 6장만 AI 에
-const PHOTO_DOCX = zip([['[Content_Types].xml', '<Types/>'], ['word/document.xml', '<w:document><w:body><w:p><w:r><w:drawing/></w:r></w:p></w:body></w:document>'],
-  ...[1, 2, 3, 4, 5, 6, 7].map((n) => [`word/media/image${n}.png`, PNG])]);
+const JPG = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#f0f0f0' } }).jpeg().toBuffer();
+// 253차(로컬 운영 docx: 글 0·그림 16장) — 그림 7장 = 앞 6장만 AI 에. 254차: 운영 파일처럼 긴 해시 이름 jpg 섞음
+const DOC_XML = '<w:document><w:body><w:p><w:r><w:drawing/></w:r></w:p></w:body></w:document>';
+const PHOTO_DOCX = zip([['[Content_Types].xml', '<Types/>'], ['word/document.xml', DOC_XML],
+  ...[1, 2, 3, 4].map((n) => [`word/media/image${n}.png`, PNG]), ...['3f9a1c0b77e24d8e9b1a', 'a07c55e1d2f34b6c8e90', 'c1d2e3f4a5b6c7d8e9f0'].map((h) => [`word/media/${h}.jpg`, JPG])]);
+const BAD_DOCX = zip([['[Content_Types].xml', '<Types/>'], ['word/document.xml', DOC_XML], ['word/media/5e8f0a1b2c3d.jpg', Buffer.from('jpg 가 아닌 글자')]]); // 254차: 그림을 못 바꾸면 이유를 남김
 const say = (o) => ({ content: [{ type: 'text', text: JSON.stringify(o) }], stop_reason: 'end_turn' });
 const queue = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: items }) });
 
@@ -84,7 +87,9 @@ const N = {
   CLOSED: { id: '00000000-0000-4000-8000-000000252005', bid: 'E252005', files: [{ seq: 25205, fileName: '입찰공고문.txt', body: Buffer.from(A) }], closed: true },
   OTHER: { id: '00000000-0000-4000-8000-000000252006', bid: 'E252006', files: [{ seq: 25206, fileName: '입찰공고문.txt', body: Buffer.from(A) }], unrelated: true },
   PHOTO: { id: '00000000-0000-4000-8000-000000252007', bid: 'E252007', files: [{ seq: 25207, fileName: '입찰공고문.docx', body: PHOTO_DOCX }] }, // 253차: 그림만 든 docx
+  BAD: { id: '00000000-0000-4000-8000-000000252008', bid: 'E252008', files: [{ seq: 25208, fileName: '입찰공고문.docx', body: BAD_DOCX }] },
 };
+const NO_PAYER = '공고문이 사진(스캔)으로만 되어 있음 · AI 사진 읽기 안 함: 비용 낼 회사 없음(영업 공간·전환 열린 운영 회사)';
 const G = { id: '00000000-0000-4000-8000-000000252010', no: 'R26BK252010-000' };
 const docs = { '/g2b/notice-b.txt': B, '/g2b/notice-c.txt': C };
 let srv, ctx, sql, fake, fg;
@@ -127,7 +132,7 @@ test('정기 실행: 열린 관련 공고만 읽음(마감 지남·관련 아님
   assert.equal((await rowOf(N.KC.id)).eligibility.error, '첨부 공고문 없음');
   assert.equal((await rowOf(N.KD.id)).eligibility.line, '공통 자격(사업자선정지침)만 적힘 — 별도 요건 없음');
   const ph = (await rowOf(N.PHOTO.id)).eligibility;
-  assert.deepEqual([ph.text, ph.error, ph.file?.name], [null, '공고문이 사진(스캔)으로만 되어 있음', '입찰공고문.docx'], '못 읽어도 어떤 파일을 봤는지');
+  assert.deepEqual([ph.text, ph.error, ph.file?.name, ph.tries], [null, NO_PAYER, '입찰공고문.docx', 0], '못 읽어도 어떤 파일을 봤는지 · AI 를 안 부른 이유 · 설정 이유는 못 읽은 횟수로 안 셈');
   assert.equal((await rowOf(N.CLOSED.id)).eligibility, undefined, '마감 지난 공고는 안 읽음');
   assert.equal((await rowOf(N.OTHER.id)).eligibility, undefined, '관련 아닌 공고는 안 읽음');
   // 다시 돌아도 같은 공고는 안 읽음(못 읽은 것도 20시간 뒤에)
@@ -170,8 +175,12 @@ test("화면 자료·공고 조회·당일 메일: '참가자격' 한 줄과 원
 });
 
 test('#790 사진 공고문: 글이 없으면 AI 비전으로 참가자격 절을 옮겨 적음(앞 6장) · 운영 회사 AI 예산·사용량 이름 · 같은 첨부면 다시 안 부름 · 화면 안내', async () => {
-  assert.equal((await rowOf(N.PHOTO.id)).eligibility.error, '공고문이 사진(스캔)으로만 되어 있음', '비용을 낼 회사(영업 전환 연 회사)가 없으면 사진 읽기 안 함');
+  assert.equal((await rowOf(N.PHOTO.id)).eligibility.error, NO_PAYER, '비용을 낼 회사(영업 전환 연 회사)가 없으면 사진 읽기 안 함');
+  // 254차(로컬 01:25 운영: 이유 없이 안 읽힘): [다시 읽기]를 여러 번 눌러도 설정 이유면 횟수가 안 쌓여 나중에 읽을 수 있음
+  for (let i = 0; i < 3; i++) assert.equal((await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.PHOTO.id })).eligibility.tries, 0);
   await sql`insert into sales_cutover (tenant, writes_open, ok) values ('default', true, true) on conflict (tenant) do update set writes_open = true, ok = true`;
+  const bad = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.BAD.id })).eligibility;
+  assert.match(bad.error, /^공고문이 사진\(스캔\)으로만 되어 있음 · AI 사진 읽기 안 함: 그림 1장을 AI 용으로 못 바꿈\(.+\)$/, bad.error); assert.equal(bad.tries, 0);
   await queue([say({ found: true, text: R1 })]);
   const r = await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.PHOTO.id });
   assert.deepEqual([r.eligibility.by, r.eligibility.text, r.eligibility.error, r.eligibility.file?.name], ['vision', E.eligibilitySection(R1), null, '입찰공고문.docx']);

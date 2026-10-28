@@ -16,12 +16,12 @@ import { vendorRecruitWatch } from './vendorRecruit';
 import { kicoxIndustrial, publicSports, rebRecent, touristHotels } from './facilities';
 import { kaptNewComplexes } from './kaptComplexes';
 import { kaptWeeklyComplexes } from './kaptWeekly';
-import { bizinfoSupport, kstartupSupport, supportWatch } from './support';
+import { bizinfoSupport, gov24Support, kstartupSupport, supportWatch } from './support';
 
 /** 원본 12개 그대로(영업관리 FEATURES 4장 순서) + #450 지원사업 3개(하루 두 번). 실행 시각은 KST 시(時) — tick 이 그 시각 이후 하루 1회(againKst 가 있으면 그 시각(들) 이후 한 번씩 더) */
 export const COLLECTORS: Collector[] = [kaptSaSun, operatingFromKapt, kicoxIndustrial, publicSports, touristHotels, kaptWeeklyComplexes /* 200차 신규 단지 1순위 */, rebRecent, kaptNewComplexes /* 186차 */, kaptBidNotices, g2bBidNotices, g2bPrespecAwards, kaptBidResults, publicAgencyBids, vendorRecruitWatch,
-  bizinfoSupport, kstartupSupport, supportWatch];
-export const SUPPORT_COLLECTORS = new Set(['bizinfo_support', 'kstartup_support', 'support_watch']);
+  bizinfoSupport, kstartupSupport, supportWatch, gov24Support];
+export const SUPPORT_COLLECTORS = new Set(['bizinfo_support', 'kstartup_support', 'support_watch', 'gov24_support']);
 export const BID_COLLECTORS = new Set(['kapt_bid_notices', 'g2b_bid_notices', 'g2b_prespec_awards', 'kapt_bid_results', 'public_agency_bids', 'vendor_recruit_watch']);
 export const find = (slug: string) => COLLECTORS.find((c) => c.slug === slug) ?? null;
 const SRC_KO: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드', vendor_recruit: '협력사 모집' };

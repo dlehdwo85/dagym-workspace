@@ -43,7 +43,7 @@ export async function support249({ owner, ctx, sql, BASE, FAKE, SHOTS, tick }) {
     await owner.goto(`${BASE}/s/sales/support`);
     await owner.getByTestId('support-viewbar').waitFor();
     assert.deepEqual([await owner.getByTestId('support-sort-amount').getAttribute('aria-pressed'), await owner.getByTestId('support-dd-d7').getAttribute('aria-pressed')], ['true', 'true']);
-    assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/support')).view, { sort: 'amount', dd: 'd7', kind: 'all' });
+    assert.deepEqual((await ctx.owner.ok('GET', '/api/sales/support')).view, { sort: 'amount', dd: 'd7', kind: 'all', aud: 'all' }); // 254차 대상 칩(aud)
     await owner.getByTestId('support-dd-all').click(); await owner.getByTestId('support-sort-fit').click();
     await owner.waitForFunction(() => document.querySelector('[data-testid="support-sort-fit"]')?.getAttribute('aria-pressed') === 'true');
     // 관리자 [여러 건 AI 판단] — 건수 × 예상 비용을 보고 누를 때만

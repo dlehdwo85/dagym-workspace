@@ -18,8 +18,8 @@ const ymd = (d: Date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZon
 const addDays = (day: string, n: number) => ymd(new Date(Date.parse(`${day}T12:00:00+09:00`) + n * 864e5));
 const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00+09:00`) - Date.parse(`${a}T12:00:00+09:00`)) / 864e5);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SOURCE_SLUG: Record<string, string> = { bizinfo: 'bizinfo_support', kstartup: 'kstartup_support', watch: 'support_watch' };
-export const SOURCE_LABEL: Record<string, string> = { bizinfo: '기업마당', kstartup: 'K-Startup', watch: '기관 공지', manual: '직접 입력' };
+const SOURCE_SLUG: Record<string, string> = { bizinfo: 'bizinfo_support', kstartup: 'kstartup_support', watch: 'support_watch', gov24: 'gov24_support' };
+export const SOURCE_LABEL: Record<string, string> = { bizinfo: '기업마당', kstartup: 'K-Startup', watch: '기관 공지', gov24: '정부24 지원금', manual: '직접 입력' };
 export const STATUS_LABEL: Record<string, string> = { interest: '관심', preparing: '신청 준비', applied: '신청 완료', selected: '선정', rejected: '탈락', dropped: '포기' };
 const OPEN_WORK = ['interest', 'preparing'];
 export const SIZES = ['예비창업', '소상공인', '소기업', '중기업', '중견기업'] as const;
@@ -31,6 +31,9 @@ export const INTEREST_WORDS: Record<string, string[]> = {
 };
 export const CERTS = ['벤처기업', '이노비즈', '메인비즈', '기업부설연구소', '연구개발전담부서', 'SW사업자', '여성기업', '사회적기업', '장애인기업', '소셜벤처', 'ISO'];
 /** #649(대표 10/25 23:20 '식품제조가공업 대상 공고가 맞춤에'): 공고 '지원 대상'에 적힌 업종 묶음 ↔ 회사 프로필 업종(같은 낱말 표로 묶음). 업종 중립 — 특정 회사 이름 없음. 짧은 영문(IT·SW·AI)은 낱말 경계로만 */
+/** #788 정부24 지원 조건 코드 이름(소상공인·법인/단체·업종만) */
+export const JA_LABEL: Record<string, string> = { JA1101: '예비창업자', JA1102: '영업 중 소상공인', JA1103: '생계곤란·폐업예정 소상공인', JA1201: '음식점업', JA1202: '제조업', JA1299: '기타업종',
+  JA2101: '중소기업', JA2102: '사회복지시설', JA2103: '기관·단체', JA2201: '제조업', JA2202: '농림어업', JA2203: '정보통신업', JA2299: '기타업종' };
 export const INDUSTRY_GROUPS: Record<string, string[]> = {
   식품: ['식품', '식품제조', '식품가공', '즉석판매', '외식', '음식점', '농식품', '식음료', '먹거리', '푸드'],
   제조: ['제조업', '제조기업', '제조 중소기업', '뿌리산업', '스마트공장', '생산설비', '생산 설비', '공장'],
@@ -157,9 +160,9 @@ export type Profile = { region_sido: string | null; region_sigungu: string | nul
   certs: string[]; brands: string[]; interests: string[]; excludes: string[]; memo: string | null; certs_none?: boolean };
 type Prog = { id: string; tenant: string | null; source: string; title: string; agency: string | null; executor: string | null; category: string | null; target: string | null; regions: string[]; nationwide: boolean; summary: string | null;
   apply_start: string | null; apply_end: string | null; apply_text: string | null; amount: string | null; biz_years: string | null; url: string | null; apply_url: string | null; attachments: { name: string; url: string }[]; hashtags: string[];
-  posted_at: string | null; first_seen_at: string; created_by: string | null };
+  posted_at: string | null; first_seen_at: string; created_by: string | null; /** #788 정부24 지원 조건(JA 코드) */ conditions?: string[] };
 const COLS = (sql: Sql, summaryLen = 1500) => sql`p.id, p.tenant, p.source, p.title, p.agency, p.executor, p.category, p.target, p.regions, p.nationwide, left(p.summary, ${summaryLen}) as summary, p.apply_start::text, p.apply_end::text,
-  p.apply_text, p.amount, p.biz_years, p.url, p.apply_url, p.attachments, p.hashtags, p.posted_at, p.first_seen_at, p.created_by`;
+  p.apply_text, p.amount, p.biz_years, p.url, p.apply_url, p.attachments, p.hashtags, p.posted_at, p.first_seen_at, p.created_by, p.conditions`;
 
 // ---------------- 회사 프로필 ----------------
 const arr = z.array(z.string().trim().min(1).max(40)).max(40).default([]);
@@ -335,6 +338,34 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
   }
   if (/중견기업/.test(tg) && !/중소/.test(tg) && pr.size && ['소상공인', '소기업', '예비창업'].includes(pr.size)) flags.push({ level: 'warn', text: '중견기업 대상' });
   if (/(대학생|대학원생|청년\s*개인|농업인|어업인|임업인)/.test(String(p.target ?? '')) && !/기업/.test(String(p.target ?? ''))) flags.push({ level: 'warn', text: '개인·특정 대상 공고' });
+  // #788 정부24 지원 조건(supportConditions JA 코드) — 소상공인만(JA11)·법인/단체(JA21)·업종(JA12·JA22)
+  const jc = p.source === 'gov24' ? p.conditions ?? [] : [];
+  if (jc.length) {
+    const small = jc.filter((c) => c.startsWith('JA11')); const corp = jc.filter((c) => c.startsWith('JA21')); const ind = jc.filter((c) => /^JA(12|22)/.test(c));
+    if (small.length && !corp.length) {
+      const heavy = /제조|건설|운수|광업/.test(pr.industries.join(' ')); const lim = heavy ? 10 : 5; // 소상공인 = 상시근로자 5명 미만(제조·건설·운수·광업 10명 미만)
+      if (small.every((c) => c === 'JA1101')) { if (pr.founded) { flags.push({ level: 'no', text: '예비창업자 대상' }); score -= 100; } else flags.push({ level: 'warn', text: '예비창업자 대상', need: 'founded' }); }
+      else if (pr.size === '소상공인' || (pr.employees != null && pr.employees < lim)) { flags.push({ level: 'ok', text: '소상공인 대상 — 우리 회사 해당' }); score += 5; }
+      else if (pr.employees != null || (pr.size && pr.size !== '예비창업')) { flags.push({ level: 'no', text: `소상공인 대상 — 우리 회사는 ${pr.employees != null ? `상시근로자 ${pr.employees}명이라` : `${pr.size}라`} 소상공인 아님` }); score -= 100; }
+      else flags.push({ level: 'warn', text: '소상공인 대상 — 규모·상시근로자 수를 넣으면 판단', need: 'employees' });
+    } else if (corp.length && !corp.includes('JA2101') && !small.length) { flags.push({ level: 'no', text: '사회복지시설·기관/단체 대상' }); score -= 100; }
+    else if (corp.includes('JA2101')) { if (pr.size === '중견기업') flags.push({ level: 'warn', text: '중소기업 대상(우리 중견기업)' }); else { flags.push({ level: 'ok', text: '중소기업 대상' }); score += 5; } }
+    if (ind.length) {
+      if (!pr.industries.length) flags.push({ level: 'warn', text: `${[...new Set(ind.map((c) => JA_LABEL[c] ?? c))].join('·')} 대상 — 프로필에 업종을 넣으면 판단`, need: 'industries' });
+      else {
+        const mine = new Set<string>();
+        for (const w of pr.industries) {
+          if (/제조/.test(w)) { mine.add('JA2201'); mine.add('JA1202'); } else if (/농|어업|임업|축산|수산/.test(w)) mine.add('JA2202');
+          else if (/정보통신|소프트웨어|SW|IT|ICT|플랫폼|앱|인공지능|AI|데이터|클라우드|통신/i.test(w)) mine.add('JA2203');
+          else if (/음식|외식|식당/.test(w)) mine.add('JA1201');
+          else { mine.add('JA2299'); mine.add('JA1299'); } // 기타업종 — 제조·농림어업·정보통신·음식점이 아닌 업종(체육시설 운영 등)
+        }
+        const hit = ind.filter((c) => mine.has(c)); const names = (cs: string[]) => [...new Set(cs.map((c) => JA_LABEL[c] ?? c))].join('·');
+        if (hit.length) { flags.push({ level: 'ok', text: `대상 업종 ${names(hit)} — 우리 업종` }); score += 15; }
+        else { flags.push({ level: 'no', text: `${names(ind)} 대상(우리 ${pr.industries.slice(0, 2).join('·')})` }); score -= 100; }
+      }
+    }
+  }
   // #649 업종: '지원 대상'(우대·가점·제외 구절은 뺌)에 적힌 업종이 우리 프로필 업종과 하나도 안 겹치면 해당 없음(여러 업종이 나열되면 하나만 겹쳐도 통과), 프로필 업종이 비어 있으면 확인 필요, 제목에만 있으면 확인 필요
   // #781: 본문의 '○○ 분야(업종·산업) 기업' 구절도 대상 업종(남동발전 '발전·에너지 분야 중소기업') · 제목의 대기 배출시설·방지시설 낱말(IoT 측정기기 부착 지원)
   const phr = [...targetText(String(p.summary ?? '').slice(0, 4000)).matchAll(/([가-힣A-Za-z·ㆍ,\s]{2,24}?)\s*(?:분야|업종|산업)\s*(?:의\s*)?(?:중소\s*|중견\s*|창업\s*|영위\s*)?(?:기업|사업자|업체)/g)].map((m) => m[1]).join(' · ');
@@ -420,20 +451,31 @@ export function kindsOf(p: { title: string; category: string | null }, amount: s
 export const SORTS = ['fit', 'deadline', 'new', 'amount'] as const;
 export const DDS = ['all', 'd3', 'd7', 'd14', 'd30', 'open'] as const;
 const KIND_KEYS = ['all', ...Object.keys(KIND_LABEL)] as [string, ...string[]];
+/** #788 대상 칩 — 중소기업·법인 / 소상공인 / 고용 지원금(정부24 지원 조건 코드 · 대상·제목 낱말) */
+export const AUD_LABEL = { corp: '중소기업·법인', small: '소상공인', job: '고용 지원금' } as const;
+const AUD_KEYS = ['all', ...Object.keys(AUD_LABEL)] as [string, ...string[]];
+function audOf(p: Prog): string[] {
+  const c = p.conditions ?? []; const out: string[] = [];
+  if (c.some((x) => x.startsWith('JA21')) || (p.source !== 'gov24' && /중소\s*기업|법인|중소·중견/.test(p.target ?? ''))) out.push('corp');
+  if (c.some((x) => x.startsWith('JA11')) || /소상공인/.test(`${p.title} ${p.target ?? ''}`)) out.push('small');
+  // 정부24 서비스분야 '고용·창업'은 창업 융자도 품어 분야만으로는 안 셈 — 제목 낱말, 또는 분야가 고용이고 대상에 채용·인건비가 있을 때
+  if (/장려금|고용\s*(?:지원|유지|안정|촉진|창출)|채용|일자리|인건비/.test(p.title) || (/고용|일자리/.test(p.category ?? '') && /채용|신규\s*고용|인건비/.test(p.target ?? ''))) out.push('job');
+  return out;
+}
 /** 탭마다 기본 정렬(사람이 고르면 그 정렬을 기억해 모든 탭에) */
 const TAB_SORT: Record<string, string> = { fit: 'fit', closing: 'deadline', list: 'deadline', mine: 'deadline', all: 'new' };
-export const supportViewInput = z.object({ sort: z.enum(SORTS).nullable().optional(), dd: z.enum(DDS).optional(), kind: z.enum(KIND_KEYS).optional() });
-type SupportView = { sort: (typeof SORTS)[number] | null; dd: (typeof DDS)[number]; kind: string };
+export const supportViewInput = z.object({ sort: z.enum(SORTS).nullable().optional(), dd: z.enum(DDS).optional(), kind: z.enum(KIND_KEYS).optional(), aud: z.enum(AUD_KEYS).optional() });
+type SupportView = { sort: (typeof SORTS)[number] | null; dd: (typeof DDS)[number]; kind: string; aud: string };
 /** 사람별 정렬·필터 기억 — user_settings.list_views.support(어느 기기에서나 같게) */
 async function supportViewOf(sql: Sql, userId: string): Promise<SupportView> {
   const [r] = await sql<{ v: any }[]>`select list_views->'support' as v from user_settings where user_id = ${userId}`;
   const v = supportViewInput.safeParse(r?.v ?? {}); const d = v.success ? v.data : {};
-  return { sort: d.sort ?? null, dd: d.dd ?? 'all', kind: d.kind ?? 'all' };
+  return { sort: d.sort ?? null, dd: d.dd ?? 'all', kind: d.kind ?? 'all', aud: d.aud ?? 'all' };
 }
 export async function saveSupportView(u: SessionUser, i: z.infer<typeof supportViewInput>) {
   await assertSpace(u, 'sales');
   const sql = db(); const cur = await supportViewOf(sql, u.id);
-  const next: SupportView = { sort: i.sort !== undefined ? i.sort : cur.sort, dd: i.dd ?? cur.dd, kind: i.kind ?? cur.kind };
+  const next: SupportView = { sort: i.sort !== undefined ? i.sort : cur.sort, dd: i.dd ?? cur.dd, kind: i.kind ?? cur.kind, aud: i.aud ?? cur.aud };
   await sql`insert into user_settings (user_id, list_views) values (${u.id}, ${sql.json({ support: next } as never)})
     on conflict (user_id) do update set list_views = coalesce(user_settings.list_views, '{}'::jsonb) || ${sql.json({ support: next } as never)}`;
   return next;
@@ -459,7 +501,7 @@ function itemOf(p: Prog, rule: Rule, m: Match | undefined, w: Work | undefined, 
   return {
     id: p.id, title: p.title, agency: p.agency, executor: p.executor, category: p.category, source: p.source, sourceLabel: SOURCE_LABEL[p.source] ?? p.source, regions: p.regions ?? [], nationwide: p.nationwide,
     applyStart: p.apply_start, applyEnd: p.apply_end, applyText: p.apply_text, dday, amount, amountKrw: amountKrw(amount) ?? amountKrw(p.amount), kinds: kindsOf(p, amount), url: p.url, applyUrl: p.apply_url, manual: !!p.tenant, mine: p.created_by === me,
-    isNew: Date.now() - new Date(p.first_seen_at).getTime() < 2 * 864e5 && !p.tenant, target: p.target, seen: p.first_seen_at, alsoOn: [] as string[],
+    isNew: Date.now() - new Date(p.first_seen_at).getTime() < 2 * 864e5 && !p.tenant, target: p.target, seen: p.first_seen_at, alsoOn: [] as string[], aud: audOf(p),
     garbled: garbledText(p.title), pending: !m?.ai_verdict && rule.verdict === 'fit', // #651 깨진 제목 · #649 ③ 1차 맞춤이지만 AI 판정 전(#782 '규칙상 맞음 · AI 판단 전')
     rule, ai: m?.ai_verdict ? { verdict: m.ai_verdict, reasons: m.ai_reasons ?? [], brands: m.ai_brands ?? [], docs: m.ai_docs ?? [], summary: m.ai_summary, at: m.ai_at, use: Array.isArray(m.ai_use) ? m.ai_use : [], schedule: m.ai_schedule ?? null, auto: !!m.ai_auto, stale, effect: m.ai_effect ?? null, ruleAt: m.ai_rule_verdict ?? null } : null, final, hidden: !!m?.hidden, listed: !!m?.listed_at, listedAt: m?.listed_at ?? null,
     queued: false, autoFail: m?.auto_fail ?? 0, // #785 자동 판단 차례(listView 가 채움) · 자동 판단 실패 횟수
@@ -475,7 +517,16 @@ function dedupe(items: SupportItem[]) {
   const groups = new Map<string, SupportItem[]>(); const out: SupportItem[] = [];
   for (const x of items) { if (x.manual) { out.push(x); continue; } const k = `${normTitle(x.title)}|${x.applyEnd ?? ''}`; const g = groups.get(k); if (g) g.push(x); else groups.set(k, [x]); }
   for (const g of groups.values()) { g.sort((a, b) => pri(a) - pri(b)); out.push({ ...g[0], alsoOn: [...new Set(g.slice(1).map((x) => x.sourceLabel).filter((l) => l !== g[0].sourceLabel))] }); }
-  return out;
+  // #788: 정부24 상시 서비스와 같은 사업 공고(기업마당·K-Startup·기관 공지)는 하나로 — 공고명이 같거나 한쪽이 다른 쪽을 품고(8자 이상) 기관이 같을 때(진행·AI 판단이 있는 정부24 줄은 그대로)
+  const notices = out.filter((x) => x.source !== 'gov24' && !x.manual).map((x) => ({ x, n: normTitle(x.title), a: normTitle(x.agency ?? '') }));
+  const drop = new Set<string>();
+  for (const g of out) {
+    if (g.source !== 'gov24' || g.work || g.ai) continue;
+    const n = normTitle(g.title.replace(/^\d{4}\s*년(?:도)?\s*/, '')); const a = normTitle(g.agency ?? '');
+    const same = n.length >= 6 && notices.find(({ n: m, a: b }) => (m === n || (Math.min(m.length, n.length) >= 8 && (m.includes(n) || n.includes(m)))) && (!a || !b || a === b || a.includes(b) || b.includes(a)));
+    if (same) { drop.add(g.id); same.x.alsoOn = [...new Set([...same.x.alsoOn, g.sourceLabel])]; }
+  }
+  return drop.size ? out.filter((x) => !drop.has(x.id)) : out;
 }
 const rankOf = (x: SupportItem) => (x.final.conflict ? RANK.maybe : x.final.by === 'ai' ? RANK[x.final.verdict] : x.final.verdict === 'no' ? RANK.no : x.rule.verdict === 'fit' ? 0.5 : RANK.none);
 /** 담당 고르기: 영업 공간을 쓰는 사람(관리자는 켠 공간 전부) */
@@ -485,13 +536,13 @@ async function peopleOf(sql: Sql, t: string) {
 }
 /** 탭: fit(맞춤 — 기본) · closing(마감 14일 안) · mine(관심·준비) · results(신청·결과) · all(전체 공고, 새로 들어온 순)
  * #781 정렬(맞춤·마감 임박·새로 올라온·지원 금액) · D-day 칩(3·7·14·30일 안·상시/예산 소진) · 종류 칩(돈·무료 서비스·공간·투자·IR·행사·교육) — 셋 다 안 주면 그 사람이 마지막에 고른 것 */
-export async function listView(u: SessionUser, q: { tab?: string; q?: string; showNo?: boolean; limit?: number; sort?: string; dd?: string; kind?: string } = {}) {
+export async function listView(u: SessionUser, q: { tab?: string; q?: string; showNo?: boolean; limit?: number; sort?: string; dd?: string; kind?: string; aud?: string } = {}) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db(); const today = ymd();
   const tab = ['fit', 'closing', 'list', 'mine', 'results', 'all'].includes(q.tab ?? '') ? q.tab! : 'fit';
-  const remembered = q.sort === undefined && q.dd === undefined && q.kind === undefined ? await supportViewOf(sql, u.id) : null;
+  const remembered = q.sort === undefined && q.dd === undefined && q.kind === undefined && q.aud === undefined ? await supportViewOf(sql, u.id) : null;
   const pick = <T extends string>(v: string | undefined, all: readonly T[], d: T | null) => (all.includes(v as T) ? (v as T) : d);
-  const view: SupportView = { sort: pick(q.sort ?? remembered?.sort ?? undefined, SORTS, null), dd: pick(q.dd ?? remembered?.dd, DDS, 'all')!, kind: pick(q.kind ?? remembered?.kind, KIND_KEYS, 'all')! };
+  const view: SupportView = { sort: pick(q.sort ?? remembered?.sort ?? undefined, SORTS, null), dd: pick(q.dd ?? remembered?.dd, DDS, 'all')!, kind: pick(q.kind ?? remembered?.kind, KIND_KEYS, 'all')!, aud: pick(q.aud ?? remembered?.aud, AUD_KEYS, 'all')! };
   const { all, profile, saved, pr, off, wm, autoAi, autoState } = await supportAll(sql, t, u.id, today);
   // #785 자동 판단 차례 — 자동 판단을 켠 회사(프로필 저장)·AI 켜짐·예산에 걸려 멈추지 않았을 때만 'AI 확인 중'
   const autoOn = saved && autoAi && aiEnabled() && process.env.SUPPORT_AUTO_AI !== 'off';
@@ -512,12 +563,18 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   };
   // 탭 숫자(맞춤 n)는 '해당 없음 보기'(showNo)와 무관 — 로컬 10/25 158차 확인: showNo=1 로 읽으면 맞춤 수가 112 → 880(숨긴 '해당 없음'까지 센 것)이 되던 것
   const counts = Object.fromEntries(Object.entries(inTab).map(([k, f]) => [k, all.filter((x) => f(x) && hit(x)).length]));
-  let items = all.filter((x) => (tab === 'fit' && q.showNo ? fitBase(x) : inTab[tab](x)) && hit(x));
+  // #788: 소상공인 칩은 우리 회사에 해당 없어도 보임(해당 없음 이유와 함께 — 대표가 소상공인 지원도 '확인') — 맞춤 탭은 '해당 없음'까지 담아 두고 칩·보기에 따라 거름
+  const pool = all.filter((x) => (tab === 'fit' ? fitBase(x) : inTab[tab](x)) && hit(x));
+  const noOk = (x: SupportItem, aud: string) => tab !== 'fit' || !!q.showNo || aud === 'small' || !isNo(x);
+  let items = pool.filter((x) => noOk(x, view.aud));
   // #781 칩 숫자: D-day 칩은 고른 종류 안에서, 종류 칩은 고른 D-day 안에서 셈(신청·결과 탭은 칩 없음)
   const ddOk = (x: SupportItem, k: string) => k === 'all' || (k === 'open' ? x.dday == null : x.dday != null && x.dday >= 0 && x.dday <= Number(k.slice(1)));
   const kindOk = (x: SupportItem, k: string) => k === 'all' || x.kinds.includes(k as Kind);
-  const chips = tab === 'results' ? null : { dd: Object.fromEntries(DDS.map((k) => [k, items.filter((x) => ddOk(x, k) && kindOk(x, view.kind)).length])), kind: Object.fromEntries(KIND_KEYS.map((k) => [k, items.filter((x) => kindOk(x, k) && ddOk(x, view.dd)).length])) };
-  if (chips) items = items.filter((x) => ddOk(x, view.dd) && kindOk(x, view.kind));
+  const audOk = (x: SupportItem, k: string) => k === 'all' || x.aud.includes(k);
+  const chips = tab === 'results' ? null : { dd: Object.fromEntries(DDS.map((k) => [k, items.filter((x) => ddOk(x, k) && kindOk(x, view.kind) && audOk(x, view.aud)).length])),
+    kind: Object.fromEntries(KIND_KEYS.map((k) => [k, items.filter((x) => kindOk(x, k) && ddOk(x, view.dd) && audOk(x, view.aud)).length])),
+    aud: Object.fromEntries(AUD_KEYS.map((k) => [k, pool.filter((x) => noOk(x, k) && audOk(x, k) && ddOk(x, view.dd) && kindOk(x, view.kind)).length])) };
+  if (chips) items = items.filter((x) => ddOk(x, view.dd) && kindOk(x, view.kind) && audOk(x, view.aud));
   const end = (x: SupportItem) => x.applyEnd ?? '9999-12-31';
   const sortUsed = tab === 'results' ? 'results' : view.sort ?? TAB_SORT[tab];
   const byFit = (a: SupportItem, b: SupportItem) => rankOf(a) - rankOf(b) || b.rule.score - a.rule.score || end(a).localeCompare(end(b));
@@ -542,7 +599,7 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   // #787(대표 "K-Startup 에서만 발췌하는지?"): 출처별 열린 공고 수 + 마지막 수집 — 화면 위 한 줄
   const per = new Map<string, number>(); for (const x of all) if (open(x) && !x.hidden) per.set(x.source, (per.get(x.source) ?? 0) + 1);
   const bySource = { counts: Object.keys(SOURCE_LABEL).map((k) => ({ source: k, label: SOURCE_LABEL[k], n: per.get(k) ?? 0 })), lastAt: sources.map((s) => s.last_run_at).filter(Boolean).sort().pop() ?? null };
-  return { tab, today, items, total, counts, hiddenNo, view, sortUsed, chips, kindLabel: KIND_LABEL, pendingCount, blanks, aiCostKrw: aiOn ? await aiCostKrw(sql, t) : null, bySource,
+  return { tab, today, items, total, counts, hiddenNo, view, sortUsed, chips, kindLabel: KIND_LABEL, audLabel: AUD_LABEL, pendingCount, blanks, aiCostKrw: aiOn ? await aiCostKrw(sql, t) : null, bySource,
     auto: { on: autoOn, enabled: autoAi, saved, queue: autoQueue, stopped: autoOn ? autoState?.stopped ?? null : null, left: autoState?.left ?? 0, at: autoState?.at ?? null, done: autoState?.done ?? 0 },
     weeklyAiMax: Math.max(0, Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 5) || 0), profile: { saved, filled: !!pr, autoAi, region: profile.region_sido, sigungu: profile.region_sigungu, size: profile.size, founded: profile.founded, interests: profile.interests, brands: profile.brands },
     sources: sources.map((s) => ({ ...s, label: SOURCE_LABEL[Object.entries(SOURCE_SLUG).find(([, v]) => v === s.slug)?.[0] ?? ''] ?? s.slug })), off,

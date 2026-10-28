@@ -5,7 +5,7 @@ import { sha256 } from '../crypto';
 import { db } from '../db';
 import { extractTextResult, unzip } from '../textExtract';
 import { apiExtra, COMMON_ONLY, eligibilityItems, eligibilityLine, eligibilitySection, lineOf, type EligItem } from './eligibilityText';
-import { visionOn, visionRead, type PhotoDoc } from './eligibilityVision';
+import { visionRead, type PhotoDoc } from './eligibilityVision';
 import { sourceFiles, type SrcFile } from './files';
 
 export type Eligibility = { text: string | null; items: EligItem[]; line: string | null; error: string | null; file: { name: string | null; url: string } | null; readAt: string; sig: string; tries: number;
@@ -54,7 +54,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   const row = r1?.row ?? r0.row; const prev = (row.eligibility ?? null) as Eligibility | null;
   const files = rankFiles(src?.files ?? []).slice(0, opt.maxFiles ?? 3);
   let found: { text: string; items: EligItem[]; line: string } | null = null; let used: SrcFile | null = null; let tried: SrcFile | null = null; const errs: string[] = [];
-  let photo: { f: SrcFile; doc: PhotoDoc } | null = null; let by: 'vision' | undefined; let visionUsd: number | undefined; let visionDone = false;
+  let photo: { f: SrcFile; doc: PhotoDoc } | null = null; let by: 'vision' | undefined; let visionUsd: number | undefined; let visionDone = false; let visionSkip = false;
   for (const f of files) {
     tried = tried ?? f;
     try {
@@ -70,14 +70,17 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
       errs.push('참가자격 절 없음');
     } catch (e) { errs.push(`공고문 못 받음(${reasonOf(e)})`); }
   }
-  // #790 글자가 없는 공고문(사진·스캔)은 AI 비전으로 — 공고당 한 번(첨부가 바뀌면 다시), 회사 AI 예산 안
-  const sigNow = filesSig(row);
-  if (!found && photo && prev?.by === 'vision' && prev.sig === sigNow && prev.text) { // 이미 사진으로 읽은 공고 — 다시 부르지 않고 그 글을 씀([공고문 다시 읽기]도)
-    found = { text: prev.text, items: eligibilityItems(prev.text), line: lineOf(prev.text, row) }; used = photo.f; by = 'vision'; visionUsd = prev.visionUsd;
-  } else if (!found && photo && opt.vision !== false && visionOn() && !(prev?.sig === sigNow && (prev?.tries ?? 0) >= 3)) {
+  // #790 글자가 없는 공고문(사진·스캔)은 AI 비전으로 — 공고당 한 번(첨부가 바뀌면 다시), 회사 AI 예산 안. 읽었는지는 같은 첨부(sig)에 visionUsd 가 있는지로(못 읽은 횟수 tries 와 따로)
+  const sigNow = filesSig(row); const visionBefore = prev?.sig === sigNow && prev?.visionUsd != null;
+  if (!found && photo && visionBefore) { // 이미 사진으로 읽은 공고 — 다시 부르지 않고 그 글을 씀([공고문 다시 읽기]도)
+    visionUsd = prev!.visionUsd;
+    if (prev!.text) { found = { text: prev!.text, items: eligibilityItems(prev!.text), line: lineOf(prev!.text, row) }; used = photo.f; by = 'vision'; }
+    else errs.push('사진에서도 참가자격 절을 못 찾음');
+  } else if (!found && photo && opt.vision !== false) {
     try {
       const v = await visionRead(photo.doc, String(row.title ?? ''));
-      if (v) {
+      if ('skip' in v) { visionSkip = true; errs.push(`AI 사진 읽기 안 함: ${v.skip}`); }
+      else {
         visionDone = true; visionUsd = v.usd;
         const sec = v.text ? eligibilitySection(v.text) ?? v.text : null;
         if (sec) { found = eligibilityOf(sec, row) ?? { text: sec.slice(0, 1500), items: eligibilityItems(sec), line: lineOf(sec, row) }; used = photo.f; by = 'vision'; }
@@ -85,10 +88,11 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
       }
     } catch (e) { errs.push(`AI 사진 읽기 못함(${String((e as Error)?.message ?? e).slice(0, 40)})`); }
   }
+  const prevTries = prev && !prev.text && prev.sig === sigNow ? prev.tries ?? 0 : 0;
   const extra = apiExtra(row, []);
-  const error = found ? null : !files.length ? (src?.listError ? '첨부 목록을 못 읽음' : '첨부 공고문 없음') : [...new Set(errs)].join(' · ').slice(0, 120) || '공고문에서 참가자격 절을 못 찾음';
+  const error = found ? null : !files.length ? (src?.listError ? '첨부 목록을 못 읽음' : '첨부 공고문 없음') : [...new Set(errs)].join(' · ').slice(0, 160) || '공고문에서 참가자격 절을 못 찾음';
   const out: Eligibility = { text: found?.text ?? null, items: found?.items ?? [], line: found?.line ?? (extra.length ? extra.join(' · ') : null), error, file: (used ?? tried) ? { name: (used ?? tried)!.name, url: (used ?? tried)!.url } : null, // 못 읽었어도 어떤 파일을 봤는지
-    readAt: new Date().toISOString(), sig: filesSig(row), tries: found ? 0 : visionDone ? 3 : (prev && !prev.text && prev.sig === filesSig(row) ? (prev.tries ?? 0) + 1 : 1), // 사진 읽기를 한 공고는 첨부가 바뀔 때까지 다시 안 함
+    readAt: new Date().toISOString(), sig: sigNow, tries: found ? 0 : visionDone || visionBefore ? 3 : visionSkip ? prevTries : prevTries + 1, // 사진 읽기를 한 공고는 첨부가 바뀔 때까지 다시 안 함 · 설정 이유로 건너뛴 것은 세지 않음
     ...(by ? { by } : {}), ...(visionUsd != null ? { visionUsd } : {}) };
   const st = String(row.source_type ?? ''); const ext = String(row.source_external_id ?? '');
   await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: out } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices'

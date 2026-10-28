@@ -21,10 +21,10 @@ type Item = { id: string; title: string; agency: string | null; executor: string
   applyText: string | null; dday: number | null; amount: string | null; amountKrw: number | null; kinds: string[]; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[]; pending?: boolean; queued?: boolean; listed?: boolean; listedAt?: string | null;
   final?: { verdict: 'fit' | 'maybe' | 'no'; by: 'ai' | 'rule'; conflict: boolean };
   rule: { score: number; verdict: 'fit' | 'maybe' | 'no'; flags: Flag[] }; ai: Ai | null; hidden: boolean; work: Work | null };
-type View = { sort: string | null; dd: string; kind: string };
+type View = { sort: string | null; dd: string; kind: string; aud?: string };
 type Blanks = { fields: { key: string; label: string; items: number }[]; items: number };
 type ListData = { tab: string; today: string; items: Item[]; total: number; counts: Record<string, number>; hiddenNo: number; weekly: Weekly | null; canEdit: boolean; platformAdmin: boolean; aiOn: boolean; people: { id: string; name: string }[];
-  view: View; sortUsed: string; chips: { dd: Record<string, number>; kind: Record<string, number> } | null; kindLabel: Record<string, string>; pendingCount: number; blanks: Blanks; aiCostKrw: number | null; weeklyAiMax: number;
+  view: View; sortUsed: string; chips: { dd: Record<string, number>; kind: Record<string, number>; aud?: Record<string, number> } | null; kindLabel: Record<string, string>; audLabel?: Record<string, string>; pendingCount: number; blanks: Blanks; aiCostKrw: number | null; weeklyAiMax: number;
   auto: { on: boolean; enabled: boolean; saved: boolean; queue: number; stopped: string | null; left: number; at: string | null; done: number };
   profile: { saved: boolean; filled: boolean; autoAi: boolean; region: string | null; sigungu: string | null; size: string | null; founded: string | null; interests: string[]; brands: string[] };
   sources: { slug: string; label: string; last_run_at: string | null; last_status: string | null; summary: string | null }[]; bySource?: { counts: { source: string; label: string; n: number }[]; lastAt: string | null }; keys: { bizinfo: boolean; datago: boolean }; statusLabel: Record<string, string> };
@@ -71,12 +71,12 @@ export function Support() {
   const tab = TABS.some(([k]) => k === sp.get('tab')) ? sp.get('tab')! : 'fit'; const openId = sp.get('id');
   const [q, setQ] = useState(''); const [showNo, setShowNo] = useState(false); const [adding, setAdding] = useState(false); const [busy, setBusy] = useState<string | null>(null);
   const [view, setView] = useState<View | null>(null); const [bulk, setBulk] = useState(false); // view = 이 화면에서 고친 정렬·칩(처음엔 서버가 기억한 것)
-  const qs = new URLSearchParams({ tab, ...(q.trim() ? { q: q.trim() } : {}), ...(showNo ? { showNo: '1' } : {}), ...(view ? { sort: view.sort ?? '', dd: view.dd, kind: view.kind } : {}) }).toString();
+  const qs = new URLSearchParams({ tab, ...(q.trim() ? { q: q.trim() } : {}), ...(showNo ? { showNo: '1' } : {}), ...(view ? { sort: view.sort ?? '', dd: view.dd, kind: view.kind, aud: view.aud ?? 'all' } : {}) }).toString();
   const { data: fresh, error, reload } = useApi<ListData>(`/api/sales/support?${qs}`);
   const [last, setLast] = useState<ListData | null>(null); // 칩을 바꾸는 동안 앞 목록을 그대로 보여 줌(깜빡임 없이)
   useEffect(() => { if (fresh) setLast(fresh); }, [fresh]);
   const data = fresh ?? last;
-  const cur: View = view ?? data?.view ?? { sort: null, dd: 'all', kind: 'all' };
+  const cur: View = view ?? data?.view ?? { sort: null, dd: 'all', kind: 'all', aud: 'all' };
   function pickView(p: Partial<View>) { const next = { ...cur, ...p }; setView(next); api('/api/sales/support/view', { method: 'PUT', body: next }).catch(() => {}); }
   const go = (p: Record<string, string | null>) => { const n = new URLSearchParams(sp.toString()); for (const [k, v] of Object.entries(p)) { if (v == null) n.delete(k); else n.set(k, v); } router.replace(`/s/sales/support${n.toString() ? `?${n}` : ''}`, { scroll: false }); };
   async function act(it: Item, status: 'interest' | 'preparing') {
@@ -192,6 +192,9 @@ function ViewBar({ data, cur, onPick }: { data: ListData; cur: View; onPick: (p:
         {DDS.map(([k, l, t]) => <button key={k} type="button" aria-pressed={cur.dd === k} title={t || undefined} className={chip(cur.dd === k)} onClick={() => onPick({ dd: k })} data-testid={`support-dd-${k}`}>{l} <span className="tabular-nums">{data.chips?.dd[k] ?? 0}</span></button>)}</div>
       <div className="flex flex-wrap items-center gap-1"><span className="w-10 shrink-0 text-[11px] text-ink-3">종류</span>
         {[['all', '전체'] as [string, string], ...Object.entries(data.kindLabel)].map(([k, l]) => <button key={k} type="button" aria-pressed={cur.kind === k} className={chip(cur.kind === k)} onClick={() => onPick({ kind: k })} data-testid={`support-kind-${k}`}>{l} <span className="tabular-nums">{data.chips?.kind[k] ?? 0}</span></button>)}</div>
+      {data.audLabel && <div className="flex flex-wrap items-center gap-1"><span className="w-10 shrink-0 text-[11px] text-ink-3">대상</span>
+        {[['all', '전체'] as [string, string], ...Object.entries(data.audLabel)].map(([k, l]) => <button key={k} type="button" aria-pressed={(cur.aud ?? 'all') === k} className={chip((cur.aud ?? 'all') === k)} onClick={() => onPick({ aud: k })} data-testid={`support-aud-${k}`}>{l} <span className="tabular-nums">{data.chips?.aud?.[k] ?? 0}</span></button>)}
+        {cur.aud === 'small' && <span className="text-[11px] text-ink-3" data-testid="support-aud-small-note">우리 회사에 해당 없는 소상공인 지원도 이유와 함께 보여 줍니다</span>}</div>}
     </div>
   );
 }

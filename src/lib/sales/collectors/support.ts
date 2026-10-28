@@ -58,7 +58,7 @@ export function sidoIn(...parts: (string | null | undefined)[]): string[] {
 const bracket = (title: string) => title.match(/^\s*[[(【]([^\])】]{1,20})[\])】]/)?.[1] ?? '';
 
 export type ProgramIn = {
-  source: 'bizinfo' | 'kstartup' | 'watch'; source_id: string; title: string; agency: string | null; executor: string | null; category: string | null; target: string | null;
+  source: 'bizinfo' | 'kstartup' | 'watch' | 'gov24'; source_id: string; title: string; agency: string | null; executor: string | null; category: string | null; target: string | null;
   regions: string[]; nationwide: boolean; summary: string | null; apply_start: string | null; apply_end: string | null; apply_text: string | null; amount: string | null; biz_years: string | null;
   url: string | null; apply_url: string | null; attachments: { name: string; url: string }[]; hashtags: string[]; raw: Record<string, unknown>; posted_at: string | null;
 };
@@ -273,6 +273,92 @@ export const kstartupSupport: Collector = {
     if (!items.length) { if (got) errors.push(`공고 칸을 찾지 못함 — 받은 칸: ${keys}`); return done({ inserted: 0, updated: 0, unchanged: 0 }, errors, !pages && errors.length ? `K-Startup: ${firstErr(errors)}` : `K-Startup: ${pages}쪽 · 받은 ${got}건 · 공고 0건`); }
     const r = await upsertPrograms(items);
     return done(r, errors, `K-Startup: ${pages}쪽 · 공고 ${items.length}건 · 신규 ${r.inserted} · 바뀜 ${r.updated} · 변화없음 ${r.unchanged}`);
+  },
+};
+
+// ---------- 정부24 공공서비스(혜택) — #788(대표 10/29 00:40·00:50 승인) ----------
+/** 행정안전부 '대한민국 공공서비스(혜택) 정보'(공공데이터포털 15113968, api.odcloud.kr gov24 v3). 사용자구분이 소상공인·법인/시설/단체인 서비스만(개인·가구 빼고) */
+const GOV24_USER = /소상공인|법인|단체|시설/;
+const ts14 = (v: string | null) => { const m = String(v ?? '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?/) ?? String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}):?(\d{2})?)?/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4] ?? '00'}:${m[5] ?? '00'}:${m[6] ?? '00'}+09:00` : null; };
+export function gov24Program(it: any): ProgramIn | null {
+  const id = pick(it, '서비스ID'); const title = pick(it, '서비스명'); if (!id || !title) return null;
+  const users = pick(it, '사용자구분') ?? ''; if (!GOV24_USER.test(users)) return null;
+  const kind = pick(it, '지원유형'); const field = pick(it, '서비스분야'); const agency = pick(it, '소관기관명'); const agencyType = pick(it, '소관기관유형');
+  const dtype = pick(it, '신청기한유형'); const dl = pick(it, '신청기한'); const per = parsePeriod(dl);
+  const always = /상시/.test(`${dtype ?? ''} ${dl ?? ''}`) && !per.end;
+  const regions = /지방|지자체|자치|광역|기초|시·?도|시군구/.test(agencyType ?? '') ? sidoIn(agency) : [];
+  const content = pick(it, '지원내용');
+  return {
+    source: 'gov24', source_id: id, title: title.slice(0, 300), agency, executor: pick(it, '부서명', '접수기관'), category: [kind, field].filter(Boolean).join(' · ') || null,
+    target: [pick(it, '지원대상'), pick(it, '선정기준') ? `선정기준: ${pick(it, '선정기준')}` : null].filter(Boolean).join('\n').slice(0, 4000) || null, regions, nationwide: !regions.length,
+    summary: [pick(it, '서비스목적요약'), content ? `지원내용: ${content}` : null, pick(it, '신청방법') ? `신청방법: ${pick(it, '신청방법')}` : null, pick(it, '접수기관') ? `접수기관: ${pick(it, '접수기관')}` : null,
+      pick(it, '전화문의') ? `문의: ${pick(it, '전화문의')}` : null].filter(Boolean).join('\n\n').slice(0, 20000) || null,
+    apply_start: always ? null : per.start, apply_end: always ? null : per.end, apply_text: always ? `상시 신청${dl && !/^상시/.test(dl) ? ` · ${dl}` : ''}` : dl, amount: amountIn(content), biz_years: null,
+    url: pick(it, '상세조회URL'), apply_url: null, attachments: [], hashtags: [kind, field].filter((x): x is string => !!x),
+    raw: { 사용자구분: users, 소관기관유형: agencyType, 서비스분야: field, 지원유형: kind, 신청기한유형: dtype, 수정일시: pick(it, '수정일시'), 등록일시: pick(it, '등록일시') }, posted_at: ts14(pick(it, '등록일시')),
+  };
+}
+/** supportConditions 한 줄 → 'Y' 인 JA 코드(소상공인 JA11xx·법인/단체 JA21xx·업종 JA12xx/JA22xx만 — 개인 조건은 버림) */
+export const gov24Conds = (row: any): string[] => Object.keys(row ?? {}).filter((k) => /^JA(1[12]|2[12])\d\d$/.test(k) && /^(Y|y|1|true)$/.test(String(row[k] ?? '').trim())).sort();
+type Gov24State = { phase: 'list' | 'cond' | 'idle'; page: number; condPage: number; total: number | null; fullAt: string | null; maxMod: string | null; kept: number };
+const GOV24_PER = 500; const GOV24_FULL_DAYS = 7; const GOV24_COND_IDS = 40;
+export const gov24Support: Collector = {
+  slug: 'gov24_support', label: '지원사업 · 정부24 지원금', hourKst: 7, againKst: [9, 11, 13, 15, 17, 19, 21],
+  source: '행정안전부 대한민국 공공서비스(혜택) 정보(정부24, 공공데이터포털 15113968) — 소상공인·법인/시설/단체 대상 서비스만. 처음엔 전체(약 1만 건)를 여러 번에 나눠 받고, 그 뒤엔 바뀐 것만(7일마다 전체 한 번)',
+  needs: ['DATA_GO_KR_SERVICE_KEY(15113968 활용신청)'],
+  keyReady: async () => !!(await supportKeys()).datago,
+  async run(ctx) {
+    const key = (await supportKeys()).datago;
+    if (!key) return done({ inserted: 0, updated: 0, unchanged: 0 }, [], '정부24: 공공데이터포털 인증키 입력 필요 — 건너뜀');
+    const sql = db(); const base = (await endpoints()).gov24_support.replace(/\/$/, ''); const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started);
+    const [s0] = await sql<{ value: Partial<Gov24State> }[]>`select value from app_settings where key = 'gov24_sync'`;
+    const st: Gov24State = { phase: 'list', page: 1, condPage: 1, total: null, fullAt: null, maxMod: null, kept: 0, ...(s0?.value ?? {}) };
+    if (st.phase === 'idle' && (!st.fullAt || Date.now() - Date.parse(st.fullAt) > GOV24_FULL_DAYS * 864e5)) Object.assign(st, { phase: 'list', page: 1, condPage: 1, kept: 0 }); // 7일마다 전체 한 번(없어진 서비스·마지막 확인 시각)
+    const save = () => sql`insert into app_settings (key, value) values ('gov24_sync', ${sql.json(st as never)}) on conflict (key) do update set value = excluded.value, updated_at = now()`;
+    const call = async (op: string, params: Record<string, string>) => {
+      const url = new URL(`${base}/${op}`); url.searchParams.set('serviceKey', key); url.searchParams.set('returnType', 'JSON');
+      for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+      const { json } = await fetchSource(url, ctx, key, Math.min(25000, left() - 3000), '15113968');
+      return { list: arrOf(json), total: Number(json?.totalCount ?? json?.matchCount ?? 0) || null };
+    };
+    const items: ProgramIn[] = []; const errors: string[] = []; let got = 0, pages = 0, conds = 0, firstFill = false; const prevMax = st.maxMod;
+    const take = (list: any[]) => { got += list.length; for (const it of list) { const p = gov24Program(it); if (p) items.push(p); const m = pick(it, '수정일시'); if (m && (!st.maxMod || m > st.maxMod)) st.maxMod = m; } };
+    const setConds = async (rows: any[], only?: Set<string>) => {
+      for (const r of rows) { const id = pick(r, '서비스ID'); if (!id || (only && !only.has(id))) continue; const c = gov24Conds(r);
+        const u = await sql`update support_programs set conditions = ${c} where tenant is null and source = 'gov24' and source_id = ${id} and conditions is distinct from ${c}::text[]`; conds += u.count; }
+    };
+    try {
+      if (st.phase === 'list') { // 전체 받기 — 쪽마다 저장해 다음 실행이 이어 받음
+        while (left() > 8000) {
+          const { list, total } = await call('serviceList', { page: String(st.page), perPage: String(GOV24_PER) }); pages++; take(list); st.total = total ?? st.total;
+          st.page++; if (!list.length || (st.total != null && (st.page - 1) * GOV24_PER >= st.total)) { st.phase = 'cond'; st.condPage = 1; break; }
+        }
+      } else if (st.phase === 'idle' && st.maxMod) { // 바뀐 것만(수정일시 이후)
+        for (let page = 1; left() > 8000; page++) { const { list } = await call('serviceList', { page: String(page), perPage: String(GOV24_PER), 'cond[수정일시::GTE]': st.maxMod }); pages++; take(list); if (list.length < GOV24_PER) break; }
+      }
+    } catch (e) { errors.push(`목록: ${e instanceof Error ? e.message : String(e)}`); }
+    const r = items.length ? await upsertPrograms(items) : { inserted: 0, updated: 0, unchanged: 0 };
+    st.kept += st.phase === 'idle' ? 0 : items.length;
+    try {
+      if (st.phase === 'cond') { // 지원 조건(소상공인·법인·업종 코드) — 전체를 쪽으로 받아 남긴 서비스만
+        const mine = new Set((await sql<{ source_id: string }[]>`select source_id from support_programs where tenant is null and source = 'gov24'`).map((x) => x.source_id));
+        while (left() > 8000) {
+          const { list, total } = await call('supportConditions', { page: String(st.condPage), perPage: '1000' }); pages++; await setConds(list, mine);
+          st.condPage++; if (!list.length || (total != null && (st.condPage - 1) * 1000 >= total)) { st.phase = 'idle'; st.fullAt = new Date().toISOString(); firstFill = !s0?.value?.fullAt; break; }
+        }
+      } else if (st.phase === 'idle' && items.length) { // 바뀐 서비스만 하나씩(지난번 마지막 수정일시와 같은 것은 이미 받음)
+        for (const p of items.filter((x) => !prevMax || String(x.raw?.수정일시 ?? '') > prevMax).slice(0, GOV24_COND_IDS)) { if (left() < 6000) break; const { list } = await call('supportConditions', { page: '1', perPage: '1', 'cond[서비스ID::EQ]': p.source_id }); await setConds(list); }
+      }
+    } catch (e) { errors.push(`지원 조건: ${e instanceof Error ? e.message : String(e)}`); }
+    await save();
+    const phase = st.phase === 'list' ? `전체 받는 중 ${Math.min(st.total ?? 0, (st.page - 1) * GOV24_PER)}/${st.total ?? '?'}건` : st.phase === 'cond' ? `지원 조건 받는 중 ${(st.condPage - 1) * 1000}/${st.total ?? '?'}건` : `바뀐 것만(마지막 전체 ${st.fullAt?.slice(0, 10) ?? '-'})`;
+    if (!got && errors.length) return done(r, errors, `정부24: ${firstErr(errors)}`);
+    // 처음 다 채웠을 때 — 자동 AI 판단(#785) 대상이 될 수 있는 수·예상 비용(1차 규칙 '해당 없음'·마감 지난 것은 판단 안 함 → 실제는 이보다 적음)
+    let note = '';
+    if (firstFill) { const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from support_programs where tenant is null and source = 'gov24' and (apply_end is null or apply_end >= ${ymdKst()}::date)`;
+      note = ` · 처음 채움 끝: 소상공인·법인 대상 ${n}건 — 자동 AI 판단은 회사 AI 예산 안에서 한 번에 10건씩, 많아야 약 ${(n * 2).toLocaleString('ko-KR')}원(건당 약 2원, 1차 규칙 '해당 없음'은 판단 안 함)`; }
+    return done(r, errors, `정부24(${phase}): ${pages}번 호출 · 받은 ${got}건 중 소상공인·법인 대상 ${items.length}건 · 신규 ${r.inserted} · 바뀜 ${r.updated} · 변화없음 ${r.unchanged} · 조건 ${conds}${note}`);
   },
 };
 
