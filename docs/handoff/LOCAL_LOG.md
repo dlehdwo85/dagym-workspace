@@ -1984,3 +1984,7 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 ## 2026-10-29 20:54 — 대표 #809: 화·금 확정·바디랩 포함·AI 영상 상한 질문
 - /api/marketing/auto production planCode pro · plans.pro {weekly blog2 feed5 reels2, monthlyCredits 250, videoMonthly 2, regenMonthly 10} · settings video_monthly null.
 - /api/platform/higgsfield Kling 3 Turbo usd 0.12 '초당' · credits 80 · usdKrw 1400. MCP 힉스필드 앱 balance 0(free, 앱 구독 10/27 종료 — 서버는 API 키 사용). open.higgsfield.ai/billing 새 탭은 로그인 화면 → 잔액 확인 못함.
+
+## 2026-10-29 21:18 — 대표 #810·#811: 버튼 없는 자동 판단 · 영상 비용 최소화
+- 클라우드 요청: 지원사업 자동 판단 대기열 끝까지 이어서(버튼 없음). 영상: 앱 화면 녹화(데모 회사)·현장 사진 슬라이드쇼·한 편 여러 곳·AI 는 훅 3~5초 싼 모델·월 상한 기본 0원·AI 인물 브랜드별 끔.
+- 단가 근거: /api/platform/higgsfield Kling 3 Turbo $0.12/초(켜짐) · Seedance 2.5 $0.07/초(꺼짐), usdKrw 1400. 글 작성 deep 70원·블로그 137원.
