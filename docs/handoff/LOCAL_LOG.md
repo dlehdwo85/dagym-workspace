@@ -1958,3 +1958,9 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 대표 직접 클라우드 요청 2건 매트릭스 #796(구글 겹침 레퍼런스)·#797(운영보고서 설계 승인) 추가.
 - PUT /api/marketing/auto autoPause false → auto_pause false(video_pause true 유지). 클라우드에 주 단위 묶음·승인 마감 전날 18시 요청.
 - 정부24: 대표 크롬(Browser 4) data.go.kr 15113968 탭 열어 둠(로그인 대기). 처음에 Browser 1 에 연 탭은 노트북 운영 브라우저여서 닫음.
+
+## 2026-10-29 18:58 — 대표 #799~#801: 협업 업무 칸 · 콘텐츠 섞기 · 정부24 활용신청
+- 정부24: 대표 크롬(Browser 4) 로그인 확인 → 활용신청 현황 승인 50건(15113968 없음) → [활용신청 바로가기] → 개발계정 신청서(웹 사이트 개발·설명 183바이트·동의) → [활용 신청하기] 클릭 시 확인 창으로 탭이 멈춤(원격 클릭 30초 시간 초과, Enter 로 안 닫힘) → 대표에게 확인 요청.
+- 릴스 d61ce94f POST /api/marketing/auto/contents/:id {action:to_cards} 49.5초 → v5 pending, 표지+본문 4, check partial(바탕 사진 없음, 브랜드 색).
+- settings allow_generated_people true(워크인 외국인 영상 원인으로 봄)·allow_slideshow true·video_pause true·영상 2/2.
+- 협업 업무: assignedSql 이 공동 담당 포함 확인, 열린 62 중 협업 7.
