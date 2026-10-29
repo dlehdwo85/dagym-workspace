@@ -1989,3 +1989,12 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 ## 2026-10-29 21:18 — 대표 #810·#811: 버튼 없는 자동 판단 · 영상 비용 최소화
 - 클라우드 요청: 지원사업 자동 판단 대기열 끝까지 이어서(버튼 없음). 영상: 앱 화면 녹화(데모 회사)·현장 사진 슬라이드쇼·한 편 여러 곳·AI 는 훅 3~5초 싼 모델·월 상한 기본 0원·AI 인물 브랜드별 끔.
 - 단가 근거: /api/platform/higgsfield Kling 3 Turbo $0.12/초(켜짐) · Seedance 2.5 $0.07/초(꺼짐), usdKrw 1400. 글 작성 deep 70원·블로그 137원.
+
+## 2026-10-29 22:24 — 269차 운영 확인 · 대표 #812 노트북 꺼짐 대책
+- 135db73 · migration 226. PC 사진 고르기 띠 0 ✅ · old-price total 0 ✅ · 아산 모아엘가비스타 업무 att-edit 0개(대표 canEdit 아님으로 봄) → 사진 문서 창 확인 못함.
+- ccd 설정: keep_awake_while_working On·keep_awake_on_battery On(일하는 동안만, 덮개 닫으면 잠듦). 노트북 꺼짐: 오늘 01:55~08:26, 15:57~18:34.
+
+## 2026-10-29 22:36 — 270·271차 반영 뒤 마케팅 규칙 설정
+- PATCH /api/marketing/auto/brands/:id video.method: 다짐·바디랩 photos, 워크인·하이링크 screen (200×4).
+- PATCH rules active false ×20(4브랜드 feed·shorts·reels·blog·story). POST /api/marketing/auto/bundle ×4 {weekdays [2,5], kinds feed·reels·shorts·blog, startDate 2026-11-03} → 활성 규칙 16(feed 10:00·shorts 11:00·reels 12:00·blog 13:00).
+- auto_pause true 유지(월 실제 비용 한도 대표 결정 뒤 켬).
