@@ -79,7 +79,7 @@ export async function openDoc(u: SessionUser, id: string) {
   const [by] = await sql<{ name: string }[]>`select name from users where id = ${file.created_by}`;
   if (file.effective_security === 'confidential') { const { audit } = await import('./log'); await audit(sql, u.id, 'library.confidential_open', 'library_file', id, { title: file.title, folder: file.folder }, null); }
   return {
-    file: { id: file.id, title: file.title, folder: file.folder, security: file.effective_security ?? file.security, created_by: file.created_by, created_by_name: by?.name ?? '', updated_at: file.updated_at },
+    file: { id: file.id, title: file.title, folder: file.folder, security: file.effective_security ?? file.security, created_by: file.created_by, created_by_name: by?.name ?? '', updated_at: file.updated_at, task_id: file.task_id ?? null },
     canEdit, canShare, shared, snapshot: b64(d.snapshot), updates: ups.map((x) => b64(x.update)),
     seq: ups.length ? Number(ups[ups.length - 1].seq) : Number(d.snapshot_seq),
   };

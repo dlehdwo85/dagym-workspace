@@ -581,7 +581,7 @@ export type PreflightInput = { channel: string; kind?: string | null; title?: st
 /** 승인함(승인 대기)에 올리기 전에 막는 문제 — 걸리면 '수정 요청' 칸에 이유와 함께(자동 제작). 사람이 올린 글은 상세에 보여 주기만.
  *  빈 글·한 줄·끊긴 문장·JSON 모양·[시험]·해시태그 초과·권유 2가지 이상·연락처(이미지 참조·사실 카드)·블로그 길이·스토리 형식·릴스/쇼츠 대본·틀 문구·다른 브랜드 이름 */
 const WORKIN_BRAND = /워크인|work-?in/i;
-const OLD_FREE = /5\s*명\s*(?:까지|이하)?\s*(?:영구|평생)?\s*무료|(?:영구|평생)\s*무료/;
+const OLD_FREE = /5\s*[명인]\s*(?:까지|이하)?\s*(?:영구|평생)?\s*무료|(?:영구|평생)\s*무료/; // 269차: '5인까지 무료'도
 export function preflight(i: PreflightInput, rules: QualityRules = DEFAULT_RULES): string[] {
   const kind = i.kind ?? null; const story = kind === 'story'; const video = !!kind && VIDEO.has(kind); const blog = i.channel === 'blog' || kind === 'blog';
   let all = String(i.body ?? '').replace(/\r\n/g, '\n');
@@ -683,4 +683,26 @@ export async function checkQuality(u: SessionUser, i: z.infer<typeof checkInput>
   const others = otherBrandNames(await otherBrands(tenantOf(u), i.brandId)); // 137차: 영문·다른 이름 포함
   const pre = i.body.trim() ? preflight({ channel: i.channel, kind: i.kind ?? null, title: i.title, body: r.body, facts: factsOf(brand?.facts), otherBrands: others, brandName: name, script: i.script ?? null, cross: i.cross ?? null }, rules) : [];
   return { cleaned: r.body, ...r.report, preflight: pre, ad, thresholds: { hook: rules.hook.min, human: rules.human.min } };
+}
+
+/**
+ * 269차 #807(대표 10/29 '5명까지 무료 → 14일 무료 체험, 남은 곳 목록'): 워크인 옛 요금 문구가 남은 곳(관리자 확인용, 고치지는 않음).
+ * 브랜드 키트 칸 · 자동 제작 규칙 주제 · 아직 안 올린 글(제목·최신 본문). 브랜드 키트·규칙은 migration 226 이 한 번 바꿈 — 이 목록은 그 뒤 남은 것·새로 들어온 것
+ */
+export async function oldPriceHits(u: SessionUser) {
+  await assertSpace(u, 'marketing');
+  const { isAdmin } = await import('./access');
+  if (!isAdmin(u)) throw (await import('./errors')).forbidden('관리자만 볼 수 있습니다');
+  const sql = db(); const t = tenantOf(u);
+  const brands = await sql<any[]>`select id, name, intro, products, weekly_topic, tone, facts, examples, voice, feed, topic_pool from mkt_brands where tenant = ${t}`;
+  const workin = brands.filter((b) => WORKIN_BRAND.test(b.name ?? ''));
+  const LABEL: Record<string, string> = { intro: '소개', products: '제품·서비스', weekly_topic: '주간 주제', tone: '말투', facts: '사실 카드', examples: '예시 글', voice: '목소리', feed: '피드', topic_pool: '주제 풀' };
+  const kit = workin.flatMap((b) => Object.entries(LABEL).filter(([k]) => OLD_FREE.test(typeof b[k] === 'string' ? b[k] : JSON.stringify(b[k] ?? ''))).map(([, field]) => ({ brand: b.name, field })));
+  const ids = workin.map((b) => b.id);
+  const rules = ids.length ? (await sql<{ id: string; topic_hint: string }[]>`select id, topic_hint from mkt_rules where tenant = ${t} and brand_id = any(${ids}::uuid[]) and topic_hint is not null`).filter((r) => OLD_FREE.test(r.topic_hint)).map((r) => ({ id: r.id, topic: r.topic_hint.slice(0, 120) })) : [];
+  const posts = ids.length ? (await sql<{ id: string; title: string; status: string; scheduled_at: string | null; body: string | null }[]>`select c.id, c.title, c.status, c.scheduled_at,
+      (select v.body from mkt_versions v where v.content_id = c.id order by v.version desc limit 1) as body
+    from mkt_contents c where c.tenant = ${t} and c.brand_id = any(${ids}::uuid[]) and c.status not in ('published', 'canceled') and c.deleted_at is null order by c.scheduled_at nulls last limit 500`)
+    .filter((c) => OLD_FREE.test(`${c.title}\n${c.body ?? ''}`)).map((c) => ({ id: c.id, title: c.title, status: c.status, scheduledAt: c.scheduled_at })) : [];
+  return { brands: workin.map((b) => b.name), kit, rules, posts, total: kit.length + rules.length + posts.length };
 }

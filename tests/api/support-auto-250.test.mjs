@@ -104,3 +104,16 @@ test('회사 AI 예산을 다 쓰면 멈춤(공고 실패로 안 셈·AI 부르�
   const { aiPurposeLabel } = await import('../../src/components/aiPurpose.ts');
   assert.equal(aiPurposeLabel('sales_support'), '지원사업 AI 판단');
 });
+
+test('269차 #803: 밀린 공고가 보통 수(10건)보다 많으면 이번 정기 실행은 50건까지(4건씩 같이)', async () => {
+  await sql`delete from support_programs where source_id like 'B%'`;
+  await ctx.owner.ok('PUT', '/api/sales/support/profile', { ...PROFILE, autoAi: true });
+  const ids = []; for (let i = 1; i <= 13; i++) ids.push(await ins({ source_id: `B${i}`, title: `[경기] 용인시 중소기업 판로 지원 ${i}차` }));
+  const before = new Set((await sql`select program_id from support_matches where ai_verdict is not null`).map((x) => x.program_id));
+  const todo = ids.filter((x) => !before.has(x));
+  await queue(Array.from({ length: 20 }, () => say({ verdict: 'fit' })));
+  const r = await auto();
+  assert.ok(r.out.default.done >= todo.length, `13건 모두(보통 10건 넘음): ${JSON.stringify(r.out.default)}`);
+  assert.equal(r.out.default.left, 0);
+  for (const id of ids) assert.ok((await ai(id))?.ai_verdict, '판단됨');
+});

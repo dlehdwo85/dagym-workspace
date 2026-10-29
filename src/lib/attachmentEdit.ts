@@ -182,6 +182,22 @@ export function docxBlocks(buf: Buffer): Block[] {
   }
   return out;
 }
+/**
+ * #806(대표 10/29 '문서 고치기 빈 화면' — 글 0자·사진 16장 docx): 원본에 든 것. 글자 수(글상자 안 포함)·사진 수·글상자 수.
+ * 사진만 든 문서(스캔·사진을 붙인 문서)는 워크인 문서로 바꾸면 빈 문서가 되므로 바꾸지 않는다.
+ */
+export function docxInfo(buf: Buffer) {
+  const xml = unzip(buf).get('word/document.xml')?.().toString('utf8') ?? '';
+  const chars = [...xml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map((m) => unxml(m[1])).join('').replace(/\s+/g, '').length;
+  return { chars, images: (xml.match(/<a:blip\b|<v:imagedata\b/g) ?? []).length, boxes: (xml.match(/<w:txbxContent\b/g) ?? []).length };
+}
+const blockChars = (blocks: Block[]) => blocks.reduce((n, b) => n + (b.runs ?? []).map((r) => r.text).join('').replace(/\s+/g, '').length + (b.rows ?? []).flat().join('').replace(/\s+/g, '').length, 0);
+const imageOnly = (i: ReturnType<typeof docxInfo>) => i.images > 0 && i.chars < 20; // 사진 밑 짧은 이름표('현장 사진' 등)만 있어도 사진 문서
+/** 워크인 문서로 바꾸면 빠지는 것(사진·글상자 글) — 문서 화면 위 안내 한 줄 */
+function lostOf(i: ReturnType<typeof docxInfo>, blocks: Block[]) {
+  const kept = blockChars(blocks);
+  return { images: i.images, text: i.chars > 40 && kept < i.chars * 0.7 ? Math.round((1 - kept / i.chars) * 100) : 0 };
+}
 /** 블록 → Yjs(Tiptap 노드 이름 그대로: heading(level)·paragraph·bulletList/orderedList > listItem > paragraph·table > tableRow > tableCell > paragraph, 굵게·기울임 mark) */
 export function blocksToYDoc(blocks: Block[]) {
   const doc = new Y.Doc(); const frag = doc.getXmlFragment('default');
@@ -215,10 +231,22 @@ export async function openAsDoc(u: SessionUser, id: string) {
   if (!a.task_id) throw badRequest('업무 첨부만 문서로 열 수 있습니다');
   if (editKindOf(a.file_name, a.mime_type) !== 'doc') throw badRequest('Word(.docx) 파일만 문서로 엽니다 — 다른 파일은 [새 버전 올리기]');
   const sql = db(); const t = tenantOf(u);
-  if (a.doc_id) { const [ok] = await sql`select 1 from library_files where id = ${a.doc_id} and deleted_at is null`; if (ok) { await shareToParticipants(a.doc_id, a.task_id); return { docId: a.doc_id, link: `/library/doc/${a.doc_id}?att=${a.id}`, created: false }; } }
+  if (a.doc_id) {
+    const [ok] = await sql`select 1 from library_files where id = ${a.doc_id} and deleted_at is null`;
+    if (ok) {
+      const empty = await emptyImageDoc(u, a, canEdit);
+      if (empty) return empty;
+      await shareToParticipants(a.doc_id, a.task_id);
+      const lost = await sourceLost(a).catch(() => null);
+      return { docId: a.doc_id, link: docLink(a.doc_id, a.id, lost), created: false };
+    }
+  }
   if (!canEdit) throw forbidden('이 업무의 요청자·담당자·검토자만 편집할 수 있습니다');
   const buf = await getObject(a.storage_key);
-  const ydoc = blocksToYDoc(docxBlocks(buf));
+  const info = docxInfo(buf);
+  if (imageOnly(info)) return { imageOnly: true as const, images: info.images, pdf: await pdfMadeOf(a.id) };
+  const blocks = docxBlocks(buf);
+  const ydoc = blocksToYDoc(blocks);
   const title = String(a.file_name).replace(/\.docx$/i, '').slice(0, 200);
   const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit' }).format(new Date());
   const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, space, folder, title, file_name, mime_type, size_bytes, tags, created_by, source, upload_status, security, task_id)
@@ -228,7 +256,77 @@ export async function openAsDoc(u: SessionUser, id: string) {
   await shareToParticipants(f.id, a.task_id);
   await activity(sql, 'task', a.task_id, u.id, 'file_opened_doc', { name: a.file_name, docId: f.id, attachmentId: a.id });
   void task;
-  return { docId: f.id, link: `/library/doc/${f.id}?att=${a.id}`, created: true };
+  return { docId: f.id, link: docLink(f.id, a.id, lostOf(info, blocks)), created: true };
+}
+const docLink = (docId: string, attId: string, lost: { images: number; text: number } | null) =>
+  `/library/doc/${docId}?att=${attId}${lost?.images ? `&lostImg=${lost.images}` : ''}${lost?.text ? `&lostText=${lost.text}` : ''}`;
+/** 이미 바꾼 문서를 다시 열 때도 원본 기준으로 빠진 것 안내(원본 = 처음 올린 판) */
+async function sourceLost(a: any) {
+  const [v] = await db()<{ storage_key: string }[]>`select storage_key from attachment_versions where attachment_id = ${a.id} and kind = 'original' limit 1`;
+  const buf = await getObject(v?.storage_key ?? a.storage_key);
+  return lostOf(docxInfo(buf), docxBlocks(buf));
+}
+/**
+ * #806: 사진만 든 원본을 예전에 바꿔 둔 빈 문서 → 원래 첨부로 되돌림. 문서 연결을 끊고(자료실 문서는 지운 것으로),
+ * 빈 문서를 [업무로 저장]해 첨부가 빈 Word 로 바뀌었으면 처음 올린 판으로 되돌린다. 글을 적어 둔 문서는 건드리지 않음
+ */
+async function emptyImageDoc(u: SessionUser, a: any, canEdit: boolean) {
+  const { doc } = await loadYDoc(a.doc_id);
+  if (docMarkdown(doc).replace(/\s+/g, '')) return null;
+  const sql = db();
+  const [orig] = await sql<any[]>`select id, storage_key from attachment_versions where attachment_id = ${a.id} and kind = 'original' limit 1`;
+  const info = docxInfo(await getObject(orig?.storage_key ?? a.storage_key));
+  if (!imageOnly(info)) return null;
+  if (canEdit) {
+    await sql`update library_files set deleted_at = now() where id = ${a.doc_id} and source = 'doc' and deleted_at is null`;
+    await sql`update attachments set doc_id = null where id = ${a.id}`;
+    const [cur] = await sql<{ kind: string }[]>`select kind from attachment_versions where attachment_id = ${a.id} and version = ${Number(a.version ?? 1)}`;
+    if (orig && cur?.kind === 'doc') await restoreVersion(u, a.id, orig.id);
+    await activity(sql, 'task', a.task_id, u.id, 'file_doc_reverted', { name: a.file_name, attachmentId: a.id, images: info.images });
+  }
+  return { imageOnly: true as const, images: info.images, reverted: canEdit, pdf: await pdfMadeOf(a.id) };
+}
+type MadePdf = { id: string; file_name: string; mime_type: string; size_bytes: number; kind: 'file' };
+const pdfMadeOf = async (attId: string): Promise<MadePdf | null> => (await db()<MadePdf[]>`select id, file_name, mime_type, size_bytes::int as size_bytes, kind from attachments where pdf_of = ${attId} and deleted_at is null order by created_at desc limit 1`)[0] ?? null;
+/**
+ * #806 [PDF 로 만들어 글자 넣기]: 사진만 든 Word 의 사진을 문서 순서대로 한 쪽에 한 장씩 PDF 로 → 같은 업무에 새 첨부(원본 Word 는 그대로).
+ * 만든 PDF 는 [고치기]에서 글자·체크·서명·가리기. 이미 만든 게 있으면 그걸 돌려줌
+ */
+export async function docImagesToPdf(u: SessionUser, id: string) {
+  const { a, canEdit } = await editable(u, id); if (!canEdit) throw forbidden('이 업무의 요청자·담당자·검토자만 만들 수 있습니다');
+  if (!a.task_id) throw badRequest('업무 첨부만 PDF 로 만들 수 있습니다');
+  if (editKindOf(a.file_name, a.mime_type) !== 'doc') throw badRequest('Word(.docx) 파일만');
+  const had = await pdfMadeOf(a.id); if (had) return { pdf: had, created: false };
+  const [orig] = await db()<{ storage_key: string }[]>`select storage_key from attachment_versions where attachment_id = ${a.id} and kind = 'original' limit 1`;
+  const z = unzip(await getObject(orig?.storage_key ?? a.storage_key));
+  const xml = z.get('word/document.xml')?.().toString('utf8') ?? '';
+  const rels = z.get('word/_rels/document.xml.rels')?.().toString('utf8') ?? '';
+  const target = new Map([...rels.matchAll(/<Relationship\b[^>]*>/g)].map((m) => [/Id="([^"]+)"/.exec(m[0])?.[1] ?? '', /Target="([^"]+)"/.exec(m[0])?.[1] ?? '']));
+  const ids = [...xml.matchAll(/<a:blip\b[^>]*r:embed="([^"]+)"|<v:imagedata\b[^>]*r:id="([^"]+)"/g)].map((m) => m[1] ?? m[2]);
+  const sharp = (await import('sharp')).default;
+  const { PDFDocument } = await import('pdf-lib');
+  const pdf = await PDFDocument.create();
+  let skipped = 0;
+  for (const rid of ids.slice(0, 200)) {
+    const t = target.get(rid); const get = t ? z.get(`word/${t.replace(/^\.?\//, '')}`) ?? z.get(t.replace(/^\//, '')) : undefined;
+    if (!get) { skipped++; continue; }
+    try {
+      const jpg = await sharp(get(), { failOn: 'none' }).rotate().resize({ width: 2000, height: 2000, fit: 'inside', withoutEnlargement: true }).flatten({ background: '#ffffff' }).jpeg({ quality: 82 }).toBuffer();
+      const img = await pdf.embedJpg(jpg);
+      const w = 595, h = Math.min(1684, Math.max(200, Math.round((w * img.height) / img.width)));
+      pdf.addPage([w, h]).drawImage(img, { x: 0, y: 0, width: w, height: h });
+    } catch { skipped++; } // emf·wmf 같은 그림은 못 바꿈
+  }
+  if (!pdf.getPageCount()) throw badRequest('문서 안 사진을 PDF 로 바꾸지 못했습니다. 원본을 내려받아 확인해 주세요');
+  const out = Buffer.from(await pdf.save());
+  const name = `${String(a.file_name).replace(/\.docx$/i, '')}.pdf`;
+  const key = `att/${new Date().toISOString().slice(0, 7)}/${a.task_id}/${crypto.randomUUID()}-${name.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;
+  await putObject(key, out, 'application/pdf');
+  const sql = db();
+  const [n] = await sql<{ id: string }[]>`insert into attachments (task_id, kind, storage_key, file_name, mime_type, size_bytes, upload_status, doc_title, source, created_by, pdf_of)
+    values (${a.task_id}, 'file', ${key}, ${name}, 'application/pdf', ${out.length}, 'ready', ${a.doc_title ?? null}, 'other', ${u.id}, ${a.id}) returning id`;
+  await activity(sql, 'task', a.task_id, u.id, 'file_attached', { name, size: out.length, from: 'doc_pdf', of: a.file_name, pages: pdf.getPageCount(), skipped });
+  return { pdf: { id: n.id, file_name: name, mime_type: 'application/pdf', size_bytes: out.length, kind: 'file' as const }, created: true, pages: pdf.getPageCount(), skipped };
 }
 async function shareToParticipants(docId: string, taskId: string) {
   const sql = db();

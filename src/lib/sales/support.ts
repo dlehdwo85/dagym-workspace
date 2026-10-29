@@ -744,19 +744,23 @@ JSON 으로만 답하세요:
   const { usdKrw } = await import('../ai/provider');
   return { ok: true, ai: { ...out, at: new Date().toISOString() }, costKrw: Math.max(1, Math.round(usd * usdKrw())) };
 }
-/** #782 '규칙상 맞음 · AI 판단 전' 공고를 맞춤 순 위에서 N건(5·10·20) AI 판단 — 관리자가 [몇 건 판단]을 눌렀을 때만(자동 판단은 꺼 둠). 5건씩, 한도에 걸리면 멈춤 */
+/** 269차 #803: 한 번에 같이 돌리는 AI 판단 수(관리자 [모두 AI 판단]·자동 판단 공통) */
+const AI_PAR = 4;
+/** #782 '규칙상 맞음 · AI 판단 전' 공고를 맞춤 순 위에서 N건(5·10·20) AI 판단 — 관리자가 [몇 건 판단]을 눌렀을 때만(자동 판단은 꺼 둠). 4건씩, 한도에 걸리면 멈춤.
+ *  #803 [대기 중인 것 모두 AI 판단]: 화면이 20건씩 이어서 부름(left = 남은 수, stopped = 한도·예산에 걸림) */
 export async function analyzeTop(u: SessionUser, n = 5) {
   await assertSpace(u, 'sales');
   if (!isAdmin(u)) throw forbidden('여러 건 판단은 관리자만');
   const v = await listView(u, { tab: 'fit', limit: 200, sort: 'fit', dd: 'all', kind: 'all' });
   const todo = v.items.filter((x) => x.pending).slice(0, Math.max(1, Math.min(20, Math.floor(n) || 5)));
-  let done = 0, costKrw = 0; const errors: string[] = [];
-  for (let i = 0; i < todo.length; i += 5) {
-    const rs = await Promise.allSettled(todo.slice(i, i + 5).map((x) => analyzeProgram(u, x.id)));
+  let done = 0, costKrw = 0, stopped = false; const errors: string[] = [];
+  for (let i = 0; i < todo.length && !stopped; i += AI_PAR) {
+    const rs = await Promise.allSettled(todo.slice(i, i + AI_PAR).map((x) => analyzeProgram(u, x.id)));
     for (const r of rs) if (r.status === 'fulfilled') { done++; costKrw += r.value.costKrw; } else errors.push(String((r.reason as Error)?.message ?? r.reason));
-    if (rs.some((r) => r.status === 'rejected' && ([402, 429].includes((r.reason as HttpError)?.status) || (r.reason as HttpError)?.code === 'ai_off'))) break; // 한도·크레딧 — 더 안 돌림
+    stopped = rs.some((r) => r.status === 'rejected' && ([402, 429].includes((r.reason as HttpError)?.status) || (r.reason as HttpError)?.code === 'ai_off')); // 한도·크레딧 — 더 안 돌림
   }
-  return { asked: todo.length, done, failed: errors.length, costKrw, error: errors[0] ?? null };
+  const left = Math.max(0, v.items.filter((x) => x.pending).length - done);
+  return { asked: todo.length, done, failed: errors.length, costKrw, error: errors[0] ?? null, left, stopped };
 }
 
 // ---------------- 진행(관심 → 신청 준비 → 신청 → 선정/탈락) ----------------
@@ -960,8 +964,10 @@ export async function weeklyBundle(t: string, opt: { now?: Date; actor?: Session
 export async function supportAutoTick(opt: { budgetMs?: number; max?: number } = {}) {
   if (process.env.SUPPORT_AUTO_AI === 'off') return { skipped: 'off' };
   if (!aiEnabled()) return { skipped: 'ai_off' };
-  const sql = db(); const t0 = Date.now(); const budget = opt.budgetMs ?? 25_000; const today = ymd();
-  const max = Math.max(0, opt.max ?? (Number(process.env.SUPPORT_AUTO_AI_MAX ?? 10) || 0));
+  const sql = db(); const t0 = Date.now(); let budget = opt.budgetMs ?? 25_000; const today = ymd();
+  const max0 = Math.max(0, opt.max ?? (Number(process.env.SUPPORT_AUTO_AI_MAX ?? 10) || 0));
+  // 269차 #803: 밀린 공고가 많으면(보통 수 넘게) 이번 실행은 50건까지·시간도 더(정기 실행 한 번 300초 안)
+  const BIG = Math.max(max0, Number(process.env.SUPPORT_AUTO_AI_BIG ?? 50) || 0);
   const tenants = await sql<{ tenant: string; updated_at: string; basis_at: string | null; auto_state: AutoState | null }[]>`select sp.tenant, sp.updated_at, sp.basis_at, sp.auto_state from support_profiles sp join tenants t on t.id = sp.tenant
     where sp.auto_ai and 'sales' = any(t.spaces) and t.status = 'active' and not coalesce(t.is_test, false) order by sp.tenant limit 50`; // 시험·체험 조직은 빼기(로컬 10/28 23:50)
   const out: Record<string, unknown> = {};
@@ -980,9 +986,11 @@ export async function supportAutoTick(opt: { budgetMs?: number; max?: number } =
     const todo = all.filter((x) => autoCandidate(x, today)) // 판단 없는 것 먼저 → 마감 가까운 순 → 새로 올라온 순
       .sort((a, b) => Number(!!a.ai) - Number(!!b.ai) || (a.applyEnd ?? '9999-12-31').localeCompare(b.applyEnd ?? '9999-12-31') || new Date(b.seen).getTime() - new Date(a.seen).getTime());
     let done = 0, failed = 0, i = 0; let stopped: string | null = null, error: string | null = null;
-    const n = Math.min(max, todo.length);
+    const many = todo.length > max0 && opt.max == null;
+    if (many && opt.budgetMs == null) budget = Math.max(budget, 90_000);
+    const n = Math.min(many ? BIG : max0, todo.length);
     while (i < n && !stopped && Date.now() - t0 < budget) {
-      const batch = todo.slice(i, Math.min(i + 5, n)); i += batch.length;
+      const batch = todo.slice(i, Math.min(i + AI_PAR, n)); i += batch.length;
       const rs = await Promise.allSettled(batch.map((x) => analyzeProgram(actor, x.id, undefined, { auto: true })));
       for (const [k, r] of rs.entries()) {
         if (r.status === 'fulfilled') { done++; continue; }
