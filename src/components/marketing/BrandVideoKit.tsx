@@ -5,7 +5,8 @@ import { cx, inputCls, toast } from '@/components/ui';
 import { MediaPick } from './MediaPick';
 
 type Kit = { logoFileId?: string | null; headline?: string | null; cta?: string | null; endColor?: string | null; fontFileId?: string | null;
-  /** 209차 #666 ⑤ 출연진 고정 */ castFileId?: string | null; castEn?: string | null; castKind?: 'generated' | 'real' | null; castConsent?: boolean; castConsentAt?: string | null };
+  /** 209차 #666 ⑤ 출연진 고정 */ castFileId?: string | null; castEn?: string | null; castKind?: 'generated' | 'real' | null; castConsent?: boolean; castConsentAt?: string | null;
+  /** 271차 #811 릴스·쇼츠 영상 만드는 방법 */ method?: 'photos' | 'screen' | 'ai' | null };
 /** #454 브랜드 키트 — 영상 끝 화면(로고·한 줄·CTA·배경색)과 자막 글꼴(자료실 OTF/TTF, 비우면 Noto Sans KR Bold). 제작의뢰실 영상 합성이 읽는다 */
 export function BrandVideoKit({ brand, onSaved }: { brand: { id: string; name: string; color?: string | null; video?: Kit | null }; onSaved: () => void }) {
   const v = brand.video ?? {}; const [color, setColor] = useState(v.endColor ?? brand.color ?? '#111111');
@@ -14,6 +15,17 @@ export function BrandVideoKit({ brand, onSaved }: { brand: { id: string; name: s
   const sm = cx(inputCls, 'h-8 py-0 text-xs');
   return (
     <div className="grid gap-1.5 text-xs sm:col-span-4 sm:pl-[8.5rem]" data-testid={`brand-video-${brand.name}`}>
+      {/* 271차 #811(대표 10/29 'AI 영상 비용 최소화'): 자동 시안의 릴스·쇼츠를 무엇으로 만들지 — 실제 사진·화면 녹화는 생성 비용 0 */}
+      <label className="flex flex-wrap items-center gap-1.5" data-testid="brand-video-method-row">
+        <span>릴스·쇼츠 영상 만드는 방법</span>
+        <select className={cx(sm, 'w-auto')} value={v.method ?? ''} onChange={(e) => save({ method: (e.target.value || null) as Kit['method'] })} aria-label={`${brand.name} 영상 만드는 방법`} data-testid="brand-video-method">
+          <option value="">정하지 않음(제작 요청 카드)</option>
+          <option value="photos">자료실 실제 사진으로 영상 · 0원</option>
+          <option value="screen">앱 화면 녹화 · 0원</option>
+          <option value="ai">AI 영상 · 크레딧</option>
+        </select>
+        <span className="text-ink-3">{v.method === 'photos' ? '원고가 나오면 이 브랜드 현장 사진 3~6장을 천천히 움직여 자막·끝 화면을 붙입니다. 사진이 3장이 안 되면 제작 요청 카드로 남습니다' : v.method === 'screen' ? '녹화 파일을 자료실 마케팅/화면 녹화에 올려 붙입니다' : ''}</span>
+      </label>
       <span className="text-ink-3">영상 끝 화면·자막(제작의뢰실 영상 합성)</span>
       <div className="flex flex-wrap items-center gap-1.5">
         <input className={cx(sm, 'w-56')} defaultValue={v.headline ?? ''} maxLength={30} placeholder="끝 화면 한 줄(비우면 AI 안·브랜드 이름)" onBlur={(e) => e.target.value !== (v.headline ?? '') && save({ headline: e.target.value || null })} aria-label={`${brand.name} 끝 화면 한 줄`} data-testid="brand-video-headline" />

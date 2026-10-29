@@ -653,6 +653,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   const G = await import('./mktGoals');
   const rationale = G.rationaleFrom({ goal: m.goal, day: c.scheduled_at ? G.ymd(new Date(c.scheduled_at)) : G.ymd(new Date()), rule, channel: c.channel, kind, why: d.why || null, source: m.goal ? 'goal' : rule ? 'rule' : 'ai', topic: m.topic || null, topicFrom: m.topicFrom || null });
   const designNote = (await import('./mktTeam')).designNote(d.design); // 187차 ④ '반영: 디자인 지침 n개·디자인 기억 n개'
+  const videoMethod = (brand?.video?.method ?? null) as 'photos' | 'screen' | 'ai' | null; // 271차 #811
   // 원고·원장·제작 요청 카드를 한 번에(중간에 끊겨 원고만 남고 카드가 빠지는 일이 없게)
   await sql.begin(async (tx) => {
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${mediaIds}, ${(v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기') + designNote + retryNote + visualNote}, ${c.created_by})`;
@@ -663,11 +664,19 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임) — #544 초안 보관이면 만들지 않음(쓰지 않을 영상에 비용 X)
     // #426: 영상은 초 단위 장면표(분당 300음절)를 그대로 넘김 — Higgsfield 연동 뒤에는 장면별 프롬프트로
     const base = (kind === 'blog' ? `표지 1장 + 본문 사진 3장 이상(실사)${d.photos?.length ? ` — 원고의 [사진 1~${d.photos.length}] 자리에 넣을 사진은 이미 골라 두었습니다` : ''}. ${d.brief ?? ''}`.trim() : d.brief) || (kind === 'story' ? '세로 1080×1920 실사 + 글자 렌더(24시간 스토리)' : '실사 사진 + 글자 렌더');
-    if (!mediaIds.length && !held) await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', f.timing ? `${base}\n\n${f.timing}` : base, kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
+    // 271차 #811 영상 만드는 방법(브랜드 영상 키트): 앱 화면 녹화 = 생성 비용 0 — 녹화 파일을 붙이는 카드(예상 크레딧 0)
+    const screen = VIDEO_KINDS.includes(kind) && videoMethod === 'screen';
+    const brief = screen ? `앱 화면 녹화로 만듭니다(생성 비용 0) — 데모 회사 화면을 녹화해 자료실 '마케팅/화면 녹화'에 올린 뒤 이 글에 붙여 주세요.\n\n${base}` : base;
+    if (!mediaIds.length && !held) await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', f.timing ? `${brief}\n\n${f.timing}` : brief, screen ? 0 : kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
     else await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'generate_image', 0, '시안 서버 그리기 — 크레딧 0', ${f.title})`;
   });
   if (!held && !batch && !isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${f.title}` : kind === 'blog' && q.issues.length === 1 ? `원고 완료 — 표지·본문 사진을 붙여 주세요: ${f.title}` : visualOnly ? `원고 완료 — 시안 제작 중: ${f.title}` : `품질 검사 미통과: ${f.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
+  // 271차 #811 영상 만드는 방법이 실제 사진이면 원고 직후 이 판에 사진 영상(생성 비용 0) — 사진이 3장이 안 되면 제작 요청 카드 그대로
+  if (VIDEO_KINDS.includes(kind) && !mediaIds.length && !held && videoMethod === 'photos') {
+    try { const r = await (await import('./mktSlideshow')).autoSlideshow({ ...c, title: f.title }, v, q.body, d.photos ?? []); if (r.skipped) await sql`update mkt_versions set note = concat_ws(' · ', note, ${`실제 사진 영상 못 만듦: ${r.skipped}`}::text) where content_id = ${c.id} and version = ${v}`; }
+    catch (e: any) { console.error('[mkt] 실제 사진 영상', c.id, e?.message ?? e); }
+  }
   return { id: c.id, passed: q.passed, issues: q.issues, ...(held ? { held: true } : {}), ...(batch ? { batch } : {}) };
 }
 
@@ -1499,7 +1508,9 @@ export const brandKitInput = z.object({ tone: z.string().max(200).nullable().opt
   video: z.object({ logoFileId: z.string().uuid().nullable().optional(), headline: z.string().trim().max(30).nullable().optional(), cta: z.string().trim().max(60).nullable().optional(),
     endColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(), fontFileId: z.string().uuid().nullable().optional(),
     // 209차 #666 ⑤ 출연진 고정: 주인공 사진(자료실 이미지) · 묘사(영문이면 장면 지시에 그대로) · 생성 인물 / 실존 인물(광고 사용 동의를 받았을 때만)
-    castFileId: z.string().uuid().nullable().optional(), castEn: z.string().trim().max(300).nullable().optional(), castKind: z.enum(['generated', 'real']).nullable().optional(), castConsent: z.boolean().optional() }).optional(),
+    castFileId: z.string().uuid().nullable().optional(), castEn: z.string().trim().max(300).nullable().optional(), castKind: z.enum(['generated', 'real']).nullable().optional(), castConsent: z.boolean().optional(),
+    // 271차 #811 릴스·쇼츠 영상 만드는 방법: 실제 사진 영상(생성 비용 0) · 앱 화면 녹화(생성 비용 0, 녹화 파일을 자료실에) · AI 영상(크레딧) — 비우면 지금처럼 제작 요청 카드
+    method: z.enum(['photos', 'screen', 'ai']).nullable().optional() }).optional(),
   feed: feedInput.optional(), // #544 피드 틀(쓸 틀·색·머리줄·연락처 줄·머리말) — 통째로 저장
   facts: factsInput.optional(), // 로컬 QA 10/24 ⑤ 사실 카드(연락처·운영 시간·요금·숫자·섞으면 안 되는 이름) — 통째로 저장
   topicPool: z.array(z.string().trim().min(1).max(120)).max(40).optional(), // 로컬 QA 10/24 ③ 브랜드 주제 풀(한 줄에 하나, 돌아가며 씀)

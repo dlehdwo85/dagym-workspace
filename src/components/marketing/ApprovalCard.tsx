@@ -134,6 +134,13 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
   const unprocessed = c.status === 'changes' && c.last_decision?.decision === 'changes' && c.last_decision.version === c.current_version && !c.production;
   const regenAsk = c.production?.status === 'needs_approval' && c.production.kind.startsWith('regen') && !!c.production.id;
   const cardsAlt = VIDEO_KINDS.includes(c.kind ?? '') && ['instagram', 'facebook'].includes(c.channel);
+  // 271차 #811(대표 '마케팅 AI 영상 제작 비용 최소화'): 릴스·쇼츠는 자료실 실제 사진으로 영상(생성 비용 0) — 관리자
+  const [slide, setSlide] = useState(false);
+  async function slideshow() {
+    setSlide(true);
+    try { const r = await api<{ photos: number; seconds: number }>('/api/marketing/studio/slideshow', { body: { contentId: c.id } }); toast.ok(`실제 사진 ${r.photos}장으로 ${r.seconds}초 영상을 만드는 중입니다. 다 되면 새 버전으로 올라옵니다`); onDone(); }
+    catch (e: any) { toast.error(e.message); } finally { setSlide(false); }
+  }
   const canAct = canDecide && !done && ['pending', 'changes', 'approved'].includes(c.status);
   const d = c.last_decision;
   const req = c.revision?.request ?? c.reapprove_comment ?? null; const from = c.revision?.from ?? c.reapprove_from ?? null; // #545
@@ -166,6 +173,9 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
           <Button size="sm" variant="secondary" onClick={() => act('approve_regen')} disabled={!!acting} data-testid="approval-regen-approve">{acting === 'approve_regen' ? '승인하는 중…' : `승인하고 제작 요청${c.production!.est ? ` · 약 ${c.production!.est}크레딧` : ''}`}</Button>
           {cardsAlt && <Button size="sm" onClick={() => act('to_cards')} disabled={!!acting} data-testid="approval-to-cards">{acting === 'to_cards' ? 'AI 가 만드는 중…' : '이미지 카드뉴스로 바꿔 만들기 · 0크레딧'}</Button>}</div>}
       </div>}
+      {canAct && VIDEO_KINDS.includes(c.kind ?? '') && <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-ink-2" data-testid="approval-slideshow-row">
+        <Button size="sm" variant="secondary" onClick={slideshow} disabled={slide || !!acting} data-testid="approval-slideshow">{slide ? '사진 고르는 중…' : '실제 사진으로 영상 만들기 · 0원'}</Button>
+        <span>자료실의 이 브랜드 현장 사진 3~6장을 천천히 움직이고 자막·끝 화면을 붙입니다</span></div>}
       {unprocessed && canDecide && !done && <div className="mt-1 flex flex-wrap items-center gap-2 rounded-input border border-violet-200 bg-violet-50 px-2 py-1.5 text-[11px] text-violet-900" data-testid="approval-revise-pending">
         <span className="min-w-0 flex-1">수정 요청이 아직 AI 수정본으로 만들어지지 않았습니다{c.last_decision?.comment ? ` — "${c.last_decision.comment.slice(0, 60)}"` : ''}</span>
         <Button size="sm" onClick={() => act('revise')} disabled={!!acting} data-testid="approval-revise-now">{acting === 'revise' ? 'AI 가 고치는 중…' : 'AI 수정본 만들기'}</Button></div>}

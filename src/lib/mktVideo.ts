@@ -52,7 +52,8 @@ export type V2Scene = { k: number; seconds: number; line: string; visualEn: stri
   status: HfState | 'pending' | 'timeout' | 'keyframe'; kf?: Keyframe | null; castOff?: boolean; requestId?: string; statusUrl?: string; submittedAt?: string; key?: string | null; prevKey?: string | null;
   tries: number; generated?: number; failRetries?: number; regens?: number; error?: string | null; qa?: SceneQa | null; lastIssues?: string[];
   /** 187차 ⑦ 다시 합성: 한 편짜리 원본에서 이 장면이 시작하는 초(같은 원본을 장면마다 나눠 씀) */
-  start?: number };
+  start?: number;
+  /** 271차 #811 사진 장면(자료실 실사, 천천히 움직여 합성 — 생성 비용 0) */ still?: boolean };
 /** source = 187차 ⑦ 한 편짜리 원본(자료실) — 합성 때 길이를 재서 장면으로 나눔 · aspect = 원본 화면 비율(의뢰 종류와 다를 때) */
 export type V2Variant = { n: number; scenes: V2Scene[]; mediaId?: string | null; duration?: number | null; notes?: string[]; error?: string | null; renderTries?: number; renderError?: string | null;
   source?: { key: string; fileId: string; lines: string[] } | null; aspect?: string | null; origin?: string | null; checks?: VideoChecks | null };
@@ -336,6 +337,9 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
   // 같은 저장소 파일은 한 번만 내려받음(187차 ⑦ 한 편짜리 원본을 장면마다 나눠 씀)
   const got = new Map<string, string>();
   const fetchKey = async (key: string) => { let f = got.get(key); if (!f) { f = `k${v.n}-${got.size}.mp4`; await writeFile(join(dir, f), await getObject(key)); got.set(key, f); } return f; };
+  /** 271차 #811 사진 장면: 어떤 형식이든(HEIC·PNG…) 돌림 바로잡고 2200px 안 JPEG 로 */
+  const stillKey = async (key: string, f: string) => { const sharp = (await import('sharp')).default;
+    await writeFile(join(dir, f), await sharp(await getObject(key), { failOn: 'none' }).rotate().resize({ width: 2200, height: 2200, fit: 'inside', withoutEnlargement: true }).flatten({ background: '#ffffff' }).jpeg({ quality: 88 }).toBuffer()); return f; };
   if (v.source && !v.scenes.length) { // 187차 ⑦ 한 편짜리 원본 → 길이를 재서 장면으로(자막 한 줄씩)
     const { mediaInfo } = await import('./video/ffmpeg'); const { syllables } = await import('./mktQuality');
     const info = await mediaInfo(join(dir, await fetchKey(v.source.key)));
@@ -351,7 +355,7 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
   const endCta = end.cta; if (end.note) notes.push(end.note);
   const scenes: ComposeScene[] = []; let screens = 0;
   for (const s of v.scenes) {
-    const file = await fetchKey(s.key!);
+    const file = s.still ? await stillKey(s.key!, `p${v.n}-${s.k}.jpg`) : await fetchKey(s.key!);
     let screenPng: string | null = null;
     if (s.screen?.mediaId) {
       const img = await libBytes(b.tenant, s.screen.mediaId, /^image\//);
@@ -380,8 +384,9 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
   const actor = await actorFor(b.created_by);
   const { saveGeneratedFile } = await import('./library');
   const reuse = r.reuse ?? null; // 187차 ⑦ 다시 합성 — 원본 영상·원장 줄을 meta 에(다시 합성 목록이 이 파일을 원본으로 다시 고르지 않게)
-  const title = `${spec.label} 영상${b.quantity > 1 ? ` ${v.n + 1}` : ''} — ${String(b.message).slice(0, 30)}${reuse ? ' (다시 합성)' : ''}`;
-  const f = await saveGeneratedFile(actor, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.mp4`, mime: 'video/mp4', data, title, folder: '마케팅', tags: ['제작의뢰실', 'AI 생성', '합성', ...(reuse ? ['다시 합성'] : [])], source: 'ai', space: 'marketing',
+  const slides = !!reuse?.slideshow; // 271차 #811 실제 사진 영상 — 'AI 생성'·'다시 합성'이 아님
+  const title = `${spec.label} 영상${b.quantity > 1 ? ` ${v.n + 1}` : ''} — ${String(b.message).slice(0, 30)}${slides ? ' (실제 사진)' : reuse ? ' (다시 합성)' : ''}`;
+  const f = await saveGeneratedFile(actor, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.mp4`, mime: 'video/mp4', data, title, folder: '마케팅', tags: ['제작의뢰실', ...(slides ? ['실제 사진', '합성'] : ['AI 생성', '합성', ...(reuse ? ['다시 합성'] : [])])], source: 'ai', space: 'marketing',
     meta: { video: { pipeline: 'v2', scenes: v.scenes.length, duration: out.duration, narration: nar.provider, bgm: bgm?.title ?? null, font: family, ...(reuse ? { reuse: { ledger: reuse.ledger, from: v.origin ?? v.source?.fileId ?? null } } : {}) } } });
   return { mediaId: f.id, duration: out.duration, notes: [...notes, ...out.notes], audio: { narration: nar.provider, chars: nar.chars, bgm: bgm?.title ?? null }, endCta, checks };
 }
@@ -467,7 +472,12 @@ async function finalize(b: any, r: any) {
   const scenesN = variants[0]?.scenes.length ?? 0; const reuse = r.reuse ?? null;
   // 187차 ⑦ 다시 합성: 새로 만든 것 없음(생성 크레딧 0) — 들어간 것만 정직하게(자막 줄이 있을 때만 '자막', 전화가 들어갔을 때만 '끝 화면 전화')
   const reuseNote = () => { const subs = variants.some((v) => v.scenes.some((x) => x.line.trim())); const tel = /\d{2,4}-\d{3,4}|\d{8,11}/.test(String(r.endCta ?? ''));
-    return `기존 영상 새 방식으로 다시 합성(생성 크레딧 0) · ${[subs ? '자막' : '', tel ? '끝 화면 전화' : '끝 화면', r.audio?.narration ? '내레이션' : '', r.audio?.bgm ? '배경음' : ''].filter(Boolean).join('·')}`; };
+    return `${reuse?.slideshow ? `실제 사진 ${scenesN}장으로 만든 영상(생성 비용 0)` : '기존 영상 새 방식으로 다시 합성(생성 크레딧 0)'} · ${[subs ? '자막' : '', tel ? '끝 화면 전화' : '끝 화면', r.audio?.narration ? '내레이션' : '', r.audio?.bgm ? '배경음' : ''].filter(Boolean).join('·')}`; };
+  if (reuse?.auto) { // 271차 #811 자동 제작 원고의 실제 사진 영상 — 새 판 없이 그 판에 붙임(주 묶음 초안은 초안 그대로)
+    const attached = await (await import('./mktSlideshow')).attachAuto(b, reuse, mediaIds, reuseNote());
+    await save(b.id, { ...r, stage: 'done', mediaIds, review, checkFails, notes, renderAt: null, attached }, { status: 'review', error: null });
+    return { status: 'review', stage: 'done', mediaIds };
+  }
   const ver = await addVersion(actor, b.content_id, { body: p.caption ?? b.message, mediaIds, note: reuse ? reuseNote() : `제작의뢰실 영상 ${mediaIds.length}편(장면 ${scenesN}개 합성 · ${r.model}) · ${issues.length ? `사람 검수 필요 ${issues.length}곳` : 'AI 검수 통과'}` });
   await sql`update mkt_contents set rationale = coalesce(rationale, '{}'::jsonb) || ${sql.json({ qa: { needsHuman: issues.length > 0, issues: issues.slice(0, 12), notes: notes.slice(0, 8), checks: variants.find((v) => v.checks)?.checks ?? null, at: new Date().toISOString() } } as never)} where id = ${b.content_id}`;
   if (reuse) { // 보관(10/25 전면 정리)했던 글이면 보관 표시를 지움 — 새 버전이 승인함에 올라감. 크레딧 원장은 그대로(새로 생성한 것 없음)
