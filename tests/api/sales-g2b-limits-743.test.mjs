@@ -15,6 +15,9 @@ const FIT = { bidNtceNo: 'R26BK0074301', bidNtceOrd: '000', bidNtceNm: '국민�
   bidClseDt: `${plus(10)} 10:00:00`, prtcptLmtRgnNm: '경기도', cntrctCnclsMthdNm: '제한경쟁' };
 const OTHER = { bidNtceNo: 'R26BK0074302', bidNtceOrd: '000', bidNtceNm: '청사 소독 용역(피트니스 아님)', ntceInsttNm: '시험구청', bidNtceDt: `${today} 09:00:00`, bidClseDt: `${plus(10)} 10:00:00` };
 const EMPTY = 'R26BK0074303'; // 이미 물었는데 값이 없던 공고(245차 진단)
+// 258차: 마감 칸(bidClseDt)이 빈 협상 공고 — 공고번호 조회에 날짜 칸만 돌려주는지(담당자 전화는 안 돌려줌)
+const NODL = { bidNtceNo: 'R26BK0074304', bidNtceOrd: '000', bidNtceNm: '(협상)시험 파크골프장 타당성 조사 용역', bidNtceDt: `${today} 09:00:00`, bidClseDt: '', opengDt: `${plus(12)} 11:00:00`,
+  rgstDt: `${today} 08:59:00`, cntrctCnclsMthdNm: '협상에 의한 계약', bidMethdNm: '전자입찰', ntceInsttOfclTelNo: '010-1234-5678' };
 let srv, ctx, sql, fake; const calls = [];
 before(async () => {
   fake = http.createServer(async (req, res) => {
@@ -28,6 +31,7 @@ before(async () => {
     if (u.pathname.endsWith('/getBidPblancListInfoPrtcptPsblRgn')) { calls.push(['region', u.searchParams.get('bidNtceNo'), u.searchParams.get('inqryDiv')]);
       return send(dataGo(u.searchParams.get('bidNtceNo') === FIT.bidNtceNo ? [{ bidNtceNo: FIT.bidNtceNo, bidNtceOrd: '000', lmtSno: '1', prtcptPsblRgnNm: '경기도' }, { bidNtceNo: FIT.bidNtceNo, bidNtceOrd: '000', lmtSno: '2', prtcptPsblRgnNm: '서울특별시' }] : [])); }
     if (u.pathname.endsWith('/getBidPblancListInfoServcPPSSrch')) return send(dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [FIT, OTHER] : []));
+    if (u.pathname.endsWith('/getBidPblancListInfoServc')) return send(dataGo(u.searchParams.get('bidNtceNo') === NODL.bidNtceNo && u.searchParams.get('inqryDiv') === '2' ? [NODL] : []));
     return send(dataGo([]));
   }).listen(PORT);
   await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, DATA_GO_KR_SERVICE_KEY: 'test-key' }); sql = testDb(); ctx = await bootstrap();
@@ -86,4 +90,15 @@ test('245차: 예전에 저장된 줄(limits_read_at 빈 값)은 아직 안 읽�
   assert.deepEqual(calls.slice(n0).map((c) => c.join('|')).sort(), [`license|${FIT.bidNtceNo}|2`, `region|${FIT.bidNtceNo}|2`]);
   const a = await rowOf(FIT.bidNtceNo);
   assert.deepEqual([a.license_limit, !!a.limits_read_at], ['체육시설업(4993) / 체육시설업', true]);
+});
+
+test('258차 플랫폼 공고 조회 g2b=dates: 공고번호로 날짜 칸·계약 방식만(담당자 전화·키 없음 · 저장 안 함) · 못 찾은 조회는 한 줄씩', async () => {
+  const d = (await ctx.owner.ok('GET', `/api/platform/sales-notices?g2b=dates&no=${NODL.bidNtceNo}-000`)).g2bDates;
+  const f = d.found.find((x) => x.cat === '용역' && x.how === '공고번호');
+  assert.deepEqual([f.same, f.bidClseDt, f.dates, f.method.cntrctCnclsMthdNm], [1, null, { bidNtceDt: NODL.bidNtceDt, opengDt: NODL.opengDt, rgstDt: NODL.rgstDt }, '협상에 의한 계약']);
+  assert.ok(!JSON.stringify(d).includes('010-1234-5678') && !JSON.stringify(d).includes('test-key'));
+  assert.ok(d.notFound.some((x) => x.startsWith('공사·공고번호')), JSON.stringify(d.notFound));
+  assert.equal((await sql`select count(*)::int n from sales_src_rows where row->>'source_external_id' = ${`${NODL.bidNtceNo}-000`}`)[0].n, 0, '저장 안 함');
+  assert.equal((await ctx.owner.ok('GET', `/api/platform/sales-notices?g2b=dates&no=${encodeURIComponent('../x')}`)).g2bDates, undefined);
+  assert.equal((await ctx.staffA.client.req('GET', `/api/platform/sales-notices?g2b=dates&no=${NODL.bidNtceNo}`)).status, 404, '플랫폼 운영자만');
 });

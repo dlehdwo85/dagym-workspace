@@ -166,6 +166,32 @@ export async function probeG2bLimits(no: string | null) {
   }
   return { at, picked: no ? 'given' : 'read-but-empty', notices };
 }
+/** 258차(로컬 10/29 09:20 'R26BK01797447-000 나라장터 입찰인데 마감일이 빔'): 플랫폼 운영 공고 조회 g2b=dates — 공고번호로 입찰공고정보서비스 4대상을
+ *  공고번호 조회(기본 서비스)·게시일 하루 기간(수집과 같은 PPSSrch)으로 물어 같은 공고 줄의 날짜 칸(…Dt·…Dtm)과 계약·입찰 방식만 돌려줌(저장 안 함, 담당자·전화·메일 칸은 안 돌려줌) — 마감이 다른 칸 이름에 있는지 확인용 */
+export async function probeG2bDates(no: string) {
+  const key = dataGoKey(); const at = new Date().toISOString();
+  if (!key) return { at, error: 'DATA_GO_KR_SERVICE_KEY 미설정' };
+  const [bno, ord] = no.split('-');
+  const [row] = await db()<{ posted: string | null }[]>`select row->>'posted_date' as posted from sales_src_rows where scope = 'global' and tbl = 'procurement_notices'
+    and row->>'source_type' = 'g2b_bid' and (row->>'source_external_id' = ${no} or split_part(row->>'source_external_id', '-', 1) = ${bno}) limit 1`;
+  const day = row?.posted?.match(/^\d{4}-\d{2}-\d{2}/)?.[0]?.replace(/-/g, '');
+  const mask = (t: string) => noPii(t.split(key).join('***').split(encodeURIComponent(key)).join('***')).replace(/\s+/g, ' ');
+  const ways = BID_OPS.flatMap(([op, cat]) => [[cat, '공고번호', op.replace(/PPSSrch$/, ''), { inqryDiv: '2', bidNtceNo: bno }] as const,
+    ...(day ? [[cat, '게시일 기간', op, { inqryDiv: '1', inqryBgnDt: `${day}0000`, inqryEndDt: `${day}2359` }] as const] : [])]);
+  const tries = await Promise.all(ways.map(async ([cat, how, op, q]) => {
+    const u = new URL(`${API()}/${op}`); for (const [k, v] of Object.entries({ serviceKey: key, numOfRows: '100', pageNo: '1', type: 'json', ...q })) u.searchParams.set(k, v);
+    const st: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 };
+    try {
+      const list = await callDataGo(u, fetch, key, 8000, st);
+      const mine = list.filter((x) => str(x?.bidNtceNo) === bno && (!ord || !str(x?.bidNtceOrd) || str(x.bidNtceOrd) === ord)); const it = mine[0];
+      if (!it) return { cat, how, codes: st.codes, total: st.total, same: 0 };
+      const dates = Object.fromEntries(Object.entries(it).filter(([k, v]) => /(Dt|Dtm|Date|Tm)$/.test(k) && str(v)).map(([k, v]) => [k, String(v)]));
+      return { cat, how, codes: st.codes, total: st.total, same: mine.length, bidClseDt: str(it.bidClseDt), dates,
+        method: { bidMethdNm: str(it.bidMethdNm), cntrctCnclsMthdNm: str(it.cntrctCnclsMthdNm), ntceKindNm: str(it.ntceKindNm), sucsfbidMthdNm: str(it.sucsfbidMthdNm) } };
+    } catch (e) { return { cat, how, error: mask(e instanceof Error ? e.message : String(e)).slice(0, 200) }; }
+  }));
+  return { at, no, posted: row?.posted ?? null, found: tries.filter((t) => 'same' in t && (t.same ?? 0) > 0), notFound: tries.filter((t) => !('same' in t) || !t.same).map((t) => `${t.cat}·${t.how}: ${'error' in t ? t.error : `코드 ${JSON.stringify(t.codes)} 전체 ${t.total}`}`) };
+}
 const noKey = (label: string): CollectorResult => ({ inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `${label}: DATA_GO_KR_SERVICE_KEY 미설정 — 건너뜀`, providerMode: 'api' });
 
 export const g2bBidNotices: Collector = {

@@ -109,13 +109,16 @@ export function eligibilityDue(r: Row, now = Date.now()): boolean {
   if (e.text && e.by !== 'vision' && !eligibilitySection(e.text)) return true; // 256차: 예전 규칙으로 잘못 자른 절(등록 절차 안내 등)은 다시 읽음
   return !e.text && (e.tries ?? 0) < 3 && now - Date.parse(e.readAt ?? '') > 20 * 3600e3;
 }
+/** 258차(로컬 10/29 09:20 ⓑ): 마감일 칸이 빈 관련 공고도 목록 '진행 중'에 보이므로 읽음 — 원천 목록에서 최근 30일 안에 본 것만(오래 안 보인 줄은 빼고) */
+const NO_DEADLINE_DAYS = 30;
+const seenSince = (today: string) => kstDay(new Date(Date.parse(`${today}T12:00:00+09:00`) - NO_DEADLINE_DAYS * 864e5));
 /** 257차: 정기 실행이 읽는 공고인지(아래 tick 의 조건과 같음) — 아니면 이유. 공고 조회에서 '왜 아직 안 읽혔나' */
 export function eligibilityOutOfScope(r: Row, gone = false, today = kstDay()): string | null {
   if (gone) return '사라짐·합쳐짐 줄';
   if (String(r.related ?? 'false') !== 'true') return '관련 공고 아님';
   const dl = String(r.deadline_at ?? '').slice(0, 10);
-  if (!dl) return '마감일 칸 없음';
-  if (dl < today) return '마감 지남';
+  if (!dl && String(r.last_seen_at ?? r.first_seen_at ?? '').slice(0, 10) < seenSince(today)) return `마감일 칸 없음 · 원천 목록에서 ${NO_DEADLINE_DAYS}일 넘게 안 보임`;
+  if (dl && dl < today) return '마감 지남';
   if (/취소|낙찰|유찰|개찰/.test(String(r.current_status ?? ''))) return `상태 '${r.current_status}'`;
   if (r.kapt_cancel_at) return 'K-apt 취소';
   return null;
@@ -125,9 +128,10 @@ export async function eligibilityTick(o: { budgetMs?: number; max?: number } = {
   if (process.env.SALES_ELIGIBILITY === 'off') return { skipped: 'off' };
   const sql = db(); const t0 = Date.now(); const budget = o.budgetMs ?? 25_000; const max = o.max ?? (Number(process.env.SALES_ELIGIBILITY_MAX) || 6);
   const rows = await sql<{ src_id: string; row: Row }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone
-    and coalesce(row->>'related', 'false') = 'true' and left(coalesce(row->>'deadline_at', ''), 10) >= ${kstDay()}
+    and coalesce(row->>'related', 'false') = 'true'
+    and (left(coalesce(row->>'deadline_at', ''), 10) >= ${kstDay()} or (coalesce(row->>'deadline_at', '') = '' and left(coalesce(row->>'last_seen_at', row->>'first_seen_at', ''), 10) >= ${seenSince(kstDay())}))
     and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰|개찰' and coalesce(row->>'kapt_cancel_at', '') = ''
-    order by row->>'deadline_at' asc limit 400`;
+    order by nullif(row->>'deadline_at', '') asc nulls last limit 400`; // 마감일 없는 공고는 마감 있는 공고 뒤
   const seen = new Set<string>(); const due: string[] = [];
   for (const r of rows) {
     const key = r.row.source_type && r.row.source_external_id ? `${r.row.source_type}:${r.row.source_external_id}` : r.src_id;

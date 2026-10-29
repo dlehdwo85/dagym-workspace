@@ -246,10 +246,15 @@ export const kaptBidNotices: Collector = {
     }
     // 185차(로컬 10/26 19:20 A4): 규칙이 바뀐 뒤에도 예전 판정('관련 아님')으로 남은 최근 공고를 다시 판정(올리기만) — 모든 원천 공고
     const refit = left() > 4000 ? await refitNotices().catch((e) => { errors.push(`다시 판정: ${e instanceof Error ? e.message : String(e)}`); return null; }) : null;
+    // 258차(로컬 10/29 09:20 ⓒ 20260528163030684): 마감일 칸이 빈 K-apt 줄이 전체 목록에 14일 넘게 안 보이면 '사라짐'(다시 보이면 수집이 되돌림) — 마감이 있는 줄은 결과(낙찰) 추적이 쓰므로 그대로
+    const stale = uniq.length > 0 && !listFailures && written === ordered.length && left() > 3000 // 매일 06시 전체 수집이 목록에 있는 줄의 last_seen 을 새로 함
+      ? await db()`update sales_src_rows set gone = true, row = row || ${db().json({ gone_reason: 'K-apt 목록에 14일 넘게 안 보임(마감일 칸 없음)' } as never)}::jsonb, synced_at = now()
+          where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'source_type' = 'kapt_bid' and coalesce(row->>'deadline_at', '') = '' and coalesce(row->>'related', 'false') = 'true'
+            and left(coalesce(row->>'last_seen_at', row->>'first_seen_at', ''), 10) < ${kstYmd(new Date(now() - 14 * 864e5))}`.then((r) => r.count, () => 0) : 0;
     let direct = 0; const fitCount = { 다짐: 0, 하이링크: 0, 둘다: 0 };
     for (const r of fitRows) { const d = details.get(r.bidNum); const m = matchFit(r.title, d?.category, d?.content, '공동주택'); if (m.direct) direct++; if (m.fit === '다짐') fitCount.다짐++; else if (m.fit === '하이링크') fitCount.하이링크++; else if (m.fit) fitCount.둘다++; }
     return { inserted, updated, unchanged, errors: writeErrors + invalid + listFailures + (api.error ? 1 : 0) + (written < ordered.length ? 1 : 0), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
-      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}${watched.length ? ` · 목록 밖 마감 전 공고 다시 확인 ${watched.length}건${watchCanceled ? `(취소 ${watchCanceled})` : ''}` : ''}${filesRead || listFailed ? ` · 첨부 목록 ${filesRead}건(파일 ${listFiles}${listFailed ? `, 못 읽음 ${listFailed}` : ''})` : ''}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') + (refit?.raised ? ` · 다시 판정으로 관련 ${refit.raised}건(마감 전 ${refit.reopened})` : '') + (refit?.lowered || refit?.changed ? ` · 다시 판정으로 내림 ${refit.lowered}건·사업 바꿈 ${refit.changed}건` : '') };
+      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}${watched.length ? ` · 목록 밖 마감 전 공고 다시 확인 ${watched.length}건${watchCanceled ? `(취소 ${watchCanceled})` : ''}` : ''}${filesRead || listFailed ? ` · 첨부 목록 ${filesRead}건(파일 ${listFiles}${listFailed ? `, 못 읽음 ${listFailed}` : ''})` : ''}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') + (refit?.raised ? ` · 다시 판정으로 관련 ${refit.raised}건(마감 전 ${refit.reopened})` : '') + (stale ? ` · 마감일 없이 14일 넘게 안 보인 줄 ${stale}건 사라짐 표시` : '') + (refit?.lowered || refit?.changed ? ` · 다시 판정으로 내림 ${refit.lowered}건·사업 바꿈 ${refit.changed}건` : '') };
   },
 };
 

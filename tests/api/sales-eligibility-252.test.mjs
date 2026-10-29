@@ -168,6 +168,16 @@ test('정기 실행: 열린 관련 공고만 읽음(마감 지남·관련 아님
   const look = async (no) => (await ctx.owner.ok('GET', `/api/platform/sales-notices?no=${no}`)).items[0].eligibility;
   const lc = await look(N.CLOSED.bid), lk = await look(N.KA.bid);
   assert.deepEqual([lc.skip, lc.due, lk.skip], ['마감 지남', false, null]);
+  // 258차(로컬 10/29 09:20 ⓑ): 마감일 칸이 빈 관련 공고도 읽음(원천 목록에서 30일 안에 본 것) — 오래 안 보인 줄은 이유와 함께 빠짐
+  const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
+  await put('00000000-0000-4000-8000-000000252021', { source_type: 'g2b_bid', source_external_id: 'R26BK0252021-000', title: '(협상)시험252 파크골프장 타당성 조사 용역', related: true, fit_business: '다짐', current_status: '공고중', notice_kind: 'new', posted_date: plus(-5), first_seen_at: ago(5), last_seen_at: ago(0) });
+  await put('00000000-0000-4000-8000-000000252022', { source_type: 'g2b_bid', source_external_id: 'R26BK0252022-000', title: '시험252 오래된 협력회사 등록', related: true, fit_business: '다짐', current_status: '공고중', notice_kind: 'new', posted_date: plus(-60), first_seen_at: ago(60), last_seen_at: ago(40) });
+  const [n1, n2] = [await look('R26BK0252021-000'), await look('R26BK0252022-000')];
+  assert.deepEqual([n1.skip, n1.due, n2.skip, n2.due], [null, true, '마감일 칸 없음 · 원천 목록에서 30일 넘게 안 보임', false]);
+  await tick();
+  assert.deepEqual([(await rowOf('00000000-0000-4000-8000-000000252021')).eligibility?.error, (await rowOf('00000000-0000-4000-8000-000000252022')).eligibility], ['첨부 공고문 없음', undefined]);
+  const open = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=open');
+  assert.ok(open.noClose >= 1 && open.items.some((x) => x.noticeNo === 'R26BK0252021-000' && !x.close), JSON.stringify({ noClose: open.noClose }));
   // 다시 돌아도 같은 공고는 안 읽음(못 읽은 것도 20시간 뒤에)
   const at = ka.readAt; await tick();
   assert.equal((await rowOf(N.KA.id)).eligibility.readAt, at); assert.equal((await rowOf(N.KB.id)).eligibility.tries, 1);

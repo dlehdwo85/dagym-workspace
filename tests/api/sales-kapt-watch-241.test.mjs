@@ -89,3 +89,18 @@ test('플랫폼 공고 조회 probe=1: 지금 상세를 받아 응답 코드·�
   assert.equal((await ctx.owner.ok('GET', `/api/platform/sales-notices?no=${encodeURIComponent('../x')}&probe=1`)).probe, undefined);
   assert.equal((await ctx.staffA.client.req('GET', `/api/platform/sales-notices?no=${N.C}&probe=1`)).status, 404, '플랫폼 운영자만');
 });
+
+test('258차(로컬 10/29 09:20 ⓒ): 마감일 칸이 빈 관련 K-apt 줄이 목록에 14일 넘게 안 보이면 사라짐 표시(이유와 함께) · 최근 본 줄·마감 있는 줄은 그대로', async () => {
+  const old = new Date(Date.now() - 20 * 864e5).toISOString(), recent = new Date(Date.now() - 3 * 864e5).toISOString();
+  const S = row('C', { id: randomUUID(), source_external_id: 'kg2b_241011', deadline_at: null, last_seen_at: old });
+  const R = row('C', { id: randomUUID(), source_external_id: 'kg2b_241012', deadline_at: null, last_seen_at: recent });
+  const D = row('C', { id: randomUUID(), source_external_id: 'kg2b_241013', last_seen_at: old }); // 마감 있는 줄(결과 추적이 씀)
+  for (const r of [S, R, D]) await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', ${r.id}, ${sql.json(r)}, 'workin')`;
+  const r = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
+  assert.match(r.summary ?? '', /마감일 없이 14일 넘게 안 보인 줄 1건 사라짐 표시/, r.summary);
+  const g = async (x) => (await sql`select gone, row from sales_src_rows where src_id = ${x.id}`)[0];
+  assert.deepEqual([(await g(S)).gone, (await g(S)).row.gone_reason, (await g(R)).gone, (await g(D)).gone], [true, 'K-apt 목록에 14일 넘게 안 보임(마감일 칸 없음)', false, false]);
+  const it = (await ctx.owner.ok('GET', '/api/platform/sales-notices?no=kg2b_241011')).items[0];
+  assert.ok(it.reasons.includes('사라짐 표시 — K-apt 목록에 14일 넘게 안 보임(마감일 칸 없음)'), JSON.stringify(it.reasons));
+  assert.equal(it.eligibility.skip, '사라짐·합쳐짐 줄');
+});

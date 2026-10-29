@@ -1154,7 +1154,13 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
       <div className="flex flex-wrap items-center gap-1.5">{chips.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}
         {tab !== 'awards' && <select className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" data-testid="bids-sort">{BID_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
         {data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
-      {tab === 'awards' ? <AwardStats onOpen={setDeep} /> : !data ? <Skeleton rows={6} /> : tab === 'skip' && data.items.length > 0 ? <SkipGroups items={data.items} row={row} /> : <ul className="space-y-1.5">{data.items.map(row)}
+      {tab === 'awards' ? <AwardStats onOpen={setDeep} /> : !data ? <Skeleton rows={6} /> : tab === 'skip' && data.items.length > 0 ? <SkipGroups items={data.items} row={row} />
+        : tab === 'open' && data.noClose > 0 ? <>
+          <ul className="space-y-1.5">{data.items.filter((n: any) => n.close).map(row)}</ul>
+          {/* 258차(로컬 10/29 09:20 ⓑ): 마감일 칸이 빈 공고는 따로 — 예고·협력사 등록·마감 칸이 빈 입찰(공고문에서 마감 확인) */}
+          <section className="space-y-1.5" data-testid="bids-no-close"><h3 className="pt-1 text-xs font-semibold text-ink-2">마감일 없음 <span className="font-normal text-ink-3">{data.noClose}건 · 예고·협력사 등록·마감 칸이 빈 입찰 — 공고문에서 마감을 확인해 주세요</span></h3>
+            <ul className="space-y-1.5">{data.items.filter((n: any) => !n.close).map(row)}</ul></section></>
+        : <ul className="space-y-1.5">{data.items.map(row)}
         {!data.items.length && <li className="text-sm text-ink-3">해당 공고가 없습니다</li>}</ul>}
       {/* 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 뺀 결과(낙찰·유찰) — 당일 메일 '결과' 구역과 같은 기준, 접어 둠 */}
       {tab === 'today' && !!data?.results?.length && <details className="rounded-card border border-line bg-slate-50 p-2" data-testid="bids-results">
@@ -1422,7 +1428,7 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
     : /취소/.test(String(n.status ?? '')) || n.notice_kind === 'cancel' ? ['취소', 'bg-slate-200 text-ink-2'] : /마감(?!임박)/.test(String(n.status ?? '')) || (dd !== null && dd < 0) ? ['마감', 'bg-slate-100 text-ink-3']
     : dd === 0 ? [`오늘 마감 ${String(n.deadline ?? '').slice(11, 16)}`, 'bg-red-600 text-white'] : dd !== null && dd <= 3 ? [`D-${dd}`, 'bg-red-50 text-red-700']
     // 대표 10/24 추가 ③: 입찰 준비는 9~10일 전부터 — D-4~D-10 주황·굵게 '준비 시작' + 카드 왼쪽 주황 줄
-    : dd !== null && dd <= PREP_DAYS ? [`D-${dd} · 준비 시작`, 'bg-amber-100 font-bold text-amber-800'] : dd !== null ? [`D-${dd}`, 'bg-slate-100 text-ink-2'] : ['진행중', 'bg-slate-100 text-ink-2'];
+    : dd !== null && dd <= PREP_DAYS ? [`D-${dd} · 준비 시작`, 'bg-amber-100 font-bold text-amber-800'] : dd !== null ? [`D-${dd}`, 'bg-slate-100 text-ink-2'] : ['마감일 없음', 'bg-slate-100 text-ink-2']; // 258차: '진행중' → 마감 칸이 비었음을 그대로
   const prep = dd !== null && dd > 3 && dd <= PREP_DAYS && st[0].endsWith('준비 시작');
   // 239차(#744): 필수 현장설명이 3일 안이면 마감 임박처럼(입찰 마감보다 먼저 다가옴)
   const bdd = n.briefing?.at && !/취소|낙찰/.test(st[0]) ? Math.round((Date.parse(String(n.briefing.at).slice(0, 10)) - Date.parse(td)) / 864e5) : null;

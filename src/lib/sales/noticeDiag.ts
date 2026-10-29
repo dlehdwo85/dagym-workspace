@@ -15,7 +15,7 @@ const clip = (v: unknown, n: number) => { const s = v == null ? '' : String(v).r
 /** 영업실 입찰·공고 목록(srcViews bids)이 이 줄을 빼는 이유 — 회사별 [대상 아님]·검색어 조건은 회사마다 달라 여기서는 '확인 필요'로만 */
 export function hiddenReasons(r: Row, gone: boolean): string[] {
   const why: string[] = [];
-  if (gone) why.push(r.merged_into ? `같은 공고의 다른 줄로 합쳐짐(남긴 줄 ${r.merged_into})` : '원천에서 사라짐 표시(gone)');
+  if (gone) why.push(r.merged_into ? `같은 공고의 다른 줄로 합쳐짐(남긴 줄 ${r.merged_into})` : r.gone_reason ? `사라짐 표시 — ${r.gone_reason}` : '원천에서 사라짐 표시(gone)');
   const now = matchFit(String(r.title ?? ''), r.bid_category ?? null, r.task_scope ?? null, r.source_type === 'kapt_bid' ? '공동주택' : null);
   if (!(r.related === true || r.related === 'true')) {
     why.push(now.fit ? `저장된 판정은 '관련 아님' — 지금 규칙으로는 관련(${now.fit}: ${now.matched.join('·')}) → 다시 판정 대상`
