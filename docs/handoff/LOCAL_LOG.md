@@ -1999,3 +1999,12 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - PATCH /api/marketing/auto/brands/:id video.method: 다짐·바디랩 photos, 워크인·하이링크 screen (200×4).
 - PATCH rules active false ×20(4브랜드 feed·shorts·reels·blog·story). POST /api/marketing/auto/bundle ×4 {weekdays [2,5], kinds feed·reels·shorts·blog, startDate 2026-11-03} → 활성 규칙 16(feed 10:00·shorts 11:00·reels 12:00·blog 13:00).
 - auto_pause true 유지(월 실제 비용 한도 대표 결정 뒤 켬).
+
+## 2026-10-29 23:33 — 272차 운영 확인
+- /api/health 701f25f. 알림함: 20:59 task_file '새 첨부: [다짐 문의] 위스테이휘트니스…'(#794 실제 도착) · 21:00 mention 김소담.
+- 내일 아침 확인할 것: 브리핑 본문 '할 일 n건'·줄표 없음.
+
+## 2026-10-29 23:36 — 대표 #813: 전원 설정·비용 한도·팀 저장소 결정
+- powercfg /query SUB_SLEEP STANDBYIDLE: 현재 AC 0x0 · DC 0x0(안 잠듦). SUB_BUTTONS LIDACTION 은 SAMSUNG MODE 구성표에서 질의 결과 없음(숨김) → 설정 화면 확인 안내.
+- PUT /api/marketing/auto {autoPause:false} → auto_pause false · plan pro · 비용 한도 없음 · 규칙 16 · 크레딧 163.5/250.
+- 클라우드: 팀 저장소 결정 4가지·대표 첨부 고치기 그대로·상용화 시험 보기 요청.
