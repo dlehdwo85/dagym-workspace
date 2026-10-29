@@ -1442,6 +1442,10 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
         <BizBadges items={n.businesses} testid="bid-business" />
         {cat && <span className={cx('hidden rounded-full px-2 py-0.5 text-[11px] font-medium md:inline', CAT_CLS[String(cat)] ?? 'bg-slate-100 text-ink-2')}>{String(cat)}</span>}
         {n.partner && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-800" title="공사 공고 — 면허를 가진 업체와 함께 참가를 준비합니다" data-testid="bid-partner">{n.partner}</span>}
+        {/* 259차: 마감이 API 입찰 마감이 아님 — 공동수급협정 마감(임시)·공고문에서 읽은 제출 마감 · 개찰은 따로 */}
+        {n.deadlineSrc === 'agreement' && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" title="나라장터에 입찰 마감 칸이 없는 공고(협상·직찰) — 공동수급협정 마감을 임시 마감으로 둠" data-testid="bid-deadline-src">공동수급협정 마감 — 입찰 마감 아님 · 공고문 확인</span>}
+        {n.deadlineSrc === 'doc' && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800" title={n.deadlineLabel ?? undefined} data-testid="bid-deadline-src">공고문에서 읽은 제출 마감 · 원문 확인</span>}
+        {n.deadlineSrc && n.opening && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2" data-testid="bid-opening">개찰 {String(n.opening).slice(5, 10).replace('-', '/')} {String(n.opening).slice(11, 16)}</span>}
         {n.vendorRecruit && <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] text-teal-800 md:hidden" data-testid="bid-recruit">협력사 모집</span>}
         {n.sourceLabel && <span className="hidden rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-2 md:inline">{String(n.sourceLabel)}</span>}
         {n.work && chip(n.work)}

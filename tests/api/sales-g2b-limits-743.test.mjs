@@ -18,6 +18,9 @@ const EMPTY = 'R26BK0074303'; // 이미 물었는데 값이 없던 공고(245차
 // 258차: 마감 칸(bidClseDt)이 빈 협상 공고 — 공고번호 조회에 날짜 칸만 돌려주는지(담당자 전화는 안 돌려줌)
 const NODL = { bidNtceNo: 'R26BK0074304', bidNtceOrd: '000', bidNtceNm: '(협상)시험 파크골프장 타당성 조사 용역', bidNtceDt: `${today} 09:00:00`, bidClseDt: '', opengDt: `${plus(12)} 11:00:00`,
   rgstDt: `${today} 08:59:00`, cntrctCnclsMthdNm: '협상에 의한 계약', bidMethdNm: '전자입찰', ntceInsttOfclTelNo: '010-1234-5678' };
+// 259차: 목록 응답에 입찰 마감이 없는 공고(직찰·협상) — 공동수급협정 마감을 임시 마감으로(관련 아닌 제목: 참가 제한 조회 건수에 안 섞임)
+const AGR = { bidNtceNo: 'R26BK0074305', bidNtceOrd: '000', bidNtceNm: '청사 청소 용역(협상)', ntceInsttNm: '시험군청', bidNtceDt: `${today} 09:00:00`, bidClseDt: '',
+  cmmnSpldmdAgrmntClseDt: `${plus(7)} 18:00:00`, opengDt: `${plus(8)} 17:00:00` };
 let srv, ctx, sql, fake; const calls = [];
 before(async () => {
   fake = http.createServer(async (req, res) => {
@@ -30,7 +33,7 @@ before(async () => {
         { bidNtceNo: FIT.bidNtceNo, bidNtceOrd: '001', lcnsLmtNm: '다른 차수 면허' }] : [])); }
     if (u.pathname.endsWith('/getBidPblancListInfoPrtcptPsblRgn')) { calls.push(['region', u.searchParams.get('bidNtceNo'), u.searchParams.get('inqryDiv')]);
       return send(dataGo(u.searchParams.get('bidNtceNo') === FIT.bidNtceNo ? [{ bidNtceNo: FIT.bidNtceNo, bidNtceOrd: '000', lmtSno: '1', prtcptPsblRgnNm: '경기도' }, { bidNtceNo: FIT.bidNtceNo, bidNtceOrd: '000', lmtSno: '2', prtcptPsblRgnNm: '서울특별시' }] : [])); }
-    if (u.pathname.endsWith('/getBidPblancListInfoServcPPSSrch')) return send(dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [FIT, OTHER] : []));
+    if (u.pathname.endsWith('/getBidPblancListInfoServcPPSSrch')) return send(dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [FIT, OTHER] : u.searchParams.get('bidNtceNm') === '골프' ? [AGR] : []));
     if (u.pathname.endsWith('/getBidPblancListInfoServc')) return send(dataGo(u.searchParams.get('bidNtceNo') === NODL.bidNtceNo && u.searchParams.get('inqryDiv') === '2' ? [NODL] : []));
     return send(dataGo([]));
   }).listen(PORT);
@@ -101,4 +104,25 @@ test('258차 플랫폼 공고 조회 g2b=dates: 공고번호로 날짜 칸·계�
   assert.equal((await sql`select count(*)::int n from sales_src_rows where row->>'source_external_id' = ${`${NODL.bidNtceNo}-000`}`)[0].n, 0, '저장 안 함');
   assert.equal((await ctx.owner.ok('GET', `/api/platform/sales-notices?g2b=dates&no=${encodeURIComponent('../x')}`)).g2bDates, undefined);
   assert.equal((await ctx.staffA.client.req('GET', `/api/platform/sales-notices?g2b=dates&no=${NODL.bidNtceNo}`)).status, 404, '플랫폼 운영자만');
+});
+
+test('259차 입찰 마감이 없는 나라장터 공고: 공동수급협정 마감을 임시 마감(agreement) · 공고문 마감(doc)은 다음 수집이 안 덮음 · API 에 입찰 마감이 오면 그것으로 · g2b=nodl 수', async () => {
+  const a = await rowOf(AGR.bidNtceNo);
+  assert.deepEqual([a.deadline_at, a.deadline_src, a.agreement_close_at, a.opening_at], [`${plus(7)}T18:00:00+09:00`, 'agreement', `${plus(7)}T18:00:00+09:00`, `${plus(8)}T17:00:00+09:00`]);
+  const fit = await rowOf(FIT.bidNtceNo);
+  assert.deepEqual([fit.deadline_src ?? null, fit.agreement_close_at ?? null], [null, null], '입찰 마감이 있는 공고는 칸을 더하지 않음');
+  await sql`update sales_src_rows set row = row || ${sql.json({ deadline_at: `${plus(5)}T18:00:00+09:00`, deadline_src: 'doc' })}::jsonb where row->>'source_external_id' = ${`${AGR.bidNtceNo}-000`}`;
+  await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
+  const b = await rowOf(AGR.bidNtceNo);
+  assert.deepEqual([b.deadline_at, b.deadline_src], [`${plus(5)}T18:00:00+09:00`, 'doc'], '공고문에서 읽은 마감은 임시 마감으로 되돌리지 않음');
+  AGR.bidClseDt = `${plus(6)} 10:00:00`;
+  await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
+  const c = await rowOf(AGR.bidNtceNo);
+  assert.deepEqual([c.deadline_at, c.deadline_src], [`${plus(6)}T10:00:00+09:00`, null], 'API 에 진짜 입찰 마감이 오면 그것으로');
+  AGR.bidClseDt = '';
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', '00000000-0000-4000-8000-000000259001',
+    ${sql.json({ id: '00000000-0000-4000-8000-000000259001', source_type: 'g2b_bid', source_external_id: 'R26BK0259001-000', title: '(협상)시험 파크골프장 기본계획 용역', related: true, posted_date: today, deadline_at: `${plus(7)}T18:00:00+09:00`, deadline_src: 'agreement' })}, 'workin')`;
+  const n = (await ctx.owner.ok('GET', '/api/platform/sales-notices?g2b=nodl')).g2bNoDeadline;
+  assert.ok(n.count >= 1 && n.agreement >= 1 && n.items.some((x) => x.ext === 'R26BK0259001-000'), JSON.stringify(n));
+  assert.equal((await ctx.staffA.client.req('GET', '/api/platform/sales-notices?g2b=nodl')).status, 404);
 });

@@ -124,7 +124,9 @@ const daysSince = (d: string | null) => { if (!d) return null; const n = Math.fl
 const vendorUnchecked = (r: any) => String(r?.source_type ?? '') === 'vendor_recruit' && !vendorDateOk(r);
 const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); return ({ id: r.__id, title: pick(r, 'title', 'notice_title', 'bid_name', 'name') ?? '(제목 없음)', agency: pick(r, 'issuer', 'agency', 'org_name', 'demand_agency', 'organization', 'buyer'),
   region: pick(r, 'region'), posted: firstSeen(r), noticeDate: vendorUnchecked(r) ? null : day(pick(r, 'posted_date', 'posted_at', 'notice_date', 'published_at', 'bid_notice_date')), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'),
-  close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')), source: pick(r, 'source_type', 'source', 'source_code'), url: fixG2bUrl(pick(r, 'source_url', 'url', 'detail_url', 'link')),
+  close: day(pick(r, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date')),
+  // 259차: 마감이 API 입찰 마감이 아닐 때 — 'agreement' 공동수급협정 마감(임시) · 'doc' 공고문에서 읽은 제출 마감(그 글줄) · 개찰
+  deadlineSrc: pick(r, 'deadline_src'), deadlineLabel: pick(r, 'doc_deadline_label'), agreementClose: pick(r, 'agreement_close_at'), opening: pick(r, 'opening_at'), source: pick(r, 'source_type', 'source', 'source_code'), url: fixG2bUrl(pick(r, 'source_url', 'url', 'detail_url', 'link')),
   // #543 옛 나라장터 주소는 새 형식으로, 바로 가는 주소가 없는 원천은 번호 검색 안내
   search: searchHint({ source: pick(r, 'source_type', 'source', 'source_code'), url: pick(r, 'source_url', 'url', 'detail_url', 'link'), externalId: pick(r, 'source_external_id'), noticeNo: pick(r, 'notice_no') }),
   attachments: attachmentsOf(r),

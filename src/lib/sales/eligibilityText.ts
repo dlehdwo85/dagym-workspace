@@ -44,6 +44,37 @@ export function eligibilitySection(text: string | null | undefined): string | nu
   return sec.length > best.head.length + 2 ? sec.slice(0, MAX) : null;
 }
 
+/** 259차(로컬 10/29 10:10 나라장터 '(협상)보령시 파크골프장…' — 협상(제안서)·직찰 공고는 API 에 입찰 마감 칸(bidClseDt)이 없음): 공고문 글 → 제안서·입찰서 제출 마감 일시.
+ *  '제안서 제출 마감: 2026. 11. 10.(화) 18:00' · '입찰서 제출기간 2026.11.03.(화) 09:00 ~ 2026.11.10.(화) 18:00까지'(끝 날짜) · '접수 기한 2026년 11월 10일(화) 오후 5시'.
+ *  참가자격 등록·참가신청·공동수급·현장설명·질의·개찰 줄은 뺌. 날짜 줄에 없으면 바로 다음 줄(표 칸)까지. posted(공고일)가 있으면 그날~200일 안만. 없으면 null */
+const DL_LABEL = /(?:(?:제안\s*서|입찰\s*서|가격\s*(?:입찰|제안)\s*서|제안\s*서류|입찰\s*서류|서류)\s*(?:의\s*)?(?:제출|접수|투찰)|(?:전자\s*)?입찰|투찰|제출|접수)\s*(?:마감\s*일시|마감|기한|기간|일시)/g;
+const DL_SKIP = /참가\s*자격\s*(?:등록|신청)|참가\s*신청|공동\s*수급|현장\s*설명|질의|이의\s*신청|사전\s*심사|개찰|낙찰/;
+const DL_DATE = /(20\d{2})\s*(?:[.\-/]|년)\s*(\d{1,2})\s*(?:[.\-/]|월)\s*(\d{1,2})\s*(?:일|\.)?\s*(?:\(\s*[월화수목금토일]\s*\)|[월화수목금토일]요일)?\s*(?:(오전|오후)\s*)?(?:(\d{1,2})\s*(?::|시)\s*(\d{2})?\s*분?)?/g;
+export function docDeadline(text: string | null | undefined, posted?: string | null): { at: string; label: string } | null {
+  const t = String(text ?? '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
+  const lo = /^\d{4}-\d{2}-\d{2}/.test(String(posted ?? '')) ? String(posted).slice(0, 10) : null;
+  const hi = lo ? new Date(Date.parse(`${lo}T12:00:00+09:00`) + 200 * 864e5).toISOString().slice(0, 10) : null;
+  const dates = (s: string) => [...s.matchAll(DL_DATE)].map((d) => {
+    let h = d[5] != null ? Number(d[5]) : null; if (h != null && d[4] === '오후' && h < 12) h += 12;
+    const ymd = `${d[1]}-${d[2].padStart(2, '0')}-${d[3].padStart(2, '0')}`;
+    return { ymd, iso: `${ymd}T${h != null && h <= 24 ? String(Math.min(h, 23)).padStart(2, '0') : '23'}:${h != null && h <= 24 ? (d[6] ?? '00').padStart(2, '0') : '59'}:00+09:00`, end: (d.index ?? 0) + d[0].length };
+  }).filter((d) => !Number.isNaN(Date.parse(d.iso)) && (!lo || (d.ymd >= lo && d.ymd <= hi!)));
+  let best: { prio: number; at: string; label: string } | null = null;
+  for (const m of t.matchAll(DL_LABEL)) {
+    const at = m.index ?? 0; const ls = t.lastIndexOf('\n', at) + 1; const le0 = t.indexOf('\n', at); const le = le0 < 0 ? t.length : le0;
+    const line = t.slice(ls, le); if (DL_SKIP.test(line)) continue;
+    const rest = t.slice(at + m[0].length, le);
+    let ds = dates(rest);
+    if (!ds.length && le < t.length) { const ne0 = t.indexOf('\n', le + 1); const next = t.slice(le + 1, ne0 < 0 ? t.length : ne0); if (!DL_SKIP.test(next)) ds = dates(next.slice(0, 120)); }
+    if (!ds.length) continue;
+    const range = ds.length > 1 && /~|∼|부터|까지|-\s*20\d{2}/.test(rest);
+    const d = range ? ds[ds.length - 1] : ds[0];
+    const prio = /제안|입찰\s*서|투찰|가격/.test(m[0]) ? 0 : /입찰/.test(m[0]) ? 1 : 2;
+    if (!best || prio < best.prio) best = { prio, at: d.iso, label: line.replace(/\s+/g, ' ').trim().slice(0, 80) };
+    if (prio === 0) break;
+  }
+  return best ? { at: best.at, label: best.label } : null;
+}
 /** 257차: jsonb 가 받지 않는 글자(NUL·짝 없는 서로게이트 — 한글 hwp 를 글자 단위로 읽거나 1,500자에서 자를 때 생길 수 있음)를 지움. 하나라도 있으면 저장이 통째로 실패해 공고가 '아직 안 읽음'으로 남았음 */
 export function jsonSafe<T extends string | null | undefined>(v: T): T {
   return (typeof v === 'string' ? v.replace(/\u0000/g, '').replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '') : v) as T;

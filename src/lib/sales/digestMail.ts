@@ -85,7 +85,7 @@ function parts(i: DigestItem, day: string, hq: string | null) {
   const src = [i.source, i.noticeNo].filter(Boolean).join(' ') || null;
   if (i.section === 'result') return { l2, lim, sched: i.openingAt ? [`개찰 ${whenLabel(i.openingAt)}`] : [], l4: src ? [src] : [], elig: null }; // 결과는 지난 마감·참가신청 대신 개찰·출처만
   // 239차(#744): 현장설명 필수·임의 · 장소까지(K-apt 상세 칸)
-  const sched = [i.briefingAt ? `현장설명${i.briefingKind === '필수' || i.briefingKind === '임의' ? `(${i.briefingKind})` : ''} ${whenLabel(i.briefingAt)}${i.briefingPlace ? ` ${i.briefingPlace}` : ''}` : null, i.participationAt ? `참가신청마감 ${whenLabel(i.participationAt)}` : null, i.deadlineAt ? `입찰마감 ${whenLabel(i.deadlineAt)}` : null,
+  const sched = [i.briefingAt ? `현장설명${i.briefingKind === '필수' || i.briefingKind === '임의' ? `(${i.briefingKind})` : ''} ${whenLabel(i.briefingAt)}${i.briefingPlace ? ` ${i.briefingPlace}` : ''}` : null, i.participationAt ? `참가신청마감 ${whenLabel(i.participationAt)}` : null, i.deadlineAt ? `입찰마감 ${whenLabel(i.deadlineAt)}${i.deadlineSrc === 'agreement' ? '(공동수급협정 마감 — 입찰 마감 아님 · 공고문 확인)' : i.deadlineSrc === 'doc' ? '(공고문에서 읽은 제출 마감)' : ''}` : null,
     i.openingAt ? `개찰 ${whenLabel(i.openingAt)}` : null].filter((x): x is string => !!x);
   const l4 = [i.attachments ? `첨부 ${i.attachments}` : null, i.bidSystem ? `투찰 ${i.bidSystem}` : null, src, i.posted && i.posted < day ? `공고일 ${mdw(i.posted)}` : null,
     i.refound ? `다시 찾은 공고(${seenLabel(i.seenAt)} 처음 수집)` : i.late ? `지난 메일 뒤 ${seenLabel(i.seenAt)} 수집` : null].filter((x): x is string => !!x);

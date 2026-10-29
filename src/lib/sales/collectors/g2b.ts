@@ -62,8 +62,11 @@ export function g2bPayload(it: any, sourceType: 'g2b_bid' | 'nuri_bid', cat: str
   const no = str(it.bidNtceNo), ord = str(it.bidNtceOrd) ?? '00', title = str(it.bidNtceNm); if (!no || !title) return null;
   // #543 API 가 주는 상세 주소도 옛 형식(ep/invitation/publish/bidInfoDtl.do, 차세대 나라장터에서 '찾을 수 없음') → 새 형식으로
   const url = fixG2bUrl(str(it.bidNtceDtlUrl) ?? str(it.bidNtceUrl)) ?? g2bBidUrl(no, ord);
+  // 259차(로컬 10/29 10:10 g2b=dates 'R26BK01797447-000' = 직찰·협상에 의한 계약 → bidClseDt 없음): 입찰 마감이 없으면 공동수급협정 마감을 임시 마감으로('입찰 마감 아님 · 공고문 확인' 표시) —
+  // 참가자격 읽기가 공고문에서 제안서·입찰서 제출 마감을 찾으면 그것으로 바꿈(deadline_src 'doc'). 입찰 마감이 있는 공고는 칸을 더하지 않음(이미 저장된 줄이 '고침'으로 안 셈)
+  const close = str(it.bidClseDt), agree = str(it.cmmnSpldmdAgrmntClseDt);
   return { source_type: sourceType, source_external_id: `${no}-${ord}`, source_url: url, title, issuer: str(it.ntceInsttNm), demand_agency: str(it.dminsttNm), region: str(it.prtcptLmtRgnNm) ?? str(it.rgnNm) ?? null, region_restriction: str(it.prtcptLmtRgnNm),
-    posted_date: str(it.bidNtceDt)?.slice(0, 10), deadline_at: str(it.bidClseDt), opening_at: str(it.opengDt), participation_deadline_at: str(it.bidBeginDt) ? null : str(it.rbidPrtcptLmtRgstClseDt ?? it.prtcptLmtRgstClseDt),
+    posted_date: str(it.bidNtceDt)?.slice(0, 10), deadline_at: close ?? agree, ...(close ? {} : { deadline_src: agree ? 'agreement' : null, agreement_close_at: agree }), opening_at: str(it.opengDt), participation_deadline_at: str(it.bidBeginDt) ? null : str(it.rbidPrtcptLmtRgstClseDt ?? it.prtcptLmtRgstClseDt),
     estimated_amount: str(it.presmptPrce), budget_amount: str(it.asignBdgtAmt), contract_method: str(it.cntrctCnclsMthdNm), award_method: str(it.sucsfbidMthdNm), notice_state: str(it.ntceKindNm), bid_category: cat, notice_type: cat === '공사' ? '공사' : undefined,
     industry_code: str(it.indstrytyLmtNm) ?? str(it.indstrytyNm), task_scope: str(it.bidNtceDtlCntnts ?? it.ntceSpecFileNm1), attachment_urls: attachments(it), notice_file_url: str(it.ntceSpecDocUrl1),
     site_briefing_at: str(it.dcmtgOprtnDt), site_briefing_place: str(it.dcmtgOprtnPlce) }; // #510 메일 3행 '현장설명'
@@ -191,6 +194,17 @@ export async function probeG2bDates(no: string) {
     } catch (e) { return { cat, how, error: mask(e instanceof Error ? e.message : String(e)).slice(0, 200) }; }
   }));
   return { at, no, posted: row?.posted ?? null, found: tries.filter((t) => 'same' in t && (t.same ?? 0) > 0), notFound: tries.filter((t) => !('same' in t) || !t.same).map((t) => `${t.cat}·${t.how}: ${'error' in t ? t.error : `코드 ${JSON.stringify(t.codes)} 전체 ${t.total}`}`) };
+}
+/** 259차(로컬 10/29 10:10 '같은 꼴(협상·제안 공고)이 더 있는지'): 플랫폼 공고 조회 g2b=nodl — 최근 60일 나라장터 관련 공고 중 API 입찰 마감이 없는 줄(마감 칸 빔·임시·공고문) 수와 앞 30건 */
+export async function g2bNoDeadline() {
+  const since = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+  const rows = await db()<{ ext: string; title: string | null; posted: string | null; src: string | null; dl: string | null; method: string | null; award: string | null }[]>`select row->>'source_external_id' as ext, row->>'title' as title,
+      row->>'posted_date' as posted, row->>'deadline_src' as src, row->>'deadline_at' as dl, row->>'contract_method' as method, row->>'award_method' as award from sales_src_rows
+    where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'source_type' in ('g2b_bid', 'nuri_bid') and coalesce(row->>'related', 'false') = 'true'
+      and coalesce(row->>'posted_date', '') >= ${since} and (coalesce(row->>'deadline_at', '') = '' or coalesce(row->>'deadline_src', '') <> '')
+    order by row->>'posted_date' desc limit 200`;
+  const by = (k: string | null) => rows.filter((r) => (r.src ?? '') === (k ?? '')).length;
+  return { since, count: rows.length, empty: by(null), agreement: by('agreement'), doc: by('doc'), items: rows.slice(0, 30) };
 }
 const noKey = (label: string): CollectorResult => ({ inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `${label}: DATA_GO_KR_SERVICE_KEY 미설정 — 건너뜀`, providerMode: 'api' });
 

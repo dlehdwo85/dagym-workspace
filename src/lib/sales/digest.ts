@@ -84,6 +84,7 @@ export type DigestItem = { id: string; title: string; issuer: string | null; reg
   /** #510 21라인 칸 */ section: DigestSection; noticeNo: string | null; badges: string[]; biz: { name: string; color: string }[]; tags: string[]; amount: string | null; deadlineAt: string | null; participationAt: string | null; openingAt: string | null; briefingAt: string | null; /** 239차(#744): 현장설명 필수·임의·공고문 참조 · 장소 */ briefingKind?: string | null; briefingPlace?: string | null; /** 252차 #786 참가자격 한 줄(공고문 절) */ elig?: string | null; bidSystem: string | null;
   /** #543 바로 가는 상세 주소가 없는 원천 — [원문] 대신 '○○에서 번호 검색' */ search?: SearchHint | null;
   /** 결과 줄: '낙찰 ○○ · 1.2억' / '유찰' */ result?: string | null;
+  /** 259차: 마감이 API 입찰 마감이 아님 — 'agreement' 공동수급협정 마감(임시) · 'doc' 공고문에서 읽은 제출 마감 */ deadlineSrc?: 'agreement' | 'doc' | null;
   /** 215차(#530 로컬 10/24 ③④⑨): 금액 칸 나눔(기초금액·추정가격·배정예산) · 참가 제한 지역과 본사 기준 참가 가능 · 이 회사 진행(상태·담당) */ amounts?: string[]; limit?: RegionLimit | null; progress?: string | null };
 /** 215차(#530 ①②): 메일 머리 — 받은 기간·맞춤 조건 상자 */
 export type DigestCond = { biz: string[]; keywords: number; excludes: number; regions: string[]; issuers: number; itemCodes: number; amountMin: number | null; amountMax: number | null; hq: string | null };
@@ -285,7 +286,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
       participation: dayOf(r.participation_deadline_at), opening: dayOf(r.opening_at), attachments: Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0, why: c.why, seenAt: r.first_seen_at ?? null, late: c.late, refound: !!c.refound, posted: dayOf(r.posted_date),
       section, noticeNo: st === 'vendor_recruit' ? null : String(r.source_external_id ?? '').trim() || null, badges, biz: biz.length ? biz : c.fit ? [{ name: c.fit, color: '#2563EB' }] : [], tags: tagsOf(r), amount: amounts.join(' · ') || null, amounts,
       limit: c.kind === 'result' || c.kind === 'cancel' ? null : regionLimit(r.region_restriction, hq), progress,
-      deadlineAt: fmtWhen(dl), participationAt: fmtWhen(when(r.participation_deadline_at)), openingAt: fmtWhen(when(r.opening_at)),
+      deadlineAt: fmtWhen(dl), deadlineSrc: r.deadline_src === 'agreement' || r.deadline_src === 'doc' ? r.deadline_src : null, participationAt: fmtWhen(when(r.participation_deadline_at)), openingAt: fmtWhen(when(r.opening_at)),
       briefingAt: briefing, briefingKind: r.site_briefing_kind ?? null, briefingPlace: r.site_briefing_place ?? null, // 239차(#744)
       elig: c.kind === 'result' || c.kind === 'cancel' ? null : eligSay(eligView(r)), // 252차 #786 — 목록 줄과 같은 말
       bidSystem: st === 'kapt_bid' && r.bid_system && sysKey(r.bid_system) !== sysKey(SRC[st]) ? String(r.bid_system) : null, // 투찰처가 원천(K-APT)과 같으면 숨김 — KG2B 같은 다른 곳만

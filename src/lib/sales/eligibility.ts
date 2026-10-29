@@ -4,12 +4,15 @@
 import { sha256 } from '../crypto';
 import { db } from '../db';
 import { extractTextResult, unzip } from '../textExtract';
-import { apiExtra, COMMON_ONLY, eligibilityItems, eligibilityLine, eligibilitySection, jsonSafe, lineOf, type EligItem } from './eligibilityText';
+import { apiExtra, COMMON_ONLY, docDeadline, eligibilityItems, eligibilityLine, eligibilitySection, jsonSafe, lineOf, type EligItem } from './eligibilityText';
 import { visionRead, type PhotoDoc } from './eligibilityVision';
 import { sourceFiles, type SrcFile } from './files';
 
 export type Eligibility = { text: string | null; items: EligItem[]; line: string | null; error: string | null; file: { name: string | null; url: string } | null; readAt: string; sig: string; tries: number;
-  /** 253차 #790 사진 공고문을 AI 비전으로 읽음(숫자는 원문 확인) */ by?: 'vision'; visionUsd?: number };
+  /** 253차 #790 사진 공고문을 AI 비전으로 읽음(숫자는 원문 확인) */ by?: 'vision'; visionUsd?: number;
+  /** 259차: 입찰 마감이 없는 공고(임시 마감·마감 칸 빔)에서 공고문의 제출 마감을 찾아봄 — 찾았으면 그 글줄 */ dl?: { at: string | null; label: string | null } };
+/** 259차: 마감 칸이 비었거나 공동수급협정 마감(임시)인 공고 — 공고문에서 제안서·입찰서 제출 마감을 찾음 */
+export const needsDocDeadline = (r: Row) => !String(r.deadline_at ?? '') || r.deadline_src === 'agreement';
 type Row = Record<string, any>;
 const kstDay = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 
@@ -54,6 +57,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   const row = r1?.row ?? r0.row; const prev = (row.eligibility ?? null) as Eligibility | null;
   const files = rankFiles(src?.files ?? []).slice(0, opt.maxFiles ?? 3);
   let found: { text: string; items: EligItem[]; line: string } | null = null; let used: SrcFile | null = null; let tried: SrcFile | null = null; const errs: string[] = [];
+  const needDl = needsDocDeadline(row); let dl: { at: string; label: string } | null = null; // 259차
   let photo: { f: SrcFile; doc: PhotoDoc } | null = null; let by: 'vision' | undefined; let visionUsd: number | undefined; let visionDone = false; let visionSkip = false;
   for (const f of files) {
     tried = tried ?? f;
@@ -65,6 +69,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
       else { const got = await fetchFile(f.url, f.name, { bid: src?.bid ?? null }); const x = await extractTextResult(got.data, got.fileName, got.mime); text = x.text; terr = x.text ? null : fileErr(x.error, got.data, got.fileName); f.name = f.name ?? got.fileName;
         if (terr === PHOTO_ONLY && !photo) photo = { f, doc: { data: got.data, fileName: got.fileName, mime: got.mime } }; }
       if (!text) { errs.push(terr ?? '본문 글자 없음'); continue; }
+      if (needDl && !dl) dl = docDeadline(text, row.posted_date ? String(row.posted_date) : null);
       found = eligibilityOf(text, row); used = f;
       if (found) break;
       errs.push('참가자격 절 없음');
@@ -93,10 +98,12 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   const error = found ? null : !files.length ? (src?.listError ? '첨부 목록을 못 읽음' : '첨부 공고문 없음') : [...new Set(errs)].join(' · ').slice(0, 160) || '공고문에서 참가자격 절을 못 찾음';
   const out: Eligibility = { text: found?.text ?? null, items: found?.items ?? [], line: found?.line ?? (extra.length ? extra.join(' · ') : null), error, file: (used ?? tried) ? { name: (used ?? tried)!.name, url: (used ?? tried)!.url } : null, // 못 읽었어도 어떤 파일을 봤는지
     readAt: new Date().toISOString(), sig: sigNow, tries: found ? 0 : visionDone || visionBefore ? 3 : visionSkip ? prevTries : prevTries + 1, // 사진 읽기를 한 공고는 첨부가 바뀔 때까지 다시 안 함 · 설정 이유로 건너뛴 것은 세지 않음
-    ...(by ? { by } : {}), ...(visionUsd != null ? { visionUsd } : {}) };
+    ...(by ? { by } : {}), ...(visionUsd != null ? { visionUsd } : {}), ...(needDl ? { dl: { at: dl?.at ?? null, label: dl ? jsonSafe(dl.label) : null } } : {}) };
   out.text = jsonSafe(out.text); out.line = jsonSafe(out.line); out.error = jsonSafe(out.error); out.items = out.items.map((x) => ({ ...x, label: jsonSafe(x.label) })); // 257차: 저장 실패 막기
   const st = String(row.source_type ?? ''); const ext = String(row.source_external_id ?? '');
-  await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: out } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices'
+  // 259차: 공고문에서 제출 마감을 찾으면 마감으로(deadline_src 'doc' — 다음 수집의 임시 마감이 덮지 않음, API 에 진짜 입찰 마감이 오면 그것으로)
+  const dlPatch = dl ? { deadline_at: dl.at, deadline_src: 'doc', doc_deadline_label: jsonSafe(dl.label) } : {};
+  await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: out, ...dlPatch } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices'
     and (src_id = ${id} ${st && ext ? sql`or (row->>'source_type' = ${st} and row->>'source_external_id' = ${ext})` : sql``})`; // synced_at 은 그대로(메일 '고침'으로 안 셈)
   return out;
 }
@@ -106,6 +113,7 @@ export function eligibilityDue(r: Row, now = Date.now()): boolean {
   const e = r.eligibility as Eligibility | undefined;
   if (!e) return true;
   if (e.sig !== filesSig(r)) return true;
+  if (needsDocDeadline(r) && !e.dl) return true; // 259차: 입찰 마감이 없는 공고는 공고문 제출 마감을 한 번 찾아봄(예전에 읽은 공고도)
   if (e.text && e.by !== 'vision' && !eligibilitySection(e.text)) return true; // 256차: 예전 규칙으로 잘못 자른 절(등록 절차 안내 등)은 다시 읽음
   return !e.text && (e.tries ?? 0) < 3 && now - Date.parse(e.readAt ?? '') > 20 * 3600e3;
 }
@@ -146,7 +154,8 @@ export async function eligibilityTick(o: { budgetMs?: number; max?: number } = {
     const e = await readEligibility(id).catch(async (err) => {
       const msg = jsonSafe(String((err as Error)?.message ?? err).slice(0, 80));
       const r = rows.find((x) => x.src_id === id)?.row; const prev = r?.eligibility as Eligibility | undefined;
-      const fail: Eligibility = { text: null, items: [], line: null, error: `읽기 오류: ${msg}`, file: null, readAt: new Date().toISOString(), sig: r ? filesSig(r) : '', tries: (prev && !prev.text ? prev.tries ?? 0 : 0) + 1 };
+      const fail: Eligibility = { text: null, items: [], line: null, error: `읽기 오류: ${msg}`, file: null, readAt: new Date().toISOString(), sig: r ? filesSig(r) : '', tries: (prev && !prev.text ? prev.tries ?? 0 : 0) + 1,
+        ...(r && needsDocDeadline(r) ? { dl: { at: null, label: null } } : {}) }; // 259차: 오류 난 공고가 '마감 찾기'로 매번 다시 앞자리에 서지 않게
       await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: fail } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`.catch(() => {});
       tried.push(`${noOf(id)} 오류(${msg.slice(0, 40)})`); return null;
     }); done++;

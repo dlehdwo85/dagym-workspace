@@ -15,6 +15,7 @@ export const GET = handler(async ({ req, user }) => {
   // 245차(로컬 20:55): g2b=1 이면 나라장터 참가 제한 조회를 지금 다시 물어 응답만(저장 안 함) — 번호가 없으면 이미 물었는데 값이 없는 최근 3건
   if (u.searchParams.get('g2b') === '1' && (!no || /^[A-Za-z0-9]{6,24}(?:-\d{1,3})?$/.test(no))) return { g2b: await (await import('@/lib/sales/collectors/g2b')).probeG2bLimits(no || null) };
   // 258차(로컬 10/29 09:20): g2b=dates 면 그 공고의 날짜 칸·계약 방식을 지금 물어 응답만(저장 안 함) — 마감일이 빈 이유 확인용
+  if (u.searchParams.get('g2b') === 'nodl') return { g2bNoDeadline: await (await import('@/lib/sales/collectors/g2b')).g2bNoDeadline() }; // 259차: 입찰 마감이 API 에 없는 나라장터 공고 수
   if (u.searchParams.get('g2b') === 'dates' && /^[A-Za-z0-9]{6,24}(?:-\d{1,3})?$/.test(no)) return { g2bDates: await (await import('@/lib/sales/collectors/g2b')).probeG2bDates(no) };
   const out = await lookupNotices({ no: u.searchParams.get('no'), q: u.searchParams.get('q') }, user);
   // 241차(로컬 10/28 19:20): probe=1 이면 K-apt 상세를 지금 받아 응답 코드·길이·취소 여부만(저장 안 함) — 수집이 그 번호 상세를 받는지 확인용

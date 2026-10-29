@@ -99,6 +99,13 @@ test('자르기·뽑기(규칙): 세 가지 공고문 꼴 → 절(머리부터 �
   assert.equal(E.eligibilitySection('○ 입찰참가자격 및 제안서평가 등 : GH 건설임대처 건설임대시설1부 (031-250-0000)'), null, '전화가 붙어도');
   assert.equal(E.lineOf(E.eligibilitySection('5. 입찰참가자격 등 : 아래 각 호의 요건을 모두 갖춘 자\n가. 자본금 2억원 이상\n6. 기타')), '자본금 2억 이상', "'등 :' 뒤가 부서가 아니면 진짜 절");
   assert.deepEqual([E.jsonSafe('가\uD840나\u0000다\uDC00'), E.jsonSafe('𠀀'), E.jsonSafe(null)], ['가나다', '𠀀', null], '반쪽 글자·NUL 만 지우고 온전한 두 칸 글자는 그대로');
+  // 259차: 공고문의 제안서·입찰서 제출 마감(협상·직찰 공고는 나라장터에 입찰 마감 칸이 없음)
+  assert.deepEqual(E.docDeadline('7. 제안서 제출 마감: 2026. 11. 10.(화) 18:00\n8. 개찰일시: 2026. 11. 18.(수) 17:00', '2026-10-28'), { at: '2026-11-10T18:00:00+09:00', label: '7. 제안서 제출 마감: 2026. 11. 10.(화) 18:00' });
+  assert.equal(E.docDeadline('입찰서 제출기간 2026.11.03.(화) 09:00 ~ 2026.11.10.(화) 18:00까지', '2026-10-28').at, '2026-11-10T18:00:00+09:00', '기간이면 끝 날짜');
+  assert.equal(E.docDeadline('○ 접수 기한: 2026년 11월 10일(화) 오후 5시', '2026-10-28').at, '2026-11-10T17:00:00+09:00');
+  assert.equal(E.docDeadline('입찰참가자격 등록 마감: 2026.11.09 18:00\n제안서 제출 마감일시\n2026.11.12 17:00', '2026-10-28').at, '2026-11-12T17:00:00+09:00', '참가자격 등록 줄은 빼고 · 다음 줄(표 칸)의 날짜');
+  assert.equal(E.docDeadline('공동수급협정서 제출 마감 2026-11-17 18:00\n현장설명 일시: 2026.11.05 14:00', '2026-10-28'), null);
+  assert.equal(E.docDeadline('제안서 제출 마감: 2025. 01. 10. 18:00', '2026-10-28'), null, '공고일 전 날짜는 아님');
 });
 
 // ---- 공고문 읽기(정기 실행·다시 읽기) ----
@@ -115,7 +122,8 @@ const N = {
 const NO_PAYER = '공고문이 사진(스캔)으로만 되어 있음 · AI 사진 읽기 안 함: 비용 낼 회사 없음(영업 공간·전환 열린 운영 회사)';
 const G = { id: '00000000-0000-4000-8000-000000252010', no: 'R26BK252010-000' };
 const HALF_HEAD = '3. 입찰참가자격\n가. 정보통신공사업 등록업체\n';
-const docs = { '/g2b/notice-b.txt': B, '/g2b/notice-c.txt': C, '/g2b/notice-half.txt': `1. 공사명: 출입통제\n${HALF_HEAD}${'가'.repeat(1499 - HALF_HEAD.length)}𠀀 나머지\n4. 입찰보증금` }; // 257차: 1,500자째에 두 칸 글자
+const DL_DOC = `1. 용역명: 시험252 파크골프장 기본계획\n3. 입찰참가자격\n가. 엔지니어링산업 진흥법에 따른 엔지니어링사업자\n4. 제안서 제출 마감: ${plus(6).replace(/-/g, '. ')}.(목) 17:00\n5. 개찰: ${plus(8)} 17:00`; // 259차
+const docs = { '/g2b/notice-b.txt': B, '/g2b/notice-c.txt': C, '/g2b/notice-half.txt': `1. 공사명: 출입통제\n${HALF_HEAD}${'가'.repeat(1499 - HALF_HEAD.length)}𠀀 나머지\n4. 입찰보증금`, '/g2b/notice-dl.txt': DL_DOC }; // 257차: 1,500자째에 두 칸 글자
 let srv, ctx, sql, fake, fg;
 const rowOf = async (id) => (await sql`select row from sales_src_rows where src_id = ${id}`)[0]?.row;
 const tick = async () => { const r = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(r.status, 200); };
@@ -198,6 +206,17 @@ test('정정(첨부가 바뀜) → 다시 읽음 · [공고문 다시 읽기] AP
   const half = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: G.id })).eligibility;
   assert.ok(half.text && half.text.length === 1499 && half.text.includes('정보통신공사업') && !/[\uD800-\uDFFF]/.test(half.text), JSON.stringify(half).slice(0, 200));
   assert.equal((await rowOf(G.id)).eligibility.text, half.text, '저장됨');
+  // 259차: 공동수급협정 마감(임시)인 공고는 공고문의 제안서 제출 마감으로 바꿈('doc' · 그 글줄) — 목록 카드에도
+  const DLID = '00000000-0000-4000-8000-000000252031';
+  await put(DLID, { source_type: 'g2b_bid', source_external_id: 'R26BK0252031-000', title: '(협상)시험252 파크골프장 기본계획 용역', related: true, fit_business: '다짐', current_status: '공고중', notice_kind: 'new',
+    posted_date: plus(-2), first_seen_at: new Date().toISOString(), deadline_at: `${plus(9)}T18:00:00+09:00`, deadline_src: 'agreement', agreement_close_at: `${plus(9)}T18:00:00+09:00`, opening_at: `${plus(10)}T17:00:00+09:00`,
+    attachment_urls: [{ name: '입찰공고서.txt', url: `http://127.0.0.1:${PORT}/g2b/notice-dl.txt` }] });
+  const dr = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: DLID })).eligibility;
+  const drow = await rowOf(DLID);
+  assert.deepEqual([drow.deadline_at, drow.deadline_src, drow.doc_deadline_label, dr.dl.at], [`${plus(6)}T17:00:00+09:00`, 'doc', `4. 제안서 제출 마감: ${plus(6).replace(/-/g, '. ')}.(목) 17:00`, `${plus(6)}T17:00:00+09:00`]);
+  const dcard = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === 'R26BK0252031-000');
+  assert.deepEqual([dcard.close, dcard.deadlineSrc, dcard.agreementClose, dcard.opening?.slice(0, 10)], [plus(6), 'doc', `${plus(9)}T18:00:00+09:00`, plus(10)]);
+  await sql`delete from sales_src_rows where src_id = ${DLID}`; // 아래 당일 메일 시험의 건수에 안 섞이게
   assert.equal((await ctx.owner.req('POST', '/api/sales/eligibility', { id: '00000000-0000-4000-8000-0000002520ff' })).status, 404);
 });
 
