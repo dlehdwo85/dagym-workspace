@@ -114,8 +114,10 @@ describe('V41 4-2 마케팅', () => {
     const appr = await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals');
     assert.ok(!appr.contents.some((c) => c.id === id), '게시된 건 승인 대기에서 빠짐');
     const day = at.slice(0, 7);
-    const cal = await ctx.owner.ok('GET', `/api/marketing/contents?from=${day}-01&to=${day}-31`);
+    const last = new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)), 0)).toISOString().slice(0, 10); // 그 달 마지막 날(11월은 30일)
+    const cal = await ctx.owner.ok('GET', `/api/marketing/contents?from=${day}-01&to=${last}`);
     assert.ok(cal.contents.some((c) => c.id === id), '캘린더에 보임');
+    assert.equal((await ctx.owner.req('GET', `/api/marketing/contents?from=${day}-01&to=2026-11-31`)).status, 400, '없는 날짜는 400(서버 오류 아님)');
   });
 
   test('전화 문의 → 영업 업무', async () => {

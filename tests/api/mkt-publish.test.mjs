@@ -233,8 +233,10 @@ test('실패: 일시 오류(5xx) → 재시도 대기(5분) → tick 뒤 성공 
 });
 
 test('자동 게시(회사 설정): 승인된 글이 예정 시각이 되면 tick 이 작업을 만들어 올림 · 꺼진 회사는 안 올림 · [예정 시각에 게시]는 run_after = 예정', async () => {
+  // 255차 #791: 게시일이 지난 글을 승인하면 다음 빈 칸으로 옮김 — '미리 승인해 둔 글의 예정 시각이 됨'은 승인 뒤 예정 시각을 지난 시각으로 돌려 흉내
   const past = new Date(Date.now() - 5 * 60_000).toISOString();
-  const off = await approved({ mediaIds: [P.img], scheduledAt: past, body: '자동 게시 꺼짐' });
+  const off = await approved({ mediaIds: [P.img], scheduledAt: new Date(Date.now() + 48 * 36e5).toISOString(), body: '자동 게시 꺼짐' });
+  await sql`update mkt_contents set scheduled_at = ${past} where id = ${off}`;
   await tick();
   assert.equal((await sql`select count(*)::int n from mkt_publish_jobs where content_id = ${off}`)[0].n, 0, '설정 꺼짐 → 작업 없음');
   await ctx.owner.ok('PUT', '/api/marketing/auto', { autoPublish: true });
@@ -242,7 +244,7 @@ test('자동 게시(회사 설정): 승인된 글이 예정 시각이 되면 tic
   const tk = await tick();
   const d = await ctx.owner.ok('GET', `/api/marketing/contents/${off}`);
   assert.equal(d.content.status, 'published', JSON.stringify({ jobs: d.publishJobs, tick: tk?.detail?.mktPublish ?? tk })); assert.equal(d.publishJobs[0].requested_by_name, null, '자동(요청자 없음)');
-  const later = new Date(Date.now() + 2 * 36e5).toISOString();
+  const later = new Date(Date.now() + 48 * 36e5).toISOString(); // 승인 마감(그날 approval_hour)이 지나지 않게 이틀 뒤 — 시험 도는 시각과 무관
   const fut = await approved({ mediaIds: [P.img], scheduledAt: later, body: '예정 시각에' });
   const r = await ctx.owner.ok('POST', `/api/marketing/contents/${fut}/publish/server`, { atSchedule: true });
   assert.equal(r.ran, null);

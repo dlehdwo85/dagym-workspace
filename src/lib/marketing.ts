@@ -109,6 +109,12 @@ export function mediaRule(channel: string, kind: string | null | undefined, n: n
 }
 export async function listContents(u: SessionUser, q: { view?: string; from?: string; to?: string; day?: string }) {
   await assertSpace(u, 'marketing');
+  // 262차(CI 빨간불): 없는 날짜(11월 31일 등)는 DB 오류(500) 대신 알기 쉬운 400
+  for (const [k, v] of [['from', q.from], ['to', q.to]] as const) {
+    if (!v) continue;
+    const ok = /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+    if (!ok) throw badRequest(`${k === 'from' ? '시작' : '끝'} 날짜가 올바르지 않습니다: ${v.slice(0, 20)}`);
+  }
   const sql = db(); const t = tenantOf(u);
   const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
       v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, v.revision, -- #545 수정본 배지(반영한 요청·AI 수정 n번째)

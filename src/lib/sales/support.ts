@@ -581,8 +581,8 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   if (sortUsed === 'fit') items.sort(byFit);
   else if (sortUsed === 'deadline') items.sort((a, b) => end(a).localeCompare(end(b)) || rankOf(a) - rankOf(b)); // 마감 임박 — 상시·예산 소진(마감일 없음)은 맨 뒤
   else if (sortUsed === 'amount') items.sort((a, b) => (b.amountKrw ?? -1) - (a.amountKrw ?? -1) || byFit(a, b));
-  else if (sortUsed === 'results') items.sort((a, b) => String(wm.get(b.id)?.updated_at ?? '').localeCompare(String(wm.get(a.id)?.updated_at ?? '')));
-  else items.sort((a, b) => String(b.seen).localeCompare(String(a.seen)));
+  else if (sortUsed === 'results') items.sort((a, b) => new Date(wm.get(b.id)?.updated_at ?? 0).getTime() - new Date(wm.get(a.id)?.updated_at ?? 0).getTime());
+  else items.sort((a, b) => new Date(b.seen).getTime() - new Date(a.seen).getTime()); // 262차: 글자로 비교하면 Date 가 'Wed Oct 28 …'(요일 이름) 순이 됨
   const total = items.length; items = items.slice(0, Math.min(200, q.limit ?? 60));
   // #782 '규칙상 맞음 · AI 판단 전' 수(맞춤 탭 기준, 찾기·칩과 무관) · #784 프로필 빈칸 — 빈 칸 때문에 '확인 필요'로 남은 공고 수
   const fitOpenAll = all.filter((x) => fitBase(x) && !isNo(x));
@@ -978,7 +978,7 @@ export async function supportAutoTick(opt: { budgetMs?: number; max?: number } =
     const actor = await adminActor(sql, t); if (!actor) { out[t] = { skipped: 'no_admin' }; continue; }
     const { all } = await supportAll(sql, t, actor.id, today);
     const todo = all.filter((x) => autoCandidate(x, today)) // 판단 없는 것 먼저 → 마감 가까운 순 → 새로 올라온 순
-      .sort((a, b) => Number(!!a.ai) - Number(!!b.ai) || (a.applyEnd ?? '9999-12-31').localeCompare(b.applyEnd ?? '9999-12-31') || String(b.seen).localeCompare(String(a.seen)));
+      .sort((a, b) => Number(!!a.ai) - Number(!!b.ai) || (a.applyEnd ?? '9999-12-31').localeCompare(b.applyEnd ?? '9999-12-31') || new Date(b.seen).getTime() - new Date(a.seen).getTime());
     let done = 0, failed = 0, i = 0; let stopped: string | null = null, error: string | null = null;
     const n = Math.min(max, todo.length);
     while (i < n && !stopped && Date.now() - t0 < budget) {
