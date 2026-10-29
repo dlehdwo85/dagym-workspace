@@ -2092,16 +2092,28 @@ await step('V12-8: 업무 등록 "📎 자료로 채우기" → 제목·설명·
   await owner.waitForLoadState('networkidle');
   await owner.getByTestId('ai-file-input').setInputFiles([{ name: 'E2E 표.png', mimeType: 'image/png', buffer: png }]);
   await owner.getByTestId('ai-files').getByText('E2E 표.png').waitFor();
-  await q([{ content: [{ type: 'tool_use', id: 'e8', name: 'propose_create_tasks', input: { title: 'E2E 지점 자료', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: addDays(today, 5), checklist: ['가', '나'] } }], stop_reason: 'tool_use' },
+  // 261차(대표 #794): 여러 명은 기본 '함께 담당 1건' — '각자'라고 분명히 말하면 mode=each(사람마다 1건). 미리보기 문구도 그대로 따라감
+  await q([{ content: [{ type: 'tool_use', id: 'e8', name: 'propose_create_tasks', input: { title: 'E2E 지점 자료', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: addDays(today, 5), checklist: ['가', '나'], mode: 'each' } }], stop_reason: 'tool_use' },
     { content: [{ type: 'text', text: '확인을 누르면 만들어집니다.' }], stop_reason: 'end_turn' }]);
-  await owner.getByLabel('AI 에게 요청').fill('각 지점 자료 받아오라고 배정해줘');
+  await owner.getByLabel('AI 에게 요청').fill('각 지점 자료 각자 받아오라고 한 명씩 따로 배정해줘');
   await owner.getByRole('button', { name: '보내기' }).click();
   const pv = owner.getByTestId('ai-proposal-preview');
-  await pv.getByText(/담당: .*\(각자 1건\)/).waitFor();
+  await pv.getByText(/담당: .*\(각자 1건씩\)/).waitFor();
   await owner.screenshot({ path: `${SHOTS}/83-ai-attach-proposal.png` });
   await owner.getByTestId('ai-proposal').getByRole('button', { name: '확인' }).click();
   await owner.getByTestId('ai-proposal').getByText('✓ 반영됨').waitFor();
   assert.equal((await sql`select count(*)::int n from tasks where title = 'E2E 지점 자료'`)[0].n, 2);
+  // 기본(mode 없음) = 함께 담당 1건 — 미리보기 '(2명 함께 담당 1건)'
+  await q([{ content: [{ type: 'tool_use', id: 'e8b', name: 'propose_create_tasks', input: { title: 'E2E 지점 자료 함께', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: addDays(today, 5) } }], stop_reason: 'tool_use' },
+    { content: [{ type: 'text', text: '확인을 누르면 만들어집니다.' }], stop_reason: 'end_turn' }]);
+  await owner.getByLabel('AI 에게 요청').fill('두 사람이 같이 맡게 해줘');
+  await owner.getByRole('button', { name: '보내기' }).click();
+  await owner.getByTestId('ai-proposal-preview').getByText(/담당: .*\(2명 함께 담당 1건\)/).waitFor();
+  await owner.getByTestId('ai-proposal').last().getByRole('button', { name: '확인' }).click();
+  await owner.getByTestId('ai-proposal').last().getByText('✓ 반영됨').waitFor();
+  const [tg] = await sql`select count(*)::int n, min(assignee_id::text) a from tasks where title = 'E2E 지점 자료 함께'`;
+  assert.deepEqual([tg.n, tg.a], [1, ctx.staffA.id]);
+  assert.equal((await sql`select count(*)::int n from task_assignees ta join tasks t on t.id = ta.task_id where t.title = 'E2E 지점 자료 함께' and ta.user_id = ${ctx.managerA.id}`)[0].n, 1, '공동 담당');
 });
 
 await step('V12-9: 첨부 칸·자료실에 파일 끌어 놓기(여러 개·진행률), 저장소 연결 실패 시 알기 쉬운 원인 표시', async () => {

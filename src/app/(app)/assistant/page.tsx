@@ -215,7 +215,7 @@ export default function AssistantPage() {
                       <div className="text-sm">{p.summary}</div>
                       {p.preview && (
                         <div className="mt-1 space-y-1 text-xs text-ink-2" data-testid="ai-proposal-preview">
-                          {p.preview.assignees && <div>담당: {p.preview.assignees.join(', ')} (각자 1건){p.preview.due && ` · 마감 ${p.preview.due}`}{p.preview.files ? ` · 📎 ${p.preview.files}개 첨부` : ''}</div>}
+                          {p.preview.assignees && <div>담당: {p.preview.assignees.join(', ')}{p.preview.assignees.length > 1 && (p.preview.mode === 'together' ? ` (${p.preview.assignees.length}명 함께 담당 1건)` : ' (각자 1건씩)')}{p.preview.due && ` · 마감 ${p.preview.due}`}{p.preview.files ? ` · 📎 ${p.preview.files}개 첨부` : ''}</div>}
                           {!!p.preview.checklist?.length && <details><summary className="cursor-pointer">체크리스트 {p.preview.checklist.length}개</summary><ul className="ml-4 list-disc">{p.preview.checklist.map((c, k) => <li key={k}>{c}</li>)}</ul></details>}
                           {p.preview.description && <p className="line-clamp-3 whitespace-pre-wrap rounded bg-slate-50 p-1.5">{p.preview.description}</p>}
                           {p.preview.when && <div data-testid="ai-event-preview">🗓 {p.preview.when}{p.preview.place && ` · 📍 ${p.preview.place}`}{p.preview.calendar && ` · ${p.preview.calendar}`}{!!p.preview.attendees?.length && <div>참석: {p.preview.attendees.join(', ')}</div>}{!!p.preview.tasks?.length && <div data-testid="ai-event-tasks">연결 업무: {p.preview.tasks.join(', ')} · 마감 {p.preview.taskDue} (일정과 날짜 연동)</div>}</div>}
