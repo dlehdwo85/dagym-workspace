@@ -132,6 +132,7 @@ import { mktVideo } from './mktVideo.step.mjs';
 import { mktVideoReuse } from './mktVideoReuse.step.mjs';
 import { coAssign } from './coAssign.step.mjs';
 import { batch794 } from './batch794.step.mjs';
+import { collab799 } from './collab799.step.mjs';
 import { aiBudget } from './aiBudget.step.mjs';
 import { listKeep } from './listKeep.step.mjs';
 import { backKeep } from './backKeep.step.mjs';
@@ -2615,6 +2616,7 @@ await step('#454 영상 파이프라인 v2: 플랫폼 운영 내레이션(TTS) �
 await step('187차 ⑦ 이번 달 만든 영상 다시 합성: 제작의뢰실 상자(원래 영상·계획·자막 줄·끝 화면 전화·내레이션 키 안내) → [다시 합성] → 다시 합성됨·승인함 링크·의뢰 카드(장면 2개·생성 크레딧 0) → 새 버전 승인 대기·보관 표시 지움·원장 그대로 → 휴대폰 폭', () => mktVideoReuse({ owner, ctx, sql, BASE, SHOTS }));
 await step('#475 업무 공동 배정(10/24 다시 설계): 업무 등록 시트 여러 명 = 기본 함께 담당(1건·완료 규칙 칸 없음) → 상세 담당자 칸 하나에 칩 3개 빼기·[+] 추가·활동 기록 → 담당자별 묶음 3곳·+2 → 휴대폰 [내 몫 완료] → 내 몫 완료 · 1/3(목록에 남음)·상세 진행 상자', () => coAssign({ owner, staff, ctx, sql, BASE, SHOTS }));
 await step('대표 #794 각자 1건씩 묶음 공유: 휴대폰 이직원 업무 상세에 박직원 업무 댓글(\'박직원 업무에서\')·함께 담당자 첨부(보기·내려받기만)·담당자별 체크리스트(잠김) → 열어 둔 화면에 새 댓글 15초 안에', () => batch794({ staff, ctx, sql, BASE, SHOTS }));
+await step('대표 #799 협업 업무 칸: 휴대폰 이직원 내 업무 맨 위 \'협업 업무\' 2건(함께 담당·같이 받은 묶음, 함께하는 사람 진행) · 개인 칸에 다시 안 나옴 · 접기 기억 · 홈 협업 업무 카드', () => collab799({ staff, ctx, sql, BASE, SHOTS }));
 await step('대표 10/24 ② 회사 월 AI 예산(원): 사용량 화면 게이지(84% 주황·다시 채워지는 날·영상 제작 따로) → AI 비서 회사 사용량 한 줄 → 100% 빨간 안내(다음 달 1일)·입력 막힘 → 플랫폼 운영 요금제 표 원 칸·회사 목록', () => aiBudget({ owner, sql, BASE, SHOTS }));
 await step('대표 23:40·23:55 마감일 버튼 크기 + 업무 첨부 자료실에서 가져오기(검색·체크 → 연결·타임라인)', () => attachLibrary({ owner, ctx, BASE, SHOTS }));
 await step('대표 02:30·03:00 승인함 통합(종류별 탭·건수·바로 승인/반려) · 예산 브랜드 축(세팅안 필요·총액 적기) · 월 목표 반려 · 매출 목표 AI 추천 · 지금 상태', () => inbox({ owner, ctx, sql, BASE, SHOTS }));

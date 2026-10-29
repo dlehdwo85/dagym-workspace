@@ -82,6 +82,9 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   t.team_id, (select tm.name from teams tm where tm.id = t.team_id) as team_name, (select tm.color from teams tm where tm.id = t.team_id) as team_color,
   (select coalesce(array_agg(ctm.name order by ctm.name), '{}') from task_teams ctc join teams ctm on ctm.id = ctc.team_id where ctc.task_id = t.id) as collab_teams,
   case when t.batch_id is null then null else (select json_build_object('total', count(*)::int, 'done', count(*) filter (where b.status = 'done')::int) from tasks b where b.batch_id = t.batch_id and b.deleted_at is null) end as batch,
+  -- 대표 #799 협업 업무 칸: 같이 받은 묶음(각자 1건씩)의 다른 담당과 그 업무 상태
+  case when t.batch_id is null then null else (select coalesce(json_agg(json_build_object('id', b.assignee_id, 'name', ba.name, 'status', b.status) order by ba.name), '[]'::json)
+    from tasks b left join users ba on ba.id = b.assignee_id where b.batch_id = t.batch_id and b.deleted_at is null and b.id <> t.id) end as batch_people,
   (select coalesce(sum(extract(epoch from (be.end_at - be.start_at)) / 60), 0)::int from events be
     where be.deleted_at is null and be.kind = 'task_block' and (be.task_id = t.id or be.id in (select event_id from event_tasks where task_id = t.id and role = 'block'))) as scheduled_minutes,
   (select count(*)::int from event_tasks lk where lk.task_id = t.id) as event_count,

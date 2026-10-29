@@ -16,6 +16,7 @@ import { ConnectCard } from '@/components/ConnectCard';
 import { HomeMonth } from '@/components/HomeMonth';
 import { useRouter } from 'next/navigation';
 import { followUpMsg, useLeadFollowUp } from '@/components/sales/LeadFollowUp';
+import { COLLAB_SHOWN, CollabPeople, collabSort, isCollab, useCollabOpen } from '@/components/CollabTasks';
 
 const seoulDay = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const fmtHM = (d: Date | string) => dtf('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
@@ -30,6 +31,28 @@ function eventDays(e: any): string[] {
   const out: string[] = [];
   for (let d = s; d <= end && out.length < 62; d = addDays(d, 1)) out.push(d);
   return out.length ? out : [s];
+}
+
+/** 대표 #799: 홈 맨 위 '협업 업무' — 내 업무 중 함께 담당·같이 받은 업무(입찰·프로젝트 먼저 → 마감 순) · 함께하는 사람 진행 · 5건 · 접기 기억 */
+function HomeCollab({ tasks }: { tasks: any[] }) {
+  const { user } = useSession();
+  const [open, setOpen] = useCollabOpen(user.id);
+  const list = tasks.filter(isCollab).sort(collabSort);
+  if (!list.length) return null;
+  return (
+    <section className="rounded-card border border-violet-200 bg-white p-3 shadow-card" data-testid="home-collab">
+      <div className="flex items-center gap-2"><button type="button" className="flex items-center gap-1 text-sm font-semibold text-violet-800" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <ChevronRight className={cx('size-4 transition-transform', open && 'rotate-90')} />협업 업무</button>
+        <span className="rounded-full bg-violet-100 px-1.5 text-xs font-medium text-violet-800 tabular-nums">{list.length}</span>
+        <Link prefetch={false} href="/tasks?view=my" className="ml-auto text-xs text-ink-3 hover:underline">내 업무에서 보기</Link></div>
+      {open && <ul className="mt-1 divide-y divide-line text-sm">{list.slice(0, COLLAB_SHOWN).map((t) => (
+        <li key={t.id} className="py-1.5" data-testid="home-collab-row">
+          <div className="flex min-w-0 items-center gap-2"><Link prefetch={false} href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{t.title}</Link><DueChip due={t.due_date} status={t.status} /></div>
+          <CollabPeople t={t} uid={user.id} className="mt-0.5" />
+        </li>))}
+        {list.length > COLLAB_SHOWN && <li className="pt-1.5 text-xs"><Link prefetch={false} href="/tasks?view=my" className="font-medium text-violet-700 hover:underline">{list.length - COLLAB_SHOWN}건 더 — 내 업무에서</Link></li>}</ul>}
+    </section>
+  );
 }
 
 function Section({ title, count, children, href, icon: Icon, className, actions, testid }: {
@@ -249,6 +272,7 @@ export default function Dashboard() {
       )}
       <ClockCard />
       <NoticeCard />
+      <HomeCollab tasks={myOpen.data?.tasks ?? []} />
       {/* V14 8번: 우리 팀 오늘의 일정 (팀에 속해 있을 때만) */}
       {(myTeams.data?.teams.length ?? 0) > 0 && (
         <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="home-team">
