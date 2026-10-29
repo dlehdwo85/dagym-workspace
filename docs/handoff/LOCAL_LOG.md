@@ -1978,3 +1978,7 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 마케팅: contents 74(게시 42·대기 11·초안 21) → 미게시 32 상세 백업 artifacts/mkt_unpublished_backup_1029.json → PUT auto autoPause true → POST /api/marketing/contents/trash ids 32 → count 32·purgeAt 2026-11-28 → 게시 42만·inbox 0.
 - 문서 고치기 재현: /library/doc/1e64fc36…?att=326d517c… ProseMirror 글자 1·img 0(사진만 docx). 사진 artifacts/1029-doc-edit-blank.png.
 - 인스타(대표 크롬, 읽기): hi_link_official 팔로워 1245·실제 화면 위주 / dagym_official 카드+시설 / _work_in_official_ 0건. 정부24 활용신청 탭 완료 확인.
+
+## 2026-10-29 20:54 — 대표 #809: 화·금 확정·바디랩 포함·AI 영상 상한 질문
+- /api/marketing/auto production planCode pro · plans.pro {weekly blog2 feed5 reels2, monthlyCredits 250, videoMonthly 2, regenMonthly 10} · settings video_monthly null.
+- /api/platform/higgsfield Kling 3 Turbo usd 0.12 '초당' · credits 80 · usdKrw 1400. MCP 힉스필드 앱 balance 0(free, 앱 구독 10/27 종료 — 서버는 API 키 사용). open.higgsfield.ai/billing 새 탭은 로그인 화면 → 잔액 확인 못함.
