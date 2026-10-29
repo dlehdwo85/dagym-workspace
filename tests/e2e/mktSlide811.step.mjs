@@ -26,6 +26,10 @@ export async function mktSlide811({ owner, ctx, sql, BASE, SHOTS }) {
     await btn.click();
     await owner.getByText(/^쓸 수 있는 실제 사진이 0장입니다\. 3장 넘게 필요합니다/).first().waitFor({ timeout: 15000 });
     assert.equal((await sql`select count(*)::int n from mkt_briefs where content_id = ${c.id}`)[0].n, 0, '사진이 없으면 의뢰 안 만듦');
+    // 273차 1) 앱 화면 녹화: [녹화 파일로 영상 만들기 · 0원] → 녹화가 없으면 안내
+    await card.getByTestId('approval-screen').click();
+    await card.getByTestId('approval-screen-empty').waitFor();
+    assert.match(await card.getByTestId('approval-screen-empty').innerText(), /마케팅\/화면 녹화'에 녹화 파일이 없습니다/);
   } finally {
     await sql`delete from mkt_contents where id = ${c.id}`;
   }

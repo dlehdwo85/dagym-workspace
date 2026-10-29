@@ -1,0 +1,16 @@
+{
+  "brand": "워크인",
+  "title": "워크인 홈·업무 목록·말로 등록",
+  "login": true,
+  "viewport": [390, 844],
+  "lines": ["오늘 할 일과 마감을 먼저 보여 줍니다", "누가 무엇을 맡았는지 바로 보입니다", "휴대폰에서 말로 업무를 등록합니다", "14일 무료 체험"],
+  "steps": [
+    { "goto": "/", "wait": 1500 },
+    { "scroll": 320, "wait": 900 },
+    { "goto": "/tasks", "wait": 1500 },
+    { "scroll": 520, "wait": 900 },
+    { "scroll": -520, "wait": 600 },
+    { "click": "testid:fab", "wait": 800 },
+    { "click": "testid:fab-voice", "wait": 1800 }
+  ]
+}

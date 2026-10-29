@@ -673,9 +673,13 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   if (!held && !batch && !isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `승인 요청: ${f.title}` : kind === 'blog' && q.issues.length === 1 ? `사진 필요: ${f.title}` : visualOnly ? `시안 제작 중: ${f.title}` : `품질 검사 미통과: ${f.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
   // 271차 #811 영상 만드는 방법이 실제 사진이면 원고 직후 이 판에 사진 영상(생성 비용 0) — 사진이 3장이 안 되면 제작 요청 카드 그대로
-  if (VIDEO_KINDS.includes(kind) && !mediaIds.length && !held && videoMethod === 'photos') {
-    try { const r = await (await import('./mktSlideshow')).autoSlideshow({ ...c, title: f.title }, v, q.body, d.photos ?? []); if (r.skipped) await sql`update mkt_versions set note = concat_ws(' · ', note, ${`실제 사진 영상 못 만듦: ${r.skipped}`}::text) where content_id = ${c.id} and version = ${v}`; }
-    catch (e: any) { console.error('[mkt] 실제 사진 영상', c.id, e?.message ?? e); }
+  // 273차: 앱 화면 녹화면 이 브랜드의 안 쓴 녹화(자료실 '마케팅/화면 녹화')로 — 없으면 카드 그대로
+  if (VIDEO_KINDS.includes(kind) && !mediaIds.length && !held && (videoMethod === 'photos' || videoMethod === 'screen')) {
+    try {
+      const Z = await import('./mktSlideshow');
+      const r = videoMethod === 'photos' ? await Z.autoSlideshow({ ...c, title: f.title }, v, q.body, d.photos ?? []) : await Z.autoRecording({ ...c, title: f.title }, v, q.body);
+      if (r.skipped) await sql`update mkt_versions set note = concat_ws(' · ', note, ${`${videoMethod === 'photos' ? '실제 사진' : '화면 녹화'} 영상 못 만듦: ${r.skipped}`}::text) where content_id = ${c.id} and version = ${v}`;
+    } catch (e: any) { console.error('[mkt] 자동 영상', videoMethod, c.id, e?.message ?? e); }
   }
   return { id: c.id, passed: q.passed, issues: q.issues, ...(held ? { held: true } : {}), ...(batch ? { batch } : {}) };
 }
