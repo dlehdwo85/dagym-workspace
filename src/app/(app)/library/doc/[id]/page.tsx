@@ -16,13 +16,16 @@ import { useSession } from '@/components/session';
 import { Avatar, Button, ErrorBox, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { PollProvider, colorFor, type PollStatus } from '@/components/docs/pollProvider';
 
-type Open = { file: { id: string; title: string; folder: string; security: string; created_by: string; created_by_name: string }; canEdit: boolean; canShare: boolean; shared: boolean; snapshot: string; updates: string[]; seq: number };
+type Open = { file: { id: string; title: string; folder: string; security: string; created_by: string; created_by_name: string; task_id?: string | null }; canEdit: boolean; canShare: boolean; shared: boolean; snapshot: string; updates: string[]; seq: number };
 type Person = { id: string; name: string; color: string; clientId: number };
 
 export default function DocPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const att = useSearchParams().get('att'); // 대표 10/20 23:05: 업무 첨부(docx)에서 연 문서 → [업무로 저장] = Word 로 첨부 새 버전
+  const q = useSearchParams();
+  const att = q.get('att'); // 대표 10/20 23:05: 업무 첨부(docx)에서 연 문서 → [업무로 저장] = Word 로 첨부 새 버전
+  // #806: 바꾸며 빠진 것(원본 사진 n장·글상자 글 n%) 안내
+  const lostImg = Number(q.get('lostImg') ?? 0), lostText = Number(q.get('lostText') ?? 0);
   const [saving, setSaving] = useState(false);
   const { user } = useSession();
   const [open, setOpen] = useState<Open | null>(null);
@@ -67,8 +70,10 @@ export default function DocPage() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-2 p-3 sm:p-4" data-testid="doc-page">
       <div className="flex flex-wrap items-center gap-2">
-        {/* #615 ②(대표 10/25): 화살표만 있던 자리를 [← 목록] 단추로 — 그 파일의 폴더로 돌아가 줄을 강조(?file=) */}
-        <button onClick={() => router.push(`/library?folder=${encodeURIComponent(open.file.folder)}&file=${id}`)} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-input px-2 text-sm font-medium text-ink-2 hover:bg-slate-100" aria-label="자료실 목록으로" data-testid="doc-back"><ArrowLeft className="size-4" />목록</button>
+        {/* #615 ②(대표 10/25): 화살표만 있던 자리를 [← 목록] 단추로 — 그 파일의 폴더로 돌아가 줄을 강조(?file=) · #806: 업무 첨부에서 연 문서(?att=)는 그 업무로 */}
+        {att && open.file.task_id
+          ? <button onClick={() => router.push(`/tasks/${open.file.task_id}`)} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-input px-2 text-sm font-medium text-ink-2 hover:bg-slate-100" aria-label="업무로 돌아가기" data-testid="doc-back" data-to="task"><ArrowLeft className="size-4" />업무로</button>
+          : <button onClick={() => router.push(`/library?folder=${encodeURIComponent(open.file.folder)}&file=${id}`)} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-input px-2 text-sm font-medium text-ink-2 hover:bg-slate-100" aria-label="자료실 목록으로" data-testid="doc-back"><ArrowLeft className="size-4" />목록</button>}
         <input className={cx(inputCls, 'min-w-0 flex-1 text-base font-semibold')} value={title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
           readOnly={!canEdit} aria-label="문서 제목" data-testid="doc-title" />
         <StatusBadge status={status} canEdit={open.canEdit} />
@@ -83,6 +88,8 @@ export default function DocPage() {
           <a href={`/api/library/docs/${id}/export?format=docx`} className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-sm text-ink-2 hover:bg-slate-50" data-testid="doc-export"><Download className="size-4" />Word</a>
         </div>
       </div>
+      {att && (lostImg > 0 || lostText > 0) && <p className="rounded-input border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900" data-testid="doc-lost">
+        원본 Word 에 있던 {[lostImg > 0 && `사진 ${lostImg}장`, lostText > 0 && `글상자 글 약 ${lostText}%`].filter(Boolean).join('과 ')}은 이 문서로 옮기지 못했습니다. 원본은 업무 첨부에 그대로 있습니다.</p>}
       {!canEdit && <p className="rounded-input bg-slate-50 px-3 py-1.5 text-xs text-ink-2" data-testid="doc-readonly">보기만 할 수 있는 문서입니다{open.shared ? ' (공유 받음)' : ''}. 고치려면 올린 사람({open.file.created_by_name})에게 편집 공유를 요청하세요.</p>}
       <DocEditor provider={provider} canEdit={canEdit} me={me} onEditor={setEditor} />
       {panel === 'share' && <ShareModal id={id} onClose={() => setPanel(null)} />}

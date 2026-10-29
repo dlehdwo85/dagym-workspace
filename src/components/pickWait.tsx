@@ -23,6 +23,14 @@ function diag(event: 'received' | 'cancel' | 'lost' | 'done', extra: Record<stri
     void api('/api/me/pick-diag', { body: { event, ...extra, ua: navigator.userAgent.slice(0, 200), app } }).catch(() => {});
   } catch { /* 진단은 실패해도 그만 */ }
 }
+/** #805(대표 10/29 'PC 에서도 휴대폰 준비 중 띠가 뜸'): '준비 중' 띠·화면 켜 두기는 휴대폰·태블릿(아이폰·아이패드·안드로이드·우리 앱)에서만. PC 는 띠 없이 바로 올림 */
+export function isPhone() {
+  try {
+    const n = navigator;
+    return !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()
+      || /iPhone|iPad|iPod|Android/i.test(n.userAgent) || (n.platform === 'MacIntel' && n.maxTouchPoints > 1);
+  } catch { return false; }
+}
 const kindsOf = (files: File[]) => {
   const k = { heic: 0, jpeg: 0, png: 0, video: 0, other: 0 };
   for (const f of files) { const t = (f.type || '').toLowerCase(), n = f.name.toLowerCase();
@@ -50,10 +58,12 @@ export function usePickWait(where: PickWhere = 'task') {
   }, []);
   const open = useCallback((ref: RefObject<HTMLInputElement | null>, kind: PickKind = 'photo') => {
     if (!ref.current) return;
-    setOn(true); setSince(Date.now());
-    hold.current ??= holdScreen();
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(stop, MAX_WAIT_MS);
+    if (isPhone()) {
+      setOn(true); setSince(Date.now());
+      hold.current ??= holdScreen();
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(stop, MAX_WAIT_MS);
+    }
     try { sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), where, kind })); } catch { /* 저장 못 함 */ }
     ref.current.addEventListener('cancel', () => { const m = readMark(); clearMark(); if (m) diag('cancel', { where, kind, sec: secSince(m.at) }); stop(); }, { once: true });
     ref.current.click();
@@ -80,7 +90,7 @@ export function usePickWait(where: PickWhere = 'task') {
   const node = on ? (
     <div className="flex items-start gap-2 rounded-input border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" role="status" data-testid="pick-wait">
       <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden />
-      <p className="min-w-0 flex-1"><b>고른 사진을 휴대폰이 준비하는 중입니다.</b> 사진이 많으면 몇 분 걸릴 수 있으니 앱을 닫지 말고 기다려 주세요 — 준비가 끝나면 바로 올라가기 시작합니다. 다음부터는 50장씩 나눠 고르면 빨리 올라갑니다.</p>
+      <p className="min-w-0 flex-1"><b>고른 사진을 휴대폰이 준비하는 중입니다.</b> 사진이 많으면 몇 분 걸립니다. 앱을 닫지 말고 기다려 주세요. 준비가 끝나면 바로 올라갑니다. 다음에는 50장씩 나눠 고르면 빠릅니다.</p>
       <span className="shrink-0 tabular-nums text-sky-700" data-testid="pick-wait-time">{Math.floor(sec / 60)}:{String(sec % 60).padStart(2, '0')}</span>
       <button type="button" className="shrink-0 underline" onClick={stop} data-testid="pick-wait-close">닫기</button>
     </div>
@@ -96,5 +106,5 @@ export function IosPickHint({ className }: { className?: string }) {
   const [ios, setIos] = useState(false);
   useEffect(() => { setIos(/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)); }, []);
   if (!ios) return null;
-  return <p className={className} data-testid="ios-pick-hint">아이폰: 사진을 한 번에 많이 고르면 [추가]를 누른 뒤 휴대폰이 사진을 준비하느라 몇 분 동안 멈춘 것처럼 보입니다(60장에 약 2분) — 50장씩 나눠 고르면 빨리 올라갑니다</p>;
+  return <p className={className} data-testid="ios-pick-hint">아이폰은 사진을 한 번에 많이 고르면 [추가]를 누른 뒤 몇 분 동안 멈춘 것처럼 보입니다(60장에 약 2분). 50장씩 나눠 고르면 빨리 올라갑니다.</p>;
 }

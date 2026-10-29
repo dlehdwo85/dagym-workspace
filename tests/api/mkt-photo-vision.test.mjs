@@ -93,6 +93,15 @@ test('사진 설명: 줄인 JPEG·빠른 모델로 한 번 · 저장(설명이 �
   await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.face}`, { text: 'auto' });
   await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.clean}`, { text: 'auto' });
   assert.deepEqual([(await vis(P.face)).tags, (await vis(P.clean)).tags], [[], []]);
+  // 269차 #807 ①: '시안 바탕' 폴더에 넣어도 AI 가 글자를 본 사진(홍보물 = 글자 많음)은 바탕으로 안 씀 · 사람이 '글자없음'을 달면 씀
+  const [{ folder: pf }] = await sql`select folder from library_files where id = ${P.promo}`;
+  await sql`update library_files set folder = '마케팅/시안 바탕(글자 없는 사진)' where id = ${P.promo}`;
+  const v4 = Object.fromEntries((await ctx.owner.ok('GET', '/api/marketing/photos')).items.map((x) => [x.id, x]));
+  assert.equal(v4[P.promo].cover, false, '바탕 폴더여도 글자 든 사진은 바탕 아님');
+  await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.promo}`, { text: 'none' });
+  assert.equal(Object.fromEntries((await ctx.owner.ok('GET', '/api/marketing/photos')).items.map((x) => [x.id, x]))[P.promo].cover, true, '사람이 글자없음 = 씀');
+  await ctx.owner.ok('PATCH', `/api/marketing/photos/${P.promo}`, { text: 'auto' });
+  await sql`update library_files set folder = ${pf} where id = ${P.promo}`;
   // 다른 회사·없는 사진·AI 대화 첨부 = 404 (188차 #685: 자료실 전체가 시안 후보 — 업무 공간 사진도 설명·판정 고치기)
   const [t2] = await sql`insert into tenants (id, name) values ('pv-other', '다른회사') on conflict (id) do update set name = excluded.name returning id`;
   const [o] = await sql`insert into library_files (tenant, space, folder, title, file_name, mime_type, size_bytes, created_by, upload_status, source) values (${t2.id}, 'marketing', '', 'x', 'x.jpg', 'image/jpeg', 10, ${ctx.ownerId}, 'ready', 'upload') returning id`;

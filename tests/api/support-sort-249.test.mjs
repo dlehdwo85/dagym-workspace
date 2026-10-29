@@ -134,7 +134,7 @@ test('#782 규칙상 맞음 · AI 판단 전: pending 수·건당 예상 비용 
   assert.equal((await ctx.owner.req('POST', '/api/sales/support/analyze-top', { n: 50 })).status, 400, '한 번에 20건까지');
   await queue([0, 1].map((i) => say({ verdict: 'fit', reasons: ['용인시 소재 중소기업 대상 — 해당'], brands: ['워크인'], docs: ['신청서'], summary: `요약 ${i}`, amount: '최대 500만원', use: ['온라인 광고비'], schedule: null })));
   const r = await ctx.owner.ok('POST', '/api/sales/support/analyze-top', { n: 2 });
-  assert.deepEqual([r.asked, r.done, r.failed], [2, 2, 0], JSON.stringify(r));
+  assert.deepEqual([r.asked, r.done, r.failed, r.left, r.stopped], [2, 2, 0, 2, false], JSON.stringify(r)); // 269차 #803: 남은 수·멈춤(화면 [모두 AI 판단]이 이어서 부름)
   const top2 = v.items.filter((x) => x.pending).slice(0, 2).map((x) => x.id);
   const judged = (await sql`select program_id from support_matches where ai_verdict is not null`).map((x) => x.program_id);
   assert.deepEqual(judged.sort(), [...top2].sort(), '맞춤 순 위 2건');

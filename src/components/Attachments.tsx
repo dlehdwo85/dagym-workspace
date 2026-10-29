@@ -86,8 +86,25 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, r
   // #533 [고치기] 하나로: docx = 워크인 문서, xlsx = 칸 고치기, 글·사진·PDF = 브라우저 편집기, 그 밖 = 내려받아 고친 뒤 올리기 안내
   const [editOf, setEditOf] = useState<any | null>(null);
   const startEdit = (a: any) => { const m = editModeOf(a); if (m === 'doc') openDoc(a); else if (m === 'sheet') setSheetOf(a); else setEditOf(a); };
+  // #806(대표 10/29 '문서 고치기 빈 화면'): 사진만 든 Word 는 바꾸지 않고 안내 → [PDF 로 만들어 글자 넣기] · [원본 내려받기]
+  const [photoDoc, setPhotoDoc] = useState<{ a: any; images: number; reverted?: boolean; pdf: any | null } | null>(null);
   async function openDoc(a: any) {
-    try { const r = await api<{ link: string; created: boolean }>(`/api/attachments/${a.id}/doc`, { body: {} }); if (r.created) toast.ok('워크인 문서로 바꿨습니다 — 같이 고친 뒤 [업무로 저장]'); window.location.href = r.link; } catch (e: any) { toast.error(e.message); }
+    try {
+      const r = await api<{ link?: string; created?: boolean; imageOnly?: boolean; images?: number; reverted?: boolean; pdf?: any | null }>(`/api/attachments/${a.id}/doc`, { body: {} });
+      if (r.imageOnly) { setPhotoDoc({ a, images: r.images ?? 0, reverted: r.reverted, pdf: r.pdf ?? null }); if (r.reverted) onChange(); return; }
+      if (r.created) toast.ok('워크인 문서로 바꿨습니다. 같이 고친 뒤 [업무로 저장]을 누르세요');
+      window.location.href = r.link!;
+    } catch (e: any) { toast.error(e.message); }
+  }
+  async function photoDocPdf() {
+    if (!photoDoc) return;
+    let pdf = photoDoc.pdf;
+    if (!pdf) {
+      setBusy('PDF 만드는 중…');
+      try { const r = await api<{ pdf: any; pages?: number; skipped?: number }>(`/api/attachments/${photoDoc.a.id}/doc/pdf`, { body: {} }); pdf = r.pdf; toast.ok(`PDF ${r.pages ?? ''}쪽을 업무에 붙였습니다${r.skipped ? `(못 바꾼 그림 ${r.skipped}개)` : ''}`); onChange(); broadcastRefresh(); }
+      catch (e: any) { toast.error(e.message); return; } finally { setBusy(''); }
+    }
+    setPhotoDoc(null); setEditOf(pdf);
   }
   async function uploadVersion(a: any, file: File | undefined) {
     if (!file) return; setBusy('새 버전 올리는 중…');
@@ -274,6 +291,19 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, r
       {prog.length > 1 && <p className="mt-2 text-xs text-ink-2" data-testid="pick-received">받은 파일 <b>{prog.length}개</b> · 올린 것 {prog.filter((p) => p.pct >= 100).length}/{prog.length}{prog.some((p) => p.error) ? ` · 못 올린 것 ${prog.filter((p) => p.error).length}` : ''}</p>}
       <UploadProgress items={prog} />
       <input ref={verRef} type="file" className="hidden" onChange={(e) => uploadVersion(verTarget, e.target.files?.[0])} aria-label="새 버전 파일" data-testid="att-version-file" />
+      {photoDoc && (
+        <Modal open onClose={() => setPhotoDoc(null)} title="사진으로 된 문서입니다">
+          <div className="space-y-3 text-sm text-ink-2" data-testid="photo-doc">
+            <p>이 Word 파일에는 글 없이 사진 {photoDoc.images}장만 들어 있습니다. 워크인 문서로 바꾸면 빈 화면이 되어 바꾸지 않았습니다.</p>
+            {photoDoc.reverted && <p className="rounded-input bg-slate-50 px-3 py-2 text-xs" data-testid="photo-doc-reverted">예전에 바꿔 둔 빈 문서는 지우고 원래 첨부로 되돌렸습니다.</p>}
+            <p>PDF 로 만들면 쪽마다 사진이 그대로 보이고, 그 위에 글자·체크·서명을 넣을 수 있습니다. 원본 Word 는 첨부에 그대로 남습니다.</p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" onClick={() => { openFile(photoDoc.a.id, false); setPhotoDoc(null); }} data-testid="photo-doc-download">원본 내려받기</Button>
+              <Button onClick={photoDocPdf} disabled={!!busy} data-testid="photo-doc-pdf">{photoDoc.pdf ? '만든 PDF 열어 글자 넣기' : 'PDF 로 만들어 글자 넣기'}</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {editOf && <AttachEditModal a={editOf} onClose={() => setEditOf(null)} onSaved={() => { onChange(); broadcastRefresh(); }} onDownload={() => openFile(editOf.id, false)} onUploadNew={() => { setVerTarget(editOf); verRef.current?.click(); }} />}
       {versionsOf && <VersionsModal a={versionsOf} canEdit={canEdit} onClose={() => setVersionsOf(null)} onChange={() => { onChange(); broadcastRefresh(); }} />}
       {sheetOf && <SheetEditModal a={sheetOf} onClose={() => setSheetOf(null)} onSaved={() => { setSheetOf(null); onChange(); broadcastRefresh(); }} />}

@@ -56,6 +56,7 @@ export async function support249({ owner, ctx, sql, BASE, FAKE, SHOTS, tick }) {
     const bk = owner.getByTestId('support-bulk'); await bk.waitFor();
     assert.match(await bk.innerText(), new RegExp(`판단 전’ ${lv.pendingCount}건`));
     assert.match(await bk.getByTestId(`support-bulk-${n}`).innerText(), new RegExp(`^${n}건 판단 · 약 [\\d,]+원$`));
+    assert.match(await bk.getByTestId('support-bulk-all').innerText(), new RegExp(`^대기 중인 공고 모두 AI 판단\\(${lv.pendingCount}건 · 약 [\\d,]+원\\)$`), '269차 #803 모두 판단 단추(건수·예상 비용)');
     await owner.screenshot({ path: `${SHOTS}/596-support-bulk.png` });
     await bk.getByTestId(`support-bulk-${n}`).click();
     await owner.getByText(new RegExp(`위에서 ${n}건을 AI 세일즈가 판단했습니다`)).waitFor();

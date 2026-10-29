@@ -49,8 +49,11 @@ const REAL = /현장|실사|사진|photo/i;
 /** #516 후속 2(로컬 10/24 08:15 '이름 규칙으로는 글자 그래픽이 안 걸러짐'): 시안 바탕은 브랜드 색이 기본 — 사진은 대표·로컬이 고른 것
  *  (자료실 '마케팅/시안 바탕…' 폴더 또는 태그 '글자없음') + #235 ⓒ(대표 #563) 사진 AI 설명이 '글자 없는 실사'로 본 사진(이름 규칙에도 안 걸리고 얼굴 알아볼 사람 없음). 태그 '글자있음'이면 뺌 */
 export const BACKDROP_FOLDER = '마케팅/시안 바탕(글자 없는 사진)';
+/** 269차 #807 ①(대표 10/29 '바탕 사진에 이미 글이 있으면 그 위에 글을 얹지 말 것'): 사진 AI 설명이 글자를 봤으면(적게라도)·홍보물·실사 아님 → '시안 바탕' 폴더에 있어도 바탕으로 안 씀.
+ *  사람이 단 태그 '글자없음'만 그 판정보다 먼저(사람이 보고 고른 것) */
+const visionSawText = (v: unknown) => visionOk(v) && (v.text !== 'none' || v.promo || v.kind !== 'photo');
 export const backdropOk = (r: { title?: string; file_name?: string | null; folder: string; tags?: string[] | null; vision?: unknown; source?: string | null }) => !markedText(r.tags) && !markedSkip(r.tags)
-  && ((r.folder ?? '').startsWith('마케팅/시안 바탕') || markedNoText(r.tags) || (visionOk(r.vision) && visionBackdrop(r.vision) && !textGraphic({ title: r.title ?? '', file_name: r.file_name, folder: r.folder, tags: r.tags, vision: r.vision, source: r.source })));
+  && (markedNoText(r.tags) || ((r.folder ?? '').startsWith('마케팅/시안 바탕') && !visionSawText(r.vision)) || (visionOk(r.vision) && visionBackdrop(r.vision) && !textGraphic({ title: r.title ?? '', file_name: r.file_name, folder: r.folder, tags: r.tags, vision: r.vision, source: r.source })));
 /** 쓸 사진 고르기: 글자 든 그래픽은 빼고 · 같은 브랜드(제목·폴더·태그·설명에 이름) +6 · 실사(현장·사진) +2 · 제목(주제) 낱말 +2씩(6까지)·본문 낱말 +1씩(4까지) · 누운 사람·뒷모습·어두운 사진은 바탕에서 뺌(171차) · 다른 브랜드 이름 −10 · 최근 30일 다른 게시에 쓴 사진 −4 · exclude = 이 글에 이미 써 본 사진 */
 async function pickPhoto(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover') {
   return (await rankPhotos(c, brand, others, text, exclude, mode))[0] ?? null;

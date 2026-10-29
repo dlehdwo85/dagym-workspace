@@ -2,7 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, Download, ExternalLink, ListPlus, Plus, Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -103,12 +103,33 @@ export function Support() {
     try { await api(`/api/sales/support/${it.id}/hide`, { body: { hidden } }); reload(); if (hidden) toast.ok('맞춤 목록에서 숨겼습니다', { label: '되돌리기', run: () => { api(`/api/sales/support/${it.id}/hide`, { body: { hidden: false } }).then(reload).catch(() => {}); } }); }
     catch (e: any) { toast.error(e.message); }
   }
+  type TopR = { asked: number; done: number; failed: number; costKrw: number; error: string | null; left: number; stopped: boolean };
   async function analyzeTop(n: number) {
     setBusy('top');
     try {
-      const r = await api<{ asked: number; done: number; failed: number; costKrw: number; error: string | null }>('/api/sales/support/analyze-top', { body: { n } }); setBulk(false);
-      if (r.failed) toast.error(`${r.done}건 판단 · ${r.failed}건 실패${r.error ? ` — ${r.error}` : ''}`); else toast.ok(r.asked ? `위에서 ${r.done}건을 AI 세일즈가 판단했습니다(${won(r.costKrw)})` : '판단할 공고가 없습니다'); reload();
+      const r = await api<TopR>('/api/sales/support/analyze-top', { body: { n } }); setBulk(false);
+      if (r.failed) toast.error(`${r.done}건 판단, ${r.failed}건 실패${r.error ? `(${r.error})` : ''}`); else toast.ok(r.asked ? `위에서 ${r.done}건을 AI 세일즈가 판단했습니다(${won(r.costKrw)})` : '판단할 공고가 없습니다'); reload();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  // 269차 #803 [대기 중인 공고 모두 AI 판단](로컬 20:45: 마케팅 승인함과 헷갈리지 않게 '지원사업 공고'로): 20건씩 이어서(4건씩 같이) — 한도·예산에 걸리거나 [멈추기]를 누르면 멈춤
+  const [allRun, setAllRun] = useState<{ done: number; total: number; costKrw: number } | null>(null);
+  const stopAll = useRef(false);
+  async function analyzeAll(total: number) {
+    setBusy('top'); stopAll.current = false; let done = 0, failed = 0, costKrw = 0, error: string | null = null, stopped = false;
+    setAllRun({ done: 0, total, costKrw: 0 });
+    try {
+      for (let k = 0; k < 50 && !stopAll.current; k++) {
+        const r = await api<TopR>('/api/sales/support/analyze-top', { body: { n: 20 } });
+        done += r.done; failed += r.failed; costKrw += r.costKrw; error ??= r.error; stopped = r.stopped;
+        setAllRun({ done, total: done + r.left, costKrw });
+        if (!r.asked || !r.left || stopped || !r.done) break;
+      }
+      setBulk(false);
+      const msg = `AI 세일즈가 ${done}건을 판단했습니다(${won(costKrw)})`;
+      if (stopped) toast.error(`${msg}. AI 예산이나 한도에 걸려 멈췄습니다${error ? `(${error})` : ''}`);
+      else if (failed) toast.error(`${msg}. ${failed}건은 실패했습니다${error ? `(${error})` : ''}`);
+      else toast.ok(stopAll.current ? `${msg}. 멈췄습니다` : msg);
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); setAllRun(null); reload(); }
   }
   async function weeklyNow() {
     setBusy('weekly');
@@ -124,7 +145,7 @@ export function Support() {
         <span className="text-xs text-ink-2">정부·지자체 지원사업 공고를 우리 회사 기준으로 걸러 봅니다</span>
         <span className="ml-auto flex flex-wrap gap-1.5">
           <input className={cx(inputCls, 'h-8 w-40 py-1 text-sm')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="찾기" aria-label="공고 찾기" data-testid="support-search" />
-          {data?.canEdit && data.aiOn && data.pendingCount > 0 && <Button size="sm" variant="secondary" disabled={busy === 'top'} onClick={() => setBulk(true)} data-testid="support-analyze-top"><Sparkles className="size-3.5" aria-hidden />{busy === 'top' ? '판단 중…' : '여러 건 AI 판단'}</Button>}
+          {data?.canEdit && data.aiOn && data.pendingCount > 0 && <Button size="sm" variant="secondary" disabled={busy === 'top'} onClick={() => setBulk(true)} data-testid="support-analyze-top"><Sparkles className="size-3.5" aria-hidden />{busy === 'top' ? '판단 중…' : '공고 여러 건 AI 판단'}</Button>}
           <Button size="sm" onClick={() => setAdding(true)} data-testid="support-add"><Plus className="size-3.5" aria-hidden />직접 추가</Button>
         </span>
       </div>
@@ -174,7 +195,7 @@ export function Support() {
         <SourceLine sources={data.sources} />
       </>}
       {adding && <ManualAdd people={data?.people ?? []} onClose={() => setAdding(false)} onDone={(id) => { setAdding(false); reload(); go({ id }); }} />}
-      {bulk && data && <BulkAi pending={data.pendingCount} cost={data.aiCostKrw} busy={busy === 'top'} onRun={analyzeTop} onClose={() => setBulk(false)} />}
+      {bulk && data && <BulkAi pending={data.pendingCount} cost={data.aiCostKrw} busy={busy === 'top'} onRun={analyzeTop} onAll={() => analyzeAll(data.pendingCount)} run={allRun} onStop={() => { stopAll.current = true; }} onClose={() => { if (!allRun) setBulk(false); }} />}
       {openId && <Detail id={openId} onClose={() => go({ id: null })} onChanged={reload} />}
     </div>
   );
@@ -246,18 +267,22 @@ function AutoNote({ data }: { data: ListData }) {
   if (a.on && a.stopped) return <p className={cx(box, 'border-amber-300 bg-amber-50 text-amber-900')} data-testid="support-auto-note" data-state="stopped"><b>AI 자동 판단을 멈췄습니다</b> — 이번 달 회사 AI 예산(또는 한도)을 다 썼습니다. 남은 {a.left}건은 예산이 채워지면 이어서 판단합니다. 급한 공고는 공고마다 [AI 판단]을 누르세요.</p>;
   if (a.on) return a.queue > 0 || data.pendingCount > 0 ? <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="on"><b>AI 세일즈가 새 공고를 자동으로 판단합니다</b>{cost ? `(${cost}, 회사 AI 예산에서)` : ''}{a.queue > 0 ? ` — 지금 판단 차례 ${a.queue}건, 15분마다 차례로(‘AI 확인 중’)` : ''}.</p> : null;
   if (!data.pendingCount) return null;
-  return <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="off"><b>규칙상 맞음 · AI 판단 전 {data.pendingCount}건</b> — 지역·업력·규모·업종 규칙으로만 맞는 공고입니다. 참여할 수 있는지는 공고마다 [AI 판단]을 눌러야 정해집니다{cost ? `(${cost}, 회사 AI 예산에서)` : ''}. {a.saved ? '새 공고 자동 판단이 꺼져 있습니다 — 회사 프로필에서 켤 수 있습니다' : '회사 프로필을 저장하면 새 공고를 자동으로 판단합니다'}{data.canEdit && data.aiOn ? ' · 여러 건은 [여러 건 AI 판단]' : ''}.</p>;
+  return <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="off"><b>규칙상 맞음 · AI 판단 전 {data.pendingCount}건</b> — 지역·업력·규모·업종 규칙으로만 맞는 공고입니다. 참여할 수 있는지는 공고마다 [AI 판단]을 눌러야 정해집니다{cost ? `(${cost}, 회사 AI 예산에서)` : ''}. {a.saved ? '새 공고 자동 판단이 꺼져 있습니다 — 회사 프로필에서 켤 수 있습니다' : '회사 프로필을 저장하면 새 공고를 자동으로 판단합니다'}{data.canEdit && data.aiOn ? ' · 여러 건은 [공고 여러 건 AI 판단]' : ''}.</p>;
 }
 
 /** #782 여러 건 AI 판단(관리자) — 몇 건·예상 비용을 보고 누를 때만 */
-function BulkAi({ pending, cost, busy, onRun, onClose }: { pending: number; cost: number | null; busy: boolean; onRun: (n: number) => void; onClose: () => void }) {
+function BulkAi({ pending, cost, busy, onRun, onAll, run, onStop, onClose }: { pending: number; cost: number | null; busy: boolean; onRun: (n: number) => void; onAll: () => void; run: { done: number; total: number; costKrw: number } | null; onStop: () => void; onClose: () => void }) {
   const opts = [...new Set([5, 10, 20].map((n) => Math.min(n, pending)))].filter((n) => n > 0);
   return (
-    <Modal open onClose={onClose} title="여러 건 AI 판단">
+    <Modal open onClose={onClose} title="지원사업 공고 AI 판단">
       <div className="space-y-3 text-sm" data-testid="support-bulk">
         <p className="text-xs text-ink-2">‘규칙상 맞음 · AI 판단 전’ {pending}건 가운데 맞춤 순 위에서부터 판단합니다. 비용은 회사 AI 예산에서 나갑니다{cost != null ? `(건당 ${won(cost)})` : ''}. 한도에 걸리면 멈춥니다.</p>
-        <div className="flex flex-wrap gap-2">{opts.map((n) => <Button key={n} size="sm" variant={n === opts[0] ? 'primary' : 'secondary'} disabled={busy} onClick={() => onRun(n)} data-testid={`support-bulk-${n}`}>{busy ? '판단 중…' : `${n}건 판단${cost != null ? ` · ${won(cost * n)}` : ''}`}</Button>)}</div>
-        <div className="flex justify-end"><Button size="sm" variant="secondary" onClick={onClose}>닫기</Button></div>
+        <div className="flex flex-wrap gap-2">{opts.map((n) => <Button key={n} size="sm" variant="secondary" disabled={busy} onClick={() => onRun(n)} data-testid={`support-bulk-${n}`}>{busy ? '판단 중…' : `${n}건 판단${cost != null ? ` · ${won(cost * n)}` : ''}`}</Button>)}</div>
+        {/* 269차 #803: 대기 중인 것 모두(4건씩 같이) */}
+        {pending > 0 && (run
+          ? <div className="flex items-center gap-2 rounded-input bg-sky-50 px-3 py-2 text-xs text-sky-900" role="status" data-testid="support-bulk-progress"><span className="flex-1">AI 판단 중 {run.done}/{run.total}건 · {won(run.costKrw)}</span><Button size="sm" variant="secondary" onClick={onStop} data-testid="support-bulk-stop">멈추기</Button></div>
+          : <Button size="sm" disabled={busy} onClick={onAll} data-testid="support-bulk-all">대기 중인 공고 모두 AI 판단({pending}건{cost != null ? ` · 약 ${won(cost * pending).replace(/^약\s*/, '')}` : ''})</Button>)}
+        <div className="flex justify-end"><Button size="sm" variant="secondary" onClick={onClose} disabled={!!run}>닫기</Button></div>
       </div>
     </Modal>
   );
