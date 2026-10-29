@@ -105,7 +105,7 @@ test('회사 AI 예산을 다 쓰면 멈춤(공고 실패로 안 셈·AI 부르�
   assert.equal(aiPurposeLabel('sales_support'), '지원사업 AI 판단');
 });
 
-test('269차 #803: 밀린 공고가 보통 수(10건)보다 많으면 이번 정기 실행은 50건까지(4건씩 같이)', async () => {
+test('270차 #810: 밀린 공고가 보통 수(10건)보다 많으면 응답 뒤 작업으로 끝까지(4건씩) — 정기 실행은 바로 끝나고 판단은 뒤에서 이어짐', async () => {
   await sql`delete from support_programs where source_id like 'B%'`;
   await ctx.owner.ok('PUT', '/api/sales/support/profile', { ...PROFILE, autoAi: true });
   const ids = []; for (let i = 1; i <= 13; i++) ids.push(await ins({ source_id: `B${i}`, title: `[경기] 용인시 중소기업 판로 지원 ${i}차` }));
@@ -113,7 +113,13 @@ test('269차 #803: 밀린 공고가 보통 수(10건)보다 많으면 이번 정
   const todo = ids.filter((x) => !before.has(x));
   await queue(Array.from({ length: 20 }, () => say({ verdict: 'fit' })));
   const r = await auto();
-  assert.ok(r.out.default.done >= todo.length, `13건 모두(보통 10건 넘음): ${JSON.stringify(r.out.default)}`);
-  assert.equal(r.out.default.left, 0);
-  for (const id of ids) assert.ok((await ai(id))?.ai_verdict, '판단됨');
+  assert.ok(r.out.default.background >= todo.length, `뒤에서 판단(앞 시험에서 남은 공고 포함): ${JSON.stringify(r.out.default)}`);
+  let left = ids.length;
+  for (let k = 0; k < 80 && left; k++) { await new Promise((ok) => setTimeout(ok, 250)); left = 0; for (const id of ids) if (!(await ai(id))?.ai_verdict) left++; }
+  assert.equal(left, 0, '13건 모두 판단(버튼 없이)');
+  let runs = [];
+  for (let k = 0; k < 40 && !runs.length; k++) { runs = await sql`select status, detail from job_runs where job = 'supportAuto:default' order by id desc limit 1`; if (!runs.length) await new Promise((ok) => setTimeout(ok, 250)); }
+  assert.equal(runs[0]?.status, 'ok', '응답 뒤 작업 기록(job_runs)');
+  const [st] = await sql`select auto_state from support_profiles where tenant = 'default'`;
+  assert.deepEqual([st.auto_state.left, st.auto_state.stopped], [0, null]);
 });

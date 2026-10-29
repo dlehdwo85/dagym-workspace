@@ -65,20 +65,32 @@ export type MktSettings = { plan?: PlanRow | null; plan_code: keyof typeof MKT_P
   /** 189차(대표 #685): 사진이 모자라면 실사 참고로 생성(크레딧 사용) — 기본 꺼짐, 관리자가 켬(209 마이그레이션) */ photo_gen: boolean;
   /** 267차(대표 #795 '두서없이 올리지 말고 수정·보완 시간까지 고려해서'): 승인 올리는 방식 — weekly = 주 단위 묶음(batch_dow 요일 batch_hour 시에 다음 주 월~일 게시분을 한 번에) ·
    *  lead = 게시 lead_days 일 전 lead_hour 시에 한 건씩(예전 방식). 224 마이그레이션으로 쓰던 회사는 weekly */ approval_mode: 'weekly' | 'lead'; batch_dow: number; batch_hour: number;
+  /** 270차 #809: 우리 회사(내부) 이미지·영상 생성 월 실제 비용 한도(원) — 값이 있으면 요금제 숫자 대신 이것으로만 막음(null = 요금제 숫자) */ cost_cap_krw: number | null; internal?: boolean;
   /** 267차: 승인 마감 = 게시 deadline_days 일 전 approval_hour:00(0 = 게시 당일 — 예전 방식) */ deadline_days: number };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
   remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false, write_tier: null, auto_pause: false, video_pause: true, photo_gen: false,
-  approval_mode: 'lead', batch_dow: 4, batch_hour: 10, deadline_days: 0 };
+  approval_mode: 'lead', batch_dow: 4, batch_hour: 10, deadline_days: 0, cost_cap_krw: null };
+/** 270차 #809: 우리 회사(내부, 'default') — plans.ts 와 같은 기준 */
+export const INTERNAL_TENANT = 'default';
 /** 자동 생성 일시정지 중인가(정기 실행·목표/운영 제안 tick 이 먼저 본다) */
 export const autoPaused = async (tenant: string) => !!(await settingsOf(tenant)).auto_pause;
 export async function settingsOf(tenant: string): Promise<MktSettings> {
   const [s] = await db()<any[]>`select * from mkt_settings where tenant = ${tenant}`;
-  if (!s) return { ...DEFAULTS };
+  const internal = tenant === INTERNAL_TENANT;
+  if (!s) return { ...DEFAULTS, internal };
   const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
   const plan = s.plan_code ? (await planTable())[s.plan_code] ?? null : null; // #103: 요금제 숫자는 DB 표에서
-  return { ...DEFAULTS, ...s, plan, monthly_credits: num(s.monthly_credits), weekly_credits: num(s.weekly_credits), ai_monthly_usd: num(s.ai_monthly_usd) };
+  return { ...DEFAULTS, ...s, plan, monthly_credits: num(s.monthly_credits), weekly_credits: num(s.weekly_credits), ai_monthly_usd: num(s.ai_monthly_usd), cost_cap_krw: num(s.cost_cap_krw), internal };
+}
+/** 270차 #809: 내부 회사가 월 실제 비용 한도(원)를 정했으면 요금제 숫자(크레딧·영상 편수·재생성 횟수) 대신 그 금액으로만 막음 */
+export const costMode = (s: Pick<MktSettings, 'internal' | 'cost_cap_krw'>) => !!s.internal && s.cost_cap_krw !== null;
+/** 이번 달 이미지·영상 생성에 쓴 돈(원, 어림) = 쓴 크레딧 × 1크레딧 최고 단가 — 한도 비교는 넉넉하게(높게) 잡음 */
+export async function monthGenKrw(tenant: string) {
+  const [use, cc] = await Promise.all([usageOf(tenant), creditCost()]);
+  return { krw: Math.round(use.monthCredits * cc.krwPerCreditMax), krwMin: Math.round(use.monthCredits * cc.krwPerCreditMin), credits: use.monthCredits, perCreditMax: cc.krwPerCreditMax };
 }
 export function limitsOf(s: MktSettings) {
+  if (costMode(s)) return { monthlyCredits: null, weeklyCredits: null, videoMonthly: null, regenMonthly: null, aiMonthlyUsd: s.ai_monthly_usd ?? null };
   const p = s.plan ?? (s.plan_code ? MKT_PLANS[s.plan_code] : null);
   const monthly = s.monthly_credits ?? p?.monthlyCredits ?? null;
   return { monthlyCredits: monthly, weeklyCredits: s.weekly_credits ?? (monthly === null ? null : Math.round((monthly / 4.3) * 10) / 10),
@@ -134,9 +146,11 @@ export async function productionLeft(tenant: string) {
   const over = lim.monthlyCredits !== null && use.monthCredits >= lim.monthlyCredits;
   const today = ymd(new Date()); const dow = new Date(`${today}T12:00:00+09:00`).getUTCDay(); const weekStart = kst(ymd(new Date(Date.now() - ((dow + 6) % 7) * DAY)), '00:00'); const weekEnd = new Date(weekStart.getTime() + 7 * DAY);
   const wk = await db()<{ kind: string; n: number }[]>`select coalesce(kind, 'feed') as kind, count(*)::int n from mkt_contents where tenant = ${tenant} and not is_test and status <> 'canceled' and scheduled_at >= ${weekStart} and scheduled_at < ${weekEnd} group by 1`;
-  const weekly = Object.entries(plan?.weekly ?? {}).map(([kind, limit]) => ({ kind, label: (KIND_LABEL as Record<string, string>)[kind] ?? kind, limit: Number(limit), used: wk.find((w) => w.kind === kind)?.n ?? 0 }));
+  const weekly = costMode(s) ? [] : Object.entries(plan?.weekly ?? {}).map(([kind, limit]) => ({ kind, label: (KIND_LABEL as Record<string, string>)[kind] ?? kind, limit: Number(limit), used: wk.find((w) => w.kind === kind)?.n ?? 0 }));
   const extra = plan?.extraCreditKrw ?? null; const shortfall = lim.monthlyCredits === null ? 0 : Math.max(0, Math.round((use.monthCredits - lim.monthlyCredits) * 10) / 10);
-  return { planCode: s.plan_code, planLabel: plan?.label ?? null, monthlyCredits: lim.monthlyCredits, usedCredits: use.monthCredits, leftCredits: left, images: left === null ? null : Math.floor(left / cost.imageCredits), videos: left === null ? null : Math.floor(left / cost.videoCredits),
+  const gen = s.internal ? await monthGenKrw(tenant) : null; // 270차 #809
+  return { internal: !!s.internal, costCapKrw: s.cost_cap_krw, monthGenKrw: gen?.krw ?? null, monthGenKrwMin: gen?.krwMin ?? null,
+    planCode: s.plan_code, planLabel: plan?.label ?? null, monthlyCredits: lim.monthlyCredits, usedCredits: use.monthCredits, leftCredits: left, images: left === null ? null : Math.floor(left / cost.imageCredits), videos: left === null ? null : Math.floor(left / cost.videoCredits),
     videosLeft: lim.videoMonthly === null ? null : Math.max(0, lim.videoMonthly - use.monthVideos), regensLeft: lim.regenMonthly === null ? null : Math.max(0, lim.regenMonthly - use.monthRegens), weekly, over, shortfall, extraCreditKrw: extra,
     overMessage: over ? `이번 달 제작 크레딧 ${lim.monthlyCredits}을 모두 썼습니다${shortfall ? ` (초과 ${shortfall})` : ''}. ${extra ? `초과분은 1크레딧당 ${extra.toLocaleString('ko-KR')}원으로 추가 구매(${shortfall ? `${Math.ceil(shortfall * extra).toLocaleString('ko-KR')}원` : '필요 시'})` : '초과 크레딧 금액은 결정 전'} — 또는 요금제를 올려 주세요.` : null, cost };
 }
@@ -554,6 +568,10 @@ export async function requestCard(c: any, version: number, kind: 'image' | 'vide
   if (kind === 'video' && est >= EST.video && lim.videoMonthly !== null && use.monthVideos >= lim.videoMonthly) reason = `이번 달 생성 영상 ${lim.videoMonthly}편을 다 썼습니다`;
   else if (kind.startsWith('regen') && lim.regenMonthly !== null && use.monthRegens >= lim.regenMonthly) reason = `이번 달 재생성 ${lim.regenMonthly}회를 다 썼습니다 — 추가 1회 = 약 ${est}크레딧`;
   else if (est > 0 && lim.weeklyCredits !== null && use.weekCredits + est > lim.weeklyCredits) reason = `이번 주 크레딧 한도(${lim.weeklyCredits}) 초과 예상 — 약 ${est}크레딧`;
+  else if (est > 0 && costMode(s)) { // 270차 #809 내부 회사: 월 실제 비용 한도(원)
+    const g = await monthGenKrw(c.tenant); const add = Math.round(est * g.perCreditMax);
+    if (g.krw + add > (s.cost_cap_krw ?? 0)) reason = `이번 달 이미지·영상 생성 비용 한도 ${(s.cost_cap_krw ?? 0).toLocaleString('ko-KR')}원을 넘습니다(지금 약 ${g.krw.toLocaleString('ko-KR')}원, 이번 제작 약 ${add.toLocaleString('ko-KR')}원)`;
+  }
   if (o.ask) { // 255차 #792: 수정 요청으로 영상·AI 이미지를 다시 만들 때는 늘 대표 승인 먼저 — 비용(크레딧·원)과 이번 달 남은 수
     const cc = await creditCost(); const won = `약 ${Math.round(est * cc.krwPerCreditMin).toLocaleString('ko-KR')}~${Math.round(est * cc.krwPerCreditMax).toLocaleString('ko-KR')}원`;
     const videosLeft = lim.videoMonthly === null ? null : Math.max(0, lim.videoMonthly - use.monthVideos); const regensLeft = lim.regenMonthly === null ? null : Math.max(0, lim.regenMonthly - use.monthRegens);
@@ -1204,7 +1222,8 @@ export const settingsInput = z.object({ planCode: z.enum(['basic', 'standard', '
   remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional(), aiMonthlyUsd: z.number().min(0).max(10000).nullable().optional(), autoPublish: z.boolean().optional(), autoPause: z.boolean().optional(), autoHold: z.boolean().optional(),
   /** 요청 C §3-1: 릴스·쇼츠·생성 영상 자동 제작 중단(기본 켬) */ videoPause: z.boolean().optional(),
   /** 189차: 사진이 모자라면 실사 참고로 생성(크레딧) */ photoGen: z.boolean().optional(),
-  /** 267차(대표 #795): 승인 올리는 방식·묶음 요일·시각·승인 마감 며칠 전 */ approvalMode: z.enum(['weekly', 'lead']).optional(), batchDow: nInt(0, 6).optional(), batchHour: nInt(0, 23).optional(), deadlineDays: nInt(0, 7).optional() });
+  /** 267차(대표 #795): 승인 올리는 방식·묶음 요일·시각·승인 마감 며칠 전 */ approvalMode: z.enum(['weekly', 'lead']).optional(), batchDow: nInt(0, 6).optional(), batchHour: nInt(0, 23).optional(), deadlineDays: nInt(0, 7).optional(),
+  /** 270차 #809 내부 회사 이미지·영상 생성 월 실제 비용 한도(원, null = 요금제 숫자) */ costCapKrw: nInt(0, 100_000_000).nullable().optional() });
 export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const cur = await settingsOf(tenantOf(u));
@@ -1214,14 +1233,16 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
     allow_generated_people: i.allowGeneratedPeople ?? cur.allow_generated_people, allow_slideshow: i.allowSlideshow ?? cur.allow_slideshow, ai_label: i.aiLabel ?? cur.ai_label,
     notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids, ai_monthly_usd: i.aiMonthlyUsd !== undefined ? i.aiMonthlyUsd : cur.ai_monthly_usd, auto_publish: i.autoPublish ?? cur.auto_publish, auto_hold: i.autoHold ?? cur.auto_hold,
     auto_pause: i.autoPause ?? cur.auto_pause, video_pause: i.videoPause ?? cur.video_pause, photo_gen: i.photoGen ?? cur.photo_gen,
-    approval_mode: i.approvalMode ?? cur.approval_mode, batch_dow: i.batchDow ?? cur.batch_dow, batch_hour: i.batchHour ?? cur.batch_hour, deadline_days: i.deadlineDays ?? cur.deadline_days };
+    approval_mode: i.approvalMode ?? cur.approval_mode, batch_dow: i.batchDow ?? cur.batch_dow, batch_hour: i.batchHour ?? cur.batch_hour, deadline_days: i.deadlineDays ?? cur.deadline_days,
+    cost_cap_krw: cur.internal && i.costCapKrw !== undefined ? i.costCapKrw : cur.cost_cap_krw }; // 내부 회사만 바꿈
   const sql = db();
   await sql`insert into mkt_settings ${sql({ tenant: tenantOf(u), ...v, updated_by: u.id } as never)}
     on conflict (tenant) do update set plan_code = excluded.plan_code, monthly_credits = excluded.monthly_credits, weekly_credits = excluded.weekly_credits, video_monthly = excluded.video_monthly,
       regen_monthly = excluded.regen_monthly, approval_hour = excluded.approval_hour, lead_days = excluded.lead_days, lead_hour = excluded.lead_hour, remind_hours = excluded.remind_hours,
       quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids, ai_monthly_usd = excluded.ai_monthly_usd, auto_publish = excluded.auto_publish, auto_hold = excluded.auto_hold,
       auto_pause = excluded.auto_pause, video_pause = excluded.video_pause, photo_gen = excluded.photo_gen, approval_mode = excluded.approval_mode, batch_dow = excluded.batch_dow, batch_hour = excluded.batch_hour,
-      deadline_days = excluded.deadline_days, updated_by = excluded.updated_by, updated_at = now()`;
+      deadline_days = excluded.deadline_days, cost_cap_krw = excluded.cost_cap_krw, updated_by = excluded.updated_by, updated_at = now()`;
+  if (v.cost_cap_krw !== cur.cost_cap_krw) await (await import('./log')).audit(sql, u.id, 'mkt.cost_cap', 'tenant', tenantOf(u), { from: cur.cost_cap_krw, to: v.cost_cap_krw }).catch(() => {});
   if (v.approval_mode !== cur.approval_mode) await (await import('./log')).audit(sql, u.id, 'mkt.approval_mode', 'tenant', tenantOf(u), { from: cur.approval_mode, to: v.approval_mode }).catch(() => {});
   if (i.autoPause !== undefined && i.autoPause !== cur.auto_pause) await (await import('./log')).audit(sql, u.id, i.autoPause ? 'mkt.auto_pause' : 'mkt.auto_resume', 'tenant', tenantOf(u), {}).catch(() => {});
   if (i.videoPause !== undefined && i.videoPause !== cur.video_pause) await (await import('./log')).audit(sql, u.id, i.videoPause ? 'mkt.video_pause' : 'mkt.video_resume', 'tenant', tenantOf(u), {}).catch(() => {});
@@ -1258,7 +1279,8 @@ const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 /** 로컬 10/20 보완 ②: 묶음의 종류별 게시 시각을 한 번에(피드·쇼츠·릴스·블로그·스토리) — 비우면 기본 BUNDLE 시각 */
 const bundleTimes = z.object({ feed: HHMM.optional(), shorts: HHMM.optional(), reels: HHMM.optional(), blog: HHMM.optional(), story: HHMM.optional() });
 export const bundleInput = z.object({ brandId: zUuid.nullable().optional(), intervalDays: nInt(2, 3).default(3), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), topicHint: z.string().max(300).optional(),
-  weekdays: z.array(nInt(0, 6)).max(7).optional(), skipWeekend: z.boolean().optional(), times: bundleTimes.optional() }); // 로컬 10/20 보완: 요일 지정(월·수·금)·주말 건너뛰기·시각
+  weekdays: z.array(nInt(0, 6)).max(7).optional(), skipWeekend: z.boolean().optional(), times: bundleTimes.optional(), // 로컬 10/20 보완: 요일 지정(월·수·금)·주말 건너뛰기·시각
+  kinds: z.array(z.enum(['feed', 'shorts', 'reels', 'blog', 'story'])).min(1).max(5).optional() }); // 270차 #808: 묶음에 넣을 종류(예: 스토리 빼고 피드·릴스·쇼츠·블로그 4개)
 /** 대표 10/20 6): 기본 묶음 규칙 5개를 한 번에(브랜드마다, 2~3일에 한 번) — 같은 bundle_key, 요일 대신 n일마다(또는 요일 지정) */
 export async function createBundle(u: SessionUser, i: z.infer<typeof bundleInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
@@ -1267,7 +1289,7 @@ export async function createBundle(u: SessionUser, i: z.infer<typeof bundleInput
   const key = randomUUID(); const start = i.startDate ?? ymd(new Date());
   const byDow = !!i.weekdays?.length; // 요일을 고르면 n일마다 대신 그 요일에(마케팅 계획: 워크인 월·수·금, 하이링크·다짐 화·목·토)
   const ids: string[] = [];
-  for (const b of BUNDLE) {
+  for (const b of BUNDLE.filter((x) => !i.kinds?.length || i.kinds.includes(x.kind as never))) {
     const [r] = await sql<{ id: string }[]>`insert into mkt_rules (tenant, brand_id, channel, kind, weekdays, post_time, topic_hint, active, created_by, interval_days, anchor_date, cross_channels, bundle_key, skip_weekend)
       values (${t}, ${i.brandId ?? null}, ${b.channel}, ${b.kind}, ${byDow ? [...new Set(i.weekdays)].sort() : []}, ${i.times?.[b.kind as keyof typeof i.times] ?? b.postTime}, ${i.topicHint ?? null}, true, ${u.id}, ${byDow ? null : i.intervalDays}, ${byDow ? null : start}, ${b.cross}, ${key}, ${!byDow && !!i.skipWeekend}) returning id`;
     ids.push(r.id);

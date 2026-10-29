@@ -29,7 +29,7 @@ const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const BUNDLE_TIMES: Record<string, string> = { feed: '10:00', shorts: '11:00', reels: '12:00', blog: '13:00', story: '18:00' };
 const BUNDLE_KINDS = ['feed', 'shorts', 'reels', 'blog', 'story'];
 const REQ: Record<string, string> = { image: '이미지', video: '영상', regen_image: '이미지 재생성', regen_video: '영상 재생성', topic: '주제 필요' };
-type Production = { planCode: string | null; planLabel: string | null; monthlyCredits: number | null; usedCredits: number; leftCredits: number | null; images: number | null; videos: number | null; videosLeft: number | null; regensLeft: number | null; weekly: { kind: string; label: string; limit: number; used: number }[]; over: boolean; shortfall: number; extraCreditKrw: number | null; overMessage: string | null };
+type Production = { internal?: boolean; costCapKrw: number | null; monthGenKrw: number | null; monthGenKrwMin: number | null; planCode: string | null; planLabel: string | null; monthlyCredits: number | null; usedCredits: number; leftCredits: number | null; images: number | null; videos: number | null; videosLeft: number | null; regensLeft: number | null; weekly: { kind: string; label: string; limit: number; used: number }[]; over: boolean; shortfall: number; extraCreditKrw: number | null; overMessage: string | null };
 type View = { full?: boolean; production?: Production | null; settings: any; rhythm?: { deadlineRule: string; next: { at: string; label: string } | null; waiting: number; dows: string[]; prepHours: number }; writeModel?: { tier: string; label: string; model?: string; perDraftKrw?: number; source: 'company' | 'plan' | 'base'; blog?: { label: string; model?: string; perDraftKrw?: number; upgraded: boolean; extraKrw?: number } }; limits: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null; aiMonthlyUsd: number | null };
   usage: { weekCredits: number; monthCredits: number; monthVideos: number; monthRegens: number; ai?: { usd: number; requests: number }; companyAiUsd?: number; companyAiLimitUsd?: number; companyAi?: { usedKrw: number; limitKrw: number | null; pct: number | null; resetLabel: string } }; plans: Record<string, { label: string; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number; price: number | null }>;
   rules: any[]; requests: any[]; ledger: any[]; brands: { id: string; name: string; tone: string | null; intro: string | null; products: string | null; weekly_topic: string | null; banned_words: string[]; test_mode: boolean; voice?: Partial<Voice> | null; facts?: Facts | null; topic_pool?: string[] | null; examples?: Example[] | null; ad_priority?: number | null; ad_share?: number | null; ad_note?: string | null; color?: string | null; video?: Record<string, string | null> | null; feed?: Feed | null; draw?: { color: string | null; from: 'feed' | 'video' | 'brand' | 'company' | null } }[]; people: { id: string; name: string; role: string }[]; canEdit: boolean; feedCatalog?: FeedCatalog };
@@ -42,12 +42,12 @@ export function Automation() {
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 링크 없음(요금제 고르기는 사용량·요금제 화면 — 대표 10/27 ⑤)
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '', mode: 'content' as Mode });
   // 로컬 10/20 보완: 묶음은 n일마다(+주말 건너뛰기) 또는 요일 지정(월·수·금), 종류별 시각 한 번에
-  const [bundle, setBundle] = useState({ brandId: '', mode: 'interval' as 'interval' | 'weekdays', intervalDays: 3, skipWeekend: false /* 대표 15:40: 기본 끔 */, weekdays: [1, 3, 5] as number[], startDate: dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), times: { ...BUNDLE_TIMES } });
+  const [bundle, setBundle] = useState({ brandId: '', mode: 'interval' as 'interval' | 'weekdays', intervalDays: 3, skipWeekend: false /* 대표 15:40: 기본 끔 */, weekdays: [1, 3, 5] as number[], startDate: dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), times: { ...BUNDLE_TIMES }, kinds: [...BUNDLE_KINDS] });
   async function addBundle(e: React.FormEvent) {
     e.preventDefault();
     try {
-      const body = bundle.mode === 'weekdays' ? { brandId: bundle.brandId || null, weekdays: bundle.weekdays, times: bundle.times } : { brandId: bundle.brandId || null, intervalDays: bundle.intervalDays, startDate: bundle.startDate, skipWeekend: bundle.skipWeekend, times: bundle.times };
-      const r = await api<{ planned: number }>('/api/marketing/auto/bundle', { body }); toast.ok(`묶음 규칙 5개 추가 — 앞으로 2주 칸 ${r.planned}개`); reload();
+      const body = { ...(bundle.mode === 'weekdays' ? { brandId: bundle.brandId || null, weekdays: bundle.weekdays, times: bundle.times } : { brandId: bundle.brandId || null, intervalDays: bundle.intervalDays, startDate: bundle.startDate, skipWeekend: bundle.skipWeekend, times: bundle.times }), kinds: bundle.kinds };
+      const r = await api<{ planned: number; ids: string[] }>('/api/marketing/auto/bundle', { body }); toast.ok(`묶음 규칙 ${r.ids.length}개를 추가했습니다. 앞으로 2주 칸 ${r.planned}개`); reload();
     } catch (er: any) { toast.error(er.message); }
   }
   const [done, setDone] = useState<Record<string, { credits: string; media: { id: string; title: string }[] }>>({});
@@ -124,6 +124,8 @@ export function Automation() {
             <span className="ml-auto text-xs text-ink-3">{data.production.planLabel ? `${data.production.planLabel} 요금제` : '요금제 없음'}{ed && !inApp && <> · <Link href="/admin/usage#mkt-plan" className="font-semibold text-violet-700 underline" data-testid="auto-plan-link">요금제 보기·바꾸기</Link></>}</span></div>
           {data.production.weekly.length > 0 && <div className="mt-1 flex flex-wrap gap-1.5 text-xs" data-testid="auto-production-weekly">{data.production.weekly.map((w) => <span key={w.kind} className={cx('rounded-full border px-2 py-0.5', w.used >= w.limit ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-line bg-white')}>이번 주 {w.label} {w.used}/{w.limit}</span>)}</div>}
           {data.production.overMessage && <p className="mt-1 text-xs text-red-800" data-testid="auto-production-over">{data.production.overMessage}</p>}
+          {/* 270차 #809(대표 '슈퍼관리자는 무한인데 AI 영상 월 2편?'): 우리 회사(내부)는 요금제 숫자 대신 월 실제 비용 한도(원)로 — 비우면 요금제 숫자 그대로 */}
+          {data.production.internal && <CostCap prod={data.production} canEdit={ed} onSaved={reload} />}
         </section>)}
       {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-recipients">
         <h2 className="text-sm font-semibold">알림·승인 받는 사람</h2>
@@ -190,8 +192,10 @@ export function Automation() {
             <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={bundle.skipWeekend} onChange={(e) => setBundle({ ...bundle, skipWeekend: e.target.checked })} data-testid="auto-bundle-skip-weekend" />주말 건너뛰기(다음 평일)</label>
           </> : <span className="flex flex-wrap items-center gap-1">{DOW.map((d, k) => <button key={d} type="button" onClick={() => setBundle({ ...bundle, weekdays: bundle.weekdays.includes(k) ? bundle.weekdays.filter((x) => x !== k) : [...bundle.weekdays, k].sort() })}
             className={cx('size-7 rounded-full border text-xs', bundle.weekdays.includes(k) ? 'border-violet-600 bg-violet-600 text-white' : 'border-line bg-white')} aria-pressed={bundle.weekdays.includes(k)} data-testid={`auto-bundle-dow-${k}`}>{d}</button>)}</span>}
-          <span className="flex flex-wrap items-center gap-1 text-xs" data-testid="auto-bundle-times">{BUNDLE_KINDS.map((k) => <label key={k} className="flex items-center gap-0.5">{KIND[k]}<input type="time" className={cx(inputCls, 'h-7 !w-auto px-1')} value={bundle.times[k]} onChange={(e) => setBundle({ ...bundle, times: { ...bundle.times, [k]: e.target.value } })} aria-label={`${KIND[k]} 시각`} data-testid={`auto-bundle-time-${k}`} /></label>)}</span>
-          <Button type="submit" size="sm" data-testid="auto-bundle-add">묶음 5개 추가</Button>
+          <span className="flex flex-wrap items-center gap-1 text-xs" data-testid="auto-bundle-times">{BUNDLE_KINDS.map((k) => <label key={k} className={cx('flex items-center gap-0.5', !bundle.kinds.includes(k) && 'opacity-50')}>
+            {/* 270차 #808: 묶음에 넣을 종류 고르기(스토리 빼기 등) */}
+            <input type="checkbox" checked={bundle.kinds.includes(k)} onChange={(e) => setBundle({ ...bundle, kinds: e.target.checked ? BUNDLE_KINDS.filter((x) => x === k || bundle.kinds.includes(x)) : bundle.kinds.filter((x) => x !== k) })} aria-label={`${KIND[k]} 넣기`} data-testid={`auto-bundle-kind-${k}`} />{KIND[k]}<input type="time" className={cx(inputCls, 'h-7 !w-auto px-1')} value={bundle.times[k]} onChange={(e) => setBundle({ ...bundle, times: { ...bundle.times, [k]: e.target.value } })} aria-label={`${KIND[k]} 시각`} data-testid={`auto-bundle-time-${k}`} /></label>)}</span>
+          <Button type="submit" size="sm" disabled={!bundle.kinds.length} data-testid="auto-bundle-add">묶음 {bundle.kinds.length}개 추가</Button>
         </form>}
         {ed && bundleGroups(data.rules).map((g) => <BundleTimes key={g.key} bundleKey={g.key} brand={g.brand} rules={g.rules} onDone={reload} />)}
         <ul className="mt-2 divide-y divide-line text-sm">{data.rules.map((r) => (
@@ -326,6 +330,25 @@ function BundleTimes({ bundleKey, brand, rules, onDone }: { bundleKey: string; b
           <Button size="sm" onClick={save} disabled={busy} data-testid="bundle-save">저장(제작 전 칸도 옮김)</Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 270차 #809 내부 회사 이미지·영상 생성 월 실제 비용 한도(원) — 정하면 요금제의 크레딧·영상 편수·재생성 횟수 대신 이 금액으로만 막음 */
+function CostCap({ prod, canEdit, onSaved }: { prod: { costCapKrw: number | null; monthGenKrw: number | null; monthGenKrwMin: number | null }; canEdit: boolean; onSaved: () => void }) {
+  const [v, setV] = useState(prod.costCapKrw === null ? '' : String(prod.costCapKrw));
+  const won = (n: number | null) => (n === null ? '-' : `${n.toLocaleString('ko-KR')}원`);
+  async function save() {
+    const n = v.trim() === '' ? null : Number(v.replace(/[^\d]/g, ''));
+    if (n !== null && !Number.isFinite(n)) return;
+    try { await api('/api/marketing/auto', { method: 'PUT', body: { costCapKrw: n } }); toast.ok(n === null ? '비용 한도를 비웠습니다. 요금제 숫자로 막습니다' : `이미지·영상 생성 월 한도를 ${won(n)}으로 정했습니다`); onSaved(); } catch (e: any) { toast.error(e.message); }
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-input border border-sky-200 bg-sky-50/60 px-2 py-1.5 text-xs text-sky-900" data-testid="auto-cost-cap">
+      <span>우리 회사(내부) · 이번 달 이미지·영상 생성 약 <b className="tabular-nums" data-testid="auto-cost-used">{won(prod.monthGenKrwMin)}~{won(prod.monthGenKrw)}</b>
+        {prod.costCapKrw === null ? ' · 비용 한도 없음(요금제 숫자로 막는 중)' : <> / 한도 <b className="tabular-nums">{won(prod.costCapKrw)}</b>(요금제 숫자 대신)</>}</span>
+      {canEdit && <span className="ml-auto flex items-center gap-1"><input className={cx(inputCls, 'h-7 !w-28 px-2 text-right')} inputMode="numeric" placeholder="비우면 요금제" value={v} onChange={(e) => setV(e.target.value)} aria-label="월 비용 한도(원)" data-testid="auto-cost-cap-input" />원
+        <Button size="sm" variant="secondary" onClick={save} data-testid="auto-cost-cap-save">저장</Button></span>}
     </div>
   );
 }

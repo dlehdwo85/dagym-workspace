@@ -78,6 +78,11 @@ export async function budgetFor(tenant: string, per: number, want: number): Prom
   const M = await import('./mktAuto');
   const lim = M.limitsOf(await M.settingsOf(tenant)); const use = await M.usageOf(tenant); const busy = (await inflight(tenant)) * per;
   const fit = (limit: number | null, used: number) => (limit === null ? want : Math.floor((limit - used - busy) / per + 1e-9));
+  const s = await M.settingsOf(tenant);
+  if (M.costMode(s)) { // 270차 #809 내부 회사: 월 실제 비용 한도(원) 안에서
+    const g = await M.monthGenKrw(tenant); const each = per * g.perCreditMax;
+    return Math.max(0, Math.min(want, Math.floor(((s.cost_cap_krw ?? 0) - g.krw - busy * g.perCreditMax) / each + 1e-9)));
+  }
   return Math.max(0, Math.min(want, fit(lim.weeklyCredits, use.weekCredits), fit(lim.monthlyCredits, use.monthCredits)));
 }
 

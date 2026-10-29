@@ -964,10 +964,11 @@ export async function weeklyBundle(t: string, opt: { now?: Date; actor?: Session
 export async function supportAutoTick(opt: { budgetMs?: number; max?: number } = {}) {
   if (process.env.SUPPORT_AUTO_AI === 'off') return { skipped: 'off' };
   if (!aiEnabled()) return { skipped: 'ai_off' };
-  const sql = db(); const t0 = Date.now(); let budget = opt.budgetMs ?? 25_000; const today = ymd();
+  const sql = db(); const t0 = Date.now(); const budget = opt.budgetMs ?? 25_000; const today = ymd();
   const max0 = Math.max(0, opt.max ?? (Number(process.env.SUPPORT_AUTO_AI_MAX ?? 10) || 0));
-  // 269차 #803: 밀린 공고가 많으면(보통 수 넘게) 이번 실행은 50건까지·시간도 더(정기 실행 한 번 300초 안)
-  const BIG = Math.max(max0, Number(process.env.SUPPORT_AUTO_AI_BIG ?? 50) || 0);
+  // 270차 #810(대표 10/29 '한번에 1000건 넘게 들어오더라도 버튼 안누르고 판단해서 넘겨올 것'): 밀린 공고가 보통 수(10건)보다 많으면
+  // 응답 뒤 작업(runLater)으로 4건씩 시간 한도(SUPPORT_AUTO_BG_MS, 기본 240초)까지 이어서 판단 → 다음 정기 실행이 남은 것부터. 회사마다 한 번에 하나(withLock)
+  const BG_MS = Math.max(10_000, Number(process.env.SUPPORT_AUTO_BG_MS ?? 240_000) || 240_000);
   const tenants = await sql<{ tenant: string; updated_at: string; basis_at: string | null; auto_state: AutoState | null }[]>`select sp.tenant, sp.updated_at, sp.basis_at, sp.auto_state from support_profiles sp join tenants t on t.id = sp.tenant
     where sp.auto_ai and 'sales' = any(t.spaces) and t.status = 'active' and not coalesce(t.is_test, false) order by sp.tenant limit 50`; // 시험·체험 조직은 빼기(로컬 10/28 23:50)
   const out: Record<string, unknown> = {};
@@ -985,28 +986,53 @@ export async function supportAutoTick(opt: { budgetMs?: number; max?: number } =
     const { all } = await supportAll(sql, t, actor.id, today);
     const todo = all.filter((x) => autoCandidate(x, today)) // 판단 없는 것 먼저 → 마감 가까운 순 → 새로 올라온 순
       .sort((a, b) => Number(!!a.ai) - Number(!!b.ai) || (a.applyEnd ?? '9999-12-31').localeCompare(b.applyEnd ?? '9999-12-31') || new Date(b.seen).getTime() - new Date(a.seen).getTime());
-    let done = 0, failed = 0, i = 0; let stopped: string | null = null, error: string | null = null;
-    const many = todo.length > max0 && opt.max == null;
-    if (many && opt.budgetMs == null) budget = Math.max(budget, 90_000);
-    const n = Math.min(many ? BIG : max0, todo.length);
-    while (i < n && !stopped && Date.now() - t0 < budget) {
-      const batch = todo.slice(i, Math.min(i + AI_PAR, n)); i += batch.length;
-      const rs = await Promise.allSettled(batch.map((x) => analyzeProgram(actor, x.id, undefined, { auto: true })));
-      for (const [k, r] of rs.entries()) {
-        if (r.status === 'fulfilled') { done++; continue; }
-        const e = r.reason as HttpError;
-        if ([402, 429].includes(e?.status) || e?.code === 'ai_off') { stopped = e?.code || 'budget'; error = String(e?.message ?? e).slice(0, 200); continue; } // 한도 — 공고 실패로 안 셈
-        failed++; error ??= String(e?.message ?? e).slice(0, 200);
-        await sql`insert into support_matches (tenant, program_id, auto_fail) values (${t}, ${batch[k].id}, 1)
-          on conflict (tenant, program_id) do update set auto_fail = support_matches.auto_fail + 1, updated_at = now()`;
-      }
+    if (todo.length > max0 && opt.max == null) {
+      const { runLater, withLock, isBusy } = await import('../later');
+      runLater(`supportAuto:${t}`, async () => {
+        const r = await withLock(`supportAuto:${t}`, async () => {
+          const q = await judgeQueue(sql, t, actor, todo, todo.length, Date.now() + BG_MS);
+          await saveAutoState(sql, t, todo.length, q, fp);
+          return q;
+        });
+        return isBusy(r) ? { busy: true } : { tenant: t, ...r, left: Math.max(0, todo.length - r.done) };
+      });
+      out[t] = { background: todo.length };
+      continue;
     }
-    // 판단·실패로 support_matches 가 바뀌었으니 fp 는 다음 실행이 다시 계산(남은 것이 없으면 그때 '같음')
-    const state: AutoState = { at: new Date().toISOString(), done, failed, left: Math.max(0, todo.length - done), stopped, error, fp: done || failed ? '' : fp };
-    await sql`update support_profiles set auto_state = ${sql.json(state as never)} where tenant = ${t}`;
-    out[t] = { done, failed, left: state.left, stopped };
+    const q = await judgeQueue(sql, t, actor, todo, Math.min(max0, todo.length), t0 + budget);
+    const state = await saveAutoState(sql, t, todo.length, q, fp);
+    out[t] = { done: q.done, failed: q.failed, left: state.left, stopped: q.stopped };
   }
   return { tenants: tenants.length, out };
+}
+/** 판단 차례를 앞에서부터 4건씩 — n 건까지·deadline 전까지. 예산·한도·크레딧에 걸리면 멈춤(공고 실패로 안 셈), 다른 실패는 공고마다 auto_fail +1 */
+async function judgeQueue(sql: Sql, t: string, actor: SessionUser, todo: { id: string }[], n: number, deadline: number) {
+  let done = 0, failed = 0, i = 0; let stopped: string | null = null, error: string | null = null;
+  while (i < n && !stopped && Date.now() < deadline) {
+    const batch = todo.slice(i, Math.min(i + AI_PAR, n)); i += batch.length;
+    const rs = await Promise.allSettled(batch.map((x) => analyzeProgram(actor, x.id, undefined, { auto: true })));
+    for (const [k, r] of rs.entries()) {
+      if (r.status === 'fulfilled') { done++; continue; }
+      const e = r.reason as HttpError;
+      if ([402, 429].includes(e?.status) || e?.code === 'ai_off') { stopped = e?.code || 'budget'; error = String(e?.message ?? e).slice(0, 200); continue; }
+      failed++; error ??= String(e?.message ?? e).slice(0, 200);
+      await sql`insert into support_matches (tenant, program_id, auto_fail) values (${t}, ${batch[k].id}, 1)
+        on conflict (tenant, program_id) do update set auto_fail = support_matches.auto_fail + 1, updated_at = now()`;
+    }
+  }
+  return { done, failed, stopped, error };
+}
+/** 판단 결과를 화면 안내용으로 저장 · #810 예산·한도에 걸려 멈추면 관리자에게 하루 한 번 알림 */
+async function saveAutoState(sql: Sql, t: string, total: number, q: Awaited<ReturnType<typeof judgeQueue>>, fp: string) {
+  // 판단·실패로 support_matches 가 바뀌었으니 fp 는 다음 실행이 다시 계산(남은 것이 없으면 그때 '같음')
+  const state: AutoState = { at: new Date().toISOString(), done: q.done, failed: q.failed, left: Math.max(0, total - q.done), stopped: q.stopped, error: q.error, fp: q.done || q.failed ? '' : fp };
+  await sql`update support_profiles set auto_state = ${sql.json(state as never)} where tenant = ${t}`;
+  if (q.stopped) {
+    const admins = (await sql<{ id: string }[]>`select id from users where tenant = ${t} and status = 'active' and role in ('owner', 'admin')`).map((x) => x.id);
+    await notify(sql, { userIds: admins, type: 'usage_alert', space: 'sales', title: '지원사업 공고 AI 판단을 멈췄습니다', body: `회사 AI 예산이나 한도에 닿았습니다. 남은 공고 ${state.left}건은 예산이 다시 생기면 다음 정기 실행 때 이어서 판단합니다.`,
+      link: '/s/sales/support', entityType: null as never, entityId: null as never, dedupeKey: `supportstop:${t}:${ymd()}` }).catch(() => {});
+  }
+  return state;
 }
 /** 정기 실행: 월요일(KST) 08시 이후 첫 tick 에 영업 공간을 켠 회사마다 한 번(SUPPORT_WEEKLY = '요일-시' 기본 '1-8', 'any' = 늘, 'off' = 안 함) */
 export async function supportWeeklyTick(opt: { now?: Date } = {}) {

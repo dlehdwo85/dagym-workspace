@@ -195,7 +195,7 @@ export function Support() {
         <SourceLine sources={data.sources} />
       </>}
       {adding && <ManualAdd people={data?.people ?? []} onClose={() => setAdding(false)} onDone={(id) => { setAdding(false); reload(); go({ id }); }} />}
-      {bulk && data && <BulkAi pending={data.pendingCount} cost={data.aiCostKrw} busy={busy === 'top'} onRun={analyzeTop} onAll={() => analyzeAll(data.pendingCount)} run={allRun} onStop={() => { stopAll.current = true; }} onClose={() => { if (!allRun) setBulk(false); }} />}
+      {bulk && data && <BulkAi pending={data.pendingCount} cost={data.aiCostKrw} busy={busy === 'top'} onRun={analyzeTop} onAll={data.auto.on ? null : () => analyzeAll(data.pendingCount)} run={allRun} onStop={() => { stopAll.current = true; }} onClose={() => { if (!allRun) setBulk(false); }} />}
       {openId && <Detail id={openId} onClose={() => go({ id: null })} onChanged={reload} />}
     </div>
   );
@@ -271,15 +271,16 @@ function AutoNote({ data }: { data: ListData }) {
 }
 
 /** #782 여러 건 AI 판단(관리자) — 몇 건·예상 비용을 보고 누를 때만 */
-function BulkAi({ pending, cost, busy, onRun, onAll, run, onStop, onClose }: { pending: number; cost: number | null; busy: boolean; onRun: (n: number) => void; onAll: () => void; run: { done: number; total: number; costKrw: number } | null; onStop: () => void; onClose: () => void }) {
+function BulkAi({ pending, cost, busy, onRun, onAll, run, onStop, onClose }: { pending: number; cost: number | null; busy: boolean; onRun: (n: number) => void; onAll: (() => void) | null; run: { done: number; total: number; costKrw: number } | null; onStop: () => void; onClose: () => void }) {
   const opts = [...new Set([5, 10, 20].map((n) => Math.min(n, pending)))].filter((n) => n > 0);
   return (
     <Modal open onClose={onClose} title="지원사업 공고 AI 판단">
       <div className="space-y-3 text-sm" data-testid="support-bulk">
         <p className="text-xs text-ink-2">‘규칙상 맞음 · AI 판단 전’ {pending}건 가운데 맞춤 순 위에서부터 판단합니다. 비용은 회사 AI 예산에서 나갑니다{cost != null ? `(건당 ${won(cost)})` : ''}. 한도에 걸리면 멈춥니다.</p>
         <div className="flex flex-wrap gap-2">{opts.map((n) => <Button key={n} size="sm" variant="secondary" disabled={busy} onClick={() => onRun(n)} data-testid={`support-bulk-${n}`}>{busy ? '판단 중…' : `${n}건 판단${cost != null ? ` · ${won(cost * n)}` : ''}`}</Button>)}</div>
-        {/* 269차 #803: 대기 중인 것 모두(4건씩 같이) */}
-        {pending > 0 && (run
+        {/* 269차 #803: 대기 중인 것 모두(4건씩 같이) · 270차 #810: 새 공고 자동 판단이 켜져 있으면 정기 실행이 끝까지 판단하므로 단추 없음 */}
+        {!onAll && pending > 0 && <p className="text-xs text-ink-2" data-testid="support-bulk-auto">새 공고 자동 판단이 켜져 있어 대기 중인 공고는 정기 실행이 차례로 모두 판단합니다. 누르지 않아도 됩니다.</p>}
+        {onAll && pending > 0 && (run
           ? <div className="flex items-center gap-2 rounded-input bg-sky-50 px-3 py-2 text-xs text-sky-900" role="status" data-testid="support-bulk-progress"><span className="flex-1">AI 판단 중 {run.done}/{run.total}건 · {won(run.costKrw)}</span><Button size="sm" variant="secondary" onClick={onStop} data-testid="support-bulk-stop">멈추기</Button></div>
           : <Button size="sm" disabled={busy} onClick={onAll} data-testid="support-bulk-all">대기 중인 공고 모두 AI 판단({pending}건{cost != null ? ` · 약 ${won(cost * pending).replace(/^약\s*/, '')}` : ''})</Button>)}
         <div className="flex justify-end"><Button size="sm" variant="secondary" onClick={onClose} disabled={!!run}>닫기</Button></div>

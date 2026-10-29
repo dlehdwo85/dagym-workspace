@@ -71,6 +71,16 @@ describe('로컬 10/20 묶음 보완 ①② (주말 건너뛰기·요일 지정�
     assert.ok(wd.length && wd.every((d) => [1, 3, 5].includes(d)), `월·수·금만 ${wd}`);
     P.key = w.bundleKey; P.ids = w.ids;
   });
+  test('270차 #808 묶음에 넣을 종류 고르기: 화·금 + 스토리 빼고 피드·쇼츠·릴스·블로그 4개 · 빈 목록은 400', async () => {
+    const b4 = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '바디랩' });
+    assert.equal((await ctx.owner.req('POST', '/api/marketing/auto/bundle', { brandId: b4.id, weekdays: [2, 5], kinds: [] })).status, 400);
+    const r = await ctx.owner.ok('POST', '/api/marketing/auto/bundle', { brandId: b4.id, weekdays: [2, 5], kinds: ['feed', 'shorts', 'reels', 'blog'] });
+    assert.equal(r.ids.length, 4);
+    const rules = await sql`select channel, kind, weekdays, cross_channels from mkt_rules where id = any(${r.ids}::uuid[]) order by kind`;
+    assert.deepEqual(rules.map((x) => `${x.channel}/${x.kind}`).sort(), ['blog/blog', 'instagram/feed', 'instagram/reels', 'youtube/shorts']);
+    assert.ok(rules.every((x) => x.weekdays.join() === '2,5'), '화·금');
+    assert.deepEqual(rules.find((x) => x.kind === 'feed').cross_channels, ['facebook'], '피드는 인스타+페이스북');
+  });
   test('② PATCH 묶음: 시각을 바꾸면 규칙 + 제작 전 초안이 같은 날 새 시각으로, 요일을 바꾸면 제작 전 초안을 지우고 다시 계획, 다른 회사·없는 묶음 404', async () => {
     const rules0 = (await ctx.owner.ok('GET', '/api/marketing/auto')).rules.filter((x) => x.bundle_key === P.key);
     const blogId0 = rules0.find((x) => x.kind === 'blog').id;

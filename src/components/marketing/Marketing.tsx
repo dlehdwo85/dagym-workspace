@@ -482,12 +482,21 @@ function BatchBoxes({ list, onOpen }: { list: CardContent[]; onOpen: (id: string
   const STATE: Record<string, string> = { pending: '승인 대기', changes: '수정 요청', hold: '보류', approved: '승인됨', published: '게시됨' };
   return <>{weeks.map((w) => { const rows = list.filter((c) => c.quality?.batch?.week === w && c.quality.batch.released && STATE[c.status]).sort((a, b) => String(a.scheduled_at ?? '').localeCompare(String(b.scheduled_at ?? '')));
     const done = rows.filter((c) => c.status === 'approved' || c.status === 'published').length;
+    // 270차 #808(대표 10/29 '11월 3일(화) 게시 4건 · 11월 6일(금) 게시 4건'): 묶음 안을 게시 날짜(서울)별로
+    const dayOf = (c: CardContent) => (c.scheduled_at ? new Date(new Date(c.scheduled_at).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : '');
+    const days = [...new Set(rows.map(dayOf))];
+    const dayLabel = (d: string) => (d ? `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일(${'일월화수목금토'[new Date(`${d}T12:00:00+09:00`).getUTCDay()]})` : '날짜 없음');
     return (
       <details key={w} open className="rounded-card border border-violet-200 bg-violet-50/30 p-3 text-sm" data-testid="mkt-batch-box">
-        <summary className="cursor-pointer font-medium text-violet-900">{md(w)}~{md(end(w))} 게시 묶음 {rows.length}건 · 승인 {done}/{rows.length}</summary>
+        <summary className="cursor-pointer font-medium text-violet-900">{md(w)}~{md(end(w))} 게시 묶음 {rows.length}건 · 승인 {done}/{rows.length}
+          <span className="ml-1 font-normal text-violet-800" data-testid="mkt-batch-days">({days.map((d) => `${dayLabel(d)} ${rows.filter((c) => dayOf(c) === d).length}건`).join(' · ')})</span></summary>
         <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[22rem] text-left text-xs"><thead className="text-ink-3"><tr><th className="py-1 pr-2 font-normal">게시</th><th className="py-1 pr-2 font-normal">브랜드</th><th className="py-1 pr-2 font-normal">채널</th><th className="py-1 pr-2 font-normal">제목</th><th className="py-1 font-normal">상태</th></tr></thead>
-          <tbody className="divide-y divide-line">{rows.map((c) => <tr key={c.id} data-testid="mkt-batch-row"><td className="whitespace-nowrap py-1 pr-2 tabular-nums">{whenLabel(c.scheduled_at)}</td><td className="py-1 pr-2">{c.brand ?? '-'}</td><td className="whitespace-nowrap py-1 pr-2">{channelLabel(c.channel)}</td>
-            <td className="max-w-[14rem] truncate py-1 pr-2"><button type="button" className="truncate text-left hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button></td><td className="whitespace-nowrap py-1">{STATE[c.status]}</td></tr>)}</tbody></table></div>
+          {days.map((d) => { const dr = rows.filter((c) => dayOf(c) === d); const dd = dr.filter((c) => c.status === 'approved' || c.status === 'published').length;
+            return <tbody key={d} className="divide-y divide-line" data-testid="mkt-batch-day">
+              <tr><th colSpan={5} className="bg-violet-100/60 px-1 py-1 text-left font-medium text-violet-900" data-testid="mkt-batch-day-head">{dayLabel(d)} 게시 {dr.length}건 · 승인 {dd}/{dr.length}</th></tr>
+              {dr.map((c) => <tr key={c.id} data-testid="mkt-batch-row"><td className="whitespace-nowrap py-1 pr-2 tabular-nums">{whenLabel(c.scheduled_at)}</td><td className="py-1 pr-2">{c.brand ?? '-'}</td><td className="whitespace-nowrap py-1 pr-2">{channelLabel(c.channel)}</td>
+                <td className="max-w-[14rem] truncate py-1 pr-2"><button type="button" className="truncate text-left hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button></td><td className="whitespace-nowrap py-1">{STATE[c.status]}</td></tr>)}
+            </tbody>; })}</table></div>
       </details>); })}</>;
 }
 
