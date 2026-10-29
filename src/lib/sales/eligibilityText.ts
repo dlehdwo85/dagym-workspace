@@ -1,7 +1,10 @@
 // 252차 #786(대표 10/29 00:20 "입찰 참가자격 요건(자본금·기술인력·실적 등)이 공고상에 적혀 있다 — 그걸 표기, 지금은 적격심사 같은 입찰 종류가 적혀 있음"):
 // 공고문 글에서 '참가자격' 절을 잘라(원문 그대로, 1,500자) 요건 항목을 규칙으로 뽑는다 — AI·비용 없음. 다른 모듈을 불러오지 않는 잎 모듈(시험이 바로 불러 씀)
 export type EligItem = { k: 'capital' | 'license' | 'perf' | 'staff' | 'credit' | 'region' | 'briefing' | 'joint' | 'other'; label: string };
-const MAX = 1500;
+/** 저장하는 절 길이 · 264차: 1,500자에서 잘린 절을 AI 에 줄 때 더 긴 절(4,000자) */
+export const SEC_MAX = 1500;
+export const SEC_LONG = 4000;
+const MAX = SEC_MAX;
 const ROMAN = 'ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ';
 /** 절 머리 — '5. 참가자격' · '8. 입찰참가자격(입찰공고일 현재기준)' · '4. 입찰 참가자격' · '□ 참가자격의 제한' · 'Ⅲ. 입찰참가자격' */
 const HEAD = new RegExp(`(?:^|\\n|[ \\t])[ \\t]*(?:(\\d{1,2})[.)]|([${ROMAN}]+)[.)]?|([□■◆◇▣○●◎※▶►]))?[ \\t]*(?:입찰\\s*)?참가\\s*자격(?:\\s*(?:의\\s*)?(?:제한|요건|조건|사항))?`, 'g');
@@ -16,8 +19,8 @@ const SEP = /[-=─━_~＝－]{4,}/g;
 const PLEDGE = /서약|유죄\s*판결|허위로|청렴/;
 const LEAD_IN = /^(?:[가-하]\.|\d{1,2}[.)])?\s*(?:(?:아래|다음|위)(?:의)?\s*(?:각\s*(?:호|항|목)\s*(?:의)?\s*)?(?:자격|요건|조건|사항)|(?:모두|다음을|아래를)\s*(?:충족|갖춘|갖추)|(?:각\s*(?:호|항)|어느\s*하나|중\s*하나)에\s*해당)/;
 
-/** 공고문 글 → '참가자격' 절(머리부터 다음 같은 급 번호 머리 앞까지, 최대 1,500자). 없으면 null */
-export function eligibilitySection(text: string | null | undefined): string | null {
+/** 공고문 글 → '참가자격' 절(머리부터 다음 같은 급 번호 머리 앞까지, 최대 1,500자 — max 로 바꿈). 없으면 null */
+export function eligibilitySection(text: string | null | undefined, max = MAX): string | null {
   const t = String(text ?? '').replace(/\r\n?/g, '\n').replace(/ /g, ' ');
   if (!t) return null;
   // 본문 안의 '참가자격이 없는 자의 입찰은 무효' 같은 말은 빼고, 머리 꼴(번호·기호로 시작하거나 줄 처음)인 것 중 첫째
@@ -39,7 +42,7 @@ export function eligibilitySection(text: string | null | undefined): string | nu
   }
   if (!best) return null;
   const body = t.slice(best.at);
-  let end = Math.min(body.length, MAX);
+  let end = Math.min(body.length, max);
   const from = best.head.length + 4;
   const cut = (re: RegExp, ok: (m: RegExpMatchArray) => boolean = () => true) => {
     for (const m of body.slice(from).matchAll(re)) if (ok(m)) { end = Math.min(end, from + (m.index ?? 0)); return; }
@@ -49,7 +52,7 @@ export function eligibilitySection(text: string | null | undefined): string | nu
   else if (best.sym) cut(new RegExp(`\\n[ \\t]*\\${best.sym}\\s*[가-힣]`, 'g'));
   else cut(/\n[ \t]*(?:\d{1,2}[.)]|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+[.)]?|[□■◆▣])\s*[가-힣]/g);
   const sec = body.slice(0, end).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-  return sec.length > best.head.length + 2 ? sec.slice(0, MAX) : null;
+  return sec.length > best.head.length + 2 ? sec.slice(0, max) : null;
 }
 
 /** 259차(로컬 10/29 10:10 나라장터 '(협상)보령시 파크골프장…' — 협상(제안서)·직찰 공고는 API 에 입찰 마감 칸(bidClseDt)이 없음): 공고문 글 → 제안서·입찰서 제출 마감 일시.
@@ -162,10 +165,24 @@ export function textSig(t: string): string {
   for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return `${h.toString(16)}:${t.length}`;
 }
-export type EligAi = { sig: string; items: EligItem[]; usd?: number; at: string; error?: string; skip?: string; tries?: number };
+/** long(264차): 저장한 절이 잘려 AI 에 더 긴 절을 줬을 때 그 글자 수 */
+export type EligAi = { sig: string; items: EligItem[]; usd?: number; at: string; error?: string; skip?: string; tries?: number; long?: number };
 /** AI 가 정리한 항목(같은 절에서 뽑은 것만) */
 export const aiItemsOf = (e: { text?: string | null; ai?: EligAi | null } | null | undefined): EligItem[] | null =>
   e?.text && e.ai?.items?.length && e.ai.sig === textSig(e.text) && !eligibilityItems(e.text).length ? e.ai.items : null;
+type EligAiRow = { text?: string | null; ai?: EligAi | null; by?: string; aiLongTry?: string | null } | null | undefined;
+/** 264차(로컬 10/29 15:50 GH 용역 — AI 가 '1)·2)·3) 중 하나(세부 내용 원문 없음)'): 저장한 절이 1,500자에서 잘렸고 규칙으로 못 뽑은 공고 —
+ *  공고문을 한 번 다시 읽어 더 긴 절(4,000자)을 AI 에 줌(이미 줬거나 해 본 공고·사진 공고문은 빼고) */
+export const aiLongDue = (e: EligAiRow): boolean => !!e?.text && e.text.length >= SEC_MAX && e.by !== 'vision' && !e.aiLongTry && !e.ai?.long && needsAiItems(e.text);
+/** 264차(같은 메시지 천안상록골프장 프로샵): 규칙으로 못 뽑은 공고의 AI 정리 상태 — 'AI 가 아직 안 돈 것인지, AI 도 못 뽑은 것인지' */
+export function aiStateOf(e: EligAiRow): string | null {
+  if (!e?.text || !needsAiItems(e.text)) return null;
+  const a = e.ai && e.ai.sig === textSig(e.text) ? e.ai : null;
+  if (a?.items?.length) return null;
+  return !a ? 'AI 정리 대기' : a.skip ? 'AI 정리 안 함' : a.error ? 'AI 정리 실패' : 'AI 도 못 뽑음';
+}
+/** '요건을 항목으로 못 뽑음(AI 도 못 뽑음) — 원문 보기' */
+export const noItemsLine = (state: string | null) => (state ? ELIG_NO_ITEMS.replace(' — ', `(${state}) — `) : ELIG_NO_ITEMS);
 /** 못 찾았을 때 말(목록·상세·당일 메일·공고 조회 같은 말) */
 export const ELIG_MISS = '공고문에서 참가자격을 못 찾음 — 원문 확인';
 /** 참가자격 한 줄 — 읽었으면 뽑은 요건, 못 찾았으면 이유(나라장터 업종·지역이 있으면 앞에), 아직 안 읽었으면 나라장터 업종·지역만(없으면 null) */
@@ -200,13 +217,15 @@ export function lineOf(text: string, r: Record<string, any> = {}): string {
   return eligibilityLine(items, text, apiExtra(r, items)) ?? commonOnly(text);
 }
 /** 252차 #786 참가자격 칸(목록 줄·펼치기·상세·공고 조회 같은 말) — 한 줄은 저장한 원문에서 매번 다시 뽑음(뽑기 규칙을 고치면 공고문을 다시 받지 않고 바로 반영, 253차) */
-export function eligView(r: any): { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl: string | null; readAt: string | null; vision: boolean; ai: boolean } {
+export function eligView(r: any): { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl: string | null; readAt: string | null; vision: boolean; ai: boolean; aiState: string | null } {
   const e = r?.eligibility; const extra = apiExtra(r ?? {}, []);
-  if (!e) return { line: extra.length ? extra.join(' · ') : null, text: null, error: null, file: null, fileUrl: null, readAt: null, vision: false, ai: false };
+  if (!e) return { line: extra.length ? extra.join(' · ') : null, text: null, error: null, file: null, fileUrl: null, readAt: null, vision: false, ai: false, aiState: null };
   if (e.text && e.by !== 'vision' && !eligibilitySection(e.text)) // 256차: 예전 규칙으로 잘라 저장한 절이 지금 규칙으로는 절 머리가 아님(등록 절차 안내 등) — 없는 것으로(정기 실행이 다시 읽음)
-    return { line: extra.length ? extra.join(' · ') : null, text: null, error: '공고문에서 참가자격 절을 못 찾음', file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: false, ai: false };
+    return { line: extra.length ? extra.join(' · ') : null, text: null, error: '공고문에서 참가자격 절을 못 찾음', file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: false, ai: false, aiState: null };
   const ai = aiItemsOf(e); // 262차: 규칙으로 못 뽑은 절은 AI 가 정리한 항목(같은 절일 때만)
-  return { line: ai ? eligibilityLine(ai, e.text, apiExtra(r, ai)) : e.text ? lineOf(e.text, r) : e.line ?? null, text: e.text ?? null, error: e.error ?? null, file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: e.by === 'vision', ai: !!ai };
+  const line = ai ? eligibilityLine(ai, e.text, apiExtra(r, ai)) : e.text ? lineOf(e.text, r) : e.line ?? null;
+  const aiState = !ai && line === ELIG_NO_ITEMS ? aiStateOf(e) : null; // 264차: 못 뽑은 줄에 AI 상태
+  return { line: aiState ? noItemsLine(aiState) : line, text: e.text ?? null, error: e.error ?? null, file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: e.by === 'vision', ai: !!ai, aiState };
 }
 /** #790 사진 공고문을 AI 가 읽은 것 — 원문 옆 안내 */
 export const VISION_NOTE = 'AI 가 사진에서 읽음 — 숫자는 원문 확인';

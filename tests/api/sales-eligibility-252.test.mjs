@@ -131,7 +131,24 @@ test('262차 한 줄 규칙: 제92조 공통·구분선·서약·머리글 거�
   const v = E.eligView(row);
   assert.deepEqual([v.line, v.ai], ['최근 3년 현황조사 실적 1건 이상 · 감정평가법인 또는 측량업자', true]);
   assert.equal(E.eligSay(v), `최근 3년 현황조사 실적 1건 이상 · 감정평가법인 또는 측량업자 (${E.AI_ITEMS_NOTE})`, '메일·공고 조회에도 AI 정리 표시');
-  assert.deepEqual([E.eligView({ eligibility: { ...row.eligibility, text: sec + ' 바뀜' } }).ai, E.eligView({ eligibility: { ...row.eligibility, text: sec + ' 바뀜' } }).line], [false, E.ELIG_NO_ITEMS], '절이 바뀌면 예전 AI 항목은 안 씀');
+  assert.deepEqual([E.eligView({ eligibility: { ...row.eligibility, text: sec + ' 바뀜' } }).ai, E.eligView({ eligibility: { ...row.eligibility, text: sec + ' 바뀜' } }).line], [false, '요건을 항목으로 못 뽑음(AI 정리 대기) — 원문 보기'], '절이 바뀌면 예전 AI 항목은 안 씀(새 절은 AI 정리 대기)');
+});
+
+// 264차(로컬 10/29 15:50): GH 용역 AI 'ㄱ: 자격 1)·2)·3) 중 하나(세부 내용 원문 없음)' — 1,500자에서 잘린 절은 더 긴 절(4,000자)을 AI 에 · 천안상록골프장 프로샵 '못 뽑음'에 AI 상태
+const FILL = Array.from({ length: 40 }, (_, i) => `※ 안내 ${i + 1}: 이 공고의 세부 사항은 과업지시서를 함께 확인하시기 바랍니다.`).join('\n');
+const GH_LONG = `1. 용역명: 시험264 현황조사\n3. 입찰참가자격\n가. 아래의 자격 1), 2), 3) 중 하나에 해당하는 자\n${FILL}\n1) 「감정평가 및 감정평가사에 관한 법률」에 따른 감정평가법인\n2) 「공간정보의 구축 및 관리 등에 관한 법률」에 따른 측량업자\n3) 「엔지니어링산업 진흥법」에 따른 엔지니어링사업자\n4. 기타\n가. 문의`;
+test('264차 잘린 절·AI 상태(규칙): 4,000자 절 · 다시 읽을 차례 · 못 뽑은 줄 괄호', () => {
+  const s = E.eligibilitySection(GH_LONG), l = E.eligibilitySection(GH_LONG, E.SEC_LONG);
+  assert.deepEqual([s.length, s.includes('감정평가법인'), l.includes('엔지니어링사업자'), l.endsWith('엔지니어링사업자')], [E.SEC_MAX, false, true, true], '저장 절은 1,500자, 긴 절은 다음 번호(4.) 앞까지');
+  assert.equal(E.needsAiItems(s), true);
+  assert.deepEqual([E.aiLongDue({ text: s }), E.aiLongDue({ text: s, aiLongTry: 'x' }), E.aiLongDue({ text: s, ai: { sig: E.textSig(s), items: [], at: '', long: 1900 } }), E.aiLongDue({ text: s, by: 'vision' }), E.aiLongDue({ text: E.eligibilitySection(GH) })],
+    [true, false, false, false, false], '잘린 절만 · 한 번만 · 사진 공고문 빼고');
+  const at = (ai) => E.eligView({ eligibility: { text: s, ...(ai ? { ai: { sig: E.textSig(s), at: '', items: [], ...ai } } : {}) } });
+  assert.deepEqual([at(null), at({}), at({ skip: 'AI 키가 없음' }), at({ error: '오류' })].map((v) => [v.line, v.aiState]), [
+    ['요건을 항목으로 못 뽑음(AI 정리 대기) — 원문 보기', 'AI 정리 대기'], ['요건을 항목으로 못 뽑음(AI 도 못 뽑음) — 원문 보기', 'AI 도 못 뽑음'],
+    ['요건을 항목으로 못 뽑음(AI 정리 안 함) — 원문 보기', 'AI 정리 안 함'], ['요건을 항목으로 못 뽑음(AI 정리 실패) — 원문 보기', 'AI 정리 실패']]);
+  assert.equal(E.eligSay(at({})), '요건을 항목으로 못 뽑음(AI 도 못 뽑음) — 원문 보기', '메일·공고 조회도 같은 말');
+  assert.deepEqual([at({ items: [{ k: 'license', label: '감정평가법인' }] }).aiState, E.eligView({ eligibility: { text: E.eligibilitySection(BORYEONG) } }).aiState], [null, null], 'AI 가 뽑았거나 규칙으로 뽑은 공고는 상태 없음');
 });
 
 // ---- 공고문 읽기(정기 실행·다시 읽기) ----
@@ -325,4 +342,47 @@ test('262차 AI 항목 정리: 규칙으로 못 뽑은 공고만 빠른 모델�
   assert.ok(run.detail.salesEligibility.aiDone >= 1 && run.detail.salesEligibility.tried.some((x) => /R26BK262002-000 AI 항목 1개/.test(x)), JSON.stringify(run.detail.salesEligibility));
   const { aiPurposeLabel } = await import('../../src/components/aiPurpose.ts');
   assert.equal(aiPurposeLabel('sales_eligibility_items'), '입찰 참가자격 항목 정리(AI)');
+});
+
+test('264차 1,500자에서 잘린 절: 공고문에서 4,000자로 다시 잘라 AI 에(한 번) · 예전에 짧은 절로 정리한 공고는 정기 실행이 한 번 다시 읽음 · 공고문을 못 받으면 전 결과 그대로', async () => {
+  docs['/g2b/notice-gh-long.txt'] = GH_LONG; docs['/g2b/notice-gh-long-c.txt'] = GH_LONG;
+  const ID = '00000000-0000-4000-8000-000000264001', IDC = '00000000-0000-4000-8000-000000264003';
+  const base = { source_type: 'g2b_bid', title: '시험264 현황조사 용역', issuer: '시험264 공사', related: true, fit_business: '하이링크', current_status: '공고중', notice_kind: 'new', posted_date: today, deadline_at: `${plus(9)}T10:00:00+09:00`, first_seen_at: new Date().toISOString() };
+  await put(ID, { ...base, source_external_id: 'R26BK264001-000', attachment_urls: [{ name: '입찰공고서.txt', url: `http://127.0.0.1:${PORT}/g2b/notice-gh-long.txt` }] });
+  const LONG_ITEM = [{ k: 'license', label: '감정평가법인·측량업자·엔지니어링사업자 중 하나' }];
+  await queue([say({ items: LONG_ITEM })]);
+  const used = async () => (await sql`select count(*)::int n from ai_usage where purpose = 'sales_eligibility_items'`)[0].n;
+  const n0 = await used();
+  const r = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: ID })).eligibility;
+  const sent = JSON.stringify((await (await fetch(`${FAKE}/__state`)).json()).anthropic.at(-1).body.messages);
+  assert.ok(sent.includes('엔지니어링사업자') && sent.includes('감정평가법인'), '1,500자 뒤 1)·2)·3) 세부까지 보냄');
+  assert.deepEqual([r.text.length, r.ai.items, r.ai.long > E.SEC_MAX, r.longText?.length === r.ai.long, !!r.aiLongTry, r.line], [E.SEC_MAX, LONG_ITEM, true, true, true, LONG_ITEM[0].label]);
+  assert.equal(await used(), n0 + 1);
+  await ctx.owner.ok('POST', '/api/sales/eligibility', { id: ID }); // 같은 절·이미 긴 절로 정리 — 다시 안 부름
+  assert.equal(await used(), n0 + 1);
+  // 예전(264차 전): 짧은 절로 정리해 '세부 내용 원문 없음' 항목 · 긴 절·시도 기록 없음 → 정기 실행이 한 번 다시 읽어 긴 절로 정리
+  const old = { sig: E.textSig(r.text), items: [{ k: 'other', label: '가: 자격 1)·2)·3) 중 하나에 해당(세부 내용 원문 없음)' }], at: new Date().toISOString(), usd: 0.0003, tries: 0 };
+  await sql`update sales_src_rows set row = jsonb_set((row #- '{eligibility,longText}') #- '{eligibility,aiLongTry}', '{eligibility,ai}', ${sql.json(old)}::jsonb) where src_id = ${ID}`;
+  const it0 = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === 'R26BK264001-000');
+  assert.equal(it0.elig.line, old.items[0].label);
+  await queue([say({ items: LONG_ITEM })]);
+  await tick();
+  const o = (await rowOf(ID)).eligibility;
+  assert.deepEqual([o.ai.items, o.ai.long > E.SEC_MAX, !!o.aiLongTry, o.line], [LONG_ITEM, true, true, LONG_ITEM[0].label], JSON.stringify(o.ai));
+  const n1 = await used(); assert.equal(n1, n0 + 2);
+  // 못 받은 경우: 같은 꼴의 다른 공고를 예전 상태로 두고 공고문 주소를 없앰 → 전 결과(절·AI 항목) 그대로, 시도 시각만 — 다음 정기 실행은 다시 안 읽음
+  await put(IDC, { ...base, source_external_id: 'R26BK264003-000', attachment_urls: [{ name: '입찰공고서.txt', url: `http://127.0.0.1:${PORT}/g2b/notice-gh-long-c.txt` }] });
+  await queue([say({ items: LONG_ITEM })]);
+  await ctx.owner.ok('POST', '/api/sales/eligibility', { id: IDC }); // 첫 읽기(긴 절 AI)
+  const c1 = (await rowOf(IDC)).eligibility;
+  await sql`update sales_src_rows set row = jsonb_set((row #- '{eligibility,longText}') #- '{eligibility,aiLongTry}', '{eligibility,ai}', ${sql.json({ ...old, sig: E.textSig(c1.text) })}::jsonb) where src_id = ${IDC}`;
+  delete docs['/g2b/notice-gh-long-c.txt'];
+  const n2 = await used();
+  await tick();
+  const c2 = (await rowOf(IDC)).eligibility;
+  assert.deepEqual([c2.text === c1.text, c2.ai.items, c2.error ?? null, !!c2.aiLongTry, c2.ai.long ?? null], [true, old.items, null, true, null], JSON.stringify({ ...c2, text: undefined }));
+  await tick();
+  const [run] = await sql`select detail from job_runs where job = 'tick' and detail ? 'salesEligibility' order by id desc limit 1`;
+  assert.ok(!run.detail.salesEligibility.tried.some((x) => /R26BK26400[13]/.test(x)), `다시 읽을 차례에서 빠짐 ${JSON.stringify(run.detail.salesEligibility)}`);
+  assert.equal(await used(), n2, 'AI 다시 안 부름');
 });

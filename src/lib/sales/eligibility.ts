@@ -4,14 +4,15 @@
 import { sha256 } from '../crypto';
 import { db } from '../db';
 import { extractTextResult, unzip } from '../textExtract';
-import { apiExtra, commonOnly, docDeadline, eligibilityItems, eligibilityLine, eligibilitySection, jsonSafe, lineOf, needsAiItems, textSig, type EligAi, type EligItem } from './eligibilityText';
+import { aiLongDue, apiExtra, commonOnly, docDeadline, eligibilityItems, eligibilityLine, eligibilitySection, jsonSafe, lineOf, needsAiItems, SEC_LONG, SEC_MAX, textSig, type EligAi, type EligItem } from './eligibilityText';
 import { visionRead, type PhotoDoc } from './eligibilityVision';
 import { sourceFiles, type SrcFile } from './files';
 
 export type Eligibility = { text: string | null; items: EligItem[]; line: string | null; error: string | null; file: { name: string | null; url: string } | null; readAt: string; sig: string; tries: number;
   /** 253차 #790 사진 공고문을 AI 비전으로 읽음(숫자는 원문 확인) */ by?: 'vision'; visionUsd?: number;
   /** 259차: 입찰 마감이 없는 공고(임시 마감·마감 칸 빔)에서 공고문의 제출 마감을 찾아봄 — 찾았으면 그 글줄 */ dl?: { at: string | null; label: string | null };
-  /** 262차: 규칙으로 항목을 못 뽑은 절을 빠른 AI 가 정리한 항목(절 지문 sig 가 같을 때만 씀) */ ai?: EligAi };
+  /** 262차: 규칙으로 항목을 못 뽑은 절을 빠른 AI 가 정리한 항목(절 지문 sig 가 같을 때만 씀) */ ai?: EligAi;
+  /** 264차: 저장한 절이 1,500자에서 잘렸을 때 공고문에서 다시 자른 더 긴 절(AI 에 줌·다시 정리할 때 씀) · 그 시도를 한 시각(공고문을 다시 받는 것은 한 번만) */ longText?: string; aiLongTry?: string };
 /** 259차: 마감 칸이 비었거나 공동수급협정 마감(임시)인 공고 — 공고문에서 제안서·입찰서 제출 마감을 찾음 */
 export const needsDocDeadline = (r: Row) => !String(r.deadline_at ?? '') || r.deadline_src === 'agreement';
 type Row = Record<string, any>;
@@ -58,6 +59,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   const row = r1?.row ?? r0.row; const prev = (row.eligibility ?? null) as Eligibility | null;
   const files = rankFiles(src?.files ?? []).slice(0, opt.maxFiles ?? 3);
   let found: { text: string; items: EligItem[]; line: string } | null = null; let used: SrcFile | null = null; let tried: SrcFile | null = null; const errs: string[] = [];
+  let full: string | null = null; // 264차: 절을 찾은 공고문 글 전체(잘린 절을 더 길게 다시 자를 때)
   const needDl = needsDocDeadline(row); let dl: { at: string; label: string } | null = null; // 259차
   let photo: { f: SrcFile; doc: PhotoDoc } | null = null; let by: 'vision' | undefined; let visionUsd: number | undefined; let visionDone = false; let visionSkip = false;
   for (const f of files) {
@@ -72,7 +74,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
       if (!text) { errs.push(terr ?? '본문 글자 없음'); continue; }
       if (needDl && !dl) dl = docDeadline(text, row.posted_date ? String(row.posted_date) : null);
       found = eligibilityOf(text, row); used = f;
-      if (found) break;
+      if (found) { full = text; break; }
       errs.push('참가자격 절 없음');
     } catch (e) { errs.push(`공고문 못 받음(${reasonOf(e)})`); }
   }
@@ -89,7 +91,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
       else {
         visionDone = true; visionUsd = v.usd;
         const sec = v.text ? eligibilitySection(v.text) ?? v.text : null;
-        if (sec) { found = eligibilityOf(sec, row) ?? { text: sec.slice(0, 1500), items: eligibilityItems(sec), line: lineOf(sec, row) }; used = photo.f; by = 'vision'; }
+        if (sec) { found = eligibilityOf(sec, row) ?? { text: sec.slice(0, 1500), items: eligibilityItems(sec), line: lineOf(sec, row) }; used = photo.f; by = 'vision'; full = v.text; }
         else errs.push('사진에서도 참가자격 절을 못 찾음');
       }
     } catch (e) { errs.push(`AI 사진 읽기 못함(${String((e as Error)?.message ?? e).slice(0, 40)})`); }
@@ -97,14 +99,22 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   const prevTries = prev && !prev.text && prev.sig === sigNow ? prev.tries ?? 0 : 0;
   const extra = apiExtra(row, []);
   const error = found ? null : !files.length ? (src?.listError ? '첨부 목록을 못 읽음' : '첨부 공고문 없음') : [...new Set(errs)].join(' · ').slice(0, 160) || '공고문에서 참가자격 절을 못 찾음';
-  const out: Eligibility = { text: found?.text ?? null, items: found?.items ?? [], line: found?.line ?? (extra.length ? extra.join(' · ') : null), error, file: (used ?? tried) ? { name: (used ?? tried)!.name, url: (used ?? tried)!.url } : null, // 못 읽었어도 어떤 파일을 봤는지
+  // 264차: 더 긴 절을 AI 에 주려고 다시 읽은 것뿐인데 공고문을 못 받았으면 — 전 결과 그대로(시도 시각만)
+  const longOnly = !found && !!prev?.text && prev.sig === sigNow && aiLongDue(prev);
+  const out: Eligibility = longOnly ? { ...prev!, aiLongTry: new Date().toISOString() } : { text: found?.text ?? null, items: found?.items ?? [], line: found?.line ?? (extra.length ? extra.join(' · ') : null), error, file: (used ?? tried) ? { name: (used ?? tried)!.name, url: (used ?? tried)!.url } : null, // 못 읽었어도 어떤 파일을 봤는지
     readAt: new Date().toISOString(), sig: sigNow, tries: found ? 0 : visionDone || visionBefore ? 3 : visionSkip ? prevTries : prevTries + 1, // 사진 읽기를 한 공고는 첨부가 바뀔 때까지 다시 안 함 · 설정 이유로 건너뛴 것은 세지 않음
     ...(by ? { by } : {}), ...(visionUsd != null ? { visionUsd } : {}), ...(needDl ? { dl: { at: dl?.at ?? null, label: dl ? jsonSafe(dl.label) : null } } : {}) };
   // 262차: 규칙으로 항목을 못 뽑은 절은 빠른 AI 로 정리(같은 절이면 전에 정리한 것을 그대로 — 다시 부르지 않음)
   if (out.text && needsAiItems(out.text)) {
     const keep = prev?.ai && prev.ai.sig === textSig(out.text) ? prev.ai : null;
     const { aiItemsDue, aiItemsFor } = await import('./eligibilityAi');
-    out.ai = keep && !aiItemsDue({ text: out.text, ai: keep }) ? keep : opt.ai === false ? keep ?? undefined : await aiItemsFor(out.text, String(row.title ?? ''), keep).catch(() => keep ?? undefined);
+    // 264차: 절이 1,500자에서 잘렸으면 공고문 글에서 4,000자까지 다시 잘라 AI 에(전에 짧은 절로 정리했으면 한 번 다시)
+    const cut = !longOnly && out.text.length >= SEC_MAX;
+    const longer = cut && full ? eligibilitySection(full, SEC_LONG) : null;
+    const long = longer && longer.length > out.text.length ? jsonSafe(longer) : null;
+    if (cut) { out.aiLongTry = new Date().toISOString(); if (long) out.longText = long; }
+    out.ai = keep && !aiItemsDue({ text: out.text, ai: keep }) && (!long || keep.long) ? keep : opt.ai === false ? keep ?? undefined
+      : await aiItemsFor(out.text, String(row.title ?? ''), keep, { long: long ?? out.longText }).catch(() => keep ?? undefined);
     if (out.ai?.items.length) out.line = eligibilityLine(out.ai.items, out.text, apiExtra(row, out.ai.items));
   }
   out.text = jsonSafe(out.text); out.line = jsonSafe(out.line); out.error = jsonSafe(out.error); out.items = out.items.map((x) => ({ ...x, label: jsonSafe(x.label) })); // 257차: 저장 실패 막기
@@ -123,7 +133,7 @@ export async function fillAiItems(id: string): Promise<EligAi | null> {
   const [r] = await sql<{ row: Row }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`;
   const e = r?.row?.eligibility as Eligibility | undefined;
   if (!e?.text || !needsAiItems(e.text)) return null;
-  const ai = await (await import('./eligibilityAi')).aiItemsFor(e.text, String(r.row.title ?? ''), e.ai);
+  const ai = await (await import('./eligibilityAi')).aiItemsFor(e.text, String(r.row.title ?? ''), e.ai, { long: e.longText });
   const safe = { ...ai, items: ai.items.map((x) => ({ ...x, label: jsonSafe(x.label) })) };
   const line = safe.items.length ? jsonSafe(eligibilityLine(safe.items, e.text, apiExtra(r.row, safe.items))) : e.line;
   const st = String(r.row.source_type ?? ''); const ext = String(r.row.source_external_id ?? '');
@@ -140,6 +150,7 @@ export function eligibilityDue(r: Row, now = Date.now()): boolean {
   if (e.sig !== filesSig(r)) return true;
   if (needsDocDeadline(r) && !e.dl) return true; // 259차: 입찰 마감이 없는 공고는 공고문 제출 마감을 한 번 찾아봄(예전에 읽은 공고도)
   if (e.text && e.by !== 'vision' && !eligibilitySection(e.text)) return true; // 256차: 예전 규칙으로 잘못 자른 절(등록 절차 안내 등)은 다시 읽음
+  if (aiLongDue(e)) return true; // 264차: 1,500자에서 잘렸고 규칙으로 못 뽑은 절 — AI 에 더 긴 절을 주려고 한 번 다시 읽음
   return !e.text && (e.tries ?? 0) < 3 && now - Date.parse(e.readAt ?? '') > 20 * 3600e3;
 }
 /** 258차(로컬 10/29 09:20 ⓑ): 마감일 칸이 빈 관련 공고도 목록 '진행 중'에 보이므로 읽음 — 원천 목록에서 최근 30일 안에 본 것만(오래 안 보인 줄은 빼고) */
@@ -183,7 +194,8 @@ export async function eligibilityTick(o: { budgetMs?: number; max?: number } = {
     const e = await readEligibility(id).catch(async (err) => {
       const msg = jsonSafe(String((err as Error)?.message ?? err).slice(0, 80));
       const r = rows.find((x) => x.src_id === id)?.row; const prev = r?.eligibility as Eligibility | undefined;
-      const fail: Eligibility = { text: null, items: [], line: null, error: `읽기 오류: ${msg}`, file: null, readAt: new Date().toISOString(), sig: r ? filesSig(r) : '', tries: (prev && !prev.text ? prev.tries ?? 0 : 0) + 1,
+      const fail: Eligibility = prev?.text && r && prev.sig === filesSig(r) && aiLongDue(prev) ? { ...prev, aiLongTry: new Date().toISOString() } // 264차: 더 긴 절 읽기만 실패 — 전 결과 그대로
+        : { text: null, items: [], line: null, error: `읽기 오류: ${msg}`, file: null, readAt: new Date().toISOString(), sig: r ? filesSig(r) : '', tries: (prev && !prev.text ? prev.tries ?? 0 : 0) + 1,
         ...(r && needsDocDeadline(r) ? { dl: { at: null, label: null } } : {}) }; // 259차: 오류 난 공고가 '마감 찾기'로 매번 다시 앞자리에 서지 않게
       await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: fail } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`.catch(() => {});
       tried.push(`${noOf(id)} 오류(${msg.slice(0, 40)})`); return null;
