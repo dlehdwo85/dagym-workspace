@@ -14,6 +14,13 @@ const SCHEMA = { type: 'object', additionalProperties: false, required: ['items'
   type: 'object', additionalProperties: false, required: ['k', 'label'], properties: { k: { type: 'string', enum: KINDS }, label: { type: 'string' } } } } } };
 export const aiItemsOff = (): string | null => process.env.SALES_ELIGIBILITY_AI === 'off' ? 'AI 항목 정리를 꺼 둠' : !aiEnabled() ? 'AI 키가 없음' : null;
 const RETRY_MS = 20 * 3600e3;
+/** AI 답 → JSON(그대로 · ```json 울타리 · 앞뒤 말이 붙은 첫 { … 끝 }) — 못 읽으면 null */
+export function jsonOf(raw: string): { items?: { k?: string; label?: string }[] } | null {
+  const t = String(raw ?? '').trim();
+  const tries = [t, t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, ''), t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)];
+  for (const x of tries) { if (!x) continue; try { const v = JSON.parse(x); if (v && typeof v === 'object' && !Array.isArray(v)) return v; if (Array.isArray(v)) return { items: v }; } catch { /* 다음 꼴 */ } }
+  return null;
+}
 
 /** 규칙으로 못 뽑은 절인데 아직 AI 정리가 없거나(절이 바뀜 포함) 실패·건너뜀 뒤 20시간 지남(실패는 3번까지) */
 export function aiItemsDue(e: { text?: string | null; ai?: EligAi | null } | null | undefined, now = Date.now()): boolean {
@@ -55,7 +62,11 @@ export async function aiItemsFor(text: string, title: string, prev: EligAi | nul
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
     values (${tenantOf(payer)}, ${payer.id}, ${randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${usd}, 'sales_eligibility_items')`;
   const raw = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('');
-  let j: { items?: { k?: string; label?: string }[] } = {}; try { j = JSON.parse(raw); } catch { return { sig, items: [], at, usd, error: 'AI 답을 못 읽음', tries: tries + 1 }; }
+  // 267차(로컬 10/29 18:45 프로샵 'AI 정리 실패'): 답 앞뒤 말·```json 울타리가 붙어도 첫 { … 끝 } 를 읽음 · 못 읽으면 이유에 답 앞부분(무엇이 왔는지)
+  let j: { items?: { k?: string; label?: string }[] } = {};
+  const parsed = jsonOf(raw);
+  if (!parsed) return { sig, items: [], at, usd, error: `AI 답을 못 읽음(${r.stop_reason ?? '끝 이유 없음'}: ${raw.replace(/\s+/g, ' ').trim().slice(0, 50) || '빈 답'})`, tries: tries + 1 };
+  j = parsed;
   // 지킴: 모르는 종류는 '그 밖' · 빈 글자·공통 문구·서약 문구는 버림 · 8개·60자까지
   const items = (Array.isArray(j.items) ? j.items : []).map((x) => ({ k: (KINDS.includes(x?.k as EligItem['k']) ? x!.k : 'other') as EligItem['k'], label: String(x?.label ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) }))
     .filter((x) => x.label && !COMMON_CLAUSE.test(x.label) && !G2B_COMMON.test(x.label) && !/서약|청렴|원문\s*(?:에\s*)?없|세부\s*(?:내용\s*)?(?:원문\s*)?없/.test(x.label)).slice(0, 8);

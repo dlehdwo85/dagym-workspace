@@ -15,11 +15,13 @@ const zChannel = z.enum(Object.keys(CHANNELS) as [keyof typeof CHANNELS, ...(key
 const uuidOr404 = (id: string) => { if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('찾을 수 없습니다'); };
 const seoulDate = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 /** 승인 마감 = 게시일 HH:00(서울, 회사 설정 — 기본 09:00) */
-/** 승인 마감 = 게시 당일 HH:00 KST(기본 09:00), 게시 시각이 더 이르면 게시 시각(운영실 규칙, OPS_ROOM_SCREEN_SPEC 3-2) */
-export const approvalDeadline = (scheduledAt: Date | string | null, hour = 9) => {
+/** 승인 마감 = 게시 당일 HH:00 KST(기본 09:00), 게시 시각이 더 이르면 게시 시각(운영실 규칙, OPS_ROOM_SCREEN_SPEC 3-2).
+ *  267차(대표 #795): 회사 설정을 넘기면 게시 deadline_days 일 전 approval_hour:00(주 단위 묶음 회사 = 게시 전날 18:00) */
+export const approvalDeadline = (scheduledAt: Date | string | null, set: number | { approval_hour: number; deadline_days?: number } = 9) => {
   if (!scheduledAt) return null;
   const at = new Date(scheduledAt);
-  const d = new Date(`${seoulDate(at)}T${String(hour).padStart(2, '0')}:00:00+09:00`);
+  const hour = typeof set === 'number' ? set : set.approval_hour; const days = typeof set === 'number' ? 0 : set.deadline_days ?? 0;
+  const d = new Date(`${seoulDate(new Date(at.getTime() - days * 864e5))}T${String(hour).padStart(2, '0')}:00:00+09:00`);
   return at < d ? at : d;
 };
 /** 승인 대기 숫자 — 메뉴 배지·현황 머리줄·승인함이 같은 계산: 승인 대기 + 시험 아님.
@@ -47,7 +49,7 @@ export async function homeNow(t: string) {
     where c.tenant = ${t} and not c.is_test and c.status in ('pending', 'changes', 'approved', 'published') and (c.scheduled_at at time zone 'Asia/Seoul')::date = (now() at time zone 'Asia/Seoul')::date order by c.scheduled_at`;
   const [next] = todayPosts.length ? [null] : await sql<any[]>`select ${cols} from mkt_contents c left join mkt_brands b on b.id = c.brand_id
     where c.tenant = ${t} and not c.is_test and c.status in ('pending', 'approved') and c.scheduled_at > now() order by c.scheduled_at limit 1`;
-  const dl = (r: any) => ({ ...r, deadline: approvalDeadline(r.scheduled_at, st.approval_hour) });
+  const dl = (r: any) => ({ ...r, deadline: approvalDeadline(r.scheduled_at, st) });
   return { queue: queue.map(dl), todayPosts: todayPosts.map(dl), next: next ? dl(next) : null, approvalHour: st.approval_hour };
 }
 
@@ -145,7 +147,8 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
   const now = Date.now();
   const trash = q.view === 'approvals' && isAdmin(u) ? (await sql<{ n: number }[]>`select count(*)::int n from mkt_contents where tenant = ${t} and deleted_at is not null`)[0].n : 0; // 183차 #177 휴지통 건수(관리자 칸)
   // 요청 C §3-5: 대표(회사 소유자) 화면은 [승인]·[수정 요청] 두 단추만 — 보류·다시 그리기·버전 비교는 운영실(관리자) 화면
-  return { approvalHour: st.approval_hour, canDecide: isAdmin(u), isOwner: u.role === 'owner', paused: !!st.auto_pause /* 대표 10/25 22:20: 자동 생성 일시정지 띠 */, trash, contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st.approval_hour) : null;
+  const A = await import('./mktAuto'); const nb = A.nextBatch(st);
+  return { approvalHour: st.approval_hour, deadlineRule: A.deadlineRule(st), batch: st.approval_mode === 'weekly' ? { dow: A.DOW[st.batch_dow], hour: st.batch_hour, next: nb ? { at: nb.at.toISOString(), label: nb.label } : null } : null /* 267차 #795 */, canDecide: isAdmin(u), isOwner: u.role === 'owner', paused: !!st.auto_pause /* 대표 10/25 22:20: 자동 생성 일시정지 띠 */, trash, contents: rows.map((r) => { const deadline = r.scheduled_at ? approvalDeadline(r.scheduled_at, st) : null;
     return { ...r, handle: handleOf(r.channel, r.brand_id), deadline, late: !!deadline && deadline.getTime() < now && ['pending', 'changes'].includes(r.status) }; }) };
 }
 
@@ -204,7 +207,7 @@ export async function getContent(u: SessionUser, id: string) {
   const photoRecord = await (await import('./mktAutoVisual')).photoRecord(tenantOf(u), c.quality).catch(() => null); // 188차 #621 사진 기록(어떤 사진·왜·보정)
   const fill = await (await import('./mktPhotoGen')).fillView(u, c).catch(() => null); // 189차 빈 칸 생성 상태(고객사엔 상태·까닭·장 수만)
   if (c.quality?.fill) { const { fill: _f, ...rest } = c.quality; c.quality = rest; }
-  return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st.approval_hour), purgeAt: c.deleted_at ? purgeAt(c.deleted_at) : null /* 183차 #177 휴지통 띠 */ }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, photoRecord, fill, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
+  return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st), purgeAt: c.deleted_at ? purgeAt(c.deleted_at) : null /* 183차 #177 휴지통 띠 */ }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, photoRecord, fill, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };
 }
 
 const versionFields = { body: z.string().max(20000).default(''), mediaIds: z.array(zUuid).max(20).default([]), note: z.string().max(500).optional() };

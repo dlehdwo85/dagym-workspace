@@ -31,6 +31,8 @@ function brief(r: Row) {
     posted: pick(r, 'posted_date', 'notice_date', 'posted_at'), deadline: pick(r, 'deadline_at', 'close_at', 'deadline', 'participation_deadline_at'), opening: pick(r, 'opening_at', 'open_at'), status: pick(r, 'current_status', 'status'),
     url: hint ? null : fixG2bUrl(raw), search: hint ? `${hint.site}에서 ${hint.label} '${hint.no}' 검색 (${hint.home})` : null, attachments: filesOf(r).length,
     eligibility: eligSay(eligView(r)), // 252차 #786 공고문 '참가자격' 절에서 뽑은 요건(목록·메일과 같은 말)
+    // 267차(로컬 10/29 18:45 '프로샵 AI 정리 실패 — 실패 이유를 남겨 주세요'): 규칙으로 못 뽑은 공고의 AI 정리 상태·이유·시각·횟수
+    eligibilityAi: (() => { const v = eligView(r); const a = r?.eligibility?.ai; return v.aiState || a ? { state: v.aiState, error: a?.error ?? null, skip: a?.skip ?? null, at: a?.at ?? null, tries: a?.tries ?? 0, items: a?.items?.length ?? 0, longChars: a?.long ?? null } : null; })(),
   };
 }
 

@@ -343,7 +343,7 @@ export function Approvals() {
         {/* 요청 C §3-5: 대표(회사 소유자) 화면은 카드에 [승인]·[수정 요청] 두 단추만(simple) · '전체' 탭에서는 콘텐츠 묶음에 초록 띠 */}
         <div className={cx(tab === 'all' && !DAY_LABEL[day] && 'rounded-card border-l-4 border-emerald-400 pl-3')} data-testid={tab === 'all' && !DAY_LABEL[day] ? 'mkt-inbox-all-contents' : undefined}>
           {tab === 'all' && !DAY_LABEL[day] && <div className="mb-2"><KindBadge k="contents" n={counts?.contents} /></div>}
-          {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} canDecide={!!(data as any).canDecide} simple={!!(data as any).isOwner && ops !== '1'} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reloadAll} trash={(data as any).trash ?? 0} />}
+          {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Skeleton rows={4} /> : <ApprovalList contents={data.contents as unknown as CardContent[]} rule={(data as any).deadlineRule ?? null} batchInfo={(data as any).batch ?? null} canDecide={!!(data as any).canDecide} simple={!!(data as any).isOwner && ops !== '1'} plain={!!DAY_LABEL[day]} onOpen={setOpen} onDone={reloadAll} trash={(data as any).trash ?? 0} />}
           <OpsRequests />
         </div>
         {tab === 'all' && !DAY_LABEL[day] && inbox.data && <InboxAll d={inbox.data} onChange={reloadAll} />}
@@ -408,14 +408,16 @@ function BriefDecisionCard({ b, canEdit, onChange }: { b: InboxBrief; canEdit: b
  * 승인함(운영실 명세 2-2): 게시 시각순 한 목록 · 처음 3장 펼침 + 'N건 더 보기' · 브랜드 탭.
  * 승인 가능 = 승인 대기(255차 #791: 게시일이 지난 것도 '게시일 지남' 띠와 함께 — 승인하면 가장 가까운 빈 게시 칸으로). 수정 요청·보류는 아래 '수정·보류' 묶음(새 버전 기다림)
  */
-function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = false, trash = 0 }: { contents: CardContent[]; canDecide: boolean; plain: boolean; onOpen: (id: string) => void; onDone: () => void; simple?: boolean; trash?: number }) {
+function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = false, trash = 0, rule = null, batchInfo = null }: { contents: CardContent[]; canDecide: boolean; plain: boolean; onOpen: (id: string) => void; onDone: () => void; simple?: boolean; trash?: number;
+  rule?: string | null; batchInfo?: { dow: string; hour: number; next: { at: string; label: string } | null } | null }) {
   const [brand, setBrand] = useState(''); const [more, setMore] = useState(false);
   // 대표 10/20 14:10 ②: 브랜드 탭은 회사 브랜드 전체(콘텐츠가 없는 브랜드도) · 예정(초안) 묶음 · 제작 예정이 없는 브랜드 안내
   const allBrands = useApi<{ brands: { id: string; name: string }[] }>('/api/marketing/brands');
   const brands = [...new Set([...(allBrands.data?.brands ?? []).map((b) => b.name), ...contents.map((c) => c.brand).filter(Boolean) as string[]])];
   const list = contents.filter((c) => !brand || c.brand === brand);
   const byWhen = (a: CardContent, b: CardContent) => String(a.scheduled_at ?? '9999').localeCompare(String(b.scheduled_at ?? '9999'));
-  const drafts = plain ? [] : list.filter((c) => c.status === 'draft' && !c.quality?.held).sort(byWhen);
+  const batchWait = plain ? [] : list.filter((c) => c.status === 'draft' && c.quality?.batch && !c.quality.batch.released).sort(byWhen); // 267차 #795 묶음 올리는 때를 기다리는 원고
+  const drafts = plain ? [] : list.filter((c) => c.status === 'draft' && !c.quality?.held && !(c.quality?.batch && !c.quality.batch.released)).sort(byWhen);
   const held = plain ? [] : list.filter((c) => c.status === 'draft' && c.quality?.held).sort(byWhen); // #544 브랜드 템플릿 전 자동 시안 = 초안 보관(승인 숫자·승인함 위쪽에 안 올림)
   const emptyBrands = plain ? [] : (allBrands.data?.brands ?? []).map((b) => b.name).filter((n) => !contents.some((c) => c.brand === n && ['draft', 'pending', 'changes', 'hold', 'approved'].includes(c.status)));
   // #516·#455: 시안 없이는 승인할 수 없는 글은 '승인할 시안' 수에서 빼고 따로(빨간 칸 — [지금 만들기])
@@ -434,7 +436,8 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
       {brands.length > 1 && <div className="flex flex-wrap gap-1.5" data-testid="mkt-brand-tabs">{['', ...brands].map((b) => (
         <button key={b || 'all'} type="button" onClick={() => setBrand(b)} className={cx('rounded-full border px-3 py-1 text-xs', brand === b ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white')}>
           {b || '전체'} {contents.filter((c) => (!b || c.brand === b) && c.status === 'pending' && !needsVisual(c)).length}</button>))}</div>}
-      {!plain && <p className="text-sm" data-testid="mkt-approvable-count">승인할 시안 <b className="text-orange-700">{ready.length}건</b></p>}
+      {!plain && <p className="text-sm" data-testid="mkt-approvable-count">승인할 시안 <b className="text-orange-700">{ready.length}건</b>{rule && <span className="ml-2 text-xs text-ink-2" data-testid="mkt-deadline-rule">승인 마감 {rule}</span>}</p>}
+      {!plain && <BatchBoxes list={list} onOpen={onOpen} />}
       {!ready.length ? <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3">{plain ? '해당 콘텐츠가 없습니다' : '지금 승인할 최종 시안이 없습니다.'}</p> : (
         <div className="space-y-2">{shown.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}
           {!more && ready.length > 3 && <Button variant="secondary" className="w-full" onClick={() => setMore(true)} data-testid="mkt-more">{ready.length - 3}건 더 보기</Button>}</div>
@@ -447,6 +450,9 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
           {!moreApproved && approvedWait.length > 10 && <Button variant="secondary" className="w-full" onClick={() => setMoreApproved(true)} data-testid="mkt-approved-more">{approvedWait.length - 10}건 더 보기</Button>}</div></details>}
       {approvedPast.length > 0 && <Fold className="rounded-card border border-line bg-white p-3 text-sm" testId="mkt-approved-past"><summary className="cursor-pointer font-medium text-ink-2">승인됨 · 예정 지남 {approvedPast.length}건 — 열어서 “브랜드·게시 예정 바로잡기”로 재배치</summary>
         <div className="mt-2 space-y-2">{approvedPast.slice(0, 30).map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></Fold>}
+      {batchWait.length > 0 && <details className="rounded-card border border-sky-200 bg-sky-50/40 p-3 text-sm" data-testid="mkt-batch-wait"><summary className="cursor-pointer font-medium text-sky-900">묶음 준비 중 {batchWait.length}건 — {batchInfo ? `${batchInfo.dow}요일 ${batchInfo.hour}:00에` : '정해진 때에'} 한 주 게시분을 한 번에 승인함으로 올립니다</summary>
+        <ul className="mt-2 divide-y divide-line text-xs">{batchWait.slice(0, 30).map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-batch-wait-row"><button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button>
+          <span className="text-ink-2">{whenLabel(c.scheduled_at)}</span>{c.brand && <BrandChip name={c.brand} color={c.brand_color ?? null} />}</li>)}</ul></details>}
       {drafts.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-drafts"><summary className="cursor-pointer font-medium text-ink-2">예정(초안) {drafts.length}건 — 제작 예정, 시안이 오면 승인 대기로</summary>
         <ul className="mt-2 divide-y divide-line text-xs">{drafts.slice(0, 30).map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-draft"><button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button><span className="text-ink-3">{[c.brand, channelLabel(c.channel, c.kind), whenLabel(c.scheduled_at), c.auto ? '자동 제작' : null].filter(Boolean).join(' · ')}</span>
           {c.quality?.failed && <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800" data-testid="mkt-draft-failed">제작 실패{(c.quality.failed.n ?? 1) >= 2 ? ' — 열어서 [AI 다시 만들기]' : ' — 2시간 뒤 다시 만듦'}</span>}</li>)}</ul></details>}
@@ -464,6 +470,25 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
       {!plain && canDecide && trash > 0 && <TrashBox count={trash} onDone={onDone} />}
     </div>
   );
+}
+
+/** 267차(대표 #795): 주 단위 묶음으로 올린 한 주 게시분 — '11/2~11/8 게시 묶음 n건' 머리 + 게시일·브랜드·채널·상태 표(승인한 것까지, 지난 주 묶음은 안 보임) */
+function BatchBoxes({ list, onOpen }: { list: CardContent[]; onOpen: (id: string) => void }) {
+  const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+  const end = (w: string) => new Date(Date.parse(`${w}T12:00:00+09:00`) + 6 * 864e5).toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  const weeks = [...new Set(list.filter((c) => c.quality?.batch?.released && ['pending', 'changes', 'hold', 'approved', 'published'].includes(c.status)).map((c) => c.quality!.batch!.week))].filter((w) => end(w) >= today).sort();
+  if (!weeks.length) return null;
+  const STATE: Record<string, string> = { pending: '승인 대기', changes: '수정 요청', hold: '보류', approved: '승인됨', published: '게시됨' };
+  return <>{weeks.map((w) => { const rows = list.filter((c) => c.quality?.batch?.week === w && c.quality.batch.released && STATE[c.status]).sort((a, b) => String(a.scheduled_at ?? '').localeCompare(String(b.scheduled_at ?? '')));
+    const done = rows.filter((c) => c.status === 'approved' || c.status === 'published').length;
+    return (
+      <details key={w} open className="rounded-card border border-violet-200 bg-violet-50/30 p-3 text-sm" data-testid="mkt-batch-box">
+        <summary className="cursor-pointer font-medium text-violet-900">{md(w)}~{md(end(w))} 게시 묶음 {rows.length}건 · 승인 {done}/{rows.length}</summary>
+        <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[22rem] text-left text-xs"><thead className="text-ink-3"><tr><th className="py-1 pr-2 font-normal">게시</th><th className="py-1 pr-2 font-normal">브랜드</th><th className="py-1 pr-2 font-normal">채널</th><th className="py-1 pr-2 font-normal">제목</th><th className="py-1 font-normal">상태</th></tr></thead>
+          <tbody className="divide-y divide-line">{rows.map((c) => <tr key={c.id} data-testid="mkt-batch-row"><td className="whitespace-nowrap py-1 pr-2 tabular-nums">{whenLabel(c.scheduled_at)}</td><td className="py-1 pr-2">{c.brand ?? '-'}</td><td className="whitespace-nowrap py-1 pr-2">{channelLabel(c.channel)}</td>
+            <td className="max-w-[14rem] truncate py-1 pr-2"><button type="button" className="truncate text-left hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button></td><td className="whitespace-nowrap py-1">{STATE[c.status]}</td></tr>)}</tbody></table></div>
+      </details>); })}</>;
 }
 
 /** #210: 승인함 접힌 묶음 — 펼치기 전에는 안 카드의 시안(사진·영상)을 그리지 않음(한 번 펼치면 계속 보임). 카드 글·단추는 그대로 */

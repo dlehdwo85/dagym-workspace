@@ -29,7 +29,7 @@ export async function inboxStatus(u: SessionUser) {
   const A = await import('./mktAuto'); const M = await import('./marketing');
   const s = await A.settingsOf(t); const now = Date.now();
   const rows = await rowsOf(t, sql`c.status in ('pending', 'changes', 'hold', 'draft', 'approved')`);
-  const late = (r: Row) => !!r.scheduled_at && (M.approvalDeadline(r.scheduled_at, s.approval_hour)?.getTime() ?? Infinity) < now;
+  const late = (r: Row) => !!r.scheduled_at && (M.approvalDeadline(r.scheduled_at, s)?.getTime() ?? Infinity) < now;
   const noVisual = (r: Row) => !r.media && r.channel !== 'threads';
   const pending = rows.filter((r) => r.status === 'pending');
   const approvable = pending.filter((r) => !noVisual(r));
@@ -37,6 +37,7 @@ export async function inboxStatus(u: SessionUser) {
   const postponed = rows.filter((r) => r.status === 'hold' && r.quality?.postponed);
   const hold = rows.filter((r) => r.status === 'hold' && !r.quality?.postponed);
   const held = rows.filter((r) => r.status === 'draft' && r.quality?.held);
+  const batchWait = rows.filter((r) => r.status === 'draft' && r.quality?.batch && !r.quality.batch.released); // 267차 #795 묶음 올리는 때를 기다리는 원고
   const planned = rows.filter((r) => r.status === 'draft' && !r.quality?.held && r.scheduled_at && new Date(r.scheduled_at).getTime() > now);
   const approved = rows.filter((r) => r.status === 'approved');
   const approvedPast = approved.filter((r) => r.scheduled_at && new Date(r.scheduled_at).getTime() < now - 864e5);
@@ -52,12 +53,13 @@ export async function inboxStatus(u: SessionUser) {
   if (changes.some(unprocessed)) why.push(`수정 요청 ${changes.filter(unprocessed).length}건이 아직 AI 수정본으로 안 만들어짐 — 승인함 카드의 [AI 수정본 만들기]`);
   if (changes.some((r) => r.production?.status === 'needs_approval')) why.push(`영상·AI 이미지 다시 만들기 ${changes.filter((r) => r.production?.status === 'needs_approval').length}건이 비용 승인을 기다림`);
   if (held.length) why.push(`초안 보관 ${held.length}건(브랜드 템플릿 전 자동 시안 — 승인함에 올리지 않음)`);
+  if (batchWait.length) { const at = A.batchAtOf(String(batchWait[0].quality.batch.week), s); why.push(`주 단위 묶음으로 올릴 원고 ${batchWait.length}건이 준비됨 — ${at.getTime() > now ? `${KST(at.toISOString())}에` : '그 주 원고가 다 만들어지면(늦어도 2시간 안)'} 한 번에 승인함으로 올라옵니다`); }
   if (postponed.length) why.push(`미뤄진 글 ${postponed.length}건(옮길 날짜가 없어 멈춤 — 날짜를 골라 다시 올리기)`);
   const brief = (r: Row) => ({ id: r.id, title: r.title, brand: r.brand, status: STATUS[r.status] ?? r.status, format: VIDEO.includes(r.kind ?? '') ? `${r.channel} 영상(${r.kind})` : `${r.channel}${r.kind ? ` ${r.kind}` : ''}`,
     version: r.current_version, scheduled: KST(r.scheduled_at), late: late(r), media: r.media, link: `/s/marketing/approvals?c=${r.id}` });
   return {
     counts: { approvable: approvable.length, approvableLate: approvable.filter(late).length, noVisual: pending.filter(noVisual).length, changes: changes.length, changesUnprocessed: changes.filter(unprocessed).length,
-      hold: hold.length, postponed: postponed.length, heldDrafts: held.length, plannedDrafts: planned.length, approvedNotPublished: approved.length, approvedPastDue: approvedPast.length,
+      hold: hold.length, postponed: postponed.length, heldDrafts: held.length, batchWaiting: batchWait.length, plannedDrafts: planned.length, approvedNotPublished: approved.length, approvedPastDue: approvedPast.length,
       productionOpen: o.requests, productionNeedsApproval: o.asks, proposals: o.proposals, budgets: o.budgets, goals: o.goals, briefs: o.briefs },
     autoPaused: !!s.auto_pause, why,
     approvable: approvable.slice(0, 10).map(brief), changes: changes.slice(0, 10).map((r) => ({ ...brief(r), request: r.last?.decision === 'changes' ? r.last.comment : null, aiRevisionPending: unprocessed(r), production: r.production })),
@@ -72,7 +74,7 @@ export async function contentStatus(u: SessionUser, q: string, limit = 5) {
   const where = /^[0-9a-f-]{36}$/i.test(term) ? sql`c.id = ${term}` : term ? sql`c.title ilike ${'%' + term.replace(/[%_\\]/g, '\\$&') + '%'}` : sql`c.status in ('pending', 'changes')`;
   const rows = (await rowsOf(t, where)).slice(0, Math.min(10, Math.max(1, limit)));
   return { items: rows.map((r) => {
-    const dl = r.scheduled_at ? M.approvalDeadline(r.scheduled_at, s.approval_hour) : null;
+    const dl = r.scheduled_at ? M.approvalDeadline(r.scheduled_at, s) : null;
     return { id: r.id, title: r.title, brand: r.brand, channel: r.channel, kind: r.kind, auto: r.auto, status: STATUS[r.status] ?? r.status, version: r.current_version, media: r.media,
       scheduled: KST(r.scheduled_at), approvalDeadline: KST(dl), late: !!dl && dl.getTime() < Date.now() && ['pending', 'changes'].includes(r.status),
       lastDecision: r.last ? { decision: ({ approve: '승인', changes: '수정 요청', hold: '보류' } as Record<string, string>)[r.last.decision] ?? r.last.decision, comment: r.last.comment, version: r.last.version, at: KST(r.last.at), by: r.last.by } : null,
@@ -82,6 +84,16 @@ export async function contentStatus(u: SessionUser, q: string, limit = 5) {
   }), total: rows.length };
 }
 
+/** 267차: AI 마케터 '자동 제작 상태' — 승인 올리는 방식·다음 묶음·이번 주(월~일) 승인 마감 */
+async function rhythmOf(t: string, s: Awaited<ReturnType<typeof import('./mktAuto')['settingsOf']>>, A: typeof import('./mktAuto')) {
+  const nb = A.nextBatch(s);
+  const week = A.weekOf(new Date());
+  const rows = await db()<{ title: string; scheduled_at: string; status: string }[]>`select title, scheduled_at, status from mkt_contents where tenant = ${t} and not is_test and deleted_at is null
+    and status in ('pending', 'changes') and scheduled_at > now() and (scheduled_at at time zone 'Asia/Seoul')::date between ${week}::date and ${week}::date + 6 order by scheduled_at limit 20`;
+  return { mode: s.approval_mode === 'weekly' ? `주 단위 묶음 — 매주 ${A.DOW[s.batch_dow]} ${s.batch_hour}:00 에 다음 주(월~일) 게시분을 한 번에 올림` : `게시 ${s.lead_days}일 전 ${s.lead_hour}:00 에 한 건씩`,
+    nextBatch: nb ? { at: KST(nb.at.toISOString()), posts: nb.label } : null, deadlineRule: `승인 마감 ${A.deadlineRule(s)} · 마감을 넘긴 글은 그 글만 다음 빈 칸으로 미루고 알림${s.approval_mode === 'weekly' ? ' · 게시 3일 안 남았는데 승인 안 된 글은 한 번 알림' : ''}`,
+    thisWeek: { awaiting: rows.length, deadlines: rows.slice(0, 8).map((r) => ({ title: r.title, scheduled: KST(r.scheduled_at), deadline: KST(A.deadlineOf(r.scheduled_at, s).toISOString()), status: STATUS[r.status] ?? r.status })) } };
+}
 export async function autoStatus(u: SessionUser) {
   await assertSpace(u, 'marketing');
   const t = tenantOf(u); const sql = db();
@@ -102,6 +114,8 @@ export async function autoStatus(u: SessionUser) {
     whilePaused: s.auto_pause ? '정기 칸·자동 제작·밤사이 제작·주간 계획·운영 제안 카드가 멈춤(소진율·충전 감시와 사람이 누르는 제작·수정 요청은 그대로)' : null,
     videoPaused: !!s.video_pause, activeRules: n.rules, nextProduction: s.auto_pause ? null : KST(n.next), plannedNext7Days: n.planned, lastProduced: KST(n.produced),
     writeModel: wm.label, revisionModel: '수정 요청 수정본은 최상 모델(deep)로 다시 씀',
+    // 267차(대표 #795): 승인 올리는 방식 · 다음 묶음 올리는 때 · 승인 마감 규칙 · 이번 주 승인 마감
+    approvalRhythm: await rhythmOf(t, s, A),
     left: { credits: left.leftCredits, videos: left.videosLeft, regens: left.regensLeft, over: left.overMessage },
   };
 }

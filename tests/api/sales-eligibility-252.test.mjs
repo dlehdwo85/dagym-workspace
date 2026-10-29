@@ -386,3 +386,20 @@ test('264차 1,500자에서 잘린 절: 공고문에서 4,000자로 다시 잘�
   assert.ok(!run.detail.salesEligibility.tried.some((x) => /R26BK26400[13]/.test(x)), `다시 읽을 차례에서 빠짐 ${JSON.stringify(run.detail.salesEligibility)}`);
   assert.equal(await used(), n2, 'AI 다시 안 부름');
 });
+
+test('267차 AI 답 읽기: ```json 울타리·앞뒤 말이 붙어도 항목으로 · 못 읽으면 이유에 끝 이유·답 앞부분 — 목록 한 줄 (AI 정리 실패)', async () => {
+  docs['/g2b/notice-proshop.txt'] = `1. 건명: 시험267 골프장 프로샵 임대\n${PROSHOP}`;
+  const row = (id, no) => put(id, { source_type: 'g2b_bid', source_external_id: no, title: '시험267 골프장 프로샵 임대', issuer: '시험267 공단', related: true, fit_business: '다짐', current_status: '공고중', notice_kind: 'new',
+    posted_date: today, deadline_at: `${plus(8)}T10:00:00+09:00`, first_seen_at: new Date().toISOString(), attachment_urls: [{ name: '입찰공고서.txt', url: `http://127.0.0.1:${PORT}/g2b/notice-proshop.txt` }] });
+  const OK = '00000000-0000-4000-8000-000000267001', BAD = '00000000-0000-4000-8000-000000267002';
+  await row(OK, 'R26BK267001-000'); await row(BAD, 'R26BK267002-000');
+  await queue([{ content: [{ type: 'text', text: '다음과 같습니다.\n```json\n' + JSON.stringify({ items: [{ k: 'license', label: '골프장 프로샵 운영 업체' }] }) + '\n```' }], stop_reason: 'end_turn' }]);
+  const a = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: OK })).eligibility;
+  assert.deepEqual([a.ai.items, a.ai.error ?? null, a.line], [[{ k: 'license', label: '골프장 프로샵 운영 업체' }], null, '골프장 프로샵 운영 업체']);
+  await queue([{ content: [{ type: 'text', text: '죄송하지만 이 공고에서는 요건을 찾을 수 없습니다.' }], stop_reason: 'end_turn' }]);
+  const b = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: BAD })).eligibility;
+  assert.match(b.ai.error, /^AI 답을 못 읽음\(end_turn: 죄송하지만 이 공고에서는/);
+  assert.equal(b.ai.tries, 1);
+  const it = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === 'R26BK267002-000');
+  assert.deepEqual([it.elig.line, it.elig.aiState], ['요건을 항목으로 못 뽑음(AI 정리 실패) — 원문 보기', 'AI 정리 실패']);
+});
