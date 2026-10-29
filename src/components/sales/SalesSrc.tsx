@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, ClipboardList, Copy, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
 import type { SearchHint } from '@/lib/sales/sourceLink';
 import { mdhm } from '@/lib/sales/bidTerms';
-import { ELIG_MISS, VISION_NOTE } from '@/lib/sales/eligibilityText';
+import { AI_ITEMS_NOTE, ELIG_MISS, VISION_NOTE } from '@/lib/sales/eligibilityText';
 import { api, useApi } from '@/components/client';
 import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
@@ -1199,14 +1199,14 @@ function EligBox({ n, onChange }: { n: any; onChange?: () => void }) {
   const read = async () => {
     setBusy(true);
     try { const r = await api<{ eligibility: Elig & { file: { name: string | null; url: string } | null } }>('/api/sales/eligibility', { body: { id: String(n.id) } }); const x = r.eligibility;
-      setGot({ line: x.line, text: x.text, error: x.error, file: x.file?.name ?? null, readAt: x.readAt, vision: (x as { by?: string }).by === 'vision' }); toast.ok(x.text ? '공고문에서 참가자격을 읽었습니다' : `${ELIG_MISS}(이유: ${x.error ?? '알 수 없음'})`); onChange?.(); }
+      setGot({ line: x.line, text: x.text, error: x.error, file: x.file?.name ?? null, readAt: x.readAt, vision: (x as { by?: string }).by === 'vision', ai: !!(x as { ai?: { items?: unknown[] } }).ai?.items?.length }); toast.ok(x.text ? '공고문에서 참가자격을 읽었습니다' : `${ELIG_MISS}(이유: ${x.error ?? '알 수 없음'})`); onChange?.(); }
     catch (err: any) { toast.error(err.message); } finally { setBusy(false); }
   };
   return (
     <div className="rounded-input border border-line p-2 text-sm" data-testid="bid-elig-detail">
       <div className="mb-1 flex flex-wrap items-center gap-2"><p className="font-medium">참가자격 <span className="text-xs font-normal text-ink-3">(첨부 공고문 「참가자격」 절 — 원문 그대로)</span></p>
         <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={read} data-testid="bid-elig-read">{busy ? '읽는 중…' : e?.readAt ? '공고문 다시 읽기' : '공고문 읽기'}</Button></div>
-      {e?.line && <p className="font-medium text-ink" data-testid="bid-elig-detail-line">{e.line}</p>}
+      {e?.line && <p className="font-medium text-ink" data-testid="bid-elig-detail-line">{e.line}{e.ai && <span className="ml-1.5 text-[11px] font-medium text-amber-800" data-testid="bid-elig-ai">{AI_ITEMS_NOTE}</span>}</p>}
       {e?.text ? <p className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-input bg-slate-50 p-2 text-xs text-ink" data-testid="bid-elig-detail-text">{e.text}</p>
         : e?.error ? <p className="text-amber-800" data-testid="bid-elig-detail-miss">{ELIG_MISS}(이유: {e.error})</p>
         : <p className="text-ink-3">아직 공고문을 읽지 않았습니다 — 마감 전 관련 공고는 정기 실행이 차례로 읽습니다.</p>}
@@ -1391,14 +1391,14 @@ const CAT_CLS: Record<string, string> = { '즉시 검토': 'bg-rose-50 text-rose
 /** 대표 10/24 추가 ③: 마감 D-10 안 = 입찰 준비 기간(D-4~D-10 주황 강조, 입찰 탭 '준비 기간(D-10 안)' 필터·당일 메일 배지와 같은 기준) */
 const PREP_DAYS = 10;
 /** 입찰 카드(영업관리 2-5, PC·휴대폰 같음): 상태 → 사업 → 분류 → 출처 → 단지·공고명 → 기관·지역·세대·업종 → 낙찰 → 공고·DB 등록(오늘 등록) → 키워드 → [전화][원문][첨부]·마감 */
-type Elig = { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl?: string | null; readAt: string | null; vision?: boolean };
+type Elig = { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl?: string | null; readAt: string | null; vision?: boolean; ai?: boolean };
 /** 252차 #786 참가자격 한 줄 — 뽑은 요건(자본금·실적·면허·인력…) · 못 찾았으면 이유. 펼치면 공고문 '참가자격' 절 원문 */
 function EligLine({ e }: { e: Elig }) {
   const miss = !e.text && !!e.error;
   if (!e.text && !e.line && !miss) return null;
   return (
     <details className="group" data-testid="bid-elig"><summary className="cursor-pointer list-none text-ink-2 [&::-webkit-details-marker]:hidden"><span className="font-medium text-ink">참가자격</span>{' '}
-      {e.line && <span data-testid="bid-elig-line">{e.line}</span>}{miss && <span className="text-amber-800" data-testid="bid-elig-miss">{e.line ? ' · ' : ''}{ELIG_MISS}(이유: {e.error})</span>} {e.text && <span className="text-ink-3 group-open:hidden">▾ 원문</span>}</summary>
+      {e.line && <span data-testid="bid-elig-line">{e.line}</span>}{e.ai && e.line && <span className="ml-1 text-[11px] text-amber-800" data-testid="bid-elig-ai">({AI_ITEMS_NOTE})</span>}{miss && <span className="text-amber-800" data-testid="bid-elig-miss">{e.line ? ' · ' : ''}{ELIG_MISS}(이유: {e.error})</span>} {e.text && <span className="text-ink-3 group-open:hidden">▾ 원문</span>}</summary>
       {e.text && <div className="mt-1 rounded-input bg-slate-50 p-2"><p className="max-h-60 overflow-auto whitespace-pre-wrap break-words text-ink" data-testid="bid-elig-text">{e.text}</p>
         {(e.file || e.vision) && <p className="mt-1 text-[11px] text-ink-3">{[e.file && `공고문: ${e.file}`, e.vision && VISION_NOTE].filter(Boolean).join(' · ')}</p>}</div>}</details>
   );

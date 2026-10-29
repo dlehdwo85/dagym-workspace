@@ -115,6 +115,25 @@ test('자르기·뽑기(규칙): 세 가지 공고문 꼴 → 절(머리부터 �
   assert.equal(E.docDeadline('제안서 제출 마감: 2025. 01. 10. 18:00', '2026-10-28'), null, '공고일 전 날짜는 아님');
 });
 
+// 262차(로컬 10/29 13:40 나라장터 4건): 제92조·구분선·서약 문구·머리글은 한 줄에서 거르고, 항목을 못 뽑은 긴 원문은 '요건을 항목으로 못 뽑음 — 원문 보기'(그런 공고만 AI 정리)
+const BORYEONG = '3. 입찰참가자격\n가. 「지방자치단체를 당사자로 하는 계약에 관한 법률」 시행령 제92조에 해당하지 않는 자로써 아래 각 항의 자격을 모두 갖춘 업체(입찰공고일 전일 기준)\n1) ｢건설기술 진흥법｣ 제26조에 따라 건설엔지니어링업(종합 또는 설계·사업관리 중 일반) 등록 업체\n4. 입찰보증금';
+const GH = '3. 입찰참가자격\n아래의 자격을\n나. 모두 충족하는 자\n가. 아래의 자격 1), 2), 3) 중 하나에 해당하는 자\n1) 「감정평가 및 감정평가사에 관한 법률」에 따른 감정평가법인\n2) 「공간정보의 구축 및 관리 등에 관한 법률」에 따른 측량업자\n4. 기타';
+const HEARING = '3. 입찰참가자격\n-----------------------------------------------------------------------------\n1) 다음 각호의 자격\n가. 「중소기업제품 구매촉진 및 판로지원에 관한 법률」에 따른 직접생산 확인을 받은 자\n4. 기타';
+const PROSHOP = '2. 입찰참가자격\n가. 유죄판결이 확정된 날부터 2년이 지나지 아니한 자 제출 시 제출하여야 합니다. 만일 서약내용이 허위로 판명될 경우\n3. 기타';
+test('262차 한 줄 규칙: 제92조 공통·구분선·서약·머리글 거르기 · 못 뽑은 긴 원문은 원문 보기 · AI 항목은 같은 절일 때만', () => {
+  assert.equal(E.lineOf(E.eligibilitySection(BORYEONG)), '건설엔지니어링업', '제92조 공통·머리글 빼고 등록 업종');
+  assert.equal(E.lineOf(E.eligibilitySection(HEARING)), '직접생산확인', '구분선·머리글 빼고');
+  assert.equal(E.lineOf(E.eligibilitySection(GH)), E.ELIG_NO_ITEMS, '표·번호 머리글만 — 원문 첫 문장을 쓰지 않음');
+  assert.equal(E.lineOf(E.eligibilitySection(PROSHOP)), E.ELIG_NO_ITEMS, '서약 문구만 — 공통 자격으로 말하지 않음');
+  assert.deepEqual([GH, PROSHOP, BORYEONG, COMMON].map((t) => E.needsAiItems(E.eligibilitySection(t))), [true, true, false, false], 'AI 정리는 못 뽑은 공고만');
+  const sec = E.eligibilitySection(GH);
+  const row = { eligibility: { text: sec, items: [], ai: { sig: E.textSig(sec), items: [{ k: 'license', label: '감정평가법인 또는 측량업자' }, { k: 'perf', label: '최근 3년 현황조사 실적 1건 이상' }], at: '' } } };
+  const v = E.eligView(row);
+  assert.deepEqual([v.line, v.ai], ['최근 3년 현황조사 실적 1건 이상 · 감정평가법인 또는 측량업자', true]);
+  assert.equal(E.eligSay(v), `최근 3년 현황조사 실적 1건 이상 · 감정평가법인 또는 측량업자 (${E.AI_ITEMS_NOTE})`, '메일·공고 조회에도 AI 정리 표시');
+  assert.deepEqual([E.eligView({ eligibility: { ...row.eligibility, text: sec + ' 바뀜' } }).ai, E.eligView({ eligibility: { ...row.eligibility, text: sec + ' 바뀜' } }).line], [false, E.ELIG_NO_ITEMS], '절이 바뀌면 예전 AI 항목은 안 씀');
+});
+
 // ---- 공고문 읽기(정기 실행·다시 읽기) ----
 const N = {
   KA: { id: '00000000-0000-4000-8000-000000252001', bid: 'E252001', files: [{ seq: 25201, fileName: '과업지시서.txt', body: Buffer.from('과업 내용\n1. 헬스장 운영\n2. 참가자격 확인 서류 제출') }, { seq: 25202, fileName: '입찰공고문.txt', body: Buffer.from(A) }] },
@@ -130,7 +149,7 @@ const NO_PAYER = '공고문이 사진(스캔)으로만 되어 있음 · AI 사�
 const G = { id: '00000000-0000-4000-8000-000000252010', no: 'R26BK252010-000' };
 const HALF_HEAD = '3. 입찰참가자격\n가. 정보통신공사업 등록업체\n';
 const DL_DOC = `1. 용역명: 시험252 파크골프장 기본계획\n3. 입찰참가자격\n가. 엔지니어링산업 진흥법에 따른 엔지니어링사업자\n4. 제안서 제출 마감: ${plus(6).replace(/-/g, '. ')}.(목) 17:00\n5. 개찰: ${plus(8)} 17:00`; // 259차
-const docs = { '/g2b/notice-b.txt': B, '/g2b/notice-c.txt': C, '/g2b/notice-half.txt': `1. 공사명: 출입통제\n${HALF_HEAD}${'가'.repeat(1499 - HALF_HEAD.length)}𠀀 나머지\n4. 입찰보증금`, '/g2b/notice-dl.txt': DL_DOC }; // 257차: 1,500자째에 두 칸 글자
+const docs = { '/g2b/notice-gh.txt': `1. 용역명: 시험262 현황조사\n${GH}`, '/g2b/notice-b.txt': B, '/g2b/notice-c.txt': C, '/g2b/notice-half.txt': `1. 공사명: 출입통제\n${HALF_HEAD}${'가'.repeat(1499 - HALF_HEAD.length)}𠀀 나머지\n4. 입찰보증금`, '/g2b/notice-dl.txt': DL_DOC }; // 257차: 1,500자째에 두 칸 글자
 let srv, ctx, sql, fake, fg;
 const rowOf = async (id) => (await sql`select row from sales_src_rows where src_id = ${id}`)[0]?.row;
 const tick = async () => { const r = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(r.status, 200); };
@@ -274,4 +293,36 @@ test('#790 사진 공고문: 글이 없으면 AI 비전으로 참가자격 절�
   assert.deepEqual([it.elig.vision, it.elig.line], [true, '자본금 5억 이상 · 실적 최근 5년 아파트 커뮤니티 시설 5개 단지 이상 위탁운영']);
   const { aiPurposeLabel } = await import('../../src/components/aiPurpose.ts');
   assert.equal(aiPurposeLabel('sales_eligibility_vision'), '입찰 참가자격 사진 읽기');
+});
+
+test('262차 AI 항목 정리: 규칙으로 못 뽑은 공고만 빠른 모델로(공고당 한 번·같은 절이면 다시 안 부름·사용량 이름) · 목록 한 줄·AI 표시 · 예전에 읽은 공고는 정기 실행이 공고문을 다시 받지 않고 정리', async () => {
+  // 앞 시험(#790)에서 비용 낼 회사(영업 전환)가 열려 있음
+  const ID = '00000000-0000-4000-8000-000000262001';
+  await put(ID, { source_type: 'g2b_bid', source_external_id: 'R26BK262001-000', title: '시험262 현황조사 용역', issuer: '시험262 공사', related: true, fit_business: '하이링크', current_status: '공고중', notice_kind: 'new',
+    posted_date: today, deadline_at: `${plus(9)}T10:00:00+09:00`, first_seen_at: new Date().toISOString(), attachment_urls: [{ name: '입찰공고서.txt', url: `http://127.0.0.1:${PORT}/g2b/notice-gh.txt` }] });
+  await queue([say({ items: [{ k: 'license', label: '감정평가법인 또는 측량업자' }, { k: 'perf', label: '최근 3년 현황조사 실적 1건 이상' }, { k: 'other', label: '청렴서약서 제출' }, { k: 'zzz', label: '지방계약법 시행령 제13조 자격' }] })]);
+  const n0 = (await sql`select count(*)::int n from ai_usage where purpose = 'sales_eligibility_items'`)[0].n;
+  const r = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: ID })).eligibility;
+  assert.deepEqual(r.ai.items, [{ k: 'license', label: '감정평가법인 또는 측량업자' }, { k: 'perf', label: '최근 3년 현황조사 실적 1건 이상' }], '서약·공통 문구 항목은 버림');
+  assert.equal(r.line, '최근 3년 현황조사 실적 1건 이상 · 감정평가법인 또는 측량업자');
+  const req = (await (await fetch(`${FAKE}/__state`)).json()).anthropic.at(-1).body;
+  assert.ok(JSON.stringify(req.system).includes('참가자격') && JSON.stringify(req.messages).includes('감정평가법인'), '저장한 절을 보냄');
+  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_eligibility_items'`)[0].n, n0 + 1);
+  await ctx.owner.ok('POST', '/api/sales/eligibility', { id: ID }); // 같은 절 — 다시 안 부름
+  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_eligibility_items'`)[0].n, n0 + 1);
+  const it = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === 'R26BK262001-000');
+  assert.deepEqual([it.elig.ai, it.elig.line], [true, '최근 3년 현황조사 실적 1건 이상 · 감정평가법인 또는 측량업자']);
+  // 예전(262차 전)에 읽어 둔 공고 — 첨부 지문 그대로라 공고문은 다시 안 받고, 저장한 절로 AI 정리만
+  const OLD = '00000000-0000-4000-8000-000000262002'; const sec = E.eligibilitySection(PROSHOP);
+  await put(OLD, { source_type: 'g2b_bid', source_external_id: 'R26BK262002-000', title: '시험262 골프장 프로샵 임대', issuer: '시험262 공단', related: true, fit_business: '다짐', current_status: '공고중', notice_kind: 'new',
+    posted_date: today, deadline_at: `${plus(7)}T10:00:00+09:00`, first_seen_at: new Date().toISOString(),
+    eligibility: { text: sec, items: [], line: '유죄판결이 확정된 날부터 2년이 지나지 아니한 자 제출 시', error: null, file: { name: '공고문.hwp', url: 'http://127.0.0.1:1/x.hwp' }, readAt: new Date().toISOString(), sig: '', tries: 0 } });
+  await queue([say({ items: [{ k: 'license', label: '골프장 프로샵 운영 경험 업체' }] })]);
+  await tick();
+  const o = (await rowOf(OLD)).eligibility;
+  assert.deepEqual([o.ai?.items, o.line, o.file?.name], [[{ k: 'license', label: '골프장 프로샵 운영 경험 업체' }], '골프장 프로샵 운영 경험 업체', '공고문.hwp'], JSON.stringify(o));
+  const [run] = await sql`select detail from job_runs where job = 'tick' and detail ? 'salesEligibility' order by id desc limit 1`;
+  assert.ok(run.detail.salesEligibility.aiDone >= 1 && run.detail.salesEligibility.tried.some((x) => /R26BK262002-000 AI 항목 1개/.test(x)), JSON.stringify(run.detail.salesEligibility));
+  const { aiPurposeLabel } = await import('../../src/components/aiPurpose.ts');
+  assert.equal(aiPurposeLabel('sales_eligibility_items'), '입찰 참가자격 항목 정리(AI)');
 });

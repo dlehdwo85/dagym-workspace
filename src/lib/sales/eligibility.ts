@@ -4,13 +4,14 @@
 import { sha256 } from '../crypto';
 import { db } from '../db';
 import { extractTextResult, unzip } from '../textExtract';
-import { apiExtra, commonOnly, docDeadline, eligibilityItems, eligibilityLine, eligibilitySection, jsonSafe, lineOf, type EligItem } from './eligibilityText';
+import { apiExtra, commonOnly, docDeadline, eligibilityItems, eligibilityLine, eligibilitySection, jsonSafe, lineOf, needsAiItems, textSig, type EligAi, type EligItem } from './eligibilityText';
 import { visionRead, type PhotoDoc } from './eligibilityVision';
 import { sourceFiles, type SrcFile } from './files';
 
 export type Eligibility = { text: string | null; items: EligItem[]; line: string | null; error: string | null; file: { name: string | null; url: string } | null; readAt: string; sig: string; tries: number;
   /** 253차 #790 사진 공고문을 AI 비전으로 읽음(숫자는 원문 확인) */ by?: 'vision'; visionUsd?: number;
-  /** 259차: 입찰 마감이 없는 공고(임시 마감·마감 칸 빔)에서 공고문의 제출 마감을 찾아봄 — 찾았으면 그 글줄 */ dl?: { at: string | null; label: string | null } };
+  /** 259차: 입찰 마감이 없는 공고(임시 마감·마감 칸 빔)에서 공고문의 제출 마감을 찾아봄 — 찾았으면 그 글줄 */ dl?: { at: string | null; label: string | null };
+  /** 262차: 규칙으로 항목을 못 뽑은 절을 빠른 AI 가 정리한 항목(절 지문 sig 가 같을 때만 씀) */ ai?: EligAi };
 /** 259차: 마감 칸이 비었거나 공동수급협정 마감(임시)인 공고 — 공고문에서 제안서·입찰서 제출 마감을 찾음 */
 export const needsDocDeadline = (r: Row) => !String(r.deadline_at ?? '') || r.deadline_src === 'agreement';
 type Row = Record<string, any>;
@@ -46,7 +47,7 @@ function fileErr(e: string | null, data: Buffer, name: string): string {
 }
 
 /** 한 공고 읽기 — 같은 공고번호의 다른 줄(원본 복사·워크인 수집)에도 같은 결과를 씀. 반환: 저장한 결과(공고가 없으면 null) */
-export async function readEligibility(id: string, opt: { maxFiles?: number; vision?: boolean } = {}): Promise<Eligibility | null> {
+export async function readEligibility(id: string, opt: { maxFiles?: number; vision?: boolean; ai?: boolean } = {}): Promise<Eligibility | null> {
   const sql = db();
   const [r0] = await sql<{ row: Row }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`;
   if (!r0) return null;
@@ -99,13 +100,37 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   const out: Eligibility = { text: found?.text ?? null, items: found?.items ?? [], line: found?.line ?? (extra.length ? extra.join(' · ') : null), error, file: (used ?? tried) ? { name: (used ?? tried)!.name, url: (used ?? tried)!.url } : null, // 못 읽었어도 어떤 파일을 봤는지
     readAt: new Date().toISOString(), sig: sigNow, tries: found ? 0 : visionDone || visionBefore ? 3 : visionSkip ? prevTries : prevTries + 1, // 사진 읽기를 한 공고는 첨부가 바뀔 때까지 다시 안 함 · 설정 이유로 건너뛴 것은 세지 않음
     ...(by ? { by } : {}), ...(visionUsd != null ? { visionUsd } : {}), ...(needDl ? { dl: { at: dl?.at ?? null, label: dl ? jsonSafe(dl.label) : null } } : {}) };
+  // 262차: 규칙으로 항목을 못 뽑은 절은 빠른 AI 로 정리(같은 절이면 전에 정리한 것을 그대로 — 다시 부르지 않음)
+  if (out.text && needsAiItems(out.text)) {
+    const keep = prev?.ai && prev.ai.sig === textSig(out.text) ? prev.ai : null;
+    const { aiItemsDue, aiItemsFor } = await import('./eligibilityAi');
+    out.ai = keep && !aiItemsDue({ text: out.text, ai: keep }) ? keep : opt.ai === false ? keep ?? undefined : await aiItemsFor(out.text, String(row.title ?? ''), keep).catch(() => keep ?? undefined);
+    if (out.ai?.items.length) out.line = eligibilityLine(out.ai.items, out.text, apiExtra(row, out.ai.items));
+  }
   out.text = jsonSafe(out.text); out.line = jsonSafe(out.line); out.error = jsonSafe(out.error); out.items = out.items.map((x) => ({ ...x, label: jsonSafe(x.label) })); // 257차: 저장 실패 막기
+  if (out.ai) out.ai = { ...out.ai, items: out.ai.items.map((x) => ({ ...x, label: jsonSafe(x.label) })) };
   const st = String(row.source_type ?? ''); const ext = String(row.source_external_id ?? '');
   // 259차: 공고문에서 제출 마감을 찾으면 마감으로(deadline_src 'doc' — 다음 수집의 임시 마감이 덮지 않음, API 에 진짜 입찰 마감이 오면 그것으로)
   const dlPatch = dl ? { deadline_at: dl.at, deadline_src: 'doc', doc_deadline_label: jsonSafe(dl.label) } : {};
   await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: out, ...dlPatch } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices'
     and (src_id = ${id} ${st && ext ? sql`or (row->>'source_type' = ${st} and row->>'source_external_id' = ${ext})` : sql``})`; // synced_at 은 그대로(메일 '고침'으로 안 셈)
   return out;
+}
+
+/** 262차: 공고문을 다시 받지 않고 저장한 절만으로 AI 항목 정리(정기 실행 — 예전에 읽은 공고). 같은 공고번호의 다른 줄에도 씀 */
+export async function fillAiItems(id: string): Promise<EligAi | null> {
+  const sql = db();
+  const [r] = await sql<{ row: Row }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`;
+  const e = r?.row?.eligibility as Eligibility | undefined;
+  if (!e?.text || !needsAiItems(e.text)) return null;
+  const ai = await (await import('./eligibilityAi')).aiItemsFor(e.text, String(r.row.title ?? ''), e.ai);
+  const safe = { ...ai, items: ai.items.map((x) => ({ ...x, label: jsonSafe(x.label) })) };
+  const line = safe.items.length ? jsonSafe(eligibilityLine(safe.items, e.text, apiExtra(r.row, safe.items))) : e.line;
+  const st = String(r.row.source_type ?? ''); const ext = String(r.row.source_external_id ?? '');
+  await sql`update sales_src_rows set row = jsonb_set(jsonb_set(row, '{eligibility,ai}', ${sql.json(safe as never)}::jsonb), '{eligibility,line}', to_jsonb(${line ?? null}::text))
+    where scope = 'global' and tbl = 'procurement_notices' and row ? 'eligibility' and row->'eligibility'->>'text' = ${e.text}
+    and (src_id = ${id} ${st && ext ? sql`or (row->>'source_type' = ${st} and row->>'source_external_id' = ${ext})` : sql``})`;
+  return safe;
 }
 
 /** 읽을 차례 — 처음·첨부 바뀜(정정)·못 읽고 20시간 지남(3번까지) */
@@ -146,6 +171,10 @@ export async function eligibilityTick(o: { budgetMs?: number; max?: number } = {
     if (seen.has(key)) continue; seen.add(key);
     if (eligibilityDue(r.row)) due.push(r.src_id);
   }
+  // 262차: 예전에 읽은 공고 중 규칙으로 항목을 못 뽑은 것 — 공고문을 다시 받지 않고 AI 항목 정리만(공고당 한 번)
+  const { aiItemsDue } = await import('./eligibilityAi');
+  const aiDue = rows.filter((r) => seen.has(r.row.source_type && r.row.source_external_id ? `${r.row.source_type}:${r.row.source_external_id}` : r.src_id) && !due.includes(r.src_id) && aiItemsDue(r.row.eligibility))
+    .filter((r, i, a) => a.findIndex((x) => (x.row.source_external_id ?? x.src_id) === (r.row.source_external_id ?? r.src_id)) === i).map((r) => r.src_id);
   let done = 0, found = 0; const tried: string[] = [];
   const noOf = (id: string) => { const r = rows.find((x) => x.src_id === id)?.row; return String(r?.source_external_id ?? id).slice(0, 24); };
   for (const id of due) {
@@ -161,5 +190,11 @@ export async function eligibilityTick(o: { budgetMs?: number; max?: number } = {
     }); done++;
     if (e?.text) { found++; tried.push(`${noOf(id)} 절 찾음`); } else if (e) tried.push(`${noOf(id)} ${String(e.error ?? '못 찾음').slice(0, 40)}`);
   }
-  return { open: seen.size, due: due.length, done, found, tried, waiting: due.slice(done, done + 10).map(noOf) }; // job_runs 기록에 이번에 읽은 공고·결과와 다음 차례
+  let aiDone = 0;
+  for (const id of aiDue) {
+    if (aiDone >= max || Date.now() - t0 > budget) break;
+    const a = await fillAiItems(id).catch((err) => { tried.push(`${noOf(id)} AI 항목 오류(${String((err as Error)?.message ?? err).slice(0, 40)})`); return null; }); aiDone++;
+    if (a) tried.push(`${noOf(id)} AI 항목 ${a.items.length}개${a.skip ? `(건너뜀: ${a.skip.slice(0, 30)})` : a.error ? `(오류: ${a.error.slice(0, 30)})` : ''}`);
+  }
+  return { open: seen.size, due: due.length, done, found, aiDue: aiDue.length, aiDone, tried, waiting: due.slice(done, done + 10).map(noOf) }; // job_runs 기록에 이번에 읽은 공고·결과와 다음 차례
 }

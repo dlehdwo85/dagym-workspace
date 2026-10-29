@@ -67,7 +67,8 @@ export async function lookupNotices(q: { no?: string | null; q?: string | null }
       briefing: briefingOf(r), terms: termsLine(r, { limits: false }), termsReadAt: r.terms_read_at ?? null, partner: partnerNeed(r), // #752
       // 252차 #786: 첨부 공고문 '참가자격' 절 — 한 줄(목록·메일과 같은 말)·뽑은 항목·원문 글자 수·못 찾은 이유·읽은 파일·읽은 때·다시 읽을 차례인지
       eligibility: r.eligibility ? { say: eligSay(eligView(r)), items: r.eligibility.items ?? [], chars: r.eligibility.text?.length ?? 0, text: r.eligibility.text ?? null, error: r.eligibility.error ?? null,
-        file: r.eligibility.file ?? null, readAt: r.eligibility.readAt ?? null, tries: r.eligibility.tries ?? 0, due: !eligibilityOutOfScope(r, gone) && eligibilityDue(r), skip: eligibilityOutOfScope(r, gone) }
+        file: r.eligibility.file ?? null, readAt: r.eligibility.readAt ?? null, tries: r.eligibility.tries ?? 0, ai: r.eligibility.ai ?? null, // 262차 AI 항목 정리(항목·비용·건너뛴 이유)
+        due: !eligibilityOutOfScope(r, gone) && eligibilityDue(r), skip: eligibilityOutOfScope(r, gone) }
         : { say: eligSay(eligView(r)), readAt: null, due: !eligibilityOutOfScope(r, gone), skip: eligibilityOutOfScope(r, gone) }, // 257차: skip = 정기 실행이 안 읽는 이유(마감일 칸 없음 등)
       firstSeenAt: r.first_seen_at ?? r.created_at ?? null, lastSeenAt: r.last_seen_at ?? null, refitAt: r.refit_at ?? null, refoundAt: r.refound_at ?? null, syncedAt: synced_at,
       nowRule: (() => { const f = matchFit(String(r.title ?? ''), r.bid_category ?? null, r.task_scope ?? null, r.source_type === 'kapt_bid' ? '공동주택' : null); return { fit: f.fit, matched: f.matched, dropped: f.dropped ?? [] }; })(),
