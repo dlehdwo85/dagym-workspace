@@ -359,7 +359,7 @@ export async function buildMetaDraft(u: SessionUser, id: string) {
   });
   await audit(sql, u.id, 'mkt_ads.meta_draft', 'mkt_ad_plan', id, ids(ext)).catch(() => {});
   await (await import('./spaceNotify')).notifySpace(sql, { tenant: t, space: 'marketing', approval: true, type: 'review_requested', role: p.brand_id ? { kind: 'marketing_brand', ref: p.brand_id } : null,
-    title: `메타 광고 초안 — 승인해 주세요 (하루 ${won(pl.dailyBudget)} · 총 상한 ${won(pl.totalCap)})`, body: `${p.name} · ${pl.startDate} ~ ${pl.endDate} · ${pl.location.address} 반경 ${pl.location.radiusKm}km`,
+    title: `메타 광고 초안 승인 요청 (하루 ${won(pl.dailyBudget)} · 총 상한 ${won(pl.totalCap)})`, body: `${p.name} · ${pl.startDate} ~ ${pl.endDate} · ${pl.location.address} 반경 ${pl.location.radiusKm}km`,
     link: '/s/marketing/approvals?tab=ads', entityType: 'mkt_ad_plan', entityId: id, dedupeKey: `metaads:${id}`, push: true }).catch(() => {});
   return { ok: true, status: 'created', external: ids(ext), warnings };
 }

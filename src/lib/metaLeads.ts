@@ -311,7 +311,7 @@ export async function followUp(sql: Sql, opt: { tenant?: string; notify?: boolea
     const to = r.is_test ? [r.created_by] : [...new Set([r.owner_id, ...admins])];
     const mins = Math.max(LATE_MINUTES, Math.round((Date.now() - +(r.created_time ?? r.received_at)) / 60e3));
     await (await import('./notifications')).notify(sql, { userIds: to, type: 'lead_ad', space: 'sales', title: `${r.is_test ? '[시험] ' : ''}리드 광고 신청 ${mins}분째 연락 전 · ${maskName(r.lead_name)}`,
-      body: `담당 ${r.owner_name ?? '미지정'} — 지금 전화해 주세요(전화·상담 기록이 아직 없습니다)`, link: `/s/sales/leads?id=${r.lead_id}`, entityType: 'sales_lead', entityId: r.lead_id, dedupeKey: `lead_ad_late:${r.id}` });
+      body: `담당 ${r.owner_name ?? '미지정'}. 아직 연락 기록이 없습니다. 지금 전화해 주세요`, link: `/s/sales/leads?id=${r.lead_id}`, entityType: 'sales_lead', entityId: r.lead_id, dedupeKey: `lead_ad_late:${r.id}` });
     await sql`update mkt_meta_leads set late_notified_at = now(), updated_at = now() where id = ${r.id}`;
     notified++;
   }

@@ -56,7 +56,7 @@ export async function replaceCoAssignees(tx: Sql, u: SessionUser, task: { id: st
   for (const a of added) await tx`insert into task_assignees (task_id, user_id, added_by, acked_at, added_at) values (${task.id}, ${a}, ${u.id}, ${a === u.id ? new Date() : null}, clock_timestamp()) on conflict do nothing`;
   // 로컬 10/23: 새로 붙은 사람에게만 '배정' 알림, 빠진 사람에게는 조용히 — 활동 기록에 'OOO 담당 추가/빼기'
   if (added.length && !opts.quiet) {
-    await notify(tx, { userIds: added, type: 'task_assigned', title: `업무 배정(함께 담당): ${task.title}`, body: `${u.name}님이 담당자로 배정했습니다 — 담당자마다 [내 몫 완료], 모두 끝나면 업무 완료`,
+    await notify(tx, { userIds: added, type: 'task_assigned', title: `업무 배정(함께 담당): ${task.title}`, body: `${u.name}님이 함께 담당하도록 배정했습니다. 각자 [내 몫 완료]를 누르고, 모두 끝나면 업무가 완료됩니다`,
       link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `coassign:${task.id}:${version}` });
   }
   if (opts.log !== false) {

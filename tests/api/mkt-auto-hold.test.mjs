@@ -35,7 +35,7 @@ test('초안 보관: 자동 제작 → 초안(시안 붙음·알림 없음) → 
     assert.equal(c.quality.held.reason, 'template');
     assert.ok((await sql`select cardinality(media_ids)::int n from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`)[0].n >= 3, '시안(표지 + 카드뉴스 장)은 그려 둠(나중에 [승인 요청])');
   }
-  assert.equal((await sql`select count(*)::int n from notifications where user_id = ${ctx.ownerId} and (title like '제작 완료%' or title like '승인 마감%')`)[0].n, 0, '승인 알림 없음');
+  assert.equal((await sql`select count(*)::int n from notifications where user_id = ${ctx.ownerId} and (title like '승인 요청%' or title like '승인 마감%')`)[0].n, 0, '승인 알림 없음');
   assert.equal((await sql`select count(*)::int n from mkt_contents where rule_id = ${rule.id} and status = 'pending'`)[0].n, 0);
   // 승인함: '초안 보관'으로 보임 · 승인 마감·게시 시각이 지나도 정리·미루기 없이 남음
   const h = made[0];

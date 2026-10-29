@@ -57,13 +57,13 @@ export async function briefingJob(now = new Date()) {
     const sales = await salesBriefLine(sql, u, today).catch(() => null);
     if (!c.open && !evs.length && !sales) continue;
     const first = evs.find((e) => !e.allDay) ?? evs[0];
-    const parts = c.open || evs.length ? [`오늘의 일정 ${c.open}건${c.over ? `(기한 지남 ${c.over})` : ''}`, `일정 ${evs.length}건`] : [];
+    const parts = c.open || evs.length ? [`할 일 ${c.open}건${c.over ? `(기한 지남 ${c.over})` : ''}`, `일정 ${evs.length}건`] : [];
     if (sales) parts.push(sales);
     // 로컬 10/20 알림 다이어트: 개별 마감 예고 푸시 대신 아침 브리핑에 오늘 마감·기한 지남 업무 이름(최대 3개)
     const dueList = await sql<{ title: string; late: boolean }[]>`select t.title, (t.due_date < ${today}) as late from tasks t where t.deleted_at is null and ${assignedOpenSql(sql, u.id)} and t.status not in ('done', 'on_hold') and t.due_date <= ${today}
       order by t.priority = 'urgent' desc, t.priority = 'high' desc, t.due_date limit 3`;
-    const dueText = dueList.length ? ` — 마감: ${dueList.map((d) => `${d.title}${d.late ? '(지남)' : ''}`).join(', ')}${c.due + c.over > dueList.length ? ` 외 ${c.due + c.over - dueList.length}건` : ''}` : '';
-    const body = `${parts.join(' · ')}${first ? ` — 첫 일정 ${first.allDay ? '종일' : hm(first.start)} ${first.title}` : ''}${dueText}`;
+    const dueText = dueList.length ? `. 마감: ${dueList.map((d) => `${d.title}${d.late ? '(지남)' : ''}`).join(', ')}${c.due + c.over > dueList.length ? ` 외 ${c.due + c.over - dueList.length}건` : ''}` : '';
+    const body = `${parts.join(' · ')}${first ? `. 첫 일정 ${first.allDay ? '종일' : hm(first.start)} ${first.title}` : ''}${dueText}`;
     sent += (await notify(sql, { userIds: [u.id], type: 'briefing', title: `좋은 아침입니다 · ${today.slice(5).replace('-', '/')} 브리핑`, body,
       link: '/', entityType: null as never, entityId: null as never, dedupeKey: `briefing:${u.id}:${today}` })).length;
   }

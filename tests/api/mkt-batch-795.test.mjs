@@ -64,7 +64,7 @@ test('주 단위 묶음: 칸 원고 만드는 때 = 그 주 묶음 4시간 전 �
   assert.ok(r1.produced.every((p) => p.batch), '묶음으로 모음');
   const st1 = await sql`select id, status, quality from mkt_contents where id = any(${[...A, B]}::uuid[])`;
   assert.ok(st1.every((c) => c.status === 'draft'), `사이에 한 건씩 안 올라옴: ${st1.map((c) => c.status)}`);
-  assert.equal((await notes(/제작 완료|게시 \d+건/)).length, 0, '알림 없음');
+  assert.equal((await notes(/승인 요청|게시 \d+건/)).length, 0, '알림 없음');
   const box1 = (await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals')).contents.filter((c) => c.quality?.batch && !c.quality.batch.released);
   assert.equal(box1.length, 5, '승인함 \'묶음 준비 중\'');
   // 2번째 실행: 남은 1건(다음 주) → 다음 주 6건을 한 번에 승인 대기 + 알림 1건 · 다다음 주 칸(묶음 때 7일 뒤)은 그대로 초안
@@ -77,7 +77,7 @@ test('주 단위 묶음: 칸 원고 만드는 때 = 그 주 묶음 4시간 전 �
   const sent = await notes(/게시 \d+건/);
   assert.equal(sent.length, 1, '묶음 알림 1건');
   assert.match(sent[0].title, /^다음 주 게시 6건/); assert.match(sent[0].body, /승인 마감 게시 전날 18:00/);
-  assert.equal((await notes(/제작 완료/)).length, 0, '한 건씩 알림 없음');
+  assert.equal((await notes(/승인 요청/)).length, 0, '한 건씩 알림 없음');
   // 승인함: 묶음 표 · 마감 = 게시 전날 18:00
   const list = await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals');
   assert.equal(list.deadlineRule, '게시 전날 18:00');

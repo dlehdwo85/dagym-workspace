@@ -40,7 +40,7 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   // #516: 피드 시안은 서버가 바로 그려 붙임(크레딧 0) — 이미지 제작 요청 카드 없이 승인 대기
   assert.ok((await sql`select cardinality(media_ids)::int n from mkt_versions where content_id = ${good.id} and version = 1`)[0].n >= 3, '요청 C: 표지 + 카드뉴스 장(3장 이상)');
   assert.equal((await sql`select count(*)::int n from mkt_production_requests where content_id = ${good.id} and kind = 'image'`)[0].n, 0, '이미지 제작 요청 카드 없음');
-  assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '제작 완료%'`).length, '제작 완료 알림');
+  assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '승인 요청: %'`).length, '승인 요청 알림');
   assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and title like '승인 마감 72시간 전%'`).length, '마감 N시간 전 알림');
   // #545(+#534) 수정 요청 → AI 가 글과 시안(서버 그림의 첫 줄)을 함께 고친 수정본 한 버전 → 바로 승인 대기 · 반영한 요청·바뀐 것·AI 수정 n번째(187차: 횟수 제한 없음)는 버전에 · 사유는 디자인 담당 기억
   await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '가을 이벤트', body: '짧게 고친 안내\n이번 주 토요일까지 현관에서 안내합니다.', brief: '' })] });

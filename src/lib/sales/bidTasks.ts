@@ -179,7 +179,7 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
   const files = auto.sourceFiles(r.attachment_urls ?? r.attachments, r.notice_file_url).length;
   auto.attachSourceFilesLater(u, { kind: 'bid', id: i.id, taskIds: [task.id] });
   await notify(sql, { userIds: ids.filter((x) => x !== u.id), type: 'task_assigned', space: 'sales', title: `입찰 업무: ${name.slice(0, 60)}`,
-    body: `${u.name}님이 입찰 공고를 업무로 넘겼습니다 — 기한 ${fmtDue({ day: due, time: dueTime })}${ids.length > 1 ? ` · 공동 담당 ${ids.length}명` : ''}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, push: true, dedupeKey: `sales:bid:${i.id}:${task.id}` } as never).catch(() => {});
+    body: `${u.name}님이 입찰 공고를 업무로 넘겼습니다. 기한 ${fmtDue({ day: due, time: dueTime })}${ids.length > 1 ? ` · 공동 담당 ${ids.length}명` : ''}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, push: true, dedupeKey: `sales:bid:${i.id}:${task.id}` } as never).catch(() => {});
   return { status: BID_STATUS, leadId: null, taskId: task.id, taskIds: [task.id], eventIds: Object.values(events), eventErrors, due, dueTime, dueText: fmtDue({ day: due, time: dueTime }), dates: future.map((m) => ({ label: m.label, day: m.w.day })), files, merged: prev.length };
 }
 

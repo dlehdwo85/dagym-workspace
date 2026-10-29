@@ -670,7 +670,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
     if (!mediaIds.length && !held) await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', f.timing ? `${brief}\n\n${f.timing}` : brief, screen ? 0 : kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
     else await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'generate_image', 0, '시안 서버 그리기 — 크레딧 0', ${f.title})`;
   });
-  if (!held && !batch && !isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `제작 완료 — 승인해 주세요: ${f.title}` : kind === 'blog' && q.issues.length === 1 ? `원고 완료 — 표지·본문 사진을 붙여 주세요: ${f.title}` : visualOnly ? `원고 완료 — 시안 제작 중: ${f.title}` : `품질 검사 미통과: ${f.title}`,
+  if (!held && !batch && !isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `승인 요청: ${f.title}` : kind === 'blog' && q.issues.length === 1 ? `사진 필요: ${f.title}` : visualOnly ? `시안 제작 중: ${f.title}` : `품질 검사 미통과: ${f.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
   // 271차 #811 영상 만드는 방법이 실제 사진이면 원고 직후 이 판에 사진 영상(생성 비용 0) — 사진이 3장이 안 되면 제작 요청 카드 그대로
   if (VIDEO_KINDS.includes(kind) && !mediaIds.length && !held && videoMethod === 'photos') {
@@ -970,7 +970,7 @@ export async function releaseBatches(tenant: string, s?: MktSettings): Promise<{
     const label = w.week === addDay(thisWeek, 7) ? '다음 주' : w.week === thisWeek ? '이번 주' : `${md(w.week)}~${md(addDay(w.week, 6))}`;
     const changes = rows.filter((r) => r.status === 'changes').length;
     const brands = [...new Set(rows.map((r) => r.brand).filter(Boolean))].map((b) => String(b).replace(/^\s*\[시험\]\s*/, ''));
-    await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'review_requested', title: `${label} 게시 ${rows.length}건 — 한 번에 올렸습니다, 승인해 주세요`,
+    await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'review_requested', title: `${label} 게시 ${rows.length}건을 한 번에 올렸습니다. 승인해 주세요`,
       body: `${md(w.week)}~${md(addDay(w.week, 6))} 게시${brands.length ? ` · ${brands.slice(0, 4).join('·')}` : ''}${changes ? ` · 검사에 걸려 수정 요청 ${changes}건 포함` : ''} · 승인 마감 ${deadlineRule(st)} · 수정 요청하면 최상 모델로 바로 수정본`,
       link: '/s/marketing/approvals', dedupeKey: `mktbatch:${tenant}:${w.week}:${rows[0].id}` });
     out.push({ week: w.week, n: rows.length });

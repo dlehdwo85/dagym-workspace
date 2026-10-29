@@ -72,7 +72,7 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
   // 되돌리기(영업 재편 2)용으로 만든 업무 id 를 리드에 남김(현장 영업 원천에는 공고 일정이 없어 일정은 만들지 않음)
   await sql`update sales_leads set src = coalesce(src, '{}'::jsonb) || ${sql.json({ taskIds, eventIds: [] })} where id = ${leadId}`;
   // 배정 알림(넘긴 본인 제외)
-  await notify(sql, { userIds: ids.filter((x) => x !== u.id), type: 'assigned', space: 'sales', title: `영업 배정: ${name.slice(0, 60)}`, body: `${u.name}님이 ${KIND_NAME[i.kind]}을(를) 영업 진행으로 넘겼습니다 — 검토·첫 연락 (마감 ${due})`, link: `/s/sales/leads?id=${leadId}`, entityType: 'sales_lead', entityId: leadId, actorId: u.id, push: true, dedupeKey: `sales:handoff:${leadId}` } as never).catch(() => {});
+  await notify(sql, { userIds: ids.filter((x) => x !== u.id), type: 'assigned', space: 'sales', title: `영업 배정: ${name.slice(0, 60)}`, body: `${u.name}님이 ${KIND_NAME[i.kind]}을(를) 영업 진행으로 넘겼습니다. ${Number(due.slice(5, 7))}/${Number(due.slice(8, 10))}까지 검토하고 첫 연락을 해 주세요`, link: `/s/sales/leads?id=${leadId}`, entityType: 'sales_lead', entityId: leadId, actorId: u.id, push: true, dedupeKey: `sales:handoff:${leadId}` } as never).catch(() => {});
   return { leadId, status: HANDOFF_STATUS, taskIds, eventIds: [] as string[], eventErrors: [] as string[], due, dates: [] as { label: string; day: string }[], files: 0 };
 }
 

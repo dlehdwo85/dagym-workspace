@@ -1,5 +1,5 @@
 // #542 같은 종류·같은 시각 알림 묶기(로컬 10/24, 대표 휴대폰 캡처 '승인 마감 6시간 전: …' 6개·'시안을 붙여 다시 올렸습니다(v2)' 여러 개):
-// 마케팅·영업 '머리: 항목' 알림은 알림 목록에는 한 줄씩 그대로, 휴대폰 푸시는 한 번에 나가는 것끼리 1건 — '승인 마감 72시간 전: 3건 — A 외 2건'(링크 = 승인함, 버튼 없음)
+// 마케팅·영업 '머리: 항목' 알림은 알림 목록에는 한 줄씩 그대로, 휴대폰 푸시는 한 번에 나가는 것끼리 1건 — '승인 마감 72시간 전 3건: A 외 2건'(링크 = 승인함, 버튼 없음)
 // · 정기 실행이 만든 것은 실행 끝 발송에서 한꺼번에(실행 중에는 요청 뒤 발송이 묶음 알림을 남겨 둠 — 중간에 갈라지지 않게)
 // · data.group = 묶음(1.1.3 앱이 같은 묶음을 접음) · tag = 묶음+날짜(1.1.2 시스템 알림·웹은 앞 알림을 바꿈) · 업무 알림 등 다른 종류는 예전처럼
 // 가짜 FCM 구조 시험 — 실제 휴대폰에서 묶여 보이는지는 로컬이 실기기에서 확인(가짜 서버 통과 ≠ 실제 연동 완료)
@@ -55,7 +55,7 @@ test('승인 마감 알림 3건(같은 정기 실행) → 목록은 3줄 · 푸�
   await sql`delete from job_locks where name = 'tick' and holder = 'push-group-test'`;
   const [m, ...more] = await flush(1);
   assert.equal(more.length, 0, '푸시는 1건');
-  assert.deepEqual([m.notification.title, m.data.link, m.android.notification.tag, m.data.actions], ['승인 마감 72시간 전: 3건 — 퇴근길 운동 외 2건', '/s/marketing/approvals', `${G}:${day}`, JSON.stringify([{ id: 'ack', label: '확인' }, { id: 'view', label: '열기', open: true }])]); // 184차 #676: 묶음 푸시도 [확인](묶음 전체 읽음)·[열기]
+  assert.deepEqual([m.notification.title, m.data.link, m.android.notification.tag, m.data.actions], ['승인 마감 72시간 전 3건: 퇴근길 운동 외 2건', '/s/marketing/approvals', `${G}:${day}`, JSON.stringify([{ id: 'ack', label: '확인' }, { id: 'view', label: '열기', open: true }])]); // 184차 #676: 묶음 푸시도 [확인](묶음 전체 읽음)·[열기]
   assert.equal(m.apns.payload.aps.category, 'wn.ack.view', 'iOS 는 이미 등록된 [확인][열기] 묶음');
   assert.equal(m.notification.body, '· 퇴근길 운동\n· 주말 필라테스\n· 가을 회원 모집');
   const st = await sql`select d.status, d.error from notification_deliveries d join notifications n on n.id = d.notification_id where n.meta->>'group' = ${G} order by d.id`;
@@ -66,7 +66,7 @@ test('승인 마감 알림 3건(같은 정기 실행) → 목록은 3줄 · 푸�
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const all = await flush(2);
   assert.equal(all.length, 2);
-  assert.deepEqual([all[1].notification.title, all[1].android.notification.tag], ['승인 마감 72시간 전: 4건 — 퇴근길 운동 외 3건', `${G}:${day}`]);
+  assert.deepEqual([all[1].notification.title, all[1].android.notification.tag], ['승인 마감 72시간 전 4건: 퇴근길 운동 외 3건', `${G}:${day}`]);
   // 다 읽은 뒤 새 1건 → 요약 아님(제목·글 링크·버튼 그대로), tag 는 같은 묶음+날짜
   const ids = (await sql`select id from notifications where user_id = ${ctx.ownerId} and meta->>'group' = ${G}`).map((r) => r.id);
   await ctx.owner.ok('POST', '/api/notifications/read', { ids });

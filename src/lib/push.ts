@@ -113,7 +113,7 @@ async function groupPayload(sql: ReturnType<typeof db>, userId: string, meta: { 
   const items = rows.map((r) => r.item || r.title);
   const paths = new Set(rows.map((r) => r.link.split(/[?#]/)[0]));
   const space = meta.group.split(':')[0];
-  return { ...base, title: `${meta.head ?? meta.group}: ${rows.length}건 — ${items[0]} 외 ${rows.length - 1}건`.slice(0, 200),
+  return { ...base, title: `${meta.head ?? meta.group} ${rows.length}건: ${items[0]} 외 ${rows.length - 1}건`.slice(0, 200),
     body: items.slice(0, 5).map((x) => `· ${x}`).join('\n') + (rows.length > 5 ? `\n외 ${rows.length - 5}건` : ''),
     link: paths.size === 1 ? [...paths][0] : `/notifications?space=${space}`, actions: GROUP_ACTIONS.map(({ id, label, open }) => ({ id, label, ...(open ? { open } : {}) })), taskId: null };
 }

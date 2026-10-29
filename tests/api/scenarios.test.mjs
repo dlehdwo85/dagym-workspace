@@ -1251,7 +1251,7 @@ describe('WORKIN_V3 서로 배정 · 요청자 · 직접 순서', () => {
     assert.ok((await ctx.owner.ok('GET', `/api/tasks?requestedById=${ctx.ownerId}&limit=500`)).tasks.some((x) => x.id === t));
     await hq2.ok('PATCH', `/api/tasks/${t}`, { status: 'review', version: d1.task.version }); // 관리자 확인 업무 → 검토 요청
     const n = (await ctx.owner.ok('GET', '/api/notifications')).items;
-    assert.ok(n.some((x) => x.type === 'review_requested' && x.link === `/tasks/${t}` && /승인 또는 반려/.test(x.body)), '요청자에게 검토 요청 알림(V12 7번)');
+    assert.ok(n.some((x) => x.type === 'review_requested' && x.link === `/tasks/${t}` && /승인하거나 반려/.test(x.body)), '요청자에게 검토 요청 알림(V12 7번)');
   });
   test('직접 순서: 보이는 순서대로 저장, 권한 밖 업무는 건너뜀', async () => {
     const ids = [];
@@ -1593,7 +1593,7 @@ describe('WORKIN_V8 아침 브리핑 · 주간 보고 초안 · 부재 종류 ·
     const n = await sql`select title, body from notifications where user_id = ${ctx.staffA.id} and type = 'briefing'`;
     if (hour < 22) {
       assert.equal(n.length, 1, '하루 한 번');
-      assert.match(n[0].body, /오늘의 일정 \d+건/);
+      assert.match(n[0].body, /^할 일 \d+건/);
     }
     await ctx.staffA.client.ok('PUT', '/api/notifications/prefs', { settings: { ...p.settings, briefingEnabled: false } });
     assert.equal((await ctx.staffA.client.ok('GET', '/api/notifications/prefs')).settings.briefingEnabled, false);
@@ -1946,7 +1946,7 @@ describe('WORKIN_V12 상태 권한 · 확인 완료 · 검토 요청 알림', ()
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
     const rv = await sql`select body from notifications where user_id = ${ctx.managerA.id} and entity_id = ${t} and type = 'review_requested'`;
-    assert.equal(rv.length, 1, '요청자에게 검토 요청 알림'); assert.match(rv[0].body, /승인 또는 반려/);
+    assert.equal(rv.length, 1, '요청자에게 검토 요청 알림'); assert.match(rv[0].body, /승인하거나 반려/);
     const pending = await sql`select count(*)::int c from notification_deliveries d join notifications n on n.id = d.notification_id where n.entity_id = ${t} and n.type = 'review_requested'`;
     assert.ok(pending[0].c >= 0);
     await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress', reviewNote: '사진 추가' }); // 반려

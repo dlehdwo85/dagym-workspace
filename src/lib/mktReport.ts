@@ -63,7 +63,7 @@ function summaryText(company: string, r: Awaited<ReturnType<typeof monthlyReport
     `게시 ${r.posts.published}건(예정 ${r.posts.scheduled} · 취소 ${r.posts.canceled})${r.posts.byChannel.length ? ` — ${r.posts.byChannel.map((c: any) => `${c.channel} ${c.n}`).join(', ')}` : ''}`,
     `승인 ${r.approvals.approved}건 · 수정 요청 ${r.approvals.changes} · 보류 ${r.approvals.held}${r.approvals.avg_hours != null ? ` · 평균 승인 소요 ${r.approvals.avg_hours}시간` : ''}`,
     `자동 제작 ${r.auto.produced}건(품질 검사 미통과 ${r.auto.quality_failed})`,
-    `광고 노출 ${r.ads.total.impressions.toLocaleString('ko-KR')} · 클릭 ${r.ads.total.clicks.toLocaleString('ko-KR')}(CTR ${r.ads.total.ctr}%) · 비용 ${won(r.ads.total.cost_krw)} · 전환 ${r.ads.total.conversions}`,
+    `광고 노출 ${r.ads.total.impressions.toLocaleString('ko-KR')} · 클릭 ${r.ads.total.clicks.toLocaleString('ko-KR')}(클릭률 ${r.ads.total.ctr}%) · 비용 ${won(r.ads.total.cost_krw)} · 전환 ${r.ads.total.conversions}`,
     ...(r.savings.amount > 0 ? [`대행사 대비 절감액(추정) ${won(r.savings.amount)} — 광고비 × 대행 수수료율 ${r.savings.pct}%`] : []),
     `전화 문의 ${r.calls.total}건(영업 리드 ${r.calls.leads})`,
     `크레딧 ${r.credits.total} · 마케팅 AI 약 ${won(r.ai.krw)}($${usd(r.ai.usd)}, ${r.ai.requests}회)`, '', `자세히: ${link}`].join('\n');

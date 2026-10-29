@@ -386,8 +386,8 @@ export const messageInput = z.object({
   /** B9 투표 */
   poll: pollInput.optional(),
 });
-/** 알림·목록 미리보기에 쓰는 파일 글: 사진 '📷 사진(3장)' · 영상 '🎬 동영상' · 나머지 '📎 이름' */
-const fileLabel = (f: { name: string; mime: string }, n = 1) => /^image\//.test(f.mime) ? (n > 1 ? `📷 사진 ${n}장` : '📷 사진') : /^video\//.test(f.mime) ? (n > 1 ? `🎬 동영상 ${n}개` : '🎬 동영상') : `📎 ${f.name}`;
+/** 알림·목록 미리보기에 쓰는 파일 글: 사진 '사진 3장' · 영상 '동영상' · 나머지 '파일 이름'(#805 꾸밈 이모지 뺌) */
+const fileLabel = (f: { name: string; mime: string }, n = 1) => /^image\//.test(f.mime) ? (n > 1 ? `사진 ${n}장` : '사진') : /^video\//.test(f.mime) ? (n > 1 ? `동영상 ${n}개` : '동영상') : `파일 ${f.name}`;
 /** @전체: 1:1 은 안 되고, 회사 전체방은 대표·관리자만 */
 const canMentionAll = (u: SessionUser, r: Room) => r.kind !== 'dm' && (r.kind !== 'company' || u.role === 'owner' || u.role === 'admin');
 export async function sendMessage(u: SessionUser, roomId: string, i: z.infer<typeof messageInput>) {
@@ -631,7 +631,7 @@ export async function forwardMessage(u: SessionUser, id: string, roomIds: string
     await sql`update chat_members set last_read_id = ${n.id}::bigint where room_id = ${r.id} and user_id = ${u.id}`;
     const members = await sql<{ user_id: string; notify: NotifyLevel }[]>`select user_id, notify from chat_members where room_id = ${r.id}`;
     const roomName = r.kind === 'dm' ? u.name : r.name ?? '대화';
-    await notify(sql, { userIds: members.filter((x) => x.user_id !== u.id && x.notify === 'all').map((x) => x.user_id), type: 'chat', title: roomName, body: `${u.name}: (전달) ${(src.body || `📎 ${src.file_name}`).slice(0, 100)}`,
+    await notify(sql, { userIds: members.filter((x) => x.user_id !== u.id && x.notify === 'all').map((x) => x.user_id), type: 'chat', title: roomName, body: `${u.name}: (전달) ${(src.body || `파일 ${src.file_name}`).slice(0, 100)}`,
       link: `/messages?room=${r.id}`, entityType: 'chat_room', entityId: r.id, actorId: u.id, dedupeKey: `chat:${n.id}`, meta: { messageId: n.id } });
     sent.push(n.id);
   }
@@ -700,7 +700,7 @@ export async function scheduleInRoom(u: SessionUser, roomId: string, i: z.infer<
   const { createEvent } = await import('./events');
   const ev = await createEvent(u, { calendarId, title: i.title, start: i.start, end: i.end, allDay: i.allDay ?? false, location: i.location || undefined,
     description: [i.description?.trim(), note && `메시지: ${note}`, `메신저 "${roomName}"에서 잡은 일정`].filter(Boolean).join('\n\n'), attendeeIds: [u.id, ...others] });
-  const body = `📅 ${i.title} · ${whenText(new Date(i.start), new Date(i.end), !!i.allDay)}`;
+  const body = `[일정] ${i.title} · ${whenText(new Date(i.start), new Date(i.end), !!i.allDay)}`;
   const [m] = await sql<{ id: string }[]>`insert into chat_messages (room_id, author_id, body, kind, event_id) values (${r.id}, ${u.id}, ${body}, 'event', ${ev.id}) returning id::text`;
   await sql`update chat_rooms set last_message_at = now() where id = ${r.id}`;
   await sql`update chat_members set last_read_id = ${m.id}::bigint where room_id = ${r.id} and user_id = ${u.id}`;

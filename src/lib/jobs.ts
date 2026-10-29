@@ -294,7 +294,7 @@ export async function eventReminders(now = new Date()) {
         const lead = Math.min(...due);
         const hm = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' }).format(o.start);
         const mins = Math.max(1, Math.round((o.start.getTime() - now.getTime()) / 60000));
-        sent += (await notify(sql, { userIds: [p.id], type: 'event_reminder', title: `일정 ${fmtLeft(mins)} 전: ${o.title}`, body: `${hm} 시작${m.location ? ` · 📍 ${m.location} — 이동 시간 확인` : ''}${ctx}`,
+        sent += (await notify(sql, { userIds: [p.id], type: 'event_reminder', title: `일정 ${fmtLeft(mins)} 전: ${o.title}`, body: `${hm} 시작${m.location ? ` · 장소 ${m.location}. 이동 시간을 확인하세요` : ''}${ctx}`,
           // 로컬 10/20(대표): 일정별 alarm 또는 사람별 기본값(일정 끔) → 알람처럼
           link: `/calendar?event=${o.id}`, entityType: 'event', entityId: o.id, dedupeKey: `evrem:${m.id}:${o.start.toISOString()}:${lead}`, meta: { kind: 'event', eventId: o.id, ...((alarmFor && lead === p.alarm_m) ? { alarm: true } : {}) } })).length;
       }

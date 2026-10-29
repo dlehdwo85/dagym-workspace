@@ -122,7 +122,7 @@ async function sendReceipt(sql: Sql, paymentId: string) {
     const when = new Date(p.paid_at ?? Date.now()).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
     const receipt = p.tid ? `https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0` : '';
     const { sendMail } = await import('../mail');
-    await sendMail(p.email, `[워크인] 결제 영수증 — ${p.amount.toLocaleString('ko-KR')}원`,
+    await sendMail(p.email, `[워크인] 결제 영수증 (${p.amount.toLocaleString('ko-KR')}원)`,
       `${p.tenant_name}\n\n상품: ${what}\n금액: ${p.amount.toLocaleString('ko-KR')}원 (VAT 포함)\n결제 수단: ${pm}${p.card_name ? ` · ${p.card_name}` : ''}${p.card_no ? ` ${p.card_no}` : ''}\n결제 일시: ${when}\n주문번호: ${p.moid}${p.tid ? `\n거래번호: ${p.tid}` : ''}\n\n${receipt ? `영수증(나이스페이): ${receipt}\n` : ''}결제 내역: ${process.env.APP_URL ?? ''}/admin/usage`);
     await sql`update payments set meta = meta || ${sql.json({ receiptSentAt: new Date().toISOString() })} where id = ${p.id}`;
   } catch (e) { await logError('billing-receipt', e); }
@@ -361,7 +361,7 @@ export async function billingJob() {
     if (!want || want === s.billing_lock || (s.billing_lock === 'suspended' && want === 'read_only')) continue;
     await sql`update tenant_subscriptions set billing_lock = ${want}, updated_at = now() where tenant = ${s.tenant}`;
     (await import('../plans')).clearReadOnlyCache(s.tenant); locked++;
-    await tell(s.tenant, s.name, want === 'suspended' ? '미납 30일 — 워크인 이용이 중지되었습니다' : '미납 7일 — 읽기 전용이 되었습니다',
+    await tell(s.tenant, s.name, want === 'suspended' ? '30일 미납으로 워크인 이용이 중지되었습니다' : '7일 미납으로 보기만 할 수 있습니다',
       want === 'suspended' ? '관리자가 결제하면 바로 다시 쓸 수 있습니다. 데이터는 지우지 않았습니다.' : '보기·내보내기는 됩니다. 결제하면 바로 복구됩니다(30일 미납이면 이용 중지).', `bill-lock:${s.tenant}:${want}:${d}`);
   }
   const testCanceled = await (await import('./payTest')).autoCancelTestPayments().catch(() => 0); // V32 1 시험 결제 자동 취소

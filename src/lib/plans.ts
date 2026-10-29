@@ -315,7 +315,7 @@ export async function usageJob() {
       if (!level) continue;
       // 저장·사용자는 한 번 넘으면 계속이므로 달마다, AI 는 그 달 기준
       alerts += (await notify(sql, { userIds: admins, type: 'usage_alert', title: `${label} ${level === 100 ? '한도에 도달했습니다' : `${level}%를 넘었습니다`}`,
-        body: `${label} ${Math.round(pct)}% 사용 중 — 관리 → 사용량·요금제에서 확인하세요${level === 100 ? (key === 'ai' ? ' (AI 는 다음 달까지 멈춤, 업무·일정은 그대로)' : key === 'tasks' ? ' (새 업무 만들기만 멈춤 — 오래된 완료 업무를 보관 파일로 내보내고 정리)' : ' (새로 올리기·초대만 멈춤, 업무·일정은 그대로)') : key === 'tasks' ? ' — 오래된 완료 업무를 보관 파일로 내보내고 정리할 수 있습니다' : ''}`,
+        body: `${label} ${Math.round(pct)}%를 썼습니다. 관리 > 사용량·요금제에서 확인하세요.${level === 100 ? (key === 'ai' ? ' AI는 다음 달까지 멈추고 업무·일정은 그대로입니다.' : key === 'tasks' ? ' 새 업무 만들기만 멈춥니다. 오래된 완료 업무를 보관 파일로 내보내 정리해 주세요.' : ' 새로 올리기와 초대만 멈추고 업무·일정은 그대로입니다.') : key === 'tasks' ? ' 오래된 완료 업무는 보관 파일로 내보내 정리할 수 있습니다.' : ''}`,
         link: '/admin/usage', entityType: null as never, entityId: null as never, dedupeKey: `usage:${t.id}:${key}:${level}:${month}` })).length;
     }
   }
@@ -439,7 +439,7 @@ export async function trialJob() {
     const admins = await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${s.tenant} and status = 'active' and role in ('owner','admin')`;
     const name = partner ? '설계 파트너 기간' : '무료 체험';
     const title = d === 0 ? `${name}이 오늘 끝납니다` : `${name}이 ${d}일 남았습니다`;
-    const body = d === 0 ? '오늘이 지나면 읽기 전용(보기·내보내기만)이 됩니다 — 요금제를 선택해 주세요' : '요금제를 선택하면 끊김 없이 계속 쓸 수 있어요';
+    const body = d === 0 ? '오늘이 지나면 보기와 내보내기만 됩니다. 요금제를 골라 주세요' : '요금제를 선택하면 끊김 없이 계속 쓸 수 있어요';
     await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title, body, link: '/admin/usage', dedupeKey: `trial:${s.tenant}:${key}:${until}` });
     const { sendMail } = await import('./mail');
     for (const a of admins) await sendMail(a.email, `[워크인] ${title}`, `${s.name}\n${body}\n${process.env.APP_URL ?? ''}/admin/usage`).catch(() => {});

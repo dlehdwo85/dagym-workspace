@@ -68,7 +68,7 @@ export default function QuotePage() {
 
 function MailModal({ id, q, onClose, onSent }: { id: string; q: Q; onClose: () => void; onSent: () => void }) {
   const [to, setTo] = useState(q.to_email ?? '');
-  const [subject, setSubject] = useState(`[${q.company_name}] 견적서 ${q.quote_no} — ${q.to_name}`);
+  const [subject, setSubject] = useState(`[${q.company_name}] ${q.to_name} 견적서 (${q.quote_no})`);
   const [body, setBody] = useState(`안녕하세요, ${q.company_name}입니다.\n요청하신 견적서(${q.quote_no})를 첨부해 드립니다.\n합계 ${won(q.total)}원(부가세 포함), 유효기간은 ${q.valid_until} 까지입니다.\n확인 부탁드립니다.`);
   const [busy, setBusy] = useState(false);
   const send = async () => { setBusy(true); try { await api(`/api/quotes/${id}/mail`, { body: { to: to.trim(), subject, body } }); toast.ok('보관함에 넣었습니다 — 곧 발송됩니다(PDF 첨부)'); onSent(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } };

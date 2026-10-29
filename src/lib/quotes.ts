@@ -306,7 +306,7 @@ export async function quoteMail(u: SessionUser, id: string, i: z.infer<typeof qu
   const { quote } = await getQuote(u, id);
   if (!quote.task_id) throw badRequest('업무에 연결된 견적서만 메일로 보낼 수 있습니다 — 업무에서 견적서를 만들거나 PDF 를 내려받아 보내 주세요');
   const { queueMail } = await import('./mailbox');
-  const r = await queueMail(u, { taskId: quote.task_id, company: quote.company_key, to: [i.to], subject: i.subject || `[${quote.company_name}] 견적서 ${quote.quote_no} — ${quote.to_name}`,
+  const r = await queueMail(u, { taskId: quote.task_id, company: quote.company_key, to: [i.to], subject: i.subject || `[${quote.company_name}] ${quote.to_name} 견적서 (${quote.quote_no})`,
     body: i.body || `안녕하세요, ${quote.company_name}입니다.\n요청하신 견적서(${quote.quote_no})를 첨부해 드립니다.\n합계 ${won(Number(quote.total))}원(부가세 포함), 유효기간은 ${quote.valid_until} 까지입니다.\n확인 부탁드립니다.`, libraryFileIds: [quote.file_id] }, ip);
   await markQuoteSent(u, id, { via: 'mail', to: i.to }, ip);
   return r;

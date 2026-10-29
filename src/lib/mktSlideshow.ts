@@ -102,7 +102,7 @@ export async function attachAuto(b: { content_id: string }, reuse: { version: nu
   });
   if (r?.toPending) {
     const A = await import('./mktAuto'); const s = await A.settingsOf(r.c.tenant);
-    if (!A.isQuiet(new Date(), s)) await A.mktNotify(sql, r.c, null, { approval: true, type: 'review_requested', title: `제작 완료 — 승인해 주세요: ${r.c.title}`, body: note, link: `/s/marketing/approvals?c=${r.c.id}`, entityType: 'mkt_content', entityId: r.c.id, dedupeKey: `mktp:${r.c.id}:${reuse.version}:video` });
+    if (!A.isQuiet(new Date(), s)) await A.mktNotify(sql, r.c, null, { approval: true, type: 'review_requested', title: `승인 요청: ${r.c.title}`, body: note, link: `/s/marketing/approvals?c=${r.c.id}`, entityType: 'mkt_content', entityId: r.c.id, dedupeKey: `mktp:${r.c.id}:${reuse.version}:video` });
   }
   return !!r;
 }

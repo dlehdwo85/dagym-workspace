@@ -105,12 +105,12 @@ export async function messengerV4({ owner, ctx, sql, BASE, SHOTS }) {
   const t3 = await em3.getByTestId('event-title-input').inputValue();
   assert.ok(!t3.includes('@전체') && t3.includes('회의'), `일정 제목 '${t3}'`);
   await owner.keyboard.press('Escape'); await em3.waitFor({ state: 'detached' });
-  // 로컬 10/25 사소 ②: 사진 묶음에 답장 → 입력창 위·인용 라벨이 파일 이름 대신 '📷 사진 3장'
+  // 로컬 10/25 사소 ②: 사진 묶음에 답장 → 입력창 위·인용 라벨이 파일 이름 대신 '사진 3장'
   const albumMsg = list.getByTestId('chat-message').filter({ has: owner.locator('[data-testid="chat-album"][data-count="3"]') }).first();
   await albumMsg.hover(); await albumMsg.getByTestId('msg-reply').click();
-  await owner.getByTestId('chat-replying').getByText('📷 사진 3장').waitFor();
+  await owner.getByTestId('chat-replying').getByText('사진 3장', { exact: true }).waitFor();
   await input.fill('사진 잘 봤어요'); await input.press('Enter');
-  await list.getByTestId('chat-reply-quote').filter({ hasText: '📷 사진 3장' }).first().waitFor();
+  await list.getByTestId('chat-reply-quote').filter({ hasText: '사진 3장' }).first().waitFor();
 
   // B9 메시지 → 일정으로 만들기(글의 날짜·시각) · B10 자주 쓰는 반응
   await ctx.staffA.client.ok('POST', `/api/chat/rooms/${room}/messages`, { body: '내일 오후 3시 현장 점검' });

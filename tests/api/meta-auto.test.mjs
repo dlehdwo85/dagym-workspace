@@ -139,7 +139,7 @@ test('메타 광고 자동 세팅: 연결 권한 → 검사 → 꺼진 초안(PA
   const [ch] = await sql`select kind, money_up, after from mkt_ad_changes where plan_id = ${made.id} and status = 'applied'`;
   assert.deepEqual([ch.kind, ch.money_up, ch.after.paused, ch.after.totalCap], ['create', false, true, 150000]);
   const [nt] = await sql`select title, link from notifications where dedupe_key = ${`metaads:${made.id}`} and user_id = ${ctx.ownerId}`;
-  assert.match(nt.title, /메타 광고 초안 — 승인해 주세요 \(하루 10,000원 · 총 상한 150,000원\)/); assert.equal(nt.link, '/s/marketing/approvals?tab=ads');
+  assert.match(nt.title, /메타 광고 초안 승인 요청 \(하루 10,000원 · 총 상한 150,000원\)/); assert.equal(nt.link, '/s/marketing/approvals?tab=ads');
   // 만든 뒤에는 고칠 수 없음
   assert.equal((await ctx.owner.req('PUT', `/api/marketing/ad-ops/meta/${made.id}`, plan(o, { name: '바꾸기' }))).status, 409);
 

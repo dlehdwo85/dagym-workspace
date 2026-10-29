@@ -34,11 +34,11 @@ describe('메신저 2차', () => {
     assert.deepEqual([row.unread, row.last_mime, row.last_kind], [1, 'image/png', 'text'], '묶음은 안 읽은 수 1');
     assert.equal((await ctx.staffA.client.ok('GET', '/api/chat/unread')).unread, 1, '앱 배지 숫자도 1');
     const n = await sql`select body from notifications where user_id = ${ctx.staffA.id} and type = 'chat' and entity_id = ${P.g}`;
-    assert.equal(n.length, 1, '알림 1번'); assert.match(n[0].body, /^김대표: 📷 사진 3장$/);
+    assert.equal(n.length, 1, '알림 1번'); assert.match(n[0].body, /^김대표: 사진 3장$/);
     assert.equal((await ctx.owner.req('POST', `/api/chat/rooms/${P.g}/messages`, { body: '글만', batch })).status, 400, '묶음은 사진·영상만');
     const v = await up(ctx.owner, P.g, '현장.mp4', 'video/mp4');
     const vm = (await ctx.owner.ok('POST', `/api/chat/rooms/${P.g}/messages`, { body: '', file: v })).id;
-    assert.equal(await lastChatNotif(ctx.staffA.id, P.g), '김대표: 🎬 동영상');
+    assert.equal(await lastChatNotif(ctx.staffA.id, P.g), '김대표: 동영상');
     const res = await fetch(`${BASE}/api/chat/messages/${vm}/file?inline=1`, { headers: { cookie: ctx.staffA.client.cookie }, redirect: 'manual' });
     assert.equal(res.status, 302); assert.match(res.headers.get('location'), /inline=1/, '영상도 바로 재생');
     await ctx.staffA.client.ok('POST', `/api/chat/rooms/${P.g}/read`, {});
@@ -48,13 +48,13 @@ describe('메신저 2차', () => {
     const batch = crypto.randomUUID();
     const f = await up(ctx.owner, P.g, '많은사진.jpg', 'image/jpeg');
     await ctx.owner.ok('POST', `/api/chat/rooms/${P.g}/messages`, { body: '', file: f, batch, batchSize: 147 });
-    assert.equal(await lastChatNotif(ctx.staffA.id, P.g), '김대표: 📷 사진 147장');
+    assert.equal(await lastChatNotif(ctx.staffA.id, P.g), '김대표: 사진 147장');
     const f2 = await up(ctx.owner, P.g, '넘침.jpg', 'image/jpeg');
     assert.equal((await ctx.owner.req('POST', `/api/chat/rooms/${P.g}/messages`, { body: '', file: f2, batch: crypto.randomUUID(), batchSize: 201 })).status, 400);
     await ctx.staffA.client.ok('POST', `/api/chat/rooms/${P.g}/read`, {});
   });
 
-  test('답장 인용 라벨(로컬 10/25 사소 ②): 사진 묶음에 답장하면 reply.mime·n(장 수) — 화면은 파일 이름 대신 "📷 사진 3장" · 글에 답장은 n 1', async () => {
+  test('답장 인용 라벨(로컬 10/25 사소 ②): 사진 묶음에 답장하면 reply.mime·n(장 수) — 화면은 파일 이름 대신 "사진 3장" · 글에 답장은 n 1', async () => {
     const batch = crypto.randomUUID(); const ids = [];
     for (const n of ['x.jpg', 'y.jpg', 'z.jpg']) {
       const f = await up(ctx.owner, P.g, n, 'image/jpeg');
@@ -145,7 +145,7 @@ describe('메신저 2차', () => {
     const card = async (c, id = r.id) => (await c.ok('GET', `/api/chat/rooms/${P.g}`)).messages.find((x) => x.id === id);
     let c = await card(ctx.staffA.client);
     assert.deepEqual([c.kind, c.event.title, c.event.going, c.event.invited, c.event.response, c.event.location, c.event.cancelled], ['event', '현장 점검', 1, 3, 'needsAction', '강남점', false]);
-    assert.match(c.body, /^📅 현장 점검 · \d+월 \d+일 \(.\) 오[전후] \d+:00~오[전후] \d+:00$/);
+    assert.match(c.body, /^\[일정\] 현장 점검 · \d+월 \d+일 \(.\) 오[전후] \d+:00~오[전후] \d+:00$/);
     const t0 = Date.now() - 1500;
     await ctx.staffA.client.ok('POST', `/api/events/${r.eventId}/respond`, { response: 'accepted' });
     c = await card(ctx.staffA.client); assert.deepEqual([c.event.going, c.event.response], [2, 'accepted']);

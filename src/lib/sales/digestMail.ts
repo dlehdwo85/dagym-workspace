@@ -64,8 +64,8 @@ const cap = (s: DigestSection, list: DigestItem[]) => (s === 'soon' ? list.slice
 
 /** 제목: '[다짐·하이링크 영업실] 10/24(금) 오늘 입찰 9건 — 즉시 검토 3 · 마감 임박 2' (0인 칸은 뺌) · 215차: 정기 시각 전 [지금 보내기]는 앞에 '[시험 발송]' */
 export function digestSubject(fromName: string, d: Digest, test = false) {
-  const tail = [d.counts.now ? `즉시 검토 ${d.counts.now}` : null, d.counts.soon ? `마감 임박 ${d.counts.soon}` : null, d.counts.result ? `결과 ${d.counts.result}` : null].filter(Boolean).join(' · ');
-  return `${test ? '[시험 발송] ' : ''}[${fromName}] ${mdw(d.day)} 오늘 입찰 ${d.counts.total}건${tail ? ` — ${tail}` : ''}`;
+  const tail = [d.counts.now ? `즉시 검토 ${d.counts.now}` : null, d.counts.soon ? `마감 임박 ${d.counts.soon}` : null, d.counts.result ? `결과 ${d.counts.result}` : null].filter(Boolean).join(', ');
+  return `${test ? '[시험 발송] ' : ''}[${fromName}] ${mdw(d.day)} 오늘 입찰 ${d.counts.total}건${tail ? ` (${tail})` : ''}`;
 }
 const summary = (d: Digest) => `새 공고 ${d.counts.new}(즉시 검토 ${d.counts.now} · 검토 ${d.counts.review}) · 정정 ${d.counts.amend} · 취소 ${d.counts.cancel} · 마감 임박(D-3 이내) ${d.counts.soon}${d.counts.result ? ` · 결과(낙찰·유찰) ${d.counts.result}` : ''}`;
 /** #530 ⑧: 머리의 사업별 새 공고 수 — 두 묶음 이상일 때만 */

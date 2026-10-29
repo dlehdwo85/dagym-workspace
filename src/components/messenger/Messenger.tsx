@@ -65,7 +65,7 @@ const isLong = (b: string) => b.length > 600 || b.split('\n').length > 15;
 const lastPreview = (r: RoomRow) => {
   if (r.last_kind === 'sticker') return `(스티커) ${r.last_body ?? ''}`;
   if (r.last_kind === 'poll') return `📊 투표: ${r.last_body ?? ''}`;
-  if (r.last_file && !plain(r.last_body)) return /^image\//.test(r.last_mime ?? '') ? '📷 사진' : /^video\//.test(r.last_mime ?? '') ? '🎬 동영상' : `📎 ${r.last_file}`;
+  if (r.last_file && !plain(r.last_body)) return /^image\//.test(r.last_mime ?? '') ? '사진' : /^video\//.test(r.last_mime ?? '') ? '동영상' : `파일 ${r.last_file}`;
   return plain(r.last_body);
 };
 const TZ = 'Asia/Seoul';
@@ -77,8 +77,8 @@ export const shortTime = (s: string | null) => {
 };
 const dayLabel = (s: string) => dtf('ko-KR', { timeZone: TZ, year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(s));
 const plain = (s: string | null) => (s ?? '').replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/g, '@$1');
-/** 답장 인용·전달 미리보기의 파일 글(로컬 10/25 사소 ②): 사진 묶음은 파일 이름 대신 '📷 사진 3장' — 알림·방 목록 미리보기와 같은 꼴 */
-const fileText = (name: string | null, mime?: string | null, n = 1) => !name ? '' : /^image\//.test(mime ?? '') ? (n > 1 ? `📷 사진 ${n}장` : '📷 사진') : /^video\//.test(mime ?? '') ? (n > 1 ? `🎬 동영상 ${n}개` : '🎬 동영상') : `📎 ${name}`;
+/** 답장 인용·전달 미리보기의 파일 글(로컬 10/25 사소 ②): 사진 묶음은 파일 이름 대신 '사진 3장' — 알림·방 목록 미리보기와 같은 꼴 */
+const fileText = (name: string | null, mime?: string | null, n = 1) => !name ? '' : /^image\//.test(mime ?? '') ? (n > 1 ? `사진 ${n}장` : '사진') : /^video\//.test(mime ?? '') ? (n > 1 ? `동영상 ${n}개` : '동영상') : `파일 ${name}`;
 const fmtSize = (n: number | null) => (!n ? '' : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))}KB` : `${(n / 1024 / 1024).toFixed(1)}MB`);
 const render = (body: string, hl?: string) => body.split(/(@\[[^\]]+\]\([0-9a-f-]{36}\)|https?:\/\/[^\s<]+)/g).map((p, i) => {
   const m = /^@\[([^\]]+)\]\(([0-9a-f-]{36})\)$/.exec(p);
@@ -492,7 +492,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
   const members = data?.members ?? [];
   const toWire = (s: string) => members.filter((m) => m.id !== user.id).reduce((acc, m) => acc.split(`@${m.name}`).join(`@[${m.name}](${m.id})`),
     data?.room.canMentionAll ? s.replace(/(^|\s)@전체(?=$|[\s.,!?~])/g, `$1@[전체](${ALL_ID})`) : s); // B11 @전체
-  /** 사진 묶음 장 수(인용 라벨 '📷 사진 n장') — 화면에 있는 같은 묶음만 셈 */
+  /** 사진 묶음 장 수(인용 라벨 '사진 n장') — 화면에 있는 같은 묶음만 셈 */
   const bundleN = (x: Msg) => (x.batch_id ? msgs.filter((y) => y.batch_id === x.batch_id && !y.deleted).length : 1);
   const mergeMine = (mid: string, p: Partial<Msg>) => setMsgs((cur) => cur.some((m) => m.id === mid) ? cur : [...cur, { id: mid, room_id: id, author_id: user.id, author_name: user.name, created_at: new Date().toISOString(),
     edited_at: null, pinned_at: null, body: '', deleted: false, file_name: null, file_mime: null, file_size: null, task_id: null, mine: true, reactions: [], ...p }]);
@@ -1033,9 +1033,9 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
           // [+] 업무: 만든 업무를 방에 알리고(메시지 → 업무 연결) 모두가 바로 열 수 있게
           try {
             const t = await api(`/api/tasks/${tid}`); const title = t?.task?.title ?? t?.title ?? '새 업무';
-            const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body: `📌 새 업무: ${title}` } });
+            const r = await api(`/api/chat/rooms/${id}/messages`, { body: { body: `[새 업무] ${title}` } });
             await api(`/api/chat/messages/${r.id}/link`, { body: { taskId: tid } });
-            afterSend(r.id, { body: `📌 새 업무: ${title}`, task_id: tid });
+            afterSend(r.id, { body: `[새 업무] ${title}`, task_id: tid });
           } catch (e: any) { toast.error(e.message); }
         }} />}
     </div>
@@ -1274,7 +1274,7 @@ function EventModal({ roomId, draft, members, me, onClose, onSent }: { roomId: s
     setBusy(true);
     try {
       const r = await api(`/api/chat/rooms/${roomId}/event`, { body: { title: title.trim(), start: s, end: e, allDay, location: loc.trim() || undefined, attendeeIds: pick, ...(draft.fromMessage ? { fromMessage: draft.fromMessage } : {}) } });
-      onSent(r.id, { kind: 'event', body: `📅 ${title.trim()}`, event: { id: r.eventId, title: title.trim(), start_at: new Date(s).toISOString(), end_at: new Date(e).toISOString(), all_day: allDay, location: loc.trim(), cancelled: false, going: 1, invited: pick.length + 1, response: 'accepted' } });
+      onSent(r.id, { kind: 'event', body: `[일정] ${title.trim()}`, event: { id: r.eventId, title: title.trim(), start_at: new Date(s).toISOString(), end_at: new Date(e).toISOString(), all_day: allDay, location: loc.trim(), cancelled: false, going: 1, invited: pick.length + 1, response: 'accepted' } });
       toast.ok(pick.length ? `일정을 잡고 ${pick.length}명을 초대했습니다` : '일정을 잡았습니다');
       onClose();
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }

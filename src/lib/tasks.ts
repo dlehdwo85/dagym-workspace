@@ -414,7 +414,7 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
     if (co.length) await replaceCoAssignees(tx, u, { id: t.id, title: i.title, assignee_id: i.assigneeId ?? null }, co, 1, { quiet: opts.quiet, log: false }); // 만들 때는 'created' 기록에 함께
     if (i.teamId && i.teamMode === 'lead' && !i.assigneeId) { // 팀에 배정 → 팀장이 담당자를 정한다
       const leads = await tx<{ user_id: string }[]>`select user_id from team_members where team_id = ${i.teamId} and is_lead`;
-      await notify(tx, { userIds: leads.map((l) => l.user_id), type: 'task_assigned', title: `팀 업무 배정: ${i.title}`, body: `${u.name}님이 팀에 배정했습니다 — 담당자를 정해 주세요`,
+      await notify(tx, { userIds: leads.map((l) => l.user_id), type: 'task_assigned', title: `팀 업무 배정: ${i.title}`, body: `${u.name}님이 팀에 배정했습니다. 담당자를 정해 주세요`,
         link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, actorId: u.id, dedupeKey: `team_assign:${t.id}` });
     }
     for (const c of new Set(i.collaboratorIds ?? [])) {
@@ -811,7 +811,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       // 검수 12: 요청자(없으면 만든 사람)에게만. 요청자가 없고 만든 사람이 본인이면 승인권자에게
       const reviewTo = reqr && reqr !== u.id ? [reqr] : await approverIds(tx, cur.org_unit_id, cur.project_id);
       await notify(tx, { userIds: reviewTo, type: 'review_requested',
-        title: `검토 요청: ${title}`, body: `${u.name}님이 검토를 요청했습니다 — 승인 또는 반려해 주세요`, link: `/tasks/${id}`,
+        title: `검토 요청: ${title}`, body: `${u.name}님이 검토를 요청했습니다. 승인하거나 반려해 주세요`, link: `/tasks/${id}`,
         entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `review:${id}:${upd.version}`, meta: { kind: 'review' } });
     }
     if (statusEvent === 'approved' || statusEvent === 'review_rejected') {
@@ -1094,7 +1094,7 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
       if (mates.has(m)) { visibleMentions.push(m); mentionAt.set(m, mates.get(m)!); } else if (p.view) { visibleMentions.push(m); mentionAt.set(m, taskId); }
     }
     for (const at of new Set(mentionAt.values())) {
-      await notify(tx, { userIds: visibleMentions.filter((m) => mentionAt.get(m) === at), type: 'mention', title: `${u.name}님이 댓글에서 회원님을 언급했습니다`, body: `${t.title} — ${preview}`,
+      await notify(tx, { userIds: visibleMentions.filter((m) => mentionAt.get(m) === at), type: 'mention', title: `${u.name}님이 댓글에서 회원님을 언급했습니다`, body: `${t.title}: ${preview}`,
         link: `/tasks/${at}#c-${c.id}`, entityType: 'task', entityId: at, actorId: u.id, dedupeKey: `mention:${c.id}` });
     }
     // V13 8번 알림 대상 — 새 댓글: 담당·요청·만든 사람·협업자·이 업무에 댓글 단 사람 / 답글: 원 댓글 작성자 + 그 스레드 참여자. 멘션된 사람은 멘션 알림 1건만
@@ -1400,7 +1400,7 @@ export async function decideExtension(u: SessionUser, taskId: string, extId: str
     if (approve) await tx`update tasks set due_extend_count = due_extend_count + 1 where id = ${task.id}`;
     await activity(tx as unknown as Sql, 'task', task.id, u.id, approve ? 'due_extended' : 'due_extension_rejected', { from: x.from_date, to: x.to_date, reason: x.reason });
     if (!approve) await notify(tx as unknown as Sql, { userIds: [x.requested_by], type: 'review_result', title: `마감 연장 반려: ${cur.title}`,
-      body: `${u.name}님이 반려했습니다 — 마감은 그대로(${x.from_date ? md(x.from_date) : ''})`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `extend_done:${x.id}` });
+      body: `${u.name}님이 반려했습니다. 마감은 ${x.from_date ? `${md(x.from_date)} ` : ''}그대로입니다`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `extend_done:${x.id}` });
   });
   return { ok: true, approved: approve };
 }

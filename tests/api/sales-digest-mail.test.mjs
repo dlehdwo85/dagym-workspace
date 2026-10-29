@@ -102,7 +102,7 @@ test('#510 메일 정리(21라인 수준): 구역·번호·빈칸 숨김·같은
   const txt = await ctx.owner.req('GET', '/api/sales/digest?preview=text');
   assert.match(txt.headers.get('content-type'), /text\/plain/);
   const html = pv.body; const text = txt.body;
-  const subject = `[${FROM_NAME}] ${mdw(today)} 오늘 입찰 4건 — 즉시 검토 2 · 마감 임박 1`;
+  const subject = `[${FROM_NAME}] ${mdw(today)} 오늘 입찰 4건 (즉시 검토 2, 마감 임박 1)`;
   assert.equal(text.split('\n')[0], subject, text.slice(0, 300));
   assert.ok(html.includes('새 공고 3(즉시 검토 2 · 검토 1) · 정정 0 · 취소 1 · 마감 임박(D-3 이내) 1'), '머리 요약');
   assert.ok(html.includes('오늘 공고 전체 보기') && html.includes('맞춤 설정'));
@@ -160,7 +160,7 @@ test('#509 a·d 회사 SMTP 경로(워크인 발송 없음): 회사 주소는 �
   assert.equal(box.length, 1); const m = box[0];
   assert.equal(m.from.value[0].name, FROM_NAME); assert.equal(m.replyTo.value[0].address, 'office@mail.test');
   assert.ok(!m.to.value.some((x) => x.address === 'office@mail.test'), '회사 주소는 받는 사람에서 뺌');
-  assert.match(m.subject, /오늘 입찰 4건 — 즉시 검토 2 · 마감 임박 1$/); assert.ok(m.html.includes('data-digest="1"') && m.text.includes('■ 정정·취소 (1)'));
+  assert.match(m.subject, /오늘 입찰 4건 \(즉시 검토 2, 마감 임박 1\)$/); assert.ok(m.html.includes('data-digest="1"') && m.text.includes('■ 정정·취소 (1)'));
   const counts = (await ctx.owner.ok('GET', '/api/sales/digest/prefs')).last.counts;
   assert.deepEqual([counts.now, counts.review, counts.soon, counts.ref, counts.cancel, counts.mailVia], [2, 1, 1, 2, 1, 'email:smtp']);
   // 참고 [보기] = 마지막 메일의 검색어만 맞은 공고 · 메일 제목 링크(?id=) = 그 공고 한 건
