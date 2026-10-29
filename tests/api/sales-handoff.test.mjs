@@ -73,6 +73,15 @@ describe('영업 진행으로 넘기기', () => {
     assert.equal(r.eventIds.length, 0); assert.deepEqual(r.dates, []); assert.equal(r.due, addDays(today, 3)); assert.equal(r.taskIds.length, 1);
     const [t] = await sql`select assignee_id, requested_by from tasks where id = ${r.taskIds[0]}`; assert.deepEqual([t.assignee_id, t.requested_by], [ctx.staffA.id, ctx.staffA.id]);
   });
+  test('대표 #794: 담당 2명으로 넘기면 업무 1건(첫 사람 주 담당·나머지 공동 담당, 묶음 아님) — 댓글·첨부가 한 업무에 모임', async () => {
+    await put('building_sales_pipeline', { id: 'B794', name: '공동 담당 단지', households: 900, region: '경기', status: '영업 전', first_seen_at: today });
+    const r = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind: 'building', id: 'B794', assigneeIds: [ctx.staffA.id, ctx.ownerId] });
+    assert.equal(r.taskIds.length, 1, '업무 1건');
+    const [t] = await sql`select assignee_id, batch_id, lead_id from tasks where id = ${r.taskIds[0]}`;
+    assert.deepEqual([t.assignee_id, t.batch_id, t.lead_id], [ctx.staffA.id, null, r.leadId]);
+    assert.deepEqual((await sql`select user_id from task_assignees where task_id = ${r.taskIds[0]}`).map((x) => x.user_id), [ctx.ownerId], '두 번째 = 공동 담당');
+    assert.ok((await sql`select 1 from notifications where user_id = ${ctx.staffA.id} and type = 'task_assigned' and entity_id = ${r.taskIds[0]}`).length, '주 담당 배정 알림');
+  });
   test('영업 DB(신규단지·시설·협력사): 리드 + 원 행 영업 중 + 허브 화면 leadId', async () => {
     for (const [kind, id, tab, nameExp] of [['building', 'B1', 'buildings', '판교 새단지'], ['facility', 'F1', 'facilities', '수원 아파트 커뮤니티'], ['vendor', 'V1', 'vendors', '좋은관리(주)']]) {
       const r = await ctx.owner.ok('POST', '/api/sales/work/handoff', { kind, id, assigneeIds: [ctx.staffA.id] });

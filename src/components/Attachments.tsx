@@ -70,7 +70,8 @@ const isVideo = (a: any) => a.kind === 'file' && /^video\//.test(a.mime_type ?? 
 
 const SOURCE_LABEL: Record<string, string> = { upload: '업로드', google_drive: 'Google Drive', chatgpt: 'ChatGPT 결과물', notion: 'Notion', web: '웹 링크', other: '기타', library: '자료실', sales_auto: '공고 첨부(자동)' };
 
-export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }: { items: any[]; taskId?: string; eventId?: string; canEdit: boolean; onChange: () => void; meId: string }) {
+/** readOnly(#794 함께 담당자 첨부): 보기·미리보기·내려받기만 — 올리기·고치기·버전 버튼 없음, 지우기는 내가 올린 것만 */
+export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, readOnly }: { items: any[]; taskId?: string; eventId?: string; canEdit: boolean; onChange: () => void; meId: string; readOnly?: boolean }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState('');
@@ -143,7 +144,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
   }
 
   return (
-    <DropZone onFiles={(f) => upload(f)} disabled={!canEdit || !!busy} label={taskId ? '놓으면 이 업무에 첨부됩니다' : '놓으면 이 일정에 첨부됩니다'} testid="attach-drop">
+    <DropZone onFiles={(f) => upload(f)} disabled={readOnly || !canEdit || !!busy} label={taskId ? '놓으면 이 업무에 첨부됩니다' : '놓으면 이 일정에 첨부됩니다'} testid="attach-drop">
       {photos.length > 0 && (
         <div className="mb-2" data-testid="photo-section">
           {photos.length > PHOTO_PREVIEW && <div className="mb-1 flex items-center gap-2 text-xs text-ink-2"><b className="text-ink">사진 {photos.length}장</b>
@@ -189,6 +190,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
                 {isHeic(a) && <span className="text-amber-700" data-testid="att-heic">아이폰 사진(HEIC) — PC 에서 안 보이면 내려받아 보기</span>}
                 {a.captured_at && isImage(a) && <span>촬영 {fmtDateTime(a.captured_at)}</span>}{/* 로컬 검수 10/17: 문서(txt 등)는 "촬영" 아님 */}
                 <span>{a.created_by_name}</span>
+                {a.from_name && <span className="font-medium text-violet-700" data-testid="att-from">{a.from_name} 업무</span>}
                 {a.kind === 'link' && <span className="truncate">원본: {(() => { try { return new URL(a.url).hostname; } catch { return ''; } })()}</span>}
               </div>
             </div>
@@ -205,7 +207,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
               <button type="button" onClick={() => startEdit(a)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-input border border-accent-200 bg-accent-50 px-2 text-xs font-medium text-accent-700 hover:bg-accent-100"
                 title={EDIT_TITLE[m]} data-testid="att-edit" data-mode={m}>{m === 'sheet' ? <Table2 className="size-3.5" /> : <PenLine className="size-3.5" />}{m === 'doc' && a.doc_id ? '편집 계속' : '고치기'}</button>); })()}
             {a.kind === 'file' && canEdit && <button type="button" onClick={() => { setVerTarget(a); verRef.current?.click(); }} className="flex size-11 shrink-0 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100 sm:size-8" aria-label={`${a.file_name} 새 버전 올리기`} title="내려받아 고친 파일을 새 버전으로(이전 버전 보관)" data-testid="att-new-version"><Upload className="size-4" /></button>}
-            {a.kind === 'file' && (Number(a.version ?? 1) > 1 || a.doc_id) && <button type="button" onClick={() => setVersionsOf(a)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold text-ink-2 hover:bg-slate-200" title="버전 기록·되돌리기" data-testid="att-versions"><History className="size-3" />v{a.version ?? 1}</button>}
+            {a.kind === 'file' && !readOnly && (Number(a.version ?? 1) > 1 || a.doc_id) && <button type="button" onClick={() => setVersionsOf(a)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold text-ink-2 hover:bg-slate-200" title="버전 기록·되돌리기" data-testid="att-versions"><History className="size-3" />v{a.version ?? 1}</button>}
             {(a.created_by === meId || canEdit) && <button onClick={() => remove(a.id)} className="rounded p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" aria-label="첨부 삭제"><Trash2 className="size-4" /></button>}
             </div>
           </li>
@@ -214,7 +216,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId }:
       </ul>
       {canEdit && <div className="mt-2"><DropHint onClick={() => pick.open(fileRef)} disabled={!!busy} /></div>}
       {pick.node && <div className="mt-2">{pick.node}</div>}
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <div className={cx('mt-2 flex flex-wrap gap-1.5', readOnly && 'hidden')}>
         <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="file-input" />
         <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
         <input ref={albumRef} type="file" accept={PHOTO_ACCEPT} multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="album-input" />

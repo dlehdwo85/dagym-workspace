@@ -134,6 +134,27 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     setTimeout(() => { try { document.querySelector(h)?.scrollIntoView({ behavior: 'smooth' }); } catch { /* 잘못된 선택자 */ } }, 100);
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 대표 #794: 열어 둔 상세도 다른 담당자의 댓글·첨부·체크가 보이게 — 15초마다 가벼운 '바뀜 표시'만 묻고, 바뀌었을 때만 다시 읽기(가려진 탭은 묻지 않음)
+  const stamp = useRef<string | null>(null);
+  useEffect(() => {
+    stamp.current = null;
+    let alive = true;
+    const tick = async () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        const r = await api<{ stamp: string }>(`/api/tasks/${id}/stamp`);
+        if (!alive) return;
+        if (stamp.current && r.stamp !== stamp.current) reload();
+        stamp.current = r.stamp;
+      } catch { /* 오프라인·권한 — 다음 차례에 */ }
+    };
+    tick();
+    const h = setInterval(tick, 15_000);
+    const onVis = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; clearInterval(h); document.removeEventListener('visibilitychange', onVis); };
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 저장 버튼 없이 자동 기록 (WORKIN_AUTOSAVE): 제목은 칸을 벗어나거나 Enter, 설명은 입력을 멈춘 1초 뒤·칸을 벗어날 때
   const [descState, setDescState] = useState<'' | 'saving' | 'saved' | 'error'>('');
   const descTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,6 +189,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const t = data.task;
   const perms = data.perms;
   const userName = (uid: string | null) => dir.users.find((u) => u.id === uid)?.name ?? '';
+  // 대표 #794: 같이 받은 업무(각자 1건씩)의 댓글도 한 흐름 — 다른 업무에서 쓴 댓글은 '○○ 업무에서' 꼬리
+  const mateName = new Map<string, string>((data.batchMates ?? []).map((b: any) => [b.id, b.assignee_name ?? '담당자 없음']));
+  const comments: any[] = data.comments.map((c: any) => (c.task_id && c.task_id !== id ? { ...c, from_name: mateName.get(c.task_id) ?? '같이 받은' } : c));
 
   // V32 4 마감 연장: 요청자 = 바로, 담당자 = 요청(사유 필수)
   const extRole = extendRole(t, user.id);
@@ -673,6 +697,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         </section>
 
         </>}
+        {/* 대표 #794: 같이 받은 업무의 체크리스트 — 담당자별 칸, 보기만(체크는 각자 자기 업무에서) */}
+        {data.batchChecklist?.length > 0 && <MateChecklists items={data.batchChecklist} />}
         </div>
         {/* V13 11번: PC 는 오른쪽 320px 고정 열, 휴대폰·좁은 패널은 "세부 정보" 요약 한 줄(누르면 펼침) */}
         <aside className={cx('relative z-10 min-w-0', wide && 'lg:sticky lg:top-16 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:self-start lg:rounded-card lg:border lg:border-line lg:p-2')} aria-label="세부 정보" data-testid="detail-aside">
@@ -764,6 +790,13 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <span className="flex gap-0.5">{data.attachments.slice(0, 3).map((a: any) => <FileKindIcon key={a.id} a={a} small />)}</span>
           </>}</h2>
           {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.edit} onChange={reload} meId={user.id} />}
+          {/* 대표 #794: 같이 받은 업무(각자 1건씩)에 다른 담당자가 올린 첨부 — 보기·내려받기 */}
+          {!fold.att && data.batchAttachments?.length > 0 && (
+            <div className="mt-3 rounded-card border border-violet-200 bg-white/70 p-2" data-testid="mate-attachments">
+              <p className="mb-1.5 text-xs font-semibold text-violet-900">함께 담당자 첨부 <span className="tabular-nums">{data.batchAttachments.length}</span></p>
+              <Attachments items={data.batchAttachments} canEdit={false} readOnly onChange={reload} meId={user.id} />
+            </div>
+          )}
           {!fold.att && <SourceFilesButton taskId={id} t={t} attachments={data.attachments} onDone={reload} />}
           {!fold.att && <TaskMail taskId={id} onChange={reload} draft={mailDraft} onDraftUsed={() => setMailDraft(null)} />}
           {/* V28-1 이 업무의 AI 비서 — 자료·첨부 바로 아래(초안 → 메일·문자 시안 창) */}
@@ -802,8 +835,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           </div>
           <ul className={cx('space-y-4', tab === 'history' && 'hidden')} data-testid="comments">
             {/* V13 8번: 댓글 + 들여쓴 답글(1단계) */}
-            {data.comments.filter((c: any) => !c.parent_id).map((c: any) => (
-              <CommentThread key={c.id} c={c} replies={data.comments.filter((r: any) => r.parent_id === c.id)} taskId={id} meId={user.id}
+            {comments.filter((c: any) => !c.parent_id).map((c: any) => (
+              <CommentThread key={c.id} c={c} replies={comments.filter((r: any) => r.parent_id === c.id)} taskId={id} meId={user.id}
                 mentionable={mentionable.data?.users ?? []} onChange={() => { reload(); broadcastRefresh(); }} />))}
             {!data.comments.length && tab === 'comments' && <li className="text-xs text-ink-3">아직 댓글이 없습니다. 진행 상황이나 질문을 남겨 주세요.</li>}
           </ul>
@@ -1233,6 +1266,33 @@ function CommentThread({ c, replies, taskId, meId, mentionable, onChange }: { c:
     </li>
   );
 }
+/** #794 같이 받은 업무의 체크리스트(담당자별) — 보기만 */
+function MateChecklists({ items }: { items: any[] }) {
+  const groups = new Map<string, any[]>();
+  for (const c of items) groups.set(c.task_id, [...(groups.get(c.task_id) ?? []), c]);
+  return (
+    <section className="rounded-card border border-violet-200 bg-violet-50/40 p-3" data-testid="mate-checklists">
+      <h2 className="mb-1.5 text-sm font-semibold text-violet-900">같이 받은 사람 체크리스트</h2>
+      <div className="space-y-2.5">
+        {[...groups].map(([tid, list]) => (
+          <div key={tid} data-testid="mate-checklist">
+            <p className="mb-0.5 flex items-center gap-2 text-xs font-semibold text-ink-2">{list[0].from_name ?? '담당자 없음'}<span className="tabular-nums font-medium">{list.filter((c) => c.done).length}/{list.length}</span></p>
+            <ul className="space-y-0.5">
+              {list.map((c) => (
+                <li key={c.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" disabled checked={c.done} className="size-4 accent-green-600" aria-label={`${c.from_name ?? ''} — ${c.text}`} />
+                  <span className={cx('min-w-0 flex-1 break-words', c.done && 'text-ink-3 line-through')}>{c.text}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <p className="mt-1.5 text-[11px] text-ink-3">체크는 각자 자기 업무에서 합니다</p>
+    </section>
+  );
+}
+
 function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: string; onChange: () => void; onReply: () => void; small?: boolean }) {
   const [edit, setEdit] = useState<string | null>(null);
   const [pick, setPick] = useState(false);
@@ -1257,6 +1317,7 @@ function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: stri
         {/* 대표 실기기: 이름이 왼쪽(아바타·직책)과 위(이름)에 두 번 → 위 한 줄만: 색 원 + 직책 + 이름 · 시각 (다른 화면의 "동재 대표 이동재"와 같은 모양) */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-2" data-testid="comment-head">
           <Avatar id={c.author_id} name={c.author_name} size={small ? 20 : 22} /><b className="text-sm text-ink">{c.author_name}</b><RoleBadge role={dir.users.find((x) => x.id === c.author_id)?.role} guest={dir.users.find((x) => x.id === c.author_id)?.is_demo} /><span>· {fmtDateTime(c.created_at)}{c.edited_at && ' (수정됨)'}</span>
+          {c.from_name && <span className="rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" data-testid="comment-from">{c.from_name} 업무에서</span>}
         </div>
         {edit === null ? <div className="mt-0.5 whitespace-pre-wrap leading-relaxed">{renderMentions(c.body)}</div> : (
           <form onSubmit={save} className="mt-1 flex gap-1.5"><input autoFocus className={cx(inputCls, 'h-8')} value={edit} onChange={(e) => setEdit(e.target.value)} aria-label="댓글 수정" onKeyDown={(e) => { if (e.key === 'Escape') setEdit(null); }} /><Button size="sm">저장</Button></form>

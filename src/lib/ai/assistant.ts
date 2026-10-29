@@ -97,10 +97,11 @@ const TOOLS: AiTool[] = [
       priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }, projectId: str('프로젝트 id (선택)'), orgUnitId: str('조직 id (선택)'),
       checklist: { type: 'array', items: { type: 'string' }, description: '체크리스트 (선택). 고객에게 보여 주는 단계는 "데모" 대신 "시연"(예: 플랫폼 시연 일정 잡기) — "데모"는 체험 계정과 헷갈림' },
     }, required: ['title'] } },
-  { name: 'propose_create_tasks', description: '같은 업무를 여러 담당자에게 각각 1건씩 만들기를 제안한다(첨부 자료를 읽고 정리할 때). 체크리스트·설명(메모)·마감 시각·요청자·첨부 자료를 함께. [확인] 후 생성.',
+  { name: 'propose_create_tasks', description: '여러 담당자에게 같은 업무 만들기를 제안한다(첨부 자료를 읽고 정리할 때). 기본은 한 업무를 함께 담당(1건, 첫 사람이 주 담당 — 댓글·첨부·체크가 한곳에 모임). 사용자가 "각자·각각·한 명씩 따로"라고 분명히 말했을 때만 mode=each(사람마다 1건). 체크리스트·설명(메모)·마감 시각·요청자·첨부 자료를 함께. [확인] 후 생성.',
     input_schema: { type: 'object', properties: {
       title: str('업무 제목'), description: str('설명·메모 (자료 요약, 촬영 팁 등)'),
-      assigneeIds: { type: 'array', items: { type: 'string' }, description: '담당자 id 목록 (list_people 로 찾기)' },
+      assigneeIds: { type: 'array', items: { type: 'string' }, description: '담당자 id 목록 (list_people 로 찾기). together 면 첫 사람이 주 담당' },
+      mode: { type: 'string', enum: ['together', 'each'], description: 'together(기본) = 함께 담당 1건 · each = 사용자가 각자 따로 만들라고 분명히 말한 경우만' },
       dueDate: str('마감일 YYYY-MM-DD'), dueTime: str('마감 시각 HH:MM (선택)'), priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
       requestedById: str('요청자 id (기본: 요청한 사람)'),
       checklist: { type: 'array', items: { type: 'string' }, description: '체크리스트 항목 (예: 자료 표의 각 줄)' },
@@ -242,7 +243,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다.
 - 실행 상태는 도구 결과·대화 기록 표시 그대로 말하세요(대표 지적 10/19 ④): 이번 답에서 만든 제안 = "확인을 누르면 반영됩니다". 대화 기록의 [실행됨] = 이미 반영된 것 → "만들었습니다/바꿨습니다(화면의 [열기])"라고 하고 다시 확인을 안내하지 마세요. [취소됨] = 반영 안 됨. 도구 오류 = "하지 못했습니다: 이유".
 [할 수 있는 일 — 아래 도구로 되는 일을 "안 된다·화면에서 직접 하세요"라고 답하지 마세요(대표 지적 10/19 ②). 되는지 모르겠으면 도구 목록을 먼저 보고, 정말 도구가 없을 때만 안 된다고 하세요]
-- 업무: 찾기 search_tasks · 상세 get_task · 만들기 propose_create_task(한 사람)·propose_create_tasks(여러 사람 각각) · 고치기 propose_update_task(담당자 변경·마감일·마감 시각·상태·우선순위·제목) · 댓글 propose_comment · 자료 첨부 propose_attach_file
+- 업무: 찾기 search_tasks · 상세 get_task · 만들기 propose_create_task(한 사람)·propose_create_tasks(여러 사람 — 기본 함께 담당 1건, '각자'라고 하면 사람마다) · 고치기 propose_update_task(담당자 변경·마감일·마감 시각·상태·우선순위·제목) · 댓글 propose_comment · 자료 첨부 propose_attach_file
 - 일정: 보기 list_events · 빈 시간 find_free_time · 만들기 propose_create_event · 시간 변경·취소 propose_update_event
 - 문자·견적서(V19): 문자 초안 propose_draft_sms(보내기는 사람이 휴대폰 문자앱에서) · 견적서 list_quote_companies → propose_draft_quote(금액은 서버 재계산, A4 1장) · 양식 propose_create_quote_template. 전화번호·금액·품목을 지어내지 마세요.
 - 기밀·회사 설정(관리자): 기밀 후보 list_confidential_suggestions · 등급 바꾸기 propose_set_confidential · 설정 보기 get_company_settings · 설정 바꾸기 propose_update_company_settings(기밀 단어·첨부 자동 저장·AI 회사 정보)
@@ -569,8 +570,11 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         checklist: Array.isArray(input.checklist) ? input.checklist.map((x: unknown) => String(x).slice(0, 300)).filter(Boolean).slice(0, 100) : undefined,
         assigneeIds: ids, approvalRequired: false });
       const names = ids.map((id) => { const p = people.find((x) => x.id === id)!; return `${p.name}${p.title ? ` · ${p.title}` : ''}`; }); // V13 13번 이름·직책
-      return propose(c, 'create_tasks', `업무 ${ids.length}건 만들기: ${i.title} — ${names.join('·')}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`,
-        { input: i, attachFileIds: files }, { assignees: names, due: i.dueDate ? `${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''}` : null, checklist: i.checklist ?? [], description: clip(i.description ?? '', 600), files: files.length });
+      // 대표 #794: 여러 명이면 기본 '함께 담당 1건' — 사람마다 따로 만들면 댓글·첨부가 서로 안 보여 일이 갈라짐. '각자'는 분명히 말한 경우만
+      const each = input.mode === 'each' && ids.length > 1;
+      const what = ids.length > 1 ? (each ? `업무 ${ids.length}건 만들기(각자 1건씩)` : `업무 1건 만들기(${ids.length}명 함께 담당)`) : '업무 만들기';
+      return propose(c, 'create_tasks', `${what}: ${i.title} — ${names.join('·')}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`,
+        { input: i, attachFileIds: files, mode: each ? 'each' : 'together' }, { assignees: names, due: i.dueDate ? `${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''}` : null, checklist: i.checklist ?? [], description: clip(i.description ?? '', 600), files: files.length, mode: each ? 'each' : 'together' });
     }
     case 'propose_update_task': {
       const d = await getTaskDetail(u, String(input.taskId));
@@ -1083,7 +1087,11 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
       case 'create_task': { const r: any = await createTask(u, taskInput.parse(x)); result = { taskId: r.id, link: `/tasks/${r.id}` }; break; }
       case 'create_tasks': {
         const { createTasksForAssignees } = await import('../tasks');
-        const r: any = await createTasksForAssignees(u, taskInput.parse(x.input));
+        const ti = taskInput.parse(x.input);
+        // #794: 예전 제안(mode 없음)은 만들던 대로 각자, 새 제안은 기본 함께 담당 1건(첫 사람 = 주 담당)
+        const ids0 = [...new Set(ti.assigneeIds ?? [])];
+        const r: any = (x.mode ?? 'each') === 'each' || ids0.length < 2 ? await createTasksForAssignees(u, ti)
+          : await createTask(u, { ...ti, assigneeIds: undefined, assigneeId: ids0[0], coAssigneeIds: ids0.slice(1) });
         const ids: string[] = r.ids ?? [r.id];
         for (const t of ids) for (const f of x.attachFileIds ?? []) await attachLibraryToTask(u, f, t);
         result = { taskIds: ids, link: ids.length === 1 ? `/tasks/${ids[0]}` : `/tasks?view=requested` };

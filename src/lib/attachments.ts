@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from './db';
 import { loadTaskForUser } from './access';
+import { loadTaskOrBatchMate } from './taskBatch';
 import { loadEvent } from './events';
 import { badRequest, forbidden, notFound } from './errors';
 import { activity } from './log';
@@ -29,6 +30,8 @@ const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|ps1|vbs|jar|apk|ipa|dll|sh)$/i;
 export async function assertAttachTarget(u: SessionUser, taskId?: string | null, eventId?: string | null, need: 'view' | 'edit' = 'edit') {
   if (!!taskId === !!eventId) throw badRequest('업무 또는 일정 중 하나에 첨부해야 합니다');
   if (taskId) {
+    // #794 '각자 1건씩' 묶음: 같이 받은 다른 업무를 볼 수 있으면 첨부 보기·내려받기만(올리기·지우기·고치기는 그 업무 사람만)
+    if (need === 'view') { const r = await loadTaskOrBatchMate(u, taskId); if (r.mate) return { perms: { edit: false, manage: false } }; }
     const { perms } = await loadTaskForUser(u, taskId);
     // V14 50: 업무를 볼 수 있는 사람은 첨부 올리기 가능, 남이 올린 첨부 삭제는 요청자·담당자만
     void need;
@@ -57,6 +60,7 @@ export async function createAttachment(u: SessionUser, i: z.infer<typeof attachm
       values (${i.taskId ?? null}, ${i.eventId ?? null}, 'link', ${i.url}, ${i.docTitle ?? i.url}, ${i.docVersion ?? null},
         ${i.docBaseDate ?? null}, ${i.docOwner ?? null}, ${source}, ${u.id}) returning id`;
     await activity(sql, i.taskId ? 'task' : 'event', (i.taskId ?? i.eventId)!, u.id, 'link_attached', { title: i.docTitle ?? i.url, url: i.url });
+    if (i.taskId) await (await import('./taskBatch')).notifyTaskFile(sql, u, i.taskId, i.docTitle ?? i.url, a.id).catch(() => {}); // #794
     return { id: a.id };
   }
   if (!i.fileName || !i.size) throw badRequest('파일 이름과 크기가 필요합니다');

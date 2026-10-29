@@ -51,6 +51,7 @@ export const NOTIFICATION_TYPES = {
   event_changed: '일정 변경',
   recurring_created: '반복 업무 생성',
   comment: '업무 댓글·답글',
+  task_file: '업무 새 첨부(같은 업무의 다른 담당·같이 받은 업무 — 안 읽은 동안은 1건으로 묶음)',
   sync_error: '동기화 오류',
   event_reminder: '일정 시작 전',
   weekly_report: '주간 보고',

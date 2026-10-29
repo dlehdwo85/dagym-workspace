@@ -19,5 +19,7 @@ export const POST = handler<{ id: string }>(async ({ req, user, params }) => {
   await activity(sql, a.task_id ? 'task' : 'event', a.task_id ?? a.event_id, user.id, 'file_attached', { name: a.file_name, size });
   // V38 4: 업무 첨부 → 자료실 자동 등록(같은 파일, 업무를 볼 수 있는 사람만). 실패해도 첨부는 그대로
   const libraryId = await (await import('@/lib/library')).registerTaskAttachment(user, a as any, size).catch(() => null);
+  // #794 같은 업무의 다른 담당·같이 받은 업무 담당에게 새 첨부 알림(안 읽은 동안은 1건으로 묶음)
+  if (a.task_id) await (await import('@/lib/taskBatch')).notifyTaskFile(sql, user, a.task_id, a.file_name, a.id).catch(() => {});
   return { ok: true, id: a.id, libraryId };
 });

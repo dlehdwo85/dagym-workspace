@@ -2053,12 +2053,12 @@ describe('WORKIN_V12 8번 자료로 업무 일괄 생성 (가짜 Anthropic)', ()
     return init.id;
   };
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-  test('사진 첨부 → 비전 입력, create_tasks 제안(담당자별·체크리스트·메모·마감 시각) → 확인하면 각자 1건 + 원본 첨부', async () => {
+  test('사진 첨부 → 비전 입력, create_tasks 제안(담당자별·체크리스트·메모·마감 시각, 각자 — mode=each) → 확인하면 각자 1건 + 원본 첨부', async () => {
     const img = await up(ctx.owner, '촬영 요청서.png', 'image/png', png);
     const before = (await fakeState()).anthropic.length;
     const checklist = ['1 지점 외관', '2 내부 전경', '3 기구 근접', '4 트레이너', '5 회원 운동', '6 이벤트 배너', '7 야간 조명'];
     await queue([{ content: [{ type: 'tool_use', id: 'c1', name: 'propose_create_tasks', input: { title: '각 지점 촬영 자료 받아오기', assigneeIds: [ctx.staffA.id, ctx.managerA.id],
-      dueDate: addDays(today, 5), dueTime: '14:00', description: '요청서 7개 게시물용 사진 — 촬영 팁: 자연광', checklist, attachFileIds: [img] } }], stop_reason: 'tool_use' },
+      dueDate: addDays(today, 5), dueTime: '14:00', description: '요청서 7개 게시물용 사진 — 촬영 팁: 자연광', checklist, attachFileIds: [img], mode: 'each' } }], stop_reason: 'tool_use' },
       { content: [{ type: 'text', text: '2명에게 각각 만들 업무를 준비했습니다. 확인을 누르면 만들어집니다.' }], stop_reason: 'end_turn' }]);
     const r = await ctx.owner.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '이직원·최매니저에게 각 지점 자료 받아오라고 배정해줘' }], fileIds: [img] });
     const req0 = (await fakeState()).anthropic.slice(before)[0].body;
@@ -2076,6 +2076,19 @@ describe('WORKIN_V12 8번 자료로 업무 일괄 생성 (가짜 Anthropic)', ()
       assert.equal(d.checklist.length, 7); assert.equal(d.task.due_time?.slice(0, 5), '14:00'); assert.match(d.task.description, /촬영 팁/);
       assert.equal(d.attachments.length, 1); assert.equal(d.attachments[0].file_name, '촬영 요청서.png');
     }
+    assert.match(p.summary, /^업무 2건 만들기\(각자 1건씩\)/);
+  });
+  test('대표 #794: create_tasks 기본(mode 없음) = 함께 담당 1건(첫 사람 주 담당·나머지 공동 담당) — 댓글·첨부가 한 업무에 모임', async () => {
+    await queue([{ content: [{ type: 'tool_use', id: 'g1', name: 'propose_create_tasks', input: { title: '#794 함께 할 일', assigneeIds: [ctx.staffA.id, ctx.managerA.id], dueDate: addDays(today, 3) } }], stop_reason: 'tool_use' },
+      { content: [{ type: 'text', text: '두 분이 함께 담당하는 업무를 준비했습니다.' }], stop_reason: 'end_turn' }]);
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { messages: [{ role: 'user', text: '이직원·최매니저에게 함께 할 일 배정해줘' }] });
+    const p = r.proposals[0];
+    assert.equal(p.kind, 'create_tasks'); assert.match(p.summary, /^업무 1건 만들기\(2명 함께 담당\)/); assert.equal(p.preview.mode, 'together');
+    const done = await ctx.owner.ok('POST', `/api/ai/proposals/${p.id}`, { accept: true });
+    assert.equal(done.taskIds.length, 1, '업무 1건');
+    const [t] = await sql`select assignee_id, batch_id from tasks where id = ${done.taskIds[0]}`;
+    assert.deepEqual([t.assignee_id, t.batch_id], [ctx.staffA.id, null], '첫 사람 = 주 담당, 묶음 아님');
+    assert.deepEqual((await sql`select user_id from task_assignees where task_id = ${done.taskIds[0]}`).map((x) => x.user_id), [ctx.managerA.id], '두 번째 = 공동 담당');
   });
   test('모르는 담당자 id·다른 회사 자료는 거절, 자료로 채우기(구조화 출력)', async () => {
     await queue([{ content: [{ type: 'tool_use', id: 'd1', name: 'propose_create_tasks', input: { title: 'x', assigneeIds: ['00000000-0000-4000-8000-000000000000'] } }], stop_reason: 'tool_use' },

@@ -266,7 +266,10 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     where t.id = ${id}`, accessibleUnitIds(u, sql)]);
   const { openRound, stepApprovers } = await import('./approvals');
   const { deadlineRisk } = await import('./availability');
-  const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks, approvals, fields, risk, batchMates, collabTeams, [hasTeams]] = await Promise.all([
+  // 대표 #794: '각자 1건씩' 묶음이면 같이 받은 업무의 댓글(한 흐름)·첨부·체크리스트도 함께 보인다
+  const mateIds = t.batch_id ? await (await import('./taskBatch')).batchMateIds(sql, id) : [];
+  const thread = [id, ...mateIds];
+  const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks, approvals, fields, risk, batchMates, collabTeams, [hasTeams], batchAttachments, batchChecklist] = await Promise.all([
     sql`select u.id, u.name from task_collaborators c join users u on u.id = c.user_id where c.task_id = ${id} order by u.name`,
     sql`select ci.id, ci.text, ci.done, ci.sort, ci.done_at, ci.assignee_id, au.name as assignee_name from task_checklist_items ci left join users au on au.id = ci.assignee_id where ci.task_id = ${id} order by ci.sort, ci.id`,
     sql`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where t.parent_id = ${id} and t.deleted_at is null
@@ -275,11 +278,11 @@ export async function getTaskDetail(u: SessionUser, id: string) {
         where d.task_id = ${id} and dt.deleted_at is null`,
     // V13 8번: 답글(parent_id)·반응. 지운 댓글은 답글이 있을 때만 "삭제된 댓글"로 남긴다
     sql`select c.id, case when c.deleted_at is null then c.body else '' end as body, c.mentions, c.created_at, c.edited_at, c.author_id, u.name as author_name,
-          c.parent_id, (c.deleted_at is not null) as deleted,
+          c.parent_id, (c.deleted_at is not null) as deleted, c.task_id,
           coalesce((select json_agg(json_build_object('emoji', g.emoji, 'n', g.n, 'mine', g.mine, 'names', g.names) order by g.first)
             from (select r.emoji, count(*)::int n, bool_or(r.user_id = ${u.id}) mine, array_agg(ru.name order by r.created_at) names, min(r.created_at) first
               from comment_reactions r join users ru on ru.id = r.user_id where r.comment_id = c.id group by r.emoji) g), '[]') as reactions
-        from comments c join users u on u.id = c.author_id where c.task_id = ${id}
+        from comments c join users u on u.id = c.author_id where c.task_id = any(${thread}::uuid[])
           and (c.deleted_at is null or exists (select 1 from comments r where r.parent_id = c.id and r.deleted_at is null)) order by c.created_at`,
     sql`select a.*, u.name as created_by_name from attachments a join users u on u.id = a.created_by
         where a.task_id = ${id} and a.deleted_at is null and a.upload_status = 'ready' order by a.created_at`,
@@ -295,6 +298,13 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     // P2 조직 개편: 함께하는 부서(조직이 있는 회사만 칸을 보임)
     sql`select tm.id, tm.name, tm.color, tm.kind from task_teams ct join teams tm on tm.id = ct.team_id where ct.task_id = ${id} order by tm.name`,
     sql<{ x: boolean }[]>`select exists (select 1 from teams where tenant = ${tenantOf(u)} and not archived) as x`,
+    // #794 같이 받은 업무의 첨부(보기·내려받기)와 체크리스트(담당자별, 보기만)
+    mateIds.length ? sql`select a.*, u.name as created_by_name, fa.name as from_name from attachments a join users u on u.id = a.created_by
+        join tasks ft on ft.id = a.task_id left join users fa on fa.id = ft.assignee_id
+        where a.task_id = any(${mateIds}::uuid[]) and a.deleted_at is null and a.upload_status = 'ready' order by a.created_at` : Promise.resolve([]),
+    mateIds.length ? sql`select ci.id, ci.task_id, ci.text, ci.done, ci.done_at, ft.status as task_status, fa.name as from_name from task_checklist_items ci
+        join tasks ft on ft.id = ci.task_id left join users fa on fa.id = ft.assignee_id
+        where ci.task_id = any(${mateIds}::uuid[]) order by fa.name, ci.task_id, ci.sort, ci.id` : Promise.resolve([]),
   ]);
   const pending = t.status === 'review' ? approvals.find((a) => a.status === 'pending' && a.round === approvals[0]?.round) : null;
   const canDecide = pending ? (await stepApprovers(sql, t.org_unit_id, pending)).includes(u.id) : false;
@@ -314,7 +324,7 @@ export async function getTaskDetail(u: SessionUser, id: string) {
     const [rv] = await sql<{ id: string; name: string }[]>`select u2.id, u2.name from tasks r join users u2 on u2.id = r.assignee_id where r.review_of = ${id} and r.deleted_at is null and r.status <> 'done' limit 1`;
     reviewer = rv ?? (t.requested_by && t.requested_by !== t.assignee_id ? { id: t.requested_by, name: t.requested_by_name ?? '' } : null);
   }
-  return { reviewTarget: reviewTarget ?? null, reviewer, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff, coAssign: reassign || atLeast(u, 'admin') || !t.assignee_id }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, collabTeams, orgHasTeams: !!hasTeams?.x, checklist, subtasks, dependencies: deps, comments, attachments, history: groupFileHistory(history as unknown as { action: string; actor_id: string | null; created_at: Date; changes: any }[]).slice(0, 100), timeBlocks: blocks, approvals, fields, risk, batchMates };
+  return { reviewTarget: reviewTarget ?? null, reviewer, speed, task: t, perms: { ...perms, decide: canDecide, reassign: reassign || !t.assignee_id, handoff, coAssign: reassign || atLeast(u, 'admin') || !t.assignee_id }, handoff: pendingHandoff ? { ...pendingHandoff, canDecide: canDecideHandoff } : null, collaborators, collabTeams, orgHasTeams: !!hasTeams?.x, checklist, subtasks, dependencies: deps, comments, attachments, history: groupFileHistory(history as unknown as { action: string; actor_id: string | null; created_at: Date; changes: any }[]).slice(0, 100), timeBlocks: blocks, approvals, fields, risk, batchMates, batchAttachments, batchChecklist };
 }
 
 async function validateRefs(sql: Sql, u: SessionUser, i: TaskInput, orgUnitId: string) {
@@ -1051,8 +1061,10 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
   if (!body) throw badRequest('내용을 입력하세요');
   // V13 8번: 답글은 1단계 — 답글에 답하면 같은 스레드(원 댓글)에 붙는다
   let parent: { id: string; author_id: string } | null = null;
+  const { batchMateIds, batchMatePeople } = await import('./taskBatch');
+  const mateIds = await batchMateIds(sql, taskId); // #794 '각자 1건씩' 묶음: 댓글은 같이 받은 업무와 한 흐름
   if (replyTo) {
-    const [p] = await sql<{ id: string; parent_id: string | null; author_id: string }[]>`select id, parent_id, author_id from comments where id = ${replyTo} and task_id = ${taskId}`;
+    const [p] = await sql<{ id: string; parent_id: string | null; author_id: string }[]>`select id, parent_id, author_id from comments where id = ${replyTo} and task_id = any(${[taskId, ...mateIds]}::uuid[])`;
     if (!p) throw notFound('댓글이 없습니다');
     parent = p.parent_id ? (await sql<{ id: string; author_id: string }[]>`select id, author_id from comments where id = ${p.parent_id}`)[0] : p;
   }
@@ -1068,45 +1080,55 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
     const [t] = await tx<{ title: string }[]>`select title from tasks where id = ${taskId}`;
     const preview = body.replace(/@\[([^\]]+)\]\([0-9a-f-]{36}\)/g, '@$1').slice(0, 120);
     // 멘션된 사람이 그 업무를 볼 수 없으면 협업자로 추가하지 않고 알림도 보내지 않는다 (권한 우회 방지)
+    // #794 같이 받은 업무의 담당·공동 담당은 자기 업무로 연결(그 업무에서도 이 댓글이 보임)
+    const mates = mateIds.length ? await batchMatePeople(tx, taskId) : new Map<string, string>();
     const visibleMentions: string[] = [];
+    const mentionAt = new Map<string, string>();
     for (const m of validMentions) {
       const [mu] = await tx`select id, email, name, role, status, timezone, tenant, is_demo as "isDemo" from users where id = ${m}`;
       const { taskPerms } = await import('./access');
       const p = await taskPerms({ ...(mu as any), sessionId: '' }, task, tx);
-      if (p.view) visibleMentions.push(m);
+      if (mates.has(m)) { visibleMentions.push(m); mentionAt.set(m, mates.get(m)!); } else if (p.view) { visibleMentions.push(m); mentionAt.set(m, taskId); }
     }
-    if (visibleMentions.length) {
-      await notify(tx, { userIds: visibleMentions, type: 'mention', title: `${u.name}님이 댓글에서 회원님을 언급했습니다`, body: `${t.title} — ${preview}`,
-        link: `/tasks/${taskId}#c-${c.id}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `mention:${c.id}` });
+    for (const at of new Set(mentionAt.values())) {
+      await notify(tx, { userIds: visibleMentions.filter((m) => mentionAt.get(m) === at), type: 'mention', title: `${u.name}님이 댓글에서 회원님을 언급했습니다`, body: `${t.title} — ${preview}`,
+        link: `/tasks/${at}#c-${c.id}`, entityType: 'task', entityId: at, actorId: u.id, dedupeKey: `mention:${c.id}` });
     }
     // V13 8번 알림 대상 — 새 댓글: 담당·요청·만든 사람·협업자·이 업무에 댓글 단 사람 / 답글: 원 댓글 작성자 + 그 스레드 참여자. 멘션된 사람은 멘션 알림 1건만
     let followers: string[];
     if (parent) {
       followers = [parent.author_id, ...(await tx<{ author_id: string }[]>`select distinct author_id from comments where parent_id = ${parent.id} and deleted_at is null`).map((r) => r.author_id)];
     } else {
-      const commenters = (await tx<{ author_id: string }[]>`select distinct author_id from comments where task_id = ${taskId} and deleted_at is null`).map((r) => r.author_id);
-      followers = [task.assignee_id, task.requested_by, task.created_by, ...(await coIds(tx, taskId)), ...(await collabIds(tx, taskId)), ...commenters].filter((x): x is string => !!x);
+      const commenters = (await tx<{ author_id: string }[]>`select distinct author_id from comments where task_id = any(${[taskId, ...mateIds]}::uuid[]) and deleted_at is null`).map((r) => r.author_id);
+      followers = [task.assignee_id, task.requested_by, task.created_by, ...(await coIds(tx, taskId)), ...(await collabIds(tx, taskId)), ...commenters, ...mates.keys()].filter((x): x is string => !!x);
     }
     followers = [...new Set(followers.filter((x): x is string => !!x && x !== u.id && !visibleMentions.includes(x)))];
-    // 업무를 더는 볼 수 없게 된 사람(예: 예전에 댓글 단 사람)에게는 보내지 않는다
+    // 업무를 더는 볼 수 없게 된 사람(예: 예전에 댓글 단 사람)에게는 보내지 않는다. #794 같이 받은 업무 담당은 자기 업무로 알림
     const { taskPerms } = await import('./access');
-    const canSee: string[] = [];
+    const at = new Map<string, string>();
     for (const f of followers) {
       const [fu] = await tx`select id, email, name, role, status, timezone, tenant, is_demo as "isDemo" from users where id = ${f} and status = 'active'`;
-      if (fu && (await taskPerms({ ...(fu as any), sessionId: '' }, task, tx)).view) canSee.push(f);
+      if (!fu) continue;
+      if (mates.has(f)) at.set(f, mates.get(f)!);
+      else if ((await taskPerms({ ...(fu as any), sessionId: '' }, task, tx)).view) at.set(f, taskId);
     }
     // 대표(10/17): 같은 업무의 댓글 알림을 아직 안 읽었으면 새 알림(푸시)을 보내지 않고, 그 안 읽은 알림만 최신 댓글로 바꿔 둔다.
     // 읽은 뒤에 달린 댓글부터 다시 알림. (멘션은 따로 늘 보냄)
-    const pending = canSee.length ? (await tx<{ id: string; user_id: string }[]>`select id, user_id from notifications
-      where user_id = any(${canSee}::uuid[]) and type = 'comment' and entity_type = 'task' and entity_id = ${taskId} and read_at is null`) : [];
-    const waiting = new Set(pending.map((r) => r.user_id));
-    for (const r of pending) {
-      // 로컬 10/20: 같은 업무 알림 1개로 갱신 — "새 댓글 n개"
-      await tx`update notifications set count = count + 1, title = ${`새 댓글 `} || (count + 1)::text || ${`개: ${t.title}`}, body = ${`${u.name}: ${preview}`}, link = ${`/tasks/${taskId}#c-${c.id}`}, actor_id = ${u.id}, created_at = now(), meta = meta || ${tx.json({ kind: 'comment', commentId: c.id })} where id = ${r.id}`;
+    const send: string[] = [];
+    for (const tid of new Set(at.values())) {
+      const canSee = [...at].filter(([, x]) => x === tid).map(([uid]) => uid);
+      const pending = await tx<{ id: string; user_id: string }[]>`select id, user_id from notifications
+        where user_id = any(${canSee}::uuid[]) and type = 'comment' and entity_type = 'task' and entity_id = ${tid} and read_at is null`;
+      const waiting = new Set(pending.map((r) => r.user_id));
+      for (const r of pending) {
+        // 로컬 10/20: 같은 업무 알림 1개로 갱신 — "새 댓글 n개"
+        await tx`update notifications set count = count + 1, title = ${`새 댓글 `} || (count + 1)::text || ${`개: ${t.title}`}, body = ${`${u.name}: ${preview}`}, link = ${`/tasks/${tid}#c-${c.id}`}, actor_id = ${u.id}, created_at = now(), meta = meta || ${tx.json({ kind: 'comment', commentId: c.id })} where id = ${r.id}`;
+      }
+      const fresh = canSee.filter((x) => !waiting.has(x));
+      send.push(...fresh);
+      await notify(tx, { userIds: fresh, type: 'comment', title: parent ? `답글: ${t.title}` : `새 댓글: ${t.title}`, body: `${u.name}: ${preview}`,
+        link: `/tasks/${tid}#c-${c.id}`, entityType: 'task', entityId: tid, actorId: u.id, dedupeKey: `comment:${c.id}`, meta: { kind: 'comment', commentId: c.id } });
     }
-    const send = canSee.filter((x) => !waiting.has(x));
-    await notify(tx, { userIds: send, type: 'comment', title: parent ? `답글: ${t.title}` : `새 댓글: ${t.title}`, body: `${u.name}: ${preview}`,
-      link: `/tasks/${taskId}#c-${c.id}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `comment:${c.id}`, meta: { kind: 'comment', commentId: c.id } });
     return { id: c.id, createdAt: c.created_at, mentions: visibleMentions, parentId: parent?.id ?? null, notified: send };
   });
 }
@@ -1134,10 +1156,14 @@ export async function mentionableUsers(u: SessionUser, taskId: string) {
   const { taskPerms } = await import('./access');
   const dir = await directory(u, sql);
   const out: { id: string; name: string; title: string | null }[] = [];
+  const mates = await (await import('./taskBatch')).batchMatePeople(sql, taskId); // #794 같이 받은 업무 담당도 이 댓글 흐름을 봄
   for (const cand of dir.users as any[]) {
-    const p = await taskPerms({ id: cand.id, email: cand.email, name: cand.name, role: cand.role, status: 'active', timezone: 'Asia/Seoul', sessionId: '', tenant: tenantOf(u) }, task, sql);
+    const p = mates.has(cand.id) ? { view: true } : await taskPerms({ id: cand.id, email: cand.email, name: cand.name, role: cand.role, status: 'active', timezone: 'Asia/Seoul', sessionId: '', tenant: tenantOf(u) }, task, sql);
     if (p.view) out.push({ id: cand.id, name: cand.name, title: cand.title });
   }
+  // 같이 받은 업무 담당이 내 사람 목록(소속) 밖이어도 이 묶음 댓글에서는 부를 수 있게(이름은 묶음 칸에 이미 보임)
+  const extra = [...mates.keys()].filter((x) => !out.some((o) => o.id === x));
+  if (extra.length) out.push(...await sql<{ id: string; name: string; title: string | null }[]>`select id, name, title from users where id = any(${extra}::uuid[]) and status = 'active' and tenant = ${tenantOf(u)} order by name`);
   return out;
 }
 

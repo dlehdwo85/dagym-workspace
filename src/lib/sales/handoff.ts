@@ -61,16 +61,14 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
       on conflict (tenant, src_tbl, src_id) do update set status = excluded.status, lead_id = excluded.lead_id, data = excluded.data, updated_at = now()`;
     return l.id;
   });
-  // 담당자마다 업무(검토·첫 연락) — 영업 공간 업무(sales_ref·lead_id), 요청자 = 넘긴 사람
+  // 업무(검토·첫 연락) 1건 — 영업 공간 업무(sales_ref·lead_id), 요청자 = 넘긴 사람.
+  // 대표 #794: 담당이 여럿이면 사람마다 따로 만들지 않고 '함께 담당 1건'(첫 사람 = 주 담당) — 댓글·첨부·체크가 한 업무에 모임
   const { createTask } = await import('../tasks');
   const link = `/s/sales/hub?tab=${i.kind === 'building' ? 'buildings' : i.kind === 'facility' ? 'facilities' : 'vendors'}`;
-  const taskIds: string[] = [];
-  for (const a of ids) {
-    const task = await createTask(u, { title: `[영업] ${name} — 검토·첫 연락`, description: `${KIND_NAME[i.kind]}에서 영업 진행으로 넘어온 건입니다. 내용을 검토하고 첫 연락을 하세요.${i.note ? `\n메모: ${i.note}` : ''}\n원천: ${link}\n리드: /s/sales/leads?id=${leadId}`,
-      space: 'sales', assigneeId: a, requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', KIND_NAME[i.kind]] } as never, { quiet: a === u.id, skipQuota: true });
-    await sql`update tasks set sales_ref = ${sql.json({ kind: i.kind, id: i.id, name, leadId, handoff: true })}, lead_id = ${leadId} where id = ${task.id}`;
-    taskIds.push(task.id);
-  }
+  const task = await createTask(u, { title: `[영업] ${name} — 검토·첫 연락`, description: `${KIND_NAME[i.kind]}에서 영업 진행으로 넘어온 건입니다. 내용을 검토하고 첫 연락을 하세요.${i.note ? `\n메모: ${i.note}` : ''}\n원천: ${link}\n리드: /s/sales/leads?id=${leadId}`,
+    space: 'sales', assigneeId: ids[0], coAssigneeIds: ids.slice(1), requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', KIND_NAME[i.kind]] } as never, { quiet: ids.length === 1 && ids[0] === u.id, skipQuota: true });
+  await sql`update tasks set sales_ref = ${sql.json({ kind: i.kind, id: i.id, name, leadId, handoff: true })}, lead_id = ${leadId} where id = ${task.id}`;
+  const taskIds: string[] = [task.id];
   // 되돌리기(영업 재편 2)용으로 만든 업무 id 를 리드에 남김(현장 영업 원천에는 공고 일정이 없어 일정은 만들지 않음)
   await sql`update sales_leads set src = coalesce(src, '{}'::jsonb) || ${sql.json({ taskIds, eventIds: [] })} where id = ${leadId}`;
   // 배정 알림(넘긴 본인 제외)
