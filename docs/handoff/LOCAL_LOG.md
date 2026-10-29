@@ -1964,3 +1964,8 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 릴스 d61ce94f POST /api/marketing/auto/contents/:id {action:to_cards} 49.5초 → v5 pending, 표지+본문 4, check partial(바탕 사진 없음, 브랜드 색).
 - settings allow_generated_people true(워크인 외국인 영상 원인으로 봄)·allow_slideshow true·video_pause true·영상 2/2.
 - 협업 업무: assignedSql 이 공동 담당 포함 확인, 열린 62 중 협업 7.
+
+## 2026-10-29 19:08 — 대표 #802: 정부24 완료 · 협업 업무 2안 · 릴스 두 시안
+- gov24_support run 247 success(바뀐 것만 1건). 19:05Z+9 정기 실행 '33번 호출 · 10942건 중 1323건 · 조건 1255 · 처음 채움 끝 1263건 · 최대 약 2,526원'. bySource gov24 1219. fit 373 · aud corp 307·small 408·job 23 · pending 239.
+- 첨부 고치기 #375·#533 완료 상태 확인(editModeOf: docx doc·xlsx sheet·text·image·pdf, 그 밖 other).
+- 클라우드: 협업 업무 칸 진행, 릴스 A 카드뉴스·B 영상(슬라이드쇼) 나란히 고르기·영상 수정 요청 기본 두 시안, 한글 안에서 고치기 의견.
