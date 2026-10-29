@@ -257,7 +257,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     try {
       if (batchAll) await api(`/api/tasks/batch/${t0.batch_id}`, { method: 'DELETE' });
       else await api(`/api/tasks/${id}${alsoEvent ? '?alsoEvent=1' : ''}`, { method: 'DELETE' });
-      toast.ok(batchAll ? `${t0.batch.total}건을 삭제했습니다` : '삭제했습니다 — 휴지통에서 30일 동안 되살릴 수 있습니다', batchAll ? undefined : {
+      toast.ok(batchAll ? `${t0.batch.total}건을 삭제했습니다` : '삭제했습니다. 30일 안에 휴지통에서 되살릴 수 있습니다', batchAll ? undefined : {
         label: '되돌리기', run: async () => { try { await api(`/api/tasks/${id}/restore`, { body: {} }); toast.ok('되살렸습니다'); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } },
       });
       broadcastRefresh(); if (onClose) onClose(); else closePage();
@@ -604,7 +604,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <textarea autoFocus rows={6} className={inputCls} value={desc} aria-label="설명"
                 onChange={(e) => { const v = e.target.value; setDesc(v); setDescState(''); if (descTimer.current) clearTimeout(descTimer.current); descTimer.current = setTimeout(() => { descTimer.current = null; saveText('description', v); }, 1000); }}
                 onBlur={() => { flushDesc(desc); setDesc(null); }} />
-              <p className="mt-1 h-4 text-xs text-ink-3" aria-live="polite" data-testid="desc-state">{descState === 'saving' ? '저장 중…' : descState === 'saved' ? '저장됨 ✓' : descState === 'error' ? <span className="text-red-600">저장 안 됨 — 다시 입력하거나 칸을 벗어나면 다시 시도합니다</span> : '입력하면 자동으로 저장됩니다'}</p>
+              <p className="mt-1 h-4 text-xs text-ink-3" aria-live="polite" data-testid="desc-state">{descState === 'saving' ? '저장 중…' : descState === 'saved' ? '저장됨' : descState === 'error' ? <span className="text-red-600">저장하지 못했습니다. 칸을 벗어나면 다시 저장합니다</span> : '입력하면 자동으로 저장됩니다'}</p>
             </div>
           )}
         </section>

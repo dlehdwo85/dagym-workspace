@@ -97,7 +97,7 @@ export function parseFile(i: z.infer<typeof parseInput>) {
   const buf = Buffer.from(i.data, 'base64');
   if (buf.length > 3 * 1024 * 1024) throw badRequest('파일이 너무 큽니다(3MB 까지) — 필요 없는 열·시트를 지우거나 CSV 로 저장해 주세요');
   const ext = i.fileName.toLowerCase().split('.').pop();
-  if (ext === 'xls') throw badRequest('옛 엑셀(.xls)은 읽지 못합니다 — 엑셀에서 [다른 이름으로 저장] → .xlsx 또는 CSV 로 저장해 주세요');
+  if (ext === 'xls') throw badRequest('예전 엑셀 파일(.xls)은 열 수 없습니다. 엑셀에서 [다른 이름으로 저장]을 눌러 .xlsx나 CSV로 다시 저장해 주세요');
   const all = (ext === 'xlsx' ? parseXlsx(buf) : parseCsv(buf)).map((r) => r.map((c) => String(c ?? '').trim()));
   const nonEmpty = all.filter((r) => r.some((c) => c));
   if (!nonEmpty.length) throw badRequest('파일에 내용이 없습니다');

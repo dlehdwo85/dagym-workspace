@@ -914,7 +914,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay: al
         ...(remind !== 'default' ? { reminderMinutes: remind === 'none' ? [] : [Number(remind)] } : {}),
         ...(alsoTask ? { taskAssigneeId: taskWho ?? user.id, taskRequestedById: taskReq ?? user.id, taskPriority: taskPrio } : {}) } });
       pushRecentColor(color);
-      toast.ok(alsoTask ? `일정을 저장하고 업무에도 추가했습니다${(taskWho ?? user.id) === user.id ? ' — 본인 업무는 마감 때 알려 드립니다' : ' — 담당자에게 알림을 보냈습니다'}` : '일정을 저장했습니다');
+      toast.ok(alsoTask ? `일정을 저장하고 업무에도 추가했습니다${(taskWho ?? user.id) === user.id ? '. 본인 업무는 마감 때 알려 드립니다' : '. 담당자에게 알렸습니다'}` : '일정을 저장했습니다');
       onSaved();
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
@@ -1238,7 +1238,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
         <div className="sticky bottom-0 z-10 -mx-5 -mb-[calc(var(--sab)+20px)] flex justify-between gap-2 border-t border-line bg-white px-5 pb-[calc(var(--sab)+12px)] pt-3 sm:-mb-5 sm:pb-4" data-testid="editor-actions">
           <div>{id && canEdit && <Button type="button" variant="danger" onClick={remove}>삭제</Button>}</div>
           <div className="flex gap-2">
-            {canEdit && <span className="self-center text-xs text-ink-3" aria-live="polite" data-testid="editor-autosave">{busy || autoState === 'saving' ? '저장 중…' : autoState === 'saved' ? '저장됨 ✓' : autoState === 'error' ? '저장 안 됨' : id ? '바꾸면 자동 저장' : '닫으면 자동 저장'}</span>}
+            {canEdit && <span className="self-center text-xs text-ink-3" aria-live="polite" data-testid="editor-autosave">{busy || autoState === 'saving' ? '저장 중…' : autoState === 'saved' ? '저장됨' : autoState === 'error' ? '저장하지 못했습니다' : id ? '바꾸면 자동 저장' : '닫으면 자동 저장'}</span>}
             <Button type="button" variant={canEdit && dirty ? 'primary' : 'secondary'} onClick={closeAndSave} data-testid="editor-close">{canEdit && dirty ? '완료' : '닫기'}</Button>
           </div>
         </div>

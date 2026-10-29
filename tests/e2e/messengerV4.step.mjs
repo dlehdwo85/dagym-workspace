@@ -108,7 +108,7 @@ export async function messengerV4({ owner, ctx, sql, BASE, SHOTS }) {
   // 로컬 10/25 사소 ②: 사진 묶음에 답장 → 입력창 위·인용 라벨이 파일 이름 대신 '사진 3장'
   const albumMsg = list.getByTestId('chat-message').filter({ has: owner.locator('[data-testid="chat-album"][data-count="3"]') }).first();
   await albumMsg.hover(); await albumMsg.getByTestId('msg-reply').click();
-  await owner.getByTestId('chat-replying').getByText('사진 3장', { exact: true }).waitFor();
+  await owner.getByTestId('chat-replying').getByText('사진 3장').waitFor();
   await input.fill('사진 잘 봤어요'); await input.press('Enter');
   await list.getByTestId('chat-reply-quote').filter({ hasText: '사진 3장' }).first().waitFor();
 

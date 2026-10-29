@@ -217,7 +217,7 @@ export async function parseContactsFile(i: z.infer<typeof importParseInput>) {
   const buf = Buffer.from(i.data, 'base64');
   if (buf.length > 3 * 1024 * 1024) throw badRequest('파일이 너무 큽니다(3MB 까지)');
   const ext = i.fileName.toLowerCase().split('.').pop();
-  if (ext === 'xls') throw badRequest('옛 엑셀(.xls)은 읽지 못합니다 — .xlsx 또는 CSV 로 저장해 주세요');
+  if (ext === 'xls') throw badRequest('예전 엑셀 파일(.xls)은 열 수 없습니다. .xlsx나 CSV로 다시 저장해 주세요');
   if (ext === 'vcf' || ext === 'vcard') {
     const rows = parseVcf(buf.toString('utf8'));
     if (!rows.length) throw badRequest('vCard 에 연락처가 없습니다');

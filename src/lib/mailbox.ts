@@ -471,7 +471,7 @@ function checkSendAt(v: string) {
 }
 
 export async function queueMail(u: SessionUser, i: z.infer<typeof sendInput>, ip: string | null) {
-  if (!(await canSend(u))) throw forbidden('메일 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+  if (!(await canSend(u))) throw forbidden('메일 보내기 권한이 없습니다. 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
   const { task } = await loadTaskForMail(u, i.taskId);
   const sql = db(); const t = tenantOf(u);
   const mine = await personalAccount(u, sql); // V33 4: 내 메일 계정이 연결돼 있으면 그걸로(내 보낸메일함에도 남음)
@@ -889,7 +889,7 @@ export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
 export const kakaoLogInput = z.object({ taskId: z.string().uuid(), to: z.string().trim().max(100).optional(), body: z.string().min(1).max(2000) });
 export async function logKakao(u: SessionUser, i: z.infer<typeof kakaoLogInput>, ip: string | null) {
   await loadTaskForMail(u, i.taskId); // 못 보는 업무·다른 조직은 먼저 404
-  if (!(await canSend(u))) throw forbidden('카카오톡 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+  if (!(await canSend(u))) throw forbidden('카카오톡 보내기 권한이 없습니다. 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
   const sql = db(); const id = randomUUID();
   const to = [i.to || '카카오톡'];
   await sql`insert into outbox (id, tenant, channel, status, task_id, created_by, to_addrs, subject, body_text, message_id, sent_at)
@@ -905,7 +905,7 @@ export const smsLogInput = z.object({ taskId: z.string().uuid(), to: z.array(z.s
 export const scheduleSmsInput = z.object({ taskId: z.string().uuid(), to: smsLogInput.shape.to, body: z.string().trim().min(1).max(2000), sendAt: z.string().datetime({ offset: true }), shareUrl: z.string().max(500).optional() });
 export async function scheduleSms(u: SessionUser, i: z.infer<typeof scheduleSmsInput>) {
   const { task } = await loadTaskForMail(u, i.taskId);
-  if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+  if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다. 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
   const at = checkSendAt(i.sendAt);
   const sql = db(); const id = randomUUID();
   let shareId: string | null = null;
@@ -919,7 +919,7 @@ export async function scheduleSms(u: SessionUser, i: z.infer<typeof scheduleSmsI
 }
 export async function logSms(u: SessionUser, i: z.infer<typeof smsLogInput>, ip: string | null) {
   await loadTaskForMail(u, i.taskId); // 못 보는 업무·다른 조직은 먼저 404
-  if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+  if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다. 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
   const sql = db(); const id = i.outboxId ?? randomUUID();
   let shareId: string | null = null;
   const tok = i.shareUrl?.match(/\/d\/([A-Za-z0-9_-]+)$/)?.[1];

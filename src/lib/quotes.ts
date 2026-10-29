@@ -279,7 +279,7 @@ export const sentInput = z.object({ via: z.enum(['share', 'mail', 'sms', 'downlo
 export async function markQuoteSent(u: SessionUser, id: string, i: z.infer<typeof sentInput>, ip: string | null) {
   const { quote } = await getQuote(u, id);
   const { canSend } = await import('./mailbox');
-  if (!(await canSend(u))) throw forbidden('견적서 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+  if (!(await canSend(u))) throw forbidden('견적서 보내기 권한이 없습니다. 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
   const sql = db(); const oid = randomUUID();
   const to = i.to || quote.to_email || quote.to_phone || quote.to_name;
   await sql`update quotes set status = 'sent', sent_via = ${i.via}, sent_to = ${to}, sent_at = now() where id = ${id}`;

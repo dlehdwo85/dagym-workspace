@@ -583,7 +583,7 @@ const PREV_STATUS = new Map<string, TaskStatus>();
 const undoTo = (t: Task): TaskStatus => PREV_STATUS.get(t.id) ?? (t.prev_status === 'todo' || t.prev_status === 'in_progress' || t.prev_status === 'on_hold' ? t.prev_status : 'in_progress');
 /** 안내 [완료됨 보기] → 그 업무가 든 '완료됨'을 펼치고 그 자리로(id 없으면 모두 펼침) */
 export const openDoneFold = (id?: string) => window.dispatchEvent(new CustomEvent('wos-done-open', { detail: { id } }));
-const toastDone = (id: string) => toast.ok('완료했습니다 — 완료됨으로 옮겼습니다', { label: '완료됨 보기', run: () => openDoneFold(id) });
+const toastDone = (id: string) => toast.ok('완료됨으로 옮겼습니다', { label: '완료됨 보기', run: () => openDoneFold(id) });
 const seoulDay = (iso?: string | null) => (iso ? dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso)) : '');
 const doneWhen = (iso?: string | null) => { const d = seoulDay(iso); if (!d) return ''; return d === todayStr() ? dtf('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso!)) : `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`; };
 /** 묶음 맨 아래 접힌 '완료됨 n건 (오늘 a · 이번 주 n)' — 줄마다 [되돌리기](담당자만), [완료 전체 보기 →]. 펼침은 이 기기에 기억 */

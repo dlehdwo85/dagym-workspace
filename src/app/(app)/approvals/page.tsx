@@ -32,7 +32,7 @@ function badgeOf(r: Pick<Req, 'status' | 'steps'>): [string, string, string] {
   return moved ? ['in_progress', '진행 중', 'bg-amber-100 text-amber-800'] : ['waiting', '대기', 'bg-sky-100 text-sky-800'];
 }
 const EMPTY: Record<View, string> = {
-  todo: '결재할 것이 없습니다 — 결재 차례가 오면 여기에 뜨고, 휴대폰 상단에 "결재할 것 n건"으로도 알려 드립니다.',
+  todo: '결재할 것이 없습니다. 차례가 오면 여기와 휴대폰 위쪽 "결재할 것 n건"에 보입니다.',
   mine: '올린 결재가 없습니다 — 위 버튼으로 휴가·지출결의·품의·출장·구매·경조사를 올려 보세요. 쓰다 말면 [임시 저장]으로 두었다가 이어 쓸 수 있습니다.',
   cc: '참조로 지정된 결재가 없습니다 — 요청자가 작성할 때 참조자로 넣으면 여기에 보입니다(결재 권한은 없고 보기만).',
   all: '결재 요청이 없습니다 — 직원이 올리면 여기에 모두 보입니다.',

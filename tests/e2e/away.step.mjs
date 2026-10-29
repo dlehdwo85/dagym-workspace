@@ -28,7 +28,7 @@ export async function awayFlow({ owner, staff, ctx, BASE, SHOTS, today, addDays 
   await owner.goto(`${BASE}/calendar?event=${ev}`);
   const dlg = owner.getByRole('dialog', { name: '일정 수정' });
   await dlg.getByTestId('ev-meeting-url').fill('https://meet.google.com/abc-defg-hij');
-  await dlg.getByTestId('editor-autosave').getByText('저장됨 ✓').waitFor(); // 기존 일정은 칸을 바꾸면 자동 저장
+  await dlg.getByTestId('editor-autosave').getByText('저장됨', { exact: true }).waitFor(); // 기존 일정은 칸을 바꾸면 자동 저장
   await dlg.getByTestId('editor-close').click();
   await dlg.waitFor({ state: 'hidden' });
   await owner.goto(`${BASE}/calendar?date=${d}`);

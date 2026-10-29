@@ -23,7 +23,7 @@ export function NoticeEditor({ initial, onClose, onSaved }: { initial?: Notice; 
     try {
       const body = { title: f.title, body: f.body, pinned: f.pinned, important: f.important, audience: { type: f.type, ids: f.type === 'all' ? [] : f.ids }, fileIds: f.fileIds, publishAt: f.publishAt ? new Date(f.publishAt).toISOString() : null };
       const r = initial ? await api(`/api/notices/${initial.id}`, { method: 'PATCH', body }) : await api('/api/notices', { body });
-      toast.ok(initial ? '공지를 고쳤습니다' : r.scheduled ? `${fmtDateTime(r.publishAt)}에 게시되도록 예약했습니다` : '공지를 올렸습니다 — 대상에게 알림을 보냈습니다');
+      toast.ok(initial ? '공지를 고쳤습니다' : r.scheduled ? `${fmtDateTime(r.publishAt)}에 게시되도록 예약했습니다` : '공지를 올렸습니다. 대상에게 알렸습니다');
       onSaved(initial ? initial.id : r.id);
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   };
