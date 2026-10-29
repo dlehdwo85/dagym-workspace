@@ -88,6 +88,17 @@ test('자르기·뽑기(규칙): 세 가지 공고문 꼴 → 절(머리부터 �
   assert.equal(E.eligibilitySection(`${G2}\n3. 입찰참가자격\n가. 엔지니어링산업 진흥법에 따른 엔지니어링사업자\n4. 입찰보증금`), '3. 입찰참가자격\n가. 엔지니어링산업 진흥법에 따른 엔지니어링사업자', '등록 안내 줄 다음의 진짜 절');
   const old = E.eligView({ eligibility: { text: '○ 입찰참가자격 등록, 나라장터 시스템: 나라장터 콜센터(☎ 1588-0800)', sig: 'x' }, license_limit: '엔지니어링사업자(1234)', region_restriction: '경기도' });
   assert.deepEqual([old.line, old.text, old.error], ['업종 엔지니어링사업자 · 지역 경기도', null, '공고문에서 참가자격 절을 못 찾음'], '예전 규칙으로 잘못 저장한 절 = 나라장터 업종·지역 먼저(정기 실행이 다시 읽음)');
+  // 257차(로컬 10/29 08:45 같은 공고 다시): 문의처 표 '○ 입찰참가자격 및 제안서평가 등 : GH 건설임대처 건설임대시설1부' = 업무별 담당 부서 줄 — 절 머리 아님
+  const G3 = `1. 용역명: GH 주민공동시설 현황조사\n○ 문의처\n○ 입찰참가자격 및 제안서평가 등 : GH 건설임대처 건설임대시설1부\n○ 계약 관련 : 계약부 031-250-0000`;
+  assert.equal(E.eligibilitySection(G3), null);
+  assert.equal(E.eligibilitySection(`${G3}\n3. 입찰참가자격\n가. 엔지니어링산업 진흥법에 따른 엔지니어링사업자\n4. 입찰보증금`), '3. 입찰참가자격\n가. 엔지니어링산업 진흥법에 따른 엔지니어링사업자', '문의처 표 다음의 진짜 절');
+  const g3 = E.eligView({ eligibility: { text: '○ 입찰참가자격 및 제안서평가 등 : GH 건설임대처 건설임대시설1부', sig: 'x' }, license_limit: '엔지니어링사업자(1234)', region_restriction: '경기도' });
+  assert.deepEqual([g3.line, g3.text], ['업종 엔지니어링사업자 · 지역 경기도', null], '진짜 절이 없으면 나라장터 업종 제한·참가 지역');
+  assert.equal(E.lineOf(E.eligibilitySection('5. 입찰참가자격 : 아래 각 호를 모두 갖춘 자\n가. 자본금 5억원 이상\n6. 기타')), '자본금 5억 이상', '머리 줄에 쌍점이 있어도 진짜 절은 그대로');
+  assert.equal(E.lineOf(E.eligibilitySection('5. 참가자격: 정보통신공사업 등록업체\n6. 기타')), '정보통신공사업');
+  assert.equal(E.eligibilitySection('○ 입찰참가자격 및 제안서평가 등 : GH 건설임대처 건설임대시설1부 (031-250-0000)'), null, '전화가 붙어도');
+  assert.equal(E.lineOf(E.eligibilitySection('5. 입찰참가자격 등 : 아래 각 호의 요건을 모두 갖춘 자\n가. 자본금 2억원 이상\n6. 기타')), '자본금 2억 이상', "'등 :' 뒤가 부서가 아니면 진짜 절");
+  assert.deepEqual([E.jsonSafe('가\uD840나\u0000다\uDC00'), E.jsonSafe('𠀀'), E.jsonSafe(null)], ['가나다', '𠀀', null], '반쪽 글자·NUL 만 지우고 온전한 두 칸 글자는 그대로');
 });
 
 // ---- 공고문 읽기(정기 실행·다시 읽기) ----
@@ -103,7 +114,8 @@ const N = {
 };
 const NO_PAYER = '공고문이 사진(스캔)으로만 되어 있음 · AI 사진 읽기 안 함: 비용 낼 회사 없음(영업 공간·전환 열린 운영 회사)';
 const G = { id: '00000000-0000-4000-8000-000000252010', no: 'R26BK252010-000' };
-const docs = { '/g2b/notice-b.txt': B, '/g2b/notice-c.txt': C };
+const HALF_HEAD = '3. 입찰참가자격\n가. 정보통신공사업 등록업체\n';
+const docs = { '/g2b/notice-b.txt': B, '/g2b/notice-c.txt': C, '/g2b/notice-half.txt': `1. 공사명: 출입통제\n${HALF_HEAD}${'가'.repeat(1499 - HALF_HEAD.length)}𠀀 나머지\n4. 입찰보증금` }; // 257차: 1,500자째에 두 칸 글자
 let srv, ctx, sql, fake, fg;
 const rowOf = async (id) => (await sql`select row from sales_src_rows where src_id = ${id}`)[0]?.row;
 const tick = async () => { const r = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(r.status, 200); };
@@ -147,6 +159,15 @@ test('정기 실행: 열린 관련 공고만 읽음(마감 지남·관련 아님
   assert.deepEqual([ph.text, ph.error, ph.file?.name, ph.tries], [null, NO_PAYER, '입찰공고문.docx', 0], '못 읽어도 어떤 파일을 봤는지 · AI 를 안 부른 이유 · 설정 이유는 못 읽은 횟수로 안 셈');
   assert.equal((await rowOf(N.CLOSED.id)).eligibility, undefined, '마감 지난 공고는 안 읽음');
   assert.equal((await rowOf(N.OTHER.id)).eligibility, undefined, '관련 아닌 공고는 안 읽음');
+  // 257차(로컬 10/29 08:45 '안 읽은 6건이 정기 실행에서 계속 남음'): 정기 실행 기록(job_runs)에 이번에 읽은 공고·결과와 다음 차례
+  const [run] = await sql`select detail from job_runs where job = 'tick' and detail ? 'salesEligibility' order by id desc limit 1`;
+  const se = run.detail.salesEligibility;
+  assert.ok(se.tried.includes(`${N.KA.bid} 절 찾음`) && se.tried.includes(`${N.KC.bid} 첨부 공고문 없음`), JSON.stringify(se));
+  assert.ok(Array.isArray(se.waiting), JSON.stringify(se));
+  // 공고 조회: 정기 실행이 안 읽는 이유
+  const look = async (no) => (await ctx.owner.ok('GET', `/api/platform/sales-notices?no=${no}`)).items[0].eligibility;
+  const lc = await look(N.CLOSED.bid), lk = await look(N.KA.bid);
+  assert.deepEqual([lc.skip, lc.due, lk.skip], ['마감 지남', false, null]);
   // 다시 돌아도 같은 공고는 안 읽음(못 읽은 것도 20시간 뒤에)
   const at = ka.readAt; await tick();
   assert.equal((await rowOf(N.KA.id)).eligibility.readAt, at); assert.equal((await rowOf(N.KB.id)).eligibility.tries, 1);
@@ -162,6 +183,11 @@ test('정정(첨부가 바뀜) → 다시 읽음 · [공고문 다시 읽기] AP
   assert.equal(g.line, '현장설명 참가 업체 · 업종 정보통신공사업 · 지역 경기도', '정정 공고문으로 다시 — 면허를 못 뽑았으니 API 업종을 합침');
   const r = await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.KC.id });
   assert.deepEqual([r.eligibility.text, r.eligibility.error], [null, '첨부 공고문 없음']);
+  // 257차: 절을 1,500자에서 자르다 두 칸 글자(𠀀 등)가 반으로 갈리면 jsonb 저장이 통째로 실패해 '아직 안 읽음'으로 남았음 — 반쪽 글자를 지우고 저장
+  await sql`update sales_src_rows set row = row || ${sql.json({ attachment_urls: [{ name: '입찰공고서.txt', url: `http://127.0.0.1:${PORT}/g2b/notice-half.txt` }] })} where src_id = ${G.id}`;
+  const half = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: G.id })).eligibility;
+  assert.ok(half.text && half.text.length === 1499 && half.text.includes('정보통신공사업') && !/[\uD800-\uDFFF]/.test(half.text), JSON.stringify(half).slice(0, 200));
+  assert.equal((await rowOf(G.id)).eligibility.text, half.text, '저장됨');
   assert.equal((await ctx.owner.req('POST', '/api/sales/eligibility', { id: '00000000-0000-4000-8000-0000002520ff' })).status, 404);
 });
 

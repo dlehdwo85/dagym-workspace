@@ -22,6 +22,8 @@ export function eligibilitySection(text: string | null | undefined): string | nu
     // 256차(로컬 10/29 08:35 나라장터 'GH 주민공동시설 현황조사' 용역): '○ 입찰참가자격 등록, 나라장터 시스템: 나라장터 콜센터(☎ 1588-0800)' = 등록 절차 안내 — 절 머리 아님
     const nl = t.indexOf('\n', at); const headLine = t.slice(at, nl < 0 ? at + 120 : Math.min(nl, at + 120));
     if (/^\s*(?:등록|신청\s*(?:방법|안내|절차))|^\s*(?:\([^)]{0,20}\))?\s*(?:등록|확인)\s*(?:방법|안내|절차)/.test(after) || /콜센터|☎|고객\s*센터/.test(headLine)) continue;
+    // 257차(같은 공고 다시): 문의처 표 '○ 입찰참가자격 및 제안서평가 등 : GH 건설임대처 건설임대시설1부' = 업무별 담당 부서 줄 — 절 머리 아님(쌍점 뒤가 부서·전화로 끝나는 줄)
+    if (/[:：]\s*[^\n:：]{0,40}(?:처|팀|부|과|실|센터|본부|담당자?|문의|전화|☎\s*[\d-]*|\d{2,4}-\d{3,4}-\d{4})\s*\d*[\s)）]*$/.test(headLine)) continue;
     const numbered = !!(m[1] || m[2] || m[3]);
     if (!numbered && (best || !lineStart)) continue;
     best = { at, num: m[1] ? Number(m[1]) : null, roman: m[2] ?? null, sym: m[3] ?? null, head: m[0].trim() };
@@ -42,6 +44,10 @@ export function eligibilitySection(text: string | null | undefined): string | nu
   return sec.length > best.head.length + 2 ? sec.slice(0, MAX) : null;
 }
 
+/** 257차: jsonb 가 받지 않는 글자(NUL·짝 없는 서로게이트 — 한글 hwp 를 글자 단위로 읽거나 1,500자에서 자를 때 생길 수 있음)를 지움. 하나라도 있으면 저장이 통째로 실패해 공고가 '아직 안 읽음'으로 남았음 */
+export function jsonSafe<T extends string | null | undefined>(v: T): T {
+  return (typeof v === 'string' ? v.replace(/\u0000/g, '').replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '') : v) as T;
+}
 const one = (s: string) => s.replace(/\s+/g, ' ').trim();
 /** 등록·면허 — 자주 나오는 이름(업종 중립: 회사 이름 아님) + 'OO공사업·OO사업자·OO관리업' 꼴 */
 const LIC_WORDS = ['주민운동시설 위탁운영 등록', '체육시설업', '소프트웨어사업자', '정보통신공사업', '전기공사업', '소방시설공사업', '소방시설관리업', '경비업', '주택관리업', '실내건축공사업', '시설물유지관리업', '기계설비공사업',

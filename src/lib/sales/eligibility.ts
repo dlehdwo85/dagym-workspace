@@ -4,7 +4,7 @@
 import { sha256 } from '../crypto';
 import { db } from '../db';
 import { extractTextResult, unzip } from '../textExtract';
-import { apiExtra, COMMON_ONLY, eligibilityItems, eligibilityLine, eligibilitySection, lineOf, type EligItem } from './eligibilityText';
+import { apiExtra, COMMON_ONLY, eligibilityItems, eligibilityLine, eligibilitySection, jsonSafe, lineOf, type EligItem } from './eligibilityText';
 import { visionRead, type PhotoDoc } from './eligibilityVision';
 import { sourceFiles, type SrcFile } from './files';
 
@@ -94,6 +94,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   const out: Eligibility = { text: found?.text ?? null, items: found?.items ?? [], line: found?.line ?? (extra.length ? extra.join(' · ') : null), error, file: (used ?? tried) ? { name: (used ?? tried)!.name, url: (used ?? tried)!.url } : null, // 못 읽었어도 어떤 파일을 봤는지
     readAt: new Date().toISOString(), sig: sigNow, tries: found ? 0 : visionDone || visionBefore ? 3 : visionSkip ? prevTries : prevTries + 1, // 사진 읽기를 한 공고는 첨부가 바뀔 때까지 다시 안 함 · 설정 이유로 건너뛴 것은 세지 않음
     ...(by ? { by } : {}), ...(visionUsd != null ? { visionUsd } : {}) };
+  out.text = jsonSafe(out.text); out.line = jsonSafe(out.line); out.error = jsonSafe(out.error); out.items = out.items.map((x) => ({ ...x, label: jsonSafe(x.label) })); // 257차: 저장 실패 막기
   const st = String(row.source_type ?? ''); const ext = String(row.source_external_id ?? '');
   await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: out } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices'
     and (src_id = ${id} ${st && ext ? sql`or (row->>'source_type' = ${st} and row->>'source_external_id' = ${ext})` : sql``})`; // synced_at 은 그대로(메일 '고침'으로 안 셈)
@@ -107,6 +108,17 @@ export function eligibilityDue(r: Row, now = Date.now()): boolean {
   if (e.sig !== filesSig(r)) return true;
   if (e.text && e.by !== 'vision' && !eligibilitySection(e.text)) return true; // 256차: 예전 규칙으로 잘못 자른 절(등록 절차 안내 등)은 다시 읽음
   return !e.text && (e.tries ?? 0) < 3 && now - Date.parse(e.readAt ?? '') > 20 * 3600e3;
+}
+/** 257차: 정기 실행이 읽는 공고인지(아래 tick 의 조건과 같음) — 아니면 이유. 공고 조회에서 '왜 아직 안 읽혔나' */
+export function eligibilityOutOfScope(r: Row, gone = false, today = kstDay()): string | null {
+  if (gone) return '사라짐·합쳐짐 줄';
+  if (String(r.related ?? 'false') !== 'true') return '관련 공고 아님';
+  const dl = String(r.deadline_at ?? '').slice(0, 10);
+  if (!dl) return '마감일 칸 없음';
+  if (dl < today) return '마감 지남';
+  if (/취소|낙찰|유찰|개찰/.test(String(r.current_status ?? ''))) return `상태 '${r.current_status}'`;
+  if (r.kapt_cancel_at) return 'K-apt 취소';
+  return null;
 }
 /** 정기 실행(tick) — 열린 관련 공고(마감 전·취소/낙찰/유찰 아님)를 마감 가까운 순으로 한 건씩(K-apt 는 빠른 연속 요청을 끊음). SALES_ELIGIBILITY=off 면 안 돎 */
 export async function eligibilityTick(o: { budgetMs?: number; max?: number } = {}) {
@@ -122,11 +134,19 @@ export async function eligibilityTick(o: { budgetMs?: number; max?: number } = {
     if (seen.has(key)) continue; seen.add(key);
     if (eligibilityDue(r.row)) due.push(r.src_id);
   }
-  let done = 0, found = 0;
+  let done = 0, found = 0; const tried: string[] = [];
+  const noOf = (id: string) => { const r = rows.find((x) => x.src_id === id)?.row; return String(r?.source_external_id ?? id).slice(0, 24); };
   for (const id of due) {
     if (done >= max || Date.now() - t0 > budget) break;
-    const e = await readEligibility(id).catch(() => null); done++;
-    if (e?.text) found++;
+    // 257차(로컬 10/29 08:45 '안 읽은 6건이 정기 실행에서 계속 남음'): 읽다 오류가 나면 저장되지 않아 마감 순 맨 앞에 남고 다음 실행도 같은 공고만 — 오류 이유를 저장해 20시간 뒤 다시(다른 공고가 차례를 받음)
+    const e = await readEligibility(id).catch(async (err) => {
+      const msg = jsonSafe(String((err as Error)?.message ?? err).slice(0, 80));
+      const r = rows.find((x) => x.src_id === id)?.row; const prev = r?.eligibility as Eligibility | undefined;
+      const fail: Eligibility = { text: null, items: [], line: null, error: `읽기 오류: ${msg}`, file: null, readAt: new Date().toISOString(), sig: r ? filesSig(r) : '', tries: (prev && !prev.text ? prev.tries ?? 0 : 0) + 1 };
+      await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: fail } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`.catch(() => {});
+      tried.push(`${noOf(id)} 오류(${msg.slice(0, 40)})`); return null;
+    }); done++;
+    if (e?.text) { found++; tried.push(`${noOf(id)} 절 찾음`); } else if (e) tried.push(`${noOf(id)} ${String(e.error ?? '못 찾음').slice(0, 40)}`);
   }
-  return { open: seen.size, due: due.length, done, found };
+  return { open: seen.size, due: due.length, done, found, tried, waiting: due.slice(done, done + 10).map(noOf) }; // job_runs 기록에 이번에 읽은 공고·결과와 다음 차례
 }
