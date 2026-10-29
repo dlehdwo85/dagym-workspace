@@ -1917,3 +1917,7 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - GH 용역 line null · '공고문에서 참가자격 절을 못 찾음'. tick salesEligibility 00:00Z·00:16Z due 0.
 - /api/platform/sales-notices?no= 6건 eligibility.skip '마감일 칸 없음'(20260528163030684 · 음성군의회 3 · 태영 협력회사 · R26BK01797447-000).
 - 콘솔 오류 18건 = 노트북 인터넷 끊김(ERR_INTERNET_DISCONNECTED·NETWORK_CHANGED), 앱 문제 아님.
+
+## 2026-10-29 10:04 — 258차 운영 확인(나라장터 마감 빈칸 진단·마감일 없음 묶음)
+- /api/health 9242c15. g2b=dates R26BK01797447-000: bidClseDt null · cmmnSpldmdAgrmntClseDt 2026-11-17 18:00 · opengDt 2026-11-18 17:00 · sucsfbidMthdNm 협상에의한계약(엔지니어링). → 협상 계약은 API 입찰 마감 없음, 공고문 제출 마감·공동수급협정 마감 대체 제안.
+- /api/sales/src bids noClose 6(음성군의회 3·K-apt 옛 줄·태영 협력회사·보령 파크골프) ✅.
