@@ -1922,3 +1922,7 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 ## 2026-10-29 10:04 — 258차 운영 확인(나라장터 마감 빈칸 진단·마감일 없음 묶음)
 - /api/health 9242c15. g2b=dates R26BK01797447-000: bidClseDt null · cmmnSpldmdAgrmntClseDt 2026-11-17 18:00 · opengDt 2026-11-18 17:00 · sucsfbidMthdNm 협상에의한계약(엔지니어링). → 협상 계약은 API 입찰 마감 없음, 공고문 제출 마감·공동수급협정 마감 대체 제안.
 - /api/sales/src bids noClose 6(음성군의회 3·K-apt 옛 줄·태영 협력회사·보령 파크골프) ✅.
+
+## 2026-10-29 13:10 — 259차 운영 확인(나라장터 협상 공고 임시 마감)
+- g2b_bid_notices run 233 success. R26BK01797447-000 deadline 11/17 18:00 · deadlineSrc agreement · opening 11/18 17:00. noClose 5. g2b=nodl since 08-30 count 1·agreement 1·doc 0.
+- 휴대폰 폭 390 카드: 'D-19 · 공동수급협정 마감 — 입찰 마감 아님 · 공고문 확인 · 개찰 11/18 17:00 · 마감 11. 17.(화) 18:00', 가로 넘침 없음. 참가자격 한 줄이 지방계약법 공통 문구로 시작 → 클라우드 전달.
