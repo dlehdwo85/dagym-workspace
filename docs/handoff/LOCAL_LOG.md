@@ -2003,3 +2003,8 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 ## 2026-10-29 23:33 — 272차 운영 확인
 - /api/health 701f25f. 알림함: 20:59 task_file '새 첨부: [다짐 문의] 위스테이휘트니스…'(#794 실제 도착) · 21:00 mention 김소담.
 - 내일 아침 확인할 것: 브리핑 본문 '할 일 n건'·줄표 없음.
+
+## 2026-10-29 23:36 — 대표 #813: 전원 설정·비용 한도·팀 저장소 결정
+- powercfg /query SUB_SLEEP STANDBYIDLE: 현재 AC 0x0 · DC 0x0(안 잠듦). SUB_BUTTONS LIDACTION 은 SAMSUNG MODE 구성표에서 질의 결과 없음(숨김) → 설정 화면 확인 안내.
+- PUT /api/marketing/auto {autoPause:false} → auto_pause false · plan pro · 비용 한도 없음 · 규칙 16 · 크레딧 163.5/250.
+- 클라우드: 팀 저장소 결정 4가지·대표 첨부 고치기 그대로·상용화 시험 보기 요청.
