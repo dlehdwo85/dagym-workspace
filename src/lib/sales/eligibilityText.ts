@@ -7,6 +7,10 @@ const ROMAN = 'ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ';
 const HEAD = new RegExp(`(?:^|\\n|[ \\t])[ \\t]*(?:(\\d{1,2})[.)]|([${ROMAN}]+)[.)]?|([□■◆◇▣○●◎※▶►]))?[ \\t]*(?:입찰\\s*)?참가\\s*자격(?:\\s*(?:의\\s*)?(?:제한|요건|조건|사항))?`, 'g');
 /** 모든 공고에 있는 공통 문구(사업자선정지침 제26조 '해당하지 않는' 사업자) — 화면 한 줄에서는 빼고 원문에만 */
 export const COMMON_CLAUSE = /(?:제\s*26\s*조|선정\s*지침|국토교통부\s*고시)[^\n]{0,80}?해당(?:하|되)지\s*않/;
+/** 260차(로컬 10/29 13:15 나라장터 '(협상)보령시 파크골프장…'): 나라장터 공고의 공통 자격 문구 — 지방·국가계약법 시행령 제13조·제12조, 시행규칙 제14조, 제31조·제76조 부정당업자 제한,
+ *  전자조달 입찰참가자격 등록 — 모든 공고에 있어 한 줄에서는 빼고 원문에만 */
+export const G2B_COMMON = /(?:계약에\s*관한\s*법률|계약\s*법)[^\n]{0,40}?시행\s*(?:령|규칙)|시행령\s*제\s*1[23]\s*조|시행규칙\s*제\s*14\s*조|제\s*(?:31|76)\s*조|부정당\s*업자|참가\s*자격\s*(?:의\s*)?제한을?\s*받|전자\s*조달\s*시스템[^\n]{0,30}?등록|참가\s*자격\s*(?:을\s*)?등록(?:한|하여야|해야)/;
+const commonPart = (x: string) => COMMON_CLAUSE.test(x) || G2B_COMMON.test(x);
 
 /** 공고문 글 → '참가자격' 절(머리부터 다음 같은 급 번호 머리 앞까지, 최대 1,500자). 없으면 null */
 export function eligibilitySection(text: string | null | undefined): string | null {
@@ -131,7 +135,9 @@ export function eligibilityLine(items: EligItem[], section: string | null | unde
   const order: EligItem['k'][] = ['capital', 'perf', 'license', 'staff', 'credit', 'region', 'briefing', 'joint'];
   const parts = [...order.flatMap((k) => items.filter((x) => x.k === k).map((x) => x.label)), ...extra.filter(Boolean)];
   if (parts.length) return parts.join(' · ').slice(0, 200);
-  const rest = String(section ?? '').split(/\n|(?=\s[가-하]\.\s)|(?=‣|•)/).map(one).filter((x) => x && !COMMON_CLAUSE.test(x) && !/^(?:\d{1,2}[.)]\s*)?(?:입찰\s*)?참가\s*자격/.test(x) && !/콜센터|☎|등록\s*방법/.test(x));
+  // 260차: 공통 문구가 섞인 줄은 쉼표·'갖추고' 단위로 나눠 공통 부분만 뺌(뒤에 붙은 진짜 요건은 남김)
+  const strip = (x: string) => (commonPart(x) ? x.split(/(?<=,|갖추고|있고|하고|이며|로서)\s+/).filter((c) => !commonPart(c)).join(' ').replace(/^[가-하]\.\s*$/, '').trim() : x);
+  const rest = String(section ?? '').split(/\n|(?=\s[가-하]\.\s)|(?=‣|•)/).map(one).map(strip).filter((x) => x && !/^[가-하]\.$/.test(x) && !/^(?:\d{1,2}[.)]\s*)?(?:입찰\s*)?참가\s*자격/.test(x) && !/콜센터|☎|등록\s*방법/.test(x));
   return rest.length ? rest.join(' ').slice(0, 90) : null;
 }
 /** 못 찾았을 때 말(목록·상세·당일 메일·공고 조회 같은 말) */
@@ -156,10 +162,16 @@ export function apiExtra(r: Record<string, any>, items: EligItem[]): string[] {
 }
 /** 절에 공통 문구(제26조)만 있을 때 한 줄 */
 export const COMMON_ONLY = '공통 자격(사업자선정지침)만 적힘 — 별도 요건 없음';
+/** 260차: 공통 문구만 있을 때 한 줄 — 나라장터 공고는 어느 법의 공통 자격인지(지방·국가계약법) */
+export function commonOnly(text: string | null | undefined): string {
+  const t = String(text ?? '');
+  return /지방\s*자치\s*단체를\s*당사자로|지방\s*계약\s*법/.test(t) ? '공통 자격(지방계약법)만 적힘 — 별도 요건 없음'
+    : /국가를\s*당사자로|국가\s*계약\s*법/.test(t) ? '공통 자격(국가계약법)만 적힘 — 별도 요건 없음' : COMMON_ONLY;
+}
 /** 원문 절 → 화면 한 줄(뽑은 요건 + 나라장터 API 업종·지역) */
 export function lineOf(text: string, r: Record<string, any> = {}): string {
   const items = eligibilityItems(text);
-  return eligibilityLine(items, text, apiExtra(r, items)) ?? COMMON_ONLY;
+  return eligibilityLine(items, text, apiExtra(r, items)) ?? commonOnly(text);
 }
 /** 252차 #786 참가자격 칸(목록 줄·펼치기·상세·공고 조회 같은 말) — 한 줄은 저장한 원문에서 매번 다시 뽑음(뽑기 규칙을 고치면 공고문을 다시 받지 않고 바로 반영, 253차) */
 export function eligView(r: any): { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl: string | null; readAt: string | null; vision: boolean } {

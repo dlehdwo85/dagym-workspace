@@ -4,7 +4,7 @@
 import { sha256 } from '../crypto';
 import { db } from '../db';
 import { extractTextResult, unzip } from '../textExtract';
-import { apiExtra, COMMON_ONLY, docDeadline, eligibilityItems, eligibilityLine, eligibilitySection, jsonSafe, lineOf, type EligItem } from './eligibilityText';
+import { apiExtra, commonOnly, docDeadline, eligibilityItems, eligibilityLine, eligibilitySection, jsonSafe, lineOf, type EligItem } from './eligibilityText';
 import { visionRead, type PhotoDoc } from './eligibilityVision';
 import { sourceFiles, type SrcFile } from './files';
 
@@ -34,7 +34,7 @@ export function rankFiles(files: SrcFile[]): SrcFile[] {
 export function eligibilityOf(text: string | null | undefined, r: Row = {}): { text: string; items: EligItem[]; line: string } | null {
   const sec = eligibilitySection(text); if (!sec) return null;
   const items = eligibilityItems(sec);
-  return { text: sec, items, line: eligibilityLine(items, sec, apiExtra(r, items)) ?? COMMON_ONLY };
+  return { text: sec, items, line: eligibilityLine(items, sec, apiExtra(r, items)) ?? commonOnly(sec) };
 }
 export const PHOTO_ONLY = '공고문이 사진(스캔)으로만 되어 있음';
 /** 글이 없는 이유 — 스캔 PDF·그림만 든 docx/hwpx(word/media·BinData)는 '사진(스캔)으로만' (253차 로컬 운영 확인: docx 에 그림 16장·글 0) */
