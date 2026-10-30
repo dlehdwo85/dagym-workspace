@@ -16,6 +16,10 @@ export async function mktSlide811({ owner, ctx, sql, BASE, SHOTS }) {
     assert.ok((await sql`select 1 from mkt_brands where id = ${brand} and video->>'method' = 'photos'`).length, '저장됨');
     await kit.getByTestId('brand-video-method-row').getByText(/현장 사진 3~6장을 천천히 움직여/).waitFor();
     await kit.getByTestId('brand-video-method-row').screenshot({ path: `${SHOTS}/811-brand-video-method.png` });
+    // 275차 #809 상용화 시험(우리 회사 관리자): 요금제 기준 원가·승인률 한 줄 + 브랜드별 표
+    await owner.getByTestId('auto-trial').waitFor();
+    assert.match(await owner.getByTestId('auto-trial-summary').innerText(), /기준 · 이번 달 원가 [\d,]+원.* · 승인률 (-|\d+%)\(문턱 70%\)/);
+    await owner.getByTestId('auto-trial-total').waitFor();
     await owner.goto(`${BASE}/s/marketing/approvals`);
     await owner.getByTestId('mkt-approvable-count').waitFor();
     const tabs = owner.getByTestId('mkt-brand-tabs');

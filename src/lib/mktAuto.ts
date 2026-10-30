@@ -402,8 +402,9 @@ const VIDEO_KINDS = ['reels', 'shorts', 'video'];
 /** #426 훅 자리: 릴스·쇼츠·영상 = 첫 장면(3초), 블로그 = 제목, 그 밖 = 본문 첫 줄 */
 const hookAt = (kind: string) => (VIDEO_KINDS.includes(kind) ? '첫 장면(첫 3초)' : kind === 'blog' ? '제목' : '본문 첫 줄');
 export async function logAi(c: any, p: { name: string; model: string }, r: any, P: typeof import('./ai/provider')) {
-  await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-    values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_produce')`;
+  // 275차 #809: 어느 글(→ 브랜드)의 글 작성 비용인지 — 상용화 시험 보기가 브랜드별로 나눔(키트 AI 등 글 없는 호출은 비움)
+  await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose, mkt_content_id)
+    values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_produce', ${c.id ?? null})`;
 }
 export const textOf = (r: any) => (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('');
 
