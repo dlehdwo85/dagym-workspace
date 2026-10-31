@@ -692,6 +692,8 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
       if (r.skipped) await sql`update mkt_versions set note = concat_ws(' · ', note, ${`${videoMethod === 'photos' ? '실제 사진' : '화면 녹화'} 영상 못 만듦: ${r.skipped}`}::text) where content_id = ${c.id} and version = ${v}`;
     } catch (e: any) { console.error('[mkt] 자동 영상', videoMethod, c.id, e?.message ?? e); }
   }
+  // 296차 #836: 단색 표지로 막힌 글이면 AI 마케터가 그 브랜드에 '필요한 자료' 요청 카드(브랜드·종류마다 열린 것 하나만)
+  if (cover.plain && V.plainCoverOf({ channel: c.channel, kind }) && !held) await (await import('./mktMaterials')).needMaterial(c).catch(() => null);
   return { id: c.id, passed: q.passed, issues: q.issues, ...(held ? { held: true } : {}), ...(batch ? { batch } : {}) };
 }
 

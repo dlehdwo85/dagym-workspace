@@ -23,7 +23,7 @@ import {
   type LucideIcon,
   MessageCircle, Mail,
   TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon, Phone, ClipboardCheck, Link2,
-  History, Rocket, Target, Briefcase, Landmark, Bot, Wand2,
+  History, Rocket, Target, Briefcase, Landmark, Bot, Wand2, Camera,
 Contact, Globe, FileSignature, } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
@@ -162,7 +162,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     // #481(대표 10/23 승인 · docs/handoff/MARKETING_MENU_AUDIT_2026-10-21.md): 계획 → 제작 → 게시 → 성과 흐름으로 묶고, 이름 4개(운영실→운영 계획 · 광고 운영→광고 집행 · 승인 대기→승인함 · 운영실 기록→이전 요청 기록), 제작의뢰실은 탭에서 메뉴로(주소 ?tab=studio 그대로)
     { href: '/s/marketing', label: '홈', icon: Megaphone },
     { href: '/s/marketing/goals', label: '월 운영 목표', icon: Target, group: '계획' }, { href: '/s/marketing/ops', label: '운영 계획', icon: Briefcase, group: '계획' }, { href: '/s/marketing/team', label: 'AI 마케팅팀', icon: Bot, group: '계획' } /* #499-7 */,
-    { href: '/s/marketing/approvals', label: '승인함', icon: ClipboardCheck, group: '제작' }, { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' }, { href: '/s/marketing/automation?tab=studio', label: '제작의뢰실', icon: Wand2, group: '제작' },
+    { href: '/s/marketing/approvals', label: '승인함', icon: ClipboardCheck, group: '제작' }, { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' }, { href: '/s/marketing/automation?tab=studio', label: '제작의뢰실', icon: Wand2, group: '제작' }, { href: '/s/marketing/materials', label: '자료 요청', icon: Camera, group: '제작' } /* 297차 #836 */,
     { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '게시' }, { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '게시' },
     { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 집행', icon: Rocket, group: '성과' }, { href: '/s/marketing/sites', label: '사이트별 집계', icon: Globe, group: '성과' }, { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []),
     ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '이전 요청 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
