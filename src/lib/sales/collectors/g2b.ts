@@ -49,7 +49,7 @@ export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string,
   if (isHtml(txt)) { // 278차 #816(10/31 06·09시 나라장터 0건이 '성공'으로 남음): 웹페이지 응답 = 실패 — 앞 500자(글자만)를 오류 기록에
     const head = noPii(mask(htmlText(txt))).slice(0, 500);
     if (stats) { stats.html = (stats.html ?? 0) + 1; stats.htmlHead ??= head; }
-    throw new Error(`웹페이지(HTML) 응답 (HTTP ${res.status}) — 점검·호출 한도 초과·차단 가능: ${head.slice(0, 120)}`);
+    throw new Error(`웹페이지(HTML) 응답 (HTTP ${res.status}) — 원천 중단·호출 한도 초과·차단 가능: ${head.slice(0, 120)}`);
   }
   // data.go.kr 공통 오류(XML): returnReasonCode 20·21·22·30·31·32·33 = 활용신청·키·호출 제한 문제 → '활용신청 필요'(그 서비스는 이번 실행에서 건너뜀)
   let j: any = null; try { j = JSON.parse(txt); } catch { const code = txt.match(/<returnReasonCode>([^<]+)</)?.[1] ?? txt.match(/<resultCode>([^<]+)</)?.[1] ?? ''; const msg = txt.match(/<returnAuthMsg>([^<]+)</)?.[1] ?? txt.match(/<errMsg>([^<]+)</)?.[1] ?? txt.match(/<resultMsg>([^<]+)</)?.[1] ?? ''; const both = `${code} ${msg}`;
@@ -115,6 +115,13 @@ const srcStat = (label: string, r: { stats: DataGoStats; failed: number; items: 
   const ok = !(r.stats.calls === 0 && r.failed > 0);
   return { label, ok, calls: r.stats.calls, received: r.stats.raw, kept: r.items.length, total: r.stats.total, ...(ok ? {} : { error: r.errors[0]?.slice(0, 300), sent: r.stats.sent, head: r.stats.htmlHead ?? r.stats.head }) };
 };
+/** 279차: 원천 점검 안내 웹페이지 — { until: 'YYYY-MM-DD HH:MM' | null } (안내 글의 '…~ 2026-11-01 24:00' 끝 시각) */
+export function maintOf(head: string | undefined): { until: string | null } | null {
+  if (!head || !/점검/.test(head)) return null;
+  const m = [...head.matchAll(/(\d{4})[-.년]\s*(\d{1,2})[-.월]\s*(\d{1,2})일?\.?\s*(?:\([^)]*\)\s*)?(\d{1,2}):(\d{2})/g)];
+  const last = m.length >= 2 ? m[m.length - 1] : null;
+  return { until: last ? `${last[1]}-${last[2].padStart(2, '0')}-${last[3].padStart(2, '0')} ${last[4].padStart(2, '0')}:${last[5]}` : null };
+}
 /** 다시 해 볼 만한 실패(웹페이지 응답·요청 실패·시간 초과) — 활용신청·주소 오류는 다시 해도 같으니 빼고 */
 const retryable = (r: { stats: DataGoStats; failed: number; denied: string[] }) => r.stats.calls === 0 && r.failed > r.denied.length;
 /** 요약 한 줄: '검색 30회 · 응답 00 · 전체 0건' — 받은 줄이 있는데 하나도 못 읽었으면 첫 줄 칸 이름(형식 확인용) */
@@ -242,7 +249,10 @@ export const g2bBidNotices: Collector = {
     if (lim.read && !lim.found) errors.push(`제한 조회 ${lim.read}건 — 값을 못 읽음${lim.keys.length ? `(받은 칸: ${lim.keys.join(', ')})` : ''}${lim.diag ? ` · ${lim.diag}` : ''}`);
     // 278차 #816: 실패한 검색 수도 오류로 셈 — 하나도 못 받으면 '실패'(예전엔 0건 '성공'으로 남아 알림이 안 감)
     const sources = { g2b: srcStat('나라장터', a), nuri: srcStat('누리장터', b) };
+    // 279차(로컬 10/31 10:40 — 원인은 나라장터 시스템 점검 10/30 19:00~11/1 24:00): 점검 안내 웹페이지면 '점검 중'(끝나는 시각) · 다시 시도는 2시간마다
+    const maint = maintOf(a.stats.htmlHead) ?? maintOf(b.stats.htmlHead);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + a.failed + b.failed, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api', sources, retry: retryable(a) || retryable(b),
+      ...(maint ? { maint } : {}),
       summary: `${[!sources.g2b.ok && '나라장터 못 받음', !sources.nuri.ok && '누리장터 못 받음'].filter(Boolean).map((x) => `${x} · `).join('')}${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건(${statLine(b.stats, b.items.length)}) (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (lim.read ? ` · 참가 제한 조회 ${lim.read}건(값 ${lim.found})` : '') + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
   },
 };
