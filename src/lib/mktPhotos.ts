@@ -296,17 +296,29 @@ export async function photosView(u: SessionUser) {
   const n = (f: (x: PhotoItem) => boolean) => items.filter(f).length;
   const P = await import('./ai/provider');
   const regen = isAdmin(u) ? await (await import('./mktPhotoGen')).regenInfo().catch(() => null) : null; // 189차 [AI로 다시 만들기] 준비됨·장당 크레딧
-  return { total: items.length, described: n((x) => visionOk(x.vision)), pending: n((x) => !x.vision), failed: n((x) => !!x.vision && 'error' in x.vision),
+  // 287차(로컬 10/31 13:45·13:55: 목록이 600장에서 잘려 전체 수·얼굴 사진 수를 짐작함): 상한 없이 센 숫자 — noBoxes = 얼굴이 보인다고 설명됐지만 얼굴 자리를 모르는(286차 전) 사진
+  const [all] = await sql<{ total: number; described: number; faces: number; noBoxes: number }[]>`select count(*)::int as total, count(*) filter (where vision ? 'caption')::int as described,
+    count(*) filter (where vision->>'faces' = 'true')::int as faces, count(*) filter (where vision->>'faces' = 'true' and not (vision ? 'faceBoxes'))::int as "noBoxes" from library_files where ${photoCond(sql, t)}`;
+  return { all, total: items.length, described: n((x) => visionOk(x.vision)), pending: n((x) => !x.vision), failed: n((x) => !!x.vision && 'error' in x.vision),
     cover: n((x) => x.cover), graphic: n((x) => !x.body), outside: n((x) => x.space !== 'marketing'), scenes: n((x) => x.scene),
     videos: await (await import('./mktScenes')).scenesView(t), ai: P.aiEnabled(), perPhotoKrw: await perPhotoKrw(), canEdit: isAdmin(u), regen, gens: n((x) => x.gen), items: items.slice(0, 60) };
 }
 
-export const describeInput = z.object({ ids: z.array(z.string().uuid()).max(20).optional(), redo: z.boolean().optional() });
+export const describeInput = z.object({ ids: z.array(z.string().uuid()).max(20).optional(), redo: z.boolean().optional(), faces: z.boolean().optional() });
 /** [설명하기]: 설명 없는 사진을 25초만큼(남으면 화면이 이어서 다시 부름) · ids + redo = 그 사진을 다시 설명 */
 export async function describeNow(u: SessionUser, i: z.infer<typeof describeInput>) {
   await assertSpace(u, 'marketing');
   if (!isAdmin(u)) throw forbidden('사진 설명은 관리자만 돌릴 수 있습니다');
   const sql = db(); const t = tenantOf(u);
+  if (i.faces) {
+    // 287차 #818 ④ [얼굴 위치 다시 읽기]: 얼굴이 보인다고 설명됐지만 얼굴 자리가 없는 예전 사진을 12장씩 다시 설명 → 자동 시안·블로그 본문에서 얼굴을 가림.
+    // 관리자가 화면에서 장수·예상 비용을 보고 누를 때만(정기 실행은 하지 않음). 실패하면 예전처럼 1시간 뒤 다시(세 번까지)
+    const noBoxes = sql`${photoCond(sql, t)} and vision->>'faces' = 'true' and not (vision ? 'faceBoxes')`;
+    const ids = (await sql<{ id: string }[]>`select id from library_files where ${noBoxes} order by (space = 'marketing') desc, created_at desc limit 12`).map((r) => r.id);
+    const r = ids.length ? await describeBatch(t, { ids, limit: 12, budgetMs: 25e3, actorId: u.id }) : { done: 0, failed: 0, left: 0, stopped: null };
+    const [{ left }] = await sql<{ left: number }[]>`select count(*)::int as left from library_files where ${noBoxes}`;
+    return { ...r, left };
+  }
   if (i.ids?.length && i.redo) await sql`update library_files set vision = null where id = any(${i.ids}::uuid[]) and ${photoCond(sql, t)}`;
   return describeBatch(t, { ids: i.ids, limit: i.ids?.length ? 20 : 12, budgetMs: 25e3, actorId: u.id });
 }

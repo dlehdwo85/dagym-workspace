@@ -11,7 +11,7 @@ type Mark = 'none' | 'has' | 'skip';
 type Item = { id: string; title: string; folder: string; tags: string[]; vision: VisionOk | { error: string; tries: number } | null; mark: Mark | null; cover: boolean; body: boolean; at: string; space: string; scene: boolean;
   /** 189차: AI 생성(실사 참고) 사진 · [AI로 다시 만들기] 상태 */ gen: boolean; regen: { status: string; fileId: string | null } | null };
 type Videos = { total: number; done: number; failed: number; skipped: number; frames: number; pending: number };
-type View = { total: number; described: number; pending: number; failed: number; cover: number; graphic: number; outside: number; scenes: number; videos: Videos; ai: boolean; perPhotoKrw: number; canEdit: boolean; items: Item[];
+type View = { /** 287차 600장 상한 없이 센 숫자 */ all?: { total: number; described: number; faces: number; noBoxes: number }; total: number; described: number; pending: number; failed: number; cover: number; graphic: number; outside: number; scenes: number; videos: Videos; ai: boolean; perPhotoKrw: number; canEdit: boolean; items: Item[];
   /** 189차 [AI로 다시 만들기] — 운영사 생성 연동이 켜져 있으면 ready · 장당 마케팅 크레딧 */ regen: { ready: boolean; credits: number | null } | null; gens: number };
 type SceneRun = { done?: number; failed?: number; skipped?: number; frames?: number; described?: number; left?: number; busy?: boolean; via?: string };
 const SPACE: Record<string, string> = { work: '업무 공간', sales: '영업 공간' };
@@ -26,11 +26,11 @@ export function MktPhotos() {
   const { data, error, reload } = useApi<View>('/api/marketing/photos');
   const [busy, setBusy] = useState('');
   /** 설명 없는 사진 전부(한 번에 25초씩 이어서) · ids = 그 사진 다시 설명 */
-  async function describe(ids?: string[]) {
-    setBusy(ids?.[0] ?? 'all'); let done = 0; let failed = 0;
+  async function describe(ids?: string[], faces = false) {
+    setBusy(faces ? 'faces' : ids?.[0] ?? 'all'); let done = 0; let failed = 0;
     try {
-      for (let k = 0; k < 20; k++) {
-        const r = await api<{ done: number; failed: number; left: number; stopped: string | null }>('/api/marketing/photos/describe', { body: ids ? { ids, redo: true } : {} });
+      for (let k = 0; k < (faces ? 40 : 20); k++) {
+        const r = await api<{ done: number; failed: number; left: number; stopped: string | null }>('/api/marketing/photos/describe', { body: faces ? { faces: true } : ids ? { ids, redo: true } : {} });
         done += r.done; failed += r.failed;
         if (r.stopped) { toast.error(`멈췄습니다 — ${r.stopped}`); break; }
         if (ids || !r.left || !(r.done + r.failed)) break;
@@ -66,10 +66,14 @@ export function MktPhotos() {
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-photos">
       <h2 className="text-sm font-semibold">사진 AI 설명 <span className="font-normal text-ink-3">— 자료실 사진(폴더·공간 무관)과 영상 장면을 AI 가 한 번 보고 한 줄 설명·태그·글자 여부를 답니다. 시안 표지·카드뉴스 장·블로그 본문 사진 고르기와 원고의 사진 설명에 씁니다. 기밀 자료·기밀 폴더·격리 팀 자료는 쓰지 않고, 마케팅 공간 밖 사진은 AI 가 실사·얼굴 없음으로 본 것만 씁니다.</span></h2>
       <p className="mt-2 text-sm" data-testid="photos-summary">자료실 사진 {data.total}장{data.outside ? `(마케팅 공간 밖 ${data.outside}장)` : ''}{data.scenes ? ` · 영상 장면 ${data.scenes}장` : ''}{data.gens ? ` · AI 생성(실사 참고) ${data.gens}장` : ''} · 설명 {data.described}장 · 아직 {data.pending}장{data.failed ? ` · 설명 못 함 ${data.failed}장` : ''} · 시안 바탕으로 쓸 수 있는 사진 {data.cover}장 · 블로그 본문에 쓸 수 있는 사진 {data.total - data.graphic}장 · 쓰지 않는 사진(글자 그래픽·쓰지 않음 표시·설명 전 공간 밖 사진) {data.graphic}장</p>
+      {data.all && (data.all.total > data.total || data.all.faces > 0) && <p className="mt-1 text-xs text-ink-3" data-testid="photos-all">
+        {data.all.total > data.total ? `위 숫자는 최근 ${data.total}장 기준 — 전체 사진 ${data.all.total}장(설명 ${data.all.described}장). ` : ''}
+        {data.all.faces ? `얼굴이 보이는 사진 ${data.all.faces}장 — ${data.all.noBoxes ? `그중 ${data.all.noBoxes}장은 예전에 설명해 얼굴 위치를 몰라 자동 시안·블로그 본문에서 가리지 못합니다([얼굴 위치 다시 읽기]를 누르면 다시 설명해 가림).` : '자동 시안·블로그 본문에서 얼굴을 모자이크합니다.'}` : ''}</p>}
       <p className="mt-1 text-sm" data-testid="photos-videos">자료실 영상 {data.videos.total}편 · 장면 뽑음 {data.videos.done}편(장면 사진 {data.videos.frames}장) · 아직 {data.videos.pending}편{data.videos.failed ? ` · 못 뽑음 ${data.videos.failed}편` : ''}{data.videos.skipped ? ` · AI·합성 영상 건너뜀 ${data.videos.skipped}편` : ''}
         <span className="ml-1 text-xs text-ink-3">— 영상마다 2초·가운데·끝 무렵 장면 2~3장을 사진으로 뽑아 «마케팅/영상 장면» 폴더에 둡니다(정기 실행이 이어서 뽑음).</span></p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {data.canEdit && <Button size="sm" onClick={() => describe()} disabled={!!busy || !data.ai || !(data.pending + data.failed)} data-testid="photos-describe">{busy === 'all' ? '설명하는 중…' : `설명 없는 사진 설명하기${data.pending + data.failed ? ` (${data.pending + data.failed}장)` : ''}`}</Button>}
+        {data.canEdit && !!data.all?.noBoxes && <Button size="sm" variant="secondary" onClick={() => describe(undefined, true)} disabled={!!busy || !data.ai} data-testid="photos-faces">{busy === 'faces' ? '얼굴 위치 읽는 중…' : `얼굴 위치 다시 읽기 (${data.all.noBoxes}장 · 약 ${Math.max(1, Math.ceil(data.all.noBoxes * data.perPhotoKrw)).toLocaleString()}원)`}</Button>}
         {data.canEdit && <Button size="sm" variant="secondary" onClick={scenes} disabled={!!busy || !data.videos.pending} data-testid="photos-scenes">{busy === 'scenes' ? '장면 뽑는 중…' : `영상 장면 뽑기${data.videos.pending ? ` (${data.videos.pending}편)` : ''}`}</Button>}
         <span className="text-xs text-ink-3">{data.ai ? `사진 1장 약 ${data.perPhotoKrw < 1 ? '1원 미만' : `${data.perPhotoKrw}원`}(빠른 모델) · 새로 올린 마케팅 사진은 올리자마자, 남은 사진(다른 공간·영상 장면 포함)은 정기 실행마다 6장씩 설명합니다.` : 'AI 가 꺼져 있어 설명하지 않습니다.'}</span>
       </div>
