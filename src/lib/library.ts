@@ -30,6 +30,7 @@ export const libraryInput = z.object({
   allowDuplicate: z.boolean().optional(),
   purpose: z.enum(['revenue', 'ai_attach']).optional(),
   space: z.enum(['work', 'sales', 'marketing']).optional(), // 대표 지시(10/18): 공간별 자료실(저장소는 하나) // revenue: 매출 근거 폴더 / ai_attach: AI 에게 줄 첨부(자동 정리 생략 — AI 요청 1회 아낌)
+  scope: z.enum(['company', 'team', 'mine']).optional(), teamId: z.string().uuid().optional(), // 292차 #804·#814 올릴 곳(비우면 회사 전체 — 화면은 주 팀을 기본으로 보냄)
 });
 export const libraryPatch = z.object({
   title: z.string().trim().min(1).max(200).optional(),
@@ -38,11 +39,38 @@ export const libraryPatch = z.object({
   description: z.string().max(2000).nullable().optional(),
   security: z.enum(['public', 'internal', 'confidential']).optional(), // V14 15번 — 올리기는 편집자, 기밀을 내리거나 확인은 기밀 편집 권한
   space: z.enum(['work', 'sales', 'marketing']).optional(), // #615 ①(로컬 10/25 18:00): 공간 바꾸기 — 그 공간을 쓸 수 있는 사람만
+  scope: z.enum(['company', 'team', 'mine']).optional(), teamId: z.string().uuid().optional(), // 292차 [옮기기: 회사 전체 / 팀 / 내 파일]
 });
+// ---------------- 292차 #804·#814 팀별 저장소·내 파일(대표 10/29 결정, docs/research/TEAM_STORAGE_804_2026-10-29.md 6절) ----------------
+// company = 회사 전체(지금과 같음) · team = 그 팀 구성원 + 그 팀 위 단위(부서·사업부·본사) 구성원 + 대표·관리자 · mine = 올린 사람만(대표·관리자도 기본은 못 봄)
+// 업무 공간 자료실에 사람이 직접 올리는 파일에만 — 영업·마케팅 공간, 업무 첨부 자동 등록, AI·제작 파일은 회사 전체 그대로. 기밀 등급은 그 위에 추가 잠금
+export type Scope = 'company' | 'team' | 'mine';
+/** '우리 팀' 파일을 볼 수 있는 팀 = 내가 속한 팀과 그 아래 단위 전부 · 대표·관리자는 회사의 모든 팀 */
+export async function visibleTeamIds(u: SessionUser, sql = db()): Promise<string[]> {
+  if (isAdmin(u)) return (await sql<{ id: string }[]>`select id from teams where tenant = ${tenantOf(u)}`).map((r) => r.id);
+  return (await sql<{ id: string }[]>`with recursive down as (select m.team_id as id from team_members m join teams t on t.id = m.team_id where m.user_id = ${u.id} and t.tenant = ${tenantOf(u)}
+      union select t.id from teams t join down on t.parent_id = down.id) select id from down`).map((r) => r.id);
+}
+/** 내가 속한 팀 — 맨 앞 = 주 팀(조직도에서 가장 위 단위, 같은 높이면 먼저 들어간 팀). 올리기 기본값·옮기기 대상 */
+export async function myTeams(u: SessionUser, sql = db()): Promise<{ id: string; name: string }[]> {
+  return sql<{ id: string; name: string }[]>`with recursive up as (select t.id as start, t.parent_id, 0 as d from teams t join team_members m on m.team_id = t.id where m.user_id = ${u.id} and t.tenant = ${tenantOf(u)} and not t.archived
+      union all select up.start, p.parent_id, up.d + 1 from up join teams p on p.id = up.parent_id where up.d < 10)
+    select t.id, t.name from teams t join team_members m on m.team_id = t.id and m.user_id = ${u.id} join (select start, max(d) as depth from up group by start) x on x.start = t.id
+    order by x.depth, m.added_at, t.name`;
+}
+/** 팀 자료로 올리거나 옮길 수 있는 팀 — 그 팀 구성원, 대표·관리자는 회사의 모든 팀 */
+async function teamFor(u: SessionUser, teamId: string | undefined, sql = db()) {
+  const mine = await myTeams(u, sql);
+  const id = teamId ?? mine[0]?.id;
+  if (!id) throw badRequest('소속 팀이 없어 팀 자료로 둘 수 없습니다 — 조직도에서 팀을 정한 뒤 다시');
+  if (!mine.some((t) => t.id === id) && !(isAdmin(u) && (await visibleTeamIds(u, sql)).includes(id))) throw badRequest('그 팀 구성원만 팀 자료로 둘 수 있습니다');
+  return id;
+}
+
 /** #615 ①: 맨 위 폴더 이름이 공간 이름이면 그 공간 — '마케팅/…' → marketing, '영업/…' → sales (자동 제작 사진 고르기·영업 자료는 space 칸으로 봄) */
 export const spaceForFolder = (folder: string): 'sales' | 'marketing' | null => { const top = folder.split('/')[0]?.trim(); return top === '마케팅' ? 'marketing' : top === '영업' ? 'sales' : null; };
 
-const COLS = `f.id, f.folder, f.security, f.security_suggested, f.security_confirmed, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
+const COLS = `f.id, f.scope, f.team_id, f.folder, f.security, f.security_suggested, f.security_confirmed, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
   (f.text_content is not null) as has_text, f.text_error, f.text_tried_at, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error, f.task_id, f.source, f.vision`;
 
 // ---------------- V14 15번 보안 등급 (일반·내부·기밀) ----------------
@@ -140,7 +168,7 @@ async function requireFolder(u: SessionUser, folder: string, need: 'view' | 'edi
 
 /** 대표 지시(10/18): 공간별 자료실 — 볼 수 있는 공간(업무 + 배정된 영업·마케팅)의 자료만, space 를 고르면 그 공간만 */
 export async function librarySpaces(u: SessionUser) { return (await (await import('./spaces')).userSpaces(u)) as string[]; }
-export async function listLibrary(u: SessionUser, q: { q?: string; folder?: string; limit?: number; review?: boolean; space?: string }) {
+export async function listLibrary(u: SessionUser, q: { q?: string; folder?: string; limit?: number; review?: boolean; space?: string; scope?: string; teamId?: string }) {
   // 스토어 심사(10/19): 체험 계정도 자료실 보기는 됨(예시 파일) — 올리기·폴더 바꾸기는 막음
   const mySpaces = await librarySpaces(u);
   if (q.space && q.space !== 'all' && !mySpaces.includes(q.space)) throw notFound();
@@ -150,7 +178,7 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
   // 폴더 권한: 볼 수 있는 폴더만 (올린 사람 본인 파일은 항상 보임)
   const [perms, allFolders] = await Promise.all([folderPerms(u),
     sql<{ folder: string; n: number }[]>`select folder, sum(n)::int n from (
-        select folder, 1 as n from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready'
+        select folder, 1 as n from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready' and scope = 'company'
         union all select path, 0 from library_folders where tenant = ${tenantOf(u)}) x group by folder order by folder`]);
   const sc = await secCtx(u);
   // 등급: 볼 수 있는 등급 목록 + 폴더 등급이 허용되는 폴더 (본인이 올린 파일은 항상)
@@ -163,19 +191,27 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
     and ${ts.isolated ? sql`(f.created_by = any(${ts.mates}::uuid[]) or f.task_id is not null)` : sql`true`}
     and (f.task_id is null or exists (select 1 from tasks t where t.id = f.task_id and t.deleted_at is null and ${taskVisibleSql(sql, u, units)}))))`;
   const counts = new Map((await sql<{ folder: string; n: number }[]>`select folder, count(*)::int n from library_files f where f.tenant = ${tenantOf(u)} and f.deleted_at is null
-    and f.upload_status = 'ready' and ${secCond} group by folder`).map((r) => [r.folder, r.n]));
+    and f.upload_status = 'ready' and f.scope = 'company' and ${secCond} group by folder`).map((r) => [r.folder, r.n]));
   // 빈 폴더(V14 18번)는 폴더 권한·등급만 맞으면 보이고, 파일이 있는 폴더는 볼 수 있는 파일이 있을 때만(기밀 파일만 있는 폴더의 존재를 숨김)
   const visible = allFolders.filter((f) => folderLevelOf(u.role, base, perms, f.folder) !== 'none' && (counts.has(f.folder) || (f.n === 0 && secAllowed(sc, folderSec(sc, f.folder)))))
     .map((f) => ({ folder: f.folder, n: counts.get(f.folder) ?? 0, security: folderSec(sc, f.folder), level: folderLevelOf(u.role, base, perms, f.folder) }));
   const visibleNames = visible.map((f) => f.folder);
+  // 292차: 회사 전체 = 지금 규칙 · 우리 팀 = 볼 수 있는 팀(폴더 권한 대신 팀 구성원 여부) + 등급 · 내 파일 = 내가 올린 것만
+  const teams = await visibleTeamIds(u, sql);
+  const companyOk = sql`(f.scope = 'company' and (f.folder = any(${visibleNames}::text[]) or f.created_by = ${u.id}) and ${secCond})`;
+  const teamOk = sql`(f.scope = 'team' and f.space = any(${spaceList}::text[]) and (f.created_by = ${u.id} or (f.security = any(${secs}::text[]) and f.team_id = any(${teams}::uuid[]))))`;
+  const mineOk = sql`(f.scope = 'mine' and f.created_by = ${u.id})`;
+  const scope = ['company', 'team', 'mine'].includes(q.scope ?? '') ? (q.scope as Scope) : null;
+  const teamPick = scope === 'team' && q.teamId && /^[0-9a-f-]{36}$/i.test(q.teamId) ? sql`and f.team_id = ${q.teamId}` : sql``;
+  const scopeOk = scope === 'company' ? companyOk : scope === 'team' ? sql`(${teamOk} ${teamPick})` : scope === 'mine' ? mineOk : sql`(${companyOk} or ${teamOk} or ${mineOk})`;
   const terms = (q.q ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 6);
   const like = (t: string) => `%${t.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
   const rows = await sql`
-    select ${sql.unsafe(COLS)}, u.name as created_by_name,
+    select ${sql.unsafe(COLS)}, u.name as created_by_name, tm.name as team_name,
       ${terms.length ? sql`substring(f.text_content from greatest(1, strpos(lower(f.text_content), lower(${terms[0]})) - 60) for 200)` : sql`null`} as snippet
-    from library_files f left join users u on u.id = f.created_by
+    from library_files f left join users u on u.id = f.created_by left join teams tm on tm.id = f.team_id
     where f.tenant = ${tenantOf(u)} and f.deleted_at is null and f.upload_status = 'ready'
-      and (f.folder = any(${visibleNames}::text[]) or f.created_by = ${u.id}) and ${secCond}
+      and ${scopeOk}
       ${q.review ? sql`and f.needs_review` : sql``}
       ${q.folder !== undefined && q.folder !== null && q.folder !== '*' ? sql`and (f.folder = ${cleanFolder(q.folder)} or f.folder like ${cleanFolder(q.folder) + '/%'})` : sql``}
       ${terms.length ? sql`and ${terms.map((t) => sql`(f.title ilike ${like(t)} or f.file_name ilike ${like(t)} or f.folder ilike ${like(t)} or array_to_string(f.tags, ' ') ilike ${like(t)}
@@ -183,9 +219,16 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
     order by ${terms.length ? sql`(f.title ilike ${like(terms[0])}) desc,` : sql``} f.updated_at desc
     limit ${Math.min(q.limit ?? 200, 500)}`;
   const [{ review }] = await sql<{ review: number }[]>`select count(*)::int review from library_files f where f.tenant = ${tenantOf(u)} and f.deleted_at is null
-    and f.upload_status = 'ready' and f.needs_review and (f.folder = any(${visibleNames}::text[]) or f.created_by = ${u.id}) and ${secCond}`;
-  return { secLevels: secs, confEdit: sc.confEdit, files: rows.map((r: any) => ({ ...r, effective_security: effSec(sc, r), level: r.created_by === u.id && folderLevelOf(u.role, base, perms, r.folder) === 'none' ? 'view' : folderLevelOf(u.role, base, perms, r.folder) })),
-    folders: visible, review, level: base, spaces: mySpaces, spaceCounts: Object.fromEntries((await sql<{ space: string; n: number }[]>`select space, count(*)::int n from library_files f
+    and f.upload_status = 'ready' and f.needs_review and ${scopeOk}`;
+  // 292차: 우리 팀·내 파일 탭의 폴더 = 그 범위 파일의 폴더 + 그 범위 빈 폴더(library_scope_folders) — 회사 폴더 목록과 섞지 않음
+  const scopeFolders = scope === 'team' || scope === 'mine' ? (await sql<{ folder: string; n: number }[]>`select folder, sum(n)::int n from (
+        select f.folder, 1 as n from library_files f where f.tenant = ${tenantOf(u)} and f.deleted_at is null and f.upload_status = 'ready' and ${scope === 'team' ? sql`(${teamOk} ${teamPick})` : mineOk}
+        union all select path, 0 from library_scope_folders sf where sf.tenant = ${tenantOf(u)} and sf.scope = ${scope}
+          and ${scope === 'mine' ? sql`sf.owner_id = ${u.id}` : q.teamId && /^[0-9a-f-]{36}$/i.test(q.teamId) ? sql`sf.team_id = ${q.teamId}` : sql`sf.team_id = any(${teams}::uuid[])`}) x where folder <> '' group by folder order by folder`)
+      .map((f) => ({ folder: f.folder, n: f.n, security: folderSec(sc, f.folder), level: base })) : null;
+  const scopeLevel = (r: any) => (r.scope === 'company' ? (r.created_by === u.id && folderLevelOf(u.role, base, perms, r.folder) === 'none' ? 'view' : folderLevelOf(u.role, base, perms, r.folder)) : r.created_by === u.id || isAdmin(u) ? base : 'view');
+  return { secLevels: secs, confEdit: sc.confEdit, files: rows.map((r: any) => ({ ...r, effective_security: effSec(sc, r), level: scopeLevel(r) })),
+    folders: scopeFolders ?? visible, scope: scope ?? 'all', myTeams: await myTeams(u, sql), review, level: base, spaces: mySpaces, spaceCounts: Object.fromEntries((await sql<{ space: string; n: number }[]>`select space, count(*)::int n from library_files f
       where f.tenant = ${tenantOf(u)} and f.deleted_at is null and f.upload_status = 'ready' and f.space = any(${mySpaces}::text[]) group by space`).map((r) => [r.space, r.n])), aiOrganize: (await import('./ai/provider')).aiEnabled() };
 }
 
@@ -194,8 +237,12 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   // 매출 근거: 매출 입력 권한이 있으면 "매출 근거" 폴더에 올릴 수 있다(자료실 폴더 권한과 별개)
   const revenue = i.purpose === 'revenue' && RANK[await menuLevel(u, 'revenue')] >= RANK.edit;
   const folder = revenue ? '매출 근거' : cleanFolder(i.folder);
-  if (!revenue) { await requireMenu(u, 'library', 'edit'); await requireFolder(u, folder, 'edit'); }
   const space = i.space ?? 'work';
+  // 292차: 우리 팀·내 파일은 업무 공간 자료실에 사람이 직접 올리는 파일만(매출 근거·AI 첨부는 회사 전체 그대로) — 폴더 권한 대신 팀 구성원 여부
+  const scope: Scope = !revenue && i.purpose !== 'ai_attach' && i.scope && i.scope !== 'company' ? i.scope : 'company';
+  if (scope !== 'company' && space !== 'work') throw badRequest('우리 팀·내 파일은 업무 공간 자료실에서만 쓸 수 있습니다');
+  const teamId = scope === 'team' ? await teamFor(u, i.teamId) : null;
+  if (!revenue) { await requireMenu(u, 'library', 'edit'); if (scope === 'company') await requireFolder(u, folder, 'edit'); }
   if (space !== 'work' && !(await librarySpaces(u)).includes(space)) throw notFound();
   const mime = i.mimeType || 'application/octet-stream';
   if (i.size > maxUploadBytes(mime)) throw badRequest(tooLargeMsg(mime)); // #109: 영상 100MB(조각), 그 외 50MB
@@ -204,7 +251,7 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   const sql = db();
   if (i.contentHash && !i.allowDuplicate) { // V13 3번: 같은 파일이 이미 있으면 알려 준다(볼 수 있는 것만)
     const dups = await sql<{ id: string; title: string; folder: string; created_by: string }[]>`select id, title, folder, created_by, security from library_files
-      where tenant = ${tenantOf(u)} and content_hash = ${i.contentHash} and deleted_at is null and upload_status = 'ready' limit 5`;
+      where tenant = ${tenantOf(u)} and content_hash = ${i.contentHash} and deleted_at is null and upload_status = 'ready' and (scope = 'company' or created_by = ${u.id}) limit 5`; // 292차: 남의 팀·내 파일은 있다고도 안 알림
     const base = await menuLevel(u, 'library'); const perms = await folderPerms(u);
     const sc = await secCtx(u);
     const d = dups.find((x: any) => x.created_by === u.id || (folderLevelOf(u.role, base, perms, x.folder) !== 'none' && canSeeSec(sc, u, x)));
@@ -212,8 +259,8 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   }
   // V14 15번: 매출 근거는 기밀(확정), 그 외는 내부(대표 지시: 확인 전 기본값) — 이름이 기밀 후보면 "기밀 제안"으로 표시해 확인을 받는다
   const ruled = revenue ? 'confidential' : ruleSecurity(`${i.fileName} ${i.title ?? ''} ${(i.tags ?? []).join(' ')}`, await confWords(tenantOf(u)));
-  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, space, folder, title, file_name, mime_type, size_bytes, tags, description, created_by, content_hash, source, security, security_suggested, security_confirmed)
-    values (${tenantOf(u)}, ${space}, ${folder}, ${i.title || i.fileName.replace(/\.[^.]+$/, '')}, ${i.fileName}, ${mime}, ${i.size}, ${i.tags ?? []}, ${i.description ?? null}, ${u.id},
+  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, scope, team_id, space, folder, title, file_name, mime_type, size_bytes, tags, description, created_by, content_hash, source, security, security_suggested, security_confirmed)
+    values (${tenantOf(u)}, ${scope}, ${teamId}, ${space}, ${folder}, ${i.title || i.fileName.replace(/\.[^.]+$/, '')}, ${i.fileName}, ${mime}, ${i.size}, ${i.tags ?? []}, ${i.description ?? null}, ${u.id},
       ${i.contentHash ?? null}, ${revenue ? 'revenue' : i.purpose === 'ai_attach' ? 'ai_attach' : 'upload'}, ${revenue ? 'confidential' : 'internal'}, ${ruled}, ${revenue}) returning id`;
   const safe = i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120);
   const key = `lib/${tenantOf(u)}/${f.id}/${safe}`;
@@ -243,6 +290,14 @@ export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open
   if (!f) throw notFound('자료가 없습니다'); // 다른 회사 자료는 없는 것처럼
   const sc = await secCtx(u);
   f.effective_security = effSec(sc, f);
+  if (f.scope === 'mine' && f.created_by !== u.id) throw notFound('자료가 없습니다'); // 292차: 내 파일 = 올린 사람만(대표·관리자도 존재를 모름)
+  if (f.scope === 'team' && f.created_by !== u.id) { // 292차: 팀 자료 = 그 팀·위 단위 구성원·대표·관리자 — 폴더 권한 대신 팀, 등급은 그대로
+    if (!f.team_id || !(await visibleTeamIds(u)).includes(f.team_id)) throw notFound('자료가 없습니다');
+    await requireMenu(u, 'library', 'view');
+    if (!canSeeSec(sc, u, f)) throw notFound('자료가 없습니다');
+    if (f.effective_security === 'confidential' && purpose !== 'meta') await secAudit(u, f, purpose);
+    return f;
+  }
   if (f.created_by !== u.id && f.space !== 'work' && !(await librarySpaces(u)).includes(f.space)) throw notFound('자료가 없습니다'); // 공간 밖 자료는 존재도 숨김
   if (f.created_by !== u.id) { // 올린 사람 본인 (매출 근거처럼 다른 경로로 올린 파일 포함)은 항상
     const ts = await teamScope(u);
@@ -336,10 +391,20 @@ export async function resetTextRetry(u: SessionUser, limit = 300) {
 export async function updateLibraryFile(u: SessionUser, id: string, i: z.infer<typeof libraryPatch>) {
   const f = await loadLibraryFile(u, id);
   await requireMenu(u, 'library', 'edit');
-  if (f.created_by !== u.id) await requireFolder(u, f.folder, 'edit');
+  if (f.created_by !== u.id && f.scope === 'company') await requireFolder(u, f.folder, 'edit');
   if (!canEdit(u, f)) throw forbidden('올린 사람 또는 관리자만 고칠 수 있습니다');
   const folder = i.folder !== undefined ? cleanFolder(i.folder) : f.folder;
-  if (folder !== f.folder) await requireFolder(u, folder, 'edit');
+  // 292차 [옮기기: 회사 전체 / 팀 / 내 파일] — 업무 첨부·업무 공간 밖 파일은 회사 전체 그대로, 내 파일로는 올린 사람만
+  let scope: Scope = f.scope ?? 'company'; let teamId: string | null = f.team_id ?? null;
+  if (i.scope && (i.scope !== scope || (i.scope === 'team' && i.teamId && i.teamId !== teamId))) {
+    if (i.scope !== 'company' && f.task_id) throw badRequest('업무 첨부 파일은 회사 전체로 둡니다(그 업무를 볼 수 있는 사람이 봄)');
+    if (i.scope !== 'company' && (i.space ?? f.space ?? 'work') !== 'work') throw badRequest('우리 팀·내 파일은 업무 공간 자료만 옮길 수 있습니다');
+    if (i.scope === 'mine' && f.created_by !== u.id) throw forbidden('내 파일로는 올린 사람만 옮길 수 있습니다');
+    teamId = i.scope === 'team' ? await teamFor(u, i.teamId) : null;
+    await (await import('./log')).audit(db(), u.id, 'library.scope_set', 'library_file', id, { from: scope, to: i.scope, teamId }, null);
+    scope = i.scope;
+  }
+  if (scope === 'company' && (folder !== f.folder || f.scope !== 'company')) await requireFolder(u, folder, 'edit');
   // #615 ①: 공간 — 명시하면 그 공간(쓸 수 있는 사람만), 폴더를 '마케팅/…'·'영업/…' 아래로 옮기면 그 공간으로(그 공간을 못 쓰면 그대로)
   let space: string = f.space ?? 'work';
   if (i.space && i.space !== space) { if (i.space !== 'work' && !(await librarySpaces(u)).includes(i.space)) throw notFound('자료가 없습니다'); space = i.space; }
@@ -355,7 +420,7 @@ export async function updateLibraryFile(u: SessionUser, id: string, i: z.infer<t
     const { audit } = await import('./log');
     await audit(sql, u.id, 'library.security_set', 'library_file', id, { from: f.security, to: i.security }, null);
   } else if (i.security && (await secCtx(u)).confEdit) confirmed = true; // 같은 등급 저장 = 확인
-  await sql`update library_files set title = ${i.title ?? f.title}, folder = ${folder}, space = ${space}, tags = ${tags}, description = ${i.description !== undefined ? i.description : f.description},
+  await sql`update library_files set title = ${i.title ?? f.title}, folder = ${folder}, space = ${space}, scope = ${scope}, team_id = ${teamId}, tags = ${tags}, description = ${i.description !== undefined ? i.description : f.description},
     needs_review = false, security = ${security}, security_confirmed = ${confirmed}, updated_at = now() where id = ${id}`;
   if (space === 'marketing' && f.space !== 'marketing') { // 마케팅 공간으로 들어온 사진은 응답 뒤에 AI 사진 설명(올릴 때와 같게) — 한도·AI 꺼짐이면 건너뜀
     const Ph = await import('./mktPhotos');
@@ -649,14 +714,23 @@ export async function confidentialLog(u: SessionUser) {
 }
 
 // ---------------- V14 18번 폴더 탐색기: 만들기·이름 바꾸기(옮기기)·삭제·여러 파일 옮기기 ----------------
-export const folderInput = z.object({ path: z.string().min(1).max(200) });
-export const folderRenameInput = z.object({ from: z.string().min(1).max(200), to: z.string().min(1).max(200) });
-export const moveInput = z.object({ ids: z.array(z.string().uuid()).min(1).max(200), folder: z.string().max(200) });
+const scopeIn = { scope: z.enum(['company', 'team', 'mine']).optional(), teamId: z.string().uuid().optional() }; // 292차 — 비우면 회사 폴더
+export const folderInput = z.object({ path: z.string().min(1).max(200), ...scopeIn });
+export const folderRenameInput = z.object({ from: z.string().min(1).max(200), to: z.string().min(1).max(200), ...scopeIn });
+export const moveInput = z.object({ ids: z.array(z.string().uuid()).min(1).max(200), folder: z.string().max(200), ...scopeIn });
+/** 292차 우리 팀·내 파일 폴더 — 내 파일 = 나, 팀 = 그 팀(구성원·대표·관리자). 회사 폴더 권한은 안 씀 */
+async function scopeFolderKey(u: SessionUser, i: { scope?: string; teamId?: string }) {
+  if (i.scope === 'mine') return { scope: 'mine' as const, teamId: null, ownerId: u.id };
+  if (i.scope === 'team') return { scope: 'team' as const, teamId: await teamFor(u, i.teamId), ownerId: null };
+  return null;
+}
 export async function createFolder(u: SessionUser, i: z.infer<typeof folderInput>) {
   denyDemo(u);
   await requireMenu(u, 'library', 'edit');
   const path = cleanFolder(i.path);
   if (!path) throw badRequest('폴더 이름을 입력하세요');
+  const k = await scopeFolderKey(u, i);
+  if (k) { await db()`insert into library_scope_folders (tenant, scope, team_id, owner_id, path, created_by) values (${tenantOf(u)}, ${k.scope}, ${k.teamId}, ${k.ownerId}, ${path}, ${u.id}) on conflict do nothing`; return { ok: true, path }; }
   await requireFolder(u, path, 'edit');
   await db()`insert into library_folders (tenant, path, created_by) values (${tenantOf(u)}, ${path}, ${u.id}) on conflict do nothing`;
   return { ok: true, path };
@@ -668,6 +742,21 @@ export async function renameFolder(u: SessionUser, i: z.infer<typeof folderRenam
   const from = cleanFolder(i.from), to = cleanFolder(i.to);
   if (!from || !to) throw badRequest('폴더를 고르세요');
   if (to === from || to.startsWith(from + '/')) throw badRequest('자기 안으로는 옮길 수 없습니다');
+  const k = await scopeFolderKey(u, i);
+  if (k) { // 292차: 내 파일 폴더 = 내 파일만, 팀 폴더 = 그 팀 파일(팀장·대표·관리자만 — 다른 사람 파일도 옮겨지므로)
+    if (k.scope === 'team' && !isAdmin(u) && !(await db()`select 1 from team_members where team_id = ${k.teamId} and user_id = ${u.id} and is_lead`).length) throw forbidden('팀 폴더 이름은 팀장·관리자만 바꿀 수 있습니다');
+    const sql = db(); const t = tenantOf(u); const [eq, like] = under(from); const re = (p: string) => to + p.slice(from.length);
+    const own = k.scope === 'mine' ? sql`created_by = ${u.id}` : sql`team_id = ${k.teamId}`;
+    const n = await sql.begin(async (tx) => {
+      const files = await tx<{ id: string; folder: string }[]>`select id, folder from library_files where tenant = ${t} and deleted_at is null and scope = ${k.scope} and ${own} and (folder = ${eq} or folder like ${like})`;
+      for (const f of files) await tx`update library_files set folder = ${re(f.folder)}, updated_at = now() where id = ${f.id}`;
+      const ownF = k.scope === 'mine' ? tx`owner_id = ${u.id}` : tx`team_id = ${k.teamId}`;
+      for (const r of await tx<{ path: string }[]>`select path from library_scope_folders where tenant = ${t} and scope = ${k.scope} and ${ownF} and (path = ${eq} or path like ${like})`)
+        await tx`update library_scope_folders set path = ${re(r.path)} where tenant = ${t} and scope = ${k.scope} and ${ownF} and path = ${r.path}`;
+      return files.length;
+    });
+    return { ok: true, moved: n };
+  }
   await requireFolder(u, from, 'delete'); await requireFolder(u, to, 'edit');
   const sql = db(); const t = tenantOf(u); const [eq, like] = under(from);
   // 보이지 않는(등급 밖) 파일이 있으면 옮기지 않는다 — 남의 기밀 파일을 모르게 옮기는 일 방지
@@ -693,6 +782,15 @@ export async function renameFolder(u: SessionUser, i: z.infer<typeof folderRenam
 export async function deleteFolder(u: SessionUser, i: z.infer<typeof folderInput>) {
   denyDemo(u);
   const path = cleanFolder(i.path);
+  const k = await scopeFolderKey(u, i);
+  if (k) { // 292차: 빈 팀·내 파일 폴더만
+    const sql = db(); const t = tenantOf(u); const [eq, like] = under(path);
+    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from library_files where tenant = ${t} and deleted_at is null and scope = ${k.scope}
+      and ${k.scope === 'mine' ? sql`created_by = ${u.id}` : sql`team_id = ${k.teamId}`} and (folder = ${eq} or folder like ${like})`;
+    if (n) throw new HttpError(409, 'not_empty', `폴더 안에 자료가 ${n}개 있습니다. 먼저 옮기거나 지우세요`);
+    await sql`delete from library_scope_folders where tenant = ${t} and scope = ${k.scope} and ${k.scope === 'mine' ? sql`owner_id = ${u.id}` : sql`team_id = ${k.teamId}`} and (path = ${eq} or path like ${like})`;
+    return { ok: true };
+  }
   await requireFolder(u, path, 'delete');
   const sql = db(); const t = tenantOf(u); const [eq, like] = under(path);
   const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from library_files where tenant = ${t} and deleted_at is null and (folder = ${eq} or folder like ${like})`;
@@ -705,9 +803,11 @@ export async function moveFiles(u: SessionUser, i: z.infer<typeof moveInput>) {
   const folder = cleanFolder(i.folder);
   const done: string[] = []; const skipped: { id: string; reason: string }[] = [];
   for (const id of i.ids) {
-    try { await updateLibraryFile(u, id, { folder }); done.push(id); } catch (e: any) { skipped.push({ id, reason: String(e?.message ?? '실패') }); }
+    try { await updateLibraryFile(u, id, { folder, ...(i.scope ? { scope: i.scope, teamId: i.teamId } : {}) }); done.push(id); } catch (e: any) { skipped.push({ id, reason: String(e?.message ?? '실패') }); }
   }
-  if (folder) await db()`insert into library_folders (tenant, path, created_by) values (${tenantOf(u)}, ${folder}, ${u.id}) on conflict do nothing`;
+  const k = done.length ? await scopeFolderKey(u, i).catch(() => null) : null;
+  if (folder && k) await db()`insert into library_scope_folders (tenant, scope, team_id, owner_id, path, created_by) values (${tenantOf(u)}, ${k.scope}, ${k.teamId}, ${k.ownerId}, ${folder}, ${u.id}) on conflict do nothing`;
+  else if (folder && (!i.scope || i.scope === 'company')) await db()`insert into library_folders (tenant, path, created_by) values (${tenantOf(u)}, ${folder}, ${u.id}) on conflict do nothing`;
   return { moved: done.length, skipped };
 }
 

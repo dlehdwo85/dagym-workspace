@@ -16,9 +16,11 @@ type F = { id: string; folder: string; title: string; file_name: string; mime_ty
   created_at: string; updated_at: string; created_by: string; created_by_name: string; has_text: boolean; text_error: string | null; text_tried_at: string | null; snippet: string | null;
   organized_by: 'ai' | 'rule' | null; ai_confidence: number | null; needs_review: boolean; can_undo: boolean; level: string; organize_status: string | null; organize_error: string | null;
   security: Sec; security_suggested: Sec | null; security_confirmed: boolean; effective_security: Sec;
-  vision?: { caption?: string; scene?: string; kind?: string; text?: string; promo?: boolean; faces?: boolean; people?: number; error?: string } | null }; // #235 ⓒ 마케팅 사진 AI 설명 · #615 ④ faces = 얼굴 나온 실사(촬영 동의 확인)
+  vision?: { caption?: string; scene?: string; kind?: string; text?: string; promo?: boolean; faces?: boolean; people?: number; error?: string } | null; // #235 ⓒ 마케팅 사진 AI 설명 · #615 ④ faces = 얼굴 나온 실사(촬영 동의 확인)
+  /** 292차 #804·#814 회사 전체 · 팀 · 내 파일 */ scope?: Scope; team_id?: string | null; team_name?: string | null; space?: string };
+type Scope = 'company' | 'team' | 'mine';
 type Fo = { folder: string; n: number; security: Sec; level: string };
-type Data = { files: F[]; folders: Fo[]; review: number; level: string; aiOrganize: boolean; confEdit: boolean; spaces?: string[]; spaceCounts?: Record<string, number> };
+type Data = { files: F[]; folders: Fo[]; review: number; level: string; aiOrganize: boolean; confEdit: boolean; spaces?: string[]; spaceCounts?: Record<string, number>; myTeams?: { id: string; name: string }[] };
 const RANK: Record<string, number> = { none: 0, view: 1, edit: 2, delete: 3 };
 const SEC: Record<Sec, { label: string; cls: string }> = {
   public: { label: '일반', cls: 'bg-green-50 text-green-700' }, internal: { label: '내부', cls: 'bg-slate-100 text-ink-2' }, confidential: { label: '기밀', cls: 'bg-red-50 text-red-700' } };
@@ -50,7 +52,11 @@ export default function LibraryPage() {
   const [review, setReview] = useState(false);
   // 대표 지시(10/18): 공간별 자료실(저장소는 하나) — 사이드바에서 온 공간이 기본, [전체]로 모두
   const [libSpace, setLibSpace] = useState(['work', 'sales', 'marketing', 'all'].includes(sp.get('space') ?? '') ? sp.get('space')! : 'work');
-  const url = `/api/library?${new URLSearchParams({ limit: '500', space: libSpace, ...(query ? { q: query } : {}), ...(review ? { review: '1' } : {}) })}`;
+  // 292차 #804·#814(대표 10/29): 업무 공간 자료실 = 전체 · 회사 전체 · 우리 팀 · 내 파일 — 전체 = 볼 수 있는 것 모두(팀·내 파일은 표시)
+  const [scope, setScope] = useState<'all' | Scope>(['company', 'team', 'mine'].includes(sp.get('scope') ?? '') ? sp.get('scope') as Scope : 'all');
+  const [teamPick, setTeamPick] = useState('');
+  const scoped = libSpace === 'work' && scope !== 'all' ? scope : null;
+  const url = `/api/library?${new URLSearchParams({ limit: '500', space: libSpace, ...(scoped ? { scope: scoped } : {}), ...(scoped === 'team' && teamPick ? { teamId: teamPick } : {}), ...(query ? { q: query } : {}), ...(review ? { review: '1' } : {}) })}`;
   const { data, error, loading, reload } = useApi<Data>(url);
   const [view, setView] = useState<'list' | 'grid'>('list');
   const [sort, setSort] = useState('name');
@@ -98,6 +104,15 @@ export default function LibraryPage() {
 
   // ---- 올리기 (현재 폴더 또는 놓은 폴더) ----
   const [prog, setProg] = useState<{ name: string; pct: number; error?: string; note?: string; onOpen?: () => void }[]>([]);
+  // 292차 올릴 곳: 업무 공간이면 기본 = 지금 탭(전체·우리 팀 탭은 주 팀, 팀이 없으면 회사 전체) — 바꿀 수 있음
+  const teams = data?.myTeams ?? [];
+  const [upPick, setUpPick] = useState<string | null>(null);
+  useEffect(() => { setUpPick(null); }, [scope, teamPick, libSpace]);
+  // 대표·관리자는 '전체' 탭에서 회사 전체가 기본(회사 양식·로고를 올리면 직원 모두가 봐야 해서 — 해석, 대표 확인 대기) · 직원은 주 팀
+  const upDefault = libSpace !== 'work' ? 'company' : scope === 'company' ? 'company' : scope === 'mine' ? 'mine' : scope === 'all' && admin ? 'company' : teams.length ? `team:${(scope === 'team' && teamPick) || teams[0].id}` : 'company';
+  const upTo = upPick ?? upDefault;
+  const destOf = (v: string) => (v.startsWith('team:') ? { scope: 'team' as const, teamId: v.slice(5) } : v === 'mine' ? { scope: 'mine' as const } : {});
+  const scopeBody = scoped === 'mine' ? { scope: 'mine' } : scoped === 'team' ? { scope: 'team', ...(teamPick ? { teamId: teamPick } : {}) } : {}; // 새 폴더·이름 바꾸기·옮기기는 지금 탭 범위
   async function upload(list0: FileList | File[] | null, folder = cur) {
     if (!list0 || !list0.length) return;
     const list = Array.from(list0);
@@ -108,7 +123,7 @@ export default function LibraryPage() {
     for (const [n, file] of list.entries()) {
       setBusy(`${list.length > 1 ? `${n + 1}/${list.length} ` : ''}${file.name} 올리는 중…`);
       try {
-        const meta = { fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, folder, contentHash: await fileHash(file), space: libSpace === 'all' ? 'work' : libSpace };
+        const meta = { fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, folder, contentHash: await fileHash(file), space: libSpace === 'all' ? 'work' : libSpace, ...(libSpace === 'work' ? destOf(upTo) : {}) };
         const r = await api('/api/library', { body: meta }).catch(async (e: any) => {
           if (e.code !== 'duplicate' || !confirm(`${e.message}\n그래도 한 번 더 올릴까요?`)) throw e;
           return api('/api/library', { body: { ...meta, allowDuplicate: true } });
@@ -143,7 +158,7 @@ export default function LibraryPage() {
   // ---- 옮기기 (파일을 폴더 위에 끌어 놓기 / 여러 개 선택) ----
   async function move(ids: string[], folder: string) {
     try {
-      const r = await api('/api/library/move', { body: { ids, folder } });
+      const r = await api('/api/library/move', { body: { ids, folder, ...scopeBody } });
       toast.ok(`${r.moved}개를 "${folder || '최상위'}"로 옮겼습니다`);
       if (r.skipped.length) toast.error(`${r.skipped.length}개는 못 옮김: ${r.skipped[0].reason}`);
       setSel(new Set()); reload();
@@ -168,16 +183,16 @@ export default function LibraryPage() {
     e.preventDefault(); if (!dlg) return;
     const v = dlg.value.trim().replace(/^\/+|\/+$/g, '');
     try {
-      if (dlg.kind === 'new') { const p = cur ? `${cur}/${v}` : v; await api('/api/library/folders', { body: { path: p } }); setCur(p); }
-      if (dlg.kind === 'rename') { const to = parentOf(cur) ? `${parentOf(cur)}/${v}` : v; const r = await api('/api/library/folders', { method: 'PATCH', body: { from: cur, to } }); setCur(to); toast.ok(`이름을 바꿨습니다 (자료 ${r.moved}개)`); }
+      if (dlg.kind === 'new') { const p = cur ? `${cur}/${v}` : v; await api('/api/library/folders', { body: { path: p, ...scopeBody } }); setCur(p); }
+      if (dlg.kind === 'rename') { const to = parentOf(cur) ? `${parentOf(cur)}/${v}` : v; const r = await api('/api/library/folders', { method: 'PATCH', body: { from: cur, to, ...scopeBody } }); setCur(to); toast.ok(`이름을 바꿨습니다 (자료 ${r.moved}개)`); }
       if (dlg.kind === 'move') await move([...sel], v);
-      if (dlg.kind === 'doc') { const r = await api('/api/library/docs', { body: { title: dlg.value.trim(), folder: cur, space: libSpace === 'all' ? 'work' : libSpace } }); setDlg(null); router.push(r.link); return; }
+      if (dlg.kind === 'doc') { const r = await api('/api/library/docs', { body: { title: dlg.value.trim(), folder: cur, space: libSpace === 'all' ? 'work' : libSpace, ...(libSpace === 'work' ? destOf(upTo) : {}) } }); setDlg(null); router.push(r.link); return; }
       setDlg(null); reload();
     } catch (er: any) { toast.error(er.message); }
   }
   async function deleteFolder() {
     if (!confirm(`"${cur}" 폴더를 지울까요? (빈 폴더만 지울 수 있습니다)`)) return;
-    try { await api('/api/library/folders', { method: 'DELETE', body: { path: cur } }); setCur(parentOf(cur)); reload(); toast.ok('폴더를 지웠습니다'); } catch (e: any) { toast.error(e.message); }
+    try { await api('/api/library/folders', { method: 'DELETE', body: { path: cur, ...scopeBody } }); setCur(parentOf(cur)); reload(); toast.ok('폴더를 지웠습니다'); } catch (e: any) { toast.error(e.message); }
   }
   async function setFolderSec(security: string) {
     try { await api('/api/library/folder-security', { method: 'PUT', body: { folder: cur, security: security || null } }); reload(); toast.ok('폴더 등급을 바꿨습니다'); } catch (e: any) { toast.error(e.message); }
@@ -187,7 +202,7 @@ export default function LibraryPage() {
     e.preventDefault(); if (!edit) return;
     try {
       await api(`/api/library/${edit.id}`, { method: 'PATCH', body: { title: edit.title, folder: edit.folder, description: edit.description || null, security: edit.security,
-        tags: String(edit.tags).split(/[,\s]+/).map((t) => t.replace(/^#/, '')).filter(Boolean) } });
+        tags: String(edit.tags).split(/[,\s]+/).map((t) => t.replace(/^#/, '')).filter(Boolean), ...(edit.scope ? { scope: edit.scope, ...(edit.scope === 'team' && edit.team_id ? { teamId: edit.team_id } : {}) } : {}) } });
       setEdit(null); reload(); toast.ok('저장했습니다');
     } catch (e: any) { toast.error(e.message); }
   }
@@ -260,6 +275,11 @@ export default function LibraryPage() {
           {data?.confEdit && <Button variant="ghost" onClick={() => setLogOpen(true)} data-testid="conf-log-open"><ShieldAlert />기밀 열람 기록</Button>}
           {canUpload && admin && <Button variant="secondary" onClick={previewAll} disabled={!!allBusy} data-testid="library-organize-all">{allBusy ? <><Loader2 className="animate-spin" />{allBusy}</> : <><Sparkles />전체 정리</>}</Button>}
           {canUpload && <Button variant="secondary" onClick={() => setDlg({ kind: 'doc', value: '' })} data-testid="library-new-doc"><FilePenLine />새 문서</Button>}
+          {canUpload && libSpace === 'work' && (
+            <select className={cx(inputCls, 'h-9 !w-auto text-sm')} value={upTo} onChange={(e) => setUpPick(e.target.value)} aria-label="올릴 곳" title="새로 올리는 파일·새 문서가 들어갈 곳" data-testid="library-upload-to">
+              {teams.map((t) => <option key={t.id} value={`team:${t.id}`}>올릴 곳: {t.name}(우리 팀)</option>)}
+              <option value="company">올릴 곳: 회사 전체</option><option value="mine">올릴 곳: 내 파일(나만)</option>
+            </select>)}
           {canUpload && <Button onClick={() => fileRef.current?.click()} disabled={!!busy} data-testid="library-upload">{busy ? <Loader2 className="animate-spin" /> : <Upload />}올리기</Button>}
         </>} />
       {(data?.spaces?.length ?? 0) > 1 && (
@@ -269,6 +289,18 @@ export default function LibraryPage() {
               className={cx('rounded-full border px-3 py-1 text-xs font-medium', libSpace === k ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>
               {{ work: '업무', sales: '영업', marketing: '마케팅', all: '전체' }[k as 'work']}{k !== 'all' && data!.spaceCounts?.[k] ? ` ${data!.spaceCounts[k]}` : ''}
             </button>))}
+        </div>
+      )}
+      {libSpace === 'work' && (
+        <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="보관 범위" data-testid="library-scopes">
+          {([['all', '전체'], ['company', '회사 전체'], ['team', '우리 팀'], ['mine', '내 파일']] as const).map(([k, label]) => (
+            <button key={k} role="tab" aria-selected={scope === k} onClick={() => { setScope(k); setCur(''); setSel(new Set()); }} data-testid={`library-scope-${k}`}
+              className={cx('rounded-full border px-3 py-1 text-xs font-medium', scope === k ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink-2 hover:bg-slate-50')}>{label}</button>))}
+          {scope === 'team' && teams.length > 1 && (
+            <select className={cx(inputCls, 'h-8 !w-auto py-0 text-xs')} value={teamPick} onChange={(e) => { setTeamPick(e.target.value); setCur(''); }} aria-label="팀 고르기" data-testid="library-team-pick">
+              <option value="">내가 볼 수 있는 팀 모두</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>)}
+          <span className="text-xs text-ink-3">{scope === 'team' ? '우리 팀 자료 — 팀 구성원과 위 부서·사업부·본사 구성원, 대표·관리자가 봅니다' : scope === 'mine' ? '내 파일 — 나만 봅니다(대표·관리자도 못 봄)' : scope === 'company' ? '회사 전체 자료 — 폴더 권한·보안 등급대로' : ''}</span>
         </div>
       )}
       <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} data-testid="library-file" />
@@ -429,6 +461,15 @@ export default function LibraryPage() {
             <Field label="보안 등급" hint="폴더 등급보다 낮출 수는 없습니다. 기밀을 내리려면 기밀 편집 권한이 필요합니다">
               <select className={inputCls} value={edit.security} onChange={(e) => setEdit({ ...edit, security: e.target.value as Sec })} aria-label="보안 등급">
                 <option value="public">일반 — 전 직원</option><option value="internal">내부 — 내부 자료 열람 권한</option><option value="confidential">🔒 기밀 — 기밀 열람 권한자만</option></select></Field>
+            {(edit.space ?? 'work') === 'work' && !(edit as F & { task_id?: string | null }).task_id && (edit.created_by === user.id || admin) && (
+              <Field label="보관 범위" hint="우리 팀 = 팀과 위 부서·대표·관리자 · 내 파일 = 나만(올린 사람만 고를 수 있음)">
+                <select className={inputCls} value={edit.scope === 'team' ? `team:${edit.team_id ?? ''}` : edit.scope ?? 'company'} aria-label="보관 범위" data-testid="library-edit-scope"
+                  onChange={(e) => { const v = e.target.value; setEdit({ ...edit, scope: v.startsWith('team:') ? 'team' : (v as Scope), team_id: v.startsWith('team:') ? v.slice(5) : null }); }}>
+                  <option value="company">회사 전체</option>
+                  {edit.scope === 'team' && edit.team_id && !teams.some((t) => t.id === edit.team_id) && <option value={`team:${edit.team_id}`}>{edit.team_name ?? '팀'}(우리 팀)</option>}
+                  {teams.map((t) => <option key={t.id} value={`team:${t.id}`}>{t.name}(우리 팀)</option>)}
+                  {edit.created_by === user.id && <option value="mine">내 파일(나만)</option>}
+                </select></Field>)}
             <Field label="설명"><textarea className={inputCls} value={edit.description ?? ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></Field>
             <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEdit(null)}>취소</Button><Button type="submit">저장</Button></div>
           </form>
@@ -478,6 +519,8 @@ function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder,
         <div className="flex items-center gap-1.5 text-sm font-medium">{isDoc(f) ? <a href={openHref(f)} className="min-w-0 truncate hover:underline" data-testid="doc-open">{f.title}</a> : onView ? <a href={openHref(f)} onClick={view} className="min-w-0 truncate hover:underline" data-testid="media-open">{f.title}</a> : <span className="min-w-0 truncate">{f.title}</span>}
           {f.vision?.faces && <span className="inline-flex shrink-0 items-center rounded bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800" title="얼굴이 나온 실사 — 홍보에 쓰려면 촬영·게시 동의를 받았는지 확인" data-testid="photo-faces">얼굴 · 동의 확인</span>}
           {f.effective_security !== 'internal' && <SecBadge s={f.effective_security} />}
+          {f.scope === 'team' && <span className="inline-flex shrink-0 items-center rounded bg-sky-50 px-1.5 text-[11px] font-semibold text-sky-800" data-testid="scope-team">{f.team_name ?? '팀'}</span>}
+          {f.scope === 'mine' && <span className="inline-flex shrink-0 items-center rounded bg-slate-800 px-1.5 text-[11px] font-semibold text-white" data-testid="scope-mine">내 파일</span>}
           {f.organized_by && <span className={cx('inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 text-[11px] font-semibold', f.needs_review ? 'bg-amber-100 text-amber-800' : 'bg-violet-100 text-violet-700')}
             title={f.ai_confidence !== null ? `확신 ${Math.round(f.ai_confidence * 100)}%` : undefined} data-testid="ai-organized"><Sparkles className="size-3" />{f.organized_by === 'ai' ? 'AI 정리됨' : '규칙 정리'}{f.needs_review && ' · 확인 필요'}</span>}
         </div>

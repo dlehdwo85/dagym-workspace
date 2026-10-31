@@ -21,7 +21,8 @@ const PRESENCE_MS = 20_000; // 커서·이름 유효 시간
 const b64 = (u: Uint8Array) => Buffer.from(u).toString('base64');
 const fromB64 = (s: string) => new Uint8Array(Buffer.from(s, 'base64'));
 
-export const docCreateInput = z.object({ title: z.string().trim().min(1).max(200), folder: z.string().max(200).default(''), space: z.enum(['work', 'sales', 'marketing']).optional() });
+export const docCreateInput = z.object({ title: z.string().trim().min(1).max(200), folder: z.string().max(200).default(''), space: z.enum(['work', 'sales', 'marketing']).optional(),
+  scope: z.enum(['company', 'team', 'mine']).optional(), teamId: z.string().uuid().optional() }); // 292차 #814 내 파일·우리 팀에 새 문서
 export const syncInput = z.object({
   since: z.coerce.number().int().min(0).default(0),
   clientId: z.coerce.number().int().min(0).default(0),
@@ -36,14 +37,19 @@ export async function createDoc(u: SessionUser, i: z.infer<typeof docCreateInput
   denyDemo(u);
   await requireMenu(u, 'library', 'edit');
   const folder = cleanFolder(i.folder);
-  if (RANK[await folderLevel(u, folder)] < RANK.edit) throw forbidden(`"${folder || '자료실'}" 폴더에 만들 권한이 없습니다`);
   const space = i.space ?? 'work';
-  if (space !== 'work' && !(await (await import('./library')).librarySpaces(u)).includes(space)) throw notFound();
+  const scope = i.scope ?? 'company';
+  if (scope !== 'company' && space !== 'work') throw badRequest('우리 팀·내 파일은 업무 공간 자료실에서만 쓸 수 있습니다');
+  if (scope === 'company' && RANK[await folderLevel(u, folder)] < RANK.edit) throw forbidden(`"${folder || '자료실'}" 폴더에 만들 권한이 없습니다`);
+  const L = await import('./library');
+  const teamId = scope === 'team' ? (i.teamId ?? (await L.myTeams(u))[0]?.id) : null;
+  if (scope === 'team' && (!teamId || !((await L.myTeams(u)).some((t) => t.id === teamId) || (isAdmin(u) && (await L.visibleTeamIds(u)).includes(teamId))))) throw badRequest('그 팀 구성원만 팀 문서를 만들 수 있습니다');
+  if (space !== 'work' && !(await L.librarySpaces(u)).includes(space)) throw notFound();
   const sql = db();
   const t = tenantOf(u);
   const suggested = ruleSecurity(i.title, await confWords(t));
-  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, space, folder, title, file_name, mime_type, size_bytes, tags, created_by, source, upload_status, security, security_suggested)
-    values (${t}, ${space}, ${folder}, ${i.title}, ${`${i.title.replace(/[\\/:*?"<>|]+/g, ' ').trim()}.wdoc`}, ${DOC_MIME}, 0, ${['문서']}, ${u.id}, 'doc', 'ready', 'internal', ${suggested}) returning id`;
+  const [f] = await sql<{ id: string }[]>`insert into library_files (tenant, scope, team_id, space, folder, title, file_name, mime_type, size_bytes, tags, created_by, source, upload_status, security, security_suggested)
+    values (${t}, ${scope}, ${teamId}, ${space}, ${folder}, ${i.title}, ${`${i.title.replace(/[\\/:*?"<>|]+/g, ' ').trim()}.wdoc`}, ${DOC_MIME}, 0, ${['문서']}, ${u.id}, 'doc', 'ready', 'internal', ${suggested}) returning id`;
   const empty = new Y.Doc(); empty.getXmlFragment(FIELD);
   await sql`insert into lib_docs (library_file_id, tenant, snapshot) values (${f.id}, ${t}, ${Buffer.from(Y.encodeStateAsUpdate(empty))})`;
   const { audit } = await import('./log');
@@ -65,7 +71,7 @@ export async function docAccess(u: SessionUser, id: string) {
   }
   if (!isDocMime(f.mime_type)) throw notFound('문서가 없습니다');
   const mine = f.created_by === u.id;
-  const canEdit = mine || isAdmin(u) || share?.role === 'edit' || (!share && RANK[await menuLevel(u, 'library')] >= RANK.edit && RANK[await folderLevel(u, f.folder)] >= RANK.edit);
+  const canEdit = mine || isAdmin(u) || share?.role === 'edit' || (!share && RANK[await menuLevel(u, 'library')] >= RANK.edit && (f.scope === 'team' || (f.scope === 'company' && RANK[await folderLevel(u, f.folder)] >= RANK.edit))); // 292차: 팀 문서는 그 팀(볼 수 있는 사람)이 고침
   return { file: f, canEdit, canShare: mine || isAdmin(u), shared: !!share };
 }
 

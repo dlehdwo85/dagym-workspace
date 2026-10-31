@@ -125,7 +125,7 @@ export const PHOTO_MIME = ['image/jpeg', 'image/png', 'image/webp'];
  *  · 영상 장면 사진(mktScenes)은 원본 영상이 지워졌거나 기밀·'쓰지않음'이면 뺌. 마케팅 공간 밖 사진은 AI 설명이 '실사·홍보물 아님·얼굴 없음·화질 괜찮음'일 때만 시안·본문에 씀(outsideOk)
  * library_files 를 별칭 없이 읽는 쿼리에 그대로 넣는다(하위 쿼리가 library_files.칸 으로 바깥 줄을 봄)
  */
-export const poolCond = (sql: ReturnType<typeof db>, tenant: string) => sql`library_files.tenant = ${tenant} and library_files.deleted_at is null and library_files.upload_status = 'ready'
+export const poolCond = (sql: ReturnType<typeof db>, tenant: string) => sql`library_files.tenant = ${tenant} and library_files.deleted_at is null and library_files.upload_status = 'ready' and library_files.scope = 'company'
   and coalesce(library_files.security, 'internal') <> 'confidential' and library_files.mime_type = any(${PHOTO_MIME}::text[]) and coalesce(library_files.source, '') not in ('ai', 'ai_attach', 'revenue', 'mosaic')
   and not exists (select 1 from library_folder_security fs where fs.tenant = library_files.tenant and fs.security = 'confidential' and (library_files.folder = fs.folder or left(library_files.folder, length(fs.folder) + 1) = fs.folder || '/'))
   and (library_files.space = 'marketing' or not exists (select 1 from team_members mi join teams ti on ti.id = mi.team_id join users uu on uu.id = mi.user_id
