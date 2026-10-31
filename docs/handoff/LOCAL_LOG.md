@@ -2054,3 +2054,17 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - POST /api/sales/collectors/kapt_bid_notices/run 10:57 → success 16초, 요약 'KG2B 상세 8건(공고문 12)'.
 - 천안 kg2b_142686 카드: attachments '주민공동시설 입찰공고문.hwp'(kg2b download 주소), opening 11/09 10:00, deadline 11/09 09:00. briefing 여전히 '공고문 참조'. eligibility '첨부 공고문 없음'(readAt 10/30 11:37) — 다음 정기 실행 뒤 확인. 업무 764f166d 첨부 0 — 자동 첨부 요청.
 - 취소 탭 광명 kg2b_142624 카드 renotice {재공고 제목, close 11-03} 표시 확인. kg2b_142669 는 두 줄(원본 복사 7e71c247·수집 8ce5bfd8)이 한 카드로 묶임.
+
+## 2026-10-31 11:35 — 280차(452e944) 운영 확인
+- 업무 화면 390px(대표): 전체·내 업무 모두 사람별 묶음, 맨 위 공동 업무 칸 없음(TaskViews 852 group==='due'&&view==='my' 때만) — 클라우드 281차 수정 중. 캡처 artifacts/1031-tasks-mine-mobile.png.
+- 정기 실행 11:30:26 taskBatchMerge {merged 4, batches 4}. 김해대청천에피트 문의 업무: batch_id null · co_assignees 김소담 · 댓글 1·체크 7 유지.
+- K-apt 수동 11:22 'KG2B 상세 2건(공고문 0, 넘긴 업무 1건에 붙임)' — 광명 f1713d0b 첨부 '…(광명자이더샵포레나).hwp' source sales_auto. 천안 764f166d 첨부 0·briefing '공고문 참조' 그대로.
+- 천안 eligibility 11:05:33 '자본금 5억 이상 · 실적 최근 5년 공동주택 1000세대 이상 5개 단지 · 지역 전국'.
+- 같은 11:30 실행: g2b 재시도 failed(점검), salesCollectorAlerts alerts 2·notified 0(하루 1번 묶음).
+
+## 2026-10-31 13:35 — 281~285차 운영 확인(c9acbc7)
+- 281: 업무 화면 390px '전체'·사람별 맨 위 '공동 업무 11'(artifacts/1031-tasks-cotask-281.png). 경기스포츠산업 공모전 상세 [업무로 · 결과 확인]·[업무 회수].
+- 280 남은 것: 13:27 K-apt 수동 'KG2B 상세 6건(공고문 0, 넘긴 업무 1건에 붙임)' → 천안 764f166d 첨부 hwp, 카드 briefing null.
+- 282: /api/notifications/prefs mkt 8항목 기본값.
+- 283·285: library marketing vision 235 · sharp 86장 · 최소 85.6 · 10% 916 · 중앙 5,468 · 최대 22,668 · 40 미만 0. AI 설명 '흔들/흐릿' 사진 sharp 85.6~22,668. 다시 그린 시안 0건. 클라우드에 기준 방식 변경 요청.
+- 운영 설정 photo_gen true(로컬이 바꾸지 않음) · video_pause false. 시안 수 10월 73 · 11월 32(휴지통 제외).
