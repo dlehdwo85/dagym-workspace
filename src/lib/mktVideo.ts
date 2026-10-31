@@ -283,11 +283,15 @@ export async function renderTick() {
 /** 자료실 파일 바이트(기밀 제외) — 브랜드 키트 로고·글꼴, #499-5 카드뉴스도 씀 */
 export async function libBytes(tenant: string, id: string | null | undefined, mime: RegExp) {
   if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const [f] = await db()<{ storage_key: string; mime_type: string; file_name: string; title: string }[]>`select storage_key, mime_type, file_name, title from library_files
+  const [f] = await db()<{ storage_key: string; mime_type: string; file_name: string; title: string; vision: unknown }[]>`select storage_key, mime_type, file_name, title, vision from library_files
     where id = ${id} and tenant = ${tenant} and deleted_at is null and upload_status = 'ready' and coalesce(security, 'internal') <> 'confidential'`;
   if (!f?.storage_key || !(mime.test(f.mime_type) || mime.test(f.file_name))) return null;
   const { getObject } = await import('./storage');
-  return { data: await getObject(f.storage_key), name: f.file_name, title: f.title || f.file_name };
+  const data = await getObject(f.storage_key);
+  // 286차 #818 ④: 시안·카드·영상에 쓰는 사진은 얼굴 자리를 모자이크(AI 설명이 알려 준 자리만 — 원본 파일은 그대로)
+  const P = /^image\//.test(f.mime_type) ? await import('./mktPhotos') : null;
+  const faces = P ? P.facesToHide(f.vision) : [];
+  return { data: faces.length ? await P!.mosaicFaces(data, faces).catch(() => data) : data, name: f.file_name, title: f.title || f.file_name };
 }
 /** 자료실 폴더 '영상 배경음'·'영상 화면 캡처'(하위 폴더 포함) 후보 */
 export async function videoAssets(tenant: string, folder: '영상 배경음' | '영상 화면 캡처') {
