@@ -56,7 +56,8 @@ before(async () => {
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', quietStart: 0, quietEnd: 0, leadDays: 3, autoHold: false });
   P.brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '실사브랜드' })).id;
   P.other = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '옆브랜드' })).id;
-  for (const b of [P.brand, P.other]) await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b}`, { intro: '동네 운동 공간', products: '1개월 회원권', facts: { phone: '032-111-2222' } });
+  // 288차 #814-2: 기본은 '이 브랜드 사진만'(이름 없는 사진 안 씀 — mkt-brand-photo-814 시험) — 이 시험은 188차 후보 규칙(공간 밖·기밀·격리·얼굴)을 보려고 예전 방식(any)으로
+  for (const b of [P.brand, P.other]) await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b}`, { intro: '동네 운동 공간', products: '1개월 회원권', facts: { phone: '032-111-2222' }, video: { photoSource: 'any' } });
 });
 after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); });
 

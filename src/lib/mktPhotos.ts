@@ -264,13 +264,15 @@ export async function describeBatch(tenant: string, o: { limit?: number; budgetM
 
 type PhotoRow = { id: string; title: string; file_name: string; folder: string; tags: string[]; description: string | null; vision: any; created_at: Date; space: string; source: string | null; regen?: any };
 /** 원고 재료의 사진 목록 — 글자 든 그래픽·다른 브랜드 사진은 빼고 이 브랜드 사진 먼저. AI 설명(없으면 자료실 설명) */
-export async function photoLines(tenant: string, brand: string, others: string[], n = 8) {
+export async function photoLines(tenant: string, brand: string, others: string[], n = 8, rule?: import('./mktAutoVisual').PhotoRule) {
+  if (rule?.src === 'screen') return []; // 288차: '앱 화면 캡처만' 브랜드는 실사 목록을 원고에 안 줌
   const sql = db(); const V = await import('./mktAutoVisual');
   const rows = await sql<PhotoRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at, space, source from library_files where ${photoCond(sql, tenant)}
     order by (space = 'marketing') desc, created_at desc limit 120`;
   const hay = (r: PhotoRow) => `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase();
-  const mine = (r: PhotoRow) => !!brand && hay(r).includes(brand.toLowerCase());
-  const pick = rows.filter((r) => poolUsable(r) && V.bodyOk(r) && !others.some((o) => !!o && hay(r).includes(o.toLowerCase())))
+  const own = rule?.own.length ? rule.own : brand ? [brand] : [];
+  const mine = (r: PhotoRow) => own.some((x) => hay(r).includes(x.toLowerCase()));
+  const pick = rows.filter((r) => poolUsable(r) && V.bodyOk(r) && !others.some((o) => !!o && hay(r).includes(o.toLowerCase())) && (!rule?.strict || mine(r)))
     .map((r, k) => ({ r, k })).sort((a, b) => Number(mine(b.r)) - Number(mine(a.r)) || a.k - b.k).slice(0, n);
   return pick.map(({ r }) => `- ${r.title}: ${visionOk(r.vision) ? `${r.vision.caption}${r.vision.scene ? ` — ${clip(r.vision.scene.split(/(?<=[.!?])\s/)[0], 80)}` : ''}` : clip(r.description, 120) || '(설명 없음)'}`);
 }
@@ -299,9 +301,34 @@ export async function photosView(u: SessionUser) {
   // 287차(로컬 10/31 13:45·13:55: 목록이 600장에서 잘려 전체 수·얼굴 사진 수를 짐작함): 상한 없이 센 숫자 — noBoxes = 얼굴이 보인다고 설명됐지만 얼굴 자리를 모르는(286차 전) 사진
   const [all] = await sql<{ total: number; described: number; faces: number; noBoxes: number }[]>`select count(*)::int as total, count(*) filter (where vision ? 'caption')::int as described,
     count(*) filter (where vision->>'faces' = 'true')::int as faces, count(*) filter (where vision->>'faces' = 'true' and not (vision ? 'faceBoxes'))::int as "noBoxes" from library_files where ${photoCond(sql, t)}`;
-  return { all, total: items.length, described: n((x) => visionOk(x.vision)), pending: n((x) => !x.vision), failed: n((x) => !!x.vision && 'error' in x.vision),
+  // 288차 #814-2: 브랜드마다 시안에 쓸 수 있는 사진 수(브랜드 키트 '시안 사진' 규칙 그대로) — 이름 없는 사진은 브랜드가 둘 이상이면 안 쓰므로 어느 브랜드에도 안 걸린 사진 수도
+  const brands = await brandPhotoCounts(t);
+  return { all, brands, total: items.length, described: n((x) => visionOk(x.vision)), pending: n((x) => !x.vision), failed: n((x) => !!x.vision && 'error' in x.vision),
     cover: n((x) => x.cover), graphic: n((x) => !x.body), outside: n((x) => x.space !== 'marketing'), scenes: n((x) => x.scene),
     videos: await (await import('./mktScenes')).scenesView(t), ai: P.aiEnabled(), perPhotoKrw: await perPhotoKrw(), canEdit: isAdmin(u), regen, gens: n((x) => x.gen), items: items.slice(0, 60) };
+}
+
+/** 288차: 브랜드별 쓸 수 있는 사진 — 실사(블로그 본문 규칙)·시안 바탕(표지 규칙)·앱 화면 캡처, 그리고 어느 브랜드 이름도 없는 실사 수(전체 사진, 600장 상한 없음) */
+async function brandPhotoCounts(t: string) {
+  const sql = db(); const V = await import('./mktAutoVisual');
+  const bs = await sql<{ id: string; name: string }[]>`select id, name from mkt_brands where tenant = ${t} order by created_at`;
+  if (!bs.length) return null;
+  const rows = await sql<(PhotoRow & { parent: string | null })[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at, space, source,
+      case when source = 'video_frame' then (select concat_ws(' ', coalesce(nullif(pv.title, ''), pv.file_name), pv.folder, array_to_string(pv.tags, ' ')) from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant) end as parent
+    from library_files where ${photoCond(sql, t)}`;
+  const real = rows.filter((r) => poolUsable(r) && V.bodyOk(r) && !markedSkip(r.tags));
+  const list = [];
+  const any = new Set<string>();
+  for (const b of bs) {
+    const rule = await V.photoRule(t, b.id);
+    const own = rule.own.length ? rule.own : [b.name];
+    const mine = (r: (typeof rows)[number]) => own.some((n) => V.photoHas(r, n));
+    for (const r of rows) if (mine(r)) any.add(r.id);
+    list.push({ id: b.id, name: b.name.replace(/^\s*\[시험\]\s*/, ''), src: rule.src, strict: rule.strict,
+      photos: rule.src === 'screen' ? 0 : real.filter(mine).length, cover: rule.src === 'screen' ? 0 : real.filter((r) => mine(r) && V.backdropOk(r)).length,
+      captures: rows.filter((r) => V.isCapture(r) && !markedSkip(r.tags) && mine(r)).length });
+  }
+  return { list, unnamed: real.filter((r) => !any.has(r.id)).length, strict: list.some((b) => b.strict) };
 }
 
 export const describeInput = z.object({ ids: z.array(z.string().uuid()).max(20).optional(), redo: z.boolean().optional(), faces: z.boolean().optional() });

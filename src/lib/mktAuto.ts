@@ -317,7 +317,7 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
   // #235 ⓑ 블로그 새 원고는 번호 붙은 본문 사진 후보(최대 20장) — 원고가 장면 순서로 '[사진 P번호]' 줄을 넣음. 블로그 수정본은 지난 원고의 사진 줄을 그대로 둠(목록 없음)
   const blog = c.kind === 'blog' || c.channel === 'blog';
   const blogPhotos = blog && !o.keep ? await (await import('./mktAutoVisual')).blogPhotoCandidates(c, `${c.title} ${topic}`).catch(() => [] as import('./mktAutoVisual').BlogPhoto[]) : [];
-  const photos = blog ? [] : await (await import('./mktPhotos')).photoLines(c.tenant, brandName(brand), others);
+  const photos = blog ? [] : await (await import('./mktPhotos')).photoLines(c.tenant, brandName(brand), others, 8, await (await import('./mktAutoVisual')).photoRule(c.tenant, c.brand_id));
   const Q = await import('./mktQuality'); const facts = Q.factsOf(brand?.facts); // 로컬 QA 10/24 ⑤ 사실 카드
   // 로컬 QA 10/24 ③: 같은 주 다른 브랜드 글 제목 — 같은 주제·같은 제목을 피하게
   const peers = c.brand_id ? await sql<{ title: string; brand: string }[]>`select x.title, b.name as brand from mkt_contents x join mkt_brands b on b.id = x.brand_id
@@ -1523,7 +1523,9 @@ export const brandKitInput = z.object({ tone: z.string().max(200).nullable().opt
     // 209차 #666 ⑤ 출연진 고정: 주인공 사진(자료실 이미지) · 묘사(영문이면 장면 지시에 그대로) · 생성 인물 / 실존 인물(광고 사용 동의를 받았을 때만)
     castFileId: z.string().uuid().nullable().optional(), castEn: z.string().trim().max(300).nullable().optional(), castKind: z.enum(['generated', 'real']).nullable().optional(), castConsent: z.boolean().optional(),
     // 271차 #811 릴스·쇼츠 영상 만드는 방법: 실제 사진 영상(생성 비용 0) · 앱 화면 녹화(생성 비용 0, 녹화 파일을 자료실에) · AI 영상(크레딧) — 비우면 지금처럼 제작 요청 카드
-    method: z.enum(['photos', 'screen', 'ai']).nullable().optional() }).optional(),
+    method: z.enum(['photos', 'screen', 'ai']).nullable().optional(),
+    // 288차 #814-2 시안 사진: 이 브랜드 이름이 든 사진만(기본) · 앱 화면 캡처만(실사 안 씀) · 이름 없는 사진도(예전)
+    photoSource: z.enum(['brand', 'screen', 'any']).nullable().optional() }).optional(),
   feed: feedInput.optional(), // #544 피드 틀(쓸 틀·색·머리줄·연락처 줄·머리말) — 통째로 저장
   facts: factsInput.optional(), // 로컬 QA 10/24 ⑤ 사실 카드(연락처·운영 시간·요금·숫자·섞으면 안 되는 이름) — 통째로 저장
   topicPool: z.array(z.string().trim().min(1).max(120)).max(40).optional(), // 로컬 QA 10/24 ③ 브랜드 주제 풀(한 줄에 하나, 돌아가며 씀)
