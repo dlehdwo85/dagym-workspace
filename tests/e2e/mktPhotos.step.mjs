@@ -59,6 +59,20 @@ export async function mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   // 자료실 목록에도 'AI 사진 설명' 줄
   await owner.goto(`${BASE}/library?space=marketing&folder=${encodeURIComponent('마케팅/사진')}`);
   await owner.getByTestId('photo-vision').filter({ hasText: '러닝머신이 줄지어 선 매장 안' }).first().waitFor();
+  // 290차 브랜드 이름 없는 사진 정리: 브랜드가 둘 이상이면 이름 없는 실사를 사람이 골라 브랜드 지정(태그) — 자동 지정 없음
+  for (const name of ['E2E가짐', 'E2E나짐']) if (!(await sql`select 1 from mkt_brands where tenant = ${tenant} and name = ${name}`).length) await ctx.owner.ok('POST', '/api/marketing/brands', { name });
+  const [ga] = await sql`select id from mkt_brands where tenant = ${tenant} and name = 'E2E가짐'`;
+  await owner.goto(`${BASE}/s/marketing/automation`);
+  const box3 = owner.getByTestId('auto-photos'); await box3.waitFor();
+  await box3.getByTestId('photos-brands').filter({ hasText: 'E2E가짐' }).waitFor();
+  const un = box3.getByTestId('photos-unnamed'); await un.locator('summary').click();
+  const row = un.locator(`[data-testid="photos-unnamed-item"]:has(img[src*="${ids.clean}"])`); await row.waitFor();
+  await row.locator('input[type=checkbox]').check();
+  await un.getByTestId('photos-unnamed-brand').selectOption(ga.id);
+  await un.getByTestId('photos-unnamed-assign').click();
+  await owner.getByText("'E2E가짐' 태그를 달았습니다").first().waitFor();
+  assert.ok((await sql`select tags from library_files where id = ${ids.clean}`)[0].tags.includes('E2E가짐'));
+  await row.waitFor({ state: 'detached' }); // 지정한 사진은 정리 목록에서 빠짐
   // 휴대폰: 사진 목록을 펼쳐도 가로 넘침 없음
   await owner.setViewportSize({ width: 390, height: 844 });
   await owner.goto(`${BASE}/s/marketing/automation`);

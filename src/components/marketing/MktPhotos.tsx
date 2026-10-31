@@ -72,7 +72,8 @@ export function MktPhotos() {
         {data.all.total > data.total ? `위 숫자는 최근 ${data.total}장 기준 — 전체 사진 ${data.all.total}장(설명 ${data.all.described}장). ` : ''}
         {data.all.faces ? `얼굴이 보이는 사진 ${data.all.faces}장 — ${data.all.noBoxes ? `그중 ${data.all.noBoxes}장은 예전에 설명해 얼굴 위치를 몰라 자동 시안·블로그 본문에서 가리지 못합니다([얼굴 위치 다시 읽기]를 누르면 다시 설명해 가림).` : '자동 시안·블로그 본문에서 얼굴을 모자이크합니다.'}` : ''}</p>}
       {!!data.brands?.list.length && <p className="mt-1 text-sm" data-testid="photos-brands">브랜드별 쓸 수 있는 사진: {data.brands.list.map((b, k) => <span key={b.id}>{k ? ' · ' : ''}<b className="font-medium">{b.name}</b> {b.src === 'screen' ? `화면 캡처 ${b.captures}장(실사 안 씀)` : `실사 ${b.photos}장(시안 바탕 ${b.cover}장)${b.captures ? ` · 화면 캡처 ${b.captures}장` : ''}`}</span>)}
-        {data.brands.strict && data.brands.unnamed > 0 && <span className="ml-1 text-xs text-ink-3">— 어느 브랜드 이름도 없는 실사 {data.brands.unnamed}장은 시안에 쓰지 않습니다. 브랜드 폴더로 옮기거나 태그에 브랜드 이름을 달아 주세요(브랜드 키트 «시안에 쓸 사진»에서 바꿀 수 있음).</span>}</p>}
+        {data.brands.strict && data.brands.unnamed > 0 && <span className="ml-1 text-xs text-ink-3">— 어느 브랜드 이름도 없는 실사 {data.brands.unnamed}장은 시안에 쓰지 않습니다. 아래 «브랜드 이름 없는 사진 정리»에서 브랜드를 지정하거나 태그에 브랜드 이름을 달아 주세요(브랜드 키트 «시안에 쓸 사진»에서 바꿀 수 있음).</span>}</p>}
+      {!!data.brands?.strict && data.brands.unnamed > 0 && <UnnamedPhotos count={data.brands.unnamed} onDone={reload} />}
       <p className="mt-1 text-sm" data-testid="photos-videos">자료실 영상 {data.videos.total}편 · 장면 뽑음 {data.videos.done}편(장면 사진 {data.videos.frames}장) · 아직 {data.videos.pending}편{data.videos.failed ? ` · 못 뽑음 ${data.videos.failed}편` : ''}{data.videos.skipped ? ` · AI·합성 영상 건너뜀 ${data.videos.skipped}편` : ''}
         <span className="ml-1 text-xs text-ink-3">— 영상마다 2초·가운데·끝 무렵 장면 2~3장을 사진으로 뽑아 «마케팅/영상 장면» 폴더에 둡니다(정기 실행이 이어서 뽑음).</span></p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -120,5 +121,64 @@ export function MktPhotos() {
           })}</ul>
         </details>)}
     </section>
+  );
+}
+
+type Unnamed = { brands: { id: string; name: string; suggested: number }[]; total: number; offset: number; canEdit: boolean;
+  items: { id: string; title: string; folder: string; at: string; space: string; caption: string; suggest: { brandId: string; name: string; score: number; why: string[] } | null }[] };
+/** 290차(로컬 10/31 14:50: 바디랩 쓸 사진 0장 · 이름 없는 실사 166장): 어느 브랜드 이름도 없는 실사를 보고 사람이 브랜드를 지정(태그) — 추천은 같이 올린 사진·같은 카톡 묶음·같은 폴더·브랜드 소개 낱말로만(자동 지정 안 함) */
+function UnnamedPhotos({ count, onDone }: { count: number; onDone: () => void }) {
+  const [open, setOpen] = useState(false); const [offset, setOffset] = useState(0);
+  const { data, error, reload } = useApi<Unnamed>(open ? `/api/marketing/photos/unnamed?offset=${offset}` : null);
+  const [pick, setPick] = useState<Set<string>>(new Set()); const [brand, setBrand] = useState(''); const [busy, setBusy] = useState(false);
+  const toggle = (id: string) => setPick((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  async function assign(skip: boolean) {
+    if (!pick.size || (!skip && !brand)) return;
+    setBusy(true);
+    try {
+      const r = await api<{ updated: number; tag: string }>('/api/marketing/photos/assign', { body: { ids: [...pick], ...(skip ? { skip: true } : { brandId: brand }) } });
+      toast.ok(skip ? `사진 ${r.updated}장을 쓰지 않음으로 표시했습니다` : `사진 ${r.updated}장에 '${r.tag}' 태그를 달았습니다 — 이제 ${r.tag} 시안에 씁니다`);
+      setPick(new Set()); reload(); onDone();
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <details className="mt-2 rounded-input border border-line p-2" data-testid="photos-unnamed" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="cursor-pointer text-xs font-medium">브랜드 이름 없는 사진 정리({count}장) — 추천을 보고 사람이 브랜드를 지정합니다(자동 지정 안 함)</summary>
+      {error && <ErrorBox error={error} />}
+      {data && (
+        <div className="mt-2 grid gap-2">
+          <p className="text-xs text-ink-3">추천 = 같이 올린 사진·같은 카톡 묶음 파일·같은 폴더에 브랜드 사진이 있거나, 사진 설명에 브랜드 키트 소개 낱말이 있을 때만. 지정하면 사진에 브랜드 이름 태그를 답니다(폴더는 그대로).
+            {data.brands.filter((b) => b.suggested).map((b) => ` ${b.name} 추천 ${b.suggested}장`).join(' ·')}</p>
+          {data.canEdit && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="photos-unnamed-bar">
+              <span>{pick.size}장 고름</span>
+              {data.brands.filter((b) => b.suggested).map((b) => <Button key={b.id} size="sm" variant="secondary" onClick={() => { setBrand(b.id); setPick(new Set(data.items.filter((x) => x.suggest?.brandId === b.id).map((x) => x.id))); }} data-testid={`photos-unnamed-pick-${b.name}`}>이 쪽의 «{b.name}» 추천 모두 고르기</Button>)}
+              <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} value={brand} onChange={(e) => setBrand(e.target.value)} aria-label="지정할 브랜드" data-testid="photos-unnamed-brand">
+                <option value="">브랜드 고르기</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <Button size="sm" onClick={() => assign(false)} disabled={busy || !pick.size || !brand} data-testid="photos-unnamed-assign">고른 {pick.size}장을 브랜드로 지정</Button>
+              <Button size="sm" variant="secondary" onClick={() => assign(true)} disabled={busy || !pick.size} data-testid="photos-unnamed-skip">쓰지 않음으로</Button>
+            </div>
+          )}
+          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">{data.items.map((it) => (
+            <li key={it.id} className={cx('rounded border p-1.5 text-xs', pick.has(it.id) ? 'border-brand-600 bg-brand-50' : 'border-line')} data-testid="photos-unnamed-item">
+              <label className="block cursor-pointer">
+                {data.canEdit && <input type="checkbox" className="mr-1 align-middle" checked={pick.has(it.id)} onChange={() => toggle(it.id)} aria-label={`${it.title} 고르기`} />}
+                <img src={`/api/library/${it.id}/download?inline=1`} alt={it.caption || it.title} loading="lazy" className="mt-1 aspect-[4/3] w-full rounded bg-slate-100 object-cover" />
+              </label>
+              <p className="mt-1 line-clamp-2">{it.caption || it.title}</p>
+              <p className="truncate text-ink-3" title={`${it.folder} · ${it.title}`}>{it.folder || '(폴더 없음)'} · {it.at.slice(0, 10)}</p>
+              {it.suggest ? <p className="mt-0.5 rounded bg-amber-50 px-1 py-0.5 text-amber-900" data-testid="photos-unnamed-suggest">추천 {it.suggest.name} — {it.suggest.why.join(' · ')}</p> : <p className="mt-0.5 text-ink-3">추천 없음</p>}
+            </li>))}</ul>
+          {data.total > data.items.length && (
+            <div className="flex items-center gap-2 text-xs">
+              <Button size="sm" variant="secondary" disabled={offset === 0} onClick={() => { setOffset(Math.max(0, offset - 48)); setPick(new Set()); }}>앞 48장</Button>
+              <span>{offset + 1}~{offset + data.items.length} / {data.total}장</span>
+              <Button size="sm" variant="secondary" disabled={offset + data.items.length >= data.total} onClick={() => { setOffset(offset + 48); setPick(new Set()); }}>다음 48장</Button>
+            </div>
+          )}
+        </div>
+      )}
+    </details>
   );
 }

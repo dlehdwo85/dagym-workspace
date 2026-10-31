@@ -331,6 +331,63 @@ async function brandPhotoCounts(t: string) {
   return { list, unnamed: real.filter((r) => !any.has(r.id)).length, strict: list.some((b) => b.strict) };
 }
 
+/**
+ * 290차(로컬 10/31 14:50: '바디랩 쓸 사진 0장 · 이름 없는 실사 166장 — 바디랩일 가능성이 높은 사진 후보를 뽑아 사람이 확인 뒤 한 번에 지정, 자동 지정은 하지 말 것'):
+ * 어느 브랜드 이름도 없는 실사 + 추천 브랜드와 까닭(AI 호출 없음 — 같이 올린 사진·같은 카톡 묶음 파일·같은 폴더·브랜드 키트 소개 낱말). 지정은 사람이 [브랜드로 지정]을 눌러야만
+ */
+const STAMP = /(\d{8})_?(\d{4})/; // KakaoTalk_20261015_2105088… = 같은 날 같은 분대 묶음
+export async function unnamedPhotos(u: SessionUser, q: { offset?: number; limit?: number } = {}) {
+  await assertSpace(u, 'marketing');
+  const sql = db(); const t = tenantOf(u); const V = await import('./mktAutoVisual');
+  const bs = await sql<{ id: string; name: string; intro: string | null; products: string | null }[]>`select id, name, intro, products from mkt_brands where tenant = ${t} and name not like '[시험]%' order by created_at`;
+  const rows = await sql<(PhotoRow & { parent: string | null; created_by: string | null })[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision, created_at, space, source, created_by,
+      case when source = 'video_frame' then (select concat_ws(' ', coalesce(nullif(pv.title, ''), pv.file_name), pv.folder, array_to_string(pv.tags, ' ')) from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant) end as parent
+    from library_files where ${photoCond(sql, t)} order by created_at desc`;
+  const real = rows.filter((r) => poolUsable(r) && V.bodyOk(r) && !markedSkip(r.tags));
+  const rules = await Promise.all(bs.map(async (b) => ({ b, own: (await V.photoRule(t, b.id)).own })));
+  const owner = (r: (typeof rows)[number]) => rules.filter((x) => (x.own.length ? x.own : [x.b.name]).some((n) => V.photoHas(r, n))).map((x) => x.b.id);
+  const named = new Map<string, string[]>(); for (const r of real) named.set(r.id, owner(r));
+  const unnamed = real.filter((r) => !named.get(r.id)!.length);
+  const kw = new Map(bs.map((b) => [b.id, [...new Set((`${b.intro ?? ''} ${b.products ?? ''}`.match(/[\p{L}\p{N}]{2,}/gu) ?? []).map((w) => w.toLowerCase()))].filter((w) => w.length >= 2 && !/^(그리고|있는|위한|합니다|입니다|우리|고객|서비스|운영|관리)$/.test(w))]));
+  const nameOf = new Map(bs.map((b) => [b.id, b.name]));
+  const suggest = (r: (typeof rows)[number]) => {
+    const score = new Map<string, { n: number; why: string[] }>();
+    const add = (id: string, n: number, why: string) => { const x = score.get(id) ?? { n: 0, why: [] }; x.n += n; x.why.push(why); score.set(id, x); };
+    const at = new Date(r.created_at).getTime(); const st = r.file_name.match(STAMP)?.slice(1).join('_');
+    const tally = (f: (o: (typeof rows)[number]) => boolean) => { const m = new Map<string, number>(); for (const o of real) if (o.id !== r.id && f(o)) for (const b of named.get(o.id) ?? []) m.set(b, (m.get(b) ?? 0) + 1); return m; };
+    for (const [b, n] of tally((o) => !!r.created_by && o.created_by === r.created_by && Math.abs(new Date(o.created_at).getTime() - at) <= 15 * 60e3)) add(b, 3, `같이 올린 사진 ${n}장이 ${nameOf.get(b)}`);
+    if (st) for (const [b, n] of tally((o) => o.file_name.match(STAMP)?.slice(1).join('_') === st)) add(b, 3, `같은 묶음 파일(${st}) ${n}장이 ${nameOf.get(b)}`);
+    if (r.folder && !/^마케팅(\/사진)?$/.test(r.folder)) for (const [b, n] of tally((o) => o.folder === r.folder)) add(b, 2, `같은 폴더(${r.folder})에 ${nameOf.get(b)} 사진 ${n}장`);
+    const text = `${r.title} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase();
+    for (const b of bs) { const hit = (kw.get(b.id) ?? []).filter((w) => text.includes(w)).slice(0, 3); if (hit.length) add(b.id, hit.length, `설명에 브랜드 소개 낱말 ${hit.map((w) => `'${w}'`).join('·')}`); }
+    const top = [...score.entries()].sort((a, b) => b[1].n - a[1].n);
+    if (!top.length || top[0][1].n < 2 || (top[1] && top[1][1].n === top[0][1].n)) return null; // 근거가 약하거나 두 브랜드가 같으면 추천 안 함
+    return { brandId: top[0][0], name: nameOf.get(top[0][0]) ?? '', score: top[0][1].n, why: top[0][1].why.slice(0, 3) };
+  };
+  const items = unnamed.map((r) => ({ id: r.id, title: r.title, folder: r.folder, at: new Date(r.created_at).toISOString(), space: r.space, caption: visionOk(r.vision) ? r.vision.caption : r.description ?? '', suggest: suggest(r) }))
+    .sort((a, b) => (b.suggest?.score ?? 0) - (a.suggest?.score ?? 0) || b.at.localeCompare(a.at));
+  const off = Math.max(0, q.offset ?? 0); const lim = Math.min(Math.max(1, q.limit ?? 48), 120);
+  const bySuggest = Object.fromEntries(bs.map((b) => [b.id, items.filter((x) => x.suggest?.brandId === b.id).length]));
+  return { brands: bs.map((b) => ({ id: b.id, name: b.name, suggested: bySuggest[b.id] ?? 0 })), total: items.length, offset: off, items: items.slice(off, off + lim), canEdit: isAdmin(u) };
+}
+export const assignInput = z.object({ ids: z.array(z.string().uuid()).min(1).max(200), brandId: z.string().uuid().optional(), skip: z.boolean().optional() });
+/** 290차 [브랜드로 지정]·[쓰지 않음]: 고른 사진에 브랜드 이름 태그(또는 '쓰지않음') — 관리자만 · 폴더는 그대로(시안 바탕 폴더 규칙이 깨지지 않게) · 감사 기록 */
+export async function assignPhotos(u: SessionUser, i: z.infer<typeof assignInput>) {
+  await assertSpace(u, 'marketing');
+  if (!isAdmin(u)) throw forbidden('사진 브랜드 지정은 관리자만 할 수 있습니다');
+  const sql = db(); const t = tenantOf(u);
+  let tag = '쓰지않음';
+  if (!i.skip) {
+    const [b] = i.brandId ? await sql<{ name: string }[]>`select name from mkt_brands where id = ${i.brandId} and tenant = ${t}` : [];
+    if (!b) throw notFound('브랜드를 찾을 수 없습니다');
+    tag = b.name.replace(/^\s*\[시험\]\s*/, '').trim();
+  }
+  const rows = await sql<{ id: string }[]>`update library_files set tags = array_append(coalesce(tags, '{}'), ${tag}::text), updated_at = now()
+    where id = any(${i.ids}::uuid[]) and ${photoCond(sql, t)} and not (${tag}::text = any(coalesce(tags, '{}'))) returning id`;
+  await (await import('./log')).audit(sql, u.id, i.skip ? 'mkt.photo_skip' : 'mkt.photo_brand', 'tenant', t, { tag, ids: rows.map((r) => r.id) });
+  return { updated: rows.length, tag };
+}
+
 export const describeInput = z.object({ ids: z.array(z.string().uuid()).max(20).optional(), redo: z.boolean().optional(), faces: z.boolean().optional() });
 /** [설명하기]: 설명 없는 사진을 25초만큼(남으면 화면이 이어서 다시 부름) · ids + redo = 그 사진을 다시 설명 */
 export async function describeNow(u: SessionUser, i: z.infer<typeof describeInput>) {

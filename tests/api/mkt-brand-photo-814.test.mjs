@@ -159,3 +159,25 @@ test("289차 수정 요청 '얼굴 모자이크' — 얼굴 위치를 모르는 
   assert.match(v.revision.check.detail, /얼굴 위치를 몰라 못 가린 사진 1장/);
 });
 
+test('290차 브랜드 이름 없는 사진 정리: 추천(같이 올린 사진·같은 카톡 묶음) · 관리자만 지정 · 지정하면 그 브랜드 사진으로 셈 · 쓰지 않음', async () => {
+  const b3 = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '바디짐' });
+  const k1 = await libFile('바디짐 KakaoTalk_20261015_2105031.jpg'); await describe(k1, V({ caption: '필라테스 기구', tags: ['필라테스'] }));
+  const k2 = await libFile('KakaoTalk_20261015_2105088.jpg'); await describe(k2, V({ caption: '기구 옆 매트', tags: ['매트'] }));
+  await sql`update library_files set created_at = now() - interval '3 days' where id = ${k1}`; // 다른 시험 사진과 떨어진 날 — 같이 올린 사진은 k1 하나
+  await sql`update library_files set created_at = now() - interval '3 days' + interval '2 minutes' where id = ${k2}`;
+  const u = await ctx.owner.ok('GET', '/api/marketing/photos/unnamed');
+  const it = u.items.find((x) => x.id === k2);
+  assert.equal(it?.suggest?.name, '바디짐', JSON.stringify(it));
+  assert.ok(it.suggest.why.some((w) => w.includes('같은 묶음 파일(20261015_2105)')) && it.suggest.why.some((w) => w.includes('같이 올린 사진 1장이 바디짐')), JSON.stringify(it.suggest));
+  assert.ok(u.brands.find((b) => b.id === b3.id).suggested >= 1);
+  assert.ok([403, 404].includes((await ctx.staffA.client.post('/api/marketing/photos/assign', { ids: [k2], brandId: b3.id })).status), '관리자만');
+  const r = await ctx.owner.ok('POST', '/api/marketing/photos/assign', { ids: [k2], brandId: b3.id });
+  assert.deepEqual([r.updated, r.tag], [1, '바디짐']);
+  assert.equal((await ctx.owner.ok('POST', '/api/marketing/photos/assign', { ids: [k2], brandId: b3.id })).updated, 0, '두 번 달지 않음');
+  const v = await ctx.owner.ok('GET', '/api/marketing/photos');
+  assert.equal(v.brands.list.find((b) => b.name === '바디짐').photos, 2);
+  assert.ok(!(await ctx.owner.ok('GET', '/api/marketing/photos/unnamed')).items.some((x) => x.id === k2));
+  const before = v.brands.unnamed;
+  assert.equal((await ctx.owner.ok('POST', '/api/marketing/photos/assign', { ids: [P.unnamed], skip: true })).tag, '쓰지않음');
+  assert.equal((await ctx.owner.ok('GET', '/api/marketing/photos')).brands.unnamed, before - 1, '쓰지 않음은 정리 목록에서 빠짐');
+});
