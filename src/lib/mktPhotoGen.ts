@@ -20,7 +20,7 @@ import type { CardPage, VisualContent } from './mktAutoVisual';
  *  사진 기록·노트에 '생성'으로 따로 보임. 비동기: 제출(요청 id) → 정기 실행이 상태 확인 → 완료분 저장·원장 → 다 끝나면 붙임. 실패·검수 걸림은 과금 없음.
  *  외부 연결은 플랫폼 운영 › 생성 연동(키·켜기·모델 표의 '참고 사진 칸')에서만 — 고객 화면에는 서비스 이름·모델·원인을 내보내지 않는다(#602).
  */
-export const FILL_MAX = 2;
+export const FILL_MAX = 4; // 296차: 2 → 4 — 사진 장이 절반이 될 때까지만(레퍼런스 '사진 장 절반 이상', 크레딧 한도 안)
 export const GEN_FOLDER = '마케팅/AI 생성(실사 참고)';
 const TIMEOUT_MIN = 30;
 const TERMINAL = new Set(['completed', 'failed', 'nsfw', 'canceled', 'timeout']);
@@ -29,7 +29,7 @@ const NO_REF = '참고할 실사가 없습니다 — 같은 브랜드의 얼굴�
 const LIMIT = '이번 주(또는 이번 달) 크레딧 한도라 생성하지 않았습니다';
 type Slot = 'cover' | number;
 export type FillJob = { slot: Slot; requestId: string; statusUrl: string; status: string; ref: string; fileId?: string; error?: string };
-export type Fill = { v: number; status: 'generating' | 'done' | 'skipped' | 'failed' | 'stale' | 'none'; reason?: string; model?: string; per?: number; credits?: number; jobs?: FillJob[]; at: string; by: 'auto' | 'manual'; error?: string };
+export type Fill = { v: number; checked?: number; status: 'generating' | 'done' | 'skipped' | 'failed' | 'stale' | 'none'; reason?: string; model?: string; per?: number; credits?: number; jobs?: FillJob[]; at: string; by: 'auto' | 'manual'; error?: string };
 type Row = VisualContent & { status: string; quality: any; scheduled_at: Date | null };
 const COLS = 'c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status, c.quality, c.scheduled_at, c.auto';
 
@@ -139,10 +139,18 @@ export async function startFill(c: Row, by: 'auto' | 'manual'): Promise<Fill> {
   const V = await import('./mktAutoVisual');
   const slots = emptySlots(c, q, V.templateReady(b));
   if (!slots.length) return saveFill(c.id, { v, status: 'none', at, by }, v);
+  // 296차(로컬 10/31 레퍼런스 대조표 '피드 사진 장 절반 이상' 8/8 미통과): 사진·화면이 든 장이 전체의 절반이 될 만큼만 — 단색 표지는 사진이 있어도 1장 채움
+  const pg: CardPage[] = Array.isArray(q.pages) ? q.pages : [];
+  const vis = q.visual ?? {};
+  const coverHas = !vis.plain && (!!vis.photoId || (Array.isArray(vis.photoIds) && vis.photoIds.length > 0) || ['phone', 'laptop'].includes(String(vis.template ?? '')));
+  const total = 1 + pg.length; const have = (coverHas ? 1 : 0) + pg.filter((p) => !!p.photoId).length;
+  const need = Math.max(Math.ceil(total / 2) - have, slots.includes('cover') ? 1 : 0);
   const r = await ready();
   if (!r) return { v, status: 'skipped', reason: NOT_READY, at, by };
+  // 이미 절반 — 앞 판의 '채움 완료' 기록(장 수·크레딧)은 그대로 두고 이 판을 확인했다는 표시(checked)만
+  if (need <= 0) return saveFill(c.id, q.fill?.status === 'done' ? { ...q.fill, checked: v } : { v, status: 'none', at, by }, v);
   const per = Number(r.m.credits) || 0;
-  const n = await budgetFor(c.tenant, per, Math.min(FILL_MAX, slots.length));
+  const n = await budgetFor(c.tenant, per, Math.min(FILL_MAX, slots.length, need));
   if (!n) return { v, status: 'skipped', reason: LIMIT, at, by, per };
   const [ver] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${v}`;
   const pages: CardPage[] = Array.isArray(q.pages) ? q.pages : [];
@@ -327,7 +335,8 @@ export async function photoFillTick(o: { tenant?: string; limit?: number; budget
   if (await ready()) {
     const cand = await sql<Row[]>`select ${sql.unsafe(COLS)} from mkt_contents c join mkt_settings s on s.tenant = c.tenant and s.photo_gen and not coalesce(s.auto_pause, false)
       where c.status in ('pending', 'changes') and not coalesce(c.is_test, false) and c.channel <> 'blog' and c.kind in ('feed', 'story') and c.quality->'visual'->>'by' = 'server'
-        and (c.quality->'fill' is null or (c.quality->'visual'->>'plain' = 'true' and coalesce((c.quality->'fill'->>'v')::int, 0) < c.current_version and c.quality->'fill'->>'status' <> 'generating')) -- 295차 #835: 단색 표지는 예전 판에서 채웠어도 새 판에서 한 번 더
+        and (c.quality->'fill' is null or (c.quality->'visual'->>'plain' = 'true' and coalesce((c.quality->'fill'->>'v')::int, 0) < c.current_version and c.quality->'fill'->>'status' <> 'generating') -- 295차 #835: 단색 표지는 예전 판에서 채웠어도 새 판에서 한 번 더
+          or (c.quality->'fill'->>'status' in ('done', 'none') and coalesce((c.quality->'fill'->>'checked')::int, (c.quality->'fill'->>'v')::int, 0) < c.current_version)) -- 296차: 새 판에서 사진 장이 아직 절반이 안 되면 더 채움(절반이면 'none'·checked 로 끝)
         and (c.scheduled_at is null or c.scheduled_at > now() + interval '2 hours') ${tf}
       order by c.scheduled_at nulls last limit ${o.limit ?? 3}`;
     for (const c of cand) { if (Date.now() - t0 > budget) break; const f = await L.withLock(`mktFill:${c.id}`, () => startFill(c, 'auto')); if ('status' in f && f.status === 'generating') started++; }

@@ -79,6 +79,7 @@ test('295차 ① 단색 틀뿐 + 실사 없음 → 수정 요청(사유) · ② 
   await ctl({ hfReset: true, hfPolls: 0, hfMode: null });
   const f1 = await ctx.owner.ok('POST', `/api/marketing/contents/${id}/fill`, {});
   assert.equal(f1.status, 'generating', JSON.stringify(f1));
+  assert.equal(f1.total, 3, `296차: 5장 중 절반(3장)이 되게 — 표지 1 + 장 2 (${JSON.stringify(f1)})`);
   const f2 = await ctx.owner.ok('POST', `/api/marketing/contents/${id}/fill`, { action: 'check' });
   assert.equal(f2.status, 'done', JSON.stringify(f2));
   const c2 = await cur(id);
@@ -143,6 +144,14 @@ test('295차 ④ 레퍼런스 대조표: 승인 대기·수정 요청 글 × 기
   assert.equal(it(filled, 'kicker').ok, true); assert.equal(it(filled, 'count').ok, true, it(filled, 'count').detail);
   assert.equal(it(filled, 'cta').ok, true); assert.equal(it(filled, 'tags').ok, true, it(filled, 'tags').detail);
   assert.ok(['hook', 'photoShare', 'audit'].every((k) => it(filled, k)), '항목 다 있음');
+  assert.equal(it(filled, 'photoShare').ok, true, `296차 생성으로 사진 장 절반: ${it(filled, 'photoShare').detail}`);
+  // 296차: 블로그 소제목은 원고 규칙(■ 4~6개, 최소 = 회사 설정 2) — 위 상한 없음
+  const [bl] = await sql`insert into mkt_contents (tenant, brand_id, title, channel, kind, scheduled_at, status, current_version, created_by, auto, quality)
+    values ('default', ${P.old}, '옛표지짐 블로그', 'blog', 'blog', now() + interval '6 days', 'pending', 1, ${ctx.ownerId}, true, ${sql.json({ visual: { by: 'server', fileId: null, photoId: null, rv: 8 } })}) returning id`;
+  await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${bl.id}, 1, ${['운동 공간 소개 글입니다', '', '■ 공간', '넓어요', '', '■ 기구', '많아요', '', '■ 수업', '있어요', '', '■ 시간', '아침', '', '■ 상담', '문의'].join('\n')}, array[gen_random_uuid()], '시안', ${ctx.ownerId})`;
+  const r2 = await ctx.owner.ok('GET', '/api/marketing/refcheck');
+  const blog = r2.rows.find((x) => x.id === bl.id);
+  assert.deepEqual([it(blog, 'heads').ok, it(blog, 'heads').detail, it(blog, 'heads').label], [true, '5개', '소제목 ■ 2개+']);
   assert.equal(filled.total, filled.items.filter((i) => i.ok !== null).length);
   const cover = r.summary.find((s) => s.key === 'cover');
   assert.ok(cover && cover.fail >= 1 && cover.of >= 3, JSON.stringify(r.summary));

@@ -47,9 +47,10 @@ export async function refItems(c: VisualContent & { quality?: any }, v: { body: 
     detail: audit ? (audit.blur + audit.brand + audit.dup ? [audit.blur ? `흔들림 ${audit.blur}` : '', audit.brand ? `브랜드 밖 ${audit.brand}` : '', audit.dup ? `겹침 ${audit.dup}` : ''].filter(Boolean).join(' · ') : `실사 ${audit.total}장 문제 없음`) : '검사 못함' };
   if (c.channel === 'blog') {
     const photos = Math.max(0, media.length - 1);
-    const heads = body.split('\n').filter((l) => /^\s*■/.test(l)).length;
+    const { HEAD_LINE } = await import('./mktText'); const min = (await (await import('./mktQuality')).qualityRules().catch(() => null))?.blog?.minHeadings ?? 2;
+    const heads = body.split('\n').filter((l) => HEAD_LINE.test(l.trim())).length; // 296차: 원고 규칙은 '■ 소제목' 4~6개(최소 = 회사 설정, 기본 2) — 위 상한 없음
     items.push({ key: 'photos', label: '본문 사진 3장+', ok: photos >= 3, detail: `${photos}장` },
-      { key: 'heads', label: '소제목 2~3개(■)', ok: heads >= 2 && heads <= 4, detail: `${heads}개` }, hookOf(body), auditItem);
+      { key: 'heads', label: `소제목 ■ ${min}개+`, ok: heads >= min, detail: `${heads}개` }, hookOf(body), auditItem);
     return items;
   }
   const story = kind === 'story';

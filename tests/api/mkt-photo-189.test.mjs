@@ -177,7 +177,7 @@ test('189차 ② 주간 크레딧 한도(진행 중 생성도 셈) · 표지 칸
   const c3 = await cur(c);
   assert.deepEqual([c3.current_version, c3.note], [2, '직접 수정'], '사람이 올린 버전 그대로');
   const left = await sql`select id from library_files where source = 'ai_ref' and meta->'gen'->>'contentId' = ${c}`;
-  assert.equal(left.length, 2, '만든 사진은 자료실에 남음');
+  assert.equal(left.length, 3, '만든 사진은 자료실에 남음 — 296차: 5장 중 절반(3장)이 되게 표지 + 장 2');
 });
 
 test('189차 ③ 참고 실사 없음(얼굴 사진만) · 생성 연동 꺼짐 · 모델 표 참고 사진 칸 형식 검사', async () => {
@@ -207,6 +207,9 @@ test('189차 ④ 회사 설정 \'사진이 모자라면 실사 참고로 생성\
   const s = await ctx.owner.ok('GET', '/api/marketing/auto');
   assert.equal(s.settings.photo_gen, false, '기본 꺼짐');
   await ctl({ hfReset: true, hfPolls: 0 });
+  // 296차: 사진 장이 이미 절반이면 생성하지 않음 — 앞 시험에서 안 붙인 생성 사진(다시 쓰면 절반이 됨)은 치워 두고 '정기 실행이 생성을 시작하는지'를 봄
+  await sql`update library_files f set deleted_at = now() where f.source = 'ai_ref' and f.deleted_at is null and f.meta->'gen'->>'contentId' in (select id::text from mkt_contents where quality->'fill'->>'status' = 'stale')`;
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { weeklyCredits: 500 }); // 296차: 한 글 최대 4장 + 앞 글 더 채우기로 이번 주 기본 한도(약 58)에 닿지 않게
   const g = await slot(P.brand, '참고브랜드 다음 달 일정', { at: day(20) });
   await produce(g, '다음 달 일정', SLIDES('다음 달 일정'));
   await tick();
@@ -221,9 +224,9 @@ test('189차 ④ 회사 설정 \'사진이 모자라면 실사 참고로 생성\
   await tick();
   const g2 = await cur(g);
   assert.deepEqual([g2.quality.fill.status, g2.current_version], ['done', 2], JSON.stringify(g2.quality.fill));
-  assert.equal(g2.quality.fill.jobs.length, 2, '한 글 2장까지');
+  assert.equal(g2.quality.fill.jobs.length, 3, '296차: 5장 중 절반(3장)이 되게 — 표지 + 장 2');
   const mine = await sql`select id from library_files where source = 'ai_ref' and meta->'gen'->>'contentId' = ${g}`;
-  assert.equal(mine.length, 2, '이 글을 위해 만든 사진 2장');
+  assert.equal(mine.length, 3, '이 글을 위해 만든 사진 3장');
   // 앞서 만들고 안 붙인(그사이 글이 바뀐) 생성 사진은 실사가 모자랄 때 다시 씀(새로 만들기 전에) — 사진 기록에 '생성'으로
   const reused = gensOf(g2).filter((x) => !mine.some((m) => m.id === x));
   if (reused.length) { const rs = await sql`select meta->'gen'->>'contentId' as c from library_files where id = any(${reused}::uuid[])`; assert.ok(rs.every((r) => r.c && r.c !== g), JSON.stringify(rs)); }
