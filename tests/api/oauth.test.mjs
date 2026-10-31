@@ -95,10 +95,14 @@ describe('V29 소셜 가입·로그인', () => {
     const [s] = await sql`select client from sessions where user_id = (select id from users where email = 'boss@social.test') order by created_at desc limit 1`;
     assert.equal(s.client, 'android');
     // 처음 가입·오류 → 앱으로(회사 만들기 표 / 메시지)
-    const p = await social(new Client(), 'kakao', { sub: '9001', email: 'appnew@social.test', name: '앱가입' }, `client=ios&ac=${ac}`);
+    const p = await social(new Client(), 'kakao', { sub: '9001', email: 'appnew@social.test', name: '앱가입' }, `client=android&ac=${ac}`);
     assert.equal(p.pathname, '/auth/app-return'); assert.ok(p.searchParams.get('pending'));
-    const e = await social(new Client(), 'kakao', { sub: '9002', email: null }, `client=ios&ac=${ac}`);
+    const e = await social(new Client(), 'kakao', { sub: '9002', email: null }, `client=android&ac=${ac}`);
     assert.match(e.searchParams.get('error'), /이메일/);
+    // 299차 #858·#839: 아이폰 앱은 가입이 없음 — 처음 보는 소셜 계정은 회사 만들기 대신 안내(앱으로)
+    const i = await social(new Client(), 'kakao', { sub: '9003', email: 'iosnew@social.test' }, `client=ios&ac=${ac}`);
+    assert.equal(i.pathname, '/auth/app-return'); assert.equal(i.searchParams.get('pending'), null);
+    assert.match(i.searchParams.get('error'), /회사 관리자의 초대로 만들어집니다/);
   });
 
   test('같은 이메일의 기존 계정은 자동으로 묶지 않음 · 인증 안 된 이메일·이메일 미동의는 가입 불가 · 상태 위조는 거절', async () => {

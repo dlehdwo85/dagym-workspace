@@ -49,6 +49,9 @@ export async function anonymize(tx: any, userId: string) {
   await tx`update sessions set revoked_at = now() where user_id = ${userId} and revoked_at is null`;
   await tx`update push_subscriptions set disabled_at = now() where user_id = ${userId} and disabled_at is null`;
   await tx`delete from google_calendar_links where user_id = ${userId}`;
+  // 299차 #858: Apple 로 연결된 계정은 토큰 해지(App Store 5.1.1(v), 응답 뒤) · 소셜 연결은 지움(같은 계정으로 다시 가입할 수 있게)
+  await (await import('./oauthApple')).revokeAppleFor(tx, userId);
+  await tx`delete from user_identities where user_id = ${userId}`;
 }
 
 export async function deleteAccount(u: SessionUser, i: z.infer<typeof deleteInput>, ip: string | null) {
