@@ -322,7 +322,8 @@ export async function billingJob() {
   const admins = async (t: string) => sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${t} and status = 'active' and role in ('owner','admin')`;
   const tell = async (t: string, name: string, title: string, body: string, key: string) => {
     const a = await admins(t);
-    await notify(sql, { userIds: a.map((x) => x.id), type: 'usage_alert', title, body, link: '/admin/usage', dedupeKey: key });
+    // 298차 #861: 알림함·푸시(앱에도 뜸)에는 결제 권유 없이 — 결제 안내·웹 주소는 관리자 이메일로만
+    await notify(sql, { userIds: a.map((x) => x.id), type: 'usage_alert', title, body: '자세한 안내를 관리자 이메일로 보냈습니다. 데이터는 그대로 남아 있습니다.', link: '/admin/usage', dedupeKey: key });
     const { sendMail } = await import('../mail');
     for (const x of a) await sendMail(x.email, `[워크인] ${title}`, `${name}\n${body}\n${process.env.APP_URL ?? ''}/admin/usage`).catch(() => {});
   };

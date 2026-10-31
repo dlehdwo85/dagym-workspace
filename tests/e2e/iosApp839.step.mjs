@@ -28,5 +28,10 @@ export async function iosApp839({ browser, BASE, devices }) {
   const a = await and.newPage();
   await a.goto(`${BASE}/signup`);
   assert.equal(new URL(a.url()).pathname, '/signup', '안드로이드 앱은 가입 화면 그대로');
+  // 298차 #861: 안드로이드 앱 가입 화면에도 카드·요금제 말 없음 · 요금 안내가 있는 소개 화면은 로그인으로
+  await a.locator('h1').first().waitFor(); await a.waitForLoadState('networkidle').catch(() => {});
+  assert.equal(await a.getByText(/카드|요금제|결제/).count(), 0, '안드로이드 앱 가입 화면: 카드·요금제·결제 말 없음');
+  await a.goto(`${BASE}/welcome`);
+  assert.equal(new URL(a.url()).pathname, '/login', '안드로이드 앱: 소개(요금) 화면은 로그인으로');
   await and.close();
 }

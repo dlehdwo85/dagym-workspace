@@ -9,9 +9,11 @@ import { OrDivider, SocialButtons } from '@/components/SocialButtons';
 import { CompanyFields } from '@/components/SignupFields';
 import { captureUtm, conversionTagsConfigured, fireSignupConversion, readUtm, setAdsConsent, setConversionTags, signupStep } from '@/components/conversion';
 import { SignupSteps } from '@/components/SignupSteps';
+import { useInApp } from '@/components/inApp';
 
 /** V15 공개 가입 → V32 3 한 화면씩: ① 계정(소셜·이메일·약관) → ② 회사(개인/팀·이름·규모·업종) → 확인 메일. ③ 연락 채널·④ 동료 초대는 첫 로그인 안내에서 */
 export default function SignupPage() {
+  const inApp = useInApp(); // 298차 #861: 안드로이드 앱 안 가입(무료 체험)은 그대로, 카드·요금제 문구만 없음
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [mode, setMode] = useState<'personal' | 'team'>('personal');
   const [f, setF] = useState({ name: '', email: '', password: '', company: '', size: '', industry: '', industries: [] as string[], website: '' });
@@ -67,7 +69,7 @@ export default function SignupPage() {
       <span><span className={cx('mr-1 text-xs font-semibold', req ? 'text-red-600' : 'text-ink-3')}>{req ? '[필수]' : '[선택]'}</span>{label}</span></label>
   );
   return (
-    <AuthCard title={step === 1 ? '14일 무료 체험' : '회사 만들기'} sub={step === 1 ? '카드 등록 없이 비즈니스 기능 전부 · 끝나면 요금제를 고르세요' : '혼자 쓰면 개인, 동료와 함께면 팀으로 시작하세요'}>
+    <AuthCard title={step === 1 ? '14일 무료 체험' : '회사 만들기'} sub={step === 1 ? (inApp ? '비즈니스 기능 전부 · 회사 계정을 만들고 동료를 초대하세요' : '카드 등록 없이 비즈니스 기능 전부 · 끝나면 요금제를 고르세요') : '혼자 쓰면 개인, 동료와 함께면 팀으로 시작하세요'}>
       <SignupSteps at={step} />
       {step === 1 ? (
       <form onSubmit={toCompany} className="space-y-4" data-testid="signup-step-account">

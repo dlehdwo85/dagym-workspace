@@ -3,7 +3,7 @@ import { ChatBubble } from '@/components/ChatBubble';
 import { RoleBadge } from '@/components/RoleBadge';
 import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
-import { IN_APP_BILLING_NOTE, IOS_ADMIN_NOTE, billingNote, useInApp, useIosApp } from './inApp';
+import { IOS_ADMIN_NOTE, billingNote, useInApp } from './inApp';
 import { ADMIN_PAGES } from '@/lib/adminPages';
 import Link, { useLinkStatus } from 'next/link';
 import { Fragment, Suspense } from 'react';
@@ -73,7 +73,6 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const path = usePathname();
   const query = useSearchParams().toString(); // #481: ?tab= 메뉴(제작의뢰실·영업기회 입찰) 강조가 주소 칸만 바뀌어도 따라가게
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 결제 링크·버튼 없음
-  const iosApp = useIosApp(); // #839 아이폰 앱: 무료 체험·결제 글자도 없음(읽기 전용일 때만 관리자 문의 안내)
   const router = useRouter();
   const [unread, setUnread] = useState(0);
   const [alarms, setAlarms] = useState<AlarmItem[]>([]); // 로컬 10/20(대표): 웹 알람 띠(알람처럼 울리는 알림, 해제 전)
@@ -522,7 +521,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* V28 B2 미납: 7일 읽기 전용 띠 · 30일 이용 중지(결제 안내만) */}
         {session.tenant?.billingLock === 'read_only' && (
           <div className="fixed inset-x-0 top-0 z-[36] bg-red-600 px-3 py-1 text-center text-xs font-medium text-white" data-testid="billing-ro-banner">
-            {iosApp ? `지금은 읽기 전용입니다 — ${IOS_ADMIN_NOTE}` : <>결제가 7일 넘게 밀려 읽기 전용입니다 — {inApp ? IN_APP_BILLING_NOTE : <><a href="/admin/usage" className="underline">결제하면 바로 복구</a> (30일 미납이면 이용 중지)</>}</>}
+            {inApp ? `지금은 읽기 전용입니다 — ${IOS_ADMIN_NOTE}` : <>결제가 7일 넘게 밀려 읽기 전용입니다 — {<><a href="/admin/usage" className="underline">결제하면 바로 복구</a> (30일 미납이면 이용 중지)</>}</>}
           </div>
         )}
         {session.tenant?.billingLock === 'suspended' && path !== '/admin/usage' && (
@@ -535,10 +534,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
           </div>
         )}
         {/* 17차: 무료 체험 D-n · 끝나면 읽기 전용 안내 */}
-        {session.tenant?.trial && !(iosApp && !session.tenant.trial.readOnly) && (
+        {session.tenant?.trial && !(inApp && !session.tenant.trial.readOnly) && ( /* 298차 #861: 두 앱 모두 체험 D-day 띠 없음(끝나기 전 안내는 관리자 이메일) — 읽기 전용일 때만 관리자 문의 */
           <div className={cx('fixed inset-x-0 top-0 z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',
             session.tenant.trial.readOnly ? 'bg-red-600 text-white' : session.tenant.trial.daysLeft <= 3 ? 'bg-warm-500 text-white' : 'bg-brand-50 text-brand-800')} data-testid="trial-banner">
-            {(() => { const n = session.tenant.trial.partner ? '설계 파트너 기간' : iosApp ? '이용 기간' : '무료 체험'; /* #667 */ return session.tenant.trial.readOnly ? `${n}이 끝나 읽기 전용입니다` : session.tenant.trial.daysLeft === 0 ? `${n} 오늘 종료` : `${n} D-${session.tenant.trial.daysLeft}`; })()}
+            {(() => { const n = session.tenant.trial.partner ? '설계 파트너 기간' : inApp ? '이용 기간' : '무료 체험'; /* #667 */ return session.tenant.trial.readOnly ? `${n}이 끝나 읽기 전용입니다` : session.tenant.trial.daysLeft === 0 ? `${n} 오늘 종료` : `${n} D-${session.tenant.trial.daysLeft}`; })()}
             {inApp ? <span className="font-normal">· {billingNote()}</span> : <Link prefetch={false} href="/admin/usage" className="underline">요금제 선택</Link>}
           </div>
         )}

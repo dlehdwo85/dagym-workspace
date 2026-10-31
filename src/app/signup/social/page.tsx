@@ -8,10 +8,12 @@ import { Button, Field, cx, inputCls } from '@/components/ui';
 import { ApiError, api } from '@/components/client';
 import { CompanyFields } from '@/components/SignupFields';
 import { SignupSteps } from '@/components/SignupSteps';
+import { useInApp } from '@/components/inApp';
 import { conversionTagsConfigured, fireSignupConversion, readUtm, setAdsConsent, setConversionTags } from '@/components/conversion';
 
 /** V29 소셜 확인 뒤 2단계 "회사 만들기" — 확인된 이메일이라 확인 메일 없이 바로 시작(동료 초대는 첫 화면 안내에서) */
 function SocialSignup() {
+  const inApp = useInApp(); // 298차 #861: 앱 안에서는 '카드 없음'(결제 관련 말) 없음
   const t = useSearchParams().get('t') ?? '';
   const [info, setInfo] = useState<{ providerLabel: string; email: string; name: string | null } | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -63,7 +65,7 @@ function SocialSignup() {
       </div>
       {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
       <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy} data-testid="social-signup-submit">{busy ? <><Loader2 className="animate-spin" />만드는 중…</> : <>무료로 시작<ArrowRight /></>}</Button>
-      <p className="text-center text-xs text-ink-3">14일 무료 체험 · 카드 없음 · 다음 화면에서 동료를 초대할 수 있어요</p>
+      <p className="text-center text-xs text-ink-3">{inApp ? '14일 무료 체험 · 다음 화면에서 동료를 초대할 수 있어요' : '14일 무료 체험 · 카드 없음 · 다음 화면에서 동료를 초대할 수 있어요'}</p>
     </form>
   );
 }

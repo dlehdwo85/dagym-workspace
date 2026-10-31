@@ -6,6 +6,7 @@ import { MediaThumb } from '@/components/MediaView';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ArrowDown, Moon, Play, Settings2, Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
+import { useInApp } from '@/components/inApp';
 import { Button, Modal, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { NaverForm } from './Ads';
 import { ApproveRow, CH_DOT, CH_STATE, ChannelSetup, ConnectButton, type HomeCh } from './Marketing';
@@ -115,6 +116,7 @@ const STATE: Record<string, [string, string]> = { waiting: ['대기', 'bg-slate-
  */
 export function MarketingHome() {
   const { data, error, reload } = useApi<Home>('/api/marketing/home');
+  const inApp = useInApp(); // 298차 #861: 앱 안에서는 추가 구매 금액·'요금제를 올려 주세요' 없이 관리자 문의만
   const [naver, setNaver] = useState(false); const [cfg, setCfg] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set()); const [busy, setBusy] = useState<string | null>(null);
   if (error) return <div className="mx-auto max-w-4xl text-sm text-red-700" data-testid="space-home-marketing">{error.message}</div>;
@@ -144,7 +146,7 @@ export function MarketingHome() {
       {/* 대표 10/20 15:40 (#103): 이번 달 남은 제작 n건 · 초과 안내 */}
       {data.production && data.production.leftCredits !== null && <Link href="/s/marketing/automation" className={cx('block rounded-card border p-3 text-sm shadow-card hover:border-violet-300', data.production.over ? 'border-red-200 bg-red-50/40' : 'border-line bg-white')} data-testid="mkt-home-production">
         <b>이번 달 남은 제작</b> <span className="tabular-nums">이미지 {data.production.images}장 또는 영상 {data.production.videos}편 <span className="text-xs text-ink-3">(크레딧 {data.production.leftCredits}/{data.production.monthlyCredits}{data.production.planLabel ? ` · ${data.production.planLabel}` : ''})</span></span>
-        {data.production.overMessage && <div className="mt-1 text-xs text-red-800">{data.production.overMessage}</div>}</Link>}
+        {data.production.overMessage && <div className="mt-1 text-xs text-red-800">{inApp ? '이번 달 제작 크레딧을 모두 썼습니다 — 회사 관리자에게 문의하세요.' : data.production.overMessage}</div>}</Link>}
       {/* 대표 10/20 18:00 ②: 이번 달 목표 n/m 막대(승인된 목표) — 없으면 [목표 만들기] */}
       {data.goal ? <Link href="/s/marketing/goals" className="block rounded-card border border-line bg-white p-3 shadow-card hover:border-violet-300" data-testid="mkt-home-goal">
         <div className="flex flex-wrap items-center gap-2 text-sm"><b>이번 달 목표</b>{data.goal.status === 'pending' && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-800">초안 — 승인 필요</span>}
