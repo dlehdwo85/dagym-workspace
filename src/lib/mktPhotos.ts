@@ -22,21 +22,62 @@ export type VisionOk = { v: 1; at: string; caption: string; scene: string; tags:
   /** 171차: 사람 자세·보이는 방향·사진 밝기(예전 설명에는 없음 → photoFlags 가 문장으로 판정) */
   pose?: (typeof POSES)[number]; facing?: (typeof FACINGS)[number]; light?: (typeof LIGHTS)[number];
   /** 282차 #818 선명도(서버 계산 — 긴 변 512px 흑백의 라플라시안 분산). 작을수록 흔들림·초점 나감 */
-  sharp?: number };
+  sharp?: number;
+  /** 286차: 64px 칸 선명도의 중앙값(가장 선명한 칸 값은 글자·모서리 한 칸만 선명해도 높게 나와 흔들린 사진을 못 거름 — 로컬 10/31 13:35 운영 분포) */
+  sharpMed?: number;
+  /** 286차 #818 ④ 알아볼 수 있는 얼굴 자리(사진 너비·높이에 대한 0~1 비율, 왼쪽 위 기준) — 시안·블로그에 쓸 때 모자이크 */
+  faceBoxes?: FaceBox[] };
+export type FaceBox = { x: number; y: number; w: number; h: number };
 export type VisionErr = { v: 1; at: string; error: string; tries: number };
 export const KIND_LABEL: Record<VisionOk['kind'], string> = { photo: '실사', graphic: '글자 그래픽', screen: '화면 캡처', illustration: '그림', document: '문서' };
+/** 286차 #818 ④ 얼굴 자리 다듬기 — 0~1 로 자르고 너무 작은 것은 버림(12개까지) */
+export function faceBoxesOf(raw: unknown): FaceBox[] {
+  const c01 = (n: unknown) => Math.max(0, Math.min(1, Number(n) || 0));
+  return (Array.isArray(raw) ? raw : []).map((b: any) => { const x = c01(b?.x), y = c01(b?.y); return { x, y, w: Math.min(1 - x, c01(b?.w)), h: Math.min(1 - y, c01(b?.h)) }; })
+    .filter((b) => b.w >= 0.01 && b.h >= 0.01).slice(0, 12);
+}
+/** 모자이크를 할 얼굴 자리(AI 가 얼굴을 봤고 자리를 알려 준 사진만) */
+export const facesToHide = (v: unknown): FaceBox[] => (visionOk(v) && v.faces && v.faceBoxes?.length ? v.faceBoxes : []);
+/** 286차 #818 ④(대표 "사람 얼굴은 되도록 모자이크 필요"): 얼굴 자리를 25% 넉넉히 잡아 굵은 칸(짧은 변의 1/12 크기)으로 모자이크 — EXIF 회전을 먼저 맞춤(AI 가 본 방향) */
+export async function mosaicFaces(buf: Buffer, boxes: FaceBox[]): Promise<Buffer> {
+  if (!boxes.length) return buf;
+  const sharp = (await import('sharp')).default;
+  const base = await sharp(buf, { failOn: 'none', limitInputPixels: 80e6 }).rotate().toBuffer({ resolveWithObject: true });
+  const W = base.info.width, H = base.info.height;
+  const parts: { input: Buffer; left: number; top: number }[] = [];
+  for (const b of boxes) {
+    const pw = b.w * 0.25, ph = b.h * 0.25;
+    const left = Math.max(0, Math.floor((b.x - pw) * W)), top = Math.max(0, Math.floor((b.y - ph) * H));
+    const w = Math.min(W - left, Math.ceil((b.w + 2 * pw) * W)), h = Math.min(H - top, Math.ceil((b.h + 2 * ph) * H));
+    if (w < 4 || h < 4) continue;
+    const cell = Math.max(4, Math.round(Math.min(w, h) / 12));
+    const small = await sharp(base.data).extract({ left, top, width: w, height: h }).resize(Math.max(1, Math.round(w / cell)), Math.max(1, Math.round(h / cell)), { kernel: 'cubic' }).toBuffer(); // 줄일 때는 평균(칸 색), 키울 때는 그대로(네모 칸)
+    parts.push({ input: await sharp(small).resize(w, h, { kernel: 'nearest' }).toBuffer(), left, top });
+  }
+  return parts.length ? sharp(base.data).composite(parts).jpeg({ quality: 90 }).toBuffer() : buf;
+}
 /** 282차 #818(대표 10/31 "사진이 흔들리거나 초점이 안맞음에도 그대로 구현해둠"): 이 값 아래면 흔들림·초점 나감으로 보고 시안·블로그 사진에서 뺌 */
 export const SHARP_MIN = Number(process.env.MKT_SHARP_MIN) || 40;
-/** 흔들림·초점 나감·AI 가 '화질 나쁨'으로 본 사진 */
-export const blurryPhoto = (v: unknown) => visionOk(v) && (v.quality === 'poor' || (typeof v.sharp === 'number' && v.sharp >= 0 && v.sharp < SHARP_MIN));
+/** 286차: 중앙값 기준(운영 분포로 정함 — 대표 승인 뒤 MKT_SHARP_MED_MIN 으로 켬, 기본 꺼짐 0) */
+export const SHARP_MED_MIN = Number(process.env.MKT_SHARP_MED_MIN) || 0;
+/** 286차(로컬 10/31 13:35 제안): AI 사진 설명이 흔들림·흐림·초점 나감이라고 쓴 사진 — 배경만 흐린 사진·손을 흔드는 사람은 빼고 */
+export function blurText(v: VisionOk): boolean {
+  const t = `${v.caption} ${v.scene}`.replace(/흐릿하게 처리된 배경|흐린 배경|배경[이은]?\s*(약간\s*)?(흐릿|흐리|흐린)\S*|손을\s*흔들\S*|흔들며|흔들고\s*있/g, ' ');
+  return /(사진|화면|이미지|영상)[이가은]?\s*(약간|조금|살짝|다소|전체적으로)?\s*(흔들|흐릿)/.test(t) || /흐릿하며|흐릿하게\s*찍|흔들려\s*(흐릿|초점)|초점이\s*(맞지\s*않|안\s*맞|나가|나간|흐)/.test(t);
+}
+/** 흔들림·초점 나감·AI 가 '화질 나쁨'으로 본 사진(AI 설명 문장 포함) */
+export const blurryPhoto = (v: unknown) => visionOk(v) && (v.quality === 'poor' || blurText(v) || (typeof v.sharp === 'number' && v.sharp >= 0 && v.sharp < SHARP_MIN)
+  || (SHARP_MED_MIN > 0 && typeof v.sharpMed === 'number' && v.sharpMed >= 0 && v.sharpMed < SHARP_MED_MIN));
 /** 선명도 — 사진을 긴 변 512px 흑백으로 줄여 64px 칸마다 라플라시안(가로·세로 2차 차분) 분산을 재고 가장 선명한 칸의 값.
  *  (사진 전체 평균이면 하늘·벽처럼 민무늬가 넓은 선명한 사진도 낮게 나옴 — 초점이 맞은 곳이 한 군데라도 있으면 그 값) · 읽지 못하면 null(돈 드는 AI 호출 없음) */
-export async function sharpnessOf(buf: Buffer): Promise<number | null> {
+export async function sharpnessOf(buf: Buffer): Promise<number | null> { return (await sharpnessStats(buf))?.max ?? null; }
+/** 칸 선명도의 가장 큰 값(max)과 중앙값(med) — 결이 없으면(한 색 그림) null */
+export async function sharpnessStats(buf: Buffer): Promise<{ max: number; med: number } | null> {
   try {
     const sharp = (await import('sharp')).default;
     const { data, info } = await sharp(buf, { failOn: 'none', limitInputPixels: 80e6 }).rotate().greyscale().resize(512, 512, { fit: 'inside', withoutEnlargement: true }).raw().toBuffer({ resolveWithObject: true });
     const w = info.width, h = info.height, ch = info.channels; if (w < 16 || h < 16) return null;
-    const T = 64; let best = 0;
+    const T = 64; const vals: number[] = [];
     for (let ty = 0; ty < h; ty += T) for (let tx = 0; tx < w; tx += T) {
       let n = 0, sum = 0, sq = 0;
       for (let y = Math.max(1, ty); y < Math.min(h - 1, ty + T); y++) for (let x = Math.max(1, tx); x < Math.min(w - 1, tx + T); x++) {
@@ -44,9 +85,14 @@ export async function sharpnessOf(buf: Buffer): Promise<number | null> {
         const l = data[i - ch] + data[i + ch] + data[i - w * ch] + data[i + w * ch] - 4 * data[i];
         n++; sum += l; sq += l * l;
       }
-      if (n >= 64) { const m = sum / n; best = Math.max(best, sq / n - m * m); }
+      if (n >= 64) { const m = sum / n; vals.push(sq / n - m * m); }
     }
-    return best < 1 ? null : Math.round(best * 10) / 10; // 한 색으로 칠한 그림처럼 결이 없으면 판단하지 않음
+    if (!vals.length) return null;
+    vals.sort((a, b) => a - b);
+    const max = vals[vals.length - 1], med = vals[Math.floor(vals.length / 2)];
+    if (max < 1) return null; // 한 색으로 칠한 그림처럼 결이 없으면 판단하지 않음
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    return { max: r1(max), med: r1(med) };
   } catch { return null; }
 }
 export const visionOk = (x: unknown): x is VisionOk => !!x && typeof x === 'object' && typeof (x as VisionOk).caption === 'string' && !('error' in (x as object));
@@ -80,7 +126,7 @@ export const PHOTO_MIME = ['image/jpeg', 'image/png', 'image/webp'];
  * library_files 를 별칭 없이 읽는 쿼리에 그대로 넣는다(하위 쿼리가 library_files.칸 으로 바깥 줄을 봄)
  */
 export const poolCond = (sql: ReturnType<typeof db>, tenant: string) => sql`library_files.tenant = ${tenant} and library_files.deleted_at is null and library_files.upload_status = 'ready'
-  and coalesce(library_files.security, 'internal') <> 'confidential' and library_files.mime_type = any(${PHOTO_MIME}::text[]) and coalesce(library_files.source, '') not in ('ai', 'ai_attach', 'revenue')
+  and coalesce(library_files.security, 'internal') <> 'confidential' and library_files.mime_type = any(${PHOTO_MIME}::text[]) and coalesce(library_files.source, '') not in ('ai', 'ai_attach', 'revenue', 'mosaic')
   and not exists (select 1 from library_folder_security fs where fs.tenant = library_files.tenant and fs.security = 'confidential' and (library_files.folder = fs.folder or left(library_files.folder, length(fs.folder) + 1) = fs.folder || '/'))
   and (library_files.space = 'marketing' or not exists (select 1 from team_members mi join teams ti on ti.id = mi.team_id join users uu on uu.id = mi.user_id
     where mi.user_id = library_files.created_by and ti.isolated and not ti.archived and ti.tenant = library_files.tenant and uu.role not in ('owner', 'admin')))
@@ -103,11 +149,14 @@ const SYSTEM = `회사 마케팅 자료실 사진 한 장을 보고 기록합니
 - seen: 읽히는 글자(상호·간판·제목) 60자 안, 없으면 ""
 - people: 보이는 사람 수(0~20)
 - faces: 얼굴을 알아볼 수 있는 사람이 있으면 true
+- face_boxes: 알아볼 수 있는 얼굴마다 {x, y, w, h} — 사진 너비·높이에 대한 0~1 비율(왼쪽 위가 0,0). 머리 전체가 들어가게 넉넉히. 없으면 []
 - quality: good · ok · poor(흐림·너무 어두움·심하게 기울어짐)
 - pose: 사람 자세 — none(사람 없음) · standing(서 있음·걷기·운동 중) · sitting(앉음) · lying(누움·엎드림·기대 누움) — 여럿이면 가장 크게 보이는 사람
 - facing: 사람이 보이는 방향 — none(사람 없음) · front(얼굴·몸 앞쪽) · side(옆) · back(뒷모습·등)
 - light: 사진 밝기 — bright(밝음) · normal · dark(어두움·야간·조명 약함)`;
-const SCHEMA = { type: 'object', additionalProperties: false, required: ['caption', 'scene', 'tags', 'kind', 'text', 'promo', 'seen', 'people', 'faces', 'quality', 'pose', 'facing', 'light'], properties: {
+const BOX = { type: 'object', additionalProperties: false, required: ['x', 'y', 'w', 'h'], properties: { x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' } } };
+const SCHEMA = { type: 'object', additionalProperties: false, required: ['caption', 'scene', 'tags', 'kind', 'text', 'promo', 'seen', 'people', 'faces', 'face_boxes', 'quality', 'pose', 'facing', 'light'], properties: {
+  face_boxes: { type: 'array', items: BOX },
   caption: { type: 'string' }, scene: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, kind: { type: 'string', enum: [...KINDS] },
   text: { type: 'string', enum: ['none', 'little', 'much'] }, promo: { type: 'boolean' }, seen: { type: 'string' }, people: { type: 'integer' }, faces: { type: 'boolean' },
   quality: { type: 'string', enum: ['good', 'ok', 'poor'] }, pose: { type: 'string', enum: [...POSES] }, facing: { type: 'string', enum: [...FACINGS] }, light: { type: 'string', enum: [...LIGHTS] } } };
@@ -125,6 +174,7 @@ function normalize(j: any): Omit<VisionOk, 'v' | 'at'> {
   return { caption: clip(j?.caption, 60), scene: clip(j?.scene, 300), tags: [...new Set((Array.isArray(j?.tags) ? j.tags : []).map((t: unknown) => clip(t, 20).replace(/^#/, '')).filter(Boolean))].slice(0, 8) as string[],
     kind: pick(j?.kind, KINDS, 'photo'), text: pick(j?.text, ['none', 'little', 'much'] as const, 'little'), promo: j?.promo === true, seen: clip(j?.seen, 60),
     people: Math.max(0, Math.min(20, Math.round(Number(j?.people) || 0))), faces: j?.faces === true, quality: pick(j?.quality, ['good', 'ok', 'poor'] as const, 'ok'),
+    ...(j?.faces === true && Array.isArray(j?.face_boxes) ? { faceBoxes: faceBoxesOf(j.face_boxes) } : {}),
     // 171차: 자세·방향·밝기 — 답에 없으면(예전 가짜 답·옛 모델) 칸을 비워 두고 문장으로 판정
     ...(POSES.includes(j?.pose) ? { pose: j.pose as VisionOk['pose'] } : {}), ...(FACINGS.includes(j?.facing) ? { facing: j.facing as VisionOk['facing'] } : {}), ...(LIGHTS.includes(j?.light) ? { light: j.light as VisionOk['light'] } : {}) };
 }
@@ -144,7 +194,7 @@ export async function describePhoto(tenant: string, id: string, actorId: string 
   let img: { data: Buffer; mime: string } | null;
   try { img = await shrink(await (await import('./storage')).getObject(f.storage_key), f.mime_type); } catch (e: any) { return fail(`사진 읽기 실패: ${e?.message ?? e}`); }
   if (!img) return fail('사진이 너무 크거나 읽을 수 없는 형식입니다');
-  const sharpScore = await sharpnessOf(img.data); // 282차 #818 — AI 호출 없이 서버에서
+  const st = await sharpnessStats(img.data); // 282차 #818 — AI 호출 없이 서버에서
   const p = P.anthropicProvider({ tier: 'fast' });
   let r: Awaited<ReturnType<typeof p.chat>>;
   try {
@@ -156,7 +206,7 @@ export async function describePhoto(tenant: string, id: string, actorId: string 
       ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_vision')`;
   let j: any;
   try { j = JSON.parse((r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('')); } catch { return fail('AI 답을 읽지 못했습니다'); }
-  const v: VisionOk = { v: 1, at: new Date().toISOString(), ...normalize(j), sharp: sharpScore ?? -1 }; // -1 = 쟀지만 판단 못함(한 색 그림 등)
+  const v: VisionOk = { v: 1, at: new Date().toISOString(), ...normalize(j), sharp: st?.max ?? -1, sharpMed: st?.med ?? -1 }; // -1 = 쟀지만 판단 못함(한 색 그림 등)
   if (!v.caption) return fail('AI 가 설명을 비워 답했습니다');
   await sql`update library_files set vision = ${sql.json(v as never)}, description = coalesce(nullif(description, ''), ${v.caption}) where id = ${id}`;
   // 188차(#619 '영상 = 화면 설명으로 분류'): 영상 장면 사진이면 설명이 비어 있던 원본 영상에 '영상 장면: …' 한 줄(자료실 검색·정리에 씀)
@@ -169,20 +219,20 @@ export async function describePhoto(tenant: string, id: string, actorId: string 
 export async function sharpBatch(tenant: string, limit = 30, budgetMs = 20e3) {
   const sql = db(); const t0 = Date.now(); let done = 0, blurry = 0;
   const rows = await sql<{ id: string; storage_key: string }[]>`select id, storage_key from library_files where ${photoCond(sql, tenant)} and storage_key is not null
-    and vision ? 'caption' and not (vision ? 'sharp') order by created_at desc limit ${limit}`;
+    and vision ? 'caption' and not (vision ? 'sharpMed') order by created_at desc limit ${limit}`;
   for (const r of rows) {
     if (Date.now() - t0 > budgetMs) break;
-    let score: number | null = null;
-    try { score = await sharpnessOf(await (await import('./storage')).getObject(r.storage_key)); } catch { score = null; }
-    await sql`update library_files set vision = vision || ${sql.json({ sharp: score ?? -1 } as never)}::jsonb where id = ${r.id}`;
-    done++; if (score != null && score >= 0 && score < SHARP_MIN) blurry++;
+    let st: { max: number; med: number } | null = null;
+    try { st = await sharpnessStats(await (await import('./storage')).getObject(r.storage_key)); } catch { st = null; }
+    await sql`update library_files set vision = vision || ${sql.json({ sharp: st?.max ?? -1, sharpMed: st?.med ?? -1 } as never)}::jsonb where id = ${r.id}`;
+    done++; if (st && st.max < SHARP_MIN) blurry++;
   }
   return { done, blurry, left: Math.max(0, rows.length - done) };
 }
 
 /** 정기 실행: 선명도가 비어 있는 사진이 있는 회사마다(한 번에 3곳) sharpBatch */
 export async function sharpTick() {
-  const ts = await db()<{ tenant: string }[]>`select distinct tenant from library_files where deleted_at is null and upload_status = 'ready' and vision ? 'caption' and not (vision ? 'sharp') limit 3`;
+  const ts = await db()<{ tenant: string }[]>`select distinct tenant from library_files where deleted_at is null and upload_status = 'ready' and vision ? 'caption' and not (vision ? 'sharpMed') limit 3`;
   const out = []; for (const t of ts) out.push({ tenant: t.tenant, ...(await sharpBatch(t.tenant, 30, 15e3)) });
   return out;
 }

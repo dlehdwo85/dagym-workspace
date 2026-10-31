@@ -139,6 +139,29 @@ export function headlineOf(title: string, body: string) {
 /** #235 ⓑ 블로그 본문 사진 후보(원고 AI 가 장면 순서로 골라 '[사진 P번호]' 줄로 넣음) — 본문 규칙(글자 든 그래픽·'쓰지 않음'·다른 브랜드 빼고, 이 브랜드·글과 맞는 사진 먼저) 순위 앞 n장.
  *  caption = 사진 AI 설명 한 줄(없으면 자료실 설명·이름) — 블로그 사진 아래 줄로도 씀 */
 export type BlogPhoto = { id: string; title: string; caption: string; scene: string };
+/** 286차 #818 ④(대표 "사람 얼굴은 되도록 모자이크 필요"): 블로그 본문은 원본 파일을 그대로 붙이므로 — AI 설명이 얼굴 자리를 알려 준 사진은
+ *  얼굴을 모자이크한 사본(자료실 '마케팅/자동 시안', source mosaic, meta.of = 원본 · 같은 원본이면 다시 씀)을 붙임. 원본은 그대로, 사본은 사진 고르기·설명에서 빠짐 */
+async function faceSafeIds(tenant: string, ids: string[], actor: SessionUser): Promise<string[]> {
+  if (!ids.length) return ids;
+  const sql = db(); const P = await import('./mktPhotos');
+  const rows = await sql<{ id: string; title: string; file_name: string; storage_key: string | null; vision: unknown }[]>`select id::text, coalesce(nullif(title, ''), file_name) as title, file_name, storage_key, vision
+    from library_files where id = any(${ids}::uuid[]) and tenant = ${tenant}`;
+  const out: string[] = [];
+  for (const id of ids) {
+    const r = rows.find((x) => x.id === id); const faces = r ? P.facesToHide(r.vision) : [];
+    if (!r?.storage_key || !faces.length) { out.push(id); continue; }
+    const [have] = await sql<{ id: string }[]>`select id::text from library_files where tenant = ${tenant} and source = 'mosaic' and meta->>'of' = ${id} and deleted_at is null and upload_status = 'ready' limit 1`;
+    if (have) { out.push(have.id); continue; }
+    try {
+      const data = await P.mosaicFaces(await (await import('./storage')).getObject(r.storage_key), faces);
+      const { saveGeneratedFile } = await import('./library');
+      const f = await saveGeneratedFile(actor, { fileName: `${r.file_name.replace(/\.[a-z0-9]{2,5}$/i, '')}_얼굴가림.jpg`, mime: 'image/jpeg', data, title: `${r.title} — 얼굴 가림`, folder: '마케팅/자동 시안',
+        tags: ['얼굴 가림', '자동 시안'], description: '얼굴 자리를 모자이크한 사본(원본은 그대로)', source: 'mosaic', space: 'marketing', meta: { of: id } } as never);
+      out.push(f.id);
+    } catch { out.push(id); } // 사본을 못 만들면 예전처럼 원본(실패로 글을 막지 않음)
+  }
+  return out;
+}
 export async function blogPhotoCandidates(c: Content, text: string, n = 20): Promise<BlogPhoto[]> {
   const [b] = c.brand_id ? await db()<{ name: string }[]>`select name from mkt_brands where id = ${c.brand_id}` : [];
   const brand = (b?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
@@ -197,7 +220,8 @@ export async function drawAutoVisual(c: Content, body: string, opts: DrawOpts = 
   const f = await saveGeneratedFile(actor, { fileName: `${safe}_${story ? '스토리' : blog ? '블로그 표지' : '피드'}.jpg`, mime: 'image/jpeg', data: jpg, title: `${safe} — 자동 시안`, folder: '마케팅/자동 시안',
     tags: ['자동 시안', ...(brand ? [brand] : [])], description: `서버 그리기(크레딧 0)${label ? ` · 틀: ${label}` : ''} · ${photo ? `사진: ${photo.title}${scene ? '(영상 장면)' : ''}${gen ? '(AI 생성·실사 참고)' : ''}${photoFix.length ? `(보정: ${fixText(photoFix)})` : ''}` : '사진 없음 — 브랜드 색 바탕'}`, source: 'ai', space: 'marketing', meta: { contentId: c.id, photoId, kind: story ? 'story' : blog ? 'blog' : 'feed', ...(template ? { template } : {}), ...(photoFix.length ? { fix: photoFix } : {}) } });
   // 블로그 본문 사진: 원고가 고른 사진들(bodyIds) — 없으면 표지에 쓴 것과 다른 실사 1장(같은 규칙 — 글자 든 그래픽·다른 브랜드·가까운 글에 쓴 사진 빼고)
-  const bodyIds = given ?? (blog ? [(await pickPhoto(c, brand, others, `${c.title} ${body}`, new Set([...(opts.exclude ?? []), ...near, ...(photoId ? [photoId] : [])]), 'body'))?.id].filter((x): x is string => !!x) : []);
+  const picked = given ?? (blog ? [(await pickPhoto(c, brand, others, `${c.title} ${body}`, new Set([...(opts.exclude ?? []), ...near, ...(photoId ? [photoId] : [])]), 'body'))?.id].filter((x): x is string => !!x) : []);
+  const bodyIds = await faceSafeIds(c.tenant, picked, actor); // 286차 #818 ④: 얼굴 자리를 아는 본문 사진은 모자이크한 사본으로
   const [bp] = bodyIds.length ? await sql<{ title: string }[]>`select coalesce(nullif(title, ''), file_name) as title from library_files where id = ${bodyIds[0]}` : [];
   return { fileId: f.id, photoId, photoTitle: photo?.title ?? null, bodyId: bodyIds[0] ?? null, bodyIds, bodyTitle: bp ? `${bp.title}${bodyIds.length > 1 ? ` 외 ${bodyIds.length - 1}장` : ''}` : null, template, templateLabel: label, photoIds, photoFix, scene, gen };
 }
@@ -546,7 +570,7 @@ export async function redrawTextVisuals(tenant: string, limit = 8, budgetMs = 15
   const sql = db(); const t0 = Date.now();
   const rows = await sql<(Content & { status: string; quality: any })[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status, c.quality, c.auto from mkt_contents c
     join mkt_versions v on v.content_id = c.id and v.version = c.current_version
-    where c.tenant = ${tenant} and c.status in ('pending', 'changes') and c.quality->'visual'->>'by' = 'server' and coalesce(c.quality->'visual'->>'rv', '1')::int < 4
+    where c.tenant = ${tenant} and c.status in ('pending', 'changes') and c.quality->'visual'->>'by' = 'server' and coalesce(c.quality->'visual'->>'rv', '1')::int < 5
       and cardinality(v.media_ids) >= 1 and v.media_ids[1]::text = c.quality->'visual'->>'fileId'
       and (c.scheduled_at is null or c.scheduled_at > now() - interval '1 day')
       and not exists (select 1 from mkt_decisions d where d.content_id = c.id and d.version = c.current_version and d.decision in ('changes', 'hold'))
@@ -564,8 +588,8 @@ export async function redrawTextVisuals(tenant: string, limit = 8, budgetMs = 15
       const blur = !!p && blurryPhoto(p.vision);
       if (!p || (backdropOk(p) && !blur)) { // 브랜드 색 바탕·고른 사진 = 괜찮음 → 표시만
         if (p && visionOk(p.vision) && typeof p.vision.sharp !== 'number') continue; // 선명도를 아직 안 쟀으면(정기 실행 mktSharp) 다음 실행에 다시 봄
-        await sql`update mkt_contents set quality = jsonb_set(quality, '{visual}', (quality->'visual') || ${sql.json({ rv: 4, ...(photoId ? { photoId } : {}) } as never)}::jsonb) where id = ${c.id}`;
-        if (Number(c.quality.visual.rv ?? 1) < 3) out.push({ id: c.id, kept: true }); // 흔들림 검사만 더한 것(3 → 4)은 따로 알리지 않음
+        await sql`update mkt_contents set quality = jsonb_set(quality, '{visual}', (quality->'visual') || ${sql.json({ rv: 5, ...(photoId ? { photoId } : {}) } as never)}::jsonb) where id = ${c.id}`;
+        if (Number(c.quality.visual.rv ?? 1) < 3) out.push({ id: c.id, kept: true }); // 흔들림 검사만 더한 것(3·4 → 5)은 따로 알리지 않음
         continue;
       }
       const [v] = await sql<{ body: string; media_ids: string[] }[]>`select body, media_ids from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;

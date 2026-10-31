@@ -112,12 +112,53 @@ test('⑤ 승인 대기 시안: 바탕 사진이 나중에 흔들림으로 판�
   assert.equal(v1.quality.visual.photoId, shaky, '선명도 없을 때는 예전처럼 고름');
   assert.equal(v1.status, 'pending');
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
-  const w = await cur(c); assert.notEqual(w.quality.visual.rv, 4, '선명도를 아직 안 쟀으면 끝냄 표시(4)를 하지 않고 기다림'); assert.equal(w.current_version, v1.current_version);
+  const w = await cur(c); assert.notEqual(w.quality.visual.rv, 5, '선명도를 아직 안 쟀으면 끝냄 표시(5)를 하지 않고 기다림'); assert.equal(w.current_version, v1.current_version);
   await sql`update library_files set vision = vision || '{"sharp": 2.5}'::jsonb where id = ${shaky}`; // 정기 실행이 선명도를 잼
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const v2 = await cur(c);
   assert.equal(v2.quality.visual.photoId, good, JSON.stringify(v2.quality.visual));
   assert.match(v2.note ?? '', /흔들린·초점 나간 바탕 사진 바꿈/);
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
-  const v3 = await cur(c); assert.equal(v3.quality.visual.rv, 4, '한 번만'); assert.equal(v3.quality.visual.photoId, good);
+  const v3 = await cur(c); assert.equal(v3.quality.visual.rv, 5, '한 번만'); assert.equal(v3.quality.visual.photoId, good);
+});
+
+test('286차 AI 설명 문장: "사진이 약간 흔들려 흐릿" 이면 선명도 값이 높아도 안 씀 · 배경만 흐린 사진은 씀 · 중앙값도 기록', async () => {
+  const b4 = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '문장짐' });
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b4.id}`, { intro: '동네 헬스장', products: '1개월 회원권' });
+  const bokeh = await libFile('문장짐 매장 덤벨.jpg', await textured(21));
+  await describe(bokeh, V({ caption: '덤벨이 놓인 매장', scene: '배경이 흐릿하게 처리된 덤벨 사진입니다.', tags: ['덤벨', '매장'] }));
+  const shaky = await libFile('문장짐 매장 덤벨 2.jpg', await textured(22)); // 더 최근 — 예전이라면 먼저 뽑힘
+  await describe(shaky, V({ caption: '덤벨이 놓인 매장', scene: '사진이 약간 흔들려 흐릿합니다.', tags: ['덤벨', '매장'] }));
+  const v = await vis(shaky); assert.ok(v.sharp >= 40 && typeof v.sharpMed === 'number', JSON.stringify(v));
+  const c = await slot(b4.id, '덤벨 고르는 법', { day: 2, ago: 2 });
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  assert.equal((await cur(c)).quality.visual.photoId, bokeh, '흔들렸다고 설명된 사진은 빼고, 배경만 흐린 사진은 씀');
+});
+
+test('286차 #818 ④ 얼굴 모자이크: AI 설명이 얼굴 자리를 알려 준 사진을 블로그 본문에 쓰면 얼굴을 가린 사본(원본은 그대로)', async () => {
+  const b5 = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '얼굴짐' });
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b5.id}`, { intro: '동네 헬스장', products: '1개월 회원권' });
+  const face = await libFile('얼굴짐 회원 사진.jpg', await textured(31));
+  await describe(face, V({ caption: '회원 두 명이 운동하는 모습', tags: ['회원'], faces: true, people: 2, face_boxes: [{ x: 0.3, y: 0.3, w: 0.4, h: 0.4 }] }));
+  assert.deepEqual((await vis(face)).faceBoxes, [{ x: 0.3, y: 0.3, w: 0.4, h: 0.4 }]);
+  const cover = await libFile('얼굴짐 트레이너 수업 공간.jpg', await textured(32)); // 제목 낱말이 맞고 더 최근 → 표지, 본문은 남은 얼굴 사진
+  await describe(cover, V({ caption: '트레이너 수업 공간', tags: ['트레이너', '수업'] }));
+  const at = new Date(Date.now() + 2 * 864e5); at.setUTCHours(4, 0, 0, 0);
+  const [bl] = await sql`insert into mkt_contents (tenant, brand_id, title, channel, kind, scheduled_at, status, current_version, created_by, auto, produce_at)
+    values ('default', ${b5.id}, '트레이너 수업 이야기', 'blog', 'blog', ${at}, 'draft', 0, ${ctx.ownerId}, true, now() - interval '1 minute') returning id`;
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const b = await cur(bl.id);
+  const ids = b.media_ids.slice(1);
+  assert.ok(!ids.includes(face), `원본 얼굴 사진을 그대로 붙이지 않음 ${JSON.stringify(ids)}`);
+  const [copy] = await sql`select id, source, meta, storage_key, folder from library_files where source = 'mosaic' and meta->>'of' = ${face}`;
+  assert.ok(copy && ids.includes(copy.id), '얼굴 가린 사본을 붙임');
+  assert.equal(copy.folder, '마케팅/자동 시안');
+  const center = async (buf) => { const { data, info } = await sharp(buf).greyscale().extract({ left: 128, top: 96, width: 64, height: 48 }).raw().toBuffer({ resolveWithObject: true });
+    let s = 0, q = 0; for (const x of data) { s += x; q += x * x; } const m = s / data.length; return q / data.length - m * m; };
+  const orig = await center(await (await import('node:fs/promises')).readFile(path.join(tmpdir(), 'workos-test', 'uploads', (await sql`select storage_key from library_files where id = ${face}`)[0].storage_key)));
+  const blur = await center(await (await import('node:fs/promises')).readFile(path.join(tmpdir(), 'workos-test', 'uploads', copy.storage_key)));
+  assert.ok(blur < orig / 3, `얼굴 자리 결이 크게 줄어듦 ${orig} → ${blur}`);
+  // 같은 사진을 다시 쓰면 사본을 다시 만들지 않음 · 사본은 사진 고르기 후보에서 빠짐
+  const pool = await ctx.owner.ok('GET', '/api/marketing/photos?limit=200').catch(() => null);
+  if (pool?.items) assert.ok(!pool.items.some((x) => x.id === copy.id), '사본은 사진 목록·고르기에서 빠짐');
 });
