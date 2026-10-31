@@ -2104,3 +2104,9 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 앱: ASC 워크인 iOS 1.1.1 '심사를 통과하지 못함'(10/28 23:52, 4.8·2.3.7·3.1.1 ×2) + 개발자 계약 업데이트 동의 필요. Codemagic 계정에는 dajim-platform 만 — 워크인 빌드는 GitHub release.yml. 16:00 release 실행 run 41178746152(1.2.0, android·ios).
 - 플레이 공개 페이지 정상(0+), '워크인' 검색 결과에 없음.
 - 대표 화면: 운영 프로필 새 창 ASC·Codemagic(로그인 완료), 제어판 전원 단추 정의 창.
+
+## 2026-10-31 17:20 — 앱 1.2.0, 293·294차
+- release.yml run 41178746152: android ready=false(Secrets 없음, 건너뜀), ios exportArchive 'PLA Update available'·'No signing certificate' 실패 — Apple 사용권 계약 미동의.
+- 423af35 버전 1.2.0(build.gradle 기본·pbxproj MARKETING_VERSION) → mobile run 63 성공 → artifacts/aab-63 → 로컬 서명(scratchpad sign_aab.py, 비밀값 출력 없음, jarsigner verify 통과) → Play 내부 테스트 '63 (1.2.0) 내부 테스터에게 제공됨' 17:12. 경고 2개는 지원 기기 안내(변화 0).
+- 293: 하이링크 photoSource 'scenes'(PATCH 200) · 5장 다시 지정으로 '워크인' 태그 빠짐.
+- 294 배포 확인은 클라우드 curl 기준, 로컬 실기기 확인 전.
