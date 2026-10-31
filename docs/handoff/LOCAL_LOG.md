@@ -2061,3 +2061,10 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - K-apt 수동 11:22 'KG2B 상세 2건(공고문 0, 넘긴 업무 1건에 붙임)' — 광명 f1713d0b 첨부 '…(광명자이더샵포레나).hwp' source sales_auto. 천안 764f166d 첨부 0·briefing '공고문 참조' 그대로.
 - 천안 eligibility 11:05:33 '자본금 5억 이상 · 실적 최근 5년 공동주택 1000세대 이상 5개 단지 · 지역 전국'.
 - 같은 11:30 실행: g2b 재시도 failed(점검), salesCollectorAlerts alerts 2·notified 0(하루 1번 묶음).
+
+## 2026-10-31 13:35 — 281~285차 운영 확인(c9acbc7)
+- 281: 업무 화면 390px '전체'·사람별 맨 위 '공동 업무 11'(artifacts/1031-tasks-cotask-281.png). 경기스포츠산업 공모전 상세 [업무로 · 결과 확인]·[업무 회수].
+- 280 남은 것: 13:27 K-apt 수동 'KG2B 상세 6건(공고문 0, 넘긴 업무 1건에 붙임)' → 천안 764f166d 첨부 hwp, 카드 briefing null.
+- 282: /api/notifications/prefs mkt 8항목 기본값.
+- 283·285: library marketing vision 235 · sharp 86장 · 최소 85.6 · 10% 916 · 중앙 5,468 · 최대 22,668 · 40 미만 0. AI 설명 '흔들/흐릿' 사진 sharp 85.6~22,668. 다시 그린 시안 0건. 클라우드에 기준 방식 변경 요청.
+- 운영 설정 photo_gen true(로컬이 바꾸지 않음) · video_pause false. 시안 수 10월 73 · 11월 32(휴지통 제외).
