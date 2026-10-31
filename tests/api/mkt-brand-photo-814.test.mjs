@@ -165,11 +165,18 @@ test('290차 브랜드 이름 없는 사진 정리: 추천(같이 올린 사진�
   const k2 = await libFile('KakaoTalk_20261015_2105088.jpg'); await describe(k2, V({ caption: '기구 옆 매트', tags: ['매트'] }));
   await sql`update library_files set created_at = now() - interval '3 days' where id = ${k1}`; // 다른 시험 사진과 떨어진 날 — 같이 올린 사진은 k1 하나
   await sql`update library_files set created_at = now() - interval '3 days' + interval '2 minutes' where id = ${k2}`;
+  // 291차(로컬 15:05): '앱 화면 캡처만' 브랜드(일앱)의 실사와 같이 올린 이름 없는 사진 — 일앱은 실사를 안 쓰므로 추천하지 않음
+  const appReal = await libFile('일앱 사무실 책상.jpg'); await describe(appReal, V({ caption: '사무실 책상', tags: ['사무실'] }));
+  const k3 = await libFile('사무실 창가.jpg'); await describe(k3, V({ caption: '사무실 창가', tags: ['창가'] }));
+  await sql`update library_files set created_at = now() - interval '5 days' where id = ${appReal}`;
+  await sql`update library_files set created_at = now() - interval '5 days' + interval '1 minute' where id = ${k3}`;
   const u = await ctx.owner.ok('GET', '/api/marketing/photos/unnamed');
   const it = u.items.find((x) => x.id === k2);
   assert.equal(it?.suggest?.name, '바디짐', JSON.stringify(it));
   assert.ok(it.suggest.why.some((w) => w.includes('같은 묶음 파일(20261015_2105)')) && it.suggest.why.some((w) => w.includes('같이 올린 사진 1장이 바디짐')), JSON.stringify(it.suggest));
   assert.ok(u.brands.find((b) => b.id === b3.id).suggested >= 1);
+  assert.equal(u.items.find((x) => x.id === k3)?.suggest ?? null, null, "'앱 화면 캡처만' 브랜드는 실사 추천에서 뺌");
+
   assert.ok([403, 404].includes((await ctx.staffA.client.post('/api/marketing/photos/assign', { ids: [k2], brandId: b3.id })).status), '관리자만');
   const r = await ctx.owner.ok('POST', '/api/marketing/photos/assign', { ids: [k2], brandId: b3.id });
   assert.deepEqual([r.updated, r.tag], [1, '바디짐']);

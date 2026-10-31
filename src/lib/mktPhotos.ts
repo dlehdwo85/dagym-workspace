@@ -344,7 +344,8 @@ export async function unnamedPhotos(u: SessionUser, q: { offset?: number; limit?
       case when source = 'video_frame' then (select concat_ws(' ', coalesce(nullif(pv.title, ''), pv.file_name), pv.folder, array_to_string(pv.tags, ' ')) from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant) end as parent
     from library_files where ${photoCond(sql, t)} order by created_at desc`;
   const real = rows.filter((r) => poolUsable(r) && V.bodyOk(r) && !markedSkip(r.tags));
-  const rules = await Promise.all(bs.map(async (b) => ({ b, own: (await V.photoRule(t, b.id)).own })));
+  const rules = await Promise.all(bs.map(async (b) => { const r = await V.photoRule(t, b.id); return { b, own: r.own, screen: r.src === 'screen' }; }));
+  const screenOnly = new Set(rules.filter((x) => x.screen).map((x) => x.b.id)); // 291차(로컬 15:05): '앱 화면 캡처만' 브랜드(워크인)는 실사를 지정해도 안 쓰므로 실사 추천에서 뺌
   const owner = (r: (typeof rows)[number]) => rules.filter((x) => (x.own.length ? x.own : [x.b.name]).some((n) => V.photoHas(r, n))).map((x) => x.b.id);
   const named = new Map<string, string[]>(); for (const r of real) named.set(r.id, owner(r));
   const unnamed = real.filter((r) => !named.get(r.id)!.length);
@@ -352,7 +353,7 @@ export async function unnamedPhotos(u: SessionUser, q: { offset?: number; limit?
   const nameOf = new Map(bs.map((b) => [b.id, b.name]));
   const suggest = (r: (typeof rows)[number]) => {
     const score = new Map<string, { n: number; why: string[] }>();
-    const add = (id: string, n: number, why: string) => { const x = score.get(id) ?? { n: 0, why: [] }; x.n += n; x.why.push(why); score.set(id, x); };
+    const add = (id: string, n: number, why: string) => { if (screenOnly.has(id)) return; const x = score.get(id) ?? { n: 0, why: [] }; x.n += n; x.why.push(why); score.set(id, x); };
     const at = new Date(r.created_at).getTime(); const st = r.file_name.match(STAMP)?.slice(1).join('_');
     const tally = (f: (o: (typeof rows)[number]) => boolean) => { const m = new Map<string, number>(); for (const o of real) if (o.id !== r.id && f(o)) for (const b of named.get(o.id) ?? []) m.set(b, (m.get(b) ?? 0) + 1); return m; };
     for (const [b, n] of tally((o) => !!r.created_by && o.created_by === r.created_by && Math.abs(new Date(o.created_at).getTime() - at) <= 15 * 60e3)) add(b, 3, `같이 올린 사진 ${n}장이 ${nameOf.get(b)}`);
