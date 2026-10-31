@@ -1,6 +1,6 @@
 'use client';
 import { dtf } from '@/lib/dtf';
-import { useInApp } from '@/components/inApp';
+import { useInApp, useIosApp } from '@/components/inApp';
 import { CompanyAiProfile } from '@/components/CompanyAiProfile';
 import { useState } from 'react';
 import { api, useApi } from '@/components/client';
@@ -40,6 +40,7 @@ export function Automation() {
   const tabQ = useSearchParams().get('tab'); const tab = tabQ === 'studio' || tabQ === 'cards' ? tabQ : 'rules'; // 대표 10/20 19:00: '제작의뢰실' 탭 · #499-5 '카드뉴스' 탭
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 링크 없음(요금제 고르기는 사용량·요금제 화면 — 대표 10/27 ⑤)
+  const iosApp = useIosApp(); // #839 아이폰 앱(App Store 3.1.1): '요금제' 글자도 없음
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '', mode: 'content' as Mode });
   // 로컬 10/20 보완: 묶음은 n일마다(+주말 건너뛰기) 또는 요일 지정(월·수·금), 종류별 시각 한 번에
   const [bundle, setBundle] = useState({ brandId: '', mode: 'interval' as 'interval' | 'weekdays', intervalDays: 3, skipWeekend: false /* 대표 15:40: 기본 끔 */, weekdays: [1, 3, 5] as number[], startDate: dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), times: { ...BUNDLE_TIMES }, kinds: [...BUNDLE_KINDS] });
@@ -99,7 +100,7 @@ export function Automation() {
       {tab === 'cards' ? <><h1 className="text-xl font-bold" style={{ color: C }}>카드뉴스</h1><CarouselStudio /></> : tab === 'studio' ? <><h1 className="text-xl font-bold" style={{ color: C }}>제작의뢰실</h1><Studio /></> : <>
       <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>자동 제작</h1>
         {ed && <Button size="sm" variant="secondary" className="ml-auto" onClick={runNow} disabled={busy} data-testid="auto-run">{busy ? '도는 중…' : '지금 한 번 돌리기'}</Button>}</div>
-      <p className="text-xs text-ink-2" data-testid="auto-ai-note">AI 원고는 회사 월 AI 예산(이번 달 {data.usage.companyAi ? `${data.usage.companyAi.usedKrw.toLocaleString('ko-KR')}원 / ${data.usage.companyAi.limitKrw === null ? '무제한' : `${data.usage.companyAi.limitKrw.toLocaleString('ko-KR')}원`}` : `$${data.usage.companyAiUsd} / $${data.usage.companyAiLimitUsd}`})과 마케팅 AI 월 한도 중 먼저 닿는 쪽에서 멈추고(예산은 {data.usage.companyAi?.resetLabel ?? '다음 달 1일'}에 다시 채워짐), 받는 사람에게 하루 한 번 알립니다. 영상 제작은 마케팅 크레딧으로 따로 셉니다. 회사 전체 AI 사용은 <a className="underline" href="/admin/usage">관리 → 사용량·요금제</a>(기능별 “마케팅”).</p>
+      <p className="text-xs text-ink-2" data-testid="auto-ai-note">AI 원고는 회사 월 AI 예산(이번 달 {data.usage.companyAi ? `${data.usage.companyAi.usedKrw.toLocaleString('ko-KR')}원 / ${data.usage.companyAi.limitKrw === null ? '무제한' : `${data.usage.companyAi.limitKrw.toLocaleString('ko-KR')}원`}` : `$${data.usage.companyAiUsd} / $${data.usage.companyAiLimitUsd}`})과 마케팅 AI 월 한도 중 먼저 닿는 쪽에서 멈추고(예산은 {data.usage.companyAi?.resetLabel ?? '다음 달 1일'}에 다시 채워짐), 받는 사람에게 하루 한 번 알립니다. 영상 제작은 마케팅 크레딧으로 따로 셉니다. 회사 전체 AI 사용은 <a className="underline" href="/admin/usage">관리 → {inApp ? '사용량' : '사용량·요금제'}</a>(기능별 “마케팅”).</p>
       {data.writeModel && <p className="text-xs text-ink-2" data-testid="auto-write-model">글 모델: <b className="text-ink">{data.writeModel.label}</b>{data.writeModel.model ? ` (${data.writeModel.model}) · 원고 1건 약 ${data.writeModel.perDraftKrw?.toLocaleString('ko-KR')}원` : ''} — {data.writeModel.source === 'company' ? '운영사가 이 회사에 정한 값' : data.writeModel.source === 'plan' ? '마케팅 요금제 기본값' : '기본값'} · 원고·수정본에 쓰고, 품질 검사는 빠른 모델로 합니다.
         {data.writeModel.blog && <span className="block" data-testid="auto-write-model-blog">네이버 블로그(1,800~2,500자·사진 8~15장 형식): <b className="text-ink">{data.writeModel.blog.label}</b>{data.writeModel.blog.model ? ` (${data.writeModel.blog.model}) · 1건 약 ${data.writeModel.blog.perDraftKrw?.toLocaleString('ko-KR')}원` : ''}{data.writeModel.blog.upgraded ? (data.writeModel.blog.extraKrw !== undefined ? ` — 빠른 모델로 쓸 때보다 1건 약 ${data.writeModel.blog.extraKrw.toLocaleString('ko-KR')}원 더(블로그만 상위 모델)` : ' — 블로그만 상위 모델') : ''}</span>}</p>}
       {/* 267차(대표 #795 '두서없이 올리지 말고 수정·보완할 시간까지 고려해서'): 승인 올리는 방식 안내 */}
@@ -119,9 +120,9 @@ export function Automation() {
       {data.production && (
         <section className={cx('rounded-card border p-3 shadow-card', data.production.over ? 'border-red-200 bg-red-50/40' : 'border-violet-200 bg-violet-50/30')} data-testid="auto-production">
           <div className="flex flex-wrap items-center gap-2 text-sm"><b>이번 달 남은 제작</b>
-            {data.production.leftCredits === null ? <span className="text-ink-2">마케팅 제작 요금제를 고르면 남은 제작 수가 보입니다</span> : <span className="tabular-nums" data-testid="auto-production-left">크레딧 {data.production.leftCredits} / {data.production.monthlyCredits} → 이미지 <b>{data.production.images}장</b> 또는 영상 <b>{data.production.videos}편</b>{data.production.videosLeft !== null && ` · 생성 영상 ${data.production.videosLeft}편`}{data.production.regensLeft !== null && ` · 재생성 ${data.production.regensLeft}회`}</span>}
+            {data.production.leftCredits === null ? <span className="text-ink-2">{iosApp ? '남은 제작 수는 회사 관리자에게 문의하세요' : '마케팅 제작 요금제를 고르면 남은 제작 수가 보입니다'}</span> : <span className="tabular-nums" data-testid="auto-production-left">크레딧 {data.production.leftCredits} / {data.production.monthlyCredits} → 이미지 <b>{data.production.images}장</b> 또는 영상 <b>{data.production.videos}편</b>{data.production.videosLeft !== null && ` · 생성 영상 ${data.production.videosLeft}편`}{data.production.regensLeft !== null && ` · 재생성 ${data.production.regensLeft}회`}</span>}
             {/* 대표 10/27 ⑤: 요금제 고르기·한도는 사용량·요금제 화면 한곳에서 — 여기는 제작만 */}
-            <span className="ml-auto text-xs text-ink-3">{data.production.planLabel ? `${data.production.planLabel} 요금제` : '요금제 없음'}{ed && !inApp && <> · <Link href="/admin/usage#mkt-plan" className="font-semibold text-violet-700 underline" data-testid="auto-plan-link">요금제 보기·바꾸기</Link></>}</span></div>
+            <span className="ml-auto text-xs text-ink-3">{!iosApp && (data.production.planLabel ? `${data.production.planLabel} 요금제` : '요금제 없음')}{ed && !inApp && <> · <Link href="/admin/usage#mkt-plan" className="font-semibold text-violet-700 underline" data-testid="auto-plan-link">요금제 보기·바꾸기</Link></>}</span></div>
           {data.production.weekly.length > 0 && <div className="mt-1 flex flex-wrap gap-1.5 text-xs" data-testid="auto-production-weekly">{data.production.weekly.map((w) => <span key={w.kind} className={cx('rounded-full border px-2 py-0.5', w.used >= w.limit ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-line bg-white')}>이번 주 {w.label} {w.used}/{w.limit}</span>)}</div>}
           {data.production.overMessage && <p className="mt-1 text-xs text-red-800" data-testid="auto-production-over">{data.production.overMessage}</p>}
           {/* 270차 #809(대표 '슈퍼관리자는 무한인데 AI 영상 월 2편?'): 우리 회사(내부)는 요금제 숫자 대신 월 실제 비용 한도(원)로 — 비우면 요금제 숫자 그대로 */}
