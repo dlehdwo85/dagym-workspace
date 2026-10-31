@@ -87,7 +87,7 @@ export async function companyAiBudget(tenant: string, sql: Sql = db()): Promise<
 /** 다 썼을 때 안내 — 금액은 관리 화면에서만(직원에게는 '회사 AI 사용량'으로) */
 export const budgetMessage = (b: Pick<CompanyBudget, 'source' | 'resetLabel'>) => b.source === 'legacy'
   ? `이번 달 회사 AI 한도에 도달해 AI 기능을 멈췄습니다 — ${b.resetLabel}에 다시 쓸 수 있어요. 업무·일정 등 다른 기능은 그대로입니다(대표가 AI 설정에서 한도를 올릴 수 있습니다).`
-  : `이번 달 회사 AI 사용량을 모두 써서 AI 기능을 멈췄습니다 — ${b.resetLabel}에 다시 채워집니다. 업무·일정 등 다른 기능은 그대로 쓸 수 있어요(관리자는 관리 › 사용량·요금제에서 AI 크레딧 팩을 추가할 수 있습니다).`;
+  : `이번 달 회사 AI 사용량을 모두 써서 AI 기능을 멈췄습니다 — ${b.resetLabel}에 다시 채워집니다. 업무·일정 등 다른 기능은 그대로 쓸 수 있어요(회사 관리자에게 문의하세요).`;
 
 /**
  * AI 호출 전 확인: 회사 월 AI 예산을 다 썼으면 429 ai_budget(다음 달 1일 초기화 안내). 80% 넘으면 알림(달마다 한 번).
@@ -114,7 +114,7 @@ export async function budgetAlerts(tenant: string, b?: CompanyBudget, sql: Sql =
   if (!admins.length) return 0;
   const legacy = b.source === 'legacy';
   const body = level === 100
-    ? `이번 달 회사 AI ${legacy ? '한도' : '예산'} ${won(b.limitKrw)}을 모두 써서 AI 기능을 멈췄습니다 — ${b.resetLabel}에 다시 채워집니다. 업무·일정 등 다른 기능은 그대로입니다.${legacy ? '' : ' 더 쓰려면 사용량·요금제에서 AI 크레딧 팩을 추가해 주세요.'}`
+    ? `이번 달 회사 AI ${legacy ? '한도' : '예산'} ${won(b.limitKrw)}을 모두 써서 AI 기능을 멈췄습니다 — ${b.resetLabel}에 다시 채워집니다. 업무·일정 등 다른 기능은 그대로입니다.`
     : `회사 AI ${legacy ? '한도' : '예산'} ${won(b.limitKrw)} 중 ${won(b.usedKrw)}(${b.pct}%)를 썼습니다 — 100%가 되면 ${b.resetLabel}까지 AI 기능만 멈춥니다(업무·일정은 그대로).`;
   const sent = await notify(sql, { userIds: admins, type: 'usage_alert', title: level === 100 ? '이번 달 AI 예산을 모두 썼습니다' : `AI 예산 ${level}% 사용`, body, link: '/admin/usage', dedupeKey: key });
   fired.add(key);

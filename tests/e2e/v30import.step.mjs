@@ -91,7 +91,7 @@ export async function notifRead({ owner, BASE, SHOTS, ctx }) {
   await owner.getByTestId('notif-unread').click();
   await list.getByText('알림읽음 시험 A', { exact: false }).waitFor();
   await list.getByText('알림읽음 시험 A', { exact: false }).click();
-  await owner.waitForURL(new RegExp(`/tasks/${a}`));
+  await owner.waitForURL((u) => new URL(u).searchParams.get('task') === a || new URL(u).pathname === `/tasks/${a}`); // 300차 #850: 업무는 패널로(?task=)
   // 업무 B 를 직접 열면 자동 읽음
   await owner.goto(`${BASE}/tasks/${b}`);
   await owner.waitForFunction(async () => (await (await fetch('/api/notifications?unread=1')).json()).unread === 0, null, { timeout: 10000 });

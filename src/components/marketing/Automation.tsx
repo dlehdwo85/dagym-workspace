@@ -1,6 +1,6 @@
 'use client';
 import { dtf } from '@/lib/dtf';
-import { useInApp, useIosApp } from '@/components/inApp';
+import { useInApp } from '@/components/inApp';
 import { CompanyAiProfile } from '@/components/CompanyAiProfile';
 import { useState } from 'react';
 import { api, useApi } from '@/components/client';
@@ -41,7 +41,7 @@ export function Automation() {
   const tabQ = useSearchParams().get('tab'); const tab = tabQ === 'studio' || tabQ === 'cards' ? tabQ : 'rules'; // 대표 10/20 19:00: '제작의뢰실' 탭 · #499-5 '카드뉴스' 탭
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 링크 없음(요금제 고르기는 사용량·요금제 화면 — 대표 10/27 ⑤)
-  const iosApp = useIosApp(); // #839 아이폰 앱(App Store 3.1.1): '요금제' 글자도 없음
+  const iosApp = inApp; // #839 아이폰 앱(App Store 3.1.1)·298차 #861 안드로이드 앱도: '요금제' 글자 없음
   const [rule, setRule] = useState({ brandId: '', channel: 'instagram', kind: 'feed', weekdays: [2, 4] as number[], postTime: '10:00', topicHint: '', mode: 'content' as Mode });
   // 로컬 10/20 보완: 묶음은 n일마다(+주말 건너뛰기) 또는 요일 지정(월·수·금), 종류별 시각 한 번에
   const [bundle, setBundle] = useState({ brandId: '', mode: 'interval' as 'interval' | 'weekdays', intervalDays: 3, skipWeekend: false /* 대표 15:40: 기본 끔 */, weekdays: [1, 3, 5] as number[], startDate: dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), times: { ...BUNDLE_TIMES }, kinds: [...BUNDLE_KINDS] });
@@ -125,12 +125,12 @@ export function Automation() {
             {/* 대표 10/27 ⑤: 요금제 고르기·한도는 사용량·요금제 화면 한곳에서 — 여기는 제작만 */}
             <span className="ml-auto text-xs text-ink-3">{!iosApp && (data.production.planLabel ? `${data.production.planLabel} 요금제` : '요금제 없음')}{ed && !inApp && <> · <Link href="/admin/usage#mkt-plan" className="font-semibold text-violet-700 underline" data-testid="auto-plan-link">요금제 보기·바꾸기</Link></>}</span></div>
           {data.production.weekly.length > 0 && <div className="mt-1 flex flex-wrap gap-1.5 text-xs" data-testid="auto-production-weekly">{data.production.weekly.map((w) => <span key={w.kind} className={cx('rounded-full border px-2 py-0.5', w.used >= w.limit ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-line bg-white')}>이번 주 {w.label} {w.used}/{w.limit}</span>)}</div>}
-          {data.production.overMessage && <p className="mt-1 text-xs text-red-800" data-testid="auto-production-over">{data.production.overMessage}</p>}
+          {data.production.overMessage && <p className="mt-1 text-xs text-red-800" data-testid="auto-production-over">{inApp ? '이번 달 제작 크레딧을 모두 썼습니다 — 회사 관리자에게 문의하세요.' : data.production.overMessage}</p>}
           {/* 270차 #809(대표 '슈퍼관리자는 무한인데 AI 영상 월 2편?'): 우리 회사(내부)는 요금제 숫자 대신 월 실제 비용 한도(원)로 — 비우면 요금제 숫자 그대로 */}
           {data.production.internal && <CostCap prod={data.production} canEdit={ed} onSaved={reload} />}
         </section>)}
       {/* 275차 #809(대표 10/29 '상용화 했을 때 기준으로 시험'): 우리 회사만 — 브랜드별 이번 달 원가·승인률 · 요금제 가격 대비 원가율 */}
-      {ed && data.production?.internal && <TrialView />}
+      {ed && data.production?.internal && !inApp && <TrialView />}{/* 298차 #861: 상용화 시험(요금제 가격·원가)은 앱에서 안 보임 */}
       {/* 295차 #835 레퍼런스 대조표(승인 대기·수정 요청 글 × 레퍼런스 기준) */}
       <RefCheck />
       {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-recipients">

@@ -19,7 +19,7 @@ export function PhoneInquiryButton({ className }: { className?: string }) {
     try {
       const r = await api('/api/inquiries/phone', { body: { ...f, organization: f.organization || undefined, name: f.name || undefined, phone: f.phone || undefined, email: f.email || undefined, region: f.region || undefined } });
       toast.ok('전화 문의를 업무로 등록했습니다'); setOpen(false); setF(EMPTY); broadcastRefresh();
-      if (r.taskId) router.push(`/tasks/${r.taskId}`);
+      if (r.taskId) router.push(`/tasks/${r.taskId}`); // 만든 업무는 상세 전체 화면(이어서 적기) — 이미 있는 업무를 누르면 패널(300차 #850)
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   const set = (p: Partial<typeof f>) => setF({ ...f, ...p });

@@ -53,13 +53,15 @@ export async function listKeep({ owner, ctx, BASE, SHOTS }) {
   await owner.screenshot({ path: `${SHOTS}/252-tasks-list-keep.png` });
   await owner.reload();
   await kept('새로 고침');
-  // 패널 [전체 화면] → 상세 [닫기] = 직전 화면(전체 화면은 패널 칸을 바꿔 쓰므로 같은 목록)
+  // 300차 #850: 패널 [크게 보기(새 탭)] = 새 탭에 전체 화면 · 이 탭의 목록·패널은 그대로 → 패널 닫기 = 같은 목록
   await openLast();
-  await panel.getByRole('button', { name: '전체 화면' }).click();
-  await owner.getByTestId('task-page').waitFor();
-  await owner.screenshot({ path: `${SHOTS}/253-task-page-close.png` });
-  await owner.getByTestId('task-page-close').click();
-  await kept('전체 화면 → 닫기');
+  const [pop] = await Promise.all([owner.context().waitForEvent('page'), panel.getByTestId('task-open-tab').click()]);
+  await pop.getByTestId('task-page').waitFor();
+  await pop.screenshot({ path: `${SHOTS}/253-task-page-close.png` });
+  await pop.close();
+  await panel.getByRole('button', { name: '패널 닫기' }).click();
+  await panel.waitFor({ state: 'detached' });
+  await kept('크게 보기(새 탭) → 패널 닫기');
   // 패널에서 대화방으로 갔다 뒤로가기 → 그 업무(패널 또는 전체 화면) → 닫기 = 같은 목록
   await openLast();
   await panel.getByRole('button', { name: '대화방 열기' }).click();

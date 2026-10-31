@@ -7,6 +7,7 @@ import { Button, Empty, ErrorBox, Loading, cx, fmtDateTime, toast } from '@/comp
 import { NOTIFICATION_TYPES } from '@/lib/types';
 import { cameBack, useUrlState } from '@/components/urlState';
 import { isInApp } from '@/components/inApp';
+import { goLink } from '@/components/TaskPanelHost';
 import { AlertTriangle, BarChart3, Bell, Briefcase, CalendarDays, ClipboardCheck, Clock, Folder, Layers, ListChecks, Mail, Megaphone, MessageCircle, type LucideIcon } from 'lucide-react';
 
 const SPACE_CHIP: Record<string, string> = { sales: '영업', marketing: '마케팅', work: '업무' };
@@ -66,7 +67,7 @@ export default function Notifications() {
     let text: string | undefined;
     if (a.open) { // #618 [승인함 열기]/[열기]: 읽음 표시 + 그 화면으로(서버 처리 없음)
       if (!n.read_at) read([n.id]);
-      router.push(n.link || '/');
+      goLink(n.link || '/', (h) => router.push(h)); // 300차 #850: 업무면 패널로
       return;
     }
     if (a.input === 'text') { const t = prompt(`${a.label} 내용`); if (t === null) return; text = t.trim(); if (!text) { toast.error(`${a.label} 내용을 적어 주세요`); return; } }

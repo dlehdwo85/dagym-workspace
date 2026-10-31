@@ -61,7 +61,7 @@ describe('회사 월 AI 예산(원)', () => {
     assert.match(r.body.error.message, /\d+월 1일에 다시 채워집니다/); assert.match(r.body.error.message, /업무·일정 등 다른 기능은 그대로/);
     assert.doesNotMatch(r.body.error.message, /5,000원|\$/, '직원에게는 금액 없이');
     const n100 = await sql`select title, body from notifications where user_id = ${custOwnerId} and dedupe_key like 'ai_budget:%:100'`;
-    assert.equal(n100.length, 1); assert.equal(n100[0].title, '이번 달 AI 예산을 모두 썼습니다'); assert.match(n100[0].body, /AI 크레딧 팩/);
+    assert.equal(n100.length, 1); assert.equal(n100[0].title, '이번 달 AI 예산을 모두 썼습니다'); assert.doesNotMatch(n100[0].body, /크레딧 팩|요금제/, '298차 #861: 알림(앱에도 뜸)에 구매 권유 없음');
     b = await budget(); assert.equal(b.over, true); assert.equal(b.leftKrw, 0);
     // 업무는 그대로
     await cust.ok('POST', '/api/tasks', { title: 'AI 멈춰도 업무는 됨' });

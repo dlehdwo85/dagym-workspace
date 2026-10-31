@@ -1,4 +1,5 @@
 'use client';
+import { showTask } from './TaskPanelHost';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mic, RotateCcw } from 'lucide-react';
@@ -86,7 +87,7 @@ export function VoiceAddTask() {
         priority: card.priority, recurrenceRule: card.rrule, approvalRequired: false } });
       if (fixes.length) learnVoice(fixes, true); // 받아들인 보정은 다음부터 바로 적용
       markNew(r.id); broadcastRefresh(); close();
-      toast.ok(`업무를 등록했습니다: ${card.title.trim()}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
+      toast.ok(`업무를 등록했습니다: ${card.title.trim()}`, { label: '보기', run: () => showTask(r.id, (h) => router.push(h)) });
       if (card.assigneeId && card.assigneeId !== user.id) warnAway(card.assigneeId, card.dueDate, dir.users.find((u) => u.id === card.assigneeId)?.name ?? '담당자');
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }

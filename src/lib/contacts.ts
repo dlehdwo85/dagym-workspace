@@ -86,7 +86,7 @@ async function assertQuota(u: SessionUser, adding: number, sql: Sql) {
   const lim = (limits as { contactsTotal?: number | null }).contactsTotal;
   if (lim === null || lim === undefined) return;
   const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from contacts where tenant = ${t} and deleted_at is null`;
-  if (n + adding > lim) throw new HttpError(429, 'contact_quota', `연락처가 ${n.toLocaleString('ko-KR')}명으로 한도(${lim.toLocaleString('ko-KR')}명)에 닿았습니다 — 안 쓰는 연락처를 지우거나 요금제를 올리면 더 넣을 수 있습니다.`);
+  if (n + adding > lim) throw new HttpError(429, 'contact_quota', `연락처가 ${n.toLocaleString('ko-KR')}명으로 한도(${lim.toLocaleString('ko-KR')}명)에 닿았습니다 — 안 쓰는 연락처를 지우거나 회사 관리자에게 문의하세요.`);
 }
 
 export async function createContact(u: SessionUser, i: ContactInput, ip: string | null) {

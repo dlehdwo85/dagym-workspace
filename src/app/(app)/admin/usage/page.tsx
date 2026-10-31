@@ -11,7 +11,7 @@ import { TaskQuota } from '@/components/TaskQuota';
 import { UsageStats } from '@/components/UsageStats';
 import { AiLimitsTable, AiPlanMatrix } from '@/components/AiLimitsTable';
 import { MktPlanSection } from '@/components/marketing/MktPlanSection';
-import { IN_APP_BILLING_NOTE, isIosApp, useInApp } from '@/components/inApp';
+import { useInApp } from '@/components/inApp';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const GB = 1024 ** 3;
@@ -55,7 +55,7 @@ export default function UsagePage() {
         {([['plan', inApp ? '사용량' : '사용량·요금제'], ['stats', '이용 현황']] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx('rounded-full border px-3 py-1 text-xs font-medium', tab === k ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2')} data-testid={`usage-tab-${k}`}>{l}</button>)}
       </div>
       {tab === 'stats' ? <UsageStats /> : <>
-      {inApp && <p className="rounded-card border border-line bg-white p-4 text-sm text-ink-2 shadow-card" data-testid="in-app-billing-note">{isIosApp() ? '이 화면은 사용량만 보여 줍니다.' : IN_APP_BILLING_NOTE}</p>}
+      {inApp && <p className="rounded-card border border-line bg-white p-4 text-sm text-ink-2 shadow-card" data-testid="in-app-billing-note">이 화면은 사용량만 보여 줍니다.</p>}
       {!inApp && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="current-plan">
         <div className="text-sm text-ink-2">현재 요금제</div>
         <div className="text-xl font-bold">{s.planName} <span className="text-base font-normal text-ink-2">{s.monthlyKrw === null ? '별도 협의' : s.perUserKrw ? `1인 월 ${won(s.perUserKrw)} · 이번 달 약 ${won(s.monthlyKrw)}` : `월 ${won(s.monthlyKrw)}`}</span></div>

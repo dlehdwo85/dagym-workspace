@@ -46,21 +46,22 @@ export async function photo189({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   const box = owner.getByTestId('mkt-fill'); await box.waitFor();
   assert.match(await box.innerText(), /빈 사진 칸 2칸/);
   await box.getByTestId('mkt-fill-start').click();
-  await owner.getByText(/실사 참고 생성을 시작했습니다\(2장\)/).first().waitFor();
+  // 296차: 사진이 든 장이 전체의 절반이 될 만큼만 채움 — 4장(표지 실사 1) 중 빈 칸 2칸이어도 생성은 1장
+  await owner.getByText(/실사 참고 생성을 시작했습니다\(1장\)/).first().waitFor();
   await owner.getByTestId('mkt-fill').filter({ hasText: '만드는 중' }).waitFor();
   await owner.getByTestId('mkt-fill-check').click();
-  await owner.getByText(/생성 사진 2장으로 빈 칸을 채웠습니다/).first().waitFor({ timeout: 60_000 });
-  await owner.getByTestId('mkt-fill').filter({ hasText: '채움 2장' }).waitFor();
+  await owner.getByText(/생성 사진 1장으로 빈 칸을 채웠습니다/).first().waitFor({ timeout: 60_000 });
+  await owner.getByTestId('mkt-fill').filter({ hasText: '채움 1장' }).waitFor();
   const [cv] = await sql`select current_version, quality from mkt_contents where id = ${c.id}`;
   assert.equal(cv.current_version, 2);
-  assert.deepEqual(cv.quality.pages.map((p) => !!p.gen), [true, true, false]);
+  assert.deepEqual(cv.quality.pages.map((p) => !!p.gen), [true, false, false]);
   const st = await fetch(`${FAKE}/__state`).then((r) => r.json());
-  assert.deepEqual([st.hf.length, st.hfUploads.length], [2, 1], '참고 사진 1번 올리고 2장 생성');
+  assert.deepEqual([st.hf.length, st.hfUploads.length], [1, 1], '참고 사진 1번 올리고 1장 생성');
   const rec = owner.getByTestId('mkt-photo-record'); await rec.waitFor();
-  assert.match(await rec.locator('summary').innerText(), /사진 기록 — 실사 1장 · 생성 2장 \/ 4칸/);
+  assert.match(await rec.locator('summary').innerText(), /사진 기록 — 실사 1장 · 생성 1장 \/ 4칸/);
   await rec.locator('summary').click();
   await rec.getByTestId('mkt-photo-gen').first().waitFor();
-  assert.equal(await rec.getByTestId('mkt-photo-gen').count(), 2);
+  assert.equal(await rec.getByTestId('mkt-photo-gen').count(), 1);
   const rows = await rec.getByTestId('mkt-photo-row').allInnerTexts();
   assert.match(rows[1], /^2장[\s\S]*AI 생성\(실사 참고\)[\s\S]*실사가 모자라 생성 — 참고 실사: E2E참고짐 매장 전경\.jpg/);
   await owner.getByTestId('mkt-fill').scrollIntoViewIfNeeded();
@@ -70,7 +71,7 @@ export async function photo189({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   await owner.goto(`${BASE}/s/marketing/automation`);
   assert.equal(await owner.getByTestId('auto-photo-gen').isChecked(), false, '사진 생성 회사 설정 기본 꺼짐');
   const photos = owner.getByTestId('auto-photos'); await photos.waitFor();
-  assert.match(await photos.getByTestId('photos-summary').innerText(), /AI 생성\(실사 참고\) 2장/);
+  assert.match(await photos.getByTestId('photos-summary').innerText(), /AI 생성\(실사 참고\) 1장/);
   await photos.getByTestId('photos-list').locator('summary').click();
   const gens = cv.quality.pages.filter((p) => p.gen).map((p) => p.photoId);
   await photos.locator(`[data-testid="photo-item"]:has(img[src*="${gens[0]}"])`).getByTestId('photo-gen').waitFor();

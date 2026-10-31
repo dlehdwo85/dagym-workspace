@@ -92,7 +92,7 @@ export async function assertTaskQuota(u: SessionUser, adding = 1, sql: Sql = db(
   const { limits } = await effectiveLimits(tenant, sql);
   if (limits.tasksTotal === null || limits.tasksTotal === undefined) return;
   const n = await taskCount(tenant, sql);
-  if (n + adding > limits.tasksTotal) throw new HttpError(429, 'task_quota', `업무가 ${n.toLocaleString('ko-KR')}개로 한도(${limits.tasksTotal.toLocaleString('ko-KR')}개, 완료·휴지통 포함)에 닿아 새 업무를 만들 수 없습니다. 관리자가 사용량 화면에서 오래된 완료 업무를 보관 파일로 내보내고 정리하거나 요금제를 올리면 다시 만들 수 있습니다.`);
+  if (n + adding > limits.tasksTotal) throw new HttpError(429, 'task_quota', `업무가 ${n.toLocaleString('ko-KR')}개로 한도(${limits.tasksTotal.toLocaleString('ko-KR')}개, 완료·휴지통 포함)에 닿아 새 업무를 만들 수 없습니다. 관리자가 사용량 화면에서 오래된 완료 업무를 보관 파일로 내보내 정리하면 다시 만들 수 있습니다.`);
 }
 
 const over = (used: number, limit: number | null) => limit !== null && used >= limit;
@@ -104,7 +104,7 @@ export async function assertStorage(u: SessionUser, addBytes: number) {
   if (limits.storageGb === null) return;
   const usage = await currentUsage(tenant);
   if (usage.storageBytes + addBytes > limits.storageGb * GB) {
-    throw new HttpError(409, 'storage_full', `회사 저장공간(${limits.storageGb}GB)이 가득 찼습니다. 기존 파일 보기·내려받기는 계속 됩니다. 관리 → 사용량·요금제에서 정리하거나 저장 팩(+20GB 월 3,000원·+100GB 월 9,900원)을 요청해 주세요.`);
+    throw new HttpError(409, 'storage_full', `회사 저장공간(${limits.storageGb}GB)이 가득 찼습니다. 기존 파일 보기·내려받기는 계속 됩니다. 안 쓰는 파일을 정리하거나 회사 관리자에게 문의하세요.`);
   }
 }
 /** AI 요청 전 회사 한도: 대표 10/24 ② 회사 월 AI 예산(원, 다 쓰면 다음 달 1일까지 멈춤) → 요금제 월 AI 요청 수.
@@ -315,7 +315,7 @@ export async function usageJob() {
       if (!level) continue;
       // 저장·사용자는 한 번 넘으면 계속이므로 달마다, AI 는 그 달 기준
       alerts += (await notify(sql, { userIds: admins, type: 'usage_alert', title: `${label} ${level === 100 ? '한도에 도달했습니다' : `${level}%를 넘었습니다`}`,
-        body: `${label} ${Math.round(pct)}%를 썼습니다. 관리 > 사용량·요금제에서 확인하세요.${level === 100 ? (key === 'ai' ? ' AI는 다음 달까지 멈추고 업무·일정은 그대로입니다.' : key === 'tasks' ? ' 새 업무 만들기만 멈춥니다. 오래된 완료 업무를 보관 파일로 내보내 정리해 주세요.' : ' 새로 올리기와 초대만 멈추고 업무·일정은 그대로입니다.') : key === 'tasks' ? ' 오래된 완료 업무는 보관 파일로 내보내 정리할 수 있습니다.' : ''}`,
+        body: `${label} ${Math.round(pct)}%를 썼습니다. 관리 > 사용량에서 확인하세요.${level === 100 ? (key === 'ai' ? ' AI는 다음 달까지 멈추고 업무·일정은 그대로입니다.' : key === 'tasks' ? ' 새 업무 만들기만 멈춥니다. 오래된 완료 업무를 보관 파일로 내보내 정리해 주세요.' : ' 새로 올리기와 초대만 멈추고 업무·일정은 그대로입니다.') : key === 'tasks' ? ' 오래된 완료 업무는 보관 파일로 내보내 정리할 수 있습니다.' : ''}`,
         link: '/admin/usage', entityType: null as never, entityId: null as never, dedupeKey: `usage:${t.id}:${key}:${level}:${month}` })).length;
     }
   }
@@ -440,7 +440,9 @@ export async function trialJob() {
     const name = partner ? '설계 파트너 기간' : '무료 체험';
     const title = d === 0 ? `${name}이 오늘 끝납니다` : `${name}이 ${d}일 남았습니다`;
     const body = d === 0 ? '오늘이 지나면 보기와 내보내기만 됩니다. 요금제를 골라 주세요' : '요금제를 선택하면 끊김 없이 계속 쓸 수 있어요';
-    await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title, body, link: '/admin/usage', dedupeKey: `trial:${s.tenant}:${key}:${until}` });
+    // 298차 #861: 알림함·푸시(앱에도 뜸)에는 요금제 권유 없이 — 요금제 안내·웹 주소는 관리자 이메일로만
+    const inBody = d === 0 ? '오늘이 지나면 보기와 내보내기만 됩니다. 자세한 안내를 관리자 이메일로 보냈습니다.' : '자세한 안내를 관리자 이메일로 보냈습니다.';
+    await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title, body: inBody, link: '/admin/usage', dedupeKey: `trial:${s.tenant}:${key}:${until}` });
     const { sendMail } = await import('./mail');
     for (const a of admins) await sendMail(a.email, `[워크인] ${title}`, `${s.name}\n${body}\n${process.env.APP_URL ?? ''}/admin/usage`).catch(() => {});
     await sql`update tenant_subscriptions set trial_notified = trial_notified || ${sql.json({ [key]: true })} where tenant = ${s.tenant}`;

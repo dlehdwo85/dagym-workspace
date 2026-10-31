@@ -7,9 +7,10 @@ import { appUrl } from './mail';
 import { createOwnerSpace, signupEnabled, signupInput, TERMS_VERSION } from './signup';
 import { ensurePersonalCalendar } from './access';
 import type { SessionUser } from './types';
+import { appleEnv } from './oauthApple';
 
 /**
- * V29 1장 소셜 가입·로그인 — Google·카카오·네이버(OAuth 2.0 인가 코드).
+ * V29 1장 소셜 가입·로그인 — Google·카카오·네이버(OAuth 2.0 인가 코드) · 299차 Apple(form_post·id_token, src/lib/oauthApple.ts).
  * - 키가 있는 제공자만 버튼이 보인다(GOOGLE_LOGIN_CLIENT_ID/SECRET, KAKAO_REST_KEY(+KAKAO_CLIENT_SECRET), NAVER_CLIENT_ID/SECRET).
  * - 콜백: {APP_URL}/api/auth/oauth/{provider}/callback — 각 제공자 콘솔에 이 주소를 등록한다.
  * - 이미 연결된 소셜 계정 → 바로 로그인. 초대 링크로 들어오면 그 초대 계정에 연결하고 합류.
@@ -17,9 +18,9 @@ import type { SessionUser } from './types';
  * - 처음이면 회사 만들기 화면(/signup/social)으로 — 확인된 이메일이라 확인 메일 없이 바로 시작, 그 이메일이 업무 이메일·회신 주소 기본값.
  * - OAUTH_TEST_BASE 가 있으면 모든 주소를 그 서버로(가짜 제공자 시험용).
  */
-export const PROVIDERS = ['google', 'kakao', 'naver'] as const;
+export const PROVIDERS = ['google', 'kakao', 'naver', 'apple'] as const; // 299차 #858 Apple(src/lib/oauthApple.ts)
 export type Provider = (typeof PROVIDERS)[number];
-export const PROVIDER_LABEL: Record<Provider, string> = { google: 'Google', kakao: '카카오', naver: '네이버' };
+export const PROVIDER_LABEL: Record<Provider, string> = { google: 'Google', kakao: '카카오', naver: '네이버', apple: 'Apple' };
 
 type Conf = { id: string; secret?: string; auth: string; token: string; me: string; scope: string };
 function conf(p: Provider): Conf | null {
@@ -30,6 +31,10 @@ function conf(p: Provider): Conf | null {
     if (!id || !secret) return null;
     const [auth, token, me] = ep(['https://accounts.google.com/o/oauth2/v2/auth', 'https://oauth2.googleapis.com/token', 'https://openidconnect.googleapis.com/v1/userinfo']);
     return { id, secret, auth, token, me, scope: 'openid email profile' };
+  }
+  if (p === 'apple') { // 299차: 넷(팀·Services ID·키 ID·키)이 다 있어야 켜짐 — 토큰 교환·확인은 oauthApple
+    const a = appleEnv();
+    return a ? { id: a.servicesId, auth: a.auth, token: a.token, me: a.keys, scope: 'name email' } : null;
   }
   if (p === 'kakao') {
     const id = process.env.KAKAO_REST_KEY ?? '';
@@ -66,6 +71,7 @@ export function startOAuth(p: Provider, i: z.infer<typeof startInput>) {
   const q = new URLSearchParams({ response_type: 'code', client_id: c.id, redirect_uri: redirectUri(p), state: st.n });
   if (c.scope) q.set('scope', c.scope);
   if (p === 'google') q.set('prompt', 'select_account');
+  if (p === 'apple') q.set('response_mode', 'form_post'); // 이름·이메일을 받으려면 form_post(콜백 POST → 같은 주소 GET 으로 넘김)
   return { url: `${c.auth}?${q}`, cookie };
 }
 function readState(cookie: string | undefined, state: string | null, p: Provider): State {
@@ -98,8 +104,13 @@ export async function exchangeHandoff(i: z.infer<typeof exchangeInput>) {
 }
 
 // ---------------- 콜백: 코드 → 토큰 → 프로필 ----------------
-type Profile = { subject: string; email: string | null; emailVerified: boolean; name: string | null };
+type Profile = { subject: string; email: string | null; emailVerified: boolean; name: string | null; secret?: string | null };
 async function fetchProfile(p: Provider, code: string, state: string): Promise<Profile> {
+  if (p === 'apple') {
+    const a = await (await import('./oauthApple')).appleProfile(code, redirectUri(p)).catch(() => null);
+    if (!a) throw badRequest('Apple 로그인에 실패했습니다. 다시 시도해 주세요.');
+    return a;
+  }
   const c = conf(p)!;
   const form = new URLSearchParams({ grant_type: 'authorization_code', client_id: c.id, redirect_uri: redirectUri(p), code });
   if (c.secret) form.set('client_secret', c.secret);
@@ -126,12 +137,14 @@ export type CallbackResult =
   | { kind: 'error'; message: string; code?: string };
 
 /** 콜백 처리 — 결과에 따라 라우트가 로그인 세션을 만들거나 화면으로 보낸다 */
-export async function oauthCallback(p: Provider, q: { code: string | null; state: string | null; error: string | null }, cookie: string | undefined, me: SessionUser | null, ip: string | null): Promise<CallbackResult> {
+export async function oauthCallback(p: Provider, q: { code: string | null; state: string | null; error: string | null; name?: string | null }, cookie: string | undefined, me: SessionUser | null, ip: string | null): Promise<CallbackResult> {
   if (q.error) return { kind: 'error', message: '로그인을 취소했습니다' };
   const st = readState(cookie, q.state, p);
   if (!q.code) throw badRequest('로그인 코드가 없습니다');
   const prof = await fetchProfile(p, q.code, q.state!);
   if (!prof.subject) throw badRequest('계정 정보를 받지 못했습니다');
+  if (!prof.name && q.name) prof.name = q.name; // Apple: 이름은 처음 한 번 form 으로만 옴
+  const secret = prof.secret ?? null; // Apple 해지용 토큰(암호화)
   const email = prof.email?.trim().toLowerCase() || null;
   const sql = db();
   const [idn] = await sql<{ user_id: string }[]>`select user_id from user_identities where provider = ${p} and subject = ${prof.subject}`;
@@ -140,7 +153,7 @@ export async function oauthCallback(p: Provider, q: { code: string | null; state
   if (st.mode === 'link') {
     if (!me || me.support) throw forbidden('로그인한 뒤 연결해 주세요');
     if (idn && idn.user_id !== me.id) return { kind: 'error', code: 'taken', message: `이 ${PROVIDER_LABEL[p]} 계정은 이미 다른 워크인 계정에 연결되어 있습니다` };
-    await sql`insert into user_identities (provider, subject, user_id, email) values (${p}, ${prof.subject}, ${me.id}, ${email}) on conflict (provider, subject) do nothing`;
+    await sql`insert into user_identities (provider, subject, user_id, email, secret) values (${p}, ${prof.subject}, ${me.id}, ${email}, ${secret}) on conflict (provider, subject) do update set secret = coalesce(excluded.secret, user_identities.secret)`;
     await audit(sql, me.id, 'auth.identity_linked', 'user', me.id, { provider: p }, ip);
     return { kind: 'linked' };
   }
@@ -152,7 +165,7 @@ export async function oauthCallback(p: Provider, q: { code: string | null; state
     if (!u || u.status !== 'active') return { kind: 'error', message: '사용이 중지된 계정입니다. 관리자에게 문의하세요.' };
     if (u.tstatus !== 'active') return { kind: 'error', message: '사용이 중지된 회사(공간)입니다. 문의: 워크인 운영팀' };
     if (u.pending) await sql`update users set signup_pending = false, email_verified_at = coalesce(email_verified_at, now()) where id = ${u.id}`;
-    await sql`update user_identities set last_login_at = now() where provider = ${p} and subject = ${prof.subject}`;
+    await sql`update user_identities set last_login_at = now(), secret = coalesce(${secret}, secret) where provider = ${p} and subject = ${prof.subject}`;
     await audit(sql, u.id, 'auth.login', 'user', u.id, { client: st.client, provider: p }, ip);
     return { kind: 'login', userId: u.id, mfa: u.totp, client: st.client };
   }
@@ -166,7 +179,7 @@ export async function oauthCallback(p: Provider, q: { code: string | null; state
       if (!u || (u.status !== 'invited' && u.status !== 'active')) throw forbidden('비활성화된 계정입니다. 관리자에게 문의하세요.');
       await tx`update users set status = 'active', email_verified_at = coalesce(email_verified_at, now()), work_email = coalesce(work_email, ${email}), updated_at = now() where id = ${u.id}`;
       await tx`update invitations set accepted_at = now() where id = ${inv.id}`;
-      await tx`insert into user_identities (provider, subject, user_id, email, last_login_at) values (${p}, ${prof.subject}, ${u.id}, ${email}, now())`;
+      await tx`insert into user_identities (provider, subject, user_id, email, last_login_at, secret) values (${p}, ${prof.subject}, ${u.id}, ${email}, now(), ${secret})`;
       await ensurePersonalCalendar(u.id, u.name, tx);
       await audit(tx, u.id, 'user.accept_invite', 'user', u.id, { provider: p }, ip);
       return u.id;
@@ -174,6 +187,8 @@ export async function oauthCallback(p: Provider, q: { code: string | null; state
     return { kind: 'login', userId, mfa: false, client: st.client };
   }
 
+  // 299차 #858·#839: 아이폰 앱은 가입이 없음(회사 관리자 초대로만) — 처음 보는 소셜 계정이면 회사 만들기 대신 안내
+  if (st.client === 'ios') return { kind: 'error', code: 'no_account', message: `이 ${PROVIDER_LABEL[p]} 계정과 연결된 워크인 계정이 없습니다. 계정은 회사 관리자의 초대로 만들어집니다 — 초대 메일의 링크로 들어오거나, 이메일로 로그인한 뒤 설정 › 계정에서 ${PROVIDER_LABEL[p]}를 연결해 주세요.` };
   // 처음 — 이메일이 꼭 필요(확인된 이메일)
   if (!email) return { kind: 'error', code: 'no_email', message: `${PROVIDER_LABEL[p]}에서 이메일 제공에 동의해야 가입할 수 있습니다. 다시 시도할 때 이메일 항목을 체크해 주세요.` };
   if (!prof.emailVerified) return { kind: 'error', code: 'unverified', message: `${PROVIDER_LABEL[p]} 계정의 이메일이 인증되지 않았습니다. 이메일로 가입해 주세요.` };
@@ -182,15 +197,15 @@ export async function oauthCallback(p: Provider, q: { code: string | null; state
   if (!signupEnabled()) return { kind: 'error', message: '아직 가입을 받지 않습니다. 초대 링크로 들어와 주세요.' };
   const token = newToken();
   await sql`delete from oauth_pending where expires_at < now()`;
-  await sql`insert into oauth_pending (token_hash, provider, subject, email, name, utm, expires_at)
-    values (${sha256(token)}, ${p}, ${prof.subject}, ${email}, ${prof.name?.slice(0, 50) ?? null}, ${st.utm ? sql.json(st.utm as never) : null}, now() + interval '30 minutes')`;
+  await sql`insert into oauth_pending (token_hash, provider, subject, email, name, utm, expires_at, secret)
+    values (${sha256(token)}, ${p}, ${prof.subject}, ${email}, ${prof.name?.slice(0, 50) ?? null}, ${st.utm ? sql.json(st.utm as never) : null}, now() + interval '30 minutes', ${secret})`;
   return { kind: 'pending', token };
 }
 
 // ---------------- 처음 가입: 회사 만들기 ----------------
-type Pending = { provider: Provider; subject: string; email: string; name: string | null; utm: Record<string, string> | null };
+type Pending = { provider: Provider; subject: string; email: string; name: string | null; utm: Record<string, string> | null; secret: string | null };
 async function loadPending(token: string): Promise<Pending> {
-  const [r] = await db()<Pending[]>`select provider, subject, email, name, utm from oauth_pending where token_hash = ${sha256(token)} and expires_at > now()`;
+  const [r] = await db()<Pending[]>`select provider, subject, email, name, utm, secret from oauth_pending where token_hash = ${sha256(token)} and expires_at > now()`;
   if (!r) throw badRequest('가입 시간이 지났습니다. 처음부터 다시 시도해 주세요.');
   return r;
 }
@@ -212,7 +227,7 @@ export async function completeSocialSignup(i: z.infer<typeof completeInput>, ip:
     if ((await tx`select 1 from users where lower(email) = ${pend.email}`).length) throw badRequest('이미 가입된 이메일입니다. 로그인해 주세요.');
     const id = await createOwnerSpace(tx, { email: pend.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, industries: i.industries,
       utm: i.utm ?? pend.utm ?? undefined, agree: i.agree, passwordHash: null, pending: false, ip, workEmail: pend.email });
-    await tx`insert into user_identities (provider, subject, user_id, email, last_login_at) values (${pend.provider}, ${pend.subject}, ${id}, ${pend.email}, now())`;
+    await tx`insert into user_identities (provider, subject, user_id, email, last_login_at, secret) values (${pend.provider}, ${pend.subject}, ${id}, ${pend.email}, now(), ${pend.secret})`;
     return id;
   });
   await sql`insert into signup_attempts (ip, email, ok, reason) values (${ip}, ${pend.email}, true, ${'social:' + pend.provider})`;
@@ -233,7 +248,8 @@ export async function unlinkIdentity(u: SessionUser, p: Provider, ip: string | n
   const sql = db();
   const left = await myIdentities(u);
   if (!left.hasPassword && left.identities.filter((x) => x.provider !== p).length === 0) throw badRequest('로그인 방법이 하나도 남지 않습니다 — 먼저 비밀번호를 만들거나 다른 계정을 연결하세요');
-  const r = await sql`delete from user_identities where user_id = ${u.id} and provider = ${p} returning 1`;
+  const r = await sql<{ secret: string | null }[]>`delete from user_identities where user_id = ${u.id} and provider = ${p} returning secret`;
+  if (p === 'apple') for (const x of r) await (await import('./oauthApple')).revokeApple(x.secret).catch(() => false); // 299차: Apple 연결 끊기 = 토큰 해지
   if (!r.length) throw notFound('연결되어 있지 않습니다');
   await audit(sql, u.id, 'auth.identity_unlinked', 'user', u.id, { provider: p }, ip);
   return { ok: true };

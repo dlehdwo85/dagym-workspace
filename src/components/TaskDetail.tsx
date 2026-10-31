@@ -6,6 +6,8 @@ import { CarriedBadge } from './carried';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
+import { useInApp } from '@/components/inApp';
+import { showTask } from '@/components/TaskPanelHost';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import {
@@ -29,6 +31,7 @@ import { TimePick } from '@/components/DateTimePickers';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { PRIORITY_LABEL, STATUS_LABEL, STATUSES, type TaskStatus } from '@/lib/types';
 import { encodeMentions } from '@/lib/mentions';
+import { MENTION_ALL, MentionList, useMention } from '@/components/MentionSuggest';
 import { VoiceButton } from '@/components/voice';
 import { MeetingDialog } from '@/components/MeetingDialog';
 import { requestTour } from '@/components/Tour';
@@ -51,6 +54,9 @@ const FIELD_LABEL: Record<string, string> = {
 /** 업무 상세. 전체 화면(/tasks/:id)과 목록 옆 오른쪽 패널(inPanel) 공용 */
 export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () => void; inPanel?: boolean }) {
   const router = useRouter();
+  const inApp = useInApp();
+  // 300차 #850: 다른 업무로 = 패널 안이면 패널 내용만 바꿈(목록 패널·전역 패널), 전체 화면이면 그 업무 화면으로
+  const go = (tid: string) => (inPanel ? showTask(tid, (h) => router.push(h)) : router.push(`/tasks/${tid}`));
   // #242(대표 10/24 '창 닫기·돌아가기를 누르면 다른 화면으로 넘어가지 않게'): 전체 화면 닫기 = 직전 화면(앱 안에서 옮겨 왔으면 뒤로가기), 새 탭·링크로 바로 연 경우만 업무 목록
   const closePage = () => { if (((window as any).__wosNav ?? 0) > 1 && window.history.length > 1) router.back(); else router.push('/tasks'); };
   const { user, dir, features, menus } = useSession();
@@ -66,6 +72,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const sendingRef = useRef(false);
   const [picked, setPicked] = useState<{ id: string; name: string }[]>([]); // 입력창에는 @이름만, 전송 때 내부 표기로 변환
   const mentionable = useApi<{ users: { id: string; name: string; title: string | null }[] }>(`/api/tasks/${id}/mentionable`);
+  // 300차 #851: 댓글 @ 자동완성 하나로(↑↓·Enter·Tab·첫 줄 기본·한글 조합 중 안전·@전체)
+  const cMention = useMention({ value: comment, set: setComment, users: mentionable.data?.users ?? [], meId: user.id, focus: () => commentRef.current?.focus(),
+    onPick: (u) => { if (u.id !== MENTION_ALL.id) setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }])); } });
   const [sub, setSub] = useState(false);
   const [desc, setDesc] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(null);
@@ -216,7 +225,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       const fm = followUpMsg(r); if (fm) toast.info(fm);
       if (r.leadReverted) toast.info(`거래처 단계도 '${r.leadReverted.to}'(으)로 되돌렸습니다`);
       // #508 후속: 완료를 되돌리면 그 완료 때 자동으로 생긴 다음 회차·리드 후속 업무 — 손대지 않은 것은 지움, 손댄 것은 그대로
-      if (r.autoKept?.length) toast.info('다음 회차/후속 업무는 그대로 두었습니다', { label: '열기', run: () => router.push(`/tasks/${r.autoKept[0].id}`) });
+      if (r.autoKept?.length) toast.info('다음 회차/후속 업무는 그대로 두었습니다', { label: '열기', run: () => go(r.autoKept[0].id) });
       else if (r.autoRemoved?.length) toast.info(`완료 때 자동으로 만든 다음 업무 ${r.autoRemoved.length}건도 지웠습니다(휴지통)`);
       reload(); broadcastRefresh();
     } catch (e: any) { toast.error(e.message); if (e.status === 409) reload(); }
@@ -282,7 +291,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     try {
       const r = await api<{ keep: string; merged: number }>(`/api/tasks/batch/${t0.batch_id}/merge`, { body: {} });
       toast.ok(`공동 업무로 합쳤습니다(${r.merged}건 합침)`); broadcastRefresh();
-      if (r.keep !== id) router.push(`/tasks/${r.keep}`); else reload();
+      if (r.keep !== id) go(r.keep); else reload();
     } catch (e: any) { toast.error(e.message); }
   }
   async function saveTemplate() {
@@ -320,10 +329,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     } catch (e: any) { toast.error(e.message); }
   }
   async function followUp() {
-    try { const r = await api(`/api/tasks/${id}/follow-up`, { body: {} }); toast.ok('후속 업무를 만들었습니다', { label: '열기', run: () => router.push(`/tasks/${r.id}`) }); broadcastRefresh(); } catch (e: any) { toast.error(e.message); }
+    try { const r = await api(`/api/tasks/${id}/follow-up`, { body: {} }); toast.ok('후속 업무를 만들었습니다', { label: '열기', run: () => go(r.id) }); broadcastRefresh(); } catch (e: any) { toast.error(e.message); }
   }
   async function duplicate() {
-    try { const r = await api(`/api/tasks/${id}/duplicate`, { body: { withSubtasks: true } }); toast.ok('복제했습니다', { label: '열기', run: () => router.push(`/tasks/${r.id}`) }); broadcastRefresh(); } catch (e: any) { toast.error(e.message); }
+    try { const r = await api(`/api/tasks/${id}/duplicate`, { body: { withSubtasks: true } }); toast.ok('복제했습니다', { label: '열기', run: () => go(r.id) }); broadcastRefresh(); } catch (e: any) { toast.error(e.message); }
   }
   async function setField(fid: string, value: unknown) {
     try { await api(`/api/tasks/${id}/fields/${fid}`, { method: 'PUT', body: { value } }); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); }
@@ -374,22 +383,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const commentFormEl = (
           <form onSubmit={sendComment} className={cx(!mobile && 'relative', 'mt-4 rounded-card border border-line bg-white focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/20',
             mobile && cx('fixed inset-x-0 mt-0 rounded-none border-x-0 border-b-0 bg-white shadow-[0_-4px_12px_rgba(15,23,42,0.08)]', 'bottom-0 z-[45] pb-[var(--sab)]'))} data-testid="comment-form">
-            {/* V8 7번: "@" 를 치면 이 업무를 볼 수 있는 사람 자동완성 */}
-            {(() => {
-              const m = /(^|\s)@([^\s@]*)$/.exec(comment);
-              if (!m) return null;
-              const list = (mentionable.data?.users ?? []).filter((u) => u.id !== user.id && u.name.includes(m[2])).slice(0, 6);
-              if (!list.length) return null;
-              return (
-                <ul role="listbox" aria-label="멘션 자동완성" className="absolute bottom-full left-2 z-20 mb-1 w-56 overflow-hidden rounded-card border border-line bg-white shadow-pop" data-testid="mention-suggest">
-                  {list.map((u) => (
-                    <li key={u.id}><button type="button" role="option" aria-selected={false} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
-                      onClick={() => { setComment((c) => c.replace(/@[^\s@]*$/, `@${u.name} `)); setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }])); }}>
-                      <Avatar id={u.id} name={u.name} size={20} />{u.name}<RoleBadge role={dir.users.find((x) => x.id === u.id)?.role} guest={dir.users.find((x) => x.id === u.id)?.is_demo} />{u.title && <span className="text-xs text-ink-3">{u.title}</span>}</button></li>
-                  ))}
-                </ul>
-              );
-            })()}
+            {/* V8 7번·300차 #851: "@" 를 치면 이 업무를 볼 수 있는 사람 자동완성(첫 줄 기본 선택, ↑↓·Enter·Tab) */}
+            <MentionList m={cMention} label="멘션 자동완성" testId="mention-suggest" className="left-2" />
             {/* V14 23번: 휴대폰은 한 줄 — [📎][📷][자동 높이 입력][등록], @ 는 입력 중 자동완성으로만 */}
             {mobile ? (
             <div className="flex items-end gap-1 px-1.5 py-1.5">
@@ -399,24 +394,16 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
               {/* 대표: 댓글도 음성으로 — 말한 글이 입력칸에 들어감(바로 보내지 않음) */}
               <VoiceButton small value={comment} onChange={setComment} label="음성 입력" />
-              <textarea ref={autoGrow} rows={1} className="block max-h-28 min-h-9 min-w-0 flex-1 resize-none rounded-input border border-line bg-slate-50 px-3 py-[7px] text-sm leading-5 focus:border-accent-500 focus:outline-none focus:ring-0" placeholder="댓글 입력"
-                value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input" aria-label="댓글" />
+              <textarea ref={autoGrow} rows={1} className="block max-h-28 min-h-9 min-w-0 flex-1 resize-none rounded-input border border-line bg-slate-50 px-3 py-[7px] text-sm leading-5 focus:border-accent-500 focus:outline-none focus:ring-0" placeholder="@로 사람 부르기"
+                value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => { cMention.onKeyDown(e); }} data-testid="comment-input" aria-label="댓글" />
               <Button size="sm" type="submit" className="h-9 shrink-0" disabled={!comment.trim()}>등록</Button>
             </div>
             ) : (<>
-            <textarea ref={commentRef} className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={2} placeholder="댓글 입력 — @ 를 치면 사람을 언급할 수 있어요" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} aria-label="댓글" />
+            <textarea ref={commentRef} className="block w-full resize-none rounded-t-card border-0 bg-transparent px-3 py-2.5 text-sm focus:outline-none focus:ring-0" rows={2} placeholder="댓글 입력 — @로 사람 부르기" value={comment} onChange={(e) => setComment(e.target.value)} data-testid="comment-input"
+              onKeyDown={(e) => { if (cMention.onKeyDown(e)) return; if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} aria-label="댓글" />
             <div className="flex items-center gap-2 border-t border-line px-2 py-1.5">
-              <select className="h-7 rounded-md border border-line bg-white px-1.5 text-xs" value="" onChange={(e) => {
-                const u = mentionable.data?.users.find((x) => x.id === e.target.value);
-                if (!u) return;
-                setComment((c) => `${c}${c && !c.endsWith(' ') ? ' ' : ''}@${u.name} `);
-                setPicked((p) => (p.some((x) => x.id === u.id) ? p : [...p, { id: u.id, name: u.name }]));
-              }} aria-label="멘션할 사람">
-                <option value="">@ 멘션</option>{mentionable.data?.users.filter((u) => u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
-              </select>
               <VoiceButton small value={comment} onChange={setComment} label="음성 입력" />
-              <span className="hidden text-[11px] text-ink-3 sm:inline">이 업무를 볼 수 있는 사람만 · Ctrl+Enter 로 등록</span>
+              <span className="hidden text-[11px] text-ink-3 sm:inline" data-testid="mention-hint">@로 사람 부르기 · 이 업무를 볼 수 있는 사람만 · Ctrl+Enter 로 등록</span>
               <span className="flex-1" />
               <Button size="sm" type="submit" disabled={!comment.trim()}>등록</Button>
             </div>
@@ -434,7 +421,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         {/* V13 10번: 업무별 대화방 */}
         <IconButton label="대화방 열기" data-testid="task-chat" onClick={async () => { try { const r = await api('/api/chat/rooms', { body: { kind: 'task', taskId: id } }); router.push(`/messages?room=${r.id}`); } catch (e: any) { toast.error(e.message); } }}><MessageCircle /></IconButton>
         <IconButton label="링크 복사" onClick={() => { navigator.clipboard?.writeText(location.origin + `/tasks/${id}`); toast.ok('링크를 복사했습니다'); }}><Link2 /></IconButton>
-        {inPanel && <IconButton label="전체 화면" onClick={() => router.push(`/tasks/${id}`)}><Maximize2 /></IconButton>}
+        {inPanel && !inApp && <IconButton label="크게 보기(새 탭)" className="max-sm:hidden" data-testid="task-open-tab" onClick={() => window.open(`/tasks/${id}`, '_blank', 'noopener')}><Maximize2 /></IconButton>}{/* 300차 #850: 전체 화면은 새 탭으로만 */}
         <div className="relative">
           <IconButton label="더보기" onClick={() => setMenu(!menu)} aria-expanded={menu}><MoreHorizontal /></IconButton>
           {menu && (
@@ -1258,9 +1245,9 @@ function CommentThread({ c, replies, taskId, meId, mentionable, onChange }: { c:
     try { await api(`/api/tasks/${taskId}/comments`, { body: { body: text, parentId: c.id } }); setReply(null); setRPicked([]); setOpen(true); onChange(); } catch (er: any) { toast.error(er.message); }
     finally { busy.current = false; }
   }
-  // 대표 실기기: 답글에서 사람 태그가 안 됨 → 본 댓글처럼 "@" 를 치면 자동완성
-  const rm = reply !== null ? /(^|\s)@([^\s@]*)$/.exec(reply) : null;
-  const rList = rm ? mentionable.filter((u) => u.id !== meId && u.name.includes(rm[2])).slice(0, 6) : [];
+  // 대표 실기기: 답글에서 사람 태그가 안 됨 → 본 댓글처럼 "@" 를 치면 자동완성 · 300차 #851 같은 자동완성(↑↓·Enter·Tab·@전체)
+  const rMention = useMention({ value: reply ?? '', set: (v) => setReply(v), users: mentionable, meId, focus: () => replyRef.current?.focus(),
+    onPick: (u) => { if (u.id !== MENTION_ALL.id) setRPicked((p) => (p.some((y) => y.id === u.id) ? p : [...p, u])); } });
   return (
     <li className="text-sm" data-testid="comment-thread">
       <CommentItem c={c} meId={meId} onChange={onChange} onReply={() => setReply((r) => (r === null ? '' : r))} />
@@ -1270,17 +1257,9 @@ function CommentThread({ c, replies, taskId, meId, mentionable, onChange }: { c:
           {open && replies.map((r) => <CommentItem key={r.id} c={r} meId={meId} onChange={onChange} onReply={() => setReply((x) => (x === null ? `@${r.author_name} ` : x))} small />)}
           {reply !== null && (
             <form onSubmit={sendReply} className="relative flex gap-1.5" data-testid="reply-form">
-              {rList.length > 0 && (
-                <ul role="listbox" aria-label="답글 멘션 자동완성" className="absolute bottom-full left-0 z-20 mb-1 w-56 overflow-hidden rounded-card border border-line bg-white shadow-pop" data-testid="reply-mention-suggest">
-                  {rList.map((u) => (
-                    <li key={u.id}><button type="button" role="option" aria-selected={false} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
-                      onClick={() => { setReply((x) => (x ?? '').replace(/@[^\s@]*$/, `@${u.name} `)); setRPicked((p) => (p.some((y) => y.id === u.id) ? p : [...p, u])); setTimeout(() => replyRef.current?.focus(), 0); }}>
-                      <Avatar id={u.id} name={u.name} size={20} badge={false} />{u.name}</button></li>
-                  ))}
-                </ul>
-              )}
-              <input ref={replyRef} autoFocus className={cx(inputCls, 'h-8')} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="답글 입력 — @ 로 사람 태그" aria-label="답글"
-                onKeyDown={(e) => { if (e.key === 'Escape') setReply(null); }} />
+              <MentionList m={rMention} label="답글 멘션 자동완성" testId="reply-mention-suggest" className="left-0" />
+              <input ref={replyRef} autoFocus className={cx(inputCls, 'h-8')} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="답글 입력 — @로 사람 부르기" aria-label="답글"
+                onKeyDown={(e) => { if (rMention.onKeyDown(e)) return; if (e.key === 'Escape') setReply(null); }} />
               <VoiceButton small value={reply} onChange={(v) => setReply(v)} label="음성 입력" />
               <Button size="sm" disabled={!reply.trim()}>등록</Button>
             </form>

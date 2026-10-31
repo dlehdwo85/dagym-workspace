@@ -462,7 +462,7 @@ function AccountSection() {
   );
 }
 
-const PROVIDER_NAME: Record<string, string> = { google: 'Google', kakao: '카카오', naver: '네이버' };
+const PROVIDER_NAME: Record<string, string> = { google: 'Google', kakao: '카카오', naver: '네이버', apple: 'Apple' };
 /** V29 로그인 연결: 소셜 계정 연결·해제(로그인 방법이 하나는 남아야 함) */
 function LinkedAccounts() {
   const r = useApi<{ identities: { provider: string; email: string | null; last_login_at: string | null }[]; enabled: string[]; hasPassword: boolean }>('/api/account/identities');
