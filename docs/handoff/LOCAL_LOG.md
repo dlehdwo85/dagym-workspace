@@ -2121,3 +2121,9 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 ## 2026-10-31 18:20 — iOS 1.2.0 업로드
 - 대표 사용권 계약 동의 뒤 release.yml run 41187748791(ios 만) → ARCHIVE SUCCEEDED · EXPORT SUCCEEDED · 'Uploaded App' 18:17. 다음: TestFlight 처리 확인 → ASC 버전 1.2.0 · 설명 가안 · 스크린샷 v4 · 심사 메모 → 재제출.
 - 안드로이드 1.2.0 은 17:12 내부 테스트 출시 완료(로컬 서명).
+
+## 2026-10-31 18:45 — 297차·실사 참고 생성 0장 원인
+- health 763cc19 · 231_mkt_material_requests. /api/marketing/materials 빈 목록 정상.
+- job_runs mktPhotoFill: pool 기록 없음 8 · started 0 · skipped '준비 안 됨(생성 연동 꺼짐·참고 사진 모델 없음)'.
+- /api/platform/higgsfield enabled·hasKey, 모델 5개 모두 ref 없음 → 생성 시작 안 됨. 10/27 189차 로컬 요청(참고 사진 칸 이름)을 로컬이 누락.
+- docs.higgsfield.ai: 참고 사진 칸은 SOUL standard image_reference_url(프롬프트 향상 안내)뿐, 실사 편집 모델 없음. 모델 표는 대표 결정 전 그대로.
