@@ -12,7 +12,8 @@ export function mdhm(iso: string | null | undefined): string | null {
 export type Briefing = { kind: string | null; at: string | null; place: string | null; required: boolean };
 /** 현장설명 — 종류(필수·임의·없음·공고문 참조)·일시·장소. 일시도 종류도 없거나 '없음'이면 null */
 export function briefingOf(r: Row): Briefing | null {
-  const kind = s0(r.site_briefing_kind); const at = s0(r.site_briefing_at ?? r.briefing_at); const place = s0(r.site_briefing_place);
+  // 280차: KG2B 상세의 현장설명(실제 입찰 사이트 값)을 K-apt '공고문 참조'보다 먼저
+  const kind = s0(r.kg2b_briefing_kind) ?? s0(r.site_briefing_kind); const at = s0(r.site_briefing_at ?? r.briefing_at) ?? s0(r.kg2b_briefing_at); const place = s0(r.site_briefing_place);
   if (kind === '없음' || (!at && !kind)) return null;
   return { kind, at, place, required: kind === '필수' };
 }

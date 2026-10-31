@@ -208,6 +208,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('meetings', async () => (await import('./meetings')).meetingsTick()); // 218차 화상회의(FEATURE_MEETINGS 일 때만): 신호 끊긴 참가자 퇴장 처리 · 하루 넘게 빈 회의 끝내기
   await step('salesDigest', async () => (await import('./sales/digest')).salesDigestTick()); // 당일 입찰 다이제스트(회사 설정 시각, 메일·알림·푸시)
   await step('bidTasks', async () => (await import('./sales/bidTasks')).bidTasksTick()); // 결정 15-35 입찰 업무: 공고 취소 → 업무·일정 취소 · 정정 → 기한·일정 · 개찰 결과 → 낙찰이면 계약
+  await step('taskBatchMerge', async () => (await import('./taskMerge')).mergeAllBatchesOnce()); // 280차 #821 기존 '각자 1건씩' 묶음 → 공동 업무 1건(한 번만, 안 끝난 묶음)
   await step('bidCancelSweep', async () => (await import('./sales/bidTasks')).canceledBidTaskSweep()); // 278차 #817·#830 취소된 공고에 남은 열린 입찰 업무(진행 기록 없이 만든 것·합쳐진 줄) → 휴지통 + 알림
   await step('contractCare', async () => (await import('./sales/bidTasks')).contractCareTick()); // 결정 15-35 재계약 사후관리: 계약 종료 120일 전 '재계약 준비' 업무 1건
   await step('leadNext', async () => (await import('./sales/bidTasks')).leadNextTick()); // 결정 15-35 업무가 없던 리드의 가까운 다음 연락 → '다음 연락' 업무(알림 없이)

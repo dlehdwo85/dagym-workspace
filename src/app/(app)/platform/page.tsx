@@ -306,12 +306,7 @@ function InquiryLink() {
                       {data.users.filter((u: any) => !list.includes(u.id)).map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
                   </div>
-                  {list.length > 1 && (
-                    <div className="mt-1.5 flex flex-wrap gap-3 pl-[7.5rem] text-ink-2">
-                      <label className="inline-flex items-center gap-1"><input type="radio" name={`mode-${t}`} checked={(cur.m[t] ?? 'together') === 'together'} onChange={() => setAsg({ ...cur, m: { ...cur.m, [t]: 'together' } })} />한 업무 — 주 담당 + 협업자</label>
-                      <label className="inline-flex items-center gap-1"><input type="radio" name={`mode-${t}`} checked={cur.m[t] === 'each'} onChange={() => setAsg({ ...cur, m: { ...cur.m, [t]: 'each' } })} />담당자마다 각각 업무</label>
-                    </div>
-                  )}
+                  {list.length > 1 && <p className="mt-1.5 pl-[7.5rem] text-xs text-ink-2" data-testid="inquiry-shared-note">공동 업무 1건 — 첫 사람이 주 담당, 나머지는 함께 담당(280차 #827)</p>}
                 </div>
               );
             })}

@@ -19,7 +19,7 @@ import { TaskDetail } from './TaskDetail';
 import { keepScroll } from './backClose';
 import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
 import { coOf, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
-import { COLLAB_SHOWN, CollabPeople, collabSort, isCollab, useCollabOpen } from './CollabTasks';
+import { CollabPeople, collabSort, isCollab } from './CollabTasks';
 import { QuickAddTask } from './QuickAddTask';
 import { CarriedBadge } from './carried';
 import { followUpMsg, useLeadFollowUp } from './sales/LeadFollowUp';
@@ -1113,7 +1113,7 @@ function MyGroupedList({ tasks: all, onPatch, onAcked, top }: { tasks: Task[]; o
   const add = top ? <div className="overflow-hidden rounded-card border border-line bg-white shadow-card">{top}</div> : null;
   // #508: 이번 주 완료는 마감 묶음이 아니라 맨 아래 접힌 '완료됨 n건' 하나로
   const open = all.filter((t) => t.status !== 'done'); const done = all.filter((t) => t.status === 'done');
-  // 대표 #799: 함께 담당·같이 받은 업무는 맨 위 '협업 업무' 칸에(입찰·프로젝트 먼저 → 마감 순) — 아래 개인 업무 묶음에는 다시 안 나옴
+  // 대표 #799 → 280차 #824: 함께 담당·같이 받은 업무는 맨 위 '공동 업무' 칸에(입찰·프로젝트 먼저 → 마감 순) — 아래 개인 업무 묶음에는 다시 안 나옴
   const collab = open.filter(isCollab).sort(collabSort);
   const tasks = open.filter((t) => !isCollab(t));
   const collabBox = collab.length ? <CollabSection tasks={collab} onPatch={onPatch} /> : null;
@@ -1154,24 +1154,19 @@ function MyGroupedList({ tasks: all, onPatch, onAcked, top }: { tasks: Task[]; o
   );
 }
 
-/** 대표 #799 '협업 업무' 칸 — 줄마다 함께하는 사람과 진행 · 5건 넘으면 접기 · 칸 접기는 사람별 기억 */
+/** 대표 #799 → 280차 #824·#826(대표 10/31): '공동 업무' 칸 — 접지 않음(전부) · 함께하는 사람 이름표는 같은 줄 */
 function CollabSection({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => void }) {
   const { user } = useSession();
-  const [open, setOpen] = useCollabOpen(user.id); const [more, setMore] = useState(false);
-  const shown = more ? tasks : tasks.slice(0, COLLAB_SHOWN);
   return (
     <section data-group="collab" data-testid="my-collab">
-      <h2 className="mb-1.5 flex items-center gap-2 px-1 text-sm font-semibold text-violet-800">
-        <button type="button" className="flex items-center gap-1" onClick={() => setOpen(!open)} aria-expanded={open} data-testid="my-collab-toggle">
-          <ChevronDown className={cx('size-4 transition-transform', !open && '-rotate-90')} />협업 업무</button>
+      <h2 className="mb-1.5 flex items-center gap-2 px-1 text-sm font-semibold text-violet-800">공동 업무
         <span className="rounded-full bg-violet-100 px-1.5 text-xs font-medium text-violet-800 tabular-nums" data-testid="my-collab-count">{tasks.length}</span>
         <span className="text-xs font-normal text-ink-3">여러 명이 함께 맡은 업무</span>
       </h2>
-      {open && <div className="overflow-hidden rounded-card border border-violet-200 bg-white shadow-card" data-testid="task-list">
-        {shown.map((t) => <div key={t.id} className="border-b border-line last:border-b-0 [&>div:first-child]:border-b-0" data-testid="collab-row"><ListRow t={t} onPatch={onPatch} handle={NO_HANDLE} /><CollabPeople t={t} uid={user.id} className="-mt-1.5 px-3 pb-2 pl-10 sm:pl-14" /></div>)}
-        {tasks.length > COLLAB_SHOWN && <button type="button" className="w-full border-t border-line px-3 py-2 text-left text-xs font-medium text-violet-700 hover:bg-violet-50/50" onClick={() => setMore(!more)} data-testid="my-collab-more">
-          {more ? '접기' : `${tasks.length - COLLAB_SHOWN}건 더 보기`}</button>}
-      </div>}
+      <div className="overflow-hidden rounded-card border border-violet-200 bg-white shadow-card" data-testid="task-list">
+        {tasks.map((t) => <div key={t.id} className="flex items-center border-b border-line last:border-b-0 [&>div:first-child>div]:border-b-0" data-testid="collab-row">
+          <div className="min-w-0 flex-1"><ListRow t={t} onPatch={onPatch} handle={NO_HANDLE} /></div><CollabPeople t={t} uid={user.id} className="max-w-[40%] shrink-0 pr-3" /></div>)}
+      </div>
     </section>
   );
 }

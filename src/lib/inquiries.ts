@@ -146,7 +146,7 @@ async function insertInquiry(sql: ReturnType<typeof db>, a: { site: Site; type: 
     const okIds = new Set((await tx<{ id: string }[]>`select id from users where id = any(${want}::uuid[]) and status = 'active' and tenant = ${INQUIRY_TENANT}`).map((r) => r.id));
     let people = want.filter((x) => okIds.has(x));
     if (!people.length) people = [ceo.id];
-    const each = setting?.mode === 'each' && people.length > 1;
+    const each = false; // 280차 #827(대표 10/31 "문의도 2명 이상 체크했을 때 공동 업무로"): 담당이 여럿이면 언제나 공동 업무 1건(주 담당 + 함께 담당) — 예전 '각자' 설정도
     const title = `[${SITES[site].label} ${a.channel === 'phone' ? '전화 ' : ''}문의] ${org}${i.inquiry_type || type !== '기타' ? ` · ${i.inquiry_type || type}` : ''}${i.region ? ` (${i.region})` : ''}`.slice(0, 200);
     const services = (Array.isArray(i.services) ? i.services : (i.services ?? '').split(/[,·]/)).map((x) => x.trim()).filter(Boolean);
     const tags = [...new Set([SITES[site].tag, i.region, ...services].filter((x): x is string => !!x).map((x) => x.slice(0, 30)))].slice(0, 20);
@@ -161,14 +161,14 @@ async function insertInquiry(sql: ReturnType<typeof db>, a: { site: Site; type: 
           ${due}, '18:00', ${tags}, ${ceo.id}, ${ceo.id}, extract(epoch from now()), ${sec.id}, ${assignee === ceo.id ? new Date() : null}, ${batchId})
         returning id`;
       taskIds.push(t.id);
-      if (!each) for (const c of people.slice(1)) await tx`insert into task_collaborators (task_id, user_id) values (${t.id}, ${c}) on conflict do nothing`;
+      if (!each) for (const c of people.slice(1)) await tx`insert into task_assignees (task_id, user_id, added_by) values (${t.id}, ${c}, ${ceo.id}) on conflict do nothing`; // 함께 담당(공동 업무)
       let n = 0;
       for (const text of checklistFor(type)) { // 1차 연락 항목 담당 = 주 담당
         await tx`insert into task_checklist_items (task_id, text, sort, assignee_id) values (${t.id}, ${text}, ${n}, ${n === 0 ? assignee : null})`; n++;
       }
       await activity(tx, 'task', t.id, a.actorId, 'created', { title, source: a.channel === 'phone' ? 'phone_inquiry' : 'website_inquiry', site, leadId: i.lead_id });
       await notify(tx, { userIds: each ? [assignee] : people, type: 'task_assigned', space: 'sales', title: `새 ${a.channel === 'phone' ? '전화' : '웹사이트'} 문의 · ${org}`.slice(0, 120),
-        body: `${SITES[site].label} · ${type}${i.region ? ` · ${i.region}` : ''} · 마감 ${due} 18:00${!each && people.length > 1 ? ` · 주 담당 외 협업 ${people.length - 1}명` : ''}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
+        body: `${SITES[site].label} · ${type}${i.region ? ` · ${i.region}` : ''} · 마감 ${due} 18:00${!each && people.length > 1 ? ` · 공동 업무(함께 담당 ${people.length - 1}명)` : ''}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
         actorId: a.actorId, dedupeKey: `inquiry:${t.id}` });
       const { runAutomations } = await import('./automation');
       await runAutomations(tx, { trigger: 'task_created', taskId: t.id, actorId: null });

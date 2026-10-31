@@ -62,30 +62,41 @@ const get = async () => (await sql`select row from sales_src_rows where tbl = 'p
 
 before(async () => {
   kapt = fakeKapt({ detailHtml: (bid) => `<table class="contTbl"><tbody><tr> <th scope="col">입찰번호</th> <td colspan="3"> ${bid} </td> </tr>
-<tr> <th scope="col">입찰분류</th> <td> 사업자 - 용역 - 주민운동시설의 위탁 </td> <th scope="col">신용평가등급확인서<br>제출여부</th> <td> 제출 </td> </tr></tbody></table>` });
+<tr> <th scope="col">입찰분류</th> <td> 사업자 - 용역 - 주민운동시설의 위탁 </td> <th scope="col">신용평가등급확인서<br>제출여부</th> <td> 제출 </td> </tr>
+<tr> <th scope="col">현장설명</th> <td> 공고문 참조 </td> <th scope="col">관리(공사용역)<br>실적증명서 제출여부</th> <td> 제출 </td> </tr></tbody></table>` });
   fake = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'); let body = ''; for await (const c of req) body += c;
     const send = (code, text, type = 'text/html; charset=utf-8') => { res.statusCode = code; res.setHeader('content-type', type); res.end(text); };
     if (u.pathname === '/kapt/bid/bidList.do') return send(200, `<html><table>${u.searchParams.get('pageNo') === '1' ? tr(BID, ['1', 'KG2B', 'APT적격심사', TITLE, `${plus(9)} 09:00`, '신규공고', '시험팔이팔푸르지오', `${plus(-3)} 18:46`]) : ''}</table></html>`);
     if (u.pathname === '/kaptbidapi/getPblAncDeSearchV3') return send(200, JSON.stringify({ response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items: [], numOfRows: 100, pageNo: 1, totalCount: 0 } } }), 'application/json');
+    if (u.pathname === '/kg2b/common/util/download') return send(200, Buffer.from('HWP Document File 5.0 시험 공고문'), 'application/octet-stream');
     if (u.pathname === '/kg2b/user/bid_list/KaptBidView') { kg2bHits.push(u.searchParams.get('bidcode')); return u.searchParams.get('bidcode') === CODE ? send(200, KG2B) : send(404, 'no'); }
     if (kapt.handle(req, res, body)) return;
     send(404, 'nope');
   }).listen(PORT);
-  await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}` }); sql = testDb(); ctx = await bootstrap();
+  await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, SALES_FILE_HOSTS: 'localhost' }); sql = testDb(); ctx = await bootstrap();
   await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant: 'default', at: new Date().toISOString(), daily: true })})`;
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
 });
 after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
 
 test('kg2b_ 공고: KG2B 상세에서 공고번호·입찰 개시·개찰(일시·장소)·참가 제한 지역·현장설명 없음·공고문 → 공고 줄 · 담당자 칸 저장 안 함 · 다시 안 읽음 · 카드 첨부', async () => {
+  // 이미 넘긴 업무(첨부 0) — 첫 수집으로 공고 줄을 만든 뒤 업무를 걸고, 같은 공고 줄을 '아직 안 읽음'으로 되돌려 다시 수집
+  const r0 = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
+  assert.match(r0.summary, /KG2B 상세 1건\(공고문 1\)/, r0.summary);
+  const [row0] = await sql`select src_id from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = ${BID}`;
+  const t = await ctx.owner.ok('POST', '/api/tasks', { title: `[입찰] ${TITLE}`, assigneeId: ctx.staffA.id, approvalRequired: false });
+  await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: row0.src_id, name: TITLE, bid: true })}, space = 'sales' where id = ${t.id}`;
+  await sql`update sales_src_rows set row = row - 'kg2b_read_at' - 'kg2b_v' - 'attachment_urls' - 'notice_file_url' where src_id = ${row0.src_id}`; kg2bHits.length = 0;
   const r = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
-  assert.match(r.summary, /KG2B 상세 1건\(공고문 1\)/, r.summary);
+  assert.match(r.summary, /KG2B 상세 1건\(공고문 1, 넘긴 업무 1건에 붙임\)/, r.summary);
+  const att = await sql`select file_name, source from attachments where task_id = ${t.id} and deleted_at is null`;
+  assert.deepEqual(att.map((a) => [a.file_name, a.source]), [['주민공동시설 입찰공고문.hwp', 'sales_auto']], '이미 넘긴 업무에도 공고문');
   assert.deepEqual(kg2bHits, [CODE]);
   const x = await get();
   assert.ok(x, '공고 줄'); assert.equal(x.related, true, x.fit_business);
-  assert.deepEqual([x.kg2b_notice_no, x.bid_start_at, x.opening_at, x.opening_place, x.region_restriction, x.site_briefing_kind],
-    ['202610281060-00', `${plus(-3)}T17:00:00+09:00`, `${plus(9)}T10:00:00+09:00`, '입찰 담당자PC', '전국', '없음']);
+  assert.deepEqual([x.kg2b_notice_no, x.bid_start_at, x.opening_at, x.opening_place, x.region_restriction, x.site_briefing_kind, x.kg2b_briefing_kind],
+    ['202610281060-00', `${plus(-3)}T17:00:00+09:00`, `${plus(9)}T10:00:00+09:00`, '입찰 담당자PC', '전국', '공고문 참조', '없음']);
   assert.equal(x.kg2b_url, `http://localhost:${PORT}/kg2b/user/bid_list/KaptBidView?bidcode=${CODE}`);
   assert.equal(x.attachment_urls.length, 1); const f = x.attachment_urls[0];
   assert.equal(f.name, '주민공동시설 입찰공고문.hwp');
@@ -99,4 +110,5 @@ test('kg2b_ 공고: KG2B 상세에서 공고번호·입찰 개시·개찰(일시
   // 목록 카드: 첨부(공고문) · 현장설명 없음
   const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((n) => n.noticeNo === BID);
   assert.ok(card, '카드'); assert.ok(card.attachments.some((a) => /입찰공고문/.test(a.name ?? '')), JSON.stringify(card.attachments));
+  assert.equal(card.briefing, null, "K-apt '공고문 참조'보다 KG2B '현장설명회 없음' — 현설 없음");
 });

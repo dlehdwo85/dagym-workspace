@@ -98,7 +98,7 @@ describe('16차 웹사이트 문의 연동', () => {
     assert.equal((await ctx.owner.req('PUT', '/api/platform/inquiries/assignees', { assignees: { 기타: '00000000-0000-0000-0000-0000000000ff' } })).status, 400);
   });
 
-  test('유형별 담당자 여러 명: 기본은 주 담당 + 협업자(전원 알림·1차 연락 항목 담당), "각각" 이면 담당자마다 업무', async () => {
+  test('유형별 담당자 여러 명: 주 담당 + 함께 담당(공동 업무, 전원 알림·1차 연락 항목 담당) — 280차 #827: 예전 "각각" 설정도 공동 업무 1건', async () => {
     await ctx.owner.ok('PUT', '/api/platform/inquiries/assignees', { assignees: { 'HILINK 플랫폼': [ctx.managerA.id, ctx.staffA.id] } });
     const st = await ctx.owner.ok('GET', '/api/platform/inquiries');
     assert.deepEqual(st.assignees['HILINK 플랫폼'], [ctx.managerA.id, ctx.staffA.id]); assert.equal(st.modes['HILINK 플랫폼'], 'together');
@@ -106,18 +106,18 @@ describe('16차 웹사이트 문의 연동', () => {
     assert.equal(r.body.taskIds.length, 1);
     const d = await ctx.owner.ok('GET', `/api/tasks/${r.body.taskId}`);
     assert.equal(d.task.assignee_id, ctx.managerA.id);
-    assert.deepEqual(d.collaborators.map((c) => c.user_id ?? c.id), [ctx.staffA.id]);
+    assert.deepEqual((await sql`select user_id from task_assignees where task_id = ${r.body.taskId}`).map((x) => x.user_id), [ctx.staffA.id], '함께 담당(공동 업무)');
     assert.equal(d.checklist[0].assignee_id, ctx.managerA.id, '1차 연락 담당 = 주 담당');
     const n = await sql`select user_id from notifications where entity_id = ${r.body.taskId} and title like '새 웹사이트 문의%'`;
     assert.deepEqual(n.map((x) => x.user_id).sort(), [ctx.managerA.id, ctx.staffA.id].sort());
     await ctx.owner.ok('PUT', '/api/platform/inquiries/assignees', { assignees: { 'HILINK 플랫폼': [ctx.managerA.id, ctx.staffA.id] }, modes: { 'HILINK 플랫폼': 'each' } });
     const e = await send(token, { lead_id: 'HL-multi-2', inquiry_type: 'HILINK 플랫폼', organization: '각각단지' });
-    assert.equal(e.body.taskIds.length, 2);
-    const ts = await sql`select assignee_id, batch_id from tasks where id = any(${e.body.taskIds}::uuid[])`;
-    assert.deepEqual(ts.map((x) => x.assignee_id).sort(), [ctx.managerA.id, ctx.staffA.id].sort());
-    assert.ok(ts[0].batch_id && ts[0].batch_id === ts[1].batch_id, '같은 묶음');
+    assert.equal(e.body.taskIds.length, 1, '공동 업무 1건');
+    const [te] = await sql`select assignee_id, batch_id from tasks where id = ${e.body.taskIds[0]}`;
+    assert.deepEqual([te.assignee_id, te.batch_id], [ctx.managerA.id, null]);
+    assert.deepEqual((await sql`select user_id from task_assignees where task_id = ${e.body.taskIds[0]}`).map((x) => x.user_id), [ctx.staffA.id]);
     assert.equal((await send(token, { lead_id: 'HL-multi-2' })).body.duplicate, true, '재전송은 추가 생성 없음');
-    assert.equal((await sql`select count(*)::int n from tasks where title like '%각각단지%'`)[0].n, 2);
+    assert.equal((await sql`select count(*)::int n from tasks where title like '%각각단지%'`)[0].n, 1);
   });
 
   test('다짐 외 회사(가입한 다른 회사 대표, 슈퍼관리자 표시가 있어도) → 메뉴·API 404', async () => {

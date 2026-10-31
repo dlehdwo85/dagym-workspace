@@ -2,6 +2,7 @@
 // '해당 공고 가기'가 KG2B 상세(로그인 없이 열림 — 10/31 kg2b_142686 클라우드 확인)로 감 → KG2B 상세에서 현장설명·입찰 개시·개찰·참가 제한 지역·공고문 첨부를 읽어
 // 공고 줄에 채움. 공고문이 생기면 참가자격 읽기(eligibilityTick)가 첨부 지문이 바뀐 것을 보고 다시 읽음. 담당자 칸(사람 이름·직함)은 저장하지 않음
 import { db } from '../../db';
+import type { SessionUser } from '../../types';
 
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
 export const kg2bBase = () => (T() ? `${T()}/kg2b` : 'https://www.kg2b.com');
@@ -32,7 +33,9 @@ export function parseKg2bDetail(html: string): Kg2bDetail {
 
 /** 공고 줄에 채울 칸 — 원래 값이 있으면 그대로(현장설명·지역·업종·낙찰 방법), 첨부는 합침, 개찰은 비었을 때만 */
 export function kg2bPatch(row: Record<string, any>, d: Kg2bDetail, at = new Date().toISOString()) {
-  const p: Record<string, unknown> = { kg2b_read_at: at, kg2b_url: kg2bDetailUrl(kg2bCode(row.source_external_id) ?? '') };
+  const p: Record<string, unknown> = { kg2b_read_at: at, kg2b_url: kg2bDetailUrl(kg2bCode(row.source_external_id) ?? ''), kg2b_v: 2,
+    // 280차(로컬 10/31 11:00 — K-apt '공고문 참조'보다 KG2B '현장설명회 없음'이 맞음): KG2B 값은 따로 두고 화면·메일이 먼저 씀(K-apt 다시 읽기가 덮어도 그대로)
+    ...(d.briefingKind ? { kg2b_briefing_kind: d.briefingKind } : {}), ...(d.briefingAt ? { kg2b_briefing_at: d.briefingAt } : {}) };
   if (d.noticeNo) p.kg2b_notice_no = d.noticeNo;
   if (d.bidStart) p.bid_start_at = d.bidStart;
   if (d.opening && !row.opening_at) p.opening_at = d.opening;
@@ -59,11 +62,11 @@ export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => numbe
   const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone
       and row->>'source_type' = 'kapt_bid' and row->>'source_external_id' ~ '^kg2b_[0-9]{3,12}$' and coalesce(row->>'related', 'false') = 'true'
       and coalesce(row->>'deadline_at', '') >= ${today} and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰'
-      and (coalesce(row->>'kg2b_read_at', '') = '' or (row->>'kg2b_read_at' < ${new Date(Date.now() - 3 * 864e5).toISOString()} and coalesce(jsonb_array_length(case when jsonb_typeof(row->'attachment_urls') = 'array' then row->'attachment_urls' end), 0) = 0))
+      and (coalesce(row->>'kg2b_read_at', '') = '' or coalesce(row->>'kg2b_v', '') <> '2' or (row->>'kg2b_read_at' < ${new Date(Date.now() - 3 * 864e5).toISOString()} and coalesce(jsonb_array_length(case when jsonb_typeof(row->'attachment_urls') = 'array' then row->'attachment_urls' end), 0) = 0))
     order by row->>'deadline_at' asc limit ${max * 3}`;
   const by = new Map<string, { src_id: string; row: any }[]>();
   for (const r of rows) { const k = String(r.row.source_external_id); if (!by.has(k)) by.set(k, []); by.get(k)!.push(r); }
-  const out = { read: 0, files: 0, errors: [] as string[] };
+  const out = { read: 0, files: 0, attached: 0, errors: [] as string[] };
   for (const [ext, group] of [...by.entries()].slice(0, max)) {
     if (left() < 8000) break;
     const code = kg2bCode(ext)!;
@@ -78,7 +81,30 @@ export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => numbe
         out.files += added;
       }
       out.read++;
+      if (d.files.length && left() > 15000) out.attached += await attachToOpenTasks(group.map((g) => g.src_id)).catch(() => 0);
     } catch (e) { if (out.errors.length < 5) out.errors.push(`KG2B 상세 ${ext}: ${e instanceof Error ? e.message : String(e)}`); }
   }
   return out;
+}
+
+/**
+ * 280차(로컬 10/31 11:00 — 이미 넘긴 업무 '[입찰] 천안푸르지오레이크사이드…' 첨부 0): KG2B 에서 공고문을 새로 찾으면 그 공고에서 넘어온 열린 입찰 업무에도 붙임
+ * (#507 자동 첨부와 같은 길 — 자료실 '영업/공고/…'에 한 번 받아 두고 업무에 연결). 붙이는 사람 = 업무 요청자(없으면 담당). 한 번에 3건
+ */
+async function attachToOpenTasks(srcIds: string[]) {
+  const sql = db();
+  const tasks = await sql<{ id: string; ref: string; actor: string | null }[]>`select t.id, t.sales_ref->>'id' as ref, coalesce(t.requested_by, t.assignee_id) as actor from tasks t
+    where t.deleted_at is null and t.status <> 'done' and t.sales_ref->>'kind' = 'bid' and t.sales_ref->>'id' = any(${srcIds}::text[])
+      and not exists (select 1 from attachments a where a.task_id = t.id and a.source = 'sales_auto' and a.deleted_at is null) limit 3`;
+  let n = 0;
+  for (const t of tasks) {
+    if (!t.actor) continue;
+    const [r] = await sql<any[]>`select u.id, u.email, u.name, u.role, u.status, u.timezone, u.is_demo, u.platform_admin, u.tenant from users u where u.id = ${t.actor} and u.status = 'active'`;
+    if (!r) continue;
+    const u = { id: r.id, email: r.email, name: r.name, role: r.role, status: r.status, timezone: r.timezone, sessionId: '', isDemo: r.is_demo, platformAdmin: r.platform_admin, tenant: r.tenant } as SessionUser;
+    const { attachSourceFiles } = await import('../autoAttach');
+    const res = await attachSourceFiles(u, { kind: 'bid', id: t.ref, taskIds: [t.id] }).catch(() => null);
+    if (res?.ok) n++;
+  }
+  return n;
 }

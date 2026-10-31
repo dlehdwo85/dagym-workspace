@@ -275,6 +275,16 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       broadcastRefresh(); router.push(`/s/sales/support?id=${ref.id}`);
     } catch (e: any) { toast.error(e.message); }
   }
+  /** 280차 #821: '각자 1건씩' 묶음 → 공동 업무 1건(댓글·첨부·체크리스트를 모아 남길 업무로, 나머지는 휴지통) */
+  async function mergeBatch() {
+    const t0 = data?.task; if (!t0?.batch_id) return;
+    if (!confirm(`같이 받은 ${t0.batch?.total ?? ''}건을 공동 업무 1건으로 합칠까요?\n댓글·첨부·체크리스트는 남는 업무로 모이고, 나머지 업무는 휴지통(30일 보관)으로 갑니다.`)) return;
+    try {
+      const r = await api<{ keep: string; merged: number }>(`/api/tasks/batch/${t0.batch_id}/merge`, { body: {} });
+      toast.ok(`공동 업무로 합쳤습니다(${r.merged}건 합침)`); broadcastRefresh();
+      if (r.keep !== id) router.push(`/tasks/${r.keep}`); else reload();
+    } catch (e: any) { toast.error(e.message); }
+  }
   async function saveTemplate() {
     const name = prompt('템플릿 이름', t.title);
     if (!name) return;
@@ -439,6 +449,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 <MenuItem icon={LayoutTemplate} onClick={saveTemplate}>템플릿으로 저장</MenuItem>
                 {features.ai && <MenuItem icon={Sparkles} onClick={() => router.push(`/assistant?task=${id}`)}>✨ AI에게 요청</MenuItem>}
                 {t.sales_ref?.kind === 'support' && t.sales_ref.id && <MenuItem icon={Undo2} onClick={withdrawSupport}>지원사업으로 회수</MenuItem>}
+                {t.batch_id && (t.batch?.total ?? 0) > 1 && (t.requested_by === user.id || t.created_by === user.id || ['owner', 'admin'].includes(user.role)) && <MenuItem icon={Merge} onClick={mergeBatch}>공동 업무로 합치기</MenuItem>}
                 {perms.delete && <><div className="my-1 border-t border-line" /><MenuItem icon={Trash2} danger onClick={del}>삭제</MenuItem></>}
               </div>
             </>

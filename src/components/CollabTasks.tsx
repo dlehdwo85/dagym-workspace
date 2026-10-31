@@ -1,5 +1,4 @@
 'use client';
-import { useEffect, useState } from 'react';
 import { STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { cx } from './ui';
 import { multiOf, partsOf, type Co } from './CoAssignees';
@@ -25,18 +24,10 @@ export function collabPeople(t: CollabTask, uid: string): { id: string; name: st
 export function CollabPeople({ t, uid, className }: { t: CollabTask; uid: string; className?: string }) {
   const people = collabPeople(t, uid);
   if (!people.length) return null;
+  // 280차 #826(대표 10/31 "같이 받은 사람 하단 탭을 없애고 위아래 높이를 줄여서"): 이름표만 한 줄(끝낸 사람은 ✓·초록, 진행 상태는 마우스를 올리면)
   return (
-    <div className={cx('flex flex-wrap items-center gap-1 text-[11px]', className)} data-testid="collab-people">
-      <span className="text-ink-3">{multiOf(t) ? '함께 담당' : '같이 받은 사람'}</span>
-      {people.map((p) => <span key={p.id} className={cx('rounded-full border px-1.5 py-0.5', p.done ? 'border-green-200 bg-green-50 text-green-800' : 'border-line bg-white text-ink-2')} data-testid="collab-person">{p.name} <b className="font-medium">{p.state}</b></span>)}
+    <div className={cx('flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[11px]', className)} data-testid="collab-people">
+      {people.map((p) => <span key={p.id} title={p.state} className={cx('shrink-0 rounded-full border px-1.5 py-0', p.done ? 'border-green-200 bg-green-50 text-green-800' : 'border-line bg-white text-ink-2')} data-testid="collab-person" data-state={p.state}>{p.done ? '✓ ' : ''}{p.name}</span>)}
     </div>
   );
 }
-/** 칸 접기 상태 — 사람마다 기억(이 기기) */
-export function useCollabOpen(uid: string): [boolean, (v: boolean) => void] {
-  const key = `collabOpen:${uid}`;
-  const [open, setOpen] = useState(true);
-  useEffect(() => { try { const v = localStorage.getItem(key); if (v !== null) setOpen(v === '1'); } catch { /* 저장소를 못 쓰면 펼친 채 */ } }, [key]);
-  return [open, (v: boolean) => { setOpen(v); try { localStorage.setItem(key, v ? '1' : '0'); } catch { /* 무시 */ } }];
-}
-export const COLLAB_SHOWN = 5;
