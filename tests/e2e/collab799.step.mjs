@@ -33,6 +33,16 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
   // 접지 않음 — 접기 단추 없이 전부
   assert.equal(await staff.getByTestId('my-collab-toggle').count(), 0);
   assert.equal(await box.getByTestId('collab-row').count(), n, '전부 보임');
+  // 281차(로컬 11:28): 사람별 묶음(전체 탭 기본·관리자)·팀별에서도 내가 들어간 공동 업무가 맨 위에 — 전체 탭은 사람 묶음에도 그대로
+  for (const q of ['view=all&group=assignee', 'view=my&group=assignee', 'view=all&group=team']) {
+    await staff.goto(`${BASE}/tasks?${q}`);
+    await staff.getByTestId('task-groups').waitFor();
+    const top2 = staff.getByTestId('my-collab');
+    await top2.waitFor();
+    assert.ok((await top2.getByTestId('collab-row').filter({ hasText: 'E2E 협업 입찰 서류' }).count()) === 1 && (await top2.getByTestId('collab-row').filter({ hasText: 'E2E 각자 협업 점검' }).count()) === 1, `${q} 공동 업무 칸`);
+    const y = async (sel) => (await staff.locator(sel).first().boundingBox()).y;
+    assert.ok(await y('[data-testid="my-collab"]') < await y('[data-testid="task-groups"] section[data-group]:not([data-group="collab"])'), `${q} 공동 업무가 묶음보다 위`);
+  }
   // 홈 맨 위 공동 업무 카드
   await staff.goto(`${BASE}/`);
   const home = staff.getByTestId('home-collab');

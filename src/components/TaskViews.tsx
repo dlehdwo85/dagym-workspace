@@ -837,7 +837,7 @@ function ViewChip({ on, onClick, children, label, grid }: { on: boolean; onClick
  * 담당자별은 본사 사람 전원을 업무 0건이어도 묶음으로 보여 준다(바로 그 사람에게 배정).
  * 직접 순서일 때는 손잡이로 끌어 순서를 바꾸고, 다른 묶음으로 끌면 그 묶음 값(담당자·요청자·마감·프로젝트)으로 바뀐다.
  */
-function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, top, people, sortBy, onSort, onReorder }: {
+function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAcked, top, people, sortBy, onSort, onReorder }: {
   tasks: Task[]; group: GroupBy | 'month'; view: string; assigneeFilter: string | null; onPatch: (t: Task, b: any) => any; onAcked: () => void; top: React.ReactNode;
   people: { id: string; name: string }[]; sortBy: SortKey; onSort: (k: SortKey) => void; onReorder: (ids: string[]) => void;
 }) {
@@ -849,7 +849,11 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
   // 맨 위 열 제목(붙는 줄)은 스크롤해서 첫 묶음 열 제목이 화면 위로 지나간 뒤에만 보임
   const [stuck, setStuck] = useState(false);
   useEffect(() => { const on = () => setStuck(window.scrollY > 220); on(); window.addEventListener('scroll', on, { passive: true }); return () => window.removeEventListener('scroll', on); }, []); // V14 40번: 선택 모드·순서를 바꿀 수 없는 정렬에서는 끌기 꺼짐 — 꾹 누르면 행이 들려 옆 행이 눌리던 문제
-  if (group === 'due' && view === 'my') return <MyGroupedList tasks={tasks} onPatch={onPatch} onAcked={onAcked} top={top} />;
+  if (group === 'due' && view === 'my') return <MyGroupedList tasks={given} onPatch={onPatch} onAcked={onAcked} top={top} />;
+  // 281차(로컬 11:28 운영 확인 — 대표 계정은 사람별 묶음이라 '공동 업무' 칸이 안 보임): 묶음 방식·탭에 상관없이 내가 들어간 공동 업무를 맨 위에.
+  // '내 업무' 탭은 아래 묶음에서 빼고(내 업무 마감별과 같게), 전체·다른 탭은 사람·팀 묶음에도 그대로 둠(팀 전체 보기)
+  const collabTop = group === 'month' ? [] : given.filter((t) => isCollab(t) && (t.assignee_id === user.id || coOf(t).some((c) => c.id === user.id))).sort(collabSort);
+  const tasks = view === 'my' && collabTop.length ? given.filter((t) => !collabTop.includes(t)) : given;
   const today = todayStr();
   const nameOf = (id: string) => dir.users.find((u) => u.id === id)?.name ?? null;
   type G = { key: string; label: string; head?: React.ReactNode; items: Task[]; add: { defaultAssignee?: string | null; defaultRequester?: string | null; defaultDue?: string | null; projectId?: string | null }; tone?: string };
@@ -958,6 +962,7 @@ function GroupedTasks({ tasks, group, view, assigneeFilter, onPatch, onAcked, to
     <DndContext sensors={selOnCtx || !draggable ? NO_SENSORS : sensors} collisionDetection={rowsFirst} onDragEnd={draggable ? end : undefined} onDragStart={(_e: DragStartEvent) => { try { navigator.vibrate?.(15); } catch {} }}>
       <div className="space-y-4" data-testid="task-groups" data-group-by={group}>
         {top && <div className="overflow-hidden rounded-card border border-accent-500/40 bg-white shadow-card ring-2 ring-accent-500/10">{top}</div>}
+        {collabTop.length > 0 && <CollabSection tasks={collabTop} onPatch={onPatch} />}
         {group === 'month' ? (() => {
           // V11 2번: 완료 보기 머리 요약
           const ym = today.slice(0, 7), d = new Date(today.slice(0, 7) + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1);
