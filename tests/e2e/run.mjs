@@ -2619,6 +2619,20 @@ await step('187차 ⑦ 이번 달 만든 영상 다시 합성: 제작의뢰실 �
 await step('#475 업무 공동 배정(10/24 다시 설계): 업무 등록 시트 여러 명 = 기본 함께 담당(1건·완료 규칙 칸 없음) → 상세 담당자 칸 하나에 칩 3개 빼기·[+] 추가·활동 기록 → 담당자별 묶음 3곳·+2 → 휴대폰 [내 몫 완료] → 내 몫 완료 · 1/3(목록에 남음)·상세 진행 상자', () => coAssign({ owner, staff, ctx, sql, BASE, SHOTS }));
 await step('대표 #794 각자 1건씩 묶음 공유: 휴대폰 이직원 업무 상세에 박직원 업무 댓글(\'박직원 업무에서\')·함께 담당자 첨부(보기·내려받기만)·담당자별 체크리스트(잠김) → 열어 둔 화면에 새 댓글 15초 안에', () => batch794({ staff, ctx, sql, BASE, SHOTS }));
 await step('대표 #799 협업 업무 칸(280차 #824·#826 \'공동 업무\'): 휴대폰 이직원 내 업무 맨 위 \'공동 업무\' 2건(함께 담당·같이 받은 묶음, 함께하는 사람 한 줄 이름표) · 개인 칸에 다시 안 나옴 · 접지 않음 · 홈 공동 업무 카드', () => collab799({ staff, ctx, sql, BASE, SHOTS }));
+await step('#823 설정 › 마케팅 알림 항목별: 8항목 · 기본값(시안별 알림함만·시안 제작 중 안 받음) · 바꿔 저장하면 사람별 설정', async () => {
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await owner.goto(BASE + '/settings');
+  const box = owner.getByTestId('mkt-notify'); await box.waitFor();
+  assert.equal(await box.locator('li').count(), 8);
+  assert.equal(await owner.getByTestId('mkt-notify-mode-each').inputValue(), 'inbox');
+  assert.equal(await owner.getByTestId('mkt-notify-mode-drafting').inputValue(), 'off');
+  assert.equal(await owner.getByTestId('mkt-notify-mode-weekly').inputValue(), 'push');
+  await owner.getByTestId('mkt-notify-mode-ai').selectOption('push');
+  await owner.getByTestId('mkt-notify-save').click(); await owner.getByText('마케팅 알림을 저장했습니다').waitFor();
+  const [r] = await sql`select in_app, push from notification_prefs where user_id = ${ctx.ownerId} and type = 'mkt:ai'`;
+  assert.deepEqual([r?.in_app, r?.push], [true, true]);
+  await sql`delete from notification_prefs where user_id = ${ctx.ownerId} and type like 'mkt:%'`;
+});
 await step('270차 #808 승인함 주 단위 묶음 칸 안 게시 날짜별 머리줄(11월 n일(화) 게시 2건 · 승인 1/2)', () => mktBatch808({ owner, ctx, sql, BASE }));
 await step('271차 #811 브랜드 영상 키트 영상 만드는 방법(실제 사진) · 승인함 릴스 [실제 사진으로 영상 만들기 · 0원] · 사진 3장 미만 안내', () => mktSlide811({ owner, ctx, sql, BASE, SHOTS }));
 await step('대표 10/24 ② 회사 월 AI 예산(원): 사용량 화면 게이지(84% 주황·다시 채워지는 날·영상 제작 따로) → AI 비서 회사 사용량 한 줄 → 100% 빨간 안내(다음 달 1일)·입력 막힘 → 플랫폼 운영 요금제 표 원 칸·회사 목록', () => aiBudget({ owner, sql, BASE, SHOTS }));

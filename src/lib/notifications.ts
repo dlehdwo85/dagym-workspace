@@ -18,6 +18,9 @@ export interface NotifyInput {
   meta?: Record<string, unknown>;
   /** #104 어느 공간의 알림인지(목록 묶기·공간별 필터). 영업·마케팅 담당자 라우팅은 spaceNotify.notifySpace() */
   space?: 'work' | 'sales' | 'marketing' | null;
+  /** 282차 #823 항목별 설정(예: 'mkt:each') — 그 사람이 정한 값이 있으면 그것, 없으면 prefDefault(종류별 설정에서 끈 것은 그대로 끔) */
+  prefKey?: string;
+  prefDefault?: 'push' | 'inbox' | 'off';
 }
 
 /**
@@ -43,8 +46,10 @@ export async function notify(sql: Sql, n: NotifyInput): Promise<string[]> {
   for (const userId of targets) {
     const pref = await sql<{ in_app: boolean; push: boolean }[]>`
       select in_app, push from notification_prefs where user_id = ${userId} and type = ${n.type}`;
-    const inApp = pref[0]?.in_app ?? true;
-    let push = n.push === false ? false : (pref[0]?.push ?? defaultPush(n.type));
+    const [item] = n.prefKey ? await sql<{ in_app: boolean; push: boolean }[]>`select in_app, push from notification_prefs where user_id = ${userId} and type = ${n.prefKey}` : [];
+    const def = n.prefKey ? n.prefDefault ?? 'inbox' : null;
+    const inApp = item ? item.in_app : def ? def !== 'off' && pref[0]?.in_app !== false : pref[0]?.in_app ?? true;
+    let push = n.push === false ? false : item ? item.push : def ? def === 'push' && pref[0]?.push !== false : (pref[0]?.push ?? defaultPush(n.type));
     // V35 2 2차 (#76): 부재(직접 설정·연차) 중에는 푸시를 보류하고 목록에만(meta.held) → 돌아온 날 요약 1건
     let held = false;
     if (push && (await (await import('./away')).heldNow(sql, userId))) { push = false; held = true; }

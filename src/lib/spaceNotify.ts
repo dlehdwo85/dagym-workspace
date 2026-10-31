@@ -63,9 +63,12 @@ export function groupOf(space: string, title: string): { group: string; head: st
 
 export async function notifySpace(sql: Sql, n: SpaceNotifyInput): Promise<{ direct: string[]; hourly: string[]; daily: string[] }> {
   const g = groupOf(n.space, n.title);
+  // 282차 #823: 마케팅 알림은 항목별 기본값·사람별 설정(휴대폰 알림·알림함만·안 받음) — mktNotifyKinds
+  const mk = n.space === 'marketing' ? (await import('./mktNotifyKinds')).mktKindOf(n.title) : null;
+  const pk = mk ? { prefKey: `mkt:${mk}`, prefDefault: (await import('./mktNotifyKinds')).mktDefault(mk) } : {};
   // #618: 승인 대기 알림(approval)은 meta.approval 로 표시 → 푸시·목록 버튼 [확인][승인함 열기](notifActions)
-  const extra = { ...(g ?? {}), ...(n.approval ? { approval: true } : {}) };
-  const base = { type: n.type, title: n.title, body: n.body, link: n.link, entityType: n.entityType, entityId: n.entityId, dedupeKey: n.dedupeKey, push: n.push, meta: Object.keys(extra).length ? { ...(n.meta ?? {}), ...extra } : n.meta, space: n.space };
+  const extra = { ...(g ?? {}), ...(n.approval ? { approval: true } : {}), ...(mk ? { mkt: mk } : {}) };
+  const base = { type: n.type, title: n.title, body: n.body, link: n.link, entityType: n.entityType, entityId: n.entityId, dedupeKey: n.dedupeKey, push: n.push, meta: Object.keys(extra).length ? { ...(n.meta ?? {}), ...extra } : n.meta, space: n.space, ...pk };
   if (n.test) {
     const to = n.test.actorId ? [n.test.actorId] : [];
     if (to.length) await notify(sql, { ...base, userIds: to, actorId: null });
@@ -84,9 +87,9 @@ export async function notifySpace(sql: Sql, n: SpaceNotifyInput): Promise<{ dire
   const directIds = [...direct].filter((id) => modes.get(id) !== 'off' || explicit.has(id) || approvers.includes(id));
   if (directIds.length) await notify(sql, { ...base, userIds: directIds, actorId: n.actorId });
   const hourly: string[] = [];
-  for (const [id, m] of modes) if (m === 'all' && !direct.has(id) && id !== n.actorId) { await enqueue(sql, n, id, 'hour'); hourly.push(id); }
+  for (const [id, m] of modes) if (m === 'all' && !direct.has(id) && id !== n.actorId && pk.prefDefault !== 'off') { await enqueue(sql, n, id, 'hour'); hourly.push(id); }
   const daily: string[] = [];
-  if (!direct.size) {
+  if (!direct.size && pk.prefDefault !== 'off') {
     const admin = await fallbackAdmin(sql, n.tenant);
     if (admin && admin !== n.actorId && !hourly.includes(admin) && modes.get(admin) !== 'off') { await enqueue(sql, n, admin, 'day'); daily.push(admin); }
   }
