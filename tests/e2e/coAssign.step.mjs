@@ -50,7 +50,7 @@ export async function coAssign({ owner, staff, ctx, sql, BASE, SHOTS }) {
   // 195차: 조직(부서·팀)이 있는 회사는 '함께하는 부서' 칸 안내가 하나 더 붙음 — 담당자·협업자 안내는 그대로
   assert.deepEqual((await owner.getByTestId('prop-hint').allInnerTexts()).filter((h) => h !== '그 부서와 위 단위도 이 업무를 봅니다'), ['각자 완료 · 모두 끝나면 완료', '보기·댓글 알림만']);
   await box.getByLabel('담당자 추가').selectOption({ label: '박직원' });
-  await owner.getByText('담당자를 추가했습니다').first().waitFor();
+  await owner.getByText('담당자를 추가하고 알렸습니다').first().waitFor(); // 274차 #805 문구
   await box.locator(`[data-testid="assignee-chip"][data-user="${ctx.staffB.id}"]`).waitFor(); // 다시 읽힌 화면에 칩 3개
   await owner.evaluate(() => document.activeElement?.blur?.()); // 열린 선택 목록 닫기(머리 없는 브라우저는 목록이 열린 채 남음)
   assert.deepEqual(await co(), [ctx.staffA.id, ctx.staffB.id]);

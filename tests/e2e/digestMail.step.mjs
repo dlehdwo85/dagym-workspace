@@ -26,7 +26,9 @@ export async function digestMail({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.waitForFunction(() => document.querySelector('[data-testid="prefs-from-name"]')?.value === '시험 영업실');
   const route = box.getByTestId('prefs-mail-route'); await route.waitFor();
   assert.ok((await route.innerText()).length > 10, '발송 경로 안내 한 줄');
-  const p = await ctx.owner.ok('GET', '/api/sales/digest/prefs');
+  // 앞의 [추가] 저장 알림이 아직 떠 있어 위 기다림이 바로 지나갈 수 있음 — 저장이 끝날 때까지(최대 10초) 다시 읽음
+  let p = await ctx.owner.ok('GET', '/api/sales/digest/prefs');
+  for (let i = 0; i < 40 && p.prefs.digest_from_name !== '시험 영업실'; i++) { await owner.waitForTimeout(250); p = await ctx.owner.ok('GET', '/api/sales/digest/prefs'); }
   assert.deepEqual([p.prefs.digest_emails, p.prefs.digest_from_name], [['office@e2e.test'], '시험 영업실']);
   await box.scrollIntoViewIfNeeded();
   await owner.screenshot({ path: `${SHOTS}/218-digest-prefs.png`, clip: await box.boundingBox() });

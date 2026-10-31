@@ -38,8 +38,9 @@ export async function research212({ owner, ctx, sql, BASE, SHOTS }) {
   assert.ok(await owner.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 1, '휴대폰 폭 넘침 없음');
   // 카드 칩 → 업무 → [완료] = 곳마다 값을 적는 창
   await owner.setViewportSize({ width: 1366, height: 900 });
-  await chip.click(); await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}/);
-  const taskId = owner.url().match(/\/tasks\/([0-9a-f-]{36})/)[1];
+  // 300차 #850: 업무 링크는 지금 화면 위 오른쪽 패널(?task=id)로 열림(예전 주소 /tasks/:id 도 받음)
+  await chip.click(); await owner.waitForURL((u) => /^\/tasks\/[0-9a-f-]{36}/.test(u.pathname) || /^[0-9a-f-]{36}$/.test(u.searchParams.get('task') ?? ''));
+  const u0 = new URL(owner.url()); const taskId = u0.searchParams.get('task') ?? u0.pathname.match(/\/tasks\/([0-9a-f-]{36})/)[1];
   await owner.getByTestId('next-action').click();
   const dlg = owner.getByTestId('research-ask'); await dlg.waitFor();
   const rowA = dlg.getByTestId('research-ask-row').filter({ hasText: 'E2E212 광교 단지' });

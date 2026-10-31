@@ -6,6 +6,14 @@ import assert from 'node:assert/strict';
 export async function backKeep({ owner, ctx, sql, BASE }) {
   const q = (k) => new URL(owner.url()).searchParams.get(k);
   const back = async (path) => { await owner.goBack(); await owner.waitForURL((u) => u.pathname === path); };
+  /** 300차 #850: 업무 링크는 지금 화면 위 오른쪽 패널(?task=id)로 열림 — 뒤로가기 = 패널만 닫히고 그 화면(탭·값·스크롤) 그대로 */
+  const viaPanel = async (path) => {
+    await owner.waitForURL((u) => u.pathname === path && /^[0-9a-f-]{36}$/.test(u.searchParams.get('task') ?? ''));
+    await owner.getByTestId('global-task-panel').waitFor();
+    await owner.goBack();
+    await owner.waitForURL((u) => u.pathname === path && !u.searchParams.has('task'));
+    await owner.getByTestId('global-task-panel').waitFor({ state: 'detached' });
+  };
   /** 앱 안 이동(사이드바 '업무')으로 다른 화면에 감 — 뒤로가기로 오면 화면을 다시 그림(새로 불러온 문서가 아님) */
   const leave = async () => { await owner.locator('a[href="/tasks"]:visible, a[href^="/tasks?"]:visible').first().click(); await owner.waitForURL((u) => u.pathname === '/tasks'); };
   await owner.setViewportSize({ width: 1366, height: 900 });
@@ -24,8 +32,7 @@ export async function backKeep({ owner, ctx, sql, BASE }) {
   const y0 = await owner.evaluate(() => Math.round(window.scrollY));
   assert.ok(y0 > 300, `알림 목록을 내림(${y0})`);
   await row('30').click();
-  await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
-  await back('/notifications');
+  await viaPanel('/notifications');
   assert.equal(q('tab'), 'all');
   assert.equal(await owner.getByTestId('notif-all').getAttribute('aria-selected'), 'true', "알림: '전체' 탭 그대로");
   await row('30').waitFor();
@@ -38,8 +45,7 @@ export async function backKeep({ owner, ctx, sql, BASE }) {
   await owner.waitForFunction(() => !new URLSearchParams(location.search).has('tab'));
   await owner.evaluate(() => window.scrollTo(0, 0));
   await row('02').click();
-  await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
-  await back('/notifications');
+  await viaPanel('/notifications');
   await owner.getByTestId('notif-item').filter({ hasText: 'E2E 돌아오기 알림 02' }).and(owner.locator('[data-read="1"]')).waitFor();
 
   // 2) 홈 월 캘린더: 다음 달 → 15일 → 그날 업무를 열었다 뒤로 → 같은 달·같은 날 목록
@@ -54,8 +60,7 @@ export async function backKeep({ owner, ctx, sql, BASE }) {
   await home.locator(`[data-day="${nm}-15"]`).click();
   await owner.waitForFunction((v) => new URLSearchParams(location.search).get('hd') === v, `${nm}-15`);
   await owner.getByTestId('home-month-list').getByText('E2E 돌아오기 홈 업무').click();
-  await owner.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
-  await back('/');
+  await viaPanel('/');
   await owner.getByTestId('home-month-list').getByText('E2E 돌아오기 홈 업무').waitFor();
   assert.match(await home.locator('h2').innerText(), new RegExp(`${Number(nm.slice(5))}월`), '홈: 보던 달 그대로');
 

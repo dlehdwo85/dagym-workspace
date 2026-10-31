@@ -888,7 +888,7 @@ await step('모바일 밀기: 기본 꺼짐·짧은/세로 밀기 무시, 켜면
   assert.notEqual(await status(), 'done', '세로 스크롤 중엔 무시');
   const w = (await row.boundingBox()).width;
   await drag([w * 0.2, w * 0.4, w * 0.5]);
-  await staff.getByText('완료했습니다').waitFor();
+  await staff.getByText('완료됨으로 옮겼습니다').waitFor(); // 274차 #805 안내 문구(줄표 뺌)
   assert.equal(await status(), 'done');
   await row.waitFor({ state: 'detached' }); // #508 목록에서 바로 빠짐
   await staff.getByRole('button', { name: '완료됨 보기' }).click();

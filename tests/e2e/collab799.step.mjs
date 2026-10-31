@@ -11,7 +11,7 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
   const solo = (await o.ok('POST', '/api/tasks', { title: 'E2E 개인 업무 799', orgUnitId: ctx.hq, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
   await b.ok('PATCH', `/api/tasks/${co}`, { status: 'done' }); // 박직원 내 몫 완료(업무는 이직원 몫이 남아 그대로)
   await b.ok('PATCH', `/api/tasks/${bB}`, { status: 'in_progress' });
-  await staff.goto(`${BASE}/tasks?view=my`);
+  await staff.goto(`${BASE}/tasks?view=my&group=due`); // 앞 단계가 이 기기에 '직원별' 묶음을 기억시켰을 수 있음 — 내 업무 기본(마감일 묶음)으로
   const box = staff.getByTestId('my-collab');
   await box.waitFor();
   const n = Number(await box.getByTestId('my-collab-count').innerText()); // 앞 단계가 만든 함께 담당 업무도 있을 수 있음

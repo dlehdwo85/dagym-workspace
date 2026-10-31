@@ -21,7 +21,7 @@ export async function v1443({ browser, desk, ctx, BASE, SHOTS, sql }) {
     const quick = m.getByTestId('status-quick');
     assert.match(await quick.innerText(), /완료/);
     await quick.tap();
-    await m.getByText('완료했습니다').waitFor();
+    await m.getByText('완료됨으로 옮겼습니다').waitFor(); // 274차 #805 안내 문구(줄표 뺌)
     assert.equal((await sql`select status from tasks where id = ${mine}`)[0].status, 'done');
     await m.getByRole('button', { name: '완료됨 보기' }).tap(); // #508 되돌리기는 맨 아래 '완료됨'에서
     await m.getByTestId('done-fold').locator(`[data-done-id="${mine}"]`).getByTestId('done-fold-undo').tap();

@@ -394,7 +394,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
               {/* 대표: 댓글도 음성으로 — 말한 글이 입력칸에 들어감(바로 보내지 않음) */}
               <VoiceButton small value={comment} onChange={setComment} label="음성 입력" />
-              <textarea ref={autoGrow} rows={1} className="block max-h-28 min-h-9 min-w-0 flex-1 resize-none rounded-input border border-line bg-slate-50 px-3 py-[7px] text-sm leading-5 focus:border-accent-500 focus:outline-none focus:ring-0" placeholder="댓글 입력 — @로 사람 부르기"
+              <textarea ref={autoGrow} rows={1} className="block max-h-28 min-h-9 min-w-0 flex-1 resize-none rounded-input border border-line bg-slate-50 px-3 py-[7px] text-sm leading-5 focus:border-accent-500 focus:outline-none focus:ring-0" placeholder="@로 사람 부르기"
                 value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => { cMention.onKeyDown(e); }} data-testid="comment-input" aria-label="댓글" />
               <Button size="sm" type="submit" className="h-9 shrink-0" disabled={!comment.trim()}>등록</Button>
             </div>
