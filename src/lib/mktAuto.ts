@@ -629,7 +629,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   // #235 ⓑ 원고가 '[사진 n]' 줄로 고른 사진들(장면 순서) = 본문 사진(표지 바탕으로는 다시 안 씀) · 고른 사진이 없으면 예전처럼 1장
   const V = await import('./mktAutoVisual');
   let mediaIds: string[] = []; let visualNote = ''; let photoId: string | null = null; let bodyIds: string[] = []; let template: string | null = null; let photoIds: string[] = [];
-  let cover: { photoFix?: string[]; scene?: boolean; gen?: boolean } = {}; // 188차 #621 시안 기록: 표지 사진 보정·영상 장면
+  let cover: { photoFix?: string[]; scene?: boolean; gen?: boolean; plain?: boolean } = {}; // 188차 #621 시안 기록: 표지 사진 보정·영상 장면 · 295차 단색 표지
   if (V.serverVisual({ channel: c.channel, kind })) {
     try { const dv = await V.drawAutoVisual({ ...c, title: f.title, card: d.card }, q.body, d.photos?.length ? { bodyIds: d.photos } : {}); bodyIds = dv.bodyIds; mediaIds = [dv.fileId, ...bodyIds]; photoId = dv.photoId; template = dv.template; photoIds = dv.photoIds; cover = dv;
       visualNote = ` · 시안 서버 그리기(${[dv.templateLabel ? `틀: ${dv.templateLabel}` : '', dv.photoTitle ? `사진: ${dv.photoTitle}` : '브랜드 색 바탕'].filter(Boolean).join(' · ')})` + (dv.bodyTitle ? ` · 본문 사진: ${dv.bodyTitle}` : ''); }
@@ -650,6 +650,8 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   if (mediaIssue && (mediaIds.length || kind === 'blog')) { q.passed = false; q.issues = [...q.issues, mediaIssue]; }
   const visualIssue = VIDEO_KINDS.includes(kind) ? '영상 시안 제작 중 — 영상이 붙으면 승인 대기로 올라갑니다' : '시안 이미지 없음 — 승인함에서 [지금 만들기]';
   if (!mediaIds.length && c.channel !== 'threads' && kind !== 'blog') { q.passed = false; q.issues = [...q.issues, visualIssue]; }
+  // 295차 #835(대표 '배경 단색에 글자 하나 툭'): 피드·스토리 표지가 단색 바탕 + 글자뿐이면 승인함 대신 수정 요청 — 정기 실행이 같은 브랜드 실사 참고로 표지 사진을 만들면 승인 대기로
+  if (cover.plain && V.plainCoverOf({ channel: c.channel, kind })) { q.passed = false; q.issues = [...q.issues, V.PLAIN_ISSUE]; }
   const visualOnly = !q.passed && q.issues.length === 1 && q.issues[0] === visualIssue;
   const held = how === 'auto' && !!s.auto_hold && !V.templateReady(brand); // #544 브랜드 템플릿 전(회사 설정 켬): 승인함 대신 초안 보관(알림 없음)
   const deadline = deadlineOf(c.scheduled_at, s);
@@ -679,7 +681,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
     if (!mediaIds.length && !held) await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', f.timing ? `${brief}\n\n${f.timing}` : brief, screen ? 0 : kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
     else await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'generate_image', 0, '시안 서버 그리기 — 크레딧 0', ${f.title})`;
   });
-  if (!held && !batch && !isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `승인 요청: ${f.title}` : kind === 'blog' && q.issues.length === 1 ? `사진 필요: ${f.title}` : visualOnly ? `시안 제작 중: ${f.title}` : `품질 검사 미통과: ${f.title}`,
+  if (!held && !batch && !isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `승인 요청: ${f.title}` : kind === 'blog' && q.issues.length === 1 ? `사진 필요: ${f.title}` : visualOnly ? `시안 제작 중: ${f.title}` : q.issues.length === 1 && q.issues[0] === V.PLAIN_ISSUE ? `표지 사진 필요: ${f.title}` : `품질 검사 미통과: ${f.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
   // 271차 #811 영상 만드는 방법이 실제 사진이면 원고 직후 이 판에 사진 영상(생성 비용 0) — 사진이 3장이 안 되면 제작 요청 카드 그대로
   // 273차: 앱 화면 녹화면 이 브랜드의 안 쓴 녹화(자료실 '마케팅/화면 녹화')로 — 없으면 카드 그대로
@@ -1178,8 +1180,9 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     else if (c.auto && isBlog(c) && media.length < V.BLOG_AUTO_MEDIA) media = [...media, ...(await V.drawInfoCards(c, body, V.BLOG_AUTO_MEDIA - media.length).catch(() => [] as string[]))];
     visual = { by: 'server', fileId: drawn.fileId, at: new Date().toISOString(), photoId: drawn.photoId, rv: 3, tried: [...new Set([...tried, ...(drawn.photoId ? [drawn.photoId] : [])])].slice(-20), ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}),
       ...(drawn.template ? { template: drawn.template } : {}), ...(drawn.photoIds.length > 1 ? { photoIds: drawn.photoIds } : {}), ...V.coverMark(drawn) };
-    const left = q.issues.filter((x) => !V.VISUAL_ISSUE.test(x));
-    if (!q.passed && q.issues.length && !left.length) q.passed = true; // 시안이 없어서만 막혀 있던 글
+    const left = q.issues.filter((x) => !V.VISUAL_ISSUE.test(x) && x !== V.PLAIN_ISSUE);
+    if (!q.passed && q.issues.length && !left.length) q.passed = true; // 시안이 없어서만(또는 단색 표지라서만) 막혀 있던 글
+    if (drawn.plain && V.plainCoverOf(c)) { left.push(V.PLAIN_ISSUE); q.passed = false; } // 295차 #835: 다시 그려도 단색 표지면 수정 요청에 남김
     q.issues = left;
     // 289차 #814-2: 사진 요청이면 뒤쪽 사진(블로그 본문·카드 장)도 — 흔들림·브랜드 밖·겹침(+ '문구와 사진 불일치'면 그 자리 글과 안 맞는 사진)을 바꿈
     if (o.photo && media.length > 1) {

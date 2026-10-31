@@ -127,6 +127,14 @@ export function hintsOf(o: { head: string; sub: string; title: string; body: str
 
 export const usesPhoto = (t: string) => ['photo', 'photos4'].includes(String(FEED_TEMPLATES[t as TemplateId]?.need ?? ''));
 export type Assets = { photo: boolean; photos: number; screen: boolean; screenWide?: boolean };
+/**
+ * 295차 #835(대표 '배경 단색에 글자 하나 툭 놓고 단조롭다'): 사진·화면·도표 없이 바탕 색 + 글자만인 틀 — 표지로는 사진·화면·도표 틀이 하나라도 될 때 쓰지 않음.
+ * 이벤트 포스터는 기간(혜택 기간)이 있을 때만 포스터 구성(제목 + 혜택 + 기간·연락처)이라 도표로 봄. 번호 목록·VS·가격 카드 = 도표
+ */
+export const PLAIN_TEMPLATES: TemplateId[] = ['title', 'statement', 'report'];
+export const plainCover = (t: TemplateId | string, h: { period?: string }) => PLAIN_TEMPLATES.includes(t as TemplateId) || (t === 'poster' && !h.period);
+/** 키트에 사진·화면·도표 틀이 없거나 쓸 수 없을 때 표지에 대신 쓰는 공통 틀(키트 색으로 그림) — 사진 먼저 */
+export const COVER_FALLBACK: TemplateId[] = ['photo_fade', 'photo_dim', 'phone', 'laptop', 'list'];
 export function eligible(t: TemplateId, h: Hints, a: Assets) {
   const need = FEED_TEMPLATES[t].need as Need;
   return need === null || (need === 'photo' && a.photo) || (need === 'photos4' && a.photos >= 4) || (need === 'screen' && a.screen) || (need === 'screen_wide' && !!a.screenWide) || (need === 'points' && h.points.length >= 3)
@@ -138,7 +146,9 @@ export function chooseTemplate(pool: TemplateId[], o: { near: (string | null)[];
   if (!pool.length) return null;
   if (o.prefer && pool.includes(o.prefer as TemplateId) && o.prefer !== o.avoid) return o.prefer as TemplateId;
   const keep = pool.filter((t) => t !== o.avoid); const fresh = keep.filter((t) => !o.near.includes(t));
-  const cands = fresh.length ? fresh : keep.length ? keep : pool;
+  // 295차: 쓸 수 있는 틀이 적어(단색 틀을 빼면 2~3종) 가까운 3개를 다 피할 수 없으면 바로 앞 글(가장 가까운 글) 틀만이라도 피함
+  const notLast = keep.filter((t) => t !== o.near[0]);
+  const cands = fresh.length ? fresh : notLast.length ? notLast : keep.length ? keep : pool;
   return [...cands].sort((a, b) => (o.usage[a] ?? 0) - (o.usage[b] ?? 0) || hash(o.seed + a) - hash(o.seed + b))[0];
 }
 /** 자료실 사진 이름 → 4분할 이름표(카메라 파일 이름·숫자만이면 비움) */

@@ -17,6 +17,7 @@ import { BrandExamples, type Example } from './BrandExamples';
 import { BrandKitAi } from './BrandKitAi';
 import { BrandMerge } from './BrandMerge';
 import { MktPhotos } from './MktPhotos';
+import { RefCheck } from './RefCheck';
 import { MODE_HINT, ModeChip, ModeToggle, asMode, type Mode } from './ModeToggle';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -130,6 +131,8 @@ export function Automation() {
         </section>)}
       {/* 275차 #809(대표 10/29 '상용화 했을 때 기준으로 시험'): 우리 회사만 — 브랜드별 이번 달 원가·승인률 · 요금제 가격 대비 원가율 */}
       {ed && data.production?.internal && <TrialView />}
+      {/* 295차 #835 레퍼런스 대조표(승인 대기·수정 요청 글 × 레퍼런스 기준) */}
+      <RefCheck />
       {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-recipients">
         <h2 className="text-sm font-semibold">알림·승인 받는 사람</h2>
         <p className="mt-1 text-xs text-ink-2">고르지 않으면 관리자 전원. 시험 모드 브랜드는 여기와 상관없이 실행한 사람에게만 갑니다.</p>

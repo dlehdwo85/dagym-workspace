@@ -122,7 +122,7 @@ test('승인 대기 블로그 다시 검사: 브랜드 밖 본문 사진은 이 
 async function pendingBlog(brandId, title, body, media, visual, hours) {
   const at = new Date(Date.now() + 2 * 864e5 + hours * 3600e3);
   const [c] = await sql`insert into mkt_contents (tenant, brand_id, title, channel, kind, scheduled_at, status, current_version, created_by, auto, quality)
-    values ('default', ${brandId}, ${title}, 'blog', 'blog', ${at}, 'pending', 1, ${ctx.ownerId}, true, ${sql.json({ visual: { by: 'server', rv: 7, ...visual } })}) returning id`;
+    values ('default', ${brandId}, ${title}, 'blog', 'blog', ${at}, 'pending', 1, ${ctx.ownerId}, true, ${sql.json({ visual: { by: 'server', rv: 8, ...visual } })}) returning id`;
   await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${body}, ${media}, '시안', ${ctx.ownerId})`;
   return c.id;
 }
