@@ -27,7 +27,7 @@ export function Collectors() {
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={4} />;
   async function toggle(c: C, scope: 'tenant' | 'global') { try { await api('/api/sales/collectors', { method: 'PUT', body: { slug: c.slug, enabled: scope === 'tenant' ? !c.enabled : !c.globalEnabled, scope } }); reload(); } catch (e: any) { toast.error(e.message); } }
-  async function run(c: C) { setBusy(c.slug); try { const r = await api<any>(`/api/sales/collectors/${c.slug}/run`, { body: {} }); toast[r.status === 'failed' ? 'error' : 'ok'](`${c.label}: ${r.summary ?? r.status}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(null); } }
+  async function run(c: C, full = false) { setBusy(c.slug); try { const r = await api<any>(`/api/sales/collectors/${c.slug}/run`, { body: full ? { full: true } : {} }); toast[r.status === 'failed' ? 'error' : 'ok'](`${c.label}: ${r.summary ?? r.status}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(null); } }
   const total = Object.values(data.counts).reduce((a, b) => a + b, 0);
   return (
     <section id="collectors" className="scroll-mt-16 rounded-card border border-line bg-white p-4 shadow-card" data-testid="sales-collectors">
@@ -46,6 +46,7 @@ export function Collectors() {
             <span className="text-xs text-ink-3">{(c.hours ?? [c.hourKst]).map((h) => `${String(h).padStart(2, '0')}:00`).join('·')} · {c.lastRunAt ? `마지막 ${fmtDateTime(c.lastRunAt)}` : '아직 안 돌음'}</span>
             <span className="ml-auto flex items-center gap-1.5">
               {data.canEdit && <Button size="sm" variant="secondary" onClick={() => run(c)} disabled={busy === c.slug || !c.globalEnabled} data-testid="sales-collector-run">{busy === c.slug ? '수집 중…' : '지금 수집'}</Button>}
+              {data.canEdit && c.bid && <Button size="sm" variant="secondary" onClick={() => run(c, true)} disabled={busy === c.slug || !c.globalEnabled} title="놓친 공고 채우기 — 최근 14일을 다시 받습니다" data-testid="sales-collector-run-full">14일 다시 받기</Button>}
               {data.canEdit && <label className={cx('inline-flex min-h-[32px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium', c.enabled ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-line bg-white text-ink-3')}><input type="checkbox" className="size-4 accent-brand-600" checked={c.enabled} onChange={() => toggle(c, 'tenant')} aria-label={`${c.label} 사용`} data-testid="sales-collector-toggle" />{c.enabled ? '사용 중' : '사용 안 함'}</label>}
               {data.platformAdmin && <button type="button" className="text-[11px] underline text-ink-3" onClick={() => toggle(c, 'global')}>{c.globalEnabled ? '플랫폼 끄기' : '플랫폼 켜기'}</button>}
             </span>
@@ -61,7 +62,7 @@ export function Collectors() {
           {c.last?.error_log && <details className="mt-0.5 text-xs text-red-700"><summary className="cursor-pointer">오류 {c.last.errors}건</summary><pre className="whitespace-pre-wrap break-all">{c.last.error_log}</pre></details>}
         </li>); })}</ul>
       {data.full !== false && <details className="mt-2 text-xs" open={open === 'runs'} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open ? 'runs' : null)}><summary className="cursor-pointer text-ink-2">최근 실행 {data.runs.length}건</summary>
-        <ul className="mt-1 space-y-0.5" data-testid="sales-collector-runs">{data.runs.map((r) => <li key={r.id} className="text-ink-2">{fmtDateTime(r.started_at)} · {r.slug} · {ST[r.status]?.[0] ?? r.status} · 신규 {r.inserted} 갱신 {r.updated} 변화없음 {r.unchanged}{r.errors ? ` 오류 ${r.errors}` : ''} · {r.trigger === 'manual' ? '수동' : '자동'}</li>)}</ul></details>}
+        <ul className="mt-1 space-y-0.5" data-testid="sales-collector-runs">{data.runs.map((r) => <li key={r.id} className="text-ink-2">{fmtDateTime(r.started_at)} · {r.slug} · {ST[r.status]?.[0] ?? r.status} · 신규 {r.inserted} 갱신 {r.updated} 변화없음 {r.unchanged}{r.errors ? ` 오류 ${r.errors}` : ''} · {r.trigger === 'manual' ? '수동' : r.trigger === 'retry' ? '다시 시도(14일)' : '자동'}</li>)}</ul></details>}
     </section>
   );
 }

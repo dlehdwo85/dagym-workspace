@@ -290,7 +290,7 @@ export async function completeRun(id: number, slug: string, r: CollectorResult, 
   const st = status ?? (r.errors > 0 && r.inserted + r.updated + r.unchanged === 0 ? 'failed' : r.errors > 0 ? 'partial' : 'success');
   const sql = db();
   await sql`update sales_collector_runs set finished_at = now(), status = ${st}, inserted = ${r.inserted}, updated = ${r.updated}, unchanged = ${r.unchanged}, errors = ${r.errors}, error_log = ${r.errorLog?.slice(0, 4000) ?? null}, summary = ${r.summary?.slice(0, 1000) ?? null}, provider_mode = ${r.providerMode},
-    detail = ${r.sources ? sql.json({ sources: r.sources } as never) : null} where id = ${id}`;
+    detail = ${r.sources || r.retry ? sql.json({ ...(r.sources ? { sources: r.sources } : {}), ...(r.retry ? { retry: true } : {}) } as never) : null} where id = ${id}`;
   await sql`insert into sales_collector_state (slug, last_run_at, last_status) values (${slug}, now(), ${st}) on conflict (slug) do update set last_run_at = now(), last_status = excluded.last_status, updated_at = now()`;
   return st;
 }

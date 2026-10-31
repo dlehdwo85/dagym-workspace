@@ -21,14 +21,16 @@ export async function bidGroups({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/s/sales/bids?tab=all&q=${encodeURIComponent('E2E 묶음')}`);
   const list = owner.getByTestId('sales-bids');
-  const screen = list.getByTestId('sales-bid').filter({ hasText: '스크린골프' }); await screen.first().waitFor();
+  const screen = list.getByTestId('sales-bid').filter({ hasText: '스크린골프' });
+  const cmty = list.getByTestId('sales-bid').filter({ hasText: '커뮤니티센터 통합관리' }); await cmty.first().waitFor();
+  assert.equal(await cmty.count(), 1, 'K-apt 재게시 한 장');
+  assert.equal(await cmty.getByTestId('bid-history-posts').innerText(), `2회 게시(${md(ymd(-4))}·${md(ymd(-2))})`);
+  assert.equal(await screen.count(), 0, '278차 #830: 취소 공고는 전체 탭에서 빠짐');
+  await list.getByTestId('sales-bids-tab-canceled').click(); await screen.first().waitFor();
   assert.equal(await screen.count(), 1, '취소 공고는 따로 카드로 안 나옴');
   assert.equal(await screen.getByTestId('bid-status').innerText(), '취소');
   assert.equal(await screen.getByTestId('bid-history-cancel').innerText(), `${md(ymd(-1))} 취소 공고`);
   assert.equal(await screen.getByTestId('sales-handoff').count(), 0, '취소 공고는 [넘기기] 대신 [대상 아님으로]');
-  const cmty = list.getByTestId('sales-bid').filter({ hasText: '커뮤니티센터 통합관리' });
-  assert.equal(await cmty.count(), 1, 'K-apt 재게시 한 장');
-  assert.equal(await cmty.getByTestId('bid-history-posts').innerText(), `2회 게시(${md(ymd(-4))}·${md(ymd(-2))})`);
   await owner.screenshot({ path: `${SHOTS}/256-bid-groups.png` });
   // 취소 카드 → [대상 아님으로](사유) → 전체 탭에서 빠짐
   await screen.getByTestId('bid-skip-open').click();
@@ -49,8 +51,9 @@ export async function bidGroups({ owner, ctx, sql, BASE, SHOTS }) {
   await sk.getByTestId('bid-skip-restore').click();
   await owner.getByText('되돌렸습니다').first().waitFor();
   await sk.waitFor({ state: 'detached' });
-  await list.getByTestId('sales-bids-tab-all').click();
+  await list.getByTestId('sales-bids-tab-canceled').click(); // 되돌리면 다시 '취소된 공고' 탭
   await list.getByTestId('sales-bid').filter({ hasText: '스크린골프' }).waitFor();
+  await list.getByTestId('sales-bids-tab-all').click(); await cmty.first().waitFor();
   // 상세 상태 버튼 '대상아님' = 사유를 묻고 넘김 → [되돌리기]
   await cmty.getByTestId('bid-open').click();
   const panel = owner.getByTestId('work-panel'); await panel.waitFor();

@@ -39,7 +39,7 @@ export function isDue(c: Pick<Collector, 'hourKst' | 'againKst'>, lastRunAt: Dat
 }
 
 /** 한 수집기 실행(실행 이력·공용 상태 갱신). 예산은 Vercel 60초 안 — 기본 45초 */
-export async function runCollector(slug: string, trigger: 'cron' | 'manual', opt: { deadlineMs?: number; params?: Record<string, unknown>; fetchImpl?: typeof fetch } = {}) {
+export async function runCollector(slug: string, trigger: 'cron' | 'manual' | 'retry', opt: { deadlineMs?: number; params?: Record<string, unknown>; fetchImpl?: typeof fetch } = {}) {
   const c = find(slug); if (!c) throw notFound('그런 수집기가 없습니다');
   const runId = await startRun(slug, trigger);
   const ctx: CollectorCtx = { fetchImpl: opt.fetchImpl ?? fetch, deadlineMs: opt.deadlineMs ?? 45000, params: opt.params, now: Date.now };
@@ -62,9 +62,21 @@ export async function collectorsTick(opt: { now?: Date } = {}) {
   const [anyTenant] = await sql<{ n: number }[]>`select count(*)::int as n from tenants where spaces @> array['sales']::text[]`;
   if (!anyTenant?.n) return { skipped: 'no sales tenant' };
   const due = COLLECTORS.find((c) => { const s = states.get(c.slug); if (s && !s.enabled) return false; return isDue(c, s?.last_run_at ? new Date(s.last_run_at) : null, hour, today); });
-  if (!due) return { ran: null };
-  const r = await runCollector(due.slug, 'cron');
-  return { ran: due.slug, status: r.status, summary: r.summary };
+  if (due) { const r = await runCollector(due.slug, 'cron'); return { ran: due.slug, status: r.status, summary: r.summary }; }
+  // 278차 #816: 원천이 웹페이지·요청 실패로 못 받았으면(detail.retry) 30분 뒤 다시 — 최근 14일 전체로 받아 놓친 공고를 채움. 하루 RETRY_MAX 번까지
+  const again = await retryDue(now);
+  if (!again) return { ran: null };
+  const r = await runCollector(again, 'retry', { params: { full: true } });
+  return { ran: again, retry: true, status: r.status, summary: r.summary };
+}
+export const RETRY_MIN = 30, RETRY_MAX = 12;
+async function retryDue(now: Date) {
+  const sql = db();
+  const rows = await sql<{ slug: string; started_at: Date; retry: boolean; tries: number; enabled: boolean | null }[]>`select l.slug, l.started_at, coalesce((l.detail->>'retry')::boolean, false) as retry,
+      (select count(*)::int from sales_collector_runs r where r.slug = l.slug and r.trigger = 'retry' and r.started_at > now() - interval '24 hours') as tries, st.enabled
+    from (select distinct on (slug) slug, started_at, detail from sales_collector_runs where status <> 'running' and started_at > now() - interval '24 hours' order by slug, started_at desc) l
+    left join sales_collector_state st on st.slug = l.slug`;
+  return rows.find((r) => r.retry && r.enabled !== false && find(r.slug) && r.tries < RETRY_MAX && now.getTime() - new Date(r.started_at).getTime() >= RETRY_MIN * 60e3)?.slug ?? null;
 }
 /**
  * #522 누락 점검(로컬 10/24 '실패가 3일째 조용히 지나갔다'): 켜진 수집기마다(원천이 여럿이면 원천마다) 마지막 성공·연속 실패.
@@ -91,8 +103,9 @@ export async function collectorAlerts(now = Date.now()): Promise<CollectorAlert[
       for (const r of rs) { const ok = u.ok(r); if (ok === null) continue; oldest = new Date(r.started_at); if (ok) { lastOk = oldest; break; } streak++; err ??= u.err(r); hint ??= [r.summary, r.error_log].filter(Boolean).join(' ') || null; }
       if (!oldest) continue;
       const stale = now - (lastOk ?? oldest).getTime() > LIMIT;
-      if (streak >= 2 || stale) {
-        const reason = streak >= 2 ? `${streak}회 연속 실패` : lastOk ? `마지막 성공 ${Math.floor((now - lastOk.getTime()) / 3600e3)}시간 전` : '최근 성공 없음';
+      const html = streak >= 1 && /웹페이지\(HTML\)/.test(`${err ?? ''} ${hint ?? ''}`); // 278차 #816: 원천이 웹페이지를 주면 한 번에 알림(점검·한도 초과·차단 — 사람이 봐야 함)
+      if (streak >= 2 || stale || html) {
+        const reason = html && streak < 2 ? '원천이 웹페이지(HTML)를 돌려줌 — 30분마다 다시 시도 중' : streak >= 2 ? `${streak}회 연속 실패` : lastOk ? `마지막 성공 ${Math.floor((now - lastOk.getTime()) / 3600e3)}시간 전` : '최근 성공 없음';
         const error = err?.split('\n')[0].slice(0, 160) ?? null;
         // #629: 첫 줄은 '할 일' 문장(todo) — 오류 원문·영문 코드·HTTP 코드는 error 로 따로(화면에서 접힘 '자세히'). 서비스 번호는 원문에 없으면 실행 요약·오류 기록(hint)에서
         out.push({ slug: c.slug, source: u.source, label: u.label, lastOkAt: lastOk?.toISOString() ?? null, failStreak: streak, error, reason, ...collectorTodo({ slug: c.slug, source: u.source, error, hint, reason }) });
@@ -117,7 +130,9 @@ export async function collectorAlertTick(now = new Date()) {
   // #602: 원천 이름·HTTP 코드·연속 실패 수는 슈퍼관리자·내부 테넌트에게만. 고객사 관리자에게는 '오늘 새 공고를 받지 못했습니다' 한 줄
   const seesAll = (p: { email: string; pa: boolean; tenant: string }) => superAdmin(p.email, p.pa) || p.tenant === INTERNAL_TENANT;
   const ins = people.filter(seesAll), cust = people.filter((p) => !seesAll(p));
-  const common = { type: 'sales_collector_alert', link: '/s/sales/sources#collectors', entityType: 'sales_collector', actorId: null, dedupeKey: `salescol:${day}`, space: 'sales' } as const;
+  // 278차 #816: 같은 날이라도 문제 원천이 바뀌면 다시 알림(오전에 다른 원천 알림이 갔어도 나라장터 웹페이지 응답은 따로)
+  const set = alerts.map((a) => `${a.slug}:${a.source ?? ''}`).sort().join(',');
+  const common = { type: 'sales_collector_alert', link: '/s/sales/sources#collectors', entityType: 'sales_collector', actorId: null, dedupeKey: `salescol:${day}:${set}`.slice(0, 200), space: 'sales' } as const;
   const sent = [
     ...(ins.length ? await notify(sql, { ...common, userIds: ins.map((p) => p.id), title, body }) : []),
     ...(cust.length ? await notify(sql, { ...common, userIds: cust.map((p) => p.id), title: '오늘 새 공고를 받지 못했습니다', body: CUSTOMER_COPY.todayMissed }) : []),
@@ -160,13 +175,13 @@ export async function setCollectorEnabled(u: SessionUser, slug: string, enabled:
   await audit(sql, u.id, 'sales_collector.toggle', 'tenant', null, { slug, enabled, scope }).catch(() => {});
   return { slug, enabled, scope };
 }
-export async function runCollectorManual(u: SessionUser, slug: string) {
+export async function runCollectorManual(u: SessionUser, slug: string, opt: { full?: boolean } = {}) {
   await assertSpace(u, 'sales'); if (!isAdmin(u)) throw forbidden('지금 수집은 관리자만');
   if (!find(slug)) throw notFound('그런 수집기가 없습니다');
   const [running] = await db()<{ id: number }[]>`select id from sales_collector_runs where slug = ${slug} and status = 'running' and started_at > now() - interval '3 minutes'`;
   if (running) throw forbidden('이미 실행 중입니다 — 잠시 뒤 다시');
-  const r = await runCollector(slug, 'manual', { deadlineMs: 40000 });
-  await audit(db(), u.id, 'sales_collector.run', 'tenant', null, { slug, status: r.status }).catch(() => {});
+  const r = await runCollector(slug, 'manual', { deadlineMs: 40000, ...(opt.full ? { params: { full: true } } : {}) }); // 278차 #816: [14일 다시 받기]
+  await audit(db(), u.id, 'sales_collector.run', 'tenant', null, { slug, status: r.status, full: !!opt.full }).catch(() => {});
   if (seesInternals(u)) return r;
   // #602 고객사: 결과는 '받았습니다 n건 / 못 받았습니다 — 연결을 확인해 주세요'만(오류 원문·원천별 상세 없음)
   return { runId: r.runId, slug: r.slug, status: r.status, inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: 0, summary: r.status === 'failed' ? CUSTOMER_COPY.notReceived : CUSTOMER_COPY.received(r.inserted + r.updated + r.unchanged) };

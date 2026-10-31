@@ -112,7 +112,8 @@ describe('입찰 업무로 넘기기', () => {
     assert.equal((await sql`select count(*)::int c from events where id = any(${r.eventIds}::uuid[]) and deleted_at is not null`)[0].c, 2, '일정 취소');
     const w = await work('B2'); assert.deepEqual([w.status, w.data.bid_result], ['공고 취소', 'canceled']);
     const [n] = await sql`select type from notifications where user_id = ${ctx.staffA.id} and title like '공고 취소:%'`; assert.equal(n?.type, 'bid_update');
-    const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.find((x) => x.id === 'B2');
+    assert.ok(!(await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.some((x) => x.id === 'B2'), '278차 #830: 취소 공고는 작업 중 탭에서 빠짐');
+    const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=canceled')).items.find((x) => x.id === 'B2');
     assert.equal(card?.workBid?.result, 'canceled');
     // 제목에 '취소'가 든 일반 공고(수집 때 공고 종류를 '취소'로 추정) — 원천 상태가 취소가 아니면 그대로 진행
     await put({ id: 'B7', title: '자동차 등록 취소 업무 대행 용역', issuer: '구청', notice_kind: 'cancel', current_status: '공고중', related: true, first_seen_at: today, deadline_at: `${addDays(today, 5)}T10:00` });

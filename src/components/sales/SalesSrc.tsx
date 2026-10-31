@@ -1142,7 +1142,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
   if (error) return <ErrorBox error={error} retry={reload} />;
   // 메일·홈 링크로 온 soon(마감 임박)·prep(준비 기간)·ref(참고) 탭은 칩에 없지만 그 탭에 있는 동안만 칩으로 보여 줌
   const extra: [string, string][] = tab === 'ref' ? [['ref', '참고(검색어만 일치)']] : tab === 'soon' ? [['soon', '마감 임박(3일)']] : tab === 'prep' ? [['prep', '준비 기간(D-10 안)']] : [];
-  const chips: [string, string][] = [...BID_CHIPS.map(([k, l]) => [k, k === 'today' && data ? `${l} ${data.todayCount ?? 0}` : l] as [string, string]), ...extra, ['skip', `대상 아님${data ? ` ${data.skipCount ?? 0}건` : ''}`]];
+  const chips: [string, string][] = [...BID_CHIPS.map(([k, l]) => [k, k === 'today' && data ? `${l} ${data.todayCount ?? 0}` : l] as [string, string]), ...extra, ['skip', `대상 아님${data ? ` ${data.skipCount ?? 0}건` : ''}`], ...(tab === 'canceled' || data?.canceledCount ? [['canceled', `취소된 공고${data ? ` ${data.canceledCount ?? 0}건` : ''}`] as [string, string]] : [])];
   const row = (n: any) => <li key={n.id} className="relative">{data?.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data?.readOnly === false} /></li>;
   return (
     <div className="space-y-3" data-testid="sales-bids">

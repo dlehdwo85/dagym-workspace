@@ -49,11 +49,14 @@ after(async () => { srv?.proc.kill(); await sql?.end(); });
 test('같은 공고 한 장: 취소 공고는 원 공고에 · 재게시 묶음 · 완전 중복 하나 · 대상 아님 숨김', async () => {
   const all = await bids('all');
   const of = (re) => all.items.filter((n) => re.test(n.title));
-  const screen = of(/스크린골프/);
+  // 278차 #830: 취소된 공고는 전체 탭에서도 빠지고 '취소된 공고' 탭에만
+  const can = await bids('canceled'); const ofC = (re) => can.items.filter((n) => re.test(n.title));
+  assert.deepEqual([of(/스크린골프/).length, of(/수영장 노후배관/).length], [0, 0], '취소 공고는 전체 탭에서 빠짐');
+  const screen = ofC(/스크린골프/);
   assert.equal(screen.length, 1, '(가) 취소 공고는 따로 카드로 안 냄');
   assert.deepEqual([screen[0].id, screen[0].status, screen[0].history.cancelDay, screen[0].history.cancelNotice], ['G1', '취소', d(-1), true], '원 공고 카드에 취소 · 취소 공고 날짜');
   assert.equal(screen[0].attachments.length, 2, '첨부는 묶음 전체');
-  const pool = of(/수영장 노후배관/);
+  const pool = ofC(/수영장 노후배관/);
   assert.deepEqual(pool.map((n) => [n.id, n.status]), [['H1', '취소']], '(나) 원 공고 마감 + 취소 공고 → 취소');
   const cmty = of(/커뮤니티센터 통합관리/);
   assert.equal(cmty.length, 1, '(다) K-apt 재게시 한 장');

@@ -61,13 +61,14 @@ test('수집: 같은 공고 두 줄(워크인 수집 + 원본 복사)을 모두 
 });
 
 test('목록: 카드 한 장 · 취소(사유) · 진행 중 탭에서 빠짐 — 원본 매일 복사가 한 줄을 진행중으로 되돌려도 카드는 취소', async () => {
-  let all = await card('all');
+  assert.equal((await card('all')).length, 0, '278차 #830: 취소 공고는 전체 탭에서도 빠지고 취소된 공고 탭에');
+  let all = await card('canceled');
   assert.equal(all.length, 1, '같은 공고 한 장');
   assert.equal(all[0].status, '취소'); assert.equal(all[0].cancelReason, WHY);
   assert.equal((await card('open')).length, 0, '진행 중 탭에서 빠짐');
   // 원본 복사 줄만 예전 값으로(취소 표시 없음) — 이 줄이 '가장 나중 게시'여도 같은 번호 줄이 취소면 카드는 취소
   await sql`update sales_src_rows set row = row - 'kapt_cancel_at' - 'result_note' || ${sql.json({ current_status: '진행중', notice_state: '신규공고', notice_kind: 'urgent' })}::jsonb where src_id = ${S}`;
-  all = await card('all');
+  all = await card('canceled');
   assert.deepEqual([all.length, all[0]?.status], [1, '취소']);
   assert.equal((await card('open')).length, 0);
 });

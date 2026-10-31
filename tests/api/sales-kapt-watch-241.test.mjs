@@ -66,7 +66,7 @@ test('목록 밖 마감 전 관련 공고 상세를 다시 읽어 취소를 잡�
   // 목록 카드: C 는 취소(진행 중 탭에서 빠짐)
   const open = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=open')).items.map((x) => x.noticeNo);
   assert.ok(!open.includes(N.C), JSON.stringify(open));
-  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === N.C)?.status, '취소');
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=canceled')).items.find((x) => x.noticeNo === N.C)?.status, '취소'); // 278차 #830: '취소된 공고' 탭
   // 다시 수집: 취소된 C 는 더 안 읽고(끝난 공고), L 은 다시 읽음(마감 전)
   kapt.calls.length = 0;
   await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});

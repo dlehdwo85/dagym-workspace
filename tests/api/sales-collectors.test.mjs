@@ -3,7 +3,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createHash } from 'node:crypto';
-import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { BASE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 import { fakeKapt } from '../fakeKapt.mjs';
 
 const PORT = 3231;
@@ -26,6 +26,8 @@ const kapt = fakeKapt({ files: { '20261021000001': [{ seq: 7001, fileName: '래�
       <table><tr><th>입찰분류</th><td>${detailCat[bid] ?? '용역 &gt; 커뮤니티 위탁운영'}</td></tr><tr><th>입찰종류</th><td>일반경쟁</td></tr><tr><th>내용</th><td><pre>커뮤니티센터 피트니스·수영장 위탁운영 사업자 선정</pre></td></tr></table><a href="javascript:fileDown('7001')">공고문.hwp</a>` });
 let agencyV2 = false, hotelMode = 'ok', lhFail = false; // #522: 새 명세(swagger) 응답 모양 · 관광숙박업 오류 응답(JSON) · 로컬 10/24 LH 오류 11
 const ymd8 = (n) => plus(n).replace(/-/g, '');
+let g2bMode = 'ok'; // 278차 #816: 'html' = data.go.kr 가 JSON 대신 점검 웹페이지
+const G2B_HTML = '<!DOCTYPE html><html><head><title>공공데이터포털</title><script>var a=1;</script></head><body><h1>시스템 점검 안내</h1><p>보다 나은 서비스를 위해 점검 중입니다. 문의 help@data.go.kr</p></body></html>';
 let vendorStatus = 200, nuriMode = 'denied'; // 누리장터: denied(활용신청 전) · empty(정상 0건) · odd(칸 이름이 다른 응답) · ok(새 명세 칸 이름 — 로컬 10/23 운영 응답)
 let vendorHtml = `<html><ul><li><a href="/notice/12">2026년 협력업체 정기등록 모집 안내</a> <span>${today}</span></li><li><a href="/notice/13">추석 연휴 안내</a></li></ul></html>`;
 before(async () => {
@@ -44,6 +46,7 @@ before(async () => {
         tr('20261021000099', '래미안 강남', '1,234', '커뮤니티 승강기 교체 공사', today, '90,000,000', '승강기(주)'), tr('20260901000777', '시험오래된아파트', '800', '[경기] 시험오래된아파트 커뮤니티 헬스장 위탁운영 업체 선정', plus(-30), '50,000,000', '옛운영(주)')] : [];
       return send(200, `<table id="tblBidList"><thead><tr><th scope="col">순번</th><th scope="col">단지명</th><th scope="col">세대수</th><th scope="col">입찰공고명</th><th scope="col"><span id="dItemNm">입찰마감일</span></th><th scope="col">낙찰금액</th><th scope="col" class="tab2_class">낙찰업체</th><th scope="col" class="tab2_class tab3_ex_class">응찰금액</th><th scope="col" class="tab3_ex_class"><span class="tab4_class">낙찰</span>업체</th></tr></thead><tbody>${rows.join('')}</tbody></table>`);
     }
+    if (g2bMode === 'html' && u.pathname.startsWith('/g2b/ad/BidPublicInfoService/')) return send(200, G2B_HTML);
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', ntceInsttNm: '성남시', dminsttNm: '성남시체육회', bidNtceDt: `${today} 09:00:00`, bidClseDt: `${plus(9)} 10:00:00`, opengDt: `${plus(9)} 11:00:00`, presmptPrce: '250000000', ntceKindNm: '일반', cntrctCnclsMthdNm: '제한경쟁', prtcptLmtRgnNm: '경기도', bidNtceDtlUrl: 'https://www.g2b.go.kr/x/1', ntceSpecDocUrl1: 'https://www.g2b.go.kr/f/1.hwp' }] : []), 'application/json');
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/')) return send(200, dataGo([]), 'application/json');
     if (u.pathname.startsWith('/g2b/ao/PrvtBidNtceService/')) return nuriMode === 'denied' ? send(200, '<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>30</returnReasonCode><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>', 'application/xml')
@@ -520,4 +523,44 @@ test('232차(로컬 10/28 15:40 남원시 결과 시각 빔) result_at 없는 �
     await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified) values ('default', ${plus(-2)}, ${sql.json([{ id, section: 'result', source: c.source, noticeNo: c.noticeNo, result: c.result.replace(/ · 낙찰률.*$/, '') }])}, '{}', 1, 1)`;
     assert.deepEqual(await preview(), [], '그 전 메일에 나간 결과는 다시 안 냄');
   } finally { await mailYd([]); await sql`delete from sales_digests where tenant = 'default' and (day = ${today} or day = ${plus(-2)})`; }
+});
+
+test('278차 #816 나라장터가 웹페이지(HTML)를 주면 실패 · 앞 500자(글자만, 메일 가림) · 바로 알림 · 30분 뒤 다시(최근 14일) · 복구되면 받음 · [14일 다시 받기]', async () => {
+  g2bMode = 'html'; nuriMode = 'empty';
+  const r = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
+  assert.equal(r.status, 'failed', JSON.stringify(r)); assert.match(r.summary, /^나라장터 못 받음 · /, r.summary);
+  assert.match(r.errorLog, /웹페이지\(HTML\) 응답 \d+회 — 앞 500자: 제목: 공공데이터포털 · 본문: 시스템 점검 안내 보다 나은 서비스를 위해 점검 중입니다\. 문의 \*\*\*@\*\*\*/, r.errorLog);
+  assert.ok(!r.errorLog.includes('var a=1') && !r.errorLog.includes('help@data.go.kr'), '스크립트·메일은 안 남김');
+  const [run] = await sql`select status, detail from sales_collector_runs where id = ${r.runId}`;
+  assert.equal(run.detail.retry, true); assert.equal(run.detail.sources.g2b.ok, false); assert.equal(run.detail.sources.nuri.ok, true, '누리장터는 받음');
+  assert.match(run.detail.sources.g2b.head, /^제목: 공공데이터포털/);
+  const al = (await ctx.owner.ok('GET', '/api/sales/collectors')).alerts.find((x) => x.slug === 'g2b_bid_notices' && x.source === 'g2b');
+  assert.ok(al, '한 번이어도 웹페이지 응답은 바로 알림'); assert.match(al.reason, /웹페이지\(HTML\)/);
+  // 30분 안에는 다시 안 함 → 30분 지나면 tick 이 다시(trigger retry, 최근 14일) — 다른 수집기는 잠시 끔(이 시험만 보려고)
+  const COLL = ['kapt_sa_sun', 'operating_from_kapt', 'kicox_industrial_complexes', 'public_sports_facilities', 'tourist_hotels_localdata', 'kapt_weekly_complexes', 'reb_recent_complexes', 'kapt_new_complexes', 'kapt_bid_notices', 'g2b_prespec_awards', 'kapt_bid_results', 'public_agency_bids', 'vendor_recruit_watch', 'bizinfo_support', 'kstartup_support', 'support_watch', 'gov24_support'];
+  try {
+    for (const slug of COLL) await sql`insert into sales_collector_state (slug, enabled) values (${slug}, false) on conflict (slug) do update set enabled = false`;
+    await sql`update sales_collector_state set last_run_at = now() where slug = 'g2b_bid_notices'`; // 정기 시각 차례는 아님
+    const tick = async () => { const t = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(t.status, 200); };
+    await tick();
+    assert.equal((await sql`select count(*)::int n from sales_collector_runs where slug = 'g2b_bid_notices' and trigger = 'retry'`)[0].n, 0, '30분 안에는 다시 안 함');
+    g2bMode = 'ok'; hits = [];
+    await sql`update sales_collector_runs set started_at = started_at - interval '31 minutes' where slug = 'g2b_bid_notices'`; // 앞 시험의 실행도 같이(가장 최근 = 웹페이지 실행 그대로)
+    await tick();
+    const [re] = await sql`select status, summary, detail from sales_collector_runs where slug = 'g2b_bid_notices' and trigger = 'retry' order by id desc limit 1`;
+    assert.ok(re, '30분 뒤 다시'); assert.notEqual(re.status, 'failed', re.summary); assert.ok(!re.detail?.retry, '복구되면 더 안 함');
+    assert.doesNotMatch(re.summary, /빠른 수집\(최근 3일\)/, '다시 받을 땐 최근 14일');
+    const q = hits.find((h) => h.path.includes('getBidPblancListInfoServcPPSSrch'))?.q;
+    const days = (Date.parse(`${q.inqryEndDt.slice(0, 4)}-${q.inqryEndDt.slice(4, 6)}-${q.inqryEndDt.slice(6, 8)}`) - Date.parse(`${q.inqryBgnDt.slice(0, 4)}-${q.inqryBgnDt.slice(4, 6)}-${q.inqryBgnDt.slice(6, 8)}`)) / 864e5;
+    assert.equal(days, 14, JSON.stringify(q));
+    assert.ok(!(await ctx.owner.ok('GET', '/api/sales/collectors')).alerts.some((x) => x.slug === 'g2b_bid_notices' && x.source === 'g2b'), '복구되면 알림 사라짐');
+    // [14일 다시 받기](관리자) — 낮에도 14일
+    hits = [];
+    const m = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', { full: true });
+    assert.doesNotMatch(m.summary, /빠른 수집/); const q2 = hits.find((h) => h.path.includes('getBidPblancListInfoServcPPSSrch'))?.q; assert.ok(q2.inqryBgnDt <= `${plus(-14).replace(/-/g, '')}0000`, JSON.stringify(q2));
+    assert.equal((await sql`select count(*)::int n from audit_logs where action = 'sales_collector.run' and detail->>'full' = 'true'`)[0].n, 1);
+  } finally {
+    g2bMode = 'ok'; nuriMode = 'denied';
+    await sql`update sales_collector_state set enabled = true where slug = any(${COLL})`;
+  }
 });
