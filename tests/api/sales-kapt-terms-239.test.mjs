@@ -136,7 +136,9 @@ test('#751 마감 전 취소: 상세의 취소된 계약·사유 → 상태 취�
   assert.deepEqual([d2.current_status, d2.notice_kind, d2.notice_state], ['취소', 'cancel', '취소'], '취소는 되돌리지 않음');
   detailOf[N.D.bid] = detail(N.D);
   const all = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items;
-  const cd = all.find((x) => x.noticeNo === N.D.bid), ce = all.find((x) => x.noticeNo === N.E.bid);
+  const can = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=canceled')).items; // 278차 #830: 취소 공고는 '취소된 공고' 탭에만
+  assert.ok(!all.some((x) => x.noticeNo === N.D.bid), '취소 공고는 전체 탭에서 빠짐');
+  const cd = can.find((x) => x.noticeNo === N.D.bid), ce = all.find((x) => x.noticeNo === N.E.bid);
   assert.equal(cd.cancelReason, '계약기간 표시 오류로 인해 취소 하고 수정 후 재공고 하고자 합니다.');
   assert.deepEqual(cd.renotice, { title: N.E.title, close: plus(15) });
   assert.deepEqual([ce.prevCancel?.reason, ce.cancelReason], ['계약기간 표시 오류로 인해 취소 하고 수정 후 재공고 하고자 합니다.', null]);

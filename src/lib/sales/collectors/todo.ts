@@ -26,6 +26,7 @@ export function collectorTodo(i: { slug: string; source: string | null; error: s
   const service = own.match(SERVICE_IN_TEXT)?.[1] ?? PORTAL_SERVICES[`${i.slug}/${i.source ?? ''}`] ?? PORTAL_SERVICES[i.slug] ?? hint.match(SERVICE_IN_TEXT)?.[1] ?? null;
   const link = service ? portalUrl(service) : null;
   if (!text) return { action: 'retry', service: null, link: null, todo: /마지막 성공|최근 성공 없음/.test(i.reason) ? '최근에 받은 게 없습니다 — [지금 수집]으로 다시 받아 보고, 계속되면 수집기 켜짐·예약 시각을 확인해 주세요' : '수집에 실패했습니다 — [지금 수집]으로 다시 받아 보세요' };
+  if (/^원천 시스템 점검 중/.test(i.reason)) return { action: 'retry', service, link: null, todo: '원천 시스템 점검 중입니다 — 끝나면 자동으로 최근 14일을 다시 받습니다(따로 할 일 없음)' }; // 279차(나라장터 10/30~11/1 점검)
   if (/LIMITED_NUMBER|호출 ?(제한|한도)|한도 초과|\b429\b/i.test(text)) return { action: 'limit', service, link, todo: '오늘 호출 한도를 넘었습니다 — 내일 다시 받습니다(계속되면 포털에서 트래픽 증가 신청)' };
   if (/키 없음|키가 없|KEY\S* 미설정/.test(text)) return { action: 'key', service, link, todo: '인증키가 없습니다 — 플랫폼 운영 › 영업 수집기 설정에서 키를 넣어 주세요' };
   if (/활용신청|인증키 확인|SERVICE_KEY_IS_NOT_REGISTERED|SERVICE ACCESS DENIED|등록되지 않은 (서비스|인증)키|UNREGISTERED|NOT_REGISTERED|FORBIDDEN|EXPIRED/i.test(text)) return { action: 'apply', service, link, todo: `공공데이터포털 활용신청${service ? `(서비스 ${service})` : ''}이 필요합니다` };

@@ -497,7 +497,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작
     // 278차 #830(대표 10/31 '취소 공고는 목록에서 뺌'): 취소된 공고(원천 상태 '취소' 또는 같은 공고 묶음의 마지막 게시가 취소)는 모든 탭에서 빼고 '취소된 공고' 보관함 탭에만
     const canceledCard = (n: (typeof all)[number]) => /취소/.test(String(n.status ?? '')) || !!(n.history as { cancelDay?: string | null } | null)?.cancelDay;
-    const inTab = (n: (typeof all)[number], tb: string) => (tb === 'skip' ? n.skipped && !!n.skip : !n.skipped) && (tb === 'skip' || (tb === 'canceled') === canceledCard(n)) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
+    const inTab = (n: (typeof all)[number], tb: string) => (tb === 'skip' ? n.skipped && !!n.skip : !n.skipped) && (tb === 'skip' || tb === 'ref' /* 참고 = 지난 메일에 실린 그대로 */ || (tb === 'canceled') === canceledCard(n)) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
       && (tb !== 'today' || (n.todayHit && (n.result || !bidEnded(n, td)))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
       && (tb !== 'soon' || (((!!n.close && n.close >= td && n.close <= plus(3)) || briefSoon(n, td)) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중 · 239차 필수 현장설명 3일 안
       && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td))); // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중

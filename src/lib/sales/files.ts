@@ -7,7 +7,7 @@ import { HttpError, badRequest } from '../errors';
 
 const MAX = 30 * 1024 * 1024;
 const UA = 'Mozilla/5.0 (WorkIn sales file relay)';
-const DEFAULT_HOSTS = ['g2b.go.kr', 'ebid.lh.or.kr', 'apply.lh.or.kr', 'onbid.co.kr', 'nuri.go.kr', 'd2b.go.kr', 'k-apt.go.kr', 'bizinfo.go.kr', 'k-startup.go.kr']; // #507 지원사업(기업마당·K-Startup) 첨부도
+const DEFAULT_HOSTS = ['g2b.go.kr', 'ebid.lh.or.kr', 'apply.lh.or.kr', 'onbid.co.kr', 'nuri.go.kr', 'd2b.go.kr', 'k-apt.go.kr', 'bizinfo.go.kr', 'k-startup.go.kr', 'kg2b.com' /* 279차 #828 KG2B 공고서 */]; // #507 지원사업(기업마당·K-Startup) 첨부도
 /** 허용 호스트: 기본 공공 사이트 + SALES_FILE_HOSTS(쉼표, 시험용) — 하위 도메인도 허용 */
 export function fileHostAllowed(host: string) {
   const extra = (process.env.SALES_FILE_HOSTS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);

@@ -69,14 +69,14 @@ export async function collectorsTick(opt: { now?: Date } = {}) {
   const r = await runCollector(again, 'retry', { params: { full: true } });
   return { ran: again, retry: true, status: r.status, summary: r.summary };
 }
-export const RETRY_MIN = 30, RETRY_MAX = 12;
+export const RETRY_MIN = 30, RETRY_MAINT_MIN = 120, RETRY_MAX = 12; // 279차: 원천 점검 중이면 2시간마다(같은 실패를 30분마다 되풀이하지 않게)
 async function retryDue(now: Date) {
   const sql = db();
-  const rows = await sql<{ slug: string; started_at: Date; retry: boolean; tries: number; enabled: boolean | null }[]>`select l.slug, l.started_at, coalesce((l.detail->>'retry')::boolean, false) as retry,
+  const rows = await sql<{ slug: string; started_at: Date; retry: boolean; maint: boolean; tries: number; enabled: boolean | null }[]>`select l.slug, l.started_at, coalesce((l.detail->>'retry')::boolean, false) as retry, (l.detail ? 'maint') as maint,
       (select count(*)::int from sales_collector_runs r where r.slug = l.slug and r.trigger = 'retry' and r.started_at > now() - interval '24 hours') as tries, st.enabled
     from (select distinct on (slug) slug, started_at, detail from sales_collector_runs where status <> 'running' and started_at > now() - interval '24 hours' order by slug, started_at desc) l
     left join sales_collector_state st on st.slug = l.slug`;
-  return rows.find((r) => r.retry && r.enabled !== false && find(r.slug) && r.tries < RETRY_MAX && now.getTime() - new Date(r.started_at).getTime() >= RETRY_MIN * 60e3)?.slug ?? null;
+  return rows.find((r) => r.retry && r.enabled !== false && find(r.slug) && r.tries < RETRY_MAX && now.getTime() - new Date(r.started_at).getTime() >= (r.maint ? RETRY_MAINT_MIN : RETRY_MIN) * 60e3)?.slug ?? null;
 }
 /**
  * #522 누락 점검(로컬 10/24 '실패가 3일째 조용히 지나갔다'): 켜진 수집기마다(원천이 여럿이면 원천마다) 마지막 성공·연속 실패.
@@ -105,7 +105,8 @@ export async function collectorAlerts(now = Date.now()): Promise<CollectorAlert[
       const stale = now - (lastOk ?? oldest).getTime() > LIMIT;
       const html = streak >= 1 && /웹페이지\(HTML\)/.test(`${err ?? ''} ${hint ?? ''}`); // 278차 #816: 원천이 웹페이지를 주면 한 번에 알림(점검·한도 초과·차단 — 사람이 봐야 함)
       if (streak >= 2 || stale || html) {
-        const reason = html && streak < 2 ? '원천이 웹페이지(HTML)를 돌려줌 — 30분마다 다시 시도 중' : streak >= 2 ? `${streak}회 연속 실패` : lastOk ? `마지막 성공 ${Math.floor((now - lastOk.getTime()) / 3600e3)}시간 전` : '최근 성공 없음';
+        const m0 = streak >= 1 ? rs[0]?.detail?.maint as { until?: string | null } | undefined : undefined; const until = m0 ? m0.until ?? '' : null; // 279차: 가장 최근 실행이 원천 점검 안내
+        const reason = until != null ? `원천 시스템 점검 중${until ? `(~${until.slice(5).replace('-', '/')})` : ''} — 2시간마다 다시 시도, 끝나면 최근 14일 다시 받음` : html && streak < 2 ? '원천이 웹페이지(HTML)를 돌려줌 — 30분마다 다시 시도 중' : streak >= 2 ? `${streak}회 연속 실패` : lastOk ? `마지막 성공 ${Math.floor((now - lastOk.getTime()) / 3600e3)}시간 전` : '최근 성공 없음';
         const error = err?.split('\n')[0].slice(0, 160) ?? null;
         // #629: 첫 줄은 '할 일' 문장(todo) — 오류 원문·영문 코드·HTTP 코드는 error 로 따로(화면에서 접힘 '자세히'). 서비스 번호는 원문에 없으면 실행 요약·오류 기록(hint)에서
         out.push({ slug: c.slug, source: u.source, label: u.label, lastOkAt: lastOk?.toISOString() ?? null, failStreak: streak, error, reason, ...collectorTodo({ slug: c.slug, source: u.source, error, hint, reason }) });
