@@ -156,7 +156,7 @@ export async function describePhoto(tenant: string, id: string, actorId: string 
       ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_vision')`;
   let j: any;
   try { j = JSON.parse((r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('')); } catch { return fail('AI 답을 읽지 못했습니다'); }
-  const v: VisionOk = { v: 1, at: new Date().toISOString(), ...normalize(j), ...(sharpScore != null ? { sharp: sharpScore } : {}) };
+  const v: VisionOk = { v: 1, at: new Date().toISOString(), ...normalize(j), sharp: sharpScore ?? -1 }; // -1 = 쟀지만 판단 못함(한 색 그림 등)
   if (!v.caption) return fail('AI 가 설명을 비워 답했습니다');
   await sql`update library_files set vision = ${sql.json(v as never)}, description = coalesce(nullif(description, ''), ${v.caption}) where id = ${id}`;
   // 188차(#619 '영상 = 화면 설명으로 분류'): 영상 장면 사진이면 설명이 비어 있던 원본 영상에 '영상 장면: …' 한 줄(자료실 검색·정리에 씀)

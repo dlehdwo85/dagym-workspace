@@ -37,7 +37,7 @@ async function slot(brandId, title, { kind = 'feed', channel = 'instagram', day 
     values ('default', ${brandId}, ${title}, ${channel}, ${kind}, ${at}, 'draft', 0, ${ctx.ownerId}, true, now() - ${`${ago} minutes`}::interval) returning id`;
   return c.id;
 }
-const cur = async (id) => (await sql`select c.status, c.quality, v.media_ids from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = ${id}`)[0];
+const cur = async (id) => (await sql`select c.status, c.quality, c.current_version, v.media_ids, v.note from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = ${id}`)[0];
 
 before(async () => {
   await resetDb(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
@@ -57,7 +57,7 @@ test('① 선명도: 결이 있는 사진은 높게 · 흐린 사진은 기준(4
   await describe(P.solid, V({ caption: '한 가지 색 바탕', tags: ['바탕'] }));
   const a = await vis(P.sharp), b = await vis(P.blur), c = await vis(P.solid);
   assert.ok(a.sharp >= 40, `선명한 사진 ${a.sharp}`); assert.ok(typeof b.sharp === 'number' && b.sharp < 40, `흐린 사진 ${b.sharp}`);
-  assert.equal(c.sharp, undefined, '한 색 그림은 판단 안 함');
+  assert.equal(c.sharp, -1, '한 색 그림은 판단 안 함(-1 = 쟀지만 판단 못함)');
   assert.equal(b.quality, 'good', 'AI 판정은 그대로 두고 서버 값으로 가림');
 });
 
@@ -96,4 +96,28 @@ test('② 사진 생성을 켠 회사: 제목·본문 낱말이 하나도 안 �
   const off = await slot(b2.id, '필라테스 둘째 수업 안내', { day: 3, ago: 3 });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.equal((await cur(off)).quality.visual.photoId, park, '생성을 끈 회사는 예전처럼(모든 장 실사)');
+});
+
+test('⑤ 승인 대기 시안: 바탕 사진이 나중에 흔들림으로 판정되면 한 번 다시 그림(다른 선명한 사진) · 선명도를 아직 안 쟀으면 기다림', async () => {
+  const b3 = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '다시짐' });
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b3.id}`, { intro: '동네 헬스장', products: '1개월 회원권' });
+  const good = await libFile('다시짐 매장 스쿼트.jpg', await textured(11));
+  await describe(good, V({ caption: '스쿼트 랙이 있는 매장', tags: ['스쿼트', '매장'] }));
+  const shaky = await libFile('다시짐 매장 스쿼트 2.jpg', await blurred(12));
+  await describe(shaky, V({ caption: '스쿼트 랙이 있는 매장', tags: ['스쿼트', '매장'] }));
+  await sql`update library_files set vision = vision - 'sharp' where id = ${shaky}`; // 282차 전에 설명한 사진처럼(선명도 없음) → 처음엔 고름
+  const c = await slot(b3.id, '스쿼트 자세 바로잡기', { day: 2, ago: 2 });
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const v1 = await cur(c);
+  assert.equal(v1.quality.visual.photoId, shaky, '선명도 없을 때는 예전처럼 고름');
+  assert.equal(v1.status, 'pending');
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const w = await cur(c); assert.notEqual(w.quality.visual.rv, 4, '선명도를 아직 안 쟀으면 끝냄 표시(4)를 하지 않고 기다림'); assert.equal(w.current_version, v1.current_version);
+  await sql`update library_files set vision = vision || '{"sharp": 2.5}'::jsonb where id = ${shaky}`; // 정기 실행이 선명도를 잼
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const v2 = await cur(c);
+  assert.equal(v2.quality.visual.photoId, good, JSON.stringify(v2.quality.visual));
+  assert.match(v2.note ?? '', /흔들린·초점 나간 바탕 사진 바꿈/);
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const v3 = await cur(c); assert.equal(v3.quality.visual.rv, 4, '한 번만'); assert.equal(v3.quality.visual.photoId, good);
 });
