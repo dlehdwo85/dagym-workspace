@@ -40,7 +40,8 @@ const uuidOf = (s: string) => { const h = createHash('sha1').update(s).digest('h
 export function emptySlots(c: { kind: string | null; channel: string }, q: any, templates: boolean): Slot[] {
   if ((c.kind !== 'feed' && c.kind !== 'story') || c.channel === 'blog') return [];
   const out: Slot[] = []; const vis = q?.visual;
-  if (vis?.by === 'server' && !templates && !vis.template && !vis.photoId && !(Array.isArray(vis.photoIds) && vis.photoIds.length)) out.push('cover');
+  // 295차 #835: 단색 바탕 + 글자 표지(visual.plain)도 표지 칸 — 피드 틀이 있는 브랜드여도
+  if (vis?.by === 'server' && (vis.plain || (!templates && !vis.template && !vis.photoId && !(Array.isArray(vis.photoIds) && vis.photoIds.length)))) out.push('cover');
   const pages: CardPage[] = Array.isArray(q?.pages) ? q.pages : []; const story = c.kind === 'story';
   pages.forEach((p, k) => { if (p.role !== 'cta' && !(story && k === pages.length - 1) && !p.photoId) out.push(k); });
   return out;
@@ -190,7 +191,11 @@ async function applyFill(c: Row, f: Fill, actor: SessionUser): Promise<Fill> {
     const d = await V.drawAutoVisual(c2, ver?.body ?? '', { photoId: coverJob.fileId!, actor });
     media[0] = d.fileId;
     visual = { ...visual, fileId: d.fileId, photoId: coverJob.fileId, gen: true, ref: coverJob.ref, ...(d.photoFix?.length ? { fix: d.photoFix } : {}), tried: [...new Set([...((visual.tried ?? []) as string[]), coverJob.fileId!])].slice(-20) };
+    if (d.template) visual.template = d.template;
+    if (d.plain) visual.plain = true; else delete visual.plain;
   }
+  // 295차 #835: 단색 표지 때문에만 수정 요청에 있던 글은 표지 사진이 붙으면 승인 대기로
+  const ps = V.plainStatus(c, q, !!visual.plain, cur.status);
   if (media.length > 1) visual.bodyIds = media.slice(1);
   const done: Fill = { ...f, status: 'done', credits: Math.round(got.length * (f.per ?? 0) * 10) / 10 };
   const v = f.v + 1;
@@ -199,10 +204,15 @@ async function applyFill(c: Row, f: Fill, actor: SessionUser): Promise<Fill> {
     if (!x || x.current_version !== f.v) return false;
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${ver?.body ?? ''}, ${media},
       ${`실사 참고 생성 ${got.length}장으로 빈 사진 칸을 채웠습니다(서버 그리기)${pageJobs.length ? ` ${V.photoNote(pages)}` : ''}`}, ${actor.id})`;
-    const quality = { ...q, ...(pageJobs.length ? { pages } : {}), visual, fill: done, ...(q.report ? { report: { ...q.report, v } } : {}) };
-    await tx`update mkt_contents set current_version = ${v}, quality = ${tx.json(quality as never)}, reminded_at = null, updated_at = now() where id = ${c.id}`;
+    const quality = { ...q, ...(pageJobs.length ? { pages } : {}), visual, fill: done, issues: ps.issues, passed: ps.passed, ...(q.report ? { report: { ...q.report, v } } : {}) };
+    await tx`update mkt_contents set current_version = ${v}, status = ${ps.status}, quality = ${tx.json(quality as never)}, reminded_at = null, updated_at = now() where id = ${c.id}`;
     return true;
   });
+  if (ok && ps.status === 'pending' && cur.status === 'changes') {
+    const M = await import('./mktAuto');
+    await M.mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `표지 사진을 채웠습니다(v${v}): ${c.title}`, body: '단색 바탕 표지를 같은 브랜드 실사를 참고해 만든 사진 표지로 바꿨습니다 — 승인해 주세요',
+      link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktfill:${c.id}:${v}` }).catch(() => {});
+  }
   return ok ? done : stale('그사이 글이 바뀌어 생성 사진을 붙이지 않았습니다(자료실에는 남아 있습니다)');
 }
 
@@ -316,7 +326,8 @@ export async function photoFillTick(o: { tenant?: string; limit?: number; budget
   let started = 0;
   if (await ready()) {
     const cand = await sql<Row[]>`select ${sql.unsafe(COLS)} from mkt_contents c join mkt_settings s on s.tenant = c.tenant and s.photo_gen and not coalesce(s.auto_pause, false)
-      where c.status in ('pending', 'changes') and not coalesce(c.is_test, false) and c.channel <> 'blog' and c.kind in ('feed', 'story') and c.quality->'visual'->>'by' = 'server' and c.quality->'fill' is null
+      where c.status in ('pending', 'changes') and not coalesce(c.is_test, false) and c.channel <> 'blog' and c.kind in ('feed', 'story') and c.quality->'visual'->>'by' = 'server'
+        and (c.quality->'fill' is null or (c.quality->'visual'->>'plain' = 'true' and coalesce((c.quality->'fill'->>'v')::int, 0) < c.current_version and c.quality->'fill'->>'status' <> 'generating')) -- 295차 #835: 단색 표지는 예전 판에서 채웠어도 새 판에서 한 번 더
         and (c.scheduled_at is null or c.scheduled_at > now() + interval '2 hours') ${tf}
       order by c.scheduled_at nulls last limit ${o.limit ?? 3}`;
     for (const c of cand) { if (Date.now() - t0 > budget) break; const f = await L.withLock(`mktFill:${c.id}`, () => startFill(c, 'auto')); if ('status' in f && f.status === 'generating') started++; }

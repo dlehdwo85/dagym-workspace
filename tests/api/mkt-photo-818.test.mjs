@@ -115,7 +115,7 @@ test('⑤ 승인 대기 시안: 바탕 사진이 흔들림이면 한 번 다시 
   assert.equal(v2.quality.visual.photoId, good, JSON.stringify(v2.quality.visual));
   assert.match(v2.note ?? '', /흔들린·초점 나간 바탕 사진 바꿈/);
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
-  const v3 = await cur(c); assert.equal(v3.quality.visual.rv, 7, '한 번만'); assert.equal(v3.quality.visual.photoId, good); assert.equal(v3.current_version, v2.current_version);
+  const v3 = await cur(c); assert.equal(v3.quality.visual.rv, 8, '한 번만'); assert.equal(v3.quality.visual.photoId, good); assert.equal(v3.current_version, v2.current_version);
 });
 
 test('286차 AI 설명 문장: "사진이 약간 흔들려 흐릿" 이면 선명도 값이 높아도 안 씀 · 배경만 흐린 사진은 씀 · 중앙값도 기록', async () => {
@@ -201,7 +201,7 @@ test('287차 #818 승인 대기 블로그: 흔들린 본문 사진만 그 자리
   const n = await sql`select title, body from notifications where entity_id = ${bl} and title like '시안을 다시 그렸습니다%'`;
   assert.match(n[0]?.body ?? '', /본문 사진이 흔들렸거나/);
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
-  const b2 = await cur(bl); assert.equal(b2.current_version, 2, '한 번만'); assert.equal(b2.quality.visual.rv, 7);
+  const b2 = await cur(bl); assert.equal(b2.current_version, 2, '한 번만'); assert.equal(b2.quality.visual.rv, 8);
 });
 
 test('287차 #818 승인 대기 카드뉴스: 흔들린 장 사진만 다시 고르고(다른 장 사진은 그대로) 장을 새로 그림 · 표지 그대로', async () => {

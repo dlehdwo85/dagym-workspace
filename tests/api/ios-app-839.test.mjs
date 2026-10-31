@@ -3,7 +3,7 @@
 // + 점검 중 발견: 카카오톡·인스타그램·페이스북 등 다른 앱 안 브라우저(WebView)를 우리 앱으로 보던 것 — 첫 주소(/)가 소개 대신 로그인으로 가던 문제
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { BASE, resetDb, startServer, testDb } from '../helpers.mjs';
+import { BASE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
 const UA = {
   iosApp: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WorkInApp',
@@ -49,4 +49,17 @@ test('다른 앱 안 브라우저(카카오톡·인스타그램)는 첫 주소(/
     const r = await get('/', ua);
     assert.notEqual(r.status, 200, `앱은 소개 대신 로그인 쪽 (${ua.slice(-20)}) → ${r.status}`);
   }
+});
+
+test('295차: 관리 › 사용자 — 카카오·네이버로만 가입해 비밀번호가 없는 사람 표시(아이폰 앱은 이메일 로그인만) · 비밀번호 값은 안 보냄', async () => {
+  const ctx = await bootstrap();
+  await sql`insert into user_identities (provider, subject, user_id, email) values ('kakao', 'k-839', ${ctx.staffA.id}, null), ('naver', 'n-839', ${ctx.staffB.id}, null)`;
+  await sql`update users set password_hash = null where id = ${ctx.staffA.id}`;
+  const { users } = await ctx.owner.ok('GET', '/api/admin/users');
+  const a = users.find((u) => u.id === ctx.staffA.id); const b = users.find((u) => u.id === ctx.staffB.id); const o = users.find((u) => u.id === ctx.ownerId);
+  assert.deepEqual([a.social, a.has_password], [['kakao'], false], '카카오만 · 비밀번호 없음');
+  assert.deepEqual([b.social, b.has_password], [['naver'], true], '네이버 연결 + 비밀번호 있음');
+  assert.deepEqual([o.social, o.has_password], [[], true]);
+  assert.ok(users.every((u) => !('password_hash' in u)), '비밀번호 값은 응답에 없음');
+  assert.equal(users.filter((u) => !u.has_password && u.social.length).length, 1, '아이폰에서 비밀번호가 필요한 사람 수');
 });

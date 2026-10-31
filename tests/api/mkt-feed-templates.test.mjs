@@ -102,8 +102,9 @@ test('자동 제작: 틀을 고른 브랜드는 초안 보관 없이 승인 대�
   const made = await sql`select id, status, quality from mkt_contents where rule_id = ${rule.id} and produced_at is not null order by scheduled_at`;
   const ts = made.map((c) => c.quality.visual?.template);
   assert.ok(made.every((c) => c.status === 'pending'), '피드 틀 = 템플릿 준비 → 승인 대기');
-  assert.ok(ts.every((t) => ['title', 'list', 'price', 'statement', 'report'].includes(t)), ts.join(','));
-  for (let i = 1; i < ts.length; i++) assert.ok(!ts.slice(Math.max(0, i - 3), i).includes(ts[i]), `가까운 3개와 다른 틀: ${ts.join(',')}`);
+  // 295차 #835: 목록·가격(도표) 틀이 될 때는 단색 틀(제목형·큰 글씨·리포트)을 표지로 쓰지 않음 — 쓸 틀이 2종이면 바로 앞 글과만 다르게
+  assert.ok(ts.every((t) => ['list', 'price'].includes(t)), `단색 틀 안 씀: ${ts.join(',')}`);
+  for (let i = 1; i < ts.length; i++) assert.notEqual(ts[i], ts[i - 1], `바로 앞 글과 다른 틀: ${ts.join(',')}`);
   const c0 = made[0];
   assert.deepEqual(c0.quality.card.prices, [{ label: '3개월', value: '19만원' }, { label: '6개월', value: '33만원' }], '재료에 없는 금액(87만원)은 뺌');
   assert.deepEqual(c0.quality.card.points, ['출입 기록 자동 정리', '시설 예약 한 화면', '공지 읽음 확인']);
