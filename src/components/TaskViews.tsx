@@ -16,6 +16,7 @@ import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag,
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
+import { PANEL_SWAP_EVENT } from './TaskPanelHost';
 import { keepScroll } from './backClose';
 import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
 import { coOf, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
@@ -220,6 +221,11 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     else window.history.pushState(st, '', `/tasks/${id}`);
     setPanelId(id);
   }, []);
+  useEffect(() => { // 300차 #850: 패널 안의 다른 업무 링크·[열기] = 이 패널 내용만 바꿈(TaskPanelHost)
+    const onSwap = (e: Event) => { const v = (e as CustomEvent<string>).detail; if (typeof v === 'string') openTask(v); };
+    window.addEventListener(PANEL_SWAP_EVENT, onSwap);
+    return () => window.removeEventListener(PANEL_SWAP_EVENT, onSwap);
+  }, [openTask]);
   const closePanel = useCallback(() => {
     if (window.history.state?.wosPanel) window.history.back();
     else { if (listUrl.current) { window.history.replaceState(null, '', listUrl.current); keepScroll(panelY.current, new URL(listUrl.current, location.origin).pathname); } setPanelId(null); }

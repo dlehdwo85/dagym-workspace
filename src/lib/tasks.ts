@@ -1071,8 +1071,9 @@ export async function addComment(u: SessionUser, taskId: string, text: string, r
     if (!p) throw notFound('댓글이 없습니다');
     parent = p.parent_id ? (await sql<{ id: string; author_id: string }[]>`select id, author_id from comments where id = ${p.parent_id}`)[0] : p;
   }
-  // 멘션: @[이름](uuid) 형식
+  // 멘션: @[이름](uuid) 형식 · 300차 #851 '@전체' = 이 업무를 볼 수 있는 사람 모두(나 빼고)
   const mentionIds = [...body.matchAll(/@\[[^\]]{1,50}\]\(([0-9a-f-]{36})\)/g)].map((m) => m[1]);
+  if (/(^|\s)@전체(?=\s|$|[.,!?])/.test(body)) mentionIds.push(...(await mentionableUsers(u, taskId)).map((x) => x.id).filter((x) => x !== u.id));
   return sql.begin(async (tx) => {
     const validMentions = mentionIds.length
       ? (await tx<{ id: string }[]>`select id from users where id = any(${mentionIds}::uuid[]) and status = 'active'`).map((r) => r.id)

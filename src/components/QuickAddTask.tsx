@@ -183,7 +183,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
       if (keep && !auto && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setNoAuto(false); setTpl(''); titleRef.current?.focus(); return; }
       onClose();
       // 자세한 항목은 만든 뒤 상세에서 — 목록 안(onCreated)이 아니면 상세로 이동
-      if (onCreated) onCreated(r.id); else if (!auto) router.push(`/tasks/${r.id}`);
+      if (onCreated) onCreated(r.id); else if (!auto) router.push(`/tasks/${r.id}`); // 만든 뒤에는 상세 전체 화면(이어서 자세히 적기) — 이미 있는 업무를 누르면 패널(300차 #850)
     } catch (err: any) {
       if (err.code === 'queued') { toast.info(err.message); onClose(); } else toast.error(err.message);
     } finally { setBusy(false); }

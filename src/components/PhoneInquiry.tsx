@@ -1,4 +1,5 @@
 'use client';
+import { showTask } from './TaskPanelHost';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PhoneIncoming } from 'lucide-react';
@@ -19,7 +20,7 @@ export function PhoneInquiryButton({ className }: { className?: string }) {
     try {
       const r = await api('/api/inquiries/phone', { body: { ...f, organization: f.organization || undefined, name: f.name || undefined, phone: f.phone || undefined, email: f.email || undefined, region: f.region || undefined } });
       toast.ok('전화 문의를 업무로 등록했습니다'); setOpen(false); setF(EMPTY); broadcastRefresh();
-      if (r.taskId) router.push(`/tasks/${r.taskId}`);
+      if (r.taskId) showTask(r.taskId, (h) => router.push(h));
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   const set = (p: Partial<typeof f>) => setF({ ...f, ...p });

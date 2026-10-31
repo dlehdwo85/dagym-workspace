@@ -4,6 +4,7 @@ import { RoleBadge } from '@/components/RoleBadge';
 import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
 import { IOS_ADMIN_NOTE, billingNote, useInApp } from './inApp';
+import { TaskPanelHost } from './TaskPanelHost';
 import { ADMIN_PAGES } from '@/lib/adminPages';
 import Link, { useLinkStatus } from 'next/link';
 import { Fragment, Suspense } from 'react';
@@ -509,6 +510,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* #626 캡처 차단(외부 고객사만 켜짐): 워터마크·인쇄 차단·창 이탈 가림·자동화 차단, 앱은 FLAG_SECURE */}
         <DailyWelcome userId={session.user.id} name={session.user.name} />{/* #483 하루 첫 진입 인사 0.8초 */}
         <PermissionIntro userId={session.user.id} />{/* #528 앱 처음 시작 휴대폰 알림 맞추기(권한 안내) */}
+        <TaskPanelHost />{/* 300차 #850 업무는 어디서 눌러도 오른쪽 패널 */}
         <CaptureGuard on={!!session.tenant?.captureBlock} automation={!!session.tenant?.captureAutomation} company={session.tenant?.name ?? '워크인'} userName={session.user.name} />
         {/* V28-3 지원 모드: 빨간 띠(읽기 전용·남은 시간) + 끝내기 */}
         {session.support && (

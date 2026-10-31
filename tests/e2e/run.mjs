@@ -118,6 +118,8 @@ import { mktTeam } from './mktTeam.step.mjs';
 import { designGuide187 } from './designGuide187.step.mjs';
 import { refCheck295 } from './refCheck295.step.mjs';
 import { materials297 } from './materials297.step.mjs';
+import { taskPanel300 } from './taskPanel300.step.mjs';
+import { mention300 } from './mention300.step.mjs';
 import { photo188 } from './photo188.step.mjs';
 import { photo189 } from './photo189.step.mjs';
 import { kit190 } from './kit190.step.mjs';
@@ -310,7 +312,9 @@ await step('② 직원(모바일) 알림 수신 → 알림 눌러 업무로 이�
   await item.waitFor();
   await staff.screenshot({ path: `${SHOTS}/05-mobile-notifications.png` });
   await item.click();
-  await staff.waitForURL(`${BASE}/tasks/${taskId}`);
+  // 300차 #850: 알림을 누르면 업무가 지금 화면 위 패널(휴대폰은 전체 시트)로 — 주소 ?task=
+  await staff.getByTestId('global-task-panel').waitFor();
+  await staff.waitForURL((u) => new URL(u).searchParams.get('task') === taskId);
 });
 
 await step('② 직원(모바일) 댓글·멘션·사진 첨부·문서 링크 → 검토 요청', async () => {
@@ -1557,7 +1561,7 @@ await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 �
   await hrow.evaluate((el) => el.scrollIntoView({ block: 'center' })); // 달성률 카드 아래로 밀려 하단 탭에 가리지 않게
   const hb = await hrow.boundingBox();
   await m.touchscreen.tap(hb.x + hb.width * 0.5, hb.y + hb.height - 3);
-  await m.waitForURL(`**/tasks/${hid}`);
+  await m.waitForURL((u) => new URL(u).searchParams.get('task') === hid); // 300차 #850: 홈 줄을 눌러도 패널(휴대폰 전체 시트)
   await mc.close();
 });
 
@@ -2607,6 +2611,8 @@ await step('#499-7 AI 마케팅팀: 사이드바 → 역할 7개(기획 담당 �
 await step('187차 ④⑤ 디자인 지침(로컬 10/26 P1): AI 마케팅팀 › 디자인 담당 [디자인 지침] 회사 전체 3줄·브랜드 2줄 저장 → 요약·글자 수 · 기억 칸 1,000자 · 브랜드 키트 머리말 칸 안내(비우면 AI 가 글마다) · 휴대폰 폭', () => designGuide187({ owner, ctx, sql, BASE, SHOTS }));
 await step('295차 #835 레퍼런스 대조표: 자동 제작 › [대조표 열기] → 단색 표지 글 표지 칸 ✗ + 까닭 · 항목별 미통과 · 휴대폰 폭 넘침 없음', () => refCheck295({ owner, ctx, sql, BASE }));
 await step('297차 #836 자료 요청: 메뉴 → AI 마케터 요청 카드(기한·막힌 글) → [자료 올리기] → 받음(브랜드 폴더) · [자료 요청 만들기] · 휴대폰 폭 넘침 없음', () => materials297({ owner, ctx, sql, BASE }));
+await step('300차 #850 업무는 어디서 눌러도 오른쪽 패널: 업무 화면의 하위 업무 링크 → 패널(?task=) · 뒤로·Esc·닫기 · 패널 안 하위 업무 = 내용만 바꿈 · [크게 보기(새 탭)] · 주소로 바로 · 휴대폰 전체 시트', () => taskPanel300({ owner, ctx, BASE }));
+await step('300차 #851 댓글 @멘션 자동완성 하나로: 멘션할 사람 고르기 없음 · 첫 줄 기본 · ↓·Enter·Tab · Esc · @전체 = 볼 수 있는 사람 모두 멘션·알림 · 안내 문구', () => mention300({ owner, ctx, sql, BASE }));
 await step('188차 실사 전면(로컬 10/26 P1 ① · #621): 콘텐츠 상세 사진 기록(표지·장마다 사진·까닭·보정·업무 공간·행동 장 글자만) → 사진 AI 설명 자료실 영상 [영상 장면 뽑기] → 장면 사진 3장·영상 장면 칩 · 휴대폰 폭', () => photo188({ owner, ctx, BASE, FAKE, SHOTS, sql }));
 await step('189차 실사 참고 생성(대표 #685 · #621): 콘텐츠 상세 빈 사진 칸 2칸 → [빈 칸 생성으로 채우기] → [지금 확인] → 그 칸만 생성 사진으로 새 버전 · 사진 기록 AI 생성 2장 → 사진 AI 설명 AI 생성 칩 · [AI로 다시 만들기](크레딧) · 설정 기본 꺼짐 · 휴대폰 폭', () => photo189({ owner, ctx, BASE, FAKE, SHOTS, sql }));
 await step('190차 브랜드 키트 AI로 채우기(대표 #689): 자동 제작 › 브랜드 키트 [AI로 채우기] → 초안 패널(근거·재료에서 확인 못 해 뺀 것) → 비어 있던 칸만 체크 → 소개 고치기·머리말 후보 → [고른 칸 저장] → 칸들 새 값·감사 기록 · 휴대폰 폭', () => kit190({ owner, ctx, BASE, FAKE, SHOTS, sql }));

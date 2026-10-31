@@ -12,6 +12,7 @@ import { useCalColors, type CalColors } from '@/components/calColors';
 import { SPACE_META } from '@/components/spaceMeta';
 import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
 import { useRowOpen } from '@/components/rowOpen';
+import { showTask } from '@/components/TaskPanelHost';
 import { ConnectCard } from '@/components/ConnectCard';
 import { HomeMonth } from '@/components/HomeMonth';
 import { useRouter } from 'next/navigation';
@@ -85,7 +86,7 @@ function NoticeCard() {
 }
 function TodayRow({ t, className }: { t: any; className?: string }) {
   const router = useRouter();
-  const rowOpen = useRowOpen(t.id, (id) => router.push(`/tasks/${id}`)); // 줄 아무 곳이나 눌러 상세
+  const rowOpen = useRowOpen(t.id, (id) => showTask(id, (h) => router.push(h))); // 줄 아무 곳이나 눌러 상세 — 300차 #850 오른쪽 패널로
   return (
     <li {...rowOpen} className={cx(className, "flex min-w-0 cursor-pointer items-center gap-2.5 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50")} data-home-task={t.id}>
       <div className="min-w-0 flex-1">
