@@ -1559,7 +1559,7 @@ export const brandKitInput = z.object({ tone: z.string().max(200).nullable().opt
     // 271차 #811 릴스·쇼츠 영상 만드는 방법: 실제 사진 영상(생성 비용 0) · 앱 화면 녹화(생성 비용 0, 녹화 파일을 자료실에) · AI 영상(크레딧) — 비우면 지금처럼 제작 요청 카드
     method: z.enum(['photos', 'screen', 'ai']).nullable().optional(),
     // 288차 #814-2 시안 사진: 이 브랜드 이름이 든 사진만(기본) · 앱 화면 캡처만(실사 안 씀) · 이름 없는 사진도(예전)
-    photoSource: z.enum(['brand', 'screen', 'any']).nullable().optional() }).optional(),
+    photoSource: z.enum(['brand', 'screen', 'scenes', 'any']).nullable().optional() }).optional(), // 293차 scenes = 앱 화면 + 출입·업무 장면(하이링크)
   feed: feedInput.optional(), // #544 피드 틀(쓸 틀·색·머리줄·연락처 줄·머리말) — 통째로 저장
   facts: factsInput.optional(), // 로컬 QA 10/24 ⑤ 사실 카드(연락처·운영 시간·요금·숫자·섞으면 안 되는 이름) — 통째로 저장
   topicPool: z.array(z.string().trim().min(1).max(120)).max(40).optional(), // 로컬 QA 10/24 ③ 브랜드 주제 풀(한 줄에 하나, 돌아가며 씀)

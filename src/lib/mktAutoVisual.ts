@@ -66,8 +66,12 @@ type PoolRow = { id: string; title: string; file_name: string; description: stri
  * · screen = 실사는 안 씀 — 표지·카드 장은 브랜드 색·휴대폰/노트북 틀, 블로그 본문은 이 브랜드 앱 화면 캡처(자료실 '영상 화면 캡처'·AI 가 화면으로 본 사진)
  * · any = 예전처럼 이름 없는 사진도 씀(다른 브랜드 이름이 든 사진은 그래도 크게 뒤로)
  */
-export type PhotoSource = 'brand' | 'screen' | 'any';
-export const PHOTO_SOURCES: PhotoSource[] = ['brand', 'screen', 'any'];
+export type PhotoSource = 'brand' | 'screen' | 'scenes' | 'any';
+export const PHOTO_SOURCES: PhotoSource[] = ['brand', 'screen', 'scenes', 'any'];
+/** 293차 #834(대표 10/31 '하이링크는 플랫폼인데 왜 현장사진이 — 들어가더라도 입장하는 장면이나 컴퓨터로 업무보는 장면 정도'): 'scenes' = 앱 화면 캡처 + 이 장면의 실사만
+ *  — AI 사진 설명(한 줄·장면·태그·읽힌 글자)이 출입·입장·얼굴 인식 단말 또는 컴퓨터·휴대폰·태블릿으로 업무·앱을 쓰는 장면일 때 */
+const ALLOWED_SCENE = /(출입|입장|들어가|들어서|게이트|출입문|개찰|얼굴\s*인식|안면\s*인식|키오스크|단말기|태블릿|컴퓨터|노트북|모니터|데스크톱|휴대폰|스마트폰|핸드폰|앱\s*화면|키보드|타이핑|업무를\s*보)/;
+export const sceneOk = (r: { vision?: unknown }) => visionOk(r.vision) && ALLOWED_SCENE.test(visionText(r.vision));
 export type PhotoRule = { own: string[]; src: PhotoSource; strict: boolean };
 export async function photoRule(tenant: string, brandId: string | null | undefined): Promise<PhotoRule> {
   if (!brandId) return { own: [], src: 'any', strict: false };
@@ -132,7 +136,10 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
   for (const [k, r] of rows.entries()) {
     if (exclude.has(r.id)) continue;
     // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽·'쓰지 않음'만 빼고 · 288차 '앱 화면 캡처만' 브랜드 = 바탕은 사진 없이, 본문은 화면 캡처만
-    if (rule?.src === 'screen' ? mode === 'cover' || !isCapture(r) || markedSkip(r.tags) : mode === 'cover' ? !backdropOk(r) : !bodyOk(r)) continue;
+    if (rule?.src === 'screen' ? mode === 'cover' || !isCapture(r) || markedSkip(r.tags) : mode === 'cover' ? !backdropOk(r) : !bodyOk(r)) {
+      if (!(rule?.src === 'scenes' && mode === 'body' && isCapture(r) && !markedSkip(r.tags))) continue; // 293차 앱 화면 + 허용 장면: 화면 캡처는 블로그 본문에
+    }
+    if (rule?.src === 'scenes' && !isCapture(r) && !sceneOk(r)) continue; // 실사는 출입·업무 장면만
     if (rule?.strict && !mine(r)) continue; // 288차: 브랜드가 둘 이상이면 이 브랜드 이름이 든 사진만
     if (r.space !== 'marketing' && !outsideOk(r.vision)) continue; // 188차: 마케팅 공간 밖 사진은 AI 설명이 실사·홍보물 아님·얼굴 없음·화질 괜찮음일 때만
     const fl = photoFlags(r.vision); // 171차 ⓒ: 누운 사람·뒷모습·어두운 사진은 바탕(표지·장)에서 뺌, 블로그 본문에서는 뒤로
@@ -628,7 +635,7 @@ async function badPhotosOf(tenant: string, ids: (string | null | undefined)[], r
     where f.tenant = ${tenant} and f.id = any(${want}::uuid[]) and f.source is distinct from 'ai'`;
   const out: Bad = new Map();
   for (const r of rows) {
-    if (rule.src === 'screen' ? !isCapture(r) : rule.strict && !rule.own.some((n) => photoHas(r, n))) { out.set(r.id, 'brand'); continue; }
+    if (rule.src === 'screen' ? !isCapture(r) : (rule.strict && !rule.own.some((n) => photoHas(r, n))) || (rule.src === 'scenes' && !isCapture(r) && !sceneOk(r))) { out.set(r.id, 'brand'); continue; }
     let v = r.vision;
     if (visionOk(v) && typeof v.sharp !== 'number' && r.key) {
       let st: { max: number; med: number } | null = null;

@@ -108,8 +108,8 @@ export default function LibraryPage() {
   const teams = data?.myTeams ?? [];
   const [upPick, setUpPick] = useState<string | null>(null);
   useEffect(() => { setUpPick(null); }, [scope, teamPick, libSpace]);
-  // 대표·관리자는 '전체' 탭에서 회사 전체가 기본(회사 양식·로고를 올리면 직원 모두가 봐야 해서 — 해석, 대표 확인 대기) · 직원은 주 팀
-  const upDefault = libSpace !== 'work' ? 'company' : scope === 'company' ? 'company' : scope === 'mine' ? 'mine' : scope === 'all' && admin ? 'company' : teams.length ? `team:${(scope === 'team' && teamPick) || teams[0].id}` : 'company';
+  // 293차 #837(대표 10/31 '대표자가 올리는 자료가 기밀자료가 많을 수 있음'): 대표·관리자도 직원과 같게 기본 = 주 팀(292차 '관리자는 회사 전체' 해석 바꿈)
+  const upDefault = libSpace !== 'work' ? 'company' : scope === 'company' ? 'company' : scope === 'mine' ? 'mine' : teams.length ? `team:${(scope === 'team' && teamPick) || teams[0].id}` : 'company';
   const upTo = upPick ?? upDefault;
   const destOf = (v: string) => (v.startsWith('team:') ? { scope: 'team' as const, teamId: v.slice(5) } : v === 'mine' ? { scope: 'mine' as const } : {});
   const scopeBody = scoped === 'mine' ? { scope: 'mine' } : scoped === 'team' ? { scope: 'team', ...(teamPick ? { teamId: teamPick } : {}) } : {}; // 새 폴더·이름 바꾸기·옮기기는 지금 탭 범위

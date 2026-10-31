@@ -188,3 +188,24 @@ test('290차 브랜드 이름 없는 사진 정리: 추천(같이 올린 사진�
   assert.equal((await ctx.owner.ok('POST', '/api/marketing/photos/assign', { ids: [P.unnamed], skip: true })).tag, '쓰지않음');
   assert.equal((await ctx.owner.ok('GET', '/api/marketing/photos')).brands.unnamed, before - 1, '쓰지 않음은 정리 목록에서 빠짐');
 });
+
+test("293차 #834 '앱 화면 + 출입·업무 장면'(하이링크): 출입·컴퓨터 장면 실사만 쓰고 시설 사진은 안 씀 · 브랜드로 지정하면 다른 브랜드 이름 태그는 뺌", async () => {
+  const pf = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '플랫폼짐' });
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${pf.id}`, { intro: '아파트 커뮤니티 플랫폼', products: '입주민 앱', video: { photoSource: 'scenes' } });
+  const gate = await libFile('플랫폼짐 입구 게이트.jpg'); await describe(gate, V({ caption: '출입 게이트를 지나 입장하는 입주민', tags: ['출입', '입장'] }));
+  const room = await libFile('플랫폼짐 열람실 안내.jpg'); await describe(room, V({ caption: '책상이 놓인 열람실', tags: ['열람실', '안내'] }));
+  const v = await ctx.owner.ok('GET', '/api/marketing/photos');
+  const b = v.brands.list.find((x) => x.name === '플랫폼짐');
+  assert.deepEqual([b.src, b.photos], ['scenes', 1], '열람실(시설) 사진은 안 셈');
+  const c = await slot(pf.id, '열람실 이용 안내', { day: 4, ago: 2 }); // 글은 열람실 — 그래도 시설 사진 대신 출입 장면이나 브랜드 색
+  await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
+  const d = await cur(c);
+  assert.ok(d, 'drafted');
+  assert.ok([gate, null].includes(d.quality.visual.photoId ?? null), JSON.stringify(d.quality.visual));
+  assert.ok(!(d.media_ids ?? []).includes(room));
+  // 다른 브랜드(일앱) 이름 태그가 달린 사진을 플랫폼짐으로 지정 → 일앱 태그는 빠짐
+  const tagged = await libFile('출입 단말 사진.jpg'); await describe(tagged, V({ caption: '얼굴 인식 단말 앞 입장', tags: ['단말'] }));
+  await sql`update library_files set tags = ${['일앱', '단말']} where id = ${tagged}`;
+  assert.equal((await ctx.owner.ok('POST', '/api/marketing/photos/assign', { ids: [tagged], brandId: pf.id })).updated, 1);
+  assert.deepEqual((await sql`select tags from library_files where id = ${tagged}`)[0].tags, ['단말', '플랫폼짐']);
+});

@@ -7,7 +7,7 @@ import { MediaPick } from './MediaPick';
 type Kit = { logoFileId?: string | null; headline?: string | null; cta?: string | null; endColor?: string | null; fontFileId?: string | null;
   /** 209차 #666 ⑤ 출연진 고정 */ castFileId?: string | null; castEn?: string | null; castKind?: 'generated' | 'real' | null; castConsent?: boolean; castConsentAt?: string | null;
   /** 271차 #811 릴스·쇼츠 영상 만드는 방법 */ method?: 'photos' | 'screen' | 'ai' | null;
-  /** 288차 #814-2 시안 사진 */ photoSource?: 'brand' | 'screen' | 'any' | null };
+  /** 288차 #814-2 시안 사진 · 293차 scenes */ photoSource?: 'brand' | 'screen' | 'scenes' | 'any' | null };
 /** #454 브랜드 키트 — 영상 끝 화면(로고·한 줄·CTA·배경색)과 자막 글꼴(자료실 OTF/TTF, 비우면 Noto Sans KR Bold). 제작의뢰실 영상 합성이 읽는다 */
 export function BrandVideoKit({ brand, onSaved }: { brand: { id: string; name: string; color?: string | null; video?: Kit | null }; onSaved: () => void }) {
   const v = brand.video ?? {}; const [color, setColor] = useState(v.endColor ?? brand.color ?? '#111111');
@@ -33,9 +33,10 @@ export function BrandVideoKit({ brand, onSaved }: { brand: { id: string; name: s
         <select className={cx(sm, 'w-auto')} value={v.photoSource ?? 'brand'} onChange={(e) => save({ photoSource: e.target.value as Kit['photoSource'] })} aria-label={`${brand.name} 시안에 쓸 사진`} data-testid="brand-photo-source">
           <option value="brand">이 브랜드 사진만(기본)</option>
           <option value="screen">앱 화면 캡처만 — 실사 안 씀</option>
+          <option value="scenes">앱 화면 + 출입·업무 장면 실사만</option>
           <option value="any">이름 없는 사진도 씀(예전 방식)</option>
         </select>
-        <span className="text-ink-3">{(v.photoSource ?? 'brand') === 'brand' ? `자료실 폴더·파일 이름·태그·설명에 '${brand.name}'(또는 다른 표기)이 든 사진만 씁니다 — 브랜드가 하나뿐인 회사는 모든 사진` : v.photoSource === 'screen' ? "표지·카드 장은 브랜드 색·휴대폰/노트북 틀, 블로그 본문은 자료실 '영상 화면 캡처'의 이 브랜드 화면만 씁니다" : '브랜드 이름이 없는 사진도 씁니다(다른 브랜드 이름이 든 사진은 뒤로)'}</span>
+        <span className="text-ink-3">{(v.photoSource ?? 'brand') === 'brand' ? `자료실 폴더·파일 이름·태그·설명에 '${brand.name}'(또는 다른 표기)이 든 사진만 씁니다 — 브랜드가 하나뿐인 회사는 모든 사진` : v.photoSource === 'screen' ? "표지·카드 장은 브랜드 색·휴대폰/노트북 틀, 블로그 본문은 자료실 '영상 화면 캡처'의 이 브랜드 화면만 씁니다" : v.photoSource === 'scenes' ? '이 브랜드 화면 캡처와, AI 사진 설명이 출입·입장·얼굴 인식 단말이나 컴퓨터·휴대폰으로 업무·앱을 쓰는 장면인 실사만 씁니다(현장·시설 사진은 안 씀)' : '브랜드 이름이 없는 사진도 씁니다(다른 브랜드 이름이 든 사진은 뒤로)'}</span>
       </label>
       <span className="text-ink-3">영상 끝 화면·자막(제작의뢰실 영상 합성)</span>
       <div className="flex flex-wrap items-center gap-1.5">

@@ -272,7 +272,7 @@ export async function photoLines(tenant: string, brand: string, others: string[]
   const hay = (r: PhotoRow) => `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)}`.toLowerCase();
   const own = rule?.own.length ? rule.own : brand ? [brand] : [];
   const mine = (r: PhotoRow) => own.some((x) => hay(r).includes(x.toLowerCase()));
-  const pick = rows.filter((r) => poolUsable(r) && V.bodyOk(r) && !others.some((o) => !!o && hay(r).includes(o.toLowerCase())) && (!rule?.strict || mine(r)))
+  const pick = rows.filter((r) => poolUsable(r) && V.bodyOk(r) && !others.some((o) => !!o && hay(r).includes(o.toLowerCase())) && (!rule?.strict || mine(r)) && (rule?.src !== 'scenes' || V.sceneOk(r)))
     .map((r, k) => ({ r, k })).sort((a, b) => Number(mine(b.r)) - Number(mine(a.r)) || a.k - b.k).slice(0, n);
   return pick.map(({ r }) => `- ${r.title}: ${visionOk(r.vision) ? `${r.vision.caption}${r.vision.scene ? ` — ${clip(r.vision.scene.split(/(?<=[.!?])\s/)[0], 80)}` : ''}` : clip(r.description, 120) || '(설명 없음)'}`);
 }
@@ -325,7 +325,7 @@ async function brandPhotoCounts(t: string) {
     const mine = (r: (typeof rows)[number]) => own.some((n) => V.photoHas(r, n));
     for (const r of rows) if (mine(r)) any.add(r.id);
     list.push({ id: b.id, name: b.name.replace(/^\s*\[시험\]\s*/, ''), src: rule.src, strict: rule.strict,
-      photos: rule.src === 'screen' ? 0 : real.filter(mine).length, cover: rule.src === 'screen' ? 0 : real.filter((r) => mine(r) && V.backdropOk(r)).length,
+      photos: rule.src === 'screen' ? 0 : real.filter((r) => mine(r) && (rule.src !== 'scenes' || V.sceneOk(r))).length, cover: rule.src === 'screen' ? 0 : real.filter((r) => mine(r) && V.backdropOk(r) && (rule.src !== 'scenes' || V.sceneOk(r))).length,
       captures: rows.filter((r) => V.isCapture(r) && !markedSkip(r.tags) && mine(r)).length });
   }
   return { list, unnamed: real.filter((r) => !any.has(r.id)).length, strict: list.some((b) => b.strict) };
@@ -344,7 +344,8 @@ export async function unnamedPhotos(u: SessionUser, q: { offset?: number; limit?
       case when source = 'video_frame' then (select concat_ws(' ', coalesce(nullif(pv.title, ''), pv.file_name), pv.folder, array_to_string(pv.tags, ' ')) from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant) end as parent
     from library_files where ${photoCond(sql, t)} order by created_at desc`;
   const real = rows.filter((r) => poolUsable(r) && V.bodyOk(r) && !markedSkip(r.tags));
-  const rules = await Promise.all(bs.map(async (b) => { const r = await V.photoRule(t, b.id); return { b, own: r.own, screen: r.src === 'screen' }; }));
+  const rules = await Promise.all(bs.map(async (b) => { const r = await V.photoRule(t, b.id); return { b, own: r.own, screen: r.src === 'screen', scenes: r.src === 'scenes' }; }));
+  const scenesOnly = new Set(rules.filter((x) => x.scenes).map((x) => x.b.id)); // 293차 #834: '앱 화면 + 허용 장면' 브랜드(하이링크)는 출입·업무 장면 실사만 추천
   const screenOnly = new Set(rules.filter((x) => x.screen).map((x) => x.b.id)); // 291차(로컬 15:05): '앱 화면 캡처만' 브랜드(워크인)는 실사를 지정해도 안 쓰므로 실사 추천에서 뺌
   const owner = (r: (typeof rows)[number]) => rules.filter((x) => (x.own.length ? x.own : [x.b.name]).some((n) => V.photoHas(r, n))).map((x) => x.b.id);
   const named = new Map<string, string[]>(); for (const r of real) named.set(r.id, owner(r));
@@ -353,7 +354,7 @@ export async function unnamedPhotos(u: SessionUser, q: { offset?: number; limit?
   const nameOf = new Map(bs.map((b) => [b.id, b.name]));
   const suggest = (r: (typeof rows)[number]) => {
     const score = new Map<string, { n: number; why: string[] }>();
-    const add = (id: string, n: number, why: string) => { if (screenOnly.has(id)) return; const x = score.get(id) ?? { n: 0, why: [] }; x.n += n; x.why.push(why); score.set(id, x); };
+    const add = (id: string, n: number, why: string) => { if (screenOnly.has(id) || (scenesOnly.has(id) && !V.sceneOk(r))) return; const x = score.get(id) ?? { n: 0, why: [] }; x.n += n; x.why.push(why); score.set(id, x); };
     const at = new Date(r.created_at).getTime(); const st = r.file_name.match(STAMP)?.slice(1).join('_');
     const tally = (f: (o: (typeof rows)[number]) => boolean) => { const m = new Map<string, number>(); for (const o of real) if (o.id !== r.id && f(o)) for (const b of named.get(o.id) ?? []) m.set(b, (m.get(b) ?? 0) + 1); return m; };
     for (const [b, n] of tally((o) => !!r.created_by && o.created_by === r.created_by && Math.abs(new Date(o.created_at).getTime() - at) <= 15 * 60e3)) add(b, 3, `같이 올린 사진 ${n}장이 ${nameOf.get(b)}`);
@@ -383,8 +384,10 @@ export async function assignPhotos(u: SessionUser, i: z.infer<typeof assignInput
     if (!b) throw notFound('브랜드를 찾을 수 없습니다');
     tag = b.name.replace(/^\s*\[시험\]\s*/, '').trim();
   }
-  const rows = await sql<{ id: string }[]>`update library_files set tags = array_append(coalesce(tags, '{}'), ${tag}::text), updated_at = now()
-    where id = any(${i.ids}::uuid[]) and ${photoCond(sql, t)} and not (${tag}::text = any(coalesce(tags, '{}'))) returning id`;
+  // 293차(로컬 16:20): 브랜드로 지정하면 다른 브랜드 이름 태그는 뺌(워크인 태그가 남아 하이링크·워크인 양쪽으로 세지던 것)
+  const others = i.skip ? [] : (await sql<{ name: string }[]>`select name from mkt_brands where tenant = ${t}`).map((b) => b.name.replace(/^\s*\[시험\]\s*/, '').trim()).filter((n) => n && n !== tag);
+  const rows = await sql<{ id: string }[]>`update library_files set tags = array_append(array(select x from unnest(coalesce(tags, '{}')) x where not (x = any(${others}::text[])) and x <> ${tag}), ${tag}::text), updated_at = now()
+    where id = any(${i.ids}::uuid[]) and ${photoCond(sql, t)} and (not (${tag}::text = any(coalesce(tags, '{}'))) or coalesce(tags, '{}') && ${others}::text[]) returning id`;
   await (await import('./log')).audit(sql, u.id, i.skip ? 'mkt.photo_skip' : 'mkt.photo_brand', 'tenant', t, { tag, ids: rows.map((r) => r.id) });
   return { updated: rows.length, tag };
 }
