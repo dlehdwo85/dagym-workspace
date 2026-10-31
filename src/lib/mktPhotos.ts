@@ -20,9 +20,35 @@ const KINDS = ['photo', 'graphic', 'screen', 'illustration', 'document'] as cons
 const POSES = ['none', 'standing', 'sitting', 'lying'] as const; const FACINGS = ['none', 'front', 'side', 'back'] as const; const LIGHTS = ['bright', 'normal', 'dark'] as const;
 export type VisionOk = { v: 1; at: string; caption: string; scene: string; tags: string[]; kind: (typeof KINDS)[number]; text: 'none' | 'little' | 'much'; promo: boolean; seen: string; people: number; faces: boolean; quality: 'good' | 'ok' | 'poor';
   /** 171차: 사람 자세·보이는 방향·사진 밝기(예전 설명에는 없음 → photoFlags 가 문장으로 판정) */
-  pose?: (typeof POSES)[number]; facing?: (typeof FACINGS)[number]; light?: (typeof LIGHTS)[number] };
+  pose?: (typeof POSES)[number]; facing?: (typeof FACINGS)[number]; light?: (typeof LIGHTS)[number];
+  /** 282차 #818 선명도(서버 계산 — 긴 변 512px 흑백의 라플라시안 분산). 작을수록 흔들림·초점 나감 */
+  sharp?: number };
 export type VisionErr = { v: 1; at: string; error: string; tries: number };
 export const KIND_LABEL: Record<VisionOk['kind'], string> = { photo: '실사', graphic: '글자 그래픽', screen: '화면 캡처', illustration: '그림', document: '문서' };
+/** 282차 #818(대표 10/31 "사진이 흔들리거나 초점이 안맞음에도 그대로 구현해둠"): 이 값 아래면 흔들림·초점 나감으로 보고 시안·블로그 사진에서 뺌 */
+export const SHARP_MIN = Number(process.env.MKT_SHARP_MIN) || 40;
+/** 흔들림·초점 나감·AI 가 '화질 나쁨'으로 본 사진 */
+export const blurryPhoto = (v: unknown) => visionOk(v) && (v.quality === 'poor' || (typeof v.sharp === 'number' && v.sharp >= 0 && v.sharp < SHARP_MIN));
+/** 선명도 — 사진을 긴 변 512px 흑백으로 줄여 64px 칸마다 라플라시안(가로·세로 2차 차분) 분산을 재고 가장 선명한 칸의 값.
+ *  (사진 전체 평균이면 하늘·벽처럼 민무늬가 넓은 선명한 사진도 낮게 나옴 — 초점이 맞은 곳이 한 군데라도 있으면 그 값) · 읽지 못하면 null(돈 드는 AI 호출 없음) */
+export async function sharpnessOf(buf: Buffer): Promise<number | null> {
+  try {
+    const sharp = (await import('sharp')).default;
+    const { data, info } = await sharp(buf, { failOn: 'none', limitInputPixels: 80e6 }).rotate().greyscale().resize(512, 512, { fit: 'inside', withoutEnlargement: true }).raw().toBuffer({ resolveWithObject: true });
+    const w = info.width, h = info.height, ch = info.channels; if (w < 16 || h < 16) return null;
+    const T = 64; let best = 0;
+    for (let ty = 0; ty < h; ty += T) for (let tx = 0; tx < w; tx += T) {
+      let n = 0, sum = 0, sq = 0;
+      for (let y = Math.max(1, ty); y < Math.min(h - 1, ty + T); y++) for (let x = Math.max(1, tx); x < Math.min(w - 1, tx + T); x++) {
+        const i = (y * w + x) * ch;
+        const l = data[i - ch] + data[i + ch] + data[i - w * ch] + data[i + w * ch] - 4 * data[i];
+        n++; sum += l; sq += l * l;
+      }
+      if (n >= 64) { const m = sum / n; best = Math.max(best, sq / n - m * m); }
+    }
+    return best < 1 ? null : Math.round(best * 10) / 10; // 한 색으로 칠한 그림처럼 결이 없으면 판단하지 않음
+  } catch { return null; }
+}
 export const visionOk = (x: unknown): x is VisionOk => !!x && typeof x === 'object' && typeof (x as VisionOk).caption === 'string' && !('error' in (x as object));
 const tagOn = (tags: string[] | null | undefined, t: string) => (tags ?? []).some((x) => String(x).replace(/\s+/g, '') === t);
 /** 사람이 고친 판정 — 태그 '글자없음' = 바탕으로 씀 · '글자있음' = 바탕에서만 뺌(본문에는 씀) · '쓰지않음' = 바탕·본문 모두 뺌 */
@@ -118,6 +144,7 @@ export async function describePhoto(tenant: string, id: string, actorId: string 
   let img: { data: Buffer; mime: string } | null;
   try { img = await shrink(await (await import('./storage')).getObject(f.storage_key), f.mime_type); } catch (e: any) { return fail(`사진 읽기 실패: ${e?.message ?? e}`); }
   if (!img) return fail('사진이 너무 크거나 읽을 수 없는 형식입니다');
+  const sharpScore = await sharpnessOf(img.data); // 282차 #818 — AI 호출 없이 서버에서
   const p = P.anthropicProvider({ tier: 'fast' });
   let r: Awaited<ReturnType<typeof p.chat>>;
   try {
@@ -129,13 +156,35 @@ export async function describePhoto(tenant: string, id: string, actorId: string 
       ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_vision')`;
   let j: any;
   try { j = JSON.parse((r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('')); } catch { return fail('AI 답을 읽지 못했습니다'); }
-  const v: VisionOk = { v: 1, at: new Date().toISOString(), ...normalize(j) };
+  const v: VisionOk = { v: 1, at: new Date().toISOString(), ...normalize(j), ...(sharpScore != null ? { sharp: sharpScore } : {}) };
   if (!v.caption) return fail('AI 가 설명을 비워 답했습니다');
   await sql`update library_files set vision = ${sql.json(v as never)}, description = coalesce(nullif(description, ''), ${v.caption}) where id = ${id}`;
   // 188차(#619 '영상 = 화면 설명으로 분류'): 영상 장면 사진이면 설명이 비어 있던 원본 영상에 '영상 장면: …' 한 줄(자료실 검색·정리에 씀)
   const vid = f.source === 'video_frame' ? String(f.meta?.video?.id ?? '') : '';
   if (/^[0-9a-f-]{36}$/i.test(vid)) await sql`update library_files set description = coalesce(nullif(description, ''), ${`영상 장면: ${v.caption}`}) where id = ${vid} and tenant = ${tenant}`;
   return v;
+}
+
+/** 282차 #818: 설명은 있는데 선명도가 없는 사진(282차 전에 설명한 것) — 서버 계산만(AI 호출 없음), 한 번에 30장. 못 읽은 사진은 -1(다시 안 봄) */
+export async function sharpBatch(tenant: string, limit = 30, budgetMs = 20e3) {
+  const sql = db(); const t0 = Date.now(); let done = 0, blurry = 0;
+  const rows = await sql<{ id: string; storage_key: string }[]>`select id, storage_key from library_files where ${photoCond(sql, tenant)} and storage_key is not null
+    and vision ? 'caption' and not (vision ? 'sharp') order by created_at desc limit ${limit}`;
+  for (const r of rows) {
+    if (Date.now() - t0 > budgetMs) break;
+    let score: number | null = null;
+    try { score = await sharpnessOf(await (await import('./storage')).getObject(r.storage_key)); } catch { score = null; }
+    await sql`update library_files set vision = vision || ${sql.json({ sharp: score ?? -1 } as never)}::jsonb where id = ${r.id}`;
+    done++; if (score != null && score >= 0 && score < SHARP_MIN) blurry++;
+  }
+  return { done, blurry, left: Math.max(0, rows.length - done) };
+}
+
+/** 정기 실행: 선명도가 비어 있는 사진이 있는 회사마다(한 번에 3곳) sharpBatch */
+export async function sharpTick() {
+  const ts = await db()<{ tenant: string }[]>`select distinct tenant from library_files where deleted_at is null and upload_status = 'ready' and vision ? 'caption' and not (vision ? 'sharp') limit 3`;
+  const out = []; for (const t of ts) out.push({ tenant: t.tenant, ...(await sharpBatch(t.tenant, 30, 15e3)) });
+  return out;
 }
 
 /** 설명 없는 사진(실패는 1시간 뒤·세 번까지) 묶음 — 회사마다 한 번에 하나. ids = 이 사진들만(다시 설명 포함) */

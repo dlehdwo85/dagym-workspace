@@ -60,7 +60,8 @@ async function pickPhoto(c: Content, brand: string, others: string[], text: stri
 }
 type PoolRow = { id: string; title: string; file_name: string; description: string | null; folder: string; tags: string[]; vision: unknown; space: string; source: string | null };
 /** 188차: 사진 후보(자료실 전체 — mktPhotos.poolCond, 마케팅 공간 먼저·최근 순 400장) + 최근 30일 다른 글에 쓴 사진(표지·4분할·장 사진·붙은 미디어) — 한 글을 그리는 동안 한 번만 읽음 */
-export type Pool = { rows: PoolRow[]; used: Set<string> };
+/** gen = 회사 설정 '사진이 모자라면 실사 참고로 생성'(282차 #818 ② — 켠 회사만 관련 없는 사진 대신 빈 칸 → 생성) */
+export type Pool = { rows: PoolRow[]; used: Set<string>; gen?: boolean };
 async function loadPool(c: Pick<Content, 'tenant' | 'id'>): Promise<Pool> {
   const sql = db(); const { poolCond } = await import('./mktPhotos');
   const rows = await sql<PoolRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, description, folder, tags, vision, space, source from library_files
@@ -70,7 +71,8 @@ async function loadPool(c: Pick<Content, 'tenant' | 'id'>): Promise<Pool> {
       || array(select jsonb_array_elements_text(case when jsonb_typeof(k.quality->'visual'->'photoIds') = 'array' then k.quality->'visual'->'photoIds' else '[]'::jsonb end))
       || array(select pg->>'photoId' from jsonb_array_elements(case when jsonb_typeof(k.quality->'pages') = 'array' then k.quality->'pages' else '[]'::jsonb end) pg)) as u(x)
     where k.tenant = ${c.tenant} and k.id <> ${c.id} and k.status <> 'canceled' and coalesce(k.scheduled_at, k.created_at) > now() - interval '30 days' and u.x is not null`).map((r) => r.id));
-  return { rows, used };
+  const [st] = await sql<{ photo_gen: boolean | null; auto_pause: boolean | null }[]>`select photo_gen, auto_pause from mkt_settings where tenant = ${c.tenant}`.catch(() => []);
+  return { rows, used, gen: !!st?.photo_gen && !st?.auto_pause };
 }
 export type VisualContent = Content;
 /** 189차 실사 참고 생성의 참고 사진 후보 — 같은 브랜드 실사(바탕 규칙 통과 · AI 설명이 실사·홍보물 아님·얼굴 안 보임·화질 괜찮음 · 생성 사진 제외), 글과 맞는 순.
@@ -81,7 +83,7 @@ export async function refPhotos(c: Content, text: string, pool?: Pool): Promise<
   const others = otherBrandNames(await otherBrands(c.tenant, c.brand_id, { site: false })).filter((n) => n !== brand);
   const p = pool ?? (await loadPool(c));
   const byId = new Map(p.rows.map((r) => [r.id, r]));
-  return (await rankPhotos(c, brand, others, text, new Set(), 'cover', p)).filter((r) => {
+  return (await rankPhotos(c, brand, others, text, new Set(), 'cover', { ...p, gen: false })).filter((r) => { // 참고 사진은 문구 관련성 거르기 없이(같은 브랜드 실사 결만 참고)
     const row = byId.get(r.id); const v = row?.vision as { kind?: string; faces?: boolean; promo?: boolean; quality?: string } | undefined;
     return !!row && row.source !== 'ai_ref' && visionOk(row.vision) && v?.kind === 'photo' && !v.faces && !v.promo && v.quality !== 'poor' && (r.brand || !brand);
   }).map((r) => ({ id: r.id, title: r.title, caption: String((byId.get(r.id)!.vision as { caption?: string }).caption ?? '') }));
@@ -89,8 +91,8 @@ export async function refPhotos(c: Content, text: string, pool?: Pool): Promise<
 export const photoPool = (c: Pick<Content, 'tenant' | 'id'>) => loadPool(c);
 /** #544 사진 순위(점수 높은 순, 같은 점수면 최근 사진) — 피드 틀의 사진 4분할은 앞의 4장 · pool = 미리 읽은 후보(장마다 다시 읽지 않게) */
 async function rankPhotos(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover', pool?: Pool) {
-  const { outsideOk } = await import('./mktPhotos');
-  const { rows, used } = pool ?? (await loadPool(c));
+  const { outsideOk, blurryPhoto } = await import('./mktPhotos');
+  const { rows, used, gen } = pool ?? (await loadPool(c));
   if (!rows.length) return [];
   // 171차(로컬 10/26 평가 ⓒ '다짐 스토리 표지 사진이 주제와 안 맞음'): 제목(주제) 낱말은 +2씩 6까지(앞부분이 같으면 — 러닝머신 ↔ 러닝머신으로), 본문 낱말은 +1씩 4까지
   //  → 같은 브랜드 사진끼리는 주제에 맞는 사진이 앞섬. 브랜드 이름 자체는 세지 않음(브랜드 점수와 겹침)
@@ -113,13 +115,15 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     let hitT = 0; let hitB = 0;
     for (const w of words(`${r.title} ${r.description ?? ''} ${(r.tags ?? []).join(' ')} ${visionText(r.vision)}`)) { if (brandWords.has(w)) continue; if (titleHit(w)) hitT++; else if (want.has(w)) hitB++; } // 188차: 사진 쪽 브랜드 이름도 안 셈('카드브랜드' 사진이 '카드 찍고…' 장과 앞글자로 맞던 것)
     score += Math.min(6, hitT * 2) + Math.min(4, hitB);
-    if (visionOk(r.vision) && r.vision.quality === 'poor') score -= 3;
+    if (blurryPhoto(r.vision)) continue; // 282차 #818(대표 "흔들리거나 초점이 안맞음에도 그대로"): 흔들림·초점 나감·화질 나쁨은 아예 안 씀(예전 −3점)
     if (mode === 'body' && visionOk(r.vision) && r.vision.text === 'much') score -= 2; // 로컬 10/25: 안내판 글자가 많은 실사는 본문에 쓰되 뒤로
     if (used.has(r.id)) score -= 4;
     if (r.source === 'ai_ref') score -= 3; // 189차: 실사 참고로 생성한 사진은 실사가 다 쓰였을 때만(같은 점수면 실사가 먼저)
     if (score > -5) out.push({ id: r.id, title: r.title, score, k, vision: r.vision, description: r.description, hit: hitT + hitB, brand: has(r, brand), scene: r.source === 'video_frame', gen: r.source === 'ai_ref' });
   }
-  return out.sort((a, b) => b.score - a.score || a.k - b.k); // 같은 점수면 최근 사진(목록 순서)
+  // 282차 #818 ②(대표 "사진이 문구와 전혀 관련이 없거나 … 실사를 바탕으로 다시 제작하거나 새로 만들어서"): 사진 생성을 켠 회사는 제목·본문 낱말이 사진 이름·설명·태그에
+  //  하나도 안 맞는 사진(브랜드만 같음)은 안 씀 → 빈 칸은 실사 참고 생성이 채움. 끈 회사는 예전처럼(#685 '모든 장 실사' — 관련 높은 사진이 앞)
+  return (gen ? out.filter((o) => o.hit > 0 || o.gen) : out).sort((a, b) => b.score - a.score || a.k - b.k); // 같은 점수면 최근 사진(목록 순서)
 }
 
 const cutAt = (s: string, n: number) => { const a = [...s]; if (a.length <= n) return s; const t = a.slice(0, n).join(''); const k = t.lastIndexOf(' '); return `${(k > n * 0.6 ? t.slice(0, k) : t).trim()}…`; };
