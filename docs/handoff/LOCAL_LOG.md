@@ -2130,3 +2130,8 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - job_runs mktPhotoFill: pool 기록 없음 8 · started 0 · skipped '준비 안 됨(생성 연동 꺼짐·참고 사진 모델 없음)'.
 - /api/platform/higgsfield enabled·hasKey, 모델 5개 모두 ref 없음 → 생성 시작 안 됨. 10/27 189차 로컬 요청(참고 사진 칸 이름)을 로컬이 누락.
 - docs.higgsfield.ai: 참고 사진 칸은 SOUL standard image_reference_url(프롬프트 향상 안내)뿐, 실사 편집 모델 없음. 모델 표는 대표 결정 전 그대로.
+
+## 2026-10-31 21:30 — 298~300차 확인, Apple 개발자 설정
+- 300차 972fa8c PC: 홈 업무 → ?task= 오른쪽 패널(task-panel-body 544px)·크게 보기(새 탭)·뒤로가기 닫힘. 댓글 @ → @전체·김민수·김소담, 멘션 select 없음.
+- Apple 개발자(88SSK23ZVB): App ID 'DAGYM WorkOS' kr.co.dagym.workos — Apple로 로그인 켬(기본 앱 ID, 프로필 무효화 경고 확인 — CI 자동 서명이 다시 만듦). Services ID 'WorkIn Web Sign In' = dev.work-in.signin(Y5D424XZM7) — Apple로 로그인 켬, 기본 앱 ID WorkOS, 도메인 www.work-in.dev·app.work-in.dev·work-in.dev, 돌아올 주소 /api/auth/oauth/apple/callback ×3. 화면이 크롬 자동 번역이라 표시 글자는 번역됨(값은 입력값 그대로).
+- 남은 것: 대표 Keys(+) Sign in with Apple .p8 · Vercel Production APPLE_TEAM_ID·APPLE_SERVICES_ID·APPLE_KEY_ID·APPLE_PRIVATE_KEY · 재배포. 서버 알림 주소(선택)·이메일 중계(naver 발신이라 보류) 미설정.
