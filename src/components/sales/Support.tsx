@@ -79,9 +79,15 @@ export function Support() {
   const cur: View = view ?? data?.view ?? { sort: null, dd: 'all', kind: 'all', aud: 'all' };
   function pickView(p: Partial<View>) { const next = { ...cur, ...p }; setView(next); api('/api/sales/support/view', { method: 'PUT', body: next }).catch(() => {}); }
   const go = (p: Record<string, string | null>) => { const n = new URLSearchParams(sp.toString()); for (const [k, v] of Object.entries(p)) { if (v == null) n.delete(k); else n.set(k, v); } router.replace(`/s/sales/support${n.toString() ? `?${n}` : ''}`, { scroll: false }); };
+  /** #815 누른 직후 [되돌리기] — 처음 누른 것이면 회수(업무 휴지통·진행 기록 처음 상태), 아니면 앞 상태·담당으로 */
+  const undoOf = (it: Item) => ({ label: '되돌리기', run: () => {
+    const prev = it.work;
+    (prev ? api(`/api/sales/support/${it.id}/work`, { body: { status: prev.status, ...(prev.ownerId ? { ownerId: prev.ownerId } : {}) } }) : api(`/api/sales/support/${it.id}/withdraw`, { body: { confirm: true } }))
+      .then(() => { toast.ok(prev ? `'${prev.statusLabel}'(으)로 되돌렸습니다` : '되돌렸습니다 — 만든 업무는 휴지통으로 옮겼습니다'); reload(); }).catch((e) => toast.error(e.message));
+  } });
   async function act(it: Item, status: 'interest' | 'preparing') {
     setBusy(`${it.id}:${status}`);
-    try { await api(`/api/sales/support/${it.id}/work`, { body: { status } }); toast.ok(status === 'interest' ? '관심으로 두고 담당 업무를 만들었습니다 — 마감 7일·3일 전에 알립니다' : '신청 준비 업무(체크리스트)를 만들었습니다 — 마감 7일·3일 전에 알립니다'); reload(); }
+    try { await api(`/api/sales/support/${it.id}/work`, { body: { status } }); toast.ok(status === 'interest' ? '관심으로 두고 담당 업무를 만들었습니다 — 마감 7일·3일 전에 알립니다' : '신청 준비 업무(체크리스트)를 만들었습니다 — 마감 7일·3일 전에 알립니다', undoOf(it)); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function analyze(it: Item) {
@@ -96,7 +102,7 @@ export function Support() {
   }
   async function toTask(it: Item, ownerId: string) {
     setBusy(`${it.id}:task`);
-    try { await api(`/api/sales/support/${it.id}/work`, { body: { status: 'preparing', ...(ownerId ? { ownerId } : {}) } }); toast.ok('담당에게 신청 준비 업무를 넘겼습니다 — 서류 체크리스트·마감 7일·3일 전 알림'); reload(); }
+    try { await api(`/api/sales/support/${it.id}/work`, { body: { status: 'preparing', ...(ownerId ? { ownerId } : {}) } }); toast.ok('담당에게 신청 준비 업무를 넘겼습니다 — 서류 체크리스트·마감 7일·3일 전 알림', undoOf(it)); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function hide(it: Item, hidden: boolean) {
@@ -373,7 +379,7 @@ function ProfileBox({ summary, blanks, onSaved }: { summary: ListData['profile']
 
 /** 공고 상세 — 원문 요약·첨부·1차 판단·AI 판단·진행(상태·담당·신청일·결과 메모)·업무·기록 */
 function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
-  const { data, error, reload, setData } = useApi<any>(`/api/sales/support/${id}`);
+  const { data, error, reload, setData } = useApi<any>(`/api/sales/support/${id}`); const router = useRouter();
   const [w, setW] = useState<Record<string, string> | null>(null); const [busy, setBusy] = useState<string | null>(null); const [editing, setEditing] = useState(false);
   const it: Item | undefined = data?.item;
   useEffect(() => { if (it && !w) setW({ ownerId: it.work?.ownerId ?? '', appliedAt: it.work?.appliedAt ?? '', resultAt: it.work?.resultAt ?? '', amountAwarded: it.work?.amountAwarded ?? '', resultMemo: it.work?.resultMemo ?? '', memo: it.work?.memo ?? '' }); }, [it, w]);
@@ -391,6 +397,18 @@ function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; o
     setBusy('ai');
     try { const r = await api<{ costKrw: number }>(`/api/sales/support/${id}/analyze`, { body: {} }); toast.ok(`AI 세일즈가 판단했습니다(약 ${r.costKrw.toLocaleString('ko-KR')}원)`); reload(); onChanged(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  /** #815 [업무 회수] — 다른 사람이 업무에 댓글·첨부·체크를 남겼으면 한 번 더 묻고 회수 */
+  async function withdraw() {
+    if (!confirm(data?.task ? '담당 업무를 회수할까요? 업무는 휴지통(30일 보관)으로 가고, 이 공고의 진행 기록은 처음 상태로 돌아갑니다. 담당에게 알림이 갑니다.' : '이 공고의 진행 기록을 처음 상태로 돌릴까요?')) return;
+    setBusy('withdraw');
+    try {
+      const url = `/api/sales/support/${id}/withdraw`;
+      let r = await api<any>(url, { body: {} });
+      if (r.needsConfirm) { if (!confirm(r.message)) return; r = await api<any>(url, { body: { confirm: true } }); }
+      setData(r.view); setW(null); onChanged();
+      toast.ok(r.taskId ? '업무를 회수했습니다 — 업무는 휴지통에서 30일 동안 되살릴 수 있습니다' : '진행 기록을 처음 상태로 돌렸습니다', r.taskId ? { label: '휴지통', run: () => router.push('/tasks/trash') } : undefined);
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function remove() {
     if (!confirm('직접 넣은 이 공고와 진행 기록을 지울까요?')) return;
@@ -441,7 +459,8 @@ function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; o
           <Field label="메모" className="mt-2"><textarea className={inputCls} rows={2} value={w.memo} onChange={(e) => setW({ ...w, memo: e.target.value })} maxLength={2000} /></Field>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {data.task && <Link href={`/tasks/${data.task.id}`} className="text-xs underline" data-testid="support-task-link">담당 업무: {data.task.title.slice(0, 50)} · 체크 {data.task.done}/{data.task.total}{data.task.status === 'done' ? ' · 완료' : data.task.due_date ? ` · 마감 ${kday(data.task.due_date)}` : ''}</Link>}
-            <Button size="sm" className="ml-auto" disabled={!!busy || !it.work} onClick={saveWork} data-testid="support-work-save">기록 저장</Button>
+            {it.work && <Button size="sm" variant="secondary" className="ml-auto" disabled={!!busy} onClick={withdraw} data-testid="support-withdraw">{busy === 'withdraw' ? '…' : data.task ? '업무 회수' : '진행 회수'}</Button>}
+            <Button size="sm" className={it.work ? '' : 'ml-auto'} disabled={!!busy || !it.work} onClick={saveWork} data-testid="support-work-save">기록 저장</Button>
           </div>
           {!it.work && <p className="mt-1 text-[11px] text-ink-3">[관심]·[신청 준비]를 누르면 담당 업무(체크리스트)가 생기고 마감 7일·3일 전에 알림이 갑니다.</p>}
         </section>

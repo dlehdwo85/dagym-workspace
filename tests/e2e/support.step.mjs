@@ -84,6 +84,26 @@ export async function supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   const res = owner.getByTestId('support-list').getByTestId('support-item');
   await res.filter({ hasText: 'E2E 시 지식재산 긴급지원' }).getByTestId('support-status').getByText('신청 완료').waitFor();
   await res.filter({ hasText: 'E2E 용인 IP 전략수립' }).getByTestId('support-status').getByText('신청 완료').waitFor();
+  // 277차 #815: [관심] 직후 토스트 [되돌리기] = 회수(업무 휴지통·진행 처음 상태) · 상세 [업무 회수]
+  await owner.goto(`${BASE}/s/sales/support?tab=all`);
+  const i2 = owner.getByTestId('support-list').getByTestId('support-item').filter({ hasText: 'E2E 소상공인 온라인 판로' }); await i2.waitFor();
+  await i2.getByTestId('support-interest').click();
+  const tst = owner.getByTestId('toast').filter({ hasText: '관심으로 두고 담당 업무를 만들었습니다' }); await tst.waitFor();
+  await i2.getByTestId('support-status').waitFor();
+  await tst.getByRole('button', { name: '되돌리기' }).click();
+  await owner.getByText(/되돌렸습니다 — 만든 업무는 휴지통으로 옮겼습니다/).waitFor();
+  await i2.getByTestId('support-interest').waitFor(); // 처음 상태: [관심]·[신청 준비] 단추가 다시
+  const made = await sql`select deleted_at from tasks where sales_ref->>'name' like 'E2E 소상공인%'`;
+  assert.ok(made.length === 1 && made[0].deleted_at, '만든 업무는 휴지통');
+  await i2.getByTestId('support-interest').click(); await i2.getByTestId('support-status').waitFor();
+  await i2.getByRole('button', { name: '진행 기록' }).click();
+  const dt2 = owner.getByTestId('support-detail'); await dt2.waitFor();
+  owner.once('dialog', (d) => d.accept());
+  await dt2.getByTestId('support-withdraw').click();
+  await owner.getByText(/업무를 회수했습니다 — 업무는 휴지통에서 30일/).waitFor();
+  await dt2.getByText(/\[관심\]·\[신청 준비\]를 누르면/).waitFor();
+  assert.equal((await sql`select count(*)::int n from tasks where sales_ref->>'name' like 'E2E 소상공인%' and deleted_at is null`)[0].n, 0);
+  await owner.keyboard.press('Escape');
   // 휴대폰 폭: 가로 넘침 없음
   await owner.setViewportSize({ width: 390, height: 844 });
   await owner.goto(`${BASE}/s/sales/support`);
