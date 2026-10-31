@@ -2011,3 +2011,22 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - powercfg /query SUB_SLEEP STANDBYIDLE: 현재 AC 0x0 · DC 0x0(안 잠듦). SUB_BUTTONS LIDACTION 은 SAMSUNG MODE 구성표에서 질의 결과 없음(숨김) → 설정 화면 확인 안내.
 - PUT /api/marketing/auto {autoPause:false} → auto_pause false · plan pro · 비용 한도 없음 · 규칙 16 · 크레딧 163.5/250.
 - 클라우드: 팀 저장소 결정 4가지·대표 첨부 고치기 그대로·상용화 시험 보기 요청.
+
+## 2026-10-31 08:50 — 대표 #814 다시 답변, #815 지원사업 업무 회수
+- git fetch·ls-remote 가 GitHub 에서 응답 없음(10/31 08:30부터, 30~60초 시간 초과). 기록은 로컬 커밋 뒤 연결되면 푸시.
+- /api/health b08c060 · 227_mkt_cost_cap. /api/marketing/auto: plan pro · auto_pause false · video_pause true · 이번 달 AI 글쓰기 $10.16(818회) · 생성 6,055원(이미지 6.5·영상 80 크레딧, 영상 11편) · 회사 AI 23,776/42,000원(57%).
+- 승인 대기 15(11/3 인스타 4·블로그 4, 11/6 인스타 4·블로그 3) + 수정 중 1(11/6 바디랩 블로그). 16건 전부 이모지 3~5, 피드 7건 화살표 2~5, 피드 8건 【】. 마지막 기록이 대표 수정 요청인 15건이 다시 승인 대기. 릴스·쇼츠 0(영상 멈춤).
+- 지원사업 진행 기록(상위 200건): 신청 준비 3 · 신청 완료 4 · 탈락 1. [관심]·[신청 준비]·[업무로] 되돌리기 없음(support.ts saveWork·ensureTask).
+- 클라우드 전달 08:50: #815 업무 회수, #814 이모지·화살표 금지·수정 반영 판정·브랜드 사진·얼굴 모자이크·영상 멈춤 해제 시 유료 여부·브랜드 추가 요금 구조·내 파일.
+
+## 2026-10-31 10:05 — 대표 10/31 09:2x 요청 16줄(#816~#831)
+- 클라우드 275·276·277차 받음(ec39905, 229 운영 적용): #809 상용화 시험 보기, #814-1 글 장식 금지, #815 지원사업 업무 회수. 영상 멈춤 풀면 유료 영상 자동 경로 없음 확인.
+- PUT /api/marketing/auto {videoPause:false} → 200, video_pause false.
+- 수집: GitHub tick 최근 25회 성공, 수집기 18개 06:05~09:16 실행. g2b_bid_notices 06:06·수동 09:2x(runId 303) 0건 — errorLog "응답 오류 (HTTP 200): <!DOCTYPE html>" 검색어마다, 상태는 success. 데이터포털 공지에 조달청 점검 없음.
+- 취소: kg2b_142624 광명자이더샵포레나 줄 30a805e7 '취소'·목록에 보임, 업무 '[입찰] 광명자이더샵포레나…' todo(홈 협업 업무 맨 위). 입찰 전체 탭 취소 2건.
+- 천안푸르지오레이크사이드 kg2b_142686: 업무 764f166d 첨부 0·eligibility '첨부 공고문 없음'. K-apt goAptbidPopup → kg2b.com KaptBidView?bidcode=142686 공개, 현설 없음·개찰 11/9 10:00·공고문 hwp(goLoad /common/util/download).
+- 홈(390px) 캡처: 협업 업무 10(접기·아래 줄 '함께 담당/같이 받은 사람'), 업무 화면 내 업무엔 묶음 없음. 캡처 Claude-Operations/artifacts/1031-home-mobile.png.
+- 알림: 최근 150건 중 마케팅 50(review_requested 48).
+- 플레이: 프로덕션 33(1.0) 10/28 게시·국가 1·설치 1, 내부 테스트 55(1.1.3) 10/24. ASC·Codemagic 운영 브라우저 로그인 풀림.
+- Playwright 가 raw.githubusercontent 읽다 30분 응답 없음(09:32~10:01). git fetch·push 는 08:30부터 계속 응답 없음.
+- 클라우드 전달 10:05: #816~#830.
