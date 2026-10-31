@@ -823,10 +823,40 @@ export async function redrawTextVisuals(tenant: string, limit = 8, budgetMs = 15
       }
       if (!r) continue;
       out.push({ id: c.id, version: r.version });
+      if (d?.plain && plainCoverOf(c)) await (await import('./mktMaterials')).needMaterial(c).catch(() => null); // 296차 #836: 다시 그려도 단색 → 자료 요청
       // 로컬 08:15 (d): 다시 그린 알림은 같은 글에 한 번만
       if (r.status === 'pending') await M.mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `시안을 다시 그렸습니다(v${r.version}): ${c.title}`,
         body: plainOld && !blur && !offBrand && !tail ? '단색 바탕에 글자만 있던 표지를 사진·화면·도표가 든 표지로 새로 그렸습니다 — 승인해 주세요' : blur || offBrand || tail ? `${blur || offBrand ? '바탕' : where} 사진이 ${(blur || tail?.why.blur) && (offBrand || tail?.why.brand) ? '흔들렸거나 이 브랜드 사진이 아니어서' : blur || tail?.why.blur ? '흔들렸거나 초점이 맞지 않아' : '이 브랜드 사진이 아니어서'} 다른 사진(또는 브랜드 색 바탕)으로 바꿨습니다 — 승인해 주세요` : '바탕 그림의 글자와 겹치던 시안을 브랜드 색 바탕(또는 고른 사진)으로 새로 그렸습니다 — 승인해 주세요',
         link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktvisr:${c.id}` });
+    } catch (e: any) { out.push({ id: c.id, error: String(e?.message ?? e).slice(0, 200) }); }
+  }
+  return out;
+}
+
+/**
+ * 296차 #836: 자료 요청으로 사진·화면이 오면 그 브랜드의 단색 표지 글(승인 대기·수정 요청, 서버 시안)을 다시 그림 — 표지만 새로(뒤쪽 장은 그대로),
+ * 단색이 풀리면 사유 줄을 지우고 승인 대기 + 알림. 그래도 단색이면 붙이지 않음(되풀이 없음)
+ */
+export async function redrawPlainForBrand(tenant: string, brandId: string, limit = 6) {
+  const sql = db();
+  const rows = await sql<(Content & { status: string; quality: any })[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.status, c.quality, c.auto from mkt_contents c
+    join mkt_versions v on v.content_id = c.id and v.version = c.current_version
+    where c.tenant = ${tenant} and c.brand_id = ${brandId} and c.status in ('pending', 'changes') and c.quality->'visual'->>'by' = 'server' and c.quality->'visual'->>'plain' = 'true'
+      and cardinality(v.media_ids) >= 1 and v.media_ids[1]::text = c.quality->'visual'->>'fileId'
+    order by c.scheduled_at nulls last limit ${limit}`;
+  const out: { id: string; version?: number; status?: string; still?: boolean; error?: string }[] = [];
+  const M = await import('./mktAuto');
+  for (const c of rows) {
+    try {
+      const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
+      const d = await drawAutoVisual(c, v?.body ?? '', { exclude: new Set((c.quality.visual.tried ?? []) as string[]) });
+      if (d.plain) { out.push({ id: c.id, still: true }); continue; }
+      const r = await attachVisual(c, d.fileId, `받은 자료로 표지 다시 그리기(서버·크레딧 0)${d.templateLabel ? ` — 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ''}`, c.created_by, d.photoId, true, [],
+        { template: d.template, photoIds: d.photoIds, photoFix: d.photoFix, scene: d.scene, gen: d.gen, plain: d.plain });
+      if (!r) continue;
+      out.push({ id: c.id, version: r.version, status: r.status });
+      if (r.status === 'pending') await M.mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `받은 자료로 표지를 다시 그렸습니다(v${r.version}): ${c.title}`,
+        body: '자료 요청으로 받은 사진·화면으로 단색 바탕 표지를 바꿨습니다 — 승인해 주세요', link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktmatr:${c.id}:${r.version}` });
     } catch (e: any) { out.push({ id: c.id, error: String(e?.message ?? e).slice(0, 200) }); }
   }
   return out;

@@ -331,17 +331,32 @@ export async function photoFillTick(o: { tenant?: string; limit?: number; budget
   for (const c of gen) { if (Date.now() - t0 > budget) break; await L.withLock(`mktFill:${c.id}`, () => pollFill(c)); polled++; }
   const regens = await sql<any[]>`select id, tenant, coalesce(nullif(title, ''), file_name) as title, tags, meta from library_files where meta->'regen'->>'status' = 'generating' ${o.tenant ? sql`and tenant = ${o.tenant}` : sql``} order by created_at limit 5`;
   for (const f of regens) { if (Date.now() - t0 > budget) break; await L.withLock(`mktRegen:${f.id}`, () => pollRegen(f)); }
-  let started = 0;
+  let started = 0; const skipped: Record<string, number> = {};
   if (await ready()) {
     const cand = await sql<Row[]>`select ${sql.unsafe(COLS)} from mkt_contents c join mkt_settings s on s.tenant = c.tenant and s.photo_gen and not coalesce(s.auto_pause, false)
       where c.status in ('pending', 'changes') and not coalesce(c.is_test, false) and c.channel <> 'blog' and c.kind in ('feed', 'story') and c.quality->'visual'->>'by' = 'server'
         and (c.quality->'fill' is null or (c.quality->'visual'->>'plain' = 'true' and coalesce((c.quality->'fill'->>'v')::int, 0) < c.current_version and c.quality->'fill'->>'status' <> 'generating') -- 295차 #835: 단색 표지는 예전 판에서 채웠어도 새 판에서 한 번 더
           or (c.quality->'fill'->>'status' in ('done', 'none') and coalesce((c.quality->'fill'->>'checked')::int, (c.quality->'fill'->>'v')::int, 0) < c.current_version)) -- 296차: 새 판에서 사진 장이 아직 절반이 안 되면 더 채움(절반이면 'none'·checked 로 끝)
-        and (c.scheduled_at is null or c.scheduled_at > now() + interval '2 hours') ${tf}
+        and (c.scheduled_at is null or c.scheduled_at > now() + interval '2 hours' or c.scheduled_at < now()) ${tf} -- 297차: 게시 예정이 지난 승인 대기 글도(승인 전이라 바로 게시되지 않음) — 막는 건 게시 직전 2시간만
       order by c.scheduled_at nulls last limit ${o.limit ?? 3}`;
-    for (const c of cand) { if (Date.now() - t0 > budget) break; const f = await L.withLock(`mktFill:${c.id}`, () => startFill(c, 'auto')); if ('status' in f && f.status === 'generating') started++; }
-  }
-  return { polled, regens: regens.length, started };
+    for (const c of cand) {
+      if (Date.now() - t0 > budget) break;
+      const f = await L.withLock(`mktFill:${c.id}`, () => startFill(c, 'auto'));
+      if ('status' in f && f.status === 'generating') started++;
+      // 296차(로컬 10/31 18:10 '채우기가 한 장도 안 돎'): 한도·준비 안 됨처럼 기록하지 않는 건너뜀도 정기 실행 결과(job_runs)에 까닭별로 남김
+      else if ('status' in f && f.status) { const k = `${f.status}${f.reason ? `: ${f.reason}` : ''}`; skipped[k] = (skipped[k] ?? 0) + 1; }
+    }
+  } else skipped['준비 안 됨(생성 연동 꺼짐·참고 사진 모델 없음)'] = 1;
+  // 297차(로컬 10/31 18:25 '크레딧 여유인데 0장'): 대기 글(피드·스토리)이 왜 후보가 아닌지 — 채우기 기록 상태·이 판 여부·회사 설정·게시 직전별 수
+  const pool = await sql<{ k: string; n: number }[]>`select concat_ws(' · ', case when not coalesce(s.photo_gen, false) then '회사 설정 꺼짐' when coalesce(s.auto_pause, false) then '자동 제작 멈춤' end,
+      case when c.quality->'visual'->>'by' is distinct from 'server' then '사람이 붙인 시안' end,
+      case when c.scheduled_at between now() and now() + interval '2 hours' then '게시 2시간 안' end,
+      coalesce(c.quality->'fill'->>'status', '기록 없음') || case when c.quality->'fill' is null then '' when coalesce((c.quality->'fill'->>'checked')::int, (c.quality->'fill'->>'v')::int, 0) >= c.current_version then '(이 판)' else '(앞 판)' end,
+      case when c.quality->'visual'->>'plain' = 'true' then '단색 표지' end) as k, count(*)::int as n
+    from mkt_contents c left join mkt_settings s on s.tenant = c.tenant
+    where c.status in ('pending', 'changes') and not coalesce(c.is_test, false) and c.channel <> 'blog' and c.kind in ('feed', 'story') ${tf}
+    group by 1 order by 2 desc limit 12`.catch(() => []);
+  return { polled, regens: regens.length, started, ...(Object.keys(skipped).length ? { skipped } : {}), ...(pool.length ? { pool: Object.fromEntries(pool.map((r) => [r.k, r.n])) } : {}) };
 }
 
 /** 상세 화면용(고객사에도 보임 — 서비스 이름·모델·원인 문장은 빼고 상태·까닭·장 수만) */
