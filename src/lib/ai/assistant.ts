@@ -1158,7 +1158,7 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
         const body = z.string().trim().min(1).max(2000).parse(x.body);
         if (x.taskId) { const r = await logSms(u, { taskId: x.taskId, to, body }, null); result = { outboxId: r.id, link: `/tasks/${x.taskId}` }; }
         else {
-          if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+          if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다. 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
           const oid = crypto.randomUUID();
           await sql`insert into outbox (id, tenant, channel, status, created_by, to_addrs, subject, body_text, message_id, sent_at) values (${oid}, ${tenantOf(u)}, 'sms:handoff', 'sent', ${u.id}, ${to}, '문자', ${body}, ${`sms-${oid}`}, now())`;
           result = { outboxId: oid, link: '/mail/outbox' };

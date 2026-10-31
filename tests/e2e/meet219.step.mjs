@@ -21,7 +21,7 @@ export async function meet219({ owner, ctx, sql, BASE, SHOTS, browser }) {
   assert.equal(await dlg.getByTestId('ev-meeting-url').count(), 0, '워크인 회의면 직접 붙여 넣는 칸은 숨김');
   await box.scrollIntoViewIfNeeded();
   await owner.screenshot({ path: `${SHOTS}/567-meet-event-toggle.png`, clip: await dlg.boundingBox() });
-  await dlg.getByTestId('editor-autosave').getByText('저장됨 ✓').waitFor();
+  await dlg.getByTestId('editor-autosave').getByText('저장됨', { exact: true }).waitFor();
   await dlg.getByTestId('editor-close').click(); await dlg.waitFor({ state: 'hidden' });
   assert.equal((await sql`select meeting_url from events where id = ${ev}`)[0].meeting_url, url, '일정 회의 주소 칸 = 워크인 회의 주소(자동 저장이 덮어쓰지 않음)');
   const code = url.split('/').pop();

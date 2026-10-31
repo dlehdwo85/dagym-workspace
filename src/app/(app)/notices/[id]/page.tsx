@@ -52,7 +52,7 @@ function ReadStatus({ id }: { id: string }) {
       </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <div><div className="text-xs font-medium text-ink-3">읽음 {d.read.length}</div><ul className="mt-1 space-y-1 text-sm" data-testid="notice-read-list">{d.read.map((p) => <li key={p.id} className="flex items-center gap-1.5"><Avatar id={p.id} name={p.name} size={20} />{p.name}<span className="text-[11px] text-ink-3">{fmtDateTime(p.read_at)}</span></li>)}</ul></div>
-        <div><div className="text-xs font-medium text-ink-3">안 읽음 {d.unread.length}</div><ul className="mt-1 space-y-1 text-sm" data-testid="notice-unread-list">{d.unread.map((p) => <li key={p.id} className={cx('flex items-center gap-1.5')}><Avatar id={p.id} name={p.name} size={20} />{p.name}{p.title && <span className="text-[11px] text-ink-3">{p.title}</span>}</li>)}{!d.unread.length && <li className="text-xs text-ink-3">모두 읽었습니다 🎉</li>}</ul></div>
+        <div><div className="text-xs font-medium text-ink-3">안 읽음 {d.unread.length}</div><ul className="mt-1 space-y-1 text-sm" data-testid="notice-unread-list">{d.unread.map((p) => <li key={p.id} className={cx('flex items-center gap-1.5')}><Avatar id={p.id} name={p.name} size={20} />{p.name}{p.title && <span className="text-[11px] text-ink-3">{p.title}</span>}</li>)}{!d.unread.length && <li className="text-xs text-ink-3">모두 읽었습니다</li>}</ul></div>
       </div>
       <p className="mt-2 text-[11px] text-ink-3"><Link href="/notices" className="underline">공지 목록</Link></p>
     </section>

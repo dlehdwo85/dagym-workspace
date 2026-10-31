@@ -17,7 +17,7 @@ import {
   Sparkles,
   MessageCircle,
   Lock as LockIcon,
-MapPin, } from 'lucide-react';
+MapPin, Undo2, } from 'lucide-react';
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, FileKindIcon, uploadTaskFiles } from '@/components/Attachments';
@@ -257,10 +257,22 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     try {
       if (batchAll) await api(`/api/tasks/batch/${t0.batch_id}`, { method: 'DELETE' });
       else await api(`/api/tasks/${id}${alsoEvent ? '?alsoEvent=1' : ''}`, { method: 'DELETE' });
-      toast.ok(batchAll ? `${t0.batch.total}건을 삭제했습니다` : '삭제했습니다 — 휴지통에서 30일 동안 되살릴 수 있습니다', batchAll ? undefined : {
+      toast.ok(batchAll ? `${t0.batch.total}건을 삭제했습니다` : '삭제했습니다. 30일 안에 휴지통에서 되살릴 수 있습니다', batchAll ? undefined : {
         label: '되돌리기', run: async () => { try { await api(`/api/tasks/${id}/restore`, { body: {} }); toast.ok('되살렸습니다'); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } },
       });
       broadcastRefresh(); if (onClose) onClose(); else closePage();
+    } catch (e: any) { toast.error(e.message); }
+  }
+  /** #815 지원사업에서 넘어온 업무 → 업무는 휴지통, 지원사업 진행 기록은 처음 상태(넘긴 사람·담당·관리자) */
+  async function withdrawSupport() {
+    const ref = data?.task?.sales_ref; if (!ref?.id) return;
+    if (!confirm('이 업무를 지원사업으로 회수할까요?\n업무는 휴지통(30일 보관)으로 가고, 지원사업 진행 기록은 처음 상태로 돌아갑니다.')) return;
+    try {
+      const url = `/api/sales/support/${ref.id}/withdraw`;
+      let r = await api<any>(url, { body: {} });
+      if (r.needsConfirm) { if (!confirm(r.message)) return; r = await api<any>(url, { body: { confirm: true } }); }
+      toast.ok('지원사업으로 회수했습니다 — 업무는 휴지통에서 30일 동안 되살릴 수 있습니다');
+      broadcastRefresh(); router.push(`/s/sales/support?id=${ref.id}`);
     } catch (e: any) { toast.error(e.message); }
   }
   async function saveTemplate() {
@@ -426,6 +438,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 <MenuItem icon={ListFilter} onClick={() => setDepOpen(true)}>선행 업무 지정</MenuItem>
                 <MenuItem icon={LayoutTemplate} onClick={saveTemplate}>템플릿으로 저장</MenuItem>
                 {features.ai && <MenuItem icon={Sparkles} onClick={() => router.push(`/assistant?task=${id}`)}>✨ AI에게 요청</MenuItem>}
+                {t.sales_ref?.kind === 'support' && t.sales_ref.id && <MenuItem icon={Undo2} onClick={withdrawSupport}>지원사업으로 회수</MenuItem>}
                 {perms.delete && <><div className="my-1 border-t border-line" /><MenuItem icon={Trash2} danger onClick={del}>삭제</MenuItem></>}
               </div>
             </>
@@ -604,7 +617,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <textarea autoFocus rows={6} className={inputCls} value={desc} aria-label="설명"
                 onChange={(e) => { const v = e.target.value; setDesc(v); setDescState(''); if (descTimer.current) clearTimeout(descTimer.current); descTimer.current = setTimeout(() => { descTimer.current = null; saveText('description', v); }, 1000); }}
                 onBlur={() => { flushDesc(desc); setDesc(null); }} />
-              <p className="mt-1 h-4 text-xs text-ink-3" aria-live="polite" data-testid="desc-state">{descState === 'saving' ? '저장 중…' : descState === 'saved' ? '저장됨 ✓' : descState === 'error' ? <span className="text-red-600">저장 안 됨 — 다시 입력하거나 칸을 벗어나면 다시 시도합니다</span> : '입력하면 자동으로 저장됩니다'}</p>
+              <p className="mt-1 h-4 text-xs text-ink-3" aria-live="polite" data-testid="desc-state">{descState === 'saving' ? '저장 중…' : descState === 'saved' ? '저장됨' : descState === 'error' ? <span className="text-red-600">저장하지 못했습니다. 칸을 벗어나면 다시 저장합니다</span> : '입력하면 자동으로 저장됩니다'}</p>
             </div>
           )}
         </section>

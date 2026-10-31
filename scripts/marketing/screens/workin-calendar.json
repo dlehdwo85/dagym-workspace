@@ -1,0 +1,14 @@
+{
+  "brand": "워크인",
+  "title": "워크인 캘린더·메신저",
+  "login": true,
+  "viewport": [390, 844],
+  "lines": ["팀 일정과 업무 마감을 같은 달력에서", "겹치는 일정은 나란히 보입니다", "업무 이야기는 메신저에서 바로", "14일 무료 체험"],
+  "steps": [
+    { "goto": "/calendar", "wait": 1800 },
+    { "scroll": 400, "wait": 900 },
+    { "scroll": -400, "wait": 700 },
+    { "goto": "/messages", "wait": 1800 },
+    { "scroll": 300, "wait": 900 }
+  ]
+}

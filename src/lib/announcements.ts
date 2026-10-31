@@ -83,7 +83,7 @@ async function notifyAudience(sql: Sql, tenant: string, a: { id: string; title: 
 export async function createNotice(u: SessionUser, i: z.infer<typeof noticeInput>, ip: string | null) {
   denyDemo(u);
   const sql = db(); const t = tenantOf(u);
-  if (!(await canWrite(u, sql))) throw forbidden('공지 쓰기 권한이 없습니다 — 대표에게 요청하세요(설정 > 메뉴 권한 > 공지 쓰기)');
+  if (!(await canWrite(u, sql))) throw forbidden('공지 쓰기 권한이 없습니다. 대표에게 요청하세요(설정 > 메뉴 권한 > 공지 쓰기)');
   if (i.audience.type !== 'all' && !i.audience.ids.length) throw badRequest('대상 팀 또는 사람을 골라 주세요');
   if (i.fileIds?.length) { const { loadLibraryFile } = await import('./library'); for (const f of i.fileIds) await loadLibraryFile(u, f, 'meta'); }
   const at = i.publishAt ? new Date(i.publishAt) : new Date();

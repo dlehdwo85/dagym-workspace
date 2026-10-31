@@ -16,6 +16,10 @@ export async function mktSlide811({ owner, ctx, sql, BASE, SHOTS }) {
     assert.ok((await sql`select 1 from mkt_brands where id = ${brand} and video->>'method' = 'photos'`).length, '저장됨');
     await kit.getByTestId('brand-video-method-row').getByText(/현장 사진 3~6장을 천천히 움직여/).waitFor();
     await kit.getByTestId('brand-video-method-row').screenshot({ path: `${SHOTS}/811-brand-video-method.png` });
+    // 275차 #809 상용화 시험(우리 회사 관리자): 요금제 기준 원가·승인률 한 줄 + 브랜드별 표
+    await owner.getByTestId('auto-trial').waitFor();
+    assert.match(await owner.getByTestId('auto-trial-summary').innerText(), /기준 · 이번 달 원가 [\d,]+원.* · 승인률 (-|\d+%)\(문턱 70%\)/);
+    await owner.getByTestId('auto-trial-total').waitFor();
     await owner.goto(`${BASE}/s/marketing/approvals`);
     await owner.getByTestId('mkt-approvable-count').waitFor();
     const tabs = owner.getByTestId('mkt-brand-tabs');
@@ -26,6 +30,10 @@ export async function mktSlide811({ owner, ctx, sql, BASE, SHOTS }) {
     await btn.click();
     await owner.getByText(/^쓸 수 있는 실제 사진이 0장입니다\. 3장 넘게 필요합니다/).first().waitFor({ timeout: 15000 });
     assert.equal((await sql`select count(*)::int n from mkt_briefs where content_id = ${c.id}`)[0].n, 0, '사진이 없으면 의뢰 안 만듦');
+    // 273차 1) 앱 화면 녹화: [녹화 파일로 영상 만들기 · 0원] → 녹화가 없으면 안내
+    await card.getByTestId('approval-screen').click();
+    await card.getByTestId('approval-screen-empty').waitFor();
+    assert.match(await card.getByTestId('approval-screen-empty').innerText(), /마케팅\/화면 녹화'에 녹화 파일이 없습니다/);
   } finally {
     await sql`delete from mkt_contents where id = ${c.id}`;
   }

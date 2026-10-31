@@ -34,7 +34,7 @@ export default function TaskImport() {
 
   async function pick(f: File | undefined) {
     if (!f) return;
-    if (!/\.(xlsx|csv|txt|tsv)$/i.test(f.name)) { toast.error(/\.xls$/i.test(f.name) ? '옛 엑셀(.xls)은 읽지 못합니다 — .xlsx 또는 CSV 로 저장해 주세요' : '.xlsx 또는 .csv 파일을 골라 주세요'); return; }
+    if (!/\.(xlsx|csv|txt|tsv)$/i.test(f.name)) { toast.error(/\.xls$/i.test(f.name) ? '예전 엑셀 파일(.xls)은 열 수 없습니다. .xlsx나 CSV로 다시 저장해 주세요' : '.xlsx 또는 .csv 파일을 골라 주세요'); return; }
     if (f.size > 3 * 1024 * 1024) { toast.error('파일이 너무 큽니다(3MB 까지) — CSV 로 저장하면 작아집니다'); return; }
     setBusy('parse'); setDone(null); setPv(null); setSkip([]); setAmap({}); setKnown([]);
     try {

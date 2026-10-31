@@ -20,3 +20,4 @@ test-results-e2e.json
 /mobile/android/build
 /mobile/android/capacitor-cordova-android-plugins/build
 store-screenshots/
+screen-records/

@@ -402,8 +402,9 @@ const VIDEO_KINDS = ['reels', 'shorts', 'video'];
 /** #426 훅 자리: 릴스·쇼츠·영상 = 첫 장면(3초), 블로그 = 제목, 그 밖 = 본문 첫 줄 */
 const hookAt = (kind: string) => (VIDEO_KINDS.includes(kind) ? '첫 장면(첫 3초)' : kind === 'blog' ? '제목' : '본문 첫 줄');
 export async function logAi(c: any, p: { name: string; model: string }, r: any, P: typeof import('./ai/provider')) {
-  await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-    values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_produce')`;
+  // 275차 #809: 어느 글(→ 브랜드)의 글 작성 비용인지 — 상용화 시험 보기가 브랜드별로 나눔(키트 AI 등 글 없는 호출은 비움)
+  await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose, mkt_content_id)
+    values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_produce', ${c.id ?? null})`;
 }
 export const textOf = (r: any) => (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('');
 
@@ -454,7 +455,7 @@ ${Q.hookGuide(hookAt(c.kind), Q.asMode(c.mode))}
 - keyword: ${blog ? '메인 키워드 1개(지역+업종, 2~15자)' : '검색 키워드 1개(재료의 브랜드·지역·상품에서, 2~12자)'}.${blogGuide}${video ? '\n- script: 컷 줄(화면 자막·내레이션) 배열 — 한 컷 2~4초(분당 300음절), 첫 컷은 3초 안, 마지막 컷은 첫 컷과 이어지게(반복 시청).' : `\n${F.CARD_GUIDE}${kickerGuide}`}${!paged ? '' : story
     ? '\n- frames: 스토리 3~5프레임 — 배열, 프레임마다 {title: 프레임 글 1줄(16자 안), body: 보조 글 1~2줄(각 24자 안, 줄바꿈으로 — 없으면 빈 문자열)}. 순서 = 질문(첫 프레임, body 첫 줄과 같은 문구) → 답 → 행동(마지막 프레임은 문의·저장·프로필 중 하나). 글자는 그림에 올라가므로 짧게.'
     : `\n- slides: 카드뉴스 3~5장 — 배열, 장마다 {role: cover|problem|solution|proof|cta 중 하나, title: 장 제목(16자 안), body: 본문 1~3줄(각 24자 안, 줄바꿈으로 — 없으면 빈 문자열)}. 순서 = cover(표지, 첫 줄 훅) → problem(공감) → solution(해결) → proof(근거 — 재료의 사실·숫자만) → cta(행동: 문의·저장·댓글 중 하나${contact ? `, 연락처 '${contact}'` : ''}). 글자는 그림에 올라가므로 짧게.`}${video || blog ? '' : `
-- 캡션 가독성(한 눈에 읽히게): 첫 줄은 25자 안의 훅 한 줄 · 한 문장이 끝나면 줄을 바꿈(한 줄에 한 문장) · 문단은 3줄 안에서 끊고 문단 사이 빈 줄 · 나열은 화살표(→)·번호·체크(✓)로 · 이모지는 문단마다 1~2개만, 같은 이모지를 잇달아 쓰지 않음 · 강조는 【 】 · 해시태그는 맨 아래 한 줄에 5개 이하.`}
+- 캡션 가독성(한 눈에 읽히게): 첫 줄은 25자 안의 훅 한 줄 · 한 문장이 끝나면 줄을 바꿈(한 줄에 한 문장) · 문단은 3줄 안에서 끊고 문단 사이 빈 줄 · 나열은 번호(1. 2.)나 줄 바꿈으로 · 이모지·화살표(→ ▶)·체크(✓)·【 】 괄호는 쓰지 않음(대표 #644 가독성) · 강조할 말은 줄을 따로 떼어 씀 · 해시태그는 맨 아래 한 줄에 5개 이하.`}
 - 사람이 쓴 글처럼: 상투어(다양한·혁신적인·놓치지 마세요·지금 바로·~해 보는 건 어떨까요)·느낌표/이모지 나열·특수 대시(—)는 쓰지 않고, 문장 길이를 섞습니다.
 - 문구 기준(표시광고법·신뢰): 최고·1위·유일·최초·100%·무조건·완벽·국내 최대는 [재료]에 근거가 없으면 쓰지 않고, 효과·결과를 단정하지 않으며(매출 2배 보장 같은 말), 다른 회사를 깎아내리지 않습니다. 차세대·올인원 솔루션·시너지·극대화 같은 빈 말도 쓰지 않습니다.
 - 요금·무료 범위·가격·혜택·기간은 [재료]의 상품 설명·[사실 카드]에 적힌 그대로만 씁니다(추측해서 바꾸지 않음). 한 브랜드 글에 다른 브랜드의 이름·명의를 섞지 않습니다.
@@ -514,6 +515,14 @@ async function rewriteHooks(c: any, brand: any, cur: string, prev: string[], why
 async function refineDraft(c: any, d: Draft, brand: any, opt: { keepTitle?: boolean } = {}) {
   const Q = await import('./mktQuality'); const rules = await Q.qualityRules();
   const notes: string[] = []; let title = d.title; let body = Q.humanize(d.body, rules).text; const script = [...d.script];
+  // 275차 #814(대표 #644 가독성 '화살표·이모티콘 빼기'): AI 가 이모지·화살표·체크·【 】를 써도 여기서 뺌(다시 쓰기 비용 없이) — 카드뉴스 장·대본·카드 글도
+  const dec = Q.decorOf([title, body, ...script, ...(d.pages ?? []).flatMap((p) => [p.title, p.body])].join('\n'));
+  if (dec.total) {
+    title = Q.stripDecor(title); body = Q.stripDecor(body); script.splice(0, script.length, ...script.map((x) => Q.stripDecor(x)).filter((x) => x.trim()));
+    for (const p of d.pages ?? []) { p.title = Q.stripDecor(p.title); p.body = Q.stripDecor(p.body); }
+    notes.push(`이모지 ${dec.emoji}·화살표 ${dec.arrow}·【 】 ${dec.bracket}개 뺌(대표 #644 가독성)`);
+  }
+  if (d.card) for (const [k, v] of Object.entries(d.card)) if (typeof v === 'string') (d.card as Record<string, unknown>)[k] = Q.stripDecor(v);
   const video = VIDEO_KINDS.includes(c.kind);
   // 로컬 QA 10/24 ⑥: 릴스·쇼츠·영상은 캡션(게시 글)과 컷 대본을 나눔 — 인스타 첫 125자가 대본으로 채워지지 않게 · 스토리는 '스티커 제안:' 줄 모양을 맞춤
   if (video) { const sp = Q.splitScript(body, script); if (sp.script.length >= 2) { if (script.length < 2) script.splice(0, script.length, ...sp.script); body = sp.caption; if (sp.moved) notes.push(`컷 대본 ${sp.moved}줄을 캡션에서 대본 칸으로 옮김`); } }
@@ -542,7 +551,7 @@ async function refineDraft(c: any, d: Draft, brand: any, opt: { keepTitle?: bool
     } else notes.push(`훅 후보가 모두 약함(${curScore.score}점) — 다른 훅으로 수정 요청해 주세요`);
   }
   const rep = Q.qualityReport({ channel: c.channel, kind: c.kind, title, body, hooks, script, keywords: kw, mainKeyword: d.keyword || null, subKeywords: d.subKeywords, persona: d.persona, voice: brand?.voice, cross: c.cross_channels ?? [], mode }, rules);
-  return { title, body: rep.body, script, report: { ...rep.report, notes }, errors: rep.report.channel.filter((x) => x.level === 'error').map((x) => x.msg), timing: rep.report.timing ? Q.timingText(rep.report.timing) : '' };
+  return { title: Q.stripDecor(title), body: Q.stripDecor(rep.body), script, report: { ...rep.report, notes }, errors: rep.report.channel.filter((x) => x.level === 'error').map((x) => x.msg), timing: rep.report.timing ? Q.timingText(rep.report.timing) : '' };
 }
 /** 연락처 줄을 본문 끝(해시태그 줄 앞)에 */
 function withContact(body: string, line: string) {
@@ -673,9 +682,13 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   if (!held && !batch && !isQuiet(new Date(), s)) await mktNotify(sql, c, actorId, { approval: true, type: 'review_requested', title: q.passed ? `승인 요청: ${f.title}` : kind === 'blog' && q.issues.length === 1 ? `사진 필요: ${f.title}` : visualOnly ? `시안 제작 중: ${f.title}` : `품질 검사 미통과: ${f.title}`,
     body: q.passed ? `승인 마감 ${Number(ymd(deadline).slice(5, 7))}/${Number(ymd(deadline).slice(8))} ${pad(s.approval_hour)}:00` : q.issues.join(' · '), link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktp:${c.id}:${v}` });
   // 271차 #811 영상 만드는 방법이 실제 사진이면 원고 직후 이 판에 사진 영상(생성 비용 0) — 사진이 3장이 안 되면 제작 요청 카드 그대로
-  if (VIDEO_KINDS.includes(kind) && !mediaIds.length && !held && videoMethod === 'photos') {
-    try { const r = await (await import('./mktSlideshow')).autoSlideshow({ ...c, title: f.title }, v, q.body, d.photos ?? []); if (r.skipped) await sql`update mkt_versions set note = concat_ws(' · ', note, ${`실제 사진 영상 못 만듦: ${r.skipped}`}::text) where content_id = ${c.id} and version = ${v}`; }
-    catch (e: any) { console.error('[mkt] 실제 사진 영상', c.id, e?.message ?? e); }
+  // 273차: 앱 화면 녹화면 이 브랜드의 안 쓴 녹화(자료실 '마케팅/화면 녹화')로 — 없으면 카드 그대로
+  if (VIDEO_KINDS.includes(kind) && !mediaIds.length && !held && (videoMethod === 'photos' || videoMethod === 'screen')) {
+    try {
+      const Z = await import('./mktSlideshow');
+      const r = videoMethod === 'photos' ? await Z.autoSlideshow({ ...c, title: f.title }, v, q.body, d.photos ?? []) : await Z.autoRecording({ ...c, title: f.title }, v, q.body);
+      if (r.skipped) await sql`update mkt_versions set note = concat_ws(' · ', note, ${`${videoMethod === 'photos' ? '실제 사진' : '화면 녹화'} 영상 못 만듦: ${r.skipped}`}::text) where content_id = ${c.id} and version = ${v}`;
+    } catch (e: any) { console.error('[mkt] 자동 영상', videoMethod, c.id, e?.message ?? e); }
   }
   return { id: c.id, passed: q.passed, issues: q.issues, ...(held ? { held: true } : {}), ...(batch ? { batch } : {}) };
 }

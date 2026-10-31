@@ -127,6 +127,8 @@ export function Automation() {
           {/* 270차 #809(대표 '슈퍼관리자는 무한인데 AI 영상 월 2편?'): 우리 회사(내부)는 요금제 숫자 대신 월 실제 비용 한도(원)로 — 비우면 요금제 숫자 그대로 */}
           {data.production.internal && <CostCap prod={data.production} canEdit={ed} onSaved={reload} />}
         </section>)}
+      {/* 275차 #809(대표 10/29 '상용화 했을 때 기준으로 시험'): 우리 회사만 — 브랜드별 이번 달 원가·승인률 · 요금제 가격 대비 원가율 */}
+      {ed && data.production?.internal && <TrialView />}
       {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-recipients">
         <h2 className="text-sm font-semibold">알림·승인 받는 사람</h2>
         <p className="mt-1 text-xs text-ink-2">고르지 않으면 관리자 전원. 시험 모드 브랜드는 여기와 상관없이 실행한 사람에게만 갑니다.</p>
@@ -335,6 +337,40 @@ function BundleTimes({ bundleKey, brand, rules, onDone }: { bundleKey: string; b
 }
 
 /** 270차 #809 내부 회사 이미지·영상 생성 월 실제 비용 한도(원) — 정하면 요금제의 크레딧·영상 편수·재생성 횟수 대신 이 금액으로만 막음 */
+type Trial = { month: string; bar: number; perCreditKrw: number; plan: { code: string; label: string; price: number | null } | null; otherTextKrw: number;
+  brands: { id: string; name: string; test: boolean; produced: number; textKrw: number; credits: number; creditKrw: number; costKrw: number; approved: number; changes: number; decided: number; approvalRate: number | null }[];
+  total: { produced: number; textKrw: number; creditKrw: number; costKrw: number; approved: number; changes: number; decided: number; approvalRate: number | null; ratio: number | null } };
+function TrialView() {
+  const { data } = useApi<Trial>('/api/marketing/auto/trial');
+  if (!data) return null;
+  const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
+  const pct = (r: number | null) => (r === null ? '-' : `${Math.round(r * 100)}%`);
+  const t = data.total; const price = data.plan?.price ?? null;
+  return (
+    <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-trial">
+      <h2 className="text-sm font-semibold">상용화 시험 · {Number(data.month.slice(5))}월</h2>
+      <p className="mt-1 text-xs text-ink-2" data-testid="auto-trial-summary">
+        {data.plan ? `${data.plan.label} 요금제` : '요금제 없음'}{price ? ` ${won(price)}` : ' · 가격 미정'} 기준 · 이번 달 원가 <b className="tabular-nums">{won(t.costKrw)}</b>
+        {t.ratio !== null && <> · 원가율 <b className="tabular-nums" data-testid="auto-trial-ratio">{pct(t.ratio)}</b></>}
+        {' '}· 승인률 <b className={cx('tabular-nums', t.approvalRate !== null && t.approvalRate < data.bar && 'text-red-700')} data-testid="auto-trial-rate">{pct(t.approvalRate)}</b>(문턱 {pct(data.bar)})
+      </p>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[34rem] text-xs tabular-nums">
+          <thead className="text-left text-ink-3"><tr><th className="py-1 font-medium">브랜드</th><th className="font-medium">만든 글</th><th className="font-medium">글 작성</th><th className="font-medium">이미지·영상 생성</th><th className="font-medium">원가</th><th className="font-medium">승인률</th><th className="font-medium">수정 요청</th></tr></thead>
+          <tbody>
+            {data.brands.map((b) => <tr key={b.id} className="border-t border-line" data-testid="auto-trial-row">
+              <td className="py-1">{b.name}{b.test && <span className="ml-1 text-ink-3">(시험)</span>}</td><td>{b.produced}건</td><td>{won(b.textKrw)}</td><td>{b.credits}크레딧 · {won(b.creditKrw)}</td><td className="font-semibold">{won(b.costKrw)}</td>
+              <td className={cx(b.approvalRate !== null && b.approvalRate < data.bar && 'text-red-700')}>{pct(b.approvalRate)}{b.decided ? ` (${b.approved}/${b.decided})` : ''}</td><td>{b.changes}건</td></tr>)}
+            {data.otherTextKrw > 0 && <tr className="border-t border-line text-ink-2"><td className="py-1" colSpan={2}>브랜드 모름(예전 기록·키트 AI 등)</td><td>{won(data.otherTextKrw)}</td><td /><td>{won(data.otherTextKrw)}</td><td /><td /></tr>}
+            <tr className="border-t-2 border-line font-semibold" data-testid="auto-trial-total"><td className="py-1">합계</td><td>{t.produced}건</td><td>{won(t.textKrw)}</td><td>{won(t.creditKrw)}</td><td>{won(t.costKrw)}</td><td>{pct(t.approvalRate)}{t.decided ? ` (${t.approved}/${t.decided})` : ''}</td><td>{t.changes}건</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1 text-[11px] text-ink-3">우리 회사 관리자만 봅니다. 생성 비용은 1크레딧 {won(data.perCreditKrw)}(높은 쪽)으로 셈합니다. 브랜드별 글 작성 비용은 10/30부터 쌓인 기록으로 나눕니다.</p>
+    </section>
+  );
+}
+
 function CostCap({ prod, canEdit, onSaved }: { prod: { costCapKrw: number | null; monthGenKrw: number | null; monthGenKrwMin: number | null }; canEdit: boolean; onSaved: () => void }) {
   const [v, setV] = useState(prod.costCapKrw === null ? '' : String(prod.costCapKrw));
   const won = (n: number | null) => (n === null ? '-' : `${n.toLocaleString('ko-KR')}원`);

@@ -178,7 +178,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
       const lastV = { assigneeId: f.assigneeId || null, requestedById: f.requestedById || null, priority: f.priority ?? 'normal', projectId: f.projectId || null, remind: f.remind ?? null };
       try { localStorage.setItem('wos_quick_last', JSON.stringify(lastV)); } catch {}
       api('/api/me/quick-last', { method: 'PUT', body: lastV }).catch(() => {});
-      toast.ok(f.teamId && !multiEach && !together && f.teamMode !== 'tag' ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다 — 팀장에게 알림을 보냈습니다') : together ? `${count}명이 함께 담당하는 업무를 만들었습니다 — 모두에게 알림을 보냈습니다` : count > 1 ? `${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다 — 각자에게 알림을 보냈습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다 — 담당자에게 알림을 보냈습니다' : '업무를 등록했습니다 — 본인 업무는 마감 때 알려 드립니다');
+      toast.ok(f.teamId && !multiEach && !together && f.teamMode !== 'tag' ? (f.teamMode === 'each' ? `팀원 ${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다` : '팀에 배정했습니다. 팀장에게 알렸습니다') : together ? `${count}명이 함께 담당하는 업무를 만들었습니다. 모두에게 알렸습니다` : count > 1 ? `${((r as any).ids ?? [r.id]).length}명에게 각각 만들었습니다. 각자에게 알렸습니다` : f.assigneeId && f.assigneeId !== user.id ? '업무를 등록했습니다. 담당자에게 알렸습니다' : '업무를 등록했습니다. 본인 업무는 마감 때 알려 드립니다');
       broadcastRefresh(); noteAway(r);
       if (keep && !auto && !defaults?.parentId) { setF((x: any) => ({ ...x, title: '' })); setNoAuto(false); setTpl(''); titleRef.current?.focus(); return; }
       onClose();

@@ -618,7 +618,7 @@ const AUTO_FP = '251'; // 자동 판단 차례 규칙이 바뀌면 올림 — �
 async function supportAll(sql: Sql, t: string, uid: string, today: string) {
   const [{ profile, saved, autoAi, basisAt, autoState }, off, matches, works] = await Promise.all([profileOf(t, sql), disabledSources(sql, t),
     sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto, auto_fail, ai_effect, listed_at, ai_rule_verdict from support_matches where tenant = ${t}`,
-    sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t}`]);
+    sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.withdrawn_at is null`]);
   const mm = new Map(matches.map((m) => [m.program_id, m])); const wm = new Map(works.map((w) => [w.program_id, w]));
   const workIds = works.map((w) => w.program_id);
   // 열린 공고(마감 전·마감 미정) + 우리 회사 진행 중인 것(마감 지나도)
@@ -644,7 +644,7 @@ export async function detailView(u: SessionUser, id: string) {
   const p = await programFor(sql, t, id);
   const { profile, saved, basisAt } = await profileOf(t, sql);
   const [m] = await sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto, auto_fail, ai_effect, listed_at, ai_rule_verdict from support_matches where tenant = ${t} and program_id = ${id}`;
-  const [w] = await sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.program_id = ${id}`;
+  const [w] = await sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.program_id = ${id} and w.withdrawn_at is null`;
   const log = w ? await sql`select l.from_status, l.to_status, l.note, l.changed_at, us.name as by from support_work_log l left join users us on us.id = l.changed_by where l.work_id = ${w.id} order by l.changed_at desc limit 30` : [];
   const [task] = w?.task_id ? await sql<{ id: string; title: string; status: string; due_date: string | null; total: number; done: number }[]>`select t.id, t.title, t.status, t.due_date::text,
     (select count(*)::int from task_checklist_items ci where ci.task_id = t.id) total, (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.done) done from tasks t where t.id = ${w.task_id} and t.deleted_at is null` : [];
@@ -804,7 +804,8 @@ export async function saveWork(u: SessionUser, id: string, i: z.infer<typeof wor
   const t = tenantOf(u); const sql = db(); const today = ymd();
   const p = await programFor(sql, t, id);
   if (i.ownerId && !(await peopleOf(sql, t)).some((x) => x.id === i.ownerId)) throw badRequest('영업 공간을 쓰는 사람만 담당으로 고를 수 있습니다');
-  const [prev] = await sql<{ id: string; status: string; owner_id: string | null; task_id: string | null }[]>`select id, status, owner_id, task_id from support_work where tenant = ${t} and program_id = ${p.id}`;
+  const [row] = await sql<{ id: string; status: string; owner_id: string | null; task_id: string | null; withdrawn_at: Date | null }[]>`select id, status, owner_id, task_id, withdrawn_at from support_work where tenant = ${t} and program_id = ${p.id}`;
+  const prev = row && !row.withdrawn_at ? row : null; const revive = row?.withdrawn_at ? row : null; // 277차 #815: 회수한 기록은 처음 상태 — 다시 고르면 같은 행을 살림(기록 이어짐)
   if (!prev && !i.status) throw badRequest('먼저 관심·신청 준비 중 하나를 고르세요');
   const status = i.status ?? prev!.status;
   const owner = i.ownerId !== undefined ? i.ownerId : prev?.owner_id ?? u.id;
@@ -815,6 +816,7 @@ export async function saveWork(u: SessionUser, id: string, i: z.infer<typeof wor
   const set = Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined));
   let w: { id: string; status: string; owner_id: string | null; task_id: string | null };
   if (prev) [w] = await sql<typeof w[]>`update support_work set ${sql(set as never)}, updated_by = ${u.id}, updated_at = now() where id = ${prev.id} returning id, status, owner_id, task_id`;
+  else if (revive) [w] = await sql<typeof w[]>`update support_work set ${sql(set as never)}, withdrawn_at = null, withdrawn_by = null, task_id = null, updated_by = ${u.id}, updated_at = now() where id = ${revive.id} returning id, status, owner_id, task_id`;
   else [w] = await sql<typeof w[]>`insert into support_work ${sql({ tenant: t, program_id: p.id, created_by: u.id, updated_by: u.id, ...set } as never)} returning id, status, owner_id, task_id`;
   if (!prev || prev.status !== status) await sql`insert into support_work_log (work_id, from_status, to_status, note, changed_by) values (${w.id}, ${prev?.status ?? null}, ${status}, ${i.resultMemo ?? i.memo ?? null}, ${u.id})`;
   // 업무: 관심·준비 = 만들기/채우기, 신청·결과·포기 = 열린 업무 완료
@@ -830,6 +832,38 @@ export async function saveWork(u: SessionUser, id: string, i: z.infer<typeof wor
   }
   await audit(sql, u.id, 'support.work', 'support_program', p.id, { from: prev?.status ?? null, to: status }).catch(() => {});
   return detailView(u, p.id);
+}
+/**
+ * 277차 #815(대표 10/31 '지원사업 넘겼을 때 실수로 누른건 다시 업무에서 회수해올 수 있도록'): [업무 회수] — 만든 업무는 휴지통(30일 안 되살리기),
+ * 진행 기록은 처음 상태(행·기록은 남김 + '회수' 한 줄), 담당에게 알림 1건(본인이면 생략). 공고는 맞춤 목록에 그대로.
+ * 넘긴 사람·담당·업무 요청자·관리자만. 다른 사람이 업무에 댓글·첨부·체크를 남겼으면 먼저 알려 주고(confirm) 진행
+ */
+export const withdrawInput = z.object({ confirm: z.boolean().optional() });
+export async function withdrawWork(u: SessionUser, id: string, i: z.infer<typeof withdrawInput>) {
+  await assertSpace(u, 'sales');
+  const t = tenantOf(u); const sql = db(); const p = await programFor(sql, t, id, 0);
+  const [w] = await sql<{ id: string; status: string; owner_id: string | null; task_id: string | null; created_by: string | null }[]>`select id, status, owner_id, task_id, created_by from support_work
+    where tenant = ${t} and program_id = ${p.id} and withdrawn_at is null`;
+  if (!w) throw badRequest('회수할 진행 기록이 없습니다');
+  const [task] = w.task_id ? await sql<{ id: string; requested_by: string | null; assignee_id: string | null }[]>`select id, requested_by, assignee_id from tasks where id = ${w.task_id} and deleted_at is null` : [];
+  if (!isAdmin(u) && ![w.created_by, w.owner_id, task?.requested_by, task?.assignee_id].includes(u.id)) throw forbidden('넘긴 사람·담당·관리자만 회수할 수 있습니다');
+  if (task && !i.confirm) { // 다른 사람이 남긴 것 — 같이 휴지통으로 가므로 먼저 알림
+    const [a] = await sql<{ c: number; f: number; k: number }[]>`select
+      (select count(*)::int from comments where task_id = ${task.id} and deleted_at is null and author_id <> ${u.id}) as c,
+      (select count(*)::int from attachments where task_id = ${task.id} and deleted_at is null and coalesce(created_by, ${u.id}) <> ${u.id}) as f,
+      (select count(*)::int from task_checklist_items where task_id = ${task.id} and done and coalesce(done_by, ${u.id}) <> ${u.id}) as k`;
+    if (a.c + a.f + a.k) return { needsConfirm: true, activity: a, message: `다른 사람이 이 업무에 ${[a.c && `댓글 ${a.c}개`, a.f && `첨부 ${a.f}개`, a.k && `체크 ${a.k}개`].filter(Boolean).join(' · ')}를 남겼습니다. 회수하면 업무와 함께 휴지통으로 갑니다(30일 안 되살릴 수 있음).` };
+  }
+  await sql.begin(async (tx) => {
+    if (task) await tx`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where (id = ${task.id} or parent_id = ${task.id}) and deleted_at is null`;
+    await tx`update support_work set withdrawn_at = now(), withdrawn_by = ${u.id}, task_id = null, remind7_at = null, remind3_at = null, applied_at = null, result_at = null, amount_awarded = null, result_memo = null, updated_by = ${u.id}, updated_at = now() where id = ${w.id}`;
+    await tx`insert into support_work_log (work_id, from_status, to_status, note, changed_by) values (${w.id}, ${w.status}, 'withdrawn', ${task ? '업무 회수(업무는 휴지통)' : '진행 회수'}, ${u.id})`;
+  });
+  const to = [...new Set([w.owner_id, task?.assignee_id].filter((x): x is string => !!x && x !== u.id))];
+  if (to.length) await notify(sql, { userIds: to, type: 'assigned', space: 'sales', title: `지원사업 업무 회수: ${p.title.slice(0, 60)}`, body: `${u.name}님이 업무를 회수했습니다. 업무는 휴지통에서 30일 동안 되살릴 수 있습니다`,
+    link: `/s/sales/support?id=${p.id}`, entityType: 'support_program', entityId: p.id, actorId: u.id, dedupeKey: `support:withdraw:${w.id}:${Date.now()}` } as never).catch(() => {});
+  await audit(sql, u.id, 'support.withdraw', 'support_program', p.id, { from: w.status, task: task?.id ?? null }).catch(() => {});
+  return { withdrawn: true, taskId: task?.id ?? null, view: await detailView(u, p.id) };
 }
 /** #784 이번 주 신청 목록에 담기·빼기(영업 공간 누구나 — 담은 사람·때 기록) */
 export async function setListed(u: SessionUser, id: string, on: boolean) {
@@ -944,7 +978,7 @@ export async function weeklyBundle(t: string, opt: { now?: Date; actor?: Session
   const items: WeeklyItem[] = v2.items.filter((x) => x.ai?.verdict === 'fit' && !x.final.conflict).slice(0, 10) // #649 ③: 주간 묶음은 AI 가 '맞음'으로 판정한 공고만(1차 규칙만 맞는 건은 '확인 중')
     .map((x) => ({ id: x.id, title: x.title, by: x.ai ? 'ai' : 'rule', dday: x.dday, applyEnd: x.applyEnd, agency: x.agency, brands: x.ai?.brands ?? [], use: x.ai?.use[0] ?? null, auto: auto.has(x.id) }));
   const admins = await sql<{ id: string }[]>`select id from users where tenant = ${t} and status = 'active' and role in ('owner', 'admin')`;
-  const owners = await sql<{ owner_id: string }[]>`select distinct owner_id from support_work where tenant = ${t} and status in ('interest', 'preparing') and owner_id is not null`;
+  const owners = await sql<{ owner_id: string }[]>`select distinct owner_id from support_work where tenant = ${t} and status in ('interest', 'preparing') and owner_id is not null and withdrawn_at is null`;
   const to = [...new Set([...admins.map((a) => a.id), ...owners.map((o) => o.owner_id)])];
   let sentTo = 0;
   if (items.length && to.length) {
@@ -1069,7 +1103,7 @@ export async function supportTick(opt: { now?: Date } = {}) {
   const sql = db(); const today = ymd(now);
   const rows = await sql<{ id: string; tenant: string; status: string; owner_id: string | null; created_by: string | null; remind7_at: string | null; remind3_at: string | null; program_id: string; title: string; apply_end: string }[]>`
     select w.id, w.tenant, w.status, w.owner_id, w.created_by, w.remind7_at, w.remind3_at, p.id as program_id, p.title, p.apply_end::text from support_work w join support_programs p on p.id = w.program_id
-    where w.status in ('interest', 'preparing') and p.apply_end between ${today}::date and ${addDays(today, 7)}::date and (w.remind3_at is null and p.apply_end <= ${addDays(today, 3)}::date or w.remind7_at is null) limit 200`;
+    where w.status in ('interest', 'preparing') and w.withdrawn_at is null and p.apply_end between ${today}::date and ${addDays(today, 7)}::date and (w.remind3_at is null and p.apply_end <= ${addDays(today, 3)}::date or w.remind7_at is null) limit 200`;
   let sent = 0;
   for (const r of rows) {
     const d = daysBetween(today, r.apply_end); const three = d <= 3;
@@ -1093,7 +1127,7 @@ export async function supportHomeCard(t: string, sql: Sql = db()) {
   const off = await disabledSources(sql, t);
   // #647(대표 10/25 22:20): 홈 상단 고정 카드 '이번 주 맞는 지원사업' — 7일 안 마감뿐 아니라 아직 신청할 수 있는 맞춤(fitOpen)도 함께 셈
   const rows = await sql<(Prog & { status: string | null; hidden: boolean | null; ai_verdict: string | null })[]>`select ${COLS(sql)}, w.status, m.hidden, m.ai_verdict from support_programs p
-    left join support_work w on w.program_id = p.id and w.tenant = ${t} left join support_matches m on m.program_id = p.id and m.tenant = ${t}
+    left join support_work w on w.program_id = p.id and w.tenant = ${t} and w.withdrawn_at is null left join support_matches m on m.program_id = p.id and m.tenant = ${t}
     where (p.tenant is null or p.tenant = ${t}) and not (p.source = any(${off})) and p.apply_end >= ${today}::date order by p.apply_end limit 3000`;
   let mine = 0, fit = 0, fitOpen = 0, mineOpen = 0, pending = 0;
   for (const r of rows) {

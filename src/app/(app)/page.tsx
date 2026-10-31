@@ -194,7 +194,7 @@ export default function Dashboard() {
       const fm = followUpMsg(r); if (fm) toast.info(fm);
       // #508: 완료는 업무 목록 맨 아래 '완료됨'으로 — 되돌리기는 거기서([완료됨 보기])
       if (toReview) toast.ok('검토를 요청했습니다', { label: '되돌리기', run: async () => { await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: t.status } }).catch(() => {}); reload(); mine.reload(); } });
-      else toast.ok('완료했습니다 — 완료됨으로 옮겼습니다', { label: '완료됨 보기', run: () => router.push('/tasks?view=my&openDone=1') });
+      else toast.ok('완료됨으로 옮겼습니다', { label: '완료됨 보기', run: () => router.push('/tasks?view=my&openDone=1') });
       reload(); mine.reload(); broadcastRefresh();
     } catch (e: any) { toast.error(e.message); }
   }

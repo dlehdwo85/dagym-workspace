@@ -699,7 +699,7 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   assert.equal(await row.getByTestId('check-circle').count(), 0, '왼쪽 완료 동그라미 없음');
   await row.getByTestId('row-status-chip').filter({ visible: true }).click();
   await owner.getByTestId('status-quick').click();
-  await owner.getByText('완료했습니다 — 완료됨으로 옮겼습니다').waitFor();
+  await owner.getByText('완료됨으로 옮겼습니다').waitFor();
   await owner.waitForTimeout(500);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
   // #508: 목록에서 바로 빠지고 묶음 맨 아래 접힌 '완료됨 1건' — 안내 [완료됨 보기]가 펼치고, 되돌리기는 거기서
@@ -732,7 +732,7 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   await owner.reload(); await owner.getByLabel('업무 검색').fill('원형 체크');
   await owner.locator(`[data-task-id="${rid}"]`).getByTestId('row-status-chip').filter({ visible: true }).click();
   await owner.getByTestId('status-quick').click();
-  const doneToast = owner.getByTestId('toast').filter({ hasText: '완료했습니다 — 완료됨으로 옮겼습니다' }); await doneToast.waitFor();
+  const doneToast = owner.getByTestId('toast').filter({ hasText: '완료됨으로 옮겼습니다' }); await doneToast.waitFor();
   const th = await doneToast.elementHandle();
   await owner.evaluate(() => window.dispatchEvent(new Event('wos-refresh')));
   await owner.waitForTimeout(4500);

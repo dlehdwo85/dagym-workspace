@@ -313,7 +313,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
       const r = await api('/api/tasks', { body: { title: autoTitle(t), priority, assigneeId: assignee, ...(each ? { assigneeIds: assignees } : multi ? { coAssigneeIds: assignees.slice(1) } : {}), requestedById: user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? proj?.id ?? null, sectionId: sectionId ?? null, approvalRequired: review } });
       markNew(r.id); setRemind(null); setPriority('normal'); setProj(null); setReview(false);
       const who = each ? `${assignees.length}명 각각` : multi ? `${assignees.length}명 함께 담당으로` : assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
-      toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? ' — 담당자에게 알림을 보냈습니다' : assignee ? ' — 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
+      toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? '. 담당자에게 알렸습니다' : assignee ? '. 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       broadcastRefresh(); onCreated?.(r.id); noteAway(r);
       if (!r.away?.length && assignee && assignee !== user.id && due) warnAway(assignee, due, dir.users.find((u) => u.id === assignee)?.name ?? '담당자');
     } catch (e: any) {

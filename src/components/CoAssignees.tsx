@@ -59,7 +59,7 @@ export function Assignees({ t, canEdit, onPatch, onAdded, extra }: { t: any; can
       ))}
       {!parts.length && !canEdit && <span className="text-sm text-ink-3">담당자 없음</span>}
       {canEdit && <UserSelect className="h-7 w-auto max-w-[9rem] rounded-full border border-dashed border-line bg-white px-2 text-xs text-ink-2" placeholder="+ 담당자 추가" value={null} ariaLabel="담당자 추가" exclude={ids}
-        onChange={(v) => { if (!v || ids.includes(v)) return; save([...ids, v], parts.length ? '담당자를 추가했습니다 — 알림을 보냈습니다' : '담당자를 정했습니다'); onAdded?.(v); }} />}
+        onChange={(v) => { if (!v || ids.includes(v)) return; save([...ids, v], parts.length ? '담당자를 추가하고 알렸습니다' : '담당자를 정했습니다'); onAdded?.(v); }} />}
       {extra}
     </span>
   );

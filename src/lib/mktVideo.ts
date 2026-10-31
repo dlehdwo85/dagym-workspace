@@ -384,9 +384,9 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
   const actor = await actorFor(b.created_by);
   const { saveGeneratedFile } = await import('./library');
   const reuse = r.reuse ?? null; // 187차 ⑦ 다시 합성 — 원본 영상·원장 줄을 meta 에(다시 합성 목록이 이 파일을 원본으로 다시 고르지 않게)
-  const slides = !!reuse?.slideshow; // 271차 #811 실제 사진 영상 — 'AI 생성'·'다시 합성'이 아님
-  const title = `${spec.label} 영상${b.quantity > 1 ? ` ${v.n + 1}` : ''} — ${String(b.message).slice(0, 30)}${slides ? ' (실제 사진)' : reuse ? ' (다시 합성)' : ''}`;
-  const f = await saveGeneratedFile(actor, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.mp4`, mime: 'video/mp4', data, title, folder: '마케팅', tags: ['제작의뢰실', ...(slides ? ['실제 사진', '합성'] : ['AI 생성', '합성', ...(reuse ? ['다시 합성'] : [])])], source: 'ai', space: 'marketing',
+  const slides = !!reuse?.slideshow, screen = !!reuse?.screen; // 271차 #811 실제 사진 영상 · 273차 앱 화면 녹화 — 'AI 생성'·'다시 합성'이 아님
+  const title = `${spec.label} 영상${b.quantity > 1 ? ` ${v.n + 1}` : ''} — ${String(b.message).slice(0, 30)}${slides ? ' (실제 사진)' : screen ? ' (화면 녹화)' : reuse ? ' (다시 합성)' : ''}`;
+  const f = await saveGeneratedFile(actor, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.mp4`, mime: 'video/mp4', data, title, folder: '마케팅', tags: ['제작의뢰실', ...(slides ? ['실제 사진', '합성'] : screen ? ['화면 녹화', '합성'] : ['AI 생성', '합성', ...(reuse ? ['다시 합성'] : [])])], source: 'ai', space: 'marketing',
     meta: { video: { pipeline: 'v2', scenes: v.scenes.length, duration: out.duration, narration: nar.provider, bgm: bgm?.title ?? null, font: family, ...(reuse ? { reuse: { ledger: reuse.ledger, from: v.origin ?? v.source?.fileId ?? null } } : {}) } } });
   return { mediaId: f.id, duration: out.duration, notes: [...notes, ...out.notes], audio: { narration: nar.provider, chars: nar.chars, bgm: bgm?.title ?? null }, endCta, checks };
 }
@@ -472,7 +472,7 @@ async function finalize(b: any, r: any) {
   const scenesN = variants[0]?.scenes.length ?? 0; const reuse = r.reuse ?? null;
   // 187차 ⑦ 다시 합성: 새로 만든 것 없음(생성 크레딧 0) — 들어간 것만 정직하게(자막 줄이 있을 때만 '자막', 전화가 들어갔을 때만 '끝 화면 전화')
   const reuseNote = () => { const subs = variants.some((v) => v.scenes.some((x) => x.line.trim())); const tel = /\d{2,4}-\d{3,4}|\d{8,11}/.test(String(r.endCta ?? ''));
-    return `${reuse?.slideshow ? `실제 사진 ${scenesN}장으로 만든 영상(생성 비용 0)` : '기존 영상 새 방식으로 다시 합성(생성 크레딧 0)'} · ${[subs ? '자막' : '', tel ? '끝 화면 전화' : '끝 화면', r.audio?.narration ? '내레이션' : '', r.audio?.bgm ? '배경음' : ''].filter(Boolean).join('·')}`; };
+    return `${reuse?.slideshow ? `실제 사진 ${scenesN}장으로 만든 영상(생성 비용 0)` : reuse?.screen ? '앱 화면 녹화로 만든 영상(생성 비용 0)' : '기존 영상 새 방식으로 다시 합성(생성 크레딧 0)'} · ${[subs ? '자막' : '', tel ? '끝 화면 전화' : '끝 화면', r.audio?.narration ? '내레이션' : '', r.audio?.bgm ? '배경음' : ''].filter(Boolean).join('·')}`; };
   if (reuse?.auto) { // 271차 #811 자동 제작 원고의 실제 사진 영상 — 새 판 없이 그 판에 붙임(주 묶음 초안은 초안 그대로)
     const attached = await (await import('./mktSlideshow')).attachAuto(b, reuse, mediaIds, reuseNote());
     await save(b.id, { ...r, stage: 'done', mediaIds, review, checkFails, notes, renderAt: null, attached }, { status: 'review', error: null });

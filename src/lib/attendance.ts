@@ -58,7 +58,7 @@ export async function clock(u: SessionUser, i: z.infer<typeof clockInput>, ip: s
   const day = todaySeoul();
   const [cur] = await sql<any[]>`select in_at, out_at from attendance where tenant = ${t} and user_id = ${u.id} and day = ${day}`;
   if (i.type === 'in' && cur?.in_at) throw badRequest(`오늘은 이미 ${hhmm(cur.in_at)}에 출근했습니다`);
-  if (i.type === 'out' && !cur?.in_at) throw badRequest('출근 기록이 없습니다 — 먼저 [출근]을 눌러 주세요');
+  if (i.type === 'out' && !cur?.in_at) throw badRequest('출근 기록이 없습니다. 먼저 [출근]을 눌러 주세요');
   if (i.type === 'out' && cur?.out_at) throw badRequest(`오늘은 이미 ${hhmm(cur.out_at)}에 퇴근했습니다`);
   const ss = await sites(sql, t);
   let siteId: string | null = null, inside: boolean | null = null, nearest: { name: string; distance: number; radius: number } | null = null;

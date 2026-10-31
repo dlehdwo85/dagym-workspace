@@ -141,6 +141,17 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
     try { const r = await api<{ photos: number; seconds: number }>('/api/marketing/studio/slideshow', { body: { contentId: c.id } }); toast.ok(`실제 사진 ${r.photos}장으로 ${r.seconds}초 영상을 만드는 중입니다. 다 되면 새 버전으로 올라옵니다`); onDone(); }
     catch (e: any) { toast.error(e.message); } finally { setSlide(false); }
   }
+  // 273차 #811 1) 앱 화면 녹화: 자료실 '마케팅/화면 녹화' 영상을 골라 자막·끝 화면을 붙임(생성 비용 0)
+  const [recs, setRecs] = useState<{ id: string; title: string; at: string; mine: boolean; used: boolean }[] | null>(null);
+  async function openRecs() {
+    if (recs) { setRecs(null); return; }
+    try { setRecs((await api<{ files: { id: string; title: string; at: string; mine: boolean; used: boolean }[] }>(`/api/marketing/studio/screen?contentId=${c.id}`)).files); } catch (e: any) { toast.error(e.message); }
+  }
+  async function pickRec(fileId: string) {
+    setSlide(true);
+    try { await api('/api/marketing/studio/screen', { body: { contentId: c.id, fileId } }); toast.ok('녹화 영상에 자막·끝 화면을 붙이는 중입니다. 다 되면 새 버전으로 올라옵니다'); setRecs(null); onDone(); }
+    catch (e: any) { toast.error(e.message); } finally { setSlide(false); }
+  }
   const canAct = canDecide && !done && ['pending', 'changes', 'approved'].includes(c.status);
   const d = c.last_decision;
   const req = c.revision?.request ?? c.reapprove_comment ?? null; const from = c.revision?.from ?? c.reapprove_from ?? null; // #545
@@ -174,8 +185,14 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
           {cardsAlt && <Button size="sm" onClick={() => act('to_cards')} disabled={!!acting} data-testid="approval-to-cards">{acting === 'to_cards' ? 'AI 가 만드는 중…' : '이미지 카드뉴스로 바꿔 만들기 · 0크레딧'}</Button>}</div>}
       </div>}
       {canAct && VIDEO_KINDS.includes(c.kind ?? '') && <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-ink-2" data-testid="approval-slideshow-row">
-        <Button size="sm" variant="secondary" onClick={slideshow} disabled={slide || !!acting} data-testid="approval-slideshow">{slide ? '사진 고르는 중…' : '실제 사진으로 영상 만들기 · 0원'}</Button>
-        <span>자료실의 이 브랜드 현장 사진 3~6장을 천천히 움직이고 자막·끝 화면을 붙입니다</span></div>}
+        <Button size="sm" variant="secondary" onClick={slideshow} disabled={slide || !!acting} data-testid="approval-slideshow">{slide ? '만드는 중…' : '실제 사진으로 영상 만들기 · 0원'}</Button>
+        <Button size="sm" variant="secondary" onClick={openRecs} disabled={slide || !!acting} data-testid="approval-screen">녹화 파일로 영상 만들기 · 0원</Button>
+        <span>자료실의 현장 사진 3~6장이나 앱 화면 녹화에 자막·끝 화면을 붙입니다</span>
+        {recs && <ul className="w-full space-y-1 rounded-input border border-line p-1.5" data-testid="approval-screen-list">
+          {recs.map((f) => <li key={f.id}><button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-50" onClick={() => pickRec(f.id)} disabled={slide} data-testid="approval-screen-pick">
+            <span className="min-w-0 flex-1 truncate">{f.title}</span>{f.mine && <span className="shrink-0 text-violet-700">이 브랜드</span>}{f.used && <span className="shrink-0 text-ink-3">쓴 적 있음</span>}<span className="shrink-0 text-ink-3">{f.at.slice(5, 10).replace('-', '/')}</span></button></li>)}
+          {!recs.length && <li className="px-2 py-1 text-ink-3" data-testid="approval-screen-empty">자료실 &apos;마케팅/화면 녹화&apos;에 녹화 파일이 없습니다. 로컬 PC 녹화 실행기로 올려 주세요</li>}
+        </ul>}</div>}
       {unprocessed && canDecide && !done && <div className="mt-1 flex flex-wrap items-center gap-2 rounded-input border border-violet-200 bg-violet-50 px-2 py-1.5 text-[11px] text-violet-900" data-testid="approval-revise-pending">
         <span className="min-w-0 flex-1">수정 요청이 아직 AI 수정본으로 만들어지지 않았습니다{c.last_decision?.comment ? ` — "${c.last_decision.comment.slice(0, 60)}"` : ''}</span>
         <Button size="sm" onClick={() => act('revise')} disabled={!!acting} data-testid="approval-revise-now">{acting === 'revise' ? 'AI 가 고치는 중…' : 'AI 수정본 만들기'}</Button></div>}

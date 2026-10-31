@@ -78,6 +78,26 @@ const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
 /** 구글 광고 글자 폭: 한글·한자·전각은 2 */
 export const textWidth = (s: string) => [...s].reduce((n, ch) => n + (WIDE.test(ch) ? 2 : 1), 0);
 const EMOJI = /\p{Extended_Pictographic}/gu;
+/** 275차 #814(대표 #644 가독성 '화살표·이모티콘 빼기'): 시안 글에 쓰지 않는 꾸밈 — 이모지 · 화살표 · 체크 표시 · 【 】 */
+const ARROW = /[→⇒➔➜➡▶►▸▹➤✓✔☑]/gu;
+export function decorOf(text: string) {
+  const t = String(text ?? ''); const emoji = (t.match(EMOJI) ?? []).length, arrow = (t.match(ARROW) ?? []).length, bracket = (t.match(/【/g) ?? []).length;
+  return { emoji, arrow, bracket, total: emoji + arrow + bracket };
+}
+export const DECOR_ISSUE = /^이모지·화살표·【 】/;
+export function decorIssue(text: string): string | null {
+  const d = decorOf(text); if (!d.total) return null;
+  return `이모지·화살표·【 】 빼기(${[d.emoji && `이모지 ${d.emoji}개`, d.arrow && `화살표·체크 ${d.arrow}개`, d.bracket && `【 】 ${d.bracket}개`].filter(Boolean).join(' · ')}) — 대표 #644 가독성`;
+}
+/** 꾸밈 빼기: 줄 머리 화살표·체크·이모지는 지우고, 문장 사이 화살표는 쉼표로, 【글】은 글만 남김 */
+export function stripDecor(text: string) {
+  return String(text ?? '').split('\n').map((l) => l
+    .replace(/^(\s*)(?:[→⇒➔➜➡▶►▸▹➤✓✔☑]|\p{Extended_Pictographic})[\u{FE0F}\u{200D}\p{Extended_Pictographic}]*\s*/u, '$1')
+    .replace(/\s*[→⇒➔➜➡]\s*/g, ', ')
+    .replace(/【\s*([^】]*?)\s*】/g, '$1').replace(/[【】]/g, '')
+    .replace(ARROW, '').replace(EMOJI, '').replace(/[\u{FE0F}\u{200D}]/gu, '')
+    .replace(/[ \t]{2,}/g, ' ').replace(/ +([,.!?])/g, '$1').replace(/^,\s*/, '').trimEnd()).join('\n');
+}
 const lines = (t: string) => t.split('\n').map((l) => l.trim()).filter(Boolean);
 const sentences = (t: string) => t.split(/(?<=[.!?。…])\s+|\n+/).map((s) => s.trim()).filter((s) => len(s) >= 2);
 /** 채우지 않은 자리({{숫자}}·○○·[확인 필요]·[○○ 입력]) — '[이벤트]' 같은 머리말은 아님 */
@@ -351,7 +371,6 @@ export const voiceInput = z.object({
 });
 export type Voice = z.infer<typeof voiceInput>;
 const FORMALITY = { polite: '존댓말(…요·…니다)', casual: '반말', mixed: '존댓말 기본, 짧은 감탄은 반말 섞어도 됨' };
-const EMOJI_USE = { none: '이모지 안 씀', few: '이모지 1~2개까지', many: '이모지 자유롭게(나열은 금지)' };
 export const hasVoice = (v: Partial<Voice> | null | undefined) => !!v && !!(v.topics || v.audience || v.offer || v.phrases?.length || v.avoid?.length || v.examples?.length);
 /** '절대 안 쓰는 표현'(금지어처럼 검사) — 배열이 아니면 없음 */
 export const avoidOf = (v: unknown): string[] => { const a = (v as { avoid?: unknown } | null)?.avoid; return Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string' && !!x.trim()) : []; };
@@ -362,7 +381,7 @@ export function voicePrompt(v: Partial<Voice> | null | undefined) {
   const x = voiceOf(v); if (!x) return '';
   return [`[말투 프로필]`, x.topics && `- 주로 다루는 주제: ${x.topics}`, x.audience && `- 타겟: ${x.audience}`, x.offer && `- 파는 것: ${x.offer}`,
     x.phrases.length && `- 자주 쓰는 말: ${x.phrases.join(', ')}`, x.avoid.length && `- 절대 안 쓰는 표현: ${x.avoid.join(', ')}`,
-    `- ${FORMALITY[x.formality]} · ${EMOJI_USE[x.emoji]}${x.emojis.length ? ` · 허용 이모지: ${x.emojis.join(' ')}` : ''}`,
+    `- ${FORMALITY[x.formality]}`, // 275차 #814: 이모지는 회사 규칙(대표 #644)으로 쓰지 않음 — 프로필의 이모지 칸은 지시문에 넣지 않음
     x.examples.length && `잘 된 글 예시(말투·리듬만 참고, 내용·숫자는 베끼지 않음):\n${x.examples.map((e, k) => `${k + 1}) ${[...e].slice(0, 300).join('')}`).join('\n')}`].filter(Boolean).join('\n');
 }
 /** 말투 프로필과 다른 점(경고만) */
@@ -591,6 +610,7 @@ export function preflight(i: PreflightInput, rules: QualityRules = DEFAULT_RULES
   const out: string[] = [];
   if (JSON_LIKE.test(all)) out.push('본문이 코드(JSON) 모양 — 원고 칸 이름이 섞임');
   if (/\[시험\]/.test(all) || (!i.isTest && /\[시험\]/.test(i.title ?? ''))) out.push("'[시험]' 표시가 섞임");
+  { const di = decorIssue(`${i.title ?? ''}\n${all}`); if (di) out.push(di); } // 275차 #814(대표 #644)
   // #178(#466 대표 결정 10/23: '5명 무료' 폐지 → 14일 무료 체험): 워크인 글에 옛 요금 문구가 남으면 막음 — 다른 브랜드 글에는 안 봄(업종 중립)
   if (WORKIN_BRAND.test(i.brandName ?? '') && OLD_FREE.test(`${i.title ?? ''}\n${all}`)) out.push("옛 요금 문구('5명까지 무료'·'영구 무료') — 지금은 '14일 무료 체험'(#466)");
   const body = lines(all).filter((l) => !/^(?:#[^\s#]+\s*)+$/.test(l) && !STICKER_LINE.test(l)); // 해시태그만 있는 줄·스티커 제안 줄 빼고
