@@ -8,6 +8,7 @@ import { ApiError, api } from '@/components/client';
 import { Capacitor } from '@capacitor/core';
 import Link from 'next/link';
 import { OrDivider, SocialButtons } from '@/components/SocialButtons';
+import { useIosApp } from '@/components/inApp';
 
 function LoginForm() {
   const sp = useSearchParams();
@@ -26,6 +27,7 @@ function LoginForm() {
     }).catch(() => {});
   }, []);
   const [signupOn, setSignupOn] = useState(false);
+  const iosApp = useIosApp(); // #839 아이폰 앱은 로그인만 — 가입·무료 체험 링크 없음
   const [unverified, setUnverified] = useState<string | null>(sp.get('resend'));
   const [resent, setResent] = useState<string | null>(null);
   useEffect(() => { api('/api/auth/signup').then((r) => setSignupOn(!!r.enabled)).catch(() => {}); }, []);
@@ -91,10 +93,12 @@ function LoginForm() {
         </div>
       )}
       <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy}>{busy ? <><Loader2 className="animate-spin" />확인 중…</> : <>{mfa ? '확인' : '로그인'}<ArrowRight /></>}</Button>
-      {signupOn
+      {signupOn && !iosApp
         ? <p className="text-center text-sm text-ink-2">처음이신가요? <Link href="/signup" className="font-semibold text-brand-700 underline" data-testid="to-signup">14일 무료 체험</Link></p>
-        : <p className="text-center text-xs leading-relaxed text-ink-2">계정은 관리자 초대로만 만들 수 있습니다.</p>}
-      <p className="text-center text-xs leading-relaxed text-ink-2">비밀번호를 잊었다면 회사 관리자에게 재설정 링크를 요청하세요.</p>
+        : <p className="text-center text-xs leading-relaxed text-ink-2" data-testid="invite-only">계정은 회사 관리자의 초대로 만들어집니다.</p>}
+      {iosApp
+        ? <p className="text-center text-xs leading-relaxed text-ink-2" data-testid="ios-password-hint">비밀번호를 잊었거나 카카오·네이버로만 가입했다면 회사 관리자에게 비밀번호 재설정 링크를 요청하세요.</p>
+        : <p className="text-center text-xs leading-relaxed text-ink-2">비밀번호를 잊었다면 회사 관리자에게 재설정 링크를 요청하세요.</p>}
       <p className="text-center text-[11px] text-ink-3"><Link href="/terms" className="underline">이용약관</Link> · <Link href="/privacy" className="underline">개인정보 처리방침</Link></p>
     </form>
   );

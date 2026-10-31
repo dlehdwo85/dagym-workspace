@@ -147,6 +147,7 @@ import { welcome483 } from './welcome483.step.mjs';
 import { permIntro528 } from './permIntro528.step.mjs';
 import { permIntroIos199 } from './permIntroIos199.step.mjs';
 import { inApp } from './inapp.step.mjs';
+import { iosApp839 } from './iosApp839.step.mjs';
 import { meeting } from './meeting.step.mjs';
 import { spaces } from './spaces.step.mjs';
 import { marketing } from './marketing.step.mjs';
@@ -1160,6 +1161,7 @@ await step('로컬 10/19 자동 로그인: 로그인 창 [로그인 유지] 기�
   assert.ok(ck2 && ck2.expires > Date.now() / 1000 + 29 * 86400, '기본 로그인은 30일 쿠키');
 });
 await step('스토어 심사 10/19: 앱 안에서는 요금제·결제·가격 숨김(사용량만), 웹은 그대로', () => inApp({ browser, BASE, devices, owner }));
+await step('294차 #839 아이폰 앱은 로그인만: 제3자 로그인·가입 링크·무료 체험 문구 없음 · 가입·소개 주소는 로그인으로 · 안드로이드 앱은 그대로', () => iosApp839({ browser, BASE, devices }));
 await step('대표 지적 10/19 캘린더: 겹친 일정 겹쳐 쌓기(241차 구글식)·누른 일정 미리보기, 자동 저장 뒤 [완료] 409 없음, 일정 색·캘린더 색 점, 월 보기 +N개', () => cal1019({ owner, ctx, sql, BASE }));
 await step('V37 8 미팅 일정: 업무 상세 [미팅 일정 만들기] → 목록 📍장소·시간 칩 · 등록 창 "방문" → 미팅 일정 제안 → 연결 일정', () => meeting({ owner, ctx, sql, BASE }));
 await step('V41 단계 1 공간: 영업 켜기 → PC 공간 카드로 영업(파란 강조)·Ctrl+1/2·뒤로가기 → 휴대폰 프로필 시트 전환 → 미배정 직원 카드 없음·주소 404', () => spaces({ browser, desk, owner, staff, BASE, sql, SHOTS }));

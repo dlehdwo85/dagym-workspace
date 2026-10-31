@@ -2,10 +2,12 @@
 import { useState } from 'react';
 import { CalendarDays, CheckCircle2, Eye, EyeOff, Gift, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { inputCls } from './ui';
+import { useIosApp } from './inApp';
 
 
 /** 로그인·초대·재설정 공통 틀: 왼쪽 회사 소개, 오른쪽 입력 */
 export function AuthCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+  const iosApp = useIosApp(); // #839 아이폰 앱(아이패드 가로 화면에서 왼쪽 판이 보임): 무료 체험 문구 없음
   return (
     <div className="flex min-h-screen bg-canvas">
       <section className="relative hidden w-[44%] max-w-xl flex-col justify-between overflow-hidden bg-brand-800 p-10 text-white lg:flex" aria-hidden>
@@ -21,10 +23,12 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
           <ul className="mt-8 space-y-4 text-sm text-slate-300">
             <li className="flex items-center gap-3"><CheckCircle2 className="size-5 text-green-400" />업무 배정 · 완료 확인 · 결재까지 한 흐름으로</li>
             <li className="flex items-center gap-3"><CalendarDays className="size-5 text-sky-400" />회사·부서·현장 일정과 마감일을 한 캘린더에</li>
-            <li className="flex items-center gap-3"><Gift className="size-5 text-orange-300" />14일 무료 체험으로 시작</li>
+            {iosApp
+              ? <li className="flex items-center gap-3"><ShieldCheck className="size-5 text-orange-300" />회사 관리자가 초대한 계정으로 로그인</li>
+              : <li className="flex items-center gap-3"><Gift className="size-5 text-orange-300" />14일 무료 체험으로 시작</li>}
           </ul>
         </div>
-        <div className="relative text-xs text-slate-400">14일 무료 체험</div>{/* #466 대표 결정 10/23: 무료 = 14일 체험(5명 무료 폐지) */}
+        <div className="relative text-xs text-slate-400">{iosApp ? '회사 계정 전용' : '14일 무료 체험'}</div>{/* #466 대표 결정 10/23: 무료 = 14일 체험(5명 무료 폐지) */}
       </section>
       <section className="flex flex-1 flex-col items-center justify-center p-5">
         <div className="w-full max-w-sm">

@@ -1,6 +1,7 @@
 'use client';
 import { Sparkles } from 'lucide-react';
 import { cx } from './ui';
+import { useIosApp } from './inApp';
 
 /** #412: 업무 AI 비서 · 영업 AI 세일즈 · 마케팅 AI 마케터 — 이번 달 한도 → 쓴 양 → 남은 양 한 표(체감 단위 병기) + 요금제별 기준표. 데이터는 서버 aiLimits.ts 하나 */
 type Feel = { label: string; n: number | null; unit: string; per: string };
@@ -32,6 +33,7 @@ function Amount({ r, k }: { r: Row; k: 'limit' | 'used' | 'left' }) {
 }
 
 export function AiLimitsTable({ data }: { data: AiLimitsData }) {
+  const iosApp = useIosApp(); // #839 아이폰 앱: '요금제' 설명 줄 없음
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-limits">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -46,7 +48,7 @@ export function AiLimitsTable({ data }: { data: AiLimitsData }) {
               <tr key={r.key} className="border-t border-line align-top" data-testid={`ai-limit-${r.key}`}>
                 <td className="py-2 pr-2">
                   <div className="flex items-center gap-1.5 font-medium"><i className={cx('inline-block size-2 rounded-full', COLOR[r.key])} />{r.name}{r.planLabel && <span className="rounded bg-violet-50 px-1 text-[11px] font-normal text-violet-800">{r.planLabel}</span>}</div>
-                  <div className="text-[11px] text-ink-3">{r.note}</div>
+                  {!(iosApp && /요금제/.test(r.note)) && <div className="text-[11px] text-ink-3">{r.note}</div>}
                 </td>
                 <td className="py-2 pr-2" title={r.limit.usd !== null && r.key !== 'marketing' ? `원가 한도 $${r.limit.usd} (${won(r.limit.usd, data.usdKrw)})` : undefined}><Amount r={r} k="limit" />{r.key !== 'marketing' && r.limit.requests === null && r.feel[0] && (r.feel[0].n === null || r.feelLimit != null) && <div className="text-[11px] text-ink-3">{r.feel[0].label} 약 {r.feel[0].n === null ? '무제한' : n(r.feelLimit)}{r.feel[0].n === null ? '' : r.feel[0].unit}</div>}</td>
                 <td className="py-2 pr-2" title={r.used.usd !== null ? `원가 $${r.used.usd} (${won(r.used.usd, data.usdKrw)})` : undefined}><Amount r={r} k="used" />{r.key !== 'marketing' && r.feel[0] && r.feelUsed != null && <div className="text-[11px] text-ink-3">{r.feel[0].label} 약 {n(r.feelUsed)}{r.feel[0].unit}</div>}</td>
