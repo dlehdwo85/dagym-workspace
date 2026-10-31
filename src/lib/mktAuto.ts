@@ -1002,11 +1002,37 @@ export async function mktAutoTick() {
 
 /** 수정 요청 나누기(V43 5 → #545·#534): 글(문구·첫 줄·해시태그·말투…) · 사진(바탕·이미지 바꾸기) · AI 이미지(Higgsfield 재생성) · 영상 다시 — 한 요청에 여럿이면 함께 */
 const REV_TEXT = /(글|문구|문장|카피|제목|첫\s*줄|훅|본문|해시태그|말투|표현|오타|맞춤법|짧게|길게|줄여|늘려)/;
+/** 289차 #814-2(로컬 10/31 08:50 대표 수정 요청 유형 — 문구와 사진 불일치 5·단색 배경에 글자만 3·다른 브랜드 사진 3·얼굴 모자이크·흔들림·중복 5·워크인 사진 없음 1):
+ *  사진 쪽 요청 종류 — 예전엔 '사진 … 바꿔/다시'만 사진 요청으로 봐서 '다짐 운영 사진 갖다 쓰지 마세요'는 글만 고쳤음 */
+export const PHOTO_ASKS = {
+  brand: /(다른|타)\s*브랜드|브랜드\s*(사진|이미지|폴더)|운영\s*사진|사진.{0,6}(갖다\s*)?쓰지\s*마|(아닌|다른)\s*(곳|매장|지점)\s*사진/,
+  mismatch: /(문구|글|내용|주제|제목|본문).{0,12}(사진|이미지).{0,12}(불일치|안\s*맞|맞지\s*않|관련\s*(이\s*)?없|상관\s*없|달라|다르)|(사진|이미지).{0,12}(문구|글|내용|주제|본문).{0,8}(안\s*맞|맞지\s*않|관련\s*(이\s*)?없|상관\s*없|불일치|달라|다르)/,
+  plain: /단색|색\s*바탕|배경색|글자만|밋밋|무난|심심|사진\s*없이/,
+  blur: /흔들|흐릿|흐린\s*사진|초점/,
+  face: /얼굴|모자이크|초상/,
+  dup: /중복|같은\s*사진|똑같은\s*사진|사진.{0,6}(반복|겹)/,
+} as const;
+export type PhotoAsk = keyof typeof PHOTO_ASKS;
+export const photoAsks = (comment: string) => (Object.keys(PHOTO_ASKS) as PhotoAsk[]).filter((k) => PHOTO_ASKS[k].test(comment));
+type CheckItem = { s: 'applied' | 'partial' | 'already' | 'unmet'; d: string };
+/** 289차: 사진 요청이 수정본에서 됐는지 — 수정본에 쓴 사진을 센 값(photoAudit)으로 판정(AI 호출 없음) */
+export function photoCheckItems(asks: PhotoAsk[], a: import('./mktAutoVisual').PhotoAudit): CheckItem[] {
+  const r: CheckItem[] = [];
+  for (const k of asks) {
+    if (k === 'brand') r.push(a.brand ? { s: 'unmet', d: `브랜드 밖 사진 ${a.brand}장 남음` } : { s: 'applied', d: '이 브랜드 사진만 씀' });
+    else if (k === 'blur') r.push(a.blur ? { s: 'unmet', d: `흔들린 사진 ${a.blur}장 남음` } : { s: 'applied', d: '흔들린 사진 없음' });
+    else if (k === 'face') r.push(a.faces ? { s: 'unmet', d: `얼굴 위치를 몰라 못 가린 사진 ${a.faces}장 — 사진 AI 설명 칸 [얼굴 위치 다시 읽기]` } : { s: 'applied', d: '얼굴은 모자이크(가릴 얼굴이 없는 사진 포함)' });
+    else if (k === 'dup') r.push(a.dup ? { s: 'unmet', d: `같은 글 안·가까운 글과 겹치는 사진 ${a.dup}장` } : { s: 'applied', d: '겹치는 사진 없음' });
+    else if (k === 'plain') r.push(a.plain ? { s: 'unmet', d: '쓸 이 브랜드 사진이 없어 브랜드 색 바탕 — 자료실에 이 브랜드 사진(앱 브랜드는 화면 캡처)을 올려 주세요' } : { s: 'applied', d: '표지에 사진·화면' });
+    else if (k === 'mismatch') r.push(!a.total ? { s: 'unmet', d: '쓸 사진이 없음' } : !a.topic ? { s: 'applied', d: '사진마다 글과 맞는 낱말 있음' } : a.topic < a.total ? { s: 'partial', d: `글과 낱말이 안 맞는 사진 ${a.topic}/${a.total}장` } : { s: 'unmet', d: '사진이 글과 낱말이 안 맞음' });
+  }
+  return r;
+}
 export function revisionParts(comment: string, kind?: string | null) {
   // 255차(대표 10/28 릴스 의견 '영상 퀄리티가… 외국이네요 배경은 공사현장'): 영상 글은 영상·화면·배경·인물·화질을 말하면 영상 다시 만들기
   const video = /(영상|동영상|컷|클립).{0,12}(다시|새로|바꿔|교체|재생성)|재촬영/.test(comment) || (VIDEO_KINDS.includes(kind ?? '') && /영상|화면|장면|배경|퀄리티|품질|화질|인물|외국|촬영|분위기/.test(comment));
   const ai = !video && /AI\s*이미지/i.test(comment); // 승인함 [AI 이미지로 다시](크레딧) 버튼 문구
-  const photo = !video && (ai || /(사진|이미지|그림|썸네일|배경|바탕).{0,12}(다시|새로|바꿔|교체|재생성|다른)|재생성/.test(comment));
+  const photo = !video && (ai || /(사진|이미지|그림|썸네일|배경|바탕).{0,12}(다시|새로|바꿔|교체|재생성|다른)|재생성/.test(comment) || photoAsks(comment).length > 0);
   const text = !(video || photo) || REV_TEXT.test(comment);
   return { text, photo, video, ai };
 }
@@ -1030,8 +1056,8 @@ export function repeatStreak(comment: string, prior: { request: string | null; s
  *  글을 고치라 했는데 글이 그대로면 unmet — 화면·메모·알림이 '반영한 요청 / 일부 반영 / 요청(이미 충족) / 반영 안 됨'으로 나뉨 */
 export type RevisionCheck = { status: 'applied' | 'partial' | 'already' | 'unmet' | 'unknown'; detail: string };
 type CheckSide = { body: string; photoId?: string | null; template?: string | null };
-export function checkRevision(comment: string, a: CheckSide, b: CheckSide & { drawn: boolean }, parts: { text: boolean; photo: boolean }): RevisionCheck {
-  const r: { s: 'applied' | 'partial' | 'already' | 'unmet'; d: string }[] = [];
+export function checkRevision(comment: string, a: CheckSide, b: CheckSide & { drawn: boolean }, parts: { text: boolean; photo: boolean }, extra: CheckItem[] = []): RevisionCheck {
+  const r: CheckItem[] = [];
   const len = (x: string) => [...x.trim()].length;
   const first = (x: string) => x.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
   const same = a.body.trim() === b.body.trim();
@@ -1067,6 +1093,7 @@ export function checkRevision(comment: string, a: CheckSide, b: CheckSide & { dr
     else if (b.template && b.template !== a.template) r.push({ s: 'partial', d: '바꿀 바탕 사진이 없어 다른 틀로 다시 그림' });
     else r.push({ s: 'unmet', d: "바꿀 바탕 사진이 없어 같은 바탕으로 다시 그림 — 자료실 '마케팅/시안 바탕(글자 없는 사진)'에 사진을 올려 주세요" });
   }
+  r.push(...extra); // 289차 사진 요청 판정
   if (!r.length) return { status: 'unknown', detail: '' };
   const has = (k: string) => r.some((x) => x.s === k);
   const status = has('unmet') ? (has('applied') || has('partial') ? 'partial' : 'unmet') : has('partial') ? 'partial' : has('applied') ? 'applied' : 'already';
@@ -1135,7 +1162,7 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     body = qc.body; q = { passed: qc.passed, issues: qc.issues }; report = { ...f.report, v, preflight: pre }; brief = d.brief || brief; card = d.card ?? card; if (d.pages?.length) pages = d.pages;
   } else q = { passed: c.quality?.passed !== false, issues: [...(c.quality?.issues ?? [])] };
   // 시안: 서버가 그린 시안이면(없으면 새로) 새 글로 다시 그림 — 사람이 붙인 사진·영상은 그대로
-  let media = o.fresh ? [] : (prev?.media_ids ?? []).map(String); let visual = o.fresh ? null : c.quality?.visual ?? null; let drawn: Awaited<ReturnType<typeof V.drawAutoVisual>> | null = null;
+  let media = o.fresh ? [] : (prev?.media_ids ?? []).map(String); let visual = o.fresh ? null : c.quality?.visual ?? null; let drawn: Awaited<ReturnType<typeof V.drawAutoVisual>> | null = null; let tailNote = '';
   const server = V.serverVisual(c) && (o.fresh || (media.length ? visual?.by === 'server' && media[0] === visual.fileId : !!c.auto)); // 시안 없는 글은 자동 제작 글만 새로 그림(사람이 쓴 글에 그림을 붙이지 않음) · 카드뉴스로 바꿀 때는 새로
   if (server && (o.photo || body !== old || !media.length)) {
     const tried = new Set<string>([...((visual?.tried ?? []) as string[]), ...(visual?.photoId ? [visual.photoId as string] : [])]);
@@ -1154,6 +1181,11 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     const left = q.issues.filter((x) => !V.VISUAL_ISSUE.test(x));
     if (!q.passed && q.issues.length && !left.length) q.passed = true; // 시안이 없어서만 막혀 있던 글
     q.issues = left;
+    // 289차 #814-2: 사진 요청이면 뒤쪽 사진(블로그 본문·카드 장)도 — 흔들림·브랜드 밖·겹침(+ '문구와 사진 불일치'면 그 자리 글과 안 맞는 사진)을 바꿈
+    if (o.photo && media.length > 1) {
+      const fx = await V.fixTail({ ...c, quality: { ...c.quality, ...(pages ? { pages } : {}) } }, { body, media_ids: media }, new Set([...(drawn.photoId ? [drawn.photoId] : []), ...drawn.photoIds]), { topic: photoAsks(comment).includes('mismatch') });
+      if (fx) { media = [media[0], ...fx.ids]; if (fx.body) body = fx.body; if (fx.pages) pages = fx.pages; tailNote = ` · ${V.tailWhy(fx.why, isBlog(c) ? '본문' : c.kind === 'story' ? '프레임' : '카드')} 바꿈`; visual = { ...visual, ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}) }; }
+    }
   }
   // 요청 C §3-3: 사진 수 규칙(자동 제작 피드 3~5장·스토리 3~5프레임·블로그 표지+3장, 사람 글 블로그 2장) — 못 미치면 승인함 대신 수정 요청
   q.issues = q.issues.filter((x) => !M.MEDIA_RULES.includes(x));
@@ -1166,10 +1198,12 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
   const moveTo = status === 'pending' && c.scheduled_at && deadlineOf(c.scheduled_at, s).getTime() <= Date.now() && (o.n ? true : c.auto && movedN < 3) ? await nextSlot(c, s).catch(() => null) : null;
   const rescheduled = moveTo ? { from: new Date(c.scheduled_at).toISOString(), to: moveTo.toISOString(), at: new Date().toISOString() } : null;
   const changed = [...(body !== old ? ['text'] : []), ...(drawn ? ['visual'] : [])];
+  const asks = o.n ? photoAsks(comment) : [];
+  const audit = asks.length ? await V.photoAudit(c, media, visual, pages, body).catch(() => null) : null; // 289차 사진 요청 = 수정본 사진을 세어 판정
   const check = o.n ? checkRevision(comment, { body: old, photoId: c.quality?.visual?.photoId ?? null, template: c.quality?.visual?.template ?? null },
-    { body, drawn: !!drawn, photoId: drawn?.photoId ?? null, template: drawn?.template ?? null }, { text: o.text !== false, photo: !!o.photo }) : null;
+    { body, drawn: !!drawn, photoId: drawn?.photoId ?? null, template: drawn?.template ?? null }, { text: o.text !== false, photo: !!o.photo }, audit ? photoCheckItems(asks, audit) : []) : null;
   const revision = o.n ? { ai: true, n: o.n, from: c.current_version, request: comment.slice(0, 500), by: o.by?.name ?? null, at: new Date().toISOString(), parts: changed, backdrop: drawn ? (drawn.photoTitle ?? '브랜드 색 바탕') : null, check } : null;
-  const drawnNote = drawn ? ` · 시안 다시 그림(${[drawn.templateLabel ? `틀: ${drawn.templateLabel}` : '', drawn.photoTitle ? `사진: ${drawn.photoTitle}` : '브랜드 색 바탕'].filter(Boolean).join(' · ')})` : '';
+  const drawnNote = drawn ? ` · 시안 다시 그림(${[drawn.templateLabel ? `틀: ${drawn.templateLabel}` : '', drawn.photoTitle ? `사진: ${drawn.photoTitle}` : '브랜드 색 바탕'].filter(Boolean).join(' · ')})${tailNote}` : '';
   const checkNote = check?.detail ? ` (${check.status === 'applied' ? '확인: ' : ''}${check.detail})` : '';
   const note = (o.note ?? (o.n ? `수정본(AI 수정 ${o.n}번째) — ${revisionLabel(check)}: ${comment.slice(0, 160)}${checkNote}` : `수정 요청 반영(0크레딧): ${comment.slice(0, 200)}`)) + drawnNote + (await import('./mktTeam')).designNote(design);
   const ok = await sql.begin(async (tx) => {

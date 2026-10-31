@@ -117,3 +117,45 @@ test('승인 대기 블로그 다시 검사: 브랜드 밖 본문 사진은 이 
   const n = await sql`select body from notifications where entity_id = ${w.id} and title like '시안을 다시 그렸습니다%'`;
   assert.match(n[0]?.body ?? '', /이 브랜드 사진이 아니어서/);
 });
+
+// 289차 #814-2 '다시 만든 시안이 수정 요청을 반영했는지 확인 단계': 사진 요청(다른 브랜드·흔들림·얼굴·중복·문구와 사진 불일치·단색 바탕)은 수정본에 쓴 사진을 세어 판정(AI 호출 없음)
+async function pendingBlog(brandId, title, body, media, visual, hours) {
+  const at = new Date(Date.now() + 2 * 864e5 + hours * 3600e3);
+  const [c] = await sql`insert into mkt_contents (tenant, brand_id, title, channel, kind, scheduled_at, status, current_version, created_by, auto, quality)
+    values ('default', ${brandId}, ${title}, 'blog', 'blog', ${at}, 'pending', 1, ${ctx.ownerId}, true, ${sql.json({ visual: { by: 'server', rv: 7, ...visual } })}) returning id`;
+  await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${body}, ${media}, '시안', ${ctx.ownerId})`;
+  return c.id;
+}
+const drawnCover = async (name) => { const id = await libFile(name); await sql`update library_files set source = 'ai', folder = '마케팅/자동 시안', meta = '{"photoId":null}' where id = ${id}`; return id; };
+const lastRev = async (id) => (await sql`select v.revision, v.note, v.media_ids, v.body from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = ${id}`)[0];
+
+test("289차 수정 요청 '다른 브랜드 사진 쓰지 마세요' → 글은 그대로, 본문 사진까지 이 브랜드 사진으로 바꾸고 확인 = 반영(이 브랜드 사진만 씀)", async () => {
+  const yoga = await libFile('가나짐 요가 매트 공간.jpg'); await describe(yoga, V({ caption: '요가 매트가 깔린 공간', tags: ['요가', '매트'] }));
+  const mat = await libFile('가나짐 매트 스트레칭.jpg'); await describe(mat, V({ caption: '매트 위에서 스트레칭', tags: ['매트', '스트레칭'] })); // 표지가 요가 사진을 쓰면 본문은 이 사진(앞 시험들이 가나짐 사진을 가까운 글에 다 씀)
+  const cover = await drawnCover('가나짐 요가 표지.jpg');
+  const body = '요가 공간을 소개합니다.\n\n[사진 1] 스피닝 자전거가 늘어선 수업 공간\n\n매트가 넉넉합니다.';
+  const id = await pendingBlog(B.ga.id, '요가 매트 공간 소개', body, [cover, P.unnamed], { fileId: cover, photoId: null }, 6);
+  const r = await ctx.owner.ok('POST', `/api/marketing/contents/${id}/decide`, { version: 1, decision: 'changes', comment: '다른 브랜드 사진 쓰지 마세요' });
+  assert.ok(r.revision?.version, JSON.stringify(r.revision));
+  const v = await lastRev(id);
+  assert.ok(!v.media_ids.includes(P.unnamed), `이름 없는(다른 브랜드) 본문 사진은 빠짐 ${JSON.stringify(v.media_ids)}`);
+  const [cv] = await sql`select quality->'visual'->>'photoId' as p from mkt_contents where id = ${id}`;
+  const [np] = await sql`select f.title, f.folder, f.vision->>'caption' as caption, (select pv.title from library_files pv where pv.id::text = f.meta->'video'->>'id') as parent from library_files f where f.id = ${v.media_ids[1]}`;
+  assert.ok(`${np.title} ${np.folder} ${np.parent ?? ''}`.includes('가나짐'), `이 브랜드 사진 ${JSON.stringify(np)}`);
+  assert.notEqual(v.media_ids[1], cv.p, '표지에 쓴 사진과 다른 사진');
+  assert.ok(v.body.includes(`[사진 1] ${np.caption}`), v.body); assert.match(v.body, /매트가 넉넉합니다/);
+  assert.ok([yoga, mat].includes(v.media_ids[1]));
+  assert.match(v.note, /브랜드 밖 본문 사진 1장 바꿈/);
+  assert.equal(v.revision.check.status, 'applied', JSON.stringify(v.revision.check)); assert.match(v.revision.check.detail, /이 브랜드 사진만 씀/);
+});
+
+test("289차 수정 요청 '얼굴 모자이크' — 얼굴 위치를 모르는 예전 사진이 남으면 확인 = 반영 안 됨/일부 + [얼굴 위치 다시 읽기] 안내", async () => {
+  const face = await libFile('가나짐 회원 운동.jpg'); await describe(face, V({ caption: '회원이 운동하는 모습', tags: ['회원'], faces: true, people: 1 })); // face_boxes 없음 = 286차 전 설명
+  const cover = await drawnCover('가나짐 회원 표지.jpg');
+  const id = await pendingBlog(B.ga.id, '회원 운동 이야기', '회원 이야기입니다.\n\n[사진 1] 회원이 운동하는 모습\n\n끝.', [cover, face], { fileId: cover, photoId: null }, 7);
+  await ctx.owner.ok('POST', `/api/marketing/contents/${id}/decide`, { version: 1, decision: 'changes', comment: '사람 얼굴은 모자이크 해 주세요' });
+  const v = await lastRev(id);
+  assert.ok(['unmet', 'partial'].includes(v.revision.check.status), JSON.stringify(v.revision.check));
+  assert.match(v.revision.check.detail, /얼굴 위치를 몰라 못 가린 사진 1장/);
+});
+

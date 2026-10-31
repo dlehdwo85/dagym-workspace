@@ -606,9 +606,16 @@ export async function fillMissingVisuals(tenant: string, limit = 4, budgetMs = 2
  * 얼굴 가림 사본은 원본 설명으로 봄 · 서버가 그린 그림(source ai — 도표형 카드 등)은 안 봄 · 선명도를 아직 안 잰 사진은 여기서 재서 원본 설명에 남김
  * (예전엔 정기 실행 mktSharp 를 기다렸음 — 마케팅 사진 범위 밖 사진은 영영 안 재질 수 있어 그 자리에서 잼, AI 호출 없음)
  */
-type Bad = Map<string, 'blur' | 'brand'>;
+/** 바꿀 까닭 — blur 흔들림·초점 · brand 브랜드 규칙 밖 · dup 같은 글 안 중복·가까운 글과 겹침 · topic 그 자리 글과 낱말이 하나도 안 맞음(289차 수정 요청 '문구와 사진 불일치') */
+type Reason = 'blur' | 'brand' | 'dup' | 'topic';
+type Bad = Map<string, Reason>;
+/** 289차: 사진 쪽 글(이름·설명·태그·AI 설명·원본 영상)과 그 자리 글이 낱말 하나라도 맞는지 — 앞부분이 같으면 맞음('러닝머신이' ↔ '러닝머신'), 브랜드 이름은 안 셈 */
+function topicHit(photo: string, text: string, skip: Set<string>) {
+  const want = [...words(text)].filter((w) => !skip.has(w));
+  return [...words(photo)].some((w) => !skip.has(w) && want.some((t) => t === w || (t.length >= 2 && w.length >= 2 && (t.startsWith(w) || w.startsWith(t)))));
+}
 /** 288차 #814-2(로컬 14:30: 워크인 블로그 본문에 다짐 현장 사진 — 온도조절기·조명 스위치): 흔들림에 더해 브랜드 키트 '시안 사진' 규칙 밖 사진(브랜드 이름 없는 사진·'앱 화면 캡처만'인데 실사)도 'brand' 로 */
-async function badPhotosOf(tenant: string, ids: (string | null | undefined)[], rule: PhotoRule): Promise<Bad> {
+async function badPhotosOf(tenant: string, ids: (string | null | undefined)[], rule: PhotoRule, o: { topic?: Map<string, string> } = {}): Promise<Bad> {
   const want = [...new Set(ids.filter((x): x is string => !!x && /^[0-9a-f-]{36}$/i.test(x)))];
   if (!want.length) return new Map();
   const sql = db(); const P = await import('./mktPhotos');
@@ -631,6 +638,7 @@ async function badPhotosOf(tenant: string, ids: (string | null | undefined)[], r
       v = { ...v, ...add };
     }
     if (P.blurryPhoto(v)) out.set(r.id, 'blur');
+    else if (o.topic?.has(r.id) && !topicHit(`${r.title} ${r.description ?? ''} ${(r.tags ?? []).join(' ')} ${visionText(v)} ${r.parent ?? ''}`, o.topic.get(r.id)!, words(rule.own.join(' ')))) out.set(r.id, 'topic');
   }
   return out;
 }
@@ -639,7 +647,12 @@ async function badPhotosOf(tenant: string, ids: (string | null | undefined)[], r
  * · 블로그 본문: 그 '[사진 n]' 줄 앞뒤 글과 맞는 다른 실사(얼굴 가림 사본 규칙 그대로)로 바꾸고 줄 설명도 새 사진 설명으로. 맞는 사진이 없으면 그 줄·사진을 빼고 번호를 당김(자동 글은 도표형 카드로 채움)
  * · 카드뉴스 장·스토리 프레임: 흔들린 장만 사진을 다시 고르고(남은 장 사진은 그대로) 장을 새로 그림. 장 수가 다르면(사람이 바꾼 장) 손대지 않음
  */
-async function freshTail(c: Content & { quality?: any }, v: { body: string; media_ids: string[] }, bad: Bad, exclude: Set<string>): Promise<{ ids: string[]; body?: string; pages: CardPage[] | null; blur: number; brand: number } | null> {
+export type TailFix = { ids: string[]; body?: string; pages: CardPage[] | null; why: Partial<Record<Reason, number>> };
+const tally = (rs: (Reason | undefined)[]) => rs.reduce<Partial<Record<Reason, number>>>((a, r) => (r ? { ...a, [r]: (a[r] ?? 0) + 1 } : a), {});
+/** 바꾼 까닭 한 줄 — '흔들린·초점 나간 본문 사진 1장 · 브랜드 밖 본문 사진 2장' */
+export const tailWhy = (why: Partial<Record<Reason, number>>, where: string) => [why.blur ? `흔들린·초점 나간 ${where} 사진 ${why.blur}장` : '', why.brand ? `브랜드 밖 ${where} 사진 ${why.brand}장` : '',
+  why.dup ? `겹치는 ${where} 사진 ${why.dup}장` : '', why.topic ? `글과 안 맞는 ${where} 사진 ${why.topic}장` : ''].filter(Boolean).join(' · ');
+async function freshTail(c: Content & { quality?: any }, v: { body: string; media_ids: string[] }, bad: Bad, exclude: Set<string>): Promise<TailFix | null> {
   const tail = (v.media_ids ?? []).slice(1).map(String);
   if (c.channel === 'blog') {
     if (!tail.some((id) => bad.has(id))) return null;
@@ -670,17 +683,60 @@ async function freshTail(c: Content & { quality?: any }, v: { body: string; medi
       const m = l.trim().match(PHOTO_LINE); return m && !m[1] ? [`[사진 ${++no}] ${m[3] ?? ''}`.trim()] : [l];
     }).join('\n').replace(/\n{3,}/g, '\n\n');
     const fill = ids.length < tail.length ? await pagesAfterCover(c, body, 1 + ids.length, { exclude: used }) : { ids: [] as string[] };
-    const why = tail.map((id) => bad.get(id));
-    return { ids: [...ids, ...fill.ids], body: body === v.body ? undefined : body, pages: null, blur: why.filter((x) => x === 'blur').length, brand: why.filter((x) => x === 'brand').length };
+    return { ids: [...ids, ...fill.ids], body: body === v.body ? undefined : body, pages: null, why: tally(tail.map((id) => bad.get(id))) };
   }
   if (c.kind !== 'feed' && c.kind !== 'story') return null;
   const pages: CardPage[] = Array.isArray(c.quality?.pages) ? structuredClone(c.quality.pages) : [];
   const hit = pages.filter((p) => p.photoId && bad.has(p.photoId));
   if (!hit.length || tail.length !== pages.length) return null;
-  const why = hit.map((p) => bad.get(p.photoId!));
+  const why = tally(hit.map((p) => bad.get(p.photoId!)));
   for (const p of hit) { delete p.photoId; delete p.rel; delete p.scene; delete p.gen; delete p.ref; }
   const ids = await drawPages(c, pages, { exclude, refill: true });
-  return { ids, pages, blur: why.filter((x) => x === 'blur').length, brand: why.filter((x) => x === 'brand').length };
+  return { ids, pages, why };
+}
+/** 사진 자리마다 그 자리 글 — 블로그 본문 사진 k번째 = '[사진 k+1]' 줄 앞뒤 3줄(줄이 없으면 제목+글), 카드 장 = 그 장 제목·글 */
+async function slotTexts(c: Content & { quality?: any }, body: string, tail: string[], pages: CardPage[]): Promise<Map<string, string>> {
+  const m = new Map<string, string>();
+  if (c.channel === 'blog') {
+    const { PHOTO_LINE } = await import('./mktText'); const lines = body.split('\n');
+    tail.forEach((id, k) => { const li = lines.findIndex((l) => { const x = l.trim().match(PHOTO_LINE); return !!x && !x[1] && Number(x[2]) === k + 1; }); m.set(id, li >= 0 ? lines.slice(Math.max(0, li - 3), li + 4).join(' ') : `${c.title} ${body}`); });
+  } else for (const p of pages) if (p.photoId) m.set(p.photoId, `${p.title} ${p.body}`);
+  return m;
+}
+/**
+ * 289차 #814-2(대표 수정 요청 '다른 브랜드 사진·흔들림·중복·문구와 사진 불일치'): 수정본에서 뒤쪽 사진(블로그 본문·카드 장)도 같이 바꿈 —
+ * 흔들림·브랜드 규칙 밖·같은 글 안 중복·가까운 글과 겹침, topic 이면 그 자리 글과 낱말이 안 맞는 사진까지. exclude = 표지에 쓴 사진. null = 바꿀 것 없음
+ */
+export async function fixTail(c: Content & { quality?: any }, v: { body: string; media_ids: string[] }, exclude: Set<string>, o: { topic?: boolean } = {}): Promise<TailFix | null> {
+  const rule = await photoRule(c.tenant, c.brand_id);
+  const pages: CardPage[] = Array.isArray(c.quality?.pages) ? c.quality.pages : [];
+  const tail = (v.media_ids ?? []).slice(1).map(String);
+  const ids = c.channel === 'blog' ? tail : pages.map((p) => p.photoId ?? null);
+  const bad = await badPhotosOf(c.tenant, ids, rule, o.topic ? { topic: await slotTexts(c, v.body, tail, pages) } : {});
+  const near = await nearUsed(c).catch(() => new Set<string>()); const seen = new Set(exclude);
+  const real = new Set((await db()<{ id: string }[]>`select id::text from library_files where id = any(${ids.filter((x): x is string => !!x)}::uuid[]) and source is distinct from 'ai'`).map((r) => r.id)); // 서버가 그린 도표형 카드는 겹침을 안 셈
+  for (const id of ids) { if (!id || bad.has(id) || !real.has(id)) continue; if (seen.has(id) || near.has(id)) bad.set(id, 'dup'); else seen.add(id); }
+  return bad.size ? freshTail(c, v, bad, exclude) : null;
+}
+export type PhotoAudit = { total: number; blur: number; brand: number; dup: number; topic: number; faces: number; plain: boolean };
+/** 289차 수정본 확인용 — 이 버전에 쓴 사진(표지·4분할 칸·블로그 본문·카드 장)을 흔들림·브랜드 밖·겹침·글과 안 맞음·얼굴 위치 모름(못 가림)·표지 사진 없음으로 셈(AI 호출 없음) */
+export async function photoAudit(c: Content & { quality?: any }, media: string[], visual: any, pages: CardPage[] | null, body: string): Promise<PhotoAudit> {
+  const rule = await photoRule(c.tenant, c.brand_id);
+  const cover = [...new Set([visual?.photoId, ...(Array.isArray(visual?.photoIds) ? visual.photoIds : [])].filter((x): x is string => typeof x === 'string'))];
+  const tail = media.slice(1).map(String); const ps = pages ?? [];
+  const slots = c.channel === 'blog' ? tail : ps.map((p) => p.photoId).filter((x): x is string => !!x);
+  const topic = await slotTexts(c, body, tail, ps); for (const id of cover) topic.set(id, `${c.title} ${body.slice(0, 400)}`);
+  const all = [...cover, ...slots];
+  const sql = db();
+  const real = await sql<{ id: string; noboxes: boolean }[]>`select f.id::text, (coalesce(o.vision, f.vision)->>'faces' = 'true' and not (coalesce(o.vision, f.vision) ? 'faceBoxes') and f.source is distinct from 'mosaic') as noboxes
+    from library_files f left join library_files o on f.source = 'mosaic' and o.tenant = f.tenant and o.id::text = f.meta->>'of' where f.tenant = ${c.tenant} and f.id = any(${all}::uuid[]) and f.source is distinct from 'ai'`;
+  const ok = new Set(real.map((r) => r.id)); const list = all.filter((x) => ok.has(x));
+  const bad = await badPhotosOf(c.tenant, list, rule, { topic });
+  const near = await nearUsed(c).catch(() => new Set<string>()); const seen = new Set<string>(); let dup = 0;
+  for (const id of list) { if (seen.has(id) || near.has(id)) dup++; seen.add(id); }
+  const n = (r: Reason) => [...bad.values()].filter((x) => x === r).length;
+  const template = typeof visual?.template === 'string' ? visual.template : '';
+  return { total: new Set(list).size, blur: n('blur'), brand: n('brand'), dup, topic: n('topic'), faces: real.filter((r) => r.noboxes).length, plain: !cover.length && !['phone', 'laptop'].includes(template) };
 }
 
 export async function redrawTextVisuals(tenant: string, limit = 8, budgetMs = 15000) {
@@ -720,7 +776,7 @@ export async function redrawTextVisuals(tenant: string, limit = 8, budgetMs = 15
         continue;
       }
       const where = c.channel === 'blog' ? '본문' : c.kind === 'story' ? '프레임' : '카드';
-      const shook = tail ? ` · ${[tail.blur ? `흔들린·초점 나간 ${where} 사진 ${tail.blur}장` : '', tail.brand ? `브랜드 밖 ${where} 사진 ${tail.brand}장` : ''].filter(Boolean).join(' · ')} 바꿈` : '';
+      const shook = tail ? ` · ${tailWhy(tail.why, where)} 바꿈` : '';
       let r: Awaited<ReturnType<typeof attachVisual>>;
       if (!d) r = await attachVisual(c, vis.fileId, `시안 사진 바꾸기(서버·크레딧 0) — 표지는 그대로${shook}`, c.created_by, photoId, true, tail!.ids, { pages: tail!.pages, tail: true, keep: true, body: tail!.body });
       else {
@@ -733,7 +789,7 @@ export async function redrawTextVisuals(tenant: string, limit = 8, budgetMs = 15
       out.push({ id: c.id, version: r.version });
       // 로컬 08:15 (d): 다시 그린 알림은 같은 글에 한 번만
       if (r.status === 'pending') await M.mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `시안을 다시 그렸습니다(v${r.version}): ${c.title}`,
-        body: blur || offBrand || tail ? `${blur || offBrand ? '바탕' : where} 사진이 ${(blur || tail?.blur) && (offBrand || tail?.brand) ? '흔들렸거나 이 브랜드 사진이 아니어서' : blur || tail?.blur ? '흔들렸거나 초점이 맞지 않아' : '이 브랜드 사진이 아니어서'} 다른 사진(또는 브랜드 색 바탕)으로 바꿨습니다 — 승인해 주세요` : '바탕 그림의 글자와 겹치던 시안을 브랜드 색 바탕(또는 고른 사진)으로 새로 그렸습니다 — 승인해 주세요',
+        body: blur || offBrand || tail ? `${blur || offBrand ? '바탕' : where} 사진이 ${(blur || tail?.why.blur) && (offBrand || tail?.why.brand) ? '흔들렸거나 이 브랜드 사진이 아니어서' : blur || tail?.why.blur ? '흔들렸거나 초점이 맞지 않아' : '이 브랜드 사진이 아니어서'} 다른 사진(또는 브랜드 색 바탕)으로 바꿨습니다 — 승인해 주세요` : '바탕 그림의 글자와 겹치던 시안을 브랜드 색 바탕(또는 고른 사진)으로 새로 그렸습니다 — 승인해 주세요',
         link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktvisr:${c.id}` });
     } catch (e: any) { out.push({ id: c.id, error: String(e?.message ?? e).slice(0, 200) }); }
   }
