@@ -127,6 +127,7 @@ export default function Settings() {
         <Button className="mt-3" onClick={save}>저장</Button>
       </section>
       {data.spaces?.length > 0 && <SpaceNotifyPrefs spaces={data.spaces} modeLabels={data.modeLabels} canSetCompany={data.canSetCompany} reload={reload} />}
+      {data.mkt?.length > 0 && <MktNotifyPrefs rows={data.mkt} labels={data.mktModeLabels} reload={reload} />}
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 받는 기기 (앱·브라우저)</h2>
         <ul className="space-y-1 text-sm">
@@ -186,6 +187,36 @@ function SpaceNotifyPrefs({ spaces, modeLabels, canSetCompany, reload }: { space
           </div>))}
       </div>
       <Button className="mt-3" onClick={save} disabled={busy} data-testid="space-notify-save">저장</Button>
+    </section>
+  );
+}
+
+type MktRow = { kind: string; label: string; desc: string; def: 'push' | 'inbox' | 'off'; mode: 'push' | 'inbox' | 'off'; own: boolean };
+/** 282차 #823(대표 10/31 '마케팅 관련 알람 너무 많이 옴'): 마케팅 알림 항목별 — 휴대폰 알림 · 알림함만 · 안 받음(기본값은 꼭 필요한 것만 휴대폰) */
+function MktNotifyPrefs({ rows: init, labels, reload }: { rows: MktRow[]; labels: Record<string, string>; reload: () => void }) {
+  const [rows, setRows] = useState<MktRow[]>(init);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setRows(init); }, [init]);
+  const MODES = ['push', 'inbox', 'off'] as const;
+  async function save() {
+    setBusy(true);
+    try { await api('/api/notifications/prefs', { method: 'PUT', body: { mkt: rows.map((r) => ({ kind: r.kind, mode: r.mode === r.def && !r.own ? null : r.mode })) } }); toast.ok('마케팅 알림을 저장했습니다'); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <section className="rounded-lg border bg-white p-4" data-testid="mkt-notify">
+      <h2 className="mb-1 text-sm font-semibold">마케팅 알림</h2>
+      <p className="mb-2 text-xs text-ink-3">휴대폰에는 꼭 필요한 것(주간 묶음 승인 요청·마감 임박·게시 실패·돈)만 갑니다. 나머지는 알림함에서 볼 수 있습니다. 항목마다 바꿀 수 있습니다.</p>
+      <ul className="divide-y divide-line rounded-card border border-line">
+        {rows.map((r, i) => (
+          <li key={r.kind} className="flex flex-wrap items-center gap-2 px-3 py-2" data-testid={`mkt-notify-${r.kind}`}>
+            <div className="min-w-0 flex-1"><div className="text-sm">{r.label}</div><div className="text-[11px] text-ink-3">{r.desc}{r.mode !== r.def ? ` · 기본값: ${labels[r.def]}` : ''}</div></div>
+            <select className={cx(inputCls, 'h-8 !w-auto py-0 text-xs')} value={r.mode} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, mode: e.target.value as MktRow['mode'], own: true } : x)))} aria-label={`${r.label} 알림`} data-testid={`mkt-notify-mode-${r.kind}`}>
+              {MODES.map((m) => <option key={m} value={m}>{labels[m]}</option>)}
+            </select>
+          </li>))}
+      </ul>
+      <Button className="mt-3" onClick={save} disabled={busy} data-testid="mkt-notify-save">저장</Button>
     </section>
   );
 }

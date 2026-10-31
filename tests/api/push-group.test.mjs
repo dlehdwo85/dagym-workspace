@@ -37,6 +37,7 @@ test('승인 마감 알림 3건(같은 정기 실행) → 목록은 3줄 · 푸�
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', remindHours: 72, approvalHour: 9, quietStart: 0, quietEnd: 0 });
   await ctx.owner.ok('POST', '/api/push/subscribe', { kind: 'fcm', endpoint: TOKEN, platform: 'android' }); // 1.1.2(caps 없음) = 시스템 알림
+  await ctx.owner.ok('PUT', '/api/notifications/prefs', { mkt: [{ kind: 'each', mode: 'push' }] }); // 282차 #823: 시안별 알림은 기본 '알림함만' — 묶음 푸시 시험은 휴대폰 알림으로 켜고
   for (const t of ['퇴근길 운동', '주말 필라테스', '가을 회원 모집']) await pending(t);
   // 정기 실행이 도는 중(잠금) — 그동안 요청 뒤 발송은 묶음 알림을 남겨 두고, 다른 알림(업무 배정)은 예전처럼 바로 보냄
   await sql`insert into job_locks (name, locked_until, holder) values ('tick', now() + interval '4 minutes', 'push-group-test')

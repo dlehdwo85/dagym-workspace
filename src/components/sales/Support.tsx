@@ -16,7 +16,7 @@ type Effect = { receive: string; amount: string | null; selfPay: string | null; 
 type Ai = { verdict: 'fit' | 'maybe' | 'no'; reasons: string[]; brands: string[]; docs: string[]; summary: string | null; at: string | null; use: string[]; schedule: string | null; auto: boolean; stale?: boolean; effect?: Effect | null };
 /** #568 주 1회 묶음 — 이번 주 맞는 공고(AI ✅ 또는 1차 ✅) 상위 10건 */
 type Weekly = { week: string; items: { id: string; title: string; by: 'ai' | 'rule'; dday: number | null; applyEnd: string | null; agency: string | null; brands: string[]; use: string | null; auto: boolean }[]; aiCount: number; aiFailed: number; sentTo: number; createdAt: string };
-type Work = { id: string; status: string; statusLabel: string; ownerId: string | null; ownerName: string | null; taskId: string | null; brands: string[]; appliedAt: string | null; resultAt: string | null; amountAwarded: string | null; resultMemo: string | null; memo: string | null };
+type Work = { id: string; status: string; statusLabel: string; ownerId: string | null; ownerName: string | null; taskId: string | null; brands: string[]; appliedAt: string | null; resultAt: string | null; amountAwarded: string | null; resultMemo: string | null; memo: string | null; taskOpen?: string | null };
 type Item = { id: string; title: string; agency: string | null; executor: string | null; category: string | null; source: string; sourceLabel: string; regions: string[]; nationwide: boolean; applyStart: string | null; applyEnd: string | null;
   applyText: string | null; dday: number | null; amount: string | null; amountKrw: number | null; kinds: string[]; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[]; pending?: boolean; queued?: boolean; listed?: boolean; listedAt?: string | null;
   final?: { verdict: 'fit' | 'maybe' | 'no'; by: 'ai' | 'rule'; conflict: boolean };
@@ -37,6 +37,9 @@ const won = (n: number) => `약 ${n.toLocaleString('ko-KR')}원`;
 const VERDICT: Record<string, [string, string, string]> = { fit: ['✅', '해당', 'border-emerald-200 bg-emerald-50 text-emerald-800'], maybe: ['⚠', '확인 필요', 'border-amber-200 bg-amber-50 text-amber-800'], no: ['❌', '해당 없음', 'border-red-200 bg-red-50 text-red-700'] };
 const FLAG_CLS: Record<Flag['level'], string> = { ok: 'bg-emerald-50 text-emerald-800', warn: 'bg-amber-50 text-amber-800', no: 'bg-red-50 text-red-700' };
 const STATUS_CLS: Record<string, string> = { interest: 'bg-sky-50 text-sky-800', preparing: 'bg-blue-600 text-white', applied: 'bg-violet-50 text-violet-800', selected: 'bg-emerald-600 text-white', rejected: 'bg-slate-200 text-ink-2', dropped: 'bg-slate-100 text-ink-3' };
+/** 280차 #820: 신청 완료·선정에서 이어 만드는 업무(단계·이름) */
+const FOLLOW: Record<string, [string, string]> = { applied: ['result', '결과 확인'], selected: ['contract', '협약·정산'] };
+const canFollow = (w: Work | null | undefined) => !!w && !!FOLLOW[w.status] && w.taskOpen !== FOLLOW[w.status][0];
 const STEPS: [string, string][] = [['interest', '관심'], ['preparing', '신청 준비'], ['applied', '신청 완료'], ['selected', '선정'], ['rejected', '탈락'], ['dropped', '포기']];
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
 const kday = (d: string | null) => (d ? dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }).format(new Date(`${d}T12:00:00+09:00`)) : '');
@@ -88,6 +91,11 @@ export function Support() {
   async function act(it: Item, status: 'interest' | 'preparing') {
     setBusy(`${it.id}:${status}`);
     try { await api(`/api/sales/support/${it.id}/work`, { body: { status } }); toast.ok(status === 'interest' ? '관심으로 두고 담당 업무를 만들었습니다 — 마감 7일·3일 전에 알립니다' : '신청 준비 업무(체크리스트)를 만들었습니다 — 마감 7일·3일 전에 알립니다', undoOf(it)); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  async function follow(it: Item) {
+    setBusy(`${it.id}:task`);
+    try { await api(`/api/sales/support/${it.id}/work`, { body: { task: true } }); toast.ok(`'${FOLLOW[it.work!.status][1]}' 업무(체크리스트)를 ${it.work?.ownerName ? `${it.work.ownerName}님에게` : '만들어'} 넘겼습니다`); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function analyze(it: Item) {
@@ -186,6 +194,7 @@ export function Support() {
               {it.work ? <><span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', STATUS_CLS[it.work.status])} data-testid="support-status">{it.work.statusLabel}</span>
                 <span className="text-xs text-ink-2">{it.work.ownerName ? `담당 ${it.work.ownerName}` : ''}{it.work.appliedAt ? ` · 신청 ${kday(it.work.appliedAt)}` : ''}{it.work.resultMemo ? ` · ${it.work.resultMemo.slice(0, 40)}` : ''}</span>
                 {it.work.status === 'interest' && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">신청 준비</Button>}
+                {canFollow(it.work) && <Button size="sm" disabled={!!busy} onClick={() => follow(it)} data-testid="support-follow-task" title="담당은 [진행 기록]에서 바꿀 수 있습니다">{busy === `${it.id}:task` ? '…' : `업무로 · ${FOLLOW[it.work.status][1]}`}</Button>}
                 <Button size="sm" variant="secondary" onClick={() => go({ id: it.id })}>진행 기록</Button></>
                 : <><Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'interest')} data-testid="support-interest">{busy === `${it.id}:interest` ? '…' : '관심'}</Button>
                   <Button size="sm" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">{busy === `${it.id}:preparing` ? '…' : '신청 준비'}</Button></>}
@@ -393,6 +402,12 @@ function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; o
     try { const r = await api<any>(`/api/sales/support/${id}/work`, { body: { ownerId: w.ownerId || null, appliedAt: w.appliedAt || null, resultAt: w.resultAt || null, amountAwarded: w.amountAwarded || null, resultMemo: w.resultMemo || null, memo: w.memo || null } }); setData(r); setW(null); onChanged(); toast.ok('진행 기록을 저장했습니다'); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
+  /** 280차 #820 신청 완료·선정 — 고른 담당에게 결과 확인·협약·정산 업무 */
+  async function follow() {
+    if (!w || !it?.work) return; setBusy('task');
+    try { const r = await api<any>(`/api/sales/support/${id}/work`, { body: { task: true, ...(w.ownerId ? { ownerId: w.ownerId } : {}) } }); setData(r); setW(null); onChanged(); toast.ok(`'${FOLLOW[it.work.status][1]}' 업무를 넘겼습니다`); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
   async function analyze() {
     setBusy('ai');
     try { const r = await api<{ costKrw: number }>(`/api/sales/support/${id}/analyze`, { body: {} }); toast.ok(`AI 세일즈가 판단했습니다(약 ${r.costKrw.toLocaleString('ko-KR')}원)`); reload(); onChanged(); }
@@ -459,10 +474,12 @@ function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; o
           <Field label="메모" className="mt-2"><textarea className={inputCls} rows={2} value={w.memo} onChange={(e) => setW({ ...w, memo: e.target.value })} maxLength={2000} /></Field>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {data.task && <Link href={`/tasks/${data.task.id}`} className="text-xs underline" data-testid="support-task-link">담당 업무: {data.task.title.slice(0, 50)} · 체크 {data.task.done}/{data.task.total}{data.task.status === 'done' ? ' · 완료' : data.task.due_date ? ` · 마감 ${kday(data.task.due_date)}` : ''}</Link>}
+            {canFollow(it.work) && <Button size="sm" disabled={!!busy} onClick={follow} data-testid="support-detail-follow">{busy === 'task' ? '…' : `업무로 · ${FOLLOW[it.work!.status][1]}`}</Button>}
             {it.work && <Button size="sm" variant="secondary" className="ml-auto" disabled={!!busy} onClick={withdraw} data-testid="support-withdraw">{busy === 'withdraw' ? '…' : data.task ? '업무 회수' : '진행 회수'}</Button>}
             <Button size="sm" className={it.work ? '' : 'ml-auto'} disabled={!!busy || !it.work} onClick={saveWork} data-testid="support-work-save">기록 저장</Button>
           </div>
           {!it.work && <p className="mt-1 text-[11px] text-ink-3">[관심]·[신청 준비]를 누르면 담당 업무(체크리스트)가 생기고 마감 7일·3일 전에 알림이 갑니다.</p>}
+          {canFollow(it.work) && <p className="mt-1 text-[11px] text-ink-3" data-testid="support-follow-note">[업무로] = 위에서 고른 담당에게 ‘{FOLLOW[it.work!.status][1]}’ 업무({it.work!.status === 'applied' ? '결과 발표 확인·보완 대응' : '협약 서류·사업 수행·정산'} 체크리스트). {it.work!.status === 'applied' ? '선정·탈락으로 바꾸면 이 업무는 자동으로 끝납니다.' : ''}</p>}
         </section>
         {data.summary && <section><h4 className="mb-1 text-xs font-semibold text-ink-2">공고 내용(원문)</h4><p className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-input border border-line bg-slate-50 p-2 text-xs" data-testid="support-summary">{data.summary}</p></section>}
         {data.log.length > 0 && <section><h4 className="mb-1 text-xs font-semibold text-ink-2">기록</h4><ul className="space-y-0.5 text-[11px] text-ink-2">{(data.log as any[]).map((g, i) => <li key={i}>{fmtDateTime(g.changed_at)} · {g.by ?? ''} · {data.statusLabel[g.from_status] ?? '—'} → {data.statusLabel[g.to_status] ?? g.to_status}{g.note ? ` (${g.note})` : ''}</li>)}</ul></section>}

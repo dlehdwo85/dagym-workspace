@@ -8,6 +8,7 @@ import { isAdmin } from '@/lib/access';
 import { forbidden } from '@/lib/errors';
 import { tenantOf } from '@/lib/types';
 import { audit } from '@/lib/log';
+import { MKT_KINDS, MKT_MODES, MKT_MODE_LABEL, mktPrefKey } from '@/lib/mktNotifyKinds';
 
 const SPACES: NotifySpace[] = ['sales', 'marketing'];
 const zMode = z.enum(['mine', 'all', 'off']);
@@ -25,8 +26,13 @@ export const GET = handler(async ({ user }) => {
     const own = modeOf(sp?.space_notify?.[space]); const company = modeOf(sp?.notify_defaults?.[space]) ?? DEFAULT_MODE;
     return { space, label: SPACE_LABEL[space], mode: own ?? company, own: own !== null, companyDefault: company };
   });
+  // 282차 #823 마케팅 알림 항목별(휴대폰 알림·알림함만·안 받음) — 마케팅 공간을 켠 회사만
+  const mkt = (sp?.spaces ?? []).includes('marketing') ? MKT_KINDS.map((k) => {
+    const p = prefs.find((x) => x.type === mktPrefKey(k.kind));
+    return { kind: k.kind, label: k.label, desc: k.desc, def: k.def, mode: p ? (p.push ? 'push' : p.in_app ? 'inbox' : 'off') : k.def, own: !!p };
+  }) : [];
   return {
-    spaces, modeLabels: SPACE_MODE_LABEL, canSetCompany: isAdmin(user),
+    spaces, modeLabels: SPACE_MODE_LABEL, canSetCompany: isAdmin(user), mkt, mktModeLabels: MKT_MODE_LABEL,
     types: Object.entries(NOTIFICATION_TYPES).filter(([type]) => (type !== 'server_error' || user.platformAdmin) && (type !== 'meeting_lobby' || process.env.FEATURE_MEETINGS === '1')).map(([type, label]) => { // 218차: 화상회의 스위치가 꺼져 있으면 대기실 알림 설정도 숨김
       const p = prefs.find((x) => x.type === type);
       return { type, label, inApp: p?.in_app ?? true, push: p?.push ?? defaultPush(type), pushDefault: defaultPush(type) };
@@ -50,6 +56,8 @@ export const PUT = handler(async ({ req, user }) => {
     spaces: z.object({ sales: zMode.nullable().optional(), marketing: zMode.nullable().optional() }).optional(),
     /** #104 ⑤ 회사 기본값(관리자만) */
     companySpaces: z.object({ sales: zMode.optional(), marketing: zMode.optional() }).optional(),
+    /** 282차 #823 마케팅 알림 항목별. mode null = 기본값으로 */
+    mkt: z.array(z.object({ kind: z.enum(MKT_KINDS.map((k) => k.kind) as [string, ...string[]]), mode: z.enum(MKT_MODES as [string, ...string[]]).nullable() })).max(20).optional(),
   }));
   const sql = db();
   if (i.spaces) {
@@ -64,6 +72,12 @@ export const PUT = handler(async ({ req, user }) => {
     for (const s of SPACES) if (i.companySpaces[s]) patch[s] = i.companySpaces[s] as string;
     await sql`update tenants set notify_defaults = notify_defaults || ${sql.json(patch as never)} where id = ${tenantOf(user)}`;
     await audit(sql, user.id, 'notify_defaults.set', 'tenant', null, patch).catch(() => {});
+  }
+  for (const m of i.mkt ?? []) {
+    const key = mktPrefKey(m.kind as never);
+    if (m.mode === null) await sql`delete from notification_prefs where user_id = ${user.id} and type = ${key}`;
+    else await sql`insert into notification_prefs (user_id, type, in_app, push) values (${user.id}, ${key}, ${m.mode !== 'off'}, ${m.mode === 'push'})
+      on conflict (user_id, type) do update set in_app = excluded.in_app, push = excluded.push`;
   }
   for (const t of i.types ?? []) {
     if (!(t.type in NOTIFICATION_TYPES)) continue;

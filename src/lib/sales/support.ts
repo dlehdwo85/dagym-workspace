@@ -410,7 +410,7 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
 // ---------------- 목록·상세 ----------------
 type Match = { program_id: string; ai_verdict: 'fit' | 'maybe' | 'no' | null; ai_reasons: string[]; ai_brands: string[]; ai_docs: string[]; ai_summary: string | null; ai_amount: string | null; ai_at: string | null; hidden: boolean;
   ai_use?: string[]; ai_schedule?: string | null; ai_auto?: boolean; auto_fail?: number; ai_effect?: Effect | null; listed_at?: string | null; ai_rule_verdict?: string | null };
-type Work = { id: string; program_id: string; status: string; owner_id: string | null; owner_name: string | null; task_id: string | null; brands: string[]; applied_at: string | null; result_at: string | null; amount_awarded: string | null; result_memo: string | null; memo: string | null; updated_at: string };
+type Work = { id: string; program_id: string; status: string; owner_id: string | null; owner_name: string | null; task_id: string | null; brands: string[]; applied_at: string | null; result_at: string | null; amount_awarded: string | null; result_memo: string | null; memo: string | null; updated_at: string; /** 280차 #820 열린 담당 업무 단계(없으면 null · 신청 전 업무 'prep' · 'result'·'contract') */ task_open?: string | null };
 const RANK: Record<string, number> = { fit: 0, maybe: 1, none: 2, no: 3 };
 async function disabledSources(sql: Sql, t: string) {
   const off = await sql<{ slug: string }[]>`select slug from sales_collector_settings where tenant = ${t} and not enabled and slug = any(${Object.values(SOURCE_SLUG)})`;
@@ -506,7 +506,7 @@ function itemOf(p: Prog, rule: Rule, m: Match | undefined, w: Work | undefined, 
     rule, ai: m?.ai_verdict ? { verdict: m.ai_verdict, reasons: m.ai_reasons ?? [], brands: m.ai_brands ?? [], docs: m.ai_docs ?? [], summary: m.ai_summary, at: m.ai_at, use: Array.isArray(m.ai_use) ? m.ai_use : [], schedule: m.ai_schedule ?? null, auto: !!m.ai_auto, stale, effect: m.ai_effect ?? null, ruleAt: m.ai_rule_verdict ?? null } : null, final, hidden: !!m?.hidden, listed: !!m?.listed_at, listedAt: m?.listed_at ?? null,
     queued: false, autoFail: m?.auto_fail ?? 0, // #785 자동 판단 차례(listView 가 채움) · 자동 판단 실패 횟수
     work: w ? { id: w.id, status: w.status, statusLabel: STATUS_LABEL[w.status] ?? w.status, ownerId: w.owner_id, ownerName: w.owner_name, taskId: w.task_id, brands: w.brands ?? [], appliedAt: w.applied_at, resultAt: w.result_at,
-      amountAwarded: w.amount_awarded, resultMemo: w.result_memo, memo: w.memo } : null,
+      amountAwarded: w.amount_awarded, resultMemo: w.result_memo, memo: w.memo, taskOpen: w.task_open ?? null } : null,
   };
 }
 export type SupportItem = ReturnType<typeof itemOf>;
@@ -618,7 +618,8 @@ const AUTO_FP = '251'; // 자동 판단 차례 규칙이 바뀌면 올림 — �
 async function supportAll(sql: Sql, t: string, uid: string, today: string) {
   const [{ profile, saved, autoAi, basisAt, autoState }, off, matches, works] = await Promise.all([profileOf(t, sql), disabledSources(sql, t),
     sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto, auto_fail, ai_effect, listed_at, ai_rule_verdict from support_matches where tenant = ${t}`,
-    sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.withdrawn_at is null`]);
+    sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at,
+    (select coalesce(tk.sales_ref->>'stage', 'prep') from tasks tk where tk.id = w.task_id and tk.deleted_at is null and tk.status <> 'done') as task_open from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.withdrawn_at is null`]);
   const mm = new Map(matches.map((m) => [m.program_id, m])); const wm = new Map(works.map((w) => [w.program_id, w]));
   const workIds = works.map((w) => w.program_id);
   // 열린 공고(마감 전·마감 미정) + 우리 회사 진행 중인 것(마감 지나도)
@@ -644,7 +645,8 @@ export async function detailView(u: SessionUser, id: string) {
   const p = await programFor(sql, t, id);
   const { profile, saved, basisAt } = await profileOf(t, sql);
   const [m] = await sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto, auto_fail, ai_effect, listed_at, ai_rule_verdict from support_matches where tenant = ${t} and program_id = ${id}`;
-  const [w] = await sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.program_id = ${id} and w.withdrawn_at is null`;
+  const [w] = await sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at,
+    (select coalesce(tk.sales_ref->>'stage', 'prep') from tasks tk where tk.id = w.task_id and tk.deleted_at is null and tk.status <> 'done') as task_open from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.program_id = ${id} and w.withdrawn_at is null`;
   const log = w ? await sql`select l.from_status, l.to_status, l.note, l.changed_at, us.name as by from support_work_log l left join users us on us.id = l.changed_by where l.work_id = ${w.id} order by l.changed_at desc limit 30` : [];
   const [task] = w?.task_id ? await sql<{ id: string; title: string; status: string; due_date: string | null; total: number; done: number }[]>`select t.id, t.title, t.status, t.due_date::text,
     (select count(*)::int from task_checklist_items ci where ci.task_id = t.id) total, (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.done) done from tasks t where t.id = ${w.task_id} and t.deleted_at is null` : [];
@@ -769,6 +771,7 @@ export const workInput = z.object({
   ownerId: z.string().uuid().nullable().optional(), brands: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
   appliedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), resultAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   amountAwarded: z.string().trim().max(100).nullable().optional(), resultMemo: z.string().trim().max(2000).nullable().optional(), memo: z.string().trim().max(2000).nullable().optional(),
+  /** 280차 #820 신청 완료·선정에서 [업무로] — 결과 확인·협약·정산 업무 */ task: z.boolean().optional(),
 });
 const STEPS_INTEREST = ['공고문·자격 요건 확인', '신청 여부 결정(신청 준비로 바꾸기)'];
 const STEPS_PREPARE = ['공고문·신청 양식 내려받기', '신청서 작성', '온라인 제출·접수 확인'];
@@ -799,6 +802,26 @@ async function ensureTask(sql: Sql, u: SessionUser, p: Prog, w: { id: string; st
   if ((p.attachments ?? []).length) (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'support', id: p.id, taskIds: [r.id] }); // #507 공고 첨부 자동
   return r.id;
 }
+/** 280차 #820(대표 10/31 '진행중인 지원사업도 업무로 넘길 수 있도록 담당자 설정해서'): 신청 완료 = 결과 확인 업무, 선정 = 협약·정산 업무(체크리스트) */
+const FOLLOW: Record<string, { stage: 'result' | 'contract'; label: string; steps: string[] }> = {
+  applied: { stage: 'result', label: '결과 확인', steps: ['결과 발표일·발표 방법 확인(공고문·누리집)', '보완 서류 요청 오면 대응', '결과 확인 뒤 지원사업 화면에서 [선정]·[탈락]으로 바꾸기'] },
+  selected: { stage: 'contract', label: '협약·정산', steps: ['협약 안내·협약 서류 목록 확인', '협약 서류 준비·제출', '협약 체결(전자 협약·날인)', '사업 수행·증빙(세금계산서·사진·결과물) 모으기', '중간·결과 보고서 제출', '정산 서류 제출·자부담 확인'] },
+};
+async function followTask(sql: Sql, u: SessionUser, p: Prog, w: { id: string; status: string; owner_id: string | null; task_id: string | null; applied_at?: string | null; result_at?: string | null; amount_awarded?: string | null }) {
+  const f = FOLLOW[w.status]; if (!f) throw badRequest('신청 완료·선정 공고만 이어서 업무로 넘길 수 있습니다');
+  if (w.task_id) {
+    const [cur] = await sql<{ id: string; stage: string | null }[]>`select id, sales_ref->>'stage' as stage from tasks where id = ${w.task_id} and deleted_at is null and status <> 'done'`;
+    if (cur?.stage === f.stage) return { id: cur.id, made: false };
+  }
+  const { createTask } = await import('../tasks');
+  const owner = w.owner_id ?? u.id;
+  const desc = [`지원사업 공고에서 이어 만든 ${f.label} 업무입니다 — /s/sales/support?id=${p.id}`, p.agency && `기관: ${[p.agency, p.executor].filter(Boolean).join(' · ')}`,
+    w.applied_at && `신청일: ${w.applied_at}`, w.result_at && `결과일: ${w.result_at}`, w.amount_awarded && `선정 금액: ${w.amount_awarded}`, !w.amount_awarded && p.amount && `지원 규모: ${p.amount}`, p.url && `공고: ${p.url}`,
+    f.stage === 'result' ? '결과가 나오면 지원사업 화면 [진행 기록]에서 선정·탈락으로 바꾸세요(이 업무는 자동으로 끝남).' : '협약·정산 마감은 기관 안내에 맞춰 업무 마감일을 정하세요.'].filter(Boolean).join('\n');
+  const r = await createTask(u, { title: `[지원사업] ${p.title.slice(0, 100)} — ${f.label}`, description: desc, space: 'sales', assigneeId: owner, requestedById: u.id, approvalRequired: false, tags: ['영업', '지원사업'], checklist: f.steps } as never, { quiet: owner === u.id, skipQuota: true });
+  await sql`update tasks set sales_ref = ${sql.json({ kind: 'support', id: p.id, name: p.title.slice(0, 120), stage: f.stage })} where id = ${r.id}`;
+  return { id: r.id as string, made: true };
+}
 export async function saveWork(u: SessionUser, id: string, i: z.infer<typeof workInput>) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db(); const today = ymd();
@@ -814,10 +837,12 @@ export async function saveWork(u: SessionUser, id: string, i: z.infer<typeof wor
     applied_at: i.appliedAt !== undefined ? i.appliedAt : status === 'applied' && prev?.status !== 'applied' ? today : undefined,
     result_at: i.resultAt !== undefined ? i.resultAt : ['selected', 'rejected'].includes(status) && prev?.status !== status ? today : undefined };
   const set = Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined));
-  let w: { id: string; status: string; owner_id: string | null; task_id: string | null };
-  if (prev) [w] = await sql<typeof w[]>`update support_work set ${sql(set as never)}, updated_by = ${u.id}, updated_at = now() where id = ${prev.id} returning id, status, owner_id, task_id`;
-  else if (revive) [w] = await sql<typeof w[]>`update support_work set ${sql(set as never)}, withdrawn_at = null, withdrawn_by = null, task_id = null, updated_by = ${u.id}, updated_at = now() where id = ${revive.id} returning id, status, owner_id, task_id`;
-  else [w] = await sql<typeof w[]>`insert into support_work ${sql({ tenant: t, program_id: p.id, created_by: u.id, updated_by: u.id, ...set } as never)} returning id, status, owner_id, task_id`;
+  if (i.task && !FOLLOW[status] && !OPEN_WORK.includes(status)) throw badRequest('탈락·포기한 공고는 업무로 넘기지 않습니다');
+  let w: { id: string; status: string; owner_id: string | null; task_id: string | null; applied_at: string | null; result_at: string | null; amount_awarded: string | null };
+  const RET = sql`returning id, status, owner_id, task_id, applied_at::text, result_at::text, amount_awarded`;
+  if (prev) [w] = await sql<typeof w[]>`update support_work set ${sql(set as never)}, updated_by = ${u.id}, updated_at = now() where id = ${prev.id} ${RET}`;
+  else if (revive) [w] = await sql<typeof w[]>`update support_work set ${sql(set as never)}, withdrawn_at = null, withdrawn_by = null, task_id = null, updated_by = ${u.id}, updated_at = now() where id = ${revive.id} ${RET}`;
+  else [w] = await sql<typeof w[]>`insert into support_work ${sql({ tenant: t, program_id: p.id, created_by: u.id, updated_by: u.id, ...set } as never)} ${RET}`;
   if (!prev || prev.status !== status) await sql`insert into support_work_log (work_id, from_status, to_status, note, changed_by) values (${w.id}, ${prev?.status ?? null}, ${status}, ${i.resultMemo ?? i.memo ?? null}, ${u.id})`;
   // 업무: 관심·준비 = 만들기/채우기, 신청·결과·포기 = 열린 업무 완료
   let taskId = w.task_id;
@@ -825,10 +850,17 @@ export async function saveWork(u: SessionUser, id: string, i: z.infer<typeof wor
     const [m] = await sql<{ ai_docs: string[] }[]>`select ai_docs from support_matches where tenant = ${t} and program_id = ${p.id}`;
     taskId = await ensureTask(sql, u, p, w, Array.isArray(m?.ai_docs) ? m.ai_docs : []);
     if (taskId !== w.task_id) await sql`update support_work set task_id = ${taskId} where id = ${w.id}`;
-  } else if (!OPEN_WORK.includes(status) && w.task_id) await sql`update tasks set status = 'done', completed_at = now(), updated_at = now(), version = version + 1 where id = ${w.task_id} and status <> 'done' and deleted_at is null`;
-  if (taskId && prev && owner && owner !== prev.owner_id && OPEN_WORK.includes(status)) { // 담당이 바뀌면 열린 업무도 넘김
-    await sql`update tasks set assignee_id = ${owner}, updated_at = now(), version = version + 1 where id = ${taskId} and status <> 'done' and deleted_at is null`;
-    await notify(sql, { userIds: [owner], type: 'assigned', space: 'sales', title: `지원사업 담당: ${p.title.slice(0, 60)}`, body: `${u.name}님이 담당으로 지정했습니다${p.apply_end ? ` — 마감 ${p.apply_end}` : ''}`, link: `/s/sales/support?id=${p.id}`, actorId: u.id, dedupeKey: `support:owner:${w.id}:${owner}` } as never).catch(() => {});
+  } else if (!OPEN_WORK.includes(status) && w.task_id && prev?.status !== status) await sql`update tasks set status = 'done', completed_at = now(), updated_at = now(), version = version + 1 where id = ${w.task_id} and status <> 'done' and deleted_at is null`; // 단계가 바뀔 때만(280차: 같은 단계 기록 저장은 이어 만든 업무를 안 끝냄)
+  let made = false;
+  if (i.task && FOLLOW[status]) { // 280차 #820 [업무로] — 신청 완료·선정
+    const r = await followTask(sql, u, p, w); made = r.made;
+    if (r.id !== w.task_id) { await sql`update support_work set task_id = ${r.id} where id = ${w.id}`; taskId = r.id; }
+    if (made) await sql`insert into support_work_log (work_id, from_status, to_status, note, changed_by) values (${w.id}, ${status}, ${status}, ${`업무로: ${FOLLOW[status].label}`}, ${u.id})`;
+  }
+  const moved = taskId && prev && owner && owner !== prev.owner_id && !made // 담당이 바뀌면 열린 업무도 넘김(신청 전 업무·이어 만든 업무)
+    ? (await sql`update tasks set assignee_id = ${owner}, updated_at = now(), version = version + 1 where id = ${taskId} and status <> 'done' and deleted_at is null returning id`).length > 0 : false;
+  if (moved && owner) {
+    await notify(sql, { userIds: [owner], type: 'assigned', space: 'sales', title: `지원사업 담당: ${p.title.slice(0, 60)}`, body: `${u.name}님이 담당으로 지정했습니다${OPEN_WORK.includes(status) && p.apply_end ? ` — 마감 ${p.apply_end}` : ''}`, link: `/s/sales/support?id=${p.id}`, actorId: u.id, dedupeKey: `support:owner:${w.id}:${owner}` } as never).catch(() => {});
   }
   await audit(sql, u.id, 'support.work', 'support_program', p.id, { from: prev?.status ?? null, to: status }).catch(() => {});
   return detailView(u, p.id);

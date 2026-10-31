@@ -70,7 +70,7 @@ async function nextBusinessDay(sql: Sql, from: string) {
 
 const cellText = (v: unknown) => String(v ?? '').replace(/\|/g, '／').replace(/\s*\n\s*/g, ' / ').trim() || '-';
 
-export function describeInquiry(site: Site, type: InquiryType, i: InquiryInput, received: Date, channel: Channel = 'web') {
+export function describeInquiry(site: Site, type: InquiryType, i: InquiryInput, received: Date, channel: Channel = 'web', complex?: { households: number | null; usedate: string | null } | null) {
   const services = Array.isArray(i.services) ? i.services.join(', ') : i.services;
   const utm = typeof i.utm === 'string' ? i.utm
     : Object.entries({ ...(i.utm && typeof i.utm === 'object' ? i.utm : {}), source: i.utm_source, medium: i.utm_medium, campaign: i.utm_campaign, term: i.utm_term, content: i.utm_content })
@@ -78,6 +78,8 @@ export function describeInquiry(site: Site, type: InquiryType, i: InquiryInput, 
   const when = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short' }).format(received);
   const rows: [string, unknown][] = [
     ['문의 유형', i.inquiry_type || type], ['회사/단지명', i.organization], ['지역', i.region], ['시설 규모/세대수', i.facility_scale],
+    // 281차 #822: 단지명이 K-apt 단지와 맞으면 세대수·준공(사용승인)년월(K-apt 기준)
+    ...(complex?.households || complex?.usedate ? [['단지 정보(K-apt)', [complex.households ? `${complex.households.toLocaleString('ko-KR')}세대` : null, complex.usedate ? `준공 ${complex.usedate.slice(0, 4)}년 ${Number(complex.usedate.slice(5, 7))}월` : null].filter(Boolean).join(' · ')] as [string, unknown]] : []),
     ['소속', i.organization_type], ['관심 서비스', services], ['현재 운영 상황', i.current_operation],
     ['접수 시각', when], ['유입 경로', [utm, i.landing_page || i.landing ? `랜딩 ${i.landing_page || i.landing}` : '', i.referrer ? `참조 ${i.referrer}` : ''].filter(Boolean).join(' · ')],
     [channel === 'phone' ? '접수 경로' : '접수 사이트', channel === 'phone' ? `${SITES[site].label} 대표번호 전화` : `${SITES[site].label} 웹사이트`], ['Lead ID', i.lead_id],
@@ -121,6 +123,7 @@ type Channel = 'web' | 'phone';
 async function insertInquiry(sql: ReturnType<typeof db>, a: { site: Site; type: InquiryType; i: InquiryInput; received: Date; tokenId: string | null; channel: Channel; actorId: string | null }) {
   const { site, type, i, received } = a;
   const org = i.organization || i.name || '이름 없는 문의';
+  const complex = i.organization ? await (await import('./sales/complexInfo')).complexFacts(sql, i.organization, i.region, { timeoutMs: 4000 }).catch(() => null) : null; // 281차 #822 — 트랜잭션 밖에서
   const out = await sql.begin(async (tx) => {
     const [ins] = await tx<{ id: string }[]>`insert into inquiries (tenant, lead_id, site, inquiry_type, organization, token_id, payload)
       values (${INQUIRY_TENANT}, ${i.lead_id}, ${site}, ${type}, ${i.organization ?? null}, ${a.tokenId}, ${tx.json(i as never)})
@@ -151,7 +154,7 @@ async function insertInquiry(sql: ReturnType<typeof db>, a: { site: Site; type: 
     const services = (Array.isArray(i.services) ? i.services : (i.services ?? '').split(/[,·]/)).map((x) => x.trim()).filter(Boolean);
     const tags = [...new Set([SITES[site].tag, i.region, ...services].filter((x): x is string => !!x).map((x) => x.slice(0, 30)))].slice(0, 20);
     const due = await nextBusinessDay(tx, toSeoulDate(received));
-    const desc = describeInquiry(site, type, i, received, a.channel);
+    const desc = describeInquiry(site, type, i, received, a.channel, complex);
     const batchId = each ? crypto.randomUUID() : null;
     const taskIds: string[] = [];
     for (const assignee of each ? people : [people[0]]) {

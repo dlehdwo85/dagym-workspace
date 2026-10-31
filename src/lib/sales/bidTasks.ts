@@ -146,8 +146,16 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
   const dueAt = bidDue(ms, today); const due = dueAt?.day ?? addDay(today, 3); const dueTime = dueAt?.time ?? null;
   const agency = pick(r, 'issuer', 'agency', 'demand_agency', 'org_name');
   const link = bidLink(i.id);
+  // 281차 #822: 현장설명회(필수 여부·일시·장소) · 세대수 · 준공(사용승인)년월 — 단지 정보는 K-apt 단지 목록에서 이름으로(못 찾으면 줄 없음)
+  const { briefingLine, briefingOf } = await import('./bidTerms'); const { complexFacts, yearMonth } = await import('./complexInfo');
+  const kind = String(r.kg2b_briefing_kind ?? r.site_briefing_kind ?? '').trim();
+  const brief = briefingOf(r) ? briefingLine(r) : kind === '없음' ? '현장설명 없음' : null;
+  const cx = await complexFacts(sql, pick(r, 'facility_name', 'complex_name', 'issuer'), pick(r, 'region') ?? pick(r, 'office_address')).catch(() => null);
+  const hh = Number(pick(r, 'household_count', 'households')) || cx?.households || null;
+  const complexLine = [hh ? `세대수 ${hh.toLocaleString('ko-KR')}세대` : null, cx?.usedate ? `준공 ${yearMonth(cx.usedate)}(사용승인)` : null].filter(Boolean).join(' · ');
   const desc = ['입찰 공고에서 넘어온 업무입니다. 기한은 입찰 마감 일시에 맞춰 자동으로 바뀌고, 공고가 취소되면 이 업무도 함께 취소됩니다.',
-    agency ? `기관: ${agency}` : null, future.length ? `일정: ${future.map((m) => `${m.label} ${fmtWhen(m.w)}`).join(' · ')}` : null,
+    agency ? `기관: ${agency}` : null, brief ? `현장설명: ${brief.replace(/^현장설명\s*/, '') || '있음'}` : null, complexLine ? `단지: ${complexLine}` : null,
+    future.length ? `일정: ${future.map((m) => `${m.label} ${fmtWhen(m.w)}`).join(' · ')}` : null,
     i.note ? `메모: ${i.note}` : null, `공고: ${link}`].filter(Boolean).join('\n');
   const { createTask } = await import('../tasks');
   const task = await createTask(u, { title: `[입찰] ${name}`.slice(0, 200), description: desc, space: 'sales', assigneeId: ids[0], coAssigneeIds: ids.slice(1), requestedById: u.id, dueDate: due, dueTime,

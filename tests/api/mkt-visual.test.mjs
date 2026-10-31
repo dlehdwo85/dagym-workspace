@@ -352,7 +352,7 @@ test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네
     assert.equal((await sql`select credits::float8 c from mkt_credit_ledger where content_id = ${o.id} and version = 3`)[0].c, 0, '무료');
   }
   const fc = await cur(fine.id);
-  assert.deepEqual([fc.current_version, fc.media_ids[0], fc.quality.visual.rv, fc.quality.visual.photoId], [2, fine.drawn, 3, real], '고른 사진 바탕은 그대로(표시만)');
+  assert.deepEqual([fc.current_version, fc.media_ids[0], fc.quality.visual.rv, fc.quality.visual.photoId], [2, fine.drawn, 4, real], '고른 사진 바탕은 그대로(표시만 — 282차 #818 ⑤ 흔들림 검사까지 끝낸 표시 4)');
   assert.deepEqual([(await cur(human.id)).current_version, (await cur(human.id)).quality.visual.rv], [2, undefined], '사람이 수정 요청한 버전은 그대로');
   assert.deepEqual((await ctx.owner.ok('POST', '/api/marketing/auto/run', {})).redraws, [], '한 번만');
   // ③ [브랜드 색으로 다시 그리기](로컬 08:15 (c)): 사진 없이 브랜드 색 바탕 · 새 버전 · 감사
