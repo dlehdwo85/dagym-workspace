@@ -2187,3 +2187,8 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 306 8ab07fc: POST /api/admin/review-account(기존 데모 계정, 예시만 다시) 200 → 데모 계정 /api/tasks 일반 회사 12건, 피트니스 낱말 0.
 - 308 e26a031: 공동 업무 11줄 상태·마감·함께 시작 x 차이 1920·1440 모두 0px, 375 가로 넘침 없음.
 - Apple: APPLE_PRIVATE_KEY 09:21Z 저장(대표) → 배포 b3675c4 09:25Z READY. providers 에 apple, 로그아웃 창 /login 'Apple로 로그인', start → appleid authorize(client_id dev.work-in.signin) 로그인 화면 정상. 내 재배포(API 403 Challenge, 화면 재배치)는 새 배포가 이미 키 뒤라 취소.
+
+## 2026-11-01 19:05 — 실사 참고 생성 끔, 알림톡 1·2단계
+- photo_gen false(대표 '끄라').
+- 카카오 비즈니스: 새 비즈니스 '워크인' 채널(유형1 기본 채널형, 하이링크 사업자, 검색용 아이디 워크인업무관리) 생성 → 비즈니스 심사 신청(11/1, 영업일 3~7일). 카카오 입력칸은 Playwright fill·insertText 로 한글이 안 들어가 CDP Input.imeSetComposition + insertText 로 입력.
+- 솔라피: 대표 가입 완료(가입 혜택 잔액 300원·한도 50건). 카카오 채널 연동 창에 @워크인업무관리·컴퓨터>소프트웨어/솔루션 입력, 관리자 휴대폰·인증번호는 대표.
