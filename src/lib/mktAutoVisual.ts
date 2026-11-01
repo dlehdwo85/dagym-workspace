@@ -1046,8 +1046,13 @@ export async function feedPreview(u: SessionUser, id: string, i: { feed?: import
   const h = { ...real, points: real.points.length >= 3 ? real.points : ['핵심 내용 하나', '핵심 내용 둘', '핵심 내용 셋'], left: real.left || '예전 방식', right: real.right || '새 방식',
     prices: real.prices.length >= 2 ? real.prices : [{ label: '1개월', value: '금액' }, { label: '3개월', value: '금액' }, { label: '6개월', value: '금액' }] };
   const fake = { id: '00000000-0000-0000-0000-000000000000', tenant: t, brand_id: id, title, channel: 'instagram', kind: 'feed', created_by: null, current_version: 0 };
-  const ranked = (await rankPhotos(fake, brand, others, `${title} ${body}`)).slice(0, 4);
-  const files = (await Promise.all(ranked.map(async (p) => ({ p, f: await libBytes(t, p.id, /^image\//).catch(() => null) })))).filter((x) => x.f);
+  // 318차(로컬 11/01 '4칸 틀만 지정해서 그려 볼 시험 경로'): 미리보기도 실제 표지와 같은 규칙 — 같은 그림·같은 영상 장면은 한 장씩(317차), 얼굴은 가린 사본·자리 모르면 뺌(314차)
+  const ranked = await distinctPhotos(await rankPhotos(fake, brand, others, `${title} ${body}`), 4);
+  const files = (await Promise.all(ranked.map(async (p) => {
+    const raw = await libBytes(t, p.id, /^image\//).catch(() => null);
+    const masked = raw ? await maskedBytes(t, p.id, raw.data) : null;
+    return { p, f: raw && masked ? { ...raw, data: masked } : null };
+  }))).filter((x) => x.f);
   const shots = await screenShots(t, brand, others, await photoRule(t, id)); const screen = shots.tall[0] ?? shots.any[0] ?? null; const screenWide = shots.wide[0] ?? null; // #262 세로 = 휴대폰 틀 · 가로 = 노트북 틀
   const sharp = (await import('sharp')).default;
   const gray = await sharp({ create: { width: 1080, height: 1350, channels: 3, background: '#9CA3AF' } }).jpeg().toBuffer(); // 사진·화면 자리(예시)
@@ -1066,7 +1071,7 @@ export async function feedPreview(u: SessionUser, id: string, i: { feed?: import
     const jpg = await sharp(png).resize(540).jpeg({ quality: 82 }).toBuffer();
     images.push({ template: tp, label: F.FEED_TEMPLATES[tp].label, desc: F.FEED_TEMPLATES[tp].desc, note, src: `data:image/jpeg;base64,${jpg.toString('base64')}` });
   }
-  return { color, sample: { title, fromContent: !!last }, images };
+  return { color, sample: { title, fromContent: !!last, photoIds: files.map((x) => x.p.id) }, images };
 }
 
 /** 승인함 [지금 만들기]: 마케팅 공간 사람 — 그 자리에서 그려 붙이고 재승인 대기
