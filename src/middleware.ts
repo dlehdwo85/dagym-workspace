@@ -34,8 +34,12 @@ export function middleware(req: NextRequest) {
   if (d && 'loginRedirect' in d && d.loginRedirect) { const u = req.nextUrl.clone(); u.pathname = d.loginRedirect; u.search = ''; res = NextResponse.redirect(u, 307); }
   else if (req.nextUrl.pathname === '/' && !signedIn && !app) res = NextResponse.rewrite(new URL('/welcome', req.url));
   // V41 공간 주소: 앱 레이아웃이 화면을 그리기 전에 공간 권한을 보고 404(상태 코드까지)로 막을 수 있게 주소를 넘김
-  else if (req.nextUrl.pathname.startsWith('/s/')) { const h = new Headers(req.headers); h.set('x-wos-path', req.nextUrl.pathname); res = NextResponse.next({ request: { headers: h } }); }
-  else res = NextResponse.next();
+  else {
+    // V41 공간 주소(x-wos-path) · 302차 #862 로그인 안 된 채 앱 화면 주소로 오면(결제 안내 메일 [결제하기] 등) 로그인 뒤 그 주소로 돌아가게(x-wos-url)
+    const h = new Headers(req.headers); h.set('x-wos-url', req.nextUrl.pathname + req.nextUrl.search);
+    if (req.nextUrl.pathname.startsWith('/s/')) h.set('x-wos-path', req.nextUrl.pathname);
+    res = NextResponse.next({ request: { headers: h } });
+  }
   if (d && 'noindex' in d && d.noindex) res.headers.set('X-Robots-Tag', 'noindex, nofollow'); // app. 은 검색 제외(로그인 뒤 화면)
   return res;
 }

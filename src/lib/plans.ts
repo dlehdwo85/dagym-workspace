@@ -394,18 +394,23 @@ async function roState(t: string) {
   return v;
 }
 export async function billingLock(t: string) { return t === 'default' || t === 'demo' ? null : (await roState(t)).lock; }
-export async function assertWritable(u: SessionUser, path: string) {
+/** 302차 #862: 앱(WorkInApp·Capacitor) 요청에는 결제·요금제 권유 없이 — '관리자에게 문의'만(App Store 3.1.1·구글 결제 정책) */
+const APP_RO = '보기 전용 상태입니다. 회사 관리자에게 문의하세요.';
+const APP_SUSPENDED = '이용이 멈춘 상태입니다. 회사 관리자에게 문의하세요.';
+export async function assertWritable(u: SessionUser, path: string, o: { app?: boolean } = {}) {
   const t = tenantOfUser(u);
   if (t === 'default' || t === 'demo' || RO_ALLOW.some((r) => r.test(path))) return;
   const st = await roState(t);
+  if (o.app && st.lock === 'suspended') throw new HttpError(402, 'suspended', APP_SUSPENDED);
+  if (o.app && st.ro) throw new HttpError(402, 'read_only', APP_RO);
   if (st.lock === 'suspended') throw new HttpError(402, 'suspended', '미납 30일로 이용이 중지되었습니다 — 관리자가 결제하면 바로 다시 쓸 수 있어요(데이터는 그대로).');
   if (st.ro) throw new HttpError(402, 'read_only', st.lock ? '미납 7일로 읽기 전용입니다 — 결제하면 바로 다시 쓸 수 있어요 (보기·내보내기는 그대로).' : `${st.partner ? '설계 파트너 기간' : '무료 체험'}이 끝나 읽기 전용입니다. 요금제를 선택하면 다시 쓸 수 있어요 (보기·내보내기는 그대로).`);
 }
 /** 이용 중지 회사는 보기 요청도 막는다(결제 안내만) */
-export async function assertNotSuspended(u: SessionUser, path: string) {
+export async function assertNotSuspended(u: SessionUser, path: string, o: { app?: boolean } = {}) {
   const t = tenantOfUser(u);
   if (t === 'default' || t === 'demo' || u.support || SUSPEND_ALLOW.some((r) => r.test(path))) return;
-  if ((await roState(t)).lock === 'suspended') throw new HttpError(402, 'suspended', '미납 30일로 이용이 중지되었습니다 — 관리자가 결제하면 바로 다시 쓸 수 있어요(데이터는 그대로).');
+  if ((await roState(t)).lock === 'suspended') throw new HttpError(402, 'suspended', o.app ? APP_SUSPENDED : '미납 30일로 이용이 중지되었습니다 — 관리자가 결제하면 바로 다시 쓸 수 있어요(데이터는 그대로).');
 }
 export const clearReadOnlyCache = (t?: string) => (t ? roCache.delete(t) : roCache.clear());
 
@@ -434,7 +439,7 @@ export async function trialJob() {
       await sql`update tenant_subscriptions set trial_notified = trial_notified || ${sql.json({ partner: true })} where tenant = ${s.tenant}`;
       partnerAlerts++;
     }
-    const key = d === 0 ? 'd0' : d === 1 ? 'd1' : d <= 3 ? 'd3' : null;
+    const key = d === 0 ? 'd0' : d === 1 ? 'd1' : d <= 3 ? 'd3' : d <= 7 ? 'd7' : null; // 302차 #862: 7일 전 안내 추가
     if (!key || s.trial_notified?.[key]) continue;
     const admins = await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${s.tenant} and status = 'active' and role in ('owner','admin')`;
     const name = partner ? '설계 파트너 기간' : '무료 체험';
@@ -443,8 +448,8 @@ export async function trialJob() {
     // 298차 #861: 알림함·푸시(앱에도 뜸)에는 요금제 권유 없이 — 요금제 안내·웹 주소는 관리자 이메일로만
     const inBody = d === 0 ? '오늘이 지나면 보기와 내보내기만 됩니다. 자세한 안내를 관리자 이메일로 보냈습니다.' : '자세한 안내를 관리자 이메일로 보냈습니다.';
     await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title, body: inBody, link: '/admin/usage', dedupeKey: `trial:${s.tenant}:${key}:${until}` });
-    const { sendMail } = await import('./mail');
-    for (const a of admins) await sendMail(a.email, `[워크인] ${title}`, `${s.name}\n${body}\n${process.env.APP_URL ?? ''}/admin/usage`).catch(() => {});
+    // 302차 #862: 메일은 휴대폰에서 바로 결제되게 — 회사·인원·추천 요금제·월 금액 + [결제하기](로그인 뒤 결제 화면으로)
+    await (await import('./billing/payMail')).sendPayMail(s.tenant, { title, lines: [body, d === 0 ? '결제하면 바로 다시 쓸 수 있고, 데이터는 그대로입니다.' : `끝나는 때: ${new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(s.trial_ends_at)}`] }).catch(() => 0);
     await sql`update tenant_subscriptions set trial_notified = trial_notified || ${sql.json({ [key]: true })} where tenant = ${s.tenant}`;
     notified++;
   }

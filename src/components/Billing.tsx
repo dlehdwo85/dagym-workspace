@@ -58,6 +58,17 @@ export function BillingSection() {
   const [ep, setEp] = useState<string | null>(null); const [epOk, setEpOk] = useState(false);
   const [renewOk, setRenewOk] = useState(false); // V34-B (#282) 정기결제 별도 동의(체크해야 결제)
   const [pageMode, setPageMode] = useState(false); // #413 레이어가 바로 닫히는 환경 — 같은 탭 이동 방식
+  // 302차 #862: 휴대폰 브라우저는 나이스페이 모바일 방식(같은 탭 이동)이 기본 — 결제 안내 메일 [결제하기]를 휴대폰에서 눌러도 막힘 없이
+  useEffect(() => { if (window.matchMedia?.('(max-width: 639px)').matches) setPageMode(true); }, []);
+  // 302차 #862: 메일 [결제하기](?pay=1&plan=코드) → 추천 요금제를 골라 둔 채 결제 칸으로 바로
+  useEffect(() => {
+    if (!data?.quotes) return;
+    const sp = new URLSearchParams(location.search);
+    if (!sp.get('pay')) return;
+    const code = sp.get('plan');
+    if (code && data.quotes.some((q: any) => q.planCode === code && q.cycle === 'monthly')) setPlan(code);
+    setTimeout(() => document.querySelector('[data-testid="billing"]')?.scrollIntoView({ block: 'start' }), 50);
+  }, [data]);
   useEffect(() => {
     const sp = new URLSearchParams(location.search);
     if (sp.get('paid')) toast.ok('결제했습니다'); else if (sp.get('vbank')) toast.ok(`가상계좌를 만들었습니다 — ${sp.get('vbank')}`); else if (sp.get('payfail')) toast.error(`결제하지 못했습니다: ${sp.get('payfail')}`);
