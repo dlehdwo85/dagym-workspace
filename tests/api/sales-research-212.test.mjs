@@ -89,6 +89,7 @@ describe('주간 후속조사 묶음', () => {
   test('다음 주 정기 실행: 남은 곳(오산 단지)만 — 조사한 곳(확인 못함 포함)은 12주 안에 다시 안 묶음', async () => {
     await sql`update sales_research_weekly set week = week - 7`; await sql`update sales_research set week = week - 7`;
     const d = await tick();
+    assert.equal(d.salesCollectors?.skipped, 'off', `시험 서버는 수집기 정기 실행 안 함(CI 1938: KST 07시대에 7시 수집기가 실제 체육시설을 넣어 묶음 3곳) ${JSON.stringify(d.salesCollectors)}`);
     const out = d.salesResearch?.out?.default;
     assert.equal(out.items, 1, JSON.stringify(out));
     assert.deepEqual((await sql`select src_id from sales_research where task_id = ${out.taskId}`).map((x) => x.src_id), ['F4']);
