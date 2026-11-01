@@ -2,6 +2,7 @@
 // → 같은 카드에 '수정본 v3 — 반영한 요청: …' 배지·'AI 수정 1번째 · 글·시안'(187차: 횟수 제한 없음)·[수정본 v3 승인] → [이전 버전(v2)과 나란히 비교](시안·바뀐 줄) → 같은 카드에서 다시 [수정 요청] '사진을 다시 만들어 주세요' = v4(시안만)
 // → 상세에서도 나란히 비교 · 휴대폰 폭(390) 넘침 없음 (가짜 AI 구조 시험 — 실제 글·그림 품질은 운영 화면에서)
 import assert from 'node:assert/strict';
+import { seedBrandPhotos } from './brandPhotos.mjs';
 
 const say = (o) => ({ content: [{ type: 'text', text: JSON.stringify(o) }], stop_reason: 'end_turn' });
 
@@ -10,6 +11,7 @@ export async function mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   const brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: 'E2E 수정본 브랜드' })).id;
   await sql`update mkt_brands set color = '#1848D0' where id = ${brand}`;
   const [{ tenant }] = await sql`select tenant from mkt_brands where id = ${brand}`;
+  await seedBrandPhotos(sql, { tenant, ownerId: ctx.ownerId, brandName: 'E2E 수정본 브랜드' }); // 295·303차 뒤: 사진이 없으면 서버 시안이 단색 표지 → 수정 요청으로 감
   const [c] = await sql`insert into mkt_contents (tenant, title, channel, kind, scheduled_at, status, current_version, created_by, auto, produced_at, brand_id, quality)
     values (${tenant}, 'E2E 수정본 자동 글', 'instagram', 'feed', now() + interval '3 days', 'pending', 1, ${ctx.ownerId}, true, now(), ${brand}, ${sql.json({ passed: true, issues: [] })}) returning id`;
   await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${'관리비 고지서, 아직 종이로 나눠 주세요?\n입주민 앱 하나로 끝납니다.\n상담은 프로필 링크에서.'}, ${[]}, 'AI 자동 제작', ${ctx.ownerId})`;

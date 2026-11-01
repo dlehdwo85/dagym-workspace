@@ -1,12 +1,14 @@
 // #516 승인함 '시안 없음'(+#544 초안 보관 묶음·[승인 요청]): 시안 없는 승인 대기 글은 '승인할 시안' 수에서 빠지고 빨간 묶음 · 카드 빨간 띠 '시안 없음 — 글만으로는 승인할 수 없습니다' · [승인] 없음
 // · [지금 만들기] → 서버가 그려 붙임(크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧] (구조 시험 — 운영 사진 고르기·그림 품질은 실제 화면에서)
 import assert from 'node:assert/strict';
+import { seedBrandPhotos } from './brandPhotos.mjs';
 
 export async function mktVisual({ owner, ctx, sql, BASE, SHOTS }) {
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   const brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: 'E2E 시안 브랜드' })).id;
   await sql`update mkt_brands set color = '#0F766E' where id = ${brand}`;
   const [{ tenant }] = await sql`select tenant from mkt_brands where id = ${brand}`; const created_by = ctx.ownerId;
+  await seedBrandPhotos(sql, { tenant, ownerId: ctx.ownerId, brandName: 'E2E 시안 브랜드' }); // 295·303차 뒤: 사진이 없으면 [지금 만들기]가 단색 표지 → 수정 요청으로 감
   // 운영 10/24 상황: 자동 제작이 글만 만들고 이미지 제작 카드를 연 채 승인 대기
   const [ac] = await sql`insert into mkt_contents (tenant, title, channel, kind, scheduled_at, status, current_version, created_by, auto, produced_at, brand_id, quality)
     values (${tenant}, 'E2E 시안 없는 자동 글', 'instagram', 'feed', now() + interval '2 days', 'pending', 1, ${created_by}, true, now(), ${brand}, ${sql.json({ passed: true, issues: [] })}) returning id`;
