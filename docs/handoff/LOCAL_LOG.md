@@ -2135,3 +2135,15 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 300차 972fa8c PC: 홈 업무 → ?task= 오른쪽 패널(task-panel-body 544px)·크게 보기(새 탭)·뒤로가기 닫힘. 댓글 @ → @전체·김민수·김소담, 멘션 select 없음.
 - Apple 개발자(88SSK23ZVB): App ID 'DAGYM WorkOS' kr.co.dagym.workos — Apple로 로그인 켬(기본 앱 ID, 프로필 무효화 경고 확인 — CI 자동 서명이 다시 만듦). Services ID 'WorkIn Web Sign In' = dev.work-in.signin(Y5D424XZM7) — Apple로 로그인 켬, 기본 앱 ID WorkOS, 도메인 www.work-in.dev·app.work-in.dev·work-in.dev, 돌아올 주소 /api/auth/oauth/apple/callback ×3. 화면이 크롬 자동 번역이라 표시 글자는 번역됨(값은 입력값 그대로).
 - 남은 것: 대표 Keys(+) Sign in with Apple .p8 · Vercel Production APPLE_TEAM_ID·APPLE_SERVICES_ID·APPLE_KEY_ID·APPLE_PRIVATE_KEY · 재배포. 서버 알림 주소(선택)·이메일 중계(naver 발신이라 보류) 미설정.
+
+## 2026-11-01 15:23 — 애플 키 화면 다시 채움, 마케팅 운영실 현황, 앱 결제 안내 요청
+- 애플 키(#863): 키 목록에서 다시 들어가 이름 'WorkIn Apple Login'·Apple로 로그인·기본 앱 ID DAGYM WorkOS 저장·계속까지 채움(등록 직전). 기존 키 4개는 모두 APNs, Apple로 로그인 키 없음. '구성' 버튼 오류 원인: 크롬 자동 번역이 버튼 글자를 font 태그로 감싸 handleClick 이 e.target.dataset.sid 를 못 읽음 → 버튼 요소를 직접 눌러 해결. 대표: 등록하다 → 내려받기(.p8 한 번만) → 키 ID 10자리 적기.
+- Vercel(#864): 환경변수 화면 로그인 상태, APPLE_ 4개 없음. 대표 입력 뒤 로컬 재배포·/api/auth/oauth/providers 확인 예정. 코드는 APPLE_PRIVATE_KEY 의 실제 줄바꿈·\n 둘 다 받음(oauthApple.ts:16).
+- 마케팅(#865) 운영 API: 이번 주 32 = 승인 대기 23 + 미완성 9. 미완성 = 영상 8(워크인 4·하이링크 4, quality.issues '영상 시안 제작 중', 10/31 09:48~10:12 제작 뒤 멈춤, 요청 brief 모두 '앱 화면 녹화로 만듭니다 — 데모 회사 화면') + 바디랩 블로그 1(1,502자). 하이링크 video.method=screen 이라 워크인 데모 녹화로 묶임 → 클라우드 요청. 대조표 표지 4/16·훅 4/16·머리말 2/8·사진 장 절반 8/8(296차와 같음). materials 0건. 11월 크레딧 0/250. 사진 627(다짐 204·하이링크 46·바디랩 0).
+- 앱 결제 안내(#862): inApp.tsx 관리자 문의 한 줄, plans.ts 체험 d3·d1·d0 메일(글자만, /admin/usage), 402 read_only 문구 '요금제를 선택하면'(앱에도 뜸), 앱 복귀 때 세션 다시 읽기 없음(onAppActive 는 BioLock 만) → 클라우드 요청.
+
+## 2026-11-01 15:37 — #866 공동 업무 줄 정렬 깨짐 원인
+- 대표 화면(PC, 공동 업무 11건): 요청자·상태·마감·담당 칸이 줄마다 좌우로 어긋남.
+- 원인 4: CollabPeople 이 ListRow 밖 형제 칸(max-w 40%, 이름표 1~2개)이라 ListRow 폭이 줄마다 다름 · 담당 칸 lg:w-12 를 얼굴+직책+CoBadge 가 넘침 · status-cell(136)·due-cell(176) 오른쪽 맞춤에 칩 길이 제각각 · 우선순위 칩/글자 혼용.
+- 클라우드 요청(SendMessage): 고정 열 격자, 사람 한 칸 통합, 겹침 제거. 배포 뒤 로컬 PC·휴대폰 폭 확인.
+- 기준값(운영 /tasks, 1920 폭, 공동 업무 11줄): 칸 시작 x 줄 간 차이 요청자 65px · 상태 82px · 마감 79px. 고친 뒤 목표 0px.
