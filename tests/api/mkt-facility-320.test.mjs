@@ -118,3 +118,36 @@ test('⑤ 사람이 만든 열린 자료 요청에 그 시설이 있으면 AI �
   const mats = await sql`select source from mkt_material_requests where brand_id = ${P.b}`;
   assert.deepEqual(mats.map((m) => m.source), ['manual'], '사람 요청 하나뿐');
 });
+
+// 323차(로컬 11/02 ②: 하이링크 「이사 나간 다음 날, 그 세대의 헬스장 출입은…」 영상에 카페 사진 2장 — 헬스장은 제한 시설이 아니고 카페 사진은 설명이 있어 321차 규칙을 통과):
+// 사진 이름·태그·한 줄 설명·폴더·원본 영상 이름에 글(제목·본문)에 없는 다른 시설(카페·주차장·사우나·독서실…)이 있으면 그 사진은 안 씀 · 글이 그 시설을 말하면 씀 · 장면 설명(긴 글)에 지나가듯 나온 말은 안 봄
+test('⑥ 글에 없는 다른 시설 사진(카페·주차장)은 표지·4분할·영상 후보에서 뺌 · 글이 그 시설을 말하면 씀 · 장면 설명에만 나온 말은 안 봄', async () => {
+  const b3 = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '출입짐' })).id;
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b3}`, { intro: '헬스장 출입 관리', products: '얼굴 출입', feed: { ...FEED, header: '출입짐 소식', templates: ['photo_fade', 'grid4'] } });
+  const door = await libFile('출입짐 출입문 단말.jpg', { caption: '출입짐 출입문 얼굴 인식 단말', tags: ['출입'] });
+  const cafe1 = await libFile('출입짐 카페3.jpg', { caption: '카페 안 키오스크', tags: ['카페'] });
+  const cafe2 = await libFile('출입짐 매장 창가.jpg', { caption: '출입짐 매장 사진', scene: '카페 창가 자리가 보이는 매장입니다.', tags: ['매장'], }); // 장면 설명에만 '카페' — 안 뺌(이름·태그·한 줄 설명엔 없음)
+  const park = await libFile('출입짐 주차장 입구.jpg', { caption: '출입짐 주차장 차단기', tags: ['주차장'] });
+  const r = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${b3}/feed-preview`, { feed: { ...FEED, header: '출입짐 소식', templates: ['photo_fade'] } });
+  const got = r.sample.photoIds;
+  assert.ok(got.includes(door) && got.includes(cafe2), JSON.stringify(got));
+  assert.ok(!got.includes(cafe1) && !got.includes(park), `다른 시설 사진이 후보에: ${JSON.stringify(got)}`);
+  // 영상(고른 사진 포함): 카페 사진은 빠지고 '뺀 사진'에 남음 — 글이 카페를 말하면 그대로 씀
+  const t = '이사 나간 다음 날, 그 세대의 헬스장 출입은';
+  const [c] = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, kind, auto, produce_at, is_test, cross_channels, mode)
+    values ('default', ${b3}, ${t}, 'instagram', now() + make_interval(days => 20), 'pending', 1, ${ctx.ownerId}, 'reels', false, now(), false, ${[]}, 'content') returning id`;
+  await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, '이사 나간 세대의 출입은 다음 날 자동으로 막힙니다.', ${[]}, '시험', ${ctx.ownerId})`;
+  const ids = [door, cafe1, cafe2, park, ...P.gym.slice(0, 2)];
+  const e = await ctx.owner.req('POST', '/api/marketing/studio/slideshow', { contentId: c.id, photoIds: ids });
+  assert.equal(e.status, 200, JSON.stringify(e.body));
+  const [brief] = await sql`select result->'reuse' as reuse from mkt_briefs where content_id = ${c.id} order by created_at desc limit 1`;
+  assert.ok(!brief.reuse.photos.includes(cafe1) && !brief.reuse.photos.includes(park), JSON.stringify(brief.reuse));
+  assert.ok((brief.reuse.faceDropped ?? []).includes(cafe1) && (brief.reuse.faceDropped ?? []).includes(park), `뺀 사진 기록: ${JSON.stringify(brief.reuse)}`);
+  await sql`update mkt_briefs set status = 'failed' where content_id = ${c.id}`; // 합성은 이 시험 범위 밖
+  // 글이 카페를 말하면 카페 사진도 후보
+  await sql`update mkt_versions set body = '헬스장과 카페 출입을 한 번에 관리합니다.' where content_id = ${c.id}`;
+  await ctx.owner.ok('POST', '/api/marketing/studio/slideshow', { contentId: c.id, photoIds: ids });
+  const [brief2] = await sql`select result->'reuse' as reuse from mkt_briefs where content_id = ${c.id} order by created_at desc limit 1`;
+  assert.ok(brief2.reuse.photos.includes(cafe1), JSON.stringify(brief2.reuse)); assert.ok(!brief2.reuse.photos.includes(park));
+  await sql`update mkt_briefs set status = 'failed' where content_id = ${c.id}`;
+});

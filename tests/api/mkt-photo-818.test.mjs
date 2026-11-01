@@ -86,7 +86,9 @@ test('② 사진 생성을 켠 회사: 제목·본문 낱말이 하나도 안 �
   const b2 = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '관련짐' });
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b2.id}`, { intro: '동네 필라테스', products: '필라테스 10회권' });
   const park = await libFile('관련짐 주차장.jpg', await textured(7));
-  await describe(park, V({ caption: '건물 뒤 주차장', scene: '차 몇 대가 서 있는 주차장입니다.', tags: ['주차장', '차량'] }));
+  await describe(park, V({ caption: '건물 뒤 주차장', scene: '차 몇 대가 서 있는 주차장입니다.', tags: ['주차장', '차량'] })); // 323차: 글에 없는 다른 시설(주차장) 사진 — 생성을 꺼도 안 씀
+  const room = await libFile('관련짐 운동 공간.jpg', await textured(8));
+  await describe(room, V({ caption: '매트가 깔린 운동 공간', scene: '매트가 놓인 밝은 공간입니다.', tags: ['매트', '공간'] })); // 낱말은 안 맞지만 다른 시설도 아님
   await ctx.owner.ok('PUT', '/api/marketing/auto', { photoGen: true });
   const on = await slot(b2.id, '필라테스 첫 수업 안내', { day: 2, ago: 4 });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
@@ -95,7 +97,7 @@ test('② 사진 생성을 켠 회사: 제목·본문 낱말이 하나도 안 �
   await ctx.owner.ok('PUT', '/api/marketing/auto', { photoGen: false });
   const off = await slot(b2.id, '필라테스 둘째 수업 안내', { day: 3, ago: 3 });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
-  assert.equal((await cur(off)).quality.visual.photoId, park, '생성을 끈 회사는 예전처럼(모든 장 실사)');
+  assert.equal((await cur(off)).quality.visual.photoId, room, '생성을 끈 회사는 예전처럼 브랜드 실사 — 단 글에 없는 다른 시설(주차장) 사진은 빼고(323차)');
 });
 
 test('⑤ 승인 대기 시안: 바탕 사진이 흔들림이면 한 번 다시 그림(다른 선명한 사진) · 선명도를 아직 안 쟀으면 287차부터 그 자리에서 잼', async () => {

@@ -45,7 +45,7 @@ async function photosFor(c: any, text: string, picked: string[]): Promise<{ phot
   const dropped = (all: string[]) => [...new Set(out)].filter((id) => !all.includes(id)).slice(0, MAX);
   // 310차(로컬 11/01 ①: 사진 영상 장면에 얼굴 그대로): 장면 사진도 얼굴 자리를 알면 모자이크 사본, 모르면 뺌 — 고른 사진이 그래서 3장 밑으로 줄면 후보로 채움
   let ids = picked.length >= 3 ? await V.faceSafeFor(c, [...new Set(picked)], out) : [];
-  ids = await V.photoRuleIds(c, ids, out); // 321차: 고른 사진도 제목 시설·내용 모름 규칙(뺀 사진은 기록에)
+  ids = await V.photoRuleIds(c, ids, out, text); // 321차: 고른 사진도 제목 시설·내용 모름 규칙(뺀 사진은 기록에) · 323차: 글에 없는 다른 시설 사진도
   if (ids.length < 3) {
     const more = (await V.blogPhotoCandidates(c, text, MAX, { own: true })).map((p) => p.id).filter((id) => !ids.includes(id)); // 303차 #869: 이 브랜드 사진만
     ids = [...ids, ...(await V.faceSafeFor(c, more, out))];
@@ -227,7 +227,8 @@ export async function attachAuto(b: { content_id: string }, reuse: { version: nu
     const q = c.quality ?? {}; const left = ((q.issues ?? []) as string[]).filter((x) => !VISUAL_ISSUE.test(x));
     const passed = q.passed !== false || !left.length;
     const quality = { ...q, issues: left, passed, ...(q.batch ? { batch: { ...q.batch, status: passed ? 'pending' : 'changes' } } : {}) };
-    const status = c.status === 'draft' ? 'draft' : passed ? 'pending' : c.status;
+    // 323차(로컬 11/02 문제 1: 보류 글을 사진 영상 다시 의뢰하니 승인 대기로 풀림): 사람이 보류한 글(hold)은 영상이 붙어도 보류 그대로 — 풀기는 사람이
+    const status = c.status === 'draft' ? 'draft' : c.status === 'hold' ? 'hold' : passed ? 'pending' : c.status;
     await tx`update mkt_contents set status = ${status}, quality = ${tx.json(quality as never)}, updated_at = now() where id = ${c.id}`;
     await tx`update mkt_production_requests set status = 'done', brief = concat_ws(E'\n\n', brief, ${reuse.screen ? '화면 녹화 영상으로 대신함(생성 비용 0)' : '실제 사진 영상으로 대신함(생성 비용 0)'}::text), decided_at = now()
       where content_id = ${c.id} and kind = 'video' and status in ('open', 'needs_approval')`;
