@@ -36,7 +36,7 @@ export async function funnelStats(weeks = 8) {
   });
   const total = { signups: 0, invited: 0, active: 0 };
   for (const w of weeksOut) { total.signups += w.signups; total.invited += w.invited; total.active += w.active; }
-  return { generatedAt: new Date().toISOString(), steps: await stepStats(30), weeks: n, definition: { invited: '활성 사용자 2명 이상', active: '가입 7일 안 업무 5건 이상 또는 3일 이상 접속', maturing: '가입 7일이 안 지나 실사용 판정 진행 중' }, total, byWeek: weeksOut };
+  return { generatedAt: new Date().toISOString(), steps: await stepStats(30), byPage: await pageStats(30), weeks: n, definition: { invited: '활성 사용자 2명 이상', active: '가입 7일 안 업무 5건 이상 또는 3일 이상 접속', maturing: '가입 7일이 안 지나 실사용 판정 진행 중' }, total, byWeek: weeksOut };
 }
 
 export async function platformFunnel(u: SessionUser, weeks?: number) {
@@ -74,4 +74,35 @@ export async function stepStats(days = 30) {
     const prev = i ? n(SIGNUP_STEPS[i - 1][0]) : null;
     return { step: k, label, n: n(k), fromPrev: prev ? Math.round((n(k) / prev) * 100) : null };
   });
+}
+
+// ---------------- 311차 #867 소개 페이지별 방문 → 체험 가입 → 영업·마케팅 선택 ----------------
+/** 셀 수 있는 소개 페이지 = 홈 + /landing/{slug} (목록에 없는 이름은 안 받음) */
+export async function landingPageKeys(): Promise<string[]> {
+  return ['home', ...(await import('./landingPages')).LANDING_PAGES.map((p) => p.slug)];
+}
+/** 방문 1번 더하기(브라우저가 같은 페이지는 하루 1번만 보냄) — 숫자만, 개인정보 없음 */
+export async function recordLandingView(page: string) {
+  if (!(await landingPageKeys()).includes(page)) return false;
+  await db()`insert into landing_views (day, page, n) values ((now() at time zone 'Asia/Seoul')::date, ${page}, 1)
+    on conflict (day, page) do update set n = landing_views.n + 1`;
+  return true;
+}
+/** 최근 days 일: 페이지별 방문 · 그 페이지로 처음 들어와 가입한 회사 · 그중 영업·마케팅 공간을 켠 회사(내부·데모·시험 제외). 첫 방문 페이지가 없는 가입은 '(모름)' */
+export async function pageStats(days = 30) {
+  const sql = db(); const keys = await landingPageKeys();
+  const label = new Map<string, string>([['home', '홈(소개)'], ...(await import('./landingPages')).LANDING_PAGES.map((p) => [p.slug, p.keyword] as [string, string])]);
+  const views = await sql<{ page: string; n: number }[]>`select page, sum(n)::int n from landing_views where day > (now() at time zone 'Asia/Seoul')::date - ${days}::int group by page`;
+  const sign = await sql<{ page: string | null; signups: number; sales: number; marketing: number }[]>`select nullif(t.signup_utm->>'page', '') as page, count(*)::int signups,
+      count(*) filter (where 'sales' = any(coalesce(t.spaces, '{}')))::int sales, count(*) filter (where 'marketing' = any(coalesce(t.spaces, '{}')))::int marketing
+    from tenants t where t.kind = 'company' and t.id not in ('default', 'demo') and t.status <> 'deleted' and not t.is_test and t.created_at > now() - make_interval(days => ${days})
+    group by 1`;
+  const row = (page: string) => {
+    const s = sign.find((x) => x.page === page);
+    return { page, label: label.get(page) ?? page, visits: views.find((v) => v.page === page)?.n ?? 0, signups: s?.signups ?? 0, sales: s?.sales ?? 0, marketing: s?.marketing ?? 0 };
+  };
+  const out = keys.map(row);
+  const other = { page: '(모름)', label: '처음 들어온 페이지 모름', visits: 0, signups: 0, sales: 0, marketing: 0 };
+  for (const x of sign.filter((y) => !y.page || !keys.includes(y.page))) { other.signups += x.signups; other.sales += x.sales; other.marketing += x.marketing; }
+  return { days, rows: other.signups ? [...out, other] : out };
 }

@@ -42,7 +42,7 @@ export default async function LandingPage({ params }: Params) {
   const others = LANDING_PAGES.filter((x) => x.slug !== p.slug);
   return (
     <div className="min-h-screen break-keep bg-white text-ink [overflow-wrap:anywhere]" data-testid="landing-page">
-      <LandingEvents ga4={tags?.ga4} ads={tags?.googleAds} naverWa={tags?.naverWa} />
+      <LandingEvents ga4={tags?.ga4} ads={tags?.googleAds} naverWa={tags?.naverWa} page={p.slug} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
       <LandingHeader />
       <section className="bg-slate-50 py-12 sm:py-16">

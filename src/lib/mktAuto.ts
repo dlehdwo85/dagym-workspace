@@ -1209,6 +1209,11 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
       const fx = await V.fixTail({ ...c, quality: { ...c.quality, ...(pages ? { pages } : {}) } }, { body, media_ids: media }, new Set([...(drawn.photoId ? [drawn.photoId] : []), ...drawn.photoIds]), { topic: photoAsks(comment).includes('mismatch') });
       if (fx) { media = [media[0], ...fx.ids]; if (fx.body) body = fx.body; if (fx.pages) pages = fx.pages; tailNote = ` · ${V.tailWhy(fx.why, isBlog(c) ? '본문' : c.kind === 'story' ? '프레임' : '카드')} 바꿈`; visual = { ...visual, ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}) }; }
     }
+    // 310차 보완: 장을 새로 안 그린 수정본도 예전 검정 행동 장은 흐린 사진 바탕으로(같은 글·같은 사진, AI 비용 0)
+    if (pagedKind(c) && pages?.length && media.length - 1 === pages.length) {
+      const a = await V.redrawActionPages(c, pages, media.slice(1)).catch(() => null);
+      if (a?.n) { media = [media[0], ...a.tail]; pages = a.pages; visual = { ...visual, bodyIds: media.slice(1) }; tailNote += ` · 행동 장 ${a.n}장 흐린 사진 바탕으로`; }
+    }
   }
   // 요청 C §3-3: 사진 수 규칙(자동 제작 피드 3~5장·스토리 3~5프레임·블로그 표지+3장, 사람 글 블로그 2장) — 못 미치면 승인함 대신 수정 요청
   q.issues = q.issues.filter((x) => !M.MEDIA_RULES.includes(x));

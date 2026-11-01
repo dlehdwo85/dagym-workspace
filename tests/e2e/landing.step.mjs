@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 export async function landing({ browser, owner, BASE, SHOTS }) {
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR' });
   const p = await ctx.newPage();
+  const views = []; p.on('request', (r) => { if (r.url().includes('/api/public/landing-view')) views.push(r.postDataJSON()?.page); }); // 311차 #867 페이지별 방문
   await p.goto(`${BASE}/?utm_source=naver&utm_medium=cpc&utm_campaign=launch`);
   assert.equal(new URL(p.url()).pathname, '/', '주소는 / 그대로(rewrite)');
   assert.equal(await p.getByTestId('landing-title').innerText(), '업무도, 영업도, 마케팅도 한 화면에서');
@@ -20,6 +21,11 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   assert.equal(await p.getByTestId('landing-feature-links').getByRole('link').count(), 5, '기능별 소개 링크 5개(#867 마케팅 자동화·입찰 정보 자동 수집)');
   assert.equal(await p.locator('meta[name="robots"]').getAttribute('content'), 'index, follow');
   assert.equal(await p.evaluate(() => JSON.parse(localStorage.getItem('wos_utm') ?? '{}').source), 'naver', 'UTM 기억');
+  // 311차 #867: 처음 들어온 소개 페이지(home)도 기억 · 방문 1번 보냄 · 같은 날 다시 와도 또 안 보냄
+  await p.waitForFunction(() => JSON.parse(localStorage.getItem('wos_utm') ?? '{}').page === 'home');
+  assert.deepEqual(views, ['home'], '홈 방문 1번');
+  await p.reload(); await p.getByTestId('landing-title').waitFor(); await p.waitForTimeout(500);
+  assert.deepEqual(views, ['home'], '같은 날 다시 와도 1번');
   const fired = await p.evaluate(() => new Promise((r) => { document.addEventListener('wos:landing', (e) => r(e.detail.kind), { once: true }); document.querySelector('[data-testid="landing-app"]').click(); }));
   assert.equal(fired, 'app', '앱 다운로드 클릭 이벤트');
   await p.getByTestId('landing-stores').getByText(/Google Play/).waitFor();

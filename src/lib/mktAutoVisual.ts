@@ -390,6 +390,20 @@ async function brandDraw(c: Content) {
 const safeTitle = (c: Pick<Content, 'title'>) => c.title.replace(/^\s*\[시험\]\s*/, '').replace(/[\\/:*?"<>|\n]+/g, ' ').trim().slice(0, 50) || '자동 시안';
 /** 171차(로컬 10/26 평가 ⓑ '본문 장이 전부 브랜드색 단색+글자'): 실사를 깔 장 — 172차 절반까지 →
  *  188차(대표 #695 '되도록 모든 화면에 실사'): 행동 장(카드뉴스 cta·스토리 마지막 행동 프레임 — 글자만 장)을 뺀 모든 장. 사진이 모자라면 있는 만큼(나머지는 색 바탕) */
+/** 310차 보완(로컬 11/01 운영: [다시 그리기]는 표지만 새로 그려 행동 장 '저장해 두세요'가 검정 단색 그대로): 사진 없는 행동 장(카드뉴스 cta·스토리 마지막 프레임)만
+ *  같은 글·같은 사진으로 다시 그려 흐린 사진 바탕을 깖(AI 비용 0). 흐릴 사진이 하나도 없으면(표지·장 모두 사진 없음) 그대로 — 그런 글은 장 수 규칙으로 이미 보류 */
+export async function redrawActionPages(c: Content & { quality?: any }, pages: CardPage[], tail: string[], actor?: SessionUser | null): Promise<{ tail: string[]; pages: CardPage[]; n: number }> {
+  const none = { tail, pages, n: 0 };
+  if (!pages.length || pages.length !== tail.length) return none;
+  const story = c.kind === 'story';
+  const idx = pages.map((p, k) => (!p.photoId && !p.back && (p.role === 'cta' || (story && k === pages.length - 1)) ? k : -1)).filter((k) => k >= 0);
+  if (!idx.length || !(pages.some((p) => p.photoId) || c.quality?.visual?.photoId)) return none;
+  const copy: CardPage[] = pages.map((p) => ({ ...p }));
+  const ids = await drawPages(c, copy, { actor, keep: true, only: new Set(idx) });
+  const done = idx.filter((k) => copy[k].back && ids[k]);
+  if (!done.length) return none;
+  return { tail: tail.map((id, k) => (done.includes(k) ? ids[k] : id)), pages: copy.map((p, k) => (done.includes(k) ? p : pages[k])), n: done.length };
+}
 /** 303차 #869: drawPages 가 사진이 없어 뺀 장 수(그 pages 배열 기준) — 판 메모에 '사진 없는 장 n장 뺌' */
 const droppedPages = new WeakMap<CardPage[], number>();
 export const droppedOf = (pages: CardPage[] | null | undefined) => (pages ? droppedPages.get(pages) ?? 0 : 0);
@@ -411,14 +425,14 @@ export const photoNote = (pages: CardPage[] | null | undefined) => {
 /** 표지 뒤 장들을 그려 자료실(마케팅/자동 시안)에 저장 → 파일 id(표지 다음 순서). 피드 1080×1350 · 스토리 1080×1920(위·아래 안전 영역 — 아래 답장 칸은 비움)
  *  171차 ⓑ: photoSlots 장에는 그 장 글과 맞는 실사(바탕 규칙 — 글자 없는 실사, 누운 사람·뒷모습·어두움 제외)를 깔고 글은 흰색(아래 그늘)·제목은 브랜드 색 상자.
  *  표지 사진(opts.exclude)·같은 브랜드 가까운 글(nearPosts)의 표지·장 사진은 안 씀. 쓴 사진은 page.photoId 에 적어 quality.pages 로 저장됨(다음 글에서 빼는 데 씀) */
-export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: SessionUser | null; exclude?: Set<string>; keep?: boolean; refill?: boolean } = {}): Promise<string[]> {
+export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: SessionUser | null; exclude?: Set<string>; keep?: boolean; refill?: boolean; only?: Set<number> } = {}): Promise<string[]> {
   if (!pages.length) return [];
   const { brand, logo, font, color, D } = await brandDraw(c);
   const story = c.kind === 'story'; const H = story ? 1920 : 1350;
   const actor = opts.actor ?? (await actorOf(c));
   if (!actor) throw badRequest('자료실에 저장할 사람이 없습니다(활성 계정 없음)');
   const { saveGeneratedFile } = await import('./library'); const { libBytes } = await import('./mktVideo');
-  for (const p of pages) { delete p.fix; if (!opts.keep && !opts.refill) { delete p.photoId; delete p.rel; delete p.pool; delete p.scene; delete p.gen; delete p.ref; } } // 다시 그릴 때 예전 장의 사진 표시는 지우고 새로 고름 — keep(189차 생성 사진 채우기)은 장마다 정해 둔 사진 그대로
+  for (const [k, p] of pages.entries()) { if (opts.only && !opts.only.has(k)) continue; delete p.fix; if (!opts.keep && !opts.refill) { delete p.photoId; delete p.rel; delete p.pool; delete p.scene; delete p.gen; delete p.ref; } } // 다시 그릴 때 예전 장의 사진 표시는 지우고 새로 고름 — keep(189차 생성 사진 채우기)은 장마다 정해 둔 사진 그대로
   // 287차 refill = 사진이 남은 장은 그대로 두고 사진을 뺀 장(흔들린 사진)만 새로 고름 — 남은 장 사진은 다시 안 씀
   const slots = photoSlots(pages, c.kind === 'story').filter((k) => !opts.refill || !pages[k].photoId);
   const { enhancePhoto, fixText } = await import('./mktPhotoFix');
@@ -464,6 +478,7 @@ export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: S
   const backId = pages.some(actionAt) ? (pages.find((p) => p.photoId && !p.gen)?.photoId ?? pages.find((p) => p.photoId)?.photoId ?? (c as { quality?: { visual?: { photoId?: string | null } } | null }).quality?.visual?.photoId ?? null) : null;
   const backBuf = backId ? (await libBytes(c.tenant, backId, /^image\//).catch(() => null))?.data ?? null : null;
   for (const [k, p] of pages.entries()) {
+    if (opts.only && !opts.only.has(k)) { ids.push(''); continue; } // 310차 보완: 고른 장만 다시 그림(나머지 자리는 빈 칸 — 부르는 쪽이 예전 파일 그대로)
     const photo = p.photoId ? await libBytes(c.tenant, p.photoId, /^image\//).catch(() => null) : null;
     if (p.photoId && !photo) { delete p.photoId; delete p.rel; delete p.scene; delete p.gen; delete p.ref; } // 파일을 못 읽으면 색 바탕
     const fx = photo ? await enhancePhoto(photo.data, { w: 1080, h: H }) : null; // 188차: 중요 부분 기준 자르기 + 밝기·대비·확대(한 것만 p.fix)
@@ -983,7 +998,10 @@ export async function makeVisualNow(u: SessionUser, id: string, opts: { redraw?:
   const d = await drawAutoVisual(c, v?.body ?? '', { actor: u, exclude, brandOnly: !!opts.redraw, notTemplate: opts.redraw ? vis?.template ?? null : null, bodyIds });
   // 요청 C: 처음 그릴 때 카드뉴스 장·도표형 카드도 함께 · 다시 그리기는 표지만(장은 그대로) — 표지 1장뿐이던 예전 글은 다시 그릴 때 장도 붙임
   const after = opts.redraw && (v?.media_ids?.length ?? 0) > 1 ? { ids: [] as string[], note: '', pages: null } : await pagesAfterCover(c, v?.body ?? '', opts.redraw ? 1 : 1 + d.bodyIds.length, { actor: u, exclude: new Set([...(d.photoId ? [d.photoId] : []), ...d.photoIds]) }); // 188차: 장에 표지 사진을 다시 쓰지 않게
-  const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.templateLabel ? ` · 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}${d.bodyTitle && !opts.redraw ? ` · 본문 사진: ${d.bodyTitle}` : ''}${after.note}`, u.id, d.photoId, !!opts.redraw, opts.redraw ? after.ids : [...d.bodyIds, ...after.ids], { template: d.template, photoIds: d.photoIds, pages: after.pages, photoFix: d.photoFix, scene: d.scene, gen: d.gen, plain: d.plain });
+  // 310차 보완: 다시 그리기도 행동 장(사진 없는 마지막 장)은 흐린 사진 바탕으로 — 나머지 장은 그대로
+  const act = opts.redraw && (v?.media_ids?.length ?? 0) > 1 && Array.isArray(c.quality?.pages) ? await redrawActionPages(c, c.quality.pages as CardPage[], (v?.media_ids ?? []).slice(1).map(String), u).catch(() => null) : null;
+  if (act?.n) after.note += ` · 행동 장 ${act.n}장 흐린 사진 바탕으로`;
+  const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.templateLabel ? ` · 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}${d.bodyTitle && !opts.redraw ? ` · 본문 사진: ${d.bodyTitle}` : ''}${after.note}`, u.id, d.photoId, !!opts.redraw, opts.redraw ? (act?.n ? act.tail : after.ids) : [...d.bodyIds, ...after.ids], { template: d.template, photoIds: d.photoIds, pages: act?.n ? act.pages : after.pages, photoFix: d.photoFix, scene: d.scene, gen: d.gen, plain: d.plain, ...(act?.n ? { tail: true } : {}) });
   if (!r) throw badRequest('그사이 콘텐츠가 바뀌었습니다 — 새로 고쳐 다시');
   await audit(sql, u.id, opts.redraw ? 'mkt.visual_redraw' : 'mkt.visual_now', 'mkt_content', id, { version: r.version, photoId: d.photoId }).catch(() => {});
   return { version: r.version, status: r.status, fileId: d.fileId, photo: d.photoTitle, template: d.templateLabel };
