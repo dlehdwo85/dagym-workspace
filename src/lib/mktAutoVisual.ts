@@ -185,6 +185,8 @@ async function faceSafeIds(tenant: string, ids: string[], actor: SessionUser): P
   const out: string[] = [];
   for (const id of ids) {
     const r = rows.find((x) => x.id === id); const faces = r ? P.facesToHide(r.vision) : [];
+    // 303차 #869(다짐 블로그 PT 장면·하이링크 안내 데스크 사진에 얼굴 그대로): 얼굴이 보인다는데 자리를 모르면 가릴 수 없으니 본문에서 뺌
+    if (r && !faces.length && visionOk(r.vision) && (r.vision as { faces?: boolean }).faces === true) continue;
     if (!r?.storage_key || !faces.length) { out.push(id); continue; }
     const [have] = await sql<{ id: string }[]>`select id::text from library_files where tenant = ${tenant} and source = 'mosaic' and meta->>'of' = ${id} and deleted_at is null and upload_status = 'ready' limit 1`;
     if (have) { out.push(have.id); continue; }
@@ -194,17 +196,20 @@ async function faceSafeIds(tenant: string, ids: string[], actor: SessionUser): P
       const f = await saveGeneratedFile(actor, { fileName: `${r.file_name.replace(/\.[a-z0-9]{2,5}$/i, '')}_얼굴가림.jpg`, mime: 'image/jpeg', data, title: `${r.title} — 얼굴 가림`, folder: '마케팅/자동 시안',
         tags: ['얼굴 가림', '자동 시안'], description: '얼굴 자리를 모자이크한 사본(원본은 그대로)', source: 'mosaic', space: 'marketing', meta: { of: id } } as never);
       out.push(f.id);
-    } catch { out.push(id); } // 사본을 못 만들면 예전처럼 원본(실패로 글을 막지 않음)
+    } catch { /* 303차 #869: 사본을 못 만들면 얼굴이 그대로인 원본 대신 뺌 */ }
   }
   return out;
 }
-export async function blogPhotoCandidates(c: Content, text: string, n = 20): Promise<BlogPhoto[]> {
+export async function blogPhotoCandidates(c: Content, text: string, n = 20, o: { own?: boolean } = {}): Promise<BlogPhoto[]> {
   const [b] = c.brand_id ? await db()<{ name: string }[]>`select name from mkt_brands where id = ${c.brand_id}` : [];
   const brand = (b?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
   const others = otherBrandNames(await otherBrands(c.tenant, c.brand_id, { site: false })).filter((x) => x !== brand);
   const one = (x: string) => x.replace(/\s+/g, ' ').trim();
   const near = await nearUsed(c).catch(() => new Set<string>()); // 188차: 가까운 글(같은 브랜드 12개·다른 브랜드 앞뒤 2일)에 쓴 사진은 후보에서 뺌
-  return (await rankPhotos(c, brand, others, text, near, 'body')).slice(0, n).map((r) => {
+  // 303차 #869(바디랩 브랜드 사진 0장인데 다른 현장 사진으로 영상): own = 이 브랜드 이름이 든 사진만(영상·사진 영상)
+  //  브랜드가 둘 이상인 회사만(브랜드 하나면 이름 없는 사진도 그 브랜드 사진)
+  const multi = o.own && !!brand ? (await db()<{ n: number }[]>`select count(*)::int n from mkt_brands where tenant = ${c.tenant}`)[0].n >= 2 : false;
+  return (await rankPhotos(c, brand, others, text, near, 'body')).filter((r) => !multi || r.brand).slice(0, n).map((r) => {
     const v = visionOk(r.vision) ? r.vision : null;
     return { id: r.id, title: r.title, caption: cutAt(one(v?.caption || r.description || r.title.replace(/\.[a-z0-9]{2,5}$/i, '')), 60), scene: v ? cutAt(one(v.scene.split(/(?<=[.!?])\s/)[0] ?? ''), 80) : '' };
   });
@@ -373,6 +378,9 @@ async function brandDraw(c: Content) {
 const safeTitle = (c: Pick<Content, 'title'>) => c.title.replace(/^\s*\[시험\]\s*/, '').replace(/[\\/:*?"<>|\n]+/g, ' ').trim().slice(0, 50) || '자동 시안';
 /** 171차(로컬 10/26 평가 ⓑ '본문 장이 전부 브랜드색 단색+글자'): 실사를 깔 장 — 172차 절반까지 →
  *  188차(대표 #695 '되도록 모든 화면에 실사'): 행동 장(카드뉴스 cta·스토리 마지막 행동 프레임 — 글자만 장)을 뺀 모든 장. 사진이 모자라면 있는 만큼(나머지는 색 바탕) */
+/** 303차 #869: drawPages 가 사진이 없어 뺀 장 수(그 pages 배열 기준) — 판 메모에 '사진 없는 장 n장 뺌' */
+const droppedPages = new WeakMap<CardPage[], number>();
+export const droppedOf = (pages: CardPage[] | null | undefined) => (pages ? droppedPages.get(pages) ?? 0 : 0);
 export function photoSlots(pages: CardPage[], story = false): number[] {
   // 181차(로컬 10/26 14:00 ⓐ): 스토리 마지막 프레임은 행동 프레임(원고 규칙 = 문의·저장·프로필) — 카드뉴스 cta 장처럼 사진을 안 깖
   return pages.map((p, k) => (p.role === 'cta' || (story && k === pages.length - 1) ? -1 : k)).filter((k) => k >= 0);
@@ -384,8 +392,9 @@ export const photoNote = (pages: CardPage[] | null | undefined) => {
   const pools = ps.map((p) => p.pool).filter((n): n is number => typeof n === 'number');
   // 188차: 영상 장면 사진·보정(밝기·대비·확대) 장 수도 — 0 이면 안 붙임
   const scenes = ps.filter((p) => p.photoId && p.scene).length; const fixed = ps.filter((p) => p.photoId && p.fix?.length).length;
-  if (!k && !gens && !pools.length) return '';
-  return `(실사 ${k}장${gens ? ` · 생성 ${gens}장` : ''}${pools.length ? ` · 후보 ${Math.max(...pools)}장` : ''}${weak ? ` · 관련 약함 ${weak}장` : ''}${scenes ? ` · 영상 장면 ${scenes}장` : ''}${fixed ? ` · 보정 ${fixed}장` : ''})`;
+  const dropped = droppedOf(ps);
+  if (!k && !gens && !pools.length && !dropped) return '';
+  return `(실사 ${k}장${gens ? ` · 생성 ${gens}장` : ''}${dropped ? ` · 사진 없는 장 ${dropped}장 뺌` : ''}${pools.length ? ` · 후보 ${Math.max(...pools)}장` : ''}${weak ? ` · 관련 약함 ${weak}장` : ''}${scenes ? ` · 영상 장면 ${scenes}장` : ''}${fixed ? ` · 보정 ${fixed}장` : ''})`;
 };
 /** 표지 뒤 장들을 그려 자료실(마케팅/자동 시안)에 저장 → 파일 id(표지 다음 순서). 피드 1080×1350 · 스토리 1080×1920(위·아래 안전 영역 — 아래 답장 칸은 비움)
  *  171차 ⓑ: photoSlots 장에는 그 장 글과 맞는 실사(바탕 규칙 — 글자 없는 실사, 누운 사람·뒷모습·어두움 제외)를 깔고 글은 흰색(아래 그늘)·제목은 브랜드 색 상자.
@@ -422,6 +431,17 @@ export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: S
     };
     for (const k of [...slots].sort((a, b) => best(b) - best(a) || a - b)) if (best(k) > 0) take(k, true);
     for (const k of slots) if (!pages[k].photoId) take(k, false);
+    // 303차 #869(대표가 '단색 배경 글자 장'을 콕 집어 반려): 사진을 못 찾은 장은 단색 바탕으로 채우지 않고 뺌 + 이 브랜드에 자료 요청 카드 —
+    //  회사 설정 plain_fill(예전 방식)이거나 '실사 참고 생성'(photo_gen, 빈 장을 생성 사진으로 채움)을 켠 회사는 그대로 둠
+    const A = await import('./mktAuto'); const st = await A.settingsOf(c.tenant);
+    const empty = slots.filter((k) => !pages[k].photoId);
+    if (empty.length && !st.plain_fill && !st.photo_gen) {
+      const drop = new Set(empty);
+      const kept = pages.filter((_, k) => !drop.has(k));
+      pages.splice(0, pages.length, ...kept);
+      droppedPages.set(pages, empty.length);
+      await (await import('./mktMaterials')).needMaterial(c as never, `${story ? '스토리 프레임' : '카드뉴스 장'}에 깔 이 브랜드 실사가 모자라 그 장을 뺐습니다`).catch(() => null);
+    }
   }
   const safe = safeTitle(c); const n = pages.length + 1; const ids: string[] = [];
   for (const [k, p] of pages.entries()) {
@@ -467,6 +487,7 @@ export async function drawInfoCards(c: Content, body: string, need: number, opts
 async function pagesAfterCover(c: Content & { quality?: any }, body: string, have: number, opts: { actor?: SessionUser | null; exclude?: Set<string> } = {}): Promise<{ ids: string[]; note: string; pages: CardPage[] | null }> {
   if (!c.auto) return { ids: [], note: '', pages: null };
   if (c.kind === 'feed' || c.kind === 'story') { const pages = pagesOf(c.kind, c.quality?.pages ?? null, body, await contactOf(c)); const ids = await drawPages(c, pages, opts); return { ids, note: ` · ${c.kind === 'story' ? '프레임' : '카드'} ${ids.length + 1}장${photoNote(pages)}`, pages }; }
+  if (c.channel === 'blog' && have < BLOG_AUTO_MEDIA && !(await (await import('./mktAuto')).settingsOf(c.tenant)).plain_fill) { await (await import('./mktMaterials')).needMaterial(c as never, '블로그 본문에 쓸 이 브랜드 실사가 모자랍니다(도표형 카드로 채우지 않음)').catch(() => null); return { ids: [], note: ' · 본문 실사가 모자라 자료 요청', pages: null }; } // 303차 #869: 도표형 카드로 채우지 않음
   if (c.channel === 'blog' && have < BLOG_AUTO_MEDIA) { const ids = await drawInfoCards(c, body, BLOG_AUTO_MEDIA - have, opts); return { ids, note: ids.length ? ` · 도표형 카드 ${ids.length}장` : '', pages: null }; }
   return { ids: [], note: '', pages: null };
 }

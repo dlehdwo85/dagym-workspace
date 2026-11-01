@@ -92,6 +92,21 @@ export function Automation() {
     const d = done[id];
     try { await api(`/api/marketing/auto/requests/${id}`, { method: 'PATCH', body: { action, ...(topics[id] ? { topic: topics[id] } : {}), ...(action === 'done' && d ? { credits: d.credits === '' ? undefined : Number(d.credits), mediaIds: d.media.map((m) => m.id) } : {}) } }); reload(); } catch (e: any) { toast.error(e.message); }
   }
+  // 303차 #874(대표 11/01 '승인 대기 게시물 전부 없애고 다시 만들어서'): 기간(기본 오늘부터 7일) 자동 시안 → 휴지통 + 같은 자리 새 칸 → 지금 규칙으로 다시 제작
+  async function remake() {
+    const kst = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
+    const from = prompt('다시 만들 기간 시작(YYYY-MM-DD)', kst(new Date())); if (!from) return;
+    const to = prompt('다시 만들 기간 끝(YYYY-MM-DD)', kst(new Date(Date.now() + 7 * 864e5))); if (!to) return;
+    setBusy(true);
+    try {
+      const pre = await api<{ count: number }>('/api/marketing/auto/remake', { body: { from, to, dryRun: true } });
+      if (!pre.count) { toast.info('그 기간에 다시 만들 자동 시안이 없습니다'); return; }
+      if (!confirm(`${from} ~ ${to} 자동 시안 ${pre.count}건(승인 대기·수정 요청·묶음 초안)을 휴지통으로 옮기고 같은 자리에 지금 규칙으로 다시 만듭니다. 게시됐거나 승인된 글·직접 만든 글은 그대로입니다. 계속할까요?`)) return;
+      const r = await api<{ trashed: number; made: number }>('/api/marketing/auto/remake', { body: { from, to } });
+      toast.ok(`휴지통 ${r.trashed}건 · 새 칸 ${r.made}건 — [지금 한 번 돌리기]나 정기 실행이 차례로 만듭니다`);
+      reload();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
   async function runNow() { setBusy(true); try { const r = await api<any>('/api/marketing/auto/run', { body: {} }); const bad = r.produced.filter((p: any) => p.error); const ask = r.produced.filter((p: any) => p.needsTopic).length;
     toast.ok(`칸 ${r.planned} · 제작 ${r.produced.length - bad.length - ask}${ask ? ` · 주제 필요 ${ask}` : ''}${r.left ? ` · 남은 ${r.left}건은 다음 실행에` : ''}${r.busy ? ' · 다른 제작이 진행 중이라 이번엔 건너뜀' : ''} · 알림 ${r.reminded} · 정리 ${r.expired}`); if (bad.length) toast.error(`제작 실패 ${bad.length}건: ${bad[0].error}`); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
   const num = (v: string) => (v === '' ? null : Number(v));
@@ -100,7 +115,8 @@ export function Automation() {
       <div className="flex gap-1 border-b border-line" role="tablist">{([['rules', '자동 제작'], ['studio', '제작의뢰실'], ['cards', '카드뉴스']] as [string, string][]).map(([k, l]) => <Link key={k} href={k === 'rules' ? '/s/marketing/automation' : `/s/marketing/automation?tab=${k}`} role="tab" aria-selected={tab === k} className={cx('px-3 py-1.5 text-sm', tab === k ? 'border-b-2 font-semibold' : 'text-ink-2')} style={tab === k ? { borderColor: C, color: C } : undefined} data-testid={`auto-tab-${k}`}>{l}</Link>)}</div>
       {tab === 'cards' ? <><h1 className="text-xl font-bold" style={{ color: C }}>카드뉴스</h1><CarouselStudio /></> : tab === 'studio' ? <><h1 className="text-xl font-bold" style={{ color: C }}>제작의뢰실</h1><Studio /></> : <>
       <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>자동 제작</h1>
-        {ed && <Button size="sm" variant="secondary" className="ml-auto" onClick={runNow} disabled={busy} data-testid="auto-run">{busy ? '도는 중…' : '지금 한 번 돌리기'}</Button>}</div>
+        {ed && <Button size="sm" variant="secondary" className="ml-auto" onClick={remake} disabled={busy} data-testid="auto-remake" title="기간 안 승인 대기·수정 요청 자동 시안을 휴지통으로 옮기고 같은 자리에 지금 규칙으로 다시 만듭니다">시안 다시 만들기</Button>}
+        {ed && <Button size="sm" variant="secondary" onClick={runNow} disabled={busy} data-testid="auto-run">{busy ? '도는 중…' : '지금 한 번 돌리기'}</Button>}</div>
       <p className="text-xs text-ink-2" data-testid="auto-ai-note">AI 원고는 회사 월 AI 예산(이번 달 {data.usage.companyAi ? `${data.usage.companyAi.usedKrw.toLocaleString('ko-KR')}원 / ${data.usage.companyAi.limitKrw === null ? '무제한' : `${data.usage.companyAi.limitKrw.toLocaleString('ko-KR')}원`}` : `$${data.usage.companyAiUsd} / $${data.usage.companyAiLimitUsd}`})과 마케팅 AI 월 한도 중 먼저 닿는 쪽에서 멈추고(예산은 {data.usage.companyAi?.resetLabel ?? '다음 달 1일'}에 다시 채워짐), 받는 사람에게 하루 한 번 알립니다. 영상 제작은 마케팅 크레딧으로 따로 셉니다. 회사 전체 AI 사용은 <a className="underline" href="/admin/usage">관리 → {inApp ? '사용량' : '사용량·요금제'}</a>(기능별 “마케팅”).</p>
       {data.writeModel && <p className="text-xs text-ink-2" data-testid="auto-write-model">글 모델: <b className="text-ink">{data.writeModel.label}</b>{data.writeModel.model ? ` (${data.writeModel.model}) · 원고 1건 약 ${data.writeModel.perDraftKrw?.toLocaleString('ko-KR')}원` : ''} — {data.writeModel.source === 'company' ? '운영사가 이 회사에 정한 값' : data.writeModel.source === 'plan' ? '마케팅 요금제 기본값' : '기본값'} · 원고·수정본에 쓰고, 품질 검사는 빠른 모델로 합니다.
         {data.writeModel.blog && <span className="block" data-testid="auto-write-model-blog">네이버 블로그(1,800~2,500자·사진 8~15장 형식): <b className="text-ink">{data.writeModel.blog.label}</b>{data.writeModel.blog.model ? ` (${data.writeModel.blog.model}) · 1건 약 ${data.writeModel.blog.perDraftKrw?.toLocaleString('ko-KR')}원` : ''}{data.writeModel.blog.upgraded ? (data.writeModel.blog.extraKrw !== undefined ? ` — 빠른 모델로 쓸 때보다 1건 약 ${data.writeModel.blog.extraKrw.toLocaleString('ko-KR')}원 더(블로그만 상위 모델)` : ' — 블로그만 상위 모델') : ''}</span>}</p>}

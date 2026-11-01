@@ -26,7 +26,7 @@ export function slideLines(body: string, n: number): string[] {
 }
 /** 쓸 사진: 고른 것(3장 넘으면) 아니면 이 글에 맞는 자료실 실사 — 이 회사·준비된·기밀 아닌 사진만, 최대 6장 */
 async function photosFor(c: any, text: string, picked: string[]) {
-  const ids = picked.length >= 3 ? [...new Set(picked)] : (await (await import('./mktAutoVisual')).blogPhotoCandidates(c, text, MAX)).map((p) => p.id);
+  const ids = picked.length >= 3 ? [...new Set(picked)] : (await (await import('./mktAutoVisual')).blogPhotoCandidates(c, text, MAX, { own: true })).map((p) => p.id); // 303차 #869: 이 브랜드 사진만
   if (!ids.length) return [];
   const rows = await db()<{ id: string; storage_key: string }[]>`select id, storage_key from library_files where tenant = ${c.tenant} and id = any(${ids}::uuid[]) and deleted_at is null
     and upload_status = 'ready' and mime_type like 'image/%' and coalesce(security, 'internal') <> 'confidential' and storage_key is not null`;
@@ -131,7 +131,10 @@ export async function autoSlideshow(c: any, version: number, body: string, picke
   if (!VIDEO_KINDS.includes(c.kind ?? '')) return { photos: 0, skipped: '영상 글 아님' };
   if (await busyOf(c.id)) return { photos: 0, skipped: '이미 만드는 중' };
   const photos = await photosFor(c, `${c.title}\n${body}`, picked);
-  if (photos.length < 3) return { photos: photos.length, skipped: `쓸 실제 사진 ${photos.length}장(3장 넘게 필요)` };
+  if (photos.length < 3) { // 303차 #869: 브랜드 사진이 모자라면 영상 보류 + 자료 요청(사진이 오면 정기 실행이 다시 만듦)
+    await (await import('./mktMaterials')).needMaterial(c, '영상에 쓸 이 브랜드 사진이 모자라 영상을 보류했습니다').catch(() => null);
+    return { photos: photos.length, skipped: `쓸 이 브랜드 실제 사진 ${photos.length}장(3장 넘게 필요) — 자료 요청` };
+  }
   const out = await startBrief(c, body, photos, c.created_by ?? null, { auto: true, version });
   return { briefId: out.briefId, photos: out.photos };
 }

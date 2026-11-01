@@ -42,7 +42,7 @@ const meta = async (fileId) => (await sql`select meta, folder from library_files
 
 before(async () => {
   await resetDb(); await ensureTls(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
-  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: true }); // 303차 #869: 이 시험은 예전 방식(사진이 모자라면 단색 장·도표형 카드로 채움)을 봄 — 새 방식은 mkt-rules-869
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', quietStart: 0, quietEnd: 0, leadDays: 3 });
   P.brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '카드브랜드' })).id;

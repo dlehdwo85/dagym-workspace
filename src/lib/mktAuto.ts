@@ -63,12 +63,13 @@ export type MktSettings = { plan?: PlanRow | null; plan_code: keyof typeof MKT_P
   /** 대표 10/25 22:20(15-16): 전면 디벨롭 동안 자동 생성(정기 칸·제작·밤사이·주간 계획·운영 제안) 멈춤 — 203 마이그레이션으로 규칙 있는 회사는 켬 */ auto_pause: boolean;
   /** 요청 C §3-1(대표 10/25 22:20): 릴스·쇼츠·생성 영상 자동 제작 중단(영상 제작 방식 결정 #580 전까지) — 정기 칸·제작에서 영상 종류를 건너뜀, 사람이 누르는 제작은 그대로 */ video_pause: boolean;
   /** 189차(대표 #685): 사진이 모자라면 실사 참고로 생성(크레딧 사용) — 기본 꺼짐, 관리자가 켬(209 마이그레이션) */ photo_gen: boolean;
+  /** 303차 #869: 사진이 모자랄 때 단색 바탕 장·블로그 도표형 카드로 채움(예전 방식) — 기본 꺼짐(233 마이그레이션): 사진 없는 장은 빼고 자료 요청 */ plain_fill: boolean;
   /** 267차(대표 #795 '두서없이 올리지 말고 수정·보완 시간까지 고려해서'): 승인 올리는 방식 — weekly = 주 단위 묶음(batch_dow 요일 batch_hour 시에 다음 주 월~일 게시분을 한 번에) ·
    *  lead = 게시 lead_days 일 전 lead_hour 시에 한 건씩(예전 방식). 224 마이그레이션으로 쓰던 회사는 weekly */ approval_mode: 'weekly' | 'lead'; batch_dow: number; batch_hour: number;
   /** 270차 #809: 우리 회사(내부) 이미지·영상 생성 월 실제 비용 한도(원) — 값이 있으면 요금제 숫자 대신 이것으로만 막음(null = 요금제 숫자) */ cost_cap_krw: number | null; internal?: boolean;
   /** 267차: 승인 마감 = 게시 deadline_days 일 전 approval_hour:00(0 = 게시 당일 — 예전 방식) */ deadline_days: number };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
-  remind_hours: 6, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false, write_tier: null, auto_pause: false, video_pause: true, photo_gen: false,
+  remind_hours: 6, plain_fill: false, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false, write_tier: null, auto_pause: false, video_pause: true, photo_gen: false,
   approval_mode: 'lead', batch_dow: 4, batch_hour: 10, deadline_days: 0, cost_cap_krw: null };
 /** 270차 #809: 우리 회사(내부, 'default') — plans.ts 와 같은 기준 */
 export const INTERNAL_TENANT = 'default';
@@ -319,6 +320,9 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
   const blogPhotos = blog && !o.keep ? await (await import('./mktAutoVisual')).blogPhotoCandidates(c, `${c.title} ${topic}`).catch(() => [] as import('./mktAutoVisual').BlogPhoto[]) : [];
   const photos = blog ? [] : await (await import('./mktPhotos')).photoLines(c.tenant, brandName(brand), others, 8, await (await import('./mktAutoVisual')).photoRule(c.tenant, c.brand_id));
   const Q = await import('./mktQuality'); const facts = Q.factsOf(brand?.facts); // 로컬 QA 10/24 ⑤ 사실 카드
+  // 303차 #869(워크인 글이 대표가 빼라 한 온도조절기 사진에서 주제를 잡음): 브랜드 금지어가 든 사진 설명은 재료에서 뺌
+  const ban = bannedOf(brand).filter((w) => w && w.length >= 2); const banned = (t: string) => ban.some((w) => t.includes(w));
+  const photoMat = photos.filter((l) => !banned(l)); const blogMat = blogPhotos.filter((p) => !banned(`${p.title} ${p.caption} ${p.scene}`));
   // 로컬 QA 10/24 ③: 같은 주 다른 브랜드 글 제목 — 같은 주제·같은 제목을 피하게
   const peers = c.brand_id ? await sql<{ title: string; brand: string }[]>`select x.title, b.name as brand from mkt_contents x join mkt_brands b on b.id = x.brand_id
     where x.tenant = ${c.tenant} and x.brand_id <> ${c.brand_id} and x.status <> 'canceled' and x.current_version > 0 and x.scheduled_at is not null
@@ -340,8 +344,8 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
     Q.factsText(facts),
     newsText(activeNews(facts, day)), // #235 ⓐ 이번 달 실제 소식
     goal && goal.status !== 'pending' ? `이달 운영 목표: ${(goal.goals?.objectives ?? []).join(' / ')}${goal.goals?.message ? ` · 핵심 메시지: ${goal.goals.message}` : ''}` : '',
-    photos.length ? `쓸 수 있는 실사 사진(자료실 · AI 사진 설명 — 보이는 장면만 글에 씀):\n${photos.join('\n')}` : '',
-    blogPhotos.length ? `[블로그 사진 후보 — 자료실 실사 · AI 사진 설명. 장면이 맞는 사진을 '[사진 P번호]' 한 줄로 넣고, 사진에 보이는 것만 글에 씀]\n${blogPhotos.map((p, k) => `P${k + 1}: ${p.caption}${p.scene ? ` — ${p.scene}` : ''}`).join('\n')}` : '',
+    photoMat.length ? `쓸 수 있는 실사 사진(자료실 · AI 사진 설명 — 보이는 장면만 글에 씀):\n${photoMat.join('\n')}` : '',
+    blogMat.length ? `[블로그 사진 후보 — 자료실 실사 · AI 사진 설명. 장면이 맞는 사진을 '[사진 P번호]' 한 줄로 넣고, 사진에 보이는 것만 글에 씀]\n${blogPhotos.map((p, k) => `P${k + 1}: ${p.caption}${p.scene ? ` — ${p.scene}` : ''}`).join('\n')}` : '',
     recent.length ? `최근 게시 제목(겹치지 않게):\n${recent.map((r) => `- ${r.title}`).join('\n')}` : '',
     peers.length ? `같은 주 다른 브랜드 글(같은 주제·제목을 피함):\n${peers.map((r) => `- ${brandName({ name: r.brand })}: ${r.title}`).join('\n')}` : '',
     near.length ? `이 브랜드 가까운 날 다른 글의 첫 줄(같은 주제여도 첫 줄·문장·구성은 새로 씀 — 그대로 옮기거나 낱말 몇 개만 바꾸지 않음):\n${near.map((r) => `- ${CH_NAME[r.channel] ?? r.channel}${r.kind ? ` ${KIND_LABEL[r.kind as Kind] ?? r.kind}` : ''}: ${firstLine(r.body)}`).join('\n')}` : '',
@@ -649,7 +653,9 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
     try { const Q = await import('./mktQuality'); pages = V.pagesOf(kind, d.pages ?? null, q.body, Q.contactLine(factsOf(brand?.facts))); const ids = await V.drawPages({ ...c, title: f.title }, pages, { exclude: new Set([...(photoId ? [photoId] : []), ...photoIds]) }); mediaIds = [...mediaIds, ...ids]; visualNote += ` · ${kind === 'story' ? '프레임' : '카드'} ${mediaIds.length}장${V.photoNote(pages)}`; }
     catch (e: any) { visualNote += ` · 장 그리기 실패: ${String(e?.message ?? e).slice(0, 80)}`; }
   }
-  if (mediaIds.length && kind === 'blog' && mediaIds.length < V.BLOG_AUTO_MEDIA) {
+  // 303차 #869: 도표형 카드(단색 바탕 + 글자)로 채우는 건 회사 설정 plain_fill 일 때만 — 기본은 채우지 않고 자료 요청(사진이 오면 다시 그림)
+  if (mediaIds.length && kind === 'blog' && mediaIds.length < V.BLOG_AUTO_MEDIA && !s.plain_fill && !(how === 'auto' && s.auto_hold)) await (await import('./mktMaterials')).needMaterial(c, '블로그 본문에 쓸 이 브랜드 실사가 모자랍니다(도표형 카드로 채우지 않음)').catch(() => null);
+  if (mediaIds.length && kind === 'blog' && mediaIds.length < V.BLOG_AUTO_MEDIA && s.plain_fill) {
     try { const ids = await V.drawInfoCards({ ...c, title: f.title }, q.body, V.BLOG_AUTO_MEDIA - mediaIds.length); mediaIds = [...mediaIds, ...ids]; if (ids.length) visualNote += ` · 도표형 카드 ${ids.length}장`; }
     catch (e: any) { visualNote += ` · 카드 그리기 실패: ${String(e?.message ?? e).slice(0, 80)}`; }
   }
@@ -677,7 +683,8 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   await sql.begin(async (tx) => {
     await tx`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, ${v}, ${q.body}, ${mediaIds}, ${(v === 1 ? 'AI 자동 제작' : 'AI 다시 만들기') + designNote + retryNote + visualNote}, ${c.created_by})`;
     if (v > 1) await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('image', 'video') and status in ('open', 'needs_approval')`;
-    await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${held || batch ? 'draft' : q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = ${tx.json({ passed: q.passed, issues: q.issues, ...(batch ? { batch: { week: batch, status: q.passed ? 'pending' : 'changes', at: new Date().toISOString() } } : {}), ...(retried ? { preflightRetry: retried } : {}), brief: d.brief, ...(d.design ? { design: d.design } : {}), report: { ...f.report, v, preflight: pre }, ...(pre.length ? { preflight: pre } : {}), ...(script ? { script } : {}), ...(d.card ? { card: d.card } : {}), ...(pages?.length ? { pages } : {}), ...(held ? { held: { at: new Date().toISOString(), reason: 'template' } } : {}),
+    // 303차: 미룬 횟수·다시 만들기 표시는 새 판에도 남김(미룬 글을 다시 만들어도 미룸 3번 한도가 처음으로 돌아가지 않게)
+    await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${held || batch ? 'draft' : q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = jsonb_strip_nulls(jsonb_build_object('moved', quality->'moved', 'movedFrom', quality->'movedFrom', 'redo', quality->'redo', 'remadeFrom', quality->'remadeFrom')) || ${tx.json({ passed: q.passed, issues: q.issues, ...(batch ? { batch: { week: batch, status: q.passed ? 'pending' : 'changes', at: new Date().toISOString() } } : {}), ...(retried ? { preflightRetry: retried } : {}), brief: d.brief, ...(d.design ? { design: d.design } : {}), report: { ...f.report, v, preflight: pre }, ...(pre.length ? { preflight: pre } : {}), ...(script ? { script } : {}), ...(d.card ? { card: d.card } : {}), ...(pages?.length ? { pages } : {}), ...(held ? { held: { at: new Date().toISOString(), reason: 'template' } } : {}),
       ...(!mediaIds.length && d.photos?.length ? { bodyPlan: d.photos } : {}), ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 3, tried: photoId ? [photoId] : [], ...(bodyIds.length ? { bodyIds } : {}), ...(template ? { template } : {}), ...(photoIds.length > 1 ? { photoIds } : {}), ...V.coverMark(cover) } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임) — #544 초안 보관이면 만들지 않음(쓰지 않을 영상에 비용 X)
@@ -743,6 +750,7 @@ export async function remindAndExpire(tenant: string) {
         const done = await sql`update mkt_contents set scheduled_at = ${at}, reminded_at = null, quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ moved: n + 1, movedFrom: new Date(c.scheduled_at).toISOString() } as never)}, updated_at = now()
           where id = ${c.id} and abs(extract(epoch from scheduled_at - ${c.scheduled_at}::timestamptz)) < 1`.then((r) => r.count, () => 0); // 같은 규칙 칸과 겹치면(유일 색인) 옮기지 않음 · 그사이 바뀐 글은 그대로(DB 시각은 마이크로초라 1초 안이면 같은 칸)
         if (done) {
+          await redoOnMove(sql, c.id); // 303차 #869 ⑤: 미룬 글이 같은 그림으로 다시 올라오지 않게 — AI 가 만든 판이면 지금 규칙으로 다시 만듦
           const when = (d: Date) => `${Number(ymd(d).slice(5, 7))}/${Number(ymd(d).slice(8))} ${hm(d)}`;
           await mktNotify(sql, c, null, { approval: true, type: 'review_requested', title: `승인 마감이 지나 다음 슬롯으로 미뤘습니다: ${c.title}`, body: `${when(new Date(c.scheduled_at))} → ${when(at)} 게시 · 승인 마감 ${when(deadlineOf(at, s))}${n + 1 >= 3 ? ' · 이번이 마지막(3번째) 미룸' : ''}`,
             link: `/s/marketing/approvals?c=${c.id}`, entityType: 'mkt_content', entityId: c.id, dedupeKey: `mktmove:${c.id}:${at.toISOString()}` });
@@ -1189,7 +1197,7 @@ async function reviseText(c: any, comment: string, o: { text?: boolean; photo?: 
     media = [drawn.fileId, ...tail];
     // 요청 C: 피드·스토리는 글이 바뀌었거나 장이 없으면 표지 뒤 장도 새 글로 다시(사진만 바꿀 때는 장 그대로) · 블로그는 표지+3장이 안 되면 도표형 카드로 채움
     if ((c.auto || o.fresh) && pagedKind(c) && (body !== old || tail.length === 0)) { const Q = await import('./mktQuality'); pages = V.pagesOf(c.kind, pages, body, Q.contactLine(factsOf(brand?.facts))); media = [drawn.fileId, ...(await V.drawPages(c, pages, { exclude: new Set([...(drawn.photoId ? [drawn.photoId] : []), ...drawn.photoIds]) }))]; }
-    else if (c.auto && isBlog(c) && media.length < V.BLOG_AUTO_MEDIA) media = [...media, ...(await V.drawInfoCards(c, body, V.BLOG_AUTO_MEDIA - media.length).catch(() => [] as string[]))];
+    else if (c.auto && isBlog(c) && media.length < V.BLOG_AUTO_MEDIA && s.plain_fill) media = [...media, ...(await V.drawInfoCards(c, body, V.BLOG_AUTO_MEDIA - media.length).catch(() => [] as string[]))];
     visual = { by: 'server', fileId: drawn.fileId, at: new Date().toISOString(), photoId: drawn.photoId, rv: 3, tried: [...new Set([...tried, ...(drawn.photoId ? [drawn.photoId] : [])])].slice(-20), ...(media.length > 1 ? { bodyIds: media.slice(1) } : {}),
       ...(drawn.template ? { template: drawn.template } : {}), ...(drawn.photoIds.length > 1 ? { photoIds: drawn.photoIds } : {}), ...V.coverMark(drawn) };
     const left = q.issues.filter((x) => !V.VISUAL_ISSUE.test(x) && x !== V.PLAIN_ISSUE);
@@ -1293,6 +1301,7 @@ export const settingsInput = z.object({ planCode: z.enum(['basic', 'standard', '
   remindHours: nInt(0, 72).optional(), quietStart: nInt(0, 23).optional(), quietEnd: nInt(0, 23).optional(), allowGeneratedPeople: z.boolean().optional(), allowSlideshow: z.boolean().optional(), aiLabel: z.string().trim().min(2).max(60).optional(), notifyUserIds: z.array(zUuid).max(30).nullable().optional(), aiMonthlyUsd: z.number().min(0).max(10000).nullable().optional(), autoPublish: z.boolean().optional(), autoPause: z.boolean().optional(), autoHold: z.boolean().optional(),
   /** 요청 C §3-1: 릴스·쇼츠·생성 영상 자동 제작 중단(기본 켬) */ videoPause: z.boolean().optional(),
   /** 189차: 사진이 모자라면 실사 참고로 생성(크레딧) */ photoGen: z.boolean().optional(),
+  /** 303차 #869: 사진이 모자라면 단색 장·도표형 카드로 채움(예전 방식) */ plainFill: z.boolean().optional(),
   /** 267차(대표 #795): 승인 올리는 방식·묶음 요일·시각·승인 마감 며칠 전 */ approvalMode: z.enum(['weekly', 'lead']).optional(), batchDow: nInt(0, 6).optional(), batchHour: nInt(0, 23).optional(), deadlineDays: nInt(0, 7).optional(),
   /** 270차 #809 내부 회사 이미지·영상 생성 월 실제 비용 한도(원, null = 요금제 숫자) */ costCapKrw: nInt(0, 100_000_000).nullable().optional() });
 export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInput>) {
@@ -1303,7 +1312,7 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
     lead_days: i.leadDays ?? cur.lead_days, lead_hour: i.leadHour ?? cur.lead_hour, remind_hours: i.remindHours ?? cur.remind_hours, quiet_start: i.quietStart ?? cur.quiet_start, quiet_end: i.quietEnd ?? cur.quiet_end,
     allow_generated_people: i.allowGeneratedPeople ?? cur.allow_generated_people, allow_slideshow: i.allowSlideshow ?? cur.allow_slideshow, ai_label: i.aiLabel ?? cur.ai_label,
     notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids, ai_monthly_usd: i.aiMonthlyUsd !== undefined ? i.aiMonthlyUsd : cur.ai_monthly_usd, auto_publish: i.autoPublish ?? cur.auto_publish, auto_hold: i.autoHold ?? cur.auto_hold,
-    auto_pause: i.autoPause ?? cur.auto_pause, video_pause: i.videoPause ?? cur.video_pause, photo_gen: i.photoGen ?? cur.photo_gen,
+    auto_pause: i.autoPause ?? cur.auto_pause, video_pause: i.videoPause ?? cur.video_pause, photo_gen: i.photoGen ?? cur.photo_gen, plain_fill: i.plainFill ?? cur.plain_fill,
     approval_mode: i.approvalMode ?? cur.approval_mode, batch_dow: i.batchDow ?? cur.batch_dow, batch_hour: i.batchHour ?? cur.batch_hour, deadline_days: i.deadlineDays ?? cur.deadline_days,
     cost_cap_krw: cur.internal && i.costCapKrw !== undefined ? i.costCapKrw : cur.cost_cap_krw }; // 내부 회사만 바꿈
   const sql = db();
@@ -1311,7 +1320,7 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
     on conflict (tenant) do update set plan_code = excluded.plan_code, monthly_credits = excluded.monthly_credits, weekly_credits = excluded.weekly_credits, video_monthly = excluded.video_monthly,
       regen_monthly = excluded.regen_monthly, approval_hour = excluded.approval_hour, lead_days = excluded.lead_days, lead_hour = excluded.lead_hour, remind_hours = excluded.remind_hours,
       quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids, ai_monthly_usd = excluded.ai_monthly_usd, auto_publish = excluded.auto_publish, auto_hold = excluded.auto_hold,
-      auto_pause = excluded.auto_pause, video_pause = excluded.video_pause, photo_gen = excluded.photo_gen, approval_mode = excluded.approval_mode, batch_dow = excluded.batch_dow, batch_hour = excluded.batch_hour,
+      auto_pause = excluded.auto_pause, video_pause = excluded.video_pause, photo_gen = excluded.photo_gen, plain_fill = excluded.plain_fill, approval_mode = excluded.approval_mode, batch_dow = excluded.batch_dow, batch_hour = excluded.batch_hour,
       deadline_days = excluded.deadline_days, cost_cap_krw = excluded.cost_cap_krw, updated_by = excluded.updated_by, updated_at = now()`;
   if (v.cost_cap_krw !== cur.cost_cap_krw) await (await import('./log')).audit(sql, u.id, 'mkt.cost_cap', 'tenant', tenantOf(u), { from: cur.cost_cap_krw, to: v.cost_cap_krw }).catch(() => {});
   if (v.approval_mode !== cur.approval_mode) await (await import('./log')).audit(sql, u.id, 'mkt.approval_mode', 'tenant', tenantOf(u), { from: cur.approval_mode, to: v.approval_mode }).catch(() => {});
@@ -1724,6 +1733,55 @@ export async function createBrandWithKit(u: SessionUser, i: z.infer<typeof brand
     on conflict (tenant, name) do update set test_mode = case when ${i.testMode === undefined} then mkt_brands.test_mode else excluded.test_mode end returning id, name, test_mode`;
   return { brand: b };
 }
+/**
+ * 303차 #869 ⑤(로컬 11/01: 승인 마감 지나 미뤄진 글이 같은 그림으로 다시 올라옴): 미룬 자동 글의 지금 판이 AI 가 만든 판(사람이 고친 판 아님)이면
+ * 다음 정기 실행에서 지금 규칙(단색 장 대신 자료 요청·얼굴 가림·브랜드 사진만)으로 다시 만듦 — 원고 판은 새 판으로 쌓이고 예전 판은 기록에 남음
+ */
+async function redoOnMove(sql: any, id: string) {
+  const [v] = await sql<{ note: string | null }[]>`select v.note from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = ${id}`;
+  if (!v || !/^AI (자동 제작|다시 만들기)/.test(v.note ?? '')) return false;
+  const r = await sql`update mkt_contents set status = 'draft', produced_at = null, produce_at = now(), reminded_at = null,
+      quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ redo: { at: new Date().toISOString(), why: 'moved' } } as never)}, updated_at = now()
+    where id = ${id} and status in ('pending', 'changes') and auto`;
+  return r.count > 0;
+}
+
+/**
+ * 303차 #874(대표 11/01 '승인 대기 게시물 전부 없애고 다시 만들어서 올려 주세요'): 기간 안 자동 글(승인 대기·수정 요청·묶음 초안, 이미 만든 것)을
+ * 휴지통으로 옮기고 같은 자리(브랜드·채널·형식·게시 시각·규칙)에 새 칸을 만들어 지금 규칙으로 다시 제작(정기 실행·[지금 한 번 돌리기]가 차례로).
+ * 관리자만 · 14일 안 · 게시됐거나 승인된 글·사람이 만든 글은 그대로 · 휴지통 글은 규칙 칸 연결을 풀어 둠(되살려도 새 칸과 겹치지 않게)
+ */
+export const remakeInput = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), brandId: zUuid.nullable().optional(), dryRun: z.boolean().optional() });
+export async function remakeContents(u: SessionUser, i: z.infer<typeof remakeInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  if (i.to < i.from) throw badRequest('기간이 거꾸로입니다');
+  if ((Date.parse(i.to) - Date.parse(i.from)) / 864e5 > 14) throw badRequest('한 번에 14일까지 다시 만들 수 있습니다');
+  const sql = db(); const t = tenantOf(u);
+  const rows = await sql<any[]>`select c.id, c.brand_id, c.channel, c.kind, c.scheduled_at, c.rule_id, c.created_by, c.is_test, c.cross_channels, c.mode, c.status, b.name as brand
+    from mkt_contents c left join mkt_brands b on b.id = c.brand_id
+    where c.tenant = ${t} and c.deleted_at is null and c.auto and c.current_version > 0 and c.status in ('pending', 'changes', 'draft') and c.scheduled_at is not null
+      and (c.scheduled_at at time zone 'Asia/Seoul')::date between ${i.from}::date and ${i.to}::date ${i.brandId ? sql`and c.brand_id = ${i.brandId}` : sql``}
+    order by c.scheduled_at`;
+  if (i.dryRun) return { count: rows.length, items: rows.map((r) => ({ id: r.id, brand: r.brand, channel: r.channel, kind: r.kind, at: r.scheduled_at, status: r.status })) };
+  const at = new Date().toISOString(); let made = 0;
+  for (const c of rows) {
+    await sql.begin(async (tx: any) => {
+      const gone = await tx`update mkt_contents set deleted_at = now(), rule_id = null, quality = coalesce(quality, '{}'::jsonb) || ${tx.json({ remade: { at, by: u.id, ruleId: c.rule_id } } as never)}, updated_at = now()
+        where id = ${c.id} and deleted_at is null and status in ('pending', 'changes', 'draft')`;
+      if (!gone.count) return;
+      await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 휴지통'), decided_at = now() where content_id = ${c.id} and status in ('open', 'needs_approval')`;
+      const d = ymd(new Date(c.scheduled_at)); const cross = (c.cross_channels ?? []) as string[];
+      const title = `${c.is_test ? '[시험] ' : ''}${c.brand ? brandName({ name: c.brand }) + ' ' : ''}${KIND_LABEL[c.kind as Kind] ?? '글'}${cross.length ? '(함께 ' + cross.map((x) => CROSS_LABEL[x] ?? x).join('·') + ')' : ''} ${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
+      const ins = await tx`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, rule_id, kind, auto, produce_at, is_test, cross_channels, mode, quality)
+        values (${t}, ${c.brand_id}, ${title}, ${c.channel}, ${c.scheduled_at}, 'draft', 0, ${c.created_by}, ${c.rule_id}, ${c.kind}, true, now(), ${!!c.is_test}, ${cross}, ${c.mode ?? 'content'}, ${tx.json({ remadeFrom: c.id } as never)})
+        on conflict (rule_id, scheduled_at) where rule_id is not null do nothing returning id`;
+      made += ins.length;
+    });
+  }
+  await (await import('./log')).audit(sql, u.id, 'mkt.remake', 'tenant', t, { from: i.from, to: i.to, brandId: i.brandId ?? null, trashed: rows.length, made }).catch(() => {});
+  return { count: rows.length, trashed: rows.length, made };
+}
+
 export async function runNow(u: SessionUser) { await assertSpace(u, 'marketing'); adminOnly(u); return runTenant(tenantOf(u), u.id); }
 
 /** 요청 C §4(대표 10/25 22:20 '브랜드별 시안 세트를 보고 승인'): 브랜드마다 내일 피드(카드뉴스·페북 함께)·스토리 1건씩, 고른 브랜드는 블로그 1건을 바로 만들어 승인함에 — 정기 규칙·일시정지와 무관한 1회 제작(사람이 누른 제작) */

@@ -44,7 +44,7 @@ const cur = async (id) => (await sql`select c.status, c.current_version, c.quali
 
 before(async () => {
   await resetDb(); await ensureTls(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
-  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: true }); // 303차 #869: 이 시험은 예전 방식(사진이 모자라면 단색 장·도표형 카드로 채움)을 봄 — 새 방식은 mkt-rules-869
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', quietStart: 0, quietEnd: 0 });
   P.brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '하이링크' })).id;
@@ -182,6 +182,9 @@ test('승인 마감 지난 미승인 자동 글: 다음 슬롯(같은 시각, �
   await sql`update mkt_contents set status = 'canceled' where brand_id = ${P.plain}`; // 앞 시험의 워크인 글이 빈 날을 막지 않게
   const at = new Date(Date.now() - 20 * 3600e3); // 20시간 전 게시 예정 = 그날 09:00 마감은 언제 돌려도 지남
   const id = await stuck('마감 지난 글', { at, brand: P.plain });
+  await sql`update mkt_versions set note = '사람이 고친 판' where content_id = ${id}`; // 303차 #869 ⑤: AI 가 만든 판은 미루며 다시 만들므로 이 시험은 사람이 고친 판으로
+  const ai = await stuck('마감 지난 AI 글', { at, brand: P.plain, channel: 'facebook' });
+  await sql`update mkt_versions set media_ids = ${[P.photo]} where content_id = ${ai}`; // 시안 있는 AI 판(시안 없는 글은 정기 실행이 그려 붙이며 옮김)
   // 다음 날은 같은 브랜드·채널·형식 글이 이미 2건(#540 하루 2건까지 — 또는 마감 1시간 안) → 그다음 날로
   const busy = await stuck('그날 이미 있는 글', { at: new Date(at.getTime() + 86400e3), brand: P.plain, status: 'approved' });
   const busy2 = await stuck('그날 이미 있는 둘째 글', { at: new Date(at.getTime() + 86400e3), brand: P.plain, status: 'approved' });
@@ -194,6 +197,9 @@ test('승인 마감 지난 미승인 자동 글: 다음 슬롯(같은 시각, �
   assert.deepEqual([c.quality.moved, c.quality.movedFrom], [1, at.toISOString()]);
   const [n] = await sql`select title, body from notifications where entity_id = ${id} and title like '승인 마감이 지나 다음 슬롯으로 미뤘습니다%'`;
   assert.ok(n, '승인자 알림'); assert.match(n.body, /게시 · 승인 마감/);
+  const a = await cur(ai); // AI 가 만든 판: 미룬 자리에서 지금 규칙으로 다시 만듦(같은 그림으로 다시 올라오지 않게)
+  assert.equal(a.quality.moved, 1); assert.equal(a.quality.redo?.why, 'moved'); assert.notEqual(a.status, 'canceled');
+  assert.equal(c.quality.redo, undefined, '사람이 고친 판은 그대로 미룸');
   // 이미 3번 미룬(=옮길 날짜가 없는) 글은 취소하지 않고 '미뤄진 글'(보류·날짜 비움) — 로컬 10/24 09:00 '대표는 미룸으로 알았는데 취소됨'
   await sql`update mkt_contents set scheduled_at = ${at}, quality = quality || '{"moved": 3}'::jsonb where id = ${id}`;
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});

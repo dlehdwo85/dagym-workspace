@@ -136,7 +136,11 @@ test('② 광고 예산 계획: AI 초안(채널 4·연결 표시·하루 예산
   // 소진율: 네이버 200,000 중 90,000 (45%) → 아직 알림 없음 → 지출 추가(총 170,000 = 85%) → '충전 필요' 1번, 두 번 돌려도 1번
   const run = tick;
   await run();
-  assert.equal((await sql`select count(*)::int n from notifications where dedupe_key like 'mktcharge:%'`)[0].n, 0, '45% 는 알림 없음');
+  // 소진율 80% 또는 '하루 평균 지출 × 이달 날수 > 예산 1.2배'(속도) — 월초(오늘이 11일 전쯤)엔 90,000 도 속도로 알림이 맞음 → 그날은 알림 1번 확인 후 지우고 85% 를 다시 봄
+  const dayN = Number(today.slice(8)), days = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
+  const pace = (90000 / dayN) * days > 200000 * 1.2;
+  assert.equal((await sql`select count(*)::int n from notifications where dedupe_key like 'mktcharge:%'`)[0].n, pace ? 1 : 0, pace ? '월초 속도 알림' : '45% 는 알림 없음');
+  if (pace) { await sql`delete from notifications where dedupe_key like 'mktcharge:%'`; await sql`update mkt_ad_budgets set alerted = '{}'::jsonb where id = ${P.budget}`; }
   await sql`insert into mkt_ad_stats (account_id, day, campaign_id, campaign_name, impressions, clicks, cost_krw) values (${P.acc}, ${today}, 'cmp-2', '추가', 100, 10, 80000)`;
   await run(); await run();
   const al = await sql`select title, body from notifications where dedupe_key like 'mktcharge:%'`;

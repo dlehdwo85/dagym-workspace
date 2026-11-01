@@ -1541,7 +1541,7 @@ describe('WORKIN_V6 달성률', () => {
     assert.ok(Array.isArray(s.people) && s.people.some((p) => p.id === ctx.ownerId));
     assert.equal(typeof s.requested.open, 'number');
     const m = await ctx.owner.ok('GET', '/api/stats?period=month');
-    assert.ok(m.due >= s.due || m.start <= s.start);
+    assert.ok(m.due >= s.due || s.start < m.start, '이번 주가 이달 안이면 이달 수가 더 큼(월초엔 이번 주가 지난달에서 시작)');
     const st = await ctx.staffA.client.ok('GET', '/api/stats?period=week');
     assert.ok(!st.people.some((p) => p.id === ctx.ownerId && p.due >= 2), '현장 직원 달성률에 본사 업무가 섞이지 않음');
   });

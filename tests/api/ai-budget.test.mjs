@@ -36,9 +36,15 @@ describe('V23 AI 비용·한도', () => {
     // 하루 한도(200원)도 넘었음 → 오늘 막힘
     const day = await ctx.staffA.client.req('POST', '/api/ai/chat', { text: '또 정리해줘' });
     assert.equal(day.status, 429); assert.match(day.body.error?.message ?? '', /오늘/);
-    await sql`update ai_usage set created_at = created_at - interval '1 day' where user_id = ${ctx.staffA.id} and created_at > date_trunc('month', now()) + interval '1 day'`;
-    await ctl({ anthropicReset: true, anthropicQueue: [say('둘째 답', { input_tokens: 100000, output_tokens: 0 })] }); // 280원 → 1,120원
-    await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '다른 것' });
+    // 하루 넘긴 것으로: 오늘(서울) 쓴 것을 어제로 옮기고 다시 대화 — 달 첫날엔 어제가 지난달이라 흉내 낼 수 없어 둘째 대화(280원)를 기록으로 바로 넣음
+    const [{ d1 }] = await sql`select extract(day from now() at time zone 'Asia/Seoul') = 1 as d1`;
+    if (!d1) {
+      await sql`update ai_usage set created_at = created_at - interval '1 day' where user_id = ${ctx.staffA.id} and created_at >= ((now() at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul')`;
+      await ctl({ anthropicReset: true, anthropicQueue: [say('둘째 답', { input_tokens: 100000, output_tokens: 0 })] }); // 280원 → 1,120원
+      await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '다른 것' });
+    } else {
+      await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cost_usd, cost_krw, purpose) values ('default', ${ctx.staffA.id}, gen_random_uuid(), 'anthropic', 'claude-sonnet-5-5', 100000, 0, 0.2, 280, 'assistant')`;
+    }
     const out = await ctx.staffA.client.req('POST', '/api/ai/chat', { text: '하나 더' });
     assert.equal(out.status, 429); assert.match(out.body.error.message, /추가 요청/);
     assert.equal((await ctx.staffA.client.ok('GET', '/api/ai/status')).overLimit, true);

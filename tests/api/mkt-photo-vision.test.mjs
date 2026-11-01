@@ -38,7 +38,7 @@ const cur = async (id) => (await sql`select c.status, c.quality, v.media_ids fro
 
 before(async () => {
   await resetDb(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
-  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: true }); // 303차 #869: 이 시험은 예전 방식(사진이 모자라면 단색 장·도표형 카드로 채움)을 봄 — 새 방식은 mkt-rules-869
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   await ctx.owner.ok('PUT', '/api/marketing/auto', { leadDays: 3, remindHours: 72, quietStart: 0, quietEnd: 0, autoHold: false });
   br = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '사진짐' });
@@ -148,12 +148,16 @@ test('설명 못 함은 사진에 남김(세 번까지·1시간 뒤 다시) · �
 test('쓰임: 피드 시안 바탕 = AI 가 글자 없는 실사로 본 이 브랜드 사진 · 블로그 본문 = 홍보물·이름 규칙 그래픽·다른 브랜드 빼고 · 원고 재료 사진 목록 = AI 설명', async () => {
   const feed = await slot(br.id, { channel: 'instagram', kind: 'feed', day: 4, hour: 10, ago: 5 });
   const blog = await slot(br.id, { channel: 'blog', kind: 'blog', day: 4, hour: 13, ago: 4 });
+  // 303차 #869: 얼굴이 보이는데 자리를 모르는 사진은 가릴 수 없어 본문에서 뺌 → 이 시험은 얼굴 자리를 아는 사진으로(가린 사본이 본문에)
+  await sql`update library_files set vision = vision || ${sql.json({ faceBoxes: [{ x: 0.3, y: 0.3, w: 0.4, h: 0.4 }] })} where id = ${P.face}`;
   const n0 = fake.state.anthropic.length;
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const f = await cur(feed); const b = await cur(blog);
   assert.equal(f.quality.visual.photoId, P.clean, '바탕 = 글자 없는 실사(폴더·태그로 고르지 않았어도)');
   assert.equal(b.media_ids.length, 4, '요청 C: 블로그 = 표지 + 본문 실사 1장 + 도표형 카드 2장(표지+3장)');
-  assert.equal(b.media_ids[1], P.face, '본문 = 홍보물·그래픽·다른 브랜드 빼고 이 브랜드 사진');
+  const [m] = await sql`select source, meta->>'of' as of from library_files where id = ${b.media_ids[1]}`;
+  assert.deepEqual([m?.source, m?.of], ['mosaic', P.face], '본문 = 홍보물·그래픽·다른 브랜드 빼고 이 브랜드 사진(얼굴은 가린 사본)');
+  assert.ok(!b.media_ids.includes(P.face), '얼굴이 그대로인 원본은 본문에 안 씀');
   const prompts = fake.state.anthropic.slice(n0).map((x) => JSON.stringify(x.body));
   assert.ok(prompts.some((p) => p.includes('AI 사진 설명') && p.includes('러닝머신이 줄지어 선 매장 안') && p.includes('트레이너가 회원에게 자세를 알려 주는 모습')), '원고 재료에 AI 사진 설명');
   assert.ok(!prompts.some((p) => p.includes('할인 이벤트 포스터') || p.includes('다른 매장 간판') || p.includes('창가 벤치')), '홍보물·다른 브랜드·이름 규칙 그래픽은 재료에서 뺌');

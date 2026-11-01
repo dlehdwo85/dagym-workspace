@@ -12,7 +12,7 @@ before(async () => { await resetDb(); await ensureTls(); fake = await startFakeG
 after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); });
 
 test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () => {
-  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: true }); // 303차 #869: 이 시험은 예전 방식(사진이 모자라면 단색 장·도표형 카드로 채움)을 봄 — 새 방식은 mkt-rules-869
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   assert.equal((await ctx.staffA.client.req('PUT', '/api/marketing/auto', { leadDays: 1 })).status, 403, '설정은 관리자');
   assert.equal((await ctx.staffB.client.req('GET', '/api/marketing/auto')).status, 404, '공간 밖');
