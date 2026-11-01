@@ -11,6 +11,8 @@ const NP_PORT = 3202, NP = `http://localhost:${NP_PORT}`;
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 const state = { failBids: new Set(), calls: [] };
 let np, srv, ctx, sql;
+// 304차 #871: 결제 완료·정기 결제 실패 알림톡(가짜 솔라피) — 동의한 관리자에게만
+const alim = []; let alimSrv;
 
 function fakeNice() {
   return http.createServer((req, res) => {
@@ -56,7 +58,10 @@ let owner, tid, platform;
 before(async () => {
   await resetDb();
   np = fakeNice();
-  srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', NICEPAY_MODE: 'test', NICEPAY_PAY_MID: 'walkin001m', NICEPAY_PAY_KEY: 'REAL-KEY-NEVER-USED-IN-TEST', NICEPAY_BILL_MID: 'walkin002m', NICEPAY_BILL_KEY: 'REAL-BILL-KEY-NEVER-USED', /* 실 키는 있어도 시험 모드에선 안 씀 */ NICEPAY_TEST_PAY_MID: MID, NICEPAY_TEST_PAY_KEY: KEY, NICEPAY_TEST_BILL_MID: BMID, NICEPAY_TEST_BILL_KEY: BKEY, NICEPAY_API_BASE: NP });
+  alimSrv = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { alim.push(JSON.parse(b).message); } catch { /* 무시 */ } res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ messageId: `M-${alim.length}`, statusCode: '2000' })); }); });
+  await new Promise((r) => alimSrv.listen(0, '127.0.0.1', r));
+  srv = await startServer({ ALIMTALK_PROVIDER: 'solapi', ALIMTALK_API_KEY: 'k', ALIMTALK_API_SECRET: 's', ALIMTALK_PF_ID: 'PF', ALIMTALK_TEMPLATES: JSON.stringify({ pay_ok: 'TPL-PAY', pay_fail: 'TPL-FAIL' }), ALIMTALK_API_BASE: `http://127.0.0.1:${alimSrv.address().port}`,
+    PUBLIC_SIGNUP: '1', MAIL_DEV: '1', NICEPAY_MODE: 'test', NICEPAY_PAY_MID: 'walkin001m', NICEPAY_PAY_KEY: 'REAL-KEY-NEVER-USED-IN-TEST', NICEPAY_BILL_MID: 'walkin002m', NICEPAY_BILL_KEY: 'REAL-BILL-KEY-NEVER-USED', /* 실 키는 있어도 시험 모드에선 안 씀 */ NICEPAY_TEST_PAY_MID: MID, NICEPAY_TEST_PAY_KEY: KEY, NICEPAY_TEST_BILL_MID: BMID, NICEPAY_TEST_BILL_KEY: BKEY, NICEPAY_API_BASE: NP });
   sql = testDb();
   ctx = await bootstrap();
   platform = ctx.owner;
@@ -65,8 +70,9 @@ before(async () => {
   await owner.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
   await owner.ok('POST', '/api/auth/login', { email: 'payer@example.com', password: 'signup-pass-1234' });
   tid = (await owner.ok('GET', '/api/auth/me')).user.tenant;
+  await owner.ok('PUT', '/api/account/alimtalk', { phone: '010-4444-5555', ok: true }); // 304차 #871
 });
-after(async () => { srv?.proc.kill(); np?.close(); await sql?.end(); });
+after(async () => { srv?.proc.kill(); np?.close(); alimSrv?.close(); await sql?.end(); });
 
 const postForm = (path, form) => fetch(BASE + path, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://web.nicepay.co.kr' }, body: new URLSearchParams(form).toString() });
 const sub = async () => (await sql`select * from tenant_subscriptions where tenant = ${tid}`)[0];
@@ -152,6 +158,10 @@ describe('18차 나이스페이 결제', () => {
     assert.equal(await (await postForm('/api/billing/nicepay/notify', { MID, MOID: w.params.Moid, Amt: w.params.Amt, TID: pay.tid, ResultCode: '4110', StateCd: '0', PayMethod: 'VBANK' })).text(), 'OK');
     [pay] = await sql`select * from payments where moid = ${w.params.Moid}`;
     assert.equal(pay.status, 'paid'); assert.equal(pay.result_msg, '가상계좌 입금 확인'); assert.ok(pay.meta.receiptSentAt, '영수증 메일');
+    // 304차 #871: 결제 완료 알림톡 — 동의한 관리자에게 1번(같은 결제는 다시 안 보냄)
+    assert.equal((await sql`select count(*)::int n from alimtalk_logs where dedupe_key = ${'pay:' + pay.id} and ok and kind = 'pay_ok'`)[0].n, 1, '결제 1건에 알림톡 1번');
+    const ok1 = alim.filter((m) => m.kakaoOptions.templateId === 'TPL-PAY').at(-1);
+    assert.deepEqual([ok1?.to, ok1?.kakaoOptions.variables['#{회사명}'], ok1?.kakaoOptions.variables['#{금액}'], ok1?.kakaoOptions.disableSms], ['01044445555', '결제상사', pay.amount.toLocaleString('ko-KR'), true], JSON.stringify(alim));
     const s1 = await sub(); assert.equal(s1.plan_code, 'w_standard'); assert.equal(s1.billing_cycle, 'monthly');
     const w2 = await owner.ok('POST', '/api/billing/window', { kind: 'addon', addonCode: 'storage50_v27', payMethod: 'BANK' });
     const r2 = await postForm('/api/billing/nicepay/return', { ...auth('bktok', w2.params), PayMethod: 'BANK' });
@@ -168,6 +178,8 @@ describe('18차 나이스페이 결제', () => {
     assert.equal(String(s.next_retry_on).slice(0, 10) > new Date().toISOString().slice(0, 10), true, '3일 뒤 재시도 예약');
     const n = await sql`select n.title from notifications n join users u on u.id = n.user_id where u.email = 'payer@example.com' and n.title = '구독 결제에 실패했습니다'`;
     assert.equal(n.length, 1);
+    const f1 = alim.filter((m) => m.kakaoOptions.templateId === 'TPL-FAIL'); // 304차 #871: 정기 결제 실패 알림톡(사유·다음 시도)
+    assert.equal(f1.length, 1, JSON.stringify(alim)); assert.match(f1[0].kakaoOptions.variables['#{사유}'], /한도/); assert.ok(f1[0].kakaoOptions.variables['#{다음시도}']);
     // 7일 미납 → 읽기 전용
     await sql`update tenant_subscriptions set past_due_since = now() - interval '8 days', next_retry_on = current_date, retry_count = 1 where tenant = ${tid}`;
     await tick();

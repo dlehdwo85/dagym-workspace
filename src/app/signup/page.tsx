@@ -18,7 +18,8 @@ export default function SignupPage() {
   const [mode, setMode] = useState<'personal' | 'team'>('personal');
   const [f, setF] = useState({ name: '', email: '', password: '', company: '', size: '', industry: '', industries: [] as string[], website: '' });
   const [social, setSocial] = useState(0);
-  const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false });
+  const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false, alimtalk: false });
+  const [phone, setPhone] = useState(''); // 304차 #871 결제·약관 안내 알림톡(선택)
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -43,7 +44,7 @@ export default function SignupPage() {
     setBusy(true);
     try {
       setAdsConsent(ads);
-      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, mode, agree: { ...agree, ads }, openedAt: opened.current, utm: readUtm() } });
+      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, mode, agree: { ...agree, ads }, phone: agree.alimtalk ? phone.trim() : undefined, openedAt: opened.current, utm: readUtm() } });
       await fireSignupConversion().catch(() => {}); // #449 회사가 만들어진 이 순간(광고를 누른 그 브라우저) — 확인 메일을 다른 기기에서 열어도 전환이 빠지지 않게
       setDone(r);
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
@@ -82,12 +83,14 @@ export default function SignupPage() {
         {/* 봇 방지: 사람에게는 안 보이는 칸 */}
         <div aria-hidden className="absolute -left-[9999px] h-0 overflow-hidden"><label>웹사이트<input tabIndex={-1} autoComplete="off" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} name="website" /></label></div>
         <div className="space-y-2 rounded-card border border-line p-3">
-          <label className="flex items-center gap-2 border-b border-line pb-2 text-sm font-semibold"><input type="checkbox" checked={all} onChange={(e) => setAgree({ terms: e.target.checked, age14: e.target.checked, privacy: e.target.checked, ai: e.target.checked, marketing: e.target.checked })} aria-label="전체 동의" />전체 동의</label>
+          <label className="flex items-center gap-2 border-b border-line pb-2 text-sm font-semibold"><input type="checkbox" checked={all} onChange={(e) => setAgree({ ...agree, terms: e.target.checked, age14: e.target.checked, privacy: e.target.checked, ai: e.target.checked, marketing: e.target.checked })} aria-label="전체 동의" />전체 동의</label>
           {box('terms', <><Link href="/terms" target="_blank" className="underline">이용약관</Link> 동의</>, true)}
           {box('privacy', <><Link href="/privacy" target="_blank" className="underline">개인정보 수집·이용</Link> 동의</>, true)}
           {box('age14', '만 14세 이상입니다', true)}
           {box('ai', <><Link href="/ai-notice" target="_blank" className="underline">AI 기능 이용</Link>(입력 내용이 AI 처리 업체로 전송) 동의</>, false)}
           {box('marketing', '새 기능·혜택 소식 받기', false)}
+          {box('alimtalk', '결제·가입 안내를 카카오 알림톡으로 받기(관리자, 광고 없음)', false)}
+          {agree.alimtalk && <input className={inputCls + ' h-10'} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" maxLength={20} placeholder="휴대폰 번호 (예: 010-1234-5678)" aria-label="알림톡 받을 휴대폰" data-testid="signup-alimtalk-phone" />}
           {conversionTagsConfigured() && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" data-testid="agree-ads" /><span>광고 효과 측정(가입 완료 1회 — Meta·Google·네이버 태그) 동의 <span className="text-ink-3">(선택)</span></span></label>}
         </div>
         {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}

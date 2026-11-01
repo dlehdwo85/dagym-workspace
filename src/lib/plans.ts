@@ -450,6 +450,11 @@ export async function trialJob() {
     await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title, body: inBody, link: '/admin/usage', dedupeKey: `trial:${s.tenant}:${key}:${until}` });
     // 302차 #862: 메일은 휴대폰에서 바로 결제되게 — 회사·인원·추천 요금제·월 금액 + [결제하기](로그인 뒤 결제 화면으로)
     await (await import('./billing/payMail')).sendPayMail(s.tenant, { title, lines: [body, d === 0 ? '결제하면 바로 다시 쓸 수 있고, 데이터는 그대로입니다.' : `끝나는 때: ${new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(s.trial_ends_at)}`] }).catch(() => 0);
+    // 304차 #871: 카카오 알림톡(동의한 관리자만·꺼짐 기본) — 체험 끝 3일 전·당일만
+    if (!partner && (key === 'd3' || key === 'd0')) {
+      const A = await import('./alimtalk');
+      await A.alimtalkAdmins(s.tenant, key === 'd0' ? 'trial_d0' : 'trial_d3', { 회사명: s.name, 종료일: A.alimDate(s.trial_ends_at, false), ...(key === 'd3' ? { 남은일수: String(Math.max(1, d)) } : {}) }, `trial:${s.tenant}:${key}:${until}`);
+    }
     await sql`update tenant_subscriptions set trial_notified = trial_notified || ${sql.json({ [key]: true })} where tenant = ${s.tenant}`;
     notified++;
   }

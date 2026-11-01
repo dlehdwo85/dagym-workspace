@@ -21,7 +21,9 @@ export const signupInput = z.object({
   name: z.string().trim().min(1, '이름을 입력하세요').max(50),
   mode: z.enum(['personal', 'team']),
   company: z.string().trim().max(60).optional(),
-  agree: z.object({ terms: z.literal(true, { errorMap: () => ({ message: '이용약관에 동의해 주세요' }) }), age14: z.literal(true, { errorMap: () => ({ message: '만 14세 이상만 가입할 수 있습니다' }) }), privacy: z.literal(true, { errorMap: () => ({ message: '개인정보 처리방침에 동의해 주세요' }) }), ai: z.boolean().default(false), marketing: z.boolean().default(false), ads: z.boolean().default(false) }),
+  agree: z.object({ terms: z.literal(true, { errorMap: () => ({ message: '이용약관에 동의해 주세요' }) }), age14: z.literal(true, { errorMap: () => ({ message: '만 14세 이상만 가입할 수 있습니다' }) }), privacy: z.literal(true, { errorMap: () => ({ message: '개인정보 처리방침에 동의해 주세요' }) }), ai: z.boolean().default(false), marketing: z.boolean().default(false), ads: z.boolean().default(false), alimtalk: z.boolean().default(false) }),
+  /** 304차 #871: 결제·약관 안내 카카오 알림톡 받을 휴대폰(선택 — alimtalk 동의할 때만 저장) */
+  phone: z.string().trim().max(20).optional(),
   /** 봇 방지: 사람에게 안 보이는 칸(채워져 있으면 봇) · 화면을 연 시각(너무 빨리 제출하면 봇) */
   website: z.string().max(200).optional(),
   openedAt: z.number().optional(),
@@ -36,7 +38,7 @@ export const signupInput = z.object({
 export const SIZE_LABEL: Record<string, string> = { '1': '혼자', '2-10': '2~10명', '11-30': '11~30명', '31-100': '31~100명', '100+': '100명 넘게' };
 
 type OwnerSpace = { email: string; name: string; mode: 'personal' | 'team'; company?: string; size?: string; industry?: string; industries?: string[]; utm?: Record<string, string | undefined>;
-  agree: Record<string, boolean>; passwordHash: string | null; pending: boolean; ip: string | null; workEmail?: string | null };
+  agree: Record<string, boolean>; passwordHash: string | null; pending: boolean; ip: string | null; workEmail?: string | null; phone?: string | null };
 /** 새 회사(또는 개인 공간) + 대표 계정 + 기본 조직·달력·동의 기록 — 이메일 가입·소셜 가입 공통 */
 export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
   const tenant = `t_${newToken(9).replace(/[^A-Za-z0-9]/g, '').toLowerCase().slice(0, 12)}`;
@@ -51,6 +53,7 @@ export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
   const [u] = await tx<{ id: string }[]>`insert into users (email, name, role, status, password_hash, tenant, signup_pending, email_verified_at, work_email)
     values (${i.email}, ${i.name}, 'owner', 'active', ${i.passwordHash}, ${tenant}, ${i.pending}, ${i.pending ? null : new Date()}, ${i.workEmail ?? null}) returning id`;
   await tx`update tenants set owner_user_id = ${u.id} where id = ${tenant}`;
+  if (i.agree.alimtalk && i.phone) await tx`update users set alimtalk_phone = ${i.phone}, alimtalk_ok = true, alimtalk_ok_at = now() where id = ${u.id}`; // 304차 #871
   const [o] = await tx<{ id: string }[]>`insert into org_units (type, name, sort, tenant) values ('hq', ${orgName}, 0, ${tenant}) returning id`;
   await tx`insert into memberships (user_id, org_unit_id) values (${u.id}, ${o.id})`;
   await tx`insert into calendars (type, org_unit_id, name, color, tenant) values ('org_unit', ${o.id}, ${orgName + ' 일정'}, '#475569', ${tenant})`;
@@ -104,7 +107,8 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
     return { ok: true, message: GENERIC, ...(devLink ? { devLink } : {}) };
   }
   const hash = await hashPassword(i.password);
-  const userId = await sql.begin((tx) => createOwnerSpace(tx, { email: i.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, industries: i.industries, utm: i.utm, agree: i.agree, passwordHash: hash, pending: true, ip }));
+  const phone = i.agree.alimtalk ? await alimtalkPhone(i.phone) : null; // 304차 #871
+  const userId = await sql.begin((tx) => createOwnerSpace(tx, { email: i.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, industries: i.industries, utm: i.utm, agree: i.agree, phone, passwordHash: hash, pending: true, ip }));
   await attempt(sql, ip, i.email, true, null);
   const { recordStep } = await import('./funnel');
   const [{ tenant }] = await sql<{ tenant: string }[]>`select tenant from users where id = ${userId}`;
@@ -126,7 +130,13 @@ export async function verifyEmail(token: string) {
     const [own] = await tx<{ id: string }[]>`select id from tenants where owner_user_id = ${u.id}`;
     if (own) await (await import('./funnel')).recordStep('verified', { tenant: own.id }, tx as unknown as Sql);
     return u.id;
-  });
+  }).then(async (id) => { await (await import('./alimtalk')).alimtalkSignup(id); return id; }); // 304차 #871: 가입(약관 동의) 완료 알림톡 — 동의한 본인만
+}
+/** 304차 #871: 알림톡 동의했으면 휴대폰이 맞아야 함(국내 휴대폰) */
+export async function alimtalkPhone(raw: string | undefined) {
+  const p = (await import('./alimtalk')).normalizePhone(raw);
+  if (!p) throw badRequest('알림톡을 받을 휴대폰 번호를 확인해 주세요 (예: 010-1234-5678)');
+  return p;
 }
 
 /** 확인 메일 다시 받기 (가입 대기 중인 계정만, 응답은 항상 같음) */

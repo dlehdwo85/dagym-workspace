@@ -213,7 +213,7 @@ export async function pendingInfo(token: string) {
   const r = await loadPending(token);
   return { provider: r.provider, providerLabel: PROVIDER_LABEL[r.provider], email: r.email, name: r.name };
 }
-export const completeInput = signupInput.pick({ name: true, mode: true, company: true, agree: true, size: true, industry: true, industries: true, utm: true }).extend({ token: z.string().min(10).max(200) });
+export const completeInput = signupInput.pick({ name: true, mode: true, company: true, agree: true, size: true, industry: true, industries: true, utm: true, phone: true }).extend({ token: z.string().min(10).max(200) });
 export async function completeSocialSignup(i: z.infer<typeof completeInput>, ip: string | null) {
   if (!signupEnabled()) throw notFound();
   if (i.mode === 'team' && !i.company) throw badRequest('회사(팀) 이름을 입력하세요');
@@ -221,12 +221,13 @@ export async function completeSocialSignup(i: z.infer<typeof completeInput>, ip:
   const [{ d }] = await sql<{ d: number }[]>`select count(*)::int d from signup_attempts where ip is not distinct from ${ip} and ok and created_at > now() - interval '1 day'`;
   if (d >= Number(process.env.SIGNUP_IP_PER_DAY ?? 3)) throw new HttpError(429, 'too_many', '가입 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.');
   const pend = await loadPending(i.token);
+  const phone = i.agree.alimtalk ? await (await import('./signup')).alimtalkPhone(i.phone) : null; // 304차 #871
   const userId = await sql.begin(async (tx) => {
     const del = await tx`delete from oauth_pending where token_hash = ${sha256(i.token)} returning 1`;
     if (!del.length) throw badRequest('이미 처리된 가입입니다. 로그인해 주세요.');
     if ((await tx`select 1 from users where lower(email) = ${pend.email}`).length) throw badRequest('이미 가입된 이메일입니다. 로그인해 주세요.');
     const id = await createOwnerSpace(tx, { email: pend.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, industries: i.industries,
-      utm: i.utm ?? pend.utm ?? undefined, agree: i.agree, passwordHash: null, pending: false, ip, workEmail: pend.email });
+      utm: i.utm ?? pend.utm ?? undefined, agree: i.agree, passwordHash: null, pending: false, ip, workEmail: pend.email, phone });
     await tx`insert into user_identities (provider, subject, user_id, email, last_login_at, secret) values (${pend.provider}, ${pend.subject}, ${id}, ${pend.email}, now(), ${pend.secret})`;
     return id;
   });
@@ -234,6 +235,7 @@ export async function completeSocialSignup(i: z.infer<typeof completeInput>, ip:
   const [{ tenant }] = await sql<{ tenant: string }[]>`select tenant from users where id = ${userId}`;
   const { recordStep } = await import('./funnel');
   await recordStep('submitted', { tenant }, sql); await recordStep('verified', { tenant }, sql); // 소셜은 확인 메일 없이 바로 회사 생성
+  await (await import('./alimtalk')).alimtalkSignup(userId); // 304차 #871: 가입(약관 동의) 완료 알림톡 — 동의한 본인만
   return { userId };
 }
 

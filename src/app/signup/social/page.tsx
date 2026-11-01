@@ -19,7 +19,8 @@ function SocialSignup() {
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<'personal' | 'team'>('team');
   const [f, setF] = useState({ name: '', company: '', size: '', industry: '', industries: [] as string[] });
-  const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false });
+  const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false, alimtalk: false });
+  const [phone, setPhone] = useState(''); // 304차 #871 결제·약관 안내 알림톡(선택)
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => { api(`/api/auth/oauth/pending?t=${encodeURIComponent(t)}`).then((r) => { setInfo(r); setF((x) => ({ ...x, name: r.name ?? '' })); }).catch((e) => setErr(e.message)); }, [t]);
@@ -32,7 +33,7 @@ function SocialSignup() {
     try {
       setAdsConsent(ads);
       await api('/api/auth/oauth/complete', { body: { token: t, name: f.name, mode, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined,
-        industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, agree: { ...agree, ads }, utm: readUtm() } });
+        industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, agree: { ...agree, ads }, phone: agree.alimtalk ? phone.trim() : undefined, utm: readUtm() } });
       await fireSignupConversion();
       location.href = '/';
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); setBusy(false); }
@@ -61,6 +62,8 @@ function SocialSignup() {
         {box('age14', '만 14세 이상입니다', true)}
         {box('ai', <><Link href="/ai-notice" target="_blank" className="underline">AI 기능 이용</Link>(입력 내용이 AI 처리 업체로 전송) 동의</>, false)}
         {box('marketing', '새 기능·혜택 소식 받기', false)}
+        {box('alimtalk', '결제·가입 안내를 카카오 알림톡으로 받기(관리자, 광고 없음)', false)}
+        {agree.alimtalk && <input className={inputCls + ' h-10'} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" maxLength={20} placeholder="휴대폰 번호 (예: 010-1234-5678)" aria-label="알림톡 받을 휴대폰" data-testid="signup-alimtalk-phone" />}
         {tagsOn && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" /><span>광고 효과 측정(가입 완료 1회) 동의 <span className="text-ink-3">(선택)</span></span></label>}
       </div>
       {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}

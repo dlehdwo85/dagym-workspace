@@ -125,6 +125,9 @@ async function sendReceipt(sql: Sql, paymentId: string) {
     await sendMail(p.email, `[워크인] 결제 영수증 (${p.amount.toLocaleString('ko-KR')}원)`,
       `${p.tenant_name}\n\n상품: ${what}\n금액: ${p.amount.toLocaleString('ko-KR')}원 (VAT 포함)\n결제 수단: ${pm}${p.card_name ? ` · ${p.card_name}` : ''}${p.card_no ? ` ${p.card_no}` : ''}\n결제 일시: ${when}\n주문번호: ${p.moid}${p.tid ? `\n거래번호: ${p.tid}` : ''}\n\n${receipt ? `영수증(나이스페이): ${receipt}\n` : ''}결제 내역: ${process.env.APP_URL ?? ''}/admin/usage`);
     await sql`update payments set meta = meta || ${sql.json({ receiptSentAt: new Date().toISOString() })} where id = ${p.id}`;
+    // 304차 #871: 결제 완료 알림톡(동의한 관리자만·꺼짐 기본) — 실패해도 결제·영수증 메일은 그대로
+    const A = await import('../alimtalk');
+    await A.alimtalkAdmins(p.tenant, 'pay_ok', { 회사명: p.tenant_name, 상품: what, 금액: p.amount.toLocaleString('ko-KR'), 결제일시: A.alimDate(p.paid_at ?? new Date()) }, `pay:${p.id}`);
   } catch (e) { await logError('billing-receipt', e); }
 }
 
@@ -353,6 +356,10 @@ export async function billingJob() {
     await sql`update tenant_subscriptions set past_due_since = ${first.toJSDate()}, retry_count = ${n}, next_retry_on = ${nextDay ? first.plus({ days: nextDay }).toISODate() : null}, updated_at = now() where tenant = ${s.tenant}`;
     await tell(s.tenant, s.name, '구독 결제에 실패했습니다',
       `${r.msg ?? '카드사 거절'} — ${nextDay ? `${first.plus({ days: nextDay }).toFormat('M/d')}에 다시 시도합니다. ` : ''}카드를 확인해 주세요. 미납 7일이 지나면 읽기 전용, 30일이 지나면 이용이 중지됩니다(데이터는 그대로).`, `bill-fail:${s.tenant}:${d}`);
+    { // 304차 #871: 정기 결제 실패 알림톡(동의한 관리자만·꺼짐 기본) — 메일은 위 tell 로 이미 감
+      const A = await import('../alimtalk');
+      await A.alimtalkAdmins(s.tenant, 'pay_fail', { 회사명: s.name, 사유: String(r.msg ?? '카드사 거절').slice(0, 60), 다음시도: nextDay ? A.alimDate(first.plus({ days: nextDay }).toJSDate(), false) : '없음(관리자 화면에서 결제)' }, `payfail:${s.tenant}:${d}`);
+    }
   }
   // 미납 단계 올리기: 7일 → 읽기 전용, 30일 → 이용 중지 (유예 중이면 건너뜀)
   const late = await sql<any[]>`select s.tenant, s.past_due_since, s.billing_lock, t.name from tenant_subscriptions s join tenants t on t.id = s.tenant

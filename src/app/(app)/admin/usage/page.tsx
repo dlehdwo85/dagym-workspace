@@ -5,6 +5,7 @@ import { Gauge, HardDrive, Sparkles, Users } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Meter, fmtBytes, won } from '@/components/usage';
 import { BillingSection } from '@/components/Billing';
+import { AlimtalkCard } from '@/components/AlimtalkCard';
 import { AiPeopleBudgets } from '@/components/AiPeopleBudgets';
 import { byPurposeRows } from '@/components/aiPurpose';
 import { TaskQuota } from '@/components/TaskQuota';
@@ -77,6 +78,7 @@ export default function UsagePage() {
       {data.aiLimits && <AiLimitsTable data={data.aiLimits} />}
       {/* V14 4번: 이번 달 AI 사용 — 사람별·기능별, 한도 대비 % */}
       {!inApp && <BillingSection />}
+      {canEdit && !inApp && <AlimtalkCard />}
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-usage">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">이번 달 AI 사용</h2>

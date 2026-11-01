@@ -139,7 +139,7 @@ export async function purgeDeletedAccounts(now = new Date()) {
       await tx`delete from notifications where user_id = ${r.id}`;
       await tx`delete from user_settings where user_id = ${r.id}`;
       await tx`delete from google_calendar_links where user_id = ${r.id}`;
-      await tx`update users set phone = null, work_email = null, title_short = null, purged_at = ${now}, updated_at = now() where id = ${r.id}`;
+      await tx`update users set phone = null, alimtalk_phone = null, alimtalk_ok = false, work_email = null, title_short = null, purged_at = ${now}, updated_at = now() where id = ${r.id}`;
       await audit(tx, null, 'account.purged', 'user', r.id, { after: '30d' }, null);
     });
   }
