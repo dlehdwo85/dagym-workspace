@@ -57,6 +57,8 @@ input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 .app-shell { overflow-x: clip; }
 /* iPhone: 16px 보다 작은 입력칸을 누르면 화면이 확대되어 옆으로 밀려 보임 → 휴대폰에서는 입력칸 글자 16px */
 @media (max-width: 640px) { input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px !important; } }
+/* 316차(#886 광고 캡처에서 발견): 위 16px 때문에 높이 28px(h-7) 작은 고르기·입력칸 글자가 위아래로 잘림 → 휴대폰에서는 36px */
+@media (max-width: 640px) { select.h-7, input.h-7 { height: 2.25rem !important; } }
 /* 앱(Android edge-to-edge·iOS 노치): Capacitor SystemBars 가 --safe-area-inset-* 를 넣어 준다. 없으면 브라우저 env() */
 :root { --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)); }
 /* V14 14번: 안드로이드 앱(edge-to-edge)에서 일부 기기(3버튼 내비)는 하단 inset 이 0 으로 들어온다 → 최소 48px */
