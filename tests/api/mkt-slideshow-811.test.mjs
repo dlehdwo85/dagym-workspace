@@ -78,6 +78,18 @@ test('사진을 고르지 않으면 이 글에 맞는 자료실 실사를 골라
   assert.ok(b.result.reuse.photos.every((x) => P.photos.includes(x)), '자료실 실사');
 });
 
+test('323차(로컬 11/02 ①) 보류 글에 다시 의뢰해도 보류 그대로 — 새 판은 붙고 승인 대기로 안 올라감', async () => {
+  const id = await content('reels');
+  await sql`update mkt_contents set status = 'hold' where id = ${id}`;
+  const r = await ctx.owner.ok('POST', '/api/marketing/studio/slideshow', { contentId: id, photoIds: P.photos });
+  const [b] = await sql`select status from mkt_briefs where id = ${r.briefId}`;
+  assert.equal(b.status, 'review');
+  const [c] = await sql`select status, current_version from mkt_contents where id = ${id}`;
+  assert.deepEqual([c.status, c.current_version], ['hold', 2], '보류 유지 + 새 판');
+  const [v] = await sql`select media_ids from mkt_versions where content_id = ${id} and version = 2`;
+  assert.equal(v.media_ids.length, 1, '새 판에 영상 1편');
+});
+
 test('자동 제작: 브랜드 영상 방법 = 실제 사진 → 릴스 원고 직후 그 판(v1)에 사진 영상(새 판 없음) · 영상 제작 요청 카드는 대신함 · 생성 비용 0 · 앱 화면 녹화 = 카드 예상 0', async () => {
   assert.equal((await ctx.staffA.client.req('PATCH', `/api/marketing/auto/brands/${P.brand}`, { video: { method: 'photos' } })).status, 403, '관리자만');
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${P.brand}`, { video: { method: 'photos' } });

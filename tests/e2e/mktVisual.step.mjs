@@ -8,7 +8,7 @@ export async function mktVisual({ owner, ctx, sql, BASE, SHOTS }) {
   const brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: 'E2E 시안 브랜드' })).id;
   await sql`update mkt_brands set color = '#0F766E' where id = ${brand}`;
   const [{ tenant }] = await sql`select tenant from mkt_brands where id = ${brand}`; const created_by = ctx.ownerId;
-  await seedBrandPhotos(sql, { tenant, ownerId: ctx.ownerId, brandName: 'E2E 시안 브랜드' }); // 295·303차 뒤: 사진이 없으면 [지금 만들기]가 단색 표지 → 수정 요청으로 감
+  await seedBrandPhotos(sql, { tenant, ownerId: ctx.ownerId, brandName: 'E2E 시안 브랜드', caption: (k) => `E2E 시안 브랜드 시설 ${k} — 입주민 예약 문의를 한 화면에서 정리하는 안내 데스크` }); // 295·303차 뒤: 사진이 없으면 [지금 만들기]가 단색 표지 → 수정 요청으로 감 · 320차 뒤: 글 낱말('화면에서')이 든 사진이어야 카드 장에 깔림
   // 운영 10/24 상황: 자동 제작이 글만 만들고 이미지 제작 카드를 연 채 승인 대기
   const [ac] = await sql`insert into mkt_contents (tenant, title, channel, kind, scheduled_at, status, current_version, created_by, auto, produced_at, brand_id, quality)
     values (${tenant}, 'E2E 시안 없는 자동 글', 'instagram', 'feed', now() + interval '2 days', 'pending', 1, ${created_by}, true, now(), ${brand}, ${sql.json({ passed: true, issues: [] })}) returning id`;
@@ -38,7 +38,10 @@ export async function mktVisual({ owner, ctx, sql, BASE, SHOTS }) {
   await ready.getByTestId('card-approve').waitFor({ timeout: 30000 });
   assert.equal(await ready.getByTestId('approval-no-media').count(), 0);
   await ready.getByRole('button', { name: '시안 1 크게 보기' }).waitFor();
-  assert.ok(await ready.getByRole('button', { name: '시안 1 크게 보기' }).locator('img').evaluate((img) => img.complete && img.naturalWidth > 0), '그린 시안이 보임');
+  // 그림이 막 만들어져 내려오는 중일 수 있어 잠깐 기다림(한 번에 보면 로딩 전에 걸림)
+  const img = ready.getByRole('button', { name: '시안 1 크게 보기' }).locator('img'); let shown = false;
+  for (let i = 0; i < 40 && !shown; i++) { shown = await img.evaluate((el) => el.complete && el.naturalWidth > 0).catch(() => false); if (!shown) await owner.waitForTimeout(250); }
+  assert.ok(shown, '그린 시안이 보임');
   assert.match(await ready.getByTestId('card-ai-image').innerText(), /AI 이미지로 다시 · 약 6\.5크레딧/);
   assert.match(await owner.getByTestId('mkt-approvable-count').innerText(), /승인할 시안 1건/);
   assert.match(await owner.getByTestId('mkt-no-visual').locator(':scope > summary').innerText(), /1건/, '손 글은 아직 시안 없음');

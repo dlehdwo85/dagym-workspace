@@ -115,8 +115,8 @@ async function lowBalanceAlerts(tenant: string, rows: BalanceRow[]) {
     const body = `${name} 잔액이 ${won(r.balance)}입니다(${r.source === 'api' ? '매체 조회' : '직접 입력'} ${when}). 광고가 멈추지 않게 충전해 주세요.${r.link ? ` 충전: ${RECHARGE_LINKS[r.provider]?.how ?? ''}` : ''}`;
     if (owners.length) {
       // 하루 1번은 low_alerted_on 이 막음 — 같은 날 기준 위로 올랐다가 다시 내려가면 새 알림(금액이 달라 알림 중복 키도 다름)
-      await notify(sql, { userIds: owners.map((o) => o.id), type: 'usage_alert', title, body, link: '/s/marketing/ads', entityType: 'mkt_balance', entityId: r.id, space: 'marketing', dedupeKey: `mktlow:${r.id}:${today}:${Math.round(r.balance)}` }).catch(() => {});
-      for (const o of owners) if (o.email) await sendMail(o.email, `[워크인] ${title}`, `${body}\n\n광고 성과 화면: ${appUrl()}/s/marketing/ads${r.link ? `\n충전 페이지: ${r.link}` : ''}\n\n알림 기준은 광고 성과 화면 › 매체 잔액에서 바꿀 수 있습니다.`).catch(() => {});
+      await notify(sql, { userIds: owners.map((o) => o.id), type: 'usage_alert', title, body, link: '/s/marketing/connections', entityType: 'mkt_balance', entityId: r.id, space: 'marketing', dedupeKey: `mktlow:${r.id}:${today}:${Math.round(r.balance)}` }).catch(() => {});
+      for (const o of owners) if (o.email) await sendMail(o.email, `[워크인] ${title}`, `${body}\n\n매체 잔액 화면: ${appUrl()}/s/marketing/connections${r.link ? `\n충전 페이지: ${r.link}` : ''}\n\n알림 기준은 마케팅 › 연결 계정 › 매체 잔액에서 바꿀 수 있습니다.`).catch(() => {});
     }
     await sql`update mkt_ad_balances set low_alerted_on = ${today}::date where id = ${r.id}`;
     n++;

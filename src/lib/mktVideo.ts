@@ -482,7 +482,8 @@ async function finalize(b: any, r: any) {
     await save(b.id, { ...r, stage: 'done', mediaIds, review, checkFails, notes, renderAt: null, attached }, { status: 'review', error: null });
     return { status: 'review', stage: 'done', mediaIds };
   }
-  const ver = await addVersion(actor, b.content_id, { body: p.caption ?? b.message, mediaIds, note: reuse ? reuseNote() : `제작의뢰실 영상 ${mediaIds.length}편(장면 ${scenesN}개 합성 · ${r.model}) · ${issues.length ? `사람 검수 필요 ${issues.length}곳` : 'AI 검수 통과'}` });
+  // 323차(로컬 11/02 ①): 보류 글에 사진 영상·화면 영상을 다시 붙여도 보류 그대로(사람이 다시 의뢰한 것 = 상태를 바꾸는 요청이 아님)
+  const ver = await addVersion(actor, b.content_id, { body: p.caption ?? b.message, mediaIds, note: reuse ? reuseNote() : `제작의뢰실 영상 ${mediaIds.length}편(장면 ${scenesN}개 합성 · ${r.model}) · ${issues.length ? `사람 검수 필요 ${issues.length}곳` : 'AI 검수 통과'}` }, { keepHold: !!reuse });
   await sql`update mkt_contents set rationale = coalesce(rationale, '{}'::jsonb) || ${sql.json({ qa: { needsHuman: issues.length > 0, issues: issues.slice(0, 12), notes: notes.slice(0, 8), checks: variants.find((v) => v.checks)?.checks ?? null, at: new Date().toISOString() } } as never)} where id = ${b.content_id}`;
   if (reuse) { // 보관(10/25 전면 정리)했던 글이면 보관 표시를 지움 — 새 버전이 승인함에 올라감. 크레딧 원장은 그대로(새로 생성한 것 없음)
     await sql`update mkt_contents set quality = (coalesce(quality, '{}'::jsonb) - 'archived_from' - 'archived_at' - 'archived_reason' - 'archived_by') || ${sql.json({ reused: { at: new Date().toISOString(), ledger: reuse.ledger, version: (ver as any)?.version ?? null } } as never)} where id = ${b.content_id}`;

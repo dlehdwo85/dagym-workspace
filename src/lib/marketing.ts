@@ -248,7 +248,8 @@ export async function createContent(u: SessionUser, i: z.infer<typeof contentInp
 
 /** 수정본 = 새 버전. 새 버전이 오면 이전 승인은 무효 → 재승인 대기 */
 export const versionInput = z.object(versionFields);
-export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof versionInput>) {
+/** opt.keepHold(323차 로컬 11/02 '재의뢰하면 보류가 풀립니다'): 보류 글에 영상·시안을 다시 붙일 때는 보류 그대로(승인 대기로 안 올림·재승인 알림 대신 보류 글 새 판 알림) */
+export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof versionInput>, opt: { keepHold?: boolean } = {}) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);
   await mediaOk(u, i.mediaIds);
@@ -273,8 +274,9 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
       const left = ((q.issues ?? []) as string[]).filter((x) => x !== BLOG_PHOTO_RULE && !VISUAL_ISSUE.test(x));
       quality = q.passed === false && (q.issues ?? []).length && !left.length ? (q.script ? { script: q.script } : null) : { ...q, issues: left, ...(visual && i.mediaIds.length === 1 && i.mediaIds[0] === visual.fileId ? { visual } : {}) }; // 대본(컷) 칸은 영상을 붙여도 남김
     }
-    await tx`update mkt_contents set current_version = ${v}, status = 'pending', quality = ${quality ? tx.json(quality as never) : null}, updated_at = now() where id = ${id}`;
-    await (await import('./mktAuto')).mktNotify(tx, { tenant: tenantOf(u), brand_id: c.brand_id, is_test: c.is_test, created_by: c.created_by }, u.id, { approval: true, type: 'review_requested', title: `재승인 대기(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
+    const hold = !!opt.keepHold && c.status === 'hold';
+    await tx`update mkt_contents set current_version = ${v}, status = ${hold ? 'hold' : 'pending'}, quality = ${quality ? tx.json(quality as never) : null}, updated_at = now() where id = ${id}`;
+    await (await import('./mktAuto')).mktNotify(tx, { tenant: tenantOf(u), brand_id: c.brand_id, is_test: c.is_test, created_by: c.created_by }, u.id, { approval: true, type: 'review_requested', title: `${hold ? '보류 글 새 판' : '재승인 대기'}(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
     return { version: v };
   });
 }

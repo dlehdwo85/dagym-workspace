@@ -87,6 +87,8 @@ export const isCapture = (r: { folder?: string | null; vision?: unknown }) => /(
 export const photoText = (r: { title: string; folder: string; tags?: string[] | null; description?: string | null; vision?: unknown; parent?: string | null }) =>
   `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)} ${r.parent ?? ''}`;
 export const photoHas = (r: Parameters<typeof photoText>[0], name: string) => !!name && photoText(r).toLowerCase().includes(name.toLowerCase());
+/** 323차: 시설 오판정에 쓰는 '강한' 글 — 이름·태그·한 줄 설명·폴더·원본 영상 이름(장면 설명은 뺌) */
+export const photoStrongText = (r: Parameters<typeof photoText>[0]) => `${r.title} ${(r.tags ?? []).join(' ')} ${visionOk(r.vision) ? r.vision.caption : ''} ${r.folder} ${r.parent ?? ''}`;
 /** 320차(로컬 11/01 ④: 하이링크 쇼츠 장면 1~4가 '카카오톡 이미지, 내용 확인 불가'로 설명된 파일): 무엇이 찍혔는지 모르는 사진 — 설명이 '내용 확인 불가·확인 필요'이거나,
  *  AI 설명 없이 자료실 설명이 파일 이름뿐인 사진. 사람이 바탕으로 고른 사진('시안 바탕' 폴더·'글자없음' 태그)은 그대로 씀 */
 const UNKNOWN_RE = /내용\s*(을\s*)?(확인|파악|식별|판독)\s*(이\s*)?(불가|불능|어렵|어려|안\s*됨|할 수 없)|확인\s*필요|확인필요|식별\s*불가|판독\s*불가|알 수 없는 (이미지|사진|파일|장면)|무엇(이|인지)\s*(찍혔는지|보이는지)?\s*알 수 없|이미지(를)?\s*(불러올|볼|열)\s*수\s*없/;
@@ -134,8 +136,9 @@ export const photoPool = (c: Pick<Content, 'tenant' | 'id' | 'brand_id'>) => loa
 async function rankPhotos(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover', pool?: Pool, facText?: string) {
   const { outsideOk, blurryPhoto, facesToHide } = await import('./mktPhotos');
   // 320차(대표 11/01 23:3x — 다짐 「사우나랑 독서실도 맡길 수 있나요?」 표지·4분할이 헬스장·GX룸): 글 제목(표지는 표지 첫 줄까지)에 시설 이름이 있으면 그 시설 사진만
-  const { facilitiesIn, facilityMatch } = await import('./mktFacility');
+  const { facilitiesIn, facilityMatch, facilityForeign } = await import('./mktFacility');
   const fac = facilitiesIn(facText ?? c.title.replace(/^\s*\[시험\]\s*/, ''));
+  const facAll = facilitiesIn(`${c.title} ${text} ${facText ?? ''}`); // 323차: 글(제목·본문) 어디에든 나온 시설 — 안 나온 시설 사진은 뺌
   const { rows, used, gen, rule } = pool ?? (await loadPool(c));
   if (!rows.length) return [];
   const own = rule?.own.length ? rule.own : brand ? [brand] : []; // 288차: 이 브랜드 이름 + 다른 표기(DAGYM 등)
@@ -154,6 +157,7 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
   for (const [k, r] of rows.entries()) {
     if (exclude.has(r.id) || (r.hash && goneHash.has(r.hash))) continue;
     if (fac.length && !facilityMatch(photoText(r), fac)) continue; // 320차: 제목의 시설이 아닌 사진은 안 씀(다른 시설 사진으로 채우지 않음)
+    if (facilityForeign(photoStrongText(r), facAll)) continue; // 323차: 글에 없는 다른 시설(카페·주차장·사우나…) 사진은 안 씀
     if (contentUnknown(r)) continue; // 320차 ④: 무엇이 찍혔는지 모르는 사진은 안 씀
     // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽·'쓰지 않음'만 빼고 · 288차 '앱 화면 캡처만' 브랜드 = 바탕은 사진 없이, 본문은 화면 캡처만
     if (rule?.src === 'screen' ? mode === 'cover' || !isCapture(r) || markedSkip(r.tags) : mode === 'cover' ? !backdropOk(r) : !bodyOk(r)) {
@@ -271,13 +275,14 @@ export async function faceSafeFor(c: Pick<Content, 'tenant' | 'created_by'>, ids
 }
 /** 321차(로컬 11/02 ①: 하이링크 영상 다시 의뢰 장면 기록에 '인포CRM사진'·'카페' 그대로): 사람이 고른 사진(사진 영상 의뢰·다시 의뢰)도 320차 규칙 —
  *  제목의 시설이 아닌 사진·무엇이 찍혔는지 모르는 사진은 뺌. 뺀 사진은 dropped 에(장면 기록 '영상에서 뺀 사진') */
-export async function photoRuleIds(c: Pick<Content, 'tenant' | 'title'>, ids: string[], dropped?: string[]): Promise<string[]> {
+export async function photoRuleIds(c: Pick<Content, 'tenant' | 'title'>, ids: string[], dropped?: string[], text = ''): Promise<string[]> {
   if (!ids.length) return ids;
   const F = await import('./mktFacility'); const fac = F.facilitiesIn(String(c.title ?? '').replace(/^\s*\[시험\]\s*/, ''));
+  const facAll = F.facilitiesIn(`${c.title ?? ''} ${text}`); // 323차: 글에 없는 다른 시설 사진은 뺌
   const rows = await db()<{ id: string; title: string; file_name: string; folder: string; tags: string[]; description: string | null; vision: unknown; parent: string | null }[]>`select id::text, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision,
     case when source = 'video_frame' then (select concat_ws(' ', coalesce(nullif(pv.title, ''), pv.file_name), pv.folder, array_to_string(pv.tags, ' ')) from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant) end as parent
     from library_files where tenant = ${c.tenant} and id = any(${ids}::uuid[])`;
-  const ok = new Set(rows.filter((r) => F.facilityMatch(photoText(r), fac) && !contentUnknown(r)).map((r) => r.id));
+  const ok = new Set(rows.filter((r) => F.facilityMatch(photoText(r), fac) && !F.facilityForeign(photoStrongText(r), facAll) && !contentUnknown(r)).map((r) => r.id));
   dropped?.push(...ids.filter((id) => !ok.has(id)));
   return ids.filter((id) => ok.has(id));
 }
