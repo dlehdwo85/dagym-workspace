@@ -10,7 +10,7 @@ import { LANDING_PAGES, SITE, landingBySlug } from '@/lib/landingPages';
 
 /**
  * #627(대표 10/25 20:05 ①, SEO_AUDIT 2-1 '핵심 키워드 5개 모두 해당 페이지 없음'): 검색어별 소개 페이지 — 중소기업 업무관리 · 전자결재 · 협업툴.
- * 글·FAQ 는 src/lib/landingPages.ts(실제 기능만). 홈과 같은 머리·하단, 가입 버튼 이벤트(data-track)는 LandingEvents 가 받는다.
+ * 글·FAQ 는 src/lib/landingPages.ts(실제 기능만). 309차: 한글은 낱말 단위 줄바꿈(break-keep, '블로/그'·'넘깁니/다' 쪼개짐) + 제목 줄 길이 고르게(text-balance). 홈과 같은 머리·하단, 가입 버튼 이벤트(data-track)는 LandingEvents 가 받는다.
  */
 export const dynamic = 'force-dynamic'; // 하단 사업자 정보가 요청 때 운영 설정을 읽음(BizFooter connection())
 
@@ -41,14 +41,14 @@ export default async function LandingPage({ params }: Params) {
   };
   const others = LANDING_PAGES.filter((x) => x.slug !== p.slug);
   return (
-    <div className="min-h-screen bg-white text-ink" data-testid="landing-page">
+    <div className="min-h-screen break-keep bg-white text-ink [overflow-wrap:anywhere]" data-testid="landing-page">
       <LandingEvents ga4={tags?.ga4} ads={tags?.googleAds} naverWa={tags?.naverWa} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
       <LandingHeader />
       <section className="bg-slate-50 py-12 sm:py-16">
         <div className="mx-auto max-w-6xl px-4 text-center">
           <p className="text-sm font-semibold text-brand-700">{p.keyword} · 14일 무료 체험</p>
-          <h1 className="mx-auto mt-2 max-w-3xl text-3xl font-bold leading-tight tracking-tight sm:text-4xl" data-testid="landing-h1">{p.h1}</h1>
+          <h1 className="mx-auto mt-2 max-w-3xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-4xl" data-testid="landing-h1">{p.h1}</h1>
           <p className="mx-auto mt-4 max-w-2xl text-base text-ink-2 sm:text-lg">{p.intro}</p>
           <div className="mt-7 flex flex-wrap justify-center gap-2">
             <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-track={`start-${p.slug}`} data-testid="landing-page-start">무료로 시작<ArrowRight className="size-4" /></Link>
