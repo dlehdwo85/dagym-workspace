@@ -18,7 +18,9 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
   assert.ok(n >= 2, `공동 업무 ${n}`);
   assert.match(await box.locator('h2').innerText(), /^공동 업무/);
   const rowOf = (title) => box.getByTestId('collab-row').filter({ hasText: title });
-  assert.equal(await rowOf('E2E 협업 입찰 서류').getByTestId('collab-person').innerText(), '✓ 박직원', '끝낸 사람은 ✓');
+  // 308차 #866: 함께하는 사람은 '함께' 열의 얼굴(끝낸 사람 초록 테두리) — 이름·상태는 마우스를 올리면
+  assert.equal(await rowOf('E2E 협업 입찰 서류').getByTestId('collab-person').getAttribute('aria-label'), '박직원 · 내 몫 완료', '끝낸 사람 표시');
+  assert.equal(await rowOf('E2E 협업 입찰 서류').getByTestId('collab-count').innerText(), '1/2');
   assert.equal(await rowOf('E2E 각자 협업 점검').getByTestId('collab-person').getAttribute('data-state'), '진행 중');
   // 함께하는 사람은 줄 오른쪽 한 줄 이름표 — 아래 줄을 더 만들지 않아 개인 업무 줄과 높이가 같음
   const soloH = (await staff.locator('[data-testid="my-groups"] > section:not([data-group="collab"]) [data-row]').filter({ hasText: 'E2E 개인 업무 799' }).boundingBox()).height;
@@ -30,6 +32,31 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
   assert.ok(await staff.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), '가로 넘침 없음');
   await box.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await staff.screenshot({ path: `${SHOTS}/268-collab-my.png` });
+  // 308차 #866(대표 '마감일·진행상황 위아래 정렬이 좌우로 깨져 보인다'): PC 1280·1440 폭 — 공동 업무 줄마다 상태·마감·함께 칸 왼쪽 끝 x 가 같고 열 이름과도 맞음
+  const vp = staff.viewportSize();
+  for (const w of [1280, 1440]) {
+    await staff.setViewportSize({ width: w, height: 900 });
+    await staff.goto(`${BASE}/tasks?view=my&group=due`);
+    await box.getByTestId('collab-row').first().waitFor();
+    const xs = await box.evaluate((el) => {
+      const left = (n) => Math.round(n.getBoundingClientRect().left);
+      const rows = [...el.querySelectorAll('[data-testid="collab-row"]')];
+      const col = (id) => rows.map((r) => left(r.querySelector(`[data-testid="${id}"]`)));
+      const head = [...el.querySelectorAll('[data-testid="collab-head"] > span')].slice(1).map(left);
+      return { status: col('status-cell'), due: col('due-cell'), people: col('people-cell'), head, n: rows.length };
+    });
+    for (const k of ['status', 'due', 'people']) assert.ok(Math.max(...xs[k]) - Math.min(...xs[k]) <= 1, `${w}px ${k} 칸 x 줄마다 같음: ${xs[k].join(',')}`);
+    assert.deepEqual(xs.head, [xs.status[0], xs.due[0], xs.people[0]], `${w}px 열 이름 = 칸 위치`);
+    assert.equal(await box.getByTestId('requester-cell').count(), 0, '요청자 칸 없음');
+    if (w === 1440) await staff.screenshot({ path: `${SHOTS}/308-collab-grid-1440.png` });
+  }
+  await staff.setViewportSize({ width: 375, height: 800 });
+  await staff.goto(`${BASE}/tasks?view=my&group=due`);
+  await box.getByTestId('collab-row').first().waitFor();
+  assert.ok(await staff.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), '375 폭 가로 넘침 없음');
+  if (vp) await staff.setViewportSize(vp);
+  await staff.goto(`${BASE}/tasks?view=my&group=due`);
+  await box.getByTestId('collab-row').first().waitFor();
   // 접지 않음 — 접기 단추 없이 전부
   assert.equal(await staff.getByTestId('my-collab-toggle').count(), 0);
   assert.equal(await box.getByTestId('collab-row').count(), n, '전부 보임');

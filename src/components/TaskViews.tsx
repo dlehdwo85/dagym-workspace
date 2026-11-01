@@ -11,7 +11,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import dynamic from 'next/dynamic';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSalesTerms, useSession } from './session';
-import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock } from 'lucide-react';
+import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock, Flag } from 'lucide-react';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
@@ -20,7 +20,7 @@ import { PANEL_SWAP_EVENT } from './TaskPanelHost';
 import { keepScroll } from './backClose';
 import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
 import { coOf, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
-import { CollabPeople, collabSort, isCollab } from './CollabTasks';
+import { CollabFaces, collabSort, isCollab } from './CollabTasks';
 import { QuickAddTask } from './QuickAddTask';
 import { CarriedBadge } from './carried';
 import { followUpMsg, useLeadFollowUp } from './sales/LeadFollowUp';
@@ -549,32 +549,34 @@ function meetingWhen(iso: string) {
   return day === ymd(new Date()) ? hm : `${Number(day.slice(5, 7))}/${Number(day.slice(8))} ${hm}`;
 }
 
-function Meta({ t, compact, onPatch }: { t: Task; compact?: boolean; onPatch?: (t: Task, b: any) => any }) {
-  const { dir } = useSession();
+function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onPatch?: (t: Task, b: any) => any; collab?: boolean }) {
+  const { dir, user } = useSession();
   const hq = dir.orgUnits.find((o) => o.id === t.org_unit_id)?.type === 'hq';
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2">
       {/* 로컬 검수 10/17: 휴대폰 둘째 줄은 상태·연장 요청·열람·첨부·경고만, 프로젝트·하위·체크리스트·댓글 수는 숨김(상세에 있음). 2차: 그래도 넘치면 잘리지 않게 줄바꿈 */}
       {/* V11 1번: 휴대폰은 제목 아래 줄에 상태 칩(누르면 바로 변경) — PC 는 상태 열 */}
-      {onPatch && <span className="shrink-0 lg:hidden"><StatusChip t={t} onPatch={onPatch} /></span>}
+      {onPatch && <span className="shrink-0 lg:hidden"><StatusChip t={t} onPatch={onPatch} plain={collab} /></span>}
       {/* V32 4: 연장 요청 대기(요청자가 목록에서 바로 알아봄). 로컬 검수 10/17: 휴대폰 둘째 줄이 넘치면 잘리므로 상태 칩 바로 다음·짧게("연장→10/20") */}
       {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장<span className="max-lg:hidden"> 요청</span> → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
       {t.team_name && <span className="inline-flex min-w-0 max-w-[6rem] truncate items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
       {(t.collab_teams?.length ?? 0) > 0 && <span className="inline-flex min-w-0 max-w-[8rem] truncate rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2 max-lg:hidden" title={`함께하는 부서: ${t.collab_teams!.join(', ')}`} data-testid="collab-chip">+{t.collab_teams![0]}{t.collab_teams!.length > 1 ? ` 외 ${t.collab_teams!.length - 1}` : ''}</span>}
       {t.project_name && <span className="inline-flex min-w-0 items-center gap-1 max-lg:hidden"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
       {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 요청자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
-      {t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate max-lg:hidden xl:hidden" title="요청자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
-      {!compact && <span className={cx('truncate max-lg:hidden', onPatch && hq && 'hidden lg:inline')}>{t.org_unit_name}</span>}
+      {!collab && t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate max-lg:hidden xl:hidden" title="요청자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
+      {/* 308차 #866: 공동 업무 줄은 요청자 칸 대신 — 남이 요청했으면 '요청 이름' 한 마디(내가 요청했으면 안 보임) · 소속 이름(본사)은 뺌 */}
+      {collab && t.requested_by && t.requested_by !== user.id && t.requested_by_name && <span className="truncate max-lg:hidden" data-testid="row-requester">요청 {t.requested_by_name}</span>}
+      {!compact && !collab && <span className={cx('truncate max-lg:hidden', onPatch && hq && 'hidden lg:inline')}>{t.org_unit_name}</span>}
       {!compact && <span className="max-lg:hidden"><BrandDot brand={t.brand_id} /></span>}
       {t.subtask_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
-      {t.checklist_total > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{t.checklist_done}/{t.checklist_total}</span>}
+      {t.checklist_total > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{collab && '할 일 '}{t.checklist_done}/{t.checklist_total}</span>}
       {t.comment_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
       {/* V35 1: 첨부는 파란 칩으로 눈에 띄게, 고객에게 보냄 = 초록 · 고객이 열어 봄 = 진한 초록 */}
       {t.attachment_count > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-sky-100 px-1.5 text-[11px] font-semibold tabular-nums text-sky-800" title={`첨부 ${t.attachment_count}개`} data-testid="att-chip"><Paperclip className="size-3" />{t.attachment_count}</span>}
       {t.share_state && <span className={cx('shrink-0 rounded-full px-1.5 text-[11px] font-semibold', t.share_state === 'opened' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700')} title={t.share_state === 'opened' ? '고객이 자료를 열어 봄' : '고객에게 자료를 보냄'} data-testid="share-chip">{t.share_state === 'opened' ? '열람' : '보냄'}</span>}
       {!!t.photo_required && <span className={cx('inline-flex items-center gap-0.5 tabular-nums', (t.photo_count ?? 0) >= t.photo_required ? 'text-green-600' : 'text-amber-700')} title="완료 증빙 사진"><Camera className="size-3.5" />{t.photo_count ?? 0}/{t.photo_required}</span>}
       {t.recurrence_rule && <span title="반복 업무" className="max-lg:hidden"><Repeat className="size-3.5" /></span>}
-      {t.batch && t.batch.total > 1 && <span className="max-lg:hidden rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
+      {!collab && t.batch && t.batch.total > 1 && <span className="max-lg:hidden rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
       {t.blocked_by_count > 0 && <span className="shrink-0 font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
       {/* V37 8: 연결 미팅 일정 📍장소·시간 (장소는 일정에 한 번만) */}
       {t.meeting && <span className="inline-flex min-w-0 max-w-[12rem] shrink items-center gap-0.5 rounded-full bg-rose-50 px-1.5 text-[11px] font-medium text-rose-800" title={`미팅 ${t.meeting.location}`} data-testid="meeting-chip"><span aria-hidden>📍</span><span className="truncate">{t.meeting.location}</span><span className="shrink-0 tabular-nums">· {meetingWhen(t.meeting.start)}</span></span>}
@@ -689,7 +691,7 @@ let tipClaimed = false; // 한 화면에 말풍선은 하나만
  * V11 1번·V14 43번: 상태 칩 = 누르는 버튼(테두리 알약 + ▾, 터치 44px, 눌림 효과) — 누르면 메뉴 맨 위 [✓ 완료](결재가 필요하면 [검토 요청]) 다음 나머지 상태.
  * 바꿀 수 없는 사람에게는 ▾ 없는 평평한 표시 + 자물쇠(누르면 이유 안내). 처음 3번은 "눌러서 상태 바꾸기" 말풍선(칩 오른쪽 — 제목을 가리지 않게).
  */
-function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any }) {
+function StatusChip({ t, onPatch, plain }: { t: Task; onPatch: (t: Task, b: any) => any; plain?: boolean }) {
   const { user } = useSession();
   const [open, setOpen] = useState(false);
   const [tip, setTip] = useState(false);
@@ -725,14 +727,15 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
   }
   // 휴대폰은 "확인 전"만(검수 10/16). 로컬 검수 10/19: PC 목록 상태 칸(112px)에 '진행 전 · 확인함'이 넘쳐 마감일과 겹침 → '확인함'은 넓은 화면(2xl)에서만 글자, 그 밖에는 툴팁
   // 대표 10/22(#427): PC 에서 '진행 전 · 확인 전'도 마감일 달력 아이콘 위로 넘쳤다 → PC 는 2xl 이상에서만 글자, 그 밖에는 빨간 점 + 툴팁(휴대폰은 그대로 글자)
-  const sub = ack && <span className={cx('text-[10.5px] font-normal', ack === '확인 전' ? 'text-red-600 lg:hidden 2xl:inline' : 'hidden text-ink-3 2xl:inline')}>· {ack}</span>;
+  // 308차 #866(대표 '표기를 통합해서 깔끔하게'): 공동 업무 줄은 상태만(몫 완료 수·확인함은 사람 칸 얼굴로)
+  const sub = ack && !plain && <span className={cx('text-[10.5px] font-normal', ack === '확인 전' ? 'text-red-600 lg:hidden 2xl:inline' : 'hidden text-ink-3 2xl:inline')}>· {ack}</span>;
   if (coMode) return (
     <button type="button" onClick={async (e) => { e.stopPropagation(); setPartDone(false);
         const r = await onPatch(t, { myPart: 'open' });
         if (r === false) setPartDone(true); else toast.ok('내 몫 완료를 취소했습니다'); }}
       onPointerDown={(e) => e.stopPropagation()} aria-pressed aria-label={`${t.title} 내 몫 완료 ${k}/${parts.length} — 누르면 취소`} title={`내 몫 완료 — 담당 ${parts.length}명 중 ${k}명 완료, 모두 끝나면 업무 완료`} data-testid="row-part-chip" data-done="1"
       className="hit inline-flex h-6 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border border-green-200 bg-green-50/60 px-1.5 text-[11px] font-semibold text-green-800/80 transition active:scale-95 lg:h-7 lg:text-[12px]">
-      <Check className="size-3 shrink-0" aria-hidden />내 몫 완료 · {k}/{parts.length}
+      <Check className="size-3 shrink-0" aria-hidden />내 몫 완료{!plain && <> · {k}/{parts.length}</>}
     </button>
   );
   if (!can) return (
@@ -746,7 +749,7 @@ function StatusChip({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => any
       <button ref={ref} type="button" onClick={(e) => { e.stopPropagation(); setTip(false); setOpen(true); }} onPointerDown={(e) => e.stopPropagation()} aria-haspopup="dialog" aria-label={`${t.title} 상태: ${statusText(t)}`} title={statusText(t)} data-testid="row-status-chip"
         // 대표(10/16): 휴대폰에서 상태 버튼이 너무 큼 → 보이는 크기 24px·글자 11px(누르는 범위는 hit 로 44px 유지)
         className={cx('hit inline-flex h-6 min-w-0 items-center gap-1 whitespace-nowrap rounded-full border pl-1.5 pr-1 text-[11px] font-semibold transition active:scale-95 lg:h-7 lg:text-[12px]', CHIP_TONE[t.status])}>
-        <span className={cx('size-1.5 shrink-0 rounded-full', ack === '확인 전' ? 'bg-red-500' : CHIP_DOT[t.status])} aria-hidden />{STATUS_LABEL[t.status]}{multi && t.status !== 'done' && <span className="font-normal tabular-nums opacity-80" data-testid="row-parts">· {k}/{parts.length}</span>}{sub}<ChevronDown className="size-3 shrink-0 opacity-70" aria-hidden />
+        <span className={cx('size-1.5 shrink-0 rounded-full', ack === '확인 전' && !plain ? 'bg-red-500' : CHIP_DOT[t.status])} aria-hidden />{STATUS_LABEL[t.status]}{multi && !plain && t.status !== 'done' && <span className="font-normal tabular-nums opacity-80" data-testid="row-parts">· {k}/{parts.length}</span>}{sub}<ChevronDown className="size-3 shrink-0 opacity-70" aria-hidden />
       </button>
       {tip && <span className="pointer-events-none absolute left-full top-1/2 z-10 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] text-white shadow-pop after:absolute after:right-full after:top-1/2 after:-translate-y-1/2 after:border-4 after:border-transparent after:border-r-ink" data-testid="status-tip">눌러서 상태 바꾸기</span>}
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={200}>
@@ -775,7 +778,8 @@ function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }
   const change = (v: string | null) => (ex === 'request' && t.due_date && (!v || v > t.due_date) ? setExt(v) : onPatch(t, { dueDate: v }));
   // 로컬 검수 10/17(390폭): 마감 칩이 92px 보다 넓으면(시간 포함 등) 왼쪽으로 넘쳐 둘째 줄 칩을 덮음 → 휴대폰은 칩 폭 그대로·줄 흐름 안에서
   return (
-    <span className="inline-flex w-[132px] shrink-0 justify-end max-lg:w-auto xl:w-[176px]" data-testid="due-cell">
+    // 308차 #866: 마감 칸은 고정 폭·왼쪽 맞춤(칩 길이가 달라도 줄마다 왼쪽 끝이 세로로 맞게)
+    <span className="inline-flex w-[136px] shrink-0 justify-start max-lg:w-auto" data-testid="due-cell">
       <DuePicker value={t.due_date} status={t.status} onChange={change} label={`${t.title} 마감일`} onExtend={ex ? () => setExt(null) : undefined} extendLabel={ex === 'request' ? '마감 연장 요청' : '마감 연장'} />
       {ex && <ExtendDialog task={t} boss={ex === 'boss'} open={ext !== false} initial={ext || null} onClose={() => setExt(false)} />}
     </span>
@@ -1167,7 +1171,6 @@ function MyGroupedList({ tasks: all, onPatch, onAcked, top }: { tasks: Task[]; o
 
 /** 대표 #799 → 280차 #824·#826(대표 10/31): '공동 업무' 칸 — 접지 않음(전부) · 함께하는 사람 이름표는 같은 줄 */
 function CollabSection({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => void }) {
-  const { user } = useSession();
   return (
     <section data-group="collab" data-testid="my-collab">
       <h2 className="mb-1.5 flex items-center gap-2 px-1 text-sm font-semibold text-violet-800">공동 업무
@@ -1175,8 +1178,12 @@ function CollabSection({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b
         <span className="text-xs font-normal text-ink-3">여러 명이 함께 맡은 업무</span>
       </h2>
       <div className="overflow-hidden rounded-card border border-violet-200 bg-white shadow-card" data-testid="task-list">
-        {tasks.map((t) => <div key={t.id} className="flex items-center border-b border-line last:border-b-0 [&>div:first-child>div]:border-b-0" data-testid="collab-row">
-          <div className="min-w-0 flex-1"><ListRow t={t} onPatch={onPatch} handle={NO_HANDLE} /></div><CollabPeople t={t} uid={user.id} className="max-w-[40%] shrink-0 pr-3" /></div>)}
+        {/* 308차 #866: 열 이름 한 줄(PC) — 줄의 [상태 132][마감 136][함께 132] 열과 같은 폭·간격 */}
+        <div className="hidden items-center gap-3 border-b border-line bg-slate-50/60 px-3 py-1 text-[11px] font-medium text-ink-3 lg:flex" data-testid="collab-head" aria-hidden>
+          <span className="min-w-0 flex-1">업무</span><span className="w-[132px] shrink-0">상태</span><span className="w-[136px] shrink-0">마감</span><span className="w-[132px] shrink-0">함께</span>
+        </div>
+        {tasks.map((t) => <div key={t.id} className="border-b border-line last:border-b-0 [&>div]:border-b-0" data-testid="collab-row">
+          <ListRow t={t} onPatch={onPatch} handle={NO_HANDLE} collab /></div>)}
       </div>
     </section>
   );
@@ -1213,7 +1220,7 @@ function ListView({ tasks, onPatch, onAck, empty, hint = true, add, tail, sortab
 
 const NO_HANDLE = <span className="hidden w-4 shrink-0 sm:inline-flex" />; // 끌기 손잡이 없는 줄의 같은 폭 빈 자리(238차: 줄 memo 가 깨지지 않게 상수)
 /** 목록 행. 모바일에서는 오른쪽으로 밀면 완료(또는 검토 요청), 왼쪽으로 밀면 보류. 238차(#742): memo — 같은 업무·같은 함수면 다시 그리지 않음 */
-const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragHint }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; handle?: React.ReactNode; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void; dragHint?: boolean }) {
+const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragHint, collab }: { t: Task; onPatch: (t: Task, b: any) => any; onAck?: (t: Task) => void; handle?: React.ReactNode; onMove?: (t: Task, to: 'top' | 'up' | 'down' | 'bottom') => void; dragHint?: boolean; collab?: boolean }) {
   const ST = useSalesTerms(); // #408 영업 원천 배지 이름은 회사 업종 템플릿
   // 방금 추가한 업무는 2초 강조
   const [fresh, setFresh] = useState(() => isFresh(t.id));
@@ -1293,22 +1300,27 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
         {/* 대표 실기기(10/16): 휴대폰은 오른쪽 마감·담당 칸 때문에 제목이 절반 폭에서 줄바꿈 → 제목은 한 줄 전체 폭, 마감·담당은 아래 줄(상태 칩 옆) */}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 max-lg:contents lg:flex-row lg:items-center lg:gap-3">
           <span className="flex min-w-0 items-center gap-1.5 max-lg:basis-full lg:max-w-[55%] lg:shrink-0" data-testid="row-title">
+            {/* 308차 #866: 공동 업무 줄은 우선순위 열 대신 높음·긴급만 제목 앞 깃발(보통·낮음은 안 보임) */}
+            {collab && (t.priority === 'urgent' || t.priority === 'high') && <Flag className={cx('size-3.5 shrink-0', t.priority === 'urgent' ? 'fill-red-500 text-red-600' : 'fill-orange-400 text-orange-500')} aria-label={t.priority === 'urgent' ? '긴급' : '높음'} data-testid="row-pri-flag" />}
             <TypeIcon t={t} />
             {/* 대표(10/16): 제목은 한 줄 전체 폭·길면 … (두 줄은 목록이 길어져 눈이 피로) — 전체 제목은 줄을 눌러 상세에서 */}
             <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
             {t.sales_ref?.kind && <span className="shrink-0 rounded-full bg-blue-50 px-1.5 text-[10px] font-medium text-blue-800" title={t.sales_ref.name ?? ''} data-testid="row-sales-ref">{(ST.kind as Record<string, string>)[t.sales_ref.kind] ?? (t.sales_ref.kind === 'support' ? '지원사업' : t.sales_ref.kind === 'contract' ? '계약' : t.sales_ref.kind === 'research' ? '후속조사' : t.sales_ref.kind)}</span>}
             {t.assigned_by_rule && <span className="shrink-0 rounded-full bg-violet-50 px-1.5 text-[10px] font-medium text-violet-800" title="담당자 지정 규칙으로 배정됨" data-testid="row-rule-badge">규칙 배정</span>}
-            {t.space && SPACE_META[t.space as 'sales' | 'marketing'] && <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: SPACE_META[t.space as 'sales' | 'marketing'].soft, color: SPACE_META[t.space as 'sales' | 'marketing'].color }} data-testid="row-space">{SPACE_META[t.space as 'sales' | 'marketing'].short}</span>}
+            {t.space && SPACE_META[t.space as 'sales' | 'marketing'] && !(collab && t.sales_ref?.kind) && <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: SPACE_META[t.space as 'sales' | 'marketing'].soft, color: SPACE_META[t.space as 'sales' | 'marketing'].color }} data-testid="row-space">{SPACE_META[t.space as 'sales' | 'marketing'].short}</span>}
           </span>
-          <span className="min-w-0 max-lg:flex-1 lg:contents"><Meta t={t} onPatch={onPatch} /></span>
+          <span className="min-w-0 max-lg:flex-1 lg:contents"><Meta t={t} onPatch={onPatch} collab={collab} /></span>
         </div>
         {onAck && <Button size="sm" variant="secondary" onClick={() => onAck(t)} aria-label={`${t.title} 확인`}>확인</Button>}
-        <span className="hidden w-[104px] min-w-0 justify-end xl:flex" data-testid="requester-cell"><AssigneePicker role="요청자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>
-        <span className="hidden w-[60px] justify-end lg:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>
-        <span className="hidden w-[112px] shrink-0 justify-end overflow-hidden lg:inline-flex xl:w-[136px]" data-testid="status-cell"><StatusChip t={t} onPatch={onPatch} /></span>
+        {/* 308차 #866(대표 '마감일·진행상황 위아래 정렬이 좌우로 깨져 보인다'): 오른쪽 열은 고정 폭·왼쪽 맞춤 — 공동 업무 줄은 요청자·우선순위 열 없이 [상태][마감][함께] */}
+        {!collab && <span className="hidden w-[104px] min-w-0 justify-end xl:flex" data-testid="requester-cell"><AssigneePicker role="요청자" value={t.requested_by} name={t.requested_by_name} size={18} withName onChange={(v) => v && onPatch(t, { requestedById: v })} /></span>}
+        {!collab && <span className="hidden w-[60px] justify-end lg:flex"><PriorityPicker value={t.priority} label={`${t.title} 우선순위`} onChange={(v) => onPatch(t, { priority: v })} /></span>}
+        <span className="hidden w-[132px] shrink-0 justify-start overflow-hidden lg:inline-flex" data-testid="status-cell"><StatusChip t={t} onPatch={onPatch} plain={collab} /></span>
         <DueEdit t={t} onPatch={onPatch} />
-        <span className="inline-flex shrink-0 items-center lg:w-12 lg:justify-end"><AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} /><CoBadge t={t} /></span>
+        {collab
+          ? <span className="inline-flex shrink-0 items-center lg:w-[132px] lg:justify-start" data-testid="people-cell"><CollabFaces t={t} uid={user.id} /></span>
+          : <span className="inline-flex shrink-0 items-center lg:w-[72px] lg:justify-start" data-testid="people-cell"><AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} /><CoBadge t={t} /></span>}
         {onMove && <OrderMenu title={t.title} onMove={(to) => onMove(t, to)} />}
       </div>
     </div>

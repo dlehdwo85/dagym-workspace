@@ -1,6 +1,6 @@
 'use client';
 import { STATUS_LABEL, type TaskStatus } from '@/lib/types';
-import { cx } from './ui';
+import { Avatar, cx } from './ui';
 import { multiOf, partsOf, type Co } from './CoAssignees';
 
 /**
@@ -29,5 +29,31 @@ export function CollabPeople({ t, uid, className }: { t: CollabTask; uid: string
     <div className={cx('flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[11px]', className)} data-testid="collab-people">
       {people.map((p) => <span key={p.id} title={p.state} className={cx('shrink-0 rounded-full border px-1.5 py-0', p.done ? 'border-green-200 bg-green-50 text-green-800' : 'border-line bg-white text-ink-2')} data-testid="collab-person" data-state={p.state}>{p.done ? '✓ ' : ''}{p.name}</span>)}
     </div>
+  );
+}
+
+/**
+ * 308차 #866(대표 '불필요한 항목 줄이고 표기를 통합'): 공동 업무 줄의 '함께' 열 — 담당·함께하는 사람 얼굴을 겹친 동그라미 최대 3개 + '+n' · 끝낸 사람은 초록 테두리 ·
+ * 확인 전은 흐리게 · 마우스를 올리면 이름·상태 · 옆에 끝낸 수 k/n. (이름표 줄·직책 글자는 목록에서 뺌 — 상세에는 그대로)
+ */
+export function CollabFaces({ t, uid }: { t: CollabTask; uid: string }) {
+  const all: { id: string; name: string; state: string; done: boolean; me: boolean }[] = multiOf(t)
+    ? partsOf(t).map((p) => ({ id: p.id, name: p.name || '이름 없음', state: p.done ? '내 몫 완료' : !p.acked ? '확인 전' : '진행 중', done: p.done, me: p.id === uid }))
+    : (t.batch_people ?? []).map((p, k) => ({ id: p.id ?? `none-${k}`, name: p.name ?? '담당 없음', state: STATUS_LABEL[p.status as TaskStatus] ?? p.status, done: p.status === 'done', me: p.id === uid }));
+  if (!all.length) return null;
+  const shown = all.slice(0, 3); const done = all.filter((p) => p.done).length;
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5" data-testid="collab-people" title={all.map((p) => `${p.name} · ${p.state}`).join('\n')}>
+      <span className="inline-flex items-center -space-x-1">
+        {shown.map((p) => (
+          <span key={p.id} className={cx('inline-flex rounded-full ring-2', p.done ? 'ring-green-500' : 'ring-white', p.state === '확인 전' && 'opacity-60')}
+            data-testid={p.me ? 'collab-me' : 'collab-person'} data-state={p.state} aria-label={`${p.name} · ${p.state}`} title={`${p.name} · ${p.state}`}>
+            <Avatar id={p.id} name={p.name} size={22} badge={false} />
+          </span>
+        ))}
+        {all.length > 3 && <span className="inline-flex size-[22px] items-center justify-center rounded-full bg-slate-200 text-[10px] font-semibold text-slate-600 ring-2 ring-white" data-testid="collab-more">+{all.length - 3}</span>}
+      </span>
+      <span className="text-[11px] tabular-nums text-ink-3" title={`끝낸 사람 ${done}명 / ${all.length}명`} data-testid="collab-count">{done}/{all.length}</span>
+    </span>
   );
 }
