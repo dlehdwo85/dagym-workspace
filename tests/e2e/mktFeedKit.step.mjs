@@ -2,6 +2,7 @@
 // → [고른 틀 미리보기](틀마다 한 장·사진 없으면 회색 자리 안내) → [피드 틀 저장] → 바탕 색 출처 '피드 틀' → 승인함 초안 보관 글 [새 틀로 다시 그리기](보관 그대로) · 휴대폰 폭
 // (구조 시험 — 그림 모양은 미리보기 화면 사진으로 사람이 확인)
 import assert from 'node:assert/strict';
+import { seedBrandPhotos } from './brandPhotos.mjs';
 
 export async function mktFeedKit({ owner, ctx, sql, BASE, SHOTS }) {
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
@@ -48,11 +49,17 @@ export async function mktFeedKit({ owner, ctx, sql, BASE, SHOTS }) {
   const held = owner.getByTestId('mkt-held'); await held.waitFor();
   await held.locator(':scope > summary').click();
   const row = held.getByTestId('mkt-held-row').filter({ hasText: 'E2E 피드 보관 글' });
+  // 321차: 쓸 사진이 없으면 글자뿐 표지를 새로 붙이지 않고 안내만 → 사진이 있을 때 다시 그려야 새 버전(v3, 사진 틀)
+  await row.getByTestId('mkt-held-redraw').click();
+  await owner.getByText(/쓸 수 있는 사진이 없어 표지를 다시 그리지 않았습니다/).waitFor({ timeout: 30000 });
+  const [same] = await sql`select current_version from mkt_contents where id = ${hc.id}`;
+  assert.equal(same.current_version, 2, '사진 없으면 새 버전 없음');
+  await seedBrandPhotos(sql, { tenant, ownerId: ctx.ownerId, brandName: 'E2E 피드 브랜드' });
   await row.getByTestId('mkt-held-redraw').click();
   await owner.getByText(/^새 틀로 다시 그렸습니다\(v3\) — 틀: /).waitFor({ timeout: 30000 });
   const [after] = await sql`select status, current_version, quality from mkt_contents where id = ${hc.id}`;
   assert.deepEqual([after.status, after.current_version, !!after.quality.held], ['draft', 3, true], '보관 그대로');
-  assert.ok(['title', 'list'].includes(after.quality.visual.template), `사진이 없으면 사진 틀은 빼고: ${after.quality.visual.template}`);
+  assert.ok(['photo_fade', 'grid4'].includes(after.quality.visual.template), `사진이 있으면 사진 틀로: ${after.quality.visual.template}`);
   // 휴대폰 폭: 키트 칸 넘침 없음
   await owner.setViewportSize({ width: 390, height: 844 });
   await owner.goto(`${BASE}/s/marketing/automation`);
