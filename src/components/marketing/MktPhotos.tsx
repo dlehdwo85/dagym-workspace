@@ -12,7 +12,7 @@ type Item = { id: string; title: string; folder: string; tags: string[]; vision:
   /** 189차: AI 생성(실사 참고) 사진 · [AI로 다시 만들기] 상태 */ gen: boolean; regen: { status: string; fileId: string | null } | null };
 type Videos = { total: number; done: number; failed: number; skipped: number; frames: number; pending: number };
 type BrandCount = { id: string; name: string; src: 'brand' | 'screen' | 'any'; strict: boolean; photos: number; cover: number; captures: number };
-type View = { /** 287차 600장 상한 없이 센 숫자 */ all?: { total: number; described: number; faces: number; noBoxes: number };
+type View = { /** 287차 600장 상한 없이 센 숫자 */ all?: { total: number; described: number; faces: number; noBoxes: number; stuck?: number };
   /** 288차 브랜드별 쓸 수 있는 사진 */ brands?: { list: BrandCount[]; unnamed: number; strict: boolean } | null; total: number; described: number; pending: number; failed: number; cover: number; graphic: number; outside: number; scenes: number; videos: Videos; ai: boolean; perPhotoKrw: number; canEdit: boolean; items: Item[];
   /** 189차 [AI로 다시 만들기] — 운영사 생성 연동이 켜져 있으면 ready · 장당 마케팅 크레딧 */ regen: { ready: boolean; credits: number | null } | null; gens: number };
 type SceneRun = { done?: number; failed?: number; skipped?: number; frames?: number; described?: number; left?: number; busy?: boolean; via?: string };
@@ -70,7 +70,7 @@ export function MktPhotos() {
       <p className="mt-2 text-sm" data-testid="photos-summary">자료실 사진 {data.total}장{data.outside ? `(마케팅 공간 밖 ${data.outside}장)` : ''}{data.scenes ? ` · 영상 장면 ${data.scenes}장` : ''}{data.gens ? ` · AI 생성(실사 참고) ${data.gens}장` : ''} · 설명 {data.described}장 · 아직 {data.pending}장{data.failed ? ` · 설명 못 함 ${data.failed}장` : ''} · 시안 바탕으로 쓸 수 있는 사진 {data.cover}장 · 블로그 본문에 쓸 수 있는 사진 {data.total - data.graphic}장 · 쓰지 않는 사진(글자 그래픽·쓰지 않음 표시·설명 전 공간 밖 사진) {data.graphic}장</p>
       {data.all && (data.all.total > data.total || data.all.faces > 0) && <p className="mt-1 text-xs text-ink-3" data-testid="photos-all">
         {data.all.total > data.total ? `위 숫자는 최근 ${data.total}장 기준 — 전체 사진 ${data.all.total}장(설명 ${data.all.described}장). ` : ''}
-        {data.all.faces ? `얼굴이 보이는 사진 ${data.all.faces}장 — ${data.all.noBoxes ? `그중 ${data.all.noBoxes}장은 예전에 설명해 얼굴 위치를 몰라 자동 시안·블로그 본문에서 가리지 못합니다([얼굴 위치 다시 읽기]를 누르면 다시 설명해 가림).` : '자동 시안·블로그 본문에서 얼굴을 모자이크합니다.'}` : ''}</p>}
+        {data.all.faces ? `얼굴이 보이는 사진 ${data.all.faces}장 — ${data.all.noBoxes ? `그중 ${data.all.noBoxes}장은 예전에 설명해 얼굴 위치를 몰라 자동 시안·블로그 본문에서 가리지 못합니다([얼굴 위치 다시 읽기]를 누르면 다시 설명해 가림).` : '자동 시안·블로그 본문에서 얼굴을 모자이크합니다.'}${data.all.stuck ? ` 다시 읽어도 얼굴 위치를 모르는 ${data.all.stuck}장은 시안·본문·영상에 쓰지 않습니다.` : ''}` : ''}</p>}
       {!!data.brands?.list.length && <p className="mt-1 text-sm" data-testid="photos-brands">브랜드별 쓸 수 있는 사진: {data.brands.list.map((b, k) => <span key={b.id}>{k ? ' · ' : ''}<b className="font-medium">{b.name}</b> {b.src === 'screen' ? `화면 캡처 ${b.captures}장(실사 안 씀)` : `실사 ${b.photos}장(시안 바탕 ${b.cover}장)${b.captures ? ` · 화면 캡처 ${b.captures}장` : ''}`}</span>)}
         {data.brands.strict && data.brands.unnamed > 0 && <span className="ml-1 text-xs text-ink-3">— 어느 브랜드 이름도 없는 실사 {data.brands.unnamed}장은 시안에 쓰지 않습니다. 아래 «브랜드 이름 없는 사진 정리»에서 브랜드를 지정하거나 태그에 브랜드 이름을 달아 주세요(브랜드 키트 «시안에 쓸 사진»에서 바꿀 수 있음).</span>}</p>}
       {!!data.brands?.strict && data.brands.unnamed > 0 && <UnnamedPhotos count={data.brands.unnamed} onDone={reload} />}

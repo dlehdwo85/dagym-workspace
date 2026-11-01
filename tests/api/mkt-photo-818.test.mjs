@@ -233,7 +233,7 @@ test('287차 #818 승인 대기 카드뉴스: 흔들린 장 사진만 다시 고
 test('287차 #818 ④ [얼굴 위치 다시 읽기]: 600장 상한 없는 숫자 · 얼굴은 보이는데 위치를 모르는 예전 사진만 다시 설명', async () => {
   const old = await libFile('얼굴짐 예전 회원 사진.jpg', await textured(61));
   await describe(old, V({ caption: '회원이 운동하는 모습', tags: ['회원'], faces: true, people: 1, face_boxes: [{ x: 0.4, y: 0.2, w: 0.2, h: 0.3 }] }));
-  await sql`update library_files set vision = vision - 'faceBoxes' where id = ${old}`; // 286차 전에 설명한 사진처럼
+  await sql`update library_files set vision = vision - 'faceBoxes' - 'fv' where id = ${old}`; // 286차 전에 설명한 사진처럼(315차 fv 표시도 없음)
   const v0 = await ctx.owner.ok('GET', '/api/marketing/photos');
   assert.ok(v0.all.total >= v0.total && v0.all.faces >= 2, JSON.stringify(v0.all));
   assert.equal(v0.all.noBoxes, 1);

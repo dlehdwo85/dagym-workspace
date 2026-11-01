@@ -19,6 +19,8 @@ import { tenantOf, type SessionUser } from './types';
 const KINDS = ['photo', 'graphic', 'screen', 'illustration', 'document'] as const;
 const POSES = ['none', 'standing', 'sitting', 'lying'] as const; const FACINGS = ['none', 'front', 'side', 'back'] as const; const LIGHTS = ['bright', 'normal', 'dark'] as const;
 export type VisionOk = { v: 1; at: string; caption: string; scene: string; tags: string[]; kind: (typeof KINDS)[number]; text: 'none' | 'little' | 'much'; promo: boolean; seen: string; people: number; faces: boolean; quality: 'good' | 'ok' | 'poor';
+  /** 315차: fv 2 = 단체 얼굴 규칙 뒤 설명(얼굴 위치 다시 읽기를 또 하지 않음) · facesBy 'people' = AI 는 얼굴 없다 했지만 사람이 여럿이라 얼굴 있음으로 봄 */
+  fv?: number; facesBy?: 'people';
   /** 171차: 사람 자세·보이는 방향·사진 밝기(예전 설명에는 없음 → photoFlags 가 문장으로 판정) */
   pose?: (typeof POSES)[number]; facing?: (typeof FACINGS)[number]; light?: (typeof LIGHTS)[number];
   /** 282차 #818 선명도(서버 계산 — 긴 변 512px 흑백의 라플라시안 분산). 작을수록 흔들림·초점 나감 */
@@ -36,6 +38,13 @@ export function faceBoxesOf(raw: unknown): FaceBox[] {
   return (Array.isArray(raw) ? raw : []).map((b: any) => { const x = c01(b?.x), y = c01(b?.y); return { x, y, w: Math.min(1 - x, c01(b?.w)), h: Math.min(1 - y, c01(b?.h)) }; })
     .filter((b) => b.w >= 0.01 && b.h >= 0.01).slice(0, 12);
 }
+/**
+ * 315차(로컬 11/01: 다짐 요가·GX 수업 사진 여러 명 얼굴이 '얼굴 없음'으로 판정돼 영상 장면에 그대로): 사람이 2명 이상이거나 단체·그룹 장면이면
+ * AI 가 얼굴 없다고 해도 얼굴 있음으로 봄 — 얼굴 자리를 모르면(가릴 수 없음) 표지·장·본문·영상에서 뺌. 같은 규칙을 238 마이그레이션이 예전 설명에도 적용
+ */
+export const GROUP_RE = /단체|그룹|여러\s?명|회원들/;
+export const groupShown = (o: { people?: number; caption?: string; scene?: string; tags?: string[] }) =>
+  (o.people ?? 0) >= 2 || ((o.people ?? 0) >= 1 && GROUP_RE.test(`${o.caption ?? ''} ${o.scene ?? ''} ${(o.tags ?? []).join(' ')}`));
 /** 모자이크를 할 얼굴 자리(AI 가 얼굴을 봤고 자리를 알려 준 사진만) */
 export const facesToHide = (v: unknown): FaceBox[] => (visionOk(v) && v.faces && v.faceBoxes?.length ? v.faceBoxes : []);
 /** 286차 #818 ④(대표 "사람 얼굴은 되도록 모자이크 필요"): 얼굴 자리를 25% 넉넉히 잡아 굵은 칸(짧은 변의 1/12 크기)으로 모자이크 — EXIF 회전을 먼저 맞춤(AI 가 본 방향) */
@@ -133,6 +142,8 @@ export const poolCond = (sql: ReturnType<typeof db>, tenant: string) => sql`libr
   and (coalesce(library_files.source, '') <> 'video_frame' or exists (select 1 from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant
     and pv.deleted_at is null and coalesce(pv.security, 'internal') <> 'confidential' and not ('쓰지않음' = any(coalesce(pv.tags, '{}')))))`;
 const photoCond = poolCond;
+/** 얼굴이 보인다는데 얼굴 자리(faceBoxes, 빈 목록 포함)를 모르는 사진 */
+const noBoxesCond = (sql: ReturnType<typeof db>) => sql`vision->>'faces' = 'true' and coalesce(jsonb_array_length(case when jsonb_typeof(vision->'faceBoxes') = 'array' then vision->'faceBoxes' end), 0) = 0`;
 /** 188차: 마케팅 공간 밖 사진을 시안·블로그·원고 목록에 쓸 조건 — AI 설명이 실사·홍보물 아님·얼굴 없음·화질 괜찮음(설명 전이면 안 씀) */
 export const outsideOk = (v: unknown) => visionOk(v) && v.kind === 'photo' && !v.promo && !v.faces && v.quality !== 'poor';
 export const poolUsable = (r: { space?: string | null; vision?: unknown }) => r.space === 'marketing' || outsideOk(r.vision);
@@ -148,8 +159,8 @@ const SYSTEM = `회사 마케팅 자료실 사진 한 장을 보고 기록합니
 - promo: 글자가 든 홍보물(포스터·배너·전단·카드뉴스·썸네일·이벤트 안내)이면 true
 - seen: 읽히는 글자(상호·간판·제목) 60자 안, 없으면 ""
 - people: 보이는 사람 수(0~20)
-- faces: 얼굴을 알아볼 수 있는 사람이 있으면 true
-- face_boxes: 알아볼 수 있는 얼굴마다 {x, y, w, h} — 사진 너비·높이에 대한 0~1 비율(왼쪽 위가 0,0). 머리 전체가 들어가게 넉넉히. 없으면 []
+- faces: 얼굴(눈·코·입)이 보이는 사람이 한 명이라도 있으면 true — 작게 보여도, 여러 명 중 뒤쪽이어도, 옆얼굴이어도 true. 뒷모습뿐이거나 얼굴이 다 가려졌을 때만 false
+- face_boxes: 보이는 얼굴 전부(작은 얼굴·뒤쪽 사람 포함)마다 {x, y, w, h} — 사진 너비·높이에 대한 0~1 비율(왼쪽 위가 0,0). 머리 전체가 들어가게 넉넉히. 없으면 []
 - quality: good · ok · poor(흐림·너무 어두움·심하게 기울어짐)
 - pose: 사람 자세 — none(사람 없음) · standing(서 있음·걷기·운동 중) · sitting(앉음) · lying(누움·엎드림·기대 누움) — 여럿이면 가장 크게 보이는 사람
 - facing: 사람이 보이는 방향 — none(사람 없음) · front(얼굴·몸 앞쪽) · side(옆) · back(뒷모습·등)
@@ -171,10 +182,14 @@ async function shrink(buf: Buffer, mime: string): Promise<{ data: Buffer; mime: 
 const clip = (s: unknown, n: number) => [...String(s ?? '').replace(/\s+/g, ' ').trim()].slice(0, n).join('');
 function normalize(j: any): Omit<VisionOk, 'v' | 'at'> {
   const pick = <T extends string>(x: unknown, ok: readonly T[], d: T) => (ok.includes(x as T) ? (x as T) : d);
-  return { caption: clip(j?.caption, 60), scene: clip(j?.scene, 300), tags: [...new Set((Array.isArray(j?.tags) ? j.tags : []).map((t: unknown) => clip(t, 20).replace(/^#/, '')).filter(Boolean))].slice(0, 8) as string[],
+  const caption = clip(j?.caption, 60); const scene = clip(j?.scene, 300); const tags = [...new Set((Array.isArray(j?.tags) ? j.tags : []).map((t: unknown) => clip(t, 20).replace(/^#/, '')).filter(Boolean))].slice(0, 8) as string[];
+  const people = Math.max(0, Math.min(20, Math.round(Number(j?.people) || 0)));
+  const forced = j?.faces !== true && groupShown({ people, caption, scene, tags }); // 315차: 여럿·단체 장면은 얼굴 있음으로
+  const boxes = (j?.faces === true || forced) && Array.isArray(j?.face_boxes) ? faceBoxesOf(j.face_boxes) : [];
+  return { caption, scene, tags,
     kind: pick(j?.kind, KINDS, 'photo'), text: pick(j?.text, ['none', 'little', 'much'] as const, 'little'), promo: j?.promo === true, seen: clip(j?.seen, 60),
-    people: Math.max(0, Math.min(20, Math.round(Number(j?.people) || 0))), faces: j?.faces === true, quality: pick(j?.quality, ['good', 'ok', 'poor'] as const, 'ok'),
-    ...(j?.faces === true && Array.isArray(j?.face_boxes) ? { faceBoxes: faceBoxesOf(j.face_boxes) } : {}),
+    people, faces: j?.faces === true || forced, quality: pick(j?.quality, ['good', 'ok', 'poor'] as const, 'ok'), fv: 2, ...(forced ? { facesBy: 'people' as const } : {}),
+    ...(boxes.length || j?.faces === true && Array.isArray(j?.face_boxes) ? { faceBoxes: boxes } : {}),
     // 171차: 자세·방향·밝기 — 답에 없으면(예전 가짜 답·옛 모델) 칸을 비워 두고 문장으로 판정
     ...(POSES.includes(j?.pose) ? { pose: j.pose as VisionOk['pose'] } : {}), ...(FACINGS.includes(j?.facing) ? { facing: j.facing as VisionOk['facing'] } : {}), ...(LIGHTS.includes(j?.light) ? { light: j.light as VisionOk['light'] } : {}) };
 }
@@ -299,8 +314,10 @@ export async function photosView(u: SessionUser) {
   const P = await import('./ai/provider');
   const regen = isAdmin(u) ? await (await import('./mktPhotoGen')).regenInfo().catch(() => null) : null; // 189차 [AI로 다시 만들기] 준비됨·장당 크레딧
   // 287차(로컬 10/31 13:45·13:55: 목록이 600장에서 잘려 전체 수·얼굴 사진 수를 짐작함): 상한 없이 센 숫자 — noBoxes = 얼굴이 보인다고 설명됐지만 얼굴 자리를 모르는(286차 전) 사진
-  const [all] = await sql<{ total: number; described: number; faces: number; noBoxes: number }[]>`select count(*)::int as total, count(*) filter (where vision ? 'caption')::int as described,
-    count(*) filter (where vision->>'faces' = 'true')::int as faces, count(*) filter (where vision->>'faces' = 'true' and not (vision ? 'faceBoxes'))::int as "noBoxes" from library_files where ${photoCond(sql, t)}`;
+  // 315차: noBoxes = 다시 읽을 수 있는 사진(새 규칙 전 설명) · stuck = 새 규칙으로 다시 읽어도 얼굴 자리를 모르는 사진(시안·영상에서 뺌)
+  const [all] = await sql<{ total: number; described: number; faces: number; noBoxes: number; stuck: number }[]>`select count(*)::int as total, count(*) filter (where vision ? 'caption')::int as described,
+    count(*) filter (where vision->>'faces' = 'true')::int as faces, count(*) filter (where ${noBoxesCond(sql)} and coalesce(vision->>'fv', '1') <> '2')::int as "noBoxes",
+    count(*) filter (where ${noBoxesCond(sql)} and vision->>'fv' = '2')::int as stuck from library_files where ${photoCond(sql, t)}`;
   // 288차 #814-2: 브랜드마다 시안에 쓸 수 있는 사진 수(브랜드 키트 '시안 사진' 규칙 그대로) — 이름 없는 사진은 브랜드가 둘 이상이면 안 쓰므로 어느 브랜드에도 안 걸린 사진 수도
   const brands = await brandPhotoCounts(t);
   return { all, brands, total: items.length, described: n((x) => visionOk(x.vision)), pending: n((x) => !x.vision), failed: n((x) => !!x.vision && 'error' in x.vision),
@@ -401,7 +418,7 @@ export async function describeNow(u: SessionUser, i: z.infer<typeof describeInpu
   if (i.faces) {
     // 287차 #818 ④ [얼굴 위치 다시 읽기]: 얼굴이 보인다고 설명됐지만 얼굴 자리가 없는 예전 사진을 12장씩 다시 설명 → 자동 시안·블로그 본문에서 얼굴을 가림.
     // 관리자가 화면에서 장수·예상 비용을 보고 누를 때만(정기 실행은 하지 않음). 실패하면 예전처럼 1시간 뒤 다시(세 번까지)
-    const noBoxes = sql`${photoCond(sql, t)} and vision->>'faces' = 'true' and not (vision ? 'faceBoxes')`;
+    const noBoxes = sql`${photoCond(sql, t)} and ${noBoxesCond(sql)} and coalesce(vision->>'fv', '1') <> '2'`; // 315차: 새 규칙으로 이미 다시 읽은 사진은 또 읽지 않음
     const ids = (await sql<{ id: string }[]>`select id from library_files where ${noBoxes} order by (space = 'marketing') desc, created_at desc limit 12`).map((r) => r.id);
     const r = ids.length ? await describeBatch(t, { ids, limit: 12, budgetMs: 25e3, actorId: u.id }) : { done: 0, failed: 0, left: 0, stopped: null };
     const [{ left }] = await sql<{ left: number }[]>`select count(*)::int as left from library_files where ${noBoxes}`;

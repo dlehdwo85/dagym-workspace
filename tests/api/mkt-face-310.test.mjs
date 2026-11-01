@@ -190,3 +190,67 @@ test('⑤ 표지 바탕도 얼굴 규칙: 시안 바탕 폴더의 얼굴 자리 
   const top = rows.find((x) => x.id === boxed);
   assert.ok(top && top.face === 'masked' && top.fix.includes('얼굴 모자이크'), JSON.stringify(rows));
 });
+
+// 315차(로컬 11/01 314차 확인 ①: 다짐 요가·GX 수업 사진 여러 명 얼굴이 '실사 — 얼굴 없음'): 사람 2명 이상·단체 장면은 AI 가 얼굴 없다 해도 얼굴 있음 —
+// 자리를 모르니 영상·표지·본문에서 뺌 · 예전 설명은 238 마이그레이션이 같은 규칙으로 바꿈 · [얼굴 위치 다시 읽기] 대상(새 규칙으로 읽은 사진은 또 안 읽음)
+test('⑥ 단체 사진: 사람 2명 이상·단체 장면은 얼굴 있음으로(자리 모름 → 영상에서 뺌) · 예전 설명은 238 마이그레이션 · 다시 읽기 대상', async () => {
+  const grp = await libFile('얼굴짐 요가 수업.jpg', { caption: '요가 수업 중인 회원들', tags: ['요가'], people: 5, faces: false });
+  const one = await libFile('얼굴짐 회원 한 명.jpg', { caption: '회원들 사이 트레이너', tags: ['수업'], people: 1, faces: false });
+  const solo = await libFile('얼굴짐 기구 정리.jpg', { caption: '기구를 정리하는 직원', tags: ['기구'], people: 1, faces: false });
+  const vis = async (id) => (await sql`select vision from library_files where id = ${id}`)[0].vision;
+  const g = await vis(grp);
+  assert.deepEqual([g.faces, g.facesBy, g.fv, g.faceBoxes], [true, 'people', 2, undefined], JSON.stringify(g));
+  assert.deepEqual([(await vis(one)).faces, (await vis(one)).facesBy], [true, 'people'], '한 명이라도 설명에 회원들(단체)');
+  assert.equal((await vis(solo)).faces, false, '혼자·단체 아님 = AI 판정 그대로');
+  // 예전 설명(fv 없음) → 238 마이그레이션
+  const old = await libFile('얼굴짐 GX 예전.jpg', { caption: 'GX 수업 장면', tags: ['수업'], people: 3, faces: false });
+  const old1 = await libFile('얼굴짐 예전 한 명.jpg', { caption: '러닝머신 위 회원', tags: ['기구'], people: 1, faces: false });
+  for (const id of [old, old1]) await sql`update library_files set vision = (vision - 'fv' - 'facesBy') || '{"faces": false}'::jsonb where id = ${id}`;
+  const mig = await readFile(path.join(process.cwd(), 'db/migrations/238_group_faces.sql'), 'utf8');
+  await sql.unsafe(mig); await sql.unsafe(mig); // 두 번 돌려도 같음
+  assert.deepEqual([(await vis(old)).faces, (await vis(old)).facesBy], [true, 'people']);
+  assert.equal((await vis(old1)).faces, false);
+  // 영상: 고른 사진 중 단체 사진은 얼굴 자리를 몰라 뺌
+  const id = await slot(P.face, '얼굴짐 단체 사진 영상', { kind: 'reels', days: 25 });
+  await sql`update mkt_contents set auto = false where id = ${id}`;
+  await ctx.owner.ok('POST', '/api/marketing/studio/slideshow', { contentId: id, photoIds: [P.eq[2], grp, P.eq[3], P.eq[4]] });
+  const reuse = (await sql`select result->'reuse' as r from mkt_briefs where content_id = ${id} order by created_at desc limit 1`)[0].r;
+  assert.deepEqual(reuse.faceDropped, [grp]); assert.ok(!reuse.photos.includes(grp));
+  // 사진 AI 설명 칸: 다시 읽을 사진(예전 설명) = noBoxes · 새 규칙으로 읽고도 자리 모름 = stuck
+  const all = (await ctx.owner.ok('GET', '/api/marketing/photos')).all;
+  assert.ok(all.noBoxes >= 1 && all.stuck >= 2, JSON.stringify(all)); // noBoxes = 238 이 바꾼 예전 사진 · stuck = 새 규칙으로 읽은 단체·얼굴 사진
+});
+
+// 315차(로컬 11/01 ②: 다시 그린 다짐 피드 표지 2건이 '사진 없는 틀(브랜드 색)' = 남색 바탕 + 번호 목록 글자): 사진 틀 키트는 사람 없는 사진 먼저 ·
+// 쓸 사진이 없어 글자뿐인 틀(목록형 포함)로 가면 단색 표지로 봄 → 승인함 대신 수정 요청 + 자료 요청(정기 제작·다시 그리기 모두)
+test('⑦ 표지: 사람 없는 사진 먼저 · 쓸 사진이 없으면 목록형도 단색으로 봄 → 승인함 대신 수정 요청 + 자료 요청(다시 그리기 포함)', async () => {
+  const FEED = { style: 'trust', templates: ['photo_fade', 'title', 'list'], palette: { bg: '#152037', accent: '#f0b038' }, header: '틀짐 소식', contact: '상담 1234-5678', kicker: '운영 기록' };
+  const tb = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '틀짐' })).id;
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${tb}`, { intro: '동네 헬스장', products: '회원권', feed: FEED });
+  const door = await libFile('틀짐 입구 모습.jpg', { caption: '틀짐 입구와 안내 데스크', tags: ['입구'] });
+  const staff = await libFile('틀짐 입구 직원.jpg', { caption: '틀짐 입구와 안내 데스크', tags: ['입구'], people: 1, facing: 'side' }); // 더 최근 · 글 낱말은 같고 사람만 있음
+  const grp = await libFile('틀짐 입구 단체.jpg', { caption: '틀짐 입구에 모인 회원들', tags: ['입구'], people: 6 }); // 얼굴 자리 모름
+  const CARD5 = { ...CARD, points: ['입구 옆 안내 데스크', '평일 아침 6시 문 엶', '주차 2시간 무료'] }; // 목록형 틀이 될 수 있게
+  const feed = (t) => say({ title: t, body: '틀짐 입구 안내입니다.\n입구 옆에 안내 데스크가 있습니다.', brief: '실사', why: '', hooks: [], keyword: '입구', card: CARD5 });
+  const a = await slot(tb, '틀짐 입구 안내', { days: 40 });
+  await run([feed('틀짐 입구 안내'), feed('틀짐 입구 안내')]);
+  const ca = await cur(a);
+  assert.equal(ca.quality.visual.photoId ?? ca.quality.visual.photoIds?.[0], door, `사람 없는 입구 사진 먼저: ${JSON.stringify(ca.quality.visual)}`);
+  assert.ok(!ca.quality.visual.plain);
+  await sql`update library_files set tags = array['쓰지않음'] where id = ${staff}`; // 이제 남은 표지 사진 없음(입구 = 가까운 글이 씀, 단체 = 얼굴 자리 모름)
+  const b = await slot(tb, '틀짐 입구 안내 둘째', { days: 41 });
+  await run([feed('틀짐 입구 안내 둘째'), feed('틀짐 입구 안내 둘째')]);
+  const cb = await cur(b); const vb = cb.quality.visual;
+  assert.ok(![vb.photoId, ...(vb.photoIds ?? [])].includes(grp), '단체 사진은 안 씀');
+  assert.ok(!vb.photoId && !(vb.photoIds ?? []).length, JSON.stringify(vb));
+  assert.ok(vb.plain, `사진 없는 글자뿐 틀(${vb.template}) = 단색으로 봄`);
+  assert.notEqual(cb.status, 'pending', '승인함에 안 올림');
+  const mats = async () => (await sql`select count(*)::int as n from mkt_material_requests where brand_id = ${tb}`)[0].n;
+  assert.ok(await mats() > 0, '자료 요청');
+  // 다시 그리기: 써 본 사진(입구)은 빼므로 남은 표지 사진 없음 → 단색 → 수정 요청(승인함 아님)
+  await sql`update mkt_contents set status = 'pending' where id = ${a}`;
+  await ctx.owner.ok('POST', `/api/marketing/contents/${a}/visual`, { redraw: true });
+  const ra = await cur(a);
+  assert.ok(ra.quality.visual.plain && !ra.quality.visual.photoId, JSON.stringify(ra.quality.visual));
+  assert.equal(ra.status, 'changes');
+});

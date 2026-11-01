@@ -149,7 +149,9 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     // 310차(로컬 11/01 ③: 다짐 사진 204장인데 블로그 본문 1장 — 얼굴 자리를 모르는 사진이 고른 뒤에 빠짐): 본문·영상은 고르기 전에 그런 사진을 빼고(가릴 수 없음),
     //  얼굴이 있는 사진(모자이크 사본으로 감)은 뒤로 → 얼굴 없는 시설·기구 사진이 먼저
     // 314차(로컬 11/01: 다짐 11/3 피드 표지 GX 수업 사진에 얼굴 그대로 — '시안 바탕' 폴더·'글자없음' 표시가 얼굴 검사를 건너뜀): 표지·장 바탕도 얼굴 자리를 모르면 안 씀(자리를 알면 그릴 때 모자이크)
-    if (visionOk(r.vision) && (r.vision as { faces?: boolean }).faces === true) { if (!facesToHide(r.vision).length) continue; if (mode === 'body') score -= 2; }
+    if (visionOk(r.vision) && (r.vision as { faces?: boolean }).faces === true) { if (!facesToHide(r.vision).length) continue; score -= 2; }
+    // 315차(로컬 11/01 ②: 다짐 표지 대체 사진 — 사람 없는 시설·기구·입구 사진 먼저): 표지·장 바탕은 사람이 든 사진을 뒤로
+    if (mode === 'cover' && visionOk(r.vision) && r.vision.people > 0) score -= 2;
     if (others.some((o) => has(r, o))) score -= 10;
     else if (REAL.test(`${r.title} ${r.folder} ${(r.tags ?? []).join(' ')}`) || (visionOk(r.vision) && r.vision.kind === 'photo')) score += 2;
     let hitT = 0; let hitB = 0;
@@ -211,6 +213,13 @@ async function maskedBytes(tenant: string, id: string, data: Buffer): Promise<Bu
   if (!visionOk(r?.vision) || (r.vision as { faces?: boolean }).faces !== true) return data;
   const P = await import('./mktPhotos'); const boxes = P.facesToHide(r.vision);
   return boxes.length ? P.mosaicFaces(data, boxes).catch(() => null) : null;
+}
+/** 315차: 얼굴이 보인다는데 자리를 모르는 사진(가릴 수 없음 — 바탕·본문·영상에 안 씀) */
+async function unknownFaces(tenant: string, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const { facesToHide } = await import('./mktPhotos');
+  const rows = await db()<{ id: string; vision: unknown }[]>`select id::text, vision from library_files where tenant = ${tenant} and id = any(${ids}::uuid[])`;
+  return new Set(rows.filter((r) => visionOk(r.vision) && (r.vision as { faces?: boolean }).faces === true && !facesToHide(r.vision).length).map((r) => r.id));
 }
 /** 310차(로컬 11/01 ①: 사진 영상 장면에 얼굴 그대로 — 하이링크 쇼츠·릴스 첫 장면 정면 얼굴, 다짐 GX 수업 여러 명): 영상 장면 사진도 블로그 본문과 같은 규칙 —
  *  얼굴 자리를 아는 사진은 모자이크 사본, 모르면(가릴 수 없음) 뺌. 저장할 사람이 없으면 얼굴 있는 사진은 뺌 */
@@ -649,9 +658,14 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
   // 사진: 가까운 3개 글에 쓴 사진·이 글에 써 본 사진은 빼고(글만 고친 수정본은 쓰던 사진 그대로)
   const keep = a.opts.photoIds?.length ? a.opts.photoIds : a.opts.photoId ? [a.opts.photoId] : null;
   const exclude = new Set([...(a.opts.exclude ?? []), ...near.flatMap((r) => r.ps), ...a.near]); // 188차: 가까운 글(같은 브랜드 12개·다른 브랜드 앞뒤 2일) 사진도
-  const ranked: { id: string; title: string; scene?: boolean; gen?: boolean }[] = keep ? (await sql<{ id: string; title: string; scene: boolean; gen: boolean }[]>`select id::text, coalesce(nullif(title, ''), file_name) as title, coalesce(source, '') = 'video_frame' as scene, coalesce(source, '') = 'ai_ref' as gen from library_files where id = any(${keep}::uuid[]) and tenant = ${c.tenant} and deleted_at is null`)
+  let ranked: { id: string; title: string; scene?: boolean; gen?: boolean }[] = keep ? (await sql<{ id: string; title: string; scene: boolean; gen: boolean }[]>`select id::text, coalesce(nullif(title, ''), file_name) as title, coalesce(source, '') = 'video_frame' as scene, coalesce(source, '') = 'ai_ref' as gen from library_files where id = any(${keep}::uuid[]) and tenant = ${c.tenant} and deleted_at is null`)
       .sort((x, y) => keep.indexOf(x.id) - keep.indexOf(y.id))
     : a.opts.photoId === null ? [] : await rankPhotos(c, a.brand, a.others, `${c.title} ${body}`, exclude);
+  if (keep && ranked.length) { // 315차: 쓰던 사진이 얼굴 자리를 모르는 사진이면(314차 전 표지) 빼고, 다 빠지면 새로 고름(단색 틀로 가지 않게)
+    const bad = await unknownFaces(c.tenant, ranked.map((r) => r.id));
+    ranked = ranked.filter((r) => !bad.has(r.id));
+    if (!ranked.length && a.opts.photoId !== null) ranked = await rankPhotos(c, a.brand, a.others, `${c.title} ${body}`, new Set([...exclude, ...bad]));
+  }
   // #262(대표 10/25 ④ 노트북 목업 틀): 화면 캡처를 세로(휴대폰 틀)·가로(노트북 틀)로 나눠 읽음 — 그 틀을 골랐을 때만
   let shots = a.kit.templates.includes('phone') || a.kit.templates.includes('laptop') ? await screenShots(c.tenant, a.brand, a.others, await photoRule(c.tenant, c.brand_id)) : { any: [] as Shot[], tall: [] as Shot[], wide: [] as Shot[] };
   const hints = F.hintsOf({ head: a.head, sub: a.sub, title: c.title, body, card: c.card ?? me?.card ?? null, kit: a.kit });
@@ -659,6 +673,11 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
   const pool = a.kit.templates.filter(elig);
   // 295차 #835(대표 '배경 단색에 글자 하나 툭'): 표지는 사진·화면·도표 틀 먼저 — 키트 틀로 안 되면 공통 사진·화면·목록 틀(키트 색), 그래도 없을 때만 단색 틀(plain 표시 → 승인함 대신 수정 요청 + 실사 참고 생성)
   let rich = pool.filter((t) => !F.plainCover(t, hints));
+  // 315차(로컬 11/01 ②: 다짐 피드 표지가 남색 바탕 + 번호 목록 글자 — 대표가 반려한 꼴): 사진 틀이 든 키트는 사진이 있으면 사진·화면·도표 틀 먼저(글자뿐인 목록형은 뒤로)
+  const needOf = (t: import('./mktFeedTemplates').TemplateId) => F.FEED_TEMPLATES[t].need as string | null;
+  const wantsPhoto = a.kit.templates.some((t) => ['photo', 'photos4'].includes(needOf(t) ?? ''));
+  const richer = rich.filter((t) => ['photo', 'photos4', 'screen', 'screen_wide', 'prices', 'compare'].includes(needOf(t) ?? ''));
+  if (wantsPhoto && richer.length) rich = richer;
   if (!rich.length) {
     if (!shots.any.length) shots = await screenShots(c.tenant, a.brand, a.others, await photoRule(c.tenant, c.brand_id));
     rich = F.COVER_FALLBACK.filter(elig);
@@ -678,8 +697,10 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
   const screen = need === 'screen' ? shots.tall[0] ?? shots.any[0] ?? null : null; // 휴대폰 틀은 세로 캡처 먼저
   const screenWide = need === 'screen_wide' ? shots.wide[0] ?? null : null;
   const set = F.EVENT_SETS[F.hash(c.id) % F.EVENT_SETS.length];
+  // 315차: 사진 틀 키트인데 사진·화면·도표 없이 글자뿐인 표지(사진이 없어 목록형·제목형으로 감) = 단색 표지로 봄 → 승인함 대신 수정 요청 + 자료 요청
+  const textOnly = wantsPhoto && !files.length && !screen && !screenWide && !['prices', 'compare'].includes(need ?? '');
   const png = await F.renderFeed({ t: template, kit: a.kit, brand: a.brand, H: a.H, h: hints, photo: files[0]?.f?.data ?? null, photos: files.map((x) => ({ data: x.f!.data, label: F.labelOf(x.p.title) })), screen: screen?.data ?? null, screenWide: screenWide?.data ?? null, logo: a.logo, font: a.font, set });
-  return { png, template, photoIds: files.map((x) => x.p.id), photoTitle: files[0]?.p.title ?? null, photoFix: [...new Set(files.flatMap((x) => x.fixes))], scene: files.some((x) => !!x.p.scene), gen: files.some((x) => !!x.p.gen), plain: F.plainCover(template, hints) };
+  return { png, template, photoIds: files.map((x) => x.p.id), photoTitle: files[0]?.p.title ?? null, photoFix: [...new Set(files.flatMap((x) => x.fixes))], scene: files.some((x) => !!x.p.scene), gen: files.some((x) => !!x.p.gen), plain: F.plainCover(template, hints) || textOnly };
 }
 
 /**
@@ -1062,5 +1083,6 @@ export async function makeVisualNow(u: SessionUser, id: string, opts: { redraw?:
   const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.templateLabel ? ` · 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}${d.bodyTitle && !opts.redraw ? ` · 본문 사진: ${d.bodyTitle}` : ''}${after.note}`, u.id, d.photoId, !!opts.redraw, opts.redraw ? (act?.n ? act.tail : after.ids) : [...d.bodyIds, ...after.ids], { template: d.template, photoIds: d.photoIds, pages: act?.n ? act.pages : after.pages, photoFix: d.photoFix, scene: d.scene, gen: d.gen, plain: d.plain, ...(act?.n ? { tail: true } : {}) });
   if (!r) throw badRequest('그사이 콘텐츠가 바뀌었습니다 — 새로 고쳐 다시');
   await audit(sql, u.id, opts.redraw ? 'mkt.visual_redraw' : 'mkt.visual_now', 'mkt_content', id, { version: r.version, photoId: d.photoId }).catch(() => {});
+  if (d.plain && plainCoverOf(c)) await (await import('./mktMaterials')).needMaterial(c).catch(() => null); // 315차: 다시 그려도 단색 표지 → 승인함 대신 수정 요청 + 자료 요청
   return { version: r.version, status: r.status, fileId: d.fileId, photo: d.photoTitle, template: d.templateLabel };
 }
