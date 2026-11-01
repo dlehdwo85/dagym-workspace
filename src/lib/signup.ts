@@ -28,7 +28,7 @@ export const signupInput = z.object({
   website: z.string().max(200).optional(),
   openedAt: z.number().optional(),
   /** 유입 경로(첫 방문 UTM) — 마케팅 퍼널 집계용, 개인정보 아님 */
-  utm: z.object({ source: z.string().max(80), medium: z.string().max(80), campaign: z.string().max(120) }).partial().optional(),
+  utm: z.object({ source: z.string().max(80), medium: z.string().max(80), campaign: z.string().max(120), page: z.string().regex(/^[a-z0-9-]{1,40}$/) }).partial().optional(), // 311차 #867 page = 처음 들어온 소개 페이지(home·landing slug)
   /** V29 가입 2단계: 인원 규모·업종(선택) */
   size: z.enum(['1', '2-10', '11-30', '31-100', '100+']).optional(),
   industry: z.string().trim().max(40).optional(),

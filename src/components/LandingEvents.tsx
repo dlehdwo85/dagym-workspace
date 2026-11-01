@@ -1,6 +1,6 @@
 'use client';
 import { useEffect } from 'react';
-import { captureUtm } from './conversion';
+import { captureUtm, landingView } from './conversion';
 
 /**
  * 소개 사이트(대표 10/20 16:45) 이벤트: UTM 첫 방문 기억 + 방문·버튼 클릭(무료로 시작·앱 다운로드·전화·메일) 측정.
@@ -14,9 +14,9 @@ const ADS = process.env.NEXT_PUBLIC_GOOGLE_ADS_SIGNUP ?? '';
 const NAVER = process.env.NEXT_PUBLIC_NAVER_WA ?? '';
 const META = process.env.NEXT_PUBLIC_META_PIXEL_ID ?? '';
 const ID_RE = /^[A-Za-z0-9_-]{4,40}$/;
-export function LandingEvents({ ga4, ads, naverWa }: { ga4?: string | null; ads?: string | null; naverWa?: string | null } = {}) {
+export function LandingEvents({ ga4, ads, naverWa, page = 'home' }: { ga4?: string | null; ads?: string | null; naverWa?: string | null; page?: string } = {}) {
   useEffect(() => {
-    captureUtm();
+    captureUtm(page); landingView(page); // 311차 #867 처음 들어온 소개 페이지 기억 + 페이지별 방문 수
     const w = window as any;
     const g = (ga4 || GA).trim(); const a = (ads || ADS).trim().split('/')[0]; const n = (naverWa || NAVER).trim(); // Ads 는 AW-… 만(전환 라벨 없이)
     if ((ID_RE.test(g) || ID_RE.test(a)) && !w.__wosGa) {
@@ -41,6 +41,6 @@ export function LandingEvents({ ga4, ads, naverWa }: { ga4?: string | null; ads?
     };
     document.addEventListener('click', onClick);
     return () => document.removeEventListener('click', onClick);
-  }, [ga4, ads, naverWa]);
+  }, [ga4, ads, naverWa, page]);
   return null;
 }

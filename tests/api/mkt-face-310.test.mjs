@@ -130,3 +130,21 @@ test('② 행동 장: 검정 단색 대신 이 글 사진을 흐리고 어둡게
   const rows = rec.photoRecord ?? [];
   assert.ok(rows.some((r) => /흐리고 어둡게 깐 바탕/.test(r.why)), JSON.stringify(rows.map((r) => r.why)));
 });
+
+test('② 보완: [다시 그리기](표지만 새로)도 예전 검정 행동 장은 흐린 사진 바탕으로 다시 — 나머지 장 파일은 그대로 · AI 비용 0', async () => {
+  const [c0] = await sql`select id, current_version, quality from mkt_contents where brand_id = ${P.act} and kind = 'feed' order by created_at desc limit 1`;
+  const pages = c0.quality.pages; const k = pages.findIndex((p) => p.role === 'cta');
+  delete pages[k].back; // 310차 전에 그린 글처럼(행동 장 검정)
+  await sql`update mkt_contents set quality = jsonb_set(quality, '{pages}', ${sql.json(pages)}::jsonb), status = 'pending' where id = ${c0.id}`;
+  const before = await cur(c0.id);
+  const r = await ctx.owner.ok('POST', `/api/marketing/contents/${c0.id}/visual`, { redraw: true });
+  assert.equal(r.version, before.current_version + 1);
+  const after = await cur(c0.id);
+  assert.equal(after.media_ids.length, before.media_ids.length, '장 수 그대로');
+  assert.notEqual(after.media_ids[0], before.media_ids[0], '표지 새로');
+  after.media_ids.slice(1).forEach((id, j) => { if (j === k) assert.notEqual(id, before.media_ids[j + 1], '행동 장 새로'); else assert.equal(id, before.media_ids[j + 1], `${j + 2}장 그대로`); });
+  assert.ok(typeof after.quality.pages[k].back === 'string', JSON.stringify(after.quality.pages[k]));
+  assert.match(after.note, /행동 장 1장 흐린 사진 바탕으로/);
+  const [f] = await sql`select description from library_files where id = ${after.media_ids[k + 1]}`;
+  assert.match(f.description, /흐린 사진 바탕/);
+});

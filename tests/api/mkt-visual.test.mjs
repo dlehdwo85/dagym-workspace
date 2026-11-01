@@ -365,7 +365,7 @@ test('#516 후속(로컬 10/24 07:35 글자 겹침): 글자 든 그래픽(썸네
   const r = await ctx.owner.ok('POST', `/api/marketing/contents/${bad.id}/visual`, { redraw: true });
   assert.deepEqual([r.version, r.status, r.photo], [4, 'pending', null]);
   const rc = await cur(bad.id);
-  assert.match(rc.note, /^시안 다시 그리기\(서버·크레딧 0\) — .+ · 브랜드 색 바탕$/);
+  assert.match(rc.note, /^시안 다시 그리기\(서버·크레딧 0\) — .+ · 브랜드 색 바탕( · 행동 장 \d장 흐린 사진 바탕으로)?$/); // 311차: 예전 검정 행동 장도 같이 다시
   assert.equal(rc.quality.visual.photoId, null);
   assert.ok((await sql`select 1 from audit_logs where action = 'mkt.visual_redraw' and target_id = ${bad.id}`).length);
   // 직접 붙인 시안·승인한 글은 안 됨

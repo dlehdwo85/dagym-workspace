@@ -73,22 +73,44 @@ export async function fireSignupConversion() {
 
 /** 유입 경로(UTM): 첫 방문 값을 30일 기억 → 가입할 때 회사에 남긴다(마케팅 퍼널 출처별 집계, 개인정보 아님) */
 const UTM_KEY = 'wos_utm';
-export function captureUtm() {
+export function captureUtm(page?: string) {
   if (typeof window === 'undefined') return;
   const q = new URLSearchParams(location.search);
   // #449 광고 클릭 id: 마지막 클릭 기준으로 덮어씀(이 브라우저에만, 전환은 동의한 경우에만 씀)
   const gclid = q.get('gclid') ?? ''; const fbclid = q.get('fbclid') ?? '';
   if (ID_RE.test(gclid) || ID_RE.test(fbclid)) { try { localStorage.setItem(CLICK_KEY, JSON.stringify({ ...(ID_RE.test(gclid) ? { gclid } : {}), ...(ID_RE.test(fbclid) ? { fbclid } : {}), at: Date.now() })); } catch {} }
   const v = { source: q.get('utm_source') ?? '', medium: q.get('utm_medium') ?? '', campaign: q.get('utm_campaign') ?? '' };
-  if (!v.source && !v.medium && !v.campaign) return;
-  try { if (!readUtm()) localStorage.setItem(UTM_KEY, JSON.stringify({ ...v, at: Date.now() })); } catch {}
+  const hasUtm = !!(v.source || v.medium || v.campaign);
+  const pg = page && PAGE_RE.test(page) ? page : '';
+  if (!hasUtm && !pg) return;
+  // 첫 값을 30일 기억(덮어쓰지 않음) — 311차 #867: 처음 들어온 소개 페이지(page)도 같이. 페이지만 기억된 뒤 UTM 이 붙어 오면 UTM 은 채움
+  try {
+    let r: Record<string, unknown> = {};
+    try { r = JSON.parse(localStorage.getItem(UTM_KEY) ?? 'null') ?? {}; } catch { r = {}; }
+    if (Date.now() - (Number(r.at) || 0) > 30 * 86400_000) r = {};
+    const had = !!(r.source || r.medium || r.campaign);
+    const next = { ...r, ...(!had && hasUtm ? v : {}), ...(!r.page && pg ? { page: pg } : {}), at: r.at ?? Date.now() };
+    if (JSON.stringify(next) !== JSON.stringify(r)) localStorage.setItem(UTM_KEY, JSON.stringify(next));
+  } catch {}
 }
-export function readUtm(): { source?: string; medium?: string; campaign?: string } | undefined {
+const PAGE_RE = /^[a-z0-9-]{1,40}$/;
+/** 311차 #867 소개 페이지 방문 1번 — 같은 브라우저·같은 페이지는 하루 1번만(숫자만 셈, 개인정보 없음). 실패해도 무시 */
+export function landingView(page: string) {
+  if (typeof window === 'undefined' || !PAGE_RE.test(page)) return;
+  try {
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    const k = `wos_lv_${page}`;
+    if (localStorage.getItem(k) === day) return;
+    localStorage.setItem(k, day);
+  } catch { /* 저장소 막힘이면 그냥 셈 */ }
+  fetch('/api/public/landing-view', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ page }), keepalive: true }).catch(() => {});
+}
+export function readUtm(): { source?: string; medium?: string; campaign?: string; page?: string } | undefined {
   try {
     const r = JSON.parse(localStorage.getItem(UTM_KEY) ?? 'null');
     if (!r || Date.now() - (r.at ?? 0) > 30 * 86400_000) return undefined;
     const clip = (s: unknown, n: number) => (typeof s === 'string' && s ? s.slice(0, n) : undefined);
-    return { source: clip(r.source, 80), medium: clip(r.medium, 80), campaign: clip(r.campaign, 120) };
+    return { source: clip(r.source, 80), medium: clip(r.medium, 80), campaign: clip(r.campaign, 120), page: typeof r.page === 'string' && PAGE_RE.test(r.page) ? r.page : undefined };
   } catch { return undefined; }
 }
 
