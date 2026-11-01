@@ -119,7 +119,7 @@ export async function refPhotos(c: Content, text: string, pool?: Pool): Promise<
 export const photoPool = (c: Pick<Content, 'tenant' | 'id' | 'brand_id'>) => loadPool(c);
 /** #544 사진 순위(점수 높은 순, 같은 점수면 최근 사진) — 피드 틀의 사진 4분할은 앞의 4장 · pool = 미리 읽은 후보(장마다 다시 읽지 않게) */
 async function rankPhotos(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover', pool?: Pool) {
-  const { outsideOk, blurryPhoto } = await import('./mktPhotos');
+  const { outsideOk, blurryPhoto, facesToHide } = await import('./mktPhotos');
   const { rows, used, gen, rule } = pool ?? (await loadPool(c));
   if (!rows.length) return [];
   const own = rule?.own.length ? rule.own : brand ? [brand] : []; // 288차: 이 브랜드 이름 + 다른 표기(DAGYM 등)
@@ -146,6 +146,9 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     if (mode === 'cover' && (fl.lying || fl.back || fl.dark)) continue;
     let score = mine(r) ? 6 : 0;
     if (mode === 'body') score -= (fl.lying ? 4 : 0) + (fl.back ? 2 : 0) + (fl.dark ? 3 : 0);
+    // 310차(로컬 11/01 ③: 다짐 사진 204장인데 블로그 본문 1장 — 얼굴 자리를 모르는 사진이 고른 뒤에 빠짐): 본문·영상은 고르기 전에 그런 사진을 빼고(가릴 수 없음),
+    //  얼굴이 있는 사진(모자이크 사본으로 감)은 뒤로 → 얼굴 없는 시설·기구 사진이 먼저
+    if (mode === 'body' && visionOk(r.vision) && (r.vision as { faces?: boolean }).faces === true) { if (!facesToHide(r.vision).length) continue; score -= 2; }
     if (others.some((o) => has(r, o))) score -= 10;
     else if (REAL.test(`${r.title} ${r.folder} ${(r.tags ?? []).join(' ')}`) || (visionOk(r.vision) && r.vision.kind === 'photo')) score += 2;
     let hitT = 0; let hitB = 0;
@@ -200,12 +203,21 @@ async function faceSafeIds(tenant: string, ids: string[], actor: SessionUser): P
   }
   return out;
 }
-export async function blogPhotoCandidates(c: Content, text: string, n = 20, o: { own?: boolean } = {}): Promise<BlogPhoto[]> {
+/** 310차(로컬 11/01 ①: 사진 영상 장면에 얼굴 그대로 — 하이링크 쇼츠·릴스 첫 장면 정면 얼굴, 다짐 GX 수업 여러 명): 영상 장면 사진도 블로그 본문과 같은 규칙 —
+ *  얼굴 자리를 아는 사진은 모자이크 사본, 모르면(가릴 수 없음) 뺌. 저장할 사람이 없으면 얼굴 있는 사진은 뺌 */
+export async function faceSafeFor(c: Pick<Content, 'tenant' | 'created_by'>, ids: string[]): Promise<string[]> {
+  if (!ids.length) return ids;
+  const actor = await actorOf(c);
+  if (actor) return faceSafeIds(c.tenant, ids, actor);
+  const ok = new Set((await db()<{ id: string }[]>`select id::text from library_files where tenant = ${c.tenant} and id = any(${ids}::uuid[]) and coalesce(vision->>'faces', 'false') <> 'true'`).map((r) => r.id));
+  return ids.filter((id) => ok.has(id));
+}
+export async function blogPhotoCandidates(c: Content, text: string, n = 20, o: { own?: boolean; near?: boolean } = {}): Promise<BlogPhoto[]> {
   const [b] = c.brand_id ? await db()<{ name: string }[]>`select name from mkt_brands where id = ${c.brand_id}` : [];
   const brand = (b?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
   const others = otherBrandNames(await otherBrands(c.tenant, c.brand_id, { site: false })).filter((x) => x !== brand);
   const one = (x: string) => x.replace(/\s+/g, ' ').trim();
-  const near = await nearUsed(c).catch(() => new Set<string>()); // 188차: 가까운 글(같은 브랜드 12개·다른 브랜드 앞뒤 2일)에 쓴 사진은 후보에서 뺌
+  const near = o.near === false ? new Set<string>() : await nearUsed(c).catch(() => new Set<string>()); // 188차: 가까운 글(같은 브랜드 12개·다른 브랜드 앞뒤 2일)에 쓴 사진은 후보에서 뺌 · 310차 near:false = 사진 영상이 새 사진이 모자랄 때 다시 씀
   // 303차 #869(바디랩 브랜드 사진 0장인데 다른 현장 사진으로 영상): own = 이 브랜드 이름이 든 사진만(영상·사진 영상)
   //  브랜드가 둘 이상인 회사만(브랜드 하나면 이름 없는 사진도 그 브랜드 사진)
   const multi = o.own && !!brand ? (await db()<{ n: number }[]>`select count(*)::int n from mkt_brands where tenant = ${c.tenant}`)[0].n >= 2 : false;
@@ -291,7 +303,7 @@ export async function photoRecord(tenant: string, q: any): Promise<PhotoRecordRo
   if (!coverIds.length) out.push(row('표지', null, vis.template ? '사진 없는 틀(브랜드 색)' : '맞는 바탕 사진이 없어 브랜드 색 바탕'));
   coverIds.forEach((id, k) => out.push(row(coverIds.length > 1 ? `표지 사진 ${k + 1}` : '표지', id, k === 0 && vis.gen && vis.ref ? genWhy(vis.ref) : info.get(id)?.source === 'ai_ref' ? '실사가 다 쓰여 전에 생성한 사진(실사 참고)' : '표지 바탕(글자 없는 실사 · 제목 낱말·브랜드가 맞는 사진부터)', k === 0 ? (vis.fix ?? []) : [], k === 0 && !!vis.scene)));
   pages.forEach((p, k) => out.push(p.photoId ? row(`${k + 2}장`, p.photoId, p.gen && p.ref ? genWhy(p.ref) : info.get(p.photoId)?.source === 'ai_ref' ? '실사가 다 쓰여 전에 생성한 사진(실사 참고)' : p.rel === 'weak' ? '관련 약함 — 글과 낱말이 맞는 사진이 없어 브랜드 사진으로 채움' : '그 장 글과 낱말이 맞는 사진', p.fix ?? [], !!p.scene)
-    : row(`${k + 2}장`, null, p.role === 'cta' ? '행동 장 — 글자만(연락처·저장 권유)' : '쓸 실사가 남지 않아 브랜드 색 바탕')));
+    : row(`${k + 2}장`, null, p.back ? '행동 장 — 이 글 사진을 흐리고 어둡게 깐 바탕(얼굴·글자 안 보임, 글자 읽히게)' : p.role === 'cta' ? '행동 장 — 글자만(연락처·저장 권유)' : '쓸 실사가 남지 않아 브랜드 색 바탕')));
   bodyIds.forEach((id, k) => { const f = info.get(id); if (f && f.source !== 'ai') out.push(row(`본문 사진 ${k + 1}`, id, '블로그 본문 — 원고가 장면 순서로 고른 실사')); });
   return out;
 }
@@ -322,7 +334,7 @@ export function plainStatus(c: { channel: string; kind?: string | null }, q: { p
  * 요청 C §3-1(대표 10/25 22:20 #644, 결정 15-11): 피드 = 카드뉴스 3~5장(표지 → 문제 → 해결 → 근거 → 행동) · 스토리 = 3~5프레임(질문 → 답 → 행동).
  * 표지 뒤 장은 원고 AI 의 slides/frames 로, 없으면(예전 글·형식 깨짐) 본문 줄로 만든다. 모두 서버가 브랜드 색 바탕(행동 장은 검정)으로 그림 — 크레딧 0
  */
-export type CardPage = { role: 'problem' | 'solution' | 'proof' | 'cta' | 'frame'; title: string; body: string; photoId?: string | null; rel?: 'weak'; pool?: number; fix?: string[]; scene?: boolean; gen?: boolean; ref?: string | null }; // photoId = 171차 그 장에 깐 실사(없으면 색 바탕) · rel 'weak' = 180차 글과 낱말이 안 맞는 사진(관련 약함) · pool = 고를 때 쓸 수 있던 실사 후보 수 · fix = 188차 보정(밝기·대비·확대·선명) · scene = 188차 영상 장면 사진
+export type CardPage = { role: 'problem' | 'solution' | 'proof' | 'cta' | 'frame'; title: string; body: string; photoId?: string | null; rel?: 'weak'; pool?: number; fix?: string[]; scene?: boolean; gen?: boolean; ref?: string | null; back?: string | null }; // back = 310차 행동 장에 흐리게 깐 사진 · photoId = 171차 그 장에 깐 실사(없으면 색 바탕) · rel 'weak' = 180차 글과 낱말이 안 맞는 사진(관련 약함) · pool = 고를 때 쓸 수 있던 실사 후보 수 · fix = 188차 보정(밝기·대비·확대·선명) · scene = 188차 영상 장면 사진
 /** 표지 포함 장 수 */
 export const PAGES_MIN = 3, PAGES_MAX = 5;
 const PAGE_ROLES = ['problem', 'solution', 'proof', 'cta'];
@@ -446,14 +458,21 @@ export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: S
     }
   }
   const safe = safeTitle(c); const n = pages.length + 1; const ids: string[] = [];
+  // 310차(로컬 11/01 ②: 행동 장 '저장해 두세요'가 검정 단색 + 글자 — 대표가 반려한 '배경 단색에 글자 하나 툭'과 같음): 사진을 안 까는 장(행동 장·스토리 마지막 프레임)은
+  //  이 글의 다른 장 사진(없으면 표지 사진)을 강하게 흐리고 어둡게 깔아 줌 — 얼굴·글자는 알아볼 수 없고 위 글자는 흰색
+  const actionAt = (p: CardPage, k: number) => !p.photoId && (p.role === 'cta' || (story && k === pages.length - 1));
+  const backId = pages.some(actionAt) ? (pages.find((p) => p.photoId && !p.gen)?.photoId ?? pages.find((p) => p.photoId)?.photoId ?? (c as { quality?: { visual?: { photoId?: string | null } } | null }).quality?.visual?.photoId ?? null) : null;
+  const backBuf = backId ? (await libBytes(c.tenant, backId, /^image\//).catch(() => null))?.data ?? null : null;
   for (const [k, p] of pages.entries()) {
     const photo = p.photoId ? await libBytes(c.tenant, p.photoId, /^image\//).catch(() => null) : null;
     if (p.photoId && !photo) { delete p.photoId; delete p.rel; delete p.scene; delete p.gen; delete p.ref; } // 파일을 못 읽으면 색 바탕
     const fx = photo ? await enhancePhoto(photo.data, { w: 1080, h: H }) : null; // 188차: 중요 부분 기준 자르기 + 밝기·대비·확대(한 것만 p.fix)
     if (fx?.fixes.length) p.fix = fx.fixes;
-    const png = await D.drawSlide({ kind: p.role === 'cta' ? 'cta' : 'body', title: p.title, body: p.body, rows: [], imagePlan: '', imageId: p.photoId ?? null }, k + 1, n, { template: 'bold', color, brand, keyword: '', logo, font, height: H }, fx?.data ?? null);
+    const back = !photo && actionAt(p, k) && backBuf ? backBuf : null;
+    if (back) p.back = backId; else delete p.back;
+    const png = await D.drawSlide({ kind: p.role === 'cta' ? 'cta' : 'body', title: p.title, body: p.body, rows: [], imagePlan: '', imageId: p.photoId ?? null }, k + 1, n, { template: 'bold', color, brand, keyword: '', logo, font, height: H, backdrop: back }, fx?.data ?? null);
     const f = await saveGeneratedFile(actor, { fileName: `${safe}_${story ? '스토리' : '피드'} ${k + 2}of${n}.jpg`, mime: 'image/jpeg', data: await D.toJpeg(png), title: `${safe} — ${story ? '프레임' : '카드'} ${k + 2}/${n}`, folder: '마케팅/자동 시안',
-      tags: ['자동 시안', ...(brand ? [brand] : [])], description: `서버 그리기(크레딧 0) · ${story ? '스토리 프레임' : '카드뉴스'} ${k + 2}/${n}${p.role === 'cta' ? ' · 행동 장' : ''}${photo ? ` · 사진: ${photo.title}${p.scene ? '(영상 장면)' : ''}${p.gen ? '(AI 생성·실사 참고)' : ''}${p.fix?.length ? `(보정: ${fixText(p.fix)})` : ''}` : ''}`, source: 'ai', space: 'marketing', meta: { contentId: c.id, page: k + 2, of: n, role: p.role, kind: story ? 'story' : 'feed', photoId: p.photoId ?? null, ...(p.fix?.length ? { fix: p.fix } : {}) } });
+      tags: ['자동 시안', ...(brand ? [brand] : [])], description: `서버 그리기(크레딧 0) · ${story ? '스토리 프레임' : '카드뉴스'} ${k + 2}/${n}${p.role === 'cta' ? ' · 행동 장' : ''}${p.back ? ' · 흐린 사진 바탕' : ''}${photo ? ` · 사진: ${photo.title}${p.scene ? '(영상 장면)' : ''}${p.gen ? '(AI 생성·실사 참고)' : ''}${p.fix?.length ? `(보정: ${fixText(p.fix)})` : ''}` : ''}`, source: 'ai', space: 'marketing', meta: { contentId: c.id, page: k + 2, of: n, role: p.role, kind: story ? 'story' : 'feed', photoId: p.photoId ?? null, ...(p.fix?.length ? { fix: p.fix } : {}) } });
     ids.push(f.id);
   }
   return ids;
@@ -517,14 +536,20 @@ export async function nearUsed(c: Pick<Content, 'id' | 'tenant' | 'brand_id'>): 
   const at = me?.at ?? new Date();
   const rows = await sql<{ ids: string[] | null }[]>`select array(select u.x from unnest(coalesce(v.media_ids::text[], '{}') || array[k.quality->'visual'->>'photoId']
         || array(select jsonb_array_elements_text(case when jsonb_typeof(k.quality->'visual'->'photoIds') = 'array' then k.quality->'visual'->'photoIds' else '[]'::jsonb end))
-        || array(select pg->>'photoId' from jsonb_array_elements(case when jsonb_typeof(k.quality->'pages') = 'array' then k.quality->'pages' else '[]'::jsonb end) pg)) as u(x) where u.x is not null) as ids
+        || array(select pg->>'photoId' from jsonb_array_elements(case when jsonb_typeof(k.quality->'pages') = 'array' then k.quality->'pages' else '[]'::jsonb end) pg)
+        || array(select jsonb_array_elements_text(case when jsonb_typeof(b.result->'reuse'->'photos') = 'array' then b.result->'reuse'->'photos' else '[]'::jsonb end) from mkt_briefs b where b.content_id = k.id)) as u(x) where u.x is not null) as ids
     from mkt_contents k left join mkt_versions v on v.content_id = k.id and v.version = k.current_version
     where k.id in ((select m.id from mkt_contents m join mkt_versions mv on mv.content_id = m.id and mv.version = m.current_version
-        where m.tenant = ${c.tenant} and m.brand_id is not distinct from ${c.brand_id} and m.id <> ${c.id} and m.status <> 'canceled' and cardinality(mv.media_ids) > 0
+        where m.tenant = ${c.tenant} and m.brand_id is not distinct from ${c.brand_id} and m.id <> ${c.id} and m.status <> 'canceled'
+          and (cardinality(mv.media_ids) > 0 or exists (select 1 from mkt_briefs b where b.content_id = m.id))
         order by abs(extract(epoch from (coalesce(m.scheduled_at, m.created_at) - ${at}::timestamptz))) limit 12)
       union (select id from mkt_contents where tenant = ${c.tenant} and id <> ${c.id} and status <> 'canceled' and brand_id is distinct from ${c.brand_id}
         and abs(extract(epoch from (coalesce(scheduled_at, created_at) - ${at}::timestamptz))) <= 172800))`;
-  return new Set(rows.flatMap((r) => r.ids ?? []));
+  // 310차(로컬 11/01 ③: 다짐 11/3 쇼츠·릴스 첫 장면이 같은 사진): 사진 영상 장면(의뢰 reuse.photos)도 '쓴 사진' — 아직 영상 파일이 없는 글도 셈 ·
+  //  얼굴 가린 사본을 쓴 글이면 그 원본도 쓴 것으로(사본·원본이 번갈아 다시 나오지 않게)
+  const ids = new Set(rows.flatMap((r) => r.ids ?? []).filter((x) => /^[0-9a-f-]{36}$/i.test(x)));
+  if (ids.size) for (const r of await sql<{ of: string }[]>`select meta->>'of' as of from library_files where tenant = ${c.tenant} and source = 'mosaic' and id = any(${[...ids]}::uuid[]) and meta ? 'of'`) ids.add(r.of);
+  return ids;
 }
 /** #262(대표 10/25 ④ 노트북 목업 틀): 자료실 '영상 화면 캡처'를 읽어 세로(휴대폰 틀)·가로(노트북 틀) 캡처로 나눔 — 다른 브랜드 이름이 든 캡처는 빼고 이 브랜드 이름이 든 것 먼저, 최근 8장까지(가로·세로는 파일을 열어야 앎) */
 type Shot = { id: string; title: string; data: Buffer };

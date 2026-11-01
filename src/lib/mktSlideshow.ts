@@ -24,9 +24,35 @@ export function slideLines(body: string, n: number): string[] {
   for (const p of parts) { if (out.length >= n) break; out.push(p.length > 30 ? `${p.slice(0, 29).replace(/\s+\S*$/, '')}…` : p); }
   return out;
 }
+/** 310차(로컬 11/01 ③ 다짐 11/3 쇼츠·릴스 첫 장면이 같은 사진): 같은 브랜드 앞뒤 3일 안 사진 영상의 첫 장면(얼굴 가린 사본이면 원본 기준)과
+ *  이 영상의 첫 장면이 같으면 겹치지 않는 사진을 맨 앞으로 */
+async function freshFirst(c: any, ids: string[]): Promise<string[]> {
+  if (ids.length < 2 || !c?.id) return ids;
+  const sql = db();
+  const firsts = (await sql<{ f: string }[]>`select b.result->'reuse'->'photos'->>0 as f from mkt_briefs b join mkt_contents m on m.id = b.content_id
+    where m.tenant = ${c.tenant} and m.brand_id is not distinct from ${c.brand_id ?? null} and m.id <> ${c.id} and m.status <> 'canceled' and jsonb_typeof(b.result->'reuse'->'photos') = 'array'
+      and abs(extract(epoch from (coalesce(m.scheduled_at, m.created_at) - (select coalesce(scheduled_at, created_at, now()) from mkt_contents where id = ${c.id})))) <= 259200`).map((r) => r.f).filter(Boolean);
+  if (!firsts.length) return ids;
+  const all = [...new Set([...ids, ...firsts])].filter((x) => /^[0-9a-f-]{36}$/i.test(x));
+  const orig = new Map((await sql<{ id: string; o: string }[]>`select id::text, coalesce(meta->>'of', id::text) as o from library_files where id = any(${all}::uuid[])`).map((r) => [r.id, r.o]));
+  const taken = new Set(firsts.map((f) => orig.get(f) ?? f));
+  const k = ids.findIndex((id) => !taken.has(orig.get(id) ?? id));
+  return k <= 0 ? ids : [ids[k], ...ids.slice(0, k), ...ids.slice(k + 1)];
+}
 /** 쓸 사진: 고른 것(3장 넘으면) 아니면 이 글에 맞는 자료실 실사 — 이 회사·준비된·기밀 아닌 사진만, 최대 6장 */
 async function photosFor(c: any, text: string, picked: string[]) {
-  const ids = picked.length >= 3 ? [...new Set(picked)] : (await (await import('./mktAutoVisual')).blogPhotoCandidates(c, text, MAX, { own: true })).map((p) => p.id); // 303차 #869: 이 브랜드 사진만
+  const V = await import('./mktAutoVisual');
+  // 310차(로컬 11/01 ①: 사진 영상 장면에 얼굴 그대로): 장면 사진도 얼굴 자리를 알면 모자이크 사본, 모르면 뺌 — 고른 사진이 그래서 3장 밑으로 줄면 후보로 채움
+  let ids = picked.length >= 3 ? await V.faceSafeFor(c, [...new Set(picked)]) : [];
+  if (ids.length < 3) {
+    const more = (await V.blogPhotoCandidates(c, text, MAX, { own: true })).map((p) => p.id).filter((id) => !ids.includes(id)); // 303차 #869: 이 브랜드 사진만
+    ids = [...ids, ...(await V.faceSafeFor(c, more))];
+  }
+  if (ids.length < 3) { // 310차: 가까운 글에 이미 쓴 사진뿐이면(사진이 적은 브랜드) 영상을 멈추지 않고 다시 씀 — 대신 첫 장면은 아래에서 겹치지 않게
+    const again = (await V.blogPhotoCandidates(c, text, MAX, { own: true, near: false })).map((p) => p.id).filter((id) => !ids.includes(id));
+    ids = [...ids, ...(await V.faceSafeFor(c, again))];
+  }
+  ids = await freshFirst(c, [...new Set(ids)]);
   if (!ids.length) return [];
   const rows = await db()<{ id: string; storage_key: string }[]>`select id, storage_key from library_files where tenant = ${c.tenant} and id = any(${ids}::uuid[]) and deleted_at is null
     and upload_status = 'ready' and mime_type like 'image/%' and coalesce(security, 'internal') <> 'confidential' and storage_key is not null`;

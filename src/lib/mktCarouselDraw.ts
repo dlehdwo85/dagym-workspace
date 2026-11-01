@@ -15,7 +15,9 @@ const PAD = 88;
 export type SlideKind = 'cover' | 'body' | 'table' | 'cta';
 export type Slide = { kind: SlideKind; title: string; body: string; rows: string[][]; imagePlan: string; imageId: string | null };
 /** height: #516 자동 시안 스토리 = 1920(9:16, 위·아래 안전 영역) — 없으면 1350(4:5) */
-export type DrawOpts = { template: 'box' | 'clean' | 'bold'; color: string | null; brand: string; keyword: string; logo: Buffer | null; font: Buffer | null; height?: number };
+/** backdrop = 310차(로컬 11/01 ②: 행동 장 '저장해 두세요'가 검정 단색 + 글자 — 대표가 반려한 꼴): 사진을 안 까는 장(행동 장·스토리 마지막 프레임)에
+ *  이 글의 사진을 흐리고 어둡게 장 전체에 깔아 줌(얼굴·글자는 알아볼 수 없을 만큼 흐림, 위 글자는 흰색) */
+export type DrawOpts = { template: 'box' | 'clean' | 'bold'; color: string | null; brand: string; keyword: string; logo: Buffer | null; font: Buffer | null; height?: number; backdrop?: Buffer | null };
 
 export type El = { type: string; key: null; props: Record<string, unknown> };
 export const h = (style: Record<string, unknown>, children: unknown): El => ({ type: 'div', key: null, props: { style: { display: 'flex', ...style }, children } });
@@ -76,6 +78,11 @@ async function photoLayer(buf: Buffer, f: ReturnType<typeof frameOf>) {
   const mask = Buffer.from(`<svg width="${f.w}" height="${f.h}"><rect width="${f.w}" height="${f.h}" rx="${f.r}" ry="${f.r}"/></svg>`);
   return sharp(await fit.ensureAlpha().png().toBuffer()).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
 }
+/** 310차: 행동 장 바탕 — 장 전체 cover · 강하게 흐림(얼굴·글자 못 알아봄) · 어둡게(흰 글자 읽힘) */
+async function backdropLayer(buf: Buffer, hh: number) {
+  const sharp = (await import('sharp')).default;
+  return sharp(buf).rotate().resize(W, hh, { fit: 'cover' }).blur(32).modulate({ brightness: 0.42, saturation: 0.8 }).png().toBuffer();
+}
 export async function logoUri(buf: Buffer) {
   const sharp = (await import('sharp')).default;
   const out = await sharp(buf, { density: 300 }).resize(320, 64, { fit: 'inside', withoutEnlargement: false }).png().toBuffer();
@@ -91,7 +98,7 @@ function tree(s: Slide, i: number, n: number, o: DrawOpts & { photo: boolean; lo
   const HH = o.height ?? H; const safe = safeOf(HH); const fr = frameOf(T, HH);
   const bg = bgOf(s, o);
   const onPhoto = o.photo && T !== 'clean'; // 사진 위 글자는 늘 흰색(아래 그늘)
-  const dark = cta || T === 'box' || onPhoto || lum(bg) < 0.45;
+  const dark = cta || !!o.backdrop || T === 'box' || onPhoto || lum(bg) < 0.45; // 310차: 흐린 사진 바탕 위 글자도 흰색
   const fg = dark ? '#FFFFFF' : '#111827'; const sub = dark ? 'rgba(255,255,255,0.88)' : '#374151'; const line = dark ? 'rgba(255,255,255,0.35)' : '#D1D5DB';
   const accent = T === 'bold' ? fg : (brandColor ?? (dark ? '#FFFFFF' : '#111827'));
   const head = h({ position: 'absolute', top: safe.top, left: PAD, right: PAD, height: 72, justifyContent: 'space-between', alignItems: 'center', color: dark ? 'rgba(255,255,255,0.9)' : '#6B7280', fontSize: 28 }, [
@@ -124,18 +131,19 @@ function tree(s: Slide, i: number, n: number, o: DrawOpts & { photo: boolean; lo
   return h({ position: 'relative', width: W, height: HH, fontFamily: 'Noto Sans KR', overflow: 'hidden' }, kids); // 바탕은 투명 — 바탕색·사진은 drawSlide 가 깔아 줌
 }
 
-/** 한 장 → PNG. photo = 자료실 사진 원본(있으면), 표·CTA 장에는 사진을 쓰지 않음 */
+/** 한 장 → PNG. photo = 자료실 사진 원본(있으면), 표·CTA 장에는 사진을 쓰지 않음(310차: 대신 o.backdrop 을 흐리게 깔 수 있음) */
 export async function drawSlide(s: Slide, i: number, n: number, o: DrawOpts, photo: Buffer | null): Promise<Buffer> {
   const f = await fonts();
   const t: Slide = { ...s, title: clean(s.title, f.has), body: clean(s.body, f.has), rows: s.rows.map((r) => r.map((c) => clean(c, f.has))) };
   const HH = o.height ?? H;
   const frame = frameOf(o.template, HH);
   const under = photo && (s.kind === 'cover' || s.kind === 'body') ? await photoLayer(photo, frame).catch(() => null) : null;
+  const back = !under && o.backdrop ? await backdropLayer(o.backdrop, HH).catch(() => null) : null;
   const logoEl = o.logo ? await logoUri(o.logo).catch(() => null) : null;
   const { ImageResponse } = await import('next/og');
   const fontList: any[] = [{ name: 'Noto Sans KR', data: f.bold, weight: 700, style: 'normal' }, { name: 'Noto Sans KR', data: f.reg, weight: 400, style: 'normal' }];
   const render = async (brandFont: boolean) => {
-    const el = tree(t, i, n, { ...o, keyword: clean(o.keyword, f.has), brand: clean(o.brand, f.has), photo: !!under, logoEl, titleFamily: brandFont ? 'Brand' : 'Noto Sans KR' });
+    const el = tree(t, i, n, { ...o, backdrop: back, keyword: clean(o.keyword, f.has), brand: clean(o.brand, f.has), photo: !!under, logoEl, titleFamily: brandFont ? 'Brand' : 'Noto Sans KR' });
     const res = new ImageResponse(el as any, { width: W, height: HH, fonts: brandFont ? [{ name: 'Brand', data: o.font!, weight: 700, style: 'normal' }, ...fontList] : fontList });
     return Buffer.from(await res.arrayBuffer());
   };
@@ -144,7 +152,7 @@ export async function drawSlide(s: Slide, i: number, n: number, o: DrawOpts, pho
   layer ??= await render(false);
   const sharp = (await import('sharp')).default;
   return sharp({ create: { width: W, height: HH, channels: 4, background: bgOf(s, o) } })
-    .composite([...(under ? [{ input: under, left: frame.x, top: frame.y }, ...(frame.r ? [] : [{ input: shadeOf(HH), left: 0, top: 0 }])] : []), { input: layer, left: 0, top: 0 }]).png().toBuffer();
+    .composite([...(back ? [{ input: back, left: 0, top: 0 }] : []), ...(under ? [{ input: under, left: frame.x, top: frame.y }, ...(frame.r ? [] : [{ input: shadeOf(HH), left: 0, top: 0 }])] : []), { input: layer, left: 0, top: 0 }]).png().toBuffer();
 }
 export async function toJpeg(png: Buffer) {
   const sharp = (await import('sharp')).default;
