@@ -272,4 +272,20 @@ test('⑧ 표지 4분할: 같은 그림(내용 해시)을 두 번 올린 사진�
   assert.ok(!(v.photoIds.includes(ids[3]) && v.photoIds.includes(ids[4])), `같은 그림 두 장이 함께 들어감: ${JSON.stringify(v.photoIds)}`);
   const hashes = (await sql`select content_hash from library_files where id in ${sql(v.photoIds)}`).map((r) => r.content_hash);
   assert.equal(new Set(hashes).size, 4);
+  Object.assign(P, { gb, gIds: ids, gFeed: FEED });
+});
+
+test('⑨ 브랜드 키트 미리보기(4분할만 골라 그려 보기)도 실제 표지와 같은 규칙: 같은 영상 장면·같은 그림은 한 칸 · 4장이 안 되면 장 수 안내', async () => {
+  const { gb, gIds: ids, gFeed } = P;
+  await sql`update library_files set meta = coalesce(meta, '{}'::jsonb) || ${sql.json({ video: { id: 'same-video' } })} where id in ${sql([ids[1], ids[2]])}`; // 같은 영상에서 뽑은 두 장면
+  const r = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${gb}/feed-preview`, { feed: { ...gFeed, templates: ['grid4'] } });
+  const got = r.sample.photoIds;
+  assert.ok(!(got.includes(ids[1]) && got.includes(ids[2])), `같은 영상 장면 두 장: ${JSON.stringify(got)}`);
+  assert.ok(!(got.includes(ids[3]) && got.includes(ids[4])), `같은 그림 두 장: ${JSON.stringify(got)}`);
+  assert.equal(got.length, 3, '서로 다른 사진 3장(0 · 1 또는 2 · 3 또는 4)');
+  const g = r.images.find((x) => x.template === 'grid4');
+  assert.match(g.note ?? '', /사진 3장/, '4장이 안 되면 장 수 안내');
+  await sql`update library_files set meta = meta - 'video' where id in ${sql([ids[1], ids[2]])}`;
+  const r2 = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${gb}/feed-preview`, { feed: { ...gFeed, templates: ['grid4'] } });
+  assert.equal(r2.sample.photoIds.length, 4); assert.equal(r2.images.find((x) => x.template === 'grid4').note, null);
 });
