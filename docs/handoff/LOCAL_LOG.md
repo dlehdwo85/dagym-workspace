@@ -2180,3 +2180,9 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 문제 ②: remakeContents 가 deleted_at 만 넣고 status 유지 → listContents(승인함)·overview week 에 옛 글 32건이 그대로(새 글과 짝으로). trashContents 는 status='canceled'·deleted_from. 미룬 글 다시 만들기(redoOnMove)·알림이 옛 글에 걸릴 위험.
 - 좋아진 것: 얼굴 표시 사진 0, 하이링크 영상 4건 붙음(장면 사진), 바디랩·워크인 영상은 보류(자료 대기), 블로그 사진 모자라면 changes+자료 요청.
 - APPLE_PRIVATE_KEY 아직 없음(입력 창 열어 둠).
+
+## 2026-11-01 18:30 — 305·306·308차 확인, Apple 로그인 운영 켜짐
+- 305 c706369: 승인함·운영실 표 옛 글 사라짐(표 31, 32de6458 없음). 2차 remake 31 → 제작 32/32(17:51~18:22, 정기 실행 busy 한 번). 승인 대기 13·수정 요청 19, 자료 요청 4(브랜드별). 본문 단색 장 0(행동 장만 검정). 영상 얼굴: 하이링크 11/3 쇼츠·릴스 여성 정면, 다짐 11/6 쇼츠 GX 단체.
+- 306 8ab07fc: POST /api/admin/review-account(기존 데모 계정, 예시만 다시) 200 → 데모 계정 /api/tasks 일반 회사 12건, 피트니스 낱말 0.
+- 308 e26a031: 공동 업무 11줄 상태·마감·함께 시작 x 차이 1920·1440 모두 0px, 375 가로 넘침 없음.
+- Apple: APPLE_PRIVATE_KEY 09:21Z 저장(대표) → 배포 b3675c4 09:25Z READY. providers 에 apple, 로그아웃 창 /login 'Apple로 로그인', start → appleid authorize(client_id dev.work-in.signin) 로그인 화면 정상. 내 재배포(API 403 Challenge, 화면 재배치)는 새 배포가 이미 키 뒤라 취소.
