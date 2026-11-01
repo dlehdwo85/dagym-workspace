@@ -55,7 +55,7 @@ export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: stri
         {/* 137차: 이 브랜드의 영문·다른 이름 — 다른 브랜드 글에 섞이면 올리기 전 검사가 막음(피드 머리줄 영문·홈페이지 주소 이름은 자동으로 함께) */}
         <input className={small} value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="이 브랜드의 다른 이름(쉼표) — 영문·약칭" aria-label="이 브랜드의 다른 이름" title="다른 브랜드 글에 이 이름이 섞이면 올리기 전 검사가 막습니다. 피드 머리줄의 영문 이름과 홈페이지 주소 이름은 따로 적지 않아도 함께 거릅니다." data-testid="facts-aliases" />
         {/* #235 ⓑ 네이버 블로그 메인 키워드(지역+업종) — 원고가 주제에 맞는 것 하나를 골라 제목 앞쪽·첫 문단·끝 문단·본문 5~7회 */}
-        <input className={small} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="블로그 검색 키워드(쉼표) — 지역+업종, 예: 송도 헬스장" aria-label="블로그 검색 키워드" title="네이버 블로그 원고의 메인 키워드 후보입니다(5개까지). 비워 두면 주소·업종으로 AI 가 정합니다." data-testid="facts-keywords" />
+        <input className={small} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="블로그 검색 키워드(쉼표) — 지역+업종, 예: 성수 사무실 인테리어" aria-label="블로그 검색 키워드" title="네이버 블로그 원고의 메인 키워드 후보입니다(5개까지). 비워 두면 주소·업종으로 AI 가 정합니다." data-testid="facts-keywords" />
       </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <textarea className={cx(inputCls, 'min-h-14 text-xs')} value={f.prices ?? ''} onChange={(e) => setF({ ...f, prices: e.target.value })} maxLength={500} placeholder="요금·혜택 — 원고는 여기 적힌 것만 씀" aria-label="요금·혜택" data-testid="facts-prices" />
@@ -66,7 +66,7 @@ export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: stri
         {news.map((x, k) => (
           <div key={k} className={cx('mt-1 flex flex-wrap items-center gap-1.5', x.to && x.to < today && 'opacity-50')} data-testid="facts-news-row">
             {/* inputCls 는 w-full 이라 폭은 감싼 칸으로 */}
-            <span className="min-w-[12rem] flex-1"><input className={small} value={x.text} maxLength={200} onChange={(e) => setRow(k, { text: e.target.value })} placeholder="예: 할로윈 주간 — 회원과 함께 오는 친구 1회 무료" aria-label={`소식 ${k + 1}`} data-testid="facts-news-text" /></span>
+            <span className="min-w-[12rem] flex-1"><input className={small} value={x.text} maxLength={200} onChange={(e) => setRow(k, { text: e.target.value })} placeholder="예: 연말 감사 주간 — 첫 상담 고객 사은품 증정" aria-label={`소식 ${k + 1}`} data-testid="facts-news-text" /></span>
             <span className="w-36 shrink-0"><input type="date" className={small} value={x.from ?? ''} onChange={(e) => setRow(k, { from: e.target.value || undefined })} aria-label={`소식 ${k + 1} 시작`} data-testid="facts-news-from" /></span>
             <span className="text-ink-3">~</span>
             <span className="w-36 shrink-0"><input type="date" className={small} value={x.to ?? ''} onChange={(e) => setRow(k, { to: e.target.value || undefined })} aria-label={`소식 ${k + 1} 끝`} data-testid="facts-news-to" /></span>

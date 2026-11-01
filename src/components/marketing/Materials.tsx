@@ -156,7 +156,7 @@ function NewRequest({ open, onClose, data, done }: { open: boolean; onClose: () 
           <Field label="종류"><select className={inputCls} value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as Kind })}>
             {(Object.keys(KIND) as Kind[]).map((k) => <option key={k} value={k}>{KIND[k]}</option>)}</select></Field>
         </div>
-        <Field label="무엇이 필요한가요"><input className={inputCls} value={f.title} maxLength={120} placeholder="예: 다짐 강남점 입구·운동 장면 실사 5장" onChange={(e) => setF({ ...f, title: e.target.value })} data-testid="material-title" /></Field>
+        <Field label="무엇이 필요한가요"><input className={inputCls} value={f.title} maxLength={120} placeholder="예: 매장 입구·제품 사용 장면 실사 5장" onChange={(e) => setF({ ...f, title: e.target.value })} data-testid="material-title" /></Field>
         <Field label="설명·예시" hint="찍을 장면, 가로·세로, 피할 것(얼굴 정면·글자 있는 홍보물) 등"><textarea className={inputCls} rows={4} value={f.detail} maxLength={2000} onChange={(e) => setF({ ...f, detail: e.target.value })} /></Field>
         <div className="grid grid-cols-3 gap-3">
           <Field label="몇 개"><input type="number" min={1} max={50} className={inputCls} value={f.wanted} onChange={(e) => setF({ ...f, wanted: Number(e.target.value) })} /></Field>

@@ -71,24 +71,24 @@ function MatrixForm({ brands, aiEnabled, onClose, onDone }: { brands: View['bran
           <Field label="브랜드"><select className={inputCls} value={brandId} onChange={(e) => setBrandId(e.target.value)} data-testid="concept-brand"><option value="">브랜드 없음(회사 전체)</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
           <Button variant="secondary" onClick={suggest} disabled={busy !== '' || !aiEnabled} title={aiEnabled ? '' : 'AI 연결 전'} data-testid="concept-suggest">{busy === 'suggest' ? '채우는 중…' : 'AI로 채우기'}</Button>
         </div>
-        <Field label="제품·서비스(한 줄)"><input className={inputCls} value={product} maxLength={120} onChange={(e) => setProduct(e.target.value)} placeholder="예: 아파트 커뮤니티 위탁 운영" data-testid="concept-product" /></Field>
+        <Field label="제품·서비스(한 줄)"><input className={inputCls} value={product} maxLength={120} onChange={(e) => setProduct(e.target.value)} placeholder="예: 중소기업 회계·세무 대행" data-testid="concept-product" /></Field>
         <div><span className="mb-1 block text-xs font-medium text-ink-2">구매자 역할(최대 6) — 결정권자·실무자·영향자</span>
           <div className="flex flex-wrap items-center gap-1.5">{roles.map((r) => <span key={r} className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800" data-testid="concept-role">{r}
             <button type="button" className="text-violet-500 hover:text-violet-900" onClick={() => setRoles(roles.filter((x) => x !== r))} aria-label={`${r} 빼기`}>×</button></span>)}
             {roles.length < 6 && <span className="flex items-center gap-1"><span className="w-44"><input className={cx(inputCls, 'h-8 py-1 text-xs')} value={role} maxLength={30} onChange={(e) => setRole(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addRole(); } }} placeholder="예: 관리사무소장" data-testid="concept-role-input" /></span>
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addRole(); } }} placeholder="예: 경영지원 팀장" data-testid="concept-role-input" /></span>
               <Button size="sm" variant="secondary" onClick={addRole} disabled={!role.trim()} data-testid="concept-role-add">추가</Button></span>}</div></div>
         <div><span className="mb-1 block text-xs font-medium text-ink-2">상황(최대 6) — 그 상황의 고통과 비용이 들지 않는 제안</span>
           <div className="space-y-1.5">{sits.map((s, k) => (
             <div key={k} className="grid gap-1.5 rounded-input border border-line p-1.5 sm:grid-cols-[1fr_1.4fr_1fr_auto]" data-testid="concept-sit">
-              <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={s.name} maxLength={40} onChange={(e) => setSit(k, { name: e.target.value })} placeholder="상황 예: 신축 입주 3~6개월 전" aria-label={`상황 ${k + 1}`} data-testid="concept-sit-name" />
-              <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={s.pain} maxLength={120} onChange={(e) => setSit(k, { pain: e.target.value })} placeholder="고통 예: 운영사·인력이 아직 미정" aria-label={`고통 ${k + 1}`} data-testid="concept-sit-pain" />
-              <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={s.offer} maxLength={80} onChange={(e) => setSit(k, { offer: e.target.value })} placeholder="제안 예: 입주 준비 체크리스트" aria-label={`제안 ${k + 1}`} data-testid="concept-sit-offer" />
+              <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={s.name} maxLength={40} onChange={(e) => setSit(k, { name: e.target.value })} placeholder="상황 예: 사무실 이전 1~2개월 전" aria-label={`상황 ${k + 1}`} data-testid="concept-sit-name" />
+              <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={s.pain} maxLength={120} onChange={(e) => setSit(k, { pain: e.target.value })} placeholder="고통 예: 이사·인터넷·가구 일정이 엉킴" aria-label={`고통 ${k + 1}`} data-testid="concept-sit-pain" />
+              <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={s.offer} maxLength={80} onChange={(e) => setSit(k, { offer: e.target.value })} placeholder="제안 예: 이전 준비 체크리스트" aria-label={`제안 ${k + 1}`} data-testid="concept-sit-offer" />
               <Button size="sm" variant="secondary" onClick={() => setSits(sits.length > 1 ? sits.filter((_, j) => j !== k) : [{ name: '', pain: '', offer: '' }])} aria-label={`상황 ${k + 1} 빼기`}>빼기</Button>
             </div>))}</div>
           {sits.length < 6 && <button type="button" className="mt-1 text-xs underline" style={{ color: C }} onClick={() => setSits([...sits, { name: '', pain: '', offer: '' }])} data-testid="concept-sit-add">+ 상황 추가</button>}</div>
         <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-          <Field label="메모(선택)"><input className={inputCls} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="예: 이번 달은 재계약 단지 위주" data-testid="concept-note" /></Field>
+          <Field label="메모(선택)"><input className={inputCls} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="예: 이번 달은 기존 고객 재계약 위주" data-testid="concept-note" /></Field>
           <Field label="컨셉 수"><select className={inputCls} value={count} onChange={(e) => setCount(Number(e.target.value))} data-testid="concept-count">{[8, 10, 12].map((n) => <option key={n} value={n}>{n}개</option>)}</select></Field>
         </div>
         <p className="text-[11px] text-ink-3">숫자·실적·가격은 회사·브랜드 정보에 있는 것만 씁니다 — 없으면 {'{{ }}'}로 비워 두니 채택 뒤 제작의뢰실에서 채워 주세요. 만들기는 AI 요청 1회입니다.</p>

@@ -39,8 +39,8 @@ export function CompanyAiProfile({ compact = false }: { compact?: boolean }) {
                 className={cx('rounded-full border px-2.5 py-1 text-xs', on ? 'border-transparent bg-brand-600 font-semibold text-white' : 'border-line bg-white hover:bg-slate-50')} data-testid="ai-industry-chip">{x}{on && (v.industries ?? [])[0] === x ? ' · 주' : ''}</button>); })}
           </div></div>
         <Field label={LABEL.business}><textarea className={cx(inputCls, 'min-h-20')} maxLength={1000} value={v.business ?? ''} onChange={(e) => set('business', e.target.value)}
-          placeholder="예: 강남·분당에서 PT 전문 센터 3곳 운영. 1:1 맞춤 관리와 재등록 상담을 중요하게 생각합니다." data-testid="ai-business" /></Field>
-        <Field label={LABEL.customers}><input className={inputCls} maxLength={500} value={v.customers ?? ''} onChange={(e) => set('customers', e.target.value)} placeholder="예: 30~50대 직장인 회원, 기업 복지 담당자" data-testid="ai-customers" /></Field>
+          placeholder="예: 중소기업에 업무 관리 솔루션을 판매·구축합니다. 빠른 응대와 꼼꼼한 사후 관리를 중요하게 생각합니다." data-testid="ai-business" /></Field>
+        <Field label={LABEL.customers}><input className={inputCls} maxLength={500} value={v.customers ?? ''} onChange={(e) => set('customers', e.target.value)} placeholder="예: 직원 10~50명 회사의 대표·경영지원 담당자" data-testid="ai-customers" /></Field>
         <Field label={LABEL.tone}><input className={inputCls} maxLength={500} value={v.tone ?? ''} onChange={(e) => set('tone', e.target.value)} placeholder="예: 친근하지만 정중하게" data-testid="ai-tone" /></Field>
         <Field label={LABEL.cautions}><input className={inputCls} maxLength={500} value={v.cautions ?? ''} onChange={(e) => set('cautions', e.target.value)} placeholder="예: '100% 효과' 같은 단정 금지, 할인 약속 금지" data-testid="ai-cautions" /></Field>
         <Button size="sm" disabled={busy || !f} onClick={save} data-testid="ai-profile-save">저장</Button>

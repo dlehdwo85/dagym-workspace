@@ -1291,7 +1291,7 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
     assert.ok((await c.ok('GET', '/api/library')).files.length >= 4, '자료실 파일');
     assert.equal((await c.ok('GET', '/api/sales/src?view=leads')).leads.length, 5, '영업 리드 5(공간 켜짐·배정)');
     assert.equal((await c.ok('GET', '/api/marketing/contents')).contents.length, 2, '마케팅 시안 2');
-    const csv = (await c.ok('GET', '/api/library')).files.find((f) => f.file_name === '근무표(예시).csv');
+    const csv = (await c.ok('GET', '/api/library')).files.find((f) => f.file_name === '팀 일정표(예시).csv');
     assert.equal((await c.get(`/api/library/${csv.id}/download`)).status < 400, true, '파일 내려받기 됨');
     const other = (await ctx.owner.ok('POST', '/api/tasks', { title: '회사 비밀 업무', orgUnitId: ctx.hq })).id;
     assert.equal((await c.get(`/api/tasks/${other}`)).status, 404);

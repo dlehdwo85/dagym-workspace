@@ -236,7 +236,7 @@ export function Automation() {
             className={cx('size-7 rounded-full border text-xs', rule.weekdays.includes(k) ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white')} aria-pressed={rule.weekdays.includes(k)} aria-label={`${d}요일`}>{d}</button>)}</span>
           <input type="time" className={inputCls} value={rule.postTime} onChange={(e) => setRule({ ...rule, postTime: e.target.value })} aria-label="게시 시각" />
           <Button type="submit" disabled={!rule.weekdays.length} data-testid="auto-rule-add">규칙 추가</Button>
-          <input className={cx(inputCls, 'sm:col-span-6')} value={rule.topicHint} onChange={(e) => setRule({ ...rule, topicHint: e.target.value })} placeholder="주제 힌트(선택) — 예: 신규 회원 이벤트, 시설 소개" aria-label="주제 힌트" />
+          <input className={cx(inputCls, 'sm:col-span-6')} value={rule.topicHint} onChange={(e) => setRule({ ...rule, topicHint: e.target.value })} placeholder="주제 힌트(선택) — 예: 신제품 소개, 고객 사례" aria-label="주제 힌트" />
           {/* #499-1 용도: 콘텐츠형(참여)·광고형(전환) — AI 가 쓰는 첫 줄·구성과 훅 채점이 다름 */}
           <span className="flex flex-wrap items-center gap-2 text-xs text-ink-2 sm:col-span-6"><span className="font-medium text-ink">용도</span><ModeToggle value={rule.mode} onChange={(m) => setRule({ ...rule, mode: m })} testId="auto-rule-mode" /><span className="text-ink-3">{MODE_HINT[rule.mode]}</span></span>
         </form>}
@@ -289,7 +289,7 @@ export function Automation() {
             {q.brief && <p className="mt-1 whitespace-pre-wrap text-xs text-ink-2">{q.brief}</p>}
             <div className="mt-2 flex flex-wrap items-end gap-2">
               {q.kind === 'topic' ? (<>
-                <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1 text-xs')} value={topics[q.id] ?? ''} onChange={(e) => setTopics({ ...topics, [q.id]: e.target.value })} placeholder="이번 글 주제(예: 10월 신규 회원 이벤트)" maxLength={300} aria-label="주제" data-testid="auto-topic" />
+                <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1 text-xs')} value={topics[q.id] ?? ''} onChange={(e) => setTopics({ ...topics, [q.id]: e.target.value })} placeholder="이번 글 주제(예: 11월 신제품 출시 소식)" maxLength={300} aria-label="주제" data-testid="auto-topic" />
                 <Button size="sm" onClick={() => act(q.id, 'done')} disabled={(topics[q.id] ?? '').trim().length < 2} data-testid="auto-topic-send">주제 보내기</Button></>)
               : q.status === 'needs_approval' ? (ed && <Button size="sm" onClick={() => act(q.id, 'approve')} data-testid="auto-req-approve">제작 승인</Button>) : (<>
                 <MediaPick value={done[q.id]?.media ?? []} onChange={(m) => setDone({ ...done, [q.id]: { credits: done[q.id]?.credits ?? '', media: m } })} />

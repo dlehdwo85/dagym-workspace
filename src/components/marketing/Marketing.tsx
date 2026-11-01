@@ -135,7 +135,7 @@ function NewContent({ onClose, onDone, date }: { onClose: () => void; onDone: ()
         {/* 대표 10/20 18:00 ①: 근거 칸 — 승인함 카드·상세 '왜 이 글인가'에 보임 */}
         <details className="rounded-input border border-line p-2" data-testid="mkt-new-why"><summary className="cursor-pointer text-xs text-ink-2">근거 — 목적·목표 지표·핵심 메시지·왜 이 글인가(선택)</summary>
           <div className="mt-2 grid gap-2 sm:grid-cols-3">
-            <Field label="목적"><input className={inputCls} value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })} maxLength={200} placeholder="예: 신규 회원 문의" data-testid="mkt-why-purpose" /></Field>
+            <Field label="목적"><input className={inputCls} value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })} maxLength={200} placeholder="예: 신규 고객 문의 늘리기" data-testid="mkt-why-purpose" /></Field>
             <Field label="목표 지표"><input className={inputCls} value={f.metric} onChange={(e) => setF({ ...f, metric: e.target.value })} maxLength={200} placeholder="예: 전화 문의 5건" /></Field>
             <Field label="핵심 메시지"><input className={inputCls} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} maxLength={200} placeholder="예: 가을 이벤트 30% 할인" /></Field>
           </div>

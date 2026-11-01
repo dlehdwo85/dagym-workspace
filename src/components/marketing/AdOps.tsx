@@ -501,7 +501,7 @@ function LocalFinder({ accountId, value, have, onChange, onPick, pickLabel }: { 
         <Field label="중심 위치(지점 주소·동네)"><input className={inputCls} value={v.center} onChange={(e) => set({ center: e.target.value })} placeholder="예: 천안 두정동 ○○점" maxLength={80} data-testid="local-center" /></Field>
         <Field label="반경"><select className={inputCls} value={v.radiusKm} onChange={(e) => set({ radiusKm: Number(e.target.value) })} data-testid="local-radius">{[1, 2, 3, 5, 10].map((k) => <option key={k} value={k}>{k}km</option>)}</select></Field>
       </div>
-      <Field label="서비스 단어(쉼표로, 5개까지)"><input className={inputCls} value={services} onChange={(e) => setServices(e.target.value)} placeholder="예: 헬스장, PT" data-testid="local-services" /></Field>
+      <Field label="서비스 단어(쉼표로, 5개까지)"><input className={inputCls} value={services} onChange={(e) => setServices(e.target.value)} placeholder="예: 홈페이지 제작, 유지보수" data-testid="local-services" /></Field>
       <div className="flex flex-wrap items-center gap-1.5" data-testid="local-areas">
         {v.areas.map((a) => <span key={a} className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-violet-900" data-testid="local-area">{a}
           <button type="button" aria-label={`${a} 빼기`} onClick={() => set({ areas: v.areas.filter((x) => x !== a) })}>×</button></span>)}

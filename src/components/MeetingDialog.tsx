@@ -27,7 +27,7 @@ export function MeetingDialog({ taskId, title, defaultDate, defaultLocation, onC
     <Modal open onClose={onClose} title="미팅 일정 만들기">
       <form onSubmit={save} className="grid gap-3" data-testid="meeting-dialog">
         <p className="text-xs text-ink-2">장소는 일정에 한 번만 적습니다. 업무 목록에 📍장소·시간이 보이고, 캘린더에 이동(출발 권장)과 30분 전 알림이 붙습니다.</p>
-        <Field label="장소"><input className={inputCls} value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} placeholder="예: 판교 OO아파트 관리사무소" maxLength={300} autoFocus data-testid="meeting-location" /></Field>
+        <Field label="장소"><input className={inputCls} value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} placeholder="예: 거래처 본사 3층 회의실" maxLength={300} autoFocus data-testid="meeting-location" /></Field>
         <div className="grid grid-cols-3 gap-2">
           <Field label="날짜"><input type="date" className={inputCls} value={f.date} min={todayStr()} onChange={(e) => setF({ ...f, date: e.target.value })} data-testid="meeting-date" /></Field>
           <Field label="시작"><input type="time" step={900} className={inputCls} value={f.start} onChange={(e) => { const s = e.target.value; const [h, m] = s.split(':').map(Number); const end = `${String(Math.min(23, h + 1)).padStart(2, '0')}:${String(m).padStart(2, '0')}`; setF({ ...f, start: s, end: f.end > s ? f.end : end }); }} data-testid="meeting-start" /></Field>

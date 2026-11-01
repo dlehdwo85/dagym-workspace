@@ -65,8 +65,8 @@ export function CarouselStudio() {
         <h2 className="font-semibold">새 카드뉴스</h2>
         <div className="grid gap-2 sm:grid-cols-3">
           <Field label="브랜드"><select className={inputCls} value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value })} data-testid="carousel-brand"><option value="">브랜드 없음</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
-          <Field label="제품·서비스"><input className={inputCls} value={f.product} maxLength={120} onChange={(e) => setF({ ...f, product: e.target.value })} placeholder="예: 커뮤니티 위탁 운영" data-testid="carousel-product" /></Field>
-          <Field label="대상(선택)"><input className={inputCls} value={f.audience} maxLength={60} onChange={(e) => setF({ ...f, audience: e.target.value })} placeholder="예: 입주를 앞둔 단지" data-testid="carousel-audience" /></Field>
+          <Field label="제품·서비스"><input className={inputCls} value={f.product} maxLength={120} onChange={(e) => setF({ ...f, product: e.target.value })} placeholder="예: 사무실 정기 관리 서비스" data-testid="carousel-product" /></Field>
+          <Field label="대상(선택)"><input className={inputCls} value={f.audience} maxLength={60} onChange={(e) => setF({ ...f, audience: e.target.value })} placeholder="예: 사무실 이전을 앞둔 회사" data-testid="carousel-audience" /></Field>
         </div>
         <div className="grid gap-2 sm:grid-cols-4">
           <Field label="비교 A(선택)"><input className={inputCls} value={f.a} maxLength={30} onChange={(e) => setF({ ...f, a: e.target.value })} placeholder="A vs B 일 때" data-testid="carousel-a" /></Field>

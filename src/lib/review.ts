@@ -46,6 +46,7 @@ async function ensureUnit(tx: Sql) {
 /**
  * 예시 데이터 새로 만들기(스토어 스크린샷용 — 로컬 10/19): 기존 예시는 지움 → 업무 12(마감 지남·오늘·이번 주, 진행·검토·완료, 체크리스트·댓글) ·
  * 이번 주 일정 7(색 여러 가지, 미팅 포함) · 메시지방 2 · AI 비서 대화 1 · 자료실 파일 4 · 영업 리드 5 · 마케팅 시안 2. 이름·전화는 모두 가상.
+ * 306차 #877(대표 11/01 '피트니스 말고 보편적인 회사 툴로 보이게'): 직원 15명쯤 B2B 회사(영업·마케팅·경영지원) 하루 업무로.
  */
 const SAMPLE = 'review-sample';
 async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: string | null, reviewerActive: boolean) {
@@ -62,21 +63,21 @@ async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: 
   const [lead, mgr] = people;
   const me = reviewer ?? lead;
   const [p] = await tx<{ id: string }[]>`insert into projects (name, description, org_unit_id, owner_id, color, created_by)
-    values ('신규 지점 오픈 준비', '체험용 예시 프로젝트입니다. 자유롭게 바꿔 보세요.', ${unitId}, ${lead}, '#0d9488', ${lead}) returning id`;
+    values ('4분기 영업·운영 계획', '체험용 예시 프로젝트입니다. 자유롭게 바꿔 보세요.', ${unitId}, ${lead}, '#0d9488', ${lead}) returning id`;
   // 제목, 담당, 지시, 마감, 우선순위, 상태, 체크리스트, 댓글
   const rows: [string, string, string, string | null, string, string, string[], [string, string][]][] = [
-    ['오픈 이벤트 안내문 작성', me, lead, today, 'high', 'in_progress', ['문구 초안', '사진 고르기', '팀장 확인'], [[lead, '이번 주 금요일까지 게시하면 좋겠어요.']]],
-    ['전단지 인쇄 견적 받기', mgr, lead, addDays(today, -2), 'urgent', 'todo', [], [[mgr, '두 곳 견적 기다리는 중입니다.']]],
-    ['회원 상담 스크립트 검토', me, mgr, addDays(today, -1), 'normal', 'review', ['첫 인사', '가격 안내', '마무리'], []],
-    ['오픈 당일 근무표 확정', lead, me, addDays(today, 1), 'high', 'todo', [], []],
-    ['운동기구 점검 일정 확인', me, lead, addDays(today, 2), 'normal', 'todo', ['러닝머신', '사이클', '웨이트 머신'], []],
-    ['지역 카페 홍보 글 올리기', mgr, lead, addDays(today, 3), 'normal', 'in_progress', [], [[lead, '사진 3장 이상 넣어 주세요.'], [mgr, '네, 오늘 올리겠습니다.']]],
-    ['샤워실 비품 발주', me, mgr, addDays(today, 4), 'low', 'todo', [], []],
-    ['신규 회원 환영 문자 문구', mgr, me, addDays(today, 5), 'normal', 'todo', [], []],
-    ['간판 시안 최종 확인', lead, me, addDays(today, 6), 'high', 'on_hold', [], [[lead, '건물 관리사무소 답변 기다립니다.']]],
-    ['강사 계약서 정리', me, lead, addDays(today, -3), 'normal', 'done', ['계약서 2부', '서명 확인'], []],
-    ['오픈 리허설 체크리스트', mgr, lead, addDays(today, -1), 'normal', 'done', [], []],
-    ['고객 설문지 만들기', me, lead, null, 'low', 'todo', [], []],
+    ['분기 매출 보고서 작성', me, lead, today, 'high', 'in_progress', ['매출 자료 모으기', '그래프 정리', '팀장 확인'], [[lead, '이번 주 금요일 경영 회의에 올리면 좋겠어요.']]],
+    ['거래처 견적서 발송', mgr, lead, addDays(today, -2), 'urgent', 'todo', [], [[mgr, '단가표 최신본 확인하고 보내겠습니다.']]],
+    ['신입 입사 준비 체크리스트 검토', me, mgr, addDays(today, -1), 'normal', 'review', ['노트북·계정 준비', '입사 서류', '첫 주 일정'], []],
+    ['월말 정산 자료 확정', lead, me, addDays(today, 1), 'high', 'todo', [], []],
+    ['홈페이지 개편 시안 검토', me, lead, addDays(today, 2), 'normal', 'todo', ['메인 화면', '서비스 소개', '문의 양식'], []],
+    ['고객 사례 소개 글 올리기', mgr, lead, addDays(today, 3), 'normal', 'in_progress', [], [[lead, '사진 3장 이상 넣어 주세요.'], [mgr, '네, 오늘 올리겠습니다.']]],
+    ['사무용품 발주', me, mgr, addDays(today, 4), 'low', 'todo', [], []],
+    ['세금계산서 발행 확인', mgr, me, addDays(today, 5), 'normal', 'todo', [], []],
+    ['거래처 계약 갱신 조건 확인', lead, me, addDays(today, 6), 'high', 'on_hold', [], [[lead, '상대 회사 답변 기다립니다.']]],
+    ['용역 계약서 정리', me, lead, addDays(today, -3), 'normal', 'done', ['계약서 2부', '서명 확인'], []],
+    ['주간 회의록 정리', mgr, lead, addDays(today, -1), 'normal', 'done', [], []],
+    ['고객 만족도 설문 만들기', me, lead, null, 'low', 'todo', [], []],
   ];
   let n = 0;
   for (const [title, who, req, due, pr, st, checks, comments] of rows) {
@@ -89,13 +90,13 @@ async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: 
   const [cal] = await tx<{ id: string }[]>`select id from calendars where type = 'org_unit' and org_unit_id = ${unitId} limit 1`;
   // 이번 주(오늘부터 6일) 일정 — 색 여러 가지, 미팅(방문) 포함
   const evs: [string, string, string, string, string | null, string][] = [
-    ['주간 운영 회의', today, '10:00', '11:00', null, '체험 지점 회의실'],
+    ['주간 팀 회의', today, '10:00', '11:00', null, '본사 회의실'],
     ['미팅 · 체험 상사 제휴 상담', today, '15:00', '16:00', '#E67C73', '체험 상사 본사(가상)'],
-    ['강사 면접', addDays(today, 1), '13:00', '14:00', '#33B679', '체험 지점 상담실'],
-    ['오픈 리허설', addDays(today, 2), '14:00', '15:30', '#F6BF26', '체험 지점'],
-    ['미팅 · 인테리어 업체 현장 방문', addDays(today, 3), '11:00', '12:00', '#8E24AA', '체험 지점 2층'],
-    ['마케팅 시안 검토', addDays(today, 4), '16:00', '17:00', '#039BE5', '온라인'],
-    ['월간 정산', addDays(today, 5), '09:30', '10:30', '#616161', '체험 지점 사무실'],
+    ['경력 사원 면접', addDays(today, 1), '13:00', '14:00', '#33B679', '본사 2층 회의실'],
+    ['분기 실적 리뷰', addDays(today, 2), '14:00', '15:30', '#F6BF26', '본사 회의실'],
+    ['미팅 · 거래처 방문', addDays(today, 3), '11:00', '12:00', '#8E24AA', '다라 오피스(가상)'],
+    ['홈페이지 시안 검토', addDays(today, 4), '16:00', '17:00', '#039BE5', '온라인'],
+    ['월말 정산', addDays(today, 5), '09:30', '10:30', '#616161', '경영지원팀'],
   ];
   for (const [title, d, s, e, color, loc] of evs) {
     const [x] = await tx<{ id: string }[]>`insert into events (calendar_id, title, location, start_at, end_at, created_by, color)
@@ -104,8 +105,8 @@ async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: 
   }
   // 메시지방: 팀 단체방 + 김팀장 1:1
   const rooms: [string, string | null, string[], [string, string][]][] = [
-    ['group', '체험 지점 운영', [lead, mgr, me], [[lead, '오늘 오후 3시 제휴 상담 있습니다.'], [mgr, '자료 준비해 두겠습니다.'], [me, '안내문 초안 올렸어요. 확인 부탁드려요.'], [lead, '좋아요 👍 사진만 하나 바꿔 주세요.']]],
-    ['dm', null, [lead, me], [[lead, '근무표 내일까지 확정 가능할까요?'], [me, '네, 오전 중에 정리해서 보내드릴게요.']]],
+    ['group', '체험 회사 업무방', [lead, mgr, me], [[lead, '오늘 오후 3시 제휴 상담 있습니다.'], [mgr, '자료 준비해 두겠습니다.'], [me, '분기 보고서 초안 올렸어요. 확인 부탁드려요.'], [lead, '좋아요 👍 그래프 하나만 바꿔 주세요.']]],
+    ['dm', null, [lead, me], [[lead, '정산 자료 내일까지 확정 가능할까요?'], [me, '네, 오전 중에 정리해서 보내드릴게요.']]],
   ];
   let r = 0;
   for (const [kind, name, members, msgs] of rooms) {
@@ -118,14 +119,14 @@ async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: 
   if (reviewer) {
     const [th] = await tx<{ id: string }[]>`insert into ai_threads (tenant, user_id, title) values (${T}, ${reviewer}, '[예시] 이번 주 할 일 정리') returning id`;
     await tx`insert into ai_messages (thread_id, role, text) values (${th.id}, 'user', '이번 주 내 업무 정리해 줘'),
-      (${th.id}, 'assistant', ${'이번 주 업무 4건입니다.\n1. 오픈 이벤트 안내문 작성 — 오늘 마감(진행 중)\n2. 운동기구 점검 일정 확인 — 모레\n3. 샤워실 비품 발주 — 4일 뒤\n4. 회원 상담 스크립트 검토 — 검토 대기\n먼저 오늘 마감인 안내문부터 마무리하시면 좋겠습니다.'})`;
+      (${th.id}, 'assistant', ${'이번 주 업무 4건입니다.\n1. 분기 매출 보고서 작성 — 오늘 마감(진행 중)\n2. 홈페이지 개편 시안 검토 — 모레\n3. 사무용품 발주 — 4일 뒤\n4. 신입 입사 준비 체크리스트 검토 — 검토 대기\n먼저 오늘 마감인 보고서부터 마무리하시면 좋겠습니다.'})`;
   }
   // 자료실 파일 4개(가상 내용)
   const files: [string, string, string, string][] = [
-    ['오픈 이벤트 안내문.txt', 'text/plain', '마케팅', '체험 지점 오픈 이벤트\n기간: 이번 달 말까지\n혜택: 첫 달 이용료 할인(예시)\n문의: 체험 지점 안내데스크'],
-    ['근무표(예시).csv', 'text/csv', '운영', '이름,월,화,수,목,금\n체험 김팀장,오전,오전,휴무,오후,오후\n체험 박매니저,오후,오후,오전,휴무,오전'],
-    ['회원 상담 스크립트.md', 'text/markdown', '운영', '# 상담 순서\n1. 인사와 방문 목적 확인\n2. 시설 안내\n3. 이용권 설명\n4. 다음 방문 약속'],
-    ['체험 지점 로고.svg', 'image/svg+xml', '디자인', '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" rx="40" fill="#0d9488"/><text x="100" y="118" font-size="44" text-anchor="middle" fill="#fff" font-family="sans-serif">체험</text></svg>'],
+    ['분기 매출 요약(예시).txt', 'text/plain', '경영지원', '4분기 매출 요약(예시)\n신규 거래처: 3곳\n재계약: 5곳\n다음 분기 목표: 기존 고객 재계약률 90%'],
+    ['팀 일정표(예시).csv', 'text/csv', '운영', '이름,월,화,수,목,금\n체험 김팀장,사무실,외근,사무실,재택,사무실\n체험 박매니저,외근,사무실,재택,사무실,외근'],
+    ['신입 입사 안내.md', 'text/markdown', '인사', '# 첫 주 안내\n1. 계정·노트북 받기\n2. 팀 소개와 업무 도구 익히기\n3. 담당 거래처 인수인계\n4. 첫 주 돌아보기'],
+    ['체험 회사 로고.svg', 'image/svg+xml', '디자인', '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" rx="40" fill="#0d9488"/><text x="100" y="118" font-size="44" text-anchor="middle" fill="#fff" font-family="sans-serif">체험</text></svg>'],
   ];
   for (const [fileName, mime, folder, body] of files) {
     const data = Buffer.from(body, 'utf8');
@@ -141,17 +142,17 @@ async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: 
   await tx`insert into sales_cutover (tenant, ok, writes_open) values (${T}, true, true) on conflict (tenant) do update set writes_open = true`;
   const leads: [string, string, string, string, string | null, string][] = [
     ['체험 상사(가상)', '미팅예정', 'high', '서울', addDays(today, 1), '체험 이대리'],
-    ['가나 피트니스(가상)', '1차연락완료', 'medium', '경기', addDays(today, 3), '체험 최실장'],
+    ['가나 물류(가상)', '1차연락완료', 'medium', '경기', addDays(today, 3), '체험 최실장'],
     ['다라 오피스(가상)', '제안서발송완료', 'high', '서울', addDays(today, 2), '체험 정과장'],
-    ['마바 아파트 관리사무소(가상)', '신규리드', 'low', '인천', null, '체험 한소장'],
-    ['사아 학원(가상)', '견적협의', 'medium', '경기', addDays(today, 5), '체험 윤원장'],
+    ['마바 디자인(가상)', '신규리드', 'low', '인천', null, '체험 한팀장'],
+    ['사아 교육(가상)', '견적협의', 'medium', '경기', addDays(today, 5), '체험 윤대표'],
   ];
   let li = 0;
   for (const [name, status, pr, region, next, contact] of leads) await tx`insert into sales_leads (tenant, src_id, name, status, priority, region, owner_id, next_contact_date, contact_name, phone, expected_revenue, memo)
     values (${T}, ${`${SAMPLE}-${li++}`}, ${name}, ${status}, ${pr}, ${region}, ${me}, ${next}, ${contact}, '010-0000-0000', ${(li * 1200000)}, '체험용 예시 리드입니다(가상).')`;
   const mk: [string, string, string, string][] = [
-    ['오픈 이벤트 인스타 피드', 'instagram', 'pending', '체험 지점이 문을 엽니다! 첫 달 할인(예시) — 지금 방문하세요.\n#체험지점 #오픈이벤트'],
-    ['블로그 · 시설 둘러보기', 'blog', 'approved', '체험 지점의 운동 공간을 소개합니다. (예시 글)'],
+    ['신규 서비스 출시 인스타 피드', 'instagram', 'pending', '체험 회사의 새 서비스를 소개합니다. 출시 기념 첫 상담 무료(예시) — 지금 문의하세요.\n#체험회사 #신규서비스'],
+    ['블로그 · 고객 사례 소개', 'blog', 'approved', '체험 회사와 함께 업무 방식을 바꾼 고객사 사례를 소개합니다. (예시 글)'],
   ];
   let mi = 0;
   for (const [title, channel, status, body] of mk) {
