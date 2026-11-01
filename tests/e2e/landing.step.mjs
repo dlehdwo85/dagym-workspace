@@ -17,7 +17,7 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   assert.ok(ld['@graph'].some((x) => x['@type'] === 'SoftwareApplication' && x.offers.price === '0'), 'JSON-LD');
   assert.equal(await p.locator('meta[property="og:image"]').getAttribute('content'), 'https://www.work-in.dev/landing/og.png'); // #627 기본 주소 www
   assert.equal(await p.locator('link[rel="canonical"]').getAttribute('href'), 'https://www.work-in.dev'); // Next 는 루트 canonical 의 끝 / 를 뗀다
-  assert.equal(await p.getByTestId('landing-feature-links').getByRole('link').count(), 3, '기능별 소개 링크 3개');
+  assert.equal(await p.getByTestId('landing-feature-links').getByRole('link').count(), 5, '기능별 소개 링크 5개(#867 마케팅 자동화·입찰 정보 자동 수집)');
   assert.equal(await p.locator('meta[name="robots"]').getAttribute('content'), 'index, follow');
   assert.equal(await p.evaluate(() => JSON.parse(localStorage.getItem('wos_utm') ?? '{}').source), 'naver', 'UTM 기억');
   const fired = await p.evaluate(() => new Promise((r) => { document.addEventListener('wos:landing', (e) => r(e.detail.kind), { once: true }); document.querySelector('[data-testid="landing-app"]').click(); }));

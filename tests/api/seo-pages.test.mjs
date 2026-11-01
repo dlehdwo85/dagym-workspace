@@ -1,5 +1,5 @@
 // #627(대표 10/25 20:05 ①, docs/handoff/SEO_AUDIT_2026-10-25 2-1 워크인 코드 묶음): robots(공개 화면 열고 앱 화면만 막음·$ 없음·주소 www) · 사이트맵(색인 화면만·lastmod·www)
-// · 검색어별 소개 페이지 3개(제목 검색어·canonical·OG·FAQ 구조화 데이터·서로 링크) · 홈 제목·설명 검색어 + 기능별 링크 · 가입 OG(색인은 안 함). 시험 서버는 NEXT_PUBLIC_SITE_URL 없음 = 기본 www
+// · 검색어별 소개 페이지 5개(#867 마케팅 자동화·입찰 정보 자동 수집 추가)(제목 검색어·canonical·OG·FAQ 구조화 데이터·서로 링크) · 홈 제목·설명 검색어 + 기능별 링크 · 가입 OG(색인은 안 함). 시험 서버는 NEXT_PUBLIC_SITE_URL 없음 = 기본 www
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { BASE, resetDb, startServer } from '../helpers.mjs';
@@ -9,7 +9,7 @@ before(async () => { await resetDb(); srv = await startServer(); });
 after(() => srv?.proc.kill());
 const get = async (p) => { const r = await fetch(BASE + p, { redirect: 'manual' }); return { status: r.status, text: await r.text() }; };
 const SITE = 'https://www.work-in.dev';
-const SLUGS = ['task-management', 'e-approval', 'collaboration'];
+const SLUGS = ['task-management', 'e-approval', 'collaboration', 'marketing-automation', 'bid-collection']; // #867 마케팅실·영업실 페이지 추가
 
 test('robots.txt: 공개 화면 전부 열고 앱 화면만 막음 · $ 패턴 없음 · 사이트맵·호스트 www', async () => {
   const r = await get('/robots.txt');
@@ -20,7 +20,7 @@ test('robots.txt: 공개 화면 전부 열고 앱 화면만 막음 · $ 패턴 �
   assert.ok(!r.text.includes('Disallow: /_next'), '_next(CSS·JS) 막지 않음');
 });
 
-test('sitemap.xml: 홈 + 소개 페이지 3개(lastmod·www), noindex 화면(가입·약관·개인정보·계정 삭제)은 없음', async () => {
+test('sitemap.xml: 홈 + 소개 페이지 5개(lastmod·www), noindex 화면(가입·약관·개인정보·계정 삭제)은 없음', async () => {
   const r = await get('/sitemap.xml');
   assert.equal(r.status, 200);
   assert.ok(r.text.includes(`<loc>${SITE}/</loc>`), '홈');
@@ -29,8 +29,8 @@ test('sitemap.xml: 홈 + 소개 페이지 3개(lastmod·www), noindex 화면(가
   for (const no of ['/signup</loc>', '/privacy</loc>', '/terms</loc>', '/account-deletion</loc>', 'https://work-in.dev/']) assert.ok(!r.text.includes(no), `없어야 함: ${no}`);
 });
 
-test('검색어별 소개 페이지 3개: 제목에 검색어 · canonical·og:url www · index,follow · FAQ·빵부스러기 구조화 데이터 · 가입 버튼 · 서로 링크 · 하단 사업자 정보 · 모르는 주소 404', async () => {
-  const keywords = { 'task-management': '중소기업 업무관리 프로그램', 'e-approval': '전자결재 프로그램', collaboration: '중소기업 협업툴' };
+test('검색어별 소개 페이지 5개: 제목에 검색어 · canonical·og:url www · index,follow · FAQ·빵부스러기 구조화 데이터 · 가입 버튼 · 서로 링크 · 하단 사업자 정보 · 모르는 주소 404', async () => {
+  const keywords = { 'task-management': '중소기업 업무관리 프로그램', 'e-approval': '전자결재 프로그램', collaboration: '중소기업 협업툴', 'marketing-automation': '마케팅 자동화', 'bid-collection': '입찰 정보 자동 수집' };
   for (const s of SLUGS) {
     const r = await get(`/landing/${s}`);
     assert.equal(r.status, 200, s);
@@ -46,7 +46,18 @@ test('검색어별 소개 페이지 3개: 제목에 검색어 · canonical·og:u
   assert.equal((await get('/landing/no-such-page')).status, 404);
 });
 
-test('홈(/·/welcome): 제목·설명에 검색어 · "Android·iOS" 문구 없음 · canonical www · 기능별 소개 링크 3개 · 측정 ID 없으면 태그 없음', async () => {
+test('#867 마케팅실·영업실 페이지: 자동 게시는 인스타그램·페이스북만(네이버 블로그는 올리기 도우미) · 광고는 일시정지 초안 → 승인 뒤 집행 · 남의 서비스 이름 없음 · 못 하는 일(서류 제출·가격 산출) 밝힘 · 사이트맵 lastmod', async () => {
+  const m = (await get('/landing/marketing-automation')).text;
+  assert.ok(m.includes('올리기 도우미') && m.includes('일시정지') && m.includes('승인'), '마케팅: 도우미·일시정지·승인');
+  assert.ok(!/네이버 블로그[^<。.]{0,20}자동 게시(?!를 하지)/.test(m), '네이버 블로그를 자동 게시라고 쓰지 않음');
+  const b = (await get('/landing/bid-collection')).text;
+  assert.ok(b.includes('참가자격') && b.includes('업무') && b.includes('직접 합니다'), '입찰: 참가자격·업무·못 하는 일');
+  for (const t of [m, b]) assert.ok(!/21라인|21LINE|비즈인포|나라장터 대행/.test(t), '남의 서비스 이름 없음');
+  const sm = (await get('/sitemap.xml')).text;
+  assert.match(sm, /\/landing\/bid-collection<\/loc>\s*<lastmod>2026-11-01/, '새 페이지 lastmod');
+});
+
+test('홈(/·/welcome): 제목·설명에 검색어 · "Android·iOS" 문구 없음 · canonical www · 기능별 소개 링크 5개 · 측정 ID 없으면 태그 없음', async () => {
   for (const path of ['/', '/welcome']) {
     const r = await get(path);
     assert.equal(r.status, 200, path);
