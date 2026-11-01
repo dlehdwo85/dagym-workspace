@@ -79,8 +79,9 @@ export function handler<P>(fn: (ctx: any) => Promise<unknown>, opts: Opts = {}) 
         if (MUTATING.has(req.method) && path !== '/api/platform/support') throw forbidden('지원 모드는 읽기 전용입니다 — 바꾸려면 고객사에 요청하세요');
       }
       // 17차: 체험이 끝난 공간은 읽기 전용(보기·내보내기·요금제 신청은 허용)
-      if (user && MUTATING.has(req.method)) await (await import('./plans')).assertWritable(user, req.nextUrl.pathname);
-      else if (user) await (await import('./plans')).assertNotSuspended(user, req.nextUrl.pathname); // V28 B2 미납 이용 중지
+      const fromApp = /WorkinApp/i.test(req.headers.get('user-agent') ?? ''); // 302차 #862: 앱이면 결제 권유 없는 문구
+      if (user && MUTATING.has(req.method)) await (await import('./plans')).assertWritable(user, req.nextUrl.pathname, { app: fromApp });
+      else if (user) await (await import('./plans')).assertNotSuspended(user, req.nextUrl.pathname, { app: fromApp }); // V28 B2 미납 이용 중지
 
       const idemKey = opts.idempotent && req.method === 'POST' ? req.headers.get('idempotency-key') : null;
       if (idemKey && user) {

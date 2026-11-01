@@ -324,8 +324,9 @@ export async function billingJob() {
     const a = await admins(t);
     // 298차 #861: 알림함·푸시(앱에도 뜸)에는 결제 권유 없이 — 결제 안내·웹 주소는 관리자 이메일로만
     await notify(sql, { userIds: a.map((x) => x.id), type: 'usage_alert', title, body: '자세한 안내를 관리자 이메일로 보냈습니다. 데이터는 그대로 남아 있습니다.', link: '/admin/usage', dedupeKey: key });
-    const { sendMail } = await import('../mail');
-    for (const x of a) await sendMail(x.email, `[워크인] ${title}`, `${name}\n${body}\n${process.env.APP_URL ?? ''}/admin/usage`).catch(() => {});
+    // 302차 #862: 결제 안내 메일 = 회사·인원·추천 요금제·월 금액 + [결제하기](휴대폰에서 바로, 로그인 뒤 결제 화면으로)
+    await (await import('./payMail')).sendPayMail(t, { title, lines: [body] }).catch(() => 0);
+    void name;
   };
   for (const s of due) {
     if (s.cancel_at_period_end) {

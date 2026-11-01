@@ -17,7 +17,10 @@ export const dynamic = 'force-dynamic';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
-  if (!user) redirect('/login');
+  if (!user) { // 302차 #862: 보던(누른) 주소로 로그인 뒤 돌아오게 — 결제 안내 메일 [결제하기] → 로그인 → 결제 화면
+    const url = (await headers()).get('x-wos-url') ?? '';
+    redirect(url.startsWith('/') && !url.startsWith('//') && url !== '/' ? `/login?next=${encodeURIComponent(url)}` : '/login');
+  }
   // V41 공간: 들어갈 수 없는 공간 주소는 화면을 그리기 전에 404
   const spaces = await (await import('@/lib/spaces')).userSpaces(user);
   const sp = /^\/s\/([^/]+)/.exec((await headers()).get('x-wos-path') ?? '')?.[1];

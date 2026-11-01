@@ -31,7 +31,7 @@ import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
 import { ROLE_LABEL } from '@/lib/types';
-import { clearReminders, enableNativePush, initNative, refreshWidget, setNativeBadge } from './native';
+import { clearReminders, enableNativePush, initNative, onAppActive, refreshWidget, setNativeBadge } from './native';
 import { PushRehome } from './PushRehome';
 import { restoreScroll, useSheetBack } from './backClose';
 import { QuickAddTask } from './QuickAddTask';
@@ -75,6 +75,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const query = useSearchParams().toString(); // #481: ?tab= 메뉴(제작의뢰실·영업기회 입찰) 강조가 주소 칸만 바뀌어도 따라가게
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 결제 링크·버튼 없음
   const router = useRouter();
+  // 302차 #862: 관리자가 휴대폰 브라우저·PC 에서 결제한 뒤 앱으로 돌아오면 다시 열지 않아도 읽기 전용 띠·체험 상태가 풀리게 — 앱이 앞으로 올 때 화면 정보 새로 읽기(20초에 한 번까지)
+  useEffect(() => { let last = Date.now(); onAppActive(() => { if (Date.now() - last < 20_000) return; last = Date.now(); router.refresh(); }); }, [router]);
   const [unread, setUnread] = useState(0);
   const [alarms, setAlarms] = useState<AlarmItem[]>([]); // 로컬 10/20(대표): 웹 알람 띠(알람처럼 울리는 알림, 해제 전)
   const [approvalsTodo, setApprovalsTodo] = useState(0); // #114 ⑦ 휴대폰 상단 '결재할 것 n건'(알림 폴링에 실려 옴)
