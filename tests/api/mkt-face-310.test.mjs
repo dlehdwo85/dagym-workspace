@@ -247,12 +247,15 @@ test('⑦ 표지: 사람 없는 사진 먼저 · 쓸 사진이 없으면 목록�
   assert.notEqual(cb.status, 'pending', '승인함에 안 올림');
   const mats = async () => (await sql`select count(*)::int as n from mkt_material_requests where brand_id = ${tb}`)[0].n;
   assert.ok(await mats() > 0, '자료 요청');
-  // 다시 그리기: 써 본 사진(입구)은 빼므로 남은 표지 사진 없음 → 단색 → 수정 요청(승인함 아님)
+  // 다시 그리기: 써 본 사진(입구)은 빼므로 남은 표지 사진 없음 → 321차: 글자뿐 표지를 새로 붙이지 않고 지금 표지·상태 그대로 + 안내(그린 파일은 지움)
   await sql`update mkt_contents set status = 'pending' where id = ${a}`;
-  await ctx.owner.ok('POST', `/api/marketing/contents/${a}/visual`, { redraw: true });
+  const rd = await ctx.owner.ok('POST', `/api/marketing/contents/${a}/visual`, { redraw: true });
+  assert.equal(rd.skipped, true, JSON.stringify(rd)); assert.match(rd.message, /다시 그리지 않았습니다/);
   const ra = await cur(a);
-  assert.ok(ra.quality.visual.plain && !ra.quality.visual.photoId, JSON.stringify(ra.quality.visual));
-  assert.equal(ra.status, 'changes');
+  assert.equal(ra.current_version, ca.current_version, '새 버전 없음');
+  assert.equal(ra.quality.visual.photoId ?? ra.quality.visual.photoIds?.[0], door, '지금 표지 그대로'); assert.ok(!ra.quality.visual.plain);
+  assert.equal(ra.status, 'pending');
+  assert.equal((await sql`select count(*)::int n from library_files where folder like '마케팅/자동 시안%' and deleted_at is null and meta->>'contentId' = ${a}`)[0].n, (await sql`select count(*)::int n from library_files where folder like '마케팅/자동 시안%' and meta->>'contentId' = ${a}`)[0].n - 1, '안 붙인 그림은 지움');
 });
 
 // 317차(로컬 11/01 315차 확인: 다짐 표지 4분할 중 2칸이 같은 사진): 같은 그림을 두 번 올린 파일(내용 해시 같음)은 4분할에 한 장만

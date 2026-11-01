@@ -45,6 +45,7 @@ async function photosFor(c: any, text: string, picked: string[]): Promise<{ phot
   const dropped = (all: string[]) => [...new Set(out)].filter((id) => !all.includes(id)).slice(0, MAX);
   // 310차(로컬 11/01 ①: 사진 영상 장면에 얼굴 그대로): 장면 사진도 얼굴 자리를 알면 모자이크 사본, 모르면 뺌 — 고른 사진이 그래서 3장 밑으로 줄면 후보로 채움
   let ids = picked.length >= 3 ? await V.faceSafeFor(c, [...new Set(picked)], out) : [];
+  ids = await V.photoRuleIds(c, ids, out); // 321차: 고른 사진도 제목 시설·내용 모름 규칙(뺀 사진은 기록에)
   if (ids.length < 3) {
     const more = (await V.blogPhotoCandidates(c, text, MAX, { own: true })).map((p) => p.id).filter((id) => !ids.includes(id)); // 303차 #869: 이 브랜드 사진만
     ids = [...ids, ...(await V.faceSafeFor(c, more, out))];
@@ -145,7 +146,7 @@ export async function slideshowStart(u: SessionUser, i: z.infer<typeof slideshow
   const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
   const body = v?.body ?? c.title;
   const { photos, dropped } = await photosFor(c, `${c.title}\n${body}`, i.photoIds ?? []);
-  if (photos.length < 3) throw badRequest(`쓸 수 있는 실제 사진이 ${photos.length}장입니다${dropped.length ? `(얼굴 자리를 몰라 뺀 사진 ${dropped.length}장)` : ''}. 3장 넘게 필요합니다. 자료실에 현장 사진을 올리거나 직접 골라 주세요`);
+  if (photos.length < 3) throw badRequest(`쓸 수 있는 실제 사진이 ${photos.length}장입니다${dropped.length ? `(얼굴 자리나 내용을 모르거나 제목의 시설이 아니라서 뺀 사진 ${dropped.length}장)` : ''}. 3장 넘게 필요합니다. 자료실에 현장 사진을 올리거나 직접 골라 주세요`);
   const out = await startBrief(c, body, photos, u.id, dropped.length ? { faceDropped: dropped } : {});
   await (await import('./log')).audit(sql, u.id, 'mkt.video_slideshow', 'mkt_content', c.id, { brief: out.briefId, photos: photos.length }).catch(() => {});
   return out;

@@ -594,7 +594,12 @@ function HeldRedraw({ id, onDone }: { id: string; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   return <Button size="sm" variant="secondary" disabled={busy} data-testid="mkt-held-redraw" onClick={async () => {
     setBusy(true);
-    try { const r = await api<{ version: number; template?: string | null; photo: string | null }>(`/api/marketing/contents/${id}/visual`, { body: { redraw: true } }); toast.ok(`새 틀로 다시 그렸습니다(v${r.version})${r.template ? ` — 틀: ${r.template}` : ''}`); onDone(); }
+    try {
+      const r = await api<{ version?: number; template?: string | null; photo?: string | null; skipped?: boolean; message?: string }>(`/api/marketing/contents/${id}/visual`, { body: { redraw: true } });
+      if (r.skipped) toast.info(r.message ?? '쓸 수 있는 사진이 없어 다시 그리지 않았습니다'); // 321차: 글자뿐 표지는 새로 붙이지 않음
+      else toast.ok(`새 틀로 다시 그렸습니다(v${r.version})${r.template ? ` — 틀: ${r.template}` : ''}`);
+      onDone();
+    }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }}>{busy ? '그리는 중…' : '새 틀로 다시 그리기'}</Button>;
 }

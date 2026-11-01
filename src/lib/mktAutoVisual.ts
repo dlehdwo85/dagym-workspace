@@ -269,6 +269,18 @@ export async function faceSafeFor(c: Pick<Content, 'tenant' | 'created_by'>, ids
   dropped?.push(...ids.filter((id) => !ok.has(id)));
   return ids.filter((id) => ok.has(id));
 }
+/** 321차(로컬 11/02 ①: 하이링크 영상 다시 의뢰 장면 기록에 '인포CRM사진'·'카페' 그대로): 사람이 고른 사진(사진 영상 의뢰·다시 의뢰)도 320차 규칙 —
+ *  제목의 시설이 아닌 사진·무엇이 찍혔는지 모르는 사진은 뺌. 뺀 사진은 dropped 에(장면 기록 '영상에서 뺀 사진') */
+export async function photoRuleIds(c: Pick<Content, 'tenant' | 'title'>, ids: string[], dropped?: string[]): Promise<string[]> {
+  if (!ids.length) return ids;
+  const F = await import('./mktFacility'); const fac = F.facilitiesIn(String(c.title ?? '').replace(/^\s*\[시험\]\s*/, ''));
+  const rows = await db()<{ id: string; title: string; file_name: string; folder: string; tags: string[]; description: string | null; vision: unknown; parent: string | null }[]>`select id::text, coalesce(nullif(title, ''), file_name) as title, file_name, folder, tags, description, vision,
+    case when source = 'video_frame' then (select concat_ws(' ', coalesce(nullif(pv.title, ''), pv.file_name), pv.folder, array_to_string(pv.tags, ' ')) from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant) end as parent
+    from library_files where tenant = ${c.tenant} and id = any(${ids}::uuid[])`;
+  const ok = new Set(rows.filter((r) => F.facilityMatch(photoText(r), fac) && !contentUnknown(r)).map((r) => r.id));
+  dropped?.push(...ids.filter((id) => !ok.has(id)));
+  return ids.filter((id) => ok.has(id));
+}
 export async function blogPhotoCandidates(c: Content, text: string, n = 20, o: { own?: boolean; near?: boolean } = {}): Promise<BlogPhoto[]> {
   const [b] = c.brand_id ? await db()<{ name: string }[]>`select name from mkt_brands where id = ${c.brand_id}` : [];
   const brand = (b?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
@@ -1139,6 +1151,14 @@ export async function makeVisualNow(u: SessionUser, id: string, opts: { redraw?:
   // 310차 보완: 다시 그리기도 행동 장(사진 없는 마지막 장)은 흐린 사진 바탕으로 — 나머지 장은 그대로
   const act = opts.redraw && (v?.media_ids?.length ?? 0) > 1 && Array.isArray(c.quality?.pages) ? await redrawActionPages(c, c.quality.pages as CardPage[], (v?.media_ids ?? []).slice(1).map(String), u).catch(() => null) : null;
   if (act?.n) after.note += ` · 행동 장 ${act.n}장 흐린 사진 바탕으로`;
+  // 321차(로컬 11/02 ①: 보류 글을 [다시 그리기] 하니 글자뿐 '번호 목록형' v7 — 대표 화면에 단색 표지가 또 보임): 다시 그리기에서 쓸 사진이 없어 글자뿐 표지가 되면
+  //  새 버전을 붙이지 않고 지금 표지·상태 그대로(그린 파일은 지움) + 자료 요청 — 예전 표지 일괄 다시 그리기(redrawPlainForBrand)와 같은 규칙
+  if (opts.redraw && d.plain && plainCoverOf(c)) {
+    await sql`update library_files set deleted_at = now() where id = ${d.fileId} and tenant = ${c.tenant}`.catch(() => {});
+    const material = await (await import('./mktMaterials')).needMaterial(c).catch(() => null);
+    await audit(sql, u.id, 'mkt.visual_redraw', 'mkt_content', id, { skipped: 'plain' }).catch(() => {});
+    return { skipped: true as const, reason: 'plain' as const, message: '쓸 수 있는 사진이 없어 표지를 다시 그리지 않았습니다(글자뿐 표지는 올리지 않음) — 지금 시안 그대로 두고 자료 요청을 기다립니다', material };
+  }
   const r = await attachVisual(c, d.fileId, `${opts.redraw ? '시안 다시 그리기' : '시안 그리기'}(서버·크레딧 0) — ${u.name}${d.templateLabel ? ` · 틀: ${d.templateLabel}` : ''}${d.photoTitle ? ` · 사진: ${d.photoTitle}` : ' · 브랜드 색 바탕'}${d.bodyTitle && !opts.redraw ? ` · 본문 사진: ${d.bodyTitle}` : ''}${after.note}`, u.id, d.photoId, !!opts.redraw, opts.redraw ? (act?.n ? act.tail : after.ids) : [...d.bodyIds, ...after.ids], { template: d.template, photoIds: d.photoIds, pages: act?.n ? act.pages : after.pages, photoFix: d.photoFix, scene: d.scene, gen: d.gen, plain: d.plain, ...(act?.n ? { tail: true } : {}) });
   if (!r) throw badRequest('그사이 콘텐츠가 바뀌었습니다 — 새로 고쳐 다시');
   await audit(sql, u.id, opts.redraw ? 'mkt.visual_redraw' : 'mkt.visual_now', 'mkt_content', id, { version: r.version, photoId: d.photoId }).catch(() => {});

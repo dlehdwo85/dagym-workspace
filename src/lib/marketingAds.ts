@@ -310,7 +310,8 @@ export async function adsOverview(u: SessionUser, q: { days?: number; month?: st
   const [prevDays] = prevFrom && prevTo ? await sql`select ${SUM} ${base(prevFrom, prevTo)}` : [null];
   const balances = await (await import('./mktRecharge')).balancesView(t);
   const savings = await (await import('./adOps')).agencySavings(t, Number(tot?.cost ?? 0)); // 광고 최적화 1차 ④ 이 기간 광고비 × 대행 수수료율(추정)
-  const common = { accounts, balances, savings, totals: tot, campaigns, keywords, creatives, daily, campaignDaily, byProvider: byProviderAll, byBrand, byBrandProvider, brands: brandList, filter: { brand, provider }, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
+  const lowBalanceKrw = (await (await import('./mktAuto')).settingsOf(t)).low_balance_krw ?? (await import('./mktRecharge')).LOW_BALANCE_DEFAULT_KRW; // 322차 #897 잔액 알림 기준
+  const common = { accounts, balances, lowBalanceKrw, savings, totals: tot, campaigns, keywords, creatives, daily, campaignDaily, byProvider: byProviderAll, byBrand, byBrandProvider, brands: brandList, filter: { brand, provider }, providers: (Object.keys(AD_PROVIDERS) as AdProvider[]).map((p) => ({ key: p, label: AD_PROVIDERS[p], ready: providerReady(p) })), canEdit: isAdmin(u),
     // 로컬 검수: 콘솔에 등록할 콜백 주소를 화면에 그대로(APP_URL 기준 — 도메인 바꾸면 이 주소도 바뀜)
     callbacks: u.platformAdmin ? { meta: callback('meta'), google: callback('google'), metaPublish: `${appUrl()}/api/marketing/publish/callback/meta` } : null }; // 콘솔 등록 값은 플랫폼 관리자에게만(고객 화면에서 기술 단계 숨김)
   if (!month) return { days: n, from, to, month: null, prev: prevDays, prevFrom, prevTo, ...common };

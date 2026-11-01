@@ -63,6 +63,7 @@ export type MktSettings = { plan?: PlanRow | null; plan_code: keyof typeof MKT_P
   /** 대표 10/25 22:20(15-16): 전면 디벨롭 동안 자동 생성(정기 칸·제작·밤사이·주간 계획·운영 제안) 멈춤 — 203 마이그레이션으로 규칙 있는 회사는 켬 */ auto_pause: boolean;
   /** 요청 C §3-1(대표 10/25 22:20): 릴스·쇼츠·생성 영상 자동 제작 중단(영상 제작 방식 결정 #580 전까지) — 정기 칸·제작에서 영상 종류를 건너뜀, 사람이 누르는 제작은 그대로 */ video_pause: boolean;
   /** 189차(대표 #685): 사진이 모자라면 실사 참고로 생성(크레딧 사용) — 기본 꺼짐, 관리자가 켬(209 마이그레이션) */ photo_gen: boolean;
+  /** 322차 #897(대표 11/02): 매체 잔액 알림 기준(원) — 이 금액 미만이면 회사 대표에게 알림 + 메일. null = 기본 10,000원 */ low_balance_krw: number | null;
   /** 303차 #869: 사진이 모자랄 때 단색 바탕 장·블로그 도표형 카드로 채움(예전 방식) — 기본 꺼짐(233 마이그레이션): 사진 없는 장은 빼고 자료 요청 */ plain_fill: boolean;
   /** 267차(대표 #795 '두서없이 올리지 말고 수정·보완 시간까지 고려해서'): 승인 올리는 방식 — weekly = 주 단위 묶음(batch_dow 요일 batch_hour 시에 다음 주 월~일 게시분을 한 번에) ·
    *  lead = 게시 lead_days 일 전 lead_hour 시에 한 건씩(예전 방식). 224 마이그레이션으로 쓰던 회사는 weekly */ approval_mode: 'weekly' | 'lead'; batch_dow: number; batch_hour: number;
@@ -70,7 +71,7 @@ export type MktSettings = { plan?: PlanRow | null; plan_code: keyof typeof MKT_P
   /** 267차: 승인 마감 = 게시 deadline_days 일 전 approval_hour:00(0 = 게시 당일 — 예전 방식) */ deadline_days: number };
 const DEFAULTS: MktSettings = { plan_code: null, monthly_credits: null, weekly_credits: null, video_monthly: null, regen_monthly: null, approval_hour: 9, lead_days: 3, lead_hour: 13,
   remind_hours: 6, plain_fill: false, quiet_start: 22, quiet_end: 8, allow_generated_people: false, allow_slideshow: false, ai_label: 'AI 도움을 받아 제작했습니다', notify_user_ids: null, ai_monthly_usd: null, auto_publish: false, auto_hold: false, write_tier: null, auto_pause: false, video_pause: true, photo_gen: false,
-  approval_mode: 'lead', batch_dow: 4, batch_hour: 10, deadline_days: 0, cost_cap_krw: null };
+  approval_mode: 'lead', batch_dow: 4, batch_hour: 10, deadline_days: 0, cost_cap_krw: null, low_balance_krw: null };
 /** 270차 #809: 우리 회사(내부, 'default') — plans.ts 와 같은 기준 */
 export const INTERNAL_TENANT = 'default';
 /** 자동 생성 일시정지 중인가(정기 실행·목표/운영 제안 tick 이 먼저 본다) */
@@ -1342,7 +1343,8 @@ export const settingsInput = z.object({ planCode: z.enum(['basic', 'standard', '
   /** 189차: 사진이 모자라면 실사 참고로 생성(크레딧) */ photoGen: z.boolean().optional(),
   /** 303차 #869: 사진이 모자라면 단색 장·도표형 카드로 채움(예전 방식) */ plainFill: z.boolean().optional(),
   /** 267차(대표 #795): 승인 올리는 방식·묶음 요일·시각·승인 마감 며칠 전 */ approvalMode: z.enum(['weekly', 'lead']).optional(), batchDow: nInt(0, 6).optional(), batchHour: nInt(0, 23).optional(), deadlineDays: nInt(0, 7).optional(),
-  /** 270차 #809 내부 회사 이미지·영상 생성 월 실제 비용 한도(원, null = 요금제 숫자) */ costCapKrw: nInt(0, 100_000_000).nullable().optional() });
+  /** 270차 #809 내부 회사 이미지·영상 생성 월 실제 비용 한도(원, null = 요금제 숫자) */ costCapKrw: nInt(0, 100_000_000).nullable().optional(),
+  /** 322차 #897 잔액 알림 기준(원, null = 기본 1만 원) */ lowBalanceKrw: nInt(0, 100_000_000).nullable().optional() });
 export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const cur = await settingsOf(tenantOf(u));
@@ -1353,14 +1355,14 @@ export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInp
     notify_user_ids: i.notifyUserIds !== undefined ? (i.notifyUserIds?.length ? i.notifyUserIds : null) : cur.notify_user_ids, ai_monthly_usd: i.aiMonthlyUsd !== undefined ? i.aiMonthlyUsd : cur.ai_monthly_usd, auto_publish: i.autoPublish ?? cur.auto_publish, auto_hold: i.autoHold ?? cur.auto_hold,
     auto_pause: i.autoPause ?? cur.auto_pause, video_pause: i.videoPause ?? cur.video_pause, photo_gen: i.photoGen ?? cur.photo_gen, plain_fill: i.plainFill ?? cur.plain_fill,
     approval_mode: i.approvalMode ?? cur.approval_mode, batch_dow: i.batchDow ?? cur.batch_dow, batch_hour: i.batchHour ?? cur.batch_hour, deadline_days: i.deadlineDays ?? cur.deadline_days,
-    cost_cap_krw: cur.internal && i.costCapKrw !== undefined ? i.costCapKrw : cur.cost_cap_krw }; // 내부 회사만 바꿈
+    cost_cap_krw: cur.internal && i.costCapKrw !== undefined ? i.costCapKrw : cur.cost_cap_krw, low_balance_krw: i.lowBalanceKrw !== undefined ? i.lowBalanceKrw : cur.low_balance_krw }; // 내부 회사만 바꿈
   const sql = db();
   await sql`insert into mkt_settings ${sql({ tenant: tenantOf(u), ...v, updated_by: u.id } as never)}
     on conflict (tenant) do update set plan_code = excluded.plan_code, monthly_credits = excluded.monthly_credits, weekly_credits = excluded.weekly_credits, video_monthly = excluded.video_monthly,
       regen_monthly = excluded.regen_monthly, approval_hour = excluded.approval_hour, lead_days = excluded.lead_days, lead_hour = excluded.lead_hour, remind_hours = excluded.remind_hours,
       quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, allow_generated_people = excluded.allow_generated_people, allow_slideshow = excluded.allow_slideshow, ai_label = excluded.ai_label, notify_user_ids = excluded.notify_user_ids, ai_monthly_usd = excluded.ai_monthly_usd, auto_publish = excluded.auto_publish, auto_hold = excluded.auto_hold,
       auto_pause = excluded.auto_pause, video_pause = excluded.video_pause, photo_gen = excluded.photo_gen, plain_fill = excluded.plain_fill, approval_mode = excluded.approval_mode, batch_dow = excluded.batch_dow, batch_hour = excluded.batch_hour,
-      deadline_days = excluded.deadline_days, cost_cap_krw = excluded.cost_cap_krw, updated_by = excluded.updated_by, updated_at = now()`;
+      deadline_days = excluded.deadline_days, cost_cap_krw = excluded.cost_cap_krw, low_balance_krw = excluded.low_balance_krw, updated_by = excluded.updated_by, updated_at = now()`;
   if (v.cost_cap_krw !== cur.cost_cap_krw) await (await import('./log')).audit(sql, u.id, 'mkt.cost_cap', 'tenant', tenantOf(u), { from: cur.cost_cap_krw, to: v.cost_cap_krw }).catch(() => {});
   if (v.approval_mode !== cur.approval_mode) await (await import('./log')).audit(sql, u.id, 'mkt.approval_mode', 'tenant', tenantOf(u), { from: cur.approval_mode, to: v.approval_mode }).catch(() => {});
   if (i.autoPause !== undefined && i.autoPause !== cur.auto_pause) await (await import('./log')).audit(sql, u.id, i.autoPause ? 'mkt.auto_pause' : 'mkt.auto_resume', 'tenant', tenantOf(u), {}).catch(() => {});
