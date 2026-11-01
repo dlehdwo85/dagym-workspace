@@ -53,6 +53,33 @@ export async function needMaterial(c: { id: string; tenant: string; brand_id: st
   const [b] = await sql<{ name: string; video: any }[]>`select name, video from mkt_brands where id = ${c.brand_id}`;
   if (!b) return null;
   const brand = brandName(b.name);
+  // 320차(대표 11/01 23:3x — 다짐 「사우나랑 독서실도 맡길 수 있나요?」): 글 제목에 시설 이름이 있으면 그 시설 사진을 콕 집어 요청(시설마다 3장·사람 없이)
+  const F = await import('./mktFacility');
+  const [ct] = await sql<{ title: string }[]>`select title from mkt_contents where id = ${c.id}`;
+  const fac = F.facilitiesIn(String(ct?.title ?? '').replace(/^\s*\[시험\]\s*/, ''));
+  if (fac.length && String(b.video?.photoSource ?? 'brand') !== 'screen') {
+    const labels = F.facilityLabels(fac).join('·');
+    const line = `· 글 「${String(ct?.title ?? '').slice(0, 40)}」 — 제목의 시설(${labels}) 사진이 자료실에 없어 다른 시설 사진으로 채우지 않고 보류했습니다. ${labels} 사진을 시설마다 3장, 사람 없이(얼굴이 보이면 쓰지 않음), 밝고 흔들리지 않게, 글자 없는 사진으로 올려 주세요(사진 이름이나 태그에 시설 이름).`;
+    const opens = await sql<{ id: string; title: string; detail: string; source: string; kind: string; wanted: number }[]>`select id, title, detail, source, kind, wanted from mkt_material_requests
+      where tenant = ${c.tenant} and brand_id = ${c.brand_id} and status = 'requested'`;
+    if (fac.every((f) => opens.some((o) => f.re.test(`${o.title} ${o.detail}`)))) return null; // 그 시설 요청이 이미 열려 있음(사람이 만든 요청 포함)
+    const ai = opens.find((o) => o.source === 'ai' && o.kind === 'photo');
+    if (ai) { // AI 요청은 브랜드·종류마다 하나 — 열린 요청에 시설 줄을 더함
+      await sql`update mkt_material_requests set title = ${`${ai.title} + ${labels}`.slice(0, 200)}, detail = ${`${ai.detail}\n${line}`}, wanted = ${Math.min(50, ai.wanted + 3 * fac.length)}, updated_at = now() where id = ${ai.id}`;
+      return ai.id;
+    }
+    const S0 = await (await import('./mktAuto')).settingsOf(c.tenant);
+    const [owner0] = await sql<{ id: string }[]>`select id from users where tenant = ${c.tenant} and status = 'active' and role = 'owner' and not is_demo order by created_at limit 1`;
+    const who = (S0.notify_user_ids ?? [])[0] ?? c.created_by ?? owner0?.id ?? null;
+    const due0 = addDays(todaySeoul(), 7);
+    const [r0] = await sql<{ id: string }[]>`insert into mkt_material_requests (tenant, brand_id, content_id, kind, title, detail, wanted, assignee_id, due_on, source)
+      values (${c.tenant}, ${c.brand_id}, ${c.id}, 'photo', ${`${brand} ${labels} 사진 — 시설마다 3장, 사람 없이`}, ${`${why}\n${line}`}, ${Math.min(50, 3 * fac.length)}, ${who}, ${due0}::date, 'ai')
+      on conflict do nothing returning id`;
+    if (!r0) return null;
+    if (who) await notify(sql, { userIds: [who], type: 'task_assigned', title: `자료 요청: ${brand} ${labels} 사진`, body: `AI 마케터 — 기한 ${due0.slice(5).replace('-', '/')} · 제목의 시설 사진이 없어 보류`,
+      link: `/s/marketing/materials?r=${r0.id}`, entityType: 'mkt_material', entityId: r0.id, space: 'marketing', dedupeKey: `mktmat:${r0.id}` }).catch(() => {});
+    return r0.id;
+  }
   const ask = aiAsk(brand, String(b.video?.photoSource ?? 'brand'), why);
   const [open] = await sql`select 1 from mkt_material_requests where tenant = ${c.tenant} and brand_id = ${c.brand_id} and kind = ${ask.kind} and status = 'requested' and source = 'ai'`;
   if (open) return null;

@@ -24,7 +24,7 @@ before(async () => {
 after(async () => { srv?.proc.kill(); mailSrv?.close(); await sql?.end(); });
 
 test('체험 7일 전: 관리자에게 HTML 결제 안내 메일 1통(회사·인원·추천 요금제·월 금액·[결제하기] → /admin/usage?pay=1&plan=) · 알림함은 결제 권유 없이 · 같은 단계는 한 번만', async () => {
-  await sql`update tenant_subscriptions set trial_ends_at = now() + interval '6 days 2 hours', trial_notified = '{}'::jsonb where tenant = ${N.t}`;
+  await sql`update tenant_subscriptions set trial_ends_at = (date_trunc('day', now() at time zone 'Asia/Seoul') + interval '6 days 12 hours') at time zone 'Asia/Seoul', trial_notified = '{}'::jsonb where tenant = ${N.t}`;
   mails.length = 0;
   await tick();
   const mine = mails.filter((m) => m.to?.includes('boss@pay862.test'));

@@ -174,7 +174,7 @@ test('⑤ 표지 바탕도 얼굴 규칙: 시안 바탕 폴더의 얼굴 자리 
   const cov = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '표지짐' })).id;
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${cov}`, { intro: '동네 헬스장', products: '회원권' });
   const unk = await libFile('표지짐 GX 수업.jpg', { caption: '단체 GX 수업', tags: ['수업'], people: 6, faces: true });
-  const boxed = await libFile('표지짐 상담 데스크.jpg', { caption: '상담 데스크', tags: ['상담'], people: 1, faces: true });
+  const boxed = await libFile('표지짐 상담 데스크.jpg', { caption: 'GX룸 앞 상담 데스크', tags: ['상담'], people: 1, faces: true }); // 320차: 제목에 GX → GX 사진만 표지에
   await sql`update library_files set vision = vision || ${sql.json({ faceBoxes: [{ x: 0.35, y: 0.2, w: 0.3, h: 0.25 }] })} where id = ${boxed}`;
   await sql`update library_files set folder = '마케팅/시안 바탕', tags = array['글자없음'] where id in ${sql([unk, boxed])}`;
   const id = await slot(cov, '표지짐 GX 수업 안내', { days: 9 });
@@ -288,4 +288,22 @@ test('⑨ 브랜드 키트 미리보기(4분할만 골라 그려 보기)도 실�
   await sql`update library_files set meta = meta - 'video' where id in ${sql([ids[1], ids[2]])}`;
   const r2 = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${gb}/feed-preview`, { feed: { ...gFeed, templates: ['grid4'] } });
   assert.equal(r2.sample.photoIds.length, 4); assert.equal(r2.images.find((x) => x.template === 'grid4').note, null);
+});
+
+test('⑩ 바닥·벽 같은 빈 면이 대부분인 사진은 표지 칸 후보에서 뒤로(새 설명 subject weak · 예전 설명은 문장으로) — 다른 사진이 없으면 그래도 씀', async () => {
+  const { gb, gFeed } = P;
+  const weak = await libFile('사분짐 기구 구역 바닥.jpg', { caption: '사분짐 기구 구역 바닥', tags: ['기구'], subject: 'weak' });
+  const old = await libFile('사분짐 기구 구역 장면.jpg', { caption: '사분짐 기구 구역 장면', scene: '바닥 가까이에서 찍은 장면으로 기구 다리와 마루가 대부분입니다.', tags: ['기구'] });
+  const mirror = await libFile('사분짐 기구 구역 거울.jpg', { caption: '사분짐 기구 구역 거울', scene: '벽면 가득 거울이 있는 기구 구역입니다.', tags: ['기구'] }); // 빈 면 아님(오탐 막기)
+  const [v1] = await sql`select vision from library_files where id = ${weak}`; assert.equal(v1.vision.subject, 'weak', '새 설명 칸 저장');
+  const r = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${gb}/feed-preview`, { feed: { ...gFeed, templates: ['grid4'] } });
+  const got = r.sample.photoIds;
+  assert.equal(got.length, 4);
+  assert.ok(!got.includes(weak) && !got.includes(old), `빈 면 사진이 4칸에: ${JSON.stringify(got)}`);
+  assert.ok(got.includes(mirror), '벽면 가득 거울은 빈 면이 아님 — 가장 최근 사진이라 앞');
+  // 다른 사진이 모자라면 빈 면 사진도 씀(빼지는 않음)
+  await sql`update library_files set deleted_at = now() where id = any(${P.gIds}::uuid[])`;
+  const r2 = await ctx.owner.ok('POST', `/api/marketing/auto/brands/${gb}/feed-preview`, { feed: { ...gFeed, templates: ['grid4'] } });
+  assert.deepEqual([...r2.sample.photoIds].sort(), [weak, old, mirror].sort());
+  assert.equal(r2.sample.photoIds[0], mirror, '빈 면 아닌 사진이 맨 앞');
 });

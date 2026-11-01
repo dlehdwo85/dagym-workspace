@@ -84,8 +84,21 @@ export async function photoRule(tenant: string, brandId: string | null | undefin
 /** 앱 화면 캡처 — 자료실 '영상 화면 캡처' 폴더(하위·상위 폴더 이름 포함) 또는 AI 가 화면 캡처로 본 사진 */
 export const isCapture = (r: { folder?: string | null; vision?: unknown }) => /(^|\/)영상 화면 캡처(\/|$)/.test(r.folder ?? '') || (visionOk(r.vision) && r.vision.kind === 'screen');
 /** 사진 쪽 글(이름·폴더·태그·설명·AI 설명·원본 영상)에 이름이 있는지 */
-export const photoHas = (r: { title: string; folder: string; tags?: string[] | null; description?: string | null; vision?: unknown; parent?: string | null }, name: string) =>
-  !!name && `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)} ${r.parent ?? ''}`.toLowerCase().includes(name.toLowerCase());
+export const photoText = (r: { title: string; folder: string; tags?: string[] | null; description?: string | null; vision?: unknown; parent?: string | null }) =>
+  `${r.title} ${r.folder} ${(r.tags ?? []).join(' ')} ${r.description ?? ''} ${visionText(r.vision)} ${r.parent ?? ''}`;
+export const photoHas = (r: Parameters<typeof photoText>[0], name: string) => !!name && photoText(r).toLowerCase().includes(name.toLowerCase());
+/** 320차(로컬 11/01 ④: 하이링크 쇼츠 장면 1~4가 '카카오톡 이미지, 내용 확인 불가'로 설명된 파일): 무엇이 찍혔는지 모르는 사진 — 설명이 '내용 확인 불가·확인 필요'이거나,
+ *  AI 설명 없이 자료실 설명이 파일 이름뿐인 사진. 사람이 바탕으로 고른 사진('시안 바탕' 폴더·'글자없음' 태그)은 그대로 씀 */
+const UNKNOWN_RE = /내용\s*(을\s*)?(확인|파악|식별|판독)\s*(이\s*)?(불가|불능|어렵|어려|안\s*됨|할 수 없)|확인\s*필요|확인필요|식별\s*불가|판독\s*불가|알 수 없는 (이미지|사진|파일|장면)|무엇(이|인지)\s*(찍혔는지|보이는지)?\s*알 수 없|이미지(를)?\s*(불러올|볼|열)\s*수\s*없/;
+const FILE_NAME_RE = /^(kakaotalk|img|image|photo|dsc|pxl|screenshot|스크린샷|카카오톡)[_\-\s]?[\w\-.]*$|\.(jpe?g|png|webp|heic|gif)$/i;
+export const contentUnknown = (r: { title: string; file_name?: string | null; folder: string; tags?: string[] | null; description?: string | null; vision?: unknown }) => {
+  if (markedNoText(r.tags) || (r.folder ?? '').startsWith('마케팅/시안 바탕')) return false;
+  const v = visionOk(r.vision) ? r.vision : null;
+  if (UNKNOWN_RE.test(`${r.description ?? ''} ${v ? `${v.caption} ${v.scene}` : ''}`)) return true;
+  if (v) return false;
+  const d = (r.description ?? '').trim();
+  return !!d && (d === r.title || d === r.file_name || FILE_NAME_RE.test(d));
+};
 /** 188차: 사진 후보(자료실 전체 — mktPhotos.poolCond, 마케팅 공간 먼저·최근 순 400장) + 최근 30일 다른 글에 쓴 사진(표지·4분할·장 사진·붙은 미디어) — 한 글을 그리는 동안 한 번만 읽음 */
 /** gen = 회사 설정 '사진이 모자라면 실사 참고로 생성'(282차 #818 ② — 켠 회사만 관련 없는 사진 대신 빈 칸 → 생성) */
 export type Pool = { rows: PoolRow[]; used: Set<string>; gen?: boolean; rule?: PhotoRule };
@@ -118,8 +131,11 @@ export async function refPhotos(c: Content, text: string, pool?: Pool): Promise<
 }
 export const photoPool = (c: Pick<Content, 'tenant' | 'id' | 'brand_id'>) => loadPool(c);
 /** #544 사진 순위(점수 높은 순, 같은 점수면 최근 사진) — 피드 틀의 사진 4분할은 앞의 4장 · pool = 미리 읽은 후보(장마다 다시 읽지 않게) */
-async function rankPhotos(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover', pool?: Pool) {
+async function rankPhotos(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover', pool?: Pool, facText?: string) {
   const { outsideOk, blurryPhoto, facesToHide } = await import('./mktPhotos');
+  // 320차(대표 11/01 23:3x — 다짐 「사우나랑 독서실도 맡길 수 있나요?」 표지·4분할이 헬스장·GX룸): 글 제목(표지는 표지 첫 줄까지)에 시설 이름이 있으면 그 시설 사진만
+  const { facilitiesIn, facilityMatch } = await import('./mktFacility');
+  const fac = facilitiesIn(facText ?? c.title.replace(/^\s*\[시험\]\s*/, ''));
   const { rows, used, gen, rule } = pool ?? (await loadPool(c));
   if (!rows.length) return [];
   const own = rule?.own.length ? rule.own : brand ? [brand] : []; // 288차: 이 브랜드 이름 + 다른 표기(DAGYM 등)
@@ -137,6 +153,8 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
   const goneHash = new Set(rows.filter((r) => r.hash && exclude.has(r.id)).map((r) => r.hash as string));
   for (const [k, r] of rows.entries()) {
     if (exclude.has(r.id) || (r.hash && goneHash.has(r.hash))) continue;
+    if (fac.length && !facilityMatch(photoText(r), fac)) continue; // 320차: 제목의 시설이 아닌 사진은 안 씀(다른 시설 사진으로 채우지 않음)
+    if (contentUnknown(r)) continue; // 320차 ④: 무엇이 찍혔는지 모르는 사진은 안 씀
     // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽·'쓰지 않음'만 빼고 · 288차 '앱 화면 캡처만' 브랜드 = 바탕은 사진 없이, 본문은 화면 캡처만
     if (rule?.src === 'screen' ? mode === 'cover' || !isCapture(r) || markedSkip(r.tags) : mode === 'cover' ? !backdropOk(r) : !bodyOk(r)) {
       if (!(rule?.src === 'scenes' && mode === 'body' && isCapture(r) && !markedSkip(r.tags))) continue; // 293차 앱 화면 + 허용 장면: 화면 캡처는 블로그 본문에
@@ -148,6 +166,8 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     if (mode === 'cover' && (fl.lying || fl.back || fl.dark)) continue;
     let score = mine(r) ? 6 : 0;
     if (mode === 'body') score -= (fl.lying ? 4 : 0) + (fl.back ? 2 : 0) + (fl.dark ? 3 : 0);
+    // 319차(로컬 11/01 318차 확인: 4분할 한 칸이 바닥이 대부분인 영상 장면): 바닥·벽·천장 같은 빈 면이 대부분인 사진은 뒤로 — 최근에 쓴 사진(−4)보다도 뒤(빼지는 않음 — 다른 사진이 없으면 씀)
+    if (fl.plain) score -= mode === 'cover' ? 6 : 3;
     // 310차(로컬 11/01 ③: 다짐 사진 204장인데 블로그 본문 1장 — 얼굴 자리를 모르는 사진이 고른 뒤에 빠짐): 본문·영상은 고르기 전에 그런 사진을 빼고(가릴 수 없음),
     //  얼굴이 있는 사진(모자이크 사본으로 감)은 뒤로 → 얼굴 없는 시설·기구 사진이 먼저
     // 314차(로컬 11/01: 다짐 11/3 피드 표지 GX 수업 사진에 얼굴 그대로 — '시안 바탕' 폴더·'글자없음' 표시가 얼굴 검사를 건너뜀): 표지·장 바탕도 얼굴 자리를 모르면 안 씀(자리를 알면 그릴 때 모자이크)
@@ -525,7 +545,7 @@ export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: S
     //  ② 남은 장은 브랜드 실사 아무거나 깔되 rel 'weak'(관련 약함) 표시 · pool = 고를 때 쓸 수 있던 후보 수(표지·가까운 글 사진 제외 뒤) → 노트 '후보 m장'. 쓸 사진이 더 없으면 나머지 장은 색 바탕
     //  181차(로컬 10/26 14:00 ⓑ: 브랜드 이름 없는 GX룸 사진이 다짐 피드·하이링크 스토리 양쪽에 쓰임): ②(아무거나)는 이 브랜드 이름이 있는 사진만 — 브랜드 미지정 사진은 글과 낱말이 맞을 때(①)만 쓰고, 후보 수도 그 둘만 셈
     const ranked = new Map<number, Awaited<ReturnType<typeof rankPhotos>>>();
-    for (const k of slots) ranked.set(k, await rankPhotos({ ...c, title: pages[k].title }, brand, others, `${pages[k].title} ${pages[k].body} ${c.title}`, exclude, 'cover', cand));
+    for (const k of slots) ranked.set(k, await rankPhotos({ ...c, title: pages[k].title }, brand, others, `${pages[k].title} ${pages[k].body} ${c.title}`, exclude, 'cover', cand, c.title.replace(/^\s*\[시험\]\s*/, '')));
     const usable = (r: { id: string; hit: number; brand: boolean }, fit: boolean) => !exclude.has(r.id) && (fit ? r.hit > 0 : r.brand);
     const pool = Math.max(0, ...[...ranked.values()].map((r) => r.filter((x) => x.brand || x.hit > 0).length));
     for (const k of slots) pages[k].pool = pool;
@@ -536,7 +556,10 @@ export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: S
       pages[k].photoId = top.id; if (!fit) pages[k].rel = 'weak'; if (top.scene) pages[k].scene = true; if (top.gen) pages[k].gen = true; exclude.add(top.id);
     };
     for (const k of [...slots].sort((a, b) => best(b) - best(a) || a - b)) if (best(k) > 0) take(k, true);
-    for (const k of slots) if (!pages[k].photoId) take(k, false);
+    // 320차 ⑤(대표 10/31 #818 '문구와 관련 없는 사진' 다시 지적 — 11/01 23:3x): 글과 낱말이 맞는 사진이 없는 장을 브랜드 실사 아무거나로 채우지 않음('관련 약함' 없앰)
+    //  → 아래 303차 규칙대로 그 장을 빼고 자료 요청(남은 장이 모자라면 장 수 규칙으로 보류). 회사 설정 plain_fill(예전 방식)만 예전처럼 채움
+    const fillWeak = (await (await import('./mktAuto')).settingsOf(c.tenant)).plain_fill;
+    if (fillWeak) for (const k of slots) if (!pages[k].photoId) take(k, false);
     // 303차 #869(대표가 '단색 배경 글자 장'을 콕 집어 반려): 사진을 못 찾은 장은 단색 바탕으로 채우지 않고 뺌 + 이 브랜드에 자료 요청 카드 —
     //  회사 설정 plain_fill(예전 방식)이거나 '실사 참고 생성'(photo_gen, 빈 장을 생성 사진으로 채움)을 켜고 생성이 준비된 회사는 그대로 둠 · 남은 장이 표지+행동 장뿐이면 장 수 규칙(3장)으로 수정 요청(보류)
     const A = await import('./mktAuto'); const st = await A.settingsOf(c.tenant);
@@ -675,14 +698,25 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
     where tenant = ${c.tenant} and brand_id = ${c.brand_id} and id <> ${c.id} and quality->'visual'->>'template' is not null order by coalesce(scheduled_at, created_at) desc limit 15) x group by t` : []).map((r) => [r.t, r.n]));
   // 사진: 가까운 3개 글에 쓴 사진·이 글에 써 본 사진은 빼고(글만 고친 수정본은 쓰던 사진 그대로)
   const keep = a.opts.photoIds?.length ? a.opts.photoIds : a.opts.photoId ? [a.opts.photoId] : null;
+  // 320차: 표지는 글 제목 + 표지 첫 줄(큰 글)의 시설 이름 — 그 시설 사진만(rankPhotos)
+  const facText = `${c.title.replace(/^\s*\[시험\]\s*/, '')} ${a.head}`;
+  const FAC = await import('./mktFacility'); const fac = FAC.facilitiesIn(facText);
   const exclude = new Set([...(a.opts.exclude ?? []), ...near.flatMap((r) => r.ps), ...a.near]); // 188차: 가까운 글(같은 브랜드 12개·다른 브랜드 앞뒤 2일) 사진도
   let ranked: { id: string; title: string; scene?: boolean; gen?: boolean }[] = keep ? (await sql<{ id: string; title: string; scene: boolean; gen: boolean }[]>`select id::text, coalesce(nullif(title, ''), file_name) as title, coalesce(source, '') = 'video_frame' as scene, coalesce(source, '') = 'ai_ref' as gen from library_files where id = any(${keep}::uuid[]) and tenant = ${c.tenant} and deleted_at is null`)
       .sort((x, y) => keep.indexOf(x.id) - keep.indexOf(y.id))
-    : a.opts.photoId === null ? [] : await rankPhotos(c, a.brand, a.others, `${c.title} ${body}`, exclude);
+    : a.opts.photoId === null ? [] : await rankPhotos(c, a.brand, a.others, `${c.title} ${body}`, exclude, 'cover', undefined, facText);
   if (keep && ranked.length) { // 315차: 쓰던 사진이 얼굴 자리를 모르는 사진이면(314차 전 표지) 빼고, 다 빠지면 새로 고름(단색 틀로 가지 않게)
     const bad = await unknownFaces(c.tenant, ranked.map((r) => r.id));
     ranked = ranked.filter((r) => !bad.has(r.id));
-    if (!ranked.length && a.opts.photoId !== null) ranked = await rankPhotos(c, a.brand, a.others, `${c.title} ${body}`, new Set([...exclude, ...bad]));
+    if (!ranked.length && a.opts.photoId !== null) ranked = await rankPhotos(c, a.brand, a.others, `${c.title} ${body}`, new Set([...exclude, ...bad]), 'cover', undefined, facText);
+  }
+  if (keep && ranked.length && fac.length) { // 320차: 글만 고친 수정본도 쓰던 사진이 제목의 시설 사진이 아니면 빼고 새로 고름(없으면 보류 + 자료 요청)
+    const rows = await sql<{ id: string; title: string; folder: string; tags: string[]; description: string | null; vision: unknown; parent: string | null }[]>`select id::text, coalesce(nullif(title, ''), file_name) as title, folder, tags, description, vision,
+      case when source = 'video_frame' then (select concat_ws(' ', coalesce(nullif(pv.title, ''), pv.file_name), pv.folder, array_to_string(pv.tags, ' ')) from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant) end as parent
+      from library_files where tenant = ${c.tenant} and id = any(${ranked.map((r) => r.id)}::uuid[])`;
+    const ok = new Set(rows.filter((r) => FAC.facilityMatch(photoText(r), fac)).map((r) => r.id));
+    ranked = ranked.filter((r) => ok.has(r.id));
+    if (!ranked.length && a.opts.photoId !== null) ranked = await rankPhotos(c, a.brand, a.others, `${c.title} ${body}`, new Set([...exclude, ...rows.map((r) => r.id)]), 'cover', undefined, facText);
   }
   // #262(대표 10/25 ④ 노트북 목업 틀): 화면 캡처를 세로(휴대폰 틀)·가로(노트북 틀)로 나눠 읽음 — 그 틀을 골랐을 때만
   let shots = a.kit.templates.includes('phone') || a.kit.templates.includes('laptop') ? await screenShots(c.tenant, a.brand, a.others, await photoRule(c.tenant, c.brand_id)) : { any: [] as Shot[], tall: [] as Shot[], wide: [] as Shot[] };
@@ -720,7 +754,7 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
   // 315차: 사진 틀 키트인데 사진·화면·도표 없이 글자뿐인 표지(사진이 없어 목록형·제목형으로 감) = 단색 표지로 봄 → 승인함 대신 수정 요청 + 자료 요청
   const textOnly = wantsPhoto && !files.length && !screen && !screenWide && !['prices', 'compare'].includes(need ?? '');
   const png = await F.renderFeed({ t: template, kit: a.kit, brand: a.brand, H: a.H, h: hints, photo: files[0]?.f?.data ?? null, photos: files.map((x) => ({ data: x.f!.data, label: F.labelOf(x.p.title) })), screen: screen?.data ?? null, screenWide: screenWide?.data ?? null, logo: a.logo, font: a.font, set });
-  return { png, template, photoIds: files.map((x) => x.p.id), photoTitle: files[0]?.p.title ?? null, photoFix: [...new Set(files.flatMap((x) => x.fixes))], scene: files.some((x) => !!x.p.scene), gen: files.some((x) => !!x.p.gen), plain: F.plainCover(template, hints) || textOnly };
+  return { png, template, photoIds: files.map((x) => x.p.id), photoTitle: files[0]?.p.title ?? null, photoFix: [...new Set(files.flatMap((x) => x.fixes))], scene: files.some((x) => !!x.p.scene), gen: files.some((x) => !!x.p.gen), plain: F.plainCover(template, hints) || textOnly }; // 320차: 제목 시설 사진이 없으면 textOnly → 보류 + 그 시설 자료 요청(needMaterial 이 제목을 봄)
 }
 
 /**

@@ -102,7 +102,7 @@ test('가입: 알림톡 선택 동의 + 휴대폰 → 이메일 확인 끝나면
 });
 
 test('체험 3일 전·당일: 동의한 관리자에게만 1번씩(같은 단계 두 번 안 보냄) · 동의 안 한 회사는 안 보냄', async () => {
-  await sql`update tenant_subscriptions set trial_ends_at = now() + interval '2 days 2 hours', trial_notified = '{}'::jsonb where tenant in ${sql([N.t, N.t2])}`;
+  await sql`update tenant_subscriptions set trial_ends_at = (date_trunc('day', now() at time zone 'Asia/Seoul') + interval '2 days 12 hours') at time zone 'Asia/Seoul', trial_notified = '{}'::jsonb where tenant in ${sql([N.t, N.t2])}`;
   got.length = 0;
   await tick();
   const d3 = mine('01098765432');
@@ -113,7 +113,7 @@ test('체험 3일 전·당일: 동의한 관리자에게만 1번씩(같은 단�
   await tick();
   assert.equal(mine('01098765432').length, 1, '같은 단계 두 번 안 보냄');
   // 당일
-  await sql`update tenant_subscriptions set trial_ends_at = now() + interval '2 hours' where tenant = ${N.t}`;
+  await sql`update tenant_subscriptions set trial_ends_at = (date_trunc('day', now() at time zone 'Asia/Seoul') + interval '23 hours 59 minutes 59 seconds') at time zone 'Asia/Seoul' where tenant = ${N.t}`;
   await tick();
   const d0 = mine('01098765432').filter((g) => g.body.message.kakaoOptions.templateId === 'TPL-D0');
   assert.equal(d0.length, 1);

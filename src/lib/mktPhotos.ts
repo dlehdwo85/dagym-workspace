@@ -18,11 +18,14 @@ import { tenantOf, type SessionUser } from './types';
  */
 const KINDS = ['photo', 'graphic', 'screen', 'illustration', 'document'] as const;
 const POSES = ['none', 'standing', 'sitting', 'lying'] as const; const FACINGS = ['none', 'front', 'side', 'back'] as const; const LIGHTS = ['bright', 'normal', 'dark'] as const;
+const SUBJECTS = ['clear', 'weak'] as const;
 export type VisionOk = { v: 1; at: string; caption: string; scene: string; tags: string[]; kind: (typeof KINDS)[number]; text: 'none' | 'little' | 'much'; promo: boolean; seen: string; people: number; faces: boolean; quality: 'good' | 'ok' | 'poor';
   /** 315차: fv 2 = 단체 얼굴 규칙 뒤 설명(얼굴 위치 다시 읽기를 또 하지 않음) · facesBy 'people' = AI 는 얼굴 없다 했지만 사람이 여럿이라 얼굴 있음으로 봄 */
   fv?: number; facesBy?: 'people';
   /** 171차: 사람 자세·보이는 방향·사진 밝기(예전 설명에는 없음 → photoFlags 가 문장으로 판정) */
   pose?: (typeof POSES)[number]; facing?: (typeof FACINGS)[number]; light?: (typeof LIGHTS)[number];
+  /** 319차: 무엇을 찍었는지 분명한가 — weak = 바닥·벽·천장 같은 빈 면이 화면 대부분(예전 설명에는 없음 → photoFlags 가 문장으로 판정) */
+  subject?: (typeof SUBJECTS)[number];
   /** 282차 #818 선명도(서버 계산 — 긴 변 512px 흑백의 라플라시안 분산). 작을수록 흔들림·초점 나감 */
   sharp?: number;
   /** 286차: 64px 칸 선명도의 중앙값(가장 선명한 칸 값은 글자·모서리 한 칸만 선명해도 높게 나와 흔들린 사진을 못 거름 — 로컬 10/31 13:35 운영 분포) */
@@ -120,11 +123,14 @@ export const visionText = (v: unknown) => (visionOk(v) ? `${v.caption} ${v.scene
  *  (어두움은 '어두운 색 옷' 같은 색 표현에 안 걸리게 조명·실내·분위기 낱말과 같이 있을 때만) */
 const LYING = /누워|누운|눕는|눕고|눕기|드러누|엎드리|엎드려|엎드린|lying|lies? (down|on)/i;
 const BACK = /뒷모습|뒤에서 (본|찍|촬영)|등을 (보이|돌리|지고)|뒤돌아|등 ?뒤에서|back view|from behind|seen from (the )?back/i;
+// 319차(로컬 11/01 318차 확인: 다짐 4분할 한 칸이 바닥 가까이 찍은 영상 장면 — 기구 다리와 마루가 대부분이라 무엇인지 알기 어려움): 빈 면이 대부분인 장면
+const PLAIN = /(바닥|마루|벽면|벽|천장|천정)[이가]\s*(화면\s*)?(의\s*)?(대부분|거의 다|거의 전부)|화면\s*(의\s*)?(대부분|거의 다|거의 전부)[이가은는을]?\s*(바닥|마루|벽|천장)|(바닥|마루|벽|천장)만\s*(보이|찍|나오|담)|(바닥|마루)\s*(가까이|가까운 곳|높이)에서\s*(찍|촬영|본|바라)|(바닥|마루|벽)을\s*(가까이|크게)\s*(찍|촬영)|(무엇|뭘|어떤 장면|어떤 공간|어디)[인을]?지?\s*(알기|알아보기|구분하기)\s*어(렵|려)|대상이\s*(분명하지|불분명|뚜렷하지)|(close-?up of|mostly) (the )?(floor|wall|ceiling)/i;
 const DARK = /어두운 (실내|조명|분위기|배경|공간|방|곳|사진|화면|밤|저녁|거리|매장|복도)|(조명|빛|실내|전체|사진|분위기|화면)[이가은는]? ?(어둡|어두워|어두운|약하|약함)|어둑|컴컴|캄캄|야간|밤 ?(에|의|시간|풍경|거리|매장)|저조도|dimly|low light|dark room|at night/i;
-export function photoFlags(v: unknown): { lying: boolean; back: boolean; dark: boolean } {
-  if (!visionOk(v)) return { lying: false, back: false, dark: false };
+export function photoFlags(v: unknown): { lying: boolean; back: boolean; dark: boolean; plain: boolean } {
+  if (!visionOk(v)) return { lying: false, back: false, dark: false, plain: false };
   const s = `${v.caption} ${v.scene} ${v.tags.join(' ')}`;
-  return { lying: v.pose ? v.pose === 'lying' : LYING.test(s), back: v.facing ? v.facing === 'back' : BACK.test(s), dark: v.light ? v.light === 'dark' : DARK.test(s) };
+  return { lying: v.pose ? v.pose === 'lying' : LYING.test(s), back: v.facing ? v.facing === 'back' : BACK.test(s), dark: v.light ? v.light === 'dark' : DARK.test(s),
+    plain: v.subject ? v.subject === 'weak' : PLAIN.test(`${v.caption} ${v.scene}`) };
 }
 
 export const PHOTO_MIME = ['image/jpeg', 'image/png', 'image/webp'];
@@ -164,13 +170,14 @@ const SYSTEM = `회사 마케팅 자료실 사진 한 장을 보고 기록합니
 - quality: good · ok · poor(흐림·너무 어두움·심하게 기울어짐)
 - pose: 사람 자세 — none(사람 없음) · standing(서 있음·걷기·운동 중) · sitting(앉음) · lying(누움·엎드림·기대 누움) — 여럿이면 가장 크게 보이는 사람
 - facing: 사람이 보이는 방향 — none(사람 없음) · front(얼굴·몸 앞쪽) · side(옆) · back(뒷모습·등)
-- light: 사진 밝기 — bright(밝음) · normal · dark(어두움·야간·조명 약함)`;
+- light: 사진 밝기 — bright(밝음) · normal · dark(어두움·야간·조명 약함)
+- subject: 무엇을 찍었는지 — clear(사람·기구·공간·간판·물건 같은 주된 대상이 분명함) · weak(바닥·벽·천장·문짝 같은 빈 면이 화면 대부분이거나, 너무 가까이·낮게 찍혀 무엇인지 알기 어려움)`;
 const BOX = { type: 'object', additionalProperties: false, required: ['x', 'y', 'w', 'h'], properties: { x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' } } };
-const SCHEMA = { type: 'object', additionalProperties: false, required: ['caption', 'scene', 'tags', 'kind', 'text', 'promo', 'seen', 'people', 'faces', 'face_boxes', 'quality', 'pose', 'facing', 'light'], properties: {
+const SCHEMA = { type: 'object', additionalProperties: false, required: ['caption', 'scene', 'tags', 'kind', 'text', 'promo', 'seen', 'people', 'faces', 'face_boxes', 'quality', 'pose', 'facing', 'light', 'subject'], properties: {
   face_boxes: { type: 'array', items: BOX },
   caption: { type: 'string' }, scene: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, kind: { type: 'string', enum: [...KINDS] },
   text: { type: 'string', enum: ['none', 'little', 'much'] }, promo: { type: 'boolean' }, seen: { type: 'string' }, people: { type: 'integer' }, faces: { type: 'boolean' },
-  quality: { type: 'string', enum: ['good', 'ok', 'poor'] }, pose: { type: 'string', enum: [...POSES] }, facing: { type: 'string', enum: [...FACINGS] }, light: { type: 'string', enum: [...LIGHTS] } } };
+  quality: { type: 'string', enum: ['good', 'ok', 'poor'] }, pose: { type: 'string', enum: [...POSES] }, facing: { type: 'string', enum: [...FACINGS] }, light: { type: 'string', enum: [...LIGHTS] }, subject: { type: 'string', enum: [...SUBJECTS] } } };
 
 /** AI 에 보내기 전 긴 변 1024px JPEG 로 줄임(토큰·전송량) — sharp 가 없거나 못 읽으면 3.5MB 아래 원본 */
 async function shrink(buf: Buffer, mime: string): Promise<{ data: Buffer; mime: string } | null> {
@@ -191,7 +198,8 @@ function normalize(j: any): Omit<VisionOk, 'v' | 'at'> {
     people, faces: j?.faces === true || forced, quality: pick(j?.quality, ['good', 'ok', 'poor'] as const, 'ok'), fv: 2, ...(forced ? { facesBy: 'people' as const } : {}),
     ...(boxes.length || j?.faces === true && Array.isArray(j?.face_boxes) ? { faceBoxes: boxes } : {}),
     // 171차: 자세·방향·밝기 — 답에 없으면(예전 가짜 답·옛 모델) 칸을 비워 두고 문장으로 판정
-    ...(POSES.includes(j?.pose) ? { pose: j.pose as VisionOk['pose'] } : {}), ...(FACINGS.includes(j?.facing) ? { facing: j.facing as VisionOk['facing'] } : {}), ...(LIGHTS.includes(j?.light) ? { light: j.light as VisionOk['light'] } : {}) };
+    ...(POSES.includes(j?.pose) ? { pose: j.pose as VisionOk['pose'] } : {}), ...(FACINGS.includes(j?.facing) ? { facing: j.facing as VisionOk['facing'] } : {}), ...(LIGHTS.includes(j?.light) ? { light: j.light as VisionOk['light'] } : {}),
+    ...(SUBJECTS.includes(j?.subject) ? { subject: j.subject as VisionOk['subject'] } : {}) };
 }
 /** 크레딧·요청 몰림·서버 불안정 = 사진 탓이 아님(다음에 다시) — 그 밖(형식 오류 등)은 사진에 실패로 남김 */
 const transient = (e: any) => e?.code === 'ai_credit' || e?.status === 429 || /불안정/.test(String(e?.message ?? ''));
