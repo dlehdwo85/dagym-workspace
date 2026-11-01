@@ -141,7 +141,7 @@ test('내레이션 키·배경음 없으면 자막만 · AI 검수를 못 하면
 test('합성 함수(/api/marketing/studio/render)는 CRON_SECRET 없으면 401 · 정기 실행 단계 mktRender', async () => {
   assert.equal((await fetch(`${BASE}/api/marketing/studio/render`, { method: 'POST' })).status, 401);
   assert.equal((await fetch(`${BASE}/api/marketing/studio/render`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret', 'content-type': 'application/json' }, body: '{}' })).status, 202);
-  const t = await tick(); assert.deepEqual(t.detail.mktRender, { kicked: 0 }, '기다리는 합성 없음');
+  const t = await tick(); assert.deepEqual(t.detail.mktRender, { kicked: 0, stale: 0 }, '기다리는 합성 없음');
 });
 
 test('#539 구글 음성(Cloud Text-to-Speech, 대표 10/24): 키는 x-goog-api-key 헤더 · 기본 음성 ko-KR-Neural2-A(모델 칸 없음) · 연결 시험 = 한국어 음성 목록(합성 안 함) · 목록에 없는 음성·틀린 키는 알아듣게 · 영상 내레이션이 구글로', async () => {

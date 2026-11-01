@@ -421,7 +421,7 @@ async function sceneRecord(tenant: string, contentId: string): Promise<PhotoReco
     const v = f?.vision as { faces?: boolean } | undefined;
     return base(`영상 장면 ${k + 1}`, id, `${first}${!visionOk(f?.vision) ? '실사 — 사진 AI 설명 전이라 얼굴 여부 확인 못함' : v?.faces ? '실사 — 얼굴 있음(가린 사본 없이 들어감, 확인 필요)' : '실사 — 얼굴 없음'}`);
   });
-  for (const id of gone) out.push(base('영상에서 뺀 사진', id, '얼굴이 보이는데 자리를 몰라 가릴 수 없어 영상에서 뺌', 'dropped'));
+  for (const id of gone) out.push(base('영상에서 뺀 사진', id, '고른 사진이지만 얼굴 자리를 모르거나(가릴 수 없음) 제목의 시설이 아니거나 글에 없는 다른 시설·내용을 모르는 사진이라 영상에서 뺌', 'dropped')); // 321·323차: 얼굴 말고도 시설·내용 규칙으로 뺀 사진이 여기 옴 · 자동으로 고를 땐 후보에서 애초에 빠져 기록 없음
   return out;
 }
 /** 사진 한 장의 출처(영상 장면 사진인지) */
