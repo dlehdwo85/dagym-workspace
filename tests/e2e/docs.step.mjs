@@ -10,6 +10,8 @@ const waitText = async (pg, s, ms = 15000) => { await pg.waitForFunction(([code,
 export async function docsCoedit({ browser, owner, staff, ctx, sql, BASE, SHOTS, login }) {
   // 만들기
   await owner.goto(BASE + '/library');
+  // 293차 #837: 대표도 새 문서 기본 올릴 곳 = 주 팀 — 앞 단계에서 대표가 팀에 들어가 있으면 그 팀 밖 직원은 못 연다 → 함께 쓸 문서는 '회사 전체'로
+  await owner.getByTestId('library-upload-to').selectOption('company');
   await owner.getByTestId('library-new-doc').click();
   await owner.getByLabel('문서 제목').fill('E2E 공동 편집 회의록');
   await owner.getByTestId('folder-save').click();
