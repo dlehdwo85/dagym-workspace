@@ -16,13 +16,22 @@ const POOL_MAX = 40;
 const NEWS_MAX = 12;
 const kstDay = (plus = 0) => new Date(Date.now() + 9 * 3600e3 + plus * 864e5).toISOString().slice(0, 10);
 const rows = (s: string) => [...new Set(s.split('\n').map((x) => [...x.trim()].slice(0, 120).join('')).filter(Boolean))];
+/** 312차 #867 페이지별 주제: 한 줄 = '주소 | 주제1 / 주제2 / 주제3' */
+type PageRow = { key?: string; url: string; topics: string[] };
+const PAGE_MAX = 8;
+const pageText = (ps: PageRow[] | null | undefined) => (ps ?? []).map((p) => `${p.url} | ${p.topics.join(' / ')}`).join('\n');
+const pageRows = (s: string): PageRow[] => s.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+  const [url, rest = ''] = l.split('|');
+  return { url: url.trim(), topics: [...new Set(rest.split('/').map((t) => [...t.trim()].slice(0, 120).join('')).filter(Boolean))].slice(0, 12) };
+}).filter((p) => p.url);
 
-export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: string; facts?: Facts | null; topic_pool?: string[] | null }; onSaved: () => void }) {
+export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: string; facts?: Facts | null; topic_pool?: string[] | null; page_rotation?: PageRow[] | null }; onSaved: () => void }) {
   const init: Facts = brand.facts ?? {};
   const [f, setF] = useState<Facts>(init); const [avoid, setAvoid] = useState((init.avoidNames ?? []).join(', ')); const [aliases, setAliases] = useState((init.aliases ?? []).join(', '));
   const [keywords, setKeywords] = useState((init.keywords ?? []).join(', '));
   const [topics, setTopics] = useState((brand.topic_pool ?? []).join('\n')); const [busy, setBusy] = useState(false);
   const [news, setNews] = useState<News[]>(init.news ?? []);
+  const [pages, setPages] = useState(pageText(brand.page_rotation));
   const today = kstDay(); const liveNews = (init.news ?? []).filter((x) => !x.to || x.to >= today).length;
   const setRow = (k: number, patch: Partial<News>) => setNews(news.map((x, i) => (i === k ? { ...x, ...patch } : x)));
   const n = rows(topics).length; const contact = !!(init.phone || init.link || init.website);
@@ -40,14 +49,16 @@ export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: stri
       const facts: Facts = { ...Object.fromEntries((['phone', 'link', 'website', 'address', 'hours', 'prices', 'numbers'] as const).map((k) => [k, (f[k] ?? '').trim()])), avoidNames: avoid.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20), aliases: aliases.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 10),
         keywords: keywords.split(',').map((x) => x.trim()).filter((x) => [...x].length >= 2).map((x) => [...x].slice(0, 30).join('')).slice(0, 5),
         news: news.map((x) => ({ text: x.text.trim(), ...(x.from ? { from: x.from } : {}), ...(x.to ? { to: x.to } : {}) })).filter((x) => x.text).slice(0, NEWS_MAX) };
-      await api(`/api/marketing/auto/brands/${brand.id}`, { method: 'PATCH', body: { facts, topicPool: rows(topics).slice(0, POOL_MAX) } });
+      const pr = pageRows(pages);
+      if (pr.some((p) => !/^https?:\/\//.test(p.url) || !p.topics.length)) throw new Error("페이지별 주제는 한 줄에 '주소 | 주제1 / 주제2' 모양으로 — 주소는 https:// 로 시작하고 주제가 하나 넘게 있어야 합니다");
+      await api(`/api/marketing/auto/brands/${brand.id}`, { method: 'PATCH', body: { facts, topicPool: rows(topics).slice(0, POOL_MAX), pageRotation: pr.slice(0, PAGE_MAX) } });
       toast.ok('사실 카드·주제 풀을 저장했습니다(이번 달 소식 포함) — 다음 원고부터 씁니다'); onSaved();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   }
   const small = cx(inputCls, 'h-8 py-0 text-xs');
   return (
     <details className="rounded-input border border-line p-2 text-xs sm:col-span-4 sm:ml-[8.5rem]" data-testid={`brand-facts-${brand.name}`}>
-      <summary className="cursor-pointer font-medium">사실 카드·소식·주제 풀 <span className="font-normal text-ink-3">· {contact ? '연락처 있음' : '연락처 없음'} · 주제 {brand.topic_pool?.length ?? 0}개 · 이번 달 소식 {liveNews}개</span></summary>
+      <summary className="cursor-pointer font-medium">사실 카드·소식·주제 풀 <span className="font-normal text-ink-3">· {contact ? '연락처 있음' : '연락처 없음'} · 주제 {brand.topic_pool?.length ?? 0}개{brand.page_rotation?.length ? ` · 페이지 ${brand.page_rotation.length}개` : ''} · 이번 달 소식 {liveNews}개</span></summary>
       <p className="mt-1 text-ink-3">원고는 여기 적힌 연락처·운영 시간·요금·숫자만 씁니다(없는 숫자는 쓰지 않음). 연락처가 있으면 글 끝에 직접 붙고, 빠지거나 &lsquo;이미지 참조&rsquo;로 돌리면 승인함에 올리기 전에 막습니다.</p>
       <div className="mt-2 grid gap-2 sm:grid-cols-3">
         {LINES.map(([k, label, max]) => <input key={k} className={small} value={f[k] ?? ''} onChange={(e) => setF({ ...f, [k]: e.target.value })} maxLength={max} placeholder={label} aria-label={label} data-testid={`facts-${k}`} />)}
@@ -79,6 +90,12 @@ export function BrandFacts({ brand, onSaved }: { brand: { id: string; name: stri
         <div className="text-ink-3">주제 풀 — 한 줄에 하나(최대 {POOL_MAX}개). 이 브랜드만의 주제를 돌아가며 쓰고, 같은 날 묶음(피드·릴스·블로그…)은 같은 주제로 형식만 바꿉니다. 다른 브랜드가 앞뒤 3일 안에 쓴 주제는 건너뜁니다.</div>
         <textarea className={cx(inputCls, 'mt-1 min-h-28 text-xs')} value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="한 줄에 주제 하나 — 누가·어떤 상황에서·무엇을 얻는지 보이게" aria-label="주제 풀" data-testid="facts-topics" />
         <div className={cx('mt-0.5', n > POOL_MAX ? 'text-amber-800' : 'text-ink-3')} data-testid="facts-topic-count">{n}개{n > POOL_MAX ? ` — 앞의 ${POOL_MAX}개만 저장됩니다` : ''}</div>
+      </div>
+      {/* 312차 #867: 페이지별 주제 — 있으면 주제 풀보다 먼저, 주마다 한 줄(페이지)씩 차례로 · 글 끝에 그 주소 링크(+utm, 인스타그램 제외) */}
+      <div className="mt-2" data-testid="facts-pages-box">
+        <div className="text-ink-3">페이지별 주제(선택) — 한 줄에 &lsquo;주소 | 주제1 / 주제2 / 주제3&rsquo;, 최대 {PAGE_MAX}줄. 주마다 한 줄씩 차례로 그 페이지 주제로 쓰고, 글 끝에 그 주소 링크(유입 표시 utm 포함)를 붙입니다. 인스타그램은 글 안 링크가 눌리지 않아 붙이지 않습니다. 비우면 위 주제 풀을 씁니다.</div>
+        <textarea className={cx(inputCls, 'mt-1 min-h-20 text-xs')} value={pages} onChange={(e) => setPages(e.target.value)} placeholder="https://www.example.com/service | 이 페이지가 알리는 주제 / 다른 주제" aria-label="페이지별 주제" data-testid="facts-pages" />
+        <div className={cx('mt-0.5', pageRows(pages).length > PAGE_MAX ? 'text-amber-800' : 'text-ink-3')} data-testid="facts-pages-count">{pageRows(pages).length}페이지{pageRows(pages).length > PAGE_MAX ? ` — 앞의 ${PAGE_MAX}줄만 저장됩니다` : ''}</div>
       </div>
       <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={draft} disabled={busy} data-testid="facts-topic-draft">{busy ? '만드는 중…' : 'AI로 주제 20개 제안'}</Button><Button size="sm" onClick={save} disabled={busy} data-testid="facts-save">저장</Button></div>
     </details>

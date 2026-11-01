@@ -351,16 +351,37 @@ export async function materialOf(c: any, brand: any, rule: any, o: { keep?: bool
     near.length ? `이 브랜드 가까운 날 다른 글의 첫 줄(같은 주제여도 첫 줄·문장·구성은 새로 씀 — 그대로 옮기거나 낱말 몇 개만 바꾸지 않음):\n${near.map((r) => `- ${CH_NAME[r.channel] ?? r.channel}${r.kind ? ` ${KIND_LABEL[r.kind as Kind] ?? r.kind}` : ''}: ${firstLine(r.body)}`).join('\n')}` : '',
   ].filter(Boolean);
   // 주제가 없고 브랜드·회사 소개도 없으면 재료 부족 — 일반론 원고 대신 '주제 필요' 카드로 질문
-  return { enough: !!topic || about.length > 0, text: lines.join('\n'), topic, topicFrom: pick.from, name: brandName(brand) || co.name, goal: goal && goal.status !== 'pending' ? goal : null, week: gweek, others, facts, blogPhotos };
+  return { enough: !!topic || about.length > 0, text: lines.join('\n'), topic, topicFrom: pick.from, page: pick.page ?? null, name: brandName(brand) || co.name, goal: goal && goal.status !== 'pending' ? goal : null, week: gweek, others, facts, blogPhotos };
 }
-type TopicFrom = 'answer' | 'kept' | 'goal' | 'brand' | 'news' | 'pool' | 'rule' | 'company' | '';
+type TopicFrom = 'answer' | 'kept' | 'goal' | 'brand' | 'news' | 'page' | 'pool' | 'rule' | 'company' | '';
+/** 312차 #867(대표 11/01 '페이지별 홍보 목표', PAGE_GOALS_867 §2): 브랜드 '페이지별 주제' — 주마다 한 페이지(소개 페이지 등)를 돌아가며 그 페이지 주제로 쓰고,
+ *  글 끝에 그 페이지 링크(+utm: 채널·페이지·글)를 붙임. 인스타그램은 글 안 링크가 눌리지 않아 링크 줄은 안 붙임 */
+export type PageRot = { key: string; url: string; topics: string[] };
+export const pageKeyOf = (url: string) => { try { const seg = new URL(url).pathname.split('/').filter(Boolean).pop() ?? ''; return seg.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40) || 'home'; } catch { return 'home'; } };
+export function pageRotOf(brand: any): PageRot[] {
+  const raw = Array.isArray(brand?.page_rotation) ? brand.page_rotation : [];
+  return raw.map((r: any) => ({ key: String(r?.key || pageKeyOf(String(r?.url ?? ''))), url: String(r?.url ?? ''), topics: (Array.isArray(r?.topics) ? r.topics : []).map((t: unknown) => String(t ?? '').trim()).filter(Boolean) }))
+    .filter((r: PageRot) => /^https?:\/\//.test(r.url) && r.topics.length);
+}
+/** 월요일 시작 주 번호(2026-01-05 월요일 기준) — 그 주에 쓸 페이지 */
+const weekNo = (day: string) => Math.floor((Date.parse(`${day}T00:00:00+09:00`) - Date.parse('2026-01-05T00:00:00+09:00')) / (7 * 864e5));
+export const pageOfWeek = (rot: PageRot[], day: string) => (rot.length ? rot[((weekNo(day) % rot.length) + rot.length) % rot.length] : null);
+const UTM_SOURCE: Record<string, string> = { blog: 'naver_blog', facebook: 'facebook', threads: 'threads', youtube: 'youtube', instagram: 'instagram' };
+/** 글 끝(해시태그 줄 앞)에 '자세히 보기: 페이지 주소?utm…' — 같은 페이지 줄이 있으면 바꿔 씀 */
+export function withPageLink(body: string, page: PageRot, c: { id: string; channel: string }) {
+  const sep = page.url.includes('?') ? '&' : '?';
+  const url = `${page.url}${sep}utm_source=${UTM_SOURCE[c.channel] ?? c.channel}&utm_medium=social&utm_campaign=${page.key}&utm_content=${String(c.id).slice(0, 8)}`;
+  const base = page.url.split('?')[0];
+  const kept = body.split('\n').filter((l) => !(l.trim().startsWith('자세히 보기:') && l.includes(base))).join('\n');
+  return withContact(kept, `자세히 보기: ${url}`);
+}
 /** 로컬 QA 10/24 ③ 브랜드마다 주제(월 목표 주간 주제가 모든 브랜드에 내려가 18건이 같은 주제였음):
  *  답한 주제 → 이미 만든 글의 주제(수정본 · 다시 만들기는 이 규칙으로 고른 글만 — 예전 글은 회사 공통 주제였을 수 있어 다시 고름) → 이 브랜드 월 목표 주제 → 키트 '이번 주 주제' → 브랜드 주제 풀 → 규칙 주제 힌트 → 회사 공통 주간 주제(브랜드에 맞게 바꿔 쓰라는 안내와 함께).
  *  주제 풀: 같은 날 같은 브랜드 묶음(피드·쇼츠·릴스·블로그·스토리)은 같은 주제(한 메시지를 형식별로), 아니면 다른 브랜드가 앞뒤 3일 안에 쓴 주제는 건너뛰고 이 브랜드가 가장 오래 안 쓴 것 */
-async function pickTopic(sql: any, c: any, brand: any, rule: any, goal: any, gweek: any, day: string, keep = false): Promise<{ topic: string; from: TopicFrom }> {
+async function pickTopic(sql: any, c: any, brand: any, rule: any, goal: any, gweek: any, day: string, keep = false): Promise<{ topic: string; from: TopicFrom; page?: string }> {
   const answered = String(c.quality?.topic ?? '').trim(); if (answered) return { topic: answered, from: 'answer' };
   const kept = c.produced_at && (keep || c.rationale?.topicFrom) ? String(c.rationale?.topic ?? '').trim() : '';
-  if (kept) return { topic: kept, from: (c.rationale?.topicFrom as TopicFrom) || 'kept' };
+  if (kept) return { topic: kept, from: (c.rationale?.topicFrom as TopicFrom) || 'kept', ...(c.rationale?.page ? { page: String(c.rationale.page) } : {}) };
   const week = String(gweek?.topic ?? '').trim(); const live = week && week !== '(지난 주)' ? week : '';
   if (live && goal?.brand_id && goal.brand_id === c.brand_id) return { topic: live, from: 'goal' };
   const kit = String(brand?.weekly_topic ?? '').trim(); if (kit) return { topic: kit, from: 'brand' };
@@ -374,6 +395,16 @@ async function pickTopic(sql: any, c: any, brand: any, rule: any, goal: any, gwe
       where tenant = ${c.tenant} and brand_id = ${c.brand_id} and id <> ${c.id} and status <> 'canceled' and rationale->>'topicFrom' = 'news' group by 1`).map((r: any) => [normTopic(r.t), Number(r.n)] as [string, number]));
     const fresh = news.filter((n) => (days.get(normTopic(n.text)) ?? 0) < 2).sort((a, b) => (days.get(normTopic(a.text)) ?? 0) - (days.get(normTopic(b.text)) ?? 0));
     if (fresh.length) return { topic: fresh[0].text, from: 'news' };
+  }
+  // 312차 #867: 페이지별 주제(주마다 한 페이지) — 주제 풀보다 먼저. 같은 날 묶음은 같은 주제, 그 페이지 주제 중 가장 오래 안 쓴 것
+  const pg = c.brand_id ? pageOfWeek(pageRotOf(brand), day) : null;
+  if (pg) {
+    const [same] = await sql`select rationale->>'topic' as t from mkt_contents where tenant = ${c.tenant} and brand_id = ${c.brand_id} and id <> ${c.id} and status <> 'canceled'
+      and rationale->>'topicFrom' = 'page' and rationale->>'page' = ${pg.key} and (scheduled_at at time zone 'Asia/Seoul')::date = ${day}::date limit 1`;
+    if (same?.t && pg.topics.some((p) => normTopic(p) === normTopic(same.t))) return { topic: same.t, from: 'page', page: pg.key };
+    const used = new Map<string, number>((await sql`select rationale->>'topic' as t, max(coalesce(scheduled_at, created_at)) as at from mkt_contents where tenant = ${c.tenant} and brand_id = ${c.brand_id}
+      and id <> ${c.id} and status <> 'canceled' and rationale->>'topicFrom' = 'page' group by 1`).map((r: any) => [normTopic(r.t), new Date(r.at).getTime()] as [string, number]));
+    return { topic: [...pg.topics].sort((a, b) => (used.get(normTopic(a)) ?? 0) - (used.get(normTopic(b)) ?? 0))[0], from: 'page', page: pg.key };
   }
   const pool = ((brand?.topic_pool ?? []) as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean);
   if (pool.length && c.brand_id) {
@@ -524,7 +555,7 @@ async function rewriteHooks(c: any, brand: any, cur: string, prev: string[], why
  * #426 글 품질 엔진: 상투어 사전·보이지 않는 문자·특수 대시 정리 → 인스타 해시태그 상한 → 지금 훅이 탈락이면 통과한 후보로(점수는 거르기용 — 통과한 훅끼리는 AI 순서)
  * → 후보가 모두 탈락이면 AI 로 한 번 더 → 보고서(사람다움·훅 3개 점수·채널 검사·초 단위 구성표). 막는 문제(채널 error)는 errors 로
  */
-async function refineDraft(c: any, d: Draft, brand: any, opt: { keepTitle?: boolean } = {}) {
+async function refineDraft(c: any, d: Draft, brand: any, opt: { keepTitle?: boolean; page?: string | null } = {}) {
   const Q = await import('./mktQuality'); const rules = await Q.qualityRules();
   const notes: string[] = []; let title = d.title; let body = Q.humanize(d.body, rules).text; const script = [...d.script];
   // 275차 #814(대표 #644 가독성 '화살표·이모티콘 빼기'): AI 가 이모지·화살표·체크·【 】를 써도 여기서 뺌(다시 쓰기 비용 없이) — 카드뉴스 장·대본·카드 글도
@@ -545,6 +576,9 @@ async function refineDraft(c: any, d: Draft, brand: any, opt: { keepTitle?: bool
   // 로컬 QA 10/24 ⑤: 사실 카드 연락처가 글에 없으면 마지막 줄에(스토리·스레드 제외 — '이미지 참조' 대신 글 안에 직접)
   const facts = Q.factsOf(brand?.facts); const line = Q.contactLine(facts);
   if (c.kind !== 'story' && c.channel !== 'threads' && line && !Q.contactIn(body, facts)) { body = withContact(body, line); notes.push(`연락처 줄을 붙임(사실 카드: ${line})`); }
+  // 312차 #867: 이번 주 페이지 링크(+utm) — 인스타그램·스토리는 글 안 링크가 안 눌려 안 붙임(프로필 링크로)
+  const pk = opt.page ?? c.rationale?.page ?? null; const pr = pk ? pageRotOf(brand).find((r) => r.key === pk) : null;
+  if (pr && c.channel !== 'instagram' && c.kind !== 'story') { body = withPageLink(body, pr, c); notes.push(`페이지 링크를 붙임(${pr.key})`); }
   if (video && script.length < 2) script.splice(0, script.length, ...Q.scriptLines(body));
   const kw = [brandName(brand)].filter(Boolean); const mode = Q.asMode(c.mode); // #499-1 콘텐츠형/광고형 채점 따로
   let hooks = d.hooks;
@@ -613,7 +647,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   const m = await materialOf(c, brand, rule);
   if (!m.enough) return askTopic(c, actorId);
   let d = await writeDraft(c, s, brand, rule, undefined, m).catch(async (e) => { if (e?.code === 'draft_invalid') await markFailed(c, e.message); throw e; });
-  let f = await refineDraft(c, d, brand);
+  let f = await refineDraft(c, d, brand, { page: m.page });
   const kind = c.kind as Kind;
   let q = qualityCheck(f.body, d.brief, s, bannedOf(brand), kind, f.title);
   if (emptyBody(q.body, s.ai_label)) { await markFailed(c, '본문이 비었거나 너무 짧음'); const { HttpError } = await import('./errors'); throw new HttpError(502, 'draft_invalid', '다듬은 뒤 본문이 비어 저장하지 않았습니다(제작 실패)'); }
@@ -626,7 +660,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   if (pre.length && process.env.MKT_PREFLIGHT_RETRY !== '0') {
     try {
       const d2 = await writeDraft(c, s, brand, rule, { prev: q.body, comment: `올리기 전 자동 검사에 걸렸습니다. 같은 주제·같은 재료로, 아래를 고쳐 다시 써 주세요:\n- ${pre.join('\n- ')}` }, m);
-      const f2 = await refineDraft(c, d2, brand);
+      const f2 = await refineDraft(c, d2, brand, { page: m.page });
       const q2 = qualityCheck(f2.body, d2.brief, s, bannedOf(brand), kind, f2.title);
       if (!emptyBody(q2.body, s.ai_label) && !f2.errors.length) {
         const pre2 = await preflightOf(c, brand, s, { title: f2.title, body: q2.body, script: f2.script });
@@ -676,7 +710,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   const batch = batchWeek && !(await sql`select 1 from mkt_batches where tenant = ${c.tenant} and week = ${batchWeek}::date`).length ? batchWeek : null;
   // 대표 10/20 18:00 ①: 근거(목적·목표 지표·핵심 메시지·왜) — 목표·주차 주제·규칙에서, AI 가 쓴 why 가 있으면 그것
   const G = await import('./mktGoals');
-  const rationale = G.rationaleFrom({ goal: m.goal, day: c.scheduled_at ? G.ymd(new Date(c.scheduled_at)) : G.ymd(new Date()), rule, channel: c.channel, kind, why: d.why || null, source: m.goal ? 'goal' : rule ? 'rule' : 'ai', topic: m.topic || null, topicFrom: m.topicFrom || null });
+  const rationale = { ...G.rationaleFrom({ goal: m.goal, day: c.scheduled_at ? G.ymd(new Date(c.scheduled_at)) : G.ymd(new Date()), rule, channel: c.channel, kind, why: d.why || null, source: m.goal ? 'goal' : rule ? 'rule' : 'ai', topic: m.topic || null, topicFrom: m.topicFrom || null }), ...(m.page ? { page: m.page } : {}) };
   const designNote = (await import('./mktTeam')).designNote(d.design); // 187차 ④ '반영: 디자인 지침 n개·디자인 기억 n개'
   const videoMethod = (brand?.video?.method ?? null) as 'photos' | 'screen' | 'ai' | null; // 271차 #811
   // 원고·원장·제작 요청 카드를 한 번에(중간에 끊겨 원고만 남고 카드가 빠지는 일이 없게)
@@ -1266,7 +1300,7 @@ export async function automationView(u: SessionUser) {
     sql`select q.id, q.kind, q.brief, q.est_credits::float8 est_credits, q.status, q.reason, q.created_at, q.brief_id, c.id as content_id, c.title, c.scheduled_at from mkt_production_requests q join mkt_contents c on c.id = q.content_id
       where q.tenant = ${t} and q.status in ('open', 'needs_approval') order by c.scheduled_at nulls last limit 50`,
     sql`select l.kind, l.credits::float8 credits, l.note, l.version, l.created_at, coalesce(l.title, c.title) as title from mkt_credit_ledger l left join mkt_contents c on c.id = l.content_id where l.tenant = ${t} order by l.created_at desc limit 30`,
-    sql`select id, name, color, tone, intro, products, weekly_topic, banned_words, test_mode, ad_priority, ad_share::float8 as ad_share, ad_note, voice, video, feed, facts, topic_pool, examples from mkt_brands where tenant = ${t} order by name`,
+    sql`select id, name, color, tone, intro, products, weekly_topic, banned_words, test_mode, ad_priority, ad_share::float8 as ad_share, ad_note, voice, video, feed, facts, topic_pool, page_rotation, examples from mkt_brands where tenant = ${t} order by name`,
     sql`select id, name, role from users where tenant = ${t} and status = 'active' and not is_demo order by name`,
   ]);
   const co = await (await import('./ai/assistant')).usageThisMonth(t);
@@ -1592,6 +1626,9 @@ export const brandKitInput = z.object({ tone: z.string().max(200).nullable().opt
   feed: feedInput.optional(), // #544 피드 틀(쓸 틀·색·머리줄·연락처 줄·머리말) — 통째로 저장
   facts: factsInput.optional(), // 로컬 QA 10/24 ⑤ 사실 카드(연락처·운영 시간·요금·숫자·섞으면 안 되는 이름) — 통째로 저장
   topicPool: z.array(z.string().trim().min(1).max(120)).max(40).optional(), // 로컬 QA 10/24 ③ 브랜드 주제 풀(한 줄에 하나, 돌아가며 씀)
+  // 312차 #867 페이지별 주제(주마다 한 페이지) — 주소(http/https)와 그 페이지 주제 1~12개, 8페이지까지. 빈 배열 = 끔(주제 풀로)
+  pageRotation: z.array(z.object({ url: z.string().trim().url().max(300).refine((u) => /^https?:\/\//.test(u), '주소는 http(s)로 시작해야 합니다'),
+    topics: z.array(z.string().trim().min(1).max(120)).min(1).max(12) })).max(8).optional(),
   examples: z.array(exampleInput).max(12).optional(), // #235 ⓔ 잘 된 예시 글(형식마다 3개) — 통째로 저장
   aiFill: z.array(z.string().trim().min(1).max(24)).max(24).optional() }); // 190차 [AI로 채우기]에서 고른 칸 이름 — 감사 기록만(값은 위 칸들)
 /** #235 ⓐ 소식: 끝나는 날이 없으면 시작(없으면 오늘)부터 30일 뒤 — 지난 소식이 계속 주제로 나가지 않게 */
@@ -1616,6 +1653,7 @@ export async function saveBrandKit(u: SessionUser, id: string, i: z.infer<typeof
     video = ${i.video === undefined ? db()`video` : db()`video || ${db().json(i.video as never)}::jsonb`}, feed = ${i.feed === undefined ? db()`feed` : db().json(normalizeFeed(i.feed) as never)},
     facts = ${i.facts === undefined ? db()`facts` : db().json(Object.fromEntries(Object.entries(factsToSave(i.facts)).filter(([, v]) => (Array.isArray(v) ? v.length : !!v))) as never)},
     topic_pool = ${i.topicPool === undefined ? db()`topic_pool` : [...new Set(i.topicPool)]},
+    page_rotation = ${i.pageRotation === undefined ? db()`page_rotation` : db().json(i.pageRotation.map((r) => ({ key: pageKeyOf(r.url), url: r.url, topics: [...new Set(r.topics)] })) as never)},
     examples = ${i.examples === undefined ? db()`examples` : db().json(i.examples.map((e) => ({ ...e, at: e.at ?? new Date().toISOString() })) as never)} where id = ${id} and tenant = ${tenantOf(u)} returning id`;
   if (!b) throw notFound();
   if (i.aiFill?.length) await (await import('./log')).audit(db(), u.id, 'mkt.brand_kit_ai', 'mkt_brand', id, { fields: i.aiFill });

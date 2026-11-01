@@ -21,10 +21,15 @@ export async function mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }) {
   assert.equal(await row.getByTestId('facts-news-to').inputValue(), kstDay(30));
   await row.getByTestId('facts-news-text').fill('할로윈 주간 — 친구와 함께 오면 1일 무료');
   await row.getByTestId('facts-news-to').fill(kstDay(7));
+  // 312차 #867 페이지별 주제: 한 줄 '주소 | 주제1 / 주제2' → 같이 저장 → 요약에 '페이지 1개'
+  await kit.getByTestId('facts-pages').fill('https://www.example.com/landing/task-management | 한 줄로 업무 등록 / 마감 전에 알림 받기');
+  assert.equal(await kit.getByTestId('facts-pages-count').innerText(), '1페이지');
   await kit.getByTestId('facts-save').click();
   await owner.getByText('사실 카드·주제 풀을 저장했습니다(이번 달 소식 포함)').first().waitFor();
   const [f] = await sql`select facts from mkt_brands where id = ${b.id}`;
   assert.deepEqual(f.facts.news, [{ text: '할로윈 주간 — 친구와 함께 오면 1일 무료', from: kstDay(0), to: kstDay(7) }]);
+  assert.deepEqual((await sql`select page_rotation from mkt_brands where id = ${b.id}`)[0].page_rotation, [{ key: 'task-management', url: 'https://www.example.com/landing/task-management', topics: ['한 줄로 업무 등록', '마감 전에 알림 받기'] }]);
+  await owner.getByTestId('brand-facts-E2E소식짐').locator('summary').filter({ hasText: '페이지 1개' }).waitFor();
   await owner.getByTestId('brand-facts-E2E소식짐').locator('summary').filter({ hasText: '이번 달 소식 1개' }).waitFor();
   // ⓔ 잘 된 예시 글: 형식 고르고 붙여 넣기 → 목록(좋은 점) → 빼기
   const ex = owner.getByTestId('brand-examples-E2E소식짐');
