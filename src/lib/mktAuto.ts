@@ -434,6 +434,14 @@ async function writeDraft(c: any, s: MktSettings, brand: any, rule: any, extra?:
     : `\n- card.kicker: 이 글 내용을 한마디로 줄인 표지 머리말(2~8자). 게시 시각이 가까운 같은 브랜드 글 머리말${nearKickers.length ? `(${[...new Set(nearKickers)].map((k) => `'${k}'`).join(', ')})` : ''}과 겹치지 않게. kickerAlts: 다른 후보 2개(역시 겹치지 않게).`;
   // #235 ⓑ(대표 노션 '네이버 블로그 자동 작성 툴'): 메인 키워드(지역+업종) 자리·횟수 · 서브 키워드는 소제목 · 검색자 한 명 · 한 문장 한 줄 · 300~400자마다 끊기 · 인용구 · 사진 8~15장(장면 순서) — 숫자는 글 품질 규칙표와 같음
   const R = (await Q.qualityRules()).blog; const kws = (m.facts.keywords ?? []).filter(Boolean); const nPh = m.blogPhotos?.length ?? 0;
+  // 301차 #865(로컬 11/01: 바디랩 블로그 1,502자가 다시 써도 1,800자를 못 넘김): 다시 쓰기·수정본에서 지난 원고가 짧으면 지금 글자 수와 목표를 숫자로 — 내용은 두고 소제목 단락을 더해 늘림
+  if (extra && blog) {
+    const n = (await import('./mktText')).blogStats(extra.prev).chars;
+    if (n < R.minChars) {
+      const goal = Math.min(R.maxChars - 100, Math.max(R.minChars + 300, 2100));
+      extra = { ...extra, comment: `${extra.comment}\n- 글자 수: 지난 원고 본문은 ${n.toLocaleString('ko-KR')}자(사진 자리 줄 제외)로 ${R.minChars.toLocaleString('ko-KR')}자에 못 미칩니다. 지난 원고의 내용·순서는 그대로 두고, 소제목 단락 2개(예: 이용 방법·자주 묻는 질문·실제 사례)를 더해 본문을 ${goal.toLocaleString('ko-KR')}자 안팎으로 늘려 주세요. 줄이지 마세요.` };
+    }
+  }
   const blogGuide = !blog ? '' : `
 - 네이버 블로그 형식(검색 상위 노출):
   · 메인 키워드 = 지역+업종(지역 이름 뒤에 업종 낱말)${kws.length ? ` — 사실 카드의 블로그 키워드(${kws.join(', ')}) 중 주제에 맞는 것 하나` : ' — 재료의 주소·지역과 업종으로'}. keyword 칸에 쓰고, 제목 맨 앞쪽(${R.titleFront}자 안)·첫 문단·마지막 문단에 꼭 넣으며 본문 전체에 ${R.keywordMin}~${R.keywordMax}번(문장에 자연스럽게).
@@ -688,8 +696,10 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   if (VIDEO_KINDS.includes(kind) && !mediaIds.length && !held && (videoMethod === 'photos' || videoMethod === 'screen')) {
     try {
       const Z = await import('./mktSlideshow');
-      const r = videoMethod === 'photos' ? await Z.autoSlideshow({ ...c, title: f.title }, v, q.body, d.photos ?? []) : await Z.autoRecording({ ...c, title: f.title }, v, q.body);
-      if (r.skipped) await sql`update mkt_versions set note = concat_ws(' · ', note, ${`${videoMethod === 'photos' ? '실제 사진' : '화면 녹화'} 영상 못 만듦: ${r.skipped}`}::text) where content_id = ${c.id} and version = ${v}`;
+      // 301차 #865: 화면 녹화인데 녹화가 없고 장면 사진 브랜드(시안 사진이 '앱 화면 캡처만'이 아님)면 사진·캡처 영상으로 바로
+      const r = await Z.autoVideo({ ...c, title: f.title }, v, q.body, videoMethod, brand?.video?.photoSource ?? null, d.photos ?? []);
+      const note = r.skipped ? `${r.via === 'photos' ? '실제 사진' : '화면 녹화'} 영상 못 만듦: ${r.skipped}` : r.note ?? null;
+      if (note) await sql`update mkt_versions set note = concat_ws(' · ', note, ${note}::text) where content_id = ${c.id} and version = ${v}`;
     } catch (e: any) { console.error('[mkt] 자동 영상', videoMethod, c.id, e?.message ?? e); }
   }
   // 296차 #836: 단색 표지로 막힌 글이면 AI 마케터가 그 브랜드에 '필요한 자료' 요청 카드(브랜드·종류마다 열린 것 하나만)

@@ -96,11 +96,11 @@ export async function recordingStart(u: SessionUser, i: z.infer<typeof recording
   return out;
 }
 /** 자동 제작: 브랜드 영상 방법이 앱 화면 녹화(screen)면 이 브랜드의 아직 안 쓴 녹화로 그 판에 영상 — 없으면 하지 않음(제작 요청 카드 그대로) */
-export async function autoRecording(c: any, version: number, body: string): Promise<{ briefId?: string; skipped?: string }> {
+export async function autoRecording(c: any, version: number, body: string): Promise<{ briefId?: string; skipped?: string; none?: boolean }> {
   if (!VIDEO_KINDS.includes(c.kind ?? '')) return { skipped: '영상 글 아님' };
   if (await busyOf(c.id)) return { skipped: '이미 만드는 중' };
   const f = (await recordingsFor(c)).find((x) => x.mine && !x.used);
-  if (!f) return { skipped: "이 브랜드의 안 쓴 화면 녹화 없음(자료실 '마케팅/화면 녹화')" };
+  if (!f) return { skipped: "이 브랜드의 안 쓴 화면 녹화 없음(자료실 '마케팅/화면 녹화')", none: true };
   return { briefId: (await startRecording(c, body, f, c.created_by ?? null, { auto: true, version })).briefId };
 }
 const busyOf = async (id: string) => (await db()`select 1 from mkt_briefs where content_id = ${id} and status = 'generating' limit 1`).length > 0;
@@ -134,6 +134,49 @@ export async function autoSlideshow(c: any, version: number, body: string, picke
   if (photos.length < 3) return { photos: photos.length, skipped: `쓸 실제 사진 ${photos.length}장(3장 넘게 필요)` };
   const out = await startBrief(c, body, photos, c.created_by ?? null, { auto: true, version });
   return { briefId: out.briefId, photos: out.photos };
+}
+
+/**
+ * 301차 #865(로컬 11/01: 하이링크 영상 4건이 '앱 화면 녹화'로 묶여 10/31부터 멈춤): 브랜드 영상 방법대로 자동 영상.
+ * 앱 화면 녹화(screen)인데 이 브랜드의 안 쓴 녹화가 없고, 브랜드 시안 사진이 '앱 화면 캡처만'(screen)이 아니면 — 하이링크처럼 출입·업무 장면 사진·캡처가 있는 브랜드 —
+ * 녹화를 기다리지 않고 그 사진·캡처로 사진 영상(생성 비용 0). 워크인처럼 '앱 화면 캡처만'인 브랜드는 녹화를 기다림(녹화 실행기로 올리면 붙음)
+ */
+export async function autoVideo(c: any, version: number, body: string, method: string | null | undefined, photoSource: string | null | undefined, picked: string[] = []):
+  Promise<{ briefId?: string; skipped?: string; via: 'photos' | 'screen'; note?: string }> {
+  if (method === 'photos') return { ...(await autoSlideshow(c, version, body, picked)), via: 'photos' };
+  const r = await autoRecording(c, version, body);
+  if (!r.none || photoSource === 'screen') return { ...r, via: 'screen' };
+  const s = await autoSlideshow(c, version, body, picked);
+  return s.skipped ? { skipped: `${r.skipped} · 장면 사진도 ${s.skipped}`, via: 'screen' } : { briefId: s.briefId, via: 'photos', note: '화면 녹화가 없어 장면 사진·캡처 영상으로' };
+}
+
+/**
+ * 301차 #865: 영상 글이 '영상 시안 제작 중'으로 멈춘 것 다시 시도(정기 실행) — 브랜드 영상 방법이 사진·화면 녹화인 글만, 6시간에 한 번, 게시 예정이 지나지 않은 것.
+ * 원고 직후 사진이 3장이 안 됐거나(그 뒤 자료 요청으로 올라옴) 녹화가 없던 글(그 뒤 녹화가 올라왔거나, 장면 사진 브랜드)이 붙음
+ */
+export async function videoRetryTick(o: { limit?: number; tenant?: string } = {}) {
+  const sql = db(); const tf = o.tenant ? sql`and c.tenant = ${o.tenant}` : sql``;
+  const rows = await sql<any[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.mode, c.auto, c.quality,
+      b.video->>'method' as method, b.video->>'photoSource' as photo_source
+    from mkt_contents c join mkt_brands b on b.id = c.brand_id
+    where c.deleted_at is null and c.kind = any(${VIDEO_KINDS}::text[]) and c.current_version > 0 and c.produced_at is not null
+      and (c.status in ('pending', 'changes') or (c.status = 'draft' and c.quality ? 'batch' and not coalesce((c.quality->>'held')::boolean, false)))
+      and (c.scheduled_at is null or c.scheduled_at > now())
+      and b.video->>'method' in ('photos', 'screen')
+      and exists (select 1 from jsonb_array_elements_text(case when jsonb_typeof(c.quality->'issues') = 'array' then c.quality->'issues' else '[]'::jsonb end) x where x like '영상 시안 제작 중%')
+      and not exists (select 1 from mkt_versions v where v.content_id = c.id and v.version = c.current_version and cardinality(v.media_ids) > 0)
+      and not exists (select 1 from mkt_briefs x where x.content_id = c.id and x.status = 'generating')
+      and coalesce((c.quality->'videoRetry'->>'at')::timestamptz, 'epoch'::timestamptz) < now() - interval '6 hours' ${tf}
+    order by c.scheduled_at nulls last limit ${o.limit ?? 6}`;
+  const out: { id: string; via: string; started: boolean; skipped?: string }[] = [];
+  for (const c of rows) {
+    const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
+    const r = await autoVideo(c, c.current_version, v?.body ?? c.title, c.method, c.photo_source).catch((e: any) => ({ skipped: String(e?.message ?? e).slice(0, 200), via: c.method } as any));
+    await sql`update mkt_contents set quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ videoRetry: { at: new Date().toISOString(), via: r.via, ...(r.briefId ? { briefId: r.briefId } : {}), ...(r.skipped ? { skipped: r.skipped } : {}) } } as never)} where id = ${c.id}`;
+    if (r.briefId && r.note) await sql`update mkt_versions set note = concat_ws(' · ', note, ${r.note}::text) where content_id = ${c.id} and version = ${c.current_version}`;
+    out.push({ id: c.id, via: r.via, started: !!r.briefId, ...(r.skipped ? { skipped: r.skipped } : {}) });
+  }
+  return { checked: rows.length, started: out.filter((x) => x.started).length, items: out };
 }
 
 /**
