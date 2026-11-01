@@ -254,3 +254,22 @@ test('⑦ 표지: 사람 없는 사진 먼저 · 쓸 사진이 없으면 목록�
   assert.ok(ra.quality.visual.plain && !ra.quality.visual.photoId, JSON.stringify(ra.quality.visual));
   assert.equal(ra.status, 'changes');
 });
+
+// 317차(로컬 11/01 315차 확인: 다짐 표지 4분할 중 2칸이 같은 사진): 같은 그림을 두 번 올린 파일(내용 해시 같음)은 4분할에 한 장만
+test('⑧ 표지 4분할: 같은 그림(내용 해시)을 두 번 올린 사진은 한 칸만', async () => {
+  const FEED = { style: 'trust', templates: ['grid4', 'title'], palette: { bg: '#152037', accent: '#f0b038' }, header: '사분짐 소식', contact: '상담 1234-5678', kicker: '운영 기록' };
+  const gb = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '사분짐' })).id;
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${gb}`, { intro: '동네 헬스장', products: '회원권', feed: FEED });
+  const ids = [];
+  for (let k = 1; k <= 5; k++) ids.push(await libFile(`사분짐 기구 ${k}.jpg`, { caption: `사분짐 기구 구역 ${k}`, tags: ['기구'] }));
+  for (const [k, id] of ids.entries()) await sql`update library_files set content_hash = ${k >= 3 ? 'same-picture' : `pic-${k}`} where id = ${id}`; // 가장 최근 두 장 = 같은 그림
+  const id = await slot(gb, '사분짐 기구 구역 안내', { days: 50 });
+  const feed = say({ title: '사분짐 기구 구역 안내', body: '사분짐 기구 구역을 소개합니다.\n구역마다 기구가 넉넉합니다.', brief: '실사', why: '', hooks: [], keyword: '기구', card: CARD });
+  await run([feed, feed]);
+  const v = (await cur(id)).quality.visual;
+  assert.equal(v.template, 'grid4', JSON.stringify(v));
+  assert.equal(v.photoIds.length, 4, JSON.stringify(v));
+  assert.ok(!(v.photoIds.includes(ids[3]) && v.photoIds.includes(ids[4])), `같은 그림 두 장이 함께 들어감: ${JSON.stringify(v.photoIds)}`);
+  const hashes = (await sql`select content_hash from library_files where id in ${sql(v.photoIds)}`).map((r) => r.content_hash);
+  assert.equal(new Set(hashes).size, 4);
+});

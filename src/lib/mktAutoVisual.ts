@@ -58,7 +58,7 @@ export const backdropOk = (r: { title?: string; file_name?: string | null; folde
 async function pickPhoto(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover') {
   return (await rankPhotos(c, brand, others, text, exclude, mode))[0] ?? null;
 }
-type PoolRow = { id: string; title: string; file_name: string; description: string | null; folder: string; tags: string[]; vision: unknown; space: string; source: string | null;
+type PoolRow = { id: string; title: string; file_name: string; description: string | null; folder: string; tags: string[]; vision: unknown; space: string; source: string | null; hash?: string | null;
   /** 288차: 영상 장면 사진의 원본 영상 이름·폴더·태그(장면 사진은 폴더가 '마케팅/영상 장면'이라 브랜드 폴더를 원본에서 봄) */ parent?: string | null };
 /**
  * 288차 #814-2(대표 10/31 "브랜드 사진 폴더 밖 사진은 못 쓰게 · 워크인은 앱 화면 녹화·캡처만"): 브랜드 키트 '시안 사진'(video.photoSource)
@@ -91,7 +91,7 @@ export const photoHas = (r: { title: string; folder: string; tags?: string[] | n
 export type Pool = { rows: PoolRow[]; used: Set<string>; gen?: boolean; rule?: PhotoRule };
 async function loadPool(c: Pick<Content, 'tenant' | 'id' | 'brand_id'>): Promise<Pool> {
   const sql = db(); const { poolCond } = await import('./mktPhotos');
-  const rows = await sql<PoolRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, description, folder, tags, vision, space, source,
+  const rows = await sql<PoolRow[]>`select id, coalesce(nullif(title, ''), file_name) as title, file_name, description, folder, tags, vision, space, source, content_hash as hash,
       case when source = 'video_frame' then (select concat_ws(' ', coalesce(nullif(pv.title, ''), pv.file_name), pv.folder, array_to_string(pv.tags, ' ')) from library_files pv where pv.id::text = library_files.meta->'video'->>'id' and pv.tenant = library_files.tenant) end as parent
     from library_files where ${poolCond(sql, c.tenant)} order by (space = 'marketing') desc, created_at desc limit 400`;
   const used = new Set((await sql<{ id: string }[]>`select distinct u.x as id from mkt_contents k join mkt_versions v on v.content_id = k.id and v.version = k.current_version
@@ -132,9 +132,11 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
   // #235 ⓒ 사진 AI 설명(한 줄·장면·태그·읽히는 글자)도 브랜드·낱말 맞추기에 — 낱말 점수는 제한(설명이 긴 사진이 브랜드 사진을 앞지르지 않게) · 흐린 사진 −3
   const has = photoHas;
   const mine = (r: (typeof rows)[number]) => own.some((n) => has(r, n));
-  const out: { id: string; title: string; score: number; k: number; vision: unknown; description: string | null; hit: number; brand: boolean; scene: boolean; gen: boolean }[] = []; // gen = 189차 실사 참고 생성 사진(source ai_ref) · hit = 180차 제목·본문 낱말이 맞은 수(0 = 글과 관련 없음) · brand = 181차 이 브랜드 이름이 사진에 있음 · scene = 188차 영상 장면 사진
+  const out: { id: string; title: string; score: number; k: number; vision: unknown; description: string | null; hit: number; brand: boolean; scene: boolean; gen: boolean; hash: string | null }[] = []; // gen = 189차 실사 참고 생성 사진(source ai_ref) · hit = 180차 제목·본문 낱말이 맞은 수(0 = 글과 관련 없음) · brand = 181차 이 브랜드 이름이 사진에 있음 · scene = 188차 영상 장면 사진
+  // 317차(로컬 11/01 315차 확인: 다짐 표지 4분할 중 2칸이 같은 사진): 같은 그림을 두 번 올린 파일(내용 해시 같음)은 한 장으로 — 뺀 사진과 같은 그림도 뺌
+  const goneHash = new Set(rows.filter((r) => r.hash && exclude.has(r.id)).map((r) => r.hash as string));
   for (const [k, r] of rows.entries()) {
-    if (exclude.has(r.id)) continue;
+    if (exclude.has(r.id) || (r.hash && goneHash.has(r.hash))) continue;
     // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽·'쓰지 않음'만 빼고 · 288차 '앱 화면 캡처만' 브랜드 = 바탕은 사진 없이, 본문은 화면 캡처만
     if (rule?.src === 'screen' ? mode === 'cover' || !isCapture(r) || markedSkip(r.tags) : mode === 'cover' ? !backdropOk(r) : !bodyOk(r)) {
       if (!(rule?.src === 'scenes' && mode === 'body' && isCapture(r) && !markedSkip(r.tags))) continue; // 293차 앱 화면 + 허용 장면: 화면 캡처는 블로그 본문에
@@ -161,11 +163,13 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     if (mode === 'body' && visionOk(r.vision) && r.vision.text === 'much') score -= 2; // 로컬 10/25: 안내판 글자가 많은 실사는 본문에 쓰되 뒤로
     if (used.has(r.id)) score -= 4;
     if (r.source === 'ai_ref') score -= 3; // 189차: 실사 참고로 생성한 사진은 실사가 다 쓰였을 때만(같은 점수면 실사가 먼저)
-    if (score > -5) out.push({ id: r.id, title: r.title, score, k, vision: r.vision, description: r.description, hit: hitT + hitB, brand: mine(r), scene: r.source === 'video_frame', gen: r.source === 'ai_ref' });
+    if (score > -5) out.push({ id: r.id, title: r.title, score, k, vision: r.vision, description: r.description, hit: hitT + hitB, brand: mine(r), scene: r.source === 'video_frame', gen: r.source === 'ai_ref', hash: r.hash ?? null });
   }
   // 282차 #818 ②(대표 "사진이 문구와 전혀 관련이 없거나 … 실사를 바탕으로 다시 제작하거나 새로 만들어서"): 사진 생성을 켠 회사는 제목·본문 낱말이 사진 이름·설명·태그에
   //  하나도 안 맞는 사진(브랜드만 같음)은 안 씀 → 빈 칸은 실사 참고 생성이 채움. 끈 회사는 예전처럼(#685 '모든 장 실사' — 관련 높은 사진이 앞)
-  return (gen ? out.filter((o) => o.hit > 0 || o.gen) : out).sort((a, b) => b.score - a.score || a.k - b.k); // 같은 점수면 최근 사진(목록 순서)
+  const seenHash = new Set<string>(); // 317차: 같은 그림은 점수 높은 한 장만
+  return (gen ? out.filter((o) => o.hit > 0 || o.gen) : out).sort((a, b) => b.score - a.score || a.k - b.k) // 같은 점수면 최근 사진(목록 순서)
+    .filter((o) => !o.hash || (seenHash.has(o.hash) ? false : (seenHash.add(o.hash), true)));
 }
 
 const cutAt = (s: string, n: number) => { const a = [...s]; if (a.length <= n) return s; const t = a.slice(0, n).join(''); const k = t.lastIndexOf(' '); return `${(k > n * 0.6 ? t.slice(0, k) : t).trim()}…`; };
@@ -213,6 +217,20 @@ async function maskedBytes(tenant: string, id: string, data: Buffer): Promise<Bu
   if (!visionOk(r?.vision) || (r.vision as { faces?: boolean }).faces !== true) return data;
   const P = await import('./mktPhotos'); const boxes = P.facesToHide(r.vision);
   return boxes.length ? P.mosaicFaces(data, boxes).catch(() => null) : null;
+}
+/** 317차: 앞에서부터 n장 — 같은 그림(내용 해시)·같은 영상의 장면 사진은 한 장씩만 */
+async function distinctPhotos<T extends { id: string }>(list: T[], n: number): Promise<T[]> {
+  const head = list.slice(0, 24);
+  if (head.length <= 1) return head.slice(0, n);
+  const meta = new Map((await db()<{ id: string; h: string | null; v: string | null }[]>`select id::text, content_hash as h, meta->'video'->>'id' as v from library_files where id = any(${head.map((x) => x.id)}::uuid[])`).map((r) => [r.id, r]));
+  const seen = new Set<string>(); const out: T[] = [];
+  for (const x of head) {
+    const m = meta.get(x.id); const keys = [m?.h ? `h:${m.h}` : '', m?.v ? `v:${m.v}` : ''].filter(Boolean);
+    if (keys.some((k) => seen.has(k))) continue;
+    keys.forEach((k) => seen.add(k)); out.push(x);
+    if (out.length >= n) break;
+  }
+  return out;
 }
 /** 315차: 얼굴이 보인다는데 자리를 모르는 사진(가릴 수 없음 — 바탕·본문·영상에 안 씀) */
 async function unknownFaces(tenant: string, ids: string[]): Promise<Set<string>> {
@@ -669,7 +687,9 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
   // #262(대표 10/25 ④ 노트북 목업 틀): 화면 캡처를 세로(휴대폰 틀)·가로(노트북 틀)로 나눠 읽음 — 그 틀을 골랐을 때만
   let shots = a.kit.templates.includes('phone') || a.kit.templates.includes('laptop') ? await screenShots(c.tenant, a.brand, a.others, await photoRule(c.tenant, c.brand_id)) : { any: [] as Shot[], tall: [] as Shot[], wide: [] as Shot[] };
   const hints = F.hintsOf({ head: a.head, sub: a.sub, title: c.title, body, card: c.card ?? me?.card ?? null, kit: a.kit });
-  const elig = (t: import('./mktFeedTemplates').TemplateId) => F.eligible(t, hints, { photo: ranked.length > 0, photos: ranked.length, screen: shots.any.length > 0, screenWide: shots.wide.length > 0 });
+  // 317차(로컬 11/01: 다짐 표지 4분할 중 2칸이 같은 사진): 4분할은 같은 그림(내용 해시)·같은 영상에서 뽑은 장면은 한 장씩만
+  const four = await distinctPhotos(ranked, 4);
+  const elig = (t: import('./mktFeedTemplates').TemplateId) => F.eligible(t, hints, { photo: ranked.length > 0, photos: four.length, screen: shots.any.length > 0, screenWide: shots.wide.length > 0 });
   const pool = a.kit.templates.filter(elig);
   // 295차 #835(대표 '배경 단색에 글자 하나 툭'): 표지는 사진·화면·도표 틀 먼저 — 키트 틀로 안 되면 공통 사진·화면·목록 틀(키트 색), 그래도 없을 때만 단색 틀(plain 표시 → 승인함 대신 수정 요청 + 실사 참고 생성)
   let rich = pool.filter((t) => !F.plainCover(t, hints));
@@ -684,7 +704,7 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
   }
   const template = F.chooseTemplate(rich.length ? rich : pool, { near: near.map((r) => r.t), usage, seed: `${c.id}:${c.current_version}`, prefer: a.opts.template, avoid: a.opts.notTemplate }) ?? 'title'; // 쓸 수 있는 틀이 없으면 제목형(키트 색)
   const need = F.FEED_TEMPLATES[template].need as string | null;
-  const pick = need === 'photo' ? ranked.slice(0, 1) : need === 'photos4' ? ranked.slice(0, 4) : [];
+  const pick = need === 'photo' ? ranked.slice(0, 1) : need === 'photos4' ? four : [];
   // 188차: 사진 틀은 칸(1080×H) 크기로 중요 부분 기준 자르기 + 보정, 4분할은 색만 보정(칸이 작아 자르기는 틀이 함)
   const { enhancePhoto } = await import('./mktPhotoFix');
   const files = (await Promise.all(pick.map(async (p) => {
