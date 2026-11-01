@@ -7,6 +7,10 @@
 //   node scripts/marketing/record-screen.mjs scripts/marketing/screens/workin-tasks.json
 //  - 녹화는 데모 회사(가상 이름·가상 업무) 계정으로만. 실제 고객·직원 정보가 보이는 화면은 녹화하지 않는다.
 //  - 비밀번호는 환경변수로만(저장소·로그에 남기지 않음). UPLOAD_* 가 없으면 파일만 만든다(REC_OUT, 기본 screen-records/ — 저장소에 올리지 않음).
+//  - 301차 #865(로컬 11/01 '대표가 터미널에 비밀번호를 넣지 않게'): REC_EMAIL·REC_PASSWORD 가 없으면 브라우저 창을 띄워 데모 회사 계정으로 한 번 로그인 →
+//    로그인 상태(세션 파일)를 저장소 밖 REC_STATE(기본 ~/Claude-Operations/secrets/rec-<주소>-demo.json)에 저장하고 다음부터 그대로 씀(만료되면 창이 다시 뜸).
+//    올리기도 같은 방식: REC_UPLOAD=1 이면 UPLOAD_* 대신 창으로 우리 회사 관리자 로그인(UPLOAD_STATE, 기본 …-upload.json). 세션 파일은 비밀값 — 저장소·대화에 올리지 않는다.
+//    예) node scripts/marketing/record-screen.mjs scripts/marketing/screens/workin-tasks.json  (REC_BASE·REC_UPLOAD=1 만 환경변수로)
 //  - 대본의 lines 는 자료실 파일 설명에 한 줄씩 들어가고, 서버가 영상을 만들 때 자막으로 쓴다.
 // 대본 꼴: { "brand": "워크인", "title": "…", "login": true, "viewport": [390, 844], "lines": ["자막 1", …],
 //           "steps": [{ "goto": "/tasks" }, { "wait": 1200 }, { "click": "testid:fab" }, { "type": { "to": "testid:quick-title", "text": "…" } }, { "scroll": 500 }] }
@@ -15,7 +19,9 @@ import { chromium, request as pwRequest } from 'playwright';
 import { mkdirSync, readFileSync, statSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 const planPath = process.argv[2];
 if (!planPath) { console.error('녹화 대본(json) 경로를 주세요 — 예: node scripts/marketing/record-screen.mjs scripts/marketing/screens/workin-tasks.json'); process.exit(1); }
@@ -30,16 +36,52 @@ async function login(ctxReq, email, password) {
   const r = await ctxReq.post(`${BASE}/api/auth/login`, { data: { email, password, client: 'web' }, headers: { origin: BASE } });
   if (!r.ok()) throw new Error(`로그인 실패 ${r.status()} ${(await r.text()).slice(0, 200)}`);
 }
+/** 301차 #865: 세션 파일(저장소 밖) — 주소별·용도별 */
+const HOST = (() => { try { return new URL(BASE).host.replace(/[^a-z0-9.-]+/gi, '_'); } catch { return 'local'; } })();
+const SECRETS = join(homedir(), 'Claude-Operations', 'secrets');
+const stateFile = (kind) => (kind === 'upload' ? process.env.UPLOAD_STATE : process.env.REC_STATE) || join(SECRETS, `rec-${HOST}-${kind}.json`);
+/** 세션 파일이 아직 살아 있는지(로그인된 사람이 있는지) */
+async function stateOk(file) {
+  if (!existsSync(file)) return false;
+  const api = await pwRequest.newContext({ baseURL: BASE, storageState: file });
+  try { const r = await api.get('/api/auth/me'); return r.ok() && !!(await r.json().catch(() => null))?.user; } catch { return false; } finally { await api.dispose(); }
+}
+/** 창을 띄워 사람이 직접 로그인(비밀번호는 이 스크립트가 보지 않음) → 로그인되면 세션 파일 저장. 5분 기다림 */
+async function interactiveLogin(file, label) {
+  console.log(`\n▶ 브라우저 창이 열립니다 — ${label} 계정으로 로그인해 주세요(5분 안). 로그인되면 창이 저절로 닫히고 다음부터는 묻지 않습니다.`);
+  const b = await chromium.launch({ headless: false, executablePath: process.env.CHROMIUM_PATH || undefined });
+  const c = await b.newContext({ viewport: { width: 1100, height: 820 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const p = await c.newPage();
+  await p.goto(`${BASE}/login`);
+  const until = Date.now() + 5 * 60_000; let ok = false;
+  while (Date.now() < until && !ok) {
+    await p.waitForTimeout(1500).catch(() => {});
+    if (p.isClosed()) break;
+    const r = await c.request.get(`${BASE}/api/auth/me`).catch(() => null);
+    ok = !!r && r.ok() && !!(await r.json().catch(() => null))?.user;
+  }
+  if (ok) { mkdirSync(dirname(file), { recursive: true }); await c.storageState({ path: file }); }
+  await b.close();
+  if (!ok) { console.error('로그인이 확인되지 않았습니다(5분 지남 또는 창 닫힘) — 다시 실행해 주세요'); process.exit(1); }
+  console.log(`✔ 로그인 저장: ${file}`);
+}
+/** 비밀번호 환경변수가 없을 때: 살아 있는 세션 파일, 없으면 창으로 로그인 */
+async function ensureState(kind, label) {
+  const file = stateFile(kind);
+  if (!(await stateOk(file))) await interactiveLogin(file, label);
+  return file;
+}
 const loc = (page, to) => to.startsWith('testid:') ? page.getByTestId(to.slice(7)).first() : to.startsWith('text:') ? page.getByText(to.slice(5)).first() : page.locator(to).first();
 
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const tmp = join(tmpdir(), `rec-${Date.now()}`); mkdirSync(tmp, { recursive: true });
-const ctx = await browser.newContext({ viewport: { width: VW, height: VH }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul',
+const usePw = !!(process.env.REC_EMAIL && process.env.REC_PASSWORD);
+const recState = plan.login !== false && !usePw ? await ensureState('demo', '데모 회사(녹화용 — 실제 고객·직원 정보가 없는 계정)') : null;
+const ctx = await browser.newContext({ ...(recState ? { storageState: recState } : {}), viewport: { width: VW, height: VH }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul',
   userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36' });
 const page = await ctx.newPage();
 if (plan.login !== false) {
-  if (!process.env.REC_EMAIL || !process.env.REC_PASSWORD) { console.error('REC_EMAIL·REC_PASSWORD(데모 회사 계정) 환경변수가 필요합니다 — 로그인 없는 대본은 "login": false'); process.exit(1); }
-  await login(page.request, process.env.REC_EMAIL, process.env.REC_PASSWORD);
+  if (usePw) await login(page.request, process.env.REC_EMAIL, process.env.REC_PASSWORD); // 아니면 위 세션 파일로 이미 로그인된 상태
 }
 await page.addInitScript(() => { try { localStorage.setItem('wos_push_asked', '1'); localStorage.setItem('wos_sel_tip', '1'); } catch { /* 저장 못 함 */ } });
 const settle = async () => { await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {}); await page.waitForTimeout(500); };
@@ -85,9 +127,11 @@ const size = statSync(mp4).size;
 console.log('✔ 녹화', mp4, `${(size / 1048576).toFixed(1)}MB`);
 
 // 우리 회사 자료실에 올리기(UPLOAD_EMAIL·UPLOAD_PASSWORD = 우리 회사 관리자) — 폴더 '마케팅/화면 녹화', 태그 = 브랜드·화면 녹화, 설명 = 자막 줄
-if (process.env.UPLOAD_EMAIL && process.env.UPLOAD_PASSWORD) {
-  const api = await pwRequest.newContext({ baseURL: BASE });
-  await login(api, process.env.UPLOAD_EMAIL, process.env.UPLOAD_PASSWORD);
+const upPw = !!(process.env.UPLOAD_EMAIL && process.env.UPLOAD_PASSWORD);
+if (upPw || process.env.REC_UPLOAD === '1') {
+  const upState = upPw ? null : await ensureState('upload', '우리 회사 관리자(자료실 올리기용)');
+  const api = await pwRequest.newContext({ baseURL: BASE, ...(upState ? { storageState: upState } : {}) });
+  if (upPw) await login(api, process.env.UPLOAD_EMAIL, process.env.UPLOAD_PASSWORD);
   const data = readFileSync(mp4);
   const lf = await api.post('/api/library', { data: { fileName: name, mimeType: 'video/mp4', size, title: plan.title ?? name, folder: '마케팅/화면 녹화', space: 'marketing',
     tags: [plan.brand, '화면 녹화'].filter(Boolean), description: (plan.lines ?? []).join('\n').slice(0, 2000), allowDuplicate: true } });

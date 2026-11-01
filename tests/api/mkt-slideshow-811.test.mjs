@@ -106,8 +106,8 @@ test('자동 제작: 브랜드 영상 방법 = 실제 사진 → 릴스 원고 �
   assert.equal(q.status, 'done'); assert.match(q.brief, /실제 사진 영상으로 대신함\(생성 비용 0\)$/);
   assert.equal((await sql`select count(*)::int n from mkt_credit_ledger where content_id = ${slots[0].id} and kind = 'generate_video'`)[0].n, 0, '생성 비용 없음');
   const p = await probe(v.media_ids[0]); assert.deepEqual([p.w, p.h], [1080, 1920]);
-  // 앱 화면 녹화: 사진 영상을 만들지 않고 녹화 파일을 붙이는 카드(예상 크레딧 0)
-  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${P.brand}`, { video: { method: 'screen' } });
+  // 앱 화면 녹화: 사진 영상을 만들지 않고 녹화 파일을 붙이는 카드(예상 크레딧 0) — 301차 #865: 녹화를 기다리는 건 시안 사진이 '앱 화면 캡처만'인 브랜드(워크인 꼴)만, 실사 브랜드는 사진 영상으로 대신함(mkt-screen-811)
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${P.brand}`, { video: { method: 'screen', photoSource: 'screen' } });
   await only(slots[1].id);
   await ctl({ anthropicReset: true, anthropicQueue: [draft, draft] });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
@@ -116,4 +116,5 @@ test('자동 제작: 브랜드 영상 방법 = 실제 사진 → 릴스 원고 �
   assert.equal(Number(q2.est_credits), 0); assert.match(q2.brief, /^앱 화면 녹화로 만듭니다\(생성 비용 0\)/);
   assert.equal((await sql`select count(*)::int n from mkt_briefs where content_id = ${slots[1].id}`)[0].n, 0, '사진 영상 안 만듦');
   await sql`update mkt_rules set active = false where id = ${r.id}`;
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${P.brand}`, { video: { method: 'photos', photoSource: null } }); // 뒤 시험은 실사 브랜드로
 });
