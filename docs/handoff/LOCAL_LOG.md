@@ -2168,3 +2168,10 @@ ea8c2853 실제 10/25 19:15 ← 제목 로컬 10/25 19
 - 운영 브라우저 work-in.dev 세션 = 데모(앱 심사 담당자, tenant demo). dagym-workspace.vercel.app = 대표 owner.
 - 데모 데이터: 업무·일정·프로젝트 헬스장 오픈 준비 위주. public/landing 캡처 = 하늘커뮤니티(아파트 커뮤니티). 입력 예시 15곳 피트니스·아파트.
 - 302차 8713d31 배포 보고 받음(앱 402 문구·앱 복귀 새로 읽기·HTML 결제 메일). 로컬 확인 ①~④ 대기.
+
+## 2026-11-01 17:30 — #874 시안 다시 만들기 실행, 문제 2
+- 워크인 banned_words + 온도조절기·스위치(PATCH 200). remake dryRun 32(하이링크 8·워크인 8·바디랩 8·다짐 8) → 실행 trashed 32·made 32(07:59Z). [지금 한 번 돌리기] 8회, 제작 30/32.
+- 문제 ①: 새 피드 8건 단색 장 그대로. mktAutoVisual.ts:438 `empty.length && !st.plain_fill && !st.photo_gen` — 우리 회사 photo_gen=true 라 빈 장 유지, 생성은 ready()=false 로 안 돎.
+- 문제 ②: remakeContents 가 deleted_at 만 넣고 status 유지 → listContents(승인함)·overview week 에 옛 글 32건이 그대로(새 글과 짝으로). trashContents 는 status='canceled'·deleted_from. 미룬 글 다시 만들기(redoOnMove)·알림이 옛 글에 걸릴 위험.
+- 좋아진 것: 얼굴 표시 사진 0, 하이링크 영상 4건 붙음(장면 사진), 바디랩·워크인 영상은 보류(자료 대기), 블로그 사진 모자라면 changes+자료 요청.
+- APPLE_PRIVATE_KEY 아직 없음(입력 창 열어 둠).
