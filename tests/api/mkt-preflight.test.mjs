@@ -28,7 +28,7 @@ const promptsAfter = async (n) => (await (await fetch(FAKE + '/__state')).json()
 
 before(async () => {
   await resetDb(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
-  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: true }); // 303차 #869: 이 시험은 예전 방식(사진이 모자라면 단색 장으로 채움) 기준 — 새 기본(빈 장 빼고 자료 요청)은 mkt-rules-869
   await ctx.owner.ok('PUT', '/api/marketing/auto', { leadDays: 3, remindHours: 72, quietStart: 0, quietEnd: 0, autoHold: false, videoPause: false }); // 요청 C: 영상 자동 제작은 기본 중단 — 이 시험은 릴스 칸도 만듦
   ga = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '가온짐' });
   nu = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '누리링크' });

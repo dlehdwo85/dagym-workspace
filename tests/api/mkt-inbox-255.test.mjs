@@ -25,7 +25,7 @@ const row = async (id) => (await sql`select c.status, c.kind, c.current_version,
 
 before(async () => {
   await resetDb(); await ensureTls(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
-  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: true }); // 303차 #869: 이 시험은 예전 방식(사진이 모자라면 단색 장으로 채움) 기준 — 새 기본(빈 장 빼고 자료 요청)은 mkt-rules-869
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', quietStart: 0, quietEnd: 0 });
   P.brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '수정시험' })).id;

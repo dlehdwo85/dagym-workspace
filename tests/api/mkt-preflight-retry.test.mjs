@@ -23,7 +23,7 @@ const text = (req) => JSON.stringify(req.body.messages); // fake-google 은 { ke
 
 before(async () => {
   await resetDb(); await ensureTls(); fake = await startFakeGoogle(); srv = await startServer({ MKT_PREFLIGHT_RETRY: '1' }); sql = testDb(); ctx = await bootstrap();
-  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: true }); // 303차 #869: 이 시험은 예전 방식(사진이 모자라면 단색 장으로 채움) 기준 — 새 기본(빈 장 빼고 자료 요청)은 mkt-rules-869
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', quietStart: 0, quietEnd: 0, leadDays: 3 });
   P.brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '재작성브랜드' })).id;
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${P.brand}`, { intro: '송도 동네 헬스장', products: '1개월 회원권, 처음 상담', facts: { phone: '032-111-2222' } });

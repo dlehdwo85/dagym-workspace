@@ -14,7 +14,7 @@ before(async () => { await resetDb(); await ensureTls(); fake = await startFakeG
 after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); });
 
 test('초안 보관: 자동 제작 → 초안(시안 붙음·알림 없음) → 마감 지나도 그대로 → [승인 요청] → 승인 대기 · 끄면 예전처럼', async () => {
-  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: true }); // 303차 #869: 이 시험은 예전 방식(사진이 모자라면 단색 장으로 채움) 기준 — 새 기본(빈 장 빼고 자료 요청)은 mkt-rules-869
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   assert.equal((await ctx.owner.ok('GET', '/api/marketing/auto')).settings.auto_hold, false, '새 회사는 끔');
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', leadDays: 3, remindHours: 72, quietStart: 0, quietEnd: 0, autoHold: true });

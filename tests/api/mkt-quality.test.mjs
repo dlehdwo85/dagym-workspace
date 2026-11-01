@@ -12,7 +12,7 @@ const check = (c, b) => c.ok('POST', '/api/marketing/quality/check', b);
 const AI_TEXT = '다양한 혜택을 놓치지 마세요! 지금 바로 특별한 경험을 시작해 보세요!! 혁신적인 서비스로 여러분의 일상을 한 단계 업그레이드하세요! ✨✨✨';
 before(async () => { await resetDb(); await ensureTls(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
-  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: true }); // 303차 #869: 이 시험은 예전 방식(사진이 모자라면 단색 장으로 채움) 기준 — 새 기본(빈 장 빼고 자료 요청)은 mkt-rules-869
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', quietStart: 0, quietEnd: 0 });
   P.brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '다짐' })).id;
