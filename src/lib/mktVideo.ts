@@ -261,23 +261,36 @@ export async function pollV2(briefId: string, opt: { waitMs?: number } = {}): Pr
 export async function kickRender(briefId?: string | null) {
   if (process.env.VERCEL && process.env.CRON_SECRET) {
     const { appUrl } = await import('./mail');
-    try { await fetch(`${appUrl()}/api/marketing/studio/render`, { method: 'POST', headers: { authorization: `Bearer ${process.env.CRON_SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify({ briefId: briefId ?? null }), signal: AbortSignal.timeout(8000) }); } catch { /* 다음 정기 실행이 다시 부름 */ }
-    return { via: 'render-route' };
+    // 324차(로컬 11/02 멈춘 의뢰): 의뢰 직후 호출이 실제로 닿았는지 의뢰에 기록(kickAt·kickStatus) — 운영에서 '바로 합성'이 안 먹는 듯한데 기록이 없어 못 짚었음
+    let status = '';
+    try { const res = await fetch(`${appUrl()}/api/marketing/studio/render`, { method: 'POST', headers: { authorization: `Bearer ${process.env.CRON_SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify({ briefId: briefId ?? null }), signal: AbortSignal.timeout(8000) }); status = String(res.status); }
+    catch (e: any) { status = `error: ${String(e?.name ?? e?.message ?? e).slice(0, 80)}`; /* 다음 정기 실행이 다시 부름 */ }
+    if (briefId) await db()`update mkt_briefs set result = result || ${db().json({ kickAt: new Date().toISOString(), kickStatus: status } as never)} where id = ${briefId}`.catch(() => {});
+    return { via: 'render-route', status };
   }
   return renderNext(briefId);
 }
 export async function renderNext(briefId?: string | null) {
   if (briefId) return renderStep(briefId);
   const [x] = await db()<{ id: string }[]>`select id from mkt_briefs where status = 'generating' and result->>'pipeline' = 'v2' and result->>'stage' in ('qa', 'render')
-    and coalesce((result->>'renderAt')::timestamptz, 'epoch') < now() - interval '6 minutes' order by updated_at limit 1`;
+    and coalesce((result->>'renderAt')::timestamptz, 'epoch') < now() - interval '6 minutes' order by coalesce((result->>'renderTries')::int, 0), created_at limit 1`;
   return x ? renderStep(x.id) : { idle: true };
 }
-/** 정기 실행: 검수·합성 기다리는 의뢰를 합성 함수로(한 번에 2건) */
+export const RENDER_MAX_TRIES = 8; // 324차: 이만큼 시작해도 못 끝내면(함수가 중간에 끊기는 등) 사유를 적고 실패 처리
+export const RENDER_STALE_HOURS = 2; // 324차: 만든 지 이만큼 지나도록 합성이 끝나지 않고 최근 30분 시작도 없으면 실패 처리(대기열·글의 '만드는 중'을 풀어 다시 의뢰할 수 있게)
+/** 정기 실행: 검수·합성 기다리는 의뢰를 합성 함수로 — 324차(로컬 11/02 멈춘 의뢰 2건·30~60분 지연): 한 번에 4건, 시도 횟수 적은 것·먼저 만든 것 순(옛날에 멈춘 의뢰가 새 의뢰를 밀어내지 않게) */
 export async function renderTick() {
-  const rows = await db()<{ id: string }[]>`select id from mkt_briefs where status = 'generating' and result->>'pipeline' = 'v2' and result->>'stage' in ('qa', 'render')
-    and coalesce((result->>'renderAt')::timestamptz, 'epoch') < now() - interval '6 minutes' order by updated_at limit 2`;
+  const sql = db();
+  const stale = await sql<{ id: string }[]>`update mkt_briefs set status = 'failed', updated_at = now(),
+      error = ${`합성이 ${RENDER_STALE_HOURS}시간 넘게 끝나지 않아 멈춤 처리(시작 `} || coalesce(result->>'renderTries', '0') || '번) — 다시 의뢰할 수 있습니다',
+      result = (result - 'renderAt') || jsonb_build_object('stage', 'failed', 'errors', coalesce(result->'errors', '[]'::jsonb) || jsonb_build_array(${`합성이 ${RENDER_STALE_HOURS}시간 넘게 끝나지 않아 멈춤 처리`}::text))
+    where status = 'generating' and result->>'pipeline' = 'v2' and result->>'stage' in ('qa', 'render')
+      and created_at < now() - make_interval(hours => ${RENDER_STALE_HOURS}) and updated_at < now() - make_interval(hours => ${RENDER_STALE_HOURS})
+      and coalesce((result->>'renderAt')::timestamptz, 'epoch') < now() - interval '30 minutes' returning id`;
+  const rows = await sql<{ id: string }[]>`select id from mkt_briefs where status = 'generating' and result->>'pipeline' = 'v2' and result->>'stage' in ('qa', 'render')
+    and coalesce((result->>'renderAt')::timestamptz, 'epoch') < now() - interval '6 minutes' order by coalesce((result->>'renderTries')::int, 0), created_at limit 4`;
   for (const r of rows) await kickRender(r.id);
-  return { kicked: rows.length };
+  return { kicked: rows.length, stale: stale.length };
 }
 
 /** 자료실 파일 바이트(기밀 제외) — 브랜드 키트 로고·글꼴, #499-5 카드뉴스도 씀 */
@@ -414,10 +427,20 @@ export function videoChecks(o: { scenes: { qa?: SceneQa | null }[]; screens: num
 /** 검수·합성 한 걸음(합성 함수에서). 잠금(renderAt 6분)으로 동시에 둘이 돌지 않게, 시간이 모자라면 다음 호출이 남은 편을 이어받는다 */
 export async function renderStep(briefId: string, budgetMs = Number(process.env.VIDEO_RENDER_BUDGET_MS ?? 230_000)): Promise<{ status: string; stage?: string; mediaIds?: string[]; errors?: string[] }> {
   const t0 = Date.now(); const sql = db();
-  const [b] = await sql<any[]>`update mkt_briefs set result = result || jsonb_build_object('renderAt', now()) where id = ${briefId} and status = 'generating' and result->>'pipeline' = 'v2' and result->>'stage' in ('qa', 'render')
+  const [b] = await sql<any[]>`update mkt_briefs set result = result || jsonb_build_object('renderAt', now(), 'renderTries', coalesce((result->>'renderTries')::int, 0) + 1) where id = ${briefId} and status = 'generating' and result->>'pipeline' = 'v2' and result->>'stage' in ('qa', 'render')
     and coalesce((result->>'renderAt')::timestamptz, 'epoch') < now() - interval '6 minutes' returning *`;
   if (!b) { const [x] = await sql<any[]>`select status, result from mkt_briefs where id = ${briefId}`; return { status: x?.status ?? 'missing', stage: x?.result?.stage, mediaIds: x?.result?.mediaIds }; }
-  const r = b.result; const spec = KIND_SPEC[b.kind]; const dir = await mkdtemp(join(tmpdir(), 'mkt-v2-'));
+  const r = b.result; const spec = KIND_SPEC[b.kind];
+  // 324차: 시작 횟수(renderTries)·시작/오류 기록(renderLog, 최근 8번) — 몇 번 시작했는지·어디서 끊겼는지 의뢰 행만 봐도 보이게. 너무 많이 시작했으면 실패 처리
+  const tries = Number(r.renderTries ?? 1); const log: { at: string; ms?: number; error?: string }[] = Array.isArray(r.renderLog) ? r.renderLog.slice(-7) : [];
+  if (tries > RENDER_MAX_TRIES) {
+    const last = [...log].reverse().find((x) => x.error)?.error ?? (r.variants as V2Variant[]).find((v) => v.renderError)?.renderError;
+    const msg = `합성을 ${tries - 1}번 시작했지만 끝내지 못해 멈춤 처리${last ? ` — 마지막 오류: ${last}` : ''}`.slice(0, 500);
+    await save(briefId, { ...r, stage: 'failed', renderAt: null, errors: [...(r.errors ?? []), msg].slice(-30) }, { status: 'failed', error: msg });
+    return { status: 'failed', stage: 'failed', errors: [msg] };
+  }
+  const entry: (typeof log)[number] = { at: new Date().toISOString() }; log.push(entry); r.renderLog = log;
+  const dir = await mkdtemp(join(tmpdir(), 'mkt-v2-'));
   let finished = false;
   try {
     const { getObject } = await import('./storage');
@@ -450,11 +473,15 @@ export async function renderStep(briefId: string, budgetMs = Number(process.env.
       catch (e: any) { v.renderTries = (v.renderTries ?? 0) + 1; v.renderError = String(e?.message ?? e).slice(0, 300); if (v.renderTries >= 2) v.error = `합성 실패: ${v.renderError}`; }
       await save(briefId, r);
     }
-    if ((r.variants as V2Variant[]).every((v) => v.error || v.mediaId)) { finished = true; return await finalize(b, r); }
+    if ((r.variants as V2Variant[]).every((v) => v.error || v.mediaId)) { finished = true; entry.ms = Date.now() - t0; return await finalize(b, r); }
     return { status: 'generating', stage: r.stage };
+  } catch (e: any) {
+    entry.error = String(e?.message ?? e).slice(0, 300); // 324차: 어디서 끊겼는지 — 예전엔 흔적 없이 renderAt 만 지워져 '한 번도 안 돈 것'처럼 보였음
+    await save(briefId, { ...r, errors: [...(r.errors ?? []), `합성 ${tries}번째 시작 오류: ${entry.error}`].slice(-30) }).catch(() => {});
+    throw e;
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
-    if (!finished) await sql`update mkt_briefs set result = result - 'renderAt' where id = ${briefId}`.catch(() => {});
+    if (!finished) { entry.ms = Date.now() - t0; await sql`update mkt_briefs set result = (result - 'renderAt') || ${sql.json({ renderLog: log } as never)} where id = ${briefId}`.catch(() => {}); }
   }
 }
 
@@ -464,7 +491,7 @@ async function finalize(b: any, r: any) {
   const variants = r.variants as V2Variant[]; const mediaIds = variants.map((v) => v.mediaId).filter((x): x is string => !!x);
   if (!mediaIds.length) {
     const msg = variants.map((v) => v.error).filter(Boolean).join(' / ').slice(0, 500) || '합성 실패';
-    await save(b.id, { ...r, stage: 'failed', renderAt: null }, { status: 'failed', error: msg });
+    await save(b.id, { ...r, stage: 'failed', renderAt: null, errors: [...(r.errors ?? []), msg].slice(-30) }, { status: 'failed', error: msg }); // 324차: 사유를 error 칸과 result.errors 양쪽에
     return { status: 'failed', stage: 'failed', errors: [msg] };
   }
   const review = variants.flatMap((v) => v.mediaId ? v.scenes.filter((s) => s.qa && !s.qa.ok).map((s) => `${variants.length > 1 ? `${v.n + 1}편 ` : ''}장면 ${s.k + 1}: ${(s.qa!.issues ?? []).join(', ') || '검수 못 함'}`) : []);
@@ -510,6 +537,7 @@ export function v2Progress(r: any) {
   const reuse = !!r.reuse; // 187차 ⑦ 기존 영상 다시 합성(새로 만들지 않음)
   const label = ({ clips: `장면 만드는 중 ${done}/${scenes.length}${kf ? ` · 출연진 맞춘 첫 사진 ${kf}` : ''}${again ? ` · 검수에 걸려 다시 만드는 장면 ${again}` : ''}`, qa: 'AI 검수 중(외국어 글자·외국인·깨진 화면·밝기·정면)', render: reuse ? '기존 영상 다시 합성 중(자막·소리·끝 화면)' : '합성 중(이어 붙이기·자막·소리·끝 화면)', done: '완료', failed: '실패' } as Record<string, string>)[r.stage] ?? r.stage;
   return { stage: r.stage, label, done, total: scenes.length, review: r.review ?? [], checkFails: r.checkFails ?? [], notes: r.notes ?? [], audio: r.audio ?? null, reuse, cast: r.cast?.mode ?? null,
+    tries: Number(r.renderTries ?? 0), kick: r.kickStatus ?? null, kickAt: r.kickAt ?? null, log: Array.isArray(r.renderLog) ? r.renderLog.slice(-3) : [], // 324차: 몇 번 시작했는지·직후 호출 결과·최근 시작 기록
     checks: vs.find((v) => v.checks)?.checks ?? null,
     variants: vs.map((v) => ({ n: v.n, mediaId: v.mediaId ?? null, duration: v.duration ?? null, error: v.error ?? null, renderError: v.renderError ?? null,
       scenes: v.scenes.map((s) => ({ k: s.k, seconds: Math.round(s.seconds * 10) / 10, line: s.line, status: s.status, screen: !!s.screen, regens: s.regens ?? 0, qa: s.qa ?? null, beat: s.beat ?? null, kf: s.kf ? s.kf.status : null, castOff: !!s.castOff })) })) };

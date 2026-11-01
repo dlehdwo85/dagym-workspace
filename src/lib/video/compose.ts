@@ -187,8 +187,11 @@ export async function composeVideo(o: ComposeInput): Promise<{ file: string; dur
   if (mix.length) f.push(`${mix.join('')}amix=inputs=${mix.length}:normalize=0:dropout_transition=0,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100,apad,atrim=0:${total.toFixed(3)}[aout]`);
   else { const i = idx++; args.push('-f', 'lavfi', '-i', `anullsrc=r=44100:cl=stereo`); f.push(`[${i}:a]atrim=0:${total.toFixed(3)}[aout]`); }
   await writeFile(join(o.dir, 'graph.txt'), f.join(';\n'));
+  // 324차(로컬 11/02 a132740e 'Failed to load fontconfig fonts'): 합성 서버(Vercel)엔 시스템 글꼴 설정 파일이 없어 libass 가 설정을 찾다 경고·지연 — 작업 폴더에 글꼴 폴더만 가리키는 설정을 만들어 그걸 쓰게 함
+  const fontsConf = join(o.dir, 'fonts.conf');
+  await writeFile(fontsConf, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig><dir>${join(o.dir, o.font.dir)}</dir><cachedir>${join(o.dir, 'fc-cache')}</cachedir></fontconfig>\n`);
   await ffmpegOk([...args, '-/filter_complex', 'graph.txt', '-map', '[vout]', '-map', '[aout]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-r', '30', '-g', '60',
-    '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', '-t', total.toFixed(3), o.out], { cwd: o.dir, timeoutMs: 250_000 });
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', '-t', total.toFixed(3), o.out], { cwd: o.dir, timeoutMs: 250_000, env: { FONTCONFIG_FILE: fontsConf, FONTCONFIG_PATH: o.dir } });
   const info = await mediaInfo(join(o.dir, o.out));
   return { file: o.out, duration: info.duration ?? total, notes, subPct: a.subPct };
 }
