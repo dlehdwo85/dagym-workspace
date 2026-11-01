@@ -11,7 +11,7 @@ export async function mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   const brand = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: 'E2E 수정본 브랜드' })).id;
   await sql`update mkt_brands set color = '#1848D0' where id = ${brand}`;
   const [{ tenant }] = await sql`select tenant from mkt_brands where id = ${brand}`;
-  await seedBrandPhotos(sql, { tenant, ownerId: ctx.ownerId, brandName: 'E2E 수정본 브랜드' }); // 295·303차 뒤: 사진이 없으면 서버 시안이 단색 표지 → 수정 요청으로 감
+  await seedBrandPhotos(sql, { tenant, ownerId: ctx.ownerId, brandName: 'E2E 수정본 브랜드', caption: (k) => `E2E 수정본 브랜드 시설 ${k} — 입주민 앱으로 관리비 고지서를 받는 안내 화면` }); // 295·303차 뒤: 사진이 없으면 서버 시안이 단색 표지 → 수정 요청으로 감 · 320차 뒤: 글 낱말('입주민'·'고지서')이 든 사진이어야 카드 장에 깔림
   const [c] = await sql`insert into mkt_contents (tenant, title, channel, kind, scheduled_at, status, current_version, created_by, auto, produced_at, brand_id, quality)
     values (${tenant}, 'E2E 수정본 자동 글', 'instagram', 'feed', now() + interval '3 days', 'pending', 1, ${ctx.ownerId}, true, now(), ${brand}, ${sql.json({ passed: true, issues: [] })}) returning id`;
   await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${'관리비 고지서, 아직 종이로 나눠 주세요?\n입주민 앱 하나로 끝납니다.\n상담은 프로필 링크에서.'}, ${[]}, 'AI 자동 제작', ${ctx.ownerId})`;

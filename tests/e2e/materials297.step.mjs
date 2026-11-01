@@ -10,8 +10,9 @@ export async function materials297({ owner, ctx, sql, BASE }) {
     values ('default', ${brand}, 'E2E 표지 사진 필요 글', 'instagram', 'feed', now() + interval '5 days', 'changes', 1, ${ctx.ownerId}, true,
       ${sql.json({ passed: false, issues: ['표지가 단색 바탕 + 글자뿐'], visual: { by: 'server', fileId: null, photoId: null, template: 'title', plain: true, rv: 8 } })}) returning id`;
   await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${'E2E 표지 사진 필요 글\n본문 한 줄'}, array[gen_random_uuid()], '시안', ${ctx.ownerId})`;
+  const due = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + 7 * 864e5));
   const [r] = await sql`insert into mkt_material_requests (tenant, brand_id, content_id, kind, title, detail, wanted, assignee_id, due_on, source)
-    values ('default', ${brand}, ${c.id}, 'photo', 'E2E 자료 브랜드 실사 5장 — 시설·입구·이용 장면', ${'표지에 쓸 사진이 없어 단색 바탕 표지만 나옵니다\n· 시설 전경·입구'}, 5, ${ctx.ownerId}, current_date + 7, 'ai') returning id`;
+    values ('default', ${brand}, ${c.id}, 'photo', 'E2E 자료 브랜드 실사 5장 — 시설·입구·이용 장면', ${'표지에 쓸 사진이 없어 단색 바탕 표지만 나옵니다\n· 시설 전경·입구'}, 5, ${ctx.ownerId}, ${due}::date, 'ai') returning id`; // 기한은 서울 날짜 기준(서버 todaySeoul 과 같게) — current_date(UTC)로 넣으면 한국 자정~09시엔 D-6 으로 보임(CI 1911)
   try {
     await owner.setViewportSize({ width: 1366, height: 900 });
     await owner.goto(`${BASE}/s/marketing/approvals`);
