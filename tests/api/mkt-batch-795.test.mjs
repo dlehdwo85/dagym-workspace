@@ -55,7 +55,8 @@ test('주 단위 묶음: 칸 원고 만드는 때 = 그 주 묶음 4시간 전 �
   const put = async (title, day, hm, ago = 1) => (await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, rule_id, kind, auto, produce_at, is_test, mode)
     values (${tenant}, ${brand.id}, ${title}, 'instagram', ${kst(day, hm)}, 'draft', 0, ${ctx.ownerId}, ${rule.id}, 'feed', true, now() - make_interval(mins => ${ago}::int), false, 'content') returning id`)[0].id;
   const A = [];
-  for (let k = 0; k < 6; k++) A.push(await put(`다음 주 칸 ${k + 1}`, addDay(W1, k), k % 2 ? '15:00' : '11:00', 20 - k)); // 만드는 차례 = 칸 순서(다다음 주 칸이 마지막)
+  // 312차(CI 1868 일요일 18:48 실패): 다음 주 칸은 화요일부터 — 월요일 칸은 승인 마감(게시 전날 = 일요일 18:00)이 일요일 저녁 시험 때 이미 지나 묶음에서 빠짐
+  for (let k = 0; k < 6; k++) A.push(await put(`다음 주 칸 ${k + 1}`, addDay(W1, k + 1), k % 2 ? '15:00' : '11:00', 20 - k)); // 만드는 차례 = 칸 순서(다다음 주 칸이 마지막)
   const B = await put('다다음 주 칸', addDay(W2, 2), '11:00', 2);
   // 1번째 실행: 한 번에 5건까지 만듦 → 다음 주 칸이 1건 남아 묶음은 아직 안 올림(만든 5건도 초안)
   await queue(8);
@@ -82,7 +83,7 @@ test('주 단위 묶음: 칸 원고 만드는 때 = 그 주 묶음 4시간 전 �
   const list = await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals');
   assert.equal(list.deadlineRule, '게시 전날 18:00');
   const a0 = list.contents.find((c) => c.id === A[0]);
-  assert.equal(new Date(a0.deadline).toISOString(), kst(addDay(W1, -1), '18:00').toISOString());
+  assert.equal(new Date(a0.deadline).toISOString(), kst(W1, '18:00').toISOString(), '화요일 칸 마감 = 월요일 18:00');
   // 이미 올린 주에 늦게 나온 원고는 바로 승인 대기 + 그 글 알림
   const late = await put('다음 주 늦은 칸', addDay(W1, 6), '19:00');
   await queue(3);
