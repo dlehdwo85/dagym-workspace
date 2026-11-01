@@ -432,10 +432,12 @@ export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: S
     for (const k of [...slots].sort((a, b) => best(b) - best(a) || a - b)) if (best(k) > 0) take(k, true);
     for (const k of slots) if (!pages[k].photoId) take(k, false);
     // 303차 #869(대표가 '단색 배경 글자 장'을 콕 집어 반려): 사진을 못 찾은 장은 단색 바탕으로 채우지 않고 뺌 + 이 브랜드에 자료 요청 카드 —
-    //  회사 설정 plain_fill(예전 방식)이거나 '실사 참고 생성'(photo_gen, 빈 장을 생성 사진으로 채움)을 켠 회사는 그대로 둠
+    //  회사 설정 plain_fill(예전 방식)이거나 '실사 참고 생성'(photo_gen, 빈 장을 생성 사진으로 채움)을 켜고 생성이 준비된 회사는 그대로 둠 · 남은 장이 표지+행동 장뿐이면 장 수 규칙(3장)으로 수정 요청(보류)
     const A = await import('./mktAuto'); const st = await A.settingsOf(c.tenant);
     const empty = slots.filter((k) => !pages[k].photoId);
-    if (empty.length && !st.plain_fill && !st.photo_gen) {
+    // 305차(로컬 11/01 #874 실행 결과: photo_gen 켜짐인데 생성 모델이 준비 안 돼 빈 장이 단색으로 남음): 생성이 실제로 될 때만 빈 장을 남겨 생성 사진을 기다림
+    const genOk = empty.length && st.photo_gen && !st.auto_pause && !st.plain_fill ? (await (await import('./mktPhotoGen')).regenInfo().catch(() => ({ ready: false }))).ready : false;
+    if (empty.length && !st.plain_fill && !genOk) {
       const drop = new Set(empty);
       const kept = pages.filter((_, k) => !drop.has(k));
       pages.splice(0, pages.length, ...kept);

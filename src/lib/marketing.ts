@@ -130,7 +130,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
     from mkt_contents c left join mkt_brands b on b.id = c.brand_id
     left join mkt_versions v on v.content_id = c.id and v.version = c.current_version
     left join users u on u.id = c.created_by
-    where c.tenant = ${t} and c.status <> 'canceled'
+    where c.tenant = ${t} and c.status <> 'canceled' and c.deleted_at is null
       and (${q.view ?? ''} <> 'approvals' or ${q.day ?? ''} <> '' or c.status in ('pending', 'changes', 'hold', 'approved') or (c.status = 'draft' and (c.scheduled_at > now() or c.quality->'held' is not null))) -- 대표 10/20 14:10 ②: 예정(초안)도 승인함에 묶음으로 · #544 초안 보관은 날짜가 지나도
       -- 현황 '오늘' 카드에서 들어온 목록(시험 제외)
       and (${q.day ?? ''} = '' or (not c.is_test and case ${q.day ?? ''}

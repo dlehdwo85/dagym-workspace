@@ -48,6 +48,8 @@ after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); })
 
 test('피드: 이 브랜드 사진이 모자라면 사진 없는 장(단색 바탕)을 빼고 판 메모에 남김 · 브랜드에 AI 자료 요청 카드 · 장 수 미달이라 승인 대기 대신 수정 요청', async () => {
   const id = await slot(P.brand, '규칙짐 아침 운동');
+  // 305차(로컬 11/01 운영): '실사 참고 생성'(photoGen)을 켜 둬도 생성이 준비 안 됐으면(운영사 설정 없음) 빈 장을 남기지 않고 뺌
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { photoGen: true });
   await ctl({ anthropicReset: true, anthropicQueue: [feedDraft('아침 운동 시작'), feedDraft('아침 운동 시작')] });
   const run = await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   assert.ok(run.produced.some((p) => p.id === id && !p.error), JSON.stringify(run.produced));
@@ -59,6 +61,7 @@ test('피드: 이 브랜드 사진이 모자라면 사진 없는 장(단색 바�
   assert.notEqual(c.status, 'pending', '장 수 미달이면 승인함에 안 올림');
   const [m] = await sql`select title, detail, source from mkt_material_requests where brand_id = ${P.brand} and status = 'requested'`;
   assert.ok(m && m.source === 'ai', '자료 요청 카드'); assert.match(m.detail, /실사가 모자라 그 장을 뺐습니다/);
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { photoGen: false });
 });
 
 test('회사 설정 plainFill(예전 방식) 켜면 사진이 없어도 장을 그대로 둠(색 바탕)', async () => {
@@ -96,8 +99,12 @@ test('#874 기간 시안 다시 만들기: 관리자만 · 먼저 대상 수(dry
   assert.ok(pre.count >= 1 && pre.items.some((x) => x.id === rs.id) && !pre.items.some((x) => x.id === ap.id), JSON.stringify(pre));
   const done = await ctx.owner.ok('POST', '/api/marketing/auto/remake', { from, to });
   assert.equal(done.trashed, pre.count);
-  const [old] = await sql`select deleted_at, rule_id, quality from mkt_contents where id = ${rs.id}`;
+  const [old] = await sql`select deleted_at, rule_id, quality, status, deleted_from, deleted_by from mkt_contents where id = ${rs.id}`;
   assert.ok(old.deleted_at && old.rule_id === null && old.quality.remade?.ruleId === r.id, '휴지통 · 규칙 칸 연결 풀림');
+  // 305차(로컬 11/01 운영: 옛 글이 승인함에 새 글과 짝으로 남음): 일반 휴지통과 같은 값 — 상태 취소·원래 상태·누가
+  assert.deepEqual([old.status, old.deleted_from, old.deleted_by], ['canceled', 'pending', ctx.ownerId]);
+  const appr = await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals');
+  assert.ok(!appr.contents.some((x) => x.id === rs.id), '승인함에 옛 글 없음');
   const [nw] = await sql`select id, status, current_version, rule_id, scheduled_at, produce_at <= now() as due, quality from mkt_contents where rule_id = ${r.id} and scheduled_at = ${rs.scheduled_at} and deleted_at is null`;
   assert.ok(nw && nw.status === 'draft' && nw.current_version === 0 && nw.due && nw.quality.remadeFrom === rs.id, JSON.stringify(nw));
   assert.equal((await sql`select status, deleted_at from mkt_contents where id = ${ap.id}`)[0].deleted_at, null, '승인된 글은 그대로');

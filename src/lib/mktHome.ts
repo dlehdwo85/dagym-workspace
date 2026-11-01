@@ -95,7 +95,7 @@ export async function homeView(u: SessionUser) {
     union all select id, title, 'doc' from ai_doc_jobs where tenant = ${t} and user_id = ${u.id} and status = 'done' and finished_at between ${nightFrom} and ${nightTo} limit 10`;
   // 4 이번 주 게시 줄: 7일 × 채널 점
   const weekRows = await sql<any[]>`select c.id, c.channel, c.status, (c.scheduled_at at time zone 'Asia/Seoul')::date::text as day, c.title from mkt_contents c
-    where c.tenant = ${t} and not c.is_test and c.status in ('pending', 'changes', 'approved', 'published', 'hold')
+    where c.tenant = ${t} and not c.is_test and c.deleted_at is null and c.status in ('pending', 'changes', 'approved', 'published', 'hold')
       and (c.scheduled_at at time zone 'Asia/Seoul')::date between (now() at time zone 'Asia/Seoul')::date and (now() at time zone 'Asia/Seoul')::date + 6 order by c.scheduled_at`;
   const week = Array.from({ length: 7 }, (_, i) => { const d = ymd(new Date(Date.now() + i * 864e5)); return { day: d, posts: weekRows.filter((r) => r.day === d).map((r) => ({ id: r.id, channel: r.channel, status: r.status, title: r.title })) }; });
   // 5 성과 7일(일별 광고비·클릭·문의) + 광고 카드(캠페인 켜짐/꺼짐·월 상한·오늘 지출·캠페인별 CTR/CPC·개선안 수)

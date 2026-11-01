@@ -737,7 +737,7 @@ async function askTopic(c: any, actorId?: string | null) {
 export async function remindAndExpire(tenant: string) {
   const sql = db(); const s = await settingsOf(tenant);
   const restored = await restoreExpired(sql, tenant);
-  const rows = await sql<any[]>`select id, tenant, title, scheduled_at, status, auto, reminded_at, is_test, created_by, brand_id, rule_id, channel, kind, quality from mkt_contents where tenant = ${tenant} and status in ('pending', 'changes', 'draft') and scheduled_at is not null and scheduled_at > now() - interval '2 days'`;
+  const rows = await sql<any[]>`select id, tenant, title, scheduled_at, status, auto, reminded_at, is_test, created_by, brand_id, rule_id, channel, kind, quality from mkt_contents where tenant = ${tenant} and status in ('pending', 'changes', 'draft') and deleted_at is null and scheduled_at is not null and scheduled_at > now() - interval '2 days'`;
   let reminded = 0, expired = 0, moved = 0, postponed = 0;
   for (const c of rows) {
     if (c.status === 'draft' && (c.quality?.held || c.quality?.batch)) continue; // #544 초안 보관 · 267차 묶음 기다리는 원고 — 승인 마감 정리·미루기·알림 없음
@@ -1766,9 +1766,12 @@ export async function remakeContents(u: SessionUser, i: z.infer<typeof remakeInp
   const at = new Date().toISOString(); let made = 0;
   for (const c of rows) {
     await sql.begin(async (tx: any) => {
-      const gone = await tx`update mkt_contents set deleted_at = now(), rule_id = null, quality = coalesce(quality, '{}'::jsonb) || ${tx.json({ remade: { at, by: u.id, ruleId: c.rule_id } } as never)}, updated_at = now()
+      // 305차(로컬 11/01: 옛 글이 승인함·운영 표에 그대로): 일반 휴지통(mktTrash.trashContents)과 같은 값 — 상태 취소·원래 상태 기억·알림 시각 비움·대기 게시 작업 취소
+      const gone = await tx`update mkt_contents set deleted_at = now(), deleted_by = ${u.id}, deleted_from = status, status = 'canceled', reminded_at = null, rule_id = null,
+          quality = coalesce(quality, '{}'::jsonb) || ${tx.json({ remade: { at, by: u.id, ruleId: c.rule_id } } as never)}, updated_at = now()
         where id = ${c.id} and deleted_at is null and status in ('pending', 'changes', 'draft')`;
       if (!gone.count) return;
+      await tx`update mkt_publish_jobs set status = 'canceled', last_error = '휴지통으로 옮긴 글(다시 만들기)' where content_id = ${c.id} and status = 'queued'`;
       await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 휴지통'), decided_at = now() where content_id = ${c.id} and status in ('open', 'needs_approval')`;
       const d = ymd(new Date(c.scheduled_at)); const cross = (c.cross_channels ?? []) as string[];
       const title = `${c.is_test ? '[시험] ' : ''}${c.brand ? brandName({ name: c.brand }) + ' ' : ''}${KIND_LABEL[c.kind as Kind] ?? '글'}${cross.length ? '(함께 ' + cross.map((x) => CROSS_LABEL[x] ?? x).join('·') + ')' : ''} ${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
