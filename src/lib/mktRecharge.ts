@@ -4,6 +4,10 @@ import { isAdmin } from './access';
 import { forbidden } from './errors';
 import { assertSpace } from './spaces';
 import { tenantOf, type SessionUser } from './types';
+import { notify } from './notifications';
+import { sendMail } from './mail';
+import { todaySeoul } from './time';
+import { appUrl } from './mail';
 
 /**
  * 대표 10/21 14:30 #411 광고비 충전 흐름:
@@ -19,6 +23,8 @@ export const RECHARGE_LINKS: Record<string, { label: string; url: string; how: s
   higgsfield: { label: 'Higgsfield', url: 'https://open.higgsfield.ai/billing', how: 'Billing › 잔액 충전' },
 };
 export const PROVIDERS = Object.keys(RECHARGE_LINKS);
+/** 322차 #897(대표 11/02 00:0x): 잔액 알림 기준 기본값(원) — 회사 설정 low_balance_krw 로 바꿈 */
+export const LOW_BALANCE_DEFAULT_KRW = 10000;
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 export type BalanceRow = { id: string; provider: string; label: string; account_id: string | null; balance: number; currency: string; source: 'manual' | 'api'; checked_at: string; pace: number; days: number | null; level: 'ok' | 'warn' | 'action'; link: string; how: string };
 
@@ -55,6 +61,7 @@ export async function rechargeCheck(tenant: string) {
   const sql = db();
   await (await import('./marketingAds')).syncBalances(tenant).catch(() => null);
   const rows = await balancesView(tenant);
+  const low = await lowBalanceAlerts(tenant, rows).catch(() => 0); // 322차 #897: 기준 금액 미만 → 대표 알림 + 메일(페이스 카드와 별개)
   let cards = 0, done = 0;
   const open = await sql<any[]>`select id, status, body from mkt_proposals where tenant = ${tenant} and kind = 'alert' and body->>'signal' like 'recharge:%' and status in ('pending', 'approved')`;
   for (const r of rows) {
@@ -82,5 +89,37 @@ export async function rechargeCheck(tenant: string) {
     cards++;
     await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'usage_alert', title, body: `${detail} 승인 뒤 충전 페이지로 이동할 수 있습니다.`, link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', dedupeKey: `mkt:recharge:${tenant}:${key}:${new Date().toISOString().slice(0, 10)}`, push: r.level === 'action' });
   }
-  return { cards, done, balances: rows.length };
+  return { cards, done, balances: rows.length, low };
+}
+
+/**
+ * 322차 #897(대표 11/02 00:0x '잔여 비즈머니로 우선 진행하고 10,000원 미만으로 떨어졌을 때 대표자한테 워크인에서 알림'):
+ * 페이스(며칠분) 카드와 별개로, 잔액이 기준 금액(회사 설정 low_balance_krw, 기본 1만 원) 미만이면 회사 대표(소유자)에게 워크인 알림 + 메일.
+ * 매체 잔액 줄마다 하루(서울) 1번 · 잔액이 기준 위로 올라오면 표시를 비워 다음에 다시 내려가면 또 알림. 충전 자체는 매체에서(돈 쓰는 일은 자동으로 안 함)
+ */
+async function lowBalanceAlerts(tenant: string, rows: BalanceRow[]) {
+  const sql = db();
+  const S = await (await import('./mktAuto')).settingsOf(tenant);
+  const min = S.low_balance_krw ?? LOW_BALANCE_DEFAULT_KRW;
+  if (!(min > 0) || !rows.length) return 0;
+  const today = todaySeoul();
+  const marks = Object.fromEntries((await sql<{ id: string; on: string | null }[]>`select id, low_alerted_on::text as on from mkt_ad_balances where tenant = ${tenant}`).map((r) => [r.id, r.on]));
+  const owners = await sql<{ id: string; email: string | null }[]>`select id, email from users where tenant = ${tenant} and status = 'active' and not is_demo and role = 'owner' order by created_at`;
+  let n = 0;
+  for (const r of rows) {
+    if (r.balance >= min) { if (marks[r.id]) await sql`update mkt_ad_balances set low_alerted_on = null where id = ${r.id}`; continue; }
+    if (marks[r.id] === today) continue;
+    const name = `${RECHARGE_LINKS[r.provider]?.label ?? r.provider}${r.label ? ` ${r.label}` : ''}`;
+    const title = `광고 잔액 ${won(r.balance)} — ${won(min)} 미만: ${name}`;
+    const when = new Date(r.checked_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const body = `${name} 잔액이 ${won(r.balance)}입니다(${r.source === 'api' ? '매체 조회' : '직접 입력'} ${when}). 광고가 멈추지 않게 충전해 주세요.${r.link ? ` 충전: ${RECHARGE_LINKS[r.provider]?.how ?? ''}` : ''}`;
+    if (owners.length) {
+      // 하루 1번은 low_alerted_on 이 막음 — 같은 날 기준 위로 올랐다가 다시 내려가면 새 알림(금액이 달라 알림 중복 키도 다름)
+      await notify(sql, { userIds: owners.map((o) => o.id), type: 'usage_alert', title, body, link: '/s/marketing/ads', entityType: 'mkt_balance', entityId: r.id, space: 'marketing', dedupeKey: `mktlow:${r.id}:${today}:${Math.round(r.balance)}` }).catch(() => {});
+      for (const o of owners) if (o.email) await sendMail(o.email, `[워크인] ${title}`, `${body}\n\n광고 성과 화면: ${appUrl()}/s/marketing/ads${r.link ? `\n충전 페이지: ${r.link}` : ''}\n\n알림 기준은 광고 성과 화면 › 매체 잔액에서 바꿀 수 있습니다.`).catch(() => {});
+    }
+    await sql`update mkt_ad_balances set low_alerted_on = ${today}::date where id = ${r.id}`;
+    n++;
+  }
+  return n;
 }

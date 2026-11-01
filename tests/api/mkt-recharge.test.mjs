@@ -7,7 +7,7 @@ import { createHmac } from 'node:crypto';
 import { bootstrap, resetDb, startServer, testDb, tick } from '../helpers.mjs';
 
 const PORT = 3229;
-let srv, ctx, sql, fake, bizmoney = 20000, calls = [];
+let srv, ctx, sql, fake, mailSrv, bizmoney = 20000, calls = []; const mails = [];
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 const dayAgo = (n) => { const d = new Date(`${today}T12:00:00+09:00`); d.setUTCDate(d.getUTCDate() - n); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d); };
 before(async () => {
@@ -25,11 +25,13 @@ before(async () => {
     if (path === '/billing/bizmoney') return send(200, { bizmoney, refundLock: 0 });
     send(404, { title: 'nope' });
   }).listen(PORT);
-  await resetDb(); srv = await startServer({ ADS_TEST_BASE: `http://localhost:${PORT}` }); sql = testDb(); ctx = await bootstrap();
+  mailSrv = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { mails.push(JSON.parse(b)); } catch { /* 무시 */ } res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"id":"m"}'); }); });
+  await new Promise((r) => mailSrv.listen(0, '127.0.0.1', r));
+  await resetDb(); srv = await startServer({ ADS_TEST_BASE: `http://localhost:${PORT}`, RESEND_API_KEY: 'test-key', MAIL_FROM: '워크인 <no-reply@work.test>', RESEND_API_BASE: `http://127.0.0.1:${mailSrv.address().port}` }); sql = testDb(); ctx = await bootstrap();
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   await ctx.owner.ok('PUT', '/api/admin/spaces/members', { userId: ctx.staffA.id, spaces: ['marketing'] });
 });
-after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
+after(async () => { srv?.proc.kill(); fake?.close(); mailSrv?.close(); await sql?.end(); });
 
 test('네이버 비즈머니 2일분 → tick 카드(조치)·딥링크·알림 → 승인 → 잔액 상승 감지 → 자동 완료', async () => {
   const acc = (await ctx.owner.ok('POST', '/api/marketing/ads/accounts', { label: '하이링크', customerId: '1234567', apiKey: 'naver-license-abc', secretKey: 'naver-secret-key-xyz' })).id;
@@ -68,4 +70,29 @@ test('구글 선불(직접 입력): 직원 403 · 관리자 입력 → 지출 �
   const g2 = r2.balances.find((x) => x.provider === 'google'); assert.deepEqual([g2.days, g2.level], [4.7, 'warn']);
   const [card] = await sql`select title, body from mkt_proposals where tenant = 'default' and body->>'signal' = 'recharge:google:'`;
   assert.ok(card, '경고 카드'); assert.equal(card.body.link, 'https://ads.google.com/aw/billing/summary'); assert.equal(card.body.amount, 510000, '60만 − 94,824 → 만 원 올림');
+});
+
+// 322차 #897(대표 11/02 00:0x '잔여 비즈머니로 우선 진행하고 10,000원 미만으로 떨어졌을 때 대표자한테 워크인에서 알림'): 페이스 카드와 별개로 기준 금액(기본 1만 원, 회사 설정) 미만이면
+// 회사 대표(소유자)에게 워크인 알림 + 메일 — 매체 줄마다 하루 1번 · 기준 위로 오르면 다시 알림 대상 · 광고 성과 화면에 기준 표시 · 관리자만 바꿈
+test('322차 #897 잔액 기준 금액 미만 → 대표 알림 + 메일(하루 1번) · 기준은 회사 설정(관리자) · 기준 위로 오르면 다시 알림 대상', async () => {
+  const back = () => sql`update mkt_ad_balances set checked_at = now() - interval '7 hours' where tenant = 'default' and provider = 'naver'`;
+  const alerts = async () => sql`select title, body from notifications where user_id = ${ctx.ownerId} and type = 'usage_alert' and title like '광고 잔액%' order by created_at`;
+  bizmoney = 9000; await back(); mails.length = 0;
+  await tick();
+  let a = await alerts();
+  assert.equal(a.length, 1, JSON.stringify(a)); assert.match(a[0].title, /^광고 잔액 9,000원 — 10,000원 미만: 네이버 검색광고 하이링크/); assert.match(a[0].body, /충전/);
+  const m = mails.filter((x) => String(x.subject ?? '').includes('광고 잔액')); assert.equal(m.length, 1, JSON.stringify(mails.map((x) => x.subject))); assert.match(m[0].subject, /9,000원/);
+  assert.equal((await ctx.owner.ok('GET', '/api/marketing/ads?days=7')).lowBalanceKrw, 10000, '기본 기준');
+  await back(); await tick();
+  assert.equal((await alerts()).length, 1, '같은 날 두 번 안 보냄'); assert.equal(mails.filter((x) => String(x.subject ?? '').includes('광고 잔액')).length, 1);
+  // 기준 바꾸기(관리자만) → 9,000 은 기준(5,000) 위 → 알림 표시 비움 → 4,000 으로 내려가면 다시 알림
+  assert.ok([403, 404].includes((await ctx.staffA.client.req('PUT', '/api/marketing/auto', { lowBalanceKrw: 5000 })).status), '직원은 못 바꿈');
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { lowBalanceKrw: 5000 });
+  assert.equal((await ctx.owner.ok('GET', '/api/marketing/ads?days=7')).lowBalanceKrw, 5000);
+  await back(); await tick();
+  assert.equal((await alerts()).length, 1);
+  assert.equal((await sql`select low_alerted_on from mkt_ad_balances where tenant = 'default' and provider = 'naver'`)[0].low_alerted_on, null, '기준 위로 오르면 다시 알림 대상');
+  bizmoney = 4000; await back(); await tick();
+  a = await alerts(); assert.equal(a.length, 2, JSON.stringify(a)); assert.match(a[1].title, /^광고 잔액 4,000원 — 5,000원 미만/);
+  assert.equal(mails.filter((x) => String(x.subject ?? '').includes('광고 잔액')).length, 2);
 });
