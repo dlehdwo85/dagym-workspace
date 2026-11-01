@@ -793,7 +793,7 @@ export function Calls() {
 }
 
 /** 188차 #621(대표 10/25 '시안 기록에 어떤 사진·왜·보정 내용'): 표지·카드뉴스 장·블로그 본문마다 쓴 실사(자료실 이름·폴더)·고른 까닭·보정 — 서버가 그린 시안만 */
-type PhotoRow = { where: string; id: string | null; title: string | null; folder: string | null; space: string | null; scene: boolean; gen?: boolean; why: string; fix: string[] };
+type PhotoRow = { where: string; id: string | null; title: string | null; folder: string | null; space: string | null; scene: boolean; gen?: boolean; why: string; fix: string[]; face?: 'masked' | 'dropped' };
 const SPACE_KO: Record<string, string> = { work: '업무 공간', sales: '영업 공간', marketing: '마케팅 공간' };
 /** 189차 빈 사진 칸 · 실사 참고 생성 상태(고객사엔 상태·까닭·장 수만, 우리 회사·슈퍼관리자는 detail) */
 type FillView = { status: string | null; reason: string | null; total: number; made: number; credits: number | null; by: string | null; empty: number; canStart: boolean; detail?: { model: string | null; error: string | null } };
@@ -822,10 +822,10 @@ function FillBox({ id, f, onDone }: { id: string; f: FillView; onDone: () => voi
   );
 }
 function PhotoRecord({ rows }: { rows: PhotoRow[] }) {
-  const real = rows.filter((r) => r.id && !r.gen).length; const gens = rows.filter((r) => r.id && r.gen).length;
+  const used = rows.filter((r) => r.face !== 'dropped'); const real = used.filter((r) => r.id && !r.gen).length; const gens = used.filter((r) => r.id && r.gen).length; const gone = rows.length - used.length;
   return (
     <details className="rounded-input border border-line p-3 text-xs" data-testid="mkt-photo-record">
-      <summary className="cursor-pointer font-medium text-ink-2">사진 기록 <span className="font-normal text-ink-3">— 실사 {real}장{gens ? ` · 생성 ${gens}장` : ''} / {rows.length}칸 · 어떤 사진을 왜 골랐고 어떻게 보정했는지</span></summary>
+      <summary className="cursor-pointer font-medium text-ink-2">사진 기록 <span className="font-normal text-ink-3">— 실사 {real}장{gens ? ` · 생성 ${gens}장` : ''} / {used.length}칸{gone ? ` · 얼굴 때문에 뺀 사진 ${gone}장` : ''} · 어떤 사진을 왜 골랐고 어떻게 보정했는지</span></summary>
       <ul className="mt-2 space-y-1">{rows.map((r, k) => (
         <li key={k} className="flex flex-wrap items-baseline gap-x-1.5" data-testid="mkt-photo-row" data-photo={r.id ?? ''}>
           <b className="shrink-0">{r.where}</b>
@@ -833,6 +833,7 @@ function PhotoRecord({ rows }: { rows: PhotoRow[] }) {
           {r.id && r.folder && <span className="text-ink-3">({r.folder}{r.space && r.space !== 'marketing' ? ` · ${SPACE_KO[r.space] ?? r.space}` : ''})</span>}
           {r.scene && <span className="rounded bg-sky-50 px-1 text-sky-800">영상 장면</span>}
           {r.gen && <span className="rounded bg-amber-50 px-1 text-amber-800" data-testid="mkt-photo-gen">AI 생성(실사 참고)</span>}
+          {r.face === 'dropped' && <span className="rounded bg-red-50 px-1 text-red-800" data-testid="mkt-photo-face-dropped">뺌 — 얼굴</span>}
           {r.fix.length > 0 && <span className="rounded bg-emerald-50 px-1 text-emerald-800" data-testid="mkt-photo-fix">보정: {r.fix.join('·')}</span>}
           <span className="basis-full pl-0.5 text-ink-3">{r.why}</span>
         </li>))}</ul>

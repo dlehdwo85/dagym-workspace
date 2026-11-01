@@ -204,7 +204,7 @@ export async function getContent(u: SessionUser, id: string) {
         mainKeyword: saved?.keyword ?? null, subKeywords: saved?.blog?.subKeywords, persona: saved?.blog?.persona }, rules).report, ...(saved ? { v: saved.v, notes: saved.notes } : {}), ...(preflight ? { preflight } : {}) } : null;
   c.is_example = Array.isArray(c.brand_examples) && c.brand_examples.some((e: { contentId?: string }) => e?.contentId === c.id); // #235 ⓔ 좋은 예시로 저장됨
   delete c.brand_voice; delete c.brand_facts; delete c.brand_examples;
-  const photoRecord = await (await import('./mktAutoVisual')).photoRecord(tenantOf(u), c.quality).catch(() => null); // 188차 #621 사진 기록(어떤 사진·왜·보정)
+  const photoRecord = await (await import('./mktAutoVisual')).photoRecord(tenantOf(u), c.quality, c.id).catch(() => null); // 188차 #621 사진 기록(어떤 사진·왜·보정) · 314차 영상 장면 사진
   const fill = await (await import('./mktPhotoGen')).fillView(u, c).catch(() => null); // 189차 빈 칸 생성 상태(고객사엔 상태·까닭·장 수만)
   if (c.quality?.fill) { const { fill: _f, ...rest } = c.quality; c.quality = rest; }
   return { content: { ...c, handle, deadline: approvalDeadline(c.scheduled_at, st), purgeAt: c.deleted_at ? purgeAt(c.deleted_at) : null /* 183차 #177 휴지통 띠 */ }, versions, media, decisions, publishJobs, canDecide: isAdmin(u), qualityReport, photoRecord, fill, publish: { targets, autoPublish: !!st.auto_publish, canServer: isAdmin(u) && !c.is_test && targets.some((t) => t.accounts.length > 0) } };

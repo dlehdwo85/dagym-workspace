@@ -148,3 +148,45 @@ test('② 보완: [다시 그리기](표지만 새로)도 예전 검정 행동 �
   const [f] = await sql`select description from library_files where id = ${after.media_ids[k + 1]}`;
   assert.match(f.description, /흐린 사진 바탕/);
 });
+
+// 314차(로컬 11/01): ④ 사진 영상 장면 기록 — 장면마다 쓴 사진(id·이름)·얼굴 처리(가림 사본/얼굴 없음)·얼굴 때문에 뺀 사진을 사진 기록에 · 첫 장면 표시
+test('④ 사진 영상 장면 기록: 장면 사진 이름·첫 장면·얼굴 가린 사본(원본 이름) · 직접 고른 사진 중 얼굴 자리를 몰라 뺀 사진도 남김', async () => {
+  const id = await slot(P.face, '얼굴짐 직접 고른 영상', { kind: 'reels', days: 20 });
+  await sql`update mkt_contents set auto = false where id = ${id}`; // 정기 실행이 이 칸을 만들지 않게(직접 만드는 영상)
+  const picked = [P.eq[0], P.unk, P.eq[1], P.boxed];
+  const r = await ctx.owner.ok('POST', '/api/marketing/studio/slideshow', { contentId: id, photoIds: picked });
+  assert.equal(r.photos, 3, JSON.stringify(r));
+  const reuse = (await sql`select result->'reuse' as r from mkt_briefs where content_id = ${id} order by created_at desc limit 1`)[0].r;
+  assert.deepEqual(reuse.faceDropped, [P.unk], '뺀 사진 = 얼굴 자리 모르는 사진');
+  const rows = (await ctx.owner.ok('GET', `/api/marketing/contents/${id}`)).photoRecord ?? [];
+  const sc = rows.filter((x) => /^영상 장면 \d$/.test(x.where));
+  assert.deepEqual(sc.map((x) => x.id), reuse.photos, JSON.stringify(rows));
+  assert.match(sc[0].why, /^첫 장면 · 실사 — 얼굴 없음/);
+  assert.equal(sc[0].title, '얼굴짐 기구 1.jpg');
+  const m = sc.find((x) => x.face === 'masked');
+  assert.ok(m && /얼굴 가린 사본으로 넣음\(원본: 얼굴짐 상담 데스크\.jpg\)/.test(m.why) && m.fix.includes('얼굴 모자이크'), JSON.stringify(m));
+  const gone = rows.filter((x) => x.face === 'dropped');
+  assert.deepEqual(gone.map((x) => [x.where, x.id, x.title]), [['영상에서 뺀 사진', P.unk, '얼굴짐 GX 수업.jpg']]);
+});
+
+// 314차(로컬 11/01 ③: 다짐 11/3 피드 표지 GX 수업 사진에 얼굴 그대로): '시안 바탕' 폴더 사진도 얼굴 규칙 — 자리를 모르면 표지로 안 고르고, 알면 모자이크해서 그림(기록 '보정: 얼굴 모자이크')
+test('⑤ 표지 바탕도 얼굴 규칙: 시안 바탕 폴더의 얼굴 자리 모르는 사진은 안 씀 · 자리를 아는 사진은 모자이크해서 그리고 사진 기록에 남김', async () => {
+  const cov = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '표지짐' })).id;
+  await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${cov}`, { intro: '동네 헬스장', products: '회원권' });
+  const unk = await libFile('표지짐 GX 수업.jpg', { caption: '단체 GX 수업', tags: ['수업'], people: 6, faces: true });
+  const boxed = await libFile('표지짐 상담 데스크.jpg', { caption: '상담 데스크', tags: ['상담'], people: 1, faces: true });
+  await sql`update library_files set vision = vision || ${sql.json({ faceBoxes: [{ x: 0.35, y: 0.2, w: 0.3, h: 0.25 }] })} where id = ${boxed}`;
+  await sql`update library_files set folder = '마케팅/시안 바탕', tags = array['글자없음'] where id in ${sql([unk, boxed])}`;
+  const id = await slot(cov, '표지짐 GX 수업 안내', { days: 9 });
+  const feed = say({ title: '표지짐 GX 수업 안내', body: 'GX 수업 시간을 알려 드립니다.\n저녁 7시에 시작합니다.', brief: '실사', why: '', hooks: [], keyword: 'GX', card: CARD });
+  await run([feed, feed]);
+  const c = await cur(id);
+  const vis = c.quality?.visual ?? {};
+  const used = [vis.photoId, ...(vis.photoIds ?? []), ...(c.quality?.pages ?? []).map((p) => p.photoId)].filter(Boolean);
+  assert.ok(!used.includes(unk), `얼굴 자리 모르는 사진은 표지·장에 없음: ${JSON.stringify(vis)}`);
+  assert.equal(vis.photoId ?? vis.photoIds?.[0], boxed, JSON.stringify(vis));
+  assert.ok((vis.fix ?? []).includes('얼굴 모자이크'), JSON.stringify(vis));
+  const rows = (await ctx.owner.ok('GET', `/api/marketing/contents/${id}`)).photoRecord ?? [];
+  const top = rows.find((x) => x.id === boxed);
+  assert.ok(top && top.face === 'masked' && top.fix.includes('얼굴 모자이크'), JSON.stringify(rows));
+});

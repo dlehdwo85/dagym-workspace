@@ -148,7 +148,8 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     if (mode === 'body') score -= (fl.lying ? 4 : 0) + (fl.back ? 2 : 0) + (fl.dark ? 3 : 0);
     // 310차(로컬 11/01 ③: 다짐 사진 204장인데 블로그 본문 1장 — 얼굴 자리를 모르는 사진이 고른 뒤에 빠짐): 본문·영상은 고르기 전에 그런 사진을 빼고(가릴 수 없음),
     //  얼굴이 있는 사진(모자이크 사본으로 감)은 뒤로 → 얼굴 없는 시설·기구 사진이 먼저
-    if (mode === 'body' && visionOk(r.vision) && (r.vision as { faces?: boolean }).faces === true) { if (!facesToHide(r.vision).length) continue; score -= 2; }
+    // 314차(로컬 11/01: 다짐 11/3 피드 표지 GX 수업 사진에 얼굴 그대로 — '시안 바탕' 폴더·'글자없음' 표시가 얼굴 검사를 건너뜀): 표지·장 바탕도 얼굴 자리를 모르면 안 씀(자리를 알면 그릴 때 모자이크)
+    if (visionOk(r.vision) && (r.vision as { faces?: boolean }).faces === true) { if (!facesToHide(r.vision).length) continue; if (mode === 'body') score -= 2; }
     if (others.some((o) => has(r, o))) score -= 10;
     else if (REAL.test(`${r.title} ${r.folder} ${(r.tags ?? []).join(' ')}`) || (visionOk(r.vision) && r.vision.kind === 'photo')) score += 2;
     let hitT = 0; let hitB = 0;
@@ -180,7 +181,7 @@ export function headlineOf(title: string, body: string) {
 export type BlogPhoto = { id: string; title: string; caption: string; scene: string };
 /** 286차 #818 ④(대표 "사람 얼굴은 되도록 모자이크 필요"): 블로그 본문은 원본 파일을 그대로 붙이므로 — AI 설명이 얼굴 자리를 알려 준 사진은
  *  얼굴을 모자이크한 사본(자료실 '마케팅/자동 시안', source mosaic, meta.of = 원본 · 같은 원본이면 다시 씀)을 붙임. 원본은 그대로, 사본은 사진 고르기·설명에서 빠짐 */
-async function faceSafeIds(tenant: string, ids: string[], actor: SessionUser): Promise<string[]> {
+async function faceSafeIds(tenant: string, ids: string[], actor: SessionUser, dropped?: string[]): Promise<string[]> {
   if (!ids.length) return ids;
   const sql = db(); const P = await import('./mktPhotos');
   const rows = await sql<{ id: string; title: string; file_name: string; storage_key: string | null; vision: unknown }[]>`select id::text, coalesce(nullif(title, ''), file_name) as title, file_name, storage_key, vision
@@ -189,7 +190,7 @@ async function faceSafeIds(tenant: string, ids: string[], actor: SessionUser): P
   for (const id of ids) {
     const r = rows.find((x) => x.id === id); const faces = r ? P.facesToHide(r.vision) : [];
     // 303차 #869(다짐 블로그 PT 장면·하이링크 안내 데스크 사진에 얼굴 그대로): 얼굴이 보인다는데 자리를 모르면 가릴 수 없으니 본문에서 뺌
-    if (r && !faces.length && visionOk(r.vision) && (r.vision as { faces?: boolean }).faces === true) continue;
+    if (r && !faces.length && visionOk(r.vision) && (r.vision as { faces?: boolean }).faces === true) { dropped?.push(id); continue; }
     if (!r?.storage_key || !faces.length) { out.push(id); continue; }
     const [have] = await sql<{ id: string }[]>`select id::text from library_files where tenant = ${tenant} and source = 'mosaic' and meta->>'of' = ${id} and deleted_at is null and upload_status = 'ready' limit 1`;
     if (have) { out.push(have.id); continue; }
@@ -199,17 +200,26 @@ async function faceSafeIds(tenant: string, ids: string[], actor: SessionUser): P
       const f = await saveGeneratedFile(actor, { fileName: `${r.file_name.replace(/\.[a-z0-9]{2,5}$/i, '')}_얼굴가림.jpg`, mime: 'image/jpeg', data, title: `${r.title} — 얼굴 가림`, folder: '마케팅/자동 시안',
         tags: ['얼굴 가림', '자동 시안'], description: '얼굴 자리를 모자이크한 사본(원본은 그대로)', source: 'mosaic', space: 'marketing', meta: { of: id } } as never);
       out.push(f.id);
-    } catch { /* 303차 #869: 사본을 못 만들면 얼굴이 그대로인 원본 대신 뺌 */ }
+    } catch { dropped?.push(id); /* 303차 #869: 사본을 못 만들면 얼굴이 그대로인 원본 대신 뺌 */ }
   }
   return out;
 }
+const FACE_FIX = '얼굴 모자이크';
+/** 314차: 바탕(표지·카드뉴스 장)으로 그리기 전 얼굴 처리 — 얼굴 없음 = 그대로 · 자리를 앎 = 모자이크한 바이트 · 자리를 모름 = null(안 씀) */
+async function maskedBytes(tenant: string, id: string, data: Buffer): Promise<Buffer | null> {
+  const [r] = await db()<{ vision: unknown }[]>`select vision from library_files where id = ${id} and tenant = ${tenant}`;
+  if (!visionOk(r?.vision) || (r.vision as { faces?: boolean }).faces !== true) return data;
+  const P = await import('./mktPhotos'); const boxes = P.facesToHide(r.vision);
+  return boxes.length ? P.mosaicFaces(data, boxes).catch(() => null) : null;
+}
 /** 310차(로컬 11/01 ①: 사진 영상 장면에 얼굴 그대로 — 하이링크 쇼츠·릴스 첫 장면 정면 얼굴, 다짐 GX 수업 여러 명): 영상 장면 사진도 블로그 본문과 같은 규칙 —
  *  얼굴 자리를 아는 사진은 모자이크 사본, 모르면(가릴 수 없음) 뺌. 저장할 사람이 없으면 얼굴 있는 사진은 뺌 */
-export async function faceSafeFor(c: Pick<Content, 'tenant' | 'created_by'>, ids: string[]): Promise<string[]> {
+export async function faceSafeFor(c: Pick<Content, 'tenant' | 'created_by'>, ids: string[], dropped?: string[]): Promise<string[]> {
   if (!ids.length) return ids;
   const actor = await actorOf(c);
-  if (actor) return faceSafeIds(c.tenant, ids, actor);
+  if (actor) return faceSafeIds(c.tenant, ids, actor, dropped); // 314차: dropped = 얼굴 때문에 뺀 사진(영상 사진 기록용)
   const ok = new Set((await db()<{ id: string }[]>`select id::text from library_files where tenant = ${c.tenant} and id = any(${ids}::uuid[]) and coalesce(vision->>'faces', 'false') <> 'true'`).map((r) => r.id));
+  dropped?.push(...ids.filter((id) => !ok.has(id)));
   return ids.filter((id) => ok.has(id));
 }
 export async function blogPhotoCandidates(c: Content, text: string, n = 20, o: { own?: boolean; near?: boolean } = {}): Promise<BlogPhoto[]> {
@@ -256,12 +266,24 @@ export async function drawAutoVisual(c: Content, body: string, opts: DrawOpts = 
     ({ png, template, photoIds, photoFix, scene, gen, plain } = r); photoId = photoIds[0] ?? null; photo = r.photoTitle ? { title: r.photoTitle } : null;
   } else {
     // photoId = 그 바탕 사진 그대로(#545 글만 고친 수정본 — 같은 사진에 새 첫 줄, null = 브랜드 색 바탕)
-    const top = opts.photoId !== undefined || opts.brandOnly ? null : await pickPhoto(c, brand, others, `${c.title} ${body}`, new Set([...(opts.exclude ?? []), ...near]));
+    let top = opts.photoId !== undefined || opts.brandOnly ? null : await pickPhoto(c, brand, others, `${c.title} ${body}`, new Set([...(opts.exclude ?? []), ...near]));
     photoId = opts.photoId !== undefined ? opts.photoId : top?.id ?? null;
-    const p = await libBytes(c.tenant, photoId, /^image\//).catch(() => null); photo = p;
+    let p = await libBytes(c.tenant, photoId, /^image\//).catch(() => null); let mosaic = false;
+    // 314차: 표지 사진도 얼굴 규칙 — 자리를 알면 모자이크해서 그림, 모르면(예전에 고른 사진 포함) 다른 사진으로 한 번 다시 고름
+    if (p && photoId) {
+      const m = await maskedBytes(c.tenant, photoId, p.data);
+      if (m) { mosaic = m !== p.data; p = { ...p, data: m }; }
+      else {
+        top = opts.brandOnly ? null : await pickPhoto(c, brand, others, `${c.title} ${body}`, new Set([...(opts.exclude ?? []), ...near, photoId]));
+        photoId = top?.id ?? null; p = photoId ? await libBytes(c.tenant, photoId, /^image\//).catch(() => null) : null;
+        const m2 = p && photoId ? await maskedBytes(c.tenant, photoId, p.data) : null;
+        if (p && m2) { mosaic = m2 !== p.data; p = { ...p, data: m2 }; } else { p = null; photoId = null; }
+      }
+    }
+    photo = p;
     const fx = p ? await enhancePhoto(p.data, { w: 1080, h: H }) : null; // 188차: 중요 부분 기준 자르기 + 밝기·대비·확대(한 것만 기록)
     const src = !top && photoId ? await sourceOf(photoId) : null;
-    photoFix = fx?.fixes ?? []; scene = top ? top.scene : src === 'video_frame'; gen = top ? top.gen : src === 'ai_ref'; // 피드 틀 전 브랜드(예전 방식)는 단색 표시 없이 예전처럼 — 빈 칸 채우기가 표지를 채움
+    photoFix = [...(fx?.fixes ?? []), ...(mosaic ? [FACE_FIX] : [])]; scene = top ? top.scene : src === 'video_frame'; gen = top ? top.gen : src === 'ai_ref'; // 피드 틀 전 브랜드(예전 방식)는 단색 표시 없이 예전처럼 — 빈 칸 채우기가 표지를 채움
     png = await D.drawSlide({ kind: 'cover', title: head, body: sub, rows: [], imagePlan: '', imageId: photoId }, 0, 1,
       { template: p ? 'box' : 'bold', color: kit.from ? kit.bg : null, brand, keyword: '', logo: logo?.data ?? null, font: fontData, height: H }, fx?.data ?? null);
   }
@@ -283,10 +305,11 @@ export async function drawAutoVisual(c: Content, body: string, opts: DrawOpts = 
  * 188차 #621(대표 10/25 '시안 기록에 어떤 사진·왜·보정 내용'): 콘텐츠 상세의 '사진 기록' — 표지·카드뉴스 장·블로그 본문마다 쓴 사진(자료실 이름·폴더·공간)·고른 까닭·보정.
  * quality.visual(표지 photoId·photoIds·fix·scene·bodyIds) + quality.pages(장 photoId·rel·fix·scene)에서 만들고, 사진 이름은 자료실에서(지워진 사진도 이름은 보임). 서버가 그린 시안이 아니면 null
  */
-export type PhotoRecordRow = { where: string; id: string | null; title: string | null; folder: string | null; space: string | null; scene: boolean; gen: boolean; why: string; fix: string[] };
-export async function photoRecord(tenant: string, q: any): Promise<PhotoRecordRow[] | null> {
+export type PhotoRecordRow = { where: string; id: string | null; title: string | null; folder: string | null; space: string | null; scene: boolean; gen: boolean; why: string; fix: string[]; face?: 'masked' | 'dropped' };
+export async function photoRecord(tenant: string, q: any, contentId?: string): Promise<PhotoRecordRow[] | null> {
   const vis = q?.visual;
-  if (!vis || vis.by !== 'server') return null;
+  const scenes = contentId ? await sceneRecord(tenant, contentId).catch(() => []) : [];
+  if (!vis || vis.by !== 'server') return scenes.length ? scenes : null;
   const pages: CardPage[] = Array.isArray(q.pages) ? q.pages : [];
   const coverIds: string[] = Array.isArray(vis.photoIds) && vis.photoIds.length ? vis.photoIds : vis.photoId ? [vis.photoId] : [];
   const bodyIds: string[] = Array.isArray(vis.bodyIds) ? vis.bodyIds.map(String) : [];
@@ -305,6 +328,36 @@ export async function photoRecord(tenant: string, q: any): Promise<PhotoRecordRo
   pages.forEach((p, k) => out.push(p.photoId ? row(`${k + 2}장`, p.photoId, p.gen && p.ref ? genWhy(p.ref) : info.get(p.photoId)?.source === 'ai_ref' ? '실사가 다 쓰여 전에 생성한 사진(실사 참고)' : p.rel === 'weak' ? '관련 약함 — 글과 낱말이 맞는 사진이 없어 브랜드 사진으로 채움' : '그 장 글과 낱말이 맞는 사진', p.fix ?? [], !!p.scene)
     : row(`${k + 2}장`, null, p.back ? '행동 장 — 이 글 사진을 흐리고 어둡게 깐 바탕(얼굴·글자 안 보임, 글자 읽히게)' : p.role === 'cta' ? '행동 장 — 글자만(연락처·저장 권유)' : '쓸 실사가 남지 않아 브랜드 색 바탕')));
   bodyIds.forEach((id, k) => { const f = info.get(id); if (f && f.source !== 'ai') out.push(row(`본문 사진 ${k + 1}`, id, '블로그 본문 — 원고가 장면 순서로 고른 실사')); });
+  for (const r of out) if (r.fix.includes(FACE_FIX)) r.face = 'masked';
+  return [...out, ...scenes];
+}
+/**
+ * 314차(로컬 11/01 ②: '사진 영상 판 장면 사진 id·이름과 얼굴 처리(가림/뺌)를 남겨 주세요 — 영상 디코딩 없이 사진만 열어 ①얼굴 ④같은 날 첫 장면 확인'):
+ * 이 글의 마지막 사진 영상 의뢰(reuse.photos 순서 = 장면 순서)에서 장면마다 쓴 사진 + 얼굴 때문에 뺀 사진(reuse.faceDropped)
+ */
+async function sceneRecord(tenant: string, contentId: string): Promise<PhotoRecordRow[]> {
+  const sql = db();
+  const [b] = await sql<{ reuse: { photos?: unknown; faceDropped?: unknown } | null }[]>`select result->'reuse' as reuse from mkt_briefs
+    where tenant = ${tenant} and content_id = ${contentId} and result->'reuse'->>'slideshow' = 'true' order by created_at desc limit 1`;
+  const ok = (v: unknown) => (Array.isArray(v) ? v : []).map(String).filter((x) => /^[0-9a-f-]{36}$/i.test(x));
+  const used = ok(b?.reuse?.photos); const gone = ok(b?.reuse?.faceDropped);
+  if (!used.length && !gone.length) return [];
+  type F = { id: string; title: string; folder: string; space: string; source: string | null; of: string | null; vision: unknown };
+  const look = async (ids: string[]) => new Map((ids.length ? await sql<F[]>`select id::text, coalesce(nullif(title, ''), file_name) as title, folder, space, source, meta->>'of' as of, vision
+    from library_files where id = any(${ids}::uuid[]) and tenant = ${tenant}` : []).map((r) => [r.id, r]));
+  const info = await look([...used, ...gone]);
+  const origs = await look([...new Set([...info.values()].map((f) => f.of).filter((x): x is string => !!x && /^[0-9a-f-]{36}$/i.test(x)))]);
+  const base = (where: string, id: string, why: string, face?: 'masked' | 'dropped'): PhotoRecordRow => {
+    const f = info.get(id);
+    return { where, id, title: f?.title ?? null, folder: f?.folder ?? null, space: f?.space ?? null, scene: f?.source === 'video_frame', gen: f?.source === 'ai_ref', why, fix: face === 'masked' ? [FACE_FIX] : [], ...(face ? { face } : {}) };
+  };
+  const out = used.map((id, k) => {
+    const f = info.get(id); const first = k === 0 ? '첫 장면 · ' : '';
+    if (f?.source === 'mosaic') return base(`영상 장면 ${k + 1}`, id, `${first}얼굴 가린 사본으로 넣음(원본: ${(f.of && origs.get(f.of)?.title) || '지워진 사진'})`, 'masked');
+    const v = f?.vision as { faces?: boolean } | undefined;
+    return base(`영상 장면 ${k + 1}`, id, `${first}${!visionOk(f?.vision) ? '실사 — 사진 AI 설명 전이라 얼굴 여부 확인 못함' : v?.faces ? '실사 — 얼굴 있음(가린 사본 없이 들어감, 확인 필요)' : '실사 — 얼굴 없음'}`);
+  });
+  for (const id of gone) out.push(base('영상에서 뺀 사진', id, '얼굴이 보이는데 자리를 몰라 가릴 수 없어 영상에서 뺌', 'dropped'));
   return out;
 }
 /** 사진 한 장의 출처(영상 장면 사진인지) */
@@ -479,10 +532,13 @@ export async function drawPages(c: Content, pages: CardPage[], opts: { actor?: S
   const backBuf = backId ? (await libBytes(c.tenant, backId, /^image\//).catch(() => null))?.data ?? null : null;
   for (const [k, p] of pages.entries()) {
     if (opts.only && !opts.only.has(k)) { ids.push(''); continue; } // 310차 보완: 고른 장만 다시 그림(나머지 자리는 빈 칸 — 부르는 쪽이 예전 파일 그대로)
-    const photo = p.photoId ? await libBytes(c.tenant, p.photoId, /^image\//).catch(() => null) : null;
+    const photo0 = p.photoId ? await libBytes(c.tenant, p.photoId, /^image\//).catch(() => null) : null;
+    const pm = photo0 && p.photoId ? await maskedBytes(c.tenant, p.photoId, photo0.data) : null; // 314차: 장 바탕도 얼굴 규칙(자리를 알면 모자이크, 모르면 색 바탕)
+    const photo = photo0 && pm ? { ...photo0, data: pm } : null;
     if (p.photoId && !photo) { delete p.photoId; delete p.rel; delete p.scene; delete p.gen; delete p.ref; } // 파일을 못 읽으면 색 바탕
     const fx = photo ? await enhancePhoto(photo.data, { w: 1080, h: H }) : null; // 188차: 중요 부분 기준 자르기 + 밝기·대비·확대(한 것만 p.fix)
-    if (fx?.fixes.length) p.fix = fx.fixes;
+    const fixes = [...(fx?.fixes ?? []), ...(photo && pm !== photo0?.data ? [FACE_FIX] : [])]; // 314차: 얼굴을 가렸으면 사진 기록 '보정'에 남김
+    if (fixes.length) p.fix = fixes;
     const back = !photo && actionAt(p, k) && backBuf ? backBuf : null;
     if (back) p.back = backId; else delete p.back;
     const png = await D.drawSlide({ kind: p.role === 'cta' ? 'cta' : 'body', title: p.title, body: p.body, rows: [], imagePlan: '', imageId: p.photoId ?? null }, k + 1, n, { template: 'bold', color, brand, keyword: '', logo, font, height: H, backdrop: back }, fx?.data ?? null);
@@ -613,9 +669,11 @@ async function drawTemplated(c: Content, body: string, a: { kit: import('./mktFe
   // 188차: 사진 틀은 칸(1080×H) 크기로 중요 부분 기준 자르기 + 보정, 4분할은 색만 보정(칸이 작아 자르기는 틀이 함)
   const { enhancePhoto } = await import('./mktPhotoFix');
   const files = (await Promise.all(pick.map(async (p) => {
-    const raw = await libBytes(c.tenant, p.id, /^image\//).catch(() => null);
+    const raw0 = await libBytes(c.tenant, p.id, /^image\//).catch(() => null);
+    const masked = raw0 ? await maskedBytes(c.tenant, p.id, raw0.data) : null; // 314차: 틀 사진도 얼굴 규칙(모르면 빈 칸)
+    const raw = raw0 && masked ? { ...raw0, data: masked } : null;
     const fx = raw ? await enhancePhoto(raw.data, need === 'photo' ? { w: 1080, h: a.H } : undefined) : null;
-    return { p, f: raw && fx ? { ...raw, data: fx.data } : null, fixes: fx?.fixes ?? [] };
+    return { p, f: raw && fx ? { ...raw, data: fx.data } : null, fixes: [...(fx?.fixes ?? []), ...(raw && masked !== raw0?.data ? [FACE_FIX] : [])] };
   }))).filter((x) => x.f);
   const screen = need === 'screen' ? shots.tall[0] ?? shots.any[0] ?? null : null; // 휴대폰 틀은 세로 캡처 먼저
   const screenWide = need === 'screen_wide' ? shots.wide[0] ?? null : null;

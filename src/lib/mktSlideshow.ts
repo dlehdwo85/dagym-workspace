@@ -40,23 +40,25 @@ async function freshFirst(c: any, ids: string[]): Promise<string[]> {
   return k <= 0 ? ids : [ids[k], ...ids.slice(0, k), ...ids.slice(k + 1)];
 }
 /** 쓸 사진: 고른 것(3장 넘으면) 아니면 이 글에 맞는 자료실 실사 — 이 회사·준비된·기밀 아닌 사진만, 최대 6장 */
-async function photosFor(c: any, text: string, picked: string[]) {
-  const V = await import('./mktAutoVisual');
+async function photosFor(c: any, text: string, picked: string[]): Promise<{ photos: { id: string; storage_key: string }[]; dropped: string[] }> {
+  const V = await import('./mktAutoVisual'); const out: string[] = []; // 314차(로컬 11/01 ②): 얼굴 때문에 뺀 사진도 의뢰에 남겨 사진 기록에 보임
+  const dropped = (all: string[]) => [...new Set(out)].filter((id) => !all.includes(id)).slice(0, MAX);
   // 310차(로컬 11/01 ①: 사진 영상 장면에 얼굴 그대로): 장면 사진도 얼굴 자리를 알면 모자이크 사본, 모르면 뺌 — 고른 사진이 그래서 3장 밑으로 줄면 후보로 채움
-  let ids = picked.length >= 3 ? await V.faceSafeFor(c, [...new Set(picked)]) : [];
+  let ids = picked.length >= 3 ? await V.faceSafeFor(c, [...new Set(picked)], out) : [];
   if (ids.length < 3) {
     const more = (await V.blogPhotoCandidates(c, text, MAX, { own: true })).map((p) => p.id).filter((id) => !ids.includes(id)); // 303차 #869: 이 브랜드 사진만
-    ids = [...ids, ...(await V.faceSafeFor(c, more))];
+    ids = [...ids, ...(await V.faceSafeFor(c, more, out))];
   }
   if (ids.length < 3) { // 310차: 가까운 글에 이미 쓴 사진뿐이면(사진이 적은 브랜드) 영상을 멈추지 않고 다시 씀 — 대신 첫 장면은 아래에서 겹치지 않게
     const again = (await V.blogPhotoCandidates(c, text, MAX, { own: true, near: false })).map((p) => p.id).filter((id) => !ids.includes(id));
-    ids = [...ids, ...(await V.faceSafeFor(c, again))];
+    ids = [...ids, ...(await V.faceSafeFor(c, again, out))];
   }
   ids = await freshFirst(c, [...new Set(ids)]);
-  if (!ids.length) return [];
+  if (!ids.length) return { photos: [], dropped: dropped(ids) };
   const rows = await db()<{ id: string; storage_key: string }[]>`select id, storage_key from library_files where tenant = ${c.tenant} and id = any(${ids}::uuid[]) and deleted_at is null
     and upload_status = 'ready' and mime_type like 'image/%' and coalesce(security, 'internal') <> 'confidential' and storage_key is not null`;
-  return ids.map((id) => rows.find((r) => r.id === id)).filter((r): r is { id: string; storage_key: string } => !!r).slice(0, MAX);
+  const photos = ids.map((id) => rows.find((r) => r.id === id)).filter((r): r is { id: string; storage_key: string } => !!r).slice(0, MAX);
+  return { photos, dropped: dropped(ids) };
 }
 /** 합성 의뢰(제작의뢰실 v2, 바로 합성 단계) 넣고 합성 함수 부르기 — 생성 비용 0(예상 크레딧 0·원장 없음) */
 async function insertBrief(c: any, body: string, result: Record<string, unknown>, by: string | null, source: 'slideshow' | 'screen') {
@@ -142,9 +144,9 @@ export async function slideshowStart(u: SessionUser, i: z.infer<typeof slideshow
   if (await busyOf(c.id)) throw badRequest('이 글의 영상을 이미 만드는 중입니다');
   const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
   const body = v?.body ?? c.title;
-  const photos = await photosFor(c, `${c.title}\n${body}`, i.photoIds ?? []);
-  if (photos.length < 3) throw badRequest(`쓸 수 있는 실제 사진이 ${photos.length}장입니다. 3장 넘게 필요합니다. 자료실에 현장 사진을 올리거나 직접 골라 주세요`);
-  const out = await startBrief(c, body, photos, u.id);
+  const { photos, dropped } = await photosFor(c, `${c.title}\n${body}`, i.photoIds ?? []);
+  if (photos.length < 3) throw badRequest(`쓸 수 있는 실제 사진이 ${photos.length}장입니다${dropped.length ? `(얼굴 자리를 몰라 뺀 사진 ${dropped.length}장)` : ''}. 3장 넘게 필요합니다. 자료실에 현장 사진을 올리거나 직접 골라 주세요`);
+  const out = await startBrief(c, body, photos, u.id, dropped.length ? { faceDropped: dropped } : {});
   await (await import('./log')).audit(sql, u.id, 'mkt.video_slideshow', 'mkt_content', c.id, { brief: out.briefId, photos: photos.length }).catch(() => {});
   return out;
 }
@@ -156,12 +158,12 @@ export async function slideshowStart(u: SessionUser, i: z.infer<typeof slideshow
 export async function autoSlideshow(c: any, version: number, body: string, picked: string[] = []): Promise<{ briefId?: string; photos: number; skipped?: string }> {
   if (!VIDEO_KINDS.includes(c.kind ?? '')) return { photos: 0, skipped: '영상 글 아님' };
   if (await busyOf(c.id)) return { photos: 0, skipped: '이미 만드는 중' };
-  const photos = await photosFor(c, `${c.title}\n${body}`, picked);
+  const { photos, dropped } = await photosFor(c, `${c.title}\n${body}`, picked);
   if (photos.length < 3) { // 303차 #869: 브랜드 사진이 모자라면 영상 보류 + 자료 요청(사진이 오면 정기 실행이 다시 만듦)
     await (await import('./mktMaterials')).needMaterial(c, '영상에 쓸 이 브랜드 사진이 모자라 영상을 보류했습니다').catch(() => null);
     return { photos: photos.length, skipped: `쓸 이 브랜드 실제 사진 ${photos.length}장(3장 넘게 필요) — 자료 요청` };
   }
-  const out = await startBrief(c, body, photos, c.created_by ?? null, { auto: true, version });
+  const out = await startBrief(c, body, photos, c.created_by ?? null, { auto: true, version, ...(dropped.length ? { faceDropped: dropped } : {}) });
   return { briefId: out.briefId, photos: out.photos };
 }
 
