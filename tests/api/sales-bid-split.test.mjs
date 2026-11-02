@@ -114,11 +114,13 @@ describe('입찰 업무로 넘기기', () => {
     assert.equal((await work('B2')).status, '입찰 진행', '취소 전에는 그대로');
     await put({ id: 'B2c', source_type: 'g2b_bid', source_external_id: 'R26BK0001-001', title: '[취소] 주민운동시설 위탁 운영', issuer: '구청', notice_kind: 'cancel', current_status: '취소', related: true, posted_date: today, first_seen_at: today });
     const d = await tick(); assert.ok(d.bidTasks?.canceled >= 1, JSON.stringify(d.bidTasks));
-    assert.ok((await sql`select deleted_at from tasks where id = ${r.taskId}`)[0].deleted_at, '업무 취소');
-    assert.equal((await sql`select count(*)::int c from activities where entity_id = ${r.taskId} and action = 'canceled' and changes->>'reason' = 'notice_canceled'`)[0].c, 1);
+    // 344차(대표 11/02 #925): 업무는 지우지 않고 취소 표시(sales_ref.cancel)+활동 기록 — 사람이 [공고 취소로 완료]
+    const [tk] = await sql`select deleted_at, status, sales_ref from tasks where id = ${r.taskId}`;
+    assert.equal(tk.deleted_at, null, '업무는 휴지통으로 안 감(344차)'); assert.equal(tk.status, 'todo'); assert.equal(tk.sales_ref.cancel?.noticeId, 'B2c', '취소 공고 줄로 표시');
+    assert.equal((await sql`select count(*)::int c from activities where entity_id = ${r.taskId} and action = 'notice_canceled'`)[0].c, 1);
     assert.equal((await sql`select count(*)::int c from events where id = any(${r.eventIds}::uuid[]) and deleted_at is not null`)[0].c, 2, '일정 취소');
     const w = await work('B2'); assert.deepEqual([w.status, w.data.bid_result], ['공고 취소', 'canceled']);
-    const [n] = await sql`select type from notifications where user_id = ${ctx.staffA.id} and title like '공고 취소:%'`; assert.equal(n?.type, 'bid_update');
+    const [n] = await sql`select type, link, body from notifications where user_id = ${ctx.staffA.id} and title like '공고 취소:%'`; assert.equal(n?.type, 'bid_update'); assert.equal(n?.link, `/tasks/${r.taskId}`); assert.match(n?.body ?? '', /\[공고 취소로 완료\]/);
     assert.ok(!(await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.some((x) => x.id === 'B2'), '278차 #830: 취소 공고는 작업 중 탭에서 빠짐');
     const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=canceled')).items.find((x) => x.id === 'B2');
     assert.equal(card?.workBid?.result, 'canceled');
@@ -128,6 +130,7 @@ describe('입찰 업무로 넘기기', () => {
     await tick();
     assert.equal((await work('B7')).status, '입찰 진행', '제목만으로는 취소로 보지 않음');
     assert.equal((await sql`select deleted_at from tasks where id = ${r7.taskId}`)[0].deleted_at, null);
+    assert.equal((await sql`select sales_ref->'cancel' as c from tasks where id = ${r7.taskId}`)[0].c, null, '취소 표시도 없음');
   });
 });
 
