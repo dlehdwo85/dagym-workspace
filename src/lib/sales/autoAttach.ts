@@ -79,7 +79,8 @@ export async function attachSourceFiles(u: SessionUser, i: { kind: SourceKind; i
   const line = failed.length ? `\n공고 첨부 ${src.files.length}건 중 ${failed.length}건 자동 첨부 실패(${failed.map((x) => `${x.name}: ${x.reason}`).join(' · ').slice(0, 300)}) — 공고문 내려받기: ${src.link}` : '';
   for (const taskId of i.taskIds) {
     for (const lib of libs) {
-      const [has] = await sql`select 1 from attachments where task_id = ${taskId} and storage_key = ${lib.storage_key} and deleted_at is null limit 1`;
+      // 332차(대표 11/02 16:1x ⑤ 래미안세레니티 같은 공고문 2개): 같은 저장 파일뿐 아니라 같은 이름·같은 크기(= 같은 내용)도 다시 안 붙임
+      const [has] = await sql`select 1 from attachments where task_id = ${taskId} and deleted_at is null and (storage_key = ${lib.storage_key} or (file_name = ${lib.file_name} and size_bytes = ${lib.size_bytes})) limit 1`;
       if (has) continue;
       await sql`insert into attachments (task_id, kind, storage_key, file_name, mime_type, size_bytes, upload_status, doc_title, source, created_by)
         values (${taskId}, 'file', ${lib.storage_key}, ${lib.file_name}, ${lib.mime_type}, ${lib.size_bytes}, 'ready', ${lib.title}, 'sales_auto', ${u.id})`;

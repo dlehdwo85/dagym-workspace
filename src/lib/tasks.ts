@@ -101,9 +101,11 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.assignee_id = ${uid} and not ci.done) as my_items,
   (select count(*)::int from comments cm where cm.task_id = t.id and cm.deleted_at is null) as comment_count,
   (select count(*)::int from attachments at where at.task_id = t.id and at.deleted_at is null) as attachment_count,
-  -- 330차(대표 11/02 15:2x 첨부 파일 종류 표기): 목록 📎 칩에 'HWP 2 · PDF 1' 처럼 종류별로 묶어 보이게 — 이름·형식만 올린 순으로 30개까지
-  (select coalesce(json_agg(json_build_object('kind', x.kind, 'file_name', x.file_name, 'mime_type', x.mime_type)), '[]'::json)
-     from (select af.kind, af.file_name, af.mime_type from attachments af where af.task_id = t.id and af.deleted_at is null order by af.created_at, af.id limit 30) x) as attachment_files,
+  -- 330차(대표 11/02 15:2x 첨부 파일 종류 표기): 목록 📎 칩에 'HWP 2 · PDF 1' 처럼 종류별로 묶어 보이게
+  --   332차 보완(로컬 16:3x: 94개 업무가 'JPG 29 · HWP 1' — 이름 목록 30개 제한을 세서 틀림): 서버가 종류(kind·확장자·형식)별로 전부 센다
+  (select coalesce(json_agg(json_build_object('kind', x.kind, 'ext', x.ext, 'mime', x.mime_type, 'n', x.n) order by x.n desc, x.ext), '[]'::json)
+     from (select af.kind, lower(substring(af.file_name from '\\.([A-Za-z][A-Za-z0-9]{0,4})$')) as ext, af.mime_type, count(*)::int as n
+             from attachments af where af.task_id = t.id and af.deleted_at is null group by 1, 2, 3) x) as attachment_kinds,
   -- V35 1: 고객에게 보낸 자료(메일·다운로드 링크) · 고객이 열어 봄
   (select case when count(*) = 0 then null when bool_or(a.action = 'share_opened') then 'opened' else 'sent' end from activities a
      where a.entity_type = 'task' and a.entity_id = t.id and a.action in ('mail_sent', 'share_created', 'share_opened')) as share_state,
@@ -1251,7 +1253,7 @@ export async function mergeTask(u: SessionUser, id: string, intoId: string) {
     const [src] = await tx<{ title: string; assignee_id: string | null; status: string; completed_at: Date | null; assignee_ack_at: Date | null }[]>`select title, assignee_id, status, completed_at, assignee_ack_at from tasks where id = ${id}`;
     const [dst] = await tx`select title from tasks where id = ${intoId}`;
     await tx`update comments set task_id = ${intoId} where task_id = ${id}`;
-    await tx`update attachments set task_id = ${intoId} where task_id = ${id}`;
+    await (await import('./attachMove')).moveAttachmentsDedupe(tx as unknown as Sql, [id], intoId); // 332차: 같은 파일은 하나만
     await tx`update tasks set parent_id = ${intoId} where parent_id = ${id} and deleted_at is null`;
     await tx`insert into task_collaborators (task_id, user_id) select ${intoId}, user_id from task_collaborators where task_id = ${id} on conflict do nothing`;
     await tx`insert into task_assignees (task_id, user_id, added_by) select ${intoId}, user_id, ${u.id} from task_assignees where task_id = ${id}

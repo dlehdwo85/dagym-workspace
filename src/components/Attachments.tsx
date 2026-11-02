@@ -2,7 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api, broadcastRefresh } from './client';
-import { Camera, Check, Download, Eye, FileText, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload, Video } from 'lucide-react';
+import { Camera, Check, ChevronDown, ChevronRight, Download, Eye, FileArchive, FileText, FolderInput, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload, Video } from 'lucide-react';
 import { isNativeApp } from './native';
 import { MediaFull } from './MediaView';
 import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
@@ -23,10 +23,11 @@ const retryable = (e: unknown) => !(e instanceof ApiError) || e.status >= 500 ||
  * 실패 알림은 장수가 많으면 끝에 한 번만(몇 장 실패했는지·이름은 진행 목록에서)
  * 213차(아이폰 147장): 화면 꺼짐 막기는 앱이면 keep-awake 플러그인(아이폰 앱 화면은 웹 Wake Lock 이 없어 화면이 꺼지면 올리기가 멈춤)
  */
-export async function uploadTaskFiles(list: File[], target: { taskId?: string; eventId?: string }, setProg: (f: (x: { name: string; pct: number; error?: string }[]) => { name: string; pct: number; error?: string }[]) => void) {
+export type UploadItem = { name: string; pct: number; error?: string; note?: string };
+export async function uploadTaskFiles(list: File[], target: { taskId?: string; eventId?: string }, setProg: (f: (x: UploadItem[]) => UploadItem[]) => void) {
   const start = list.map((f) => ({ name: f.name, pct: 0 }));
   setProg(() => start);
-  const upd = (i: number, patch: Partial<{ pct: number; error: string }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
+  const upd = (i: number, patch: Partial<{ pct: number; error: string; note: string }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
   const many = list.length > 3;
   const release = many ? await holdScreen() : null;
   let shrinking: Promise<unknown> = Promise.resolve(); // 사진 줄이기는 한 번에 한 장(메모리)
@@ -37,26 +38,28 @@ export async function uploadTaskFiles(list: File[], target: { taskId?: string; e
     const capturedAt = raw.lastModified ? new Date(raw.lastModified).toISOString() : undefined;
     for (let tryN = 0; ; tryN++) {
       try {
-        const r = await api('/api/attachments', { body: { ...target, kind: 'file', fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, capturedAt } });
+        const r = await api<any>('/api/attachments', { body: { ...target, kind: 'file', fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, capturedAt, skipDuplicate: true } });
+        // 332차(대표 11/02 16:1x ⑤ · 로컬: 나눠 올리다 같은 사진 21장이 두 번): 같은 이름·크기 파일이 이미 있으면 서버가 올리지 않고 알려 줌 → '이미 있음'으로 건너뜀
+        if (r.duplicate) { upd(n, { pct: 100, note: '이미 있는 파일 — 건너뜀' }); return 'dup' as const; }
         const { uploadId } = await putFile(r.upload, file, (pct) => upd(n, { pct }));
         await api(`/api/attachments/${r.id}/complete`, { body: uploadId ? { uploadId } : {} });
-        return;
+        return 'ok' as const;
       } catch (e) { if (tryN >= 1 || !retryable(e)) throw e; upd(n, { pct: 0 }); await new Promise((r) => setTimeout(r, 1500)); }
     }
   };
-  let ok = 0, next = 0; const failed: string[] = [];
+  let ok = 0, dup = 0, next = 0; const failed: string[] = [];
   const worker = async () => {
     while (next < list.length) {
       const n = next++;
-      try { await one(n); upd(n, { pct: 100 }); ok++; }
+      try { if ((await one(n)) === 'dup') dup++; else { upd(n, { pct: 100 }); ok++; } }
       catch (e: any) { upd(n, { error: e.message }); failed.push(list[n].name); if (!many) toast.error(`${list[n].name}: ${e.message}`); }
     }
   };
   try { await Promise.all(Array.from({ length: Math.min(3, list.length) }, worker)); } finally { release?.(); }
   if (failed.length && many) toast.error(`${list.length}개 중 ${failed.length}개를 올리지 못했습니다 — 진행 목록에서 이유를 보고 다시 올려 주세요`);
-  if (ok) toast.ok(`${ok}개 첨부 완료`);
-  if (ok === list.length) setTimeout(() => setProg(() => []), 1500);
-  return ok;
+  if (ok || dup) toast.ok(`${ok}개 첨부 완료${dup ? ` · 이미 있는 파일 ${dup}개 건너뜀` : ''}`);
+  if (ok + dup === list.length) setTimeout(() => setProg(() => []), 1500);
+  return ok + dup;
 }
 
 const isImage = (a: any) => a.kind === 'file' && /^image\//.test(a.mime_type ?? '') && !isHeic(a);
@@ -114,13 +117,94 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, r
   }
   const photos = items.filter(isImage);
   const [album, setAlbum] = useState(false);
-  const manyPhotos = photos.length > PHOTO_ROWS_MAX;
   const canDel = (a: any) => a.created_by === meId || canEdit;
+  // ── 332차(대표 11/02 16:1x 업무 첨부 ①~④): 올린 묶음(같은 사람·10분 안)·날짜별로 묶어 보이고 최근 묶음만 펼침(첨부 12개 이하면 모두 펼침) · 사진은 바둑판·문서는 줄 ·
+  //    체크로 바로 선택(Shift 범위 · 빈 곳에서 끌어 사각형) · 머리줄 오른쪽 [모두 선택]·선택 수 · 선택 띠 [선택 n개 내려받기(zip)]·[자료실로]·[삭제]
+  const docsCount = items.length - photos.length;
+  type Grp = { key: string; day: string; start: string; byId: string | null; by: string; all: any[]; photos: any[]; last: number };
+  const groups = useMemo<Grp[]>(() => {
+    const out: Grp[] = [];
+    for (const a of items) {
+      const t = Date.parse(a.created_at); const last = out[out.length - 1];
+      if (last && last.byId === (a.created_by ?? null) && t - last.last <= 10 * 60e3 && seoulDay(a.created_at) === last.day) { last.all.push(a); if (isImage(a)) last.photos.push(a); last.last = t; }
+      else out.push({ key: a.id, day: seoulDay(a.created_at), start: a.created_at, byId: a.created_by ?? null, by: a.created_by_name ?? '', all: [a], photos: isImage(a) ? [a] : [], last: t });
+    }
+    return out.reverse(); // 최근 묶음 먼저
+  }, [items]);
+  const [opens, setOpens] = useState<Record<string, boolean>>({});
+  const isOpen = (g: Grp, i: number) => opens[g.key] ?? (i === 0 || items.length <= 12);
+  const rowsOf = (g: Grp) => (g.photos.length > PHOTO_ROWS_MAX ? g.all.filter((a) => !isImage(a)) : g.all); // 사진이 많은 묶음은 사진을 바둑판에만(예전 '사진 n장' 규칙을 묶음마다)
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  useEffect(() => { setSel((s) => { const n = new Set([...s].filter((id) => items.some((a) => a.id === id))); return n.size === s.size ? s : n; }); }, [items]);
+  const order = useMemo(() => groups.flatMap((g, i) => (isOpen(g, i) ? [...g.photos, ...rowsOf(g).filter((a) => !isImage(a))] : [])), [groups, opens, items.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lastIdx = useRef<number | null>(null);
+  const toggleSel = (id: string, shift?: boolean) => {
+    const idx = order.findIndex((a) => a.id === id);
+    setSel((s) => { const n = new Set(s);
+      if (shift && lastIdx.current !== null && idx >= 0) { const lo = Math.min(lastIdx.current, idx), hi = Math.max(lastIdx.current, idx); const add = !n.has(id); for (let k = lo; k <= hi; k++) { if (add) n.add(order[k].id); else n.delete(order[k].id); } }
+      else if (n.has(id)) n.delete(id); else n.add(id);
+      return n; });
+    if (idx >= 0) lastIdx.current = idx;
+  };
+  const selItems = items.filter((a) => sel.has(a.id));
+  const selFiles = selItems.filter((a) => a.kind === 'file' && a.upload_status !== 'pending');
+  const selDeletable = selItems.filter(canDel);
+  const dupName = (a: any) => a.kind === 'file' && items.some((x) => x.id !== a.id && x.kind === 'file' && x.file_name === a.file_name); // 같은 이름(내용은 다름)은 올린 때로 구분
+  const boxRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ x: number; y: number; base: Set<string>; moved: boolean; active: boolean }>({ x: 0, y: 0, base: new Set(), moved: false, active: false });
+  const [rect, setRect] = useState<{ l: number; t: number; w: number; h: number } | null>(null);
+  const onDown = (e: React.PointerEvent) => {
+    dragRef.current.moved = false; // 끌기 직후의 click 만 무시하고(아래 onUp), 다음 누름부터는 정상
+    if (e.pointerType !== 'mouse' || e.button !== 0 || (e.target as HTMLElement).closest('a,button,input,select,textarea,label,[data-nodrag]')) return;
+    dragRef.current = { x: e.clientX, y: e.clientY, base: e.shiftKey ? new Set(sel) : new Set(), moved: false, active: true };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 지원 안 하면 칸 안에서만 */ } // 칸 밖으로 끌어도 계속 고르기
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const d = dragRef.current; if (!d.active || !boxRef.current) return;
+    if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) return;
+    d.moved = true;
+    const box = boxRef.current.getBoundingClientRect();
+    const l = Math.min(d.x, e.clientX), t = Math.min(d.y, e.clientY), r = Math.max(d.x, e.clientX), b = Math.max(d.y, e.clientY);
+    setRect({ l: l - box.left, t: t - box.top, w: r - l, h: b - t });
+    const n = new Set(d.base);
+    boxRef.current.querySelectorAll<HTMLElement>('[data-att-id]').forEach((el) => { const q = el.getBoundingClientRect(); if (q.right > l && q.left < r && q.bottom > t && q.top < b && el.dataset.attId) n.add(el.dataset.attId); });
+    setSel(n);
+  };
+  const onUp = () => { const d = dragRef.current; if (!d.active) return; d.active = false; setRect(null); }; // moved 는 다음 pointerdown 에서 풀림 — 끌기 끝에 따라오는 click 이 그 줄을 다시 토글하지 않게
+  async function zipSelected() {
+    const ids = selFiles.map((a) => a.id); if (!ids.length) return;
+    if (isNativeApp()) { const { openFileExternally } = await import('./native'); await openFileExternally(`/api/attachments/zip?ids=${ids.join(',')}`); return; }
+    setBusy('zip 으로 묶는 중…');
+    try {
+      const res = await fetch('/api/attachments/zip', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }), credentials: 'same-origin' });
+      if (!res.ok) { let msg = `내려받기 실패(${res.status})`; try { const j = await res.json(); msg = j.message ?? j.error ?? msg; } catch { /* 본문 없음 */ } throw new Error(msg); }
+      const name = decodeURIComponent(/filename\*=UTF-8''([^;]+)/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? '첨부.zip');
+      const url = URL.createObjectURL(await res.blob());
+      const el = document.createElement('a'); el.href = url; el.download = name; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      const skipped = Number(res.headers.get('x-skipped') ?? 0);
+      toast.ok(`${res.headers.get('x-count') ?? ids.length}개를 zip 으로 내려받습니다${skipped ? ` · 못 담은 것 ${skipped}개(링크·기밀)` : ''}`);
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
+  }
+  async function toLibrary() {
+    const ids = selFiles.map((a) => a.id); if (!ids.length) return;
+    setBusy('자료실에 등록하는 중…');
+    try { const r = await api<{ added: number; already: number; skipped: number; folders: string[] }>('/api/attachments/to-library', { body: { ids } });
+      toast.ok(`자료실에 ${r.added}개 등록${r.already ? ` · 이미 있던 것 ${r.already}개` : ''}${r.skipped ? ` · 건너뜀 ${r.skipped}개` : ''}${r.folders.length ? ` — 폴더: ${r.folders.slice(0, 2).join(', ')}` : ''}`); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
+  }
+  async function removeSelected() {
+    const ids = selDeletable.map((a) => a.id); if (!ids.length) return;
+    if (!confirm(`첨부 ${ids.length}개를 삭제할까요?${ids.length < sel.size ? ` (내가 올리지 않은 ${sel.size - ids.length}개는 빼고)` : ''}`)) return;
+    setBusy('삭제하는 중…'); let n = 0;
+    for (const id of ids) { try { await api(`/api/attachments/${id}`, { method: 'DELETE' }); n++; } catch (e: any) { toast.error(e.message); } }
+    setBusy(''); if (n) toast.ok(`첨부 ${n}개를 삭제했습니다`); setSel(new Set()); onChange(); broadcastRefresh();
+  }
+  const hm = (v: string) => dtf('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(v));
   const albumRef = useRef<HTMLInputElement>(null);
   const vidRef = useRef<HTMLInputElement>(null); // #109 영상 촬영
   const vidAlbumRef = useRef<HTMLInputElement>(null); // 248차 #780 영상은 사진과 따로 고르기
 
-  const [prog, setProg] = useState<{ name: string; pct: number; error?: string }[]>([]);
+  const [prog, setProg] = useState<UploadItem[]>([]);
   const pick = usePickWait('task'); // 213차: 아이폰은 사진을 많이 고르면 [추가] 뒤 몇 분 동안 아무 표시가 없음 → '준비 중' 띠 · 248차 고르기 진단
   async function upload(files: FileList | null) {
     pick.received(files);
@@ -162,36 +246,65 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, r
 
   return (
     <DropZone onFiles={(f) => upload(f)} disabled={readOnly || !canEdit || !!busy} label={taskId ? '놓으면 이 업무에 첨부됩니다' : '놓으면 이 일정에 첨부됩니다'} testid="attach-drop">
-      {photos.length > 0 && (
-        <div className="mb-2" data-testid="photo-section">
-          {photos.length > PHOTO_PREVIEW && <div className="mb-1 flex items-center gap-2 text-xs text-ink-2"><b className="text-ink">사진 {photos.length}장</b>
-            <button type="button" className="ml-auto font-semibold text-accent-700 underline" onClick={() => setAlbum(true)} data-testid="photo-album-open">사진첩으로 모두 보기</button></div>}
-          <div className={cx('grid gap-2', photos.length > PHOTO_ROWS_MAX ? 'grid-cols-4 gap-1.5 sm:grid-cols-6' : 'grid-cols-3 sm:grid-cols-4')} data-testid="photo-grid">
-            {photos.slice(0, photos.length > PHOTO_PREVIEW ? PHOTO_PREVIEW - 1 : PHOTO_PREVIEW).map((a) => (
-              <a key={a.id} href={`/api/attachments/${a.id}/download?inline=1`} onClick={(e) => { e.preventDefault(); setView(a); }} className="group relative block aspect-square overflow-hidden rounded-input border border-line bg-slate-100" title={a.file_name} data-photo={a.id}>
-                <img src={`/api/attachments/${a.id}/download?inline=1`} alt={a.file_name} loading="lazy" className="size-full object-cover transition-transform group-hover:scale-105" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-                <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/60 to-transparent px-1.5 pb-1 pt-4 text-[10px] text-white">{a.captured_at ? fmtDateTime(a.captured_at) : a.file_name}</span>
-              </a>
-            ))}
-            {photos.length > PHOTO_PREVIEW && (
-              <button type="button" onClick={() => setAlbum(true)} className="relative block aspect-square overflow-hidden rounded-input border border-line bg-slate-100" aria-label={`사진 ${photos.length}장 모두 보기`} data-testid="photo-more">
-                <img src={`/api/attachments/${photos[PHOTO_PREVIEW - 1].id}/download?inline=1`} alt="" loading="lazy" className="size-full object-cover" />
-                <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-lg font-bold text-white">+{photos.length - (PHOTO_PREVIEW - 1)}</span>
-              </button>
-            )}
-          </div>
+      {items.length > 0 && (
+        <div className="mb-1.5 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2" data-testid="att-head">
+          {sel.size > 0 ? (
+            /* 선택 띠는 머리줄 자리에(높이 고정) — 띠가 끼어들어 줄이 밀리면 끌어 고르는 중에 줄 위치가 바뀜 */
+            <span className="flex flex-wrap items-center gap-1.5" data-testid="att-sel-bar">
+              <b className="tabular-nums text-accent-700" title="Shift 로 범위 · 빈 곳에서 끌어 사각형 선택" data-testid="att-sel-count">선택 {sel.size}</b>
+              <Button size="sm" variant="secondary" onClick={zipSelected} disabled={!!busy || !selFiles.length} data-testid="att-sel-zip"><FileArchive />선택 {selFiles.length}개 내려받기(zip)</Button>
+              {taskId && !readOnly && <Button size="sm" variant="secondary" onClick={toLibrary} disabled={!!busy || !selFiles.length} data-testid="att-sel-library"><FolderInput />자료실로</Button>}
+              {selDeletable.length > 0 && <Button size="sm" variant="danger" onClick={removeSelected} disabled={!!busy} data-testid="att-sel-delete"><Trash2 />삭제{selDeletable.length < sel.size ? ` ${selDeletable.length}개` : ''}</Button>}
+              <button type="button" className="underline" onClick={() => setSel(new Set())} data-testid="att-sel-clear">선택 해제</button>
+            </span>
+          ) : (
+            <>
+              <span data-testid="att-photo-summary"><b className="text-ink">첨부 {items.length}개</b>{photos.length > 0 && <> · 사진 {photos.length}장</>}{docsCount > 0 && <> · 문서 {docsCount}개</>}</span>
+              {photos.length > PHOTO_PREVIEW && <button type="button" className="font-semibold text-accent-700 underline" onClick={() => setAlbum(true)} data-testid="photo-album-open">사진첩으로 모두 보기</button>}
+            </>
+          )}
+          <span className="ml-auto flex items-center gap-2">
+            <button type="button" className="rounded-full border border-line px-2 py-0.5 font-medium hover:bg-slate-50" onClick={() => setSel(sel.size === items.length ? new Set() : new Set(items.map((a) => a.id)))} data-testid="att-select-all">{sel.size === items.length ? '선택 해제' : '모두 선택'}</button>
+          </span>
         </div>
       )}
-      <ul className="space-y-1.5" data-testid="attachments">
-        {manyPhotos && (
-          <li className="flex items-center gap-2.5 rounded-input border border-line px-2.5 py-2 text-sm" data-testid="att-photo-summary">
-            <ImageIcon className="size-4 shrink-0 text-ink-3" />
-            <span className="min-w-0 flex-1"><b>사진 {photos.length}장</b> <span className="text-xs text-ink-2">위 사진 칸·사진첩에서 크게 보기·고치기·내려받기·지우기</span></span>
-            <button type="button" onClick={() => setAlbum(true)} className="shrink-0 rounded-input border border-line px-2 py-1 text-xs font-medium hover:bg-slate-50" data-testid="att-photo-album">사진첩</button>
-          </li>
-        )}
-        {(manyPhotos ? items.filter((a) => !isImage(a)) : items).map((a) => (
-          <li key={a.id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-input border border-line px-2.5 py-2 text-sm">
+      <div ref={boxRef} className={cx('relative space-y-2', rect && 'select-none')} data-testid="attachments" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+        {rect && <div className="pointer-events-none absolute z-20 rounded border border-accent-500 bg-accent-500/10" style={{ left: rect.l, top: rect.t, width: rect.w, height: rect.h }} />}
+        {groups.map((g, gi) => { const open = isOpen(g, gi); const headed = groups.length > 1; const rows = rowsOf(g); return (
+          <section key={g.key} data-testid="att-group" data-open={open ? '1' : '0'}>
+            {headed && (
+              <button type="button" onClick={() => setOpens({ ...opens, [g.key]: !open })} aria-expanded={open} className="flex w-full items-center gap-1.5 rounded-input bg-slate-50 px-2 py-1 text-left text-xs text-ink-2 hover:bg-slate-100" data-testid="att-group-head" data-nodrag>
+                {open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
+                <b className="text-ink">{dayLabel(g.day)} {hm(g.start)}</b><span className="truncate">{g.by}</span>
+                <span className="ml-auto shrink-0 tabular-nums">{g.photos.length > 0 && `사진 ${g.photos.length}장`}{g.photos.length > 0 && g.all.length > g.photos.length && ' · '}{g.all.length > g.photos.length && `문서 ${g.all.length - g.photos.length}개`}</span>
+              </button>
+            )}
+            {open && g.photos.length > 0 && (
+              <div className={cx(headed && 'mt-1.5')} data-testid="photo-section">
+                <div className={cx('grid gap-2', g.photos.length > PHOTO_ROWS_MAX ? 'grid-cols-4 gap-1.5 sm:grid-cols-6' : 'grid-cols-3 sm:grid-cols-4')} data-testid="photo-grid">
+                  {g.photos.slice(0, g.photos.length > PHOTO_PREVIEW ? PHOTO_PREVIEW - 1 : PHOTO_PREVIEW).map((a) => { const on = sel.has(a.id); return (
+                    <div key={a.id} className={cx('relative rounded-input', on && 'ring-2 ring-accent-500 ring-offset-1')} data-att-id={a.id}>
+                      <a href={`/api/attachments/${a.id}/download?inline=1`} onClick={(e) => { e.preventDefault(); if (dragRef.current.moved) return; setView(a); }} className="group relative block aspect-square overflow-hidden rounded-input border border-line bg-slate-100" title={a.file_name} data-photo={a.id}>
+                        <img src={`/api/attachments/${a.id}/download?inline=1`} alt={a.file_name} loading="lazy" className={cx('size-full object-cover transition-transform group-hover:scale-105', on && 'opacity-80')} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                        {a.captured_at && <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/60 to-transparent px-1.5 pb-1 pt-4 text-[10px] text-white">{fmtDateTime(a.captured_at)}</span>}
+                      </a>
+                      <button type="button" className={cx('absolute left-1 top-1 z-10 flex size-6 items-center justify-center rounded-full border-2 border-white shadow', on ? 'bg-accent-600' : 'bg-black/35 opacity-70 hover:opacity-100')} aria-label={`${a.file_name} 선택`} aria-pressed={on} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSel(a.id, e.shiftKey); }} data-testid="photo-check">{on && <Check className="size-3.5 text-white" />}</button>
+                    </div>); })}
+                  {g.photos.length > PHOTO_PREVIEW && (
+                    <button type="button" onClick={() => setAlbum(true)} className="relative block aspect-square overflow-hidden rounded-input border border-line bg-slate-100" aria-label={`사진 ${photos.length}장 모두 보기`} data-testid="photo-more">
+                      <img src={`/api/attachments/${g.photos[PHOTO_PREVIEW - 1].id}/download?inline=1`} alt="" loading="lazy" className="size-full object-cover" />
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-lg font-bold text-white">+{g.photos.length - (PHOTO_PREVIEW - 1)}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+            {open && rows.length > 0 && (
+              <ul className={cx('space-y-1.5', headed && 'mt-1.5')} data-testid="att-rows">
+                {rows.map((a) => { const on = sel.has(a.id); return (
+                  <li key={a.id} className={cx('flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-input border px-2.5 py-2 text-sm', on ? 'border-accent-300 bg-accent-50/60' : 'border-line')} data-att-id={a.id} data-selected={on ? '1' : undefined}
+                    onClick={(e) => { if (dragRef.current.moved) return; if ((e.target as HTMLElement).closest('a,button,input,select,textarea,label')) return; toggleSel(a.id, e.shiftKey); }}>
+                    <input type="checkbox" checked={on} onChange={() => {}} onClick={(e) => { e.stopPropagation(); toggleSel(a.id, e.shiftKey); }} className="size-4 shrink-0 accent-accent-600" aria-label={`${a.doc_title || a.file_name || a.url} 선택`} data-testid="att-check" />
             <FileKindIcon a={a} />
             {/* #533: 버튼이 많아도 이름이 사라지지 않게 — 이름 최소 폭, 모자라면 버튼 묶음이 다음 줄로 */}
             <div className="min-w-[10rem] flex-1">
@@ -205,6 +318,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, r
                 {a.doc_base_date && <span>기준일 {fmtDate(a.doc_base_date)}</span>}
                 {a.doc_owner && <span>문서 담당 {a.doc_owner}</span>}
                 {a.size_bytes ? <span>{fmtSize(Number(a.size_bytes))}</span> : null}
+                {dupName(a) && <span title="같은 이름의 파일이 더 있어 올린 때로 구분" data-testid="att-uploaded-at">올림 {fmtDateTime(a.created_at)}</span>}
                 {isHeic(a) && <span className="text-amber-700" data-testid="att-heic">아이폰 사진(HEIC) — PC 에서 안 보이면 내려받아 보기</span>}
                 {a.captured_at && isImage(a) && <span>촬영 {fmtDateTime(a.captured_at)}</span>}{/* 로컬 검수 10/17: 문서(txt 등)는 "촬영" 아님 */}
                 <span>{a.created_by_name}</span>
@@ -228,10 +342,12 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, r
             {a.kind === 'file' && !readOnly && (Number(a.version ?? 1) > 1 || a.doc_id) && <button type="button" onClick={() => setVersionsOf(a)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold text-ink-2 hover:bg-slate-200" title="버전 기록·되돌리기" data-testid="att-versions"><History className="size-3" />v{a.version ?? 1}</button>}
             {(a.created_by === meId || canEdit) && <button onClick={() => remove(a.id)} className="rounded p-1 text-ink-3 hover:bg-red-50 hover:text-red-600" aria-label="첨부 삭제"><Trash2 className="size-4" /></button>}
             </div>
-          </li>
-        ))}
-        {!items.length && <li className="text-xs text-ink-3">첨부된 자료가 없습니다</li>}
-      </ul>
+                  </li>); })}
+              </ul>
+            )}
+          </section>); })}
+        {!items.length && <p className="text-xs text-ink-3">첨부된 자료가 없습니다</p>}
+      </div>
       {canEdit && <div className="mt-2"><DropHint onClick={() => pick.open(fileRef)} disabled={!!busy} /></div>}
       {pick.node && <div className="mt-2">{pick.node}</div>}
       <div className={cx('mt-2 flex flex-wrap gap-1.5', readOnly && 'hidden')}>
@@ -436,13 +552,26 @@ export function fileKind(a: { kind?: string; file_name?: string | null; mime_typ
 /** 330차(대표 11/02 15:2x 첨부 파일 종류 표기): 종류 글자 — 파일 이름의 확장자(HWP·HWPX·PDF·XLSX·DOCX·JPG·ZIP …) → 없으면 형식(mime) → 그래도 모르면 '파일' · 링크는 '링크' */
 const MIME_EXT: [RegExp, string][] = [[/pdf/, 'PDF'], [/hwpx/, 'HWPX'], [/hwp|haansoft/, 'HWP'], [/spreadsheetml|ms-excel/, 'XLSX'], [/csv/, 'CSV'], [/wordprocessingml|msword/, 'DOCX'], [/presentationml|ms-powerpoint/, 'PPTX'],
   [/zip|compressed/, 'ZIP'], [/^image\/jpe?g/, 'JPG'], [/^image\/png/, 'PNG'], [/^image\/hei[cf]/, 'HEIC'], [/^image\/gif/, 'GIF'], [/^image\/webp/, 'WEBP'], [/^image\//, '사진'], [/^video\//, '영상'], [/^audio\//, '음성'], [/^text\/plain/, 'TXT'], [/x-workin-doc/, '문서']];
-export function fileExt(a: { kind?: string; file_name?: string | null; mime_type?: string | null }): string {
-  if (a.kind === 'link') return '링크';
-  const m = /\.([a-z][a-z0-9]{0,4})$/i.exec((a.file_name ?? '').trim());
-  if (m) { const e = m[1].toUpperCase(); return e === 'JPEG' ? 'JPG' : e; }
-  const mime = (a.mime_type ?? '').toLowerCase();
-  for (const [re, ext] of MIME_EXT) if (re.test(mime)) return ext;
+export function extLabel(kind: string | undefined, ext: string | null | undefined, mimeType: string | null | undefined): string {
+  if (kind === 'link') return '링크';
+  if (ext) { const e = ext.toUpperCase(); return e === 'JPEG' ? 'JPG' : e; }
+  const mime = (mimeType ?? '').toLowerCase();
+  for (const [re, x] of MIME_EXT) if (re.test(mime)) return x;
   return '파일';
+}
+export function fileExt(a: { kind?: string; file_name?: string | null; mime_type?: string | null }): string {
+  const m = /\.([a-z][a-z0-9]{0,4})$/i.exec((a.file_name ?? '').trim());
+  return extLabel(a.kind, m?.[1] ?? null, a.mime_type);
+}
+/** 332차 보완: 서버가 종류별로 전부 센 값(attachment_kinds: kind·ext·mime·n)으로 같은 요약 — 첨부가 수십 개여도 수가 맞음 */
+export function attKindSummaryCounts(rows: { kind?: string; ext?: string | null; mime?: string | null; n: number }[], max = 3): string {
+  const m = new Map<string, number>(); let total = 0;
+  for (const r of rows) { const e = extLabel(r.kind, r.ext, r.mime); m.set(e, (m.get(e) ?? 0) + r.n); total += r.n; }
+  const groups = [...m.entries()].sort((a, b) => b[1] - a[1]);
+  if (!groups.length) return '';
+  if (total === 1) return groups[0][0];
+  const rest = groups.slice(max).reduce((n, [, c]) => n + c, 0);
+  return groups.slice(0, max).map(([e, c]) => `${e} ${c}`).join(' · ') + (rest ? ` 외 ${rest}` : '');
 }
 /** 여러 개면 종류별로 묶어 'HWP 2 · PDF 1'(많은 순, 같으면 먼저 올린 순 · max 종까지, 나머지는 '외 n') · 1개면 'PDF' */
 export function attKindSummary(files: { kind?: string; file_name?: string | null; mime_type?: string | null }[], max = 3): string {

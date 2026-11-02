@@ -2,7 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import { SPACE_META } from './spaceMeta';
 import { PhoneInquiryButton } from './PhoneInquiry';
-import { attKindSummary } from './Attachments';
+import { attKindSummaryCounts } from './Attachments';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -37,7 +37,7 @@ export type Task = {
   team_id?: string | null; team_name?: string | null; team_color?: string | null; collab_teams?: string[];
   org_unit_id: string; org_unit_name: string; brand_id: string | null; assignee_id: string | null; assignee_name: string | null;
   start_date: string | null; due_date: string | null; due_time: string | null; version: number; subtask_count: number; subtask_done: number;
-  checklist_total: number; checklist_done: number; comment_count: number; attachment_count: number; attachment_files?: { kind: string; file_name: string | null; mime_type: string | null }[]; share_state?: 'sent' | 'opened' | null; blocked_by_count: number;
+  checklist_total: number; checklist_done: number; comment_count: number; attachment_count: number; attachment_kinds?: { kind: string; ext: string | null; mime: string | null; n: number }[]; share_state?: 'sent' | 'opened' | null; blocked_by_count: number;
   recurrence_rule: string | null; approval_required: boolean; tags: string[];
   section_id?: string | null; assignee_ack_at?: string | null; created_by?: string; sort_order?: number;
   task_type?: 'normal' | 'milestone' | 'approval' | 'inspection'; approval_line_id?: string | null; photo_required?: number; photo_count?: number;
@@ -577,7 +577,7 @@ function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onP
       {t.comment_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
       {/* V35 1: 첨부는 파란 칩으로 눈에 띄게, 고객에게 보냄 = 초록 · 고객이 열어 봄 = 진한 초록 */}
       {/* 330차(대표 11/02 15:2x): 개수 대신 종류 — 'PDF' · 'HWP 2 · PDF 1'(휴대폰 폭에서도 줄 바꿈 없이) */}
-      {t.attachment_count > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full bg-sky-100 px-1.5 text-[11px] font-semibold tabular-nums text-sky-800" title={`첨부 ${t.attachment_count}개`} data-testid="att-chip" data-att-count={t.attachment_count}><Paperclip className="size-3" />{t.attachment_files?.length ? attKindSummary(t.attachment_files) : t.attachment_count}</span>}
+      {t.attachment_count > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full bg-sky-100 px-1.5 text-[11px] font-semibold tabular-nums text-sky-800" title={`첨부 ${t.attachment_count}개`} data-testid="att-chip" data-att-count={t.attachment_count}><Paperclip className="size-3" />{t.attachment_kinds?.length ? attKindSummaryCounts(t.attachment_kinds) : t.attachment_count}</span>}
       {t.share_state && <span className={cx('shrink-0 rounded-full px-1.5 text-[11px] font-semibold', t.share_state === 'opened' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700')} title={t.share_state === 'opened' ? '고객이 자료를 열어 봄' : '고객에게 자료를 보냄'} data-testid="share-chip">{t.share_state === 'opened' ? '열람' : '보냄'}</span>}
       {!!t.photo_required && <span className={cx('inline-flex items-center gap-0.5 tabular-nums', (t.photo_count ?? 0) >= t.photo_required ? 'text-green-600' : 'text-amber-700')} title="완료 증빙 사진"><Camera className="size-3.5" />{t.photo_count ?? 0}/{t.photo_required}</span>}
       {t.recurrence_rule && <span title="반복 업무" className="max-lg:hidden"><Repeat className="size-3.5" /></span>}

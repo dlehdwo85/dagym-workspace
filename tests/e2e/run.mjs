@@ -138,6 +138,7 @@ import { mktVideoReuse } from './mktVideoReuse.step.mjs';
 import { coAssign } from './coAssign.step.mjs';
 import { batch794 } from './batch794.step.mjs';
 import { collab799 } from './collab799.step.mjs';
+import { attach332 } from './attach332.step.mjs';
 import { mktBatch808 } from './mktBatch808.step.mjs';
 import { mktSlide811 } from './mktSlide811.step.mjs';
 import { aiBudget } from './aiBudget.step.mjs';
@@ -2638,6 +2639,7 @@ await step('187차 ⑦ 이번 달 만든 영상 다시 합성: 제작의뢰실 �
 await step('#475 업무 공동 배정(10/24 다시 설계): 업무 등록 시트 여러 명 = 기본 함께 담당(1건·완료 규칙 칸 없음) → 상세 담당자 칸 하나에 칩 3개 빼기·[+] 추가·활동 기록 → 담당자별 묶음 3곳·+2 → 휴대폰 [내 몫 완료] → 내 몫 완료 · 1/3(목록에 남음)·상세 진행 상자', () => coAssign({ owner, staff, ctx, sql, BASE, SHOTS }));
 await step('대표 #794 각자 1건씩 묶음 공유: 휴대폰 이직원 업무 상세에 박직원 업무 댓글(\'박직원 업무에서\')·함께 담당자 첨부(보기·내려받기만)·담당자별 체크리스트(잠김) → 열어 둔 화면에 새 댓글 15초 안에', () => batch794({ staff, ctx, sql, BASE, SHOTS }));
 await step('대표 #799 협업 업무 칸(280차 #824·#826 \'공동 업무\'): 휴대폰 이직원 내 업무 맨 위 \'공동 업무\' 2건(함께 담당·같이 받은 묶음, 함께하는 사람 한 줄 이름표) · 개인 칸에 다시 안 나옴 · 접지 않음 · 홈 공동 업무 카드', () => collab799({ staff, ctx, sql, BASE, SHOTS }));
+await step('332차 업무 첨부(대표 11/02 16:1x): 올린 묶음별 접기(최근만 펼침) · 체크로 바로 선택·Shift 범위·사각형 끌기 · [모두 선택]·선택 띠 [내려받기(zip)]·[삭제] · 같은 이름·크기 다시 올리면 건너뜀 · 같은 이름 다른 내용은 올린 때', () => attach332({ owner, ctx, sql, BASE }));
 await step('#823 설정 › 마케팅 알림 항목별: 8항목 · 기본값(시안별 알림함만·시안 제작 중 안 받음) · 바꿔 저장하면 사람별 설정', async () => {
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   await owner.goto(BASE + '/settings');

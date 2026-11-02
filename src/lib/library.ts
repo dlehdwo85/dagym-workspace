@@ -816,12 +816,12 @@ export async function moveFiles(u: SessionUser, i: z.infer<typeof moveInput>) {
  * 등급은 이름 규칙(기밀 단어면 기밀, 아니면 내부), 그 업무를 볼 수 있는 사람만 자료실에서도 보임. 회사 설정으로 끌 수 있음(기본 켬).
  * 자료실에서 고른 파일을 첨부한 경우(이미 자료실에 있음)·링크는 건너뜀. 실패해도 첨부 자체는 그대로.
  */
-export async function registerTaskAttachment(u: SessionUser, a: { id: string; task_id: string | null; storage_key: string | null; file_name: string; mime_type: string; source: string }, size: number) {
+export async function registerTaskAttachment(u: SessionUser, a: { id: string; task_id: string | null; storage_key: string | null; file_name: string; mime_type: string; source: string }, size: number, opt: { force?: boolean } = {}) {
   if (!a.task_id || !a.storage_key || a.source === 'library') return null;
   const sql = db();
   const t = tenantOf(u);
   const [ten] = await sql<{ on: boolean }[]>`select attach_to_library as on from tenants where id = ${t}`;
-  if (ten && !ten.on) return null;
+  if (ten && !ten.on && !opt.force) return null; // 332차 [자료실로]: 사람이 고른 것은 자동 등록이 꺼져 있어도 등록
   const [dup] = await sql`select 1 from library_files where tenant = ${t} and storage_key = ${a.storage_key} limit 1`;
   if (dup) return null;
   const [task] = await sql<{ title: string; project: string | null }[]>`select t.title, p.name as project from tasks t left join projects p on p.id = t.project_id where t.id = ${a.task_id}`;

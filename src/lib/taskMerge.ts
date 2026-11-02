@@ -30,7 +30,7 @@ export async function mergeTaskIds(ids: string[], actorId: string | null, why: '
     const keep = rows.find((r) => r.assignee_id && r.assignee_id === r.requested_by) ?? rows[0];
     const others = rows.filter((r) => r.id !== keep.id); const gone = others.map((o) => o.id);
     await sql`update comments set task_id = ${keep.id} where task_id = any(${gone}::uuid[])`;
-    await sql`update attachments set task_id = ${keep.id} where task_id = any(${gone}::uuid[])`;
+    const att = await (await import('./attachMove')).moveAttachmentsDedupe(sql, gone, keep.id); // 332차: 같은 파일은 하나만
     await sql`update tasks set parent_id = ${keep.id}, updated_at = now(), version = version + 1 where parent_id = any(${gone}::uuid[]) and deleted_at is null`;
     await sql`update inquiries set task_id = ${keep.id} where task_id = any(${gone}::uuid[])`;
     // 체크리스트: 같은 글은 하나로(누가 체크했으면 체크 유지), 다른 글은 옮김
@@ -61,7 +61,7 @@ export async function mergeTaskIds(ids: string[], actorId: string | null, why: '
     await sql`update tasks set ${dueSet} batch_id = null, status = ${status}, completed_at = ${allDone ? keep.completed_at ?? new Date() : null},
         assignee_done_at = case when ${keep.status === 'done'} then coalesce(assignee_done_at, completed_at, now()) else assignee_done_at end, updated_at = now(), version = version + 1 where id = ${keep.id}`;
     await sql`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = any(${gone}::uuid[])`;
-    await activity(sql, 'task', keep.id, actorId, 'merged', { reason: why, from: gone, ...(dueMoved ? { dueDate: { from: keep.due, to: due!.day }, dueRule: bd ? 'bid_deadline' : 'latest' } : {}) }).catch(() => {});
+    await activity(sql, 'task', keep.id, actorId, 'merged', { reason: why, from: gone, attachments: att, ...(dueMoved ? { dueDate: { from: keep.due, to: due!.day }, dueRule: bd ? 'bid_deadline' : 'latest' } : {}) }).catch(() => {});
     for (const id of gone) await activity(sql, 'task', id, actorId, 'merged_into', { into: keep.id, reason: why }).catch(() => {});
     return { keep: keep.id, merged: gone.length };
   });

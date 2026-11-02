@@ -23,6 +23,8 @@ export const attachmentInput = z.object({
   docOwner: z.string().max(100).optional(),
   source: z.enum(['upload', 'google_drive', 'chatgpt', 'notion', 'web', 'other']).optional(),
   capturedAt: z.string().datetime({ offset: true }).optional(),
+  /** 332차(대표 11/02 16:1x ⑤): 같은 업무·일정에 같은 이름·크기 파일이 이미 있으면 올리지 않고 그 첨부를 돌려줌(duplicate: true) */
+  skipDuplicate: z.boolean().optional(),
 });
 
 const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|ps1|vbs|jar|apk|ipa|dll|sh)$/i;
@@ -66,6 +68,12 @@ export async function createAttachment(u: SessionUser, i: z.infer<typeof attachm
   if (!i.fileName || !i.size) throw badRequest('파일 이름과 크기가 필요합니다');
   if (i.size > maxUploadBytes(i.mimeType)) throw badRequest(tooLargeMsg(i.mimeType)); // #109: 영상 100MB(조각)
   if (BLOCKED_EXT.test(i.fileName)) throw badRequest('실행 파일은 첨부할 수 없습니다');
+  // 332차(대표 11/02 16:1x ⑤ · 로컬: 30장 제한으로 나눠 올리다 같은 사진 21장이 두 번 올라감): 같은 이름·크기 파일이 이미 있으면 다시 안 올림
+  if (i.skipDuplicate) {
+    const [dup] = await sql<{ id: string }[]>`select id from attachments where ${i.taskId ? sql`task_id = ${i.taskId}` : sql`event_id = ${i.eventId!}`} and deleted_at is null
+      and kind = 'file' and upload_status = 'ready' and file_name = ${i.fileName} and size_bytes = ${i.size} order by created_at limit 1`;
+    if (dup) return { id: dup.id, duplicate: true as const };
+  }
   await (await import('./plans')).assertStorage(u, i.size); // V10 회사 저장공간 한도
   const safe = i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120);
   const mime = i.mimeType || 'application/octet-stream';
