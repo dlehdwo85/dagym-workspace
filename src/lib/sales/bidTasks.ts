@@ -17,7 +17,7 @@ import { notify } from '../notifications';
 import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
-import { cancelInfo as noticeCancelInfo, groupNotices, latestCancelled, latestLive, noKey, renoticeKey } from './noticeGroups';
+import { cancelInfo as noticeCancelInfo, groupNotices, isCancel, latestCancelled, latestLive, noKey, renoticeKey } from './noticeGroups';
 import { briefingOf, mdhm } from './bidTerms';
 import { BID_STATUS, workRecord } from './work';
 
@@ -692,7 +692,22 @@ export async function noticeLiveRows(sql: Sql, ids: string[]): Promise<Map<strin
 // ── 335차(대표 11/02 16:5x #918 "공고 → 업무로 넘어올 때 세대수·입찰 마감 일시·현장설명회 일시(필수 여부)를 업무 설명 위 고정 칸으로"):
 //    아파트 공고(K-apt·주택관리업자 선정)는 세대수까지, 나라장터·누리장터·KG2B 는 마감·현설만. 세대수를 모르면 '확인 필요'. 공고가 정정되면 정기 실행이 칸·체크리스트 줄을 따라 바꾸고 활동 기록을 남긴다.
 export type BidBriefing = { kind: string | null; at: string | null; place: string | null; required: boolean };
-export type BidInfo = { v: 1; apt: boolean; source: string | null; households: number | null; deadline: string | null; deadlineLabel: string | null; briefing: BidBriefing | null; briefingNone: boolean; updatedAt: string };
+/** 347차(로컬 11/03 00:0x): 이 공고가 재공고이고 그 앞 공고(같은 제목·발주처, 번호·마감 달라도)가 취소됐으면 — 업무 고정 칸에 '이 업무의 공고는 재공고 · 이전 공고(마감 …) 취소됨 — 사유' 한 줄(광명자이처럼 취소 탭의 같은 이름과 헷갈리지 않게) */
+export type BidPrevCancel = { day: string | null; reason: string | null; deadlineLabel: string | null };
+export type BidInfo = { v: 1; apt: boolean; source: string | null; households: number | null; deadline: string | null; deadlineLabel: string | null; briefing: BidBriefing | null; briefingNone: boolean; updatedAt: string; prevCancel?: BidPrevCancel | null };
+/** 같은 흐름(renoticeKey)의 앞선 취소 공고 — 같은 원천·같은 발주처 글자로 후보를 좁힌 뒤 열쇠·게시 순서로 고름(최근 180일). 못 찾으면 null */
+async function prevCancelOf(sql: Sql, id: string, r: any): Promise<BidPrevCancel | null> {
+  const key = renoticeKey(r); const agency = pick(r, 'issuer', 'facility_name', 'complex_name', 'agency'); if (!key || !agency) return null;
+  const since = new Date(Date.now() - 180 * 864e5).toISOString();
+  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id <> ${id} and row->>'source_type' = ${String(r?.source_type ?? '')}
+    and (row->>'issuer' = ${String(agency)} or row->>'facility_name' = ${String(agency)} or row->>'complex_name' = ${String(agency)} or row->>'agency' = ${String(agency)})
+    and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${since} limit 200`.catch(() => []);
+  const at = (x: any) => String(x?.posted_date ?? x?.first_seen_at ?? '');
+  const prev = rows.map((x) => ({ ...x.row, id: x.src_id })).filter((x) => renoticeKey(x) === key && isCancel(x) && at(x) <= at(r)).sort((a, b) => at(b).localeCompare(at(a)))[0];
+  if (!prev) return null;
+  const w = when(pick(prev, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'));
+  return { day: at(prev).slice(0, 10) || null, reason: (pick(prev, 'result_note', 'cancel_reason') as string | null) ?? null, deadlineLabel: w ? fmtWhen(w) : null };
+}
 const hhOf = (r: any) => { const n = Number(String(pick(r, 'household_count', 'households') ?? '').replace(/,/g, '')); return Number.isFinite(n) && n > 0 ? Math.round(n) : null; };
 /** 아파트 공고인가 — K-apt 원천(source_type kapt_…·id kapt…) 또는 세대수 칸이 있는 공고. 나라장터·누리장터·KG2B 는 아파트 칸 없이 */
 export const isAptNotice = (id: string, r: any) => /^kapt/i.test(String(r?.source_type ?? '')) || /^kapt/i.test(String(id ?? '')) || hhOf(r) !== null;
@@ -706,11 +721,13 @@ export async function bidInfoOf(sql: Sql, id: string, r: any, opt: { complex?: b
   if (!households && opt.prev?.households) households = opt.prev.households;
   const ms = bidMilestones(r); const close = ms.find((m) => m.key === 'close') ?? ms.find((m) => m.key === 'apply') ?? null;
   const b = briefingOf(r); const kind = String(r?.kg2b_briefing_kind ?? r?.site_briefing_kind ?? '').trim();
+  const prevCancel = await prevCancelOf(sql, id, r).catch(() => null); // 347차
   return { v: 1, apt, source: r?.source_type ? String(r.source_type) : null, households, deadline: close ? (close.w.allDay ? close.w.day : `${close.w.day}T${hm(close.w.start)}`) : null, deadlineLabel: close ? fmtWhen(close.w) : null,
-    briefing: b ? { kind: b.kind, at: b.at, place: b.place, required: b.required } : null, briefingNone: !b && kind === '없음', updatedAt: new Date().toISOString() };
+    briefing: b ? { kind: b.kind, at: b.at, place: b.place, required: b.required } : null, briefingNone: !b && kind === '없음', updatedAt: new Date().toISOString(), prevCancel };
 }
+const samePrev = (x: BidPrevCancel | null | undefined, y: BidPrevCancel | null | undefined) => !!x === !!y && (!x || !y || ((x.day ?? null) === (y.day ?? null) && (x.reason ?? null) === (y.reason ?? null) && (x.deadlineLabel ?? null) === (y.deadlineLabel ?? null)));
 const sameBriefing = (x: BidBriefing | null | undefined, y: BidBriefing | null | undefined) => !!x === !!y && (!x || !y || ((x.kind ?? null) === (y.kind ?? null) && (x.at ?? null) === (y.at ?? null) && (x.place ?? null) === (y.place ?? null) && !!x.required === !!y.required)); // jsonb 는 키 순서를 바꿔 문자열 비교 불가
-const sameInfo = (a: BidInfo | null | undefined, b: BidInfo) => !!a && a.apt === b.apt && (a.households ?? null) === (b.households ?? null) && (a.deadline ?? null) === (b.deadline ?? null) && sameBriefing(a.briefing, b.briefing) && !!a.briefingNone === !!b.briefingNone;
+const sameInfo = (a: BidInfo | null | undefined, b: BidInfo) => !!a && a.apt === b.apt && (a.households ?? null) === (b.households ?? null) && (a.deadline ?? null) === (b.deadline ?? null) && sameBriefing(a.briefing, b.briefing) && !!a.briefingNone === !!b.briefingNone && samePrev(a.prevCancel, b.prevCancel);
 /** 고정 칸 체크리스트 줄: 세대수 확인(아파트만) · 입찰 마감 확인 · 현장설명회 참석(필수/임의 · 일시 · 장소) / 현설 없음 / 현장설명회 여부 확인 */
 export function bidInfoChecklist(info: BidInfo): string[] {
   const out: string[] = [];
@@ -745,7 +762,7 @@ export async function applyBidInfo(sql: Sql, taskId: string, noticeId: string, a
   if (sameInfo(prev, info)) return { changed: false, info };
   await sql`update tasks set sales_ref = coalesce(sales_ref, '{}'::jsonb) || ${sql.json({ bidInfo: info } as never)}, updated_at = now() where id = ${taskId}`;
   const lines = await syncBidChecklist(sql, taskId, info);
-  const slim = (x: BidInfo | null) => (x ? { households: x.households, deadline: x.deadline, briefing: x.briefing, briefingNone: x.briefingNone } : null);
+  const slim = (x: BidInfo | null) => (x ? { households: x.households, deadline: x.deadline, briefing: x.briefing, briefingNone: x.briefingNone, prevCancel: x.prevCancel ?? null } : null);
   await activity(sql, 'task', taskId, actorId, 'updated', { reason: prev ? 'bid_info_update' : (opt.reason ?? 'bid_info_fill'), bidInfo: { from: slim(prev), to: slim(info) }, checklist: lines }).catch(() => {});
   return { changed: true, info };
 }

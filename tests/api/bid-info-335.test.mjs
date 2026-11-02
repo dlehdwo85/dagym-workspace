@@ -24,6 +24,9 @@ before(async () => {
   await sql`insert into sales_cutover (tenant, writes_open, ok) values ('default', true, true) on conflict (tenant) do update set writes_open = true, ok = true`;
   await put({ id: 'A1', source_type: 'kapt_bid', title: '커뮤니티시설 위탁운영 업체 선정', complex_name: '래미안 시험단지', issuer: '래미안시험단지 입주자대표회의', household_count: 1200, related: true, first_seen_at: today,
     deadline_at: `${addDays(today, 5)}T14:00`, site_briefing_kind: '필수', site_briefing_at: `${addDays(today, 3)}T10:00`, site_briefing_place: '관리사무소 회의실' });
+  // 347차: A1 과 같은 제목·발주처의 앞선 공고(번호·마감 다름)가 취소됨 → A1 업무 고정 칸에 '재공고 · 이전 공고 취소됨' 한 줄 (A1 은 뒤 게시라 취소 표시 대상 아님)
+  await put({ id: 'A1C', source_type: 'kapt_bid', title: '커뮤니티시설 위탁운영 업체 선정', complex_name: '래미안 시험단지', issuer: '래미안시험단지 입주자대표회의', household_count: 1200, related: true, posted_date: addDays(today, -3), first_seen_at: addDays(today, -3),
+    deadline_at: `${addDays(today, 4)}T14:00`, current_status: '취소', notice_state: '취소', notice_kind: 'cancel', result_note: '계약기간 표시 오류' });
   await put({ id: 'A2', source_type: 'kapt_bid', title: '헬스장 위탁운영', complex_name: '모름 시험단지', issuer: '모름단지 입주자대표회의', related: true, first_seen_at: today, deadline_at: `${addDays(today, 4)}T17:00` });
   await put({ id: 'N1', source_type: 'g2b_bid', title: '체육시설 운영 용역', issuer: '성남시', related: true, first_seen_at: today, deadline_at: `${addDays(today, 9)}T10:00`, site_briefing_kind: '없음' });
   await put({ id: 'N2', source_type: 'nuri_bid', title: '수영장 위탁 용역', issuer: '평택시', related: true, first_seen_at: today, deadline_at: `${addDays(today, 6)}T18:00` });
@@ -48,8 +51,10 @@ test('정기 실행 첫 채우기: 아파트 공고 = 세대수·마감·현설(
   assert.deepEqual(a1.briefing, { kind: '필수', at: `${addDays(today, 3)}T10:00`, place: '관리사무소 회의실', required: true });
   const c1 = (await items(P.a1)).map((x) => x.text);
   assert.deepEqual(c1, [`현장설명회 참석(필수) · ${kd(addDays(today, 3), '10:00')} · 관리사무소 회의실`, '세대수 확인 · 1,200세대', `입찰 마감 확인 · ${kd(addDays(today, 5), '14:00')}`], '예전 현설 줄은 같은 줄의 글만 바뀌고(체크 유지) 세대수·마감 줄이 추가');
+  assert.deepEqual(a1.prevCancel, { day: addDays(today, -3), reason: '계약기간 표시 오류', deadlineLabel: kd(addDays(today, 4), '14:00') }, '347차: 재공고 업무에 이전 취소 공고 한 줄');
+  assert.equal((await sql`select sales_ref->'cancel' as c from tasks where id = ${P.a1}`)[0].c, null, '앞선 취소 공고로는 업무에 취소 표시를 하지 않음');
   const a2 = await info(P.a2);
-  assert.deepEqual([a2.apt, a2.households, a2.briefing, a2.briefingNone], [true, null, null, false]);
+  assert.deepEqual([a2.apt, a2.households, a2.briefing, a2.briefingNone], [true, null, null, false]); assert.equal(a2.prevCancel, null);
   assert.deepEqual((await items(P.a2)).map((x) => x.text), ['공고문·참가 자격 검토', '세대수 확인 · 확인 필요', `입찰 마감 확인 · ${kd(addDays(today, 4), '17:00')}`, '현장설명회 여부 확인']);
   const n1 = await info(P.n1);
   assert.deepEqual([n1.apt, n1.households, n1.briefing, n1.briefingNone], [false, null, null, true]);
