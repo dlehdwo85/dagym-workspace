@@ -85,3 +85,22 @@ test('#830 취소 공고는 입찰 목록 모든 탭(전체 포함)에서 빠지
   assert.ok(it, JSON.stringify(c.items.map((x) => x.noticeNo))); assert.equal(it.status, '취소'); assert.equal(it.cancelReason, WHY);
   assert.ok(all.canceledCount >= 1, '칩 건수');
 });
+
+test('346차: 번호·마감이 다른 \'(긴급)\' 재게시(같은 제목·발주처)가 취소되면 — 원래 공고를 가리키는 업무도 취소 표시(광명자이 f1713d0b 꼴) · 취소 카드에 "업무 열려 있음" 링크', async () => {
+  const ORIG = randomUUID(), URG = randomUUID(); const T2 = '[경기] 시험삼사육아파트 커뮤니티센터 위탁운영 업체 선정 입찰공고';
+  const t1 = new Date(Date.now() - 5 * 36e5).toISOString(), t2 = new Date(Date.now() - 3 * 36e5).toISOString();
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', ${ORIG}, ${sql.json({ ...base, id: ORIG, source_external_id: 'kg2b_346001', title: T2, issuer: '시험삼사육아파트', facility_name: '시험삼사육아파트', posted_date: plus(-3), deadline_at: `${plus(1)}T17:00:00+09:00`, first_seen_at: t1, updated_at: t1 })}, 'workin')`;
+  await sql`insert into sales_src_rows (scope, tbl, src_id, row, origin) values ('global', 'procurement_notices', ${URG}, ${sql.json({ ...base, id: URG, source_external_id: 'kg2b_346002', title: `${T2}(긴급)`, issuer: '시험삼사육아파트', facility_name: '시험삼사육아파트', posted_date: plus(-1), deadline_at: `${plus(6)}T17:00:00+09:00`, first_seen_at: t2, updated_at: t2, current_status: '취소', notice_state: '취소', notice_kind: 'cancel', result_note: '사업 계획 변경' })}, 'workin')`;
+  const t = await ctx.owner.ok('POST', '/api/tasks', { title: `[입찰] ${T2}`, assigneeId: ctx.staffA.id, space: 'sales' });
+  await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: ORIG, name: T2, bid: true })} where id = ${t.id}`;
+  // 이 회사 진행 기록(넘긴 줄 = 원래 공고)에 업무 id — 취소 카드의 업무 링크는 이 기록으로 찾음
+  await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, data) values ('default', 'procurement_notices', ${ORIG}, ${ORIG}, '입찰 진행', ${sql.json({ status: '입찰 진행', notice_id: ORIG, bid_task_id: t.id, assignees: [ctx.staffA.id] })})`.catch(() => {});
+  await tick();
+  const [row] = await sql`select sales_ref, deleted_at, status from tasks where id = ${t.id}`;
+  assert.equal(row.deleted_at, null); assert.equal(row.status, 'todo');
+  assert.equal(row.sales_ref.cancel?.noticeId, URG, '뒤에 올라온 긴급 재게시의 취소로 표시'); assert.equal(row.sales_ref.cancel?.reason, '사업 계획 변경');
+  const c = await card('canceled'); const it = c.items.find((x) => String(x.title).includes('시험삼사육'));
+  assert.ok(it, JSON.stringify(c.items.map((x) => x.title)));
+  if (it.cancelTask) { assert.equal(it.cancelTask.id, t.id); assert.equal(it.cancelTask.done, false); }
+});
+

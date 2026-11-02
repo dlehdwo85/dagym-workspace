@@ -1488,7 +1488,9 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
       <div className="mt-1"><button type="button" onClick={onOpen} className="text-left font-medium hover:underline" data-testid="bid-open">{n.complex && <b className="mr-1">{n.complex}</b>}{n.title}</button></div>
       <div className="mt-0.5 text-xs text-ink-2">{[n.agency, n.region, n.households && `${n.households}세대`, n.industry].filter(Boolean).join(' · ')}</div>
       {/* #751(로컬 10/28 17:25): 마감 전에 취소된 공고 · 재공고 잇기 */}
-      {(n.cancelReason || n.renotice) && <div className="mt-0.5 text-xs text-slate-600" data-testid="bid-cancel">{n.cancelReason ? `취소 사유: ${n.cancelReason}` : '취소된 공고'}{n.renotice ? ` · 재공고 올라옴${n.renotice.close ? `(마감 ${kd(n.renotice.close)})` : ''}` : ''}</div>}
+      {(n.cancelReason || n.renotice || n.cancelTask) && <div className="mt-0.5 text-xs text-slate-600" data-testid="bid-cancel">{n.cancelReason ? `취소 사유: ${n.cancelReason}` : '취소된 공고'}{n.renotice ? ` · 재공고 올라옴${n.renotice.close ? `(마감 ${kd(n.renotice.close)})` : ''}` : ''}
+        {/* 346차(로컬 11/02 ④): 이 공고(같은 제목·발주처 흐름 포함)로 만든 입찰 업무 — 열려 있으면 '확인 필요'(상세에서 [공고 취소로 완료]) */}
+        {n.cancelTask && <> · <Link href={`/tasks/${n.cancelTask.id}`} className={n.cancelTask.done ? 'underline' : 'font-semibold text-red-700 underline'} data-testid="bid-cancel-task">업무 {n.cancelTask.done ? '완료됨' : '열려 있음(확인 필요)'}</Link></>}</div>}
       {n.prevCancel && <div className="mt-0.5 text-xs text-amber-800" data-testid="bid-prev-cancel">재공고 — 이전 공고 취소{n.prevCancel.day ? `(${kd(n.prevCancel.day)})` : ''}{n.prevCancel.reason ? ` · 사유: ${n.prevCancel.reason}` : ''}
         {/* 344차(#925 ②): 이전 공고를 넘겨 만든 업무의 상태 — 재공고는 되살리지 않고 다시 넘겨 새 업무 */}
         {n.prevCancel.task && <> · <Link href={`/tasks/${n.prevCancel.task.id}`} className="underline" data-testid="bid-prev-cancel-task">이전 업무 {n.prevCancel.task.done ? '완료됨' : '열려 있음(확인 필요)'}</Link></>}</div>}

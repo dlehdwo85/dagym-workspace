@@ -17,7 +17,7 @@ import { notify } from '../notifications';
 import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
-import { cancelInfo as noticeCancelInfo, groupNotices, latestCancelled, latestLive, noKey } from './noticeGroups';
+import { cancelInfo as noticeCancelInfo, groupNotices, latestCancelled, latestLive, noKey, renoticeKey } from './noticeGroups';
 import { briefingOf, mdhm } from './bidTerms';
 import { BID_STATUS, workRecord } from './work';
 
@@ -371,13 +371,20 @@ export async function canceledBidTaskSweep() {
   const since = new Date(Date.now() - 180 * 864e5).toISOString();
   const pool = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices'
     and (src_id = any(${[...ids, ...merged]}::text[]) or (not gone and coalesce(row->>'related', 'false') = 'true' and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${since})) limit 20000`;
+  const rows = pool.map((x) => ({ ...x.row, id: x.src_id }));
   const groupOf = new Map<string, any[]>();
-  for (const g of groupNotices(pool.map((x) => ({ ...x.row, id: x.src_id })))) for (const r of g) groupOf.set(String(r.id), g);
+  for (const g of groupNotices(rows)) for (const r of g) groupOf.set(String(r.id), g);
+  // 346차(로컬 11/02 23:2x: 광명자이 f1713d0b 가 그대로): 같은 제목·발주처의 뒤 게시(번호·마감이 달라진 '(긴급)' 재게시 — 제목 묶음(titleKey)은 마감일까지 같아야 해서 못 묶음)도 같은 흐름 — #751 재공고 잇기와 같은 열쇠(renoticeKey)
+  const chains = new Map<string, any[]>();
+  for (const r of rows) { const k = renoticeKey(r); if (k) (chains.get(k) ?? chains.set(k, []).get(k)!).push(r); }
+  const at = (r: any) => String(r?.posted_date ?? r?.first_seen_at ?? '');
   let canceled = 0;
   for (const t of tasks) {
     const row = ownMap.get(t.nid); if (!row) continue;
     const g = [...(groupOf.get(t.nid) ?? [{ ...row, id: t.nid }])];
-    const m = row?.merged_into ? groupOf.get(String(row.merged_into)) : null; if (m) for (const x of m) if (!g.some((y) => String(y.id) === String(x.id))) g.push(x);
+    const add = (xs?: any[] | null) => { for (const x of xs ?? []) if (!g.some((y) => String(y.id) === String(x.id))) g.push(x); };
+    if (row?.merged_into) add(groupOf.get(String(row.merged_into)));
+    const ck = renoticeKey(row); if (ck) add((chains.get(ck) ?? []).filter((x) => at(x) >= at(row))); // 넘긴 공고 뒤에 올라온 같은 흐름 게시만(앞선 다른 입찰은 아님)
     // 넘긴 공고 줄 자신은 원천 상태가 '취소'일 때만 취소로(제목에 '취소'가 든 일반 공고 오판 방지) — 정기 점검과 같은 규칙
     const g1 = g.map((x) => (String(x.id) === t.nid && x.notice_kind === 'cancel' && !/취소/.test(String(x.current_status ?? '')) ? { ...x, notice_kind: null } : x));
     const ci = noticeCancelInfo(g1); if (!ci) continue;

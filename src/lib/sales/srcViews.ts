@@ -6,7 +6,7 @@ import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
 import { isAwardResult, onbidSale, partnerNeed } from './collectors/procurement';
-import { groupNotices, isCancel, oneCardPerNotice, plainTitle, skipLinks } from './noticeGroups';
+import { groupNotices, isCancel, oneCardPerNotice, plainTitle, renoticeKey, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { hubTabsOn } from './hubTabs';
 import { LEAD_STAGES, stageName } from './terms';
@@ -166,17 +166,20 @@ export const SOURCE_LABEL: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid
  * · 사전규격(입찰 예정)은 빼고 · 작업 상태 미참여·대상아님은 뺀다. 원본 상태 문구가 '공고중'만이 아니어서(운영 10/19 진행 중 0건) 닫힌 상태만 거른다 */
 /** #751: 취소 공고와 그 재공고 — 같은 원천 + 같은 제목(표시 뺌) + 같은 기관, 취소 공고보다 늦게 게시(처음 본 때)된 취소 아닌 공고. 마감일이 달라도 이음(K-apt 재공고는 마감이 바뀜) */
 function renoticeLinks(rows: any[]) {
-  const key = (r: any) => { const t = plainTitle(pick(r, 'title', 'notice_title')); const a = String(pick(r, 'issuer', 'facility_name', 'complex_name', 'agency') ?? '').replace(/[^0-9A-Za-z가-힣]/g, ''); return t.length >= 6 ? `${r.source_type ?? ''}|${t}|${a}` : null; };
+  const key = renoticeKey; // 346차: 열쇠를 noticeGroups 와 공유(취소 판정 sweep 도 같은 흐름 규칙)
   const at = (r: any) => String(r.posted_date ?? r.first_seen_at ?? '');
-  const cancels = new Map<string, any[]>(); const lives = new Map<string, any[]>();
-  for (const r of rows) { const k = key(r); if (!k) continue; const m = isCancel(r) ? cancels : lives; (m.get(k) ?? m.set(k, []).get(k)!).push(r); }
-  return (r: any): { prevCancel?: { id: string; title: string; reason: string | null; day: string | null; task?: { id: string; done: boolean; title: string } }; renotice?: { title: string; close: string | null } } => {
+  const cancels = new Map<string, any[]>(); const lives = new Map<string, any[]>(); const chain = new Map<string, any[]>();
+  for (const r of rows) { const k = key(r); if (!k) continue; const m = isCancel(r) ? cancels : lives; (m.get(k) ?? m.set(k, []).get(k)!).push(r); (chain.get(k) ?? chain.set(k, []).get(k)!).push(r); }
+  /** 같은 흐름(같은 제목·발주처)의 공고 id 전부 — 취소 카드에 '이 공고로 만든 업무' 를 찾을 때 */
+  const peers = (r: any): string[] => { const k = key(r); return k ? (chain.get(k) ?? []).map((x) => String(x.id ?? x.__id ?? '')).filter(Boolean) : []; };
+  const link = (r: any): { prevCancel?: { id: string; title: string; reason: string | null; day: string | null; task?: { id: string; done: boolean; title: string } }; renotice?: { title: string; close: string | null } } => {
     const k = key(r); if (!k) return {};
     if (isCancel(r)) { const next = (lives.get(k) ?? []).filter((x) => at(x) >= at(r)).sort((a, b) => at(b).localeCompare(at(a)))[0];
       return next ? { renotice: { title: String(pick(next, 'title') ?? ''), close: day(pick(next, 'deadline_at')) } } : {}; }
     const prev = (cancels.get(k) ?? []).filter((x) => at(x) <= at(r)).sort((a, b) => at(b).localeCompare(at(a)))[0];
     return prev ? { prevCancel: { id: String(prev.id ?? prev.__id ?? ''), title: String(pick(prev, 'title') ?? ''), reason: pick(prev, 'result_note'), day: day(pick(prev, 'posted_date', 'first_seen_at')) } } : {};
   };
+  return { link, peers };
 }
 /** 239차(#744): 필수 현장설명이 오늘~3일 안 — 입찰 마감보다 먼저 다가와 '마감 임박'에 함께 */
 const briefSoon = (n: { briefing?: { required: boolean; at: string | null } | null }, td: string) => { const d = n.briefing?.required && n.briefing.at ? String(n.briefing.at).slice(0, 10) : null; return !!d && d >= td && d <= plus(3); };
@@ -488,7 +491,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 338차(대표 11/02 #922 새 공고 날짜별): ?day=YYYY-MM-DD(오늘이 아닌 날) → '그날 새 공고' = 그날 처음 수집했거나 공고일이 그날인 공고(마감 지난 것 포함) · days = 최근 7일 날짜별 건수
     const dayPick = tab === 'today' && isDay(q.day) && String(q.day) !== td ? String(q.day) : null;
     // #751: 취소된 공고 ↔ 같은 원천·같은 제목(취소·긴급·재공고 표시 뺌)·같은 기관으로 그 뒤에 올라온 공고(재공고) — 서로 잇는 한 줄
-    const relink = renoticeLinks(cand);
+    const rl = renoticeLinks(cand); const relink = rl.link;
     const all = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since, r.refound_at); const skipped = skips.hidden(r);
       // 234차: 처음 본 날이 오늘이어도 결과를 안 때(result_at)가 지난 메일 전이면(오래된 결과를 이제야 모은 것) 오늘 결과 묶음에 넣지 않음 — 당일 메일과 같은 기준
       const oldResult = isAwardResult(r) && since != null && Date.parse(String(r.result_at ?? '')) < since;
@@ -505,12 +508,21 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 278차 #830(대표 10/31 '취소 공고는 목록에서 뺌'): 취소된 공고(원천 상태 '취소' 또는 같은 공고 묶음의 마지막 게시가 취소)는 모든 탭에서 빼고 '취소된 공고' 보관함 탭에만
     // 339차(대표 11/02 #924 지역별): 공고의 시·도 — 원천 지역 → 비면 참가가능지역·발주처·수요기관·주소·단지·제목에서(당일 메일과 같은 순서) → 못 찾으면 '지역 미정'
     // 344차(대표 11/02 #925 ②): 재공고 줄에 '이전 공고 취소 → 업무 완료됨/열려 있음' — 이전 공고의 진행 기록이 가리키는 입찰 업무 상태(재공고는 새로 넘겨 새 업무)
+    // 346차(로컬 11/02 23:2x ④): 취소된 공고 카드에도 '이 공고(또는 같은 제목·발주처 흐름)로 만든 업무 열려 있음(확인 필요)/완료됨' — 취소 탭에서 바로 업무로
     try {
+      const isUuid = (x: string) => /^[0-9a-f-]{36}$/i.test(x);
+      const tidOf = (nid: string) => { const v = String(pick(byNotice.get(nid) ?? {}, 'bid_task_id') ?? ''); return isUuid(v) ? v : null; };
       const prevIds = [...new Set(all.map((n) => n.prevCancel?.id).filter((x): x is string => !!x))];
-      const pairs = prevIds.map((pid) => ({ pid, tid: String(pick(byNotice.get(pid) ?? {}, 'bid_task_id') ?? '') })).filter((x) => /^[0-9a-f-]{36}$/i.test(x.tid));
-      if (pairs.length) {
-        const st = new Map((await sql<{ id: string; status: string; title: string }[]>`select id, status, title from tasks where id = any(${pairs.map((x) => x.tid)}::uuid[]) and deleted_at is null`).map((x) => [x.id, x]));
-        for (const n of all) { const pc = n.prevCancel; const tid = pc?.id ? pairs.find((x) => x.pid === pc.id)?.tid : undefined; const tk = tid ? st.get(tid) : undefined; if (pc && tk) pc.task = { id: tk.id, done: tk.status === 'done', title: tk.title }; }
+      const pairs = prevIds.map((pid) => ({ pid, tid: tidOf(pid) })).filter((x): x is { pid: string; tid: string } => !!x.tid);
+      const canceledTask = new Map<string, string>(); // 취소 카드 id → 업무 id
+      for (const n of all) if (/취소/.test(String(n.status ?? '')) || !!(n.history as { cancelDay?: string | null } | null)?.cancelDay) { const tid = [String(n.id), ...rl.peers(n.raw ?? n)].map(tidOf).find(Boolean); if (tid) canceledTask.set(String(n.id), tid); }
+      const want = [...new Set([...pairs.map((x) => x.tid), ...canceledTask.values()])];
+      if (want.length) {
+        const st = new Map((await sql<{ id: string; status: string; title: string }[]>`select id, status, title from tasks where id = any(${want}::uuid[]) and deleted_at is null`).map((x) => [x.id, x]));
+        for (const n of all) {
+          const pc = n.prevCancel; const tid = pc?.id ? pairs.find((x) => x.pid === pc.id)?.tid : undefined; const tk = tid ? st.get(tid) : undefined; if (pc && tk) pc.task = { id: tk.id, done: tk.status === 'done', title: tk.title };
+          const ct = canceledTask.get(String(n.id)); const ck = ct ? st.get(ct) : undefined; if (ck) (n as { cancelTask?: { id: string; done: boolean; title: string } }).cancelTask = { id: ck.id, done: ck.status === 'done', title: ck.title };
+        }
       }
     } catch { /* 연결 표시만 빠짐 */ }
     const str = (v: unknown) => (v == null ? null : String(v));

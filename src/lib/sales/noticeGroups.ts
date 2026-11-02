@@ -34,6 +34,11 @@ export function titleKey(r: any): string | null {
   if (t.length < 6 || !close) return null;
   return `${st}|${t}|${flat(pick(r, 'issuer', 'agency', 'demand_agency', 'org_name', 'facility_name', 'complex_name'))}|${close}`;
 }
+/** #751 재공고 잇기·346차 취소 판정: 같은 원천 + 표시를 뺀 같은 제목 + 같은 발주처 — 번호·마감이 달라진 '(긴급)' 재게시·재공고를 한 흐름으로(마감일은 안 봄). 제목 6자 미만은 없음 */
+export const renoticeKey = (r: any): string | null => {
+  const t = plainTitle(pick(r, 'title', 'notice_title')); const a = String(pick(r, 'issuer', 'facility_name', 'complex_name', 'agency') ?? '').replace(/[^0-9A-Za-z가-힣]/g, '');
+  return t.length >= 6 ? `${r?.source_type ?? ''}|${t}|${a}` : null;
+};
 export const noticeKeys = (r: any) => { const n = noKey(r).key; const t = titleKey(r); return [...(n ? [`n:${n}`] : []), ...(t ? [`t:${t}`] : [])]; };
 
 /** 열쇠(번호·제목) 하나라도 같으면 한 묶음(이어진 것끼리 모두) */
