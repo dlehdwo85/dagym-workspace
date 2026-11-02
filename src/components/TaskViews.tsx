@@ -14,7 +14,7 @@ import { api, broadcastRefresh, useApi } from './client';
 import { useSalesTerms, useSession } from './session';
 import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock, Flag, Users } from 'lucide-react';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
-import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
+import { HIDDEN_BRANDS, ROLE_RANK, STATUSES, STATUS_LABEL, type Role, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
 import { PANEL_SWAP_EVENT } from './TaskPanelHost';
@@ -110,6 +110,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const [filters, setFilters] = useState<Record<string, string>>(() => filtersOf(sp));
   // V11 2번: "완료된 업무도 보기" 체크박스는 없앰(상단 "완료" 칩 = 완료 업무 월별). 주소 ?done=1 만 호환
   const [showDone] = useState(sp.get('done') === '1');
+  // 334차: 완료 안내의 [완료 보기] → '완료' 칩 보기(목록에는 완료가 남지 않음)
+  useEffect(() => { const on = () => setFilters((f) => ({ ...f, view: 'done', assigneeId: '' })); window.addEventListener('wos-done-open', on); return () => window.removeEventListener('wos-done-open', on); }, []);
   // 묶기: 담당자별(기본) · 마감일 · 프로젝트 · 묶지 않음. "내 업무"는 마감일 묶음(새로 배정됨 확인 포함)이 기본
   const [groupPick, setGroupPick] = useState<GroupBy | ''>(() => {
     const g = sp.get('group'); if (GROUPS.includes(g as GroupBy)) return g as GroupBy;
@@ -160,7 +162,8 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     const p = new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), ...(fixed ?? {}) });
     if (q) p.set('q', q);
     // #508(대표 10/23): 목록은 완료하면 바로 빠지고 묶음 맨 아래 접힌 '완료됨 n건'(이번 주 완료) — 캘린더는 V6 16번 그대로(오늘 완료 취소선). "완료" 보기는 완료 업무 전체(월별)
-    if (!showDone && mode !== 'board' && !filters.status && (fixed?.view ?? filters.view) !== 'done') p.set('includeDone', mode === 'list' ? 'week' : 'recent');
+    // 334차(대표 11/02 16:4x #917): 완료하면 전체·내 업무·담당자별 목록에서 바로 빠지고 '완료' 칩에서만(#508 '완료됨' 접힌 칸·오늘 완료 취소선 없음) — 캘린더는 V6 16번 그대로
+    if (!showDone && mode !== 'board' && !filters.status && (fixed?.view ?? filters.view) !== 'done') p.set('includeDone', '0');
     if ((fixed?.view ?? filters.view) === 'done') { p.set('limit', '1000'); if (mode === 'list') p.set('doneMonth', todayStr().slice(0, 7)); } // V20: 목록은 이번 달만, 지난달은 펼칠 때
     return p.toString();
   }, [filters, fixed, q, showDone, mode]);
@@ -189,8 +192,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       const r = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { ...body, version: t.version } });
       if (!r.part && r.status === 'done' && t.status !== 'done') PREV_STATUS.set(t.id, t.status); // 마지막 담당자가 내 몫을 끝내 업무 완료
       setData((d) => d && { tasks: d.tasks.map((x) => (x.id === t.id ? withPart({ ...x, version: r.version }, r, sess.user.id) : x)) });
+      // 334차: 완료된 업무는 목록(완료 보기 밖)에서 바로 뺌 — 공동 업무 칸·사람별 건수도 같이
+      if (!r.part && (r.status ?? body.status) === 'done' && !showDone && (fixed?.view ?? filters.view) !== 'done') setData((d) => d && { tasks: d.tasks.filter((x) => x.id !== t.id) });
       if (r.spawned) toast.info('반복 업무의 다음 회차가 생성되었습니다');
       const m = followUpMsg(r); if (m) toast.info(m);
+      // 334차: 완료 되돌리기가 '완료' 칩 보기의 상태 칩으로 옮겨감 — 완료 때 자동으로 생긴 다음 회차·후속 업무 정리 안내도 여기서
+      if (r?.autoKept?.length) toast.info('다음 회차/후속 업무는 그대로 두었습니다');
+      else if (r?.autoRemoved?.length) toast.info(`완료 때 자동으로 만든 다음 업무 ${r.autoRemoved.length}건도 지웠습니다(휴지통)`);
       broadcastRefresh();
       return r ?? true; // #508 후속: 되돌리기 안내가 자동 후속 업무 정리 결과(autoRemoved·autoKept)를 씀
     } catch (e: any) {
@@ -596,7 +604,7 @@ const PREV_STATUS = new Map<string, TaskStatus>();
 const undoTo = (t: Task): TaskStatus => PREV_STATUS.get(t.id) ?? (t.prev_status === 'todo' || t.prev_status === 'in_progress' || t.prev_status === 'on_hold' ? t.prev_status : 'in_progress');
 /** 안내 [완료됨 보기] → 그 업무가 든 '완료됨'을 펼치고 그 자리로(id 없으면 모두 펼침) */
 export const openDoneFold = (id?: string) => window.dispatchEvent(new CustomEvent('wos-done-open', { detail: { id } }));
-const toastDone = (id: string) => toast.ok('완료됨으로 옮겼습니다', { label: '완료됨 보기', run: () => openDoneFold(id) });
+const toastDone = (id: string) => toast.ok('완료로 옮겼습니다', { label: '완료 보기', run: () => openDoneFold(id) }); // 334차: 완료는 목록에 안 남고 '완료' 칩에서
 const seoulDay = (iso?: string | null) => (iso ? dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso)) : '');
 const doneWhen = (iso?: string | null) => { const d = seoulDay(iso); if (!d) return ''; return d === todayStr() ? dtf('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso!)) : `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`; };
 /** 묶음 맨 아래 접힌 '완료됨 n건 (오늘 a · 이번 주 n)' — 줄마다 [되돌리기](담당자만), [완료 전체 보기 →]. 펼침은 이 기기에 기억 */
@@ -654,7 +662,7 @@ function DoneFold({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any
 }
 
 /** V14 50(대표 결정): 상태는 담당자만(없으면 요청자·만든 사람). 검토 중인 업무의 승인·반려는 검토 담당자(요청자)만 — 서버와 같은 규칙 */
-export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
+export function canSetStatus(t: Task, uid: string, to: TaskStatus, role?: string) {
   if (to === t.status) return true;
   const owner = t.assignee_id ?? t.requested_by ?? t.created_by;
   // 점검 2026-10-16 ②: [검토] 업무는 "완료"(= 원 업무 승인)만
@@ -663,6 +671,8 @@ export function canSetStatus(t: Task, uid: string, to: TaskStatus) {
   const mine = owner === uid || (multiOf(t) && coOf(t).some((c) => c.id === uid)); // 대표 10/24: 담당자가 여럿이면 모두 같은 무게
   // 검토 중: 검토 담당자는 승인(완료)·반려(진행 중), 담당자는 검토 요청 취소(진행 중)만
   if (t.status === 'review' && reviewer) return (reviewer === uid && (to === 'done' || to === 'in_progress')) || (mine && to === 'in_progress');
+  // 334차(대표 11/02 16:4x): 요청자·관리자급(현장 관리자 이상)은 [완료]만은 담당자가 아니어도(남은 몫은 서버가 기록·알림) — 팀장·부서장은 상세 화면(서버 권한 perms.finish)에서
+  if (to === 'done' && t.status !== 'review' && (t.requested_by === uid || (!!role && (ROLE_RANK[role as Role] ?? 0) >= ROLE_RANK.site_manager))) return true;
   return mine;
 }
 const NOT_MINE = '상태는 담당자만 바꿀 수 있어요 (검토 중인 업무는 검토 담당자만 승인·반려)';
@@ -702,7 +712,7 @@ function StatusChip({ t, onPatch, plain }: { t: Task; onPatch: (t: Task, b: any)
   const [tip, setTip] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const quick = nextStatusOnCheck(t, user.role); // 완료(또는 검토 요청, 완료 상태면 다시 진행 중)
-  const can = STATUSES.some((s) => s !== t.status && canSetStatus(t, user.id, s));
+  const can = STATUSES.some((s) => s !== t.status && canSetStatus(t, user.id, s, user.role));
   const ack = t.status === 'todo' && t.assignee_id ? (t.assignee_ack_at ? '확인함' : '확인 전') : null;
   // 대표 10/24: 담당자가 여럿이면 [완료] = 내 몫 완료 — 내 몫을 끝냈으면 '내 몫 완료 · k/n'(흐리게, 누르면 취소), 모두 끝나면 업무 완료
   const parts = partsOf(t); const multi = parts.length > 1;
@@ -758,14 +768,14 @@ function StatusChip({ t, onPatch, plain }: { t: Task; onPatch: (t: Task, b: any)
       </button>
       {tip && <span className="pointer-events-none absolute left-full top-1/2 z-10 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] text-white shadow-pop after:absolute after:right-full after:top-1/2 after:-translate-y-1/2 after:border-4 after:border-transparent after:border-r-ink" data-testid="status-tip">눌러서 상태 바꾸기</span>}
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} title="상태 바꾸기" width={200}>
-        {canSetStatus(t, user.id, quick) && quick !== t.status && (
+        {canSetStatus(t, user.id, quick, user.role) && quick !== t.status && (
           <button type="button" onClick={() => go(quick)} data-testid="status-quick"
             className="mb-1 flex w-full items-center gap-2 rounded-input bg-green-50 px-2.5 py-2 text-left text-sm font-bold text-green-800 hover:bg-green-100">
             <Check className="size-4" />{mine && quick !== 'in_progress' && t.status !== 'review' ? '내 몫 완료' : quick === 'done' ? '완료' : quick === 'review' ? '검토 요청' : '다시 진행 중'}
           </button>
         )}
         {(['in_progress', 'todo', 'review', 'on_hold', 'done'] as TaskStatus[]).filter((s) => s !== quick).map((s) => (
-          <button key={s} type="button" disabled={!canSetStatus(t, user.id, s)} onClick={() => go(s)} aria-pressed={s === t.status}
+          <button key={s} type="button" disabled={!canSetStatus(t, user.id, s, user.role)} onClick={() => go(s)} aria-pressed={s === t.status}
             className="flex w-full items-center gap-2 rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50 disabled:opacity-40">
             <span className={cx('size-2 rounded-full', CHIP_DOT[s])} />{STATUS_LABEL[s]}{s === t.status && <Check className="ml-auto size-3.5 text-accent-600" />}
           </button>
@@ -976,7 +986,7 @@ function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAc
       order.splice(at < 0 ? order.length : at, 0, a);
       const body = moveBody(dst);
       const t = src.items.find((x) => x.id === a)!;
-      if (body && 'status' in body && !canSetStatus(t, user.id, body.status as TaskStatus)) { toast.info(NOT_MINE); return; }
+      if (body && 'status' in body && !canSetStatus(t, user.id, body.status as TaskStatus, user.role)) { toast.info(NOT_MINE); return; }
       if (body) onPatch(t, body);
     }
     onReorder(order);
@@ -1255,7 +1265,7 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
   const [dx, setDx] = useState(0);
   // 밀어서 완료: 기본 꺼짐(설정에서 켬). 켜도 오른쪽으로 행 너비 45% 이상 밀고 손을 뗄 때만, 세로 스크롤 중엔 무시. 보류 밀기는 없앰(실수로 업무가 사라지던 원인)
   // V12 11번: 상태를 바꿀 수 없는 업무는 밀어서 완료도 끔
-  const swipeOn = useSwipeSetting() && canSetStatus(t, user.id, nextStatusOnCheck(t, user.role));
+  const swipeOn = useSwipeSetting() && canSetStatus(t, user.id, nextStatusOnCheck(t, user.role), user.role);
   const rowOpen0 = useRowOpen(t.id, useContext(OpenTaskCtx));
   const selc = useContext(SelectCtx);
   const picked = !!selc?.sel.has(t.id);
@@ -1406,7 +1416,7 @@ function BoardView({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: an
     const t = e.active.data.current as Task;
     const to = e.over?.id as TaskStatus | undefined;
     if (!t || !to || to === t.status) return;
-    if (!canSetStatus(t, user.id, to)) { toast.info(NOT_MINE); return; } // V12 11번
+    if (!canSetStatus(t, user.id, to, user.role)) { toast.info(NOT_MINE); return; } // V12 11번
     onPatch(t, { status: to });
   };
   return (

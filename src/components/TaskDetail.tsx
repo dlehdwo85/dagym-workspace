@@ -42,7 +42,7 @@ import { useResearchAsk } from '@/components/sales/ResearchAsk';
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
   reopened: '다시 열기', deleted: '삭제', auto_spawned: '완료로 다음 업무 자동 생성', auto_removed: '완료 되돌리기 — 자동 생성 업무 정리', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
-  checklist_done: '체크리스트 완료', reassigned: '재배정', part_done: '내 몫 완료(공동 담당)', part_reopened: '내 몫 완료 취소(공동 담당)', assignee_added: '담당 추가', assignee_removed: '담당 빼기', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
+  checklist_done: '체크리스트 완료', reassigned: '재배정', part_done: '내 몫 완료(공동 담당)', part_reopened: '내 몫 완료 취소(공동 담당)', closed_by: '완료 처리(남은 담당자 몫 포함)', assignee_added: '담당 추가', assignee_removed: '담당 빼기', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
   file_attached: '파일 첨부', file_edited: '파일 수정', file_opened_doc: '파일을 문서로 열어 편집', file_downloaded: '파일 내려받음', mail_queued: '메일 보내기 요청', mail_sent: '메일 보냄', mail_failed: '메일 발송 실패', share_created: '다운로드 링크 만듦', share_opened: '고객이 자료를 열어봄', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
 const FIELD_LABEL: Record<string, string> = {
@@ -372,7 +372,14 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
     : t.approval_required && reviewerCandidate0 && reviewerCandidate0 !== user.id ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') } // #410 보강: 담당자가 관리자여도 검토자가 따로 있으면 검토 요청
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
-  const primary = primary0 && (statusOwner || isReviewer) ? primary0 : null;
+  // 334차(대표 11/02 16:4x·17:0x): 요청자(지시자)·관리자급(관리자·부서장·팀장)은 담당자 전원이 [내 몫 완료]를 누르기 전에도 [완료 처리] — 남은 몫은 기록(closed_by)·알림. 서버 perms.finish 와 같은 기준
+  const finishAs: string | null = t.status !== 'done' && t.status !== 'review' ? (perms.finish ?? null) : null;
+  const finishBtn = finishAs ? { label: multi ? '완료 처리(남은 몫 포함)' : '완료 처리', run: () => {
+    if (multi && !confirm('아직 [내 몫 완료]를 누르지 않은 담당자가 있어도 업무를 완료 처리합니다.\n남은 담당자에게 알림이 갑니다. 계속할까요?')) return;
+    patch({ status: 'done', finish: true }, '완료 처리했습니다');
+  } } : null;
+  const primary = primary0 && (statusOwner || isReviewer) ? primary0 : finishBtn;
+  const closedBy = t.status === 'done' ? (data.history as any[]).find((h) => h.action === 'closed_by' && (!t.completed_at || Math.abs(new Date(h.created_at).getTime() - new Date(t.completed_at).getTime()) < 300000)) : null;
   // 대표 10/21 13:50 #410 ①: 모든 업무에서 담당자가 완료 대신 [검토 요청]을 누를 수 있다(요청자·없으면 만든 사람이 검토) — 결재선·검토 필수 업무는 기존 흐름 그대로
   const reviewerCandidate = reviewerCandidate0;
   const reviewAsk = !!primary && primary.label === '완료' && (t.status === 'todo' || t.status === 'in_progress') && !t.approval_line_id && !!reviewerCandidate && reviewerCandidate !== user.id
@@ -518,6 +525,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           )}
           {/* V14 20번: 완료 업무는 "다시 진행"을 크게 (권한 없으면 서버가 이유를 알려 줌) */}
  <PartBox t={t} onPatch={patch} />
+          {closedBy && <p className="mt-3 rounded-input bg-violet-50 px-3 py-2 text-sm text-violet-950" data-testid="closed-by-note"><b>{closedBy.actor_name}({closedBy.changes?.as})</b>님이 완료 처리했습니다 — 내 몫 완료 전이던 담당자: {(closedBy.changes?.left ?? []).join(', ')}</p>}
           {t.status !== 'done' && t.status !== 'review' && !primary && !myPart && (
             <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">{t.assignee_name ? `담당자 ${t.assignee_name}님이 진행합니다` : `만든 사람 ${t.created_by_name}님이 진행합니다`}</p>
           )}

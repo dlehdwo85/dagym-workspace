@@ -150,3 +150,40 @@ test('알림·리마인더: 마감 알림·마감일 변경·댓글이 공동 �
   const dup = await ctx.owner.ok('POST', `/api/tasks/${r.id}/duplicate`, {});
   assert.equal((await sql`select count(*)::int n from task_assignees where task_id = ${dup.id}`)[0].n, 2);
 });
+
+// 334차(대표 11/02 16:4x·17:0x '대표자 지시 혹은 팀장 등 관리자급'): 요청자·관리자급은 담당자 전원이 [내 몫 완료]를 누르기 전에도 [완료] — 남은 몫은 기록(closed_by)·남은 담당자 알림 · 단독 업무도 같은 기준 · status=open 은 완료 제외
+test('334차: 요청자가 공동 업무를 [완료] → 바로 완료 · closed_by(요청자·남은 사람) · 남은 담당자에게만 알림 · 관리자도 단독 업무를 완료 처리 · 되돌리기는 지금 규칙(담당자) · ?status=open 에 완료 없음', async () => {
+  const nameOf = async (id) => (await sql`select name from users where id = ${id}`)[0].name;
+  const ver = async (c, id) => (await c.ok('GET', `/api/tasks/${id}`)).task.version;
+  // 공동 업무: 요청자 managerA → 주 담당 staffB + 공동 staffA(내 몫 완료함)
+  const r = await ctx.managerA.client.ok('POST', '/api/tasks', { title: '공동 점검 334', assigneeId: ctx.staffB.id, coAssigneeIds: [ctx.staffA.id], orgUnitId: ctx.siteA, approvalRequired: false });
+  await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.id}`, { myPart: 'done' });
+  const before = await ctx.managerA.client.ok('GET', `/api/tasks/${r.id}`);
+  assert.equal(before.perms.finish, '요청자'); assert.equal(before.task.status, 'todo');
+  const d = await ctx.managerA.client.ok('PATCH', `/api/tasks/${r.id}`, { status: 'done', version: before.task.version });
+  assert.equal(d.status, 'done', '담당자 몫이 남아도 요청자는 업무를 바로 완료');
+  const got = await ctx.owner.ok('GET', `/api/tasks/${r.id}`);
+  assert.equal(got.task.status, 'done'); assert.equal(got.perms.finish, '관리자', '대표는 관리자 자격');
+  const a = (await acts(r.id)).find((x) => x.action === 'closed_by');
+  assert.ok(a, '완료 처리 기록'); assert.equal(a.changes.as, '요청자'); assert.deepEqual(a.changes.left, [await nameOf(ctx.staffB.id)], '내 몫 완료 전이던 사람만');
+  assert.ok((await notes(ctx.staffB.id, r.id)).some((n) => n.type === 'task_closed' && n.title.startsWith('완료 처리됨: ')), '남은 담당자 알림');
+  assert.ok(!(await notes(ctx.staffA.id, r.id)).some((n) => n.type === 'task_closed'), '내 몫을 마친 사람에겐 없음');
+  assert.ok(got.history.some((h) => h.action === 'closed_by'), '상세 변경 이력에');
+  // 단독 업무: 요청자 managerA → 담당 staffA · 요청자가 아닌 관리자(대표)가 완료 처리 → closed_by '관리자' · 담당자 알림 · 되돌리기는 담당자가 지금 규칙대로
+  const s = await ctx.managerA.client.ok('POST', '/api/tasks', { title: '단독 334', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false });
+  assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${s.id}`)).perms.finish, null, '담당 직원 본인에겐 완료 처리 자격 없음(내 상태 변경은 원래 규칙)');
+  await ctx.owner.ok('PATCH', `/api/tasks/${s.id}`, { status: 'done', version: await ver(ctx.owner, s.id) });
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${s.id}`)).task.status, 'done');
+  const a2 = (await acts(s.id)).find((x) => x.action === 'closed_by'); assert.equal(a2?.changes.as, '관리자'); assert.deepEqual(a2?.changes.left, [await nameOf(ctx.staffA.id)]);
+  assert.ok((await notes(ctx.staffA.id, s.id)).some((n) => n.type === 'task_closed'));
+  await ctx.staffA.client.ok('PATCH', `/api/tasks/${s.id}`, { status: 'in_progress', version: await ver(ctx.staffA.client, s.id) });
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${s.id}`)).task.status, 'in_progress', '담당자가 다시 진행');
+  // 완료 처리 자격이 있어도 '완료' 말고 다른 상태는 그대로 막힘(요청자가 보류로 바꾸기 X)
+  const h = await ctx.managerA.client.req('PATCH', `/api/tasks/${s.id}`, { status: 'on_hold', version: await ver(ctx.managerA.client, s.id) });
+  assert.equal(h.status, 403);
+  // 목록: status=open 은 완료 제외(예전엔 모르는 값이라 완료가 섞여 나옴) · status=done 에는 있음 · open,review 조합
+  const open = await ctx.owner.ok('GET', '/api/tasks?status=open&limit=500');
+  assert.ok(open.tasks.length > 0 && open.tasks.every((t) => t.status !== 'done') && open.tasks.some((t) => t.id === s.id) && !open.tasks.some((t) => t.id === r.id));
+  assert.ok((await ctx.owner.ok('GET', '/api/tasks?status=done&limit=500')).tasks.some((t) => t.id === r.id));
+  assert.ok((await ctx.owner.ok('GET', '/api/tasks?status=open,done&limit=500')).tasks.some((t) => t.id === r.id), 'open,done 은 둘 다');
+});

@@ -706,7 +706,7 @@ await step('U-0b·U-0c 검증 오류는 항목 이름과 한국어로, 연결 �
   assert.match(fam[0], /Pretendard Variable/); assert.equal(fam[1], true, 'Pretendard 글꼴 로드');
   await c.close();
 });
-await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고 맨 아래 \'완료됨 1건\' → 되돌리기(#508) (V14 43번: 왼쪽 동그라미 없음), 필터 칩 표시·해제, 상단 검색(Ctrl K 버튼)', async () => {
+await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 바로 빠지고(접힌 완료됨 칸 없음) 안내 [완료 보기] → 완료 칩에서 되돌리기(334차 #917) (V14 43번: 왼쪽 동그라미 없음), 필터 칩 표시·해제, 상단 검색(Ctrl K 버튼)', async () => {
   const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '원형 체크 시험', orgUnitId: ctx.siteA, approvalRequired: false })).id;
   await owner.goto(BASE + '/tasks?mode=list');
   await owner.getByLabel('업무 검색').fill('원형 체크');
@@ -714,52 +714,45 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 빠지고
   assert.equal(await row.getByTestId('check-circle').count(), 0, '왼쪽 완료 동그라미 없음');
   await row.getByTestId('row-status-chip').filter({ visible: true }).click();
   await owner.getByTestId('status-quick').click();
-  await owner.getByText('완료됨으로 옮겼습니다').waitFor();
+  await owner.getByText('완료로 옮겼습니다').waitFor(); // 334차(대표 11/02 16:4x #917): 완료는 목록에 남지 않고 '완료' 칩에서만
   await owner.waitForTimeout(500);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
-  // #508: 목록에서 바로 빠지고 묶음 맨 아래 접힌 '완료됨 1건' — 안내 [완료됨 보기]가 펼치고, 되돌리기는 거기서
   await owner.locator(`[data-row="${id}"]`).waitFor({ state: 'detached' });
-  // 168차 CI: 목록이 담당자별 묶음(기본)으로 열리면 '완료됨' 칸이 묶음마다 하나씩 → 안내 [완료됨 보기]로 연 뒤 이 글이 든 칸을 고른다
-  await owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }).first().waitFor();
+  assert.equal(await owner.getByTestId('done-fold').count(), 0, '334차: 접힌 완료됨 칸도 없음(#508 칸은 끝)');
   assert.equal(await owner.getByRole('button', { name: '되돌리기', exact: true }).count(), 0, '안내에는 되돌리기 없음');
-  await owner.getByRole('button', { name: '완료됨 보기' }).click();
-  const doneRow = owner.locator(`[data-done-id="${id}"]`).first(); await doneRow.waitFor();
-  const fold = owner.getByTestId('done-fold').filter({ has: owner.locator(`[data-done-id="${id}"]`) }).first();
-  assert.match(await fold.getByTestId('done-fold-toggle').innerText(), /완료됨 1건\s*\(오늘 1 · 이번 주 1\)/);
-  assert.equal(await fold.getByTestId('done-fold-all').getAttribute('href'), '/tasks?view=done');
-  await owner.screenshot({ path: `${SHOTS}/217-done-fold.png`, clip: await fold.boundingBox() });
-  await doneRow.getByTestId('done-fold-undo').click();
-  await owner.getByText('되돌렸습니다 — 진행 전').waitFor();
-  await owner.locator(`[data-row="${id}"]`).waitFor();
-  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'todo', '바로 전 상태(진행 전)로');
-  await owner.reload(); await owner.getByLabel('업무 검색').fill('원형 체크'); await owner.locator(`[data-row="${id}"]`).waitFor(); // 새로 불러와도 목록에
-  assert.equal(await owner.getByTestId('done-fold').count(), 0, '완료가 없으면 접힌 칸도 없음');
-  // 다른 화면(API)에서 보류 → 완료: 새로 불러온 '완료됨'의 [되돌리기]는 서버 활동 기록의 완료 직전 상태(보류)로
+  await owner.getByRole('button', { name: '완료 보기' }).click(); // 안내 → '완료' 칩 보기(월별)
+  const doneRow = owner.locator(`[data-row="${id}"]`).first(); await doneRow.waitFor();
+  await owner.getByTestId('task-groups').getByText(/\d{4}년 \d+월/).first().waitFor();
+  await owner.screenshot({ path: `${SHOTS}/217-done-view.png`, clip: await doneRow.boundingBox() });
+  // 되돌리기 = 완료 보기의 상태 칩 → [다시 진행 중]
+  await doneRow.getByTestId('row-status-chip').filter({ visible: true }).click();
+  await owner.getByTestId('status-quick').click();
+  await owner.getByText('다시 진행 중으로 바꿨습니다').waitFor();
+  await owner.locator(`[data-row="${id}"]`).waitFor({ state: 'detached' });
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'in_progress', '다시 진행 중으로');
+  await owner.goto(BASE + '/tasks?mode=list'); await owner.getByLabel('업무 검색').fill('원형 체크'); await owner.locator(`[data-row="${id}"]`).waitFor(); // 다시 목록에
+  assert.equal(await owner.getByTestId('done-fold').count(), 0, '목록에 접힌 칸 없음');
+  // API(로컬 11/02 관찰): ?status=open 에 완료가 섞이지 않음
   for (const st of ['on_hold', 'done']) await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { status: st, version: (await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.version });
-  await owner.goto(BASE + '/tasks?mode=list&openDone=1'); await owner.getByLabel('업무 검색').fill('원형 체크'); // openDone=1 = '완료됨' 칸 펼친 채로(묶음 모드여도 이 글이 든 칸을 바로 찾음)
-  await owner.locator(`[data-done-id="${id}"]`).first().getByTestId('done-fold-undo').click();
-  await owner.getByText('되돌렸습니다 — 보류').waitFor();
-  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'on_hold', '새로 불러와도 완료 직전 상태(보류)로');
-  await owner.evaluate(() => localStorage.removeItem('wos_done_fold')); // 펼침 기억은 이 단계 안에서만
+  assert.ok(!(await ctx.owner.ok('GET', '/api/tasks?status=open&limit=500')).tasks.some((t) => t.id === id), 'status=open 은 완료 제외');
   await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { status: 'todo', version: (await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.version });
-  // #508 후속(로컬 10/23 운영): 반복 업무 완료 → 다음 회차 → '완료됨'에서 되돌리기 → 손대지 않은 다음 회차도 같이 휴지통(안내) · 안내는 4초 넘게 그대로(새로고침 신호에도 다시 그려지지 않음)
+  // #508 후속(로컬 10/23 운영) → 334차: 반복 업무 완료 → 다음 회차 → '완료' 칩 보기의 상태 칩으로 되돌리기 → 손대지 않은 다음 회차도 같이 휴지통(안내) · 안내는 4초 넘게 그대로(새로고침 신호에도 다시 그려지지 않음)
   const rid = (await ctx.owner.ok('POST', '/api/tasks', { title: '원형 체크 반복', orgUnitId: ctx.siteA, dueDate: addDays(today, 1), recurrenceRule: 'FREQ=WEEKLY', approvalRequired: false })).id;
   await owner.reload(); await owner.getByLabel('업무 검색').fill('원형 체크');
   await owner.locator(`[data-task-id="${rid}"]`).getByTestId('row-status-chip').filter({ visible: true }).click();
   await owner.getByTestId('status-quick').click();
-  const doneToast = owner.getByTestId('toast').filter({ hasText: '완료됨으로 옮겼습니다' }); await doneToast.waitFor();
+  const doneToast = owner.getByTestId('toast').filter({ hasText: '완료로 옮겼습니다' }); await doneToast.waitFor();
   const th = await doneToast.elementHandle();
   await owner.evaluate(() => window.dispatchEvent(new Event('wos-refresh')));
   await owner.waitForTimeout(4500);
   assert.equal(await th.isVisible(), true, '4.5초 뒤·새로고침 신호 뒤에도 같은 안내');
   const [nx] = await sql`select id from tasks where recurrence_source_id = ${rid} and deleted_at is null`; assert.ok(nx, '다음 회차 생김');
-  await owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }).first().waitFor();
-  const row3 = owner.locator(`[data-done-id="${rid}"]`).first();
-  if (!(await row3.count())) await owner.getByTestId('done-fold').filter({ hasText: '완료됨 1건' }).first().getByTestId('done-fold-toggle').click(); // 주소 openDone=1 로 이미 펼쳐져 있으면 그대로(한 번 더 누르면 닫힘)
-  await row3.getByTestId('done-fold-undo').click();
+  await doneToast.getByRole('button', { name: '완료 보기' }).click();
+  const row3 = owner.locator(`[data-row="${rid}"]`).first(); await row3.waitFor();
+  await row3.getByTestId('row-status-chip').filter({ visible: true }).click(); await owner.getByTestId('status-quick').click();
   await owner.getByText('완료 때 자동으로 만든 다음 업무 1건도 지웠습니다').waitFor();
   assert.ok((await sql`select deleted_at from tasks where id = ${nx.id}`)[0].deleted_at, '손대지 않은 다음 회차는 휴지통');
-  await owner.evaluate(() => localStorage.removeItem('wos_done_fold'));
+  await owner.getByRole('button', { name: '완료', exact: true }).click(); // 완료 칩 끄기 → 목록으로
   await owner.getByTestId('filter-toggle').click();
   await owner.getByTestId('filter-panel').getByLabel('상태').selectOption('todo');
   await owner.getByTestId('filter-chip').filter({ hasText: '상태: 진행 전' }).waitFor();
@@ -895,14 +888,15 @@ await step('모바일 밀기: 기본 꺼짐·짧은/세로 밀기 무시, 켜면
   assert.notEqual(await status(), 'done', '세로 스크롤 중엔 무시');
   const w = (await row.boundingBox()).width;
   await drag([w * 0.2, w * 0.4, w * 0.5]);
-  await staff.getByText('완료됨으로 옮겼습니다').waitFor(); // 274차 #805 안내 문구(줄표 뺌)
+  await staff.getByText('완료로 옮겼습니다').waitFor(); // 334차: 완료는 목록에 남지 않고 '완료' 칩에서
   assert.equal(await status(), 'done');
-  await row.waitFor({ state: 'detached' }); // #508 목록에서 바로 빠짐
-  await staff.getByRole('button', { name: '완료됨 보기' }).click();
-  const back = staff.getByTestId('done-fold').locator(`[data-done-id="${id}"]`);
-  await back.getByTestId('done-fold-undo').click();
+  await row.waitFor({ state: 'detached' }); // 목록에서 바로 빠짐
+  await staff.getByRole('button', { name: '완료 보기' }).click();
+  const back = staff.locator(`[data-row="${id}"]`).first(); await back.waitFor();
+  await back.getByTestId('row-status-chip').filter({ visible: true }).click(); await staff.getByTestId('status-quick').click(); // 되돌리기 = 완료 보기의 상태 칩
   await staff.waitForTimeout(600);
   assert.notEqual(await status(), 'done', '되돌리기');
+  await staff.getByRole('button', { name: '완료', exact: true }).click(); // 완료 칩 끄기 → 목록
   await row.waitFor();
   await staff.evaluate(() => localStorage.removeItem('wos_swipe_done'));
 });
@@ -1703,15 +1697,15 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   assert.equal(batch.length, 3); assert.equal(new Set(batch.map((b) => b.batch_id)).size, 1);
   await owner.goto(BASE + '/tasks');
   await owner.locator('[data-batch]').first().waitFor();
-  // #508(대표 10/23): 완료하면 목록에서 빠지고 그 묶음 맨 아래 접힌 '완료됨'으로(예전 V6 16번 '제자리 취소선' 대신)
+  // #508(대표 10/23) → 334차(대표 11/02 16:4x): 완료하면 목록에서 바로 빠지고(접힌 칸 없음) '완료' 칩 보기에만
   const row = owner.locator('[data-row]', { hasText: 'V6 다같이 점검' }).first();
   const rid = await row.getAttribute('data-row');
   await row.getByTestId('row-status-chip').filter({ visible: true }).click(); await owner.getByTestId('status-quick').click(); // V14 43번: 상태 칩 메뉴 맨 위 완료
   await owner.locator(`[data-row="${rid}"]`).waitFor({ state: 'detached' });
-  await owner.getByRole('button', { name: '완료됨 보기' }).click();
-  await owner.getByTestId('done-fold').locator(`[data-done-id="${rid}"]`).waitFor();
+  assert.equal(await owner.getByTestId('done-fold').count(), 0, '334차: 접힌 완료됨 칸 없음');
+  await owner.getByRole('button', { name: '완료 보기' }).click();
   // 완료 보기(월별)
-  await owner.getByRole('button', { name: '완료', exact: true }).click();
+  await owner.locator(`[data-row="${rid}"]`).first().waitFor();
   await owner.getByTestId('task-groups').getByText(/\d{4}년 \d+월/).first().waitFor();
   await owner.screenshot({ path: `${SHOTS}/70-done-archive.png` });
   // 삭제 → 되돌리기 → 다시 삭제 → 휴지통에서 되살리기

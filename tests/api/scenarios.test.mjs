@@ -1942,7 +1942,7 @@ describe('WORKIN_V12 상태 권한 · 확인 완료 · 검토 요청 알림', ()
     assert.equal((await sql`select count(*)::int c from notifications where entity_id = ${t} and title like '확인 완료%'`)[0].c, 0, '확인 완료 알림 없음');
     const deny = await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
     assert.equal(deny.status, 403); assert.match(deny.body.error.message, /담당자만 바꿀 수 있어요/);
-    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t}`, { status: 'done' })).status, 403, '대표도 남의 업무 완료 불가');
+    assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t}`, { status: 'on_hold' })).status, 403, '대표도 남의 업무 보류 불가(334차: 완료만 요청자·관리자급 예외 — co-assign 시험)');
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
     const rv = await sql`select body from notifications where user_id = ${ctx.managerA.id} and entity_id = ${t} and type = 'review_requested'`;
@@ -2012,9 +2012,9 @@ describe('대표 피드백 10/15 검토 중 업무', () => {
 });
 
 describe('WORKIN_V12 11번 상태는 담당자만 (대표·관리자 예외 없음)', () => {
-  test('대표·관리자·요청자도 담당자 업무의 보류·진행·완료 불가(403), 담당자는 가능', async () => {
+  test('대표·관리자·요청자도 담당자 업무의 보류·진행 불가(403), 담당자는 가능 · 334차(대표 11/02 16:4x): 완료만은 요청자·관리자급이 가능(기록 closed_by)', async () => {
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12-11 보류 시도', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
-    for (const st of ['on_hold', 'in_progress', 'done']) {
+    for (const st of ['on_hold', 'in_progress']) {
       for (const c of [ctx.owner, ctx.managerA.client]) {
         const r = await c.req('PATCH', `/api/tasks/${t}`, { status: st });
         assert.equal(r.status, 403, `${st} 거절`); assert.match(r.body.error.message, /상태는 담당자만/);
@@ -2023,10 +2023,14 @@ describe('WORKIN_V12 11번 상태는 담당자만 (대표·관리자 예외 없�
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'on_hold' });
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
     assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'in_progress');
+    // 334차: 현장 관리자(관리자급)의 [완료] → 바로 완료 + 담당자 몫이 남았다는 기록
+    await ctx.managerA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'done' });
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'done');
+    assert.ok((await sql`select 1 from activities where entity_type = 'task' and entity_id = ${t} and action = 'closed_by' and changes->>'as' = '관리자'`).length, '완료 처리 기록');
   });
-  test('유일한 예외: 검토 요청된 업무를 그 업무의 요청자가 승인·반려 — 요청자가 아닌 대표·관리자는 불가, 검토 전에는 요청자도 불가', async () => {
+  test('검토 요청된 업무를 그 업무의 요청자가 승인·반려 — 요청자가 아닌 대표·관리자는 불가, 검토 전에는 요청자도 보류 불가(완료는 334차부터 가능)', async () => {
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12-11 검토', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, approvalRequired: false })).id;
-    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { status: 'done' })).status, 403, '검토 전에는 요청자도 불가');
+    assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { status: 'on_hold' })).status, 403, '검토 전에는 요청자도 보류 불가');
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
     assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${t}`, { status: 'done' })).status, 403, '요청자가 아닌 대표는 승인 불가');
     assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${t}`, { status: 'on_hold' })).status, 403, '요청자도 보류는 불가');

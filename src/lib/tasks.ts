@@ -55,6 +55,7 @@ export const taskInput = z.object({
   completeRule: z.enum(['primary', 'all']).optional(),
   /** 담당자 본인의 '내 몫 완료'(done)·취소(open) — 담당자가 여럿이면 마지막 사람이 끝낼 때 업무 완료, 혼자면 업무 상태 그대로 */
   myPart: z.enum(['done', 'open']).optional(),
+  finish: z.boolean().optional(), // 334차: 요청자·관리자급의 '완료 처리'(내 몫이 있어도 내 몫 완료가 아니라 업무 완료)
   /** V14 8번: 팀에 배정 — each = 팀원 모두에게 각각, lead = 팀장이 담당자 지정 */
   teamId: zUuid.nullable().optional(),
   teamMode: z.enum(['each', 'lead', 'tag']).optional(), // tag(R-16): 소속 팀만 붙이고 담당자는 그대로
@@ -190,8 +191,10 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
   if (q.assigneeId) conds.push(assignedSql(sql, q.assigneeId)); // #475 공동 담당 업무도 그 사람 업무로
   if (q.requestedById) conds.push(sql`t.requested_by = ${q.requestedById}`);
   if (q.status) {
-    const st = q.status.split(',').filter((s) => s in STATUS_LABEL);
-    if (st.length) conds.push(sql`t.status = any(${st})`);
+    const raw = q.status.split(','); const st = raw.filter((s) => s in STATUS_LABEL);
+    // 334차(로컬 11/02 관찰: ?status=open 에 완료 98건 섞임): open = 완료 아닌 것 전부(예전엔 모르는 값이라 무시됨)
+    if (raw.includes('open')) conds.push(st.length ? sql`(t.status <> 'done' or t.status = any(${st}))` : sql`t.status <> 'done'`);
+    else if (st.length) conds.push(sql`t.status = any(${st})`);
   } else if (q.includeDone === '0') conds.push(sql`t.status <> 'done'`);
   // V6 16번: 완료해도 오늘(서울 자정까지)은 목록에 남기고, 댓글이 달린 완료 업무는 7일 동안
   else if (q.includeDone === 'recent') conds.push(sql`(t.status <> 'done' or t.completed_at >= ${today}::date::timestamp at time zone 'Asia/Seoul'
@@ -554,7 +557,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const leadFu = i.leadFollowUp; // 197차(#460): 아래에서 i 를 다시 짜도(내 몫 완료 → 업무 완료) 고른 다음 행동은 그대로
     const partOnly = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'myPart', 'leadFollowUp'].includes(k));
     let partStatus = false; // 담당자가 내 몫으로 바꾸는 업무 상태(마지막 사람의 완료·내 몫 취소로 다시 열기) — 버전·첫 담당자 확인 없이
-    if (i.myPart !== undefined || (multi && mine && partOnly && i.status)) {
+    if (!i.finish && (i.myPart !== undefined || (multi && mine && partOnly && i.status))) {
       if (!mine) throw forbidden('담당자만 내 몫 완료를 표시할 수 있어요');
       // 내 몫: myPart 그대로 · 완료/검토 요청 = 내 몫 완료 · 완료된 업무를 다른 상태로 = 내 몫 취소(다시 열기). 진행 중·보류 같은 단계 바꾸기는 내 몫과 상관없이 아래 원래 길로
       const want = i.myPart !== undefined ? i.myPart === 'done' : i.status === 'done' || i.status === 'review' ? true : cur.status === 'done' ? false : null;
@@ -587,7 +590,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       && (await tx`select 1 from team_members where team_id = ${cur.team_id} and user_id = ${u.id} and is_lead`).length > 0;
     // #475(로컬 10/23): 관리자는 남의 업무에도 공동 담당 추가·빼기·완료 규칙만은 바꿀 수 있다(내용·일정은 그대로 요청자·담당자만)
     const coAdminOnly = atLeast(u, 'admin') && Object.entries(i).every(([k, v]) => v === undefined || ['coAssigneeIds', 'completeRule', 'version'].includes(k));
-    if (!perms.edit && !leadFirstAssign && !coAdminOnly) {
+    // 334차(대표 11/02 16:4x·17:0x '대표자 지시 혹은 팀장 등 관리자급'): 요청자·관리자급은 담당자가 아니어도 상태 '완료'만은(남은 몫은 아래에서 기록·알림)
+    const finishOnly = !!perms.finish && i.status === 'done' && Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'leadFollowUp', 'finish'].includes(k));
+    if (!perms.edit && !leadFirstAssign && !coAdminOnly && !finishOnly) {
       const onlyStatus = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'leadFollowUp'].includes(k));
       throw forbidden(onlyStatus ? '상태는 담당자만 바꿀 수 있어요' : '이 업무를 수정할 권한이 없습니다 — 업무 내용·일정은 요청자·담당자만 바꿀 수 있습니다');
     }
@@ -691,8 +696,8 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
           throw forbidden(`검토 중인 업무의 승인·반려는 검토 담당자 ${nm?.name ?? ''}님만 할 수 있습니다`);
         }
         if (reviewer && reviewer === u.id && i.status !== 'done' && i.status !== 'in_progress') throw forbidden('검토 담당자는 승인(완료)·반려(진행 중)만 할 수 있어요');
-        if (!reviewer && owner !== u.id && !(multi && isCo)) throw forbidden('상태는 담당자만 바꿀 수 있어요');
-      } else if (owner !== u.id && !(multi && isCo)) { // 대표 10/24: 담당자가 여럿이면 누구나(같은 무게)
+        if (!reviewer && owner !== u.id && !(multi && isCo) && !(i.status === 'done' && perms.finish)) throw forbidden('상태는 담당자만 바꿀 수 있어요');
+      } else if (owner !== u.id && !(multi && isCo) && !(i.status === 'done' && perms.finish)) { // 대표 10/24: 담당자가 여럿이면 누구나(같은 무게) · 334차: 요청자·관리자급의 [완료]는 예외
         const [nm] = cur.assignee_id ? await tx<{ name: string }[]>`select name from users where id = ${cur.assignee_id}` : [];
         throw forbidden(cur.assignee_id ? `상태는 담당자만 바꿀 수 있어요(담당 ${nm?.name ?? ''})` : '담당자가 없는 업무의 상태는 요청자(만든 사람)만 바꿀 수 있어요');
       }
@@ -710,7 +715,8 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       }
       if (to === 'done' && lineId) throw forbidden('결재선이 지정된 업무입니다. "검토 요청"으로 결재를 올려 주세요.');
       // 대표 10/24: 담당자가 여럿이면 모두 내 몫을 끝내야 완료·검토 요청(각자 [완료] → 마지막 사람이 끝내면 위에서 자동) — 검토 승인은 이미 확인된 것이라 그대로
-      if ((to === 'done' || to === 'review') && cur.status !== 'review' && multi && !partStatus) {
+      // 334차(대표 11/02 16:4x): 요청자·관리자급의 [완료]는 남은 몫이 있어도 통과(아래에서 기록·알림)
+      if ((to === 'done' || to === 'review') && cur.status !== 'review' && multi && !partStatus && !(to === 'done' && perms.finish && (!mine || i.finish))) {
         const left = (await partsOf(tx, id)).filter((p) => !p.done).map((p) => p.name);
         if (left.length) throw conflict(`담당자 ${left.join(', ')}님이 아직 완료하지 않았어요 — 담당자가 각자 [완료]를 누르면 마지막 사람이 끝낼 때 업무가 완료돼요`);
       }
@@ -834,6 +840,15 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       await notify(tx, { userIds: [requester], type: 'task_done_for_requester',
         title: `${head}: ${title}`, body: `${u.name}님이 '${title}'을(를) ${verb}`,
         link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reqst:${id}:${upd.version}` });
+    }
+    // 334차(대표 11/02 16:4x): 요청자·관리자급이 담당자 몫이 남은 업무를 [완료]로 끝내면 — 기록 closed_by(누가·어떤 자격으로·남은 사람) + 남은 담당자에게 알림(본인 몫은 제외)
+    if (set.status === 'done' && cur.status !== 'done' && (!mine || i.finish) && perms.finish) {
+      const left = (await partsOf(tx, id)).filter((p) => !p.done && p.id !== u.id);
+      if (left.length) {
+        await activity(tx, 'task', id, u.id, 'closed_by', { as: perms.finish, left: left.map((p) => p.name) });
+        await notify(tx, { userIds: left.map((p) => p.id), type: 'task_closed', title: `완료 처리됨: ${title}`, body: `${u.name}(${perms.finish})님이 업무를 완료 처리했습니다 — 남은 내 몫도 완료로 봅니다`,
+          link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `closed:${id}:${upd.version}` });
+      }
     }
     if (set.status || 'requested_by' in set || (cur.status === 'review' && ('title' in set || 'due_date' in set || 'assignee_id' in set))) await syncReviewTask(tx, id, u.id);
     let spawned: string | null = null;

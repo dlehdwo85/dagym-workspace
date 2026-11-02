@@ -155,6 +155,8 @@ export interface TaskPerms {
   delete: boolean;
   /** #475 공동 담당(주 담당 외) — 보기·내용 수정·'내 몫 완료' */
   co?: boolean;
+  /** 334차(대표 11/02 16:4x·17:0x '대표자 지시 혹은 팀장 등 관리자급'): 담당자 전원이 [내 몫 완료]를 누르기 전에도 [완료]로 끝낼 수 있는 자격 — 요청자(지시자)·관리자(현장 관리자 이상·대표)·부서장·팀장(팀 업무). 없으면 null */
+  finish?: '요청자' | '관리자' | '부서장' | '팀장' | null;
 }
 
 export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db()): Promise<TaskPerms> {
@@ -176,6 +178,8 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
   const del = requester === u.id;
   // 부서장: 자기 부서원이 담당·요청한 업무(부서 간 협업 포함)
   const deptLead = (await sql`select 1 from tasks t where t.id = ${t.id} and ${leadOfInvolvedSql(sql, u)}`).length > 0;
+  // 334차: 요청자·관리자급의 [완료] 자격(상태 '완료'만 — 내용·일정·다른 상태는 위 규칙 그대로)
+  const finish: TaskPerms['finish'] = requester === u.id ? '요청자' : isAdmin(u) || (inUnit && atLeast(u, 'site_manager')) ? '관리자' : deptLead ? '부서장' : null;
   // P2 조직 개편: 함께하는 부서(task_teams)를 볼 수 있는 사람은 보기·댓글(수정은 위 규칙 그대로)
   let collabSeen = false;
   for (const r of await sql<{ team_id: string }[]>`select team_id from task_teams where task_id = ${t.id}`) {
@@ -185,10 +189,10 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
     const lv = await teamTaskLevel(u, t.team_id, sql);
     const [lead] = await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`;
     const teamManager = isAdmin(u) || (!!lead && lv === 'edit');
-    return { view: lv !== 'none' || involved || deptLead || collabSeen, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del, co: isCo };
+    return { view: lv !== 'none' || involved || deptLead || collabSeen, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del, co: isCo, finish: finish ?? (lead ? '팀장' : null) };
   }
   const manager = inUnit && atLeast(u, 'site_manager');
-  return { view: inUnit || involved || deptLead || collabSeen, edit, approve: manager, delete: del, co: isCo };
+  return { view: inUnit || involved || deptLead || collabSeen, edit, approve: manager, delete: del, co: isCo, finish };
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

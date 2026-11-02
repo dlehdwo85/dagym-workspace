@@ -21,14 +21,22 @@ export async function v1443({ browser, desk, ctx, BASE, SHOTS, sql }) {
     const quick = m.getByTestId('status-quick');
     assert.match(await quick.innerText(), /완료/);
     await quick.tap();
-    await m.getByText('완료됨으로 옮겼습니다').waitFor(); // 274차 #805 안내 문구(줄표 뺌)
+    await m.getByText('완료로 옮겼습니다').waitFor(); // 334차(대표 11/02 16:4x): 완료는 목록에 남지 않고 '완료' 칩에서
     assert.equal((await sql`select status from tasks where id = ${mine}`)[0].status, 'done');
-    await m.getByRole('button', { name: '완료됨 보기' }).tap(); // #508 되돌리기는 맨 아래 '완료됨'에서
-    await m.getByTestId('done-fold').locator(`[data-done-id="${mine}"]`).getByTestId('done-fold-undo').tap();
+    await m.locator(`[data-row="${mine}"]`).waitFor({ state: 'detached' });
+    await m.getByRole('button', { name: '완료 보기' }).tap(); // 되돌리기는 완료 보기의 상태 칩에서
+    const doneRow = m.locator(`[data-row="${mine}"]`).first(); await doneRow.waitFor();
+    await doneRow.getByTestId('row-status-chip').filter({ visible: true }).tap(); await m.getByTestId('status-quick').tap();
     for (let i = 0; i < 20 && (await sql`select status from tasks where id = ${mine}`)[0].status === 'done'; i++) await m.waitForTimeout(150);
     assert.notEqual((await sql`select status from tasks where id = ${mine}`)[0].status, 'done', '되돌리기');
-    const locked = m.locator(`[data-row="${other}"]`).getByTestId('row-status-locked').filter({ visible: true });
-    await locked.waitFor();
-    assert.equal(await m.locator(`[data-row="${other}"]`).getByTestId('row-status-chip').count(), 0, '남의 업무는 버튼 아님');
+    await m.getByRole('button', { name: '완료', exact: true }).tap(); // 완료 칩 끄기 → 목록
+    // 334차(대표 11/02 16:4x): 대표·관리자급은 남의 업무도 [완료]만은 누를 수 있음 → 칩은 버튼이되 메뉴에서 완료만 켜지고 보류·진행은 꺼짐(자물쇠는 직원끼리)
+    const otherChip = m.locator(`[data-row="${other}"]`).getByTestId('row-status-chip').filter({ visible: true });
+    await otherChip.waitFor();
+    await otherChip.tap();
+    assert.match(await m.getByTestId('status-quick').innerText(), /완료/, '관리자는 남의 업무에 완료만');
+    assert.equal(await m.getByRole('button', { name: '보류', exact: true }).isDisabled(), true, '보류는 담당자만');
+    assert.equal(await m.getByRole('button', { name: '진행 중', exact: true }).isDisabled(), true, '진행 중도 담당자만');
+    await m.keyboard.press('Escape');
   } finally { await mc.close(); for (const id of [mine, other]) await ctx.owner.ok('DELETE', `/api/tasks/${id}`).catch(() => {}); }
 }

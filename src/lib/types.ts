@@ -56,6 +56,7 @@ export const NOTIFICATION_TYPES = {
   event_reminder: '일정 시작 전',
   weekly_report: '주간 보고',
   task_done_for_requester: '요청한 업무 완료·보류',
+  task_closed: '내 몫이 남은 업무를 요청자·관리자가 완료 처리(남은 담당자에게)',
   briefing: '아침 브리핑(오늘의 일정·일정)',
   usage_alert: '사용량 한도(저장공간·AI·사용자) 80%·100%',
   chat: '메신저 새 메시지',
