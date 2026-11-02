@@ -157,7 +157,7 @@ export async function usageOverview(u: SessionUser) {
 function customerAi(a: Awaited<ReturnType<typeof aiBreakdown>>) {
   const k = (usd: number) => Math.round(usd * a.usdKrw);
   return { currency: 'krw' as const, cost: k(a.costUsd), limit: k(a.limitUsd), left: k(a.leftUsd), pct: a.pct, requests: a.requests, tokens: a.tokens, blocked: a.blocked, dailyLimit: a.dailyLimit,
-    byUser: (a.byUser as unknown as { user_id: string; name: string; requests: number; cost: number }[]).map((x) => ({ ...x, cost: k(x.cost) })), byPurpose: (a.byPurpose as unknown as { purpose: string; requests: number; cost: number }[]).map((x) => ({ ...x, cost: k(x.cost) })) };
+    byUser: (a.byUser as unknown as { user_id: string; name: string; requests: number; cost: number }[]).map((x) => ({ ...x, cost: k(x.cost) })), byPurpose: (a.byPurpose as unknown as { purpose: string; requests: number; cost: number; todayRequests: number; todayCost: number }[]).map((x) => ({ ...x, cost: k(x.cost), todayCost: k(x.todayCost) })) };
 }
 
 /** V14 4번: 이번 달 AI 사용 — 사람별·기능별, 회사 월 한도($) 대비 %, 원 환산(USD_KRW, 기본 1,400) */
@@ -165,11 +165,14 @@ export async function aiBreakdown(tenant: string, sql: Sql = db()) {
   const { usageThisMonth } = await import('./ai/assistant');
   const { aiSettings } = await import('./ai/threads');
   const m = await usageThisMonth(tenant);
-  const start = `${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7)}-01`;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()); const start = `${today.slice(0, 7)}-01`;
   const [byUser, byPurpose, [blocked]] = await Promise.all([
     sql`select a.user_id, coalesce(us.name, '(삭제된 사용자)') as name, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost
       from ai_usage a left join users us on us.id = a.user_id where a.tenant = ${tenant} and a.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul') group by a.user_id, us.name order by cost desc limit 50`,
-    sql`select a.purpose, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost from ai_usage a
+    // 333차 ⓑ: 기능별 오늘(서울 날짜) 호출 수·비용도 같이
+    sql`select a.purpose, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost,
+        count(*) filter (where a.created_at >= (${today}::date::timestamp at time zone 'Asia/Seoul'))::int as "todayRequests",
+        coalesce(sum(a.cost_usd) filter (where a.created_at >= (${today}::date::timestamp at time zone 'Asia/Seoul')), 0)::float8 as "todayCost" from ai_usage a
       where a.tenant = ${tenant} and a.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul') group by a.purpose order by cost desc`,
     sql<{ n: number }[]>`select count(*)::int n from ai_messages m join ai_threads t on t.id = m.thread_id where t.tenant = ${tenant} and m.role = 'user' and m.status = 'blocked'
       and m.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul')`,

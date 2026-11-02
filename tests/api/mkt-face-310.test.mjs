@@ -178,7 +178,7 @@ test('⑤ 표지 바탕도 얼굴 규칙: 시안 바탕 폴더의 얼굴 자리 
   await sql`update library_files set vision = vision || ${sql.json({ faceBoxes: [{ x: 0.35, y: 0.2, w: 0.3, h: 0.25 }] })} where id = ${boxed}`;
   await sql`update library_files set folder = '마케팅/시안 바탕', tags = array['글자없음'] where id in ${sql([unk, boxed])}`;
   const id = await slot(cov, '표지짐 GX 수업 안내', { days: 9 });
-  const feed = say({ title: '표지짐 GX 수업 안내', body: 'GX 수업 시간을 알려 드립니다.\n저녁 7시에 시작합니다.', brief: '실사', why: '', hooks: [], keyword: 'GX', card: CARD });
+  const feed = say({ title: '표지짐 GX 수업 안내', body: 'GX 수업 시간을 알려 드립니다.\n저녁 7시에 시작합니다. 상담은 데스크에서 받습니다.', brief: '실사', why: '', hooks: [], keyword: 'GX', card: CARD }); // 329차 장면 규칙: 글에 '상담'이 있어야 상담 데스크 사진을 씀
   await run([feed, feed]);
   const c = await cur(id);
   const vis = c.quality?.visual ?? {};

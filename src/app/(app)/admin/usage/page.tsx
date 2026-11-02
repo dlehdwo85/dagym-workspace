@@ -95,7 +95,7 @@ export default function UsagePage() {
                   <li key={r.k ?? r.label} className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-2">
                     <span className="truncate">{r.label}</span>
                     <span className="h-2 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-violet-500" style={{ width: `${(r.cost / max) * 100}%` }} /></span>
-                    <span className="tabular-nums text-ink-2">{aiMoney(ai, r.cost)} · {r.n}회</span>
+                    <span className="tabular-nums text-ink-2">{aiMoney(ai, r.cost)} · {r.n}회{r.todayN > 0 && <span className="ml-1 text-ink-3" data-testid="ai-purpose-today" title="오늘(서울 날짜) 호출 수와 비용">· 오늘 {r.todayN}회 · {aiMoney(ai, r.todayCost)}</span>}</span>
                   </li>
                 ))}{!rows.length && <li className="text-ink-3">아직 사용이 없습니다</li>}</ul>
               </div>

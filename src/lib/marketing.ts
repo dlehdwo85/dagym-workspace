@@ -119,7 +119,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
     if (!ok) throw badRequest(`${k === 'from' ? '시작' : '끝'} 날짜가 올바르지 않습니다: ${v.slice(0, 20)}`);
   }
   const sql = db(); const t = tenantOf(u);
-  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, coalesce(c.quality->'photoAudit'->>'pending', 'false')::boolean as audit_pending, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
+  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, coalesce(c.quality->'photoAudit'->>'pending', 'false')::boolean as audit_pending, case when (c.quality->'photoAudit'->>'version')::int = c.current_version then c.quality->'photoAudit'->>'skipped' end as audit_skipped, (c.quality->'photoAudit'->>'version')::int = c.current_version and c.quality->'photoAudit'->>'pending' is distinct from 'true' and c.quality->'photoAudit'->>'skipped' is null and (c.quality->'photoAudit'->>'passed')::boolean as audit_ok, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
       v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, v.revision, -- #545 수정본 배지(반영한 요청·AI 수정 n번째)
       jsonb_array_length(case when jsonb_typeof(b.feed->'templates') = 'array' then b.feed->'templates' else '[]'::jsonb end) > 0 as brand_templates, -- #544 피드 틀이 있으면 [다른 틀로 다시 그리기]
       (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type, 'faces', coalesce((f.vision->>'faces')::boolean, false)) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, (c.quality - 'fill') as quality, c.quality->'fill'->>'status' as fill_status /* 189차: 생성 기록(모델·오류)은 빼고 상태만 */, c.rationale,
@@ -256,7 +256,7 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
   await mediaOk(u, i.mediaIds);
   const sql = db();
   return sql.begin(async (tx) => {
-    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by, channel, brand_id, cross_channels, quality from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
+    const [c] = await tx<any[]>`select id, title, current_version, status, is_test, created_by, channel, kind, brand_id, cross_channels, quality from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
     threadsLimit(c.channel, c.cross_channels, i.body);
@@ -277,7 +277,10 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
     }
     const hold = !!opt.keepHold && c.status === 'hold';
     // 329차: 새 판에 시안이 붙어 승인 대기로 가면 'AI 사진·글 대조 중' 표시 → 정기 실행이 대조해 통과하면 승인할 시안에, 안 맞으면 수정 요청
-    if (!hold && i.mediaIds.length && !c.is_test && (await import('./mktPhotoAudit')).auditOn()) quality = { ...(quality ?? {}), photoAudit: { v: 1, at: new Date().toISOString(), version: v, pending: true } };
+    if (!hold && !c.is_test && (await import('./mktPhotoAudit')).auditOn()) {
+      const PA = await import('./mktPhotoAudit'); // 333차: 파일이 없는 새 판은 '건너뜀(사진 없음)' 한 줄(승인함에서 구분)
+      quality = { ...(quality ?? {}), photoAudit: i.mediaIds.length ? { v: 1, at: new Date().toISOString(), version: v, pending: true } : PA.skippedAudit(v, PA.skipReasonFor(c.kind)) };
+    }
     await tx`update mkt_contents set current_version = ${v}, status = ${hold ? 'hold' : 'pending'}, quality = ${quality ? tx.json(quality as never) : null}, updated_at = now() where id = ${id}`;
     await (await import('./mktAuto')).mktNotify(tx, { tenant: tenantOf(u), brand_id: c.brand_id, is_test: c.is_test, created_by: c.created_by }, u.id, { approval: true, type: 'review_requested', title: `${hold ? '보류 글 새 판' : '재승인 대기'}(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
     return { version: v };

@@ -62,7 +62,7 @@ export function whenLabel(at: string | null) {
 /** '10/19(일) 09:00까지 승인하면 18:00 게시' */
 export const deadlineLabel = (deadline: string | null, at: string | null) => deadline && at ? `${whenLabel(deadline).replace(/^(오늘|내일) /, '$1 ')}까지 승인하면 ${hm(at)} 게시` : null;
 
-export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; audit_pending?: boolean; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null; brand_logo?: string | null; handle?: string | null;
+export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; audit_pending?: boolean; audit_skipped?: string | null; audit_ok?: boolean | null; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null; brand_logo?: string | null; handle?: string | null;
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null; faces?: boolean }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
   revision?: Revision | null; reapprove_comment?: string | null; // #545 수정본 배지(반영한 요청·AI 수정 n번째)
   brand_templates?: boolean; // #544 브랜드 키트 피드 틀이 있으면 [다른 틀로 다시 그리기]
@@ -164,6 +164,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
         <ModeChip mode={c.mode} />
         <StatusChip s={c.status} />
         {auditing && <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="approval-auditing" title="표지·장·본문 사진이 글과 맞는지 AI 가 대조하는 중 — 끝나면 승인할 시안에 올라옵니다">AI 사진·글 대조 중</span>}
+        {!auditing && c.audit_skipped && <span className="rounded-full border border-line bg-slate-50 px-2 py-0.5 text-[11px] text-ink-2" data-testid="approval-audit-skipped" title={`AI 사진·글 대조를 건너뜀 — ${c.audit_skipped}`}>AI 대조 건너뜀 · {c.audit_skipped.startsWith('영상') ? '영상' : c.audit_skipped.startsWith('사진 없음') ? '사진 없음' : c.audit_skipped.split(/[—(]/)[0].trim().slice(0, 12)}</span>}
+        {!auditing && c.audit_ok && <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800" data-testid="approval-audit-ok" title="표지·장·본문 사진이 글과 맞는지 AI 가 대조해 통과한 판">AI 대조 통과</span>}
         {late && <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-800" data-testid="approval-late-chip">게시일 지남</span>}
         <span className="text-[11px] text-ink-3">v{c.current_version}</span>
         {rep?.needsPolish && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-polish-badge" title="사람다움 점수가 기준보다 낮습니다 — 상세에서 [AI로 다듬기]">다듬기 필요{rep.human ? ` · ${rep.human.score}점` : ''}</span>}

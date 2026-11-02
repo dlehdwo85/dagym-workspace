@@ -116,3 +116,50 @@ test('③ 새 판을 붙이면 대조 중 → 승인할 시안에서 빠짐·[�
   const r3 = await tick();
   assert.equal(r3.mktPhotoAudit?.checked ?? 0, 0, '이 판은 이미 대조했으니 다시 안 함');
 });
+
+// 333차(로컬 11/02 329차 운영 확인 후속): ⓐ 사진이 없어 대조를 건너뛴 글도 기록에 '건너뜀(영상 글/사진 없음)' 한 줄 + 승인함 카드 칸(audit_skipped·audit_ok) ⓑ 대조 호출은 사용량에 '사진·글 AI 대조' 줄로 따로 + 기능별 오늘 호출 수·비용
+test('④ 333차 ⓐ 영상만 붙은 글(영상형)은 정기 실행이 "영상 글 — 대조할 사진 없음" 으로 기록 · 파일 없는 새 판은 "사진 없음" · 승인함 목록에 audit_skipped / 통과한 글은 audit_ok', async () => {
+  // (a) 영상 파일만 붙은 승인 대기 글(대조 표시 없음) → 정기 실행 → 건너뜀 기록(AI 호출 없음)
+  const [vf] = await sql`insert into library_files (tenant, space, folder, title, file_name, mime_type, size_bytes, created_by, upload_status, source, storage_key)
+    values ('default', 'marketing', '마케팅/영상', '수업짐 소개 영상', 'intro.mp4', 'video/mp4', 1000, ${ctx.ownerId}, 'ready', 'upload', 'lib/default/x/intro.mp4') returning id`;
+  const [cv] = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, kind, auto, is_test, cross_channels, mode)
+    values ('default', ${P.b}, '수업짐 소개 릴스', 'instagram', now() + interval '2 days', 'pending', 1, ${ctx.ownerId}, 'reels', true, false, ${[]}, 'content') returning id`;
+  await sql`insert into mkt_versions (content_id, version, body, media_ids, created_by) values (${cv.id}, 1, '수업짐 소개 릴스 대본', ${[vf.id]}, ${ctx.ownerId})`;
+  const before = (await (await fetch(`${FAKE}/__state`)).json()).audits.length;
+  const r = await tick();
+  assert.ok(r.mktPhotoAudit?.checked >= 1, JSON.stringify(r.mktPhotoAudit));
+  let c = await cur(cv.id);
+  assert.equal(c.status, 'pending', '건너뜀은 승인 대기 그대로');
+  assert.ok(c.quality?.photoAudit && c.quality.photoAudit.passed === true && c.quality.photoAudit.pending === undefined && c.quality.photoAudit.version === 1, JSON.stringify(c.quality?.photoAudit));
+  assert.match(c.quality.photoAudit.skipped, /^영상 글 — 대조할 사진 없음/);
+  assert.equal((await (await fetch(`${FAKE}/__state`)).json()).audits.length, before, '영상 글은 AI 대조 호출 없음(비용 0)');
+  // (b) 파일 없는 새 판(사람이 글만 고침) → '사진 없음' 기록(대조 중 아님 → [승인] 막히지 않음)
+  const v = await ctx.owner.ok('POST', `/api/marketing/contents/${P.c2}/versions`, { body: '스피닝 시간표 글만 고침', mediaIds: [], note: '글만' });
+  c = await cur(P.c2);
+  assert.equal(c.status, 'pending'); assert.equal(c.quality.photoAudit.pending, undefined); assert.equal(c.quality.photoAudit.version, v.version);
+  assert.match(c.quality.photoAudit.skipped, /^사진 없음/);
+  // (c) 승인함 목록 칸: 영상 글·사진 없는 글 = audit_skipped, ③에서 통과한 글 = audit_ok
+  const list = await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals');
+  const rows = list.contents ?? list.items; const by = (id) => rows.find((x) => x.id === id);
+  assert.match(by(cv.id)?.audit_skipped ?? '', /^영상 글/); assert.equal(by(cv.id)?.audit_ok, false); assert.equal(by(cv.id)?.audit_pending, false);
+  assert.match(by(P.c2)?.audit_skipped ?? '', /^사진 없음/);
+  assert.equal(by(P.c1)?.audit_ok, true, '③에서 대조 통과한 글'); assert.equal(by(P.c1)?.audit_skipped, null);
+  // 기록이 이 판 것이 아니면(예전 판) 칸은 비움
+  await sql`update mkt_contents set quality = quality || ${sql.json({ photoAudit: { ...c.quality.photoAudit, version: 0 } })} where id = ${P.c2}`;
+  const again = (await ctx.owner.ok('GET', '/api/marketing/contents?view=approvals'));
+  assert.equal((again.contents ?? again.items).find((x) => x.id === P.c2)?.audit_skipped, null, '예전 판 기록은 안 보임');
+  await sql`update mkt_contents set quality = quality || ${sql.json({ photoAudit: c.quality.photoAudit })} where id = ${P.c2}`;
+});
+
+test('⑤ 333차 ⓑ 대조 호출은 ai_usage 에 purpose=marketing_photo_audit(글 id 포함) · /api/usage 기능별 줄에 오늘 호출 수·비용(todayRequests·todayCost)', async () => {
+  const rows = await sql`select purpose, count(*)::int n, count(*) filter (where mkt_content_id is not null)::int withc from ai_usage where tenant = 'default' group by purpose`;
+  const audit = rows.find((x) => x.purpose === 'marketing_photo_audit'); const produce = rows.find((x) => x.purpose === 'marketing_produce');
+  assert.ok(audit && audit.n >= 2 && audit.withc === audit.n, `대조 호출은 따로 기록 ${JSON.stringify(rows)}`);
+  assert.ok(produce && produce.n >= 1, '원고 호출은 그대로 marketing_produce');
+  const u = await ctx.owner.ok('GET', '/api/usage');
+  const bp = u.ai.byPurpose; const a = bp.find((x) => x.purpose === 'marketing_photo_audit');
+  assert.ok(a, JSON.stringify(bp));
+  assert.equal(a.requests, audit.n); assert.equal(a.todayRequests, audit.n, '오늘 호출 수 = 이번 달(시험은 오늘만)');
+  assert.ok(typeof a.todayCost === 'number' && a.todayCost >= 0 && typeof a.cost === 'number' && Math.abs(a.todayCost - a.cost) < 1e-6, JSON.stringify(a));
+  assert.ok(bp.every((x) => typeof x.todayRequests === 'number' && typeof x.todayCost === 'number'), '모든 줄에 오늘 칸');
+});

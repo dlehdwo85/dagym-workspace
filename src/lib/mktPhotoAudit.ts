@@ -13,6 +13,12 @@ export type PhotoAudit = { v: 1; at: string; version: number; passed: boolean; r
 export const AUDIT_PREFIX = 'AI 사진·글 대조 미통과';
 export const VERDICT_LABEL: Record<AuditVerdict, string> = { ok: '맞음', weak: '무난함', mismatch: '안 맞음' };
 export const auditOn = () => process.env.MKT_PHOTO_AUDIT !== 'off';
+/** 333차(로컬 329차 확인 ⓐ): 사진이 없어 대조를 건너뛴 글도 기록에 한 줄 — 승인함에서 '대조 통과'와 '건너뜀(영상/사진 없음)'을 구분 */
+export const skippedAudit = (version: number, skipped: string): PhotoAudit => ({ v: 1, at: new Date().toISOString(), version, passed: true, rows: [], skipped });
+export const SKIP_VIDEO = '영상 글 — 대조할 사진 없음(장면은 영상 기록으로)';
+export const SKIP_NO_PHOTO = '사진 없음 — 시안이 붙으면 대조';
+/** 제작 직후 붙은 파일이 없을 때 사유: 영상 글이면 '영상 글', 아니면 '사진 없음' */
+export const skipReasonFor = (kind: string | null | undefined) => (['reels', 'shorts', 'video'].includes(kind ?? '') ? SKIP_VIDEO : SKIP_NO_PHOTO);
 export const auditIssue = (a: PhotoAudit) => `${AUDIT_PREFIX} — ${a.rows.filter((r) => r.verdict === 'mismatch').map((r) => `${r.where}: ${r.why || '사진이 글과 다른 내용'}`).join(' · ')}(사진을 바꾸거나 글에 맞는 사진을 올린 뒤 다시 그리기)`;
 const UUID = /^[0-9a-f-]{36}$/i;
 const firstLine = (body: string) => body.split('\n').map((l) => l.trim()).find((l) => l && !/^#/.test(l)) ?? '';
@@ -63,12 +69,13 @@ export async function auditPhotos(c: Pick<C, 'id' | 'tenant' | 'title' | 'kind' 
   if (!P.aiEnabled()) return { ...base, passed: true, rows: [], skipped: 'AI 비서 꺼짐' };
   const info = await photoTexts(c.tenant, [...new Set(slots.map((s) => s.photoId))]);
   const use = slots.filter((s) => info.get(s.photoId)?.image);
-  if (!use.length) return { ...base, passed: true, rows: [], skipped: '대조할 사진 없음' };
+  // 333차: 영상·문서만 붙은 글(영상형)은 '영상 글 — 대조할 사진 없음', 아무것도 없으면 '사진 없음' — 승인함 칩에서 구분
+  if (!use.length) return { ...base, passed: true, rows: [], skipped: slots.length && [...info.values()].some((x) => !x.image) ? SKIP_VIDEO : slots.length ? '대조할 사진 없음(자료실에서 지워짐)' : skipReasonFor(c.kind) };
   const A = await import('./mktAuto');
   try { await A.assertMktAi(c.tenant); } catch (e: any) { return { ...base, passed: true, rows: [], skipped: `AI 한도: ${String(e?.message ?? e).slice(0, 120)}` }; }
   const p = P.anthropicProvider({ tier: 'fast', maxTokens: 1200 });
   const r = await p.chat({ system: SYSTEM, messages: [{ role: 'user', content: JSON.stringify({ post: { title: c.title, kind: c.kind ?? null, channel: c.channel }, slots: use.map((s) => ({ where: s.where, text: s.text.slice(0, 500), photo: info.get(s.photoId)!.text })) }) }], tools: [], format: FORMAT });
-  await A.logAi({ tenant: c.tenant, created_by: c.created_by ?? null, id: c.id }, p, r, P).catch(() => {});
+  await A.logAi({ tenant: c.tenant, created_by: c.created_by ?? null, id: c.id }, p, r, P, 'marketing_photo_audit').catch(() => {}); // 333차 ⓑ: 사용량 '사진·글 AI 대조' 줄로 따로
   let parsed: { verdicts?: { where?: string; verdict?: string; why?: string }[] } = {};
   try { parsed = JSON.parse(A.textOf(r)); } catch { /* 모양이 깨지면 전부 무난함 */ }
   const by = new Map((parsed.verdicts ?? []).map((v) => [String(v.where ?? ''), v]));

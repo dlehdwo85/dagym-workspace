@@ -156,10 +156,11 @@ export async function slideshowStart(u: SessionUser, i: z.infer<typeof slideshow
  * 271차 #811 자동 제작: 브랜드 영상 키트의 '영상 만드는 방법'이 실제 사진(photos)이면 릴스·쇼츠 원고 직후 그 판에 사진 영상을 붙임(생성 비용 0).
  * 사진이 3장이 안 되면 하지 않음(제작 요청 카드 그대로) — 이유를 돌려줌
  */
-export async function autoSlideshow(c: any, version: number, body: string, picked: string[] = []): Promise<{ briefId?: string; photos: number; skipped?: string }> {
+export async function autoSlideshow(c: any, version: number, body: string, picked: string[] = [], ruleText = ''): Promise<{ briefId?: string; photos: number; skipped?: string }> {
   if (!VIDEO_KINDS.includes(c.kind ?? '')) return { photos: 0, skipped: '영상 글 아님' };
   if (await busyOf(c.id)) return { photos: 0, skipped: '이미 만드는 중' };
-  const { photos, dropped } = await photosFor(c, `${c.title}\n${body}`, picked);
+  // 333차(CI mkt-face-310 ①·③·⑤): 사진 규칙(시설·수업·장면)이 보는 글 = 제목 + 캡션 + 대본 줄(ruleText) — 대본에 '상담은 전화로'가 있으면 상담 데스크 장면도 이 영상의 장면
+  const { photos, dropped } = await photosFor(c, `${c.title}\n${body}${ruleText ? `\n${ruleText}` : ''}`, picked);
   if (photos.length < 3) { // 303차 #869: 브랜드 사진이 모자라면 영상 보류 + 자료 요청(사진이 오면 정기 실행이 다시 만듦)
     await (await import('./mktMaterials')).needMaterial(c, '영상에 쓸 이 브랜드 사진이 모자라 영상을 보류했습니다').catch(() => null);
     return { photos: photos.length, skipped: `쓸 이 브랜드 실제 사진 ${photos.length}장(3장 넘게 필요) — 자료 요청` };
@@ -173,12 +174,12 @@ export async function autoSlideshow(c: any, version: number, body: string, picke
  * 앱 화면 녹화(screen)인데 이 브랜드의 안 쓴 녹화가 없고, 브랜드 시안 사진이 '앱 화면 캡처만'(screen)이 아니면 — 하이링크처럼 출입·업무 장면 사진·캡처가 있는 브랜드 —
  * 녹화를 기다리지 않고 그 사진·캡처로 사진 영상(생성 비용 0). 워크인처럼 '앱 화면 캡처만'인 브랜드는 녹화를 기다림(녹화 실행기로 올리면 붙음)
  */
-export async function autoVideo(c: any, version: number, body: string, method: string | null | undefined, photoSource: string | null | undefined, picked: string[] = []):
+export async function autoVideo(c: any, version: number, body: string, method: string | null | undefined, photoSource: string | null | undefined, picked: string[] = [], ruleText = ''):
   Promise<{ briefId?: string; skipped?: string; via: 'photos' | 'screen'; note?: string }> {
-  if (method === 'photos') return { ...(await autoSlideshow(c, version, body, picked)), via: 'photos' };
+  if (method === 'photos') return { ...(await autoSlideshow(c, version, body, picked, ruleText)), via: 'photos' };
   const r = await autoRecording(c, version, body);
   if (!r.none || photoSource === 'screen') return { ...r, via: 'screen' };
-  const s = await autoSlideshow(c, version, body, picked);
+  const s = await autoSlideshow(c, version, body, picked, ruleText);
   return s.skipped ? { skipped: `${r.skipped} · 장면 사진도 ${s.skipped}`, via: 'screen' } : { briefId: s.briefId, via: 'photos', note: '화면 녹화가 없어 장면 사진·캡처 영상으로' };
 }
 
@@ -203,7 +204,8 @@ export async function videoRetryTick(o: { limit?: number; tenant?: string } = {}
   const out: { id: string; via: string; started: boolean; skipped?: string }[] = [];
   for (const c of rows) {
     const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
-    const r = await autoVideo(c, c.current_version, v?.body ?? c.title, c.method, c.photo_source).catch((e: any) => ({ skipped: String(e?.message ?? e).slice(0, 200), via: c.method } as any));
+    const sc: string[] = Array.isArray(c.quality?.script) ? c.quality.script.map(String) : (await import('./mktQuality')).scriptLines(v?.body ?? ''); // 333차: 대본 줄도 사진 규칙 글에
+    const r = await autoVideo(c, c.current_version, v?.body ?? c.title, c.method, c.photo_source, [], sc.join('\n')).catch((e: any) => ({ skipped: String(e?.message ?? e).slice(0, 200), via: c.method } as any));
     await sql`update mkt_contents set quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ videoRetry: { at: new Date().toISOString(), via: r.via, ...(r.briefId ? { briefId: r.briefId } : {}), ...(r.skipped ? { skipped: r.skipped } : {}) } } as never)} where id = ${c.id}`;
     if (r.briefId && r.note) await sql`update mkt_versions set note = concat_ws(' · ', note, ${r.note}::text) where content_id = ${c.id} and version = ${c.current_version}`;
     out.push({ id: c.id, via: r.via, started: !!r.briefId, ...(r.skipped ? { skipped: r.skipped } : {}) });

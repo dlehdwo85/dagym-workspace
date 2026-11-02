@@ -57,7 +57,7 @@ export async function uploadTaskFiles(list: File[], target: { taskId?: string; e
   };
   try { await Promise.all(Array.from({ length: Math.min(3, list.length) }, worker)); } finally { release?.(); }
   if (failed.length && many) toast.error(`${list.length}개 중 ${failed.length}개를 올리지 못했습니다 — 진행 목록에서 이유를 보고 다시 올려 주세요`);
-  if (ok || dup) toast.ok(`${ok}개 첨부 완료${dup ? ` · 이미 있는 파일 ${dup}개 건너뜀` : ''}`);
+  if (ok || dup) toast.ok(ok ? `${ok}개 첨부 완료${dup ? ` · 이미 있는 파일 ${dup}개 건너뜀` : ''}` : `이미 있는 파일 ${dup}개 — 새로 붙이지 않았습니다`); // 333차(로컬 332 ⓒ): 모두 중복이면 그 말만
   if (ok + dup === list.length) setTimeout(() => setProg(() => []), 1500);
   return ok + dup;
 }

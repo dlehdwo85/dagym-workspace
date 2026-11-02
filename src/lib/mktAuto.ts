@@ -437,10 +437,10 @@ const pagedKind = (c: { channel?: string | null; kind?: string | null }) => (c.k
 const VIDEO_KINDS = ['reels', 'shorts', 'video'];
 /** #426 훅 자리: 릴스·쇼츠·영상 = 첫 장면(3초), 블로그 = 제목, 그 밖 = 본문 첫 줄 */
 const hookAt = (kind: string) => (VIDEO_KINDS.includes(kind) ? '첫 장면(첫 3초)' : kind === 'blog' ? '제목' : '본문 첫 줄');
-export async function logAi(c: any, p: { name: string; model: string }, r: any, P: typeof import('./ai/provider')) {
+export async function logAi(c: any, p: { name: string; model: string }, r: any, P: typeof import('./ai/provider'), purpose = 'marketing_produce') { // 333차 ⓑ: 사진·글 대조는 'marketing_photo_audit'
   // 275차 #809: 어느 글(→ 브랜드)의 글 작성 비용인지 — 상용화 시험 보기가 브랜드별로 나눔(키트 AI 등 글 없는 호출은 비움)
   await db()`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose, mkt_content_id)
-    values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, 'marketing_produce', ${c.id ?? null})`;
+    values (${c.tenant}, ${c.created_by}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${P.costUsd(r.model ?? p.model, r.usage)}, ${purpose}, ${c.id ?? null})`;
 }
 export const textOf = (r: any) => (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('');
 
@@ -722,7 +722,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
     if (v > 1) await tx`update mkt_production_requests set status = 'canceled', reason = coalesce(reason, '다시 만들기로 대체'), decided_at = now() where content_id = ${c.id} and kind in ('image', 'video') and status in ('open', 'needs_approval')`;
     // 303차: 미룬 횟수·다시 만들기 표시는 새 판에도 남김(미룬 글을 다시 만들어도 미룸 3번 한도가 처음으로 돌아가지 않게)
     await tx`update mkt_contents set title = ${(c.is_test && !f.title.startsWith('[시험]') ? '[시험] ' : '') + f.title}, current_version = ${v}, reminded_at = null, status = ${held || batch ? 'draft' : q.passed ? 'pending' : 'changes'}, produced_at = now(), quality = jsonb_strip_nulls(jsonb_build_object('moved', quality->'moved', 'movedFrom', quality->'movedFrom', 'redo', quality->'redo', 'remadeFrom', quality->'remadeFrom')) || ${tx.json({ passed: q.passed, issues: q.issues, ...(batch ? { batch: { week: batch, status: q.passed ? 'pending' : 'changes', at: new Date().toISOString() } } : {}), ...(retried ? { preflightRetry: retried } : {}), brief: d.brief, ...(d.design ? { design: d.design } : {}), report: { ...f.report, v, preflight: pre }, ...(pre.length ? { preflight: pre } : {}), ...(script ? { script } : {}), ...(d.card ? { card: d.card } : {}), ...(pages?.length ? { pages } : {}), ...(held ? { held: { at: new Date().toISOString(), reason: 'template' } } : {}),
-      ...(auditNeeded ? { photoAudit: { v: 1, at: new Date().toISOString(), version: v, pending: true } } : {}), ...(!mediaIds.length && d.photos?.length ? { bodyPlan: d.photos } : {}), ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 3, tried: photoId ? [photoId] : [], ...(bodyIds.length ? { bodyIds } : {}), ...(template ? { template } : {}), ...(photoIds.length > 1 ? { photoIds } : {}), ...V.coverMark(cover) } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
+      ...(auditNeeded ? { photoAudit: { v: 1, at: new Date().toISOString(), version: v, pending: true } } : !c.is_test && PA.auditOn() ? { photoAudit: PA.skippedAudit(v, PA.skipReasonFor(kind)) } : {}), /* 333차: 사진 없는 글도 '건너뜀' 한 줄 */ ...(!mediaIds.length && d.photos?.length ? { bodyPlan: d.photos } : {}), ...(mediaIds.length ? { visual: { by: 'server', fileId: mediaIds[0], at: new Date().toISOString(), photoId, rv: 3, tried: photoId ? [photoId] : [], ...(bodyIds.length ? { bodyIds } : {}), ...(template ? { template } : {}), ...(photoIds.length > 1 ? { photoIds } : {}), ...V.coverMark(cover) } } : {}) } as never)}, rationale = ${tx.json(rationale as never)}, updated_at = now() where id = ${c.id}`;
     await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'text', 0, ${v === 1 ? '원고(Claude) — 크레딧 0' : '다시 만들기 원고(Claude) — 크레딧 0'}, (select title from mkt_contents where id = ${c.id}))`;
     // 이미지·영상은 제작 요청 카드(Higgsfield 계약 전: 사람이 실사 + 글자 렌더로 제작해 붙임) — #544 초안 보관이면 만들지 않음(쓰지 않을 영상에 비용 X)
     // #426: 영상은 초 단위 장면표(분당 300음절)를 그대로 넘김 — Higgsfield 연동 뒤에는 장면별 프롬프트로
@@ -743,7 +743,7 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
     try {
       const Z = await import('./mktSlideshow');
       // 301차 #865: 화면 녹화인데 녹화가 없고 장면 사진 브랜드(시안 사진이 '앱 화면 캡처만'이 아님)면 사진·캡처 영상으로 바로
-      const r = await Z.autoVideo({ ...c, title: f.title }, v, q.body, videoMethod, brand?.video?.photoSource ?? null, d.photos ?? []);
+      const r = await Z.autoVideo({ ...c, title: f.title }, v, q.body, videoMethod, brand?.video?.photoSource ?? null, d.photos ?? [], (f.script ?? []).join('\n')); // 333차: 대본 줄도 사진 규칙(시설·수업·장면) 글에
       const note = r.skipped ? `${r.via === 'photos' ? '실제 사진' : '화면 녹화'} 영상 못 만듦: ${r.skipped}` : r.note ?? null;
       if (note) await sql`update mkt_versions set note = concat_ws(' · ', note, ${note}::text) where content_id = ${c.id} and version = ${v}`;
     } catch (e: any) { console.error('[mkt] 자동 영상', videoMethod, c.id, e?.message ?? e); }
