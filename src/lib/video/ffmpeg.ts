@@ -15,7 +15,8 @@ export function ffmpegPath() {
   return bin;
 }
 
-type Run = { code: number; stderr: string; killed?: boolean };
+export type Progress = { outSec: number | null; speed: number | null; fps: number | null };
+type Run = { code: number; stderr: string; killed?: boolean; progress?: Progress | null };
 type RunOpt = { cwd?: string; timeoutMs?: number; env?: Record<string, string> };
 function spawnOnce(path: string, args: string[], opt: RunOpt): Promise<Run> {
   return new Promise((ok, fail) => {
@@ -36,13 +37,23 @@ export async function ffmpegRun(args: string[], opt: RunOpt = {}): Promise<Run> 
     return spawnOnce(tmp, ['-hide_banner', '-nostdin', ...args], opt);
   }
 }
-/** 실패하면 오류 마지막 줄들을 담아 던진다(글꼴 경고 같은 잡음은 뺌) */
+/** 326차(로컬 11/02 ②: 같은 사진 영상이 27초 또는 250초 초과): `-progress` 가 5초마다 stderr 에 남기는 진행 칸(out_time·speed·fps)의 마지막 — 끊겼을 때 몇 초까지 만들었는지·속도 */
+export function parseProgress(stderr: string): Progress | null {
+  const t = [...stderr.matchAll(/^out_time=(\d+):(\d+):(\d+(?:\.\d+)?)/gm)].pop();
+  const sp = [...stderr.matchAll(/^speed=\s*([\d.]+)x/gm)].pop(); const fp = [...stderr.matchAll(/^fps=\s*([\d.]+)/gm)].pop();
+  if (!t && !sp) return null;
+  return { outSec: t ? Math.round((+t[1] * 3600 + +t[2] * 60 + +t[3]) * 10) / 10 : null, speed: sp ? +sp[1] : null, fps: fp ? +fp[1] : null };
+}
+const PROGRESS_LINE = /^(frame|fps|stream_\d+_\d+_q|bitrate|total_size|out_time_us|out_time_ms|out_time|dup_frames|drop_frames|speed|progress)=/;
+/** 실패하면 오류 마지막 줄들을 담아 던진다(글꼴 경고·진행 칸 같은 잡음은 뺌) */
 export async function ffmpegOk(args: string[], opt: RunOpt = {}) {
-  const r = await ffmpegRun(['-y', '-loglevel', 'error', ...args], opt);
+  const r = await ffmpegRun(['-y', '-loglevel', 'error', '-progress', 'pipe:2', '-stats_period', '5', ...args], opt);
+  r.progress = parseProgress(r.stderr);
   if (r.code !== 0) {
     // 324차(로컬 11/02 a132740e: 'Failed to load fon(c)tconfig fonts' 만 남고 -1): 시간 제한으로 끊긴 것은 그렇게 말하고, 글꼴 설정 경고는 잡음이라 뺌
-    const tail = r.stderr.split('\n').filter((l) => l.trim() && !/fon[ct]+config|memory font/i.test(l)).slice(-4).join(' / ');
-    if (r.killed) throw new Error(`영상 합성 실패(시간 제한 ${Math.round((opt.timeoutMs ?? 240_000) / 1000)}초 안에 끝나지 않아 중단 — 장면·사진 수를 줄이거나 다시 시도)${tail ? `: ${tail.slice(0, 200)}` : ''}`);
+    const tail = r.stderr.split('\n').filter((l) => l.trim() && !PROGRESS_LINE.test(l) && !/fon[ct]+config|memory font/i.test(l)).slice(-4).join(' / ');
+    const prog = r.progress?.outSec != null ? ` — ${r.progress.outSec}초까지 만듦${r.progress.speed != null ? `(속도 ${r.progress.speed}x)` : ''}` : '';
+    if (r.killed) throw new Error(`영상 합성 실패(시간 제한 ${Math.round((opt.timeoutMs ?? 240_000) / 1000)}초 안에 끝나지 않아 중단${prog} — 장면·사진 수를 줄이거나 다시 시도)${tail ? `: ${tail.slice(0, 200)}` : ''}`);
     throw new Error(`영상 합성 실패(ffmpeg ${r.code}): ${tail.slice(0, 400)}`);
   }
   return r;

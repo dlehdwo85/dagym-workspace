@@ -122,10 +122,11 @@ export async function logoPng(logo: Buffer, d: Dim): Promise<Buffer> {
 /** start = 원본 파일에서 이 장면이 시작하는 초(187차 ⑦ 한 편짜리 영상을 장면으로 나눠 다시 합성) */
 export type ComposeScene = { file: string; seconds: number; line: string; screenPng?: string | null; start?: number };
 export type ComposeInput = { dir: string; aspect: string; scenes: ComposeScene[]; end: { seconds: number; color: string; headline: string; cta: string; logoPng?: string | null };
-  narration: ({ file: string; duration: number } | null)[]; bgm?: { file: string } | null; font: { dir: string; family: string }; out: string };
+  narration: ({ file: string; duration: number } | null)[]; bgm?: { file: string } | null; font: { dir: string; family: string }; out: string;
+  /** 326차: ffmpeg 시간 제한(기본 250초) — 함수 남은 시간에 맞춰 줄일 수 있게 */ timeoutMs?: number };
 
 /** 한 편 합성 → { 파일, 길이, 알림 } */
-export async function composeVideo(o: ComposeInput): Promise<{ file: string; duration: number; notes: string[]; subPct: number | null }> {
+export async function composeVideo(o: ComposeInput): Promise<{ file: string; duration: number; notes: string[]; subPct: number | null; ffmpegMs: number; speed: number | null }> {
   const d = dimOf(o.aspect); const notes: string[] = []; const args: string[] = []; const f: string[] = []; let idx = 0;
   const durs: number[] = [];
   const infos = new Map<string, Awaited<ReturnType<typeof mediaInfo>>>(); // 같은 원본을 여러 장면이 나눠 쓰면 한 번만 읽음
@@ -135,15 +136,19 @@ export async function composeVideo(o: ComposeInput): Promise<{ file: string; dur
     const st = Math.max(0, s.start ?? 0);
     durs.push(Math.max(1.2, Math.min(s.seconds, (info.duration ?? st + s.seconds) - st)));
   }
-  // 장면 입력(원본 중간부터 쓰는 장면은 그 초로 건너뛰어 읽음 · 사진은 장면 길이만큼 되풀이)
-  const sceneIn = o.scenes.map((s, k) => {
-    if (isStill(s.file)) args.push('-loop', '1', '-framerate', '30', '-t', (durs[k] + 0.5).toFixed(3), '-i', s.file);
+  // 장면 입력(원본 중간부터 쓰는 장면은 그 초로 건너뛰어 읽음)
+  // 326차(로컬 11/02 ②): 사진·화면 캡처·로고 같은 정지 그림은 `-loop 1` 입력 대신 한 장만 읽고 그래프 안에서 되풀이(loop 필터) — ffmpeg 7 은 모든 입력을 앞서 읽어
+  // 뒤 장면 프레임을 겹침 전환이 쓸 때까지 메모리에 쌓아 사진 6장 영상이 1.35GB 까지 갔음(합성 함수 메모리에 2건이 같이 못 들어감). loop 필터는 필요할 때만 만들어 같은 결과(PSNR ∞)에 0.69GB.
+  // 끝 화면 색 바탕도 lavfi 입력 대신 그래프 안 color 원천(입력이면 3초치 90장을 미리 쌓음)
+  const STILL = 'loop=loop=-1:size=1:start=0,setpts=N/(30*TB)';
+  const sceneIn = o.scenes.map((s) => {
+    if (isStill(s.file)) args.push('-i', s.file);
     else { if (s.start && s.start > 0) args.push('-ss', s.start.toFixed(3)); args.push('-i', s.file); }
     return idx++;
   });
-  const devIn = o.scenes.map((s, k) => { if (!s.screenPng) return -1; args.push('-loop', '1', '-framerate', '30', '-t', String(durs[k] + 0.5), '-i', s.screenPng); return idx++; });
-  const E = o.end.seconds; const endIn = idx++; args.push('-f', 'lavfi', '-i', `color=c=0x${(/^#?([0-9a-f]{6})$/i.exec(o.end.color)?.[1] ?? '111111')}:s=${d.w}x${d.h}:r=30:d=${E + 0.5}`);
-  const logoIn = o.end.logoPng ? (args.push('-loop', '1', '-framerate', '30', '-t', String(E + 0.5), '-i', o.end.logoPng), idx++) : -1;
+  const devIn = o.scenes.map((s) => { if (!s.screenPng) return -1; args.push('-i', s.screenPng); return idx++; });
+  const E = o.end.seconds; const endSrc = `color=c=0x${(/^#?([0-9a-f]{6})$/i.exec(o.end.color)?.[1] ?? '111111')}:s=${d.w}x${d.h}:r=30:d=${E + 0.5}`;
+  const logoIn = o.end.logoPng ? (args.push('-i', o.end.logoPng), idx++) : -1;
   const fit = `scale=${d.w}:${d.h}:force_original_aspect_ratio=increase,crop=${d.w}:${d.h},fps=30,setsar=1`;
   const even = (n: number) => Math.round(n / 2) * 2;
   const PW = even(d.w * PAN), PH = even(d.h * PAN);
@@ -152,15 +157,15 @@ export async function composeVideo(o: ComposeInput): Promise<{ file: string; dur
     return m === 0 ? `x='(iw-${d.w})*${f}':y='(ih-${d.h})/2'` : m === 1 ? `x='(iw-${d.w})*(1-${f})':y='(ih-${d.h})/2'` : m === 2 ? `x='(iw-${d.w})/2':y='(ih-${d.h})*${f}'` : `x='(iw-${d.w})/2':y='(ih-${d.h})*(1-${f})'`; };
   o.scenes.forEach((s, k) => {
     const base = isStill(s.file)
-      ? `[${sceneIn[k]}:v]scale=${PW}:${PH}:force_original_aspect_ratio=increase,crop=${PW}:${PH},fps=30,crop=${d.w}:${d.h}:${panOf(k, durs[k])},setsar=1,trim=duration=${durs[k].toFixed(3)},setpts=PTS-STARTPTS`
+      ? `[${sceneIn[k]}:v]${STILL},scale=${PW}:${PH}:force_original_aspect_ratio=increase,crop=${PW}:${PH},fps=30,crop=${d.w}:${d.h}:${panOf(k, durs[k])},setsar=1,trim=duration=${durs[k].toFixed(3)},setpts=PTS-STARTPTS`
       : `[${sceneIn[k]}:v]${fit},tpad=stop_mode=clone:stop_duration=3,trim=duration=${durs[k].toFixed(3)},setpts=PTS-STARTPTS`;
     if (devIn[k] < 0) { f.push(`${base},format=yuv420p,fps=30[s${k}]`); return; }
     f.push(`${base},gblur=sigma=26,eq=brightness=-0.07:saturation=0.85,format=yuv420p[bg${k}]`);
-    f.push(`[${devIn[k]}:v]format=rgba,fade=t=in:st=0:d=0.35:alpha=1[dv${k}]`);
+    f.push(`[${devIn[k]}:v]${STILL},format=rgba,fade=t=in:st=0:d=0.35:alpha=1[dv${k}]`);
     f.push(`[bg${k}][dv${k}]overlay=x=(W-w)/2:y=(H-h)/2-${d.h > d.w ? Math.round(d.h * 0.07) : 0}+${Math.round(d.h * 0.025)}*(1-min(t/0.55\\,1)):shortest=1,format=yuv420p,fps=30[s${k}]`);
   });
-  f.push(logoIn >= 0 ? `[${endIn}:v]format=yuv420p,setsar=1[eb];[eb][${logoIn}:v]overlay=x=(W-w)/2:y=H*0.4-h/2:shortest=1,format=yuv420p,fps=30,trim=duration=${(E + 0.2).toFixed(2)}[end]`
-    : `[${endIn}:v]format=yuv420p,setsar=1,fps=30,trim=duration=${(E + 0.2).toFixed(2)}[end]`);
+  f.push(logoIn >= 0 ? `${endSrc},format=yuv420p,setsar=1[eb];[${logoIn}:v]${STILL}[lg];[eb][lg]overlay=x=(W-w)/2:y=H*0.4-h/2:shortest=1,format=yuv420p,fps=30,trim=duration=${(E + 0.2).toFixed(2)}[end]`
+    : `${endSrc},format=yuv420p,setsar=1,fps=30,trim=duration=${(E + 0.2).toFixed(2)}[end]`);
   // 장면 이어 붙이기(겹쳐 넘김) → 끝 화면
   const starts: number[] = [0]; let acc = durs[0]; let cur = 's0';
   for (let k = 1; k < durs.length; k++) { const off = acc - XFADE; starts.push(off); f.push(`[${cur}][s${k}]xfade=transition=fade:duration=${XFADE}:offset=${off.toFixed(3)}[x${k}]`); cur = `x${k}`; acc = off + durs[k]; }
@@ -190,8 +195,9 @@ export async function composeVideo(o: ComposeInput): Promise<{ file: string; dur
   // 324차(로컬 11/02 a132740e 'Failed to load fontconfig fonts'): 합성 서버(Vercel)엔 시스템 글꼴 설정 파일이 없어 libass 가 설정을 찾다 경고·지연 — 작업 폴더에 글꼴 폴더만 가리키는 설정을 만들어 그걸 쓰게 함
   const fontsConf = join(o.dir, 'fonts.conf');
   await writeFile(fontsConf, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig><dir>${join(o.dir, o.font.dir)}</dir><cachedir>${join(o.dir, 'fc-cache')}</cachedir></fontconfig>\n`);
-  await ffmpegOk([...args, '-/filter_complex', 'graph.txt', '-map', '[vout]', '-map', '[aout]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-r', '30', '-g', '60',
-    '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', '-t', total.toFixed(3), o.out], { cwd: o.dir, timeoutMs: 250_000, env: { FONTCONFIG_FILE: fontsConf, FONTCONFIG_PATH: o.dir } });
+  const tf = Date.now();
+  const run = await ffmpegOk([...args, '-/filter_complex', 'graph.txt', '-map', '[vout]', '-map', '[aout]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-r', '30', '-g', '60',
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', '-t', total.toFixed(3), o.out], { cwd: o.dir, timeoutMs: o.timeoutMs ?? 250_000, env: { FONTCONFIG_FILE: fontsConf, FONTCONFIG_PATH: o.dir } });
   const info = await mediaInfo(join(o.dir, o.out));
-  return { file: o.out, duration: info.duration ?? total, notes, subPct: a.subPct };
+  return { file: o.out, duration: info.duration ?? total, notes, subPct: a.subPct, ffmpegMs: Date.now() - tf, speed: run.progress?.speed ?? null };
 }

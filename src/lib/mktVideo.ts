@@ -278,6 +278,22 @@ export async function renderNext(briefId?: string | null) {
 }
 export const RENDER_MAX_TRIES = 8; // 324차: 이만큼 시작해도 못 끝내면(함수가 중간에 끊기는 등) 사유를 적고 실패 처리
 export const RENDER_STALE_HOURS = 2; // 324차: 만든 지 이만큼 지나도록 합성이 끝나지 않고 최근 30분 시작도 없으면 실패 처리(대기열·글의 '만드는 중'을 풀어 다시 의뢰할 수 있게)
+/** 326차(로컬 11/02 ②: 같은 사진 5~6장 영상이 어떤 때는 27초, 어떤 때는 250초 초과 — 느린 4건은 모두 다른 1건과 같은 초에 시작): 한 함수 인스턴스 안에서 합성은 한 번에 하나.
+ *  재현(이 저장소 시험 서버): 합성 1건 ffmpeg 최대 메모리 약 1.3GB(CPU 1개·4개 같음), 2건 동시면 합계 2.5~2.8GB — 운영 합성 함수(메모리 지정 없음) 안에 둘이 같이 안 들어가 서로 밀어내며 느려짐.
+ *  정기 실행이 한꺼번에 띄운 2~4건이 같은 인스턴스로 오면 차례로 돌고, 남은 시간 안에 차례가 안 오면 시작 횟수를 되돌리고 다음 정기 실행에. 기록(renderLog): 인스턴스 표시(inst)·켜진 지 몇 초(up)·대기(wait)·단계별 시간(steps)·ffmpeg 속도(speed) */
+export type RenderLogEntry = { at: string; ms?: number; error?: string; inst?: string; up?: number; busy?: boolean; wait?: number; steps?: Record<string, number>; speed?: number | null; skipped?: string };
+const INSTANCE = randomUUID().slice(0, 8); const BOOT = Date.now();
+const RENDER_HARD_MS = 275_000; // 합성 함수(300초) 안에서 ffmpeg 가 끝나야 하는 한계 — 뒤처리(자료실 저장·버전) 여유 포함
+type Waiter = { res: (ok: boolean) => void; timer: ReturnType<typeof setTimeout> };
+let renderBusy = false; const renderQueue: Waiter[] = [];
+function passRender() { const w = renderQueue.shift(); if (w) { clearTimeout(w.timer); w.res(true); } else renderBusy = false; }
+async function acquireRender(waitMs: number): Promise<{ ok: boolean; busy: boolean; waited: number; release: () => void }> {
+  const t = Date.now(); const busy = renderBusy;
+  if (!busy) renderBusy = true;
+  const ok = busy ? await new Promise<boolean>((res) => { const w = { res } as Waiter; w.timer = setTimeout(() => { const i = renderQueue.indexOf(w); if (i >= 0) { renderQueue.splice(i, 1); res(false); } }, Math.max(0, waitMs)); renderQueue.push(w); }) : true;
+  let done = false;
+  return { ok, busy, waited: Date.now() - t, release: () => { if (done || !ok) return; done = true; passRender(); } };
+}
 /** 정기 실행: 검수·합성 기다리는 의뢰를 합성 함수로 — 324차(로컬 11/02 멈춘 의뢰 2건·30~60분 지연): 한 번에 4건, 시도 횟수 적은 것·먼저 만든 것 순(옛날에 멈춘 의뢰가 새 의뢰를 밀어내지 않게) */
 export async function renderTick() {
   const sql = db();
@@ -348,7 +364,8 @@ async function pickBgm(b: any, brandName: string | null, chosen: string | null |
 }
 
 /** 한 편 합성 → 자료실 저장 */
-async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
+async function renderVariant(b: any, r: any, v: V2Variant, dir: string, o: { deadline: number; steps: Record<string, number> }) {
+  let tm = Date.now(); const lap = (k: string) => { o.steps[k] = (o.steps[k] ?? 0) + (Date.now() - tm); tm = Date.now(); }; // 326차: 단계별 걸린 시간(prep 원본·글꼴·로고 준비, tts 내레이션·배경음, ffmpeg, save 자료실 저장)
   const sql = db(); const spec = KIND_SPEC[b.kind]; const p = b.prompt ?? {}; const notes: string[] = [];
   const { getObject } = await import('./storage'); const C = await import('./video/compose');
   // 같은 저장소 파일은 한 번만 내려받음(187차 ⑦ 한 편짜리 원본을 장면마다 나눠 씀)
@@ -390,11 +407,14 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
   let logo: string | null = null;
   const lg = await libBytes(b.tenant, kit.logoFileId, /^image\//);
   if (lg) { logo = 'logo.png'; await writeFile(join(dir, logo), await C.logoPng(lg.data, d)); } else if (kit.logoFileId) notes.push('끝 화면 로고 파일을 찾지 못했습니다');
+  lap('prep');
   const nar = await narrate(b, v, dir, notes);
   const bgm = await pickBgm(b, brand?.name ?? null, p.bgmId, dir, notes);
+  lap('tts');
   const headline = kit.headline || p.endCard?.headline || brand?.name || '';
-  const out = await C.composeVideo({ dir, aspect, scenes, narration: nar.list, bgm, font: { dir: 'fonts', family }, out: `out-${v.n}.mp4`,
+  const out = await C.composeVideo({ dir, aspect, scenes, narration: nar.list, bgm, font: { dir: 'fonts', family }, out: `out-${v.n}.mp4`, timeoutMs: Math.max(30_000, Math.min(250_000, o.deadline - Date.now())),
     end: { seconds: END_SEC, color: kit.endColor || brand?.color || '#111111', headline, cta: endCta, logoPng: logo } });
+  lap('ffmpeg');
   // 209차 ⑦ 검수 기준 — 새로 만든 영상만(다시 합성은 예전 영상 그대로라 빼고)
   const checks = r.reuse ? null : videoChecks({ scenes: v.scenes, screens, subPct: out.subPct, end: { logo: !!logo, headline: !!String(headline).trim(), phone: PHONE.test(endCta) } });
   const data = await readFile(join(dir, out.file));
@@ -405,7 +425,8 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string) {
   const title = `${spec.label} 영상${b.quantity > 1 ? ` ${v.n + 1}` : ''} — ${String(b.message).slice(0, 30)}${slides ? ' (실제 사진)' : screen ? ' (화면 녹화)' : reuse ? ' (다시 합성)' : ''}`;
   const f = await saveGeneratedFile(actor, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.mp4`, mime: 'video/mp4', data, title, folder: '마케팅', tags: ['제작의뢰실', ...(slides ? ['실제 사진', '합성'] : screen ? ['화면 녹화', '합성'] : ['AI 생성', '합성', ...(reuse ? ['다시 합성'] : [])])], source: 'ai', space: 'marketing',
     meta: { video: { pipeline: 'v2', scenes: v.scenes.length, duration: out.duration, narration: nar.provider, bgm: bgm?.title ?? null, font: family, ...(reuse ? { reuse: { ledger: reuse.ledger, from: v.origin ?? v.source?.fileId ?? null } } : {}) } } });
-  return { mediaId: f.id, duration: out.duration, notes: [...notes, ...out.notes], audio: { narration: nar.provider, chars: nar.chars, bgm: bgm?.title ?? null }, endCta, checks };
+  lap('save');
+  return { mediaId: f.id, duration: out.duration, notes: [...notes, ...out.notes], audio: { narration: nar.provider, chars: nar.chars, bgm: bgm?.title ?? null }, endCta, checks, speed: out.speed };
 }
 
 const PHONE = /\d{2,4}-\d{3,4}|\d{8,11}/;
@@ -425,21 +446,22 @@ export function videoChecks(o: { scenes: { qa?: SceneQa | null }[]; screens: num
 }
 
 /** 검수·합성 한 걸음(합성 함수에서). 잠금(renderAt 6분)으로 동시에 둘이 돌지 않게, 시간이 모자라면 다음 호출이 남은 편을 이어받는다 */
-export async function renderStep(briefId: string, budgetMs = Number(process.env.VIDEO_RENDER_BUDGET_MS ?? 230_000)): Promise<{ status: string; stage?: string; mediaIds?: string[]; errors?: string[] }> {
+export async function renderStep(briefId: string, budgetMs = Number(process.env.VIDEO_RENDER_BUDGET_MS ?? 230_000)): Promise<{ status: string; stage?: string; mediaIds?: string[]; errors?: string[]; deferred?: boolean }> {
   const t0 = Date.now(); const sql = db();
   const [b] = await sql<any[]>`update mkt_briefs set result = result || jsonb_build_object('renderAt', now(), 'renderTries', coalesce((result->>'renderTries')::int, 0) + 1) where id = ${briefId} and status = 'generating' and result->>'pipeline' = 'v2' and result->>'stage' in ('qa', 'render')
     and coalesce((result->>'renderAt')::timestamptz, 'epoch') < now() - interval '6 minutes' returning *`;
   if (!b) { const [x] = await sql<any[]>`select status, result from mkt_briefs where id = ${briefId}`; return { status: x?.status ?? 'missing', stage: x?.result?.stage, mediaIds: x?.result?.mediaIds }; }
   const r = b.result; const spec = KIND_SPEC[b.kind];
   // 324차: 시작 횟수(renderTries)·시작/오류 기록(renderLog, 최근 8번) — 몇 번 시작했는지·어디서 끊겼는지 의뢰 행만 봐도 보이게. 너무 많이 시작했으면 실패 처리
-  const tries = Number(r.renderTries ?? 1); const log: { at: string; ms?: number; error?: string }[] = Array.isArray(r.renderLog) ? r.renderLog.slice(-7) : [];
+  const tries = Number(r.renderTries ?? 1); const log: RenderLogEntry[] = Array.isArray(r.renderLog) ? r.renderLog.slice(-7) : [];
   if (tries > RENDER_MAX_TRIES) {
     const last = [...log].reverse().find((x) => x.error)?.error ?? (r.variants as V2Variant[]).find((v) => v.renderError)?.renderError;
     const msg = `합성을 ${tries - 1}번 시작했지만 끝내지 못해 멈춤 처리${last ? ` — 마지막 오류: ${last}` : ''}`.slice(0, 500);
     await save(briefId, { ...r, stage: 'failed', renderAt: null, errors: [...(r.errors ?? []), msg].slice(-30) }, { status: 'failed', error: msg });
     return { status: 'failed', stage: 'failed', errors: [msg] };
   }
-  const entry: (typeof log)[number] = { at: new Date().toISOString() }; log.push(entry); r.renderLog = log;
+  const entry: RenderLogEntry = { at: new Date().toISOString(), inst: INSTANCE, up: Math.round((Date.now() - BOOT) / 1000) }; log.push(entry); r.renderLog = log;
+  let lock: Awaited<ReturnType<typeof acquireRender>> | null = null;
   const dir = await mkdtemp(join(tmpdir(), 'mkt-v2-'));
   let finished = false;
   try {
@@ -466,11 +488,26 @@ export async function renderStep(briefId: string, budgetMs = Number(process.env.
       if (again) { await save(briefId, { ...r, stage: 'clips', renderAt: null, pollAt: null }); finished = true; return { status: 'generating', stage: 'clips' }; }
       r.stage = 'render'; await save(briefId, r);
     }
+    if ((r.variants as V2Variant[]).some((v) => !v.error && !v.mediaId)) {
+      // 326차: 같은 인스턴스에서 합성은 하나씩 — 남은 시간(예산 - 120초) 안에 차례가 안 오면 시작 횟수를 되돌리고 다음 정기 실행에
+      lock = await acquireRender(Math.max(0, t0 + budgetMs - 120_000 - Date.now()));
+      entry.busy = lock.busy; if (lock.waited) entry.wait = lock.waited;
+      if (!lock.ok) {
+        entry.ms = Date.now() - t0; entry.skipped = '같은 함수에서 다른 합성이 진행 중이라 차례가 안 와 넘김 — 다음 정기 실행에서';
+        await sql`update mkt_briefs set result = (result - 'renderAt') || jsonb_build_object('renderTries', greatest(coalesce((result->>'renderTries')::int, 1) - 1, 0), 'renderLog', ${sql.json(log as never)}) where id = ${briefId}`;
+        finished = true; return { status: 'generating', stage: r.stage, deferred: true };
+      }
+    }
+    const steps: Record<string, number> = {}; entry.steps = steps;
     for (const v of r.variants as V2Variant[]) {
       if (v.error || v.mediaId) continue;
       if (Date.now() - t0 > budgetMs - 90_000) break; // 남은 편은 다음 호출에서
-      try { const o = await renderVariant(b, r, v, dir); v.mediaId = o.mediaId; v.duration = o.duration; v.notes = o.notes; v.checks = o.checks; v.renderError = null; r.audio = o.audio; r.endCta = o.endCta; }
-      catch (e: any) { v.renderTries = (v.renderTries ?? 0) + 1; v.renderError = String(e?.message ?? e).slice(0, 300); if (v.renderTries >= 2) v.error = `합성 실패: ${v.renderError}`; }
+      try { const o = await renderVariant(b, r, v, dir, { deadline: t0 + RENDER_HARD_MS, steps }); v.mediaId = o.mediaId; v.duration = o.duration; v.notes = o.notes; v.checks = o.checks; v.renderError = null; r.audio = o.audio; r.endCta = o.endCta; entry.speed = o.speed; }
+      catch (e: any) {
+        v.renderTries = (v.renderTries ?? 0) + 1; v.renderError = String(e?.message ?? e).slice(0, 300); if (v.renderTries >= 2) v.error = `합성 실패: ${v.renderError}`;
+        // 326차(로컬 11/02 ③: 오류 기록에 mkt:render 가 없음): 편 단위 합성 실패도 오류 기록(error_logs)에 — 의뢰 행을 안 열어도 운영 화면에서 보이게
+        await (await import('./log')).logError('mkt:render', e, { briefId, variant: v.n, tries: v.renderTries, start: tries, inst: INSTANCE, up: entry.up, busy: entry.busy ?? false, wait: entry.wait ?? 0, steps, ms: Date.now() - t0 }).catch(() => {});
+      }
       await save(briefId, r);
     }
     if ((r.variants as V2Variant[]).every((v) => v.error || v.mediaId)) { finished = true; entry.ms = Date.now() - t0; return await finalize(b, r); }
@@ -480,6 +517,7 @@ export async function renderStep(briefId: string, budgetMs = Number(process.env.
     await save(briefId, { ...r, errors: [...(r.errors ?? []), `합성 ${tries}번째 시작 오류: ${entry.error}`].slice(-30) }).catch(() => {});
     throw e;
   } finally {
+    lock?.release();
     await rm(dir, { recursive: true, force: true }).catch(() => {});
     if (!finished) { entry.ms = Date.now() - t0; await sql`update mkt_briefs set result = (result - 'renderAt') || ${sql.json({ renderLog: log } as never)} where id = ${briefId}`.catch(() => {}); }
   }
