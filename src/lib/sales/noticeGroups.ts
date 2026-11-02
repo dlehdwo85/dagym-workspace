@@ -9,9 +9,10 @@ export const SKIP_ONLY = /대상\s?아님|not[_\s-]?target/i;
 const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = o?.[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return null; };
 const DEADLINE = ['deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'];
 /** 서울 날짜(YYYY-MM-DD) — 시각이 붙은 값은 서울 기준으로 바꿈 */
+const KST = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }); // 345차: 포맷터는 한 번만(줄마다 만들면 수백 µs)
 const kday = (v: unknown) => {
   const t = s(v); const m = t.match(/^(\d{4})-?(\d{2})-?(\d{2})/); if (!m) return null;
-  if (/[T\s]\d{2}:/.test(t)) { const d = new Date(t); if (!Number.isNaN(d.getTime())) return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d); }
+  if (/[T\s]\d{2}:/.test(t)) { const d = new Date(t); if (!Number.isNaN(d.getTime())) return KST.format(d); }
   return `${m[1]}-${m[2]}-${m[3]}`;
 };
 const flat = (v: unknown) => s(v).replace(/[^0-9A-Za-z가-힣]/g, '').toLowerCase();
@@ -59,6 +60,12 @@ const rowKey = (r: any) => { const st = s(r?.source_type), ext = s(r?.source_ext
 const cancelOf = (rows: any[]) => { const c = new Set(rows.filter(isCancel).map(rowKey).filter(Boolean)); return (r: any) => isCancel(r) || (!!rowKey(r) && c.has(rowKey(r))); };
 /** 196차(결정 15-35): 같은 공고 묶음(같은 번호·차수만 다름)에서 가장 나중 게시가 취소인가 — 입찰 업무 정기 점검(취소 연동) */
 export const latestCancelled = (rows: any[]) => { const all = [...rows].sort(order); const c = cancelOf(all); return all.length > 0 && c(all[all.length - 1]); };
+/** 344차(대표 11/02 #925): 묶음의 마지막 게시가 취소면 취소 정보(취소 공고 줄·취소일·사유) — 업무 경고 띠·알림에 씀. 아니면 null */
+export const cancelInfo = (rows: any[]): { noticeId: string; day: string | null; reason: string | null } | null => {
+  const all = [...rows].sort(order); if (!all.length) return null; const c = cancelOf(all); const last = all[all.length - 1]; if (!c(last)) return null;
+  const cr = [...all].reverse().find((r) => isCancel(r)) ?? last;
+  return { noticeId: idOf(cr), day: postDay(cr), reason: s(pick(cr, 'result_note', 'cancel_reason')) || null };
+};
 /** 같은 묶음에서 취소가 아닌 가장 나중 게시(정정 공고의 바뀐 날짜를 따라감) — 없으면 null */
 export const latestLive = (rows: any[]) => { const all = [...rows].sort(order); const c = cancelOf(all); const live = all.filter((r) => !c(r)); return live[live.length - 1] ?? null; };
 

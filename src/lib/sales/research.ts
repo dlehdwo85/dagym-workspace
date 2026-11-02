@@ -13,7 +13,7 @@ import { notify } from '../notifications';
 import { tenantOf, type SessionUser } from '../types';
 import { weekMonday } from './support';
 
-const ymd = (d: Date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
+const KST = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }); const ymd = (d: Date = new Date()) => KST.format(d); // 345차: 포맷터 한 번만
 const addDays = (day: string, n: number) => ymd(new Date(Date.parse(`${day}T12:00:00+09:00`) + n * 864e5));
 const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
 /** 한 주에 묶는 시설 수(SALES_RESEARCH_MAX, 기본 10) · 업무 마감 7일 · 조사한 시설(값 적음·확인 못함)은 12주 뒤 다시 후보 */

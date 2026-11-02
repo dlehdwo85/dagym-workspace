@@ -17,7 +17,7 @@ import { notify } from '../notifications';
 import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
-import { latestCancelled, latestLive, noKey } from './noticeGroups';
+import { cancelInfo as noticeCancelInfo, groupNotices, latestCancelled, latestLive, noKey } from './noticeGroups';
 import { briefingOf, mdhm } from './bidTerms';
 import { BID_STATUS, workRecord } from './work';
 
@@ -354,29 +354,74 @@ export async function setBidResult(u: SessionUser, i: z.infer<typeof bidResultIn
 }
 
 /**
- * 278차 #817·#830(대표 10/31 "입찰 생성된 게 취소되면 목록에서도 지우고 생성된 업무에서도 지울 수 있도록"): 공고가 취소됐는데 열린 입찰 업무가 남은 것 —
- * 진행 기록 없이 만든 업무·합쳐진 줄을 가리키는 업무까지. 업무(하위 포함)는 휴지통(30일) + 활동 기록 + 담당·공동 담당·요청자 알림. 정기 실행마다(쿼리 두 번)
+ * 344차(대표 11/02 #925 "취소된 공고의 업무는 없애지 말고 경고를 띄워 담당자가 확인하고 완료 처리 — 재공고가 올라오면 그때 다시 업무를 만들면 됨"):
+ * 공고에서 온 열린 입찰 업무 전부를 정기 실행마다 대조 — 같은 공고 묶음(같은 번호의 다른 차수 · 제목·발주처가 같은 긴급·재게시·취소 공고 · 합쳐진 줄)의 마지막 게시가 취소면
+ * 업무는 그대로 두고 sales_ref.cancel(취소일·사유) + 활동 기록 + 담당·공동 담당·요청자 알림(한 번). 278차의 '휴지통으로' 는 하지 않음(이미 옮긴 것은 그대로).
+ * 묶음 규칙은 허브 '취소된 공고' 와 같은 groupNotices — 예전엔 업무가 가리키는 줄(또는 merged_into 줄)의 원천 상태만 봐서 K-apt(kg2b)처럼 번호가 다른 '(긴급)' 재게시가 취소된 광명자이 업무를 못 잡았음
  */
 export async function canceledBidTaskSweep() {
   const sql = db();
-  const rows = await sql<{ id: string; title: string; assignee_id: string | null; requested_by: string | null; reason: string | null }[]>`
-    select t.id, t.title, t.assignee_id, t.requested_by, coalesce(k.row->>'result_note', n.row->>'result_note') as reason
-    from tasks t join sales_src_rows n on n.scope = 'global' and n.tbl = 'procurement_notices' and n.src_id = t.sales_ref->>'id'
-    left join sales_src_rows k on k.scope = 'global' and k.tbl = 'procurement_notices' and k.src_id = n.row->>'merged_into'
-    where t.deleted_at is null and t.status <> 'done' and t.parent_id is null and t.sales_ref->>'kind' = 'bid'
-      and coalesce(k.row->>'current_status', n.row->>'current_status', '') ~ '취소' limit 200`;
+  const tasks = await sql<{ id: string; title: string; nid: string }[]>`select t.id, t.title, t.sales_ref->>'id' as nid from tasks t
+    where t.deleted_at is null and t.status <> 'done' and t.parent_id is null and t.sales_ref->>'id' is not null and (t.sales_ref->>'kind' = 'bid' or t.title like '[입찰]%') and (t.sales_ref -> 'cancel') is null limit 500`;
+  if (!tasks.length) return { checked: 0, canceled: 0 };
+  const ids = [...new Set(tasks.map((t) => t.nid).filter(Boolean))];
+  const own = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = any(${ids}::text[])`;
+  const ownMap = new Map(own.map((o) => [o.src_id, o.row]));
+  const merged = [...new Set(own.map((o) => String(o.row?.merged_into ?? '')).filter(Boolean))];
+  const since = new Date(Date.now() - 180 * 864e5).toISOString();
+  const pool = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices'
+    and (src_id = any(${[...ids, ...merged]}::text[]) or (not gone and coalesce(row->>'related', 'false') = 'true' and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${since})) limit 20000`;
+  const groupOf = new Map<string, any[]>();
+  for (const g of groupNotices(pool.map((x) => ({ ...x.row, id: x.src_id })))) for (const r of g) groupOf.set(String(r.id), g);
   let canceled = 0;
-  for (const r of rows) {
-    const del = await sql<{ id: string }[]>`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where (id = ${r.id} or parent_id = ${r.id}) and deleted_at is null returning id`;
-    if (!del.some((x) => x.id === r.id)) continue;
-    canceled++;
-    await activity(sql, 'task', r.id, null, 'canceled', { reason: 'notice_canceled' }).catch(() => {});
-    const co = (await sql<{ user_id: string }[]>`select user_id from task_assignees where task_id = ${r.id}`).map((x) => x.user_id);
-    const to = [...new Set([r.assignee_id, r.requested_by, ...co].filter((x): x is string => !!x))];
-    if (to.length) await notify(sql, { userIds: to, type: 'bid_update', space: 'sales', title: `공고 취소: ${r.title.replace(/^\[입찰\]\s*/, '').slice(0, 60)}`,
-      body: `발주처가 공고를 취소해 이 입찰 업무를 휴지통으로 옮겼습니다(30일 안에 되살릴 수 있음)${r.reason ? ` — 사유: ${r.reason.slice(0, 100)}` : ''}.`, link: '/tasks/trash', actorId: null, push: true, dedupeKey: `sales:bid:cancel-task:${r.id}` } as never).catch(() => {});
+  for (const t of tasks) {
+    const row = ownMap.get(t.nid); if (!row) continue;
+    const g = [...(groupOf.get(t.nid) ?? [{ ...row, id: t.nid }])];
+    const m = row?.merged_into ? groupOf.get(String(row.merged_into)) : null; if (m) for (const x of m) if (!g.some((y) => String(y.id) === String(x.id))) g.push(x);
+    // 넘긴 공고 줄 자신은 원천 상태가 '취소'일 때만 취소로(제목에 '취소'가 든 일반 공고 오판 방지) — 정기 점검과 같은 규칙
+    const g1 = g.map((x) => (String(x.id) === t.nid && x.notice_kind === 'cancel' && !/취소/.test(String(x.current_status ?? '')) ? { ...x, notice_kind: null } : x));
+    const ci = noticeCancelInfo(g1); if (!ci) continue;
+    if (await markBidTaskCanceled(sql, t.id, ci)) canceled++;
   }
-  return { checked: rows.length, canceled };
+  return { checked: tasks.length, canceled };
+}
+
+/** 344차(#925): 업무는 그대로 두고 sales_ref.cancel(취소 공고·취소일·사유·표시 시각) + 활동 기록 + 담당·공동 담당·요청자(+넘긴 사람) 알림. 이미 표시된·완료·휴지통 업무는 건너뜀(false) */
+export async function markBidTaskCanceled(sql: Sql, taskId: string, c: { noticeId: string; day: string | null; reason: string | null }, extraTo: (string | null | undefined)[] = []) {
+  const [t] = await sql<{ id: string; title: string; assignee_id: string | null; requested_by: string | null }[]>`update tasks set sales_ref = coalesce(sales_ref, '{}'::jsonb) || ${sql.json({ cancel: { noticeId: c.noticeId, day: c.day, reason: c.reason, at: new Date().toISOString() } } as never)}::jsonb, updated_at = now(), version = version + 1
+    where id = ${taskId} and deleted_at is null and status <> 'done' and (sales_ref -> 'cancel') is null returning id, title, assignee_id, requested_by`;
+  if (!t) return false;
+  await activity(sql, 'task', t.id, null, 'notice_canceled', { noticeId: c.noticeId, day: c.day, reason: c.reason }).catch(() => {});
+  const co = (await sql<{ user_id: string }[]>`select user_id from task_assignees where task_id = ${t.id}`).map((x) => x.user_id);
+  const to = [...new Set([t.assignee_id, t.requested_by, ...co, ...extraTo].filter((x): x is string => !!x))];
+  if (to.length) await notify(sql, { userIds: to, type: 'bid_update', space: 'sales', title: `공고 취소: ${t.title.replace(/^\[입찰\]\s*/, '').slice(0, 60)}`,
+    body: `발주처가 이 공고를 취소했습니다${c.day ? `(${c.day})` : ''}${c.reason ? ` — 사유: ${c.reason.slice(0, 100)}` : ''}. 업무를 확인하고 [공고 취소로 완료]를 눌러 주세요. 재공고가 올라오면 그때 공고를 다시 넘겨 새 업무를 만듭니다.`,
+    link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, actorId: null, push: true, dedupeKey: `sales:bid:cancel-task:${t.id}` } as never).catch(() => {});
+  return true;
+}
+
+/** 344차(#925) [공고 취소로 완료] — 취소 표시가 있는 업무를 담당자·공동 담당·요청자·관리자급이 완료: 남은 체크리스트 '건너뜀'·공동 담당 몫 완료·하위 업무 완료·기록 closed_by(공고 취소)·다른 담당자에게 알림. 검토·반복·리드 다음 연락 같은 완료 뒤 자동 흐름은 타지 않음 */
+export async function closeBidCanceledTask(u: SessionUser, taskId: string) {
+  const sql = db();
+  const { perms } = await (await import('../access')).loadTaskForUser(u, taskId, sql); // 볼 권한 확인(없으면 404) — 이 함수는 접근 칸만 돌려주므로 필요한 칸은 다시 읽음
+  const [tk] = await sql<{ id: string; title: string; status: string; assignee_id: string | null; requested_by: string | null; sales_ref: { cancel?: { noticeId?: string } | null } | null }[]>`select id, title, status, assignee_id, requested_by, sales_ref from tasks where id = ${taskId} and deleted_at is null`;
+  if (!tk) throw notFound('업무를 찾을 수 없습니다');
+  const cancel = tk.sales_ref?.cancel; if (!cancel) throw badRequest('공고 취소 표시가 없는 업무입니다');
+  if (tk.status === 'done') return { id: taskId, status: 'done', already: true, skippedChecklist: 0, subtasks: 0 };
+  const co = (await sql<{ user_id: string }[]>`select user_id from task_assignees where task_id = ${taskId}`).map((x) => x.user_id);
+  if (!(perms.finish || perms.co || tk.assignee_id === u.id || co.includes(u.id) || tk.requested_by === u.id || ['owner', 'admin'].includes(u.role))) throw forbidden('담당자·요청자·관리자만 완료할 수 있습니다');
+  return sql.begin(async (tx) => {
+    const skipped = await tx<{ id: string }[]>`update task_checklist_items set skipped_at = now() where task_id = ${taskId} and not done and skipped_at is null returning id`;
+    await tx`update task_assignees set done_at = coalesce(done_at, now()) where task_id = ${taskId}`;
+    const [r] = await tx<{ version: number }[]>`update tasks set status = 'done', completed_at = now(), updated_at = now(), version = version + 1 where id = ${taskId} and deleted_at is null returning version`;
+    await activity(tx as unknown as Sql, 'task', taskId, u.id, 'closed_by', { as: '공고 취소', reason: 'notice_canceled', skippedChecklist: skipped.length, noticeId: cancel.noticeId ?? null });
+    const subs = await tx<{ id: string }[]>`update tasks set status = 'done', completed_at = now(), updated_at = now(), version = version + 1 where parent_id = ${taskId} and deleted_at is null and status <> 'done' returning id`;
+    for (const sb of subs) await activity(tx as unknown as Sql, 'task', sb.id, u.id, 'closed_by', { as: '공고 취소', reason: 'notice_canceled', parent: taskId });
+    const to = [...new Set([tk.assignee_id, tk.requested_by, ...co].filter((x): x is string => !!x && x !== u.id))];
+    if (to.length) await notify(tx as unknown as Sql, { userIds: to, type: 'task_closed', title: `공고 취소로 완료: ${String(tk.title).replace(/^\[입찰\]\s*/, '').slice(0, 60)}`,
+      body: `${u.name}님이 취소된 공고의 업무를 완료 처리했습니다${skipped.length ? ` — 남은 체크리스트 ${skipped.length}개는 건너뜀` : ''}.`, link: `/tasks/${taskId}`, entityType: 'task', entityId: taskId, actorId: u.id, dedupeKey: `sales:bid:cancel-done:${taskId}` } as never).catch(() => {});
+    return { id: taskId, status: 'done', version: r?.version ?? null, skippedChecklist: skipped.length, subtasks: subs.length };
+  });
 }
 
 /** 같은 공고 묶음(나라장터·누리장터: 같은 번호, 차수만 다른 정정·취소 공고) — 정기 점검 한 번에 모아 읽음 */
@@ -419,12 +464,14 @@ export async function bidTasksTick(now = new Date()) {
       const d = rec.data ?? {};
       // 넘긴 공고 줄 자신은 원천 상태가 '취소'일 때만 취소로 봄 — 제목에 '취소'가 든 일반 공고(notice_kind 추정)를 잘못 지우지 않게. 같은 번호의 다른 차수 취소 공고는 그대로
       const g0 = g.map((x) => (String(x.id) === id && x.notice_kind === 'cancel' && !/취소/.test(String(x.current_status ?? '')) ? { ...x, notice_kind: null } : x));
-      if (latestCancelled(g0)) {
-        const n = await cancelTaskAndEvents(sql, d, null, 'notice_canceled', id);
-        await sql`update sales_work_records set status = ${BID_RESULT_STATUS.canceled}, data = ${sql.json({ ...d, status: BID_RESULT_STATUS.canceled, bid_result: 'canceled', bid_canceled_at: new Date().toISOString() })}, updated_at = now()
+      const ci = noticeCancelInfo(g0);
+      if (ci) {
+        // 344차(대표 11/02 #925): 업무는 지우지 않고 경고 표시(sales_ref.cancel)+담당·요청자·넘긴 사람 알림 → 사람이 [공고 취소로 완료]. 일정만 취소, 진행 기록은 취소 상태(재공고는 다시 넘겨 새 업무)
+        if (d?.bid_task_id) await markBidTaskCanceled(sql, String(d.bid_task_id), ci, [d.handoff_by]);
+        const ev = soonEvents(d); const events = ev.length ? await sql<{ id: string }[]>`update events set deleted_at = now(), updated_at = now(), version = version + 1 where id = any(${ev}::uuid[]) and deleted_at is null returning id` : [];
+        for (const e of events) await activity(sql, 'event', e.id, null, 'canceled', { reason: 'notice_canceled', noticeId: id });
+        await sql`update sales_work_records set status = ${BID_RESULT_STATUS.canceled}, data = ${sql.json({ ...d, status: BID_RESULT_STATUS.canceled, bid_result: 'canceled', bid_canceled_at: new Date().toISOString(), bid_cancel_reason: ci.reason })}, updated_at = now()
           where tenant = ${rec.tenant} and src_tbl = ${SRC} and src_id = ${rec.src_id}`;
-        if (n.tasks) await notify(sql, { userIds: [...new Set([...(d.assignees ?? []), d.handoff_by].filter(Boolean))], type: 'bid_update', space: 'sales', title: `공고 취소: ${String(d.bid_name ?? '입찰 공고').slice(0, 60)}`,
-          body: `발주처가 공고를 취소해 입찰 업무와 일정 ${n.events}건을 취소했습니다.`, link: `/s/sales/hub?tab=bids&bt=canceled&bq=${encodeURIComponent(id)}` /* 278차 #830: 취소 공고는 '취소된 공고' 탭 */, actorId: null, push: true, dedupeKey: `sales:bid:cancel:${id}` } as never).catch(() => {});
         canceled++; continue;
       }
       const award = awardOf(g);

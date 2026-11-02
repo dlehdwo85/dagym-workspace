@@ -22,9 +22,11 @@ import { sidoIn } from './region';
  */
 const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = o?.[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return null; };
 // 로컬 10/19: 전환 뒤 리드(DB)의 날짜는 Date 객체 → String() 하면 'Wed Sep 09' 가 됨 — 서울 날짜(YYYY-MM-DD)로
-const day = (v: unknown) => (!v ? null : v instanceof Date ? (Number.isNaN(v.getTime()) ? null : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(v)) : String(v).slice(0, 10));
-const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-const plus = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
+// 345차(로컬 11/02 343차 timing: 시설 탭 mapMs 5.5~8.2초 — 줄마다 Intl.DateTimeFormat 을 새로 만들던 것(firstSeen·today·날짜 칸 7번)): 서울 날짜 포맷터는 한 번만 만들어 다시 씀
+const KST = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' });
+const day = (v: unknown) => (!v ? null : v instanceof Date ? (Number.isNaN(v.getTime()) ? null : KST.format(v)) : String(v).slice(0, 10));
+const today = () => KST.format(new Date());
+const plus = (n: number) => KST.format(new Date(Date.now() + n * 864e5));
 /** 338차: ?day= 값이 실제 날짜(YYYY-MM-DD)인지 */
 const isDay = (v: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) && !Number.isNaN(Date.parse(String(v)));
 
@@ -51,7 +53,7 @@ async function noticeRows(ids: Iterable<string> = [], opt: { related?: boolean }
 }
 /** 전환 뒤(쓰기 열림): 리드는 정식 표(sales_leads)가 정본 — 원본 행 칸 이름으로 맞춰 돌려줌(화면 코드 그대로) */
 /** date 칸: 운영 DB 연결은 date 를 'YYYY-MM-DD' 문자열로, 시험 DB 는 Date 로 줄 수 있음 — 둘 다(핫픽스 10/19: 문자열을 format 해 500) */
-const ymdOf = (v: unknown) => (v == null || v === '' ? null : typeof v === 'string' ? v.slice(0, 10) : v instanceof Date && !Number.isNaN(v.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(v) : null);
+const ymdOf = (v: unknown) => (v == null || v === '' ? null : typeof v === 'string' ? v.slice(0, 10) : v instanceof Date && !Number.isNaN(v.getTime()) ? KST.format(v) : null);
 async function formalLeads(tenant: string, id?: string) {
   const r = await db()<any[]>`select l.*, u.name as owner_name, (select max(x.occurred_at) from sales_lead_records x where x.lead_id = l.id and x.kind in ('sales_activities', 'proposals', 'contracts')) as last_activity_at from sales_leads l left join users u on u.id = l.owner_id where l.tenant = ${tenant} and l.deleted_at is null ${id ? db()`and l.id = ${id}` : db()``} order by l.updated_at desc limit 5000`;
   return r.map((l) => ({ ...(l.src ?? {}), __id: l.id, __src_id: l.src_id, __owner: l.owner_name ?? '', __owner_id: l.owner_id, name: l.name, sales_status: l.status, priority: l.priority, facility_type: l.facility_type, region: l.region,
@@ -69,7 +71,7 @@ const CLOSED = new Set(['계약완료', '보류', '실패', '되돌림']);
 /** #610·#614 리드 보관함(보류·실패·되돌림) — 계약완료는 대표 결정(⑩ 이름·숨김) 전까지 기본 목록에 그대로 */
 const ARCHIVED_STAGES = new Set(['보류', '실패', '되돌림']);
 /** 오늘 기준 n개월 앞뒤(KST 날짜) — #606 기간 필터 */
-const shiftMonths = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x); };
+const shiftMonths = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return KST.format(x); };
 const PRIORITY: Record<string, string> = { urgent: '긴급', high: '높음', medium: '보통', low: '낮음' };
 /** 지역 칸에 단지명 같은 값(원본 데이터 오류)은 '지역 미정' 묶음으로 — 값은 고치지 않음 */
 const regionOf = (v: unknown) => { const r = String(v ?? '').trim(); return !r || r.length > 8 || /\s/.test(r) ? '지역 미정' : r; };
@@ -91,7 +93,7 @@ const firstSeen = (r: any) => {
   const v = r?.first_seen_at;
   if (!v) return null;
   const d = new Date(String(v));
-  return /T|\s\d{2}:/.test(String(v)) && !Number.isNaN(d.getTime()) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d) : String(v).slice(0, 10);
+  return /T|\s\d{2}:/.test(String(v)) && !Number.isNaN(d.getTime()) ? KST.format(d) : String(v).slice(0, 10);
 };
 /** #476 b: '오늘' 탭 = 공고일 오늘 · 처음 본 날 오늘 · 지난 메일(전날까지 마지막 다이제스트) 뒤 처음 본 공고 — 메일 링크(오늘 탭)와 같은 범위.
  * 오늘이 된 까닭이 공고일·수집일 차이면 배지('어제 공고·오늘 수집' / '어제 메일 뒤 수집'). 게시일을 못 읽은 협력사 글은 뺌 */
@@ -139,7 +141,7 @@ const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); r
   complex: pick(r, 'complex_name', 'facility_name', 'apartment_name'), households: pick(r, 'household_count', 'households', 'total_households', 'units'), industry: pick(r, 'industry', 'business_type', 'work_type', 'notice_type', 'bid_category'),
   winner: pick(r, 'winner_name', 'award_company', 'successful_bidder'), awardAmount: pick(r, 'winner_amount', 'award_amount', 'winning_amount', 'contract_amount'), awardDate: day(pick(r, 'award_date', 'opened_at')),
   keywords: (() => { const k = pick(r, 'matched_keywords', 'keywords', 'keyword_hits'); return Array.isArray(k) ? k.join(', ') : k; })(), phone: pick(r, 'office_phone', 'management_phone', 'phone', 'contact_phone'),
-  todayNew: firstSeen(r) === new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()),
+  todayNew: firstSeen(r) === KST.format(new Date()),
   // S1-4(로컬 10/20): 원본 상세 화면 정보 칸(SALES_SCREEN_INVENTORY 2-5 상세) — 추정가격·계약방식·계약기간·공고번호·주소·팩스, 대표 판단·영업 포인트·부족 자격, 접힘 '과업·참가자격·요건 상세' 8칸
   // S1-3(로컬 10/20): 감사(AUDIT_SALES_MIGRATION)에 적힌 원본 실제 칸을 후보 맨 앞에 — source_type(9값)·household_count·winner_amount·notice_type·fit_business. 나머지 추측 칸은 원본 스키마 복사(docs/sales-src)가 오면 다시 맞춤
   vendorRecruit: /vendor_recruit|협력사/.test(String(pick(r, 'source_type', 'notice_type', 'bid_category', 'source') ?? '')),
@@ -168,12 +170,12 @@ function renoticeLinks(rows: any[]) {
   const at = (r: any) => String(r.posted_date ?? r.first_seen_at ?? '');
   const cancels = new Map<string, any[]>(); const lives = new Map<string, any[]>();
   for (const r of rows) { const k = key(r); if (!k) continue; const m = isCancel(r) ? cancels : lives; (m.get(k) ?? m.set(k, []).get(k)!).push(r); }
-  return (r: any): { prevCancel?: { title: string; reason: string | null; day: string | null }; renotice?: { title: string; close: string | null } } => {
+  return (r: any): { prevCancel?: { id: string; title: string; reason: string | null; day: string | null; task?: { id: string; done: boolean; title: string } }; renotice?: { title: string; close: string | null } } => {
     const k = key(r); if (!k) return {};
     if (isCancel(r)) { const next = (lives.get(k) ?? []).filter((x) => at(x) >= at(r)).sort((a, b) => at(b).localeCompare(at(a)))[0];
       return next ? { renotice: { title: String(pick(next, 'title') ?? ''), close: day(pick(next, 'deadline_at')) } } : {}; }
     const prev = (cancels.get(k) ?? []).filter((x) => at(x) <= at(r)).sort((a, b) => at(b).localeCompare(at(a)))[0];
-    return prev ? { prevCancel: { title: String(pick(prev, 'title') ?? ''), reason: pick(prev, 'result_note'), day: day(pick(prev, 'posted_date', 'first_seen_at')) } } : {};
+    return prev ? { prevCancel: { id: String(prev.id ?? prev.__id ?? ''), title: String(pick(prev, 'title') ?? ''), reason: pick(prev, 'result_note'), day: day(pick(prev, 'posted_date', 'first_seen_at')) } } : {};
   };
 }
 /** 239차(#744): 필수 현장설명이 오늘~3일 안 — 입찰 마감보다 먼저 다가와 '마감 임박'에 함께 */
@@ -331,7 +333,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const W = await prog('opportunity_work'); const td = today();
     const workOf = new Map(W.map((w) => [String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''), pick(w, 'status')]));
     const endOf = (r: any) => day(pick(r, 'contract_end_date', 'contract_end', 'service_end_date', 'contract_expiry_date'));
-    const shift = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(x); };
+    const shift = (d: string, months: number) => { const x = new Date(`${d}T12:00:00+09:00`); x.setUTCMonth(x.getUTCMonth() + months); return KST.format(x); };
     const rel = (await noticeRows()).filter((r) => r.related === true || r.related === 'true');
     const skips = skipLinks(rel, (id) => workOf.get(id)); // 137차: 대상 아님 + 같은 사업(사전규격 ↔ 본 공고)
     const timing = (end: string) => { const start = shift(end, -12), start2 = shift(end, -9), propose = shift(end, -6), rebid = shift(end, -3);
@@ -502,6 +504,15 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작
     // 278차 #830(대표 10/31 '취소 공고는 목록에서 뺌'): 취소된 공고(원천 상태 '취소' 또는 같은 공고 묶음의 마지막 게시가 취소)는 모든 탭에서 빼고 '취소된 공고' 보관함 탭에만
     // 339차(대표 11/02 #924 지역별): 공고의 시·도 — 원천 지역 → 비면 참가가능지역·발주처·수요기관·주소·단지·제목에서(당일 메일과 같은 순서) → 못 찾으면 '지역 미정'
+    // 344차(대표 11/02 #925 ②): 재공고 줄에 '이전 공고 취소 → 업무 완료됨/열려 있음' — 이전 공고의 진행 기록이 가리키는 입찰 업무 상태(재공고는 새로 넘겨 새 업무)
+    try {
+      const prevIds = [...new Set(all.map((n) => n.prevCancel?.id).filter((x): x is string => !!x))];
+      const pairs = prevIds.map((pid) => ({ pid, tid: String(pick(byNotice.get(pid) ?? {}, 'bid_task_id') ?? '') })).filter((x) => /^[0-9a-f-]{36}$/i.test(x.tid));
+      if (pairs.length) {
+        const st = new Map((await sql<{ id: string; status: string; title: string }[]>`select id, status, title from tasks where id = any(${pairs.map((x) => x.tid)}::uuid[]) and deleted_at is null`).map((x) => [x.id, x]));
+        for (const n of all) { const pc = n.prevCancel; const tid = pc?.id ? pairs.find((x) => x.pid === pc.id)?.tid : undefined; const tk = tid ? st.get(tid) : undefined; if (pc && tk) pc.task = { id: tk.id, done: tk.status === 'done', title: tk.title }; }
+      }
+    } catch { /* 연결 표시만 빠짐 */ }
     const str = (v: unknown) => (v == null ? null : String(v));
     const sidoByText = (n: (typeof all)[number]) => sidoIn(str(n.region)) ?? sidoIn(str(pick(n.raw, 'region_restriction')), str(n.agency), str(pick(n.raw, 'demand_agency')), str(pick(n.raw, 'office_address', 'address')), str(n.complex), str(n.title));
     // 342차(로컬 11/02 341차 운영 확인 ⓑ): 글자로 못 찾은 공고('이촌동 현대아파트 리모델링주택조합')는 단지 이름(+동 이름)으로 K-apt 단지 목록에서 소재 시도 — 같은 이름이 여러 시도에 있으면(현대아파트) 그대로 '지역 미정'
@@ -561,7 +572,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const dayPick = q.day === 'today' ? td : isDay(q.day) ? String(q.day) : null;
     const dayOk = (r: any) => !dayPick || firstSeen(r) === dayPick; // 오늘(또는 고른 날) 새 영업 DB
     let dayCounts: { day: string; n: number }[] = [];
-    const dayFilter = (rs: any[]) => { const base = rs.filter(hit); dayCounts = Array.from({ length: 7 }, (_, i) => plus(-i)).map((d) => ({ day: d, n: base.filter((r) => firstSeen(r) === d).length })); return base.filter(dayOk); };
+    const dayFilter = (rs: any[]) => { const base = rs.filter(hit); const fs = base.map((r) => firstSeen(r)); /* 345차: 줄마다 한 번만 */ dayCounts = Array.from({ length: 7 }, (_, i) => plus(-i)).map((d) => ({ day: d, n: fs.filter((x) => x === d).length })); return base.filter(dayOk); };
     // #605(대표 10/25): '대상 아님'·완료(영업완료·등록 완료)로 넘긴 건은 기본 목록에서 빠지고 보관함(?box=archive)에 누가·언제·사유 + [되돌리기]
     const box = q.box === 'archive' ? 'archive' : 'open';
     // #459(대표 10/23): 상태 필터 칩(?status=) — 회사 진행 상태 글자로 묶음. 기본 목록은 미검토·검토중·연락중·신청·보류(·완료·전환), 보관함은 대상 아님·완료. 묶음별 건수도 돌려줌

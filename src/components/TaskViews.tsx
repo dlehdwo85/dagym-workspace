@@ -31,7 +31,7 @@ import { useResearchAsk } from './sales/ResearchAsk';
 
 export type Task = {
   space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
-  sales_ref?: { kind: string; id: string; name?: string; bidInfo?: { briefing?: { at?: string | null; required?: boolean; place?: string | null } | null; briefingNone?: boolean } | null } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천 · 335차 bidInfo
+  sales_ref?: { kind: string; id: string; name?: string; bidInfo?: { briefing?: { at?: string | null; required?: boolean; place?: string | null } | null; briefingNone?: boolean } | null; cancel?: { day?: string | null; reason?: string | null } | null } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천 · 335차 bidInfo
   assigned_by_rule?: string | null; // #100 담당자 지정 규칙으로 배정됨
   co_assignees?: Co[] | null; assignee_done?: boolean | null; complete_rule?: 'primary' | 'all'; // 대표 10/23 #475 함께 맡은 담당자 · 10/24 첫 담당자의 내 몫 완료
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
@@ -1343,6 +1343,8 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
             <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
             {t.sales_ref?.kind && <span className="shrink-0 rounded-full bg-blue-50 px-1.5 text-[10px] font-medium text-blue-800" title={t.sales_ref.name ?? ''} data-testid="row-sales-ref">{(ST.kind as Record<string, string>)[t.sales_ref.kind] ?? (t.sales_ref.kind === 'support' ? '지원사업' : t.sales_ref.kind === 'contract' ? '계약' : t.sales_ref.kind === 'research' ? '후속조사' : t.sales_ref.kind)}</span>}
+            {/* 344차(대표 11/02 #925): 발주처가 취소한 공고의 열린 업무 — '공고 취소' 빨간 칩(상세에서 [공고 취소로 완료]) */}
+            {t.sales_ref?.cancel && t.status !== 'done' && <span className="shrink-0 rounded-full bg-red-50 px-1.5 text-[10px] font-semibold text-red-700" data-testid="row-bid-canceled" title={`발주처가 공고를 취소했습니다${t.sales_ref.cancel.reason ? ` · 사유: ${t.sales_ref.cancel.reason}` : ''} — 상세에서 [공고 취소로 완료]`}>공고 취소</span>}
             {/* 335차(대표 16:5x, 선택): 다가오는 현장설명회 '현설 11/4 14:00' */}
             {t.sales_ref?.bidInfo?.briefing?.at && !t.sales_ref.bidInfo.briefingNone && String(t.sales_ref.bidInfo.briefing.at).slice(0, 10) >= todayStr() && <span className="shrink-0 rounded-full bg-amber-50 px-1.5 text-[10px] font-medium text-amber-800" data-testid="row-bid-briefing"
               title={`현장설명회${t.sales_ref.bidInfo.briefing.required ? '(필수)' : ''}${t.sales_ref.bidInfo.briefing.place ? ` · ${t.sales_ref.bidInfo.briefing.place}` : ''}`}>현설 {bidShort(String(t.sales_ref.bidInfo.briefing.at))}{t.sales_ref.bidInfo.briefing.required ? ' 필수' : ''}</span>}

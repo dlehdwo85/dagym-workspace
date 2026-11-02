@@ -282,7 +282,7 @@ export async function getTaskDetail(u: SessionUser, id: string) {
   const thread = [id, ...mateIds];
   const [collaborators, checklist, subtasks, deps, comments, attachments, history, blocks, approvals, fields, risk, batchMates, collabTeams, [hasTeams], batchAttachments, batchChecklist] = await Promise.all([
     sql`select u.id, u.name from task_collaborators c join users u on u.id = c.user_id where c.task_id = ${id} order by u.name`,
-    sql`select ci.id, ci.text, ci.done, ci.sort, ci.done_at, ci.assignee_id, au.name as assignee_name from task_checklist_items ci left join users au on au.id = ci.assignee_id where ci.task_id = ${id} order by ci.sort, ci.id`,
+    sql`select ci.id, ci.text, ci.done, ci.sort, ci.done_at, ci.skipped_at, ci.assignee_id, au.name as assignee_name from task_checklist_items ci left join users au on au.id = ci.assignee_id where ci.task_id = ${id} order by ci.sort, ci.id`,
     sql`select ${TASK_COLS(sql)} ${TASK_FROM(sql)} where t.parent_id = ${id} and t.deleted_at is null
         and ${taskVisibleSql(sql, u, units)} order by t.sort_order, t.created_at`,
     sql`select dt.id, dt.title, dt.status, dt.due_date from task_dependencies d join tasks dt on dt.id = d.depends_on_id

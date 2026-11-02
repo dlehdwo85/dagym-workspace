@@ -43,7 +43,7 @@ import { BidInfoBox } from '@/components/sales/BidInfoBox';
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
   reopened: '다시 열기', deleted: '삭제', auto_spawned: '완료로 다음 업무 자동 생성', auto_removed: '완료 되돌리기 — 자동 생성 업무 정리', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
-  checklist_done: '체크리스트 완료', reassigned: '재배정', part_done: '내 몫 완료(공동 담당)', part_reopened: '내 몫 완료 취소(공동 담당)', closed_by: '완료 처리(남은 담당자 몫 포함)', assignee_added: '담당 추가', assignee_removed: '담당 빼기', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
+  checklist_done: '체크리스트 완료', reassigned: '재배정', part_done: '내 몫 완료(공동 담당)', part_reopened: '내 몫 완료 취소(공동 담당)', closed_by: '완료 처리(남은 담당자 몫 포함)', notice_canceled: '공고 취소(발주처) — 확인 뒤 완료 처리 필요', assignee_added: '담당 추가', assignee_removed: '담당 빼기', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
   file_attached: '파일 첨부', file_edited: '파일 수정', file_opened_doc: '파일을 문서로 열어 편집', file_downloaded: '파일 내려받음', mail_queued: '메일 보내기 요청', mail_sent: '메일 보냄', mail_failed: '메일 발송 실패', share_created: '다운로드 링크 만듦', share_opened: '고객이 자료를 열어봄', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
 const FIELD_LABEL: Record<string, string> = {
@@ -311,7 +311,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const photoShort = photoNeed > 0 && photoHave < photoNeed;
   const lastRound = data.approvals?.length ? data.approvals[0].round : null;
   const roundSteps = (data.approvals ?? []).filter((a: any) => a.round === lastRound).sort((a: any, b: any) => a.step - b.step);
-  const checkDone = data.checklist.filter((c: any) => c.done).length;
+  const checkDone = data.checklist.filter((c: any) => c.done || c.skipped_at).length; // 344차: 공고 취소로 건너뛴 항목도 진행률에서는 끝난 것으로
   const subDone = data.subtasks.filter((x: any) => x.status === 'done').length;
   const planEmpty = !planOpen && !data.checklist.length && !data.subtasks.length && !data.dependencies.length;
   // 대표 검수 10/20(체크리스트): 담당자가 한 명이면 항목별 담당 칩 숨기고 그 사람 몫으로. 담당 2명 이상(함께 하는 사람)·하위 업무로 나뉜 업무만 항목별 담당 선택
@@ -456,6 +456,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       </div>
 
       <div className={cx('space-y-6 px-5 py-5', !inPanel && 'rounded-b-card border border-t-0 border-line bg-white')}>
+        {/* 344차(대표 11/02 #925): 발주처가 공고를 취소한 입찰 업무 — 맨 위 빨간 경고 띠 + [공고 취소로 완료] */}
+        {t.sales_ref?.cancel && <BidCancelBanner t={t} id={id} reload={() => { reload(); broadcastRefresh(); }} />}
         <div>
           <div className="mb-1.5 flex flex-wrap items-center gap-1 text-xs text-ink-2">
             <Link href="/tasks" className="hover:underline">업무</Link>
@@ -527,7 +529,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           )}
           {/* V14 20번: 완료 업무는 "다시 진행"을 크게 (권한 없으면 서버가 이유를 알려 줌) */}
  <PartBox t={t} onPatch={patch} finishAs={perms.finish ?? null} />
-          {closedBy && <p className="mt-3 rounded-input bg-violet-50 px-3 py-2 text-sm text-violet-950" data-testid="closed-by-note"><b>{closedBy.actor_name}({closedBy.changes?.as})</b>님이 완료 처리했습니다 — 내 몫 완료 전이던 담당자: {(closedBy.changes?.left ?? []).join(', ')}</p>}
+          {closedBy && closedBy.changes?.reason !== 'notice_canceled' && <p className="mt-3 rounded-input bg-violet-50 px-3 py-2 text-sm text-violet-950" data-testid="closed-by-note"><b>{closedBy.actor_name}({closedBy.changes?.as})</b>님이 완료 처리했습니다 — 내 몫 완료 전이던 담당자: {(closedBy.changes?.left ?? []).join(', ')}</p>}
+          {closedBy && closedBy.changes?.reason === 'notice_canceled' && <p className="mt-3 rounded-input bg-slate-100 px-3 py-2 text-sm text-ink" data-testid="closed-by-note"><b>{closedBy.actor_name}</b>님이 공고 취소로 완료 처리했습니다{closedBy.changes?.skippedChecklist ? ` — 남은 체크리스트 ${closedBy.changes.skippedChecklist}개 건너뜀` : ''}</p>}
           {t.status !== 'done' && t.status !== 'review' && !primary && !myPart && (
             <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">{t.assignee_name ? `담당자 ${t.assignee_name}님이 진행합니다` : `만든 사람 ${t.created_by_name}님이 진행합니다`}</p>
           )}
@@ -654,7 +657,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                   try { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { done } }); } catch (er: any) { toast.error(er.message); }
                   reload();
                 }} />
-                <span className={cx('min-w-0 flex-1 break-words', c.done && 'text-ink-3 line-through', !c.done && itemOwner(c) === user.id && multiAssignee && 'font-semibold')}>{c.text}{!c.done && c.assignee_id === user.id && multiAssignee && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">내 몫</span>}</span>
+                <span className={cx('min-w-0 flex-1 break-words', (c.done || c.skipped_at) && 'text-ink-3 line-through', !c.done && !c.skipped_at && itemOwner(c) === user.id && multiAssignee && 'font-semibold')}>{c.text}{c.skipped_at && !c.done && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-medium text-ink-3" data-testid="checklist-skipped">건너뜀(공고 취소)</span>}{!c.done && c.assignee_id === user.id && multiAssignee && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">내 몫</span>}</span>
                 {/* 대표 검수 10/20: 항목마다 붙던 '미팅 일정 만들기' 버튼 제거(글자 깨짐·아래 큰 [미팅 일정] 버튼과 중복) · 담당 칩은 담당 여럿일 때만, 이미 다른 사람이 지정된 항목은 이름만 */}
                 {multiAssignee && perms.edit ? <UserSelect className="h-7 w-auto max-w-[7.5rem] rounded-full border border-line bg-white px-1.5 text-[11px] text-ink-2" placeholder="담당 없음" value={c.assignee_id}
                   ariaLabel={`${c.text} 담당`} onChange={async (v) => { await api(`/api/checklist/${c.id}`, { method: 'PATCH', body: { assigneeId: v } }).catch((er) => toast.error(er.message)); reload(); broadcastRefresh(); }} />
@@ -1360,6 +1363,27 @@ function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: stri
 }
 
 /** #507 공고·지원사업에서 넘어온 업무: 원천 첨부를 받아 붙이기(자동으로 못 붙였거나 기능 전에 만든 업무) — 이미 붙은 파일은 건너뜀 */
+/** 344차(대표 11/02 #925): 발주처가 취소한 공고의 업무 — 빨간 경고 띠(취소일·사유) + [공고 취소로 완료]. 완료된 뒤에는 회색 안내 한 줄 */
+function BidCancelBanner({ t, id, reload }: { t: any; id: string; reload: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const c = t?.sales_ref?.cancel; if (!c) return null;
+  const md = (d?: string | null) => (d && /^\d{4}-\d{2}-\d{2}/.test(d) ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : null);
+  const when = md(c.day);
+  if (t.status === 'done') return <div className="rounded-card border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="bid-cancel-done-note">발주처가 공고를 취소해{when ? `(${when})` : ''} 완료 처리한 업무입니다{c.reason ? ` · 사유: ${c.reason}` : ''}. 재공고가 올라오면 영업기회 › 입찰에서 다시 넘겨 새 업무를 만듭니다.</div>;
+  return (
+    <div className="rounded-card border border-red-300 bg-red-50 px-3 py-2.5 text-sm text-red-900" role="alert" data-testid="bid-cancel-banner">
+      <p className="font-semibold">이 공고는 발주처가 취소했습니다{when ? `(취소일 ${when})` : ''}.</p>
+      {c.reason && <p className="mt-0.5 text-xs">사유: {c.reason}</p>}
+      <p className="mt-1 text-xs text-red-800">확인 후 [공고 취소로 완료]를 눌러 주세요. 남은 체크리스트는 건너뜀으로 표시되고, 재공고가 올라오면 그때 공고를 다시 넘겨 새 업무를 만듭니다.</p>
+      <Button size="sm" className="mt-2" disabled={busy} data-testid="bid-cancel-done" onClick={async () => {
+        setBusy(true);
+        try { const r = await api(`/api/tasks/${id}/bid-cancel-done`, { method: 'POST', body: {} }); toast.ok(`공고 취소로 완료 처리했습니다${r?.skippedChecklist ? ` · 체크리스트 ${r.skippedChecklist}개 건너뜀` : ''}`); reload(); }
+        catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+      }}>공고 취소로 완료</Button>
+    </div>
+  );
+}
+
 function SourceFilesButton({ taskId, t, attachments, onDone }: { taskId: string; t: any; attachments: any[]; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const kind = t?.sales_ref?.kind;
