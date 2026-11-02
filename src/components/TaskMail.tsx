@@ -7,7 +7,7 @@ import QRCode from 'qrcode';
 import { api, broadcastRefresh, useApi } from './client';
 import { SuggestInput, SuggestList, useRecipientSuggest } from './contacts/RecipientSuggest';
 import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
-import { uploadTaskFiles } from './Attachments';
+import { LibPreview, uploadTaskFiles, type LibPreviewFile } from './Attachments';
 import type { AssistDraft } from './TaskAssist';
 import { KakaoSend } from './KakaoSend';
 import { cacheForSms, canSmsAttach, smsWithFiles, type SmsFile } from './native';
@@ -28,7 +28,16 @@ type Item = { id: string; channel: string; preview: string | null; status: strin
 /** #177 예약 문자를 다시 열 때(본문 완성본·받는 사람·보관함 행) */
 type ComposeInitial = AssistDraft & { to?: string; outboxId?: string; complete?: boolean };
 const INTENTS = { send: '자료 보냄', progress: '진행 안내', schedule: '일정 확인', thanks: '감사 인사' } as const;
-const PH = /\[[^\]\n]{1,12}\]/; // V32 7-1: [날짜] 같은 빈칸
+/** V32 7-1 → 337차(대표 11/02 17:3x ②): [날짜] 같은 빈칸이 남아도 보내기를 막지 않는다 — 본문 아래 안내 한 줄 + 보내기 전 확인 창(취소하면 돌아가 고침, 확인하면 그대로) */
+const phList = (s: string) => [...new Set(s.match(/\[[^\]\n]{1,12}\]/g) ?? [])];
+function phConfirm(body: string, verb: '보낼' | '예약할') {
+  const ph = phList(body); if (!ph.length) return true;
+  return window.confirm(`본문에 빈칸 ${ph.join(' ')} 이(가) 남아 있습니다.\n날짜처럼 아직 정하지 않은 값이면 그 문장을 지우고 보내도 됩니다.\n\n그대로 ${verb}까요?`);
+}
+function PhHint({ body, testid }: { body: string; testid: string }) {
+  const ph = phList(body); if (!ph.length) return null;
+  return <p className="-mt-1 text-[11px] text-amber-800" data-testid={testid}>빈칸 {ph.join(' ')} 이(가) 남아 있어요 — 날짜처럼 아직 정하지 않은 값은 그 문장을 지우고 보내도 됩니다(보내기 전에 한 번 더 묻습니다)</p>;
+}
 
 // ---- 대표 요청(10/19) 예약 보내기: KST 날짜·시각 → ISO(+09:00), 빠른 선택, 밤·주말 경고 ----
 const kstParts = (d = new Date()) => { const f = dtf('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' }).formatToParts(d);
@@ -199,7 +208,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   async function openSms() {
     const nums = sms.to.split(/[,;\s]+/).map((x) => x.replace(/[^0-9+]/g, '')).filter(Boolean);
     if (!nums.length) { toast.error('받는 사람 전화번호를 넣어 주세요'); return; }
-    if (PH.test(sms.body)) { toast.error('빈칸([날짜] 등)을 채운 뒤 보내 주세요'); return; }
+    if (!phConfirm(sms.body, '보낼')) return;
     const complete = !!initial?.complete; // 예약 문자: 본문에 링크·서명이 이미 들어 있음
     let share: string | undefined;
     try {
@@ -246,7 +255,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   async function scheduleSmsSend() {
     const nums = sms.to.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
     if (!nums.length) { toast.error('받는 사람 전화번호를 넣어 주세요'); return; }
-    if (PH.test(sms.body)) { toast.error('빈칸([날짜] 등)을 채운 뒤 예약해 주세요'); return; }
+    if (!phConfirm(sms.body, '예약할')) return;
     setBusy(true);
     try {
       let share: string | undefined;
@@ -270,7 +279,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   async function send() {
     const to = splitAddrs(f!.to);
     if (!to.length) { toast.error('받는 사람 메일 주소를 넣어 주세요'); return; }
-    if (PH.test(f!.body)) { toast.error('빈칸([날짜] 등)을 채운 뒤 보내 주세요'); return; }
+    if (!phConfirm(f!.body, '보낼')) return;
     setBusy(true);
     try {
       const r = await withConfidentialConfirm((ok) => api('/api/mail/send', { body: { taskId, company: f!.company, to, cc: splitAddrs(f!.cc), bcc: splitAddrs(f!.bcc), fromName: f!.fromName.trim() || undefined, replyTo: f!.replyTo.trim() || undefined, subject: f!.subject, body: f!.body, attachmentIds: f!.files, libraryFileIds: libIds(),
@@ -321,6 +330,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
             <Field label="받는 사람 전화번호 (여러 명은 쉼표)"><SuggestInput value={sms.to} onChange={(v) => setSms({ ...sms, to: v })} kind="phone" multi taskId={taskId} testId="sms-to" placeholder="이름·회사·번호를 치면 회사 연락처에서 찾습니다" /></Field>
             <CandChips items={d.candidates?.phones ?? []} current={sms.to} onPick={(v) => setSms({ ...sms, to: [sms.to, v].filter((x) => x.trim()).join(', ') })} testId="sms-to-cand" />
             <Field label="문자 내용"><textarea className={inputCls} rows={4} value={sms.body} onChange={(e) => setSms({ ...sms, body: e.target.value })} data-testid="sms-body" /></Field>
+            <PhHint body={sms.body} testid="sms-ph-hint" />
             {(() => { const b = smsBytes([sms.body.trim(), smsLine].filter(Boolean).join('\n\n')); return (
               <p className={cx('-mt-1 flex flex-wrap items-center gap-2 text-xs', b > 2000 ? 'text-red-700' : 'text-ink-3')} data-testid="sms-bytes">
                 {b}바이트 · {b <= 90 ? 'SMS(90바이트)' : b <= 2000 ? 'LMS(2,000바이트)' : '2,000바이트 넘음 — 줄여 주세요'}
@@ -350,6 +360,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
           <Field label="참조"><AddrChips value={f.cc} onChange={(v) => set({ cc: v })} testId="mail-cc" /></Field>
           <Field label="제목"><input className={inputCls} value={f.subject} onChange={(e) => set({ subject: e.target.value })} maxLength={200} data-testid="mail-subject" /></Field>
           <Field label="본문"><textarea className={inputCls} rows={7} value={f.body} onChange={(e) => set({ body: e.target.value })} data-testid="mail-body" /></Field>
+          <PhHint body={f.body} testid="mail-ph-hint" />
         </div>
         )}
         <div className="space-y-1.5">
@@ -435,8 +446,9 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
 function LibraryPick({ onPicked }: { onPicked: (f: { id: string; name: string; size: number }) => void }) {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
-  const res = useApi<{ files: { id: string; title: string; file_name: string; folder: string; size_bytes: number }[] }>(`/api/library?limit=30&q=${encodeURIComponent(query)}`, [query]);
-  function pick(x: { id: string; title: string; file_name: string; size_bytes: number }) {
+  const res = useApi<{ files: (LibPreviewFile & { folder: string; size_bytes: number })[] }>(`/api/library?limit=30&q=${encodeURIComponent(query)}`, [query]);
+  const [view, setView] = useState<LibPreviewFile | null>(null); /* 336차(대표 11/02 17:3x ①): 눈 아이콘 → 아래 미리보기(고르기 전 내용 확인) */
+  function pick(x: LibPreviewFile) {
     onPicked({ id: x.id, name: x.title || x.file_name, size: Number(x.size_bytes) }); toast.ok('메일 첨부에 넣었습니다');
   }
   return (
@@ -445,13 +457,18 @@ function LibraryPick({ onPicked }: { onPicked: (f: { id: string; name: string; s
         <input className={cx(inputCls, 'py-1')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="회사소개서·제안서·견적서…" aria-label="자료 검색" />
         <Button size="sm" type="submit" variant="secondary"><Search />찾기</Button>
       </form>
+      <p className="text-[11px] text-ink-3">이름을 누르면 바로 첨부 · 눈 아이콘을 누르면 내용을 먼저 봅니다</p>
       <ul className="max-h-48 overflow-y-auto text-sm">
         {(res.data?.files ?? []).map((x) => (
-          <li key={x.id}><button type="button" onClick={() => pick(x)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-50">
-            <span className="min-w-0 flex-1 truncate">{x.title || x.file_name}</span><span className="truncate text-xs text-ink-3">{x.folder}</span><span className="text-xs tabular-nums text-ink-3">{mb(Number(x.size_bytes))}</span></button></li>
+          <li key={x.id} className={cx('flex items-center rounded hover:bg-slate-50', view?.id === x.id && 'bg-accent-50/50')} data-testid="mail-lib-item">
+            <button type="button" onClick={() => pick(x)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-left">
+              <span className="min-w-0 flex-1 truncate">{x.title || x.file_name}</span><span className="truncate text-xs text-ink-3">{x.folder}</span><span className="text-xs tabular-nums text-ink-3">{mb(Number(x.size_bytes))}</span></button>
+            <button type="button" onClick={() => setView(view?.id === x.id ? null : x)} className="inline-flex size-7 shrink-0 items-center justify-center rounded text-ink-3 hover:bg-slate-100 hover:text-ink-1" aria-label={`${x.title || x.file_name} 미리보기`} title="내용 미리보기" data-testid="mail-lib-view"><Eye className="size-4" /></button>
+          </li>
         ))}
         {res.data && !res.data.files.length && <li className="px-2 py-1 text-xs text-ink-3">찾는 자료가 없습니다</li>}
       </ul>
+      {view && <LibPreview f={view} onClose={() => setView(null)} action={{ label: '메일 첨부에 넣기', on: () => { pick(view); setView(null); } }} />}
     </div>
   );
 }

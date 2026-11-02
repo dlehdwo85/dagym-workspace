@@ -145,6 +145,7 @@ import { aiBudget } from './aiBudget.step.mjs';
 import { listKeep } from './listKeep.step.mjs';
 import { backKeep } from './backKeep.step.mjs';
 import { attachLibrary } from './attachLibrary.step.mjs';
+import { mailDate337 } from './mailDate337.step.mjs';
 import { inbox } from './inbox.step.mjs';
 import { cal1019 } from './cal1019.step.mjs';
 import { cal480 } from './cal480.step.mjs';
@@ -2652,6 +2653,7 @@ await step('270차 #808 승인함 주 단위 묶음 칸 안 게시 날짜별 머
 await step('271차 #811 브랜드 영상 키트 영상 만드는 방법(실제 사진) · 승인함 릴스 [실제 사진으로 영상 만들기 · 0원] · 사진 3장 미만 안내', () => mktSlide811({ owner, ctx, sql, BASE, SHOTS }));
 await step('대표 10/24 ② 회사 월 AI 예산(원): 사용량 화면 게이지(84% 주황·다시 채워지는 날·영상 제작 따로) → AI 비서 회사 사용량 한 줄 → 100% 빨간 안내(다음 달 1일)·입력 막힘 → 플랫폼 운영 요금제 표 원 칸·회사 목록', () => aiBudget({ owner, sql, BASE, SHOTS }));
 await step('대표 23:40·23:55 마감일 버튼 크기 + 업무 첨부 자료실에서 가져오기(검색·체크 → 연결·타임라인)', () => attachLibrary({ owner, ctx, BASE, SHOTS }));
+await step('337차 대표 17:3x ② 메일·문자 빈칸([날짜]) 보내기 안 막음 — 안내 한 줄 + 확인 창(취소하면 그대로 · 확인하면 보관함)', () => mailDate337({ owner, ctx, BASE, SHOTS, sql }));
 await step('대표 02:30·03:00 승인함 통합(종류별 탭·건수·바로 승인/반려) · 예산 브랜드 축(세팅안 필요·총액 적기) · 월 목표 반려 · 매출 목표 AI 추천 · 지금 상태', () => inbox({ owner, ctx, sql, BASE, SHOTS }));
 
 await step('#116 전자계약서: 사용자 줄 [전자계약서] → 근로계약서 보내기 → 링크·접속 코드 → 로그인 없는 서명 화면(코드·본문·그리기·동의) → 서명 → 전자계약서 탭 1/2', () => contractsFlow({ browser, owner, ctx, BASE, SHOTS, sql }));

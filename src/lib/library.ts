@@ -458,7 +458,22 @@ export async function deleteLibraryFile(u: SessionUser, id: string) {
 export async function libraryDownload(u: SessionUser, id: string, inline: boolean) {
   const f = await loadLibraryFile(u, id, 'download');
   if (f.upload_status !== 'ready') throw notFound();
-  return downloadUrl(f.storage_key, f.file_name, inline && /^(image\/(png|jpe?g|gif|webp)|video\/.+|application\/pdf)$/.test(f.mime_type));
+  const inl = inline && /^(image\/(png|jpe?g|gif|webp)|video\/.+|application\/pdf)$/.test(f.mime_type);
+  return downloadUrl(f.storage_key, f.file_name, inl, 120, inl ? f.mime_type : undefined);
+}
+
+/** 336차(대표 11/02 17:3x ① 자료실 고르기 창에서 고르기 전 내용 확인): 본문 앞부분 — 올릴 때 뽑아 둔 글자(한글·워드·엑셀·PDF·발표·txt)의 앞 1,500자.
+ *  사진·영상·PDF 는 화면에 바로 띄우고, 창 안에 못 여는 문서는 이 글과 파일 정보로 확인한다. 권한은 자료 열기와 같음(기밀은 열람 기록) */
+export async function libraryPreview(u: SessionUser, id: string) {
+  const f = await loadLibraryFile(u, id, 'open');
+  const text = f.text_content ? String(f.text_content).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim() : '';
+  const LIMIT = 1500;
+  return { id: f.id, ready: f.upload_status === 'ready', text: text ? text.slice(0, LIMIT) : null, more: text.length > LIMIT, chars: text.length,
+    text_error: text ? null : friendlyTextError(f.text_error ?? (f.text_tried_at ? '본문을 찾지 못함' : (f.upload_status === 'ready' ? '아직 글자를 뽑지 않음' : '아직 올리는 중'))) };
+}
+/** 추출기 예외 문장(InvalidPDFException 같은 것)은 사람 말로 */
+function friendlyTextError(e: string) {
+  return /추출 오류/.test(e) ? '본문 글자를 뽑지 못한 파일입니다(손상되었거나 지원하지 않는 형식) — 내려받아 확인해 주세요' : e;
 }
 
 /** 자료를 업무에 첨부 (같은 저장 파일을 가리킴 — 복사하지 않음) */

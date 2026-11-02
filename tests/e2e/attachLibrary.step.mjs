@@ -20,7 +20,20 @@ export async function attachLibrary({ owner, ctx, BASE, SHOTS }) {
   const pick = owner.getByTestId('lib-pick'); await pick.waitFor();
   await pick.getByTestId('lib-pick-q').fill('현장 안내문'); await pick.getByTestId('lib-pick-q').press('Enter');
   const item = pick.getByTestId('lib-pick-item').filter({ hasText: '현장 안내문 E2E' }); await item.waitFor();
-  await item.getByRole('checkbox').check();
+  // 336차(대표 11/02 17:3x ①): 줄을 누르면 오른쪽 미리보기(PDF 첫 장 틀 · 파일 정보 · 본문 앞부분 · [새 탭에서 열기]) · 패널 [이 파일 선택] → 체크
+  await item.getByTestId('lib-pick-view').click();
+  const pv = pick.getByTestId('lib-preview'); await pv.waitFor();
+  assert.equal(await pv.getAttribute('data-kind'), 'pdf');
+  await pv.getByTestId('lib-preview-media').waitFor();
+  await pv.getByTestId('lib-preview-info').getByText(/PDF/).first().waitFor();
+  await pv.getByTestId('lib-preview-text').getByText('불러오는 중', { exact: false }).waitFor({ state: 'hidden' });
+  assert.equal((await pv.getByTestId('lib-preview-open').textContent())?.trim(), '새 탭에서 열기');
+  const lb = await pick.getByTestId('lib-pick-list').boundingBox(); const vb = await pv.boundingBox();
+  assert.ok(lb && vb && vb.x >= lb.x + lb.width - 1, `PC 에서는 미리보기가 목록 오른쪽에 ${JSON.stringify([lb, vb])}`);
+  assert.equal(await item.getByRole('checkbox').isChecked(), false, '미리보기만으로는 선택되지 않음');
+  await pv.getByTestId('lib-preview-pick').click();
+  assert.equal(await item.getByRole('checkbox').isChecked(), true, '패널 [이 파일 선택] → 체크');
+  await pv.getByTestId('lib-preview-pick').getByText('선택 해제').waitFor();
   await owner.screenshot({ path: `${SHOTS}/169-attach-from-library.png` });
   await pick.getByTestId('lib-pick-go').click();
   await owner.getByText(/자료실 파일 1건을 첨부/).waitFor();
@@ -34,5 +47,17 @@ export async function attachLibrary({ owner, ctx, BASE, SHOTS }) {
   await owner.goto(`${BASE}/tasks/${t}`);
   await owner.getByTestId('att-from-library').waitFor();
   await owner.screenshot({ path: `${SHOTS}/169-attach-from-library-390.png` });
+  // 336차 휴대폰: 줄을 누르면 목록 자리에 미리보기 · [‹ 목록]으로 돌아감
+  await owner.getByTestId('att-from-library').click();
+  const pick2 = owner.getByTestId('lib-pick'); await pick2.waitFor();
+  await pick2.getByTestId('lib-pick-q').fill('현장 안내문'); await pick2.getByTestId('lib-pick-q').press('Enter');
+  const item2 = pick2.getByTestId('lib-pick-item').filter({ hasText: '현장 안내문 E2E' }); await item2.waitFor();
+  await item2.getByTestId('lib-pick-view').click();
+  const pv2 = pick2.getByTestId('lib-preview'); await pv2.waitFor();
+  await pick2.getByTestId('lib-pick-list').waitFor({ state: 'hidden' });
+  await owner.screenshot({ path: `${SHOTS}/336-lib-preview-390.png` });
+  await pv2.getByTestId('lib-preview-back').click();
+  await pick2.getByTestId('lib-pick-list').waitFor();
+  await owner.keyboard.press('Escape');
   await owner.setViewportSize({ width: 1366, height: 900 });
 }

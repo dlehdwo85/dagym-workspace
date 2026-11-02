@@ -823,7 +823,7 @@ const korDate = (d: string) => `${+d.slice(5, 7)}월 ${+d.slice(8, 10)}일(${'�
 export function draftWarnings(body: string, channel: 'email' | 'sms') {
   const w: string[] = [];
   const ph = [...new Set(body.match(/\[[^\]\n]{1,12}\]/g) ?? [])];
-  if (ph.length) w.push(`빈칸이 남아 있습니다: ${ph.join(' ')} — 보내기 전에 실제 값으로 채워 주세요`);
+  if (ph.length) w.push(`빈칸이 남아 있습니다: ${ph.join(' ')} — 실제 값으로 채우거나, 날짜처럼 아직 정하지 않은 값이면 그 문장을 지우고 보내 주세요(보내기를 막지는 않습니다)`); // 337차
   if (channel === 'sms') { const b = [...body].reduce((n, ch) => n + (ch.charCodeAt(0) > 127 ? 2 : 1), 0); if (b > 90) w.push(`${b}바이트 — 90바이트를 넘어 LMS(장문)로 갑니다. 핵심 2~3문장이면 충분합니다`); }
   return w;
 }

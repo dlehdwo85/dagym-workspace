@@ -67,7 +67,7 @@ export function Field({ label, children, hint, className }: { label: string; chi
 
 export const inputCls = 'w-full rounded-input border border-slate-300 bg-white px-3 py-2 text-sm text-ink placeholder:text-slate-400 transition-colors hover:border-slate-400 focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20 disabled:bg-slate-50';
 
-export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
+export function Modal({ open, onClose, title, children, wide, xl }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean; xl?: boolean /* 336차: 미리보기 패널이 열리면 더 넓게 */ }) {
   useSheetBack(open, onClose); // V14 39번: 앱 뒤로 버튼은 열린 시트부터 닫는다
   useEffect(() => {
     if (!open) return;
@@ -90,7 +90,7 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
   return createPortal(
     <div data-modal-root className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-[1px] sm:items-center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal="true" aria-label={title}
-        className={clsx('max-h-[calc(100dvh-var(--sat)-12px)] sm:max-h-[92vh] w-full animate-fade-up overflow-y-auto overscroll-contain rounded-t-2xl bg-white shadow-pop sm:rounded-card', wide ? 'sm:max-w-3xl' : 'sm:max-w-lg')}>
+        className={clsx('max-h-[calc(100dvh-var(--sat)-12px)] sm:max-h-[92vh] w-full animate-fade-up overflow-y-auto overscroll-contain rounded-t-2xl bg-white shadow-pop sm:rounded-card', xl ? 'sm:max-w-5xl' : wide ? 'sm:max-w-3xl' : 'sm:max-w-lg')}>
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden />
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-white px-5 py-3">
           <h2 className="text-base font-semibold">{title}</h2>

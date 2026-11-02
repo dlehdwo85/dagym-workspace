@@ -139,10 +139,11 @@ export async function objectSize(key: string): Promise<number | null> {
 }
 
 /** 권한 확인 후 발급하는 짧은 수명의 다운로드 URL */
-export async function downloadUrl(key: string, fileName: string, inline: boolean, ttlSec = 120) {
+export async function downloadUrl(key: string, fileName: string, inline: boolean, ttlSec = 120, contentType?: string) {
   const disp = `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(fileName)}`;
   if (s3Configured()) {
-    return getSignedUrl(s3(), new GetObjectCommand({ Bucket: s3Env().bucket, Key: key, ResponseContentDisposition: disp }), { expiresIn: ttlSec });
+    /* 336차: 창 안(iframe)에 띄우는 PDF 는 올릴 때 형식이 비어 있어도 브라우저가 내려받기로 돌리지 않게 응답 형식을 같이 서명 */
+    return getSignedUrl(s3(), new GetObjectCommand({ Bucket: s3Env().bucket, Key: key, ResponseContentDisposition: disp, ...(inline && contentType ? { ResponseContentType: contentType } : {}) }), { expiresIn: ttlSec });
   }
   const exp = Date.now() + ttlSec * 1000;
   return `/api/files/local?key=${encodeURIComponent(key)}&exp=${exp}&sig=${hmac(`get:${key}:${exp}`)}&name=${encodeURIComponent(fileName)}&inline=${inline ? 1 : 0}`;

@@ -28,8 +28,8 @@ export function BidInfoBox({ info }: { info: BidInfoView }) {
       <Cell label="입찰 마감 일시" testid="bid-info-deadline" missing={!info.deadlineLabel}>{info.deadlineLabel ?? '확인 필요'}</Cell>
       <Cell label="현장설명회" testid="bid-info-briefing" missing={!info.briefingNone && !b}>
         {info.briefingNone ? '없음' : b ? (<>
-          {bidWhen(b.at) ?? '일시 확인 필요'}
-          {b.required ? <span className="ml-1 rounded bg-red-50 px-1 text-[11px] font-medium text-red-700">필수</span> : b.kind ? <span className="ml-1 rounded bg-slate-100 px-1 text-[11px] font-normal text-ink-2">{b.kind}</span> : null}
+          {bidWhen(b.at) ?? '일시 확인 필요'}{' '}
+          {b.required ? <span className="rounded bg-red-50 px-1 text-[11px] font-medium text-red-700">필수</span> : b.kind ? <span className="rounded bg-slate-100 px-1 text-[11px] font-normal text-ink-2">{b.kind}</span> : null}
           {b.place && <span className="block text-xs font-normal text-ink-2">{b.place}</span>}
         </>) : '확인 필요'}
       </Cell>

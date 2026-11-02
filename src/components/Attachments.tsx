@@ -2,7 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api, broadcastRefresh } from './client';
-import { Camera, Check, ChevronDown, ChevronRight, Download, Eye, FileArchive, FileText, FolderInput, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload, Video } from 'lucide-react';
+import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Eye, FileArchive, FileText, FolderInput, FolderOpen, History, Image as ImageIcon, Link2, Loader2, Paperclip, PenLine, Search, Table2, Trash2, Upload, Video, X } from 'lucide-react';
 import { isNativeApp } from './native';
 import { MediaFull } from './MediaView';
 import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
@@ -594,6 +594,8 @@ export function FileKindIcon({ a, small }: { a: any; small?: boolean }) {
   );
 }
 
+/** 336차: 목록 API 가 주는 시각(ISO)을 서울 날짜(YYYY-MM-DD)로 — fmtDate 는 날짜 문자열만 받아 ISO 를 주면 'NaN' 이 났음 */
+const dayKst = (x?: string | null) => (x ? dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(x)) : '');
 /** 1MB 미만은 KB, 1KB 미만은 바이트 */
 export function fmtSize(b: number) {
   if (b < 1024) return `${b}B`;
@@ -607,6 +609,8 @@ export function LibraryPickModal({ onClose, onPick, title = '자료실에서 가
   const [q, setQ] = useState(''); const [query, setQuery] = useState(''); const [space, setSpace] = useState('all'); const [folder, setFolder] = useState('*');
   const [sel, setSel] = useState<Record<string, LibPicked>>({}); const [busy, setBusy] = useState(false);
   const [data, setData] = useState<any | null>(null); const [err, setErr] = useState('');
+  const [view, setView] = useState<LibPreviewFile | null>(null); /* 336차(대표 11/02 17:3x ①): 줄을 누르면 옆(휴대폰은 목록 자리)에 미리보기 — 고르기 전 내용 확인 */
+  const toggle = (f: any) => setSel((s) => { const c = { ...s }; if (c[f.id]) delete c[f.id]; else c[f.id] = { id: f.id, title: f.title || f.file_name, file_name: f.file_name, size_bytes: Number(f.size_bytes) }; return c; });
   useEffect(() => { let on = true; setData(null);
     api<any>(`/api/library?limit=60&space=${encodeURIComponent(space)}&folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(query)}`).then((d) => { if (on) setData(d); }).catch((e) => { if (on) setErr(e.message); });
     return () => { on = false; }; }, [query, space, folder]);
@@ -614,8 +618,8 @@ export function LibraryPickModal({ onClose, onPick, title = '자료실에서 가
   const n = Object.keys(sel).length;
   const SP: Record<string, string> = { all: '전체', work: '업무', sales: '영업', marketing: '마케팅' };
   return (
-    <Modal open onClose={onClose} title={title} wide>
-      <div className="space-y-2 text-sm" data-testid="lib-pick">
+    <Modal open onClose={onClose} title={title} wide xl={!!view}>
+      <div className="space-y-2 text-sm" data-testid="lib-pick" data-preview={view ? '1' : '0'}>
         <form onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }} className="flex flex-wrap items-center gap-1.5">
           <input className={cx(inputCls, 'h-9 min-w-0 flex-1')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="파일 이름·폴더·내용으로 찾기" aria-label="자료 검색" data-testid="lib-pick-q" />
           <Button size="sm" type="submit" variant="secondary"><Search />찾기</Button>
@@ -623,21 +627,96 @@ export function LibraryPickModal({ onClose, onPick, title = '자료실에서 가
           <select className={cx(inputCls, 'h-9 max-w-[12rem] py-0')} value={folder} onChange={(e) => setFolder(e.target.value)} aria-label="폴더" data-testid="lib-pick-folder"><option value="*">모든 폴더</option>{(data?.folders ?? []).map((f: any) => <option key={f.folder} value={f.folder}>{f.folder || '(최상위)'}{f.n ? ` (${f.n})` : ''}</option>)}</select>
         </form>
         {err && <p className="text-xs text-red-700">{err}</p>}
-        <p className="text-[11px] text-ink-3">{query ? `"${query}" 검색 결과` : '최근 올린 순'} · 체크한 파일을 이 업무에 연결합니다(복사 아님 — 자료실에서 지우거나 등급을 바꾸면 업무에서도 같이 적용).</p>
-        <ul className="max-h-[50vh] divide-y divide-line overflow-y-auto rounded-input border border-line" data-testid="lib-pick-list">
+        <p className="text-[11px] text-ink-3">{query ? `"${query}" 검색 결과` : '최근 올린 순'} · 줄을 누르면 내용 미리보기, 네모를 체크하면 선택 · 체크한 파일을 이 업무에 연결합니다(복사 아님 — 자료실에서 지우거나 등급을 바꾸면 업무에서도 같이 적용).</p>
+        <div className="flex gap-2 md:items-stretch">
+        <ul className={cx('max-h-[50vh] min-w-0 flex-1 divide-y divide-line overflow-y-auto rounded-input border border-line', view && 'hidden md:block')} data-testid="lib-pick-list">
           {!data && !err && <li className="px-3 py-3 text-xs text-ink-3">불러오는 중…</li>}
-          {files.map((f) => { const on = !!sel[f.id]; return (
-            <li key={f.id}><label className={cx('flex cursor-pointer items-center gap-2.5 px-2.5 py-2 hover:bg-slate-50', on && 'bg-accent-50/50')} data-testid="lib-pick-item">
-              <input type="checkbox" className="size-4 accent-brand-600" checked={on} onChange={() => setSel((s) => { const c = { ...s }; if (c[f.id]) delete c[f.id]; else c[f.id] = { id: f.id, title: f.title || f.file_name, file_name: f.file_name, size_bytes: Number(f.size_bytes) }; return c; })} aria-label={`${f.title || f.file_name} 선택`} />
-              <FileKindIcon a={{ kind: 'file', mime_type: f.mime_type, file_name: f.file_name }} small />
-              <span className="min-w-0 flex-1"><span className="block truncate font-medium">{f.title || f.file_name}</span><span className="block truncate text-[11px] text-ink-3">{f.folder || '최상위'}{f.security === 'confidential' ? ' · 기밀' : ''} · {f.created_by_name ?? ''} · {fmtDate(f.updated_at ?? f.created_at)}</span></span>
-              <span className="text-xs tabular-nums text-ink-3">{f.size_bytes ? fmtSize(Number(f.size_bytes)) : ''}</span>
-            </label></li>); })}
+          {files.map((f) => { const on = !!sel[f.id]; const viewing = view?.id === f.id; return (
+            <li key={f.id}><div className={cx('flex items-center gap-2.5 px-2.5 py-2 hover:bg-slate-50', on && 'bg-accent-50/50', viewing && 'ring-1 ring-inset ring-accent-300')} data-testid="lib-pick-item" data-viewing={viewing ? '1' : undefined}>
+              <input type="checkbox" className="size-4 shrink-0 accent-brand-600" checked={on} onChange={() => toggle(f)} aria-label={`${f.title || f.file_name} 선택`} />
+              <button type="button" onClick={() => setView(f)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left" title="내용 미리보기" aria-label={`${f.title || f.file_name} 미리보기`} data-testid="lib-pick-view">
+                <FileKindIcon a={{ kind: 'file', mime_type: f.mime_type, file_name: f.file_name }} small />
+                <span className="min-w-0 flex-1"><span className="block truncate font-medium">{f.title || f.file_name}</span><span className="block truncate text-[11px] text-ink-3">{f.folder || '최상위'}{f.security === 'confidential' ? ' · 기밀' : ''} · {f.created_by_name ?? ''} · {fmtDate(dayKst(f.updated_at ?? f.created_at))}</span></span>
+                <span className="text-xs tabular-nums text-ink-3">{f.size_bytes ? fmtSize(Number(f.size_bytes)) : ''}</span>
+                <Eye className={cx('size-4 shrink-0', viewing ? 'text-accent-600' : 'text-ink-3')} aria-hidden />
+              </button>
+            </div></li>); })}
           {data && !files.length && <li className="px-3 py-3 text-xs text-ink-3">{query ? '찾는 자료가 없습니다' : '자료실에 파일이 없습니다'}</li>}
         </ul>
+        {view && <LibPreview f={view} onClose={() => setView(null)} backLabel="목록" className="w-full md:max-h-[50vh] md:w-[22rem] md:shrink-0 md:overflow-y-auto"
+          action={{ label: sel[view.id] ? '선택 해제' : '이 파일 선택', active: !!sel[view.id], on: () => toggle(view) }} />}
+        </div>
         <div className="flex items-center justify-end gap-2"><span className="mr-auto text-xs text-ink-2">{n ? `${n}개 선택` : ''}</span><Button variant="secondary" onClick={onClose}>취소</Button>
           <Button onClick={async () => { setBusy(true); try { await onPick(Object.values(sel)); } finally { setBusy(false); } }} disabled={!n || busy} data-testid="lib-pick-go">{confirmLabel}{n ? ` (${n})` : ''}</Button></div>
       </div>
     </Modal>
+  );
+}
+
+/** 336차(대표 11/02 17:3x ① 고르기 전 내용 확인): 자료실 고르기 창 미리보기 패널에 넘기는 줄(목록 API 가 주는 칸 그대로) */
+export type LibPreviewFile = { id: string; title?: string | null; file_name: string; mime_type?: string | null; size_bytes?: number | string | null; folder?: string | null; description?: string | null; tags?: string[] | null;
+  created_at?: string | null; created_by_name?: string | null; team_name?: string | null; security?: string | null; upload_status?: string | null };
+/** 창 안에 바로 띄울 수 있는 종류 — 사진(브라우저가 그리는 형식)·영상·PDF(형식이 PDF 로 올라온 것만, 아니면 내려받기로 돌아가서 문서 취급) */
+export function libPreviewKind(f: { mime_type?: string | null; file_name?: string | null }): 'image' | 'video' | 'pdf' | 'doc' {
+  const mime = (f.mime_type ?? '').toLowerCase(); const ext = (f.file_name ?? '').toLowerCase().split('.').pop() ?? '';
+  if (/^image\/(png|jpe?g|gif|webp)$/.test(mime) || ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime === 'application/pdf') return 'pdf';
+  return 'doc';
+}
+/** 미리보기 패널: 사진은 큰 그림 · 영상은 재생 · PDF 는 첫 장(창 안) · 한글·워드·엑셀 등은 파일 정보 + 본문 앞부분(올릴 때 뽑아 둔 글자) + [새 탭에서 열기/내려받기].
+ *  업무 첨부 [자료실에서] 창과 메일·문자 [자료실에서 고르기] 두 곳이 같이 쓴다 */
+export function LibPreview({ f, onClose, action, backLabel, className }: { f: LibPreviewFile; onClose: () => void; backLabel?: string; className?: string;
+  action?: { label: string; on: () => void; active?: boolean } }) {
+  const kind = libPreviewKind(f); const k = fileKind({ kind: 'file', mime_type: f.mime_type, file_name: f.file_name }); const ext = fileExt({ kind: 'file', mime_type: f.mime_type, file_name: f.file_name });
+  const url = `/api/library/${f.id}/download?inline=1`;
+  const [text, setText] = useState<{ text: string | null; more: boolean; text_error: string | null } | null>(null); const [textErr, setTextErr] = useState('');
+  const [broken, setBroken] = useState(false);
+  const android = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent); // 안드로이드 웹뷰는 창 안 PDF 를 못 그림 → 새 탭 안내
+  useEffect(() => { setText(null); setTextErr(''); setBroken(false);
+    if (kind === 'image' || kind === 'video') return; let on = true;
+    api<any>(`/api/library/${f.id}/preview`).then((d) => { if (on) setText(d); }).catch((e) => { if (on) setTextErr(e.message); });
+    return () => { on = false; }; }, [f.id, kind]);
+  const name = f.title || f.file_name;
+  return (
+    <div className={cx('flex min-h-0 flex-col gap-2 rounded-input border border-line bg-white p-2.5', className)} data-testid="lib-preview" data-kind={kind}>
+      <div className="flex items-center gap-1.5">
+        {backLabel && <button type="button" onClick={onClose} className="inline-flex h-7 shrink-0 items-center gap-0.5 rounded px-1 text-xs text-ink-2 hover:bg-slate-50 md:hidden" data-testid="lib-preview-back"><ChevronLeft className="size-4" />{backLabel}</button>}
+        <FileKindIcon a={{ kind: 'file', mime_type: f.mime_type, file_name: f.file_name }} small />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium" title={f.file_name}>{name}</span>
+        <button type="button" onClick={onClose} className={cx('inline-flex size-7 shrink-0 items-center justify-center rounded text-ink-3 hover:bg-slate-100 hover:text-ink-1', backLabel && 'hidden md:inline-flex')} aria-label="미리보기 닫기" title="미리보기 닫기"><X className="size-4" /></button>
+      </div>
+      {kind === 'image' && !broken && <img src={url} alt="" className="max-h-[42vh] w-full rounded-input bg-slate-50 object-contain" onError={() => setBroken(true)} data-testid="lib-preview-media" />}
+      {kind === 'video' && <video src={url} controls playsInline preload="metadata" className="max-h-[42vh] w-full rounded-input bg-black" data-testid="lib-preview-media" />}
+      {kind === 'pdf' && (android
+        ? <p className="rounded-input bg-slate-50 px-3 py-6 text-center text-xs text-ink-3">안드로이드 앱에서는 PDF 를 창 안에 그릴 수 없습니다 — 아래 [새 탭에서 열기]로 보세요</p>
+        : <iframe src={`${url}#page=1&toolbar=0&navpanes=0`} title={`${name} 첫 장`} className="h-[42vh] w-full rounded-input border border-line bg-slate-50" data-testid="lib-preview-media" />)}
+      {(kind === 'doc' || broken) && (
+        <div className="flex items-center gap-3 rounded-input bg-slate-50 px-3 py-3">
+          <span className={cx('flex size-11 shrink-0 items-center justify-center rounded-lg text-xs font-extrabold', k.cls)}>{ext.slice(0, 4)}</span>
+          <p className="text-xs text-ink-2">{broken ? '이 사진은 화면에서 바로 그릴 수 없는 형식(HEIC 등)이라 내려받아 확인해 주세요' : `${k.label} 파일은 창 안에서 바로 열 수 없어 파일 정보와 본문 앞부분으로 보여 드립니다`}</p>
+        </div>)}
+      <dl className="grid grid-cols-[4.5rem_1fr] gap-x-2 gap-y-1 text-xs" data-testid="lib-preview-info">
+        <dt className="text-ink-3">종류</dt><dd>{k.label} · {ext}{f.security === 'confidential' ? ' · 기밀' : ''}</dd>
+        <dt className="text-ink-3">크기</dt><dd className="tabular-nums">{f.size_bytes ? fmtSize(Number(f.size_bytes)) : '-'}</dd>
+        <dt className="text-ink-3">올린 사람</dt><dd>{f.created_by_name || '-'}</dd>
+        <dt className="text-ink-3">올린 때</dt><dd>{f.created_at ? fmtDateTime(f.created_at) : '-'}</dd>
+        <dt className="text-ink-3">폴더</dt><dd className="break-all">{f.folder || '최상위'}{f.team_name ? ` · ${f.team_name}` : ''}</dd>
+        {f.description && <><dt className="text-ink-3">설명</dt><dd className="whitespace-pre-wrap break-words">{f.description}</dd></>}
+        {(f.tags?.length ?? 0) > 0 && <><dt className="text-ink-3">태그</dt><dd>{f.tags!.join(' · ')}</dd></>}
+      </dl>
+      {kind !== 'image' && kind !== 'video' && (
+        <div className="rounded-input border border-line bg-slate-50/60 p-2" data-testid="lib-preview-text">
+          <p className="mb-1 text-[11px] font-medium text-ink-3">본문 앞부분{text?.more ? ' (1,500자까지)' : ''}</p>
+          {textErr ? <p className="text-xs text-red-700">{textErr}</p>
+            : !text ? <p className="text-xs text-ink-3"><Loader2 className="inline size-3 animate-spin" /> 불러오는 중…</p>
+            : text.text ? <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-ink-1">{text.text}</pre>
+            : <p className="text-xs text-ink-3">{text.text_error ?? '본문 없음'}</p>}
+        </div>)}
+      <div className="mt-auto flex flex-wrap items-center justify-end gap-1.5 pt-1">
+        <a href={url} target="_blank" rel="noopener" className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-xs text-ink-2 hover:bg-slate-50" data-testid="lib-preview-open"><ExternalLink className="size-3.5" />{kind === 'doc' ? '내려받기' : '새 탭에서 열기'}</a>
+        {action && <Button size="sm" variant={action.active ? 'secondary' : 'primary'} onClick={action.on} data-testid="lib-preview-pick">{action.label}</Button>}
+      </div>
+    </div>
   );
 }
