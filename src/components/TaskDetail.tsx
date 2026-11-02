@@ -22,7 +22,7 @@ import {
 MapPin, Undo2, } from 'lucide-react';
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
-import { Attachments, FileKindIcon, uploadTaskFiles } from '@/components/Attachments';
+import { Attachments, FileKindIcon, attKindSummary, uploadTaskFiles } from '@/components/Attachments';
 import { TaskMail } from '@/components/TaskMail';
 import { TaskAssist, type AssistDraft } from '@/components/TaskAssist';
 import { DropZone, UploadProgress } from '@/components/upload';
@@ -799,6 +799,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><FoldBtn open={!fold.att} onClick={() => toggleFold('att')} label="자료·첨부" />{data.attachments.length > 0 && <>
             <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-600 px-1.5 text-[11px] font-bold tabular-nums text-white" data-testid="att-count"><Paperclip className="size-3" />{data.attachments.length}</span>
             <span className="flex gap-0.5">{data.attachments.slice(0, 3).map((a: any) => <FileKindIcon key={a.id} a={a} small />)}</span>
+            <span className="truncate text-xs font-medium text-sky-800" data-testid="att-kinds">{attKindSummary(data.attachments)}</span>{/* 330차: 'HWP 2 · PDF 1' */}
           </>}</h2>
           {!fold.att && <Attachments items={data.attachments} taskId={id} canEdit={perms.edit} onChange={reload} meId={user.id} />}
           {/* 대표 #794: 같이 받은 업무(각자 1건씩)에 다른 담당자가 올린 첨부 — 보기·내려받기 */}

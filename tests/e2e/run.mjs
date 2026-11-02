@@ -467,15 +467,21 @@ await step('V35 1 첨부 눈에 띄게: 목록 파란 📎 칩·"첨부 있음" 
   const up = await ctx.owner.ok('POST', '/api/attachments', { taskId: t.id, kind: 'file', fileName: '견적서.pdf', mimeType: 'application/pdf', size: 12 });
   await fetch(BASE + up.upload.url, { method: 'PUT', headers: up.upload.headers, body: Buffer.from('%PDF-1.4 abc') });
   await ctx.owner.ok('POST', `/api/attachments/${up.id}/complete`, {});
+  // 330차(대표 11/02 15:2x): 종류 표기 — 한글 2 + PDF 1 이면 칩·머리에 'HWP 2 · PDF 1', 줄마다 HWP/PDF 배지
+  for (const n of ['제안서.hwp', '산출내역.hwp']) { const h = await ctx.owner.ok('POST', '/api/attachments', { taskId: t.id, kind: 'file', fileName: n, mimeType: 'application/x-hwp', size: 4 }); await fetch(BASE + h.upload.url, { method: 'PUT', headers: h.upload.headers, body: Buffer.from('HWP!') }); await ctx.owner.ok('POST', `/api/attachments/${h.id}/complete`, {}); }
   await owner.goto(BASE + '/tasks?mode=list&hasAttach=1');
   await owner.getByRole('button', { name: '전체', exact: true }).click();
   const row = owner.locator(`[data-task-id="${t.id}"]`).first();
   await row.getByTestId('att-chip').waitFor();
-  assert.equal((await row.getByTestId('att-chip').innerText()).trim(), '1');
+  assert.equal((await row.getByTestId('att-chip').innerText()).trim(), 'HWP 2 · PDF 1', '목록 칩: 종류별 묶음');
+  assert.equal(await row.getByTestId('att-chip').getAttribute('data-att-count'), '3');
   await row.locator('a[data-open-task]').first().click();
   const panel = owner.getByTestId('task-panel');
   await panel.getByTestId('att-count').waitFor();
   assert.equal(await panel.getByTestId('attach-section').locator('[data-file-kind="pdf"]').count() >= 1, true, 'PDF 빨강 아이콘');
+  assert.equal((await panel.getByTestId('att-kinds').innerText()).trim(), 'HWP 2 · PDF 1', '머리 종류 요약');
+  assert.deepEqual((await panel.getByTestId('attachments').getByTestId('att-ext').allInnerTexts()).map((x) => x.trim()).sort(), ['HWP', 'HWP', 'PDF'], '줄마다 종류 배지');
+  assert.equal(await panel.getByTestId('attachments').locator('[data-file-kind="hwp"][data-ext="HWP"]').count(), 2, '한글 파란 칸에 HWP 글자');
   await panel.getByTestId('sum-attach').click();
   await panel.getByTestId('attachments').getByText('견적서.pdf').waitFor();
   await owner.keyboard.press('Escape');

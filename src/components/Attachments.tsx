@@ -199,6 +199,7 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, r
                 {a.doc_title || a.file_name || a.url}
               </a>
               <div className="flex flex-wrap gap-x-2 text-xs text-ink-2">
+                <span className={cx('rounded px-1 font-bold', fileKind(a).cls)} data-testid="att-ext">{fileExt(a)}</span>{/* 330차: HWP·PDF 같은 종류 글자 */}
                 <span>{SOURCE_LABEL[a.source] ?? a.source}</span>
                 {a.doc_version && <span>버전 {a.doc_version}</span>}
                 {a.doc_base_date && <span>기준일 {fmtDate(a.doc_base_date)}</span>}
@@ -432,11 +433,34 @@ export function fileKind(a: { kind?: string; file_name?: string | null; mime_typ
   if (['ppt', 'pptx'].includes(ext) || /presentation/.test(mime)) return { key: 'ppt', label: '발표', cls: 'bg-orange-100 text-orange-700' };
   return { key: 'file', label: '파일', cls: 'bg-slate-100 text-slate-600' };
 }
+/** 330차(대표 11/02 15:2x 첨부 파일 종류 표기): 종류 글자 — 파일 이름의 확장자(HWP·HWPX·PDF·XLSX·DOCX·JPG·ZIP …) → 없으면 형식(mime) → 그래도 모르면 '파일' · 링크는 '링크' */
+const MIME_EXT: [RegExp, string][] = [[/pdf/, 'PDF'], [/hwpx/, 'HWPX'], [/hwp|haansoft/, 'HWP'], [/spreadsheetml|ms-excel/, 'XLSX'], [/csv/, 'CSV'], [/wordprocessingml|msword/, 'DOCX'], [/presentationml|ms-powerpoint/, 'PPTX'],
+  [/zip|compressed/, 'ZIP'], [/^image\/jpe?g/, 'JPG'], [/^image\/png/, 'PNG'], [/^image\/hei[cf]/, 'HEIC'], [/^image\/gif/, 'GIF'], [/^image\/webp/, 'WEBP'], [/^image\//, '사진'], [/^video\//, '영상'], [/^audio\//, '음성'], [/^text\/plain/, 'TXT'], [/x-workin-doc/, '문서']];
+export function fileExt(a: { kind?: string; file_name?: string | null; mime_type?: string | null }): string {
+  if (a.kind === 'link') return '링크';
+  const m = /\.([a-z][a-z0-9]{0,4})$/i.exec((a.file_name ?? '').trim());
+  if (m) { const e = m[1].toUpperCase(); return e === 'JPEG' ? 'JPG' : e; }
+  const mime = (a.mime_type ?? '').toLowerCase();
+  for (const [re, ext] of MIME_EXT) if (re.test(mime)) return ext;
+  return '파일';
+}
+/** 여러 개면 종류별로 묶어 'HWP 2 · PDF 1'(많은 순, 같으면 먼저 올린 순 · max 종까지, 나머지는 '외 n') · 1개면 'PDF' */
+export function attKindSummary(files: { kind?: string; file_name?: string | null; mime_type?: string | null }[], max = 3): string {
+  const m = new Map<string, number>();
+  for (const f of files) { const e = fileExt(f); m.set(e, (m.get(e) ?? 0) + 1); }
+  const groups = [...m.entries()].sort((a, b) => b[1] - a[1]);
+  if (!groups.length) return '';
+  if (files.length === 1) return groups[0][0];
+  const rest = groups.slice(max).reduce((n, [, c]) => n + c, 0);
+  return groups.slice(0, max).map(([e, c]) => `${e} ${c}`).join(' · ') + (rest ? ` 외 ${rest}` : '');
+}
 export function FileKindIcon({ a, small }: { a: any; small?: boolean }) {
-  const k = fileKind(a);
+  const k = fileKind(a); const ext = fileExt(a);
+  // 330차: 큰 칸(32px)에는 아이콘 대신 확장자 글자(4자까지) — 한글(HWP)인지 PDF 인지 바로 보이게 · 작은 칸·링크·긴 확장자는 아이콘
+  const text = !small && k.key !== 'link' && ext.length <= 4;
   return (
-    <span className={cx('flex shrink-0 items-center justify-center rounded-md', k.cls, small ? 'size-5' : 'size-8')} title={k.label} data-file-kind={k.key} aria-hidden>
-      {k.key === 'link' ? <Link2 className={small ? 'size-3' : 'size-4'} /> : k.key === 'img' ? <ImageIcon className={small ? 'size-3' : 'size-4'} /> : <FileText className={small ? 'size-3' : 'size-4'} />}
+    <span className={cx('flex shrink-0 items-center justify-center rounded-md', k.cls, small ? 'size-5' : 'size-8')} title={`${k.label} · ${ext}`} data-file-kind={k.key} data-ext={ext} aria-hidden>
+      {text ? <span className="text-[10px] font-extrabold leading-none tracking-tight">{ext}</span> : k.key === 'link' ? <Link2 className={small ? 'size-3' : 'size-4'} /> : k.key === 'img' ? <ImageIcon className={small ? 'size-3' : 'size-4'} /> : <FileText className={small ? 'size-3' : 'size-4'} />}
     </span>
   );
 }

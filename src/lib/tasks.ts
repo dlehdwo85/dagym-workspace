@@ -101,6 +101,9 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.assignee_id = ${uid} and not ci.done) as my_items,
   (select count(*)::int from comments cm where cm.task_id = t.id and cm.deleted_at is null) as comment_count,
   (select count(*)::int from attachments at where at.task_id = t.id and at.deleted_at is null) as attachment_count,
+  -- 330차(대표 11/02 15:2x 첨부 파일 종류 표기): 목록 📎 칩에 'HWP 2 · PDF 1' 처럼 종류별로 묶어 보이게 — 이름·형식만 올린 순으로 30개까지
+  (select coalesce(json_agg(json_build_object('kind', x.kind, 'file_name', x.file_name, 'mime_type', x.mime_type)), '[]'::json)
+     from (select af.kind, af.file_name, af.mime_type from attachments af where af.task_id = t.id and af.deleted_at is null order by af.created_at, af.id limit 30) x) as attachment_files,
   -- V35 1: 고객에게 보낸 자료(메일·다운로드 링크) · 고객이 열어 봄
   (select case when count(*) = 0 then null when bool_or(a.action = 'share_opened') then 'opened' else 'sent' end from activities a
      where a.entity_type = 'task' and a.entity_id = t.id and a.action in ('mail_sent', 'share_created', 'share_opened')) as share_state,
