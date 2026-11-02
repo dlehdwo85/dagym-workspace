@@ -555,6 +555,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings'; const td = today();
+    // 343차(로컬 11/02 341차 참고: 시설 탭 첫 로딩 16초): 응답에 구간별 시간 — readMs(DB 읽기 전부) · mapMs(줄 만들기) · packMs(건수·정렬·자르기) · totalMs · rows(읽은 줄 수). 운영에서 어느 구간이 긴지 로컬이 읽을 수 있게
+    const t0 = Date.now(); const timing = (tRead: number, tMap: number, n: number) => ({ readMs: tRead - t0, mapMs: tMap - tRead, packMs: Date.now() - tMap, totalMs: Date.now() - t0, rows: n });
     // 338차(대표 11/02 #922): ?day=today 또는 YYYY-MM-DD → 그날 처음 들어온 것만 · days = 최근 7일 날짜별 건수(이 탭, 검색어 뒤·날짜 필터 전)
     const dayPick = q.day === 'today' ? td : isDay(q.day) ? String(q.day) : null;
     const dayOk = (r: any) => !dayPick || firstSeen(r) === dayPick; // 오늘(또는 고른 날) 새 영업 DB
@@ -592,9 +594,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       return { ...meta, tab, box, tabs, day: dayPick, days: dayCounts, sort: sortKey, status: stKey || null, statusGroups: STATUS_GROUPS.map(([k, l]) => [k, l]), statusCounts, filters: { region: region || null, hh: hh || null, period: months || null, my: my || null }, regions, sidos, archiveCount: archived.length, total: out.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
     };
     // S1-2: 신규단지 진행(opportunity_work · source_id = 단지 id)
-    const BW = new Map((await prog('opportunity_work')).filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w]));
     if (tab === 'buildings') {
-      const list = dayFilter(await rows('global', 'building_sales_pipeline')).map((r) => { const w = BW.get(String(r.id ?? r.__id));
+      const [BWRows, BRows] = await Promise.all([prog('opportunity_work'), rows('global', 'building_sales_pipeline')]); // 343차: 서로 상관없는 두 읽기를 한꺼번에
+      const BW = new Map(BWRows.filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w])); const tRead = Date.now();
+      const list = dayFilter(BRows).map((r) => { const w = BW.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
           work: w ? { status: pick(w, 'status'), memo: pick(w, 'memo', 'note'), next: day(pick(w, 'next_date', 'next_action_date')), leadId: w?.lead_id ?? null, handoff: !!(w?.lead_id && pick(w, 'handoff_by')) } : null, archive: archiveOf(w),
           // S1-3: 원본 칸 current_stage·sales_priority·household_count·source_url·attachment_urls 먼저
@@ -609,13 +612,16 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           firstSeen: firstSeen(r), raw: r }; });
       type B = (typeof list)[number];
       const sorter: Record<string, (a: B, b: B) => number> = { completion: (a, b) => asc(a.completion, b.completion), moveIn: (a, b) => asc(a.moveIn, b.moveIn), households: (a, b) => numDesc(a.households, b.households), firstSeen: (a, b) => desc(a.firstSeen, b.firstSeen) };
-      return pack(list, (x) => done(x.work?.status), (x) => regionOk(x) && hhOk(x) && inPeriod(x.completion, x.moveIn, x.firstSeen) && myOk(x.moveIn ?? x.completion), sorter[sortKey ?? ''] ?? null, (x) => x.work?.status);
+      const tMap = Date.now(); const out = pack(list, (x) => done(x.work?.status), (x) => regionOk(x) && hhOk(x) && inPeriod(x.completion, x.moveIn, x.firstSeen) && myOk(x.moveIn ?? x.completion), sorter[sortKey ?? ''] ?? null, (x) => x.work?.status);
+      return { ...out, timing: timing(tRead, tMap, list.length) };
     }
     if (tab === 'facilities') {
-      const P = new Map((await prog('operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
-      const RM = await import('./research'); const RS = await RM.researchState(sql, t); // 212차 #612 후속조사(조사 예정·조사함·확인 못함 + 적은 값)
-      const NC = await RM.relatedNoticeCounts(sql).catch(() => new Map<string, number>()); // #758 단지 이름별 관련 공고 수
-      const list = dayFilter(await rows('global', 'operating_facility_prospects', 20000)).map((r) => { const p = P.get(String(r.id ?? r.__id)); const rs = RS.get(String(r.__id)) ?? null;
+      // 343차(로컬 11/02: 시설 탭 첫 로딩 16초): 서로 상관없는 DB 읽기 5개(진행 기록·후속조사·관련 공고 수·시설 줄·원본 기준일)를 차례로 기다리던 것을 한꺼번에 — 운영 DB 왕복이 길수록 효과
+      const RM = await import('./research');
+      const [PRows, RS, NC, FRows, asOf] = await Promise.all([prog('operating_facility_prospects__progress', 20000), RM.researchState(sql, t) /* 212차 #612 후속조사(조사 예정·조사함·확인 못함 + 적은 값) */,
+        RM.relatedNoticeCounts(sql).catch(() => new Map<string, number>()) /* #758 단지 이름별 관련 공고 수 */, rows('global', 'operating_facility_prospects', 20000), sourceAsOf(['kapt_weekly_complexes', 'kapt_new_complexes', 'reb_recent_complexes'])]);
+      const P = new Map(PRows.map((p) => [String(p.id ?? p.__id), p])); const tRead = Date.now();
+      const list = dayFilter(FRows).map((r) => { const p = P.get(String(r.id ?? r.__id)); const rs = RS.get(String(r.__id)) ?? null;
         return { id: r.__id, name: pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)', address: pick(r, 'address', 'road_address'), score: Number(pick(r, 'score', 'priority_score') ?? 0) || null,
           lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'completion_date', 'use_approval_date', 'completed_at', 'move_in_date')),
           contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null), leadId: p?.lead_id ?? null, handoff: !!(p?.lead_id && pick(p, 'handoff_by')), archive: archiveOf(p),
@@ -636,9 +642,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       type Fc = (typeof list)[number];
       const sorter: Record<string, (a: Fc, b: Fc) => number> = { completion: (a, b) => asc(a.date, b.date), moveIn: (a, b) => asc(a.moveIn, b.moveIn), elapsed: (a, b) => numDesc(a.elapsedDays, b.elapsedDays), households: (a, b) => numDesc(a.households, b.households), next: (a, b) => asc(a.next, b.next) };
       // 200차 #699: 원본 기준일 한 줄 — 준공·입주 단지 원천의 기준일(우선순위 순: K-apt 자료실 주 1회 · K-apt 단지 목록 매일 · 한국부동산원 연 1회)
-      return { ...pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen) && myOk(x.moveIn ?? x.date),
-        sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))), (x) => x.contact),
-        sourceAsOf: await sourceAsOf(['kapt_weekly_complexes', 'kapt_new_complexes', 'reb_recent_complexes']) };
+      const tMap = Date.now(); const out = pack(list, (x) => done(x.contact), (x) => regionOk(x) && hhOk(x) && inPeriod(x.date, x.moveIn, x.firstSeen) && myOk(x.moveIn ?? x.date),
+        sorter[sortKey ?? ''] ?? ((a, b) => (Number(b.households ?? 0) - Number(a.households ?? 0)) || ((b.score ?? -1) - (a.score ?? -1))), (x) => x.contact);
+      return { ...out, sourceAsOf: asOf, timing: timing(tRead, tMap, list.length) };
     }
     if (tab === 'vendors') {
       const P = new Map((await prog('vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
