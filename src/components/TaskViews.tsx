@@ -1344,7 +1344,7 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
         <span className="hidden w-[132px] shrink-0 justify-start overflow-hidden lg:inline-flex" data-testid="status-cell"><StatusChip t={t} onPatch={onPatch} plain={collab} /></span>
         <DueEdit t={t} onPatch={onPatch} />
         {collab
-          ? <span className="inline-flex shrink-0 items-center lg:w-[132px] lg:justify-start" data-testid="people-cell"><CollabFaces t={t} uid={user.id} /></span>
+          ? <span className="inline-flex shrink-0 items-center lg:w-[132px] lg:justify-start" data-testid="people-cell" data-batch={t.batch && t.batch.total > 1 ? `${t.batch.done}/${t.batch.total}` : undefined} title={t.batch && t.batch.total > 1 ? `담당자별로 같이 만든 업무 — 완료 ${t.batch.done}/${t.batch.total}` : undefined}><CollabFaces t={t} uid={user.id} /></span>
           : <span className="inline-flex shrink-0 items-center lg:w-[72px] lg:justify-start" data-testid="people-cell"><AssigneePicker value={t.assignee_id} name={t.assignee_name} onChange={(v) => onPatch(t, { assigneeId: v })} /><CoBadge t={t} /></span>}
         {onMove && <OrderMenu title={t.title} onMove={(to) => onMove(t, to)} />}
       </div>

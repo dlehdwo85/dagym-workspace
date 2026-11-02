@@ -9,7 +9,7 @@ import { badRequest, forbidden, notFound } from './errors';
 import { isAdmin } from './access';
 import { tenantOf, type SessionUser } from './types';
 
-type Row = { id: string; assignee_id: string | null; requested_by: string | null; created_by: string; status: string; assignee_ack_at: Date | null; completed_at: Date | null; title: string };
+type Row = { id: string; assignee_id: string | null; requested_by: string | null; created_by: string; status: string; assignee_ack_at: Date | null; completed_at: Date | null; title: string; due: string | null; tm: string | null; sales_ref: any };
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** 묶음(같은 batch_id) 하나를 공동 업무 1건으로 — 327차부터 mergeTaskIds 로 */
@@ -23,7 +23,7 @@ export async function mergeBatch(batchId: string, actorId: string | null) {
 export async function mergeTaskIds(ids: string[], actorId: string | null, why: 'batch_to_shared' | 'dupes_to_shared' = 'batch_to_shared') {
   return db().begin(async (tx) => {
     const sql = tx as unknown as Sql;
-    const rows = await sql<Row[]>`select id, assignee_id, requested_by, created_by, status, assignee_ack_at, completed_at, title from tasks
+    const rows = await sql<Row[]>`select id, assignee_id, requested_by, created_by, status, assignee_ack_at, completed_at, title, due_date::text as due, to_char(due_time, 'HH24:MI') as tm, sales_ref from tasks
       where id = any(${ids}::uuid[]) and deleted_at is null and parent_id is null order by created_at, id for update`;
     if (!rows.length) return null;
     if (rows.length === 1) { await sql`update tasks set batch_id = null, updated_at = now(), version = version + 1 where id = ${rows[0].id} and batch_id is not null`; return { keep: rows[0].id, merged: 0 }; }
@@ -49,12 +49,19 @@ export async function mergeTaskIds(ids: string[], actorId: string | null, why: '
       await sql`insert into task_assignees (task_id, user_id, added_by, acked_at, done_at) values (${keep.id}, ${o.assignee_id}, ${actorId}, ${o.assignee_ack_at}, ${o.status === 'done' ? o.completed_at ?? new Date() : null})
         on conflict (task_id, user_id) do update set done_at = coalesce(task_assignees.done_at, excluded.done_at), acked_at = coalesce(task_assignees.acked_at, excluded.acked_at)`;
     }
+    // 331차(대표 '업무 마감일은 입찰 마감일과 동일하게' · 로컬: 합칠 때 가장 이른 마감을 골라 더 나빠짐): 합친 업무의 마감 = 공고 업무면 공고 입찰 마감 일시, 아니면 가장 늦은 마감
+    const bidId = rows.map((r) => (r.sales_ref?.kind === 'bid' && r.sales_ref?.id ? String(r.sales_ref.id) : '')).find(Boolean) || null;
+    const bd = bidId ? (await (await import('./sales/bidTasks')).noticeDues(sql, [bidId])).get(bidId) ?? null : null;
+    const latest = rows.filter((r) => r.due).sort((a, b) => `${b.due}${b.tm ?? ''}`.localeCompare(`${a.due}${a.tm ?? ''}`))[0] ?? null;
+    const due = bd ?? (latest ? { day: latest.due!, time: latest.tm ?? null } : null);
+    const dueMoved = !!due && (due.day !== keep.due || (due.time ?? null) !== (keep.tm ?? null));
+    const dueSet = dueMoved ? sql`due_date = ${due!.day}::date, due_time = ${due!.time}::time,` : sql``;
     const allDone = rows.every((r) => r.status === 'done');
     const status = allDone ? 'done' : keep.status === 'done' ? 'in_progress' : rows.some((r) => r.status === 'in_progress') && keep.status === 'todo' ? 'in_progress' : keep.status;
-    await sql`update tasks set batch_id = null, status = ${status}, completed_at = ${allDone ? keep.completed_at ?? new Date() : null},
+    await sql`update tasks set ${dueSet} batch_id = null, status = ${status}, completed_at = ${allDone ? keep.completed_at ?? new Date() : null},
         assignee_done_at = case when ${keep.status === 'done'} then coalesce(assignee_done_at, completed_at, now()) else assignee_done_at end, updated_at = now(), version = version + 1 where id = ${keep.id}`;
     await sql`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = any(${gone}::uuid[])`;
-    await activity(sql, 'task', keep.id, actorId, 'merged', { reason: why, from: gone }).catch(() => {});
+    await activity(sql, 'task', keep.id, actorId, 'merged', { reason: why, from: gone, ...(dueMoved ? { dueDate: { from: keep.due, to: due!.day }, dueRule: bd ? 'bid_deadline' : 'latest' } : {}) }).catch(() => {});
     for (const id of gone) await activity(sql, 'task', id, actorId, 'merged_into', { into: keep.id, reason: why }).catch(() => {});
     return { keep: keep.id, merged: gone.length };
   });

@@ -24,16 +24,17 @@ after(async () => { srv?.proc.kill(); await sql?.end(); });
 const openTask = (kind, id) => sql`select id, title, status, due_date::text as due, assignee_id, requested_by, space, sales_ref, lead_id from tasks where sales_ref->>'kind' = ${kind} and sales_ref->>'id' = ${id} and deleted_at is null order by created_at desc limit 1`;
 
 describe('영업 진행 → 업무 자동 리스트업', () => {
-  test('입찰 연락중(다음 연락일) → "[입찰] …" 업무(결정 15-35 — 담당·요청자 = 바꾼 사람, 마감 = 다음 연락일, space sales, 원천 배지) · 검토중은 업무 없음 → 다음 연락일 바꾸면 마감 따라감', async () => {
+  test('입찰 연락중(다음 연락일) → "[입찰] …" 업무(결정 15-35 — 담당·요청자 = 바꾼 사람, 마감 = 공고 입찰 마감 일시(331차 — 다음 연락일보다 우선), space sales, 원천 배지) · 검토중은 업무 없음 → 다음 연락일 바꾸면 마감 따라감', async () => {
     const r0 = await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '미검토' });
     assert.equal(r0.task.action, 'none'); assert.equal((await openTask('bid', 'N1')).length, 0, '미검토는 업무 없음');
     const r = await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '연락중', nextDate: addDays(today, 3) });
     assert.equal(r.task.action, 'created');
     const [t] = await openTask('bid', 'N1');
     assert.ok(t.title.startsWith('[입찰] 분당 스포츠센터 성남시 체육시설 위탁운영 — 입찰 준비'), t.title);
-    assert.deepEqual([t.status, t.due, t.assignee_id, t.requested_by, t.space, t.sales_ref.kind, t.sales_ref.id], ['todo', addDays(today, 3), ctx.ownerId, ctx.ownerId, 'sales', 'bid', 'N1']);
+    assert.deepEqual([t.status, t.due, t.assignee_id, t.requested_by, t.space, t.sales_ref.kind, t.sales_ref.id], ['todo', addDays(today, 5), ctx.ownerId, ctx.ownerId, 'sales', 'bid', 'N1'], '331차: 마감 = 공고 입찰 마감일(다음 연락일 +3 아님)');
+    assert.equal((await sql`select to_char(due_time, 'HH24:MI') as tm from tasks where id = ${t.id}`)[0].tm, '10:00', '마감 시각도 공고대로');
     const r2 = await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', nextDate: addDays(today, 6) });
-    assert.equal(r2.task.action, 'updated'); assert.equal((await openTask('bid', 'N1'))[0].due, addDays(today, 6), '마감 따라감');
+    assert.equal(r2.task.action, 'none', '331차: 다음 연락일을 바꿔도 공고 업무 마감은 공고 마감 그대로'); assert.equal((await openTask('bid', 'N1'))[0].due, addDays(today, 5), '마감 = 공고 마감 유지');
     assert.equal((await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '연락중' })).task.action, 'none', '같은 상태 다시 저장해도 업무 하나');
     const list = await ctx.owner.ok('GET', '/api/tasks?space=sales&limit=50');
     const mine = (list.tasks ?? list).find((x) => x.id === t.id);

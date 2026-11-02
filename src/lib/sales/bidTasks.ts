@@ -1,6 +1,7 @@
 // 결정 15-35(대표 10/26 17:00 확정): 입찰은 업무로, 현장 영업은 영업 진행(리드)으로 나눈다 — 입찰 공고가 리드 '신규리드'로 섞이던 길을 끊음.
 // [입찰 업무로 넘기기] = 공고 하나에 입찰 업무 1건(첫 사람 주 담당, 나머지 공동 담당). 리드는 만들지 않는다.
-//   기한은 공고 일정을 따라간다: 다가오는 참가신청(없으면 입찰) 마감의 전날 → 마감이 다 지나면 개찰일.
+//   기한은 공고 일정을 따라간다(246차 #772): 다가오는 입찰 마감(없으면 참가신청 마감)의 당일·마감 시각 → 마감이 다 지나면 개찰일.
+//   331차(대표 11/02 '업무 마감일은 입찰 마감일과 동일하게'): 어느 경로(넘기기·상태 버튼·공고에서 온 리드·합치기)로 만든 공고 업무든 정기 실행마다 공고 마감 일시에 맞춤(bidDueAlignTick).
 //   체크리스트(공고 검토·현장설명회·참가신청·입찰서 제출·개찰 결과 확인) · 회사 공용 캘린더 일정 · 공고 첨부(#507) · 배정 알림.
 // 정기 점검(bidTasksTick, 정기 실행마다): 공고 취소 → 업무·일정 취소 + 알림 · 정정(날짜 바뀜) → 일정·기한 따라감(사람이 바꾼 기한은 그대로) ·
 //   개찰 결과(낙찰자) → 우리 회사인지(사업자번호, 없으면 회사·브랜드 이름) → 낙찰이면 계약 기록 + 계약 업무, 아니면 결과를 남기고 입찰 업무를 마침.
@@ -600,3 +601,48 @@ export async function moveBidLeads(u: SessionUser, i: z.infer<typeof moveBidLead
 }
 
 export type { Sql };
+
+// ── 331차(대표 11/02 15:5x "한화포레나 평택화양·광명 푸르지오 센트베르 입찰 일정 마감일이 오늘인데 어제로 설정되어 있음 … 업무 마감일은 입찰 마감일과 동일하게 … 전수조사해서 수정"):
+//    공고에서 온 업무는 어느 경로로 만들었든 마감 = 공고 입찰 마감 일시(246차 #772 규칙) — 예전 D-1 로 남은 것·사람이 옮긴 것·공고가 정정된 것 모두 정기 실행마다 맞춘다.
+/** 공고 id → 지금 기한(다가오는 입찰 마감 → 참가신청 마감 → 개찰, 날·시각). 정정·합쳐진 줄은 같은 묶음으로 보고 취소된 공고는 뺌(취소는 정기 점검이 업무를 취소함) */
+export async function noticeDues(sql: Sql, ids: string[], today = ymd(new Date())): Promise<Map<string, Due>> {
+  const out = new Map<string, Due>();
+  const uniq = [...new Set(ids.filter((x) => !!x))];
+  if (!uniq.length) return out;
+  const own = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = any(${uniq}::text[])`;
+  if (!own.length) return out;
+  const groups = await groupsOf(sql, own.map((o) => ({ id: o.src_id, row: o.row })));
+  const into = own.filter((o) => o.row?.merged_into).map((o) => [o.src_id, String(o.row.merged_into)] as const);
+  if (into.length) {
+    const kept = new Map((await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = any(${into.map(([, k]) => k)}::text[])`).map((k) => [k.src_id, k.row]));
+    for (const [id, k] of into) { const g = groups.get(id); const row = kept.get(k); if (g && row && !g.some((x) => String(x.id) === k)) g.push({ ...row, id: k }); }
+  }
+  for (const id of uniq) {
+    const g = groups.get(id); if (!g || !g.length || latestCancelled(g)) continue;
+    const d = bidDue(bidMilestones(latestLive(g) ?? g[0]), today);
+    if (d) out.set(id, d);
+  }
+  return out;
+}
+/** 열린 공고 업무(sales_ref.kind = 'bid' · 공고에서 넘어온 리드(src.from = 'bid')의 업무)의 마감을 공고 입찰 마감 일시로 — 정기 실행마다(첫 실행이 전수 보정, 결과는 app_settings 'bid_due_align_331' 에 한 번 기록) */
+export async function bidDueAlignTick(max = 300) {
+  const sql = db(); const today = ymd(new Date());
+  const rows = await sql<{ id: string; nid: string | null; due: string | null; tm: string | null }[]>`
+    select t.id, case when t.sales_ref->>'kind' = 'bid' then nullif(t.sales_ref->>'id', '') else nullif(l.src->>'id', '') end as nid, t.due_date::text as due, to_char(t.due_time, 'HH24:MI') as tm
+    from tasks t left join sales_leads l on l.id = t.lead_id and l.src->>'from' = 'bid'
+    where t.deleted_at is null and t.status <> 'done' and t.parent_id is null
+      and ((t.sales_ref->>'kind' = 'bid' and coalesce(t.sales_ref->>'id', '') <> '') or (l.id is not null and coalesce(l.src->>'id', '') <> ''))
+    order by t.updated_at limit ${max}`;
+  const dues = await noticeDues(sql, rows.map((r) => r.nid ?? ''), today);
+  let moved = 0; const changed: { id: string; from: string | null; fromTime: string | null; to: string; toTime: string | null }[] = [];
+  for (const r of rows) {
+    const d = r.nid ? dues.get(r.nid) : null; if (!d) continue;
+    if (r.due === d.day && (r.tm ?? null) === (d.time ?? null)) continue;
+    const n = await sql`update tasks set due_date = ${d.day}::date, due_time = ${d.time}::time, updated_at = now(), version = version + 1 where id = ${r.id} and deleted_at is null and status <> 'done'`;
+    if (!n.count) continue;
+    await activity(sql, 'task', r.id, null, 'updated', { dueDate: { from: r.due, to: d.day }, dueTime: { from: r.tm, to: d.time }, reason: 'bid_deadline_align' }).catch(() => {});
+    moved++; changed.push({ id: r.id, from: r.due, fromTime: r.tm, to: d.day, toTime: d.time });
+  }
+  await sql`insert into app_settings (key, value) values ('bid_due_align_331', ${sql.json({ at: new Date().toISOString(), checked: rows.length, moved, changed: changed.slice(0, 200) } as never)}) on conflict (key) do nothing`;
+  return { checked: rows.length, matched: rows.filter((r) => r.nid && dues.has(r.nid)).length, moved };
+}

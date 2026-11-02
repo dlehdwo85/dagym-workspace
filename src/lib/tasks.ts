@@ -1381,7 +1381,8 @@ export async function requestExtension(u: SessionUser, taskId: string, i: z.infe
     });
     return { applied: true };
   }
-  if (cur.assignee_id !== u.id) throw forbidden('마감 연장은 담당자(요청)·요청자(바로 연장)만 할 수 있습니다');
+  // 331차(로컬 11/02 ②: 공동 담당은 연장 요청조차 못 함): 함께 담당도 요청자에게 연장 요청
+  if (cur.assignee_id !== u.id && !(await isCoAssignee(sql, task.id, u.id))) throw forbidden('마감 연장은 담당자·함께 담당(요청)·요청자(바로 연장)만 할 수 있습니다');
   const id = await sql.begin(async (tx) => {
     await tx`update task_due_extensions set status = 'cancelled' where task_id = ${task.id} and status = 'pending'`;
     const [x] = await tx<{ id: string }[]>`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason)

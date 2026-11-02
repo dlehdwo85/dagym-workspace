@@ -69,7 +69,7 @@ describe('입찰 업무로 넘기기', () => {
     assert.ok(!ag.items.some((x) => x.kind === 'bid' && x.title.startsWith('입찰 마감 · 분당 스포츠센터')), '넘긴 공고는 주요 일정에서 빠짐(일정이 대신)');
     assert.ok((await sql`select 1 from events where title like '[입찰] 입찰 마감 · %분당 스포츠센터%' and deleted_at is null`).length, '입찰 마감은 회사 캘린더 일정으로 한 번');
   });
-  test('정기 점검 — 공고 정정(날짜·시각) → 일정·기한(마감일 당일·마감 시각) 따라감 · 사람이 바꾼 기한은 그대로', async () => {
+  test('정기 점검 — 공고 정정(날짜·시각) → 일정·기한(마감일 당일·마감 시각) 따라감 · 331차: 사람이 바꾼 기한도 공고 마감으로 다시(대표 "업무 마감일은 입찰 마감일과 동일하게")', async () => {
     const w0 = await work('B1'); const taskId = w0.data.bid_task_id; const closeEv = w0.data.bid_events.close;
     assert.equal(w0.data.bid_events.apply, undefined, '246차 #771 참가신청 일정은 만들지 않음');
     await patch('B1', { participation_deadline_at: `${addDays(today, 9)}T18:00`, deadline_at: `${addDays(today, 11)}T17:00` });
@@ -82,11 +82,12 @@ describe('입찰 업무로 넘기기', () => {
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${taskId}`, { dueDate: addDays(today, 3) }); // 사람이 바꾼 기한
     await patch('B1', { deadline_at: `${addDays(today, 12)}T14:00` });
     await tick();
-    assert.equal((await sql`select due_date::text d from tasks where id = ${taskId}`)[0].d, addDays(today, 3), '사람이 바꾼 기한은 그대로');
+    assert.deepEqual(Object.values((await sql`select due_date::text d, to_char(due_time, 'HH24:MI') t from tasks where id = ${taskId}`)[0]), [addDays(today, 12), '14:00'], '331차: 사람이 바꾼 기한도 공고 마감 일시로(bidDueAlign)');
+    assert.equal((await sql`select count(*)::int c from activities where entity_id = ${taskId} and action = 'updated' and changes->>'reason' = 'bid_deadline_align'`)[0].c >= 1, true);
     assert.equal((await sql`select ${kday('start_at')} d from events where id = ${closeEv}`)[0].d, addDays(today, 12));
     assert.deepEqual([(await work('B1')).data.bid_due_auto, (await work('B1')).data.bid_due_time], [addDays(today, 12), '14:00']);
   });
-  test('246차 #772: 예전 규칙(마감 전날)으로 만든 열린 입찰 업무는 정기 점검이 한 번 새 규칙으로 다시 계산(사람이 옮긴 기한도) · 다음부터는 사람이 바꾼 기한 그대로', async () => {
+  test('246차 #772: 예전 규칙(마감 전날)으로 만든 열린 입찰 업무는 정기 점검이 새 규칙으로 다시 계산(사람이 옮긴 기한도) · 331차: 그 뒤 사람이 바꾼 기한도 공고 마감으로', async () => {
     await put({ id: 'B8', title: '예전 규칙 공고', issuer: '시청', related: true, first_seen_at: today, deadline_at: `${addDays(today, 7)}T17:00` });
     const r = await handoff(ctx.owner, 'B8', [ctx.staffA.id]);
     // 배포 전 규칙으로 만든 것처럼: 기한 = 마감 전날, 규칙 표시 없음 · 사람이 하루 더 옮김
@@ -100,7 +101,7 @@ describe('입찰 업무로 넘기기', () => {
     assert.equal((await work('B8')).data.bid_due_rule, 'close_day');
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.taskId}`, { dueDate: addDays(today, 6) });
     await tick();
-    assert.equal((await sql`select due_date::text d from tasks where id = ${r.taskId}`)[0].d, addDays(today, 6), '한 번만 — 그 뒤 사람이 바꾼 기한은 그대로');
+    assert.equal((await sql`select due_date::text d from tasks where id = ${r.taskId}`)[0].d, addDays(today, 7), '331차: 사람이 뒤로 옮겨도 공고 마감(+7)으로 다시');
   });
   test('정기 점검 — 나라장터 같은 번호 취소 공고 → 업무·일정 취소 · 공고 취소 · 알림', async () => {
     await put({ id: 'B2', source_type: 'g2b_bid', source_external_id: 'R26BK0001-000', title: '주민운동시설 위탁 운영', issuer: '구청', related: true, first_seen_at: today, posted_date: addDays(today, -1),

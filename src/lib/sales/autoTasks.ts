@@ -1,5 +1,5 @@
 // 대표 10/20 14:15 영업: DB(입찰·신규단지·시설·협력사·리드)에서 TM 을 거쳐 '영업 진행'으로 바뀐 건을 업무·일정에 자동 리스트업.
-// ① 진행 상태(연락중·신청 준비·전환, 리드 생성)로 바뀌면 담당자에게 업무 "[영업] 이름 — 다음 조치"(마감 = 다음 연락일/입찰 마감 D-1, 요청자 = 바꾼 사람, 원천 카드 링크)
+// ① 진행 상태(연락중·신청 준비·전환, 리드 생성)로 바뀌면 담당자에게 업무 "[영업] 이름 — 다음 조치"(마감 = 공고 입찰 마감 일시 → 없으면 다음 연락일(331차 · 예전 D-1 없앰), 요청자 = 바꾼 사람, 원천 카드 링크)
 // ② 업무는 업무 공간과 같은 표(space='sales', sales_ref·lead_id) → 업무 화면 '영업' 칩·원천 배지, 영업 홈 '오늘 할 일'과 같은 데이터
 // ③ 보류 → 보류(on_hold), 미참여·대상아님·영업완료·등록 완료·실패 → 완료(done) 자동. 다음 연락일을 바꾸면 열린 업무의 마감도 따라감
 // 일정은 따로 만들지 않는다 — 리드 다음 연락일·작업 중 입찰 마감은 이미 '영업 주요 일정'으로 홈·캘린더에 합성된다(srcViews agenda).
@@ -21,10 +21,12 @@ const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seou
 export type SyncInput = { kind: SalesKind; id: string; name: string; status: string | null; nextDate?: string | null; nextAction?: string | null; deadline?: string | null; deadlineTime?: string | null; assigneeId?: string | null; leadId?: string | null;
   /** 196차: 배정 알림 없이(정기 실행이 예전 리드에 업무를 채울 때) */ quiet?: boolean };
 /** 327차(대표 11/02 '입찰인데 왜 영업으로 표기되나'): 공고에서 넘어와 리드가 된 건(sales_leads.src.from = 'bid')이면 그 리드의 업무도 [입찰] 로 */
-export async function leadFromBid(sql: Sql, leadId: string | null | undefined): Promise<boolean> {
-  if (!leadId || !/^[0-9a-f-]{36}$/i.test(leadId)) return false;
-  const rows = await sql<{ f: string | null }[]>`select src->>'from' as f from sales_leads where id = ${leadId}`.catch(() => [] as { f: string | null }[]);
-  return rows[0]?.f === 'bid';
+export async function leadFromBid(sql: Sql, leadId: string | null | undefined): Promise<boolean> { return !!(await leadBidId(sql, leadId)); }
+/** 331차: 공고에서 넘어온 리드면 그 공고 id(sales_leads.src.id) — 업무 마감을 공고 입찰 마감에 맞추는 데 씀 */
+export async function leadBidId(sql: Sql, leadId: string | null | undefined): Promise<string | null> {
+  if (!leadId || !/^[0-9a-f-]{36}$/i.test(leadId)) return null;
+  const rows = await sql<{ f: string | null; id: string | null }[]>`select src->>'from' as f, src->>'id' as id from sales_leads where id = ${leadId}`.catch(() => [] as { f: string | null; id: string | null }[]);
+  return rows[0]?.f === 'bid' && rows[0]?.id ? String(rows[0].id) : null;
 }
 /** 열린(완료 아님) 자동 업무 찾기 */
 async function openTask(sql: Sql, tenant: string, kind: SalesKind, id: string) {
@@ -51,13 +53,18 @@ export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Pro
     return { taskId: cur.id, action: 'held' };
   }
   const progress = PROGRESS.has(st) || i.kind === 'lead';
-  // 마감: 다음 연락일 > 입찰 마감일 당일·마감 시각(246차 #772, 예전 D-1) > (리드) 내일
-  const due = i.nextDate ?? (i.deadline ? i.deadline : i.kind === 'lead' ? ymd(new Date(Date.now() + 864e5)) : null);
-  const dueTime = !i.nextDate && i.deadline ? i.deadlineTime ?? null : null;
+  // 331차(대표 11/02 '업무 마감일은 입찰 마감일과 동일하게'): 공고에서 온 건은 어느 경로든 마감 = 공고 입찰 마감 일시(246차 #772 규칙: 마감일 당일·마감 시각, 다 지났으면 개찰) — 다음 연락일보다 우선.
+  //   공고 → 리드(src.from = 'bid')의 업무도 그 공고 마감으로. 공고 일정이 모두 지났으면 다음 연락일 > (리드) 내일. (예전: 다음 연락일 > 입찰 마감, 더 예전엔 D-1)
+  const today = ymd(new Date());
+  const bidId = i.kind === 'bid' ? i.id : i.kind === 'lead' ? await leadBidId(sql, i.leadId ?? i.id) : null;
+  const bd = (bidId ? (await (await import('./bidTasks')).noticeDues(sql, [bidId], today)).get(bidId) : null)
+    ?? (i.kind === 'bid' && i.deadline && i.deadline >= today ? { day: i.deadline, time: i.deadlineTime ?? null } : null);
+  const due = bd?.day ?? i.nextDate ?? (i.kind === 'lead' ? ymd(new Date(Date.now() + 864e5)) : null);
+  const dueTime = bd ? bd.time : null;
   if (cur) {
     if (!progress) return { taskId: cur.id, action: 'none' };
     const back = cur.status === 'on_hold' ? sql`, status = 'todo'` : sql``;
-    if ((due && due !== cur.due_date) || cur.status === 'on_hold') { await sql`update tasks set due_date = coalesce(${due}::date, due_date) ${dueTime ? sql`, due_time = ${dueTime}::time` : sql``} ${back}, updated_at = now(), version = version + 1 where id = ${cur.id}`; return { taskId: cur.id, action: 'updated' }; }
+    if ((due && due !== cur.due_date) || cur.status === 'on_hold') { await sql`update tasks set due_date = coalesce(${due}::date, due_date) ${bd ? sql`, due_time = ${dueTime}::time` : sql``} ${back}, updated_at = now(), version = version + 1 where id = ${cur.id}`; return { taskId: cur.id, action: 'updated' }; }
     return { taskId: cur.id, action: 'none' };
   }
   if (!progress) return { taskId: null, action: 'none' };
@@ -67,7 +74,7 @@ export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Pro
   const rule = i.assigneeId ? null : await (await import('../assignees')).resolveAssignee(sql, tenantOf(u), 'sales_source', i.kind).catch(() => null);
   // 결정 15-35: 입찰은 업무로(현장 영업과 구분) — 입찰 공고에서 생긴 업무는 [입찰]
   // 327차(대표 11/02 '광명 푸르지오·한화포레나는 입찰인데 왜 영업으로 표기되나'): 공고에서 온 업무는 어느 경로든 [입찰] — 공고에서 넘어와 리드가 된 건의 다음 연락 업무도. 태그는 영업·입찰 함께
-  const fromBid = i.kind === 'bid' || (i.kind === 'lead' && (await leadFromBid(sql, i.leadId ?? i.id)));
+  const fromBid = !!bidId;
   const title = `${fromBid ? '[입찰]' : '[영업]'} ${i.name.slice(0, 120)} — ${(i.nextAction ?? (i.kind === 'lead' ? '첫 연락' : st === '검토중' ? '검토' : i.kind === 'vendor' ? '등록 신청' : i.kind === 'bid' ? '입찰 준비' : '다음 조치')).slice(0, 40)}`;
   const desc = `${KIND_LABEL[i.kind]} 건에서 자동으로 만든 ${fromBid ? '입찰' : '영업'} 업무입니다 — 원천: ${LINK[i.kind](i.id)}${i.deadline ? `\n입찰 마감: ${i.deadline}` : ''}\n(상태를 보류·미참여·대상아님·완료로 바꾸면 이 업무도 함께 보류·완료됩니다)`;
   const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, dueDate: due, dueTime, approvalRequired: false, tags: [...new Set(['영업', ...(fromBid ? ['입찰'] : []), KIND_LABEL[i.kind]])] }, { quiet: !!i.quiet, skipQuota: true });

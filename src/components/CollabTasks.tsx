@@ -39,7 +39,8 @@ export function CollabPeople({ t, uid, className }: { t: CollabTask; uid: string
 export function CollabFaces({ t, uid }: { t: CollabTask; uid: string }) {
   const all: { id: string; name: string; state: string; done: boolean; me: boolean }[] = multiOf(t)
     ? partsOf(t).map((p) => ({ id: p.id, name: p.name || '이름 없음', state: p.done ? '내 몫 완료' : !p.acked ? '확인 전' : '진행 중', done: p.done, me: p.id === uid }))
-    : (t.batch_people ?? []).map((p, k) => ({ id: p.id ?? `none-${k}`, name: p.name ?? '담당 없음', state: STATUS_LABEL[p.status as TaskStatus] ?? p.status, done: p.status === 'done', me: p.id === uid }));
+    : [...(t.assignee_id ? [{ id: t.assignee_id, name: t.assignee_name || '이름 없음', state: STATUS_LABEL[t.status as TaskStatus] ?? t.status, done: t.status === 'done', me: t.assignee_id === uid }] : []), // 331차: 묶음 줄은 그 줄의 담당(나 또는 그 사람)부터 — 328차 뒤 전체 보기 공동 업무 칸에서 담당·근무 상태 점이 안 보였음
+      ...(t.batch_people ?? []).map((p, k) => ({ id: p.id ?? `none-${k}`, name: p.name ?? '담당 없음', state: STATUS_LABEL[p.status as TaskStatus] ?? p.status, done: p.status === 'done', me: p.id === uid }))];
   if (!all.length) return null;
   const shown = all.slice(0, 3); const done = all.filter((p) => p.done).length;
   return (
