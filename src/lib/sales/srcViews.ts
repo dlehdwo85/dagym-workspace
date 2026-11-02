@@ -24,6 +24,8 @@ const pick = (o: any, ...keys: string[]) => { for (const k of keys) { const v = 
 const day = (v: unknown) => (!v ? null : v instanceof Date ? (Number.isNaN(v.getTime()) ? null : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(v)) : String(v).slice(0, 10));
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 const plus = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
+/** 338차: ?day= 값이 실제 날짜(YYYY-MM-DD)인지 */
+const isDay = (v: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) && !Number.isNaN(Date.parse(String(v)));
 
 /** 185차(로컬 10/26 19:20 A5): 상한(limit)은 최근 것부터 채우고(처음 본 때 최근순) 공고는 3년 창 — 정렬 없이 limit 하면 행이 상한(2만)을 넘을 때 공고가 무작위로 빠진다.
  *  돌려줄 때는 예전처럼 들어온 순서(오래된 것 → 새것, 같은 때는 저장 위치 순)로 되돌린다 — 동률 정렬(지역 묶음 순서 등)이 바뀌지 않게 */
@@ -480,6 +482,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // [대상 아님] 탭: 누가·언제·사유(진행 기록) — 사유 칸이 생기기 전에 넘긴 것은 마지막으로 고친 사람·시각
     const who = tab === 'skip' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
     const td = today();
+    // 338차(대표 11/02 #922 새 공고 날짜별): ?day=YYYY-MM-DD(오늘이 아닌 날) → '그날 새 공고' = 그날 처음 수집했거나 공고일이 그날인 공고(마감 지난 것 포함) · days = 최근 7일 날짜별 건수
+    const dayPick = tab === 'today' && isDay(q.day) && String(q.day) !== td ? String(q.day) : null;
     // #751: 취소된 공고 ↔ 같은 원천·같은 제목(취소·긴급·재공고 표시 뺌)·같은 기관으로 그 뒤에 올라온 공고(재공고) — 서로 잇는 한 줄
     const relink = renoticeLinks(cand);
     const all = N.map((r) => { const id = String(r.id ?? r.__id); const w = byNotice.get(id); const p = P.get(id); const n0 = notice(r, cats); const why = todayReason(n0, r.first_seen_at, since, r.refound_at); const skipped = skips.hidden(r);
@@ -496,9 +500,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; });
     // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작
     // 278차 #830(대표 10/31 '취소 공고는 목록에서 뺌'): 취소된 공고(원천 상태 '취소' 또는 같은 공고 묶음의 마지막 게시가 취소)는 모든 탭에서 빼고 '취소된 공고' 보관함 탭에만
+    const dayHit = (n: (typeof all)[number], d: string) => (d === td ? n.todayHit : n.posted === d || n.noticeDate === d); // 338차: 오늘은 기존 규칙(메일 뒤 수집·다시 찾음 포함), 지난 날은 수집일·공고일
     const canceledCard = (n: (typeof all)[number]) => /취소/.test(String(n.status ?? '')) || !!(n.history as { cancelDay?: string | null } | null)?.cancelDay;
     const inTab = (n: (typeof all)[number], tb: string) => (tb === 'skip' ? n.skipped && !!n.skip : !n.skipped) && (tb === 'skip' || tb === 'ref' /* 참고 = 지난 메일에 실린 그대로 */ || (tb === 'canceled') === canceledCard(n)) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
-      && (tb !== 'today' || (n.todayHit && (n.result || !bidEnded(n, td)))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
+      && (tb !== 'today' || (dayPick ? dayHit(n, dayPick) : (n.todayHit && (n.result || !bidEnded(n, td))))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
       && (tb !== 'soon' || (((!!n.close && n.close >= td && n.close <= plus(3)) || briefSoon(n, td)) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중 · 239차 필수 현장설명 3일 안
       && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td))); // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
     // 191차(로컬 10/27): 플랫폼 조회 — 이 줄이 이 회사 입찰 목록(전체 탭)에 들어가는지, 빠지면 어느 단계에서(목록과 같은 계산)
@@ -527,14 +532,20 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const results = tab === 'today' ? items.filter((n) => n.result) : [];
     const skipCount = N.filter((r) => skips.own(r) && !folded(r)).length; // [대상 아님] 탭 장 수(같은 사업은 한 장)
     const todayCount = all.filter((n) => inTab(n, 'today') && !n.result).length; // #613 '오늘 새 공고 n' 칩(검색어와 무관)
+    // 338차: 최근 7일(오늘부터) 날짜별 새 공고 수 — 오늘 칸은 '오늘 새 공고 n' 과 같은 수, 지난 날은 마감이 지났어도 그날 새 공고로 셈(검색어와 무관)
+    const days = Array.from({ length: 7 }, (_, i) => plus(-i)).map((d) => ({ day: d, n: all.filter((n) => !n.skipped && !canceledCard(n) && !n.result && dayHit(n, d) && (d !== td || !bidEnded(n, td))).length }));
     const canceledCount = all.filter((n) => inTab(n, 'canceled')).length;
     // 258차(로컬 10/29 09:20 ⓑ): 진행 중 탭에서 마감일 칸이 빈 공고(예고·협력사 등록·마감 칸 빈 입찰) 수 — 화면은 따로 묶어 보여 줌
     const noClose = tab === 'open' ? items.filter((n) => !n.close).length : 0;
-    return { ...meta, tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, todayCount, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
+    return { ...meta, tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, todayCount, day: dayPick ?? (tab === 'today' ? td : null), days, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings'; const td = today();
-    const dayOk = (r: any) => q.day !== 'today' || firstSeen(r) === td; // 오늘 새 영업 DB
+    // 338차(대표 11/02 #922): ?day=today 또는 YYYY-MM-DD → 그날 처음 들어온 것만 · days = 최근 7일 날짜별 건수(이 탭, 검색어 뒤·날짜 필터 전)
+    const dayPick = q.day === 'today' ? td : isDay(q.day) ? String(q.day) : null;
+    const dayOk = (r: any) => !dayPick || firstSeen(r) === dayPick; // 오늘(또는 고른 날) 새 영업 DB
+    let dayCounts: { day: string; n: number }[] = [];
+    const dayFilter = (rs: any[]) => { const base = rs.filter(hit); dayCounts = Array.from({ length: 7 }, (_, i) => plus(-i)).map((d) => ({ day: d, n: base.filter((r) => firstSeen(r) === d).length })); return base.filter(dayOk); };
     // #605(대표 10/25): '대상 아님'·완료(영업완료·등록 완료)로 넘긴 건은 기본 목록에서 빠지고 보관함(?box=archive)에 누가·언제·사유 + [되돌리기]
     const box = q.box === 'archive' ? 'archive' : 'open';
     // #459(대표 10/23): 상태 필터 칩(?status=) — 회사 진행 상태 글자로 묶음. 기본 목록은 미검토·검토중·연락중·신청·보류(·완료·전환), 보관함은 대상 아님·완료. 묶음별 건수도 돌려줌
@@ -560,12 +571,12 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       const archived = list.filter(isDone); const base = (box === 'archive' ? archived : list.filter((x) => !isDone(x))).filter(keep);
       const statusCounts = Object.fromEntries(STATUS_GROUPS.map(([k]) => [k, base.filter((x) => stMatch(k, stOf(x))).length])); // #459 칩 건수(상태 필터 전)
       const out = stKey ? base.filter((x) => stMatch(stKey, stOf(x))) : base;
-      return { ...meta, tab, box, tabs, sort: sortKey, status: stKey || null, statusGroups: STATUS_GROUPS.map(([k, l]) => [k, l]), statusCounts, filters: { region: region || null, hh: hh || null, period: months || null, my: my || null }, regions, archiveCount: archived.length, total: out.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
+      return { ...meta, tab, box, tabs, day: dayPick, days: dayCounts, sort: sortKey, status: stKey || null, statusGroups: STATUS_GROUPS.map(([k, l]) => [k, l]), statusCounts, filters: { region: region || null, hh: hh || null, period: months || null, my: my || null }, regions, archiveCount: archived.length, total: out.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
     };
     // S1-2: 신규단지 진행(opportunity_work · source_id = 단지 id)
     const BW = new Map((await prog('opportunity_work')).filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w]));
     if (tab === 'buildings') {
-      const list = (await rows('global', 'building_sales_pipeline')).filter((r) => hit(r) && dayOk(r)).map((r) => { const w = BW.get(String(r.id ?? r.__id));
+      const list = dayFilter(await rows('global', 'building_sales_pipeline')).map((r) => { const w = BW.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
           work: w ? { status: pick(w, 'status'), memo: pick(w, 'memo', 'note'), next: day(pick(w, 'next_date', 'next_action_date')), leadId: w?.lead_id ?? null, handoff: !!(w?.lead_id && pick(w, 'handoff_by')) } : null, archive: archiveOf(w),
           // S1-3: 원본 칸 current_stage·sales_priority·household_count·source_url·attachment_urls 먼저
@@ -586,7 +597,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       const P = new Map((await prog('operating_facility_prospects__progress', 20000)).map((p) => [String(p.id ?? p.__id), p]));
       const RM = await import('./research'); const RS = await RM.researchState(sql, t); // 212차 #612 후속조사(조사 예정·조사함·확인 못함 + 적은 값)
       const NC = await RM.relatedNoticeCounts(sql).catch(() => new Map<string, number>()); // #758 단지 이름별 관련 공고 수
-      const list = (await rows('global', 'operating_facility_prospects', 20000)).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id)); const rs = RS.get(String(r.__id)) ?? null;
+      const list = dayFilter(await rows('global', 'operating_facility_prospects', 20000)).map((r) => { const p = P.get(String(r.id ?? r.__id)); const rs = RS.get(String(r.__id)) ?? null;
         return { id: r.__id, name: pick(r, 'name', 'facility_name', 'complex_name') ?? '(이름 없음)', address: pick(r, 'address', 'road_address'), score: Number(pick(r, 'score', 'priority_score') ?? 0) || null,
           lane: pick(r, 'facility_type', 'lane', 'category', 'kind'), region: pick(r, 'region'), operating: pick(r, 'operating_status'), date: day(pick(r, 'completion_date', 'use_approval_date', 'completed_at', 'move_in_date')),
           contact: p?.contact_status ?? null, next: day(p?.next_action_date ?? null), leadId: p?.lead_id ?? null, handoff: !!(p?.lead_id && pick(p, 'handoff_by')), archive: archiveOf(p),
@@ -613,7 +624,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     }
     if (tab === 'vendors') {
       const P = new Map((await prog('vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
-      const list = (await rows('global', 'vendor_registrations')).filter((r) => hit(r) && dayOk(r)).map((r) => { const p = P.get(String(r.id ?? r.__id));
+      const list = dayFilter(await rows('global', 'vendor_registrations')).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)', division: pick(r, 'category', 'division', 'kind'), rank: pick(r, 'rank_label', 'rank'), notice: pick(r, 'notice_title', 'title', 'notice'),
           url: pick(r, 'recruit_url', 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null), leadId: p?.lead_id ?? null, handoff: !!(p?.lead_id && pick(p, 'handoff_by')), archive: archiveOf(p), region: pick(r, 'region', 'sido'),
           // 영업관리 2-9 카드: 모집 공지 공개 여부·모집 시기·등록 요건·공동인증서·비고·링크

@@ -43,6 +43,19 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     assert.deepEqual((await hb.locator('button[data-testid^="sales-bids-tab-"]').allInnerTexts()).map((x) => x.replace(/\d+/g, 'n').trim()), ['진행 중(마감 임박순)', '오늘 새 공고 n', '진행 기록 있음', '관련 전체', '오늘 마감', '협력사 모집', '낙찰 분석', '대상 아님 n건']);
     assert.equal(await hb.getByTestId('bids-all-link').count(), 0);
     assert.match(await hb.getByTestId('sales-bids-tab-today').innerText(), /^오늘 새 공고 [1-9]\d*$/, '오늘 새 공고 건수 배지');
+    // 338차(대표 11/02 #922): 오늘 새 공고 칩 아래 날짜별 7칸(오늘부터·건수) + 날짜 고르기 → 어제 칸 = 주소 bt=날짜 · 안내 줄 · 오늘 칸으로 돌아오면 bt=today
+    const kst = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(ms));
+    const td = kst(Date.now()), yd = kst(Date.now() - 864e5);
+    const days = hb.getByTestId('bids-days'); await days.waitFor();
+    assert.equal(await days.locator('button[data-testid^="bids-day-"]').count(), 7, '최근 7일');
+    assert.match(await hb.getByTestId(`bids-day-${td}`).innerText(), /오늘 [1-9]\d*$/, '오늘 칸 = 오늘 새 공고 수');
+    await hb.getByTestId(`bids-day-${yd}`).tap();
+    await p.waitForURL(new RegExp(`bt=${yd}`));
+    await hb.getByTestId('bids-day-note').waitFor();
+    assert.equal(await hb.getByTestId('bids-day-pick').inputValue(), yd);
+    await p.screenshot({ path: `${SHOTS}/338-bids-days-390.png` });
+    await hb.getByTestId(`bids-day-${td}`).tap();
+    await p.waitForURL(/bt=today/);
     const res = hb.getByTestId('bids-results'); await res.waitFor();
     assert.match(await res.locator('summary').innerText(), /결과\(낙찰·유찰\) 1건/);
     assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 헬스기구 구매 낙찰 결과' }).count(), 1, '결과는 오늘 새 공고 목록에 없고');

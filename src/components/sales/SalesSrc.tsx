@@ -25,6 +25,8 @@ import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, to
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
 const C = '#2563EB';
 const q = (o: Record<string, string | undefined>) => new URLSearchParams(Object.entries(o).filter(([, v]) => v) as [string, string][]).toString();
+/** 338차(대표 11/02 #922): 날짜 칩 글자 'M/D(요일)' + 오늘이면 ' 오늘' */
+const dayLabel = (d: string, td?: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}(${'일월화수목금토'[new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10))).getUTCDay()]})${d === td ? ' 오늘' : ''}`;
 function Head({ title, meta, children }: { title: string; meta?: { syncedAt: string | null; imported: boolean; readOnly?: boolean }; children?: React.ReactNode }) {
   return (
     <div className="space-y-1">
@@ -1130,9 +1132,9 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
   // #242 2단계: 탭·검색어·사업·정렬은 주소에 — 공고에서 업무·리드로 갔다 뒤로 와도 같은 목록
   // 기본 칩은 고정 '진행 중'(#613 대표 10/25: 모니터링은 진행 중 먼저) — 앱 하단 '영업기회'·당일 메일 링크는 ?bt=today 로 오늘 새 공고를 바로 연다
   const sp = useSearchParams();
-  const [tab, setTab] = useUrlState(embedded ? 'bt' : 'tab', embedded ? (initialTab ?? 'open') : 'open'); const [s, setS] = useUrlState(embedded ? 'bq' : 'q', ''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useUrlState(embedded ? 'bz' : 'biz', '');
+  const [tabRaw, setTab] = useUrlState(embedded ? 'bt' : 'tab', embedded ? (initialTab ?? 'open') : 'open'); const dayTab = /^\d{4}-\d{2}-\d{2}$/.test(tabRaw) ? tabRaw : null; const tab = dayTab ? 'today' : tabRaw; /* 338차: ?bt=YYYY-MM-DD = 그날 새 공고(오늘 새 공고 칩 안 날짜 고르기) */ const [s, setS] = useUrlState(embedded ? 'bq' : 'q', ''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useUrlState(embedded ? 'bz' : 'biz', '');
   const [sort, setSort] = useUrlState(embedded ? 'bs' : 'sort', ''); // #606 정렬(주소에 저장 — 새로 고침해도 유지)
-  const { data, error, reload } = useApi<any>(tab === 'awards' ? null : `/api/sales/src?${q({ view: 'bids', tab, q: s, biz, sort })}`, [tab, s, biz, sort]); // [낙찰 분석]은 목록 대신 업체별 묶음
+  const { data, error, reload } = useApi<any>(tab === 'awards' ? null : `/api/sales/src?${q({ view: 'bids', tab, day: dayTab ?? undefined, q: s, biz, sort })}`, [tab, dayTab, s, biz, sort]); // [낙찰 분석]은 목록 대신 업체별 묶음
   // #510: 당일 공고 메일 제목(?id=) → 그 공고 상세를 바로 — 지금 탭 목록에 없어도 한 건 찾아서. #242 2단계: 허브 안·뒤로가기로 돌아온 상세도(?id=)
   const [deep, setDeep] = useState<string | null>(initialId ?? sp.get('id'));
   const one = useApi<any>(deep ? `/api/sales/src?${q({ view: 'bids', tab: 'all', q: deep })}` : null, [deep]);
@@ -1154,6 +1156,14 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
       <div className="flex flex-wrap items-center gap-1.5">{chips.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}
         {tab !== 'awards' && <select className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" data-testid="bids-sort">{BID_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
         {data && <span className="self-center text-xs text-ink-3">{data.items.length}{data.items.length === 300 ? '+(최근 300)' : ''} / 관련 {data.total}</span>}</div>
+      {/* 338차(대표 11/02 #922 새 공고 날짜별): 오늘 새 공고 칩 아래 최근 7일 날짜 칸(건수) + 날짜 고르기 — 고른 날은 주소 ?bt=YYYY-MM-DD, 오늘은 bt=today 그대로(당일 메일·앱 하단 링크 그대로) */}
+      {tab === 'today' && !!data?.days?.length && <div className="flex flex-wrap items-center gap-1.5" data-testid="bids-days">
+        <span className="text-[11px] text-ink-3">날짜별</span>
+        {data.days.map((d: { day: string; n: number }) => { const on = (dayTab ?? data.day) === d.day; return (
+          <button key={d.day} type="button" onClick={() => setTab(d.day === data.days[0].day ? 'today' : d.day)} data-testid={`bids-day-${d.day}`} className={cx('rounded-full border px-2.5 py-0.5 text-xs tabular-nums', on ? 'border-transparent text-white' : d.n ? 'border-line' : 'border-line text-ink-3')} style={on ? { background: C } : undefined}>{dayLabel(d.day, data.days[0].day)} {d.n}</button>); })}
+        <input type="date" className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={dayTab ?? data.day ?? ''} max={data.days[0].day} onChange={(e) => { const v = e.target.value; if (v) setTab(v === data.days[0].day ? 'today' : v); }} aria-label="날짜 고르기" data-testid="bids-day-pick" />
+        {dayTab && <span className="text-xs text-ink-2" data-testid="bids-day-note">{dayLabel(dayTab, data.days[0].day)} 새 공고 {data.items.length}건 — 그날 처음 수집했거나 공고일이 그날인 공고(마감이 지난 것도 포함)</span>}
+      </div>}
       {tab === 'awards' ? <AwardStats onOpen={setDeep} /> : !data ? <Skeleton rows={6} /> : tab === 'skip' && data.items.length > 0 ? <SkipGroups items={data.items} row={row} />
         : tab === 'open' && data.noClose > 0 ? <>
           <ul className="space-y-1.5">{data.items.filter((n: any) => n.close).map(row)}</ul>
@@ -1265,7 +1275,7 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
   const tabs = ([['all', '전체'], ...(bidsOn ? [['bids', '입찰']] : []), ['buildings', T.buildingsTab], ['facilities', T.facilitiesTab], ['vendors', T.vendorsTab], ...(bidsOn ? [['contracts', '계약만료·재입찰']] : []), ['prospects', '공공데이터'], ['regions', '지역별']] as [string, string][]).filter(([k]) => k === 'all' || !allowed || allowed.includes(k)); // 243차 #764 [전체]는 늘
   const [tabQ, setTab] = useUrlState('tab', 'buildings'); const tab = tabs.some(([k]) => k === tabQ) ? tabQ : (tabs.some(([k]) => k === 'buildings') ? 'buildings' : tabs[0]?.[0] ?? 'buildings');
   const [s, setS] = useUrlState('q', ''); const [detail, setDetail] = useState<any>(null);
-  const [dayQ, setDay] = useUrlState('day', ''); const day = dayQ === 'today' ? 'today' : ''; // 영업 현황 '오늘 새 영업 DB'
+  const [dayQ, setDay] = useUrlState('day', ''); const day = dayQ === 'today' ? 'today' : /^\d{4}-\d{2}-\d{2}$/.test(dayQ) ? dayQ : ''; // 영업 현황 '오늘 새 영업 DB' · 338차: 날짜(YYYY-MM-DD)도
   const [boxQ, setBox] = useUrlState('box', ''); const box = boxQ === 'archive' ? 'archive' : ''; // #605 보관함(대상 아님·완료)
   const [sort, setSort] = useUrlState('sort', ''); const [region, setRegion] = useUrlState('region', ''); const [hh, setHh] = useUrlState('hh', ''); const [period, setPeriod] = useUrlState('period', ''); // #606
   const [st, setSt] = useUrlState('st', ''); // #459(대표 10/23): 상태 필터 칩(주소 ?st=)
@@ -1297,8 +1307,15 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
     <div className="space-y-3" data-testid="sales-hub">
       <Head title="영업기회 허브" meta={data}><Search value={s} onChange={setS} />
         {my && <button type="button" onClick={() => setMy('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="hub-my">{my.length === 4 ? `${my}년` : `${my.slice(0, 4)}년 ${Number(my.slice(5, 7))}월`} 입주·준공 ✕</button>}
-        {day === 'today' && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="hub-day-today">오늘 새로 들어온 것만 ✕</button>}</Head>
+        {day && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="hub-day-today">{day === 'today' ? '오늘' : dayLabel(day)} 새로 들어온 것만 ✕</button>}</Head>
       {tabRow((on) => cx('rounded-full border px-3 py-1 text-xs', on ? 'border-transparent text-white' : 'border-line'), (on) => (on ? { background: C } : undefined))}
+      {/* 338차(대표 11/02 #922): 영업 현황 '오늘 새 영업 DB' 도 날짜별 — 이 탭에 최근 7일 새로 들어온 건수 칸 + 날짜 고르기(주소 ?day=today|YYYY-MM-DD) */}
+      {!!data?.days?.length && (day || data.days.some((d: { n: number }) => d.n > 0)) && <div className="flex flex-wrap items-center gap-1.5" data-testid="hub-days">
+        <span className="text-[11px] text-ink-3">새로 들어온 날</span>
+        {data.days.map((d: { day: string; n: number }) => { const cur = day === 'today' ? data.days[0].day : day; const on = cur === d.day; return (
+          <button key={d.day} type="button" onClick={() => setDay(on ? '' : d.day === data.days[0].day ? 'today' : d.day)} data-testid={`hub-day-${d.day}`} className={cx('rounded-full border px-2.5 py-0.5 text-xs tabular-nums', on ? 'border-transparent text-white' : d.n ? 'border-line' : 'border-line text-ink-3')} style={on ? { background: C } : undefined}>{dayLabel(d.day, data.days[0].day)} {d.n}</button>); })}
+        <input type="date" className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={day === 'today' ? data.days[0].day : day} max={data.days[0].day} onChange={(e) => { const v = e.target.value; setDay(!v ? '' : v === data.days[0].day ? 'today' : v); }} aria-label="날짜 고르기" data-testid="hub-day-pick" />
+      </div>}
       {/* #605 보관함 칩 · #606 정렬·필터(지역·세대수·기간) — 모두 주소에 저장(새로 고침·뒤로가기에도 같은 목록) */}
       <div className="flex flex-wrap items-center gap-1.5 text-xs" data-testid="hub-toolbar">
         <button type="button" onClick={() => setBox('')} aria-pressed={!box} className={chipCls(!box)} data-testid="hub-box-open">기본 목록</button>
