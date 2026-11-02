@@ -38,6 +38,7 @@ import { requestTour } from '@/components/Tour';
 import { Assignees, PartBox, coOf, multiOf, partMsg, partsOf } from '@/components/CoAssignees';
 import { followUpMsg, useLeadFollowUp } from '@/components/sales/LeadFollowUp';
 import { useResearchAsk } from '@/components/sales/ResearchAsk';
+import { BidInfoBox } from '@/components/sales/BidInfoBox';
 
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
@@ -374,7 +375,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
   // 334차(대표 11/02 16:4x·17:0x): 요청자(지시자)·관리자급(관리자·부서장·팀장)은 담당자 전원이 [내 몫 완료]를 누르기 전에도 [완료 처리] — 남은 몫은 기록(closed_by)·알림. 서버 perms.finish 와 같은 기준
   const finishAs: string | null = t.status !== 'done' && t.status !== 'review' ? (perms.finish ?? null) : null;
-  const finishBtn = finishAs ? { label: multi ? '완료 처리(남은 몫 포함)' : '완료 처리', run: () => {
+  // #923(대표 그림: 단계 칸 폭 때문에 '완료 처리(남은 몫 포 / 함)'으로 글자 중간 줄바꿈): 단추 글자는 '완료 처리'로 짧게 — 남은 몫까지 간다는 말은 확인 창·도움말에
+  const finishBtn = finishAs ? { label: '완료 처리', run: () => {
     if (multi && !confirm('아직 [내 몫 완료]를 누르지 않은 담당자가 있어도 업무를 완료 처리합니다.\n남은 담당자에게 알림이 갑니다. 계속할까요?')) return;
     patch({ status: 'done', finish: true }, '완료 처리했습니다');
   } } : null;
@@ -524,7 +526,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             </div>
           )}
           {/* V14 20번: 완료 업무는 "다시 진행"을 크게 (권한 없으면 서버가 이유를 알려 줌) */}
- <PartBox t={t} onPatch={patch} />
+ <PartBox t={t} onPatch={patch} finishAs={perms.finish ?? null} />
           {closedBy && <p className="mt-3 rounded-input bg-violet-50 px-3 py-2 text-sm text-violet-950" data-testid="closed-by-note"><b>{closedBy.actor_name}({closedBy.changes?.as})</b>님이 완료 처리했습니다 — 내 몫 완료 전이던 담당자: {(closedBy.changes?.left ?? []).join(', ')}</p>}
           {t.status !== 'done' && t.status !== 'review' && !primary && !myPart && (
             <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-sm text-ink-2" data-testid="status-owner-note">{t.assignee_name ? `담당자 ${t.assignee_name}님이 진행합니다` : `만든 사람 ${t.created_by_name}님이 진행합니다`}</p>
@@ -613,6 +615,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
 
         <div className={cx('flex flex-col gap-6', wide && 'lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-x-6')}>
         <section className={cx(wide && 'lg:col-start-1 lg:row-start-1')} data-testid="desc-section">
+          {t.sales_ref?.bidInfo && <BidInfoBox info={t.sales_ref.bidInfo} />}{/* 335차: 공고 업무 고정 칸(세대수·입찰 마감·현장설명회) */}
           <h2 className="mb-1.5 text-sm font-semibold">설명</h2>
           {desc === null ? (
             <div className="min-h-[56px] cursor-text rounded-card border border-line bg-slate-50/70 px-3 py-2.5 text-sm leading-relaxed hover:border-slate-300" onClick={() => { descSent.current = t.description; setDescState(''); setDesc(t.description); }} data-testid="desc-view">

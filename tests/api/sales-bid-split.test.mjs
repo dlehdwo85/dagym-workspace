@@ -42,8 +42,10 @@ describe('입찰 업무로 넘기기', () => {
     assert.match(t.description, /메모: 현장설명회 꼭 참석/); assert.match(t.description, /공고가 취소되면 이 업무도 함께 취소/);
     assert.deepEqual((await sql`select user_id from task_assignees where task_id = ${t.id}`).map((x) => x.user_id), [ctx.ownerId], '공동 담당');
     const items = (await sql`select text from task_checklist_items where task_id = ${t.id} order by sort`).map((x) => x.text);
-    assert.equal(items.length, 5); assert.equal(items[0], '공고문·참가 자격 검토');
-    assert.deepEqual(items.slice(1).map((x) => x.split(' · ')[0]), ['현장설명회 참석', '참가신청', '입찰서 제출', '개찰 결과 확인']);
+    // 335차: 고정 칸 줄(입찰 마감 확인·현장설명회 참석 — 아파트 공고가 아니라 세대수 줄 없음)이 검토 다음에
+    assert.equal(items.length, 6, JSON.stringify(items)); assert.equal(items[0], '공고문·참가 자격 검토');
+    assert.deepEqual(items.slice(1).map((x) => x.split(' · ')[0]), ['입찰 마감 확인', '현장설명회 참석', '참가신청', '입찰서 제출', '개찰 결과 확인']);
+    assert.deepEqual([t.sales_ref.bidInfo.apt, t.sales_ref.bidInfo.deadline, t.sales_ref.bidInfo.briefing.at, t.sales_ref.bidInfo.briefingNone], [false, `${addDays(today, 8)}T10:00`, `${addDays(today, 2)}T14:00`, false]);
     const [old] = await sql`select deleted_at, tags from tasks where id = ${auto.id}`; assert.equal(old.deleted_at, null, '상태 버튼으로 생긴 자동 업무를 그대로 이어 씀(327차)');
     assert.ok(old.tags.includes('영업') && old.tags.includes('입찰'), `태그 영업·입찰 ${old.tags}`);
     assert.match(t.description, /입찰 업무로 넘김/); // 넘기기 설명은 예전 설명 아래에

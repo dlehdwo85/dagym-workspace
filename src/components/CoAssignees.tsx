@@ -66,7 +66,7 @@ export function Assignees({ t, canEdit, onPatch, onAdded, extra }: { t: any; can
 }
 
 /** 상세 위쪽(담당자가 여럿일 때): 담당자에게 [내 몫 완료]·취소 + '담당 n명 중 k명 완료 · 남은 사람' — 담당자가 아니면 진행 상황만 */
-export function PartBox({ t, onPatch }: { t: any; onPatch: (body: Record<string, unknown>, okMsg?: string | ((r: any) => string)) => void }) {
+export function PartBox({ t, onPatch, finishAs = null }: { t: any; onPatch: (body: Record<string, unknown>, okMsg?: string | ((r: any) => string)) => void; finishAs?: string | null }) {
   const { user } = useSession();
   if (t.status === 'done' || !multiOf(t)) return null;
   const { done, total, left } = progressOf(t);
@@ -83,6 +83,9 @@ export function PartBox({ t, onPatch }: { t: any; onPatch: (body: Record<string,
       {me && !review && (left.length
         ? <Button size="sm" variant={me.done ? 'secondary' : 'primary'} onClick={() => onPatch({ myPart: me.done ? 'open' : 'done' }, finishMsg)} data-testid="part-btn">{me.done ? '내 몫 완료 취소' : '내 몫 완료'}</Button>
         : <Button size="sm" onClick={() => onPatch({ myPart: 'done' }, finishMsg)} data-testid="part-finish">업무 완료</Button>)}
+      {/* 334차 보완(로컬 11/02 18:1x ①: 대표가 함께 담당이면 [내 몫 완료]만 보임): 요청자·관리자급은 내 몫이 있어도 남은 몫까지 완료 처리 */}
+      {finishAs && me && !review && left.length > 0 && <Button size="sm" variant="secondary" data-testid="part-finish-all" title={`${finishAs} 자격 — 남은 담당자 몫까지 완료 처리(남은 사람에게 알림)`}
+        onClick={() => { if (!confirm(`아직 [내 몫 완료]를 누르지 않은 담당자(${left.map((p) => p.name).join(', ')})가 있어도 업무를 완료 처리합니다.\n남은 담당자에게 알림이 갑니다. 계속할까요?`)) return; onPatch({ status: 'done', finish: true }, '완료 처리했습니다'); }}><span className="whitespace-nowrap">완료 처리</span><span className="ml-1 whitespace-nowrap text-[11px] font-normal opacity-80">남은 몫 포함</span></Button>}
     </div>
   );
 }

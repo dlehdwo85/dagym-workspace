@@ -15,6 +15,7 @@ import { useSalesTerms, useSession } from './session';
 import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock, Flag, Users } from 'lucide-react';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, ROLE_RANK, STATUSES, STATUS_LABEL, type Role, type TaskStatus } from '@/lib/types';
+import { bidShort } from '@/components/sales/BidInfoBox';
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
 import { PANEL_SWAP_EVENT } from './TaskPanelHost';
@@ -30,7 +31,7 @@ import { useResearchAsk } from './sales/ResearchAsk';
 
 export type Task = {
   space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
-  sales_ref?: { kind: string; id: string; name?: string } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천
+  sales_ref?: { kind: string; id: string; name?: string; bidInfo?: { briefing?: { at?: string | null; required?: boolean; place?: string | null } | null; briefingNone?: boolean } | null } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천 · 335차 bidInfo
   assigned_by_rule?: string | null; // #100 담당자 지정 규칙으로 배정됨
   co_assignees?: Co[] | null; assignee_done?: boolean | null; complete_rule?: 'primary' | 'all'; // 대표 10/23 #475 함께 맡은 담당자 · 10/24 첫 담당자의 내 몫 완료
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
@@ -1342,6 +1343,9 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
             <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{t.title}</TaskLink>
             <CarriedBadge t={t} />
             {t.sales_ref?.kind && <span className="shrink-0 rounded-full bg-blue-50 px-1.5 text-[10px] font-medium text-blue-800" title={t.sales_ref.name ?? ''} data-testid="row-sales-ref">{(ST.kind as Record<string, string>)[t.sales_ref.kind] ?? (t.sales_ref.kind === 'support' ? '지원사업' : t.sales_ref.kind === 'contract' ? '계약' : t.sales_ref.kind === 'research' ? '후속조사' : t.sales_ref.kind)}</span>}
+            {/* 335차(대표 16:5x, 선택): 다가오는 현장설명회 '현설 11/4 14:00' */}
+            {t.sales_ref?.bidInfo?.briefing?.at && !t.sales_ref.bidInfo.briefingNone && String(t.sales_ref.bidInfo.briefing.at).slice(0, 10) >= todayStr() && <span className="shrink-0 rounded-full bg-amber-50 px-1.5 text-[10px] font-medium text-amber-800" data-testid="row-bid-briefing"
+              title={`현장설명회${t.sales_ref.bidInfo.briefing.required ? '(필수)' : ''}${t.sales_ref.bidInfo.briefing.place ? ` · ${t.sales_ref.bidInfo.briefing.place}` : ''}`}>현설 {bidShort(String(t.sales_ref.bidInfo.briefing.at))}{t.sales_ref.bidInfo.briefing.required ? ' 필수' : ''}</span>}
             {t.assigned_by_rule && <span className="shrink-0 rounded-full bg-violet-50 px-1.5 text-[10px] font-medium text-violet-800" title="담당자 지정 규칙으로 배정됨" data-testid="row-rule-badge">규칙 배정</span>}
             {t.space && SPACE_META[t.space as 'sales' | 'marketing'] && !(collab && t.sales_ref?.kind) && <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: SPACE_META[t.space as 'sales' | 'marketing'].soft, color: SPACE_META[t.space as 'sales' | 'marketing'].color }} data-testid="row-space">{SPACE_META[t.space as 'sales' | 'marketing'].short}</span>}
           </span>

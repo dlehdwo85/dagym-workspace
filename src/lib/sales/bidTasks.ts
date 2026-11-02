@@ -18,6 +18,7 @@ import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
 import { latestCancelled, latestLive, noKey } from './noticeGroups';
+import { briefingOf, mdhm } from './bidTerms';
 import { BID_STATUS, workRecord } from './work';
 
 export { BID_STATUS };
@@ -81,8 +82,9 @@ export function fmtWhen(w: When) {
 }
 const ITEM: Record<MilestoneKey, string> = { briefing: '현장설명회 참석', apply: '참가신청', close: '입찰서 제출', open: '개찰 결과 확인' };
 /** 체크리스트: 공고 검토 + 아직 오지 않은 일정 + (개찰 일정이 없으면) 결과 확인 */
-export function bidChecklist(ms: Milestone[], today: string) {
-  const items = ['공고문·참가 자격 검토', ...ms.filter((m) => m.w.day >= today).map((m) => `${ITEM[m.key]} · ${fmtWhen(m.w)}`)];
+export function bidChecklist(ms: Milestone[], today: string, info?: BidInfo | null) {
+  // 335차: 고정 칸 줄(세대수·입찰 마감·현장설명회)을 공고 검토 다음에 — 현장설명회 줄은 고정 칸 쪽(필수 여부·장소까지)으로
+  const items = ['공고문·참가 자격 검토', ...(info ? bidInfoChecklist(info) : []), ...ms.filter((m) => m.w.day >= today && !(info && m.key === 'briefing')).map((m) => `${ITEM[m.key]} · ${fmtWhen(m.w)}`)];
   if (!ms.some((m) => m.key === 'open' && m.w.day >= today)) items.push('개찰 결과 확인');
   return items;
 }
@@ -154,6 +156,7 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
   const cx = await complexFacts(sql, pick(r, 'facility_name', 'complex_name', 'issuer'), pick(r, 'region') ?? pick(r, 'office_address')).catch(() => null);
   const hh = Number(pick(r, 'household_count', 'households')) || cx?.households || null;
   const complexLine = [hh ? `세대수 ${hh.toLocaleString('ko-KR')}세대` : null, cx?.usedate ? `준공 ${yearMonth(cx.usedate)}(사용승인)` : null].filter(Boolean).join(' · ');
+  const info = await bidInfoOf(sql, i.id, r, { complex: false }); if (!info.households && hh) info.households = hh; // 335차 고정 칸(단지 정보는 위에서 이미 찾음)
   const desc = ['입찰 공고에서 넘어온 업무입니다. 기한은 입찰 마감 일시에 맞춰 자동으로 바뀌고, 공고가 취소되면 이 업무도 함께 취소됩니다.',
     agency ? `기관: ${agency}` : null, brief ? `현장설명: ${brief.replace(/^현장설명\s*/, '') || '있음'}` : null, complexLine ? `단지: ${complexLine}` : null,
     future.length ? `일정: ${future.map((m) => `${m.label} ${fmtWhen(m.w)}`).join(' · ')}` : null,
@@ -174,12 +177,14 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
     for (const uid of co) await sql`insert into task_assignees (task_id, user_id, added_by) values (${reuse.id}, ${uid}, ${u.id}) on conflict (task_id, user_id) do nothing`;
     const have = new Set((await sql<{ text: string }[]>`select text from task_checklist_items where task_id = ${reuse.id}`).map((x) => x.text.replace(/\s+/g, ' ').trim()));
     let sort = have.size;
-    for (const c of bidChecklist(ms, today)) if (!have.has(c.replace(/\s+/g, ' ').trim())) await sql`insert into task_checklist_items (task_id, text, sort) values (${reuse.id}, ${c}, ${sort++})`;
+    await syncBidChecklist(sql, reuse.id, info); // 335차: 고정 칸 줄은 같은 줄을 찾아 글만 맞춤
+    for (const c of bidChecklist(ms, today, info)) if (!have.has(c.replace(/\s+/g, ' ').trim()) && !INFO_FAMILY(c)) await sql`insert into task_checklist_items (task_id, text, sort) values (${reuse.id}, ${c}, ${sort++})`;
+    await sql`update tasks set sales_ref = coalesce(sales_ref, '{}'::jsonb) || ${sql.json({ bidInfo: info } as never)} where id = ${reuse.id}`;
     await activity(sql, 'task', reuse.id, u.id, 'updated', { reason: 'bid_handoff_reuse', assignees: ids, note: i.note ?? null });
   } else {
     task = await createTask(u, { title: `[입찰] ${name}`.slice(0, 200), description: desc, space: 'sales', assigneeId: ids[0], coAssigneeIds: ids.slice(1), requestedById: u.id, dueDate: due, dueTime,
-      approvalRequired: false, tags: ['영업', '입찰'], checklist: bidChecklist(ms, today) } as never, { quiet: true, skipQuota: true });
-    await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: i.id, name, bid: true, handoff: true })} where id = ${task.id}`;
+      approvalRequired: false, tags: ['영업', '입찰'], checklist: bidChecklist(ms, today, info) } as never, { quiet: true, skipQuota: true });
+    await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: i.id, name, bid: true, handoff: true, bidInfo: info } as never)} where id = ${task.id}`;
   }
   // 같은 공고의 다른 열린 업무(둘 이상이던 경우)는 이 업무가 이어받음(같은 공고 업무 두 건 방지)
   const prev = await sql<{ id: string }[]>`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id <> ${task.id} and deleted_at is null and status <> 'done'
@@ -607,6 +612,12 @@ export type { Sql };
 /** 공고 id → 지금 기한(다가오는 입찰 마감 → 참가신청 마감 → 개찰, 날·시각). 정정·합쳐진 줄은 같은 묶음으로 보고 취소된 공고는 뺌(취소는 정기 점검이 업무를 취소함) */
 export async function noticeDues(sql: Sql, ids: string[], today = ymd(new Date())): Promise<Map<string, Due>> {
   const out = new Map<string, Due>();
+  for (const [id, row] of await noticeLiveRows(sql, ids)) { const d = bidDue(bidMilestones(row), today); if (d) out.set(id, d); }
+  return out;
+}
+/** 공고 id → 지금 살아 있는 줄(정정·합쳐진 줄은 같은 묶음의 최신 줄, 취소된 공고는 뺌) — 마감(noticeDues)·고정 칸(applyBidInfo)이 같은 줄을 본다 */
+export async function noticeLiveRows(sql: Sql, ids: string[]): Promise<Map<string, any>> {
+  const out = new Map<string, any>();
   const uniq = [...new Set(ids.filter((x) => !!x))];
   if (!uniq.length) return out;
   const own = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = any(${uniq}::text[])`;
@@ -619,21 +630,82 @@ export async function noticeDues(sql: Sql, ids: string[], today = ymd(new Date()
   }
   for (const id of uniq) {
     const g = groups.get(id); if (!g || !g.length || latestCancelled(g)) continue;
-    const d = bidDue(bidMilestones(latestLive(g) ?? g[0]), today);
-    if (d) out.set(id, d);
+    out.set(id, latestLive(g) ?? g[0]);
   }
   return out;
+}
+
+// ── 335차(대표 11/02 16:5x #918 "공고 → 업무로 넘어올 때 세대수·입찰 마감 일시·현장설명회 일시(필수 여부)를 업무 설명 위 고정 칸으로"):
+//    아파트 공고(K-apt·주택관리업자 선정)는 세대수까지, 나라장터·누리장터·KG2B 는 마감·현설만. 세대수를 모르면 '확인 필요'. 공고가 정정되면 정기 실행이 칸·체크리스트 줄을 따라 바꾸고 활동 기록을 남긴다.
+export type BidBriefing = { kind: string | null; at: string | null; place: string | null; required: boolean };
+export type BidInfo = { v: 1; apt: boolean; source: string | null; households: number | null; deadline: string | null; deadlineLabel: string | null; briefing: BidBriefing | null; briefingNone: boolean; updatedAt: string };
+const hhOf = (r: any) => { const n = Number(String(pick(r, 'household_count', 'households') ?? '').replace(/,/g, '')); return Number.isFinite(n) && n > 0 ? Math.round(n) : null; };
+/** 아파트 공고인가 — K-apt 원천(source_type kapt_…·id kapt…) 또는 세대수 칸이 있는 공고. 나라장터·누리장터·KG2B 는 아파트 칸 없이 */
+export const isAptNotice = (id: string, r: any) => /^kapt/i.test(String(r?.source_type ?? '')) || /^kapt/i.test(String(id ?? '')) || hhOf(r) !== null;
+export async function bidInfoOf(sql: Sql, id: string, r: any, opt: { complex?: boolean; prev?: BidInfo | null } = {}): Promise<BidInfo> {
+  const apt = isAptNotice(id, r);
+  let households = hhOf(r);
+  if (apt && !households && opt.complex !== false) { // 단지 목록에서 세대수(K-apt 기본정보 한 번 읽기) — 정기 실행은 첫 채우기·하루 한 번만
+    const { complexFacts } = await import('./complexInfo');
+    households = (await complexFacts(sql, pick(r, 'facility_name', 'complex_name', 'issuer'), pick(r, 'region') ?? pick(r, 'office_address')).catch(() => null))?.households ?? null;
+  }
+  if (!households && opt.prev?.households) households = opt.prev.households;
+  const ms = bidMilestones(r); const close = ms.find((m) => m.key === 'close') ?? ms.find((m) => m.key === 'apply') ?? null;
+  const b = briefingOf(r); const kind = String(r?.kg2b_briefing_kind ?? r?.site_briefing_kind ?? '').trim();
+  return { v: 1, apt, source: r?.source_type ? String(r.source_type) : null, households, deadline: close ? (close.w.allDay ? close.w.day : `${close.w.day}T${hm(close.w.start)}`) : null, deadlineLabel: close ? fmtWhen(close.w) : null,
+    briefing: b ? { kind: b.kind, at: b.at, place: b.place, required: b.required } : null, briefingNone: !b && kind === '없음', updatedAt: new Date().toISOString() };
+}
+const sameBriefing = (x: BidBriefing | null | undefined, y: BidBriefing | null | undefined) => !!x === !!y && (!x || !y || ((x.kind ?? null) === (y.kind ?? null) && (x.at ?? null) === (y.at ?? null) && (x.place ?? null) === (y.place ?? null) && !!x.required === !!y.required)); // jsonb 는 키 순서를 바꿔 문자열 비교 불가
+const sameInfo = (a: BidInfo | null | undefined, b: BidInfo) => !!a && a.apt === b.apt && (a.households ?? null) === (b.households ?? null) && (a.deadline ?? null) === (b.deadline ?? null) && sameBriefing(a.briefing, b.briefing) && !!a.briefingNone === !!b.briefingNone;
+/** 고정 칸 체크리스트 줄: 세대수 확인(아파트만) · 입찰 마감 확인 · 현장설명회 참석(필수/임의 · 일시 · 장소) / 현설 없음 / 현장설명회 여부 확인 */
+export function bidInfoChecklist(info: BidInfo): string[] {
+  const out: string[] = [];
+  if (info.apt) out.push(info.households ? `세대수 확인 · ${info.households.toLocaleString('ko-KR')}세대` : '세대수 확인 · 확인 필요');
+  out.push(info.deadlineLabel ? `입찰 마감 확인 · ${info.deadlineLabel}` : '입찰 마감 확인 · 확인 필요');
+  if (info.briefingNone) out.push('현설 없음');
+  else if (info.briefing) out.push(`현장설명회 참석${info.briefing.required ? '(필수)' : info.briefing.kind === '임의' ? '(임의)' : ''} · ${mdhm(info.briefing.at) ?? '일시 확인 필요'}${info.briefing.place ? ` · ${info.briefing.place}` : ''}`);
+  else out.push('현장설명회 여부 확인');
+  return out;
+}
+const INFO_FAMILY = (text: string) => /^세대수 확인/.test(text) ? 'hh' : /^입찰 마감 확인/.test(text) ? 'close' : /^(현장설명회 참석|현설 없음|현장설명회 여부 확인)/.test(text) ? 'briefing' : null;
+/** 고정 칸 줄을 체크리스트에 넣거나(없으면) 같은 줄(세대수·마감·현설)의 글만 바꿈(체크 여부는 그대로) → 바뀐 줄 */
+export async function syncBidChecklist(sql: Sql, taskId: string, info: BidInfo) {
+  const have = await sql<{ id: string; text: string }[]>`select id, text from task_checklist_items where task_id = ${taskId} order by sort`;
+  const changed: string[] = []; let sort = have.length;
+  if (!have.length) { await sql`insert into task_checklist_items (task_id, text, sort) values (${taskId}, '공고문·참가 자격 검토', ${sort++})`; changed.push('공고문·참가 자격 검토'); } // 빈 체크리스트면 검토 줄부터
+  for (const line of bidInfoChecklist(info)) {
+    const fam = INFO_FAMILY(line); const cur = have.find((h) => INFO_FAMILY(h.text) === fam);
+    if (!cur) { await sql`insert into task_checklist_items (task_id, text, sort) values (${taskId}, ${line}, ${sort++})`; changed.push(line); }
+    else if (cur.text.replace(/\s+/g, ' ').trim() !== line) { await sql`update task_checklist_items set text = ${line} where id = ${cur.id}`; changed.push(line); }
+  }
+  return changed;
+}
+/** 업무 1건의 고정 칸(sales_ref.bidInfo)·체크리스트 줄을 공고의 지금 값에 맞춤 — 새로 만들 때(bid_info_fill)·정기 실행(정정이면 bid_info_update 기록) */
+export async function applyBidInfo(sql: Sql, taskId: string, noticeId: string, actorId: string | null, opt: { row?: any; reason?: string; complex?: boolean } = {}) {
+  const [t] = await sql<{ sales_ref: any }[]>`select sales_ref from tasks where id = ${taskId} and deleted_at is null`;
+  if (!t) return null;
+  const row = opt.row !== undefined ? opt.row : ((await noticeLiveRows(sql, [noticeId])).get(noticeId) ?? null);
+  if (!row) return null;
+  const prev: BidInfo | null = t.sales_ref?.bidInfo ?? null;
+  const info = await bidInfoOf(sql, noticeId, row, { prev, complex: opt.complex ?? (!prev || (prev.households == null && Date.now() - Date.parse(prev.updatedAt) > 864e5)) });
+  if (sameInfo(prev, info)) return { changed: false, info };
+  await sql`update tasks set sales_ref = coalesce(sales_ref, '{}'::jsonb) || ${sql.json({ bidInfo: info } as never)}, updated_at = now() where id = ${taskId}`;
+  const lines = await syncBidChecklist(sql, taskId, info);
+  const slim = (x: BidInfo | null) => (x ? { households: x.households, deadline: x.deadline, briefing: x.briefing, briefingNone: x.briefingNone } : null);
+  await activity(sql, 'task', taskId, actorId, 'updated', { reason: prev ? 'bid_info_update' : (opt.reason ?? 'bid_info_fill'), bidInfo: { from: slim(prev), to: slim(info) }, checklist: lines }).catch(() => {});
+  return { changed: true, info };
 }
 /** 열린 공고 업무(sales_ref.kind = 'bid' · 공고에서 넘어온 리드(src.from = 'bid')의 업무)의 마감을 공고 입찰 마감 일시로 — 정기 실행마다(첫 실행이 전수 보정, 결과는 app_settings 'bid_due_align_331' 에 한 번 기록) */
 export async function bidDueAlignTick(max = 300) {
   const sql = db(); const today = ymd(new Date());
-  const rows = await sql<{ id: string; nid: string | null; due: string | null; tm: string | null }[]>`
-    select t.id, case when t.sales_ref->>'kind' = 'bid' then nullif(t.sales_ref->>'id', '') else nullif(l.src->>'id', '') end as nid, t.due_date::text as due, to_char(t.due_time, 'HH24:MI') as tm
+  const rows = await sql<{ id: string; nid: string | null; due: string | null; tm: string | null; sales_ref: any }[]>`
+    select t.id, case when t.sales_ref->>'kind' = 'bid' then nullif(t.sales_ref->>'id', '') else nullif(l.src->>'id', '') end as nid, t.due_date::text as due, to_char(t.due_time, 'HH24:MI') as tm, t.sales_ref
     from tasks t left join sales_leads l on l.id = t.lead_id and l.src->>'from' = 'bid'
     where t.deleted_at is null and t.status <> 'done' and t.parent_id is null
       and ((t.sales_ref->>'kind' = 'bid' and coalesce(t.sales_ref->>'id', '') <> '') or (l.id is not null and coalesce(l.src->>'id', '') <> ''))
     order by t.updated_at limit ${max}`;
-  const dues = await noticeDues(sql, rows.map((r) => r.nid ?? ''), today);
+  const live = await noticeLiveRows(sql, rows.map((r) => r.nid ?? ''));
+  const dues = new Map<string, Due>(); for (const [id, row] of live) { const d = bidDue(bidMilestones(row), today); if (d) dues.set(id, d); }
   let moved = 0; const changed: { id: string; from: string | null; fromTime: string | null; to: string; toTime: string | null }[] = [];
   for (const r of rows) {
     const d = r.nid ? dues.get(r.nid) : null; if (!d) continue;
@@ -644,5 +716,14 @@ export async function bidDueAlignTick(max = 300) {
     moved++; changed.push({ id: r.id, from: r.due, fromTime: r.tm, to: d.day, toTime: d.time });
   }
   await sql`insert into app_settings (key, value) values ('bid_due_align_331', ${sql.json({ at: new Date().toISOString(), checked: rows.length, moved, changed: changed.slice(0, 200) } as never)}) on conflict (key) do nothing`;
-  return { checked: rows.length, matched: rows.filter((r) => r.nid && dues.has(r.nid)).length, moved };
+  // 335차: 고정 칸(세대수·입찰 마감·현장설명회)·체크리스트 줄 — 첫 실행이 기존 열린 공고 업무 전수 채우기(bid_info_fill_335 에 한 번 기록), 그 뒤는 공고 정정 따라가기
+  let infoFilled = 0, infoUpdated = 0;
+  for (const r of rows) {
+    const row = r.nid ? live.get(r.nid) : null; if (!row) continue;
+    const had = !!r.sales_ref?.bidInfo;
+    const res = await applyBidInfo(sql, r.id, r.nid!, null, { row }).catch(() => null);
+    if (res?.changed) { if (had) infoUpdated++; else infoFilled++; }
+  }
+  await sql`insert into app_settings (key, value) values ('bid_info_fill_335', ${sql.json({ at: new Date().toISOString(), checked: rows.length, filled: infoFilled, updated: infoUpdated } as never)}) on conflict (key) do nothing`;
+  return { checked: rows.length, matched: rows.filter((r) => r.nid && dues.has(r.nid)).length, moved, infoFilled, infoUpdated };
 }
