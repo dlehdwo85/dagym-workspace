@@ -222,6 +222,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('contacts', async () => (await import('./contacts')).contactsJob()); // V31 연락처 휴지통 30일 정리
   await step('docVersions', async () => (await import('./libDocs')).docVersionsJob()); // 10/19 공동 편집 문서: 10분·모두 나가면 변경 기록·조각 합치기·검색 글자
   await step('mktAuto', async () => (await import('./mktAuto')).mktAutoTick());
+  await step('mktPhotoAudit', async () => (await import('./mktPhotoAudit')).auditPendingTick()); // 329차(대표 11/02 결정 ⓑ): '대조 중' 글·대조 안 한 승인 대기 글 → AI 사진·글 대조 → 통과면 승인할 시안, 안 맞으면 수정 요청
   await step('mktSharp', async () => (await import('./mktPhotos')).sharpTick()); // 282차 #818 ①: 예전에 설명한 사진의 선명도(흔들림·초점) — 서버 계산만 // V41 4-3 마케팅 주간 규칙 → 제작 → 승인함 → 알림
   await step('mktGoals', async () => (await import('./mktGoals')).goalTickAll());
   await step('hfPoll', async () => (await import('./mktStudio')).hfPollTick()); // 로컬 10/22 Higgsfield 비동기 생성 결과 이어받기(완료분 자료실 저장 → 승인 대기)

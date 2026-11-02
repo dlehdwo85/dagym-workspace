@@ -26,7 +26,8 @@ export const approvalDeadline = (scheduledAt: Date | string | null, set: number 
 };
 /** 승인 대기 숫자 — 메뉴 배지·현황 머리줄·승인함이 같은 계산: 승인 대기 + 시험 아님.
  *  255차 #791(대표 10/29 01:45 '승인 대기가 안 올라온다'): 게시일(승인 마감)이 지난 승인 대기도 셈 — 승인하면 가장 가까운 빈 게시 칸으로 옮김(예전에는 숫자·승인함에서 숨겨 10건이 안 보였음) */
-export const APPROVABLE_SQL = () => db()`status = 'pending' and not is_test and deleted_at is null`;
+/** 329차: 'AI 사진·글 대조 중'(quality.photoAudit.pending) 인 글은 승인할 시안에서 뺌 — 대조가 끝나야 올라옴 */
+export const APPROVABLE_SQL = () => db()`status = 'pending' and not is_test and deleted_at is null and coalesce(quality->'photoAudit'->>'pending', 'false') <> 'true'`;
 export async function approvableCount(tenant: string) {
   const [r] = await db()<{ n: number }[]>`select count(*)::int as n from mkt_contents where tenant = ${tenant} and ${APPROVABLE_SQL()}`;
   return r.n;
@@ -118,7 +119,7 @@ export async function listContents(u: SessionUser, q: { view?: string; from?: st
     if (!ok) throw badRequest(`${k === 'from' ? '시작' : '끝'} 날짜가 올바르지 않습니다: ${v.slice(0, 20)}`);
   }
   const sql = db(); const t = tenantOf(u);
-  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
+  const rows = await sql<any[]>`select c.id, c.title, c.channel, c.kind, c.mode, c.cross_channels, c.status, c.scheduled_at, c.current_version, c.approved_version, coalesce(c.quality->'photoAudit'->>'pending', 'false')::boolean as audit_pending, c.published_url, c.published_at, c.published_deleted_at, c.is_test, b.name as brand, b.color as brand_color, c.brand_id, b.video->>'logoFileId' as brand_logo,
       v.body, cardinality(v.media_ids) as media_count, v.media_ids, v.note as version_note, v.revision, -- #545 수정본 배지(반영한 요청·AI 수정 n번째)
       jsonb_array_length(case when jsonb_typeof(b.feed->'templates') = 'array' then b.feed->'templates' else '[]'::jsonb end) > 0 as brand_templates, -- #544 피드 틀이 있으면 [다른 틀로 다시 그리기]
       (select json_agg(json_build_object('id', f.id, 'mime', f.mime_type, 'faces', coalesce((f.vision->>'faces')::boolean, false)) order by array_position(v.media_ids, f.id)) from library_files f where f.id = any(v.media_ids) and f.deleted_at is null) as media_info, u.name as created_by_name, c.updated_at, c.auto, c.produce_at, c.produced_at, (c.quality - 'fill') as quality, c.quality->'fill'->>'status' as fill_status /* 189차: 생성 기록(모델·오류)은 빼고 상태만 */, c.rationale,
@@ -275,6 +276,8 @@ export async function addVersion(u: SessionUser, id: string, i: z.infer<typeof v
       quality = q.passed === false && (q.issues ?? []).length && !left.length ? (q.script ? { script: q.script } : null) : { ...q, issues: left, ...(visual && i.mediaIds.length === 1 && i.mediaIds[0] === visual.fileId ? { visual } : {}) }; // 대본(컷) 칸은 영상을 붙여도 남김
     }
     const hold = !!opt.keepHold && c.status === 'hold';
+    // 329차: 새 판에 시안이 붙어 승인 대기로 가면 'AI 사진·글 대조 중' 표시 → 정기 실행이 대조해 통과하면 승인할 시안에, 안 맞으면 수정 요청
+    if (!hold && i.mediaIds.length && !c.is_test && (await import('./mktPhotoAudit')).auditOn()) quality = { ...(quality ?? {}), photoAudit: { v: 1, at: new Date().toISOString(), version: v, pending: true } };
     await tx`update mkt_contents set current_version = ${v}, status = ${hold ? 'hold' : 'pending'}, quality = ${quality ? tx.json(quality as never) : null}, updated_at = now() where id = ${id}`;
     await (await import('./mktAuto')).mktNotify(tx, { tenant: tenantOf(u), brand_id: c.brand_id, is_test: c.is_test, created_by: c.created_by }, u.id, { approval: true, type: 'review_requested', title: `${hold ? '보류 글 새 판' : '재승인 대기'}(v${v}): ${c.title}`, body: i.note ?? `${u.name}님이 수정본을 올렸습니다`, link: `/s/marketing/approvals?c=${id}`, entityType: 'mkt_content', entityId: id, actorId: u.id, dedupeKey: `mkt:${id}:${v}` });
     return { version: v };
@@ -290,9 +293,10 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
   if (i.decision !== 'approve' && (i.comment?.trim().length ?? 0) < 2) throw badRequest(i.decision === 'changes' ? '무엇을 고칠지 두 글자 이상 적어 주세요' : '보류 이유를 두 글자 이상 적어 주세요');
   const sql = db();
   const res = await sql.begin(async (tx) => {
-    const [c] = await tx<any[]>`select id, tenant, title, current_version, status, created_by, channel, kind, auto, scheduled_at, rule_id, brand_id from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
+    const [c] = await tx<any[]>`select id, tenant, title, current_version, status, created_by, channel, kind, auto, scheduled_at, rule_id, brand_id, quality from mkt_contents where id = ${id} and tenant = ${tenantOf(u)} for update`;
     if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
     if (i.version !== c.current_version) throw new HttpError(409, 'stale_version', `최신 버전(v${c.current_version})이 아닙니다 — 새로 고쳐 보고 결정해 주세요`);
+    if (i.decision === 'approve' && c.quality?.photoAudit?.pending) throw badRequest('AI 사진·글 대조가 아직 끝나지 않았습니다 — 잠시 뒤 새로 고쳐 승인해 주세요'); // 329차
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
     if (i.decision === 'approve' && c.channel !== 'threads') { // 스레드는 글만으로도 승인(사진은 선택). 블로그는 표지+본문 사진 — 대표 10/20 18:45 · 요청 C: 자동 제작 피드 3~5장·스토리 3~5프레임·블로그 표지+3장
       const [v] = await tx<{ n: number }[]>`select cardinality(media_ids) as n from mkt_versions where content_id = ${id} and version = ${i.version}`;

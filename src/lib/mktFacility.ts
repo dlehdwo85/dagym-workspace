@@ -27,3 +27,29 @@ export const facilityLabels = (fac: Facility[]) => fac.map((f) => f.label);
 /** 323차: 사진 쪽 '강한' 글(이름·태그·한 줄 설명·폴더·원본 영상 이름)에 글에 없는 다른 시설이 있으면 그 시설 — 대표가 지적한 '문구와 관련 없는 사진'(헬스장 출입 글에 카페 사진).
  *  장면 설명(2~3문장)은 지나가는 말이 많아 안 봄. present = 글(제목·본문)에 나온 시설 */
 export const facilityForeign = (strongText: string, present: Facility[]): Facility | null => FACILITIES.find((f) => !present.includes(f) && f.re.test(strongText)) ?? null;
+
+/**
+ * 329차(대표 11/02 결정 2 "모든 문구와 사진들은 어느 정도 매칭해야 한다 — 시설 이름뿐 아니라 수업 이름(요가·필라테스·스피닝)·장면(출입·상담·청소 등)까지 장마다"):
+ * 수업·장면도 시설처럼 묶음으로 — 장 글에 없는 다른 수업(요가 장에 스피닝 사진)·다른 장면(상담 장에 청소 사진) 사진은 그 장에 안 씀.
+ * 수업은 사진 쪽 강한 글(이름·태그·한 줄 설명·폴더), 장면은 이름·태그(사람이 붙인 것)로만 봄 — 장면 설명 문장은 지나가는 말이 많아 오탐이 큼. 마지막 판정은 AI 대조(mktPhotoAudit)가 장마다.
+ */
+export const CLASSES: Facility[] = [
+  { key: 'yoga', label: '요가', re: /요가|yoga/i },
+  { key: 'pilates', label: '필라테스', re: /필라테스|pilates|리포머/i },
+  { key: 'spinning', label: '스피닝', re: /스피닝|스핀\s?바이크|spinning|(사이클|싸이클)\s?(수업|클래스|룸)/i },
+  { key: 'zumba', label: '줌바', re: /줌바|zumba/i },
+  { key: 'crossfit', label: '크로스핏', re: /크로스핏|crossfit/i },
+  { key: 'boxing', label: '복싱', re: /복싱|boxing|킥복싱|무에타이/i },
+  { key: 'dance', label: '댄스', re: /댄스|dance|발레|K-?pop\s?(댄스|수업)/i },
+  { key: 'pt', label: 'PT', re: /(^|[^A-Za-z])P\.?T(?![A-Za-z])|퍼스널\s?트레이닝|1:1\s?(레슨|수업|지도)/i },
+];
+// 장면은 대표가 든 예(출입·상담·청소)만 — 라커·탈의실·결제(키오스크) 같은 공간·물건은 묶지 않음(헬스장 글 어디에나 나와 후보가 너무 줄어듦 — 188차 시험 '후보 3장'). 나머지는 AI 대조가 장마다 봄
+export const SCENES: Facility[] = [
+  { key: 'entry', label: '출입', re: /출입|입장|게이트|도어락|체크인|QR\s?(출입|입장|체크)/i },
+  { key: 'consult', label: '상담', re: /상담|카운슬링|안내\s?데스크|프런트|프론트|리셉션/i },
+  { key: 'clean', label: '청소', re: /청소|소독|방역|위생\s?(점검|관리)/i },
+];
+export const classesIn = (text: string): Facility[] => CLASSES.filter((f) => f.re.test(text));
+export const scenesIn = (text: string): Facility[] => SCENES.filter((f) => f.re.test(text));
+/** 사진 쪽 글에 장 글에 없는 다른 수업/장면이 있으면 그것 */
+export const groupForeign = (groups: Facility[], photoText: string, present: Facility[]): Facility | null => groups.find((f) => !present.includes(f) && f.re.test(photoText)) ?? null;

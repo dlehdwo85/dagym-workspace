@@ -136,9 +136,10 @@ export const photoPool = (c: Pick<Content, 'tenant' | 'id' | 'brand_id'>) => loa
 async function rankPhotos(c: Content, brand: string, others: string[], text: string, exclude: Set<string> = new Set(), mode: 'cover' | 'body' = 'cover', pool?: Pool, facText?: string) {
   const { outsideOk, blurryPhoto, facesToHide } = await import('./mktPhotos');
   // 320차(대표 11/01 23:3x — 다짐 「사우나랑 독서실도 맡길 수 있나요?」 표지·4분할이 헬스장·GX룸): 글 제목(표지는 표지 첫 줄까지)에 시설 이름이 있으면 그 시설 사진만
-  const { facilitiesIn, facilityMatch, facilityForeign } = await import('./mktFacility');
+  const { facilitiesIn, facilityMatch, facilityForeign, CLASSES, SCENES, classesIn, scenesIn, groupForeign } = await import('./mktFacility');
   const fac = facilitiesIn(facText ?? c.title.replace(/^\s*\[시험\]\s*/, ''));
   const facAll = facilitiesIn(`${c.title} ${text} ${facText ?? ''}`); // 323차: 글(제목·본문) 어디에든 나온 시설 — 안 나온 시설 사진은 뺌
+  const clsAll = classesIn(`${c.title} ${text} ${facText ?? ''}`); const scnAll = scenesIn(`${c.title} ${text} ${facText ?? ''}`); // 329차: 글(장)에 나온 수업·장면
   const { rows, used, gen, rule } = pool ?? (await loadPool(c));
   if (!rows.length) return [];
   const own = rule?.own.length ? rule.own : brand ? [brand] : []; // 288차: 이 브랜드 이름 + 다른 표기(DAGYM 등)
@@ -158,6 +159,9 @@ async function rankPhotos(c: Content, brand: string, others: string[], text: str
     if (exclude.has(r.id) || (r.hash && goneHash.has(r.hash))) continue;
     if (fac.length && !facilityMatch(photoText(r), fac)) continue; // 320차: 제목의 시설이 아닌 사진은 안 씀(다른 시설 사진으로 채우지 않음)
     if (facilityForeign(photoStrongText(r), facAll)) continue; // 323차: 글에 없는 다른 시설(카페·주차장·사우나…) 사진은 안 씀
+    // 329차(대표 11/02 결정 2 '수업 이름·장면까지 장마다'): 장 글에 없는 다른 수업(요가 장에 스피닝)·다른 장면(상담 장에 청소) 사진은 안 씀 — 수업은 사진 쪽 강한 글, 장면은 이름·태그로만
+    if (groupForeign(CLASSES, photoStrongText(r), clsAll)) continue;
+    if (groupForeign(SCENES, `${r.title} ${(r.tags ?? []).join(' ')}`, scnAll)) continue;
     if (contentUnknown(r)) continue; // 320차 ④: 무엇이 찍혔는지 모르는 사진은 안 씀
     // 바탕 = 고른 사진·AI 가 글자 없는 실사로 본 사진, 블로그 본문 = 글자 든 그래픽·'쓰지 않음'만 빼고 · 288차 '앱 화면 캡처만' 브랜드 = 바탕은 사진 없이, 본문은 화면 캡처만
     if (rule?.src === 'screen' ? mode === 'cover' || !isCapture(r) || markedSkip(r.tags) : mode === 'cover' ? !backdropOk(r) : !bodyOk(r)) {
@@ -392,6 +396,9 @@ export async function photoRecord(tenant: string, q: any, contentId?: string): P
   pages.forEach((p, k) => out.push(p.photoId ? row(`${k + 2}장`, p.photoId, p.gen && p.ref ? genWhy(p.ref) : info.get(p.photoId)?.source === 'ai_ref' ? '실사가 다 쓰여 전에 생성한 사진(실사 참고)' : p.rel === 'weak' ? '관련 약함 — 글과 낱말이 맞는 사진이 없어 브랜드 사진으로 채움' : '그 장 글과 낱말이 맞는 사진', p.fix ?? [], !!p.scene)
     : row(`${k + 2}장`, null, p.back ? '행동 장 — 이 글 사진을 흐리고 어둡게 깐 바탕(얼굴·글자 안 보임, 글자 읽히게)' : p.role === 'cta' ? '행동 장 — 글자만(연락처·저장 권유)' : '쓸 실사가 남지 않아 브랜드 색 바탕')));
   bodyIds.forEach((id, k) => { const f = info.get(id); if (f && f.source !== 'ai') out.push(row(`본문 사진 ${k + 1}`, id, '블로그 본문 — 원고가 장면 순서로 고른 실사')); });
+  // 329차: AI 사진·글 대조 결과를 칸마다 '까닭' 뒤에 — 맞음/무난함/안 맞음(근거)
+  const audit = q?.photoAudit; const VL: Record<string, string> = { ok: '맞음', weak: '무난함', mismatch: '안 맞음' };
+  if (audit && Array.isArray(audit.rows)) { const by = new Map((audit.rows as { where: string; verdict: string; why?: string }[]).map((x) => [x.where, x])); for (const r of out) { const a = by.get(r.where); if (a) r.why = `${r.why} · AI 대조: ${VL[a.verdict] ?? a.verdict}${a.why ? `(${a.why})` : ''}`; } }
   for (const r of out) if (r.fix.includes(FACE_FIX)) r.face = 'masked';
   return [...out, ...scenes];
 }

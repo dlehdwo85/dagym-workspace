@@ -62,7 +62,7 @@ export function whenLabel(at: string | null) {
 /** '10/19(일) 09:00까지 승인하면 18:00 게시' */
 export const deadlineLabel = (deadline: string | null, at: string | null) => deadline && at ? `${whenLabel(deadline).replace(/^(오늘|내일) /, '$1 ')}까지 승인하면 ${hm(at)} 게시` : null;
 
-export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null; brand_logo?: string | null; handle?: string | null;
+export type CardContent = { id: string; title: string; channel: string; kind?: string | null; mode?: string | null; status: string; audit_pending?: boolean; scheduled_at: string | null; current_version: number; brand: string | null; brand_color?: string | null; brand_logo?: string | null; handle?: string | null;
   body?: string; media_ids?: string[]; media_info?: { id: string; mime: string | null; faces?: boolean }[] | null; version_note?: string | null; deadline: string | null; late?: boolean; reapprove_from?: number | null; published_url?: string | null;
   revision?: Revision | null; reapprove_comment?: string | null; // #545 수정본 배지(반영한 요청·AI 수정 n번째)
   brand_templates?: boolean; // #544 브랜드 키트 피드 틀이 있으면 [다른 틀로 다시 그리기]
@@ -152,7 +152,8 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
     try { await api('/api/marketing/studio/screen', { body: { contentId: c.id, fileId } }); toast.ok('녹화 영상에 자막·끝 화면을 붙이는 중입니다. 다 되면 새 버전으로 올라옵니다'); setRecs(null); onDone(); }
     catch (e: any) { toast.error(e.message); } finally { setSlide(false); }
   }
-  const canAct = canDecide && !done && ['pending', 'changes', 'approved'].includes(c.status);
+  const auditing = c.status === 'pending' && !!c.audit_pending; // 329차: AI 사진·글 대조 중 — 끝날 때까지 [승인] 없음
+  const canAct = canDecide && !done && !auditing && ['pending', 'changes', 'approved'].includes(c.status);
   const d = c.last_decision;
   const req = c.revision?.request ?? c.reapprove_comment ?? null; const from = c.revision?.from ?? c.reapprove_from ?? null; // #545
   return (
@@ -162,6 +163,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="mkt-channel-label">{channelLabel(c.channel, c.kind)}</span>
         <ModeChip mode={c.mode} />
         <StatusChip s={c.status} />
+        {auditing && <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="approval-auditing" title="표지·장·본문 사진이 글과 맞는지 AI 가 대조하는 중 — 끝나면 승인할 시안에 올라옵니다">AI 사진·글 대조 중</span>}
         {late && <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-800" data-testid="approval-late-chip">게시일 지남</span>}
         <span className="text-[11px] text-ink-3">v{c.current_version}</span>
         {rep?.needsPolish && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="approval-polish-badge" title="사람다움 점수가 기준보다 낮습니다 — 상세에서 [AI로 다듬기]">다듬기 필요{rep.human ? ` · ${rep.human.score}점` : ''}</span>}

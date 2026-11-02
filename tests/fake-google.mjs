@@ -52,6 +52,7 @@ export function startFakeGoogle(port = 3199) {
     anthropicUploads: [], // 올린 파일 이름 기록
     classified: [], classifyQueue: [], // V14 5번 업무 무관 질문 분류
     vision: [], visionQueue: [], // #235 ⓒ 사진 AI 설명(다른 응답 줄과 따로)
+    audits: [], auditQueue: [], // 329차 AI 사진·글 대조(지시문 MKT_PHOTO_AUDIT — 다른 응답 줄과 따로, 기본 답 = 모든 칸 ok)
     fcmUnregistered: new Set(),
     webpush: [],
     webpushGone: new Set(),
@@ -152,6 +153,15 @@ export function startFakeGoogle(port = 3199) {
         const out = { caption: '실내를 찍은 사진', scene: '실내 모습입니다.', tags: ['실내'], kind: 'photo', text: 'little', promo: false, seen: '', people: 0, faces: false, quality: 'good', ...(v ?? {}) };
         return json(res, 200, { id: `msg_v${state.vision.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_reason: 'end_turn',
           usage: { input_tokens: 1600, output_tokens: 120, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, content: [{ type: 'text', text: JSON.stringify(out) }] });
+      }
+      // 329차 AI 사진·글 대조: 받은 칸(slots)마다 판정 — auditQueue 의 { verdicts } 또는 { all: 'mismatch', why } · 없으면 모두 ok
+      if (String(body.system ?? '').startsWith('MKT_PHOTO_AUDIT')) {
+        state.audits.push(body);
+        const a = state.auditQueue.length ? state.auditQueue.shift() : null;
+        const input = JSON.parse(body.messages[0].content);
+        const verdicts = a?.verdicts ?? input.slots.map((s) => ({ where: s.where, verdict: a?.all ?? 'ok', why: a?.why ?? (a?.all === 'mismatch' ? '글과 다른 사진' : '글과 맞음') }));
+        return json(res, 200, { id: `msg_a${state.audits.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_reason: 'end_turn',
+          usage: { input_tokens: 900, output_tokens: 80, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, content: [{ type: 'text', text: JSON.stringify({ verdicts }) }] });
       }
       state.anthropic.push({ key: req.headers['x-api-key'], beta: req.headers['anthropic-beta'] ?? null, body });
       let next = state.anthropicQueue.shift();
@@ -259,8 +269,9 @@ export function startFakeGoogle(port = 3199) {
       if ('invalidGrant' in body) state.invalidGrant = body.invalidGrant;
       if ('expireSyncToken' in body) state.expireSyncToken = body.expireSyncToken;
       if (body.fcmUnregister) state.fcmUnregistered.add(body.fcmUnregister);
-      if (body.anthropicReset) { state.anthropicQueue.length = 0; state.classifyQueue.length = 0; state.visionQueue.length = 0; } // 비운 다음에 새로 넣는다
+      if (body.anthropicReset) { state.anthropicQueue.length = 0; state.classifyQueue.length = 0; state.visionQueue.length = 0; state.auditQueue.length = 0; } // 비운 다음에 새로 넣는다
       if (body.visionQueue) state.visionQueue.push(...body.visionQueue);
+      if (body.auditQueue) state.auditQueue.push(...body.auditQueue);
       if (body.anthropicQueue) state.anthropicQueue.push(...body.anthropicQueue);
       if (body.anthropicFiles) for (const [k, v] of Object.entries(body.anthropicFiles)) state.anthropicFiles[k] = { at: new Date().toISOString(), ...v };
       if (body.classifyQueue) state.classifyQueue.push(...body.classifyQueue);
