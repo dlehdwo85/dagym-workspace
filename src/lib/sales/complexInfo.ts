@@ -41,3 +41,40 @@ export async function complexFacts(sql: Sql, name: string | null | undefined, re
   }
   return { code, households, usedate };
 }
+
+// 342차(로컬 11/02 341차 운영 확인 ⓑ: '이촌동 현대아파트 리모델링주택조합' 발주 공고가 '지역 미정'): 글자에 시·도·시·군·구가 없는 단지 발주 공고는
+// 단지 이름(+동 이름)으로 K-apt 단지 목록(kapt_complex_codes: name·sido·dong)에서 소재 시도를 찾는다. 같은 이름 단지가 여러 시도에 있으면(현대아파트) 그대로 못 찾음.
+const DONG_STOP = new Set(['공동', '운동', '활동', '이동', '자동', '행동', '협동', '합동', '노동', '작동', '변동', '유동', '진동', '부동', '연동', '가동', '출동', '감동', '제동', '구동', '기동', '시동']);
+export type AptHints = { apts: string[]; dongs: string[] };
+/** 발주처·수요기관·단지 칸에서 '○○아파트' 이름 조각과 '○○동' 조각 — 제목에서는 아파트 이름만(동 이름은 보통 낱말과 섞여 발주처 쪽만) */
+export function aptHints(o: { org?: (string | null | undefined)[]; complex?: string | null; titles?: (string | null | undefined)[] }): AptHints {
+  const apts = new Set<string>(), dongs = new Set<string>();
+  const grab = (s: string, withDong: boolean) => {
+    for (const m of s.matchAll(/([가-힣A-Za-z0-9·]{2,20}?)(?:아파트|APT)(?![가-힣])/gi)) { const n = norm(m[1]); if (n.length >= 2) apts.add(n); }
+    if (withDong) for (const m of s.matchAll(/(?<![가-힣])([가-힣]{2,5}동)(?![가-힣])/g)) if (!DONG_STOP.has(m[1])) dongs.add(m[1]);
+  };
+  for (const t of o.org ?? []) if (t) grab(String(t), true);
+  if (o.complex) { const n = norm(String(o.complex)); if (n.length >= 2) apts.add(n); grab(String(o.complex), true); }
+  for (const t of o.titles ?? []) if (t) grab(String(t), false);
+  return { apts: [...apts], dongs: [...dongs] };
+}
+/** 공고별 단지 이름 조각으로 소재 시도(짧은 이름) — 동 이름이 있으면 그 동의 단지 가운데 이름이 맞는 것, 없으면 이름이 똑같은 단지. 후보 시도가 하나일 때만 */
+export async function complexSidos(sql: Sql, items: ({ id: string } & AptHints)[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const todo = items.filter((x) => x.apts.length); if (!todo.length) return out;
+  const apts = [...new Set(todo.flatMap((x) => x.apts))], dongs = [...new Set(todo.flatMap((x) => x.dongs))];
+  const { CODES } = await import('./collectors/kaptComplexes');
+  const rows = await sql<{ name: string; sido: string | null; dong: string | null }[]>`select regexp_replace(regexp_replace(regexp_replace(coalesce(row->>'name', ''), '\\s+', '', 'g'), '\\(.*?\\)', '', 'g'), '(아파트|APT)$', '', 'i') as name, row->>'sido' as sido, row->>'dong' as dong
+    from sales_src_rows where scope = 'global' and tbl = ${CODES}
+    and (regexp_replace(regexp_replace(regexp_replace(coalesce(row->>'name', ''), '\\s+', '', 'g'), '\\(.*?\\)', '', 'g'), '(아파트|APT)$', '', 'i') = any(${apts}::text[]) ${dongs.length ? sql`or row->>'dong' = any(${dongs}::text[])` : sql``}) limit 3000`.catch(() => []);
+  if (!rows.length) return out;
+  const { sidoIn } = await import('./region');
+  for (const x of todo) {
+    const byDong = x.dongs.length ? rows.filter((r) => r.dong && x.dongs.includes(r.dong) && r.name.length >= 2 && x.apts.some((a) => r.name === a || r.name.includes(a) || a.includes(r.name))) : [];
+    const cands = byDong.length ? byDong : rows.filter((r) => x.apts.includes(r.name));
+    const sidos = new Set(cands.map((r) => sidoIn(r.sido) ?? '').filter(Boolean));
+    if (sidos.size === 1) out.set(x.id, [...sidos][0]);
+  }
+  return out;
+}
+

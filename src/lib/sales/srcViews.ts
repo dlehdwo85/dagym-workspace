@@ -503,7 +503,11 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 278차 #830(대표 10/31 '취소 공고는 목록에서 뺌'): 취소된 공고(원천 상태 '취소' 또는 같은 공고 묶음의 마지막 게시가 취소)는 모든 탭에서 빼고 '취소된 공고' 보관함 탭에만
     // 339차(대표 11/02 #924 지역별): 공고의 시·도 — 원천 지역 → 비면 참가가능지역·발주처·수요기관·주소·단지·제목에서(당일 메일과 같은 순서) → 못 찾으면 '지역 미정'
     const str = (v: unknown) => (v == null ? null : String(v));
-    const sidoOfNotice = (n: (typeof all)[number]) => sidoIn(str(n.region)) ?? sidoIn(str(pick(n.raw, 'region_restriction')), str(n.agency), str(pick(n.raw, 'demand_agency')), str(pick(n.raw, 'office_address', 'address')), str(n.complex), str(n.title)) ?? '지역 미정';
+    const sidoByText = (n: (typeof all)[number]) => sidoIn(str(n.region)) ?? sidoIn(str(pick(n.raw, 'region_restriction')), str(n.agency), str(pick(n.raw, 'demand_agency')), str(pick(n.raw, 'office_address', 'address')), str(n.complex), str(n.title));
+    // 342차(로컬 11/02 341차 운영 확인 ⓑ): 글자로 못 찾은 공고('이촌동 현대아파트 리모델링주택조합')는 단지 이름(+동 이름)으로 K-apt 단지 목록에서 소재 시도 — 같은 이름이 여러 시도에 있으면(현대아파트) 그대로 '지역 미정'
+    const { aptHints, complexSidos } = await import('./complexInfo');
+    const aptSido = await complexSidos(db(), all.filter((n) => !sidoByText(n)).map((n) => ({ id: String(n.id), ...aptHints({ org: [str(n.agency), str(pick(n.raw, 'demand_agency'))], complex: str(n.complex), titles: [str(n.title)] }) }))).catch(() => new Map<string, string>());
+    const sidoOfNotice = (n: (typeof all)[number]) => sidoByText(n) ?? aptSido.get(String(n.id)) ?? '지역 미정';
     const regionPick = String(q.region ?? '').trim();
     const bizOk = (n: (typeof all)[number]) => !q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz));
     const dayHit = (n: (typeof all)[number], d: string) => (d === td ? n.todayHit : n.posted === d || n.noticeDate === d); // 338차: 오늘은 기존 규칙(메일 뒤 수집·다시 찾음 포함), 지난 날은 수집일·공고일
