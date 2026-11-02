@@ -56,6 +56,17 @@ export async function salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     await p.screenshot({ path: `${SHOTS}/338-bids-days-390.png` });
     await hb.getByTestId(`bids-day-${td}`).tap();
     await p.waitForURL(/bt=today/);
+    // 339차(대표 11/02 #924): 지역(시·도) 칩 — 경기(체육시설·매점)·경남(골프숍) 건수, 경기 칩 → 주소 br=경기 · 경남 공고 빠짐 · 다시 누르면 전체
+    const rgRow = hb.getByTestId('sales-bids-region'); await rgRow.waitFor();
+    assert.match(await hb.getByTestId('sales-bids-region-경기').innerText(), /^경기 [1-9]\d*$/); assert.match(await hb.getByTestId('sales-bids-region-경남').innerText(), /^경남 [1-9]\d*$/);
+    await hb.getByTestId('sales-bids-region-경기').tap();
+    await p.waitForURL(/br=%EA%B2%BD%EA%B8%B0|br=경기/);
+    await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프클럽 골프숍' }).waitFor({ state: 'detached' }); // 경남 공고는 경기 칩에서 빠짐(목록 다시 읽은 뒤)
+    await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 체육시설' }).waitFor();
+    await p.screenshot({ path: `${SHOTS}/339-bids-region-390.png` });
+    await hb.getByTestId('sales-bids-region-경기').tap();
+    await p.waitForFunction(() => !location.search.includes('br='));
+    await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 골프클럽 골프숍' }).waitFor();
     const res = hb.getByTestId('bids-results'); await res.waitFor();
     assert.match(await res.locator('summary').innerText(), /결과\(낙찰·유찰\) 1건/);
     assert.equal(await hb.getByTestId('sales-bid').filter({ hasText: 'E2E 앱 헬스기구 구매 낙찰 결과' }).count(), 1, '결과는 오늘 새 공고 목록에 없고');

@@ -1132,9 +1132,10 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
   // #242 2단계: 탭·검색어·사업·정렬은 주소에 — 공고에서 업무·리드로 갔다 뒤로 와도 같은 목록
   // 기본 칩은 고정 '진행 중'(#613 대표 10/25: 모니터링은 진행 중 먼저) — 앱 하단 '영업기회'·당일 메일 링크는 ?bt=today 로 오늘 새 공고를 바로 연다
   const sp = useSearchParams();
-  const [tabRaw, setTab] = useUrlState(embedded ? 'bt' : 'tab', embedded ? (initialTab ?? 'open') : 'open'); const dayTab = /^\d{4}-\d{2}-\d{2}$/.test(tabRaw) ? tabRaw : null; const tab = dayTab ? 'today' : tabRaw; /* 338차: ?bt=YYYY-MM-DD = 그날 새 공고(오늘 새 공고 칩 안 날짜 고르기) */ const [s, setS] = useUrlState(embedded ? 'bq' : 'q', ''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useUrlState(embedded ? 'bz' : 'biz', '');
+  const [tabRaw, setTab] = useUrlState(embedded ? 'bt' : 'tab', embedded ? (initialTab ?? 'open') : 'open'); const dayTab = /^\d{4}-\d{2}-\d{2}$/.test(tabRaw) ? tabRaw : null; const tab = dayTab ? 'today' : tabRaw; /* 338차: ?bt=YYYY-MM-DD = 그날 새 공고(오늘 새 공고 칩 안 날짜 고르기) */
+  const [rg, setRg] = useUrlState(embedded ? 'br' : 'region', ''); /* 339차(#924): 지역(시·도) 칩 — 주소 ?br= */ const [s, setS] = useUrlState(embedded ? 'bq' : 'q', ''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useUrlState(embedded ? 'bz' : 'biz', '');
   const [sort, setSort] = useUrlState(embedded ? 'bs' : 'sort', ''); // #606 정렬(주소에 저장 — 새로 고침해도 유지)
-  const { data, error, reload } = useApi<any>(tab === 'awards' ? null : `/api/sales/src?${q({ view: 'bids', tab, day: dayTab ?? undefined, q: s, biz, sort })}`, [tab, dayTab, s, biz, sort]); // [낙찰 분석]은 목록 대신 업체별 묶음
+  const { data, error, reload } = useApi<any>(tab === 'awards' ? null : `/api/sales/src?${q({ view: 'bids', tab, day: dayTab ?? undefined, region: rg, q: s, biz, sort })}`, [tab, dayTab, rg, s, biz, sort]); // [낙찰 분석]은 목록 대신 업체별 묶음
   // #510: 당일 공고 메일 제목(?id=) → 그 공고 상세를 바로 — 지금 탭 목록에 없어도 한 건 찾아서. #242 2단계: 허브 안·뒤로가기로 돌아온 상세도(?id=)
   const [deep, setDeep] = useState<string | null>(initialId ?? sp.get('id'));
   const one = useApi<any>(deep ? `/api/sales/src?${q({ view: 'bids', tab: 'all', q: deep })}` : null, [deep]);
@@ -1151,6 +1152,9 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
       {!!data?.categories?.length && <div className="flex flex-wrap items-center gap-1.5" data-testid="sales-bids-biz"><span className="text-[11px] text-ink-3">사업</span>
         {[['', '전체'], ...data.categories.map((c: any) => [c.key, c.name]), ['none', '미분류']].map(([k, l]) => <button key={k} type="button" onClick={() => setBiz(k)} data-testid={`sales-bids-biz-${k || 'all'}`} className={cx('rounded-full border px-2.5 py-0.5 text-xs', biz === k ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white')}>{l}</button>)}
         <Link href="/s/sales/sources#biz" className="text-[11px] text-ink-3 underline">관심 사업 설정</Link></div>}
+      {/* 339차(대표 11/02 #924): 지역(시·도) 칩 — 지금 칩(진행 중·오늘 새 공고·날짜별 …)·검색어·사업 조건 안에서 시·도별 건수, 주소 ?br= · 원천 지역이 비면 발주처·수요기관·주소·제목에서 찾음 */}
+      {!!data?.regions?.length && (data.regions.length > 1 || rg) && <div className="flex flex-wrap items-center gap-1.5" data-testid="sales-bids-region"><span className="text-[11px] text-ink-3">지역</span>
+        {[{ key: '', n: data.regions.reduce((a: number, r: { n: number }) => a + r.n, 0) }, ...data.regions].map((r: { key: string; n: number }) => <button key={r.key || 'all'} type="button" onClick={() => setRg(rg === r.key ? '' : r.key)} data-testid={`sales-bids-region-${r.key || 'all'}`} className={cx('rounded-full border px-2.5 py-0.5 text-xs tabular-nums', rg === r.key ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line bg-white')}>{r.key || '전체'} {r.n}</button>)}</div>}
       <Head title="입찰·공고 모니터링" meta={data}><AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBids} compact /><Search value={s} onChange={setS} /></Head>
       {data?.canAssign && data?.readOnly === false && <BidLeadsBanner onDone={reload} />}
       <div className="flex flex-wrap items-center gap-1.5">{chips.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} data-testid={`sales-bids-tab-${k}`} className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent text-white' : 'border-line')} style={tab === k ? { background: C } : undefined}>{l}</button>)}
@@ -1322,7 +1326,7 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
         <button type="button" onClick={() => setBox('archive')} aria-pressed={box === 'archive'} className={chipCls(box === 'archive')} data-testid="hub-box-archive">대상 아님·완료{data ? ` ${data.archiveCount ?? 0}건` : ''}</button>
         <span className="mx-1 hidden h-4 w-px bg-line sm:block" />
         <select className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="정렬" data-testid="hub-sort">{(HUB_SORTS[tab] ?? HUB_SORTS.buildings).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-        {tab !== 'vendors' && <select className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={region} onChange={(e) => setRegion(e.target.value)} aria-label="지역 필터" data-testid="hub-f-region"><option value="">지역 전체</option>{regions.map((r) => <option key={r} value={r}>{r}</option>)}{region && !regions.includes(region) && <option value={region}>{region}</option>}</select>}
+        {tab !== 'vendors' && <select className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={region} onChange={(e) => setRegion(e.target.value)} aria-label="지역 필터" data-testid="hub-f-region"><option value="">지역 전체</option>{(data?.sidos?.length ? data.sidos.filter((r: { key: string }) => r.key !== '지역 미정').map((r: { key: string; n: number }) => [r.key, `${r.key} ${r.n}`]) : regions.map((r) => [r, r])).map(([k, l]: string[]) => <option key={k} value={k}>{l}</option>)}{region && !(data?.sidos?.some((r: { key: string }) => r.key === region) || regions.includes(region)) && <option value={region}>{region}</option>}</select>} {/* 339차: 시·도 + 건수 */}
         {tab !== 'vendors' && <select className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={hh} onChange={(e) => setHh(e.target.value)} aria-label="세대수 필터" data-testid="hub-f-hh"><option value="">세대수 전체</option>{[['300', '300세대 이상'], ['500', '500세대 이상'], ['1000', '1,000세대 이상']].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
         <select className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="기간 필터" data-testid="hub-f-period"><option value="">기간 전체</option><option value="1">1개월 안</option><option value="3">3개월 안</option><option value="6">6개월 안</option></select>
         {data && <span className="ml-auto text-ink-3" data-testid="hub-count">{(data.total ?? data.items.length).toLocaleString('ko-KR')}건{(data.total ?? 0) > data.items.length ? ` (앞 ${data.items.length}건 표시)` : ''}</span>}
@@ -1374,6 +1378,16 @@ export function Regions() {
   return (
     <div className="space-y-3" data-testid="sales-regions">
       <Head title="지역별" meta={data} />
+      {/* 339차(대표 11/02 #924 '영업기회 허브 지역별로 구분'): 지역(시·도) × 리드·진행 중 공고·건물·시설 건수 표 — 숫자를 누르면 그 탭이 그 지역으로 열림 */}
+      {!!data?.matrix?.length && <div className="overflow-x-auto rounded-card border border-line bg-white shadow-card" data-testid="sales-regions-matrix">
+        <table className="w-full text-sm"><thead><tr className="border-b border-line text-left text-xs text-ink-3"><th className="px-3 py-2">지역</th><th className="px-2 py-2 text-right">리드</th><th className="px-2 py-2 text-right">진행 중 공고</th><th className="px-2 py-2 text-right">건물</th><th className="px-2 py-2 text-right">시설</th></tr></thead>
+          <tbody>{data.matrix.map((r: any) => { const sido = r.region === '지역 미정' ? '' : r.region; const cell = (n: number, href: string | null, tid: string) => <td className="px-2 py-1.5 text-right tabular-nums" data-testid={tid}>{n && href ? <Link href={href} className="text-brand-700 underline">{n}</Link> : n ? String(n) : <span className="text-ink-3">0</span>}</td>; return (
+            <tr key={r.region} className="border-b border-line/60 last:border-0" data-testid="sales-region-row" data-region={r.region}><td className="px-3 py-1.5 font-medium">{r.region}</td>
+              {cell(r.leads, sido ? `/s/sales/leads?region=${encodeURIComponent(sido)}` : '/s/sales/leads', 'rm-leads')}
+              {cell(r.bids, `/s/sales/hub?tab=bids&bt=open&br=${encodeURIComponent(r.region)}`, 'rm-bids')}
+              {cell(r.buildings, sido ? `/s/sales/hub?tab=buildings&region=${encodeURIComponent(sido)}` : null, 'rm-buildings')}
+              {cell(r.facilities, sido ? `/s/sales/hub?tab=facilities&region=${encodeURIComponent(sido)}` : null, 'rm-facilities')}</tr>); })}</tbody></table>
+        <p className="px-3 py-1.5 text-[11px] text-ink-3">공고는 진행 중(마감 전) 기준 · 원천 지역이 비면 발주처·수요기관·주소·제목에서 시·도를 찾음 · 숫자를 누르면 그 탭이 그 지역으로 열립니다</p></div>}
       {!data ? <Skeleton rows={4} /> : <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{data.regions.map((r: any) => (
         <li key={r.region} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="sales-region"><div className="flex items-center"><span className="font-semibold">{r.region}</span><span className="ml-auto text-lg font-bold tabular-nums" style={{ color: C }}>{r.total}</span></div>
           <div className="mt-1 flex flex-wrap gap-1">{Object.entries(r.byStatus).map(([s, n]) => <span key={s} className="rounded-full bg-slate-100 px-1.5 text-[11px]">{s} {String(n)}</span>)}</div></li>))}</ul>}

@@ -13,6 +13,7 @@ import { LEAD_STAGES, stageName } from './terms';
 import { sourceAsOf } from './collectors/store';
 import { briefingLine, briefingOf, termsLine, termsRows } from './bidTerms';
 import { eligView } from './eligibilityText';
+import { sidoIn } from './region';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -500,6 +501,11 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; });
     // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작
     // 278차 #830(대표 10/31 '취소 공고는 목록에서 뺌'): 취소된 공고(원천 상태 '취소' 또는 같은 공고 묶음의 마지막 게시가 취소)는 모든 탭에서 빼고 '취소된 공고' 보관함 탭에만
+    // 339차(대표 11/02 #924 지역별): 공고의 시·도 — 원천 지역 → 비면 참가가능지역·발주처·수요기관·주소·단지·제목에서(당일 메일과 같은 순서) → 못 찾으면 '지역 미정'
+    const str = (v: unknown) => (v == null ? null : String(v));
+    const sidoOfNotice = (n: (typeof all)[number]) => sidoIn(str(n.region)) ?? sidoIn(str(pick(n.raw, 'region_restriction')), str(n.agency), str(pick(n.raw, 'demand_agency')), str(pick(n.raw, 'office_address', 'address')), str(n.complex), str(n.title)) ?? '지역 미정';
+    const regionPick = String(q.region ?? '').trim();
+    const bizOk = (n: (typeof all)[number]) => !q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz));
     const dayHit = (n: (typeof all)[number], d: string) => (d === td ? n.todayHit : n.posted === d || n.noticeDate === d); // 338차: 오늘은 기존 규칙(메일 뒤 수집·다시 찾음 포함), 지난 날은 수집일·공고일
     const canceledCard = (n: (typeof all)[number]) => /취소/.test(String(n.status ?? '')) || !!(n.history as { cancelDay?: string | null } | null)?.cancelDay;
     const inTab = (n: (typeof all)[number], tb: string) => (tb === 'skip' ? n.skipped && !!n.skip : !n.skipped) && (tb === 'skip' || tb === 'ref' /* 참고 = 지난 메일에 실린 그대로 */ || (tb === 'canceled') === canceledCard(n)) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
@@ -527,17 +533,21 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       : sortKey === 'notice' ? String(b.noticeDate ?? b.posted ?? '').localeCompare(String(a.noticeDate ?? a.posted ?? ''))
         : sortKey === 'amount' ? (Number(b.amount) || 0) - (Number(a.amount) || 0)
           : tab === 'open' || tab === 'soon' || tab === 'prep' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : tab === 'skip' ? String(b.skip?.at ?? '').localeCompare(String(a.skip?.at ?? '')) : String(b.posted).localeCompare(String(a.posted));
-    const items = all.filter((n) => inTab(n, tab) && hit(n) && (!q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz)))).sort(cmp).slice(0, 300);
+    const items = all.filter((n) => inTab(n, tab) && hit(n) && bizOk(n) && (!regionPick || sidoOfNotice(n) === regionPick)).sort(cmp).slice(0, 300); // 339차: 지역 칩
     // 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 결과(낙찰·유찰)는 빼고 아래 '결과' 묶음으로 — 당일 메일 결과 구역과 같은 기준(isAwardResult)
     const results = tab === 'today' ? items.filter((n) => n.result) : [];
     const skipCount = N.filter((r) => skips.own(r) && !folded(r)).length; // [대상 아님] 탭 장 수(같은 사업은 한 장)
     const todayCount = all.filter((n) => inTab(n, 'today') && !n.result).length; // #613 '오늘 새 공고 n' 칩(검색어와 무관)
     // 338차: 최근 7일(오늘부터) 날짜별 새 공고 수 — 오늘 칸은 '오늘 새 공고 n' 과 같은 수, 지난 날은 마감이 지났어도 그날 새 공고로 셈(검색어와 무관)
     const days = Array.from({ length: 7 }, (_, i) => plus(-i)).map((d) => ({ day: d, n: all.filter((n) => !n.skipped && !canceledCard(n) && !n.result && dayHit(n, d) && (d !== td || !bidEnded(n, td))).length }));
+    // 339차: 지역 칩 건수 — 지금 칩·검색어·사업 조건 뒤, 지역 조건 전(고른 지역만 켜고 나머지 칩 수는 그대로)
+    const regionCount = new Map<string, number>();
+    for (const n of all) if (inTab(n, tab) && hit(n) && bizOk(n) && !(tab === 'today' && n.result)) { const k = sidoOfNotice(n); regionCount.set(k, (regionCount.get(k) ?? 0) + 1); }
+    const regions = [...regionCount.entries()].map(([key, n]) => ({ key, n })).sort((a, b) => (a.key === '지역 미정' ? 1 : b.key === '지역 미정' ? -1 : b.n - a.n || a.key.localeCompare(b.key, 'ko')));
     const canceledCount = all.filter((n) => inTab(n, 'canceled')).length;
     // 258차(로컬 10/29 09:20 ⓑ): 진행 중 탭에서 마감일 칸이 빈 공고(예고·협력사 등록·마감 칸 빈 입찰) 수 — 화면은 따로 묶어 보여 줌
     const noClose = tab === 'open' ? items.filter((n) => !n.close).length : 0;
-    return { ...meta, tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, todayCount, day: dayPick ?? (tab === 'today' ? td : null), days, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
+    return { ...meta, tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, todayCount, day: dayPick ?? (tab === 'today' ? td : null), days, region: regionPick || null, regions, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings'; const td = today();
@@ -562,16 +572,20 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // 242차 #759: 입주(없으면 준공·사용승인) 연도·달(?my=YYYY|YYYY-MM) — 영업기회 '2026년 입주' 목록에 K-apt 준공·입주 단지를 함께
     const my = /^\d{4}(-(0[1-9]|1[0-2]))?$/.test(String(q.my ?? '')) ? String(q.my) : '';
     const myOk = (d: string | null | undefined) => !my || (!!d && d.startsWith(my));
-    const regionOk = (x: { region?: unknown; address?: unknown }) => !region || String(x.region ?? '').includes(region) || String(x.address ?? '').includes(region);
+    const regionOk = (x: { region?: unknown; address?: unknown }) => !region || String(x.region ?? '').includes(region) || String(x.address ?? '').includes(region) || sidoIn(String(x.region ?? '')) === region || sidoIn(String(x.address ?? '')) === region; // 339차: '전라북도 전주시' 도 '전북' 으로 걸림
     const hhOk = (x: { households?: unknown }) => !hh || Number(x.households) >= hh;
     const asc = (a: unknown, b: unknown) => String(a ?? '9999-99').localeCompare(String(b ?? '9999-99')); const desc = (a: unknown, b: unknown) => String(b ?? '').localeCompare(String(a ?? '')); const numDesc = (a: unknown, b: unknown) => (Number(b) || 0) - (Number(a) || 0);
     const tabs = await hubTabsOn(t, bidsOn);
     const pack = <T extends { region?: unknown }>(list: T[], isDone: (x: T) => boolean, keep: (x: T) => boolean, sorter: ((a: T, b: T) => number) | null, stOf: (x: T) => unknown) => {
       const regions = [...new Set(list.map((x) => String(x.region ?? '').trim()).filter((x) => x && x.length <= 8))].sort((a, b) => a.localeCompare(b, 'ko'));
+      // 339차(대표 11/02 #924): 시·도별 건수(지역 필터 전, 보관함 여부만 반영) — 지역 고르기 칸에 '경기 120' 처럼, 지역별 탭 표에도 씀
+      const sidoCount = new Map<string, number>();
+      for (const x of (box === 'archive' ? list.filter(isDone) : list.filter((y) => !isDone(y)))) { const k = sidoIn(String(x.region ?? '')) ?? sidoIn(String((x as { address?: unknown }).address ?? '')) ?? '지역 미정'; sidoCount.set(k, (sidoCount.get(k) ?? 0) + 1); }
+      const sidos = [...sidoCount.entries()].map(([key, n]) => ({ key, n })).sort((a, b) => (a.key === '지역 미정' ? 1 : b.key === '지역 미정' ? -1 : b.n - a.n || a.key.localeCompare(b.key, 'ko')));
       const archived = list.filter(isDone); const base = (box === 'archive' ? archived : list.filter((x) => !isDone(x))).filter(keep);
       const statusCounts = Object.fromEntries(STATUS_GROUPS.map(([k]) => [k, base.filter((x) => stMatch(k, stOf(x))).length])); // #459 칩 건수(상태 필터 전)
       const out = stKey ? base.filter((x) => stMatch(stKey, stOf(x))) : base;
-      return { ...meta, tab, box, tabs, day: dayPick, days: dayCounts, sort: sortKey, status: stKey || null, statusGroups: STATUS_GROUPS.map(([k, l]) => [k, l]), statusCounts, filters: { region: region || null, hh: hh || null, period: months || null, my: my || null }, regions, archiveCount: archived.length, total: out.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
+      return { ...meta, tab, box, tabs, day: dayPick, days: dayCounts, sort: sortKey, status: stKey || null, statusGroups: STATUS_GROUPS.map(([k, l]) => [k, l]), statusCounts, filters: { region: region || null, hh: hh || null, period: months || null, my: my || null }, regions, sidos, archiveCount: archived.length, total: out.length, items: (sorter ? [...out].sort(sorter) : out).slice(0, 300) };
     };
     // S1-2: 신규단지 진행(opportunity_work · source_id = 단지 id)
     const BW = new Map((await prog('opportunity_work')).filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w]));
@@ -642,7 +656,15 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const L = (await leadRows()).map((r) => lead(r, names));
     const m = new Map<string, { region: string; total: number; byStatus: Record<string, number> }>();
     for (const l of L) { const k = regionOf(l.region); const e = m.get(k) ?? { region: k, total: 0, byStatus: {} }; e.total++; e.byStatus[String(l.status ?? '미정')] = (e.byStatus[String(l.status ?? '미정')] ?? 0) + 1; m.set(k, e); }
-    return { ...meta, regions: [...m.values()].sort((a, b) => (a.region === '지역 미정' ? 1 : b.region === '지역 미정' ? -1 : b.total - a.total)) };
+    // 339차(대표 11/02 #924 '영업기회 허브 지역별로 구분'): 리드만이 아니라 지역(시·도) × 진행 중 공고·건물·시설 건수 표 — 공고는 입찰 보기(진행 중)의 지역 칩 수, 건물·시설은 허브 탭의 시·도 수를 그대로(탭이 꺼져 있거나 못 읽으면 0)
+    const sidoLead = new Map<string, number>();
+    for (const l of L) { const k = sidoIn(String(l.region ?? '')) ?? '지역 미정'; sidoLead.set(k, (sidoLead.get(k) ?? 0) + 1); }
+    const grab = async (v2: string, q2: Parameters<typeof salesView>[2], key: 'regions' | 'sidos') => { try { const r = (await salesView(u, v2, q2)) as unknown as Record<string, { key: string; n: number }[] | undefined>; return new Map((r[key] ?? []).map((x) => [x.key, x.n])); } catch { return new Map<string, number>(); } };
+    const [bidsBy, bldBy, facBy] = await Promise.all([grab('bids', { tab: 'open' }, 'regions'), grab('hub', { tab: 'buildings' }, 'sidos'), grab('hub', { tab: 'facilities' }, 'sidos')]);
+    const keys = new Set<string>([...sidoLead.keys(), ...bidsBy.keys(), ...bldBy.keys(), ...facBy.keys()]);
+    const matrix = [...keys].map((region) => { const r = { region, leads: sidoLead.get(region) ?? 0, bids: bidsBy.get(region) ?? 0, buildings: bldBy.get(region) ?? 0, facilities: facBy.get(region) ?? 0 }; return { ...r, total: r.leads + r.bids + r.buildings + r.facilities }; })
+      .filter((r) => r.total > 0).sort((a, b) => (a.region === '지역 미정' ? 1 : b.region === '지역 미정' ? -1 : b.total - a.total || a.region.localeCompare(b.region, 'ko')));
+    return { ...meta, regions: [...m.values()].sort((a, b) => (a.region === '지역 미정' ? 1 : b.region === '지역 미정' ? -1 : b.total - a.total)), matrix };
   }
   throw notFound();
 }
