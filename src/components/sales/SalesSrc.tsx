@@ -1314,6 +1314,8 @@ export function Hub({ initialSub }: { initialTab?: string; initialDay?: string; 
         {day && <button type="button" onClick={() => setDay('')} className="rounded-full border px-2.5 py-0.5 text-xs" style={{ color: C, borderColor: C }} data-testid="hub-day-today">{day === 'today' ? '오늘' : dayLabel(day)} 새로 들어온 것만 ✕</button>}</Head>
       {tabRow((on) => cx('rounded-full border px-3 py-1 text-xs', on ? 'border-transparent text-white' : 'border-line'), (on) => (on ? { background: C } : undefined))}
       {/* 338차(대표 11/02 #922): 영업 현황 '오늘 새 영업 DB' 도 날짜별 — 이 탭에 최근 7일 새로 들어온 건수 칸 + 날짜 고르기(주소 ?day=today|YYYY-MM-DD) */}
+      {/* 340차(로컬 11/02 제안): 시설 탭처럼 느린 탭은 목록 응답 전에 7칸 자리를 흐리게 먼저 그려 '없는 것처럼' 보이지 않게 */}
+      {!data && !error && day && !sub && tab !== 'all' && <div className="flex flex-wrap items-center gap-1.5" data-testid="hub-days-loading" aria-hidden><span className="text-[11px] text-ink-3">새로 들어온 날</span>{Array.from({ length: 7 }, (_, i) => <span key={i} className="h-6 w-[4.5rem] animate-pulse rounded-full bg-slate-100" />)}</div>}
       {!!data?.days?.length && (day || data.days.some((d: { n: number }) => d.n > 0)) && <div className="flex flex-wrap items-center gap-1.5" data-testid="hub-days">
         <span className="text-[11px] text-ink-3">새로 들어온 날</span>
         {data.days.map((d: { day: string; n: number }) => { const cur = day === 'today' ? data.days[0].day : day; const on = cur === d.day; return (

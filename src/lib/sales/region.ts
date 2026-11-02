@@ -15,7 +15,17 @@ const CITY: Record<string, string> = Object.fromEntries(Object.entries({
   제주: '서귀포', 대구: '군위', 인천: '강화 옹진', 부산: '기장', 울산: '울주',
 }).flatMap(([sido, names]) => names.split(' ').map((n) => [n, sido])));
 const SHORT_RE = new RegExp(`(?<![가-힣])(${SHORT})(?:특별시|광역시|특별자치시|특별자치도|시|도)?(?![가-힣])`);
-const CITY_RE = new RegExp(`(?<![가-힣])(${Object.keys(CITY).join('|')})(?:시|군)(?:청|의회|교육지원청|보건소|시설관리공단|도시공사|체육회|문화재단)?(?![가-힣])`);
+// 340차(로컬 11/02 #924 후속: 진행 중 공고의 19% 가 '지역 미정'): '김해시영운국민체육센터'처럼 시·군 뒤에 글자가 바로 이어지는 기관 이름도 잡는다(접미 조건 없음 — 시·군 글자가 닻)
+const CITY_RE = new RegExp(`(?<![가-힣])(${Object.keys(CITY).join('|')})(?:시|군)`);
+/** 340차: 특별시·광역시·큰 시의 구 이름 → 시도. 두 곳 이상에 있는 중·동·서·남·북·강서(서울·부산)는 넣지 않음 */
+const GU: Record<string, string> = Object.fromEntries(Object.entries({
+  서울: '종로 용산 성동 광진 동대문 중랑 성북 강북 도봉 노원 은평 서대문 마포 양천 구로 금천 영등포 동작 관악 서초 강남 송파 강동',
+  부산: '해운대 사하 금정 연제 수영 사상 영도 부산진 동래', 대구: '수성 달서', 인천: '미추홀 연수 남동 부평 계양', 광주: '광산', 대전: '유성 대덕',
+  경기: '분당 수정 중원 권선 팔달 영통 장안 일산동 일산서 덕양 상록 단원 동안 만안 처인 기흥 수지 오정 원미 소사', 경남: '의창 성산 마산합포 마산회원 진해',
+  충북: '상당 서원 흥덕 청원', 충남: '동남 서북', 전북: '완산 덕진',
+}).flatMap(([sido, names]) => names.split(' ').map((n) => [n, sido])));
+// 구 뒤는 기관 이름에서 흔한 이어짐(청·의회·립·민·시설관리공단…)이나 글자 끝만 — '수영구역'·'수정구매'·'남동구간' 같은 보통 낱말은 안 잡음
+const GU_RE = new RegExp(`(?<![가-힣])(${Object.keys(GU).join('|')})구(?:청|의회|립|민|시설|도시|체육|문화|서비스|보건|공단|공사|재단|센터|종합|국민|여성|청소년|노인|장애인|평생|건강|복지|자원|도서관|생활|가족|육아|진흥|[^가-힣]|$)`);
 const BRACKET_RE = new RegExp(`^\\s*\\[(${SHORT})`);
 
 /** 글(발주처·수요기관·주소·제목)에서 시도 짧은 이름 — '서울특별시청'·'경기도 화성시'·'삼척시'·'[경기용인] …' → 서울·경기·강원·경기. 못 찾으면 null('경기장' 같은 낱말은 시도로 보지 않음) */
@@ -26,6 +36,7 @@ export function sidoIn(...texts: (string | null | undefined)[]): string | null {
     const b = s.match(BRACKET_RE); if (b) return b[1];
     const m = s.match(SHORT_RE); if (m) return m[1];
     const c = s.match(CITY_RE); if (c) return CITY[c[1]];
+    const g = s.match(GU_RE); if (g) return GU[g[1]];
   }
   return null;
 }
