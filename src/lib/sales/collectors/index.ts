@@ -57,6 +57,9 @@ export async function runCollector(slug: string, trigger: 'cron' | 'manual' | 'r
 }
 /** tick: KST 실행 시각이 지났고 오늘 아직 안 돈 수집기 중 하나(순서대로)만 — 한 tick 에 하나(60초 한도) */
 export async function collectorsTick(opt: { now?: Date } = {}) {
+  // 325차(CI 1938·1939): 시험 서버는 SALES_COLLECTORS_TICK=off — 정기 실행이 실제 바깥 원천(data.go.kr·문체부 파일 …)을 받아 시험 DB 를 채우지 않게.
+  // KST 07시대에 CI 가 돌면 7시 수집기(산업단지·공공체육시설 …)가 tick 에서 돌아 operating_facility_prospects 에 실제 시설이 들어가 sales-research-212 묶음이 3곳이 됐음. 가짜 원천(SALES_COLLECT_TEST_BASE) 시험은 켠 채(tests/helpers.mjs)
+  if (process.env.SALES_COLLECTORS_TICK === 'off') return { skipped: 'off' as const };
   const sql = db(); const now = opt.now ?? new Date(); const hour = kstHour(); const today = kstDay(now);
   const states = new Map((await sql<{ slug: string; enabled: boolean; last_run_at: Date | null }[]>`select slug, enabled, last_run_at from sales_collector_state`).map((r) => [r.slug, r]));
   const [anyTenant] = await sql<{ n: number }[]>`select count(*)::int as n from tenants where spaces @> array['sales']::text[]`;

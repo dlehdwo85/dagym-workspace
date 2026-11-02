@@ -90,7 +90,9 @@ export async function ensureTls() {
 export const FAKE_TLS = 'https://localhost:3200';
 
 export async function startServer(extraEnv = {}) {
-  const env = { ...process.env, ...serverEnv(), ...extraEnv, NODE_ENV: 'production', PORT: String(PORT), NODE_EXTRA_CA_CERTS: await ensureTls() };
+  // 325차(CI 1938·1939): 수집기 정기 실행(collectorsTick)은 가짜 원천(SALES_COLLECT_TEST_BASE)을 준 시험에서만 — 아니면 tick 이 실제 data.go.kr·문체부 파일을 받아
+  // 시험 DB(operating_facility_prospects)를 채움(KST 07시대에 7시 수집기가 돌아 sales-research-212 '다음 주 묶음'이 실제 체육시설 포함 3곳). 시험이 SALES_COLLECTORS_TICK 을 직접 주면 그 값
+  const env = { ...process.env, ...serverEnv(), ...(extraEnv.SALES_COLLECT_TEST_BASE ? {} : { SALES_COLLECTORS_TICK: 'off' }), ...extraEnv, NODE_ENV: 'production', PORT: String(PORT), NODE_EXTRA_CA_CERTS: await ensureTls() };
   const proc = spawn(process.execPath, [NEXT_BIN, 'start', '-p', String(PORT)], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   proc.stdout.on('data', (d) => (log += d));

@@ -22,7 +22,7 @@ import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, 
 import { TaskDetail } from '@/components/TaskDetail';
 import { useBackClose, useSheetBack } from '@/components/backClose';
 import { replaceUrl } from '@/components/urlState';
-import { useCalendarSwipe } from '@/components/calSwipe';
+import { swipeState, useCalendarSwipe } from '@/components/calSwipe';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
@@ -731,12 +731,14 @@ function CalendarPage() {
             // #756(대표 10/28 '캘린더 생성도 15분 단위로 클릭해서 생성'): 한 번 누름도 누른 자리의 끌기 단위(15분, 30분으로 바꿨으면 30분) 칸부터 1시간 — 199차의 '정시부터'를 바꿈
             dateClick={(info) => {
               const api = calRef.current?.getApi(); if (!api) return;
+              if (Date.now() - swipeState.at < 600) return; // 좌우 밀기 직후의 '탭'은 밀기의 끝(빠른 등록 안 엶)
               clickAt.current = { x: info.jsEvent.clientX, y: info.jsEvent.clientY };
               const h = info.date.getTime(); // FullCalendar 가 누른 자리를 끌기 단위(snapDuration)로 맞춘 시각
               // 손 뗌을 다 처리한 뒤에 고름 — 같은 손 뗌에서 바로 고르면 '빈 곳 누름 = 선택 풀기'에 곧바로 풀림
               setTimeout(() => { if (info.allDay) api.select(info.dateStr.slice(0, 10)); else api.select(new Date(h), new Date(h + 3600000)); }, 0);
             }}
             select={(s) => {
+              if (Date.now() - swipeState.at < 600) { calRef.current?.getApi().unselect(); return; } // 좌우 밀기 직후 선택도 밀기의 끝
               const js = (s.jsEvent as MouseEvent | undefined);
               const pt = js ? { x: js.clientX, y: js.clientY } : clickAt.current; clickAt.current = null;
               const x = pt?.x ?? window.innerWidth / 2, y = pt?.y ?? 200;

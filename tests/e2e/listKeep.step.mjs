@@ -32,6 +32,7 @@ export async function listKeep({ owner, ctx, BASE, SHOTS }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/tasks?mode=list`);
   await chip().click();
+  await owner.waitForFunction(() => new URLSearchParams(location.search).get('view') === 'my'); // CI 1924: 칩 누름과 검색어 입력의 주소 반영이 겹치면 한쪽이 덮여 30초 기다리다 실패 — 사람처럼 칩 반영을 보고 나서 입력
   await search().fill(Q);
   await owner.waitForFunction((q) => { const p = new URLSearchParams(location.search); return p.get('view') === 'my' && p.get('q') === q; }, Q);
   await owner.getByText('E2E 목록유지 24').first().waitFor();

@@ -2,6 +2,8 @@
 import { useEffect, type RefObject } from 'react';
 
 type Api = { next: () => void; prev: () => void };
+/** 마지막으로 가로 밀기가 끝난 시각 — CI 1925(V14 36~39 '밀기는 빠른 등록을 열지 않음' 1 !== 0): 손가락을 따라 판이 움직이면 놓는 자리가 같은 칸이라 FullCalendar 가 '탭'으로 보고 칸 누름(dateClick)을 낼 수 있음 → 캘린더 화면이 밀기 직후 0.6초 안의 칸 누름·선택을 무시하는 데 씀 */
+export const swipeState = { at: 0 };
 /**
  * V14 36번: 캘린더 좌우로 밀어 기간 이동 — 손가락을 따라 화면이 움직이고, 놓으면 슬라이드로 넘어감(짧게 밀면 제자리).
  * - 가로 이동량이 세로보다 확실히 클 때만(세로 스크롤과 충돌 없음), 일정 블록 위에서 시작하거나 꾹 누른 뒤(블록 끌기·시간 선택)는 무시
@@ -50,6 +52,7 @@ export function useCalendarSwipe(wrap: RefObject<HTMLElement | null>, api: () =>
     const end = (e: TouchEvent) => {
       const s = st; st = null;
       if (!s || s.lock !== 'x') return;
+      swipeState.at = Date.now();
       const dx = (e.changedTouches[0]?.clientX ?? s.x) - s.x;
       const fast = Math.abs(dx) / Math.max(1, Date.now() - s.t) > 0.5 && Math.abs(dx) > 40;
       if (Math.abs(dx) > s.w * 0.22 || fast) slide(dx < 0 ? 1 : -1);
