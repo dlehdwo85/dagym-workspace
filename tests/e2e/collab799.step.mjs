@@ -66,7 +66,7 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
   await box.getByTestId('my-collab-fold').click();
   await box.getByTestId('collab-row').first().waitFor();
   assert.equal(await box.getByTestId('collab-row').count(), n, '다시 펼침');
-  // 281차(로컬 11:28): 사람별 묶음(전체 탭 기본·관리자)·팀별에서도 내가 들어간 공동 업무가 맨 위에 — 전체 탭은 사람 묶음에도 그대로
+  // 281차(로컬 11:28): 사람별 묶음(전체 탭 기본·관리자)·팀별에서도 내가 들어간 공동 업무가 맨 위에 — 328차부터 담당자별 묶기에선 사람 묶음에 다시 안 나옴(팀 묶음은 그대로)
   for (const q of ['view=all&group=assignee', 'view=my&group=assignee', 'view=all&group=team']) {
     await staff.goto(`${BASE}/tasks?${q}`);
     await staff.getByTestId('task-groups').waitFor();

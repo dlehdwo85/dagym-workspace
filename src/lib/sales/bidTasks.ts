@@ -233,6 +233,29 @@ export async function revertBidHandoff(u: SessionUser, i: z.infer<typeof bidReve
   return { ok: true, status: prev, ...out };
 }
 
+// ── 328차(대표 11/02 12:4x 결정 ⓒ '입찰 관련 건은 입찰로, 영업 관련 건은 영업으로 표기 — 공고로 올라온 것은 입찰'): 예전에 [영업]으로 만들어진 공고 업무 제목을 한 번 [입찰]로 ──
+// 대상 = 열린 업무(끝나지 않음·휴지통 아님) 가운데 제목이 [영업]으로 시작하고 공고에서 시작한 것 — sales_ref.kind = 'bid'(넘기기·상태 버튼·예전 리드 넘기기) 또는
+// 공고에서 넘어온 리드(sales_leads.src.from = 'bid')에 연결된 것(다음 연락·다시 볼 날 자동 업무). 공고 없이 영업 DB에서 시작한 건은 [영업] 그대로.
+// 정기 실행이 한 번만(app_settings 'bid_prefix_fix_328' 에 바뀐 목록) · 업무마다 활동 기록 · 태그에 '입찰' 보탬
+export async function bidPrefixFixOnce() {
+  const sql = db();
+  if ((await sql`select 1 from app_settings where key = 'bid_prefix_fix_328'`).length) return { skipped: 'done' };
+  const rows = await sql<{ id: string; title: string }[]>`select t.id, t.title from tasks t
+    where t.deleted_at is null and t.status <> 'done' and t.title like '[영업]%'
+      and (t.sales_ref->>'kind' = 'bid' or exists (select 1 from sales_leads l where l.src->>'from' = 'bid'
+        and l.id = coalesce(t.lead_id, case when t.sales_ref->>'kind' = 'lead' and (t.sales_ref->>'id') ~ '^[0-9a-f-]{36}$' then (t.sales_ref->>'id')::uuid end)))
+    order by t.created_at`;
+  const changed: { id: string; from: string; to: string }[] = [];
+  for (const r of rows) {
+    const to = r.title.replace(/^\[영업\]/, '[입찰]');
+    await sql`update tasks set title = ${to}, tags = (select coalesce(array_agg(distinct x), '{}') from unnest(coalesce(tags, '{}') || array['입찰']) x), updated_at = now(), version = version + 1 where id = ${r.id}`;
+    await activity(sql, 'task', r.id, null, 'updated', { reason: 'bid_prefix_328', title: { from: r.title, to } }).catch(() => {});
+    changed.push({ id: r.id, from: r.title, to });
+  }
+  await sql`insert into app_settings (key, value) values ('bid_prefix_fix_328', ${sql.json({ at: new Date().toISOString(), changed } as never)}) on conflict (key) do nothing`;
+  return { changed: changed.length, ids: changed.map((c) => c.id) };
+}
+
 // ── 우리 회사 판정(개찰 결과) ─────────────────────────────────────────────
 const CORP = /\(주\)|㈜|주식회사|\(유\)|유한회사|유한책임회사|합자회사|합명회사|\(사\)|사단법인|재단법인|\(재\)|협동조합/g;
 /** 회사 이름 비교용: 법인 표시·띄어쓰기·기호를 뺀 이름 */

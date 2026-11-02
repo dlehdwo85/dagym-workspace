@@ -58,9 +58,18 @@ export async function coAssign({ owner, staff, ctx, sql, BASE, SHOTS }) {
   await owner.getByTestId('hist-co').first().waitFor({ state: 'attached' }); // 활동 기록 '담당 추가·빼기 박직원'
   await box.evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await owner.screenshot({ path: `${SHOTS}/213-co-assign-detail.png`, clip: await box.boundingBox() });
-  // 담당자별 묶음: 주 담당·공동 담당 묶음에 모두 · 행에 +2
+  // 담당자별 묶음 → 328차(대표 11/02 '공동 업무에 있는 작업물은 개인 업무 목록에서 안 보이게'): 맨 위 '공동 업무' 칸에만 · 사람별 묶음(주 담당·함께 담당 3곳)엔 없고 머리줄에 '공동 업무 n건은 위 묶음에'
   await owner.goto(BASE + '/tasks');
-  for (const id of [ctx.managerA.id, ctx.staffA.id, ctx.staffB.id]) await owner.locator(`[data-group="${id}"]`).getByText('E2E 공동 담당 점검').first().waitFor();
+  const topBox = owner.getByTestId('my-collab');
+  await topBox.getByTestId('collab-row').filter({ hasText: 'E2E 공동 담당 점검' }).first().waitFor();
+  for (const id of [ctx.managerA.id, ctx.staffA.id, ctx.staffB.id]) {
+    const g = owner.locator(`[data-group="${id}"]`);
+    assert.equal(await g.getByText('E2E 공동 담당 점검').count(), 0, '사람별 묶음에는 다시 안 나옴');
+    assert.match(await g.getByTestId('group-collab-note').innerText(), /공동 업무 \d+건은 위 '공동 업무' 묶음에/);
+  }
+  // 사람 필터(칩)에서는 그 사람 묶음에 그대로(+2)
+  await owner.goto(`${BASE}/tasks?assigneeId=${ctx.managerA.id}`);
+  await owner.locator(`[data-group="${ctx.managerA.id}"]`).getByText('E2E 공동 담당 점검').first().waitFor();
   assert.equal(await owner.locator(`[data-group="${ctx.managerA.id}"] [data-row="${t.id}"]`).getByTestId('row-co').first().innerText(), '+2');
   // 휴대폰(이직원 = 함께 맡은 담당자): 상태 칩 '진행 전 · 0/3' → 눌러 [내 몫 완료] → '내 몫 완료 · 1/3'(흐리게, 목록에 남음 · 업무 상태 그대로)
   await staff.goto(BASE + '/tasks');

@@ -867,12 +867,15 @@ function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAc
   useEffect(() => { const on = () => setStuck(!!headRef.current && headRef.current.getBoundingClientRect().top <= 57); on(); window.addEventListener('scroll', on, { passive: true }); return () => window.removeEventListener('scroll', on); }, []); // V14 40번: 선택 모드·순서를 바꿀 수 없는 정렬에서는 끌기 꺼짐 — 꾹 누르면 행이 들려 옆 행이 눌리던 문제
   if (group === 'due' && view === 'my') return <MyGroupedList tasks={given} onPatch={onPatch} onAcked={onAcked} top={top} />;
   // 281차(로컬 11:28 운영 확인 — 대표 계정은 사람별 묶음이라 '공동 업무' 칸이 안 보임): 묶음 방식·탭에 상관없이 내가 들어간 공동 업무를 맨 위에.
-  // '내 업무' 탭은 아래 묶음에서 빼고(내 업무 마감별과 같게), 전체·다른 탭은 사람·팀 묶음에도 그대로 둠(팀 전체 보기)
-  const collabTop = group === 'month' ? [] : given.filter((t) => isCollab(t) && (t.assignee_id === user.id || coOf(t).some((c) => c.id === user.id))).sort(collabSort);
-  const tasks = view === 'my' && collabTop.length ? given.filter((t) => !collabTop.includes(t)) : given;
+  // '내 업무' 탭은 아래 묶음에서 빼고(내 업무 마감별과 같게), 팀·프로젝트 묶음과 사람 필터는 묶음에도 그대로 둠(팀 전체 보기)
+  // 328차(대표 11/02 12:4x '공동 업무에 있는 작업물들은 개인 업무 목록에서 안 보이게 — 지금 겹쳐 보입니다'): 담당자별 묶기(사람 필터 없음)에서는 공동 업무를 전부 맨 위 '공동 업무' 칸에만 두고
+  //   사람별 묶음에서는 뺌(건수·지연 수도 그에 맞게) · 사람별 묶음 머리줄에 '공동 업무 n건은 위 묶음에' 한 줄
+  const byPerson = group === 'assignee' && !assigneeFilter;
+  const collabTop = group === 'month' ? [] : given.filter((t) => isCollab(t) && (byPerson || t.assignee_id === user.id || coOf(t).some((c) => c.id === user.id))).sort(collabSort);
+  const tasks = (view === 'my' || byPerson) && collabTop.length ? given.filter((t) => !collabTop.includes(t)) : given;
   const today = todayStr();
   const nameOf = (id: string) => dir.users.find((u) => u.id === id)?.name ?? null;
-  type G = { key: string; label: string; head?: React.ReactNode; items: Task[]; add: { defaultAssignee?: string | null; defaultRequester?: string | null; defaultDue?: string | null; projectId?: string | null }; tone?: string };
+  type G = { key: string; label: string; head?: React.ReactNode; items: Task[]; add: { defaultAssignee?: string | null; defaultRequester?: string | null; defaultDue?: string | null; projectId?: string | null }; tone?: string; note?: string };
   let groups: G[] = [];
   if (group === 'assignee' || group === 'requester') {
     const isReq = group === 'requester';
@@ -893,7 +896,10 @@ function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAc
       else if (assigneeFilter) ensure(assigneeFilter, null).items.push(t); // 사람 필터: 그 사람이 주·공동 담당인 업무를 그 사람 묶음에
       else { ensure(t.assignee_id, t.assignee_name).items.push(t); for (const c of coOf(t)) ensure(c.id, c.name).items.push(t); } // #475 공동 담당 묶음에도
     }
+    // 328차: 공동 업무만 맡은 사람도 묶음은 남김(업무 없음 + 안내 한 줄) — 묶음에서 사라지면 왜 빠졌는지 알 수 없음
+    if (byPerson) for (const t of collabTop) { if (t.assignee_id) ensure(t.assignee_id, t.assignee_name); for (const c of coOf(t)) ensure(c.id, c.name); }
     groups = [...m.values()].sort((a, b) => (a.key === user.id ? -1 : b.key === user.id ? 1 : a.key === 'none' ? 1 : b.key === 'none' ? -1 : a.label.localeCompare(b.label, 'ko')));
+    if (byPerson) for (const g of groups) { const n = collabTop.filter((t) => t.assignee_id === g.key || coOf(t).some((c) => c.id === g.key)).length; if (n) g.note = `공동 업무 ${n}건은 위 '공동 업무' 묶음에`; } // 328차
   } else if (group === 'due') {
     const d = new Date(today + 'T00:00:00Z');
     const weekEnd = new Date(d.getTime() + (6 - ((d.getUTCDay() + 6) % 7)) * 86400000).toISOString().slice(0, 10);
@@ -1007,6 +1013,7 @@ function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAc
                   <span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums" title="진행 중">{open}</span>
                   {late > 0 && <span className="rounded-full bg-red-50 px-1.5 text-xs font-medium text-red-600 tabular-nums">지연 {late}</span>}
                   {!x.items.length && <span className="text-xs font-normal text-ink-3">업무 없음</span>}
+                  {x.note && <span className="text-xs font-normal text-violet-700" data-testid="group-collab-note">{x.note}</span>}
                 </button>
               )}
               {!isFolded && !archive && shown.length > 0 && <ListHeader sortBy={sortBy} onSort={onSort} compact />}
