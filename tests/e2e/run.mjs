@@ -2070,8 +2070,9 @@ await step('V12: PC 상세 패널 — 다른 업무 클릭 시 교체·바깥/Es
   // 남의 업무: 원형 체크 비활성, 검토 요청 알림에서 승인
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 검토 승인 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
   await owner.goto(BASE + '/tasks?mode=list');
-  await owner.locator(`[data-row="${t}"]`).getByTestId('row-status-locked').filter({ visible: true }).waitFor(); // 담당자만 상태 변경 — 남의 업무는 잠김 표시
-  assert.equal(await owner.locator(`[data-row="${t}"]`).getByTestId('row-status-chip').count(), 0, '담당자만 완료');
+  // 334차(대표 11/02 #916): 요청자·관리자급은 남의 업무도 [완료]만 할 수 있음 — 잠김 표시 대신 상태 칩(메뉴는 완료만, 되돌리기·보류는 담당자만)
+  const otherRow = owner.locator(`[data-row="${t}"]`); await otherRow.getByTestId('row-status-chip').filter({ visible: true }).waitFor();
+  assert.equal(await otherRow.getByTestId('row-status-locked').count(), 0, '334차: 요청자(대표)는 완료 처리 가능 → 잠김 아님');
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
   await owner.goto(BASE + '/notifications');
   const li = owner.getByTestId('notifications').locator('li', { hasText: '검토 요청: V12 검토 승인 업무' });
