@@ -33,7 +33,8 @@ describe('입찰 업무로 넘기기', () => {
     const [auto] = await sql`select id, title from tasks where sales_ref->>'kind' = 'bid' and sales_ref->>'id' = 'B1' and deleted_at is null`;
     assert.ok(auto?.title.startsWith('[입찰] '), `상태 버튼 자동 업무도 [입찰]: ${auto?.title}`);
     const r = await handoff(ctx.owner, 'B1', [ctx.staffA.id, ctx.ownerId], '현장설명회 꼭 참석');
-    assert.deepEqual([r.status, r.leadId, r.taskIds.length, r.due, r.dueTime, r.eventIds.length, r.merged], ['입찰 진행', null, 1, addDays(today, 8), '10:00', 2, 1]);
+    // 327차(로컬 11/02 10): 같은 공고의 열린 [입찰] 업무(상태 버튼 자동 업무)는 새로 만들지 않고 이어 붙임 — 업무 id 그대로·새 업무 없음
+    assert.deepEqual([r.status, r.leadId, r.taskIds.length, r.due, r.dueTime, r.eventIds.length, r.merged, r.reused, r.taskId], ['입찰 진행', null, 1, addDays(today, 8), '10:00', 2, 0, true, auto.id]);
     assert.deepEqual(r.dates.map((d) => d.label), ['현장설명회', '참가신청 마감', '입찰 마감', '개찰']);
     assert.equal((await sql`select count(*)::int c from sales_leads where src->>'id' = 'B1'`)[0].c, 0, '리드를 만들지 않음');
     const [t] = await sql`select id, title, assignee_id, due_date::text as due, to_char(due_time, 'HH24:MI') as tm, space, sales_ref, lead_id, requested_by, description from tasks where id = ${r.taskId}`;
@@ -43,8 +44,11 @@ describe('입찰 업무로 넘기기', () => {
     const items = (await sql`select text from task_checklist_items where task_id = ${t.id} order by sort`).map((x) => x.text);
     assert.equal(items.length, 5); assert.equal(items[0], '공고문·참가 자격 검토');
     assert.deepEqual(items.slice(1).map((x) => x.split(' · ')[0]), ['현장설명회 참석', '참가신청', '입찰서 제출', '개찰 결과 확인']);
-    const [old] = await sql`select deleted_at from tasks where id = ${auto.id}`; assert.ok(old.deleted_at, '상태 버튼으로 생긴 자동 업무는 이어받아 정리');
-    assert.equal((await sql`select count(*)::int c from activities where entity_id = ${auto.id} and action = 'merged_into'`)[0].c, 1);
+    const [old] = await sql`select deleted_at, tags from tasks where id = ${auto.id}`; assert.equal(old.deleted_at, null, '상태 버튼으로 생긴 자동 업무를 그대로 이어 씀(327차)');
+    assert.ok(old.tags.includes('영업') && old.tags.includes('입찰'), `태그 영업·입찰 ${old.tags}`);
+    assert.match(t.description, /입찰 업무로 넘김/); // 넘기기 설명은 예전 설명 아래에
+    assert.equal((await sql`select count(*)::int c from activities where entity_id = ${auto.id} and action = 'updated' and changes->>'reason' = 'bid_handoff_reuse'`)[0].c, 1);
+    assert.equal((await sql`select count(*)::int c from tasks where sales_ref->>'kind' = 'bid' and sales_ref->>'id' = 'B1' and deleted_at is null`)[0].c, 1, '같은 공고 업무는 한 건');
     const evs = await sql`select e.title, c.type, (select count(*)::int from event_attendees a where a.event_id = e.id) as att from events e join calendars c on c.id = e.calendar_id where e.id = any(${r.eventIds}::uuid[]) order by e.start_at`;
     assert.deepEqual(evs.map((e) => [e.title.split(' · ')[0], e.type, e.att]), [['[입찰] 현장설명회', 'company', 2], ['[입찰] 입찰 마감', 'company', 2]]);
     const w = await work('B1');

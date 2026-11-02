@@ -1,4 +1,4 @@
-// 대표 #799(10/29 19:10) → 280차 #824·#826(10/31 '공동 업무'로 이름 · 접지 않음 · 같이 받은 사람 아래 줄 없이 한 줄 이름표): 이직원(휴대폰) 내 업무 맨 위 '공동 업무' 칸 —
+// 대표 #799(10/29 19:10) → 280차 #824·#826(10/31 '공동 업무'로 이름 · 같이 받은 사람 아래 줄 없이 한 줄 이름표) → 327차(11/02 접는 머리줄): 이직원(휴대폰) 내 업무 맨 위 '공동 업무' 칸 —
 // 함께 담당 1건(박직원 내 몫 완료)·같이 받은 묶음 1건(박직원 진행 중) · 줄마다 함께하는 사람·진행 · 아래 개인 업무 묶음에는 안 나옴 · 접으면 새로 고침에도 접힘 · 홈 맨 위 협업 업무 카드
 import assert from 'node:assert/strict';
 
@@ -57,9 +57,15 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
   if (vp) await staff.setViewportSize(vp);
   await staff.goto(`${BASE}/tasks?view=my&group=due`);
   await box.getByTestId('collab-row').first().waitFor();
-  // 접지 않음 — 접기 단추 없이 전부
-  assert.equal(await staff.getByTestId('my-collab-toggle').count(), 0);
+  // 327차(로컬 11/02 6 — 대표 화면 캡처): 사람별 묶음과 같은 접는 머리줄(이름·건수·지연 수) — 기본은 펼쳐서 전부, 누르면 접힘, 다시 누르면 펼침
   assert.equal(await box.getByTestId('collab-row').count(), n, '전부 보임');
+  assert.equal(await staff.getByTestId('my-collab-toggle').count(), 0, '예전 더 보기 단추 없음');
+  await box.getByTestId('my-collab-fold').click();
+  assert.equal(await box.getByTestId('collab-row').count(), 0, '접힘');
+  assert.equal(await box.getByTestId('my-collab-fold').getAttribute('aria-expanded'), 'false');
+  await box.getByTestId('my-collab-fold').click();
+  await box.getByTestId('collab-row').first().waitFor();
+  assert.equal(await box.getByTestId('collab-row').count(), n, '다시 펼침');
   // 281차(로컬 11:28): 사람별 묶음(전체 탭 기본·관리자)·팀별에서도 내가 들어간 공동 업무가 맨 위에 — 전체 탭은 사람 묶음에도 그대로
   for (const q of ['view=all&group=assignee', 'view=my&group=assignee', 'view=all&group=team']) {
     await staff.goto(`${BASE}/tasks?${q}`);

@@ -17,7 +17,8 @@ export async function docsCoedit({ browser, owner, staff, ctx, sql, BASE, SHOTS,
   await owner.getByTestId('folder-save').click();
   await owner.waitForURL(/\/library\/doc\//);
   const id = owner.url().split('/').pop();
-  await owner.getByTestId('doc-editor').waitFor();
+  // CI 1938·1939·1954(기록만 바꾼 커밋): 편집기(doc-editor)가 30초 안에 안 보이는 흔들림 — 늦으면 한 번 새로 고쳐서 기다림
+  try { await owner.getByTestId('doc-editor').waitFor({ timeout: 30000 }); } catch { await owner.reload(); await owner.getByTestId('doc-editor').waitFor({ timeout: 45000 }); }
   await owner.getByTestId('doc-status').waitFor();
   const ed = owner.getByTestId('doc-editor');
   await ed.click();

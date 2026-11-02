@@ -158,10 +158,29 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
     future.length ? `일정: ${future.map((m) => `${m.label} ${fmtWhen(m.w)}`).join(' · ')}` : null,
     i.note ? `메모: ${i.note}` : null, `공고: ${link}`].filter(Boolean).join('\n');
   const { createTask } = await import('../tasks');
-  const task = await createTask(u, { title: `[입찰] ${name}`.slice(0, 200), description: desc, space: 'sales', assigneeId: ids[0], coAssigneeIds: ids.slice(1), requestedById: u.id, dueDate: due, dueTime,
-    approvalRequired: false, tags: ['입찰'], checklist: bidChecklist(ms, today) } as never, { quiet: true, skipQuota: true });
-  await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: i.id, name, bid: true, handoff: true })} where id = ${task.id}`;
-  // 넘기기 전에 상태 버튼(검토중·연락중)으로 생긴 자동 업무는 이 업무가 이어받음(같은 공고 업무 두 건 방지)
+  // 327차(로컬 11/02 10 — 대표 '입찰인데 왜 영업으로 표기되나'): 같은 공고의 열린 [입찰] 업무(상태 버튼으로 생긴 자동 업무 등)가 있으면 새로 만들지 않고 그 업무에 이어 붙임 —
+  // 제목을 [입찰]로 통일 · 넘기기 설명·메모·일정은 설명 아래에 · 넘긴 담당이 주 담당, 그 밖(예전 담당 포함)은 함께 담당 · 체크리스트는 없는 항목만 · 태그 영업·입찰 — 댓글·첨부는 그대로 남는다
+  const [reuse] = await sql<{ id: string; description: string | null; assignee_id: string | null }[]>`select id, description, assignee_id from tasks where deleted_at is null and status <> 'done'
+    and sales_ref->>'kind' = 'bid' and sales_ref->>'id' = ${i.id} and created_by in (select id from users where tenant = ${t}) order by created_at limit 1`;
+  let task: { id: string };
+  if (reuse) {
+    task = { id: reuse.id };
+    const co = [...new Set([...ids.slice(1), ...(reuse.assignee_id && !ids.includes(reuse.assignee_id) ? [reuse.assignee_id] : [])])];
+    await sql`update tasks set title = ${`[입찰] ${name}`.slice(0, 200)}, description = ${[reuse.description?.trim() || null, `— ${u.name}님이 입찰 업무로 넘김 —`, desc].filter(Boolean).join('\n\n').slice(0, 20000)},
+        assignee_id = ${ids[0]}, space = 'sales', due_date = ${due}::date, due_time = ${dueTime}::time, tags = (select coalesce(array_agg(distinct x), '{}') from unnest(coalesce(tags, '{}') || array['영업', '입찰']) x),
+        sales_ref = coalesce(sales_ref, '{}'::jsonb) || ${sql.json({ kind: 'bid', id: i.id, name, bid: true, handoff: true })}, updated_at = now(), version = version + 1 where id = ${reuse.id}`;
+    await sql`delete from task_assignees where task_id = ${reuse.id} and user_id = ${ids[0]}`;
+    for (const uid of co) await sql`insert into task_assignees (task_id, user_id, added_by) values (${reuse.id}, ${uid}, ${u.id}) on conflict (task_id, user_id) do nothing`;
+    const have = new Set((await sql<{ text: string }[]>`select text from task_checklist_items where task_id = ${reuse.id}`).map((x) => x.text.replace(/\s+/g, ' ').trim()));
+    let sort = have.size;
+    for (const c of bidChecklist(ms, today)) if (!have.has(c.replace(/\s+/g, ' ').trim())) await sql`insert into task_checklist_items (task_id, text, sort) values (${reuse.id}, ${c}, ${sort++})`;
+    await activity(sql, 'task', reuse.id, u.id, 'updated', { reason: 'bid_handoff_reuse', assignees: ids, note: i.note ?? null });
+  } else {
+    task = await createTask(u, { title: `[입찰] ${name}`.slice(0, 200), description: desc, space: 'sales', assigneeId: ids[0], coAssigneeIds: ids.slice(1), requestedById: u.id, dueDate: due, dueTime,
+      approvalRequired: false, tags: ['영업', '입찰'], checklist: bidChecklist(ms, today) } as never, { quiet: true, skipQuota: true });
+    await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', id: i.id, name, bid: true, handoff: true })} where id = ${task.id}`;
+  }
+  // 같은 공고의 다른 열린 업무(둘 이상이던 경우)는 이 업무가 이어받음(같은 공고 업무 두 건 방지)
   const prev = await sql<{ id: string }[]>`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id <> ${task.id} and deleted_at is null and status <> 'done'
     and sales_ref->>'kind' = 'bid' and sales_ref->>'id' = ${i.id} and created_by in (select id from users where tenant = ${t}) returning id`;
   for (const p of prev) await activity(sql, 'task', p.id, u.id, 'merged_into', { into: task.id, reason: 'bid_handoff' });
@@ -188,7 +207,7 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
   auto.attachSourceFilesLater(u, { kind: 'bid', id: i.id, taskIds: [task.id] });
   await notify(sql, { userIds: ids.filter((x) => x !== u.id), type: 'task_assigned', space: 'sales', title: `입찰 업무: ${name.slice(0, 60)}`,
     body: `${u.name}님이 입찰 공고를 업무로 넘겼습니다. 기한 ${fmtDue({ day: due, time: dueTime })}${ids.length > 1 ? ` · 공동 담당 ${ids.length}명` : ''}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, push: true, dedupeKey: `sales:bid:${i.id}:${task.id}` } as never).catch(() => {});
-  return { status: BID_STATUS, leadId: null, taskId: task.id, taskIds: [task.id], eventIds: Object.values(events), eventErrors, due, dueTime, dueText: fmtDue({ day: due, time: dueTime }), dates: future.map((m) => ({ label: m.label, day: m.w.day })), files, merged: prev.length };
+  return { status: BID_STATUS, leadId: null, taskId: task.id, taskIds: [task.id], eventIds: Object.values(events), eventErrors, due, dueTime, dueText: fmtDue({ day: due, time: dueTime }), dates: future.map((m) => ({ label: m.label, day: m.w.day })), files, merged: prev.length, reused: !!reuse };
 }
 
 export const bidRevertInput = z.object({ kind: z.literal('bid'), id: z.string().min(1).max(100), reason: z.string().trim().max(300).optional() });

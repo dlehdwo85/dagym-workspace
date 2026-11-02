@@ -9,7 +9,7 @@ import { LibraryPickModal } from './Attachments';
 import { VoiceButton } from './voice';
 import { parseTaskText } from '@/lib/nlparse';
 import { PRIORITY_LABEL } from '@/lib/types';
-import { Loader2, Mic, Paperclip, Sparkles } from 'lucide-react';
+import { Loader2, Mic, Paperclip, Sparkles, Users } from 'lucide-react';
 import { AI_ACCEPT, uploadToLibrary } from './libraryUpload';
 import { DropZone } from './upload';
 import { TimePick } from './DateTimePickers';
@@ -291,12 +291,21 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
           <RepeatChip value={f.rrule ?? null} anchorDate={f.dueDate || null} onChange={set('rrule')} />
           <BellChip value={f.remind ?? null} onChange={set('remind')} />
         </div>
-        {/* V6 13번: 다른 사람도 같은 업무를 각자 1건씩 (담당자별 묶음) */}
+        {/* V6 13번: 다른 사람도 같은 업무를 각자 1건씩 (담당자별 묶음) → #475 여러 명 = 기본 함께 담당(공동 업무)
+            327차(로컬 11/02 7 — 대표 '공동 업무를 만드는 길이 안 보인다'): 작은 글자 링크 대신 담당 칸 바로 아래 눈에 띄는 단추 + 2명 이상 고르면 '공동 업무 · n명이 함께 담당' 표시 */}
         {!defaults?.parentId && !tpl && (
-          <div data-testid="multi-assignee">
-            <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={() => set('multi')(!f.multi)} aria-expanded={!!f.multi}>{f.multi ? '− 여러 명 선택 닫기' : '+ 담당자 여러 명'}</button>
+          <div data-testid="multi-assignee" className={cx('rounded-input border border-dashed p-2', count > 1 ? 'border-violet-400 bg-violet-50/60' : 'border-violet-200 bg-violet-50/30')}>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => set('multi')(!f.multi)} aria-expanded={!!f.multi} data-testid="quick-collab-btn"
+                className={cx('inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold', f.multi ? 'border-violet-600 bg-violet-600 text-white' : 'border-violet-300 bg-white text-violet-800 hover:bg-violet-50')}>
+                <Users className="size-3.5" aria-hidden />{f.multi ? '− 담당자 여러 명 닫기' : '공동 업무로 — 담당자 여러 명'}
+              </button>
+              {count > 1
+                ? <span className="text-xs font-semibold text-violet-800" data-testid="quick-collab-badge">{f.multiMode === 'each' ? `${count}명에게 각자 1건씩` : `공동 업무 · ${count}명이 함께 담당`}</span>
+                : <span className="text-xs text-ink-3">담당자를 2명 이상 고르면 한 업무를 함께 맡는 공동 업무가 됩니다</span>}
+            </div>
             {f.multi && (
-              <div className="mt-1.5 flex flex-wrap gap-1.5 rounded-input bg-slate-50 p-2">
+              <div className="mt-1.5 flex flex-wrap gap-1.5 rounded-input bg-white p-2">
                 <div className="flex w-full flex-wrap gap-3 pb-1 text-xs" role="radiogroup" aria-label="여러 명 방식">
                   <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode !== 'each'} onChange={() => set('multiMode')('together')} data-testid="multi-together" />함께 담당(업무 1개 · 각자 완료, 모두 끝나면 완료)</label>
                   <label className="flex items-center gap-1"><input type="radio" name="multiMode" checked={f.multiMode === 'each'} onChange={() => set('multiMode')('each')} data-testid="multi-each" />각자 1건씩(사람마다 따로)</label>

@@ -1241,8 +1241,11 @@ export async function mergeTask(u: SessionUser, id: string, intoId: string) {
   return sql.begin(async (tx) => {
     const a = await loadTaskForUser(u, id, tx);
     const b = await loadTaskForUser(u, intoId, tx);
-    if (!a.perms.delete || !b.perms.edit) throw forbidden('통합하려면 원본 삭제 권한과 대상 수정 권한이 필요합니다');
-    const [src] = await tx`select title from tasks where id = ${id}`;
+    // 327차(로컬 11/02 8 — 대표 지시로 같은 이름 업무를 합치는데 요청자가 다른 사람인 건은 대표 계정이 403): 중복 통합은 관리자도 할 수 있다.
+    // '담당자 변경·삭제 = 요청자만'(V14 50)의 예외는 통합에만 — 원본 내용(댓글·첨부·하위·공동 담당)은 대상 업무에 남고 활동 기록이 남는다
+    const admin = atLeast(u, 'admin');
+    if (!(a.perms.delete || admin) || !(b.perms.edit || admin)) throw forbidden('통합하려면 원본 삭제 권한과 대상 수정 권한이 필요합니다(요청자 또는 관리자)');
+    const [src] = await tx<{ title: string; assignee_id: string | null; status: string; completed_at: Date | null; assignee_ack_at: Date | null }[]>`select title, assignee_id, status, completed_at, assignee_ack_at from tasks where id = ${id}`;
     const [dst] = await tx`select title from tasks where id = ${intoId}`;
     await tx`update comments set task_id = ${intoId} where task_id = ${id}`;
     await tx`update attachments set task_id = ${intoId} where task_id = ${id}`;
@@ -1250,7 +1253,10 @@ export async function mergeTask(u: SessionUser, id: string, intoId: string) {
     await tx`insert into task_collaborators (task_id, user_id) select ${intoId}, user_id from task_collaborators where task_id = ${id} on conflict do nothing`;
     await tx`insert into task_assignees (task_id, user_id, added_by) select ${intoId}, user_id, ${u.id} from task_assignees where task_id = ${id}
       and user_id is distinct from (select assignee_id from tasks where id = ${intoId}) on conflict do nothing`; // #475 공동 담당도 대상 업무로
-    await tx`insert into comments (task_id, author_id, body) values (${intoId}, ${u.id}, ${`[중복 통합] '${src.title}' 업무를 이 업무로 통합했습니다`})`;
+    // 327차(로컬 11/02 8·9 — 대표 '같은 이름 업무를 공동 업무로 합치기'): 원본의 담당자도 대상 업무의 함께 담당으로(원본을 끝냈으면 내 몫 완료) — 담당이 서로 다른 중복 업무를 합치면 공동 업무가 된다
+    if (src.assignee_id) await tx`insert into task_assignees (task_id, user_id, added_by, acked_at, done_at) select ${intoId}, ${src.assignee_id}, ${u.id}, ${src.assignee_ack_at}, ${src.status === 'done' ? src.completed_at ?? new Date() : null}
+      where ${src.assignee_id} is distinct from (select assignee_id from tasks where id = ${intoId}) on conflict (task_id, user_id) do nothing`;
+    await tx`insert into comments (task_id, author_id, body) values (${intoId}, ${u.id}, ${`[중복 통합] '${src.title}' 업무를 이 업무로 통합했습니다${admin && !a.perms.delete ? ' (관리자 통합)' : ''}`})`;
     await tx`update tasks set deleted_at = now(), version = version + 1, updated_at = now() where id = ${id}`;
     await hideTaskBlocks(tx, [id]);
     await activity(tx, 'task', id, u.id, 'merged_into', { into: intoId, title: dst.title });

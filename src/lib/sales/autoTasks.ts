@@ -20,6 +20,12 @@ const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seou
 
 export type SyncInput = { kind: SalesKind; id: string; name: string; status: string | null; nextDate?: string | null; nextAction?: string | null; deadline?: string | null; deadlineTime?: string | null; assigneeId?: string | null; leadId?: string | null;
   /** 196차: 배정 알림 없이(정기 실행이 예전 리드에 업무를 채울 때) */ quiet?: boolean };
+/** 327차(대표 11/02 '입찰인데 왜 영업으로 표기되나'): 공고에서 넘어와 리드가 된 건(sales_leads.src.from = 'bid')이면 그 리드의 업무도 [입찰] 로 */
+export async function leadFromBid(sql: Sql, leadId: string | null | undefined): Promise<boolean> {
+  if (!leadId || !/^[0-9a-f-]{36}$/i.test(leadId)) return false;
+  const rows = await sql<{ f: string | null }[]>`select src->>'from' as f from sales_leads where id = ${leadId}`.catch(() => [] as { f: string | null }[]);
+  return rows[0]?.f === 'bid';
+}
 /** 열린(완료 아님) 자동 업무 찾기 */
 async function openTask(sql: Sql, tenant: string, kind: SalesKind, id: string) {
   const [t] = await sql<{ id: string; status: string; due_date: string | null }[]>`select t.id, t.status, t.due_date::text from tasks t join users cu on cu.id = t.created_by
@@ -60,9 +66,11 @@ export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Pro
   // #100 담당자 지정: 담당이 안 정해진 자동 업무는 영업 원천 규칙(주·부 담당, 부재 대체)
   const rule = i.assigneeId ? null : await (await import('../assignees')).resolveAssignee(sql, tenantOf(u), 'sales_source', i.kind).catch(() => null);
   // 결정 15-35: 입찰은 업무로(현장 영업과 구분) — 입찰 공고에서 생긴 업무는 [입찰]
-  const title = `${i.kind === 'bid' ? '[입찰]' : '[영업]'} ${i.name.slice(0, 120)} — ${(i.nextAction ?? (i.kind === 'lead' ? '첫 연락' : st === '검토중' ? '검토' : i.kind === 'vendor' ? '등록 신청' : i.kind === 'bid' ? '입찰 준비' : '다음 조치')).slice(0, 40)}`;
-  const desc = `${KIND_LABEL[i.kind]} 건에서 자동으로 만든 ${i.kind === 'bid' ? '입찰' : '영업'} 업무입니다 — 원천: ${LINK[i.kind](i.id)}${i.deadline ? `\n입찰 마감: ${i.deadline}` : ''}\n(상태를 보류·미참여·대상아님·완료로 바꾸면 이 업무도 함께 보류·완료됩니다)`;
-  const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, dueDate: due, dueTime, approvalRequired: false, tags: ['영업', KIND_LABEL[i.kind]] }, { quiet: !!i.quiet, skipQuota: true });
+  // 327차(대표 11/02 '광명 푸르지오·한화포레나는 입찰인데 왜 영업으로 표기되나'): 공고에서 온 업무는 어느 경로든 [입찰] — 공고에서 넘어와 리드가 된 건의 다음 연락 업무도. 태그는 영업·입찰 함께
+  const fromBid = i.kind === 'bid' || (i.kind === 'lead' && (await leadFromBid(sql, i.leadId ?? i.id)));
+  const title = `${fromBid ? '[입찰]' : '[영업]'} ${i.name.slice(0, 120)} — ${(i.nextAction ?? (i.kind === 'lead' ? '첫 연락' : st === '검토중' ? '검토' : i.kind === 'vendor' ? '등록 신청' : i.kind === 'bid' ? '입찰 준비' : '다음 조치')).slice(0, 40)}`;
+  const desc = `${KIND_LABEL[i.kind]} 건에서 자동으로 만든 ${fromBid ? '입찰' : '영업'} 업무입니다 — 원천: ${LINK[i.kind](i.id)}${i.deadline ? `\n입찰 마감: ${i.deadline}` : ''}\n(상태를 보류·미참여·대상아님·완료로 바꾸면 이 업무도 함께 보류·완료됩니다)`;
+  const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, dueDate: due, dueTime, approvalRequired: false, tags: [...new Set(['영업', ...(fromBid ? ['입찰'] : []), KIND_LABEL[i.kind]])] }, { quiet: !!i.quiet, skipQuota: true });
   await sql`update tasks set sales_ref = ${sql.json({ kind: i.kind, id: i.id, name: i.name })}, lead_id = ${i.leadId ?? (i.kind === 'lead' ? i.id : null)}, assigned_by_rule = ${rule?.ruleId ?? null} where id = ${r.id}`;
   if (i.kind === 'bid') (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'bid', id: i.id, taskIds: [r.id] }); // #507 공고 첨부 자동
   return { taskId: r.id, action: 'created' };

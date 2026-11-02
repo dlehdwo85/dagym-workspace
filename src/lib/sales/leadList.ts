@@ -107,7 +107,7 @@ export async function leadBrief(u: SessionUser, id: string) {
  */
 export async function leadRevisitTick(now = new Date()) {
   const sql = db(); const today = ymd(now);
-  const rows = await sql<{ id: string; tenant: string; name: string; status: string; owner_id: string | null; revisit: string; reason: string | null }[]>`select l.id, l.tenant, l.name, l.status, l.owner_id, l.revisit_date::text as revisit,
+  const rows = await sql<{ id: string; tenant: string; name: string; status: string; owner_id: string | null; revisit: string; reason: string | null; src_from: string | null }[]>`select l.id, l.tenant, l.name, l.status, l.owner_id, l.revisit_date::text as revisit, l.src->>'from' as src_from,
       (select g.reason from sales_status_log g where g.lead_id = l.id and g.to_status = l.status order by g.changed_at desc limit 1) as reason
     from sales_leads l join sales_cutover c on c.tenant = l.tenant and c.writes_open
     where l.deleted_at is null and l.revisit_date <= ${today}::date and coalesce(l.status, '') in ('보류', '실패') order by l.revisit_date limit 50`;
@@ -117,7 +117,8 @@ export async function leadRevisitTick(now = new Date()) {
   for (const l of rows) {
     const actor = (await actorOf(sql, l.owner_id)) ?? (await adminOf(sql, l.tenant));
     if (actor) {
-      const t = await createTask(actor, { title: `[영업] ${l.name.slice(0, 120)} — 다시 연락(재접촉 검토)`, space: 'sales', assigneeId: actor.id, requestedById: actor.id, dueDate: today, approvalRequired: false, tags: ['영업', '리드'],
+      const bid = l.src_from === 'bid'; // 327차: 공고에서 넘어온 리드면 [입찰]
+      const t = await createTask(actor, { title: `${bid ? '[입찰]' : '[영업]'} ${l.name.slice(0, 120)} — 다시 연락(재접촉 검토)`, space: 'sales', assigneeId: actor.id, requestedById: actor.id, dueDate: today, approvalRequired: false, tags: bid ? ['영업', '입찰', '리드'] : ['영업', '리드'],
         description: `'${l.status}'(으)로 닫으며 고른 다시 볼 날(${l.revisit})입니다${l.reason ? ` — 사유: ${l.reason}` : ''}\n리드: /s/sales/leads?id=${l.id}\n다시 진행하려면 리드의 단계를 진행 단계로 바꾸세요` }, { quiet: true, skipQuota: true });
       await sql`update tasks set sales_ref = ${sql.json({ kind: 'lead', id: l.id, name: l.name, manual: true, revisit: true })}, lead_id = ${l.id} where id = ${t.id}`;
       await notify(sql, { userIds: [actor.id], type: 'task_assigned', title: `다시 볼 날: ${l.name}`, body: `'${l.status}'(으)로 닫은 거래처를 다시 볼 날입니다 — 오늘 업무로 넣었습니다`,

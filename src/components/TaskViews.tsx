@@ -11,7 +11,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import dynamic from 'next/dynamic';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSalesTerms, useSession } from './session';
-import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock, Flag } from 'lucide-react';
+import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock, Flag, Users } from 'lucide-react';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, STATUSES, STATUS_LABEL, type TaskStatus } from '@/lib/types';
 import { UnitSelect } from './pickers';
@@ -22,6 +22,7 @@ import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, Ord
 import { coOf, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
 import { CollabFaces, collabSort, isCollab } from './CollabTasks';
 import { QuickAddTask } from './QuickAddTask';
+import { DupeMergeButton, useDupeSets } from './TaskDupes';
 import { CarriedBadge } from './carried';
 import { followUpMsg, useLeadFollowUp } from './sales/LeadFollowUp';
 import { useResearchAsk } from './sales/ResearchAsk';
@@ -287,6 +288,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const teamChips = (teamList.data?.teams ?? []).filter((t) => t.visible !== false); // 대표 10/20 4): 팀별 보기 칩 — 볼 수 있는 팀만
   // V14 12번 다중 선택
   const [selOn, setSelOn] = useState(false);
+  const dupes = useDupeSets(mode === 'list' && !fixed?.view); // 327차(로컬 11/02 9): 사람마다 따로 만든 같은 업무 묶음 → [공동 업무로 합치기]
   const [selTip, setSelTip] = useState(false);
   useEffect(() => { try { setSelTip(localStorage.getItem('wos_sel_tip') !== '1'); } catch {} }, []);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -420,6 +422,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           )}
         </div>
         {(mode === 'list' || mode === 'board') && <Button variant={selOn ? 'primary' : 'secondary'} onClick={() => (selOn ? exitSel() : setSelOn(true))} aria-pressed={selOn} data-testid="select-mode">{selOn ? '선택 끝내기' : '선택'}</Button>}
+        {mode === 'list' && !fixed?.view && <DupeMergeButton sets={dupes.sets} onDone={() => dupes.reload()} />}
         <Button variant="secondary" onClick={() => setFilterOpen(!filterOpen)} aria-expanded={filterOpen} data-testid="filter-toggle">
           <SlidersHorizontal />필터{chips.length > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] leading-4 text-white">{chips.length}</span>}
           <ChevronDown className={cx('!size-3.5 transition-transform', filterOpen && 'rotate-180')} />
@@ -811,7 +814,7 @@ function sortTasks(ts: Task[], k: SortKey) {
 }
 
 /** PC 열 머리: 누르면 그 기준으로 정렬 */
-function ListHeader({ sortBy, onSort, compact, stuck }: { sortBy: SortKey; onSort: (k: SortKey) => void; compact?: boolean; stuck?: boolean }) {
+function ListHeader({ sortBy, onSort, compact, stuck, headRef }: { sortBy: SortKey; onSort: (k: SortKey) => void; compact?: boolean; stuck?: boolean; headRef?: React.Ref<HTMLDivElement> }) {
   // V14 48: 맨 위 줄은 스크롤해도 붙어 있음(정렬 버튼). 로컬 검수 10/19: 모든 묶음이 같은 자리(묶음 이름 아래)에 열 제목 — 맨 위 줄은 스크롤해 묶음 제목이 가려질 때만 보임.
   // 열 폭은 줄(TaskRow)과 같은 값: 요청자 104·우선순위 60·상태 112/xl 136(오른쪽 정렬, #427)·마감일 132/xl 176(기한 지남 표기, lg~xl 은 'n일 지남' 글자 숨김 #427)·담당 48
   const H = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => (
@@ -819,7 +822,7 @@ function ListHeader({ sortBy, onSort, compact, stuck }: { sortBy: SortKey; onSor
       className={cx('truncate text-left hover:text-ink', sortBy === k ? 'font-semibold text-accent-600' : '', className)}>{children}{sortBy === k ? ' ↓' : ''}</button>
   );
   return (
-    <div className={cx('hidden items-center gap-3 px-3 lg:flex', compact ? 'pb-0.5 text-[11px] text-ink-3' : cx('sticky top-14 z-20 -mx-1 -mb-[29px] h-[29px] border-b border-line bg-canvas px-4 py-1.5 text-xs text-ink-3 transition-opacity', stuck ? 'opacity-100' : 'pointer-events-none opacity-0'))}
+    <div ref={headRef} className={cx('hidden items-center gap-3 px-3 lg:flex', compact ? 'pb-0.5 text-[11px] text-ink-3' : cx('sticky top-14 z-20 -mx-1 -mb-[29px] h-[29px] border-b border-line bg-canvas px-4 py-1.5 text-xs text-ink-3 transition-opacity', stuck ? 'opacity-100' : 'pointer-events-none opacity-0'))}
       data-testid={compact ? 'group-col-header' : 'list-header'} aria-hidden={(!compact && !stuck) || undefined}>
       <span className="w-4" /><span className="w-[22px]" />
       <H k="title" className="flex-1">업무 이름</H>
@@ -858,7 +861,10 @@ function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAc
   const selOnCtx = !!useContext(SelectCtx)?.on;
   // 맨 위 열 제목(붙는 줄)은 스크롤해서 첫 묶음 열 제목이 화면 위로 지나간 뒤에만 보임
   const [stuck, setStuck] = useState(false);
-  useEffect(() => { const on = () => setStuck(window.scrollY > 220); on(); window.addEventListener('scroll', on, { passive: true }); return () => window.removeEventListener('scroll', on); }, []); // V14 40번: 선택 모드·순서를 바꿀 수 없는 정렬에서는 끌기 꺼짐 — 꾹 누르면 행이 들려 옆 행이 눌리던 문제
+  const headRef = useRef<HTMLDivElement>(null);
+  // 327차(로컬 11/02 6 — 대표 화면 캡처: 공동 업무 칸과 사람별 묶음 사이에 열 이름 줄이 애매하게 떠 있음): 예전엔 220px 넘게 스크롤하면 보이게 했는데 맨 위 공동 업무 칸이 길면
+  //   아직 제자리(묶음 사이)에 있는 줄이 그대로 나타났다 → 실제로 머리 아래(56px)에 붙었을 때만 보임
+  useEffect(() => { const on = () => setStuck(!!headRef.current && headRef.current.getBoundingClientRect().top <= 57); on(); window.addEventListener('scroll', on, { passive: true }); return () => window.removeEventListener('scroll', on); }, []); // V14 40번: 선택 모드·순서를 바꿀 수 없는 정렬에서는 끌기 꺼짐 — 꾹 누르면 행이 들려 옆 행이 눌리던 문제
   if (group === 'due' && view === 'my') return <MyGroupedList tasks={given} onPatch={onPatch} onAcked={onAcked} top={top} />;
   // 281차(로컬 11:28 운영 확인 — 대표 계정은 사람별 묶음이라 '공동 업무' 칸이 안 보임): 묶음 방식·탭에 상관없이 내가 들어간 공동 업무를 맨 위에.
   // '내 업무' 탭은 아래 묶음에서 빼고(내 업무 마감별과 같게), 전체·다른 탭은 사람·팀 묶음에도 그대로 둠(팀 전체 보기)
@@ -979,7 +985,7 @@ function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAc
           const prev = d.toISOString().slice(0, 7);
           const n = (k: string) => groups.find((g) => g.key === k)?.items.length ?? 0;
           return <p className="px-1 text-sm text-ink-2" data-testid="done-summary">이번 달 <b className="text-ink">{n(ym)}건</b> · 지난달 <b className="text-ink">{n(prev)}건</b> 완료</p>;
-        })() : <ListHeader sortBy={sortBy} onSort={onSort} stuck={stuck} />}
+        })() : <ListHeader sortBy={sortBy} onSort={onSort} stuck={stuck} headRef={headRef} />}
         {groups.map((x, gi) => {
           const open = x.items.filter((t) => t.status !== 'done').length;
           // #508: 완료 업무는 목록에서 빼고 묶음 맨 아래 접힌 '완료됨 n건(오늘·이번 주)'
@@ -1169,22 +1175,32 @@ function MyGroupedList({ tasks: all, onPatch, onAcked, top }: { tasks: Task[]; o
   );
 }
 
-/** 대표 #799 → 280차 #824·#826(대표 10/31): '공동 업무' 칸 — 접지 않음(전부) · 함께하는 사람 이름표는 같은 줄 */
+/** 대표 #799 → 280차 #824·#826(대표 10/31): '공동 업무' 칸 — 함께하는 사람 이름표는 같은 줄 · 더 보기 없이 전부
+ *  327차(로컬 11/02 6 — 대표 화면 캡처 '공동 업무도 사람별 묶음처럼 위에 접는 머리줄'): 사람별 묶음과 같은 모양의 접는 머리줄(▾ 이름 · 진행 수 · 지연 수), 기본 펼침 */
 function CollabSection({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any) => void }) {
+  const [folded, setFolded] = useState(false);
+  const today = todayStr();
+  const late = tasks.filter((t) => t.status !== 'done' && t.due_date && t.due_date < today).length;
   return (
     <section data-group="collab" data-testid="my-collab">
-      <h2 className="mb-1.5 flex items-center gap-2 px-1 text-sm font-semibold text-violet-800">공동 업무
-        <span className="rounded-full bg-violet-100 px-1.5 text-xs font-medium text-violet-800 tabular-nums" data-testid="my-collab-count">{tasks.length}</span>
-        <span className="text-xs font-normal text-ink-3">여러 명이 함께 맡은 업무</span>
+      <h2 className="mb-1.5">
+        <button type="button" onClick={() => setFolded((f) => !f)} aria-expanded={!folded} data-testid="my-collab-fold"
+          className="flex w-full items-center gap-2 px-1 text-left text-sm font-semibold text-violet-800">
+          <ChevronDown className={cx('size-4 text-ink-3 transition-transform', folded && '-rotate-90')} />
+          <Users className="size-4" aria-hidden />공동 업무
+          <span className="rounded-full bg-violet-100 px-1.5 text-xs font-medium text-violet-800 tabular-nums" title="진행 중" data-testid="my-collab-count">{tasks.length}</span>
+          {late > 0 && <span className="rounded-full bg-red-50 px-1.5 text-xs font-medium text-red-600 tabular-nums">지연 {late}</span>}
+          <span className="text-xs font-normal text-ink-3">여러 명이 함께 맡은 업무</span>
+        </button>
       </h2>
-      <div className="overflow-hidden rounded-card border border-violet-200 bg-white shadow-card" data-testid="task-list">
+      {!folded && <div className="overflow-hidden rounded-card border border-violet-200 bg-white shadow-card" data-testid="task-list">
         {/* 308차 #866: 열 이름 한 줄(PC) — 줄의 [상태 132][마감 136][함께 132] 열과 같은 폭·간격 */}
         <div className="hidden items-center gap-3 border-b border-line bg-slate-50/60 px-3 py-1 text-[11px] font-medium text-ink-3 lg:flex" data-testid="collab-head" aria-hidden>
           <span className="min-w-0 flex-1">업무</span><span className="w-[132px] shrink-0">상태</span><span className="w-[136px] shrink-0">마감</span><span className="w-[132px] shrink-0">함께</span>
         </div>
         {tasks.map((t) => <div key={t.id} className="border-b border-line last:border-b-0 [&>div]:border-b-0" data-testid="collab-row">
           <ListRow t={t} onPatch={onPatch} handle={NO_HANDLE} collab /></div>)}
-      </div>
+      </div>}
     </section>
   );
 }
