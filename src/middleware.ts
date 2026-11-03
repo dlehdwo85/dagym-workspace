@@ -13,8 +13,8 @@ function isApp(ua: string) {
 /** #839 아이폰 앱(App Store 4.8·3.1.1 거절 10/28): 로그인만 — 가입·회사 만들기·소개(요금·무료 체험) 주소는 로그인으로. 표시 'WorkInApp' + 안드로이드 아님(아이패드는 맥 표시) */
 const isIosApp = (ua: string) => /WorkinApp/i.test(ua) && !/Android/i.test(ua);
 const IOS_APP_LOGIN_ONLY = /^\/(signup|welcome|landing)(\/|$)/;
-/** 298차 #861(대표 10/31 '아이폰도 갤럭시도 결제는 웹에서만'): 안드로이드 앱도 요금 안내가 있는 소개 화면은 로그인으로(앱 안 가입·무료 체험은 그대로) */
-const APP_NO_PRICING = /^\/(welcome|landing)(\/|$)/;
+/** 298차 #861(대표 10/31 '아이폰도 갤럭시도 결제는 웹에서만'): 안드로이드 앱도 요금 안내가 있는 소개 화면은 로그인으로 · 351차 #942(대표 11/04): 앱 안 가입(/signup)도 두 앱 모두 로그인으로 — 가입은 웹에서 */
+const APP_NO_PRICING = /^\/(welcome|landing|signup)(\/|$)/;
 
 /**
  * V15: 로그인 안 한 사람이 첫 주소(/)로 오면 소개(랜딩) 화면. 로그인한 사람은 홈, 앱은 지금처럼 로그인 화면

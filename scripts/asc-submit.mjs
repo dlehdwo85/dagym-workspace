@@ -1,6 +1,6 @@
 // 351차 #947(대표 11/04 '아이폰 앱 정상 출시를 서둘러 달라'): App Store Connect API 로 1.2.0 재제출 준비·제출 — GitHub Actions(appstore-submit.yml)에서만 실행(키는 Secrets).
 // 하는 일(MODE=apply): ⓐ 반려된 iOS 버전의 버전 문자열 → VERSION ⓑ 빌드 BUILD(1.2.0) 지정 ⓒ 설명·키워드(WORKIN_STORE_LISTING.md) ⓓ 심사 메모(review-notes.md + 기존 메모의 권한·계정 삭제·개인정보 줄 유지, 요금·무료 줄 제거)
-// ⓔ 6.9형 스크린샷 교체(ios-v4/iphone-01..06.png) ⓕ SUBMIT=1 이면 심사 제출. MODE=plan 은 읽기만(무엇을 바꿀지 보고). 비밀번호·키는 절대 출력하지 않는다.
+// ⓔ 스크린샷 교체 — 버전에 붙은 모든 묶음(6.9형 APP_IPHONE_67 ← iphone-0n · 6.1형 APP_IPHONE_61 ← iphone61-0n · 아이패드 13형 APP_IPAD_PRO_3GEN_129 ← ipad-0n, 그 밖 묶음은 옛 그림만 지움)의 옛 그림(v3, 가격 표시)을 지우고 새것으로. 없는 필수 묶음(6.9형·아이패드 13형)은 만든다. ⓕ SUBMIT=1 이면 심사 제출. MODE=plan 은 읽기만(묶음별 '지울 n장·올릴 n장' 보고). 비밀번호·키는 절대 출력하지 않는다.
 // 외부 패키지 없음(Node 22 fetch + node:crypto ES256). 참고: 6.9형 슬롯의 API 이름은 APP_IPHONE_67(애플이 6.7형 슬롯을 6.9형으로 넓힘) — 다르면 DISPLAY_TYPE 으로 바꿈.
 import { createHash, createPrivateKey, sign } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
@@ -11,7 +11,8 @@ const KEY_ID = env('ASC_KEY_ID', ''), ISSUER = env('ASC_ISSUER_ID', ''), P8 = en
 const BUNDLE = env('BUNDLE_ID', 'kr.co.dagym.workos');
 const VERSION = env('VERSION', '1.2.0'), BUILD = env('BUILD', '13');
 const MODE = env('MODE', 'plan'); const SUBMIT = env('SUBMIT', '0') === '1';
-const DISPLAY = env('DISPLAY_TYPE', 'APP_IPHONE_67');
+const DISPLAY = env('DISPLAY_TYPE', 'APP_IPHONE_67'); // 6.9형 슬롯 이름(애플이 6.7형 슬롯을 6.9형으로 넓힘) — 다르면 입력으로
+const IPAD_DISPLAY = env('IPAD_DISPLAY_TYPE', 'APP_IPAD_PRO_3GEN_129'); // 아이패드 13형(2048×2732) 슬롯
 const LOCALE = env('LOCALE', 'ko');
 const SHOTS_DIR = env('SHOTS_DIR', 'docs/handoff/store/ios-v4');
 const LISTING = env('LISTING', 'docs/handoff/WORKIN_STORE_LISTING.md');
@@ -64,7 +65,10 @@ const BAD_META = /\d[\d,]*\s*원|무료|체험|요금|가격|free|pricing|price|
 for (const [name, text] of [['설명', description], ['키워드', keywords]]) { // 심사 메모는 심사관에게 '요금 문장을 뺐다'고 설명하는 글이라 검사 대상이 아님
   const m = text.match(BAD_META); if (m) { console.error(`${name}에 요금·무료 관련 글자('${m[0]}')가 있습니다 — 2.3.7 재발 방지로 멈춤`); process.exit(3); }
 }
-const shots = [1, 2, 3, 4, 5, 6].map((n) => path.join(SHOTS_DIR, `iphone-${String(n).padStart(2, '0')}.png`)).filter((f) => { try { return statSync(f).size > 0; } catch { return false; } });
+const six = (prefix) => [1, 2, 3, 4, 5, 6].map((n) => path.join(SHOTS_DIR, `${prefix}-${String(n).padStart(2, '0')}.png`)).filter((f) => { try { return statSync(f).size > 0; } catch { return false; } });
+/** 묶음(슬롯) → 올릴 파일: 6.9형·6.1형·아이패드 13형. 그 밖 묶음은 파일 없음(옛 그림만 지움) */
+const FILES_OF = { [DISPLAY]: six('iphone'), APP_IPHONE_61: six('iphone61'), [IPAD_DISPLAY]: six('ipad') };
+const REQUIRED = [DISPLAY, IPAD_DISPLAY]; // 앱이 아이폰·아이패드 둘 다 지원(TARGETED_DEVICE_FAMILY 1,2)
 
 // ---------- 1. 앱·버전 ----------
 const apps = (await api('GET', `/apps?filter[bundleId]=${encodeURIComponent(BUNDLE)}`)).data;
@@ -119,7 +123,7 @@ if (verId) {
   else await act('심사 정보 새로 만들기(데모 계정은 사람이 적어야 함)', () => api('POST', '/appStoreReviewDetails', { data: { type: 'appStoreReviewDetails', attributes: { notes, demoAccountRequired: true }, relationships: { appStoreVersion: { data: { type: 'appStoreVersions', id: verId } } } } }));
 }
 
-// ---------- 5. 스크린샷(6.9형) ----------
+// ---------- 5. 스크린샷(버전에 붙은 모든 묶음) ----------
 async function uploadShot(setId, file, idx) {
   const buf = readFileSync(file); const md5 = createHash('md5').update(buf).digest('hex');
   const r = (await api('POST', '/appScreenshots', { data: { type: 'appScreenshots', attributes: { fileName: `${String(idx + 1).padStart(2, '0')}-${path.basename(file)}`, fileSize: buf.length }, relationships: { appScreenshotSet: { data: { type: 'appScreenshotSets', id: setId } } } } })).data;
@@ -139,19 +143,23 @@ async function uploadShot(setId, file, idx) {
 }
 if (loc) {
   const sets = (await api('GET', `/appStoreVersionLocalizations/${loc.id}/appScreenshotSets`)).data;
-  log(`ⓔ 스크린샷 묶음: ${sets.map((s) => s.attributes.screenshotDisplayType).join(', ') || '없음'} · 올릴 파일 ${shots.length}장(${DISPLAY})`);
-  if (shots.length !== 6) log('  (iphone-01..06.png 6장이 아님 — 스크린샷은 건너뜀)');
-  else {
-    let set = sets.find((s) => s.attributes.screenshotDisplayType === DISPLAY);
-    if (!set) set = await act(`${DISPLAY} 묶음 만들기`, () => api('POST', '/appScreenshotSets', { data: { type: 'appScreenshotSets', attributes: { screenshotDisplayType: DISPLAY }, relationships: { appStoreVersionLocalization: { data: { type: 'appStoreVersionLocalizations', id: loc.id } } } } }).then((j) => j.data));
-    if (set) {
-      const olds = (await api('GET', `/appScreenshotSets/${set.id}/appScreenshots`)).data;
-      log(`  기존 ${olds.length}장 → 지우고 6장 새로`);
-      await act(`기존 ${olds.length}장 지우기`, async () => { for (const o of olds) await api('DELETE', `/appScreenshots/${o.id}`); });
-      const ids = [];
-      for (const [i, f] of shots.entries()) { const id = await act(`올리기 ${path.basename(f)}`, () => uploadShot(set.id, f, i)); if (id) ids.push(id); }
-      if (ids.length === 6) await act('순서 맞추기', () => api('PATCH', `/appScreenshotSets/${set.id}/relationships/appScreenshots`, { data: ids.map((id) => ({ type: 'appScreenshots', id })) }));
-    }
+  const have = new Map(sets.map((s) => [s.attributes.screenshotDisplayType, s]));
+  const types = [...new Set([...REQUIRED, ...sets.map((s) => s.attributes.screenshotDisplayType)])];
+  log(`ⓔ 스크린샷 묶음(버전에 붙은 것 + 필수): ${types.join(', ')}`);
+  for (const type of types) {
+    const files = FILES_OF[type] ?? [];
+    let set = have.get(type) ?? null;
+    const olds = set ? (await api('GET', `/appScreenshotSets/${set.id}/appScreenshots?limit=50`)).data : [];
+    const ready = files.length === 6;
+    log(`  ${type}: 지울 ${olds.length}장 · 올릴 ${ready ? 6 : files.length ? `${files.length}(6장이 아니라 건너뜀)` : '0(새 그림 없음 — 옛 그림만 지움)'}장${!set ? ' · 묶음 새로 만듦' : ''}`);
+    if (!set && !ready) continue; // 필수인데 파일이 없으면 만들지 않음(빈 묶음은 의미 없음)
+    if (!set) set = await act(`${type} 묶음 만들기`, () => api('POST', '/appScreenshotSets', { data: { type: 'appScreenshotSets', attributes: { screenshotDisplayType: type }, relationships: { appStoreVersionLocalization: { data: { type: 'appStoreVersionLocalizations', id: loc.id } } } } }).then((j) => j.data));
+    if (!set) continue;
+    if (olds.length) await act(`${type} 옛 그림 ${olds.length}장 지우기`, async () => { for (const o of olds) await api('DELETE', `/appScreenshots/${o.id}`); });
+    if (!ready) continue;
+    const ids = [];
+    for (const [i, f] of files.entries()) { const id = await act(`${type} 올리기 ${path.basename(f)}`, () => uploadShot(set.id, f, i)); if (id) ids.push(id); }
+    if (ids.length === 6) await act(`${type} 순서 맞추기`, () => api('PATCH', `/appScreenshotSets/${set.id}/relationships/appScreenshots`, { data: ids.map((id) => ({ type: 'appScreenshots', id })) }));
   }
 }
 

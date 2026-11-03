@@ -1,7 +1,8 @@
 // 351차 #947(로컬 11/04 03:3x · 대표 '아이폰 앱 정상 출시를 서둘러 달라'): App Store 6.9형 스크린샷 v4 — 1320×2868(뷰포트 440×956 · 배율 3 · 아이폰 WorkInApp 표시).
 // 시험 서버 + 일반 B2B 샘플 회사(하늘솔루션, 가상 — 306차 sample-seed, 실제 회사·사람 데이터 0) 화면 6장을 찍고 WORKIN_STORE_LISTING.md '스크린샷 6장' 헤드라인(청록 #0F766E 위 흰 글씨 + 휴대폰 화면)으로 합성한다.
 // 조건 검사: 화면 글에 원·회(횟수)·가격·무료·체험·요금 글자가 있으면 실패로 보고(2.3.7 거절 사유 재발 방지). 생성 AI 없음 — Playwright(크로미움)·sharp 만.
-// 실행: npm run build && node tests/e2e/store-shots-ios-v4.mjs  (PostgreSQL 필요) → docs/handoff/store/ios-v4/iphone-01..06.png · raw/01..06.png(원본 캡처) · 00_sheet.jpg
+// 실행: npm run build && node tests/e2e/store-shots-ios-v4.mjs  (PostgreSQL 필요) → docs/handoff/store/ios-v4/iphone-01..06.png(6.9형 1320×2868) · iphone61-01..06.png(6.1형 1179×2556, 같은 그림 줄임) · ipad-01..06.png(아이패드 13형 2048×2732, 아이패드 화면 캡처) · raw/ · 00_sheet.jpg
+// 로컬 11/04 04:0x: 앱이 아이패드도 지원(TARGETED_DEVICE_FAMILY 1,2)이라 아이패드 묶음은 필수 — 옛 v3 묶음(가격 표시)을 모두 새것으로 바꾸려고 6.1형·아이패드도 같이 만든다
 import { chromium } from 'playwright';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -12,7 +13,9 @@ const require = createRequire(import.meta.url);
 const sharp = require('sharp');
 const OUT = 'docs/handoff/store/ios-v4'; mkdirSync(`${OUT}/raw`, { recursive: true });
 const W = 1320, H = 2868, GREEN = '#0F766E';
+const PW = 2048, PH = 2732; // 아이패드 13형(2048×2732) — 뷰포트 1024×1366 @2
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WorkInApp/1.2.0';
+const UA_PAD = 'Mozilla/5.0 (iPad; CPU OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WorkInApp/1.2.0';
 // 2.3.7: 원·횟수·가격·무료·체험·요금 글자 0 — '회의'·'회사' 같은 낱말은 빼고 '숫자+회'만 본다
 const BAD = /\d[\d,]*\s*원(?![가-힣])|\d+\s*회(?![사의원])|가격|무료|체험|요금|크레딧/g; // '원' 뒤에 한글이 오면(직원·원인 등) 낱말이라 제외
 const SLIDES = [
@@ -92,6 +95,23 @@ try {
     console.log('캡처', s.n, path, bad.length ? `⚠ ${bad.join(' · ')}` : '글자 OK');
   }
   await mc.close();
+  // 아이패드 13형: 1024×1366 @2 — 같은 화면 6장(가로폭이 넓어 PC 와 같은 틀이 보임)
+  const pc = await browser.newContext({ viewport: { width: 1024, height: 1366 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: UA_PAD, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: st });
+  await pc.addInitScript(() => { try { localStorage.setItem('wos_connect_card', 'off'); localStorage.setItem('wos_status_tip', '3'); } catch {} });
+  const pp = await pc.newPage(); const padRaws = [];
+  for (const s of SLIDES) {
+    const path = s.path.replace('THREAD', th.id).replace('TASK', task.id);
+    await pp.goto(BASE + path); await pp.waitForLoadState('networkidle').catch(() => {}); await pp.waitForTimeout(1800);
+    await pp.addStyleTag({ content: '[data-testid="trial-banner"],[data-testid="pwa-install"],[data-testid="push-ask"]{display:none!important}' }); await pp.waitForTimeout(200);
+    const text = await pp.evaluate(() => document.body.innerText);
+    const bad = [...new Set((text.match(BAD) ?? []).map((x) => x.trim()))];
+    if (bad.length) problems.push(`아이패드 ${s.n} ${path}: 금지 글자 ${bad.join(' · ')}`);
+    const raw = `${OUT}/raw/ipad-${String(s.n).padStart(2, '0')}.png`;
+    await pp.screenshot({ path: raw }); padRaws.push(raw);
+    const meta = await sharp(raw).metadata(); if (meta.width !== PW || meta.height !== PH) problems.push(`아이패드 ${s.n}: 캡처 크기 ${meta.width}×${meta.height}`);
+    console.log('아이패드 캡처', s.n, path, bad.length ? `⚠ ${bad.join(' · ')}` : '글자 OK');
+  }
+  await pc.close();
   // 합성: 청록 배경 + 헤드라인(흰 글씨) + 휴대폰 틀 안 캡처 — 글꼴은 앱과 같은 Pretendard(저장소 node_modules, 외부 내려받기 없음)
   const font = readFileSync('node_modules/pretendard/dist/web/variable/woff2/PretendardVariable.woff2').toString('base64');
   const icon = readFileSync('docs/handoff/brand/workin-s3/icon-1024-rounded.png').toString('base64');
@@ -134,11 +154,52 @@ try {
     await cp.screenshot({ path: out, type: 'png' }); outs.push(out); console.log('합성', out);
   }
   await cp.close();
+  // 6.1형(1179×2556) — 6.9형 그림을 그대로 줄임(비율 같음 0.893). 옛 APP_IPHONE_61 묶음을 비우지 않고 새 그림으로 바꾸려고
+  for (const [i, f] of outs.entries()) await sharp(f).resize(1179, 2556, { kernel: 'lanczos3' }).png({ compressionLevel: 9 }).toFile(`${OUT}/iphone61-${String(i + 1).padStart(2, '0')}.png`);
+  // 아이패드 13형 합성: 2048×2732 — 헤드라인 위, 태블릿 틀(가로 1700) 아래
+  const tp = await browser.newPage({ viewport: { width: PW, height: PH }, deviceScaleFactor: 1 });
+  const pads = [];
+  for (const s of SLIDES) {
+    const raw = padRaws[s.n - 1];
+    const px = await sharp(raw).extract({ left: 12, top: 4, width: 4, height: 4 }).raw().toBuffer();
+    const bar = `rgb(${px[0]},${px[1]},${px[2]})`; const dark = (px[0] * 299 + px[1] * 587 + px[2] * 114) / 1000 < 128;
+    const shot = readFileSync(raw).toString('base64');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+      @font-face{font-family:P;src:url(data:font/woff2;base64,${font}) format('woff2');font-weight:100 900}
+      body{margin:0;width:${PW}px;height:${PH}px;background:${GREEN};font-family:P,system-ui,sans-serif;color:#fff;overflow:hidden;position:relative}
+      .c1{position:absolute;right:-420px;top:-360px;width:1200px;height:1200px;border-radius:50%;background:rgba(255,255,255,.08)}
+      .c2{position:absolute;left:-320px;bottom:-200px;width:900px;height:900px;border-radius:50%;background:rgba(255,255,255,.06)}
+      .brand{position:absolute;left:140px;top:120px;display:flex;align-items:center;gap:22px;font-size:46px;font-weight:700;letter-spacing:-1px}
+      .brand img{width:80px;height:80px;border-radius:22px}
+      h1{position:absolute;left:140px;top:250px;margin:0;font-size:104px;line-height:1.12;font-weight:800;letter-spacing:-3px;width:1768px;text-align:center}
+      .sub{position:absolute;left:140px;top:520px;font-size:44px;font-weight:500;opacity:.92;width:1768px;text-align:center}
+      .accent{position:absolute;left:${PW / 2 - 52}px;top:600px;width:104px;height:12px;border-radius:6px;background:#F59E0B}
+      .pad{position:absolute;left:${(PW - 1720) / 2}px;top:700px;width:1680px;padding:20px;background:linear-gradient(135deg,#3a3a3f,#18181b 50%,#3a3a3f);border-radius:90px;box-shadow:0 70px 140px rgba(0,0,0,.45)}
+      .screen{border-radius:72px;overflow:hidden;background:${bar};position:relative}
+      .status{height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 56px;font-size:28px;font-weight:600;color:${dark ? '#fff' : '#111'}}
+      .screen img{display:block;width:1680px;height:auto}
+      .ic{display:flex;align-items:center;gap:12px}
+    </style></head><body><div class="c1"></div><div class="c2"></div>
+      <div class="brand"><img src="data:image/png;base64,${icon}">워크인</div>
+      <h1>${s.title.join(' ')}</h1><div class="sub">${s.sub}</div><div class="accent"></div>
+      <div class="pad"><div class="screen">
+        <div class="status"><span>9:41</span><span class="ic">
+          <svg width="32" height="24" viewBox="0 0 32 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M2 8a20 20 0 0 1 28 0"/><path d="M8 14a12 12 0 0 1 16 0"/><circle cx="16" cy="20" r="2" fill="currentColor" stroke="none"/></svg>
+          <svg width="54" height="26" viewBox="0 0 54 26" fill="none"><rect x="1" y="1" width="46" height="24" rx="7" stroke="currentColor" stroke-opacity=".4" stroke-width="2"/><rect x="5" y="5" width="38" height="16" rx="4" fill="currentColor"/><rect x="50" y="9" width="3" height="8" rx="1.5" fill="currentColor" fill-opacity=".4"/></svg>
+        </span></div>
+        <img src="data:image/png;base64,${shot}"></div></div>
+    </body></html>`;
+    await tp.setContent(html); await tp.evaluate(() => document.fonts.ready); await tp.waitForTimeout(300);
+    const out = `${OUT}/ipad-${String(s.n).padStart(2, '0')}.png`;
+    await tp.screenshot({ path: out, type: 'png' }); pads.push(out); console.log('아이패드 합성', out);
+  }
+  await tp.close();
   // 축소 시트(검토용)
-  const tw = 300, gap = 20, ih = Math.round(tw * H / W);
+  const tw = 300, gap = 20, ih = Math.round(tw * H / W), ph = Math.round(tw * PH / PW);
   const layers = [];
   for (let i = 0; i < outs.length; i++) layers.push({ input: await sharp(outs[i]).resize(tw, ih).png().toBuffer(), top: gap, left: gap + i * (tw + gap) });
-  await sharp({ create: { width: outs.length * (tw + gap) + gap, height: ih + gap * 2, channels: 3, background: '#e5e7eb' } }).composite(layers).jpeg({ quality: 86 }).toFile(`${OUT}/00_sheet.jpg`);
-  console.log(problems.length ? `⚠ 확인 필요:\n- ${problems.join('\n- ')}` : '✔ 금지 글자 0 · 6장 1320×2868');
+  for (let i = 0; i < pads.length; i++) layers.push({ input: await sharp(pads[i]).resize(tw, ph).png().toBuffer(), top: gap * 2 + ih, left: gap + i * (tw + gap) });
+  await sharp({ create: { width: outs.length * (tw + gap) + gap, height: ih + ph + gap * 3, channels: 3, background: '#e5e7eb' } }).composite(layers).jpeg({ quality: 86 }).toFile(`${OUT}/00_sheet.jpg`);
+  console.log(problems.length ? `⚠ 확인 필요:\n- ${problems.join('\n- ')}` : '✔ 금지 글자 0 · 아이폰 6.9형 6장 1320×2868 · 6.1형 6장 1179×2556 · 아이패드 13형 6장 2048×2732');
 } finally { await browser.close(); srv.proc.kill(); await sql.end(); }
 if (problems.length) process.exit(1);

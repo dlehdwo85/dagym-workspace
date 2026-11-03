@@ -6,5 +6,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: `${SITE}/`, lastModified: new Date(LANDING_UPDATED), changeFrequency: 'weekly', priority: 1 },
     ...LANDING_PAGES.map((p) => ({ url: `${SITE}/landing/${p.slug}`, lastModified: new Date(p.updated), changeFrequency: 'monthly' as const, priority: 0.9 })),
+    { url: `${SITE}/landing/bid-alerts`, lastModified: new Date('2026-11-04'), changeFrequency: 'monthly' as const, priority: 0.9 }, // #949 입찰 공고 아침 메일 무료 구독
   ];
 }

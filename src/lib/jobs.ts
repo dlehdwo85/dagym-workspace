@@ -207,6 +207,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('salesKwMonthly', async () => (await import('./sales/kwSuggest')).kwSuggestMonthlyTick()); // 224차 #457 관심 검색어 추천(매달 1일 KST 09시 뒤 첫 tick, AI 없이 낱말 세기 + 놓친 공고 후보 — 있을 때만 관리자 알림)
   await step('meetings', async () => (await import('./meetings')).meetingsTick()); // 218차 화상회의(FEATURE_MEETINGS 일 때만): 신호 끊긴 참가자 퇴장 처리 · 하루 넘게 빈 회의 끝내기
   await step('salesDigest', async () => (await import('./sales/digest')).salesDigestTick()); // 당일 입찰 다이제스트(회사 설정 시각, 메일·알림·푸시)
+  await step('bidAlerts', async () => (await import('./bidAlerts')).bidAlertTick()); // #949 입찰 공고 아침 메일 무료 구독(로그인 없는 구독자, KST 7시부터 하루 1통·새 공고 있는 날만)
   await step('bidTasks', async () => (await import('./sales/bidTasks')).bidTasksTick()); // 결정 15-35 입찰 업무: 공고 취소 → 업무·일정 취소 · 정정 → 기한·일정 · 개찰 결과 → 낙찰이면 계약
   await step('taskBatchMerge', async () => (await import('./taskMerge')).mergeAllBatchesOnce()); // 280차 #821 기존 '각자 1건씩' 묶음 → 공동 업무 1건(한 번만, 안 끝난 묶음)
   await step('bidPrefixFix', async () => (await import('./sales/bidTasks')).bidPrefixFixOnce()); // 328차(대표 11/02 결정 ⓒ): 공고에서 온 열린 [영업] 업무 제목 → [입찰] 한 번

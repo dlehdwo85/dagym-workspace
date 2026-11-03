@@ -32,11 +32,14 @@ test('아이폰·아이패드 앱: 가입·소개·랜딩 주소는 로그인으
   }
 });
 
-test('안드로이드 앱·웹 브라우저(아이폰 사파리 포함)는 가입 화면 그대로', async () => {
-  for (const ua of [UA.androidApp, UA.iphoneSafari, UA.kakaoIphone]) {
+test('웹 브라우저(아이폰 사파리·카카오톡 안 브라우저)는 가입 화면 그대로 · 351차 #942: 안드로이드 앱은 /signup 도 로그인으로(가입은 웹에서)', async () => {
+  for (const ua of [UA.iphoneSafari, UA.kakaoIphone]) {
     const r = await get('/signup', ua);
     assert.equal(r.status, 200, `가입 그대로 (${ua.slice(13, 30)})`);
   }
+  const a = await get('/signup', UA.androidApp);
+  assert.equal(a.status, 307); assert.equal(new URL(a.headers.get('location'), BASE).pathname, '/login');
+  assert.equal((await get('/login', UA.androidApp)).status, 200);
 });
 
 test('다른 앱 안 브라우저(카카오톡·인스타그램)는 첫 주소(/)에서 소개 화면 · 우리 앱(옛 아이폰 앱 포함)은 로그인 쪽', async () => {
