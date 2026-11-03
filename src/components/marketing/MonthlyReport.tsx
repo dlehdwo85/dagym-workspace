@@ -41,7 +41,7 @@ export function MonthlyReport() {
         {card('자동 제작', `${r.auto.produced}건`, `품질 검사 미통과 ${r.auto.quality_failed}`)}
         {card('광고 비용', `${n(r.ads.total.cost_krw)}원`, `클릭 ${n(r.ads.total.clicks)} · CTR ${r.ads.total.ctr}% · CPC ${n(r.ads.total.cpc)}원`)}
         {card('전화 문의', `${r.calls.total}건`, `영업 리드 ${r.calls.leads}`)}
-        {card('크레딧·AI', `${r.credits.total}`, `마케팅 AI 약 ${n(r.ai.krw)}원 · ${r.ai.requests}회`)}
+        {card('제작 크레딧', `${r.credits.total}`, '마케팅 AI 글 포함')}
       </section>
       {r.savings?.amount > 0 && <p className="text-sm text-ink-2" data-testid="report-savings">대행사 대비 절감액(추정) <b className="text-emerald-800">{n(r.savings.amount)}원</b> — 광고비 {n(r.savings.spend)}원 × 대행 수수료율 {r.savings.pct}%(통상 15~20%, 광고 운영에서 바꿀 수 있음)</p>}
       {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적 + CAC·ROI */}

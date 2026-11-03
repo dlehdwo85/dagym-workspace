@@ -16,15 +16,17 @@ export async function aiBudget({ owner, sql, BASE, SHOTS }) {
     await owner.setViewportSize({ width: 1366, height: 900 });
     await owner.goto(BASE + '/admin/usage');
     const meter = owner.getByTestId('meter-ai');
-    await meter.getByText('이번 달 AI 예산').waitFor();
-    assert.match(await meter.innerText(), /84%[\s\S]*원 \/ [\d,]+원/);
+    await meter.getByText('이번 달 AI 사용량').waitFor();
+    assert.match(await meter.innerText(), /84%[\s\S]*사용 84% \/ 남은 양 16%/); // 351차 #939 ③: 원 없이 %
+    assert.doesNotMatch(await owner.getByTestId('ai-usage').innerText(), /원|\d+회/, '351차: 관리자 사용량 화면에 원·회 없음');
     assert.match(await owner.getByTestId('meter-ai-note').innerText(), /^\d{1,2}월 1일에 다시 채워짐 · 운영사가 정한 값 · 영상 제작은 마케팅 크레딧으로 따로$/);
-    assert.match(await owner.getByTestId('ai-usage-pct').innerText(), /회사 월 AI 예산 [\d,]+원 중 84%/);
+    assert.match(await owner.getByTestId('ai-usage-pct').innerText(), /회사 월 AI 사용량 84% · 남은 양 16%/);
     await meter.screenshot({ path: `${SHOTS}/250-ai-budget-meter.png` });
     // AI 비서: 80% 넘으면 한 줄 미리 알림, 관리자 머리줄엔 예산 금액
     await owner.goto(BASE + '/assistant');
     await owner.getByTestId('ai-company-near').getByText(/회사 이번 달 AI 사용량 84% — 100%가 되면 \d{1,2}월 1일까지 AI 기능이 멈춥니다/).waitFor();
-    assert.match(await owner.getByTestId('ai-company-line').innerText(), /회사 이번 달 AI [\d,]+원 \/ 예산 [\d,]+원 \(84%\) · \d{1,2}월 1일 초기화/);
+    assert.match(await owner.getByTestId('ai-company-line').innerText(), /^회사 이번 달 AI 사용량 84% · \d{1,2}월 1일 초기화/);
+    assert.doesNotMatch(await owner.getByTestId('ai-budget').innerText(), /원|\d+회/, '351차: AI 비서 막대에 원·회 없음');
     // 100% 넘음 → 빨간 안내 · 입력 막힘
     await spend(Math.round(limit * 0.2));
     await owner.reload();

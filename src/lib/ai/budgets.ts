@@ -19,7 +19,7 @@ export async function requestMoreAi(u: SessionUser, i: z.infer<typeof limitReque
   if (dup) throw badRequest('이미 보낸 추가 요청이 대표 확인을 기다리고 있습니다');
   const [r] = await sql<{ id: string }[]>`insert into ai_limit_requests (tenant, user_id, month, amount_krw, reason) values (${tenantOf(u)}, ${u.id}, ${month()}, ${i.amountKrw}, ${i.reason ?? null}) returning id`;
   const owners = (await sql<{ id: string }[]>`select id from users where tenant = ${tenantOf(u)} and role = 'owner' and status = 'active'`).map((x) => x.id);
-  await notify(sql, { userIds: owners, type: 'usage_alert', title: `AI 한도 추가 요청 — ${u.name}`, body: `+${i.amountKrw.toLocaleString('ko-KR')}원${i.reason ? ` · ${i.reason.slice(0, 60)}` : ''}`,
+  await notify(sql, { userIds: owners, type: 'usage_alert', title: `AI 한도 추가 요청 — ${u.name}`, body: `이번 달 AI 사용량 추가 요청${i.reason ? ` · ${i.reason.slice(0, 60)}` : ''}`, // 351차 #939 ③: 원 없음
     link: '/admin/usage#ai-people', actorId: u.id, dedupeKey: `ai_limit_req:${r.id}` });
   await audit(sql, u.id, 'ai.limit_request', null, null, { id: r.id, amountKrw: i.amountKrw }, null);
   return { id: r.id };
@@ -32,7 +32,7 @@ export async function decideAiRequest(u: SessionUser, id: string, approve: boole
     where id = ${id} and tenant = ${tenantOf(u)} and status = 'pending' returning id, user_id, amount_krw, status`;
   if (!r) throw notFound('요청이 없거나 이미 처리되었습니다');
   await notify(sql, { userIds: [r.user_id], type: 'usage_alert', title: approve ? 'AI 한도 추가 승인' : 'AI 한도 추가 거절',
-    body: approve ? `이번 달 AI 한도가 ${r.amount_krw.toLocaleString('ko-KR')}원 늘었습니다` : '대표가 이번 추가 요청을 거절했습니다', link: '/assistant', actorId: u.id, dedupeKey: `ai_limit_dec:${r.id}` });
+    body: approve ? '대표가 이번 달 AI 사용량 추가를 승인했습니다 — 다시 쓸 수 있습니다' : '대표가 이번 추가 요청을 거절했습니다', link: '/assistant', actorId: u.id, dedupeKey: `ai_limit_dec:${r.id}` });
   await audit(sql, u.id, approve ? 'ai.limit_approved' : 'ai.limit_rejected', 'user', r.user_id, { id: r.id, amountKrw: r.amount_krw }, ip);
   return { ok: true };
 }

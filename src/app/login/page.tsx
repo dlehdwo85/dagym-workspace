@@ -8,7 +8,7 @@ import { ApiError, api } from '@/components/client';
 import { Capacitor } from '@capacitor/core';
 import Link from 'next/link';
 import { OrDivider, SocialButtons } from '@/components/SocialButtons';
-import { useIosApp } from '@/components/inApp';
+import { useInApp } from '@/components/inApp';
 
 function LoginForm() {
   const sp = useSearchParams();
@@ -27,7 +27,7 @@ function LoginForm() {
     }).catch(() => {});
   }, []);
   const [signupOn, setSignupOn] = useState(false);
-  const iosApp = useIosApp(); // #839 아이폰 앱은 로그인만 — 가입·무료 체험 링크 없음
+  const iosApp = useInApp(); // #839 아이폰 앱은 로그인만 → 351차 #942(대표 11/04): 안드로이드 앱도 가입·무료 체험 링크 없음(앱 안에는 요금·무료·체험 글자 없음)
   const [unverified, setUnverified] = useState<string | null>(sp.get('resend'));
   const [resent, setResent] = useState<string | null>(null);
   useEffect(() => { api('/api/auth/signup').then((r) => setSignupOn(!!r.enabled)).catch(() => {}); }, []);

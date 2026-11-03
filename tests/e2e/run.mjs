@@ -1890,10 +1890,11 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   // #412 세 AI 한도 한 표(업무·영업·마케팅) + 요금제별 기준표
   await owner.getByTestId('ai-limits').waitFor();
   assert.equal(await owner.getByTestId('ai-limits').locator('tbody tr').count(), 3);
-  assert.match(await owner.getByTestId('ai-limit-work').innerText(), /AI 비서[\s\S]*질문·답변/);
+  assert.match(await owner.getByTestId('ai-limit-work').innerText(), /AI 비서[\s\S]*(제한 없음|\d+%)/); // 351차 #939 ③: 횟수 대신 %
   assert.match(await owner.getByTestId('ai-limit-sales').innerText(), /AI 세일즈[\s\S]*회사 한도를 나눠/);
-  assert.match(await owner.getByTestId('ai-limit-marketing').innerText(), /AI 마케터[\s\S]*시안 이미지/);
-  assert.match(await owner.getByTestId('ai-plan-matrix').innerText(), /베이직[\s\S]*1인 월 500원분[\s\S]*스탠다드[\s\S]*1인 월 1,200원분[\s\S]*프로/); // 대표 10/24 ② 1인 월 AI 예산(원)
+  assert.match(await owner.getByTestId('ai-limit-marketing').innerText(), /AI 마케터[\s\S]*(제한 없음|\d+%)/); // 351차: 시안 n장 환산 칸 없음
+  assert.match(await owner.getByTestId('ai-plan-matrix').innerText(), /베이직[\s\S]*회사 공유 AI 포함[\s\S]*스탠다드[\s\S]*회사 공유 AI 포함[\s\S]*프로/); // 대표 10/24 ② → 351차 #939 ③: 원분 없이
+  assert.doesNotMatch(await owner.getByTestId('ai-limits').innerText(), /원|\d+회/, '351차: AI 한도 표에 원·회 없음');
   await owner.getByTestId('ai-limits').screenshot({ path: `${SHOTS}/178-ai-limits.png` });
   await owner.getByTestId('plan-request').click();
   await owner.getByLabel('요청할 요금제').selectOption('w_standard'); // V27 요금표

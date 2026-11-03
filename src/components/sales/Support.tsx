@@ -33,7 +33,6 @@ const TABS: [string, string][] = [['fit', '맞춤'], ['closing', '마감 임박'
 /** #781 정렬·D-day·종류(사람별 기억) */
 const SORTS: [string, string][] = [['fit', '맞춤 순'], ['deadline', '마감 임박 순'], ['new', '새로 올라온 순'], ['amount', '지원 금액 큰 순']];
 const DDS: [string, string, string][] = [['all', '전체', ''], ['d3', 'D-3', '오늘부터 3일 안 마감'], ['d7', 'D-7', '7일 안 마감'], ['d14', 'D-14', '14일 안 마감'], ['d30', 'D-30', '30일 안 마감'], ['open', '상시·예산 소진', '마감일 없음(상시·예산 소진 시·마감 미정)']];
-const won = (n: number) => `약 ${n.toLocaleString('ko-KR')}원`;
 const VERDICT: Record<string, [string, string, string]> = { fit: ['✅', '해당', 'border-emerald-200 bg-emerald-50 text-emerald-800'], maybe: ['⚠', '확인 필요', 'border-amber-200 bg-amber-50 text-amber-800'], no: ['❌', '해당 없음', 'border-red-200 bg-red-50 text-red-700'] };
 const FLAG_CLS: Record<Flag['level'], string> = { ok: 'bg-emerald-50 text-emerald-800', warn: 'bg-amber-50 text-amber-800', no: 'bg-red-50 text-red-700' };
 const STATUS_CLS: Record<string, string> = { interest: 'bg-sky-50 text-sky-800', preparing: 'bg-blue-600 text-white', applied: 'bg-violet-50 text-violet-800', selected: 'bg-emerald-600 text-white', rejected: 'bg-slate-200 text-ink-2', dropped: 'bg-slate-100 text-ink-3' };
@@ -100,7 +99,7 @@ export function Support() {
   }
   async function analyze(it: Item) {
     setBusy(`${it.id}:ai`);
-    try { const r = await api<{ costKrw: number }>(`/api/sales/support/${it.id}/analyze`, { body: {} }); toast.ok(`AI 세일즈가 판단했습니다(${won(r.costKrw)})`); reload(); }
+    try { const r = await api<{ costKrw: number }>(`/api/sales/support/${it.id}/analyze`, { body: {} }); toast.ok('AI 세일즈가 판단했습니다'); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function listIt(it: Item, on: boolean) {
@@ -122,7 +121,7 @@ export function Support() {
     setBusy('top');
     try {
       const r = await api<TopR>('/api/sales/support/analyze-top', { body: { n } }); setBulk(false);
-      if (r.failed) toast.error(`${r.done}건 판단, ${r.failed}건 실패${r.error ? `(${r.error})` : ''}`); else toast.ok(r.asked ? `위에서 ${r.done}건을 AI 세일즈가 판단했습니다(${won(r.costKrw)})` : '판단할 공고가 없습니다'); reload();
+      if (r.failed) toast.error(`${r.done}건 판단, ${r.failed}건 실패${r.error ? `(${r.error})` : ''}`); else toast.ok(r.asked ? `위에서 ${r.done}건을 AI 세일즈가 판단했습니다` : '판단할 공고가 없습니다'); reload();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   // 269차 #803 [대기 중인 공고 모두 AI 판단](로컬 20:45: 마케팅 승인함과 헷갈리지 않게 '지원사업 공고'로): 20건씩 이어서(4건씩 같이) — 한도·예산에 걸리거나 [멈추기]를 누르면 멈춤
@@ -139,7 +138,7 @@ export function Support() {
         if (!r.asked || !r.left || stopped || !r.done) break;
       }
       setBulk(false);
-      const msg = `AI 세일즈가 ${done}건을 판단했습니다(${won(costKrw)})`;
+      const msg = `AI 세일즈가 ${done}건을 판단했습니다`;
       if (stopped) toast.error(`${msg}. AI 예산이나 한도에 걸려 멈췄습니다${error ? `(${error})` : ''}`);
       else if (failed) toast.error(`${msg}. ${failed}건은 실패했습니다${error ? `(${error})` : ''}`);
       else toast.ok(stopAll.current ? `${msg}. 멈췄습니다` : msg);
@@ -198,7 +197,7 @@ export function Support() {
                 <Button size="sm" variant="secondary" onClick={() => go({ id: it.id })}>진행 기록</Button></>
                 : <><Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'interest')} data-testid="support-interest">{busy === `${it.id}:interest` ? '…' : '관심'}</Button>
                   <Button size="sm" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">{busy === `${it.id}:preparing` ? '…' : '신청 준비'}</Button></>}
-              {data.aiOn && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => analyze(it)} data-testid="support-analyze" title={data.aiCostKrw != null ? `회사 AI 예산에서 ${won(data.aiCostKrw)}` : undefined}><Sparkles className="size-3.5" aria-hidden />{busy === `${it.id}:ai` ? '판단 중…' : it.ai ? '다시 판단' : `AI 판단${data.aiCostKrw != null ? ` · ${won(data.aiCostKrw)}` : ''}`}</Button>}
+              {data.aiOn && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => analyze(it)} data-testid="support-analyze" title="회사 AI 예산에서 씁니다"><Sparkles className="size-3.5" aria-hidden />{busy === `${it.id}:ai` ? '판단 중…' : it.ai ? '다시 판단' : 'AI 판단'}</Button>}
               {(!it.work || ['interest', 'preparing'].includes(it.work.status)) && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => listIt(it, !it.listed)} data-testid="support-list-toggle" data-on={it.listed ? '1' : '0'}>{it.listed ? <><Check className="size-3.5" aria-hidden />목록에 담음</> : <><ListPlus className="size-3.5" aria-hidden />목록에 담기</>}</Button>}
               {it.url && <a href={it.url} target="_blank" rel="noopener noreferrer" className={linkCls}><ExternalLink className="size-3.5" aria-hidden />원문</a>}
               {!it.work && !it.manual && <button type="button" className="ml-auto text-xs text-ink-3 underline" onClick={() => hide(it, !it.hidden)} data-testid="support-hide">{it.hidden ? '숨김 풀기' : '숨기기'}</button>}
@@ -210,7 +209,7 @@ export function Support() {
         <SourceLine sources={data.sources} />
       </>}
       {adding && <ManualAdd people={data?.people ?? []} onClose={() => setAdding(false)} onDone={(id) => { setAdding(false); reload(); go({ id }); }} />}
-      {bulk && data && <BulkAi pending={data.pendingCount} cost={data.aiCostKrw} busy={busy === 'top'} onRun={analyzeTop} onAll={data.auto.on ? null : () => analyzeAll(data.pendingCount)} run={allRun} onStop={() => { stopAll.current = true; }} onClose={() => { if (!allRun) setBulk(false); }} />}
+      {bulk && data && <BulkAi pending={data.pendingCount} busy={busy === 'top'} onRun={analyzeTop} onAll={data.auto.on ? null : () => analyzeAll(data.pendingCount)} run={allRun} onStop={() => { stopAll.current = true; }} onClose={() => { if (!allRun) setBulk(false); }} />}
       {openId && <Detail id={openId} onClose={() => go({ id: null })} onChanged={reload} />}
     </div>
   );
@@ -277,7 +276,7 @@ function ApplyList({ data, busy, onOpen, onTask, onUnlist }: { data: ListData; b
 
 /** #782·#785 AI 판단 안내 한 줄 — 자동 판단 중(판단 차례 n건) · 예산에 걸려 멈춤 · 꺼짐(규칙상 맞음 · AI 판단 전 n건은 [AI 판단]) */
 function AutoNote({ data }: { data: ListData }) {
-  const a = data.auto; const cost = data.aiCostKrw != null ? `건당 ${won(data.aiCostKrw)}` : '';
+  const a = data.auto; const cost = ''; // 351차 #939 ③: 건당 원 표시 없음(비용은 회사 AI 예산에서)
   const box = 'rounded-input border px-2.5 py-1.5 text-xs';
   if (a.on && a.stopped) return <p className={cx(box, 'border-amber-300 bg-amber-50 text-amber-900')} data-testid="support-auto-note" data-state="stopped"><b>AI 자동 판단을 멈췄습니다</b> — 이번 달 회사 AI 예산(또는 한도)을 다 썼습니다. 남은 {a.left}건은 예산이 채워지면 이어서 판단합니다. 급한 공고는 공고마다 [AI 판단]을 누르세요.</p>;
   if (a.on) return a.queue > 0 || data.pendingCount > 0 ? <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="on"><b>AI 세일즈가 새 공고를 자동으로 판단합니다</b>{cost ? `(${cost}, 회사 AI 예산에서)` : ''}{a.queue > 0 ? ` — 지금 판단 차례 ${a.queue}건, 15분마다 차례로(‘AI 확인 중’)` : ''}.</p> : null;
@@ -286,18 +285,18 @@ function AutoNote({ data }: { data: ListData }) {
 }
 
 /** #782 여러 건 AI 판단(관리자) — 몇 건·예상 비용을 보고 누를 때만 */
-function BulkAi({ pending, cost, busy, onRun, onAll, run, onStop, onClose }: { pending: number; cost: number | null; busy: boolean; onRun: (n: number) => void; onAll: (() => void) | null; run: { done: number; total: number; costKrw: number } | null; onStop: () => void; onClose: () => void }) {
+function BulkAi({ pending, busy, onRun, onAll, run, onStop, onClose }: { pending: number; busy: boolean; onRun: (n: number) => void; onAll: (() => void) | null; run: { done: number; total: number; costKrw: number } | null; onStop: () => void; onClose: () => void }) {
   const opts = [...new Set([5, 10, 20].map((n) => Math.min(n, pending)))].filter((n) => n > 0);
   return (
     <Modal open onClose={onClose} title="지원사업 공고 AI 판단">
       <div className="space-y-3 text-sm" data-testid="support-bulk">
-        <p className="text-xs text-ink-2">‘규칙상 맞음 · AI 판단 전’ {pending}건 가운데 맞춤 순 위에서부터 판단합니다. 비용은 회사 AI 예산에서 나갑니다{cost != null ? `(건당 ${won(cost)})` : ''}. 한도에 걸리면 멈춥니다.</p>
-        <div className="flex flex-wrap gap-2">{opts.map((n) => <Button key={n} size="sm" variant="secondary" disabled={busy} onClick={() => onRun(n)} data-testid={`support-bulk-${n}`}>{busy ? '판단 중…' : `${n}건 판단${cost != null ? ` · ${won(cost * n)}` : ''}`}</Button>)}</div>
+        <p className="text-xs text-ink-2">‘규칙상 맞음 · AI 판단 전’ {pending}건 가운데 맞춤 순 위에서부터 판단합니다. 비용은 회사 AI 예산에서 나갑니다. 한도에 걸리면 멈춥니다.</p>
+        <div className="flex flex-wrap gap-2">{opts.map((n) => <Button key={n} size="sm" variant="secondary" disabled={busy} onClick={() => onRun(n)} data-testid={`support-bulk-${n}`}>{busy ? '판단 중…' : `${n}건 판단`}</Button>)}</div>
         {/* 269차 #803: 대기 중인 것 모두(4건씩 같이) · 270차 #810: 새 공고 자동 판단이 켜져 있으면 정기 실행이 끝까지 판단하므로 단추 없음 */}
         {!onAll && pending > 0 && <p className="text-xs text-ink-2" data-testid="support-bulk-auto">새 공고 자동 판단이 켜져 있어 대기 중인 공고는 정기 실행이 차례로 모두 판단합니다. 누르지 않아도 됩니다.</p>}
         {onAll && pending > 0 && (run
-          ? <div className="flex items-center gap-2 rounded-input bg-sky-50 px-3 py-2 text-xs text-sky-900" role="status" data-testid="support-bulk-progress"><span className="flex-1">AI 판단 중 {run.done}/{run.total}건 · {won(run.costKrw)}</span><Button size="sm" variant="secondary" onClick={onStop} data-testid="support-bulk-stop">멈추기</Button></div>
-          : <Button size="sm" disabled={busy} onClick={onAll} data-testid="support-bulk-all">대기 중인 공고 모두 AI 판단({pending}건{cost != null ? ` · 약 ${won(cost * pending).replace(/^약\s*/, '')}` : ''})</Button>)}
+          ? <div className="flex items-center gap-2 rounded-input bg-sky-50 px-3 py-2 text-xs text-sky-900" role="status" data-testid="support-bulk-progress"><span className="flex-1">AI 판단 중 {run.done}/{run.total}건</span><Button size="sm" variant="secondary" onClick={onStop} data-testid="support-bulk-stop">멈추기</Button></div>
+          : <Button size="sm" disabled={busy} onClick={onAll} data-testid="support-bulk-all">대기 중인 공고 모두 AI 판단({pending}건)</Button>)}
         <div className="flex justify-end"><Button size="sm" variant="secondary" onClick={onClose} disabled={!!run}>닫기</Button></div>
       </div>
     </Modal>
@@ -410,7 +409,7 @@ function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; o
   }
   async function analyze() {
     setBusy('ai');
-    try { const r = await api<{ costKrw: number }>(`/api/sales/support/${id}/analyze`, { body: {} }); toast.ok(`AI 세일즈가 판단했습니다(약 ${r.costKrw.toLocaleString('ko-KR')}원)`); reload(); onChanged(); }
+    try { const r = await api<{ costKrw: number }>(`/api/sales/support/${id}/analyze`, { body: {} }); toast.ok('AI 세일즈가 판단했습니다'); reload(); onChanged(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   /** #815 [업무 회수] — 다른 사람이 업무에 댓글·첨부·체크를 남겼으면 한 번 더 묻고 회수 */

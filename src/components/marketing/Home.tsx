@@ -145,7 +145,7 @@ export function MarketingHome() {
     </section>
       {/* 대표 10/20 15:40 (#103): 이번 달 남은 제작 n건 · 초과 안내 */}
       {data.production && data.production.leftCredits !== null && <Link href="/s/marketing/automation" className={cx('block rounded-card border p-3 text-sm shadow-card hover:border-violet-300', data.production.over ? 'border-red-200 bg-red-50/40' : 'border-line bg-white')} data-testid="mkt-home-production">
-        <b>이번 달 남은 제작</b> <span className="tabular-nums">이미지 {data.production.images}장 또는 영상 {data.production.videos}편 <span className="text-xs text-ink-3">(크레딧 {data.production.leftCredits}/{data.production.monthlyCredits}{data.production.planLabel ? ` · ${data.production.planLabel}` : ''})</span></span>
+        <b>이번 달 남은 제작</b> <span className="tabular-nums">이미지 {data.production.images}장 또는 영상 {data.production.videos}편 <span className="text-xs text-ink-3">(남은 양 {(data.production.monthlyCredits ?? 0) > 0 ? Math.max(0, Math.round((data.production.leftCredits / (data.production.monthlyCredits ?? 1)) * 100)) : 0}%{!inApp && data.production.planLabel ? ` · ${data.production.planLabel}` : ''})</span></span>
         {data.production.overMessage && <div className="mt-1 text-xs text-red-800">{inApp ? '이번 달 제작 크레딧을 모두 썼습니다 — 회사 관리자에게 문의하세요.' : data.production.overMessage}</div>}</Link>}
       {/* 대표 10/20 18:00 ②: 이번 달 목표 n/m 막대(승인된 목표) — 없으면 [목표 만들기] */}
       {data.goal ? <Link href="/s/marketing/goals" className="block rounded-card border border-line bg-white p-3 shadow-card hover:border-violet-300" data-testid="mkt-home-goal">

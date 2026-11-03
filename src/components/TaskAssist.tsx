@@ -62,7 +62,6 @@ export function TaskAssist({ taskId, onDraft }: { taskId: string; onDraft: (d: A
                   </div>
                 </div>
               )}
-              {m.cost_krw && <p className="text-[11px] text-ink-3">약 {Math.max(1, Math.round(Number(m.cost_krw)))}원</p>}
             </div>
           ))}
           {busy && <p className="flex items-center gap-1.5 text-xs text-ink-3"><Loader2 className="size-3.5 animate-spin" />작성 중…</p>}

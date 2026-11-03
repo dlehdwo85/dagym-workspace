@@ -32,10 +32,10 @@ export async function v22({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await card.waitFor();
   await owner.waitForFunction(() => [...document.querySelectorAll('[data-testid=doc-job]')].pop()?.getAttribute('data-status') === 'done', null, { timeout: 30000 });
   await card.getByTestId('doc-job-preview').waitFor();
-  // V23 4.3: 남은 AI 한도 막대·답마다 이번 요청 비용, 문서 카드 작업 비용(모든 사용자)
+  // V23 4.3 → 351차: 남은 AI 한도 막대는 %만, 답·문서 카드에 비용(원) 없음
   await owner.getByTestId('ai-budget').getByTestId('ai-budget-left').waitFor();
-  await owner.getByTestId('ai-cost').last().waitFor();
-  await card.getByTestId('doc-job-cost').waitFor();
+  assert.equal(await owner.getByTestId('ai-cost').count(), 0, '351차 #939 ③: 답 아래 이번 요청 약 n원 줄 없음'); // 대표 11/04
+  assert.equal(await card.getByTestId('doc-job-cost').count(), 0, '351차: 문서 작업 비용(원) 줄 없음');
   assert.match(await card.innerText(), /1쪽/);
   await card.getByTestId('doc-job-preview').click();
   await owner.getByTestId('doc-job-preview-big').waitFor();

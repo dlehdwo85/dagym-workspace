@@ -2,12 +2,12 @@
 import { useState } from 'react';
 import { CalendarDays, CheckCircle2, Eye, EyeOff, Gift, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { inputCls } from './ui';
-import { useIosApp } from './inApp';
+import { useInApp } from './inApp';
 
 
 /** 로그인·초대·재설정 공통 틀: 왼쪽 회사 소개, 오른쪽 입력 */
 export function AuthCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
-  const iosApp = useIosApp(); // #839 아이폰 앱(아이패드 가로 화면에서 왼쪽 판이 보임): 무료 체험 문구 없음
+  const iosApp = useInApp(); // #839 아이폰 앱(아이패드 가로 화면에서 왼쪽 판이 보임) → 351차 #942(대표 11/04): 안드로이드 앱도 무료 체험 문구 없음
   return (
     <div className="flex min-h-screen bg-canvas">
       <section className="relative hidden w-[44%] max-w-xl flex-col justify-between overflow-hidden bg-brand-800 p-10 text-white lg:flex" aria-hidden>

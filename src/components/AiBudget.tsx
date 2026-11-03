@@ -5,12 +5,13 @@ import { api } from './client';
 import { Button, cx, toast } from './ui';
 
 export type Budget = { limitKrw: number; usedKrw: number; remainingKrw: number; pct: number; todayKrw: number; dayLimitKrw: number; chatsLeft: number; docsLeft: number; extraKrw: number };
-/** 대표 10/24 ② 회사 월 AI 예산 — 직원에게는 %·다시 채워지는 날만(금액은 관리자 응답에만) */
-export type CompanyAi = { pct: number | null; over: boolean; resetLabel: string; message: string | null; limitKrw?: number | null; usedKrw?: number; leftKrw?: number | null };
-const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
+/** 대표 10/24 ② 회사 월 AI 예산 — 직원에게는 %·다시 채워지는 날만(금액은 관리자 응답에만) · capPct = 대표가 정한 회사 한도(요금제 예산 대비 %) */
+export type CompanyAi = { pct: number | null; over: boolean; resetLabel: string; message: string | null; limitKrw?: number | null; usedKrw?: number; leftKrw?: number | null; capPct?: number | null };
+/** 351차 #939 ③(대표 11/04): 직원·관리자 화면에는 AI 를 원·회로 보이지 않음 — 쓴 % → 남은 양 % */
+export const leftPct = (pct: number) => Math.max(0, 100 - Math.min(100, Math.round(pct)));
 
 /**
- * V23 4.3: AI 비서 위 "이번 달 남은 AI 6,420원 / 10,000원 · 대화 약 90회 · 문서 약 70건" 막대.
+ * V23 4.3 → 351차 #939 ③: AI 비서 위 "이번 달 AI 남은 양 99%" 막대(금액·횟수 없음 — 원 금액은 플랫폼 운영 화면에만).
  * 다 쓰면 [추가 요청](대표 승인), 크레딧 소진이면 빨간 안내(V23-1). compact = 오른쪽 패널용 한 줄
  */
 export function AiBudgetBar({ budget, company, creditMessage, compact, onChanged }: { budget?: Budget | null; company?: CompanyAi | null; creditMessage?: string | null; compact?: boolean; onChanged?: () => void }) {
@@ -22,12 +23,12 @@ export function AiBudgetBar({ budget, company, creditMessage, compact, onChanged
   if (!budget) return near;
   const out = budget.usedKrw >= budget.limitKrw;
   const dayOut = !out && budget.todayKrw >= budget.dayLimitKrw;
+  const limitKrw = budget.limitKrw;
   async function ask() {
-    const v = prompt('추가로 요청할 이번 달 AI 금액(원)', '5000');
-    if (!v) return;
-    const amount = Math.round(Number(v.replace(/[^0-9]/g, '')));
-    if (!amount || amount < 1000) { toast.error('1,000원 이상으로 적어 주세요'); return; }
-    try { await api('/api/ai/limit-requests', { body: { amountKrw: amount, reason: prompt('이유(선택)') ?? undefined } }); setSent(true); toast.ok('대표에게 추가 요청을 보냈습니다'); onChanged?.(); }
+    // 요청 양은 이번 달 한도의 절반(화면에는 금액이 없음) — 대표가 사람별 AI 한도 칸에서 승인
+    const reason = prompt('대표에게 이번 달 AI 사용량 추가를 요청합니다. 이유(선택)');
+    if (reason === null) return;
+    try { await api('/api/ai/limit-requests', { body: { amountKrw: Math.max(1000, Math.round(limitKrw * 0.5)), reason: reason.trim() || undefined } }); setSent(true); toast.ok('대표에게 추가 요청을 보냈습니다'); onChanged?.(); }
     catch (e: any) { toast.error(e.message); }
   }
   const tone = out ? 'bg-red-500' : budget.pct >= 80 ? 'bg-amber-500' : 'bg-brand-600';
@@ -35,9 +36,8 @@ export function AiBudgetBar({ budget, company, creditMessage, compact, onChanged
     <div className={cx('rounded-input border border-line bg-white', compact ? 'px-2 py-1' : 'px-3 py-2')} data-testid="ai-budget">
       {near}
       <div className={cx('flex flex-wrap items-center gap-x-2 gap-y-0.5', compact ? 'text-[11px]' : 'text-xs')}>
-        <span className="font-semibold text-ink">내 이번 달 남은 AI <span data-testid="ai-budget-left">{won(budget.remainingKrw)}</span> <span className="font-normal text-ink-3">/ {won(budget.limitKrw)}</span></span>
-        {!out && <span className="text-ink-3">대화 약 {budget.chatsLeft.toLocaleString('ko-KR')}회 · 문서 약 {budget.docsLeft.toLocaleString('ko-KR')}건</span>}
-        {dayOut && <span className="text-amber-700">오늘 한도({won(budget.dayLimitKrw)})를 다 썼습니다 — 내일 다시</span>}
+        <span className="font-semibold text-ink">이번 달 AI 남은 양 <span data-testid="ai-budget-left">{leftPct(budget.pct)}%</span></span>
+        {dayOut && <span className="text-amber-700">오늘 쓸 수 있는 양을 다 썼습니다 — 내일 다시</span>}
         {out && (sent ? <span className="text-ink-3">추가 요청을 보냈습니다</span>
           : <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={ask} data-testid="ai-limit-request">추가 요청</Button>)}
       </div>
@@ -45,4 +45,3 @@ export function AiBudgetBar({ budget, company, creditMessage, compact, onChanged
     </div>
   );
 }
-export const costLine = (krw?: number) => (krw === undefined || krw === null ? null : `이번 요청 약 ${Math.max(0, Math.round(krw)).toLocaleString('ko-KR')}원`);

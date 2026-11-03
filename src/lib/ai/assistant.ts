@@ -53,7 +53,7 @@ export async function aiStatus(u: SessionUser) {
   // 대표 10/24 ② 회사 월 AI 예산: 직원에게는 %·다시 채워지는 날만(금액은 관리자만), 다 썼으면 안내 문구
   const B = await import('./companyBudget');
   const cb = usage.budget;
-  const company = { pct: cb.pct, over: cb.over, resetLabel: cb.resetLabel, message: cb.over ? B.budgetMessage(cb) : null, ...(isAdmin(u) ? { limitKrw: cb.limitKrw, usedKrw: cb.usedKrw, leftKrw: cb.leftKrw } : {}) };
+  const company = { pct: cb.pct, over: cb.over, resetLabel: cb.resetLabel, message: cb.over ? B.budgetMessage(cb) : null, ...(isAdmin(u) ? { limitKrw: cb.limitKrw, usedKrw: cb.usedKrw, leftKrw: cb.leftKrw, capPct: B.capPct(cb) } : {}) }; // 351차 #939 ③: 대표 한도는 요금제 예산 대비 %(capPct)
   const { budget: _cb, ...usageOut } = usage;
   return { enabled: true, model: modelFor(), usage: isAdmin(u) ? usageOut : { ...usageOut, costUsd: undefined, tokens: undefined }, quota,
     budget, company, creditBlocked: !!creditUntil, creditMessage: creditUntil ? G.CREDIT_MSG : null,

@@ -15,6 +15,8 @@ export function MktPlanSection() {
   const { data, error, reload } = useApi<Data>('/api/marketing/plan');
   if (error || !data) return null;
   const used = Math.round(data.used.monthCredits * 10) / 10;
+  // 351차 #939 ③(대표 11/04): 크레딧 숫자 대신 % — 지금 요금제(또는 직접 적은 월 크레딧) 기준
+  const curLimit = data.overrides.monthlyCredits ?? (data.planCode ? data.plans[data.planCode]?.monthlyCredits ?? null : null);
   async function save(patch: Record<string, unknown>) { try { await api('/api/marketing/auto', { method: 'PUT', body: patch }); toast.ok('저장했습니다'); reload(); } catch (e: any) { toast.error(e.message); } }
   async function pick(code: string, p: Plan) {
     const off = data!.planCode === code;
@@ -25,11 +27,11 @@ export function MktPlanSection() {
   return (
     <section id="mkt-plan" className="scroll-mt-20 rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-plan">
       <h2 className="text-sm font-semibold">마케팅 제작 요금제</h2>
-      <p className="mt-0.5 text-xs text-ink-2">자동 제작실이 쓰는 월 제작 크레딧·주간 제작 수입니다. 이번 달 쓴 크레딧 <b className="tabular-nums text-ink" data-testid="mkt-plan-used">{used}</b> · 요금제마다 남는 양을 같이 보여 드립니다.</p>
+      <p className="mt-0.5 text-xs text-ink-2">자동 제작실이 쓰는 월 제작 크레딧·주간 제작 수입니다. 이번 달 제작 사용량 <b className="tabular-nums text-ink" data-testid="mkt-plan-used">{curLimit === null ? '요금제 없음' : `${Math.round((used / Math.max(1, curLimit)) * 100)}%`}</b> · 요금제마다 남는 양(%)을 같이 보여 드립니다.</p>
       <div className="mt-2 grid gap-2 sm:grid-cols-3">{Object.entries(data.plans).map(([k, p]) => {
         const cur = data.planCode === k;
         const limit = cur && data.overrides.monthlyCredits !== null ? data.overrides.monthlyCredits : p.monthlyCredits;
-        const left = Math.round((limit - used) * 10) / 10;
+        const left = Math.round((limit - used) * 10) / 10; const lp = limit > 0 ? Math.round((left / limit) * 100) : left < 0 ? -100 : 0;
         return (
           <button key={k} type="button" disabled={!data.canEdit} onClick={() => pick(k, p)} aria-pressed={cur} data-testid={`auto-plan-${k}`}
             className={cx('rounded-input border p-3 text-left text-xs disabled:cursor-default', cur ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
@@ -37,7 +39,7 @@ export function MktPlanSection() {
               <span className="ml-1 font-normal text-ink-3">· 가격 {p.price ? `${Number(p.price).toLocaleString('ko-KR')}원/월` : '결정 전'}</span></div>
             <div className="mt-1 text-ink-2">주간 {Object.entries(p.weekly).map(([kk, n]) => `${KIND[kk] ?? kk} ${n}`).join(' · ')}</div>
             <div className="text-ink-2">월 크레딧 {limit} · 생성 영상 {p.videoMonthly}편 · 재생성 {p.regenMonthly}회</div>
-            <div className={cx('mt-1 font-semibold tabular-nums', left < 0 ? 'text-red-700' : 'text-emerald-700')} data-testid={`auto-plan-left-${k}`}>이번 달 {left < 0 ? `${-left} 크레딧 초과` : `${left} 크레딧 남음`}</div>
+            <div className={cx('mt-1 font-semibold tabular-nums', left < 0 ? 'text-red-700' : 'text-emerald-700')} data-testid={`auto-plan-left-${k}`}>이번 달 {lp < 0 ? `${-lp}% 초과` : `${lp}% 남음`}</div>
           </button>);
       })}</div>
       {data.canEdit && <div className="mt-3 grid gap-2 sm:grid-cols-4">

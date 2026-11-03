@@ -50,7 +50,7 @@ describe('회사 월 AI 예산(원)', () => {
     await ctl({ anthropicReset: true, anthropicQueue: [say('네, 정리해 드릴게요')] });
     await cust.ok('POST', '/api/ai/chat', { text: '이번 주 할 일 정리해줘' });
     const n80 = await sql`select title, body from notifications where user_id = ${custOwnerId} and dedupe_key like 'ai_budget:%'`;
-    assert.equal(n80.length, 1); assert.equal(n80[0].title, 'AI 예산 80% 사용'); assert.match(n80[0].body, /5,000원 중 4,2\d\d원\(8\d%\)/); assert.match(n80[0].body, /\d+월 1일까지 AI 기능만 멈춥니다/);
+    assert.equal(n80.length, 1); assert.equal(n80[0].title, 'AI 예산 80% 사용'); assert.match(n80[0].body, /예산의 8\d%를 썼습니다/); assert.doesNotMatch(n80[0].body, /원/, '351차 #939 ③: 관리자 알림에도 원 없음'); assert.match(n80[0].body, /\d+월 1일까지 AI 기능만 멈춥니다/);
     await cust.ok('GET', '/api/ai/status'); // 다시 불러도 알림은 한 번
     assert.equal((await sql`select count(*)::int n from notifications where user_id = ${custOwnerId} and dedupe_key like 'ai_budget:%:80'`)[0].n, 1);
     await spend(1); // 5,600원 = 112%

@@ -22,7 +22,6 @@ export function resetOf(ym = monthOf()) {
   const ny = m === 12 ? y + 1 : y, nm = m === 12 ? 1 : m + 1;
   return { on: `${ny}-${String(nm).padStart(2, '0')}-01`, label: `${nm}월 1일` };
 }
-const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 
 export type BudgetSource = 'plan' | 'override' | 'unlimited' | 'legacy';
 export type CompanyBudget = {
@@ -84,6 +83,10 @@ export async function companyAiBudget(tenant: string, sql: Sql = db()): Promise<
     over: limit !== null && usedKrw >= limit, parts, resetOn: r.on, resetLabel: r.label };
 }
 
+/** 351차 #939 ③: 대표 한도(ownerCap)를 뺀 요금제 예산 — 대표 화면은 원 없이 이 값 대비 %로 한도를 정하고 보여 줌(예전 요금제는 기본 한도 기준) */
+export const baseBudgetKrw = (b: CompanyBudget): number | null => b.source === 'legacy' ? Math.round(defaultBudgetUsd() * usdKrw()) : b.source === 'unlimited' ? null : b.source === 'override' ? b.parts.planKrw : (b.parts.planKrw ?? 0) + b.parts.mktKrw + b.parts.packKrw;
+export const capPct = (b: CompanyBudget): number | null => { const base = baseBudgetKrw(b); return b.parts.ownerCapKrw === null || !base ? null : Math.min(100, Math.round((b.parts.ownerCapKrw / base) * 100)); };
+
 /** 다 썼을 때 안내 — 금액은 관리 화면에서만(직원에게는 '회사 AI 사용량'으로) */
 export const budgetMessage = (b: Pick<CompanyBudget, 'source' | 'resetLabel'>) => b.source === 'legacy'
   ? `이번 달 회사 AI 한도에 도달해 AI 기능을 멈췄습니다 — ${b.resetLabel}에 다시 쓸 수 있어요. 업무·일정 등 다른 기능은 그대로입니다(대표가 AI 설정에서 한도를 올릴 수 있습니다).`
@@ -114,8 +117,8 @@ export async function budgetAlerts(tenant: string, b?: CompanyBudget, sql: Sql =
   if (!admins.length) return 0;
   const legacy = b.source === 'legacy';
   const body = level === 100
-    ? `이번 달 회사 AI ${legacy ? '한도' : '예산'} ${won(b.limitKrw)}을 모두 써서 AI 기능을 멈췄습니다 — ${b.resetLabel}에 다시 채워집니다. 업무·일정 등 다른 기능은 그대로입니다.`
-    : `회사 AI ${legacy ? '한도' : '예산'} ${won(b.limitKrw)} 중 ${won(b.usedKrw)}(${b.pct}%)를 썼습니다 — 100%가 되면 ${b.resetLabel}까지 AI 기능만 멈춥니다(업무·일정은 그대로).`;
+    ? `이번 달 회사 AI ${legacy ? '한도' : '예산'}을 모두 써서 AI 기능을 멈췄습니다 — ${b.resetLabel}에 다시 채워집니다. 업무·일정 등 다른 기능은 그대로입니다.`
+    : `회사 AI ${legacy ? '한도' : '예산'}의 ${b.pct}%를 썼습니다 — 100%가 되면 ${b.resetLabel}까지 AI 기능만 멈춥니다(업무·일정은 그대로).`; // 351차 #939 ③: 관리자 알림에도 원 없음
   const sent = await notify(sql, { userIds: admins, type: 'usage_alert', title: level === 100 ? '이번 달 AI 예산을 모두 썼습니다' : `AI 예산 ${level}% 사용`, body, link: '/admin/usage', dedupeKey: key });
   fired.add(key);
   return Array.isArray(sent) ? sent.length : 0;

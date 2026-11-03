@@ -145,15 +145,15 @@ export default function AssistantPage() {
   }
   useEffect(() => { if (voice) keepScreenOn(true); return () => { keepScreenOn(false); stopSpeaking(); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   async function editLimit() {
-    // 대표 10/24 ②: 원 단위 — 요금제 예산보다 낮게 정하면 그 값에서 멈춤, 비우면 요금제 예산 그대로
-    const v = prompt('회사 AI 월 한도(원) — 비우면 요금제 예산 그대로, 더 낮게 적으면 그 값에서 멈춥니다', status.data?.company?.limitKrw != null ? String(status.data.company.limitKrw) : '');
+    // 대표 10/24 ② → 351차 #939 ③: 원이 아니라 요금제 예산 대비 % — 100 보다 낮게 적으면 그 비율에서 멈춤, 비우면(또는 100) 요금제 예산 그대로
+    const v = prompt('회사 AI 월 한도 — 요금제 예산의 %(비우면 요금제 예산 그대로, 100보다 낮게 적으면 그 비율에서 멈춥니다)', status.data?.company?.capPct != null ? String(status.data.company.capPct) : '');
     if (v === null) return;
-    const krw = Math.round(Number(v.replace(/[^0-9]/g, '')));
-    try { await api('/api/ai/limit', { method: 'PUT', body: v.trim() === '' ? { clear: true } : { monthlyKrw: krw } }); status.reload(); toast.ok('한도를 바꿨습니다'); } catch (e: any) { toast.error(e.message); }
+    const pct = Math.round(Number(v.replace(/[^0-9]/g, '')));
+    if (v.trim() !== '' && (!Number.isFinite(pct) || pct < 1 || pct > 100)) { toast.error('1~100 사이 %로 적어 주세요'); return; }
+    try { await api('/api/ai/limit', { method: 'PUT', body: v.trim() === '' ? { clear: true } : { pct } }); status.reload(); toast.ok('한도를 바꿨습니다'); } catch (e: any) { toast.error(e.message); }
   }
 
   if (status.data && !status.data.enabled) return <Empty title="AI 비서가 꺼져 있습니다" icon={Sparkles}>관리자가 AI 를 설정하면 사용할 수 있습니다.</Empty>;
-  const u = status.data?.usage;
   return (
     <div className="mx-auto flex max-w-5xl gap-4">
     {/* V14 2번: 대화 목록 (휴대폰은 위 "대화 목록" 버튼) */}
@@ -184,7 +184,7 @@ export default function AssistantPage() {
     <div className="flex h-[calc(100dvh-9rem)] min-w-0 flex-1 flex-col sm:h-[calc(100dvh-6rem)]">
       <PageHeader title={aiName(space)} icon={Sparkles}
         sub={<>자료실·업무·일정{user.role === 'owner' || user.role === 'admin' ? '·매출' : ''}을 내 권한 안에서 찾아 답합니다. 업무 만들기·첨부·댓글은 <b>[확인]</b>을 눌러야 반영됩니다.
-          {u?.costUsd !== undefined && status.data?.company?.usedKrw !== undefined && <span className="ml-1 text-xs text-ink-3" data-testid="ai-company-line">회사 이번 달 AI {status.data.company.usedKrw.toLocaleString('ko-KR')}원 / 예산 {status.data.company.limitKrw === null || status.data.company.limitKrw === undefined ? '무제한' : `${status.data.company.limitKrw.toLocaleString('ko-KR')}원`}{status.data.company.pct !== null && ` (${status.data.company.pct}%)`} · {status.data.company.resetLabel} 초기화{status.data?.canSetLimit && <button onClick={editLimit} className="ml-1 text-brand-600 underline">한도 바꾸기</button>}</span>}</>} />
+          {status.data?.company?.usedKrw !== undefined && <span className="ml-1 text-xs text-ink-3" data-testid="ai-company-line">회사 이번 달 AI 사용량 {status.data.company.pct === null ? '제한 없음' : `${status.data.company.pct}%`} · {status.data.company.resetLabel} 초기화{status.data?.canSetLimit && <button onClick={editLimit} className="ml-1 text-brand-600 underline">한도 바꾸기</button>}</span>}</>} />
       <div className="mb-2"><AiBudgetBar budget={status.data?.budget} company={status.data?.company} creditMessage={status.data?.creditMessage} onChanged={status.reload} /></div>
       <div className="mb-2 flex items-center gap-2 lg:hidden">
         <Button size="sm" variant="secondary" onClick={() => setListOpen(true)} data-testid="ai-threads-open">대화 목록</Button>

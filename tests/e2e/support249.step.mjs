@@ -23,8 +23,8 @@ export async function support249({ owner, ctx, sql, BASE, FAKE, SHOTS, tick }) {
     // #782 표시 — 돌고 있는 것처럼 보이던 'AI 확인 중' 대신
     const v = ia.getByTestId('support-verdict');
     assert.equal(await v.innerText(), '규칙상 맞음 · AI 판단 전'); assert.equal(await v.getAttribute('data-pending'), '1');
-    assert.match(await owner.getByTestId('support-auto-note').innerText(), /규칙상 맞음 · AI 판단 전 \d+건[\s\S]*\[AI 판단\]을 눌러야[\s\S]*건당 약 [\d,]+원[\s\S]*새 공고 자동 판단이 꺼져 있습니다/);
-    assert.match(await ia.getByTestId('support-analyze').innerText(), /^AI 판단 · 약 [\d,]+원$/);
+    assert.match(await owner.getByTestId('support-auto-note').innerText(), /규칙상 맞음 · AI 판단 전 \d+건[\s\S]*\[AI 판단\]을 눌러야[\s\S]*새 공고 자동 판단이 꺼져 있습니다/);
+    assert.match(await ia.getByTestId('support-analyze').innerText(), /^AI 판단$/);
     assert.equal(await owner.getByText('AI 확인 중', { exact: true }).count(), 0);
     // #784 빈칸 안내 — 1인 창조기업 공고가 상시근로자 수 빈칸 때문에 '확인 필요'
     assert.match(await owner.getByTestId('support-profile-blanks').innerText(), /^빈칸 \d+개\([^)]*상시근로자 수[^)]*\)를 채우면 \d+건 더 판단합니다/);
@@ -55,8 +55,8 @@ export async function support249({ owner, ctx, sql, BASE, FAKE, SHOTS, tick }) {
     await owner.getByTestId('support-analyze-top').click();
     const bk = owner.getByTestId('support-bulk'); await bk.waitFor();
     assert.match(await bk.innerText(), new RegExp(`판단 전’ ${lv.pendingCount}건`));
-    assert.match(await bk.getByTestId(`support-bulk-${n}`).innerText(), new RegExp(`^${n}건 판단 · 약 [\\d,]+원$`));
-    assert.match(await bk.getByTestId('support-bulk-all').innerText(), new RegExp(`^대기 중인 공고 모두 AI 판단\\(${lv.pendingCount}건 · 약 [\\d,]+원\\)$`), '269차 #803 모두 판단 단추(건수·예상 비용)');
+    assert.match(await bk.getByTestId(`support-bulk-${n}`).innerText(), new RegExp(`^${n}건 판단$`)); // 351차 #939 ③: 원 없음
+    assert.match(await bk.getByTestId('support-bulk-all').innerText(), new RegExp(`^대기 중인 공고 모두 AI 판단\\(${lv.pendingCount}건\\)$`), '269차 #803 모두 판단 단추(건수) · 351차: 예상 비용(원) 없음');
     await owner.screenshot({ path: `${SHOTS}/596-support-bulk.png` });
     await bk.getByTestId(`support-bulk-${n}`).click();
     await owner.getByText(new RegExp(`위에서 ${n}건을 AI 세일즈가 판단했습니다`)).waitFor();

@@ -4,7 +4,6 @@ import { Copy, FileText, Loader2, Pencil, RotateCw, Send, Square } from 'lucide-
 import Link from 'next/link';
 import { apiStream } from './client';
 import { AiText } from './AiText';
-import { costLine } from './AiBudget';
 import { Button, cx, inputCls, toast } from './ui';
 
 /**
@@ -40,14 +39,14 @@ export function FoundFiles({ files, onAttach }: { files?: FoundFile[]; onAttach:
 export type ReplyTiming = { firstMs: number | null; doneMs: number; chunks: number; server?: { firstMs: number | null; answerMs: number | null; totalMs: number; chunks: number } | null };
 const sec = (ms: number) => `${(ms / 1000).toFixed(1)}초`;
 export const timingLine = (t?: ReplyTiming) => (!t ? null : `${t.firstMs !== null ? `첫 글자 ${sec(t.firstMs)} · ` : ''}끝 ${sec(t.doneMs)}`);
-/** 답 아래 작은 줄: 이번 요청 비용 · 첫 글자·끝 시각(화면·패널 공통) */
+/** 답 아래 작은 줄: 첫 글자·끝 시각(화면·패널 공통) */
 export function ReplyMeta({ m }: { m: ChatMsg }) {
-  const cost = m.role === 'assistant' ? costLine(m.costKrw) : null; const t = m.role === 'assistant' ? timingLine(m.timing) : null;
-  if (!cost && !t) return null;
+  // 351차 #939 ③(대표 11/04): '이번 요청 약 n원' 줄은 없음(직원·관리자 화면에 AI 를 원·회로 보이지 않음) — 첫 글자·끝 시각만
+  const t = m.role === 'assistant' ? timingLine(m.timing) : null;
+  if (!t) return null;
   const sv = m.timing?.server;
   return (
     <span className="mt-0.5 text-[10.5px] text-ink-3">
-      {cost && <span data-testid="ai-cost">{cost}</span>}{cost && t ? ' · ' : ''}
       {t && <span data-testid="ai-timing" data-first-ms={m.timing?.firstMs ?? ''} data-done-ms={m.timing?.doneMs} data-chunks={m.timing?.chunks}
         title={`글자 조각 ${m.timing?.chunks}개${sv ? ` · 서버 기준 답 첫 글자 ${sv.answerMs !== null ? sec(sv.answerMs) : '-'} · 끝 ${sec(sv.totalMs)} · 조각 ${sv.chunks}개` : ''}`}>{t}</span>}
     </span>

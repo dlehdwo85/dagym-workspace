@@ -12,7 +12,6 @@ export type Minutes = { id: string; summary: string; decisions: string[]; todos:
 type Info = { items: Minutes[]; quota: { capMin: number; usedMin: number }; perMinKrw: number; maxSec: number; sttReady: boolean; canWork: boolean };
 
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 
 export function MeetingRecorder({ eventId, occurrenceStart, canWork, followed, onTodo }: {
   eventId: string; occurrenceStart?: string; canWork: boolean; followed: Set<string>; onTodo: (t: MinutesTodo) => void;
@@ -41,7 +40,7 @@ export function MeetingRecorder({ eventId, occurrenceStart, canWork, followed, o
     try {
       setStatus(`녹음 올리는 중… (${Math.max(1, Math.round(blob.size / 1024 / 1024))}MB)`);
       const up = await uploadToLibrary(new File([blob], `회의 녹음 ${new Date().toISOString().slice(0, 16).replace('T', ' ')}.${ext}`, { type }), '회의 녹음', (pct) => setStatus(`녹음 올리는 중… ${pct}%`), ['회의 녹음']);
-      setStatus(`받아쓰고 요약하는 중… (${mmss(duration)}, 약 ${won(est)})`);
+      setStatus(`받아쓰고 요약하는 중… (${mmss(duration)})`);
       await api(`/api/events/${eventId}/minutes`, { body: { audioFileId: up.id, duration: Math.max(1, Math.round(duration)), ...(occurrenceStart ? { occurrenceStart } : {}) } });
       toast.ok('회의록을 만들었습니다'); info.reload();
     } catch (e: any) { toast.error(e.message); } finally { setStatus(''); }
@@ -78,7 +77,7 @@ export function MeetingRecorder({ eventId, occurrenceStart, canWork, followed, o
   return (
     <section data-testid="minutes">
       <h3 className="mb-2 flex flex-wrap items-center gap-1.5 text-sm font-semibold"><Mic className="size-4 text-ink-3" />AI 회의록
-        {q && <span className="text-xs font-normal text-ink-3" data-testid="minutes-quota">· 이번 달 녹음 {q.usedMin}/{q.capMin}분 · 약 {won(info.data!.perMinKrw)}/분</span>}</h3>
+        {q && <span className="text-xs font-normal text-ink-3" data-testid="minutes-quota">· 이번 달 녹음 {q.usedMin}/{q.capMin}분</span>}</h3>
       {canWork && (
         <div className="flex flex-wrap items-center gap-2">
           {info.data && !info.data.sttReady ? (
@@ -98,7 +97,7 @@ export function MeetingRecorder({ eventId, occurrenceStart, canWork, followed, o
       {!latest && !status && <p className="mt-1 text-xs text-ink-3">회의를 녹음하거나 녹음 파일을 올리면 요약·결정 사항·할 일을 만들어 드립니다. 녹음 원본은 받아쓴 뒤 바로 지웁니다.</p>}
       {latest && (
         <div className="mt-2 space-y-2 rounded-input border border-line bg-white p-3 text-sm" data-testid="minutes-card">
-          <p className="text-xs text-ink-3">{new Date(latest.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {mmss(latest.durationSec)} · {latest.createdByName ?? ''} · <span data-testid="minutes-cost">약 {won(latest.costKrw)}</span>
+          <p className="text-xs text-ink-3">{new Date(latest.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {mmss(latest.durationSec)} · {latest.createdByName ?? ''}
             {latest.transcript && <> · <button type="button" className="underline" onClick={() => setShowText(showText ? null : latest.transcript)}>{showText ? '녹취 닫기' : '녹취 보기'}</button></>}</p>
           <p className="whitespace-pre-wrap" data-testid="minutes-summary">{latest.summary}</p>
           {latest.decisions.length > 0 && (
