@@ -43,6 +43,8 @@ export type Task = {
   section_id?: string | null; assignee_ack_at?: string | null; created_by?: string; sort_order?: number;
   task_type?: 'normal' | 'milestone' | 'approval' | 'inspection'; approval_line_id?: string | null; photo_required?: number; photo_count?: number;
   fields?: Record<string, unknown>;
+  /** 348차: 검색 결과 — 어디에 맞았는지·그 둘레 한 줄(제목 일치는 글 없음) */
+  match?: { in: string; text: string | null } | null;
   requested_by?: string | null; requested_by_name?: string | null; created_at?: string; completed_at?: string | null; prev_status?: string | null;
   assigned_at?: string | null;
   batch_id?: string | null; batch?: { total: number; done: number } | null; batch_people?: { id: string | null; name: string | null; status: string }[] | null; recurrence_source_id?: string | null;
@@ -56,6 +58,16 @@ const OpenTaskCtx = createContext<(id: string) => void>(() => {});
 /** V14 12번 다중 선택: 선택 모드·선택된 id·토글(Shift 는 화면 순서로 범위) */
 type Sel = { on: boolean; sel: Set<string>; toggle: (id: string, range?: boolean) => void; enter: (id: string) => void };
 const SelectCtx = createContext<Sel | null>(null);
+/** 348차(대표 11/03 02:42 '아름베스트빌 검색해도 안 나옴'): 검색어 — 결과 줄에 일치한 곳·글을 보여 주고 완료 업무도 접지 않는다 */
+const SearchCtx = createContext<string>('');
+/** 348차: 검색어와 같은 글자를 노랗게 */
+function Hi({ text, q }: { text: string; q: string }) {
+  if (!q) return <>{text}</>;
+  const parts: React.ReactNode[] = []; const lo = text.toLowerCase(), ql = q.toLowerCase(); let i = 0;
+  for (let j = lo.indexOf(ql); j >= 0; j = lo.indexOf(ql, i)) { if (j > i) parts.push(text.slice(i, j)); parts.push(<mark key={j} className="rounded-sm bg-yellow-200/70 text-inherit">{text.slice(j, j + q.length)}</mark>); i = j + q.length; }
+  if (i < text.length) parts.push(text.slice(i));
+  return <>{parts}</>;
+}
 
 function TaskLink({ id, className, children }: { id: string; className?: string; children: React.ReactNode }) {
   const open = useContext(OpenTaskCtx);
@@ -108,6 +120,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     return VIEW_MODES.includes(m as ViewMode) ? (m as ViewMode) : defaultMode;
   });
   const [q, setQ] = useState(sp.get('q') ?? '');
+  const sq = q.trim(); // 348차: 검색 중에는 보기(내 업무·지연…)를 떼고 완료 업무까지 전체에서 찾는다(서버도 댓글·체크리스트·첨부·하위 업무까지)
   const [filters, setFilters] = useState<Record<string, string>>(() => filtersOf(sp));
   // V11 2번: "완료된 업무도 보기" 체크박스는 없앰(상단 "완료" 칩 = 완료 업무 월별). 주소 ?done=1 만 호환
   const [showDone] = useState(sp.get('done') === '1');
@@ -161,13 +174,13 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
 
   const qs = useMemo(() => {
     const p = new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), ...(fixed ?? {}) });
-    if (q) p.set('q', q);
+    if (sq) { p.set('q', sq); p.delete('view'); return p.toString(); } // 348차: 검색 = 보기·완료 여부와 상관없이 전체에서(서버가 완료 업무도 찾아 맨 아래에)
     // #508(대표 10/23): 목록은 완료하면 바로 빠지고 묶음 맨 아래 접힌 '완료됨 n건'(이번 주 완료) — 캘린더는 V6 16번 그대로(오늘 완료 취소선). "완료" 보기는 완료 업무 전체(월별)
     // 334차(대표 11/02 16:4x #917): 완료하면 전체·내 업무·담당자별 목록에서 바로 빠지고 '완료' 칩에서만(#508 '완료됨' 접힌 칸·오늘 완료 취소선 없음) — 캘린더는 V6 16번 그대로
     if (!showDone && mode !== 'board' && !filters.status && (fixed?.view ?? filters.view) !== 'done') p.set('includeDone', '0');
     if ((fixed?.view ?? filters.view) === 'done') { p.set('limit', '1000'); if (mode === 'list') p.set('doneMonth', todayStr().slice(0, 7)); } // V20: 목록은 이번 달만, 지난달은 펼칠 때
     return p.toString();
-  }, [filters, fixed, q, showDone, mode]);
+  }, [filters, fixed, sq, showDone, mode]);
   const { data, error, loading, reload, setData } = useApi<{ tasks: Task[] }>(`/api/tasks?${qs}`);
   const tasks = useMemo(() => sortTasks(data?.tasks ?? [], sortBy), [data, sortBy]);
   // V14 42번: 보기 칩 건수 — 목록과 같은 필터(보기·담당자 제외), 목록이 바뀔 때마다 다시
@@ -283,7 +296,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const sections = sectionsApi.data?.sections ?? [];
   const [boardBy, setBoardBy] = useState<'status' | 'section'>('status');
 
-  const curView = fixed?.view ?? filters.view ?? '';
+  const curView = sq ? '' : (fixed?.view ?? filters.view ?? ''); // 348차: 검색 중엔 전체 보기 규칙으로(완료는 줄에 그대로)
   // V14 34-보정: 기본 묶기는 PC·휴대폰 모두 담당자별(각 묶음 안은 마감 일시 오름차순 — 기본 정렬 'due'), 마감별은 묶기 메뉴에서 선택
   const group: GroupBy = groupPick || (curView === 'my' ? 'due' : 'assignee');
   const pickGroup = (g: GroupBy) => { setGroupPick(g); try { localStorage.setItem('wos_task_group', g); } catch {} };
@@ -409,7 +422,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         <input ref={kbProxy} aria-hidden tabIndex={-1} className="pointer-events-none fixed left-0 top-0 h-0 w-0 opacity-0" />
         <div className="relative min-w-[160px] flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
-          <input className={cx(inputCls, 'h-9 pl-8')} placeholder="제목·설명·태그 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="업무 검색" />
+          <input className={cx(inputCls, 'h-9 pl-8')} placeholder="제목·설명·댓글·첨부 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="업무 검색" />
         </div>
         <div className="relative">
           <Button variant="secondary" onClick={() => setMoreMenu(!moreMenu)} aria-expanded={moreMenu} aria-label="업무 더보기 메뉴" data-testid="tasks-more"><MoreHorizontal /></Button>
@@ -458,6 +471,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           </span>
         ))}
         {chips.length > 1 && <button className="text-xs font-medium text-ink-2 underline" onClick={() => setFilters((f) => ({ view: f.view ?? '' }))}>모두 지우기</button>}
+        {sq && <p className="basis-full text-xs text-ink-3" data-testid="search-scope">{`‘${sq}’ 검색: 제목·설명·태그·댓글·체크리스트·첨부·하위 업무에서 찾고, 완료 업무와 모든 보기의 업무를 함께 보여 줍니다`}</p>}
       </div>
       {filterOpen && (
         <div className="grid animate-fade-up grid-cols-2 gap-2 rounded-card border border-line bg-white p-3 shadow-card sm:grid-cols-3 xl:grid-cols-6" data-testid="filter-panel">
@@ -497,7 +511,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             if (action === 'delete' && panelId && done.includes(panelId)) closePanel();
             reload(); broadcastRefresh();
           }} />}
-          <SelectCtx.Provider value={mode === 'list' || mode === 'board' ? selCtx : null}>
+          <SearchCtx.Provider value={sq}><SelectCtx.Provider value={mode === 'list' || mode === 'board' ? selCtx : null}>
           {mode === 'list' && (projectId ? <SectionedList projectId={projectId} sections={sections} tasks={tasks} onPatch={onPatch} reloadSections={sectionsApi.reload} reloadTasks={reload} />
             : curView === 'done' ? <DoneArchive thisMonth={tasks} filterQs={new URLSearchParams(Object.entries({ assigneeId: filters.assigneeId, teamId: filters.teamId, projectId: fixed?.projectId }).filter(([, v]) => v) as [string, string][]).toString()} onPatch={onPatch} />
             : <GroupedTasks tasks={tasks} group={group} view={curView} assigneeFilter={filters.assigneeId || null} onPatch={onPatch} onAcked={reload}
@@ -511,7 +525,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
             </div>
           )}
           {mode === 'board' && (boardBy === 'section' && projectId ? <SectionBoard sections={sections} tasks={tasks} onPatch={onPatch} /> : <BoardView tasks={tasks} onPatch={onPatch} />)}
-          </SelectCtx.Provider>
+          </SelectCtx.Provider></SearchCtx.Provider>
           {/* V14 20번: 처음 쓰는 사람에게 "선택" 안내 (목록 아래 — 늦게 떠도 행이 밀리지 않게) */}
           {!selOn && selTip && (mode === 'list' || mode === 'board') && (
             <p className="mt-2 flex items-center gap-2 rounded-input border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800" data-testid="select-tip">
@@ -872,6 +886,7 @@ function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAc
   // PC: 손잡이를 마우스로 끌기 · 휴대폰: 행을 0.4초 꾹 누르면 들어 올려 위아래로
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 8 } }));
   const selOnCtx = !!useContext(SelectCtx)?.on;
+  const searching = !!useContext(SearchCtx); // 348차
   // 맨 위 열 제목(붙는 줄)은 스크롤해서 첫 묶음 열 제목이 화면 위로 지나간 뒤에만 보임
   const [stuck, setStuck] = useState(false);
   const headRef = useRef<HTMLDivElement>(null);
@@ -1009,8 +1024,9 @@ function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAc
           const open = x.items.filter((t) => t.status !== 'done').length;
           // #508: 완료 업무는 목록에서 빼고 묶음 맨 아래 접힌 '완료됨 n건(오늘·이번 주)'
           const archive = group === 'month';
-          const shown = archive ? x.items : x.items.filter((t) => t.status !== 'done');
-          const doneFold = archive ? [] : x.items.filter((t) => t.status === 'done');
+          const showAll = archive || searching; // 348차: 검색 결과는 완료 업무도 줄에 그대로(접지 않음)
+          const shown = showAll ? x.items : x.items.filter((t) => t.status !== 'done');
+          const doneFold = showAll ? [] : x.items.filter((t) => t.status === 'done');
           const late = x.items.filter((t) => t.status !== 'done' && t.due_date && t.due_date < today).length;
           const isFolded = folded[x.key];
           const who = x.label === '담당자 없음' ? '담당자 없이' : `${x.label}님에게`;
@@ -1018,19 +1034,20 @@ function GroupedTasks({ tasks: given, group, view, assigneeFilter, onPatch, onAc
             placeholder={group === 'assignee' ? `${who} 업무 추가` : group === 'requester' ? `${x.label} 요청으로 업무 추가` : x.label ? `${x.label}에 업무 추가` : '업무 추가'} />;
           return (
             <GroupDrop key={x.key} id={`group:${x.key}`} groupKey={x.key}>
+              {/* 348차(대표 11/03 02:39 휴대폰 캡처 '글자 깨짐·정렬'): 이름이 '이동\n재' 로 쪼개지고 안내문이 두 줄로 밀림 → 이름·건수·지연은 줄바꿈 없이, 안내문은 좁은 화면에서 아래 줄 */}
               {x.label && (
                 <button onClick={() => setFolded((f) => ({ ...f, [x.key]: !f[x.key] }))} aria-expanded={!isFolded}
-                  className={cx('mb-1.5 flex w-full items-center gap-2 px-1 text-left text-sm font-semibold', x.tone ?? 'text-ink')}>
-                  <ChevronDown className={cx('size-4 text-ink-3 transition-transform', isFolded && '-rotate-90')} />
-                  {x.head}{x.label}
-                  <span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums" title="진행 중">{open}</span>
-                  {late > 0 && <span className="rounded-full bg-red-50 px-1.5 text-xs font-medium text-red-600 tabular-nums">지연 {late}</span>}
-                  {!x.items.length && <span className="text-xs font-normal text-ink-3">업무 없음</span>}
-                  {x.note && <span className="text-xs font-normal text-violet-700" data-testid="group-collab-note">{x.note}</span>}
+                  className={cx('mb-1.5 flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-left text-sm font-semibold', x.tone ?? 'text-ink')}>
+                  <ChevronDown className={cx('size-4 shrink-0 text-ink-3 transition-transform', isFolded && '-rotate-90')} />
+                  <span className="flex shrink-0 items-center gap-2" data-testid="group-label">{x.head}<span className="whitespace-nowrap">{x.label}</span></span>
+                  <span className="shrink-0 rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums" title="진행 중">{open}</span>
+                  {late > 0 && <span className="shrink-0 rounded-full bg-red-50 px-1.5 text-xs font-medium text-red-600 tabular-nums">지연 {late}</span>}
+                  {!x.items.length && <span className="shrink-0 text-xs font-normal text-ink-3">업무 없음</span>}
+                  {x.note && <span className="basis-full pl-6 text-xs font-normal text-violet-700 sm:basis-auto sm:pl-0" data-testid="group-collab-note">{x.note}</span>}
                 </button>
               )}
               {!isFolded && !archive && shown.length > 0 && <ListHeader sortBy={sortBy} onSort={onSort} compact />}
-              {!isFolded && <ListView tasks={shown} onPatch={onPatch} hint={gi === 0} tail={archive ? undefined : addRow} sortable={draggable} dragHint={!draggable && !archive} onMove={draggable ? (t, to) => {
+              {!isFolded && <ListView tasks={shown} onPatch={onPatch} hint={gi === 0} tail={showAll ? undefined : addRow} sortable={draggable} dragHint={!draggable && !archive} onMove={draggable ? (t, to) => {
                 const ids = shown.map((i) => i.id); const from = ids.indexOf(t.id);
                 const at = to === 'top' ? 0 : to === 'bottom' ? ids.length - 1 : Math.max(0, Math.min(ids.length - 1, from + (to === 'up' ? -1 : 1)));
                 if (at !== from) onReorder(arrayMove(ids, from, at));
@@ -1205,12 +1222,12 @@ function CollabSection({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b
     <section data-group="collab" data-testid="my-collab">
       <h2 className="mb-1.5">
         <button type="button" onClick={() => setFolded((f) => !f)} aria-expanded={!folded} data-testid="my-collab-fold"
-          className="flex w-full items-center gap-2 px-1 text-left text-sm font-semibold text-violet-800">
-          <ChevronDown className={cx('size-4 text-ink-3 transition-transform', folded && '-rotate-90')} />
-          <Users className="size-4" aria-hidden />공동 업무
-          <span className="rounded-full bg-violet-100 px-1.5 text-xs font-medium text-violet-800 tabular-nums" title="진행 중" data-testid="my-collab-count">{tasks.length}</span>
-          {late > 0 && <span className="rounded-full bg-red-50 px-1.5 text-xs font-medium text-red-600 tabular-nums">지연 {late}</span>}
-          <span className="text-xs font-normal text-ink-3">여러 명이 함께 맡은 업무</span>
+          className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-left text-sm font-semibold text-violet-800">
+          <ChevronDown className={cx('size-4 shrink-0 text-ink-3 transition-transform', folded && '-rotate-90')} />
+          <span className="flex shrink-0 items-center gap-2 whitespace-nowrap"><Users className="size-4" aria-hidden />공동 업무</span>
+          <span className="shrink-0 rounded-full bg-violet-100 px-1.5 text-xs font-medium text-violet-800 tabular-nums" title="진행 중" data-testid="my-collab-count">{tasks.length}</span>
+          {late > 0 && <span className="shrink-0 rounded-full bg-red-50 px-1.5 text-xs font-medium text-red-600 tabular-nums">지연 {late}</span>}
+          <span className="text-xs font-normal text-ink-3 max-sm:basis-full max-sm:pl-6">여러 명이 함께 맡은 업무</span>
         </button>
       </h2>
       {!folded && <div className="overflow-hidden rounded-card border border-violet-200 bg-white shadow-card" data-testid="task-list">
@@ -1269,6 +1286,7 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
   const swipeOn = useSwipeSetting() && canSetStatus(t, user.id, nextStatusOnCheck(t, user.role), user.role);
   const rowOpen0 = useRowOpen(t.id, useContext(OpenTaskCtx));
   const selc = useContext(SelectCtx);
+  const sq = useContext(SearchCtx); // 348차: 검색 중이면 제목은 두 줄까지 다 보이고(잘린 뒤에 이름이 있을 수 있음) 일치한 줄을 아래에
   const picked = !!selc?.sel.has(t.id);
   // 선택 모드에서는 행을 누르면 선택/해제 (Shift = 범위)
   const rowOpen = selc?.on ? { onClick: (e: React.MouseEvent) => { e.preventDefault(); selc.toggle(t.id, e.shiftKey); } } : rowOpen0;
@@ -1335,12 +1353,12 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
         {/* 점검 2026-10-16 ①: 1024px 미만(태블릿·좁은 창)은 휴대폰처럼 제목 두 줄 + 아래 줄에 상태·정보 — 고정 열에 제목이 눌리지 않게 */}
         {/* 대표 실기기(10/16): 휴대폰은 오른쪽 마감·담당 칸 때문에 제목이 절반 폭에서 줄바꿈 → 제목은 한 줄 전체 폭, 마감·담당은 아래 줄(상태 칩 옆) */}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 max-lg:contents lg:flex-row lg:items-center lg:gap-3">
-          <span className="flex min-w-0 items-center gap-1.5 max-lg:basis-full lg:max-w-[55%] lg:shrink-0" data-testid="row-title">
+          <span className={cx('flex min-w-0 items-center gap-1.5 max-lg:basis-full lg:max-w-[55%] lg:shrink-0', sq && 'flex-wrap')} data-testid="row-title">
             {/* 308차 #866: 공동 업무 줄은 우선순위 열 대신 높음·긴급만 제목 앞 깃발(보통·낮음은 안 보임) */}
             {collab && (t.priority === 'urgent' || t.priority === 'high') && <Flag className={cx('size-3.5 shrink-0', t.priority === 'urgent' ? 'fill-red-500 text-red-600' : 'fill-orange-400 text-orange-500')} aria-label={t.priority === 'urgent' ? '긴급' : '높음'} data-testid="row-pri-flag" />}
             <TypeIcon t={t} />
             {/* 대표(10/16): 제목은 한 줄 전체 폭·길면 … (두 줄은 목록이 길어져 눈이 피로) — 전체 제목은 줄을 눌러 상세에서 */}
-            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{t.title}</TaskLink>
+            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline', sq ? 'line-clamp-2 whitespace-normal break-words' : 'truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{sq ? <Hi text={t.title} q={sq} /> : t.title}</TaskLink>
             <CarriedBadge t={t} />
             {t.sales_ref?.kind && <span className="shrink-0 rounded-full bg-blue-50 px-1.5 text-[10px] font-medium text-blue-800" title={t.sales_ref.name ?? ''} data-testid="row-sales-ref">{(ST.kind as Record<string, string>)[t.sales_ref.kind] ?? (t.sales_ref.kind === 'support' ? '지원사업' : t.sales_ref.kind === 'contract' ? '계약' : t.sales_ref.kind === 'research' ? '후속조사' : t.sales_ref.kind)}</span>}
             {/* 344차(대표 11/02 #925): 발주처가 취소한 공고의 열린 업무 — '공고 취소' 빨간 칩(상세에서 [공고 취소로 완료]) */}
@@ -1350,6 +1368,8 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
               title={`현장설명회${t.sales_ref.bidInfo.briefing.required ? '(필수)' : ''}${t.sales_ref.bidInfo.briefing.place ? ` · ${t.sales_ref.bidInfo.briefing.place}` : ''}`}>현설 {bidShort(String(t.sales_ref.bidInfo.briefing.at))}{t.sales_ref.bidInfo.briefing.required ? ' 필수' : ''}</span>}
             {t.assigned_by_rule && <span className="shrink-0 rounded-full bg-violet-50 px-1.5 text-[10px] font-medium text-violet-800" title="담당자 지정 규칙으로 배정됨" data-testid="row-rule-badge">규칙 배정</span>}
             {t.space && SPACE_META[t.space as 'sales' | 'marketing'] && !(collab && t.sales_ref?.kind) && <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: SPACE_META[t.space as 'sales' | 'marketing'].soft, color: SPACE_META[t.space as 'sales' | 'marketing'].color }} data-testid="row-space">{SPACE_META[t.space as 'sales' | 'marketing'].short}</span>}
+            {/* 348차(대표 '아름까지만 검색해도 풀네임 다 보이게'): 어디에 맞았는지 한 줄 — 설명·댓글·체크리스트·첨부·하위 업무, 낱말 전체 */}
+            {sq && t.match?.text && <span className="line-clamp-2 basis-full text-xs text-ink-2" data-testid="row-match">{t.match.in}: <Hi text={t.match.text} q={sq} /></span>}
           </span>
           <span className="min-w-0 max-lg:flex-1 lg:contents"><Meta t={t} onPatch={onPatch} collab={collab} /></span>
         </div>

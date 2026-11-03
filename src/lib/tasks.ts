@@ -122,6 +122,27 @@ export const TASK_FROM = (sql: Sql) => sql`
   left join projects p on p.id = t.project_id
   left join org_units o on o.id = t.org_unit_id`;
 
+/** 348차: 검색어 → ilike 꼴(%·_·\\ 는 글자 그대로) */
+export function searchLike(q: string) { return '%' + q.replace(/[%_\\]/g, (m) => '\\' + m) + '%'; }
+export type SearchMatch = { in: '제목' | '설명' | '태그' | '원천' | '댓글' | '체크리스트' | '첨부' | '하위 업무'; text: string | null };
+/** 348차(대표 '아름까지만 검색해도 풀네임 다 보이게'): 일치한 곳과 그 둘레 한 줄 — 낱말이 잘리지 않게 앞뒤 빈칸까지 넓힌다(제목 일치는 줄 자체가 보이므로 글 없음) */
+export function searchMatch(q: string, r: Record<string, any>): SearchMatch | null {
+  const has = (s: unknown) => typeof s === 'string' && s.toLowerCase().includes(q.toLowerCase());
+  if (has(r.title)) return { in: '제목', text: null };
+  const pick = (where: SearchMatch['in'], s: unknown) => (has(s) ? { in: where, text: snippet(String(s), q) } : null);
+  return pick('설명', r.description) ?? (Array.isArray(r.tags) && r.tags.some(has) ? { in: '태그', text: r.tags.filter(has).join(', ') } : null)
+    ?? pick('원천', r.sales_ref?.name) ?? pick('댓글', r.m_comment) ?? pick('체크리스트', r.m_check) ?? pick('첨부', r.m_attach) ?? pick('하위 업무', r.m_sub);
+}
+export function snippet(text: string, q: string, before = 24, after = 40) {
+  const flat = text.replace(/\s+/g, ' ').replace(/[|*>#`]+/g, ' ').replace(/ {2,}/g, ' ').trim();
+  const i = flat.toLowerCase().indexOf(q.toLowerCase()); if (i < 0) return flat.slice(0, before + after);
+  let a = Math.max(0, i - before), b = Math.min(flat.length, i + q.length + after);
+  // 낱말 경계까지(아름 → 아름베스트빌6차아파트): 앞은 빈칸까지 최대 20자, 뒤는 빈칸·마침표까지 최대 30자
+  const a0 = a; while (a > 0 && flat[a - 1] !== ' ' && a0 - a < 20) a--;
+  const b0 = b; while (b < flat.length && !/[ .,]/.test(flat[b]) && b - b0 < 30) b++;
+  return `${a > 0 ? '…' : ''}${flat.slice(a, b).trim()}${b < flat.length ? '…' : ''}`;
+}
+
 export const listQuery = z.object({
   // U-0a 주소창 값은 사람이 고칠 수 있다 — 모르는 보기·옵션 값은 오류 대신 기본값으로
   view: z.enum(['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done', 'extend']).catch('all'),
@@ -195,14 +216,20 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
     // 334차(로컬 11/02 관찰: ?status=open 에 완료 98건 섞임): open = 완료 아닌 것 전부(예전엔 모르는 값이라 무시됨)
     if (raw.includes('open')) conds.push(st.length ? sql`(t.status <> 'done' or t.status = any(${st}))` : sql`t.status <> 'done'`);
     else if (st.length) conds.push(sql`t.status = any(${st})`);
-  } else if (q.includeDone === '0') conds.push(sql`t.status <> 'done'`);
+  } else if (q.includeDone === '0' && !q.q) conds.push(sql`t.status <> 'done'`); // 348차: 검색 중엔 완료 업무도 찾는다
   // V6 16번: 완료해도 오늘(서울 자정까지)은 목록에 남기고, 댓글이 달린 완료 업무는 7일 동안
   else if (q.includeDone === 'recent') conds.push(sql`(t.status <> 'done' or t.completed_at >= ${today}::date::timestamp at time zone 'Asia/Seoul'
     or (t.completed_at > now() - interval '7 days' and exists (select 1 from comments c where c.task_id = t.id and c.deleted_at is null)))`);
   else if (q.includeDone === 'week') conds.push(notDone);
   if (q.q) {
-    const like = '%' + q.q.replace(/[%_\\]/g, (m) => '\\' + m) + '%';
-    conds.push(sql`(t.title ilike ${like} or t.description ilike ${like} or exists (select 1 from unnest(t.tags) tg where tg ilike ${like}))`);
+    // 348차(대표 11/03 02:4x '아름베스트빌이 있는데 검색해도 안 나옴 — 제목·설명·댓글 등 이름이 있으면 뜨게'): 제목·설명·태그 + 댓글·체크리스트·첨부 이름·하위 업무·원천(공고·리드) 이름
+    const like = searchLike(q.q);
+    conds.push(sql`(t.title ilike ${like} or t.description ilike ${like} or exists (select 1 from unnest(t.tags) tg where tg ilike ${like})
+      or t.sales_ref->>'name' ilike ${like}
+      or exists (select 1 from comments sc where sc.task_id = t.id and sc.deleted_at is null and sc.body ilike ${like})
+      or exists (select 1 from task_checklist_items sci where sci.task_id = t.id and sci.text ilike ${like})
+      or exists (select 1 from attachments sa where sa.task_id = t.id and sa.deleted_at is null and (sa.file_name ilike ${like} or sa.doc_title ilike ${like}))
+      or exists (select 1 from tasks ss where ss.parent_id = t.id and ss.deleted_at is null and (ss.title ilike ${like} or ss.description ilike ${like})))`);
   }
   if (q.doneMonth) conds.push(sql`t.completed_at >= (${q.doneMonth + '-01'}::date::timestamp at time zone 'Asia/Seoul') and t.completed_at < ((${q.doneMonth + '-01'}::date + interval '1 month')::timestamp at time zone 'Asia/Seoul')`);
   if (q.hasAttach) conds.push(sql`exists (select 1 from attachments at where at.task_id = t.id and at.deleted_at is null)`);
@@ -255,9 +282,16 @@ export async function listTasks(u: SessionUser, q: z.infer<typeof listQuery>) {
   // #508 '완료됨' 칸 [되돌리기]: 완료 직전 상태(활동 기록 마지막 '→ 완료'의 이전 상태) — 다른 화면·다른 날 완료해도 원래 상태로
   const prev = q.includeDone === 'week' ? sql`, case when t.status = 'done' then (select a.changes->'status'->>'from' from activities a where a.entity_type = 'task' and a.entity_id = t.id
     and a.changes->'status'->>'to' = 'done' order by a.created_at desc limit 1) end as prev_status` : sql``;
-  const rows = await sql<any[]>`select ${TASK_COLS(sql, u.id)} ${prev} ${TASK_FROM(sql)} where ${where}
-    order by ${q.view === 'done' ? sql`t.completed_at desc nulls last,` : q.includeDone === 'week' ? sql`(t.status = 'done'),` : sql``} t.due_date asc nulls last, t.priority = 'urgent' desc, t.priority = 'high' desc, t.sort_order, t.created_at
+  // 348차: 검색 중에는 어디에 맞았는지(댓글·체크리스트·첨부·하위 업무 첫 일치 글) 같이 읽어 결과 줄에 '설명: …아름베스트빌6차아파트…' 로 보여 준다
+  const like = q.q ? searchLike(q.q) : null;
+  const hit = like ? sql`, (select sc.body from comments sc where sc.task_id = t.id and sc.deleted_at is null and sc.body ilike ${like} order by sc.created_at desc limit 1) as m_comment,
+    (select sci.text from task_checklist_items sci where sci.task_id = t.id and sci.text ilike ${like} order by sci.sort limit 1) as m_check,
+    (select coalesce(sa.file_name, sa.doc_title) from attachments sa where sa.task_id = t.id and sa.deleted_at is null and (sa.file_name ilike ${like} or sa.doc_title ilike ${like}) order by sa.created_at limit 1) as m_attach,
+    (select ss.title from tasks ss where ss.parent_id = t.id and ss.deleted_at is null and (ss.title ilike ${like} or ss.description ilike ${like}) order by ss.sort_order limit 1) as m_sub` : sql``;
+  const rows = await sql<any[]>`select ${TASK_COLS(sql, u.id)} ${prev} ${hit} ${TASK_FROM(sql)} where ${where}
+    order by ${q.view === 'done' ? sql`t.completed_at desc nulls last,` : q.includeDone === 'week' || like ? sql`(t.status = 'done'),` : sql``} t.due_date asc nulls last, t.priority = 'urgent' desc, t.priority = 'high' desc, t.sort_order, t.created_at
     limit ${q.limit}`;
+  if (like) for (const r of rows) { r.match = searchMatch(q.q!, r); delete r.m_comment; delete r.m_check; delete r.m_attach; delete r.m_sub; }
   if (q.view !== 'risk') return rows;
   const { deadlineRisk } = await import('./availability');
   const risks = await Promise.all(rows.map((r) => deadlineRisk(r))); // 행마다 순서대로 기다리지 않게

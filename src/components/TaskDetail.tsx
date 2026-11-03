@@ -169,6 +169,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [descState, setDescState] = useState<'' | 'saving' | 'saved' | 'error'>('');
   const descTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const descSent = useRef<string | null>(null);
+  // 348차(대표 11/03 02:41 캡처 '길게 나와 있던 설명이 누르면 짧아짐 — 그 높이 그대로 두고 수정, 앱·웹'): 보던 칸 높이를 최소로, 글 길이에 맞춰 자동으로 늘어나고(최대 없음) 손으로도 늘릴 수 있게
+  const descH = useRef(0);
+  const descGrow = (el: HTMLTextAreaElement | null) => { if (!el) return; el.style.height = 'auto'; el.style.height = `${Math.max(el.scrollHeight + 2, descH.current, 144)}px`; };
   async function saveText(field: 'title' | 'description', value: string) {
     if (field === 'description') setDescState('saving');
     try {
@@ -621,12 +624,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
           {t.sales_ref?.bidInfo && <BidInfoBox info={t.sales_ref.bidInfo} />}{/* 335차: 공고 업무 고정 칸(세대수·입찰 마감·현장설명회) */}
           <h2 className="mb-1.5 text-sm font-semibold">설명</h2>
           {desc === null ? (
-            <div className="min-h-[56px] cursor-text rounded-card border border-line bg-slate-50/70 px-3 py-2.5 text-sm leading-relaxed hover:border-slate-300" onClick={() => { descSent.current = t.description; setDescState(''); setDesc(t.description); }} data-testid="desc-view">
+            <div className="min-h-[56px] cursor-text rounded-card border border-line bg-slate-50/70 px-3 py-2.5 text-sm leading-relaxed hover:border-slate-300" onClick={(e) => { descH.current = e.currentTarget.offsetHeight; descSent.current = t.description; setDescState(''); setDesc(t.description); }} data-testid="desc-view">
               {t.description ? <RichText text={t.description} /> : <span className="text-ink-3">업무 내용·기준·참고 링크를 적어 주세요 (**굵게**, 링크 자동 연결)</span>}
             </div>
           ) : (
             <div>
-              <textarea autoFocus rows={6} className={inputCls} value={desc} aria-label="설명"
+              <textarea autoFocus rows={6} ref={descGrow} className={cx(inputCls, 'resize-y leading-relaxed')} style={{ minHeight: Math.max(descH.current, 144) }} value={desc} aria-label="설명"
                 onChange={(e) => { const v = e.target.value; setDesc(v); setDescState(''); if (descTimer.current) clearTimeout(descTimer.current); descTimer.current = setTimeout(() => { descTimer.current = null; saveText('description', v); }, 1000); }}
                 onBlur={() => { flushDesc(desc); setDesc(null); }} />
               <p className="mt-1 h-4 text-xs text-ink-3" aria-live="polite" data-testid="desc-state">{descState === 'saving' ? '저장 중…' : descState === 'saved' ? '저장됨' : descState === 'error' ? <span className="text-red-600">저장하지 못했습니다. 칸을 벗어나면 다시 저장합니다</span> : '입력하면 자동으로 저장됩니다'}</p>
