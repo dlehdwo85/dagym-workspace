@@ -1,0 +1,38 @@
+# 351차 #947(대표 11/04 '아이폰 앱 정상 출시를 서둘러 달라'): App Store Connect API 로 iOS 1.2.0 재제출 준비·제출
+# — release.yml 과 같은 키(ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8). mode=plan 은 읽기만(무엇을 바꿀지 보고), mode=apply 는 버전 문자열·빌드·설명·키워드·심사 메모·6.9형 스크린샷을 바꾸고,
+# submit=true 일 때만 심사 제출(대표 승인 뒤). 비밀번호·키는 출력하지 않음. 스크린샷은 docs/handoff/store/ios-v4/iphone-01..06.png, 심사 메모 새 글은 docs/handoff/store/ios-v4/review-notes.md
+name: appstore-submit
+on:
+  workflow_dispatch:
+    inputs:
+      mode: { description: 'plan = 읽기만 · apply = 바꾸기', type: choice, options: [plan, apply], default: plan }
+      submit: { description: '심사 제출까지(apply 일 때만 · 대표 승인 뒤)', type: boolean, default: false }
+      version: { description: '버전 문자열', required: true, default: '1.2.0' }
+      build: { description: '빌드 번호(TestFlight 처리 끝난 것)', required: true, default: '13' }
+      display_type: { description: '스크린샷 슬롯(6.9형 = APP_IPHONE_67)', required: true, default: 'APP_IPHONE_67' }
+      whats_new: { description: '새 기능 글(첫 버전이면 비움)', required: false, default: '' }
+jobs:
+  asc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 설정 확인
+        id: cfg
+        run: echo "ready=${{ secrets.ASC_KEY_P8 != '' && secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' }}" >> "$GITHUB_OUTPUT"
+      - if: steps.cfg.outputs.ready != 'true'
+        run: echo "::error::App Store Connect API 키(ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8)가 Secrets 에 없습니다"; exit 1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: App Store Connect
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          MODE: ${{ inputs.mode }}
+          SUBMIT: ${{ inputs.submit && '1' || '0' }}
+          VERSION: ${{ inputs.version }}
+          BUILD: ${{ inputs.build }}
+          DISPLAY_TYPE: ${{ inputs.display_type }}
+          WHATS_NEW: ${{ inputs.whats_new }}
+        run: node scripts/asc-submit.mjs
