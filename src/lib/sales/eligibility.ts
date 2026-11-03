@@ -8,7 +8,7 @@ import { aiLongDue, apiExtra, commonOnly, docDeadline, eligibilityItems, eligibi
 import { visionRead, type PhotoDoc } from './eligibilityVision';
 import { sourceFiles, type SrcFile } from './files';
 
-export type Eligibility = { text: string | null; items: EligItem[]; line: string | null; error: string | null; file: { name: string | null; url: string } | null; readAt: string; sig: string; tries: number;
+export type Eligibility = { text: string | null; items: EligItem[]; line: string | null; error: string | null; file: { name: string | null; url: string } | null; readAt: string; sig: string; tries: number; /** 350차 #938: 읽을 때 본 자료실 사본·업무 첨부 공고문 id(새 문서가 올라오면 다시 읽음) */ ldocs?: string[];
   /** 253차 #790 사진 공고문을 AI 비전으로 읽음(숫자는 원문 확인) */ by?: 'vision'; visionUsd?: number;
   /** 259차: 입찰 마감이 없는 공고(임시 마감·마감 칸 빔)에서 공고문의 제출 마감을 찾아봄 — 찾았으면 그 글줄 */ dl?: { at: string | null; label: string | null };
   /** 262차: 규칙으로 항목을 못 뽑은 절을 빠른 AI 가 정리한 항목(절 지문 sig 가 같을 때만 씀) */ ai?: EligAi;
@@ -23,6 +23,36 @@ export function filesSig(r: Row): string {
   const urls = sourceFiles(r.attachment_urls ?? r.attachments, r.notice_file_url).map((f) => f.url).sort();
   return urls.length ? sha256(urls.join('\n')).slice(0, 16) : '';
 }
+type Sql = ReturnType<typeof db>;
+/** 350차(대표 11/04 #938 천안푸르지오레이크사이드 — 공고문이 KG2B 에만 있고 K-apt 첨부는 없음 · 사람이 업무·자료실에 올린 공고문도 읽기): 원천 첨부 밖의 공고문 후보
+ *  ① 이 공고(같은 번호 줄 포함)의 자동 첨부 사본(자료실 sales_auto, meta.id = 공고 줄) ② 이 공고에서 만든 업무에 사람이 올린 hwp·hwpx·pdf·docx 첨부(자료실 문서를 연결한 것은 그 글) */
+export type LocalDoc = { kind: 'lib' | 'att'; id: string; name: string; key: string | null; mime: string | null; text: string | null; url: string };
+export async function localDocs(sql: Sql, ids: string[]): Promise<LocalDoc[]> {
+  if (!ids.length) return [];
+  type F = { id: string; file_name: string; storage_key: string | null; mime_type: string | null; text_content: string | null };
+  const libs = await sql<F[]>`select id, file_name, storage_key, mime_type, text_content from library_files
+    where deleted_at is null and upload_status = 'ready' and source = 'sales_auto' and meta->>'id' = any(${ids}::text[]) order by created_at desc limit 5`.catch(() => [] as F[]);
+  const atts = await sql<F[]>`select a.id, a.file_name, a.storage_key, a.mime_type, lf.text_content
+    from attachments a join tasks t on t.id = a.task_id left join library_files lf on lf.id = a.doc_id
+    where t.deleted_at is null and t.sales_ref->>'kind' = 'bid' and t.sales_ref->>'id' = any(${ids}::text[]) and a.deleted_at is null and a.kind = 'file' and a.upload_status = 'ready'
+      and coalesce(a.source, 'upload') <> 'sales_auto' and a.file_name ~* '\\.(hwpx?|pdf|docx?)$' order by a.created_at desc limit 6`.catch(() => [] as F[]);
+  const docs: LocalDoc[] = [...libs.map((f) => ({ kind: 'lib' as const, id: String(f.id), name: f.file_name, key: f.storage_key, mime: f.mime_type, text: f.text_content, url: `/api/library/${f.id}/download` })),
+    ...atts.map((f) => ({ kind: 'att' as const, id: String(f.id), name: f.file_name, key: f.storage_key, mime: f.mime_type, text: f.text_content, url: `/api/attachments/${f.id}/download` }))];
+  return docs.sort((a, b) => (/공고/.test(b.name) ? 1 : 0) - (/공고/.test(a.name) ? 1 : 0)).slice(0, 4);
+}
+/** 정기 실행용: 공고 줄(src_id)마다 지금 있는 자료실 사본·업무 첨부 공고문 id — 저장된 ldocs 에 없는 것이 생기면 다시 읽을 차례 */
+export async function localDocIds(sql: Sql, ids: string[]): Promise<Map<string, string[]>> {
+  const m = new Map<string, string[]>(); if (!ids.length) return m;
+  const add = (k: string, v: string) => { if (!m.has(k)) m.set(k, []); m.get(k)!.push(v); };
+  type R = { nid: string; id: string };
+  for (const r of await sql<R[]>`select meta->>'id' as nid, id::text as id from library_files where deleted_at is null and upload_status = 'ready' and source = 'sales_auto' and meta->>'id' = any(${ids}::text[])`.catch(() => [] as R[])) add(r.nid, r.id);
+  for (const r of await sql<R[]>`select t.sales_ref->>'id' as nid, a.id::text as id from attachments a join tasks t on t.id = a.task_id
+    where t.deleted_at is null and t.sales_ref->>'kind' = 'bid' and t.sales_ref->>'id' = any(${ids}::text[]) and a.deleted_at is null and a.kind = 'file' and a.upload_status = 'ready'
+      and coalesce(a.source, 'upload') <> 'sales_auto' and a.file_name ~* '\\.(hwpx?|pdf|docx?)$'`.catch(() => [] as R[])) add(r.nid, r.id);
+  return m;
+}
+/** 350차 #938 ③: 자동 읽기가 3번 실패해 멈춘 공고 */
+export const eligFailed = (e: Eligibility | null | undefined) => !!e && !e.text && Number(e.tries ?? 0) >= 3;
 /** 공고문일 법한 파일부터 — 이름에 '공고' +3 · '입찰' +1 · 과업지시서·내역서·도면·서식 등 −2 · 글을 뽑을 수 없는 꼴(그림·압축) 맨 뒤 */
 const NOT_NOTICE = /(과업|시방|내역|도면|설계|평가|제안요청|양식|서식|사진|견적|별지|계약서|청렴|서약|위임|확약|산출|명세|배치|조감|현황)/;
 export function rankFiles(files: SrcFile[]): SrcFile[] {
@@ -78,6 +108,22 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
       errs.push('참가자격 절 없음');
     } catch (e) { errs.push(`공고문 못 받음(${reasonOf(e)})`); }
   }
+  // 350차 #938: 원천 첨부에서 못 찾았으면(첨부 없음 포함) 이 공고의 자료실 사본·업무에 올린 공고문에서
+  const st0 = String(row.source_type ?? ''), ext0 = String(row.source_external_id ?? '');
+  const groupIds = [id, ...(st0 && ext0 ? (await sql<{ src_id: string }[]>`select src_id from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id <> ${id} and row->>'source_type' = ${st0} and row->>'source_external_id' = ${ext0}`).map((x) => x.src_id) : [])];
+  const local = await localDocs(sql, groupIds); const ldocs = local.map((d) => d.id);
+  if (!found) for (const d of local) {
+    try {
+      let text = d.text;
+      if (!text && d.key) { const { getObject } = await import('../storage'); const buf = await getObject(d.key); const x = await extractTextResult(buf, d.name, d.mime ?? 'application/octet-stream'); text = x.text; if (!text) { errs.push(`${d.name}: ${fileErr(x.error, buf, d.name)}`); continue; } }
+      if (!text) { errs.push(`${d.name}: 글 없음`); continue; }
+      tried = tried ?? { url: d.url, name: d.name };
+      if (needDl && !dl) dl = docDeadline(text, row.posted_date ? String(row.posted_date) : null);
+      found = eligibilityOf(text, row);
+      if (found) { full = text; used = { url: d.url, name: d.name }; break; }
+      errs.push(`${d.name}: 참가자격 절 없음`);
+    } catch (e) { errs.push(`${d.name}: 못 읽음(${String((e as Error)?.message ?? e).slice(0, 40)})`); }
+  }
   // #790 글자가 없는 공고문(사진·스캔)은 AI 비전으로 — 공고당 한 번(첨부가 바뀌면 다시), 회사 AI 예산 안. 읽었는지는 같은 첨부(sig)에 visionUsd 가 있는지로(못 읽은 횟수 tries 와 따로)
   const sigNow = filesSig(row); const visionBefore = prev?.sig === sigNow && prev?.visionUsd != null;
   if (!found && photo && visionBefore) { // 이미 사진으로 읽은 공고 — 다시 부르지 않고 그 글을 씀([공고문 다시 읽기]도)
@@ -98,11 +144,11 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   }
   const prevTries = prev && !prev.text && prev.sig === sigNow ? prev.tries ?? 0 : 0;
   const extra = apiExtra(row, []);
-  const error = found ? null : !files.length ? (src?.listError ? '첨부 목록을 못 읽음' : '첨부 공고문 없음') : [...new Set(errs)].join(' · ').slice(0, 160) || '공고문에서 참가자격 절을 못 찾음';
+  const error = found ? null : !files.length && !local.length ? (src?.listError ? '첨부 목록을 못 읽음' : '첨부 공고문 없음') : [...new Set(errs)].join(' · ').slice(0, 160) || '공고문에서 참가자격 절을 못 찾음';
   // 264차: 더 긴 절을 AI 에 주려고 다시 읽은 것뿐인데 공고문을 못 받았으면 — 전 결과 그대로(시도 시각만)
   const longOnly = !found && !!prev?.text && prev.sig === sigNow && aiLongDue(prev);
   const out: Eligibility = longOnly ? { ...prev!, aiLongTry: new Date().toISOString() } : { text: found?.text ?? null, items: found?.items ?? [], line: found?.line ?? (extra.length ? extra.join(' · ') : null), error, file: (used ?? tried) ? { name: (used ?? tried)!.name, url: (used ?? tried)!.url } : null, // 못 읽었어도 어떤 파일을 봤는지
-    readAt: new Date().toISOString(), sig: sigNow, tries: found ? 0 : visionDone || visionBefore ? 3 : visionSkip ? prevTries : prevTries + 1, // 사진 읽기를 한 공고는 첨부가 바뀔 때까지 다시 안 함 · 설정 이유로 건너뛴 것은 세지 않음
+    readAt: new Date().toISOString(), sig: sigNow, ldocs, tries: found ? 0 : visionDone || visionBefore ? 3 : visionSkip ? prevTries : prevTries + 1, // 사진 읽기를 한 공고는 첨부가 바뀔 때까지 다시 안 함 · 설정 이유로 건너뛴 것은 세지 않음
     ...(by ? { by } : {}), ...(visionUsd != null ? { visionUsd } : {}), ...(needDl ? { dl: { at: dl?.at ?? null, label: dl ? jsonSafe(dl.label) : null } } : {}) };
   // 262차: 규칙으로 항목을 못 뽑은 절은 빠른 AI 로 정리(같은 절이면 전에 정리한 것을 그대로 — 다시 부르지 않음)
   if (out.text && needsAiItems(out.text)) {
@@ -144,10 +190,11 @@ export async function fillAiItems(id: string): Promise<EligAi | null> {
 }
 
 /** 읽을 차례 — 처음·첨부 바뀜(정정)·못 읽고 20시간 지남(3번까지) */
-export function eligibilityDue(r: Row, now = Date.now()): boolean {
+export function eligibilityDue(r: Row, now = Date.now(), ldocIds?: string[]): boolean {
   const e = r.eligibility as Eligibility | undefined;
   if (!e) return true;
   if (e.sig !== filesSig(r)) return true;
+  if (ldocIds?.some((x) => !(e.ldocs ?? []).includes(x))) return true; // 350차 #938 ①·④: 자료실 사본·업무 첨부에 공고문이 새로 생김
   if (needsDocDeadline(r) && !e.dl) return true; // 259차: 입찰 마감이 없는 공고는 공고문 제출 마감을 한 번 찾아봄(예전에 읽은 공고도)
   if (e.text && e.by !== 'vision' && !eligibilitySection(e.text)) return true; // 256차: 예전 규칙으로 잘못 자른 절(등록 절차 안내 등)은 다시 읽음
   if (aiLongDue(e)) return true; // 264차: 1,500자에서 잘렸고 규칙으로 못 뽑은 절 — AI 에 더 긴 절을 주려고 한 번 다시 읽음
@@ -177,10 +224,11 @@ export async function eligibilityTick(o: { budgetMs?: number; max?: number } = {
     and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰|개찰' and coalesce(row->>'kapt_cancel_at', '') = ''
     order by nullif(row->>'deadline_at', '') asc nulls last limit 400`; // 마감일 없는 공고는 마감 있는 공고 뒤
   const seen = new Set<string>(); const due: string[] = [];
+  const lmap = await localDocIds(sql, rows.map((r) => r.src_id)); // 350차 #938
   for (const r of rows) {
     const key = r.row.source_type && r.row.source_external_id ? `${r.row.source_type}:${r.row.source_external_id}` : r.src_id;
     if (seen.has(key)) continue; seen.add(key);
-    if (eligibilityDue(r.row)) due.push(r.src_id);
+    if (eligibilityDue(r.row, Date.now(), lmap.get(r.src_id))) due.push(r.src_id);
   }
   // 262차: 예전에 읽은 공고 중 규칙으로 항목을 못 뽑은 것 — 공고문을 다시 받지 않고 AI 항목 정리만(공고당 한 번)
   const { aiItemsDue } = await import('./eligibilityAi');

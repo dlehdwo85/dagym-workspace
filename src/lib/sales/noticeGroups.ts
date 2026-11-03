@@ -69,7 +69,7 @@ export const latestCancelled = (rows: any[]) => { const all = [...rows].sort(ord
 export const cancelInfo = (rows: any[]): { noticeId: string; day: string | null; reason: string | null } | null => {
   const all = [...rows].sort(order); if (!all.length) return null; const c = cancelOf(all); const last = all[all.length - 1]; if (!c(last)) return null;
   const cr = [...all].reverse().find((r) => isCancel(r)) ?? last;
-  return { noticeId: idOf(cr), day: postDay(cr), reason: s(pick(cr, 'result_note', 'cancel_reason')) || null };
+  return { noticeId: idOf(cr), day: s(pick(cr, 'cancel_date')) || postDay(cr), reason: s(pick(cr, 'result_note', 'cancel_reason')) || null }; // 350차 #937: K-apt 자체 취소는 취소 등록일
 };
 /** 같은 묶음에서 취소가 아닌 가장 나중 게시(정정 공고의 바뀐 날짜를 따라감) — 없으면 null */
 export const latestLive = (rows: any[]) => { const all = [...rows].sort(order); const c = cancelOf(all); const live = all.filter((r) => !c(r)); return live[live.length - 1] ?? null; };

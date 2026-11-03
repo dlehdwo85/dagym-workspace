@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, ClipboardList, Copy, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
 import type { SearchHint } from '@/lib/sales/sourceLink';
 import { mdhm } from '@/lib/sales/bidTerms';
-import { AI_ITEMS_NOTE, ELIG_MISS, VISION_NOTE } from '@/lib/sales/eligibilityText';
+import { AI_ITEMS_NOTE, ELIG_FAIL, ELIG_MISS, VISION_NOTE } from '@/lib/sales/eligibilityText';
 import { api, useApi } from '@/components/client';
 import { useSalesTerms, useSession } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
@@ -1213,7 +1213,7 @@ function EligBox({ n, onChange }: { n: any; onChange?: () => void }) {
   const read = async () => {
     setBusy(true);
     try { const r = await api<{ eligibility: Elig & { file: { name: string | null; url: string } | null } }>('/api/sales/eligibility', { body: { id: String(n.id) } }); const x = r.eligibility;
-      setGot({ line: x.line, text: x.text, error: x.error, file: x.file?.name ?? null, readAt: x.readAt, vision: (x as { by?: string }).by === 'vision', ai: !!(x as { ai?: { items?: unknown[] } }).ai?.items?.length }); toast.ok(x.text ? '공고문에서 참가자격을 읽었습니다' : `${ELIG_MISS}(이유: ${x.error ?? '알 수 없음'})`); onChange?.(); }
+      setGot({ line: x.line, text: x.text, error: x.error, file: x.file?.name ?? null, readAt: x.readAt, vision: (x as { by?: string }).by === 'vision', ai: !!(x as { ai?: { items?: unknown[] } }).ai?.items?.length, failed: !x.text && Number((x as { tries?: number }).tries ?? 0) >= 3 }); toast.ok(x.text ? '공고문에서 참가자격을 읽었습니다' : `${ELIG_MISS}(이유: ${x.error ?? '알 수 없음'})`); onChange?.(); }
     catch (err: any) { toast.error(err.message); } finally { setBusy(false); }
   };
   return (
@@ -1222,7 +1222,7 @@ function EligBox({ n, onChange }: { n: any; onChange?: () => void }) {
         <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={read} data-testid="bid-elig-read">{busy ? '읽는 중…' : e?.readAt ? '공고문 다시 읽기' : '공고문 읽기'}</Button></div>
       {e?.line && <p className="font-medium text-ink" data-testid="bid-elig-detail-line">{e.line}{e.ai && <span className="ml-1.5 text-[11px] font-medium text-amber-800" data-testid="bid-elig-ai">{AI_ITEMS_NOTE}</span>}</p>}
       {e?.text ? <p className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-input bg-slate-50 p-2 text-xs text-ink" data-testid="bid-elig-detail-text">{e.text}</p>
-        : e?.error ? <p className="text-amber-800" data-testid="bid-elig-detail-miss">{ELIG_MISS}(이유: {e.error})</p>
+        : e?.error ? <p className="text-amber-800" data-testid="bid-elig-detail-miss">{e.failed ? ELIG_FAIL : ELIG_MISS}(이유: {e.error}){e.failed && n.url && <> · <a href={n.url} target="_blank" rel="noopener noreferrer" className="underline" data-testid="bid-elig-detail-origin">원문 열기</a></>}</p>
         : <p className="text-ink-3">아직 공고문을 읽지 않았습니다 — 마감 전 관련 공고는 정기 실행이 차례로 읽습니다.</p>}
       {e?.vision && e.text && <p className="mt-1 text-[11px] font-medium text-amber-800" data-testid="bid-elig-vision">{VISION_NOTE}</p>}
       {(e?.file || e?.readAt) && <p className="mt-1 text-[11px] text-ink-3">{[e.file && `공고문: ${e.file}`, e.readAt && `읽은 때 ${fmtDateTime(e.readAt)}`].filter(Boolean).join(' · ')}</p>}
@@ -1424,14 +1424,27 @@ const CAT_CLS: Record<string, string> = { '즉시 검토': 'bg-rose-50 text-rose
 /** 대표 10/24 추가 ③: 마감 D-10 안 = 입찰 준비 기간(D-4~D-10 주황 강조, 입찰 탭 '준비 기간(D-10 안)' 필터·당일 메일 배지와 같은 기준) */
 const PREP_DAYS = 10;
 /** 입찰 카드(영업관리 2-5, PC·휴대폰 같음): 상태 → 사업 → 분류 → 출처 → 단지·공고명 → 기관·지역·세대·업종 → 낙찰 → 공고·DB 등록(오늘 등록) → 키워드 → [전화][원문][첨부]·마감 */
-type Elig = { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl?: string | null; readAt: string | null; vision?: boolean; ai?: boolean };
+type Elig = { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl?: string | null; readAt: string | null; vision?: boolean; ai?: boolean; failed?: boolean };
 /** 252차 #786 참가자격 한 줄 — 뽑은 요건(자본금·실적·면허·인력…) · 못 찾았으면 이유. 펼치면 공고문 '참가자격' 절 원문 */
-function EligLine({ e }: { e: Elig }) {
+function EligLine({ e: e0, n }: { e: Elig; n?: any }) {
+  // 350차 #938 ③·④: 3번 실패해 멈춘 공고는 '자동 확인 실패 — 원문에서' + [원문 열기] · 카드에서도 [참가자격 다시 읽기](자료실·업무에 올린 공고문도 읽음)
+  const [got, setGot] = useState<Elig | null>(null); const [busy, setBusy] = useState(false);
+  const e = got ?? e0;
   const miss = !e.text && !!e.error;
+  const url: string | null = n?.url ?? null;
+  const read = async (ev: React.MouseEvent) => {
+    ev.preventDefault(); ev.stopPropagation(); setBusy(true);
+    try { const r = await api<{ eligibility: any }>('/api/sales/eligibility', { body: { id: String(n.id) } }); const x = r.eligibility;
+      setGot({ line: x.line, text: x.text, error: x.error, file: x.file?.name ?? null, readAt: x.readAt, vision: x.by === 'vision', ai: !!x.ai?.items?.length, failed: !x.text && Number(x.tries ?? 0) >= 3 });
+      toast.ok(x.text ? '공고문에서 참가자격을 읽었습니다' : `${ELIG_MISS}(이유: ${x.error ?? '모름'})`); }
+    catch (err: any) { toast.error(err.message); } finally { setBusy(false); }
+  };
   if (!e.text && !e.line && !miss) return null;
   return (
     <details className="group" data-testid="bid-elig"><summary className="cursor-pointer list-none text-ink-2 [&::-webkit-details-marker]:hidden"><span className="font-medium text-ink">참가자격</span>{' '}
-      {e.line && <span data-testid="bid-elig-line">{e.line}</span>}{e.ai && e.line && <span className="ml-1 text-[11px] text-amber-800" data-testid="bid-elig-ai">({AI_ITEMS_NOTE})</span>}{miss && <span className="text-amber-800" data-testid="bid-elig-miss">{e.line ? ' · ' : ''}{ELIG_MISS}(이유: {e.error})</span>} {e.text && <span className="text-ink-3 group-open:hidden">▾ 원문</span>}</summary>
+      {e.line && <span data-testid="bid-elig-line">{e.line}</span>}{e.ai && e.line && <span className="ml-1 text-[11px] text-amber-800" data-testid="bid-elig-ai">({AI_ITEMS_NOTE})</span>}{miss && <span className="text-amber-800" data-testid="bid-elig-miss">{e.line ? ' · ' : ''}{e.failed ? ELIG_FAIL : ELIG_MISS}(이유: {e.error})</span>}
+      {miss && e.failed && url && <a href={url} target="_blank" rel="noopener noreferrer" className="ml-1 underline" data-testid="bid-elig-origin" onClick={(ev) => ev.stopPropagation()}>원문 열기</a>}
+      {miss && n?.id && <button type="button" className="ml-1 text-ink-2 underline disabled:opacity-50" disabled={busy} onClick={read} data-testid="bid-elig-reread">{busy ? '읽는 중…' : '참가자격 다시 읽기'}</button>} {e.text && <span className="text-ink-3 group-open:hidden">▾ 원문</span>}</summary>
       {e.text && <div className="mt-1 rounded-input bg-slate-50 p-2"><p className="max-h-60 overflow-auto whitespace-pre-wrap break-words text-ink" data-testid="bid-elig-text">{e.text}</p>
         {(e.file || e.vision) && <p className="mt-1 text-[11px] text-ink-3">{[e.file && `공고문: ${e.file}`, e.vision && VISION_NOTE].filter(Boolean).join(' · ')}</p>}</div>}</details>
   );
@@ -1447,7 +1460,7 @@ function BidTermsLine({ n, bdd }: { n: any; bdd: number | null }) {
         <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', past ? 'bg-slate-100 text-ink-3' : b.required ? (bdd !== null && bdd <= 3 ? 'bg-red-600 text-white' : 'bg-amber-100 text-amber-800') : 'bg-slate-100 text-ink-2')}>
           현장설명{b.kind && b.kind !== '공고문 참조' ? ` ${b.kind}` : ''}{!past && bdd !== null ? (bdd === 0 ? ' 오늘' : ` D-${bdd}`) : past ? ' 지남' : ''}</span>
         <span className="text-ink-2">{[b.at ? mdhm(b.at) : b.kind === '공고문 참조' ? '일시 공고문 참조' : null, b.place, b.at && b.kind === '공고문 참조' ? '필수 여부 공고문 참조' : null].filter(Boolean).join(' · ')}</span></div>}
-      {n.elig && <EligLine e={n.elig} />}
+      {n.elig && <EligLine e={n.elig} n={n} />}
       {n.terms && <details className="group" data-testid="bid-terms-more"><summary className="cursor-pointer list-none text-ink-2 [&::-webkit-details-marker]:hidden"><span className="font-medium text-ink">입찰 방식</span> {n.terms} <span className="text-ink-3 group-open:hidden">▾</span></summary>
         <dl className="mt-1 grid grid-cols-[7rem_1fr] gap-x-2 gap-y-0.5 rounded-input bg-slate-50 p-2">{(n.termRows as [string, string][] ?? []).map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="break-words">{v}</dd>])}</dl></details>}
     </div>

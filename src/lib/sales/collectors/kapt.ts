@@ -39,7 +39,8 @@ export function parseKaptBidList(html: string): { rows: KaptBidRow[]; malformed:
 export type KaptBidDetail = { manager?: string; officeAddress?: string; phone?: string; fax?: string; households?: number; category?: string; bidKind?: string; content?: string; attachments?: string[];
   /** #507 후속: 첨부 목록 API(bidFileListData.do)로 읽은 원래 이름·파일 번호 */ files?: { name: string | null; url: string }[];
   /** 239차(#743·#744): 참가 조건·현장설명 칸 */ terms?: KaptBidTerms;
-  /** #751(로컬 10/28 17:25): 마감 전에 취소된 공고 — '낙찰업체 정보' 표에 '취소된 계약 입니다' · '낙찰/유찰/취소 사유' */ canceled?: boolean; cancelReason?: string | null };
+  /** #751(로컬 10/28 17:25): 마감 전에 취소된 공고 — '낙찰업체 정보' 표에 '취소된 계약 입니다' · '낙찰/유찰/취소 사유' */ canceled?: boolean; cancelReason?: string | null;
+  /** 350차(대표 11/04 #937): K-apt 자체 공고의 취소 — 상세 '공고 취소 등록일'(한국 시각 ISO) */ cancelAt?: string | null };
 /** 239차(#743·#744 로컬 10/28 19:30·19:45): 입찰공고 상세의 참가 조건·현장설명 — 파일을 열지 않고 목록 줄·상세·메일에 */
 export type KaptBidTerms = { briefingKind: '필수' | '임의' | '없음' | '공고문 참조' | null; briefingAt: string | null; briefingPlace: string | null; bidDocs: string | null; creditCert: string | null;
   perfCert: string | null; bidBond: string | null; docsDeadline: string | null; bidMethod: string | null; urgent: boolean | null; payTerms: string | null };
@@ -85,9 +86,15 @@ export function parseKaptBidDetail(html: string): KaptBidDetail {
   if (files.length) d.attachments = files;
   if (/현장설명|입찰보증금|신용평가/.test(html)) d.terms = parseKaptBidTerms(html);
   // #751(광명자이더샵포레나 kg2b_142624): K-apt 목록은 취소된 공고도 '신규공고'로 두고 상세에만 '취소된 계약 입니다'·사유를 보여 줌
-  if (/취소된\s*계약/.test(html)) { d.canceled = true; d.cancelReason = parseKaptAwardDetail(html).reason; }
+  // 350차(대표 11/04 #937 래미안 세레니티 6fabd5ac — 10/26 공고가 '진행중'으로 남음): K-apt 자체 공고의 취소는 '취소된 계약' 글자 없이 상세 머리의
+  // '공고 취소 등록일' 칸(+ '낙찰/유찰/취소 사유' 표)로만 보인다 → 그 칸이 있으면 취소(등록일은 cancel_at·cancel_date 로 저장 — 업무 고정 칸 '…는 10/27 취소됨' 날짜)
+  const cxl = pair('공고\\s*취소\\s*등록일') ?? pair('취소\\s*등록일') ?? (/공고\s*취소\s*등록일/.test(html) ? text(html).match(/공고\s*취소\s*등록일\s*[:：]?\s*(\d{4}[-./]\d{1,2}[-./]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)/)?.[1] : undefined);
+  const cxlAt = cxl && /\d{4}[-./]\d{1,2}[-./]\d{1,2}/.test(cxl) ? kstOf(cxl) : null;
+  if (/취소된\s*계약/.test(html) || cxlAt) { d.canceled = true; d.cancelReason = parseKaptAwardDetail(html).reason; if (cxlAt) d.cancelAt = cxlAt; }
   return d;
 }
+/** '2026-10-27 10:16:17' · '2026.10.27' → 한국 시각 ISO */
+const kstOf = (v: string) => { const m = v.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/); return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}T${(m[4] ?? '0').padStart(2, '0')}:${m[5] ?? '00'}:${m[6] ?? '00'}+09:00` : null; };
 /** 241차(로컬 10/28 19:20 'kg2b_142624 상세 요청의 응답 코드·길이·취소된 계약 포함 여부'): 플랫폼 공고 조회의 [상세 지금 받아 보기] — 저장하지 않음.
  *  화면 글·대표자·전화는 돌려주지 않고 응답 코드·길이·취소 여부·사유·참가 조건을 읽었는지만 */
 export async function probeKaptDetail(bid: string) {
@@ -107,7 +114,7 @@ export function toPayload(r: KaptBidRow, d?: KaptBidDetail): Record<string, unkn
     attachment_urls: d?.files ? d.files.map((f) => (f.name ? { name: f.name, url: f.url } : f.url)) : [], files_checked_at: d?.files ? new Date().toISOString() : null,
     // 239차(#743·#744): 참가 조건·현장설명(상세를 읽은 때만 — 못 읽은 실행은 칸을 안 보내 저장된 값을 지우지 않음)
     ...(d?.canceled && d.cancelReason ? { result_note: d.cancelReason } : {}), // #751 취소 사유(상태 '취소'·공고구분 'cancel' 은 notice_state 로 계산)
-    ...(d?.canceled ? { kapt_cancel_at: new Date().toISOString() } : {}), // #751 후속: 상세로 취소를 안 때(처음 한 번) — 원본 매일 복사가 '진행중'으로 되돌리지 않게
+    ...(d?.canceled ? { kapt_cancel_at: new Date().toISOString(), ...(d.cancelAt ? { cancel_at: d.cancelAt, cancel_date: d.cancelAt.slice(0, 10) } : {}) } : {}), // #751 후속: 상세로 취소를 안 때(처음 한 번) · 350차 #937: 원천의 취소 등록일 — 원본 매일 복사가 '진행중'으로 되돌리지 않게
     ...(d?.terms ? { site_briefing_kind: d.terms.briefingKind, site_briefing_at: d.terms.briefingAt, site_briefing_place: d.terms.briefingPlace, bid_docs: d.terms.bidDocs,
       credit_rating_cert: d.terms.creditCert, performance_cert: d.terms.perfCert, bid_bond: d.terms.bidBond, docs_deadline_at: d.terms.docsDeadline, bid_method: d.terms.bidMethod,
       urgent_bid: d.terms.urgent, payment_terms: d.terms.payTerms, terms_read_at: new Date().toISOString() } : {}) };

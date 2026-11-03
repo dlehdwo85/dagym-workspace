@@ -54,7 +54,7 @@ export function kg2bPatch(row: Record<string, any>, d: Kg2bDetail, at = new Date
 }
 
 /**
- * 마감 전 관련 K-apt 공고 중 kg2b_ 번호이고 KG2B 상세를 아직 안 읽은 것(또는 3일 전에 읽었는데 공고문이 없던 것)을 한 번에 max 건 — 같은 번호 줄(원본 복사·워크인 수집)을 함께 고침.
+ * 마감 전 관련 K-apt 공고 중 kg2b_ 번호이고 KG2B 상세를 아직 안 읽은 것(또는 하루 전에 읽었는데 공고문이 없던 것 — 350차 #938 ②: 매일 다시)을 한 번에 max 건 — 같은 번호 줄(원본 복사·워크인 수집)을 함께 고침.
  * 저장은 칸 합치기만(updated_at 그대로 — 당일 메일 '변경'에 다시 안 오름)
  */
 export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => number, max = 10) {
@@ -62,7 +62,7 @@ export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => numbe
   const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone
       and row->>'source_type' = 'kapt_bid' and row->>'source_external_id' ~ '^kg2b_[0-9]{3,12}$' and coalesce(row->>'related', 'false') = 'true'
       and coalesce(row->>'deadline_at', '') >= ${today} and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰'
-      and (coalesce(row->>'kg2b_read_at', '') = '' or coalesce(row->>'kg2b_v', '') <> '2' or (row->>'kg2b_read_at' < ${new Date(Date.now() - 3 * 864e5).toISOString()} and coalesce(jsonb_array_length(case when jsonb_typeof(row->'attachment_urls') = 'array' then row->'attachment_urls' end), 0) = 0))
+      and (coalesce(row->>'kg2b_read_at', '') = '' or coalesce(row->>'kg2b_v', '') <> '2' or (row->>'kg2b_read_at' < ${new Date(Date.now() - 1 * 864e5).toISOString()} and coalesce(jsonb_array_length(case when jsonb_typeof(row->'attachment_urls') = 'array' then row->'attachment_urls' end), 0) = 0))
     order by row->>'deadline_at' asc limit ${max * 3}`;
   const by = new Map<string, { src_id: string; row: any }[]>();
   for (const r of rows) { const k = String(r.row.source_external_id); if (!by.has(k)) by.set(k, []); by.get(k)!.push(r); }

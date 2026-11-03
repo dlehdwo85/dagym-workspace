@@ -87,12 +87,12 @@ export function usePickWait(where: PickWhere = 'task') {
   useEffect(() => stop, [stop]); // 화면을 떠나면 놓음
   useEffect(() => { if (!on) return; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [on]);
   const sec = on && since ? Math.max(0, Math.floor((Date.now() - since) / 1000)) : 0;
+  // 350차(로컬 11/04 #934 후속 — 50장 '받기' 113초 동안 띠를 못 보고 다시 고름): 띠를 화면 아래(입력칸·하단 탭 위)에 고정해 어디를 보고 있어도 보이게 · 지난 시간 크게 · [닫기] 대신 '계속 기다리는 중'(20분 뒤 저절로 걷힘)
   const node = on ? (
-    <div className="flex items-start gap-2 rounded-input border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" role="status" data-testid="pick-wait">
-      <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden />
-      <p className="min-w-0 flex-1"><b>고른 사진을 휴대폰이 준비하는 중입니다.</b> 사진이 많으면 몇 분 걸립니다. 앱을 닫지 말고 기다려 주세요. 준비가 끝나면 바로 올라갑니다. 다음에는 50장씩 나눠 고르면 빠릅니다.</p>
-      <span className="shrink-0 tabular-nums text-sky-700" data-testid="pick-wait-time">{Math.floor(sec / 60)}:{String(sec % 60).padStart(2, '0')}</span>
-      <button type="button" className="shrink-0 underline" onClick={stop} data-testid="pick-wait-close">닫기</button>
+    <div className="fixed inset-x-2 z-40 flex items-center gap-2 rounded-input border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 shadow-card" style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 5.75rem)' }} role="status" data-testid="pick-wait">
+      <Loader2 className="size-5 shrink-0 animate-spin" aria-hidden />
+      <p className="min-w-0 flex-1"><b>고른 사진을 휴대폰이 준비하는 중 — 계속 기다리는 중입니다.</b> 사진이 많으면 몇 분 걸립니다(60장에 약 2분). 앱을 닫거나 다시 고르지 마세요. 준비가 끝나면 바로 올라갑니다.</p>
+      <span className="shrink-0 text-lg font-bold tabular-nums text-sky-800" data-testid="pick-wait-time">{Math.floor(sec / 60)}:{String(sec % 60).padStart(2, '0')}</span>
     </div>
   ) : null;
   return { open, stop, received, done, node, on };

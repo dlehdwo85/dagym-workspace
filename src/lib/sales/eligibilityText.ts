@@ -185,6 +185,8 @@ export function aiStateOf(e: EligAiRow): string | null {
 export const noItemsLine = (state: string | null) => (state ? ELIG_NO_ITEMS.replace(' — ', `(${state}) — `) : ELIG_NO_ITEMS);
 /** 못 찾았을 때 말(목록·상세·당일 메일·공고 조회 같은 말) */
 export const ELIG_MISS = '공고문에서 참가자격을 못 찾음 — 원문 확인';
+/** 350차 #938 ③: 자동 읽기 3번 실패 → 멈춤 */
+export const ELIG_FAIL = '참가자격 자동 확인 실패 — 원문에서 직접 확인';
 /** 참가자격 한 줄 — 읽었으면 뽑은 요건, 못 찾았으면 이유(나라장터 업종·지역이 있으면 앞에), 아직 안 읽었으면 나라장터 업종·지역만(없으면 null) */
 export function eligSay(e: { line?: string | null; text?: string | null; error?: string | null; ai?: boolean } | null | undefined): string | null {
   if (!e) return null;
@@ -217,15 +219,15 @@ export function lineOf(text: string, r: Record<string, any> = {}): string {
   return eligibilityLine(items, text, apiExtra(r, items)) ?? commonOnly(text);
 }
 /** 252차 #786 참가자격 칸(목록 줄·펼치기·상세·공고 조회 같은 말) — 한 줄은 저장한 원문에서 매번 다시 뽑음(뽑기 규칙을 고치면 공고문을 다시 받지 않고 바로 반영, 253차) */
-export function eligView(r: any): { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl: string | null; readAt: string | null; vision: boolean; ai: boolean; aiState: string | null } {
+export function eligView(r: any): { line: string | null; text: string | null; error: string | null; file: string | null; fileUrl: string | null; readAt: string | null; vision: boolean; ai: boolean; aiState: string | null; failed: boolean; tries: number } {
   const e = r?.eligibility; const extra = apiExtra(r ?? {}, []);
-  if (!e) return { line: extra.length ? extra.join(' · ') : null, text: null, error: null, file: null, fileUrl: null, readAt: null, vision: false, ai: false, aiState: null };
+  if (!e) return { line: extra.length ? extra.join(' · ') : null, text: null, error: null, file: null, fileUrl: null, readAt: null, vision: false, ai: false, aiState: null, failed: false, tries: 0 };
   if (e.text && e.by !== 'vision' && !eligibilitySection(e.text)) // 256차: 예전 규칙으로 잘라 저장한 절이 지금 규칙으로는 절 머리가 아님(등록 절차 안내 등) — 없는 것으로(정기 실행이 다시 읽음)
-    return { line: extra.length ? extra.join(' · ') : null, text: null, error: '공고문에서 참가자격 절을 못 찾음', file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: false, ai: false, aiState: null };
+    return { line: extra.length ? extra.join(' · ') : null, text: null, error: '공고문에서 참가자격 절을 못 찾음', file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: false, ai: false, aiState: null, failed: false, tries: 0 };
   const ai = aiItemsOf(e); // 262차: 규칙으로 못 뽑은 절은 AI 가 정리한 항목(같은 절일 때만)
   const line = ai ? eligibilityLine(ai, e.text, apiExtra(r, ai)) : e.text ? lineOf(e.text, r) : e.line ?? null;
   const aiState = !ai && line === ELIG_NO_ITEMS ? aiStateOf(e) : null; // 264차: 못 뽑은 줄에 AI 상태
-  return { line: aiState ? noItemsLine(aiState) : line, text: e.text ?? null, error: e.error ?? null, file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: e.by === 'vision', ai: !!ai, aiState };
+  return { line: aiState ? noItemsLine(aiState) : line, text: e.text ?? null, error: e.error ?? null, file: e.file?.name ?? null, fileUrl: e.file?.url ?? null, readAt: e.readAt ?? null, vision: e.by === 'vision', ai: !!ai, aiState, failed: !e.text && Number(e.tries ?? 0) >= 3, tries: Number(e.tries ?? 0) }; // 350차 #938 ③: 3번 실패 → 멈춤 표시
 }
 /** #790 사진 공고문을 AI 가 읽은 것 — 원문 옆 안내 */
 export const VISION_NOTE = 'AI 가 사진에서 읽음 — 숫자는 원문 확인';

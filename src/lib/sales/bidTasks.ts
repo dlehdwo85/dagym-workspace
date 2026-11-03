@@ -694,7 +694,9 @@ export async function noticeLiveRows(sql: Sql, ids: string[]): Promise<Map<strin
 export type BidBriefing = { kind: string | null; at: string | null; place: string | null; required: boolean };
 /** 347차(로컬 11/03 00:0x): 이 공고가 재공고이고 그 앞 공고(같은 제목·발주처, 번호·마감 달라도)가 취소됐으면 — 업무 고정 칸에 '이 업무의 공고는 재공고 · 이전 공고(마감 …) 취소됨 — 사유' 한 줄(광명자이처럼 취소 탭의 같은 이름과 헷갈리지 않게) */
 export type BidPrevCancel = { day: string | null; reason: string | null; deadlineLabel: string | null };
-export type BidInfo = { v: 1; apt: boolean; source: string | null; households: number | null; deadline: string | null; deadlineLabel: string | null; briefing: BidBriefing | null; briefingNone: boolean; updatedAt: string; prevCancel?: BidPrevCancel | null };
+export type BidInfo = { v: 1; apt: boolean; source: string | null; households: number | null; deadline: string | null; deadlineLabel: string | null; briefing: BidBriefing | null; briefingNone: boolean; updatedAt: string; prevCancel?: BidPrevCancel | null;
+  /** 350차(대표 11/04 #938 ③): 참가자격 자동 읽기가 3번 실패해 멈춘 공고 — 체크리스트 '참가자격 직접 확인' 줄 + 원문 링크 */ eligFail?: { reason: string | null; url: string | null } | null };
+const eligFailOf = (r: any): BidInfo['eligFail'] => { const e = r?.eligibility; return e && !e.text && Number(e.tries ?? 0) >= 3 ? { reason: e.error ? String(e.error).slice(0, 120) : null, url: (pick(r, 'kg2b_url', 'source_url', 'url', 'detail_url') as string | null) ?? null } : null; };
 /** 같은 흐름(renoticeKey)의 앞선 취소 공고 — 같은 원천·같은 발주처 글자로 후보를 좁힌 뒤 열쇠·게시 순서로 고름(최근 180일). 못 찾으면 null */
 async function prevCancelOf(sql: Sql, id: string, r: any): Promise<BidPrevCancel | null> {
   const key = renoticeKey(r); const agency = pick(r, 'issuer', 'facility_name', 'complex_name', 'agency'); if (!key || !agency) return null;
@@ -706,7 +708,7 @@ async function prevCancelOf(sql: Sql, id: string, r: any): Promise<BidPrevCancel
   const prev = rows.map((x) => ({ ...x.row, id: x.src_id })).filter((x) => renoticeKey(x) === key && isCancel(x) && at(x) <= at(r)).sort((a, b) => at(b).localeCompare(at(a)))[0];
   if (!prev) return null;
   const w = when(pick(prev, 'deadline_at', 'close_at', 'deadline', 'bid_close_at', 'closing_date', 'end_date'));
-  return { day: at(prev).slice(0, 10) || null, reason: (pick(prev, 'result_note', 'cancel_reason') as string | null) ?? null, deadlineLabel: w ? fmtWhen(w) : null };
+  return { day: String(pick(prev, 'cancel_date') ?? '').slice(0, 10) || at(prev).slice(0, 10) || null, reason: (pick(prev, 'result_note', 'cancel_reason') as string | null) ?? null, deadlineLabel: w ? fmtWhen(w) : null }; // 350차 #937: 취소 등록일이 있으면 그 날
 }
 const hhOf = (r: any) => { const n = Number(String(pick(r, 'household_count', 'households') ?? '').replace(/,/g, '')); return Number.isFinite(n) && n > 0 ? Math.round(n) : null; };
 /** 아파트 공고인가 — K-apt 원천(source_type kapt_…·id kapt…) 또는 세대수 칸이 있는 공고. 나라장터·누리장터·KG2B 는 아파트 칸 없이 */
@@ -723,11 +725,12 @@ export async function bidInfoOf(sql: Sql, id: string, r: any, opt: { complex?: b
   const b = briefingOf(r); const kind = String(r?.kg2b_briefing_kind ?? r?.site_briefing_kind ?? '').trim();
   const prevCancel = await prevCancelOf(sql, id, r).catch(() => null); // 347차
   return { v: 1, apt, source: r?.source_type ? String(r.source_type) : null, households, deadline: close ? (close.w.allDay ? close.w.day : `${close.w.day}T${hm(close.w.start)}`) : null, deadlineLabel: close ? fmtWhen(close.w) : null,
-    briefing: b ? { kind: b.kind, at: b.at, place: b.place, required: b.required } : null, briefingNone: !b && kind === '없음', updatedAt: new Date().toISOString(), prevCancel };
+    briefing: b ? { kind: b.kind, at: b.at, place: b.place, required: b.required } : null, briefingNone: !b && kind === '없음', updatedAt: new Date().toISOString(), prevCancel, eligFail: eligFailOf(r) };
 }
+const sameFail = (x: BidInfo['eligFail'], y: BidInfo['eligFail']) => (x?.reason ?? null) === (y?.reason ?? null) && (x?.url ?? null) === (y?.url ?? null);
 const samePrev = (x: BidPrevCancel | null | undefined, y: BidPrevCancel | null | undefined) => !!x === !!y && (!x || !y || ((x.day ?? null) === (y.day ?? null) && (x.reason ?? null) === (y.reason ?? null) && (x.deadlineLabel ?? null) === (y.deadlineLabel ?? null)));
 const sameBriefing = (x: BidBriefing | null | undefined, y: BidBriefing | null | undefined) => !!x === !!y && (!x || !y || ((x.kind ?? null) === (y.kind ?? null) && (x.at ?? null) === (y.at ?? null) && (x.place ?? null) === (y.place ?? null) && !!x.required === !!y.required)); // jsonb 는 키 순서를 바꿔 문자열 비교 불가
-const sameInfo = (a: BidInfo | null | undefined, b: BidInfo) => !!a && a.apt === b.apt && (a.households ?? null) === (b.households ?? null) && (a.deadline ?? null) === (b.deadline ?? null) && sameBriefing(a.briefing, b.briefing) && !!a.briefingNone === !!b.briefingNone && samePrev(a.prevCancel, b.prevCancel);
+const sameInfo = (a: BidInfo | null | undefined, b: BidInfo) => !!a && a.apt === b.apt && (a.households ?? null) === (b.households ?? null) && (a.deadline ?? null) === (b.deadline ?? null) && sameBriefing(a.briefing, b.briefing) && !!a.briefingNone === !!b.briefingNone && samePrev(a.prevCancel, b.prevCancel) && sameFail(a.eligFail, b.eligFail);
 /** 고정 칸 체크리스트 줄: 세대수 확인(아파트만) · 입찰 마감 확인 · 현장설명회 참석(필수/임의 · 일시 · 장소) / 현설 없음 / 현장설명회 여부 확인 */
 export function bidInfoChecklist(info: BidInfo): string[] {
   const out: string[] = [];
@@ -736,13 +739,16 @@ export function bidInfoChecklist(info: BidInfo): string[] {
   if (info.briefingNone) out.push('현설 없음');
   else if (info.briefing) out.push(`현장설명회 참석${info.briefing.required ? '(필수)' : info.briefing.kind === '임의' ? '(임의)' : ''} · ${mdhm(info.briefing.at) ?? '일시 확인 필요'}${info.briefing.place ? ` · ${info.briefing.place}` : ''}`);
   else out.push('현장설명회 여부 확인');
+  if (info.eligFail) out.push(`참가자격 직접 확인 · 자동 읽기 실패${info.eligFail.url ? ' — 원문에서' : ''}`); // 350차 #938 ③
   return out;
 }
-const INFO_FAMILY = (text: string) => /^세대수 확인/.test(text) ? 'hh' : /^입찰 마감 확인/.test(text) ? 'close' : /^(현장설명회 참석|현설 없음|현장설명회 여부 확인)/.test(text) ? 'briefing' : null;
+const INFO_FAMILY = (text: string) => /^세대수 확인/.test(text) ? 'hh' : /^입찰 마감 확인/.test(text) ? 'close' : /^(현장설명회 참석|현설 없음|현장설명회 여부 확인)/.test(text) ? 'briefing' : /^참가자격 직접 확인/.test(text) ? 'elig' : null;
 /** 고정 칸 줄을 체크리스트에 넣거나(없으면) 같은 줄(세대수·마감·현설)의 글만 바꿈(체크 여부는 그대로) → 바뀐 줄 */
 export async function syncBidChecklist(sql: Sql, taskId: string, info: BidInfo) {
-  const have = await sql<{ id: string; text: string }[]>`select id, text from task_checklist_items where task_id = ${taskId} order by sort`;
+  const have = await sql<{ id: string; text: string; done: boolean }[]>`select id, text, done from task_checklist_items where task_id = ${taskId} order by sort`;
   const changed: string[] = []; let sort = have.length;
+  // 350차 #938: 참가자격을 나중에 읽어 냈으면 '직접 확인' 줄은(아직 안 했을 때만) 거둠
+  if (!info.eligFail) for (const h of have) if (INFO_FAMILY(h.text) === 'elig' && !h.done) { await sql`delete from task_checklist_items where id = ${h.id}`; changed.push(`(거둠) ${h.text}`); }
   if (!have.length) { await sql`insert into task_checklist_items (task_id, text, sort) values (${taskId}, '공고문·참가 자격 검토', ${sort++})`; changed.push('공고문·참가 자격 검토'); } // 빈 체크리스트면 검토 줄부터
   for (const line of bidInfoChecklist(info)) {
     const fam = INFO_FAMILY(line); const cur = have.find((h) => INFO_FAMILY(h.text) === fam);
@@ -762,7 +768,7 @@ export async function applyBidInfo(sql: Sql, taskId: string, noticeId: string, a
   if (sameInfo(prev, info)) return { changed: false, info };
   await sql`update tasks set sales_ref = coalesce(sales_ref, '{}'::jsonb) || ${sql.json({ bidInfo: info } as never)}, updated_at = now() where id = ${taskId}`;
   const lines = await syncBidChecklist(sql, taskId, info);
-  const slim = (x: BidInfo | null) => (x ? { households: x.households, deadline: x.deadline, briefing: x.briefing, briefingNone: x.briefingNone, prevCancel: x.prevCancel ?? null } : null);
+  const slim = (x: BidInfo | null) => (x ? { households: x.households, deadline: x.deadline, briefing: x.briefing, briefingNone: x.briefingNone, prevCancel: x.prevCancel ?? null, eligFail: x.eligFail ?? null } : null);
   await activity(sql, 'task', taskId, actorId, 'updated', { reason: prev ? 'bid_info_update' : (opt.reason ?? 'bid_info_fill'), bidInfo: { from: slim(prev), to: slim(info) }, checklist: lines }).catch(() => {});
   return { changed: true, info };
 }

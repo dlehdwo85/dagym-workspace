@@ -2,7 +2,7 @@
 import { cx } from '@/components/ui';
 
 // 335차(대표 11/02 16:5x #918): 공고에서 온 업무의 설명 위 고정 칸 — 세대수(아파트 공고만) · 입찰 마감 일시 · 현장설명회(일시·필수 여부·장소). 모르면 '확인 필요'
-export type BidInfoView = { apt: boolean; households: number | null; deadline: string | null; deadlineLabel: string | null; briefing: { kind: string | null; at: string | null; place: string | null; required: boolean } | null; briefingNone: boolean; prevCancel?: { day: string | null; reason: string | null; deadlineLabel: string | null } | null };
+export type BidInfoView = { apt: boolean; households: number | null; deadline: string | null; deadlineLabel: string | null; briefing: { kind: string | null; at: string | null; place: string | null; required: boolean } | null; briefingNone: boolean; prevCancel?: { day: string | null; reason: string | null; deadlineLabel: string | null } | null; eligFail?: { reason: string | null; url: string | null } | null };
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 /** '2026-11-04T14:00' → '11/4(수) 14:00' */
 export function bidWhen(iso?: string | null) {
@@ -36,6 +36,10 @@ export function BidInfoBox({ info }: { info: BidInfoView }) {
       {/* 347차(로컬 11/03 00:0x): 재공고 업무 — 취소 탭의 같은 이름 공고와 헷갈리지 않게 '이 업무의 공고는 재공고 · 이전 공고(마감)는 취소됨 — 사유' */}
       {info.prevCancel && <div className="col-span-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-900 sm:col-span-3" data-testid="bid-info-prev-cancel">
         이 업무의 공고는 <b>재공고</b>입니다 · 이전 공고{info.prevCancel.deadlineLabel ? `(마감 ${info.prevCancel.deadlineLabel})` : ''}는 {info.prevCancel.day ? `${bidWhen(info.prevCancel.day)} ` : ''}취소됨{info.prevCancel.reason ? ` — 사유: ${info.prevCancel.reason}` : ''}
+      </div>}
+      {/* 350차 #938 ③: 참가자격 자동 읽기 3번 실패 → 담당자가 원문에서 직접 확인 */}
+      {info.eligFail && <div className="col-span-2 rounded bg-slate-50 px-2 py-1 text-xs text-ink-2 sm:col-span-3" data-testid="bid-info-elig-fail">
+        참가자격 자동 확인 실패{info.eligFail.reason ? `(${info.eligFail.reason})` : ''} — 원문에서 직접 확인{info.eligFail.url && <> · <a href={info.eligFail.url} target="_blank" rel="noopener noreferrer" className="underline">원문 열기</a></>}
       </div>}
     </div>
   );

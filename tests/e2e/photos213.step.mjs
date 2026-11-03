@@ -47,7 +47,8 @@ export async function photos213({ owner: pc, browser, devices, ctx, sql, BASE, S
   await owner.getByTestId('att-album').click();
   await chooser;
   const wait = owner.getByTestId('pick-wait'); await wait.waitFor();
-  assert.match(await wait.innerText(), /고른 사진을 휴대폰이 준비하는 중입니다/);
+  assert.match(await wait.innerText(), /고른 사진을 휴대폰이 준비하는 중/); // 350차: 띠를 화면 아래 고정 · '계속 기다리는 중'
+  assert.equal(await wait.evaluate((el) => getComputedStyle(el).position), 'fixed', '350차: 어디를 보고 있어도 보이게 화면 아래 고정');
   assert.match(await wait.getByTestId('pick-wait-time').innerText(), /^\d+:\d{2}$/, '지난 시간');
   await wait.scrollIntoViewIfNeeded();
   assert.ok(await owner.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 1, '휴대폰 폭 넘침 없음');
