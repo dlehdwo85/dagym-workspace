@@ -20,7 +20,7 @@ import {
   MessageCircle,
   Lock as LockIcon,
 MapPin, Undo2, } from 'lucide-react';
-import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
+import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtNum, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, FileKindIcon, attKindSummary, uploadTaskFiles } from '@/components/Attachments';
 import { TaskMail } from '@/components/TaskMail';
@@ -904,9 +904,10 @@ function FoldBtn({ open, onClick, label }: { open: boolean; onClick: () => void;
 function DdayChip({ due, time, status }: { due: string | null; time: string | null; status: string }) {
   if (!due) return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-3">마감 없음</span>;
   const d = Math.round((new Date(due + 'T00:00:00Z').getTime() - new Date(todayStr() + 'T00:00:00Z').getTime()) / 86400000);
-  const label = d === 0 ? 'D-day' : d > 0 ? `D-${d}` : `${-d}일 지남`;
+  // 349차(대표 #929): 목록 칩과 같은 순서 — 날짜(숫자) → 시간 → D-n(오늘 D-day) · 지남 '· n일 지남' · 완료는 날짜만
+  const label = status === 'done' ? null : d === 0 ? 'D-day' : d > 0 ? `D-${d}` : `${-d}일 지남`;
   const cls = status === 'done' ? 'bg-slate-100 text-ink-3' : d < 0 ? 'bg-red-100 text-red-700' : d === 0 ? 'bg-orange-100 text-orange-700' : d <= 3 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-ink-2';
-  return <span className={cx('inline-flex h-6 items-center rounded-full px-2 font-semibold tabular-nums', cls)} data-testid="dday">{label} · {Number(due.slice(5, 7))}/{Number(due.slice(8, 10))}{time ? ' ' + time.slice(0, 5) : ''}</span>;
+  return <span className={cx('inline-flex h-6 items-center rounded-full px-2 font-semibold tabular-nums', cls)} data-testid="dday">{fmtNum(due)}{time ? ' ' + time.slice(0, 5) : ''}{label ? (d < 0 ? ` · ${label}` : ` ${label}`) : ''}</span>;
 }
 function HistLine({ h, userName }: { h: any; userName: (id: string | null) => string }) {
   return <>

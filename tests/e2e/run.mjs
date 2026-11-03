@@ -2677,7 +2677,14 @@ await step('대표 10/22 #427 PC 목록: 상태 칸 왼쪽 정렬(308차 #866) �
     }
   }
   { const txt = (await owner.locator(`[data-task-id="${late}"]`).getByTestId('due-cell').innerText()).replace(/\s+/g, ' ').trim();
-    assert.match(txt, /\d+\/\d+ · 1일 지남/, `기한 지남은 짧은 날짜(1920): "${txt}"`); }
+    assert.match(txt, /^\d+\/\d+ · 1일 지남$/, `기한 지남은 짧은 날짜(1920): "${txt}"`); }
+  // 349차(대표 11/04 #929): 앞으로 남은 업무도 '월·일' 글자 없이 숫자 + D-n · 상세 D-day 칩은 날짜 → D 순서
+  { const txt = (await owner.locator(`[data-task-id="${id}"]`).getByTestId('due-cell').innerText()).replace(/\s+/g, ' ').trim();
+    assert.match(txt, /^\d+\/\d+ D-3$/, `349차 #929 숫자 날짜 + D-3(1920): "${txt}"`);
+    await owner.locator(`[data-task-id="${id}"]`).getByTestId('row-title').locator('a').first().click();
+    const dd = (await owner.getByTestId('task-panel').getByTestId('dday').innerText()).replace(/\s+/g, ' ').trim();
+    assert.match(dd, /^\d+\/\d+ D-3$/, `상세 D-day 칩 날짜 → D: "${dd}"`);
+    await owner.getByTestId('task-panel').getByRole('button', { name: '패널 닫기' }).click(); }
   for (const w of [1280, 1440, 1920]) {
     await owner.setViewportSize({ width: w, height: 900 });
     await owner.goto(BASE + '/tasks?mode=list');

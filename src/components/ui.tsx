@@ -285,12 +285,13 @@ export function DueChip({ due, status, time, className }: { due: string | null |
   const done = status === 'done';
   const tone = done ? 'text-slate-400' : days < 0 ? 'bg-red-50 text-red-700' : days === 0 ? 'bg-blue-50 text-blue-700' : days <= 3 ? 'bg-orange-50 text-orange-700' : 'text-ink-2';
   // 로컬 10/22(#427): 기한 지남은 '· n일 지남'이 붙어 길어지므로 날짜를 숫자(10/21)로 짧게
-  const [, mm, dd] = due.split('-').map(Number);
-  const label = days === 0 ? '오늘' : days === 1 ? '내일' : !done && days < 0 && Number(due.slice(0, 4)) === new Date().getFullYear() ? `${mm}/${dd}` : fmtShort(due);
+  // 349차(대표 11/04 01:0x #929 '모든 업무에 월·일 단어를 빼고 숫자만 + D-10 처럼 몇 일 남았는지'): 날짜는 늘 숫자(11/9 · 올해 아니면 27/1/5, '오늘'·'내일' 낱말도 숫자로)
+  //   → 시간 → D-n(오늘은 D-day) · 지남은 '· n일 지남'(빨강) 그대로 · 완료는 날짜만(회색) · 색 규칙은 그대로
+  const dday = done ? null : days === 0 ? 'D-day' : days > 0 ? `D-${days}` : null;
   return (
     <span className={clsx('inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums', tone, className)}
-      title={`마감 ${fmtDate(due)}${!done && days < 0 ? ` · ${-days}일 지남` : ''}`}>
-      <CalendarDays className="size-3.5 opacity-70" aria-hidden />{label}{time ? ` ${time.slice(0, 5)}` : ''}{!done && days < 0 && <span className="font-semibold lg:max-xl:hidden"> · {-days}일 지남</span>}
+      title={`마감 ${fmtDate(due)}${dday ? ` · ${dday}` : !done && days < 0 ? ` · ${-days}일 지남` : ''}`} data-days={done ? undefined : days}>
+      <CalendarDays className="size-3.5 opacity-70" aria-hidden />{fmtNum(due)}{time ? ` ${time.slice(0, 5)}` : ''}{dday && <span className="font-semibold" data-testid="due-dday">{dday}</span>}{!done && days < 0 && <span className="font-semibold lg:max-xl:hidden"> · {-days}일 지남</span>}
     </span>
   );
 }
@@ -386,6 +387,11 @@ export function fmtMinutes(m: number | null | undefined) {
 export function fmtShort(d: string) {
   const [y, m, day] = d.split('-').map(Number);
   return new Date().getFullYear() === y ? `${m}월 ${day}일` : `${String(y).slice(2)}.${m}.${day}`;
+}
+/** 349차 #929: 숫자만 — 올해 '11/9', 다른 해 '27/1/5' */
+export function fmtNum(d: string) {
+  const [y, m, day] = d.split('-').map(Number);
+  return new Date().getFullYear() === y ? `${m}/${day}` : `${String(y).slice(2)}/${m}/${day}`;
 }
 export function todayStr() {
   return dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
