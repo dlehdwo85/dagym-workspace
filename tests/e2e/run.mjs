@@ -1895,11 +1895,14 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   assert.match(await owner.getByTestId('ai-limit-work').innerText(), /AI 비서[\s\S]*(제한 없음|\d+%)/); // 351차 #939 ③: 횟수 대신 %
   assert.match(await owner.getByTestId('ai-limit-sales').innerText(), /AI 세일즈[\s\S]*회사 한도를 나눠/);
   assert.match(await owner.getByTestId('ai-limit-marketing').innerText(), /AI 마케터[\s\S]*(제한 없음|\d+%)/); // 351차: 시안 n장 환산 칸 없음
-  assert.match(await owner.getByTestId('ai-plan-matrix').innerText(), /베이직[\s\S]*회사 공유 AI 포함[\s\S]*스탠다드[\s\S]*회사 공유 AI 포함[\s\S]*프로/); // 대표 10/24 ② → 351차 #939 ③: 원분 없이
+  assert.match(await owner.getByTestId('ai-plan-matrix').innerText(), /업무[\s\S]*구간 정액[\s\S]*회사 공유 AI 포함[\s\S]*업무 \+ 영업[\s\S]*회사 공유 AI 포함/); // 대표 10/24 ② → 351차 #939 ③: 원분 없이 → 355차 구간 정액
+  assert.doesNotMatch(await owner.getByTestId('ai-plan-matrix').innerText(), /원분/);
   assert.doesNotMatch(await owner.getByTestId('ai-limits').innerText(), /원|\d+회/, '351차: AI 한도 표에 원·회 없음');
   await owner.getByTestId('ai-limits').screenshot({ path: `${SHOTS}/178-ai-limits.png` });
   await owner.getByTestId('plan-request').click();
-  await owner.getByLabel('요청할 요금제').selectOption('w_standard'); // V27 요금표
+  await owner.getByLabel('요청할 요금제').selectOption('w_work'); // 355차 구간 정액
+  assert.match(await owner.getByTestId('plan-bands-w_work').innerText(), /1~5인 19,900원[\s\S]*51인~ 1인 3,900원/);
+  assert.match(await owner.getByTestId('plan-bands-w_sales').innerText(), /51인~ 1인 3,900원 \+ 영업 사용자 1인 7,900원/);
   await owner.getByRole('button', { name: '요청 보내기' }).click();
   await owner.getByText(/요청을 보냈습니다/).waitFor();
   await owner.screenshot({ path: `${SHOTS}/78-usage-plan.png`, fullPage: true });
@@ -1915,6 +1918,8 @@ await step('V10: 관리 → 사용량·요금제(내부 무제한·막대·큰 �
   await owner.getByText('저장했습니다').first().waitFor();
   assert.equal((await sql`select monthly_krw from plans where code = 'business'`)[0].monthly_krw, 80000);
   await sql`update plans set monthly_krw = 79000 where code = 'business'`;
+  await owner.getByTestId('plan-bands-edit-w_work').getByLabel('w_work 구간 1 월 금액').waitFor(); // 355차 #939 구간 정액 편집 칸
+  assert.equal(await owner.getByLabel('w_work 구간 2 월 금액').inputValue(), '39900');
   assert.equal((await sql`select plan_code from tenant_subscriptions where tenant = 'default'`)[0].plan_code, 'internal', '반려하면 그대로');
   await owner.screenshot({ path: `${SHOTS}/79-platform.png`, fullPage: true });
   // V32 1 → 192차(대표 10/27) 결제 시험: 결제 모듈 상태 + [시험 결제](숨은 시험 계정 하나 — 회사 만들기 없음) → (결제창은 외부라 승인 결과를 기록으로 넣고) 자동 확인 화면

@@ -2,7 +2,7 @@
 import { PlatformFunnel } from '@/components/PlatformFunnel';
 import { PlatformConversionTags } from '@/components/PlatformConversionTags';
 import { PlatformQualityRules } from '@/components/PlatformQualityRules';
-import { Suspense, useEffect, useState } from 'react';
+import { Fragment, Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Building2, Check, Copy, KeyRound, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
@@ -18,6 +18,7 @@ import { PlatformSalesSources } from '@/components/sales/PlatformSalesSources';
 import { PlatformCollectorSettings } from '@/components/sales/PlatformCollectorSettings';
 import { PlatformMktPlans } from '@/components/platform/PlatformMktPlans';
 import { PlatformSpeed } from '@/components/platform/PlatformSpeed';
+import { PlanBands } from '@/components/platform/PlanBands';
 import { PlatformSalesMigrate } from '@/components/sales/PlatformSalesMigrate';
 import { PlatformOpsImport } from '@/components/marketing/PlatformOpsImport';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -157,8 +158,8 @@ function PlatformInner() {
                 const e = plans[p.code] ?? { name: p.name, monthlyKrw: p.monthly_krw ?? '', perUserKrw: p.per_user_krw ?? '', puStorage: p.limits.perUserStorageGb ?? '', puAi: p.limits.perUserAi ?? '', users: p.limits.users ?? '', storageGb: p.limits.storageGb ?? '', aiRequests: p.limits.aiRequests ?? '',
                   aiKrw: p.limits.aiBudgetKrw ?? '', puAiKrw: p.limits.perUserAiBudgetKrw ?? '', public: p.public };
                 const set = (patch: any) => setPlans({ ...plans, [p.code]: { ...e, ...patch } });
-                return (
-                  <tr key={p.code} className="border-t border-line">
+                return (<Fragment key={p.code}>
+                  <tr className="border-t border-line">
                     <td className={cx(cell, 'text-xs text-ink-3')}>{p.code}</td>
                     <td className={cell}><input className={small} value={e.name} onChange={(x) => set({ name: x.target.value })} aria-label={`${p.code} 이름`} /></td>
                     <td className={cell}><input className={small} inputMode="numeric" value={e.monthlyKrw} onChange={(x) => set({ monthlyKrw: x.target.value })} aria-label={`${p.code} 월 요금`} /></td>
@@ -173,6 +174,8 @@ function PlatformInner() {
                         ...(num(String(e.puStorage)) ? { perUserStorageGb: num(String(e.puStorage))! } : {}), ...(num(String(e.puAi)) ? { perUserAi: num(String(e.puAi))! } : {}),
                         ...(num(String(e.aiKrw)) !== null ? { aiBudgetKrw: num(String(e.aiKrw))! } : {}), ...(num(String(e.puAiKrw)) !== null ? { perUserAiBudgetKrw: num(String(e.puAiKrw))! } : {}) } }, () => setPlans((s) => { const n = { ...s }; delete n[p.code]; return n; }))}>저장</Button></td>
                   </tr>
+                  {Array.isArray(p.limits.bands) && <tr><td colSpan={11} className="px-2 pb-2"><PlanBands plan={p} onSave={(body, done) => save(`/api/platform/plans/${p.code}`, body, done)} /></td></tr>}
+                </Fragment>
                 );
               })}
             </tbody>

@@ -15,7 +15,7 @@ test('플랫폼 운영 표: 기본값(코드와 같음·가격 결정 전) → �
   assert.equal((await ctx.staffA.client.req('GET', '/api/platform/mkt-plans')).status, 404);
   assert.equal((await ctx.staffA.client.req('PUT', '/api/platform/mkt-plans', { plan: { code: 'pro', monthlyCredits: 1 } })).status, 404);
   const g = await ctx.owner.ok('GET', '/api/platform/mkt-plans');
-  const pro = g.plans.find((p) => p.code === 'pro'); assert.equal(pro.monthlyCredits, 250); assert.equal(pro.price, null); assert.equal(pro.rateMin, null); assert.deepEqual(pro.weekly, { feed: 5, blog: 2, reels: 2 });
+  const pro = g.plans.find((p) => p.code === 'pro'); assert.equal(pro.monthlyCredits, 250); assert.equal(pro.price, 59000, '355차 #939: 마케팅 프로 월 59,000원(대표 11/04 확정)'); assert.equal(pro.rateMin, Math.round((250 * 43 / 59000) * 1000) / 10); assert.deepEqual(pro.weekly, { feed: 5, blog: 2, reels: 2 });
   assert.equal(pro.images, Math.floor(250 / 6.5)); assert.equal(pro.videos, 3); assert.equal(pro.costMin, 250 * 43); assert.equal(pro.costMax, 250 * 70);
   const s = await ctx.owner.ok('PUT', '/api/platform/mkt-plans', { plan: { code: 'pro', priceKrw: 199000, monthlyCredits: 300, weekly: { feed: 5, blog: 2, reels: 2, shorts: 2, story: 3 }, videoMonthly: 3, regenMonthly: 12, extraCreditKrw: 60 } });
   const p2 = s.plans.find((p) => p.code === 'pro'); assert.equal(p2.price, 199000); assert.equal(p2.monthlyCredits, 300); assert.equal(p2.weekly.story, 3); assert.equal(p2.extraCreditKrw, 60);

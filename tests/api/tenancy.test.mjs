@@ -240,8 +240,8 @@ describe('17차 14일 무료 체험 · 끝나면 읽기 전용', () => {
     assert.equal(w.status, 402); assert.equal(w.body.error.code, 'read_only');
     assert.ok((await c.ok('GET', '/api/tasks')).tasks.some((t) => t.title === '체험 중 업무'), '보기는 됨');
     assert.equal((await c.get('/api/account/export')).status, 200, '내보내기는 됨');
-    await c.ok('POST', '/api/usage/request', { planCode: 'w_standard', note: '팀으로 할게요' });
-    assert.equal((await sql`select chosen_plan from tenant_subscriptions where tenant = ${tid}`)[0].chosen_plan, 'w_standard');
+    await c.ok('POST', '/api/usage/request', { planCode: 'w_work', note: '팀으로 할게요' });
+    assert.equal((await sql`select chosen_plan from tenant_subscriptions where tenant = ${tid}`)[0].chosen_plan, 'w_work');
     const me = await c.ok('GET', '/api/auth/me');
     assert.ok(me.user);
   });
@@ -257,7 +257,7 @@ describe('17차 14일 무료 체험 · 끝나면 읽기 전용', () => {
     assert.equal((await c.post('/api/tasks', { title: 'x' })).status, 402);
     await p.ok('POST', `/api/platform/tenants/${tid}/trial`, { action: 'convert' });
     const [s] = await sql`select plan_code, status from tenant_subscriptions where tenant = ${tid}`;
-    assert.deepEqual({ ...s }, { plan_code: 'w_standard', status: 'active' });
+    assert.deepEqual({ ...s }, { plan_code: 'w_work', status: 'active' });
     await c.ok('POST', '/api/tasks', { title: '유료 전환 뒤 업무' });
     assert.equal((await p.req('POST', `/api/platform/tenants/${tid}/trial`, { action: 'convert', planCode: 'team_free' })).status, 400);
   });

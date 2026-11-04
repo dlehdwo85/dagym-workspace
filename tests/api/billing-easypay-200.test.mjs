@@ -38,7 +38,7 @@ const postForm = (path, form) => fetch(BASE + path, { method: 'POST', redirect: 
 test('켠 간편결제만 · 약관 동의 없으면 안 열림 · 직접 호출 파라미터 · 동의 기록 · 결제 내역 이름', async () => {
   const b = await owner.ok('GET', '/api/billing');
   assert.deepEqual(b.easyPays, [{ key: 'naverpay', label: '네이버페이' }, { key: 'kakaopay', label: '카카오페이' }], '켠 것만(대소문자·빈칸 무시, 모르는 이름은 버림)');
-  const W = { kind: 'monthly', planCode: 'w_standard' };
+  const W = { kind: 'monthly', planCode: 'w_work' };
   const off = await owner.post('/api/billing/window', { ...W, easyPay: 'tosspay', agree: true });
   assert.equal(off.status, 400); assert.equal(off.body.error.message, '토스페이는 아직 열리지 않았습니다');
   const noAgree = await owner.post('/api/billing/window', { ...W, easyPay: 'naverpay' });
@@ -67,7 +67,7 @@ test('켠 간편결제만 · 약관 동의 없으면 안 열림 · 직접 호출
 
 test('플랫폼 결제 시험: 켜기 전(토스페이)에도 직접 호출 결제창을 열어 상점 지원 여부를 볼 수 있음', async () => {
   await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
-  const w = await ctx.owner.ok('POST', '/api/platform/pay-test/tester/window', { kind: 'monthly', planCode: 'w_standard', payMethod: 'CARD', easyPay: 'tosspay', agree: true });
+  const w = await ctx.owner.ok('POST', '/api/platform/pay-test/tester/window', { kind: 'monthly', planCode: 'w_work', payMethod: 'CARD', easyPay: 'tosspay', agree: true });
   assert.deepEqual([w.mode, w.params.MID, w.params.DirectEasyPay, w.params.DirectShowOpt], ['test', MID, 'E025', 'CARD']);
-  assert.equal((await ctx.owner.post('/api/platform/pay-test/tester/window', { kind: 'monthly', planCode: 'w_standard', easyPay: 'tosspay' })).status, 400, '시험도 약관 동의 값은 보냄');
+  assert.equal((await ctx.owner.post('/api/platform/pay-test/tester/window', { kind: 'monthly', planCode: 'w_work', easyPay: 'tosspay' })).status, 400, '시험도 약관 동의 값은 보냄');
 });

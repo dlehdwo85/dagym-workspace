@@ -19,7 +19,7 @@ test('규칙 → 제작 → 승인함 → 수정 요청 → 원장', async () =>
   // 요금제 프로(가격 결정 전), 영상 0편·재생성 0회로 덮어써 한도 시험, 무알림 끔(시험 시각과 무관하게)
   await ctx.owner.ok('PUT', '/api/marketing/auto', { planCode: 'pro', videoMonthly: 0, regenMonthly: 0, leadDays: 3, remindHours: 72, quietStart: 0, quietEnd: 0 });
   let v = await ctx.owner.ok('GET', '/api/marketing/auto');
-  assert.equal(v.plans.pro.price, null, '가격은 대표 결정 전 빈칸');
+  assert.equal(v.plans.pro.price, 59000, '355차 #939: 대표 11/04 확정 금액');
   assert.deepEqual([v.limits.monthlyCredits, v.limits.weeklyCredits, v.limits.videoMonthly, v.limits.regenMonthly], [250, 58.1, 0, 0]);
   const brand = await ctx.owner.ok('POST', '/api/marketing/brands', { name: '다짐' });
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${brand.id}`, { tone: '친근하게', bannedWords: ['최저가'] });

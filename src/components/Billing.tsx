@@ -132,7 +132,7 @@ export function BillingSection() {
               <p className="text-xs font-semibold text-ink-2">월 구독 (VAT 포함, 현재 인원 기준)</p>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <select className={cx(inputCls, 'w-auto')} value={plan} onChange={(e) => setPlan(e.target.value)} aria-label="구독할 요금제">
-                  <option value="">요금제 선택</option>{monthly.map((q: any) => <option key={q.planCode} value={q.planCode}>{q.name} · 월 {won(q.amount)} ({q.seats}인)</option>)}
+                  <option value="">요금제 선택</option>{monthly.map((q: any) => <option key={q.planCode} value={q.planCode}>{q.name} · 월 {won(q.amount)} ({q.band ? `${q.band} 구간 · 지금 ${q.seats}명` : `${q.seats}인`})</option>)}
                 </select>
                 <Button size="sm" disabled={!plan || !data.card || !renewOk || busy} onClick={() => subscribe(plan)} data-testid="billing-subscribe">{data.card ? '등록 카드로 결제·자동 결제' : '카드를 먼저 등록하세요'}</Button>
                 <Button size="sm" variant="secondary" disabled={!plan || busy} onClick={() => openWindow({ kind: 'monthly', planCode: plan })} data-testid="billing-window-monthly">결제창으로 1개월</Button>

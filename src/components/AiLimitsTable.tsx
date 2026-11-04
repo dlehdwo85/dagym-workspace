@@ -10,7 +10,9 @@ type Row = { key: 'work' | 'sales' | 'marketing'; name: string; shared: boolean;
   feelLimit?: number | null; feelUsed?: number | null /* 서버가 환산(#602: 고객사 응답엔 달러가 없음) */ };
 export type AiLimitsData = { month: string; usdKrw: number; rows: Row[]; pool: { requests: { limit: number | null; used: number; left: number | null }; usd: { limit: number | null; used: number; left: number | null } }; plans: PlanMatrix };
 export type PlanMatrix = { plans: { code: string; name: string; perUserKrw: number | null; monthlyKrw: number | null; minUsers: number | null; work: { perUserAi: number | null; aiRequests: number | null; feelPerUser: Feel[]; budgetKrw?: number | null; perUserBudgetKrw?: number | null };
-  marketing: { label: string; price: number | null; monthlyCredits: number; aiMonthlyUsd: number | null; aiMonthlyKrw?: number | null; videoMonthly: number; images: number; videos: number } | null }[];
+  marketing: { label: string; price: number | null; monthlyCredits: number; aiMonthlyUsd: number | null; aiMonthlyKrw?: number | null; videoMonthly: number; images: number; videos: number } | null;
+  /** 355차 구간 정액 요금제의 구간 표 */ bands?: { label: string; krw: number; perUserKrw: number | null; salesPerUserKrw: number | null; storageGb: number; perUserStorageGb: number | null }[] | null }[];
+  /** 355차 마케팅 공간(회사당, 구간 무관) */ marketingPlans?: { code: string; label: string; price: number | null; monthlyCredits: number; videoMonthly: number; images: number; videos: number }[];
   packs: { code: string; name: string; monthlyKrw: number; aiRequests: number; aiBudgetKrw?: number | null }[]; usdKrw: number; note: string };
 
 const COLOR: Record<Row['key'], string> = { work: 'bg-brand-600', sales: 'bg-sky-600', marketing: 'bg-violet-600' };
@@ -62,12 +64,13 @@ export function AiPlanMatrix({ matrix, currentCode, showPrice = true }: { matrix
           <tbody>
             {matrix.plans.map((p) => (
               <tr key={p.code} className={cx('border-t border-line align-top', p.code === currentCode && 'bg-brand-50')} data-testid={`ai-plan-${p.code}`}>
-                <td className="py-1.5 pr-2"><div className={cx(p.code === currentCode && 'font-semibold')}>{p.name}</div>{showPrice && <div className="text-[11px] text-ink-3">{p.perUserKrw ? `1인 월 ${p.perUserKrw.toLocaleString('ko-KR')}원` : p.monthlyKrw === 0 || p.monthlyKrw === null ? '무료' : `월 ${p.monthlyKrw.toLocaleString('ko-KR')}원`}</div>}</td>
+                <td className="py-1.5 pr-2"><div className={cx(p.code === currentCode && 'font-semibold')}>{p.name}</div>{showPrice && <div className="text-[11px] text-ink-3">{p.bands?.length ? `월 ${p.bands[0].krw.toLocaleString('ko-KR')}원부터 · 구간 정액` : p.perUserKrw ? `1인 월 ${p.perUserKrw.toLocaleString('ko-KR')}원` : p.monthlyKrw === 0 || p.monthlyKrw === null ? '무료' : `월 ${p.monthlyKrw.toLocaleString('ko-KR')}원`}</div>}</td>
                 <td className="py-1.5 pr-2">회사 공유 AI 포함<div className="text-[11px] text-ink-3">업무·영업·마케팅 글 AI 가 함께 씀 · 쓴 양은 %로</div></td>
                 <td className="py-1.5 pr-2 text-ink-2">회사 공유<div className="text-[11px] text-ink-3">업무 AI 와 같은 한도</div></td>
                 <td className="py-1.5">
                   {p.marketing ? <>{p.marketing.label} · 월 제작 크레딧 포함
                     <div className="text-[11px] text-ink-3">시안 약 {p.marketing.images}장 또는 영상 {p.marketing.videos}편 · 생성 영상 월 {p.marketing.videoMonthly}편{showPrice && (p.marketing.price ? ` · 월 ${p.marketing.price.toLocaleString('ko-KR')}원` : ' · 금액 결정 전')}</div></>
+                    : p.bands ? <span className="text-ink-2">마케팅 공간 따로 선택<div className="text-[11px] text-ink-3">베이직·스탠다드·프로 — 아래 줄</div></span>
                     : <span className="text-ink-3">마케팅 요금제 없음</span>}
                 </td>
               </tr>
@@ -75,6 +78,7 @@ export function AiPlanMatrix({ matrix, currentCode, showPrice = true }: { matrix
           </tbody>
         </table>
       </div>
+      {!!matrix.marketingPlans?.length && matrix.plans.some((p) => p.bands) && <p className="mt-2 text-xs text-ink-2" data-testid="ai-plan-mkt">마케팅 공간(회사당, 인원 구간과 무관): {matrix.marketingPlans.map((m) => `${m.label}${showPrice && m.price ? ` 월 ${m.price.toLocaleString('ko-KR')}원` : ''} · 월 제작 크레딧 ${m.monthlyCredits}`).join(' / ')}</p>}
       {!!matrix.packs.length && <p className="mt-2 text-xs text-ink-2">AI 크레딧 팩(회사 단위, 업무·영업·마케팅 공유): {matrix.packs.map((a) => `${a.name}${showPrice ? ` 월 ${a.monthlyKrw.toLocaleString('ko-KR')}원` : ''}`).join(' · ')}</p>}
       <p className="mt-1 text-[11px] text-ink-3">{matrix.note}</p>
     </section>

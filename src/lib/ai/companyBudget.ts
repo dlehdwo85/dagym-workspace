@@ -7,7 +7,8 @@ import { usdKrw } from './provider';
  * 대표 10/24 ② 요금제별 회사 월 AI 예산(원). 회사가 이번 달 쓴 AI 원가(정가 환산 ai_usage.cost_krw) 합계를 예산과 비교한다.
  * - 예산 = 플랫폼 운영이 회사별로 정한 값(limit_overrides.aiBudgetKrw, null = 무제한)이 있으면 그 값,
  *   없으면 요금제 고정액(limits.aiBudgetKrw — 14일 체험 5,000원) 또는 1인 금액(limits.perUserAiBudgetKrw) × 결제 인원(최소 인원 이상)
- *   + 마케팅 요금제의 AI 몫(체험 중 제외) + AI 크레딧 팩. 대표가 AI 설정에서 회사 월 한도($)를 따로 정했으면 둘 중 낮은 값.
+ *   + 마케팅 요금제의 AI 몫(체험 중 제외) + AI 크레딧 팩.
+ *   355차 #939 ①②: 구간 정액 요금제(limits.bands)는 지금 구간의 회사 AI 예산(1인 월 40회 × 30원 = 1,200원 × 구간 최대 인원, 51인~ 1인 1,200원 × 인원). 대표가 AI 설정에서 회사 월 한도($)를 따로 정했으면 둘 중 낮은 값.
  * - 요금제에 원 예산이 없으면(우리 회사 internal·체험 조직 demo·예전 요금제) 예전 회사 월 한도($, 기본 AI_MONTHLY_BUDGET_USD)를 원으로 바꿔 쓴다(legacy).
  * - 영상 제작은 마케팅 크레딧으로 따로 센다: Higgsfield 비용은 ai_usage 에 없고, 영상 기획·검수 AI(purpose marketing_video*)도 뺀다.
  * - 80%·100% 알림(대표·관리자, 달마다 한 번). 100%면 AI 기능만 멈추고(업무·일정 그대로) 다음 달 1일(서울)에 다시 채워진다.
@@ -27,7 +28,7 @@ export type BudgetSource = 'plan' | 'override' | 'unlimited' | 'legacy';
 export type CompanyBudget = {
   month: string; source: BudgetSource; limitKrw: number | null; usedKrw: number; leftKrw: number | null; pct: number | null; over: boolean;
   /** 예산이 어떻게 정해졌는지(관리 화면 한 줄) — 요금제 몫(고정 또는 1인 × 인원)·마케팅 요금제 AI 몫·AI 팩·대표가 정한 달러 한도 */
-  parts: { planKrw: number | null; perSeatKrw: number | null; seats: number | null; mktKrw: number; packKrw: number; ownerCapKrw: number | null };
+  parts: { planKrw: number | null; perSeatKrw: number | null; seats: number | null; mktKrw: number; packKrw: number; ownerCapKrw: number | null; band?: string | null };
   resetOn: string; resetLabel: string;
 };
 
@@ -36,7 +37,8 @@ export async function companyAiBudget(tenant: string, sql: Sql = db()): Promise<
   const rate = usdKrw(); const month = monthOf();
   const P = await import('../plans');
   const sub = await P.subscription(tenant, sql);
-  const lim = (sub.limits ?? {}) as { aiBudgetKrw?: number | null; perUserAiBudgetKrw?: number | null };
+  const lim = (sub.limits ?? {}) as { aiBudgetKrw?: number | null; perUserAiBudgetKrw?: number | null; bands?: unknown };
+  const B = await import('../bands');
   const ov = (sub.limit_overrides ?? {}) as { aiBudgetKrw?: number | null };
   const [[cap], [used], [plan], [people]] = await Promise.all([
     sql<{ usd: number }[]>`select monthly_usd::float8 usd from ai_limits where tenant = ${tenant}`,
@@ -52,21 +54,26 @@ export async function companyAiBudget(tenant: string, sql: Sql = db()): Promise<
     source = ov.aiBudgetKrw === null || ov.aiBudgetKrw === undefined ? 'unlimited' : 'override';
     limit = source === 'unlimited' ? null : Number(ov.aiBudgetKrw);
     parts.planKrw = limit;
-  } else if (typeof lim.aiBudgetKrw === 'number' || typeof lim.perUserAiBudgetKrw === 'number') {
+  } else if (typeof lim.aiBudgetKrw === 'number' || typeof lim.perUserAiBudgetKrw === 'number' || B.isBanded(lim as unknown)) { // as unknown: lim 타입을 좁히지 않게
     source = 'plan';
-    if (typeof lim.aiBudgetKrw === 'number') parts.planKrw = lim.aiBudgetKrw;
+    const band = await B.tenantBand(tenant, lim, sql, people.n);
+    if (band) {
+      // 구간 정액: 지금 구간의 회사 AI 예산(구간 안에서는 인원이 늘어도 그대로) — 51인~ 는 1인 금액 × 인원
+      parts.planKrw = band.aiBudgetKrw; parts.seats = band.people; parts.band = band.label;
+      if (band.over) parts.perSeatKrw = Math.round(band.aiBudgetKrw / Math.max(1, band.people));
+    } else if (typeof lim.aiBudgetKrw === 'number') parts.planKrw = lim.aiBudgetKrw;
     else {
       // 결제 인원 = 1인 요금제면 max(최소 인원, 활성 인원) — 결제(billing.quote)와 같은 셈
       parts.seats = plan?.per_user_krw ? Math.max(plan.min_users ?? 1, people.n) : Math.max(1, people.n);
       parts.perSeatKrw = lim.perUserAiBudgetKrw!;
       parts.planKrw = parts.perSeatKrw * parts.seats;
-      // 마케팅 요금제(크레딧과 별도로 'AI $' 몫이 있음)를 고른 회사는 그 몫을 더한다 — 체험 중에는 대표 결정 5,000원 그대로
-      if (sub.status !== 'trial') {
-        const M = await import('../mktAuto');
-        const ms = await M.settingsOf(tenant).catch(() => null);
-        const usd = ms?.plan_code ? M.limitsOf(ms).aiMonthlyUsd : null;
-        if (usd) parts.mktKrw = Math.round(usd * rate);
-      }
+    }
+    // 마케팅 요금제(크레딧과 별도로 'AI $' 몫이 있음)를 고른 회사는 그 몫을 더한다(1인·구간 요금제) — 체험 중에는 대표 결정 5,000원 그대로
+    if ((band || typeof lim.aiBudgetKrw !== 'number') && sub.status !== 'trial') {
+      const M = await import('../mktAuto');
+      const ms = await M.settingsOf(tenant).catch(() => null);
+      const usd = ms?.plan_code ? M.limitsOf(ms).aiMonthlyUsd : null;
+      if (usd) parts.mktKrw = Math.round(usd * rate);
     }
     const counts = (sub.addons ?? {}) as Record<string, number>;
     const codes = Object.keys(counts).filter((k) => counts[k] > 0);

@@ -94,7 +94,9 @@ describe('회사 월 AI 예산(원)', () => {
     assert.deepEqual([d.aiBudget.parts.perSeatKrw, d.aiBudget.parts.seats, d.aiBudget.parts.mktKrw, d.aiBudget.parts.packKrw], [2000, 3, 8400, 4950]);
     // 요금제별 기준표(고객·소개 사이트 같은 데이터): 1인 금액·팩 원
     const m = (await cust.ok('GET', '/api/usage')).aiLimits;
-    assert.equal(m.plans.plans.find((p) => p.code === 'w_standard').work.perUserBudgetKrw, 2000);
+    // 355차 #939 ①②: 고객 기준표는 구간 정액(업무·업무+영업)만 — 예전 1인 요금제(스탠다드)는 내렸지만 쓰는 회사는 그대로 셈
+    assert.equal(m.plans.plans.some((p) => p.code === 'w_standard'), false);
+    assert.deepEqual(m.plans.plans.map((p) => p.code), ['w_work', 'w_sales']);
     assert.equal(m.plans.packs.find((a) => a.code === 'ai_credit_s').aiBudgetKrw, 4950);
     assert.equal(m.budget.limitKrw, 19350);
     assert.equal((await cust.req('PUT', `/api/platform/tenants/${custTenant}/limits`, { aiBudgetKrw: 999999 })).status, 404, '고객은 운영 화면 없음');

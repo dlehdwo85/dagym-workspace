@@ -5,6 +5,7 @@ import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { audit } from './log';
 import { notify } from './notifications';
 import { PARTNER } from './partner';
+import { BAND_KEYS, bandRows, isBanded, tenantBand, type BandPick } from './bands';
 import type { SessionUser } from './types';
 
 /**
@@ -29,7 +30,7 @@ export async function subscription(tenant: string, sql: Sql = db()) {
 }
 
 /** 요금제 + 추가 옵션 = 실제 한도 (null = 무제한) */
-export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<{ limits: Limits; sub: any }> {
+export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<{ limits: Limits; sub: any; band: BandPick | null }> {
   const sub = await subscription(tenant, sql);
   const base = sub.limits as Limits & { perUserStorageGb?: number; perUserAi?: number };
   const limits: Limits = { users: base.users ?? null, storageGb: base.storageGb ?? null, aiRequests: base.aiRequests ?? null, tasksTotal: base.tasksTotal ?? null, contactsTotal: base.contactsTotal ?? null };
@@ -40,6 +41,9 @@ export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<
     if (base.perUserStorageGb) limits.storageGb = base.perUserStorageGb * people;
     if (base.perUserAi) limits.aiRequests = base.perUserAi * people;
   }
+  // 355차 #939 ①②: 구간 정액 요금제 — 저장 = 지금 구간(활성 인원) 저장. AI 는 원 예산(ai/companyBudget)이 같은 구간으로 셈
+  const band = await tenantBand(tenant, base, sql);
+  if (band) limits.storageGb = band.storageGb;
   // V28-3 플랫폼 운영자가 회사별로 정한 한도(있으면 요금제 한도 대신, null = 무제한)
   const ov = (sub.limit_overrides ?? {}) as Partial<Limits>;
   for (const k of ['users', 'storageGb', 'aiRequests', 'tasksTotal', 'contactsTotal'] as const) if (k in ov) limits[k] = ov[k] ?? null;
@@ -50,7 +54,7 @@ export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<
       for (const [k, v] of Object.entries(a.adds) as [keyof Limits, number][]) if (k in limits && limits[k] !== null) limits[k] = (limits[k] ?? 0) + v * counts[a.code]; // 원 예산(aiBudgetKrw)은 ai/companyBudget 이 셈
     }
   }
-  return { limits, sub };
+  return { limits, sub, band };
 }
 
 /** 실시간 사용량 */
@@ -133,7 +137,7 @@ export async function usageOverview(u: SessionUser) {
   await requireTenantAdmin(u);
   const tenant = tenantOfUser(u);
   const sql = db();
-  const [{ limits, sub }, usage, plans, addons, top, requests] = await Promise.all([
+  const [{ limits, sub, band }, usage, plans, addons, top, requests] = await Promise.all([
     effectiveLimits(tenant, sql), currentUsage(tenant, sql),
     sql`select code, name, monthly_krw, per_user_krw, annual_monthly_krw, annual_per_user_krw, min_users, limits, description from plans where public and active order by sort`,
     sql`select code, name, monthly_krw, adds from plan_addons where active order by sort`,
@@ -149,8 +153,9 @@ export async function usageOverview(u: SessionUser) {
   const full = (await import('./customerScope')).seesInternals(u);
   const ai = await aiBreakdown(tenant, sql);
   const { aiCostUsd: _usd, ...usageCust } = usage;
-  return { tenant, subscription: { planCode: sub.plan_code, planName: sub.plan_name, monthlyKrw: sub.per_user_krw ? sub.per_user_krw * Math.max(1, usage.users) : sub.monthly_krw, perUserKrw: sub.per_user_krw ?? null, addons: sub.addons, periodStart: sub.period_start, periodEnd: sub.period_end, status: sub.status },
-    limits, usage: full ? usage : usageCust, plans, addons, topFiles: top, requests, demo: tenant === 'demo', ai: full ? { currency: 'usd' as const, ...ai } : customerAi(ai), aiLimits: await (await import('./aiLimits')).aiLimitsView(tenant, sql, full), canEdit: (await (await import('./menuPerms')).menuLevel(u, 'usage', sql)) === 'edit',
+  return { tenant, subscription: { planCode: sub.plan_code, planName: sub.plan_name, monthlyKrw: band ? band.krw : sub.per_user_krw ? sub.per_user_krw * Math.max(1, usage.users) : sub.monthly_krw, perUserKrw: sub.per_user_krw ?? null,
+      band: band ? { label: band.label, people: band.people, krw: band.krw } : null /* 355차 구간 정액 */, addons: sub.addons, periodStart: sub.period_start, periodEnd: sub.period_end, status: sub.status },
+    limits, usage: full ? usage : usageCust, plans: plans.map((p: any) => ({ ...p, bandRows: isBanded(p.limits) ? bandRows(p.limits) : null })), addons, topFiles: top, requests, demo: tenant === 'demo', ai: full ? { currency: 'usd' as const, ...ai } : customerAi(ai), aiLimits: await (await import('./aiLimits')).aiLimitsView(tenant, sql, full), canEdit: (await (await import('./menuPerms')).menuLevel(u, 'usage', sql)) === 'edit',
     aiBudget: await (await import('./ai/companyBudget')).companyAiBudget(tenant, sql), full }; // 대표 10/24 ② 회사 월 AI 예산(원) 게이지
 }
 /** #602 고객사용 AI 사용 내역: 금액은 전부 원화(환율은 서버가 적용), 달러 칸·운영 메모 없음 */
@@ -249,7 +254,13 @@ export const planInput = z.object({
   limits: z.object({ users: z.number().int().min(0).nullable(), storageGb: z.number().min(0).nullable(), aiRequests: z.number().int().min(0).nullable(),
     perUserStorageGb: z.number().min(0).optional(), perUserAi: z.number().int().min(0).optional(), tasksTotal: z.number().int().min(0).nullable().optional(),
     // 대표 10/24 ② 회사 월 AI 예산(원): 고정액 또는 1인 금액(× 결제 인원) — 둘 다 없으면 예전 한도
-    aiBudgetKrw: z.number().int().min(0).max(100_000_000).optional(), perUserAiBudgetKrw: z.number().int().min(0).max(10_000_000).optional() }),
+    aiBudgetKrw: z.number().int().min(0).max(100_000_000).optional(), perUserAiBudgetKrw: z.number().int().min(0).max(10_000_000).optional(),
+    // 355차 #939 ①② 구간 정액: 구간(인원 상한·월 금액·저장·회사 AI 예산 원) + 마지막 구간을 넘으면 1인 값. 보내지 않으면 저장된 구간을 그대로 둔다
+    bands: z.array(z.object({ upTo: z.number().int().min(1).max(100_000), krw: z.number().int().min(0).max(100_000_000), storageGb: z.number().min(0).max(1_000_000), aiBudgetKrw: z.number().int().min(0).max(100_000_000) }))
+      .min(1).max(10).refine((b) => b.every((x, i) => !i || x.upTo > b[i - 1].upTo), '구간 인원은 작은 것부터 커져야 합니다').optional(),
+    overPerUserKrw: z.number().int().min(0).max(1_000_000).optional(), overPerUserStorageGb: z.number().min(0).max(10_000).optional(),
+    overPerUserAiBudgetKrw: z.number().int().min(0).max(1_000_000).optional(), salesPerUserKrw: z.number().int().min(0).max(1_000_000).nullable().optional(),
+    annualOffPct: z.number().int().min(0).max(90).optional() }),
   perUserKrw: z.number().int().min(0).max(1_000_000).nullable().optional(),
   description: z.string().max(200).nullable().optional(), public: z.boolean().optional(), active: z.boolean().optional(), sort: z.number().int().optional(),
 });
@@ -260,7 +271,8 @@ export async function upsertPlan(u: SessionUser, code: string, i: z.infer<typeof
   const sql = db();
   await sql`insert into plans (code, name, monthly_krw, per_user_krw, limits, description, public, active, sort)
     values (${code}, ${i.name}, ${i.monthlyKrw}, ${i.perUserKrw ?? null}, ${sql.json(i.limits)}, ${i.description ?? null}, ${i.public ?? true}, ${i.active ?? true}, ${i.sort ?? 50})
-    on conflict (code) do update set name = excluded.name, monthly_krw = excluded.monthly_krw, per_user_krw = ${i.perUserKrw === undefined ? sql`plans.per_user_krw` : sql`${i.perUserKrw}::int`}, limits = excluded.limits, description = coalesce(excluded.description, plans.description),
+    on conflict (code) do update set name = excluded.name, monthly_krw = excluded.monthly_krw, per_user_krw = ${i.perUserKrw === undefined ? sql`plans.per_user_krw` : sql`${i.perUserKrw}::int`},
+      limits = excluded.limits || coalesce((select jsonb_object_agg(e.key, e.value) from jsonb_each(plans.limits) e where e.key = any(${[...BAND_KEYS]}::text[]) and not (excluded.limits ? e.key)), '{}'::jsonb), description = coalesce(excluded.description, plans.description),
       public = coalesce(${i.public ?? null}::boolean, plans.public), active = coalesce(${i.active ?? null}::boolean, plans.active),
       sort = coalesce(${i.sort ?? null}::int, plans.sort), updated_at = now()`;
   await audit(sql, u.id, 'platform.plan', null, null, { code, ...i }, null);

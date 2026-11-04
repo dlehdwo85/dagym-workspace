@@ -24,11 +24,11 @@ export const BUNDLE: { channel: string; kind: Kind; postTime: string; cross: str
   { channel: 'instagram', kind: 'feed', postTime: '10:00', cross: ['facebook'] }, { channel: 'youtube', kind: 'shorts', postTime: '11:00', cross: [] }, { channel: 'instagram', kind: 'reels', postTime: '12:00', cross: [] },
   { channel: 'blog', kind: 'blog', postTime: '13:00', cross: [] }, { channel: 'instagram', kind: 'story', postTime: '18:00', cross: ['facebook'] }];
 type Kind = keyof typeof KIND_LABEL;
-/** 요금제(V43 3 안). price 는 대표 결정 전이라 null — 화면에 '결정 전' */
+/** 요금제(V43 3 안). price = 마케팅 공간 월 금액(회사당, 구간 무관 — 355차 #939 대표 11/04 확정, DB mkt_plan_limits 가 먼저) */
 export const MKT_PLANS = {
-  basic: { label: '베이직', weekly: { feed: 2, blog: 1 }, monthlyCredits: 30, videoMonthly: 0, regenMonthly: 2, aiMonthlyUsd: 3, price: null },
-  standard: { label: '스탠다드', weekly: { feed: 3, blog: 1, reels: 1 }, monthlyCredits: 80, videoMonthly: 0, regenMonthly: 6, aiMonthlyUsd: 6, price: null },
-  pro: { label: '프로', weekly: { feed: 5, blog: 2, reels: 2 }, monthlyCredits: 250, videoMonthly: 2, regenMonthly: 10, aiMonthlyUsd: 15, price: null },
+  basic: { label: '베이직', weekly: { feed: 2, blog: 1 }, monthlyCredits: 30, videoMonthly: 0, regenMonthly: 2, aiMonthlyUsd: 3, price: 9900 },
+  standard: { label: '스탠다드', weekly: { feed: 3, blog: 1, reels: 1 }, monthlyCredits: 80, videoMonthly: 0, regenMonthly: 6, aiMonthlyUsd: 6, price: 29000 },
+  pro: { label: '프로', weekly: { feed: 5, blog: 2, reels: 2 }, monthlyCredits: 250, videoMonthly: 2, regenMonthly: 10, aiMonthlyUsd: 15, price: 59000 },
 } as const;
 /** 제작 요청 카드 예상 크레딧(V43 1 실측): 실사 + 글자 렌더 0, 실사 릴스 0.5~3, 생성 영상 약 80, 재생성 이미지 6.5·영상 컷 7~22.5 */
 const EST = { image: 0, video_reels: 3, video: 80, regen_image: 6.5, regen_video: 15 };

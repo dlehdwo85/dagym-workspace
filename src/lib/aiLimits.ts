@@ -1,5 +1,6 @@
 import { db, type Sql } from './db';
 import { AI_NAME } from './aiNames';
+import { bandRows, isBanded } from './bands';
 
 /**
  * 대표 10/21 14:30 (#412) 요금제별 AI 한도 통합: 업무 AI 비서 · 영업 AI 세일즈 · 마케팅 AI 마케터 각각 "이번 달 한도 → 쓴 양 → 남은 양"을 한 표로,
@@ -109,13 +110,15 @@ export function publicAiPlans(m: Awaited<ReturnType<typeof aiPlanMatrix>>) {
   return {
     plans: m.plans.map((p) => ({ ...p, work: { ...p.work, feelPerUser: p.work.feelPerUser.map((f) => ({ ...f, per: '' })) },
       marketing: p.marketing ? { ...p.marketing, aiMonthlyUsd: null } : null })),
-    packs: m.packs, note: m.note,
+    marketingPlans: m.marketingPlans, packs: m.packs, note: m.note,
   };
 }
 export type AiPlanRow = {
   code: string; name: string; perUserKrw: number | null; monthlyKrw: number | null; minUsers: number | null; description: string | null;
   work: { perUserAi: number | null; aiRequests: number | null; feelPerUser: Feel[]; budgetKrw: number | null; perUserBudgetKrw: number | null };
   sales: { shared: true };
+  /** 355차 #939 ①② 구간 정액 요금제의 구간 표(월 금액·연간·저장, AI 는 첫 구간 대비 배수만) — 1인 요금제면 null */
+  bands: ReturnType<typeof bandRows> | null;
   marketing: { code: string; label: string; price: number | null; monthlyCredits: number; aiMonthlyUsd: number | null; videoMonthly: number; regenMonthly: number; images: number; videos: number; weekly: Record<string, number> } | null;
 };
 /** 요금제별 기준표 — 업무 요금제(plans 표, 공개·활성) × 마케팅 요금제(mkt_plan_limits, 코드 w_basic→basic 식으로 짝) + AI 크레딧 팩. 한 함수가 모든 화면에 같은 값을 준다 */
@@ -129,7 +132,8 @@ export async function aiPlanMatrix(sql: Sql = db()) {
   const rate = usdKrwRate();
   const rows: AiPlanRow[] = plans.map((p) => {
     const lim = (p.limits ?? {}) as { aiRequests?: number | null; perUserAi?: number | null; aiBudgetKrw?: number | null; perUserAiBudgetKrw?: number | null };
-    const mk = mkt[p.code.replace(/^w_/, '')] ?? null;
+    const banded = isBanded(p.limits);
+    const mk = banded ? null : mkt[p.code.replace(/^w_/, '')] ?? null; // 구간 요금제는 마케팅 공간을 따로 고름(marketingPlans)
     // 1인당 월 요청 수 → 체감(질문 기준): 요청 1회 = 질문 1회로 본다. 대표 10/24 ② 원 예산 요금제는 1인 금액 ÷ 최근 평균 단가
     const per = lim.perUserAi ?? null;
     const perKrw = lim.perUserAiBudgetKrw ?? null;
@@ -137,10 +141,13 @@ export async function aiPlanMatrix(sql: Sql = db()) {
       : per === null ? [] : [{ label: '질문·답변', n: per, unit: '회', per: `1회 약 ${krw(rates.assistant, rate)}` }, { label: '메일·문자 초안', n: Math.floor((per * rates.assistant) / rates.mail_draft), unit: '건', per: `1건 약 ${krw(rates.mail_draft, rate)}` }];
     return { code: p.code, name: p.name, perUserKrw: p.per_user_krw ?? null, monthlyKrw: p.monthly_krw ?? null, minUsers: p.min_users ?? null, description: p.description ?? null,
       work: { perUserAi: per, aiRequests: lim.aiRequests ?? null, feelPerUser, budgetKrw: lim.aiBudgetKrw ?? null, perUserBudgetKrw: perKrw },
-      sales: { shared: true as const },
+      sales: { shared: true as const }, bands: banded ? bandRows(p.limits) : null,
       marketing: mk ? { code: mk.code, label: mk.label, price: mk.price, monthlyCredits: mk.monthlyCredits, aiMonthlyUsd: mk.aiMonthlyUsd, videoMonthly: mk.videoMonthly, regenMonthly: mk.regenMonthly,
         images: Math.floor(mk.monthlyCredits / cost.imageCredits), videos: Math.floor(mk.monthlyCredits / cost.videoCredits), weekly: mk.weekly } : null };
   });
-  return { plans: rows, packs: packs.map((a) => ({ code: a.code, name: a.name, monthlyKrw: a.monthly_krw, aiRequests: Number(a.adds?.aiRequests ?? 0), aiBudgetKrw: a.adds?.aiBudgetKrw === undefined ? null : Number(a.adds.aiBudgetKrw) })), cost, rates, usdKrw: rate,
-    note: '업무·영업·마케팅 글 AI 는 회사 월 AI 예산 하나를 함께 씀(1인 금액 × 결제 인원 + 마케팅 요금제 AI 몫 + AI 크레딧 팩, 매달 1일 다시 채워짐). 영상·시안 생성은 마케팅 크레딧으로 따로.' };
+  // 355차: 마케팅 공간(회사당, 구간 무관) — 업무 요금제와 따로 고른다
+  const marketingPlans = Object.values(mkt).map((m) => ({ code: m.code, label: m.label, price: m.price, monthlyCredits: m.monthlyCredits, videoMonthly: m.videoMonthly,
+    images: Math.floor(m.monthlyCredits / cost.imageCredits), videos: Math.floor(m.monthlyCredits / cost.videoCredits) }));
+  return { plans: rows, marketingPlans, packs: packs.map((a) => ({ code: a.code, name: a.name, monthlyKrw: a.monthly_krw, aiRequests: Number(a.adds?.aiRequests ?? 0), aiBudgetKrw: a.adds?.aiBudgetKrw === undefined ? null : Number(a.adds.aiBudgetKrw) })), cost, rates, usdKrw: rate,
+    note: '업무·영업·마케팅 글 AI 는 회사 월 AI 사용량 하나를 함께 씀(구간 인원에 맞춘 양 + 마케팅 공간 AI 몫 + AI 크레딧 팩, 매달 1일 다시 채워짐 · 쓴 양은 %로). 영상·시안 생성은 마케팅 크레딧으로 따로.' };
 }

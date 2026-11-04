@@ -55,7 +55,7 @@ export default function UsagePage() {
       {inApp && <p className="rounded-card border border-line bg-white p-4 text-sm text-ink-2 shadow-card" data-testid="in-app-billing-note">이 화면은 사용량만 보여 줍니다.</p>}
       {!inApp && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="current-plan">
         <div className="text-sm text-ink-2">현재 요금제</div>
-        <div className="text-xl font-bold">{s.planName} <span className="text-base font-normal text-ink-2">{s.monthlyKrw === null ? '별도 협의' : s.perUserKrw ? `1인 월 ${won(s.perUserKrw)} · 이번 달 약 ${won(s.monthlyKrw)}` : `월 ${won(s.monthlyKrw)}`}</span></div>
+        <div className="text-xl font-bold">{s.planName} <span className="text-base font-normal text-ink-2">{s.monthlyKrw === null ? '별도 협의' : s.band ? `월 ${won(s.monthlyKrw)} · ${s.band.label} 구간(지금 ${s.band.people}명)` : s.perUserKrw ? `1인 월 ${won(s.perUserKrw)} · 이번 달 약 ${won(s.monthlyKrw)}` : `월 ${won(s.monthlyKrw)}`}</span></div>
         <div className="mt-1 text-xs text-ink-3">
           {Object.entries(s.addons ?? {}).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${addons.find((a: any) => a.code === k)?.name ?? k} ×${v}`).join(' · ') || '추가 옵션 없음'}
           {s.periodEnd && ` · 다음 갱신일 ${fmtDate(s.periodEnd)}`}{s.status !== 'active' && ` · ${s.status === 'trial' ? '체험 중' : '일시 중지'}`}
@@ -140,7 +140,7 @@ export default function UsagePage() {
         </ul>
       </section>
       {!inApp && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="plan-table">
-        <h2 className="text-sm font-semibold">요금제 (VAT 별도 · 1인 월 · 최소 3인 · 30인 이상 10% 할인)</h2>
+        <h2 className="text-sm font-semibold">요금제 (VAT 별도 · 월 · 구간 정액 — 구간 안에서는 인원이 늘어도 같은 금액 · 연간 결제 20% 할인)</h2>
         <div className="mt-2 overflow-x-auto">
           <table className="w-full min-w-[480px] text-sm">
             <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">요금제</th><th>월 요금</th><th>사용자</th><th>저장공간</th><th>AI(회사 공유)/월</th></tr></thead>
@@ -148,8 +148,9 @@ export default function UsagePage() {
               {plans.map((p: any) => (
                 <tr key={p.code} className={cx('border-t border-line', p.code === s.planCode && 'bg-brand-50 font-semibold')}>
                   <td className="py-1.5">{p.name}{p.description && <div className="text-[11px] font-normal text-ink-3">{p.description}</div>}</td>
-                  <td>{p.per_user_krw ? `1인 ${won(p.per_user_krw)}` : won(p.monthly_krw)}{p.min_users ? <div className="text-[11px] font-normal text-ink-3">최소 {p.min_users}인</div> : null}{(p.annual_per_user_krw || p.annual_monthly_krw) ? <div className="text-[11px] font-normal text-brand-700">연간 결제 시 {p.annual_per_user_krw ? `1인 ${won(p.annual_per_user_krw)}` : won(p.annual_monthly_krw)}</div> : null}</td><td>{lim(p.limits.users, '명')}</td>
-                  <td>{p.limits.perUserStorageGb ? `1인 ${p.limits.perUserStorageGb}GB(합산)` : lim(p.limits.storageGb, 'GB')}</td><td>{/* 대표 10/24 ② → 351차 #939 ③: AI 는 원·회 없이 '포함(회사 공유)' */}
+                  <td>{p.bandRows ? <div data-testid={`plan-bands-${p.code}`}>{p.bandRows.map((b: any) => <div key={b.label} className="whitespace-nowrap">{b.label} {b.perUserKrw ? `1인 ${won(b.perUserKrw)}${b.salesPerUserKrw ? ` + 영업 사용자 1인 ${won(b.salesPerUserKrw)}` : ''}` : won(b.krw)}</div>)}</div>
+                    : p.per_user_krw ? `1인 ${won(p.per_user_krw)}` : won(p.monthly_krw)}{p.min_users ? <div className="text-[11px] font-normal text-ink-3">최소 {p.min_users}인</div> : null}{(p.annual_per_user_krw || p.annual_monthly_krw) ? <div className="text-[11px] font-normal text-brand-700">연간 결제 시 {p.annual_per_user_krw ? `1인 ${won(p.annual_per_user_krw)}` : won(p.annual_monthly_krw)}</div> : null}</td><td className="whitespace-nowrap">{p.bandRows ? '구간별' : lim(p.limits.users, '명')}</td>
+                  <td>{p.bandRows ? p.bandRows.map((b: any) => <div key={b.label} className="whitespace-nowrap">{b.label} {b.perUserStorageGb ? `1인 ${b.perUserStorageGb}GB` : `${b.storageGb}GB`}</div>) : p.limits.perUserStorageGb ? `1인 ${p.limits.perUserStorageGb}GB(합산)` : lim(p.limits.storageGb, 'GB')}</td><td className="whitespace-nowrap">{/* 대표 10/24 ② → 351차 #939 ③: AI 는 원·회 없이 '포함(회사 공유)' */}
                     포함(회사 공유)</td>
                 </tr>
               ))}
@@ -174,7 +175,7 @@ export default function UsagePage() {
             <Field label="요금제">
               <select className={inputCls} value={req.planCode} onChange={(e) => setReq({ ...req, planCode: e.target.value })} aria-label="요청할 요금제">
                 <option value="">그대로 (옵션만)</option>
-                {plans.map((p: any) => <option key={p.code} value={p.code}>{p.name} · {p.per_user_krw ? `1인 ${won(p.per_user_krw)}` : won(p.monthly_krw)}</option>)}
+                {plans.map((p: any) => <option key={p.code} value={p.code}>{p.name} · {p.bandRows ? `월 ${won(p.bandRows[0].krw)}부터(구간 정액)` : p.per_user_krw ? `1인 ${won(p.per_user_krw)}` : won(p.monthly_krw)}</option>)}
               </select>
             </Field>
             {addons.map((a: any) => (

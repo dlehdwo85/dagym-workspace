@@ -33,21 +33,29 @@ async function requireBillingAdmin(u: SessionUser) {
   return t;
 }
 
-/** 요금 견적: 1인 요금 × max(최소 인원, 활성 인원) — 월 또는 연간(12개월), VAT 포함 */
+/** 요금 견적: 1인 요금 × max(최소 인원, 활성 인원) — 월 또는 연간(12개월), VAT 포함
+ *  355차 #939 ①②: 구간 정액 요금제(limits.bands)는 활성 인원의 구간 금액(구간 안에서는 인원이 늘어도 같은 금액, 연간 = 12개월 × (1 − 연간 할인 %)).
+ *  고객 화면에서 내린 요금제(public = false)도 지금 그 요금제를 쓰는 회사는 견적·갱신 결제가 된다 */
 export async function quote(tenant: string, planCode: string, cycle: 'monthly' | 'annual', sql: Sql = db()) {
-  const [p] = await sql<any[]>`select code, name, monthly_krw, per_user_krw, annual_monthly_krw, annual_per_user_krw, min_users from plans
-    where code = ${planCode} and public and active and code not in ('trial', 'free', 'team_free', 'w_free')`;
+  const [p] = await sql<any[]>`select code, name, monthly_krw, per_user_krw, annual_monthly_krw, annual_per_user_krw, min_users, limits from plans
+    where code = ${planCode} and active and code not in ('trial', 'free', 'team_free', 'w_free')
+      and (public or code = (select plan_code from tenant_subscriptions where tenant = ${tenant}))`;
   if (!p) throw badRequest('결제할 수 없는 요금제입니다');
   const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from users where tenant = ${tenant} and status = 'active'`;
-  const seats = p.per_user_krw ? Math.max(p.min_users ?? 1, n) : 1;
-  const unit = cycle === 'annual' ? (p.per_user_krw ? p.annual_per_user_krw ?? p.per_user_krw : p.annual_monthly_krw ?? p.monthly_krw) : (p.per_user_krw ?? p.monthly_krw);
-  // V27(대표 10/17): 30인 이상 10% 할인
-  const list = Math.round(unit * seats * (cycle === 'annual' ? 12 : 1) * (p.per_user_krw && seats >= 30 ? 0.9 : 1));
+  const band = await (await import('../bands')).tenantBand(tenant, p.limits, sql, n);
+  let seats: number, unit: number, list: number;
+  if (band) { seats = band.people; unit = band.krw; list = cycle === 'annual' ? band.annualKrw : band.krw; }
+  else {
+    seats = p.per_user_krw ? Math.max(p.min_users ?? 1, n) : 1;
+    unit = cycle === 'annual' ? (p.per_user_krw ? p.annual_per_user_krw ?? p.per_user_krw : p.annual_monthly_krw ?? p.monthly_krw) : (p.per_user_krw ?? p.monthly_krw);
+    // V27(대표 10/17): 30인 이상 10% 할인
+    list = Math.round(unit * seats * (cycle === 'annual' ? 12 : 1) * (p.per_user_krw && seats >= 30 ? 0.9 : 1));
+  }
   // #656 회사별 할인(플랫폼 운영자가 건 것, 기한 안) — 공급가에 적용. 다음 결제부터 반영
   const [ds] = await sql<{ discount_pct: number; discount_until: string | null }[]>`select discount_pct, to_char(discount_until, 'YYYY-MM-DD') as discount_until from tenant_subscriptions where tenant = ${tenant}`;
   const discountPct = ds && Number(ds.discount_pct) > 0 && (!ds.discount_until || ds.discount_until >= today()) ? Number(ds.discount_pct) : 0;
   const supply = Math.round(list * (1 - discountPct / 100));
-  return { plan: p, seats, unit, supply, listSupply: list, discountPct, amount: Math.round(supply * VAT), cycle, goodsName: `Workin ${p.code} ${cycle}` };
+  return { plan: p, seats, unit, supply, listSupply: list, discountPct, amount: Math.round(supply * VAT), cycle, goodsName: `Workin ${p.code} ${cycle}`, band: band?.label ?? null };
 }
 
 export async function billingOverview(u: SessionUser) {
@@ -64,7 +72,7 @@ export async function billingOverview(u: SessionUser) {
     sql`select plan_code, amount_krw, cycle, created_at from billing_consents where tenant = ${t} order by created_at desc limit 1`, // V34-B 마지막 정기결제 동의
   ]);
   const quotes = [];
-  for (const p of plans) for (const cy of ['monthly', 'annual'] as const) { const q = await quote(t, p.code, cy, sql); quotes.push({ planCode: p.code, name: q.plan.name, cycle: cy, seats: q.seats, supply: q.supply, amount: q.amount }); }
+  for (const p of plans) for (const cy of ['monthly', 'annual'] as const) { const q = await quote(t, p.code, cy, sql); quotes.push({ planCode: p.code, name: q.plan.name, cycle: cy, seats: q.seats, band: q.band, supply: q.supply, amount: q.amount }); }
   return { enabled: !!npConf(), mode: npConf()?.mode ?? null, card: card ?? null, sub: sub ?? null, payments, quotes, autoRenewConsent: consent ?? null, addons: addons.map((a: any) => ({ ...a, amount: Math.round(a.monthly_krw * VAT) })),
     easyPays: easyPaysOn().map((k) => ({ key: k, label: EASY_PAYS[k].label })) /* 200차 #706 켠 간편결제만 */ };
 }

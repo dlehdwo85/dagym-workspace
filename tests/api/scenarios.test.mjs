@@ -1858,10 +1858,12 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
     assert.deepEqual(u.limits, { users: null, storageGb: null, aiRequests: null, tasksTotal: null, contactsTotal: null });
     assert.ok(u.usage.storageBytes > 0 && u.usage.users >= 4 && u.usage.aiRequests >= 1, '첨부·자료실·사람·AI 요청 셈');
     assert.ok(u.topFiles.length > 0 && u.topFiles[0].size >= u.topFiles.at(-1).size, '큰 파일 순');
-    // V27(대표 10/17): 베이직 2,200·스탠다드 4,500·프로 8,500원(1인·최소 3인), 예전 개인·팀·비즈니스·내부·체험은 목록에 없음 · 무료(5명)는 #466(대표 10/23 — 14일 체험만)으로 내림(188)
+    // 355차 #939 ①②(대표 11/04): 구간 정액 업무·업무+영업만 — 예전 1인 요금제(베이직·스탠다드·프로)·개인·팀·비즈니스·내부·체험·무료는 목록에 없음
     const P = Object.fromEntries(u.plans.map((p) => [p.code, p]));
-    assert.ok(P.w_basic?.per_user_krw === 2200 && P.w_basic.annual_per_user_krw === 1800 && P.w_basic.min_users === 3 && P.w_standard?.per_user_krw === 4500 && P.w_pro?.per_user_krw === 8500
-      && !u.plans.some((p) => ['internal', 'standard', 'free', 'w_free', 'basic', 'team_free', 'trial', 'team', 'personal', 'business'].includes(p.code)), `V27 요금표: ${u.plans.map((p) => p.code).join(',')}`);
+    assert.deepEqual(u.plans.map((p) => p.code), ['w_work', 'w_sales'], `요금표: ${u.plans.map((p) => p.code).join(',')}`);
+    assert.deepEqual(P.w_work.bandRows.map((b) => b.krw), [19900, 39900, 69000, 169000, 3900]);
+    assert.deepEqual(P.w_sales.bandRows.map((b) => b.krw), [34900, 64900, 109000, 249000, 3900]);
+    assert.doesNotMatch(JSON.stringify(u.plans.map((p) => p.description)), /원분/, '요금제 설명에 AI 원 금액 없음');
     assert.deepEqual(u.addons.map((a) => a.monthly_krw).sort((a, b) => a - b), [4000, 9900, 29000, 59000], 'AI 크레딧 3종·저장 +50GB');
     assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     const pf = await ctx.owner.ok('GET', '/api/platform');
@@ -1916,13 +1918,14 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
   });
 
   test('요금제 변경 요청 → 운영자 승인하면 반영·요청자 알림, 반려도 가능', async () => {
-    const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'w_standard', note: '지점 늘어남' });
-    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'w_standard' })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
+    const r = await ctx.owner.ok('POST', '/api/usage/request', { planCode: 'w_work', note: '지점 늘어남' });
+    assert.equal((await ctx.owner.req('POST', '/api/usage/request', { planCode: 'w_standard' })).status, 400, '355차: 내린 1인 요금제는 요청 불가');
+    assert.equal((await ctx.staffA.client.req('POST', '/api/usage/request', { planCode: 'w_work' })).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     assert.equal((await ctx.owner.req('POST', '/api/usage/request', { planCode: 'internal' })).status, 400, '공개 안 된 요금제는 요청 불가');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.equal(pf.requests.find((x) => x.id === r.id).status, 'pending');
     await ctx.owner.ok('POST', `/api/platform/requests/${r.id}`, { approve: true });
-    assert.equal((await ctx.owner.ok('GET', '/api/usage')).subscription.planCode, 'w_standard');
+    assert.equal((await ctx.owner.ok('GET', '/api/usage')).subscription.planCode, 'w_work');
     assert.equal((await ctx.owner.req('POST', `/api/platform/requests/${r.id}`, { approve: true })).status, 400);
     const before = (await ctx.owner.ok('GET', '/api/usage')).limits.aiRequests;
     const r2 = await ctx.owner.ok('POST', '/api/usage/request', { addons: { ai500: 1 } });

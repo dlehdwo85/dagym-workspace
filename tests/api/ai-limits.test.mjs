@@ -44,11 +44,15 @@ test('사용량·요금제: 세 AI 줄 — 공간별 쓴 양(purpose 로 구분)
   const wf = Object.fromEntries(w.feel.map((f) => [f.label, f]));
   assert.ok(wf['질문·답변'].n >= 1 && /원/.test(wf['질문·답변'].per), '체감 단위 + 단가');
   assert.ok(wf['메일·문자 초안'].n > wf['질문·답변'].n, '메일 초안이 더 싸다');
-  // 요금제별 기준표: 업무 요금제 × 마케팅 요금제 짝(w_basic→basic) + AI 크레딧 팩
-  const basic = L.plans.plans.find((p) => p.code === 'w_basic');
-  // 대표 10/24 ②: 1인 월 AI 예산(원, 192 초안 500원) — 요청 횟수 대신, 체감 = 500원 ÷ 질문 단가(기본 $0.05 × 1,400 = 70원) = 7회
-  assert.equal(basic.work.perUserAi, null); assert.equal(basic.work.perUserBudgetKrw, 500); assert.equal(basic.marketing.label, '베이직'); assert.equal(basic.marketing.monthlyCredits, 30); assert.equal(basic.marketing.images, 4);
-  assert.equal(basic.work.feelPerUser[0].n, 7);
+  // 요금제별 기준표 — 355차 #939 ①②: 구간 정액(업무·업무+영업) + 마케팅 공간은 따로(회사당, 구간 무관) + AI 크레딧 팩
+  assert.deepEqual(L.plans.plans.map((p) => p.code), ['w_work', 'w_sales'], '예전 1인 요금제(베이직·스탠다드·프로)는 고객 표에서 내림');
+  const work = L.plans.plans.find((p) => p.code === 'w_work');
+  assert.deepEqual(work.bands.map((b) => [b.label, b.krw, b.storageGb]), [['1~5인', 19900, 10], ['6~10인', 39900, 25], ['11~20인', 69000, 60], ['21~50인', 169000, 150], ['51인~', 3900, 5]]);
+  assert.equal(work.bands[4].perUserKrw, 3900); assert.equal(work.marketing, null); assert.equal(work.work.perUserBudgetKrw, null);
+  assert.deepEqual(work.bands.slice(0, 4).map((b) => b.aiTimes), [1, 2, 4, 10], 'AI 는 원 대신 첫 구간 대비 배수');
+  assert.equal(L.plans.plans.find((p) => p.code === 'w_sales').bands[4].salesPerUserKrw, 7900);
+  const mb = L.plans.marketingPlans.find((x) => x.code === 'basic');
+  assert.deepEqual([mb.label, mb.price, mb.monthlyCredits, mb.images], ['베이직', 9900, 30, 4]);
   assert.equal(L.plans.plans.find((p) => p.code === 'w_free'), undefined, '#466 무료 5명 폐지(188) — 요금표에서 내림'); // 대표 10/23
   assert.ok(L.plans.packs.some((a) => a.code === 'ai_credit_s' && a.aiRequests === 100 && a.aiBudgetKrw === 4950));
   assert.equal(L.budget.source, 'legacy', '우리 회사(internal)는 예전 회사 월 한도'); assert.equal(L.budget.limitKrw, 14000);
@@ -60,7 +64,7 @@ test('소개 사이트·요금 안내 같은 데이터: /api/public/ai-plans 로
   const r = await fetch(`${BASE}/api/public/ai-plans`); assert.equal(r.status, 200);
   const m = await r.json();
   // #602: 로그인 없는 기준표에는 원가·단가·환율이 없음(요청당 평균 원가·크레딧 원가·'1회 약 n원'·마케팅 AI 달러)
-  assert.deepEqual(Object.keys(m).sort(), ['note', 'packs', 'plans']);
+  assert.deepEqual(Object.keys(m).sort(), ['marketingPlans', 'note', 'packs', 'plans']);
   assert.ok(!/usd|krwPerCredit|"per":"1/i.test(JSON.stringify(m.plans.map((p) => ({ ...p, marketing: p.marketing && { ...p.marketing, aiMonthlyUsd: undefined } })))), JSON.stringify(m.plans[0]));
   assert.ok(m.plans.every((p) => !p.marketing || p.marketing.aiMonthlyUsd === null));
   const u = await ctx.owner.ok('GET', '/api/usage');
@@ -68,8 +72,9 @@ test('소개 사이트·요금 안내 같은 데이터: /api/public/ai-plans 로
   // 플랫폼 운영에서 마케팅 표 숫자를 바꾸면 두 곳 다 바뀐다(배포 없음)
   await ctx.owner.ok('PUT', '/api/platform/mkt-plans', { plan: { code: 'basic', monthlyCredits: 40 } });
   const m2 = await (await fetch(`${BASE}/api/public/ai-plans`)).json();
-  assert.equal(m2.plans.find((p) => p.code === 'w_basic').marketing.monthlyCredits, 40);
-  assert.equal((await ctx.owner.ok('GET', '/api/usage')).aiLimits.plans.plans.find((p) => p.code === 'w_basic').marketing.monthlyCredits, 40);
+  assert.equal(m2.marketingPlans.find((p) => p.code === 'basic').monthlyCredits, 40);
+  assert.equal((await ctx.owner.ok('GET', '/api/usage')).aiLimits.plans.marketingPlans.find((p) => p.code === 'basic').monthlyCredits, 40);
+  assert.ok(!/aiBudgetKrw|aiMonthlyUsd/.test(JSON.stringify(m2.plans.map((p) => p.bands))), '구간 표에 AI 원 예산 없음');
 });
 
 test('AI 비서 대화는 호출 공간에 따라 sales_assistant·marketing_assistant 로 기록 → 영업·마케팅 줄에 잡힌다', async () => {
