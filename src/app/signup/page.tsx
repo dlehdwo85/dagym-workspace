@@ -20,6 +20,8 @@ export default function SignupPage() {
   const [social, setSocial] = useState(0);
   const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false, alimtalk: false });
   const [phone, setPhone] = useState(''); // 304차 #871 결제·약관 안내 알림톡(선택)
+  const [contact, setContact] = useState(''); // 359차 승인제 가입: 연락받을 전화(24시간 안에 연락)
+  const [approval, setApproval] = useState(true);
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -28,7 +30,7 @@ export default function SignupPage() {
   const opened = useRef(Date.now());
   useEffect(() => { captureUtm(); }, []);
   useEffect(() => { if (enabled) signupStep(step === 1 ? 'account_view' : 'company_view'); }, [step, enabled]);
-  useEffect(() => { api('/api/auth/signup').then((r) => { setConversionTags(r.tags); setEnabled(!!r.enabled); }).catch(() => setEnabled(false)); }, []);
+  useEffect(() => { api('/api/auth/signup').then((r) => { setConversionTags(r.tags); setEnabled(!!r.enabled); setApproval(r.approval !== false); }).catch(() => setEnabled(false)); }, []);
   const all = agree.terms && agree.age14 && agree.privacy && agree.ai && agree.marketing;
 
   function toCompany(e: React.FormEvent) {
@@ -41,10 +43,11 @@ export default function SignupPage() {
     e.preventDefault(); setErr(null);
     if (!agree.terms || !agree.privacy || !agree.age14) { setStep(1); setErr('필수 약관에 동의해 주세요'); return; }
     if (mode === 'team' && !f.company.trim()) { setErr('회사(팀) 이름을 입력하세요'); return; }
+    if (approval && !contact.trim()) { setErr('연락받을 전화번호를 적어 주세요 — 24시간 안에 연락드립니다'); return; }
     setBusy(true);
     try {
       setAdsConsent(ads);
-      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, mode, agree: { ...agree, ads }, phone: agree.alimtalk ? phone.trim() : undefined, openedAt: opened.current, utm: readUtm() } });
+      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, mode, agree: { ...agree, ads }, phone: agree.alimtalk ? phone.trim() : undefined, contact: contact.trim() || undefined, openedAt: opened.current, utm: readUtm() } });
       await fireSignupConversion().catch(() => {}); // #449 회사가 만들어진 이 순간(광고를 누른 그 브라우저) — 확인 메일을 다른 기기에서 열어도 전환이 빠지지 않게
       setDone(r);
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
@@ -57,7 +60,7 @@ export default function SignupPage() {
     </AuthCard>
   );
   if (done) return (
-    <AuthCard title="메일을 확인해 주세요" sub={f.email}>
+    <AuthCard title={approval ? '체험 신청 — 메일을 확인해 주세요' : '메일을 확인해 주세요'} sub={f.email}>
       <div className="flex gap-3 rounded-card border border-green-200 bg-green-50 p-4 text-sm text-green-900" data-testid="signup-done">
         <MailCheck className="size-5 shrink-0" /><p>{done.message}</p>
       </div>
@@ -70,7 +73,7 @@ export default function SignupPage() {
       <span><span className={cx('mr-1 text-xs font-semibold', req ? 'text-red-600' : 'text-ink-3')}>{req ? '[필수]' : '[선택]'}</span>{label}</span></label>
   );
   return (
-    <AuthCard title={step === 1 ? '14일 무료 체험' : '회사 만들기'} sub={step === 1 ? (inApp ? '비즈니스 기능 전부 · 회사 계정을 만들고 동료를 초대하세요' : '카드 등록 없이 비즈니스 기능 전부 · 끝나면 요금제를 고르세요') : '혼자 쓰면 개인, 동료와 함께면 팀으로 시작하세요'}>
+    <AuthCard title={step === 1 ? (approval ? '14일 무료 체험 신청' : '14일 무료 체험') : '회사 정보'} sub={step === 1 ? (approval ? '신청을 확인한 뒤 24시간 안에 연락드립니다 · 승인되면 그때부터 14일 체험' : inApp ? '비즈니스 기능 전부 · 회사 계정을 만들고 동료를 초대하세요' : '카드 등록 없이 비즈니스 기능 전부 · 끝나면 요금제를 고르세요') : '혼자 쓰면 개인, 동료와 함께면 팀으로 신청하세요'}>
       <SignupSteps at={step} />
       {step === 1 ? (
       <form onSubmit={toCompany} className="space-y-4" data-testid="signup-step-account">
@@ -94,9 +97,9 @@ export default function SignupPage() {
           {conversionTagsConfigured() && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" data-testid="agree-ads" /><span>광고 효과 측정(가입 완료 1회 — Meta·Google·네이버 태그) 동의 <span className="text-ink-3">(선택)</span></span></label>}
         </div>
         {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
-        <Button type="submit" className="h-11 w-full text-[15px]" disabled={enabled === null} data-testid="signup-next">다음: 회사 만들기<ArrowRight /></Button>
+        <Button type="submit" className="h-11 w-full text-[15px]" disabled={enabled === null} data-testid="signup-next">{approval ? '다음: 회사 정보' : '다음: 회사 만들기'}<ArrowRight /></Button>
         <p className="text-center text-sm text-ink-2">이미 계정이 있나요? <Link href="/login" className="font-semibold text-brand-700 underline">로그인</Link></p>
-        <ul className="space-y-1 text-xs text-ink-3"><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />14일 체험: 10명 · 저장 20GB · AI 포함 · 카드 없음</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />이후 1인 월 2,200원부터 (베이직 2,200원 · 스탠다드 4,500원 · 프로 8,500원, VAT 별도·최소 3인)</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />고르지 않으면 읽기 전용 — 데이터는 지우지 않고 내보낼 수 있어요</li></ul>
+        <ul className="space-y-1 text-xs text-ink-3"><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />14일 체험: 10명 · 저장 20GB · AI 포함 · 카드 없음</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />이후 업무 요금제 1~5인 월 19,900원부터 (인원 구간별 정액, VAT 별도)</li><li className="flex gap-1.5"><CheckCircle2 className="size-3.5" />고르지 않으면 읽기 전용 — 데이터는 지우지 않고 내보낼 수 있어요</li></ul>
       </form>
       ) : (
       <form onSubmit={submit} className="space-y-4" data-testid="signup-step-company">
@@ -109,10 +112,11 @@ export default function SignupPage() {
           ))}
         </div>
         {mode === 'team' && <CompanyFields v={f} onChange={(v) => setF({ ...f, ...v })} />}
+        {approval && <Field label="연락받을 전화번호 (24시간 안에 연락드립니다)"><input className={inputCls + ' h-11'} value={contact} onChange={(e) => setContact(e.target.value)} inputMode="tel" maxLength={20} placeholder="예: 010-1234-5678" required aria-label="연락받을 전화번호" data-testid="signup-contact" /></Field>}
         {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
-        <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy || enabled === null} data-testid="signup-submit">{busy ? <><Loader2 className="animate-spin" />가입 중…</> : <>가입하고 확인 메일 받기<ArrowRight /></>}</Button>
+        <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy || enabled === null} data-testid="signup-submit">{busy ? <><Loader2 className="animate-spin" />{approval ? '신청 중…' : '가입 중…'}</> : <>{approval ? '체험 신청하고 확인 메일 받기' : '가입하고 확인 메일 받기'}<ArrowRight /></>}</Button>
         <button type="button" className="w-full text-center text-sm text-ink-2 underline" onClick={() => { setErr(null); setStep(1); }}>이전 단계</button>
-        <p className="text-center text-xs text-ink-3">③ 연락 채널·④ 동료 초대는 메일 확인 뒤 처음 로그인할 때 안내합니다(나중에 해도 됩니다).</p>
+        <p className="text-center text-xs text-ink-3">{approval ? '승인되면 메일로 알려 드립니다. ③ 연락 채널·④ 동료 초대는 승인 뒤 처음 로그인할 때 안내합니다.' : '③ 연락 채널·④ 동료 초대는 메일 확인 뒤 처음 로그인할 때 안내합니다(나중에 해도 됩니다).'}</p>
       </form>
       )}
     </AuthCard>

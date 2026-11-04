@@ -10,7 +10,7 @@ import { ArrowRight, BellRing, Briefcase, Check, Download, Mail, Megaphone, Mic,
 
 /**
  * 워크인 소개 사이트(대표 10/20 16:45): work-in.dev 루트(로그인 전) — 로그인하면 홈(middleware). 앱은 로그인 화면.
- * H1 "업무도, 영업도, 마케팅도 한 화면에서" · 14일 무료 체험(#466 대표 결정 10/23 — 5명 무료 폐지) · [무료로 시작]/[앱 다운로드] · 세 공간 소개 · AI 비서 · 도입 3단계 · 요금(14일 체험) · 문의 · 푸터(개인정보·계정 삭제·운영사) · JSON-LD·OG · UTM·sign_up/CompleteRegistration/tel 이벤트 · 390px.
+ * H1 "업무도, 영업도, 마케팅도 한 화면에서" · 14일 무료 체험(#466 대표 결정 10/23 — 5명 무료 폐지) · [14일 무료 체험 신청]/[앱 다운로드] · 세 공간 소개 · AI 비서 · 도입 3단계 · 요금(14일 체험) · 문의 · 푸터(개인정보·계정 삭제·운영사) · JSON-LD·OG · UTM·sign_up/CompleteRegistration/tel 이벤트 · 390px.
  */
 // #627: 주소(호스트)는 src/lib/landingPages SITE 하나로(NEXT_PUBLIC_SITE_URL, 기본 www) — 도메인 방향(apex → www)은 Vercel 설정
 const PLAY = process.env.NEXT_PUBLIC_PLAY_URL || ''; // 정식 출시 전엔 스토어 주소가 404 — 로컬이 출시 뒤 env 로(내부 테스트 링크도 가능)
@@ -32,7 +32,7 @@ const SPACES = [
   { key: 'marketing', name: '마케팅', color: '#7C3AED', icon: Megaphone, img: '/landing/marketing.png', t: '시안 승인·자동 제작·광고', d: '피드·블로그·릴스 원고를 AI가 묶음으로 만들고, 대표는 승인함에서 [승인]만. 사람 승인 없이 밖으로 나가는 것은 없습니다.',
     f: ['승인함 — 썸네일·게시 화면 미리보기·마감', '브랜드별 게시 묶음(주말 건너뛰기) · 콘텐츠 캘린더', '네이버·구글 광고 성과 · 월간 보고'] },
 ];
-const STEPS = [['가입 1분', '이메일만으로 회사 공간을 만들고 14일 동안 체험합니다.'], ['직원 초대', '링크 하나로 초대. 부서·팀과 권한은 소속에서 자동.'], ['공간 켜기', '영업·마케팅은 필요할 때 관리자가 켭니다. 안 쓰는 회사는 업무만.']];
+const STEPS = [['체험 신청 1분', '이메일이나 구글·카카오·네이버 계정으로 신청하면 24시간 안에 연락드리고, 승인되면 14일 동안 체험합니다.'], ['직원 초대', '링크 하나로 초대. 부서·팀과 권한은 소속에서 자동.'], ['공간 켜기', '영업·마케팅은 필요할 때 관리자가 켭니다. 안 쓰는 회사는 업무만.']];
 const AI_DEMO = [['내일 3시 거래처 미팅 잡아 줘', '내일 15:00 “거래처 미팅” 일정을 만들고 30분 전 알림을 걸었습니다. 준비 업무도 하나 만들까요?'], ['이번 주 연락할 리드 알려 줘', '다음 연락일이 이번 주인 리드 4곳입니다 — 판교 레이크(수), 광교 호수마을(목)… 첫 연락 업무를 담당자에게 만들었습니다.'], ['10월 블로그 원고 초안 써 줘', '브랜드 키트의 말투로 원고 2편을 만들어 승인함에 올렸습니다. 표지·본문 사진을 붙이면 승인 요청됩니다.']];
 
 export default async function Welcome() {
@@ -65,7 +65,7 @@ export default async function Welcome() {
         <h1 className="mt-2 text-3xl font-bold leading-tight tracking-tight sm:text-5xl" data-testid="landing-title">업무도, 영업도, 마케팅도<br className="sm:hidden" /> 한 화면에서</h1>
         <p className="mx-auto mt-4 max-w-2xl text-base text-slate-200 sm:text-lg">직원은 업무와 일정을, 영업팀은 리드와 입찰을, 마케팅은 시안 승인과 광고를 — 회사마다 켜고 끄는 세 공간을 한 계정으로. AI 비서가 등록·요약·초안을 돕습니다.</p>
         <div className="mt-7 flex flex-wrap justify-center gap-2">
-          <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-testid="landing-start" data-track="start">무료로 시작<ArrowRight className="size-4" /></Link>
+          <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-testid="landing-start" data-track="start">14일 무료 체험 신청<ArrowRight className="size-4" /></Link>
           <a href="#app" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input border border-white/40 px-6 py-3 text-base font-semibold text-white hover:bg-white/10" data-testid="landing-app" data-track="app">앱 다운로드<Download className="size-4" /></a>
         </div>
         <p className="mt-3 text-xs text-slate-300">웹 · 휴대폰 앱 · 한국어</p>
@@ -120,7 +120,7 @@ export default async function Welcome() {
         <div className="mx-auto mt-6 max-w-md rounded-card border border-brand-600 p-6 ring-1 ring-brand-600" data-testid="pricing">
           <div className="text-sm font-semibold text-brand-700">14일 무료 체험</div><div className="mt-1 text-4xl font-bold">0원</div><div className="text-sm text-ink-3">14일 동안 모든 기능 · 체험이 끝나면 요금제를 고릅니다</div>
           <ul className="mt-4 space-y-1.5 text-left text-sm">{['업무·일정·캘린더·메신저·결재·자료실 전부', '영업·마케팅 공간 켜기 가능', 'ai'].map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 text-green-600" />{x === 'ai' ? <LandingAiLine /> : x}</li>)}</ul>
-          <Link href="/signup" className="mt-5 inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white hover:bg-brand-700" data-track="start-pricing">무료로 시작<ArrowRight className="size-4" /></Link>
+          <Link href="/signup" className="mt-5 inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white hover:bg-brand-700" data-track="start-pricing">14일 무료 체험 신청<ArrowRight className="size-4" /></Link>
         </div>
         <p className="mt-3 text-xs text-ink-3">체험 뒤 요금·더 큰 저장 공간·AI 한도는 아래로 문의해 주세요.</p>
       </section>

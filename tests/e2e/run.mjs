@@ -173,6 +173,7 @@ import { digestMail } from './digestMail.step.mjs';
 import { app113 } from './app113.step.mjs';
 import { cal592 } from './cal592.step.mjs';
 import { customerSim } from './customerSim.step.mjs';
+import { signupJourney359 } from './signupJourney359.step.mjs';
 import { captureGuard } from './captureGuard.step.mjs';
 import { moveIn186 } from './moveIn186.step.mjs';
 
@@ -2962,6 +2963,13 @@ await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]�
   assert.equal(no.dl.filter((a) => a[1] === 'conversion').length, 0, '동의 안 하면 안 보냄');
   assert.equal(no.hits.filter((u) => /googleadservices/.test(u)).length, 0, '동의 안 하면 전환 호출 없음(소개 화면 측정 태그는 #627 로 실림)'); assert.equal(no.gcl, undefined);
   await ctx.owner.ok('PUT', '/api/platform/conversion-tags', { googleAds: '' });
+});
+
+await step('359차 승인제 가입 여정(대표 11/04 #965): 소개 [14일 무료 체험 신청] → 신청(연락처 필수) → 확인 링크 → \'가입 신청이 접수됐습니다·24시간 안에 연락\' 화면(쓰기 403) → 슈퍼관리자 알림 → 가입 신청 [승인] → 체험 D-14·처음 안내(연락 채널·동료 초대) → 동료 초대 가입 → 업무 등록·일정·자료실·업무 메일 창 → 체험 끝 읽기 전용 띠 · 거절 안내(휴대폰)', async () => {
+  srv.proc.kill('SIGTERM'); await new Promise((r) => setTimeout(r, 1000));
+  srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SIGNUP_IP_PER_DAY: '50', SIGNUP_APPROVAL: '1' });
+  try { await signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }); }
+  finally { srv.proc.kill('SIGTERM'); await new Promise((r) => setTimeout(r, 1000)); srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SIGNUP_IP_PER_DAY: '50' }); }
 });
 
 await step('#509·#510 당일 공고 메일: 데이터 설정 받는 주소 직접 추가(형식 확인·칩)·보낸 사람 이름·발송 경로 안내 → [오늘 메일 미리보기] 구역·지역·미공개·D-day, 휴대폰 폭 넘침 없음 → 메일 제목 링크로 공고 상세 바로', () => digestMail({ owner, ctx, sql, BASE, SHOTS }));

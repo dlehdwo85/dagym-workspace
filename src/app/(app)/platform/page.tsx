@@ -210,7 +210,34 @@ function Signups() {
     if (status === 'blocked' && !confirm('이 공간을 차단할까요? 모든 구성원이 바로 로그아웃됩니다.')) return;
     try { await api(`/api/platform/tenants/${id}/status`, { method: 'PUT', body: { status } }); reload(); toast.ok('바꿨습니다'); } catch (e: any) { toast.error(e.message); }
   };
-  return (
+  // 359차 승인제 가입: 승인 대기·거절 신청 — [승인] = 14일 체험 시작·환영 메일, [거절](사유) = 안내 메일
+  const decide = async (t: any, ok: boolean) => {
+    const label = t.signup_info?.company ?? t.name;
+    if (ok && !confirm(`'${label}' 체험 신청을 승인할까요? 지금부터 14일 체험이 시작되고 환영 메일이 갑니다.`)) return;
+    const reason = ok ? null : prompt(`'${label}' 신청을 거절하는 사유(신청자에게 보입니다)`)?.trim();
+    if (!ok && !reason) return;
+    try { await api(`/api/platform/signups/${t.id}/${ok ? 'approve' : 'reject'}`, { body: ok ? {} : { reason } }); reload(); toast.ok(ok ? '승인했습니다 — 환영 메일을 보냈습니다' : '거절했습니다 — 안내 메일을 보냈습니다'); } catch (e: any) { toast.error(e.message); }
+  };
+  const reqs = data.tenants.filter((t: any) => t.signup_status === 'pending' || t.signup_status === 'rejected');
+  const pendingN = reqs.filter((t: any) => t.signup_status === 'pending').length;
+  return (<>
+    <section id="signup-requests" className={cx('rounded-card border bg-white shadow-card', pendingN ? 'border-amber-300' : 'border-line')} data-testid="platform-signup-requests">
+      <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">가입 신청 {pendingN ? <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900" data-testid="signup-pending-count">승인 대기 {pendingN}</span> : <span className="ml-1 text-xs font-normal text-ink-3">승인 대기 없음</span>}
+        <span className="ml-2 text-xs font-normal text-ink-3">{data.approval ? '승인제 가입 켜짐 — 신청자에게 "24시간 안에 연락드립니다" 안내' : '승인제 가입 꺼짐(SIGNUP_APPROVAL=0) — 가입하면 바로 체험'}</span></h2>
+      <ul className="divide-y divide-line">{reqs.map((t: any) => { const i = t.signup_info ?? {}; return (
+        <li key={t.id} className="flex flex-wrap items-start gap-3 px-3 py-2.5 text-sm" data-testid="signup-request" data-tenant={t.id}>
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">{i.company ?? t.name} <span className={cx('ml-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium', t.signup_status === 'pending' ? 'bg-amber-50 text-amber-800' : 'bg-slate-100 text-ink-2')}>{t.signup_status === 'pending' ? '승인 대기' : '거절'}</span></div>
+            <div className="mt-0.5 text-xs text-ink-2">{i.name ?? t.owner_name} · {i.email ?? t.owner_email}{t.signup_pending && <span className="ml-1 text-amber-700">메일 미확인</span>} · 연락처 <b data-testid="signup-request-contact">{i.contact ?? '없음'}</b></div>
+            <div className="mt-0.5 text-xs text-ink-3">{i.mode === 'personal' ? '개인' : '팀'}{i.size ? ` · ${i.size}명` : ''}{i.industry ? ` · ${[i.industry, ...(i.industries ?? [])].join(', ')}` : ''} · {({ email: '이메일', google: '구글', kakao: '카카오', naver: '네이버', apple: '애플' } as Record<string, string>)[i.via] ?? '이메일'} 가입{i.utm && Object.values(i.utm).some(Boolean) ? ` · 유입 ${Object.entries(i.utm).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(' ')}` : ''} · {fmtDateTime(t.created_at)}</div>
+            {t.signup_status === 'rejected' && <div className="mt-0.5 text-xs text-ink-3">거절 사유: {t.signup_reason}{t.signup_decided_by_name ? ` (${t.signup_decided_by_name})` : ''}</div>}
+          </div>
+          <div className="flex gap-1.5">
+            <Button size="sm" onClick={() => decide(t, true)} data-testid="signup-approve">{t.signup_status === 'rejected' ? '다시 승인' : '승인'}</Button>
+            {t.signup_status === 'pending' && <Button size="sm" variant="secondary" onClick={() => decide(t, false)} data-testid="signup-reject">거절</Button>}
+          </div>
+        </li>); })}{!reqs.length && <li className="px-3 py-2 text-xs text-ink-3">신청이 없습니다</li>}</ul>
+    </section>
     <section className="rounded-card border border-line bg-white shadow-card" data-testid="platform-signups">
       <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">신규 가입 {data.tenants.length}곳
         <span className="ml-2 text-xs font-normal text-ink-3">최근 24시간 시도: {data.attempts.map((a: any) => `${({ ok: '성공', exists: '이미 있음', bot: '봇', rate: '제한', resend: '재발송' } as Record<string, string>)[a.reason] ?? a.reason} ${a.n}`).join(' · ') || '없음'}</span></h2>
@@ -225,7 +252,7 @@ function Signups() {
                 <td className={cell}>{t.users}명 · 업무 {t.tasks}</td>
                 <td className={cell}><div>{fmtDateTime(t.created_at)}</div><div className="text-[11px] text-ink-3">{t.created_ip}</div></td>
                 <td className={cell} data-testid={`trial-${t.id}`}>
-                  <div className="text-xs">{t.sub_status === 'trial' ? `체험 ~${String(t.trial_ends_at ?? '').slice(0, 10)}` : t.sub_status === 'expired' ? '체험 끝(읽기 전용)' : t.plan_code ?? '-'}{t.chosen_plan && <span className="ml-1 text-brand-700">신청: {t.chosen_plan}</span>}</div>
+                  <div className="text-xs">{t.sub_status === 'trial' ? (t.trial_ends_at ? `체험 ~${String(t.trial_ends_at).slice(0, 10)}` : '승인 대기(체험 전)') : t.sub_status === 'expired' ? '체험 끝(읽기 전용)' : t.plan_code ?? '-'}{t.chosen_plan && <span className="ml-1 text-brand-700">신청: {t.chosen_plan}</span>}</div>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {[7, 14].map((d) => <Button key={d} size="sm" variant="ghost" onClick={() => trial(t.id, { action: 'extend', days: d })}>+{d}일</Button>)}
                     {t.sub_status !== 'expired' && <Button size="sm" variant="ghost" onClick={() => trial(t.id, { action: 'end' })}>종료</Button>}
@@ -242,7 +269,7 @@ function Signups() {
       </div>
       {!!data.ips.length && <p className="border-t border-line px-3 py-2 text-xs text-ink-3">IP별(24시간): {data.ips.map((x: any) => `${x.ip ?? '?'} ${x.n}회(성공 ${x.ok})`).join(' · ')}</p>}
     </section>
-  );
+  </>);
 }
 
 /** 16차: 다짐·하이링크 웹사이트 문의 → 워크인 업무. 다짐 회사 슈퍼관리자에게만 보인다(다른 회사는 API 404 → 섹션 없음) */

@@ -112,6 +112,18 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const [createMenu, setCreateMenu] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  // 359차: PC 체험 띠(오른쪽 위 고정)가 [+ 만들기]·알림·내 계정을 가리지 않게 — 띠 너비만큼 머리줄 오른쪽을 비움
+  const bandRef = useRef<HTMLDivElement>(null);
+  const [bandW, setBandW] = useState(0);
+  useEffect(() => {
+    const el = bandRef.current;
+    if (!el) { setBandW(0); return; }
+    const fit = () => setBandW(window.innerWidth >= 640 ? el.offsetWidth : 0);
+    fit();
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit);
+    ro?.observe(el); window.addEventListener('resize', fit);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', fit); };
+  }, [session.tenant?.trial?.readOnly, session.tenant?.trial?.daysLeft, inApp]);
   const [adminOpen, setAdminOpen] = useState(true);
   const [search, setSearch] = useState('');
   const [pushAsk, setPushAsk] = useState(false);
@@ -410,7 +422,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         <div className="min-w-0 flex-1 pb-[calc(6rem+var(--sab))] sm:pb-0 [[data-chat-room]_&]:pb-0">
           <TitleBar title={sm.label} />
           {/* 상단 바 (데스크톱) */}
-          <header className="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b border-line bg-white/90 px-5 backdrop-blur sm:flex">
+          <header className="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b border-line bg-white/90 px-5 backdrop-blur sm:flex" style={bandW ? { paddingRight: bandW + 28 } : undefined}>
             <button onClick={() => setPalette(true)} data-testid="open-palette"
               className="mx-auto flex h-9 w-full max-w-md items-center gap-2 rounded-input border border-line bg-canvas px-3 text-sm text-ink-3 transition-colors hover:border-slate-300 hover:bg-white">
               <Search className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate text-left">{/* 점검 ⑧: 좁은 PC(768)에서 두 줄로 꺾이지 않게 */}<span className="lg:hidden">검색</span><span className="hidden lg:inline">업무·프로젝트·사람·일정 검색</span></span><span className="hidden lg:inline"><Kbd>Ctrl K</Kbd></span>
@@ -505,7 +517,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
         {session.tenant?.onboarding && <Onboarding />}
         {/* #77 처음 사용 안내 — 회사 첫 안내 창·결제 잠금 동안은 기다림 */}
-        {session.tours && <TourHost userId={session.user.id} seen={session.tours.seen} auto={session.tours.auto} admin={admin} blocked={!!session.tenant?.onboarding || !!session.tenant?.billingLock} />}
+        {session.tours && <TourHost userId={session.user.id} seen={session.tours.seen} auto={session.tours.auto} admin={admin} blocked={!!session.tenant?.onboarding || !!session.tenant?.billingLock || !!session.tenant?.signup} />}
         <BioLock />
         {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} name={aiName(space)} /></Suspense>}
         <MessengerDock aiOpen={aiDock} />
@@ -522,6 +534,23 @@ export function AppShell({ session, children }: { session: Sess; children: React
             지원 모드 — {session.support.tenantName} (읽기 전용 · {new Date(session.support.until).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}까지 · 모든 조회 기록)
             <button type="button" className="rounded bg-white/20 px-2 py-0.5 hover:bg-white/30" data-testid="support-end"
               onClick={async () => { await api('/api/platform/support', { method: 'DELETE' }).catch(() => {}); window.location.href = '/platform'; }}>지원 모드 끝내기</button>
+          </div>
+        )}
+        {/* 359차 승인제 가입: 승인 대기 = '24시간 안에 연락' 안내 · 거절 = 사유 — 데이터 만들기·초대는 서버에서도 막힘 */}
+        {session.tenant?.signup && (
+          <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-900/70 p-4" data-testid={session.tenant.signup.status === 'pending' ? 'signup-pending' : 'signup-rejected'}>
+            <div className="w-full max-w-sm rounded-card bg-white p-5 text-center shadow-pop">
+              {session.tenant.signup.status === 'pending' ? <>
+                <p className="text-lg font-bold">가입 신청이 접수됐습니다</p>
+                <p className="mt-2 text-sm text-ink-2">24시간 안에 연락드립니다. 승인되면 메일로 알려 드리고, 그때부터 14일 무료 체험이 시작됩니다.</p>
+                <p className="mt-3 rounded-input bg-slate-50 px-3 py-2 text-xs text-ink-2">{session.tenant.name} · {session.user.email}</p>
+              </> : <>
+                <p className="text-lg font-bold">가입 신청이 승인되지 않았습니다</p>
+                {session.tenant.signup.reason && <p className="mt-2 text-sm text-ink-2" data-testid="signup-reject-reason">사유: {session.tenant.signup.reason}</p>}
+                <p className="mt-2 text-xs text-ink-3">궁금한 점은 워크인 소개 사이트의 [문의하기]로 남겨 주세요.</p>
+              </>}
+              <button type="button" onClick={logout} className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-input border border-line px-4 py-2 text-sm font-medium text-ink-2 hover:bg-slate-50" data-testid="signup-logout">로그아웃</button>
+            </div>
           </div>
         )}
         {/* V28 B2 미납: 7일 읽기 전용 띠 · 30일 이용 중지(결제 안내만) */}
@@ -542,7 +571,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* 17차: 무료 체험 D-n · 끝나면 읽기 전용 안내 */}
         {session.tenant?.trial && !(inApp && !session.tenant.trial.readOnly) && ( /* 298차 #861: 두 앱 모두 체험 D-day 띠 없음(끝나기 전 안내는 관리자 이메일) — 읽기 전용일 때만 관리자 문의 */
           <div className={cx('fixed inset-x-0 top-0 z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',
-            session.tenant.trial.readOnly ? 'bg-red-600 text-white' : session.tenant.trial.daysLeft <= 3 ? 'bg-warm-500 text-white' : 'bg-brand-50 text-brand-800')} data-testid="trial-banner">
+            session.tenant.trial.readOnly ? 'bg-red-600 text-white' : session.tenant.trial.daysLeft <= 3 ? 'bg-warm-500 text-white' : 'bg-brand-50 text-brand-800')} data-testid="trial-banner" ref={bandRef}>
             {(() => { const n = session.tenant.trial.partner ? '설계 파트너 기간' : inApp ? '이용 기간' : '무료 체험'; /* #667 */ return session.tenant.trial.readOnly ? `${n}이 끝나 읽기 전용입니다` : session.tenant.trial.daysLeft === 0 ? `${n} 오늘 종료` : `${n} D-${session.tenant.trial.daysLeft}`; })()}
             {inApp ? <span className="font-normal">· {billingNote()}</span> : <Link prefetch={false} href="/admin/usage" className="underline">요금제 선택</Link>}
           </div>

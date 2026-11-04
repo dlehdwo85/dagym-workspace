@@ -342,15 +342,17 @@ export async function platformSignups(u: SessionUser) {
   requirePlatform(u);
   const sql = db();
   const [tenants, attempts, ips] = await Promise.all([
-    sql`select t.id, t.name, t.kind, t.status, t.created_ip, t.created_at, t.onboarded_at, ow.email as owner_email, ow.signup_pending,
+    sql`select t.id, t.name, t.kind, t.status, t.created_ip, t.created_at, t.onboarded_at, ow.email as owner_email, ow.name as owner_name, ow.signup_pending,
+          t.signup_status, t.signup_info, t.signup_decided_at, t.signup_reason, dby.name as signup_decided_by_name,
           ts.status as sub_status, ts.plan_code, ts.trial_ends_at, ts.chosen_plan,
           (select count(*)::int from users x where x.tenant = t.id and x.status = 'active') as users,
           (select count(*)::int from tasks k join org_units o on o.id = k.org_unit_id where o.tenant = t.id and k.deleted_at is null) as tasks
-        from tenants t left join users ow on ow.id = t.owner_user_id left join tenant_subscriptions ts on ts.tenant = t.id where t.id not in ('default','demo') and not t.is_test order by t.created_at desc limit 200`,
+        from tenants t left join users ow on ow.id = t.owner_user_id left join users dby on dby.id = t.signup_decided_by left join tenant_subscriptions ts on ts.tenant = t.id
+        where t.id not in ('default','demo') and not t.is_test order by (t.signup_status = 'pending') desc, t.created_at desc limit 200`,
     sql`select coalesce(reason, 'ok') as reason, count(*)::int n from signup_attempts where created_at > now() - interval '1 day' group by 1 order by 2 desc`,
     sql`select ip, count(*)::int n, count(*) filter (where ok)::int ok from signup_attempts where created_at > now() - interval '1 day' group by ip order by n desc limit 10`,
   ]);
-  return { tenants, attempts, ips };
+  return { tenants, attempts, ips, approval: (await import('./signupApproval')).signupApprovalOn() };
 }
 export async function setTenantStatus(u: SessionUser, tenant: string, status: 'active' | 'blocked') {
   requirePlatform(u);
@@ -393,18 +395,21 @@ export async function trialInfo(tenant: string, sql: Sql = db()) {
   return { trial: !ended, readOnly: ended, daysLeft: ended ? 0 : days, endsAt: s.trial_ends_at, chosenPlan: s.chosen_plan, partner: s.segment === 'partner' /* #667 */ };
 }
 
-const roCache = new Map<string, { at: number; ro: boolean; lock: string | null; partner: boolean }>();
+const roCache = new Map<string, { at: number; ro: boolean; lock: string | null; partner: boolean; signup: 'pending' | 'rejected' | null }>();
 /** 읽기 전용(체험 끝·미납 7일)이면 쓰기 요청을 막는다. 보기·내보내기·로그인·요금제 신청·알림 읽음·탈퇴는 허용 */
 const RO_ALLOW = [/^\/api\/billing/, /^\/api\/auth\//, /^\/api\/account\//, /^\/api\/plan/, /^\/api\/usage/, /^\/api\/push\//, /\/read$/, /^\/api\/notifications/, /^\/api\/export/, /^\/api\/support/, /^\/api\/me\//];
 /** V28 B2: 미납 30일 이용 중지 — 로그인해도 결제 안내만(결제·로그인·내보내기·요금 화면만 열림) */
 const SUSPEND_ALLOW = [/^\/api\/billing/, /^\/api\/auth\//, /^\/api\/account\//, /^\/api\/usage/, /^\/api\/export/, /^\/api\/support/, /^\/api\/platform/];
+/** 359차 승인제 가입: 승인 대기·거절 회사도 로그인·계정·알림·푸시·지원 요청만 */
+const SIGNUP_ALLOW = [/^\/api\/auth\//, /^\/api\/account\//, /^\/api\/push\//, /\/read$/, /^\/api\/notifications/, /^\/api\/me\//, /^\/api\/support/];
 async function roState(t: string) {
   const c = roCache.get(t);
   if (c && Date.now() - c.at < 15_000) return c;
-  const [s] = await db()<{ billing_lock: string | null }[]>`select billing_lock from tenant_subscriptions where tenant = ${t}`;
+  const [s] = await db()<{ billing_lock: string | null; signup_status: string | null }[]>`select s.billing_lock, t.signup_status from tenants t left join tenant_subscriptions s on s.tenant = t.id where t.id = ${t}`;
   const lock = s?.billing_lock ?? null;
-  const info = lock ? null : await trialInfo(t);
-  const v = { at: Date.now(), ro: !!lock || !!info?.readOnly, lock, partner: !!info?.partner };
+  const signup: 'pending' | 'rejected' | null = s?.signup_status === 'pending' || s?.signup_status === 'rejected' ? s.signup_status : null;
+  const info = lock || signup ? null : await trialInfo(t);
+  const v = { at: Date.now(), ro: !!lock || !!info?.readOnly, lock, partner: !!info?.partner, signup };
   roCache.set(t, v);
   return v;
 }
@@ -412,10 +417,16 @@ export async function billingLock(t: string) { return t === 'default' || t === '
 /** 302차 #862: 앱(WorkInApp·Capacitor) 요청에는 결제·요금제 권유 없이 — '관리자에게 문의'만(App Store 3.1.1·구글 결제 정책) */
 const APP_RO = '보기 전용 상태입니다. 회사 관리자에게 문의하세요.';
 const APP_SUSPENDED = '이용이 멈춘 상태입니다. 회사 관리자에게 문의하세요.';
+const signupError = (s: 'pending' | 'rejected') => (s === 'pending'
+  ? new HttpError(403, 'signup_pending', '가입 신청이 접수됐습니다. 24시간 안에 연락드립니다 — 승인되면 바로 쓸 수 있어요.')
+  : new HttpError(403, 'signup_rejected', '가입 신청이 승인되지 않았습니다.'));
 export async function assertWritable(u: SessionUser, path: string, o: { app?: boolean } = {}) {
   const t = tenantOfUser(u);
-  if (t === 'default' || t === 'demo' || RO_ALLOW.some((r) => r.test(path))) return;
+  if (t === 'default' || t === 'demo') return;
+  if (RO_ALLOW.some((r) => r.test(path)) && SIGNUP_ALLOW.some((r) => r.test(path))) return;
   const st = await roState(t);
+  if (st.signup && !SIGNUP_ALLOW.some((r) => r.test(path))) throw signupError(st.signup); // 359차: 승인 대기 = 쓰기·초대·결제 막힘
+  if (RO_ALLOW.some((r) => r.test(path))) return;
   if (o.app && st.lock === 'suspended') throw new HttpError(402, 'suspended', APP_SUSPENDED);
   if (o.app && st.ro) throw new HttpError(402, 'read_only', APP_RO);
   if (st.lock === 'suspended') throw new HttpError(402, 'suspended', '미납 30일로 이용이 중지되었습니다 — 관리자가 결제하면 바로 다시 쓸 수 있어요(데이터는 그대로).');
@@ -424,7 +435,9 @@ export async function assertWritable(u: SessionUser, path: string, o: { app?: bo
 /** 이용 중지 회사는 보기 요청도 막는다(결제 안내만) */
 export async function assertNotSuspended(u: SessionUser, path: string, o: { app?: boolean } = {}) {
   const t = tenantOfUser(u);
-  if (t === 'default' || t === 'demo' || u.support || SUSPEND_ALLOW.some((r) => r.test(path))) return;
+  if (t === 'default' || t === 'demo' || u.support) return;
+  if (!SIGNUP_ALLOW.some((r) => r.test(path)) && (await roState(t)).signup === 'rejected') throw signupError('rejected'); // 359차: 거절 = 보기도 막힘
+  if (SUSPEND_ALLOW.some((r) => r.test(path))) return;
   if ((await roState(t)).lock === 'suspended') throw new HttpError(402, 'suspended', o.app ? APP_SUSPENDED : '미납 30일로 이용이 중지되었습니다 — 관리자가 결제하면 바로 다시 쓸 수 있어요(데이터는 그대로).');
 }
 export const clearReadOnlyCache = (t?: string) => (t ? roCache.delete(t) : roCache.clear());

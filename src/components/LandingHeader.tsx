@@ -11,7 +11,7 @@ export function LandingHeader({ home = false }: { home?: boolean }) {
         <a href={to('pricing')} className="hidden px-2 text-ink-2 hover:text-ink sm:inline">요금</a>
         <a href={to('contact')} className="hidden px-2 text-ink-2 hover:text-ink sm:inline">문의</a>
         <Link href="/login" className="rounded-input px-3 py-2 font-semibold text-ink-2 hover:bg-slate-100" data-testid="landing-login">로그인</Link>
-        <Link href="/signup" className="rounded-input bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700" data-track="start-top">무료로 시작</Link>
+        <Link href="/signup" className="rounded-input bg-brand-600 px-3 py-2 font-semibold text-white hover:bg-brand-700" data-track="start-top">체험 신청</Link>
       </nav>
     </header>
   );

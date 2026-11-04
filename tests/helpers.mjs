@@ -62,6 +62,7 @@ export function serverEnv() {
     SALES_KW_MONTHLY: 'off', // 224차 관심 검색어 월 추천(매달 1일 09시 뒤 첫 tick)도 같은 이유 — tests/api/sales-kw-457.test.mjs 만 'any'
     CAPTURE_BLOCK: 'noauto', // #626 캡처 차단: 시험 서버는 자동화 감지·봇 UA 로그인 거부만 끔(Playwright·node fetch 가 막히지 않게) — 워터마크·인쇄 차단·창 이탈 가림은 외부 고객사 계정에 그대로(E2E 확인)
     MKT_SCENES_TICK: '0', // 188차: 자료실 영상 장면 뽑기(ffmpeg)는 정기 실행에서 안 돎 — 다른 시험의 가짜 영상('fake-mp4')을 건드리지 않게. tests/api/mkt-photo-188.test.mjs 가 API 로 직접
+    SIGNUP_APPROVAL: '0', // 359차 승인제 가입은 tests/api/signup-approval-359.test.mjs·E2E 가입 여정에서만 켬(다른 가입 시험은 예전처럼 바로 시작)
     PERF_PROBE: 'off', // #948 속도 정기 검침(자기 주소 7곳 호출)·주간 요약은 tests/api/perf-948.test.mjs 만 'any'
     PERF_WEEKLY: 'off',
     MKT_PHOTO_AUDIT: 'off', // 329차: 글마다 AI 사진·글 대조는 시험 서버에서 끔(줄 세운 가짜 답·승인 대기 건수 시험이 안 흔들리게) — tests/api/mkt-photo-audit-329.test.mjs 만 'on'

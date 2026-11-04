@@ -51,7 +51,7 @@ export default async function LandingPage({ params }: Params) {
           <h1 className="mx-auto mt-2 max-w-3xl text-balance text-3xl font-bold leading-tight tracking-tight sm:text-4xl" data-testid="landing-h1">{p.h1}</h1>
           <p className="mx-auto mt-4 max-w-2xl text-base text-ink-2 sm:text-lg">{p.intro}</p>
           <div className="mt-7 flex flex-wrap justify-center gap-2">
-            <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-track={`start-${p.slug}`} data-testid="landing-page-start">무료로 시작<ArrowRight className="size-4" /></Link>
+            <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-track={`start-${p.slug}`} data-testid="landing-page-start">14일 무료 체험 신청<ArrowRight className="size-4" /></Link>
             <Link href="/" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input border border-line bg-white px-6 py-3 text-base font-semibold text-ink-2 hover:bg-slate-100">워크인 소개 보기</Link>
           </div>
           <p className="mt-3 text-xs text-ink-3">웹 · 휴대폰 앱 · 한국어 · 가입 1분</p>
@@ -83,7 +83,7 @@ export default async function LandingPage({ params }: Params) {
         <h2 className="text-2xl font-bold">14일 동안 모든 기능을 써 보세요</h2>
         <p className="mt-1 text-sm text-ink-2">이메일만으로 회사 공간을 만들고, 직원은 링크 하나로 초대합니다. 체험 뒤 요금은 문의로 안내합니다.</p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
-          <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 font-semibold text-white hover:bg-brand-700" data-track={`start-${p.slug}-bottom`}>무료로 시작<ArrowRight className="size-4" /></Link>
+          <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 font-semibold text-white hover:bg-brand-700" data-track={`start-${p.slug}-bottom`}>14일 무료 체험 신청<ArrowRight className="size-4" /></Link>
           <Link href="/#contact" className="inline-flex min-h-[48px] items-center rounded-input border border-line px-6 py-3 font-semibold text-ink-2 hover:bg-slate-100">문의하기</Link>
         </div>
         <nav aria-label="다른 기능 소개" className="mt-8 flex flex-wrap justify-center gap-2 text-sm" data-testid="landing-others">

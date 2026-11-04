@@ -6,6 +6,7 @@ import { hashPassword, newToken, sha256 } from './crypto';
 import { audit } from './log';
 import { appUrl, mailConfigured, mailDevMode, sendMail } from './mail';
 import { ensurePersonalCalendar } from './access';
+import { contactPhone, signupApprovalOn } from './signupApproval';
 
 /**
  * V15 공개 가입: 이메일+비밀번호 → 확인 메일 → 로그인. "개인으로 시작"(1인 공간) / "팀(회사)으로 시작".
@@ -24,6 +25,8 @@ export const signupInput = z.object({
   agree: z.object({ terms: z.literal(true, { errorMap: () => ({ message: '이용약관에 동의해 주세요' }) }), age14: z.literal(true, { errorMap: () => ({ message: '만 14세 이상만 가입할 수 있습니다' }) }), privacy: z.literal(true, { errorMap: () => ({ message: '개인정보 처리방침에 동의해 주세요' }) }), ai: z.boolean().default(false), marketing: z.boolean().default(false), ads: z.boolean().default(false), alimtalk: z.boolean().default(false) }),
   /** 304차 #871: 결제·약관 안내 카카오 알림톡 받을 휴대폰(선택 — alimtalk 동의할 때만 저장) */
   phone: z.string().trim().max(20).optional(),
+  /** 359차 승인제 가입: 연락받을 전화(승인 안내 — 승인제가 켜져 있으면 필수) */
+  contact: z.string().trim().max(20).optional(),
   /** 봇 방지: 사람에게 안 보이는 칸(채워져 있으면 봇) · 화면을 연 시각(너무 빨리 제출하면 봇) */
   website: z.string().max(200).optional(),
   openedAt: z.number().optional(),
@@ -38,18 +41,22 @@ export const signupInput = z.object({
 export const SIZE_LABEL: Record<string, string> = { '1': '혼자', '2-10': '2~10명', '11-30': '11~30명', '31-100': '31~100명', '100+': '100명 넘게' };
 
 type OwnerSpace = { email: string; name: string; mode: 'personal' | 'team'; company?: string; size?: string; industry?: string; industries?: string[]; utm?: Record<string, string | undefined>;
-  agree: Record<string, boolean>; passwordHash: string | null; pending: boolean; ip: string | null; workEmail?: string | null; phone?: string | null };
+  agree: Record<string, boolean>; passwordHash: string | null; pending: boolean; ip: string | null; workEmail?: string | null; phone?: string | null;
+  /** 359차 승인제 가입: 공개 가입이면 승인 대기로(체험은 승인할 때 시작). 플랫폼 [고객사 추가]는 없음 = 바로 승인 */
+  approval?: { contact: string | null; via: import('./signupApproval').SignupVia } };
 /** 새 회사(또는 개인 공간) + 대표 계정 + 기본 조직·달력·동의 기록 — 이메일 가입·소셜 가입 공통 */
 export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
   const tenant = `t_${newToken(9).replace(/[^A-Za-z0-9]/g, '').toLowerCase().slice(0, 12)}`;
   const orgName = i.mode === 'personal' ? `${i.name}의 공간` : i.company!;
   const utm = i.utm && Object.values(i.utm).some(Boolean) ? i.utm : null;
   const inds = [...new Set([i.industry, ...(i.industries ?? [])].map((x) => (x ?? '').trim()).filter(Boolean))];
-  await tx`insert into tenants (id, name, kind, created_ip, signup_utm, size_band, industry, industries) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${i.ip},
-    ${utm ? tx.json(utm as never) : null}, ${i.size ?? null}, ${inds[0] ?? null}, ${inds})`;
-  // 17차: 무료 요금제 대신 14일 무료 체험(비즈니스 기능 전부, 카드 없음)
+  const info = i.approval ? { company: i.mode === 'team' ? i.company ?? null : null, name: i.name, email: i.email, contact: i.approval.contact, size: i.size ?? null, industry: inds[0] ?? null, industries: inds.slice(1),
+    mode: i.mode, utm, via: i.approval.via, at: new Date().toISOString() } : null;
+  await tx`insert into tenants (id, name, kind, created_ip, signup_utm, size_band, industry, industries, signup_status, signup_info) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${i.ip},
+    ${utm ? tx.json(utm as never) : null}, ${i.size ?? null}, ${inds[0] ?? null}, ${inds}, ${info ? 'pending' : 'approved'}, ${info ? tx.json(info as never) : null})`;
+  // 17차: 무료 요금제 대신 14일 무료 체험(비즈니스 기능 전부, 카드 없음) · 359차 승인 대기면 체험은 승인할 때 시작(끝나는 날 없음)
   await tx`insert into tenant_subscriptions (tenant, plan_code, status, trial_ends_at, period_end)
-    values (${tenant}, 'trial', 'trial', now() + interval '14 days', (now() + interval '14 days')::date)`;
+    values (${tenant}, 'trial', 'trial', ${info ? null : tx`now() + interval '14 days'`}, ${info ? null : tx`(now() + interval '14 days')::date`})`;
   const [u] = await tx<{ id: string }[]>`insert into users (email, name, role, status, password_hash, tenant, signup_pending, email_verified_at, work_email)
     values (${i.email}, ${i.name}, 'owner', 'active', ${i.passwordHash}, ${tenant}, ${i.pending}, ${i.pending ? null : new Date()}, ${i.workEmail ?? null}) returning id`;
   await tx`update tenants set owner_user_id = ${u.id} where id = ${tenant}`;
@@ -71,7 +78,9 @@ export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
 }
 
 const LIMIT = { ipPerHour: Number(process.env.SIGNUP_IP_PER_HOUR ?? 10), ipSignupsPerDay: Number(process.env.SIGNUP_IP_PER_DAY ?? 3), totalPerDay: Number(process.env.SIGNUP_TOTAL_PER_DAY ?? 300) };
-const GENERIC = '확인 메일을 보냈습니다. 메일의 링크를 누르면 가입이 끝납니다(24시간 유효).';
+const GENERIC_OPEN = '확인 메일을 보냈습니다. 메일의 링크를 누르면 가입이 끝납니다(24시간 유효).';
+const GENERIC_APPROVAL = '확인 메일을 보냈습니다. 메일의 링크(24시간 유효)를 누르면 체험 신청이 접수되고, 24시간 안에 연락드립니다.';
+const genericMsg = () => (signupApprovalOn() ? GENERIC_APPROVAL : GENERIC_OPEN);
 
 async function attempt(sql: Sql, ip: string | null, email: string, ok: boolean, reason: string | null) {
   await sql`insert into signup_attempts (ip, email, ok, reason) values (${ip}, ${email}, ${ok}, ${reason})`;
@@ -90,7 +99,7 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
   if (!mailConfigured() && !mailDevMode()) throw new HttpError(503, 'mail_not_configured', '지금은 가입을 받을 수 없습니다(메일 발송 준비 중). 잠시 후 다시 시도해 주세요.');
   const sql = db();
   // 봇: 조용히 성공처럼 응답(아무것도 만들지 않음)
-  if (i.website || (i.openedAt && Date.now() - i.openedAt < 2500)) { await attempt(sql, ip, i.email, false, 'bot'); return { ok: true, message: GENERIC }; }
+  if (i.website || (i.openedAt && Date.now() - i.openedAt < 2500)) { await attempt(sql, ip, i.email, false, 'bot'); return { ok: true, message: genericMsg() }; }
   const [{ h }] = await sql<{ h: number }[]>`select count(*)::int h from signup_attempts where ip is not distinct from ${ip} and created_at > now() - interval '1 hour'`;
   const [{ d }] = await sql<{ d: number }[]>`select count(*)::int d from signup_attempts where ip is not distinct from ${ip} and ok and created_at > now() - interval '1 day'`;
   const [{ t }] = await sql<{ t: number }[]>`select count(*)::int t from signup_attempts where ok and created_at > now() - interval '1 day'`;
@@ -99,22 +108,25 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
     throw new HttpError(429, 'too_many', '가입 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.');
   }
   if (i.mode === 'team' && !i.company) throw badRequest('회사(팀) 이름을 입력하세요');
+  const approval = signupApprovalOn();
+  const contact = contactPhone(i.contact); // 359차 승인제 가입: 승인 안내 연락처
+  if (approval && !contact) throw badRequest('연락받을 전화번호를 적어 주세요 — 24시간 안에 연락드립니다');
   const [ex] = await sql<{ id: string; signup_pending: boolean }[]>`select id, signup_pending from users where lower(email) = ${i.email}`;
   if (ex) {
     // 이미 있는 이메일: 가입 대기 중이면 확인 메일만 다시, 아니면 같은 안내(가입 여부를 드러내지 않음)
     await attempt(sql, ip, i.email, false, 'exists');
     const devLink = ex.signup_pending ? await issueVerification(sql, ex.id, i.email) : undefined;
-    return { ok: true, message: GENERIC, ...(devLink ? { devLink } : {}) };
+    return { ok: true, message: genericMsg(), ...(devLink ? { devLink } : {}) };
   }
   const hash = await hashPassword(i.password);
   const phone = i.agree.alimtalk ? await alimtalkPhone(i.phone) : null; // 304차 #871
-  const userId = await sql.begin((tx) => createOwnerSpace(tx, { email: i.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, industries: i.industries, utm: i.utm, agree: i.agree, phone, passwordHash: hash, pending: true, ip }));
+  const userId = await sql.begin((tx) => createOwnerSpace(tx, { email: i.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, industries: i.industries, utm: i.utm, agree: i.agree, phone, passwordHash: hash, pending: true, ip, ...(approval ? { approval: { contact, via: 'email' as const } } : {}) }));
   await attempt(sql, ip, i.email, true, null);
   const { recordStep } = await import('./funnel');
   const [{ tenant }] = await sql<{ tenant: string }[]>`select tenant from users where id = ${userId}`;
   await recordStep('submitted', { tenant }, sql);
   const devLink = await issueVerification(sql, userId, i.email);
-  return { ok: true, message: GENERIC, ...(devLink ? { devLink } : {}) };
+  return { ok: true, message: genericMsg(), approval, ...(devLink ? { devLink } : {}) };
 }
 
 /** 확인 링크 → 가입 완료. 로그인 세션은 호출한 라우트에서 만든다 */
@@ -129,8 +141,14 @@ export async function verifyEmail(token: string) {
     await audit(tx, u.id, 'auth.email_verified', 'user', u.id, {}, null);
     const [own] = await tx<{ id: string }[]>`select id from tenants where owner_user_id = ${u.id}`;
     if (own) await (await import('./funnel')).recordStep('verified', { tenant: own.id }, tx as unknown as Sql);
-    return u.id;
-  }).then(async (id) => { await (await import('./alimtalk')).alimtalkSignup(id); return id; }); // 304차 #871: 가입(약관 동의) 완료 알림톡 — 동의한 본인만
+    return { id: u.id, tenant: own?.id ?? null };
+  }).then(async ({ id, tenant }) => {
+    // 359차 승인제 가입: 메일 확인이 끝난 신청 = 슈퍼관리자에게 알림(한 번) · 가입 완료 알림톡은 승인할 때(체험 종료일이 생긴 뒤)
+    const gate = tenant ? await (await import('./signupApproval')).signupGate(tenant) : null;
+    if (gate?.status === 'pending') await (await import('./signupApproval')).notifyNewSignup(tenant!).catch(async (e) => { await (await import('./log')).logError('signup_notify', e).catch(() => {}); });
+    else await (await import('./alimtalk')).alimtalkSignup(id); // 304차 #871: 가입(약관 동의) 완료 알림톡 — 동의한 본인만
+    return id;
+  });
 }
 /** 304차 #871: 알림톡 동의했으면 휴대폰이 맞아야 함(국내 휴대폰) */
 export async function alimtalkPhone(raw: string | undefined) {
@@ -148,5 +166,5 @@ export async function resendVerification(email: string, ip: string | null) {
   await attempt(sql, ip, email, false, 'resend');
   const [u] = await sql<{ id: string }[]>`select id from users where lower(email) = ${email} and signup_pending and status = 'active'`;
   const devLink = u ? await issueVerification(sql, u.id, email) : undefined;
-  return { ok: true, message: GENERIC, ...(devLink ? { devLink } : {}) };
+  return { ok: true, message: genericMsg(), ...(devLink ? { devLink } : {}) };
 }

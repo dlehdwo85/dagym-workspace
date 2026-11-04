@@ -21,19 +21,22 @@ function SocialSignup() {
   const [f, setF] = useState({ name: '', company: '', size: '', industry: '', industries: [] as string[] });
   const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false, alimtalk: false });
   const [phone, setPhone] = useState(''); // 304차 #871 결제·약관 안내 알림톡(선택)
+  const [contact, setContact] = useState(''); // 359차 승인제 가입: 연락받을 전화
+  const [approval, setApproval] = useState(true);
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => { api(`/api/auth/oauth/pending?t=${encodeURIComponent(t)}`).then((r) => { setInfo(r); setF((x) => ({ ...x, name: r.name ?? '' })); }).catch((e) => setErr(e.message)); }, [t]);
   const [tagsOn, setTagsOn] = useState(conversionTagsConfigured());
-  useEffect(() => { api('/api/auth/signup').then((r) => { setConversionTags(r.tags); setTagsOn(conversionTagsConfigured()); }).catch(() => {}); }, []); // #449 플랫폼 운영에서 넣은 전환 태그 ID
+  useEffect(() => { api('/api/auth/signup').then((r) => { setConversionTags(r.tags); setTagsOn(conversionTagsConfigured()); setApproval(r.approval !== false); }).catch(() => {}); }, []); // #449 플랫폼 운영에서 넣은 전환 태그 ID
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setErr(null);
     if (!agree.terms || !agree.privacy || !agree.age14) { setErr('필수 약관에 동의해 주세요'); return; }
+    if (approval && !contact.trim()) { setErr('연락받을 전화번호를 적어 주세요 — 24시간 안에 연락드립니다'); return; }
     setBusy(true);
     try {
       setAdsConsent(ads);
       await api('/api/auth/oauth/complete', { body: { token: t, name: f.name, mode, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined,
-        industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, agree: { ...agree, ads }, phone: agree.alimtalk ? phone.trim() : undefined, utm: readUtm() } });
+        industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, agree: { ...agree, ads }, phone: agree.alimtalk ? phone.trim() : undefined, contact: contact.trim() || undefined, utm: readUtm() } });
       await fireSignupConversion();
       location.href = '/';
     } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); setBusy(false); }
@@ -66,12 +69,13 @@ function SocialSignup() {
         {agree.alimtalk && <input className={inputCls + ' h-10'} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" maxLength={20} placeholder="휴대폰 번호 (예: 010-1234-5678)" aria-label="알림톡 받을 휴대폰" data-testid="signup-alimtalk-phone" />}
         {tagsOn && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={ads} onChange={(e) => setAds(e.target.checked)} aria-label="광고 효과 측정" /><span>광고 효과 측정(가입 완료 1회) 동의 <span className="text-ink-3">(선택)</span></span></label>}
       </div>
+      {approval && <Field label="연락받을 전화번호 (24시간 안에 연락드립니다)"><input className={inputCls + ' h-11'} value={contact} onChange={(e) => setContact(e.target.value)} inputMode="tel" maxLength={20} placeholder="예: 010-1234-5678" required aria-label="연락받을 전화번호" data-testid="signup-contact" /></Field>}
       {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
-      <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy} data-testid="social-signup-submit">{busy ? <><Loader2 className="animate-spin" />만드는 중…</> : <>무료로 시작<ArrowRight /></>}</Button>
-      <p className="text-center text-xs text-ink-3">{inApp ? '14일 무료 체험 · 다음 화면에서 동료를 초대할 수 있어요' : '14일 무료 체험 · 카드 없음 · 다음 화면에서 동료를 초대할 수 있어요'}</p>
+      <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy} data-testid="social-signup-submit">{busy ? <><Loader2 className="animate-spin" />{approval ? '신청 중…' : '만드는 중…'}</> : <>{approval ? '14일 무료 체험 신청' : '무료로 시작'}<ArrowRight /></>}</Button>
+      <p className="text-center text-xs text-ink-3">{approval ? '신청을 확인한 뒤 24시간 안에 연락드립니다 · 승인되면 그때부터 14일 체험 · 카드 없음' : inApp ? '14일 무료 체험 · 다음 화면에서 동료를 초대할 수 있어요' : '14일 무료 체험 · 카드 없음 · 다음 화면에서 동료를 초대할 수 있어요'}</p>
     </form>
   );
 }
 export default function SocialSignupPage() {
-  return <AuthCard title="회사 만들기" sub="회사 정보만 적으면 바로 시작합니다"><SignupSteps at={2} /><Suspense><SocialSignup /></Suspense></AuthCard>;
+  return <AuthCard title="회사 정보" sub="회사 정보를 적어 주세요"><SignupSteps at={2} /><Suspense><SocialSignup /></Suspense></AuthCard>;
 }
