@@ -53,6 +53,7 @@ export async function backClose({ owner, ctx, BASE }) {
   await owner.locator('a[href="/s/marketing/approvals"]:visible').first().click();
   await owner.waitForURL((u) => u.pathname === '/s/marketing/approvals');
   const far = () => owner.getByTestId('approval-card').filter({ hasText: 'E2E 뒤로가기 스크롤 글' }).last().getByTestId('mkt-row');
+  await far().waitFor({ timeout: 90_000 }); // 358차(CI 2139): DB 가 바쁠 때(체크포인트 270초) 승인함 첫 목록이 30초를 넘김 — 목록이 뜰 때까지 기다린 뒤 내림
   await far().scrollIntoViewIfNeeded();
   const y0 = await owner.evaluate(() => Math.round(window.scrollY));
   assert.ok(y0 > 300, `목록을 충분히 내림(${y0})`);

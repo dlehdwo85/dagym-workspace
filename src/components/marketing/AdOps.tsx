@@ -50,11 +50,18 @@ const kwLabel = (p: Plan) => {
 };
 const negFailed = (p: Plan) => (Array.isArray(p.external?.negFailed) ? (p.external.negFailed as string[]) : []);
 const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable: '켜기', pause: '끄기', budget: '하루 예산 변경', auto_pause: '상한 도달 자동 중지', sync: '키워드 다시 읽기', ad_pause: '소재 끄기', ad_resume: '소재 켜기',
-  region: '광고 지역 변경', keywords_add: '키워드 추가', keywords_remove: '키워드 빼기', kw_pause: '키워드 끄기', kw_resume: '키워드 켜기' };
-const REVERTIBLE = ['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add', 'kw_pause', 'kw_resume'];
+  region: '광고 지역 변경', keywords_add: '키워드 추가', keywords_remove: '키워드 빼기', kw_pause: '키워드 끄기', kw_resume: '키워드 켜기',
+  import: '기존 캠페인 가져오기', group_bid: '광고 그룹 입찰가', group_pause: '광고 그룹 끄기', group_resume: '광고 그룹 켜기' };
+const REVERTIBLE = ['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add', 'kw_pause', 'kw_resume', 'group_bid', 'group_pause', 'group_resume'];
+/** 358차 네이버 화면에서 직접 만든 캠페인을 가져온 것(세팅안 없음) — 광고 그룹은 external.adgroups */
+type Group = { id: string; name: string; bidAmt: number; paused: boolean };
+const isImp = (p: Plan) => p.kind === 'imported';
+const groupsOf = (p: Plan) => (Array.isArray(p.external?.adgroups) ? (p.external.adgroups as Group[]) : []);
+const groupDesc = (c: Change) => { const b = new Map(((c.before?.adgroups ?? []) as Group[]).map((g) => [g.id, g])); const a = (c.after?.adgroups ?? []) as Group[];
+  return a.map((g) => c.kind === 'group_bid' ? `${g.name || g.id} ${won(b.get(g.id)?.bidAmt ?? 0)} → ${won(g.bidAmt)}` : g.name || g.id).join(', '); };
 const kwList = (k: string[] = []) => (k.length > 3 ? `${k.slice(0, 3).join(', ')} 외 ${k.length - 3}개` : k.join(', '));
 const adName = (plans: Plan[], c: Change, id: string) => { const p = plans.find((x) => x.id === c.plan_id); const k = ((p?.external?.adIds as string[] | undefined) ?? []).indexOf(id); return k >= 0 ? `안 ${'ABC'[k] ?? k + 1}` : id; };
-const desc = (c: Change, plans: Plan[] = []) => c.kind === 'create' && c.after?.campaignId ? `캠페인 ${c.after.campaignId}${c.after.adgroupId ? ` · 그룹 ${c.after.adgroupId}` : ''}` : c.kind === 'budget' ? `${won(c.before?.dailyBudget)} → ${won(c.after?.dailyBudget)}` : c.kind === 'auto_pause' && c.after?.spend ? `이번 달 ${won(c.after.spend)} / 상한 ${won(c.after.cap)}`
+const desc = (c: Change, plans: Plan[] = []) => c.kind.startsWith('group_') ? groupDesc(c) : c.kind === 'import' && c.after?.campaignId ? `캠페인 ${c.after.campaignId} · 광고 그룹 ${c.after.adgroups}개${c.after.dailyBudget ? ` · 하루 ${won(c.after.dailyBudget)}` : ''}` : c.kind === 'create' && c.after?.campaignId ? `캠페인 ${c.after.campaignId}${c.after.adgroupId ? ` · 그룹 ${c.after.adgroupId}` : ''}` : c.kind === 'budget' ? `${won(c.before?.dailyBudget)} → ${won(c.after?.dailyBudget)}` : c.kind === 'auto_pause' && c.after?.spend ? `이번 달 ${won(c.after.spend)} / 상한 ${won(c.after.cap)}`
   : (c.kind === 'ad_pause' || c.kind === 'ad_resume') ? `${((c.after?.adIds ?? []) as string[]).map((x) => adName(plans, c, x)).join(', ')}${c.after?.ab ? ' (3안 테스트 결과)' : ''}`
   : c.kind === 'region' && c.after?.KR ? `${c.before ? `${regionLabel(c.before.KR)} → ` : ''}${regionLabel(c.after.KR)}${c.after.OTHERS?.includes('00') || c.after.abroad ? ' · 해외 포함' : ''}`
   : c.kind === 'keywords_add' || c.kind === 'kw_pause' || c.kind === 'kw_resume' ? kwList(c.after?.keywords) : c.kind === 'keywords_remove' ? kwList(c.before?.keywords) : '';
@@ -112,6 +119,7 @@ export function AdOps() {
   const { data, error, reload } = useApi<Data>('/api/marketing/ad-ops');
   const [capIn, setCapIn] = useState('');
   const [form, setForm] = useState<false | true | Plan>(false); // true = 새 세팅안, Plan = 고치기
+  const [imp, setImp] = useState(false); // 358차 기존 캠페인 가져오기
   const [busy, setBusy] = useState<string | null>(null);
   const [local, setLocal] = useState<{ p: Plan; mode: 'keywords' | 'region' } | null>(null); // 광고 최적화 1차 ② 만든 세팅안의 동네 키워드·광고 지역
   const running = useRef(false); // 두 번 눌러도 요청 한 번(운영 10/19 — 다시 읽기 요청 2번)
@@ -143,17 +151,21 @@ export function AdOps() {
 
       <section className="rounded-card border border-line bg-white p-3 shadow-card">
         <div className="flex items-center gap-2"><h2 className="text-sm font-semibold">네이버 파워링크 세팅안</h2>
-          {data.canEdit && <Button size="sm" className="ml-auto" onClick={() => setForm(true)} disabled={!data.accounts.length} title={data.accounts.length ? undefined : '네이버 검색광고 연결 후'} data-testid="ad-plan-new">새 세팅안</Button>}</div>
+          {data.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setImp(true)} disabled={!data.accounts.length} title="네이버 광고 화면에서 직접 만든 캠페인을 워크인에서 조정" data-testid="ad-import-open">기존 캠페인 가져오기</Button>}
+          {data.canEdit && <Button size="sm" onClick={() => setForm(true)} disabled={!data.accounts.length} title={data.accounts.length ? undefined : '네이버 검색광고 연결 후'} data-testid="ad-plan-new">새 세팅안</Button>}</div>
         {!data.accounts.length && <p className="mt-1 text-xs text-ink-3">먼저 설정 › 연결 계정에서 네이버 검색광고를 연결해 주세요.</p>}
         <ul className="mt-2 space-y-2">{data.plans.map((p) => {
           const [label, cls] = STATUS[p.status] ?? [p.status, 'bg-slate-100'];
           return (
             <li key={p.id} className="rounded-input border border-line p-2 text-sm" data-testid="ad-plan">
               <div className="flex flex-wrap items-center gap-2"><b>{p.name}</b>{p.brand && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="ad-plan-brand">{p.brand}</span>}<span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', cls)} data-testid="ad-plan-status">{label}</span>
-                <span className="text-xs text-ink-2">{p.account_label} · 하루 {won(p.plan.dailyBudget)} · 입찰 {won(p.plan.bidAmt)} · 키워드 {p.plan.keywords.length}개</span></div>
+                {isImp(p) ? <><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-ink-2" data-testid="ad-plan-imported">가져온 캠페인</span>
+                  <span className="text-xs text-ink-2">{p.account_label} · 하루 {p.plan.dailyBudget ? won(p.plan.dailyBudget) : '제한 없음'} · 광고 그룹 {groupsOf(p).length}개</span></>
+                  : <span className="text-xs text-ink-2">{p.account_label} · 하루 {won(p.plan.dailyBudget)} · 입찰 {won(p.plan.bidAmt)} · 키워드 {p.plan.keywords.length}개</span>}</div>
+              {isImp(p) ? <ImportedGroups p={p} canEdit={data.canEdit} busy={busy === p.id} run={run} /> : <>
               <p className="mt-0.5 text-xs text-ink-2" data-testid="ad-plan-kw-line">키워드: {kwLabel(p)}</p>
               {p.plan.ads.map((a, k) => <p key={k} className="mt-0.5 text-xs"><b className="text-emerald-800">{a.headline}</b> {a.description} <span className="text-ink-3">{a.url}</span></p>)}
-              <p className="mt-0.5 text-xs text-ink-2" data-testid="ad-plan-setup">광고 설정: {setupText(p.plan.setup, !!p.plan.test?.on)}</p>
+              <p className="mt-0.5 text-xs text-ink-2" data-testid="ad-plan-setup">광고 설정: {setupText(p.plan.setup, !!p.plan.test?.on)}</p></>}
               {!!p.external?.campaignId && <NaverIds p={p} />}
               {!!p.external?.readBack && <ReadBackBox rb={p.external.readBack as ReadBack} />}
               {staleCreating(p) && <p className="mt-1 text-xs text-amber-800" data-testid="ad-plan-stale">만드는 중에 끊겼습니다({STALE_MIN}분 넘게 진행 없음) — [이어서 만들기]를 누르면 네이버에 만든 데까지 이어서 만듭니다.</p>}
@@ -161,7 +173,7 @@ export function AdOps() {
               {/* #499-2 권고는 시작을 막지 않음(연결 주소·광고형 문구·질문형 제목·제외 키워드) */}
               {!!p.advice?.length && ['draft', 'failed'].includes(p.status) && <ul className="mt-1 space-y-0.5 text-xs text-sky-900" data-testid="ad-plan-advice">{p.advice.map((x, k) => <li key={k}>권고: {x}</li>)}</ul>}
               {negFailed(p).length > 0 && <p className="mt-1 break-words text-xs text-amber-800" data-testid="ad-plan-neg-failed">제외 키워드 {negFailed(p).length}개는 네이버가 받지 않았습니다 — {negFailed(p).join(' / ')} · 네이버 광고 시스템에서 직접 넣어 주세요</p>}
-              {['created', 'active', 'paused'].includes(p.status) && <p className="mt-0.5 text-xs text-ink-3" data-testid="ad-plan-manual">직접 할 일(권장): 파워링크 이미지(썸네일 확장 소재)는 네이버 API로 만들 수 없어, 네이버 광고 시스템에서 이 광고그룹에 등록합니다.</p>}
+              {['created', 'active', 'paused'].includes(p.status) && !isImp(p) && <p className="mt-0.5 text-xs text-ink-3" data-testid="ad-plan-manual">직접 할 일(권장): 파워링크 이미지(썸네일 확장 소재)는 네이버 API로 만들 수 없어, 네이버 광고 시스템에서 이 광고그룹에 등록합니다.</p>}
               {p.error && <p className="mt-1 break-words text-xs text-red-700">{p.error}</p>}
               {p.plan.local && (p.plan.local.center || p.plan.local.areas?.length || p.plan.local.region?.length) ? <p className="mt-0.5 text-xs text-ink-2" data-testid="ad-plan-local">동네 타깃: {p.plan.local.center ? `${p.plan.local.center} 반경 ${p.plan.local.radiusKm}km` : '중심 없음'}{p.plan.local.areas?.length ? ` · 동네 ${p.plan.local.areas.length}곳(${kwList(p.plan.local.areas)})` : ''} · 광고 지역 {regionLabel(p.plan.local.region)}{p.plan.local.abroad ? '·해외' : ''}</p> : null}
               {p.ab && <AbBox p={p} ab={p.ab} canEdit={data.canEdit} busy={busy === p.id} run={run} />}
@@ -174,15 +186,17 @@ export function AdOps() {
                     onClick={() => confirm(`광고를 켭니다. 하루 최대 ${won(p.plan.dailyBudget)} 이 나갈 수 있습니다(이번 달 ${won(data.monthSpend)} / 상한 ${data.cap ? won(data.cap.monthlyCap) : '없음'}). 켤까요?`) && run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'enable' } }), '광고를 켰습니다')}>켜기</Button>}
                   {p.status === 'active' && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-pause" onClick={() => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'pause' } }), '광고를 껐습니다')}>끄기</Button>}
                   {/* 운영 10/19: 키워드 id 가 비어 있으면(생성 응답 파싱 실패) 네이버에서 다시 읽기 — 켜기·예산은 그대로 */}
-                  {['created', 'active', 'paused'].includes(p.status) && !kwOk(p.external?.keywordIds) && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-sync"
+                  {['created', 'active', 'paused'].includes(p.status) && !isImp(p) && !kwOk(p.external?.keywordIds) && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-sync"
                     onClick={() => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'sync' } }), '키워드 id 를 다시 읽었습니다')}>키워드 다시 읽기</Button>}
                   {/* #499-2 후속(c) 읽기만 — 실패한 세팅안도 만든 캠페인이 있으면(남은 캠페인 확인) */}
-                  {['created', 'active', 'paused', 'failed'].includes(p.status) && !!p.external?.campaignId && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-readback-btn"
+                  {['created', 'active', 'paused', 'failed'].includes(p.status) && !isImp(p) && !!p.external?.campaignId && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-readback-btn"
                     onClick={() => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'readback' } }), '네이버에서 반영 값을 다시 읽었습니다')}>네이버 반영 값 다시 읽기</Button>}
-                  {['created', 'active', 'paused'].includes(p.status) && <Button size="sm" variant="secondary" disabled={busy === p.id} onClick={() => setLocal({ p, mode: 'keywords' })} data-testid="ad-local-kw">동네 키워드 추가</Button>}
-                  {['created', 'active', 'paused'].includes(p.status) && <Button size="sm" variant="secondary" disabled={busy === p.id} onClick={() => setLocal({ p, mode: 'region' })} data-testid="ad-local-region">광고 지역</Button>}
+                  {['created', 'active', 'paused'].includes(p.status) && !isImp(p) && <Button size="sm" variant="secondary" disabled={busy === p.id} onClick={() => setLocal({ p, mode: 'keywords' })} data-testid="ad-local-kw">동네 키워드 추가</Button>}
+                  {['created', 'active', 'paused'].includes(p.status) && !isImp(p) && <Button size="sm" variant="secondary" disabled={busy === p.id} onClick={() => setLocal({ p, mode: 'region' })} data-testid="ad-local-region">광고 지역</Button>}
+                  {isImp(p) && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-import-refresh"
+                    onClick={() => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'refresh' } }), '네이버에서 다시 읽었습니다')}>네이버에서 다시 읽기</Button>}
                   {['created', 'active', 'paused'].includes(p.status) && <Button size="sm" variant="secondary" disabled={busy === p.id} data-testid="ad-plan-budget"
-                    onClick={() => { const v = Number(prompt('새 하루 예산(원)', String(p.plan.dailyBudget))?.replace(/\D/g, '')); if (v) run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'budget', dailyBudget: v } }), '하루 예산을 바꿨습니다'); }}>하루 예산</Button>}
+                    onClick={() => { const v = Number(prompt('새 하루 예산(원)', p.plan.dailyBudget ? String(p.plan.dailyBudget) : '')?.replace(/\D/g, '')); if (v) run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body: { action: 'budget', dailyBudget: v } }), '하루 예산을 바꿨습니다'); }}>하루 예산</Button>}
                 </div>)}
             </li>);
         })}{!data.plans.length && <li className="text-xs text-ink-3">세팅안이 없습니다</li>}</ul>
@@ -209,6 +223,7 @@ export function AdOps() {
             </li>);
         })}{!data.changes.length && <li className="py-1.5 text-ink-3">아직 변경이 없습니다</li>}</ul>
       </section>
+      {imp && <ImportModal accounts={data.accounts} brands={data.brands ?? []} onClose={() => setImp(false)} onDone={() => { setImp(false); reload(); }} />}
       {form && <PlanForm accounts={data.accounts} brands={data.brands ?? []} budgetHint={data.budgetHint ?? null} edit={form === true ? undefined : form} onClose={() => setForm(false)} onDone={reload} />}
       {local?.mode === 'keywords' && <Modal open onClose={() => setLocal(null)} title="동네 키워드 추가">
         <LocalFinder accountId={local.p.account_id} value={{ ...NO_LOCAL, ...(local.p.plan.local ?? {}) }} have={local.p.plan.keywords} pickLabel="광고에 키워드 추가"
@@ -220,6 +235,65 @@ export function AdOps() {
   );
 }
 
+/** 358차 가져온 캠페인의 광고 그룹: 입찰가·켜짐 — 그룹마다 [입찰가]·[끄기]/[켜기], 모든 그룹 입찰가 한 번에. 돈이 늘면 확인 창 */
+function ImportedGroups({ p, canEdit, busy, run }: { p: Plan; canEdit: boolean; busy: boolean; run: (key: string, fn: () => Promise<unknown>, ok: string) => void }) {
+  const gs = groupsOf(p);
+  const act = (body: Record<string, unknown>, ok: string) => run(p.id, () => api(`/api/marketing/ad-ops/plans/${p.id}/action`, { body }), ok);
+  const bid = (ids: string[], cur: number | null) => {
+    const v = Number(prompt(ids.length > 1 ? `광고 그룹 ${ids.length}개의 기본 입찰가(원, 70원 이상)` : '기본 입찰가(원, 70원 이상)', cur ? String(cur) : '')?.replace(/\D/g, ''));
+    if (!v) return; if (v < 70) return toast.error('입찰가는 70원 이상입니다');
+    const up = gs.filter((g) => ids.includes(g.id) && v > g.bidAmt).length;
+    if (up && p.status === 'active' && !confirm(`입찰가를 올리면 클릭당 광고비가 더 나갈 수 있습니다(${up}개 그룹). 바꿀까요?`)) return;
+    act({ action: 'group_bid', adgroupIds: ids, bidAmt: v }, `입찰가를 ${won(v)}(으)로 바꿨습니다`);
+  };
+  return (
+    <div className="mt-1" data-testid="ad-import-groups">
+      <p className="text-xs text-ink-3">네이버 광고 화면에서 직접 만든 캠페인입니다. 워크인에서는 끄기·켜기·하루 예산·광고 그룹 입찰가·그룹 끄기/켜기만 바꿉니다(키워드·소재·지역은 네이버 화면에서). 바꾼 값은 아래 기록에 남고 되돌릴 수 있습니다.</p>
+      <ul className="mt-1 divide-y divide-line rounded-input border border-line text-xs">{gs.map((g) => (
+        <li key={g.id} className="flex flex-wrap items-center gap-2 px-2 py-1.5" data-testid="ad-import-group" data-group={g.id}>
+          <span className="min-w-0 flex-1 break-words">{g.name || g.id}</span>
+          <span className="whitespace-nowrap text-ink-2" data-testid="ad-import-group-bid">입찰 {won(g.bidAmt)}</span>
+          <span className={cx('whitespace-nowrap rounded-full px-1.5 text-[10px] font-medium', g.paused ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800')} data-testid="ad-import-group-state">{g.paused ? '꺼짐' : '켜짐'}</span>
+          {canEdit && <span className="flex gap-1">
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => bid([g.id], g.bidAmt)} data-testid="ad-import-group-bid-btn">입찰가</Button>
+            {g.paused ? <Button size="sm" variant="secondary" disabled={busy} data-testid="ad-import-group-resume"
+              onClick={() => (p.status !== 'active' || confirm(`'${g.name}' 그룹을 켭니다. 광고비가 나갈 수 있습니다. 켤까요?`)) && act({ action: 'group_resume', adgroupIds: [g.id] }, '광고 그룹을 켰습니다')}>켜기</Button>
+              : <Button size="sm" variant="secondary" disabled={busy} data-testid="ad-import-group-pause" onClick={() => act({ action: 'group_pause', adgroupIds: [g.id] }, '광고 그룹을 껐습니다')}>끄기</Button>}</span>}
+        </li>))}{!gs.length && <li className="px-2 py-1.5 text-ink-3">광고 그룹이 없습니다</li>}</ul>
+      {canEdit && gs.length > 1 && <Button size="sm" variant="secondary" className="mt-1" disabled={busy} onClick={() => bid(gs.map((g) => g.id), null)} data-testid="ad-import-bid-all">모든 그룹 입찰가</Button>}
+    </div>
+  );
+}
+type Cand = { id: string; name: string; type: string; dailyBudget: number | null; on: boolean; linked: boolean };
+/** 358차 기존 캠페인 가져오기: 계정 고르기 → 네이버 캠페인 목록(읽기만) → [가져오기](브랜드 고르기 선택) */
+function ImportModal({ accounts, brands, onClose, onDone }: { accounts: Data['accounts']; brands: Data['brands']; onClose: () => void; onDone: () => void }) {
+  const [acc, setAcc] = useState(accounts[0]?.id ?? '');
+  const [brand, setBrand] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const list = useApi<{ campaigns: Cand[] }>(acc ? `/api/marketing/ad-ops/import?accountId=${acc}` : null);
+  async function go(c: Cand) {
+    setBusy(c.id);
+    try { await api('/api/marketing/ad-ops/import', { body: { accountId: acc, campaignId: c.id, brandId: brand || null } }); toast.ok(`'${c.name}' 을(를) 가져왔습니다 — 네이버 쪽은 바뀌지 않았습니다`); onDone(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  return (
+    <Modal open onClose={onClose} title="기존 캠페인 가져오기">
+      <div className="space-y-2 text-sm" data-testid="ad-import-modal">
+        <p className="text-xs text-ink-2">네이버 광고 화면에서 직접 만든 캠페인을 워크인에 연결합니다. 가져오기는 네이버 값을 읽기만 하고 바꾸지 않습니다. 가져온 뒤에는 월 광고비 상한에 닿으면 이 캠페인도 자동으로 꺼집니다.</p>
+        {accounts.length > 1 && <Field label="네이버 계정"><select className={inputCls} value={acc} onChange={(e) => setAcc(e.target.value)} data-testid="ad-import-account">{accounts.map((a) => <option key={a.id} value={a.id}>{a.label} ({a.external_id})</option>)}</select></Field>}
+        {!!brands.length && <Field label="브랜드(선택)"><select className={inputCls} value={brand} onChange={(e) => setBrand(e.target.value)} data-testid="ad-import-brand"><option value="">고르지 않음</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>}
+        {list.error ? <ErrorBox error={list.error} retry={list.reload} /> : !list.data ? <Skeleton rows={3} /> : (
+          <ul className="divide-y divide-line rounded-input border border-line text-xs">{list.data.campaigns.map((c) => (
+            <li key={c.id} className="flex flex-wrap items-center gap-2 px-2 py-1.5" data-testid="ad-import-cand">
+              <span className="min-w-0 flex-1 break-words"><b>{c.name}</b> <code className="text-[10px] text-ink-3">{c.id}</code></span>
+              <span className="whitespace-nowrap text-ink-2">{c.dailyBudget ? `하루 ${won(c.dailyBudget)}` : '하루 제한 없음'} · {c.on ? '켜짐' : '꺼짐'}</span>
+              {c.linked ? <span className="text-ink-3">이미 연결됨</span>
+                : <Button size="sm" disabled={!!busy} onClick={() => go(c)} data-testid="ad-import-go">{busy === c.id ? '가져오는 중…' : '가져오기'}</Button>}
+            </li>))}{!list.data.campaigns.length && <li className="px-2 py-1.5 text-ink-3">캠페인이 없습니다</li>}</ul>)}
+      </div>
+    </Modal>
+  );
+}
 function PlanForm({ accounts, brands, budgetHint, edit, onClose, onDone }: { accounts: Data['accounts']; brands: Data['brands']; budgetHint: Data['budgetHint']; edit?: Plan; onClose: () => void; onDone: () => void }) {
   const [f, setF] = useState(edit
     ? { accountId: edit.account_id, brandId: edit.brand_id ?? '', name: edit.name, dailyBudget: String(edit.plan.dailyBudget), bidAmt: String(edit.plan.bidAmt), channelId: edit.plan.channelId, keywords: edit.plan.keywords.join(', '), ads: edit.plan.ads.map((a) => ({ ...a })),

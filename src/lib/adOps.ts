@@ -164,7 +164,7 @@ export async function adOpsOverview(u: SessionUser) {
     from mkt_ad_changes c left join users u on u.id = c.actor_id left join mkt_ad_plans pp on pp.id = c.plan_id where c.tenant = ${t} and (pp.provider is null or pp.provider = 'naver') order by c.created_at desc limit 100`;
   const ab = await abFor(plans);
   const [bud] = await sql<any[]>`select plan, brand_plan, total from mkt_ad_budgets where tenant = ${t} and month = ${ymKst()} and status = 'approved'`;
-  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: precheck(p.plan, rules), advice: advice({ ...p.plan, name: p.name }, rules), ab: ab.get(p.id) ?? null })), changes,
+  return { canEdit: isAdmin(u), cap, monthSpend: spend, month: ymKst(), accounts, brands, plans: plans.map((p) => ({ ...p, issues: isImported(p) ? [] : precheck(p.plan, rules), advice: isImported(p) ? [] : advice({ ...p.plan, name: p.name }, rules), ab: ab.get(p.id) ?? null })), changes,
     savings: await agencySavings(t, spend), budgetHint: bud ? naverBudgetHint(bud) : null };
 }
 /** #499-2 하루 예산 권장(월 ÷ 30 × 1.5)의 '월': 이번 달 승인된 광고 예산의 네이버 몫 — 브랜드별은 예산 승인 집행과 같은 비율(브랜드 월 예산 × 네이버 비중) */
@@ -582,16 +582,20 @@ export async function guardMoneyUp(t: string, addDaily = 0) {
   if (spend >= cap.monthlyCap) throw new HttpError(409, 'cap_reached', `이번 달 광고비 ${won(spend)} 가 상한 ${won(cap.monthlyCap)} 에 닿아 켤 수 없습니다 — 상한을 올리거나 다음 달에 켜 주세요`);
   return { cap: cap.monthlyCap, spend, addDaily };
 }
-export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync', 'readback', 'ad_pause', 'ad_resume', 'ab_apply', 'region', 'keywords_add', 'kw_pause', 'kw_resume']), dailyBudget: z.number().int().min(50).max(10_000_000).optional(),
+export const planAction = z.object({ action: z.enum(['enable', 'pause', 'budget', 'sync', 'readback', 'ad_pause', 'ad_resume', 'ab_apply', 'region', 'keywords_add', 'kw_pause', 'kw_resume', 'group_bid', 'group_pause', 'group_resume', 'refresh']), dailyBudget: z.number().int().min(50).max(10_000_000).optional(),
+  adgroupIds: z.array(z.string().trim().min(1).max(60)).min(1).max(50).optional(), bidAmt: z.number().int().min(70).max(100_000).optional(),
   keywordIds: z.array(z.string().trim().min(1).max(60)).min(1).max(50).optional(),
   adIds: z.array(z.string().trim().min(1).max(60)).min(1).max(3).optional(),
   region: z.array(z.string().regex(REGION_RE)).max(17).optional(), abroad: z.boolean().optional(), keywords: z.array(z.string().trim().min(1).max(25)).min(1).max(30).optional(),
   local: z.object({ center: z.string().trim().max(80), radiusKm: z.number().min(0.5).max(30), areas: z.array(z.string().trim().min(1).max(20)).max(20) }).partial().optional() });
 export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null = null): Promise<Record<string, unknown>> {
   if (/^[0-9a-f-]{36}$/i.test(id)) { // #494 메타 자동 세팅안: 끄기·다시 켜기·하루 예산은 metaAuto(상한 검사·기록 같은 규칙)
-    const [pv] = await db()<{ provider: string }[]>`select provider from mkt_ad_plans where id = ${id} and tenant = ${tenantOf(u)}`;
+    const [pv] = await db()<{ provider: string; kind: string }[]>`select provider, kind from mkt_ad_plans where id = ${id} and tenant = ${tenantOf(u)}`;
     if (pv?.provider === 'meta') return (await import('./metaAuto')).actMetaPlan(u, id, i, revertOf);
+    if (pv && isImported(pv) && !IMPORTED_ACTIONS.includes(i.action)) throw new HttpError(409, 'imported_limited', '가져온 캠페인은 끄기·켜기·하루 예산·광고 그룹 입찰가·그룹 끄기/켜기·다시 읽기만 합니다(키워드·소재·지역은 네이버 광고 화면에서)');
   }
+  if (i.action === 'group_bid' || i.action === 'group_pause' || i.action === 'group_resume') return actGroups(u, id, i, revertOf);
+  if (i.action === 'refresh') return refreshImported(u, id);
   if (i.action === 'sync') return syncPlanKeywords(u, id);
   if (i.action === 'readback') return readBackPlan(u, id);
   if (i.action === 'ad_pause' || i.action === 'ad_resume' || i.action === 'ab_apply') return actAds(u, id, i, revertOf);
@@ -611,7 +615,7 @@ export async function actPlan(u: SessionUser, id: string, i: z.infer<typeof plan
     await setLock(a, cid, true); before = { userLock: false }; after = { userLock: true }; status = 'paused';
   } else {
     if (!i.dailyBudget) throw badRequest('하루 예산을 넣어 주세요');
-    moneyUp = i.dailyBudget > Number(p.plan.dailyBudget);
+    moneyUp = i.dailyBudget > Number(p.plan.dailyBudget) && !(isImported(p) && !Number(p.plan.dailyBudget)); // 358차: 가져온 캠페인이 '제한 없음'이었으면 제한을 거는 것은 줄이는 쪽
     if (moneyUp && p.status === 'active') await guardMoneyUp(t, i.dailyBudget - Number(p.plan.dailyBudget));
     await naverReq(a, 'PUT', `/ncc/campaigns/${cid}`, '?fields=budget', { nccCampaignId: cid, dailyBudget: i.dailyBudget, useDailyBudget: true });
     before = { dailyBudget: p.plan.dailyBudget }; after = { dailyBudget: i.dailyBudget };
@@ -629,7 +633,15 @@ export async function revertChange(u: SessionUser, changeId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(changeId)) throw notFound();
   const [c] = await db()<any[]>`select id, plan_id, kind, before, after, status from mkt_ad_changes where id = ${changeId} and tenant = ${tenantOf(u)}`;
   if (!c || !c.plan_id) throw notFound('변경 기록을 찾을 수 없습니다');
-  if (c.status !== 'applied' || !['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add', 'kw_pause', 'kw_resume'].includes(c.kind)) throw new HttpError(409, 'not_revertible', '이 기록은 되돌릴 수 없습니다');
+  if (c.status !== 'applied' || !['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add', 'kw_pause', 'kw_resume', 'group_bid', 'group_pause', 'group_resume'].includes(c.kind)) throw new HttpError(409, 'not_revertible', '이 기록은 되돌릴 수 없습니다');
+  // 358차 가져온 캠페인의 광고 그룹: 입찰가는 바꾸기 전 네이버 값(그룹마다)으로, 끄기 ↔ 켜기
+  if (c.kind === 'group_bid') {
+    const bids = Object.fromEntries(((c.before?.adgroups ?? []) as ImportedGroup[]).filter((g) => Number(g.bidAmt) >= 70).map((g) => [g.id, Number(g.bidAmt)]));
+    if (!Object.keys(bids).length) throw new HttpError(409, 'not_revertible', '바꾸기 전 입찰가 기록이 없습니다');
+    return actGroups(u, c.plan_id, { action: 'group_bid', adgroupIds: Object.keys(bids) }, c.id, bids);
+  }
+  if (c.kind === 'group_pause' || c.kind === 'group_resume') return actGroups(u, c.plan_id, { action: c.kind === 'group_pause' ? 'group_resume' : 'group_pause', adgroupIds: ((c.after?.adgroups ?? []) as ImportedGroup[]).map((g) => g.id) }, c.id);
+  if (c.kind === 'budget' && !Number(c.before?.dailyBudget)) throw new HttpError(409, 'not_revertible', '바꾸기 전에는 하루 예산 제한이 없었습니다 — 제한 없이 되돌리려면 네이버 광고 화면에서 바꿔 주세요');
   if (c.kind === 'kw_pause' || c.kind === 'kw_resume') return actKeywords(u, c.plan_id, { action: c.kind === 'kw_pause' ? 'kw_resume' : 'kw_pause', keywordIds: c.before?.keywordIds ?? [] }, c.id);
   // 지역: 전 값으로(전에 타겟이 없었으면 = 전국 + 해외). 키워드 추가: 그때 새로 만든 키워드만 네이버에서 지우고 세팅안에서 뺌
   if (c.kind === 'region') return actLocal(u, c.plan_id, { action: 'region', region: c.before?.KR ?? [], abroad: c.before?.OTHERS == null || c.before.OTHERS.includes('00') }, c.id);
@@ -637,6 +649,103 @@ export async function revertChange(u: SessionUser, changeId: string) {
   if (c.kind === 'ad_pause' || c.kind === 'ad_resume') return actAds(u, c.plan_id, { action: c.kind === 'ad_pause' ? 'ad_resume' : 'ad_pause', adIds: c.before?.adIds ?? [] }, c.id);
   const action = c.kind === 'budget' ? { action: 'budget' as const, dailyBudget: Number(c.before?.dailyBudget) } : { action: ((c.before?.userLock ?? c.before?.paused) ? 'pause' : 'enable') as 'pause' | 'enable' }; // 메타 = paused
   return actPlan(u, c.plan_id, action, c.id);
+}
+
+// ---------------- 358차 네이버 광고 화면에서 직접 만든 캠페인 가져오기 ----------------
+/**
+ * 로컬 11/04(대표 '워크인 네이버는 멈추기보다 금액을 낮추고'): 세팅안 없이 네이버 화면에서 만든 캠페인을 워크인에 연결해
+ * 끄기·켜기·하루 예산·광고 그룹 입찰가·그룹 끄기/켜기를 하고, 변경 기록·되돌리기·월 상한 자동 중지·월 예산 집행(브랜드)을 같이 받는다.
+ * - 가져오기·다시 읽기는 네이버를 읽기만 함(아무것도 바꾸지 않음). 키워드·소재·지역은 워크인에서 바꾸지 않음(네이버 화면 그대로)
+ * - 돈이 늘어나는 변경(켜기·예산 올림·입찰가 올림·그룹 켜기)은 다른 세팅안과 같이 관리자 누름 + 월 상한 검사
+ * - 그룹 입찰가: 네이버에서 그 그룹을 읽어 입찰가만 바꿔 다시 씀(PUT /ncc/adgroups/{id}) → 다시 읽어 실제 값 확인. 실계정 확인 전 '구조 시험'
+ */
+type ImportedGroup = { id: string; name: string; bidAmt: number; paused: boolean };
+const IMPORTED_ACTIONS: string[] = ['enable', 'pause', 'budget', 'group_bid', 'group_pause', 'group_resume', 'refresh'];
+export const isImported = (p: { kind?: string | null }) => p.kind === 'imported';
+const groupRow = (g: any): ImportedGroup => ({ id: String(g.nccAdgroupId), name: String(g.name ?? ''), bidAmt: Number(g.bidAmt) || 0, paused: !!g.userLock });
+const campBudget = (c: any) => (c?.useDailyBudget === false ? 0 : Number(c?.dailyBudget) || 0);
+
+/** 이 네이버 계정의 캠페인(가져올 후보) — 이미 워크인 세팅안에 연결된 것은 linked */
+export async function importCandidates(u: SessionUser, accountId: string) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const a = await naverAcc(t, accountId);
+  const [list, linked] = await Promise.all([naverReq(a, 'GET', '/ncc/campaigns').then(listOf), linkedCampaigns(t)]);
+  return { campaigns: list.filter((c) => c?.nccCampaignId).map((c) => ({ id: String(c.nccCampaignId), name: String(c.name ?? ''), type: String(c.campaignTp ?? ''),
+    dailyBudget: campBudget(c) || null, on: c.userLock === false, linked: linked.has(String(c.nccCampaignId)) })) };
+}
+export const importInput = z.object({ accountId: z.string().uuid(), campaignId: z.string().trim().regex(/^cmp-[A-Za-z0-9-]{1,80}$/, '캠페인 id 꼴이 아닙니다(cmp-…)'), brandId: z.string().uuid().nullable().optional() });
+export async function importCampaign(u: SessionUser, i: z.infer<typeof importInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db(); const a = await naverAcc(t, i.accountId);
+  if (i.brandId) { const [b] = await sql`select id from mkt_brands where id = ${i.brandId} and tenant = ${t}`; if (!b) throw notFound('브랜드를 찾을 수 없습니다'); }
+  if ((await linkedCampaigns(t)).has(i.campaignId)) throw new HttpError(409, 'already_linked', '이미 워크인에 연결된 캠페인입니다');
+  const c = await naverReq(a, 'GET', `/ncc/campaigns/${encodeURIComponent(i.campaignId)}`);
+  if (String(c?.nccCampaignId ?? '') !== i.campaignId) throw notFound('이 계정에서 캠페인을 찾을 수 없습니다');
+  const groups = (await adgroupsOf(a, i.campaignId)).filter((g) => g?.nccAdgroupId).map(groupRow);
+  const on = c.userLock === false;
+  const name = String(c.name ?? i.campaignId).slice(0, 200);
+  const plan = { dailyBudget: campBudget(c), bidAmt: 0, channelId: '', keywords: [], ads: [] };
+  const external = { imported: true, importedAt: new Date().toISOString(), campaignId: i.campaignId, campaignName: name, campaignTp: String(c.campaignTp ?? ''), useDailyBudget: c.useDailyBudget !== false, adgroups: groups };
+  const [p] = await sql<{ id: string }[]>`insert into mkt_ad_plans (tenant, account_id, provider, kind, name, plan, status, external, created_by, approved_by, approved_at, brand_id)
+    select ${t}, ${a.id}, 'naver', 'imported', ${name}, ${sql.json(plan as never)}, ${on ? 'active' : 'paused'}, ${sql.json(external as never)}, ${u.id}, ${u.id}, now(), ${i.brandId ?? null}
+    where not exists (select 1 from mkt_ad_plans where tenant = ${t} and provider = 'naver' and external->>'campaignId' = ${i.campaignId}) returning id`;
+  if (!p) throw new HttpError(409, 'already_linked', '이미 워크인에 연결된 캠페인입니다');
+  await sql`insert into mkt_ad_changes (tenant, plan_id, kind, after, money_up, actor_id) values (${t}, ${p.id}, 'import', ${sql.json({ campaignId: i.campaignId, name, on, dailyBudget: plan.dailyBudget, adgroups: groups.length } as never)}, false, ${u.id})`;
+  await audit(sql, u.id, 'mkt_ads.import', 'mkt_ad_plan', p.id, { campaignId: i.campaignId, adgroups: groups.length }).catch(() => {});
+  return { id: p.id, status: on ? 'active' : 'paused', dailyBudget: plan.dailyBudget, adgroups: groups };
+}
+/** 가져온 캠페인을 네이버에서 다시 읽기(네이버 화면에서 바꾼 하루 예산·켜짐·그룹 입찰가·그룹 추가) — 읽기만 */
+async function refreshImported(u: SessionUser, id: string) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db(); const p = await planOf(t, id);
+  if (!isImported(p)) throw new HttpError(409, 'not_imported', '가져온 캠페인만 다시 읽습니다');
+  const a = await naverAcc(t, p.account_id); const cid = String(p.external.campaignId);
+  const c = await naverReq(a, 'GET', `/ncc/campaigns/${encodeURIComponent(cid)}`);
+  const groups = (await adgroupsOf(a, cid)).filter((g) => g?.nccAdgroupId).map(groupRow);
+  const status = c?.userLock === false ? 'active' : 'paused';
+  await sql`update mkt_ad_plans set status = ${status}, plan = ${sql.json({ ...p.plan, dailyBudget: campBudget(c) } as never)},
+    external = ${sql.json({ ...p.external, campaignName: String(c?.name ?? p.external.campaignName ?? ''), useDailyBudget: c?.useDailyBudget !== false, adgroups: groups, refreshedAt: new Date().toISOString() } as never)}, updated_at = now() where id = ${id}`;
+  return { ok: true, status, dailyBudget: campBudget(c), adgroups: groups };
+}
+/** 가져온 캠페인의 광고 그룹 입찰가·끄기·켜기. bids = 되돌리기(그룹마다 전 값). 일부만 바뀌면 바뀐 것은 기록(되돌리기 가능) + 나머지는 실패 기록 */
+async function actGroups(u: SessionUser, id: string, i: z.infer<typeof planAction>, revertOf: string | null, bids?: Record<string, number>): Promise<Record<string, unknown>> {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db(); const p = await planOf(t, id);
+  if (!isImported(p) || !['active', 'paused'].includes(p.status) || !p.external?.campaignId) throw new HttpError(409, 'not_imported', '가져온 캠페인의 광고 그룹만 여기서 바꿉니다');
+  const kind = i.action as 'group_bid' | 'group_pause' | 'group_resume';
+  const all: ImportedGroup[] = Array.isArray(p.external.adgroups) ? p.external.adgroups : [];
+  const ids = [...new Set(i.adgroupIds ?? [])];
+  if (!ids.length || ids.some((x) => !all.some((g) => g.id === x))) throw badRequest('이 캠페인의 광고 그룹을 골라 주세요');
+  const bidOf = (gid: string) => Number(bids?.[gid] ?? i.bidAmt);
+  if (kind === 'group_bid' && ids.some((x) => !(bidOf(x) >= 70))) throw badRequest('입찰가는 70원 이상으로 넣어 주세요');
+  if (kind === 'group_pause' && all.every((g) => g.paused || ids.includes(g.id))) throw new HttpError(409, 'last_group', '광고 그룹을 모두 끌 수는 없습니다 — 캠페인 전체를 끄려면 [끄기]');
+  const sel = all.filter((g) => ids.includes(g.id));
+  const moneyUp = kind === 'group_resume' || (kind === 'group_bid' && sel.some((g) => bidOf(g.id) > g.bidAmt));
+  if (moneyUp && p.status === 'active') await guardMoneyUp(t); // 켜진 캠페인에서 돈이 늘어나는 변경 — 월 상한
+  const a = await naverAcc(t, p.account_id);
+  const next = all.map((g) => ({ ...g })); const before: ImportedGroup[] = []; const done: ImportedGroup[] = []; let err: any = null; const mismatch: string[] = [];
+  for (const g of sel) {
+    try {
+      const cur = await naverReq(a, 'GET', `/ncc/adgroups/${encodeURIComponent(g.id)}`);
+      const was = groupRow({ ...cur, nccAdgroupId: g.id });
+      if (kind === 'group_bid') await naverReq(a, 'PUT', `/ncc/adgroups/${encodeURIComponent(g.id)}`, '', { ...cur, nccAdgroupId: g.id, bidAmt: bidOf(g.id) }); // 그룹 전체를 읽은 값 그대로 + 입찰가만
+      else await naverReq(a, 'PUT', `/ncc/adgroups/${encodeURIComponent(g.id)}`, '?fields=userLock', { nccAdgroupId: g.id, userLock: kind === 'group_pause' });
+      const now = groupRow({ ...(await naverReq(a, 'GET', `/ncc/adgroups/${encodeURIComponent(g.id)}`)), nccAdgroupId: g.id }); // 실제 반영 값
+      if (kind === 'group_bid' ? now.bidAmt !== bidOf(g.id) : now.paused !== (kind === 'group_pause')) mismatch.push(now.name || g.id);
+      const n = next.find((x) => x.id === g.id)!; Object.assign(n, now);
+      before.push(was); done.push({ ...now });
+    } catch (e) { err = e; break; }
+  }
+  const after = { adgroups: done, ...(kind === 'group_bid' && !bids ? { bidAmt: i.bidAmt } : {}) };
+  await sql.begin(async (tx) => {
+    await tx`update mkt_ad_plans set external = ${tx.json({ ...p.external, adgroups: next } as never)}, updated_at = now() where id = ${id}`;
+    if (done.length) await tx`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up, actor_id, revert_of) values (${t}, ${id}, ${kind}, ${tx.json({ adgroups: before } as never)}, ${tx.json(after as never)}, ${moneyUp}, ${u.id}, ${revertOf})`;
+    if (err) await tx`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, status, error, actor_id) values (${t}, ${id}, ${kind}, ${tx.json({ adgroupIds: ids } as never)},
+      ${tx.json({ done: done.map((g) => g.id) } as never)}, 'failed', ${String(err?.message ?? err).slice(0, 4000)}, ${u.id})`;
+  });
+  if (done.length) await audit(sql, u.id, `mkt_ads.${kind}`, 'mkt_ad_plan', id, { before, after }).catch(() => {});
+  if (err) throw new HttpError(502, 'naver_partial', `${done.length}/${sel.length}개 그룹만 바꿨습니다 — ${String(err?.message ?? err).slice(0, 600)}`);
+  return { ok: true, adgroups: next, ...(mismatch.length ? { mismatch } : {}) };
 }
 
 // ---------------- tick: 월 상한 넘으면 워크인이 켠 광고 자동 중지 ----------------
