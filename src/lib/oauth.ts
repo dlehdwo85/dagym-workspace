@@ -240,6 +240,7 @@ export async function completeSocialSignup(i: z.infer<typeof completeInput>, ip:
   await recordStep('submitted', { tenant }, sql); await recordStep('verified', { tenant }, sql); // 소셜은 확인 메일 없이 바로 회사 생성
   if (approval) await SA.notifyNewSignup(tenant, sql).catch(async (e) => { await (await import('./log')).logError('signup_notify', e).catch(() => {}); }); // 359차: 알림톡은 승인할 때
   else await (await import('./alimtalk')).alimtalkSignup(userId); // 304차 #871: 가입(약관 동의) 완료 알림톡 — 동의한 본인만
+  if (i.agree.marketing) await (await import('./marketingConsent')).noticeResult(userId, true).catch(() => false); // 360차 정보통신망법 50조 ⑦ 처리 결과 알림
   return { userId, pendingApproval: approval };
 }
 

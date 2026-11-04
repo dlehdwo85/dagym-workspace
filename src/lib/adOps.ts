@@ -1093,3 +1093,42 @@ async function actKeywords(u: SessionUser, id: string, i: z.infer<typeof planAct
   await audit(sql, u.id, `mkt_ads.${i.action}`, 'mkt_ad_plan', id, { keywordIds: ids }).catch(() => {});
   return { ok: true, kwLocks: locks };
 }
+
+// ---------------- 360차 #971 네이버 자동 추적 URL 켜기(모든 캠페인) ----------------
+/**
+ * 대표 #971 '효과를 아주 정밀하게 추적': 네이버 캠페인 trackingMode = AUTO_TRACKING_MODE(자동 추적 URL) → 광고로 들어온 주소 끝에
+ * n_keyword_id·n_keyword·n_media… 가 붙어 문의·전화·체험 신청이 어느 키워드에서 왔는지 셀 수 있게 된다(adAttrib). 비용은 들지 않음.
+ * - 네이버 API: PUT /ncc/campaigns/{id} 의 fields 는 userLock·budget·period 뿐 → trackingMode 는 fields 없이 '캠페인 전체'를 보내야 바뀜
+ *   (네이버 공식 명세 ncc-heroes-ncc.json). 그래서 읽은 캠페인 그대로 + trackingMode 만 바꿔 다시 씀 → 다시 읽어 실제로 켜졌는지 확인
+ * - 워크인에 연결 안 된 캠페인까지 계정의 모든 캠페인. 이미 켜진 것·'사이트 통과(PASS_THROUGH_SITE_MODE)'로 쓰는 것은 건드리지 않음
+ * - dryRun=true 면 바꿀 목록만(아무것도 안 바꿈). 관리자만. 실계정 확인 전 '구조 시험'
+ */
+export const trackingAllInput = z.object({ accountId: z.string().uuid(), dryRun: z.boolean().default(true) });
+export async function naverTrackingAll(u: SessionUser, i: z.infer<typeof trackingAllInput>) {
+  await assertSpace(u, 'marketing'); adminOnly(u);
+  const t = tenantOf(u); const sql = db();
+  const a = await naverAcc(t, i.accountId);
+  const camps = listOf(await naverReq(a, 'GET', '/ncc/campaigns'));
+  const plans = await sql<{ id: string; cid: string }[]>`select id, external->>'campaignId' as cid from mkt_ad_plans where tenant = ${t} and account_id = ${i.accountId} and external->>'campaignId' is not null and status <> 'archived'`;
+  const planOfCid = new Map(plans.map((p) => [String(p.cid), p.id]));
+  const rows: { id: string; name: string; before: string; after: string | null; status: 'already' | 'other_mode' | 'would_change' | 'changed' | 'not_applied' | 'failed'; error?: string; planId: string | null }[] = [];
+  for (const c of camps) {
+    const id = String(c?.nccCampaignId ?? ''); if (!id) continue;
+    const name = String(c?.name ?? id); const before = String(c?.trackingMode || 'TRACKING_DISABLED'); const planId = planOfCid.get(id) ?? null;
+    if (before === 'AUTO_TRACKING_MODE') { rows.push({ id, name, before, after: before, status: 'already', planId }); continue; }
+    if (before === 'PASS_THROUGH_SITE_MODE') { rows.push({ id, name, before, after: before, status: 'other_mode', planId }); continue; }
+    if (i.dryRun) { rows.push({ id, name, before, after: null, status: 'would_change', planId }); continue; }
+    try {
+      const full = await naverReq(a, 'GET', `/ncc/campaigns/${encodeURIComponent(id)}`);
+      if (!full?.nccCampaignId) throw new Error('캠페인을 읽지 못했습니다');
+      await naverReq(a, 'PUT', `/ncc/campaigns/${encodeURIComponent(id)}`, '', { ...full, trackingMode: 'AUTO_TRACKING_MODE' });
+      const back = await naverReq(a, 'GET', `/ncc/campaigns/${encodeURIComponent(id)}`);
+      const after = String(back?.trackingMode ?? '');
+      rows.push({ id, name, before, after, status: after === 'AUTO_TRACKING_MODE' ? 'changed' : 'not_applied', planId });
+      if (planId) await sql`insert into mkt_ad_changes (tenant, plan_id, kind, before, after, money_up, actor_id) values (${t}, ${planId}, 'tracking', ${sql.json({ trackingMode: before })}, ${sql.json({ trackingMode: after })}, false, ${u.id})`;
+    } catch (e: any) { rows.push({ id, name, before, after: null, status: 'failed', error: String(e?.message ?? e).slice(0, 200), planId }); }
+  }
+  const count = (s: string) => rows.filter((r) => r.status === s).length;
+  if (!i.dryRun) await audit(sql, u.id, 'mkt_ads.tracking_all', 'mkt_ad_account', i.accountId, { changed: count('changed'), notApplied: count('not_applied'), failed: count('failed') }).catch(() => {});
+  return { dryRun: i.dryRun, total: rows.length, already: count('already'), otherMode: count('other_mode'), wouldChange: count('would_change'), changed: count('changed'), notApplied: count('not_applied'), failed: count('failed'), rows };
+}

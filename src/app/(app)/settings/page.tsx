@@ -425,6 +425,7 @@ function AccountSection() {
       <p className="mt-1 text-ink-2">내 업무·일정·댓글·메시지를 파일(JSON)로 내려받을 수 있습니다.</p>
       <a href="/api/account/export" className="mt-2 inline-block rounded-input border border-line px-3 py-1.5 font-medium hover:bg-slate-50" data-testid="account-export">내 데이터 내려받기</a>
       <LinkedAccounts />
+      <MarketingConsent />
       {user.role === 'owner' && <SupportConsent />}
       {tenant?.personal && user.role === 'owner' && (
         <form className="mt-4 flex flex-wrap items-end gap-2 rounded-input border border-line p-3" onSubmit={async (e) => { e.preventDefault(); try { await api('/api/account/upgrade', { body: { company: team } }); location.reload(); } catch (er: any) { toast.error(er.message); } }} data-testid="upgrade-team">
@@ -551,3 +552,28 @@ function AwaySection() {
     </section>
   );
 }
+
+/** 360차(대표 #976 정보통신망법 제50조): 광고성 정보(새 기능·혜택 소식) 수신 동의 — 켜고 끄면 처리 결과 메일이 바로 갑니다 · 2년마다 확인 안내 */
+function MarketingConsent() {
+  const { data, reload } = useApi<{ agreed: boolean; at: string | null; reconfirmedAt: string | null; label: string }>('/api/account/marketing-consent');
+  const [busy, setBusy] = useState(false);
+  const [pick, setPick] = useState<boolean | null>(null); // 누른 값을 바로 보여 줌(서버 답 전에도 체크가 바뀜) — 실패하면 되돌림
+  if (!data) return null;
+  async function toggle(agreed: boolean) {
+    setBusy(true); setPick(agreed);
+    try {
+      const r = await api<{ mailed?: boolean }>('/api/account/marketing-consent', { method: 'PUT', body: { agreed } });
+      toast.ok(`${agreed ? '수신 동의했습니다' : '수신 거부했습니다'} — ${r.mailed === false ? '처리 결과 메일은 보내지 못했습니다' : '처리 결과를 메일로 보냈습니다'}`); reload();
+    } catch (e: any) { setPick(null); toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div id="marketing-consent" className="mt-4 rounded-input border border-line p-3" data-testid="marketing-consent">
+      <label className="flex items-start gap-2">
+        <input type="checkbox" className="mt-0.5" checked={pick ?? data.agreed} disabled={busy} onChange={(e) => toggle(e.target.checked)} data-testid="marketing-consent-toggle" />
+        <span><span className="font-medium">{data.label}</span> <span className="text-ink-3">(선택)</span>
+          <span className="mt-0.5 block text-xs text-ink-3">{data.agreed && data.at ? `${fmtDateTime(data.at)} 동의 · 2년마다 동의 여부를 메일로 다시 알려 드립니다` : '받지 않음'} · 바꾸면 처리 결과를 메일로 알려 드립니다. 업무 알림·결제·보안 메일은 동의와 관계없이 갑니다.</span></span>
+      </label>
+    </div>
+  );
+}
+

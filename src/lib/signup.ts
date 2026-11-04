@@ -31,7 +31,7 @@ export const signupInput = z.object({
   website: z.string().max(200).optional(),
   openedAt: z.number().optional(),
   /** 유입 경로(첫 방문 UTM) — 마케팅 퍼널 집계용, 개인정보 아님 */
-  utm: z.object({ source: z.string().max(80), medium: z.string().max(80), campaign: z.string().max(120), page: z.string().regex(/^[a-z0-9-]{1,40}$/) }).partial().optional(), // 311차 #867 page = 처음 들어온 소개 페이지(home·landing slug)
+  utm: z.object({ source: z.string().max(80), medium: z.string().max(80), campaign: z.string().max(120), page: z.string().regex(/^[a-z0-9-]{1,40}$/), term: z.string().max(80), landing: z.string().max(500).regex(/^\//) }).partial().optional(), // 311차 #867 page = 처음 들어온 소개 페이지(home·landing slug)
   /** V29 가입 2단계: 인원 규모·업종(선택) */
   size: z.enum(['1', '2-10', '11-30', '31-100', '100+']).optional(),
   industry: z.string().trim().max(40).optional(),
@@ -79,18 +79,26 @@ export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
 
 const LIMIT = { ipPerHour: Number(process.env.SIGNUP_IP_PER_HOUR ?? 10), ipSignupsPerDay: Number(process.env.SIGNUP_IP_PER_DAY ?? 3), totalPerDay: Number(process.env.SIGNUP_TOTAL_PER_DAY ?? 300) };
 const GENERIC_OPEN = '확인 메일을 보냈습니다. 메일의 링크를 누르면 가입이 끝납니다(24시간 유효).';
-const GENERIC_APPROVAL = '확인 메일을 보냈습니다. 메일의 링크(24시간 유효)를 누르면 체험 신청이 접수되고, 24시간 안에 연락드립니다.';
+// 360차(대표 #974 '이미 신청했는데 조건 붙은 말처럼 보임'): 접수가 먼저, 메일 확인은 승인 뒤 바로 로그인하기 위한 것(승인 메일에서도 확인됨)
+const GENERIC_APPROVAL = '체험 신청을 받았습니다. 24시간 안에 연락드립니다. 보낸 메일의 [메일 주소 확인]을 눌러 두시면 승인 뒤 바로 로그인할 수 있어요.';
 const genericMsg = () => (signupApprovalOn() ? GENERIC_APPROVAL : GENERIC_OPEN);
 
 async function attempt(sql: Sql, ip: string | null, email: string, ok: boolean, reason: string | null) {
   await sql`insert into signup_attempts (ip, email, ok, reason) values (${ip}, ${email}, ${ok}, ${reason})`;
 }
 
-async function issueVerification(sql: Sql, userId: string, email: string) {
+/** 메일 확인 링크(한 번 쓰면 끝). 359차 승인제: 승인 환영 메일의 [시작하기]도 이 링크(7일) — 신청 때 확인을 안 눌렀어도 승인 메일로 확인·로그인 */
+export async function verificationLink(sql: Sql, userId: string, hours = 24) {
   const token = newToken();
-  await sql`insert into email_verifications (token_hash, user_id, expires_at) values (${sha256(token)}, ${userId}, now() + interval '24 hours')`;
-  const link = `${appUrl()}/verify/${token}`;
-  const r = await sendMail(email, '[워크인] 이메일 확인', `워크인 가입을 마치려면 아래 링크를 눌러 주세요 (24시간 유효).\n\n${link}\n\n본인이 가입하지 않았다면 이 메일을 무시하세요.`);
+  await sql`insert into email_verifications (token_hash, user_id, expires_at) values (${sha256(token)}, ${userId}, now() + make_interval(hours => ${hours}))`;
+  return { token, url: `${appUrl()}/verify/${token}` };
+}
+async function issueVerification(sql: Sql, userId: string, email: string) {
+  const approval = signupApprovalOn();
+  const { token, url: link } = await verificationLink(sql, userId, approval ? 24 * 7 : 24);
+  const r = approval
+    ? await sendMail(email, '[워크인] 체험 신청을 받았습니다 — 이메일 확인', `워크인 14일 무료 체험 신청을 받았습니다. 24시간 안에 연락드립니다.\n승인되면 메일로 알려 드리고, 그때부터 14일 체험이 시작됩니다.\n\n아래 링크로 메일 주소를 확인해 두시면 승인 뒤 바로 로그인할 수 있어요(7일 유효 — 승인 메일에서도 확인할 수 있습니다).\n\n${link}\n\n본인이 신청하지 않았다면 이 메일을 무시하세요.`)
+    : await sendMail(email, '[워크인] 이메일 확인', `워크인 가입을 마치려면 아래 링크를 눌러 주세요 (24시간 유효).\n\n${link}\n\n본인이 가입하지 않았다면 이 메일을 무시하세요.`);
   return r === 'dev' ? `/verify/${token}` : undefined;
 }
 
@@ -122,10 +130,13 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
   const phone = i.agree.alimtalk ? await alimtalkPhone(i.phone) : null; // 304차 #871
   const userId = await sql.begin((tx) => createOwnerSpace(tx, { email: i.email, name: i.name, mode: i.mode, company: i.company, size: i.size, industry: i.industry, industries: i.industries, utm: i.utm, agree: i.agree, phone, passwordHash: hash, pending: true, ip, ...(approval ? { approval: { contact, via: 'email' as const } } : {}) }));
   await attempt(sql, ip, i.email, true, null);
+  if (i.agree.marketing) await (await import('./marketingConsent')).noticeResult(userId, true).catch(() => false); // 360차(대표 #976) 정보통신망법 50조 ⑦: 광고성 정보 수신 동의 처리 결과 알림(바로)
   const { recordStep } = await import('./funnel');
   const [{ tenant }] = await sql<{ tenant: string }[]>`select tenant from users where id = ${userId}`;
   await recordStep('submitted', { tenant }, sql);
   const devLink = await issueVerification(sql, userId, i.email);
+  // 360차(대표 #974): [체험 신청]을 누른 순간 접수 — 슈퍼관리자 알림·메일도 바로(메일 확인을 기다리지 않음, 회사당 한 번)
+  if (approval) await (await import('./signupApproval')).notifyNewSignup(tenant).catch(async (e) => { await (await import('./log')).logError('signup_notify', e).catch(() => {}); });
   return { ok: true, message: genericMsg(), approval, ...(devLink ? { devLink } : {}) };
 }
 

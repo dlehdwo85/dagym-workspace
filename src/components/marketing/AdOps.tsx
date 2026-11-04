@@ -51,7 +51,7 @@ const kwLabel = (p: Plan) => {
 const negFailed = (p: Plan) => (Array.isArray(p.external?.negFailed) ? (p.external.negFailed as string[]) : []);
 const KIND: Record<string, string> = { create: '꺼진 상태로 생성', enable: '켜기', pause: '끄기', budget: '하루 예산 변경', auto_pause: '상한 도달 자동 중지', sync: '키워드 다시 읽기', ad_pause: '소재 끄기', ad_resume: '소재 켜기',
   region: '광고 지역 변경', keywords_add: '키워드 추가', keywords_remove: '키워드 빼기', kw_pause: '키워드 끄기', kw_resume: '키워드 켜기',
-  import: '기존 캠페인 가져오기', group_bid: '광고 그룹 입찰가', group_pause: '광고 그룹 끄기', group_resume: '광고 그룹 켜기' };
+  import: '기존 캠페인 가져오기', group_bid: '광고 그룹 입찰가', group_pause: '광고 그룹 끄기', group_resume: '광고 그룹 켜기', tracking: '자동 추적 URL 켬' };
 const REVERTIBLE = ['enable', 'pause', 'budget', 'auto_pause', 'ad_pause', 'ad_resume', 'region', 'keywords_add', 'kw_pause', 'kw_resume', 'group_bid', 'group_pause', 'group_resume'];
 /** 358차 네이버 화면에서 직접 만든 캠페인을 가져온 것(세팅안 없음) — 광고 그룹은 external.adgroups */
 type Group = { id: string; name: string; bidAmt: number; paused: boolean };
@@ -152,6 +152,16 @@ export function AdOps() {
       <section className="rounded-card border border-line bg-white p-3 shadow-card">
         <div className="flex items-center gap-2"><h2 className="text-sm font-semibold">네이버 파워링크 세팅안</h2>
           {data.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setImp(true)} disabled={!data.accounts.length} title="네이버 광고 화면에서 직접 만든 캠페인을 워크인에서 조정" data-testid="ad-import-open">기존 캠페인 가져오기</Button>}
+          {data.canEdit && <Button size="sm" variant="secondary" disabled={!data.accounts.length || busy === 'tracking'} title="모든 캠페인에 네이버 '자동 추적 URL'을 켭니다 — 광고로 들어온 주소에 키워드가 붙어 키워드별 전화·문의·체험 신청을 셉니다(광고비 변화 없음)" data-testid="ad-tracking-all"
+            onClick={() => run('tracking', async () => {
+              for (const acc of data.accounts) {
+                const d = await api<{ total: number; already: number; otherMode: number; wouldChange: number }>('/api/marketing/ad-ops/tracking', { body: { accountId: acc.id, dryRun: true } });
+                if (!d.wouldChange) { toast.ok(`${acc.label}: 캠페인 ${d.total}개 — 켤 것 없음(이미 켜짐 ${d.already}${d.otherMode ? ` · 다른 추적 방식 ${d.otherMode}` : ''})`); continue; }
+                if (!confirm(`${acc.label}: 캠페인 ${d.total}개 중 ${d.wouldChange}개에 자동 추적 URL을 켤까요?\n(이미 켜짐 ${d.already}${d.otherMode ? ` · 다른 추적 방식이라 그대로 ${d.otherMode}` : ''} · 광고비·입찰가는 바뀌지 않습니다)`)) continue;
+                const r = await api<{ changed: number; notApplied: number; failed: number }>('/api/marketing/ad-ops/tracking', { body: { accountId: acc.id, dryRun: false } });
+                if (r.failed || r.notApplied) toast.error(`${acc.label}: 켬 ${r.changed} · 반영 안 됨 ${r.notApplied} · 실패 ${r.failed} — 네이버 광고 시스템 › 도구 › 추적 기능에서 확인해 주세요`);
+              }
+            }, '자동 추적 URL 확인을 마쳤습니다')} >자동 추적 URL 켜기</Button>}
           {data.canEdit && <Button size="sm" onClick={() => setForm(true)} disabled={!data.accounts.length} title={data.accounts.length ? undefined : '네이버 검색광고 연결 후'} data-testid="ad-plan-new">새 세팅안</Button>}</div>
         {!data.accounts.length && <p className="mt-1 text-xs text-ink-3">먼저 설정 › 연결 계정에서 네이버 검색광고를 연결해 주세요.</p>}
         <ul className="mt-2 space-y-2">{data.plans.map((p) => {
@@ -626,9 +636,11 @@ function RegionModal({ p, onClose, onSave }: { p: Plan; onClose: () => void; onS
 }
 
 type LeadRow = { key: string; provider: string; itemId: string | null; keyword: string; campaign: string; clicks: number; cost: number; tel: number; calls: number; phone: number; inquiries: number; leads: number;
-  cpa: number | null; flag: 'waste' | 'high' | 'good' | null; planId: string | null; paused: boolean };
-type Leads = { days: number; canEdit: boolean; totals: { cost: number; tel: number; calls: number; phone: number; inquiries: number; leads: number; cpa: number | null }; unknown: { tel: number; calls: number; inquiries: number };
-  coverage: number | null; judge: boolean; target: { cpa: number | null; custom: boolean; avg: number | null }; tracking: { beacon: boolean; naverIds: boolean; calls: boolean }; rows: LeadRow[] };
+  cpa: number | null; flag: 'waste' | 'high' | 'good' | null; planId: string | null; paused: boolean; wkSignup?: number; wkApproved?: number; wkActive?: number };
+type WkCamp = { campaign: string; provider: string; cost: number; signups: number; approved: number; active: number; perSignup: number | null; perApproved: number | null; perActive: number | null };
+type Workin = { signups: number; approved: number; active: number; fromAds: number; untracked: number; organic: number; byCampaign: WkCamp[] };
+type Leads = { days: number; canEdit: boolean; totals: { cost: number; tel: number; calls: number; phone: number; inquiries: number; leads: number; wkSignup?: number; cpa: number | null }; unknown: { tel: number; calls: number; inquiries: number };
+  coverage: number | null; judge: boolean; target: { cpa: number | null; custom: boolean; avg: number | null }; tracking: { beacon: boolean; naverIds: boolean; calls: boolean }; rows: LeadRow[]; workin?: Workin | null };
 const FLAG: Record<string, [string, string]> = { waste: ['0건 — 끄기 제안', 'bg-red-50 text-red-800'], high: ['비용 높음', 'bg-amber-50 text-amber-800'], good: ['잘 됨', 'bg-emerald-50 text-emerald-800'] };
 const PROVIDER: Record<string, string> = { naver: '네이버', google: '구글', meta: '메타', other: '기타' };
 /**
@@ -644,20 +656,23 @@ function LeadsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok: 
       <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">전화·문의 기준 키워드 점검</h2>
         <span className="w-28"><select className={cx(inputCls, 'h-8 text-xs')} value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="기간" data-testid="ad-leads-days">{[7, 30, 90].map((d) => <option key={d} value={d}>최근 {d}일</option>)}</select></span></div>
       {error ? <ErrorBox error={error} retry={reload} /> : !data || !t ? <Skeleton rows={3} /> : <>
-        <p className="mt-1 text-xs text-ink-2" data-testid="ad-leads-summary">광고비 {won(t.cost)} · 전화 {n0(t.phone)}건(클릭 {n0(t.tel)} · 기록 {n0(t.calls)}) · 문의 {n0(t.inquiries)}건 → 전환당 비용 <b>{t.cpa === null ? '—' : won(t.cpa)}</b>
+        <p className="mt-1 text-xs text-ink-2" data-testid="ad-leads-summary">광고비 {won(t.cost)} · 전화 {n0(t.phone)}건(클릭 {n0(t.tel)} · 기록 {n0(t.calls)}) · 문의 {n0(t.inquiries)}건{t.wkSignup ? ` · 워크인 체험 신청 ${n0(t.wkSignup)}건` : ''} → 전환당 비용 <b>{t.cpa === null ? '—' : won(t.cpa)}</b>
           {' · '}목표 {data.target.cpa === null ? '없음' : won(data.target.cpa)}({data.target.custom ? '회사 설정' : '기간 평균'})
           {data.canEdit && <> · <button type="button" className="underline" data-testid="ad-leads-target" onClick={() => { const v = prompt('목표 전환당 비용(원) — 비우면 기간 평균', data.target.custom ? String(data.target.cpa) : ''); if (v === null) return;
             const n = Number(v.replace(/\D/g, '')); if (v.trim() && !(n >= 1000)) return toast.error('1,000원 이상 숫자로 적어 주세요');
             run('cpa', async () => { await api('/api/marketing/ad-ops/target-cpa', { method: 'PUT', body: { cpa: v.trim() ? n : null } }); reload(); }, '목표 전환당 비용을 저장했습니다'); }}>목표 바꾸기</button></>}</p>
         <p className="text-[11px] text-ink-3" data-testid="ad-leads-coverage">광고 키워드를 모르는 전화 클릭 {n0(data.unknown.tel)} · 전화 기록 {n0(data.unknown.calls)} · 문의 {n0(data.unknown.inquiries)}
           {data.coverage !== null ? ` — 키워드를 아는 비율 ${data.coverage}%` : ''}{!data.judge ? ' · 추적이 절반이 안 돼 0건 키워드 판단은 하지 않습니다' : ''}. 전화 = 전화 클릭과 전화 기록 중 큰 값(같은 전화를 두 번 세지 않게).</p>
+        {data.workin && <WorkinConv w={data.workin} />}
         {data.rows.length ? <div className="mt-1 overflow-x-auto"><table className="w-full min-w-[720px] text-right text-xs">
-          <thead><tr className="text-ink-2"><th className="py-1 text-left font-medium">키워드</th><th className="text-left font-medium">매체</th><th className="font-medium">광고비</th><th className="font-medium">클릭</th><th className="font-medium">전화</th><th className="font-medium">문의</th><th className="font-medium">전환당 비용</th><th className="pl-2 text-left font-medium">판단</th><th /></tr></thead>
+          <thead><tr className="text-ink-2"><th className="py-1 text-left font-medium">키워드</th><th className="text-left font-medium">매체</th><th className="font-medium">광고비</th><th className="font-medium">클릭</th><th className="font-medium">전화</th><th className="font-medium">문의</th>{data.workin && <th className="font-medium" title="워크인 체험 신청 · 승인 · 실사용">체험 신청</th>}<th className="font-medium">전환당 비용</th><th className="pl-2 text-left font-medium">판단</th><th /></tr></thead>
           <tbody className="divide-y divide-line tabular-nums">{data.rows.map((r) => (
             <tr key={r.key} data-testid="ad-leads-row" data-flag={r.flag ?? ''}>
               <td className="max-w-[14rem] py-1 text-left"><span className="font-medium">{r.keyword || '(키워드 없음)'}</span>{r.paused && <span className="ml-1 text-ink-3">(꺼짐)</span>}<span className="block truncate text-[11px] text-ink-3">{r.campaign || (r.itemId ? '' : '광고비 자료 없음')}</span></td>
               <td className="text-left">{PROVIDER[r.provider] ?? r.provider}</td><td>{won(r.cost)}</td><td>{n0(r.clicks)}</td>
-              <td title={`클릭 ${r.tel} · 기록 ${r.calls}`}>{n0(r.phone)}</td><td>{n0(r.inquiries)}</td><td>{r.cpa === null ? '—' : won(r.cpa)}</td>
+              <td title={`클릭 ${r.tel} · 기록 ${r.calls}`}>{n0(r.phone)}</td><td>{n0(r.inquiries)}</td>
+              {data.workin && <td title={`신청 ${r.wkSignup ?? 0} · 승인 ${r.wkApproved ?? 0} · 실사용 ${r.wkActive ?? 0}`} data-testid="ad-leads-wk">{n0(r.wkSignup ?? 0)}{r.wkSignup ? <span className="text-ink-3"> ({n0(r.wkApproved ?? 0)}·{n0(r.wkActive ?? 0)})</span> : null}</td>}
+              <td>{r.cpa === null ? '—' : won(r.cpa)}</td>
               <td className="whitespace-nowrap pl-2 text-left">{r.flag && <span className={cx('rounded-full px-1.5 py-0.5 text-[10px] font-medium', FLAG[r.flag][1])} data-testid="ad-leads-flag">{FLAG[r.flag][0]}</span>}</td>
               <td className="whitespace-nowrap pl-1">{data.canEdit && r.planId && r.itemId ? <button type="button" className="px-1 text-[11px] underline" data-testid="ad-leads-pause"
                 onClick={() => { const lp = r.planId!; run(lp, async () => { await api(`/api/marketing/ad-ops/plans/${lp}/action`, { body: { action: r.paused ? 'kw_resume' : 'kw_pause', keywordIds: [r.itemId] } }); reload(); }, r.paused ? `'${r.keyword}' 키워드를 켰습니다` : `'${r.keyword}' 키워드를 껐습니다`); }}>{r.paused ? '켜기' : '끄기'}</button>
@@ -674,6 +689,22 @@ function LeadsBox({ run }: { run: (key: string, fn: () => Promise<unknown>, ok: 
         </details>
       </>}
     </section>
+  );
+}
+
+/** 360차 #971: 워크인 체험 신청 → 승인 → 실사용을 광고 전환으로(캠페인별 건당 광고비). 신청 때 남은 utm·첫 광고 주소로 키워드를 붙인다 */
+function WorkinConv({ w }: { w: Workin }) {
+  return (
+    <div className="mt-2 rounded-lg border border-line bg-slate-50 p-2 text-xs" data-testid="ad-leads-workin">
+      <p className="text-ink-2">워크인 체험 신청 <b>{n0(w.signups)}</b> → 승인 <b>{n0(w.approved)}</b> → 실사용 <b>{n0(w.active)}</b>
+        <span className="text-ink-3"> · 광고 키워드 앎 {n0(w.fromAds)} · 광고인데 키워드 모름 {n0(w.untracked)} · 광고 아님 {n0(w.organic)}</span></p>
+      <p className="text-[11px] text-ink-3">실사용 = 승인 뒤 가입 7일 안 업무 5건 이상 또는 3일 이상 접속(마케팅 퍼널과 같은 기준). 표의 체험 신청 칸 괄호는 (승인·실사용).</p>
+      {w.byCampaign.length > 0 && <div className="mt-1 overflow-x-auto"><table className="w-full min-w-[560px] text-right" data-testid="ad-leads-workin-camp">
+        <thead><tr className="text-ink-2"><th className="py-1 text-left font-medium">캠페인</th><th className="font-medium">광고비</th><th className="font-medium">신청</th><th className="font-medium">승인</th><th className="font-medium">실사용</th><th className="font-medium">신청당</th><th className="font-medium">실사용당</th></tr></thead>
+        <tbody className="divide-y divide-line tabular-nums">{w.byCampaign.map((c) => (
+          <tr key={`${c.provider}:${c.campaign}`}><td className="py-1 text-left">{c.campaign || '(캠페인 모름)'} <span className="text-ink-3">{PROVIDER[c.provider] ?? c.provider}</span></td>
+            <td>{won(c.cost)}</td><td>{n0(c.signups)}</td><td>{n0(c.approved)}</td><td>{n0(c.active)}</td><td>{c.perSignup === null ? '—' : won(c.perSignup)}</td><td>{c.perActive === null ? '—' : won(c.perActive)}</td></tr>))}</tbody></table></div>}
+    </div>
   );
 }
 
