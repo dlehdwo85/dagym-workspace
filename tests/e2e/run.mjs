@@ -720,6 +720,8 @@ await step('목록: 상태 칩 [✓ 완료]로 완료 → 목록에서 바로 �
   await owner.getByText('완료로 옮겼습니다').waitFor(); // 334차(대표 11/02 16:4x #917): 완료는 목록에 남지 않고 '완료' 칩에서만
   await owner.waitForTimeout(500);
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id}`)).task.status, 'done');
+  // 348차: 검색 중엔 완료 업무도 결과에 남음 → 검색어를 지우면 목록에서 빠짐(334차)
+  await owner.getByLabel('업무 검색').fill('');
   await owner.locator(`[data-row="${id}"]`).waitFor({ state: 'detached' });
   assert.equal(await owner.getByTestId('done-fold').count(), 0, '334차: 접힌 완료됨 칸도 없음(#508 칸은 끝)');
   assert.equal(await owner.getByRole('button', { name: '되돌리기', exact: true }).count(), 0, '안내에는 되돌리기 없음');
@@ -893,6 +895,7 @@ await step('모바일 밀기: 기본 꺼짐·짧은/세로 밀기 무시, 켜면
   await drag([w * 0.2, w * 0.4, w * 0.5]);
   await staff.getByText('완료로 옮겼습니다').waitFor(); // 334차: 완료는 목록에 남지 않고 '완료' 칩에서
   assert.equal(await status(), 'done');
+  await staff.getByLabel('업무 검색').fill(''); // 348차: 검색 중엔 완료 업무도 결과에 남음 → 검색어를 지우면
   await row.waitFor({ state: 'detached' }); // 목록에서 바로 빠짐
   await staff.getByRole('button', { name: '완료 보기' }).click();
   const back = staff.locator(`[data-row="${id}"]`).first(); await back.waitFor();

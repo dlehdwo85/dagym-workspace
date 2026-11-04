@@ -18,7 +18,7 @@ export async function aiBudget({ owner, sql, BASE, SHOTS }) {
     const meter = owner.getByTestId('meter-ai');
     await meter.getByText('이번 달 AI 사용량').waitFor();
     assert.match(await meter.innerText(), /84%[\s\S]*사용 84% \/ 남은 양 16%/); // 351차 #939 ③: 원 없이 %
-    assert.doesNotMatch(await owner.getByTestId('ai-usage').innerText(), /원|\d+회/, '351차: 관리자 사용량 화면에 원·회 없음');
+    assert.doesNotMatch(await owner.getByTestId('ai-usage').innerText(), /\d[\d,]*\s*원|\d+\s*회/, '351차: 관리자 사용량 화면에 원·회 없음'); // 357차: 금액·횟수만 — 사람 이름 '박직원'의 '원'은 빼고
     assert.match(await owner.getByTestId('meter-ai-note').innerText(), /^\d{1,2}월 1일에 다시 채워짐 · 운영사가 정한 값 · 영상 제작은 마케팅 크레딧으로 따로$/);
     assert.match(await owner.getByTestId('ai-usage-pct').innerText(), /회사 월 AI 사용량 84% · 남은 양 16%/);
     await meter.screenshot({ path: `${SHOTS}/250-ai-budget-meter.png` });

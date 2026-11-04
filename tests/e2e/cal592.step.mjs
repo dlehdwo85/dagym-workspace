@@ -4,7 +4,14 @@
 import assert from 'node:assert/strict';
 
 export async function cal592({ browser, desk, ctx, BASE, SHOTS, addDays, today }) {
-  const d = addDays(today, 21);
+  // 357차(CI 2086~): 전체 E2E 에서는 앞 단계가 3주 뒤 같은 날에 종일 항목(마감만 있는 업무 등)을 만들어 '+n개'가 달라짐 → 그날 아무것도 없는 날을 고름
+  let d = addDays(today, 21);
+  for (let k = 21; k < 90; k++) {
+    const day = addDays(today, k);
+    const [tk, evs] = await Promise.all([ctx.owner.ok('GET', `/api/tasks?view=all&includeDone=1&from=${day}&to=${day}&limit=500`),
+      ctx.owner.ok('GET', `/api/events?from=${encodeURIComponent(`${day}T00:00:00+09:00`)}&to=${encodeURIComponent(`${addDays(day, 1)}T00:00:00+09:00`)}`)]);
+    if (!tk.tasks.length && !evs.events.length) { d = day; break; }
+  }
   const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
   const ev = (body) => ctx.owner.ok('POST', '/api/events', { calendarId: cal, ...body });
   const made = [];

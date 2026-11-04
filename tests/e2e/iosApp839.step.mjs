@@ -23,11 +23,11 @@ export async function iosApp839({ browser, BASE, devices }) {
   await q.getByText('회사 관리자가 초대한 계정으로 로그인').waitFor();
   assert.equal(await q.getByText(/무료|체험/).count(), 0, '아이패드 앱도 무료 체험 문구 없음');
   await ipad.close();
-  // 안드로이드 앱은 그대로(가입 주소 막지 않음)
+  // 352차 #942(대표 11/04): 안드로이드 앱도 앱 안 가입(/signup)은 로그인으로 — 가입·결제는 웹에서
   const and = await browser.newContext({ ...devices['Pixel 7'], userAgent: `${devices['Pixel 7'].userAgent} WorkInApp`, locale: 'ko-KR' });
   const a = await and.newPage();
   await a.goto(`${BASE}/signup`);
-  assert.equal(new URL(a.url()).pathname, '/signup', '안드로이드 앱은 가입 화면 그대로');
+  assert.equal(new URL(a.url()).pathname, '/login', '안드로이드 앱도 가입 주소는 로그인으로(352차 #942)');
   // 298차 #861: 안드로이드 앱 가입 화면에도 카드·요금제 말 없음 · 요금 안내가 있는 소개 화면은 로그인으로
   await a.locator('h1').first().waitFor(); await a.waitForLoadState('networkidle').catch(() => {});
   assert.equal(await a.getByText(/카드|요금제|결제/).count(), 0, '안드로이드 앱 가입 화면: 카드·요금제·결제 말 없음');

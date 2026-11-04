@@ -13,7 +13,8 @@ export async function perf948({ owner, ctx, sql, BASE, SHOTS }) {
   const h = (b, n) => { const a = Array(16).fill(0); a[b] = n; return a; };
   await sql`insert into perf_screens (day, client, screen, metric, n, sum_ms, max_ms, h) values
     ((now() at time zone 'Asia/Seoul')::date, 'web', '/calendar', 'first', 12, 9600, 1200, ${h(5, 12)}::int[]),
-    ((now() at time zone 'Asia/Seoul')::date, 'app', '/s/sales/hub', 'list', 6, 27000, 5000, ${h(9, 6)}::int[])`;
+    ((now() at time zone 'Asia/Seoul')::date, 'app', '/s/sales/hub', 'list', 6, 27000, 5000, ${h(9, 6)}::int[])
+    on conflict (day, client, screen, metric) do update set n = excluded.n, sum_ms = excluded.sum_ms, max_ms = excluded.max_ms, h = excluded.h`; // 357차: 전체 E2E 에서는 앞 단계 화면이 보낸 비콘이 오늘 /calendar 줄을 이미 만듦
   // ⓐ 비콘: 업무 화면을 열고 한 번 누르면(LCP 확정) 3초 안에 보냄 — sendBeacon 본문(Blob)은 Playwright 가 못 읽는 때가 있어 저장된 줄로 확인
   const sent = [];
   owner.on('request', (r) => { if (r.url().includes('/api/public/perf') && r.method() === 'POST') sent.push(r.postDataBuffer()?.toString() ?? ''); });

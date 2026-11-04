@@ -25,18 +25,26 @@ export async function listKeep({ owner, ctx, BASE, SHOTS }) {
     assert.equal(await chip().getAttribute('aria-pressed'), 'true', `${how}: '내 업무' 그대로`);
     assert.equal(await search().inputValue(), Q, `${how}: 검색어 그대로`);
     await owner.getByText('E2E 목록유지 24').first().waitFor();
-    assert.equal(await owner.getByText('E2E 목록유지 남의 업무').count(), 0, `${how}: 남의 업무는 안 보임(내 업무)`);
+    assert.ok((await owner.getByText('E2E 목록유지 남의 업무').count()) >= 1, `${how}: 348차 검색 중엔 보기와 상관없이 전체에서(남의 업무도)`);
   };
 
   // PC: 패널이 목록 옆에 열림
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/tasks?mode=list`);
-  await chip().click();
-  await owner.waitForFunction(() => new URLSearchParams(location.search).get('view') === 'my'); // CI 1924: 칩 누름과 검색어 입력의 주소 반영이 겹치면 한쪽이 덮여 30초 기다리다 실패 — 사람처럼 칩 반영을 보고 나서 입력
+  // 357차: 전체 실행(업무가 수백 건)에서는 목록이 뜨기 전(화면 준비 전)에 누른 칩이 먹지 않아 30초 기다리다 실패 — 목록이 뜬 뒤 누르고, 안 먹었으면 다시 누름(눌린 상태면 안 누름)
+  await owner.locator('[data-task-id]').first().waitFor({ timeout: 60_000 });
+  for (let k = 0; ; k++) {
+    if ((await chip().getAttribute('aria-pressed')) !== 'true') await chip().click();
+    const on = await owner.waitForFunction(() => new URLSearchParams(location.search).get('view') === 'my', null, { timeout: 8000 }).then(() => true, () => false);
+    if (on) break;
+    if (k >= 3) throw new Error("'내 업무' 칩을 눌러도 주소에 view=my 가 붙지 않음");
+  }
+  // CI 1924: 칩 누름과 검색어 입력의 주소 반영이 겹치면 한쪽이 덮여 30초 기다리다 실패 — 사람처럼 칩 반영을 보고 나서 입력
   await search().fill(Q);
   await owner.waitForFunction((q) => { const p = new URLSearchParams(location.search); return p.get('view') === 'my' && p.get('q') === q; }, Q);
   await owner.getByText('E2E 목록유지 24').first().waitFor();
-  assert.equal(await owner.getByText('E2E 목록유지 남의 업무').count(), 0, '내 업무만');
+  // 348차(대표 11/03 '아름베스트빌 검색해도 안 나옴'): 검색 중엔 '내 업무' 칩이 눌려 있어도 전체에서 찾음(주소의 view·q 는 그대로 남아 닫으면 같은 화면)
+  await owner.getByText('E2E 목록유지 남의 업무').first().waitFor();
   await last().scrollIntoViewIfNeeded();
   const y0 = await scrollY();
   assert.ok(y0 > 100, `목록을 내림(${y0})`);

@@ -182,7 +182,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     return p.toString();
   }, [filters, fixed, sq, showDone, mode]);
   const { data, error, loading, reload, setData } = useApi<{ tasks: Task[] }>(`/api/tasks?${qs}`);
-  const tasks = useMemo(() => sortTasks(data?.tasks ?? [], sortBy), [data, sortBy]);
+  // 357차: 목록이 완료를 받지 않는 때(includeDone=0)는 아직 남은 앞 응답(검색 결과의 완료 업무)도 빼서 보임 — 검색어를 지운 직후 '완료됨' 칸이 잠깐 생기지 않게. 새 응답에는 원래 완료가 없음
+  const noDone = useMemo(() => new URLSearchParams(qs).get('includeDone') === '0', [qs]);
+  const tasks = useMemo(() => sortTasks((data?.tasks ?? []).filter((t) => !noDone || t.status !== 'done'), sortBy), [data, sortBy, noDone]);
   // V14 42번: 보기 칩 건수 — 목록과 같은 필터(보기·담당자 제외), 목록이 바뀔 때마다 다시
   const countQs = useMemo(() => { const p = new URLSearchParams(qs); ['view', 'assigneeId', 'limit', 'doneMonth', 'carried'].forEach((k) => p.delete(k)); return p.toString(); }, [qs]);
   const counts = useApi<{ counts: Record<string, number> }>(fixed?.view ? null : `/api/tasks/counts?${countQs}`);
