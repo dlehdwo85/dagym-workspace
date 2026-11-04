@@ -17,6 +17,7 @@ import { PlatformSettlement } from '@/components/PlatformSettlement';
 import { PlatformSalesSources } from '@/components/sales/PlatformSalesSources';
 import { PlatformCollectorSettings } from '@/components/sales/PlatformCollectorSettings';
 import { PlatformMktPlans } from '@/components/platform/PlatformMktPlans';
+import { PlatformSpeed } from '@/components/platform/PlatformSpeed';
 import { PlatformSalesMigrate } from '@/components/sales/PlatformSalesMigrate';
 import { PlatformOpsImport } from '@/components/marketing/PlatformOpsImport';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -40,6 +41,7 @@ const TABS = [
   { key: 'support', label: '고객 지원', desc: '고객 문의에 답하고, 요금제 변경 요청과 홈페이지 문의 연결을 관리합니다.' },
   { key: 'ai', label: 'AI·제작 도구', desc: 'AI 비용 예상, 영상·사진·목소리 만들기 연결, 글 품질 규칙을 정합니다.' },
   { key: 'sales', label: '영업 데이터', desc: '공고 수집기 설정과 공공데이터 수집, 예전 영업·마케팅 자료 옮기기를 합니다.' },
+  { key: 'speed', label: '속도', desc: '핵심 API 응답 시간(30분마다 검침)과 실제 화면 표시 시간(웹·앱)을 보고, 기준을 넘은 곳을 찾습니다.' }, // #948
 ] as const;
 type TabKey = (typeof TABS)[number]['key'];
 const TAB_KEYS = TABS.map((t) => t.key) as readonly string[];
@@ -189,6 +191,7 @@ function PlatformInner() {
       {tab === 'support' && <>{supportEl}{requestsEl}<InquiryLink /></>}
       {tab === 'ai' && <><AiForecast /><PlatformHiggsfield /><PlatformTts /><PlatformQualityRules /></>}
       {tab === 'sales' && <><PlatformCollectorSettings /><PlatformSalesSources /><PlatformSalesMigrate /><PlatformOpsImport /></>}
+      {tab === 'speed' && <PlatformSpeed />}
     </div>
   );
 }

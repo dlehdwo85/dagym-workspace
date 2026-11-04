@@ -1,5 +1,6 @@
 # 351차 #947(대표 11/04 '아이폰 앱 정상 출시를 서둘러 달라'): App Store Connect API 로 iOS 1.2.0 재제출 준비·제출
-# — release.yml 과 같은 키(ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8). mode=plan 은 읽기만(무엇을 바꿀지 보고), mode=apply 는 버전 문자열·빌드·설명·키워드·심사 메모·6.9형 스크린샷을 바꾸고,
+# — release.yml 과 같은 키(ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8). mode=plan 은 읽기만(무엇을 바꿀지 보고), mode=apply 는 버전 문자열·빌드·설명·키워드·심사 메모·스크린샷(6.9형·6.1형·아이패드 13형)을 바꾸고,
+# cancel_unresolved=true 이면 반려·초안 제출 묶음을 먼저 거둠(묶음 만들기 409 STATE_ERROR 일 때 — 353차),
 # submit=true 일 때만 심사 제출(대표 승인 뒤). 비밀번호·키는 출력하지 않음. 스크린샷은 docs/handoff/store/ios-v4/iphone-01..06.png, 심사 메모 새 글은 docs/handoff/store/ios-v4/review-notes.md
 name: appstore-submit
 on:
@@ -11,6 +12,7 @@ on:
       build: { description: '빌드 번호(TestFlight 처리 끝난 것)', required: true, default: '13' }
       display_type: { description: '스크린샷 슬롯(6.9형 = APP_IPHONE_67)', required: true, default: 'APP_IPHONE_67' }
       whats_new: { description: '새 기능 글(첫 버전이면 비움)', required: false, default: '' }
+      cancel_unresolved: { description: '반려·초안 제출 묶음을 거두고(canceled) 진행 — 스크린샷 묶음이 409 로 막힐 때(대표 재제출 승인 범위)', type: boolean, default: false }
 jobs:
   asc:
     runs-on: ubuntu-latest
@@ -35,4 +37,5 @@ jobs:
           BUILD: ${{ inputs.build }}
           DISPLAY_TYPE: ${{ inputs.display_type }}
           WHATS_NEW: ${{ inputs.whats_new }}
+          CANCEL_UNRESOLVED: ${{ inputs.cancel_unresolved && '1' || '0' }}
         run: node scripts/asc-submit.mjs

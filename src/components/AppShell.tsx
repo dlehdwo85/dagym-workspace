@@ -13,6 +13,7 @@ import { AlarmBar, type AlarmItem } from './AlarmBar';
 import { BioLock } from './BioLock';
 import { MessengerDock } from './MessengerDock';
 import { VersionWatch } from './VersionWatch';
+import { PerfBeacon } from './PerfBeacon';
 import { CaptureGuard } from './CaptureGuard';
 import { Onboarding } from './Onboarding';
 import { TourHost, restartTours } from './Tour';
@@ -513,6 +514,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         <DailyWelcome userId={session.user.id} name={session.user.name} />{/* #483 하루 첫 진입 인사 0.8초 */}
         <PermissionIntro userId={session.user.id} />{/* #528 앱 처음 시작 휴대폰 알림 맞추기(권한 안내) */}
         <TaskPanelHost />{/* 300차 #850 업무는 어디서 눌러도 오른쪽 패널 */}
+        <PerfBeacon />{/* #948 실제 사용자 화면 속도(첫 표시·목록 표시) */}
         <CaptureGuard on={!!session.tenant?.captureBlock} automation={!!session.tenant?.captureAutomation} company={session.tenant?.name ?? '워크인'} userName={session.user.name} />
         {/* V28-3 지원 모드: 빨간 띠(읽기 전용·남은 시간) + 끝내기 */}
         {session.support && (

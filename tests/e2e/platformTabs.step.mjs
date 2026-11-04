@@ -9,7 +9,7 @@ export async function platformTabs({ owner, ctx, sql, BASE, SHOTS }) {
   const today = owner.getByTestId('platform-today'); await today.waitFor();
   assert.equal(await today.getByRole('button').count(), 5, "'오늘 볼 것' 5개");
   await today.getByTestId('today-company').getByText(/^\d[\d,]*곳$/).waitFor(); // 숫자 칸만 — 아래 '최근 7일 · 오늘까지 연락할 곳 n곳' 줄이 같이 있으면 /곳$/ 은 둘에 걸림(CI 2054·2072)
-  assert.equal(await owner.getByTestId('platform-tabs').getByRole('tab').count(), 5);
+  assert.equal(await owner.getByTestId('platform-tabs').getByRole('tab').count(), 6); // #948 속도 탭
   assert.equal(await owner.getByTestId('platform-tab-company').getAttribute('aria-selected'), 'true', '처음은 회사·가입');
   await owner.getByTestId('platform-company-list').waitFor();
   await owner.screenshot({ path: `${SHOTS}/274-platform-tabs.png` });

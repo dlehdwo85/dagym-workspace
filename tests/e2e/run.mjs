@@ -49,6 +49,7 @@ import { salesTodo } from './salesTodo.step.mjs';
 import { salesLeads2 } from './salesLeads2.step.mjs';
 import { landing } from './landing.step.mjs';
 import { bidAlerts949 } from './bidAlerts949.step.mjs';
+import { perf948 } from './perf948.step.mjs';
 import { mktGoals } from './mktGoals.step.mjs';
 import { mktQuality } from './mktQuality.step.mjs';
 import { mktPreflight } from './mktPreflight.step.mjs';
@@ -2600,6 +2601,7 @@ await step('영업 S2 1차(대표 14:15): 허브 일괄 [영업 진행으로] �
 await step('영업 S2 2차(감사 1-13~1-16): 새 리드 13칸·비슷한 거래처 경고 → 칩·정렬·보기·CSV → 상세 업무 탭·타임라인·상담 다음 연락일 → 제안·계약·ROI → 삭제(사유)', () => salesLeads2({ owner, ctx, sql, BASE, SHOTS }));
 await step('소개 사이트(대표 16:45): / 랜딩(H1·무료로 시작·앱·세 공간·AI·3단계·요금 14일 무료 체험·문의·계정 삭제·JSON-LD·OG·UTM·클릭 이벤트·390) → 로그인하면 홈', () => landing({ browser, owner, BASE, SHOTS }));
 await step('#949 입찰 공고 아침 메일 무료 구독 소개 페이지: 폼(이메일·지역·분야·동의) → [무료로 받기] → 신청됨 · 방문 1번 · 가격 숫자 없음', () => bidAlerts949({ browser, BASE, SHOTS, sql }));
+await step('#948 속도 정기 검침: 화면 비콘(첫 표시·목록 표시) → 플랫폼 운영 › 속도(느린 곳 상위 5 · 7곳 7일 막대 · 실제 화면 표 · 휴대폰 폭)', () => perf948({ owner, ctx, sql, BASE, SHOTS }));
 await step('대표 18:00 월 운영 목표·근거: 초안 → 고치기 → 승인 → 홈 막대 → 새 콘텐츠 근거 칸 → 승인함 왜 이 글인가', () => mktGoals({ owner, ctx, BASE, SHOTS }));
 await step('대표 19:00 제작의뢰실: 의뢰 → 프롬프트 → 수정 → 제작 요청 카드로 → 카드에 제작의뢰실 표시', () => mktStudio({ owner, ctx, BASE, SHOTS }));
 await step('대표 20:00 운영실: AI 마케터 카드 반려·승인 → 제작의뢰 · 광고 예산 고치기 → 승인·집행 · 월 매출 목표 막대(마케팅·영업 홈) · 월간 보고 CAC·ROI', () => mktOps({ owner, ctx, sql, BASE, SHOTS }));

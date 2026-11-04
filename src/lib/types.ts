@@ -78,5 +78,6 @@ export const NOTIFICATION_TYPES = {
   sales_research_weekly: '영업 후속조사 주간 묶음(월요일 아침 — 이번 주 조사할 준공·입주 시설, 담당)',
   sales_kw_suggest: '관심 검색어 추천(매달 1일 — 지난 30일 놓친 공고 후보, 관리자)',
   meeting_lobby: '화상회의 대기실(손님·직원이 들어오길 기다림 — 주최자·공동 주최자)',
+  perf_alert: '속도 기준 초과(핵심 API 1.5초·화면 3초를 연속으로 넘음 — 플랫폼 운영자만) · 주간 속도 요약',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;
