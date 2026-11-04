@@ -45,7 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       salesHubTabs: (spaces as string[]).includes('sales') ? await (await import('@/lib/sales/hubTabs')).hubTabsOn(tenantOf(user), await (await import('@/lib/sales/options')).salesBidsOn(tenantOf(user))).catch(() => null) : null,
       salesTerms,
       sidebar3: process.env.FEATURE_SIDEBAR3 !== '0' /* ⑦ 사이드바 3구역 — 되돌리려면 FEATURE_SIDEBAR3=0 */,
-      meetings: process.env.FEATURE_MEETINGS === '1', // 219차 워크인 화상회의(기본 꺼짐)
+      meetings: (await import('@/lib/meetings')).meetingsOn(tenantOf(user)), // 219차 워크인 화상회의(기본 꺼짐) · #946 MEETINGS_TENANTS 면 그 회사만
       appHost: (() => { const h = hostSplit(); return h.on ? h.app : null; })() /* 198차 결정 15-29 주소 분리(켰을 때만) */ },
     menus,
     spaces, // V41 공간

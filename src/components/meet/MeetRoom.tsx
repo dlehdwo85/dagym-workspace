@@ -1,13 +1,14 @@
 'use client';
 // 219차 워크인 화상회의 화면(결정 15-37, 설계 docs/research/VIDEO_MEETINGS_DESIGN_2026-10-28.md 6-2·6-3) — 참가 전 미리보기 → (손님 이름) → 대기실 → 회의 → 나가기.
-// 영상·음성은 엔진(중계 서버)으로 직접 가는데, 지금은 엔진 화면 연결 전 단계: 가짜 엔진이면 '시험 연결'로 내 화면·참가자·주최자 도구만(실제 영상은 0단계 시험대에서).
+// 영상·음성은 엔진(중계 서버)으로 직접 간다. #946: 엔진이 라이브킷이면 LiveStage(실제 영상·음성·화면 공유), 가짜 엔진이면 '시험 연결'로 내 화면·참가자·주최자 도구만.
 // 줌·구글·마이크로소프트의 로고·색·아이콘·문구는 쓰지 않는다 — 워크인 디자인 문서(docs/DESIGN_SYSTEM.md) 기준.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Lock, LogOut, Mic, MicOff, ShieldCheck, Unlock, UserRound, Users, Video, VideoOff, X } from 'lucide-react';
 import { Button, Field, Toaster, cx, inputCls, toast } from '@/components/ui';
+import { LiveStage } from './LiveStage';
 
 type Pub = { title: string; company: string; status: 'open' | 'live' | 'ended'; locked: boolean; staffFirst: boolean; started: boolean; staff: boolean; meetingId: string | null; engine: string | null };
-type Grant = { token: string; url: string; engine: string; expiresIn: number };
+type Grant = { token: string; url: string; engine: string; expiresIn: number; canShare?: boolean };
 type Person = { id: string; name: string; guest: boolean; role: string; state: string };
 type Phase = 'loading' | 'error' | 'ended' | 'pre' | 'waiting' | 'waitingStaff' | 'in' | 'left' | 'removed' | 'denied';
 type Guest = { pid: string; secret: string; name: string };
@@ -30,6 +31,7 @@ export function MeetRoom({ code }: { code: string }) {
   const [guest, setGuest] = useState<Guest | null>(null); const [name, setName] = useState('');
   const [grant, setGrant] = useState<Grant | null>(null); const [role, setRole] = useState<string>('member'); const [selfId, setSelfId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attempt, setAttempt] = useState(0); // #946 [다시 연결]마다 라이브킷 칸을 새로(같은 입장권이어도 다시 접속)
   // 미리보기(브라우저 기능 — 엔진과 무관)
   const [stream, setStream] = useState<MediaStream | null>(null); const [mediaErr, setMediaErr] = useState('');
   const [mic, setMic] = useState(true); const [cam, setCam] = useState(true);
@@ -52,6 +54,8 @@ export function MeetRoom({ code }: { code: string }) {
   useEffect(() => { if (phase === 'pre' && !stream && !mediaErr) void openMedia(); }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (vref.current) vref.current.srcObject = stream; }, [stream, phase]);
   useEffect(() => () => stream?.getTracks().forEach((t) => t.stop()), [stream]);
+  // #946 라이브킷이면 미리보기 카메라·마이크를 놓아 준다(같은 장치를 회의 칸이 다시 엶 — 휴대폰은 둘을 동시에 못 쓰는 일이 있음)
+  useEffect(() => { if (phase === 'in' && grant?.engine === 'livekit' && stream) { stream.getTracks().forEach((t) => t.stop()); setStream(null); } }, [phase, grant, stream]);
   const toggleMic = () => { const v = !mic; setMic(v); stream?.getAudioTracks().forEach((t) => (t.enabled = v)); };
   const toggleCam = () => { const v = !cam; setCam(v); stream?.getVideoTracks().forEach((t) => (t.enabled = v)); };
 
@@ -59,11 +63,11 @@ export function MeetRoom({ code }: { code: string }) {
   const staffJoin = useCallback(async () => {
     const r = await call<any>(`/api/meetings/${pub!.meetingId}/join`, { body: {} });
     setRole(r.role ?? 'member'); setSelfId(r.participantId ?? null);
-    if (r.state === 'admitted') { setGrant({ token: r.token, url: r.url, engine: r.engine, expiresIn: r.expiresIn }); setPhase('in'); } else setPhase('waiting');
+    if (r.state === 'admitted') { setGrant({ token: r.token, url: r.url, engine: r.engine, expiresIn: r.expiresIn, canShare: r.canShare }); setPhase('in'); } else setPhase('waiting');
   }, [pub]);
   const guestPoll = useCallback(async (g: Guest) => {
     const r = await call<any>(`/api/meet/${code}/guest/${g.pid}`, { headers: { 'x-guest-secret': g.secret } });
-    if (r.state === 'admitted' && r.token) { setGrant({ token: r.token, url: r.url, engine: r.engine, expiresIn: r.expiresIn }); setRole('guest'); setPhase('in'); }
+    if (r.state === 'admitted' && r.token) { setGrant({ token: r.token, url: r.url, engine: r.engine, expiresIn: r.expiresIn, canShare: r.canShare }); setRole('guest'); setPhase('in'); }
     else if (r.state === 'admitted') setPhase('waitingStaff');
     else if (r.state === 'waiting') setPhase('waiting');
     else if (r.state === 'ended' || r.state === 'removed' || r.state === 'denied') { setPhase(r.state); if (r.state !== 'ended') store.set(code, null); }
@@ -149,6 +153,15 @@ export function MeetRoom({ code }: { code: string }) {
   );
   // 회의 중
   const host = role === 'host' || role === 'cohost';
+  if (grant?.engine === 'livekit') return (
+    <><Toaster />
+      <LiveStage key={attempt} url={grant.url} token={grant.token} canShare={!!grant.canShare} start={{ mic, cam, camId: camId || undefined, micId: micId || undefined }} selfLabel={guest ? `${guest.name}(손님)` : '나'} busy={busy}
+        header={<><span className="min-w-0 truncate font-semibold">{pub.title}</span><span className="tabular-nums text-slate-300" data-testid="meet-elapsed">{mmss(elapsed)}</span></>}
+        side={host && pub.meetingId ? <HostPanel meetingId={pub.meetingId} onEnded={() => { setPhase('ended'); setGrant(null); }} /> : undefined}
+        onLeave={() => void leave()} onRetry={() => { setAttempt((x) => x + 1); void join(); }}
+        onGone={(why) => { setGrant(null); setPhase(why); if (why === 'removed' && guest) store.set(code, null); }} />
+    </>
+  );
   return (
     <main className="flex min-h-dvh flex-col bg-slate-900 text-white" data-testid="meet-room">
       <Toaster />

@@ -12,9 +12,18 @@ import { notify } from '../notifications';
 import { tenantOf, type SessionUser } from '../types';
 import { EngineAuthError, meetingEngine, type EngineRole, type MeetingEngine } from './engine';
 
-export const meetingsOn = () => process.env.FEATURE_MEETINGS === '1';
+/**
+ * 기능 스위치: FEATURE_MEETINGS=1 일 때만. #946(대표 11/04 0단계 '우리 회사만'): MEETINGS_TENANTS(쉼표로 회사 id, 예 'default')를 적으면 그 회사만 —
+ * 다른 회사 직원에게는 메뉴·일정 칸·API 가 모두 없음(404), 그 회사 회의 주소도 404. 비우면 스위치를 켠 모든 회사.
+ */
+export const meetingTenants = () => (process.env.MEETINGS_TENANTS ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+export const meetingsOn = (tenant?: string | null) => {
+  if (process.env.FEATURE_MEETINGS !== '1') return false;
+  const list = meetingTenants();
+  return tenant === undefined || !list.length || (!!tenant && list.includes(tenant));
+};
 const NF = '회의를 찾을 수 없습니다';
-function assertOn() { if (!meetingsOn()) throw notFound(NF); }
+function assertOn(tenant?: string | null) { if (!meetingsOn(tenant)) throw notFound(NF); }
 /** 회의당 들어와 있는 사람(직원+손님) · 대기실 · 손님 요청(1분) 한도 — 요금제별 한도는 요금 시안과 함께 */
 export const MEETING_MAX = 25, LOBBY_MAX = 50, GUEST_PER_MIN = 20;
 const TOKEN_TTL = 600; // 입장권 10분(입장할 때만 씀 — 끊기면 다시 받음)
@@ -37,7 +46,7 @@ const isHost = (role: string) => role === 'host' || role === 'cohost';
 
 /** 직원이 회의에 접근 — 같은 회사 + 회의 종류별(일정을 볼 수 있음·방 멤버) · role = 주최자/공동 주최자/참가자 · invited = 일정 참석자·만든 사람·방 멤버 */
 async function access(u: SessionUser, id: string, sql: Sql = db()) {
-  assertOn();
+  assertOn(tenantOf(u));
   if (!zUuid.safeParse(id).success) throw notFound(NF);
   const [m] = await sql<MeetingRow[]>`select * from meetings where id = ${id} and tenant = ${tenantOf(u)}`;
   if (!m) throw notFound(NF);
@@ -74,10 +83,11 @@ async function hostsOf(sql: Sql, m: MeetingRow) {
   return [...new Set([m.host_id, ...r.map((x) => x.user_id)].filter((x): x is string => !!x))];
 }
 async function issueFor(sql: Sql, m: MeetingRow, p: { id: string; role: EngineRole; name: string }, eng: MeetingEngine) {
-  const t = await eng.issue({ room: m.id, identity: p.id, name: p.name.slice(0, 60), role: p.role, canShare: m.share === 'all' || isHost(p.role), ttlSec: ttlOf() });
+  const canShare = m.share === 'all' || isHost(p.role);
+  const t = await eng.issue({ room: m.id, identity: p.id, name: p.name.slice(0, 60), role: p.role, canShare, ttlSec: ttlOf() });
   await log(sql, m.id, 'token', { participantId: p.id, data: { role: p.role } });
   if (!m.engine) await sql`update meetings set engine = ${eng.id} where id = ${m.id}`;
-  return { engine: eng.id, url: t.url, token: t.token, expiresIn: ttlOf() };
+  return { engine: eng.id, url: t.url, token: t.token, expiresIn: ttlOf(), canShare }; // #946 화면 공유 단추를 보일지(엔진도 입장권으로 같은 규칙을 지킴)
 }
 async function goLive(sql: Sql, m: MeetingRow, by: string) {
   if (m.status !== 'open') return;
@@ -96,7 +106,7 @@ const view = (m: MeetingRow) => ({ id: m.id, code: m.code, url: meetUrl(m.code),
 export const meetingInput = z.object({ kind: z.enum(['instant', 'personal', 'room']), title: z.string().trim().max(100).optional(), roomId: zUuid.optional() });
 /** 즉석 회의 · 내 고정 회의실(1개, 같은 주소) · 메시지방 통화(열린 회의가 있으면 그것) */
 export async function createMeeting(u: SessionUser, i: z.infer<typeof meetingInput>) {
-  assertOn(); const sql = db(); const t = tenantOf(u);
+  const sql = db(); const t = tenantOf(u); assertOn(t);
   if (i.kind === 'personal') {
     const [cur] = await sql<MeetingRow[]>`select * from meetings where tenant = ${t} and host_id = ${u.id} and kind = 'personal'`;
     if (cur) { if (cur.status === 'ended') await sql`update meetings set status = 'open', ended_at = null, updated_at = now() where id = ${cur.id}`; return { ...view({ ...cur, status: cur.status === 'ended' ? 'open' : cur.status }), created: false }; }
@@ -123,14 +133,14 @@ async function masterOf(sql: Sql, eventId: string) {
   return e?.recurring_event_id ?? eventId;
 }
 export async function eventMeeting(u: SessionUser, eventId: string) {
-  if (!meetingsOn()) return { enabled: false as const };
+  if (!meetingsOn(tenantOf(u))) return { enabled: false as const };
   const sql = db(); const { perms } = await (await import('../events')).loadEvent(u, eventId, sql);
   const master = await masterOf(sql, eventId);
   const [m] = await sql<MeetingRow[]>`select * from meetings where event_id = ${master} and tenant = ${tenantOf(u)}`;
   return { enabled: true as const, canEdit: perms.edit, on: !!m && m.status !== 'ended', meeting: m && m.status !== 'ended' ? view(m) : null, record: m ? await record(sql, m) : null };
 }
 export async function setEventMeeting(u: SessionUser, eventId: string, on: boolean) {
-  assertOn(); const sql = db(); const ev = await (await import('../events')).loadEvent(u, eventId, sql);
+  assertOn(tenantOf(u)); const sql = db(); const ev = await (await import('../events')).loadEvent(u, eventId, sql);
   if (!ev.perms.edit) throw forbidden('일정을 고칠 수 있는 사람만 화상회의를 켜고 끕니다');
   const master = await masterOf(sql, eventId); const t = tenantOf(u);
   const [e] = await sql<{ id: string; title: string; created_by: string; meeting_url: string | null }[]>`select id, title, created_by, meeting_url from events where id = ${master}`;
@@ -211,7 +221,7 @@ async function byCode(sql: Sql, code: string) {
   if (!/^[A-Za-z0-9_-]{16,40}$/.test(code)) throw notFound(NF);
   const [m] = await sql<(MeetingRow & { company: string; gone: boolean })[]>`select m.*, t.name as company, (m.kind = 'event' and (e.id is null or e.deleted_at is not null or e.cancelled)) as gone
     from meetings m join tenants t on t.id = m.tenant left join events e on e.id = m.event_id where m.code = ${code} and m.expires_at > now()`;
-  if (!m) throw notFound(NF);
+  if (!m || !meetingsOn(m.tenant)) throw notFound(NF); // #946 '우리 회사만'이면 다른 회사 회의 주소는 없는 것처럼
   return m.gone ? { ...m, status: 'ended' as const } : m; // 지운 일정의 회의는 끝난 회의로
 }
 /** 회의 주소를 연 사람에게: 회사 이름·회의 이름·상태만(참석자·일정 내용 없음) */
@@ -381,5 +391,10 @@ export async function meetingsTick() {
   }
   for (const m of await sql<MeetingRow[]>`select m.* from meetings m where m.status = 'live' and m.kind <> 'personal' and m.updated_at < now() - interval '1 day'
       and not exists (select 1 from meeting_participants p where p.meeting_id = m.id and p.state in ('joined', 'admitted') and p.last_seen_at > now() - interval '1 day') limit 100`) { await endNow(sql, m, null); ended++; }
-  return { left, ended };
+  // #946(대표 11/04 '녹화 꺼짐 · 기록 90일'): 녹화는 하지 않는다(입장권에 녹화 권한 없음). 회의 기록(참가자·시간·사건)은 끝난 뒤 MEETING_KEEP_DAYS(기본 90)일 지나면 지움
+  const keep = Math.max(7, Number(process.env.MEETING_KEEP_DAYS ?? 90) || 90);
+  const purged = await sql`delete from meetings where status = 'ended' and kind <> 'personal' and coalesce(ended_at, updated_at) < now() - make_interval(days => ${keep}) returning id`;
+  const logs = await sql`delete from meeting_log where at < now() - make_interval(days => ${keep}) returning id`; // 내 고정 회의실처럼 회의 줄이 남는 것의 오래된 기록
+  await sql`delete from meeting_participants where state in ('left', 'denied') and coalesce(left_at, created_at) < now() - make_interval(days => ${keep})`; // 내보낸 사람(removed)은 재입장 금지라 남김
+  return { left, ended, purged: purged.length, logs: logs.length };
 }
