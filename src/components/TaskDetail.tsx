@@ -36,7 +36,7 @@ import { MENTION_ALL, MentionList, useMention } from '@/components/MentionSugges
 import { VoiceButton } from '@/components/voice';
 import { MeetingDialog } from '@/components/MeetingDialog';
 import { requestTour } from '@/components/Tour';
-import { Assignees, PartBox, coOf, multiOf, partMsg, partsOf } from '@/components/CoAssignees';
+import { Assignees, PartBox, coOf, confirmFinishAll, multiOf, partMsg, partsOf } from '@/components/CoAssignees';
 import { followUpMsg, useLeadFollowUp } from '@/components/sales/LeadFollowUp';
 import { useResearchAsk } from '@/components/sales/ResearchAsk';
 import { BidInfoBox } from '@/components/sales/BidInfoBox';
@@ -208,8 +208,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const mateName = new Map<string, string>((data.batchMates ?? []).map((b: any) => [b.id, b.assignee_name ?? '담당자 없음']));
   const comments: any[] = data.comments.map((c: any) => (c.task_id && c.task_id !== id ? { ...c, from_name: mateName.get(c.task_id) ?? '같이 받은' } : c));
 
-  // V32 4 마감 연장: 요청자 = 바로, 담당자 = 요청(사유 필수)
-  const extRole = extendRole(t, user.id);
+  // V32 4 마감 연장: 요청자 = 바로, 담당자 = 요청(사유 필수) · 365차 #988 대표·부서장·팀장 = 바로(사유 필수·알림, 서버 perms.dueNow)
+  const extRole = extendRole(t, user.id, perms.dueNow);
+  const dueViaDialog = !!perms.dueNow && perms.dueNow !== '요청자'; // 요청자 아닌 바로 연장 자격 — 마감 바꾸기는 사유 창으로
   const md = (d: string | null) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '-');
   async function decideExt(approve: boolean) {
     try { await api(`/api/tasks/${id}/extend/${t.ext_pending.id}`, { body: { approve } }); toast.ok(approve ? '마감 연장을 승인했습니다' : '연장 요청을 반려했습니다'); reload(); broadcastRefresh(); }
@@ -358,22 +359,25 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const reviewerCandidate0 = t.requested_by && t.requested_by !== t.assignee_id ? t.requested_by : (!t.assignee_id || t.created_by !== t.assignee_id) ? t.created_by : null;
   const primary0 = t.status === 'done' ? null
     : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : isReviewer ? { label: '승인(최종 완료)', run: () => patch({ status: 'done' }, '승인했습니다 — 최종 완료') } : null)
-    : multi ? (myPart && !myPart.done ? { label: '내 몫 완료', run: () => patch({ myPart: 'done' }, (r) => (r.status === 'review' ? '모두 마쳐 검토를 요청했습니다' : '모두 마쳐 업무를 완료했습니다')) } : null)
+    : multi ? (myPart && !myPart.done ? { label: '완료', run: () => patch({ myPart: 'done' }, (r) => (r.status === 'review' ? '모두 마쳐 검토를 요청했습니다' : '모두 마쳐 업무를 완료했습니다')) } : null) // #989 글자는 [완료] 하나
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
     : t.approval_required && reviewerCandidate0 && reviewerCandidate0 !== user.id ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') } // #410 보강: 담당자가 관리자여도 검토자가 따로 있으면 검토 요청
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
   // 334차(대표 11/02 16:4x·17:0x): 요청자(지시자)·관리자급(관리자·부서장·팀장)은 담당자 전원이 [내 몫 완료]를 누르기 전에도 [완료 처리] — 남은 몫은 기록(closed_by)·알림. 서버 perms.finish 와 같은 기준
   const finishAs: string | null = t.status !== 'done' && t.status !== 'review' ? (perms.finish ?? null) : null;
   // #923(대표 그림: 단계 칸 폭 때문에 '완료 처리(남은 몫 포 / 함)'으로 글자 중간 줄바꿈): 단추 글자는 '완료 처리'로 짧게 — 남은 몫까지 간다는 말은 확인 창·도움말에
-  const finishBtn = finishAs ? { label: '완료 처리', run: () => {
-    if (multi && !confirm('아직 [내 몫 완료]를 누르지 않은 담당자가 있어도 업무를 완료 처리합니다.\n남은 담당자에게 알림이 갑니다. 계속할까요?')) return;
+  // 365차 #989(대표 11/05 '완료 단추 하나'): 자격자의 [완료] = 바로 업무 완료 — 남은 담당이 있으면 '남은 담당 n명 몫도 함께 완료' 확인 창
+  const othersLeft = multi ? partsOf(t).filter((p) => !p.done && p.id !== user.id) : [];
+  const finishBtn = finishAs ? { label: '완료', finishAll: true, run: () => {
+    if (multi && !confirmFinishAll(othersLeft)) return;
     patch({ status: 'done', finish: true }, '완료 처리했습니다');
   } } : null;
-  const primary = primary0 && (statusOwner || isReviewer) ? primary0 : finishBtn;
+  // 자격자는 내 몫이 있어도 업무 완료(#989) — 검토 중 승인 등 다른 단계는 그대로
+  const primary = finishBtn && multi && t.status !== 'review' ? finishBtn : primary0 && (statusOwner || isReviewer) ? primary0 : finishBtn;
   const closedBy = t.status === 'done' ? (data.history as any[]).find((h) => h.action === 'closed_by' && (!t.completed_at || Math.abs(new Date(h.created_at).getTime() - new Date(t.completed_at).getTime()) < 300000)) : null;
   // 대표 10/21 13:50 #410 ①: 모든 업무에서 담당자가 완료 대신 [검토 요청]을 누를 수 있다(요청자·없으면 만든 사람이 검토) — 결재선·검토 필수 업무는 기존 흐름 그대로
   const reviewerCandidate = reviewerCandidate0;
-  const reviewAsk = !!primary && primary.label === '완료' && (t.status === 'todo' || t.status === 'in_progress') && !t.approval_line_id && !!reviewerCandidate && reviewerCandidate !== user.id
+  const reviewAsk = !!primary && primary.label === '완료' && !multi && primary !== finishBtn && (t.status === 'todo' || t.status === 'in_progress') && !t.approval_line_id && !!reviewerCandidate && reviewerCandidate !== user.id
     ? { label: '검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') } : null;
 
   // V14 19번 ④: 휴대폰은 댓글 입력줄을 화면 아래에 고정(📎·📷) — 변형(transform)된 부모 영향 없게 body 로 띄운다
@@ -762,7 +766,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {/* 값이 없으면 "마감일 없음" 칩 하나, 누르면 빠른 선택·달력. 시각은 날짜를 정한 뒤에만 */}
               <span className="flex pl-2 flex-wrap items-center gap-1.5" data-testid="detail-due" data-value={t.due_date ?? ''}>
                 <DuePicker value={t.due_date} status={t.status} label="마감일" emptyText="마감일 없음" onExtend={extRole ? () => setExt(null) : undefined} extendLabel={extRole === 'request' ? '마감 연장 요청' : '마감 연장'}
-                  onChange={(v) => (extRole === 'request' && t.due_date && (!v || v > t.due_date) ? setExt(v) : patch({ dueDate: v, ...(v ? {} : { dueTime: null }) }))} />
+                  onChange={(v) => ((extRole === 'request' && t.due_date && (!v || v > t.due_date)) || (dueViaDialog && t.due_date && v && v !== t.due_date) ? setExt(v) : patch({ dueDate: v, ...(v ? {} : { dueTime: null }) }))} />
                 {t.due_date && (
                   <TimePick className="h-8 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={t.due_time?.slice(0, 5) ?? ''} onChange={(v) => patch({ dueTime: v })} ariaLabel="마감 시각" emptyLabel="시각 없음" />
                 )}

@@ -19,7 +19,7 @@ import { ChatComposer, DoneSummary, FoundFiles, LiveAnswer, MsgTools, ReplyMeta,
 import { AiText } from '@/components/AiText';
 import { SpecialProposal } from '@/components/ProposalCard';
 
-type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: Record<string, any> & { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; tasks?: string[]; taskDue?: string; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
+type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; replaced?: boolean; link?: string; preview?: Record<string, any> & { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; tasks?: string[]; taskDue?: string; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
 type Msg = Omit<ChatMsg, 'proposals'> & { proposals?: Proposal[] };
 type Thread = { id: string; title: string; task_id: string | null; task_title: string | null; pinned: boolean; updated_at: string; turns: number };
 const EXAMPLES = ['회사 로고 찾아서 이 업무에 첨부해줘', '이번 주 내 마감 업무 정리해줘', '내일 3시 회의 준비 업무 만들어줘', '3분기 매출 현장별로 엑셀 만들어줘'];
@@ -225,7 +225,7 @@ export default function AssistantPage() {
                         </div>
                       )}
                       {p.state === 'done' ? <div className="mt-1 text-xs text-green-700">✓ 반영됨 {p.link && <Link href={p.link} className="underline">열기</Link>}</div>
-                        : p.state === 'cancelled' ? <div className="mt-1 text-xs text-ink-3">취소함</div> : (
+                        : p.state === 'cancelled' ? <div className="mt-1 text-xs text-ink-3" data-testid={p.replaced ? 'ai-replaced' : undefined}>{p.replaced ? '새 제안으로 바뀜' : '취소함'}</div> : (
                           <div className="mt-1.5 flex gap-1.5">
                             <Button size="sm" onClick={() => decide(i, p, true)} disabled={p.state === 'busy'}><Check />확인</Button>
                             <Button size="sm" variant="secondary" onClick={() => decide(i, p, false)} disabled={p.state === 'busy'}><X />취소</Button>

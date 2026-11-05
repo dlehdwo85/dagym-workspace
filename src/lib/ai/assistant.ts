@@ -237,11 +237,17 @@ const MKT_TOOLS: AiTool[] = [
   { name: 'marketing_auto_status', description: '마케팅 자동 제작 상태: 일시정지 여부·언제·누가(어느 결정)·멈춘 동안 멈추는 일·다음 자동 제작 예정·7일 안 계획 칸·마지막 제작·켜진 규칙 수·글 모델·이번 달 남은 크레딧/영상/재생성.',
     input_schema: { type: 'object', properties: {} } },
 ];
+// 365차 #987(대표): 대기 중 제안을 고쳐 달라고 하면 새 제안이 옛 제안을 바꿔 끼운다 — 옛 제안은 서버가 자동 취소(대표가 [취소]를 따로 누르지 않게)
+for (const t of TOOLS) if (t.name.startsWith('propose_')) {
+  const sc = t.input_schema as { properties?: Record<string, unknown> };
+  sc.properties = { ...(sc.properties ?? {}), replacesProposalId: str('바꿔 끼울 대기 중 제안 id (선택) — 사용자가 아직 [확인] 안 한 제안을 고쳐 달라고 할 때만, 대화 기록의 [대기 · id=…] 값. 옛 제안은 자동 취소') };
+}
 
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 아래 [우리 회사] 직원을 돕습니다. 그 회사의 업종·사업 방향·말투에 맞춰 답하고, 다른 회사 이야기를 지어내지 마세요.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다.
 - 실행 상태는 도구 결과·대화 기록 표시 그대로 말하세요(대표 지적 10/19 ④): 이번 답에서 만든 제안 = "확인을 누르면 반영됩니다". 대화 기록의 [실행됨] = 이미 반영된 것 → "만들었습니다/바꿨습니다(화면의 [열기])"라고 하고 다시 확인을 안내하지 마세요. [취소됨] = 반영 안 됨. 도구 오류 = "하지 못했습니다: 이유".
+- 대화 기록의 [대기] 제안(아직 [확인] 전)을 고쳐 달라고 하면(담당·마감·제목·내용 바꾸기 등) 고친 새 제안을 만들 때 replacesProposalId 에 그 제안 id 를 넣으세요. 옛 제안은 자동으로 취소되니 "이전 제안은 취소해 주세요"라고 안내하지 말고 "고친 제안으로 바꿨습니다 — 확인을 누르면 반영됩니다"라고 하세요.
 [할 수 있는 일 — 아래 도구로 되는 일을 "안 된다·화면에서 직접 하세요"라고 답하지 마세요(대표 지적 10/19 ②). 되는지 모르겠으면 도구 목록을 먼저 보고, 정말 도구가 없을 때만 안 된다고 하세요]
 - 업무: 찾기 search_tasks · 상세 get_task · 만들기 propose_create_task(한 사람)·propose_create_tasks(여러 사람 — 기본 함께 담당 1건, '각자'라고 하면 사람마다) · 고치기 propose_update_task(담당자 변경·마감일·마감 시각·상태·우선순위·제목) · 댓글 propose_comment · 자료 첨부 propose_attach_file
 - 일정: 보기 list_events · 빈 시간 find_free_time · 만들기 propose_create_event · 시간 변경·취소 propose_update_event
@@ -266,6 +272,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 
 /** confidential: 이번 차례에 기밀 자료(기밀 파일·매출)를 읽었는지 — 결과물·제안이 같은 등급을 따른다(V14 15번) */
 type Ctx = { allTools?: boolean; u: SessionUser; proposals: { id: string; kind: string; summary: string; preview?: unknown }[]; confidential?: boolean;
+  /** 365차 #987 새 제안으로 바꿔 끼워 자동 취소한 옛 제안 id */ replaced?: string[];
   /** #753 이번 대화에서 search_library 로 찾은 자료(답에 이름이 나온 것만 카드로) */ found?: { id: string; title: string; folder: string | null; fileName: string | null; mime: string | null }[]; threadId?: string; docJobs?: { id: string; title: string; kind: string; version: number; status: string }[] };
 const clip = (s: unknown, n = 400) => (typeof s === 'string' ? (s.length > n ? s.slice(0, n) + '…' : s) : s);
 const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -304,6 +311,37 @@ export function intentHint(text: string): string {
     return `\n의도 힌트(규칙): "${who}" 에게 일을 시키는 요청 — 업무 배정으로 처리(list_people → search_tasks 로 비슷한 업무 확인 → propose_create_task, 요청자 = 사용자). 메시지 전달로 해석하지 마세요.`;
   }
   return '';
+}
+
+/** 365차 #987: 새 제안(out.proposalId)이 만들어졌고 replacesProposalId 가 대기 중인 내 제안이면 옛 제안을 취소한다 */
+async function replaceOld(c: Ctx, input: unknown, out: unknown, sql = db()) {
+  const old = (input as { replacesProposalId?: unknown } | null)?.replacesProposalId;
+  const nid = (out as { proposalId?: unknown } | null)?.proposalId;
+  if (typeof old !== 'string' || !UUID_RE.test(old) || typeof nid !== 'string' || old === nid) return;
+  if (!(await cancelPending(c, [old], sql)).length) return;
+  (out as Record<string, unknown>).replaced = '이전 제안은 자동으로 취소했습니다(새 제안으로 바꿔 끼움)';
+}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function cancelPending(c: Ctx, ids: string[], sql = db()) {
+  const r = await sql<{ id: string }[]>`update ai_proposals set status = 'cancelled', decided_at = now() where id = any(${ids}::uuid[]) and user_id = ${c.u.id} and status = 'pending' returning id`;
+  for (const { id } of r) {
+    (c.replaced ??= []).push(id);
+    const k = c.proposals.findIndex((p) => p.id === id); if (k >= 0) c.proposals.splice(k, 1); // 같은 답 안에서 바꿔 끼운 것은 카드에서 뺌
+  }
+  return r;
+}
+/** 모델이 id 를 안 넣어도: 바로 앞 답의 대기 제안이 같은 종류 1건뿐이고 질문이 '고쳐/바꿔/말고…'면 바꿔 끼운다 */
+const MODIFY_RE = /(고쳐|고치|바꿔|바꾸|수정|변경|말고|대신|아니고|아니라|빼고|빼\s*줘|로\s*해\s*(줘|주세요|줄래)|으로\s*해\s*(줘|주세요|줄래)|로\s*하자|으로\s*하자)/;
+const kindFamily = (k: string) => k.replace(/s$/, '');
+export function autoReplaceTargets(userText: string, prev: { id: string; kind: string }[], made: { id: string; kind: string }[], already: string[] = []) {
+  if (!prev.length || !made.length || !MODIFY_RE.test(userText)) return [];
+  const out: string[] = [];
+  for (const fam of new Set(made.map((p) => kindFamily(p.kind)))) {
+    const same = prev.filter((x) => kindFamily(x.kind) === fam && !made.some((m) => m.id === x.id));
+    if (same.some((x) => already.includes(x.id))) continue; // 모델이 이미 바꿔 끼움
+    if (same.length === 1) out.push(same[0].id);
+  }
+  return out;
 }
 
 async function propose(c: Ctx, kind: string, summary: string, payload: unknown, preview?: unknown) {
@@ -959,6 +997,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     return { reply: blocked, proposals: [], tools: [], threadId, blocked: true };
   }
   const hist = i.threadId ? await T.threadHistory(i.threadId) : null;
+  const prevPending = i.threadId && !i.replaceLast ? await T.lastPendingProposals(i.threadId) : []; // 365차 #987 바로 앞 답의 대기 제안
   const settings = await T.aiSettings(tenant);
   // 문서 요청이면 가벼운 모델·문서 도구만(부록 2 ⑥) — 문서 작업이 꺼져 있으면 보통 경로
   // 대표 지적(10/19 ①): "○○한테 보고서 만들라고 해줘" 는 문서 만들기가 아니라 업무 배정 — 문서 경로(업무 도구 없음)로 보내지 않음
@@ -1030,7 +1069,9 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     const results = await Promise.all(uses.map(async (t) => {
       steps.push(t.name);
       try {
-        return { type: 'tool_result' as const, tool_use_id: t.id, content: JSON.stringify(await runTool(c, t.name, t.input)) };
+        const out = await runTool(c, t.name, t.input);
+        if (t.name.startsWith('propose_')) await replaceOld(c, t.input, out);
+        return { type: 'tool_result' as const, tool_use_id: t.id, content: JSON.stringify(out) };
       } catch (e: any) {
         const msg = e instanceof HttpError ? (e.status === 404 ? '찾을 수 없거나 볼 권한이 없습니다' : e.message) : e?.issues ? '입력값이 올바르지 않습니다' : '처리 중 오류';
         return { type: 'tool_result' as const, tool_use_id: t.id, content: msg, is_error: true };
@@ -1046,6 +1087,10 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     await audit(sql, u.id, 'ai.chat_stopped', null, null, { threadId, steps }, null);
     return { reply: '', proposals: [], tools: steps, threadId, stopped: true };
   }
+  if (prevPending.length && c.proposals.length) { // 365차 #987 모델이 id 를 빠뜨려도 바로 앞 대기 제안을 바꿔 끼움
+    const ids = autoReplaceTargets(userText, prevPending, c.proposals, c.replaced);
+    if (ids.length) await cancelPending(c, ids);
+  }
   const timing = { firstMs: tm.first ? tm.first - t0 : null, answerMs: tm.answer ? tm.answer - t0 : null, totalMs: Date.now() - t0, chunks: tm.chunks };
   await audit(sql, u.id, 'ai.chat', i.taskId ? 'task' : null, i.taskId ?? null, { tools: steps, proposals: c.proposals.map((p) => p.id), threadId, timing }, null);
   await T.saveTurn(u, threadId, { text: userText, fileIds: i.fileIds, fileNames }, { text: reply, proposalIds: c.proposals.map((p) => p.id), docJobIds: c.docJobs?.map((j) => j.id), cost: turnCost, inTok, outTok });
@@ -1055,7 +1100,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   // #753 자료 카드: 찾은 자료 중 답에 이름이 나온 것(최대 8) — 답이 '자료실에서 찾았다'고만 하면 찾은 순서대로
   const named = (c.found ?? []).filter((f) => (f.title && reply.includes(f.title)) || (f.fileName && reply.includes(f.fileName)));
   const files = (named.length ? named : /자료실/.test(reply) ? c.found ?? [] : []).slice(0, 8);
-  return { reply, proposals: c.proposals, tools: steps, threadId, costKrw: Math.round(turnCost * usdKrw()), budget, timing, ...(kept.length ? { kept } : {}), ...(c.docJobs?.length ? { docJobs: c.docJobs } : {}), ...(files.length ? { files } : {}) };
+  return { reply, proposals: c.proposals, tools: steps, threadId, costKrw: Math.round(turnCost * usdKrw()), budget, timing, ...(kept.length ? { kept } : {}), ...(c.replaced?.length ? { replaced: c.replaced } : {}), ...(c.docJobs?.length ? { docJobs: c.docJobs } : {}), ...(files.length ? { files } : {}) };
 }
 
 // ---------------- 제안 실행 (사람이 [확인]) ----------------

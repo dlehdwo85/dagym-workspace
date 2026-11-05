@@ -21,7 +21,7 @@ import { TaskDetail } from './TaskDetail';
 import { PANEL_SWAP_EVENT } from './TaskPanelHost';
 import { keepScroll } from './backClose';
 import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
-import { coOf, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
+import { coOf, confirmFinishAll, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
 import { CollabFaces, collabSort, isCollab } from './CollabTasks';
 import { QuickAddTask } from './QuickAddTask';
 import { DupeMergeButton, useDupeSets } from './TaskDupes';
@@ -738,6 +738,8 @@ function StatusChip({ t, onPatch, plain }: { t: Task; onPatch: (t: Task, b: any)
   const [partDone, setPartDone] = useState(!!mine?.done);
   useEffect(() => { setPartDone(!!mine?.done); }, [mine?.done]);
   const coMode = !!mine && partDone && t.status !== 'done' && t.status !== 'review';
+  // 365차 #989: 자격자(요청자·현장 관리자 이상 — 부서장·팀장은 상세에서)의 [완료] = 바로 업무 완료(남은 담당 확인 창)
+  const finisher = (t.requested_by ?? (t as Task & { created_by?: string }).created_by) === user.id || (ROLE_RANK[user.role as Role] ?? 0) >= ROLE_RANK.site_manager;
   useEffect(() => {
     if (!can || tipClaimed) return;
     try { const n = Number(localStorage.getItem('wos_status_tip') ?? 0); if (n < 3) { tipClaimed = true; setTip(true); localStorage.setItem('wos_status_tip', String(n + 1)); } } catch {}
@@ -746,6 +748,12 @@ function StatusChip({ t, onPatch, plain }: { t: Task; onPatch: (t: Task, b: any)
   async function go(s: TaskStatus) {
     setOpen(false); setTip(false);
     if (s === t.status) return;
+    if (mine && s === 'done' && finisher && t.status !== 'review') { // #989 자격자 = 남은 몫까지 업무 완료
+      if (!confirmFinishAll(parts.filter((p) => !p.done && p.id !== user.id))) return;
+      const ok = await onPatch(t, { status: 'done', finish: true });
+      if (ok !== false) toastDone(t.id);
+      return;
+    }
     if (mine && (s === 'done' || s === 'review') && t.status !== 'review') { // 내 몫 완료(마지막 사람이면 업무 완료)
       setPartDone(true);
       const r = await onPatch(t, { myPart: 'done' });
@@ -788,7 +796,7 @@ function StatusChip({ t, onPatch, plain }: { t: Task; onPatch: (t: Task, b: any)
         {canSetStatus(t, user.id, quick, user.role) && quick !== t.status && (
           <button type="button" onClick={() => go(quick)} data-testid="status-quick"
             className="mb-1 flex w-full items-center gap-2 rounded-input bg-green-50 px-2.5 py-2 text-left text-sm font-bold text-green-800 hover:bg-green-100">
-            <Check className="size-4" />{mine && quick !== 'in_progress' && t.status !== 'review' ? '내 몫 완료' : quick === 'done' ? '완료' : quick === 'review' ? '검토 요청' : '다시 진행 중'}
+            <Check className="size-4" />{mine && quick !== 'in_progress' && t.status !== 'review' ? '완료' : quick === 'done' ? '완료' : quick === 'review' ? '검토 요청' : '다시 진행 중'}
           </button>
         )}
         {(['in_progress', 'todo', 'review', 'on_hold', 'done'] as TaskStatus[]).filter((s) => s !== quick).map((s) => (
@@ -805,9 +813,12 @@ function StatusChip({ t, onPatch, plain }: { t: Task; onPatch: (t: Task, b: any)
 function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }) {
   const { user } = useSession();
   const [ext, setExt] = useState<string | null | false>(false);
-  const ex = extendRole(t, user.id);
-  // V32 4: 담당자가 마감을 뒤로 미루면 바로 바꾸지 않고 연장 요청 창(사유 필수)으로
-  const change = (v: string | null) => (ex === 'request' && t.due_date && (!v || v > t.due_date) ? setExt(v) : onPatch(t, { dueDate: v }));
+  const ownerDue = user.role === 'owner'; // 365차 #988: 대표는 요청자가 아니어도 바로(사유 창)
+  const ex = extendRole(t, user.id, ownerDue);
+  const requester = (t.requested_by ?? (t as Task & { created_by?: string }).created_by) === user.id;
+  // V32 4: 담당자가 마감을 뒤로 미루면 바로 바꾸지 않고 연장 요청 창(사유 필수)으로 · #988 대표(요청자 아님)는 마감 바꾸기 = 사유 창(바로 반영)
+  const change = (v: string | null) => ((ex === 'request' || (ownerDue && !requester)) && t.due_date && v && (ex === 'boss' ? v !== t.due_date : v > t.due_date) ? setExt(v)
+    : ex === 'request' && t.due_date && !v ? setExt(null) : onPatch(t, { dueDate: v }));
   // 로컬 검수 10/17(390폭): 마감 칩이 92px 보다 넓으면(시간 포함 등) 왼쪽으로 넘쳐 둘째 줄 칩을 덮음 → 휴대폰은 칩 폭 그대로·줄 흐름 안에서
   return (
     // 308차 #866: 마감 칸은 고정 폭·왼쪽 맞춤(칩 길이가 달라도 줄마다 왼쪽 끝이 세로로 맞게)

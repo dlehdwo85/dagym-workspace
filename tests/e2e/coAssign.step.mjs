@@ -79,8 +79,8 @@ export async function coAssign({ owner, staff, ctx, sql, BASE, SHOTS }) {
   // 308차 #866: 공동 업무 줄은 상태 칩에 상태만 — 끝낸 수 k/n 은 '함께' 열(얼굴 옆)
   assert.match(await chip.innerText(), /진행 전/); assert.equal(await mine.getByTestId('collab-count').innerText(), '0/3');
   await chip.click();
-  await staff.getByTestId('status-quick').filter({ hasText: '내 몫 완료' }).click();
-  await staff.getByText(/^내 몫 완료\(1\/3\) — 최매니저, 박직원님까지 끝내면 업무가 완료됩니다/).first().waitFor();
+  await staff.getByTestId('status-quick').filter({ hasText: '완료' }).click(); // 365차 #989 단추 글자는 [완료] 하나(함께 담당 = 내 몫 완료)
+  await staff.getByText(/^완료했습니다\(내 몫 1\/3\) — 남은 담당 2명: 최매니저, 박직원님이 끝내면 업무가 완료됩니다/).first().waitFor();
   const part = mine.getByTestId('row-part-chip').filter({ visible: true }).first();
   await part.waitFor();
   assert.match(await part.innerText(), /내 몫 완료/); await mine.getByTestId('collab-count').filter({ hasText: '1/3' }).waitFor();

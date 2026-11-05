@@ -47,10 +47,13 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
   let segs = 0;
   let cur: string[] = []; // 지금 구간의 후보들
   let firstAlts: string[] = []; // 한 구간만 말했을 때 그 구간의 다른 후보(단어장 보정용)
+  // 365차 #986(대표 갤럭시): 멈춘 뒤 안드로이드가 빈 후보([""])를 보내 지금 구간을 덮으면 '말소리를 듣지 못했습니다'가 떴다 →
+  // 빈 후보는 버리고, 끝날 때 들은 글이 없으면 화면에 마지막으로 보였던 글을 결과로 쓴다(화면에 글이 있었으면 no-speech 아님)
+  let lastShown = '';
   const joined = () => mergeSpeech(base, cur[0] ?? '');
   const result = (): VoiceResult | null => {
     const text = joined();
-    if (!text) return null;
+    if (!text) return lastShown.trim() ? { text: lastShown.trim(), alternatives: [] } : null;
     const n = segs + (cur[0]?.trim() ? 1 : 0);
     const alts = segs ? firstAlts : cur.slice(1);
     return { text, alternatives: n === 1 ? alts.map((x) => x.trim()).filter(Boolean) : [] };
@@ -58,12 +61,14 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
   let cleanup = () => {};
   const end: VoiceEnd = (r, e) => { if (!ended) { ended = true; done = true; clearInterval(watch); cleanup(); o.onEnd(r, e); } };
   const partial = (alts: string[]) => {
-    if (!alts.length) return;
+    if (!alts.length || !(alts[0] ?? '').trim()) return; // 빈 후보 = 들은 말 없음(덮어쓰지 않음)
     if ((alts[0] ?? '') !== (cur[0] ?? '')) heard = Date.now();
-    cur = alts; o.onPartial?.(joined());
+    cur = alts; lastShown = joined(); o.onPartial?.(lastShown);
   };
   const commit = () => { if (cur[0]?.trim()) { if (!segs) firstAlts = cur.slice(1); base = mergeSpeech(base, cur[0]); segs++; } cur = []; };
   let stopEngine = () => {};
+  let restartT: ReturnType<typeof setTimeout> | null = null; // 짧은 쉼 뒤 다시 켜기 예약(멈추면 취소)
+  const cancelRestart = () => { if (restartT) { clearTimeout(restartT); restartT = null; } };
   const finish = (e?: 'no-speech' | 'error' | 'denied') => { done = true; commit(); const r = result(); end(r, r ? undefined : e ?? 'no-speech'); };
   // 조용함·최대 시간 감시
   const watch = setInterval(() => {
@@ -75,8 +80,9 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
   if (nativeOk()) {
     cleanup = () => { Native.removeAllListeners().catch(() => {}); };
     stopEngine = () => { Native.stop().catch(() => {}); };
+    // 365차 #985: [멈춤]을 눌렀는데 그 사이 다시 켜던 인식기가 늦게 켜지면 계속 듣는 것처럼 보였다 → 멈춘 뒤 끝난 start 는 인식기를 한 번 더 끈다
     const startOnce = () => Native.start({ language: 'ko-KR', maxResults: 5, partialResults: true, popup: false, addPunctuation: false, allowForSilence: SILENCE_MS, contextualStrings: o.contextual?.slice(0, 100) })
-      .then((r) => { if (r?.matches?.length) partial(r.matches); if (!done) segmentEnded(); }) // 기기에 따라 "멈춤" 알림 없이 start 만 끝남 → 여기서도 이어 듣기
+      .then((r) => { if (r?.matches?.length) partial(r.matches); if (!done) segmentEnded(); else stopEngine(); }) // 기기에 따라 "멈춤" 알림 없이 start 만 끝남 → 여기서도 이어 듣기
       .catch(() => { if (!done) segmentEnded(); });
     // 인식기가 혼자 끝나면(짧은 쉼) 지금까지 말을 붙여 두고 다시 켠다
     // 같은 구간 끝을 "멈춤" 알림과 start 끝남 양쪽에서 받아도 한 번만 다시 켠다(겹치면 인식기가 바쁨 오류 → 반복)
@@ -85,7 +91,7 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
       if (done) { finish(); return; }
       if (restarting) return;
       restarting = true; commit();
-      setTimeout(() => { restarting = false; if (!done) startOnce(); }, 250);
+      restartT = setTimeout(() => { restartT = null; restarting = false; if (!done) startOnce(); }, 250);
     };
     (async () => {
       let p = (await Native.checkPermissions().catch(() => ({ speechRecognition: 'prompt' }))).speechRecognition;
@@ -101,7 +107,7 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
       });
       await startOnce();
     })().catch(() => finish('error'));
-    return () => { if (done) return; done = true; stopEngine(); setTimeout(() => finish(), 400); };
+    return () => { if (done) return; done = true; cancelRestart(); stopEngine(); setTimeout(() => finish(), 400); };
   }
   const SRc = webSR();
   if (!SRc || Capacitor.isNativePlatform()) { end(null, 'unsupported'); return () => {}; }
@@ -127,11 +133,11 @@ export function listen(o: { onPartial?: (t: string) => void; onEnd: VoiceEnd; en
       done = true; finish('error');
     };
     // 브라우저가 혼자 끝내면(쉼) 지금까지 말을 붙여 두고 다시 켠다
-    r.onend = () => { if (done) { finish(); return; } commit(); setTimeout(() => { if (!done) { try { startWeb(); } catch { finish('error'); } } }, 150); };
+    r.onend = () => { if (done) { finish(); return; } commit(); restartT = setTimeout(() => { restartT = null; if (!done) { try { startWeb(); } catch { finish('error'); } } }, 150); };
     r.start();
   };
   try { startWeb(); } catch { end(null, 'error'); }
-  return () => { if (done) return; done = true; stopEngine(); setTimeout(() => finish(), 400); };
+  return () => { if (done) return; done = true; cancelRestart(); stopEngine(); setTimeout(() => finish(), 400); };
 }
 
 /**
@@ -210,29 +216,44 @@ export function VoiceButton({ value, onChange, small, label = '음성 입력' }:
   const [ask, setAsk] = useState(false);
   const stop = useRef<() => void>(() => {});
   const base = useRef('');
+  // 365차 #984(대표 갤럭시 AI 비서): 듣는 중·단어장 보정 중에 [보내기] → 늦게 끝난 음성이 비운 입력칸을 보낸 글로 다시 채웠다.
+  // 녹음마다 번호(gen)를 붙여 끝난 뒤 늦게 온 결과는 버리고, 입력칸을 밖에서 비우면(보내기) 듣기를 멈추고 결과를 버린다.
+  const gen = useRef(0);
+  const lastSet = useRef(''); // 이 버튼이 마지막으로 넣은 글(밖에서 비웠는지 가리기)
+  const busy = state !== 'idle';
   useEffect(() => setOk(voiceAvailable()), []);
-  useEffect(() => () => stop.current(), []);
+  useEffect(() => () => { gen.current++; stop.current(); }, []);
+  useEffect(() => {
+    if (busy && value === '' && lastSet.current.trim() !== '') { gen.current++; lastSet.current = ''; stop.current(); setState('idle'); }
+  }, [value, busy]);
   if (!ok) return null;
   const join = (t: string) => (base.current ? `${base.current} ${t}` : t);
   function start(fresh = false) {
     setAsk(false);
+    const my = ++gen.current; const live = () => gen.current === my;
+    const emit = (v: string) => { if (!live()) return; lastSet.current = v; onChange(v); };
     base.current = fresh ? '' : value.trim();
-    if (fresh) onChange('');
+    lastSet.current = value;
+    if (fresh) emit('');
     setState('listening');
     stop.current = listen({
-      onPartial: (t) => onChange(join(t)),
+      onPartial: (t) => emit(join(t)),
       onEnd: async (r, err) => {
-        if (!r) { onChange(base.current); setState('idle'); voiceErrorToast(err); return; }
+        if (!live()) return;
+        if (!r) { emit(base.current); setState('idle'); voiceErrorToast(err); return; }
         setState('fixing');
         const c = await correctVoice(r);
-        onChange(join(c.text)); setState('idle');
+        if (!live()) return; // 보정 중에 보냈거나 비웠으면 다시 채우지 않음
+        emit(join(c.text)); setState('idle');
         if (c.fixes.length) { learnVoice(c.fixes, true); toast.info(`단어장으로 고쳤습니다: ${c.fixes.map((f) => `${f.from} → ${f.to}`).join(', ')}`); }
       },
     });
   }
+  // #985: 누르는 즉시 '정리하는 중'으로(인식기가 늦게 답해도 계속 듣는 것처럼 보이지 않게)
+  const stopNow = () => { setState('fixing'); stop.current(); };
   return (
     <span className="relative inline-flex">
-      <Button type="button" variant="secondary" size={small ? 'sm' : undefined} onClick={state === 'listening' ? () => stop.current() : () => (value.trim() ? setAsk(!ask) : start())} disabled={state === 'fixing'}
+      <Button type="button" variant="secondary" size={small ? 'sm' : undefined} onClick={state === 'listening' ? stopNow : () => (value.trim() ? setAsk(!ask) : start())} disabled={state === 'fixing'}
         aria-label={state === 'listening' ? '음성 입력 멈추기' : label} aria-pressed={state === 'listening'} aria-haspopup="menu" aria-expanded={ask} data-testid="voice-button"
         className={cx(state === 'listening' && 'border-red-300 bg-red-50 text-red-600')}>
         {state === 'fixing' ? <Loader2 className="animate-spin" /> : state === 'listening' ? <Square className="fill-current" /> : <Mic />}

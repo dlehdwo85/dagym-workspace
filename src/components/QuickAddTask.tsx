@@ -246,7 +246,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
         <Field label="제목">
           <span className="flex items-center gap-1.5">
             <input ref={titleRef} autoFocus className={cx(inputCls, 'h-11 text-base')} value={f.title ?? ''} onChange={(e) => set('title')(e.target.value)} placeholder="무엇을 해야 하나요?" maxLength={200} />
-            <button type="button" onClick={voice} aria-label="음성으로 입력" aria-pressed={listening} className={cx('flex size-11 shrink-0 items-center justify-center rounded-input border border-line', listening ? 'animate-pulse bg-red-500 text-white' : 'text-ink-2 hover:bg-slate-50')} data-testid="quick-voice"><Mic className="size-5" /></button>
+            <button type="button" onClick={voice} aria-label={listening ? '녹음 멈추기' : '음성으로 입력'} aria-pressed={listening} className={cx('flex size-11 shrink-0 items-center justify-center rounded-input border border-line', listening ? 'animate-pulse bg-red-500 text-white' : 'text-ink-2 hover:bg-slate-50')} data-testid="quick-voice"><Mic className="size-5" /></button>
           </span>
         </Field>
         {!tpl && MEETING_WORDS.test(f.title ?? '') && (

@@ -44,11 +44,17 @@ export async function threadHistory(threadId: string, sql: Sql = db()) {
   const jids = rows.flatMap((r) => r.doc_job_ids ?? []);
   const jobs = jids.length ? await sql<{ id: string; title: string; kind: string; version: number; status: string; pages: number | null }[]>`select id, title, kind, version, status, pages from ai_doc_jobs where id = any(${jids}::uuid[])` : [];
   const jobNote = (r: (typeof rows)[number]) => (r.doc_job_ids?.length ? `\n[파일 작업: ${r.doc_job_ids.map((id) => jobs.find((j) => j.id === id)).filter(Boolean).map((j) => `id=${j!.id} · ${j!.title} v${j!.version} · ${j!.kind} · ${j!.status}${j!.pages ? ` · ${j!.pages}쪽` : ''}`).join(' / ')}]` : '');
-  const msgs = rows.map((r) => ({ role: r.role, text: r.text + files(r) + jobNote(r) + (r.proposal_ids.length ? `\n(제안: ${r.proposal_ids.map((p) => props.find((x) => x.id === p)).filter(Boolean).map((p) => `${p!.summary} [${p!.status === 'done' ? '실행됨' : p!.status === 'cancelled' ? '취소됨' : '대기'}]`).join('; ')})` : '') }));
+  const msgs = rows.map((r) => ({ role: r.role, text: r.text + files(r) + jobNote(r) + (r.proposal_ids.length ? `\n(제안: ${r.proposal_ids.map((p) => props.find((x) => x.id === p)).filter(Boolean).map((p) => `${p!.summary} [${p!.status === 'done' ? '실행됨' : p!.status === 'cancelled' ? '취소됨' : `대기 · id=${p!.id}`}]`).join('; ')})` : '') }));
   // 처음은 user 여야 한다
   while (msgs.length && msgs[0].role !== 'user') msgs.shift();
   const [t] = await sql<{ summary: string | null }[]>`select summary from ai_threads where id = ${threadId}`;
   return { messages: msgs, summary: t?.summary ?? null, oldestId: rows[0]?.id ?? null };
+}
+/** 365차 #987: 바로 앞 AI 답이 만든 제안 중 아직 대기인 것(고쳐 달라는 질문이면 바꿔 끼울 후보) */
+export async function lastPendingProposals(threadId: string, sql: Sql = db()) {
+  const [m] = await sql<{ proposal_ids: string[] }[]>`select proposal_ids from ai_messages where thread_id = ${threadId} and role = 'assistant' and status = 'ok' order by id desc limit 1`;
+  if (!m?.proposal_ids?.length) return [];
+  return sql<{ id: string; kind: string }[]>`select id::text, kind from ai_proposals where id = any(${m.proposal_ids}::uuid[]) and status = 'pending'`;
 }
 /** 20개보다 오래된 메시지가 10개 이상 쌓이면 가벼운 모델로 요약해 둔다(실패해도 대화는 계속) */
 export async function maybeSummarize(u: SessionUser, threadId: string) {

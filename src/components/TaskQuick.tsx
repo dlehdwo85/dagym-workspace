@@ -195,16 +195,23 @@ export function MultiAssigneePicker({ values, onChange, mode = 'together', onMod
 
 /** V5 반복 칩: 안 함·매일·평일·매주·매월… (반복은 마감일 기준 — 마감이 없으면 오늘을 마감으로) */
 /** V8 4번 음성 받아쓰기: 지원 안 되면(일부 앱 WebView) 키보드의 마이크로 말하도록 안내 — 날짜·담당자 인식은 입력한 문장에도 적용됨 */
+// 365차 #985·#986(대표 갤럭시 업무 녹음): 멈춤을 다시 눌러도 멈추지 않고 새 녹음이 또 켜졌다(멈추는 손잡이를 버리고 있었음) →
+// 듣는 중에 다시 누르면 지금 녹음을 멈추고 화면을 바로 멈춤 상태로 바꾼다(들은 글은 그대로 넣음)
+let voiceStop: (() => void) | null = null;
 export function voiceInput(setListening: (v: boolean) => void, onText: (t: string) => void) {
+  if (voiceStop) { const s = voiceStop; voiceStop = null; setListening(false); s(); return; }
   if (!voiceAvailable()) { voiceErrorToast('unsupported'); return; }
   setListening(true);
-  listen({ onEnd: async (r, e) => {
+  let over = false;
+  const my = listen({ onEnd: async (r, e) => {
+    over = true; if (voiceStop === my) voiceStop = null;
     if (!r) { setListening(false); voiceErrorToast(e); return; }
     const c = await correctVoice(r); // V24 회사 단어장 보정
     setListening(false);
     if (c.fixes.length) learnVoice(c.fixes, true);
     if (c.text.trim()) onText(c.text.trim());
   } });
+  if (!over) voiceStop = my;
 }
 
 /** V8 6번: 담당자가 그날 연차·출장·공휴일이면 알려 준다(배정은 그대로) */
@@ -365,7 +372,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
           onCompositionEnd={() => { if (enterWhileComposing.current) { enterWhileComposing.current = false; setTimeout(() => submit(input.current?.value), 0); } }}
           className="min-w-0 flex-1 bg-transparent py-1 text-sm placeholder:text-ink-3 focus:outline-none" />
         {/* V11 4번: 음성은 입력칸 오른쪽 큰 마이크 버튼 */}
-        <button type="button" onClick={voice} aria-label="음성으로 업무 추가" aria-pressed={listening} data-testid="voice-btn"
+        <button type="button" onClick={voice} aria-label={listening ? '녹음 멈추기' : '음성으로 업무 추가'} aria-pressed={listening} data-testid="voice-btn"
           className={cx('flex size-11 shrink-0 items-center justify-center rounded-full sm:size-9', listening ? 'animate-pulse bg-red-500 text-white' : 'bg-accent-50 text-accent-700 hover:bg-accent-100')}><Mic className="size-5" /></button>
         {title.trim() && <button type="submit" className="h-11 shrink-0 rounded-input bg-brand-600 px-4 text-sm font-semibold text-white shadow-card active:scale-95 sm:h-8 sm:px-3" data-testid="inline-save">{assignees.length > 1 ? (multiMode === 'each' ? `${assignees.length}명에게 각각 만들기` : `${assignees.length}명 함께 담당 · 저장`) : '저장'}</button>}
         {busy && <span className="shrink-0 text-xs text-ink-3" data-testid="inline-saving">저장 중…</span>}
@@ -445,20 +452,22 @@ export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { t
   const [to, setTo] = useState<string>(initial ?? addDays(base, 1));
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (open) { setTo(initial && initial > base ? initial : addDays(base, 1)); setReason(''); } }, [open, initial, base]);
+  // 365차 #988: 바로 바꾸는 사람(요청자·대표·부서장·팀장)은 앞당기기도 이 창에서(사유 기록·알림)
+  useEffect(() => { if (open) { setTo(initial && (boss ? initial !== base : initial > base) ? initial : addDays(base, 1)); setReason(''); } }, [open, initial, base, boss]);
+  const earlier = to < base;
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reason.trim()) { toast.error('연장 사유를 적어 주세요'); return; }
     setBusy(true);
     try {
       const r = await api<{ applied: boolean }>(`/api/tasks/${task.id}/extend`, { body: { toDate: to, reason: reason.trim() } });
-      toast.ok(r.applied ? `마감을 ${Number(to.slice(5, 7))}/${Number(to.slice(8))}로 연장했습니다` : '요청자에게 연장 요청을 보냈습니다');
+      toast.ok(r.applied ? `마감을 ${Number(to.slice(5, 7))}/${Number(to.slice(8))}로 ${earlier ? '바꿨습니다' : '연장했습니다'} — 요청자·담당자에게 알림` : '요청자에게 연장 요청을 보냈습니다');
       broadcastRefresh(); onDone?.(); onClose();
     } catch (err: any) { toast.error(err.message); } finally { setBusy(false); }
   };
   const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
   return (
-    <Modal open={open} onClose={onClose} title={boss ? '마감 연장' : '마감 연장 요청'}>
+    <Modal open={open} onClose={onClose} title={boss ? (earlier ? '마감 변경' : '마감 연장') : '마감 연장 요청'}>
       <form onSubmit={send} className="space-y-3 text-sm" data-testid="extend-dialog">
         <p className="text-ink-2"><b className="text-ink">{task.title}</b><br />지금 마감 {task.due_date ? md(task.due_date) : '없음'} → <b className="text-amber-800" data-testid="extend-to">{md(to)}</b></p>
         <div className="grid grid-cols-3 gap-2">
@@ -468,19 +477,21 @@ export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { t
           ))}
         </div>
         <label className="flex items-center gap-2"><span className="shrink-0 text-ink-2">날짜 고르기</span>
-          <input type="date" className={cx(inputCls, 'h-11')} min={addDays(base, 1)} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} aria-label="연장할 마감일" /></label>
-        <label className="block"><span className="text-ink-2">연장 사유 <span className="text-red-600">*</span></span>
+          <input type="date" className={cx(inputCls, 'h-11')} min={boss ? undefined : addDays(base, 1)} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} aria-label="연장할 마감일" /></label>
+        <label className="block"><span className="text-ink-2">{earlier ? '변경' : '연장'} 사유 <span className="text-red-600">*</span></span>
           <input className={cx(inputCls, 'mt-1 h-11')} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="예: 거래처 자료 회신이 늦어짐" aria-label="연장 사유" data-testid="extend-reason" /></label>
-        {!boss && <p className="text-xs text-ink-3">요청자가 승인하면 마감이 바뀝니다. 요청자에게 알림이 갑니다.</p>}
-        <Button type="submit" className="h-11 w-full" disabled={busy || to <= base} data-testid="extend-submit">{boss ? '연장하기' : '연장 요청 보내기'}</Button>
+        {!boss ? <p className="text-xs text-ink-3">요청자가 승인하면 마감이 바뀝니다. 요청자에게 알림이 갑니다.</p>
+          : <p className="text-xs text-ink-3">승인 없이 바로 바뀝니다. 요청자·담당자에게 사유와 함께 알림이 갑니다.</p>}
+        <Button type="submit" className="h-11 w-full" disabled={busy || to === base || (!boss && to < base)} data-testid="extend-submit">{boss ? (earlier ? '바꾸기' : '연장하기') : '연장 요청 보내기'}</Button>
       </form>
     </Modal>
   );
 }
 
-/** V32 4: 연장 가능 — 요청자(없으면 만든 사람) = 바로 'boss', 담당자 = 'request'. 마감 있고 미완료일 때만 */
-export function extendRole(t: { due_date: string | null; status: string; assignee_id: string | null; requested_by?: string | null; created_by?: string }, uid: string): 'boss' | 'request' | null {
+/** V32 4: 연장 가능 — 요청자(없으면 만든 사람) = 바로 'boss', 담당자 = 'request'. 마감 있고 미완료일 때만
+ *  365차 #988: 대표·부서장·팀장도 바로('boss') — 상세는 서버 perms.dueNow, 목록은 대표(role owner)만 알 수 있음 */
+export function extendRole(t: { due_date: string | null; status: string; assignee_id: string | null; requested_by?: string | null; created_by?: string }, uid: string, dueNow?: string | null | boolean): 'boss' | 'request' | null {
   if (!t.due_date || t.status === 'done') return null;
-  if ((t.requested_by ?? t.created_by) === uid) return 'boss';
+  if ((t.requested_by ?? t.created_by) === uid || dueNow) return 'boss';
   return t.assignee_id === uid ? 'request' : null;
 }

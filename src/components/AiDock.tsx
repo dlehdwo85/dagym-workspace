@@ -18,7 +18,7 @@ import { Button, cx, inputCls, toast } from './ui';
 import { SpecialProposal } from './ProposalCard';
 
 type Ctx = { page: 'home' | 'tasks' | 'task' | 'calendar' | 'library' | 'revenue' | 'reports' | 'messages' | 'other'; id?: string; taskId?: string };
-type P = { id: string; kind?: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; link?: string; preview?: { warnings?: string[]; moves?: string[]; folder?: string } & Record<string, any> };
+type P = { id: string; kind?: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; replaced?: boolean; link?: string; preview?: { warnings?: string[]; moves?: string[]; folder?: string } & Record<string, any> };
 type M = Omit<ChatMsg, 'proposals'> & { proposals?: P[] };
 
 /** 지금 화면 → 맥락(id 만) */
@@ -148,7 +148,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
                         {p.preview?.folder && <div className="mt-1 text-xs text-ink-2">📁 저장 폴더: {p.preview.folder}</div>}
                         {!!p.preview?.warnings?.length && <ul className="mt-1 rounded bg-amber-50 p-1.5 text-xs text-amber-800" data-testid="ai-dock-warnings">{p.preview.warnings.map((w, k) => <li key={k}>⚠ {w}</li>)}</ul>}
                         {p.state === 'done' ? <div className="mt-1 text-xs text-green-700">✓ 반영됨 {p.link && <Link href={p.link} className="underline">열기</Link>}</div>
-                          : p.state === 'cancelled' ? <div className="mt-1 text-xs text-ink-3">취소함</div>
+                          : p.state === 'cancelled' ? <div className="mt-1 text-xs text-ink-3" data-testid={p.replaced ? 'ai-replaced' : undefined}>{p.replaced ? '새 제안으로 바뀜' : '취소함'}</div>
                           : <div className="mt-1 flex gap-1.5"><Button size="sm" onClick={() => decide(i, p, true)} disabled={p.state === 'busy'}><Check />확인</Button><Button size="sm" variant="secondary" onClick={() => decide(i, p, false)} disabled={p.state === 'busy'}><X />취소</Button></div>}
                       </div>
                     ))}

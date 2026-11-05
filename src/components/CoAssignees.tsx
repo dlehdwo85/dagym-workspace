@@ -30,9 +30,13 @@ export function progressOf(t: PartTask) {
 /** 내 몫은 끝냈지만 다른 담당자가 남은 업무 — 목록에 흐리게 '내 몫 완료 · k/n' */
 export const myPartDone = (t: PartTask, uid: string) => multiOf(t) && t.status !== 'done' && t.status !== 'review' && !!partsOf(t).find((p) => p.id === uid)?.done;
 /** 서버 응답(part·left·partsDone/partsTotal)으로 안내 한 줄 */
+// 365차 #989: 단추는 [완료] 하나 — 함께 담당이 누르면 내 몫 완료, 끝난 뒤 '남은 담당 n명' 안내
 export const partMsg = (r: { part?: string; left?: string[]; partsDone?: number; partsTotal?: number }) => r.part === 'done'
-  ? `내 몫 완료(${r.partsDone}/${r.partsTotal}) — ${r.left?.length ? `${r.left.join(', ')}님까지 끝내면 업무가 완료됩니다` : '업무를 완료했습니다'}`
+  ? (r.left?.length ? `완료했습니다(내 몫 ${r.partsDone}/${r.partsTotal}) — 남은 담당 ${r.left.length}명: ${r.left.join(', ')}님이 끝내면 업무가 완료됩니다` : '업무를 완료했습니다')
   : '내 몫 완료를 취소했습니다';
+/** #989 자격자(요청자·대표·관리자·부서장·팀장)의 [완료] = 바로 업무 완료 — 남은 담당이 있으면 확인 창 */
+export const confirmFinishAll = (others: { name: string }[]) => !others.length
+  || confirm(`남은 담당 ${others.length}명(${others.map((p) => p.name).join(', ')}) 몫도 함께 완료합니다.\n남은 담당자에게 알림이 갑니다. 계속할까요?`);
 /** 마지막 사람이 끝내 업무 상태가 바뀐 응답 */
 export const finishMsg = (r: { status?: string }) => (r.status === 'review' ? '모두 마쳐 검토를 요청했습니다' : '모두 마쳐 업무를 완료했습니다');
 
@@ -78,14 +82,13 @@ export function PartBox({ t, onPatch, finishAs = null }: { t: any; onPatch: (bod
         <b className="tabular-nums" data-testid="part-progress">담당 {total}명 중 {done}명 완료</b>
         {review ? ' — 모두 마쳐 검토 중입니다' : left.length ? ` — 남은 사람: ${left.map((p) => p.name).join(', ')}` : ' — 모두 마쳤습니다'}
         {me && !review && <span className="block text-xs text-violet-800">{me.done ? '내 몫을 마쳤습니다 ✓ 다른 담당자가 끝낼 때까지 내 업무에 흐리게 남고, 모두 끝나면 업무가 완료됩니다'
-          : '각자 [내 몫 완료]를 누르면 마지막 사람이 끝낼 때 업무가 완료됩니다'}</span>}
+          : finishAs ? `${finishAs} 자격 — [완료]를 누르면 남은 담당 몫까지 업무가 완료됩니다(남은 담당자에게 알림)` : '각자 [완료]를 누르면 내 몫이 끝나고, 마지막 사람이 끝낼 때 업무가 완료됩니다'}</span>}
       </span>
-      {me && !review && (left.length
-        ? <Button size="sm" variant={me.done ? 'secondary' : 'primary'} onClick={() => onPatch({ myPart: me.done ? 'open' : 'done' }, finishMsg)} data-testid="part-btn">{me.done ? '내 몫 완료 취소' : '내 몫 완료'}</Button>
-        : <Button size="sm" onClick={() => onPatch({ myPart: 'done' }, finishMsg)} data-testid="part-finish">업무 완료</Button>)}
-      {/* 334차 보완(로컬 11/02 18:1x ①: 대표가 함께 담당이면 [내 몫 완료]만 보임): 요청자·관리자급은 내 몫이 있어도 남은 몫까지 완료 처리 */}
-      {finishAs && me && !review && left.length > 0 && <Button size="sm" variant="secondary" data-testid="part-finish-all" title={`${finishAs} 자격 — 남은 담당자 몫까지 완료 처리(남은 사람에게 알림)`}
-        onClick={() => { if (!confirm(`아직 [내 몫 완료]를 누르지 않은 담당자(${left.map((p) => p.name).join(', ')})가 있어도 업무를 완료 처리합니다.\n남은 담당자에게 알림이 갑니다. 계속할까요?`)) return; onPatch({ status: 'done', finish: true }, '완료 처리했습니다'); }}><span className="whitespace-nowrap">완료 처리</span><span className="ml-1 whitespace-nowrap text-[11px] font-normal opacity-80">남은 몫 포함</span></Button>}
+      {/* 365차 #989(대표 11/05): 단추는 [완료] 하나 — 자격자 = 바로 업무 완료(남은 몫 기록·알림), 그 밖 함께 담당 = 내 몫 완료(마지막이면 업무 완료) */}
+      {me && !review && (me.done
+        ? <Button size="sm" variant="secondary" onClick={() => onPatch({ myPart: 'open' })} data-testid="part-btn">내 몫 완료 취소</Button>
+        : <Button size="sm" data-testid="part-btn" data-finish={finishAs ? '1' : undefined} title={finishAs ? `${finishAs} 자격 — 남은 담당 몫까지 완료` : '내 몫 완료(마지막 사람이면 업무 완료)'}
+            onClick={() => { if (finishAs) { if (confirmFinishAll(left.filter((p) => p.id !== me.id))) onPatch({ status: 'done', finish: true }, '완료 처리했습니다'); } else onPatch({ myPart: 'done' }, finishMsg); }}>완료</Button>)}
     </div>
   );
 }

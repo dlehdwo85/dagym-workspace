@@ -564,7 +564,7 @@ export async function deleteBatch(u: SessionUser, batchId: string) {
   return { deleted: rows.length };
 }
 
-export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInput>): Promise<{ id: string; version: number; changed: boolean; spawned?: string | null; approvedOriginal?: string; part?: 'done' | 'open'; left?: string[]; partsDone?: number; partsTotal?: number; status?: string }> {
+export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInput>, opt: { dueNow?: boolean } = {}): Promise<{ id: string; version: number; changed: boolean; spawned?: string | null; approvedOriginal?: string; part?: 'done' | 'open'; left?: string[]; partsDone?: number; partsTotal?: number; status?: string }> {
   const sql = db();
   // 점검 2026-10-16 ②: [검토] 업무(review_of)는 상태를 직접 바꾸지 않는다 — "완료" = 원 업무 승인(검토 담당자 권한 그대로), 그 밖은 원 업무에서 승인·반려
   if (i.status) {
@@ -589,9 +589,10 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const isCo = cur.assignee_id !== u.id && (await isCoAssignee(tx, id, u.id));
     const mine = cur.assignee_id === u.id || isCo;
     const leadFu = i.leadFollowUp; // 197차(#460): 아래에서 i 를 다시 짜도(내 몫 완료 → 업무 완료) 고른 다음 행동은 그대로
-    const partOnly = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'myPart', 'leadFollowUp'].includes(k));
+    const partOnly = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'myPart', 'leadFollowUp', 'finish'].includes(k)); // #989 finish 는 자격 없으면 무시
     let partStatus = false; // 담당자가 내 몫으로 바꾸는 업무 상태(마지막 사람의 완료·내 몫 취소로 다시 열기) — 버전·첫 담당자 확인 없이
-    if (!i.finish && (i.myPart !== undefined || (multi && mine && partOnly && i.status))) {
+    // 365차 #989: [완료] 하나 — 자격(perms.finish) 없는 사람이 finish 를 보내면 내 몫 완료로(업무 전체 완료 아님)
+    if (!(i.finish && perms.finish) && (i.myPart !== undefined || (multi && mine && partOnly && i.status))) {
       if (!mine) throw forbidden('담당자만 내 몫 완료를 표시할 수 있어요');
       // 내 몫: myPart 그대로 · 완료/검토 요청 = 내 몫 완료 · 완료된 업무를 다른 상태로 = 내 몫 취소(다시 열기). 진행 중·보류 같은 단계 바꾸기는 내 몫과 상관없이 아래 원래 길로
       const want = i.myPart !== undefined ? i.myPart === 'done' : i.status === 'done' || i.status === 'review' ? true : cur.status === 'done' ? false : null;
@@ -626,7 +627,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     const coAdminOnly = atLeast(u, 'admin') && Object.entries(i).every(([k, v]) => v === undefined || ['coAssigneeIds', 'completeRule', 'version'].includes(k));
     // 334차(대표 11/02 16:4x·17:0x '대표자 지시 혹은 팀장 등 관리자급'): 요청자·관리자급은 담당자가 아니어도 상태 '완료'만은(남은 몫은 아래에서 기록·알림)
     const finishOnly = !!perms.finish && i.status === 'done' && Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'leadFollowUp', 'finish'].includes(k));
-    if (!perms.edit && !leadFirstAssign && !coAdminOnly && !finishOnly) {
+    // 365차 #988: 대표·부서장·팀장의 마감 바로 변경(사유는 requestExtension 이 기록) — 마감일·시각만
+    const dueNowOnly = !!opt.dueNow && !!perms.dueNow && Object.entries(i).every(([k, v]) => v === undefined || ['dueDate', 'dueTime', 'version'].includes(k));
+    if (!perms.edit && !leadFirstAssign && !coAdminOnly && !finishOnly && !dueNowOnly) {
       const onlyStatus = Object.entries(i).every(([k, v]) => v === undefined || ['status', 'version', 'reviewNote', 'leadFollowUp'].includes(k));
       throw forbidden(onlyStatus ? '상태는 담당자만 바꿀 수 있어요' : '이 업무를 수정할 권한이 없습니다 — 업무 내용·일정은 요청자·담당자만 바꿀 수 있습니다');
     }
@@ -651,7 +654,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       changes.dueTime = { from: cur.due_time_s, to: i.dueTime };
     }
     // V32 4(대표 결정): 담당자는 마감을 뒤로 미루거나 지울 수 없다 — 요청자에게 [마감 연장] 요청(앞당기기는 됨). 요청자 = 본인이면 제한 없음
-    if ('due_date' in set && cur.due_date && cur.status !== 'done' && (cur.assignee_id === u.id || isCo) && (cur.requested_by ?? cur.created_by) !== u.id
+    if ('due_date' in set && !dueNowOnly && cur.due_date && cur.status !== 'done' && (cur.assignee_id === u.id || isCo) && (cur.requested_by ?? cur.created_by) !== u.id
       && (!set.due_date || String(set.due_date).slice(0, 10) > dstr(cur.due_date))) {
       throw new HttpError(403, 'extend_required', '마감을 미루려면 요청자에게 [마감 연장]을 요청하세요');
     }
@@ -1414,29 +1417,37 @@ async function assertTeamAssign(u: SessionUser, teamId: string, sql: Sql = db())
 // ---------------- V32 4 마감 연장 ----------------
 const dstr = (d: unknown) => (d instanceof Date ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d) : String(d ?? '').slice(0, 10));
 export const extendInput = z.object({ toDate: zDate, reason: z.string().trim().min(1, '연장 사유를 적어 주세요').max(300) });
-/** 요청자(없으면 만든 사람) = 바로 연장, 담당자 = 요청자에게 연장 요청(이전 요청은 취소) */
+/** 요청자(없으면 만든 사람)·365차 #988 대표·부서장·팀장 = 바로 연장(사유 기록·요청자·담당자 알림), 담당자 = 요청자에게 연장 요청(이전 요청은 취소) */
 export async function requestExtension(u: SessionUser, taskId: string, i: z.infer<typeof extendInput>) {
   const sql = db();
-  const { task } = await loadTaskForUser(u, taskId, sql);
+  const { task, perms } = await loadTaskForUser(u, taskId, sql);
   const [cur] = await sql<{ title: string; status: string; assignee_id: string | null; requested_by: string | null; created_by: string; due_date: string | null }[]>`
     select title, status, assignee_id, requested_by, created_by, to_char(due_date, 'YYYY-MM-DD') due_date from tasks where id = ${task.id}`;
   if (!cur.due_date) throw badRequest('마감일이 없는 업무입니다 — 마감일을 먼저 정하세요');
   if (cur.status === 'done') throw badRequest('완료된 업무입니다');
-  if (i.toDate <= cur.due_date) throw badRequest('지금 마감일보다 뒤 날짜를 고르세요');
   const boss = cur.requested_by ?? cur.created_by;
-  if (boss === u.id) {
-    await updateTask(u, task.id, { dueDate: i.toDate });
-    await sql.begin(async (tx) => {
+  const direct = boss === u.id ? '요청자' : perms.dueNow ?? null;
+  if (i.toDate === cur.due_date) throw badRequest('지금 마감일과 같은 날짜입니다');
+  if (!direct && i.toDate < cur.due_date) throw badRequest('지금 마감일보다 뒤 날짜를 고르세요');
+  if (direct) {
+    const later = i.toDate > cur.due_date;
+    await updateTask(u, task.id, { dueDate: i.toDate }, { dueNow: direct !== '요청자' });
+    const extId = await sql.begin(async (tx) => {
       await tx`update task_due_extensions set status = 'cancelled' where task_id = ${task.id} and status = 'pending'`;
-      await tx`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason, status, decided_by, decided_at)
-        values (${task.id}, ${u.id}, ${cur.due_date}, ${i.toDate}, ${i.reason}, 'applied', ${u.id}, now())`;
-      await tx`update tasks set due_extend_count = due_extend_count + 1 where id = ${task.id}`;
-      await activity(tx as unknown as Sql, 'task', task.id, u.id, 'due_extended', { from: cur.due_date, to: i.toDate, reason: i.reason });
+      const [x] = await tx<{ id: string }[]>`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason, status, decided_by, decided_at)
+        values (${task.id}, ${u.id}, ${cur.due_date}, ${i.toDate}, ${i.reason}, 'applied', ${u.id}, now()) returning id`;
+      if (later) await tx`update tasks set due_extend_count = due_extend_count + 1 where id = ${task.id}`;
+      await activity(tx as unknown as Sql, 'task', task.id, u.id, 'due_extended', { from: cur.due_date, to: i.toDate, reason: i.reason, as: direct });
+      // #988: 요청자·담당자(함께 담당 포함)에게 '○○님이 마감을 m/d → m/d 로 연장(사유)' — 본인은 빼고
+      const to = [...new Set([boss, cur.assignee_id, ...(await coIds(tx as unknown as Sql, task.id))].filter((x): x is string => !!x && x !== u.id))];
+      if (to.length) await notify(tx as unknown as Sql, { userIds: to, type: 'review_result', title: `마감 ${later ? '연장' : '변경'}: ${cur.title}`,
+        body: `${u.name}님이 마감을 ${md(cur.due_date!)} → ${md(i.toDate)} 로 ${later ? '연장' : '변경'}(${i.reason})`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id, actorId: u.id, dedupeKey: `extend_applied:${x.id}` });
+      return x.id;
     });
-    return { applied: true };
+    return { applied: true, id: extId, as: direct };
   }
   // 331차(로컬 11/02 ②: 공동 담당은 연장 요청조차 못 함): 함께 담당도 요청자에게 연장 요청
-  if (cur.assignee_id !== u.id && !(await isCoAssignee(sql, task.id, u.id))) throw forbidden('마감 연장은 담당자·함께 담당(요청)·요청자(바로 연장)만 할 수 있습니다');
+  if (cur.assignee_id !== u.id && !(await isCoAssignee(sql, task.id, u.id))) throw forbidden('마감 연장은 담당자·함께 담당(요청)·요청자·대표·부서장·팀장(바로 연장)만 할 수 있습니다');
   const id = await sql.begin(async (tx) => {
     await tx`update task_due_extensions set status = 'cancelled' where task_id = ${task.id} and status = 'pending'`;
     const [x] = await tx<{ id: string }[]>`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason)

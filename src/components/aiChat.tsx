@@ -91,6 +91,9 @@ export function useAiConversation<M extends ChatMsg>(opts: {
       if (ctl.signal.aborted) return;
       o.current.onReply?.(r);
       if (r.stopped) return;
+      // 365차 #987: 새 제안으로 바꿔 끼운 옛 제안 카드는 '새 제안으로 바뀜'
+      const rep: string[] = r.replaced ?? [];
+      if (rep.length) setMsgs((m) => m.map((x) => (x.proposals?.some((p: any) => rep.includes(p.id)) ? { ...x, proposals: x.proposals!.map((p: any) => (rep.includes(p.id) ? { ...p, state: 'cancelled', replaced: true } : p)) } : x)));
       const timing: ReplyTiming = { firstMs: first === null ? null : Math.round(first), doneMs: Math.round(performance.now() - t0), chunks, server: r.timing ?? null };
       setMsgs((m) => [...m, ...(r.kept?.length ? [{ role: 'assistant', text: `이전 요청으로 이미 처리됨: ${r.kept.join(' · ')}`, note: true } as M] : []), { ...o.current.toAssistant(r), ...(r.blocked ? {} : { timing }) }]);
     } catch (e: any) {

@@ -53,4 +53,16 @@ export async function dueExtend({ staff, owner, ctx, sql, BASE }) {
   await banner.getByTestId('ext-approve').click();
   await owner.getByTestId('sum-ext-count').getByText('연장 1회').waitFor();
   assert.equal((await sql`select to_char(due_date, 'YYYY-MM-DD') d from tasks where id = ${id}`)[0].d, addDays(due, 3));
+  // 365차 #988: 대표는 요청자가 아니어도(최매니저가 요청한 업무) 머리 [마감 연장] → 사유 → 바로 반영(승인 없음)·요청자·담당자 알림
+  const id2 = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: '대표 바로 연장 시험', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, dueDate: due, approvalRequired: false })).id;
+  await owner.goto(`${BASE}/tasks/${id2}`);
+  await owner.getByTestId('sum-extend').click();
+  const dlg2 = owner.getByTestId('extend-dialog');
+  await dlg2.getByText('승인 없이 바로 바뀝니다').waitFor();
+  await dlg2.getByRole('button', { name: '+1주' }).click();
+  await dlg2.getByTestId('extend-reason').fill('발주처 일정 변경');
+  await dlg2.getByTestId('extend-submit').click();
+  await owner.getByText(/마감을 .+로 연장했습니다 — 요청자·담당자에게 알림/).first().waitFor();
+  assert.equal((await sql`select to_char(due_date, 'YYYY-MM-DD') d from tasks where id = ${id2}`)[0].d, addDays(due, 7), '대표 = 바로 반영');
+  assert.equal((await sql`select count(*)::int n from notifications where entity_id = ${id2} and title like '마감 연장:%'`)[0].n, 2, '요청자·담당자 알림');
 }
