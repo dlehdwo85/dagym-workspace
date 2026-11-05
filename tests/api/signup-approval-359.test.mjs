@@ -70,10 +70,10 @@ describe('359차 승인제 가입', () => {
     assert.equal(t.trial_ends_at, null, '체험은 승인 때 시작'); assert.equal(t.period_end, null);
     assert.equal(t.signup_info.contact, '010-1234-5678'); assert.equal(t.signup_info.via, 'email');
     assert.deepEqual([t.signup_info.company, t.signup_info.name, t.signup_info.size, t.signup_info.industry], ['승인상사', '신청대표', '2-10', '제조']);
-    assert.equal(t.signup_notified_at, null, '확인 링크 전에는 알리지 않음');
-    assert.equal((await sql`select count(*)::int n from notifications where type = 'signup_request'`)[0].n, 0);
-
-    await boss.ok('POST', '/api/auth/verify', { token: verifyToken('boss@approval.test') });
+    assert.ok(t.signup_notified_at, '360차: [체험 신청]을 누른 순간 접수 — 메일 확인 전에 바로 알림');
+    assert.match(r.message, /^체험 신청을 받았습니다\. 24시간 안에 연락드립니다/, '접수가 먼저(대표 #974)');
+    const ack = mailTo('boss@approval.test', /체험 신청을 받았습니다/);
+    assert.equal(ack.length, 1); assert.match(ack[0].text, /7일 유효/);
     const ns = await sql`select user_id, title, link from notifications where type = 'signup_request'`;
     assert.equal(ns.length, 1); assert.equal(ns[0].user_id, ctx.ownerId);
     assert.match(ns[0].title, /새 체험 신청: 승인상사 · 신청대표 · 2-10명 · 제조/); assert.equal(ns[0].link, '/platform?tab=company#signup-requests');
@@ -82,6 +82,9 @@ describe('359차 승인제 가입', () => {
     assert.equal(am.length, 1);
     assert.match(am[0].text, /연락처: 010-1234-5678/); assert.match(am[0].text, /가입 경로: email · 유입 source=meta campaign=trial/);
     assert.match(am[0].text, /24시간 안에 연락드린다고 안내했습니다/);
+    assert.match(am[0].text, /메일 주소 확인: 아직/);
+    await boss.ok('POST', '/api/auth/verify', { token: verifyToken('boss@approval.test') });
+    assert.equal((await sql`select count(*)::int n from notifications where type = 'signup_request'`)[0].n, 1, '메일 확인 뒤 다시 알리지 않음');
     assert.equal(mailTo('boss@approval.test', /승인/).length, 0, '신청자에게는 아직 승인 메일 없음');
     // 같은 회사 다시 알리지 않음(로그인 다시 해도)
     await boss.ok('POST', '/api/auth/login', { email: 'boss@approval.test', password: 'signup-pass-1234' });
@@ -167,6 +170,24 @@ describe('359차 승인제 가입', () => {
     assert.equal((await c.req('GET', '/api/tasks')).status, 200);
     const [ra] = await sql`select t.signup_reason, s.trial_ends_at from tenants t join tenant_subscriptions s on s.tenant = t.id where t.id = ${st}`;
     assert.equal(ra.signup_reason, null); assert.ok(ra.trial_ends_at);
+  });
+
+  test('360차: 메일 확인을 안 누른 채 승인 → 환영 메일 [워크인 시작하기] = 메일 확인 링크(7일) → 누르면 로그인·바로 쓰기', async () => {
+    const c = new Client('nover');
+    await c.ok('POST', '/api/auth/signup', { email: 'nover@approval.test', name: '확인안함', password: 'nover-pass-1234', mode: 'team', company: '확인안함상사', size: '1', contact: '010-3333-4444', agree });
+    const [{ tenant: nt }] = await sql`select tenant from users where email = 'nover@approval.test'`;
+    assert.equal((await c.post('/api/auth/login', { email: 'nover@approval.test', password: 'nover-pass-1234' })).status, 403, '메일 확인 전 로그인은 안 됨(기존 그대로)');
+    await ctx.owner.ok('POST', `/api/platform/signups/${nt}/approve`, {});
+    const wm = mailTo('nover@approval.test', /체험 신청이 승인됐습니다/);
+    assert.equal(wm.length, 1);
+    assert.match(wm[0].text, /메일 주소 확인과 로그인이 한 번에/);
+    const token = wm[0].text.match(/\/verify\/([A-Za-z0-9_-]+)/)?.[1];
+    assert.ok(token, '환영 메일 단추 = 메일 확인 링크');
+    const [v] = await sql`select expires_at from email_verifications ev join users u on u.id = ev.user_id where u.email = 'nover@approval.test' order by expires_at desc limit 1`;
+    assert.ok((new Date(v.expires_at) - Date.now()) / 864e5 > 6.9, '7일 유효');
+    await c.ok('POST', '/api/auth/verify', { token });
+    assert.equal((await c.req('GET', '/api/tasks')).status, 200);
+    await c.ok('POST', '/api/auth/login', { email: 'nover@approval.test', password: 'nover-pass-1234' });
   });
 
   test('플랫폼 [고객사 추가]로 만든 회사·기존 회사는 승인 대기 없음', async () => {

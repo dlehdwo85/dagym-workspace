@@ -79,8 +79,11 @@ export function captureUtm(page?: string) {
   // #449 광고 클릭 id: 마지막 클릭 기준으로 덮어씀(이 브라우저에만, 전환은 동의한 경우에만 씀)
   const gclid = q.get('gclid') ?? ''; const fbclid = q.get('fbclid') ?? '';
   if (ID_RE.test(gclid) || ID_RE.test(fbclid)) { try { localStorage.setItem(CLICK_KEY, JSON.stringify({ ...(ID_RE.test(gclid) ? { gclid } : {}), ...(ID_RE.test(fbclid) ? { fbclid } : {}), at: Date.now() })); } catch {} }
-  const v = { source: q.get('utm_source') ?? '', medium: q.get('utm_medium') ?? '', campaign: q.get('utm_campaign') ?? '' };
-  const hasUtm = !!(v.source || v.medium || v.campaign);
+  // 360차 #971: 광고 키워드까지 — utm_term · 네이버 자동 추적(n_keyword·n_keyword_id·n_media…) · gclid 가 붙은 첫 주소를 landing 으로(서버 adAttrib 이 풀어 씀)
+  const adParam = [...q.keys()].some((k) => /^n_(keyword|keyword_id|media|query|ad_group|ad|campaign_type)$/.test(k) || k === 'gclid' || k === 'utm_term');
+  const land = adParam ? (location.pathname + location.search).slice(0, 500) : '';
+  const v = { source: q.get('utm_source') ?? '', medium: q.get('utm_medium') ?? '', campaign: q.get('utm_campaign') ?? '', term: (q.get('utm_term') ?? '').slice(0, 80), ...(land ? { landing: land } : {}) };
+  const hasUtm = !!(v.source || v.medium || v.campaign || land);
   const pg = page && PAGE_RE.test(page) ? page : '';
   if (!hasUtm && !pg) return;
   // 첫 값을 30일 기억(덮어쓰지 않음) — 311차 #867: 처음 들어온 소개 페이지(page)도 같이. 페이지만 기억된 뒤 UTM 이 붙어 오면 UTM 은 채움
@@ -88,7 +91,7 @@ export function captureUtm(page?: string) {
     let r: Record<string, unknown> = {};
     try { r = JSON.parse(localStorage.getItem(UTM_KEY) ?? 'null') ?? {}; } catch { r = {}; }
     if (Date.now() - (Number(r.at) || 0) > 30 * 86400_000) r = {};
-    const had = !!(r.source || r.medium || r.campaign);
+    const had = !!(r.source || r.medium || r.campaign || r.landing);
     const next = { ...r, ...(!had && hasUtm ? v : {}), ...(!r.page && pg ? { page: pg } : {}), at: r.at ?? Date.now() };
     if (JSON.stringify(next) !== JSON.stringify(r)) localStorage.setItem(UTM_KEY, JSON.stringify(next));
   } catch {}
@@ -105,12 +108,13 @@ export function landingView(page: string) {
   } catch { /* 저장소 막힘이면 그냥 셈 */ }
   fetch('/api/public/landing-view', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ page }), keepalive: true }).catch(() => {});
 }
-export function readUtm(): { source?: string; medium?: string; campaign?: string; page?: string } | undefined {
+export function readUtm(): { source?: string; medium?: string; campaign?: string; page?: string; term?: string; landing?: string } | undefined {
   try {
     const r = JSON.parse(localStorage.getItem(UTM_KEY) ?? 'null');
     if (!r || Date.now() - (r.at ?? 0) > 30 * 86400_000) return undefined;
     const clip = (s: unknown, n: number) => (typeof s === 'string' && s ? s.slice(0, n) : undefined);
-    return { source: clip(r.source, 80), medium: clip(r.medium, 80), campaign: clip(r.campaign, 120), page: typeof r.page === 'string' && PAGE_RE.test(r.page) ? r.page : undefined };
+    return { source: clip(r.source, 80), medium: clip(r.medium, 80), campaign: clip(r.campaign, 120), page: typeof r.page === 'string' && PAGE_RE.test(r.page) ? r.page : undefined,
+      term: clip(r.term, 80), landing: typeof r.landing === 'string' && r.landing.startsWith('/') ? r.landing.slice(0, 500) : undefined };
   } catch { return undefined; }
 }
 

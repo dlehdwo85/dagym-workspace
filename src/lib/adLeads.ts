@@ -14,20 +14,25 @@ import { adAttrib, isTelLabel, kwKey } from './adAttrib';
  * - 판단: 0건인데 돈만 쓴 키워드 = '끄기 제안'(광고 키워드를 아는 전화·문의가 절반 이상일 때만 — 추적이 덜 됐으면 '0건'이 틀릴 수 있어서),
  *   목표의 70% 이하 = '잘 됨', 목표의 2배 이상 = '비용 높음'. 목표 = 회사 설정(target_cpa) 또는 기간 평균.
  * - 끄기·켜기는 워크인이 만든 세팅안의 네이버 키워드만(adOps kw_pause·kw_resume).
+ * - 360차 #971: 워크인 운영 회사(tenant 'default')는 워크인 체험 신청도 전환 — 신청 때 남긴 utm·첫 광고 주소(n_keyword…)로 키워드에 붙인다.
+ *   신청 = 회사형 가입(내부·시험·삭제 제외), 승인 = signup_status 'approved', 실사용 = 승인 + 가입 7일 안 업무 5건 이상 또는 3일 이상 접속(마케팅 퍼널과 같은 기준).
+ *   리드 = 전화 + 문의 + 체험 신청(체험 신청만 있는 워크인 키워드가 '0건 — 끄기 제안'으로 잘못 나오지 않게).
  */
 const DEFAULT_CPA = 30000; // 목표·평균이 없을 때 '끄기 제안' 기준(원)
 const MIN_WASTE = 20000;   // 이보다 적게 쓴 키워드는 0건이어도 판단하지 않음(원)
 const MIN_CLICKS = 10;
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 export type LeadRow = { key: string; provider: string; itemId: string | null; keyword: string; campaign: string; clicks: number; cost: number; mediaConv: number;
-  tel: number; calls: number; phone: number; inquiries: number; cta: number; leads: number; cpa: number | null; flag: 'waste' | 'high' | 'good' | null; planId: string | null; paused: boolean };
+  tel: number; calls: number; phone: number; inquiries: number; cta: number; leads: number; cpa: number | null; flag: 'waste' | 'high' | 'good' | null; planId: string | null; paused: boolean;
+  wkSignup: number; wkApproved: number; wkActive: number };
+const WORKIN_TENANT = 'default';
 
 export async function leadsReport(u: SessionUser, q: { days?: number }) {
   await assertSpace(u, 'marketing');
   const t = tenantOf(u); const sql = db();
   const days = [7, 30, 90].includes(Number(q.days)) ? Number(q.days) : 30;
   const from = ymd(new Date(Date.now() - (days - 1) * 864e5)); const fromTs = `${from}T00:00:00+09:00`;
-  const [items, beacon, calls, inq, ctas, [st], plans] = await Promise.all([
+  const [items, beacon, calls, inq, ctas, [st], plans, signups] = await Promise.all([
     sql<any[]>`select a.provider, s.item_id, max(s.item_name) as keyword, max(s.campaign_name) as campaign, sum(s.clicks)::float8 clicks, sum(s.cost_krw)::float8 cost, sum(s.conversions)::float8 conversions
       from mkt_ad_items s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.kind = 'keyword' and s.day >= ${from}::date group by a.provider, s.item_id order by sum(s.cost_krw) desc`,
     sql<any[]>`select provider, keyword_key, keyword_id, max(keyword) as keyword, kind, sum(n)::int n from mkt_ad_leads where tenant = ${t} and day >= ${from}::date group by provider, keyword_key, keyword_id, kind`,
@@ -36,10 +41,16 @@ export async function leadsReport(u: SessionUser, q: { days?: number }) {
     sql<{ label: string; n: number }[]>`select label, sum(n)::int n from mkt_site_events where tenant = ${t} and event = 'cta' and day >= ${from}::date group by label`,
     sql<{ target_cpa: number | null }[]>`select target_cpa from mkt_settings where tenant = ${t}`,
     sql<any[]>`select id, external from mkt_ad_plans where tenant = ${t} and status in ('created', 'active', 'paused')`,
+    t !== WORKIN_TENANT ? Promise.resolve([] as { utm: any; status: string; active: boolean }[]) : sql<{ utm: any; status: string; active: boolean }[]>`
+      select t.signup_utm as utm, t.signup_status as status,
+        (t.signup_status = 'approved' and (
+          (select count(*) from tasks k join users u on u.id = k.created_by where u.tenant = t.id and k.created_at < t.created_at + interval '7 days') >= 5
+          or (select count(distinct d.day) from user_active_days d where d.tenant = t.id and d.day < (t.created_at at time zone 'Asia/Seoul')::date + 7) >= 3)) as active
+      from tenants t where t.kind = 'company' and t.id not in ('default', 'demo') and t.status <> 'deleted' and not t.is_test and t.created_at >= ${fromTs}::timestamptz`,
   ]);
   const rows = new Map<string, LeadRow>();
   const blank = (key: string, provider: string, itemId: string | null, keyword: string, campaign = ''): LeadRow => ({ key, provider, itemId, keyword, campaign, clicks: 0, cost: 0, mediaConv: 0,
-    tel: 0, calls: 0, phone: 0, inquiries: 0, cta: 0, leads: 0, cpa: null, flag: null, planId: null, paused: false });
+    tel: 0, calls: 0, phone: 0, inquiries: 0, cta: 0, leads: 0, cpa: null, flag: null, planId: null, paused: false, wkSignup: 0, wkApproved: 0, wkActive: 0 });
   const byId = new Map<string, string>(); const byKw = new Map<string, string>(); const anyKw = new Map<string, string>();
   for (const it of items) { // 광고비 많은 순 — 같은 키워드가 여러 캠페인에 있으면 가장 많이 쓴 쪽에 붙임
     const key = `${it.provider}:${it.item_id}`;
@@ -73,16 +84,29 @@ export async function leadsReport(u: SessionUser, q: { days?: number }) {
     if (!at || (!at.keyword && !at.keywordId)) { unknown.inquiries++; continue; }
     row(at.provider, at.keywordId, at.keyword).inquiries++;
   }
+  // 워크인 체험 신청 → 키워드 줄(광고 키워드를 알 때). 광고가 아닌 신청(검색·직접·SNS 일반 링크)은 따로 셈
+  const wk = { signups: 0, approved: 0, active: 0, fromAds: 0, untracked: 0, organic: 0 };
+  for (const g of signups) {
+    const ok = g.status === 'approved'; wk.signups++; if (ok) wk.approved++; if (g.active) wk.active++;
+    const u0 = g.utm && typeof g.utm === 'object' ? g.utm : {};
+    const at = adAttrib({ landing: u0.landing, utm: u0 });
+    if (!at) { wk.organic++; continue; }
+    if (!at.keyword && !at.keywordId) { wk.untracked++; unknown.inquiries++; continue; } // 광고로 왔지만 키워드 없음 — 키워드를 모르는 리드로 셈
+    wk.fromAds++;
+    const r = row(at.provider, at.keywordId, at.keyword);
+    if (!r.campaign && typeof u0.campaign === 'string') r.campaign = u0.campaign.slice(0, 120);
+    r.wkSignup++; if (ok) r.wkApproved++; if (g.active) r.wkActive++;
+  }
   // 워크인이 만든 세팅안의 네이버 키워드 → 끄기·켜기 가능
   const owner = new Map<string, { planId: string; paused: boolean }>();
   for (const p of plans) (Array.isArray(p.external?.keywordIds) ? p.external.keywordIds as string[] : []).forEach((kid) => owner.set(kid, { planId: p.id, paused: !!p.external?.kwLocks?.[kid] }));
   const list = [...rows.values()];
   for (const r of list) {
-    r.phone = Math.max(r.tel, r.calls); r.leads = r.phone + r.inquiries; r.cpa = r.leads ? Math.round(r.cost / r.leads) : null;
+    r.phone = Math.max(r.tel, r.calls); r.leads = r.phone + r.inquiries + r.wkSignup; r.cpa = r.leads ? Math.round(r.cost / r.leads) : null;
     const o = r.provider === 'naver' && r.itemId ? owner.get(r.itemId) : undefined; if (o) { r.planId = o.planId; r.paused = o.paused; }
   }
   const sum = (f: (r: LeadRow) => number) => list.reduce((a, r) => a + f(r), 0);
-  const totals = { cost: sum((r) => r.cost), clicks: sum((r) => r.clicks), tel: sum((r) => r.tel), calls: sum((r) => r.calls), phone: sum((r) => r.phone), inquiries: sum((r) => r.inquiries), cta: sum((r) => r.cta), leads: sum((r) => r.leads), cpa: null as number | null };
+  const totals = { cost: sum((r) => r.cost), clicks: sum((r) => r.clicks), tel: sum((r) => r.tel), calls: sum((r) => r.calls), phone: sum((r) => r.phone), inquiries: sum((r) => r.inquiries), cta: sum((r) => r.cta), leads: sum((r) => r.leads), wkSignup: sum((r) => r.wkSignup), cpa: null as number | null };
   totals.cpa = totals.leads ? Math.round(totals.cost / totals.leads) : null;
   const unknownLeads = unknown.inquiries + Math.max(unknown.tel, unknown.calls);
   const coverage = totals.leads + unknownLeads ? Math.round((totals.leads / (totals.leads + unknownLeads)) * 100) : null; // 광고 키워드를 아는 리드 비율(%)
@@ -95,7 +119,19 @@ export async function leadsReport(u: SessionUser, q: { days?: number }) {
   }
   const order = { waste: 0, high: 1, good: 2 } as Record<string, number>;
   list.sort((a, b) => (order[a.flag ?? ''] ?? 3) - (order[b.flag ?? ''] ?? 3) || b.cost - a.cost || b.leads - a.leads);
-  return { days, from, canEdit: isAdmin(u), totals, unknown, coverage, judge,
+  // 캠페인별 워크인 전환(체험 신청이 있었거나 이름에 워크인이 들어간 캠페인) — 광고비는 그 캠페인 키워드들의 합
+  const camp = new Map<string, { campaign: string; provider: string; cost: number; signups: number; approved: number; active: number }>();
+  for (const r of list) {
+    if (!r.wkSignup && !/워크인|workin/i.test(r.campaign)) continue;
+    const k = `${r.provider}:${r.campaign}`;
+    const c = camp.get(k) ?? { campaign: r.campaign, provider: r.provider, cost: 0, signups: 0, approved: 0, active: 0 };
+    c.cost += r.cost; c.signups += r.wkSignup; c.approved += r.wkApproved; c.active += r.wkActive; camp.set(k, c);
+  }
+  const per = (cost: number, n: number) => (n ? Math.round(cost / n) : null);
+  const workin = t !== WORKIN_TENANT ? null : { ...wk,
+    byCampaign: [...camp.values()].sort((a, b) => b.cost - a.cost || b.signups - a.signups).slice(0, 30)
+      .map((c) => ({ ...c, perSignup: per(c.cost, c.signups), perApproved: per(c.cost, c.approved), perActive: per(c.cost, c.active) })) };
+  return { days, from, canEdit: isAdmin(u), totals, unknown, coverage, judge, workin,
     target: { cpa: target ?? null, custom: st?.target_cpa != null, avg: totals.cpa },
     tracking: { beacon: beacon.length > 0, naverIds: beacon.some((b) => b.provider === 'naver' && b.keyword_id), calls: calls.some((c) => c.ad_keyword) },
     rows: list.slice(0, 150) };

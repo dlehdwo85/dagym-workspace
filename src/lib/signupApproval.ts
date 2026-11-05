@@ -47,9 +47,10 @@ async function mailTo(to: string, title: string, lines: string[], button?: { lab
 /** 새 신청을 슈퍼관리자에게(앱 알림·푸시 + 메일) — 회사당 한 번. 이메일 가입은 확인 링크를 누른 뒤, 소셜은 회사를 만든 바로 뒤 */
 export async function notifyNewSignup(tenant: string, sql: Sql = db()) {
   if (!signupApprovalOn()) return 0;
-  const [t] = await sql<{ id: string; name: string; signup_info: SignupInfo | null }[]>`update tenants set signup_notified_at = now()
-    where id = ${tenant} and signup_status = 'pending' and signup_notified_at is null returning id, name, signup_info`;
+  const [t] = await sql<{ id: string; name: string; signup_info: SignupInfo | null; owner_user_id: string | null }[]>`update tenants set signup_notified_at = now()
+    where id = ${tenant} and signup_status = 'pending' and signup_notified_at is null returning id, name, signup_info, owner_user_id`;
   if (!t) return 0;
+  const [ow] = t.owner_user_id ? await sql<{ signup_pending: boolean }[]>`select signup_pending from users where id = ${t.owner_user_id}` : [];
   const { platformAdminIds } = await import('./superAdmin');
   const ids = await platformAdminIds(sql);
   if (!ids.length) return 0;
@@ -63,6 +64,7 @@ export async function notifyNewSignup(tenant: string, sql: Sql = db()) {
     `회사: ${i?.company ?? t.name}`, `신청한 사람: ${i?.name ?? ''} (${i?.email ?? ''})`, `연락처: ${i?.contact ?? '없음'}`,
     `인원: ${i?.size ?? '-'} · 업종: ${[i?.industry, ...(i?.industries ?? [])].filter(Boolean).join(', ') || '-'}`,
     `가입 경로: ${i?.via ?? 'email'}${i?.utm && Object.values(i.utm).some(Boolean) ? ` · 유입 ${Object.entries(i.utm).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(' ')}` : ''}`,
+    ...(ow?.signup_pending ? ['메일 주소 확인: 아직 — 승인하면 환영 메일의 링크가 메일 확인을 겸합니다'] : []),
     '신청자에게는 24시간 안에 연락드린다고 안내했습니다.'], { label: '가입 신청 보기', url: `${appUrl()}/platform?tab=company#signup-requests` });
   return ids.length;
 }
@@ -96,14 +98,16 @@ export async function approveSignup(u: SessionUser, tenant: string) {
     await audit(tx, u.id, 'signup.approve', 'tenant', null, { tenant, from: t.signup_status }, null);
   });
   (await import('./plans')).clearReadOnlyCache(tenant);
-  const [o] = t.owner_user_id ? await sql<{ id: string; email: string; name: string }[]>`select id, email, name from users where id = ${t.owner_user_id}` : [];
+  const [o] = t.owner_user_id ? await sql<{ id: string; email: string; name: string; signup_pending: boolean }[]>`select id, email, name, signup_pending from users where id = ${t.owner_user_id}` : [];
   const [s] = await sql<{ trial_ends_at: Date | null }[]>`select trial_ends_at from tenant_subscriptions where tenant = ${tenant}`;
   const ends = s?.trial_ends_at ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' }).format(s.trial_ends_at) : null;
   let mailed = false;
   if (o) {
     const { appUrl } = await import('./mail');
+    // 360차: 신청 때 메일 확인을 안 눌렀으면 [시작하기] = 메일 확인 링크(7일, 누르면 바로 로그인)
+    const start = o.signup_pending ? (await (await import('./signup')).verificationLink(sql, o.id, 24 * 7)).url : `${appUrl()}/login`;
     mailed = await mailTo(o.email, '체험 신청이 승인됐습니다', [`${o.name}님, ${t.name} 워크인 체험 신청이 승인됐습니다.`, `지금부터 14일 동안 모든 기능을 쓸 수 있어요${ends ? `(${ends}까지)` : ''}.`,
-      '로그인하면 회사 설정과 동료 초대 안내가 이어집니다.'], { label: '워크인 시작하기', url: `${appUrl()}/login` });
+      o.signup_pending ? '아래 [워크인 시작하기]를 누르면 메일 주소 확인과 로그인이 한 번에 됩니다(7일 유효).' : '로그인하면 회사 설정과 동료 초대 안내가 이어집니다.'], { label: '워크인 시작하기', url: start });
     await (await import('./alimtalk')).alimtalkSignup(o.id); // 304차 #871: 동의한 대표에게만(체험 종료일이 생긴 지금)
   }
   return { ok: true, trialEndsAt: s?.trial_ends_at ?? null, mailed };

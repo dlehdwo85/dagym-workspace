@@ -29,7 +29,7 @@ export async function adLeads({ owner, ctx, sql, BASE, SHOTS }) {
   assert.equal(await r2.getByTestId('ad-leads-flag').innerText(), '0건 — 끄기 제안');
   const r1 = box.getByTestId('ad-leads-row').filter({ hasText: '두정동헬스장' });
   assert.equal(await r1.getByTestId('ad-leads-flag').innerText(), '잘 됨');
-  assert.match(await r1.innerText(), /30,000원\s+100\s+20\s+0\s+1,500원/, '광고비·클릭·전화·문의·전환당 비용');
+  assert.match(await r1.innerText(), /30,000원\s+100\s+20\s+0\s+0\s+1,500원/, '광고비·클릭·전화·문의·체험 신청(360차 워크인 운영 회사)·전환당 비용');
   assert.equal(await box.getByTestId('ad-leads-row').first().getAttribute('data-flag'), 'waste', '끄기 제안이 맨 위');
   await box.scrollIntoViewIfNeeded();
   await owner.screenshot({ path: `${SHOTS}/204-ad-leads.png` });

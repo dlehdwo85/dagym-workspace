@@ -75,7 +75,7 @@ test('홈(/·/welcome): 제목·설명에 검색어 · "Android·iOS" 문구 없
 
 test('가입·로그인: 고유 제목 · 가입은 OG 미리보기 · 둘 다 색인 안 함(noindex)', async () => {
   const su = await get('/signup');
-  assert.ok(su.text.includes('<title>워크인 가입') && su.text.includes('property="og:title"') && su.text.includes(`property="og:url" content="${SITE}/signup"`), '가입 제목·OG');
+  assert.ok(su.text.includes('<title>워크인 — 14일 무료 체험 신청') && su.text.includes('property="og:title"') && su.text.includes(`property="og:url" content="${SITE}/signup"`), '가입 제목·OG');
   assert.ok(/name="robots" content="noindex/.test(su.text), '가입은 noindex');
   const lo = await get('/login');
   assert.ok(lo.text.includes('<title>워크인 로그인') && /name="robots" content="noindex/.test(lo.text), '로그인 제목·noindex');

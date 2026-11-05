@@ -85,7 +85,8 @@ test('통화 기반 최적화: 광고 유입 전화·문의·전화 기록 → �
   assert.deepEqual([row(k1).tel, row(k1).calls, row(k1).phone, row(k1).inquiries, row(k1).leads, row(k1).cpa], [2, 1, 2, 1, 3, 10000]);
   assert.deepEqual([row('nkw-x').leads, row('nkw-x').cpa, row('nkw-x').planId], [1, 60000, null], '사람이 만든 캠페인 키워드는 끄기 단추 없음');
   assert.equal(row(k1).planId, p.id);
-  assert.deepEqual(r.totals, { cost: 178000, clicks: 390, tel: 3, calls: 1, phone: 3, inquiries: 1, cta: 1, leads: 4, cpa: 44500 });
+  assert.deepEqual(r.totals, { cost: 178000, clicks: 390, tel: 3, calls: 1, phone: 3, inquiries: 1, cta: 1, leads: 4, wkSignup: 0, cpa: 44500 }); // 360차: 워크인 체험 신청(이 시험엔 없음)
+  assert.deepEqual({ ...r.workin, byCampaign: undefined }, { signups: 0, approved: 0, active: 0, fromAds: 0, untracked: 0, organic: 0, byCampaign: undefined }, '워크인 운영 회사(default)는 체험 신청 칸이 있음');
   assert.deepEqual(r.unknown, { tel: 2, calls: 1, inquiries: 1 }, '전화 클릭 중 랜딩 없는 것·광고 아닌 것(인스타 일반) = 키워드 모름');
   assert.equal(r.coverage, 57, '키워드를 아는 리드 4 / (4 + 모름 문의 1 + max(전화 클릭 2, 기록 1))'); assert.equal(r.judge, true);
   assert.deepEqual(r.target, { cpa: 44500, custom: false, avg: 44500 });

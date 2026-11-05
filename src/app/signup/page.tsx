@@ -60,7 +60,7 @@ export default function SignupPage() {
     </AuthCard>
   );
   if (done) return (
-    <AuthCard title={approval ? '체험 신청 — 메일을 확인해 주세요' : '메일을 확인해 주세요'} sub={f.email}>
+    <AuthCard title={approval ? '체험 신청을 받았습니다' : '메일을 확인해 주세요'} sub={f.email}>
       <div className="flex gap-3 rounded-card border border-green-200 bg-green-50 p-4 text-sm text-green-900" data-testid="signup-done">
         <MailCheck className="size-5 shrink-0" /><p>{done.message}</p>
       </div>

@@ -40,7 +40,7 @@ export async function signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }
     await shot('306-journey-apply-company.png');
     await p.getByTestId('signup-submit').click();
     await p.getByTestId('signup-done').waitFor();
-    await p.getByText('체험 신청 — 메일을 확인해 주세요').waitFor();
+    await p.getByText('체험 신청을 받았습니다').first().waitFor();
     await shot('307-journey-apply-done.png');
     const link = await p.getByTestId('dev-verify-link').getAttribute('href');
     const [t] = await sql`select t.id, t.signup_status, t.signup_info, s.trial_ends_at from tenants t join users u on u.tenant = t.id join tenant_subscriptions s on s.tenant = t.id where u.email = ${email}`;
@@ -137,6 +137,18 @@ export async function signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }
     await p.goto(BASE + '/library');
     await p.getByText('회사소개서').first().waitFor();
     await shot('316-journey-library.png');
+    // ── 8-1) 360차 #976 광고성 정보 수신 동의: 설정 › '새 기능·혜택 소식(광고성 정보) 받기' 켜기 → 처리 결과 메일 안내 · 날짜 줄
+    await p.goto(BASE + '/settings#marketing-consent');
+    const consent = p.getByTestId('marketing-consent'); await consent.waitFor();
+    await consent.scrollIntoViewIfNeeded();
+    assert.match(await consent.innerText(), /광고성 정보/);
+    const tg = p.getByTestId('marketing-consent-toggle');
+    if (!(await tg.isChecked())) { await tg.check(); await p.getByText('수신 동의했습니다').first().waitFor(); }
+    await p.waitForFunction(() => /2년마다/.test(document.querySelector('[data-testid="marketing-consent"]')?.textContent ?? ''));
+    assert.equal((await me.ok('GET', '/api/account/marketing-consent')).agreed, true);
+    await consent.evaluate((el) => { el.style.scrollMarginTop = '72px'; el.scrollIntoView({ block: 'start' }); });
+    await p.waitForTimeout(300);
+    await shot('320-journey-marketing-consent.png');
     // ── 9) 업무 메일 쓰기 창(보내기는 메일 계정 연결 뒤 — 새 회사 첫 화면 그대로)
     await p.goto(BASE + `/tasks/${taskId}`);
     const open = p.getByTestId('mail-compose-open');
