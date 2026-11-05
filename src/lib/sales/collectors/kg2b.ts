@@ -108,3 +108,74 @@ async function attachToOpenTasks(srcIds: string[]) {
   }
   return n;
 }
+
+// 373차 #996(대표 11/05 "KG2B 에서도 긁어 오고 있는가? 산업단지는 KG2B 에 올라오는 경우가 간혹 있음"): 지금은 K-apt 에 'kg2b_번호'로 공유된 공고만 KG2B 상세를 읽음 →
+// K-apt 에 없는 KG2B 공고(집합건물·상가·지식산업센터·산업단지 관리단 등)를 놓침. KG2B 자체 입찰 목록(/user/bid_list/bidAll — 로그인 없이 열림, 11/05 클라우드 확인:
+// 진행 공고 736건·한 장 10줄·74장, 다음 장은 같은 화면의 theForm(__encrypted) POST)을 받아 '이미 있음 / 새로 받을 것 / 관련 / 건물 종류'만 세는 미리 보기 — 저장 안 함.
+// 실제 수집 켜기는 대표 결정 뒤(KG2B 화면 아래 '허락없이 링크하거나 상업적인 용도로 사용할 수 없습니다' 문구 — 고객사에 보여 주는 범위를 정해야 함). 요청 간격 1.2초.
+export type Kg2bListRow = { code: string; noticeNo: string | null; title: string; issuer: string | null; industry: string | null; region: string | null;
+  briefingAt: string | null; openingAt: string | null; posted: string | null; kinds: string[] };
+const yy = (v: string | undefined) => { const m = /^(\d{2})-(\d{2})-(\d{2})(?:\s+(\d{1,2}):(\d{2}))?/.exec(String(v ?? '').trim()); return m ? `20${m[1]}-${m[2]}-${m[3]}T${(m[4] ?? '00').padStart(2, '0')}:${m[5] ?? '00'}:00+09:00` : null; };
+/** KG2B 입찰 목록 한 장 — 줄: 번호 · 공고 종류 그림(전자·현설·재입찰…)+공고번호 · 공고명(goAction('view','코드'))+발주처 · 업종+지역 · 현설일+개찰일 */
+export function parseKg2bList(html: string): { rows: Kg2bListRow[]; total: number | null; enc: string | null } {
+  const rows: Kg2bListRow[] = [];
+  for (const tr of html.match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
+    const code = /goAction\(\s*'view'\s*,\s*'(\d{3,12})'/.exec(tr)?.[1]; if (!code) continue;
+    const td: string[] = [...(tr.replace(/<script[\s\S]*?<\/script>/gi, ' ').match(/<td[\s\S]*?<\/td>/gi) ?? [])];
+    const cell = td.find((c) => c.includes(`'${code}'`)) ?? '';
+    const a = /<a[^>]*>([\s\S]*?)<\/a>/i.exec(cell)?.[1] ?? ''; const p = /<p[^>]*>([\s\S]*?)<\/p>/i.exec(cell)?.[1] ?? '';
+    const i = td.indexOf(cell); const ind = td[i + 1] ?? '', dates = td[i + 2] ?? '';
+    const noticeNo = /class="notinum"[^>]*>([\s\S]*?)<\/p>/i.exec(tr)?.[1] ? text(/class="notinum"[^>]*>([\s\S]*?)<\/p>/i.exec(tr)![1]) : null;
+    const h4 = /<h4[^>]*>([\s\S]*?)<\/h4>/i.exec(ind)?.[1]; const h5 = /<h5[^>]*>([\s\S]*?)<\/h5>/i.exec(dates)?.[1];
+    const d = /^(\d{4})(\d{2})(\d{2})/.exec(noticeNo ?? '');
+    rows.push({ code, noticeNo, title: text(a), issuer: text(p) || null, industry: text(ind.replace(/<h4[\s\S]*?<\/h4>/i, '')) || null, region: h4 ? text(h4) || null : null,
+      briefingAt: yy(text(dates.replace(/<h5[\s\S]*?<\/h5>/i, ''))), openingAt: h5 ? yy(text(h5)) : null, posted: d ? `${d[1]}-${d[2]}-${d[3]}` : null,
+      kinds: [...tr.matchAll(/<img[^>]*alt="([^"]+)"/gi)].map((m) => m[1]).slice(0, 4) });
+  }
+  const total = /공고수\s*:\s*([\d,]+)\s*건/.exec(text(html))?.[1]; const f = html.indexOf('name="theForm"');
+  const enc = f >= 0 ? /name="__encrypted"\s+value="([^"]+)"/.exec(html.slice(f))?.[1] ?? null : null;
+  return { rows, total: total ? Number(total.replace(/,/g, '')) : null, enc };
+}
+/** 발주처 이름으로 건물 종류 짐작 — K-apt(공동주택)에 없는 쪽이 이번에 새로 얻는 몫 */
+export function kg2bIssuerKind(issuer: string | null, title = ''): '산업단지·지식산업센터' | '집합건물·상가·오피스텔' | '공동주택(추정)' {
+  // 제목의 '커뮤니티센터'·'상가 보수' 같은 말은 아파트 공고에도 흔함 → 건물 종류는 발주처 이름으로(없을 때만 제목), 산업단지만 제목도 봄
+  const s = String(issuer ?? '').trim() || title;
+  if (/산업단지|산단|지식산업센터|테크노(?:파크|밸리|타워)|벤처타운|아파트형\s*공장|공단/.test(`${s} ${title}`)) return '산업단지·지식산업센터';
+  if (/관리단|빌딩|오피스텔|상가|타워|프라자|플라자|스퀘어|쇼핑몰|센터/i.test(s) && !/아파트|APT|입주자\s*대표/i.test(s)) return '집합건물·상가·오피스텔';
+  return '공동주택(추정)';
+}
+export async function previewKg2bList(opts: { pages?: number; days?: number } = {}, fetchImpl: typeof fetch = fetch) {
+  const pages = Math.min(Math.max(1, Math.floor(opts.pages ?? 8)), 20), days = Math.min(Math.max(1, Math.floor(opts.days ?? 14)), 30);
+  const since = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() - days * 864e5));
+  const url = `${kg2bBase()}/user/bid_list/bidAll`; const UA = 'Mozilla/5.0 (WorkIn sales)'; const t0 = Date.now();
+  let cookie = ''; const keep = (r: Response) => { const sc = (r.headers as any).getSetCookie?.() as string[] | undefined; const c = (sc ?? []).map((x) => x.split(';')[0]).filter(Boolean); if (c.length) cookie = c.join('; '); };
+  const all: Kg2bListRow[] = []; const seen = new Set<string>(); let total: number | null = null, enc: string | null = null, read = 0, stop = ''; const errors: string[] = [];
+  for (let page = 1; page <= pages; page++) {
+    if (page > 1) { if (!enc) { stop = '다음 장 열쇠(__encrypted) 없음'; break; } if (Date.now() - t0 > 40_000) { stop = '40초 넘음'; break; } await new Promise((r) => setTimeout(r, 1200)); }
+    try {
+      const res = page === 1 ? await fetchImpl(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(12_000), redirect: 'follow' })
+        : await fetchImpl(url, { method: 'POST', headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded', Referer: url, ...(cookie ? { Cookie: cookie } : {}) },
+          body: new URLSearchParams({ method: 'bidAlllist', currentPage: String(page), tabkind: '', __encrypted: enc! }).toString(), signal: AbortSignal.timeout(12_000), redirect: 'follow' });
+      keep(res); read++;
+      if (!res.ok) { errors.push(`${page}장 HTTP ${res.status}`); break; }
+      const p = parseKg2bList(await res.text()); total = total ?? p.total; enc = p.enc ?? enc;
+      const fresh = p.rows.filter((r) => !seen.has(r.code)); fresh.forEach((r) => seen.add(r.code)); all.push(...fresh);
+      if (!fresh.length) { stop = `${page}장에 새 줄 없음`; break; }
+      if (fresh.every((r) => r.posted && r.posted < since)) { stop = `${page}장이 모두 ${days}일 전`; break; }
+    } catch (e) { errors.push(`${page}장 ${(e as Error).message.slice(0, 80)}`); break; }
+  }
+  const inRange = all.filter((r) => !r.posted || r.posted >= since);
+  const have = new Set((await db()<{ ext: string }[]>`select row->>'source_external_id' as ext from sales_src_rows where scope = 'global' and tbl = 'procurement_notices'
+    and row->>'source_external_id' = any(${inRange.map((r) => `kg2b_${r.code}`)})`).map((x) => x.ext));
+  const { matchFit } = await import('./procurement');
+  const scored = inRange.map((r) => { const f = matchFit(r.title, r.industry); return { ...r, already: have.has(`kg2b_${r.code}`), fit: f.fit, kind: kg2bIssuerKind(r.issuer, r.title) }; });
+  const byKind: Record<string, { n: number; notInDb: number; related: number; relatedNew: number }> = {};
+  const byDay: Record<string, number> = {};
+  for (const r of scored) { const k = (byKind[r.kind] ??= { n: 0, notInDb: 0, related: 0, relatedNew: 0 }); k.n++; if (!r.already) k.notInDb++; if (r.fit) { k.related++; if (!r.already) k.relatedNew++; } if (r.posted) byDay[r.posted] = (byDay[r.posted] ?? 0) + 1; }
+  const pick = (r: (typeof scored)[number]) => ({ code: r.code, noticeNo: r.noticeNo, title: r.title, issuer: r.issuer, industry: r.industry, region: r.region, posted: r.posted, openingAt: r.openingAt, kind: r.kind, fit: r.fit, already: r.already });
+  const notIn = scored.filter((r) => !r.already);
+  return { source: url, days, since, pagesRead: read, total, rows: scored.length, stop: stop || (read >= pages ? `${pages}장까지(최대)` : ''), errors, ms: Date.now() - t0,
+    already: scored.length - notIn.length, notInDb: notIn.length, related: scored.filter((r) => r.fit).length, relatedNew: notIn.filter((r) => r.fit).length, byKind, byDay,
+    examples: [...notIn.filter((r) => r.fit), ...notIn.filter((r) => !r.fit && r.kind !== '공동주택(추정)'), ...notIn.filter((r) => !r.fit && r.kind === '공동주택(추정)')].slice(0, 15).map(pick),
+    alreadyExamples: scored.filter((r) => r.already).slice(0, 3).map(pick), saved: 0 };
+}

@@ -16,6 +16,11 @@ export const G2B_WORDS = ['피트니스', '헬스', '체력단련', '스포츠�
 const BID_OPS = [['ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch', '용역'], ['ad/BidPublicInfoService/getBidPblancListInfoThngPPSSrch', '물품'], ['ad/BidPublicInfoService/getBidPblancListInfoCnstwkPPSSrch', '공사'], ['ad/BidPublicInfoService/getBidPblancListInfoFrgcptPPSSrch', '외자']] as const;
 /** 누리장터는 확인된 주소가 없어 플랫폼 설정(endpoints)으로 — 전체 URL 을 op 자리에 넣는다 */
 const nuriOps = async () => { const ep = await endpoints(); return [[ep.nuri_bid_servc, '용역'], [ep.nuri_bid_thng, '물품']] as const; };
+// 372차 #995: 나라장터 '기타' 공고(업무 구분이 물품·용역·공사가 아닌 것 — 시설 관리위탁·운영자 모집, 연계 기관의 미분류 공고)도 받음.
+// 이 조회가 실패해도 수집 실패로 세지 않고 요약에 한 줄(활용신청 범위 밖이면 그 안내)
+const ETC_OPS = [['ad/BidPublicInfoService/getBidPblancListInfoEtcPPSSrch', '기타']] as const;
+/** 372차 미리 보기 검색어 — 공공 시설 관리위탁·운영자 모집(지금 검색어로는 '관리위탁 운영자'가 안 잡힘) */
+const PUB_WORDS = ['관리위탁', '위탁관리', '운영자 모집', '위탁운영자', '수탁자', '놀이터', '캠핑장', '야영장', '파크골프'];
 const PRESPEC_OPS = [['ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServc', '용역'], ['ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoThng', '물품']] as const;
 // 낙찰정보는 'as/' 접두(2026-10-21 실측: ao/ 는 '서비스 없음', as/ 는 키 오류 = 주소 존재)
 const AWARD_OPS = [['as/ScsbidInfoService/getScsbidListSttusServcPPSSrch', '용역'], ['as/ScsbidInfoService/getScsbidListSttusThngPPSSrch', '물품']] as const;
@@ -244,7 +249,13 @@ export const g2bBidNotices: Collector = {
     const a = await searchAll(BID_OPS, G2B_WORDS, days, (it, cat) => g2bPayload(it, 'g2b_bid', cat), ctx, key);
     const b = await searchAll(await nuriOps(), G2B_WORDS, days, nuriPayload, ctx, key);
     const errors = [...a.errors, ...b.errors]; const items = [...a.items, ...b.items];
-    const lim = await readG2bLimits(a.items, ctx, key, errors).catch((e) => { errors.push(`제한 조회: ${e instanceof Error ? e.message : String(e)}`); return { read: 0, found: 0, keys: [] as string[], diag: '' }; });
+    // 372차 #995: '기타' — 받은 것만 더하고(같은 공고는 한 번), 실패는 요약 한 줄로만
+    const e = await searchAll(ETC_OPS, G2B_WORDS, days, (it, cat) => g2bPayload(it, 'g2b_bid', cat), ctx, key).catch(() => null);
+    const have = new Set(a.items.map((x) => String(x.source_external_id)));
+    const etc = (e?.items ?? []).filter((x) => !have.has(String(x.source_external_id)));
+    items.push(...etc);
+    const etcNote = e && !e.items.length && (e.failed || e.denied.length) ? `기타 공고 조회 못 함${e.denied.length ? '(활용신청 범위 밖)' : ''} — 수집 실패로 안 셈` : null;
+    const lim = await readG2bLimits([...a.items, ...etc], ctx, key, errors).catch((e) => { errors.push(`제한 조회: ${e instanceof Error ? e.message : String(e)}`); return { read: 0, found: 0, keys: [] as string[], diag: '' }; });
     const r = await write(items, errors);
     if (lim.read && !lim.found) errors.push(`제한 조회 ${lim.read}건 — 값을 못 읽음${lim.keys.length ? `(받은 칸: ${lim.keys.join(', ')})` : ''}${lim.diag ? ` · ${lim.diag}` : ''}`);
     // 278차 #816: 실패한 검색 수도 오류로 셈 — 하나도 못 받으면 '실패'(예전엔 0건 '성공'으로 남아 알림이 안 감)
@@ -253,7 +264,7 @@ export const g2bBidNotices: Collector = {
     const maint = maintOf(a.stats.htmlHead) ?? maintOf(b.stats.htmlHead);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + a.failed + b.failed, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api', sources, retry: retryable(a) || retryable(b),
       ...(maint ? { maint } : {}),
-      summary: `${[!sources.g2b.ok && '나라장터 못 받음', !sources.nuri.ok && '누리장터 못 받음'].filter(Boolean).map((x) => `${x} · `).join('')}${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건(${statLine(b.stats, b.items.length)}) (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (lim.read ? ` · 참가 제한 조회 ${lim.read}건(값 ${lim.found})` : '') + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
+      summary: `${[!sources.g2b.ok && '나라장터 못 받음', !sources.nuri.ok && '누리장터 못 받음', etcNote].filter(Boolean).map((x) => `${x} · `).join('')}${etc.length ? `나라장터 기타 ${etc.length}건 · ` : ''}${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건(${statLine(b.stats, b.items.length)}) (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (lim.read ? ` · 참가 제한 조회 ${lim.read}건(값 ${lim.found})` : '') + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
   },
 };
 export function prespecPayload(it: any, cat: string): Record<string, unknown> | null {
@@ -284,3 +295,21 @@ export const g2bPrespecAwards: Collector = {
       summary: `사전규격 관련 ${pre.items.length}건(신규 ${r1.inserted}) · 낙찰 관련 ${awardItems.length}건(병합 ${r2.updated}·신규 ${r2.inserted})` + (pre.denied.length + aw.denied.length ? ` · 활용신청·주소 확인 필요 ${pre.denied.length + aw.denied.length}개 서비스` : '') };
   },
 };
+
+
+/** 372차 #995 미리 보기(저장 안 함): 공공 시설 관리위탁·운영자 모집 검색어로 용역·기타 최근 n일을 지금 받아 —
+ *  지금 규칙(matchFit)이 잡는 것 / 후보 규칙(publicFacilityFit)으로 새로 잡힐 것 / 후보가 뺀 까닭을 센다(잡음 확인용) */
+export async function previewPublicFacility(days = 14) {
+  const key = dataGoKey(); if (!key) return { error: '나라장터 서비스키 없음' };
+  const { matchFit, publicFacilityFit } = await import('./procurement');
+  const ctx: CollectorCtx = { fetchImpl: fetch, deadlineMs: 45_000, now: () => Date.now() };
+  const ops = [...BID_OPS.filter(([, c]) => c === '용역'), ...ETC_OPS];
+  const r = await searchAll(ops, PUB_WORDS, Math.min(Math.max(days, 1), 14), (it, cat) => g2bPayload(it, 'g2b_bid', cat), ctx, key);
+  const rows = r.items.map((x) => ({ no: String(x.source_external_id), title: String(x.title ?? ''), cat: String(x.bid_category ?? ''), issuer: (x.demand_agency ?? x.issuer ?? null) as string | null, posted: (x.posted_date ?? null) as string | null,
+    now: matchFit(String(x.title ?? ''), String(x.bid_category ?? '')).fit, cand: publicFacilityFit(String(x.title ?? ''), String(x.bid_category ?? '')) }));
+  const added = rows.filter((x) => !x.now && x.cand.hit);
+  const why = new Map<string, number>(); for (const x of rows) if (!x.now && !x.cand.hit && x.cand.why) why.set(x.cand.why, (why.get(x.cand.why) ?? 0) + 1);
+  return { days, words: PUB_WORDS, calls: r.stats.calls, failed: r.failed, errors: r.errors.slice(0, 3), scanned: rows.length, already: rows.filter((x) => x.now).length, added: added.length,
+    byCat: Object.fromEntries(['용역', '기타'].map((c) => [c, added.filter((x) => x.cat === c).length])), notAddedWhy: Object.fromEntries(why),
+    examples: added.slice(0, 15).map(({ cand, now: _n, ...x }) => ({ ...x, ops: cand.ops, facility: cand.facility })) };
+}

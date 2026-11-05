@@ -574,7 +574,38 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const canceledCount = all.filter((n) => inTab(n, 'canceled')).length;
     // 258차(로컬 10/29 09:20 ⓑ): 진행 중 탭에서 마감일 칸이 빈 공고(예고·협력사 등록·마감 칸 빈 입찰) 수 — 화면은 따로 묶어 보여 줌
     const noClose = tab === 'open' ? items.filter((n) => !n.close).length : 0;
-    return { ...meta, tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, todayCount, day: dayPick ?? (tab === 'today' ? td : null), days, region: regionPick || null, regions, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
+    // 372차 #995 ④(로컬 21라인 대조 '래미안·공고 번호로 찾으면 안 나옴'): 검색어가 있으면 이 탭 밖(대상 아님·취소된 공고·다른 탭)과 목록에 안 읽힌 '관련 아님' 공고도
+    // 제목·공고 번호·발주처·수요기관·단지 이름으로 찾아 어디 있는지·왜 안 보이는지 한 줄(최대 10건)
+    let outside: { id: string; title: string; noticeNo: string | null; where: string; why: string | null }[] = [];
+    if (term.length >= 2) {
+      const shown = new Set(items.map((n) => String(n.id)));
+      const like = `%${String(q.q ?? '').trim()}%`;
+      const rowsQ = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone
+        and (coalesce(row->>'title', '') ilike ${like} or coalesce(row->>'source_external_id', '') ilike ${like} or coalesce(row->>'notice_no', '') ilike ${like}
+          or coalesce(row->>'issuer', '') ilike ${like} or coalesce(row->>'demand_agency', '') ilike ${like} or coalesce(row->>'complex_name', '') ilike ${like})
+        order by coalesce(row->>'posted_date', row->>'first_seen_at') desc nulls last limit 30`.catch(() => []);
+      const byId = new Map(all.map((n) => [String(n.id), n]));
+      const { matchFit } = await import('./collectors/procurement');
+      for (const r of rowsQ) {
+        if (shown.has(r.src_id) || outside.length >= 10) continue;
+        const n = byId.get(r.src_id);
+        const title = String(r.row.title ?? ''); const noticeNo = r.row.source_external_id ? String(r.row.source_external_id) : null;
+        let where: string, why: string | null = null;
+        if (n) {
+          where = n.skipped ? '대상 아님 탭' : canceledCard(n) ? '취소된 공고 탭' : '다른 탭(전체 탭에서 보임)';
+          if (n.skipped) { // 대상 아님 탭이 아니면 n.skip 이 비어 있어 진행 기록에서 바로(같은 사업으로 함께 숨긴 카드는 기록 없음 → '함께 숨김')
+            const w = byNotice.get(String(n.id)); const reason = pick(w, 'skip_reason');
+            why = reason ? `숨긴 까닭: ${reason}` : w ? null : '같은 사업 공고와 함께 숨김';
+          }
+        } else {
+          const f = matchFit(title, r.row.bid_category ?? r.row.classification, r.row.task_scope);
+          where = r.row.related === false || !f.fit ? '관련 아님(우리 사업 낱말 없음)' : '목록 밖';
+          why = f.dropped?.[0] ? `${f.dropped[0].business} 뺀 까닭: ${f.dropped[0].why}` : null;
+        }
+        outside.push({ id: r.src_id, title, noticeNo, where, why });
+      }
+    }
+    return { ...meta, tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, todayCount, day: dayPick ?? (tab === 'today' ? td : null), days, region: regionPick || null, regions, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, outside, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings'; const td = today();

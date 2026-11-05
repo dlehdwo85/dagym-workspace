@@ -33,6 +33,20 @@ const OPERATION_ONLY = new Set(['위탁운영', '운영위탁', '운영업체', 
 /** 227차(로컬 10/28 ①② '국회도서관 정보기기·보안관제 위탁운영'): 위탁 대상이 시설이 아니라 정보기기·전산·관제·유지관리·콜센터인 공고 */
 const IT_TARGET = /정보\s*기기|전산|정보\s*(?:시스템|화|통신|보호)|보안\s*관제|관제\s*(?:시스템|센터|용역|업무)|유지\s*관리|유지\s*보수|콜\s*센터|서버|네트워크|홈페이지|소프트웨어/;
 
+/** 372차 #995(로컬 21라인 대조: 나라장터 '기타' R26BK01813410 안동 '엄마까투리 상상놀이터 관리위탁 운영자 모집'이 빠짐) — 미리 보기용 후보 규칙(아직 matchFit 에 안 넣음):
+ *  지자체·공공 시설의 관리위탁·운영자 모집 = 제목에 운영 맡김 낱말 + 시설 낱말, 설치·공사·구매 같은 낱말은 없음. 대표 확인 뒤 matchFit 에 넣는다 */
+const PUB_OPS = /(관리\s*위탁|위탁\s*관리|위탁\s*운영|운영\s*위탁|위탁\s*운영자|운영자\s*(?:모집|선정)|수탁(?:자|기관)\s*(?:모집|선정)|관리\s*운영\s*(?:위탁|자))/;
+const PUB_FAC = /(놀이터|어린이\s*공원|공원|캠핑장|야영장|오토\s*캠핑|체육\s*공원|파크\s*골프|골프장|체육\s*시설|체육관|체육\s*센터|수영장|생활\s*체육|스포츠\s*센터|국민\s*체육|복합\s*문화|문화\s*체육|레포츠|썰매장|스케이트장|물놀이)/;
+export function publicFacilityFit(title: string, cat?: string | null): { hit: boolean; ops: string | null; facility: string | null; why: string | null } {
+  const t = String(title ?? ''); const head = `${t} ${cat ?? ''}`;
+  const ops = t.match(PUB_OPS)?.[0] ?? null, facility = t.match(PUB_FAC)?.[0] ?? null;
+  if (!ops || !facility) return { hit: false, ops, facility, why: !ops ? '운영 맡김 낱말 없음' : '시설 낱말 없음' };
+  if (EXCLUDE_TOPICS.some((k) => norm(head).includes(norm(k)))) return { hit: false, ops, facility, why: '제외 주제' };
+  const build = t.match(BUILD_RE)?.[0] ?? t.match(CONSTRUCTION_RE)?.[0] ?? null;
+  if (build) return { hit: false, ops, facility, why: `제목에 '${build}'` };
+  return { hit: true, ops, facility, why: null };
+}
+
 export type FitBusiness = '다짐' | '하이링크' | '다짐·하이링크';
 /** dropped = 낱말은 맞았지만 191차 규칙으로 뺀 사업과 까닭(다시 판정이 예전 판정을 내릴 때 근거) */
 export type FitResult = { fit: FitBusiness | null; matched: string[]; direct: boolean; dropped?: { business: '다짐' | '하이링크'; why: string }[] };

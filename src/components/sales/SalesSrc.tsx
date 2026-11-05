@@ -1180,6 +1180,12 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
       {tab === 'today' && !!data?.results?.length && <details className="rounded-card border border-line bg-slate-50 p-2" data-testid="bids-results">
         <summary className="cursor-pointer text-sm font-semibold text-ink-2">결과(낙찰·유찰) {data.results.length}건 <span className="font-normal text-ink-3">— 새 공고가 아닌 결과</span></summary>
         <ul className="mt-2 space-y-1.5">{data.results.map((n: any) => <BidCard key={n.id} n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data.readOnly === false} />)}</ul></details>}
+      {/* 372차 #995 ④: 검색어가 있으면 이 탭 밖(대상 아님·취소된 공고·다른 탭)·목록에 안 읽힌 '관련 아님' 공고도 — 어디 있는지·왜 안 보이는지 */}
+      {!!data?.outside?.length && <section className="rounded-card border border-amber-200 bg-amber-50/60 p-2" data-testid="bids-outside">
+        <h3 className="text-xs font-semibold text-ink-2">이 목록 밖에서 찾은 공고 {data.outside.length}건 <span className="font-normal text-ink-3">— 검색어가 들어간 다른 탭·관련 아님 공고</span></h3>
+        <ul className="mt-1 space-y-1 text-sm">{data.outside.map((o: any) => <li key={o.id} data-testid="bids-outside-row"><span className="font-medium">{o.title}</span>{o.noticeNo && <span className="text-xs text-ink-3"> · {o.noticeNo}</span>}
+          {' — '}<span className="text-amber-800">{o.where}</span>{o.why && <span className="text-xs text-ink-3"> · {o.why}</span>}</li>)}</ul>
+      </section>}
       <BulkBar kind="bid" ids={sel} onDone={reload} onClear={() => setSel([])} />
       {open && <BidDetail n={data?.items.find((x: any) => x.id === open.id) ?? open} admin={data?.canAssign} canWrite={data?.readOnly === false} onChange={reload} onClose={() => setOpen(null)} />}
     </div>
