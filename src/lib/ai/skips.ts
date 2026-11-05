@@ -1,10 +1,11 @@
 // 371차 #994: AI 를 쓰는 수집·판단 단계가 한도·크레딧·속도 제한으로 '못 함' — 항목·사유·날짜를 남기고, 나중에 처리되면 '다시 채움'
 import { db, type Sql } from '../db';
 
-export type SkipStage = 'support' | 'eligibility_vision' | 'eligibility_ai' | 'mkt_audit' | 'mkt_produce';
+export type SkipStage = 'support' | 'eligibility_vision' | 'eligibility_ai' | 'mkt_audit' | 'mkt_produce' | 'kg2b_detail';
 export const STAGE_LABEL: Record<SkipStage, string> = {
   support: '지원사업 AI 판단', eligibility_vision: '사진 공고문 참가자격 읽기', eligibility_ai: '참가자격 AI 항목 정리',
   mkt_audit: '마케팅 사진·글 대조', mkt_produce: '마케팅 자동 원고',
+  kg2b_detail: 'KG2B 공고 상세 읽기(현장설명·공고문)', // 376차(로컬 11/06): KG2B 를 못 읽은 kg2b_ 공고 — 서울 중계로 다시 읽으면 '다시 채움'
 };
 const reasonOf = (e: unknown) => { const x = e as { code?: string; status?: number } | null; return String(x?.code || (x?.status ? `http_${x.status}` : 'ai_stop')).slice(0, 40); };
 

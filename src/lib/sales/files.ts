@@ -135,7 +135,8 @@ async function openChecked(rawUrl: string, init: { method?: string; headers?: Re
   if (!(u.protocol === 'https:' || (allowHttp && u.protocol === 'http:'))) throw badRequest('https 주소만 받을 수 있습니다');
   if (!fileHostAllowed(u.hostname)) throw new HttpError(403, 'file_host', '허용한 공공 사이트(나라장터·LH·온비드·누리장터·국방·K-apt·기업마당·K-Startup)의 첨부만 받을 수 있습니다');
   let r: Response;
-  try { r = await fetch(u, { method: init.method ?? 'GET', body: init.body, redirect: 'manual', signal: AbortSignal.timeout(30_000), headers: { 'user-agent': UA, accept: '*/*', ...init.headers } }); }
+  // 376차: KG2B 첨부는 해외 IP 를 막아 서울 중계로(서울 밖일 때만) — 리다이렉트 금지·30MB 같은 규칙은 그대로
+  try { r = await (await import('../krFetch')).krFetch(u.toString(), { method: init.method ?? 'GET', body: init.body, redirect: 'manual', signal: AbortSignal.timeout(30_000), headers: { 'user-agent': UA, accept: '*/*', ...init.headers } }); }
   catch (e: any) { throw new HttpError(502, 'file_fetch', `첨부를 받지 못했습니다: ${String(e?.message ?? e).slice(0, 120)}`); }
   if (r.status >= 300 && r.status < 400) throw new HttpError(502, 'file_redirect', '첨부 주소가 다른 곳으로 넘어가 받지 않았습니다 — 원문에서 직접 받아 주세요');
   if (!r.ok || !r.body) { await r.body?.cancel().catch(() => {}); throw new HttpError(502, 'file_fetch', `첨부를 받지 못했습니다(${r.status})`); }

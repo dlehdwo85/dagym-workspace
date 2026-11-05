@@ -377,6 +377,24 @@ test('#507 후속(로컬 10/23): 같은 공고 여러 줄(원본 복사 + 워크
   const v = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all');
   const hit = v.items.filter((i) => i.noticeNo === '20261021000001');
   assert.equal(hit.length, 1, JSON.stringify(hit.map((i) => i.id))); assert.equal(hit[0].attachments.length, 2);
+  // ④ 376차(로컬 11/06 kg2b_142686 두 줄 '취소'·'진행중'): 숨긴 워크인 줄만 취소를 알고, 남긴 두 줄은 '진행중' → 수집 뒤 남긴 줄도 취소(사유·취소일 옮김) · 카드는 '취소된 공고' 탭 한 줄
+  const saved = await one();
+  // 앞 시험(결과 수집)이 이 공고를 '낙찰'로 만들어 둠 → 남긴 두 줄을 '진행중'으로(낙찰·낙찰자 있는 줄은 옮기지 않으므로)
+  for (const id of ['SRC-2', 'SRC-3']) await sql`update sales_src_rows set row = (row - 'winner_name' - 'winner_amount' - 'winner_biz_no' - 'award_date' - 'result_note') || ${sql.json({ current_status: '진행중', notice_state: '공고중' })}::jsonb where src_id = ${id}`;
+  await sql`update sales_src_rows set row = row || ${sql.json({ current_status: '취소', notice_state: '취소', notice_kind: 'cancel', kapt_cancel_at: '2026-11-05T01:00:00.000Z', cancel_date: '2026-11-04', result_note: '입주자대표회의 의결로 취소' })}::jsonb where src_id = ${w.src_id}`;
+  const d = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
+  assert.match(d.summary, /같은 공고 다른 줄 취소 맞춤 2줄/, d.summary);
+  rows = await one();
+  for (const id of ['SRC-2', 'SRC-3']) {
+    const r = rows.find((x) => x.src_id === id).row;
+    assert.deepEqual([r.current_status, r.notice_kind, r.cancel_date, r.result_note, r.cancel_synced_from], ['취소', 'cancel', '2026-11-04', '입주자대표회의 의결로 취소', w.src_id], id);
+  }
+  const again = await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
+  assert.doesNotMatch(again.summary, /취소 맞춤/, '다시 돌려도 그대로(재수집이 진행중으로 안 되돌림)');
+  assert.equal((await one()).find((x) => x.src_id === 'SRC-2').row.current_status, '취소');
+  const cv = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=canceled');
+  assert.equal(cv.items.filter((i) => i.noticeNo === '20261021000001').length, 1, '취소된 공고 탭에 한 줄');
+  for (const r of saved) await sql`update sales_src_rows set row = ${sql.json(r.row)}, gone = ${r.gone} where src_id = ${r.src_id}`; // 다음 시험이 같은 공고를 씀
 });
 
 /** #522 새 명세 응답(가짜 원천): LH 는 body.item 에 바로·날짜 yyyy-MM-dd 만 받음(yyyyMMdd 면 오류) · 국방은 response.body.items.item · 온비드는 resultType=json·필수 입력 확인 */

@@ -26,6 +26,11 @@
       "regions": [
         "icn1"
       ]
+    },
+    "src/app/api/internal/kr-fetch/route.ts": {
+      "regions": [
+        "icn1"
+      ]
     }
   },
   "git": {

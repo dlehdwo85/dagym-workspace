@@ -8,7 +8,8 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # 376차: ubuntu-latest 가 26.04 로 바뀌어 Playwright 1.56 이 chromium·의존성을 못 깖(CI 2225~2235 E2E 단계 실패, API 시험은 통과) → 지원되는 24.04 로 고정
+    runs-on: ubuntu-24.04
     timeout-minutes: 90 # API 시험 ~25분 + E2E 까지 한 작업
     services:
       postgres:

@@ -33,7 +33,7 @@ before(async () => {
       res.end(req.method === 'POST' && f.get('method') === 'bidAlllist' && f.get('currentPage') === '2' && f.get('__encrypted') === 'TOKEN1' && /JSESSIONID=sess996/.test(req.headers.cookie ?? '') ? P2 : P1);
     });
   }).listen(PORT);
-  await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}` }); sql = testDb(); ctx = await bootstrap();
+  await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, KR_RELAY: 'force' /* 376차: 목록 미리 보기도 서울 중계로(POST·쿠키·열쇠가 중계를 지나도 그대로) */ }); sql = testDb(); ctx = await bootstrap();
   await sql`insert into sales_src_rows (scope, tbl, src_id, row) values ('global', 'procurement_notices', '00000000-0000-4000-8000-000000996001',
     ${sql.json({ id: '00000000-0000-4000-8000-000000996001', source_type: 'kapt_bid', source_external_id: 'kg2b_996001', title: '경비용역 업체 선정 입찰공고', posted_date: today })})`;
 });
@@ -66,8 +66,21 @@ test('374차 KG2B 연결 점검(이름 찾기·연결·첫 화면·목록) · �
     assert.ok(p.dns.ok && p.tcp.ok, JSON.stringify(p)); assert.equal(p.port, PORT);
     assert.equal(p.main.ok, true); assert.equal(p.main.status, 404, '가짜 KG2B 는 첫 화면 404');
     assert.equal(p.list.ok, true); assert.equal(p.list.rows, 3);
+    assert.ok(p.relay?.ok && p.relay.rows === 3, `서울 중계로도 목록 ${JSON.stringify(p.relay)}`);
   }
   const { kg2bList } = await ctx.owner.ok('GET', '/api/platform/kg2b?do=listpreview&pages=2&days=14');
   assert.equal(kg2bList.rows, 3); assert.ok('region' in kg2bList);
   const r = await ctx.staffA.client.req('GET', '/api/platform/kg2b?do=probe'); assert.equal(r.status, 404, '운영자 아니면 숨김');
+});
+
+test('376차 서울 중계 주소: 서버끼리만(CRON_SECRET) · 허용한 곳(KG2B)만 · 상태·머리는 x-kr-* 로', async () => {
+  const BASE = (await import('../helpers.mjs')).BASE;
+  const post = (body, auth) => fetch(`${BASE}/api/internal/kr-fetch`, { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: `Bearer ${auth}` } : {}) }, body: JSON.stringify(body) });
+  assert.equal((await post({ url: `http://localhost:${PORT}/kg2b/user/bid_list/bidAll` })).status, 401, '열쇠 없으면 거절');
+  assert.equal((await post({ url: `http://localhost:${PORT}/kg2b/user/bid_list/bidAll` }, 'wrong-secret')).status, 401);
+  assert.equal((await post({ url: 'https://example.com/' }, 'cron-test-secret')).status, 403, '허용 안 한 곳');
+  assert.equal((await post({ url: `http://localhost:${PORT}/other` }, 'cron-test-secret')).status, 403, '시험 서버라도 /kg2b 밖은 거절');
+  const ok = await post({ url: `http://localhost:${PORT}/kg2b/user/bid_list/bidAll` }, 'cron-test-secret');
+  assert.equal(ok.status, 200); assert.equal(ok.headers.get('x-kr-status'), '200'); assert.match(ok.headers.get('x-kr-set-cookie') ?? '', /JSESSIONID=sess996/);
+  assert.match(await ok.text(), /공고수 : 736건/);
 });

@@ -154,14 +154,30 @@ const JUDGED = new Set<string>(['fit_business', 'matched_keywords', 'related', '
  * 진행 기록·업무가 걸린 줄의 id 를 살리고(없으면 워크인 수집 줄 → 첨부 있는 줄 → 먼저 본 줄), 다른 줄의 첨부는 합치고 빈 칸·원천 값은 더 최근 줄 값으로 채운 뒤 숨김(gone, merged_into).
  * 진행 기록이 걸린 줄이 둘 이상이면 그 줄들은 숨기지 않음(목록은 화면에서 한 줄). 원본 복사가 숨긴 줄을 되살려도 복사 뒤·수집 뒤에 다시 돌아 같은 결과
  */
-export async function mergeNoticeDuplicates(): Promise<{ groups: number; hidden: number; kept: number; byType: Record<string, number> }> {
+export async function mergeNoticeDuplicates(): Promise<{ groups: number; hidden: number; kept: number; byType: Record<string, number>; canceled: number }> {
   const sql = db();
+  // 376차(로컬 11/06 kg2b_142686 두 줄 — 하나 '취소', 하나 '진행중'): K-apt 상세로 취소를 알면 그때 보이던 줄만 고침 → 숨겨 둔 줄·원본 매일 복사가 되살린 줄,
+  // 진행 기록이 걸려 남긴 줄은 '진행중'으로 남아 목록·메일에 산 공고로 보였다. 같은 공고(원천 종류 + 번호)의 한 줄이라도 취소면(숨긴 줄 포함) 보이는 다른 줄에 취소 칸을 옮김.
+  // 낙찰·낙찰자가 있는 줄은 그대로. cancel_synced_at 이 있으면 원본 매일 복사가 '진행중'으로 되돌리지 않음(migrate 취소 유지 규칙)
+  const canceled = await sql<{ src_id: string }[]>`update sales_src_rows s set row = s.row || jsonb_strip_nulls(jsonb_build_object(
+      'current_status', c.row->'current_status', 'notice_state', c.row->'notice_state', 'notice_kind', c.row->'notice_kind',
+      'kapt_cancel_at', case when coalesce(s.row->>'kapt_cancel_at', '') = '' then c.row->'kapt_cancel_at' end,
+      'cancel_at', case when coalesce(s.row->>'cancel_at', '') = '' then c.row->'cancel_at' end, 'cancel_date', case when coalesce(s.row->>'cancel_date', '') = '' then c.row->'cancel_date' end,
+      'result_note', case when coalesce(s.row->>'result_note', '') = '' then c.row->'result_note' end,
+      'cancel_synced_at', to_jsonb(${new Date().toISOString()}::text), 'cancel_synced_from', to_jsonb(c.src_id))), synced_at = now()
+    from (select distinct on (row->>'source_type', row->>'source_external_id') src_id, row from sales_src_rows
+      where scope = ${SCOPE} and tbl = 'procurement_notices' and coalesce(row->>'current_status', '') ~ '취소' and coalesce(row->>'source_external_id', '') <> ''
+      order by row->>'source_type', row->>'source_external_id', synced_at desc nulls last) c
+    where s.scope = ${SCOPE} and s.tbl = 'procurement_notices' and not s.gone and s.src_id <> c.src_id
+      and s.row->>'source_type' = c.row->>'source_type' and s.row->>'source_external_id' = c.row->>'source_external_id'
+      and coalesce(s.row->>'current_status', '') !~ '취소|낙찰' and coalesce(s.row->>'winner_name', '') = ''
+    returning s.src_id`;
   const dup = await sql<{ src_id: string; origin: string; row: any }[]>`with d as (
       select row->>'source_type' as st, row->>'source_external_id' as ext from sales_src_rows
       where scope = ${SCOPE} and tbl = 'procurement_notices' and not gone and coalesce(row->>'source_external_id', '') <> '' group by 1, 2 having count(*) > 1)
     select s.src_id, s.origin, s.row from sales_src_rows s join d on s.row->>'source_type' = d.st and s.row->>'source_external_id' = d.ext
     where s.scope = ${SCOPE} and s.tbl = 'procurement_notices' and not s.gone`;
-  const out = { groups: 0, hidden: 0, kept: 0, byType: {} as Record<string, number> };
+  const out = { groups: 0, hidden: 0, kept: 0, byType: {} as Record<string, number>, canceled: canceled.length };
   if (!dup.length) return out;
   const links = await noticeLinks(dup.map((r) => r.src_id));
   type Dup = { src_id: string; origin: string; row: any };

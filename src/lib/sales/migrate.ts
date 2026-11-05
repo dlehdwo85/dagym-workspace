@@ -66,7 +66,7 @@ export const JUDGED_KEEP = ['related', 'fit_business', 'matched_keywords', 'clas
 export const RESULT_KEEP = ['result_at', 'result_filled_at', 'kapt_detail_at', 'kapt_detail_v', 'participants', 'result_note', 'winner_name', 'winner_biz_no', 'winner_amount', 'award_date', 'winner_rate', 'bidders',
   // 239차·#751 후속(로컬 10/28 18:22): K-apt 상세가 채운 참가 조건·현장설명 칸과 취소를 안 때도 같은 규칙(원본이 비었으면 워크인 값)
   'site_briefing_kind', 'site_briefing_at', 'site_briefing_place', 'bid_docs', 'credit_rating_cert', 'performance_cert', 'bid_bond', 'docs_deadline_at', 'bid_method', 'urgent_bid', 'payment_terms', 'terms_read_at', 'kapt_cancel_at',
-  'eligibility']; // 252차 #786 첨부 공고문에서 읽은 참가자격(원본에는 없는 칸)
+  'eligibility', 'cancel_synced_at', 'cancel_synced_from']; // 252차 #786 첨부 공고문에서 읽은 참가자격(원본에는 없는 칸) · 376차 같은 공고 다른 줄에서 옮긴 취소 표시
 async function upsertRows(scope: string, tbl: string, rows: any[]) {
   const sql = db(); const now = new Date(); const weekAgo = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(now.getTime() - 7 * 864e5));
   for (let n = 0; n < rows.length; n += 500) {
@@ -78,7 +78,7 @@ async function upsertRows(scope: string, tbl: string, rows: any[]) {
         || (case when (coalesce(sales_src_rows.row->>'current_status', '') ~ '낙찰|유찰' or coalesce(sales_src_rows.row->>'winner_name', '') <> '')
             and not (coalesce(excluded.row->>'current_status', '') ~ '낙찰|유찰' or coalesce(excluded.row->>'winner_name', '') <> '')
           then jsonb_strip_nulls(jsonb_build_object('current_status', sales_src_rows.row->'current_status', 'notice_state', sales_src_rows.row->'notice_state')) else '{}'::jsonb end)
-        || (case when sales_src_rows.row ? 'kapt_cancel_at' and coalesce(sales_src_rows.row->>'current_status', '') ~ '취소'
+        || (case when (sales_src_rows.row ? 'kapt_cancel_at' or sales_src_rows.row ? 'cancel_synced_at') and coalesce(sales_src_rows.row->>'current_status', '') ~ '취소' /* 376차: 같은 공고 다른 줄에서 옮긴 취소도 */
             and not (coalesce(excluded.row->>'current_status', '') ~ '취소|낙찰|유찰' or coalesce(excluded.row->>'winner_name', '') <> '')
           then jsonb_strip_nulls(jsonb_build_object('current_status', sales_src_rows.row->'current_status', 'notice_state', sales_src_rows.row->'notice_state', 'notice_kind', sales_src_rows.row->'notice_kind')) else '{}'::jsonb end)
         || (case when not (sales_src_rows.row ? 'result_at') and not (coalesce(sales_src_rows.row->>'current_status', '') ~ '낙찰|유찰' or coalesce(sales_src_rows.row->>'winner_name', '') <> '')

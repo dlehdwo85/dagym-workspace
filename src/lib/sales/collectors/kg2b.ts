@@ -3,6 +3,9 @@
 // 공고 줄에 채움. 공고문이 생기면 참가자격 읽기(eligibilityTick)가 첨부 지문이 바뀐 것을 보고 다시 읽음. 담당자 칸(사람 이름·직함)은 저장하지 않음
 import { db } from '../../db';
 import type { SessionUser } from '../../types';
+import { krFetch, needsKr, relayOn } from '../../krFetch';
+/** 376차: KG2B 는 해외 IP 를 막음 → 서울 밖이면 서울 중계로(시험·서울 함수는 넘겨받은 fetch 그대로) */
+const viaKr = (f: typeof fetch): typeof fetch => ((u: any, init?: any) => (needsKr(String(u)) && relayOn() ? krFetch(String(u), init) : f(u, init))) as typeof fetch;
 
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
 export const kg2bBase = () => (T() ? `${T()}/kg2b` : 'https://www.kg2b.com');
@@ -67,11 +70,12 @@ export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => numbe
   const by = new Map<string, { src_id: string; row: any }[]>();
   for (const r of rows) { const k = String(r.row.source_external_id); if (!by.has(k)) by.set(k, []); by.get(k)!.push(r); }
   const out = { read: 0, files: 0, attached: 0, errors: [] as string[] };
+  const done: string[] = [], missed: { key: string; title: string | null; err: { code: string; message: string } }[] = [];
   for (const [ext, group] of [...by.entries()].slice(0, max)) {
     if (left() < 8000) break;
     const code = kg2bCode(ext)!;
     try {
-      const res = await fetchImpl(kg2bDetailUrl(code), { headers: { 'User-Agent': 'Mozilla/5.0 (WorkIn sales)' }, signal: AbortSignal.timeout(8000), redirect: 'follow' });
+      const res = await viaKr(fetchImpl)(kg2bDetailUrl(code), { headers: { 'User-Agent': 'Mozilla/5.0 (WorkIn sales)' }, signal: AbortSignal.timeout(relayOn() ? 20000 : 8000), redirect: 'follow' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = parseKg2bDetail(await res.text());
       if (!d.noticeNo && !d.files.length && !d.close) throw new Error('KG2B 상세 칸을 못 읽음(화면이 바뀜?)');
@@ -80,10 +84,18 @@ export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => numbe
         await sql`update sales_src_rows set row = row || ${sql.json(patch as never)}::jsonb, synced_at = now() where scope = 'global' and tbl = 'procurement_notices' and src_id = ${g.src_id}`;
         out.files += added;
       }
-      out.read++;
+      out.read++; done.push(ext);
       if (d.files.length && left() > 15000) out.attached += await attachToOpenTasks(group.map((g) => g.src_id)).catch(() => 0);
-    } catch (e) { if (out.errors.length < 5) out.errors.push(`KG2B 상세 ${ext}: ${e instanceof Error ? e.message : String(e)}`); }
+    } catch (e) {
+      const msg = fetchErr(e); if (out.errors.length < 5) out.errors.push(`KG2B 상세 ${ext}: ${msg}`);
+      // 376차(로컬 11/06 "못 읽은 kg2b_ 공고는 #994 '못 함'으로 남겨 다시 채워 주세요"): 관리 › 운영 상태 '빠졌던 날'에 남고, 다음 실행이 다시 읽으면 '다시 채움'
+      const http = /^HTTP (\d{3})/.exec(e instanceof Error ? e.message : ''); missed.push({ key: ext, title: group[0].row?.title ?? null, err: { code: http ? `http_${http[1]}` : /못 읽음/.test(msg) ? 'kg2b_parse' : 'kg2b_fetch', message: msg } });
+    }
   }
+  // 못 함·다시 채움 기록(공용 공고 = 'global') — 실패해도 수집은 그대로
+  const { noteSkip, noteDone } = await import('../../ai/skips');
+  for (const m of missed) await noteSkip(sql, 'global', 'kg2b_detail', m.key, m.title, m.err);
+  await noteDone(sql, 'global', 'kg2b_detail', done);
   return out;
 }
 
@@ -144,7 +156,8 @@ export function kg2bIssuerKind(issuer: string | null, title = ''): '산업단지
   if (/관리단|빌딩|오피스텔|상가|타워|프라자|플라자|스퀘어|쇼핑몰|센터/i.test(s) && !/아파트|APT|입주자\s*대표/i.test(s)) return '집합건물·상가·오피스텔';
   return '공동주택(추정)';
 }
-export async function previewKg2bList(opts: { pages?: number; days?: number } = {}, fetchImpl: typeof fetch = fetch) {
+export async function previewKg2bList(opts: { pages?: number; days?: number } = {}, fetchImpl0: typeof fetch = fetch) {
+  const fetchImpl = viaKr(fetchImpl0);
   const pages = Math.min(Math.max(1, Math.floor(opts.pages ?? 8)), 20), days = Math.min(Math.max(1, Math.floor(opts.days ?? 14)), 30);
   const since = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() - days * 864e5));
   const url = `${kg2bBase()}/user/bid_list/bidAll`; const UA = 'Mozilla/5.0 (WorkIn sales)'; const t0 = Date.now();
@@ -202,5 +215,8 @@ export async function kg2bProbe(fetchImpl: typeof fetch = fetch) {
   const get = (path: string) => timed(async () => { const r = await fetchImpl(`${kg2bBase()}${path}`, { headers: { 'User-Agent': 'Mozilla/5.0 (WorkIn sales)' }, signal: AbortSignal.timeout(15_000), redirect: 'follow' });
     const h = await r.text(); return { status: r.status, bytes: h.length, ...(path.includes('bidAll') ? { rows: parseKg2bList(h).rows.length } : {}) }; });
   const main = await get('/'); await new Promise((r) => setTimeout(r, 1200)); const list = await get('/user/bid_list/bidAll');
-  return { region: process.env.VERCEL_REGION ?? null, host, port, dns, tcp, main, list, at: new Date().toISOString() };
+  // 376차: 서울 중계로 받으면 되는지(서울 밖에서만 — 정기 실행이 실제로 쓰는 길)
+  const relay = relayOn() ? await timed(async () => { const r = await krFetch(`${kg2bBase()}/user/bid_list/bidAll`, { headers: { 'User-Agent': 'Mozilla/5.0 (WorkIn sales)' } });
+    const h = await r.text(); return { status: r.status, via: r.headers.get('x-kr-relay'), rows: parseKg2bList(h).rows.length }; }) : null;
+  return { region: process.env.VERCEL_REGION ?? null, host, port, dns, tcp, main, list, relay, at: new Date().toISOString() };
 }

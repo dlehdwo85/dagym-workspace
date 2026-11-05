@@ -57,7 +57,7 @@ const KG2B = `<html><head><title>KG2B 전자입찰시스템</title><script>funct
 <!-- <a href="#">201410241998_1.hwp(26624byte) <img src="/resources/images/sub/ico_filedown.gif" alt="첨부파일 다운받기"></a> --></dd>
 								</dl></td></tr>
 </table></body></html>`;
-let srv, ctx, sql, fake, kapt; const kg2bHits = [];
+let srv, ctx, sql, fake, kapt; const kg2bHits = []; let kg2bDown = false;
 const get = async () => (await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = ${BID}`)[0]?.row;
 
 before(async () => {
@@ -70,11 +70,11 @@ before(async () => {
     if (u.pathname === '/kapt/bid/bidList.do') return send(200, `<html><table>${u.searchParams.get('pageNo') === '1' ? tr(BID, ['1', 'KG2B', 'APT적격심사', TITLE, `${plus(9)} 09:00`, '신규공고', '시험팔이팔푸르지오', `${plus(-3)} 18:46`]) : ''}</table></html>`);
     if (u.pathname === '/kaptbidapi/getPblAncDeSearchV3') return send(200, JSON.stringify({ response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items: [], numOfRows: 100, pageNo: 1, totalCount: 0 } } }), 'application/json');
     if (u.pathname === '/kg2b/common/util/download') return send(200, Buffer.from('HWP Document File 5.0 시험 공고문'), 'application/octet-stream');
-    if (u.pathname === '/kg2b/user/bid_list/KaptBidView') { kg2bHits.push(u.searchParams.get('bidcode')); return u.searchParams.get('bidcode') === CODE ? send(200, KG2B) : send(404, 'no'); }
+    if (u.pathname === '/kg2b/user/bid_list/KaptBidView') { kg2bHits.push(u.searchParams.get('bidcode')); if (kg2bDown) return send(503, 'busy'); return u.searchParams.get('bidcode') === CODE ? send(200, KG2B) : send(404, 'no'); }
     if (kapt.handle(req, res, body)) return;
     send(404, 'nope');
   }).listen(PORT);
-  await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, SALES_FILE_HOSTS: 'localhost' }); sql = testDb(); ctx = await bootstrap();
+  await resetDb(); srv = await startServer({ SALES_COLLECT_TEST_BASE: `http://localhost:${PORT}`, SALES_FILE_HOSTS: 'localhost', KR_RELAY: 'force' /* 376차: 운영(싱가포르)처럼 KG2B 상세·공고문을 서울 중계 주소로 받음 */ }); sql = testDb(); ctx = await bootstrap();
   await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant: 'default', at: new Date().toISOString(), daily: true })})`;
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
 });
@@ -111,4 +111,21 @@ test('kg2b_ 공고: KG2B 상세에서 공고번호·입찰 개시·개찰(일시
   const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((n) => n.noticeNo === BID);
   assert.ok(card, '카드'); assert.ok(card.attachments.some((a) => /입찰공고문/.test(a.name ?? '')), JSON.stringify(card.attachments));
   assert.equal(card.briefing, null, "K-apt '공고문 참조'보다 KG2B '현장설명회 없음' — 현설 없음");
+});
+
+test('376차(로컬 11/06): KG2B 를 못 읽은 kg2b_ 공고 = 못 함(공용 · 관리 › 운영 상태 빠졌던 날) → 다음 실행이 읽으면 다시 채움', async () => {
+  const [r0] = await sql`select src_id from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = ${BID}`;
+  await sql`update sales_src_rows set row = row - 'kg2b_read_at' - 'kg2b_v' where src_id = ${r0.src_id}`;
+  kg2bDown = true;
+  await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
+  const skip = async () => (await sql`select reason, title, done_at, message from ai_skips where tenant = 'global' and stage = 'kg2b_detail' and item_key = ${BID}`)[0];
+  let s = await skip();
+  assert.deepEqual([s?.reason, s?.title, s?.done_at], ['http_503', TITLE, null], JSON.stringify(s));
+  const ops = await ctx.owner.ok('GET', '/api/admin/ops');
+  assert.ok(ops.aiSkips.some((x) => x.stage === 'kg2b_detail' && x.left === 1 && /KG2B/.test(x.label)), JSON.stringify(ops.aiSkips));
+  assert.equal((await get()).kg2b_read_at ?? null, null);
+  kg2bDown = false;
+  await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
+  s = await skip(); assert.ok(s.done_at, '다시 채움');
+  assert.ok((await get()).kg2b_read_at, 'KG2B 상세 다시 읽음');
 });

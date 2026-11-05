@@ -50,7 +50,7 @@ export async function runCollector(slug: string, trigger: 'cron' | 'manual' | 'r
   if (BID_COLLECTORS.has(slug)) {
     const m = await mergeNoticeDuplicates().catch(async (e) => { await logError('sales-notice-merge', e).catch(() => {}); return null; });
     const by = Object.entries(m?.byType ?? {}).map(([k, v]) => `${SRC_KO[k] ?? k} ${v}`).join('·');
-    if (m?.hidden || m?.kept) result = { ...result, summary: `${result.summary ?? ''}${m.hidden ? ` · 같은 공고 ${m.hidden}줄 합침(${by})` : ''}${m.kept ? ` · 두 줄 모두 진행 기록·업무가 있어 그대로 둔 공고 ${m.kept}건` : ''}` };
+    if (m?.hidden || m?.kept || m?.canceled) result = { ...result, summary: `${result.summary ?? ''}${m.hidden ? ` · 같은 공고 ${m.hidden}줄 합침(${by})` : ''}${m.kept ? ` · 두 줄 모두 진행 기록·업무가 있어 그대로 둔 공고 ${m.kept}건` : ''}${m.canceled ? ` · 같은 공고 다른 줄 취소 맞춤 ${m.canceled}줄` : ''}` };
   }
   const status = await completeRun(runId, slug, result);
   return { runId, slug, status, ...result };
