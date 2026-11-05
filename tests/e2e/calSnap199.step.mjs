@@ -20,12 +20,14 @@ export async function calSnap199({ owner, ctx, sql, BASE }) {
       const box = await ev.boundingBox();
       await owner.mouse.move(box.x + box.width / 2, box.y + 6); await owner.mouse.down();
       await owner.mouse.move(box.x + box.width / 2, box.y + 6 + slotH * frac / 2, { steps: 6 });
-      await owner.mouse.move(box.x + box.width / 2, box.y + 6 + slotH * frac + 3, { steps: 6 }); await owner.mouse.up();
+      // CI 2187(11/05): 무거운 CI 에서 마지막 이동을 달력이 읽기 전에 손을 떼 제자리(10:00)로 놓인 적 있음 → 놓기 전에 잠깐 멈춤
+      await owner.mouse.move(box.x + box.width / 2, box.y + 6 + slotH * frac + 3, { steps: 6 }); await owner.waitForTimeout(150); await owner.mouse.up();
       await owner.getByText('일정을 이동했습니다').first().waitFor();
     };
     await drag(0.25); // 15분만큼 아래로
     for (let i = 0; i < 20 && (await startOf()) === '10:00'; i++) await owner.waitForTimeout(200);
-    assert.equal(await startOf(), '10:15', '15분 단위로 옮겨짐(예전 1시간 단위면 제자리 · 잡은 자리 보정이 없으면 45분 튐)');
+    const at = async () => (await sql`select to_char(start_at at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') as s from events where id = ${r.id}`)[0].s;
+    assert.equal(await startOf(), '10:15', `15분 단위로 옮겨짐(예전 1시간 단위면 제자리 · 잡은 자리 보정이 없으면 45분 튐) — 지금 ${await at()}`);
     // #756(대표 10/28): 한 번 클릭도 누른 자리 15분 칸부터 1시간(199차의 '정시부터'를 바꿈) · 끌어서 그리면 15분 단위
     const lane = owner.locator('td.fc-timegrid-slot-lane[data-time="14:00:00"]').first();
     await lane.evaluate((el) => el.scrollIntoView({ block: 'center' })); await owner.waitForTimeout(200);
