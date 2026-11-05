@@ -1103,7 +1103,9 @@ async function actKeywords(u: SessionUser, id: string, i: z.infer<typeof planAct
  * - 워크인에 연결 안 된 캠페인까지 계정의 모든 캠페인. 이미 켜진 것·'사이트 통과(PASS_THROUGH_SITE_MODE)'로 쓰는 것은 건드리지 않음
  * - dryRun=true 면 바꿀 목록만(아무것도 안 바꿈). 관리자만. 실계정 확인 전 '구조 시험'
  */
-export const trackingAllInput = z.object({ accountId: z.string().uuid(), dryRun: z.boolean().default(true) });
+export const trackingAllInput = z.object({ accountId: z.string().uuid(), dryRun: z.boolean().default(true),
+  /** 360차 후속(노트북): 켤 캠페인만 고르기 — 없으면 계정의 모든 캠페인 */
+  campaignIds: z.array(z.string().regex(/^cmp-[\w-]{1,60}$/)).min(1).max(200).optional() });
 export async function naverTrackingAll(u: SessionUser, i: z.infer<typeof trackingAllInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const t = tenantOf(u); const sql = db();
@@ -1111,10 +1113,14 @@ export async function naverTrackingAll(u: SessionUser, i: z.infer<typeof trackin
   const camps = listOf(await naverReq(a, 'GET', '/ncc/campaigns'));
   const plans = await sql<{ id: string; cid: string }[]>`select id, external->>'campaignId' as cid from mkt_ad_plans where tenant = ${t} and account_id = ${i.accountId} and external->>'campaignId' is not null and status <> 'archived'`;
   const planOfCid = new Map(plans.map((p) => [String(p.cid), p.id]));
-  const rows: { id: string; name: string; before: string; after: string | null; status: 'already' | 'other_mode' | 'would_change' | 'changed' | 'not_applied' | 'failed'; error?: string; planId: string | null }[] = [];
+  const rows: { id: string; name: string; before: string; after: string | null; status: 'already' | 'other_mode' | 'would_change' | 'changed' | 'not_applied' | 'failed' | 'place' | 'not_picked'; error?: string; planId: string | null }[] = [];
+  const picked = i.campaignIds ? new Set(i.campaignIds) : null;
   for (const c of camps) {
     const id = String(c?.nccCampaignId ?? ''); if (!id) continue;
     const name = String(c?.name ?? id); const before = String(c?.trackingMode || 'TRACKING_DISABLED'); const planId = planOfCid.get(id) ?? null;
+    if (picked && !picked.has(id)) { rows.push({ id, name, before, after: before, status: 'not_picked', planId }); continue; }
+    // 플레이스 광고는 손님이 네이버 플레이스로 가서 사이트 주소 꼬리표가 쓸모없음 → 그대로
+    if (String(c?.campaignTp ?? '') === 'PLACE') { rows.push({ id, name, before, after: before, status: 'place', planId }); continue; }
     if (before === 'AUTO_TRACKING_MODE') { rows.push({ id, name, before, after: before, status: 'already', planId }); continue; }
     if (before === 'PASS_THROUGH_SITE_MODE') { rows.push({ id, name, before, after: before, status: 'other_mode', planId }); continue; }
     if (i.dryRun) { rows.push({ id, name, before, after: null, status: 'would_change', planId }); continue; }
@@ -1130,5 +1136,6 @@ export async function naverTrackingAll(u: SessionUser, i: z.infer<typeof trackin
   }
   const count = (s: string) => rows.filter((r) => r.status === s).length;
   if (!i.dryRun) await audit(sql, u.id, 'mkt_ads.tracking_all', 'mkt_ad_account', i.accountId, { changed: count('changed'), notApplied: count('not_applied'), failed: count('failed') }).catch(() => {});
-  return { dryRun: i.dryRun, total: rows.length, already: count('already'), otherMode: count('other_mode'), wouldChange: count('would_change'), changed: count('changed'), notApplied: count('not_applied'), failed: count('failed'), rows };
+  return { dryRun: i.dryRun, total: rows.length, already: count('already'), otherMode: count('other_mode'), place: count('place'), notPicked: count('not_picked'),
+    wouldChange: count('would_change'), changed: count('changed'), notApplied: count('not_applied'), failed: count('failed'), rows };
 }

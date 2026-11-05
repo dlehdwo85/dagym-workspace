@@ -691,7 +691,9 @@ export async function analyzeProgram(u: SessionUser, id: string, provider: AiPro
   const t = tenantOf(u); const sql = db(); const today = ymd();
   let p = await programFor(sql, t, id);
   await (await import('../plans')).assertAiRequest(u, { legacy: true }); // 회사 월 AI 예산(원)·예전 달러 한도·요청 수
-  await (await import('../ai/guard')).assertUserBudget(u, sql);
+  // 361차(노트북 11/05 10:40 '지원사업 AI 판단 멈춤'): 정기 자동 판단은 회사 대표 이름으로 돌지만 대표 개인 AI 한도(월·하루 20%)는 쓰지 않음 —
+  // 회사 월 AI 예산·요금제 요청 수만 봄(대표 결정: 지원사업은 매번 판단). 사람이 누른 판단은 예전처럼 본인 한도
+  if (!opt.auto) await (await import('../ai/guard')).assertUserBudget(u, sql);
   await (await import('../ai/guard')).assertAiCredit(sql);
   if (p.source === 'watch' && !p.summary && p.url) { // 기관 공지: 본문을 한 번 읽어 둔다(같은 호스트만)
     const body = await watchDetailText(p.url).catch(() => null);
@@ -729,7 +731,7 @@ JSON 으로만 답하세요:
   catch (e) { throw await (await import('../ai/guard')).onAiError(e, sql); }
   const usd = costUsd(r.model ?? provider.model, r.usage);
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-    values (${t}, ${u.id}, ${randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${usd}, 'sales_support')`;
+    values (${t}, ${opt.auto ? null : u.id}, ${randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${usd}, 'sales_support')`;
   if (r.stop_reason === 'refusal') throw badRequest('이 공고는 판단할 수 없습니다');
   const text = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('');
   let j: any; try { j = JSON.parse(text); } catch { throw new HttpError(502, 'ai_bad_output', 'AI 응답을 해석하지 못했습니다. 다시 시도해 주세요.'); }
@@ -742,7 +744,7 @@ JSON 으로만 답하세요:
     on conflict (tenant, program_id) do update set ai_verdict = excluded.ai_verdict, ai_reasons = excluded.ai_reasons, ai_brands = excluded.ai_brands, ai_docs = excluded.ai_docs, ai_summary = excluded.ai_summary,
       ai_amount = excluded.ai_amount, ai_model = excluded.ai_model, ai_cost_usd = excluded.ai_cost_usd, ai_by = excluded.ai_by, ai_at = now(), ai_use = excluded.ai_use, ai_schedule = excluded.ai_schedule, ai_auto = excluded.ai_auto,
       ai_effect = excluded.ai_effect, ai_rule_verdict = excluded.ai_rule_verdict, auto_fail = 0, updated_at = now()`;
-  await (await import('../ai/guard')).userBudgetAlerts(u, sql).catch(() => {});
+  if (!opt.auto) await (await import('../ai/guard')).userBudgetAlerts(u, sql).catch(() => {});
   const { usdKrw } = await import('../ai/provider');
   return { ok: true, ai: { ...out, at: new Date().toISOString() }, costKrw: Math.max(1, Math.round(usd * usdKrw())) };
 }

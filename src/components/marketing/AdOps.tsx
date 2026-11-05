@@ -155,10 +155,12 @@ export function AdOps() {
           {data.canEdit && <Button size="sm" variant="secondary" disabled={!data.accounts.length || busy === 'tracking'} title="모든 캠페인에 네이버 '자동 추적 URL'을 켭니다 — 광고로 들어온 주소에 키워드가 붙어 키워드별 전화·문의·체험 신청을 셉니다(광고비 변화 없음)" data-testid="ad-tracking-all"
             onClick={() => run('tracking', async () => {
               for (const acc of data.accounts) {
-                const d = await api<{ total: number; already: number; otherMode: number; wouldChange: number }>('/api/marketing/ad-ops/tracking', { body: { accountId: acc.id, dryRun: true } });
+                const d = await api<{ total: number; already: number; otherMode: number; place?: number; wouldChange: number; rows: { id: string; name: string; status: string }[] }>('/api/marketing/ad-ops/tracking', { body: { accountId: acc.id, dryRun: true } });
+                const pick = d.rows.filter((r) => r.status === 'would_change'); const names = pick.map((r) => r.name);
                 if (!d.wouldChange) { toast.ok(`${acc.label}: 캠페인 ${d.total}개 — 켤 것 없음(이미 켜짐 ${d.already}${d.otherMode ? ` · 다른 추적 방식 ${d.otherMode}` : ''})`); continue; }
-                if (!confirm(`${acc.label}: 캠페인 ${d.total}개 중 ${d.wouldChange}개에 자동 추적 URL을 켤까요?\n(이미 켜짐 ${d.already}${d.otherMode ? ` · 다른 추적 방식이라 그대로 ${d.otherMode}` : ''} · 광고비·입찰가는 바뀌지 않습니다)`)) continue;
-                const r = await api<{ changed: number; notApplied: number; failed: number }>('/api/marketing/ad-ops/tracking', { body: { accountId: acc.id, dryRun: false } });
+                if (!confirm(`${acc.label}: 캠페인 ${d.total}개 중 ${d.wouldChange}개에 자동 추적 URL을 켤까요?\n켤 캠페인: ${names.slice(0, 6).join(', ')}${names.length > 6 ? ' 외' : ''}\n(이미 켜짐 ${d.already}${d.otherMode ? ` · 다른 추적 방식이라 그대로 ${d.otherMode}` : ''}${d.place ? ` · 플레이스 광고라 그대로 ${d.place}` : ''} · 광고비·입찰가는 바뀌지 않습니다)`)) continue;
+                // 361차: 확인 창에 보인 캠페인만 켬(그사이 새로 생긴 캠페인·플레이스 캠페인은 건드리지 않음)
+                const r = await api<{ changed: number; notApplied: number; failed: number }>('/api/marketing/ad-ops/tracking', { body: { accountId: acc.id, dryRun: false, campaignIds: pick.map((x) => x.id) } });
                 if (r.failed || r.notApplied) toast.error(`${acc.label}: 켬 ${r.changed} · 반영 안 됨 ${r.notApplied} · 실패 ${r.failed} — 네이버 광고 시스템 › 도구 › 추적 기능에서 확인해 주세요`);
               }
             }, '자동 추적 URL 확인을 마쳤습니다')} >자동 추적 URL 켜기</Button>}

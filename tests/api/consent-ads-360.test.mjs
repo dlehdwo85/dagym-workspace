@@ -182,3 +182,54 @@ describe('360차 네이버 자동 추적 URL 모든 캠페인 켜기', () => {
     assert.deepEqual(au.detail, { changed: 1, notApplied: 1, failed: 0 });
   });
 });
+
+describe('360차 후속(노트북 확인)', () => {
+  test('자동 추적: 고른 캠페인만 켜기(campaignIds) · 플레이스 캠페인은 건너뜀 · 이상한 id 400', async () => {
+    const [acc] = await sql`select id from mkt_ad_accounts where provider = 'naver' limit 1`;
+    const base = { customerId: 1234567, dailyBudget: 1000, useDailyBudget: true, userLock: false, trackingMode: 'TRACKING_DISABLED' };
+    camps['cmp-p'] = { ...base, nccCampaignId: 'cmp-p', name: '바디랩 플레이스#1', campaignTp: 'PLACE' };
+    camps['cmp-e'] = { ...base, nccCampaignId: 'cmp-e', name: '워크인 소개 페이지', campaignTp: 'WEB_SITE' };
+    camps['cmp-f'] = { ...base, nccCampaignId: 'cmp-f', name: '[시험] 워크인 파워링크', campaignTp: 'WEB_SITE' };
+    assert.equal((await ctx.owner.req('POST', '/api/marketing/ad-ops/tracking', { accountId: acc.id, dryRun: true, campaignIds: ['bad id'] })).status, 400);
+    assert.equal((await ctx.owner.req('POST', '/api/marketing/ad-ops/tracking', { accountId: acc.id, dryRun: true, campaignIds: [] })).status, 400);
+    const d = await ctx.owner.ok('POST', '/api/marketing/ad-ops/tracking', { accountId: acc.id, dryRun: true });
+    assert.equal(d.place, 1, '플레이스 캠페인 1개');
+    assert.equal(d.rows.find((x) => x.id === 'cmp-p').status, 'place');
+    calls = [];
+    const r = await ctx.owner.ok('POST', '/api/marketing/ad-ops/tracking', { accountId: acc.id, dryRun: false, campaignIds: ['cmp-e', 'cmp-p'] });
+    assert.deepEqual([r.changed, r.place, r.notPicked, r.failed], [1, 1, 5, 0]);
+    assert.deepEqual(calls.filter((c) => c.method === 'PUT').map((c) => c.path), ['/ncc/campaigns/cmp-e'], '고른 것만 바꿈');
+    assert.equal(camps['cmp-e'].trackingMode, 'AUTO_TRACKING_MODE');
+    assert.equal(camps['cmp-f'].trackingMode, 'TRACKING_DISABLED', '안 고른 것은 그대로');
+    assert.equal(camps['cmp-p'].trackingMode, 'TRACKING_DISABLED', '플레이스는 그대로');
+  });
+
+  test('광고 전환 집계에서 거절·차단·시험 회사 빼기', async () => {
+    const before = (await ctx.owner.ok('GET', '/api/marketing/ad-ops/leads?days=30')).workin;
+    const t3 = await tenantOfEmail('a3@ads.test'), t4 = await tenantOfEmail('a4@ads.test'), t5 = await tenantOfEmail('a5@ads.test');
+    await sql`update tenants set signup_status = 'rejected' where id = ${t3}`;
+    await sql`update tenants set status = 'blocked' where id = ${t4}`;
+    await sql`update tenants set is_test = true where id = ${t5}`;
+    const r = await ctx.owner.ok('GET', '/api/marketing/ad-ops/leads?days=30');
+    assert.equal(r.workin.signups, before.signups - 3);
+    assert.deepEqual([r.workin.fromAds, r.workin.untracked, r.workin.organic], [before.fromAds - 1, before.untracked - 1, before.organic - 1], 'a5(구글)·a3(키워드 모름)·a4(광고 아님) 빠짐');
+    assert.equal(r.rows.find((x) => x.provider === 'google')?.wkSignup ?? 0, 0);
+    await sql`update tenants set signup_status = 'pending', status = 'active', is_test = false where id = any(${[t3, t4, t5]}::text[])`;
+  });
+
+  test('알림 못 받은 승인 대기 신청(10분 넘음) → 정기 실행이 플랫폼 운영자에게 한 번 알림 · 30일 넘은 것·이미 알린 것은 안 보냄', async () => {
+    await signup(new Client('late1'), 'late1@ads.test');
+    await signup(new Client('late2'), 'late2@ads.test');
+    const l1 = await tenantOfEmail('late1@ads.test'), l2 = await tenantOfEmail('late2@ads.test');
+    await sql`update tenants set signup_notified_at = null, signup_status = 'pending', created_at = now() - interval '2 hours' where id = ${l1}`;
+    await sql`update tenants set signup_notified_at = null, signup_status = 'pending', created_at = now() - interval '40 days' where id = ${l2}`;
+    await sql`delete from notifications where type = 'signup_request' and dedupe_key = any(${[`signup:${l1}`, `signup:${l2}`]}::text[])`;
+    await tick();
+    const n1 = await sql`select title from notifications where type = 'signup_request' and dedupe_key = ${`signup:${l1}`}`;
+    assert.equal(n1.length, 1, '늦게라도 알림'); assert.match(n1[0].title, /새 체험 신청: late1 상사/);
+    assert.ok((await sql`select signup_notified_at from tenants where id = ${l1}`)[0].signup_notified_at);
+    assert.equal((await sql`select count(*)::int n from notifications where dedupe_key = ${`signup:${l2}`}`)[0].n, 0, '30일 넘은 신청은 안 보냄');
+    await tick();
+    assert.equal((await sql`select count(*)::int n from notifications where dedupe_key = ${`signup:${l1}`}`)[0].n, 1, '한 번만');
+  });
+});

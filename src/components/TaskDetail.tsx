@@ -28,6 +28,7 @@ import { TaskAssist, type AssistDraft } from '@/components/TaskAssist';
 import { DropZone, UploadProgress } from '@/components/upload';
 import { BellChip, DuePicker, ExtendDialog, extendRole, warnAway } from '@/components/TaskQuick';
 import { TimePick } from '@/components/DateTimePickers';
+import { TaskDeleteDialog } from '@/components/TaskDeleteDialog';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { PRIORITY_LABEL, STATUS_LABEL, STATUSES, type TaskStatus } from '@/lib/types';
 import { encodeMentions } from '@/lib/mentions';
@@ -85,6 +86,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [mergeOpen, setMergeOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [meetOpen, setMeetOpen] = useState(false); // V37 8 미팅 일정 만들기
+  const [delOpen, setDelOpen] = useState(false); // 361차 #977 업무 삭제 창
   const [tab, setTab] = useState<'comments' | 'history'>('comments'); // V14 23번: 활동 탭 철회 — 댓글(기본)·변경 이력
   const moreFields = true; // R-15 4번: "필드 더보기" 없앰 — 모든 항목을 기본으로 보여 준다
   // V14 19번 ⑤: 섹션 접기 기억(이 기기)
@@ -258,24 +260,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     await api(`/api/tasks/${id}/comments`, { body: { body: `[보완 요청] ${note}` } }).catch(() => {});
     reload();
   }
-  async function del() {
-    const subs = data?.subtasks?.length ?? 0;
-    const synced = (events.data?.events ?? []).filter((e: any) => e.sync);
-    if (!confirm(`이 업무를 삭제할까요?${subs ? `\n하위 업무 ${subs}개도 함께 삭제됩니다.` : ''}\n삭제한 업무는 30일 동안 휴지통에서 되살릴 수 있습니다.`)) return;
-    // V5 "업무에도 추가"로 연결된 일정: 함께 지울지 묻는다 (반복 업무는 일정 시리즈 전체가 지워지므로 묻지 않고 남김)
-    const alsoEvent = synced.length > 0 && !data?.task?.recurrence_rule && confirm(`연결된 일정 '${synced[0].title}'도 함께 삭제할까요?\n취소를 누르면 업무만 삭제하고 일정은 남깁니다.`);
-    // V6 13번: 담당자별로 같이 만든 묶음은 요청자가 한 번에 지울 수 있음
-    const t0 = data?.task;
-    const batchAll = !!t0?.batch_id && (t0.batch?.total ?? 0) > 1 && (t0.requested_by === user.id || t0.created_by === user.id) && confirm(`같이 만든 ${t0.batch.total}건(담당자별)을 모두 삭제할까요?\n취소를 누르면 이 업무만 삭제합니다.`);
-    try {
-      if (batchAll) await api(`/api/tasks/batch/${t0.batch_id}`, { method: 'DELETE' });
-      else await api(`/api/tasks/${id}${alsoEvent ? '?alsoEvent=1' : ''}`, { method: 'DELETE' });
-      toast.ok(batchAll ? `${t0.batch.total}건을 삭제했습니다` : '삭제했습니다. 30일 안에 휴지통에서 되살릴 수 있습니다', batchAll ? undefined : {
-        label: '되돌리기', run: async () => { try { await api(`/api/tasks/${id}/restore`, { body: {} }); toast.ok('되살렸습니다'); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } },
-      });
-      broadcastRefresh(); if (onClose) onClose(); else closePage();
-    } catch (e: any) { toast.error(e.message); }
-  }
+  /** 361차 #977: 기본 확인창 두 번 대신 앱 안 삭제 창 하나(연결 일정 함께 지우기·묶음 범위·되살리면 일정도) */
+  function del() { setDelOpen(true); }
   /** #815 지원사업에서 넘어온 업무 → 업무는 휴지통, 지원사업 진행 기록은 처음 상태(넘긴 사람·담당·관리자) */
   async function withdrawSupport() {
     const ref = data?.task?.sales_ref; if (!ref?.id) return;
@@ -891,6 +877,9 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       <QuickAddTask open={sub} onClose={() => setSub(false)} defaults={{ parentId: id, dueDate: t.due_date ?? undefined, assigneeId: t.assignee_id ?? undefined }} onCreated={() => reload()} />
       <TimeBlockModal open={blockOpen} onClose={() => setBlockOpen(false)} task={t} onDone={() => { reload(); events.reload(); }} />
       <DepsModal open={depOpen} onClose={() => setDepOpen(false)} taskId={id} current={data.dependencies.map((d: any) => d.id)} onSave={(ids) => { patch({ dependsOn: ids }); setDepOpen(false); }} />
+      <TaskDeleteDialog open={delOpen} onClose={() => setDelOpen(false)} taskId={id} title={t.title}
+        batch={t.batch_id && (t.batch?.total ?? 0) > 1 ? { id: t.batch_id, total: t.batch.total, canAll: t.requested_by === user.id || t.created_by === user.id } : null}
+        onDeleted={() => { if (onClose) onClose(); else closePage(); }} />
       <MergeModal open={mergeOpen} onClose={() => setMergeOpen(false)} taskId={id} title={t.title} onMerged={(into) => { broadcastRefresh(); if (onClose && inPanel) onClose(); router.push(`/tasks/${into}`); }} />
     </div>
   );

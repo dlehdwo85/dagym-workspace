@@ -475,6 +475,14 @@ test('#522 관광숙박업 오류 응답(JSON)도 코드·사유 그대로 · �
   await sql`update sales_collector_runs set started_at = started_at - interval '26 hours' where slug = 'tourist_hotels_localdata'`;
   v = await ctx.owner.ok('GET', '/api/sales/collectors');
   assert.match(v.alerts.find((x) => x.slug === 'tourist_hotels_localdata').reason, /^마지막 성공 2\d시간 전$/);
+  // 361차(노트북 11/05 09~10시 같은 알림 4번): 오늘 이미 알린 원천만 남았으면 정기 실행이 다시 보내지 않음(09시 뒤에만 도는 알림이라 그 시각에만 확인)
+  const kh = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+  if (kh >= 9) {
+    const alertStep = async () => (await (await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } })).json()).detail.salesCollectorAlerts;
+    const t1 = await alertStep(); const t2 = await alertStep();
+    assert.ok(t1.notified > 0 || t1.skipped === 'already told today', JSON.stringify(t1));
+    if (t2.alerts === t1.alerts) assert.deepEqual([t2.notified, t2.skipped], [0, 'already told today'], JSON.stringify([t1, t2]));
+  }
   hotelMode = 'ok';
 });
 

@@ -1796,15 +1796,23 @@ function BulkBar({ ids, tasks, onClear, onDone }: { ids: string[]; tasks: Task[]
   const byId = new Map(tasks.map((t) => [t.id, t]));
   async function run(action: 'patch' | 'done' | 'delete', patch?: Record<string, unknown>, label?: string) {
     if (!ids.length) return;
-    if (action === 'delete' && !confirm(`${ids.length}건을 휴지통으로 옮길까요?`)) return;
+    // 361차 #977: 이 업무가 주인인 연결 일정(업무에도 추가·업무에서 만든 미팅)은 함께 지움 — 되돌리면 같이 돌아옴
+    let withEvents = false;
+    if (action === 'delete') {
+      const pl = await api<{ events: { title: string; attendees: number }[] }>('/api/tasks/bulk', { body: { ids, action: 'plan' } }).catch(() => ({ events: [] }));
+      const n = pl.events.length; const att = pl.events.reduce((a, e) => a + e.attendees, 0);
+      const evLine = n ? `\n연결 일정 ${n}개도 함께 지웁니다: ${pl.events.slice(0, 3).map((e) => `'${e.title}'`).join(', ')}${n > 3 ? ' 외' : ''}${att ? ` (참석자 ${att}명에게 취소 알림)` : ''}\n되돌리면 일정도 함께 돌아옵니다.` : '';
+      if (!confirm(`${ids.length}건을 휴지통으로 옮길까요?${evLine}`)) return;
+      withEvents = n > 0;
+    }
     setBusy(true);
     // 되돌리기용 이전 값
     const key = patch ? Object.keys(patch)[0] : 'status';
     const col: Record<string, keyof Task> = { assigneeId: 'assignee_id', dueDate: 'due_date', projectId: 'project_id', status: 'status' };
     const before = Object.fromEntries(ids.map((id) => [id, { [key]: (byId.get(id) as any)?.[col[key]] ?? null }]));
     try {
-      const r = await api('/api/tasks/bulk', { body: { ids, action, ...(patch ? { patch } : {}) } });
-      const msg = `${r.done.length}건 ${label ?? '바꿨습니다'}${action === 'done' && r.done.length ? ' — 완료됨으로 옮겼습니다' : ''}${r.skipped.length ? ` · ${r.skipped.length}건 건너뜀` : ''}`;
+      const r = await api('/api/tasks/bulk', { body: { ids, action, ...(patch ? { patch } : {}), ...(withEvents ? { events: 'default' } : {}) } });
+      const msg = `${r.done.length}건 ${label ?? '바꿨습니다'}${r.eventsDeleted ? ` · 연결 일정 ${r.eventsDeleted}개도 지웠습니다` : ''}${action === 'done' && r.done.length ? ' — 완료됨으로 옮겼습니다' : ''}${r.skipped.length ? ` · ${r.skipped.length}건 건너뜀` : ''}`;
       if (action === 'done') for (const id of r.done as string[]) { const st = byId.get(id)?.status; if (st && st !== 'done') PREV_STATUS.set(id, st); }
       const undo = r.done.length ? { label: '되돌리기', run: async () => {
         const back = action === 'delete' ? { ids: r.done, action: 'restore' } : { ids: r.done, action: 'patch', each: Object.fromEntries(r.done.map((id: string) => [id, before[id]])) };

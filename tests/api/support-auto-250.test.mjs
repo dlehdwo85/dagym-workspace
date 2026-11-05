@@ -40,7 +40,9 @@ test('프로필 저장 전에는 안 함 → 저장(자동 판단 기본 켬) �
   const r1 = await auto();
   assert.deepEqual(r1.out.default, { done: 2, failed: 0, left: 0, stopped: null }, JSON.stringify(r1));
   assert.deepEqual([(await ai(a)).ai_auto, (await ai(b)).ai_auto, await ai(c)], [true, true, null]);
-  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support' and user_id = ${ctx.ownerId}`)[0].n, 2, '사용량은 회사 대표 이름으로');
+  // 361차: 자동 판단은 대표 개인 한도를 쓰지 않음 — 사용량은 '자동 실행'(사람 없음)으로, 회사 예산에는 그대로 셈
+  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support' and user_id is null and tenant = 'default'`)[0].n, 2, '사용량은 자동 실행으로');
+  assert.ok((await ctx.owner.ok('GET', '/api/usage')).ai.byUser.some((x) => x.name.startsWith('자동 실행')), '사용량 화면 사람별에 자동 실행 줄');
   L = await list(); assert.deepEqual([L[a].queued, L[b].queued, [L[a].ai.verdict, L[b].ai.verdict].sort()], [false, false, ['fit', 'maybe']]); // 5건씩 함께 보내 답 순서는 정해지지 않음
   v = await ctx.owner.ok('GET', '/api/sales/support?tab=fit&limit=200&sort=fit&dd=all&kind=all'); assert.deepEqual([v.auto.queue, v.auto.done], [0, 2]);
   // 다음 실행: 남은 것 없음 → 한 번 확인하고(지문 저장) → 그다음부터는 공고를 다시 읽지 않음
@@ -53,6 +55,16 @@ test('프로필 저장 전에는 안 함 → 저장(자동 판단 기본 켬) �
   assert.deepEqual((await auto()).out.default, { done: 1, failed: 0, left: 0, stopped: null });
   assert.equal((await ai(e)).ai_verdict, 'fit');
   assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support'`)[0].n, 3);
+  // 361차: 대표 개인 AI 한도(월·하루)를 다 써도 자동 판단은 계속(회사 예산·요청 수만 봄) — 대표가 직접 누르는 판단은 본인 한도로 막힘
+  await sql`insert into ai_user_limits (user_id, monthly_krw) values (${ctx.ownerId}, 1) on conflict (user_id) do update set monthly_krw = 1`;
+  const [mine] = await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cost_usd, purpose) values ('default', ${ctx.ownerId}, gen_random_uuid(), 'anthropic', 'test', 0, 0, 0.01, 'assistant') returning id`;
+  const h = await ins({ source_id: 'A4b', title: '[경기] 용인시 중소기업 수출 마케팅 바우처' });
+  await queue([say({ verdict: 'fit' })]);
+  assert.deepEqual((await auto()).out.default, { done: 1, failed: 0, left: 0, stopped: null }, '대표 개인 한도와 상관없이 자동 판단');
+  assert.equal((await ai(h)).ai_verdict, 'fit');
+  assert.equal((await ctx.owner.req('POST', `/api/sales/support/${h}/analyze`, {})).status, 429, '사람이 누른 판단은 본인 한도');
+  await sql`delete from ai_usage where id = ${mine.id}`; await sql`delete from ai_user_limits where user_id = ${ctx.ownerId}`;
+  await sql`delete from support_matches where program_id = ${h}`; await sql`delete from support_programs where id = ${h}`; // 다음 시험의 공고 수 그대로
 });
 
 test('판단 기준 칸(상시근로자)이 바뀌면 그 전 판단은 예전 프로필 기준 → 다시 판단 차례 → 다시 판단 · 회사 소개만 바꾸면 그대로', async () => {

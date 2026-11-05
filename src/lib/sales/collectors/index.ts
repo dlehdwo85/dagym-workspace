@@ -128,6 +128,12 @@ export async function collectorAlertTick(now = new Date()) {
     from users u join tenants t on t.id = u.tenant where u.status = 'active' and not coalesce(u.is_demo, false)
       and ((t.spaces @> array['sales']::text[] and u.role in ('owner', 'admin')) or coalesce(u.platform_admin, false))`).filter((p) => p.mine || superAdmin(p.email, p.pa));
   if (!people.length) return { alerts: alerts.length, notified: 0 };
+  // 361차(노트북 11/05 09~10시 같은 알림 4번): 시간 초과로 원천이 들락날락하면 묶음이 바뀔 때마다 다시 갔음 →
+  // 오늘 이미 알린 원천만 남았으면 안 보냄 · 오늘 처음 문제가 된 원천이 생겼을 때만 다시(278차 #816 '다른 원천은 따로' 유지)
+  const pre = `salescol:${day}:`;
+  const told = new Set((await sql<{ k: string }[]>`select distinct dedupe_key as k from notifications where type = 'sales_collector_alert' and dedupe_key like ${pre + '%'}`)
+    .flatMap((r) => r.k.slice(pre.length).split(',')));
+  if (told.size && alerts.every((a) => told.has(`${a.slug}:${a.source ?? ''}`))) return { alerts: alerts.length, notified: 0, skipped: 'already told today' };
   const title = `영업 DB 수집 누락 위험 ${alerts.length}곳 — ${alerts.slice(0, 2).map((a) => a.label).join(' · ')}${alerts.length > 2 ? ' 외' : ''}`;
   const body = alerts.slice(0, 6).map((a) => `${a.label} — ${a.todo} (${a.reason})`).join('\n'); // #629: 알림도 '할 일' 문장 — 원문·영문 코드는 화면의 '자세히'에서
   const { notify } = await import('../../notifications');

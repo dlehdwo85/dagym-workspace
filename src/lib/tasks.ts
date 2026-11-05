@@ -1101,13 +1101,16 @@ export async function restoreTask(u: SessionUser, id: string) {
   await assertUnitAccess(u, t.org_unit_id, sql);
   if (!(t.created_by === u.id || t.requested_by === u.id || atLeast(u, 'admin'))) throw forbidden('만든 사람·요청자·관리자만 되살릴 수 있습니다');
   if (Date.now() - t.deleted_at.getTime() > 30 * 86400000) throw badRequest('30일이 지나 되살릴 수 없습니다');
-  await sql.begin(async (tx) => {
+  const backIds = await sql.begin(async (tx) => {
     const back = await tx<{ id: string }[]>`update tasks set deleted_at = null, updated_at = now(), version = version + 1 where id = ${id} or (parent_id = ${id} and deleted_at = ${t.deleted_at}) returning id`;
     await unhideTaskBlocks(tx, back.map((b) => b.id));
     await activity(tx, 'task', id, u.id, 'restored');
     await syncReviewTask(tx, id, u.id);
+    return back.map((b) => b.id);
   });
-  return { ok: true };
+  // 361차 #977: 업무와 함께 지웠던 연결 일정도 되살림(외부 캘린더 반영은 라우트가 calendars 로)
+  const ev = await (await import('./taskEventDelete')).restoreTaskEvents(u, backIds).catch(() => ({ restored: 0, calendars: [] as string[] }));
+  return { ok: true, eventsRestored: ev.restored, calendars: ev.calendars };
 }
 
 // ---- 댓글 ----

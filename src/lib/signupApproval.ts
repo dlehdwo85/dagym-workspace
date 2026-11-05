@@ -45,6 +45,16 @@ async function mailTo(to: string, title: string, lines: string[], button?: { lab
 }
 
 /** 새 신청을 슈퍼관리자에게(앱 알림·푸시 + 메일) — 회사당 한 번. 이메일 가입은 확인 링크를 누른 뒤, 소셜은 회사를 만든 바로 뒤 */
+/** 360차 후속(노트북 '테스트 회사' 알림 없음): 359차 때 신청하고 메일 확인을 안 눌러 알림이 안 간 승인 대기 회사 · 알림이 실패한 신청 → 정기 실행이 보냄(10분 지난 것, 30일 안, 한 번) */
+export async function signupNotifyCatchUp(sql: Sql = db()) {
+  if (!signupApprovalOn()) return { skipped: 'off' };
+  const due = await sql<{ id: string }[]>`select id from tenants where signup_status = 'pending' and signup_notified_at is null and status = 'active'
+    and created_at < now() - interval '10 minutes' and created_at > now() - interval '30 days' order by created_at limit 20`;
+  let sent = 0;
+  for (const t of due) sent += await notifyNewSignup(t.id, sql).catch(() => 0);
+  return { due: due.length, sent };
+}
+
 export async function notifyNewSignup(tenant: string, sql: Sql = db()) {
   if (!signupApprovalOn()) return 0;
   const [t] = await sql<{ id: string; name: string; signup_info: SignupInfo | null; owner_user_id: string | null }[]>`update tenants set signup_notified_at = now()

@@ -88,7 +88,7 @@ async function loadCalendar(sql: Sql, id: string) {
   return c;
 }
 
-async function eventPerms(u: SessionUser, e: EventRow, sql: Sql) {
+export async function eventPerms(u: SessionUser, e: EventRow, sql: Sql) {
   const cal = await loadCalendar(sql, e.calendar_id);
   const cp = await calendarPerms(u, cal);
   const masterId = e.recurring_event_id ?? e.id;

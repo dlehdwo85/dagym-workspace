@@ -4,10 +4,8 @@ import { deleteTask, getTaskDetail, markAcked, taskInput, updateTask } from '@/l
 import { dispatchPending } from '@/lib/push';
 import { syncTaskBlocksSoon } from '@/lib/google/hooks';
 import { remindersChanged } from '@/lib/push';
-import { affectedByTask } from '@/lib/reminders';
-import { db } from '@/lib/db';
-import { deleteEvent } from '@/lib/events';
-import { syncedEventIds } from '@/lib/eventtasks';
+import { affectedByEvent, affectedByTask } from '@/lib/reminders';
+import { deletePickedEvents, deletePlan, pickEvents, picksFrom, syncCalendars } from '@/lib/taskEventDelete';
 
 export const GET = handler<{ id: string }>(async ({ user, params }) => {
   const d = await getTaskDetail(user, params.id);
@@ -29,13 +27,17 @@ export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {
 });
 
 export const DELETE = handler<{ id: string }>(async ({ req, user, params }) => {
-  // V5 "연결된 일정도 삭제" (?alsoEvent=1)
-  const evIds = req.nextUrl.searchParams.get('alsoEvent') === '1' ? await syncedEventIds(db(), params.id) : [];
-  const was = await affectedByTask(params.id).catch(() => []);
+  // 361차 #977: 연결 일정은 삭제 창에서 고른 것만(?events=키,…) — 예전 앱 ?alsoEvent=1 은 기본 체크 그대로. 계획은 업무를 지우기 전에(다른 업무 연결 판단)
+  const picks = picksFrom(req.nextUrl.searchParams);
+  const picked = picks === 'none' ? [] : pickEvents(await deletePlan(user, [params.id]), picks);
+  const was = [...(await affectedByTask(params.id).catch(() => [])), ...(await Promise.all(picked.map((p) => affectedByEvent(p.id).catch(() => [])))).flat()];
   after(() => remindersChanged(was).catch(() => {}));
   const out: Record<string, unknown> = await deleteTask(user, params.id);
-  let eventsDeleted = 0;
-  for (const e of evIds) { try { await deleteEvent(user, e, { scope: 'all' }); eventsDeleted++; } catch { /* 권한 없는 일정은 남김 */ } }
-  if (evIds.length) { out.eventsDeleted = eventsDeleted; out.eventsKept = evIds.length - eventsDeleted; }
+  if (picked.length) {
+    const r = await deletePickedEvents(user, picked);
+    out.eventsDeleted = r.deleted; out.eventsKept = picked.length - r.deleted;
+    after(() => dispatchPending().catch(() => {})); // 참석자 '일정 취소' 알림
+    after(() => syncCalendars(r.calendars));
+  }
   return out;
 });

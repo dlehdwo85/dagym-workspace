@@ -1718,13 +1718,25 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   await owner.screenshot({ path: `${SHOTS}/70-done-archive.png` });
   // 삭제 → 되돌리기 → 다시 삭제 → 휴지통에서 되살리기
   const del = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V6 지웠다 살릴 업무', orgUnitId: ctx.hq, approvalRequired: false })).id;
+  // 361차 #977: 업무에서 만든 미팅 일정 — 삭제 창 하나(기본 체크) → 함께 지움 → 되돌리기면 일정도 다시
+  const dayAfter = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
+  const meet = await ctx.owner.ok('POST', `/api/tasks/${del}/meeting`, { location: '본사', start: `${dayAfter}T10:00:00+09:00`, end: `${dayAfter}T11:00:00+09:00` });
   await owner.goto(`${BASE}/tasks/${del}`);
-  owner.once('dialog', (dg) => dg.accept());
   await owner.getByRole('button', { name: '더보기', exact: true }).click();
   await owner.getByRole('menuitem', { name: '삭제' }).click();
+  const delDlg = owner.getByTestId('task-delete-dialog');
+  await delDlg.getByTestId('task-delete-event').first().waitFor();
+  assert.equal(await delDlg.getByTestId('task-delete-event').count(), 1, '연결 일정 1개');
+  assert.equal(await delDlg.getByTestId('task-delete-event').getAttribute('data-kind'), 'own');
+  assert.equal(await delDlg.getByRole('checkbox', { name: /함께 지우기/ }).isChecked(), true, '업무에서 만든 일정은 기본 체크');
+  await owner.screenshot({ path: `${SHOTS}/361-task-delete-dialog.png` });
+  await delDlg.getByTestId('task-delete-confirm').filter({ hasText: '업무와 일정 1개 삭제' }).click();
+  await owner.getByText(/연결 일정 1개도 지웠습니다/).waitFor();
+  assert.ok((await sql`select deleted_at from events where id = ${meet.id}`)[0].deleted_at, '일정도 지워짐');
   await owner.getByRole('button', { name: '되돌리기' }).click();
-  await owner.getByText('되살렸습니다').waitFor();
+  await owner.getByText(/되살렸습니다 · 일정 1개도 돌아왔습니다/).waitFor();
   assert.equal((await sql`select deleted_at from tasks where id = ${del}`)[0].deleted_at, null);
+  assert.equal((await sql`select deleted_at from events where id = ${meet.id}`)[0].deleted_at, null, '일정도 돌아옴');
   await ctx.owner.ok('DELETE', `/api/tasks/${del}`);
   await owner.goto(BASE + '/tasks/trash');
   await owner.getByTestId('trash-list').getByRole('button', { name: 'V6 지웠다 살릴 업무 되살리기' }).click();

@@ -172,7 +172,7 @@ export async function aiBreakdown(tenant: string, sql: Sql = db()) {
   const m = await usageThisMonth(tenant);
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()); const start = `${today.slice(0, 7)}-01`;
   const [byUser, byPurpose, [blocked]] = await Promise.all([
-    sql`select a.user_id, coalesce(us.name, '(삭제된 사용자)') as name, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost
+    sql`select a.user_id, case when a.user_id is null then '자동 실행(지원사업 판단 등)' else coalesce(us.name, '(삭제된 사용자)') end as name, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost
       from ai_usage a left join users us on us.id = a.user_id where a.tenant = ${tenant} and a.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul') group by a.user_id, us.name order by cost desc limit 50`,
     // 333차 ⓑ: 기능별 오늘(서울 날짜) 호출 수·비용도 같이
     sql`select a.purpose, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost,

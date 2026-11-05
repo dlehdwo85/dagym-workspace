@@ -15,7 +15,7 @@ import { adAttrib, isTelLabel, kwKey } from './adAttrib';
  *   목표의 70% 이하 = '잘 됨', 목표의 2배 이상 = '비용 높음'. 목표 = 회사 설정(target_cpa) 또는 기간 평균.
  * - 끄기·켜기는 워크인이 만든 세팅안의 네이버 키워드만(adOps kw_pause·kw_resume).
  * - 360차 #971: 워크인 운영 회사(tenant 'default')는 워크인 체험 신청도 전환 — 신청 때 남긴 utm·첫 광고 주소(n_keyword…)로 키워드에 붙인다.
- *   신청 = 회사형 가입(내부·시험·삭제 제외), 승인 = signup_status 'approved', 실사용 = 승인 + 가입 7일 안 업무 5건 이상 또는 3일 이상 접속(마케팅 퍼널과 같은 기준).
+ *   신청 = 회사형 가입(내부·시험·삭제·차단·거절 제외), 승인 = signup_status 'approved', 실사용 = 승인 + 가입 7일 안 업무 5건 이상 또는 3일 이상 접속(마케팅 퍼널과 같은 기준).
  *   리드 = 전화 + 문의 + 체험 신청(체험 신청만 있는 워크인 키워드가 '0건 — 끄기 제안'으로 잘못 나오지 않게).
  */
 const DEFAULT_CPA = 30000; // 목표·평균이 없을 때 '끄기 제안' 기준(원)
@@ -46,7 +46,8 @@ export async function leadsReport(u: SessionUser, q: { days?: number }) {
         (t.signup_status = 'approved' and (
           (select count(*) from tasks k join users u on u.id = k.created_by where u.tenant = t.id and k.created_at < t.created_at + interval '7 days') >= 5
           or (select count(distinct d.day) from user_active_days d where d.tenant = t.id and d.day < (t.created_at at time zone 'Asia/Seoul')::date + 7) >= 3)) as active
-      from tenants t where t.kind = 'company' and t.id not in ('default', 'demo') and t.status <> 'deleted' and not t.is_test and t.created_at >= ${fromTs}::timestamptz`,
+      from tenants t where t.kind = 'company' and t.id not in ('default', 'demo') and t.status not in ('deleted', 'blocked') and t.signup_status <> 'rejected' and not t.is_test
+        and t.created_at >= ${fromTs}::timestamptz`, // 360차 후속(노트북): 거절·차단·시험 신청은 광고 실적에서 뺌
   ]);
   const rows = new Map<string, LeadRow>();
   const blank = (key: string, provider: string, itemId: string | null, keyword: string, campaign = ''): LeadRow => ({ key, provider, itemId, keyword, campaign, clicks: 0, cost: 0, mediaConv: 0,
