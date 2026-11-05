@@ -1023,7 +1023,7 @@ await step('W-1 이름 워크인·부제 다짐 · 하이링크, 사이드바(�
   for (const l of ['내 업무', '현장 신고 QR', '자동화', '현장 비교', '업무량', '결재선', '전체 업무', '오늘·이번 주', '템플릿']) assert.ok(!labels.includes(l), `${l} 숨김`);
   await owner.getByRole('button', { name: '내 계정 메뉴' }).click();
   const items = (await owner.getByRole('menuitem').allTextContents()).map((x) => x.replace(/\?$/, '').trim());
-  assert.deepEqual(items, ['설정·알림', '도움말·문의', '사용 안내 다시 보기', '단축키', '로그아웃']);
+  assert.deepEqual(items, ['설정·알림', '도움말·문의', '워크인 소개', '사용 안내 다시 보기', '단축키', '로그아웃']); // 362차 #978: '워크인 소개' → 소개 사이트(앱 안에서는 숨김)
   await owner.keyboard.press('Escape');
   await owner.screenshot({ path: `${SHOTS}/55-hq-sidebar.png` });
 });
@@ -1767,6 +1767,23 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   // 운영 상태 알림 기록 (달성률 카드는 V7 에서 제거)
   await owner.goto(BASE + '/admin/ops');
   await owner.getByTestId('recent-notifications').getByText('V6 다같이 점검').first().waitFor();
+});
+
+await step('363차 #981 광고 점검 카드: 광고 집행 화면에 기준 5개·켜짐 → [기준 고치기] 키워드 비용 12,000원 저장 → 기준 줄 바뀜 · 지금 숫자로 본 점검·주간 보고 자리', async () => {
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await owner.setViewportSize({ width: 1366, height: 900 });
+  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  const card = owner.getByTestId('ad-watch'); await card.waitFor();
+  assert.match(await owner.getByTestId('ad-watch-state').innerText(), /켜짐/);
+  assert.match(await owner.getByTestId('ad-watch-rules').innerText(), /키워드 7일 비용 10,000원 이상·문의 0 → 입찰가 내림 제안, 2번 연속 → 중지 제안[\s\S]*1\.5배[\s\S]*80%/);
+  await card.getByText('아직 보낸 주간 보고가 없습니다').waitFor();
+  await owner.getByTestId('ad-watch-edit').click();
+  await owner.getByTestId('ad-watch-kwCost').fill('12000');
+  await owner.getByTestId('ad-watch-save').click();
+  await owner.getByTestId('ad-watch-rules').filter({ hasText: '12,000원' }).waitFor();
+  await card.scrollIntoViewIfNeeded();
+  await card.screenshot({ path: `${SHOTS}/363-ad-watch.png` });
+  await ctx.owner.ok('PUT', '/api/marketing/ad-ops/watch', { kwCost: 10000 });
 });
 
 await step('V7: 홈 첫 화면에 오늘 할 일·이번 주(업무·일정 같은 한 줄), 달성률 없음, 업무 ⋯ 메뉴 시트, 캘린더 개인/회사 색', async () => {

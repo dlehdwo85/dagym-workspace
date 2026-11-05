@@ -15,6 +15,27 @@ export function hostSplit(env: Record<string, string | undefined> = process.env)
   return { on: env.APP_HOST_SPLIT === '1' && site !== app, site, app, graceUntil: /^\d{4}-\d{2}-\d{2}$/.test(g) ? g : null };
 }
 
+/**
+ * 362차 #978(대표 승인): www 머리줄이 '이 브라우저에서 로그인한 적 있음'을 알도록 두 호스트가 함께 보는 표시 쿠키.
+ * 값은 '1' 하나뿐(누구인지·세션 정보 없음) — 세션 쿠키(wos_session)는 app. 에만 그대로 두고 www 로 넘기지 않는다.
+ * 스위치가 켜지고 두 호스트의 상위 도메인이 같을 때(www.work-in.dev · app.work-in.dev → work-in.dev)만 그 도메인으로, 아니면 이 호스트에만.
+ */
+export const SIGNED_MARK = 'wi_signed';
+export function markDomain(cfg: HostSplit, host?: string): string | null {
+  if (!cfg.on) return null;
+  const a = cfg.site.split(':')[0].split('.'), b = cfg.app.split(':')[0].split('.');
+  const common: string[] = [];
+  for (let i = 1; i <= Math.min(a.length, b.length) && a[a.length - i] === b[b.length - i]; i++) common.unshift(a[a.length - i]);
+  if (common.length < 2) return null;
+  const d = common.join('.');
+  const h = host?.toLowerCase().split(':')[0];
+  return !h || h === d || h.endsWith(`.${d}`) ? d : null; // 다른 주소(미리 보기 등)에서는 상위 도메인 쿠키를 못 심음
+}
+export const markCookie = (cfg: HostSplit, host: string, on: boolean, secure: boolean) => {
+  const domain = markDomain(cfg, host);
+  return { name: SIGNED_MARK, value: on ? '1' : '', path: '/', sameSite: 'lax' as const, secure, httpOnly: false, maxAge: on ? 90 * 86400 : 0, ...(domain ? { domain } : {}) };
+};
+
 /** 소개 사이트(www)에 남는 화면 — 로그인 없이 보는 홍보·약관 화면 */
 const SITE_PAGES = ['/welcome', '/landing', '/privacy', '/terms', '/account-deletion', '/data-deletion', '/ai-notice'];
 export const isSitePage = (p: string) => p === '/' || SITE_PAGES.some((x) => p === x || p.startsWith(`${x}/`));

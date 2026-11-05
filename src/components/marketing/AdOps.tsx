@@ -8,6 +8,7 @@ import { NAVER_REGIONS, regionLabel } from '@/lib/naverRegions';
 import { PLAN_KEYWORDS_MAX, combineKeywords } from '@/lib/kwCombine';
 import { NAVER_NAME_MAX, badChars as badList, fixAdText, groupName, naverManageUrl, naverName } from '@/lib/naverText';
 import { MetaAuto } from './MetaAuto';
+import { AdWatch } from './AdWatch';
 
 const C = '#7C3AED';
 /** 네이버 소재 허용 문자(서버 검사와 같은 규칙, naverText) — 저장 전에 바로 표시 */
@@ -148,6 +149,8 @@ export function AdOps() {
           {data.canEdit && <> · <button type="button" className="underline" data-testid="ad-fee-edit" onClick={() => { const v = prompt('대행 수수료율(%) — 비우면 기본 15%', String(data.savings!.pct)); if (v === null) return; const t = v.trim();
             if (t !== '' && !(Number(t) >= 0 && Number(t) <= 50)) return toast.error('0~50 사이 숫자로 적어 주세요'); run('fee', () => api('/api/marketing/ad-ops/fee', { method: 'PUT', body: { pct: t === '' ? null : Number(t) } }), '대행 수수료율을 저장했습니다'); }}>수수료율 바꾸기</button></>}</p>}
       </section>
+
+      <AdWatch />
 
       <section className="rounded-card border border-line bg-white p-3 shadow-card">
         <div className="flex items-center gap-2"><h2 className="text-sm font-semibold">네이버 파워링크 세팅안</h2>

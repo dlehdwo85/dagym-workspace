@@ -65,6 +65,7 @@ export function serverEnv() {
     SIGNUP_APPROVAL: '0', // 359차 승인제 가입은 tests/api/signup-approval-359.test.mjs·E2E 가입 여정에서만 켬(다른 가입 시험은 예전처럼 바로 시작)
     PERF_PROBE: 'off', // #948 속도 정기 검침(자기 주소 7곳 호출)·주간 요약은 tests/api/perf-948.test.mjs 만 'any'
     PERF_WEEKLY: 'off',
+    AD_WATCH: 'off', // 363차 #981 서버 광고 점검(서울 9시 뒤·월요일) — tests/api/ad-watch-363.test.mjs 만 'any'
     MKT_PHOTO_AUDIT: 'off', // 329차: 글마다 AI 사진·글 대조는 시험 서버에서 끔(줄 세운 가짜 답·승인 대기 건수 시험이 안 흔들리게) — tests/api/mkt-photo-audit-329.test.mjs 만 'on'
     MKT_PREFLIGHT_RETRY: '0', // 172차: 올리기 전 검사에 걸리면 1번 다시 쓰는 것(mktAuto produceContent)은 시험 서버에서 끔 — 줄 세운 가짜 답이 한 건씩 맞아야 하므로. tests/api/mkt-preflight-retry.test.mjs 만 '1'
     OPENAI_BASE_URL: `${FAKE}/openai/v1`,

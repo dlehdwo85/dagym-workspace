@@ -4,6 +4,7 @@ import { RoleBadge } from '@/components/RoleBadge';
 import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
 import { IOS_ADMIN_NOTE, billingNote, useInApp } from './inApp';
+import { SITE_HOME } from './AuthCard';
 import { TaskPanelHost } from './TaskPanelHost';
 import { ADMIN_PAGES } from '@/lib/adminPages';
 import Link, { useLinkStatus } from 'next/link';
@@ -465,6 +466,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                     <div className="my-1 border-t border-line" />
                     <Link prefetch={false} role="menuitem" href="/settings" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Settings className="size-4 text-ink-2" />설정·알림</Link>
                     <Link prefetch={false} role="menuitem" href="/help" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><HelpCircle className="size-4 text-ink-2" />도움말·문의</Link>
+                    {!inApp && <a role="menuitem" href={SITE_HOME} className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50" data-testid="menu-site"><Globe className="size-4 text-ink-2" />워크인 소개</a>}{/* 362차 #978 app. → www */}
                     <button role="menuitem" onClick={() => { setUserMenu(false); restartTours(); }} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50" data-testid="tour-restart"><Compass className="size-4 text-ink-2" />사용 안내 다시 보기</button>
                     <button role="menuitem" onClick={() => { setUserMenu(false); setHelp(true); }} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Keyboard className="size-4 text-ink-2" /><span className="flex-1 text-left">단축키</span><Kbd>?</Kbd></button>
                     <button role="menuitem" onClick={logout} className="flex w-full items-center gap-2.5 rounded-input px-2.5 py-2 text-sm text-red-600 hover:bg-red-50"><LogOut className="size-4" />로그아웃</button>

@@ -64,6 +64,12 @@ export async function clearAiCredit(sql: Sql = db()) {
 // ---------------- 사람별 한도 ----------------
 const monthKey = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).slice(0, 7);
 export const defaultUserLimitKrw = (role: string) => (role === 'owner' ? 20000 : 10000); // 4.5: 대표 20,000 · 본부장·직원 10,000
+/**
+ * 362차(노트북 11/05 — 대표 개인 한도 $15.09 중 마케팅 자동 제작이 거의 전부): 사람별 AI 한도(월·하루)에는 그 사람이 직접 쓴 것만.
+ * 마케팅 자동 제작·사진 읽기·사진/글 대조처럼 규칙 주인(대표) 이름으로 기록되는 자동 작업은 마케팅 AI 월 한도·회사 예산이 따로 막는다.
+ * 마케팅 AI 비서(marketing_assistant)는 사람이 직접 묻는 대화라 그대로 셈.
+ */
+const PERSONAL = (sql: Sql) => sql`not (coalesce(purpose, '') like 'marketing%' and purpose <> 'marketing_assistant')`;
 export async function userAiBudget(u: { id: string; role: string }, sql: Sql = db()) {
   const month = monthKey();
   const [[lim], [extra], [used], [today]] = await Promise.all([
@@ -71,9 +77,9 @@ export async function userAiBudget(u: { id: string; role: string }, sql: Sql = d
     sql<{ krw: number }[]>`select coalesce(sum(amount_krw), 0)::int krw from ai_limit_requests where user_id = ${u.id} and month = ${month} and status = 'approved'`,
     sql<{ krw: number; chats: number; docs: number }[]>`select coalesce(sum(coalesce(cost_krw, cost_usd * ${usdKrw()})), 0)::float8 krw,
         count(*) filter (where purpose is null or purpose in ('assistant', 'sales_assistant', 'marketing_assistant'))::int chats, count(*) filter (where purpose = 'doc_engine')::int docs
-      from ai_usage where user_id = ${u.id} and created_at >= (${month + '-01'}::date::timestamp at time zone 'Asia/Seoul')`,
+      from ai_usage where user_id = ${u.id} and ${PERSONAL(sql)} and created_at >= (${month + '-01'}::date::timestamp at time zone 'Asia/Seoul')`,
     sql<{ krw: number }[]>`select coalesce(sum(coalesce(cost_krw, cost_usd * ${usdKrw()})), 0)::float8 krw from ai_usage
-      where user_id = ${u.id} and created_at >= ((now() at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul')`,
+      where user_id = ${u.id} and ${PERSONAL(sql)} and created_at >= ((now() at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul')`,
   ]);
   const limit = (lim?.monthly_krw ?? defaultUserLimitKrw(u.role)) + (extra?.krw ?? 0);
   const dayLimit = Math.round(limit * 0.2);
