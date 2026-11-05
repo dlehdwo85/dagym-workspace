@@ -29,6 +29,14 @@ export function aiErrorMessage(kind: AiErrKind, status?: number) {
   return `AI 서버 응답 오류${status ? ` (${status})` : ''}. 잠시 후 다시 시도하세요.`;
 }
 
+/** 371차 #994: 한도·크레딧·속도 제한·AI 꺼짐 = '나중에 다시' 할 막힘(항목 실패로 세지 않고 멈춤·못 함으로 기록).
+ *  크레딧 소진은 503 ai_credit 으로 온다(예전 코드는 402 만 봐서 크레딧이 떨어진 동안 공고마다 실패 1회로 셈해 3번이면 차례에서 빠졌다) */
+export const AI_STOP_CODES = new Set(['ai_credit', 'ai_budget', 'ai_quota', 'ai_off', 'ai_user_limit', 'ai_user_day_limit', 'mkt_ai_quota']);
+export function isAiStop(e: unknown) {
+  const x = e as { status?: number; code?: string } | null;
+  return !!x && (AI_STOP_CODES.has(String(x.code ?? '')) || x.status === 402 || x.status === 429);
+}
+
 /** 크레딧 부족 차단 중이면 바로 안내(외부 호출 없음) */
 export async function assertAiCredit(sql: Sql = db()) {
   const [r] = await sql<{ until: string }[]>`select value->>'until' as until from app_settings where key = ${BLOCK_KEY}`;

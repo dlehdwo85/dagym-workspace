@@ -72,7 +72,7 @@ export async function auditPhotos(c: Pick<C, 'id' | 'tenant' | 'title' | 'kind' 
   // 333차: 영상·문서만 붙은 글(영상형)은 '영상 글 — 대조할 사진 없음', 아무것도 없으면 '사진 없음' — 승인함 칩에서 구분
   if (!use.length) return { ...base, passed: true, rows: [], skipped: slots.length && [...info.values()].some((x) => !x.image) ? SKIP_VIDEO : slots.length ? '대조할 사진 없음(자료실에서 지워짐)' : skipReasonFor(c.kind) };
   const A = await import('./mktAuto');
-  try { await A.assertMktAi(c.tenant); } catch (e: any) { return { ...base, passed: true, rows: [], skipped: `AI 한도: ${String(e?.message ?? e).slice(0, 120)}` }; }
+  await A.assertMktAi(c.tenant); // 371차 #994: 한도·크레딧 막힘은 '대조 없이 통과'가 아니라 대기(auditContent 가 받아 다음 정기 실행에 다시 — 시도 횟수 안 셈)
   const p = P.anthropicProvider({ tier: 'fast', maxTokens: 1200 });
   const r = await p.chat({ system: SYSTEM, messages: [{ role: 'user', content: JSON.stringify({ post: { title: c.title, kind: c.kind ?? null, channel: c.channel }, slots: use.map((s) => ({ where: s.where, text: s.text.slice(0, 500), photo: info.get(s.photoId)!.text })) }) }], tools: [], format: FORMAT });
   await A.logAi({ tenant: c.tenant, created_by: c.created_by ?? null, id: c.id }, p, r, P, 'marketing_photo_audit').catch(() => {}); // 333차 ⓑ: 사용량 '사진·글 AI 대조' 줄로 따로
@@ -93,10 +93,18 @@ export async function auditContent(id: string, opt: { quiet?: boolean } = {}): P
   let audit: PhotoAudit;
   try { audit = await auditPhotos(c, c.current_version, slots); }
   catch (e: any) {
+    const SK = await import('./ai/skips');
+    if ((await import('./ai/guard')).isAiStop(e)) {
+      const tries = Number(prev.tries) || 0; const error = `AI 한도·크레딧으로 대조를 미룸 — ${String(e?.message ?? e).slice(0, 120)}`;
+      await sql`update mkt_contents set quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ photoAudit: { v: 1, at: new Date().toISOString(), version: c.current_version, pending: true, tries, error, stop: true } } as never)} where id = ${c.id}`;
+      await SK.noteSkip(sql, c.tenant, 'mkt_audit', c.id, c.title, e);
+      return { pending: true, tries };
+    }
     const tries = (Number(prev.tries) || 0) + 1; const error = String(e?.message ?? e).slice(0, 160);
     if (tries < 3) { await sql`update mkt_contents set quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ photoAudit: { v: 1, at: new Date().toISOString(), version: c.current_version, pending: true, tries, error } } as never)} where id = ${id}`; return { pending: true, tries }; }
     audit = { v: 1, at: new Date().toISOString(), version: c.current_version, passed: true, rows: [], skipped: `AI 대조 못 함(3번 시도) — ${error}` };
   }
+  await (await import('./ai/skips')).noteDone(sql, c.tenant, 'mkt_audit', [c.id]);
   const q = c.quality ?? {};
   const rest = ((q.issues ?? []) as string[]).filter((x) => !x.startsWith(AUDIT_PREFIX));
   const line = audit.passed ? null : auditIssue(audit);

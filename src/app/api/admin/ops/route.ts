@@ -1,6 +1,7 @@
 import { handler } from '@/lib/api';
 import { db } from '@/lib/db';
 import { requireMenu } from '@/lib/menuPerms';
+import { tenantOf } from '@/lib/types';
 
 export const GET = handler(async ({ user }) => {
   await requireMenu(user, 'ops', 'view');
@@ -29,5 +30,16 @@ export const GET = handler(async ({ user }) => {
     // 248차 #780: 휴대폰 사진 고르기 진단 최근 20건(사람 이름·기기)
     sql`select e.id, e.message, e.context, e.created_at, u.name from error_logs e left join users u on u.id::text = e.context->>'userId' where e.source = 'diag:pick' order by e.id desc limit 20`,
   ]);
-  return { jobs, errors, deliveries, syncErrors, counts: counts[0], recent, noDevice, dbLocale: dbLocale[0] ?? null, pickDiag };
+  // 371차 #994(대표 11/06): 빠졌던 날 / 다시 채움 — AI 한도·크레딧으로 못 한 항목(이 회사 + 공용 공고)과 수집기가 실패한 날
+  const { skipSummary } = await import('@/lib/ai/skips');
+  const aiSkips = await skipSummary(sql, [tenantOf(user), 'global']).catch(() => []);
+  const { COLLECTORS } = await import('@/lib/sales/collectors');
+  const label = new Map(COLLECTORS.map((c) => [c.slug, c.label]));
+  const collectorDays = (await sql<{ day: string; slug: string; failed: number; ok: number; next_ok: Date | null }[]>`
+    select x.day, x.slug, x.failed, x.ok, (select min(r.started_at) from sales_collector_runs r where r.slug = x.slug and r.status in ('success', 'partial')
+      and r.started_at > (x.day::date + 1)::timestamp at time zone 'Asia/Seoul') as next_ok
+    from (select to_char(started_at at time zone 'Asia/Seoul', 'YYYY-MM-DD') as day, slug, count(*) filter (where status = 'failed')::int as failed,
+      count(*) filter (where status in ('success', 'partial'))::int as ok from sales_collector_runs where started_at > now() - interval '14 days' group by 1, 2) x
+    where x.failed > 0 order by x.day desc, x.slug limit 60`.catch(() => [])).map((r) => ({ ...r, label: label.get(r.slug) ?? r.slug }));
+  return { jobs, errors, deliveries, syncErrors, counts: counts[0], recent, noDevice, dbLocale: dbLocale[0] ?? null, pickDiag, aiSkips, collectorDays };
 });

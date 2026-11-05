@@ -9,6 +9,7 @@ import { HttpError, badRequest, forbidden, notFound } from '../errors';
 import { audit } from '../log';
 import { notify } from '../notifications';
 import { aiEnabled, anthropicProvider, costUsd, modelFor, usdKrw, type AiProvider } from '../ai/provider';
+import { isAiStop } from '../ai/guard';
 import { tenantOf, type SessionUser } from '../types';
 import { NOT_SUPPORT_RE, SIDO, supportKeyStatus, watchDetailText } from './collectors/support';
 import { SIDO_ALIASES } from './collectors/prospects';
@@ -761,7 +762,7 @@ export async function analyzeTop(u: SessionUser, n = 5) {
   for (let i = 0; i < todo.length && !stopped; i += AI_PAR) {
     const rs = await Promise.allSettled(todo.slice(i, i + AI_PAR).map((x) => analyzeProgram(u, x.id)));
     for (const r of rs) if (r.status === 'fulfilled') { done++; costKrw += r.value.costKrw; } else errors.push(String((r.reason as Error)?.message ?? r.reason));
-    stopped = rs.some((r) => r.status === 'rejected' && ([402, 429].includes((r.reason as HttpError)?.status) || (r.reason as HttpError)?.code === 'ai_off')); // 한도·크레딧 — 더 안 돌림
+    stopped = rs.some((r) => r.status === 'rejected' && isAiStop(r.reason)); // 한도·크레딧(371차: 크레딧은 503 ai_credit 도) — 더 안 돌림
   }
   const left = Math.max(0, v.items.filter((x) => x.pending).length - done);
   return { asked: todo.length, done, failed: errors.length, costKrw, error: errors[0] ?? null, left, stopped };
@@ -1004,7 +1005,7 @@ export async function weeklyBundle(t: string, opt: { now?: Date; actor?: Session
       try { await analyzeProgram(actor, x.id, undefined, { auto: true }); aiCount++; auto.add(x.id); }
       catch (e) {
         aiFailed++; aiError ??= String((e as Error)?.message ?? e).slice(0, 160);
-        if ([402, 429].includes((e as HttpError)?.status) || (e as HttpError)?.code === 'ai_off') break; // 한도·크레딧 — 더 안 돌림
+        if (isAiStop(e)) break; // 한도·크레딧(371차: 503 ai_credit 포함) — 더 안 돌림
       }
     }
   }
@@ -1052,8 +1053,11 @@ export async function supportAutoTick(opt: { budgetMs?: number; max?: number } =
     if (prev && prev.fp === fp && !prev.left && !prev.stopped) { out[t] = { skipped: 'same' }; continue; }
     const actor = await adminActor(sql, t); if (!actor) { out[t] = { skipped: 'no_admin' }; continue; }
     const { all } = await supportAll(sql, t, actor.id, today);
-    const todo = all.filter((x) => autoCandidate(x, today)) // 판단 없는 것 먼저 → 마감 가까운 순 → 새로 올라온 순
-      .sort((a, b) => Number(!!a.ai) - Number(!!b.ai) || (a.applyEnd ?? '9999-12-31').localeCompare(b.applyEnd ?? '9999-12-31') || new Date(b.seen).getTime() - new Date(a.seen).getTime());
+    // 371차 #994: 한도·크레딧으로 못 한 공고(처음 막힌 순서) 먼저 → 판단 없는 것 → 마감 가까운 순 → 새로 올라온 순
+    const skipped = await (await import('../ai/skips')).openSkipOrder(sql, t, 'support');
+    const sk = (x: { id: string }) => skipped.get(x.id) ?? Number.MAX_SAFE_INTEGER;
+    const todo = all.filter((x) => autoCandidate(x, today))
+      .sort((a, b) => sk(a) - sk(b) || Number(!!a.ai) - Number(!!b.ai) || (a.applyEnd ?? '9999-12-31').localeCompare(b.applyEnd ?? '9999-12-31') || new Date(b.seen).getTime() - new Date(a.seen).getTime());
     if (todo.length > max0 && opt.max == null) {
       const { runLater, withLock, isBusy } = await import('../later');
       runLater(`supportAuto:${t}`, async () => {
@@ -1074,20 +1078,26 @@ export async function supportAutoTick(opt: { budgetMs?: number; max?: number } =
   return { tenants: tenants.length, out };
 }
 /** 판단 차례를 앞에서부터 4건씩 — n 건까지·deadline 전까지. 예산·한도·크레딧에 걸리면 멈춤(공고 실패로 안 셈), 다른 실패는 공고마다 auto_fail +1 */
-async function judgeQueue(sql: Sql, t: string, actor: SessionUser, todo: { id: string }[], n: number, deadline: number) {
-  let done = 0, failed = 0, i = 0; let stopped: string | null = null, error: string | null = null;
+async function judgeQueue(sql: Sql, t: string, actor: SessionUser, todo: { id: string; title?: string | null }[], n: number, deadline: number) {
+  let done = 0, failed = 0, i = 0; let stopped: string | null = null, error: string | null = null; let stopErr: unknown = null;
+  const ok: string[] = [];
   while (i < n && !stopped && Date.now() < deadline) {
     const batch = todo.slice(i, Math.min(i + AI_PAR, n)); i += batch.length;
     const rs = await Promise.allSettled(batch.map((x) => analyzeProgram(actor, x.id, undefined, { auto: true })));
     for (const [k, r] of rs.entries()) {
-      if (r.status === 'fulfilled') { done++; continue; }
+      if (r.status === 'fulfilled') { done++; ok.push(batch[k].id); continue; }
       const e = r.reason as HttpError;
-      if ([402, 429].includes(e?.status) || e?.code === 'ai_off') { stopped = e?.code || 'budget'; error = String(e?.message ?? e).slice(0, 200); continue; }
+      // 371차 #994: 크레딧 소진(503 ai_credit)·회사 예산·요청 수·속도 제한 = 멈춤(공고 실패로 안 셈) — 예전엔 402·429 만 봐서 크레딧이 떨어진 동안 공고마다 auto_fail +1, 3번이면 차례에서 빠졌다
+      if (isAiStop(e)) { stopped = e?.code || 'budget'; error = String(e?.message ?? e).slice(0, 200); stopErr = e; continue; }
       failed++; error ??= String(e?.message ?? e).slice(0, 200);
       await sql`insert into support_matches (tenant, program_id, auto_fail) values (${t}, ${batch[k].id}, 1)
         on conflict (tenant, program_id) do update set auto_fail = support_matches.auto_fail + 1, updated_at = now()`;
     }
   }
+  // 371차 #994: 다시 판단된 것 = 다시 채움 · 멈췄으면 아직 못 한 차례 전부를 '못 함(사유·날짜)'으로 — 다음 정기 실행이 처음 막힌 순서대로 다시
+  const SK = await import('../ai/skips');
+  await SK.noteDone(sql, t, 'support', ok);
+  if (stopped) await SK.noteSkips(sql, t, 'support', todo.filter((x) => !ok.includes(x.id)).map((x) => ({ key: x.id, title: x.title ?? null })), stopErr);
   return { done, failed, stopped, error };
 }
 /** 판단 결과를 화면 안내용으로 저장 · #810 예산·한도에 걸려 멈추면 관리자에게 하루 한 번 알림 */

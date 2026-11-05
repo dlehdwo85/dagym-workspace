@@ -91,7 +91,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   let found: { text: string; items: EligItem[]; line: string } | null = null; let used: SrcFile | null = null; let tried: SrcFile | null = null; const errs: string[] = [];
   let full: string | null = null; // 264차: 절을 찾은 공고문 글 전체(잘린 절을 더 길게 다시 자를 때)
   const needDl = needsDocDeadline(row); let dl: { at: string; label: string } | null = null; // 259차
-  let photo: { f: SrcFile; doc: PhotoDoc } | null = null; let by: 'vision' | undefined; let visionUsd: number | undefined; let visionDone = false; let visionSkip = false;
+  let photo: { f: SrcFile; doc: PhotoDoc } | null = null; let by: 'vision' | undefined; let visionUsd: number | undefined; let visionDone = false; let visionSkip = false; let visionStop: unknown = null;
   for (const f of files) {
     tried = tried ?? f;
     try {
@@ -140,7 +140,11 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
         if (sec) { found = eligibilityOf(sec, row) ?? { text: sec.slice(0, 1500), items: eligibilityItems(sec), line: lineOf(sec, row) }; used = photo.f; by = 'vision'; full = v.text; }
         else errs.push('사진에서도 참가자격 절을 못 찾음');
       }
-    } catch (e) { errs.push(`AI 사진 읽기 못함(${String((e as Error)?.message ?? e).slice(0, 40)})`); }
+    } catch (e) {
+      // 371차 #994: 회사 예산·요청 수·크레딧 막힘은 시도 횟수(최대 3)로 세지 않음 — 정상으로 돌아오면 다시 읽음 · '못 함' 기록
+      if ((await import('../ai/guard')).isAiStop(e)) { visionSkip = true; visionStop = e; errs.push(`AI 사진 읽기 미룸 — 한도·크레딧(${String((e as Error)?.message ?? e).slice(0, 40)})`); }
+      else errs.push(`AI 사진 읽기 못함(${String((e as Error)?.message ?? e).slice(0, 40)})`);
+    }
   }
   const prevTries = prev && !prev.text && prev.sig === sigNow ? prev.tries ?? 0 : 0;
   const extra = apiExtra(row, []);
@@ -170,7 +174,17 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   const dlPatch = dl ? { deadline_at: dl.at, deadline_src: 'doc', doc_deadline_label: jsonSafe(dl.label) } : {};
   await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: out, ...dlPatch } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices'
     and (src_id = ${id} ${st && ext ? sql`or (row->>'source_type' = ${st} and row->>'source_external_id' = ${ext})` : sql``})`; // synced_at 은 그대로(메일 '고침'으로 안 셈)
+  await noteElig(sql, id, String(row.title ?? ''), { vision: visionStop ? 'stop' : visionDone ? 'done' : null, stopErr: visionStop, ai: out.ai });
   return out;
+}
+
+/** 371차 #994: 사진 읽기·AI 항목 정리가 한도·크레딧에 막히면 '못 함', 다시 되면 '다시 채움'(공용 공고 = tenant 'global') */
+async function noteElig(sql: Sql, id: string, title: string, s: { vision: 'stop' | 'done' | null; stopErr?: unknown; ai?: { skip?: string | null; error?: string | null; items: unknown[] } | null }) {
+  const SK = await import('../ai/skips');
+  if (s.vision === 'stop') await SK.noteSkip(sql, 'global', 'eligibility_vision', id, title, s.stopErr ?? { code: 'ai_stop', message: '사진 공고문 읽기 — AI 한도·크레딧' });
+  else if (s.vision === 'done') await SK.noteDone(sql, 'global', 'eligibility_vision', [id]);
+  if (s.ai?.skip && /^AI 예산·한도/.test(s.ai.skip)) await SK.noteSkip(sql, 'global', 'eligibility_ai', id, title, { code: 'ai_stop', message: s.ai.skip });
+  else if (s.ai && !s.ai.skip && !s.ai.error) await SK.noteDone(sql, 'global', 'eligibility_ai', [id]);
 }
 
 /** 262차: 공고문을 다시 받지 않고 저장한 절만으로 AI 항목 정리(정기 실행 — 예전에 읽은 공고). 같은 공고번호의 다른 줄에도 씀 */
@@ -186,6 +200,7 @@ export async function fillAiItems(id: string): Promise<EligAi | null> {
   await sql`update sales_src_rows set row = jsonb_set(jsonb_set(row, '{eligibility,ai}', ${sql.json(safe as never)}::jsonb), '{eligibility,line}', to_jsonb(${line ?? null}::text))
     where scope = 'global' and tbl = 'procurement_notices' and row ? 'eligibility' and row->'eligibility'->>'text' = ${e.text}
     and (src_id = ${id} ${st && ext ? sql`or (row->>'source_type' = ${st} and row->>'source_external_id' = ${ext})` : sql``})`;
+  await noteElig(sql, id, String(r.row.title ?? ''), { vision: null, ai: safe });
   return safe;
 }
 

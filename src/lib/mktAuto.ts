@@ -980,8 +980,13 @@ async function produceDue(tenant: string, actorId: string | undefined, budgetMs:
       if (produced.length && Date.now() - start > budgetMs) break;
       const [fresh] = await db()<any[]>`select * from mkt_contents where id = ${c.id} and status = 'draft' and produced_at is null`; // 그사이 [지금 만들기] 등으로 만들어졌으면 건너뜀
       if (!fresh) continue;
-      const r: any = await produceContent(fresh, actorId, 'auto').catch((e) => ({ id: c.id, error: String(e?.message ?? e).slice(0, 200), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' }));
+      let stopE: unknown = null;
+      const r: any = await produceContent(fresh, actorId, 'auto').catch((e) => (stopE = e, { id: c.id, error: String(e?.message ?? e).slice(0, 200), quota: e?.code === 'ai_quota' || e?.code === 'mkt_ai_quota' || e?.code === 'ai_credit' || e?.code === 'ai_budget' /* 371차 #994: 회사 예산 막힘에도 계속 돌던 것 */ }));
       produced.push(r);
+      // 371차 #994: 만든 칸 = 다시 채움 · 한도·크레딧으로 멈추면 이 칸부터 남은 칸을 '못 함'으로(다음 실행이 produce_at 순으로 다시)
+      const SK = await import('./ai/skips');
+      if (!r.error) await SK.noteDone(db(), tenant, 'mkt_produce', [c.id]);
+      else if (r.quota) await SK.noteSkips(db(), tenant, 'mkt_produce', due.slice(k).map((x: any) => ({ key: x.id, title: x.title ?? null })), stopE);
       if (r.quota) { // 한도·크레딧: 남은 칸도 같은 이유로 실패하므로 멈추고, 받는 사람에게 하루 한 번 알림
         await (await import('./spaceNotify')).notifySpace(db(), { tenant, space: 'marketing', approval: true, type: 'usage_alert', title: '마케팅 자동 제작 멈춤(AI 한도)', body: r.error, link: '/s/marketing/automation', dedupeKey: `mktquota:${tenant}:${ymd(new Date())}` }).catch(() => {});
         k++; break;

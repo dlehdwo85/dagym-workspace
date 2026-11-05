@@ -111,6 +111,13 @@ export function passPrefs(r: any, p: Prefs): { ok: boolean; why: string; fit: st
 const SRC: Record<string, string> = { kapt_bid: 'K-apt', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집' };
 const SLUG_OF: Record<string, string> = { kapt_bid: 'kapt_bid_notices', g2b_bid: 'g2b_bid_notices', nuri_bid: 'g2b_bid_notices', g2b_prespec: 'g2b_prespec_awards', lh_bid: 'public_agency_bids', lh_prespec: 'public_agency_bids', d2b_bid: 'public_agency_bids', onbid_lease: 'public_agency_bids', vendor_recruit: 'vendor_recruit_watch' };
 const SECTION_ORDER: DigestSection[] = ['now', 'review', 'soon', 'change', 'result', 'ref'];
+/** 371차 #994: 공고일보다 이틀 넘게 늦게 처음 받은 공고(수집 실패·한도 막힘 뒤 다시 채움 등) — 메일 배지 '늦게 찾음' */
+export function lateFound(r: { posted_date?: unknown; notice_date?: unknown; first_seen_at?: unknown }) {
+  const posted = String(r.posted_date ?? r.notice_date ?? '').slice(0, 10); const seen = r.first_seen_at ? new Date(String(r.first_seen_at)) : null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(posted) || !seen || Number.isNaN(seen.getTime())) return false;
+  const seenDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(seen);
+  return (Date.parse(`${seenDay}T00:00:00Z`) - Date.parse(`${posted}T00:00:00Z`)) / 864e5 > 2;
+}
 const num = (v: unknown) => { if (v == null || v === '') return null; const n = Number(String(v).replace(/[,\s원]/g, '')); return Number.isFinite(n) ? n : null; };
 const won = (n: number) => (n >= 1e8 ? `${(n / 1e8).toFixed(1).replace(/\.0$/, '')}억` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString('ko-KR')}만원` : `${n.toLocaleString('ko-KR')}원`);
 /** 결과 한 줄: '낙찰 ○○ · 낙찰금액 1.2억' / '유찰' */
@@ -277,7 +284,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     // #530 ⑦(로컬 10/24): 21라인 범례처럼 공고 유형 배지 — 정정·취소·재공고·재게시·긴급 + 수의계약·견적·현장설명 · 결과는 낙찰/유찰
     const badges = c.kind === 'result' ? [/유찰/.test(String(r.current_status ?? '')) && !String(r.winner_name ?? '').trim() ? '유찰' : '낙찰', ...(c.filled ? ['보완'] : [])]
       : [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : reposted.has(c.id) ? '재게시' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null,
-        /수의/.test(method) ? '수의계약' : null, /견적/.test(`${method} ${r.title ?? ''}`) ? '견적' : null, briefing && briefing.slice(0, 10) >= day && c.kind !== 'cancel' ? (r.site_briefing_kind === '필수' ? '현장설명 필수' : '현장설명') : null, c.kind !== 'cancel' ? partner : null].filter((x): x is string => !!x); // 현장설명 배지는 아직 안 지난 것만 · #752
+        lateFound(r) ? '늦게 찾음' : null, /수의/.test(method) ? '수의계약' : null, /견적/.test(`${method} ${r.title ?? ''}`) ? '견적' : null, briefing && briefing.slice(0, 10) >= day && c.kind !== 'cancel' ? (r.site_briefing_kind === '필수' ? '현장설명 필수' : '현장설명') : null, c.kind !== 'cancel' ? partner : null].filter((x): x is string => !!x); // 현장설명 배지는 아직 안 지난 것만 · #752
     const amounts = amountsOf(r); const wk = work.get(c.id);
     const progress = wk && (wk.status || wk.who) ? [wk.status ? `진행 ${wk.status}` : '진행 기록 있음', wk.who ? `담당 ${wk.who}` : null].filter(Boolean).join(' · ') : null;
     const biz = matchBiz(r, cats).map((b) => ({ name: b.name, color: b.color }));

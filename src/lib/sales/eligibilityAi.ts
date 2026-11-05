@@ -54,8 +54,8 @@ export async function aiItemsFor(text: string, title: string, prev: EligAi | nul
   try { r = await provider.chat({ system, tools: [], format: SCHEMA, messages: [{ role: 'user', content: `공고명: ${title.slice(0, 120)}\n\n${long ?? text.slice(0, SEC_MAX)}` }] }); }
   catch (e) {
     const err = await (await import('../ai/guard')).onAiError(e, sql);
-    const status = (err as { status?: number })?.status;
-    return status === 402 || status === 429 ? { sig, items: [], at, skip: `AI 예산·한도: ${String((err as Error)?.message ?? err).slice(0, 60)}`, tries }
+    // 371차 #994: 크레딧 소진은 503 ai_credit 으로 온다 — 402·429 만 보던 때는 실패(tries +1, 3번이면 끝)로 셈했다
+    return (await import('../ai/guard')).isAiStop(err) ? { sig, items: [], at, skip: `AI 예산·한도: ${String((err as Error)?.message ?? err).slice(0, 60)}`, tries }
       : { sig, items: [], at, error: String((err as Error)?.message ?? err).slice(0, 80), tries: tries + 1 };
   }
   const usd = costUsd(r.model ?? provider.model, r.usage);

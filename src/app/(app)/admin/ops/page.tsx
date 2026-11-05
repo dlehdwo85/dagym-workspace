@@ -48,6 +48,25 @@ export default function Ops() {
             {j.detail?.due && ` · 마감알림 ${j.detail.due.created}`}{j.detail?.recurring && ` · 반복생성 ${j.detail.recurring.spawned}`}{j.detail?.push && ` · 푸시 ${j.detail.push.sent}/${j.detail.push.claimed}`}</li>
         ))}{!data.jobs.length && <li className="text-slate-400">아직 실행 기록이 없습니다 — 스케줄러 연결을 확인하세요</li>}</ul>
       </section>
+      {/* 371차 #994: AI 한도·크레딧으로 못 한 항목·수집기가 실패한 날 — 정상으로 돌아온 정기 실행이 오래된 것부터 다시 채움 */}
+      <section className="rounded-lg border bg-white p-4" data-testid="ops-gaps">
+        <h2 className="mb-1 text-sm font-semibold">빠졌던 날 · 다시 채움 (최근 14일)</h2>
+        <p className="mb-2 text-xs text-ink-3">AI 한도·크레딧이 막힌 동안 못 한 항목은 실패로 세지 않고 남겨 두었다가, 정상으로 돌아온 정기 실행이 처음 막힌 순서대로 다시 합니다(회사 한도 안에서만, 닿으면 다시 멈춤). 나라장터 수집은 매일 06시에 14일 범위를 다시 받습니다.</p>
+        {!data.aiSkips?.length && !data.collectorDays?.length ? <p className="text-sm text-ink-3" data-testid="ops-gaps-none">빠진 날 없음</p> : (
+          <ul className="space-y-1 text-sm">
+            {data.aiSkips?.map((g: any) => (
+              <li key={`${g.day}-${g.stage}`} data-testid="ops-gap-ai" className={cx(g.left > 0 && 'text-amber-800')}>
+                {g.day} · {g.label} — 못 함 {g.total}건 · 다시 채움 완료 {g.done}건 · 남은 {g.left}건 <span className="text-xs text-ink-3">({g.reason})</span>
+              </li>
+            ))}
+            {data.collectorDays?.map((c: any) => (
+              <li key={`${c.day}-${c.slug}`} data-testid="ops-gap-collector" className={cx(!c.ok && !c.next_ok && 'text-red-700')}>
+                {c.day} · {c.label} 수집 — 실패 {c.failed}번{c.ok ? ` · 같은 날 성공 ${c.ok}번` : ''}{!c.ok && (c.next_ok ? ` → 다음 성공 ${fmtDateTime(c.next_ok)}` : ' → 아직 성공 없음')}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">푸시 발송 (최근 7일)</h2>
         <p className="text-sm">{data.deliveries.map((d: any) => `${({ sent: '성공', failed: '실패', pending: '대기', skipped: '건너뜀' } as any)[d.status]} ${d.c}`).join(' · ') || '기록 없음'}</p>
