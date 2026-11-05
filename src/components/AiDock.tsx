@@ -94,7 +94,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
       const r = await api(`/api/ai/threads/${id}`);
       conv.cancelEdit();
       setMsgs(r.messages.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'assistant', text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text || (m.status === 'error' ? '(오류)' : ''), stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked', docJobs: m.doc_jobs?.length ? m.doc_jobs.map((j: any) => j.id) : undefined, error: m.status === 'error',
-        proposals: (m.proposals ?? []).map((p: any) => ({ id: p.id, kind: p.kind, summary: p.summary, preview: p.preview ?? undefined, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) })));
+        proposals: (m.proposals ?? []).map((p: any) => ({ id: p.id, kind: p.kind, summary: p.summary, preview: p.preview ?? undefined, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, replaced: !!p.result?.replaced, link: p.result?.link })) })));
       setThreadId(id); setView('chat');
     } catch (e: any) { toast.error(e.message); }
   }

@@ -36,6 +36,7 @@ describe('365차 #987 대기 제안 바꿔 끼우기', () => {
     await queue([toolUse('b', 'propose_create_task', { title: '견적서 보내기', assigneeId: ctx.staffB.id, replacesProposalId: first.id }), say('고친 제안으로 바꿨습니다.')]);
     const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '담당은 박직원으로 바꿔줘', threadId });
     assert.equal(r.proposals.length, 1);
+    assert.match(r.proposals[0].summary, /담당 박직원/, '366차 후속: 카드 한 줄에 담당');
     assert.deepEqual(r.replaced, [first.id]);
     assert.equal(await status(first.id), 'cancelled');
     assert.equal(await status(r.proposals[0].id), 'pending');
@@ -45,7 +46,11 @@ describe('365차 #987 대기 제안 바꿔 끼우기', () => {
 
   test('모델이 id 를 빠뜨려도: 바로 앞 답의 같은 종류 대기 제안 1건 + "바꿔/고쳐" 질문이면 자동 취소', async () => {
     await queue([toolUse('c', 'propose_create_task', { title: '견적서 보내기(금요일)', assigneeId: ctx.staffB.id, dueDate: '2026-11-13' }), say('마감을 금요일로 한 제안입니다.')]);
+    const n0 = (await fakeState()).anthropic.length;
     const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '마감은 금요일로 해줘', threadId });
+    // 366차 후속: AI 가 보는 기록도 화면과 같은 이름(바꿔 끼운 옛 제안 = 새 제안으로 바뀜, 취소됨 아님)
+    const hist = JSON.stringify((await fakeState()).anthropic.slice(n0)[0].body.messages);
+    assert.match(hist, /새 제안으로 바뀜/); assert.doesNotMatch(hist, /담당 이직원[^\]]*\[취소됨\]/);
     assert.deepEqual(r.replaced, [first.id]);
     assert.equal(await status(first.id), 'cancelled');
     first = r.proposals[0];

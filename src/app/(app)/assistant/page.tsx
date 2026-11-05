@@ -46,7 +46,7 @@ export default function AssistantPage() {
       const r = await api(`/api/ai/threads/${id}`);
       conv.cancelEdit();
       setMsgs(r.messages.map((m: any) => ({ role: m.role, text: m.status === 'stopped' && m.role === 'assistant' ? '멈춤' : m.text, stopped: m.status === 'stopped' && m.role === 'assistant', files: m.file_names?.length ? m.file_names : undefined, blocked: m.status === 'blocked', docJobs: m.doc_jobs?.length ? m.doc_jobs.map((j: any) => j.id) : undefined,
-        proposals: m.proposals?.length ? m.proposals.map((p: any) => ({ id: p.id, kind: p.kind, summary: p.summary, preview: p.preview ?? undefined, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, link: p.result?.link })) : undefined })));
+        proposals: m.proposals?.length ? m.proposals.map((p: any) => ({ id: p.id, kind: p.kind, summary: p.summary, preview: p.preview ?? undefined, state: p.status === 'done' ? 'done' : p.status === 'cancelled' ? 'cancelled' : undefined, replaced: !!p.result?.replaced, link: p.result?.link })) : undefined })));
     } catch (e: any) { toast.error(e.message); setThreadId(null); }
   }
   useEffect(() => { if (threadId && !msgs.length) openThread(threadId); }, []); // eslint-disable-line react-hooks/exhaustive-deps

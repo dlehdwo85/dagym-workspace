@@ -246,7 +246,7 @@ for (const t of TOOLS) if (t.name.startsWith('propose_')) {
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 아래 [우리 회사] 직원을 돕습니다. 그 회사의 업종·사업 방향·말투에 맞춰 답하고, 다른 회사 이야기를 지어내지 마세요.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다.
-- 실행 상태는 도구 결과·대화 기록 표시 그대로 말하세요(대표 지적 10/19 ④): 이번 답에서 만든 제안 = "확인을 누르면 반영됩니다". 대화 기록의 [실행됨] = 이미 반영된 것 → "만들었습니다/바꿨습니다(화면의 [열기])"라고 하고 다시 확인을 안내하지 마세요. [취소됨] = 반영 안 됨. 도구 오류 = "하지 못했습니다: 이유".
+- 실행 상태는 도구 결과·대화 기록 표시 그대로 말하세요(대표 지적 10/19 ④): 이번 답에서 만든 제안 = "확인을 누르면 반영됩니다". 대화 기록의 [실행됨] = 이미 반영된 것 → "만들었습니다/바꿨습니다(화면의 [열기])"라고 하고 다시 확인을 안내하지 마세요. [취소됨]·[새 제안으로 바뀜] = 반영 안 됨(바뀜은 고친 새 제안으로 대신함 — 사용자에게도 그 이름 그대로). 도구 오류 = "하지 못했습니다: 이유".
 - 대화 기록의 [대기] 제안(아직 [확인] 전)을 고쳐 달라고 하면(담당·마감·제목·내용 바꾸기 등) 고친 새 제안을 만들 때 replacesProposalId 에 그 제안 id 를 넣으세요. 옛 제안은 자동으로 취소되니 "이전 제안은 취소해 주세요"라고 안내하지 말고 "고친 제안으로 바꿨습니다 — 확인을 누르면 반영됩니다"라고 하세요.
 [할 수 있는 일 — 아래 도구로 되는 일을 "안 된다·화면에서 직접 하세요"라고 답하지 마세요(대표 지적 10/19 ②). 되는지 모르겠으면 도구 목록을 먼저 보고, 정말 도구가 없을 때만 안 된다고 하세요]
 - 업무: 찾기 search_tasks · 상세 get_task · 만들기 propose_create_task(한 사람)·propose_create_tasks(여러 사람 — 기본 함께 담당 1건, '각자'라고 하면 사람마다) · 고치기 propose_update_task(담당자 변경·마감일·마감 시각·상태·우선순위·제목) · 댓글 propose_comment · 자료 첨부 propose_attach_file
@@ -323,7 +323,9 @@ async function replaceOld(c: Ctx, input: unknown, out: unknown, sql = db()) {
 }
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function cancelPending(c: Ctx, ids: string[], sql = db()) {
-  const r = await sql<{ id: string }[]>`update ai_proposals set status = 'cancelled', decided_at = now() where id = any(${ids}::uuid[]) and user_id = ${c.u.id} and status = 'pending' returning id`;
+  // result.replaced = 새 제안으로 바꿔 끼움(화면 '새 제안으로 바뀜'·대화 기록에도 같은 이름)
+  const r = await sql<{ id: string }[]>`update ai_proposals set status = 'cancelled', decided_at = now(), result = coalesce(result, '{}'::jsonb) || '{"replaced": true}'::jsonb
+    where id = any(${ids}::uuid[]) and user_id = ${c.u.id} and status = 'pending' returning id`;
   for (const { id } of r) {
     (c.replaced ??= []).push(id);
     const k = c.proposals.findIndex((p) => p.id === id); if (k >= 0) c.proposals.splice(k, 1); // 같은 답 안에서 바꿔 끼운 것은 카드에서 뺌
@@ -590,7 +592,9 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       const i = taskInput.parse({ title: input.title, description: input.description || undefined, assigneeId: input.assigneeId || undefined, dueDate: isDate(input.dueDate) ? input.dueDate : undefined,
         dueTime: /^\d{2}:\d{2}$/.test(input.dueTime ?? '') ? input.dueTime : undefined, priority: input.priority || undefined, projectId: input.projectId || undefined,
         orgUnitId: input.orgUnitId || undefined, checklist: Array.isArray(input.checklist) ? input.checklist.slice(0, 50) : undefined });
-      return propose(c, 'create_task', `업무 만들기: ${i.title}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`, i);
+      // 366차 후속(로컬 #991 확인): 카드 한 줄에 담당 — 담당만 바꾼 제안도 카드에서 차이가 보이게
+      const who = i.assigneeId ? ((await directory(u)).users as unknown as { id: string; name: string }[]).find((p) => p.id === i.assigneeId)?.name : null;
+      return propose(c, 'create_task', `업무 만들기: ${i.title}${who ? ` · 담당 ${who}` : ''}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`, i);
     }
     case 'propose_create_tasks': {
       if (c.proposals.some((p) => p.kind === 'create_event' && p.summary.includes(`: ${String(input.title ?? '').trim()} —`)
