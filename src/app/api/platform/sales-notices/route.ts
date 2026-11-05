@@ -18,6 +18,8 @@ export const GET = handler(async ({ req, user }) => {
   // 372차 #995: g2b=fitpreview — 공공 시설 관리위탁·운영자 모집 후보 규칙 미리 보기(지금 받아 세기만, 저장 안 함)
   if (u.searchParams.get('g2b') === 'fitpreview') return { fitPreview: await (await import('@/lib/sales/collectors/g2b')).previewPublicFacility(Number(u.searchParams.get('days')) || 14) };
   // 373차 #996: kg2b=listpreview — KG2B 자체 입찰 목록 미리 보기(이미 있음·새로·관련·건물 종류 세기만, 저장 안 함 · 요청 간격 1.2초 · 최대 20장)
+  // 374차: kg2b=probe — 이 서버(기본 싱가포르)에서 KG2B 까지 이름 찾기·연결·첫 화면·목록이 되는지. 서울에서는 /api/platform/kg2b?do=probe
+  if (u.searchParams.get('kg2b') === 'probe') return { kg2bProbe: await (await import('@/lib/sales/collectors/kg2b')).kg2bProbe() };
   if (u.searchParams.get('kg2b') === 'listpreview') return { kg2bList: await (await import('@/lib/sales/collectors/kg2b')).previewKg2bList({ pages: Number(u.searchParams.get('pages')) || 8, days: Number(u.searchParams.get('days')) || 14 }) };
   if (u.searchParams.get('g2b') === 'nodl') return { g2bNoDeadline: await (await import('@/lib/sales/collectors/g2b')).g2bNoDeadline() }; // 259차: 입찰 마감이 API 에 없는 나라장터 공고 수
   if (u.searchParams.get('g2b') === 'dates' && /^[A-Za-z0-9]{6,24}(?:-\d{1,3})?$/.test(no)) return { g2bDates: await (await import('@/lib/sales/collectors/g2b')).probeG2bDates(no) };

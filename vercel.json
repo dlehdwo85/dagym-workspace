@@ -21,6 +21,11 @@
       "regions": [
         "icn1"
       ]
+    },
+    "src/app/api/platform/kg2b/route.ts": {
+      "regions": [
+        "icn1"
+      ]
     }
   },
   "git": {

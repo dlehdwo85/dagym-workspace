@@ -149,11 +149,11 @@ export async function previewKg2bList(opts: { pages?: number; days?: number } = 
   const since = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() - days * 864e5));
   const url = `${kg2bBase()}/user/bid_list/bidAll`; const UA = 'Mozilla/5.0 (WorkIn sales)'; const t0 = Date.now();
   let cookie = ''; const keep = (r: Response) => { const sc = (r.headers as any).getSetCookie?.() as string[] | undefined; const c = (sc ?? []).map((x) => x.split(';')[0]).filter(Boolean); if (c.length) cookie = c.join('; '); };
-  const all: Kg2bListRow[] = []; const seen = new Set<string>(); let total: number | null = null, enc: string | null = null, read = 0, stop = ''; const errors: string[] = [];
+  const all: Kg2bListRow[] = []; const seen = new Set<string>(); let total: number | null = null, enc: string | null = null, read = 0, stop = '', retried = false; const errors: string[] = [];
   for (let page = 1; page <= pages; page++) {
     if (page > 1) { if (!enc) { stop = '다음 장 열쇠(__encrypted) 없음'; break; } if (Date.now() - t0 > 40_000) { stop = '40초 넘음'; break; } await new Promise((r) => setTimeout(r, 1200)); }
     try {
-      const res = page === 1 ? await fetchImpl(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(12_000), redirect: 'follow' })
+      const res = page === 1 ? await fetchImpl(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(20_000), redirect: 'follow' })
         : await fetchImpl(url, { method: 'POST', headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded', Referer: url, ...(cookie ? { Cookie: cookie } : {}) },
           body: new URLSearchParams({ method: 'bidAlllist', currentPage: String(page), tabkind: '', __encrypted: enc! }).toString(), signal: AbortSignal.timeout(12_000), redirect: 'follow' });
       keep(res); read++;
@@ -162,7 +162,11 @@ export async function previewKg2bList(opts: { pages?: number; days?: number } = 
       const fresh = p.rows.filter((r) => !seen.has(r.code)); fresh.forEach((r) => seen.add(r.code)); all.push(...fresh);
       if (!fresh.length) { stop = `${page}장에 새 줄 없음`; break; }
       if (fresh.every((r) => r.posted && r.posted < since)) { stop = `${page}장이 모두 ${days}일 전`; break; }
-    } catch (e) { errors.push(`${page}장 ${(e as Error).message.slice(0, 80)}`); break; }
+    } catch (e) {
+      // 374차(로컬 11/06 02:40 운영 'fetch failed' 10.5초): 원인(코드·시스템 호출·주소)을 그대로 남기고 첫 장은 2초 뒤 한 번 더
+      if (page === 1 && !retried) { retried = true; errors.push(`1장 ${fetchErr(e)} — 2초 뒤 다시`); await new Promise((r) => setTimeout(r, 2000)); page = 0; continue; }
+      errors.push(`${page}장 ${fetchErr(e)}`); break;
+    }
   }
   const inRange = all.filter((r) => !r.posted || r.posted >= since);
   const have = new Set((await db()<{ ext: string }[]>`select row->>'source_external_id' as ext from sales_src_rows where scope = 'global' and tbl = 'procurement_notices'
@@ -174,8 +178,29 @@ export async function previewKg2bList(opts: { pages?: number; days?: number } = 
   for (const r of scored) { const k = (byKind[r.kind] ??= { n: 0, notInDb: 0, related: 0, relatedNew: 0 }); k.n++; if (!r.already) k.notInDb++; if (r.fit) { k.related++; if (!r.already) k.relatedNew++; } if (r.posted) byDay[r.posted] = (byDay[r.posted] ?? 0) + 1; }
   const pick = (r: (typeof scored)[number]) => ({ code: r.code, noticeNo: r.noticeNo, title: r.title, issuer: r.issuer, industry: r.industry, region: r.region, posted: r.posted, openingAt: r.openingAt, kind: r.kind, fit: r.fit, already: r.already });
   const notIn = scored.filter((r) => !r.already);
-  return { source: url, days, since, pagesRead: read, total, rows: scored.length, stop: stop || (read >= pages ? `${pages}장까지(최대)` : ''), errors, ms: Date.now() - t0,
+  return { source: url, region: process.env.VERCEL_REGION ?? null, days, since, pagesRead: read, total, rows: scored.length, stop: stop || (read >= pages ? `${pages}장까지(최대)` : ''), errors, ms: Date.now() - t0,
     already: scored.length - notIn.length, notInDb: notIn.length, related: scored.filter((r) => r.fit).length, relatedNew: notIn.filter((r) => r.fit).length, byKind, byDay,
     examples: [...notIn.filter((r) => r.fit), ...notIn.filter((r) => !r.fit && r.kind !== '공동주택(추정)'), ...notIn.filter((r) => !r.fit && r.kind === '공동주택(추정)')].slice(0, 15).map(pick),
     alreadyExamples: scored.filter((r) => r.already).slice(0, 3).map(pick), saved: 0 };
+}
+
+/** 374차: fetch 실패 원인 한 줄 — 'fetch failed' 뒤에 숨은 cause(코드·errno·syscall·주소)까지 */
+export function fetchErr(e: unknown): string {
+  const x = e as any, c = x?.cause, cc = c?.cause;
+  const parts = [x?.name, x?.message, c?.code, c?.errno, c?.syscall, c?.hostname ?? c?.address, c?.message, cc?.code, cc?.message].filter((v) => v != null && v !== '').map(String);
+  return parts.filter((v, i) => parts.indexOf(v) === i).join(' · ').slice(0, 300) || String(e);
+}
+/** 374차(로컬 11/06 02:40 — 운영 서버에서 KG2B 첫 장 'fetch failed', 노트북 국내 회선은 열림): 이 서버에서 KG2B 까지 어디서 막히는지(이름 찾기·연결·첫 화면·목록)
+ *  — 싱가포르(sin1, 기본)와 서울(icn1, /api/platform/kg2b) 두 곳에서 불러 비교. 저장 안 함 */
+export async function kg2bProbe(fetchImpl: typeof fetch = fetch) {
+  const base = new URL(kg2bBase()); const host = base.hostname; const port = Number(base.port) || (base.protocol === 'http:' ? 80 : 443);
+  const timed = async <T extends object>(f: () => Promise<T>) => { const t = Date.now(); try { const v = await f(); return { ok: true, ms: Date.now() - t, ...v }; } catch (e) { return { ok: false, ms: Date.now() - t, error: fetchErr(e) }; } };
+  const dns = await timed(async () => ({ addresses: (await (await import('node:dns/promises')).lookup(host, { all: true })).map((a) => a.address).slice(0, 4) }));
+  const tcp = await timed(() => new Promise<{ port: number }>((resolve, reject) => import('node:net').then(({ connect }) => {
+    const s = connect({ host, port, timeout: 8000 }); s.once('connect', () => { s.destroy(); resolve({ port }); });
+    s.once('timeout', () => { s.destroy(); reject(new Error(`연결 8초 넘음(${host}:${port})`)); }); s.once('error', (e) => { s.destroy(); reject(e); }); }, reject)));
+  const get = (path: string) => timed(async () => { const r = await fetchImpl(`${kg2bBase()}${path}`, { headers: { 'User-Agent': 'Mozilla/5.0 (WorkIn sales)' }, signal: AbortSignal.timeout(15_000), redirect: 'follow' });
+    const h = await r.text(); return { status: r.status, bytes: h.length, ...(path.includes('bidAll') ? { rows: parseKg2bList(h).rows.length } : {}) }; });
+  const main = await get('/'); await new Promise((r) => setTimeout(r, 1200)); const list = await get('/user/bid_list/bidAll');
+  return { region: process.env.VERCEL_REGION ?? null, host, port, dns, tcp, main, list, at: new Date().toISOString() };
 }

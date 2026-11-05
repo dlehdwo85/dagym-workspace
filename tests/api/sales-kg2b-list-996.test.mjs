@@ -59,3 +59,15 @@ test('KG2B 목록 미리 보기: 2장(열쇠·쿠키)·14일 안만·이미 있�
   assert.ok(post && /__encrypted=TOKEN1/.test(post.body) && /JSESSIONID=sess996/.test(post.cookie), '다음 장은 화면 열쇠·쿠키로');
   assert.equal((await sql`select count(*)::int as n from sales_src_rows where tbl = 'procurement_notices'`)[0].n, before, '저장 안 함');
 });
+
+test('374차 KG2B 연결 점검(이름 찾기·연결·첫 화면·목록) · 서울 지역 주소도 같은 결과 · 플랫폼 운영자만', async () => {
+  for (const path of ['/api/platform/sales-notices?kg2b=probe', '/api/platform/kg2b?do=probe']) {
+    const { kg2bProbe: p } = await ctx.owner.ok('GET', path);
+    assert.ok(p.dns.ok && p.tcp.ok, JSON.stringify(p)); assert.equal(p.port, PORT);
+    assert.equal(p.main.ok, true); assert.equal(p.main.status, 404, '가짜 KG2B 는 첫 화면 404');
+    assert.equal(p.list.ok, true); assert.equal(p.list.rows, 3);
+  }
+  const { kg2bList } = await ctx.owner.ok('GET', '/api/platform/kg2b?do=listpreview&pages=2&days=14');
+  assert.equal(kg2bList.rows, 3); assert.ok('region' in kg2bList);
+  const r = await ctx.staffA.client.req('GET', '/api/platform/kg2b?do=probe'); assert.equal(r.status, 404, '운영자 아니면 숨김');
+});

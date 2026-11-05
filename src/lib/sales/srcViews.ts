@@ -585,6 +585,11 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           or coalesce(row->>'issuer', '') ilike ${like} or coalesce(row->>'demand_agency', '') ilike ${like} or coalesce(row->>'complex_name', '') ilike ${like})
         order by coalesce(row->>'posted_date', row->>'first_seen_at') desc nulls last limit 30`.catch(() => []);
       const byId = new Map(all.map((n) => [String(n.id), n]));
+      const key = (x: any) => String(x.id ?? x.__id);
+      const readIds = new Set(read.map(key)), candIds = new Set(cand.map(key));
+      let repMap: Map<string, string> | null = null; // 같은 공고 묶음 → 목록 카드(trace 와 같은 계산) — 필요할 때만
+      const repOf = () => { if (repMap) return repMap; const cards = new Set(N.map(key)); repMap = new Map();
+        for (const g of groupNotices(cand)) { const rep = g.find((x) => cards.has(key(x))); for (const x of g) repMap.set(key(x), rep ? key(rep) : key(x)); } return repMap; };
       const { matchFit } = await import('./collectors/procurement');
       for (const r of rowsQ) {
         if (shown.has(r.src_id) || outside.length >= 10) continue;
@@ -595,8 +600,15 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
           where = n.skipped ? '대상 아님 탭' : canceledCard(n) ? '취소된 공고 탭' : '다른 탭(전체 탭에서 보임)';
           if (n.skipped) { // 대상 아님 탭이 아니면 n.skip 이 비어 있어 진행 기록에서 바로(같은 사업으로 함께 숨긴 카드는 기록 없음 → '함께 숨김')
             const w = byNotice.get(String(n.id)); const reason = pick(w, 'skip_reason');
-            why = reason ? `숨긴 까닭: ${reason}` : w ? null : '같은 사업 공고와 함께 숨김';
+            why = reason ? `숨긴 까닭: ${reason}` : w ? '숨긴 까닭 안 적음' : '같은 사업 공고와 함께 숨김';
           }
+        } else if (candIds.has(r.src_id)) {
+          // 374차(로컬 11/06 ⓒ 래미안트윈파크 03912856 '목록 밖' 까닭 없음): 같은 공고 묶음(원본 복사·재게시·정정)의 다른 카드로 합쳐진 줄 → 그 카드가 어디 있는지
+          const rep = byId.get(repOf().get(r.src_id) ?? '');
+          where = !rep ? '목록 밖' : rep.skipped ? '대상 아님 탭(같은 공고 묶음)' : canceledCard(rep) ? '취소된 공고 탭(같은 공고 묶음)' : '같은 공고 묶음 카드로 보임';
+          why = rep ? `같은 공고 묶음 카드: ${String(rep.title ?? '').slice(0, 40)}${rep.skipped ? ' — 대상 아님' : ''}` : null;
+        } else if (readIds.has(r.src_id)) {
+          where = '목록 밖'; why = '확인 안 된 협력사 모집 줄 또는 온비드 매각 공고';
         } else {
           const f = matchFit(title, r.row.bid_category ?? r.row.classification, r.row.task_scope);
           where = r.row.related === false || !f.fit ? '관련 아님(우리 사업 낱말 없음)' : '목록 밖';
