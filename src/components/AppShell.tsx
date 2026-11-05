@@ -27,7 +27,7 @@ import {
   MessageCircle, Mail,
   TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon, Phone, ClipboardCheck, Link2,
   History, Rocket, Target, Briefcase, Landmark, Bot, Wand2, Camera,
-Contact, Globe, FileSignature, } from 'lucide-react';
+Contact, Globe, FileSignature, Send } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
@@ -53,6 +53,7 @@ const NAV: NavItem[] = [
   { href: '/calendar', label: '캘린더', icon: CalendarDays },
   { href: '/messages', label: '메시지', icon: MessageCircle }, // V13 10번 사내 메신저
   { href: '/notifications', label: '알림', icon: Bell },
+  { href: '/mail/outbox', label: '보낸 메일', icon: Send }, // 375차 #997 보낸 메일 모아 보기(공통 — 어느 공간에서나, 휴대폰은 프로필 시트)
   { href: '/reports/mine', label: '내 주간 보고', icon: FileText },
   { href: '/notices', label: '공지', icon: Megaphone }, // V30 ② 공지(게시판)
   { href: '/approvals', label: '결재', icon: Stamp }, // V30 ④ 결재 양식(휴가·지출결의·품의)
@@ -183,7 +184,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 집행', icon: Rocket, group: '성과' }, { href: '/s/marketing/sites', label: '사이트별 집계', icon: Globe, group: '성과' }, { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []),
     ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '이전 요청 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
 
-  const commonNav: NavItem[] = [{ href: '/tasks', label: '업무', icon: CircleCheck }, { href: '/calendar', label: '캘린더', icon: CalendarDays }, { href: '/messages', label: '메시지', icon: MessageCircle },
+  const commonNav: NavItem[] = [{ href: '/tasks', label: '업무', icon: CircleCheck }, { href: '/calendar', label: '캘린더', icon: CalendarDays }, { href: '/messages', label: '메시지', icon: MessageCircle }, { href: '/mail/outbox', label: '보낸 메일', icon: Send },
     ...(session.features.library ? [{ href: `/library?space=${space}`, label: '자료실', icon: Library }] : []), ...(session.features.ai ? [{ href: `/assistant?space=${space}`, label: aiName(space), icon: Sparkles }] : [])];
 
   // ⑦ 사이드바 3구역(시안 DESIGN_HOME_SIDEBAR 10/20, 대표 승인): ① 공간 전환 탭 ② '○○ 메뉴'(공간마다 바뀜 — 업무: 홈·업무·프로젝트·내 주간 보고·결재(·매출)) ③ '공통'(캘린더·알림·메시지·자료실·연락처·공지·AI 비서 — 어느 공간에서나 같은 자리) + 관리(접힘)
@@ -191,7 +192,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const byHref = (h: string) => NAV.find((n) => n.href === h)!;
   const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
   const sp_ = space === 'work' ? '' : `?space=${space}`;
-  const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'),
+  const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'), byHref('/mail/outbox'),
     ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: Sparkles }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c

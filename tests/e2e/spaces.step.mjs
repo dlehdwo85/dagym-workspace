@@ -32,7 +32,9 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   const workLabels = await sideLabels();
   assert.deepEqual(workLabels.slice(0, 5), ['홈', '업무', '프로젝트', '내 주간 보고', '결재'], `업무 메뉴 ${workLabels}`);
   const commonWork = await navLabels('nav-common-v3');
-  assert.deepEqual(commonWork.slice(0, 4), ['캘린더', '알림', '메시지', '자료실'].filter((l) => commonWork.includes(l)).slice(0, 4), `공통 ${commonWork}`);
+  // 375차 #997: 공통에 '보낸 메일'(메시지 다음)
+  assert.deepEqual(commonWork.slice(0, 5), ['캘린더', '알림', '메시지', '보낸 메일', '자료실'].filter((l) => commonWork.includes(l)).slice(0, 5), `공통 ${commonWork}`);
+  assert.ok(commonWork.includes('보낸 메일'), `공통에 보낸 메일 ${commonWork}`);
   assert.ok(commonWork.includes('연락처') && commonWork.includes('공지'), `공통에 연락처·공지 ${commonWork}`);
   await go(owner, () => owner.getByTestId('space-tab-sales').click(), /\/s\/sales$/);
   await owner.getByTestId('space-home-sales').waitFor();

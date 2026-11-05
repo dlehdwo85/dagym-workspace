@@ -99,6 +99,18 @@ export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: str
     const it = hist.data.items.find((x) => x.id === id && x.status === 'due');
     if (it && hist.data.canSend) { dueOpened.current = true; openDue(it); }
   }, [hist.data]);
+  // 375차 #997: 보낸 메일 화면 [같은 내용으로 새로 쓰기] → /tasks/{id}?resend={outboxId} — 받는 사람·제목·본문·첨부를 그대로 시안 창에
+  const resendOpened = useRef(false);
+  useEffect(() => {
+    if (!hist.data?.canSend || resendOpened.current) return;
+    const id = new URLSearchParams(window.location.search).get('resend'); if (!id) return;
+    resendOpened.current = true;
+    api<{ kind: string; channel: string; subject: string | null; body: string; to: string[]; files: { attachmentId: string | null }[] }>(`/api/mail/outbox/${id}`).then((x) => {
+      const channel = x.channel === 'sms:handoff' ? 'sms' : x.channel === 'kakao:handoff' ? 'kakao' : 'email';
+      setInitial({ channel, subject: channel === 'email' ? x.subject ?? '' : '', body: x.body, to: x.to.join(', '), attachmentIds: x.files.map((f) => f.attachmentId).filter((v): v is string => !!v) });
+      setOpen(true);
+    }).catch((e: any) => toast.error(e.message));
+  }, [hist.data]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!hist.data) return null;
   if (!hist.data.canSend && !hist.data.items.length) return null;
   return (
@@ -165,7 +177,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
     if (!d || f) return;
     const k = d.kinds[d.kinds.length - 1];
     const okFiles = (initial?.attachmentIds ?? []).filter((id) => d.attachments.some((a) => a.id === id && !a.blocked));
-    setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: d.to.join(', '), cc: '', bcc: '', fromName: d.defaults?.fromName ?? '', replyTo: d.defaults?.replyTo ?? '', more: false,
+    setF({ company: d.company ?? d.companies[0]?.key ?? '', kind: k.key, to: initial?.channel === 'email' && initial.to ? initial.to : d.to.join(', '), cc: '', bcc: '', fromName: d.defaults?.fromName ?? '', replyTo: d.defaults?.replyTo ?? '', more: false,
       subject: initial?.channel === 'email' && initial.subject ? initial.subject : `${k.subject}${d.contact?.organization ? ` — ${d.contact.organization}` : ''}`,
       body: initial?.channel === 'email' && initial.body ? initial.body : k.body, files: okFiles, title: '', phone: '', workEmail: '' });
     if (initial?.channel === 'sms') setSms({ to: initial.to ?? d.phone ?? d.contact?.phone ?? '', body: initial.body });
