@@ -37,14 +37,14 @@ export async function threadHistory(threadId: string, sql: Sql = db()) {
     select id::text, role, text, proposal_ids, file_ids, file_names, doc_job_ids from ai_messages m where thread_id = ${threadId} and status = 'ok' order by m.id desc limit 12`; // V45 원가: 최근 6턴만, 그 앞은 요약
   rows.reverse();
   const pids = rows.flatMap((r) => r.proposal_ids);
-  const props = pids.length ? await sql<{ id: string; summary: string; status: string; replaced: boolean }[]>`select id, summary, status, coalesce((result->>'replaced')::boolean, false) as replaced from ai_proposals where id = any(${pids}::uuid[])` : [];
+  const props = pids.length ? await sql<{ id: string; summary: string; status: string; replaced: boolean; dup: number | null }[]>`select id, summary, status, coalesce((result->>'replaced')::boolean, false) as replaced, (result->>'dupCheck')::int as dup from ai_proposals where id = any(${pids}::uuid[])` : [];
   // 앞선 질문의 첨부 id — "아까 올린 사진 자료실에 정리해줘" 처럼 나중에 가리킬 수 있게
   const files = (r: (typeof rows)[number]) => (r.file_ids?.length ? `\n[첨부: ${r.file_ids.map((id, k) => `id=${id} · ${r.file_names?.[k] ?? ''}`).join(' / ')}]` : '');
   // V22: 앞선 파일 작업 — "더 다듬어 줘" 처럼 이어서 고칠 때 baseJobId 로 쓴다
   const jids = rows.flatMap((r) => r.doc_job_ids ?? []);
   const jobs = jids.length ? await sql<{ id: string; title: string; kind: string; version: number; status: string; pages: number | null }[]>`select id, title, kind, version, status, pages from ai_doc_jobs where id = any(${jids}::uuid[])` : [];
   const jobNote = (r: (typeof rows)[number]) => (r.doc_job_ids?.length ? `\n[파일 작업: ${r.doc_job_ids.map((id) => jobs.find((j) => j.id === id)).filter(Boolean).map((j) => `id=${j!.id} · ${j!.title} v${j!.version} · ${j!.kind} · ${j!.status}${j!.pages ? ` · ${j!.pages}쪽` : ''}`).join(' / ')}]` : '');
-  const msgs = rows.map((r) => ({ role: r.role, text: r.text + files(r) + jobNote(r) + (r.proposal_ids.length ? `\n(제안: ${r.proposal_ids.map((p) => props.find((x) => x.id === p)).filter(Boolean).map((p) => `${p!.summary} [${p!.status === 'done' ? '실행됨' : p!.status === 'cancelled' ? (p!.replaced ? '새 제안으로 바뀜' : '취소됨') : `대기 · id=${p!.id}`}]`).join('; ')})` : '') }));
+  const msgs = rows.map((r) => ({ role: r.role, text: r.text + files(r) + jobNote(r) + (r.proposal_ids.length ? `\n(제안: ${r.proposal_ids.map((p) => props.find((x) => x.id === p)).filter(Boolean).map((p) => `${p!.summary}${p!.dup == null ? '' : p!.dup ? ` · 서버 확인: 비슷한 열린 업무 ${p!.dup}건` : ' · 서버 확인: 비슷한 열린 업무 없음'} [${p!.status === 'done' ? '실행됨' : p!.status === 'cancelled' ? (p!.replaced ? '새 제안으로 바뀜' : '취소됨') : `대기 · id=${p!.id}`}]`).join('; ')})` : '') }));
   // 처음은 user 여야 한다
   while (msgs.length && msgs[0].role !== 'user') msgs.shift();
   const [t] = await sql<{ summary: string | null }[]>`select summary from ai_threads where id = ${threadId}`;

@@ -245,7 +245,7 @@ for (const t of TOOLS) if (t.name.startsWith('propose_')) {
 
 const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비서입니다. 아래 [우리 회사] 직원을 돕습니다. 그 회사의 업종·사업 방향·말투에 맞춰 답하고, 다른 회사 이야기를 지어내지 마세요.
 - 사실(업무·일정·자료·매출)은 반드시 도구로 확인하고 답하세요. 도구 결과에 없는 숫자·이름·날짜를 지어내지 마세요.
-- 업무 상태·건수·완료 여부처럼 이번 답에서 도구로 확인하지 않은 사실은 말하지 마세요(짐작으로 '모두 완료 상태입니다'·'없습니다'라고 하지 않음). 꼭 필요하면 먼저 search_tasks 등으로 확인하고, 확인하지 않았으면 '확인하지 않았습니다'라고 쓰세요. 제안 카드를 만든 답에는 그 제안 내용만 적고, 확인하지 않은 다른 업무 이야기를 덧붙이지 마세요.
+- 업무 상태·건수·완료 여부처럼 이번 답에서 도구로 확인하지 않은 사실은 말하지 마세요(짐작으로 '모두 완료 상태입니다'·'없습니다'라고 하지 않음). 꼭 필요하면 먼저 search_tasks 등으로 확인하고, 확인하지 않았으면 '확인하지 않았습니다'라고 쓰세요. 제안 카드를 만든 답에는 그 제안 내용만 적고, 확인하지 않은 다른 업무 이야기를 덧붙이지 마세요. 앞 답에서 한 말은 새 도구 결과가 다를 때만 바로잡고(대화 기록의 '서버 확인'은 그때 확인한 것), 같은 확인 문장을 다음 답에서 되풀이하지 마세요.
 - 데이터를 바꾸는 일(업무 만들기·고치기·댓글·첨부·일정 만들기·변경·취소·엑셀 보고서·문서 만들기·자료실 정리)은 propose_* 도구로만 제안하세요. 제안은 사용자가 화면의 [확인] 버튼을 눌러야 실행됩니다.
 - 실행 상태는 도구 결과·대화 기록 표시 그대로 말하세요(대표 지적 10/19 ④): 이번 답에서 만든 제안 = "확인을 누르면 반영됩니다". 대화 기록의 [실행됨] = 이미 반영된 것 → "만들었습니다/바꿨습니다(화면의 [열기])"라고 하고 다시 확인을 안내하지 마세요. [취소됨]·[새 제안으로 바뀜] = 반영 안 됨(바뀜은 고친 새 제안으로 대신함 — 사용자에게도 그 이름 그대로). 도구 오류 = "하지 못했습니다: 이유".
 - 대화 기록의 [대기] 제안(아직 [확인] 전)을 고쳐 달라고 하면(담당·마감·제목·내용 바꾸기 등) 고친 새 제안을 만들 때 replacesProposalId 에 그 제안 id 를 넣으세요. 옛 제안은 자동으로 취소되니 "이전 제안은 취소해 주세요"라고 안내하지 말고 "고친 제안으로 바꿨습니다 — 확인을 누르면 반영됩니다"라고 하세요.
@@ -257,7 +257,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 - 자료실: 찾기 search_library · 읽기 read_library_file · 폴더 list_library_folders · 정리 propose_organize_files · 문서·엑셀 propose_create_document·propose_xlsx_report·run_file_task·fill_template
 - 사람·조직 list_people · 매출 revenue_summary(대표·본사)
 [지시 해석 — 대표 지적 10/19 ①] "○○한테/에게 ~하라고 해줘·시켜줘·전달해줘·맡겨줘·부탁해줘"는 기본이 업무 배정입니다: 담당 = ○○(list_people 로 id), 요청자 = 말한 사람, 마감은 말에서 해석(예: "다음주 금요일까지"), 제목은 시킬 일. propose_create_task 로 제안하세요. "메시지로·문자로·카톡으로·메일로"라고 분명히 말할 때만 메시지 전달로 봅니다(메시지 보내기 도구는 없으니 그때는 보낼 문구를 써 주세요).
-[중복 막기 — 대표 지적 10/19 ③] 새 업무를 제안하기 전에 search_tasks 로 비슷한 제목의 열린 업무를 확인하세요. 있으면 그 업무 이름·담당·마감을 보여 주고 "이 업무에 붙일까요, 새로 만들까요?"를 한 번만 물으세요(둘 다 제안하지 않기). 사용자가 요청하지 않은 일(다른 업무에 첨부 등)을 먼저 제안하지 마세요.
+[중복 막기 — 대표 지적 10/19 ③] 새 업무를 제안하기 전에 search_tasks 로 비슷한 제목의 열린 업무를 확인하세요(370차: propose_create_task 결과의 dupCheck 도 서버가 직접 찾아본 결과라 그대로 말해도 됩니다). 있으면 그 업무 이름·담당·마감을 보여 주고 "이 업무에 붙일까요, 새로 만들까요?"를 한 번만 물으세요(둘 다 제안하지 않기). 사용자가 요청하지 않은 일(다른 업무에 첨부 등)을 먼저 제안하지 마세요.
 [근거 — 대표 지적 10/19 ⑤⑥] 첨부·자료실 파일 내용(담당자 이름·금액·날짜 등)은 이번 대화에서 파일 내용을 실제로 받았거나 read_library_file 로 읽은 경우에만 말하고 "(파일명, n쪽/시트)"처럼 근거를 붙이세요. 앞선 차례에 올린 파일은 이름만 기록에 있으니 내용이 필요하면 read_library_file 로 다시 읽고, 못 읽었으면 "아직 열어 보지 않았습니다"라고 하세요. 기존 업무의 담당·마감·상태는 search_tasks·get_task 결과로만 말하세요(기억·추측 금지).
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
 - 일정과 업무를 함께 요청하면(예: "회의 잡고 참석자들 업무로도") propose_create_event 하나에 taskAssigneeIds 를 넣어 "일정 1 + 연결 업무"로 제안하세요. 업무 마감은 일정 시작과 같고 날짜가 연동됩니다. 같은 내용의 propose_create_task(s) 를 따로 만들지 마세요(사용자가 다른 마감을 요청한 경우만 예외). 일정 주인 본인에게는 업무를 또 만들지 않습니다.
@@ -345,6 +345,28 @@ export function autoReplaceTargets(userText: string, prev: { id: string; kind: s
     if (same.length === 1) out.push(same[0].id);
   }
   return out;
+}
+
+// 370차(로컬 369차 운영 확인): 중복 막기를 서버가 직접 — 업무 제안 때 비슷한 제목의 열린 업무를 찾아 도구 답·카드·대화 기록에 남김
+// (AI 가 "비슷한 열린 업무는 없었습니다"를 확인한 사실로 말하고, 다음 답에서 "확인 안 한 말이었다"고 괜히 고치지 않게)
+const titleCore = (t: string) => t.replace(/\[[^\]]*\]/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+const titleWords = (t: string) => titleCore(t).split(' ').filter((w) => w.length >= 2);
+export async function similarOpenTasks(u: SessionUser, title: string) {
+  const ws = titleWords(title); const mine = titleCore(title);
+  if (!ws.length || !mine) return [];
+  const key = [...ws].sort((a, b) => b.length - a.length)[0];
+  const rows = await listTasks(u, listQuery.parse({ view: 'all', q: key, limit: 40 }));
+  return rows.filter((t: any) => t.status !== 'done').filter((t: any) => {
+    const c = titleCore(String(t.title ?? '')); if (!c) return false;
+    if (c.includes(mine) || mine.includes(c)) return true;
+    const tw = titleWords(String(t.title)); return ws.filter((w) => tw.includes(w)).length >= Math.max(2, Math.ceil(ws.length / 2));
+  }).slice(0, 3).map((t: any) => ({ id: t.id, title: t.title, assignee: t.assignee_name ?? null, due: t.due_date ? String(t.due_date).slice(0, 10) : null }));
+}
+const dupLine = (sim: { title: string; assignee: string | null; due: string | null }[]) => sim.length
+  ? `서버 확인: 비슷한 제목의 열린 업무 ${sim.length}건 — ${sim.map((x) => `${x.title}${x.assignee ? ` · 담당 ${x.assignee}` : ''}${x.due ? ` · 마감 ${x.due}` : ''}`).join(' / ')}. 사용자에게 이 업무에 붙일지 새로 만들지 한 번만 물어보세요`
+  : '서버 확인: 비슷한 제목의 열린 업무 없음';
+async function noteDup(id: string, sim: unknown[]) {
+  await db()`update ai_proposals set result = coalesce(result, '{}'::jsonb) || ${db().json({ dupCheck: sim.length } as never)} where id = ${id}`;
 }
 
 async function propose(c: Ctx, kind: string, summary: string, payload: unknown, preview?: unknown) {
@@ -595,7 +617,11 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         orgUnitId: input.orgUnitId || undefined, checklist: Array.isArray(input.checklist) ? input.checklist.slice(0, 50) : undefined });
       // 366차 후속(로컬 #991 확인): 카드 한 줄에 담당 — 담당만 바꾼 제안도 카드에서 차이가 보이게
       const who = i.assigneeId ? ((await directory(u)).users as unknown as { id: string; name: string }[]).find((p) => p.id === i.assigneeId)?.name : null;
-      return propose(c, 'create_task', `업무 만들기: ${i.title}${who ? ` · 담당 ${who}` : ''}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`, i);
+      const sim = await similarOpenTasks(u, i.title);
+      const out = await propose(c, 'create_task', `업무 만들기: ${i.title}${who ? ` · 담당 ${who}` : ''}${i.dueDate ? ` (마감 ${i.dueDate}${i.dueTime ? ' ' + i.dueTime : ''})` : ''}`, i,
+        sim.length ? { warnings: [`비슷한 열린 업무 ${sim.length}건: ${sim.map((x) => x.title).join(', ')}`] } : undefined);
+      await noteDup(out.proposalId, sim);
+      return { ...out, dupCheck: dupLine(sim), similarOpen: sim };
     }
     case 'propose_create_tasks': {
       if (c.proposals.some((p) => p.kind === 'create_event' && p.summary.includes(`: ${String(input.title ?? '').trim()} —`)
