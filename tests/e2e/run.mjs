@@ -1741,6 +1741,8 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   await owner.goto(BASE + '/tasks/trash');
   await owner.getByTestId('trash-list').getByRole('button', { name: 'V6 지웠다 살릴 업무 되살리기' }).click();
   await owner.getByText('되살렸습니다').waitFor();
+  // 369차: 되살린 미팅(모레 10:00~11:00)이 뒤 단계 #690 캘린더 끌기 일정과 같은 칸에 겹치지 않게 시험이 끝나면 치움
+  await sql`update events set deleted_at = now() where id = ${meet.id}`;
   // 엑셀 내려받기
   await owner.goto(BASE + '/tasks');
   await owner.getByTestId('tasks-more').click();

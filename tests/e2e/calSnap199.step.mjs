@@ -17,11 +17,22 @@ export async function calSnap199({ owner, ctx, sql, BASE }) {
       const ev = owner.locator('.fc-timegrid-event', { hasText: 'E2E 15분 끌기' }).first(); await ev.waitFor();
       await ev.evaluate((el) => el.scrollIntoView({ block: 'center' })); await owner.waitForTimeout(200);
       const slotH = await owner.locator('td.fc-timegrid-slot').first().evaluate((el) => el.getBoundingClientRect().height); // 한 칸 = 1시간
-      const box = await ev.boundingBox();
-      await owner.mouse.move(box.x + box.width / 2, box.y + 6); await owner.mouse.down();
-      await owner.mouse.move(box.x + box.width / 2, box.y + 6 + slotH * frac / 2, { steps: 6 });
+      // 369차(CI 2187~2197): 전체 E2E 에서는 앞 단계(V6 지웠다 살린 업무의 미팅)가 같은 날 10:00~11:00 에 일정을 남겨
+      // 구글식 겹침으로 두 일정이 포개짐 → 블록 가운데를 누르면 위에 놓인 다른 일정을 잡아 그게 옮겨짐(안내는 뜨는데 이 일정은 제자리).
+      // 이 일정 블록이 실제로 맨 위에 보이는 점을 찾아 잡음
+      const pt = await ev.evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        for (const fx of [0.5, 0.75, 0.9, 0.25, 0.1]) {
+          const x = b.left + b.width * fx, y = b.top + 6;
+          if (document.elementFromPoint(x, y)?.closest('.fc-timegrid-event') === el) return { x, y };
+        }
+        return { x: b.left + b.width / 2, y: b.top + 6, hidden: true };
+      });
+      assert.ok(!pt.hidden, '끌 일정 블록이 다른 일정에 가려지지 않음');
+      await owner.mouse.move(pt.x, pt.y); await owner.mouse.down();
+      await owner.mouse.move(pt.x, pt.y + slotH * frac / 2, { steps: 6 });
       // CI 2187(11/05): 무거운 CI 에서 마지막 이동을 달력이 읽기 전에 손을 떼 제자리(10:00)로 놓인 적 있음 → 놓기 전에 잠깐 멈춤
-      await owner.mouse.move(box.x + box.width / 2, box.y + 6 + slotH * frac + 3, { steps: 6 }); await owner.waitForTimeout(150); await owner.mouse.up();
+      await owner.mouse.move(pt.x, pt.y + slotH * frac + 3, { steps: 6 }); await owner.waitForTimeout(150); await owner.mouse.up();
       await owner.getByText('일정을 이동했습니다').first().waitFor();
     };
     await drag(0.25); // 15분만큼 아래로

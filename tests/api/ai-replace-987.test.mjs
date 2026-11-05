@@ -29,6 +29,8 @@ describe('365차 #987 대기 제안 바꿔 끼우기', () => {
     const tool = req.tools.find((t) => t.name === 'propose_create_task');
     assert.ok(tool.input_schema.properties.replacesProposalId, '도구에 바꿔 끼우기 칸');
     assert.match(JSON.stringify(req.system), /replacesProposalId/);
+    // 369차(로컬 368차 확인 덤): 첫 답에 확인 안 한 "'[시험]' 업무는 모두 완료 상태" — 확인하지 않은 사실은 말하지 않는 지시
+    assert.match(JSON.stringify(req.system), /이번 답에서 도구로 확인하지 않은 사실은 말하지 마세요/);
   });
 
   test('모델이 replacesProposalId 를 넣으면: 새 제안만 대기 · 옛 제안 자동 취소 · 응답 replaced', async () => {

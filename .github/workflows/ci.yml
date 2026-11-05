@@ -27,6 +27,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
+      # 369차(CI 2202): ffmpeg-static 이 설치 때 실행 파일 내려받기에 실패해도 npm ci 는 성공 → 영상 시험 11건이 ENOENT. 없으면 다시 받음(3번), 그래도 없으면 여기서 멈춤
+      - run: for i in 1 2 3; do test -x node_modules/ffmpeg-static/ffmpeg && break; node node_modules/ffmpeg-static/install.js || sleep 5; done; test -x node_modules/ffmpeg-static/ffmpeg
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
