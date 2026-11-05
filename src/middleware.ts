@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { hostDecision, hostSplit } from '@/lib/hostSplit';
+import { hostDecision, hostSplit, markCookie, SIGNED_MARK } from '@/lib/hostSplit';
 
 /** 카카오톡·인스타그램·페이스북·네이버·라인·밴드 등 다른 앱 안 브라우저 — WebView 지만 우리 앱이 아님(광고·공유 링크로 온 사람은 소개 화면) */
 const OTHER_IN_APP = /KAKAOTALK|Instagram|FBAN|FBAV|FBIOS|FB_IAB|NAVER\(inapp|Line\/|DaumApps|BAND\/|Twitter|everytimeApp|Snapchat/i;
@@ -26,7 +26,8 @@ export function middleware(req: NextRequest) {
   const app = isApp(ua);
   if ((isIosApp(ua) && IOS_APP_LOGIN_ONLY.test(req.nextUrl.pathname)) || (/WorkinApp/i.test(ua) && APP_NO_PRICING.test(req.nextUrl.pathname))) { const u = req.nextUrl.clone(); u.pathname = '/login'; u.search = ''; return NextResponse.redirect(u, 307); }
   const signedIn = !!req.cookies.get('wos_session')?.value || !!req.headers.get('authorization');
-  const d = hostDecision(hostSplit(), req.headers.get('host') ?? req.nextUrl.host, req.nextUrl.pathname, req.nextUrl.search, { isApp: app, signedIn });
+  const cfg = hostSplit(); const host = req.headers.get('host') ?? req.nextUrl.host;
+  const d = hostDecision(cfg, host, req.nextUrl.pathname, req.nextUrl.search, { isApp: app, signedIn });
   if (d && 'redirect' in d) return NextResponse.redirect(d.redirect, d.status);
   if (d && 'robots' in d) return new NextResponse('User-agent: *\nDisallow: /\n', { headers: { 'content-type': 'text/plain; charset=utf-8', 'x-robots-tag': 'noindex, nofollow' } });
   if (d && 'rewrite' in d) return NextResponse.rewrite(new URL(d.rewrite, req.url));
@@ -41,6 +42,8 @@ export function middleware(req: NextRequest) {
     res = NextResponse.next({ request: { headers: h } });
   }
   if (d && 'noindex' in d && d.noindex) res.headers.set('X-Robots-Tag', 'noindex, nofollow'); // app. 은 검색 제외(로그인 뒤 화면)
+  // 362차 #978: 로그인된 브라우저 표시(값 '1' 뿐) — www 머리줄이 [로그인] 대신 [내 업무로 가기]. 로그아웃이 지움
+  if (req.cookies.get('wos_session')?.value && req.cookies.get(SIGNED_MARK)?.value !== '1') res.cookies.set(markCookie(cfg, host, true, req.nextUrl.protocol === 'https:'));
   return res;
 }
 // 198차: 주소 분리 갈림이 모든 화면 주소에 필요해 넓힘(API·Next 정적 파일 제외 — 두 호스트 모두 그대로 응답)

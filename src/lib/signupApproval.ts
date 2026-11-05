@@ -79,6 +79,37 @@ export async function notifyNewSignup(tenant: string, sql: Sql = db()) {
   return ids.length;
 }
 
+/**
+ * 362차 #980(대표 결정 11/05): 첫 알림 뒤 24시간이 지나도 [승인]·[거절]을 안 한 신청 → 슈퍼관리자에게 한 번 더(알림·메일, 신청마다 한 번).
+ * 거절한 회사는 지우지 않음(#972) — 대기(pending)만 대상. 30일 넘은 신청은 다시 알리지 않음.
+ */
+export async function signupRemindTick(sql: Sql = db()) {
+  if (!signupApprovalOn()) return { skipped: 'off' };
+  const due = await sql<{ id: string; name: string; signup_info: SignupInfo | null; signup_notified_at: Date }[]>`update tenants set signup_reminded_at = now()
+    where id in (select id from tenants where signup_status = 'pending' and status = 'active' and signup_reminded_at is null
+      and signup_notified_at < now() - interval '24 hours' and created_at > now() - interval '30 days' order by created_at limit 20)
+    returning id, name, signup_info, signup_notified_at`;
+  if (!due.length) return { due: 0 };
+  const { platformAdminIds } = await import('./superAdmin');
+  const ids = await platformAdminIds(sql);
+  if (!ids.length) return { due: due.length, sent: 0 };
+  const { notify } = await import('./notifications');
+  const { appUrl } = await import('./mail');
+  const admins = await sql<{ email: string }[]>`select email from users where id = any(${ids}::uuid[])`;
+  const hours = (d: Date) => Math.floor((Date.now() - +new Date(d)) / 3600e3);
+  for (const t of due) {
+    const i = t.signup_info; const company = i?.company ?? t.name;
+    const line = [company, i?.name, i?.size ? `${i.size}명` : null, i?.industry].filter(Boolean).join(' · ');
+    await notify(sql, { userIds: ids, type: 'signup_request', title: `답 기다리는 체험 신청(${hours(t.signup_notified_at)}시간 지남): ${line}`,
+      body: '신청자에게 24시간 안에 연락드린다고 안내했습니다 — 플랫폼 운영 › 회사에서 [승인]·[거절]', link: '/platform?tab=company#signup-requests', actorId: null, dedupeKey: `signupremind:${t.id}` });
+    for (const a of admins) await mailTo(a.email, `[24시간 지남] 체험 신청 답 기다림 — ${company}`, [
+      `회사: ${company}`, `신청한 사람: ${i?.name ?? ''} (${i?.email ?? ''})`, `연락처: ${i?.contact ?? '없음'}`,
+      `첫 알림: ${hours(t.signup_notified_at)}시간 전 · 아직 [승인]·[거절] 전입니다.`,
+      '신청자에게는 24시간 안에 연락드린다고 안내했습니다. 이 메일은 신청마다 한 번만 갑니다.'], { label: '가입 신청 보기', url: `${appUrl()}/platform?tab=company#signup-requests` });
+  }
+  return { due: due.length, sent: due.length };
+}
+
 /** 회사의 가입 상태(승인 대기·거절) — 화면·쓰기 막기에 씀. 승인된 회사는 null */
 export async function signupGate(tenant: string, sql: Sql = db()) {
   if (tenant === 'default' || tenant === 'demo') return null;

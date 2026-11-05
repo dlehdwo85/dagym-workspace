@@ -5,7 +5,7 @@
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { PORT, bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
+import { Client, PORT, bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
 
 const WWW = 'www.work-in.dev', APP = 'app.work-in.dev';
 const APP_UA = 'Mozilla/5.0 (Linux; Android 14; SM-S921N Build/UP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/129.0 Mobile Safari/537.36 WorkInApp';
@@ -57,6 +57,24 @@ describe('주소 분리 켬(유예 날짜 앞)', () => {
     assert.equal(r.status, 307); assert.equal(r.headers.location, `https://${APP}/api/auth/oauth/google/start?ac=abc`);
     const a = await raw(APP, '/api/auth/oauth/google/start?ac=abc');
     assert.notEqual(a.status, 307, 'app. 에서는 그대로 시작(설정이 없으면 로그인 화면으로 안내)');
+  });
+
+  test('362차 #978: 로그인한 브라우저가 app. 화면을 열면 www 와 함께 보는 표시 쿠키(값 1, 상위 도메인) · 로그인 전엔 없음 · 로그아웃이 지움 · www 머리줄 [로그인]', async () => {
+    const r = await raw(APP, '/tasks', { cookie: ctx.owner.cookie });
+    const sc = [].concat(r.headers['set-cookie'] ?? []).find((c) => c.startsWith('wi_signed='));
+    assert.ok(sc, JSON.stringify(r.headers['set-cookie']));
+    assert.match(sc, /^wi_signed=1;/); assert.match(sc, /Domain=work-in\.dev/i); assert.doesNotMatch(sc, /HttpOnly/i, '소개 화면이 읽을 수 있게');
+    assert.ok(!sc.includes(ctx.owner.cookie.split('=')[1]), '세션 값은 담지 않음');
+    const again = await raw(APP, '/tasks', { cookie: `${ctx.owner.cookie}; wi_signed=1` });
+    assert.ok(![].concat(again.headers['set-cookie'] ?? []).some((c) => c.startsWith('wi_signed=')), '이미 있으면 다시 안 심음');
+    const anon = await raw(APP, '/login');
+    assert.ok(![].concat(anon.headers['set-cookie'] ?? []).some((c) => c.startsWith('wi_signed=')), '로그인 전엔 없음');
+    const w = await raw(WWW, '/welcome');
+    assert.equal(w.status, 200); assert.match(w.body, /data-testid="landing-login"/); assert.match(w.body, /href="(https:\/\/app\.work-in\.dev)?\/login"/);
+    const fresh = new Client('logout362'); await fresh.ok('POST', '/api/auth/login', { email: ctx.staffA.email, password: ctx.staffA.password }); // 다른 시험이 쓰는 세션은 그대로
+    const out = await new Promise((ok, fail) => { const q = http.request({ host: '127.0.0.1', port: PORT, path: '/api/auth/logout', method: 'POST', headers: { host: APP, cookie: fresh.cookie, 'content-type': 'application/json' } }, (s) => { s.resume(); s.on('end', () => ok(s.headers)); }); q.on('error', fail); q.end('{}'); });
+    const cleared = [].concat(out['set-cookie'] ?? []).find((c) => c.startsWith('wi_signed='));
+    assert.ok(cleared && /Max-Age=0/i.test(cleared) && /Domain=work-in\.dev/i.test(cleared), JSON.stringify(out['set-cookie']));
   });
 
   test('그 밖의 호스트(Vercel 기본 주소 등)는 예전 그대로 · 받는 중인 구독 수', async () => {

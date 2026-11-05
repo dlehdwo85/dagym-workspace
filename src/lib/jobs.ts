@@ -208,6 +208,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('meetings', async () => (await import('./meetings')).meetingsTick()); // 218차 화상회의(FEATURE_MEETINGS 일 때만): 신호 끊긴 참가자 퇴장 처리 · 하루 넘게 빈 회의 끝내기
   await step('salesDigest', async () => (await import('./sales/digest')).salesDigestTick()); // 당일 입찰 다이제스트(회사 설정 시각, 메일·알림·푸시)
   await step('signupNotifyCatchUp', async () => (await import('./signupApproval')).signupNotifyCatchUp()); // 360차 후속: 알림 못 받은 승인 대기 신청
+  await step('signupRemind', async () => (await import('./signupApproval')).signupRemindTick()); // 362차 #980: 답 없는 승인 대기 신청 24시간 뒤 한 번 더
   await step('marketingReconfirm', async () => (await import('./marketingConsent')).marketingReconfirmTick()); // 360차 #976 정보통신망법 50조: 광고성 정보 수신 동의 2년마다 확인 안내(2년 30일 전, 한 사람 한 번)
   await step('bidAlerts', async () => (await import('./bidAlerts')).bidAlertTick()); // #949 입찰 공고 아침 메일 무료 구독(로그인 없는 구독자, KST 7시부터 하루 1통·새 공고 있는 날만)
   await step('perfProbe', async () => (await import('./perf')).perfProbeTick()); // #948 속도 정기 검침(30분마다 핵심 API 7곳 자기 호출·기준 초과 2번 연속 알림)

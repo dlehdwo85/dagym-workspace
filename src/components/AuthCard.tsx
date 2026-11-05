@@ -5,6 +5,9 @@ import { inputCls } from './ui';
 import { useInApp } from './inApp';
 
 
+/** 362차 #978: 로그인 화면(app.)에서 소개 사이트(www)로 — 로고와 아래 '워크인 소개'. 앱 안에서는 소개·요금 화면으로 보내지 않음(스토어 심사) */
+export const SITE_HOME = `${(process.env.NEXT_PUBLIC_SITE_URL ?? '').replace(/\/$/, '')}/welcome`;
+
 /** 로그인·초대·재설정 공통 틀: 왼쪽 회사 소개, 오른쪽 입력 */
 export function AuthCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   const iosApp = useInApp(); // #839 아이폰 앱(아이패드 가로 화면에서 왼쪽 판이 보임) → 351차 #942(대표 11/04): 안드로이드 앱도 무료 체험 문구 없음
@@ -14,7 +17,8 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
         <div className="absolute -right-24 -top-24 size-80 rounded-full bg-accent-500/20 blur-3xl" />
         <div className="absolute -bottom-32 -left-16 size-96 rounded-full bg-orange-500/10 blur-3xl" />
         <div className="relative">{/* 대표 10/20 로고 S3 확정: 어두운 판엔 다크 록업 */}
-          <img src="/brand/lockup-dark.svg" alt="WorkIn 워크인" className="h-12 w-auto" width={160} height={48} />
+          {iosApp ? <img src="/brand/lockup-dark.svg" alt="WorkIn 워크인" className="h-12 w-auto" width={160} height={48} />
+            : <a href={SITE_HOME} tabIndex={-1}><img src="/brand/lockup-dark.svg" alt="WorkIn 워크인" className="h-12 w-auto" width={160} height={48} /></a>}
           <div className="mt-1 text-xs text-slate-400">업무 · 일정 · 알림을 한 곳에</div>
         </div>
         <div className="relative">
@@ -32,15 +36,16 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
       </section>
       <section className="flex flex-1 flex-col items-center justify-center p-5">
         <div className="w-full max-w-sm">
-          <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <img src="/icon.svg" alt="" className="size-9" />
-            <div><div className="font-bold text-brand-700">워크인</div><div className="text-xs text-ink-2">업무 · 일정 · 알림을 한 곳에</div></div>
-          </div>
+          {(() => { const logo = <><img src="/icon.svg" alt="" className="size-9" />
+            <div><div className="font-bold text-brand-700">워크인</div><div className="text-xs text-ink-2">업무 · 일정 · 알림을 한 곳에</div></div></>;
+            return iosApp ? <div className="mb-8 flex items-center gap-2.5 lg:hidden">{logo}</div>
+              : <a href={SITE_HOME} className="mb-8 flex items-center gap-2.5 lg:hidden" aria-label="워크인 소개 사이트로">{logo}</a>; })()}
           <h1 className="text-2xl font-bold tracking-tight text-ink">{title}</h1>
           {sub && <p className="mt-1.5 text-sm text-ink-2">{sub}</p>}
           <div className="mt-7">{children}</div>
           <p className="mt-10 flex items-center justify-center gap-1.5 text-center text-xs text-ink-3">
             <ShieldCheck className="size-3.5" />회사 계정 전용 · <a href="/privacy" className="underline hover:text-ink-2">개인정보처리방침</a>
+            {!iosApp && <> · <a href={SITE_HOME} className="underline hover:text-ink-2" data-testid="auth-site-link">워크인 소개</a></>}
           </p>
         </div>
       </section>

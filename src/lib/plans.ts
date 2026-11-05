@@ -155,7 +155,7 @@ export async function usageOverview(u: SessionUser) {
   const { aiCostUsd: _usd, ...usageCust } = usage;
   return { tenant, subscription: { planCode: sub.plan_code, planName: sub.plan_name, monthlyKrw: band ? band.krw : sub.per_user_krw ? sub.per_user_krw * Math.max(1, usage.users) : sub.monthly_krw, perUserKrw: sub.per_user_krw ?? null,
       band: band ? { label: band.label, people: band.people, krw: band.krw } : null /* 355차 구간 정액 */, addons: sub.addons, periodStart: sub.period_start, periodEnd: sub.period_end, status: sub.status },
-    limits, usage: full ? usage : usageCust, plans: plans.map((p: any) => ({ ...p, bandRows: isBanded(p.limits) ? bandRows(p.limits) : null })), addons, topFiles: top, requests, demo: tenant === 'demo', ai: full ? { currency: 'usd' as const, ...ai } : customerAi(ai), aiLimits: await (await import('./aiLimits')).aiLimitsView(tenant, sql, full), canEdit: (await (await import('./menuPerms')).menuLevel(u, 'usage', sql)) === 'edit',
+    limits, usage: full ? usage : usageCust, plans: plans.map((p: any) => ({ ...p, bandRows: isBanded(p.limits) ? bandRows(p.limits) : null })), addons, topFiles: top, requests, demo: tenant === 'demo', ai: full ? { currency: 'usd' as const, ...ai, mktProduce: await mktProduceBreakdown(tenant, sql).catch(() => null) } : customerAi(ai), aiLimits: await (await import('./aiLimits')).aiLimitsView(tenant, sql, full), canEdit: (await (await import('./menuPerms')).menuLevel(u, 'usage', sql)) === 'edit',
     aiBudget: await (await import('./ai/companyBudget')).companyAiBudget(tenant, sql), full }; // 대표 10/24 ② 회사 월 AI 예산(원) 게이지
 }
 /** #602 고객사용 AI 사용 내역: 금액은 전부 원화(환율은 서버가 적용), 달러 칸·운영 메모 없음 */
@@ -163,6 +163,40 @@ function customerAi(a: Awaited<ReturnType<typeof aiBreakdown>>) {
   const k = (usd: number) => Math.round(usd * a.usdKrw);
   return { currency: 'krw' as const, cost: k(a.costUsd), limit: k(a.limitUsd), left: k(a.leftUsd), pct: a.pct, requests: a.requests, tokens: a.tokens, blocked: a.blocked, dailyLimit: a.dailyLimit,
     byUser: (a.byUser as unknown as { user_id: string; name: string; requests: number; cost: number }[]).map((x) => ({ ...x, cost: k(x.cost) })), byPurpose: (a.byPurpose as unknown as { purpose: string; requests: number; cost: number; todayRequests: number; todayCost: number }[]).map((x) => ({ ...x, cost: k(x.cost), todayCost: k(x.todayCost) })) };
+}
+
+/**
+ * 362차(노트북 11/05 '자동 원고 5일 144회 — 원인?'): 이번 달 '마케팅 자동 원고' AI 호출을 글별로 — 슈퍼관리자·내부 테넌트 화면에만.
+ * 글 1건 = 쓰기 1 + 다듬기 1(읽기 실패면 쓰기 한 번 더, 올리기 전 검사에 걸리면 쓰기+다듬기 한 번 더) → 2~6회. 같은 글을 다시 만들면 그만큼 더.
+ */
+export async function mktProduceBreakdown(tenant: string, sql: Sql = db()) {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const from = sql`(${`${today.slice(0, 7)}-01`}::date::timestamp at time zone 'Asia/Seoul')`;
+  const [[tot], per, top] = await Promise.all([
+    sql<{ calls: number; contents: number; noContent: number; cost: number }[]>`select count(*)::int calls, count(distinct mkt_content_id)::int contents,
+        count(*) filter (where mkt_content_id is null)::int "noContent", coalesce(sum(cost_usd), 0)::float8 cost
+      from ai_usage where tenant = ${tenant} and purpose = 'marketing_produce' and created_at >= ${from}`,
+    sql<{ upTo2: number; three4: number; five: number; test: number; sample: number; gone: number; published: number; days: number }[]>`select
+        count(*) filter (where n <= 2)::int "upTo2", count(*) filter (where n between 3 and 4)::int "three4", count(*) filter (where n >= 5)::int five,
+        count(*) filter (where test)::int test, count(*) filter (where sample)::int sample, count(*) filter (where gone)::int gone,
+        count(*) filter (where published)::int published, coalesce(sum(days), 0)::int days
+      from (select a.mkt_content_id, count(*) n, count(distinct (a.created_at at time zone 'Asia/Seoul')::date) days, bool_or(c.is_test) test,
+          bool_or(coalesce(c.quality->>'sample', '') = 'true' or (c.rule_id is null and c.title like '%시안 세트%')) sample,
+          bool_or(c.deleted_at is not null or c.status = 'canceled') gone, bool_or(c.status = 'published') published
+        from ai_usage a join mkt_contents c on c.id = a.mkt_content_id
+        where a.tenant = ${tenant} and a.purpose = 'marketing_produce' and a.created_at >= ${from} group by a.mkt_content_id) x`,
+    sql<{ id: string; title: string; channel: string; brand: string | null; status: string; calls: number; days: number; cost: number }[]>`select c.id, c.title, c.channel, b.name as brand, c.status,
+        count(*)::int calls, count(distinct (a.created_at at time zone 'Asia/Seoul')::date)::int days, coalesce(sum(a.cost_usd), 0)::float8 cost
+      from ai_usage a join mkt_contents c on c.id = a.mkt_content_id left join mkt_brands b on b.id = c.brand_id
+      where a.tenant = ${tenant} and a.purpose = 'marketing_produce' and a.created_at >= ${from}
+      group by c.id, b.name order by count(*) desc, sum(a.cost_usd) desc limit 15`,
+  ]);
+  const p = per[0];
+  return { calls: tot.calls, contents: tot.contents, noContent: tot.noContent, cost: Math.round(tot.cost * 100) / 100,
+    perContent: tot.contents ? Math.round((tot.calls - tot.noContent) / tot.contents * 10) / 10 : 0,
+    byCalls: { upTo2: p?.upTo2 ?? 0, three4: p?.three4 ?? 0, fivePlus: p?.five ?? 0 },
+    kinds: { test: p?.test ?? 0, sample: p?.sample ?? 0, deletedOrCanceled: p?.gone ?? 0, published: p?.published ?? 0, remadeOnOtherDay: Math.max(0, (p?.days ?? 0) - tot.contents) },
+    top: top.map((x) => ({ ...x, cost: Math.round(x.cost * 1000) / 1000 })) };
 }
 
 /** V14 4번: 이번 달 AI 사용 — 사람별·기능별, 회사 월 한도($) 대비 %, 원 환산(USD_KRW, 기본 1,400) */
