@@ -1023,7 +1023,7 @@ await step('W-1 이름 워크인·부제 다짐 · 하이링크, 사이드바(�
   for (const l of ['내 업무', '현장 신고 QR', '자동화', '현장 비교', '업무량', '결재선', '전체 업무', '오늘·이번 주', '템플릿']) assert.ok(!labels.includes(l), `${l} 숨김`);
   await owner.getByRole('button', { name: '내 계정 메뉴' }).click();
   const items = (await owner.getByRole('menuitem').allTextContents()).map((x) => x.replace(/\?$/, '').trim());
-  assert.deepEqual(items, ['설정·알림', '도움말·문의', '사용 안내 다시 보기', '단축키', '로그아웃']);
+  assert.deepEqual(items, ['설정·알림', '도움말·문의', '워크인 소개', '사용 안내 다시 보기', '단축키', '로그아웃']); // 362차 #978: '워크인 소개' → 소개 사이트(앱 안에서는 숨김)
   await owner.keyboard.press('Escape');
   await owner.screenshot({ path: `${SHOTS}/55-hq-sidebar.png` });
 });
