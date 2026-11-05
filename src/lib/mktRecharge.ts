@@ -28,17 +28,28 @@ export const LOW_BALANCE_DEFAULT_KRW = 10000;
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 export type BalanceRow = { id: string; provider: string; label: string; account_id: string | null; balance: number; currency: string; source: 'manual' | 'api'; checked_at: string; pace: number; days: number | null; level: 'ok' | 'warn' | 'action'; link: string; how: string };
 
-/** 매체별 최근 7일 하루 평균 지출(원) */
-async function paceByProvider(tenant: string) {
-  const rows = await db()<{ provider: string; cost: number }[]>`select a.provider, coalesce(sum(s.cost_krw), 0)::float8 / 7 as cost from mkt_ad_stats s join mkt_ad_accounts a on a.id = s.account_id
-    where a.tenant = ${tenant} and s.day >= (now() at time zone 'Asia/Seoul')::date - 7 group by a.provider`;
-  return Object.fromEntries(rows.map((r) => [r.provider, Number(r.cost)])) as Record<string, number>;
+/**
+ * 광고 계정별 최근 7일 하루 평균 지출(원, 예전과 같은 기간 — 서울 오늘 기준 7일 전부터 ÷ 7).
+ * 364차(노트북 11/05): 예전엔 매체(네이버) 전체 합계를 계정마다 똑같이 써서 '다짐·하이링크'와 '바디랩 두정점' 비즈머니가 같은 하루 평균(10,517원)으로
+ * 계산됨 → 바디랩 3.2일(실제 약 10일)로 잘못 '충전 필요'. 잔액은 계정마다 따로 빠지므로 그 계정 캠페인 비용으로 나눔.
+ */
+async function paceByAccount(tenant: string) {
+  const rows = await db()<{ id: string; provider: string; label: string; cost: number }[]>`select a.id, a.provider, a.label, coalesce(sum(s.cost_krw), 0)::float8 / 7 as cost
+    from mkt_ad_accounts a left join mkt_ad_stats s on s.account_id = a.id and s.day >= (now() at time zone 'Asia/Seoul')::date - 7
+    where a.tenant = ${tenant} and a.status <> 'disconnected' group by a.id, a.provider, a.label`;
+  return rows.map((r) => ({ ...r, cost: Number(r.cost) }));
+}
+/** 잔액 줄 → 그 잔액을 쓰는 계정의 하루 평균: 연결된 계정(account_id) → 같은 매체·같은 이름 계정 → 그 매체 계정이 하나뿐이면 그 계정 → 아니면 매체 합계(직접 입력한 잔액이 어느 계정 것인지 모를 때) */
+function paceOf(r: { provider: string; label: string; account_id: string | null }, accs: Awaited<ReturnType<typeof paceByAccount>>) {
+  const same = accs.filter((a) => a.provider === r.provider);
+  const hit = (r.account_id && same.find((a) => a.id === r.account_id)) || same.find((a) => a.label.trim() === r.label.trim()) || (same.length === 1 ? same[0] : null);
+  return hit ? hit.cost : same.reduce((s, a) => s + a.cost, 0);
 }
 export async function balancesView(tenant: string): Promise<BalanceRow[]> {
-  const pace = await paceByProvider(tenant);
+  const accs = await paceByAccount(tenant);
   const rows = await db()<any[]>`select id, provider, label, account_id, balance_krw::float8 as balance, currency, source, checked_at from mkt_ad_balances where tenant = ${tenant} order by provider, label`;
   return rows.map((r) => {
-    const p = pace[r.provider] ?? 0; const days = p > 0 ? r.balance / p : null;
+    const p = paceOf(r, accs); const days = p > 0 ? r.balance / p : null;
     const level: BalanceRow['level'] = days === null ? 'ok' : days < RECHARGE_ACTION_DAYS ? 'action' : days < RECHARGE_WARN_DAYS ? 'warn' : 'ok';
     const L = RECHARGE_LINKS[r.provider] ?? { label: r.provider, url: '', how: '' };
     return { ...r, pace: Math.round(p), days: days === null ? null : Math.round(days * 10) / 10, level, link: L.url, how: L.how };

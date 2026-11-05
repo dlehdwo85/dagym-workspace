@@ -96,3 +96,15 @@ test('322차 #897 잔액 기준 금액 미만 → 대표 알림 + 메일(하루 
   a = await alerts(); assert.equal(a.length, 2, JSON.stringify(a)); assert.match(a[1].title, /^광고 잔액 4,000원 — 5,000원 미만/);
   assert.equal(mails.filter((x) => String(x.subject ?? '').includes('광고 잔액')).length, 2);
 });
+
+test('364차(노트북 11/05): 네이버 계정이 둘이면 잔액 날수는 그 계정 지출로 — 매체 합계를 계정마다 똑같이 쓰지 않음(직접 입력 잔액은 같은 이름 계정)', async () => {
+  // 두 번째 네이버 계정(바디랩 두정점): 하루 3,000원 — 첫 계정(하이링크)은 위 시험에서 하루 10,000원
+  const [b2] = await sql`insert into mkt_ad_accounts (tenant, provider, external_id, label, status, last_sync_at) values ('default', 'naver', '7654321', '바디랩 두정점', 'active', now()) returning id`;
+  for (let i = 0; i < 7; i++) await sql`insert into mkt_ad_stats (account_id, day, campaign_id, campaign_name, impressions, clicks, cost_krw, conversions) values (${b2.id}, ${dayAgo(i)}, 'cmp-b', '플레이스', 300, 10, 3000, 0)`;
+  await ctx.owner.ok('PUT', '/api/marketing/ads/balances', { provider: 'naver', label: '바디랩 두정점', balanceKrw: 33727 });
+  const rows = (await ctx.owner.ok('GET', '/api/marketing/ads/balances')).balances.filter((x) => x.provider === 'naver');
+  const by = Object.fromEntries(rows.map((x) => [x.label, x]));
+  assert.equal(by['바디랩 두정점'].pace, 3000, '바디랩은 바디랩 계정 지출만');
+  assert.equal(by['바디랩 두정점'].days, 11.2); assert.equal(by['바디랩 두정점'].level, 'ok', '약 11일분 — 충전 필요 아님');
+  assert.equal(by['하이링크'].pace, 10000, '하이링크는 하이링크 계정 지출만(바디랩 지출이 더해지지 않음)');
+});
