@@ -1,7 +1,7 @@
 // 365차 #987(대표 11/05): AI 비서 대기 중 제안을 고쳐 달라고 하면 새 제안으로 바꿔 끼우고 옛 제안은 자동 취소(대표가 [취소]를 따로 안 누르게) (가짜 Anthropic 서버)
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { bootstrap, resetDb, startServer, testDb, FAKE, ensureTls } from '../helpers.mjs';
+import { bootstrap, resetDb, startServer, testDb, FAKE, BASE, ensureTls } from '../helpers.mjs';
 import { startFakeGoogle } from '../fake-google.mjs';
 
 let srv, fake, ctx, sql;
@@ -66,5 +66,28 @@ describe('365차 #987 대기 제안 바꿔 끼우기', () => {
     const o = await ctx.staffA.client.ok('POST', '/api/ai/chat', { text: '내 업무 하나 만들어줘' });
     assert.equal(o.replaced, undefined);
     assert.equal(await status(first.id), 'pending', '남의 제안은 그대로');
+  });
+});
+
+// #992(로컬 11/05 운영): 제안 카드 바로 뒤 "방금 제안들 어떻게 됐어?"가 '업무와 관련된 요청만'으로 걸림 → 이어 가는 대화의 짧은 후속 질문은 거르지 않음
+// #993: /assistant 를 열자마자(단추 연결 전) 입력하면 글이 사라짐 → 처음 받은 화면의 입력칸은 잠금('준비 중…')
+describe('#992 후속 질문 · #993 준비 전 입력칸', () => {
+  test('같은 대화의 짧은 후속 질문은 업무 밖 거름 안 탐 · 새 대화의 같은 말은 분류기 판정 그대로', async () => {
+    await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: [say('업무 제안을 준비했습니다.')] }) });
+    const a = await ctx.owner.ok('POST', '/api/ai/chat', { text: '이번 주 내 업무 정리해줘' });
+    await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, classifyQueue: [false], anthropicQueue: [say('앞서 제안 두 건은 반영되지 않았습니다.')] }) });
+    const b = await ctx.owner.ok('POST', '/api/ai/chat', { text: '방금 제안들 어떻게 됐어?', threadId: a.threadId });
+    assert.notEqual(b.blocked, true, '후속 질문은 통과');
+    assert.equal(b.reply, '앞서 제안 두 건은 반영되지 않았습니다.');
+    await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, classifyQueue: [false] }) });
+    const c = await ctx.owner.ok('POST', '/api/ai/chat', { text: '방금 제안들 어떻게 됐어?' });
+    assert.equal(c.blocked, true, '앞 대화가 없으면 분류기 판정대로');
+  });
+  test('/assistant 첫 화면: 입력칸은 준비 전 잠금(준비 중…)', async () => {
+    const r = await fetch(`${BASE}/assistant`, { headers: { cookie: ctx.owner.cookie } });
+    const html = await r.text();
+    const m = html.match(/<textarea[^>]*aria-label="AI 에게 요청"[^>]*>/);
+    if (m) { assert.match(m[0], /disabled/, '준비 전 잠금'); assert.match(m[0], /준비 중…/); }
+    else assert.ok(!/aria-label="AI 에게 요청"/.test(html), '첫 화면에 입력칸이 없으면(브라우저에서만 그림) 사라질 일 없음');
   });
 });

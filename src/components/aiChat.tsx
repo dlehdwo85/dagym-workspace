@@ -162,7 +162,10 @@ export function ChatComposer({ value, onChange, onSend, onStop, busy, canSend, p
   const own = useRef<HTMLTextAreaElement>(null);
   const ref = inputRef ?? own;
   const [touch, setTouch] = useState(false);
-  useEffect(() => setTouch(touchInput()), []);
+  // #993(로컬 11/05 운영 /assistant): 화면이 그려진 뒤 단추가 연결되기 전(느린 첫 로딩)에 입력·Enter 하면 글이 지워지고 아무 일도 없었다 →
+  // 연결될 때까지 입력칸을 잠그고('준비 중…'), 그 사이 들어간 글이 있으면 그대로 넘겨받는다
+  const [ready, setReady] = useState(false);
+  useEffect(() => { setTouch(touchInput()); const v = ref.current?.value; if (v && !value) onChange(v); setReady(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     const el = ref.current; if (!el) return;
     el.style.height = 'auto';
@@ -177,7 +180,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, busy, canSend, p
       <div className="flex items-end gap-1.5">
         {leading}
         <textarea ref={ref} rows={1} className={cx(inputCls, 'flex-1 resize-none leading-5', small ? 'min-h-9 py-1.5' : 'min-h-[42px] py-2.5')} value={value}
-          onChange={(e) => onChange(e.target.value)} onPaste={onPaste} placeholder={placeholder} aria-label={ariaLabel} disabled={disabled} enterKeyHint={touch ? 'enter' : 'send'}
+          onChange={(e) => onChange(e.target.value)} onPaste={onPaste} placeholder={ready ? placeholder : '준비 중…'} aria-label={ariaLabel} disabled={disabled || !ready} data-ready={ready ? '1' : undefined} enterKeyHint={touch ? 'enter' : 'send'}
           onKeyDown={(e) => {
             if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
             if (touch || e.shiftKey) return; // 휴대폰은 Enter = 줄바꿈, PC 는 Shift+Enter = 줄바꿈

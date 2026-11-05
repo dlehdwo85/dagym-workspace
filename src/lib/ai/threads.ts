@@ -79,6 +79,8 @@ export async function maybeSummarize(u: SessionUser, threadId: string) {
 }
 
 /** 사전 점검(비싼 모델 전에): 입력 길이 · 1인 하루 한도 · 같은 질문 반복 · 업무 무관 질문(가벼운 모델 분류). 막히면 이유 */
+/** 앞 답을 가리키는 짧은 후속 말(그거·방금·다시·왜·어떻게 됐어…) */
+const FOLLOW_UP = /(방금|아까|그거|그것|그건|이거|이건|저거|위에|위의|앞에|앞의|앞서|다시|왜|어떻게\s*(됐|되었|된|돼)|됐어|됐나|되었|취소|확인|맞아|맞나|좋아|그래|그럼|그러면|계속|이어서|더\s*(해|자세히|알려)|바꿔|고쳐|제안)/;
 export async function precheck(u: SessionUser, text: string, threadId: string | null, hasFiles: boolean): Promise<string | null> {
   const sql = db();
   const s = await aiSettings(tenantOf(u), sql);
@@ -91,6 +93,9 @@ export async function precheck(u: SessionUser, text: string, threadId: string | 
     if (last && last.text.trim() === text.trim() && Date.now() - new Date(last.at).getTime() < 2 * 60_000 && !hasFiles) return '방금 같은 질문을 하셨어요. 위의 답을 확인해 주세요.';
   }
   if (!s.topic_filter || hasFiles || text.trim().length < 8) return null; // 자료를 붙인 요청·짧은 말은 업무로 본다
+  // #992(로컬 11/05 운영): 제안 카드 바로 뒤 "방금 제안들 어떻게 됐어?"가 업무 밖으로 걸림 → 이어 가는 대화의 짧은 후속 질문은 거르지 않는다
+  if (threadId && text.trim().length <= 40 && FOLLOW_UP.test(text)
+    && (await sql`select 1 from ai_messages where thread_id = ${threadId} and role = 'assistant' and status = 'ok' limit 1`).length) return null;
   const { anthropicProvider, costUsd } = await import('./provider');
   const p = anthropicProvider({ tier: 'fast' });
   try {
