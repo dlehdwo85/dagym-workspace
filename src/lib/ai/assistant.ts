@@ -925,7 +925,10 @@ async function fileBlocks(u: SessionUser, ids: string[]) {
  */
 const DOC_NOUN = /(견적서|거래\s*명세서|명세서|공문|안내문|보고서|제안서|계약서|문서|엑셀|워드|ppt|피피티|파워포인트|pdf|양식|발주서|청구서|영수증|xlsx|docx)/i;
 const DOC_VERB = /(만들|작성|채워|채우|바꿔|고쳐|다듬|수정|뽑아|써\s*줘|생성|디자인)/;
-export const isDocRequest = (text: string) => (DOC_NOUN.test(text) && DOC_VERB.test(text)) || /^「[^」]+」\s*v\d+을/.test(text.trim());
+// #991(로컬 11/05 운영 대표 계정): "견적서 정리 업무 만들어줘, 마감 11월 7일, 담당은 나"가 문서 모드(문서 도구만)로 가 '업무를 만드는 기능이 없다'고 답함 →
+// 업무 낱말(업무·할 일·담당·마감·기한·배정·시켜·맡겨·요청·일정·우선순위·체크리스트)이 있으면 문서 모드로 보내지 않는다(보통 모드에도 문서 도구 묶음은 붙음)
+const TASK_WORD = /(업무|할\s*일|담당|마감|기한|배정|시켜|맡겨|요청|일정|우선\s*순위|체크\s*리스트)/;
+export const isDocRequest = (text: string) => /^「[^」]+」\s*v\d+을/.test(text.trim()) || (DOC_NOUN.test(text) && DOC_VERB.test(text) && !TASK_WORD.test(text));
 // ---- V45 원가(대표 지적 10/19: 질문 1번 중앙 73원) — 의도별 도구 묶음·빠른 모델·고정부 캐시 ----
 /** 늘 붙는 도구(업무·사람·자료 찾기) + 의도 낱말이 있을 때만 붙는 묶음. 묶음은 몇 가지로 고정돼 같은 회사 안에서 캐시가 다시 쓰임 */
 const CORE_TOOLS = new Set(['search_tasks', 'get_task', 'list_people', 'list_events', 'search_library', 'read_library_file', 'propose_create_task', 'propose_create_tasks', 'propose_update_task', 'propose_comment', 'propose_attach_file', 'more_tools']);

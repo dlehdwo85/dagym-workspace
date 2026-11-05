@@ -270,3 +270,29 @@ describe('V22 문서 엔진', () => {
     await ctx.owner.ok('PUT', '/api/ai/settings', { webTools: true, docEngine: true });
   });
 });
+
+// #991(로컬 11/05 운영 대표 계정): 문서 이름 + '만들어/바꿔' 이라도 업무 낱말(업무·마감·담당…)이 있으면 문서 모드로 가지 않는다 — 업무 제안 도구가 붙음
+describe('#991 문서 낱말이 든 업무 요청', () => {
+  test('"견적서 정리 업무 만들어줘, 마감·담당" → 보통 모드(업무 제안 도구) · 제안 카드 1', async () => {
+    const n0 = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicQueue: [toolUse('w1', 'propose_create_task', { title: '시험용 견적서 정리', assigneeId: ctx.ownerId, dueDate: '2026-11-07' }), say('업무를 준비했습니다. 확인을 누르면 반영됩니다.')] });
+    const r = await ctx.owner.ok('POST', '/api/ai/chat', { text: '[시험] 업무 하나 만들어줘: 시험용 견적서 정리, 마감 11월 7일, 담당은 나' });
+    const req = (await fakeState()).anthropic.slice(n0)[0].body;
+    assert.ok(req.tools.some((t) => t.name === 'propose_create_task'), '업무 만들기 도구');
+    assert.doesNotMatch(JSON.stringify(req.system), /문서 담당 AI/, '문서 모드 아님');
+    assert.equal(r.proposals.length, 1);
+  });
+  test('"제안서 마감 월요일로 바꿔줘" → 업무 고치기 도구 · "견적서 만들어줘"는 그대로 문서 모드', async () => {
+    let n0 = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicQueue: [say('어느 업무인지 알려 주세요.')] });
+    await ctx.owner.ok('POST', '/api/ai/chat', { text: '제안서 마감 월요일로 바꿔줘' });
+    let req = (await fakeState()).anthropic.slice(n0)[0].body;
+    assert.ok(req.tools.some((t) => t.name === 'propose_update_task'), '업무 고치기 도구');
+    assert.doesNotMatch(JSON.stringify(req.system), /문서 담당 AI/);
+    n0 = (await fakeState()).anthropic.length;
+    await ctl({ anthropicReset: true, anthropicQueue: [say('양식을 찾아볼게요.')] });
+    await ctx.owner.ok('POST', '/api/ai/chat', { text: '다짐 견적서 새로 만들어줘' });
+    req = (await fakeState()).anthropic.slice(n0)[0].body;
+    assert.match(JSON.stringify(req.system), /문서 담당 AI/, '문서 요청은 그대로 문서 모드');
+  });
+});
