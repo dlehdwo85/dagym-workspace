@@ -1769,6 +1769,23 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   await owner.getByTestId('recent-notifications').getByText('V6 다같이 점검').first().waitFor();
 });
 
+await step('363차 #981 광고 점검 카드: 광고 집행 화면에 기준 5개·켜짐 → [기준 고치기] 키워드 비용 12,000원 저장 → 기준 줄 바뀜 · 지금 숫자로 본 점검·주간 보고 자리', async () => {
+  await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
+  await owner.setViewportSize({ width: 1366, height: 900 });
+  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  const card = owner.getByTestId('ad-watch'); await card.waitFor();
+  assert.match(await owner.getByTestId('ad-watch-state').innerText(), /켜짐/);
+  assert.match(await owner.getByTestId('ad-watch-rules').innerText(), /키워드 7일 비용 10,000원 이상·문의 0 → 입찰가 내림 제안, 2번 연속 → 중지 제안[\s\S]*1\.5배[\s\S]*80%/);
+  await card.getByText('아직 보낸 주간 보고가 없습니다').waitFor();
+  await owner.getByTestId('ad-watch-edit').click();
+  await owner.getByTestId('ad-watch-kwCost').fill('12000');
+  await owner.getByTestId('ad-watch-save').click();
+  await owner.getByTestId('ad-watch-rules').filter({ hasText: '12,000원' }).waitFor();
+  await card.scrollIntoViewIfNeeded();
+  await card.screenshot({ path: `${SHOTS}/363-ad-watch.png` });
+  await ctx.owner.ok('PUT', '/api/marketing/ad-ops/watch', { kwCost: 10000 });
+});
+
 await step('V7: 홈 첫 화면에 오늘 할 일·이번 주(업무·일정 같은 한 줄), 달성률 없음, 업무 ⋯ 메뉴 시트, 캘린더 개인/회사 색', async () => {
   for (const [w, h] of [[390, 844], [360, 780]]) {
     const mc = await browser.newContext({ viewport: { width: w, height: h }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });

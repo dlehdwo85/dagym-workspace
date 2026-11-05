@@ -29,16 +29,21 @@ const WORKIN_TENANT = 'default';
 
 export async function leadsReport(u: SessionUser, q: { days?: number }) {
   await assertSpace(u, 'marketing');
-  const t = tenantOf(u); const sql = db();
   const days = [7, 30, 90].includes(Number(q.days)) ? Number(q.days) : 30;
-  const from = ymd(new Date(Date.now() - (days - 1) * 864e5)); const fromTs = `${from}T00:00:00+09:00`;
+  const from = ymd(new Date(Date.now() - (days - 1) * 864e5));
+  return { days, canEdit: isAdmin(u), ...(await leadsRange(tenantOf(u), from, ymd(new Date()))) };
+}
+/** 363차 #981: 기간(서울 날짜 from~to, 양끝 포함) 키워드별 광고비 × 전화·문의·체험 신청 — 화면(leadsReport)과 서버 광고 점검(adWatch)이 같이 씀 */
+export async function leadsRange(t: string, from: string, to: string, o: { limit?: number } = {}) {
+  const sql = db();
+  const fromTs = `${from}T00:00:00+09:00`; const toTs = new Date(Date.parse(`${to}T00:00:00+09:00`) + 864e5).toISOString(); // to 다음 날 0시(서울) 전까지
   const [items, beacon, calls, inq, ctas, [st], plans, signups] = await Promise.all([
     sql<any[]>`select a.provider, s.item_id, max(s.item_name) as keyword, max(s.campaign_name) as campaign, sum(s.clicks)::float8 clicks, sum(s.cost_krw)::float8 cost, sum(s.conversions)::float8 conversions
-      from mkt_ad_items s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.kind = 'keyword' and s.day >= ${from}::date group by a.provider, s.item_id order by sum(s.cost_krw) desc`,
-    sql<any[]>`select provider, keyword_key, keyword_id, max(keyword) as keyword, kind, sum(n)::int n from mkt_ad_leads where tenant = ${t} and day >= ${from}::date group by provider, keyword_key, keyword_id, kind`,
-    sql<any[]>`select ad_keyword, ad_provider, count(*)::int n from mkt_calls where tenant = ${t} and status <> 'excluded' and called_at >= ${fromTs}::timestamptz group by ad_keyword, ad_provider`,
-    sql<{ payload: any }[]>`select payload from inquiries where tenant = ${t} and created_at >= ${fromTs}::timestamptz`,
-    sql<{ label: string; n: number }[]>`select label, sum(n)::int n from mkt_site_events where tenant = ${t} and event = 'cta' and day >= ${from}::date group by label`,
+      from mkt_ad_items s join mkt_ad_accounts a on a.id = s.account_id where a.tenant = ${t} and s.kind = 'keyword' and s.day >= ${from}::date and s.day <= ${to}::date group by a.provider, s.item_id order by sum(s.cost_krw) desc`,
+    sql<any[]>`select provider, keyword_key, keyword_id, max(keyword) as keyword, kind, sum(n)::int n from mkt_ad_leads where tenant = ${t} and day >= ${from}::date and day <= ${to}::date group by provider, keyword_key, keyword_id, kind`,
+    sql<any[]>`select ad_keyword, ad_provider, count(*)::int n from mkt_calls where tenant = ${t} and status <> 'excluded' and called_at >= ${fromTs}::timestamptz and called_at < ${toTs}::timestamptz group by ad_keyword, ad_provider`,
+    sql<{ payload: any }[]>`select payload from inquiries where tenant = ${t} and created_at >= ${fromTs}::timestamptz and created_at < ${toTs}::timestamptz`,
+    sql<{ label: string; n: number }[]>`select label, sum(n)::int n from mkt_site_events where tenant = ${t} and event = 'cta' and day >= ${from}::date and day <= ${to}::date group by label`,
     sql<{ target_cpa: number | null }[]>`select target_cpa from mkt_settings where tenant = ${t}`,
     sql<any[]>`select id, external from mkt_ad_plans where tenant = ${t} and status in ('created', 'active', 'paused')`,
     t !== WORKIN_TENANT ? Promise.resolve([] as { utm: any; status: string; active: boolean }[]) : sql<{ utm: any; status: string; active: boolean }[]>`
@@ -47,7 +52,7 @@ export async function leadsReport(u: SessionUser, q: { days?: number }) {
           (select count(*) from tasks k join users u on u.id = k.created_by where u.tenant = t.id and k.created_at < t.created_at + interval '7 days') >= 5
           or (select count(distinct d.day) from user_active_days d where d.tenant = t.id and d.day < (t.created_at at time zone 'Asia/Seoul')::date + 7) >= 3)) as active
       from tenants t where t.kind = 'company' and t.id not in ('default', 'demo') and t.status not in ('deleted', 'blocked') and t.signup_status <> 'rejected' and not t.is_test
-        and t.created_at >= ${fromTs}::timestamptz`, // 360차 후속(노트북): 거절·차단·시험 신청은 광고 실적에서 뺌
+        and t.created_at >= ${fromTs}::timestamptz and t.created_at < ${toTs}::timestamptz`, // 360차 후속(노트북): 거절·차단·시험 신청은 광고 실적에서 뺌
   ]);
   const rows = new Map<string, LeadRow>();
   const blank = (key: string, provider: string, itemId: string | null, keyword: string, campaign = ''): LeadRow => ({ key, provider, itemId, keyword, campaign, clicks: 0, cost: 0, mediaConv: 0,
@@ -132,10 +137,10 @@ export async function leadsReport(u: SessionUser, q: { days?: number }) {
   const workin = t !== WORKIN_TENANT ? null : { ...wk,
     byCampaign: [...camp.values()].sort((a, b) => b.cost - a.cost || b.signups - a.signups).slice(0, 30)
       .map((c) => ({ ...c, perSignup: per(c.cost, c.signups), perApproved: per(c.cost, c.approved), perActive: per(c.cost, c.active) })) };
-  return { days, from, canEdit: isAdmin(u), totals, unknown, coverage, judge, workin,
+  return { from, to, totals, unknown, coverage, judge, workin,
     target: { cpa: target ?? null, custom: st?.target_cpa != null, avg: totals.cpa },
     tracking: { beacon: beacon.length > 0, naverIds: beacon.some((b) => b.provider === 'naver' && b.keyword_id), calls: calls.some((c) => c.ad_keyword) },
-    rows: list.slice(0, 150) };
+    rows: list.slice(0, o.limit ?? 150) };
 }
 
 export const targetCpaInput = z.object({ cpa: z.number().int().min(1000).max(10_000_000).nullable() });

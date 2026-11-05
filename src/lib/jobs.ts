@@ -240,6 +240,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('mktPublish', async () => (await import('./mktPublish')).publishTick()); // 대표 10/20 22:30 ② M1 서버 게시 실행기(승인된 글 → 인스타·페북·스레드·유튜브, 자동 게시 켠 회사는 예정 시각에)
   await step('mktPublishDeleted', async () => (await import('./mktPublish')).publishDeletedTick()); // 로컬 10/21 11:45: 게시 뒤 삭제 감지(30일·6시간마다) → 작업 deleted·콘텐츠 '게시 삭제됨'·알림
   await step('mktOps', async () => (await import('./mktOps')).opsTickAll()); // 대표 10/20 20:00 ①②: 월요일 AI 마케터 분석·방향 카드 · 매일 광고 소진율 '충전 필요' · 25일 다음 달 예산 초안 // 대표 10/20 18:00 ②: 25일 다음 달 목표 초안 · 월요일 주간 리뷰 · 월초 결산
+  await step('adWatch', async () => (await import('./adWatch')).adWatchTick()); // 363차 #981 서버 광고 점검: 서울 9시 뒤 매일 이상 알림(키워드·사업별 하루 비용·월 상한 %) + 월요일 주간 보고 — 제안만, 바꾸지 않음
   await step('nightAssistant', async () => (await import('./mktHome')).nightAssistantTick()); // ⑥ 밤사이 비서(22~06시, 회사 AI 설정에서 켠 범위만 — 지금은 원고 초안)
   await step('mktReport', async () => (await import('./mktReport')).monthlyReportJob()); // 상용화 ⑧ 매월 1일 지난달 마케팅 보고 알림·메일
   await step('awayReturn', async () => (await import('./away')).awayReturnTick()); // #76 부재 끝난 사람에게 '부재 중 알림 n건' 1건
