@@ -53,7 +53,16 @@ export async function backClose({ owner, ctx, BASE }) {
   await owner.locator('a[href="/s/marketing/approvals"]:visible').first().click();
   await owner.waitForURL((u) => u.pathname === '/s/marketing/approvals');
   const far = () => owner.getByTestId('approval-card').filter({ hasText: 'E2E 뒤로가기 스크롤 글' }).last().getByTestId('mkt-row');
-  await far().waitFor({ timeout: 90_000 }); // 358차(CI 2139): DB 가 바쁠 때(체크포인트 270초) 승인함 첫 목록이 30초를 넘김 — 목록이 뜰 때까지 기다린 뒤 내림
+  // 358차(CI 2139): DB 가 바쁠 때 승인함 첫 목록이 30초를 넘김 — 목록이 뜰 때까지 기다린 뒤 내림
+  // 377차(CI 2242 — 2240 은 같은 코드로 통과): 시안이 붙은 글은 '승인할 시안' 묶음(처음 3장 + [N건 더 보기])으로 가서 아래 글이 [더 보기] 뒤에 숨음
+  //   → 90초 동안 카드를 기다리며 [더 보기]가 보이면 누름(시안 없음 묶음은 모두 펼쳐져 있어 그대로)
+  const until = Date.now() + 90_000;
+  while (!(await far().isVisible().catch(() => false)) && Date.now() < until) {
+    const more = owner.getByTestId('mkt-more');
+    if (await more.isVisible().catch(() => false)) await more.click().catch(() => {});
+    await owner.waitForTimeout(500);
+  }
+  await far().waitFor({ timeout: 5_000 });
   await far().scrollIntoViewIfNeeded();
   const y0 = await owner.evaluate(() => Math.round(window.scrollY));
   assert.ok(y0 > 300, `목록을 충분히 내림(${y0})`);

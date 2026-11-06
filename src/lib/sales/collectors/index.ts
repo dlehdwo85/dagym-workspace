@@ -48,7 +48,9 @@ export async function runCollector(slug: string, trigger: 'cron' | 'manual' | 'r
   catch (e) { const msg = e instanceof Error ? e.message : String(e); result = { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: msg, summary: `실행 중 예외: ${msg}`, providerMode: 'manual' }; await logError(`sales-collect:${slug}`, e).catch(() => {}); }
   // #507 후속: 공고 수집 뒤 같은 공고 여러 줄(원본 복사 + 워크인 수집)을 한 줄로 — 진행 기록·업무가 걸린 줄을 살림
   if (BID_COLLECTORS.has(slug)) {
-    const m = await mergeNoticeDuplicates().catch(async (e) => { await logError('sales-notice-merge', e).catch(() => {}); return null; });
+    let mergeErr: string | null = null; // 377차: 합치기·취소 맞춤이 실패하면 요약에 남김(예전엔 오류 기록에만 — 로컬이 '맞춤 문구 없음'만 봄)
+    const m = await mergeNoticeDuplicates().catch(async (e) => { mergeErr = e instanceof Error ? e.message : String(e); await logError('sales-notice-merge', e).catch(() => {}); return null; });
+    if (mergeErr) result = { ...result, summary: `${result.summary ?? ''} · 같은 공고 합치기·취소 맞춤 실패: ${String(mergeErr).slice(0, 120)}` };
     const by = Object.entries(m?.byType ?? {}).map(([k, v]) => `${SRC_KO[k] ?? k} ${v}`).join('·');
     if (m?.hidden || m?.kept || m?.canceled) result = { ...result, summary: `${result.summary ?? ''}${m.hidden ? ` · 같은 공고 ${m.hidden}줄 합침(${by})` : ''}${m.kept ? ` · 두 줄 모두 진행 기록·업무가 있어 그대로 둔 공고 ${m.kept}건` : ''}${m.canceled ? ` · 같은 공고 다른 줄 취소 맞춤 ${m.canceled}줄` : ''}` };
   }

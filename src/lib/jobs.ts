@@ -222,6 +222,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('leadNext', async () => (await import('./sales/bidTasks')).leadNextTick()); // 결정 15-35 업무가 없던 리드의 가까운 다음 연락 → '다음 연락' 업무(알림 없이)
   await step('leadRevisit', async () => (await import('./sales/leadList')).leadRevisitTick()); // 197차(#461): 보류·실패로 닫으며 고른 '다시 볼 날' → 담당자 업무 1건 + 알림
   await step('inquiryLeads', async () => (await import('./inquiries')).inquiryLeadsTick()); // 대표 10/27 ③: 끝나지 않은 다짐·하이링크 문의 업무도 영업 진행(리드)에 연결 — 완료 때 다음 연락·종결
+  await step('salesKg2bDetail', async () => (await import('./sales/collectors/kg2b')).kg2bDetailTick()); // 377차(로컬 11/06): K-apt 수집 시간 안에 못 읽은 kg2b_ 공고 KG2B 상세 5건씩(서울 중계) — 공고문이 붙으면 아래 참가자격 읽기
   await step('salesEligibility', async () => (await import('./sales/eligibility')).eligibilityTick()); // 252차 #786 열린 관련 입찰 공고의 첨부 공고문 '참가자격' 절 읽기(AI 없음, 마감 가까운 순 한 번에 6건·25초, 정정으로 첨부가 바뀌면 다시) — 첨부 받기가 느려도 당일 메일·입찰 업무를 늦추지 않게 그 뒤에
   await step('notices', async () => (await import('./announcements')).noticesJob()); // V30 ② 예약 게시
   await step('textExtract', async () => (await import('./library')).textExtractJob()); // V14 32: HWP·PDF 본문 재추출(기존 파일, 한 번에 15개)

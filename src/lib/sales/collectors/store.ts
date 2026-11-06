@@ -168,7 +168,7 @@ export async function mergeNoticeDuplicates(): Promise<{ groups: number; hidden:
     from (select distinct on (row->>'source_type', row->>'source_external_id') src_id, row from sales_src_rows
       where scope = ${SCOPE} and tbl = 'procurement_notices' and coalesce(row->>'current_status', '') ~ '취소' and coalesce(row->>'source_external_id', '') <> ''
       order by row->>'source_type', row->>'source_external_id', synced_at desc nulls last) c
-    where s.scope = ${SCOPE} and s.tbl = 'procurement_notices' and not s.gone and s.src_id <> c.src_id
+    where s.scope = ${SCOPE} and s.tbl = 'procurement_notices' and s.src_id <> c.src_id /* 377차: 숨긴 줄도 — 공고 조회에서 두 줄 상태가 같게, 되살아나도 취소 */
       and s.row->>'source_type' = c.row->>'source_type' and s.row->>'source_external_id' = c.row->>'source_external_id'
       and coalesce(s.row->>'current_status', '') !~ '취소|낙찰' and coalesce(s.row->>'winner_name', '') = ''
     returning s.src_id`;

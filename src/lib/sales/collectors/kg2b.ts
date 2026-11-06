@@ -60,12 +60,15 @@ export function kg2bPatch(row: Record<string, any>, d: Kg2bDetail, at = new Date
  * 마감 전 관련 K-apt 공고 중 kg2b_ 번호이고 KG2B 상세를 아직 안 읽은 것(또는 하루 전에 읽었는데 공고문이 없던 것 — 350차 #938 ②: 매일 다시)을 한 번에 max 건 — 같은 번호 줄(원본 복사·워크인 수집)을 함께 고침.
  * 저장은 칸 합치기만(updated_at 그대로 — 당일 메일 '변경'에 다시 안 오름)
  */
-export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => number, max = 10) {
-  const sql = db(); const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone
+const kstToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+/** KG2B 상세를 읽을 줄 — 마감 전 관련 K-apt 'kg2b_번호' 공고 중 아직 안 읽었거나(판 2 전) 하루 전에 읽었는데 공고문이 없던 것. 읽기·점검(kg2bWhy)이 같은 조건 */
+const dueCond = (sql: ReturnType<typeof db>, today: string) => sql`scope = 'global' and tbl = 'procurement_notices' and not gone
       and row->>'source_type' = 'kapt_bid' and row->>'source_external_id' ~ '^kg2b_[0-9]{3,12}$' and coalesce(row->>'related', 'false') = 'true'
       and coalesce(row->>'deadline_at', '') >= ${today} and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰'
-      and (coalesce(row->>'kg2b_read_at', '') = '' or coalesce(row->>'kg2b_v', '') <> '2' or (row->>'kg2b_read_at' < ${new Date(Date.now() - 1 * 864e5).toISOString()} and coalesce(jsonb_array_length(case when jsonb_typeof(row->'attachment_urls') = 'array' then row->'attachment_urls' end), 0) = 0))
+      and (coalesce(row->>'kg2b_read_at', '') = '' or coalesce(row->>'kg2b_v', '') <> '2' or (row->>'kg2b_read_at' < ${new Date(Date.now() - 1 * 864e5).toISOString()} and coalesce(jsonb_array_length(case when jsonb_typeof(row->'attachment_urls') = 'array' then row->'attachment_urls' end), 0) = 0))`;
+export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => number, max = 10) {
+  const sql = db(); const today = kstToday();
+  const rows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where ${dueCond(sql, today)}
     order by row->>'deadline_at' asc limit ${max * 3}`;
   const by = new Map<string, { src_id: string; row: any }[]>();
   for (const r of rows) { const k = String(r.row.source_external_id); if (!by.has(k)) by.set(k, []); by.get(k)!.push(r); }
@@ -97,6 +100,55 @@ export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => numbe
   for (const m of missed) await noteSkip(sql, 'global', 'kg2b_detail', m.key, m.title, m.err);
   await noteDone(sql, 'global', 'kg2b_detail', done);
   return out;
+}
+
+/** 377차(로컬 11/06 kg2b_142990 '8건에 안 들어감'): K-apt 수집(06·10·14·18시)은 남은 시간 안에서만 KG2B 상세를 읽어 밀린 공고가 남음 →
+ *  정기 실행(15~30분)마다 5건씩 더 읽음(서울 중계, 20초 안). 시험 서버(SALES_COLLECTORS_TICK=off)는 건너뜀 */
+export async function kg2bDetailTick() {
+  if (process.env.SALES_COLLECTORS_TICK === 'off') return { skipped: 'off' as const };
+  const started = Date.now(); const left = () => 20000 - (Date.now() - started);
+  const r = await readKg2bDetails(fetch, left, 5);
+  return r.read || r.errors.length ? r : { read: 0 };
+}
+
+/** 377차(로컬 11/06 kg2b_142686 '취소'·'진행중' 그대로 · kg2b_142990 상세 비어 있음): 한 공고 번호의 줄마다
+ *  KG2B 상세를 읽을 차례인지·아닌 까닭·밀린 순서, 같은 번호 줄끼리 상태가 다른 까닭, '못 함' 기록 — 저장 안 함 */
+export async function kg2bWhy(no: string) {
+  const sql = db(); const today = kstToday(); const ext = no.trim();
+  const rows = await sql<{ src_id: string; row: any; gone: boolean; origin: string | null; synced_at: Date }[]>`select src_id, row, gone, origin, synced_at from sales_src_rows
+    where scope = 'global' and tbl = 'procurement_notices' and (row->>'source_external_id' = ${ext} or row->>'notice_no' = ${ext} or src_id = ${ext}) order by synced_at desc limit 20`;
+  const dayAgo = new Date(Date.now() - 864e5).toISOString();
+  const nFiles = (r: any) => (Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0);
+  const notDue = (x: { row: any; gone: boolean }) => {
+    const r = x.row;
+    if (x.gone) return '숨긴 줄(합쳐짐·사라짐) — 같은 번호의 보이는 줄을 읽음';
+    if (r.source_type !== 'kapt_bid') return `원천이 K-apt 입찰공고가 아님(${r.source_type ?? '빈 값'})`;
+    if (!/^kg2b_[0-9]{3,12}$/.test(String(r.source_external_id ?? ''))) return `공고 번호가 kg2b_숫자 꼴이 아님(${r.source_external_id ?? '빈 값'})`;
+    if (String(r.related) !== 'true') return '관련 공고가 아님 — KG2B 상세는 관련 공고만 읽음(못 함 기록도 읽으려다 실패한 것만)';
+    if (!r.deadline_at) return '마감일 칸이 비어 있음';
+    if (String(r.deadline_at) < today) return `마감이 지남(${r.deadline_at})`;
+    if (/취소|낙찰|유찰/.test(String(r.current_status ?? ''))) return `상태가 '${r.current_status}'`;
+    if (r.kg2b_read_at && String(r.kg2b_v ?? '') === '2' && !(String(r.kg2b_read_at) < dayAgo && nFiles(r) === 0))
+      return nFiles(r) ? `이미 읽음(${r.kg2b_read_at})` : `${r.kg2b_read_at} 에 읽었는데 공고문 없음 — 하루 뒤 다시`;
+    return null;
+  };
+  const queue = await sql<{ ext: string }[]>`select row->>'source_external_id' as ext from sales_src_rows where ${dueCond(sql, today)} group by 1 order by min(row->>'deadline_at') asc`;
+  const at = queue.findIndex((q) => q.ext === ext);
+  const [skip] = await sql<any[]>`select reason, message, first_at, last_at, skips, done_at from ai_skips where tenant = 'global' and stage = 'kg2b_detail' and item_key = ${ext}`.catch(() => []);
+  const items = rows.map((x) => { const r = x.row; return { id: x.src_id, origin: x.origin === 'workin' ? '워크인 수집' : '원본 영업관리 복사', gone: x.gone, mergedInto: r.merged_into ?? null,
+    sourceType: r.source_type ?? null, sourceNo: r.source_external_id ?? null, noticeNo: r.notice_no ?? null, status: r.current_status ?? null, noticeState: r.notice_state ?? null, noticeKind: r.notice_kind ?? null,
+    winner: r.winner_name ?? null, related: String(r.related) === 'true', deadlineAt: r.deadline_at ?? null, postedDate: r.posted_date ?? null,
+    kg2bReadAt: r.kg2b_read_at ?? null, kg2bV: r.kg2b_v ?? null, files: nFiles(r), briefing: r.kg2b_briefing_kind ?? r.site_briefing_kind ?? null,
+    kaptCancelAt: r.kapt_cancel_at ?? null, cancelDate: r.cancel_date ?? null, cancelSyncedAt: r.cancel_synced_at ?? null, cancelSyncedFrom: r.cancel_synced_from ?? null, syncedAt: x.synced_at,
+    kg2bDetail: notDue(x) ?? `읽을 차례 — 밀린 ${queue.length}건 중 ${at + 1}번째(정기 실행 5건·K-apt 수집 10건씩)` }; });
+  // 같은 번호 줄끼리 취소/진행이 다르면 — 취소 맞춤(mergeNoticeDuplicates)이 왜 안 옮겼는지
+  const canceled = items.filter((i) => /취소/.test(String(i.status ?? '')));
+  const cancel = !canceled.length || canceled.length === items.length ? null : items.filter((i) => !/취소/.test(String(i.status ?? ''))).map((i) => ({ id: i.id,
+    why: /낙찰/.test(String(i.status ?? '')) || i.winner ? '낙찰·낙찰자가 있는 줄은 옮기지 않음'
+      : !canceled.some((c) => c.sourceType === i.sourceType && c.sourceNo === i.sourceNo) ? `원천 종류·번호가 취소 줄과 다름(${i.sourceType}·${i.sourceNo} ↔ ${canceled.map((c) => `${c.sourceType}·${c.sourceNo}`).join(', ')})`
+      : '다음 공고 수집(K-apt·나라장터) 뒤 맞춤 — 그 뒤에도 다르면 알려 주세요' }));
+  return { no: ext, today, items, queue: { total: queue.length, position: at >= 0 ? at + 1 : null }, cancel,
+    skip: skip ? { reason: skip.reason, message: skip.message, firstAt: skip.first_at, lastAt: skip.last_at, times: skip.skips, refilledAt: skip.done_at } : null };
 }
 
 /**

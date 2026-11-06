@@ -5,7 +5,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { bootstrap, resetDb, startServer, testDb, tick } from '../helpers.mjs';
 import { fakeKapt } from '../fakeKapt.mjs';
 
 const PORT = 3282;
@@ -128,4 +128,32 @@ test('376차(로컬 11/06): KG2B 를 못 읽은 kg2b_ 공고 = 못 함(공용 ·
   await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
   s = await skip(); assert.ok(s.done_at, '다시 채움');
   assert.ok((await get()).kg2b_read_at, 'KG2B 상세 다시 읽음');
+});
+
+test('377차(로컬 11/06 kg2b_142990·142686): ?kg2b=why 줄마다 KG2B 상세 차례·까닭 · 정기 실행이 5건씩 읽음 · 같은 번호 줄 취소가 다른 까닭', async () => {
+  const [r0] = await sql`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = ${BID} and not gone`;
+  await sql`update sales_src_rows set row = row - 'kg2b_read_at' - 'kg2b_v' where src_id = ${r0.src_id}`;
+  const why = (no = BID) => ctx.owner.ok('GET', `/api/platform/sales-notices?no=${no}&kg2b=why`).then((x) => x.kg2bWhy);
+  let w = await why();
+  assert.match(w.items.find((i) => i.id === r0.src_id).kg2bDetail, /읽을 차례 — 밀린 1건 중 1번째/, JSON.stringify(w.items));
+  assert.deepEqual(w.queue, { total: 1, position: 1 });
+  assert.equal(w.skip?.refilledAt ? 'refilled' : null, 'refilled', '앞 시험의 못 함 → 다시 채움 기록');
+  kg2bHits.length = 0;
+  const t = await tick();
+  assert.equal(t.detail.salesKg2bDetail?.read, 1, JSON.stringify(t.detail.salesKg2bDetail));
+  assert.deepEqual(kg2bHits, [CODE]);
+  w = await why();
+  assert.match(w.items.find((i) => i.id === r0.src_id).kg2bDetail, /이미 읽음/);
+  assert.deepEqual(w.queue, { total: 0, position: null });
+  // 관련 아님 · 마감 지남 · 원본 복사 줄은 숨김 + 취소 — 까닭이 줄마다
+  const base = { ...r0.row, source_external_id: 'kg2b_828002', title: '시험팔이팔 관련 아님 공고' };
+  const ins = (id, row, gone = false, origin = 'workin') => sql`insert into sales_src_rows (scope, tbl, src_id, row, origin, gone) values ('global', 'procurement_notices', ${id}, ${sql.json(row)}, ${origin}, ${gone})`;
+  await ins('W828-2', { ...base, id: 'W828-2', related: false, fit_business: null, kg2b_read_at: null, current_status: '진행중' });
+  await ins('S828-2', { ...base, id: 'S828-2', source_type: 'kapt', current_status: '취소' }, false, 'src');
+  w = await why('kg2b_828002');
+  const by = Object.fromEntries(w.items.map((i) => [i.id, i]));
+  assert.match(by['W828-2'].kg2bDetail, /관련 공고가 아님/);
+  assert.match(by['S828-2'].kg2bDetail, /원천이 K-apt 입찰공고가 아님\(kapt\)/);
+  assert.match(w.cancel?.[0]?.why ?? '', /원천 종류·번호가 취소 줄과 다름\(kapt_bid·kg2b_828002 ↔ kapt·kg2b_828002\)/, JSON.stringify(w.cancel));
+  assert.equal((await ctx.staffA.client.req('GET', `/api/platform/sales-notices?no=${BID}&kg2b=why`)).status, 404, '플랫폼 운영자만');
 });
