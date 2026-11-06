@@ -1140,7 +1140,7 @@ await step('V24 음성 등록: AI 비서 화면·패널 마이크 → 실시간 
 await step('V14 42 업무 보기 칩: 412px 에서 7개 모두 보임(4칸 2줄)·건수 = API·0건 숨김·사람 칩 둘째 줄·PC 한 줄', () => v1442({ browser, desk, ctx, BASE, SHOTS, addDays, today }));
 await step('V14 43 업무 목록: 왼쪽 동그라미 없음·상태 칩 버튼(테두리·▾·32px)·메뉴 맨 위 완료 → 되돌리기·남의 업무 잠김·"확인 완료" 문구 없음', () => v1443({ browser, desk, ctx, BASE, SHOTS, sql }));
 await step('메신저 대화방 이름 바꾸기: ✎ → 입력 → Enter = 머리줄·목록·상대에게 새 이름, Esc 취소, 1:1 은 버튼 없음', () => chatRename({ owner, ctx, BASE }));
-await step('V32 4 마감 연장: 휴대폰 담당자 목록 마감 칩 → 연장 요청(사유 필수, 뒤 날짜는 요청 창) → PC 요청자 "연장 요청" 칩·행 표시 → 머리에서 승인 → 마감 변경·연장 1회', () => dueExtend({ staff, owner, ctx, sql, BASE }));
+await step('V32 4 마감 연장(378차): 휴대폰 담당자 마감 칩(날짜·시간·D-n) → [마감 연장] 날짜·시각·사유 → 승인 없이 바로 → PC 요청자 상세 마감 연장 기록(사유) · 예전 대기 요청 칩·승인 그대로', () => dueExtend({ staff, owner, ctx, sql, BASE }));
 await step('V38 3 음성 모드(운전 중): 메시지방 새 메시지 읽어 주기·말로 보내기("보내" 확인·"취소")·AI 비서 말로 묻고 답 읽어 주기', () => voiceMode({ browser, desk, ctx, sql, BASE, FAKE }));
 await step('로컬 검수 10/17: 홈 최근 활동 멘션 @이름 · 월 보기 요일 머리 · 휴대폰 일정 시트 닫기 버튼 화면 안 · 휴대폰 업무 둘째 줄 한 줄', () => verify1017({ owner, staff, ctx, sql, BASE }));
 await step('로컬 10/19 회사 정보 AI 로 정리: 오른쪽 도우미·질문으로 시작 5문항·주의할 점 칸', async () => {

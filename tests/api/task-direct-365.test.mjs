@@ -35,7 +35,7 @@ describe('365차 #988 마감 바로 연장(대표·부서장·팀장)', () => {
     assert.equal(x.status, 'applied'); assert.equal(x.requested_by, ctx.ownerId); assert.equal(x.reason, '거래처 일정 변경');
     const ns = await sql`select user_id, title, body from notifications where entity_id = ${taskId} and title like '마감 연장:%'`;
     assert.deepEqual(ns.map((n) => n.user_id).sort(), [ctx.managerA.id, ctx.staffA.id].sort(), '요청자·담당자에게만');
-    assert.ok(ns[0].body.endsWith(`님이 마감을 ${md(addDays(today, 2))} → ${md(addDays(today, 4))} 로 연장(거래처 일정 변경)`), ns[0].body);
+    assert.ok(ns[0].body.endsWith(`님이 마감을 ${md(addDays(today, 2))} → ${md(addDays(today, 4))} 로 연장(사유: 거래처 일정 변경)`), ns[0].body);
     // 앞당기기도 바로(변경) — 연장 횟수는 그대로
     const r2 = await ctx.owner.ok('POST', `/api/tasks/${taskId}/extend`, { toDate: addDays(today, 3), reason: '앞당김 요청' });
     assert.equal(r2.applied, true);
@@ -46,15 +46,17 @@ describe('365차 #988 마감 바로 연장(대표·부서장·팀장)', () => {
     assert.equal((await ctx.owner.req('PATCH', `/api/tasks/${taskId}`, { dueDate: addDays(today, 9) })).status, 403);
   });
 
-  test('일반 관리자는 바로 연장 대상 아님(403) · 담당자는 그대로 요청 · 요청자는 바로', async () => {
+  test('일반 관리자는 바로 연장 대상 아님(403) · 담당자도 바로(378차, 뒤로만) · 요청자는 바로', async () => {
     assert.equal((await admin.client.ok('GET', `/api/tasks/${taskId}`)).perms.dueNow ?? null, null);
     assert.equal((await admin.client.req('POST', `/api/tasks/${taskId}/extend`, { toDate: addDays(today, 8), reason: '관리자' })).status, 403);
     const a = await ctx.staffA.client.ok('POST', `/api/tasks/${taskId}/extend`, { toDate: addDays(today, 6), reason: '자료 늦음' });
-    assert.equal(a.applied, false, '담당자는 요청');
-    assert.equal((await ctx.staffA.client.req('POST', `/api/tasks/${taskId}/extend`, { toDate: addDays(today, 1), reason: '앞당김' })).status, 400, '담당자 요청은 뒤 날짜만');
+    assert.deepEqual([a.applied, a.as], [true, '담당자'], '378차: 담당자도 승인 없이 바로');
+    assert.equal((await due(taskId)).d, addDays(today, 6));
+    assert.equal((await ctx.staffA.client.req('POST', `/api/tasks/${taskId}/extend`, { toDate: addDays(today, 1), reason: '앞당김' })).status, 400, '담당자는 뒤 날짜만');
     const b = await ctx.managerA.client.ok('POST', `/api/tasks/${taskId}/extend`, { toDate: addDays(today, 7), reason: '요청자 연장' });
     assert.equal(b.applied, true); assert.equal(b.as, '요청자');
-    assert.equal((await sql`select status from task_due_extensions where task_id = ${taskId} and reason = '자료 늦음'`)[0].status, 'cancelled', '대기 요청은 정리');
+    assert.equal((await sql`select status from task_due_extensions where task_id = ${taskId} and reason = '자료 늦음'`)[0].status, 'applied', '담당자 연장 기록');
+    assert.ok((await sql`select 1 from notifications where entity_id = ${taskId} and title like '마감 연장:%' and user_id = ${ctx.managerA.id} and body like '%(사유: 자료 늦음)'`).length, '담당자 연장은 요청자에게 사유와 함께 알림');
     assert.ok((await sql`select 1 from notifications where entity_id = ${taskId} and title like '마감 연장:%' and user_id = ${ctx.staffA.id} and body like '%요청자 연장%'`).length, '요청자 연장도 담당자에게 알림');
   });
 

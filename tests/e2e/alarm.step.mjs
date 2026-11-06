@@ -37,4 +37,17 @@ export async function alarmFlow({ staff, ctx, sql, BASE, SHOTS }) {
   await staff.goto(`${BASE}/notifications`);
   await staff.getByTestId('notif-activity').click();
   await staff.getByTestId('activity-list').getByText(/알람 해제/).first().waitFor();
+  // 378차(대표 11/06 '알람 울릴 때 열기 눌렀으면 알람 사라져야'): [열기] = 그 업무 화면 + 알람 해제 — 전에는 진동만 멈추고 띠가 남았다
+  const [n2] = await sql`insert into notifications (user_id, type, title, body, link, entity_type, entity_id, meta, dedupe_key) values (${ctx.staffA.id}, 'due_soon', '30분 뒤 마감: E2E 알람 업무', '오늘 23:00까지', ${`/tasks/${t}`}, 'task', ${t}, '{"kind":"due","alarm":true}'::jsonb, ${`e2e-alarm-open:${t}`}) returning id`;
+  await staff.goto(`${BASE}/`);
+  await bar.waitFor({ timeout: 15000 });
+  await bar.getByTestId('alarm-open').click();
+  await bar.waitFor({ state: 'detached' });
+  for (let k = 0; k < 40 && !staff.url().includes(t); k++) await staff.waitForTimeout(250);
+  assert.ok(staff.url().includes(t), `[열기] → 업무 화면(전체 또는 오른쪽 패널 ?task=) (${staff.url()})`);
+  let done = null;
+  for (let k = 0; k < 40 && !done; k++) { done = (await sql`select action_done from notifications where id = ${n2.id}`)[0].action_done; if (!done) await staff.waitForTimeout(250); }
+  assert.equal(done, '알람 해제', '[열기]도 해제');
+  await staff.reload(); await staff.waitForTimeout(2000);
+  assert.equal(await staff.getByTestId('alarm-bar').count(), 0, '새로고침해도 띠 없음');
 }

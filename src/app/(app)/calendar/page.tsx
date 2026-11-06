@@ -863,7 +863,7 @@ function UnscheduledPanel({ onClose, onOpen }: { onClose: () => void; onOpen: (i
               className="group cursor-grab rounded-input border border-line bg-white px-2.5 py-2 text-sm hover:border-accent-500 hover:shadow-card active:cursor-grabbing">
               <button type="button" className="line-clamp-2 text-left font-medium hover:underline" onMouseDown={(e) => e.stopPropagation()} onClick={() => onOpen(t.id)}>{t.title}</button>
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-2">
-                <DueChip due={t.due_date} status={t.status} />
+                <DueChip due={t.due_date} time={t.due_time} status={t.status} />
                 {remaining ? <span className="inline-flex items-center gap-0.5"><Timer className="size-3.5" />{fmtMinutesShort(remaining)}</span> : null}
               </div>
             </div>

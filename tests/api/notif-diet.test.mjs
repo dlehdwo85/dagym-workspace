@@ -145,15 +145,14 @@ describe('알림에서 바로 처리', () => {
     assert.equal(r.label, '승인함');
     assert.equal((await sql`select status from tasks where id = ${id}`)[0].status, 'done');
   });
-  test('마감 연장 요청 알림 [승인] → 마감 바뀜·"연장 승인함" · 멘션 알림 [답글] → 같은 스레드 댓글', async () => {
+  test('378차 담당자 마감 연장 = 승인 없이 바로 → 요청자 알림은 사유만(승인 버튼 없음) · 멘션 알림 [답글] → 같은 스레드 댓글', async () => {
     const id = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: '연장 바로 승인', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false, dueDate: today })).id;
     await ctx.staffA.client.ok('POST', `/api/tasks/${id}/extend`, { toDate: addDays(today, 3), reason: '자재 지연' });
-    const n = (await ctx.managerA.client.ok('GET', '/api/notifications')).items.find((x) => x.type === 'review_requested' && x.entity_id === id && x.meta?.kind === 'extension');
-    assert.deepEqual(n.actions.map((a) => a.label), ['승인', '거절']);
-    const r = await ctx.managerA.client.ok('POST', `/api/notifications/${n.id}/action`, { action: 'approve_ext' });
-    assert.equal(r.label, '연장 승인함');
-    assert.equal((await sql`select to_char(due_date, 'YYYY-MM-DD') d from tasks where id = ${id}`)[0].d, addDays(today, 3));
-    assert.deepEqual((await ctx.managerA.client.ok('GET', '/api/notifications')).items.find((x) => x.id === n.id).actions, [], '처리된 알림은 버튼 없음');
+    assert.equal((await sql`select to_char(due_date, 'YYYY-MM-DD') d from tasks where id = ${id}`)[0].d, addDays(today, 3), '승인 없이 바로');
+    const items = (await ctx.managerA.client.ok('GET', '/api/notifications')).items.filter((x) => x.entity_id === id);
+    assert.ok(!items.some((x) => x.type === 'review_requested' && x.meta?.kind === 'extension'), '승인 요청 알림 없음');
+    const n = items.find((x) => x.title.startsWith('마감 연장:'));
+    assert.match(n.body, /사유: 자재 지연/); assert.deepEqual(n.actions.map((a) => a.id), ['ack'], '[확인]만 — 승인 버튼 없음');
     const c = await ctx.managerA.client.ok('POST', `/api/tasks/${id}/comments`, { body: `@[이직원](${ctx.staffA.id}) 일정 확인` });
     const m = (await ctx.staffA.client.ok('GET', '/api/notifications')).items.find((x) => x.type === 'mention' && x.entity_id === id);
     assert.deepEqual(m.actions.map((a) => a.id), ['reply', 'ack']);

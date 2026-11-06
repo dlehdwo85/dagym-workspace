@@ -446,43 +446,53 @@ export function OrderMenu({ title, onMove }: { title: string; onMove: (to: 'top'
 }
 
 
-/** V32 4 마감 연장 대화창: +1일·+3일·+1주·날짜 고르기 + 사유(필수). 요청자는 바로 연장, 담당자는 요청자에게 요청 */
-export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { task: { id: string; title: string; due_date: string | null }; boss: boolean; open: boolean; onClose: () => void; initial?: string | null; onDone?: () => void }) {
+/** V32 4 마감 연장 대화창: +1일·+3일·+1주·날짜 고르기 + 사유(필수).
+ *  378차(대표 11/06): 담당자도 승인 없이 바로 연장(뒤로만) · 날짜와 함께 시각도 고름(지금 시각이 기본, '시간 없음' = 종일) · 사유는 업무 '마감 연장 기록'에 남음
+ *  boss = 앞당기기도 되는 사람(요청자·대표·부서장·팀장) */
+export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { task: { id: string; title: string; due_date: string | null; due_time?: string | null }; boss: boolean; open: boolean; onClose: () => void; initial?: string | null; onDone?: () => void }) {
   const base = task.due_date ?? todayStr();
+  const baseTime = task.due_time?.slice(0, 5) ?? null;
   const [to, setTo] = useState<string>(initial ?? addDays(base, 1));
+  const [time, setTime] = useState<string | null>(baseTime);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   // 365차 #988: 바로 바꾸는 사람(요청자·대표·부서장·팀장)은 앞당기기도 이 창에서(사유 기록·알림)
-  useEffect(() => { if (open) { setTo(initial && (boss ? initial !== base : initial > base) ? initial : addDays(base, 1)); setReason(''); } }, [open, initial, base, boss]);
-  const earlier = to < base;
+  useEffect(() => { if (open) { setTo(initial && (boss ? initial !== base : initial >= base) ? initial : addDays(base, 1)); setTime(baseTime); setReason(''); } }, [open, initial, base, baseTime, boss]);
+  const key = (d: string, t: string | null) => `${d} ${t ?? '24:00'}`; // 시각 없음 = 그날 끝(서버와 같은 비교)
+  const same = key(to, time) === key(base, baseTime);
+  const earlier = key(to, time) < key(base, baseTime);
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reason.trim()) { toast.error('연장 사유를 적어 주세요'); return; }
     setBusy(true);
     try {
-      const r = await api<{ applied: boolean }>(`/api/tasks/${task.id}/extend`, { body: { toDate: to, reason: reason.trim() } });
-      toast.ok(r.applied ? `마감을 ${Number(to.slice(5, 7))}/${Number(to.slice(8))}로 ${earlier ? '바꿨습니다' : '연장했습니다'} — 요청자·담당자에게 알림` : '요청자에게 연장 요청을 보냈습니다');
+      await api<{ applied: boolean }>(`/api/tasks/${task.id}/extend`, { body: { toDate: to, toTime: time, reason: reason.trim() } });
+      toast.ok(`마감을 ${when(to, time)}로 ${earlier ? '바꿨습니다' : '연장했습니다'} — 요청자·담당자에게 사유와 함께 알림`);
       broadcastRefresh(); onDone?.(); onClose();
     } catch (err: any) { toast.error(err.message); } finally { setBusy(false); }
   };
   const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
+  const when = (d: string, t: string | null) => `${md(d)}${t ? ` ${t}` : ''}`;
   return (
-    <Modal open={open} onClose={onClose} title={boss ? (earlier ? '마감 변경' : '마감 연장') : '마감 연장 요청'}>
+    <Modal open={open} onClose={onClose} title={boss && earlier ? '마감 변경' : '마감 연장'}>
       <form onSubmit={send} className="space-y-3 text-sm" data-testid="extend-dialog">
-        <p className="text-ink-2"><b className="text-ink">{task.title}</b><br />지금 마감 {task.due_date ? md(task.due_date) : '없음'} → <b className="text-amber-800" data-testid="extend-to">{md(to)}</b></p>
+        <p className="text-ink-2"><b className="text-ink">{task.title}</b><br />지금 마감 {task.due_date ? when(task.due_date, baseTime) : '없음'} → <b className="text-amber-800" data-testid="extend-to">{when(to, time)}</b></p>
         <div className="grid grid-cols-3 gap-2">
           {([['+1일', 1], ['+3일', 3], ['+1주', 7]] as const).map(([l, n]) => (
             <button key={l} type="button" onClick={() => setTo(addDays(base, n))} aria-pressed={to === addDays(base, n)}
               className={cx('h-11 rounded-input border text-sm font-medium', to === addDays(base, n) ? 'border-brand-600 bg-brand-50 text-brand-700 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>{l}</button>
           ))}
         </div>
-        <label className="flex items-center gap-2"><span className="shrink-0 text-ink-2">날짜 고르기</span>
-          <input type="date" className={cx(inputCls, 'h-11')} min={boss ? undefined : addDays(base, 1)} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} aria-label="연장할 마감일" /></label>
-        <label className="block"><span className="text-ink-2">{earlier ? '변경' : '연장'} 사유 <span className="text-red-600">*</span></span>
+        {/* 378차: 날짜(넓게) · 시각(좁게) 한 줄 — 같은 날 시각만 늦추는 연장도 됨 */}
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-ink-2">날짜·시각</span>
+          <input type="date" className={cx(inputCls, 'h-11 min-w-0 flex-1')} min={boss ? undefined : base} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} aria-label="연장할 마감일" data-testid="extend-date" />
+          <TimePick className={cx(inputCls, 'h-11 w-28 shrink-0')} value={time} onChange={setTime} ariaLabel="연장할 마감 시각" emptyLabel="시간 없음" testid="extend-time" />
+        </div>
+        <label className="block"><span className="text-ink-2">{boss && earlier ? '변경' : '연장'} 사유 <span className="text-red-600">*</span></span>
           <input className={cx(inputCls, 'mt-1 h-11')} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="예: 거래처 자료 회신이 늦어짐" aria-label="연장 사유" data-testid="extend-reason" /></label>
-        {!boss ? <p className="text-xs text-ink-3">요청자가 승인하면 마감이 바뀝니다. 요청자에게 알림이 갑니다.</p>
-          : <p className="text-xs text-ink-3">승인 없이 바로 바뀝니다. 요청자·담당자에게 사유와 함께 알림이 갑니다.</p>}
-        <Button type="submit" className="h-11 w-full" disabled={busy || to === base || (!boss && to < base)} data-testid="extend-submit">{boss ? (earlier ? '바꾸기' : '연장하기') : '연장 요청 보내기'}</Button>
+        <p className="text-xs text-ink-3" data-testid="extend-note">승인 없이 바로 바뀝니다. 요청자·담당자에게 사유와 함께 알림이 가고, 업무의 &lsquo;마감 연장 기록&rsquo;에 남습니다.{!boss && ' 앞당기기는 마감일 칸에서 바꿀 수 있습니다.'}</p>
+        <Button type="submit" className="h-11 w-full" disabled={busy || same || (!boss && earlier)} data-testid="extend-submit">{boss && earlier ? '바꾸기' : '연장하기'}</Button>
       </form>
     </Modal>
   );
@@ -490,8 +500,9 @@ export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { t
 
 /** V32 4: 연장 가능 — 요청자(없으면 만든 사람) = 바로 'boss', 담당자 = 'request'. 마감 있고 미완료일 때만
  *  365차 #988: 대표·부서장·팀장도 바로('boss') — 상세는 서버 perms.dueNow, 목록은 대표(role owner)만 알 수 있음 */
-export function extendRole(t: { due_date: string | null; status: string; assignee_id: string | null; requested_by?: string | null; created_by?: string }, uid: string, dueNow?: string | null | boolean): 'boss' | 'request' | null {
+export function extendRole(t: { due_date: string | null; status: string; assignee_id: string | null; requested_by?: string | null; created_by?: string; co_assignees?: { id: string }[] | null }, uid: string, dueNow?: string | null | boolean): 'boss' | 'request' | null {
   if (!t.due_date || t.status === 'done') return null;
   if ((t.requested_by ?? t.created_by) === uid || dueNow) return 'boss';
-  return t.assignee_id === uid ? 'request' : null;
+  // 378차: 'request' = 담당자·함께 담당 — 이제 승인 없이 바로 연장(뒤로만). 이름은 예전 그대로
+  return t.assignee_id === uid || (t.co_assignees ?? []).some((c) => c.id === uid) ? 'request' : null;
 }

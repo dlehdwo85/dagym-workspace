@@ -47,7 +47,7 @@ function HomeCollab({ tasks }: { tasks: any[] }) {
       <ul className="mt-1 divide-y divide-line text-sm">{list.map((t) => (
         <li key={t.id} className="flex min-w-0 items-center gap-2 py-1" data-testid="home-collab-row">
           <Link prefetch={false} href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{t.title}</Link>
-          <CollabPeople t={t} uid={user.id} className="max-w-[45%] shrink-0" /><DueChip due={t.due_date} status={t.status} />
+          <CollabPeople t={t} uid={user.id} className="max-w-[45%] shrink-0" /><DueChip due={t.due_date} time={t.due_time} status={t.status} />
         </li>))}</ul>
     </section>
   );
@@ -94,7 +94,7 @@ function TodayRow({ t, className }: { t: any; className?: string }) {
         <div className="truncate text-xs text-ink-2">{t.assignee_name ?? '담당자 없음'}{t.org_unit_name ? ` · ${t.org_unit_name}` : ''}</div>
       </div>
       <PriorityTag p={t.priority} label={false} />
-      <DueChip due={t.due_date} status={t.status} />
+      <DueChip due={t.due_date} time={t.due_time} status={t.status} />
     </li>
   );
 }
@@ -281,7 +281,7 @@ export default function Dashboard() {
               <li key={t.id} className="flex items-center gap-2 py-1.5">
                 <span className="size-2 shrink-0 rounded-full" style={{ background: t.team_color ?? '#0F766E' }} />
                 <Link prefetch={false} href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate hover:underline">{t.title}</Link>
-                <span className="shrink-0 text-xs text-ink-3">{t.assignee_name ?? '담당 미정'}</span><DueChip due={t.due_date} status={t.status} />
+                <span className="shrink-0 text-xs text-ink-3">{t.assignee_name ?? '담당 미정'}</span><DueChip due={t.due_date} time={t.due_time} status={t.status} />
               </li>
             ))}
             {!myTeams.data!.tasks.length && <li className="py-2 text-xs text-ink-3">오늘 할 팀 업무가 없습니다</li>}

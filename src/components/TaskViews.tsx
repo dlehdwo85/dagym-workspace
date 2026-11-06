@@ -823,7 +823,8 @@ function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }
   return (
     // 308차 #866: 마감 칸은 고정 폭·왼쪽 맞춤(칩 길이가 달라도 줄마다 왼쪽 끝이 세로로 맞게)
     <span className="inline-flex w-[136px] shrink-0 justify-start max-lg:w-auto" data-testid="due-cell">
-      <DuePicker value={t.due_date} status={t.status} onChange={change} label={`${t.title} 마감일`} onExtend={ex ? () => setExt(null) : undefined} extendLabel={ex === 'request' ? '마감 연장 요청' : '마감 연장'} />
+      {/* 378차(대표 11/06 '업무 D-day 옆에는 시간'): 목록 마감 칩에도 시각(11/9 18:00 D-3) */}
+      <DuePicker value={t.due_date} time={t.due_time} status={t.status} onChange={change} label={`${t.title} 마감일`} onExtend={ex ? () => setExt(null) : undefined} extendLabel="마감 연장" />
       {ex && <ExtendDialog task={t} boss={ex === 'boss'} open={ext !== false} initial={ext || null} onClose={() => setExt(false)} />}
     </span>
   );

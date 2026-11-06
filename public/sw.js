@@ -18,6 +18,11 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = event.notification.data || {};
   const url = new URL(data.link || '/', self.location.origin).href;
+  // 378차(대표 11/06 '알람 울릴 때 열기 눌렀으면 알람 사라져야'): 알람 알림 본문을 눌러 열면 = 해제 — 열린 창의 빨간 알람 띠도 사라짐(전에는 열기만 해서 띠가 남았다)
+  //   해제가 끝난 뒤 창을 열어(아래) 새로 읽은 화면에 띠가 다시 뜨지 않게
+  const dismissed = data.alarm && data.notificationId && (!event.action || event.action === 'open')
+    ? fetch(`/api/notifications/${data.notificationId}/action`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'dismiss' }) }).catch(() => {})
+    : Promise.resolve();
   // 버튼을 눌렀으면 서버에서 바로 처리(로그인 쿠키 사용). 글이 필요한데 입력이 없으면 앱을 연다. 처리되면 "승인함 ✓" 알림으로 바꾼다
   // #618(대표 10/25): [확인] = 읽음 + 지움(처리 알림을 다시 띄우지 않음) · [승인함 열기]/[열기](open) = 서버 호출 없이 읽음 표시만 하고 그 화면을 연다
   if (event.action && data.notificationId) {
@@ -41,6 +46,7 @@ self.addEventListener('notificationclick', (event) => {
     }
   }
   event.waitUntil((async () => {
+    await dismissed;
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const c of all) {
       if (c.url.startsWith(self.location.origin)) { await c.focus(); return c.navigate(url); }

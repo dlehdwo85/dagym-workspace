@@ -208,7 +208,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const mateName = new Map<string, string>((data.batchMates ?? []).map((b: any) => [b.id, b.assignee_name ?? '담당자 없음']));
   const comments: any[] = data.comments.map((c: any) => (c.task_id && c.task_id !== id ? { ...c, from_name: mateName.get(c.task_id) ?? '같이 받은' } : c));
 
-  // V32 4 마감 연장: 요청자 = 바로, 담당자 = 요청(사유 필수) · 365차 #988 대표·부서장·팀장 = 바로(사유 필수·알림, 서버 perms.dueNow)
+  // V32 4 마감 연장: 요청자 = 바로 · 365차 #988 대표·부서장·팀장 = 바로 · 378차 담당자·함께 담당도 바로(뒤로만) — 모두 사유 필수·알림·연장 기록
   const extRole = extendRole(t, user.id, perms.dueNow);
   const dueViaDialog = !!perms.dueNow && perms.dueNow !== '요청자'; // 요청자 아닌 바로 연장 자격 — 마감 바꾸기는 사유 창으로
   const md = (d: string | null) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '-');
@@ -495,6 +495,19 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 </span> : <span className="text-xs">요청자 승인을 기다리는 중</span>}
               </div>
             )}
+            {/* 378차(대표 11/06 '사유를 남겨놓으면 지시자와 담당자가 해당 업무에서 사유를 확인'): 마감 연장 기록 — 최근 한 줄(사유)은 늘 보이고, 누르면 전부 */}
+            {(t.ext_history?.length ?? 0) > 0 && (() => {
+              const hs = t.ext_history as { id: string; status: string; from: string | null; fromTime: string | null; to: string; toTime: string | null; reason: string; byName: string; at: string; decidedByName: string | null }[];
+              const w = (d: string | null, tm: string | null) => (d ? `${md(d)}${tm ? ` ${tm}` : ''}` : '없음');
+              const line = (h: (typeof hs)[number]) => <>{w(h.from, h.fromTime)} → {w(h.to, h.toTime)} · {h.byName}{h.status === 'rejected' ? ` · 반려(${h.decidedByName ?? ''})` : ''} · <span className="text-ink-3">{fmtDateTime(h.at)}</span><span className="block text-xs text-ink-2">사유: {h.reason}</span></>;
+              return (
+                <details className="rounded-input border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-950" data-testid="ext-history">
+                  <summary className="cursor-pointer list-none"><span className="inline-flex items-center gap-1 font-semibold"><CalendarDays className="size-4" />마감 연장 기록 {hs.length}건</span>
+                    <span className="ml-1 text-xs text-ink-3">(누르면 전부)</span><span className="block" data-testid="ext-history-last">{line(hs[0])}</span></summary>
+                  <ul className="mt-2 space-y-1.5 border-t border-amber-200 pt-2">{hs.slice(1).map((h) => <li key={h.id} data-testid="ext-history-row">{line(h)}</li>)}</ul>
+                </details>
+              );
+            })()}
           </div>
           {/* V14 19번 ①⑧: 머리 요약 — 담당·마감 D-day(색)·우선순위 */}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="task-summary">
@@ -504,7 +517,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             {perms.coAssign && t.status !== 'done' && <button type="button" onClick={() => editProp('select[aria-label="담당자 추가"]')} className="inline-flex size-6 items-center justify-center rounded-full border border-dashed border-line text-ink-2 hover:bg-slate-50" aria-label="담당자 추가" title="담당자 추가" data-testid="sum-assignee-add"><Plus className="size-3.5" /></button>}
             <button type="button" onClick={() => editProp('[data-testid="due-picker"]', true)} className="rounded-full hover:opacity-80" title="마감일 바꾸기" data-testid="sum-due"><DdayChip due={t.due_date} time={t.due_time} status={t.status} /></button>
             {extRole && !t.ext_pending && <button type="button" onClick={() => setExt(null)} className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100" data-testid="sum-extend">
-              <CalendarDays className="size-3.5" />{extRole === 'boss' ? '마감 연장' : '마감 연장 요청'}</button>}
+              <CalendarDays className="size-3.5" />마감 연장</button>}
             {!!t.due_extend_count && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2" data-testid="sum-ext-count">연장 {t.due_extend_count}회</span>}
             {extRole && <ExtendDialog task={t} boss={extRole === 'boss'} open={ext !== false} initial={ext || null} onClose={() => setExt(false)} onDone={reload} />}
             <button type="button" onClick={() => editProp('select[aria-label="우선순위"]')} className="rounded-full hover:opacity-80" title="우선순위 바꾸기" data-testid="sum-priority"><PriorityTag p={t.priority} /></button>
@@ -765,7 +778,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             <Prop icon={CalendarDays} label="마감일">
               {/* 값이 없으면 "마감일 없음" 칩 하나, 누르면 빠른 선택·달력. 시각은 날짜를 정한 뒤에만 */}
               <span className="flex pl-2 flex-wrap items-center gap-1.5" data-testid="detail-due" data-value={t.due_date ?? ''}>
-                <DuePicker value={t.due_date} status={t.status} label="마감일" emptyText="마감일 없음" onExtend={extRole ? () => setExt(null) : undefined} extendLabel={extRole === 'request' ? '마감 연장 요청' : '마감 연장'}
+                <DuePicker value={t.due_date} status={t.status} label="마감일" emptyText="마감일 없음" onExtend={extRole ? () => setExt(null) : undefined} extendLabel="마감 연장"
                   onChange={(v) => ((extRole === 'request' && t.due_date && (!v || v > t.due_date)) || (dueViaDialog && t.due_date && v && v !== t.due_date) ? setExt(v) : patch({ dueDate: v, ...(v ? {} : { dueTime: null }) }))} />
                 {t.due_date && (
                   <TimePick className="h-8 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={t.due_time?.slice(0, 5) ?? ''} onChange={(v) => patch({ dueTime: v })} ariaLabel="마감 시각" emptyLabel="시각 없음" />

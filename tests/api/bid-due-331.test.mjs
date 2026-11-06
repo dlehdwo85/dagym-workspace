@@ -86,15 +86,15 @@ test('합치기(327차 dupes): 공고 업무끼리 합치면 마감 = 공고 마
   assert.equal(act.changes.dueRule, 'latest');
 });
 
-test('함께 담당도 마감 연장 요청 가능(로컬 ②) · 주 담당 요청은 이전 요청 대신 · 요청자는 바로 연장', async () => {
+test('함께 담당도 마감 연장 가능(로컬 ②) → 378차: 함께 담당·주 담당·요청자 모두 승인 없이 바로(사유 남김)', async () => {
   const t = await ctx.owner.ok('POST', '/api/tasks', { title: '연장 요청 시험', assigneeId: ctx.staffA.id, coAssigneeIds: [ctx.managerA.id], orgUnitId: ctx.siteA, approvalRequired: false, dueDate: addDays(today, 2) });
   const co = await ctx.managerA.client.ok('POST', `/api/tasks/${t.id}/extend`, { toDate: addDays(today, 4), reason: '현장설명회 뒤 서류 보완' });
-  assert.equal(co.applied, false); assert.ok(co.id, '함께 담당 → 요청자에게 연장 요청');
-  assert.deepEqual(await due(t.id), [addDays(today, 2), null], '아직 바뀌지 않음');
-  assert.equal((await sql`select count(*)::int c from notifications where user_id = ${ctx.ownerId} and title like '마감 연장 요청:%'`)[0].c, 1);
+  assert.deepEqual([co.applied, co.as], [true, '담당자'], '함께 담당 → 바로 연장');
+  assert.deepEqual(await due(t.id), [addDays(today, 4), null]);
+  assert.equal((await sql`select count(*)::int c from notifications where user_id = ${ctx.ownerId} and entity_id = ${t.id} and title like '마감 연장:%' and body like '%(사유: 현장설명회 뒤 서류 보완)'`)[0].c, 1, '요청자에게 사유와 함께 알림');
   const me = await ctx.staffA.client.ok('POST', `/api/tasks/${t.id}/extend`, { toDate: addDays(today, 5), reason: '자료 늦음' });
-  assert.equal(me.applied, false, '주 담당도 요청(이전 요청은 취소)');
-  assert.equal((await sql`select count(*)::int c from task_due_extensions where task_id = ${t.id} and status = 'pending'`)[0].c, 1, '대기 중 요청은 하나');
+  assert.equal(me.applied, true, '주 담당도 바로');
+  assert.equal((await sql`select count(*)::int c from task_due_extensions where task_id = ${t.id} and status = 'pending'`)[0].c, 0, '대기 요청 없음');
   const boss = await ctx.owner.ok('POST', `/api/tasks/${t.id}/extend`, { toDate: addDays(today, 6), reason: '요청자 바로 연장' });
   assert.equal(boss.applied, true); assert.deepEqual(await due(t.id), [addDays(today, 6), null]);
 });

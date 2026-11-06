@@ -134,6 +134,7 @@ const hasLocal = () => Capacitor.isPluginAvailable('LocalNotifications');
 import { api } from './client';
 import { WN_ACTION_IDS, WN_OPEN_IDS, WN_SETS, wnCategory } from '@/lib/notifCategories';
 import { deepPath } from '@/lib/deepLink';
+import { markOpenedFromOutside } from './alarmOpened';
 
 type Router = { push: (href: string) => void; replace: (href: string) => void };
 
@@ -181,7 +182,15 @@ export async function initNative(router: Router) {
       await scheduleSnooze({ title: n.title ?? '알람', body: n.body ?? '', minutes, extra: x });
       await report('snooze', minutes); toast.ok(`${minutes}분 뒤 다시 알립니다`); window.dispatchEvent(new Event('wos-refresh'));
     } else if (act === 'dismiss') { await report('dismiss'); toast.ok('알람을 해제했습니다'); window.dispatchEvent(new Event('wos-refresh')); }
-    else go(x.link);
+    else {
+      // 378차(대표 11/06 '알람 울릴 때 열기 눌렀으면 알람 사라져야'): [열기]·본문 탭 = 그 화면을 열고 알람 해제 — 전에는 화면만 열어
+      // 서버 알람이 '해제 전'으로 남아 앱 위쪽 빨간 알람 띠가 다시 떴다. 화면을 먼저 열고(기다리지 않게) 뒤에서 해제
+      markOpenedFromOutside(x.link); go(x.link);
+      const viaNotif = from === 'fcm' && x.key ? api(`/api/notifications/${encodeURIComponent(String(x.key))}/action`, { body: { action: 'dismiss' } }).then(() => true, () => false) : Promise.resolve(false);
+      if (!(await viaNotif)) await report('dismiss');
+      if (x.entityId && (await hasCap(FULLSCREEN_ALARM))) await WorkinNative.settleAlarm({ entityId: String(x.entityId) }).catch(() => {}); // 울리는 전체 화면 알람 알림도
+      window.dispatchEvent(new Event('wos-refresh'));
+    }
   };
   // 앱 1.1.3 알림창 버튼(#130·#478, iOS): 알림의 [승인][수정 요청]·[답글][확인] 등 → 알림 액션 API(서버가 권한·상태 검사). 안드로이드 1.1.3 은 앱이 직접 처리(NotificationActionReceiver)
   const notifAction = async (nid: string, action: string, text: string | undefined, link?: string) => {
@@ -212,7 +221,8 @@ export async function initNative(router: Router) {
       go(x.link);
     });
   }
-  App.addListener('appUrlOpen', (e: any) => go(deepPath(String(e?.url ?? '')))); // #194 workos://tasks/{id}·workos://app/…·https://… 모두
+  // #194 workos://tasks/{id}·workos://app/…·https://… 모두 · 378차: 안드로이드 전체 화면 알람 [워크인에서 열기]도 이 길(workos://app/…) — 같은 화면 알람은 AlarmBar 가 해제
+  App.addListener('appUrlOpen', (e: any) => { const p = deepPath(String(e?.url ?? '')); markOpenedFromOutside(p); go(p); });
   // V14 39번: 하드웨어 뒤로 = 열린 시트·모달 닫기 → 이전 화면(history) → 홈 → (홈에서) 2초 안에 한 번 더 누르면 종료
   let exitAt = 0;
   App.addListener('backButton', async ({ canGoBack }: any) => {
