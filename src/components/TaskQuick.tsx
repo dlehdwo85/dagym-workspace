@@ -483,11 +483,13 @@ export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { t
               className={cx('h-11 rounded-input border text-sm font-medium', to === addDays(base, n) ? 'border-brand-600 bg-brand-50 text-brand-700 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>{l}</button>
           ))}
         </div>
-        {/* 378차: 날짜(넓게) · 시각(좁게) 한 줄 — 같은 날 시각만 늦추는 연장도 됨 */}
-        <div className="flex items-center gap-2">
-          <span className="shrink-0 text-ink-2">날짜·시각</span>
-          <input type="date" className={cx(inputCls, 'h-11 min-w-0 flex-1')} min={boss ? undefined : base} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} aria-label="연장할 마감일" data-testid="extend-date" />
-          <TimePick className={cx(inputCls, 'h-11 w-28 shrink-0')} value={time} onChange={setTime} ariaLabel="연장할 마감 시각" emptyLabel="시간 없음" testid="extend-time" />
+        {/* 378차: 날짜(넓게) · 시각(좁게) — 같은 날 시각만 늦추는 연장도 됨
+            379차 #1011(대표 PC 크롬 '날짜 칸이 좁은 빈 네모'): inputCls 의 w-full 이 시각 칸 w-28 을 이겨 시각 칸이 줄을 다 차지하고 날짜 칸(min-w-0)이 0으로 줄었다 → 칸 나눔(그리드)으로 */}
+        <div className="grid grid-cols-[minmax(10rem,1fr)_8rem] gap-2">
+          <label className="block min-w-0"><span className="text-ink-2">날짜</span>
+            <input type="date" className={cx(inputCls, 'mt-1 h-11')} min={boss ? undefined : base} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} aria-label="연장할 마감일" data-testid="extend-date" /></label>
+          <label className="block min-w-0"><span className="text-ink-2">시각</span>
+            <TimePick className={cx(inputCls, 'mt-1 h-11')} value={time} onChange={setTime} ariaLabel="연장할 마감 시각" emptyLabel="시간 없음" testid="extend-time" /></label>
         </div>
         <label className="block"><span className="text-ink-2">{boss && earlier ? '변경' : '연장'} 사유 <span className="text-red-600">*</span></span>
           <input className={cx(inputCls, 'mt-1 h-11')} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="예: 거래처 자료 회신이 늦어짐" aria-label="연장 사유" data-testid="extend-reason" /></label>

@@ -7,7 +7,7 @@ import { isNativeApp } from './native';
 import { MediaFull } from './MediaView';
 import { Button, Field, Modal, cx, inputCls, toast, fmtDate, fmtDateTime } from './ui';
 import { useBackClose } from './backClose';
-import { DropHint, DropZone, UploadProgress, putFile } from './upload';
+import { DropHint, DropZone, PICK_MAX, UploadProgress, putFile } from './upload';
 import { AttachEditModal, editModeOf } from './AttachEdit';
 import { holdScreen } from './awake';
 import { IosPickHint, PHOTO_ACCEPT, usePickWait } from './pickWait';
@@ -209,7 +209,8 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, r
   async function upload(files: FileList | null) {
     pick.received(files);
     if (!files?.length) return;
-    const list = Array.from(files);
+    const all = Array.from(files); const list = all.slice(0, PICK_MAX); // 379차 #1003: 전에는 제한 없음 → 200(메신저와 같게)
+    if (all.length > list.length) toast.info(`한 번에 ${PICK_MAX}개까지 올립니다 — 나머지 ${all.length - list.length}개는 다시 골라 주세요`);
     setBusy('올리는 중…');
     const ok = await uploadTaskFiles(list, { taskId, eventId }, setProg);
     pick.done({ ok, fail: list.length - ok });

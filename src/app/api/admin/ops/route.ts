@@ -41,5 +41,8 @@ export const GET = handler(async ({ user }) => {
     from (select to_char(started_at at time zone 'Asia/Seoul', 'YYYY-MM-DD') as day, slug, count(*) filter (where status = 'failed')::int as failed,
       count(*) filter (where status in ('success', 'partial'))::int as ok from sales_collector_runs where started_at > now() - interval '14 days' group by 1, 2) x
     where x.failed > 0 order by x.day desc, x.slug limit 60`.catch(() => [])).map((r) => ({ ...r, label: label.get(r.slug) ?? r.slug }));
-  return { jobs, errors, deliveries, syncErrors, counts: counts[0], recent, noDevice, dbLocale: dbLocale[0] ?? null, pickDiag, aiSkips, collectorDays };
+  // 379차(로컬 11/07 'ops 에서 salesKg2bDetail 을 못 찾음'): 위 jobs 30줄은 다른 작업에 밀려 정기 실행(tick)이 빠질 수 있음 → 최근 정기 실행 5번의 KG2B 상세 읽기 결과만 따로
+  const kg2bTicks = await sql`select id, started_at, finished_at, status, detail->'salesKg2bDetail' as "salesKg2bDetail" from job_runs
+    where job = 'tick' and status <> 'skipped' and finished_at is not null order by id desc limit 5`.catch(() => []);
+  return { jobs, errors, deliveries, syncErrors, counts: counts[0], recent, noDevice, dbLocale: dbLocale[0] ?? null, pickDiag, aiSkips, collectorDays, kg2bTicks };
 });

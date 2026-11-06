@@ -26,6 +26,8 @@ export async function dueExtend({ staff, owner, ctx, sql, BASE }) {
   await staff.getByTestId('due-extend-open').tap();
   await dlg.getByText('승인 없이 바로 바뀝니다').waitFor();
   await dlg.getByRole('button', { name: '+3일' }).tap();
+  // 379차 #1011(대표 PC '날짜 칸이 좁은 빈 네모'): 날짜 칸이 날짜를 다 보일 만큼 넓은지
+  assert.ok((await dlg.getByTestId('extend-date').boundingBox()).width >= 140, `날짜 칸 폭 ${(await dlg.getByTestId('extend-date').boundingBox()).width}`);
   await dlg.getByTestId('extend-time').selectOption('14:00');
   assert.equal(await dlg.getByTestId('extend-to').textContent(), `${md(addDays(due, 3))} 14:00`);
   await dlg.getByTestId('extend-submit').tap();
@@ -75,6 +77,8 @@ export async function dueExtend({ staff, owner, ctx, sql, BASE }) {
   await owner.getByTestId('sum-extend').click();
   const dlg2 = owner.getByTestId('extend-dialog');
   await dlg2.getByText('승인 없이 바로 바뀝니다').waitFor();
+  const dw = (await dlg2.getByTestId('extend-date').boundingBox()).width, tw = (await dlg2.getByTestId('extend-time').boundingBox()).width;
+  assert.ok(dw >= 160 && tw >= 100 && dw > tw, `PC 날짜 칸 ${dw} · 시각 칸 ${tw}`);
   await dlg2.getByRole('button', { name: '+1주' }).click();
   await dlg2.getByTestId('extend-reason').fill('발주처 일정 변경');
   await dlg2.getByTestId('extend-submit').click();

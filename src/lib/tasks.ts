@@ -1463,17 +1463,35 @@ export async function requestExtension(u: SessionUser, taskId: string, i: z.infe
   return { applied: true, id: extId, as: direct };
 }
 const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
-/** 요청자가 연장 요청 승인(마감 변경) · 반려 */
-export async function decideExtension(u: SessionUser, taskId: string, extId: string, approve: boolean) {
+/** 요청자가 연장 요청 승인(마감 변경) · 반려
+ *  379차 #1012(대표 11/07 '연장 요청만 되고 내가 못 함 — 요청자 승인이 오래 걸리거나 놓침'): 378차 전에 남은 '대기' 요청은
+ *  ① 요청을 낸 사람(담당자)이 [바로 적용](378 규칙: 승인 없이·사유 그대로·요청자 알림) 또는 [요청 취소]
+ *  ② 요청자 말고도 바로 연장 자격(대표·부서장·팀장)이 있으면 승인·반려 — 전에는 화면엔 [승인]이 보여도 '요청자만'으로 막혔다 */
+export async function decideExtension(u: SessionUser, taskId: string, extId: string, approve: boolean | 'apply' | 'cancel') {
   const sql = db();
-  const { task } = await loadTaskForUser(u, taskId, sql);
+  const { task, perms } = await loadTaskForUser(u, taskId, sql);
+  if (approve === 'apply' || approve === 'cancel') {
+    const [p] = await sql<{ id: string; requested_by: string; to_date: string; to_time: string | null; reason: string; status: string }[]>`
+      select id, requested_by, to_char(to_date, 'YYYY-MM-DD') to_date, to_char(to_time, 'HH24:MI') to_time, reason, status from task_due_extensions where id = ${extId} and task_id = ${task.id}`;
+    if (!p) throw notFound('요청이 없습니다');
+    if (p.status !== 'pending') throw conflict('이미 처리된 요청입니다');
+    if (p.requested_by !== u.id) throw forbidden('요청을 낸 사람만 바로 적용·취소할 수 있습니다');
+    if (approve === 'apply') {
+      const r = await requestExtension(u, task.id, { toDate: p.to_date, ...(p.to_time ? { toTime: p.to_time } : {}), reason: p.reason });
+      return { ok: true, applied: true, id: r.id, as: r.as };
+    }
+    await sql`update task_due_extensions set status = 'cancelled', decided_by = ${u.id}, decided_at = now() where id = ${p.id} and status = 'pending'`;
+    await activity(sql, 'task', task.id, u.id, 'due_extension_cancelled', { to: p.to_date, reason: p.reason });
+    return { ok: true, cancelled: true };
+  }
   const [x] = await sql<{ id: string; requested_by: string; to_date: string; to_time: string | null; from_date: string | null; reason: string; status: string }[]>`
     select id, requested_by, to_char(to_date, 'YYYY-MM-DD') to_date, to_char(to_time, 'HH24:MI') to_time, to_char(from_date, 'YYYY-MM-DD') from_date, reason, status from task_due_extensions where id = ${extId} and task_id = ${task.id}`;
   if (!x) throw notFound('요청이 없습니다');
   if (x.status !== 'pending') throw conflict('이미 처리된 요청입니다');
   const [cur] = await sql<{ title: string; requested_by: string | null; created_by: string }[]>`select title, requested_by, created_by from tasks where id = ${task.id}`;
-  if ((cur.requested_by ?? cur.created_by) !== u.id) throw forbidden('요청자만 승인할 수 있습니다');
-  if (approve) await updateTask(u, task.id, { dueDate: x.to_date, ...(x.to_time ? { dueTime: x.to_time } : {}) });
+  const isBoss = (cur.requested_by ?? cur.created_by) === u.id;
+  if (!isBoss && !perms.dueNow) throw forbidden('요청자만 승인할 수 있습니다');
+  if (approve) await updateTask(u, task.id, { dueDate: x.to_date, ...(x.to_time ? { dueTime: x.to_time } : {}) }, isBoss ? {} : { dueNow: true });
   await sql.begin(async (tx) => {
     await tx`update task_due_extensions set status = ${approve ? 'approved' : 'rejected'}, decided_by = ${u.id}, decided_at = now() where id = ${x.id}`;
     if (approve) await tx`update tasks set due_extend_count = due_extend_count + 1 where id = ${task.id}`;

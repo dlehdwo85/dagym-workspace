@@ -7,7 +7,7 @@ import { ArrowLeft, ChevronRight, Download, ExternalLink, FilePenLine, FileSprea
   Check, Pencil, Search, ShieldAlert, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { DropZone, UploadProgress, fileHash, putFile } from '@/components/upload';
+import { DropZone, PICK_MAX, UploadProgress, fileHash, putFile } from '@/components/upload';
 import { ROLE_LABEL } from '@/lib/types';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -115,7 +115,8 @@ export default function LibraryPage() {
   const scopeBody = scoped === 'mine' ? { scope: 'mine' } : scoped === 'team' ? { scope: 'team', ...(teamPick ? { teamId: teamPick } : {}) } : {}; // 새 폴더·이름 바꾸기·옮기기는 지금 탭 범위
   async function upload(list0: FileList | File[] | null, folder = cur) {
     if (!list0 || !list0.length) return;
-    const list = Array.from(list0);
+    const all = Array.from(list0); const list = all.slice(0, PICK_MAX); // 379차 #1003: 한 번에 200개(메신저와 같게)
+    if (all.length > list.length) toast.info(`한 번에 ${PICK_MAX}개까지 올립니다 — 나머지 ${all.length - list.length}개는 다시 골라 주세요`);
     setProg(list.map((f) => ({ name: f.name, pct: 0 })));
     const upd = (i: number, patch: Partial<{ pct: number; error: string; note: string; onOpen: () => void }>) => setProg((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
     let ok = 0;

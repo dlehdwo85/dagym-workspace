@@ -2,6 +2,8 @@
 import { useState, type ReactNode } from 'react';
 import { Upload } from 'lucide-react';
 import { cx } from './ui';
+/** 379차 #1003(대표 11/07 '아이폰 사진 한 번에 100장 이상'): 한 번에 고르는 최대 개수 — 메신저(CHAT_FILES_MAX 200, 213차)와 같게 업무 첨부·자료실·마케팅 자료 요청도 200 */
+export const PICK_MAX = 200;
 
 /**
  * V12 9번: 업로드 공통 — 진행률(%) + 실패 원인을 사람이 알 수 있는 말로.

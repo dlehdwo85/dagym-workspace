@@ -60,6 +60,14 @@ describe('365차 #988 마감 바로 연장(대표·부서장·팀장)', () => {
     assert.ok((await sql`select 1 from notifications where entity_id = ${taskId} and title like '마감 연장:%' and user_id = ${ctx.staffA.id} and body like '%요청자 연장%'`).length, '요청자 연장도 담당자에게 알림');
   });
 
+  test('379차 #1012: 요청자가 아니어도 바로 연장 자격(대표)이면 대기 요청 승인 — 전에는 [승인]이 보여도 403', async () => {
+    const [p] = await sql`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason) values (${taskId}, ${ctx.staffA.id}, ${addDays(today, 7)}, ${addDays(today, 8)}, '대표 승인 시험') returning id`;
+    assert.equal((await admin.client.req('POST', `/api/tasks/${taskId}/extend/${p.id}`, { approve: true })).status, 403, '일반 관리자는 아님');
+    await ctx.owner.ok('POST', `/api/tasks/${taskId}/extend/${p.id}`, { approve: true });
+    assert.equal((await due(taskId)).d, addDays(today, 8));
+    assert.equal((await sql`select status, decided_by from task_due_extensions where id = ${p.id}`)[0].decided_by, ctx.ownerId);
+  });
+
   test('부서장(담당자가 속한 팀의 팀장) = 바로 · 팀 업무의 팀장 = 바로 · 상관없는 직원은 못 봄(404)', async () => {
     const [team] = await sql`insert into teams (tenant, name) values ('default', '365 영업팀') returning id`;
     await sql`insert into team_members (team_id, user_id, is_lead) values (${team.id}, ${ctx.staffA.id}, false), (${team.id}, ${ctx.staffB.id}, true)`;

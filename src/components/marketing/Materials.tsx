@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Bot, Camera, FileImage, Upload, UserRound } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { shrinkImage } from '@/components/Attachments';
-import { putFile } from '@/components/upload';
+import { PICK_MAX, putFile } from '@/components/upload';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 
 type Row = { id: string; brand_id: string | null; brand: string; content_id: string | null; content_title: string | null; kind: Kind; title: string; detail: string; wanted: number;
@@ -77,7 +77,8 @@ function Card({ r, focus, canEdit, reload }: { r: Row; focus: boolean; canEdit: 
   const [busy, setBusy] = useState(false);
   const late = r.status === 'requested' && r.due_on < today();
   async function pick(list: FileList | null) {
-    const files = [...(list ?? [])].slice(0, 50);
+    const all = [...(list ?? [])]; const files = all.slice(0, PICK_MAX); // 379차 #1003: 50 → 200(메신저와 같게)
+    if (all.length > files.length) toast.info(`한 번에 ${PICK_MAX}개까지 받습니다 — 나머지 ${all.length - files.length}개는 다시 골라 주세요`);
     if (!files.length) return;
     setPct(0);
     try {

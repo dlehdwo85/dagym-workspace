@@ -63,4 +63,21 @@ describe('378차 마감 연장 — 담당자 바로·사유·시각·기록', ()
     const h = (await ctx.owner.ok('GET', `/api/tasks/${taskId}`)).task.ext_history;
     assert.ok(h.some((x) => x.status === 'rejected' && x.reason === '너무 바쁨'), '반려도 기록에');
   });
+  test('379차 #1012 예전 대기 요청: 요청을 낸 담당자가 [바로 적용](사유 그대로·요청자 알림)·[요청 취소] · 남은 못 함', async () => {
+    const [p] = await sql`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason) values (${taskId}, ${ctx.staffA.id}, ${addDays(today, 1)}, ${addDays(today, 6)}, '예전 요청 바로') returning id`;
+    assert.equal((await ctx.owner.req('POST', `/api/tasks/${taskId}/extend/${p.id}`, { action: 'apply' })).status, 403, '요청을 낸 사람만');
+    const a = await ctx.staffA.client.ok('POST', `/api/tasks/${taskId}/extend/${p.id}`, { action: 'apply' });
+    assert.deepEqual([a.applied, a.as], [true, '담당자']);
+    assert.deepEqual(await due(), { d: addDays(today, 6), t: null, n: 5 }, '승인 없이 바로 · 연장 횟수 +1');
+    assert.equal((await sql`select status from task_due_extensions where id = ${p.id}`)[0].status, 'cancelled', '대기 요청은 정리(적용 기록은 새 줄)');
+    const [n] = await sql`select body from notifications where user_id = ${ctx.ownerId} and title like '마감 연장:%' order by created_at desc limit 1`;
+    assert.match(n.body, /\(사유: 예전 요청 바로\)$/);
+    assert.equal((await ctx.owner.ok('GET', `/api/tasks/${taskId}`)).task.ext_history[0].reason, '예전 요청 바로');
+    const [q] = await sql`insert into task_due_extensions (task_id, requested_by, from_date, to_date, reason) values (${taskId}, ${ctx.staffA.id}, ${addDays(today, 6)}, ${addDays(today, 9)}, '취소할 요청') returning id`;
+    await ctx.staffA.client.ok('POST', `/api/tasks/${taskId}/extend/${q.id}`, { action: 'cancel' });
+    assert.equal((await sql`select status from task_due_extensions where id = ${q.id}`)[0].status, 'cancelled');
+    assert.equal((await due()).d, addDays(today, 6), '취소는 마감 그대로');
+    assert.equal((await ctx.staffA.client.req('POST', `/api/tasks/${taskId}/extend/${q.id}`, { action: 'apply' })).status, 409, '이미 처리됨');
+    assert.equal((await ctx.staffA.client.req('POST', `/api/tasks/${taskId}/extend/${q.id}`, { action: 'nope' })).status, 400);
+  });
 });

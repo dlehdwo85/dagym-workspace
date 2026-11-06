@@ -30,7 +30,7 @@ export const materialInput = z.object({
   assigneeId: z.string().uuid().nullable().optional(),
   dueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
-export const receiveInput = z.object({ fileIds: z.array(z.string().uuid()).min(1).max(50) });
+export const receiveInput = z.object({ fileIds: z.array(z.string().uuid()).min(1).max(200) }); // 379차 #1003: 50 → 200
 export const materialPatch = z.object({ status: z.enum(['canceled', 'requested']).optional(), assigneeId: z.string().uuid().nullable().optional(), dueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
 
 const brandName = (n: string | null | undefined) => String(n ?? '').replace(/^\s*\[시험\]\s*/, '').trim();

@@ -44,7 +44,7 @@ import { BidInfoBox } from '@/components/sales/BidInfoBox';
 const ACTION_LABEL: Record<string, string> = {
   created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
   reopened: '다시 열기', deleted: '삭제', auto_spawned: '완료로 다음 업무 자동 생성', auto_removed: '완료 되돌리기 — 자동 생성 업무 정리', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
-  checklist_done: '체크리스트 완료', reassigned: '재배정', part_done: '내 몫 완료(공동 담당)', part_reopened: '내 몫 완료 취소(공동 담당)', closed_by: '완료 처리(남은 담당자 몫 포함)', notice_canceled: '공고 취소(발주처) — 확인 뒤 완료 처리 필요', assignee_added: '담당 추가', assignee_removed: '담당 빼기', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
+  checklist_done: '체크리스트 완료', reassigned: '재배정', part_done: '내 몫 완료(공동 담당)', part_reopened: '내 몫 완료 취소(공동 담당)', closed_by: '완료 처리(남은 담당자 몫 포함)', notice_canceled: '공고 취소(발주처) — 확인 뒤 완료 처리 필요', assignee_added: '담당 추가', assignee_removed: '담당 빼기', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', due_extension_cancelled: '마감 연장 요청 취소', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
   file_attached: '파일 첨부', file_edited: '파일 수정', file_opened_doc: '파일을 문서로 열어 편집', file_downloaded: '파일 내려받음', mail_queued: '메일 보내기 요청', mail_sent: '메일 보냄', mail_failed: '메일 발송 실패', share_created: '다운로드 링크 만듦', share_opened: '고객이 자료를 열어봄', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
 };
 const FIELD_LABEL: Record<string, string> = {
@@ -212,8 +212,10 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const extRole = extendRole(t, user.id, perms.dueNow);
   const dueViaDialog = !!perms.dueNow && perms.dueNow !== '요청자'; // 요청자 아닌 바로 연장 자격 — 마감 바꾸기는 사유 창으로
   const md = (d: string | null) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '-');
-  async function decideExt(approve: boolean) {
-    try { await api(`/api/tasks/${id}/extend/${t.ext_pending.id}`, { body: { approve } }); toast.ok(approve ? '마감 연장을 승인했습니다' : '연장 요청을 반려했습니다'); reload(); broadcastRefresh(); }
+  async function decideExt(approve: boolean | 'apply' | 'cancel') {
+    const body = typeof approve === 'boolean' ? { approve } : { action: approve };
+    const ok = approve === 'apply' ? '마감을 바로 연장했습니다 — 요청자에게 사유와 함께 알림' : approve === 'cancel' ? '연장 요청을 취소했습니다' : approve ? '마감 연장을 승인했습니다' : '연장 요청을 반려했습니다';
+    try { await api(`/api/tasks/${id}/extend/${t.ext_pending.id}`, { body }); toast.ok(ok); reload(); broadcastRefresh(); }
     catch (e: any) { toast.error(e.message); reload(); }
   }
   async function patch(body: Record<string, unknown>, okMsg?: string | ((r: any) => string)) {
@@ -489,7 +491,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <div className="flex flex-wrap items-center gap-2 rounded-input border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="ext-pending">
                 <CalendarDays className="size-4 shrink-0" />
                 <span className="min-w-0 flex-1"><b>마감 연장 요청</b> {md(t.ext_pending.from)} → {md(t.ext_pending.to)} · {t.ext_pending.byName}<span className="block text-xs">“{t.ext_pending.reason}”</span></span>
-                {extRole === 'boss' ? <span className="flex gap-1.5">
+                {/* 379차 #1012(대표 11/07 '연장 요청만 되고 내가 못 함'): 378차 전에 낸 내 요청 = [바로 적용](승인 없이·사유 그대로)·[요청 취소] */}
+                {t.ext_pending.by === user.id ? <span className="flex gap-1.5">
+                  <Button size="sm" onClick={() => decideExt('apply')} data-testid="ext-apply">바로 적용</Button>
+                  <Button size="sm" variant="secondary" onClick={() => decideExt('cancel')} data-testid="ext-cancel">요청 취소</Button>
+                </span> : extRole === 'boss' ? <span className="flex gap-1.5">
                   <Button size="sm" onClick={() => decideExt(true)} data-testid="ext-approve">승인</Button>
                   <Button size="sm" variant="secondary" onClick={() => decideExt(false)} data-testid="ext-reject">반려</Button>
                 </span> : <span className="text-xs">요청자 승인을 기다리는 중</span>}
@@ -516,7 +522,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             {/* 로컬 10/23 #475: 휴대폰(앱)에서도 담당자 칩 옆 [+]로 바로 담당자 추가 */}
             {perms.coAssign && t.status !== 'done' && <button type="button" onClick={() => editProp('select[aria-label="담당자 추가"]')} className="inline-flex size-6 items-center justify-center rounded-full border border-dashed border-line text-ink-2 hover:bg-slate-50" aria-label="담당자 추가" title="담당자 추가" data-testid="sum-assignee-add"><Plus className="size-3.5" /></button>}
             <button type="button" onClick={() => editProp('[data-testid="due-picker"]', true)} className="rounded-full hover:opacity-80" title="마감일 바꾸기" data-testid="sum-due"><DdayChip due={t.due_date} time={t.due_time} status={t.status} /></button>
-            {extRole && !t.ext_pending && <button type="button" onClick={() => setExt(null)} className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100" data-testid="sum-extend">
+            {/* 379차 #1012: 대기 요청이 있어도 [마감 연장](새로 바로 연장하면 대기 요청은 정리) */}
+            {extRole && <button type="button" onClick={() => setExt(null)} className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100" data-testid="sum-extend">
               <CalendarDays className="size-3.5" />마감 연장</button>}
             {!!t.due_extend_count && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2" data-testid="sum-ext-count">연장 {t.due_extend_count}회</span>}
             {extRole && <ExtendDialog task={t} boss={extRole === 'boss'} open={ext !== false} initial={ext || null} onClose={() => setExt(false)} onDone={reload} />}
