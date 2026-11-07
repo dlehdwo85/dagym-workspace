@@ -292,7 +292,7 @@ async function acquireRender(waitMs: number): Promise<{ ok: boolean; busy: boole
   if (!busy) renderBusy = true;
   const ok = busy ? await new Promise<boolean>((res) => { const w = { res } as Waiter; w.timer = setTimeout(() => { const i = renderQueue.indexOf(w); if (i >= 0) { renderQueue.splice(i, 1); res(false); } }, Math.max(0, waitMs)); renderQueue.push(w); }) : true;
   let done = false;
-  return { ok, busy, waited: Date.now() - t, release: () => { if (done || !ok) return; done = true; passRender(); } };
+  return { ok, busy, waited: busy ? Date.now() - t : 0, release: () => { if (done || !ok) return; done = true; passRender(); } };
 }
 /** 정기 실행: 검수·합성 기다리는 의뢰를 합성 함수로 — 324차(로컬 11/02 멈춘 의뢰 2건·30~60분 지연): 한 번에 4건, 시도 횟수 적은 것·먼저 만든 것 순(옛날에 멈춘 의뢰가 새 의뢰를 밀어내지 않게) */
 export async function renderTick() {
