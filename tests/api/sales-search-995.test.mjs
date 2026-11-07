@@ -28,12 +28,12 @@ test('검색어: 목록에 보이는 것 + 탭 밖(대상 아님·까닭)·관�
   const r = await ctx.owner.ok('GET', `/api/sales/src?view=bids&tab=all&q=${encodeURIComponent('시험995')}`);
   assert.deepEqual(r.items.map((x) => x.noticeNo), ['R26BK995001-000'], '목록에는 보이는 것만');
   const o = Object.fromEntries(r.outside.map((x) => [x.id, x]));
-  assert.equal(o[B]?.where, '대상 아님 탭', JSON.stringify(r.outside));
+  assert.equal(o[B]?.where, '취소 탭', JSON.stringify(r.outside));
   assert.match(o[B].why ?? '', /참가자격 미달/);
   assert.equal(o[C]?.where, '관련 아님(우리 사업 낱말 없음)');
-  assert.equal(o[D]?.where, '대상 아님 탭(같은 공고 묶음)', '원본 복사 줄은 묶음 카드가 어디 있는지');
-  assert.match(o[D].why ?? '', /같은 공고 묶음 카드: 시험995 래미안시험파크.* — 대상 아님/);
-  assert.equal(o[E]?.where, '대상 아님 탭'); assert.equal(o[E].why, '숨긴 까닭 안 적음');
+  assert.equal(o[D]?.where, '취소 탭(같은 공고 묶음)', '원본 복사 줄은 묶음 카드가 어디 있는지');
+  assert.match(o[D].why ?? '', /같은 공고 묶음 카드: 시험995 래미안시험파크.* — 취소/); // 385차: 380차 탭 이름
+  assert.equal(o[E]?.where, '취소 탭'); assert.equal(o[E].why, '숨긴 까닭 안 적음');
   assert.ok(!o[A], '목록에 보이는 공고는 다시 안 적음');
   const byNo = await ctx.owner.ok('GET', `/api/sales/src?view=bids&tab=all&q=${encodeURIComponent('R26BK995003')}`);
   assert.deepEqual(byNo.outside.map((x) => x.noticeNo), ['R26BK995003-000'], '공고 번호로 찾기');

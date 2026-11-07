@@ -555,7 +555,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         if (!readIds.has(id)) return { id, listed: false, step: 'read', why: '목록 읽기에서 빠짐 — 관련 아님이고 이 회사 진행 기록이 없음(또는 사라짐·3년 창 밖)' };
         if (!candIds.has(id)) return { id, listed: false, step: 'filter', why: '확인 안 된 협력사 모집 줄 또는 온비드 매각 공고' };
         const card = repOf.get(id) ?? id;
-        if (!shown.has(card)) return { id, listed: false, step: 'skip', card, why: card !== id ? `같은 공고 묶음(카드 ${card})이 이 회사 [대상 아님]` : '이 회사 [대상 아님](같은 사업 사전규격·본 공고 함께 숨김 포함)' };
+        if (!shown.has(card)) { // 385차(로컬 11/07): 380차 탭 이름 그대로 — 사람이 누른 [취소]·[완료], 발주처가 취소한 공고는 '발주처 취소'
+          const c = all.find((n) => String(n.id) === card); const one = card !== id ? `같은 공고 묶음(카드 ${card})이 ` : '';
+          const tabOf = !c || c.skipped ? null : doneCard(c) ? '완료' : canceledCard(c) ? '발주처 취소' : null;
+          return { id, listed: false, step: 'skip', card, why: tabOf ? `${one || '이 공고는 '}${tabOf} 탭에 보임` : card !== id ? `같은 공고 묶음(카드 ${card})이 이 회사 [취소]` : '이 회사 [취소](같은 사업 사전규격·본 공고 함께 숨김 포함)' }; }
         return { id, listed: true, step: 'listed', card, why: card !== id ? `같은 공고 묶음 카드(${card})로 보임` : '목록에 보임' };
       }) };
     }
@@ -603,16 +606,16 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         const title = String(r.row.title ?? ''); const noticeNo = r.row.source_external_id ? String(r.row.source_external_id) : null;
         let where: string, why: string | null = null;
         if (n) {
-          where = n.skipped ? '대상 아님 탭' : canceledCard(n) ? '취소된 공고 탭' : '다른 탭(전체 탭에서 보임)';
-          if (n.skipped) { // 대상 아님 탭이 아니면 n.skip 이 비어 있어 진행 기록에서 바로(같은 사업으로 함께 숨긴 카드는 기록 없음 → '함께 숨김')
+          where = n.skipped ? '취소 탭' : doneCard(n) ? '완료 탭' : canceledCard(n) ? '발주처 취소 탭' : '다른 탭(전체 탭에서 보임)'; // 385차: 380차 탭 이름([취소]·[완료]·발주처 취소)
+          if (n.skipped) { // 취소 탭이 아니면 n.skip 이 비어 있어 진행 기록에서 바로(같은 사업으로 함께 숨긴 카드는 기록 없음 → '함께 숨김')
             const w = byNotice.get(String(n.id)); const reason = pick(w, 'skip_reason');
             why = reason ? `숨긴 까닭: ${reason}` : w ? '숨긴 까닭 안 적음' : '같은 사업 공고와 함께 숨김';
           }
         } else if (candIds.has(r.src_id)) {
           // 374차(로컬 11/06 ⓒ 래미안트윈파크 03912856 '목록 밖' 까닭 없음): 같은 공고 묶음(원본 복사·재게시·정정)의 다른 카드로 합쳐진 줄 → 그 카드가 어디 있는지
           const rep = byId.get(repOf().get(r.src_id) ?? '');
-          where = !rep ? '목록 밖' : rep.skipped ? '대상 아님 탭(같은 공고 묶음)' : canceledCard(rep) ? '취소된 공고 탭(같은 공고 묶음)' : '같은 공고 묶음 카드로 보임';
-          why = rep ? `같은 공고 묶음 카드: ${String(rep.title ?? '').slice(0, 40)}${rep.skipped ? ' — 대상 아님' : ''}` : null;
+          where = !rep ? '목록 밖' : rep.skipped ? '취소 탭(같은 공고 묶음)' : doneCard(rep) ? '완료 탭(같은 공고 묶음)' : canceledCard(rep) ? '발주처 취소 탭(같은 공고 묶음)' : '같은 공고 묶음 카드로 보임';
+          why = rep ? `같은 공고 묶음 카드: ${String(rep.title ?? '').slice(0, 40)}${rep.skipped ? ' — 취소' : ''}` : null;
         } else if (readIds.has(r.src_id)) {
           where = '목록 밖'; why = '확인 안 된 협력사 모집 줄 또는 온비드 매각 공고';
         } else {
