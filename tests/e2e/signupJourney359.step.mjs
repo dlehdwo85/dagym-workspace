@@ -125,7 +125,7 @@ export async function signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }
     // ── 8) 일정 · 자료실(만든 뒤 화면)
     const cals = (await me.ok('GET', '/api/calendars')).calendars;
     const cal = cals.find((x) => x.type === 'personal') ?? cals[0];
-    const day = addDays(seoulToday(), 1);
+    const day = seoulToday(); // 383차(CI 11/07 토요일): 내일(일요일)은 주 보기(일~토) 다음 주라 안 보였음 — 오늘 일정으로
     await me.ok('POST', '/api/events', { calendarId: cal.id, title: '새별상사 주간 회의', start: `${day}T10:00:00+09:00`, end: `${day}T11:00:00+09:00` });
     await p.goto(BASE + '/calendar');
     const ev = p.getByText('새별상사 주간 회의').first(); await ev.waitFor();

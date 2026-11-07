@@ -19,7 +19,7 @@ export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     const bid = p.getByTestId('sales-bid').filter({ hasText: 'E2E 진행 기록 공고' }); await bid.waitFor();
     await bid.getByTestId('bid-open').tap();
     const panel = p.getByTestId('work-panel'); await panel.waitFor();
-    assert.deepEqual(await panel.getByRole('group', { name: '진행 상태' }).getByRole('button').allInnerTexts(), ['미검토', '검토중', '연락중', '보류', '미참여', '대상아님'], '원본 상태 버튼 그대로');
+    assert.deepEqual(await panel.getByRole('group', { name: '진행 상태' }).getByRole('button').allInnerTexts(), ['미검토', '검토중', '연락중', '보류', '미참여', '취소', '완료'], '원본 상태 버튼(380차 #1015 대상아님 → 취소·완료)');
     await panel.getByTestId('work-status-연락중').tap();
     await p.getByText('저장했습니다').first().waitFor();
     let w = null;
