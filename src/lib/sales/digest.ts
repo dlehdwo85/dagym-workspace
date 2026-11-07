@@ -108,8 +108,8 @@ export function passPrefs(r: any, p: Prefs): { ok: boolean; why: string; fit: st
   const amt = r.estimated_amount ?? r.budget_amount; if (amt != null && amt !== '') { const n = Number(amt); if (p.amount_min != null && n < p.amount_min) return { ok: false, why: '금액 미만', fit }; if (p.amount_max != null && n > p.amount_max) return { ok: false, why: '금액 초과', fit }; }
   return { ok: true, why: [fit ? `적합 ${fit}` : null, kw.length ? `검색어 ${kw.join('·')}` : null, r.source_type === 'vendor_recruit' ? '협력사 모집' : null].filter(Boolean).join(' · '), fit };
 }
-const SRC: Record<string, string> = { kapt_bid: 'K-apt', kg2b_bid: 'KG2B', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집' };
-const SLUG_OF: Record<string, string> = { kapt_bid: 'kapt_bid_notices', kg2b_bid: 'kg2b_bid_notices', g2b_bid: 'g2b_bid_notices', nuri_bid: 'g2b_bid_notices', g2b_prespec: 'g2b_prespec_awards', lh_bid: 'public_agency_bids', lh_prespec: 'public_agency_bids', d2b_bid: 'public_agency_bids', onbid_lease: 'public_agency_bids', vendor_recruit: 'vendor_recruit_watch' };
+const SRC: Record<string, string> = { kapt_bid: 'K-apt', kg2b_bid: 'KG2B', kwater_bid: '수자원공사', kra_bid: '마사회', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집' };
+const SLUG_OF: Record<string, string> = { kapt_bid: 'kapt_bid_notices', kg2b_bid: 'kg2b_bid_notices', kwater_bid: 'public_agency_bids', kra_bid: 'public_agency_bids', g2b_bid: 'g2b_bid_notices', nuri_bid: 'g2b_bid_notices', g2b_prespec: 'g2b_prespec_awards', lh_bid: 'public_agency_bids', lh_prespec: 'public_agency_bids', d2b_bid: 'public_agency_bids', onbid_lease: 'public_agency_bids', vendor_recruit: 'vendor_recruit_watch' };
 const SECTION_ORDER: DigestSection[] = ['now', 'review', 'soon', 'change', 'result', 'ref'];
 /** 371차 #994: 공고일보다 이틀 넘게 늦게 처음 받은 공고(수집 실패·한도 막힘 뒤 다시 채움 등) — 메일 배지 '늦게 찾음' */
 export function lateFound(r: { posted_date?: unknown; notice_date?: unknown; first_seen_at?: unknown }) {

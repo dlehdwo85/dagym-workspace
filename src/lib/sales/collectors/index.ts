@@ -25,7 +25,7 @@ export const COLLECTORS: Collector[] = [kaptSaSun, operatingFromKapt, kicoxIndus
 export const SUPPORT_COLLECTORS = new Set(['bizinfo_support', 'kstartup_support', 'support_watch', 'gov24_support']);
 export const BID_COLLECTORS = new Set(['kapt_bid_notices', 'kg2b_bid_notices', 'g2b_bid_notices', 'g2b_prespec_awards', 'kapt_bid_results', 'public_agency_bids', 'vendor_recruit_watch']);
 export const find = (slug: string) => COLLECTORS.find((c) => c.slug === slug) ?? null;
-const SRC_KO: Record<string, string> = { kapt_bid: 'K-apt', kg2b_bid: 'KG2B', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드', vendor_recruit: '협력사 모집' };
+const SRC_KO: Record<string, string> = { kapt_bid: 'K-apt', kg2b_bid: 'KG2B', kwater_bid: '수자원공사', kra_bid: '마사회', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드', vendor_recruit: '협력사 모집' };
 const kstHour = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
 const kstDay = (d: Date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 const kstHourOf = (d: Date) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(d)) % 24;

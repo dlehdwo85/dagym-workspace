@@ -9,6 +9,10 @@ export const DEFAULT_ENDPOINTS: Record<string, string> = {
   lh_bid: 'https://apis.data.go.kr/B552555/OpenBidInfoList/getOpenBidInfo', lh_prespec: 'https://apis.data.go.kr/B552555/OpenAdvcinfoReqList/getOpenAdvcinfoReqList',
   d2b_bid: 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcCmpetBidPblancList', d2b_fclty: 'https://apis.data.go.kr/1690000/BidPblancInfoService/getFcltyCmpetBidPblancList',
   onbid_lease: 'https://apis.data.go.kr/B010003/OnbidPbancListSrvc2/getPbancList2',
+  // 384차 #1005(대표 11/07 '공기업 사이트 공고도'): 한국수자원공사 전자조달 입찰공고 15101635(용역·공사·물품, searchDt=YYYYMM) · 한국마사회 전자입찰 공고 15058158(XML, notice_month)
+  //  11/07 키 없이 호출해 'SERVICE_KEY_IS_NULL' = 주소 있음 확인. 활용신청(공공데이터포털)이 필요
+  kwater_servc: 'https://apis.data.go.kr/B500001/ebid/tndr3/servcList', kwater_cntrwk: 'https://apis.data.go.kr/B500001/ebid/tndr3/cntrwkList', kwater_gds: 'https://apis.data.go.kr/B500001/ebid/tndr3/gdsList',
+  kra_bid: 'https://apis.data.go.kr/B551015/API182/E-noticeInfo',
   // 로컬 10/23: 누리장터 getPrvtBidNtceList* = '서비스가 없거나 폐기'(12) → 오퍼레이션 이름은 getPrvtBidPblancListInfo*(공고명 검색 = PPSSrch). 10/23 키 없이 호출해 '등록되지 않은 키'(30) = 주소 있음 확인
   nuri_bid_servc: 'https://apis.data.go.kr/1230000/ao/PrvtBidNtceService/getPrvtBidPblancListInfoServcPPSSrch', nuri_bid_thng: 'https://apis.data.go.kr/1230000/ao/PrvtBidNtceService/getPrvtBidPblancListInfoThngPPSSrch',
   // #450 지원사업 — 기업마당 지원사업정보 API(인증키 crtfcKey) · K-Startup 사업공고(창업진흥원, data.go.kr)
@@ -19,7 +23,7 @@ export const DEFAULT_ENDPOINTS: Record<string, string> = {
 };
 /** 폐기된 주소(예전 기본값) — 설정에 그대로 남아 있어도 무시하고 새 기본값을 씀(#522: 옛 LH·국방·온비드 주소 포함) */
 const DEAD = /PrvtBidNtceService\/getPrvtBidNtceList|lhBidInfo\/|lhPreStdInfo\/|\/1290000\/cmpetBidInfoService|OnbidRentalService/;
-export const ENDPOINT_LABEL: Record<string, string> = { lh_bid: 'LH 입찰공고', lh_prespec: 'LH 사전규격', d2b_bid: '방위사업청 입찰(국내 물품·용역)', d2b_fclty: '방위사업청 입찰(시설 공사·용역)', onbid_lease: '온비드 공고(차세대)', nuri_bid_servc: '누리장터 민간입찰 용역', nuri_bid_thng: '누리장터 민간입찰 물품', bizinfo_support: '지원사업 · 기업마당', bizinfo_datago_support: '지원사업 · 기업마당(공공데이터포털)', kstartup_support: '지원사업 · K-Startup', gov24_support: '지원사업 · 정부24 지원금' };
+export const ENDPOINT_LABEL: Record<string, string> = { lh_bid: 'LH 입찰공고', lh_prespec: 'LH 사전규격', d2b_bid: '방위사업청 입찰(국내 물품·용역)', d2b_fclty: '방위사업청 입찰(시설 공사·용역)', onbid_lease: '온비드 공고(차세대)', kwater_servc: '수자원공사 입찰(용역)', kwater_cntrwk: '수자원공사 입찰(공사)', kwater_gds: '수자원공사 입찰(물품)', kra_bid: '마사회 전자입찰', nuri_bid_servc: '누리장터 민간입찰 용역', nuri_bid_thng: '누리장터 민간입찰 물품', bizinfo_support: '지원사업 · 기업마당', bizinfo_datago_support: '지원사업 · 기업마당(공공데이터포털)', kstartup_support: '지원사업 · K-Startup', gov24_support: '지원사업 · 정부24 지원금' };
 /** 시험 모드: 기관은 `${T}/agency/<key>`, 누리장터는 `${T}/g2b/ao/PrvtBidNtceService/...` (가짜 원천 경로 그대로) */
 export async function endpoints(): Promise<Record<string, string>> {
   if (T()) return Object.fromEntries(Object.keys(DEFAULT_ENDPOINTS).map((k) => [k, k.startsWith('nuri_') ? DEFAULT_ENDPOINTS[k].replace('https://apis.data.go.kr/1230000', `${T()}/g2b`) : `${T()}/agency/${k}`]));

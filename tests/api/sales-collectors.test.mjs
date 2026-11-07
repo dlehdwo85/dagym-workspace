@@ -422,6 +422,8 @@ function agency522(u, send) {
     return json(ok(q.onbidPbancNm === '스포츠' ? [{ onbidPbancNo: '202610-36613-00', pbancMngNo: 'M-1', pbctNo: 'P-1', onbidPbancNm: '진영스포츠센터 내 용품점 및 자판기 사용·수익허가(3차)', orgNm: '김해시도시개발공사', rspbSbrNm: '시설운영팀', pbancYmd: ymd8(0), cltrBidBgngDt: `${ymd8(1)}1000`, cltrBidEndDt: `${ymd8(3)}1700`, cltrOpbdDt: `${ymd8(4)}1000`, dspsMthodNm: '임대', prptDivNm: '공유재산', pbancKindNm: '일반공고', bidDivNm: '인터넷', pbctNsq: '3' }]
       : q.onbidPbancNm === '골프' ? [{ onbidPbancNo: '202610-90589-00', onbidPbancNm: '골프장 27홀 매각 수의계약 공고', orgNm: '시험 레스포타운', pbancYmd: ymd8(0), cltrBidBgngDt: `${ymd8(1)}1000`, cltrBidEndDt: `${ymd8(5)}1700`, cltrOpbdDt: `${ymd8(6)}1000`, dspsMthodNm: '매각', prptDivNm: '기타일반재산', pbancKindNm: '수의계약공고' }] : [], true)); // #537 후속2: 매각은 영업 대상 아님
   }
+  if (u.pathname.startsWith('/agency/kwater_')) return json(ok([], true)); // 384차 #1005 수자원공사·마사회(빈 응답 — 자세한 시험은 sales-agency-1005)
+  if (u.pathname === '/agency/kra_bid') return xml([]);
   return send(404, 'nope');
 }
 
@@ -454,7 +456,7 @@ test('#522 LH·국방·온비드 새 주소·칸: LH(body.item·날짜 형식 �
   const oq = hits.find((h) => h.path === '/agency/onbid_lease' && h.q.onbidPbancNm === '스포츠').q;
   assert.deepEqual([oq.resultType, oq.cltrTypeCd, oq.prptDivCd, oq.opbdDtStart, oq.opbdDtEnd], ['json', '0001', '0002,0010,0005', ymd8(0), ymd8(60)]);
   const [run] = await sql`select detail from sales_collector_runs where slug = 'public_agency_bids' order by started_at desc limit 1`;
-  assert.deepEqual(Object.keys(run.detail.sources).sort(), ['d2b_bid', 'd2b_fclty', 'lh_bid', 'lh_prespec', 'onbid_lease']);
+  assert.deepEqual(Object.keys(run.detail.sources).sort(), ['d2b_bid', 'd2b_fclty', 'kra_bid', 'kwater_cntrwk', 'kwater_gds', 'kwater_servc', 'lh_bid', 'lh_prespec', 'onbid_lease']);
   const v = await ctx.owner.ok('GET', '/api/sales/collectors');
   assert.ok(v.collectors.find((c) => c.slug === 'public_agency_bids').last.detail.sources.lh_bid.keys.length > 0, '수집기 칸에 원천별 줄');
   // 로컬 10/24 운영: LH 가 '11 NO MANDATORY REQUEST PARAMETERS ERROR' → 원천별 줄에 보낸 주소(키 ***)·응답 앞 300자(메일·전화 가림)

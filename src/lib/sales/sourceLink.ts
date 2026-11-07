@@ -20,6 +20,8 @@ const HOMES: [RegExp, string, string][] = [
   [/(^|\.)d2b\.go\.kr$/i, '국방전자조달', 'https://www.d2b.go.kr'],
   [/(^|\.)ebid\.lh\.or\.kr$/i, 'LH 전자조달', 'https://ebid.lh.or.kr'],
   [/(^|\.)nuri\.g2b\.go\.kr$/i, '누리장터', 'https://nuri.g2b.go.kr'],
+  [/(^|\.)ebid\.kwater\.or\.kr$/i, '수자원공사 전자조달', 'https://ebid.kwater.or.kr'], // 384차 #1005
+  [/(^|\.)ebid\.kra\.co\.kr$/i, '마사회 전자입찰', 'https://ebid.kra.co.kr'],
 ];
 /** 내부 키 → 공고번호: 방위사업청 시설 'F-'·LH 사전규격 'lhpre-' 앞붙임과 '-차수' 뒷붙임을 뗌(수집 때 공고번호를 따로 남긴 줄은 그것을 씀) */
 const bareNo = (source: string, ext: string) => {

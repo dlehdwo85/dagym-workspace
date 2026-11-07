@@ -76,11 +76,41 @@ export function onbidPayload(it: any): Record<string, unknown> | null {
     ...(sports ? { fit_hint: '다짐', fit_words: [sports] } : {}) };
 }
 
-type Src = 'lh_bid' | 'lh_prespec' | 'd2b_bid' | 'd2b_fclty' | 'onbid_lease';
+/** 'YYYYMMDD' → 'YYYY-MM-DD'(그 밖은 그대로) */
+const d8 = (v: string | null) => (v && /^\d{8}$/.test(v) ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}` : v);
+/** 384차 #1005 한국수자원공사 전자조달 입찰공고(15101635, B500001/ebid/tndr3 servcList·cntrwkList·gdsList) — 담당자 이름(intnChargerNm)은 저장 안 함.
+ *  상세로 바로 가는 주소가 없어 전자조달 첫 화면 + 공고번호(검색 안내) */
+const KW_KIND: Record<string, string> = { kwater_servc: '용역', kwater_cntrwk: '공사', kwater_gds: '물품' };
+export function kwaterPayload(it: any, src: 'kwater_servc' | 'kwater_cntrwk' | 'kwater_gds'): Record<string, unknown> | null {
+  const no = pick(it, 'tndrPbanno'), title = pick(it, 'tndrPblancNm'); if (!no || !title) return null;
+  return { source_type: 'kwater_bid', source_external_id: no, notice_no: no, source_url: 'https://ebid.kwater.or.kr', title, issuer: '한국수자원공사', demand_agency: pick(it, 'cntrctDeptNm'),
+    posted_date: d8(pick(it, 'tndrPblancDe')), deadline_at: d8(pick(it, 'tndrPblancEnddt')), estimated_amount: pick(it, 'tndrPlnprc'), contract_method: pick(it, 'ctrmthdCdNm'),
+    notice_state: pick(it, 'tndrStat'), bid_category: pick(it, 'cntrctDivNm') ?? KW_KIND[src], ...(KW_KIND[src] === '공사' ? { notice_type: '공사' } : {}) };
+}
+/** 384차 #1005 한국마사회 전자입찰 공고(15058158, B551015/API182/E-noticeInfo, XML) — 작성·품의 단계(공고 전)와 매각은 빼고,
+ *  나라장터에도 보낸 공고(renotifyCnt=1 'G2B 전송')는 나라장터 줄이 맡음(같은 공고 두 줄 방지) */
+const KRA_STATUS: Record<string, string> = { '20': '공고중', '30': '심사중', '97': '재입찰', '98': '유찰', '99': '낙찰' };
+const KRA_WORK: Record<string, string> = { '01': '시설공사', '02': '기술용역', '03': '일반용역', '05': '매각' };
+const KRA_METHOD: Record<string, string> = { '1': '일반경쟁', '2': '지명경쟁', '3': '제한경쟁', '4': '수의계약' };
+export function kraPayload(it: any): (Record<string, unknown> & { g2b_sent?: boolean }) | null {
+  const no = pick(it, 'bCode'), title = pick(it, 'bidName'); if (!no || !title) return null;
+  const st = pick(it, 'status') ?? ''; if (!KRA_STATUS[st]) return null;
+  const work = pick(it, 'workType') ?? ''; if (work === '05') return null;
+  const at = (d: string | null, t: string | null) => (d ? `${d8(d)}${t ? ` ${t.slice(0, 5)}` : ''}` : null);
+  return { source_type: 'kra_bid', source_external_id: no, notice_no: no, source_url: 'https://ebid.kra.co.kr', title, issuer: pick(it, 'noticeAuth') ?? '한국마사회', demand_agency: pick(it, 'demandAuth'),
+    posted_date: d8(pick(it, 'noticeDate')), participation_deadline_at: at(pick(it, 'registEndDate'), pick(it, 'registEndTime')), deadline_at: at(pick(it, 'bidEndDate'), pick(it, 'bidEndTime')),
+    contract_method: KRA_METHOD[pick(it, 'contMethod') ?? ''] ?? pick(it, 'contGubun'), notice_state: KRA_STATUS[st], bid_category: KRA_WORK[work] ?? null,
+    task_scope: line(pick(it, 'openDate') && `입찰 개시 ${short(`${pick(it, 'openDate')}${(pick(it, 'openTime') ?? '').replace(':', '')}`)}`, pick(it, 'openPlace') && `개찰 장소 ${pick(it, 'openPlace')}`),
+    ...(pick(it, 'renotifyCnt') === '1' ? { g2b_sent: true } : {}) };
+}
+
+type Src = 'lh_bid' | 'lh_prespec' | 'd2b_bid' | 'd2b_fclty' | 'onbid_lease' | 'kwater_servc' | 'kwater_cntrwk' | 'kwater_gds' | 'kra_bid';
+/** 384차: 달 단위(YYYYMM)로 묻는 원천 — 날짜 형식 다시 보내기 없음 */
+const MONTHLY = new Set<Src>(['kwater_servc', 'kwater_cntrwk', 'kwater_gds', 'kra_bid']);
 const NEED = /활용신청 필요|주소 확인 필요/;
 export const publicAgencyBids: Collector = {
   slug: 'public_agency_bids', label: 'LH·국방·온비드 공고', hourKst: 6,
-  source: 'LH 입찰공고(최근 7일)·LH 사전규격(의견마감 오늘~+30일)·방위사업청 국내·시설 경쟁입찰(최근 30일, 검색어 9개)·온비드 공고(개찰 오늘~+60일, 검색어 7개) — matchFit 통과분만(온비드 체육시설 임대는 포함)', needs: ['DATA_GO_KR_SERVICE_KEY'],
+  source: 'LH 입찰공고(최근 7일)·LH 사전규격(의견마감 오늘~+30일)·방위사업청 국내·시설 경쟁입찰(최근 30일, 검색어 9개)·온비드 공고(개찰 오늘~+60일, 검색어 7개)·384차 수자원공사 전자조달(용역·공사·물품, 이번 달)·마사회 전자입찰(이번 달, 나라장터에도 보낸 공고 제외) — matchFit 통과분만(온비드 체육시설 임대는 포함)', needs: ['DATA_GO_KR_SERVICE_KEY'],
   async run(ctx: CollectorCtx): Promise<CollectorResult> {
     const key = dataGoKey(); if (!key) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: 'LH·국방·온비드: DATA_GO_KR_SERVICE_KEY 미설정 — 건너뜀', providerMode: 'api' };
     const ep = await endpoints(); const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started);
@@ -94,7 +124,7 @@ export const publicAgencyBids: Collector = {
       const once = async () => {
         const u = new URL(ep[src]); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', String(page));
         // 로컬 10/24: LH 2종은 명세가 XML 만(produces application/xml) — JSON 요청 칸(type·_type)을 빼고 XML 로 받아 읽음
-        const xml = src === 'lh_bid' || src === 'lh_prespec';
+        const xml = src === 'lh_bid' || src === 'lh_prespec' || src === 'kra_bid'; // 384차: 마사회도 XML 만
         if (src === 'onbid_lease') u.searchParams.set('resultType', 'json'); else if (!xml) { u.searchParams.set('type', 'json'); u.searchParams.set('_type', 'json'); }
         for (const [k, v] of Object.entries(params((x) => D(src, x)))) u.searchParams.set(k, v);
         const ds: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 };
@@ -105,10 +135,14 @@ export const publicAgencyBids: Collector = {
         return { rows, total: ds.total };
       };
       try { return await once(); }
-      catch (e) { const m = e instanceof Error ? e.message : String(e); if (dash.has(src) || NEED.test(m) || src === 'onbid_lease') throw e; dash.add(src); S(src).note = '날짜를 yyyy-MM-dd 로 다시 보냄'; return once(); }
+      catch (e) { const m = e instanceof Error ? e.message : String(e); if (dash.has(src) || NEED.test(m) || src === 'onbid_lease' || MONTHLY.has(src)) throw e; dash.add(src); S(src).note = '날짜를 yyyy-MM-dd 로 다시 보냄'; return once(); }
     };
+    let kraG2b = 0;
     const keep = (src: Src, p: Record<string, unknown> | null) => {
-      if (!p) return; if (!matchFit(String(p.title), String(p.bid_category ?? ''), String(p.task_scope ?? '')).fit && !p.fit_hint) return;
+      if (!p) return;
+      const fit = matchFit(String(p.title), String(p.bid_category ?? ''), String(p.task_scope ?? '')).fit;
+      if (p.g2b_sent) { if (fit) kraG2b++; return; } // 384차: 나라장터에도 보낸 마사회 공고는 나라장터 줄로
+      if (!fit && !p.fit_hint) return;
       items.push(p); S(src).kept++;
     };
     /** 쪽 넘기며(100줄씩) — totalCount 만큼, 최대 maxPages 쪽 */
@@ -141,6 +175,12 @@ export const publicAgencyBids: Collector = {
     await source('d2b_fclty', () => words('d2b_fclty', D2B_WORDS, (w, f) => ({ cntrwkNm: w, anmtDateBegin: f(d(-30)), anmtDateEnd: f(d(0)) }), (it) => d2bPayload(it, 'fclty')));
     // 온비드: 부동산(0001) · 공유(0002)·국유(0010)·기타일반(0005) 재산 · 개찰일 오늘~+60일(필수 입력, yyyyMMdd)
     await source('onbid_lease', () => words('onbid_lease', ONBID_WORDS, (w) => ({ cltrTypeCd: '0001', prptDivCd: '0002,0010,0005', opbdDtStart: ymd8(d(0)), opbdDtEnd: ymd8(d(60)), onbidPbancNm: w }), onbidPayload));
+    // 384차 #1005: 수자원공사(용역·공사·물품)·마사회 — 이번 달(10일까지는 지난달도), 100줄씩 최대 3쪽
+    const kst = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()); const ym = kst.slice(0, 7).replace('-', '');
+    const prev = (() => { const [y, m] = [Number(kst.slice(0, 4)), Number(kst.slice(5, 7))]; return m === 1 ? `${y - 1}12` : `${y}${String(m - 1).padStart(2, '0')}`; })();
+    const months = Number(kst.slice(8, 10)) <= 10 ? [ym, prev] : [ym];
+    for (const src of ['kwater_servc', 'kwater_cntrwk', 'kwater_gds'] as const) await source(src, async () => { for (const mo of months) await pages(src, () => ({ searchDt: mo }), (it) => kwaterPayload(it, src), 3); });
+    await source('kra_bid', async () => { for (const mo of months) await pages('kra_bid', () => ({ notice_month: mo }), kraPayload, 3); });
     // #650(로컬 158차 확인 ④): 온비드 응답에 첨부 주소 칸이 있는지는 운영 응답을 봐야 앎 — 첫 줄 칸 이름 중 첨부 후보가 있는지 원천 줄에 남긴다(없으면 공고번호 검색 안내만)
     { const k = stats.onbid_lease?.keys; if (k?.length && !stats.onbid_lease!.note) { const hit = k.filter((x) => ONBID_ATT_KEYS.includes(x)); const fileish = k.filter((x) => /file|atch|attach/i.test(x)); stats.onbid_lease!.note = hit.length ? `첨부 칸 ${hit.join('·')} 저장` : `첨부 주소 칸 없음(${fileish.length ? `파일 관련 칸: ${fileish.join('·')}` : '파일 관련 칸 없음'}) — 공고번호 검색 안내만`; } }
     // 국방 공고 중 나라장터 공고번호가 있는 것: 나라장터 줄이 이미 있으면 국방 줄은 만들지 않고, 예전에 만든 국방 줄은(진행 기록·업무가 없을 때) 숨겨 한 줄로
@@ -157,10 +197,10 @@ export const publicAgencyBids: Collector = {
         items.splice(i, 1); joined++;
       }
     }
-    const seen = new Set<string>(); const uniq = items.filter((p) => { const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) return false; seen.add(k); return true; }).map(({ g2b_no: _g, ...p }) => p);
+    const seen = new Set<string>(); const uniq = items.filter((p) => { const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) return false; seen.add(k); return true; }).map(({ g2b_no: _g, g2b_sent: _s, ...p }) => p);
     const r = uniq.length ? await upsertNotices(uniq) : { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0, errorLog: undefined as string | undefined }; if (r.errorLog) errors.push(r.errorLog);
     const by = (Object.entries(stats) as [Src, SourceStat][]).map(([, s]) => `${s.label} ${s.ok ? `받음 ${s.received}·관련 ${s.kept}` : '실패'}`).join(' / ');
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + Object.values(stats).filter((s) => !s.ok).length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api', sources: stats as Record<string, SourceStat>,
-      summary: `관련 공고 ${uniq.length}건 · 신규 ${r.inserted} · 갱신 ${r.updated}${joined ? ` · 나라장터와 같은 국방 공고 ${joined}건은 나라장터 줄로` : ''} — ${by}` + (denied.size ? ` · 활용신청·주소 확인 필요: ${[...denied].join(', ')} (플랫폼 운영 › 영업 수집기 설정)` : '') };
+      summary: `관련 공고 ${uniq.length}건 · 신규 ${r.inserted} · 갱신 ${r.updated}${joined ? ` · 나라장터와 같은 국방 공고 ${joined}건은 나라장터 줄로` : ''}${kraG2b ? ` · 나라장터에도 올린 마사회 관련 공고 ${kraG2b}건은 나라장터 줄로` : ''} — ${by}` + (denied.size ? ` · 활용신청·주소 확인 필요: ${[...denied].join(', ')} (플랫폼 운영 › 영업 수집기 설정)` : '') };
   },
 };
