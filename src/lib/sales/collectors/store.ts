@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '../../db';
 import { sourceFiles } from '../files';
-import { DAGYM_KEYWORDS, HILINK_KEYWORDS, PROCUREMENT_ETL_FIELDS, initialClassification, matchFit, planNoticeBatch } from './procurement';
+import { DAGYM_KEYWORDS, HILINK_KEYWORDS, PROCUREMENT_ETL_FIELDS, aptContext, initialClassification, matchFit, planNoticeBatch } from './procurement';
 import { COMPLEX_RANK, complexMatchKeys, planBatch, prospectFromKaptSelection } from './prospects';
 import type { CollectorResult } from './types';
 
@@ -17,6 +17,10 @@ const todayKst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul'
 async function prevNotices(sourceType: string, extIds: string[]) {
   const prev = new Map<string, Record<string, unknown>>(); const more: Map<string, Record<string, unknown>>[] = [];
   if (!extIds.length) return { prev, more };
+  // 383차 #1009: KG2B 직접 수집(kg2b_bid)이 먼저 받은 'kg2b_번호' 공고를 K-apt 가 나중에 올리면 그 줄을 K-apt 줄로 바꿔 이어 씀(새 줄 없음 — 진행 기록·업무 연결 그대로, 같은 공고 한 줄)
+  const kg = sourceType === 'kapt_bid' ? extIds.filter((x) => /^kg2b_\d{3,12}$/.test(x)) : [];
+  if (kg.length) await db()`update sales_src_rows set row = row || ${db().json({ source_type: 'kapt_bid', kg2b_adopted_at: new Date().toISOString() } as never)}::jsonb, synced_at = now()
+    where tbl = 'procurement_notices' and scope = ${SCOPE} and row->>'source_type' = 'kg2b_bid' and row->>'source_external_id' = any(${kg})`;
   const rows = await db()<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = ${SCOPE} and row->>'source_type' = ${sourceType} and row->>'source_external_id' = any(${extIds}) and not gone
     order by (origin = 'workin') desc nulls last, synced_at desc nulls last`;
   for (const r of rows) {
@@ -83,7 +87,7 @@ export async function refitNotices(opt: { days?: number; now?: Date } = {}): Pro
   const from = new Date(now.getTime() - days * 864e5).toISOString();
   const td = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(now);
   const t = now.toISOString();
-  const fitOf = (row: any) => matchFit(String(row.title), row.bid_category ?? null, row.task_scope ?? null, row.source_type === 'kapt_bid' ? '공동주택' : null);
+  const fitOf = (row: any) => matchFit(String(row.title), row.bid_category ?? null, row.task_scope ?? null, aptContext(row));
   // 191차: 줄이 많아도(K-apt 전체 공고 등) 끝까지 — 예전엔 순서 없이 2만 줄까지만 읽어 일부 공고를 다시 판정하지 못했다. 판정에 쓰는 칸만 5천 줄씩
   const page = async (related: boolean, after: string) => sql<{ src_id: string; row: any }[]>`select src_id, jsonb_build_object('title', row->'title', 'bid_category', row->'bid_category',
       'task_scope', row->'task_scope', 'source_type', row->'source_type', 'deadline_at', row->'deadline_at', 'refound_at', row->'refound_at', 'refit_at', row->'refit_at',

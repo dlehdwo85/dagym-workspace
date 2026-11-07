@@ -4,6 +4,8 @@
 import { db } from '../../db';
 import type { SessionUser } from '../../types';
 import { krFetch, needsKr, relayOn } from '../../krFetch';
+import { aptContext, kg2bIssuerKind, matchFit } from './procurement';
+import type { Collector, CollectorCtx, CollectorResult } from './types';
 /** 376차: KG2B 는 해외 IP 를 막음 → 서울 밖이면 서울 중계로(시험·서울 함수는 넘겨받은 fetch 그대로) */
 const viaKr = (f: typeof fetch): typeof fetch => ((u: any, init?: any) => (needsKr(String(u)) && relayOn() ? krFetch(String(u), init) : f(u, init))) as typeof fetch;
 
@@ -63,8 +65,8 @@ export function kg2bPatch(row: Record<string, any>, d: Kg2bDetail, at = new Date
 const kstToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 /** KG2B 상세를 읽을 줄 — 마감 전 관련 K-apt 'kg2b_번호' 공고 중 아직 안 읽었거나(판 2 전) 하루 전에 읽었는데 공고문이 없던 것. 읽기·점검(kg2bWhy)이 같은 조건 */
 const dueCond = (sql: ReturnType<typeof db>, today: string) => sql`scope = 'global' and tbl = 'procurement_notices' and not gone
-      and row->>'source_type' = 'kapt_bid' and row->>'source_external_id' ~ '^kg2b_[0-9]{3,12}$' and coalesce(row->>'related', 'false') = 'true'
-      and coalesce(row->>'deadline_at', '') >= ${today} and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰'
+      and row->>'source_type' in ('kapt_bid', 'kg2b_bid') /* 383차: KG2B 직접 수집 줄도 */ and row->>'source_external_id' ~ '^kg2b_[0-9]{3,12}$' and coalesce(row->>'related', 'false') = 'true'
+      and (coalesce(row->>'deadline_at', '') >= ${today} or (row->>'source_type' = 'kg2b_bid' and coalesce(row->>'deadline_at', '') = '')) and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰'
       and (coalesce(row->>'kg2b_read_at', '') = '' or coalesce(row->>'kg2b_v', '') <> '2' or (row->>'kg2b_read_at' < ${new Date(Date.now() - 1 * 864e5).toISOString()} and coalesce(jsonb_array_length(case when jsonb_typeof(row->'attachment_urls') = 'array' then row->'attachment_urls' end), 0) = 0))`;
 export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => number, max = 10) {
   const sql = db(); const today = kstToday();
@@ -178,10 +180,13 @@ async function attachToOpenTasks(srcIds: string[]) {
 // 진행 공고 736건·한 장 10줄·74장, 다음 장은 같은 화면의 theForm(__encrypted) POST)을 받아 '이미 있음 / 새로 받을 것 / 관련 / 건물 종류'만 세는 미리 보기 — 저장 안 함.
 // 실제 수집 켜기는 대표 결정 뒤(KG2B 화면 아래 '허락없이 링크하거나 상업적인 용도로 사용할 수 없습니다' 문구 — 고객사에 보여 주는 범위를 정해야 함). 요청 간격 1.2초.
 export type Kg2bListRow = { code: string; noticeNo: string | null; title: string; issuer: string | null; industry: string | null; region: string | null;
-  briefingAt: string | null; openingAt: string | null; posted: string | null; kinds: string[] };
+  briefingAt: string | null; openingAt: string | null; posted: string | null; kinds: string[];
+  /** 383차: 입찰 마감(한국 시각) — 목록 줄의 남은 시간 타이머 timerDownN("초") + 받은 때(분 단위로 맞춤, 11/07 kg2b 143124 상세 '입찰마감일시 2026-11-17 17:00'과 같음) */
+  close: string | null };
+const kstMin = (ms: number) => { const d = new Date(Math.round(ms / 60000) * 60000 + 9 * 3600e3); return `${d.toISOString().slice(0, 16)}:00+09:00`; };
 const yy = (v: string | undefined) => { const m = /^(\d{2})-(\d{2})-(\d{2})(?:\s+(\d{1,2}):(\d{2}))?/.exec(String(v ?? '').trim()); return m ? `20${m[1]}-${m[2]}-${m[3]}T${(m[4] ?? '00').padStart(2, '0')}:${m[5] ?? '00'}:00+09:00` : null; };
 /** KG2B 입찰 목록 한 장 — 줄: 번호 · 공고 종류 그림(전자·현설·재입찰…)+공고번호 · 공고명(goAction('view','코드'))+발주처 · 업종+지역 · 현설일+개찰일 */
-export function parseKg2bList(html: string): { rows: Kg2bListRow[]; total: number | null; enc: string | null } {
+export function parseKg2bList(html: string, at = Date.now()): { rows: Kg2bListRow[]; total: number | null; enc: string | null } {
   const rows: Kg2bListRow[] = [];
   for (const tr of html.match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
     const code = /goAction\(\s*'view'\s*,\s*'(\d{3,12})'/.exec(tr)?.[1]; if (!code) continue;
@@ -192,38 +197,35 @@ export function parseKg2bList(html: string): { rows: Kg2bListRow[]; total: numbe
     const noticeNo = /class="notinum"[^>]*>([\s\S]*?)<\/p>/i.exec(tr)?.[1] ? text(/class="notinum"[^>]*>([\s\S]*?)<\/p>/i.exec(tr)![1]) : null;
     const h4 = /<h4[^>]*>([\s\S]*?)<\/h4>/i.exec(ind)?.[1]; const h5 = /<h5[^>]*>([\s\S]*?)<\/h5>/i.exec(dates)?.[1];
     const d = /^(\d{4})(\d{2})(\d{2})/.exec(noticeNo ?? '');
+    const left = Number(/timerDown\d*\(\s*["'](-?\d{1,9})["']/.exec(tr)?.[1] ?? NaN);
     rows.push({ code, noticeNo, title: text(a), issuer: text(p) || null, industry: text(ind.replace(/<h4[\s\S]*?<\/h4>/i, '')) || null, region: h4 ? text(h4) || null : null,
       briefingAt: yy(text(dates.replace(/<h5[\s\S]*?<\/h5>/i, ''))), openingAt: h5 ? yy(text(h5)) : null, posted: d ? `${d[1]}-${d[2]}-${d[3]}` : null,
-      kinds: [...tr.matchAll(/<img[^>]*alt="([^"]+)"/gi)].map((m) => m[1]).slice(0, 4) });
+      kinds: [...tr.matchAll(/<img[^>]*alt="([^"]+)"/gi)].map((m) => m[1]).slice(0, 4), close: Number.isFinite(left) && left > 0 ? kstMin(at + left * 1000) : null });
   }
   const total = /공고수\s*:\s*([\d,]+)\s*건/.exec(text(html))?.[1]; const f = html.indexOf('name="theForm"');
   const enc = f >= 0 ? /name="__encrypted"\s+value="([^"]+)"/.exec(html.slice(f))?.[1] ?? null : null;
   return { rows, total: total ? Number(total.replace(/,/g, '')) : null, enc };
 }
-/** 발주처 이름으로 건물 종류 짐작 — K-apt(공동주택)에 없는 쪽이 이번에 새로 얻는 몫 */
-export function kg2bIssuerKind(issuer: string | null, title = ''): '산업단지·지식산업센터' | '집합건물·상가·오피스텔' | '공동주택(추정)' {
-  // 제목의 '커뮤니티센터'·'상가 보수' 같은 말은 아파트 공고에도 흔함 → 건물 종류는 발주처 이름으로(없을 때만 제목), 산업단지만 제목도 봄
-  const s = String(issuer ?? '').trim() || title;
-  if (/산업단지|산단|지식산업센터|테크노(?:파크|밸리|타워)|벤처타운|아파트형\s*공장|공단/.test(`${s} ${title}`)) return '산업단지·지식산업센터';
-  if (/관리단|빌딩|오피스텔|상가|타워|프라자|플라자|스퀘어|쇼핑몰|센터/i.test(s) && !/아파트|APT|입주자\s*대표/i.test(s)) return '집합건물·상가·오피스텔';
-  return '공동주택(추정)';
-}
-export async function previewKg2bList(opts: { pages?: number; days?: number } = {}, fetchImpl0: typeof fetch = fetch) {
+/** 발주처 이름으로 건물 종류 짐작 — 383차: 판정 맥락(aptContext)도 써서 procurement 로 옮김 */
+export { kg2bIssuerKind };
+/** 383차: KG2B 진행 공고 목록 여러 장(한 장 10줄) — 첫 장 GET, 다음 장은 같은 화면 theForm(__encrypted) POST · 1.2초 간격 · 서울 중계. 미리 보기와 정기 수집이 같이 씀 */
+export async function readKg2bList(fetchImpl0: typeof fetch, opts: { pages: number; days: number; budgetMs: number }) {
   const fetchImpl = viaKr(fetchImpl0);
-  const pages = Math.min(Math.max(1, Math.floor(opts.pages ?? 8)), 20), days = Math.min(Math.max(1, Math.floor(opts.days ?? 14)), 30);
+  const { pages, days } = opts;
   const since = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() - days * 864e5));
   const url = `${kg2bBase()}/user/bid_list/bidAll`; const UA = 'Mozilla/5.0 (WorkIn sales)'; const t0 = Date.now();
   let cookie = ''; const keep = (r: Response) => { const sc = (r.headers as any).getSetCookie?.() as string[] | undefined; const c = (sc ?? []).map((x) => x.split(';')[0]).filter(Boolean); if (c.length) cookie = c.join('; '); };
   const all: Kg2bListRow[] = []; const seen = new Set<string>(); let total: number | null = null, enc: string | null = null, read = 0, stop = '', retried = false; const errors: string[] = [];
   for (let page = 1; page <= pages; page++) {
-    if (page > 1) { if (!enc) { stop = '다음 장 열쇠(__encrypted) 없음'; break; } if (Date.now() - t0 > 40_000) { stop = '40초 넘음'; break; } await new Promise((r) => setTimeout(r, 1200)); }
+    if (page > 1) { if (!enc) { stop = '다음 장 열쇠(__encrypted) 없음'; break; } if (Date.now() - t0 > opts.budgetMs) { stop = `${Math.round(opts.budgetMs / 1000)}초 넘음`; break; } await new Promise((r) => setTimeout(r, 1200)); }
     try {
+      const at = Date.now();
       const res = page === 1 ? await fetchImpl(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(20_000), redirect: 'follow' })
         : await fetchImpl(url, { method: 'POST', headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded', Referer: url, ...(cookie ? { Cookie: cookie } : {}) },
           body: new URLSearchParams({ method: 'bidAlllist', currentPage: String(page), tabkind: '', __encrypted: enc! }).toString(), signal: AbortSignal.timeout(12_000), redirect: 'follow' });
       keep(res); read++;
       if (!res.ok) { errors.push(`${page}장 HTTP ${res.status}`); break; }
-      const p = parseKg2bList(await res.text()); total = total ?? p.total; enc = p.enc ?? enc;
+      const p = parseKg2bList(await res.text(), at); total = total ?? p.total; enc = p.enc ?? enc;
       const fresh = p.rows.filter((r) => !seen.has(r.code)); fresh.forEach((r) => seen.add(r.code)); all.push(...fresh);
       if (!fresh.length) { stop = `${page}장에 새 줄 없음`; break; }
       if (fresh.every((r) => r.posted && r.posted < since)) { stop = `${page}장이 모두 ${days}일 전`; break; }
@@ -233,20 +235,31 @@ export async function previewKg2bList(opts: { pages?: number; days?: number } = 
       errors.push(`${page}장 ${fetchErr(e)}`); break;
     }
   }
-  const inRange = all.filter((r) => !r.posted || r.posted >= since);
-  const have = new Set((await db()<{ ext: string }[]>`select row->>'source_external_id' as ext from sales_src_rows where scope = 'global' and tbl = 'procurement_notices'
-    and row->>'source_external_id' = any(${inRange.map((r) => `kg2b_${r.code}`)})`).map((x) => x.ext));
-  const { matchFit } = await import('./procurement');
-  const scored = inRange.map((r) => { const f = matchFit(r.title, r.industry); return { ...r, already: have.has(`kg2b_${r.code}`), fit: f.fit, kind: kg2bIssuerKind(r.issuer, r.title) }; });
+  return { url, since, rows: all.filter((r) => !r.posted || r.posted >= since), total, read, stop: stop || (read >= pages ? `${pages}장까지(최대)` : ''), errors, ms: Date.now() - t0 };
+}
+/** 이미 있는 'kg2b_번호' 공고(어느 원천이든 — K-apt 가 공유한 줄 포함) → 원천 종류 */
+async function knownKg2b(codes: string[]) {
+  if (!codes.length) return new Map<string, string>();
+  const rows = await db()<{ ext: string; st: string }[]>`select distinct on (row->>'source_external_id') row->>'source_external_id' as ext, row->>'source_type' as st from sales_src_rows
+    where scope = 'global' and tbl = 'procurement_notices' and row->>'source_external_id' = any(${codes.map((c) => `kg2b_${c}`)})
+    order by row->>'source_external_id', (row->>'source_type' = 'kapt_bid') desc`;
+  return new Map(rows.map((r) => [r.ext, r.st]));
+}
+export async function previewKg2bList(opts: { pages?: number; days?: number } = {}, fetchImpl0: typeof fetch = fetch) {
+  const pages = Math.min(Math.max(1, Math.floor(opts.pages ?? 8)), 20), days = Math.min(Math.max(1, Math.floor(opts.days ?? 14)), 30);
+  const L = await readKg2bList(fetchImpl0, { pages, days, budgetMs: 40_000 });
+  const inRange = L.rows; const known = await knownKg2b(inRange.map((r) => r.code));
+  const have = new Set([...known.entries()].filter(([, st]) => st !== 'kg2b_bid').map(([k]) => k)); // 383차: 직접 수집(kg2b_bid)한 줄은 'K-apt 에 없던 몫'으로 셈
+  const scored = inRange.map((r) => { const f = matchFit(r.title, null, null, aptContext({ source_type: 'kg2b_bid', issuer: r.issuer, title: r.title })); return { ...r, already: have.has(`kg2b_${r.code}`), saved: known.get(`kg2b_${r.code}`) === 'kg2b_bid', fit: f.fit, kind: kg2bIssuerKind(r.issuer, r.title) }; });
   const byKind: Record<string, { n: number; notInDb: number; related: number; relatedNew: number }> = {};
   const byDay: Record<string, number> = {};
   for (const r of scored) { const k = (byKind[r.kind] ??= { n: 0, notInDb: 0, related: 0, relatedNew: 0 }); k.n++; if (!r.already) k.notInDb++; if (r.fit) { k.related++; if (!r.already) k.relatedNew++; } if (r.posted) byDay[r.posted] = (byDay[r.posted] ?? 0) + 1; }
-  const pick = (r: (typeof scored)[number]) => ({ code: r.code, noticeNo: r.noticeNo, title: r.title, issuer: r.issuer, industry: r.industry, region: r.region, posted: r.posted, openingAt: r.openingAt, kind: r.kind, fit: r.fit, already: r.already });
+  const pick = (r: (typeof scored)[number]) => ({ code: r.code, noticeNo: r.noticeNo, title: r.title, issuer: r.issuer, industry: r.industry, region: r.region, posted: r.posted, openingAt: r.openingAt, close: r.close, kind: r.kind, fit: r.fit, already: r.already, saved: r.saved });
   const notIn = scored.filter((r) => !r.already);
-  return { source: url, region: process.env.VERCEL_REGION ?? null, days, since, pagesRead: read, total, rows: scored.length, stop: stop || (read >= pages ? `${pages}장까지(최대)` : ''), errors, ms: Date.now() - t0,
+  return { source: L.url, region: process.env.VERCEL_REGION ?? null, days, since: L.since, pagesRead: L.read, total: L.total, rows: scored.length, stop: L.stop, errors: L.errors, ms: L.ms,
     already: scored.length - notIn.length, notInDb: notIn.length, related: scored.filter((r) => r.fit).length, relatedNew: notIn.filter((r) => r.fit).length, byKind, byDay,
     examples: [...notIn.filter((r) => r.fit), ...notIn.filter((r) => !r.fit && r.kind !== '공동주택(추정)'), ...notIn.filter((r) => !r.fit && r.kind === '공동주택(추정)')].slice(0, 15).map(pick),
-    alreadyExamples: scored.filter((r) => r.already).slice(0, 3).map(pick), saved: 0 };
+    alreadyExamples: scored.filter((r) => r.already).slice(0, 3).map(pick), saved: scored.filter((r) => r.saved).length };
 }
 
 /** 374차: fetch 실패 원인 한 줄 — 'fetch failed' 뒤에 숨은 cause(코드·errno·syscall·주소)까지 */
@@ -272,3 +285,49 @@ export async function kg2bProbe(fetchImpl: typeof fetch = fetch) {
     const h = await r.text(); return { status: r.status, via: r.headers.get('x-kr-relay'), rows: parseKg2bList(h).rows.length }; }) : null;
   return { region: process.env.VERCEL_REGION ?? null, host, port, dns, tcp, main, list, relay, at: new Date().toISOString() };
 }
+
+// 383차 #1009·#1007(대표 11/07 "KG2B 수집 켜고 고객사도 확인할 수 있게" — KG2B 화면 아래 '허락 없이 링크·상업적 용도 불가' 문구를 알린 뒤 대표 결정 '켬·고객사 공개'):
+// 373차 미리 보기를 정기 수집으로. KG2B 진행 공고 목록(로그인 없이 열림)을 서울 중계로 하루 4번(06·10·14·18시) 받아 K-apt 에 없는 공고만 'kg2b_bid' 로 적재
+// (K-apt 가 'kg2b_번호'로 공유한 공고는 K-apt 줄이 맡음 — 나중에 K-apt 가 같은 번호를 올리면 그 줄을 K-apt 줄로 이어 씀, store.prevNotices).
+// 관련 공고는 상세(입찰 마감·현장설명·개찰·공고서 첨부)를 읽어 공고서는 [첨부 받기]·업무 넘길 때 자동 첨부로 이어짐(#1018). 요청 간격 1.2초, 담당자 이름·전화는 저장 안 함
+const kgHourNow = () => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
+const KG_STATE = /취소|정정|재공고|재입찰|긴급/;
+/** 목록 한 줄 → 공고 줄(상세를 읽으면 kg2bPatch 가 마감·첨부 등을 채움) */
+export function kg2bListPayload(r: Kg2bListRow): Record<string, unknown> {
+  const state = r.kinds.filter((k) => KG_STATE.test(k)).join(' ') || null;
+  return { source_type: 'kg2b_bid', source_external_id: `kg2b_${r.code}`, source_url: kg2bDetailUrl(r.code), title: r.title, issuer: r.issuer, facility_name: r.issuer,
+    posted_date: r.posted, deadline_at: r.close, opening_at: r.openingAt, site_briefing_at: r.briefingAt,
+    // 업종('위탁(식당/어린이집/자판기/검침)등' 같은 넓은 묶음 이름)은 판정 분류로 쓰지 않음 — 예시 낱말(자판기·식당)이 제외 주제에 걸려 위탁운영 공고가 빠짐(383차 시험)
+    region_restriction: r.region, industry_code: r.industry, bid_system: 'KG2B전자입찰', notice_no: r.noticeNo, notice_state: state };
+}
+export const kg2bBidNotices: Collector = {
+  slug: 'kg2b_bid_notices', label: 'KG2B 입찰공고(직접)', hourKst: 6, againKst: [10, 14, 18],
+  source: 'kg2b.com/user/bid_list/bidAll — 로그인 없이 열리는 진행 공고 목록(서울 중계, 1.2초 간격, 키 불필요). K-apt 에 없는 공고(집합건물·상가·산업단지 관리단 등)만 새로 받고 관련 공고는 상세·공고서까지 — 06시 8장·그 밖 5장(최근 3일)',
+  async run(ctx: CollectorCtx): Promise<CollectorResult> {
+    const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const errors: string[] = [];
+    const full = ctx.params?.full === true || kgHourNow() < 10;
+    const L = await readKg2bList(ctx.fetchImpl, { pages: full ? 8 : 5, days: Number(ctx.params?.days) > 0 ? Math.min(14, Number(ctx.params?.days)) : 3, budgetMs: Math.max(4000, Math.min(left() - 22_000, 30_000)) });
+    errors.push(...L.errors);
+    if (!L.rows.length) return { inserted: 0, updated: 0, unchanged: 0, errors: L.errors.length ? 1 : 0, errorLog: errors.join('\n') || undefined, providerMode: 'web_scrape', retry: L.errors.length > 0,
+      summary: `KG2B 목록 ${L.read}장 · ${L.errors.length ? '불러오기 실패' : '최근 공고 0건'}${L.stop ? ` · ${L.stop}` : ''}`,
+      sources: { kg2b: { label: 'KG2B 입찰 목록', ok: !L.errors.length, calls: L.read, received: 0, kept: 0, ...(L.errors.length ? { error: L.errors[0] } : {}) } } };
+    const known = await knownKg2b(L.rows.map((r) => r.code));
+    const kapt = L.rows.filter((r) => known.get(`kg2b_${r.code}`) === 'kapt_bid'); // K-apt 가 공유한 공고 — K-apt 줄이 맡음
+    const mine = L.rows.filter((r) => known.get(`kg2b_${r.code}`) !== 'kapt_bid');
+    const fresh = mine.filter((r) => !known.has(`kg2b_${r.code}`));
+    const fitOf = (r: Kg2bListRow) => matchFit(r.title, null, null, aptContext({ source_type: 'kg2b_bid', issuer: r.issuer, title: r.title }));
+    const rel = fresh.filter((r) => fitOf(r).fit);
+    const { upsertNotices } = await import('./store');
+    const w = await upsertNotices([...mine.filter((r) => fitOf(r).fit), ...mine.filter((r) => !fitOf(r).fit)].map(kg2bListPayload));
+    if (w.errorLog) errors.push(w.errorLog);
+    // 관련 공고 상세(마감·현설·개찰·공고서) — 새 줄 + 예전에 못 읽은 줄(K-apt 공유 공고와 같은 대기열, 마감 가까운 순)
+    const kg = left() > 12_000 ? await readKg2bDetails(ctx.fetchImpl, left, 12).catch((e) => { errors.push(`KG2B 상세: ${fetchErr(e)}`); return null; }) : null;
+    if (kg?.errors.length) errors.push(...kg.errors);
+    const byKind: Record<string, number> = {}; for (const r of fresh) { const k = kg2bIssuerKind(r.issuer, r.title); byKind[k] = (byKind[k] ?? 0) + 1; }
+    const kinds = Object.entries(byKind).map(([k, n]) => `${k} ${n}`).join('·');
+    return { inserted: w.inserted, updated: w.updated, unchanged: w.unchanged, errors: w.errors + w.invalid + (L.errors.length ? 1 : 0), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
+      summary: `KG2B 목록 ${L.read}장 ${L.rows.length}건(최근 공고${L.stop ? ` · ${L.stop}` : ''}) · K-apt 에 이미 있음 ${kapt.length} · K-apt 에 없는 공고 ${mine.length}건(새로 ${fresh.length}${kinds ? `: ${kinds}` : ''} · 관련 ${rel.length})`
+        + (kg?.read ? ` · KG2B 상세 ${kg.read}건(공고서 ${kg.files}${kg.attached ? `, 넘긴 업무 ${kg.attached}건에 붙임` : ''})` : '') + ` · 적재 신규 ${w.inserted} · 갱신 ${w.updated} · 변화없음 ${w.unchanged}`,
+      sources: { kg2b: { label: 'KG2B 입찰 목록', ok: !L.errors.length, calls: L.read, received: L.rows.length, kept: mine.length, ...(L.total != null ? { total: L.total } : {}), ...(L.errors.length ? { error: L.errors[0] } : {}) } } };
+  },
+};

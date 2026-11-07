@@ -196,6 +196,20 @@ const urls = (v: unknown): (string | { name: string; url: string })[] => (Array.
   return n ? { name: n.slice(0, 200), url: u } : u;
 }).filter((x): x is string | { name: string; url: string } => x !== null).slice(0, 20);
 
+/** 발주처 이름으로 건물 종류 짐작(373차 KG2B 미리 보기에서 옮김) — 제목의 '커뮤니티센터'·'상가 보수' 같은 말은 아파트 공고에도 흔해 발주처 이름으로(없을 때만 제목), 산업단지만 제목도 봄 */
+export function kg2bIssuerKind(issuer: string | null | undefined, title = ''): '산업단지·지식산업센터' | '집합건물·상가·오피스텔' | '공동주택(추정)' {
+  const s = String(issuer ?? '').trim() || title;
+  if (/산업단지|산단|지식산업센터|테크노(?:파크|밸리|타워)|벤처타운|아파트형\s*공장|공단/.test(`${s} ${title}`)) return '산업단지·지식산업센터';
+  if (/관리단|빌딩|오피스텔|상가|타워|프라자|플라자|스퀘어|쇼핑몰|센터/i.test(s) && !/아파트|APT|입주자\s*대표/i.test(s)) return '집합건물·상가·오피스텔';
+  return '공동주택(추정)';
+}
+/** 판정 맥락 '공동주택' — K-apt 공고는 모두, 383차 KG2B 직접 공고(#1009)는 발주처가 산업단지·집합건물이 아니면(K-apt 와 같은 단지 관리 주체) */
+export const aptContext = (r: { source_type?: unknown; issuer?: unknown; title?: unknown }): string | null => {
+  const st = String(r?.source_type ?? '');
+  if (st === 'kapt_bid') return '공동주택';
+  return st === 'kg2b_bid' && kg2bIssuerKind(r?.issuer == null ? null : String(r.issuer), String(r?.title ?? '')) === '공동주택(추정)' ? '공동주택' : null;
+};
+
 export type NoticeValidate = { ok: true; row: NoticeRow } | { ok: false; reason: string };
 /** 수집 payload → 저장 행(ETL 필드만). 적합 분류·상태·공고구분은 여기서 계산 */
 export function validateNoticePayload(p: Record<string, unknown>, now: Date): NoticeValidate {
@@ -205,7 +219,7 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
   if (!title) return { ok: false, reason: 'title required' };
   if (!url || !/^https?:\/\//i.test(url)) return { ok: false, reason: 'source_url must be http(s)' };
   const deadline = ts(p.deadline_at); const state = txt(p.notice_state);
-  const fit0 = matchFit(title, txt(p.bid_category), txt(p.task_scope), sourceType === 'kapt_bid' ? '공동주택' : null);
+  const fit0 = matchFit(title, txt(p.bid_category), txt(p.task_scope), aptContext({ source_type: sourceType, issuer: p.issuer, title }));
   // #522 온비드: '스포츠센터 내 용품점 및 자판기 사용·수익허가'처럼 제외 낱말(자판기)이 섞인 체육시설 임대도 놓치지 않게 — 수집기가 준 적합 힌트
   const hint = txt(p.fit_hint) as FitBusiness | null;
   const fit: FitResult = fit0.fit || !hint ? fit0 : { fit: hint, matched: Array.isArray(p.fit_words) ? (p.fit_words as string[]).slice(0, 5) : [], direct: false };
