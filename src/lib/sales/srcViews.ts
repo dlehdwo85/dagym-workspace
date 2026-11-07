@@ -184,7 +184,7 @@ function renoticeLinks(rows: any[]) {
 /** 239차(#744): 필수 현장설명이 오늘~3일 안 — 입찰 마감보다 먼저 다가와 '마감 임박'에 함께 */
 const briefSoon = (n: { briefing?: { required: boolean; at: string | null } | null }, td: string) => { const d = n.briefing?.required && n.briefing.at ? String(n.briefing.at).slice(0, 10) : null; return !!d && d >= td && d <= plus(3); };
 const CLOSED_NOTICE = /마감(?!임박)|종료|취소|낙찰|유찰|개찰완료|closed|cancel|award|expired|done/i; // '마감임박'(3일 안 마감)은 진행 중(#537 후속2)
-const SKIP_WORK = /미참여|대상아님|not[_\s-]?target|skip/i;
+const SKIP_WORK = /미참여|대상아님|^완료$|not[_\s-]?target|skip/i; // 380차 #1015: 입찰 [완료]도 진행 중 집계에서 뺌
 /** 마감 시각(KST) → epoch ms. 시각이 없거나 읽을 수 없으면 null. 오프셋 없는 'YYYY-MM-DD HH:MM' 은 서울 시각으로 */
 function deadlineAt(v: unknown): number | null {
   const s = String(v ?? '').trim();
@@ -486,7 +486,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const folded = (r: any) => skips.under.has(String(r.id ?? r.__id));
     const since = await lastMailAt(t);
     // [대상 아님] 탭: 누가·언제·사유(진행 기록) — 사유 칸이 생기기 전에 넘긴 것은 마지막으로 고친 사람·시각
-    const who = tab === 'skip' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
+    const who = tab === 'skip' || tab === 'done' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
     const td = today();
     // 338차(대표 11/02 #922 새 공고 날짜별): ?day=YYYY-MM-DD(오늘이 아닌 날) → '그날 새 공고' = 그날 처음 수집했거나 공고일이 그날인 공고(마감 지난 것 포함) · days = 최근 7일 날짜별 건수
     const dayPick = tab === 'today' && isDay(q.day) && String(q.day) !== td ? String(q.day) : null;
@@ -502,7 +502,10 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         workMemo: w ? pick(w, 'memo', 'note') : null, workNext: w ? day(pick(w, 'next_action_date', 'next_date', 'due_date')) : null, workLeadId: w?.lead_id ?? null, workHandoff: !!(w?.lead_id && pick(w, 'handoff_by')), raw: r.__orig ?? r,
         // 결정 15-35: 입찰 업무로 넘긴 공고 — 업무 열기·기한·결과·[되돌리기]
         workBid: w && pick(w, 'bid_task_id') ? { taskId: String(pick(w, 'bid_task_id')), due: pick(w, 'bid_due_auto'), dueTime: pick(w, 'bid_due_time'), result: pick(w, 'bid_result'), winner: pick(w, 'bid_winner'), amount: pick(w, 'bid_amount'), auto: !!pick(w, 'bid_result_auto'), contractTaskId: pick(w, 'bid_contract_task_id'), assignees: Array.isArray(w.assignees) ? w.assignees.length : 0 } : null,
-        history: r.__history ?? null, ...relink(r), skipped, skip: who && skipped && !folded(r) ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null,
+        history: r.__history ?? null, ...relink(r), skipped,
+        // 380차 #1015: [완료] 누가·언제
+        done: who && w && String(pick(w, 'status') ?? '') === '완료' ? { by: who.get(String(pick(w, 'updated_by') ?? '')) ?? null, at: pick(w, '__updated_at', 'updated_at') } : null,
+        skip: who && skipped && !folded(r) ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null,
         linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; });
     // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작
     // 278차 #830(대표 10/31 '취소 공고는 목록에서 뺌'): 취소된 공고(원천 상태 '취소' 또는 같은 공고 묶음의 마지막 게시가 취소)는 모든 탭에서 빼고 '취소된 공고' 보관함 탭에만
@@ -535,7 +538,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const bizOk = (n: (typeof all)[number]) => !q.biz || (q.biz === 'none' ? !n.businesses.length : n.businesses.some((b) => b.key === q.biz));
     const dayHit = (n: (typeof all)[number], d: string) => (d === td ? n.todayHit : n.posted === d || n.noticeDate === d); // 338차: 오늘은 기존 규칙(메일 뒤 수집·다시 찾음 포함), 지난 날은 수집일·공고일
     const canceledCard = (n: (typeof all)[number]) => /취소/.test(String(n.status ?? '')) || !!(n.history as { cancelDay?: string | null } | null)?.cancelDay;
-    const inTab = (n: (typeof all)[number], tb: string) => (tb === 'skip' ? n.skipped && !!n.skip : !n.skipped) && (tb === 'skip' || tb === 'ref' /* 참고 = 지난 메일에 실린 그대로 */ || (tb === 'canceled') === canceledCard(n)) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
+    // 380차 #1015(대표 11/07 '대상 아님 말고 [취소]·[완료]'): [완료](입찰 참여·처리를 마친 공고)는 다른 탭에서 빼고 '완료' 탭에만 · [취소] = 예전 대상 아님 탭 그대로
+    const doneCard = (n: (typeof all)[number]) => String(n.work ?? '') === '완료';
+    const inTab = (n: (typeof all)[number], tb: string) => (tb === 'done' ? doneCard(n) && !n.skipped : tb === 'skip' ? n.skipped && !!n.skip : !n.skipped && (tb === 'ref' || !doneCard(n))) && (tb === 'skip' || tb === 'done' || tb === 'ref' /* 참고 = 지난 메일에 실린 그대로 */ || (tb === 'canceled') === canceledCard(n)) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
       && (tb !== 'today' || (dayPick ? dayHit(n, dayPick) : (n.todayHit && (n.result || !bidEnded(n, td))))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
       && (tb !== 'soon' || (((!!n.close && n.close >= td && n.close <= plus(3)) || briefSoon(n, td)) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중 · 239차 필수 현장설명 3일 안
       && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td))); // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
@@ -572,6 +577,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     for (const n of all) if (inTab(n, tab) && hit(n) && bizOk(n) && !(tab === 'today' && n.result)) { const k = sidoOfNotice(n); regionCount.set(k, (regionCount.get(k) ?? 0) + 1); }
     const regions = [...regionCount.entries()].map(([key, n]) => ({ key, n })).sort((a, b) => (a.key === '지역 미정' ? 1 : b.key === '지역 미정' ? -1 : b.n - a.n || a.key.localeCompare(b.key, 'ko')));
     const canceledCount = all.filter((n) => inTab(n, 'canceled')).length;
+    const doneCount = all.filter((n) => inTab(n, 'done')).length; // 380차 #1015 '완료' 탭 건수
     // 258차(로컬 10/29 09:20 ⓑ): 진행 중 탭에서 마감일 칸이 빈 공고(예고·협력사 등록·마감 칸 빈 입찰) 수 — 화면은 따로 묶어 보여 줌
     const noClose = tab === 'open' ? items.filter((n) => !n.close).length : 0;
     // 372차 #995 ④(로컬 21라인 대조 '래미안·공고 번호로 찾으면 안 나옴'): 검색어가 있으면 이 탭 밖(대상 아님·취소된 공고·다른 탭)과 목록에 안 읽힌 '관련 아님' 공고도
@@ -617,7 +623,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         outside.push({ id: r.src_id, title, noticeNo, where, why });
       }
     }
-    return { ...meta, tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, todayCount, day: dayPick ?? (tab === 'today' ? td : null), days, region: regionPick || null, regions, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, outside, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
+    return { ...meta, tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, doneCount, todayCount, day: dayPick ?? (tab === 'today' ? td : null), days, region: regionPick || null, regions, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, outside, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings'; const td = today();

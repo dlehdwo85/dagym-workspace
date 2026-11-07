@@ -138,7 +138,9 @@ export function skipLinks(cards: any[], statusOf: (id: string) => unknown) {
   const own = (r: any) => SKIP_ONLY.test(s(statusOf(idOf(r))));
   const owned = cards.filter(own); const via = projectSkipOf(owned);
   const under = new Map<string, any>();
-  for (const r of cards) { if (own(r) || settledWork(statusOf(idOf(r)))) continue; const x = via(r); if (x) under.set(idOf(r), x); }
+  // 380차 #1014(대표 11/07 '래미안 트윈파크 … 대상아님으로 해 두었음. 그래도 지속적으로 공고는 보내 달라'): [취소]는 그 공고 한 건만 —
+  //   함께 숨기는 것은 치운 본 공고 앞의 사전규격뿐. 사전규격을 치워도 뒤따른 본 공고·재공고·정정은 계속 보임(전에는 본 공고까지 함께 숨김)
+  for (const r of cards) { if (own(r) || settledWork(statusOf(idOf(r))) || !isPrespec(r)) continue; const x = via(r); if (x) under.set(idOf(r), x); }
   // 둘 다 대상 아님이면 본 공고 쪽 한 장(사전규격을 그 아래로)
   for (const r of owned) if (isPrespec(r)) { const bid = owned.find((x) => !isPrespec(x) && sameProject(r, x)); if (bid) under.set(idOf(r), bid); }
   for (const [k, v] of under) { const up = under.get(idOf(v)); if (up) under.set(k, up); } // 함께 숨긴 카드 → 사전규격(본 공고 아래) → 본 공고

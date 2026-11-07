@@ -19,7 +19,7 @@ import { listBizCats, matchBiz, type BizCat } from './bizCats';
 import { regionLimit, sidoIn, type RegionLimit } from './region';
 import { digestMail } from './digestMail';
 import { eligSay, eligView } from './eligibilityText';
-import { SKIP_ONLY, noKey, noticeKeys, projectSkipOf, settledWork, titleKey } from './noticeGroups';
+import { SKIP_ONLY, isCancel, isPrespec, noKey, noticeKeys, projectSkipOf, settledWork, titleKey } from './noticeGroups';
 import { fixG2bUrl, searchHint, type SearchHint } from './sourceLink';
 
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
@@ -175,10 +175,17 @@ async function notTargets(tenant: string) {
   const ids = new Set(w.filter((x) => x.id && SKIP_ONLY.test(String(x.status ?? ''))).map((x) => String(x.id)));
   const live = new Set(w.filter((x) => x.id && !SKIP_ONLY.test(String(x.status ?? ''))).map((x) => String(x.id)));
   const settled = new Set(w.filter((x) => x.id && settledWork(x.status)).map((x) => String(x.id)));
-  const keys = new Set<string>(); const skippedRows: any[] = [];
-  if (ids.size) for (const { row } of await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and (src_id = any(${[...ids]}::text[]) or row->>'id' = any(${[...ids]}::text[]))`) { skippedRows.push(row); for (const k of noticeKeys(row)) keys.add(k); }
+  // 380차 #1014(대표 11/07 '대상아님으로 해 두었음. 그래도 지속적으로 공고는 보내 달라'): [취소]는 그 공고 한 건만 — 다른 원천에 실린 같은 공고(제목·발주처·마감이 같음)만 함께 빼고,
+  //   같은 번호의 정정(차수가 올라간 것)·재공고·새 공고·사전규격 뒤 본 공고는 계속 메일로(전에는 번호가 같으면 정정도, 사전규격을 치우면 본 공고도 뺐다)
+  const keys = new Set<string>(); const skippedRows: any[] = []; const skippedOrd = new Map<string, number>();
+  if (ids.size) for (const { row } of await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and (src_id = any(${[...ids]}::text[]) or row->>'id' = any(${[...ids]}::text[]))`) {
+    skippedRows.push(row); for (const k of noticeKeys(row)) if (k.startsWith('t:')) keys.add(k);
+    const n = noKey(row); if (n.key) skippedOrd.set(n.key, Math.max(skippedOrd.get(n.key) ?? -1, n.ord));
+  }
   const project = projectSkipOf(skippedRows);
-  return (id: string, r: any) => ids.has(id) || (!live.has(id) && noticeKeys(r).some((k) => keys.has(k))) || (!settled.has(id) && !!project(r));
+  // 정정(차수↑)은 계속 — 단, 이미 치운 공고의 '취소 공고'는 소음이라 그대로 뺌
+  const newerRevision = (r: any) => { const n = noKey(r); return !!n.key && skippedOrd.has(n.key) && n.ord > skippedOrd.get(n.key)! && !isCancel(r); };
+  return (id: string, r: any) => ids.has(id) || (!live.has(id) && !newerRevision(r) && noticeKeys(r).some((k) => keys.has(k))) || (!settled.has(id) && isPrespec(r) && !!project(r));
 }
 type Cand = { id: string; r: any; isNew: boolean; kind: string; late: boolean; fit: string | null; why: string; soon?: boolean; refound?: boolean; filled?: boolean };
 /** 지난 메일 이후(digestSince) 처음 본 공고 + 그 뒤 정정·취소로 바뀐 공고 → 회사 맞춤 통과분 → 구역. 마감 임박 = 이미 받은 관련 공고 중 D-3 이내·진행 기록 없음 */
@@ -218,7 +225,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     if (!isNew && !changedToday) continue;
     if (r.source_type === 'vendor_recruit' && (!r.posted_date || !vendorDateOk(r))) { skip('게시일 미상'); continue; } // #476 e·후속: 게시판 날짜로 확인 못 한 협력사 줄(조각·메뉴·예전 방식)은 메일·오늘 탭에서 뺌
     if (onbidSale(r)) { skip('온비드 매각'); continue; } // #537 후속2(로컬 10/24 12:58): 온비드는 임대·사용허가만
-    if (notTarget(String(r.id ?? src_id), r)) { skip('대상 아님'); continue; }
+    if (!result && notTarget(String(r.id ?? src_id), r)) { skip('대상 아님'); continue; } // 380차 #1014: [취소]한 공고의 낙찰 결과는 계속 메일로
     const f = passPrefs(r, p); if (!f.ok) { skip(f.why); continue; }
     // 234차: 결과 줄은 처음 본 날이 아니라 결과를 안 때로 — 새로 들어온 오래된 결과(result_at 이 그날 끝)는 오늘 결과가 아님
     if (result) { if ((isNew && resAt == null) || resultToday || filledToday) cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why, ...(filledToday && !isNew ? { filled: true } : {}) }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음

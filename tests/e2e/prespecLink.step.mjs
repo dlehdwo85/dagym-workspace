@@ -23,7 +23,7 @@ export async function prespecLink({ owner, ctx, sql, BASE, SHOTS }) {
   // 본 공고를 대상 아님으로(상세 상태 버튼과 같은 API) → 전체 탭에서 둘 다 빠짐
   await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: ids[1], status: '대상아님', reason: '우리 사업 아님' });
   await owner.reload();
-  await owner.waitForFunction(() => /대상 아님 \d+건/.test(document.querySelector('[data-testid="sales-bids-tab-skip"]')?.textContent ?? ''));
+  await owner.waitForFunction(() => /^취소 \d+건/.test(document.querySelector('[data-testid="sales-bids-tab-skip"]')?.textContent ?? '')); // 380차 #1015 탭 이름 '취소'
   assert.equal(await list.getByTestId('sales-bid').count(), 0, '사전규격도 함께 빠짐');
   await list.getByTestId('sales-bids-tab-skip').click();
   const card = list.getByTestId('sales-bid').filter({ hasText: T }); await card.first().waitFor();

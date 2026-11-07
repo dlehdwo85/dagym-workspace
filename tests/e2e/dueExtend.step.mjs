@@ -37,8 +37,8 @@ export async function dueExtend({ staff, owner, ctx, sql, BASE }) {
   await dlg.waitFor({ state: 'detached' });
   await staff.getByText(/마감을 .+ 14:00로 연장했습니다 — 요청자·담당자에게 사유와 함께 알림/).first().waitFor();
   assert.deepEqual({ ...(await sql`select to_char(due_date, 'YYYY-MM-DD') d, to_char(due_time, 'HH24:MI') t from tasks where id = ${id}`)[0] }, { d: addDays(due, 3), t: '14:00' }, '승인 없이 바로·시각까지');
-  // D-day 옆 시간: 목록 마감 칩 = '11/9 14:00 D-5'
-  await row.getByTestId('due-picker').getByText(`${md(addDays(due, 3))} 14:00`).waitFor();
+  // D-day 옆 시간: 목록 마감 칩 = '11/9 14시 D-5'(380차: 정시는 'n시')
+  await row.getByTestId('due-picker').getByText(`${md(addDays(due, 3))} 14시`).waitFor(); // 380차 #1017: 정시는 'n시'
   assert.equal(await row.getByTestId('due-picker').getByTestId('due-dday').textContent(), 'D-5');
   // 요청자(PC): 업무 상세 '마감 연장 기록' — 사유·누가·앞뒤 날짜시각
   await owner.goto(`${BASE}/tasks/${id}`);

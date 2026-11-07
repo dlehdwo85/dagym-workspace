@@ -14,7 +14,7 @@ const kindLabels = async (tenant: string): Promise<Record<SalesKind, string>> =>
 /** 진행으로 치는 상태(업무 생성) / 멈춤(보류) / 끝(완료) */
 const PROGRESS = new Set(['연락중', '신청 준비', '신청 완료', '검토중']);
 const HOLD = new Set(['보류']);
-const DONE = new Set(['미참여', '대상아님', '대상 아님', '영업완료', '등록 완료', '실패', '계약완료']);
+const DONE = new Set(['미참여', '대상아님', '대상 아님', '영업완료', '등록 완료', '실패', '계약완료', '완료']); // 380차 #1015: 입찰 [완료]도 이 공고로 만든 업무를 완료로
 const LINK: Record<SalesKind, (id: string) => string> = { bid: (id) => `/s/sales/hub?tab=bids&bt=working&bq=${encodeURIComponent(id)}`, building: () => '/s/sales/hub?tab=buildings', facility: () => '/s/sales/hub?tab=facilities', vendor: () => '/s/sales/hub?tab=vendors', lead: (id) => `/s/sales/leads?id=${id}` };
 const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 

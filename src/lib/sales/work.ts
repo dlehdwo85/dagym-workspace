@@ -14,7 +14,7 @@ export const WORK_KINDS = ['bid', 'building', 'facility', 'vendor'] as const;
 export type WorkKind = (typeof WORK_KINDS)[number];
 /** 원본 상태 버튼 그대로(완료로 보내는 값: 미참여·대상아님 / 영업완료·대상아님 / 등록 완료·대상 아님) */
 export const WORK_STATUS: Record<WorkKind, string[]> = {
-  bid: ['미검토', '검토중', '연락중', '보류', '미참여', '대상아님'],
+  bid: ['미검토', '검토중', '연락중', '보류', '미참여', '대상아님', '완료'], // 380차 #1015: 화면 [취소] = 대상아님(저장 값 그대로) · [완료] = 입찰 참여·처리를 마친 공고('완료' 탭)
   building: ['미검토', '검토중', '연락중', '보류', '대상아님'],
   facility: ['미연락', '연락중', '영업완료', '대상아님'],
   vendor: ['미등록', '신청 준비', '신청 완료', '등록 완료', '대상 아님'],

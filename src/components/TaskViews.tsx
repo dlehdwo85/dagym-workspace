@@ -15,7 +15,10 @@ import { useSalesTerms, useSession } from './session';
 import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock, Flag, Users } from 'lucide-react';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, ROLE_RANK, STATUSES, STATUS_LABEL, type Role, type TaskStatus } from '@/lib/types';
-import { bidShort } from '@/components/sales/BidInfoBox';
+import { hourLabel } from '@/components/ui';
+/** 380차 #1017: '11/9 11시' · '11/9 11:30' · 시각 없으면 '11/9' */
+const hourShort = (iso: string) => { const m = iso.match(/^\d{4}-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/); return m ? `${Number(m[1])}/${Number(m[2])}${m[3] ? ` ${hourLabel(`${m[3]}:${m[4]}`)}` : ''}` : iso; };
+const daysTo = (iso: string) => Math.round((Date.parse(iso.slice(0, 10)) - Date.parse(todayStr())) / 864e5);
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
 import { PANEL_SWAP_EVENT } from './TaskPanelHost';
@@ -31,7 +34,7 @@ import { useResearchAsk } from './sales/ResearchAsk';
 
 export type Task = {
   space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
-  sales_ref?: { kind: string; id: string; name?: string; bidInfo?: { briefing?: { at?: string | null; required?: boolean; place?: string | null } | null; briefingNone?: boolean } | null; cancel?: { day?: string | null; reason?: string | null } | null } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천 · 335차 bidInfo
+  sales_ref?: { kind: string; id: string; name?: string; bidInfo?: { briefing?: { at?: string | null; required?: boolean; place?: string | null } | null; briefingNone?: boolean; deadline?: string | null } | null; cancel?: { day?: string | null; reason?: string | null } | null } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천 · 335차 bidInfo
   assigned_by_rule?: string | null; // #100 담당자 지정 규칙으로 배정됨
   co_assignees?: Co[] | null; assignee_done?: boolean | null; complete_rule?: 'primary' | 'all'; // 대표 10/23 #475 함께 맡은 담당자 · 10/24 첫 담당자의 내 몫 완료
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
@@ -590,13 +593,9 @@ function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onP
       {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장<span className="max-lg:hidden"> 요청</span> → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
       {t.team_name && <span className="inline-flex min-w-0 max-w-[6rem] truncate items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
       {(t.collab_teams?.length ?? 0) > 0 && <span className="inline-flex min-w-0 max-w-[8rem] truncate rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2 max-lg:hidden" title={`함께하는 부서: ${t.collab_teams!.join(', ')}`} data-testid="collab-chip">+{t.collab_teams![0]}{t.collab_teams!.length > 1 ? ` 외 ${t.collab_teams!.length - 1}` : ''}</span>}
-      {t.project_name && <span className="inline-flex min-w-0 items-center gap-1 max-lg:hidden"><span className="size-2 shrink-0 rounded-[3px]" style={{ background: t.project_color ?? '#999' }} /><span className="truncate">{t.project_name}</span></span>}
       {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 요청자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
-      {!collab && t.requested_by && t.requested_by !== t.assignee_id && t.requested_by_name && <span className="truncate max-lg:hidden xl:hidden" title="요청자 → 담당자">{t.requested_by_name} → {t.assignee_name ?? '미배정'}</span>}
+      {/* 380차 #1017: 요청 ○○·본사(소속)·프로젝트(웹사이트 문의)·사업(다짐·하이링크) 표기는 줄에서 뺌 — 상세에 있음 */}
       {/* 308차 #866: 공동 업무 줄은 요청자 칸 대신 — 남이 요청했으면 '요청 이름' 한 마디(내가 요청했으면 안 보임) · 소속 이름(본사)은 뺌 */}
-      {collab && t.requested_by && t.requested_by !== user.id && t.requested_by_name && <span className="truncate max-lg:hidden" data-testid="row-requester">요청 {t.requested_by_name}</span>}
-      {!compact && !collab && <span className={cx('truncate max-lg:hidden', onPatch && hq && 'hidden lg:inline')}>{t.org_unit_name}</span>}
-      {!compact && <span className="max-lg:hidden"><BrandDot brand={t.brand_id} /></span>}
       {t.subtask_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
       {t.checklist_total > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{collab && '할 일 '}{t.checklist_done}/{t.checklist_total}</span>}
       {t.comment_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
@@ -1374,12 +1373,15 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
             {/* 대표(10/16): 제목은 한 줄 전체 폭·길면 … (두 줄은 목록이 길어져 눈이 피로) — 전체 제목은 줄을 눌러 상세에서 */}
             <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline', sq ? 'line-clamp-2 whitespace-normal break-words' : 'truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{sq ? <Hi text={t.title} q={sq} /> : t.title}</TaskLink>
             <CarriedBadge t={t} />
-            {t.sales_ref?.kind && <span className="shrink-0 rounded-full bg-blue-50 px-1.5 text-[10px] font-medium text-blue-800" title={t.sales_ref.name ?? ''} data-testid="row-sales-ref">{(ST.kind as Record<string, string>)[t.sales_ref.kind] ?? (t.sales_ref.kind === 'support' ? '지원사업' : t.sales_ref.kind === 'contract' ? '계약' : t.sales_ref.kind === 'research' ? '후속조사' : t.sales_ref.kind)}</span>}
+            {/* 380차 #1017(대표 11/07 '입찰과 본사 그리고 요청, 웹사이트, 문의, 다짐 표기를 없애고 현설과 입찰 마감'): 출처 칩(입찰·리드) 뺌 — 상세에 있음 */}
             {/* 344차(대표 11/02 #925): 발주처가 취소한 공고의 열린 업무 — '공고 취소' 빨간 칩(상세에서 [공고 취소로 완료]) */}
             {t.sales_ref?.cancel && t.status !== 'done' && <span className="shrink-0 rounded-full bg-red-50 px-1.5 text-[10px] font-semibold text-red-700" data-testid="row-bid-canceled" title={`발주처가 공고를 취소했습니다${t.sales_ref.cancel.reason ? ` · 사유: ${t.sales_ref.cancel.reason}` : ''} — 상세에서 [공고 취소로 완료]`}>공고 취소</span>}
-            {/* 335차(대표 16:5x, 선택): 다가오는 현장설명회 '현설 11/4 14:00' */}
-            {t.sales_ref?.bidInfo?.briefing?.at && !t.sales_ref.bidInfo.briefingNone && String(t.sales_ref.bidInfo.briefing.at).slice(0, 10) >= todayStr() && <span className="shrink-0 rounded-full bg-amber-50 px-1.5 text-[10px] font-medium text-amber-800" data-testid="row-bid-briefing"
-              title={`현장설명회${t.sales_ref.bidInfo.briefing.required ? '(필수)' : ''}${t.sales_ref.bidInfo.briefing.place ? ` · ${t.sales_ref.bidInfo.briefing.place}` : ''}`}>현설 {bidShort(String(t.sales_ref.bidInfo.briefing.at))}{t.sales_ref.bidInfo.briefing.required ? ' 필수' : ''}</span>}
+            {/* 380차 #1017: 입찰 업무 줄 = '현설 11/9 11시'(필수면 '필수', 3일 안 빨강, 지나면 회색) · '입찰 마감 11/16 17시' — 정시는 'n시', 분이 있으면 '11:30'(폭이 좁아서) */}
+            {t.sales_ref?.bidInfo?.briefing?.at && !t.sales_ref.bidInfo.briefingNone && (() => { const b = t.sales_ref.bidInfo.briefing; const dd = daysTo(String(b.at)); return (
+              <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', dd < 0 ? 'bg-slate-100 text-ink-3' : dd <= 3 ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800')} data-testid="row-bid-briefing" data-past={dd < 0 || undefined}
+                title={`현장설명회${b.required ? '(필수)' : ''}${b.place ? ` · ${b.place}` : ''}`}>현설 {hourShort(String(b.at))}{b.required ? ' 필수' : ''}</span>); })()}
+            {t.sales_ref?.bidInfo?.deadline && (() => { const dd = daysTo(String(t.sales_ref.bidInfo.deadline)); return (
+              <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', dd < 0 ? 'bg-slate-100 text-ink-3' : 'bg-slate-100 text-ink-2')} data-testid="row-bid-close" title="입찰 마감(서류 제출)">입찰 마감 {hourShort(String(t.sales_ref.bidInfo.deadline))}</span>); })()}
             {t.assigned_by_rule && <span className="shrink-0 rounded-full bg-violet-50 px-1.5 text-[10px] font-medium text-violet-800" title="담당자 지정 규칙으로 배정됨" data-testid="row-rule-badge">규칙 배정</span>}
             {t.space && SPACE_META[t.space as 'sales' | 'marketing'] && !(collab && t.sales_ref?.kind) && <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: SPACE_META[t.space as 'sales' | 'marketing'].soft, color: SPACE_META[t.space as 'sales' | 'marketing'].color }} data-testid="row-space">{SPACE_META[t.space as 'sales' | 'marketing'].short}</span>}
             {/* 348차(대표 '아름까지만 검색해도 풀네임 다 보이게'): 어디에 맞았는지 한 줄 — 설명·댓글·체크리스트·첨부·하위 업무, 낱말 전체 */}

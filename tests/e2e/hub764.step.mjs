@@ -32,7 +32,7 @@ export async function hub764({ owner, ctx, sql, BASE, SHOTS }) {
     const card = owner.getByTestId('sales-bid').filter({ hasText: 'E2E764 칠육사아파트' }); await card.waitFor();
     await card.getByTestId('sales-skip').click();
     await card.waitFor({ state: 'detached' });
-    const t = owner.getByTestId('toast').filter({ hasText: '대상 아님으로 옮겼습니다' }); await t.waitFor();
+    const t = owner.getByTestId('toast').filter({ hasText: '취소로 옮겼습니다' }); await t.waitFor();
     assert.equal((await sql`select status from sales_work_records where ref_id = ${N}`)[0]?.status, '대상아님');
     await t.getByRole('button', { name: '되돌리기' }).click();
     await card.waitFor();

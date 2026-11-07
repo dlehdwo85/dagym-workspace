@@ -25,7 +25,7 @@ export async function research212({ owner, ctx, sql, BASE, SHOTS }) {
   // 업무 화면(영업): 묶음 업무 한 줄 + 원천 칩 '후속조사'
   await owner.goto(`${BASE}/tasks?space=sales`);
   const trow = owner.getByTestId('row-title').filter({ hasText: '[후속조사] 시설 2곳 — 연락(전화)' }).first(); await trow.waitFor();
-  assert.equal(await trow.getByTestId('row-sales-ref').innerText(), '후속조사');
+  assert.equal(await trow.getByTestId('row-sales-ref').count(), 0, '380차 #1017: 업무 줄에 출처 칩 없음(상세에 있음)');
   await owner.goto(`${BASE}/s/sales/hub?tab=facilities&q=E2E212`); await bar.waitFor();
   const card = owner.getByTestId('sales-hub-item').filter({ hasText: 'E2E212 광교 단지' });
   const chip = card.getByTestId('hub-research-chip'); await chip.waitFor();

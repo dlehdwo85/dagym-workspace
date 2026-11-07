@@ -1,5 +1,5 @@
 // 137차(로컬 10/24 23:55 135차 ③ 화원): 나라장터 사전규격 → 본 공고 = 같은 사업 — 같은 발주·수요기관 + 표시를 뺀 같은 제목 + 사전규격이 본 공고보다 앞(120일 안).
-// 둘 중 하나를 '대상 아님'으로 넘기면 다른 쪽도 모든 목록·숫자·당일 메일에서 빠짐(다른 쪽에 미검토 말고 진행 기록이 있으면 그대로) · [대상 아님] 탭은 한 장 · 되돌리기도 함께
+// 380차 #1014: 본 공고를 '대상 아님([취소])'으로 넘기면 그 앞 사전규격도 함께 빠짐(사전규격만 넘기면 본 공고는 계속) — 원래: 둘 중 하나를 '대상 아님'으로 넘기면 다른 쪽도 모든 목록·숫자·당일 메일에서 빠짐(다른 쪽에 미검토 말고 진행 기록이 있으면 그대로) · [대상 아님] 탭은 한 장 · 되돌리기도 함께
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { bootstrap, resetDb, startServer, testDb, seoulToday, addDays } from '../helpers.mjs';
@@ -62,12 +62,12 @@ test('본 공고를 대상 아님 → 같은 사업 사전규격도 모든 목�
   assert.ok(all.includes('B1') && all.includes('P1'), '둘 다 다시 목록에');
 });
 
-test('사전규격을 대상 아님 → 본 공고도 빠짐(본 공고 기록이 미검토뿐이면) · 둘 다 넘겼으면 본 공고 한 장 · 되돌리기 = 함께(감사 기록 둘)', async () => {
+test('380차 #1014: 사전규격을 [취소] → 그 사전규격만 치움(뒤따른 본 공고는 계속) · 둘 다 넘겼으면 본 공고 한 장 · 되돌리기 = 함께(감사 기록 둘)', async () => {
   await work('P1', { status: '대상아님', reason: '사전규격 단계에서 제외' });
   const all = ids(await bids('all'));
-  assert.ok(!all.includes('P1') && !all.includes('B1'), JSON.stringify(all));
+  assert.ok(!all.includes('P1') && all.includes('B1'), JSON.stringify(all));
   let sk = await bids('skip'); const k1 = sk.skipCount;
-  assert.deepEqual(sk.items.find((n) => n.id === 'P1').linked.map((l) => [l.id, l.own]), [['B1', false]], '사전규격 카드 아래 본 공고');
+  assert.deepEqual(sk.items.find((n) => n.id === 'P1').linked, [], '본 공고는 함께 숨기지 않음');
   await work('B1', { status: '대상아님' });
   sk = await bids('skip');
   assert.equal(sk.skipCount, k1, '둘 다 넘겨도 한 장');
@@ -92,7 +92,7 @@ test('이어진 쪽에 진행 기록(검토중)이 있으면 그대로 보임', 
   await work('B1', { restore: true });
 });
 
-test('당일 메일: 대상 아님 사전규격과 같은 사업인 오늘 새 본 공고는 빠짐 · 본 공고에 진행 기록이 있으면 그대로', async () => {
+test('380차 #1014 당일 메일: [취소]한 사전규격과 같은 사업인 오늘 새 본 공고도 계속 메일로(그 공고 한 건만 치움)', async () => {
   await sql`insert into sales_digests (tenant, day, items, counts, mailed, notified, created_at) values ('default', ${d(-1)}, '[]', '{}', 1, 1, ${new Date(at(d(-1), '08:00'))})`;
   await pre('P4', { title: '시험면 커뮤니티센터 헬스장 위탁운영', issuer: '시험면', posted_date: d(-10), first_seen_at: at(d(-10)) });
   await bid('B4', 'R26BK0400-000', { title: '시험면 커뮤니티센터 헬스장 위탁운영', issuer: '시험면', posted_date: today, first_seen_at: ago(2), updated_at: ago(2), deadline_at: at(d(9), '10:00') });
@@ -104,7 +104,6 @@ test('당일 메일: 대상 아님 사전규격과 같은 사업인 오늘 새 �
   await work('B5', { status: '검토중', memo: '본 공고 검토' });
   await work('P5', { status: '대상아님' });
   const g = await ctx.owner.ok('GET', '/api/sales/digest');
-  assert.ok(!g.items.some((i) => i.id === 'B4'), '대상 아님 사전규격과 같은 사업');
+  assert.ok(g.items.some((i) => i.id === 'B4'), '취소한 사전규격과 같은 사업의 본 공고도 계속');
   assert.ok(g.items.some((i) => i.id === 'B5'), '진행 기록이 있는 본 공고는 그대로');
-  assert.ok((g.counts.skipped['대상 아님'] ?? 0) >= 1);
 });

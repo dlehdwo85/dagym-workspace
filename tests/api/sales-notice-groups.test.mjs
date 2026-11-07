@@ -131,3 +131,12 @@ test('당일 메일: 대상 아님 공고와 그 취소 공고(같은 번호)는
   const pv = (await ctx.owner.req('GET', '/api/sales/digest?preview=text')).body;
   assert.match(pv, /\[재게시\] \[서울\] 시험 커뮤니티 피트니스/);
 });
+
+test('380차 #1014(대표 11/07 \'대상아님으로 해 두었음. 그래도 지속적으로 공고는 보내 달라\'): [취소]한 공고의 정정(차수↑)은 계속 메일로 · 그 공고의 취소 공고는 빠짐', async () => {
+  await g2b('T1', 'R26BK0030-000', { title: '시험읍 체육관 헬스장 위탁운영', issuer: '시험읍', posted_date: d(-2), first_seen_at: at(d(-2)), updated_at: at(d(-2)), deadline_at: at(d(9), '10:00') });
+  await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'T1', status: '대상아님' });
+  await g2b('T2', 'R26BK0030-001', { title: '[정정] 시험읍 체육관 헬스장 위탁운영', issuer: '시험읍', posted_date: today, first_seen_at: ago(1), updated_at: ago(1), deadline_at: at(d(12), '10:00'), notice_kind: 'amend' });
+  const g = await ctx.owner.ok('GET', '/api/sales/digest');
+  assert.ok(g.items.some((i) => i.id === 'T2'), `정정은 계속 ${JSON.stringify(g.items.map((i) => i.id))}`);
+  assert.ok(!g.items.some((i) => i.id === 'T1'), '치운 그 공고는 빠짐');
+});

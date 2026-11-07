@@ -278,6 +278,8 @@ export function AvatarStack({ people, max = 3, size = 22 }: { people: { id?: str
 }
 
 /** 마감일 칩: 지남=빨강, 오늘=파랑, 3일 이내=주황 */
+/** 380차 #1017(대표 11/07 '넓이가 좁으니 11:00까지 표기 x, 11시 이렇게. 30분 단위가 있으면 11:30'): 시각을 좁게 */
+export const hourLabel = (t: string) => { const m = t.match(/^(\d{1,2}):(\d{2})/); return m ? (m[2] === '00' ? `${Number(m[1])}시` : `${Number(m[1])}:${m[2]}`) : t; };
 export function DueChip({ due, status, time, className }: { due: string | null | undefined; status?: string; time?: string | null; className?: string }) {
   if (!due) return null;
   const t = todayStr();
@@ -291,7 +293,7 @@ export function DueChip({ due, status, time, className }: { due: string | null |
   return (
     <span className={clsx('inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums', tone, className)}
       title={`마감 ${fmtDate(due)}${dday ? ` · ${dday}` : !done && days < 0 ? ` · ${-days}일 지남` : ''}`} data-days={done ? undefined : days}>
-      <CalendarDays className="size-3.5 opacity-70" aria-hidden />{fmtNum(due)}{time ? ` ${time.slice(0, 5)}` : ''}{dday && <span className="font-semibold" data-testid="due-dday">{dday}</span>}{!done && days < 0 && <span className="font-semibold lg:max-xl:hidden"> · {-days}일 지남</span>}
+      <CalendarDays className="size-3.5 opacity-70" aria-hidden />{fmtNum(due)}{time ? ` ${hourLabel(time)}` : ''}{dday && <span className="font-semibold" data-testid="due-dday">{dday}</span>}{!done && days < 0 && <span className="font-semibold lg:max-xl:hidden"> · {-days}일 지남</span>}
     </span>
   );
 }

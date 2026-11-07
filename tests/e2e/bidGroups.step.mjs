@@ -32,21 +32,18 @@ export async function bidGroups({ owner, ctx, sql, BASE, SHOTS }) {
   assert.equal(await screen.getByTestId('bid-history-cancel').innerText(), `${md(ymd(-1))} 취소 공고`);
   assert.equal(await screen.getByTestId('sales-handoff').count(), 0, '취소 공고는 [넘기기] 대신 [대상 아님으로]');
   await owner.screenshot({ path: `${SHOTS}/256-bid-groups.png` });
-  // 취소 카드 → [대상 아님으로](사유) → 전체 탭에서 빠짐
+  // 취소 카드 → 380차 #1015: [발주처 취소 확인 · 취소로 치우기] 한 번(사유 칸 없음) → 전체 탭에서 빠짐
   await screen.getByTestId('bid-skip-open').click();
-  await screen.getByTestId('bid-skip-reason-input').fill('취소 공고 확인');
-  await screen.getByTestId('bid-skip-go').click();
-  await owner.getByText('대상 아님으로 넘겼습니다').first().waitFor();
+  await owner.getByText('취소로 옮겼습니다').first().waitFor();
   await screen.waitFor({ state: 'detached' });
-  // [대상 아님 n건] 탭: 누가·언제·사유 → [되돌리기]
+  // [취소 n건] 탭: 누가·언제 → [되돌리기] (예전 '대상 아님' 탭)
   const tab = list.getByTestId('sales-bids-tab-skip');
-  assert.match(await tab.innerText(), /^대상 아님 \d+건$/);
+  assert.match(await tab.innerText(), /^취소 \d+건$/);
   await tab.click();
   const sk = list.getByTestId('sales-bid').filter({ hasText: '스크린골프' }); await sk.waitFor();
   const [{ name }] = await sql`select name from users where id = ${ctx.ownerId}`;
   const line = await sk.getByTestId('bid-skip').innerText();
-  assert.ok(line.includes('대상 아님') && line.includes(name), line);
-  assert.equal(await sk.getByTestId('bid-skip-reason').innerText(), '· 사유: 취소 공고 확인');
+  assert.ok(line.includes('취소함') && line.includes(name), line);
   await owner.screenshot({ path: `${SHOTS}/257-bid-skip-tab.png` });
   await sk.getByTestId('bid-skip-restore').click();
   await owner.getByText('되돌렸습니다').first().waitFor();
@@ -57,13 +54,13 @@ export async function bidGroups({ owner, ctx, sql, BASE, SHOTS }) {
   // 상세 상태 버튼 '대상아님' = 사유를 묻고 넘김 → [되돌리기]
   await cmty.getByTestId('bid-open').click();
   const panel = owner.getByTestId('work-panel'); await panel.waitFor();
+  // 380차 #1015: 입찰 상태 버튼 '대상아님' 은 [취소]로 보이고 사유 칸 없이 바로 저장
+  assert.equal(await panel.getByTestId('work-status-대상아님').innerText(), '취소');
   await panel.getByTestId('work-status-대상아님').click();
-  await panel.getByTestId('work-skip-reason').fill('우리 업종 아님');
-  await panel.getByTestId('work-skip-go').click();
   await panel.getByTestId('work-skipped').waitFor();
   let w = null; // 화면은 누르자마자 바뀌므로 저장은 기록으로 확인
   for (let k = 0; k < 40 && w?.status !== '대상아님'; k++) { [w] = await sql`select status, data from sales_work_records where tenant = 'default' and ref_id = ${ids[3]}`; if (w?.status !== '대상아님') await owner.waitForTimeout(250); }
-  assert.deepEqual([w.status, w.data.skip_reason], ['대상아님', '우리 업종 아님'], '카드 = 가장 최근 게시(진행 기록 없음)');
+  assert.deepEqual([w.status, w.data.skip_reason], ['대상아님', null], '카드 = 가장 최근 게시(진행 기록 없음) · 사유 없음');
   await panel.getByTestId('work-restore').click();
   await owner.getByText("되돌렸습니다 — '미검토'").first().waitFor();
   assert.equal((await sql`select status from sales_work_records where tenant = 'default' and ref_id = ${ids[3]}`)[0].status, '미검토');

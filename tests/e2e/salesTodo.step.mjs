@@ -37,7 +37,7 @@ export async function salesTodo({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.goto(`${BASE}/tasks?space=sales`);
   const row = owner.getByTestId('row-title').filter({ hasText: 'E2E 할일 단지 A' }).first();
   await row.waitFor();
-  assert.equal(await row.getByTestId('row-sales-ref').innerText(), '신규단지');
+  assert.equal(await row.getByTestId('row-sales-ref').count(), 0, '380차 #1017: 업무 줄에 출처 칩 없음');
   // 계약만료·재입찰
   await owner.goto(`${BASE}/s/sales/contracts`);
   await owner.getByTestId('contracts-item').filter({ hasText: 'E2E 계약 종료 예정 운영' }).waitFor();
@@ -59,7 +59,7 @@ export async function salesTodo({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.goto(`${BASE}/s/sales/hub`);
   await owner.getByTestId('sales-hub-buildings').filter({ hasText: '신규 프로젝트' }).waitFor();
   await owner.goto(`${BASE}/tasks?space=sales`);
-  assert.equal(await owner.getByTestId('row-title').filter({ hasText: 'E2E 할일 단지 A' }).first().getByTestId('row-sales-ref').innerText(), '신규 프로젝트');
+  await owner.getByTestId('row-title').filter({ hasText: 'E2E 할일 단지 A' }).first().waitFor(); // 380차 #1017: 줄의 출처 칩은 뺐음(업종 이름은 상세·영업 화면에서)
   await owner.goto(`${BASE}/s/sales/sources`);
   await Promise.all([owner.waitForNavigation({ waitUntil: 'load' }), owner.getByTestId('sales-template-facility').click()]);
   await owner.getByTestId('sales-template').getByTestId('sales-template-state').filter({ hasText: '시설 운영·위탁' }).waitFor();
