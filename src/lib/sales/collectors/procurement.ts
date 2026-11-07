@@ -33,23 +33,33 @@ const OPERATION_ONLY = new Set(['위탁운영', '운영위탁', '운영업체', 
 /** 227차(로컬 10/28 ①② '국회도서관 정보기기·보안관제 위탁운영'): 위탁 대상이 시설이 아니라 정보기기·전산·관제·유지관리·콜센터인 공고 */
 const IT_TARGET = /정보\s*기기|전산|정보\s*(?:시스템|화|통신|보호)|보안\s*관제|관제\s*(?:시스템|센터|용역|업무)|유지\s*관리|유지\s*보수|콜\s*센터|서버|네트워크|홈페이지|소프트웨어/;
 
-/** 372차 #995(로컬 21라인 대조: 나라장터 '기타' R26BK01813410 안동 '엄마까투리 상상놀이터 관리위탁 운영자 모집'이 빠짐) — 미리 보기용 후보 규칙(아직 matchFit 에 안 넣음):
- *  지자체·공공 시설의 관리위탁·운영자 모집 = 제목에 운영 맡김 낱말 + 시설 낱말, 설치·공사·구매 같은 낱말은 없음. 대표 확인 뒤 matchFit 에 넣는다 */
+/** 372차 #995(로컬 21라인 대조: 나라장터 '기타' R26BK01813410 안동 '엄마까투리 상상놀이터 관리위탁 운영자 모집'이 빠짐) — 미리 보기로 시작한 규칙.
+ *  381차 #1008(대표 11/07 "켜 주세요 — 단 놀이터는 우리가 위탁하지 않음"): matchFit 에 넣음(다짐). 놀이터는 시설 낱말에서 뺌 — 캠핑장·야영장·파크골프 등 나머지는 그대로.
+ *  지자체·공공 시설의 관리위탁·운영자 모집 = 제목에 운영 맡김 낱말 + 시설 낱말, 설치·공사·구매·청소·경비·조경·전산 같은 낱말은 없음 */
 const PUB_OPS = /(관리\s*위탁|위탁\s*관리|위탁\s*운영|운영\s*위탁|위탁\s*운영자|운영자\s*(?:모집|선정)|수탁(?:자|기관)\s*(?:모집|선정)|관리\s*운영\s*(?:위탁|자))/;
-const PUB_FAC = /(놀이터|어린이\s*공원|공원|캠핑장|야영장|오토\s*캠핑|체육\s*공원|파크\s*골프|골프장|체육\s*시설|체육관|체육\s*센터|수영장|생활\s*체육|스포츠\s*센터|국민\s*체육|복합\s*문화|문화\s*체육|레포츠|썰매장|스케이트장|물놀이)/;
+const PUB_FAC = /(어린이\s*공원|공원|캠핑장|야영장|오토\s*캠핑|체육\s*공원|파크\s*골프|골프장|체육\s*시설|체육관|체육\s*센터|수영장|생활\s*체육|스포츠\s*센터|국민\s*체육|복합\s*문화|문화\s*체육|레포츠|썰매장|스케이트장|물놀이)/g;
+/** 공원·어린이공원만 있는 놀이터 공고(예 'OO공원 놀이터 관리위탁')는 놀이터 위탁 — 빼고, 체육·캠핑 같은 다른 시설이 함께 있으면 그 시설로 */
+const PLAYGROUND = /놀이터/;
+const PARK_ONLY = /^(?:어린이\s*공원|공원)$/;
+const PUB_NOISE = /조경|수목|녹지|제초|가로수|화장실|주차|매표|발권/;
 export function publicFacilityFit(title: string, cat?: string | null): { hit: boolean; ops: string | null; facility: string | null; why: string | null } {
   const t = String(title ?? ''); const head = `${t} ${cat ?? ''}`;
-  const ops = t.match(PUB_OPS)?.[0] ?? null, facility = t.match(PUB_FAC)?.[0] ?? null;
-  if (!ops || !facility) return { hit: false, ops, facility, why: !ops ? '운영 맡김 낱말 없음' : '시설 낱말 없음' };
+  const ops = t.match(PUB_OPS)?.[0] ?? null;
+  let facs = [...t.matchAll(PUB_FAC)].map((m) => m[0]);
+  if (PLAYGROUND.test(t)) facs = facs.filter((f) => !PARK_ONLY.test(f));
+  const facility = facs[0] ?? null;
+  if (!ops || !facility) return { hit: false, ops, facility, why: !ops ? '운영 맡김 낱말 없음' : PLAYGROUND.test(t) ? "'놀이터'는 위탁하지 않음" : '시설 낱말 없음' };
   if (EXCLUDE_TOPICS.some((k) => norm(head).includes(norm(k)))) return { hit: false, ops, facility, why: '제외 주제' };
-  const build = t.match(BUILD_RE)?.[0] ?? t.match(CONSTRUCTION_RE)?.[0] ?? null;
+  const build = t.match(BUILD_RE)?.[0] ?? t.match(CONSTRUCTION_RE)?.[0] ?? t.match(FACILITY_SERVICE_RE)?.[0] ?? t.match(PUB_NOISE)?.[0] ?? null;
   if (build) return { hit: false, ops, facility, why: `제목에 '${build}'` };
+  const it = t.match(IT_TARGET)?.[0];
+  if (it) return { hit: false, ops, facility, why: `위탁 대상이 '${it}'` };
   return { hit: true, ops, facility, why: null };
 }
 
 export type FitBusiness = '다짐' | '하이링크' | '다짐·하이링크';
 /** dropped = 낱말은 맞았지만 191차 규칙으로 뺀 사업과 까닭(다시 판정이 예전 판정을 내릴 때 근거) */
-export type FitResult = { fit: FitBusiness | null; matched: string[]; direct: boolean; dropped?: { business: '다짐' | '하이링크'; why: string }[] };
+export type FitResult = { fit: FitBusiness | null; matched: string[]; direct: boolean; dropped?: { business: '다짐' | '하이링크'; why: string }[]; pub?: true };
 const norm = (s: string) => s.toUpperCase().replace(/\s+/g, '');
 
 /** 제목·분류·내용에서 키워드를 찾아 적합 사업을 정한다(띄어쓰기 무시, 긴 단어에 포함된 짧은 단어는 하나로).
@@ -103,9 +113,16 @@ export function matchFit(...texts: (string | null | undefined)[]): FitResult {
     const why = !apt ? `시설 낱말이 '${fac.join('·')}'뿐이고 아파트·주민 맥락이 없음` : it ? `위탁 대상이 '${it}' — 다짐은 시설 운영만` : null;
     if (why) { dropped.push({ business: '다짐', why }); d = []; }
   }
+  // 381차 #1008: 다짐 낱말이 안 잡혔고(191·227차 규칙으로 뺀 것은 그대로 뺌) 제목이 공공 시설 관리위탁·운영자 모집이면 다짐 — 운영을 맡기는 공고라 즉시 검토
+  let pub = false;
+  if (!d.length && !dropped.some((x) => x.business === '다짐')) {
+    const pf = publicFacilityFit(parts[0] ?? '', parts[1] ?? null);
+    if (pf.hit && pf.facility) { d = [pf.facility.replace(/\s+/g, '')]; pub = true; }
+  }
   const fit: FitBusiness | null = d.length && h.length ? '다짐·하이링크' : d.length ? '다짐' : h.length ? '하이링크' : null;
-  const direct = (d.length > 0 && DIRECT_OPS.test(text)) || (h.length > 0 && DIRECT_SYS.test(text));
-  return { fit, matched: [...d, ...h], direct: !!fit && direct, ...(dropped.length ? { dropped } : {}) };
+  // 381차: 제목의 '관리위탁'·'운영자 모집'·'수탁기관 모집'(공공 시설 운영 맡김 낱말)도 다짐 즉시 검토
+  const direct = pub || (d.length > 0 && (DIRECT_OPS.test(text) || PUB_OPS.test(parts[0] ?? ''))) || (h.length > 0 && DIRECT_SYS.test(text));
+  return { fit, matched: [...d, ...h], direct: !!fit && direct, ...(dropped.length ? { dropped } : {}), ...(pub ? { pub: true as const } : {}) };
 }
 
 /** 로컬 10/24 12:20(#537 후속): 결과(낙찰·유찰) 줄 — 영업 기회가 아니라 결과. 오늘 새 공고·새 공고 수에서 빼고 '결과' 묶음으로(당일 메일·영업기회 오늘 탭·영업 홈 같은 기준) */

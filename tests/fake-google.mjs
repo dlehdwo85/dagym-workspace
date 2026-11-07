@@ -140,9 +140,11 @@ export function startFakeGoogle(port = 3199) {
       // V14 5번: 업무 무관 질문 분류(가벼운 모델)는 시험 응답 줄을 쓰지 않고 따로 답한다(기본: 업무 맞음)
       if (String(body.system ?? '').startsWith('WORKIN_TOPIC_CLASSIFIER')) {
         state.classified.push(body.messages[0].content);
-        const work = state.classifyQueue.length ? state.classifyQueue.shift() : true;
+        // 381차: 판정은 { work, sure } — 시험 줄이 true/false 면 sure = true(확실), 객체면 그대로
+        const q = state.classifyQueue.length ? state.classifyQueue.shift() : true;
+        const out = typeof q === 'object' && q ? q : { work: q, sure: true };
         return json(res, 200, { id: `msg_c${state.classified.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_reason: 'end_turn',
-          usage: { input_tokens: 50, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, content: [{ type: 'text', text: JSON.stringify({ work }) }] });
+          usage: { input_tokens: 50, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, content: [{ type: 'text', text: JSON.stringify(out) }] });
       }
       // #235 ⓒ 사진 AI 설명(구조화 출력 caption·promo·faces): 다른 시험이 줄 세운 응답과 섞이지 않게 따로 받고(state.vision) 따로 답함(visionQueue)
       //   기본 답 = 중립 판정(실사·글자 조금·홍보물 아님 → 그래픽도 아니고 바탕 후보도 아님 — 예전 이름 규칙 결과 그대로)

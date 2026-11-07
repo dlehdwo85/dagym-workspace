@@ -970,6 +970,8 @@ const BUNDLES: [RegExp, string[]][] = [
   [/문자|SMS|견적|양식|발송/i, ['propose_draft_sms', 'list_quote_companies', 'propose_draft_quote', 'propose_create_quote_template']],
   [/기밀|보안 ?등급|회사 ?설정|기밀 ?단어|업종|말투|사업 ?방향|고객층|주의 ?사항|자동 ?저장|설정/, ['list_confidential_suggestions', 'propose_set_confidential', 'get_company_settings', 'propose_update_company_settings']],
 ];
+/** 381차 #1002: '할 수 없음' 답 — 이렇게 답하면 모든 도구로 한 번 더 시도(정책상 거절 refusal 은 아님) */
+export const CANT_RE = /(할\s*수\s*(?:가\s*)?없|해\s*드릴\s*수\s*없|도와\s*드릴\s*수\s*없|드릴\s*수\s*없|불가능합|지원하지\s*않|도구가\s*없|기능이\s*없|기능은\s*없|화면에서\s*직접|직접\s*(?:하셔야|해\s*주셔야|확인해\s*주셔야))/;
 const MORE_TOOLS: AiTool = { name: 'more_tools', description: '이번 질문에는 자주 쓰는 도구만 붙어 있다. 일정·자료·문서·매출 등 필요한 도구가 목록에 없으면 먼저 이 도구를 불러 모든 도구를 받는다("안 된다"고 답하기 전에 반드시).',
   input_schema: { type: 'object', properties: { reason: { type: 'string', description: '필요한 일' } } } } as AiTool;
 export function toolsFor(text: string, hasFiles: boolean, all = false, space?: string | null) {
@@ -1038,7 +1040,8 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   const assignHint = intentHint(userText);
   const docMode = !providerArg && settings.doc_engine && !assignHint && isDocRequest(userText);
   const light = !docMode && !assignHint && lightQuestion(userText, !!i.fileIds?.length); // V45: 조회 질문은 빠른 모델
-  const provider: AiProvider = providerArg ?? anthropicProvider(docMode || light ? { tier: 'fast' } : {});
+  let provider: AiProvider = providerArg ?? anthropicProvider(docMode || light ? { tier: 'fast' } : {});
+  let retried = false; // 381차 #1002: '할 수 없음' 답 전에 모든 도구로 한 번 더
 
   let context = '';
   if (i.taskId) {
@@ -1095,6 +1098,18 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
     const text = cleanReply(r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('\n').trim()); // #650 도구 안내 문장 제거
     if (r.stop_reason === 'refusal') { reply = '이 요청은 처리할 수 없습니다. 다르게 요청해 주세요.'; break; }
     if (r.stop_reason === 'pause_turn') { messages.push({ role: 'assistant', content: r.content as never }); continue; }
+    // 381차 #1002(대표 11/07 "AI 비서가 '할 수 없다'고 하는 것을 최소화"): 자주 쓰는 도구만 붙은 채(또는 빠른 모델로) '할 수 없음·도구가 없음'이라 답하면
+    // 모든 도구를 붙이고(빠른 모델이었으면 기본 모델로) 한 번 더 시도 — 화면의 앞 답은 도구 단계처럼 지워짐
+    if (r.stop_reason === 'end_turn' && !retried && !docMode && (!c.allTools || (light && !providerArg)) && CANT_RE.test(text)) {
+      retried = true; c.allTools = true;
+      if (light && !providerArg) provider = anthropicProvider({});
+      messages.push({ role: 'assistant', content: r.content as never });
+      messages.push({ role: 'user', content: '(자동 안내) 모든 도구를 붙였습니다. 도구로 할 수 있는지 다시 확인하고 요청을 처리하세요. 정말 도구로 안 되는 일이면 그때만 이유와 대신 할 수 있는 방법을 짧게 알려 주세요.' });
+      steps.push('more_tools');
+      onEvent?.({ type: 'tools', names: ['more_tools'] });
+      tm.answer = 0; tm.chunks = 0;
+      continue;
+    }
     if (r.stop_reason !== 'tool_use') { reply = text || (r.stop_reason === 'max_tokens' ? '답이 너무 길어 중간에 끊겼습니다. 범위를 좁혀 다시 요청해 주세요.' : ''); break; }
     messages.push({ role: 'assistant', content: r.content as never });
     const uses = r.content.filter((b): b is Extract<typeof b, { type: 'tool_use' }> => b.type === 'tool_use');

@@ -72,7 +72,7 @@ export async function lookupNotices(q: { no?: string | null; q?: string | null }
         due: !eligibilityOutOfScope(r, gone) && eligibilityDue(r), skip: eligibilityOutOfScope(r, gone) }
         : { say: eligSay(eligView(r)), readAt: null, due: !eligibilityOutOfScope(r, gone), skip: eligibilityOutOfScope(r, gone) }, // 257차: skip = 정기 실행이 안 읽는 이유(마감일 칸 없음 등)
       firstSeenAt: r.first_seen_at ?? r.created_at ?? null, lastSeenAt: r.last_seen_at ?? null, refitAt: r.refit_at ?? null, refoundAt: r.refound_at ?? null, syncedAt: synced_at,
-      nowRule: (() => { const f = matchFit(String(r.title ?? ''), r.bid_category ?? null, r.task_scope ?? null, r.source_type === 'kapt_bid' ? '공동주택' : null); return { fit: f.fit, matched: f.matched, dropped: f.dropped ?? [] }; })(),
+      nowRule: (() => { const f = matchFit(String(r.title ?? ''), r.bid_category ?? null, r.task_scope ?? null, r.source_type === 'kapt_bid' ? '공동주택' : null); return { fit: f.fit, matched: f.matched, dropped: f.dropped ?? [], direct: f.direct, ...(f.pub ? { pub: true } : {}) }; })(), // 381차: 즉시 검토·공공 시설 위탁 규칙(pub)으로 잡힘
       refitLoweredAt: r.refit_lowered_at ?? null, refitLoweredWhy: r.refit_lowered_why ?? null, judgedAt: r.judged_at ?? null,
       reasons: hiddenReasons(r, gone),
       listCheck: traced ? (gone ? { listed: false, step: 'read', why: '사라짐·합쳐짐 줄은 목록에서 읽지 않음' } : traced.get(src_id) ?? null) : null,

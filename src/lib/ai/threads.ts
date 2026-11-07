@@ -11,10 +11,10 @@ import type { SessionUser } from '../types';
  * - 업무와 무관한 질문·하루 한도·긴 입력·같은 질문 반복은 비싼 모델 호출 전에 막고 "차단됨"으로 남긴다.
  */
 import { tenantOf } from '../types';
-export type AiSettings = { retention_days: number; daily_limit: number; input_max: number; topic_filter: boolean; console_note: string | null; web_tools: boolean; doc_engine: boolean; /** ⑥ 밤사이 비서 범위(draft·lead_next·bid_summary·report, 기본 모두 끔) */ night_scope: Record<string, boolean> };
+export type AiSettings = { retention_days: number; daily_limit: number; input_max: number; topic_filter: boolean; /** 381차 #1002 거름 허용 낱말 */ topic_allow: string[]; console_note: string | null; web_tools: boolean; doc_engine: boolean; /** ⑥ 밤사이 비서 범위(draft·lead_next·bid_summary·report, 기본 모두 끔) */ night_scope: Record<string, boolean> };
 export async function aiSettings(tenant: string, sql: Sql = db()): Promise<AiSettings> {
-  const [s] = await sql<AiSettings[]>`select retention_days, daily_limit, input_max, topic_filter, console_note, web_tools, doc_engine, night_scope from ai_settings where tenant = ${tenant}`;
-  return s ? { ...s, night_scope: s.night_scope ?? {} } : { retention_days: 90, daily_limit: Number(process.env.AI_DAILY_LIMIT) || 50, input_max: 4000, topic_filter: process.env.AI_TOPIC_FILTER !== '0', console_note: null, web_tools: true, doc_engine: true, night_scope: {} };
+  const [s] = await sql<AiSettings[]>`select retention_days, daily_limit, input_max, topic_filter, topic_allow, console_note, web_tools, doc_engine, night_scope from ai_settings where tenant = ${tenant}`;
+  return s ? { ...s, topic_allow: s.topic_allow ?? [], night_scope: s.night_scope ?? {} } : { retention_days: 90, daily_limit: Number(process.env.AI_DAILY_LIMIT) || 50, input_max: 4000, topic_filter: process.env.AI_TOPIC_FILTER !== '0', topic_allow: [], console_note: null, web_tools: true, doc_engine: true, night_scope: {} };
 }
 
 /** 대화 하나 열기(본인 것만). 없으면 404 */
@@ -96,18 +96,36 @@ export async function precheck(u: SessionUser, text: string, threadId: string | 
   // #992(로컬 11/05 운영): 제안 카드 바로 뒤 "방금 제안들 어떻게 됐어?"가 업무 밖으로 걸림 → 이어 가는 대화의 짧은 후속 질문은 거르지 않는다
   if (threadId && text.trim().length <= 40 && FOLLOW_UP.test(text)
     && (await sql`select 1 from ai_messages where thread_id = ${threadId} and role = 'assistant' and status = 'ok' limit 1`).length) return null;
+  // 381차 #1002(대표 11/07 "업무 밖 거름은 확실한 잡담만 막고 애매하면 통과"): 회사 일 낱말·회사가 더한 허용 낱말이 있으면 분류기 없이 통과
+  const flat = text.replace(/\s+/g, '');
+  if (WORK_HINT.test(text) || s.topic_allow.some((w) => w.trim() && flat.includes(w.replace(/\s+/g, '')))) return null;
   const { anthropicProvider, costUsd } = await import('./provider');
   const p = anthropicProvider({ tier: 'fast' });
   try {
-    const r = await p.chat({ system: 'WORKIN_TOPIC_CLASSIFIER: 사내 업무 도구의 AI 비서에 들어온 요청이 회사 업무(업무·일정·회의·자료실·매출·보고·고객 응대·회사 문서 작성/요약/번역 등)와 관련 있는지 판정하세요. 일반 잡담·숙제·코딩 과제·연예·게임·개인 상담·시사 토론은 무관.',
-      tools: [], format: { type: 'object', additionalProperties: false, required: ['work'], properties: { work: { type: 'boolean' } } },
+    const r = await p.chat({ system: 'WORKIN_TOPIC_CLASSIFIER: 사내 업무 도구의 AI 비서에 들어온 요청이 회사 일에 쓰일 수 있는지 판정하세요. 업무·일정·회의·자료·매출·보고·고객 응대·영업·마케팅·회사 문서 작성/요약/번역·정보 찾기·계산·법/세금/노무·기술 질문은 모두 업무(work=true)입니다. '
+      + '업무와 확실히 무관한 잡담(인사·농담·연예·게임·운세·로또·맛집·개인 연애 상담·학교 숙제 풀이)일 때만 work=false, sure=true. 조금이라도 회사 일에 쓰일 수 있거나 애매하면 work=true(또는 work=false 라도 sure=false).',
+      tools: [], format: { type: 'object', additionalProperties: false, required: ['work', 'sure'], properties: { work: { type: 'boolean' }, sure: { type: 'boolean' } } },
       messages: [{ role: 'user', content: text.slice(0, 600) }] });
     await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
       values (${tenantOf(u)}, ${u.id}, ${crypto.randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0},
         ${r.usage.cache_creation_input_tokens ?? 0}, ${costUsd(r.model ?? p.model, r.usage)}, 'classify')`;
     const j = JSON.parse(/\{[\s\S]*\}/.exec(r.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(''))?.[0] ?? '{"work":true}');
-    return j.work === false ? '업무와 관련된 요청만 도와드려요. 업무·일정·자료·보고에 대해 물어봐 주세요.' : null;
+    return j.work === false && j.sure !== false ? TOPIC_BLOCK : null; // 381차: 확실할 때만 막음
   } catch { return null; } // 분류 실패는 막지 않는다
+}
+/** 업무 밖 거름에 걸린 답(관리 › AI 사용 내역 '거름에 걸린 질문' 목록이 이 문구로 찾음) */
+export const TOPIC_BLOCK = '업무와 관련된 요청만 도와드려요. 업무·일정·자료·보고에 대해 물어봐 주세요.';
+/** 381차 #1002: 회사 일 낱말 — 있으면 분류기 없이 통과(애매하면 통과) */
+const WORK_HINT = /(업무|회사|고객|거래처|공고|입찰|일정|회의|미팅|메일|문서|보고|계약|매출|지출|비용|견적|마케팅|광고|영업|자료|파일|엑셀|직원|팀원|담당|현장|시설|단지|아파트|관리\s*사무소|센터|헬스|피트니스|커뮤니티|발주|납품|세금|부가세|노무|급여|연차|출장|결재|공문|기안|안내문|프로젝트|업체|협력사|입주|위탁|요금|결제|정산|재고|주문|배송|민원|점검|교육|채용|면접)/;
+/** 381차 #1002: 관리 › AI 사용 내역 — 업무 밖 거름에 걸린 질문(최근 30일, 이 회사만, 이름 없이 질문 앞 120자) */
+export async function topicBlocked(u: SessionUser) {
+  const { requireMenu } = await import('../menuPerms');
+  await requireMenu(u, 'ai_logs', 'view');
+  const sql = db();
+  const rows = await sql<{ text: string; at: Date }[]>`select left(m.text, 120) as text, m.created_at as at from ai_messages m join ai_threads t on t.id = m.thread_id
+    where t.tenant = ${tenantOf(u)} and not coalesce(t.confidential, false) and m.role = 'user' and m.status = 'blocked' and m.block_reason = ${TOPIC_BLOCK} and m.created_at >= now() - interval '30 days'
+    order by m.id desc limit 100`;
+  return { items: rows.map((r) => ({ text: r.text, at: r.at })), count: rows.length };
 }
 
 export async function saveTurn(u: SessionUser, threadId: string, user: { text: string; fileIds?: string[]; fileNames?: string[] },
@@ -218,6 +236,7 @@ export async function logDelete(u: SessionUser, id: string, ip: string | null) {
 }
 export const aiSettingsInput = z.object({ retentionDays: z.number().int().min(0).max(3650).optional(), dailyLimit: z.number().int().min(1).max(1000).optional(),
   inputMax: z.number().int().min(200).max(20000).optional(), topicFilter: z.boolean().optional(), consoleNote: z.string().max(500).nullable().optional(),
+  topicAllow: z.array(z.string().trim().min(1).max(30)).max(100).optional(), // 381차 #1002 거름 허용 낱말
   webTools: z.boolean().optional(), docEngine: z.boolean().optional(), // V22 웹 검색·페이지 읽기 / 문서 작업 켜기·끄기
   nightScope: z.record(z.enum(['draft', 'lead_next', 'bid_summary', 'report', 'goal']), z.boolean()).optional() }); // ⑥ 밤사이 비서 범위
 export async function setAiSettings(u: SessionUser, i: z.infer<typeof aiSettingsInput>, ip: string | null) {
@@ -227,12 +246,12 @@ export async function setAiSettings(u: SessionUser, i: z.infer<typeof aiSettings
   const sql = db(); const t = tenantOf(u);
   const cur = await aiSettings(t, sql);
   const next = { retention_days: i.retentionDays ?? cur.retention_days, daily_limit: i.dailyLimit ?? cur.daily_limit, input_max: i.inputMax ?? cur.input_max,
-    topic_filter: i.topicFilter ?? cur.topic_filter, console_note: i.consoleNote !== undefined ? i.consoleNote : cur.console_note,
+    topic_filter: i.topicFilter ?? cur.topic_filter, topic_allow: i.topicAllow ? [...new Set(i.topicAllow)] : cur.topic_allow, console_note: i.consoleNote !== undefined ? i.consoleNote : cur.console_note,
     web_tools: i.webTools ?? cur.web_tools, doc_engine: i.docEngine ?? cur.doc_engine, night_scope: i.nightScope ?? cur.night_scope ?? {} };
-  await sql`insert into ai_settings (tenant, retention_days, daily_limit, input_max, topic_filter, console_note, web_tools, doc_engine, night_scope, updated_by)
-    values (${t}, ${next.retention_days}, ${next.daily_limit}, ${next.input_max}, ${next.topic_filter}, ${next.console_note}, ${next.web_tools}, ${next.doc_engine}, ${sql.json(next.night_scope as never)}, ${u.id})
+  await sql`insert into ai_settings (tenant, retention_days, daily_limit, input_max, topic_filter, topic_allow, console_note, web_tools, doc_engine, night_scope, updated_by)
+    values (${t}, ${next.retention_days}, ${next.daily_limit}, ${next.input_max}, ${next.topic_filter}, ${next.topic_allow}, ${next.console_note}, ${next.web_tools}, ${next.doc_engine}, ${sql.json(next.night_scope as never)}, ${u.id})
     on conflict (tenant) do update set retention_days = excluded.retention_days, daily_limit = excluded.daily_limit, input_max = excluded.input_max,
-      topic_filter = excluded.topic_filter, console_note = excluded.console_note, web_tools = excluded.web_tools, doc_engine = excluded.doc_engine, night_scope = excluded.night_scope, updated_by = excluded.updated_by, updated_at = now()`;
+      topic_filter = excluded.topic_filter, topic_allow = excluded.topic_allow, console_note = excluded.console_note, web_tools = excluded.web_tools, doc_engine = excluded.doc_engine, night_scope = excluded.night_scope, updated_by = excluded.updated_by, updated_at = now()`;
   await audit(sql, u.id, 'ai.settings', null, null, next, ip);
   return { ok: true, settings: next };
 }

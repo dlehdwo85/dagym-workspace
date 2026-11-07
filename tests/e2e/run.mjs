@@ -87,6 +87,7 @@ import { terms239 } from './terms239.step.mjs';
 import { photos749 } from './photos749.step.mjs';
 import { cal755 } from './cal755.step.mjs';
 import { aiFind753 } from './aiFind753.step.mjs';
+import { aiTopic1002 } from './aiTopic1002.step.mjs';
 import { trash241 } from './trash241.step.mjs';
 import { movein759 } from './movein759.step.mjs';
 import { hub764 } from './hub764.step.mjs';
@@ -3072,6 +3073,7 @@ await step('239차 #743·#744 입찰 카드: 현장설명 필수 D-n(3일 안 �
 await step('#749 아이폰 사진 147장(휴대폰 흉내·실제 크기 사진): 업무 첨부·메신저 모두 끝까지 · 긴 작업 · 버튼 다시 누를 수 있음 · 아이폰 고르기 전 한 줄 안내', () => photos749({ browser, devices, ctx, sql, BASE }));
 await step('#755·#756·#757 캘린더 구글처럼(대표 10/28): 이어진 30분 일정 4건 좌우로 안 쪼개짐·한 줄 \'제목, 오후 2:30\' · 시간 글자 가로줄 가운데·첫 글자 숨김 · 빈 칸 클릭 = 15분 칸부터 1시간 · 시각 :15·:45 · 휴대폰 폭', () => cal755({ owner, ctx, sql, BASE, SHOTS }));
 await step('#753 AI 비서 자료실 찾기: 답 아래 자료 카드(이름·폴더) · [열기] = 자료실 그 폴더·그 파일 강조 · [내려받기] · [업무에 붙이기] = 입력칸에 부탁 글 · 패널(✨)도 같음', () => aiFind753({ owner, ctx, BASE, FAKE, SHOTS }));
+await step('381차 #1002 AI 사용 내역: 업무 밖으로 걸린 질문(이름 없이) · 거름 없이 통과시킬 낱말 저장', () => aiTopic1002({ owner, ctx, BASE, FAKE, SHOTS }));
 await step('241차 지운 일정(로컬 10/28 19:20 일정 사라짐): 캘린더 [지운 일정] → 지운 사람·때 → [되살리기] · 미리보기에서 지우면 안내 [되돌리기] · 휴대폰 칩 줄', () => trash241({ owner, ctx, sql, BASE, SHOTS }));
 await step('#759 2026년 입주 목록(대표 10/28 최우선): [올해 입주] 건수·가까운 순·아파트만 · 달 칩 · 더 보기(100건 넘게) · K-apt 준공·입주 단지 칸 → 허브 · 휴대폰 폭', () => movein759({ owner, ctx, sql, BASE, SHOTS }));
 await step('#764·#765 영업기회 허브 [전체] 한 번에 찾기(입찰·신규 단지·시설 → 상세) · 입찰 [대상 아님] 한 번·[되돌리기] · 휴대폰 탭 한 줄', () => hub764({ owner, ctx, sql, BASE, SHOTS }));
