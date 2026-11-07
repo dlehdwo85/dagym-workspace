@@ -287,7 +287,7 @@ test('#568 주 1회 묶음: 1차 ✅·AI 판단 없는 공고를 자동 판단(�
   assert.deepEqual([first?.by, first?.auto, first?.use], ['ai', true, '접목 0: 온라인 광고비로'], JSON.stringify(w.items));
   assert.ok(w.items.every((x) => x.by === 'rule' || x.by === 'ai'));
   assert.equal((await sql`select ai_auto from support_matches where program_id = ${todo[0].id}`)[0].ai_auto, true, '자동 판단 표시');
-  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support' and user_id is null`)[0].n >= todo.length, true, '자동 판단 사용량은 사람 이름 없이(361차: 대표 개인 한도가 아니라 회사 예산 — 사용량 화면 \'자동 실행\' 줄)');
+  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support_auto' and user_id is null`)[0].n >= todo.length, true, '자동 판단 사용량은 사람 이름 없이 — 382차 #1004: 회사 한도 밖 시스템 몫(sales_support_auto)');
   const n = await sql`select user_id, title, body, link from notifications where type = 'support_weekly'`;
   assert.ok(n.some((x) => x.user_id === ctx.ownerId), '대표에게'); assert.ok(n.some((x) => x.user_id === ctx.staffA.id), '관심·준비 담당(staffA)에게도');
   assert.match(n[0].title, /^이번 주 맞는 지원사업 \d+건$/); assert.match(n[0].body, /AI 세일즈가 새로 판단 \d+건/); assert.equal(n[0].link, '/s/sales/support?tab=fit');

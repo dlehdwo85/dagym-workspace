@@ -18,6 +18,7 @@ import { PlatformSalesSources } from '@/components/sales/PlatformSalesSources';
 import { PlatformCollectorSettings } from '@/components/sales/PlatformCollectorSettings';
 import { PlatformMktPlans } from '@/components/platform/PlatformMktPlans';
 import { PlatformSpeed } from '@/components/platform/PlatformSpeed';
+import { PlatformSystemAi } from '@/components/platform/PlatformSystemAi';
 import { PlanBands } from '@/components/platform/PlanBands';
 import { PlatformSalesMigrate } from '@/components/sales/PlatformSalesMigrate';
 import { PlatformOpsImport } from '@/components/marketing/PlatformOpsImport';
@@ -192,7 +193,7 @@ function PlatformInner() {
       {tab === 'company' && <><PlatformTenants /><Signups />{usageEl}<PlatformFunnel /><PlatformConversionTags /></>}
       {tab === 'billing' && <>{plansEl}<PlatformPayments /><PlatformSettlement /><Suspense><PayTest /></Suspense><PlatformMktPlans /></>}
       {tab === 'support' && <>{supportEl}{requestsEl}<InquiryLink /></>}
-      {tab === 'ai' && <><AiForecast /><PlatformHiggsfield /><PlatformTts /><PlatformQualityRules /></>}
+      {tab === 'ai' && <><AiForecast /><PlatformSystemAi /><PlatformHiggsfield /><PlatformTts /><PlatformQualityRules /></>}
       {tab === 'sales' && <><PlatformCollectorSettings /><PlatformSalesSources /><PlatformSalesMigrate /><PlatformOpsImport /></>}
       {tab === 'speed' && <PlatformSpeed />}
     </div>

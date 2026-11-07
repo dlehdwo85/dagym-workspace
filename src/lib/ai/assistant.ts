@@ -32,7 +32,8 @@ export async function usageThisMonth(tenant: string) {
   const start = DateTime.now().setZone(TZ).startOf('month').toJSDate();
   const [[u], budget] = await Promise.all([
     sql<{ cost: number; requests: number; tokens: number }[]>`select coalesce(sum(cost_usd), 0)::float8 cost, count(*)::int requests,
-      coalesce(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens), 0)::float8 tokens from ai_usage where tenant = ${tenant} and created_at >= ${start}`,
+      coalesce(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens), 0)::float8 tokens from ai_usage where tenant = ${tenant} and created_at >= ${start}
+        and coalesce(purpose, '') <> all(${['sales_support_auto', 'sales_eligibility_items', 'sales_eligibility_vision']}::text[])`, // 382차 #1004: 시스템 몫 제외
     (await import('./companyBudget')).companyAiBudget(tenant, sql),
   ]);
   return { costUsd: Math.round(u.cost * 10000) / 10000, requests: u.requests, tokens: u.tokens, limitUsd: budget.limitKrw === null ? 0 : Math.round((budget.limitKrw / usdKrw()) * 100) / 100, budget };

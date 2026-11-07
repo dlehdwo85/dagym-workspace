@@ -53,7 +53,7 @@ export async function visionRead(f: PhotoDoc, title: string, provider: AiProvide
   const off = visionOff(); if (off) return { skip: off };
   const payer = await visionPayer(sql); if ('why' in payer) return { skip: payer.why };
   const { blocks, why } = await visionBlocks(f); if (!blocks.length) return { skip: why ?? '보낼 그림 없음' };
-  await (await import('../plans')).assertAiRequest(payer, { legacy: true });
+  await (await import('../ai/systemShare')).assertSystemAi(sql); // 382차 #1004: 회사 AI 한도 밖 '시스템 몫'(안전 상한만)
   await (await import('../ai/guard')).assertAiCredit(sql);
   const system = `입찰 공고문을 찍은 사진(또는 스캔 PDF)입니다. 공고문에서 '입찰참가자격'(참가자격·참가자격의 제한) 절을 찾아 원문 그대로 옮겨 적으세요.
 - 절 머리(번호·제목)부터 다음 번호 머리 바로 앞까지. 줄바꿈·번호(가. 나. 1) 등)는 원문대로.
@@ -64,7 +64,7 @@ export async function visionRead(f: PhotoDoc, title: string, provider: AiProvide
   catch (e) { throw await (await import('../ai/guard')).onAiError(e, sql); }
   const usd = costUsd(r.model ?? provider.model, r.usage);
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-    values (${tenantOf(payer)}, ${payer.id}, ${randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${usd}, 'sales_eligibility_vision')`;
+    values (${tenantOf(payer)}, null, ${randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${usd}, 'sales_eligibility_vision')`;
   const raw = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('');
   let j: { found?: boolean; text?: string } = {}; try { j = JSON.parse(raw); } catch { /* 아래 null */ }
   const text = j.found && j.text ? String(j.text).replace(/\r\n?/g, '\n').trim().slice(0, 3000) : null;

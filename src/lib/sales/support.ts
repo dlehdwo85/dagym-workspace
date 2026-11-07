@@ -483,7 +483,7 @@ export async function saveSupportView(u: SessionUser, i: z.infer<typeof supportV
 }
 /** AI 판단 1건 예상 비용(원) — 이 회사 최근 지원사업 판단 30건 평균(없으면 모든 회사, 그것도 없으면 보통 길이로 계산) */
 async function aiCostKrw(sql: Sql, t: string) {
-  const avg = async (mine: boolean) => (await sql<{ a: number | null }[]>`select avg(cost_usd)::float8 as a from (select cost_usd from ai_usage where purpose = 'sales_support' and (${!mine} or tenant = ${t}) order by created_at desc limit 30) x`)[0]?.a ?? null;
+  const avg = async (mine: boolean) => (await sql<{ a: number | null }[]>`select avg(cost_usd)::float8 as a from (select cost_usd from ai_usage where purpose in ('sales_support', 'sales_support_auto') and (${!mine} or tenant = ${t}) order by created_at desc limit 30) x`)[0]?.a ?? null;
   const usd = (await avg(true)) ?? (await avg(false)) ?? costUsd(modelFor('fast'), { input_tokens: 6000, output_tokens: 900 });
   const krw = usd * usdKrw();
   return krw < 10 ? Math.max(1, Math.round(krw)) : Math.round(krw / 10) * 10;
@@ -691,7 +691,9 @@ export async function analyzeProgram(u: SessionUser, id: string, provider: AiPro
   if (!aiEnabled()) throw new HttpError(503, 'ai_off', 'AI 가 설정되지 않았습니다 — 플랫폼 운영자에게 요청해 주세요');
   const t = tenantOf(u); const sql = db(); const today = ymd();
   let p = await programFor(sql, t, id);
-  await (await import('../plans')).assertAiRequest(u, { legacy: true }); // 회사 월 AI 예산(원)·예전 달러 한도·요청 수
+  // 382차 #1004: 정기 자동 판단은 회사 AI 한도 밖 '시스템 몫'(안전 상한만) — 사람이 누른 판단은 예전처럼 회사 월 AI 예산·요청 수
+  if (opt.auto) await (await import('../ai/systemShare')).assertSystemAi(sql);
+  else await (await import('../plans')).assertAiRequest(u, { legacy: true }); // 회사 월 AI 예산(원)·예전 달러 한도·요청 수
   // 361차(노트북 11/05 10:40 '지원사업 AI 판단 멈춤'): 정기 자동 판단은 회사 대표 이름으로 돌지만 대표 개인 AI 한도(월·하루 20%)는 쓰지 않음 —
   // 회사 월 AI 예산·요금제 요청 수만 봄(대표 결정: 지원사업은 매번 판단). 사람이 누른 판단은 예전처럼 본인 한도
   if (!opt.auto) await (await import('../ai/guard')).assertUserBudget(u, sql);
@@ -732,7 +734,7 @@ JSON 으로만 답하세요:
   catch (e) { throw await (await import('../ai/guard')).onAiError(e, sql); }
   const usd = costUsd(r.model ?? provider.model, r.usage);
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-    values (${t}, ${opt.auto ? null : u.id}, ${randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${usd}, 'sales_support')`;
+    values (${t}, ${opt.auto ? null : u.id}, ${randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${usd}, ${opt.auto ? 'sales_support_auto' : 'sales_support'})`;
   if (r.stop_reason === 'refusal') throw badRequest('이 공고는 판단할 수 없습니다');
   const text = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('');
   let j: any; try { j = JSON.parse(text); } catch { throw new HttpError(502, 'ai_bad_output', 'AI 응답을 해석하지 못했습니다. 다시 시도해 주세요.'); }

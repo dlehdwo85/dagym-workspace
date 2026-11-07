@@ -99,6 +99,8 @@ export default function UsagePage() {
             );
           })}
         </div>
+        {/* 382차 #1004: 영업 자동 수집 AI 는 회사 AI 사용량에 안 셈 — 따로 한 줄 */}
+        {ai.system?.calls > 0 && <p className="mt-3 text-xs text-ink-2" data-testid="ai-usage-system">{ai.system.label} 이번 달 {ai.system.calls}번 — 지원사업 자동 판단·참가자격 읽기·사진 공고문 읽기. 회사 AI 사용량·한도에 넣지 않습니다.</p>}
         <p className="mt-3 text-[11px] text-ink-3">80%·100% 에 알림, 100% 가 되면 AI 기능만 멈추고 업무·일정은 그대로입니다. 사람별·기능별은 이번 달 전체 사용에서 차지하는 비중입니다.</p>
       </section>
       <AiPeopleBudgets />

@@ -309,7 +309,7 @@ test('#790 사진 공고문: 글이 없으면 AI 비전으로 참가자격 절�
   const it = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === N.PHOTO.bid);
   assert.deepEqual([it.elig.vision, it.elig.line], [true, '자본금 5억 이상 · 실적 최근 5년 아파트 커뮤니티 시설 5개 단지 이상 위탁운영']);
   const { aiPurposeLabel } = await import('../../src/components/aiPurpose.ts');
-  assert.equal(aiPurposeLabel('sales_eligibility_vision'), '입찰 참가자격 사진 읽기');
+  assert.equal(aiPurposeLabel('sales_eligibility_vision'), '입찰 참가자격 사진 읽기(회사 한도 밖)');
 });
 
 test('262차 AI 항목 정리: 규칙으로 못 뽑은 공고만 빠른 모델로(공고당 한 번·같은 절이면 다시 안 부름·사용량 이름) · 목록 한 줄·AI 표시 · 예전에 읽은 공고는 정기 실행이 공고문을 다시 받지 않고 정리', async () => {
@@ -341,7 +341,7 @@ test('262차 AI 항목 정리: 규칙으로 못 뽑은 공고만 빠른 모델�
   const [run] = await sql`select detail from job_runs where job = 'tick' and detail ? 'salesEligibility' order by id desc limit 1`;
   assert.ok(run.detail.salesEligibility.aiDone >= 1 && run.detail.salesEligibility.tried.some((x) => /R26BK262002-000 AI 항목 1개/.test(x)), JSON.stringify(run.detail.salesEligibility));
   const { aiPurposeLabel } = await import('../../src/components/aiPurpose.ts');
-  assert.equal(aiPurposeLabel('sales_eligibility_items'), '입찰 참가자격 항목 정리(AI)');
+  assert.equal(aiPurposeLabel('sales_eligibility_items'), '입찰 참가자격 항목 정리(회사 한도 밖)');
 });
 
 test('264차 1,500자에서 잘린 절: 공고문에서 4,000자로 다시 잘라 AI 에(한 번) · 예전에 짧은 절로 정리한 공고는 정기 실행이 한 번 다시 읽음 · 공고문을 못 받으면 전 결과 그대로', async () => {

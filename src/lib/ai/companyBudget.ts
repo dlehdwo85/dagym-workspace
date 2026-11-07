@@ -15,6 +15,7 @@ import { usdKrw } from './provider';
  */
 const TZ = 'Asia/Seoul';
 export const VIDEO_PURPOSE = 'marketing_video%';
+import { SYSTEM_PURPOSES as SYS } from './systemShare';
 export const defaultBudgetUsd = () => { const n = Number(process.env.AI_MONTHLY_BUDGET_USD); return Number.isFinite(n) && n > 0 ? n : 30; };
 const monthOf = () => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date()).slice(0, 7);
 /** 다음 달 1일 — 'YYYY-MM-01'·'11월 1일' */
@@ -43,7 +44,8 @@ export async function companyAiBudget(tenant: string, sql: Sql = db()): Promise<
   const [[cap], [used], [plan], [people]] = await Promise.all([
     sql<{ usd: number }[]>`select monthly_usd::float8 usd from ai_limits where tenant = ${tenant}`,
     sql<{ krw: number }[]>`select coalesce(sum(coalesce(cost_krw, cost_usd * ${rate})), 0)::float8 krw from ai_usage
-      where tenant = ${tenant} and created_at >= (${month + '-01'}::date::timestamp at time zone 'Asia/Seoul') and coalesce(purpose, '') not like ${VIDEO_PURPOSE}`,
+      where tenant = ${tenant} and created_at >= (${month + '-01'}::date::timestamp at time zone 'Asia/Seoul') and coalesce(purpose, '') not like ${VIDEO_PURPOSE}
+        and coalesce(purpose, '') <> all(${SYS as unknown as string[]})`, // 382차 #1004: 영업 자동 수집 AI(시스템 몫)는 회사 예산에 안 셈
     sql<{ min_users: number | null; per_user_krw: number | null }[]>`select min_users, per_user_krw from plans where code = ${sub.plan_code}`,
     sql<{ n: number }[]>`select count(*)::int n from users where tenant = ${tenant} and status = 'active'`,
   ]);

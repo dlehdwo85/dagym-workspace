@@ -40,9 +40,11 @@ test('프로필 저장 전에는 안 함 → 저장(자동 판단 기본 켬) �
   const r1 = await auto();
   assert.deepEqual(r1.out.default, { done: 2, failed: 0, left: 0, stopped: null }, JSON.stringify(r1));
   assert.deepEqual([(await ai(a)).ai_auto, (await ai(b)).ai_auto, await ai(c)], [true, true, null]);
-  // 361차: 자동 판단은 대표 개인 한도를 쓰지 않음 — 사용량은 '자동 실행'(사람 없음)으로, 회사 예산에는 그대로 셈
-  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support' and user_id is null and tenant = 'default'`)[0].n, 2, '사용량은 자동 실행으로');
-  assert.ok((await ctx.owner.ok('GET', '/api/usage')).ai.byUser.some((x) => x.name.startsWith('자동 실행')), '사용량 화면 사람별에 자동 실행 줄');
+  // 361차: 자동 판단은 대표 개인 한도를 쓰지 않음 — 382차 #1004: 회사 AI 한도 밖 '시스템 몫'(sales_support_auto)으로 따로 셈
+  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support_auto' and user_id is null and tenant = 'default'`)[0].n, 2, '사용량은 자동 실행(시스템 몫)으로');
+  const us = (await ctx.owner.ok('GET', '/api/usage')).ai;
+  assert.equal(us.system.calls, 2, '사용량 화면 \'자동 수집(회사 한도 밖)\' 줄'); assert.equal(us.system.label, '자동 수집(회사 한도 밖)');
+  assert.ok(!us.byPurpose.some((x) => x.purpose === 'sales_support_auto'), '회사 사용량 기능별에는 안 셈');
   L = await list(); assert.deepEqual([L[a].queued, L[b].queued, [L[a].ai.verdict, L[b].ai.verdict].sort()], [false, false, ['fit', 'maybe']]); // 5건씩 함께 보내 답 순서는 정해지지 않음
   v = await ctx.owner.ok('GET', '/api/sales/support?tab=fit&limit=200&sort=fit&dd=all&kind=all'); assert.deepEqual([v.auto.queue, v.auto.done], [0, 2]);
   // 다음 실행: 남은 것 없음 → 한 번 확인하고(지문 저장) → 그다음부터는 공고를 다시 읽지 않음
@@ -54,7 +56,7 @@ test('프로필 저장 전에는 안 함 → 저장(자동 판단 기본 켬) �
   await queue([say({ verdict: 'fit' })]);
   assert.deepEqual((await auto()).out.default, { done: 1, failed: 0, left: 0, stopped: null });
   assert.equal((await ai(e)).ai_verdict, 'fit');
-  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support'`)[0].n, 3);
+  assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_support_auto'`)[0].n, 3);
   // 361차: 대표 개인 AI 한도(월·하루)를 다 써도 자동 판단은 계속(회사 예산·요청 수만 봄) — 대표가 직접 누르는 판단은 본인 한도로 막힘
   await sql`insert into ai_user_limits (user_id, monthly_krw) values (${ctx.ownerId}, 1) on conflict (user_id) do update set monthly_krw = 1`;
   const [mine] = await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cost_usd, purpose) values ('default', ${ctx.ownerId}, gen_random_uuid(), 'anthropic', 'test', 0, 0, 0.01, 'assistant') returning id`;
@@ -81,19 +83,33 @@ test('판단 기준 칸(상시근로자)이 바뀌면 그 전 판단은 예전 �
   L = await list(); assert.ok(Object.values(L).every((x) => !x.ai?.stale && !x.queued));
 });
 
-test('회사 AI 예산을 다 쓰면 멈춤(공고 실패로 안 셈·AI 부르지 않음) → 화면 안내·AI 확인 중 아님 → 예산이 채워지면 이어서 · 실패는 공고마다 3번까지 · 회사가 끄면 안 함 · 사용량 이름', async () => {
-  const f = await ins({ source_id: 'A5', title: '[경기] 용인시 중소기업 온라인 마케팅 지원' });
+test('382차 #1004: 회사 AI 예산을 다 써도 자동 판단은 계속 · 자동 수집 AI 월 안전 상한에 닿으면 멈춤(공고 실패로 안 셈·AI 부르지 않음·슈퍼관리자 알림) → 화면 안내·AI 확인 중 아님 → 상한을 올리면 이어서 · 실패는 공고마다 3번까지 · 회사가 끄면 안 함 · 사용량 이름', async () => {
   const [big] = await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cost_usd, purpose) values ('default', ${ctx.ownerId}, gen_random_uuid(), 'anthropic', 'test', 0, 0, 100000, 'test_fill') returning id`;
+  const f0 = await ins({ source_id: 'A5a', title: '[경기] 용인시 중소기업 온라인 판로 지원' });
+  await queue([say({ verdict: 'fit' })]);
+  assert.deepEqual((await auto()).out.default, { done: 1, failed: 0, left: 0, stopped: null }, '회사 AI 예산을 다 써도 자동 판단은 계속(회사 한도 밖)');
+  assert.equal((await ai(f0)).ai_verdict, 'fit');
+  assert.equal((await ctx.owner.req('POST', `/api/sales/support/${f0}/analyze`, {})).status, 429, '사람이 누른 판단은 회사 예산 그대로');
+  await sql`delete from ai_usage where id = ${big.id}`;
+  // 자동 수집 AI 월 안전 상한(플랫폼 운영) — 이번 달 사용이 상한 이상이면 멈춤
+  const pv = await ctx.owner.ok('GET', '/api/platform/ai-system');
+  assert.deepEqual([pv.capKrw, pv.label], [20000, '자동 수집(회사 한도 밖)'], '기본 상한 월 2만 원');
+  assert.ok(pv.calls >= 4, JSON.stringify(pv));
+  await ctx.owner.ok('PUT', '/api/platform/ai-system', { capKrw: 1 });
+  const f = await ins({ source_id: 'A5', title: '[경기] 용인시 중소기업 온라인 마케팅 지원' });
   await queue([]);
   const r = await auto();
-  assert.equal(r.out.default.done, 0); assert.match(String(r.out.default.stopped), /ai_budget|ai_quota|limit|budget/, JSON.stringify(r));
+  assert.equal(r.out.default.done, 0); assert.equal(r.out.default.stopped, 'ai_system_cap', JSON.stringify(r));
+  const [nt] = await sql`select title, link from notifications where type = 'usage_alert' and title like '자동 수집 AI 월 상한%' order by created_at desc limit 1`;
+  assert.ok(nt && nt.link.includes('/platform'), '슈퍼관리자에게 알림');
+  assert.equal((await ctx.staffA.client.req('GET', '/api/platform/ai-system')).status, 404, '상한은 슈퍼관리자만');
   assert.equal((await ai(f))?.auto_fail ?? 0, 0, '예산 멈춤은 공고 실패가 아님');
   const v = await ctx.owner.ok('GET', '/api/sales/support?tab=fit&limit=200&sort=fit&dd=all&kind=all');
   assert.ok(v.auto.stopped && v.auto.left >= 1, JSON.stringify(v.auto));
   assert.equal(v.items.find((x) => x.id === f).queued, false, '멈췄으면 AI 확인 중이 아님(규칙상 맞음 · AI 판단 전)');
-  await sql`delete from ai_usage where id = ${big.id}`;
+  await ctx.owner.ok('PUT', '/api/platform/ai-system', { capKrw: 20000 });
   await queue([say({ verdict: 'fit' })]);
-  assert.deepEqual((await auto()).out.default, { done: 1, failed: 0, left: 0, stopped: null }, '예산이 채워지면 이어서');
+  assert.deepEqual((await auto()).out.default, { done: 1, failed: 0, left: 0, stopped: null }, '상한을 올리면 이어서');
   // 실패(응답을 못 읽음)는 공고마다 세고 3번 실패하면 차례에서 뺌
   const g = await ins({ source_id: 'A6', title: '[경기] 용인시 중소기업 마케팅 교육' });
   for (let i = 1; i <= 3; i++) {
@@ -115,6 +131,7 @@ test('회사 AI 예산을 다 쓰면 멈춤(공고 실패로 안 셈·AI 부르�
   // 관리 › 사용량 '기능별' 이름
   const { aiPurposeLabel } = await import('../../src/components/aiPurpose.ts');
   assert.equal(aiPurposeLabel('sales_support'), '지원사업 AI 판단');
+  assert.equal(aiPurposeLabel('sales_support_auto'), '지원사업 자동 판단(회사 한도 밖)');
 });
 
 test('270차 #810: 밀린 공고가 보통 수(10건)보다 많으면 응답 뒤 작업으로 끝까지(4건씩) — 정기 실행은 바로 끝나고 판단은 뒤에서 이어짐', async () => {

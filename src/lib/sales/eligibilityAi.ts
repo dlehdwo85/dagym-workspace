@@ -41,7 +41,7 @@ export async function aiItemsFor(text: string, title: string, prev: EligAi | nul
   const sql = db();
   const payer = await visionPayer(sql); if ('why' in payer) return { sig, items: [], at, skip: payer.why, tries };
   try {
-    await (await import('../plans')).assertAiRequest(payer, { legacy: true });
+    await (await import('../ai/systemShare')).assertSystemAi(sql); // 382차 #1004: 회사 AI 한도 밖 '시스템 몫'(안전 상한만)
     await (await import('../ai/guard')).assertAiCredit(sql);
   } catch (e) { return { sig, items: [], at, skip: `AI 예산·한도: ${String((e as Error)?.message ?? e).slice(0, 60)}`, tries }; }
   const system = `입찰 공고문의 '참가자격' 절입니다. 입찰에 참가하려면 갖춰야 하는 요건만 짧은 항목으로 뽑으세요.
@@ -60,7 +60,7 @@ export async function aiItemsFor(text: string, title: string, prev: EligAi | nul
   }
   const usd = costUsd(r.model ?? provider.model, r.usage);
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
-    values (${tenantOf(payer)}, ${payer.id}, ${randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${usd}, 'sales_eligibility_items')`;
+    values (${tenantOf(payer)}, null, ${randomUUID()}, ${provider.name}, ${r.model ?? provider.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0}, ${r.usage.cache_creation_input_tokens ?? 0}, ${usd}, 'sales_eligibility_items')`;
   const raw = r.content.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('');
   // 267차(로컬 10/29 18:45 프로샵 'AI 정리 실패'): 답 앞뒤 말·```json 울타리가 붙어도 첫 { … 끝 } 를 읽음 · 못 읽으면 이유에 답 앞부분(무엇이 왔는지)
   let j: { items?: { k?: string; label?: string }[] } = {};

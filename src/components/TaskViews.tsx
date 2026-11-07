@@ -582,8 +582,6 @@ function meetingWhen(iso: string) {
 }
 
 function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onPatch?: (t: Task, b: any) => any; collab?: boolean }) {
-  const { dir, user } = useSession();
-  const hq = dir.orgUnits.find((o) => o.id === t.org_unit_id)?.type === 'hq';
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2">
       {/* 로컬 검수 10/17: 휴대폰 둘째 줄은 상태·연장 요청·열람·첨부·경고만, 프로젝트·하위·체크리스트·댓글 수는 숨김(상세에 있음). 2차: 그래도 넘치면 잘리지 않게 줄바꿈 */}
@@ -591,7 +589,7 @@ function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onP
       {onPatch && <span className="shrink-0 lg:hidden"><StatusChip t={t} onPatch={onPatch} plain={collab} /></span>}
       {/* V32 4: 연장 요청 대기(요청자가 목록에서 바로 알아봄). 로컬 검수 10/17: 휴대폰 둘째 줄이 넘치면 잘리므로 상태 칩 바로 다음·짧게("연장→10/20") */}
       {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장<span className="max-lg:hidden"> 요청</span> → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
-      {t.team_name && <span className="inline-flex min-w-0 max-w-[6rem] truncate items-center gap-1 rounded-full px-1.5 text-[11px] font-medium" style={{ background: `${t.team_color ?? '#0F766E'}1a`, color: t.team_color ?? '#0F766E' }} data-testid="team-chip">{t.team_name}</span>}
+      {/* 381차(로컬 11/07 운영 확인 — #1017 '본사' 표기 39곳 남음): 팀 칩(본사·운영팀 등)도 줄에서 뺌 — 팀은 상세·팀 필터에 있음 */}
       {(t.collab_teams?.length ?? 0) > 0 && <span className="inline-flex min-w-0 max-w-[8rem] truncate rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2 max-lg:hidden" title={`함께하는 부서: ${t.collab_teams!.join(', ')}`} data-testid="collab-chip">+{t.collab_teams![0]}{t.collab_teams!.length > 1 ? ` 외 ${t.collab_teams!.length - 1}` : ''}</span>}
       {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 요청자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
       {/* 380차 #1017: 요청 ○○·본사(소속)·프로젝트(웹사이트 문의)·사업(다짐·하이링크) 표기는 줄에서 뺌 — 상세에 있음 */}

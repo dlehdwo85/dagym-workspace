@@ -73,7 +73,7 @@ export async function currentUsage(tenant: string, sql: Sql = db()) {
       from library_files where tenant = ${tenant}`,
     sql<{ requests: number; tokens: number; cost: number }[]>`select count(distinct coalesce(request_id::text, id::text))::int requests,
         coalesce(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens), 0)::float8 tokens, coalesce(sum(cost_usd), 0)::float8 cost
-      from ai_usage where tenant = ${tenant} and created_at >= ${start}`,
+      from ai_usage where tenant = ${tenant} and created_at >= ${start} and coalesce(purpose, '') <> all(${['sales_support_auto', 'sales_eligibility_items', 'sales_eligibility_vision']}::text[])`, // 382차 #1004: 시스템 몫(영업 자동 수집 AI)은 회사 요청 수에 안 셈
     sql<{ active: number; invited: number }[]>`select count(*) filter (where status = 'active')::int active, count(*) filter (where status = 'invited')::int invited
       from users where tenant = ${tenant}`,
     taskCount(tenant, sql).then((n) => [n]),
@@ -207,19 +207,21 @@ export async function aiBreakdown(tenant: string, sql: Sql = db()) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()); const start = `${today.slice(0, 7)}-01`;
   const [byUser, byPurpose, [blocked]] = await Promise.all([
     sql`select a.user_id, case when a.user_id is null then '자동 실행(지원사업 판단 등)' else coalesce(us.name, '(삭제된 사용자)') end as name, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost
-      from ai_usage a left join users us on us.id = a.user_id where a.tenant = ${tenant} and a.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul') group by a.user_id, us.name order by cost desc limit 50`,
+      from ai_usage a left join users us on us.id = a.user_id where a.tenant = ${tenant} and a.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul') and coalesce(a.purpose, '') <> all(${['sales_support_auto', 'sales_eligibility_items', 'sales_eligibility_vision']}::text[]) group by a.user_id, us.name order by cost desc limit 50`,
     // 333차 ⓑ: 기능별 오늘(서울 날짜) 호출 수·비용도 같이
     sql`select a.purpose, count(*)::int requests, coalesce(sum(a.cost_usd), 0)::float8 cost,
         count(*) filter (where a.created_at >= (${today}::date::timestamp at time zone 'Asia/Seoul'))::int as "todayRequests",
         coalesce(sum(a.cost_usd) filter (where a.created_at >= (${today}::date::timestamp at time zone 'Asia/Seoul')), 0)::float8 as "todayCost" from ai_usage a
-      where a.tenant = ${tenant} and a.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul') group by a.purpose order by cost desc`,
+      where a.tenant = ${tenant} and a.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul') and coalesce(a.purpose, '') <> all(${['sales_support_auto', 'sales_eligibility_items', 'sales_eligibility_vision']}::text[]) group by a.purpose order by cost desc`, // 382차: 시스템 몫은 아래 system 줄로 따로
     sql<{ n: number }[]>`select count(*)::int n from ai_messages m join ai_threads t on t.id = m.thread_id where t.tenant = ${tenant} and m.role = 'user' and m.status = 'blocked'
       and m.created_at >= (${start}::date::timestamp at time zone 'Asia/Seoul')`,
   ]);
   const rate = Number(process.env.USD_KRW) || 1400;
   const s = await aiSettings(tenant, sql);
+  const sys = await (await import('./ai/systemShare')).systemSpend(sql, tenant); // 382차 #1004: '자동 수집(회사 한도 밖)' 줄 — 회사 사용량에 안 셈
   return { costUsd: m.costUsd, limitUsd: m.limitUsd, pct: m.limitUsd > 0 ? Math.round((m.costUsd / m.limitUsd) * 1000) / 10 : 0, leftUsd: Math.max(0, Math.round((m.limitUsd - m.costUsd) * 100) / 100),
-    requests: m.requests, tokens: m.tokens, usdKrw: rate, byUser, byPurpose, blocked: blocked.n, dailyLimit: s.daily_limit, consoleNote: s.console_note };
+    requests: m.requests, tokens: m.tokens, usdKrw: rate, byUser, byPurpose, blocked: blocked.n, dailyLimit: s.daily_limit, consoleNote: s.console_note,
+    system: { label: '자동 수집(회사 한도 밖)', calls: sys.calls, byPurpose: sys.byPurpose.map((b) => ({ purpose: b.purpose, calls: b.calls })) } };
 }
 
 export const planRequestInput = z.object({ planCode: z.string().max(40).optional(), addons: z.record(z.string(), z.number().int().min(0).max(100)).optional(), note: z.string().max(1000).optional() });

@@ -55,7 +55,7 @@ function Verdict({ it }: { it: Pick<Item, 'ai' | 'rule' | 'queued' | 'final'> })
   const f = it.final ?? { verdict: it.ai?.verdict ?? it.rule.verdict, by: it.ai ? 'ai' : 'rule', conflict: false };
   const v = f.verdict;
   if (it.queued && !it.ai) return <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800" data-testid="support-verdict" data-verdict={v} data-by="rule" data-queued="1"
-    title="새 공고 자동 AI 판단 차례 — 정기 실행(15분마다) 때 차례로 판단합니다(회사 AI 예산에서)">⏳ AI 확인 중</span>; // #785: 실제로 판단 차례에 있을 때만
+    title="새 공고 자동 AI 판단 차례 — 정기 실행(15분마다) 때 차례로 판단합니다(회사 AI 한도 밖 — 자동 수집 몫)">⏳ AI 확인 중</span>; // #785: 실제로 판단 차례에 있을 때만
   // #649 ③: 1차 규칙만 맞는 공고는 '해당'이 아님 — #782(대표 10/28 "AI 확인 중이라고 왜?"): 판단 차례가 아니면 '규칙상 맞음 · AI 판단 전'(사람이 [AI 판단]을 눌러야 정해짐)
   const pending = !it.ai && v === 'fit';
   const [icon, label, cls] = pending ? ['', '규칙상 맞음 · AI 판단 전', 'border-sky-200 bg-sky-50 text-sky-800'] : VERDICT[v];
@@ -278,10 +278,10 @@ function ApplyList({ data, busy, onOpen, onTask, onUnlist }: { data: ListData; b
 function AutoNote({ data }: { data: ListData }) {
   const a = data.auto; const cost = ''; // 351차 #939 ③: 건당 원 표시 없음(비용은 회사 AI 예산에서)
   const box = 'rounded-input border px-2.5 py-1.5 text-xs';
-  if (a.on && a.stopped) return <p className={cx(box, 'border-amber-300 bg-amber-50 text-amber-900')} data-testid="support-auto-note" data-state="stopped"><b>AI 자동 판단을 멈췄습니다</b> — 이번 달 회사 AI 예산(또는 한도)을 다 썼습니다. 남은 {a.left}건은 예산이 채워지면 이어서 판단합니다. 급한 공고는 공고마다 [AI 판단]을 누르세요.</p>;
-  if (a.on) return a.queue > 0 || data.pendingCount > 0 ? <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="on"><b>AI 세일즈가 새 공고를 자동으로 판단합니다</b>{cost ? `(${cost}, 회사 AI 예산에서)` : ''}{a.queue > 0 ? ` — 지금 판단 차례 ${a.queue}건, 15분마다 차례로(‘AI 확인 중’)` : ''}.</p> : null;
+  if (a.on && a.stopped) return <p className={cx(box, 'border-amber-300 bg-amber-50 text-amber-900')} data-testid="support-auto-note" data-state="stopped"><b>AI 자동 판단을 멈췄습니다</b> — {a.stopped === 'ai_system_cap' ? '이번 달 자동 수집 AI 안전 상한(회사 한도 밖)에 닿았습니다' : 'AI 크레딧이나 한도에 걸렸습니다'}. 남은 {a.left}건은 다시 채워지면 이어서 판단합니다. 급한 공고는 공고마다 [AI 판단]을 누르세요.</p>;
+  if (a.on) return a.queue > 0 || data.pendingCount > 0 ? <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="on"><b>AI 세일즈가 새 공고를 자동으로 판단합니다</b>{cost ? `(${cost}, 회사 AI 한도 밖 — 자동 수집 몫)` : ' (회사 AI 한도 밖 — 자동 수집 몫)'}{a.queue > 0 ? ` — 지금 판단 차례 ${a.queue}건, 15분마다 차례로(‘AI 확인 중’)` : ''}.</p> : null;
   if (!data.pendingCount) return null;
-  return <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="off"><b>규칙상 맞음 · AI 판단 전 {data.pendingCount}건</b> — 지역·업력·규모·업종 규칙으로만 맞는 공고입니다. 참여할 수 있는지는 공고마다 [AI 판단]을 눌러야 정해집니다{cost ? `(${cost}, 회사 AI 예산에서)` : ''}. {a.saved ? '새 공고 자동 판단이 꺼져 있습니다 — 회사 프로필에서 켤 수 있습니다' : '회사 프로필을 저장하면 새 공고를 자동으로 판단합니다'}{data.canEdit && data.aiOn ? ' · 여러 건은 [공고 여러 건 AI 판단]' : ''}.</p>;
+  return <p className={cx(box, 'border-sky-200 bg-sky-50/60 text-sky-900')} data-testid="support-auto-note" data-state="off"><b>규칙상 맞음 · AI 판단 전 {data.pendingCount}건</b> — 지역·업력·규모·업종 규칙으로만 맞는 공고입니다. 참여할 수 있는지는 공고마다 [AI 판단]을 눌러야 정해집니다{cost ? `(${cost}, 회사 AI 한도 밖 — 자동 수집 몫)` : ' (회사 AI 한도 밖 — 자동 수집 몫)'}. {a.saved ? '새 공고 자동 판단이 꺼져 있습니다 — 회사 프로필에서 켤 수 있습니다' : '회사 프로필을 저장하면 새 공고를 자동으로 판단합니다'}{data.canEdit && data.aiOn ? ' · 여러 건은 [공고 여러 건 AI 판단]' : ''}.</p>;
 }
 
 /** #782 여러 건 AI 판단(관리자) — 몇 건·예상 비용을 보고 누를 때만 */
@@ -378,7 +378,7 @@ function ProfileBox({ summary, blanks, onSaved }: { summary: ListData['profile']
         </div>
         <Field label="회사 소개(AI 판단에 함께 줌)"><textarea className={inputCls} rows={2} maxLength={1000} value={f.memo} onChange={(e) => set('memo', e.target.value)} disabled={ro} /></Field>
         <label className="flex items-start gap-2 text-xs text-ink-2"><input type="checkbox" className="mt-0.5" checked={!!f.autoAi} onChange={(e) => set('autoAi', e.target.checked)} disabled={ro} data-testid="profile-auto-ai" />
-          <span><b className="text-ink">새 공고 AI 자동 판단</b> — 공고가 올라오면 AI 세일즈가 우리 회사 프로필로 참여 가능 여부를 판단합니다(회사 AI 예산에서, 15분마다 차례로). 지역·설립일·규모·근로자·매출·업종·인증을 바꾸면 열린 공고를 다시 판단합니다.</span></label>
+          <span><b className="text-ink">새 공고 AI 자동 판단</b> — 공고가 올라오면 AI 세일즈가 우리 회사 프로필로 참여 가능 여부를 판단합니다(회사 AI 한도 밖 — 자동 수집 몫, 15분마다 차례로). 지역·설립일·규모·근로자·매출·업종·인증을 바꾸면 열린 공고를 다시 판단합니다.</span></label>
         {ro ? <p className="text-xs text-ink-3">프로필은 관리자가 고칩니다.</p> : <div className="flex justify-end"><Button size="sm" disabled={busy} onClick={save} data-testid="profile-save">저장</Button></div>}
       </div>)}
     </section>
