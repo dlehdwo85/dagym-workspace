@@ -37,7 +37,8 @@ export async function aiFind753({ owner, ctx, BASE, FAKE, SHOTS }) {
     assert.match(await row.getAttribute('class'), /bg-amber-50/, '찾은 파일 줄 강조');
     // 패널(✨)도 같은 카드
     await owner.goto(BASE + '/tasks');
-    await owner.getByTestId('ai-dock-open').click();
+    // 386차(CI 2291): 페이지가 바뀌는 순간 앞 공간 단추('AI 세일즈 열기')가 잠깐 함께 있어 같은 testid 2개(strict 위반) — 이름은 마지막 공간을 따라가므로 첫 단추를 누름
+    await owner.getByTestId('ai-dock-open').first().click();
     const dock = owner.getByTestId('ai-dock');
     const db = dock.getByLabel('AI 에게 요청 (화면 맥락)');
     await db.fill('E2E753 로고 찾아줘');
