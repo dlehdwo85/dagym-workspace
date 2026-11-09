@@ -92,6 +92,7 @@ import { aiSystem1004 } from './aiSystem1004.step.mjs';
 import { trash241 } from './trash241.step.mjs';
 import { movein759 } from './movein759.step.mjs';
 import { hub764 } from './hub764.step.mjs';
+import { eventAssign386 } from './eventAssign386.step.mjs';
 import { bid246 } from './bid246.step.mjs';
 import { support249 } from './support249.step.mjs';
 import { elig252 } from './elig252.step.mjs';
@@ -2635,6 +2636,7 @@ await step('로컬 10/20 알람처럼 울리기(웹): 설정 기본값 3칸 → 
 
 await step('S1-2 진행 기록 쓰기(390): 입찰 상세 원본 상태 버튼·메모·다음 연락일 저장 → 카드 칩 → 196차 입찰 [넘기기] → 리드 없이 입찰 업무·입찰 업무 칸 [유찰] · 입찰은 리드 전환 없음', () => salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }));
 
+await step('386차 일정 배정: 배정받은 일정 = 누구 일정 나·배정한 사람 안내 → 누구 일정을 박직원으로 → 박직원 캘린더·참석자 빠짐·알림 → 미리보기 내가 배정', () => eventAssign386({ owner, ctx, sql, BASE, SHOTS }));
 await step('로컬 10/20 캘린더 재발: 빠른 입력 첫 화면 색 줄 → 생성 직후 편집(새로고침 신호에도 입력 유지·저장) → 다른 기기 충돌 뒤 [완료] 자동 재시도', () => calEditFlow({ browser, desk, owner, ctx, sql, BASE, SHOTS }));
 await step('대표 10/20 4) 팀별 보기: 업무 화면 팀 칩(볼 수 있는 팀만) → 칩으로 그 팀 업무만 → 메뉴 권한 \'팀 업무 보기\' 지정 팀 → 직원 화면에 그 팀 칩', () => teamChipsFlow({ browser, owner, ctx, sql, BASE, SHOTS, login }));
 await step('대표 10/20 7) 퇴사 처리·인수인계: 창에서 퇴사일·받을 사람·항목 개수 → 퇴사(날짜)·접힘·인수인계·복직 버튼 → 로그인 차단·업무 이전', () => offboardFlow({ owner, ctx, BASE, SHOTS }));

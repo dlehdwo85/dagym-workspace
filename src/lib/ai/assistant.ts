@@ -123,12 +123,14 @@ const TOOLS: AiTool[] = [
       from: str('찾기 시작 날짜 YYYY-MM-DD'), to: str('끝 날짜 YYYY-MM-DD (포함, 최대 14일)'), durationMinutes: { type: 'number', description: '필요한 길이(분), 기본 60' },
       notBefore: str('이 시각 이후만 HH:MM (선택)'), notAfter: str('이 시각까지 끝나야 HH:MM (선택)'),
     }, required: ['from', 'to'] } },
-  { name: 'propose_create_event', description: '캘린더 일정(회의 등) 만들기를 제안한다. 참석자 충돌·연차/부재를 함께 경고한다. [확인] 후 생성되고 참석자에게 초대 알림이 간다.',
+  { name: 'propose_create_event', description: '캘린더 일정(회의 등) 만들기를 제안한다. 참석자 충돌·연차/부재를 함께 경고한다. [확인] 후 생성되고 참석자에게 초대 알림이 간다. 다른 사람의 일정을 잡아 달라는 요청(예: "OO님 일정 잡아줘", "OO에게 일정 배정")은 ownerId 로 — 그 사람 캘린더에 생기고 나는 들어가지 않는다.',
     input_schema: { type: 'object', properties: {
       title: str('제목'), date: str('날짜 YYYY-MM-DD'), startTime: str('시작 HH:MM (종일이면 생략)'), endTime: str('끝 HH:MM (선택)'),
       durationMinutes: { type: 'number', description: '끝 시각 대신 길이(분), 기본 60' }, allDay: { type: 'boolean', description: '종일 일정' }, endDate: str('여러 날 종일 일정의 마지막 날 YYYY-MM-DD (선택)'),
-      location: str('장소 (선택)'), attendeeIds: { type: 'array', items: { type: 'string' }, description: '참석자 id (list_people 로 찾기)' },
-      calendar: { type: 'string', enum: ['personal', 'company'], description: 'personal=내 캘린더(기본), company=회사 공용 캘린더' },
+      location: str('장소 (선택)'), attendeeIds: { type: 'array', items: { type: 'string' }, description: '함께 참석하는 사람 id (list_people 로 찾기). 일정 주인(나 또는 ownerId)은 넣지 않는다' },
+      ownerId: str('누구 일정인지 — 다른 사람에게 일정을 배정할 때 그 사람 id(list_people). 그 사람 캘린더에 생기고 나는 참석자가 아니다. 비우면 내 일정'),
+      includeMe: { type: 'boolean', description: 'ownerId 로 남의 일정을 만들면서 나도 함께 가는 경우만 true(나를 참석자로). 사용자가 "나도 같이"라고 할 때만' },
+      calendar: { type: 'string', enum: ['personal', 'company'], description: 'personal=내 캘린더(기본), company=회사 공용 캘린더. ownerId 가 있으면 무시' },
       repeat: { type: 'string', enum: ['none', 'daily', 'weekdays', 'weekly', 'biweekly', 'monthly'], description: '반복 (선택)' }, repeatUntil: str('반복 끝 날짜 YYYY-MM-DD (선택)'),
       reminderMinutes: { type: 'array', items: { type: 'number' }, description: '알림: 시작 몇 분 전 (예: [10], 하루 전은 1440)' },
       description: str('메모 (선택)'), taskId: str('연결할 업무 id (선택)'), isPrivate: { type: 'boolean', description: '비공개 (선택)' },
@@ -262,6 +264,7 @@ const SYSTEM = `당신은 사내 업무·일정 서비스 "워크인"의 AI 비�
 [근거 — 대표 지적 10/19 ⑤⑥] 첨부·자료실 파일 내용(담당자 이름·금액·날짜 등)은 이번 대화에서 파일 내용을 실제로 받았거나 read_library_file 로 읽은 경우에만 말하고 "(파일명, n쪽/시트)"처럼 근거를 붙이세요. 앞선 차례에 올린 파일은 이름만 기록에 있으니 내용이 필요하면 read_library_file 로 다시 읽고, 못 읽었으면 "아직 열어 보지 않았습니다"라고 하세요. 기존 업무의 담당·마감·상태는 search_tasks·get_task 결과로만 말하세요(기억·추측 금지).
 - 첨부 자료를 업무로 정리해 달라고 하면 자료 내용을 읽고 propose_create_tasks 로 담당자별 업무(체크리스트·메모·마감·첨부)를 한 번에 제안하세요.
 - 일정과 업무를 함께 요청하면(예: "회의 잡고 참석자들 업무로도") propose_create_event 하나에 taskAssigneeIds 를 넣어 "일정 1 + 연결 업무"로 제안하세요. 업무 마감은 일정 시작과 같고 날짜가 연동됩니다. 같은 내용의 propose_create_task(s) 를 따로 만들지 마세요(사용자가 다른 마감을 요청한 경우만 예외). 일정 주인 본인에게는 업무를 또 만들지 않습니다.
+- 일정 배정(386차): "OO님 일정 잡아줘·만들어줘·넣어줘", "OO에게 일정 배정"처럼 다른 사람의 일정을 만들어 달라는 요청은 propose_create_event 의 ownerId 에 그 사람을 넣으세요(그 사람 캘린더에 생기고 요청한 나는 들어가지 않음). attendeeIds 는 함께 참석하는 사람(회의 초대)일 때만 쓰고, 나도 같이 간다고 할 때만 includeMe=true. 답에서는 "OO님 일정으로 배정"이라고 말하세요.
 - 회의·일정 잡기: 참석자를 list_people 로 찾고, 시간이 정해지지 않았으면 find_free_time 으로 빈 시간을 찾은 뒤 propose_create_event 로 제안하세요. 시간 변경·취소는 list_events 로 일정 id 를 찾아 propose_update_event. 충돌·연차 경고가 나오면 답에서 알려 주세요.
 - 문서 비용을 아끼세요: 우리 회사 양식(자료실 "양식")에 **값만 바꾸면 되는** 요청은 list_templates(또는 첨부·참고 xlsx/docx) → read_template_layout → fill_template 로 바로 만드세요(거의 무료, 서식 그대로). 양식이 없거나, **다른 회사 양식을 "참고해서" 만드는 요청**, 구조·디자인을 새로 해야 할 때는 run_file_task(참고 파일은 referenceFileIds).
 - 서식·디자인이 중요한 문서(견적서·보고서·제안서·안내문·PPT)나 "참고해서 만들어/더 세련되게/색 바꿔" 같은 요청, 엑셀·CSV 계산·차트 분석은 run_file_task 를 쓰세요(실제 파일·미리보기). 앞서 만든 파일을 고칠 때는 대화 기록의 [파일 작업: id=…] 를 baseJobId 로 mode=edit. run_file_task 를 부른 뒤에는 "만들기 시작했습니다(1~3분, 아래 카드에 미리보기가 나옵니다)"처럼 시작했다고만 말하고, "~했습니다·~뺐습니다·~맞췄습니다" 같은 완료형으로 결과를 설명하지 마세요(아직 만들지 않았음). 간단한 글 문서는 propose_create_document, 단순 데이터 표는 propose_xlsx_report.
@@ -394,14 +397,14 @@ async function peopleNames(u: SessionUser, ids: string[]) {
 }
 
 /** 충돌(같은 시간 다른 일정)·연차/출장·반차/외근 경고 */
-async function eventWarnings(u: SessionUser, ids: string[], s: Date, e: Date, allDay: boolean, excludeIds: string[] = []) {
+async function eventWarnings(u: SessionUser, ids: string[], s: Date, e: Date, allDay: boolean, excludeIds: string[] = [], opt: { withoutMe?: boolean } = {}) {
   const out: string[] = [];
-  if (!allDay) for (const c of await findConflicts(u, ids, s, e, excludeIds)) {
+  if (!allDay) for (const c of await findConflicts(u, ids, s, e, excludeIds, opt)) {
     out.push(`겹치는 일정: ${c.who.join('·') || '나'} — ${c.title} ${DateTime.fromJSDate(c.start).setZone(TZ).toFormat('HH:mm')}~${DateTime.fromJSDate(c.end).setZone(TZ).toFormat('HH:mm')}`);
   }
   const { busyOf } = await import('../availability');
   const sql = db();
-  const all = [...new Set([u.id, ...ids])];
+  const all = [...new Set([...(opt.withoutMe ? [] : [u.id]), ...ids])];
   const users = await sql<{ id: string; name: string }[]>`select id, name from users where id = any(${all}::uuid[]) and tenant = ${tenantOf(u)}`;
   const day0 = DateTime.fromJSDate(s).setZone(TZ).startOf('day'), day1 = DateTime.fromJSDate(e).setZone(TZ).endOf('day');
   const half = await sql<{ name: string; kind: string; start_at: Date; end_at: Date }[]>`select us.name, e.kind, e.start_at, e.end_at from events e join users us on us.id = e.created_by
@@ -538,10 +541,20 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
       let s: DateTime, e: DateTime;
       if (allDay) { s = DateTime.fromISO(input.date, { zone: TZ }); e = (isDate(input.endDate) && input.endDate >= input.date ? DateTime.fromISO(input.endDate, { zone: TZ }) : s).plus({ days: 1 }); }
       else { s = at(input.date, input.startTime); e = isTime(input.endTime) && input.endTime > input.startTime ? at(input.date, input.endTime) : s.plus({ minutes: Math.min(Math.max(Number(input.durationMinutes) || 60, 5), 24 * 60) }); }
-      const ids = [...new Set((Array.isArray(input.attendeeIds) ? input.attendeeIds : []).map(String))].filter((x) => x !== u.id).slice(0, 50) as string[];
-      const people = await peopleNames(u, ids);
+      // 386차(대표 11/09): 남의 일정 배정 — ownerId 의 개인 캘린더에, 나는 includeMe 일 때만 참석자
+      const ownerRaw = input.ownerId ? String(input.ownerId) : '';
+      const ownerId = ownerRaw && ownerRaw !== u.id ? ownerRaw : null;
+      let ids = [...new Set((Array.isArray(input.attendeeIds) ? input.attendeeIds : []).map(String))].filter((x) => x !== u.id && x !== ownerId).slice(0, 50) as string[];
+      if (ownerId) {
+        const dir = (await directory(u)).users as unknown as { id: string }[];
+        if (!dir.some((p) => p.id === ownerId)) throw badRequest(`일정을 배정할 수 없는 사람 id: ${ownerId} — list_people 로 다시 찾으세요`);
+        if (input.includeMe) ids = [u.id, ...ids];
+      }
+      const people = await peopleNames(u, ids.filter((x) => x !== u.id));
+      const [owner] = ownerId ? await peopleNames(u, [ownerId]) : [];
       let calendarId: string; let calName = '내 캘린더';
-      if (input.calendar === 'company') {
+      if (ownerId) { calendarId = ''; calName = `${owner?.name ?? ''} 캘린더(배정)`; }
+      else if (input.calendar === 'company') {
         const [cc] = await db()<{ id: string; name: string }[]>`select id, name from calendars where type = 'company' and tenant = ${tenantOf(u)}`;
         if (!cc) throw badRequest('회사 공용 캘린더가 없습니다');
         calendarId = cc.id; calName = cc.name;
@@ -558,19 +571,23 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         if (bad.length) throw badRequest(`배정할 수 없는 사람 id: ${bad.join(', ')} — list_people 로 다시 찾으세요`);
       }
       const taskPeople = taskWho.length ? await peopleNames(u, taskWho.filter((x) => x !== u.id)) : [];
-      const i = eventInput.parse({ calendarId, title: String(input.title ?? '').slice(0, 200), description: input.description ? String(input.description).slice(0, 5000) : undefined,
+      const i = eventInput.parse({ calendarId: calendarId || undefined, ...(ownerId ? { ownerId } : {}), title: String(input.title ?? '').slice(0, 200), description: input.description ? String(input.description).slice(0, 5000) : undefined,
         location: input.location ? String(input.location).slice(0, 300) : undefined, allDay, start: s.toISO(), end: e.toISO(), rrule, attendeeIds: ids.length ? ids : undefined,
         reminderMinutes: Array.isArray(input.reminderMinutes) ? input.reminderMinutes.map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 40320).slice(0, 5) : undefined,
         taskId: input.taskId || undefined, isPrivate: input.isPrivate ? true : undefined, kind: input.taskId ? 'normal' : undefined,
         ...(taskWho.length ? { alsoTask: true, taskAssigneeIds: taskWho, taskRequestedById: u.id } : {}) });
-      const { calendarPerms } = await import('../access');
-      const [cal] = await db()<any[]>`select id, type, org_unit_id, owner_user_id, team_id, tenant from calendars where id = ${calendarId}`;
-      if (!(await calendarPerms(u, cal)).edit) throw new HttpError(403, 'forbidden', `${calName}에 일정을 만들 권한이 없습니다 — 내 캘린더(personal)로 만드세요`);
-      const warnings = await eventWarnings(u, ids, s.toJSDate(), e.toJSDate(), allDay);
+      if (!ownerId) {
+        const { calendarPerms } = await import('../access');
+        const [cal] = await db()<any[]>`select id, type, org_unit_id, owner_user_id, team_id, tenant from calendars where id = ${calendarId}`;
+        if (!(await calendarPerms(u, cal)).edit) throw new HttpError(403, 'forbidden', `${calName}에 일정을 만들 권한이 없습니다 — 내 캘린더(personal)로 만드세요`);
+      }
+      // 배정이면 일정 주인·참석자 기준으로 충돌을 봄(나는 includeMe 일 때만)
+      const warnings = await eventWarnings(u, ownerId ? [ownerId, ...ids.filter((x) => x !== u.id)] : ids, s.toJSDate(), e.toJSDate(), allDay, [], { withoutMe: !!ownerId && !input.includeMe });
       const when = fmtWhen(s, e, allDay) + (rrule ? ` · 반복 ${({ daily: '매일', weekdays: '평일', weekly: '매주', biweekly: '격주', monthly: '매월' } as Record<string, string>)[input.repeat]}` : '');
       const linked = taskWho.length ? ` · 연결 업무 ${taskWho.length}` : '';
-      return { ...(await propose(c, 'create_event', `일정 1${linked} 만들기: ${i.title} — ${when}${people.length ? ` · ${people.map((p) => p.name).join('·')}` : ''}`, i,
-        { when, place: i.location || null, attendees: people.map((p) => `${p.name}${p.title ? ` · ${p.title}` : ''}`), calendar: calName, warnings,
+      const attNames = [...(ownerId && input.includeMe ? ['나'] : []), ...people.map((p) => `${p.name}${p.title ? ` · ${p.title}` : ''}`)];
+      return { ...(await propose(c, 'create_event', `일정 1${linked} 만들기: ${i.title} — ${when}${ownerId ? ` · ${owner?.name ?? ''}님 일정으로 배정` : ''}${people.length ? ` · ${ownerId ? '함께 ' : ''}${people.map((p) => p.name).join('·')}` : ''}`, i,
+        { when, place: i.location || null, attendees: attNames, calendar: calName, ...(ownerId ? { owner: owner?.name ?? '' } : {}), warnings,
           ...(taskWho.length ? { tasks: taskWho.map((id) => id === u.id ? '나' : (taskPeople.find((p) => p.id === id)?.name ?? '')), taskDue: when.split('~')[0] } : {}) })), warnings };
     }
     case 'propose_update_event': {
@@ -1173,7 +1190,7 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
       const { userSeesConfidential, assertConfidentialAudience } = await import('../library');
       const need = (ids: unknown[]) => Promise.all(ids.filter(Boolean).map(async (id) => { if (!(await userSeesConfidential(String(id)))) throw forbidden('기밀 자료를 근거로 한 내용이라 기밀 열람 권한이 없는 사람에게 줄 수 없습니다'); }));
       if (p.kind === 'create_task') await need([x.assigneeId, x.requestedById, ...(x.collaboratorIds ?? [])]);
-      if (p.kind === 'create_event') await need(x.attendeeIds ?? []);
+      if (p.kind === 'create_event') await need([...(x.attendeeIds ?? []), x.ownerId]);
       if (p.kind === 'create_tasks') await need([...(x.input?.assigneeIds ?? []), x.input?.requestedById]);
       if (p.kind === 'update_task' || p.kind === 'comment') await assertConfidentialAudience(x.taskId, [x.patch?.assigneeId].filter(Boolean));
       if ((p.kind === 'xlsx_report' || p.kind === 'create_document') && x.taskId) await assertConfidentialAudience(x.taskId);

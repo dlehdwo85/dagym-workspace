@@ -52,6 +52,9 @@ export const eventInput = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, '색은 #rrggbb').nullable().optional(),
   /** 영업 재편 5): 리드·거래처 일정(상세 '일정' 탭·타임라인) */
   leadId: zUuid.nullable().optional(),
+  /** 386차(대표 11/09 "서로 업무배정뿐 아니라 스케줄도 배정"): 누구 일정인지 — 다른 사람이면 그 사람 개인 캘린더에 생기고(배정),
+   *  배정한 사람은 참석자로 들어가지 않음(만든 사람이라 보기·고치기는 그대로). 같은 회사 재직자(격리 팀이면 같은 팀)만 */
+  ownerId: zUuid.nullable().optional(),
 });
 export type EventInput = z.infer<typeof eventInput>;
 
@@ -118,9 +121,10 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
   const calFilter = calendarIds?.length ? sql`and c.id = any(${calendarIds}::uuid[])` : sql``;
   const sc = await teamScope(u, sql);
   const mates = sc.isolated ? sc.mates : await hqColleagues(u, sql); // 격리 팀: 같은 팀 사람 일정만(본사 동료 일정 없음)
-  const rows = await sql<(EventRow & { ev_color: string | null; cal_name: string; color: string; cal_type: string; owner_id: string; owner_name: string | null; is_private: boolean })[]>`
-    select e.*, e.color as ev_color, c.name as cal_name, c.color, c.type as cal_type, coalesce(c.owner_user_id, e.created_by) as owner_id, ow.name as owner_name
-    from events e join calendars c on c.id = e.calendar_id left join users ow on ow.id = coalesce(c.owner_user_id, e.created_by)
+  const rows = await sql<(EventRow & { ev_color: string | null; cal_name: string; color: string; cal_type: string; owner_id: string; owner_name: string | null; is_private: boolean; assigned_by_name: string | null })[]>`
+    select e.*, e.color as ev_color, c.name as cal_name, c.color, c.type as cal_type, coalesce(c.owner_user_id, e.created_by) as owner_id, ow.name as owner_name,
+      case when c.type = 'personal' and c.owner_user_id <> e.created_by then cb.name end as assigned_by_name
+    from events e join calendars c on c.id = e.calendar_id left join users ow on ow.id = coalesce(c.owner_user_id, e.created_by) left join users cb on cb.id = e.created_by
     where e.deleted_at is null and e.recurring_event_id is null
       and (e.rrule is not null or (e.start_at < ${to} and e.end_at > ${from}))
       and (
@@ -130,6 +134,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
         or (c.type = 'org_unit' and ${units === null ? sql`not exists (select 1 from org_units dz where dz.id = c.org_unit_id and dz.is_demo)` : sql`c.org_unit_id = any(${units}::uuid[])`})
         or (c.type = 'team' and c.team_id in (${myTeamsSql(sql, u)}))
         or exists (select 1 from event_attendees a where a.event_id = e.id and a.user_id = ${u.id})
+        or e.created_by = ${u.id} -- 386차: 내가 남에게 배정한 일정(상세 보기·고치기 권한과 같게)
       ) ${calFilter}`;
   const ids = rows.map((r) => r.id);
   const exceptions = ids.length
@@ -169,6 +174,7 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
       calendarId: e.calendar_id, calendarName: masked ? '' : e.cal_name, color: e.color, eventColor: masked ? null : e.ev_color ?? null, calendarType: e.cal_type,
       kind: e.kind, taskId: masked ? null : e.task_id, attendees: masked ? [] : att, createdBy: e.created_by,
       ownerId: e.owner_id, ownerName: e.owner_name, isPrivate: e.is_private, masked,
+      assignedBy: !masked && e.assigned_by_name ? { id: e.created_by, name: e.assigned_by_name } : null, // 386차: 남이 배정한 일정(만든 사람 ≠ 캘린더 주인)
       linkedTask: lt && !masked ? { id: lt.id, status: e.rrule ? null : lt.status } : null,
       linkedTaskIds: masked ? [] : lts.map((x) => x.id),
       blockTask: bt && !masked ? { id: bt.id, status: bt.status } : null,
@@ -201,13 +207,13 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
 }
 
 /** 같은 참석자/작성자의 겹치는 시간 일정 (종일 일정 제외) */
-export async function findConflicts(u: SessionUser, userIds: string[], start: Date, end: Date, excludeIds: string[] = []) {
+export async function findConflicts(u: SessionUser, userIds: string[], start: Date, end: Date, excludeIds: string[] = [], opt: { withoutMe?: boolean } = {}) {
   if (end <= start) return [];
   const sql = db();
   let ids = [...new Set([u.id, ...userIds])];
-  { // 같은 회사 사람만
+  { // 같은 회사 사람만 · 386차: 남에게 배정하는 일정이면(withoutMe) 내 일정과의 충돌은 보지 않음
     const ok = await sql<{ id: string }[]>`select id from users where id = any(${ids}::uuid[]) and tenant = ${tenantOf(u)}`;
-    ids = [u.id, ...ok.map((r) => r.id).filter((x) => x !== u.id)];
+    ids = [...(opt.withoutMe ? [] : [u.id]), ...ok.map((r) => r.id).filter((x) => x !== u.id)];
   }
   const rows = await sql<(EventRow & { cal_type: string; owner_user_id: string | null })[]>`
     select e.*, c.type as cal_type, c.owner_user_id from events e join calendars c on c.id = e.calendar_id
@@ -242,6 +248,17 @@ function validateTimes(i: { start: string; end: string; allDay?: boolean }) {
   return { s, e };
 }
 
+/** 386차: 일정을 배정받을 사람 — 같은 회사 재직자, 격리 팀이면 같은 팀 사람만(업무 배정과 같은 범위) */
+async function scheduleAssignee(u: SessionUser, ownerId: string, sql: Sql) {
+  if (u.isDemo) throw forbidden('체험 계정에서는 다른 사람에게 일정을 배정할 수 없습니다');
+  const [p] = await sql<{ id: string; name: string }[]>`select id, name from users where id = ${ownerId} and status = 'active' and tenant = ${tenantOf(u)}`;
+  if (!p) throw badRequest('일정을 배정할 사람을 찾을 수 없습니다(같은 회사 재직자만)');
+  const sc = await teamScope(u, sql);
+  if (sc.isolated && !sc.mates.includes(p.id)) throw forbidden('같은 팀 사람에게만 일정을 배정할 수 있습니다');
+  return p;
+}
+const kWhen = (d: Date, allDay?: boolean) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short', ...(allDay ? {} : { hour: '2-digit', minute: '2-digit', hour12: false }) }).format(d);
+
 async function setAttendees(sql: Sql, eventId: string, ids: string[]) {
   const before = (await sql<{ user_id: string }[]>`select user_id from event_attendees where event_id = ${eventId}`).map((r) => r.user_id);
   const want = [...new Set(ids)];
@@ -252,10 +269,13 @@ async function setAttendees(sql: Sql, eventId: string, ids: string[]) {
 
 export async function createEvent(u: SessionUser, i: EventInput) {
   const sql = db();
-  const calendarId = i.calendarId ?? (await ensurePersonalCalendar(u.id, u.name, sql));
+  // 386차: 다른 사람에게 배정 = 그 사람 개인 캘린더(캘린더 칸은 무시) · 나에게(ownerId = 나)면 내 개인 캘린더
+  const other = i.ownerId && i.ownerId !== u.id ? await scheduleAssignee(u, i.ownerId, sql) : null;
+  const calendarId = other ? await ensurePersonalCalendar(other.id, other.name, sql) : i.ownerId === u.id ? await ensurePersonalCalendar(u.id, u.name, sql) : i.calendarId ?? (await ensurePersonalCalendar(u.id, u.name, sql));
   const cal = await loadCalendar(sql, calendarId);
-  const cp = await calendarPerms(u, cal);
+  const cp = other ? { edit: true } : await calendarPerms(u, cal);
   if (!cp.edit) throw forbidden('이 캘린더에 일정을 등록할 권한이 없습니다');
+  if (other && i.attendeeIds?.length) i = { ...i, attendeeIds: i.attendeeIds.filter((x) => x !== other.id) }; // 일정 주인은 참석자로 따로 넣지 않음
   const { s, e } = validateTimes(i);
   const rule = normalizeRule(i.rrule);
   if (i.taskId) {
@@ -277,12 +297,15 @@ export async function createEvent(u: SessionUser, i: EventInput) {
         body: `${u.name}님이 일정에 초대했습니다`, link: `/calendar?event=${ev.id}`, entityType: 'event', entityId: ev.id,
         actorId: u.id, dedupeKey: `evinv:${ev.id}` });
     }
-    await activity(tx, 'event', ev.id, u.id, 'created', { title: i.title, start: s, end: e, rrule: rule });
+    if (other) await notify(tx, { userIds: [other.id], type: 'event_changed', title: `일정 배정: ${i.title}`,
+      body: `${u.name}님이 일정을 배정했습니다 · ${kWhen(s, i.allDay)}`, link: `/calendar?event=${ev.id}`, entityType: 'event', entityId: ev.id,
+      actorId: u.id, dedupeKey: `evasg:${ev.id}` });
+    await activity(tx, 'event', ev.id, u.id, 'created', { title: i.title, start: s, end: e, rrule: rule, ...(other ? { assignedTo: other.id } : {}) });
     return { id: ev.id };
   });
   if (i.alsoTask) {
     const { createSyncTask } = await import('./eventtasks');
-    const who = i.taskAssigneeIds?.length ? [...new Set(i.taskAssigneeIds)] : [i.taskAssigneeId ?? null];
+    const who = i.taskAssigneeIds?.length ? [...new Set(i.taskAssigneeIds)] : [i.taskAssigneeId ?? other?.id ?? null]; // 386차: 배정한 일정의 연결 업무 기본 담당 = 일정 주인
     const ids: string[] = [];
     for (const a of who) ids.push((await createSyncTask(u, out.id, a, { requestedById: i.taskRequestedById, priority: i.taskPriority })).id);
     out.taskId = ids[0]; (out as { taskIds?: string[] }).taskIds = ids;
@@ -306,7 +329,14 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
     if (i.version !== undefined && i.version !== e.version) {
       throw conflict('다른 곳에서 먼저 수정되었습니다. 새로고침 후 다시 시도하세요.', { currentVersion: e.version });
     }
-    if (i.calendarId && i.calendarId !== e.calendar_id) {
+    // 386차: 누구 일정인지 바꾸기(배정·되가져오기) = 그 사람 개인 캘린더로 옮김 — 반복 일정은 전체 일정에서만
+    let reassigned: { id: string; name: string } | null = null;
+    if (i.ownerId && !(perms.calendar.type === 'personal' && perms.calendar.owner_user_id === i.ownerId)) {
+      if ((e.rrule || e.recurring_event_id) && scope.scope !== 'all') throw badRequest('반복 일정은 전체 일정에서만 누구 일정인지 바꿀 수 있습니다');
+      reassigned = i.ownerId === u.id ? { id: u.id, name: u.name } : await scheduleAssignee(u, i.ownerId, tx);
+      i = { ...i, calendarId: await ensurePersonalCalendar(reassigned.id, reassigned.name, tx) };
+    } else if (i.ownerId) i = { ...i, calendarId: undefined }; // 이미 그 사람 일정 — 함께 온 캘린더 값으로 다시 옮기지 않음
+    if (i.calendarId && i.calendarId !== e.calendar_id && !reassigned) {
       const cal = await loadCalendar(tx, i.calendarId);
       if (!(await calendarPerms(u, cal)).edit) throw forbidden('옮길 캘린더에 권한이 없습니다');
     }
@@ -434,9 +464,19 @@ export async function updateEvent(u: SessionUser, id: string, i: Partial<EventIn
       const seriesId = (result.newSeriesId as string | undefined) ?? master.id;
       await tx`update events set alarm = ${i.alarm}, updated_at = now() where id = ${seriesId}`;
     }
+    if (reassigned) { // 386차: 새 주인은 참석자 줄에서 빼고(주인이 됨), 반복 예외 회차도 같은 캘린더로 · 받는 사람에게 '일정 배정' 알림
+      await tx`delete from event_attendees where event_id = ${master.id} and user_id = ${reassigned.id}`;
+      await tx`update events set calendar_id = ${i.calendarId!} where recurring_event_id = ${master.id}`;
+      if (reassigned.id !== u.id) await notify(tx, { userIds: [reassigned.id], type: 'event_changed', title: `일정 배정: ${i.title ?? master.title}`,
+        body: `${u.name}님이 일정을 배정했습니다 · ${kWhen(master.start_at, master.all_day)}`, link: `/calendar?event=${target}`, entityType: 'event', entityId: target,
+        actorId: u.id, dedupeKey: `evasg:${master.id}:${reassigned.id}` });
+    }
     const [after] = await tx<{ version: number }[]>`select version from events where id = ${target}`;
     const attendeeIds = (await tx<{ user_id: string }[]>`select user_id from event_attendees where event_id = ${master.id}`).map((r) => r.user_id);
-    await notify(tx, { userIds: attendeeIds, type: 'event_changed', title: `일정 변경: ${i.title ?? master.title}`,
+    // 386차: 남이 내 일정(배정받은 일정 등)을 바꾸면 일정 주인에게도 알림
+    const [ownerRow] = await tx<{ owner_user_id: string | null }[]>`select c.owner_user_id from events ev join calendars c on c.id = ev.calendar_id where ev.id = ${target}`;
+    const changeTo = [...new Set([...attendeeIds, ...(ownerRow?.owner_user_id && ownerRow.owner_user_id !== u.id && ownerRow.owner_user_id !== reassigned?.id ? [ownerRow.owner_user_id] : [])])];
+    await notify(tx, { userIds: changeTo, type: 'event_changed', title: `일정 변경: ${i.title ?? master.title}`,
       body: `${u.name}님이 일정을 변경했습니다`, link: `/calendar?event=${target}`, entityType: 'event', entityId: target,
       actorId: u.id, dedupeKey: `evchg:${target}:${after.version}` });
     await activity(tx, 'event', master.id, u.id, 'updated', { scope: scope.scope, occurrenceStart: scope.occurrenceStart ?? null, fields: i });
@@ -468,7 +508,8 @@ export async function deleteEvent(u: SessionUser, id: string, scope: z.infer<typ
       }
     }
     const attendeeIds = (await tx<{ user_id: string }[]>`select user_id from event_attendees where event_id = ${master.id}`).map((r) => r.user_id);
-    await notify(tx, { userIds: attendeeIds, type: 'event_changed', title: `일정 취소: ${master.title}`,
+    if (perms.calendar.type === 'personal' && perms.calendar.owner_user_id && perms.calendar.owner_user_id !== u.id) attendeeIds.push(perms.calendar.owner_user_id); // 386차: 배정받은 일정을 남이 지우면 주인에게도
+    await notify(tx, { userIds: [...new Set(attendeeIds)], type: 'event_changed', title: `일정 취소: ${master.title}`,
       body: `${u.name}님이 일정을 취소했습니다${scope.scope !== 'all' && master.rrule ? ` (${scope.scope === 'this' ? '이번 일정' : '이후 일정'})` : ''}`,
       link: `/calendar`, entityType: 'event', entityId: master.id, actorId: u.id, dedupeKey: `evdel:${master.id}:${scope.scope}:${scope.occurrenceStart ?? ''}` });
     await activity(tx, 'event', master.id, u.id, 'deleted', { scope: scope.scope, occurrenceStart: scope.occurrenceStart ?? null });
