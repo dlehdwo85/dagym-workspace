@@ -180,8 +180,20 @@ const num = (v: unknown): number | null => { if (v == null || v === '') return n
 /** 낙찰률(%) — '87.745' · '87.745%' → 87.745, 0·200 넘는 값은 버림 */
 const rate = (v: unknown): number | null => { if (v == null || v === '') return null; const n = Number(String(v).replace(/[%\s,]/g, '')); return Number.isFinite(n) && n > 0 && n <= 200 ? n : null; };
 export const ymdOf = (v: unknown): string | null => { const m = String(v ?? '').match(/^(\d{4})-?(\d{2})-?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : null; };
-/** 원천 시각(한국) → ISO(+09:00). '2026-10-21 14:00' · '20261021 1400' · '2026/10/21' 모두 */
+/** 387차(대표 11/10 '스케줄이 일정에 맞게 생성되지 않음' — 더샵일산퍼스트월드1단지 입찰 마감 17:00 이 캘린더에 08:00): 시간대가 붙은 시각
+ *  ('…Z' · '…+00:00' · '…+0000' · DB 글자 '… 08:00:00+00')은 그 순간을 한국 시각(+09:00)으로 바꿔 씀 — 예전엔 숫자만 읽고 +09:00 을 붙여 9시간 당겨졌다.
+ *  날짜만('2026-11-11')·시간대 없는 시각은 그대로 한국 시각으로 본다(끝의 '-11' 을 시간대로 읽지 않게 시각이 있을 때만) */
+const ZONED = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:[zZ]|[+-]\d{2}(?::?\d{2})?)$/;
+export const kstIso = (d: Date) => `${new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 19)}+09:00`;
+/** 시간대가 붙은 시각이면 한국 시각 ISO, 아니면 null */
+export const zonedKst = (v: unknown): string | null => {
+  const raw = String(v ?? '').trim(); if (!ZONED.test(raw)) return null;
+  const d = new Date(raw.replace(' ', 'T').replace(/\s+(?=[zZ+-]\d*:?\d*$)/, '').replace(/([+-]\d{2})$/, '$1:00').replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+  return Number.isNaN(d.getTime()) ? null : kstIso(d);
+};
+/** 원천 시각(한국) → ISO(+09:00). '2026-10-21 14:00' · '20261021 1400' · '2026/10/21' 모두 · 시간대가 붙은 시각은 한국 시각으로 바꿈(387차) */
 export const ts = (v: unknown): string | null => {
+  const z = zonedKst(v); if (z) return z;
   const s = String(v ?? '').trim().replace(/[./]/g, '-');
   const m = s.match(/^(\d{4})-?(\d{2})-?(\d{2})(?:[ T]?(\d{2}):?(\d{2})(?::?(\d{2}))?)?/);
   if (!m) return null;

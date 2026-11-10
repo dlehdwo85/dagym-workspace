@@ -19,6 +19,7 @@ import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
 import { cancelInfo as noticeCancelInfo, groupNotices, isCancel, latestCancelled, latestLive, noKey, renoticeKey } from './noticeGroups';
 import { briefingOf, mdhm } from './bidTerms';
+import { zonedKst } from './collectors/procurement';
 import { BID_STATUS, workRecord } from './work';
 
 export { BID_STATUS };
@@ -39,7 +40,8 @@ export function when(v: unknown): When | null {
   const s = String(v ?? '').trim(); if (!s) return null;
   const m = s.match(/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2}))?/);
   if (!m) { const d = new Date(s); if (Number.isNaN(d.getTime())) return null; return { day: ymd(d), start: d.toISOString(), end: new Date(d.getTime() + 3600e3).toISOString(), allDay: false }; }
-  if (m[2]) { const st = /[zZ]|[+-]\d{2}:?\d{2}$/.test(s) ? new Date(s) : new Date(`${m[1]}T${m[2]}:${m[3]}:00+09:00`); return { day: ymd(st), start: st.toISOString(), end: new Date(st.getTime() + 3600e3).toISOString(), allDay: false }; }
+  // 387차: 시간대가 붙은 시각('Z'·'+00:00'·DB 글자 '+00')은 그 순간 그대로 — 예전 검사는 '+00'(두 자리)을 못 알아봐 한국 시각으로 읽어 9시간 당겨졌다
+  if (m[2]) { const z = zonedKst(s); const st = z ? new Date(z) : new Date(`${m[1]}T${m[2]}:${m[3]}:00+09:00`); return { day: ymd(st), start: st.toISOString(), end: new Date(st.getTime() + 3600e3).toISOString(), allDay: false }; }
   const st = new Date(`${m[1]}T00:00:00+09:00`); return { day: m[1], start: st.toISOString(), end: new Date(st.getTime() + 864e5).toISOString(), allDay: true };
 }
 export type MilestoneKey = 'briefing' | 'apply' | 'close' | 'open';

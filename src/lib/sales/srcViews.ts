@@ -5,7 +5,7 @@ import { badRequest, notFound } from '../errors';
 import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
-import { isAwardResult, onbidSale, partnerNeed } from './collectors/procurement';
+import { isAwardResult, onbidSale, partnerNeed, zonedKst } from './collectors/procurement';
 import { groupNotices, isCancel, oneCardPerNotice, plainTitle, renoticeKey, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { hubTabsOn } from './hubTabs';
@@ -190,7 +190,7 @@ function deadlineAt(v: unknown): number | null {
   const s = String(v ?? '').trim();
   const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
   if (!m) return null;
-  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) { const t = Date.parse(s); return Number.isNaN(t) ? null : t; }
+  const z = zonedKst(s); if (z) return Date.parse(z); // 387차: '+00'(두 자리)·'+0000' 시간대도 그 순간 그대로
   return Date.parse(`${m[1]}T${m[2]}:${m[3]}:00+09:00`);
 }
 /** 끝난 공고: 마감·취소·낙찰 상태이거나 마감일이 지남 — #537 후속2(로컬 10/24 12:58) 오늘 새 공고에서도 뺌 */
