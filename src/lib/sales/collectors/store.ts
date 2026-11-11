@@ -90,7 +90,7 @@ export async function refitNotices(opt: { days?: number; now?: Date } = {}): Pro
   const fitOf = (row: any) => matchFit(String(row.title), row.bid_category ?? null, row.task_scope ?? null, aptContext(row));
   // 191차: 줄이 많아도(K-apt 전체 공고 등) 끝까지 — 예전엔 순서 없이 2만 줄까지만 읽어 일부 공고를 다시 판정하지 못했다. 판정에 쓰는 칸만 5천 줄씩
   const page = async (related: boolean, after: string) => sql<{ src_id: string; row: any }[]>`select src_id, jsonb_build_object('title', row->'title', 'bid_category', row->'bid_category',
-      'task_scope', row->'task_scope', 'source_type', row->'source_type', 'deadline_at', row->'deadline_at', 'refound_at', row->'refound_at', 'refit_at', row->'refit_at',
+      'task_scope', row->'task_scope', 'source_type', row->'source_type', 'issuer', row->'issuer', 'deadline_at', row->'deadline_at', 'refound_at', row->'refound_at', 'refit_at', row->'refit_at',
       'classification', row->'classification', 'fit_business', row->'fit_business', 'matched_keywords', row->'matched_keywords') as row
     from sales_src_rows where scope = ${SCOPE} and tbl = 'procurement_notices' and not gone and src_id > ${after}
     and ${related ? sql`coalesce(row->>'related', 'false') = 'true'` : sql`coalesce(row->>'related', 'false') <> 'true'`} and coalesce(row->>'source_type', '') <> 'vendor_recruit'

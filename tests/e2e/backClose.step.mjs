@@ -56,8 +56,10 @@ export async function backClose({ owner, ctx, BASE }) {
   // 358차(CI 2139): DB 가 바쁠 때 승인함 첫 목록이 30초를 넘김 — 목록이 뜰 때까지 기다린 뒤 내림
   // 377차(CI 2242 — 2240 은 같은 코드로 통과): 시안이 붙은 글은 '승인할 시안' 묶음(처음 3장 + [N건 더 보기])으로 가서 아래 글이 [더 보기] 뒤에 숨음
   //   → 90초 동안 카드를 기다리며 [더 보기]가 보이면 누름(시안 없음 묶음은 모두 펼쳐져 있어 그대로)
-  const until = Date.now() + 90_000;
+  const until = Date.now() + 90_000; let reloaded = false;
   while (!(await far().isVisible().catch(() => false)) && Date.now() < until) {
+    // 386차(CI 2289 — 90초 내내 카드 없음): 첫 목록 요청이 늦게 실패하면 그대로 빈 화면 — 45초가 지나면 한 번 새로 고침
+    if (!reloaded && Date.now() > until - 45_000) { reloaded = true; await owner.reload(); await owner.waitForURL((u) => u.pathname === '/s/marketing/approvals'); }
     const more = owner.getByTestId('mkt-more');
     if (await more.isVisible().catch(() => false)) await more.click().catch(() => {});
     await owner.waitForTimeout(500);

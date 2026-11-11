@@ -40,7 +40,8 @@ export type KaptBidDetail = { manager?: string; officeAddress?: string; phone?: 
   /** #507 후속: 첨부 목록 API(bidFileListData.do)로 읽은 원래 이름·파일 번호 */ files?: { name: string | null; url: string }[];
   /** 239차(#743·#744): 참가 조건·현장설명 칸 */ terms?: KaptBidTerms;
   /** #751(로컬 10/28 17:25): 마감 전에 취소된 공고 — '낙찰업체 정보' 표에 '취소된 계약 입니다' · '낙찰/유찰/취소 사유' */ canceled?: boolean; cancelReason?: string | null;
-  /** 350차(대표 11/04 #937): K-apt 자체 공고의 취소 — 상세 '공고 취소 등록일'(한국 시각 ISO) */ cancelAt?: string | null };
+  /** 350차(대표 11/04 #937): K-apt 자체 공고의 취소 — 상세 '공고 취소 등록일'(한국 시각 ISO) */ cancelAt?: string | null;
+  /** 387차: 상세의 '입찰서제출마감일'(한국 시각 ISO, 시각이 있을 때만) — 저장된 마감이 잘못 바뀌어도 상세를 다시 읽을 때 바로잡음 */ deadline?: string | null };
 /** 239차(#743·#744 로컬 10/28 19:30·19:45): 입찰공고 상세의 참가 조건·현장설명 — 파일을 열지 않고 목록 줄·상세·메일에 */
 export type KaptBidTerms = { briefingKind: '필수' | '임의' | '없음' | '공고문 참조' | null; briefingAt: string | null; briefingPlace: string | null; bidDocs: string | null; creditCert: string | null;
   perfCert: string | null; bidBond: string | null; docsDeadline: string | null; bidMethod: string | null; urgent: boolean | null; payTerms: string | null };
@@ -91,6 +92,9 @@ export function parseKaptBidDetail(html: string): KaptBidDetail {
   const cxl = pair('공고\\s*취소\\s*등록일') ?? pair('취소\\s*등록일') ?? (/공고\s*취소\s*등록일/.test(html) ? text(html).match(/공고\s*취소\s*등록일\s*[:：]?\s*(\d{4}[-./]\d{1,2}[-./]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)/)?.[1] : undefined);
   const cxlAt = cxl && /\d{4}[-./]\d{1,2}[-./]\d{1,2}/.test(cxl) ? kstOf(cxl) : null;
   if (/취소된\s*계약/.test(html) || cxlAt) { d.canceled = true; d.cancelReason = parseKaptAwardDetail(html).reason; if (cxlAt) d.cancelAt = cxlAt; }
+  // 387차(대표 11/10 더샵일산퍼스트월드1단지 — 상세 '입찰서제출마감일 2026-11-11 17:00:00' 인데 캘린더 08:00): 상세의 마감 일시를 기준으로
+  const dl = [...html.matchAll(/<th[^>]*>([\s\S]*?)<\/th>\s*<td[^>]*>([\s\S]*?)<\/td>/g)].find((m) => /^입찰서?제출마감(일|일시)$/.test(text(m[1]).replace(/\s/g, '')));
+  const dlText = dl ? text(dl[2]) : ''; if (/\d{4}[-./]\d{1,2}[-./]\d{1,2}\s+\d{1,2}:\d{2}/.test(dlText)) d.deadline = kstOf(dlText);
   return d;
 }
 /** '2026-10-27 10:16:17' · '2026.10.27' → 한국 시각 ISO */
@@ -108,7 +112,7 @@ export async function probeKaptDetail(bid: string) {
 export const regionFromTitle = (title: string) => title.match(/^\s*\[([^\]]{1,12})\]/)?.[1]?.trim() ?? null;
 export function toPayload(r: KaptBidRow, d?: KaptBidDetail): Record<string, unknown> {
   return { source_type: 'kapt_bid', source_external_id: r.bidNum, source_url: `${BASE().replace(/\/kapt$/, T() ? '/kapt' : '')}/bid/bidDetail.do?bidNum=${encodeURIComponent(r.bidNum)}`, issuer: r.complex || null, facility_name: r.complex || null, title: r.title, region: regionFromTitle(r.title),
-    posted_date: r.registeredAt.slice(0, 10), deadline_at: r.deadline, notice_state: d?.canceled ? '취소' : r.state, bid_system: r.system, award_method: r.awardMethod, contract_method: d?.bidKind ?? null, bid_category: d?.category ?? null, task_scope: d?.content ?? null,
+    posted_date: r.registeredAt.slice(0, 10), deadline_at: d?.deadline ?? r.deadline, notice_state: d?.canceled ? '취소' : r.state, bid_system: r.system, award_method: r.awardMethod, contract_method: d?.bidKind ?? null, bid_category: d?.category ?? null, task_scope: d?.content ?? null,
     office_phone: d?.phone ?? null, office_fax: d?.fax ?? null, office_address: d?.officeAddress ?? null, household_count: d?.households ?? null,
     // 첨부는 첨부 목록 API 로 읽은 것만(상세 HTML 의 링크는 화면 스크립트가 그려 실제 K-apt 에선 비거나 엉뚱한 주소 — 10/23 a7e4efad·086aeff2)
     attachment_urls: d?.files ? d.files.map((f) => (f.name ? { name: f.name, url: f.url } : f.url)) : [], files_checked_at: d?.files ? new Date().toISOString() : null,
@@ -224,7 +228,8 @@ export const kaptBidNotices: Collector = {
       const rows0 = await db()<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'source_type' = 'kapt_bid'
           and coalesce(row->>'related', 'false') = 'true' and coalesce(row->>'deadline_at', '') >= ${td} and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰'
           and not (row->>'source_external_id' = any(${skip}::text[]))
-        order by row->>'detail_seen_at' asc nulls first, row->>'deadline_at' asc limit ${WATCH_LIMIT * 2}`.catch(() => []);
+        order by left(coalesce(row->>'deadline_at', ''), 10) <= ${kstYmd(new Date(Date.parse(`${td}T12:00:00+09:00`) + 2 * 864e5))} desc, row->>'detail_seen_at' asc nulls first, row->>'deadline_at' asc limit ${WATCH_LIMIT * 2}`.catch(() => []); // 387차: 마감 이틀 안 공고는 매번
+      const listedRow = new Map(uniq.map((r) => [r.bidNum, r]));
       const seenExt = new Set<string>();
       const wl = rows0.map((x) => x.row).filter((x) => { const k = String(x?.source_external_id ?? ''); if (!k || seenExt.has(k)) return false; seenExt.add(k); return true; }).slice(0, WATCH_LIMIT);
       await pool(wl, 6, async (x) => {
@@ -233,7 +238,8 @@ export const kaptBidNotices: Collector = {
           const s = await kaptSession(String(x.source_external_id), fetchImpl, 8000); if (s.status !== 200) throw new Error(`HTTP ${s.status}`);
           const d = parseKaptBidDetail(s.html); if (d.canceled) watchCanceled++;
           // 목록 칸(제목·마감·공고 구분·주소·지역·발주처)은 저장된 값 그대로 — 상태·공고 종류 계산이 목록에서 읽을 때와 같고, 표기 차이로 '변경'이 되지 않게. 상세 칸만 새로
-          const p = toPayload({ bidNum: String(x.source_external_id), title: String(x.title ?? ''), deadline: String(x.deadline_at ?? ''), state: String(x.notice_state ?? ''),
+          // 387차: 이번 목록에 있는 공고는 목록 값(마감 등) — 저장된 값이 잘못 바뀐 경우(9시간 당겨진 마감)에 목록보다 먼저 쓰여 그대로 남던 것을 막음. 마감은 상세 값이 있으면 상세(toPayload)
+          const p = toPayload(listedRow.get(String(x.source_external_id)) ?? { bidNum: String(x.source_external_id), title: String(x.title ?? ''), deadline: String(x.deadline_at ?? ''), state: String(x.notice_state ?? ''),
             complex: String(x.facility_name ?? x.issuer ?? ''), registeredAt: String(x.posted_date ?? ''), system: String(x.bid_system ?? ''), awardMethod: String(x.award_method ?? '') }, d);
           watched.push({ ...p, source_url: x.source_url || p.source_url, region: x.region ?? p.region, issuer: x.issuer ?? p.issuer, facility_name: x.facility_name ?? p.facility_name,
             detail_seen_at: new Date().toISOString() }); // 다시 확인한 때 — 다음 실행은 오래전에 확인한 공고부터

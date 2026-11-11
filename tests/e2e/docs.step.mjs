@@ -28,7 +28,8 @@ export async function docsCoedit({ browser, owner, staff, ctx, sql, BASE, SHOTS,
 
   // 휴대폰 직원이 같은 문서를 열면 대표 글이 보이고, 직원이 쓴 글이 대표 화면에도
   await staff.goto(`${BASE}/library/doc/${id}`);
-  await staff.getByTestId('doc-editor').waitFor();
+  // 386차(CI 2285·2286·2291 — 로컬은 통과): 휴대폰 직원 화면도 편집기가 30초 안에 안 뜨는 흔들림 — 대표 화면과 같이 늦으면 한 번 새로 고쳐서 기다림
+  try { await staff.getByTestId('doc-editor').waitFor({ timeout: 30000 }); } catch { await staff.reload(); await staff.getByTestId('doc-editor').waitFor({ timeout: 45000 }); }
   await waitText(staff, '안건 1: 매출 점검');
   await staff.getByTestId('doc-editor').click();
   await staff.keyboard.press('End');

@@ -4,6 +4,10 @@ import { audit } from '../log';
 import type { SessionUser } from '../types';
 import { createHash } from 'node:crypto';
 import { srcAll, srcConfigured, srcCount, srcGet } from './supabaseSrc';
+import { zonedKst } from './collectors/procurement';
+
+/** 387차: 공고 시각 칸(원본은 timestamptz → '…+00:00') */
+const TIME_COLS = ['deadline_at', 'participation_deadline_at', 'opening_at', 'site_briefing_at', 'docs_deadline_at', 'agreement_close_at', 'bid_start_at'];
 
 /**
  * V41 단계 2 영업관리(Supabase) → 워크인 이전 — 1) 미리보기: 원본은 읽기만, 저장 없음.
@@ -107,7 +111,9 @@ export async function salesMigrateApply(u: SessionUser | null, tenant: string) {
       const rows = await srcAll(tbl);
       if (scope === 'global') {
         const own = GLOBAL[tbl];
-        await upsertRows('global', tbl, rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !own.includes(k)))));
+        // 387차: 원본의 시각 칸은 세계 표준시('…08:00:00+00:00')로 오므로 한국 시각(+09:00) 글자로 바꿔 둠 — 다른 수집기·화면이 '+09:00' 글자를 전제로 날짜·시각을 자름
+        const kst = (r: any) => (tbl === 'procurement_notices' ? { ...r, ...Object.fromEntries(TIME_COLS.flatMap((k) => { const z = zonedKst(r[k]); return z ? [[k, z]] : []; })) } : r);
+        await upsertRows('global', tbl, rows.map((r) => kst(Object.fromEntries(Object.entries(r).filter(([k]) => !own.includes(k))))));
         const prog = own.length ? rows.map((r) => ({ id: r.id, ...Object.fromEntries(own.filter((k) => r[k] !== null && r[k] !== undefined).map((k) => [k, r[k]])) })).filter((p) => Object.keys(p).length > 1) : [];
         if (own.length) await upsertRows(tenant, `${tbl}__progress`, prog);
         results.push({ tbl, scope, src: rows.length, dst: 0, ok: false, progress: prog.length });

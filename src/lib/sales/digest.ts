@@ -12,7 +12,7 @@ import { notify } from '../notifications';
 import { audit } from '../log';
 import { zUuid } from '../api';
 import { tenantOf, type SessionUser } from '../types';
-import { CLOSED_STATUS, initialClassification, isAwardResult, matchFit, onbidSale, partnerNeed } from './collectors/procurement';
+import { CLOSED_STATUS, initialClassification, isAwardResult, matchFit, onbidSale, partnerNeed, zonedKst } from './collectors/procurement';
 import { vendorDateOk } from './collectors/vendorRules';
 import { BID_COLLECTORS } from './collectors';
 import { listBizCats, matchBiz, type BizCat } from './bizCats';
@@ -71,8 +71,9 @@ const norm = (s: string) => s.replace(/\s+/g, '').toUpperCase();
 /** 원천 날짜·시각 → 서울 기준 'YYYY-MM-DD HH:MM'(시각이 없거나 00:00 이면 날짜만). 형식: 2026-10-28 17:00(:00) · 2026-10-28T17:00:00+09:00 · 202610281700 */
 function when(v: unknown): { d: string; t: string | null } | null {
   const s = String(v ?? '').trim(); const m = s.match(/^(\d{4})-?(\d{2})-?(\d{2})(?:[T\s]?(\d{2}):?(\d{2}))?/); if (!m) return null;
-  if (/[T\s]\d{2}:?\d{2}.*(Z|[+-]\d{2}:?\d{2})$/.test(s)) {
-    const x = new Date(s);
+  const z = zonedKst(s); // 387차: '+00'(두 자리)·'+0000' 시간대도 그 순간 그대로
+  if (z) {
+    const x = new Date(z);
     if (!Number.isNaN(x.getTime())) { const t = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(x); return { d: kstDay(x), t: t === '00:00' ? null : t }; }
   }
   const t = m[4] ? `${m[4]}:${m[5]}` : null;

@@ -11,6 +11,10 @@ export const NOISE_KEYWORDS = ['도장', '방수', '보수공사', '공사', '�
   '회계감사', '감사', '변압기', '택배', '리모델링', '바닥재', '인테리어', '교체'] as const;
 export const EXCLUDE_TOPICS = ['어린이집', '보육', '알뜰', '장터', '야시장', '자판기', '주차관제', '주차장', '음식물', '종량기', '재활용', '택배', '이동통신', '중계기', '헬스케어', '구내식당', '급식', '매점', '학위복', '방과후',
   '영어마을', '정보시스템', '전산', '선거', '투표', '돼지', '가축', '축산', '양돈', '농장', '개체식별', '해외연수', '바이오헬스', '헬스산업', '조기경보', '재난', '하천', '임대공실', '공실', '점포', '장서'] as const;
+/** 385차(로컬 11/07 '[서울] 공동현관 로비폰 및 중계기 교체공사'가 관련 아님): 제외 주제 '중계기'는 이동통신 중계기(통신사 장비 자리 임대) —
+ *  같은 제목·분류에 로비폰·공동현관·인터폰·월패드·출입이 있으면 로비폰(인터폰) 중계기라 하이링크 일이므로 제외하지 않음(norm 한 글자에 대고 봄) */
+const LOBBY_CTX = /로비폰|공동현관|인터폰|월패드|비디오폰|출입/;
+const excluded = (normHead: string) => EXCLUDE_TOPICS.some((k) => normHead.includes(norm(k)) && !(k === '중계기' && LOBBY_CTX.test(normHead)));
 // #476 d: '주민 운동시설 위탁관리업체 선정'(K-apt 분류 '사업자-용역-주민운동시설의 위탁')이 중장기로 빠졌다 → 위탁 관리(업체)·시설의 위탁·위탁 업체/사업자 선정도 즉시 검토
 // 191차(대표 10/27 정정): 즉시 검토 낱말을 둘로 — 다짐은 운영·위탁 낱말만(예전 '스크린골프'·'타석'은 다짐 즉시 검토가 아님), 하이링크는 시스템 낱말
 const DIRECT_OPS = /(위탁\s*운영|운영\s*위탁|운영\s*업체|운영\s*사업자|운영자|위탁\s*용역|위탁\s*관리(?:\s*업체)?|시설의\s*위탁|위탁\s*(?:업체|사업자)\s*선정)/;
@@ -49,7 +53,7 @@ export function publicFacilityFit(title: string, cat?: string | null): { hit: bo
   if (PLAYGROUND.test(t)) facs = facs.filter((f) => !PARK_ONLY.test(f));
   const facility = facs[0] ?? null;
   if (!ops || !facility) return { hit: false, ops, facility, why: !ops ? '운영 맡김 낱말 없음' : PLAYGROUND.test(t) ? "'놀이터'는 위탁하지 않음" : '시설 낱말 없음' };
-  if (EXCLUDE_TOPICS.some((k) => norm(head).includes(norm(k)))) return { hit: false, ops, facility, why: '제외 주제' };
+  if (excluded(norm(head))) return { hit: false, ops, facility, why: '제외 주제' };
   const build = t.match(BUILD_RE)?.[0] ?? t.match(CONSTRUCTION_RE)?.[0] ?? t.match(FACILITY_SERVICE_RE)?.[0] ?? t.match(PUB_NOISE)?.[0] ?? null;
   if (build) return { hit: false, ops, facility, why: `제목에 '${build}'` };
   const it = t.match(IT_TARGET)?.[0];
@@ -74,7 +78,7 @@ export function matchFit(...texts: (string | null | undefined)[]): FitResult {
   const title = String(texts[0] ?? '');
   const upper = norm(text), titleU = norm(parts[0] ?? ''), headU = norm(`${parts[0] ?? ''} ${parts[1] ?? ''}`);
   const has = (k: string) => upper.includes(norm(k));
-  if (EXCLUDE_TOPICS.some((k) => headU.includes(norm(k)))) return { fit: null, matched: [], direct: false };
+  if (excluded(headU)) return { fit: null, matched: [], direct: false };
   const noisy = NOISE_KEYWORDS.some((k) => titleU.includes(norm(k)));
   const apt = APT_CONTEXT.test(text);
   // 185차 A2: '통합관리시스템'은 제목에 '커뮤니티'가 같이 있으면 강한 낱말(커뮤니티센터 통합관리시스템 = 하이링크 핵심 공고)
@@ -176,8 +180,20 @@ const num = (v: unknown): number | null => { if (v == null || v === '') return n
 /** 낙찰률(%) — '87.745' · '87.745%' → 87.745, 0·200 넘는 값은 버림 */
 const rate = (v: unknown): number | null => { if (v == null || v === '') return null; const n = Number(String(v).replace(/[%\s,]/g, '')); return Number.isFinite(n) && n > 0 && n <= 200 ? n : null; };
 export const ymdOf = (v: unknown): string | null => { const m = String(v ?? '').match(/^(\d{4})-?(\d{2})-?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : null; };
-/** 원천 시각(한국) → ISO(+09:00). '2026-10-21 14:00' · '20261021 1400' · '2026/10/21' 모두 */
+/** 387차(대표 11/10 '스케줄이 일정에 맞게 생성되지 않음' — 더샵일산퍼스트월드1단지 입찰 마감 17:00 이 캘린더에 08:00): 시간대가 붙은 시각
+ *  ('…Z' · '…+00:00' · '…+0000' · DB 글자 '… 08:00:00+00')은 그 순간을 한국 시각(+09:00)으로 바꿔 씀 — 예전엔 숫자만 읽고 +09:00 을 붙여 9시간 당겨졌다.
+ *  날짜만('2026-11-11')·시간대 없는 시각은 그대로 한국 시각으로 본다(끝의 '-11' 을 시간대로 읽지 않게 시각이 있을 때만) */
+const ZONED = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:[zZ]|[+-]\d{2}(?::?\d{2})?)$/;
+export const kstIso = (d: Date) => `${new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 19)}+09:00`;
+/** 시간대가 붙은 시각이면 한국 시각 ISO, 아니면 null */
+export const zonedKst = (v: unknown): string | null => {
+  const raw = String(v ?? '').trim(); if (!ZONED.test(raw)) return null;
+  const d = new Date(raw.replace(' ', 'T').replace(/\s+(?=[zZ+-]\d*:?\d*$)/, '').replace(/([+-]\d{2})$/, '$1:00').replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+  return Number.isNaN(d.getTime()) ? null : kstIso(d);
+};
+/** 원천 시각(한국) → ISO(+09:00). '2026-10-21 14:00' · '20261021 1400' · '2026/10/21' 모두 · 시간대가 붙은 시각은 한국 시각으로 바꿈(387차) */
 export const ts = (v: unknown): string | null => {
+  const z = zonedKst(v); if (z) return z;
   const s = String(v ?? '').trim().replace(/[./]/g, '-');
   const m = s.match(/^(\d{4})-?(\d{2})-?(\d{2})(?:[ T]?(\d{2}):?(\d{2})(?::?(\d{2}))?)?/);
   if (!m) return null;

@@ -23,7 +23,12 @@ export const GET = handler<{ id: string }>(async ({ user, params }) => {
   const task = event.task_id ? (await sql`select id, title, status from tasks where id = ${event.task_id}`)[0] : null;
   // V5 "업무에도 추가"로 연결된 업무
   const [syncTask] = await sql`select t.id, t.title, t.status from event_tasks et join tasks t on t.id = et.task_id where et.event_id = ${masterId} and et.sync and t.deleted_at is null`;
-  return { event: { ...event, rrule: master.rrule, reminder_minutes: (master as any).reminder_minutes ?? null }, perms: { edit: perms.edit, attendee: perms.attendee }, calendar: perms.calendar, attendees, attachments, task, syncTask: syncTask ?? null };
+  // 386차: 누구 일정(개인 캘린더 주인)·배정한 사람(만든 사람 ≠ 주인)
+  const ownerId = perms.calendar.type === 'personal' ? perms.calendar.owner_user_id : null;
+  const people = await sql<{ id: string; name: string }[]>`select id, name from users where id = any(${[ownerId, event.created_by].filter(Boolean) as string[]}::uuid[])`;
+  const owner = ownerId ? people.find((p) => p.id === ownerId) ?? null : null;
+  const assignedBy = ownerId && ownerId !== event.created_by ? people.find((p) => p.id === event.created_by) ?? null : null;
+  return { event: { ...event, rrule: master.rrule, reminder_minutes: (master as any).reminder_minutes ?? null }, perms: { edit: perms.edit, attendee: perms.attendee }, calendar: perms.calendar, attendees, attachments, task, syncTask: syncTask ?? null, owner, assignedBy };
 });
 
 export const PATCH = handler<{ id: string }>(async ({ req, user, params }) => {

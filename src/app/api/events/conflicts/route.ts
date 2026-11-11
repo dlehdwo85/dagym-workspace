@@ -8,5 +8,5 @@ export const GET = handler(async ({ req, user }) => {
   if (isNaN(+s) || isNaN(+e)) throw badRequest('start/end 가 필요합니다');
   const users = p.get('userIds')?.split(',').filter(Boolean) ?? [];
   const exclude = p.get('exclude')?.split(',').filter(Boolean) ?? [];
-  return { conflicts: await findConflicts(user, users, s, e, exclude) };
+  return { conflicts: await findConflicts(user, users, s, e, exclude, { withoutMe: p.get('withoutMe') === '1' }) }; // 386차: 남에게 배정하는 일정은 내 충돌 빼고
 });

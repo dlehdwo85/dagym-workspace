@@ -106,5 +106,5 @@ test('③④⑤ 관련 아님 공고가 2만 줄 넘게 쌓여도: 관련 원본
   // 이 회사가 [대상 아님]으로 넘긴 줄 → listCheck 'skip'
   await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: R.card, status: '대상아님', reason: '시험' });
   const sk = (await ctx.owner.ok('GET', '/api/platform/sales-notices?no=20261023140627810')).items[0];
-  assert.deepEqual([sk.listCheck.listed, sk.listCheck.step], [false, 'skip']); assert.match(sk.listCheck.why, /대상 아님/);
+  assert.deepEqual([sk.listCheck.listed, sk.listCheck.step], [false, 'skip']); assert.match(sk.listCheck.why, /\[취소\]/); // 385차: 380차 탭 이름([취소])
 });

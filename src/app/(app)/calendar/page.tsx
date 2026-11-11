@@ -140,7 +140,8 @@ function CalendarPage() {
   const showEvent = (e: any) => {
     if (who === 'all') return true;
     const ids = who === 'mine' ? [user.id] : who;
-    return ids.includes(e.ownerId) || ids.includes(e.createdBy) || (e.attendees ?? []).some((a: any) => ids.includes(a.user_id));
+    // 386차(대표 11/09): 남에게 배정한 일정(만든 사람 ≠ 주인)은 받은 사람 일정 — 만든 사람의 '내 일정'에는 안 보임
+    return ids.includes(e.ownerId) || (!e.assignedBy && ids.includes(e.createdBy)) || (e.attendees ?? []).some((a: any) => ids.includes(a.user_id));
   };
   const showTask = (t: any) => who === 'all' || (who === 'mine' ? assignedTo(t, user.id) : who.some((w) => assignedTo(t, w))); // #475 공동 담당 업무도
   const calRef = useRef<FullCalendar>(null);
@@ -1014,7 +1015,7 @@ function ColorRow({ value, onChange, testId }: { value: string | null; onChange:
   );
 }
 
-function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }: { id?: string; occurrenceStart?: string; draft?: any; calendars: any[]; onClose: () => void; onSaved: () => void; dirUsers: any[] }) {
+function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved, dirUsers }: { id?: string; occurrenceStart?: string; draft?: any; calendars: any[]; onClose: () => void; onSaved: () => void; dirUsers: any[] }) {
   const { user, features } = useSession();
   const meetOn = !!features.meetings; const [meetNew, setMeetNew] = useState(false); // 219차 [워크인 화상회의](새 일정은 저장할 때 켬)
   const existing = useApi<any>(id ? `/api/events/${id}` : null);
@@ -1040,11 +1041,13 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const en = new Date(s.getTime() + dur);
       setF({ title: e.title, calendarId: e.calendar_id, allDay: e.all_day, date: seoulDate(s), start: seoulTime(s),
         endDate: e.all_day ? addDays(seoulDate(en), -1) : seoulDate(en), end: seoulTime(en), rrule: e.rrule, location: e.location, meetingUrl: e.meetingUrl ?? '',
-        description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version, reminders: e.reminder_minutes ?? null, alarm: e.alarm ?? null, isPrivate: !!e.is_private, color: e.color ?? null });
+        description: e.description, kind: e.kind, attendeeIds: d.attendees.map((a: any) => a.user_id), version: e.version, reminders: e.reminder_minutes ?? null, alarm: e.alarm ?? null, isPrivate: !!e.is_private, color: e.color ?? null,
+        ownerId: d.owner?.id ?? null }); // 386차: 누구 일정(개인 캘린더 주인) — 회사·팀 캘린더면 null
     } else {
       const personal = calendars.find((c) => c.type === 'personal');
       setF({ title: draft?.title ?? '', calendarId: draft?.calendarId || personal?.id || editable[0]?.id || '', allDay: draft?.allDay ?? false, date: draft?.date, start: draft?.start ?? '09:00',
-        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', meetingUrl: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, prep: '', color: draft?.color ?? null, alsoTask: !!draft?.alsoTask });
+        endDate: draft?.endDate ?? draft?.date, end: draft?.end ?? '10:00', rrule: draft?.rrule ?? null, location: '', meetingUrl: '', description: '', kind: 'normal', attendeeIds: [], reminders: null, isPrivate: !!draft?.isPrivate, prep: '', color: draft?.color ?? null, alsoTask: !!draft?.alsoTask,
+        ownerId: draft?.ownerId ?? user.id });
     }
   }, [existing.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
   // 236차(대표 10/28 '일정생성불가함' — 로컬 재현): 창이 캘린더 목록보다 먼저 열리면 새 일정의 캘린더가 빈 채로 남고, 고르기 칸은 첫 캘린더를 보여 줘
@@ -1063,8 +1066,10 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     if (!f || f.allDay || !f.date) { setConf([]); return; }
     const t = times();
     const ex = id ? `&exclude=${existing.data?.event?.recurring_event_id ?? id}` : '';
-    api(`/api/events/conflicts?start=${encodeURIComponent(t.start)}&end=${encodeURIComponent(t.end)}&userIds=${f.attendeeIds.join(',')}${ex}`).then((r) => setConf(r.conflicts)).catch(() => {});
-  }, [f?.date, f?.start, f?.end, f?.endDate, f?.allDay, f?.attendeeIds?.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+    const other = f.ownerId && f.ownerId !== user.id ? f.ownerId : null; // 386차: 남에게 배정하는 일정은 받는 사람·참석자 기준(나는 참석자일 때만)
+    const who = other ? [other, ...f.attendeeIds] : f.attendeeIds;
+    api(`/api/events/conflicts?start=${encodeURIComponent(t.start)}&end=${encodeURIComponent(t.end)}&userIds=${who.join(',')}${ex}${other && !f.attendeeIds.includes(user.id) ? '&withoutMe=1' : ''}`).then((r) => setConf(r.conflicts)).catch(() => {});
+  }, [f?.date, f?.start, f?.end, f?.endDate, f?.allDay, f?.attendeeIds?.join(), f?.ownerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 처음 불러온 값(변경 여부 비교용)과 자동 저장 상태
   const baseRef = useRef<string | null>(null);
@@ -1094,7 +1099,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       const t = times();
       if (t.end < t.start) return;
       setAutoState('saving');
-      const run = patchWithRetry({ title: f.title, calendarId: f.calendarId, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null, scope: 'all' });
+      const run = patchWithRetry({ title: f.title, ...placeOf(), allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null, scope: 'all' });
       autoRun.current = run.catch(() => {});
       try {
         const r = await run;
@@ -1110,6 +1115,10 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
   const canEdit = !id || d?.perms.edit;
   const isRecurring = !!(d?.event?.rrule || d?.event?.recurring_event_id);
   const myAtt = d?.attendees?.find((a: any) => a.user_id === user.id);
+  // 386차: 남에게 배정한(또는 배정하는) 일정은 '누구 일정'(ownerId)으로 보내고 캘린더 칸은 보내지 않음 — 그 사람 개인 캘린더에
+  const assignOther = !!f.ownerId && f.ownerId !== user.id;
+  function placeOf(): { ownerId?: string; calendarId?: string } { return assignOther ? { ownerId: f.ownerId } : { calendarId: f.calendarId || undefined }; }
+  const ownerName = assignOther ? (dirUsers.find((x: any) => x.id === f.ownerId)?.name ?? d?.owner?.name ?? '') : '';
 
   async function save(e?: React.FormEvent) {
     e?.preventDefault();
@@ -1118,7 +1127,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
     setBusy(true);
     await autoRun.current;
     try {
-      const body = { title: f.title, calendarId: f.calendarId || undefined, allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
+      const body = { title: f.title, ...placeOf(), allDay: f.allDay, start: t.start, end: t.end, rrule: f.rrule, location: f.location, meetingUrl: f.meetingUrl || '', description: f.description, kind: f.kind, attendeeIds: f.attendeeIds, reminderMinutes: f.reminders, alarm: f.alarm ?? null, isPrivate: !!f.isPrivate, color: f.color ?? null };
       if (!id) {
         const made = await api<{ id?: string }>('/api/events', { body: { ...body, alsoTask: !!f.alsoTask } }); pushRecentColor(f.color);
         if (meetOn && meetNew && made?.id) await enableEventMeeting(made.id);
@@ -1160,13 +1169,28 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved }
       <form onSubmit={save} className="space-y-3">
         <fieldset disabled={!canEdit} className="space-y-3">
           <Field label="제목"><input className={inputCls} value={f.title} onChange={(e) => set('title')(e.target.value)} required autoFocus={!id} /></Field>
+          {/* 386차(대표 11/09 "서로 업무배정뿐 아니라 스케줄도 배정"): 누구 일정 — 다른 사람을 고르면 그 사람 캘린더에(나는 참석자로 안 들어감) */}
+          {(!id || f.ownerId) && (
+            <div data-testid="editor-owner">
+              <Field label="누구 일정">
+                <select className={inputCls} value={f.ownerId ?? user.id} aria-label="누구 일정" data-testid="editor-owner-select"
+                  onChange={(e) => { const v = e.target.value; setF((x: any) => ({ ...x, ownerId: v, ...(v === user.id ? { calendarId: (calendars.find((c) => c.type === 'personal') ?? editable[0])?.id ?? x.calendarId } : {}), attendeeIds: x.attendeeIds.filter((a: string) => a !== v) })); }}>
+                  <option value={user.id}>나</option>
+                  {dirUsers.filter((x: any) => x.id !== user.id && !x.is_demo).map((x: any) => <option key={x.id} value={x.id}>{x.name}{x.title ? ` · ${x.title}` : ''}</option>)}
+                  {f.ownerId && f.ownerId !== user.id && !dirUsers.some((x: any) => x.id === f.ownerId) && <option value={f.ownerId}>{d?.owner?.name ?? '다른 사람'}</option>}
+                </select>
+              </Field>
+              {assignOther && <p className="mt-1 text-xs text-ink-2" data-testid="editor-owner-note">{ownerName}님 캘린더에 생기고 {ownerName}님에게 알림이 갑니다. 나는 참석자로 들어가지 않습니다 — 함께 가면 아래 참석자에 나를 넣으세요.</p>}
+              {d?.assignedBy && d.assignedBy.id !== user.id && !assignOther && <p className="mt-1 text-xs text-ink-2" data-testid="editor-assigned-by">{d.assignedBy.name}님이 배정한 일정입니다.</p>}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Field label="캘린더">
+            {!assignOther && <Field label="캘린더">
               <select className={inputCls} value={f.calendarId ?? ''} onChange={(e) => set('calendarId')(e.target.value)}>
                 {!f.calendarId && <option value="">{calendars.length ? '내 개인 일정(기본)' : '캘린더 불러오는 중…'}</option>}
                 {(canEdit ? editable : calendars).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-            </Field>
+            </Field>}
             <Field label="종류">
               <select className={inputCls} value={f.kind} onChange={(e) => { set('kind')(e.target.value); if (e.target.value === 'vacation' || e.target.value === 'business_trip') set('allDay')(true); }}>
                 {Object.entries(EVENT_KIND_LABEL).filter(([k]) => k !== 'task_block' || f.kind === 'task_block').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -1323,7 +1347,7 @@ function EventPreview({ ev, folded = [], x, y, calendarName, onClose, onEdit, on
             {ev.location && <p className="mt-0.5 flex items-center gap-1 text-sm text-ink-2"><MapPin className="size-3.5" />{ev.location}</p>}
             {ev.meetingUrl && <a href={ev.meetingUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex h-8 items-center gap-1 rounded-input bg-brand-600 px-2.5 text-xs font-medium text-white hover:bg-brand-700" data-testid="ev-join"><Video className="size-3.5" />회의 참여</a>}
             {meetOn && !ev.masked && isWorkinMeet(ev.meetingUrl) && <MeetingRecordLine eventId={ev.id} />}
-            <p className="mt-1 text-xs text-ink-3">{ev.calendarType === 'personal' && ev.ownerName ? `${ev.ownerName}님 일정` : calendarName}{ev.recurring ? ' · 반복 일정' : ''}{ev.isPrivate ? ' · 비공개' : ''}</p>
+            <p className="mt-1 text-xs text-ink-3">{ev.calendarType === 'personal' && ev.ownerName ? `${ev.ownerName}님 일정` : calendarName}{ev.assignedBy ? <span data-testid="preview-assigned-by"> · {ev.assignedBy.id === user.id ? '내가 배정' : `${ev.assignedBy.name}님이 배정`}</span> : ''}{ev.recurring ? ' · 반복 일정' : ''}{ev.isPrivate ? ' · 비공개' : ''}</p>
             {ev.masked && <p className="mt-1 text-xs text-ink-2" data-testid="masked-note">비공개 일정이라 시간만 보입니다</p>}
           </div>
         </div>

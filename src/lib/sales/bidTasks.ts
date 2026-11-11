@@ -19,6 +19,7 @@ import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
 import { cancelInfo as noticeCancelInfo, groupNotices, isCancel, latestCancelled, latestLive, noKey, renoticeKey } from './noticeGroups';
 import { briefingOf, mdhm } from './bidTerms';
+import { zonedKst } from './collectors/procurement';
 import { BID_STATUS, workRecord } from './work';
 
 export { BID_STATUS };
@@ -39,7 +40,8 @@ export function when(v: unknown): When | null {
   const s = String(v ?? '').trim(); if (!s) return null;
   const m = s.match(/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2}))?/);
   if (!m) { const d = new Date(s); if (Number.isNaN(d.getTime())) return null; return { day: ymd(d), start: d.toISOString(), end: new Date(d.getTime() + 3600e3).toISOString(), allDay: false }; }
-  if (m[2]) { const st = /[zZ]|[+-]\d{2}:?\d{2}$/.test(s) ? new Date(s) : new Date(`${m[1]}T${m[2]}:${m[3]}:00+09:00`); return { day: ymd(st), start: st.toISOString(), end: new Date(st.getTime() + 3600e3).toISOString(), allDay: false }; }
+  // 387차: 시간대가 붙은 시각('Z'·'+00:00'·DB 글자 '+00')은 그 순간 그대로 — 예전 검사는 '+00'(두 자리)을 못 알아봐 한국 시각으로 읽어 9시간 당겨졌다
+  if (m[2]) { const z = zonedKst(s); const st = z ? new Date(z) : new Date(`${m[1]}T${m[2]}:${m[3]}:00+09:00`); return { day: ymd(st), start: st.toISOString(), end: new Date(st.getTime() + 3600e3).toISOString(), allDay: false }; }
   const st = new Date(`${m[1]}T00:00:00+09:00`); return { day: m[1], start: st.toISOString(), end: new Date(st.getTime() + 864e5).toISOString(), allDay: true };
 }
 export type MilestoneKey = 'briefing' | 'apply' | 'close' | 'open';
@@ -52,11 +54,14 @@ const MS: [MilestoneKey, string, string[]][] = [
 ];
 /** 공고 일정(원천마다 칸 이름이 달라 후보 순서로) */
 // 239차(#744 로컬 10/28 19:45): 현장설명이 '없음'이면 일정에서 빼고, 필수·임의면 이름에 붙임('현장설명회(필수)') — K-apt 상세 칸
+// 388차(대표 11/10 '스케줄에는 공고에서 올라오는 현장설명회와 입찰 마감'): KG2B 상세의 현장설명(kg2b_briefing_*)을 K-apt 값보다 먼저(280차 briefingOf 와 같은 규칙) —
+//   예전엔 K-apt 칸만 봐서 KG2B 에만 현설일시가 있는 공고는 현장설명회 일정이 안 생겼고, KG2B '없음'인데 K-apt 칸으로 일정이 생길 수 있었다
 export const bidMilestones = (r: any): Milestone[] => MS.flatMap(([key, label, keys]) => {
-  if (key === 'briefing' && r?.site_briefing_kind === '없음') return [];
-  const w = when(pick(r, ...keys)); if (!w) return [];
+  const bk = String(r?.kg2b_briefing_kind ?? r?.site_briefing_kind ?? '');
+  if (key === 'briefing' && bk === '없음') return [];
+  const w = when(pick(r, ...(key === 'briefing' ? [...keys, 'kg2b_briefing_at'] : keys))); if (!w) return [];
   // 242차 #761: 필수·임의·공고문 참조 모두 이름에 붙여 일정에서 바로 알게
-  return [{ key, label: key === 'briefing' && ['필수', '임의', '공고문 참조'].includes(String(r?.site_briefing_kind ?? '')) ? `${label}(${r.site_briefing_kind})` : label, w }];
+  return [{ key, label: key === 'briefing' && ['필수', '임의', '공고문 참조'].includes(bk) ? `${label}(${bk})` : label, w }];
 });
 const hm = (iso: string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 export type Due = { day: string; time: string | null };

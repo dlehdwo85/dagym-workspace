@@ -63,3 +63,14 @@ test("당일 메일: 면허 업체 협력 필요 공고는 ★즉시 검토가 �
   const it = (await ctx.owner.ok('GET', '/api/platform/sales-notices?no=E2E7521')).items[0];
   assert.equal(it.partner, '면허 업체 협력 필요');
 });
+
+// 385차(로컬 11/07 운영 공고 조회): '[서울] 공동현관 로비폰 및 중계기 교체공사'가 제외 주제 '중계기'(이동통신 중계기)에 걸려 관련 아님이었다 —
+// 로비폰·공동현관·출입이 함께 있으면 로비폰(인터폰) 중계기라 하이링크 · 이동통신 중계기·중계기만 있는 공고는 그대로 제외
+test('385차: 로비폰 중계기 교체공사 = 하이링크(면허 업체 협력 필요) · 이동통신 중계기는 그대로 제외', () => {
+  const t = '[서울] 공동현관 로비폰 및 중계기 교체공사 입찰 공고';
+  assert.equal(P.matchFit(t).fit, '하이링크'); assert.deepEqual(P.matchFit(t).matched, ['로비폰']);
+  assert.equal(P.matchFit(t, '사업자 - 공사 - 장기수선', null, '공동주택').fit, '하이링크');
+  assert.equal(P.partnerNeed({ fit_business: '하이링크', title: t }), '면허 업체 협력 필요');
+  assert.equal(P.matchFit('이동통신 중계기 설치 장소 임대(출입 승인 포함)').fit, null, '이동통신은 그대로 제외');
+  assert.equal(P.matchFit('옥상 중계기 철거 및 무인 경비 공사').fit, null, '로비폰·출입 맥락 없는 중계기는 그대로 제외');
+});
