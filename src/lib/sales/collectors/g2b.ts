@@ -49,7 +49,7 @@ const noPii = (s: string) => s.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '***@***')
 export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string, timeoutMs = 12000, stats?: DataGoStats, accept = 'application/json'): Promise<any[]> {
   const mask = (s: string) => s.split(key).join('***').split(encodeURIComponent(key)).join('***');
   if (stats) stats.sent = mask(url.toString()).slice(0, 400);
-  let res: Response; try { res = await fetchImpl(url.toString(), { headers: { Accept: accept }, signal: AbortSignal.timeout(timeoutMs) }); } catch (e) { throw new Error(`요청 실패 (${e instanceof Error ? e.name : 'Error'})`); }
+  let res: Response; try { res = await fetchImpl(url.toString(), { headers: { Accept: accept }, signal: AbortSignal.timeout(timeoutMs) }); } catch (e) { const c = (e as any)?.cause; throw new Error(`요청 실패 (${[e instanceof Error ? e.name : 'Error', c?.code ?? c?.name].filter(Boolean).join(' · ')})`); } // 390차: 연결 끊김·시간 초과 코드(ECONNRESET 등)까지 — 주소(키)는 넣지 않음
   const txt = await res.text(); const safe = (s: string) => mask(s).slice(0, 160);
   if (stats) stats.head = noPii(mask(txt)).slice(0, 300); // 성공하면 아래에서 지움
   if (isHtml(txt)) { // 278차 #816(10/31 06·09시 나라장터 0건이 '성공'으로 남음): 웹페이지 응답 = 실패 — 앞 500자(글자만)를 오류 기록에

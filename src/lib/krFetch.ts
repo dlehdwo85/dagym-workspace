@@ -24,10 +24,8 @@ function plainHeaders(h: HeadersInit | undefined): Record<string, string> {
   if (Array.isArray(h)) return Object.fromEntries(h);
   return { ...(h as Record<string, string>) };
 }
-/** fetch 와 같은 모양 — 한국 IP 만 받는 곳이고 서울 밖이면 서울 중계로, 아니면 그대로 fetch */
-export async function krFetch(input: string | URL, init: RequestInit = {}, hops = 0): Promise<Response> {
-  const url = String(input);
-  if (!needsKr(url) || !relayOn()) return fetch(url, init);
+/** 서울 중계 한 번(리다이렉트는 따라가지 않음) — 받는 쪽(/api/internal/kr-fetch)이 허용한 곳인지 다시 확인 */
+async function relayOnce(url: string, init: RequestInit): Promise<Response> {
   const body: Init & { url: string } = { url, method: init.method ?? 'GET', headers: plainHeaders(init.headers), body: typeof init.body === 'string' ? init.body : init.body instanceof URLSearchParams ? init.body.toString() : undefined, redirect: init.redirect };
   const r = await fetch(`${appUrl()}/api/internal/kr-fetch`, { method: 'POST', headers: { authorization: `Bearer ${process.env.CRON_SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: init.signal ?? AbortSignal.timeout(55_000), redirect: 'manual' });
   if (r.status === 401 || r.status === 403 || r.status === 404 || !r.headers.get('x-kr-status')) {
@@ -38,19 +36,40 @@ export async function krFetch(input: string | URL, init: RequestInit = {}, hops 
   const h = new Headers();
   for (const k of ['content-type', 'content-length', 'content-disposition', 'last-modified']) { const v = r.headers.get(`x-kr-h-${k}`); if (v) h.set(k, v); }
   const loc = r.headers.get('x-kr-h-location'); if (loc) h.set('location', loc);
-  // 중계는 리다이렉트를 따라가지 않음 → 호출 쪽이 따라가길 바랐으면(기본) 여기서 3번까지, 허용한 곳으로만
-  if (status >= 300 && status < 400 && loc && init.redirect !== 'manual' && hops < 3) {
-    await r.body?.cancel().catch(() => {});
-    const next = new URL(loc, url).toString();
-    if (!needsKr(next)) throw new Error(`서울 중계: 허용하지 않은 곳으로 넘어감(${new URL(next).hostname})`);
-    return krFetch(next, { ...init, method: status === 307 || status === 308 ? init.method : 'GET', body: status === 307 || status === 308 ? init.body : undefined }, hops + 1);
-  }
   for (const c of JSON.parse(r.headers.get('x-kr-set-cookie') || '[]') as string[]) h.append('set-cookie', c);
   h.set('x-kr-relay', r.headers.get('x-kr-region') ?? 'relay');
   const nullBody = status === 204 || status === 304 || (status >= 100 && status < 200);
   const res = new Response(nullBody ? null : r.body, { status: status >= 200 && status <= 599 ? status : 502, headers: h });
   Object.defineProperty(res, 'url', { value: r.headers.get('x-kr-url') ?? url }); // 호출 쪽이 res.url 을 볼 때(최종 주소)
   return res;
+}
+const nextHop = (res: Response, url: string, init: RequestInit) => {
+  const loc = res.headers.get('location');
+  if (res.status < 300 || res.status >= 400 || !loc || init.redirect === 'manual') return null;
+  const keep = res.status === 307 || res.status === 308;
+  return { next: new URL(loc, url).toString(), init: { ...init, method: keep ? init.method : 'GET', body: keep ? init.body : undefined } };
+};
+/** fetch 와 같은 모양 — 한국 IP 만 받는 곳이고 서울 밖이면 서울 중계로, 아니면 그대로 fetch */
+export async function krFetch(input: string | URL, init: RequestInit = {}, hops = 0): Promise<Response> {
+  const url = String(input);
+  if (!needsKr(url) || !relayOn()) return fetch(url, init);
+  const res = await relayOnce(url, init);
+  // 중계는 리다이렉트를 따라가지 않음 → 호출 쪽이 따라가길 바랐으면(기본) 여기서 3번까지, 허용한 곳으로만
+  const n = hops < 3 ? nextHop(res, url, init) : null;
+  if (!n) return res;
+  await res.body?.cancel().catch(() => {});
+  if (!needsKr(n.next)) throw new Error(`서울 중계: 허용하지 않은 곳으로 넘어감(${new URL(n.next).hostname})`);
+  return krFetch(n.next, n.init, hops + 1);
+}
+/** 390차(대표 11/13 '협력사 모집 감시 — 원천 서버가 응답하지 않았습니다'): 해외(싱가포르) 서버의 접속을 끊는 국내 사이트(협력사 게시판 등)를
+ *  서울 중계로 한 번 더 — 받는 쪽이 허용 목록(협력사 감시 페이지)에 있는 곳인지 확인. 리다이렉트는 같은 사이트 안에서만 3번까지(다른 곳이면 3xx 그대로) */
+export async function krRelay(input: string | URL, init: RequestInit = {}, hops = 0): Promise<Response> {
+  const url = String(input);
+  const res = await relayOnce(url, init);
+  const n = hops < 3 ? nextHop(res, url, init) : null;
+  if (!n || new URL(n.next).hostname !== new URL(url).hostname) return res;
+  await res.body?.cancel().catch(() => {});
+  return krRelay(n.next, n.init, hops + 1);
 }
 /** 중계 주소가 받을 수 있는 곳인지(서울 쪽 검사) */
 export const relayAllowed = (url: string) => needsKr(url) && /^https?:\/\//i.test(url) && (url.startsWith('https://') || !!testKg2b());

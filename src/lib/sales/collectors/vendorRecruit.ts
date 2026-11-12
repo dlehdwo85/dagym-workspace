@@ -7,7 +7,8 @@ import { db } from '../../db';
 import { decodeKoreanText } from './files';
 import { text as htmlText } from './kapt';
 import { upsertNotices } from './store';
-import type { Collector, CollectorCtx, CollectorResult } from './types';
+import { krRelay, relayOn } from '../../krFetch';
+import type { Collector, CollectorCtx, CollectorResult, SourceStat } from './types';
 import { FRAGMENT_RE, PAGE_CHANGED, RECRUIT_EXCLUDE_RE, RECRUIT_RE, cleanRecruitTitle, isGenericLink, postedDateOf } from './vendorRules';
 
 export { RECRUIT_RE, RECRUIT_EXCLUDE_RE, cleanRecruitTitle, postedDateOf } from './vendorRules';
@@ -16,6 +17,13 @@ export async function watchPages(): Promise<WatchPage[]> {
   if (process.env.SALES_COLLECT_TEST_BASE) return [{ company: '시험건설', url: `${process.env.SALES_COLLECT_TEST_BASE.replace(/\/$/, '')}/vendor/notice` }];
   const [s] = await db()<{ value: WatchPage[] }[]>`select value from app_settings where key = 'sales_vendor_watch_pages'`;
   return Array.isArray(s?.value) ? s.value.filter((p) => p && /^https?:\/\//.test(String(p.url))) : [];
+}
+/** 390차: 서울 중계가 받아도 되는 주소인가 — 협력사 감시 페이지 목록에 있는 사이트(같은 호스트)만 */
+export async function relayVendorAllowed(url: string) {
+  let u: URL; try { u = new URL(url); } catch { return false; }
+  if (!/^https?:$/.test(u.protocol)) return false;
+  const t = process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, ''); if (t) return url.startsWith(`${t}/vendor/`); // 시험 서버: 모든 가짜 원천이 localhost — 협력사 게시판 길만
+  return (await watchPages()).some((p) => { try { return new URL(p.url).hostname === u.hostname; } catch { return false; } });
 }
 const h8 = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 16);
 const kstToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
@@ -51,7 +59,7 @@ export function parseRecruitPage(html: string, base: string, today = kstToday())
 
 // ---------------- 안내 페이지 바뀜 감시 ----------------
 // fails·restUntil: 로컬 10/23 '서희건설 시간 초과 반복' — 3번 연속 실패한 페이지는 3일 쉬고 다시(다른 페이지 시간을 잡아먹지 않게). seen 이 없으면 아직 기준 없음
-type PageState = Record<string, { seen?: string[]; at?: string; changedAt?: string | null; fails?: number; restUntil?: string | null }>;
+type PageState = Record<string, { seen?: string[]; at?: string; changedAt?: string | null; fails?: number; restUntil?: string | null; err?: string | null; relay?: boolean }>;
 const FAIL_REST = 3, REST_DAYS = 3;
 const kstMd = (iso: string) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }).format(new Date(iso)).replace(/\.\s*/g, '/').replace(/\/$/, '');
 const STATE_KEY = 'sales_vendor_page_state';
@@ -108,31 +116,60 @@ async function markChecked(exts: string[]) {
   if (!exts.length) return;
   await db()`update sales_src_rows set row = row || ${db().json({ posted_checked: true } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'source_type' = 'vendor_recruit' and row->>'source_external_id' = any(${exts}) and (row->>'posted_checked') is distinct from 'true'`;
 }
+const UA = { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' };
+/** fetch 실패 원인 한 줄(연결 끊김·시간 초과 코드까지 — 주소·본문은 넣지 않음) */
+const why = (e: unknown) => { const x = e as any, c = x?.cause; return [x?.name === 'TimeoutError' ? '시간 초과' : x?.message, c?.code].filter(Boolean).join(' · ') || String(e); };
+/** 390차(대표 11/13 '협력사 모집 감시 — 원천 서버가 응답하지 않았습니다'): 운영 서버는 해외(싱가포르)라 해외 접속을 끊는 국내 건설사 게시판(서희건설 등 — 연결 끊김·시간 초과·5xx)은
+ *  서울 중계로 한 번 더. 서울 중계가 꺼진 곳(시험·로컬)은 바로 실패 */
+async function getPage(ctx: CollectorCtx, url: string, ms: number, relayMs: number): Promise<{ res: Response; relay: boolean }> {
+  let direct = '';
+  try {
+    const res = await ctx.fetchImpl(url, { headers: UA, signal: AbortSignal.timeout(ms) });
+    if (res.status < 500 || !relayOn()) return { res, relay: false };
+    direct = `HTTP ${res.status}`; await res.body?.cancel().catch(() => {});
+  } catch (e) { if (!relayOn()) throw new Error(why(e)); direct = why(e); }
+  if (relayMs < 3000) throw new Error(`${direct} — 시간 한도라 서울 중계는 다음 실행에서`);
+  try { return { res: await krRelay(url, { headers: UA, signal: AbortSignal.timeout(relayMs) }), relay: true }; }
+  catch (e) { throw new Error(`${direct} · 서울 중계로도 못 받음(${why(e)})`); }
+}
+const POOL = 5; // 390차: 21곳을 한 곳씩 읽으면 시간 한도(45초)에 끝 쪽 페이지가 매일 빠질 수 있어 다섯 곳씩 함께
 export const vendorRecruitWatch: Collector = {
-  slug: 'vendor_recruit_watch', label: '협력사 모집 감시', hourKst: 7, source: '시공사·시행사 공지 페이지(app_settings sales_vendor_watch_pages) — 협력업체 모집·등록 글',
+  slug: 'vendor_recruit_watch', label: '협력사 모집 감시', hourKst: 7, source: '시공사·시행사 공지 페이지(app_settings sales_vendor_watch_pages) — 협력업체 모집·등록 글 · 해외 접속을 끊는 사이트는 서울 중계로',
   async run(ctx: CollectorCtx): Promise<CollectorResult> {
     const pages = await watchPages(); if (!pages.length) return { inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: '감시 페이지 목록이 비어 있습니다(app_settings sales_vendor_watch_pages)', providerMode: 'web_scrape' };
     const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const errors: string[] = []; const items: Record<string, unknown>[] = [];
     const state = await loadState(); const today = kstToday(); const checked: string[] = [];
-    let posts = 0, moved = 0, hidden = 0, cleared = 0, changed = 0, baseline = 0; const resting: string[] = []; const failed: string[] = []; // 로컬 10/24 19:20: 못 읽은 곳 이름을 요약에
-    for (const p of pages) {
-      if (left() < 6000) { errors.push(`시간 한도 근접 — ${p.company} 부터는 다음 실행에서`); break; }
+    let posts = 0, moved = 0, hidden = 0, cleared = 0, changed = 0, baseline = 0, relayed = 0; const resting: string[] = []; const failed: string[] = []; const late: string[] = []; // 로컬 10/24 19:20: 못 읽은 곳 이름을 요약에
+    // 390차: 페이지(회사)마다 성공·실패를 따로 — 한 곳만 막혀도 '협력사 모집 감시' 전체가 누락 위험으로 뜨던 것을 '협력사 모집 감시 › 서희건설'처럼 그 곳만
+    const sources: Record<string, SourceStat> = {}; const dup = new Map<string, number>();
+    const label = (p: WatchPage) => { const n = (dup.get(p.company) ?? 0) + 1; dup.set(p.company, n); return n > 1 ? `${p.company} ${n}` : p.company; };
+    const one = async (p: WatchPage, src: SourceStat) => {
       const st = state[p.url];
-      if (st?.restUntil && st.restUntil > new Date().toISOString()) { resting.push(`${p.company}(${kstMd(st.restUntil)}까지)`); continue; }
+      if (st?.restUntil && st.restUntil > new Date().toISOString()) { resting.push(`${p.company}(${kstMd(st.restUntil)}까지)`); Object.assign(src, { error: `${st.err ?? '연속 실패'} — ${FAIL_REST}번 연속 실패라 ${kstMd(st.restUntil)}까지 쉬고 다시 시도` }); return; }
+      if (left() < 6000) { late.push(p.company); Object.assign(src, { error: '시간 한도 근접 — 다음 실행에서' }); errors.push(`시간 한도 근접 — ${p.company} 은(는) 다음 실행에서`); return; }
       const fail = (msg: string) => { const n = (st?.fails ?? 0) + 1; const rest = n >= FAIL_REST ? new Date(Date.now() + REST_DAYS * 864e5).toISOString() : null;
-        state[p.url] = { ...st, fails: n, restUntil: rest }; failed.push(p.company); errors.push(`${p.company}: ${msg}${rest ? ` — ${n}번 연속 실패라 ${REST_DAYS}일 쉬고 다시 시도` : ''}`); };
-      try { const res = await ctx.fetchImpl(p.url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WorkIn-collector/1.0)' }, signal: AbortSignal.timeout(Math.min(10000, left() - 2000)) }); if (!res.ok) { fail(`HTTP ${res.status}`); continue; }
+        state[p.url] = { ...st, fails: n, restUntil: rest, err: msg.slice(0, 160) }; failed.push(p.company); src.error = msg.slice(0, 200); errors.push(`${p.company}: ${msg}${rest ? ` — ${n}번 연속 실패라 ${REST_DAYS}일 쉬고 다시 시도` : ''}`); };
+      try {
+        const { res, relay } = await getPage(ctx, p.url, Math.min(10000, left() - 2000), Math.min(15000, left() - 3000)); src.calls++;
+        if (relay) { relayed++; src.note = '서울 중계로 받음'; }
+        if (!res.ok) { fail(`HTTP ${res.status}${relay ? '(서울 중계)' : ''}`); return; }
         const { text } = decodeKoreanText(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type'));
         const page = parseRecruitPage(text, p.url, today); const fresh = page.posts.map((r) => ({ ...r, ext: `${h8(p.company)}-${h8(r.title)}` }));
         for (const r of fresh) { posts++; checked.push(r.ext); items.push({ source_type: 'vendor_recruit', source_external_id: r.ext, source_url: r.url, title: `[${p.company}] ${r.title}`, issuer: p.company, notice_type: '협력사 모집', register_url: p.register_url && /^https?:\/\//.test(p.register_url) ? p.register_url : null, posted_date: r.posted, bid_category: '협력사 모집' }); }
-        const pc = pageChange(p, page.lines, st, today); state[p.url] = { ...pc.next, fails: 0, restUntil: null }; if (pc.baseline) baseline++; if (pc.item) { items.push(pc.item); changed++; }
+        const pc = pageChange(p, page.lines, st, today); state[p.url] = { ...pc.next, fails: 0, restUntil: null, err: null, relay }; if (pc.baseline) baseline++; if (pc.item) { items.push(pc.item); changed++; }
         const t = await tidyOld(p.company, fresh); moved += t.moved; hidden += t.hidden; cleared += t.cleared;
+        Object.assign(src, { ok: true, received: fresh.length, kept: fresh.length + (pc.item ? 1 : 0) });
       } catch (e) { fail(e instanceof Error ? e.message : String(e)); }
-    }
+    };
+    const queue = pages.map((p) => { const src: SourceStat = { label: label(p), ok: false, calls: 0, received: 0, kept: 0 }; sources[`p${h8(p.url).slice(0, 10)}`] = src; return { p, src }; });
+    const worker = async () => { for (let it = queue.shift(); it; it = queue.shift()) await one(it.p, it.src); };
+    await Promise.all(Array.from({ length: Math.min(POOL, queue.length) }, worker));
     const r = items.length ? await upsertNotices(items) : { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0, errorLog: undefined as string | undefined }; if (r.errorLog) errors.push(r.errorLog);
     await markChecked(checked); await saveState(state);
-    return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + errors.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
+    return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + errors.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape', sources,
       summary: `감시 ${pages.length}곳 · 모집 글 ${posts}건(최근 30일·게시일 있는 글) · ${PAGE_CHANGED} ${changed}` + (baseline ? `(처음 본 페이지 ${baseline}곳은 기준만 저장)` : '') + ` · 신규 ${r.inserted} · 변화없음 ${r.unchanged}`
-        + (moved || hidden || cleared ? ` · 옛 줄 정리: 제목 고침 ${moved} · 숨김 ${hidden}${cleared ? ` · 게시일 지움 ${cleared}` : ''}` : '') + (failed.length ? ` · 못 읽은 곳 ${failed.length}: ${failed.join(', ')}` : '') + (resting.length ? ` · 쉬는 페이지 ${resting.length}: ${resting.join(', ')}` : '') };
+        + (relayed ? ` · 서울 중계로 받은 곳 ${relayed}` : '')
+        + (moved || hidden || cleared ? ` · 옛 줄 정리: 제목 고침 ${moved} · 숨김 ${hidden}${cleared ? ` · 게시일 지움 ${cleared}` : ''}` : '') + (failed.length ? ` · 못 읽은 곳 ${failed.length}: ${failed.join(', ')}` : '') + (late.length ? ` · 시간 한도로 다음 실행: ${late.join(', ')}` : '') + (resting.length ? ` · 쉬는 페이지 ${resting.length}: ${resting.join(', ')}` : ''),
+    };
   },
 };

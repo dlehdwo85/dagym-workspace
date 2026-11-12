@@ -16,7 +16,8 @@ export async function POST(req: NextRequest) {
   let q: { url?: string; method?: string; headers?: Record<string, string>; body?: string };
   try { q = await req.json(); } catch { return NextResponse.json({ error: 'bad json' }, { status: 400 }); }
   const url = String(q.url ?? '');
-  if (!relayAllowed(url)) return NextResponse.json({ error: '중계하지 않는 주소입니다' }, { status: 403 });
+  // 390차: KG2B 말고도 협력사 모집 감시 페이지(플랫폼 운영 › 영업 수집기 설정의 목록에 있는 사이트)는 중계 — 해외 접속을 끊는 국내 건설사 게시판
+  if (!relayAllowed(url) && !(await (await import('@/lib/sales/collectors/vendorRecruit')).relayVendorAllowed(url).catch(() => false))) return NextResponse.json({ error: '중계하지 않는 주소입니다' }, { status: 403 });
   const method = q.method === 'POST' ? 'POST' : 'GET';
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(q.headers ?? {})) if (/^(user-agent|content-type|cookie|referer|accept|accept-language)$/i.test(k) && typeof v === 'string') headers[k] = v.slice(0, 4000);
