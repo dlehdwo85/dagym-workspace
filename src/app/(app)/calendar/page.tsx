@@ -162,6 +162,58 @@ function CalendarPage() {
   const [monthPicker, setMonthPicker] = useState(false);
   const touch = typeof window !== 'undefined' && (window.innerWidth < 640 || !!window.matchMedia?.('(pointer: coarse)').matches);
   useCalendarSwipe(swipeWrap, calApi, touch);
+  // 389차(대표 11/12 '스케줄 옮길 때 드래그해서 다음주로 넘기는게 불가함'): 구글 캘린더처럼 일정을 끌어 달력 왼쪽·오른쪽 끝에 잠깐(0.6초) 대고 있으면
+  // 이전·다음 기간(주 보기 = 한 주, 3일 = 3일, 일 = 하루)으로 넘어가고 끌기는 그대로 이어짐 → 새 주의 원하는 날·시각에 놓음(계속 대고 있으면 1.2초마다 한 번 더).
+  // 끝 칸 표시는 손 끝을 막지 않게(pointer-events 없음 — FullCalendar 는 놓을 자리를 그 점의 화면 요소로도 확인함)
+  const [edgeDrag, setEdgeDrag] = useState<{ view: string; hot: -1 | 0 | 1; top: number; bottom: number; l: [number, number]; r: [number, number] } | null>(null);
+  const edgeRef = useRef<{ hot: -1 | 0 | 1; timer?: ReturnType<typeof setTimeout>; off: () => void } | null>(null);
+  const edgeStop = useCallback(() => {
+    const st = edgeRef.current; edgeRef.current = null;
+    if (st) { clearTimeout(st.timer); st.off(); }
+    setEdgeDrag(null);
+  }, []);
+  useEffect(() => edgeStop, [edgeStop]);
+  function edgeStart(view: string, held: EventTarget | null) {
+    edgeStop();
+    const root = swipeWrap.current;
+    if (!root || !view.startsWith('timeGrid')) return;
+    const pad = mobile ? 16 : 24;
+    const cols = () => root.querySelectorAll<HTMLElement>('.fc-timegrid-body td.fc-timegrid-col[data-date]');
+    const zoneOf = (x: number, y: number): -1 | 0 | 1 => {
+      const c = cols(); if (!c.length) return 0;
+      const box = root.getBoundingClientRect();
+      if (y < box.top || y > box.bottom) return 0;
+      if (x <= c[0].getBoundingClientRect().left + pad) return -1; // 시간 눈금 칸 포함 왼쪽 끝
+      if (x >= c[c.length - 1].getBoundingClientRect().right - pad) return 1; // 오른쪽 끝(달력 밖 오른쪽 포함)
+      return 0;
+    };
+    const st: { hot: -1 | 0 | 1; timer?: ReturnType<typeof setTimeout>; off: () => void } = { hot: 0, off: () => {} };
+    const flip = (dir: -1 | 1) => {
+      const a = calRef.current?.getApi(); if (!a || edgeRef.current !== st) return;
+      if (dir === 1) a.next(); else a.prev();
+      st.timer = setTimeout(() => flip(dir), 1200);
+    };
+    const onMove = (x: number, y: number) => {
+      const z = zoneOf(x, y);
+      if (z === st.hot) return;
+      clearTimeout(st.timer); st.hot = z;
+      setEdgeDrag((v) => (v ? { ...v, hot: z } : v));
+      if (z) st.timer = setTimeout(() => flip(z), 600);
+    };
+    const mm = (e: MouseEvent) => onMove(e.clientX, e.clientY);
+    const tm = (e: TouchEvent) => { const t = e.touches[0]; if (t) onMove(t.clientX, t.clientY); };
+    document.addEventListener('mousemove', mm, true);
+    document.addEventListener('touchmove', tm, { capture: true, passive: true });
+    // 손가락 끌기: 넘어가면 잡은 블록이 화면에서 빠져 그 뒤 움직임이 문서까지 올라오지 않음 → 잡은 요소에도 직접(FullCalendar 와 같은 방식)
+    held?.addEventListener('touchmove', tm as EventListener, { passive: true });
+    st.off = () => { document.removeEventListener('mousemove', mm, true); document.removeEventListener('touchmove', tm, true); held?.removeEventListener('touchmove', tm as EventListener); };
+    edgeRef.current = st;
+    const c = cols(); if (!c.length) return;
+    const box = root.getBoundingClientRect(), a = c[0].getBoundingClientRect(), b = c[c.length - 1].getBoundingClientRect();
+    const head = root.querySelector('.fc-col-header')?.getBoundingClientRect(), harness = root.querySelector('.fc-view-harness')?.getBoundingClientRect();
+    const top = Math.max(0, (head?.bottom ?? box.top) - box.top), bottom = Math.max(0, box.bottom - (harness?.bottom ?? box.bottom));
+    setEdgeDrag({ view, hot: 0, top, bottom, l: [Math.max(0, a.left - box.left - 4), pad + 4], r: [Math.max(0, box.right - b.right - 4), pad + 4] });
+  }
 
   useEffect(() => { try { localStorage.setItem('wos_cal_hidden', JSON.stringify(hidden)); localStorage.setItem('wos_cal_tasks', showTasks ? '1' : '0'); localStorage.setItem('wos_cal_unscheduled', sidePanel ? '1' : '0'); } catch {} }, [hidden, showTasks, sidePanel]);
   // B-17 공휴일 + Google Calendar 와 같은 단축키 D·W·M·A·T·C
@@ -601,7 +653,7 @@ function CalendarPage() {
             </div>
             {monthPicker && <div className="mt-1 rounded-card border border-line p-2"><MiniMonth anchor={visibleStart} holidays={holidaySet} onPick={(d) => { goto(d); setMonthPicker(false); }} /></div>}
           </div>
-          <div ref={swipeWrap} className={cx('overflow-x-clip', mobile && 'cal-phone', mobile && range?.view && `cal-v-${range.view}`)} data-testid="cal-swipe">
+          <div ref={swipeWrap} className={cx('relative overflow-x-clip', mobile && 'cal-phone', mobile && range?.view && `cal-v-${range.view}`)} data-testid="cal-swipe">
           <FullCalendar
             ref={calRef}
             plugins={[grabWhereHeld, dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
@@ -728,6 +780,8 @@ function CalendarPage() {
             dayHeaderClassNames={(a) => (a.view.type !== 'dayGridMonth' && holidaySet.has(seoulDate(a.date)) ? ['is-holiday'] : [])}
             eventDrop={moveEvent}
             eventResize={moveEvent}
+            eventDragStart={(a) => edgeStart(a.view.type, a.jsEvent?.target ?? null)}
+            eventDragStop={edgeStop}
             // 휴대폰: 빈 칸 한 번 탭 = 그 시각 1시간 임시 블록 + 빠른 등록 (길게 누를 필요 없음). 월 보기 날짜 탭 = 그날 종일
             // #756(대표 10/28 '캘린더 생성도 15분 단위로 클릭해서 생성'): 한 번 누름도 누른 자리의 끌기 단위(15분, 30분으로 바꿨으면 30분) 칸부터 1시간 — 199차의 '정시부터'를 바꿈
             dateClick={(info) => {
@@ -747,13 +801,26 @@ function CalendarPage() {
                 start: s.allDay ? undefined : seoulTime(s.start), end: s.allDay ? undefined : seoulTime(s.end), endDate: s.allDay ? addDays(seoulDate(s.end), -1) : seoulDate(s.end) });
             }}
           />
+          {edgeDrag && ([-1, 1] as const).map((d) => {
+            const [off, w] = d < 0 ? edgeDrag.l : edgeDrag.r, hot = edgeDrag.hot === d;
+            const label = edgeDrag.view === 'timeGridDay' ? (d < 0 ? '전날' : '다음 날') : edgeDrag.view === 'timeGrid3' ? (d < 0 ? '이전 3일' : '다음 3일') : d < 0 ? '지난주' : '다음 주';
+            return (
+              <div key={d} aria-hidden data-testid={d < 0 ? 'cal-edge-prev' : 'cal-edge-next'} data-hot={hot ? '1' : '0'}
+                className={cx('pointer-events-none absolute z-[5] flex flex-col items-center justify-center gap-1 rounded-md border transition-colors duration-150',
+                  hot ? 'border-brand-300 bg-brand-100/90 text-brand-700' : 'border-transparent bg-slate-200/50 text-ink-3')}
+                style={{ top: edgeDrag.top, bottom: edgeDrag.bottom, width: w, ...(d < 0 ? { left: off } : { right: off }) }}>
+                {d < 0 ? <ChevronLeft className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
+                <span className="text-[11px] font-medium leading-none [writing-mode:vertical-rl]">{label}</span>
+              </div>
+            );
+          })}
           </div>
           {mobile && calChips}
           {mobile && peopleFilter}
         </div>
         {sidePanel && <UnscheduledPanel onClose={() => setSidePanel(false)} onOpen={setOpenTask} />}
       </div>
-      <p className="text-xs text-ink-2">빈 칸을 누르거나 끌면 빠른 입력, 업무는 체크로 완료합니다. 오른쪽 “미배정 업무”를 시간 칸으로 끌어 놓으면 업무 시간이 잡힙니다. 단축키 D·W·M·A·T·C</p>
+      <p className="text-xs text-ink-2">빈 칸을 누르거나 끌면 빠른 입력, 업무는 체크로 완료합니다. 오른쪽 “미배정 업무”를 시간 칸으로 끌어 놓으면 업무 시간이 잡힙니다. 일정을 끌어 달력 왼쪽·오른쪽 끝에 잠깐 대면 지난주·다음 주로 넘어갑니다. 단축키 D·W·M·A·T·C</p>
       <ScopeDialog />
       {/* 휴대폰: 캘린더 오른쪽 아래 미팅 일정 단추(하단 탭 위) — #592 긴 알약 대신 둥근 48px 아이콘(칸을 덜 가림), 아래로 밀면 숨김 */}
       <button type="button" onClick={() => openMeeting()} aria-label="미팅 일정" title="미팅 일정" data-hidden={fabHidden ? '1' : '0'}
