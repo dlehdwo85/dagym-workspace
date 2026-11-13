@@ -1,4 +1,4 @@
-import { db } from './db';
+import { db, type Sql } from './db';
 import { accessibleUnitIds, atLeast, isAdmin, taskVisibleSql } from './access';
 import { forbidden, notFound } from './errors';
 import { notify } from './notifications';
@@ -112,8 +112,12 @@ export async function workload(u: SessionUser, weekStart?: string) {
   return { weekStart: start, weekEnd: end, holidays, people: out };
 }
 
-/** B-15 지난주(월~일) 전사 주간 보고 데이터 */
-export async function buildWeeklyReport(weekStart: string) {
+/**
+ * B-15 지난주(월~일) 전사 주간 보고 데이터.
+ * 408차 범용화 G-17: 회사별(tenant). 기본 회사(다짐)는 예전 모양·숫자 그대로. 다른 회사는 회사 이름(company)·plain 표시가 붙고
+ * '미해결 민원'(다짐의 '회원 민원' 태그 집계) 숫자는 넣지 않는다.
+ */
+export async function buildWeeklyReport(weekStart: string, tenant = 'default') {
   const sql = db();
   const end = addDays(weekStart, 6);
   const from = seoulMidnight(weekStart), to = seoulMidnight(addDays(end, 1));
@@ -125,23 +129,42 @@ export async function buildWeeklyReport(weekStart: string) {
       count(t.id) filter (where t.status = 'review')::int as review,
       count(t.id) filter (where t.status <> 'done' and '회원 민원' = any(t.tags))::int as open_complaints
     from org_units o left join tasks t on t.org_unit_id = o.id and t.deleted_at is null and t.parent_id is null
-    where o.active and o.tenant = 'default' group by o.id order by done desc, o.name`;
+    where o.active and o.tenant = ${tenant} group by o.id order by done desc, o.name`;
   const issues = await sql<any[]>`
     select t.id, t.title, t.priority, t.due_date, o.name as org_unit_name, u.name as assignee_name
     from tasks t join org_units o on o.id = t.org_unit_id left join users u on u.id = t.assignee_id
-    where t.deleted_at is null and o.tenant = 'default' and t.status <> 'done' and (t.priority in ('urgent','high') or t.due_date <= ${end})
+    where t.deleted_at is null and o.tenant = ${tenant} and t.status <> 'done' and (t.priority in ('urgent','high') or t.due_date <= ${end})
     order by t.priority = 'urgent' desc, t.due_date nulls last limit 10`;
   const photos = await sql<any[]>`
     select a.id, a.file_name, t.id as task_id, t.title as task_title, o.name as org_unit_name, a.captured_at
     from attachments a join tasks t on t.id = a.task_id join org_units o on o.id = t.org_unit_id
     where a.deleted_at is null and a.upload_status = 'ready' and a.kind = 'file' and a.mime_type like 'image/%'
-      and a.created_at >= ${from} and a.created_at < ${to} and t.deleted_at is null and o.tenant = 'default'
+      and a.created_at >= ${from} and a.created_at < ${to} and t.deleted_at is null and o.tenant = ${tenant}
     order by a.created_at desc limit 8`;
   const tot = sites.reduce((a, s) => ({ done: a.done + s.done, created: a.created + s.created, overdue: a.overdue + s.overdue, review: a.review + s.review, complaints: a.complaints + s.open_complaints }),
     { done: 0, created: 0, overdue: 0, review: 0, complaints: 0 });
   // 202차(#461 ⑤): 영업 진행(회사 전체) — 진행 중·연락일 지남·다음 행동 없음·오래 쉼(14일 넘게 연락 없음)·담당 없음 + 오래 쉼 거래처 10곳
-  const sales = await (await import('./sales/leadList')).salesReportBlock(sql, 'default', todaySeoul()).catch(() => null);
-  return { weekStart, weekEnd: end, totals: tot, sites: sites.filter((s) => s.done || s.created || s.overdue || s.review || s.open_complaints), issues, photos, sales };
+  const sales = await (await import('./sales/leadList')).salesReportBlock(sql, tenant, todaySeoul()).catch(() => null);
+  if (tenant === 'default') return { weekStart, weekEnd: end, totals: tot, sites: sites.filter((s) => s.done || s.created || s.overdue || s.review || s.open_complaints), issues, photos, sales };
+  const [co] = await sql<{ name: string }[]>`select name from tenants where id = ${tenant}`;
+  const { complaints: _c, ...totals } = tot; void _c;
+  return { weekStart, weekEnd: end, company: co?.name ?? null, plain: true, totals,
+    sites: sites.filter((s) => s.done || s.created || s.overdue || s.review).map(({ open_complaints: _o, ...s }) => { void _o; return s; }), issues, photos, sales };
+}
+/** 한 회사의 지난주 보고 1건 만들고 그 회사 대표·관리자에게 알림(이미 있으면 건너뜀) */
+async function weeklyReportFor(sql: Sql, tenant: string, lastMonday: string) {
+  const [exists] = await sql`select 1 from weekly_reports where week_start = ${lastMonday} and tenant = ${tenant}`;
+  if (exists) return { skipped: 'exists' as const };
+  const data: any = await buildWeeklyReport(lastMonday, tenant);
+  const [r] = await sql<{ id: string }[]>`insert into weekly_reports (week_start, tenant, data) values (${lastMonday}, ${tenant}, ${sql.json(data as never)})
+    on conflict (tenant, week_start) do nothing returning id`;
+  if (!r) return { skipped: 'race' as const };
+  const admins = (await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active' and tenant = ${tenant}`).map((x) => x.id);
+  const base = tenant === 'default';
+  await notify(sql, { userIds: admins, type: 'weekly_report', title: `주간 보고 (${lastMonday.slice(5).replace('-', '/')} 주)`,
+    body: `완료 ${data.totals.done} · 새 업무 ${data.totals.created} · 지연 ${data.totals.overdue}${base ? ` · 미해결 민원 ${data.totals.complaints}` : ''}${data.sales ? ` · 영업 오래 쉼 ${data.sales.stale} · 다음 행동 없음 ${data.sales.none}` : ''}`,
+    link: `/reports/${r.id}`, entityType: 'weekly_report', entityId: r.id, actorId: null, dedupeKey: base ? `weekly:${lastMonday}` : `weekly:${tenant}:${lastMonday}` });
+  return { created: r.id };
 }
 
 /** 정기 실행: 월요일 08:00(서울) 이후 지난주 보고가 없으면 1번 만들고 대표·본사 관리자에게 알림 */
@@ -150,28 +173,28 @@ export async function weeklyReportJob(now = new Date()) {
   if (d.weekday === 1 && d.hour < 8) return { skipped: 'before Monday 08:00' };
   const lastMonday = addDays(weekRangeSeoul(now).start, -7);
   const sql = db();
-  const [exists] = await sql`select 1 from weekly_reports where week_start = ${lastMonday}`;
-  if (exists) return { skipped: 'exists' };
-  const data = await buildWeeklyReport(lastMonday);
-  const [r] = await sql<{ id: string }[]>`insert into weekly_reports (week_start, data) values (${lastMonday}, ${sql.json(data as never)})
-    on conflict (week_start) do nothing returning id`;
-  if (!r) return { skipped: 'race' };
-  const admins = (await sql<{ id: string }[]>`select id from users where role in ('owner','admin') and status = 'active' and tenant = 'default'`).map((x) => x.id);
-  await notify(sql, { userIds: admins, type: 'weekly_report', title: `주간 보고 (${lastMonday.slice(5).replace('-', '/')} 주)`,
-    body: `완료 ${data.totals.done} · 새 업무 ${data.totals.created} · 지연 ${data.totals.overdue} · 미해결 민원 ${data.totals.complaints}${data.sales ? ` · 영업 오래 쉼 ${data.sales.stale} · 다음 행동 없음 ${data.sales.none}` : ''}`,
-    link: `/reports/${r.id}`, entityType: 'weekly_report', entityId: r.id, actorId: null, dedupeKey: `weekly:${lastMonday}` });
-  return { created: r.id };
+  const base = await weeklyReportFor(sql, 'default', lastMonday); // 기본 회사: 예전과 같음(움직임이 없어도 매주 1건)
+  // 408차 G-17 다른 회사: 지난주에 움직임(새 업무·완료·지연·검토 대기)이 있던 회사만 — 안 쓰는 회사에 빈 보고·알림이 쌓이지 않게. 심사용 체험 조직·개인 공간은 뺌
+  const from = seoulMidnight(lastMonday), to = seoulMidnight(addDays(lastMonday, 7)), end = addDays(lastMonday, 6);
+  const others = await sql<{ id: string }[]>`select t.id from tenants t
+    where t.id not in ('default', 'demo') and t.status = 'active' and t.kind = 'company' and t.deleted_at is null
+      and not exists (select 1 from weekly_reports w where w.tenant = t.id and w.week_start = ${lastMonday})
+      and exists (select 1 from tasks k join org_units o on o.id = k.org_unit_id where o.tenant = t.id and o.active and k.deleted_at is null and k.parent_id is null
+        and ((k.created_at >= ${from} and k.created_at < ${to}) or (k.status = 'done' and k.completed_at >= ${from} and k.completed_at < ${to}) or (k.status <> 'done' and k.due_date <= ${end}) or k.status = 'review'))
+    order by t.id limit 30`;
+  let made = 0;
+  for (const t of others) { const r = await weeklyReportFor(sql, t.id, lastMonday).catch(() => null); if (r && 'created' in r) made++; }
+  return others.length ? { ...base, others: made } : base;
 }
 
 export async function listReports(u: SessionUser) {
   if (!isAdmin(u)) throw forbidden(`주간 보고는 ${await adminsWord(u)} 봅니다`);
-  if (tenantOf(u) !== 'default') return [];
-  return db()`select id, week_start, created_at, data->'totals' as totals from weekly_reports order by week_start desc limit 52`;
+  return db()`select id, week_start, created_at, data->'totals' as totals from weekly_reports where tenant = ${tenantOf(u)} order by week_start desc limit 52`; // 408차 G-17: 내 회사 보고만
 }
 export async function getReport(u: SessionUser, id: string) {
   if (!isAdmin(u)) throw forbidden(`주간 보고는 ${await adminsWord(u)} 봅니다`);
-  if (!/^[0-9a-f-]{36}$/.test(id) || tenantOf(u) !== 'default') throw notFound();
-  const [r] = await db()`select id, week_start, created_at, data from weekly_reports where id = ${id}`;
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound();
+  const [r] = await db()`select id, week_start, created_at, data from weekly_reports where id = ${id} and tenant = ${tenantOf(u)}`; // 다른 회사 보고는 없는 것으로
   if (!r) throw notFound('보고서가 없습니다');
   return r;
 }

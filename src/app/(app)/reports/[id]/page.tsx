@@ -14,6 +14,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
   if (loading && !data) return <Skeleton rows={8} />;
   const r = data!.report;
   const d = r.data;
+  const plain = !!d.plain; // 408차 범용화 G-17·G-55: 기본 회사(다짐) 보고는 예전 그대로, 다른 회사 보고는 회사 이름 머리글 + '미해결 민원' 칸 없음
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between print:hidden">
@@ -22,25 +23,25 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
       </div>
       <article className="print-area mx-auto max-w-4xl space-y-6 rounded-card border border-line bg-white p-6 shadow-card sm:p-10" data-testid="weekly-report">
         <header className="border-b border-line pb-4">
-          <p className="text-sm text-ink-2">다짐 · 하이링크</p>
+          <p className="text-sm text-ink-2" data-testid="weekly-report-company">{plain ? d.company ?? '' : '다짐 · 하이링크'}</p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight">주간 보고 · {fmtDate(d.weekStart)} ~ {fmtDate(d.weekEnd)}</h1>
           <p className="mt-1 text-xs text-ink-3">{fmtDateTime(r.created_at)} 자동 생성 · 워크인 집계</p>
         </header>
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          {[['완료', d.totals.done, ''], ['새 업무', d.totals.created, ''], ['지연(주말 기준)', d.totals.overdue, d.totals.overdue ? 'text-red-600' : ''], ['검토 대기', d.totals.review, ''], ['미해결 민원', d.totals.complaints, d.totals.complaints ? 'text-violet-600' : '']].map(([l, v, c]) => (
+        <section className={plain ? 'grid grid-cols-2 gap-3 sm:grid-cols-4' : 'grid grid-cols-2 gap-3 sm:grid-cols-5'}>
+          {[['완료', d.totals.done, ''], ['새 업무', d.totals.created, ''], ['지연(주말 기준)', d.totals.overdue, d.totals.overdue ? 'text-red-600' : ''], ['검토 대기', d.totals.review, ''], ...(plain ? [] : [['미해결 민원', d.totals.complaints, d.totals.complaints ? 'text-violet-600' : '']])].map(([l, v, c]) => (
             <div key={l as string} className="rounded-input border border-line p-3"><div className="text-xs text-ink-2">{l}</div><div className={`mt-1 text-2xl font-bold tabular-nums ${c}`}>{v as number}</div></div>
           ))}
         </section>
         <section>
-          <h2 className="mb-2 font-semibold">현장별</h2>
+          <h2 className="mb-2 font-semibold">{plain ? '조직별' : '현장별'}</h2>
           <table className="w-full text-sm">
-            <thead className="border-b border-line text-left text-xs text-ink-2"><tr><th className="py-2">조직</th><th className="py-2 text-right">완료</th><th className="py-2 text-right">새 업무</th><th className="py-2 text-right">지연</th><th className="py-2 text-right">검토 대기</th><th className="py-2 text-right">미해결 민원</th></tr></thead>
+            <thead className="border-b border-line text-left text-xs text-ink-2"><tr><th className="py-2">조직</th><th className="py-2 text-right">완료</th><th className="py-2 text-right">새 업무</th><th className="py-2 text-right">지연</th><th className="py-2 text-right">검토 대기</th>{!plain && <th className="py-2 text-right">미해결 민원</th>}</tr></thead>
             <tbody className="divide-y divide-line">
               {d.sites.map((s: any) => (
                 <tr key={s.id}><td className="py-2 font-medium">{s.name}</td><td className="py-2 text-right tabular-nums">{s.done}</td><td className="py-2 text-right tabular-nums">{s.created}</td>
-                  <td className={`py-2 text-right tabular-nums ${s.overdue ? 'font-semibold text-red-600' : ''}`}>{s.overdue}</td><td className="py-2 text-right tabular-nums">{s.review}</td><td className="py-2 text-right tabular-nums">{s.open_complaints}</td></tr>
+                  <td className={`py-2 text-right tabular-nums ${s.overdue ? 'font-semibold text-red-600' : ''}`}>{s.overdue}</td><td className="py-2 text-right tabular-nums">{s.review}</td>{!plain && <td className="py-2 text-right tabular-nums">{s.open_complaints}</td>}</tr>
               ))}
-              {!d.sites.length && <tr><td colSpan={6} className="py-4 text-center text-ink-3">지난주 움직임이 있는 조직이 없습니다</td></tr>}
+              {!d.sites.length && <tr><td colSpan={plain ? 5 : 6} className="py-4 text-center text-ink-3">지난주 움직임이 있는 조직이 없습니다</td></tr>}
             </tbody>
           </table>
         </section>

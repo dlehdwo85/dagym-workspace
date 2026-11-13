@@ -6,6 +6,7 @@
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { readFileSync } from 'node:fs';
 
 let srv, sql, ctx, T, mate, admin;
 const j = (x) => JSON.stringify(x);
@@ -114,5 +115,18 @@ describe('407차 감사 기록 회사별', () => {
       await sql`update audit_logs set tenant = audit_scope(actor_id, action, target_type, target_id, detail) where tenant is null`;
     } finally { await sql`alter table audit_logs enable trigger audit_logs_scope`; }
     assert.deepEqual((await ctx.owner.ok('GET', '/api/admin/audit')).logs.map((l) => l.id).filter((id) => before.includes(id)), before);
+  });
+
+  test('과거 자동 입찰 결과(행위자·회사 표시 없음): 그 공고를 진행한 회사가 한 곳이면 그 회사 기록으로, 두 곳이면 그대로(258)', async () => {
+    const put = (tenant, id, nid) => sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status) values (${tenant}, 'opportunity_work', ${id}, ${nid}, '입찰 진행')`;
+    await put(T.tenant, 'W1', 'N-ONE'); await put(T.tenant, 'W2', 'N-TWO'); await put('default', 'W3', 'N-TWO');
+    const ins = async (nid) => (await sql`insert into audit_logs (action, target_type, target_id, detail) values ('sales.bid_result', 'sales_bid', ${nid}, ${sql.json({ to: 'lost', auto: true })}) returning id, tenant`)[0];
+    const one = await ins('N-ONE'), two = await ins('N-TWO'), none = await ins('N-NONE');
+    assert.deepEqual([one.tenant, two.tenant, none.tenant], [null, null, null], '회사 표시가 없는 옛 기록 = 회사 미상');
+    await sql.unsafe(readFileSync('db/migrations/258_audit_bid_scope.sql', 'utf8'));
+    const after = Object.fromEntries((await sql`select id, tenant from audit_logs where id = any(${[one.id, two.id, none.id]}::bigint[])`).map((r) => [r.id, r.tenant]));
+    assert.deepEqual([after[one.id], after[two.id], after[none.id]], [T.tenant, null, null]);
+    assert.ok((await T.c.ok('GET', '/api/admin/audit')).logs.some((l) => l.action === 'sales.bid_result' && l.target_id === 'N-ONE'), '그 회사 감사 기록에 보임');
+    assert.ok(!(await ctx.owner.ok('GET', '/api/admin/audit')).logs.some((l) => l.action === 'sales.bid_result'), '다짐 화면에는 없음');
   });
 });

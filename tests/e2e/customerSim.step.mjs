@@ -157,6 +157,17 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     const auditText = await p.getByTestId('audit').innerText();
     assert.ok(!/dagym\.test|platform\.|이직원|박직원|최매니저/.test(auditText), `새 회사 감사 기록에 다른 회사·운영 기록 없음: ${auditText.slice(0, 200)}`); // 이 시험의 새 회사 대표 이름도 '김대표'라 이름으로는 가리지 않음
     if (!(await p.locator('a[href="/admin/audit"]').count())) note('§7-1b 감사 기록', '사이드바에 [감사 기록] 줄이 안 보임');
+    // ── 7-1c) 408차 주간 보고(G-17·G-55): 새 회사도 [지난주 보고 지금 만들기]가 되고(예전 404), 보고 머리글은 회사 이름 · '미해결 민원'·'다짐 · 하이링크' 없음
+    await p.goto(BASE + '/reports');
+    await p.getByRole('button', { name: '지난주 보고 지금 만들기' }).click();
+    await p.getByTestId('weekly-report').waitFor();
+    assert.equal((await p.getByTestId('weekly-report-company').innerText()).trim(), company, '보고 머리글 = 회사 이름');
+    const repText = await p.getByTestId('weekly-report').innerText();
+    assert.ok(!/미해결 민원|다짐|하이링크|현장별/.test(repText), `새 회사 주간 보고에 다짐 낱말 없음: ${repText.slice(0, 200)}`);
+    await shot('408-cust-weekly-report.png');
+    await p.goto(BASE + '/reports');
+    await p.getByTestId('reports').waitFor();
+    assert.ok(!(await p.getByTestId('reports').innerText()).includes('미해결 민원'));
     // ── 7-2) 범용화 2단계(용어 사전): 새 회사에는 다짐식 역할·조직 이름이 안 보이고, 회사 정보에서 역할 이름을 바꾸면 화면에 반영
     await p.goto(BASE + '/admin/users');
     await p.getByTestId('invite-open').waitFor();

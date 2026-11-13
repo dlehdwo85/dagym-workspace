@@ -26,7 +26,7 @@ export default function ReportsPage() {
             <li key={r.id}>
               <Link href={`/reports/${r.id}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-slate-50">
                 <span className="font-semibold">{fmtDate(r.week_start)} 주</span>
-                <span className="text-sm text-ink-2">완료 {r.totals.done} · 새 업무 {r.totals.created} · 지연 <b className={r.totals.overdue ? 'text-red-600' : ''}>{r.totals.overdue}</b> · 미해결 민원 {r.totals.complaints}</span>
+                <span className="text-sm text-ink-2">완료 {r.totals.done} · 새 업무 {r.totals.created} · 지연 <b className={r.totals.overdue ? 'text-red-600' : ''}>{r.totals.overdue}</b>{r.totals.complaints !== undefined && <> · 미해결 민원 {r.totals.complaints}</>}</span>
                 <span className="ml-auto text-xs text-ink-3">{fmtDateTime(r.created_at)} 생성</span>
               </Link>
             </li>
