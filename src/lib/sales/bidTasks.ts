@@ -494,7 +494,7 @@ export async function bidTasksTick(now = new Date()) {
           winner: String(pick(award, 'winner_name', 'award_company', 'successful_bidder') ?? '') || null, winnerBiz: pick(award, 'winner_biz_no', 'winner_bizno'), amount: pick(award, 'winner_amount', 'award_amount', 'winning_amount'),
           awardDate: when(pick(award, 'award_date', 'opening_at', 'open_at'))?.day ?? null } : { result: 'failed' };
         await applyResult(sql, rec.tenant, rec, id, res, null);
-        await audit(sql, null, 'sales.bid_result', 'sales_bid', id, { to: res.result, auto: true, winner: res.winner ?? null }).catch(() => {});
+        await audit(sql, null, 'sales.bid_result', 'sales_bid', id, { to: res.result, auto: true, winner: res.winner ?? null, tenant: rec.tenant }).catch(() => {}); // tenant = 감사 기록이 보일 회사(행위자 없는 자동 기록 — 407차)
         results++; continue;
       }
       // 날짜 정정 → 일정 옮김 · 기한 따라감

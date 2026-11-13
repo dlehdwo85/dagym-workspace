@@ -30,10 +30,10 @@ describe('범용화 1단계 S-01~S-05', () => {
     assert.ok(base.teams.some((t) => t.id === d.id) && !base.teams.some((t) => t.id === o.id), '다짐은 자기 팀만(예전과 같음)');
   });
 
-  test('S-02 다른 회사 대표: 조직·공휴일·결재선은 열리고, 서버 운영 상태·감사 기록은 404 · 다짐 대표는 모두 그대로 열림', async () => {
-    // 서버 운영 화면 — 다른 회사는 404(모든 회사 기록이 섞여 있음)
+  test('S-02 다른 회사 대표: 조직·공휴일·결재선은 열리고, 서버 운영 상태는 404 · 감사 기록은 자기 회사 것만(407차) · 다짐 대표는 모두 그대로 열림', async () => {
+    // 서버 운영 화면 — 다른 회사는 404(모든 회사 기록이 섞여 있음). 감사 기록은 407차부터 회사별(자기 회사 기록만 — tests/api/audit-scope-1026)
     assert.equal((await T.c.get('/api/admin/ops')).status, 404);
-    assert.equal((await T.c.get('/api/admin/audit')).status, 404);
+    assert.ok(Array.isArray((await T.c.ok('GET', '/api/admin/audit')).logs));
     await ctx.owner.ok('GET', '/api/admin/ops'); const au = await ctx.owner.ok('GET', '/api/admin/audit'); assert.ok(Array.isArray(au.logs));
     // 조직 구성: 자기 회사 조직만 보고 만들 수 있음(다짐 조직은 안 보임)
     const units = (await T.c.ok('GET', '/api/admin/org-units')).units;
@@ -48,8 +48,8 @@ describe('범용화 1단계 S-01~S-05', () => {
     assert.equal((await T.c.req('POST', '/api/approval-lines', { name: '남의 결재자', steps: [{ label: '대표', type: 'user', userId: ctx.ownerId }] })).status, 404, '다른 회사 사람은 결재자로 못 넣음');
     // 화면 입구: 다른 회사 대표 — 공휴일·조직·결재 설정 화면은 열리고, 운영 상태·감사 기록 화면은 '권한 없음' · 다짐 대표는 모두 열림(예전과 같음)
     const page = async (c, path) => { const r = await c.get(path); return { status: r.status, blocked: String(r.body).includes('admin-no-access') }; };
-    for (const path of ['/admin/holidays', '/admin/org', '/admin/approval-settings']) assert.deepEqual(await page(T.c, path), { status: 200, blocked: false }, `다른 회사 대표 ${path}`);
-    for (const path of ['/admin/ops', '/admin/audit']) assert.deepEqual(await page(T.c, path), { status: 200, blocked: true }, `다른 회사 대표 ${path} = 권한 없음`);
+    for (const path of ['/admin/holidays', '/admin/org', '/admin/approval-settings', '/admin/audit']) assert.deepEqual(await page(T.c, path), { status: 200, blocked: false }, `다른 회사 대표 ${path}`);
+    for (const path of ['/admin/ops']) assert.deepEqual(await page(T.c, path), { status: 200, blocked: true }, `다른 회사 대표 ${path} = 권한 없음`);
     for (const path of ['/admin/ops', '/admin/audit', '/admin/holidays', '/admin/org', '/admin/approval-settings']) assert.deepEqual(await page(ctx.owner, path), { status: 200, blocked: false }, `다짐 대표 ${path}`);
     // 다짐 직원은 예전처럼 운영 메뉴 없음
     assert.equal((await ctx.staffA.client.get('/api/admin/ops')).status, 404);

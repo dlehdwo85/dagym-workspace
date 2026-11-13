@@ -109,7 +109,10 @@ describe('V15 회사 간 분리 — 다른 회사 데이터는 404·빈 목록',
       // 기본 회사 전용 메뉴
       assert.equal((await c.get('/api/revenue?year=2026')).status, 404);
       assert.equal((await c.get('/api/admin/ops')).status, 404);
-      assert.equal((await c.get('/api/admin/audit')).status, 404);
+      // 감사 기록은 407차부터 회사별: 열리면 자기 회사 계정의 기록만(기존 회사 사람·메일·id 가 안 보임) — 메뉴 권한이 없는 계정은 예전처럼 404
+      const au = await c.get('/api/admin/audit');
+      assert.ok([200, 404].includes(au.status), String(au.status));
+      if (au.status === 200) assert.ok(!JSON.stringify(au.body.logs).includes('dagym.test') && !au.body.logs.some((l) => ['김대표', '이직원', '박직원', '최매니저'].includes(l.actor_name)), JSON.stringify(au.body.logs).slice(0, 300));
     }
   });
   test('다른 회사 사람·조직을 배정·수정할 수 없다', async () => {

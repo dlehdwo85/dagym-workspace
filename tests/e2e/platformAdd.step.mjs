@@ -54,4 +54,16 @@ export async function platformAdd({ owner, BASE, SHOTS, sql }) {
   await owner.getByTestId(`company-partner-${t.id}`).waitFor(); // 목록에 파트너 배지
   await owner.getByTestId(`company-stage-${t.id}`).filter({ hasText: '보류' }).waitFor(); // 닫으면 목록을 다시 불러온다
   await owner.getByTestId(`company-contact-${t.id}`).filter({ hasText: '다음 2026-11-03' }).waitFor();
+  // 407차(대표 11/14 '가안'): 플랫폼 운영 [모든 회사 감사 기록] — 회사 열, '플랫폼 운영·회사 미상' 거름에 방금 한 운영 행위(어느 회사 일인지 표시)
+  const pa = owner.getByTestId('platform-audit'); await pa.scrollIntoViewIfNeeded();
+  await pa.getByTestId('platform-audit-toggle').click();
+  await pa.getByTestId('platform-audit-table').waitFor();
+  await pa.getByTestId('platform-audit-scope').selectOption('none');
+  await pa.getByTestId('platform-audit-table').getByText('플랫폼 운영 → E2E 고객사').first().waitFor();
+  await pa.getByTestId('platform-audit-table').getByText('platform.tenant_create').first().waitFor();
+  await owner.screenshot({ path: `${SHOTS}/407-platform-audit.png` });
+  // 다짐 [감사 기록] 화면에는 다른 회사 이름·운영 행위가 없다
+  await owner.goto(BASE + '/admin/audit'); await owner.getByTestId('audit').waitFor();
+  const auditText = await owner.getByTestId('audit').innerText();
+  assert.ok(!/platform\.|E2E 고객사/.test(auditText) && !auditText.includes(t.id), '다짐 감사 기록에 플랫폼 운영 행위·고객사 없음');
 }

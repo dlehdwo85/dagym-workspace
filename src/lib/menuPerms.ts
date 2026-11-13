@@ -66,6 +66,8 @@ export async function menuLevels(u: SessionUser) {
   const out: Record<string, string> = {};
   for (const m of Object.keys(MENUS) as MenuKey[]) out[m] = await menuLevel(u, m);
   out[PLATFORM_OPS] = tenantOf(u) === 'default' ? out.ops : 'none'; // 화면 입구·사이드바용 계산값(메뉴 권한 표에는 없음)
+  out[AUDIT_COMPANY] = auditHidden(u) ? 'none' : out.ops; // 407차: 감사 기록 화면 입구 — 자기 회사 기록만 보는 화면
+  out[AUDIT_SIDEBAR] = auditHidden(u) || tenantOf(u) === 'default' ? 'none' : out.ops; // 사이드바 줄: 기본 회사는 예전처럼 [운영 상태] 안에서 들어감(사이드바 그대로)
   return out;
 }
 /** 서버 운영 화면(운영 상태·감사 기록 — 모든 회사 기록이 섞여 있음)의 권한 키: 기본 회사의 '운영 상태' 권한, 다른 회사는 항상 없음 */
@@ -75,6 +77,17 @@ export async function platformOpsLevel(u: SessionUser, sql: Sql = db()) { return
 export async function requirePlatformOps(u: SessionUser, need: 'view' | 'edit' = 'view', sql: Sql = db()) {
   if (tenantOf(u) !== 'default') throw notFound();
   return requireMenu(u, 'ops', need, sql);
+}
+/**
+ * 407차 범용화(대표 11/14 '가안'): 감사 기록 화면은 회사마다 자기 회사 기록만 본다(audit_logs.tenant = 내 회사).
+ * 권한은 예전과 같은 '운영 상태' 메뉴 권한. 심사용 체험 조직은 공용 계정이라 접속 주소가 서로 보이지 않게 예전처럼 화면이 없다.
+ */
+export const AUDIT_COMPANY = 'audit_company';
+export const AUDIT_SIDEBAR = 'audit_sidebar';
+const auditHidden = (u: SessionUser) => !!u.isDemo || tenantOf(u) === 'demo';
+export async function requireCompanyAudit(u: SessionUser, sql: Sql = db()) {
+  if (auditHidden(u)) throw notFound();
+  return requireMenu(u, 'ops', 'view', sql);
 }
 /** 여러 메뉴 중 하나라도 need 이상이면 통과 (예: 조직 목록은 사용자 관리·운영 상태 어느 쪽이든 조회) */
 export async function requireAnyMenu(u: SessionUser, menus: MenuKey[], need: 'view' | 'edit' = 'view', sql: Sql = db()) {

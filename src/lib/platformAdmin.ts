@@ -329,9 +329,28 @@ export async function tenantAuditLog(u: SessionUser, tenant: string) {
   if (!(await sql`select 1 from tenants where id = ${tenant}`).length) throw notFound('없는 회사입니다');
   const rows = await sql`select a.id::text as id, a.action, a.target_type, a.target_id, a.detail, a.created_at, ac.name as actor_name, ac.platform_admin as by_platform
     from audit_logs a left join users ac on ac.id = a.actor_id
-    where (a.target_type = 'tenant' and a.target_id = ${tenant}) or ac.tenant = ${tenant}
+    where (a.target_type = 'tenant' and a.target_id = ${tenant}) or ac.tenant = ${tenant} or a.tenant = ${tenant} or a.detail->>'tenant' = ${tenant}
     order by a.created_at desc limit 100`;
   return { logs: rows };
+}
+/**
+ * 407차(대표 11/14 '가안' · "슈퍼관리자 계정에서만 타 회사 … 정보 확인"): 모든 회사 감사 기록 — 플랫폼 운영자(대표 계정)만.
+ * scope: 'all' = 전부 · 'none' = 어느 회사 화면에도 안 보이는 기록(플랫폼 운영 행위·회사 미상) · 그 밖 = 그 회사 화면에 보이는 기록
+ * about = 운영 행위가 다룬 회사(대상 회사 또는 detail.tenant) — 회사 화면에는 안 보이지만 운영자는 어느 회사 일인지 알아야 한다
+ */
+export async function platformAuditLog(u: SessionUser, q: { scope?: string | null; before?: string | null }) {
+  requirePlatform(u);
+  const sql = db();
+  const scope = (q.scope ?? 'all').slice(0, 80);
+  const before = q.before && /^\d+$/.test(q.before) ? Number(q.before) : null;
+  const logs = await sql`select a.id::text as id, a.action, a.target_type, a.target_id, a.detail, a.ip, a.created_at, ac.name as actor_name,
+      a.tenant, t.name as tenant_name, ab.id as about, ab.name as about_name
+    from audit_logs a left join users ac on ac.id = a.actor_id left join tenants t on t.id = a.tenant
+      left join tenants ab on a.tenant is null and ab.id = coalesce(case when a.target_type = 'tenant' then a.target_id end, a.detail->>'tenant')
+    where ${scope === 'all' ? sql`true` : scope === 'none' ? sql`a.tenant is null` : sql`a.tenant = ${scope}`} and ${before ? sql`a.id < ${before}` : sql`true`}
+    order by a.id desc limit 100`;
+  const tenants = await sql<{ id: string; name: string }[]>`select id, name from tenants order by (id = 'default') desc, name`;
+  return { logs, tenants, scope };
 }
 
 /** #565 플랫폼 운영 맨 위 '오늘 볼 것' — 신규 가입(7일)·결제 실패(7일)와 밀린 결제·답 안 한 문의·수집 실패(24시간)·이번 달 AI 원가. 시험 회사는 뺌 */

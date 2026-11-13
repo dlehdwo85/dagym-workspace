@@ -19,6 +19,7 @@ import { PlatformCollectorSettings } from '@/components/sales/PlatformCollectorS
 import { PlatformMktPlans } from '@/components/platform/PlatformMktPlans';
 import { PlatformSpeed } from '@/components/platform/PlatformSpeed';
 import { PlatformSystemAi } from '@/components/platform/PlatformSystemAi';
+import { PlatformAudit } from '@/components/platform/PlatformAudit';
 import { PlanBands } from '@/components/platform/PlanBands';
 import { PlatformSalesMigrate } from '@/components/sales/PlatformSalesMigrate';
 import { PlatformOpsImport } from '@/components/marketing/PlatformOpsImport';
@@ -190,7 +191,7 @@ function PlatformInner() {
       <PageHeader title="플랫폼 운영" icon={Building2} sub="워크인을 쓰는 모든 회사를 돌보는 곳입니다. 위 숫자를 누르면 그 칸으로 갑니다. 요금제 숫자는 여기서 바꾸면 바로 적용됩니다." />
       <TodayCards go={go} />
       <PlatformTabs tab={tab} go={go} />
-      {tab === 'company' && <><PlatformTenants /><Signups />{usageEl}<PlatformFunnel /><PlatformConversionTags /></>}
+      {tab === 'company' && <><PlatformTenants /><Signups />{usageEl}<PlatformFunnel /><PlatformConversionTags /><PlatformAudit /></>}
       {tab === 'billing' && <>{plansEl}<PlatformPayments /><PlatformSettlement /><Suspense><PayTest /></Suspense><PlatformMktPlans /></>}
       {tab === 'support' && <>{supportEl}{requestsEl}<InquiryLink /></>}
       {tab === 'ai' && <><AiForecast /><PlatformSystemAi /><PlatformHiggsfield /><PlatformTts /><PlatformQualityRules /></>}

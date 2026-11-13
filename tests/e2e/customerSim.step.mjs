@@ -149,6 +149,14 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     if (hid.length) note('§3-5 사용량 숨은 글(title 등)', hid.join(' | '));
     const perHit = usageText.match(/1(회|건|장|편) 약 [\d,]+원/g);
     if (perHit) note('§3-5 사용량 1건 원가', [...new Set(perHit)].join(', '));
+    // ── 7-1b) 407차 감사 기록: 새 회사 대표도 사이드바 [감사 기록]으로 자기 회사 기록만 본다(예전엔 화면이 없었음)
+    await p.goto(BASE + '/admin/audit');
+    await p.getByTestId('audit').waitFor();
+    const auditRows = await p.getByTestId('audit').locator('tbody tr').count();
+    assert.ok(auditRows >= 1, '새 회사 감사 기록 1건 이상(가입·로그인 등)');
+    const auditText = await p.getByTestId('audit').innerText();
+    assert.ok(!/dagym\.test|platform\.|이직원|박직원|최매니저/.test(auditText), `새 회사 감사 기록에 다른 회사·운영 기록 없음: ${auditText.slice(0, 200)}`); // 이 시험의 새 회사 대표 이름도 '김대표'라 이름으로는 가리지 않음
+    if (!(await p.locator('a[href="/admin/audit"]').count())) note('§7-1b 감사 기록', '사이드바에 [감사 기록] 줄이 안 보임');
     // ── 7-2) 범용화 2단계(용어 사전): 새 회사에는 다짐식 역할·조직 이름이 안 보이고, 회사 정보에서 역할 이름을 바꾸면 화면에 반영
     await p.goto(BASE + '/admin/users');
     await p.getByTestId('invite-open').waitFor();

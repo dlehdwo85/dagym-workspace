@@ -6,7 +6,8 @@
  */
 /** #429 parent = 경로(이전 화면이 없을 때 돌아갈 곳), selfBack = 화면이 직접 '← 이전 화면'·경로를 그린다(결재 설정 탭) */
 /** gate = 화면 입구·사이드바에서 menu 대신 볼 권한 키(메뉴 권한 표에는 없는 계산값) — 'ops_platform' = 기본 회사 전용 서버 운영 화면(범용화 S-02) */
-export type AdminPage = { href: string; label: string; menu: string; gate?: string; sidebar?: boolean; parent?: { label: string; href: string }; selfBack?: boolean };
+/** sideGate = 사이드바 줄만 따로 볼 권한 키(없으면 gate·menu) — 감사 기록: 기본 회사는 [운영 상태] 안에서 들어가고(사이드바 그대로), 다른 회사는 운영 상태 화면이 없어 사이드바에 줄을 둔다(407차) */
+export type AdminPage = { href: string; label: string; menu: string; gate?: string; sideGate?: string; sidebar?: boolean; parent?: { label: string; href: string }; selfBack?: boolean };
 const APPROVALS = { label: '결재', href: '/approvals' };
 export const ADMIN_PAGES: AdminPage[] = [
   { href: '/reports', label: '주간 보고', menu: 'team_reports', sidebar: true },
@@ -15,7 +16,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   { href: '/contracts', label: '전자계약', menu: 'admin_users', sidebar: true }, // 2차(글로싸인 레퍼런스): 올린 계약서에 칸 놓아 보내기·상태 바구니
   { href: '/admin/ops', label: '운영 상태', menu: 'ops', gate: 'ops_platform', sidebar: true },
   { href: '/admin/org', label: '조직 구성', menu: 'ops' },
-  { href: '/admin/audit', label: '감사 기록', menu: 'ops', gate: 'ops_platform' },
+  { href: '/admin/audit', label: '감사 기록', menu: 'ops', gate: 'audit_company', sideGate: 'audit_sidebar', sidebar: true },
   { href: '/admin/holidays', label: '공휴일', menu: 'ops' },
   { href: '/admin/approvals', label: '결재선', menu: 'ops', parent: APPROVALS, selfBack: true },
   { href: '/admin/company', label: '회사 정보·디자인', menu: 'company', sidebar: true },
