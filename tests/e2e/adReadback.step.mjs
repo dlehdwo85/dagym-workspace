@@ -25,7 +25,7 @@ export async function adReadback({ owner, ctx, sql, BASE, SHOTS }) {
   const [stuck] = await sql`insert into mkt_ad_plans (tenant, account_id, provider, kind, name, plan, status, external, created_by, updated_at) values ('default', ${acc.id}, 'naver', 'powerlink', 'E2E 끊긴 세팅안',
     ${sql.json(plan)}, 'creating', '{}'::jsonb, ${ctx.ownerId}, now() - interval '10 minutes') returning id`;
 
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   // 만든 세팅안: id · 네이버 이름(첫 시도 이름) · 링크(광고그룹) · 이어 씀
   const card = owner.getByTestId('ad-plan').filter({ hasText: '[시험] 하이링크 B2B 설정확인' });
   const ids = card.getByTestId('ad-plan-ids');
@@ -90,7 +90,7 @@ export async function adReadback({ owner, ctx, sql, BASE, SHOTS }) {
 
   // 휴대폰 폭: 반영 값 상자·id 줄이 가로로 넘치지 않음
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   await card.getByTestId('ad-plan-readback').scrollIntoViewIfNeeded();
   const over = await owner.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(over <= 1, `휴대폰 광고 운영 가로 넘침 ${over}px`);

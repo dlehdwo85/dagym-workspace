@@ -11,7 +11,7 @@ export async function refCheck295({ owner, ctx, sql, BASE }) {
   await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${'E2E 단색 표지 글\n본문 한 줄'}, array[gen_random_uuid()], '시안', ${ctx.ownerId})`;
   try {
     await owner.setViewportSize({ width: 1366, height: 900 });
-    await owner.goto(`${BASE}/s/marketing/automation`);
+    await owner.goto(`${BASE}/s/marketing/automation?view=all`);
     await owner.getByTestId('refcheck').waitFor();
     await owner.getByTestId('refcheck-load').click();
     const row = owner.locator(`[data-testid=refcheck-row][data-id="${c.id}"]`);

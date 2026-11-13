@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db } from './db';
 import { isAdmin } from './access';
-import { forbidden } from './errors';
+import { forbidden, notFound } from './errors';
 import { assertSpace } from './spaces';
 import { tenantOf, type SessionUser } from './types';
 import { notify } from './notifications';
@@ -26,7 +26,12 @@ export const PROVIDERS = Object.keys(RECHARGE_LINKS);
 /** 322차 #897(대표 11/02 00:0x): 잔액 알림 기준 기본값(원) — 회사 설정 low_balance_krw 로 바꿈 */
 export const LOW_BALANCE_DEFAULT_KRW = 10000;
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
-export type BalanceRow = { id: string; provider: string; label: string; account_id: string | null; balance: number; currency: string; source: 'manual' | 'api'; checked_at: string; pace: number; days: number | null; level: 'ok' | 'warn' | 'action'; link: string; how: string };
+export type BalanceRow = { id: string; provider: string; label: string; account_id: string | null; balance: number; currency: string; source: 'manual' | 'api'; checked_at: string; pace: number; days: number | null; level: 'ok' | 'warn' | 'action'; link: string; how: string;
+  /** 402차 #1028 끊기면 안 되는 계정(남은 날 14·7·3일·잔액 0 에 대표 메일) */ guard: boolean; guard_stage: number | null; guard_on: string | null };
+/** 끊김 방지 메일 단계(남은 날) — 이 날수 아래로 내려갈 때마다 메일. 3일 아래와 잔액 0 은 채워질 때까지 하루 1번 다시 */
+export const GUARD_STAGES = [14, 7, 3] as const;
+export const guardStageOf = (r: { balance: number; days: number | null }): number | null =>
+  r.balance <= 0 ? 0 : r.days === null ? null : r.days < 3 ? 3 : r.days < 7 ? 7 : r.days < 14 ? 14 : null;
 
 /**
  * 광고 계정별 최근 7일 하루 평균 지출(원, 예전과 같은 기간 — 서울 오늘 기준 7일 전부터 ÷ 7).
@@ -47,7 +52,7 @@ function paceOf(r: { provider: string; label: string; account_id: string | null 
 }
 export async function balancesView(tenant: string): Promise<BalanceRow[]> {
   const accs = await paceByAccount(tenant);
-  const rows = await db()<any[]>`select id, provider, label, account_id, balance_krw::float8 as balance, currency, source, checked_at from mkt_ad_balances where tenant = ${tenant} order by provider, label`;
+  const rows = await db()<any[]>`select id, provider, label, account_id, balance_krw::float8 as balance, currency, source, checked_at, guard, guard_stage, guard_on::text as guard_on from mkt_ad_balances where tenant = ${tenant} order by provider, label`;
   return rows.map((r) => {
     const p = paceOf(r, accs); const days = p > 0 ? r.balance / p : null;
     const level: BalanceRow['level'] = days === null ? 'ok' : days < RECHARGE_ACTION_DAYS ? 'action' : days < RECHARGE_WARN_DAYS ? 'warn' : 'ok';
@@ -73,6 +78,7 @@ export async function rechargeCheck(tenant: string) {
   await (await import('./marketingAds')).syncBalances(tenant).catch(() => null);
   const rows = await balancesView(tenant);
   const low = await lowBalanceAlerts(tenant, rows).catch(() => 0); // 322차 #897: 기준 금액 미만 → 대표 알림 + 메일(페이스 카드와 별개)
+  const guard = await guardAlerts(tenant, rows).catch(() => 0); // 402차 #1028: 끊기면 안 되는 계정 — 남은 날 14·7·3일·잔액 0 에 대표 메일
   let cards = 0, done = 0;
   const open = await sql<any[]>`select id, status, body from mkt_proposals where tenant = ${tenant} and kind = 'alert' and body->>'signal' like 'recharge:%' and status in ('pending', 'approved')`;
   for (const r of rows) {
@@ -100,7 +106,64 @@ export async function rechargeCheck(tenant: string) {
     cards++;
     await (await import('./spaceNotify')).notifySpace(sql, { tenant, space: 'marketing', approval: true, type: 'usage_alert', title, body: `${detail} 승인 뒤 충전 페이지로 이동할 수 있습니다.`, link: '/s/marketing/approvals?tab=proposals', entityType: 'mkt_proposal', dedupeKey: `mkt:recharge:${tenant}:${key}:${new Date().toISOString().slice(0, 10)}`, push: r.level === 'action' });
   }
-  return { cards, done, balances: rows.length, low };
+  return { cards, done, balances: rows.length, low, guard };
+}
+
+/**
+ * 402차 #1028(대표 11/13 "하이링크는 절대 네이버 광고 비용이 닳아서 광고가 진행 안 되는 상황이 연출되어선 안 됩니다. 이 부분은 메일로 따로 알려 주세요"):
+ * 끊김 방지(guard)를 켠 매체 잔액 줄 — 남은 날이 14일·7일·3일 아래로 내려갈 때마다 회사 대표(소유자)에게 메일 + 워크인 알림(충전 카드·금액 기준 알림과 별개).
+ * 같은 단계는 하루 1번을 넘지 않고, 3일 아래와 잔액 0(광고 멈춤)은 채워질 때까지 하루 1번 다시 알린다. 14일 위로 올라오면 표시를 비워 다음에 내려가면 또 알림.
+ * 충전 자체는 매체 화면에서(돈 쓰는 일은 자동으로 안 함). 잔액은 켠 계정만 1시간마다 다시 읽는다(marketingAds.syncBalances).
+ */
+export async function guardAlerts(tenant: string, rows: BalanceRow[]) {
+  const sql = db(); const today = todaySeoul();
+  const targets = rows.filter((r) => r.guard);
+  if (!targets.length) return 0;
+  const owners = await sql<{ id: string; email: string | null }[]>`select id, email from users where tenant = ${tenant} and status = 'active' and not is_demo and role = 'owner' order by created_at`;
+  let n = 0;
+  for (const r of targets) {
+    const stage = guardStageOf(r); const prev = r.guard_stage;
+    if (stage === null) { if (prev !== null) await sql`update mkt_ad_balances set guard_stage = null, guard_on = null where id = ${r.id}`; continue; }
+    const worse = prev === null || stage < prev;           // 새로 내려감(더 급한 단계)
+    const again = stage <= 3 && r.guard_on !== today;       // 3일 아래·잔액 0 은 하루 1번 다시
+    if (!worse && !again) { if (stage !== prev) await sql`update mkt_ad_balances set guard_stage = ${stage} where id = ${r.id}`; continue; } // 조금 채워 덜 급해진 것은 조용히 단계만 맞춤
+    const name = `${RECHARGE_LINKS[r.provider]?.label ?? r.provider}${r.label ? ` ${r.label}` : ''}`;
+    const daysTxt = r.days === null ? '계산 못함(최근 지출 없음)' : `약 ${r.days}일`;
+    const title = stage === 0 ? `광고가 멈춥니다 — ${name} 잔액 ${won(r.balance)}` : `광고 잔액 ${daysTxt}분 남음(${stage}일 아래) — ${name} ${won(r.balance)}`;
+    const when = new Date(r.checked_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const L = RECHARGE_LINKS[r.provider];
+    const lines = [
+      stage === 0 ? `${name} 잔액이 0원입니다. 충전할 때까지 광고가 나가지 않습니다.` : `${name} 잔액이 지금 속도로 ${daysTxt}분 남았습니다(${stage}일 아래로 내려감).`,
+      '',
+      `잔액: ${won(r.balance)} (${r.source === 'api' ? '매체 조회' : '직접 입력'} ${when})`,
+      `하루 평균 지출(최근 7일): ${won(r.pace)}`,
+      `남은 날: ${daysTxt}`,
+      '',
+      `충전 경로: ${L?.label ?? r.provider} › ${L?.how ?? ''}`,
+      ...(L?.url ? [`충전 페이지: ${L.url}`] : []),
+      `워크인 매체 잔액 화면: ${appUrl()}/s/marketing/connections`,
+      '',
+      stage <= 3 ? '잔액이 채워질 때까지 하루에 한 번 다시 알려 드립니다.' : `다음 알림: 남은 날이 ${stage === 14 ? 7 : 3}일 아래로 내려갈 때.`,
+      '이 메일은 마케팅 › 연결 계정 › 매체 잔액에서 [끊김 방지 메일]을 켠 계정에만 갑니다.',
+    ];
+    if (owners.length) {
+      await notify(sql, { userIds: owners.map((o) => o.id), type: 'usage_alert', title, body: lines[0], link: '/s/marketing/connections', entityType: 'mkt_balance', entityId: r.id, space: 'marketing', dedupeKey: `mktguard:${r.id}:${stage}:${today}` }).catch(() => {});
+      for (const o of owners) if (o.email) await sendMail(o.email, `[워크인] ${title}`, lines.join('\n')).catch(() => {});
+    }
+    await sql`update mkt_ad_balances set guard_stage = ${stage}, guard_on = ${today}::date where id = ${r.id}`;
+    n++;
+  }
+  return n;
+}
+export const guardInput = z.object({ id: z.string().uuid(), guard: z.boolean() });
+/** 끊김 방지 메일 켜기·끄기(관리자) — 켜면 바로 한 번 확인해 이미 기준 아래면 메일 */
+export async function setGuard(u: SessionUser, i: z.infer<typeof guardInput>) {
+  await assertSpace(u, 'marketing'); if (!isAdmin(u)) throw forbidden('끊김 방지 메일 설정은 관리자가 합니다');
+  const t = tenantOf(u);
+  const r = await db()`update mkt_ad_balances set guard = ${i.guard}, guard_stage = null, guard_on = null where id = ${i.id} and tenant = ${t} returning id`;
+  if (!r.length) throw notFound('잔액 줄이 없습니다');
+  const sent = i.guard ? await guardAlerts(t, await balancesView(t)).catch(() => 0) : 0;
+  return { ok: true, sent, balances: await balancesView(t) };
 }
 
 /**

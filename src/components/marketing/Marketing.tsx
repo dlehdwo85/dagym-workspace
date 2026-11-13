@@ -356,7 +356,9 @@ export function Approvals() {
 }
 /** 요청 C §3-5 '전체' 탭: 콘텐츠 아래에 운영 제안·광고 예산·광고 컨셉·광고 초안·월 목표·제작 의뢰를 건수 있는 종류만 묶음(종류 배지 색 띠) — 카드는 종류별 탭과 같은 것 */
 function InboxAll({ d, onChange }: { d: Inbox; onChange: () => void }) {
-  const kinds = INBOX_TABS.filter(([k]) => k !== 'all' && k !== 'contents' && (d.counts[k as keyof Inbox['counts']] ?? 0) > 0);
+  // 400차 #1025: 시안이 있는 것(광고 초안·광고 컨셉)을 위로, 운영 제안·알림은 맨 아래
+  const order = ['ads', 'concepts', 'budget', 'goals', 'briefs', 'proposals'];
+  const kinds = INBOX_TABS.filter(([k]) => k !== 'all' && k !== 'contents' && (d.counts[k as keyof Inbox['counts']] ?? 0) > 0).sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
   if (!kinds.length) return null;
   return (
     <div className="space-y-3" data-testid="mkt-inbox-all">{kinds.map(([k]) => (
@@ -366,15 +368,37 @@ function InboxAll({ d, onChange }: { d: Inbox; onChange: () => void }) {
       </section>))}</div>
   );
 }
+/**
+ * 400차 #1025(노트북 11/13 "알림 카드(피드 톤 불일치 같은 것)가 4번 반복"): 운영 제안 칸 — 제안 카드 먼저, 운영 신호(알림)는 종류별로 가장 최근 1장만 펼치고
+ * 같은 종류의 나머지(다른 브랜드 등)는 [같은 종류 알림 n건 더 보기]로 접는다. 같은 신호가 여러 번 올라온 것은 서버가 한 장으로 묶음(카드에 '같은 알림 n건 묶음').
+ */
+function ProposalGroups({ d, onChange }: { d: Inbox; onChange: () => void }) {
+  const card = (p: Inbox['proposals'][number]) => <ProposalCard key={p.id} p={p} kinds={d.kinds} canEdit={d.canEdit} onChange={onChange} />;
+  const plain = d.proposals.filter((p) => p.kind !== 'alert');
+  const groups = new Map<string, Inbox['proposals']>();
+  for (const p of d.proposals.filter((x) => x.kind === 'alert')) { const k = String(p.body?.signal ?? '').split(':')[0] || p.id; groups.set(k, [...(groups.get(k) ?? []), p]); }
+  return (
+    <div className="space-y-3" data-testid="mkt-inbox-proposals">
+      {plain.length > 0 && <div className="grid gap-3 md:grid-cols-2">{plain.map(card)}</div>}
+      {[...groups.entries()].map(([k, list]) => (
+        <div key={k} className="space-y-2" data-testid="ops-alert-group" data-signal={k} data-count={list.length}>
+          <div className="grid gap-3 md:grid-cols-2">{card(list[0])}</div>
+          {list.length > 1 && <details className="rounded-card border border-line bg-white p-3 text-sm shadow-card" data-testid="ops-alert-more">
+            <summary className="cursor-pointer font-medium">같은 종류 알림 {list.length - 1}건 더 보기</summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">{list.slice(1).map(card)}</div></details>}
+        </div>))}
+    </div>
+  );
+}
 function InboxTab({ tab, d, onChange }: { tab: string; d: Inbox; onChange: () => void }) {
   const empty = (t: string, href: string, label: string) => <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3" data-testid="mkt-inbox-empty">{t} <Link href={href} className="underline">{label}</Link></p>;
-  if (tab === 'proposals') return d.proposals.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-proposals">{d.proposals.map((p) => <ProposalCard key={p.id} p={p} kinds={d.kinds} canEdit={d.canEdit} onChange={onChange} />)}</div>
+  if (tab === 'proposals') return d.proposals.length ? <ProposalGroups d={d} onChange={onChange} />
     : empty('대기 중인 운영 제안 카드가 없습니다.', '/s/marketing/ops', '운영 계획에서 [AI 마케터 제안 받기] →');
   if (tab === 'budget') return d.budgets.length ? <div className="space-y-3" data-testid="mkt-inbox-budget">{d.budgets.map((b) => <BudgetCard key={b.id} b={b} month={b.month} canEdit={d.canEdit} busy={false} onDraft={() => {}} onChange={onChange} compact />)}</div>
     : empty('승인 대기 중인 광고 예산 계획이 없습니다.', '/s/marketing/ops', '운영 계획에서 예산 계획 만들기 →');
   // #494 메타 광고 초안(Meta 에 꺼진 채로 만든 것) — 승인하면 서버가 상한을 다시 확인하고 켬
   if (tab === 'ads') return d.ads.length ? <div className="grid gap-3 xl:grid-cols-2" data-testid="mkt-inbox-ads">{d.ads.map((r) => <MetaDraftCard key={r.id} r={r} canEdit={d.canEdit} onChange={onChange} />)}</div>
-    : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops', '광고 집행에서 메타 광고 세팅 →');
+    : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops?tab=meta', '광고 집행에서 메타 광고 세팅 →');
   // #499-4 상황 매트릭스: 1~4개 채택 → 광고형 제작 의뢰 · 반려 사유 → AI 고친 안
   if (tab === 'concepts') return d.concepts.length ? <div className="space-y-3" data-testid="mkt-inbox-concepts">{d.concepts.map((s) => <ConceptSetCard key={s.id} s={s} canDecide={d.canEdit} userId={d.userId} maxRevisions={d.maxRevisions} onChange={onChange} />)}</div>
     : empty('채택을 기다리는 광고 컨셉이 없습니다.', '/s/marketing/ops#concepts', '운영 계획에서 상황 매트릭스 만들기 →');
@@ -456,7 +480,7 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
       {drafts.length > 0 && <details className="rounded-card border border-line bg-white p-3 text-sm" data-testid="mkt-drafts"><summary className="cursor-pointer font-medium text-ink-2">예정(초안) {drafts.length}건 — 제작 예정, 시안이 오면 승인 대기로</summary>
         <ul className="mt-2 divide-y divide-line text-xs">{drafts.slice(0, 30).map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-draft"><button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button><span className="text-ink-3">{[c.brand, channelLabel(c.channel, c.kind), whenLabel(c.scheduled_at), c.auto ? '자동 제작' : null].filter(Boolean).join(' · ')}</span>
           {c.quality?.failed && <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800" data-testid="mkt-draft-failed">제작 실패{(c.quality.failed.n ?? 1) >= 2 ? ' — 열어서 [AI 다시 만들기]' : ' — 2시간 뒤 다시 만듦'}</span>}</li>)}</ul></details>}
-      {emptyBrands.length > 0 && <p className="rounded-card border border-dashed border-amber-300 bg-amber-50/40 px-3 py-2 text-xs text-amber-900" data-testid="mkt-brand-empty">제작 예정 없음: <b>{emptyBrands.join(' · ')}</b> — <Link href="/s/marketing/automation" className="font-medium underline">자동 제작 규칙</Link>을 켜거나 <Link href="/s/marketing/ops" className="font-medium underline">운영실</Link>에서 제작을 의뢰하세요.</p>}
+      {emptyBrands.length > 0 && <p className="rounded-card border border-dashed border-amber-300 bg-amber-50/40 px-3 py-2 text-xs text-amber-900" data-testid="mkt-brand-empty">제작 예정 없음: <b>{emptyBrands.join(' · ')}</b> — <Link href="/s/marketing/automation?view=rules" className="font-medium underline">자동 제작 규칙</Link>을 켜거나 <Link href="/s/marketing/ops" className="font-medium underline">운영실</Link>에서 제작을 의뢰하세요.</p>}
       {held.length > 0 && <Fold className="rounded-card border border-violet-200 bg-violet-50/30 p-3 text-sm" testId="mkt-held"><summary className="cursor-pointer font-medium text-violet-900">초안 보관 — 브랜드 템플릿 준비 전 자동 시안 {held.length}건(승인함에 올리지 않음)</summary>
         <p className="mt-1 text-xs text-ink-2">대표 결정(10/24): 브랜드별 템플릿이 나올 때까지 정기·밤사이 자동 제작 시안은 초안으로 둡니다. 쓸 만한 것만 [승인 요청]으로 올리세요. 브랜드 키트에 피드 틀을 정한 브랜드는 [새 틀로 다시 그리기] 뒤 올리면 됩니다.</p>
         <TrashPicker list={held.slice(0, 20)} canDecide={canDecide} onDone={onDone} testId="mkt-held" render={(c) => <div className="space-y-1" data-testid="mkt-held-row"><ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />

@@ -187,7 +187,7 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.waitForURL(/\/s\/marketing\/automation$/);
   assert.equal(await owner.locator('aside').getByRole('link', { name: '자동 제작', exact: true }).getAttribute('aria-current'), 'page', '주소 칸만 바뀌어도 강조가 따라감');
   // V44 ① 광고 운영: 상한 없으면 안내 → 상한 저장 → 막대 표시(네이버 계정 없으면 새 세팅안 잠김)
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   await owner.getByTestId('ad-cap-required').waitFor();
   await owner.getByTestId('ad-cap-input').fill('500000');
   await owner.getByTestId('ad-cap-save').click();
@@ -200,7 +200,7 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   assert.equal(await owner.getByTestId('naver-open-api').getAttribute('target'), '_blank');
   await owner.keyboard.press('Escape');
   // V41 4-3 자동 제작: 사용량 카드 4·요금제 3·규칙 추가(화·목 10:00)
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   await owner.getByTestId('auto-usage').first().waitFor();
   assert.equal(await owner.getByTestId('auto-usage').count(), 5);
   await owner.getByTestId('auto-production').waitFor(); // #103 이번 달 남은 제작(요금제 전에는 안내 문구)

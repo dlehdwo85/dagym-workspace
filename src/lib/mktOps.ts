@@ -117,9 +117,14 @@ export async function actProposal(u: SessionUser, id: string, i: z.infer<typeof 
   const sql = db(); const t = tenantOf(u);
   const [p] = await sql<any[]>`select * from mkt_proposals where id = ${id} and tenant = ${t}`;
   if (!p) throw notFound();
+  // 400차 #1025: 같은 신호로 쌓인 다른 대기 알림 카드는 이 결정으로 함께 닫는다(실행은 이 카드 한 번만)
+  const closeSame = async () => { const sig = p.kind === 'alert' && typeof p.body?.signal === 'string' ? p.body.signal : null; if (!sig || p.status !== 'pending') return 0;
+    return (await sql`update mkt_proposals set status = 'done', decision_note = '같은 알림 묶음 — 최근 카드에서 결정', decided_by = ${u.id}, decided_at = now(), updated_at = now()
+      where tenant = ${t} and kind = 'alert' and status = 'pending' and id <> ${id} and body->>'signal' = ${sig} returning id`).length; };
   if (i.action === 'reject') {
     if (!i.note) throw badRequest('반려 사유를 적어 주세요');
     await sql`update mkt_proposals set status = 'rejected', decision_note = ${i.note}, decided_by = ${u.id}, decided_at = now(), updated_at = now() where id = ${id}`;
+    await closeSame();
     if (TEAM_KINDS.includes(p.kind)) await (await import('./mktTeam')).remember(t, 'reporter', { kind: 'reject', text: `${PROPOSAL_KIND[p.kind] ?? p.kind}: ${p.title}`, reason: i.note, sourceType: 'mkt_proposal', sourceId: id, by: u.id }).catch(() => {}); // #499-7
     // ② 반려 사유 → AI 가 고친 안(v2) 을 같은 줄기로 다시 올림(최대 3회, 승인자 알림 1회). 반려 사유 없는 반려·AI 없음·3회 초과면 반려로 끝
     const revised = p.status === 'pending' ? await reviseProposal(t, p, i.note, u.id).catch(() => null) : null;
@@ -146,6 +151,7 @@ export async function actProposal(u: SessionUser, id: string, i: z.infer<typeof 
     } catch (e: any) { executed.taskError = String(e?.message ?? e); }
   }
   await sql`update mkt_proposals set status = 'approved', decision_note = ${i.note ?? null}, decided_by = ${u.id}, decided_at = now(), executed = ${sql.json(executed as never)}, updated_at = now() where id = ${id}`;
+  await closeSame();
   if (TEAM_KINDS.includes(p.kind)) await (await import('./mktTeam')).remember(t, 'reporter', { kind: 'adopt', text: `${PROPOSAL_KIND[p.kind] ?? p.kind}: ${p.title}`, reason: i.note ?? null, sourceType: 'mkt_proposal', sourceId: id, by: u.id }).catch(() => {}); // #499-7
   const { audit } = await import('./log'); await audit(sql as never, u.id, 'mkt.proposal_approve', 'mkt_proposal', id, { kind: p.kind }, null).catch(() => {});
   return { status: 'approved', executed };
@@ -477,8 +483,14 @@ export async function opsReview(tenant: string, now = new Date(), opts: { force?
   // 신호 → 카드(같은 신호 3일 안 중복 없음, 승인 뒤 실행)
   let cards = 0;
   for (const sg of signals) {
-    const [dup] = await sql<{ id: string }[]>`select id from mkt_proposals where tenant = ${tenant} and kind = 'alert' and body->>'signal' = ${sg.key} and created_at >= now() - interval '3 days' limit 1`;
-    if (dup) continue;
+    // 400차 #1025(노트북 11/13 "승인함에 같은 알림 카드가 4번 반복"): 예전엔 3일이 지나면 같은 신호 카드를 또 만들어 대기 카드가 쌓였다 →
+    // 승인 대기 중인 같은 신호 카드가 있으면 새로 만들지 않고 그 카드의 제목·내용만 오늘 숫자로 고친다(3일 안에 결정한 신호도 그대로 건너뜀)
+    const [dup] = await sql<{ id: string; status: string }[]>`select id, status from mkt_proposals where tenant = ${tenant} and kind = 'alert' and body->>'signal' = ${sg.key}
+      and (status = 'pending' or created_at >= now() - interval '3 days') order by (status = 'pending') desc, created_at desc limit 1`;
+    if (dup) {
+      if (dup.status === 'pending') await sql`update mkt_proposals set title = ${sg.title.slice(0, 200)}, summary = ${sg.detail.slice(0, 1000)}, updated_at = now() where id = ${dup.id} and version = 1`; // AI 가 고쳐 다시 올린 안(v2~)은 그대로
+      continue;
+    }
     await sql`insert into mkt_proposals (tenant, kind, title, summary, body, source, month, created_by) values (${tenant}, 'alert', ${sg.title.slice(0, 200)}, ${sg.detail.slice(0, 1000)},
       ${sql.json({ signal: sg.key, level: sg.level, items: [{ title: '제안 조치', detail: sg.action, expected: sg.level === 'action' ? '손실 막기' : '기회 확대', cost: '없음(대표 승인 뒤 담당 업무)' }], ...(sg.link ? { link: sg.link } : {}), rationale: `오늘 지표: 게시 ${m.posts}·클릭 ${m.clicks}·CPC ${m.cpc ? won(m.cpc) : '-'}·문의 ${m.inquiries}·가입 ${m.signups}·계약 ${m.contracts}${m.budgetRate !== null ? `·소진율 ${m.budgetRate}%` : ''}`, numbers: m } as never)}, 'template', ${day.slice(0, 7)}, null)`;
     cards++;
@@ -521,7 +533,16 @@ export async function inboxView(u: SessionUser) {
   const { approvableCount } = await import('./marketing');
   const contents = await approvableCount(t);
   const feed = await (await import('./mktFeed')).feedConsistency(t).catch(() => null); // 대표 10/21 12:20 피드 일관성(브랜드별 최근 9장)
-  const proposals = await sql<any[]>`select p.*, du.name as decided_by_name from mkt_proposals p left join users du on du.id = p.decided_by where p.tenant = ${t} and p.status = 'pending' order by p.created_at desc limit 20`;
+  const proposalsAll = await sql<any[]>`select p.*, du.name as decided_by_name from mkt_proposals p left join users du on du.id = p.decided_by where p.tenant = ${t} and p.status = 'pending' order by p.created_at desc limit 80`;
+  // 400차 #1025: 같은 신호(예: '피드 톤 불일치 — 하이링크')의 대기 카드가 여러 장이면 가장 최근 것 하나만 보이고 same 에 묶인 수를 적는다 — 결정하면 묶인 카드도 같이 닫음(actProposal)
+  const seenSig = new Map<string, any>(); const proposals: any[] = [];
+  for (const p of proposalsAll) {
+    const sig = p.kind === 'alert' && typeof p.body?.signal === 'string' ? p.body.signal : null;
+    const first = sig ? seenSig.get(sig) : null;
+    if (first) { first.same = (first.same ?? 0) + 1; continue; }
+    if (sig) seenSig.set(sig, p);
+    if (proposals.length < 20) proposals.push(p);
+  }
   const budgets = await sql<any[]>`select b.*, au.name as approved_by_name from mkt_ad_budgets b left join users au on au.id = b.approved_by where b.tenant = ${t} and b.status = 'pending' order by b.month desc limit 3`;
   const goals = await sql<any[]>`select g.*, b.name as brand, ub.name as created_by_name, ua.name as approved_by_name from mkt_goals g left join mkt_brands b on b.id = g.brand_id left join users ub on ub.id = g.created_by left join users ua on ua.id = g.approved_by where g.tenant = ${t} and g.status = 'pending' order by g.month desc, (g.brand_id is null) desc limit 10`;
   const briefs = await sql<any[]>`select b.id, b.kind, b.channel, b.purpose, b.message, b.status, b.quantity, b.due_date::text, b.created_at, br.name as brand, cu.name as created_by_name, b.prompt->>'summaryKo' as summary_ko, b.prompt->>'model' as model

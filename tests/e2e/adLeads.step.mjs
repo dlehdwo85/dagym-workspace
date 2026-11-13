@@ -20,7 +20,7 @@ export async function adLeads({ owner, ctx, sql, BASE, SHOTS }) {
   await sql`insert into mkt_ad_leads (tenant, day, provider, keyword_key, keyword_id, kind, keyword, n) values ('default', ${today}, 'naver', '두정동헬스장', 'nkw-e1', 'tel', '두정동헬스장', 20)`;
   await sql`insert into mkt_site_events (tenant, site, day, event, label, n) values ('default', 'e2e-leads', ${today}, 'cta', 'tel', 20)`;
 
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   const box = owner.getByTestId('ad-leads');
   const r2 = box.getByTestId('ad-leads-row').filter({ hasText: '두정역PT' });
   await r2.waitFor();
@@ -51,7 +51,7 @@ export async function adLeads({ owner, ctx, sql, BASE, SHOTS }) {
   await box.getByTestId('ad-leads-row').filter({ hasText: '두정역PT' }).waitFor();
   // 휴대폰 폭: 표는 상자 안에서만 옆으로
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   await owner.getByTestId('ad-leads-row').first().waitFor();
   const over = await owner.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(over <= 1, `휴대폰 가로 넘침 ${over}px`);

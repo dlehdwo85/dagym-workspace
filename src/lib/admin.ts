@@ -234,8 +234,8 @@ export async function createOrgUnit(actor: SessionUser, i: z.infer<typeof orgUni
     const [o] = await tx<{ id: string }[]>`
       insert into org_units (parent_id, brand_id, type, name, sort, is_demo, tenant) values (${i.parentId ?? null}, ${i.brandId ?? null}, ${i.type}, ${i.name}, ${i.sort ?? 0}, ${!!i.isDemo}, ${tn})
       returning id`;
-    await tx`insert into calendars (type, org_unit_id, name, color) values ('org_unit', ${o.id}, ${i.name + ' 일정'},
-      ${i.brandId === 'dagym' ? '#ea580c' : i.brandId === 'hilink' ? '#2563eb' : i.brandId === 'bodylab' ? '#16a34a' : '#475569'})`;
+    await tx`insert into calendars (type, org_unit_id, name, color, tenant) values ('org_unit', ${o.id}, ${i.name + ' 일정'},
+      ${i.brandId === 'dagym' ? '#ea580c' : i.brandId === 'hilink' ? '#2563eb' : i.brandId === 'bodylab' ? '#16a34a' : '#475569'}, ${tenantOf(actor)})`; // 범용화 S-02: 다른 회사가 만든 조직의 캘린더가 'default' 로 들어가지 않게(기본 회사는 예전과 같은 값)
     await audit(tx, actor.id, 'org.create', 'org_unit', o.id, i, ip);
     return { id: o.id };
   });

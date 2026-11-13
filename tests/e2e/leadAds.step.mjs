@@ -26,7 +26,7 @@ export async function leadAds({ owner, ctx, sql, BASE, SHOTS }) {
   await row({ leadgen_id: 'e2e-9002', status: 'created', lead_id: l1.id, ad_id: '777', ad_name: '가을 PT 이벤트 A', created_time: ago(20), received_at: ago(20), late_notified_at: ago(14) });
   await row({ leadgen_id: 'e2e-9003', status: 'failed', owner_id: null, received_at: ago(5), error: 'Meta API 오류 400 /9003 (#200) Requires leads_retrieval permission' });
 
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   const box = owner.getByTestId('lead-ads');
   await box.getByTestId('lead-ads-row').first().waitFor();
   assert.match(await box.getByTestId('lead-ads-summary').innerText(), /신청 2건\(새 리드 2 · 기존 리드에 붙임 0\) · 5분 안 첫 연락 1\/2 · 첫 연락까지 중간값 2분 · 연락 전 1건 · 처리 못 함 1건/);
@@ -48,7 +48,7 @@ export async function leadAds({ owner, ctx, sql, BASE, SHOTS }) {
   await box.locator('[data-testid=lead-ads-row][data-status=skipped]').getByText(/페이지 연결이 끊겨/).waitFor();
   // 휴대폰 폭: 표는 상자 안에서만 옆으로
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   await owner.getByTestId('lead-ads-row').first().waitFor();
   const over = await owner.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(over <= 1, `휴대폰 가로 넘침 ${over}px`);

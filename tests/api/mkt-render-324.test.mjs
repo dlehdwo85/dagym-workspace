@@ -56,7 +56,9 @@ test('만든 지 2시간 넘게 합성이 끝나지 않은 의뢰는 정기 실�
   const r = await row(old);
   assert.equal(r.status, 'failed'); assert.match(r.error, /^합성이 2시간 넘게 끝나지 않아 멈춤 처리\(시작 0번\)/); assert.equal(r.result.stage, 'failed'); assert.ok(r.result.errors.some((x) => x.startsWith('합성이 2시간')));
   const again = await ctx.owner.req('POST', '/api/marketing/studio/slideshow', { contentId: c });
-  assert.equal(again.status, 400); assert.doesNotMatch(msg(again), /이미 만드는 중/, '막힘이 풀림(사진이 없어 다른 이유로 400)'); assert.match(msg(again), /실제 사진이 0장/);
+  // 398차 #1024: 사진이 없어도 그래픽 카드로 만든다 — 막힘이 풀리면 새 의뢰가 시작되거나(200), 대본이 모자라면 '영상 대본 미달'(400)
+  assert.doesNotMatch(msg(again), /이미 만드는 중/, '막힘이 풀림'); assert.ok(again.status === 200 || /영상 대본 미달/.test(msg(again)), `${again.status} ${msg(again)}`);
+  await sql`update mkt_briefs set status = 'failed' where content_id = ${c} and status = 'generating'`; // 새로 시작된 의뢰의 합성은 이 시험 범위 밖
   // 방금 만든 의뢰(합성 단계)는 정리 대상이 아니고 대기열로 감
   const c2 = await content(); const now = await brief(c2);
   const t2 = await tick(); assert.deepEqual(t2.detail.mktRender, { kicked: 1, stale: 0 }); assert.equal((await row(now)).status, 'failed'); assert.equal((await row(now)).error, '시험용 실패');

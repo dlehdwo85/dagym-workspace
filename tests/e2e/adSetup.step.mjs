@@ -29,7 +29,7 @@ export async function adSetup({ owner, ctx, sql, BASE, SHOTS }) {
   let combBody = null;
   await owner.route('**/api/marketing/ad-ops/keywords/combine', async (r) => { combBody = r.request().postDataJSON(); await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(COMB) }); });
 
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   await owner.getByTestId('ad-plan-new').click();
   const dlg = owner.getByRole('dialog', { name: '네이버 파워링크 세팅안' });
   // 하루 예산 권장(월 ÷ 30 × 1.5) → [넣기]

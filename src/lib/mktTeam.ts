@@ -37,7 +37,7 @@ export const ROLES: Record<Role, RoleDef> = {
     link: { href: '/s/marketing/ops', label: '광고 예산' } },
   responder: { name: '응대 담당', schedule: '실시간', job: '리드 광고 신청 → 담당자에게 5분 안 첫 연락 알림·늦으면 다시 알림 · 댓글·DM 답 초안은 준비 중', owner: '[보내기]', mode: 'always', def: true, ai: false, note: '리드 광고 설정을 따릅니다 — 댓글·DM 답 초안은 메타 권한 심사 뒤',
     recipe: ['리드 광고 신청 → 영업 리드·담당 업무(이름·전화는 알림에 가림)', '5분 안에 첫 연락 기록이 없으면 담당·관리자에게 다시 알림', '보내는 것은 언제나 사람이 [보내기]'],
-    link: { href: '/s/marketing/ad-ops', label: '리드 광고' } },
+    link: { href: '/s/marketing/ad-ops?tab=meta', label: '리드 광고' } },
   reporter: { name: '보고 담당', schedule: '주 1회(월요일 09:00)', job: '광고비 → 클릭 → 문의·계약 숫자로 주간 운영 제안 + 분석·방향 카드', owner: '다음 주 방향 결정(승인함)', mode: 'toggle', def: true, ai: true,
     recipe: ['지난 7일 캠페인별 광고비·CPC·CTR', '단가 조정·소재 교체·잘 되는 매체·예산 페이스', '분석·방향 카드(대기 카드가 없을 때)', '승인하면 항목마다 담당 업무', '보고 담당 기억(채택·반려·대표 메모)'],
     link: { href: '/s/marketing/approvals?tab=proposals', label: '운영 제안' } },

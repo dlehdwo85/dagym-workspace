@@ -29,7 +29,7 @@ export async function mktVideo209({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
     await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${brand}`, { video: { logoFileId: logo, headline: '한 화면에서 끝' }, facts: { phone: '02-555-0209' } });
     // 브랜드 키트: 실존 인물 → 동의 표시 전에는 사진 고르기 없음 → 동의 → 자료실에서 주인공 사진 → '실존 인물 · 광고 사용 동의 날짜'
     await owner.setViewportSize({ width: 1366, height: 900 });
-    await owner.goto(`${BASE}/s/marketing/automation`);
+    await owner.goto(`${BASE}/s/marketing/automation?view=all`);
     const castBox = owner.getByTestId('brand-video-E2E209 브랜드').getByTestId('brand-video-cast'); await castBox.waitFor();
     await castBox.getByTestId('brand-video-cast-kind').selectOption('real');
     assert.equal(await castBox.getByTestId('media-pick').count(), 0, '동의 표시 전에는 사진을 고를 수 없음');

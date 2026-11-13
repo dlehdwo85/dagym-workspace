@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { db } from './db';
 import { forbidden } from './errors';
 import { audit } from './log';
-import type { SessionUser } from './types';
+import { tenantOf, type SessionUser } from './types';
 
 /** Google Calendar 와 같은 12색 */
 export const CAL_PALETTE = ['#d50000', '#e67c73', '#f4511e', '#f6bf26', '#33b679', '#0b8043', '#039be5', '#3f51b5', '#7986cb', '#8e24aa', '#616161', '#795548'] as const;
@@ -26,10 +26,13 @@ export const colorsInput = z.object({
 });
 type Stored = { personal?: string; company?: string; cals?: Record<string, string>; people?: Record<string, string>; whoDot?: boolean };
 
+/** 범용화 S-04(대표 11/13 승인): '모두의 기본값'은 회사별 — 기본 회사는 예전 키('cal_colors') 그대로, 다른 회사는 'cal_colors:<회사>'. 예전엔 한 줄이라 아무 회사 대표나 모든 회사의 기본색을 바꿨다 */
+const defKey = (u: SessionUser) => (tenantOf(u) === 'default' ? 'cal_colors' : `cal_colors:${tenantOf(u)}`);
+
 export async function getCalColors(u: SessionUser) {
   const sql = db();
   const [[d], [mine]] = await Promise.all([
-    sql<{ value: { personal: string; company: string } }[]>`select value from app_settings where key = 'cal_colors'`,
+    sql<{ value: { personal: string; company: string } }[]>`select value from app_settings where key = ${defKey(u)}`,
     sql<{ cal_colors: Stored | null }[]>`select cal_colors from user_settings where user_id = ${u.id}`,
   ]);
   const def = { ...DEFAULT_CAL_COLORS, ...(d?.value ?? {}) };
@@ -61,7 +64,7 @@ export async function setCalColors(u: SessionUser, i: z.infer<typeof colorsInput
   if (i.asDefault) {
     if (u.role !== 'owner') throw forbidden('모두의 기본값은 대표만 정할 수 있습니다');
     const def = { personal: value.personal ?? DEFAULT_CAL_COLORS.personal, company: value.company ?? DEFAULT_CAL_COLORS.company };
-    await sql`insert into app_settings (key, value, updated_by) values ('cal_colors', ${sql.json(def)}, ${u.id})
+    await sql`insert into app_settings (key, value, updated_by) values (${defKey(u)}, ${sql.json(def)}, ${u.id})
       on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = now()`;
     await audit(sql, u.id, 'cal_colors_default', 'setting', null, def);
   }

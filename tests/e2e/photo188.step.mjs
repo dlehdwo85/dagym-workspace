@@ -56,7 +56,7 @@ export async function photo188({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   execFileSync(path.join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg'), ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=duration=9:size=640x360:rate=10', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', mp4]);
   const vid = await lib('E2E실사짐 현장 영상.mp4', await readFile(mp4), { folder: '마케팅/영상', mime: 'video/mp4' });
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true }) });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const box = owner.getByTestId('auto-photos'); await box.waitFor();
   assert.match(await box.getByTestId('photos-videos').innerText(), /장면 뽑음 0편\(장면 사진 0장\) · 아직 1편/);
   await box.getByTestId('photos-scenes').click();

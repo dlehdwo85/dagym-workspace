@@ -125,7 +125,7 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     await m.goto(BASE + '/s/marketing'); await m.getByText('채널 연결 3단계').first().waitFor();
     await m.screenshot({ path: `${SHOTS}/292-cust-marketing-390.png` });
     // 자동 제작 화면: 브랜드 키트 없이 돌지 않는지·글 모델 줄(모델 등급·비용)
-    await p.goto(BASE + '/s/marketing/automation');
+    await p.goto(BASE + '/s/marketing/automation?view=all');
     await p.waitForLoadState('networkidle');
     await shot('293-cust-automation.png', { fullPage: true });
     const autoText = await body(); scanText('자동 제작', autoText);

@@ -1,6 +1,7 @@
 'use client';
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Check } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -9,6 +10,7 @@ import { PLAN_KEYWORDS_MAX, combineKeywords } from '@/lib/kwCombine';
 import { NAVER_NAME_MAX, badChars as badList, fixAdText, groupName, naverManageUrl, naverName } from '@/lib/naverText';
 import { MetaAuto } from './MetaAuto';
 import { AdWatch } from './AdWatch';
+import { BrandBriefs } from './BrandBriefs';
 
 const C = '#7C3AED';
 /** 네이버 소재 허용 문자(서버 검사와 같은 규칙, naverText) — 저장 전에 바로 표시 */
@@ -116,8 +118,16 @@ function ReadBackBox({ rb }: { rb: ReadBack }) {
  * V44 ① 광고 운영(네이버 검색광고 파워링크) — 세팅안 → [승인하고 시작](꺼진 상태로 생성) → [켜기](상한 검사) · 변경 기록·되돌리기.
  * 대표 결정 전 기본값: 월 상한 필수 입력, 넘으면 워크인이 켠 광고 자동 중지.
  */
+/** 399차 #1025(대표 11/13 "보기가 어렵네요. 한눈에 보기 쉽게"): 한 화면에 길게 쌓여 있던 것을 탭으로 나눔 — 주소 ?tab= 으로 바로 열림, '전체'는 예전처럼 한 화면 */
+const AD_TABS = [['summary', '요약·점검'], ['naver', '네이버 세팅'], ['meta', '메타'], ['kw', '검색어 점검'], ['log', '변경 기록'], ['all', '전체']] as const;
+type AdTab = (typeof AD_TABS)[number][0];
+
 export function AdOps() {
   const { data, error, reload } = useApi<Data>('/api/marketing/ad-ops');
+  const router = useRouter(); const sp = useSearchParams();
+  const tabQ = sp.get('tab'); const tab: AdTab = AD_TABS.some(([k]) => k === tabQ) ? (tabQ as AdTab) : 'summary';
+  const show = (k: AdTab) => tab === 'all' || tab === k;
+  const goTab = (k: AdTab) => { const q = new URLSearchParams(sp.toString()); if (k === 'summary') q.delete('tab'); else q.set('tab', k); const qs = q.toString(); router.replace(`/s/marketing/ad-ops${qs ? `?${qs}` : ''}`, { scroll: false }); };
   const [capIn, setCapIn] = useState('');
   const [form, setForm] = useState<false | true | Plan>(false); // true = 새 세팅안, Plan = 고치기
   const [imp, setImp] = useState(false); // 358차 기존 캠페인 가져오기
@@ -132,10 +142,15 @@ export function AdOps() {
   const reverted = new Set(data.changes.map((c) => c.revert_of).filter(Boolean));
   return (
     <div className="space-y-4" data-testid="ad-ops">
-      <div><h1 className="text-xl font-bold" style={{ color: C }}>광고 집행</h1>
-        <p className="text-xs text-ink-2">세팅안을 만들고 [승인하고 시작]을 누르면 네이버 검색광고에 <b>꺼진 상태</b>로 만들어집니다. 확인한 뒤 [켜기]를 눌러야 광고비가 나갑니다. 모든 변경은 아래 기록에 남고 되돌릴 수 있습니다.</p></div>
+      <h1 className="text-xl font-bold" style={{ color: C }}>광고 집행</h1>
+      <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="tablist" aria-label="광고 집행 보기" data-testid="ad-tabs">{AD_TABS.map(([k, l]) => (
+        <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => goTab(k)} data-testid={`ad-tab-${k}`}
+          className={cx('shrink-0 rounded-full border px-3 py-1 text-sm', tab === k ? 'border-transparent font-semibold text-white' : 'border-line bg-white text-ink-2 hover:bg-slate-50')} style={tab === k ? { background: C } : undefined}>
+          {l}{k === 'naver' && data.plans.length ? <span className="ml-1 text-xs tabular-nums">{data.plans.length}</span> : null}</button>))}</div>
 
-      <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ad-cap">
+      {show('summary') && <BrandBriefs />}
+
+      {show('summary') && <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ad-cap">
         <div className="flex flex-wrap items-baseline gap-2"><h2 className="text-sm font-semibold">이번 달 광고비 · 월 상한</h2>
           <span className="text-sm">{won(data.monthSpend)} / {data.cap ? <b>{won(data.cap.monthlyCap)}</b> : <span className="text-red-700">상한 없음</span>}</span>
           {data.cap?.stoppedMonth === data.month && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-800">상한 도달 — 자동 중지됨</span>}</div>
@@ -148,11 +163,12 @@ export function AdOps() {
         {data.savings && <p className="mt-2 text-xs text-ink-2" data-testid="ad-savings">이번 달 대행사 대비 절감액(추정) <b className="text-emerald-800">{won(data.savings.amount)}</b> — 광고비 {won(data.savings.spend)} × 대행 수수료율 {data.savings.pct}%{data.savings.custom ? '(회사 설정)' : '(기본값 — 통상 15~20%)'}
           {data.canEdit && <> · <button type="button" className="underline" data-testid="ad-fee-edit" onClick={() => { const v = prompt('대행 수수료율(%) — 비우면 기본 15%', String(data.savings!.pct)); if (v === null) return; const t = v.trim();
             if (t !== '' && !(Number(t) >= 0 && Number(t) <= 50)) return toast.error('0~50 사이 숫자로 적어 주세요'); run('fee', () => api('/api/marketing/ad-ops/fee', { method: 'PUT', body: { pct: t === '' ? null : Number(t) } }), '대행 수수료율을 저장했습니다'); }}>수수료율 바꾸기</button></>}</p>}
-      </section>
+      </section>}
 
-      <AdWatch />
+      {show('summary') && <AdWatch />}
 
-      <section className="rounded-card border border-line bg-white p-3 shadow-card">
+      {show('naver') && <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ad-naver">
+        <p className="mb-2 text-xs text-ink-2">[승인하고 시작] → 네이버에 <b>꺼진 상태</b>로 만듦 → [켜기]를 눌러야 광고비가 나갑니다.</p>
         <div className="flex items-center gap-2"><h2 className="text-sm font-semibold">네이버 파워링크 세팅안</h2>
           {data.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setImp(true)} disabled={!data.accounts.length} title="네이버 광고 화면에서 직접 만든 캠페인을 워크인에서 조정" data-testid="ad-import-open">기존 캠페인 가져오기</Button>}
           {data.canEdit && <Button size="sm" variant="secondary" disabled={!data.accounts.length || busy === 'tracking'} title="모든 캠페인에 네이버 '자동 추적 URL'을 켭니다 — 광고로 들어온 주소에 키워드가 붙어 키워드별 전화·문의·체험 신청을 셉니다(광고비 변화 없음)" data-testid="ad-tracking-all"
@@ -215,15 +231,15 @@ export function AdOps() {
                 </div>)}
             </li>);
         })}{!data.plans.length && <li className="text-xs text-ink-3">세팅안이 없습니다</li>}</ul>
-      </section>
+      </section>}
 
-      <MetaAuto />
+      {show('meta') && <MetaAuto />}
 
-      <LeadsBox run={run} />
+      {show('kw') && <LeadsBox run={run} />}
 
-      <LeadAdsBox run={run} />
+      {show('meta') && <LeadAdsBox run={run} />}
 
-      <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ad-changes">
+      {show('log') && <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ad-changes">
         <h2 className="text-sm font-semibold">변경 기록</h2>
         <ul className="mt-1 divide-y divide-line text-xs">{data.changes.map((c) => {
           const plan = data.plans.find((p) => p.id === c.plan_id);
@@ -237,7 +253,7 @@ export function AdOps() {
               {canRevert && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => confirm('이 변경 전으로 되돌릴까요?') && run(c.id, () => api(`/api/marketing/ad-ops/changes/${c.id}/revert`, { body: {} }), '되돌렸습니다')} data-testid="ad-change-revert">되돌리기</Button>}
             </li>);
         })}{!data.changes.length && <li className="py-1.5 text-ink-3">아직 변경이 없습니다</li>}</ul>
-      </section>
+      </section>}
       {imp && <ImportModal accounts={data.accounts} brands={data.brands ?? []} onClose={() => setImp(false)} onDone={() => { setImp(false); reload(); }} />}
       {form && <PlanForm accounts={data.accounts} brands={data.brands ?? []} budgetHint={data.budgetHint ?? null} edit={form === true ? undefined : form} onClose={() => setForm(false)} onDone={reload} />}
       {local?.mode === 'keywords' && <Modal open onClose={() => setLocal(null)} title="동네 키워드 추가">

@@ -31,7 +31,7 @@ export async function mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
     V({ caption: '10월 이벤트 안내 포스터', kind: 'graphic', text: 'much', promo: true, seen: '10월 이벤트' }),
     V({ caption: '트레이너가 회원에게 자세를 알려 주는 모습', tags: ['수업', '트레이너'], faces: true, people: 2 }),
   ] }) });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const box = owner.getByTestId('auto-photos'); await box.waitFor();
   assert.match(await box.getByTestId('photos-summary').innerText(), /아직 3장/);
   await box.getByTestId('photos-describe').click();
@@ -62,7 +62,7 @@ export async function mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   // 290차 브랜드 이름 없는 사진 정리: 브랜드가 둘 이상이면 이름 없는 실사를 사람이 골라 브랜드 지정(태그) — 자동 지정 없음
   for (const name of ['E2E가짐', 'E2E나짐']) if (!(await sql`select 1 from mkt_brands where tenant = ${tenant} and name = ${name}`).length) await ctx.owner.ok('POST', '/api/marketing/brands', { name });
   const [ga] = await sql`select id from mkt_brands where tenant = ${tenant} and name = 'E2E가짐'`;
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const box3 = owner.getByTestId('auto-photos'); await box3.waitFor();
   await box3.getByTestId('photos-brands').filter({ hasText: 'E2E가짐' }).waitFor();
   const un = box3.getByTestId('photos-unnamed'); await un.locator('summary').click();
@@ -75,7 +75,7 @@ export async function mktPhotos({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   await row.waitFor({ state: 'detached' }); // 지정한 사진은 정리 목록에서 빠짐
   // 휴대폰: 사진 목록을 펼쳐도 가로 넘침 없음
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const box2 = owner.getByTestId('auto-photos'); await box2.waitFor();
   await box2.getByTestId('photos-list').locator('summary').click();
   await box2.getByTestId('photo-item').first().waitFor();

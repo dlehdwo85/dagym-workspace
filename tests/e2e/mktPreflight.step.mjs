@@ -12,7 +12,7 @@ export async function mktPreflight({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   await ctx.owner.ok('POST', '/api/marketing/brands', { name: 'E2E누리링크' });
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b.id}`, { intro: '동네 헬스장', products: '1개월 회원권', topicPool: ['처음 오는 날 준비물', '샤워실 이용 시간'] });
   // 브랜드 키트: 사실 카드 + 주제 풀(AI 제안 2개 더함 — 이미 있는 주제·다른 브랜드 이름이 든 주제는 서버가 뺌)
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const kit = owner.getByTestId('brand-facts-E2E사실짐'); await kit.waitFor();
   assert.match(await kit.locator('summary').innerText(), /연락처 없음 · 주제 2개/);
   await kit.locator('summary').click();

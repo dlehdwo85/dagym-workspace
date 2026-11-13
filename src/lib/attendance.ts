@@ -94,7 +94,7 @@ export async function sheet(u: SessionUser, f: { day?: string; month?: string })
     const day = f.day;
     const rows = await sql<any[]>`select a.*, si.name as in_site_name, so.name as out_site_name from attendance a left join work_sites si on si.id = a.in_site_id left join work_sites so on so.id = a.out_site_id where a.tenant = ${t} and a.day = ${day}`;
     const away = await awayMap(sql, t, day, day);
-    const [hol] = await sql<{ name: string }[]>`select name from holidays where date = ${day}`;
+    const holName = await (await import('./holidays')).holidayName(t, day, sql); const hol = holName ? { name: holName } : undefined;
     const dow = new Date(`${day}T00:00:00+09:00`).getUTCDay();
     const workday = !hol && dow !== 0 && dow !== 6;
     return { day, workday, holiday: hol?.name ?? null, workStart: st.workStart, rows: people.map((p) => {
@@ -106,7 +106,7 @@ export async function sheet(u: SessionUser, f: { day?: string; month?: string })
   const month = f.month ?? todaySeoul().slice(0, 7);
   const from = `${month}-01`; const to = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
   const rows = await sql<any[]>`select user_id, to_char(day, 'YYYY-MM-DD') as day, in_at, out_at, in_inside, out_inside from attendance where tenant = ${t} and day between ${from} and ${to}`;
-  const hols = new Set((await sql<{ d: string }[]>`select to_char(date, 'YYYY-MM-DD') d from holidays where date between ${from} and ${to}`).map((r) => r.d));
+  const hols = await (await import('./holidays')).holidaySet(t, from, to, sql);
   const away = await awayMap(sql, t, from, to);
   const today = todaySeoul();
   const days: string[] = []; for (let d = new Date(`${from}T00:00:00Z`); d.toISOString().slice(0, 10) <= to; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));

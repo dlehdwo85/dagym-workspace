@@ -506,7 +506,7 @@ export async function metaAutoTick(now = new Date()) {
       const label = why.reason === 'cpl' ? '리드당 비용' : '클릭당 비용';
       await (await import('./spaceNotify')).notifySpace(sql, { tenant: p.tenant, space: 'marketing', approval: true, type: 'usage_alert',
         title: `메타 광고 자동 일시정지 — ${p.name}`, body: `${label} ${why.value != null ? won(why.value) : `(아직 ${why.reason === 'cpl' ? '리드' : '클릭'} 0)`} · 기준 ${won(why.limit)} · 쓴 돈 ${won(spend)}. 다시 켜려면 광고 운영에서 [다시 켜기]`,
-        link: '/s/marketing/ad-ops', entityType: 'mkt_ad_plan', entityId: p.id, dedupeKey: `metaguard:${p.id}:${ymd(now)}` }).catch(() => {});
+        link: '/s/marketing/ad-ops?tab=meta', entityType: 'mkt_ad_plan', entityId: p.id, dedupeKey: `metaguard:${p.id}:${ymd(now)}` }).catch(() => {});
       paused++;
     } catch (e) {
       await sql`update mkt_ad_plans set external = external || ${sql.json({ guardAt: now.toISOString(), guardError: msgOf(e).slice(0, 300) } as never)}::jsonb where id = ${p.id}`.catch(() => {});

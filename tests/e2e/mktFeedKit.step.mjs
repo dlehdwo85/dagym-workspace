@@ -10,7 +10,7 @@ export async function mktFeedKit({ owner, ctx, sql, BASE, SHOTS }) {
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${brand}`, { intro: '아파트 커뮤니티 운영 대행', products: '운영 대행' });
   const [{ tenant }] = await sql`select tenant from mkt_brands where id = ${brand}`;
   await owner.setViewportSize({ width: 1366, height: 1000 });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const kit = owner.getByTestId('brand-feed-E2E 피드 브랜드'); await kit.waitFor();
   assert.match(await kit.getByTestId('brand-feed-summary').innerText(), /아직 안 정함 · 정기 자동 시안은 초안 보관/);
   await kit.getByTestId('brand-feed-summary').click();
@@ -62,7 +62,7 @@ export async function mktFeedKit({ owner, ctx, sql, BASE, SHOTS }) {
   assert.ok(['photo_fade', 'grid4'].includes(after.quality.visual.template), `사진이 있으면 사진 틀로: ${after.quality.visual.template}`);
   // 휴대폰 폭: 키트 칸 넘침 없음
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const k2 = owner.getByTestId('brand-feed-E2E 피드 브랜드'); await k2.waitFor();
   await k2.getByTestId('brand-feed-summary').click();
   await k2.getByTestId('brand-feed-templates').waitFor();

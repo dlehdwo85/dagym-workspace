@@ -27,7 +27,7 @@ export async function mktBlog({ owner, ctx, BASE, SHOTS, sql }) {
     ids.push(f.id);
   }
   // 자동 제작: 글 모델 블로그 줄 · 사실 카드 블로그 검색 키워드 · 사진 판정 '쓰지 않음'
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   assert.match(await owner.getByTestId('auto-write-model-blog').innerText(), /네이버 블로그\(1,800~2,500자·사진 8~15장 형식\): .+/);
   const kit = owner.getByTestId('brand-facts-E2E블로그짐'); await kit.waitFor();
   await kit.locator('summary').click();

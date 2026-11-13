@@ -53,7 +53,7 @@ export async function designGuide187({ owner, ctx, sql, BASE, SHOTS }) {
   await mcard.screenshot({ path: `${SHOTS}/187-team-design-guide-390.png` });
   // ⑤ 브랜드 키트 머리말 칸: 채우면 고정 · 비우면 AI 가 글마다
   await owner.setViewportSize({ width: 1366, height: 900 });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const kit = owner.getByTestId('brand-feed-E2E 지침 브랜드'); await kit.waitFor();
   await kit.getByTestId('brand-feed-summary').click();
   assert.equal(await kit.getByTestId('brand-feed-kicker').getAttribute('placeholder'), '표지 머리말 — 비우면 AI 가 글마다');

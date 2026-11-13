@@ -100,8 +100,15 @@ export async function verifyCutover(tenant: string) {
 }
 
 export async function writesOpen(tenant: string) {
-  const [c] = await db()<{ writes_open: boolean }[]>`select writes_open from sales_cutover where tenant = ${tenant}`;
-  return !!c?.writes_open;
+  const sql = db();
+  const [c] = await sql<{ writes_open: boolean }[]>`select writes_open from sales_cutover where tenant = ${tenant}`;
+  if (c || tenant === 'default') return !!c?.writes_open; // 기본 회사는 예전 그대로(전환 기록이 정함)
+  // 범용화 S-03(대표 11/13 승인): 옛 영업관리 자료가 없는 다른 회사는 전환할 것이 없으므로 바로 쓰기를 연다(행이 없어 읽기 전용이던 문제). 옮기는 중인 회사(옮긴 원본 행이 있음)는 그대로 닫힘
+  const [src] = await sql`select 1 from sales_src_rows where scope = ${tenant} limit 1`;
+  if (src) return false;
+  await sql`insert into sales_cutover (tenant, ok, writes_open) values (${tenant}, true, true) on conflict (tenant) do nothing`.catch(() => {});
+  const [n] = await sql<{ writes_open: boolean }[]>`select writes_open from sales_cutover where tenant = ${tenant}`;
+  return !!n?.writes_open;
 }
 export async function convertAndVerify(u: SessionUser, tenant: string) {
   platformOnly(u);

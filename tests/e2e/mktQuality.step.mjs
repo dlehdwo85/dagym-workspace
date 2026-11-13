@@ -57,7 +57,7 @@ export async function mktQuality({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   // 브랜드 키트 [말투 프로필]
   const b = await ctx.owner.ok('POST', '/api/marketing/brands', { name: 'E2E 말투 브랜드' });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const vb = owner.getByTestId('brand-voice-E2E 말투 브랜드'); await vb.waitFor();
   await vb.locator('summary').click();
   await vb.getByTestId('voice-audience').fill('퇴근 후 운동하는 직장인');

@@ -242,11 +242,11 @@ export async function readBalance(a: Acc): Promise<{ balance: number; currency: 
 /** 회사 광고 계정의 잔액을 읽어 mkt_ad_balances 에 적는다(API 로 읽히는 매체만, 6시간마다) */
 export async function syncBalances(tenant: string, force = false) {
   const sql = db();
-  const accs = await sql<(Acc & { label: string; last_balance_at: string | null })[]>`select a.id, a.tenant, a.provider, a.external_id, a.secret_enc, a.label, b.checked_at as last_balance_at
+  const accs = await sql<(Acc & { label: string; last_balance_at: string | null; guard: boolean | null })[]>`select a.id, a.tenant, a.provider, a.external_id, a.secret_enc, a.label, b.checked_at as last_balance_at, b.guard
     from mkt_ad_accounts a left join mkt_ad_balances b on b.account_id = a.id where a.tenant = ${tenant} and a.status <> 'disconnected'`;
   let read = 0;
   for (const a of accs) {
-    if (!force && a.last_balance_at && Date.now() - new Date(a.last_balance_at).getTime() < 6 * 3600e3) continue;
+    if (!force && a.last_balance_at && Date.now() - new Date(a.last_balance_at).getTime() < (a.guard ? 1 : 6) * 3600e3) continue; // 402차 #1028: 끊김 방지를 켠 계정은 1시간마다(나머지는 6시간)
     const r = await readBalance(a).catch(() => null); if (!r) continue;
     await sql`insert into mkt_ad_balances (tenant, provider, label, account_id, balance_krw, currency, source, checked_at) values (${tenant}, ${a.provider}, ${a.label}, ${a.id}, ${r.balance}, ${r.currency}, 'api', now())
       on conflict (tenant, provider, label) do update set account_id = excluded.account_id, balance_krw = excluded.balance_krw, currency = excluded.currency, source = 'api', checked_at = now()`;

@@ -68,7 +68,7 @@ export async function photo189({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   await owner.screenshot({ path: `${SHOTS}/189-photo-fill.png` });
   await owner.keyboard.press('Escape');
   // 사진 AI 설명: 생성 사진 'AI 생성' 칩 · 실사에 [AI로 다시 만들기](확인 창) → '다시 만드는 중' · 설정 기본 꺼짐
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   assert.equal(await owner.getByTestId('auto-photo-gen').isChecked(), false, '사진 생성 회사 설정 기본 꺼짐');
   const photos = owner.getByTestId('auto-photos'); await photos.waitFor();
   assert.match(await photos.getByTestId('photos-summary').innerText(), /AI 생성\(실사 참고\) 1장/);

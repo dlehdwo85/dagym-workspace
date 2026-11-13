@@ -23,7 +23,7 @@ export async function adAb({ owner, ctx, sql, BASE, SHOTS }) {
   }
   await sql`insert into mkt_ad_stats (account_id, day, campaign_id, campaign_name, cost_krw) values (${acc.id}, ${today}, 'cmp-e2e', 'E2E 3안 테스트', 120000) on conflict do nothing`;
 
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   const card = owner.getByTestId('ad-plan').filter({ hasText: 'E2E 3안 테스트' });
   const box = card.getByTestId('ad-ab');
   await box.waitFor();
@@ -83,7 +83,7 @@ export async function adAb({ owner, ctx, sql, BASE, SHOTS }) {
 
   // 휴대폰 폭: 소재 표는 상자 안에서만 옆으로(화면 넘침 없음)
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   await owner.getByTestId('ad-ab').first().waitFor();
   const over = await owner.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(over <= 1, `휴대폰 가로 넘침 ${over}px`);

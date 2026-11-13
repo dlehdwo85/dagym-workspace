@@ -13,7 +13,7 @@ import { AdRefBox } from './AdRefs';
  * ③ 월 매출 목표 vs 실적 막대(RevenueGoal) + CAC·ROI 는 월간 보고.
  */
 const C = '#7C3AED';
-type Proposal = { id: string; kind: string; title: string; summary: string; body: { items: { title: string; detail: string; expected?: string; cost?: string }[]; rationale: string; numbers?: any; link?: string }; status: string; source: string; version?: number; revision_note?: string | null; decision_note: string | null; decided_by_name: string | null; decided_at: string | null; executed: any; created_at: string };
+export type Proposal = { id: string; kind: string; title: string; summary: string; same?: number; body: { items: { title: string; detail: string; expected?: string; cost?: string }[]; rationale: string; numbers?: any; link?: string; signal?: string }; status: string; source: string; version?: number; revision_note?: string | null; decision_note: string | null; decided_by_name: string | null; decided_at: string | null; executed: any; created_at: string };
 export type BrandRow = { brandId: string; name: string; share: number; monthly: number; priority: number | null; note: string; plans: number; needsPlan: boolean };
 type Budget = { id: string; month: string; status: string; version?: number; revision_note?: string | null; reject_note?: string | null; brand_plan?: BrandRow[]; total_source?: string | null; plan: { provider: string; label: string; monthly: number; daily: number; note: string; connected: boolean; charge: string | null; used: number; rate: number | null }[]; total: number; rationale: string | null; source: string; executed: any[] | null; approved_by_name: string | null; approved_at: string | null };
 type FeedItem = { id: string; title: string; media: string; url: string | null; stats: { brightness: number; saturation: number; warmth: number } | { error: string } | null; outlier: boolean };
@@ -114,7 +114,7 @@ export function ProposalCard({ p, kinds, canEdit, onChange }: { p: Proposal; kin
   return (
     <article className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ops-card" data-kind={p.kind} data-status={p.status}>
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]"><span className="rounded-full bg-violet-50 px-2 py-0.5 font-semibold text-violet-800" data-testid="ops-card-kind">{kinds[p.kind] ?? p.kind}</span>{(p.version ?? 1) > 1 && <span className="rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-800" data-testid="ops-card-version">v{p.version} 반려 반영</span>}
-        <span className={cx('rounded-full px-2 py-0.5 font-semibold', sc)} data-testid="ops-card-status">{sl}</span><span className="text-ink-3">{p.source === 'ai' ? 'AI 마케터' : p.source === 'template' ? '기본 카드(AI 없이)' : '직접'} · {fmtDateTime(p.created_at)}</span></div>
+        <span className={cx('rounded-full px-2 py-0.5 font-semibold', sc)} data-testid="ops-card-status">{sl}</span>{!!p.same && <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-ink-2" data-testid="ops-card-same" title="같은 알림이 여러 번 올라와 가장 최근 것 하나만 보입니다 — 결정하면 묶인 카드도 함께 닫힙니다">같은 알림 {p.same + 1}건 묶음</span>}<span className="text-ink-3">{p.source === 'ai' ? 'AI 마케터' : p.source === 'template' ? '기본 카드(AI 없이)' : '직접'} · {fmtDateTime(p.created_at)}</span></div>
       <h3 className="mt-1.5 text-sm font-bold" data-testid="ops-card-title">{p.title}</h3>
       <p className="mt-1 text-sm text-ink-1">{p.summary}</p>
       <ul className="mt-2 space-y-1.5 text-xs">{(p.body?.items ?? []).map((it, i) => <li key={i} className="rounded-input border border-line p-2"><b>{it.title}</b> <span className="text-ink-2">{it.detail}</span>
@@ -187,7 +187,7 @@ export function BudgetCard({ b, month, canEdit, busy, onDraft, onChange, ownerTo
             <td className="py-1.5"><span className="mr-1 rounded-full bg-slate-100 px-1.5 text-[10px] text-ink-3">{x.priority ?? '-'}순위</span>{x.name}</td>
             <td className="py-1.5 text-right tabular-nums">{x.share}%</td>
             <td className="py-1.5 text-right tabular-nums">{edit ? <input className={cx(inputCls, 'h-7 w-28 py-0 text-right text-xs')} value={bplan[x.brandId] ?? ''} onChange={(e) => setBplan({ ...bplan, [x.brandId]: e.target.value })} inputMode="numeric" aria-label={`${x.name} 월 예산`} data-testid={`budget-brand-in-${x.name}`} /> : won(x.monthly)}</td>
-            <td className="py-1.5">{x.plans ? <span className="text-emerald-800">네이버 {x.plans}건</span> : <Link href="/s/marketing/ad-ops" className="font-semibold text-amber-800 underline" data-testid={`budget-brand-needs-${x.name}`}>세팅안 필요 →</Link>}</td>
+            <td className="py-1.5">{x.plans ? <span className="text-emerald-800">네이버 {x.plans}건</span> : <Link href="/s/marketing/ad-ops?tab=naver" className="font-semibold text-amber-800 underline" data-testid={`budget-brand-needs-${x.name}`}>세팅안 필요 →</Link>}</td>
             <td className="py-1.5 text-ink-2">{x.note}</td></tr>)}</tbody></table>}
         {b.reject_note && <p className="mt-2 text-[11px] text-ink-3" data-testid="budget-reject-note">반려 사유: {b.reject_note}</p>}
         {b.revision_note && <p className="mt-1 rounded-input border border-amber-200 bg-amber-50/50 px-2.5 py-1.5 text-[11px] text-ink-2" data-testid="budget-revision"><b className="text-amber-800">반려 사유 → 반영한 점</b> {b.revision_note}</p>}

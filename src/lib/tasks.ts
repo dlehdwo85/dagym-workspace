@@ -1018,7 +1018,7 @@ export async function syncReviewTask(sql: Sql, id: string, actorId: string | nul
   const active = o.status === 'review' && !o.deleted_at && !o.approval_line_id && !!reviewer && reviewer !== o.assignee_id;
   if (active) {
     const today = todaySeoul();
-    const hol = new Set((await sql<{ d: string }[]>`select to_char(date, 'YYYY-MM-DD') d from holidays where date between ${today} and ${addDays(today, 20)} and (tenant is null or tenant = ${o.tenant})`).map((h) => h.d));
+    const hol = await (await import('./holidays')).holidaySet(o.tenant, today, addDays(today, 20), sql);
     let biz = addDays(today, 1);
     for (let k = 0; k < 20; k++) { const w = new Date(biz + 'T00:00:00Z').getUTCDay(); if (w !== 0 && w !== 6 && !hol.has(biz)) break; biz = addDays(biz, 1); }
     const due = o.due_date && String(o.due_date) < biz ? String(o.due_date) : biz;

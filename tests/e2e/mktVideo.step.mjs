@@ -44,7 +44,7 @@ export async function mktVideo({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await upload('E2E 밝은 피아노.mp3', 'audio/mpeg', fakeMp3(20, 262), '영상 배경음');
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${brand}`, { video: { logoFileId: logo, endColor: '#0F766E' }, facts: { phone: '02-1234-5678' } }); // 209차 끝 화면 전화(검수 기준)
   // 브랜드 키트 화면: 끝 화면 한 줄·CTA
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const kit = owner.getByTestId('brand-video-E2E 워크인'); await kit.waitFor();
   await kit.getByTestId('brand-video-headline').fill('일은 한 화면에서'); await kit.getByTestId('brand-video-headline').blur();
   await owner.getByText('영상 키트를 저장했습니다').first().waitFor();

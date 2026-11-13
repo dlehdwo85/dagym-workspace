@@ -27,7 +27,7 @@ export async function mktStudio({ owner, ctx, BASE, SHOTS }) {
   await card.getByTestId('studio-prompt-en').filter({ hasText: 'winter morning' }).waitFor();
   await card.getByTestId('studio-generate').click();
   await card.getByTestId('studio-status').filter({ hasText: '생성 중' }).waitFor();
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const req = owner.getByTestId('auto-request').filter({ hasText: 'E2E 겨울 시즌권' }); await req.first().waitFor();
   await req.first().getByTestId('auto-req-brief').waitFor();
   assert.match(await req.first().innerText(), /\[제작의뢰실\] 스토리[\s\S]*winter morning/);
