@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Capacitor } from '@capacitor/core';
 
 /**
@@ -7,9 +7,14 @@ import { Capacitor } from '@capacitor/core';
  * 앱 판별 = Capacitor 네이티브(또는 앱 user-agent 'WorkInApp'). 첫 그림은 웹과 같게(false) 그린 뒤 바꿈 → 서버 렌더와 어긋나지 않음.
  */
 export const isInApp = () => typeof window !== 'undefined' && (Capacitor.isNativePlatform() || /WorkInApp/i.test(navigator.userAgent));
+/** 397차 #1023(애플 11/06 반려 3.1.1 '사업자 가입 기능이 아직 있음'): 서버가 요청의 앱 표시(WorkInApp)를 보고 처음 그림부터 앱 모양으로 —
+ *  예전엔 첫 그림을 웹과 같게 그린 뒤 바꿔서, 아이패드 가로 로그인 화면 왼쪽 판에 '14일 무료 체험으로 시작'·소개 링크가 잠깐 보였음 */
+const AppHint = createContext(false);
+export function InAppHint({ value, children }: { value: boolean; children: ReactNode }) { return <AppHint.Provider value={value}>{children}</AppHint.Provider>; }
 export function useInApp() {
-  const [v, setV] = useState(false);
-  useEffect(() => setV(isInApp()), []);
+  const hint = useContext(AppHint);
+  const [v, setV] = useState(hint);
+  useEffect(() => setV(hint || isInApp()), [hint]);
   return v;
 }
 /** 298차 #861(대표 10/31 '아이폰도 갤럭시도 웹에서 하는걸로 통일 — 앱에서는 결제 없이'): 두 앱 모두 앱 밖 결제 안내('PC 웹에서 관리')도 하지 않고 관리자 문의만 */

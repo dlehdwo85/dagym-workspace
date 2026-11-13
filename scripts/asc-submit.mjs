@@ -72,6 +72,8 @@ const BAD_META = /\d[\d,]*\s*원|무료|체험|요금|가격|free|pricing|price|
 for (const [name, text] of [['설명', description], ['키워드', keywords]]) { // 심사 메모는 심사관에게 '요금 문장을 뺐다'고 설명하는 글이라 검사 대상이 아님
   const m = text.match(BAD_META); if (m) { console.error(`${name}에 요금·무료 관련 글자('${m[0]}')가 있습니다 — 2.3.7 재발 방지로 멈춤`); process.exit(3); }
 }
+// 397차 #1023(애플 11/06 반려 3.1.1 — 설명의 '문의: 메일' 줄을 앱 밖 구매로 이끄는 문구로 지적): 설명에 문의 안내·메일·웹 주소가 있으면 멈춤
+{ const m = description.match(/문의\s*[:：]|[\w.+-]+@[\w-]+\.[\w.-]+|https?:\/\/|www\./i); if (m) { console.error(`설명에 문의·메일·주소('${m[0]}')가 있습니다 — 3.1.1 재발 방지로 멈춤`); process.exit(3); } }
 const six = (prefix) => [1, 2, 3, 4, 5, 6].map((n) => path.join(SHOTS_DIR, `${prefix}-${String(n).padStart(2, '0')}.png`)).filter((f) => { try { return statSync(f).size > 0; } catch { return false; } });
 /** 묶음(슬롯) → 올릴 파일: 6.9형·6.1형·아이패드 13형. 그 밖 묶음은 파일 없음(옛 그림만 지움) */
 const FILES_OF = { [DISPLAY]: six('iphone'), APP_IPHONE_61: six('iphone61'), [IPAD_DISPLAY]: six('ipad') };

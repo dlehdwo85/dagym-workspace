@@ -64,6 +64,7 @@ import { calEdge389 } from './calEdge389.step.mjs';
 import { calSticky391 } from './calSticky391.step.mjs';
 import { pageAlarms394 } from './pageAlarms394.step.mjs';
 import { bidChips1020 } from './bidChips1020.step.mjs';
+import { iosReview1023 } from './iosReview1023.step.mjs';
 import { kaptWeekly200 } from './kaptWeekly200.step.mjs';
 import { easyPay200 } from './easyPay200.step.mjs';
 import { salesBrief202 } from './salesBrief202.step.mjs';
@@ -3073,6 +3074,7 @@ await step('389차 일정 끌어 다음 주로(대표 11/12 "드래그해서 다
 await step('391차 캘린더 날짜 줄 고정(대표 11/13 "화면을 내리면 위에 날짜가 안 보인다"): 휴대폰 주·3일·월 보기에서 페이지를 끝까지 내려도 날짜 줄이 앱 머리줄 바로 아래에 보임 · 올리면 제자리', () => calSticky391({ owner, BASE }));
 await step('394차 화면별 알림(대표 11/13 "각 페이지별 알람이 보일 수 있도록"): 업무 화면 위 "업무 새 알림 N건" · 왼쪽 메뉴 업무 숫자 · [보기] = 알림 화면 업무 알림만 · [모두 읽음] = 업무 것만 · 휴대폰 하단 탭 캘린더 숫자', () => pageAlarms394({ owner, ctx, sql, BASE }));
 await step('395차 #1020 업무 줄(대표 11/08 "할 일 개수는 빼고 댓글·첨부만 · 현설 표기"): 할 일·하위 업무 n/m 칩 없음 · 입찰 업무 현설 칩 늘(일시·필수 / 없음 / 공고문 참조 / 공고문 확인)', () => bidChips1020({ owner, ctx, sql, BASE }));
+await step('397차 #1023 계정 삭제 메뉴(애플 11/06 반려 5.1.1(v)): 설정 맨 위 [계정 삭제] → 계정 삭제 칸 펼쳐짐 · 주소(#delete-account)로 와도 펼쳐짐', () => iosReview1023({ owner, BASE }));
 await step('200차 #699 준공·입주 시설 원본 기준일(대표 10/26): K-apt 자료실 추출일(주 1회) · 한국부동산원 파일 수정일(연 1회) 한 줄 · 자료실 단지 카드(전화·세대수·주민운동시설) · 1366·390 넘침 없음 · 기준일 없으면 줄 없음', () => kaptWeekly200({ owner, ctx, sql, BASE, SHOTS }));
 await step('200차 #706 간편결제 바로 열기(대표 10/26): 켠 간편결제만 버튼 · [필수] 결제 대행 약관 동의 없으면 안 열림 · 결제창 요청 = 카드 + 간편결제 + 동의 · 다른 수단 고르면 풀림 · 결제 내역 간편결제 이름 · 1366·390', () => easyPay200({ owner, BASE, SHOTS }));
 await step('202차 #461 ⑤ 본사 주간 보고 영업 진행(놓침 방지): 연락일 지남·다음 행동 없음·오래 쉼(14일)·담당 없음 + 오래 쉼 목록(단계·담당·마지막 접촉·리드 링크) · 1366·390', () => salesBrief202({ owner, ctx, sql, BASE, SHOTS }));

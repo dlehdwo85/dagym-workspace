@@ -10,6 +10,7 @@ import { alarmDeviceStatus, enableNativePush, isNativeApp, openAlarmSettings, su
 import { BioLockSetting } from '@/components/BioLock';
 import { ROLE_LABEL } from '@/lib/types';
 import { UserSelect } from '@/components/pickers';
+import { useInApp } from '@/components/inApp';
 
 /** #447 앱 1.1.3 전체화면 알람: 이 휴대폰이 잠금 화면 위 전체 화면을 막아 두었거나 정확한 시각 예약이 꺼져 있으면 안내(안드로이드 14+ 는 사용자가 설정에서 허용) */
 function FullScreenAlarmNotice() {
@@ -60,6 +61,8 @@ export default function Settings() {
         <div className="font-semibold">{user.name}</div>
         <div className="flex items-center gap-1.5 text-slate-500">{user.email} · {ROLE_LABEL[user.role]}<RoleBadge role={user.role} size="sm" /></div>
         {features.googleSync && <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 (선택 기능) →</Link>}
+        {/* 397차 #1023(애플 11/06 반려 5.1.1(v) '앱 안에 계정 삭제를 시작하는 메뉴가 없음'): 설정 맨 위에서 바로 — 아래 '계정 › 계정 삭제' 칸을 펼쳐 보여 줌 */}
+        <a href="#delete-account" className="mt-2 block w-fit text-xs text-red-700 underline" data-testid="to-delete-account">계정 삭제</a>
       </section>
       <SwipeToggle />
       <section className="rounded-lg border bg-white p-4"><ChatBubbleToggle /></section>
@@ -410,6 +413,14 @@ function AccountSection() {
   const [space, setSpace] = useState('');
   const [team, setTeam] = useState('');
   const own = !!tenant && !tenant.internal;
+  const inApp = useInApp();
+  // 397차 #1023: '계정 삭제' 칸은 주소(#delete-account)·위 링크로 오면 펼쳐서 보여 줌
+  const [delOpen, setDelOpen] = useState(false);
+  const delRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const on = () => { if (location.hash !== '#delete-account') return; setDelOpen(true); setTimeout(() => delRef.current?.scrollIntoView({ block: 'center' }), 80); };
+    on(); window.addEventListener('hashchange', on); return () => window.removeEventListener('hashchange', on);
+  }, []);
   const ids = useApi<{ hasPassword: boolean }>('/api/account/identities');
   const needPw = ids.data?.hasPassword !== false;
   async function leave() {
@@ -427,15 +438,18 @@ function AccountSection() {
       <LinkedAccounts />
       <MarketingConsent />
       {user.role === 'owner' && <SupportConsent />}
-      {tenant?.personal && user.role === 'owner' && (
+      {/* 397차 #1023(3.1.1): 앱 안에는 회사(팀) 만들기가 없음 — 웹에서만 */}
+      {tenant?.personal && user.role === 'owner' && !inApp && (
         <form className="mt-4 flex flex-wrap items-end gap-2 rounded-input border border-line p-3" onSubmit={async (e) => { e.preventDefault(); try { await api('/api/account/upgrade', { body: { company: team } }); location.reload(); } catch (er: any) { toast.error(er.message); } }} data-testid="upgrade-team">
           <Field label="팀으로 바꾸기 — 데이터는 그대로, 사람을 초대해 함께"><input className={inputCls} value={team} onChange={(e) => setTeam(e.target.value)} placeholder="회사(팀) 이름" aria-label="팀 이름" /></Field>
           <Button type="submit" disabled={!team.trim()}>팀 만들기</Button>
         </form>
       )}
       {/* V28-5: 회사(초대) 계정은 스스로 탈퇴 대신 삭제 요청 — 회사 관리자·개인정보 담당에게 */}
+      <div id="delete-account" ref={delRef} className="scroll-mt-24" data-testid="delete-account">
+      <h3 className="mt-4 text-sm font-semibold text-red-700">계정 삭제</h3>
       {!own && (
-        <details className="mt-4 rounded-input border border-red-200 p-3" data-testid="deletion-request">
+        <details className="mt-2 rounded-input border border-red-200 p-3" data-testid="deletion-request" open={delOpen} onToggle={(e) => setDelOpen((e.target as HTMLDetailsElement).open)}>
           <summary className="cursor-pointer font-medium text-red-700">계정 삭제 요청</summary>
           <p className="mt-2 text-xs text-ink-2">회사가 만든 계정은 회사 관리자가 정리합니다. 요청을 보내면 회사 관리자와 워크인 개인정보 담당에게 전달됩니다. <a href="/account-deletion" target="_blank" className="underline">삭제 안내</a></p>
           <Field label="사유 (선택)"><input className={inputCls} value={confirm} onChange={(e) => setConfirm(e.target.value)} maxLength={200} aria-label="삭제 요청 사유" /></Field>
@@ -443,8 +457,8 @@ function AccountSection() {
         </details>
       )}
       {own && (
-        <details className="mt-4 rounded-input border border-red-200 p-3">
-          <summary className="cursor-pointer font-medium text-red-700">회원 탈퇴{user.role === 'owner' ? ' · 공간 삭제' : ''}</summary>
+        <details className="mt-2 rounded-input border border-red-200 p-3" data-testid="account-leave" open={delOpen} onToggle={(e) => setDelOpen((e.target as HTMLDetailsElement).open)}>
+          <summary className="cursor-pointer font-medium text-red-700">계정 삭제(회원 탈퇴){user.role === 'owner' ? ' · 공간 삭제' : ''}</summary>
           <div className="mt-3 space-y-2">
             {needPw ? <Field label="비밀번호"><input type="password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" aria-label="탈퇴 비밀번호" /></Field>
               : <p className="text-xs text-ink-2">소셜 계정으로 가입해 비밀번호가 없습니다 — 로그인한 지 15분 안에만 진행할 수 있습니다(지났으면 로그아웃 후 다시 로그인).</p>}
@@ -459,6 +473,7 @@ function AccountSection() {
           </div>
         </details>
       )}
+      </div>
     </section>
   );
 }

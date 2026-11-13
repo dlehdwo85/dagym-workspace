@@ -32,6 +32,18 @@ test('아이폰·아이패드 앱: 가입·소개·랜딩 주소는 로그인으
   }
 });
 
+test('397차 #1023(애플 11/06 반려 3.1.1): 앱 로그인 화면은 서버가 처음 그림부터 앱 모양 — 체험 문구·소개 링크·사업자 표시 없음 · 웹은 그대로', async () => {
+  for (const ua of [UA.iosApp, UA.ipadApp, UA.androidApp]) {
+    const html = await (await get('/login', ua)).text();
+    assert.ok(!/14일 무료 체험/.test(html), `체험 문구 없음 (${ua.slice(13, 25)})`);
+    assert.ok(!/통신판매업|사업자등록번호|biz-ftc/.test(html), '사업자·통신판매 표시 없음');
+    assert.match(html, /회사 관리자가 초대한 계정으로 로그인/, '왼쪽 판 = 초대 계정 안내');
+    assert.match(html, /개인정보처리방침/, '약관·개인정보 링크는 그대로');
+  }
+  const web = await (await get('/login', UA.iphoneSafari)).text();
+  assert.match(web, /14일 무료 체험/); assert.match(web, /통신판매업/);
+});
+
 test('웹 브라우저(아이폰 사파리·카카오톡 안 브라우저)는 가입 화면 그대로 · 351차 #942: 안드로이드 앱은 /signup 도 로그인으로(가입은 웹에서)', async () => {
   for (const ua of [UA.iphoneSafari, UA.kakaoIphone]) {
     const r = await get('/signup', ua);

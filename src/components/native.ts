@@ -442,7 +442,9 @@ export async function openOAuthInBrowser(startPath: string) {
   const v = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
   const ac = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v))), (b) => b.toString(16).padStart(2, '0')).join('');
   try { localStorage.setItem('wos_oauth_v', v); } catch {}
-  await Browser.open({ url: `${location.origin}${startPath}${startPath.includes('?') ? '&' : '?'}ac=${ac}`, presentationStyle: 'popover' });
+  // 397차 #1023(애플 11/06 반려 2.1(a) — 아이패드에서 'Sign in with Apple' 을 누르면 빈 창): 'popover' 는 아이폰에서는 시트로 바뀌지만 아이패드에서는 진짜 팝업으로 뜨고,
+  // 크기를 주지 않으면(Capacitor setCenteredPopover 는 위치만 잡음) 로그인 화면이 그려지지 않는 작은 빈 창이 됨 → 기본값인 전체 화면으로(아이폰·아이패드 같은 모양)
+  await Browser.open({ url: `${location.origin}${startPath}${startPath.includes('?') ? '&' : '?'}ac=${ac}`, presentationStyle: 'fullscreen' });
 }
 export function takeOAuthVerifier() {
   try { const v = localStorage.getItem('wos_oauth_v'); localStorage.removeItem('wos_oauth_v'); return v; } catch { return null; }
