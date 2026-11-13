@@ -68,7 +68,10 @@ export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
   if (i.mode === 'team') await tx`insert into calendars (type, name, color, tenant) values ('company', ${i.company + ' 공용'}, '#0F766E', ${tenant})`;
   // 상용화: AI 비서는 빈 상태에서 이 회사 기준으로 — 회사 정보(상호) 1건 + 업종별 시작 템플릿(다른 회사 데이터는 복사하지 않음)
   if (i.mode === 'team') await tx`insert into company_profiles (tenant, key, name, is_default, updated_by) values (${tenant}, 'main', ${i.company!}, true, ${u.id}) on conflict do nothing`;
-  for (const s of (i.industry && INDUSTRY_PRESETS[i.industry]?.starters) || []) {
+  // 406차 범용화 G-35: 시작 템플릿은 주 업종 + 추가 업종 모두(예전엔 주 업종 것만) — 같은 이름은 한 번만
+  const starterSeen = new Set<string>();
+  const starters = inds.flatMap((x) => INDUSTRY_PRESETS[x]?.starters ?? []).filter((s) => !starterSeen.has(s.name) && !!starterSeen.add(s.name));
+  for (const s of starters) {
     await tx`insert into templates (name, description, payload, org_unit_id, created_by, personal, tenant)
       values (${s.name}, ${s.description}, ${tx.json({ title: s.name, checklist: s.checklist, ...(s.dueInDays !== undefined ? { dueInDays: s.dueInDays } : {}) } as never)}, null, ${u.id}, false, ${tenant})`;
   }

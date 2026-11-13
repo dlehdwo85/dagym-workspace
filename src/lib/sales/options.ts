@@ -15,12 +15,12 @@ export async function salesBidsOn(tenant: string) {
 /** #408 회사 영업 용어(업종 템플릿) — null 이면 회사 업종으로 추정 */
 export async function salesTerms(tenant: string): Promise<SalesTerms & { auto: boolean }> {
   const [t] = await db()<{ sales_template: string | null; industries: string[] | null; industry: string | null; sales_stages: unknown }[]>`select sales_template, industries, industry, sales_stages from tenants where id = ${tenant}`;
-  return salesTermsFor(t?.sales_template, tenantIndustries(t), t?.sales_stages);
+  return salesTermsFor(t?.sales_template, tenantIndustries(t), t?.sales_stages, tenant === 'default');
 }
 export async function salesOptions(u: SessionUser) {
   await assertSpace(u, 'sales');
   const [t] = await db()<{ sales_bids: boolean | null; sales_template: string | null; industries: string[] | null; industry: string | null; sales_stages: unknown }[]>`select sales_bids, sales_template, industries, industry, sales_stages from tenants where id = ${tenantOf(u)}`;
-  const terms = salesTermsFor(t?.sales_template, tenantIndustries(t), t?.sales_stages);
+  const terms = salesTermsFor(t?.sales_template, tenantIndustries(t), t?.sales_stages, tenantOf(u) === 'default');
   return { bids: t?.sales_bids ?? true, bidsAuto: t?.sales_bids == null, canEdit: isAdmin(u), template: { code: terms.template, label: terms.label, auto: terms.auto }, terms, templates: salesTemplateList() };
 }
 /** 207차: 단계 표시 이름·색·숨김 — null = 기본 이름으로 되돌림 */

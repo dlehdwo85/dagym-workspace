@@ -89,19 +89,30 @@ export const termsOf = (code: SalesTemplate, stages?: unknown): SalesTerms => ({
 export const isSalesTemplate = (v: unknown): v is SalesTemplate => (SALES_TEMPLATES as readonly string[]).includes(String(v));
 
 /** 회사 업종(industries·industry)으로 템플릿 추정 — 온보딩에서 업종만 골라도 영업 화면 용어가 맞춰진다 */
-export function inferSalesTemplate(industries: readonly string[] | null | undefined): SalesTemplate {
-  const s = (industries ?? []).filter(Boolean).join(' ');
+export function inferSalesTemplate(industries: readonly string[] | null | undefined, legacy = false): SalesTemplate {
+  const list = (industries ?? []).filter(Boolean);
+  const s = list.join(' ');
   if (!s) return 'general';
-  if (/운동|피트니스|헬스|스포츠|체육|커뮤니티|시설|위탁|관리|숙박|레저|요가|수영/.test(s)) return 'facility';
-  if (/건설|건축|시공|인테리어|토목|전기|설비|리모델링|조경/.test(s)) return 'construction';
-  if (/IT|소프트웨어|SI|SaaS|앱|웹|개발|정보통신|플랫폼|데이터/i.test(s)) return 'it';
+  if (legacy) { // 기본 회사(다짐): 예전 판정 그대로
+    if (/운동|피트니스|헬스|스포츠|체육|커뮤니티|시설|위탁|관리|숙박|레저|요가|수영/.test(s)) return 'facility';
+    if (/건설|건축|시공|인테리어|토목|전기|설비|리모델링|조경/.test(s)) return 'construction';
+    if (/IT|소프트웨어|SI|SaaS|앱|웹|개발|정보통신|플랫폼|데이터/i.test(s)) return 'it';
+    return 'general';
+  }
+  // 406차 범용화 G-10: 예전엔 '시설·위탁·관리' 낱말이 건설보다 먼저 걸려 '건설·시설관리'·'시설관리·용역' 회사가 아파트 위탁 운영 용어(단지명·관리사무소·현 위탁사)를 받았다 →
+  // 주 업종(앞에 적힌 것)부터 하나씩 보고, 건설을 먼저 판정하며, 아파트 위탁 묶음은 운동·레저 시설 업종에만
+  for (const x of list) {
+    if (/건설|건축|시공|인테리어|토목|전기|설비|리모델링|조경/.test(x)) return 'construction';
+    if (/운동|피트니스|헬스|스포츠|체육|커뮤니티|숙박|레저|요가|수영/.test(x)) return 'facility';
+    if (/IT|소프트웨어|SI|SaaS|앱|웹|개발|정보통신|플랫폼|데이터/i.test(x)) return 'it';
+  }
   return 'general';
 }
 /** 회사 업종 목록: industries[](여러 개)가 있으면 그것만, 없으면 예전 industry 한 칸 */
 export const tenantIndustries = (t: { industries?: string[] | null; industry?: string | null } | null | undefined): string[] => (t?.industries?.length ? t.industries : t?.industry ? [t.industry] : []);
 /** 저장값(null 이면 추정) → 용어 */
-export function salesTermsFor(saved: string | null | undefined, industries: readonly string[] | null | undefined, stages?: unknown): SalesTerms & { auto: boolean } {
+export function salesTermsFor(saved: string | null | undefined, industries: readonly string[] | null | undefined, stages?: unknown, legacy = false): SalesTerms & { auto: boolean } {
   const auto = !isSalesTemplate(saved);
-  return { ...termsOf(auto ? inferSalesTemplate(industries) : (saved as SalesTemplate), stages), auto };
+  return { ...termsOf(auto ? inferSalesTemplate(industries, legacy) : (saved as SalesTemplate), stages), auto };
 }
 export const DEFAULT_TERMS = termsOf('general');

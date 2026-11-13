@@ -29,6 +29,11 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     await p.getByTestId('signup-next').click();
     await p.getByTestId('mode-team').click();
     await p.getByTestId('signup-step-company').locator('input').first().fill(company);
+    { // 406차 범용화 G-09: 가입 업종에 '외식·카페'·'학원·교습'·'시설관리·용역'(맨 끝은 '기타')
+      const opts = await p.getByTestId('signup-industry').locator('option').allTextContents();
+      for (const x of ['외식·카페', '학원·교습', '시설관리·용역']) assert.ok(opts.includes(x), `가입 업종에 ${x}: ${opts.join(',')}`);
+      assert.equal(opts.at(-1), '기타');
+    }
     await p.getByTestId('signup-industry').selectOption('유통·판매');
     await shot('282-cust-signup-company.png');
     scanText('가입 2단계(회사 정보·업종)', await body());

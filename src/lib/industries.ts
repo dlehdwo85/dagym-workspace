@@ -36,6 +36,24 @@ export const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
       { name: '캠페인 집행', description: '광고·홍보 캠페인', checklist: ['목표·예산 확정', '소재 제작', '집행 시작', '성과 보고'] }] },
   '공공·비영리': { guide: '사업 운영·행사·보고·대외 협력이 주 업무입니다. 공문·보고서는 격식 있게, 숫자와 근거를 분명히 씁니다.',
     starters: [{ name: '사업 결과 보고', description: '사업 종료 보고', checklist: ['실적 정리', '증빙 자료 모으기', '보고서 작성', '제출'] }] },
+  // 406차 범용화 G-09(대표 11/13: 가입 업종에 '외식·카페'·'학원·교습'·'시설관리·용역' 추가 + 시작 템플릿) — 예로 든 신규 가입자(카페·학원·시설관리)에게 맞는 칸이 없었다
+  '외식·카페': { guide: '매장 운영·식자재 발주·위생·직원 근무표·손님 응대가 주 업무입니다. 메뉴·가격·영업시간은 확인된 값만 쓰고, 손님에게는 짧고 친절하게 안내합니다.',
+    starters: [{ name: '오픈 준비', description: '문 열기 전 점검', checklist: ['매장 청소·환기', '식자재·재고 확인', '포스·카드 단말 확인', '오늘 예약·단체 주문 확인'], dueInDays: 0 },
+      { name: '식자재 발주', description: '재고 확인부터 입고까지', checklist: ['재고 세기', '발주 품목·수량 정하기', '거래처에 발주', '입고 확인·유통기한 표시'], dueInDays: 2 },
+      { name: '위생 점검', description: '정기 위생 점검', checklist: ['조리대·냉장고 온도 확인', '유통기한 지난 것 폐기', '점검표 사진 첨부', '고칠 곳 보고'] }] },
+  '학원·교습': { guide: '수업·수강생 관리·학부모 상담·수강료 안내가 주 업무입니다. 학부모·수강생에게는 따뜻하고 정중하게, 일정·준비물·결석 보강을 분명히 안내합니다.',
+    starters: [{ name: '신규 수강 상담', description: '문의부터 등록까지', checklist: ['희망 과목·수준 확인', '시간표·수강료 안내', '체험 수업 일정', '등록·교재 안내'] },
+      { name: '결석·보강 안내', description: '결석한 수강생 보강', checklist: ['결석 사유 확인', '보강 일정 잡기', '학부모에게 안내', '보강 뒤 기록'], dueInDays: 3 },
+      { name: '월 수강료 안내', description: '매달 수강료 안내·확인', checklist: ['이번 달 수강생 명단 확인', '안내 문자 보내기', '입금 확인', '미납 다시 안내'] }] },
+  '시설관리·용역': { guide: '시설 순회 점검·청소·경비·수리 접수·월간 보고가 주 업무입니다. 위치·일시·조치 내용을 분명히 적고 사진 증빙을 챙기도록 안내합니다.',
+    starters: [{ name: '정기 순회 점검', description: '맡은 시설 순회', checklist: ['점검 구역 돌기', '이상 있는 곳 사진', '바로 조치한 것 기록', '남은 조치 보고'] },
+      { name: '수리·민원 접수', description: '접수부터 완료 확인까지', checklist: ['내용·위치 확인', '담당·일정 정하기', '조치 완료', '요청한 분께 결과 안내'], dueInDays: 3 },
+      { name: '월간 용역 보고', description: '발주처에 내는 월 보고', checklist: ['이번 달 작업 내역 모으기', '사진·점검표 정리', '보고서 작성', '발주처에 제출'] }] },
   '기타': { guide: '', starters: [] },
 };
 export const INDUSTRIES = Object.keys(INDUSTRY_PRESETS);
+/** 406차: 새로 넣은 업종 3개 — 기본 회사(다짐)의 회사 정보 화면 목록은 예전 12개 그대로 둔다(대표 11/13 "다짐 세팅은 건들이지 않습니다") */
+const ADDED_406 = ['외식·카페', '학원·교습', '시설관리·용역'];
+export function industryOptionsFor(tenant: string): string[] {
+  return tenant === 'default' ? INDUSTRIES.filter((x) => !ADDED_406.includes(x)) : INDUSTRIES;
+}
