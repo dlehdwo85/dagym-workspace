@@ -2299,8 +2299,12 @@ await step('V14 2·6번: AI 비서 대화가 남아 다시 열면 이어짐, 직
   // 자료실: AI 응답이 해석 안 되면 "정리 못 함 — 이유 · 다시 정리" → 다시 정리하면 "AI 정리됨"
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [{ content: [{ type: 'text', text: '모르겠어요' }], stop_reason: 'end_turn' }] }) });
   await owner.goto(BASE + '/library');
-  await owner.getByTestId('library-file').setInputFiles([{ name: 'V14 단가표.txt', mimeType: 'text/plain', buffer: Buffer.from('PT 10회 550000') }]);
+  // CI 에서 2번(103c245·12e13fb) 30초 시간 초과: 화면이 다 켜지기 전에 파일을 넣으면 올리기가 시작되지 않는다(V30 ① 과 같은 원인) → 다 켜진 뒤 넣고, 줄이 안 생기면 한 번 더
+  await owner.waitForLoadState('networkidle').catch(() => {});
+  const v14File = [{ name: 'V14 단가표.txt', mimeType: 'text/plain', buffer: Buffer.from('PT 10회 550000') }];
+  await owner.getByTestId('library-file').setInputFiles(v14File);
   const row = owner.getByTestId('library-list').locator('li').filter({ hasText: 'V14 단가표' });
+  if (!(await row.first().waitFor({ timeout: 8000 }).then(() => true).catch(() => false))) await owner.getByTestId('library-file').setInputFiles(v14File);
   await row.getByTestId('organize-failed').waitFor();
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ folder: '영업/단가', tags: ['단가표', 'PT'], title: 'V14 단가표', summary: 'PT 단가', confidence: 0.9 }) }], stop_reason: 'end_turn' }] }) });
   await row.getByTestId('organize-retry').click();
