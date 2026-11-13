@@ -42,7 +42,7 @@ import { useResearchAsk } from '@/components/sales/ResearchAsk';
 import { BidInfoBox } from '@/components/sales/BidInfoBox';
 
 const ACTION_LABEL: Record<string, string> = {
-  created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', completed: '완료',
+  created: '업무 생성', updated: '수정', review_requested: '검토 요청', approved: '최종 완료 확인', review_rejected: '보완 요청', review_skipped: '검토 없이 완료', completed: '완료',
   reopened: '다시 열기', deleted: '삭제', auto_spawned: '완료로 다음 업무 자동 생성', auto_removed: '완료 되돌리기 — 자동 생성 업무 정리', comment_edited: '댓글 수정', comment_deleted: '댓글 삭제', checklist_added: '체크리스트 추가',
   checklist_done: '체크리스트 완료', reassigned: '재배정', part_done: '내 몫 완료(공동 담당)', part_reopened: '내 몫 완료 취소(공동 담당)', closed_by: '완료 처리(남은 담당자 몫 포함)', notice_canceled: '공고 취소(발주처) — 확인 뒤 완료 처리 필요', assignee_added: '담당 추가', assignee_removed: '담당 빼기', handoff_requested: '넘기기 요청', handoff_rejected: '넘기기 거절', due_extended: '마감 연장', due_extension_requested: '마감 연장 요청', due_extension_rejected: '마감 연장 반려', due_extension_cancelled: '마감 연장 요청 취소', checklist_undone: '체크리스트 해제', checklist_removed: '체크리스트 삭제', checklist_edited: '체크리스트 수정',
   file_attached: '파일 첨부', file_edited: '파일 수정', file_opened_doc: '파일을 문서로 열어 편집', file_downloaded: '파일 내려받음', mail_queued: '메일 보내기 요청', mail_sent: '메일 보냄', mail_failed: '메일 발송 실패', share_created: '다운로드 링크 만듦', share_opened: '고객이 자료를 열어봄', link_attached: '문서 링크 연결', attachment_removed: '첨부 삭제', recurring_created: '반복 회차 생성',
@@ -343,9 +343,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const isReviewer = t.status === 'review' && !!reviewer && reviewer.id === user.id;
   const isTaskOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id || (multi && !!myPart);
   const reviewerLabel = reviewer ? `${reviewer.id === t.requested_by ? '요청자' : '검토 담당'} ${reviewer.name}님` : '검토자';
+  // 393차(대표 11/13 '업무 담당자가 검토 승인 요청 후 완료 처리를 할 수 없는 상황'): 검토 필수가 아닌 업무는 검토를 기다리는 중에도 담당자가 바로 [완료](서버와 같은 기준)
+  const finishNoReview = t.status === 'review' && isTaskOwner && !isReviewer && !t.approval_required && !t.approval_line_id;
   const ownerLabel = t.assignee_id ? `담당자 ${t.assignee_name}님` : t.requested_by ? `요청자 ${t.requested_by_name}님` : `만든 사람 ${t.created_by_name}님`;
   const lockMsg = statusOwner ? null : t.status === 'review'
-    ? (isReviewer ? '검토 중인 업무는 아래 [승인]·[반려]로 처리하세요' : isTaskOwner ? `검토 중에는 ${reviewerLabel}의 승인·반려를 기다립니다 — 고칠 게 있으면 [검토 요청 취소]` : `검토 중 — ${reviewerLabel}이 승인·반려합니다`)
+    ? (isReviewer ? '검토 중인 업무는 아래 [승인]·[반려]로 처리하세요' : finishNoReview ? `검토 요청 중 — 검토 필수 업무가 아니라 ${reviewerLabel}의 승인 없이도 아래 [완료]로 끝낼 수 있어요` : isTaskOwner ? `검토 중에는 ${reviewerLabel}의 승인·반려를 기다립니다 — 고칠 게 있으면 [검토 요청 취소]` : `검토 중 — ${reviewerLabel}이 승인·반려합니다`)
     : `상태는 ${ownerLabel}만 바꿀 수 있어요`;
   // 예상 처리 기간: 1일 이상 · 완료 표본 3건 이상일 때만(0일·1건 기준은 의미 없음)
   const showSpeed = !!data.speed && data.speed.median_days != null && data.speed.median_days >= 1 && (data.speed.done ?? 0) >= 3;
@@ -482,7 +484,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             {reviewAsk && <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2"><span>바로 완료하지 않고 {t.requested_by_name ?? t.created_by_name ?? '요청자'}님에게 확인을 받으려면</span><Button size="sm" variant="secondary" onClick={() => { if (photoShort) return toast.error(`증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)`); reviewAsk.run(); }} data-testid="review-ask">검토 요청</Button></p>}
             {t.status === 'review' && isTaskOwner && !isReviewer && (
               <div className="flex flex-wrap items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="review-wait">
-                <Hourglass className="size-4 shrink-0" /><span className="flex-1">검토 중에는 {reviewerLabel}의 승인·반려를 기다립니다.</span>
+                <Hourglass className="size-4 shrink-0" /><span className="flex-1">{finishNoReview ? `${reviewerLabel}의 검토를 기다리는 중입니다 — 검토 필수 업무가 아니라 승인 없이도 바로 완료할 수 있어요.` : `검토 중에는 ${reviewerLabel}의 승인·반려를 기다립니다.`}</span>
+                {finishNoReview && <Button size="sm" onClick={() => { if (photoShort) return toast.error(`증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)`); patch({ status: 'done' }, '완료 처리했습니다 — 검토 담당자에게 알렸습니다'); }} data-testid="review-finish"><CircleCheck />완료</Button>}
                 <Button size="sm" variant="secondary" onClick={() => patch({ status: 'in_progress' }, '검토 요청을 취소했습니다 — 다시 진행 중')} data-testid="review-cancel">검토 요청 취소</Button>
               </div>
             )}

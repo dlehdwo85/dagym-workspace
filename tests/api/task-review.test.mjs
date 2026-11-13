@@ -15,8 +15,8 @@ test('일반 업무: 담당자 검토 요청 → 요청자 알림·검토 업무
   t = await get(ctx.owner, id); assert.equal(t.status, 'review'); assert.ok(t.review_requested_at, '검토 요청 시각');
   assert.ok((await sql`select 1 from notifications where user_id = ${ctx.ownerId} and type = 'review_requested' and entity_id = ${id}`).length, '요청자 알림');
   assert.ok((await sql`select 1 from activities where entity_type = 'task' and entity_id = ${id} and action = 'review_requested'`).length, '활동 기록 review_requested');
-  // 담당자는 검토 중 완료 불가, 요청자가 반려(보완 요청)
-  assert.equal((await ctx.staffA.client.req('PATCH', `/api/tasks/${id}`, { status: 'done', version: t.version })).status, 403, '검토 중 담당자 완료 불가');
+  // 요청자가 반려(보완 요청) — 393차부터 검토 필수가 아닌 업무는 담당자도 검토 중 바로 완료할 수 있음(아래 시험)
+  assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${id}`, { status: 'done', version: t.version })).status, 403, '담당·검토 담당이 아닌 사람(같은 현장 관리자)은 검토 중 완료 불가');
   await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { status: 'in_progress', version: t.version, reviewNote: '사진 더 붙여 주세요' });
   t = await get(ctx.staffA.client, id); assert.equal(t.status, 'in_progress');
   assert.ok((await sql`select 1 from activities where entity_type = 'task' and entity_id = ${id} and action = 'review_rejected'`).length, '활동 기록 review_rejected');
@@ -38,6 +38,7 @@ test("'검토 필수': 요청자가 켬 → 담당자 바로 완료 403·검토 
   assert.equal((await ctx.staffA.client.req('PATCH', `/api/tasks/${id}`, { status: 'done', version: t.version })).status, 403, '검토 필수면 바로 완료 불가');
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review', version: t.version });
   t = await get(ctx.owner, id); assert.equal(t.status, 'review');
+  assert.equal((await ctx.staffA.client.req('PATCH', `/api/tasks/${id}`, { status: 'done', version: t.version })).status, 403, '393차: 검토 필수 업무는 검토 중에도 담당자 완료 불가(그대로)');
   await ctx.owner.ok('PATCH', `/api/tasks/${id}`, { status: 'done', version: t.version });
   t = await get(ctx.owner, id); assert.equal(t.status, 'done'); assert.equal(t.approved_by, ctx.ownerId);
   const id2 = (await ctx.owner.ok('POST', '/api/tasks', { title: '만들 때 검토 필수', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: true })).id;
@@ -60,4 +61,26 @@ test('검토 필수 + 담당자 관리자: 바로 완료 403 → 검토 요청 �
   const self = (await ctx.owner.ok('POST', '/api/tasks', { title: '내가 만들고 내가 하는 검토 필수 업무', assigneeId: ctx.ownerId, orgUnitId: ctx.hq, approvalRequired: true })).id;
   const s = await get(ctx.owner, self); await ctx.owner.ok('PATCH', `/api/tasks/${self}`, { status: 'done', version: s.version });
   assert.equal((await get(ctx.owner, self)).status, 'done', '담당자 = 요청자면 자기 승인');
+});
+
+test("393차(대표 11/13 '업무 담당자가 검토 승인 요청 후 완료 처리를 할 수 없는 상황'): 검토 필수가 아닌 업무는 검토를 기다리는 중에도 담당자가 바로 완료 · 검토 담당자에게 '검토 없이 완료' 알림 · [검토] 업무 닫힘", async () => {
+  const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '골라서 검토 요청한 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
+  let t = await get(ctx.staffA.client, id);
+  await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review', version: t.version });
+  const [rv] = await sql`select id, status, assignee_id from tasks where review_of = ${id} and deleted_at is null`;
+  assert.deepEqual([rv?.status, rv?.assignee_id], ['todo', ctx.ownerId], '요청자에게 [검토] 업무');
+  t = await get(ctx.staffA.client, id); assert.equal(t.status, 'review');
+  await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'done', version: t.version });
+  t = await get(ctx.owner, id);
+  assert.deepEqual([t.status, t.approved_by ?? null], ['done', null], '담당자가 완료(승인 기록은 없음)');
+  assert.equal((await sql`select status from tasks where id = ${rv.id}`)[0].status, 'done', '[검토] 업무 자동으로 닫힘');
+  const acts = (await sql`select action from activities where entity_type = 'task' and entity_id = ${id} order by created_at`).map((a) => a.action);
+  assert.ok(acts.includes('review_skipped') && acts.includes('completed') && !acts.includes('approved'), acts.join(','));
+  const [n] = await sql`select title from notifications where user_id = ${ctx.ownerId} and entity_id = ${id} and title like '완료(검토 없이)%'`;
+  assert.ok(n, '검토 담당자(요청자)에게 검토 없이 완료 알림');
+  // 담당자가 다시 열어 다시 검토 요청할 수 있음(그대로)
+  await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'in_progress', version: t.version });
+  t = await get(ctx.staffA.client, id); assert.equal(t.status, 'in_progress');
+  await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review', version: t.version });
+  assert.equal((await get(ctx.owner, id)).status, 'review');
 });

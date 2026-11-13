@@ -727,6 +727,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
 
     // V12 11번: 상태는 담당자만(대표·관리자도 예외 없음). 예외는 하나 — 검토 요청된 업무를 그 업무의 요청자가 승인(완료)·반려(진행 중).
     // 담당자가 없는 업무는 만든 사람만. (결재선 업무의 결재는 approvals 의 결재 API 로 따로)
+    let skippedReviewer: string | null = null; // 393차: 검토 필수가 아닌 업무를 담당자가 검토 승인 없이 끝낸 경우의 검토 담당자(알림)
     if (i.status && i.status !== cur.status) {
       // V14 50(대표 결정): 상태는 배정된 담당자만(대표·관리자·요청자·협업자 모두 불가). 담당자가 없는 업무는 요청자(없으면 만든 사람).
       // 검토 중인 업무의 승인(완료)·반려(진행 중)는 검토 담당자만 — "[검토]" 업무가 있으면 그 담당자, 없으면 요청자. 담당자 본인은 자기 검토를 승인할 수 없다.
@@ -736,7 +737,11 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         const reviewer = rv?.assignee_id ?? (cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : null);
         // 대표 피드백(10/15): 담당자는 자기 검토 요청을 취소(→ 진행 중)할 수 있다. 승인(완료)·반려는 검토 담당자만
         const cancelByOwner = (owner === u.id || (multi && isCo)) && i.status === 'in_progress';
-        if (reviewer && reviewer !== u.id && !cancelByOwner) {
+        // 393차(대표 11/13 '업무 담당자가 검토 승인 요청 후 완료 처리를 할 수 없는 상황'): 검토 필수가 아닌 업무(담당자가 골라서 [검토 요청]을 누른 것)는
+        // 검토를 기다리는 중에도 담당자가 바로 [완료] — 검토 담당자에게는 '검토 없이 완료' 알림, [검토] 업무는 자동으로 닫힘. 검토 필수·결재선 업무는 그대로 승인 필요
+        const finishByOwner = (owner === u.id || (multi && isCo)) && i.status === 'done' && !cur.approval_required;
+        if (finishByOwner && reviewer && reviewer !== u.id) skippedReviewer = reviewer;
+        if (reviewer && reviewer !== u.id && !cancelByOwner && !finishByOwner) {
           const [nm] = await tx<{ name: string }[]>`select name from users where id = ${reviewer}`;
           throw forbidden(`검토 중인 업무의 승인·반려는 검토 담당자 ${nm?.name ?? ''}님만 할 수 있습니다`);
         }
@@ -776,7 +781,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         if (blockers.length) throw conflict('선행 업무가 아직 완료되지 않았습니다');
         set.completed_at = new Date();
         if (cur.approval_required) { set.approved_at = new Date(); set.approved_by = u.id; }
-        statusEvent = cur.status === 'review' ? 'approved' : 'completed';
+        statusEvent = cur.status === 'review' && !skippedReviewer ? 'approved' : 'completed';
       } else if (to === 'review') {
         set.review_requested_at = new Date();
         set.review_requested_by = u.id;
@@ -878,6 +883,11 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     }
     // WORKIN_V3 요청자에게: 담당자가 완료하거나 검토를 요청하면 알림 (요청자 본인이 한 변경은 제외)
     const requester = (set.requested_by ?? cur.requested_by) as string | null;
+    if (skippedReviewer && set.status === 'done') { // 393차: 검토를 기다리던 업무를 담당자가 끝냄 — 검토 담당자에게(요청자면 아래 '완료' 알림 대신 이 한 통)
+      await activity(tx, 'task', id, u.id, 'review_skipped', { reviewer: skippedReviewer });
+      await notify(tx, { userIds: [skippedReviewer], type: 'task_done_for_requester', title: `완료(검토 없이): ${title}`, body: `${u.name}님이 검토를 기다리던 '${title}'을(를) 직접 완료했습니다 — 확인할 게 있으면 업무에서 다시 열 수 있어요`,
+        link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `reqst:${id}:${upd.version}` });
+    }
     // 2026-10-15 대표: 알림은 중요한 것만 — 요청자에게는 완료·보류만(검토 요청은 위에서 따로). 시작·다시 진행·되돌림은 보내지 않음
     if (requester && requester !== u.id && set.status && set.status !== cur.status && statusEvent !== 'review_requested' && (set.status === 'done' || set.status === 'on_hold')) {
       const verb = set.status === 'done' ? '완료했습니다' : '보류했습니다';

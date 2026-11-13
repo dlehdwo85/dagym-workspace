@@ -1988,7 +1988,8 @@ describe('V28-5 계정 삭제 요청(스토어)', () => {
 
 describe('대표 피드백 10/15 검토 중 업무', () => {
   test('담당자는 [검토 요청 취소](→ 진행 중)만, 승인·반려는 검토 담당자(요청자) · 상세에 검토자 이름', async () => {
-    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '검토 취소 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, approvalRequired: false })).id;
+    // 393차(대표 11/13): 검토 필수가 아닌 업무는 검토 중에도 담당자가 바로 완료할 수 있게 바뀜(task-review.test) — '담당자 본인은 승인 불가'는 검토 필수 업무로 확인
+    const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '검토 취소 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, approvalRequired: true })).id;
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
     const d = await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
     assert.equal(d.reviewer.id, ctx.managerA.id); assert.ok(d.reviewer.name);

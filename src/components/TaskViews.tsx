@@ -684,7 +684,9 @@ export function canSetStatus(t: Task, uid: string, to: TaskStatus, role?: string
   const reviewer = t.requested_by && t.requested_by !== t.assignee_id ? t.requested_by : null;
   const mine = owner === uid || (multiOf(t) && coOf(t).some((c) => c.id === uid)); // 대표 10/24: 담당자가 여럿이면 모두 같은 무게
   // 검토 중: 검토 담당자는 승인(완료)·반려(진행 중), 담당자는 검토 요청 취소(진행 중)만
-  if (t.status === 'review' && reviewer) return (reviewer === uid && (to === 'done' || to === 'in_progress')) || (mine && to === 'in_progress');
+  // 393차: 검토 필수가 아닌 업무는 검토를 기다리는 중에도 담당자가 바로 완료(서버 updateTask 와 같은 기준)
+  const optional = !t.approval_required && !(t as Task & { approval_line_id?: string | null }).approval_line_id;
+  if (t.status === 'review' && reviewer) return (reviewer === uid && (to === 'done' || to === 'in_progress')) || (mine && (to === 'in_progress' || (to === 'done' && optional)));
   // 334차(대표 11/02 16:4x): 요청자·관리자급(현장 관리자 이상)은 [완료]만은 담당자가 아니어도(남은 몫은 서버가 기록·알림) — 팀장·부서장은 상세 화면(서버 권한 perms.finish)에서
   if (to === 'done' && t.status !== 'review' && (t.requested_by === uid || (!!role && (ROLE_RANK[role as Role] ?? 0) >= ROLE_RANK.site_manager))) return true;
   return mine;
