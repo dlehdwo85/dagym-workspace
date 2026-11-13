@@ -21,11 +21,11 @@ export function BrandVideoKit({ brand, onSaved }: { brand: { id: string; name: s
         <span>릴스·쇼츠 영상 만드는 방법</span>
         <select className={cx(sm, 'w-auto')} value={v.method ?? ''} onChange={(e) => save({ method: (e.target.value || null) as Kit['method'] })} aria-label={`${brand.name} 영상 만드는 방법`} data-testid="brand-video-method">
           <option value="">정하지 않음(제작 요청 카드)</option>
-          <option value="photos">자료실 실제 사진으로 영상 · 0원</option>
+          <option value="photos">그래픽·사진 영상 · 0원</option>
           <option value="screen">앱 화면 녹화 · 0원</option>
           <option value="ai">AI 영상 · 크레딧</option>
         </select>
-        <span className="text-ink-3">{v.method === 'photos' ? '원고가 나오면 이 브랜드 현장 사진 3~6장을 천천히 움직여 자막·끝 화면을 붙입니다. 사진이 3장이 안 되면 제작 요청 카드로 남습니다' : v.method === 'screen' ? '녹화 파일을 자료실 마케팅/화면 녹화에 올려 붙입니다' : ''}</span>
+        <span className="text-ink-3">{v.method === 'photos' ? '원고가 나오면 영상 대본 줄을 자막으로, 브랜드 색 그래픽 카드·앱 화면 캡처·품질을 통과한 현장 사진으로 만듭니다(흐리거나 작은 사진은 쓰지 않음)' : v.method === 'screen' ? '녹화 파일을 자료실 마케팅/화면 녹화에 올려 붙입니다' : ''}</span>
       </label>
       {/* 288차 #814-2(대표 10/31 '브랜드 사진 폴더 밖 사진은 못 쓰게 · 워크인은 앱 화면 녹화·캡처만'): 표지·카드 장·블로그 본문에 쓸 사진 */}
       <label className="flex flex-wrap items-center gap-1.5" data-testid="brand-photo-source-row">

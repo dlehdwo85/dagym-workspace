@@ -88,13 +88,14 @@ test('자동 제작: 브랜드 영상 방법 = 앱 화면 녹화 → 이 브랜�
   assert.equal(b.result.reuse.fileId, rec2, '이 브랜드의 안 쓴 녹화');
   const [q] = await sql`select status, brief from mkt_production_requests where content_id = ${slots[0].id} and kind = 'video'`;
   assert.equal(q.status, 'done'); assert.match(q.brief, /화면 녹화 영상으로 대신함\(생성 비용 0\)$/);
-  // 안 쓴 녹화가 없으면: 카드(예상 0·녹화 안내) 그대로 + 판 메모에 이유
+  // 안 쓴 녹화가 없으면 장면 사진·그래픽 영상으로 넘어가는데(301차·398차), 이 원고는 대본이 2줄·글이 2문장뿐이라 '영상 대본 미달'로 만들지 않음 → 카드(예상 0·녹화 안내) 그대로 + 판 메모에 이유
   await only(slots[1].id); await ctl({ anthropicReset: true, anthropicQueue: [draft, draft] });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const [q2] = await sql`select status, brief, est_credits from mkt_production_requests where content_id = ${slots[1].id} and kind = 'video'`;
   assert.ok(['open', 'needs_approval'].includes(q2.status)); assert.equal(Number(q2.est_credits), 0); assert.match(q2.brief, /^앱 화면 녹화로 만듭니다/);
   const [v2] = await sql`select media_ids, note from mkt_versions where content_id = ${slots[1].id} and version = 1`;
-  assert.equal(v2.media_ids.length, 0); assert.match(v2.note, /화면 녹화 영상 못 만듦: 이 브랜드의 안 쓴 화면 녹화 없음/);
+  assert.equal(v2.media_ids.length, 0); assert.match(v2.note, /화면 녹화 영상 못 만듦: 이 브랜드의 안 쓴 화면 녹화 없음/); assert.match(v2.note, /영상 대본 미달 — 대본이 3줄뿐/);
+  assert.equal((await sql`select count(*)::int n from mkt_briefs where content_id = ${slots[1].id}`)[0].n, 0, '대본 미달이면 의뢰·파일을 만들지 않음');
   await sql`update mkt_rules set active = false where id = ${r.id}`;
 });
 

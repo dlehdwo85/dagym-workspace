@@ -189,7 +189,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
           {cardsAlt && <Button size="sm" onClick={() => act('to_cards')} disabled={!!acting} data-testid="approval-to-cards">{acting === 'to_cards' ? 'AI 가 만드는 중…' : '이미지 카드뉴스로 바꿔 만들기 · 0크레딧'}</Button>}</div>}
       </div>}
       {canAct && VIDEO_KINDS.includes(c.kind ?? '') && <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-ink-2" data-testid="approval-slideshow-row">
-        <Button size="sm" variant="secondary" onClick={slideshow} disabled={slide || !!acting} data-testid="approval-slideshow">{slide ? '만드는 중…' : '실제 사진으로 영상 만들기 · 0원'}</Button>
+        <Button size="sm" variant="secondary" onClick={slideshow} disabled={slide || !!acting} data-testid="approval-slideshow">{slide ? '만드는 중…' : '그래픽·사진 영상 만들기 · 0원'}</Button>
         <Button size="sm" variant="secondary" onClick={openRecs} disabled={slide || !!acting} data-testid="approval-screen">녹화 파일로 영상 만들기 · 0원</Button>
         <span>자료실의 현장 사진 3~6장이나 앱 화면 녹화에 자막·끝 화면을 붙입니다</span>
         {recs && <ul className="w-full space-y-1 rounded-input border border-line p-1.5" data-testid="approval-screen-list">

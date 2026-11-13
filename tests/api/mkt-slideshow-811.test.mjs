@@ -50,21 +50,23 @@ test('릴스 글 → [실제 사진으로 영상 만들기] = 사진 6장(약 15
   const t0 = Date.now();
   const r = await ctx.owner.ok('POST', '/api/marketing/studio/slideshow', { contentId: id, photoIds: P.photos });
   const ms = Date.now() - t0;
-  assert.deepEqual([r.photos, r.seconds], [6, 16]);
+  // 398차 #1024: 장면 수 = 자막 줄 수(제목 + 글 3문장 = 4장면) · 첫·끝 장면은 그래픽 카드 → 실사는 가운데 2장면
+  assert.equal(r.photos, 2); assert.ok(r.seconds >= 10 && r.seconds <= 16, String(r.seconds));
   const [b] = await sql`select status, est_credits, result from mkt_briefs where id = ${r.briefId}`;
   assert.equal(b.status, 'review', JSON.stringify(b.result?.variants?.[0]?.renderError ?? b.result?.errors));
   assert.equal(Number(b.est_credits), 0);
   const [c] = await sql`select current_version from mkt_contents where id = ${id}`;
   assert.equal(c.current_version, 2, '새 버전');
   const [v] = await sql`select media_ids, note from mkt_versions where content_id = ${id} and version = 2`;
-  assert.match(v.note, /^실제 사진 6장으로 만든 영상\(생성 비용 0\) · 자막·끝 화면 전화/);
+  assert.match(v.note, /^그래픽·사진 영상\(장면 4개 — 그래픽 카드 2 · 화면 캡처 0 · 품질 통과 실사 2 · 생성 비용 0\) · 자막·끝 화면 전화/);
+  const sl = b.result.variants[0].slide; assert.deepEqual(sl.fails, [], JSON.stringify(sl)); assert.ok(b.result.variants[0].scenes.every((x) => x.line.trim()), '장면마다 자막');
   const [lf] = await sql`select file_name, tags from library_files where id = ${v.media_ids[0]}`;
-  assert.match(lf.file_name, /\(실제 사진\)\.mp4$/); assert.ok(lf.tags.includes('실제 사진') && !lf.tags.includes('AI 생성') && !lf.tags.includes('다시 합성'), lf.tags.join(','));
+  assert.match(lf.file_name, /\(그래픽·사진\)\.mp4$/); assert.ok(lf.tags.includes('그래픽·사진') && !lf.tags.includes('AI 생성') && !lf.tags.includes('다시 합성'), lf.tags.join(','));
   const p = await probe(v.media_ids[0]);
   assert.deepEqual([p.w, p.h], [1080, 1920], '세로 영상');
-  assert.ok(p.duration > 13 && p.duration < 19, `길이 ${p.duration}초`);
+  assert.ok(p.duration > 9 && p.duration < 19, `길이 ${p.duration}초`);
   assert.equal((await sql`select count(*)::int n from mkt_credit_ledger where content_id = ${id}`)[0].n, 0, '생성 비용 없음');
-  console.log(`# 사진 6장 ${p.duration}초 영상 합성 ${Math.round(ms / 100) / 10}초(시험 서버, 내레이션 없음)`);
+  console.log(`# 장면 4개(실사 2) ${p.duration}초 영상 합성 ${Math.round(ms / 100) / 10}초(시험 서버, 내레이션 없음)`);
   // 사진이 2장뿐이면 안 됨
   assert.equal((await ctx.owner.req('POST', '/api/marketing/studio/slideshow', { contentId: await content('shorts'), photoIds: P.photos.slice(0, 2) })).status, 400);
 });
@@ -72,7 +74,7 @@ test('릴스 글 → [실제 사진으로 영상 만들기] = 사진 6장(약 15
 test('사진을 고르지 않으면 이 글에 맞는 자료실 실사를 골라 씀', async () => {
   const id = await content('shorts');
   const r = await ctx.owner.ok('POST', '/api/marketing/studio/slideshow', { contentId: id });
-  assert.ok(r.photos >= 3 && r.photos <= 6, String(r.photos));
+  assert.ok(r.photos >= 1 && r.photos <= 6, String(r.photos));
   const [b] = await sql`select status, result from mkt_briefs where id = ${r.briefId}`;
   assert.equal(b.status, 'review');
   assert.ok(b.result.reuse.photos.every((x) => P.photos.includes(x)), '자료실 실사');
@@ -110,7 +112,7 @@ test('자동 제작: 브랜드 영상 방법 = 실제 사진 → 릴스 원고 �
   assert.equal(c.current_version, 1, '새 판 없이 원고 판에');
   const [v] = await sql`select media_ids, note from mkt_versions where content_id = ${slots[0].id} and version = 1`;
   assert.equal(v.media_ids.length, 1, v.note);
-  assert.match(v.note, /^AI 자동 제작.* · 실제 사진 [3-6]장으로 만든 영상\(생성 비용 0\)/);
+  assert.match(v.note, /^AI 자동 제작.* · 그래픽·사진 영상\(장면 \d개 — 그래픽 카드 \d · 화면 캡처 0 · 품질 통과 실사 [1-6] · 생성 비용 0\)/);
   const issues = c.quality.issues ?? [];
   assert.ok(!issues.some((x) => /영상 시안 제작 중/.test(x)), JSON.stringify(issues));
   assert.equal(c.status, issues.length ? 'changes' : 'pending', JSON.stringify(c.quality));

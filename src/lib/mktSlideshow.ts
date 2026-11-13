@@ -70,11 +70,54 @@ async function insertBrief(c: any, body: string, result: Record<string, unknown>
   await (await import('./mktVideo')).kickRender(b.id).catch(() => {}); // 실패는 의뢰 상태·정기 실행이 다시
   return b.id;
 }
-async function startBrief(c: any, body: string, photos: { id: string; storage_key: string }[], by: string | null, extra: Record<string, unknown> = {}) {
-  const lines = slideLines(body, photos.length);
-  const scenes: V2Scene[] = photos.map((p, k) => ({ k, seconds: SCENE_SEC, line: lines[k] ?? '', visualEn: '', screen: null, status: 'completed', tries: 0, key: p.storage_key, still: true }));
-  const result = { provider: 'slideshow', pipeline: 'v2', model: null, stage: 'render', variants: [{ n: 0, scenes }], errors: [], notes: [], mediaIds: [], reuse: { slideshow: true, photos: photos.map((p) => p.id), ...extra } };
-  return { briefId: await insertBrief(c, body, result, by, 'slideshow'), photos: photos.length, seconds: Math.round(photos.length * SCENE_SEC) };
+/**
+ * 398차 #1024(대표 11/13 '수준이 너무 낮습니다 … 무조건 실사 사용하지 않아도 된다니까요?'): 장면 계획 새 기준.
+ *  자막 = 영상 대본 줄(없으면 글 문장)을 영상 전체 길이에 장면마다 한 줄(훅 → … → 행동 권유) · 장면 수 = 줄 수.
+ *  장면 그림: 첫 장면(훅)·마지막 장면(권유) = 브랜드 색 그래픽 카드 + 가운데 큰 글자 / 가운데 장면 = 이 브랜드 '영상 화면 캡처'(휴대폰 틀) → 품질을 통과한 실사 → 모자라면 그래픽 카드.
+ *  실사는 gatePhoto(저해상·흔들림·하얗게 날아감·너무 어두움)를 통과한 것만 — 뺀 사진과 이유는 의뢰 기록(reuse.gated)에.
+ */
+export async function planSlides(c: any, body: string, script: string[], photos: { id: string; storage_key: string }[]) {
+  const P = await import('./video/slidePlan'); const sql = db();
+  const [brand] = c.brand_id ? await sql<{ name: string; video: any; facts: any }[]>`select name, video, facts from mkt_brands where id = ${c.brand_id}` : [];
+  const sc = P.slideScript({ title: String(c.title ?? ''), body, script, phone: String(brand?.facts?.phone ?? ''), cta: String(brand?.video?.cta ?? '') });
+  const lines = sc.lines; const notes = [...sc.notes];
+  // 대본 검사(줄 수·제목 되풀이·같은 말·권유)는 합성 전에 — 미달이면 영상을 만들지 않음(자막이 빈 영상·검사 미달 파일을 자료실에 쌓지 않음)
+  const bad = P.scriptIssues(lines, String(c.title ?? ''));
+  if (bad.length) return { scenes: [] as V2Scene[], lines, notes, gated: [] as { id: string; why: string }[], photos: [] as string[], skipped: `영상 대본 미달 — ${bad.join(' · ')}` };
+  const { dimOf } = await import('./video/compose'); const d = dimOf((KIND_SPEC[c.kind] ?? KIND_SPEC.reels).aspect);
+  // 실사 품질 거름
+  const { getObject } = await import('./storage'); const good: { id: string; key: string; mode: 'cover' | 'contain' }[] = []; const gated: { id: string; why: string }[] = [];
+  // 사진 AI 설명이 '화면을 찍은 사진'·'기울어진 사진'이라고 쓴 것은 계산(해상도·선명도·노출)으로는 못 거르므로 설명 글로 거름 — 화면은 캡처를 씀
+  const SHOT = /기울어|비스듬|삐뚤|(화면|모니터|스크린)[을를]?\s*(찍|촬영)|모아레|반사[가되]\S*\s*(심|보)/;
+  const vis = new Map((photos.length ? await sql<{ id: string; t: string }[]>`select id::text, concat_ws(' ', vision->>'caption', vision->>'scene') as t from library_files where id = any(${photos.map((p) => p.id)}::uuid[])` : []).map((r) => [r.id, r.t ?? '']));
+  for (const p of photos) {
+    if (SHOT.test(vis.get(p.id) ?? '')) { gated.push({ id: p.id, why: '화면을 찍었거나 기울어진 사진(사진 설명 기준) — 화면은 캡처를 씀' }); continue; }
+    try { const g = await P.gatePhoto(await getObject(p.storage_key), d); if (g.ok) good.push({ id: p.id, key: p.storage_key, mode: g.mode }); else gated.push({ id: p.id, why: g.why ?? '품질 미달' }); }
+    catch (e: any) { gated.push({ id: p.id, why: `사진 읽기 실패: ${String(e?.message ?? e).slice(0, 60)}` }); }
+  }
+  // 이 브랜드의 깨끗한 화면 캡처(자료실 '영상 화면 캡처' — 폴더·태그에 브랜드 이름) 2장까지
+  const name = String(brand?.name ?? '').replace(/^\s*\[시험\]\s*/, '').trim();
+  const caps = name ? (await (await import('./mktVideo')).videoAssets(c.tenant, '영상 화면 캡처').catch(() => [])).filter((x) => x.folder.includes(name) || (x.tags ?? []).includes(name) || String(x.title ?? '').includes(name)).slice(0, 2) : [];
+  const N = lines.length; const mid: ({ cap: string } | { photo: (typeof good)[number] })[] = [];
+  { let ci = 0, pi = 0; for (let k = 0; k < N - 2; k++) { // 가운데 장면: 캡처·실사를 번갈아(캡처 먼저)
+      const wantCap = k % 2 === 0;
+      if (wantCap && ci < caps.length) mid.push({ cap: caps[ci++].id }); else if (pi < good.length) mid.push({ photo: good[pi++] }); else if (ci < caps.length) mid.push({ cap: caps[ci++].id }); else break; } }
+  const scenes: V2Scene[] = lines.map((line, k) => {
+    const base = { k, seconds: P.sceneSeconds(line, k), line, visualEn: '', status: 'completed' as const, tries: 0, still: true };
+    const m = k > 0 && k < N - 1 ? mid[k - 1] : undefined;
+    if (m && 'photo' in m) return { ...base, screen: null, key: m.photo.key, mode: m.photo.mode };
+    if (m && 'cap' in m) return { ...base, screen: { mediaId: m.cap, device: 'phone' as const }, key: null, mode: 'card' as const };
+    return { ...base, screen: null, key: null, mode: 'card' as const, big: true };
+  });
+  return { scenes, lines, notes, gated, photos: scenes.filter((x) => x.key).map((x) => good.find((g) => g.key === x.key)!.id), skipped: null as string | null };
+}
+async function startBrief(c: any, body: string, photos: { id: string; storage_key: string }[], by: string | null, extra: Record<string, unknown> = {}, script: string[] = []) {
+  const plan = await planSlides(c, body, script, photos);
+  if (plan.skipped) return { briefId: undefined as string | undefined, photos: 0, seconds: 0, skipped: plan.skipped };
+  const { SLIDE_GEN } = await import('./video/slidePlan');
+  const result = { provider: 'slideshow', pipeline: 'v2', model: null, stage: 'render', variants: [{ n: 0, scenes: plan.scenes }], errors: [], notes: plan.notes, mediaIds: [],
+    reuse: { slideshow: true, gen: SLIDE_GEN, photos: plan.photos, ...(plan.gated.length ? { gated: plan.gated.slice(0, 8) } : {}), ...extra } };
+  return { briefId: await insertBrief(c, body, result, by, 'slideshow'), photos: plan.photos.length, seconds: Math.round(plan.scenes.reduce((a, x) => a + x.seconds, 0)), skipped: undefined as string | undefined };
 }
 /** 273차 #811 1) 앱 화면 녹화: 녹화 영상 한 편 → 길이를 재서 장면(자막 한 줄씩)으로 나눠 끝 화면·배경음과 합성(187차 ⑦ 한 편 나눠 쓰기 길). 자막 = 파일 설명 줄(녹화 실행기가 대본 lines 를 넣음), 없으면 글 문장 */
 async function startRecording(c: any, body: string, f: { id: string; storage_key: string; description: string | null }, by: string | null, extra: Record<string, unknown> = {}) {
@@ -146,8 +189,11 @@ export async function slideshowStart(u: SessionUser, i: z.infer<typeof slideshow
   const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
   const body = v?.body ?? c.title;
   const { photos, dropped } = await photosFor(c, `${c.title}\n${body}`, i.photoIds ?? []);
-  if (photos.length < 3) throw badRequest(`쓸 수 있는 실제 사진이 ${photos.length}장입니다${dropped.length ? `(얼굴 자리나 내용을 모르거나 제목의 시설이 아니라서 뺀 사진 ${dropped.length}장)` : ''}. 3장 넘게 필요합니다. 자료실에 현장 사진을 올리거나 직접 골라 주세요`);
-  const out = await startBrief(c, body, photos, u.id, dropped.length ? { faceDropped: dropped } : {});
+  // 398차 #1024: 실사가 없어도 만듦(그래픽 카드·화면 캡처) — 자막은 영상 대본 줄, 실사는 품질을 통과한 것만
+  const [cq] = await sql<{ quality: any }[]>`select quality from mkt_contents where id = ${c.id}`;
+  const sc0: string[] = Array.isArray(cq?.quality?.script) ? cq.quality.script.map(String) : (await import('./mktQuality')).scriptLines(body);
+  const out = await startBrief(c, body, photos, u.id, dropped.length ? { faceDropped: dropped } : {}, sc0);
+  if (!out.briefId) throw badRequest(out.skipped ?? '영상을 만들 수 없습니다');
   await (await import('./log')).audit(sql, u.id, 'mkt.video_slideshow', 'mkt_content', c.id, { brief: out.briefId, photos: photos.length }).catch(() => {});
   return out;
 }
@@ -156,16 +202,15 @@ export async function slideshowStart(u: SessionUser, i: z.infer<typeof slideshow
  * 271차 #811 자동 제작: 브랜드 영상 키트의 '영상 만드는 방법'이 실제 사진(photos)이면 릴스·쇼츠 원고 직후 그 판에 사진 영상을 붙임(생성 비용 0).
  * 사진이 3장이 안 되면 하지 않음(제작 요청 카드 그대로) — 이유를 돌려줌
  */
-export async function autoSlideshow(c: any, version: number, body: string, picked: string[] = [], ruleText = ''): Promise<{ briefId?: string; photos: number; skipped?: string }> {
+export async function autoSlideshow(c: any, version: number, body: string, picked: string[] = [], ruleText = '', extra: Record<string, unknown> = {}): Promise<{ briefId?: string; photos: number; skipped?: string }> {
   if (!VIDEO_KINDS.includes(c.kind ?? '')) return { photos: 0, skipped: '영상 글 아님' };
   if (await busyOf(c.id)) return { photos: 0, skipped: '이미 만드는 중' };
   // 333차(CI mkt-face-310 ①·③·⑤): 사진 규칙(시설·수업·장면)이 보는 글 = 제목 + 캡션 + 대본 줄(ruleText) — 대본에 '상담은 전화로'가 있으면 상담 데스크 장면도 이 영상의 장면
   const { photos, dropped } = await photosFor(c, `${c.title}\n${body}${ruleText ? `\n${ruleText}` : ''}`, picked);
-  if (photos.length < 3) { // 303차 #869: 브랜드 사진이 모자라면 영상 보류 + 자료 요청(사진이 오면 정기 실행이 다시 만듦)
-    await (await import('./mktMaterials')).needMaterial(c, '영상에 쓸 이 브랜드 사진이 모자라 영상을 보류했습니다').catch(() => null);
-    return { photos: photos.length, skipped: `쓸 이 브랜드 실제 사진 ${photos.length}장(3장 넘게 필요) — 자료 요청` };
-  }
-  const out = await startBrief(c, body, photos, c.created_by ?? null, { auto: true, version, ...(dropped.length ? { faceDropped: dropped } : {}) });
+  // 398차 #1024(대표 11/13 '무조건 실사 사용하지 않아도 된다'): 사진이 3장이 안 돼도 보류하지 않음 — 그래픽 카드·화면 캡처로 만들고, 실사는 품질을 통과한 것만. 대본 줄 = ruleText(자동 제작이 넘긴 컷 줄)
+  const script = ruleText.split('\n').map((x) => x.trim()).filter(Boolean);
+  const out = await startBrief(c, body, photos, c.created_by ?? null, { auto: true, version, ...(dropped.length ? { faceDropped: dropped } : {}), ...extra }, script);
+  if (!out.briefId) return { photos: 0, skipped: out.skipped ?? '영상 대본이 모자람' };
   return { briefId: out.briefId, photos: out.photos };
 }
 
@@ -218,13 +263,17 @@ export async function videoRetryTick(o: { limit?: number; tenant?: string } = {}
  * 그것뿐이었으면 승인 대기로(주 묶음·초안 보관 원고는 초안 그대로, 묶음 상태만) · 영상 제작 요청 카드는 '실제 사진 영상으로 대신함'.
  * 그사이 사람이 다른 판을 올렸거나 이미 영상이 붙었으면 붙이지 않음(자료실 파일만 남음)
  */
-export async function attachAuto(b: { content_id: string }, reuse: { version: number; screen?: boolean }, mediaIds: string[], note: string) {
+export async function attachAuto(b: { content_id: string }, reuse: { version: number; screen?: boolean; replace?: boolean }, mediaIds: string[], note: string) {
   const sql = db();
   const r = await sql.begin(async (tx) => {
     const [c] = await tx<any[]>`select id, tenant, title, status, current_version, quality, brand_id, is_test, created_by from mkt_contents where id = ${b.content_id} and deleted_at is null for update`;
     if (!c || c.current_version !== reuse.version || ['published', 'canceled'].includes(c.status)) return null;
-    const [v] = await tx`update mkt_versions set media_ids = ${mediaIds}, note = concat_ws(' · ', note, ${note}::text) where content_id = ${c.id} and version = ${reuse.version} and cardinality(media_ids) = 0 returning version`;
+    // 398차 #1024: replace = 옛 기준 영상 시안을 새 기준 영상으로 바꿔 붙임(같은 판, 상태 그대로 — 옛 파일은 자료실에 남음)
+    const [v] = reuse.replace
+      ? await tx`update mkt_versions set media_ids = ${mediaIds}, note = concat_ws(' · ', note, ${`새 기준으로 다시 만든 영상 — ${note}`}::text) where content_id = ${c.id} and version = ${reuse.version} returning version`
+      : await tx`update mkt_versions set media_ids = ${mediaIds}, note = concat_ws(' · ', note, ${note}::text) where content_id = ${c.id} and version = ${reuse.version} and cardinality(media_ids) = 0 returning version`;
     if (!v) return null;
+    if (reuse.replace) return { c, toPending: false };
     const { VISUAL_ISSUE } = await import('./mktAutoVisual');
     const q = c.quality ?? {}; const left = ((q.issues ?? []) as string[]).filter((x) => !VISUAL_ISSUE.test(x));
     const passed = q.passed !== false || !left.length;
@@ -241,4 +290,31 @@ export async function attachAuto(b: { content_id: string }, reuse: { version: nu
     if (!A.isQuiet(new Date(), s)) await A.mktNotify(sql, r.c, null, { approval: true, type: 'review_requested', title: `승인 요청: ${r.c.title}`, body: note, link: `/s/marketing/approvals?c=${r.c.id}`, entityType: 'mkt_content', entityId: r.c.id, dedupeKey: `mktp:${r.c.id}:${reuse.version}:video` });
   }
   return !!r;
+}
+
+/**
+ * 398차 #1024(대표 11/13 — 승인함의 영상 시안이 옛 기준): 아직 게시 전(승인 대기·수정 요청·보류·초안)인 글에 붙은 자동 사진 영상 중 새 기준(gen)이 아닌 것을
+ * 한 번씩 새 기준으로 다시 만들어 그 판에 바꿔 붙임(생성 비용 0 — 서버 합성). 한 번에 2건, 글마다 한 번(quality.videoRemake).
+ */
+export async function videoRemakeTick(o: { limit?: number; tenant?: string } = {}) {
+  const sql = db(); const tf = o.tenant ? sql`and c.tenant = ${o.tenant}` : sql``;
+  const { SLIDE_GEN } = await import('./video/slidePlan');
+  const rows = await sql<any[]>`select c.id, c.tenant, c.brand_id, c.title, c.channel, c.kind, c.created_by, c.is_test, c.current_version, c.mode, c.auto, c.quality
+    from mkt_contents c
+    where c.deleted_at is null and c.kind = any(${VIDEO_KINDS}::text[]) and c.status in ('pending', 'changes', 'hold', 'draft') and c.current_version > 0
+      and (c.scheduled_at is null or c.scheduled_at > now()) and not (coalesce(c.quality, '{}'::jsonb) ? 'videoRemake')
+      and exists (select 1 from mkt_versions v where v.content_id = c.id and v.version = c.current_version and cardinality(v.media_ids) > 0)
+      and exists (select 1 from mkt_briefs x where x.content_id = c.id and x.status = 'review' and x.result->'reuse'->>'slideshow' = 'true' and x.result->'reuse'->>'auto' = 'true'
+        and (x.result->'reuse'->>'version')::int = c.current_version and coalesce((x.result->'reuse'->>'gen')::int, 0) < ${SLIDE_GEN})
+      and not exists (select 1 from mkt_briefs x where x.content_id = c.id and x.status = 'generating') ${tf}
+    order by c.scheduled_at nulls last limit ${o.limit ?? 2}`;
+  const out: { id: string; started: boolean; skipped?: string }[] = [];
+  for (const c of rows) {
+    const [v] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${c.current_version}`;
+    const sc: string[] = Array.isArray(c.quality?.script) ? c.quality.script.map(String) : (await import('./mktQuality')).scriptLines(v?.body ?? '');
+    const r = await autoSlideshow(c, c.current_version, v?.body ?? c.title, [], sc.join('\n'), { replace: true }).catch((e: any) => ({ photos: 0, skipped: String(e?.message ?? e).slice(0, 200) } as { briefId?: string; photos: number; skipped?: string }));
+    await sql`update mkt_contents set quality = coalesce(quality, '{}'::jsonb) || ${sql.json({ videoRemake: { at: new Date().toISOString(), gen: SLIDE_GEN, ...(r.briefId ? { briefId: r.briefId } : {}), ...(r.skipped ? { skipped: r.skipped } : {}) } } as never)} where id = ${c.id}`;
+    out.push({ id: c.id, started: !!r.briefId, ...(r.skipped ? { skipped: r.skipped } : {}) });
+  }
+  return { checked: rows.length, started: out.filter((x) => x.started).length, items: out };
 }

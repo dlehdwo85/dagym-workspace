@@ -14,12 +14,13 @@ export const dimOf = (aspect: string) => DIMS[aspect] ?? DIMS['9:16'];
 export const XFADE = 0.4; // 장면 사이
 /** 271차 #811(대표 10/29 'AI 영상 비용 최소화'): 사진 장면 — 영상 대신 실제 사진(자료실·업무 첨부)을 천천히 움직여(좌↔우·위↔아래 번갈아) 장면으로. 생성 비용 0 */
 export const isStill = (file: string) => /\.(jpe?g|png|webp)$/i.test(file);
-const PAN = 1.16; // 사진을 화면보다 16% 크게 두고 그 안에서 움직임
+const PAN = 1.1; // 사진을 화면보다 10% 크게 두고 그 안에서 움직임(398차 #1024: 16% → 10% — 덜 확대)
 export const END_XFADE = 0.5; // 끝 화면 들어갈 때
 
 /** 화면 비율별 자막 틀: 글자 크기·한 줄 글자 수·아래 여백(세로 영상은 아래 24% = 인스타·쇼츠 설명·버튼 자리 피함) */
 function subBox(d: Dim) {
-  if (d.h > d.w) return { size: Math.round(d.w * 0.056), perLine: 15, marginV: Math.round(d.h * 0.24), marginH: Math.round(d.w * 0.08) };
+  // 398차 #1024(시험 영상을 장면으로 뽑아 보니 휴대폰에서 자막이 작음): 세로 영상 자막 5.6% → 6.8%(한 줄 15자 → 12자)
+  if (d.h > d.w) return { size: Math.round(d.w * 0.068), perLine: 12, marginV: Math.round(d.h * 0.24), marginH: Math.round(d.w * 0.08) };
   if (d.w > d.h) return { size: Math.round(d.h * 0.052), perLine: 26, marginV: Math.round(d.h * 0.08), marginH: Math.round(d.w * 0.1) };
   return { size: Math.round(d.w * 0.054), perLine: 16, marginV: Math.round(d.h * 0.1), marginH: Math.round(d.w * 0.09) };
 }
@@ -59,21 +60,39 @@ const assText = (s: string) => s.replace(/[{}\\]/g, '').replace(/\r?\n/g, ' ');
 const assColor = (hex: string, alpha = 0) => { const h = /^#?([0-9a-f]{6})$/i.exec(hex)?.[1] ?? 'FFFFFF'; return `&H${alpha.toString(16).padStart(2, '0').toUpperCase()}${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}`.toUpperCase(); };
 export const isLight = (hex: string) => { const h = /^#?([0-9a-f]{6})$/i.exec(hex)?.[1]; if (!h) return false; const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255); return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.62; };
 
-export function buildAss(o: { dim: Dim; font: string; subs: { start: number; end: number; text: string }[]; end?: { start: number; end: number; headline: string; cta: string; logo: boolean; color: string } }) {
+export function buildAss(o: { dim: Dim; font: string; subs: { start: number; end: number; text: string; big?: boolean }[]; end?: { start: number; end: number; headline: string; cta: string; logo: boolean; color: string } }) {
   const b = subBox(o.dim); const notes: string[] = []; let minSize = 0; // 209차 ⑦ 자막 크기 검수(가장 작은 자막)
   const ink = o.end && isLight(o.end.color) ? '#161616' : '#FFFFFF';
-  const head = Math.round(Math.min(o.dim.w, o.dim.h) * 0.068); const cta = Math.round(Math.min(o.dim.w, o.dim.h) * 0.044);
+  // 398차 #1024(로컬 11/13 '끝 카드 글자가 화면의 3% 정도로 작습니다'): 끝 화면 큰 글자 6.8% → 9.5%, 행동 권유 4.4% → 6.2%(짧은 변 기준). 길면 줄을 나누고, 그래도 넘치면 8%까지만 줄임
+  const m = Math.min(o.dim.w, o.dim.h); const avail = o.dim.w - b.marginH * 2;
+  const headText = o.end ? assText(o.end.headline) : ''; const ctaText = o.end ? assText(o.end.cta) : '';
+  let head = Math.round(m * 0.095); const headMin = Math.round(m * 0.08);
+  let hl = wrapKo(headText, Math.max(4, Math.floor(avail / head)));
+  if (hl.length > 2) { head = Math.max(headMin, Math.min(head, Math.floor(avail / Math.ceil(headText.length / 2 + 1)))); hl = wrapKo(headText, Math.max(4, Math.floor(avail / head))); }
+  hl = hl.slice(0, 3);
+  const cta = Math.max(Math.round(m * 0.05), Math.min(Math.round(m * 0.062), ctaText.length ? Math.floor(avail / (ctaText.length * 0.72)) : Math.round(m * 0.062)));
+  // 그래픽 카드 장면의 큰 글자(화면 가운데) — 짧은 변의 10.5%
+  const big = Math.round(m * 0.105);
   const lines = [
     '[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${o.dim.w}`, `PlayResY: ${o.dim.h}`, 'WrapStyle: 2', 'ScaledBorderAndShadow: yes', '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     `Style: Sub,${o.font},${b.size},&H00FFFFFF,&H00FFFFFF,&H00141414,&H8C000000,-1,0,0,0,100,100,0,0,1,${Math.max(2, Math.round(b.size / 18))},${Math.max(1, Math.round(b.size / 30))},2,${b.marginH},${b.marginH},${b.marginV},1`,
     `Style: Head,${o.font},${head},${assColor(ink)},${assColor(ink)},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,5,${b.marginH},${b.marginH},0,1`,
-    `Style: Cta,${o.font},${cta},${assColor(ink)},${assColor(ink)},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,5,${b.marginH},${b.marginH},0,1`, '',
+    `Style: Cta,${o.font},${cta},${assColor(ink)},${assColor(ink)},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,5,${b.marginH},${b.marginH},0,1`,
+    `Style: Big,${o.font},${big},&H00FFFFFF,&H00FFFFFF,&H00141414,&H78000000,-1,0,0,0,100,100,0,0,1,${Math.max(2, Math.round(big / 30))},${Math.max(1, Math.round(big / 26))},5,${b.marginH},${b.marginH},0,1`, '',
     '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
   o.subs.forEach((s, k) => {
     if (!s.text.trim() || s.end - s.start < 0.4) return;
+    if (s.big) { // 398차: 그래픽 카드 = 화면 가운데 큰 글자(아래에서 살짝 올라오며 나타남) — 네 줄까지, 넘치면 조금 줄임
+      const per = Math.max(4, Math.floor(avail / big)); let bl = wrapKo(assText(s.text), per); let size = big;
+      if (bl.length > 4) { size = Math.round(big * 0.84); bl = wrapKo(assText(s.text), Math.max(4, Math.floor(avail / size))).slice(0, 5); }
+      minSize = minSize ? Math.min(minSize, size) : size;
+      const cx = Math.round(o.dim.w / 2), cy = Math.round(o.dim.h * 0.45), up = Math.round(o.dim.h * 0.018);
+      lines.push(`Dialogue: 0,${assTime(s.start)},${assTime(s.end)},Big,,0,0,0,,{\\move(${cx},${cy + up},${cx},${cy},0,320)\\fad(200,140)${size !== big ? `\\fs${size}` : ''}}${bl.join('\\N')}`);
+      return;
+    }
     const f = fitLines(assText(s.text), b.perLine, b.size);
     if (f.over) notes.push(`장면 ${k + 1} 자막이 길어 세 줄까지만 넣었습니다`);
     minSize = minSize ? Math.min(minSize, f.size) : f.size;
@@ -81,11 +100,10 @@ export function buildAss(o: { dim: Dim; font: string; subs: { start: number; end
   });
   if (o.end) {
     const cx = Math.round(o.dim.w / 2); const y0 = Math.round(o.dim.h * (o.end.logo ? 0.6 : 0.47));
-    const hl = wrapKo(assText(o.end.headline), o.dim.h > o.dim.w ? 12 : 22).slice(0, 2);
     if (hl.length) lines.push(`Dialogue: 1,${assTime(o.end.start + 0.25)},${assTime(o.end.end)},Head,,0,0,0,,{\\pos(${cx},${y0})\\fad(250,0)}${hl.join('\\N')}`);
-    if (o.end.cta.trim()) lines.push(`Dialogue: 1,${assTime(o.end.start + 0.45)},${assTime(o.end.end)},Cta,,0,0,0,,{\\pos(${cx},${y0 + Math.round(head * (hl.length > 1 ? 1.9 : 1.25) + cta)})\\fad(250,0)}${assText(o.end.cta)}`);
+    if (ctaText.trim()) lines.push(`Dialogue: 1,${assTime(o.end.start + 0.45)},${assTime(o.end.end)},Cta,,0,0,0,,{\\pos(${cx},${y0 + Math.round(head * (0.62 * hl.length + 0.7) + cta)})\\fad(250,0)}${ctaText}`);
   }
-  return { ass: lines.join('\n') + '\n', notes, subPct: minSize ? Math.round((minSize / Math.min(o.dim.w, o.dim.h)) * 1000) / 10 : null };
+  return { ass: lines.join('\n') + '\n', notes, subPct: minSize ? Math.round((minSize / m) * 1000) / 10 : null, endPct: o.end && hl.length ? Math.round((head / m) * 1000) / 10 : null };
 }
 
 let sharpMod: any;
@@ -120,13 +138,14 @@ export async function logoPng(logo: Buffer, d: Dim): Promise<Buffer> {
 }
 
 /** start = 원본 파일에서 이 장면이 시작하는 초(187차 ⑦ 한 편짜리 영상을 장면으로 나눠 다시 합성) */
-export type ComposeScene = { file: string; seconds: number; line: string; screenPng?: string | null; start?: number };
+/** 398차 #1024: mode = 사진 장면 모양 — cover(화면을 채워 천천히 움직임, 기본) · contain(사진 전체를 보이고 뒤는 흐린 같은 사진 — 가로 사진을 세로 영상에) · card(브랜드 색 그래픽 카드, 움직임 없음) · big = 자막을 화면 가운데 큰 글자로 */
+export type ComposeScene = { file: string; seconds: number; line: string; screenPng?: string | null; start?: number; mode?: 'cover' | 'contain' | 'card'; big?: boolean };
 export type ComposeInput = { dir: string; aspect: string; scenes: ComposeScene[]; end: { seconds: number; color: string; headline: string; cta: string; logoPng?: string | null };
   narration: ({ file: string; duration: number } | null)[]; bgm?: { file: string } | null; font: { dir: string; family: string }; out: string;
   /** 326차: ffmpeg 시간 제한(기본 250초) — 함수 남은 시간에 맞춰 줄일 수 있게 */ timeoutMs?: number };
 
 /** 한 편 합성 → { 파일, 길이, 알림 } */
-export async function composeVideo(o: ComposeInput): Promise<{ file: string; duration: number; notes: string[]; subPct: number | null; ffmpegMs: number; speed: number | null }> {
+export async function composeVideo(o: ComposeInput): Promise<{ file: string; duration: number; notes: string[]; subPct: number | null; endPct: number | null; cover: number | null; maxGap: number | null; ffmpegMs: number; speed: number | null }> {
   const d = dimOf(o.aspect); const notes: string[] = []; const args: string[] = []; const f: string[] = []; let idx = 0;
   const durs: number[] = [];
   const infos = new Map<string, Awaited<ReturnType<typeof mediaInfo>>>(); // 같은 원본을 여러 장면이 나눠 쓰면 한 번만 읽음
@@ -156,11 +175,22 @@ export async function composeVideo(o: ComposeInput): Promise<{ file: string; dur
   const panOf = (k: number, D: number) => { const f = `min(t/${D.toFixed(3)}\\,1)`; const m = k % 4;
     return m === 0 ? `x='(iw-${d.w})*${f}':y='(ih-${d.h})/2'` : m === 1 ? `x='(iw-${d.w})*(1-${f})':y='(ih-${d.h})/2'` : m === 2 ? `x='(iw-${d.w})/2':y='(ih-${d.h})*${f}'` : `x='(iw-${d.w})/2':y='(ih-${d.h})*(1-${f})'`; };
   o.scenes.forEach((s, k) => {
-    const base = isStill(s.file)
-      ? `[${sceneIn[k]}:v]${STILL},scale=${PW}:${PH}:force_original_aspect_ratio=increase,crop=${PW}:${PH},fps=30,crop=${d.w}:${d.h}:${panOf(k, durs[k])},setsar=1,trim=duration=${durs[k].toFixed(3)},setpts=PTS-STARTPTS`
-      : `[${sceneIn[k]}:v]${fit},tpad=stop_mode=clone:stop_duration=3,trim=duration=${durs[k].toFixed(3)},setpts=PTS-STARTPTS`;
+    const D = durs[k].toFixed(3); const still = isStill(s.file);
+    let base: string;
+    if (still && s.mode === 'card') base = `[${sceneIn[k]}:v]scale=${d.w}:${d.h},setsar=1,${STILL},fps=30,trim=duration=${D},setpts=PTS-STARTPTS`; // 그래픽 카드: 그대로(움직임 없음)
+    else if (still && s.mode === 'contain') { // 398차: 사진 전체를 보이고(가로 94%·세로 60% 안) 뒤는 같은 사진을 흐리게 — 흐림은 한 장에만 걸고 되풀이(프레임마다 흐리지 않음)
+      const FW = even(d.w * 0.94), FH = even(d.h * 0.6), up = d.h > d.w ? Math.round(d.h * 0.05) : 0, drift = Math.round(d.h * 0.012);
+      f.push(`[${sceneIn[k]}:v]split=2[ca${k}][cb${k}]`);
+      f.push(`[ca${k}]scale=${d.w}:${d.h}:force_original_aspect_ratio=increase,crop=${d.w}:${d.h},gblur=sigma=30,eq=brightness=-0.12:saturation=0.9,setsar=1,${STILL},fps=30[cg${k}]`);
+      f.push(`[cb${k}]scale=${FW}:${FH}:force_original_aspect_ratio=decrease,setsar=1,${STILL},fps=30[cf${k}]`);
+      f.push(`[cg${k}][cf${k}]overlay=x=(W-w)/2:y='(H-h)/2-${up}+${drift}*(1-min(t/${D}\\,1))',trim=duration=${D},setpts=PTS-STARTPTS[cv${k}]`);
+      base = `[cv${k}]null`;
+    }
+    // 398차: 사진을 옮길 때 2픽셀 단위로 끊겨 떨려 보였음(yuv420 자르기) → 4:4:4 로 바꿔 1픽셀 단위(exact)
+    else if (still) base = `[${sceneIn[k]}:v]${STILL},scale=${PW}:${PH}:force_original_aspect_ratio=increase,crop=${PW}:${PH},format=yuv444p,fps=30,crop=${d.w}:${d.h}:${panOf(k, durs[k])}:exact=1,setsar=1,trim=duration=${D},setpts=PTS-STARTPTS`;
+    else base = `[${sceneIn[k]}:v]${fit},tpad=stop_mode=clone:stop_duration=3,trim=duration=${D},setpts=PTS-STARTPTS`;
     if (devIn[k] < 0) { f.push(`${base},format=yuv420p,fps=30[s${k}]`); return; }
-    f.push(`${base},gblur=sigma=26,eq=brightness=-0.07:saturation=0.85,format=yuv420p[bg${k}]`);
+    f.push(still && s.mode === 'card' ? `${base},format=yuv420p[bg${k}]` : `${base},gblur=sigma=26,eq=brightness=-0.07:saturation=0.85,format=yuv420p[bg${k}]`);
     f.push(`[${devIn[k]}:v]${STILL},format=rgba,fade=t=in:st=0:d=0.35:alpha=1[dv${k}]`);
     f.push(`[bg${k}][dv${k}]overlay=x=(W-w)/2:y=(H-h)/2-${d.h > d.w ? Math.round(d.h * 0.07) : 0}+${Math.round(d.h * 0.025)}*(1-min(t/0.55\\,1)):shortest=1,format=yuv420p,fps=30[s${k}]`);
   });
@@ -172,7 +202,12 @@ export async function composeVideo(o: ComposeInput): Promise<{ file: string; dur
   const endStart = acc - END_XFADE; const total = endStart + E;
   f.push(`[${cur}][end]xfade=transition=fade:duration=${END_XFADE}:offset=${endStart.toFixed(3)},trim=duration=${total.toFixed(3)}[xv]`);
   // 자막 + 끝 화면 글자(ASS)
-  const subs = o.scenes.map((s, k) => ({ start: starts[k] + (k ? XFADE / 2 : 0.15), end: starts[k] + durs[k] - (k === durs.length - 1 ? END_XFADE : XFADE) / 2 - 0.05, text: s.line }));
+  // 398차 #1024(로컬 11/13 '장면 전환 도중 두 장이 겹쳐 글자가 흐립니다'): 겹쳐 넘기는 구간(0.4초)에는 자막을 두지 않음 — 앞 장면 자막은 겹침이 시작되기 전에 끝나고, 다음 자막은 겹침이 끝난 뒤 시작
+  const subs = o.scenes.map((s, k) => ({ start: starts[k] + (k ? XFADE : 0.15), end: (k < durs.length - 1 ? starts[k + 1] : endStart) - 0.04, text: s.line, big: !!s.big }));
+  // 자막이 덮는 비율·자막 없는 가장 긴 구간(끝 화면 전까지) — 렌더 뒤 검사에 씀
+  const shown = subs.filter((x) => x.text.trim() && x.end - x.start >= 0.4);
+  let maxGap = 0, at = 0; for (const x of shown) { maxGap = Math.max(maxGap, x.start - at); at = x.end; } maxGap = Math.max(maxGap, endStart - at);
+  const cover = endStart > 0 ? shown.reduce((n, x) => n + (x.end - x.start), 0) / endStart : null;
   const a = buildAss({ dim: d, font: o.font.family, subs, end: { start: endStart, end: total, headline: o.end.headline, cta: o.end.cta, logo: logoIn >= 0, color: o.end.color } });
   notes.push(...a.notes);
   await writeFile(join(o.dir, 'subs.ass'), a.ass);
@@ -199,5 +234,5 @@ export async function composeVideo(o: ComposeInput): Promise<{ file: string; dur
   const run = await ffmpegOk([...args, '-/filter_complex', 'graph.txt', '-map', '[vout]', '-map', '[aout]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-r', '30', '-g', '60',
     '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', '-t', total.toFixed(3), o.out], { cwd: o.dir, timeoutMs: o.timeoutMs ?? 250_000, env: { FONTCONFIG_FILE: fontsConf, FONTCONFIG_PATH: o.dir } });
   const info = await mediaInfo(join(o.dir, o.out));
-  return { file: o.out, duration: info.duration ?? total, notes, subPct: a.subPct, ffmpegMs: Date.now() - tf, speed: run.progress?.speed ?? null };
+  return { file: o.out, duration: info.duration ?? total, notes, subPct: a.subPct, endPct: a.endPct, cover: cover === null ? null : Math.round(cover * 100) / 100, maxGap: Math.round(maxGap * 10) / 10, ffmpegMs: Date.now() - tf, speed: run.progress?.speed ?? null };
 }

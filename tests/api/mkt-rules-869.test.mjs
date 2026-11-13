@@ -74,15 +74,19 @@ test('회사 설정 plainFill(예전 방식) 켜면 사진이 없어도 장을 �
   await ctx.owner.ok('PUT', '/api/marketing/auto', { plainFill: false });
 });
 
-test('영상(사진 영상): 이 브랜드 사진만 씀 — 남의 브랜드 사진뿐이면 영상 보류 + 판 메모 + 자료 요청', async () => {
+test('영상(사진 영상): 이 브랜드 사진만 씀 — 남의 브랜드 사진뿐이면 실사 없이 그래픽 카드로 만듦(398차 #1024: 사진이 모자라도 보류하지 않음 · 남의 사진은 안 씀)', async () => {
   const id = await slot(P.brand, '규칙짐 릴스', { kind: 'reels', days: 5 });
-  const d = say({ title: '규칙짐 아침', body: '아침 7시에 문을 엽니다.', brief: '실사', why: '', hooks: [], keyword: '운동', script: ['아침 7시 문 여는 곳', '상담은 전화로'] });
+  const d = say({ title: '규칙짐 아침', body: '아침 7시에 문을 엽니다.', brief: '실사', why: '', hooks: [], keyword: '운동', script: ['아침 7시 문 여는 곳', '기구가 넉넉합니다', '샤워실은 매일 청소합니다', '처음이면 둘러보기부터', '상담은 전화로'] });
   await ctl({ anthropicReset: true, anthropicQueue: [d, d] });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const c = await cur(id);
-  assert.equal(c.media_ids.length, 0, '남의 사진으로 영상 안 만듦');
-  assert.match(c.note, /이 브랜드 실제 사진 \d장\(3장 넘게 필요\) — 자료 요청/);
-  assert.equal((await sql`select count(*)::int n from mkt_briefs where content_id = ${id}`)[0].n, 0);
+  const [b] = await sql`select status, result from mkt_briefs where content_id = ${id}`;
+  assert.equal(b?.status, 'review', JSON.stringify(b?.result?.errors ?? c.note));
+  // 이 브랜드 사진은 1장(P.cover)뿐 — 남의 브랜드 사진 4장은 장면에 안 들어가고 나머지 장면은 그래픽 카드
+  assert.deepEqual(b.result.reuse.photos, [P.cover], '이 브랜드 사진만(남의 브랜드 사진은 장면에 없음)');
+  assert.equal(b.result.variants[0].scenes.filter((x) => x.key).length, 1); assert.equal(b.result.variants[0].scenes.filter((x) => x.mode === 'card').length, 4, '나머지는 그래픽 카드');
+  assert.equal(c.media_ids.length, 1, c.note);
+  assert.match(c.note, /그래픽·사진 영상\(장면 5개 — 그래픽 카드 4 · 화면 캡처 0 · 품질 통과 실사 1 · 생성 비용 0\)/);
 });
 
 test('#874 기간 시안 다시 만들기: 관리자만 · 먼저 대상 수(dryRun) → 휴지통(규칙 칸 연결 풀림) + 같은 자리 새 칸(지금 제작) · 게시·승인된 글은 그대로', async () => {

@@ -53,10 +53,12 @@ export type V2Scene = { k: number; seconds: number; line: string; visualEn: stri
   tries: number; generated?: number; failRetries?: number; regens?: number; error?: string | null; qa?: SceneQa | null; lastIssues?: string[];
   /** 187차 ⑦ 다시 합성: 한 편짜리 원본에서 이 장면이 시작하는 초(같은 원본을 장면마다 나눠 씀) */
   start?: number;
-  /** 271차 #811 사진 장면(자료실 실사, 천천히 움직여 합성 — 생성 비용 0) */ still?: boolean };
+  /** 271차 #811 사진 장면(자료실 실사, 천천히 움직여 합성 — 생성 비용 0) */ still?: boolean;
+  /** 398차 #1024 사진 영상 장면 모양: cover(화면 채움) · contain(사진 전체 + 흐린 배경) · card(브랜드 색 그래픽 카드 — key 없음) · big = 가운데 큰 글자 */ mode?: 'cover' | 'contain' | 'card'; big?: boolean };
 /** source = 187차 ⑦ 한 편짜리 원본(자료실) — 합성 때 길이를 재서 장면으로 나눔 · aspect = 원본 화면 비율(의뢰 종류와 다를 때) */
 export type V2Variant = { n: number; scenes: V2Scene[]; mediaId?: string | null; duration?: number | null; notes?: string[]; error?: string | null; renderTries?: number; renderError?: string | null;
-  source?: { key: string; fileId: string; lines: string[] } | null; aspect?: string | null; origin?: string | null; checks?: VideoChecks | null };
+  source?: { key: string; fileId: string; lines: string[] } | null; aspect?: string | null; origin?: string | null; checks?: VideoChecks | null;
+  /** 398차 #1024 사진 영상 렌더 뒤 검사(자막 덮임·글자 크기·끝 카드) */ slide?: import('./video/slidePlan').SlideChecks | null };
 type PlanScene = Pick<V2Scene, 'k' | 'seconds' | 'line' | 'visualEn' | 'screen'> & { beat: Beat };
 
 /** 장면 계획: AI 장면(3~5초 정수, 3~5개) → 규격 길이(끝 화면 2.5초·겹침 포함)에 맞춘다. AI 가 없으면 메시지로 4장면 */
@@ -388,14 +390,17 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string, o: { dea
   const end = endCtaOf(String(kit.cta || p.endCard?.cta || ''), String(brand?.facts?.phone ?? ''));
   const endCta = end.cta; if (end.note) notes.push(end.note);
   const scenes: ComposeScene[] = []; let screens = 0;
+  const cardColor = kit.endColor || brand?.color || '#0F766E';
   for (const s of v.scenes) {
-    const file = s.still ? await stillKey(s.key!, `p${v.n}-${s.k}.jpg`) : await fetchKey(s.key!);
+    let file: string;
+    if (s.mode === 'card') { file = `c${v.n}-${s.k}.png`; await writeFile(join(dir, file), await (await import('./video/slidePlan')).cardPng(d, cardColor, s.k)); } // 398차: 그래픽 카드(브랜드 색 도형, 글자는 자막 엔진)
+    else file = s.still ? await stillKey(s.key!, `p${v.n}-${s.k}.jpg`) : await fetchKey(s.key!);
     let screenPng: string | null = null;
     if (s.screen?.mediaId) {
       const img = await libBytes(b.tenant, s.screen.mediaId, /^image\//);
       if (img) { screenPng = `dev${v.n}-${s.k}.png`; await writeFile(join(dir, screenPng), await C.deviceMock(img.data, s.screen.device, d)); screens++; } else notes.push(`장면 ${s.k + 1} 화면 캡처를 찾지 못해 합성하지 않았습니다`);
     }
-    scenes.push({ file, seconds: s.seconds, line: s.line, screenPng, start: s.start ?? 0 });
+    scenes.push({ file, seconds: s.seconds, line: s.line, screenPng, start: s.start ?? 0, mode: s.mode, big: !!s.big && !screenPng });
   }
   await mkdir(join(dir, 'fonts'), { recursive: true }); let family = 'Noto Sans KR';
   const font = await libBytes(b.tenant, kit.fontFileId, /font|\.(otf|ttf)$/i);
@@ -417,16 +422,19 @@ async function renderVariant(b: any, r: any, v: V2Variant, dir: string, o: { dea
   lap('ffmpeg');
   // 209차 ⑦ 검수 기준 — 새로 만든 영상만(다시 합성은 예전 영상 그대로라 빼고)
   const checks = r.reuse ? null : videoChecks({ scenes: v.scenes, screens, subPct: out.subPct, end: { logo: !!logo, headline: !!String(headline).trim(), phone: PHONE.test(endCta) } });
+  // 398차 #1024: 사진 영상(새 기준)은 렌더 뒤 자동 검사 — 자막 덮임 비율·자막 없는 구간·글자 크기·끝 카드 글자 크기·대본
+  const slide = r.reuse?.slideshow && r.reuse?.gen ? (await import('./video/slidePlan')).slideChecks({ lines: v.scenes.map((x) => x.line), title: String(b.message ?? ''), cover: out.cover, maxGap: out.maxGap, subPct: out.subPct, endPct: out.endPct,
+    photos: v.scenes.filter((x) => x.still && x.mode !== 'card').length, cards: v.scenes.filter((x) => x.mode === 'card' && !x.screen).length, screens }) : null;
   const data = await readFile(join(dir, out.file));
   const actor = await actorFor(b.created_by);
   const { saveGeneratedFile } = await import('./library');
   const reuse = r.reuse ?? null; // 187차 ⑦ 다시 합성 — 원본 영상·원장 줄을 meta 에(다시 합성 목록이 이 파일을 원본으로 다시 고르지 않게)
   const slides = !!reuse?.slideshow, screen = !!reuse?.screen; // 271차 #811 실제 사진 영상 · 273차 앱 화면 녹화 — 'AI 생성'·'다시 합성'이 아님
-  const title = `${spec.label} 영상${b.quantity > 1 ? ` ${v.n + 1}` : ''} — ${String(b.message).slice(0, 30)}${slides ? ' (실제 사진)' : screen ? ' (화면 녹화)' : reuse ? ' (다시 합성)' : ''}`;
-  const f = await saveGeneratedFile(actor, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.mp4`, mime: 'video/mp4', data, title, folder: '마케팅', tags: ['제작의뢰실', ...(slides ? ['실제 사진', '합성'] : screen ? ['화면 녹화', '합성'] : ['AI 생성', '합성', ...(reuse ? ['다시 합성'] : [])])], source: 'ai', space: 'marketing',
+  const title = `${spec.label} 영상${b.quantity > 1 ? ` ${v.n + 1}` : ''} — ${String(b.message).slice(0, 30)}${slides ? (reuse?.gen ? ' (그래픽·사진)' : ' (실제 사진)') : screen ? ' (화면 녹화)' : reuse ? ' (다시 합성)' : ''}`;
+  const f = await saveGeneratedFile(actor, { fileName: `${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.mp4`, mime: 'video/mp4', data, title, folder: '마케팅', tags: ['제작의뢰실', ...(slides ? [reuse?.gen ? '그래픽·사진' : '실제 사진', '합성'] : screen ? ['화면 녹화', '합성'] : ['AI 생성', '합성', ...(reuse ? ['다시 합성'] : [])])], source: 'ai', space: 'marketing',
     meta: { video: { pipeline: 'v2', scenes: v.scenes.length, duration: out.duration, narration: nar.provider, bgm: bgm?.title ?? null, font: family, ...(reuse ? { reuse: { ledger: reuse.ledger, from: v.origin ?? v.source?.fileId ?? null } } : {}) } } });
   lap('save');
-  return { mediaId: f.id, duration: out.duration, notes: [...notes, ...out.notes], audio: { narration: nar.provider, chars: nar.chars, bgm: bgm?.title ?? null }, endCta, checks, speed: out.speed };
+  return { mediaId: f.id, duration: out.duration, notes: [...notes, ...out.notes], audio: { narration: nar.provider, chars: nar.chars, bgm: bgm?.title ?? null }, endCta, checks, slide, speed: out.speed };
 }
 
 const PHONE = /\d{2,4}-\d{3,4}|\d{8,11}/;
@@ -502,7 +510,7 @@ export async function renderStep(briefId: string, budgetMs = Number(process.env.
     for (const v of r.variants as V2Variant[]) {
       if (v.error || v.mediaId) continue;
       if (Date.now() - t0 > budgetMs - 90_000) break; // 남은 편은 다음 호출에서
-      try { const o = await renderVariant(b, r, v, dir, { deadline: t0 + RENDER_HARD_MS, steps }); v.mediaId = o.mediaId; v.duration = o.duration; v.notes = o.notes; v.checks = o.checks; v.renderError = null; r.audio = o.audio; r.endCta = o.endCta; entry.speed = o.speed; }
+      try { const o = await renderVariant(b, r, v, dir, { deadline: t0 + RENDER_HARD_MS, steps }); v.mediaId = o.mediaId; v.duration = o.duration; v.notes = o.notes; v.checks = o.checks; v.slide = o.slide; v.renderError = null; r.audio = o.audio; r.endCta = o.endCta; entry.speed = o.speed; }
       catch (e: any) {
         v.renderTries = (v.renderTries ?? 0) + 1; v.renderError = String(e?.message ?? e).slice(0, 300); if (v.renderTries >= 2) v.error = `합성 실패: ${v.renderError}`;
         // 326차(로컬 11/02 ③: 오류 기록에 mkt:render 가 없음): 편 단위 합성 실패도 오류 기록(error_logs)에 — 의뢰 행을 안 열어도 운영 화면에서 보이게
@@ -541,7 +549,15 @@ async function finalize(b: any, r: any) {
   const scenesN = variants[0]?.scenes.length ?? 0; const reuse = r.reuse ?? null;
   // 187차 ⑦ 다시 합성: 새로 만든 것 없음(생성 크레딧 0) — 들어간 것만 정직하게(자막 줄이 있을 때만 '자막', 전화가 들어갔을 때만 '끝 화면 전화')
   const reuseNote = () => { const subs = variants.some((v) => v.scenes.some((x) => x.line.trim())); const tel = /\d{2,4}-\d{3,4}|\d{8,11}/.test(String(r.endCta ?? ''));
-    return `${reuse?.slideshow ? `실제 사진 ${scenesN}장으로 만든 영상(생성 비용 0)` : reuse?.screen ? '앱 화면 녹화로 만든 영상(생성 비용 0)' : '기존 영상 새 방식으로 다시 합성(생성 크레딧 0)'} · ${[subs ? '자막' : '', tel ? '끝 화면 전화' : '끝 화면', r.audio?.narration ? '내레이션' : '', r.audio?.bgm ? '배경음' : ''].filter(Boolean).join('·')}`; };
+    const sv = variants[0]?.slide;
+    return `${reuse?.slideshow && sv ? `그래픽·사진 영상(장면 ${scenesN}개 — 그래픽 카드 ${sv.cards} · 화면 캡처 ${sv.screens} · 품질 통과 실사 ${sv.photos} · 생성 비용 0)` : reuse?.slideshow ? `실제 사진 ${scenesN}장으로 만든 영상(생성 비용 0)` : reuse?.screen ? '앱 화면 녹화로 만든 영상(생성 비용 0)' : '기존 영상 새 방식으로 다시 합성(생성 크레딧 0)'} · ${[subs ? '자막' : '', tel ? '끝 화면 전화' : '끝 화면', r.audio?.narration ? '내레이션' : '', r.audio?.bgm ? '배경음' : ''].filter(Boolean).join('·')}`; };
+  // 398차 #1024(대표 11/13): 사진 영상이 렌더 뒤 검사(자막 덮임·글자 크기·끝 카드·대본)에 걸리면 승인함에 올리지 않음 — 파일은 자료실에 남고 의뢰는 '검사 미달'로 끝(글은 '영상 시안 제작 중' 그대로 → 정기 실행이 다시 시도)
+  const slideFails = variants.flatMap((v) => v.mediaId ? (v.slide?.fails ?? []) : []);
+  if (reuse?.slideshow && slideFails.length) {
+    const msg = `영상 검사 미달 — ${[...new Set(slideFails)].join(' · ')}`.slice(0, 500);
+    await save(b.id, { ...r, stage: 'failed', mediaIds, slideFails, notes, renderAt: null, errors: [...(r.errors ?? []), msg].slice(-30) }, { status: 'failed', error: msg });
+    return { status: 'failed', stage: 'failed', mediaIds, errors: [msg] };
+  }
   if (reuse?.auto) { // 271차 #811 자동 제작 원고의 실제 사진 영상 — 새 판 없이 그 판에 붙임(주 묶음 초안은 초안 그대로)
     const attached = await (await import('./mktSlideshow')).attachAuto(b, reuse, mediaIds, reuseNote());
     await save(b.id, { ...r, stage: 'done', mediaIds, review, checkFails, notes, renderAt: null, attached }, { status: 'review', error: null });

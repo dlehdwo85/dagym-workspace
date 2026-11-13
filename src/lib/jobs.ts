@@ -240,6 +240,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('mktRender', async () => (await import('./mktVideo')).renderTick()); // #454 영상: 장면 다 만든 의뢰 → 검수·합성 함수(/api/marketing/studio/render, ffmpeg)
   await step('mktScenes', async () => (await import('./mktScenes')).scenesTick()); // 188차: 자료실 영상 → 장면 사진 2~3장(합성 함수의 ffmpeg) → 사진 AI 설명 → 시안 실사 후보
   await step('mktVideoRetry', async () => (await import('./mktSlideshow')).videoRetryTick()); // 301차 #865: '영상 시안 제작 중'으로 멈춘 영상 글 — 사진 영상·녹화·장면 사진으로 다시(6시간에 한 번)
+  await step('mktVideoRemake', async () => (await import('./mktSlideshow')).videoRemakeTick()); // 398차 #1024: 승인함의 옛 기준 사진 영상 시안을 새 기준(대본 자막·소재 거름·그래픽 카드)으로 한 번씩 다시
   await step('mktPhotoFill', async () => (await import('./mktPhotoGen')).photoFillTick({ budgetMs: 40000 })); // 189차: 실사가 모자란 시안 칸 → 같은 브랜드 실사를 참고로 실사풍 생성(회사 설정 photo_gen·크레딧 한도) · 진행 중 생성·[AI로 다시 만들기] 결과 이어받기
   await step('mktPublish', async () => (await import('./mktPublish')).publishTick()); // 대표 10/20 22:30 ② M1 서버 게시 실행기(승인된 글 → 인스타·페북·스레드·유튜브, 자동 게시 켠 회사는 예정 시각에)
   await step('mktPublishDeleted', async () => (await import('./mktPublish')).publishDeletedTick()); // 로컬 10/21 11:45: 게시 뒤 삭제 감지(30일·6시간마다) → 작업 deleted·콘텐츠 '게시 삭제됨'·알림

@@ -38,7 +38,7 @@ async function slot(brand, title, { channel = 'instagram', kind = 'feed', days =
 const cur = async (id) => (await sql`select c.status, c.current_version, c.quality, v.media_ids, v.note from mkt_contents c join mkt_versions v on v.content_id = c.id and v.version = c.current_version where c.id = ${id}`)[0];
 const briefPhotos = async (id) => (await sql`select result->'reuse'->'photos' as p from mkt_briefs where content_id = ${id} order by created_at desc limit 1`)[0]?.p ?? null;
 const origOf = async (ids) => Promise.all(ids.map(async (id) => (await sql`select coalesce(meta->>'of', id::text) as o from library_files where id = ${id}`)[0].o));
-const reelsDraft = say({ title: '얼굴짐 아침', body: '아침 7시에 문을 엽니다.', brief: '실사', why: '', hooks: [], keyword: '운동', script: ['아침 7시 문 여는 곳', '기구가 넉넉합니다', '상담은 전화로'] });
+const reelsDraft = say({ title: '얼굴짐 아침', body: '아침 7시에 문을 엽니다.', brief: '실사', why: '', hooks: [], keyword: '운동', script: ['아침 7시 문 여는 곳', '기구가 넉넉합니다', '러닝머신도 줄 서지 않아요', '샤워실은 매일 청소합니다', '처음이면 둘러보기부터', '상담은 전화로'] }); // 398차 #1024: 장면 수 = 대본 줄 수(첫·끝은 그래픽 카드 → 실사 4장면)
 const run = async (queue) => { await ctl({ anthropicReset: true, anthropicQueue: queue }); return ctx.owner.ok('POST', '/api/marketing/auto/run', {}); };
 
 before(async () => {
@@ -154,6 +154,7 @@ test('④ 사진 영상 장면 기록: 장면 사진 이름·첫 장면·얼굴 
   const id = await slot(P.face, '얼굴짐 직접 고른 영상', { kind: 'reels', days: 20 });
   await sql`update mkt_contents set auto = false where id = ${id}`; // 정기 실행이 이 칸을 만들지 않게(직접 만드는 영상)
   const picked = [P.eq[0], P.unk, P.eq[1], P.boxed];
+  await sql`update mkt_contents set quality = ${sql.json({ script: ['아침 7시 문 여는 곳', '기구가 넉넉합니다', '러닝머신도 줄 서지 않아요', '처음이면 둘러보기부터', '상담은 전화로'] })} where id = ${id}`; // 398차: 자막 = 대본 줄(대본 없는 글은 영상을 만들지 않음)
   const r = await ctx.owner.ok('POST', '/api/marketing/studio/slideshow', { contentId: id, photoIds: picked });
   assert.equal(r.photos, 3, JSON.stringify(r));
   const reuse = (await sql`select result->'reuse' as r from mkt_briefs where content_id = ${id} order by created_at desc limit 1`)[0].r;
@@ -212,7 +213,7 @@ test('⑥ 단체 사진: 사람 2명 이상·단체 장면은 얼굴 있음으�
   assert.equal((await vis(old1)).faces, false);
   // 영상: 고른 사진 중 단체 사진은 얼굴 자리를 몰라 뺌
   const id = await slot(P.face, '얼굴짐 단체 사진 영상', { kind: 'reels', days: 25 });
-  await sql`update mkt_contents set auto = false where id = ${id}`;
+  await sql`update mkt_contents set auto = false, quality = ${sql.json({ script: ['아침 7시 문 여는 곳', '기구가 넉넉합니다', '러닝머신도 줄 서지 않아요', '처음이면 둘러보기부터', '상담은 전화로'] })} where id = ${id}`;
   await ctx.owner.ok('POST', '/api/marketing/studio/slideshow', { contentId: id, photoIds: [P.eq[2], grp, P.eq[3], P.eq[4]] });
   const reuse = (await sql`select result->'reuse' as r from mkt_briefs where content_id = ${id} order by created_at desc limit 1`)[0].r;
   assert.deepEqual(reuse.faceDropped, [grp]); assert.ok(!reuse.photos.includes(grp));
