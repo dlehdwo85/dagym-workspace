@@ -34,7 +34,7 @@ import { useResearchAsk } from './sales/ResearchAsk';
 
 export type Task = {
   space?: 'sales' | 'marketing' | null; // 대표 확정(10/19) 만든 공간
-  sales_ref?: { kind: string; id: string; name?: string; bidInfo?: { briefing?: { at?: string | null; required?: boolean; place?: string | null } | null; briefingNone?: boolean; deadline?: string | null } | null; cancel?: { day?: string | null; reason?: string | null } | null } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천 · 335차 bidInfo
+  sales_ref?: { kind: string; id: string; name?: string; bidInfo?: { briefing?: { kind?: string | null; at?: string | null; required?: boolean; place?: string | null } | null; briefingNone?: boolean; deadline?: string | null } | null; cancel?: { day?: string | null; reason?: string | null } | null } | null; lead_id?: string | null; // 대표 10/20 14:15 영업 자동 업무 원천 · 335차 bidInfo
   assigned_by_rule?: string | null; // #100 담당자 지정 규칙으로 배정됨
   co_assignees?: Co[] | null; assignee_done?: boolean | null; complete_rule?: 'primary' | 'all'; // 대표 10/23 #475 함께 맡은 담당자 · 10/24 첫 담당자의 내 몫 완료
   id: string; title: string; status: TaskStatus; priority: any; project_id: string | null; project_name: string | null; project_color: string | null;
@@ -594,8 +594,7 @@ function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onP
       {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 요청자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
       {/* 380차 #1017: 요청 ○○·본사(소속)·프로젝트(웹사이트 문의)·사업(다짐·하이링크) 표기는 줄에서 뺌 — 상세에 있음 */}
       {/* 308차 #866: 공동 업무 줄은 요청자 칸 대신 — 남이 요청했으면 '요청 이름' 한 마디(내가 요청했으면 안 보임) · 소속 이름(본사)은 뺌 */}
-      {t.subtask_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="하위 업무"><ListChecks className="size-3.5" />{t.subtask_done}/{t.subtask_count}</span>}
-      {t.checklist_total > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="체크리스트"><CheckCheck className="size-3.5" />{collab && '할 일 '}{t.checklist_done}/{t.checklist_total}</span>}
+      {/* 395차 #1020(대표 11/08 '할 일 개수는 뺍니다 · 댓글과 첨부 표시만'): 업무 줄의 '할 일 n/m'(체크리스트)·하위 업무 n/m 칩은 뺌 — 개수는 상세에 */}
       {t.comment_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
       {/* V35 1: 첨부는 파란 칩으로 눈에 띄게, 고객에게 보냄 = 초록 · 고객이 열어 봄 = 진한 초록 */}
       {/* 330차(대표 11/02 15:2x): 개수 대신 종류 — 'PDF' · 'HWP 2 · PDF 1'(휴대폰 폭에서도 줄 바꿈 없이) */}
@@ -1377,9 +1376,17 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
             {/* 344차(대표 11/02 #925): 발주처가 취소한 공고의 열린 업무 — '공고 취소' 빨간 칩(상세에서 [공고 취소로 완료]) */}
             {t.sales_ref?.cancel && t.status !== 'done' && <span className="shrink-0 rounded-full bg-red-50 px-1.5 text-[10px] font-semibold text-red-700" data-testid="row-bid-canceled" title={`발주처가 공고를 취소했습니다${t.sales_ref.cancel.reason ? ` · 사유: ${t.sales_ref.cancel.reason}` : ''} — 상세에서 [공고 취소로 완료]`}>공고 취소</span>}
             {/* 380차 #1017: 입찰 업무 줄 = '현설 11/9 11시'(필수면 '필수', 3일 안 빨강, 지나면 회색) · '입찰 마감 11/16 17시' — 정시는 'n시', 분이 있으면 '11:30'(폭이 좁아서) */}
-            {t.sales_ref?.bidInfo?.briefing?.at && !t.sales_ref.bidInfo.briefingNone && (() => { const b = t.sales_ref.bidInfo.briefing; const dd = daysTo(String(b.at)); return (
-              <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', dd < 0 ? 'bg-slate-100 text-ink-3' : dd <= 3 ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800')} data-testid="row-bid-briefing" data-past={dd < 0 || undefined}
-                title={`현장설명회${b.required ? '(필수)' : ''}${b.place ? ` · ${b.place}` : ''}`}>현설 {hourShort(String(b.at))}{b.required ? ' 필수' : ''}</span>); })()}
+            {/* 395차 #1020(대표 11/08 '현설 표기'): 입찰 업무 줄은 늘 현설 칩 — '현설 11/9 11시 필수'(일시) · '현설 없음' · '현설 공고문 참조' · '현설 필수/임의'(일시 미정) ·
+                아직 원천에서 못 읽었으면 '현설 확인 필요'(정기 실행이 원천을 다시 읽으면 바뀜). 예전엔 일시가 있을 때만 보여 '없음'·'공고문 참조' 업무는 칩이 없었음 */}
+            {(t.sales_ref?.bidInfo || t.sales_ref?.kind === 'bid') && (() => { const bi = t.sales_ref.bidInfo; const b = bi?.briefing;
+              if (b?.at) { const dd = daysTo(String(b.at)); return (
+                <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', dd < 0 ? 'bg-slate-100 text-ink-3' : dd <= 3 ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800')} data-testid="row-bid-briefing" data-kind="at" data-past={dd < 0 || undefined}
+                  title={`현장설명회${b.required ? '(필수)' : ''}${b.place ? ` · ${b.place}` : ''}`}>현설 {hourShort(String(b.at))}{b.required ? ' 필수' : ''}</span>); }
+              const [label, kind, tone, tip] = bi?.briefingNone ? ['현설 없음', 'none', 'bg-slate-100 text-ink-2', '현장설명회 없음(원천 공고)']
+                : b?.kind === '공고문 참조' ? ['현설 공고문 참조', 'ref', 'bg-amber-50 text-amber-800', '현장설명회 여부·일시는 공고문에 — 공고문을 확인하세요']
+                : b?.kind === '필수' || b?.kind === '임의' ? [`현설 ${b.kind}`, 'kind', 'bg-amber-50 text-amber-800', `현장설명회 ${b.kind} — 일시는 공고문 확인`]
+                : ['현설 확인 필요', 'unknown', 'bg-white text-ink-3 ring-1 ring-line', '원천에서 현장설명회 정보를 아직 못 읽었습니다 — 정기 실행이 다시 읽으면 바뀝니다'];
+              return <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', tone)} data-testid="row-bid-briefing" data-kind={kind} title={tip}>{label}</span>; })()}
             {t.sales_ref?.bidInfo?.deadline && (() => { const dd = daysTo(String(t.sales_ref.bidInfo.deadline)); return (
               <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', dd < 0 ? 'bg-slate-100 text-ink-3' : 'bg-slate-100 text-ink-2')} data-testid="row-bid-close" title="입찰 마감(서류 제출)">입찰 마감 {hourShort(String(t.sales_ref.bidInfo.deadline))}</span>); })()}
             {t.assigned_by_rule && <span className="shrink-0 rounded-full bg-violet-50 px-1.5 text-[10px] font-medium text-violet-800" title="담당자 지정 규칙으로 배정됨" data-testid="row-rule-badge">규칙 배정</span>}
