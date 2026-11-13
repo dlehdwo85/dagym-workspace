@@ -9,7 +9,7 @@ const n0 = (n: number) => Math.round(n).toLocaleString('ko-KR');
 type Kw = { keyword: string; campaign: string; impressions: number; clicks: number; cost: number; leads: number; why?: string };
 type Brief = { brandId: string | null; name: string; color: string | null; cost: number; plan: number | null; planPct: number | null; impressions: number; clicks: number; ctr: number | null; cpc: number | null;
   leads: number; calls: number; balance: { krw: number; days: number | null; level: 'ok' | 'warn' | 'action' } | null; good: Kw[]; waste: Kw[]; todos: string[] };
-type Data = { month: string; day: string; elapsedPct: number; tracked: boolean; coverage: number | null; brands: Brief[]; unbranded: Brief | null };
+type Data = { month: string; day: string; elapsedPct: number; tracked: boolean; judge: boolean; coverage: number | null; brands: Brief[]; unbranded: Brief | null };
 const until = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}까지`;
 
 function Num({ label, value, sub, warn }: { label: string; value: string; sub: string; warn?: boolean }) {
@@ -17,7 +17,7 @@ function Num({ label, value, sub, warn }: { label: string; value: string; sub: s
     <div className="rounded-input bg-slate-50 p-2" data-testid="brief-num">
       <dt className="text-[11px] text-ink-2">{label}</dt>
       <dd className={cx('text-lg font-bold tabular-nums leading-tight', warn ? 'text-red-700' : 'text-ink')}>{value}</dd>
-      <dd className="truncate text-[11px] text-ink-3">{sub}</dd>
+      <dd className="text-[11px] leading-snug text-ink-3">{sub}</dd>
     </div>
   );
 }
@@ -48,14 +48,14 @@ function Card({ b, d }: { b: Brief; d: Data }) {
       {(b.good.length > 0 || b.waste.length > 0) && (
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div data-testid="brief-good">
-            <h4 className="text-xs font-semibold text-emerald-800">잘 되는 검색어</h4>
+            <h4 className="text-xs font-semibold text-emerald-800">{d.judge ? '잘 되는 검색어' : '클릭 많은 검색어'}</h4>
             {b.good.length ? <ol className="mt-1 space-y-1 text-xs">{b.good.map((k, i) => (
               <li key={`${k.keyword}:${i}`} className="flex items-baseline gap-2"><span className="min-w-0 flex-1 truncate font-medium" title={k.campaign}>{i + 1}. {k.keyword}</span>
                 <span className="shrink-0 tabular-nums text-ink-2">{k.leads > 0 ? `문의 ${k.leads} · ` : ''}클릭 {n0(k.clicks)} · {won(k.cost)}</span></li>))}</ol>
-              : <p className="mt-1 text-xs text-ink-3">클릭이 난 검색어가 아직 없습니다</p>}
+              : <p className="mt-1 text-xs text-ink-3">{d.judge ? '문의가 확인된 검색어가 아직 없습니다' : '클릭이 난 검색어가 아직 없습니다'}</p>}
           </div>
           <div data-testid="brief-waste">
-            <h4 className="text-xs font-semibold text-red-800">돈만 쓰는 검색어</h4>
+            <h4 className="text-xs font-semibold text-red-800">{d.judge ? '돈만 쓰는 검색어' : '노출만 되고 클릭 없는 검색어'}</h4>
             {b.waste.length ? <ol className="mt-1 space-y-1 text-xs">{b.waste.map((k, i) => (
               <li key={`${k.keyword}:${i}`} className="flex items-baseline gap-2"><span className="min-w-0 flex-1 truncate font-medium" title={k.campaign}>{i + 1}. {k.keyword}</span>
                 <span className="shrink-0 tabular-nums text-ink-2">{k.why}</span></li>))}</ol>
@@ -75,21 +75,27 @@ function Card({ b, d }: { b: Brief; d: Data }) {
  * 399차 #1025(대표 11/13 "워크인에서 보기가 어렵네요. 한눈에 보기 쉽게"): 사업(브랜드)별 한 장 요약.
  * 숫자 먼저(광고비·클릭·문의·잔액) → 잘 되는 검색어 3 · 돈만 쓰는 검색어 3 → 할 일 3. compact = 마케팅 홈용 한 줄 요약.
  */
-export function BrandBriefs({ compact }: { compact?: boolean }) {
+export function BrandBriefs({ compact, only }: { compact?: boolean; only?: string }) {
   const { data, error, reload } = useApi<Data>('/api/marketing/ad-ops/brief');
   if (error) return compact ? null : <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={compact ? 2 : 4} />;
   const rows = [...data.brands, ...(data.unbranded ? [data.unbranded] : [])];
+  if (only) { // 광고 성과에서 사업을 골랐을 때: 그 사업 카드 한 장만
+    const b = data.brands.find((x) => x.brandId === only);
+    return b ? <section data-testid="brand-brief-one"><p className="mb-1 text-xs text-ink-3">이번 달 {until(data.day)} 요약</p><Card b={b} d={data} /></section> : null;
+  }
   if (compact) {
     const live = rows.filter((b) => b.cost > 0);
+    if (!live.length) return null; // 이번 달 광고 집행이 없는 회사(광고를 안 쓰는 회사 포함)는 홈에 빈 카드를 두지 않음
     return (
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-brief">
         <h2 className="flex flex-wrap items-baseline justify-between gap-2 text-base font-bold"><span>사업별 광고 요약 <span className="text-sm font-normal text-ink-3">이번 달 {until(data.day)}</span></span>
           <Link href="/s/marketing/ad-ops" className="text-xs font-medium" style={{ color: C }}>광고 집행 →</Link></h2>
-        {live.length ? <ul className="mt-1 divide-y divide-line">{live.map((b) => (
+        <ul className="mt-1 divide-y divide-line">{live.map((b) => (
           <li key={b.brandId ?? 'none'} className="py-1.5" data-testid="mkt-home-brief-row" data-brand={b.name}>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm">
-              <span className="inline-flex items-center gap-1.5 font-semibold"><span className="size-2 rounded-full" style={{ background: b.color ?? '#94A3B8' }} aria-hidden />{b.name}</span>
+              {b.brandId ? <Link href={`/s/marketing/ads?brand=${b.brandId}`} className="inline-flex items-center gap-1.5 font-semibold hover:underline" data-testid="mkt-home-brief-link"><span className="size-2 rounded-full" style={{ background: b.color ?? '#94A3B8' }} aria-hidden />{b.name}</Link>
+                : <span className="inline-flex items-center gap-1.5 font-semibold"><span className="size-2 rounded-full" style={{ background: '#94A3B8' }} aria-hidden />{b.name}</span>}
               <span className="tabular-nums">광고비 <b>{won(b.cost)}</b>{b.planPct !== null ? <span className="text-ink-3"> (계획의 {b.planPct}%)</span> : null}</span>
               <span className="tabular-nums text-ink-2">클릭 {n0(b.clicks)}</span>
               <span className={cx('tabular-nums', b.leads === 0 && data.tracked ? 'text-red-700' : 'text-ink-2')}>문의 {n0(b.leads)}건</span>
@@ -97,7 +103,6 @@ export function BrandBriefs({ compact }: { compact?: boolean }) {
             </div>
             {b.todos[0] && <p className="mt-0.5 text-xs text-amber-900">할 일 · {b.todos[0]}</p>}
           </li>))}</ul>
-          : <p className="mt-1 text-xs text-ink-3">이번 달 광고 집행 기록이 없습니다.</p>}
       </section>
     );
   }

@@ -3,6 +3,7 @@ import { dtf } from '@/lib/dtf';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { BrandBriefs } from './BrandBriefs';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, PendingButton, Skeleton, btnCls, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -271,6 +272,8 @@ export function Ads() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{cards.map(([l, v, d]) => <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="ads-card"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div>{d && <div className="mt-0.5 text-[11px]">{d}</div>}</div>)}</div>
       {!!data.savings?.amount && <p className="text-xs text-ink-2" data-testid="ads-savings">대행사 대비 절감액(추정) <b className="text-emerald-800">{won(data.savings.amount)}</b> — 이 기간 광고비 {won(data.savings.spend)} × 대행 수수료율 {data.savings.pct}%(통상 15~20%, 광고 운영에서 바꿀 수 있음)</p>}
       {!brand && (data.byBrand ?? []).length > 0 && <BrandCards rows={data.byBrand} total={t.cost} brands={data.brands ?? []} onPick={setBrand} />}
+      {/* 399차 #1025: 사업을 고르면 그 사업의 이번 달 한 장 요약(잘 되는·돈만 쓰는 검색어·할 일) */}
+      {brand && <BrandBriefs only={brand} />}
       {data.month && <MonthAnalysis month={data.month} analysis={data.analysis} canEdit={data.canEdit} onChange={(a) => setData({ ...data, analysis: a })} />}
       <SumTable rows={data.byProvider ?? []} head="매체" testid="ads-by-provider" label={(r) => <><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: P_COLOR[r.provider] }} />{data.providers.find((x) => x.key === r.provider)?.label ?? r.provider}</> as unknown as string} />
       {!brand && <BrandMatrix rows={data.byBrandProvider ?? []} byBrand={data.byBrand ?? []} byProvider={data.byProvider ?? []} label={(p) => data.providers.find((x) => x.key === p)?.label ?? p} />}

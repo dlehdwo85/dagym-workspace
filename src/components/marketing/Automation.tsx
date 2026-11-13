@@ -38,9 +38,13 @@ const lim = (used: number, max: number | null) => (max === null ? `${used} (한�
 /** 351차 #939 ③(대표 11/04): 크레딧·AI 는 숫자 대신 쓴 % */
 const pc = (used: number, max: number | null) => (max === null ? '제한 없음' : max <= 0 ? '100%' : `${Math.round((used / max) * 100)}%`);
 
+const AUTO_VIEWS = [['now', '현황'], ['rules', '게시 규칙'], ['brands', '브랜드 키트'], ['settings', '설정'], ['log', '기록'], ['all', '전체']] as const;
+type AutoView = (typeof AUTO_VIEWS)[number][0];
+
 /** V41 4-3 + V43: 자동 제작 — 요금제·한도·사용량, 일정·마감·알림, 브랜드 키트, 주간 규칙, 제작 요청 카드, 크레딧 원장 */
 export function Automation() {
-  const tabQ = useSearchParams().get('tab'); const tab = tabQ === 'studio' || tabQ === 'cards' ? tabQ : 'rules'; // 대표 10/20 19:00: '제작의뢰실' 탭 · #499-5 '카드뉴스' 탭
+  const sp = useSearchParams(); const tabQ = sp.get('tab'); const tab = tabQ === 'studio' || tabQ === 'cards' ? tabQ : 'rules'; // 대표 10/20 19:00: '제작의뢰실' 탭 · #499-5 '카드뉴스' 탭
+  const viewQ = sp.get('view'); const view: AutoView = AUTO_VIEWS.some(([k]) => k === viewQ) ? (viewQ as AutoView) : 'now'; const show = (k: AutoView) => view === 'all' || view === k; // 400차 #1025 보기(현황·게시 규칙·브랜드 키트·설정·기록·전체)
   const { data, error, reload } = useApi<View>('/api/marketing/auto');
   const inApp = useInApp(); // 스토어 심사: 앱 안에서는 요금제 링크 없음(요금제 고르기는 사용량·요금제 화면 — 대표 10/27 ⑤)
   const iosApp = inApp; // #839 아이폰 앱(App Store 3.1.1)·298차 #861 안드로이드 앱도: '요금제' 글자 없음
@@ -119,24 +123,28 @@ export function Automation() {
       <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold" style={{ color: C }}>자동 제작</h1>
         {ed && <Button size="sm" variant="secondary" className="ml-auto" onClick={remake} disabled={busy} data-testid="auto-remake" title="기간 안 승인 대기·수정 요청 자동 시안을 휴지통으로 옮기고 같은 자리에 지금 규칙으로 다시 만듭니다">시안 다시 만들기</Button>}
         {ed && <Button size="sm" variant="secondary" onClick={runNow} disabled={busy} data-testid="auto-run">{busy ? '도는 중…' : '지금 한 번 돌리기'}</Button>}</div>
-      <p className="text-xs text-ink-2" data-testid="auto-ai-note">AI 원고는 회사 월 AI 예산(이번 달 사용 {data.usage.companyAi ? (data.usage.companyAi.pct === null ? '제한 없음' : `${data.usage.companyAi.pct}%`) : `${data.usage.companyAiLimitUsd ? Math.round(((data.usage.companyAiUsd ?? 0) / data.usage.companyAiLimitUsd) * 100) : 0}%`})과 마케팅 AI 월 한도 중 먼저 닿는 쪽에서 멈추고(예산은 {data.usage.companyAi?.resetLabel ?? '다음 달 1일'}에 다시 채워짐), 받는 사람에게 하루 한 번 알립니다. 영상 제작은 마케팅 크레딧으로 따로 셉니다. 회사 전체 AI 사용은 <a className="underline" href="/admin/usage">관리 → {inApp ? '사용량' : '사용량·요금제'}</a>(기능별 “마케팅”).</p>
-      {data.writeModel && <p className="text-xs text-ink-2" data-testid="auto-write-model">글 모델: <b className="text-ink">{data.writeModel.label}</b>{data.writeModel.model ? ` (${data.writeModel.model})` : ''} — {data.writeModel.source === 'company' ? '운영사가 이 회사에 정한 값' : data.writeModel.source === 'plan' ? '마케팅 요금제 기본값' : '기본값'} · 원고·수정본에 쓰고, 품질 검사는 빠른 모델로 합니다.
+      {/* 400차 #1025(노트북 11/13 '자동 제작 15,276px·24,369자'): 한 화면에 길게 쌓여 있던 것을 보기로 나눔 — 주소 ?view= , '전체'는 예전처럼 한 화면 */}
+      <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="tablist" aria-label="자동 제작 보기" data-testid="auto-views">{AUTO_VIEWS.map(([k, l]) => (
+        <Link key={k} href={k === 'now' ? '/s/marketing/automation' : `/s/marketing/automation?view=${k}`} role="tab" aria-selected={view === k} scroll={false} data-testid={`auto-view-${k}`}
+          className={cx('shrink-0 rounded-full border px-3 py-1 text-sm', view === k ? 'border-transparent font-semibold text-white' : 'border-line bg-white text-ink-2 hover:bg-slate-50')} style={view === k ? { background: C } : undefined}>{l}</Link>))}</div>
+      {show('settings') && <p className="text-xs text-ink-2" data-testid="auto-ai-note">AI 원고는 회사 월 AI 예산(이번 달 사용 {data.usage.companyAi ? (data.usage.companyAi.pct === null ? '제한 없음' : `${data.usage.companyAi.pct}%`) : `${data.usage.companyAiLimitUsd ? Math.round(((data.usage.companyAiUsd ?? 0) / data.usage.companyAiLimitUsd) * 100) : 0}%`})과 마케팅 AI 월 한도 중 먼저 닿는 쪽에서 멈추고(예산은 {data.usage.companyAi?.resetLabel ?? '다음 달 1일'}에 다시 채워짐), 받는 사람에게 하루 한 번 알립니다. 영상 제작은 마케팅 크레딧으로 따로 셉니다. 회사 전체 AI 사용은 <a className="underline" href="/admin/usage">관리 → {inApp ? '사용량' : '사용량·요금제'}</a>(기능별 “마케팅”).</p>}
+      {show('settings') && data.writeModel && <p className="text-xs text-ink-2" data-testid="auto-write-model">글 모델: <b className="text-ink">{data.writeModel.label}</b>{data.writeModel.model ? ` (${data.writeModel.model})` : ''} — {data.writeModel.source === 'company' ? '운영사가 이 회사에 정한 값' : data.writeModel.source === 'plan' ? '마케팅 요금제 기본값' : '기본값'} · 원고·수정본에 쓰고, 품질 검사는 빠른 모델로 합니다.
         {data.writeModel.blog && <span className="block" data-testid="auto-write-model-blog">네이버 블로그(1,800~2,500자·사진 8~15장 형식): <b className="text-ink">{data.writeModel.blog.label}</b>{data.writeModel.blog.model ? ` (${data.writeModel.blog.model})` : ''}{data.writeModel.blog.upgraded ? ' — 블로그만 상위 모델' : ''}</span>}</p>}
       {/* 267차(대표 #795 '두서없이 올리지 말고 수정·보완할 시간까지 고려해서'): 승인 올리는 방식 안내 */}
-      <p className="text-xs text-ink-2" data-testid="auto-rhythm">{s.approval_mode === 'weekly'
+      {show('rules') && <p className="text-xs text-ink-2" data-testid="auto-rhythm">{s.approval_mode === 'weekly'
         ? <>주 단위 묶음: 매주 <b className="text-ink">{data.rhythm?.dows[s.batch_dow]}요일 {s.batch_hour}:00</b>에 다음 주(월~일) 게시분을 <b className="text-ink">한 번에</b> 승인함에 올립니다(원고는 {data.rhythm?.prepHours ?? 4}시간 전부터 만들어 두고, 사이사이 한 건씩 올리지 않음).
           {data.rhythm?.next && <> 다음 묶음: <b className="text-ink" data-testid="auto-next-batch">{new Date(data.rhythm.next.at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' })}</b> ({data.rhythm.next.label}).</>}
           {!!data.rhythm?.waiting && <> 묶음으로 올릴 원고 {data.rhythm.waiting}건 준비됨.</>}</>
         : <>한 건씩: 주간 규칙대로 게시 {s.lead_days}일 전 {s.lead_hour}:00 에 AI 마케터가 원고를 쓰고 품질 검사를 통과하면 승인 대기에 올립니다.</>}
-        {' '}승인 마감 = <b className="text-ink">{data.rhythm?.deadlineRule ?? `게시 당일 ${s.approval_hour}:00`}</b> · 수정 요청 → 최상 모델로 바로 수정본, 마감을 넘기면 그 글만 다음 빈 칸으로 미루고 알림{s.approval_mode === 'weekly' ? ' · 게시 3일 안 남았는데 승인 안 된 글은 한 번 알림' : ''}. 알림 = {s.approval_mode === 'weekly' ? '묶음 1건' : '제작 완료 즉시'} + 마감 {s.remind_hours}시간 전({s.quiet_start}~{s.quiet_end}시는 무알림 → 직전 저녁). 이미지·영상은 서버 시안·제작 요청 카드로.</p>
+        {' '}승인 마감 = <b className="text-ink">{data.rhythm?.deadlineRule ?? `게시 당일 ${s.approval_hour}:00`}</b> · 수정 요청 → 최상 모델로 바로 수정본, 마감을 넘기면 그 글만 다음 빈 칸으로 미루고 알림{s.approval_mode === 'weekly' ? ' · 게시 3일 안 남았는데 승인 안 된 글은 한 번 알림' : ''}. 알림 = {s.approval_mode === 'weekly' ? '묶음 1건' : '제작 완료 즉시'} + 마감 {s.remind_hours}시간 전({s.quiet_start}~{s.quiet_end}시는 무알림 → 직전 저녁). 이미지·영상은 서버 시안·제작 요청 카드로.</p>}
 
-      <section className="grid gap-3 sm:grid-cols-5">{([['이번 주 제작 사용', pc(data.usage.weekCredits, data.limits.weeklyCredits)], ['이번 달 제작 사용', pc(data.usage.monthCredits, data.limits.monthlyCredits)],
+      {show('now') && <section className="grid gap-3 sm:grid-cols-5">{([['이번 주 제작 사용', pc(data.usage.weekCredits, data.limits.weeklyCredits)], ['이번 달 제작 사용', pc(data.usage.monthCredits, data.limits.monthlyCredits)],
         ['이번 달 생성 영상', lim(data.usage.monthVideos, data.limits.videoMonthly)], ['이번 달 재생성', lim(data.usage.monthRegens, data.limits.regenMonthly)],
         data.usage.ai ? ['이번 달 마케팅 AI', pc(data.usage.ai.usd, data.limits.aiMonthlyUsd)] : ['이번 달 마케팅 AI', data.usage.companyAi ? (data.usage.companyAi.pct === null ? '제한 없음' : `${data.usage.companyAi.pct}%`) : '-']] as [string, string][]) /* #602 고객사: 회사 AI 예산 · 351차: % 만 */.map(([l, v]) => (
-        <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="auto-usage"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div></div>))}</section>
+        <div key={l} className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="auto-usage"><div className="text-xs text-ink-2">{l}</div><div className="mt-1 text-lg font-bold tabular-nums" style={{ color: C }}>{v}</div></div>))}</section>}
 
       {/* 대표 10/20 15:40 (#103): 이번 달 남은 제작 n건 + 초과 안내 */}
-      {data.production && (
+      {show('now') && data.production && (
         <section className={cx('rounded-card border p-3 shadow-card', data.production.over ? 'border-red-200 bg-red-50/40' : 'border-violet-200 bg-violet-50/30')} data-testid="auto-production">
           <div className="flex flex-wrap items-center gap-2 text-sm"><b>이번 달 남은 제작</b>
             {data.production.leftCredits === null ? <span className="text-ink-2">{iosApp ? '남은 제작 수는 회사 관리자에게 문의하세요' : '마케팅 제작 요금제를 고르면 남은 제작 수가 보입니다'}</span> : <span className="tabular-nums" data-testid="auto-production-left">남은 양 {(data.production.monthlyCredits ?? 0) > 0 ? Math.max(0, Math.round((data.production.leftCredits / (data.production.monthlyCredits ?? 1)) * 100)) : 0}% → 이미지 <b>{data.production.images}장</b> 또는 영상 <b>{data.production.videos}편</b>{data.production.videosLeft !== null && ` · 생성 영상 ${data.production.videosLeft}편`}{data.production.regensLeft !== null && ` · 재생성 ${data.production.regensLeft}회`}</span>}
@@ -148,10 +156,10 @@ export function Automation() {
           {data.production.internal && <CostCap prod={data.production} canEdit={ed} onSaved={reload} />}
         </section>)}
       {/* 275차 #809(대표 10/29 '상용화 했을 때 기준으로 시험'): 우리 회사만 — 브랜드별 이번 달 원가·승인률 · 요금제 가격 대비 원가율 */}
-      {ed && data.production?.internal && !inApp && <TrialView />}{/* 298차 #861: 상용화 시험(요금제 가격·원가)은 앱에서 안 보임 */}
+      {show('log') && ed && data.production?.internal && !inApp && <TrialView />}{/* 298차 #861: 상용화 시험(요금제 가격·원가)은 앱에서 안 보임 */}
       {/* 295차 #835 레퍼런스 대조표(승인 대기·수정 요청 글 × 레퍼런스 기준) */}
-      <RefCheck />
-      {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-recipients">
+      {show('now') && <RefCheck />}
+      {show('settings') && ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-recipients">
         <h2 className="text-sm font-semibold">알림·승인 받는 사람</h2>
         <p className="mt-1 text-xs text-ink-2">고르지 않으면 관리자 전원. 시험 모드 브랜드는 여기와 상관없이 실행한 사람에게만 갑니다.</p>
         <div className="mt-2 flex flex-wrap gap-1.5">{data.people.map((p) => { const on = (s.notify_user_ids ?? []).includes(p.id); return (
@@ -160,7 +168,7 @@ export function Automation() {
           {!!s.notify_user_ids?.length && <Button size="sm" variant="secondary" onClick={() => save({ notifyUserIds: null })}>관리자 전원으로</Button>}</div>
       </section>}
 
-      {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-schedule">
+      {show('settings') && ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-schedule">
         <h2 className="text-sm font-semibold">제작·마감·알림</h2>
         <div className="mt-2 grid gap-2 sm:grid-cols-4">
           {/* 267차(대표 #795): 승인 올리는 방식 — 주 단위 묶음(기본) / 게시 n일 전 한 건씩 */}
@@ -186,15 +194,15 @@ export function Automation() {
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_generated_people} onChange={(e) => save({ allowGeneratedPeople: e.target.checked })} />생성 인물 허용</label>
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.allow_slideshow} onChange={(e) => save({ allowSlideshow: e.target.checked })} />슬라이드쇼 허용</label>
             <label className="flex items-center gap-1.5" title="대표 결정(10/24): 브랜드 템플릿이 나올 때까지 정기·밤사이 자동 제작 시안은 승인함에 올리지 않고 초안으로 둡니다. 승인함 아래 '초안 보관'에서 [승인 요청]으로 올릴 수 있습니다."><input type="checkbox" checked={!!s.auto_hold} onChange={(e) => save({ autoHold: e.target.checked })} data-testid="auto-hold" />자동 시안은 초안으로 보관(브랜드 템플릿 전)</label>
-            <label className="flex items-center gap-1.5" title="189차(대표 #685): 서버 시안에 쓸 실사가 모자라 브랜드 색으로 남은 칸(표지·카드뉴스 장·스토리 프레임)을 같은 브랜드 실사(얼굴이 보이지 않는 사진)를 참고해 실사풍 사진으로 생성해 채웁니다. 한 글에 2장까지, 이번 주·이번 달 크레딧 한도 안에서만. 생성 사진은 자료실 '마케팅/AI 생성(실사 참고)'에 남고 사진 기록에 'AI 생성'으로 보입니다."><input type="checkbox" checked={!!s.photo_gen} onChange={(e) => save({ photoGen: e.target.checked })} data-testid="auto-photo-gen" />사진이 모자라면 실사 참고로 생성(크레딧)</label>
+            <label className="flex items-center gap-1.5" title="서버 시안에 쓸 실사가 모자라 브랜드 색으로 남은 칸(표지·카드뉴스 장·스토리 프레임)을 같은 브랜드 실사(얼굴이 보이지 않는 사진)를 참고해 실사풍 사진으로 생성해 채웁니다. 한 글에 2장까지, 이번 주·이번 달 크레딧 한도 안에서만. 생성 사진은 자료실 '마케팅/AI 생성(실사 참고)'에 남고 사진 기록에 'AI 생성'으로 보입니다."><input type="checkbox" checked={!!s.photo_gen} onChange={(e) => save({ photoGen: e.target.checked })} data-testid="auto-photo-gen" />사진이 모자라면 실사 참고로 생성(크레딧)</label>
             <label className="flex items-center gap-1.5" title="대표 결정(10/25 22:20, 요청 C): 영상 제작 방식을 정할 때까지 릴스·쇼츠·생성 영상은 정기 칸을 만들지 않고 자동 제작도 하지 않습니다. 제작의뢰실에서 사람이 의뢰하는 영상은 그대로."><input type="checkbox" checked={s.video_pause !== false} onChange={(e) => save({ videoPause: e.target.checked })} data-testid="auto-video-pause" />릴스·쇼츠·생성 영상 자동 제작 중단(영상 제작 결정 전){s.video_pause !== false ? ' — 지금 멈춤' : ''}</label>
             <label className="flex items-center gap-1.5" title="승인된 최신 버전이 예정 시각이 되면 연결된 계정(인스타·페북·스레드·유튜브)에 워크인 서버가 올립니다. 승인이 곧 게시 결정입니다."><input type="checkbox" checked={!!s.auto_publish} onChange={(e) => save({ autoPublish: e.target.checked })} data-testid="auto-publish" />승인되면 예정 시각에 자동 게시(연결 채널)</label>
           </div>
         </div>
       </section>}
 
-      {ed && <section className="rounded-card border border-red-200 bg-white p-4 shadow-card" data-testid="auto-archive">
-        <h2 className="text-sm font-semibold text-red-700">전면 정리 <span className="font-normal text-ink-3">— 대표 10/25 22:20: 미게시 시안 전부 치우고 디벨롭한 방향을 검토받은 뒤 다시 올림</span></h2>
+      {show('settings') && ed && <section className="rounded-card border border-red-200 bg-white p-4 shadow-card" data-testid="auto-archive">
+        <h2 className="text-sm font-semibold text-red-700">전면 정리 <span className="font-normal text-ink-3">— 미게시 시안을 한 번에 보관</span></h2>
         <p className="mt-1 text-xs text-ink-2">미게시 글(초안·승인 대기·수정 요청·보류)을 한 번에 취소 상태로 보관합니다. 게시됨·승인됨은 그대로. 원래 상태를 기록해 두어 [되돌리기]로 복원할 수 있습니다.</p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <Button size="sm" variant="danger" onClick={archiveAll} disabled={busy} data-testid="auto-archive-run">미게시 글 전부 보관</Button>
@@ -203,8 +211,8 @@ export function Automation() {
         </div>
       </section>}
 
-      <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-rules">
-        <h2 className="text-sm font-semibold">게시 규칙 <span className="font-normal text-ink-3">— 기본값(대표 10/20): 브랜드마다 2~3일에 한 묶음(유튜브 쇼츠 1 · 인스타 릴스 1 · 블로그 1 · 인스타+페이스북 게시물 1 · 인스타+페이스북 스토리 1)</span></h2>
+      {show('rules') && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-rules">
+        <h2 className="text-sm font-semibold">게시 규칙 <span className="font-normal text-ink-3">— 기본값: 브랜드마다 2~3일에 한 묶음(유튜브 쇼츠 1 · 인스타 릴스 1 · 블로그 1 · 인스타+페이스북 게시물 1 · 인스타+페이스북 스토리 1)</span></h2>
         <p className="mt-1 text-xs text-ink-2" data-testid="auto-rules-daycap">같은 브랜드·채널·형식(피드·릴스·블로그·스토리 따로)은 하루 2건까지 — 3시간 넘게 띄우고, 규칙이 겹쳐 넘치는 칸은 만들지 않습니다(먼저 만든 규칙 우선). 같은 날 같은 주제·같은 사진은 쓰지 않습니다.</p>
         {ed && <form onSubmit={addBundle} className="mt-2 flex flex-wrap items-center gap-2 rounded-input border border-violet-200 bg-violet-50/40 p-2 text-sm" data-testid="auto-bundle-form">
           <span className="text-xs font-medium text-violet-800">묶음 규칙 만들기</span>
@@ -242,9 +250,9 @@ export function Automation() {
           {/* #499-1 용도: 콘텐츠형(참여)·광고형(전환) — AI 가 쓰는 첫 줄·구성과 훅 채점이 다름 */}
           <span className="flex flex-wrap items-center gap-2 text-xs text-ink-2 sm:col-span-6"><span className="font-medium text-ink">용도</span><ModeToggle value={rule.mode} onChange={(m) => setRule({ ...rule, mode: m })} testId="auto-rule-mode" /><span className="text-ink-3">{MODE_HINT[rule.mode]}</span></span>
         </form>}
-      </section>
+      </section>}
 
-      {ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-brands">
+      {show('brands') && ed && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-brands">
         <h2 className="text-sm font-semibold">브랜드 키트</h2>
         {/* 로컬 10/19: 회사 정보(사업 소개·고객·말투·주의할 점)와 같은 칸 + 'AI 로 정리' — 한 번 정리하면 마케팅 원고·메일 시안·영업 제안서가 함께 씀 */}
         <details className="mt-2 rounded-input border border-line p-2" data-testid="brand-company-ai"><summary className="cursor-pointer text-xs font-medium">회사 소개·말투·주의할 점(모든 브랜드 공통) — AI 로 정리</summary><div className="mt-2"><CompanyAiProfile compact /></div></details>
@@ -279,9 +287,9 @@ export function Automation() {
         <p className="mt-2 text-xs text-ink-3">원고 재료: 브랜드 소개·주력 상품·이번 주 주제(없으면 이번 달 소식 → 주제 풀) + 사실 카드 + 같은 형식 잘 된 예시 글 + 회사 AI 프로필 + 마케팅 자료실 사진의 AI 설명(아래 &lsquo;사진 AI 설명&rsquo;). 재료가 없으면 시안 대신 “주제 필요” 카드로 묻습니다. 말투 프로필은 모든 원고·자막이 읽고, 다 쓴 원고는 글 품질 엔진(훅 점수·사람다움 점수·채널 검사)을 거칩니다.</p>
       </section>}
 
-      {ed && <MktPhotos />}
+      {show('brands') && ed && <MktPhotos />}
 
-      <section id="requests" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-requests">
+      {show('now') && <section id="requests" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="auto-requests">
         <h2 className="text-sm font-semibold">제작 요청 카드</h2>
         <ul className="mt-2 space-y-2">{data.requests.map((q) => (
           <li key={q.id} className={cx('rounded-input border p-3 text-sm', q.status === 'needs_approval' ? 'border-amber-300 bg-amber-50' : 'border-line')} data-testid="auto-request">
@@ -300,14 +308,14 @@ export function Automation() {
               <Button size="sm" variant="secondary" onClick={() => act(q.id, 'cancel')}>{q.kind === 'topic' ? '이번 칸 건너뛰기' : '취소'}</Button>
             </div>
           </li>))}{!data.requests.length && <li className="text-xs text-ink-3">열린 제작 요청이 없습니다</li>}</ul>
-      </section>
+      </section>}
 
-      <section className="rounded-card border border-line bg-white p-4 shadow-card">
+      {show('log') && <section className="rounded-card border border-line bg-white p-4 shadow-card">
         <h2 className="text-sm font-semibold">크레딧 원장(최근 30건)</h2>
         <ul className="mt-2 divide-y divide-line text-xs">{data.ledger.map((l, k) => (
           <li key={k} className="flex gap-2 py-1"><span className="w-28 shrink-0 text-ink-3">{fmtDateTime(l.created_at)}</span><span className="flex-1 truncate">{l.title ?? '—'}{l.version ? ` v${l.version}` : ''} · {l.note}</span><span className="tabular-nums font-medium">{l.credits}</span></li>))}
           {!data.ledger.length && <li className="py-1 text-ink-3">기록 없음</li>}</ul>
-      </section>
+      </section>}
       </>}
     </div>
   );

@@ -66,7 +66,7 @@ export async function ceo211({ owner, ctx, sql, BASE, SHOTS }) {
   for (const k of ['basic', 'standard', 'pro']) assert.match(await plan.getByTestId(`auto-plan-left-${k}`).innerText(), /^이번 달 \d+% (남음|초과)$/, k); // 351차: 크레딧 숫자 대신 %
   await plan.scrollIntoViewIfNeeded();
   await owner.screenshot({ path: `${SHOTS}/559-usage-marketing-plan.png` });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   await owner.getByTestId('auto-plan-link').waitFor();
   assert.equal(await owner.getByTestId('auto-plan-standard').count(), 0);
 }

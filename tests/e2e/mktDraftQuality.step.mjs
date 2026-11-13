@@ -10,7 +10,7 @@ export async function mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }) {
   const [{ tenant }] = await sql`select tenant from users where id = ${ctx.ownerId}`;
   const b = await ctx.owner.ok('POST', '/api/marketing/brands', { name: 'E2E소식짐' });
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${b.id}`, { intro: '동네 헬스장', products: '1개월 회원권' });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   // ⓐ 이번 달 소식: [+ 소식 추가] = 오늘~30일 뒤 기본 → 내용 적고 저장
   const kit = owner.getByTestId('brand-facts-E2E소식짐'); await kit.waitFor();
   assert.match(await kit.locator('summary').innerText(), /이번 달 소식 0개/);
@@ -68,7 +68,7 @@ export async function mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }) {
   await owner.keyboard.press('Escape');
   // 휴대폰: 브랜드 키트(소식 줄·예시 칸) 넘침 없음
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const kit2 = owner.getByTestId('brand-facts-E2E소식짐'); await kit2.waitFor();
   await kit2.locator('summary').click();
   await kit2.getByTestId('facts-news-row').first().waitFor();

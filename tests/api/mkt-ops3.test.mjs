@@ -87,6 +87,12 @@ test('② 상시 운영: [지금 검토] → 오늘 지표·상태 정상 → �
   assert.equal(r2.cards, 0); assert.equal((await sql`select count(*)::int n from mkt_proposals where kind = 'alert'`)[0].n, 3);
   assert.equal((await ctx.owner.ok('GET', '/api/marketing/inbox')).counts.proposals, 3);
   assert.ok((await ctx.owner.ok('GET', '/api/marketing/ops')).review.signals.length === 3);
+  // 400차 #1025(노트북 11/13 '승인함에 같은 알림 카드가 4번 반복'): 3일이 지나도 승인 대기 중인 같은 신호 카드가 있으면 새로 만들지 않고 그 카드 내용만 고침
+  await sql`update mkt_proposals set created_at = now() - interval '5 days', title = '옛 제목' where kind = 'alert'`;
+  const r3 = await ctx.owner.ok('POST', '/api/marketing/ops/review', {});
+  assert.equal(r3.cards, 0, '대기 카드가 있으면 3일 뒤에도 또 만들지 않음');
+  assert.equal((await sql`select count(*)::int n from mkt_proposals where kind = 'alert'`)[0].n, 3);
+  assert.ok((await sql`select title from mkt_proposals where kind = 'alert' and body->>'signal' = 'cpc_spike'`)[0].title.includes('900원'), '대기 카드 제목을 오늘 숫자로 고침');
   // 승인 → 업무(담당 = 승인자)
   const ap = await ctx.owner.ok('PATCH', `/api/marketing/ops/proposals/${cards[0].id}`, { action: 'approve' });
   assert.equal(ap.executed.tasks.length, 1);

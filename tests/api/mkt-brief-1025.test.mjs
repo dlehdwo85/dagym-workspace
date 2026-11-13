@@ -52,7 +52,8 @@ describe('399차 사업별 한 장 요약', () => {
     assert.equal(h.color, '#2563EB');
     assert.deepEqual([h.leads, h.calls], [1, 1], '광고 키워드로 확인된 문의 1 · 전화 기록 1');
     assert.equal(h.balance.krw, 20000); assert.ok(h.balance.days !== null && h.balance.days > 0, '잔액 남은 날');
-    assert.equal(h.good[0].keyword, '헬스장 위탁'); assert.equal(h.good[0].leads, 1);
+    assert.equal(v.judge, true, '문의 추적이 절반 이상 → 문의 0 판단함');
+    assert.deepEqual(h.good.map((k) => [k.keyword, k.leads]), [['헬스장 위탁', 1]], '잘 되는 검색어 = 문의가 확인된 것만(돈만 쓰는 검색어와 겹치지 않음)');
     assert.deepEqual(h.waste.map((k) => k.keyword), ['아파트 출입', '관리사무소 앱', '커뮤니티 예약'], '비용 큰 순 → 노출만 있는 검색어');
     assert.match(h.waste[0].why, /25,000원 · 클릭 18 · 문의 0/); assert.match(h.waste[2].why, /노출 1,200 · 클릭 0/);
     assert.ok(!h.waste.some((k) => k.keyword === '헬스장 위탁' || k.keyword === '출입 카드'), '문의가 난 검색어·노출 100 아래는 안 나옴');
@@ -62,7 +63,7 @@ describe('399차 사업별 한 장 요약', () => {
     const b = v.brands[1];
     assert.deepEqual([b.cost, b.plan, b.planPct, b.clicks, b.leads], [8000, null, null, 20, 0]);
     assert.ok(b.todos.some((t) => /이번 달 계획\(예산\)이 없습니다/.test(t)), JSON.stringify(b.todos));
-    assert.equal(b.good[0].keyword, '두정동 헬스장');
+    assert.equal(b.good.length, 0); assert.equal(b.waste[0].keyword, '두정동 헬스장');
     const z = v.brands[2];
     assert.equal(z.cost, 0); assert.deepEqual(z.todos, ['이번 달 광고 집행이 없습니다']); assert.equal(z.balance, null, '최근 30일 쓴 계정이 없으면 잔액 없음');
     assert.equal(v.unbranded.name, '(브랜드 없음)'); assert.equal(v.unbranded.cost, 3000);
@@ -75,6 +76,20 @@ describe('399차 사업별 한 장 요약', () => {
     assert.equal(m.brands[0].name, '하이링크');
     assert.equal((await ctx.staffB.client.req('GET', '/api/marketing/ad-ops/brief')).status, 404);
     assert.equal((await fetch(`${BASE}/api/marketing/ad-ops/brief`)).status, 401);
+  });
+
+  test('문의 추적이 안 될 때(judge=false): 문의 0 으로 단정하지 않음 — 왼쪽은 클릭 많은 검색어, 오른쪽은 노출만 있는 검색어만 · 입찰가 내리기 제안 없음', async () => {
+    const saved = await sql`select * from mkt_calls where tenant = 'default'`;
+    await sql`delete from mkt_calls where tenant = 'default'`;
+    try {
+      const v = await ctx.owner.ok('GET', '/api/marketing/ad-ops/brief');
+      assert.equal(v.judge, false);
+      const h = v.brands[0];
+      assert.deepEqual(h.good.map((k) => k.keyword), ['아파트 출입', '헬스장 위탁', '관리사무소 앱'], '클릭 많은 순');
+      assert.deepEqual(h.waste.map((k) => k.keyword), ['커뮤니티 예약'], '노출만 있고 클릭 0 인 것만');
+      assert.ok(!h.todos.some((t) => /입찰가 내리기/.test(t)), JSON.stringify(h.todos));
+      assert.ok(h.leads === 0);
+    } finally { for (const r of saved) await sql`insert into mkt_calls ${sql(r)}`; }
   });
 
   test("홈 카드: 기본 순서에 '사업별 광고 요약'이 숫자 4칸 아래 · 예전에 저장한 구성에는 한 번 끼워 넣음 · 그 뒤 저장하면 끈 것도 지킴", async () => {

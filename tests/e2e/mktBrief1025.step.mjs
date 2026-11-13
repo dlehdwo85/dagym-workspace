@@ -23,9 +23,18 @@ export async function mktBrief1025({ owner, ctx, sql, BASE }) {
     const card = owner.locator(`[data-testid="brief-card"][data-brand="${NAME}"]`); await card.waitFor();
     const t = await card.innerText();
     assert.match(t, /광고비\s*70,000원/); assert.match(t, /계획 200,000원의 35%/); assert.match(t, /클릭\s*50/); assert.match(t, /클릭률 1\.3%/); assert.match(t, /문의·신청\s*1건/);
-    assert.match(await card.getByTestId('brief-good').innerText(), /1\. 요약 잘되는 검색어[\s\S]*문의 1/);
-    assert.match(await card.getByTestId('brief-waste').innerText(), /1\. 요약 돈만쓰는 검색어[\s\S]*40,000원 · 클릭 20 · 문의 0[\s\S]*요약 노출만 검색어[\s\S]*노출 500 · 클릭 0/);
-    assert.match(await card.getByTestId('brief-todos').innerText(), /'요약 돈만쓰는 검색어' 입찰가 내리기·중지 검토/);
+    // 문의 추적이 절반 이상일 때만 '문의 0'을 판단(judge) — 앞 단계가 남긴 전화·문의에 따라 달라지므로 두 경우 모두 확인
+    const { judge } = await ctx.owner.ok('GET', '/api/marketing/ad-ops/brief');
+    const good = await card.getByTestId('brief-good').innerText(); const waste = await card.getByTestId('brief-waste').innerText(); const todos = await card.getByTestId('brief-todos').innerText();
+    if (judge) {
+      assert.match(good, /^잘 되는 검색어[\s\S]*1\. 요약 잘되는 검색어[\s\S]*문의 1/); assert.ok(!good.includes('요약 돈만쓰는 검색어'), '두 칸에 같은 검색어가 나오지 않음');
+      assert.match(waste, /^돈만 쓰는 검색어[\s\S]*1\. 요약 돈만쓰는 검색어[\s\S]*40,000원 · 클릭 20 · 문의 0[\s\S]*요약 노출만 검색어[\s\S]*노출 500 · 클릭 0/);
+      assert.match(todos, /'요약 돈만쓰는 검색어' 입찰가 내리기·중지 검토/);
+    } else {
+      assert.match(good, /^클릭 많은 검색어[\s\S]*1\. 요약 잘되는 검색어[\s\S]*2\. 요약 돈만쓰는 검색어/);
+      assert.match(waste, /^노출만 되고 클릭 없는 검색어[\s\S]*1\. 요약 노출만 검색어[\s\S]*노출 500 · 클릭 0/); assert.ok(!waste.includes('문의 0'));
+      assert.match(todos, /'요약 노출만 검색어' 광고 문구·순위 확인/); assert.ok(!todos.includes('입찰가 내리기'));
+    }
     assert.equal(await card.getByTestId('brief-more').getAttribute('href'), `/s/marketing/ads?brand=${b.id}`);
     // 요약 탭에는 상한·점검만 — 세팅안·변경 기록은 다른 탭
     assert.equal(await owner.getByTestId('ad-cap').count(), 1); assert.equal(await owner.getByTestId('ad-watch').count(), 1);

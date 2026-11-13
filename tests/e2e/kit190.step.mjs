@@ -20,7 +20,7 @@ export async function kit190({ owner, ctx, BASE, FAKE, SHOTS, sql }) {
   const m = await ctx.owner.ok('POST', '/api/marketing/contents', { title: 'E2E키트짐 새 기구', channel: 'instagram', brandId: b.id, body: '새 기구가 들어왔어요. 같이 해요.\n상담 032-555-7777', mediaIds: [] });
   await sql`update mkt_contents set status = 'published', published_at = now() where id = ${m.id}`;
   await ctl(FAKE, { anthropicReset: true, anthropicQueue: [say(ANSWER)] });
-  await owner.goto(`${BASE}/s/marketing/automation`);
+  await owner.goto(`${BASE}/s/marketing/automation?view=all`);
   const wrap = owner.getByTestId('brand-kit-ai-E2E키트짐'); await wrap.waitFor();
   await wrap.getByTestId('brand-kit-ai').click();
   const panel = owner.getByTestId('brand-kit-ai-panel'); await panel.waitFor();

@@ -8,7 +8,7 @@ export async function mktSlide811({ owner, ctx, sql, BASE, SHOTS }) {
     values ('default', ${brand}, 'E2E811 아침 운동 릴스', 'instagram', 'reels', now() + interval '3 days', 'pending', 1, ${ctx.ownerId}) returning id`;
   await sql`insert into mkt_versions (content_id, version, body, created_by) values (${c.id}, 1, '아침 7시, 문을 열면 가장 먼저 반겨 주는 곳.', ${ctx.ownerId})`;
   try {
-    await owner.goto(`${BASE}/s/marketing/automation`);
+    await owner.goto(`${BASE}/s/marketing/automation?view=all`);
     const kit = owner.getByTestId('brand-video-E2E811 다짐'); await kit.waitFor();
     await kit.getByTestId('brand-video-method').selectOption('photos');
     await owner.getByText('영상 키트를 저장했습니다').first().waitFor();
