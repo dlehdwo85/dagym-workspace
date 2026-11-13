@@ -30,19 +30,20 @@ function Spark({ points }: { points: { done: number; onTimeRate: number | null }
 /** B-14 현장 비교 대시보드 */
 export default function InsightsPage() {
   const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
+  const cols = T.base ? COLS : COLS.map((c) => (c.key === 'complaints' ? { ...c, hint: 'QR 신고의 고객 민원 중 미완료' } : c)); // 412차 G-24: 다른 회사는 '고객 민원'
   const { user, dir } = useSession();
   const [weeks, setWeeks] = useState(4);
   const [brand, setBrand] = useState('');
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: 'overdue', dir: -1 });
   const { data, error, loading, reload } = useApi<any>(`/api/insights/sites?weeks=${weeks}${brand ? `&brand=${brand}` : ''}`);
   const rows = useMemo(() => {
-    const col = COLS.find((c) => c.key === sort.key)!;
+    const col = cols.find((c) => c.key === sort.key)!;
     return [...(data?.sites ?? [])].sort((a, b) => (col.sortVal(a) - col.sortVal(b)) * sort.dir);
   }, [data, sort]);
   if (!canManage(user.role)) return <ErrorBox error={{ status: 403, message: `현장 비교는 ${roleOrAbove(T, 'site_manager')}이 봅니다.` }} />;
   return (
     <div className="space-y-4">
-      <PageHeader title="현장 비교" icon={BarChart3} sub={data ? `${fmtDate(data.from)} ~ ${fmtDate(data.to)} · 지점·위탁현장별` : '지점·위탁현장별 운영 지표'} actions={<>
+      <PageHeader title={T.base ? '현장 비교' : `${T.unit.branch} 비교`} icon={BarChart3} sub={data ? `${fmtDate(data.from)} ~ ${fmtDate(data.to)} · ${T.base ? '지점·위탁현장별' : `${T.unit.branch}·${T.unit.site}별`}` : T.base ? '지점·위탁현장별 운영 지표' : `${T.unit.branch}·${T.unit.site}별 운영 지표`} actions={<>
         <div className="flex rounded-input border border-line bg-white p-0.5 text-sm shadow-card" role="group" aria-label="기간">
           {[4, 8, 12].map((w) => <button key={w} onClick={() => setWeeks(w)} aria-pressed={weeks === w} className={cx('rounded-md px-3 py-1.5 font-medium', weeks === w ? 'bg-brand-600 text-white' : 'text-ink-2 hover:bg-slate-100')}>{w}주</button>)}
         </div>
@@ -60,7 +61,7 @@ export default function InsightsPage() {
               <thead className="bg-slate-50 text-left text-xs text-ink-2">
                 <tr>
                   <th className="px-4 py-2.5 font-medium">현장</th>
-                  {COLS.map((c) => (
+                  {cols.map((c) => (
                     <th key={c.key} className="px-3 py-2.5 text-right font-medium" title={c.hint}>
                       <button className="inline-flex items-center gap-1 hover:text-ink" onClick={() => setSort((s) => ({ key: c.key, dir: s.key === c.key ? (s.dir === 1 ? -1 : 1) : -1 }))} aria-label={`${c.label} 순 정렬`}>
                         {c.label}<ArrowDownUp className={cx('size-3', sort.key === c.key ? 'text-accent-600' : 'text-ink-3')} />
@@ -79,7 +80,7 @@ export default function InsightsPage() {
                       </Link>
                       <span className="text-xs text-ink-3">{T.unit[s.type as UnitType]} · 진행 {s.open}</span>
                     </td>
-                    {COLS.map((c) => <td key={c.key} className={cx('px-3 py-3 text-right font-semibold tabular-nums', c.tone?.(s))}>{c.fmt(s)}</td>)}
+                    {cols.map((c) => <td key={c.key} className={cx('px-3 py-3 text-right font-semibold tabular-nums', c.tone?.(s))}>{c.fmt(s)}</td>)}
                     <td className="px-4 py-3"><Spark points={s.trend} /></td>
                   </tr>
                 ))}
@@ -91,12 +92,12 @@ export default function InsightsPage() {
               <div key={s.id} className="rounded-card border border-line bg-white p-4 shadow-card">
                 <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 font-semibold"><MapPin className="size-4 text-ink-3" />{s.name}</span><Spark points={s.trend} /></div>
                 <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
-                  {COLS.map((c) => <div key={c.key}><dt className="text-[11px] text-ink-3">{c.label}</dt><dd className={cx('text-sm font-bold tabular-nums', c.tone?.(s))}>{c.fmt(s).split(' ')[0]}</dd></div>)}
+                  {cols.map((c) => <div key={c.key}><dt className="text-[11px] text-ink-3">{c.label}</dt><dd className={cx('text-sm font-bold tabular-nums', c.tone?.(s))}>{c.fmt(s).split(' ')[0]}</dd></div>)}
                 </dl>
               </div>
             ))}
           </div>
-          <p className="text-xs text-ink-2">기한 준수율 90% 이상 초록, 70% 이상 주황, 그 아래 빨강. 머리글을 누르면 정렬합니다. 미해결 민원은 현장 QR 회원 민원으로 들어온 미완료 업무입니다.</p>
+          <p className="text-xs text-ink-2">기한 준수율 90% 이상 초록, 70% 이상 주황, 그 아래 빨강. 머리글을 누르면 정렬합니다. {T.base ? '미해결 민원은 현장 QR 회원 민원으로 들어온 미완료 업무입니다.' : '미해결 민원은 QR 신고의 고객 민원으로 들어온 미완료 업무입니다.'}</p>
         </>
       )}
     </div>

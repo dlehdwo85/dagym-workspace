@@ -7,12 +7,21 @@ import { activity } from './log';
 import { notify } from './notifications';
 import { putObject } from './storage';
 import { addDays, todaySeoul } from './time';
-import type { SessionUser } from './types';
+import { tenantOf, type SessionUser } from './types';
 import { zUuid } from './api';
 
 /** B-8 현장 신고 양식 + QR. 회원·직원이 현장에서 QR 로 시설 고장·민원·비품 요청 → 그 현장 업무 자동 생성·배정 */
 export const KIND_LABEL = { facility: '시설 고장', complaint: '회원 민원', supply: '비품 요청' } as const;
 const KIND_TEMPLATE = { facility: '시설 보수', complaint: '회원 민원', supply: null } as const;
+/**
+ * 412차 범용화 G-24: '회원 민원'은 피트니스 말 — 다른 회사는 '고객 민원'(양식 이름·업무 제목 머리·태그·알림 글). 기본 회사(다짐)는 지금 글·태그 그대로.
+ * 태그 '현장신고'·알림 '현장 신고 접수'의 '현장'도 다른 회사에서는 'QR 신고'·'신고 접수'.
+ */
+export function formWordsFor(tenant: string | null | undefined) {
+  const base = !tenant || tenant === 'default';
+  const label: Record<keyof typeof KIND_LABEL, string> = base ? KIND_LABEL : { ...KIND_LABEL, complaint: '고객 민원' };
+  return { base, label, template: base ? KIND_TEMPLATE : { ...KIND_TEMPLATE, complaint: '고객 민원' as string | null }, tag: base ? '현장신고' : 'QR 신고', received: base ? '현장 신고 접수' : '신고 접수' };
+}
 const KIND_DUE = { facility: 3, complaint: 2, supply: 7 } as const;
 
 export const formInput = z.object({
@@ -37,7 +46,7 @@ export async function saveForm(u: SessionUser, id: string | null, i: z.infer<typ
   if (!atLeast(u, 'site_manager')) throw forbidden(`신고 양식은 ${(await (await import('./termsServer')).termsOfUser(u)).role.site_manager} 이상이 만듭니다`);
   const sql = db();
   await assertUnitAccess(u, i.orgUnitId, sql);
-  const title = i.title ?? KIND_LABEL[i.kind];
+  const title = i.title ?? formWordsFor(tenantOf(u)).label[i.kind];
   if (id) {
     const [old] = await sql`select org_unit_id from site_forms where id = ${id}`;
     if (!old) throw notFound('양식이 없습니다');
@@ -67,7 +76,7 @@ export async function publicForm(token: string) {
     from site_forms f join org_units o on o.id = f.org_unit_id left join brands b on b.id = o.brand_id left join tenants t on t.id = o.tenant where f.token = ${token}`;
   if (!f || !f.enabled) throw notFound('사용할 수 없는 신고 양식입니다. 현장 직원에게 문의해 주세요.');
   // 410차 G-23: 브랜드가 없는 조직의 머리글 — 기본 회사는 화면 기본값('다짐 · 하이링크') 그대로, 다른 회사는 그 회사 이름(예전엔 다른 회사 신고 화면에도 '다짐 · 하이링크')
-  return { kind: f.kind, kindLabel: KIND_LABEL[f.kind as keyof typeof KIND_LABEL], title: f.title, place: f.org_unit_name, brand: f.brand_name ?? (f.tenant !== 'default' ? f.tenant_name ?? null : null) };
+  return { kind: f.kind, kindLabel: formWordsFor(f.tenant).label[f.kind as keyof typeof KIND_LABEL], title: f.title, place: f.org_unit_name, brand: f.brand_name ?? (f.tenant !== 'default' ? f.tenant_name ?? null : null) };
 }
 
 export const submitInput = z.object({
@@ -113,18 +122,24 @@ export async function submitForm(token: string, i: z.infer<typeof submitInput>, 
       select distinct u.id from users u join memberships m on m.user_id = u.id
       where m.org_unit_id in (select id from up) and u.status = 'active' and u.role in ('site_manager','dept_lead') order by u.id`).map((r) => r.id);
     assignee ??= managers[0] ?? null;
-    const creator = user?.id ?? assignee ?? (await tx<{ id: string }[]>`select id from users where role = 'owner' and status = 'active' limit 1`)[0]?.id;
+    const unitTenant = (await tx<{ tenant: string }[]>`select tenant from org_units where id = ${f.org_unit_id}`)[0]?.tenant ?? 'default';
+    const W = formWordsFor(unitTenant); // 412차 G-24: 낱말은 그 조직의 회사 기준
+    // 412차: 그 회사의 대표 — 예전엔 회사 조건 없이 '아무 대표 1명'이라, 담당이 없는 다른 회사 신고의 '만든 사람'이 남의 회사 대표로 잡힐 수 있었다(기본 회사 결과는 같음)
+    const ownerId = (await tx<{ id: string }[]>`select id from users where role = 'owner' and status = 'active' and tenant = ${unitTenant} order by created_at limit 1`)[0]?.id ?? null;
+    // 관리자 역할이 없는 작은 회사(대표 혼자·직원 몇 명)는 신고가 담당 없이 쌓이고 알림도 안 갔다 → 다른 회사는 대표에게(기본 회사는 예전 그대로)
+    if (!assignee && !W.base) assignee = ownerId;
+    const creator = user?.id ?? assignee ?? ownerId;
     const kind = f.kind as keyof typeof KIND_LABEL;
-    const tplName = KIND_TEMPLATE[kind];
+    const tplName = W.template[kind];
     const tpl = tplName ? (await tx`select payload from templates where name = ${tplName} and not archived and not personal
       and tenant = (select tenant from org_units where id = ${f.org_unit_id}) limit 1`)[0] : null;
     const reporter = user ? `${user.name} (직원)` : i.name ? `${i.name}${i.phone ? ` · ${i.phone}` : ''}` : '익명';
     const firstLine = i.content.split('\n')[0].slice(0, 60);
     const [o] = await tx<{ brand_id: string | null }[]>`select brand_id from org_units where id = ${f.org_unit_id}`;
     const [t] = await tx<{ id: string }[]>`insert into tasks (org_unit_id, brand_id, title, description, priority, assignee_id, due_date, tags, created_by, sort_order, task_type, photo_required)
-      values (${f.org_unit_id}, ${o.brand_id}, ${`[${KIND_LABEL[kind]}] ${firstLine}`},
+      values (${f.org_unit_id}, ${o.brand_id}, ${`[${W.label[kind]}] ${firstLine}`},
         ${`${i.content}\n\n위치: ${i.location || '-'}\n신고자: ${reporter}\n접수: 현장 QR 양식 '${f.title}'`},
-        ${kind === 'complaint' ? 'high' : 'normal'}, ${assignee}, ${addDays(todaySeoul(), KIND_DUE[kind])}, ${['현장신고', KIND_LABEL[kind]]}, ${creator},
+        ${kind === 'complaint' ? 'high' : 'normal'}, ${assignee}, ${addDays(todaySeoul(), KIND_DUE[kind])}, ${[W.tag, W.label[kind]]}, ${creator},
         extract(epoch from now()), ${kind === 'facility' ? 'inspection' : 'normal'}, ${kind === 'facility' ? 1 : 0})
       returning id`;
     if (ruleId) await tx`update tasks set assigned_by_rule = ${ruleId} where id = ${t.id}`;
@@ -140,7 +155,7 @@ export async function submitForm(token: string, i: z.infer<typeof submitInput>, 
     await tx`insert into form_submissions (form_id, task_id, reporter_name, reporter_phone, reporter_user_id, ip_hash)
       values (${f.id}, ${t.id}, ${user ? null : i.name ?? null}, ${user ? null : i.phone ?? null}, ${user?.id ?? null}, ${ipHash})`;
     await activity(tx, 'task', t.id, user?.id ?? null, 'created', { title: firstLine, source: 'site_form', form: f.title });
-    await notify(tx, { userIds: [assignee, ...managers], type: 'task_assigned', title: `현장 신고 접수 (${KIND_LABEL[kind]}): ${firstLine}`,
+    await notify(tx, { userIds: [assignee, ...managers], type: 'task_assigned', title: `${W.received} (${W.label[kind]}): ${firstLine}`,
       body: `${reporter} · ${i.location || '위치 미기재'}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, actorId: user?.id ?? null,
       dedupeKey: `form:${t.id}` });
     const { runAutomations } = await import('./automation');

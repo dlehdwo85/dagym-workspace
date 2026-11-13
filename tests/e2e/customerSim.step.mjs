@@ -191,6 +191,16 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
       const hit = attrs.match(/다짐|하이링크|HILINK|바디랩|두정동|단지/g);
       assert.ok(!hit, `${path} 입력칸 예시·말풍선에 다짐 낱말: ${[...new Set(hit ?? [])].join(', ')}`);
     }
+    // ── 7-1g) 412차 G-24: 새 회사의 신고 QR 화면 — '고객 민원'(회원 민원 아님), 피트니스 설명(운동기구·샤워실·수건) 없음
+    await p.goto(BASE + '/forms'); await p.waitForLoadState('networkidle').catch(() => {});
+    await p.getByRole('button', { name: '첫 양식 만들기' }).or(p.getByRole('button', { name: '양식 만들기' })).first().waitFor();
+    const formsText = await body();
+    assert.ok(/고객 민원/.test(formsText) && !/회원 민원|현장 신고 QR|현장마다/.test(formsText), `신고 QR 화면 낱말: ${formsText.slice(0, 160)}`);
+    await p.getByRole('button', { name: '첫 양식 만들기' }).or(p.getByRole('button', { name: '양식 만들기' })).first().click();
+    await p.getByText('고객 민원').first().waitFor();
+    const dlgText = await body();
+    assert.ok(!/회원 민원|운동기구|샤워실|수건/.test(dlgText), '양식 만들기 창에 피트니스 낱말 없음');
+    await p.keyboard.press('Escape');
     // ── 7-2) 범용화 2단계(용어 사전): 새 회사에는 다짐식 역할·조직 이름이 안 보이고, 회사 정보에서 역할 이름을 바꾸면 화면에 반영
     await p.goto(BASE + '/admin/users');
     await p.getByTestId('invite-open').waitFor();

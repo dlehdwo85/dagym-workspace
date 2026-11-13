@@ -13,10 +13,17 @@ const KIND: Record<string, { label: string; desc: string; color: string }> = {
   complaint: { label: '회원 민원', desc: '불편 사항 접수 (회신용 연락처 받음)', color: '#7c3aed' },
   supply: { label: '비품 요청', desc: '수건·소모품 등 비품 요청', color: '#0891b2' },
 };
+/** 412차 범용화 G-24: 다른 회사는 '고객 민원'·업종과 무관한 설명(다짐은 지금 글 그대로) */
+const KIND_COMMON: typeof KIND = {
+  facility: { label: '시설 고장', desc: '설비·집기·조명 등 고장 신고', color: '#ea580c' },
+  complaint: { label: '고객 민원', desc: '불편 사항 접수 (회신용 연락처 받음)', color: '#7c3aed' },
+  supply: { label: '비품 요청', desc: '소모품 등 비품 요청', color: '#0891b2' },
+};
 
 /** B-8 현장 신고 양식 + QR 관리 (현장 관리자 이상) */
 export default function FormsPage() {
   const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
+  const K = T.base ? KIND : KIND_COMMON; // 412차 G-24: 다른 회사는 '고객 민원'
   const { user, dir } = useSession();
   const { data, error, loading, reload } = useApi<{ forms: any[] }>('/api/forms');
   const [open, setOpen] = useState(false);
@@ -37,16 +44,16 @@ export default function FormsPage() {
   }
   return (
     <div className="space-y-4">
-      <PageHeader title="현장 신고 QR" icon={QrCode} sub="회원·직원이 QR 을 찍어 신고하면 그 현장 업무가 자동으로 만들어지고 담당자에게 배정됩니다."
+      <PageHeader title={T.base ? '현장 신고 QR' : '신고 QR'} icon={QrCode} sub={T.base ? '회원·직원이 QR 을 찍어 신고하면 그 현장 업무가 자동으로 만들어지고 담당자에게 배정됩니다.' : '고객·직원이 QR 을 찍어 신고하면 그 조직의 업무가 자동으로 만들어지고 담당자에게 배정됩니다.'}
         actions={<Button onClick={() => setOpen(true)}><Plus />양식 만들기</Button>} />
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={4} /> : !data?.forms.length ? (
-        <Empty title="아직 신고 양식이 없습니다" icon={QrCode} action={<Button onClick={() => setOpen(true)}><Plus />첫 양식 만들기</Button>}>현장마다 시설 고장·회원 민원·비품 요청 양식을 만들고 QR 을 인쇄해 붙이세요.</Empty>
+        <Empty title="아직 신고 양식이 없습니다" icon={QrCode} action={<Button onClick={() => setOpen(true)}><Plus />첫 양식 만들기</Button>}>{T.base ? '현장마다 시설 고장·회원 민원·비품 요청 양식을 만들고 QR 을 인쇄해 붙이세요.' : '조직마다 시설 고장·고객 민원·비품 요청 양식을 만들고 QR 을 인쇄해 붙이세요.'}</Empty>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="forms">
           {data.forms.map((x) => (
             <div key={x.id} className={cx('rounded-card border border-line bg-white p-4 shadow-card', !x.enabled && 'opacity-60')}>
               <div className="flex items-start gap-3">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-input text-white" style={{ background: KIND[x.kind].color }}><QrCode className="size-5" /></span>
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-input text-white" style={{ background: K[x.kind].color }}><QrCode className="size-5" /></span>
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold">{x.org_unit_name} · {x.title}</div>
                   <div className="text-xs text-ink-2">담당 {x.default_assignee_name ?? `${T.role.site_manager} 자동`} · 접수 {x.submissions}건{x.last_submitted ? ` · 최근 ${fmtDateTime(x.last_submitted)}` : ''}</div>
@@ -66,7 +73,7 @@ export default function FormsPage() {
         <form onSubmit={create} className="space-y-3">
           <MultiSiteOnly><Field label="현장"><UnitSelect value={f.orgUnitId ?? dir.orgUnits[0]?.id} onChange={(v) => setF({ ...f, orgUnitId: v })} /></Field></MultiSiteOnly>
           <div className="grid gap-2">
-            {Object.entries(KIND).map(([k, v]) => (
+            {Object.entries(K).map(([k, v]) => (
               <label key={k} className={cx('flex cursor-pointer items-center gap-3 rounded-input border p-3', f.kind === k ? 'border-brand-500 bg-brand-50' : 'border-line')}>
                 <input type="radio" name="kind" checked={f.kind === k} onChange={() => setF({ ...f, kind: k })} />
                 <span><span className="block text-sm font-semibold">{v.label}</span><span className="text-xs text-ink-2">{v.desc}</span></span>

@@ -22,6 +22,7 @@ export async function siteComparison(u: SessionUser, weeks = 4, brand?: string |
   const from = addDays(thisMonday, -7 * (weeks - 1));
   const fromTs = seoulMidnight(from);
   const unitFilter = units === null ? sql`true` : sql`o.id = any(${units}::uuid[])`;
+  const complaintTag = tenantOf(u) === 'default' ? '회원 민원' : '고객 민원'; // 412차 G-24: QR 민원 신고가 붙이는 태그(다짐은 '회원 민원' 그대로 — lib/forms.formWordsFor)
   const brandFilter = brand ? sql`and o.brand_id = ${brand}` : sql``;
   const sites = await sql<{ id: string; name: string; type: string; brand_id: string | null }[]>`
     select o.id, o.name, o.type, o.brand_id from org_units o where o.active and o.type in ('branch','site') and ${unitFilter} ${brandFilter} order by o.name`;
@@ -36,7 +37,7 @@ export async function siteComparison(u: SessionUser, weeks = 4, brand?: string |
       avg(extract(epoch from t.completed_at - t.created_at) / 86400) filter (where t.status = 'done' and t.completed_at >= ${fromTs})::float8 as avg_days,
       count(*) filter (where t.status <> 'done')::int as open,
       count(*) filter (where t.status <> 'done' and t.due_date < ${today})::int as overdue,
-      count(*) filter (where t.status <> 'done' and '회원 민원' = any(t.tags))::int as open_complaints,
+      count(*) filter (where t.status <> 'done' and ${complaintTag} = any(t.tags))::int as open_complaints,
       count(*) filter (where t.task_type = 'inspection' and t.due_date between ${from} and ${today})::int as insp_total,
       count(*) filter (where t.task_type = 'inspection' and t.due_date between ${from} and ${today} and t.status = 'done')::int as insp_done
     from tasks t where t.deleted_at is null and t.parent_id is null and t.org_unit_id = any(${ids}::uuid[]) group by t.org_unit_id`;
