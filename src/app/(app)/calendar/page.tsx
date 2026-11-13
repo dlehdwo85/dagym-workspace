@@ -478,6 +478,16 @@ function CalendarPage() {
   // 미배정 업무를 시간 칸으로 끌어 놓기 → 업무 시간 블록 (기존 /plan 기능)
   const personal = cals.data?.calendars.find((c) => c.type === 'personal');
   async function receive(info: any) {
+    // 389차 후속(11/14 토요일 CI 에서 드러남): 일정을 끌어 달력 끝에서 주를 넘긴 뒤, 끝 바로 옆 칸(지난주 첫 칸·다음 주 마지막 칸)에 곧장 놓으면
+    // 그사이 달력이 새 주 자료로 다시 그려져 FullCalendar 가 '다른 달력에서 온 것'으로 처리한다(eventDrop 대신 eventReceive).
+    // 예전엔 이 경우를 '미배정 업무 끌어 놓기'로 알고 업무 시간 블록을 하나 더 만들고 원래 일정은 그대로 뒀다 → 미배정 업무(taskId)가 아니면 옮기기로 처리
+    const xp = info.event.extendedProps;
+    if (!xp.taskId && (xp.ev || xp.type)) {
+      const moved = { event: { start: info.event.start as Date, end: info.event.end as Date | null, allDay: info.event.allDay as boolean, extendedProps: xp }, revert: () => {} };
+      info.event.remove(); // 받은 임시 블록은 지우고, 서버에 옮긴 뒤 다시 불러와 그린다(moveEvent 끝의 load)
+      await moveEvent(moved);
+      return;
+    }
     const taskId = info.event.extendedProps.taskId as string;
     const start = info.event.start as Date, end = (info.event.end as Date | null) ?? new Date(start.getTime() + 3600000);
     const title = info.event.title as string;

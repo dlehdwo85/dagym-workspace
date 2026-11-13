@@ -59,6 +59,15 @@ export async function calEdge389({ owner, ctx, sql, BASE }) {
     assert.equal(t2, d);
     for (let i = 0; i < 25 && (await at()).s.slice(0, 10) !== d; i++) await owner.waitForTimeout(200);
     assert.deepEqual(await at(), { s: `${d} 08:00`, e: '09:00' }, '왼쪽 끝 = 지난주로 넘어가 원래 날짜로');
+    // 389차 후속(11/14): 주를 넘긴 뒤 끝 바로 옆 칸(다음 주 마지막 칸)에 곧장 놓아도 옮겨지고, 업무 시간 블록이 하나 더 생기지 않는다
+    // (예전: 달력이 새 주 자료로 다시 그려지는 사이에 놓으면 '다른 달력에서 온 것'으로 처리돼 일정은 그대로·블록만 새로 생김 — 토요일에 이 시험의 왼쪽 끝 단계가 첫 칸에 놓다가 드러남)
+    const t3 = await dragVia(1, plus(w0, 7), 6);
+    assert.equal(t3, plus(w0, 13), '놓은 칸 = 다음 주 마지막 칸');
+    for (let i = 0; i < 25 && (await at()).s.slice(0, 10) !== t3; i++) await owner.waitForTimeout(200);
+    assert.deepEqual(await at(), { s: `${t3} 08:00`, e: '09:00' }, '끝 바로 옆 칸에 놓아도 옮겨짐');
+    await owner.waitForTimeout(600);
+    assert.equal((await sql`select count(*)::int n from events where title = ${TITLE} and deleted_at is null`)[0].n, 1, '같은 제목 일정이 하나 더 생기지 않음(업무 시간 블록 없음)');
+    await ctx.owner.ok('PATCH', `/api/events/${r.id}`, { start: `${d}T08:00:00+09:00`, end: `${d}T09:00:00+09:00`, allDay: false, scope: 'all' }); // 휴대폰 단계는 원래 날짜에서 시작
     // 휴대폰 손가락: 길게 눌러 끌어 오른쪽 끝 → 다음 주 → 천천히(1.2초 넘게) 월요일로 옮겨 놓음 — 한 주 더 넘어가지 않음
     const pc = await owner.context().browser().newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await owner.context().storageState() });
     try {
@@ -90,5 +99,6 @@ export async function calEdge389({ owner, ctx, sql, BASE }) {
     } finally { await pc.close(); }
   } finally {
     await ctx.owner.ok('DELETE', `/api/events/${r.id}`).catch(() => {});
+    await sql`update events set deleted_at = now() where title = ${TITLE} and deleted_at is null`.catch(() => {}); // 실패했을 때 남은 블록 정리
   }
 }
