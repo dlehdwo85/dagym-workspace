@@ -184,6 +184,13 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     await p.getByTestId('tpl-three').waitFor();
     assert.equal((await p.getByTestId('tpl-three').innerText()).trim(), '3단계 · 팀장 → 부서장 → 대표');
     assert.ok(!(await body()).includes('본부장'), '결재 설정에 본부장 없음');
+    // ── 7-1f) 410차 P2 문구 ②(G-49·G-50): 새 회사의 마케팅 화면 입력칸 예시·말풍선(title)에 다짐·하이링크·바디랩 이름이 없다
+    for (const path of ['/s/marketing/calendar', '/s/marketing/ads', '/s/marketing/ad-ops?tab=all']) {
+      await p.goto(BASE + path); await p.waitForLoadState('networkidle').catch(() => {}); await p.waitForTimeout(600);
+      const attrs = await p.evaluate(() => [...document.querySelectorAll('[placeholder],[title]')].map((e) => `${e.getAttribute('placeholder') ?? ''} ${e.getAttribute('title') ?? ''}`).join(' | '));
+      const hit = attrs.match(/다짐|하이링크|HILINK|바디랩|두정동|단지/g);
+      assert.ok(!hit, `${path} 입력칸 예시·말풍선에 다짐 낱말: ${[...new Set(hit ?? [])].join(', ')}`);
+    }
     // ── 7-2) 범용화 2단계(용어 사전): 새 회사에는 다짐식 역할·조직 이름이 안 보이고, 회사 정보에서 역할 이름을 바꾸면 화면에 반영
     await p.goto(BASE + '/admin/users');
     await p.getByTestId('invite-open').waitFor();

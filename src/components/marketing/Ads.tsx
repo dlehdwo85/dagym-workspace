@@ -1,5 +1,6 @@
 'use client';
 import { dtf } from '@/lib/dtf';
+import { useTerms } from '@/components/session';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -179,6 +180,7 @@ function AliasPanel({ brands, onSaved }: { brands: Brand[]; onSaved: () => void 
   );
 }
 function AliasRow({ b, onSaved }: { b: Brand; onSaved: () => void }) {
+  const base = useTerms().base; // 410차 P2: 다른 이름 예시는 회사별
   const [v, setV] = useState(b.aliases.join(', ')); const [busy, setBusy] = useState(false);
   async function save() {
     setBusy(true);
@@ -188,7 +190,7 @@ function AliasRow({ b, onSaved }: { b: Brand; onSaved: () => void }) {
   return (
     <li className="flex flex-wrap items-center gap-1.5" data-testid="ads-alias-row" data-brand={b.name}>
       <span className="flex w-28 shrink-0 items-center gap-1.5 truncate font-medium"><span className="size-2 shrink-0 rounded-full" style={{ background: b.color }} />{b.name}</span>
-      <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-0 text-xs')} value={v} onChange={(e) => setV(e.target.value)} placeholder="예: HILINK, 하이링크SA (쉼표로 나눔)" aria-label={`${b.name} 찾는 낱말`} data-testid="ads-alias-input" />
+      <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-0 text-xs')} value={v} onChange={(e) => setV(e.target.value)} placeholder={base ? '예: HILINK, 하이링크SA (쉼표로 나눔)' : '예: 영문 이름, 줄임말 (쉼표로 나눔)'} aria-label={`${b.name} 찾는 낱말`} data-testid="ads-alias-input" />
       <Button size="sm" variant="secondary" onClick={save} disabled={busy} data-testid="ads-alias-save">{busy ? '저장 중…' : '저장'}</Button>
     </li>
   );

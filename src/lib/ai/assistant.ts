@@ -992,6 +992,19 @@ const BUNDLES: [RegExp, string[]][] = [
 export const CANT_RE = /(할\s*수\s*(?:가\s*)?없|해\s*드릴\s*수\s*없|도와\s*드릴\s*수\s*없|드릴\s*수\s*없|불가능합|지원하지\s*않|도구가\s*없|기능이\s*없|기능은\s*없|화면에서\s*직접|직접\s*(?:하셔야|해\s*주셔야|확인해\s*주셔야))/;
 const MORE_TOOLS: AiTool = { name: 'more_tools', description: '이번 질문에는 자주 쓰는 도구만 붙어 있다. 일정·자료·문서·매출 등 필요한 도구가 목록에 없으면 먼저 이 도구를 불러 모든 도구를 받는다("안 된다"고 답하기 전에 반드시).',
   input_schema: { type: 'object', properties: { reason: { type: 'string', description: '필요한 일' } } } } as AiTool;
+/**
+ * 410차 범용화 G-26: 도구 설명에 든 다짐·하이링크 예시("다짐 기본 견적서", "플랫폼 시연 일정 잡기", "조직(현장·부서)")는 다른 회사에 공통 예시로 바꿔 보내고,
+ * 다른 회사에 없는 매출 메뉴 도구(revenue_summary)는 목록에서 뺀다. 기본 회사(다짐)는 지금 목록·글 그대로.
+ */
+const TOOL_WORDS_OTHER: [string, string][] = [['다짐 기본 견적서', '기본 견적서'], ['플랫폼 시연 일정 잡기', '제품 시연 일정 잡기'], ['조직(현장·부서)', '조직(지점·부서)']];
+export function toolsForTenant(tools: AiTool[], tenant: string): AiTool[] {
+  if (tenant === 'default') return tools;
+  return tools.filter((t) => t.name !== 'revenue_summary').map((t) => {
+    let s = JSON.stringify(t); let hit = false;
+    for (const [a, b] of TOOL_WORDS_OTHER) if (s.includes(a)) { s = s.split(a).join(b); hit = true; }
+    return hit ? JSON.parse(s) as AiTool : t;
+  });
+}
 export function toolsFor(text: string, hasFiles: boolean, all = false, space?: string | null) {
   if (all) return [...TOOLS, ...SALES_TOOLS, ...MKT_TOOLS, MORE_TOOLS].filter((t) => t.name !== 'more_tools');
   const want = new Set(CORE_TOOLS);
@@ -1090,7 +1103,7 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   const c: Ctx = { u, proposals: [], confidential: false, threadId, docJobs: [] };
   // V22 웹 검색·페이지 읽기 (회사 설정으로 끄기)
-  const pick = () => { const base = docMode ? TOOLS.filter((t) => DOC_TOOL_NAMES.has(t.name)) : toolsFor(userText, !!i.fileIds?.length, c.allTools, i.space); return !docMode && settings.web_tools ? [...base, ...WEB_TOOLS] : base; };
+  const pick = () => { const base = docMode ? TOOLS.filter((t) => DOC_TOOL_NAMES.has(t.name)) : toolsFor(userText, !!i.fileIds?.length, c.allTools, i.space); return toolsForTenant(!docMode && settings.web_tools ? [...base, ...WEB_TOOLS] : base, tenantOf(u)); }; // 410차 G-26: 다른 회사에는 공통 예시로(뒤에 붙는 도구까지)
   let tools = pick();
   if (i.fileIds?.length && fbConf) c.confidential = true;
   const sql = db();

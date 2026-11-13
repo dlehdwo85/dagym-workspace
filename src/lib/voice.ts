@@ -166,13 +166,16 @@ export async function structureVoice(u: SessionUser, i: z.infer<typeof structure
   const dow = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', weekday: 'long' }).format(new Date());
   const p = anthropicProvider({ tier: 'fast' });
   try {
-    const r = await p.chat({
-      system: `음성으로 말한 업무 요청을 업무 카드로 정리합니다. JSON 만.
+    // 410차 범용화 G-26: 지시문 속 예시("푸르지오 푸르지오", 현장·아파트)는 다짐 예시 — 다른 회사에는 공통 예시로(다짐은 지금 글 그대로)
+    const voiceSystem0 = `음성으로 말한 업무 요청을 업무 카드로 정리합니다. JSON 만.
 - title: 해야 할 일만 짧게(30자 이내, "~하기"·명사형). 받아쓰기 반복·말더듬("다음 다음 주", "푸르지오 푸르지오")은 한 번만, 지시 문구("업무 배정해 줘", "나 지금", "~할 것")·담당자·마감 표현은 빼고, 고유명사(현장·아파트·거래처 이름)는 그대로.
 - assignee: 일을 맡을 사람. 아래 [사람] 목록의 이름 그대로. 이름이 잘못 들렸어도 직책이 목록에서 한 사람뿐이면 그 사람. 모르면 null(지어내지 않음).
 - dueDate: YYYY-MM-DD(오늘 ${today} ${dow} 기준, "다음 주 금요일" = 다음 주의 금요일). 말하지 않았으면 null. dueTime: HH:MM 또는 null.
 - description: 업무명에 다 못 담은 내용(조건·순서·참고)만 1~3문장, 없으면 "". checklist: 말한 단계가 여러 개면 짧은 항목(최대 8), 없으면 []. 말하지 않은 일은 만들지 않음.
-- priority: "급함·긴급"=urgent, "높은 우선순위·중요"=high, "낮음·천천히"=low, 말하지 않았으면 null(우선순위 말은 설명에 넣지 않음).`,
+- priority: "급함·긴급"=urgent, "높은 우선순위·중요"=high, "낮음·천천히"=low, 말하지 않았으면 null(우선순위 말은 설명에 넣지 않음).`;
+    const voiceSystem = tenantOf(u) === 'default' ? voiceSystem0 : voiceSystem0.replace('"푸르지오 푸르지오"', '"견적서 견적서"').replace('고유명사(현장·아파트·거래처 이름)', '고유명사(지점·거래처 이름)');
+    const r = await p.chat({
+      system: voiceSystem,
       tools: [],
       messages: [{ role: 'user', content: `[사람]\n${people.map((x) => `${x.name}${x.title ? ` (${x.title})` : ''}`).join('\n')}\n\n[말한 내용]\n${i.text}` }],
       format: { type: 'object', additionalProperties: false, required: ['title', 'assignee', 'dueDate', 'dueTime', 'description', 'checklist', 'priority'], properties: {

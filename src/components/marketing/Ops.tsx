@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { useTerms } from '@/components/session';
 import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -138,6 +139,7 @@ export function ProposalCard({ p, kinds, canEdit, onChange }: { p: Proposal; kin
 }
 
 export function BudgetCard({ b, month, canEdit, busy, onDraft, onChange, ownerTotal, totalDefault, compact }: { b: Budget | null; month: string; canEdit: boolean; busy: boolean; onDraft: () => void; onChange: () => void; ownerTotal?: number | null; totalDefault?: { total: number; source: string }; compact?: boolean }) {
+  const base = useTerms().base; // 410차 P2: 브랜드별 비중 안내는 다짐에서만 이름을 적음
   const [edit, setEdit] = useState(false); const [plan, setPlan] = useState<Record<string, string>>({}); const [bplan, setBplan] = useState<Record<string, string>>({}); const [w, setW] = useState(false); const [reject, setReject] = useState('');
   const [tot, setTot] = useState<string | null>(null);
   async function saveTotal() {
@@ -171,7 +173,7 @@ export function BudgetCard({ b, month, canEdit, busy, onDraft, onChange, ownerTo
           <Button size="sm" variant="secondary" onClick={() => setTot(ownerTotal ? String(ownerTotal) : '')} data-testid="budget-total-edit">예산 총액 적기</Button></>
           : <><input className={cx(inputCls, 'h-8 w-36 py-0 text-right text-sm')} value={tot} onChange={(e) => setTot(e.target.value)} inputMode="numeric" placeholder="원" aria-label="월 광고 예산 총액" data-testid="budget-total-in" />
             <Button size="sm" onClick={saveTotal} disabled={w} data-testid="budget-total-save">저장</Button><Button size="sm" variant="secondary" onClick={() => setTot(null)}>취소</Button></>}
-        <span className="text-ink-3">월 운영 목표 광고비와 연동 · 비중: 하이링크 35~40 · 워크인 30~35 · 바디랩 15 · 다짐 10(브랜드 설정에서 바꿈)</span></div>}
+        <span className="text-ink-3">{base ? '월 운영 목표 광고비와 연동 · 비중: 하이링크 35~40 · 워크인 30~35 · 바디랩 15 · 다짐 10(브랜드 설정에서 바꿈)' : '월 운영 목표 광고비와 연동 · 브랜드별 비중은 브랜드 설정에서 바꿈'}</span></div>}
       {!b ? <p className="mt-2 text-xs text-ink-2" data-testid="budget-empty">이 달 계획이 없습니다. 매월 25일 다음 달 계획 초안이 올라옵니다(광고 계정이 연결된 회사).</p> : <>
         <table className="mt-3 w-full text-xs" data-testid="budget-table"><thead className="text-left text-ink-3"><tr><th className="py-1">채널</th><th className="py-1 text-right">월 예산</th><th className="py-1 text-right">하루</th><th className="py-1 text-right">이달 사용</th><th className="py-1">비고</th></tr></thead>
           <tbody>{b.plan.map((p) => <tr key={p.provider} className="border-t border-line" data-testid={`budget-row-${p.provider}`}>

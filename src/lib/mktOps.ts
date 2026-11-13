@@ -45,7 +45,18 @@ async function material(tenant: string) {
   return { last30, byProvider, campaigns, brands, co, goal: goal[0] ?? null, text };
 }
 
-export async function aiJson(tenant: string, actorId: string | null, system: string, user: string, format: any, purpose: string, opt: { make?: boolean } = {}) {
+/**
+ * 410차 범용화 G-48: 마케팅 AI 지시문에 든 아파트 위탁 운영 예시("{{운영 단지 수}}", "입주자대표회의·관리사무소장·위탁관리사")는 다짐 사업의 예시다 —
+ * 다른 회사에는 업종과 무관한 예시로 바꿔 보낸다. 기본 회사(다짐)의 지시문은 한 글자도 바꾸지 않는다(대표가 제작 품질을 검수 중).
+ */
+const PROMPT_WORDS_OTHER: [string, string][] = [['{{운영 단지 수}}', '{{거래처 수}}'], ['예: 입주자대표회의·관리사무소장·위탁관리사', '예: 대표·구매 담당자·실무 사용자']];
+export function promptForTenant(tenant: string, system: string) {
+  if (tenant === 'default') return system;
+  let s = system; for (const [a, b] of PROMPT_WORDS_OTHER) s = s.split(a).join(b);
+  return s;
+}
+export async function aiJson(tenant: string, actorId: string | null, system0: string, user: string, format: any, purpose: string, opt: { make?: boolean } = {}) {
+  const system = promptForTenant(tenant, system0);
   const P = await import('./ai/provider');
   if (!P.aiEnabled()) return null;
   const { assertMktAi, makeTier } = await import('./mktAuto'); await assertMktAi(tenant);

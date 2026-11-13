@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useTerms } from '@/components/session';
 import Link from 'next/link';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -163,6 +164,7 @@ export function MetaAuto() {
 }
 
 function MetaPlanForm({ d, edit, onClose, onDone }: { d: Data; edit?: MetaPlanRow; onClose: () => void; onDone: () => void }) {
+  const base = useTerms().base; // 410차 P2: 지역 칸 이름·예시는 회사별
   const e0 = edit?.plan;
   const plusDays = (n: number) => { const t = new Date(`${d.today}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   const [f, setF] = useState({
@@ -228,7 +230,7 @@ function MetaPlanForm({ d, edit, onClose, onDone }: { d: Data; edit?: MetaPlanRo
           </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-4">
-          <Field label="지역(단지·매장 주소)" className="sm:col-span-2"><input className={inputCls} value={f.address} onChange={(e) => set({ address: e.target.value })} required minLength={4} maxLength={120} placeholder="예: 경기 수원시 영통구 광교중앙로 140" data-testid="meta-address" /></Field>
+          <Field label={base ? '지역(단지·매장 주소)' : '지역(매장·사업장 주소)'} className="sm:col-span-2"><input className={inputCls} value={f.address} onChange={(e) => set({ address: e.target.value })} required minLength={4} maxLength={120} placeholder={base ? '예: 경기 수원시 영통구 광교중앙로 140' : '예: 서울 강남구 테헤란로 123'} data-testid="meta-address" /></Field>
           <Field label="반경(km, 1~80)"><input className={inputCls} inputMode="decimal" value={f.radiusKm} onChange={(e) => set({ radiusKm: e.target.value.replace(/[^\d.]/g, '') })} data-testid="meta-radius" /></Field>
           <Field label="나이"><div className="flex items-center gap-1"><input className={inputCls} inputMode="numeric" value={f.ageMin} onChange={(e) => set({ ageMin: digits(e.target.value) })} aria-label="최소 나이" data-testid="meta-age-min" />~
             <input className={inputCls} inputMode="numeric" value={f.ageMax} onChange={(e) => set({ ageMax: digits(e.target.value) })} aria-label="최대 나이(65 = 65세 이상)" data-testid="meta-age-max" /></div></Field>

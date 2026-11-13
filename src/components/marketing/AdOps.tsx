@@ -1,5 +1,6 @@
 'use client';
 import { useMemo, useRef, useState } from 'react';
+import { useTerms } from '@/components/session';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Check } from 'lucide-react';
@@ -466,11 +467,14 @@ function PctInput({ value, onChange, label, testId }: { value: number; onChange:
 
 type CombRow = { keyword: string; pc: number | null; mobile: number | null; total: number; low: boolean };
 const GROUP_HINT = ['예: 아파트, 신축아파트, 단지', '예: 커뮤니티, 헬스장, 골프연습장', '예: 운영, 위탁운영, 운영업체', '(선택) 네 번째 그룹'];
+/** 410차 G-49: 다른 회사는 '지역 / 업종 / 서비스' 꼴 공통 예시(다짐은 지금 예시 그대로) */
+const GROUP_HINT_COMMON = ['예: 서울, 강남, 역삼', '예: 카페, 디저트, 브런치', '예: 예약, 단체 주문, 배달', '(선택) 네 번째 그룹'];
 /**
  * #499-2 키워드 N단 조합기(테크트리 EP.7): 단어 그룹 2~4개 → 조합(화면에서 바로 셈, 최대 300개) → [검색량 확인](네이버 키워드 도구) → 고르기.
  * 영상 절차: 같은 그룹 안 단어끼리 꾸밀 수 없으면 그 단어를 앞 그룹에도 넣는다. '빼도 됨' 그룹은 그 그룹 없는 조합도 만든다.
  */
 function KwCombiner({ accountId, have, onPick }: { accountId: string; have: string[]; onPick: (keywords: string[]) => void }) {
+  const base = useTerms().base; // 410차 P2: 검색어 조합 예시는 회사별
   const [groups, setGroups] = useState(GROUP_HINT.map(() => ({ text: '', optional: false })));
   const [rows, setRows] = useState<CombRow[] | null>(null);
   const [related, setRelated] = useState<{ keyword: string; total: number }[]>([]);
@@ -498,7 +502,7 @@ function KwCombiner({ accountId, have, onPick }: { accountId: string; have: stri
       {groups.map((g, i) => (
         <div key={i} className="flex items-center gap-2">
           <span className="w-12 shrink-0 text-ink-2">그룹 {i + 1}</span>
-          <input className={cx(inputCls, 'h-8 min-w-0 flex-1 text-xs')} value={g.text} onChange={(e) => setG(i, { text: e.target.value })} placeholder={GROUP_HINT[i]} aria-label={`단어 그룹 ${i + 1}`} data-testid="kw-group" />
+          <input className={cx(inputCls, 'h-8 min-w-0 flex-1 text-xs')} value={g.text} onChange={(e) => setG(i, { text: e.target.value })} placeholder={(base ? GROUP_HINT : GROUP_HINT_COMMON)[i]} aria-label={`단어 그룹 ${i + 1}`} data-testid="kw-group" />
           <label className="flex shrink-0 items-center gap-1 whitespace-nowrap"><input type="checkbox" checked={g.optional} onChange={(e) => setG(i, { optional: e.target.checked })} data-testid="kw-group-optional" />빼도 됨</label>
         </div>))}
       <p className="text-ink-2" data-testid="kw-comb-count">조합 {comb.keywords.length}개{comb.truncated ? `(${PLAN_KEYWORDS_MAX}개에서 자름 — 그룹 단어를 줄이세요)` : ''}{comb.keywords.length ? ` · 예: ${comb.keywords.slice(0, 3).join(', ')}` : ' — 그룹 2개 이상에 단어를 쉼표로 넣으세요'}</p>
@@ -572,6 +576,7 @@ type KwRow = { keyword: string; area: string; service: string; pc: number | null
  * 네이버 파워링크는 반경을 직접 지정할 수 없어 '반경 안 동네 이름 키워드'로 맞춘다.
  */
 function LocalFinder({ accountId, value, have, onChange, onPick, pickLabel }: { accountId: string; value: Local; have: string[]; onChange?: (v: Partial<Local>) => void; onPick: (keywords: string[], v: Local) => void; pickLabel: string }) {
+  const base = useTerms().base; // 410차 P2: 중심 위치 예시는 회사별
   const [v, setV] = useState<Local>(value);
   const set = (patch: Partial<Local>) => { setV((x) => ({ ...x, ...patch })); onChange?.(patch); };
   const [services, setServices] = useState('');
@@ -603,7 +608,7 @@ function LocalFinder({ accountId, value, have, onChange, onPick, pickLabel }: { 
   return (
     <div className="grid gap-2 text-xs" data-testid="local-finder">
       <div className="grid grid-cols-[1fr_auto] gap-2">
-        <Field label="중심 위치(지점 주소·동네)"><input className={inputCls} value={v.center} onChange={(e) => set({ center: e.target.value })} placeholder="예: 천안 두정동 ○○점" maxLength={80} data-testid="local-center" /></Field>
+        <Field label="중심 위치(지점 주소·동네)"><input className={inputCls} value={v.center} onChange={(e) => set({ center: e.target.value })} placeholder={base ? '예: 천안 두정동 ○○점' : '예: 서울 강남구 역삼동 ○○점'} maxLength={80} data-testid="local-center" /></Field>
         <Field label="반경"><select className={inputCls} value={v.radiusKm} onChange={(e) => set({ radiusKm: Number(e.target.value) })} data-testid="local-radius">{[1, 2, 3, 5, 10].map((k) => <option key={k} value={k}>{k}km</option>)}</select></Field>
       </div>
       <Field label="서비스 단어(쉼표로, 5개까지)"><input className={inputCls} value={services} onChange={(e) => setServices(e.target.value)} placeholder="예: 홈페이지 제작, 유지보수" data-testid="local-services" /></Field>

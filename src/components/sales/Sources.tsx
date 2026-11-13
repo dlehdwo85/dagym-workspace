@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, inputCls, toast } from '@/components/ui';
-import { useSalesTerms } from '@/components/session';
+import { useSalesTerms, useTerms } from '@/components/session';
 import { HIDEABLE_STAGES, LEAD_STAGES, STAGE_LABEL_MAX, type SalesTerms, type StageCfg } from '@/lib/sales/terms';
 import { BidPrefs, Collectors } from './Collectors';
 
@@ -185,6 +185,7 @@ function StageNames({ terms, canEdit }: { terms: SalesTerms; canEdit: boolean })
 /** 대표 10/21 12:00 영업 재편 4): 회사 관심 사업(카테고리) — 공고 사업별 탭·필터·적합 배지의 근거. 이름·색·검색어 모두 회사가 정함(코드에 회사 이름 없음) */
 type Biz = { key?: string; name: string; color: string; keywords: string[]; active: boolean };
 function BizCats({ canEdit }: { canEdit: boolean }) {
+  const base = useTerms().base; // 410차 P2: 검색어 예시는 회사별
   const { data, error, reload } = useApi<{ items: Biz[] }>('/api/sales/business-categories');
   const [rows, setRows] = useState<Biz[] | null>(null); const [busy, setBusy] = useState(false);
   const list = rows ?? data?.items ?? [];
@@ -203,7 +204,7 @@ function BizCats({ canEdit }: { canEdit: boolean }) {
         <li key={r.key ?? `n${i}`} className="grid gap-1.5 sm:grid-cols-[2.25rem_10rem_1fr_auto] sm:items-center" data-testid="sales-bizcat">
           <input type="color" className="h-8 w-9 cursor-pointer rounded border border-line" value={r.color} onChange={(e) => set(i, { color: e.target.value })} aria-label="색" disabled={!canEdit} />
           <input className={inputCls} value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="사업 이름" aria-label="사업 이름" maxLength={40} disabled={!canEdit} data-testid="sales-bizcat-name" />
-          <input className={inputCls} value={r.keywords.join(', ')} onChange={(e) => set(i, { keywords: csv(e.target.value) })} placeholder="검색어(쉼표) 예: 커뮤니티, 위탁운영" aria-label="검색어" disabled={!canEdit} data-testid="sales-bizcat-keywords" />
+          <input className={inputCls} value={r.keywords.join(', ')} onChange={(e) => set(i, { keywords: csv(e.target.value) })} placeholder={base ? '검색어(쉼표) 예: 커뮤니티, 위탁운영' : '검색어(쉼표) 예: 유지관리, 구매'} aria-label="검색어" disabled={!canEdit} data-testid="sales-bizcat-keywords" />
           <div className="flex items-center gap-2 text-xs"><label className="inline-flex items-center gap-1"><input type="checkbox" checked={r.active} onChange={(e) => set(i, { active: e.target.checked })} disabled={!canEdit} />쓰기</label>
             {canEdit && <button type="button" className="text-ink-3 underline" onClick={() => setRows(list.filter((_, n) => n !== i))}>빼기</button>}</div>
         </li>))}

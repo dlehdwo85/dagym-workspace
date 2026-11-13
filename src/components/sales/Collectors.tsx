@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
-import { useSalesTerms } from '@/components/session';
+import { useSalesTerms, useTerms } from '@/components/session';
 import { PortalApplyLink, portalService } from './PortalApply';
 
 type Src = { label: string; ok: boolean; calls: number; received: number; kept: number; total?: number; keys?: string[]; error?: string; note?: string; sent?: string; head?: string };
@@ -85,6 +85,7 @@ function MailRouteNote({ m }: { m: MailRoute }) {
 }
 /** 대표 10/21 08:45 ②③: 맞춤 설정(21라인 관심검색어·제외어·지역·발주처·물품 코드·금액) + 당일 다이제스트(시각·메일·받는 사람·지금 보내기) */
 export function BidPrefs() {
+  const base = useTerms().base; // 410차 P2: 발주처·코드 예시는 회사별
   const T = useSalesTerms(); // #408 업종 템플릿 예시 검색어
   const { data, error, reload } = useApi<PD>('/api/sales/digest/prefs');
   const [f, setF] = useState<Record<string, string> | null>(null); const [busy, setBusy] = useState(false); const [addr, setAddr] = useState('');
@@ -123,8 +124,8 @@ export function BidPrefs() {
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <Field label="관심 검색어(쉼표)"><input className={inputCls} value={form.keywords} onChange={(e) => set('keywords', e.target.value)} placeholder={T.examples.keywords} disabled={!data.canEdit} data-testid="prefs-keywords" /></Field>
         <Field label="제외 검색어(쉼표)"><input className={inputCls} value={form.excludes} onChange={(e) => set('excludes', e.target.value)} placeholder={T.examples.excludes} disabled={!data.canEdit} data-testid="prefs-excludes" /></Field>
-        <Field label="관심 발주처(쉼표, 비우면 전체)"><input className={inputCls} value={form.issuers} onChange={(e) => set('issuers', e.target.value)} placeholder="LH, 시설관리공단" disabled={!data.canEdit} /></Field>
-        <Field label="물품·업종 코드(쉼표, 비우면 전체)"><input className={inputCls} value={form.item_codes} onChange={(e) => set('item_codes', e.target.value)} placeholder="예: 1156, 위탁용역" disabled={!data.canEdit} /></Field>
+        <Field label="관심 발주처(쉼표, 비우면 전체)"><input className={inputCls} value={form.issuers} onChange={(e) => set('issuers', e.target.value)} placeholder={base ? 'LH, 시설관리공단' : '예: 조달청, ○○시청'} disabled={!data.canEdit} /></Field>
+        <Field label="물품·업종 코드(쉼표, 비우면 전체)"><input className={inputCls} value={form.item_codes} onChange={(e) => set('item_codes', e.target.value)} placeholder={base ? '예: 1156, 위탁용역' : '예: 물품 분류 번호, 용역'} disabled={!data.canEdit} /></Field>
         <Field label="추정가격 최소(원)"><input className={inputCls} inputMode="numeric" value={form.amount_min} onChange={(e) => set('amount_min', e.target.value.replace(/\D/g, ''))} disabled={!data.canEdit} /></Field>
         <Field label="추정가격 최대(원)"><input className={inputCls} inputMode="numeric" value={form.amount_max} onChange={(e) => set('amount_max', e.target.value.replace(/\D/g, ''))} disabled={!data.canEdit} /></Field>
       </div>
