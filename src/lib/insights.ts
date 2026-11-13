@@ -82,7 +82,7 @@ export async function workload(u: SessionUser, weekStart?: string) {
     : await sql<any[]>`select distinct u.id, u.email, u.name, u.role, u.status, u.title from users u left join memberships m on m.user_id = u.id
         where u.status = 'active' and ${units === null ? sql`true` : sql`m.org_unit_id = any(${units}::uuid[])`} order by u.name`;
   const ids = people.map((p) => p.id);
-  const holidays = await sql<{ date: string; name: string }[]>`select to_char(date, 'YYYY-MM-DD') as date, name from holidays where date between ${start} and ${end}`;
+  const holidays = await (await import('./holidays')).holidaysBetween(tenantOf(u), start, end, sql);
   const tasks = ids.length ? await sql<any[]>`
     select t.assignee_id, count(*) filter (where t.due_date between ${start} and ${end})::int as due_week,
       count(*) filter (where t.due_date < ${todaySeoul()})::int as overdue,
@@ -176,8 +176,8 @@ export async function getReport(u: SessionUser, id: string) {
   return r;
 }
 
-export async function listHolidays(from: string, to: string) {
-  return db()<{ date: string; name: string }[]>`select to_char(date, 'YYYY-MM-DD') as date, name from holidays where date between ${from} and ${to} order by date`;
+export async function listHolidays(from: string, to: string, tenant?: string | null) {
+  return (await import('./holidays')).holidaysBetween(tenant, from, to);
 }
 
 /**

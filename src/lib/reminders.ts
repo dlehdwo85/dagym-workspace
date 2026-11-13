@@ -2,7 +2,7 @@ import { DateTime } from 'luxon';
 import { db } from './db';
 import { occurrences } from './recurrence';
 import { todaySeoul, addDays } from './time';
-import type { SessionUser } from './types';
+import { tenantOf, type SessionUser } from './types';
 import { assignedOpenSql } from './taskAssignees';
 
 const TZ = 'Asia/Seoul';
@@ -122,7 +122,7 @@ export async function upcomingReminders(u: SessionUser, days = 7, limit = 64): P
 
   // 아침 브리핑 (내용은 열어서 확인 — 미리 예약하므로 숫자 대신 안내)
   if (st.bon) {
-    const hol = new Set((await sql<{ d: string }[]>`select to_char(date,'YYYY-MM-DD') d from holidays where date between ${today} and ${addDays(today, days)}`).map((h) => h.d));
+    const hol = await (await import('./holidays')).holidaySet(tenantOf(u), today, addDays(today, days), sql);
     for (let i = 0; i <= days; i++) {
       const d = addDays(today, i), at = kst(d, st.btime);
       if (!st.bweekend && (at.weekday >= 6 || hol.has(d))) continue;

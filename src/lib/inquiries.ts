@@ -58,8 +58,7 @@ type InquiryInput = z.infer<typeof inquiryInput>;
 
 /** 접수 + 1영업일(주말·공휴일 제외) */
 async function nextBusinessDay(sql: Sql, from: string) {
-  const hol = new Set((await sql<{ d: string }[]>`select to_char(date, 'YYYY-MM-DD') d from holidays
-    where date between ${from} and ${addDays(from, 20)} and (tenant is null or tenant = ${INQUIRY_TENANT})`).map((h) => h.d));
+  const hol = await (await import('./holidays')).holidaySet(INQUIRY_TENANT, from, addDays(from, 20), sql);
   let d = addDays(from, 1);
   for (let i = 0; i < 20; i++, d = addDays(d, 1)) {
     const dow = new Date(d + 'T00:00:00Z').getUTCDay();

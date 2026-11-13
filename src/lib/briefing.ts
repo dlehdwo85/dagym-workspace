@@ -37,7 +37,9 @@ export async function briefingJob(now = new Date()) {
   const nowHM = local.toFormat('HH:mm');
   if (nowHM >= '22:00') return { sent: 0 };
   const weekend = local.weekday >= 6;
-  const [hol] = await sql`select name from holidays where date = ${today}`;
+  // 범용화 S-05: 공휴일은 회사별(기본 회사는 예전 표 그대로)
+  const { holidayName } = await import('./holidays'); const holOf = new Map<string, boolean>();
+  const isHol = async (t: string) => { if (!holOf.has(t)) holOf.set(t, !!(await holidayName(t, today, sql))); return holOf.get(t)!; };
   const users = await sql<{ id: string; tenant: string; role: string; t: string; weekend: boolean }[]>`
     select u.id, u.tenant, u.role, to_char(coalesce(s.briefing_time, time '08:30'), 'HH24:MI') as t, coalesce(s.briefing_weekend, false) as weekend
     from users u left join user_settings s on s.user_id = u.id
@@ -47,7 +49,7 @@ export async function briefingJob(now = new Date()) {
   const { salesBriefLine } = await import('./sales/leadList');
   for (const u of users) {
     if (nowHM < u.t) continue;
-    if ((weekend || hol) && !u.weekend) continue;
+    if ((weekend || (await isHol(u.tenant))) && !u.weekend) continue;
     const [c] = await sql<{ open: number; over: number; due: number }[]>`
       select count(*)::int as open, count(*) filter (where t.due_date < ${today})::int as over, count(*) filter (where t.due_date = ${today})::int as due
       from tasks t where t.deleted_at is null and ${assignedOpenSql(sql, u.id)} and t.status not in ('done', 'on_hold')

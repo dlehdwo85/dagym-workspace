@@ -414,7 +414,7 @@ async function eventWarnings(u: SessionUser, ids: string[], s: Date, e: Date, al
     if (away.size) out.push(`${x.name}: 연차·출장 (${[...away].sort().map((d) => DateTime.fromISO(d).toFormat('M/d')).join(', ')})`);
   }
   for (const h of half) out.push(`${h.name}: ${h.kind === 'half_day' ? '반차' : '외근'} ${DateTime.fromJSDate(h.start_at).setZone(TZ).toFormat('HH:mm')}~${DateTime.fromJSDate(h.end_at).setZone(TZ).toFormat('HH:mm')}`);
-  const hol = await sql<{ d: string; name: string }[]>`select to_char(date, 'YYYY-MM-DD') d, name from holidays where date between ${day0.toISODate()} and ${day1.toISODate()} and (tenant is null or tenant = ${tenantOf(u)})`;
+  const hol = (await (await import('../holidays')).holidaysBetween(tenantOf(u), day0.toISODate()!, day1.toISODate()!, sql)).map((h) => ({ d: h.date, name: h.name }));
   for (const h of hol) out.push(`공휴일: ${h.name} (${DateTime.fromISO(h.d).toFormat('M/d')})`);
   return [...new Set(out)].slice(0, 10);
 }
@@ -438,7 +438,7 @@ async function findFreeTime(u: SessionUser, input: any) {
     busy.push(...b.intervals.map((x) => ({ s: x.s, e: x.e })));
     b.away.forEach((d) => away.add(d));
   }
-  const hol = new Set((await sql<{ d: string }[]>`select to_char(date, 'YYYY-MM-DD') d from holidays where date between ${from.toISODate()} and ${to.toISODate()} and (tenant is null or tenant = ${tenantOf(u)})`).map((h) => h.d));
+  const hol = await (await import('../holidays')).holidaySet(tenantOf(u), from.toISODate()!, to.toISODate()!, sql);
   const nb = isTime(input.notBefore) ? Number(input.notBefore.slice(0, 2)) * 60 + Number(input.notBefore.slice(3)) : 0;
   const na = isTime(input.notAfter) ? Number(input.notAfter.slice(0, 2)) * 60 + Number(input.notAfter.slice(3)) : 24 * 60;
   const slots: { date: string; start: string; end: string; freeUntil: string }[] = [];

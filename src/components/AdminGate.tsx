@@ -10,7 +10,7 @@ import { useInApp } from './inApp';
 export function AdminGate({ levels, children }: { levels: Record<string, string>; children: React.ReactNode }) {
   const page = adminPageFor(usePathname() ?? '');
   const inApp = useInApp(); // 스토어 심사(#839): 앱 안 경로 이름에 '요금제' 없음
-  if (page && (levels[page.menu] ?? 'none') === 'none') return <NoAccess what={page.label} />;
+  if (page && (levels[page.gate ?? page.menu] ?? 'none') === 'none') return <NoAccess what={page.label} />;
   // #429 관리 하위 화면 '← 이전 화면'·경로(관리 › 사용자 관리) — 결재 설정처럼 탭이 있는 화면은 화면이 직접 그린다
   return <>{page && !page.selfBack && <BackBar fallback={page.parent?.href ?? '/'} crumbs={[page.parent ?? { label: '관리' }, { label: inApp && page.href === '/admin/usage' ? '사용량' : page.label }]} />}{children}</>;
 }

@@ -1,10 +1,10 @@
 import { handler } from '@/lib/api';
 import { db } from '@/lib/db';
-import { requireMenu } from '@/lib/menuPerms';
+import { requirePlatformOps } from '@/lib/menuPerms';
 import { tenantOf } from '@/lib/types';
 
 export const GET = handler(async ({ user }) => {
-  await requireMenu(user, 'ops', 'view');
+  await requirePlatformOps(user, 'view'); // 범용화 S-02: 서버 운영 상태는 기본 회사 전용(다른 회사 404)
   const sql = db();
   const [jobs, errors, deliveries, syncErrors, counts, recent, noDevice, dbLocale, pickDiag] = await Promise.all([
     sql`select id, job, trigger, started_at, finished_at, status, detail from job_runs order by id desc limit 30`,

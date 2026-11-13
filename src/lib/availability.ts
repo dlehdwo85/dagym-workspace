@@ -54,7 +54,7 @@ const len = (xs: { s: number; e: number }[]) => xs.reduce((a, x) => a + (x.e - x
 export async function dayLoads(userId: string, fromDate: string, toDate: string, opts: { notBefore?: Date } = {}, sql: Sql = db()): Promise<DayLoad[]> {
   const from = DateTime.fromISO(fromDate, { zone: TZ }).startOf('day');
   const to = DateTime.fromISO(toDate, { zone: TZ }).plus({ days: 1 }).startOf('day');
-  const holidays = new Map((await sql<{ date: string; name: string }[]>`select to_char(date, 'YYYY-MM-DD') as date, name from holidays where date between ${fromDate} and ${toDate}`).map((h) => [h.date, h.name]));
+  const holidays = new Map((await (await import('./holidays')).holidaysForUser(userId, fromDate, toDate, sql)).map((h) => [h.date, h.name]));
   const { intervals, away } = await busyOf(userId, from.toJSDate(), to.toJSDate(), sql);
   const out: DayLoad[] = [];
   const nb = opts.notBefore?.getTime() ?? 0;
