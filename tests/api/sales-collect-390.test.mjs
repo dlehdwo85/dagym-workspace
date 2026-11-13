@@ -51,6 +51,17 @@ test('협력사 모집 감시: 직접 접속이 끊긴 사이트는 서울 중�
   assert.deepEqual(al.map((a) => [a.label, a.source, a.action]), [['협력사 모집 감시', src.length === 1 && Object.keys(r.sources)[0], 'retry']], JSON.stringify(al));
   assert.match(al[0].error, /서울 중계로도 못 받음/);
   assert.match(al[0].todo, /^원천 서버가 응답하지 않았습니다/);
+  // 396차(노트북 11/13 '쉬는 페이지 1: 서희건설(11/15까지)'): 중계가 생기기 전 실패로 쉬는 중이면 쉬지 않고 중계까지 시도 · 중계로도 못 받은 실패만 쉼
+  const url = `http://localhost:${PORT}/vendor/notice`; const later = new Date(Date.now() + 2 * 864e5).toISOString();
+  const setState = (v) => sql`update app_settings set value = jsonb_set(value, ${[url]}::text[], ${sql.json(v)}::jsonb) where key = 'sales_vendor_page_state'`;
+  const [cur] = await sql`select value->${url} v from app_settings where key = 'sales_vendor_page_state'`;
+  vendorMode = 'resetOnce'; hits['/vendor/notice'] = 0;
+  await setState({ ...cur.v, fails: 3, restUntil: later, err: 'HTTP 503' });
+  const back = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
+  assert.match(back.summary, /서울 중계로 받은 곳 1/, back.summary); assert.doesNotMatch(back.summary, /쉬는 페이지/);
+  await setState({ ...cur.v, fails: 3, restUntil: later, err: 'fetch failed · 서울 중계로도 못 받음(…)' });
+  const rest = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
+  assert.match(rest.summary, /쉬는 페이지 1: 시험건설/, '중계로도 못 받은 실패면 쉼');
 });
 
 test('공공기관 입찰: 연결 끊김은 한 번 더 받아 성공 · 오류 화면(HTML)은 호출 한도가 아님 · 못 받은 원천이 있으면 30분 뒤 다시 실행 · 활용신청 줄에 서비스 번호', async () => {

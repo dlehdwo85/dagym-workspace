@@ -1377,7 +1377,7 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
             {t.sales_ref?.cancel && t.status !== 'done' && <span className="shrink-0 rounded-full bg-red-50 px-1.5 text-[10px] font-semibold text-red-700" data-testid="row-bid-canceled" title={`발주처가 공고를 취소했습니다${t.sales_ref.cancel.reason ? ` · 사유: ${t.sales_ref.cancel.reason}` : ''} — 상세에서 [공고 취소로 완료]`}>공고 취소</span>}
             {/* 380차 #1017: 입찰 업무 줄 = '현설 11/9 11시'(필수면 '필수', 3일 안 빨강, 지나면 회색) · '입찰 마감 11/16 17시' — 정시는 'n시', 분이 있으면 '11:30'(폭이 좁아서) */}
             {/* 395차 #1020(대표 11/08 '현설 표기'): 입찰 업무 줄은 늘 현설 칩 — '현설 11/9 11시 필수'(일시) · '현설 없음' · '현설 공고문 참조' · '현설 필수/임의'(일시 미정) ·
-                아직 원천에서 못 읽었으면 '현설 확인 필요'(정기 실행이 원천을 다시 읽으면 바뀜). 예전엔 일시가 있을 때만 보여 '없음'·'공고문 참조' 업무는 칩이 없었음 */}
+                원천 목록에 정보가 없으면 '현설 공고문 확인'(396차 — K-apt 아닌 공고, 노트북 11/13 다올이음터). 예전엔 일시가 있을 때만 보여 '없음'·'공고문 참조' 업무는 칩이 없었음 */}
             {(t.sales_ref?.bidInfo || t.sales_ref?.kind === 'bid') && (() => { const bi = t.sales_ref.bidInfo; const b = bi?.briefing;
               if (b?.at) { const dd = daysTo(String(b.at)); return (
                 <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', dd < 0 ? 'bg-slate-100 text-ink-3' : dd <= 3 ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800')} data-testid="row-bid-briefing" data-kind="at" data-past={dd < 0 || undefined}
@@ -1385,7 +1385,7 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
               const [label, kind, tone, tip] = bi?.briefingNone ? ['현설 없음', 'none', 'bg-slate-100 text-ink-2', '현장설명회 없음(원천 공고)']
                 : b?.kind === '공고문 참조' ? ['현설 공고문 참조', 'ref', 'bg-amber-50 text-amber-800', '현장설명회 여부·일시는 공고문에 — 공고문을 확인하세요']
                 : b?.kind === '필수' || b?.kind === '임의' ? [`현설 ${b.kind}`, 'kind', 'bg-amber-50 text-amber-800', `현장설명회 ${b.kind} — 일시는 공고문 확인`]
-                : ['현설 확인 필요', 'unknown', 'bg-white text-ink-3 ring-1 ring-line', '원천에서 현장설명회 정보를 아직 못 읽었습니다 — 정기 실행이 다시 읽으면 바뀝니다'];
+                : ['현설 공고문 확인', 'unknown', 'bg-white text-ink-2 ring-1 ring-line', '원천 공고 목록에 현장설명회 정보가 없습니다(나라장터 등) — 공고문(첨부)에서 확인하세요. K-apt·KG2B 공고는 정기 실행이 다시 읽으면 바뀝니다'];
               return <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', tone)} data-testid="row-bid-briefing" data-kind={kind} title={tip}>{label}</span>; })()}
             {t.sales_ref?.bidInfo?.deadline && (() => { const dd = daysTo(String(t.sales_ref.bidInfo.deadline)); return (
               <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', dd < 0 ? 'bg-slate-100 text-ink-3' : 'bg-slate-100 text-ink-2')} data-testid="row-bid-close" title="입찰 마감(서류 제출)">입찰 마감 {hourShort(String(t.sales_ref.bidInfo.deadline))}</span>); })()}

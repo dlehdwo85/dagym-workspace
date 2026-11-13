@@ -1,5 +1,5 @@
 // 395차 #1020(대표 11/08 "할일 개수는 뺍니다 댓글과 첨부 표시만 표시 · 기존 업무들도 적용 · 현설 표기 요청"):
-// 업무 줄에 '할 일 n/m'(체크리스트)·하위 업무 n/m 칩 없음 · 댓글 수는 그대로 · 입찰 업무 줄은 늘 현설 칩(일시·필수 / 없음 / 공고문 참조 / 확인 필요)
+// 업무 줄에 '할 일 n/m'(체크리스트)·하위 업무 n/m 칩 없음 · 댓글 수는 그대로 · 입찰 업무 줄은 늘 현설 칩(일시·필수 / 없음 / 공고문 참조 / 공고문 확인)
 import assert from 'node:assert/strict';
 
 export async function bidChips1020({ owner, ctx, sql, BASE }) {
@@ -27,7 +27,7 @@ export async function bidChips1020({ owner, ctx, sql, BASE }) {
     assert.equal(await chip('E2E1020 현설 일시'), `현설 ${md} 11시 필수`);
     assert.equal(await chip('E2E1020 현설 없음'), '현설 없음');
     assert.equal(await chip('E2E1020 공고문 참조'), '현설 공고문 참조');
-    assert.equal(await chip('E2E1020 옛 업무'), '현설 확인 필요', '고정 칸이 아직 없는 옛 입찰 업무도 칩');
+    assert.equal(await chip('E2E1020 옛 업무'), '현설 공고문 확인', '고정 칸이 아직 없는·원천에 현설 정보가 없는 입찰 업무도 칩(396차 문구)');
     for (const t of ['E2E1020 현설 일시', 'E2E1020 현설 없음']) assert.equal(await row(t).locator('[title="체크리스트"], [title="하위 업무"]').count(), 0, `${t}: 할 일 개수 칩 없음`);
     assert.ok(!(await row('E2E1020 현설 없음').innerText()).includes('0/2'), '할 일 0/2 글자 없음');
   } finally {
