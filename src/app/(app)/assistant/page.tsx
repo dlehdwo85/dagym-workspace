@@ -9,7 +9,7 @@ import { AI_ACCEPT } from '@/components/libraryUpload';
 import { AttachChips, askFor, useAiAttach } from '@/components/aiAttach';
 import { DropZone } from '@/components/upload';
 import { api, broadcastRefresh, useApi } from '@/components/client';
-import { useSession } from '@/components/session';
+import { useSession, useTerms } from '@/components/session';
 import { Button, Empty, PageHeader, cx, inputCls, toast } from '@/components/ui';
 import { VoiceButton } from '@/components/voice';
 import { hearOnce, keepScreenOn, speak, stopSpeaking, yesNo } from '@/components/speak';
@@ -22,11 +22,11 @@ import { SpecialProposal } from '@/components/ProposalCard';
 type Proposal = { id: string; kind: string; summary: string; state?: 'done' | 'cancelled' | 'busy'; replaced?: boolean; link?: string; preview?: Record<string, any> & { assignees?: string[]; due?: string | null; checklist?: string[]; description?: string; files?: number; when?: string; place?: string | null; attendees?: string[]; tasks?: string[]; taskDue?: string; calendar?: string; warnings?: string[]; moves?: string[]; folder?: string } };
 type Msg = Omit<ChatMsg, 'proposals'> & { proposals?: Proposal[] };
 type Thread = { id: string; title: string; task_id: string | null; task_title: string | null; pinned: boolean; updated_at: string; turns: number };
-const EXAMPLES = ['회사 로고 찾아서 이 업무에 첨부해줘', '이번 주 내 마감 업무 정리해줘', '내일 3시 회의 준비 업무 만들어줘', '3분기 매출 현장별로 엑셀 만들어줘'];
 
 /** V9 AI 비서: 자료실·업무·일정·매출을 내 권한으로 찾아 답하고, 바꾸는 일은 제안 → [확인] 후 실행 */
 export default function AssistantPage() {
   const { user } = useSession();
+  const EXAMPLES = ['회사 로고 찾아서 이 업무에 첨부해줘', '이번 주 내 마감 업무 정리해줘', '내일 3시 회의 준비 업무 만들어줘', useTerms().example.aiChip]; // 409차: 마지막 예시는 회사별(매출 메뉴는 다른 회사에 없음)
   const sp = useSearchParams();
   const router = useRouter();
   const taskId = sp.get('task') ?? undefined;

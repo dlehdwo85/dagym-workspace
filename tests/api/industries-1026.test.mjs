@@ -57,7 +57,7 @@ describe('범용화 3단계 가입 업종·시작 템플릿', () => {
     assert.deepEqual(await tplNames(etc.tenant), []);
   });
 
-  test('G-10 영업 용어 묶음 자동 판정: 건설·시설관리 = 건설 묶음, 시설관리·용역·외식·학원 = 일반(단지·관리사무소 없음), 운동·피트니스 = 시설 묶음 그대로', async () => {
+  test('G-10·G-11 영업 용어 묶음 자동 판정: 건설·시설관리 = 건설 묶음, 시설관리·용역·외식·학원·운동·피트니스 = 일반(단지·관리사무소 없음)', async () => {
     const pick = async (email, company, industry, industries = []) => { const x = await join(email, company, industry, industries); await x.c.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true }); return (await x.c.ok('GET', '/api/sales/options')); };
     const con = await pick('ceo@con-1026.test', '튼튼건설', '건설·시설관리');
     assert.deepEqual([con.template.code, con.template.auto, con.terms.kind.building], ['construction', true, '신규 현장']);
@@ -67,8 +67,12 @@ describe('범용화 3단계 가입 업종·시작 템플릿', () => {
       assert.deepEqual([o.template.code, o.template.auto], ['general', true], ind);
       assert.ok(!JSON.stringify(o.terms).includes('관리사무소') && !JSON.stringify(o.terms).includes('단지'), ind);
     }
+    // 409차 G-11: 운동·피트니스 업종이라고 아파트 위탁 운영 묶음(단지명·관리사무소·예시 "아파트 커뮤니티 시설을 위탁 운영…")을 자동으로 주지 않는다 — 추가 업종 건설이 있으면 건설, 없으면 일반
     const gym = await pick('ceo@gym-1026.test', '튼튼짐', '운동·피트니스', ['건설·시설관리']);
-    assert.equal(gym.template.code, 'facility', '주 업종(앞에 적힌 것)이 먼저');
+    assert.equal(gym.template.code, 'construction');
+    const yoga = await pick('ceo@yoga-1026.test', '고요요가', '운동·피트니스');
+    assert.deepEqual([yoga.template.code, yoga.template.auto], ['general', true]);
+    assert.ok(!/단지|관리사무소|아파트|위탁/.test(JSON.stringify(yoga.terms)), JSON.stringify(yoga.terms.examples));
     const it = await pick('ceo@it-1026.test', '코드공방', 'IT·소프트웨어', ['운동·피트니스']);
     assert.equal(it.template.code, 'it');
   });
@@ -82,6 +86,7 @@ describe('범용화 3단계 가입 업종·시작 템플릿', () => {
     // 시드 = 'facility' 고정(자동 아님)
     let o = await ctx.owner.ok('GET', '/api/sales/options');
     assert.deepEqual([o.template.code, o.template.auto, o.terms.unitName, o.terms.office], ['facility', false, '단지명', '관리사무소']);
+    assert.match(o.terms.examples.aiProfile, /아파트 커뮤니티 시설을 위탁 운영/, '다짐 회사 정보 예시 문장 그대로(G-11)');
     // 자동 판정으로 돌려도 예전 순서 그대로: '건설·시설관리'는 예전처럼 시설 묶음(시설·관리 낱말이 먼저 걸림)
     const before = await sql`select industry, industries, sales_template from tenants where id = 'default'`;
     try {

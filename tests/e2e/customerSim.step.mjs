@@ -168,6 +168,13 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     await p.goto(BASE + '/reports');
     await p.getByTestId('reports').waitFor();
     assert.ok(!(await p.getByTestId('reports').innerText()).includes('미해결 민원'));
+    // ── 7-1d) 409차 예시 문구(G-01·G-03·G-08): 새 회사의 AI 비서 예시 칩·업무 입력칸·연락처 태그 칸에 다짐 예시(현장별 매출·푸르지오·관리소)가 없다
+    await p.goto(BASE + '/assistant');
+    await p.getByText('지난주 완료한 업무 요약해줘').first().waitFor();
+    assert.ok(!(await body()).includes('현장별'), 'AI 비서 예시 칩에 "현장별 매출" 없음');
+    await p.goto(BASE + '/contacts');
+    const phs = await p.evaluate(() => [...document.querySelectorAll('input[placeholder],textarea[placeholder]')].map((e) => e.getAttribute('placeholder')).join(' | '));
+    assert.ok(!/관리소|푸르지오|두정점|김민수/.test(phs), `입력칸 예시에 다짐 낱말 없음: ${phs.slice(0, 200)}`);
     // ── 7-2) 범용화 2단계(용어 사전): 새 회사에는 다짐식 역할·조직 이름이 안 보이고, 회사 정보에서 역할 이름을 바꾸면 화면에 반영
     await p.goto(BASE + '/admin/users');
     await p.getByTestId('invite-open').waitFor();

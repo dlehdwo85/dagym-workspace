@@ -93,7 +93,7 @@ function EditModal({ init, onClose, onSaved }: { init: Partial<C>; onClose: () =
           <Field label="이메일"><input className={inputCls} value={f.email} onChange={set('email')} inputMode="email" aria-label="이메일" data-testid="cf-email" /></Field>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <Field label="태그 (쉼표)"><input className={inputCls} value={f.tags} onChange={set('tags')} placeholder="고객, 관리소" aria-label="태그" data-testid="cf-tags" /></Field>
+          <Field label="태그 (쉼표)"><input className={inputCls} value={f.tags} onChange={set('tags')} placeholder={T.example.contactTags} aria-label="태그" data-testid="cf-tags" /></Field>
           <Field label="담당 직원"><select className={inputCls} value={f.ownerId} onChange={set('ownerId')} aria-label="담당 직원"><option value="">없음</option>{dir.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
         </div>
         <Field label="메모"><textarea className={cx(inputCls, 'min-h-16')} value={f.memo} onChange={set('memo')} aria-label="메모" /></Field>

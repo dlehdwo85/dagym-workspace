@@ -19,6 +19,15 @@ export type Terms = {
   /** 연락처의 소속 칸 이름 */
   contactOrg: string;
   capacity: Record<CapacityKey, string>;
+  /** 409차 범용화 P1(G-01·G-02·G-03·G-08): 입력칸·예시 칩에 보이는 예시 글 — 기본 회사는 지금 예시 그대로, 다른 회사는 업종과 무관한 예시 */
+  example: {
+    /** 업무 빨리 추가 입력칸 */ quickTask: string;
+    /** 음성 등록 '이렇게 말해 보세요' 둘째 줄 */ voiceTask: string;
+    /** 업무의 AI 비서 입력칸 */ assistReply: string;
+    /** 받는 사람 호칭 예시(카카오 보내기·메일 초안 지시문) */ honorific: string;
+    /** 연락처 태그 칸 */ contactTags: string;
+    /** AI 비서 첫 화면 예시 칩 마지막 줄 */ aiChip: string;
+  };
 };
 export const ROLES: Role[] = ['owner', 'admin', 'dept_lead', 'site_manager', 'staff'];
 
@@ -29,6 +38,8 @@ export const TERMS_BASE: Terms = {
   event: { normal: '일정', vacation: '연차', half_day: '반차', outside: '외근', business_trip: '출장', task_block: '업무 시간' },
   contactOrg: '회사·단지',
   capacity: { 요청자: '요청자', 관리자: '관리자', 부서장: '부서장', 팀장: '팀장', 대표: '대표', 담당자: '담당자' },
+  example: { quickTask: '예: 다음 주 금요일까지 김민수 본부장한테 푸르지오 비교 파일 검수받고 보고하라고 해 줘', voiceTask: '금요일까지 김민수 두정점 원판 수량 파악, 중요',
+    assistReply: '예: 견적서 첨부해서 관리소장님께 회신 써줘', honorific: '관리소장님', contactTags: '고객, 관리소', aiChip: '3분기 매출 현장별로 엑셀 만들어줘' },
 };
 /** 다른 회사 기본값(대표 11/13: 대표·관리자·팀 책임자·지점 관리자·직원) */
 export const TERMS_COMMON: Terms = {
@@ -37,6 +48,9 @@ export const TERMS_COMMON: Terms = {
   event: { normal: '일정', vacation: '휴가', half_day: '반차', outside: '외근', business_trip: '출장', task_block: '업무 시간' },
   contactOrg: '회사·지점',
   capacity: { 요청자: '요청자', 관리자: '관리자', 부서장: '부서장', 팀장: '팀장', 대표: '대표', 담당자: '담당자' },
+  // 사람 이름은 예시로 널리 쓰는 '홍길동', 호칭은 흔한 '김 과장님' — 실제 직원·거래처 이름을 쓰지 않는다. 매출 메뉴는 다른 회사에 없으므로 AI 예시도 모든 회사에서 되는 것으로
+  example: { quickTask: '예: 다음 주 금요일까지 홍길동 팀장한테 견적서 비교 파일 검수받고 보고하라고 해 줘', voiceTask: '금요일까지 홍길동 재고 수량 파악, 중요',
+    assistReply: '예: 견적서 첨부해서 거래처 담당자께 회신 써줘', honorific: '김 과장님', contactTags: '고객, 거래처', aiChip: '지난주 완료한 업무 요약해줘' },
 };
 /** 회사가 정한 값(지금은 역할 이름만) */
 export type TermsCustom = { role?: Partial<Record<Role, string>> };

@@ -4,6 +4,7 @@ import { Copy, Loader2, Mail, MessageSquare, Send, Sparkles, Trash2 } from 'luci
 import { api, useApi } from './client';
 import { Button, cx, inputCls, toast } from './ui';
 import { KakaoSend } from './KakaoSend';
+import { useTerms } from './session';
 
 export type AssistDraft = { channel: 'email' | 'sms' | 'kakao'; subject: string; body: string; attachmentIds: string[] };
 type Msg = { id: number; role: 'user' | 'assistant'; action: string; content: string; draft: AssistDraft | null; cost_krw: string | null; created_at: string };
@@ -11,6 +12,7 @@ const QUICK: [string, string][] = [['mail', '메일 초안'], ['sms', '문자 �
 
 /** V28-1 이 업무의 AI 비서 — 업무 1건 문맥(Haiku), 초안은 시안 창으로 넘겨 사람이 확인 후 보냄. 대화는 업무 × 나 단위로 남는다 */
 export function TaskAssist({ taskId, onDraft }: { taskId: string; onDraft: (d: AssistDraft) => void }) {
+  const T = useTerms(); // 409차: 입력칸 예시는 회사별(다짐은 지금 예시 그대로)
   const hist = useApi<{ messages: Msg[] }>(`/api/tasks/${taskId}/assist`, [taskId]);
   const [busy, setBusy] = useState<string | null>(null);
   const [text, setText] = useState('');
@@ -69,7 +71,7 @@ export function TaskAssist({ taskId, onDraft }: { taskId: string; onDraft: (d: A
         </div>
       )}
       <form onSubmit={(e) => { e.preventDefault(); if (text.trim()) run('ask', text.trim()); }} className="flex gap-1.5">
-        <input className={cx(inputCls, 'py-1.5')} value={text} onChange={(e) => setText(e.target.value)} placeholder="예: 견적서 첨부해서 관리소장님께 회신 써줘" aria-label="이 업무의 AI 비서에게" data-testid="assist-input" />
+        <input className={cx(inputCls, 'py-1.5')} value={text} onChange={(e) => setText(e.target.value)} placeholder={T.example.assistReply} aria-label="이 업무의 AI 비서에게" data-testid="assist-input" />
         <Button size="sm" type="submit" disabled={!!busy || !text.trim()} aria-label="보내기"><Send /></Button>
       </form>
     </div>

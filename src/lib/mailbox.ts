@@ -833,7 +833,7 @@ const DRAFT_SYSTEM = `회사 영업·고객 응대 메일(또는 문자) 초안�
 - 대괄호 빈칸([날짜]·[이름]·[금액] 등)은 절대 쓰지 않습니다. 모르는 값은 그 문장을 빼고 씁니다.
 - [첨부] 있음이면 "요청하신 ○○ 자료를 보내드립니다. 아래 링크(14일)에서 받아 보세요" 처럼 '보내드림' 문장이 기본입니다(업무 상태와 무관, "확인 중·다시 안내" 금지).
   [첨부] 없음이고 진행 중이면 진행 안내 — [업무 마감]이 있으면 그 날짜로 "○월 ○일(○)까지 안내드리겠습니다", 없으면 날짜 문장을 뺍니다.
-- 받는 사람 전화·이메일은 쓰지 않습니다. 호칭은 [받는 사람 호칭]이 있으면 그것(예: "관리소장님"), 없으면 "안녕하세요."로 시작합니다("담당자님" 금지).
+- 받는 사람 전화·이메일은 쓰지 않습니다. 호칭은 [받는 사람 호칭]이 있으면 그것(예: "__HONORIFIC__"), 없으면 "안녕하세요."로 시작합니다("담당자님" 금지).
 - [의도]가 있으면 그 목적에 맞게만 씁니다(자료 보냄 / 진행 안내 / 일정 확인 / 감사 인사).
 - [쓰는 사람]이 [우리 회사]를 대표해 보내는 글입니다. 그 사람의 직책에 맞는 어조로, 회사의 사업 방향·주요 고객·말투에 맞춰 씁니다. 자기소개가 필요하면 "(회사) (직책) (이름)입니다".
 - recommend: 보낼 자료 후보 목록에서 이 고객에게 보내면 좋은 자료 번호를 최대 3개(없으면 빈 배열).`;
@@ -869,7 +869,8 @@ export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
     `[기본 문구 참고]\n제목: ${kind.subject}\n${kind.body}`,
     `[보낼 자료 후보]\n${cands.map((f, n) => `${n + 1}. ${f.title || f.file_name} (${f.folder || '최상위'}${f.tags?.length ? ' · ' + f.tags.join(',') : ''})`).join('\n') || '없음'}`].filter(Boolean).join('\n\n');
   const p = P.anthropicProvider({ tier: 'fast' });
-  const r = await p.chat({ system: DRAFT_SYSTEM, tools: [], messages: [{ role: 'user', content: prompt }], format: DRAFT_SCHEMA });
+  const honorific = (await (await import('./termsServer')).termsOfUser(u)).example.honorific; // 409차: 호칭 예시는 회사별(다짐은 '관리소장님' 그대로)
+  const r = await p.chat({ system: DRAFT_SYSTEM.replace('__HONORIFIC__', honorific), tools: [], messages: [{ role: 'user', content: prompt }], format: DRAFT_SCHEMA });
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
     values (${tenantOf(u)}, ${u.id}, ${randomUUID()}, ${p.name}, ${r.model ?? p.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, ${r.usage.cache_read_input_tokens ?? 0},
       ${r.usage.cache_creation_input_tokens ?? 0}, ${P.costUsd(r.model ?? p.model, r.usage)}, 'mail_draft')`;

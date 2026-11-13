@@ -6,11 +6,13 @@ import { api, broadcastRefresh } from './client';
 import { Button, cx, inputCls, toast } from './ui';
 import { kakaoEnabled, kakaoText, shareKakao } from './kakao';
 import { isNativeApp } from './native';
+import { useTerms } from './session';
 
 const copyText = (s: string) => navigator.clipboard?.writeText(s).then(() => true, () => false) ?? Promise.resolve(false);
 
 /** V28-2A [카카오톡으로 보내기] — 휴대폰은 카카오톡 앱, PC 는 카카오 공유 창 또는 QR 로 휴대폰에 넘김. [보냈어요]를 누르면 보관함·업무 기록에 남긴다 */
 export function KakaoSend({ taskId, body, msgId, onLogged, big }: { taskId: string; body: string; msgId?: number; onLogged?: () => void; big?: boolean }) {
+  const T = useTerms(); // 409차: 호칭 예시는 회사별(다짐은 지금 예시 그대로)
   const [step, setStep] = useState<'idle' | 'opened' | 'done'>('idle');
   const [qr, setQr] = useState<string | null>(null);
   const [to, setTo] = useState('');
@@ -60,7 +62,7 @@ export function KakaoSend({ taskId, body, msgId, onLogged, big }: { taskId: stri
             <p className="text-ink-2">휴대폰 카메라로 찍으면 워크인(로그인 필요)에서 같은 내용이 열립니다. 거기서 [카카오톡으로 보내기] → [보냈어요]를 누르면 기록됩니다.</p></div>}
           {qr ? <Button size="sm" variant="secondary" onClick={() => done(false)}>닫기</Button> : <>
             <p className="text-ink-2">카카오톡에서 보냈나요? 누구에게 보냈는지 적어 두면 보관함에서 찾기 쉽습니다.</p>
-            <input className={cx(inputCls, 'py-1 text-xs')} value={to} onChange={(e) => setTo(e.target.value)} placeholder="받는 사람(선택) 예: 관리소장님" maxLength={100} data-testid="kakao-to" />
+            <input className={cx(inputCls, 'py-1 text-xs')} value={to} onChange={(e) => setTo(e.target.value)} placeholder={`받는 사람(선택) 예: ${T.example.honorific}`} maxLength={100} data-testid="kakao-to" />
             <div className="flex gap-1.5"><Button size="sm" onClick={() => done(true)} data-testid="kakao-sent">보냈어요</Button><Button size="sm" variant="secondary" onClick={() => done(false)}>안 보냄</Button></div></>}
         </div>
       )}

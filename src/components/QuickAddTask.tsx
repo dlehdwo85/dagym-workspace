@@ -13,7 +13,7 @@ import { Loader2, Mic, Paperclip, Sparkles, Users } from 'lucide-react';
 import { AI_ACCEPT, uploadToLibrary } from './libraryUpload';
 import { DropZone } from './upload';
 import { TimePick } from './DateTimePickers';
-import { useSession } from './session';
+import { useSession, useTerms } from './session';
 import { MEETING_WORDS } from './MeetingDialog';
 
 export interface QuickDefaults { dueTime?: string; projectId?: string; orgUnitId?: string; dueDate?: string; parentId?: string; assigneeId?: string; sectionId?: string; title?: string; description?: string }
@@ -24,6 +24,7 @@ export interface QuickDefaults { dueTime?: string; projectId?: string; orgUnitId
  */
 export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: { open: boolean; onClose: () => void; defaults?: QuickDefaults; onCreated?: (id: string) => void; switchTo?: { label: string; onClick: () => void } }) {
   const { user, dir } = useSession();
+  const T = useTerms(); // 409차: 입력칸 예시는 회사별(다짐은 지금 예시 그대로)
   const router = useRouter();
   const projects = useApi<{ projects: any[] }>(open ? '/api/projects' : null);
   const teams = useApi<{ teams: { id: string; name: string; mine: boolean; members: { id: string }[] }[] }>(open ? '/api/teams' : null); // V14 8번
@@ -235,7 +236,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
           <div className="space-y-1.5 rounded-input border border-accent-200 bg-accent-50/50 p-2.5" data-testid="quick-ai">
             <p className="flex items-center gap-1 text-xs font-semibold text-accent-700"><Sparkles className="size-3.5" />AI 비서 — 말하거나 편하게 적으면 아래 칸을 채워요</p>
             <textarea className={cx(inputCls, 'min-h-[56px] text-sm')} value={aiText} onChange={(e) => setAiText(e.target.value)} aria-label="AI 비서에게 업무 설명"
-              placeholder="예: 다음 주 금요일까지 김민수 본부장한테 푸르지오 비교 파일 검수받고 보고하라고 해 줘" />
+              placeholder={T.example.quickTask} />
             <div className="flex items-center gap-2">
               <VoiceButton value={aiText} onChange={setAiText} label="AI 비서에게 말하기" />
               <Button type="button" size="sm" variant="accent" className="ml-auto" disabled={aiBusy || !aiText.trim()} onClick={() => aiFill()} data-testid="quick-ai-fill">

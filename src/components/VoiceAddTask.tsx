@@ -6,11 +6,10 @@ import { Mic, RotateCcw } from 'lucide-react';
 import { parseTaskText } from '@/lib/nlparse';
 import { VoiceChoice, correctVoice, learnVoice, listen, voiceAvailable, voiceErrorToast, type VoiceFix } from './voice';
 import { api, broadcastRefresh, useApi } from './client';
-import { useSession } from './session';
+import { useSession, useTerms } from './session';
 import { AssigneePicker, DuePicker, PriorityPicker, RepeatChip, markNew, warnAway } from './TaskQuick';
 import { Button, Modal, cx, inputCls, toast, todayStr } from './ui';
 
-const EXAMPLES = ['내일 오후 3시까지 견적서 보내기', '금요일까지 김민수 두정점 원판 수량 파악, 중요', '매주 월요일 오전 10시 주간 회의 자료 준비'];
 type Card = { title: string; dueDate: string | null; dueTime: string | null; assigneeId: string | null; requestedById: string | null; priority: string; rrule: string | null };
 
 function Row({ label, children, bad }: { label: string; children: React.ReactNode; bad?: boolean }) {
@@ -30,6 +29,7 @@ export const openVoiceAdd = () => window.dispatchEvent(new Event('wos-voice-add'
  */
 export function VoiceAddTask() {
   const { user, dir } = useSession();
+  const EXAMPLES = ['내일 오후 3시까지 견적서 보내기', useTerms().example.voiceTask, '매주 월요일 오전 10시 주간 회의 자료 준비']; // 409차: 둘째 예시는 회사별(다짐은 지금 예시 그대로)
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');

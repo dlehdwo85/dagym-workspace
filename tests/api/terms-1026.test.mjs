@@ -30,6 +30,9 @@ describe('범용화 2단계 용어 사전', () => {
     assert.deepEqual(v.terms.role, { owner: '대표', admin: '본사 관리자', dept_lead: '부서 책임자', site_manager: '현장 관리자', staff: '직원' });
     assert.deepEqual(v.terms.unit, { hq: '본사', department: '부서', branch: '지점', site: '위탁운영 현장' });
     assert.deepEqual([v.terms.event.vacation, v.terms.event.half_day, v.terms.event.outside, v.terms.event.business_trip, v.terms.contactOrg], ['연차', '반차', '외근', '출장', '회사·단지']);
+    // 409차 P1 예시 문구(G-01·G-02·G-03·G-08): 다짐은 지금 예시 그대로
+    assert.deepEqual(v.terms.example, { quickTask: '예: 다음 주 금요일까지 김민수 본부장한테 푸르지오 비교 파일 검수받고 보고하라고 해 줘', voiceTask: '금요일까지 김민수 두정점 원판 수량 파악, 중요',
+      assistReply: '예: 견적서 첨부해서 관리소장님께 회신 써줘', honorific: '관리소장님', contactTags: '고객, 관리소', aiChip: '3분기 매출 현장별로 엑셀 만들어줘' });
     const r = await ctx.owner.req('PUT', '/api/org/terms', { role: { admin: '점장' } });
     assert.equal(r.status, 400); assert.match(msg(r), /역할 이름은 바꾸지 않습니다/);
     await sql`insert into app_settings (key, value) values ('terms:default', ${sql.json({ role: { admin: '끼어든 이름' } })}) on conflict (key) do update set value = excluded.value`;
@@ -56,6 +59,10 @@ describe('범용화 2단계 용어 사전', () => {
     assert.deepEqual(v.terms.role, { owner: '대표', admin: '관리자', dept_lead: '팀 책임자', site_manager: '지점 관리자', staff: '직원' });
     assert.deepEqual(v.terms.unit, { hq: '회사', department: '부서', branch: '지점', site: '사업장' });
     assert.deepEqual([v.terms.event.vacation, v.terms.contactOrg], ['휴가', '회사·지점']);
+    // 409차 P1 예시 문구: 다른 회사에는 다짐 직원 이름·지점·아파트·호칭·'현장'이 든 예시가 없다
+    assert.deepEqual(Object.keys(v.terms.example).sort(), ['aiChip', 'assistReply', 'contactTags', 'honorific', 'quickTask', 'voiceTask']);
+    assert.ok(!/김민수|본부장|푸르지오|두정점|원판|관리소|현장|매출/.test(JSON.stringify(v.terms.example)), JSON.stringify(v.terms.example));
+    assert.deepEqual([v.terms.example.honorific, v.terms.example.contactTags], ['김 과장님', '고객, 거래처']);
     assert.deepEqual(v.defaults, v.terms.role); assert.deepEqual(v.custom, {});
     assert.equal((await sql`select role_badge from tenants where id = ${T.tenant}`)[0].role_badge, 'ko', '새 회사는 한글 배지');
     assert.equal((await T.c.ok('GET', '/api/org/role-badge')).modeLabels.ko, '한글 (대표 · 관리자 · 팀 책임자 · 지점 관리자 · 직원)');
