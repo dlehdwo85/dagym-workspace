@@ -1,5 +1,6 @@
 'use client';
 import { dtf } from '@/lib/dtf';
+import { useTerms } from './session';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, MessageCircle, CheckCircle2, Eye, Library, Loader2, Mail, MessageSquare, Paperclip, RotateCcw, Search, Send, Sparkles, Upload } from 'lucide-react';
@@ -73,6 +74,7 @@ const STATUS: Record<string, [string, string]> = {
 
 /** V21 업무 안 "보낼 자료·메일": [메일로] 시안(실제 나갈 모습 그대로) → 사람이 [보내기] → 보관함 발송, 상태 실시간 */
 export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: string; onChange: () => void; draft?: AssistDraft | null; onDraftUsed?: () => void }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const hist = useApi<{ items: Item[]; canSend: boolean }>(`/api/tasks/${taskId}/mail?history=1`, [taskId]);
   const [open, setOpen] = useState(false);
   const busy = hist.data?.items.some((i) => ['queued', 'sending', 'retry'].includes(i.status) && !isScheduled(i));
@@ -87,7 +89,7 @@ export function TaskMail({ taskId, onChange, draft, onDraftUsed }: { taskId: str
   const [initial, setInitial] = useState<ComposeInitial | null>(null);
   useEffect(() => {
     if (!draft || !hist.data) return;
-    if (hist.data.canSend) { setInitial(draft); setOpen(true); } else toast.info('보내기 권한이 없어 시안 창을 열 수 없습니다 — 초안을 복사해 대표에게 전달해 주세요');
+    if (hist.data.canSend) { setInitial(draft); setOpen(true); } else toast.info(`보내기 권한이 없어 시안 창을 열 수 없습니다 — 초안을 복사해 ${T.role.owner}에게 전달해 주세요`);
     onDraftUsed?.();
   }, [draft, hist.data]); // eslint-disable-line react-hooks/exhaustive-deps
   // #177 예약 문자가 '보낼 시간'이면 본문 완성본으로 시안 창을 열어 문자앱으로 넘긴다 (알림 링크 /tasks/{id}?sms={outboxId} 는 자동으로)

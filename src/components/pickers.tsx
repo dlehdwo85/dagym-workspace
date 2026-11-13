@@ -2,11 +2,13 @@
 import { dtf } from '@/lib/dtf';
 import { RoleBadge } from '@/components/RoleBadge';
 import { useMemo, useState } from 'react';
-import { useSession } from './session';
+import { useSession, useTerms } from './session';
 import { Modal, cx, inputCls } from './ui';
-import { HIDDEN_BRANDS, UNIT_TYPE_LABEL } from '@/lib/types';
+import { HIDDEN_BRANDS } from '@/lib/types';
+import type { UnitType } from '@/lib/terms';
 
 export function UnitSelect({ value, onChange, allowEmpty, id, className }: { value: string | null | undefined; onChange: (v: string) => void; allowEmpty?: string; id?: string; className?: string }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { dir } = useSession();
   const tree = useMemo(() => {
     const out: { id: string; label: string }[] = [];
@@ -17,7 +19,7 @@ export function UnitSelect({ value, onChange, allowEmpty, id, className }: { val
     }
     const walk = (p: string | null, depth: number) => {
       for (const u of byParent.get(p) ?? []) {
-        out.push({ id: u.id, label: `${'　'.repeat(depth)}${u.name} (${UNIT_TYPE_LABEL[u.type as keyof typeof UNIT_TYPE_LABEL] ?? u.type})` });
+        out.push({ id: u.id, label: `${'　'.repeat(depth)}${u.name} (${T.unit[u.type as UnitType] ?? u.type})` });
         walk(u.id, depth + 1);
       }
     };

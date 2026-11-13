@@ -1,6 +1,7 @@
 import { db, type Sql } from './db';
 import { forbidden, notFound } from './errors';
 import { ROLE_RANK, tenantOf, type SessionUser } from './types';
+import type { CapacityKey } from './terms';
 
 export const isAdmin = (u: SessionUser) => u.role === 'owner' || u.role === 'admin';
 export const atLeast = (u: SessionUser, role: keyof typeof ROLE_RANK) => ROLE_RANK[u.role] >= ROLE_RANK[role];
@@ -156,9 +157,10 @@ export interface TaskPerms {
   /** #475 공동 담당(주 담당 외) — 보기·내용 수정·'내 몫 완료' */
   co?: boolean;
   /** 334차(대표 11/02 16:4x·17:0x '대표자 지시 혹은 팀장 등 관리자급'): 담당자 전원이 [내 몫 완료]를 누르기 전에도 [완료]로 끝낼 수 있는 자격 — 요청자(지시자)·관리자(현장 관리자 이상·대표)·부서장·팀장(팀 업무). 없으면 null */
-  finish?: '요청자' | '관리자' | '부서장' | '팀장' | null;
+  /* 범용화 2단계(G-68): 이 값은 '자격 키'(기록·알림에도 이 값으로 남음) — 화면에 보일 이름은 terms.capacity[키] */
+  finish?: Extract<CapacityKey, '요청자' | '관리자' | '부서장' | '팀장'> | null;
   /** 365차 #988(대표 11/05): 승인 없이 마감을 바로 바꿀 수 있는 사람(사유 필수·기록·알림) — 요청자·대표·부서장(자기 부서원이 담당·요청)·팀장(팀 업무). 일반 관리자는 빠짐(대표 확인 중) */
-  dueNow?: '요청자' | '대표' | '부서장' | '팀장' | null;
+  dueNow?: Extract<CapacityKey, '요청자' | '대표' | '부서장' | '팀장'> | null;
 }
 
 export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db()): Promise<TaskPerms> {

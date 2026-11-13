@@ -451,7 +451,7 @@ export async function deleteLibraryFile(u: SessionUser, id: string) {
   // 삭제 단계 권한이 있으면 누구 파일이든, 올리기·수정 단계면 내가 올린 파일만
   const lv = await folderLevel(u, f.folder);
   if (!(RANK[lv] >= RANK.delete || (f.created_by === u.id && RANK[await menuLevel(u, 'library')] >= RANK.edit)))
-    throw forbidden('자료실: 삭제 권한이 없습니다 — 대표에게 요청하세요');
+    throw forbidden(`자료실: 삭제 권한이 없습니다 — ${await (await import('./termsServer')).ownerWord(u)}에게 요청하세요`);
   await db()`update library_files set deleted_at = now() where id = ${id}`;
   return { ok: true };
 }
@@ -648,7 +648,7 @@ async function applyOrganize(id: string, prev: unknown, r: OrgResult) {
 }
 /** 전체 정리 미리보기를 고른 것만 적용 */
 export async function applyOrganizePreviews(u: SessionUser, ids: string[]) {
-  if (!isAdmin(u)) throw forbidden('대표·본사 관리자만 전체 정리할 수 있습니다');
+  if (!isAdmin(u)) { const t = (await (await import('./termsServer')).termsOfUser(u)); throw forbidden(`${t.role.owner}·${t.role.admin}만 전체 정리할 수 있습니다`); }
   const rows = await db()<any[]>`select id, folder, title, tags, description, organize_preview from library_files where tenant = ${tenantOf(u)} and id = any(${ids}::uuid[]) and organize_preview is not null`;
   for (const f of rows) await applyOrganize(f.id, { folder: f.folder, title: f.title, tags: f.tags, description: f.description }, f.organize_preview);
   return { applied: rows.length };
@@ -674,7 +674,7 @@ export async function setFolderPerm(u: SessionUser, i: z.infer<typeof folderPerm
 
 /** V14 3번: 관리자 "전체 정리" — 아직 정리하지 않았거나 실패한 파일을 한 번에 최대 10개씩(화면이 반복 호출) */
 export async function organizeAll(u: SessionUser, opt: { preview?: boolean } = {}) {
-  if (!isAdmin(u)) throw forbidden('대표·본사 관리자만 전체 정리할 수 있습니다');
+  if (!isAdmin(u)) { const t = (await (await import('./termsServer')).termsOfUser(u)); throw forbidden(`${t.role.owner}·${t.role.admin}만 전체 정리할 수 있습니다`); }
   await requireMenu(u, 'library', 'edit');
   const sql = db();
   const rows = await sql<{ id: string }[]>`select id from library_files where tenant = ${tenantOf(u)} and deleted_at is null and upload_status = 'ready'

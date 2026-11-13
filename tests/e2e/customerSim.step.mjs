@@ -144,6 +144,27 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     if (hid.length) note('§3-5 사용량 숨은 글(title 등)', hid.join(' | '));
     const perHit = usageText.match(/1(회|건|장|편) 약 [\d,]+원/g);
     if (perHit) note('§3-5 사용량 1건 원가', [...new Set(perHit)].join(', '));
+    // ── 7-2) 범용화 2단계(용어 사전): 새 회사에는 다짐식 역할·조직 이름이 안 보이고, 회사 정보에서 역할 이름을 바꾸면 화면에 반영
+    await p.goto(BASE + '/admin/users');
+    await p.getByTestId('invite-open').waitFor();
+    const usersText = await body();
+    const dz = usersText.match(/본사 관리자|현장 관리자|부서 책임자|위탁운영 현장/g);
+    if (dz) note('용어 사전: 사용자 관리', `다짐식 이름이 보임 — ${[...new Set(dz)].join(', ')}`);
+    assert.equal(await p.getByTestId('role-badge').first().innerText(), '대표', '새 회사 권한 배지는 한글(그 회사 역할 이름)');
+    await p.getByTestId('invite-open').click();
+    await p.waitForFunction(() => [...document.querySelectorAll('select option')].some((o) => o.textContent === '관리자'));
+    const roleOpts = async () => p.evaluate(() => [...document.querySelectorAll('select')].map((x) => [...x.options].map((o) => o.textContent)).find((o) => o.includes('관리자')) ?? []); // '관리자'는 이름을 바꾸지 않는 역할
+    assert.deepEqual((await roleOpts()).filter((x) => x !== '대표'), ['관리자', '팀 책임자', '지점 관리자', '직원'], '초대 권한 고르기 = 공통 역할 이름');
+    await p.goto(BASE + '/admin/company');
+    await p.getByTestId('role-names-setting').waitFor();
+    await p.getByTestId('role-name-site_manager').fill('점장'); await p.getByTestId('role-name-staff').fill('크루');
+    await p.getByTestId('role-names-save').click();
+    await p.getByText('역할 이름을 저장했습니다').first().waitFor();
+    await p.goto(BASE + '/admin/users'); await p.getByTestId('invite-open').click();
+    await p.waitForFunction(() => [...document.querySelectorAll('select option')].some((o) => o.textContent === '관리자'));
+    assert.deepEqual((await roleOpts()).filter((x) => x !== '대표'), ['관리자', '팀 책임자', '점장', '크루'], '바꾼 역할 이름이 화면에 반영');
+    await p.goto(BASE + '/admin/company'); await p.getByTestId('role-names-setting').waitFor();
+    assert.equal(await p.getByTestId('role-name-site_manager').inputValue(), '점장');
     // ── 8) 알림: 첫날 받은 알림
     await p.goto(BASE + '/notifications');
     await p.waitForLoadState('networkidle');

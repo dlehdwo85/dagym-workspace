@@ -86,7 +86,7 @@ export async function requireMenu(u: SessionUser, menu: MenuKey, need: 'view' | 
   const lv = await menuLevel(u, menu, sql);
   if (RANK[lv] >= RANK[need]) return lv;
   if (lv === 'none') throw notFound();
-  throw forbidden(`${MENUS[menu].label} ${levelLabel(menu, need)} 권한이 없습니다. 대표에게 요청하세요`);
+  throw forbidden(`${MENUS[menu].label} ${levelLabel(menu, need)} 권한이 없습니다. ${await (await import('./termsServer')).ownerWord(u)}에게 요청하세요`); // 범용화 2단계: 대표 이름은 회사별
 }
 
 // ---------------- 대표 전용 설정 ----------------

@@ -3,13 +3,15 @@ import { Fragment, useState } from 'react';
 import { ChevronDown, ChevronRight, Lock, ShieldCheck, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, inputCls, toast } from '@/components/ui';
-import { ROLE_LABEL, type Role } from '@/lib/types';
+import { type Role } from '@/lib/types';
+import { useTerms } from '@/components/session';
 
 type Level = { value: string; label: string };
 type M = { teamGrants: { user_id: string; name: string; team_id: string; team_name: string }[]; menus: { key: string; label: string; levels: Level[] }[]; roles: Role[]; matrix: Record<string, Record<string, string>>; overrides: { menu: string; user_id: string; level: string; name: string }[] };
 
 /** V13 2·4번 메뉴 권한 (대표만): 행 = 메뉴, 열 = 등급, 칸 = 단계. 아래에 사람별 예외 */
 export function MenuPermsTab({ users }: { users: { id: string; name: string; role: Role; status: string }[] }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { data, error, loading, reload } = useApi<M>('/api/admin/menu-perms');
   const [busy, setBusy] = useState('');
   const [add, setAdd] = useState({ menu: 'revenue', userId: '', level: 'view' });
@@ -29,7 +31,7 @@ export function MenuPermsTab({ users }: { users: { id: string; name: string; rol
         등급마다 메뉴를 켜고 끕니다. 꺼진 메뉴는 화면에서 사라지고 서버도 막습니다. 대표 본인 권한은 끌 수 없습니다. 바꾼 내용은 감사 기록에 남습니다.</p>
       <div className="overflow-x-auto rounded-card border border-line bg-white">
         <table className="w-full min-w-[760px] text-sm">
-          <thead><tr className="border-b border-line bg-slate-50 text-left text-xs text-ink-2"><th className="p-2">메뉴</th>{d.roles.map((r) => <th key={r} className="p-2">{ROLE_LABEL[r]}</th>)}</tr></thead>
+          <thead><tr className="border-b border-line bg-slate-50 text-left text-xs text-ink-2"><th className="p-2">메뉴</th>{d.roles.map((r) => <th key={r} className="p-2">{T.role[r]}</th>)}</tr></thead>
           <tbody className="divide-y divide-line">
             {d.menus.filter((m) => !NESTED.includes(m.key)).map((m) => (
               <Fragment key={m.key}>
@@ -56,7 +58,7 @@ export function MenuPermsTab({ users }: { users: { id: string; name: string; rol
         </ul>
         <div className="mt-2 flex flex-wrap gap-2">
           <select className={cx(inputCls, 'h-9 !w-auto')} value={add.userId} onChange={(e) => setAdd({ ...add, userId: e.target.value })} aria-label="예외 사람">
-            <option value="">사람 선택</option>{users.filter((u) => u.role !== 'owner' && u.status !== 'disabled').map((u) => <option key={u.id} value={u.id}>{u.name} ({ROLE_LABEL[u.role]})</option>)}
+            <option value="">사람 선택</option>{users.filter((u) => u.role !== 'owner' && u.status !== 'disabled').map((u) => <option key={u.id} value={u.id}>{u.name} ({T.role[u.role]})</option>)}
           </select>
           <select className={cx(inputCls, 'h-9 !w-auto')} value={add.menu} onChange={(e) => setAdd({ ...add, menu: e.target.value, level: d.menus.find((m) => m.key === e.target.value)!.levels[1].value })} aria-label="예외 메뉴">
             {d.menus.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
@@ -75,6 +77,7 @@ export function MenuPermsTab({ users }: { users: { id: string; name: string; rol
 
 /** 대표 10/20 4): 사람별 '팀 업무 보기' — 전체(다른 팀 전체 예외 조회) / 자기 팀만(예외·지정 없음) / 지정 팀(team_view_grants). 격리 팀원은 무엇을 골라도 자기 팀만 */
 function TeamView({ d, users, reload }: { d: M; users: { id: string; name: string; role: Role; status: string }[]; reload: () => void }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const teams = useApi<{ teams: { id: string; name: string; kind: string; parent_name: string | null; parent_path?: string | null }[] }>('/api/teams');
   const [userId, setUserId] = useState(''); const [busy, setBusy] = useState(false); const [pickMode, setPickMode] = useState(false); // '지정 팀'을 골랐지만 아직 팀을 안 고른 상태
   const list = (teams.data?.teams ?? []);
@@ -99,7 +102,7 @@ function TeamView({ d, users, reload }: { d: M; users: { id: string; name: strin
       <h2 className="text-sm font-semibold">팀 업무 보기 <span className="font-normal text-ink-3">— 사람마다 전체 / 자기 팀만 / 지정 팀 (업무 화면 ‘팀별’ 칩에 그 팀만 보임, 격리 팀원은 자기 팀만)</span></h2>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <select className={cx(inputCls, 'h-9 !w-auto')} value={userId} onChange={(e) => { setUserId(e.target.value); setPickMode(false); }} aria-label="팀 업무 보기 사람" data-testid="team-view-user">
-          <option value="">사람 선택</option>{users.filter((u) => u.role !== 'owner' && u.status !== 'disabled').map((u) => <option key={u.id} value={u.id}>{u.name} ({ROLE_LABEL[u.role]})</option>)}
+          <option value="">사람 선택</option>{users.filter((u) => u.role !== 'owner' && u.status !== 'disabled').map((u) => <option key={u.id} value={u.id}>{u.name} ({T.role[u.role]})</option>)}
         </select>
         {userId && <div className="flex rounded-input border border-line p-0.5 text-xs" role="radiogroup" aria-label="팀 업무 보기 범위">
           {([['all', '전체'], ['own', '자기 팀만'], ['pick', '지정 팀']] as const).map(([k, l]) => (
@@ -142,6 +145,7 @@ function Switches({ levels, value, onSet, label, disabled }: { levels: Level[]; 
 }
 const SHORT: Record<string, string> = { view: '조회', edit: '편집', delete: '삭제', use: '켬' };
 function Row({ m, d, busy, put, nested, open, onToggle }: { m: M['menus'][number]; d: M; busy: string; put: (b: Record<string, unknown>, key: string) => void; nested?: boolean; open?: boolean; onToggle?: () => void }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const levels = m.key === 'library' ? m.levels.map((l) => (l.value === 'edit' ? { ...l, label: '올리기·수정' } : l)) : m.levels;
   const lib = m.key === 'library';
   return (
@@ -153,7 +157,7 @@ function Row({ m, d, busy, put, nested, open, onToggle }: { m: M['menus'][number
       </td>
       {d.roles.map((r) => (
         <td key={r} className="p-2">
-          <Switches levels={lib ? levels.map((l) => ({ ...l, label: l.value === 'edit' ? '올리기·수정' : l.label })) : levels} value={d.matrix[m.key][r]} label={`${m.label} ${ROLE_LABEL[r]}`}
+          <Switches levels={lib ? levels.map((l) => ({ ...l, label: l.value === 'edit' ? '올리기·수정' : l.label })) : levels} value={d.matrix[m.key][r]} label={`${m.label} ${T.role[r]}`}
             disabled={r === 'owner' || busy === `${m.key}.${r}`} onSet={(v) => put({ menu: m.key, role: r, level: v }, `${m.key}.${r}`)} />
           {r === 'owner' && <span className="text-[10px] text-ink-3">고정</span>}
         </td>
@@ -164,6 +168,7 @@ function Row({ m, d, busy, put, nested, open, onToggle }: { m: M['menus'][number
 type Folder = { folder: string; n: number; security?: string };
 /** 자료실 행 펼침: 폴더별 등급 + 등급(역할)별 폴더 권한 */
 function LibraryFolders({ roles }: { roles: Role[] }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const lib = useApi<{ folders: Folder[] }>('/api/library');
   const fp = useApi<{ perms: { folder: string; role: string; level: string }[] }>('/api/library/folder-perms');
   const fs = useApi<{ folders: { folder: string; security: string }[] }>('/api/library/folder-security');
@@ -180,7 +185,7 @@ function LibraryFolders({ roles }: { roles: Role[] }) {
     <div className="space-y-1.5" data-testid="perm-folders">
       <p className="text-xs text-ink-3">폴더별: 보안 등급(하위 폴더·파일에 상속, 파일은 더 높게만) · 등급별 권한(비워 두면 위 자료실 설정을 따름, 더 넓힐 수는 없음)</p>
       <table className="w-full text-xs">
-        <thead><tr className="text-left text-ink-3"><th className="p-1.5">폴더</th><th className="p-1.5">보안 등급</th>{others.map((r) => <th key={r} className="p-1.5">{ROLE_LABEL[r]}</th>)}</tr></thead>
+        <thead><tr className="text-left text-ink-3"><th className="p-1.5">폴더</th><th className="p-1.5">보안 등급</th>{others.map((r) => <th key={r} className="p-1.5">{T.role[r]}</th>)}</tr></thead>
         <tbody className="divide-y divide-line">
           {folders.map((f) => {
             const sec = fs.data?.folders.find((x) => x.folder === f.folder)?.security ?? '';
@@ -197,10 +202,10 @@ function LibraryFolders({ roles }: { roles: Role[] }) {
                   const p = fp.data?.perms.find((x) => x.folder === f.folder && x.role === r);
                   return (
                     <td key={r} className="p-1.5">
-                      {p ? <div className="flex items-center gap-1"><Switches levels={levels} value={p.level} label={`${f.folder} ${ROLE_LABEL[r]}`} disabled={busy === `fp.${f.folder}.${r}`}
+                      {p ? <div className="flex items-center gap-1"><Switches levels={levels} value={p.level} label={`${f.folder} ${T.role[r]}`} disabled={busy === `fp.${f.folder}.${r}`}
                         onSet={(v) => call('/api/library/folder-perms', { folder: f.folder, role: r, level: v }, `fp.${f.folder}.${r}`)} />
                         <button className="text-ink-3 underline" onClick={() => call('/api/library/folder-perms', { folder: f.folder, role: r, level: null }, `fp.${f.folder}.${r}`)}>기본</button></div>
-                        : <button className="text-ink-3 underline" onClick={() => call('/api/library/folder-perms', { folder: f.folder, role: r, level: 'view' }, `fp.${f.folder}.${r}`)} aria-label={`${f.folder} ${ROLE_LABEL[r]} 따로 정하기`}>자료실 설정 따름 · 따로 정하기</button>}
+                        : <button className="text-ink-3 underline" onClick={() => call('/api/library/folder-perms', { folder: f.folder, role: r, level: 'view' }, `fp.${f.folder}.${r}`)} aria-label={`${f.folder} ${T.role[r]} 따로 정하기`}>자료실 설정 따름 · 따로 정하기</button>}
                     </td>
                   );
                 })}

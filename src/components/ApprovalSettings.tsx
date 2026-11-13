@@ -6,11 +6,11 @@ import { ArrowDown, ArrowUp, ChevronRight, GripVertical, Plus, Save, Stamp, Tras
 import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { api, useApi } from './client';
-import { useSession } from './session';
+import { useSession, useTerms } from './session';
 import { BackBar } from './BackBar';
 import { Button, Empty, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from './ui';
 import { UnitSelect } from './pickers';
-import { ROLE_LABEL } from '@/lib/types';
+import { type Role } from '@/lib/types';
 
 export type SettingsTab = 'lines' | 'forms' | 'assign';
 const TABS: [SettingsTab, string][] = [['lines', '결재선'], ['forms', '양식'], ['assign', '팀별 배정']];
@@ -66,11 +66,12 @@ function StepChips({ steps, who }: { steps: Step[]; who: (s: Step) => string }) 
 }
 
 function LinesTab() {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { dir } = useSession();
   const { data, reload } = useApi<{ lines: Line[] }>('/api/approval-lines');
   const [edit, setEdit] = useState<{ id?: string; name: string; orgUnitId: string; steps: EStep[]; active: boolean } | null>(null);
   const userName = (id?: string) => dir.users.find((u) => u.id === id)?.name ?? '';
-  const who = (s: Step) => (s.type === 'user' ? userName(s.userId) : s.type === 'lead' ? LEAD_SHORT[s.up ?? 0] : ROLE_LABEL[s.role as keyof typeof ROLE_LABEL] ?? '');
+  const who = (s: Step) => (s.type === 'user' ? userName(s.userId) : s.type === 'lead' ? LEAD_SHORT[s.up ?? 0] : T.role[s.role as Role] ?? '');
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!edit) return;
@@ -87,7 +88,7 @@ function LinesTab() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => setEdit({ name: '', orgUnitId: '', steps: [{ key: key(), label: '현장 관리자', type: 'role', role: 'site_manager' }, { key: key(), label: '대표', type: 'role', role: 'owner' }], active: true })}><Plus />결재선 만들기</Button>
+        <Button onClick={() => setEdit({ name: '', orgUnitId: '', steps: [{ key: key(), label: T.role.site_manager, type: 'role', role: 'site_manager' }, { key: key(), label: T.role.owner, type: 'role', role: 'owner' }], active: true })}><Plus />결재선 만들기</Button>
         <span className="text-xs text-ink-3">예시로 시작:</span>
         <Button size="sm" variant="secondary" onClick={() => template('two')} data-testid="tpl-two">2단계 · 팀장 → 대표</Button>
         <Button size="sm" variant="secondary" onClick={() => template('three')} data-testid="tpl-three">3단계 · 팀장 → 본부장 → 대표</Button>
@@ -149,6 +150,7 @@ function StepsEditor({ steps, onChange, users }: { steps: EStep[]; onChange: (s:
 }
 
 function StepRow({ s, i, total, users, set, move, remove }: { s: EStep; i: number; total: number; users: { id: string; name: string; title: string | null }[]; set: (p: Partial<EStep>) => void; move: (d: number) => void; remove: () => void }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: s.key });
   const n = `${i + 1}차`;
   const cond = s.when?.minAmount !== undefined ? 'amount' : s.when?.minDays !== undefined ? 'days' : '';
@@ -163,7 +165,7 @@ function StepRow({ s, i, total, users, set, move, remove }: { s: EStep; i: numbe
         <select className={inputCls + ' h-9 !w-28'} value={s.type} onChange={(e) => setType(e.target.value as EStep['type'])} aria-label={`${n} 결재자 방식`}>
           <option value="lead">소속 장</option><option value="role">역할</option><option value="user">지정 사람</option>
         </select>
-        {s.type === 'role' && <select className={inputCls + ' h-9 min-w-40 flex-1'} value={s.role} onChange={(e) => set({ role: e.target.value })} aria-label={`${n} 역할`}>{ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}{r === 'site_manager' || r === 'dept_lead' ? ' (업무 소속·상위 조직)' : ''}</option>)}</select>}
+        {s.type === 'role' && <select className={inputCls + ' h-9 min-w-40 flex-1'} value={s.role} onChange={(e) => set({ role: e.target.value })} aria-label={`${n} 역할`}>{ROLES.map((r) => <option key={r} value={r}>{T.role[r as Role]}{r === 'site_manager' || r === 'dept_lead' ? ' (업무 소속·상위 조직)' : ''}</option>)}</select>}
         {s.type === 'user' && <select className={inputCls + ' h-9 min-w-40 flex-1'} value={s.userId ?? ''} onChange={(e) => set({ userId: e.target.value })} aria-label={`${n} 사람`} required><option value="">선택(본부장처럼 역할에 없는 직책)</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}</select>}
         {s.type === 'lead' && <select className={inputCls + ' h-9 min-w-40 flex-1'} value={s.up ?? 0} onChange={(e) => set({ up: Number(e.target.value) })} aria-label={`${n} 소속 장`}>{LEAD_UP.map((l, k) => <option key={k} value={k}>{l}</option>)}</select>}
         <span className="flex items-center gap-0.5">

@@ -25,7 +25,7 @@ export const GET = handler(async ({ user, req }) => {
 
 export const POST = handler(async ({ req, user }) => {
   const i = await body(req, projectInput);
-  if (!atLeast(user, 'site_manager')) throw forbidden('프로젝트는 현장 관리자 이상이 만들 수 있습니다');
+  if (!atLeast(user, 'site_manager')) throw forbidden(`프로젝트는 ${(await (await import('@/lib/termsServer')).termsOfUser(user)).role.site_manager} 이상이 만들 수 있습니다`); // 범용화 2단계: 역할 이름은 회사별
   const sql = db();
   await assertUnitAccess(user, i.orgUnitId, sql);
   const brand = i.brandId !== undefined ? i.brandId : ((await sql`select brand_id from org_units where id = ${i.orgUnitId}`)[0]?.brand_id ?? null);

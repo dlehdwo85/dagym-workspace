@@ -52,7 +52,8 @@ export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
   const inds = [...new Set([i.industry, ...(i.industries ?? [])].map((x) => (x ?? '').trim()).filter(Boolean))];
   const info = i.approval ? { company: i.mode === 'team' ? i.company ?? null : null, name: i.name, email: i.email, contact: i.approval.contact, size: i.size ?? null, industry: inds[0] ?? null, industries: inds.slice(1),
     mode: i.mode, utm, via: i.approval.via, at: new Date().toISOString() } : null;
-  await tx`insert into tenants (id, name, kind, created_ip, signup_utm, size_band, industry, industries, signup_status, signup_info) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, ${i.ip},
+  // 범용화 2단계(G-07): 새 회사의 권한 배지는 한글(그 회사 역할 이름) — 예전엔 첫 화면부터 영어 약어(Ops·Lead)가 붙었다. 이미 있는 회사는 그대로
+  await tx`insert into tenants (id, name, kind, role_badge, created_ip, signup_utm, size_band, industry, industries, signup_status, signup_info) values (${tenant}, ${orgName}, ${i.mode === 'personal' ? 'personal' : 'company'}, 'ko', ${i.ip},
     ${utm ? tx.json(utm as never) : null}, ${i.size ?? null}, ${inds[0] ?? null}, ${inds}, ${info ? 'pending' : 'approved'}, ${info ? tx.json(info as never) : null})`;
   // 17차: 무료 요금제 대신 14일 무료 체험(비즈니스 기능 전부, 카드 없음) · 359차 승인 대기면 체험은 승인할 때 시작(끝나는 날 없음)
   await tx`insert into tenant_subscriptions (tenant, plan_code, status, trial_ends_at, period_end)

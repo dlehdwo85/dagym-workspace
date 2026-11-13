@@ -102,11 +102,13 @@ export async function userAiBudget(u: { id: string; role: string }, sql: Sql = d
     pct: limit > 0 ? Math.round((usedKrw / limit) * 100) : 100, todayKrw: Math.round(today.krw), dayLimitKrw: dayLimit,
     chats: used.chats, docs: used.docs, avgChatKrw: chatKrw, avgDocKrw: docKrw, chatsLeft: Math.floor(remaining / chatKrw), docsLeft: Math.floor(remaining / docKrw) };
 }
-export const USER_LIMIT_MSG = '이번 달 내 AI 한도를 모두 썼습니다 — [추가 요청]으로 대표에게 한도를 요청해 주세요. (업무·일정 등 다른 기능은 그대로 쓸 수 있습니다)';
+/** 범용화 2단계: '대표' 자리는 그 회사의 대표 이름 */
+export const userLimitMsg = (owner = '대표') => `이번 달 내 AI 한도를 모두 썼습니다 — [추가 요청]으로 ${owner}에게 한도를 요청해 주세요. (업무·일정 등 다른 기능은 그대로 쓸 수 있습니다)`;
+export const USER_LIMIT_MSG = userLimitMsg();
 /** 사람별 한도 확인(달·하루). 다 썼으면 429 */
 export async function assertUserBudget(u: SessionUser, sql: Sql = db()) {
   const b = await userAiBudget(u, sql);
-  if (b.usedKrw >= b.limitKrw) throw new HttpError(429, 'ai_user_limit', USER_LIMIT_MSG);
+  if (b.usedKrw >= b.limitKrw) throw new HttpError(429, 'ai_user_limit', userLimitMsg(await (await import('../termsServer')).ownerWord(u)));
   if (b.todayKrw >= b.dayLimitKrw) throw new HttpError(429, 'ai_user_day_limit', `오늘 쓸 수 있는 AI 한도(약 ${b.dayLimitKrw.toLocaleString('ko-KR')}원, 월 한도의 20%)를 다 썼습니다. 내일 다시 쓸 수 있습니다.`);
   return b;
 }

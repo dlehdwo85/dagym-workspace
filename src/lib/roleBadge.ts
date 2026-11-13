@@ -8,11 +8,14 @@ import { badRequest } from './errors';
 import { tenantOf, type Role, type SessionUser } from './types';
 
 export { ROLE_BADGE_EN, GUEST_BADGE, ROLE_BADGE_MODES, ROLE_BADGE_MODE_LABEL, type RoleBadgeMode } from './roleBadgeConst';
+import { roleListLabel } from './terms';
 import { ROLE_BADGE_EN, ROLE_BADGE_MODES, ROLE_BADGE_MODE_LABEL, type RoleBadgeMode } from './roleBadgeConst';
 
 export async function getRoleBadge(u: SessionUser): Promise<{ mode: RoleBadgeMode; labels: Record<Role, string>; modeLabels: Record<RoleBadgeMode, string> }> {
   const [r] = await db()<{ role_badge: string | null }[]>`select role_badge from tenants where id = ${tenantOf(u)}`;
-  return { mode: (ROLE_BADGE_MODES.includes(r?.role_badge as RoleBadgeMode) ? r!.role_badge : 'en') as RoleBadgeMode, labels: ROLE_BADGE_EN, modeLabels: ROLE_BADGE_MODE_LABEL };
+  return { mode: (ROLE_BADGE_MODES.includes(r?.role_badge as RoleBadgeMode) ? r!.role_badge : 'en') as RoleBadgeMode, labels: ROLE_BADGE_EN,
+    // 범용화 2단계: '한글' 보기 설명은 그 회사의 역할 이름으로(기본 회사는 예전 글자 그대로)
+    modeLabels: { ...ROLE_BADGE_MODE_LABEL, ko: `한글 (${roleListLabel(await (await import('./termsServer')).termsOfUser(u))})` } };
 }
 /** 회사 정보·디자인 편집 권한(대표·관리자 등 메뉴 권한) */
 export async function setRoleBadge(u: SessionUser, mode: string) {

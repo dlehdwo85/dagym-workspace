@@ -2,6 +2,7 @@
 import { createContext, useContext } from 'react';
 import type { Role } from '@/lib/types';
 import { DEFAULT_TERMS, type SalesTerms } from '@/lib/sales/terms';
+import { TERMS_BASE, type Terms } from '@/lib/terms';
 
 export interface Dir {
   brands: { id: string; name: string; color: string }[];
@@ -17,6 +18,8 @@ export interface Sess {
   /** 선택 기능 스위치 (핵심 기능은 항상 켜짐) */
   /** V13 메뉴 권한 (revenue·team_reports·library·assistant → none/view/edit/use) */
   menus?: Record<string, string>;
+  /** 범용화 2단계: 이 회사의 용어(역할·조직 단위·일정 종류 이름) — 서버가 회사별로 골라 내려 줌 */
+  terms?: Terms;
   tenant?: { /** #101 권한 배지: 영어(기본)·한글·끄기 */ roleBadge?: 'en' | 'ko' | 'off'; name: string; personal: boolean; internal: boolean; /** #626 캡처 차단(외부 고객사 기본 켬 · 우리 회사/체험/슈퍼관리자 끔) · 자동화 브라우저 차단 */ captureBlock?: boolean; captureAutomation?: boolean; /** V21 문의(웹·전화) 받는 회사 */ inquiries?: boolean; onboarding: boolean; trial?: { trial: boolean; readOnly: boolean; daysLeft: number; /** #667 설계 파트너 기간 */ partner?: boolean } | null; /** V28 B2 미납 잠금 */ billingLock?: 'read_only' | 'suspended' | null; /** 359차 승인제 가입: 승인 대기·거절(승인된 회사는 null) */ signup?: { status: 'pending' | 'rejected'; reason: string | null } | null };
   /** V41 공간: 들어갈 수 있는 공간(업무는 늘) */
   spaces?: ('work' | 'sales' | 'marketing')[];
@@ -33,6 +36,10 @@ export function useSession() {
 /** #408 영업 용어(업종 템플릿) — 세션에 없으면 중립('일반') */
 export function useSalesTerms(): SalesTerms {
   return useSession().features.salesTerms ?? DEFAULT_TERMS;
+}
+/** 범용화 2단계: 회사별 용어 — 세션 밖(로그인 전 화면 등)에서는 기본 표현 */
+export function useTerms(): Terms {
+  return useContext(SessionCtx)?.terms ?? TERMS_BASE;
 }
 export const canManage = (role: Role) => role !== 'staff';
 export const isAdminRole = (role: Role) => role === 'owner' || role === 'admin';

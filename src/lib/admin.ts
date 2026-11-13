@@ -84,7 +84,7 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
 
 export async function invitationInfo(token: string) {
   const [inv] = await db()`
-    select i.email, i.name, i.role, i.expires_at, i.accepted_at, i.revoked_at, u.name as invited_by_name
+    select i.email, i.name, i.role, i.expires_at, i.accepted_at, i.revoked_at, u.name as invited_by_name, u.tenant
     from invitations i join users u on u.id = i.invited_by where i.token_hash = ${sha256(token)}`;
   if (!inv) throw notFound('초대 링크가 올바르지 않습니다');
   if (inv.revoked_at) throw badRequest('취소된 초대입니다. 관리자에게 다시 요청하세요.');

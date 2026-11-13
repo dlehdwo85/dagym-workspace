@@ -42,6 +42,7 @@ export default function CompanyPage() {
       <AiProfile />
       <AttachToLibrary />
       <RoleBadgeSetting />
+      <RoleNamesSetting />
       <SmsSignSetting />
       {loading && !data ? <Skeleton rows={3} /> : !data?.profiles.length ? <Empty title="아직 회사 정보가 없습니다" icon={Building2}>회사 추가를 눌러 상호·사업자번호·주소·로고·브랜드 색을 넣어 주세요.</Empty> : (
         <ul className="grid gap-3 sm:grid-cols-2" data-testid="company-list">
@@ -103,6 +104,34 @@ function RoleBadgeSetting() {
       <div className="flex flex-col gap-1.5 text-sm" role="radiogroup" aria-label="권한 배지 표시">
         {(['en', 'ko', 'off'] as const).map((m) => <label key={m} className="flex items-center gap-2"><input type="radio" name="role-badge" checked={st.data!.mode === m} disabled={busy} onChange={() => set(m)} data-testid={`role-badge-${m}`} />{st.data!.modeLabels[m]}</label>)}
       </div>
+    </section>
+  );
+}
+
+/**
+ * 범용화 2단계(대표 11/13 "역할 이름은 사용자가 정할 수 있도록"): 역할 5개의 표시 이름 — 권한(역할 키)은 그대로, 화면·안내 문구에 나오는 이름만 바꾼다.
+ * 비우면 공통 기본값(대표·관리자·팀 책임자·지점 관리자·직원). 기본 회사는 지금 표현을 그대로 쓰므로 이 칸이 나오지 않는다.
+ */
+const ROLE_KEYS = ['owner', 'admin', 'dept_lead', 'site_manager', 'staff'] as const;
+function RoleNamesSetting() {
+  const st = useApi<{ terms: { role: Record<string, string> }; custom: { role?: Record<string, string> }; defaults: Record<string, string>; fixed: boolean; max: number }>('/api/org/terms');
+  const [f, setF] = useState<Record<string, string> | null>(null); const [busy, setBusy] = useState(false);
+  if (!st.data || st.data.fixed) return null;
+  const d = st.data; const cur = f ?? Object.fromEntries(ROLE_KEYS.map((r) => [r, d.custom.role?.[r] ?? '']));
+  const save = async () => {
+    setBusy(true);
+    try { await api('/api/org/terms', { method: 'PUT', body: { role: Object.fromEntries(ROLE_KEYS.map((r) => [r, cur[r].trim() || null])) } }); setF(null); st.reload(); toast.ok('역할 이름을 저장했습니다 — 화면을 새로 고치면 적용됩니다'); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="role-names-setting">
+      <h2 className="text-sm font-semibold">역할 이름</h2>
+      <p className="mb-2 text-xs text-ink-3">우리 회사에서 부르는 이름으로 바꿉니다. 권한은 그대로이고 화면·안내 문구의 이름만 바뀝니다. 비우면 기본 이름을 씁니다.</p>
+      <div className="grid gap-2 sm:grid-cols-5">
+        {ROLE_KEYS.map((r) => <label key={r} className="text-xs text-ink-2">기본 이름 · {d.defaults[r]}
+          <input className={cx(inputCls, 'mt-0.5')} value={cur[r]} maxLength={d.max} placeholder={d.defaults[r]} onChange={(e) => setF({ ...cur, [r]: e.target.value })} aria-label={`${d.defaults[r]} 역할 이름`} data-testid={`role-name-${r}`} /></label>)}
+      </div>
+      <div className="mt-2 flex justify-end"><Button size="sm" onClick={save} disabled={busy || !f} data-testid="role-names-save">저장</Button></div>
     </section>
   );
 }

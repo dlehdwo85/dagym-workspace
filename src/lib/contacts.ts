@@ -318,7 +318,7 @@ export async function importContacts(u: SessionUser, i: z.infer<typeof importApp
 export async function exportContacts(u: SessionUser) {
   const { contacts } = await listContacts(u, { limit: 500 });
   const { writeXlsx } = await import('./xlsx');
-  const data = writeXlsx([{ name: '연락처', rows: [['이름', '회사·단지', '직함', '휴대폰', '이메일', '태그', '담당', '출처', '마지막 연락', '메모'],
+  const data = writeXlsx([{ name: '연락처', rows: [['이름', (await (await import('./termsServer')).termsOfUser(u)).contactOrg /* 범용화 2단계: 다짐은 '회사·단지' 그대로 */, '직함', '휴대폰', '이메일', '태그', '담당', '출처', '마지막 연락', '메모'],
     ...contacts.map((c: any) => [c.name, c.organization ?? '', c.title ?? '', c.phone ?? '', c.email ?? '', (c.tags ?? []).join(', '), c.owner_name ?? '', SOURCE_LABEL[c.source] ?? c.source, c.last_contact_at ? new Date(c.last_contact_at).toISOString().slice(0, 10) : '', c.memo ?? ''])], widths: [10, 16, 10, 14, 24, 14, 8, 8, 12, 30] }]);
   return { fileName: `연락처_${new Date().toISOString().slice(0, 10)}.xlsx`, data };
 }

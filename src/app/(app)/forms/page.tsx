@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { roleOrAbove } from '@/lib/terms';
 import QRCode from 'qrcode';
 import { Copy, Plus, Printer, QrCode, RefreshCw } from 'lucide-react';
 import { api, useApi } from '@/components/client';
-import { useSession, canManage } from '@/components/session';
+import { useSession, canManage, useTerms } from '@/components/session';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { UnitSelect, UserSelect } from '@/components/pickers';
 
@@ -15,12 +16,13 @@ const KIND: Record<string, { label: string; desc: string; color: string }> = {
 
 /** B-8 현장 신고 양식 + QR 관리 (현장 관리자 이상) */
 export default function FormsPage() {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { user, dir } = useSession();
   const { data, error, loading, reload } = useApi<{ forms: any[] }>('/api/forms');
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<any>({ kind: 'facility' });
   const [qr, setQr] = useState<any>(null);
-  if (!canManage(user.role)) return <ErrorBox error={{ status: 403, message: '현장 신고 양식은 현장 관리자 이상이 관리합니다.' }} />;
+  if (!canManage(user.role)) return <ErrorBox error={{ status: 403, message: `현장 신고 양식은 ${roleOrAbove(T, 'site_manager')}이 관리합니다.` }} />;
   const url = (t: string) => `${location.origin}/r/${t}`;
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -47,7 +49,7 @@ export default function FormsPage() {
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-input text-white" style={{ background: KIND[x.kind].color }}><QrCode className="size-5" /></span>
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold">{x.org_unit_name} · {x.title}</div>
-                  <div className="text-xs text-ink-2">담당 {x.default_assignee_name ?? '현장 관리자 자동'} · 접수 {x.submissions}건{x.last_submitted ? ` · 최근 ${fmtDateTime(x.last_submitted)}` : ''}</div>
+                  <div className="text-xs text-ink-2">담당 {x.default_assignee_name ?? `${T.role.site_manager} 자동`} · 접수 {x.submissions}건{x.last_submitted ? ` · 최근 ${fmtDateTime(x.last_submitted)}` : ''}</div>
                 </div>
                 <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" className="accent-brand-600" checked={x.enabled} onChange={() => toggle(x)} />사용</label>
               </div>
@@ -71,7 +73,7 @@ export default function FormsPage() {
               </label>
             ))}
           </div>
-          <Field label="기본 담당자" hint="비우면 그 현장의 현장 관리자에게 배정됩니다"><UserSelect value={f.defaultAssigneeId} onChange={(v) => setF({ ...f, defaultAssigneeId: v })} placeholder="현장 관리자 자동" /></Field>
+          <Field label="기본 담당자" hint={`비우면 그 현장의 ${T.role.site_manager}에게 배정됩니다`}><UserSelect value={f.defaultAssigneeId} onChange={(v) => setF({ ...f, defaultAssigneeId: v })} placeholder={`${T.role.site_manager} 자동`} /></Field>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setOpen(false)}>취소</Button><Button type="submit">만들기</Button></div>
         </form>
       </Modal>

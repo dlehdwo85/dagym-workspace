@@ -4,10 +4,11 @@ import { RoleBadge } from '@/components/RoleBadge';
 import { useEffect, useState } from 'react';
 import { SpacesTab } from '@/components/SpacesTab';
 import { api, useApi } from '@/components/client';
-import { useSession } from '@/components/session';
+import { useSession, useTerms } from '@/components/session';
 import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, refreshBadges, toast } from '@/components/ui';
 import { TeamPath, TeamPicker } from '@/components/TeamPicker';
-import { ROLE_LABEL, type Role } from '@/lib/types';
+import { type Role } from '@/lib/types';
+import { ROLES } from '@/lib/terms';
 import { MenuPermsTab } from '@/components/MenuPerms';
 import { LeadChip, TeamsTab } from '@/components/Teams';
 import { iGa, leadTitle } from '@/lib/orgKinds';
@@ -56,6 +57,7 @@ export default function UsersPage() {
 }
 
 function Users() {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { user, dir, menus } = useSession();
   const canEdit = (menus?.admin_users ?? 'none') === 'edit'; // V14 7번: 조회만이면 읽기 전용
   const { data, error, loading, reload } = useApi<{ users: any[] }>('/api/admin/users');
@@ -79,7 +81,7 @@ function Users() {
   async function rejoin(u: any) { if (!confirm(`${u.name}님을 복직 처리할까요? (퇴사일부터 30일 안)`)) return; try { await api(`/api/admin/users/${u.id}/rejoin`, { body: {} }); toast.ok('복직 처리했습니다'); reload(); } catch (e: any) { toast.error(e.message); } }
   const demoN = data?.users.filter((u: any) => u.is_demo).length ?? 0;
   const allUnits = useApi<{ units: any[] }>('/api/admin/org-units');
-  const roles = (Object.keys(ROLE_LABEL) as Role[]).filter((r) => r !== 'owner' || user.role === 'owner');
+  const roles = ROLES.filter((r) => r !== 'owner' || user.role === 'owner');
 
   async function invite(e: React.FormEvent) {
     e.preventDefault();
@@ -122,7 +124,7 @@ function Users() {
         <h1 className="text-lg font-bold">사용자·권한</h1>
         <span className="flex flex-wrap gap-2">
           {user.role === 'owner' && <Button variant="secondary" onClick={() => setReview({ email: '', name: '앱 심사 담당자' })} data-testid="review-account">심사용 체험 계정</Button>}
-          {canEdit ? <Button onClick={() => { setInvKey((k) => k + 1); allUnits.reload(); teamsList.reload(); setInv({ email: '', name: '', role: 'staff', orgUnitIds: [], teamIds: [] }); }} data-testid="invite-open">+ 직원 초대</Button> : <span className="text-xs text-ink-3" data-testid="users-readonly">조회 권한 — 바꾸려면 대표에게 &ldquo;편집&rdquo;을 요청하세요</span>}
+          {canEdit ? <Button onClick={() => { setInvKey((k) => k + 1); allUnits.reload(); teamsList.reload(); setInv({ email: '', name: '', role: 'staff', orgUnitIds: [], teamIds: [] }); }} data-testid="invite-open">+ 직원 초대</Button> : <span className="text-xs text-ink-3" data-testid="users-readonly">조회 권한 — 바꾸려면 {T.role.owner}에게 &ldquo;편집&rdquo;을 요청하세요</span>}
         </span>
       </div>
       {demoN > 0 && <button type="button" className="text-xs text-ink-2 underline" onClick={() => setShowDemo((x) => !x)} data-testid="demo-toggle">{showDemo ? '심사용 체험 계정 숨기기' : `심사용 체험 계정 ${demoN}개 보기`}</button>}
@@ -134,7 +136,7 @@ function Users() {
             <tbody className="divide-y">{data!.users.filter((u: any) => (showDemo || !u.is_demo) && (showLeft || u.status !== 'left')).map((u) => (
               <tr key={u.id} className={cx(u.status !== 'active' && u.status !== 'invited' && 'text-slate-400')}>
                 <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}{!u.has_password && u.social?.length > 0 && <span className="ml-1.5 rounded bg-sky-50 px-1.5 text-[11px] font-medium text-sky-800" title="아이폰 앱은 이메일·비밀번호로만 로그인합니다 — 아이폰을 쓰면 [재설정 링크]로 비밀번호를 만들게 해 주세요" data-testid="user-social-only">{u.social.map((p: string) => ({ kakao: '카카오', naver: '네이버', google: 'Google', apple: 'Apple' } as Record<string, string>)[p] ?? p).join('·')}만 · 비밀번호 없음</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}{u.title_short ? ` (${u.title_short})` : ''}</div></td>
-                <td className="p-2"><span className="flex items-center gap-1.5"><RoleBadge role={u.role} guest={u.is_demo} size="sm" /><span className="text-xs text-ink-2">{ROLE_LABEL[u.role as Role]}</span></span></td>
+                <td className="p-2"><span className="flex items-center gap-1.5"><RoleBadge role={u.role} guest={u.is_demo} size="sm" /><span className="text-xs text-ink-2">{T.role[u.role as Role]}</span></span></td>
                 <td className="p-2 text-xs">{(u.teams ?? []).length ? (u.teams as any[]).map((t, i) => <span key={t.id} className="mr-1.5 inline-flex items-center gap-0.5"><TeamPath path={t.path} />{t.primary && (u.teams as any[]).length > 1 && <span className="rounded bg-brand-50 px-1 text-[10px] text-brand-700">주</span>}{t.lead && <LeadChip kind={t.kind} />}{i < (u.teams as any[]).length - 1 ? '' : ''}</span>) : <span className="text-ink-3">{u.org_unit_ids.map(unitName).join(', ') || '-'}</span>}</td>
                 <td className="p-2" data-testid="user-status">{u.status === 'left' && u.left_at ? `퇴사(${u.left_at.slice(5).replace('-', '/')})` : STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}{u.status === 'left' && u.rejoin_until && u.rejoin_until >= todayK && <div className="text-xs text-slate-400">복직 가능 ~{u.rejoin_until.slice(5).replace('-', '/')}</div>}</td>
                 <td className="p-2 text-xs">{u.last_login_at ? fmtDateTime(u.last_login_at) : '-'}</td>
@@ -157,7 +159,7 @@ function Users() {
           <div className="grid grid-cols-2 gap-3">
             <Field label="이름"><input className={inputCls} required value={inv.name} onChange={(e) => setInv({ ...inv, name: e.target.value })} /></Field>
             <Field label="회사 이메일"><input type="email" className={inputCls} required value={inv.email} onChange={(e) => setInv({ ...inv, email: e.target.value })} /></Field>
-            <Field label="권한"><select className={inputCls} value={inv.role} onChange={(e) => setInv({ ...inv, role: e.target.value })}>{roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></Field>
+            <Field label="권한"><select className={inputCls} value={inv.role} onChange={(e) => setInv({ ...inv, role: e.target.value })}>{roles.map((r) => <option key={r} value={r}>{T.role[r]}</option>)}</select></Field>
             <Field label="직책 (선택)"><input className={inputCls} value={inv.title ?? ''} onChange={(e) => setInv({ ...inv, title: e.target.value })} /></Field>
           </div>
           {/* 대표 10/20 15:15 재정비: '소속' 하나(부서 › 팀 트리, 주 소속 + 겸직) — 접근 범위는 자동, 예전 '접근 가능한 조직' 체크는 고급 */}
@@ -196,7 +198,7 @@ function Users() {
             <Field label="이름"><input className={inputCls} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
             <Field label="직책"><input className={inputCls} value={edit.title ?? ''} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></Field>
             <Field label="직책 약칭 (예: CEO·CPO, 아바타 옆에 표시 — 비우면 직책)"><input className={inputCls} maxLength={12} value={edit.title_short ?? ''} onChange={(e) => setEdit({ ...edit, title_short: e.target.value })} aria-label="직책 약칭" /></Field>
-            <Field label="권한"><select className={inputCls} value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })}>{roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></Field>
+            <Field label="권한"><select className={inputCls} value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })}>{roles.map((r) => <option key={r} value={r}>{T.role[r]}</option>)}</select></Field>
             <Field label="상태"><select className={inputCls} value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })} disabled={edit.status === 'invited'}>
               {edit.status === 'invited' && <option value="invited">초대됨</option>}<option value="active">사용 중</option><option value="disabled">사용 중지</option><option value="left">퇴사</option></select></Field>
           </div>
