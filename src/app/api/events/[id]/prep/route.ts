@@ -1,5 +1,6 @@
 import { handler, body } from '@/lib/api';
-import { PREP_PRESETS, createPrepTasks, prepInput } from '@/lib/eventtasks';
+import { createPrepTasks, prepInput, prepPresetsFor } from '@/lib/eventtasks';
+import { tenantOf } from '@/lib/types';
 
-export const GET = handler(async () => ({ presets: Object.entries(PREP_PRESETS).map(([id, p]) => ({ id, ...p })) }));
+export const GET = handler(async ({ user }) => ({ presets: Object.entries(prepPresetsFor(tenantOf(user))).map(([id, p]) => ({ id, ...p })) }));
 export const POST = handler<{ id: string }>(async ({ req, user, params }) => createPrepTasks(user, params.id, await body(req, prepInput)), { idempotent: true });

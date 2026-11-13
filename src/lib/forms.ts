@@ -63,10 +63,11 @@ export async function rotateToken(u: SessionUser, id: string) {
 }
 
 export async function publicForm(token: string) {
-  const [f] = await db()`select f.id, f.kind, f.title, f.enabled, o.name as org_unit_name, b.name as brand_name
-    from site_forms f join org_units o on o.id = f.org_unit_id left join brands b on b.id = o.brand_id where f.token = ${token}`;
+  const [f] = await db()`select f.id, f.kind, f.title, f.enabled, o.name as org_unit_name, b.name as brand_name, o.tenant, t.name as tenant_name
+    from site_forms f join org_units o on o.id = f.org_unit_id left join brands b on b.id = o.brand_id left join tenants t on t.id = o.tenant where f.token = ${token}`;
   if (!f || !f.enabled) throw notFound('사용할 수 없는 신고 양식입니다. 현장 직원에게 문의해 주세요.');
-  return { kind: f.kind, kindLabel: KIND_LABEL[f.kind as keyof typeof KIND_LABEL], title: f.title, place: f.org_unit_name, brand: f.brand_name };
+  // 410차 G-23: 브랜드가 없는 조직의 머리글 — 기본 회사는 화면 기본값('다짐 · 하이링크') 그대로, 다른 회사는 그 회사 이름(예전엔 다른 회사 신고 화면에도 '다짐 · 하이링크')
+  return { kind: f.kind, kindLabel: KIND_LABEL[f.kind as keyof typeof KIND_LABEL], title: f.title, place: f.org_unit_name, brand: f.brand_name ?? (f.tenant !== 'default' ? f.tenant_name ?? null : null) };
 }
 
 export const submitInput = z.object({

@@ -11,6 +11,7 @@ import { TASK_COLS, TASK_FROM, createTask } from './tasks';
 import { addDays } from './time';
 import { zDate, zUuid } from './api';
 import type { SessionUser } from './types';
+import { tenantOf } from './types';
 
 const TZ = 'Asia/Seoul';
 const seoulDateOf = (d: Date | string) => DateTime.fromJSDate(new Date(d)).setZone(TZ).toISODate()!;
@@ -22,6 +23,19 @@ export const PREP_PRESETS: Record<string, { label: string; items: { title: strin
   contract_meeting: { label: '계약 미팅', items: [{ title: '계약서 초안 검토', daysBefore: 2 }, { title: '미팅 자료 출력', daysBefore: 1 }] },
   event_promo: { label: '행사·프로모션', items: [{ title: '홍보물 제작', daysBefore: 10 }, { title: 'SNS·문자 공지', daysBefore: 5 }, { title: '현장 준비물 확인', daysBefore: 1 }] },
 };
+
+/**
+ * 410차 범용화 G-25: 준비 업무 묶음은 회사별 — 기본 회사(다짐)는 지금 목록 그대로.
+ * 다른 회사는 'GX 개강'(피트니스 수업 개강: 공지·강사·음향)을 빼고, '현장' 낱말을 뺀 공통 묶음(점검·미팅·행사)만.
+ */
+export function prepPresetsFor(tenant: string): typeof PREP_PRESETS {
+  if (tenant === 'default') return PREP_PRESETS;
+  return {
+    site_inspection: { label: '방문 점검', items: [{ title: '점검표 준비', daysBefore: 3 }, { title: '방문 일정 공지', daysBefore: 1 }] },
+    contract_meeting: PREP_PRESETS.contract_meeting,
+    event_promo: { label: '행사·프로모션', items: [{ title: '홍보물 제작', daysBefore: 10 }, { title: 'SNS·문자 공지', daysBefore: 5 }, { title: '준비물 확인', daysBefore: 1 }] },
+  };
+}
 
 export async function eventCtx(u: SessionUser, eventId: string, sql: Sql = db()) {
   const { event, perms } = await loadEvent(u, eventId, sql);
@@ -158,7 +172,8 @@ export async function createPrepTasks(u: SessionUser, eventId: string, i: z.infe
   const c = await eventCtx(u, eventId, sql);
   if (!c.perms.edit) throw forbidden('일정 편집 권한이 있어야 준비 업무를 만들 수 있습니다');
   if (c.event.rrule) throw badRequest('반복 일정은 "회차마다 만드는 업무"를 사용하세요');
-  const items = i.items?.length ? i.items : i.preset && PREP_PRESETS[i.preset] ? PREP_PRESETS[i.preset].items : null;
+  const presets = prepPresetsFor(tenantOf(u));
+  const items = i.items?.length ? i.items : i.preset && presets[i.preset] ? presets[i.preset].items : null;
   if (!items) throw badRequest('준비 업무 묶음이나 항목을 고르세요');
   const day = seoulDateOf(c.event.start_at);
   const ids: string[] = [];

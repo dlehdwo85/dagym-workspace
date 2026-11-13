@@ -5,6 +5,7 @@ import { HelpCircle } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, Field, PageHeader, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { restartTours } from '@/components/Tour';
+import { useTerms } from '@/components/session';
 
 const FAQ: [string, string][] = [
   ['업무는 어떻게 만들어요?', '아래 + 버튼(휴대폰) 또는 위쪽 "만들기"(PC) → 업무. 목록 묶음 끝 "업무 추가" 줄에 바로 써도 됩니다. "내일 3시 김민수 견적서"처럼 쓰면 날짜·담당자를 알아봅니다. 🎤 음성 등록도 됩니다.'],
@@ -24,6 +25,7 @@ const NEWS: [string, string][] = [
 
 /** V12 3번 도움말·문의 · 업데이트 소식 · 서비스 상태 */
 export default function HelpPage() {
+  const person = useTerms().example.person; // 410차 G-20: 도움말 예시의 사람 이름은 회사별(다짐은 지금 그대로)
   const mine = useApi<{ tickets: any[] }>('/api/support');
   const [f, setF] = useState({ category: 'question', subject: '', body: '' });
   async function send(e: React.FormEvent) {
@@ -37,7 +39,7 @@ export default function HelpPage() {
         actions={<Button variant="secondary" onClick={() => restartTours()} data-testid="help-tour-restart">사용 안내 다시 보기</Button>} />
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
         <h2 className="text-sm font-semibold">자주 묻는 질문</h2>
-        <div className="mt-2 divide-y divide-line">{FAQ.map(([q, a]) => <details key={q} className="py-2"><summary className="cursor-pointer text-sm font-medium">{q}</summary><p className="mt-1 text-sm text-ink-2">{a}</p></details>)}</div>
+        <div className="mt-2 divide-y divide-line">{FAQ.map(([q, a0]) => [q, a0.replace('김민수', person)] as const).map(([q, a]) => <details key={q} className="py-2"><summary className="cursor-pointer text-sm font-medium">{q}</summary><p className="mt-1 text-sm text-ink-2">{a}</p></details>)}</div>
       </section>
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="support-form">
         <h2 className="text-sm font-semibold">문의 남기기</h2>

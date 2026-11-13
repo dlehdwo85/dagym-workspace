@@ -41,7 +41,7 @@ export default function ReportPage({ params }: { params: Promise<{ token: string
       <div className="mx-auto max-w-md">
         <div className="mb-5 flex items-center gap-2.5">
           <img src="/icon.svg" alt="" className="size-9" />
-          <div><div className="text-xs text-ink-2">{info?.brand ?? '다짐 · 하이링크'}</div><div className="font-bold">{info ? `${info.place} ${info.kindLabel} 신고` : '현장 신고'}</div></div>
+          <div><div className="text-xs text-ink-2">{info ? info.brand ?? '다짐 · 하이링크' : '\u00A0' /* 410차 G-23: 불러오기 전에는 비워 둔다(다른 회사 신고 화면에 다짐 이름이 잠깐 보이지 않게) */}</div><div className="font-bold">{info ? `${info.place} ${info.kindLabel} 신고` : '현장 신고'}</div></div>
         </div>
         {!info && !err && <div className="flex items-center justify-center gap-2 py-16 text-sm text-ink-2"><Loader2 className="size-4 animate-spin" />불러오는 중…</div>}
         {!info && err && <div className="rounded-card border border-line bg-white p-6 text-center text-sm" role="alert">{err}</div>}
