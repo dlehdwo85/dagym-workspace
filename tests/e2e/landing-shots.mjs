@@ -23,10 +23,14 @@ try {
   await p0.getByRole('button', { name: '로그인' }).click(); await p0.waitForURL(BASE + '/');
   const st = await ctx0.storageState(); await ctx0.close();
   const lc = await browser.newContext({ viewport: { width: 1280, height: 960 }, deviceScaleFactor: 1, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: st });
+  await lc.clock.setFixedTime(new Date(`${today}T09:41:00+09:00`)); // 밤에 찍어도 캘린더·인사말이 오전 업무 시간으로(#1047)
   const p = await lc.newPage();
+  // 대표 11/14 #1047 · 범용화 G-13: 소개 그림에 우리 업무·이전 문구가 찍히면 안 된다 — 있으면 알림
+  const OURS = /심사|\(가상\)|영업관리|현장 미등록|피트니스|헬스|아파트|단지|관리사무소|입주|회원|운동기구|다짐|하이링크/g; const found = [];
   for (const [path, file] of [['/', 'home'], ['/tasks', 'tasks'], ['/calendar?view=week', 'calendar'], ['/s/sales', 'sales'], ['/s/marketing/approvals', 'marketing']]) { // 316차 #886: 마케팅 그림 = 승인함(인스타그램·페이스북 시안만) — 마케팅 홈은 다른 채널 단추가 보여 자동 게시처럼 읽힘
     await p.goto(BASE + path); await p.waitForLoadState('networkidle').catch(() => {}); await p.waitForTimeout(1200);
-    await p.addStyleTag({ content: '[data-testid="trial-banner"]{display:none!important}' }); await p.waitForTimeout(150); // 316차: 체험 D-n 띠(계정 상태)는 소개 그림에서 뺌
+    await p.addStyleTag({ content: '[data-testid="trial-banner"],[data-testid="daily-welcome"]{display:none!important}' }); await p.waitForTimeout(150); // 316차: 체험 D-n 띠(계정 상태)는 소개 그림에서 뺌
+    const hit = [...new Set(((await p.evaluate(() => document.body.innerText)).match(OURS) ?? []))]; if (hit.length) found.push(`${file}: ${hit.join(' · ')}`);
     await p.screenshot({ path: `public/landing/${file}.png` });
   }
   // OG 그림 1200×630
@@ -35,5 +39,6 @@ try {
     <div style="font-size:28px;font-weight:600;opacity:.9">워크인</div><div style="font-size:72px;font-weight:800;line-height:1.15;margin-top:12px">업무도, 영업도,<br>마케팅도 한 화면에서</div>
     <div style="font-size:30px;margin-top:28px;opacity:.95">14일 무료 체험 · 웹 · Android · iOS</div></body></html>`);
   await og.screenshot({ path: '/tmp/landing-og-preview.png' }); // 로고 S3 확정: public/landing/og.png 는 docs/handoff/brand/workin-s3/og-1200x630.png 고정본(덮어쓰지 않음)
+  if (found.length) { console.log(`⚠ 소개 그림에 우리 업무·이전 문구:\n- ${found.join('\n- ')}`); process.exitCode = 1; }
   console.log('랜딩 그림 저장: public/landing/{home,tasks,calendar,sales,marketing,approvals,og}.png');
 } finally { await browser.close(); srv.proc.kill(); await sql.end(); }

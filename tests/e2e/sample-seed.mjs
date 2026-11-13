@@ -1,5 +1,8 @@
 // 소개 사이트·광고 그림용 일반 B2B 샘플 회사(하늘솔루션, 가상 — 실제 데이터 아님): landing-shots.mjs(306차 #877)·ad-shots.mjs(316차 #886)가 같이 씀.
 // 316차: 전자결재(휴가·구매 결재 대기)·메신저(팀방 대화)·공지도 넣음 — 광고 그림 '전자결재'·'협업' 화면용
+// 대표 11/14 #1047('스토어 스크린샷에 우리 업무 내용이 보인다 → 일반적인 업무로'): 거래처 이름에서 '(가상)' 꼬리표를 떼고(한빛상사·새봄디자인·푸른유통 — 지어낸 이름),
+//   옛 영업관리 이전 표시를 넣지 않으며("영업관리에서 옮긴 자료…" 문구가 안 나옴 — 새 회사는 401차부터 이전 없이 영업 쓰기가 열림), 출근 카드의 '(현장 미등록…)'이 안 나오게 근무지 1곳을 둔다.
+//   전화번호는 넣지 않는다(지어낸 번호가 실제 누군가의 번호일 수 있음).
 import { BASE, Client, addDays } from '../helpers.mjs';
 
 /** opts.image(이름, 제목, [r,g,b]) = 시안 그림(브라우저로 그린 제목 카드) — 없으면 단색 PNG */
@@ -23,16 +26,16 @@ export async function seedSample(sql, today, opts = {}) {
   for (const [title, d, h] of [['주간 팀 회의', 0, 10], ['거래처 미팅', 1, 14], ['신제품 리뷰', 2, 11], ['점심 세미나', 3, 12], ['월간 회고', 4, 16]]) await c.ok('POST', '/api/events', { calendarId: cc.id, title, start: `${addDays(today, d)}T${String(h).padStart(2, '0')}:00:00+09:00`, end: `${addDays(today, d)}T${String(h + 1).padStart(2, '0')}:00:00+09:00` });
   // 영업: 공간 켜기 + 전환 완료 + 샘플 공고·리드(일반 B2B — 306차 #877)
   await c.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
-  await sql`insert into app_settings (key, value) values ('sales_migrate_applied', ${sql.json({ tenant, at: new Date().toISOString(), daily: true })}) on conflict (key) do update set value = excluded.value`;
   await sql`insert into sales_cutover (tenant, writes_open, ok) values (${tenant}, true, true) on conflict (tenant) do update set writes_open = true, ok = true`;
   const put = (tbl, row) => sql`insert into sales_src_rows (scope, tbl, src_id, row) values ('global', ${tbl}, ${String(row.id)}, ${sql.json(row)})`;
   await put('procurement_notices', { id: 'S1', title: '공공기관 홈페이지 유지관리 용역', issuer: '경기도청', region: '경기', related: true, first_seen_at: today, deadline_at: `${addDays(today, 6)}T10:00:00+09:00`, status: '공고중' });
   await put('procurement_notices', { id: 'S2', title: '사무용 가구 구매', issuer: '수원시', region: '경기', related: true, first_seen_at: today, deadline_at: `${addDays(today, 3)}T14:00:00+09:00`, status: '공고중' });
   await put('procurement_notices', { id: 'S3', title: '청사 시설 청소 용역', issuer: '화성시', region: '경기', related: true, first_seen_at: addDays(today, -40), status: '낙찰', winner_name: '타사', contract_end_date: addDays(today, 70) });
   await c.ok('POST', '/api/sales/work', { kind: 'bid', id: 'S1', status: '연락중', nextDate: today });
-  await c.ok('POST', '/api/sales/leads', { name: '가나 물류(가상)', status: '미팅예정', priority: 'high', region: '경기', expectedRevenue: 36000000, nextContactDate: today, force: true, ownerId: ppl[0] });
-  await c.ok('POST', '/api/sales/leads', { name: '다라 오피스(가상)', status: '1차연락완료', region: '서울', nextContactDate: addDays(today, 2), force: true, ownerId: ppl[1] });
-  await c.ok('POST', '/api/sales/leads', { name: '마바 디자인(가상)', status: '제안서작성중', region: '인천', expectedRevenue: 24000000, nextContactDate: addDays(today, 4), force: true });
+  await c.ok('POST', '/api/sales/leads', { name: '한빛상사', status: '미팅예정', priority: 'high', region: '경기', expectedRevenue: 36000000, nextContactDate: today, force: true, ownerId: ppl[0] });
+  await c.ok('POST', '/api/sales/leads', { name: '새봄디자인', status: '1차연락완료', region: '서울', nextContactDate: addDays(today, 2), force: true, ownerId: ppl[1] });
+  await c.ok('POST', '/api/sales/leads', { name: '푸른유통', status: '제안서작성중', region: '인천', expectedRevenue: 24000000, nextContactDate: addDays(today, 4), force: true });
+  await sql`insert into work_sites (tenant, name, address, lat, lng, radius_m, created_by) values (${tenant}, '본사', null, 37.5665, 126.978, 200, ${me.user.id})`.catch((e) => console.log('work_site', e.message));
   // 마케팅: 공간 켜기 + 브랜드 + 시안 3건(그림 포함)
   await c.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   const brand = await c.ok('POST', '/api/marketing/brands', { name: '하늘솔루션' }).catch(() => null);
@@ -58,5 +61,5 @@ export async function seedSample(sql, today, opts = {}) {
       await who.ok('POST', `/api/chat/rooms/${room.id}/messages`, { body }).catch((e) => console.log('chat', e.message));
   }
   await c.ok('POST', '/api/notices', { title: '11월 전체 회의 안내', body: '첫째 주 월요일 오전 10시, 2층 회의실', important: true, pinned: true }).catch((e) => console.log('notice', e.message));
-  return { c, unit, ppl, tenant, room: room?.id ?? null };
+  return { c, unit, ppl, staff, tenant, room: room?.id ?? null };
 }
