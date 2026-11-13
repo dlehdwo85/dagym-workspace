@@ -1,11 +1,14 @@
 import { handler } from '@/lib/api';
 import { db } from '@/lib/db';
 import { actionsFor, webActions, type NotifRow } from '@/lib/notifActions';
+import { AREA_OK, AREA_SQL_RE } from '@/lib/notifAreas';
 
 export const GET = handler(async ({ req, user }) => {
   const unreadOnly = req.nextUrl.searchParams.get('unread') === '1';
   const space = req.nextUrl.searchParams.get('space'); // #104 묶음 알림 링크 → 그 공간 알림만
   const archived = req.nextUrl.searchParams.get('archived') === '1'; // #110 보관함 탭(보관한 것만), 기본 목록은 보관 제외
+  // 394차(대표 11/13 '각 페이지별 알람'): ?area=/tasks → 그 화면으로 가는 알림만(링크 앞부분 기준, notifAreas.ts)
+  const areaQ = req.nextUrl.searchParams.get('area'); const area = areaQ && AREA_OK.test(areaQ) ? areaQ : null;
   const sql = db();
   // V12 7번: 검토 요청 알림은 업무가 아직 검토 중이면 바로 승인·반려 (task_status·task_version)
   const items = await sql<any[]>`select n.id, n.type, n.title, n.body, n.link, n.read_at, n.created_at, u.name as actor_name, n.entity_id, n.entity_type, n.meta, n.count, n.action_done, n.action_done_at, n.space, n.archived_at,
@@ -15,6 +18,7 @@ export const GET = handler(async ({ req, user }) => {
     from notifications n left join users u on u.id = n.actor_id
     left join tasks t on n.entity_type = 'task' and t.id = n.entity_id and t.deleted_at is null
     where n.user_id = ${user.id} and n.type <> 'chat' ${archived ? sql`and n.archived_at is not null` : sql`and n.archived_at is null`} ${unreadOnly ? sql`and n.read_at is null` : sql``} ${space && ['work', 'sales', 'marketing'].includes(space) ? sql`and n.space = ${space}` : sql``}
+      ${area ? sql`and regexp_replace(split_part(split_part(n.link, '?', 1), '#', 1), ${AREA_SQL_RE}, '\\1') = ${area}` : sql``}
     order by (n.read_at is null) desc, n.created_at desc limit 150`;
   const [c] = await sql`select count(*)::int c from notifications where user_id = ${user.id} and read_at is null and type <> 'chat'`; // 메신저는 메시지 화면 배지로
   // 로컬 10/20: 알림에서 바로 처리할 버튼(종류·상태로 정함) — 처리된 알림은 action_done("승인함")만
@@ -25,6 +29,9 @@ export const GET = handler(async ({ req, user }) => {
     .map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, link: n.link, entityType: n.entity_type ?? null, entityId: n.entity_id ?? null, actions: actionsFor(n as NotifRow) })) : undefined;
   // #114 ⑦ 휴대폰 상단 '결재할 것 n건' — 같은 폴링에 실어 보낸다(별도 폴링 없음)
   const approvalsTodo = unreadOnly ? await (await import('@/lib/approvalForms')).todoCount(sql, user).catch(() => 0) : undefined;
+  // 394차: 화면별 안 읽은 알림 수(메뉴·하단 탭 숫자, 화면 위 알림 줄) — 같은 폴링에 실어 보냄(메신저는 메시지 화면 배지로 따로)
+  const areas = unreadOnly ? Object.fromEntries((await sql<{ a: string; n: number }[]>`select regexp_replace(split_part(split_part(link, '?', 1), '#', 1), ${AREA_SQL_RE}, '\\1') as a, count(*)::int as n
+      from notifications where user_id = ${user.id} and read_at is null and type <> 'chat' and link like '/%' group by 1`).map((r) => [r.a, r.n])) : undefined;
   // #618: 푸시는 모든 알림에 [확인]이 붙지만, 웹 목록은 줄마다 [읽음]·[보관]이 있으므로 [확인]만 있는 줄은 버튼 없이(webActions)
-  return { items: items.map((n) => ({ ...n, actions: webActions(actionsFor(n as NotifRow), !(n as { read_at?: string | null }).read_at) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}) };
+  return { items: items.map((n) => ({ ...n, actions: webActions(actionsFor(n as NotifRow), !(n as { read_at?: string | null }).read_at) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}), ...(areas ? { areas } : {}), ...(area ? { area } : {}) };
 });

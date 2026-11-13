@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Loading, cx, fmtDateTime, toast } from '@/components/ui';
 import { NOTIFICATION_TYPES } from '@/lib/types';
+import { AREA_OK, areaLabel } from '@/lib/notifAreas';
 import { cameBack, useUrlState } from '@/components/urlState';
 import { isInApp } from '@/components/inApp';
 import { goLink } from '@/components/TaskPanelHost';
@@ -27,6 +28,9 @@ export default function Notifications() {
   // #104 ⑥: 묶음 알림 링크(/notifications?space=marketing) → 그 공간 알림만
   const [spaceQ, setSpaceQ] = useUrlState('space', '');
   const space = SPACE_CHIP[spaceQ] ? spaceQ : null;
+  // 394차(대표 11/13 '각 페이지별 알람'): 화면 위 알림 줄의 [보기] → 그 화면으로 가는 알림만(?area=/tasks)
+  const [areaQ, setAreaQ] = useUrlState('area', '');
+  const area = AREA_OK.test(areaQ) ? areaQ : null;
   // V32 0: 기본은 안 읽은 알림만 — 누르면 바로 읽음(배지 감소), 서버 실패 때만 되돌림. [전체]로 읽은 것까지 · #110 [보관함]
   // #242 2단계: 탭은 주소(?tab=)에 — 알림을 눌러 업무·승인함에 갔다 뒤로 와도 보던 탭
   const [tabQ, setTabQ] = useUrlState('tab', 'unread');
@@ -42,7 +46,7 @@ export default function Notifications() {
   const setView = (v: 'rooms' | 'list') => { setViewS(v); try { localStorage.setItem('notif-view', v); } catch { /* 무시 */ } if (v === 'list' && roomQ) setRoomQ(''); };
   const openRoom = (type: string) => { const p = new URLSearchParams(location.search); p.set('room', type); pushedRoom.current = true; router.push(`/notifications?${p}`); };
   const closeRoom = () => { if (pushedRoom.current) { pushedRoom.current = false; router.back(); } else setRoomQ(''); };
-  const { data, error, loading, reload, setData } = useApi<any>(`/api/notifications${tab === 'archived' ? '?archived=1' : space ? `?space=${space}` : ''}`);
+  const { data, error, loading, reload, setData } = useApi<any>(`/api/notifications${(() => { const q = new URLSearchParams(); if (tab === 'archived') q.set('archived', '1'); else if (space) q.set('space', space); if (area) q.set('area', area); const t = q.toString(); return t ? `?${t}` : ''; })()}`);
   // 로컬 10/19(대표) 홈 개편: 홈 '최근 활동' 카드가 여기 '활동' 탭으로
   const [doneIds, setDoneIds] = useState<string[]>([]); // 이 화면에서 방금 처리한 알림 — 다시 불러와도 안 읽음 탭에 "…함 ✓"로 남김
   // #110: 이 화면에서 읽음 처리한 알림은 흐리게 남겨 둔다(탭을 바꾸면 빠짐). #242 2단계: 눌러서 다른 화면에 갔다 뒤로 와도 남김(이 창 동안, 같은 탭)
@@ -50,7 +54,7 @@ export default function Notifications() {
   // #110: 길게 눌러(또는 [선택]) 여러 건 고르기
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
-  const hereKey = `${tab}|${space ?? ''}`;
+  const hereKey = `${tab}|${space ?? ''}|${area ?? ''}`;
   useEffect(() => {
     let ids: string[] = [];
     if (cameBack()) try { const r = JSON.parse(sessionStorage.getItem('wos_notif_here') ?? 'null'); if (r?.k === hereKey && Array.isArray(r.ids)) ids = r.ids; } catch { /* 무시 */ } // 뒤로가기로 돌아왔을 때만
@@ -86,12 +90,12 @@ export default function Notifications() {
     const target = ids ? new Set(ids) : null;
     const changed = data.items.filter((n: any) => !n.read_at && (!target || target.has(n.id))).length;
     const prev = data;
-    setData({ ...data, unread: ids ? Math.max(0, data.unread - changed) : 0, items: data.items.filter((n: any) => !(archive && target?.has(n.id))).map((n: any) => (!n.read_at && (!target || target.has(n.id)) ? { ...n, read_at: now } : n)) });
+    setData({ ...data, unread: ids || area ? Math.max(0, data.unread - changed) : 0, items: data.items.filter((n: any) => !(archive && target?.has(n.id))).map((n: any) => (!n.read_at && (!target || target.has(n.id)) ? { ...n, read_at: now } : n)) });
     if (ids && !archive) setReadHere((r) => [...r, ...ids]);
     if (ids) setPicked((p) => p.filter((x) => !target!.has(x)));
-    window.dispatchEvent(new CustomEvent('wos-unread', { detail: ids ? { delta: -changed } : { value: 0 } }));
-    try {
-      const r = await api<{ unread: number }>('/api/notifications/read', { body: ids ? (archive ? { ids, archive: true } : { ids }) : { all: true } });
+    window.dispatchEvent(new CustomEvent('wos-unread', { detail: ids || area ? { delta: -changed } : { value: 0 } }));
+    try { // 394차: 화면별로 걸러 보는 중이면 [모두 읽음] = 그 화면 알림만
+      const r = await api<{ unread: number }>('/api/notifications/read', { body: ids ? (archive ? { ids, archive: true } : { ids }) : area ? { area } : { all: true } });
       window.dispatchEvent(new CustomEvent('wos-unread', { detail: { value: r.unread } }));
       if (archive) toast.ok(`${ids!.length}건 보관했습니다`);
     } catch (e: any) {
@@ -119,10 +123,11 @@ export default function Notifications() {
   return (
     <div className="mx-auto max-w-3xl space-y-3">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold">알림 {data?.unread ? <span className="text-sm text-red-600">{data.unread}</span> : null}{space && <span className="ml-1 rounded-full bg-brand-50 px-2 text-xs font-normal text-brand-700" data-testid="notif-space-filter">{SPACE_CHIP[space]}만 <button type="button" className="underline" onClick={() => setSpaceQ('')}>해제</button></span>}</h1>
+        <h1 className="text-lg font-bold">알림 {data?.unread ? <span className="text-sm text-red-600">{data.unread}</span> : null}{space && <span className="ml-1 rounded-full bg-brand-50 px-2 text-xs font-normal text-brand-700" data-testid="notif-space-filter">{SPACE_CHIP[space]}만 <button type="button" className="underline" onClick={() => setSpaceQ('')}>해제</button></span>}
+          {area && <span className="ml-1 rounded-full bg-red-50 px-2 text-xs font-normal text-red-800" data-testid="notif-area-filter">{areaLabel(area)} 화면 알림만 <button type="button" className="underline" onClick={() => setAreaQ('')}>해제</button></span>}</h1>
         <div className="flex gap-2"><Link href="/settings" className="text-sm text-brand-600 hover:underline">알림 설정</Link>
           {tab !== 'activity' && tab !== 'archived' && !(roomsOn && !room) && <Button size="sm" variant="secondary" onClick={() => { setSelecting((s) => !s); setPicked([]); }} data-testid="notif-select" aria-pressed={selecting}>{selecting ? '선택 끝' : '선택'}</Button>}
-          <Button size="sm" variant="secondary" onClick={() => read()} disabled={!data?.unread} data-testid="read-all">모두 읽음</Button></div>
+          <Button size="sm" variant="secondary" onClick={() => read()} disabled={area ? !data?.items?.some((n: any) => !n.read_at) : !data?.unread} data-testid="read-all">{area ? '이 화면 알림 모두 읽음' : '모두 읽음'}</Button></div>
       </div>
       <div className="flex gap-1 text-sm" role="tablist" aria-label="알림 보기">
         {listTabs.map(([k, l]) => (

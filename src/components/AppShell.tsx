@@ -1,6 +1,7 @@
 'use client';
 import { ChatBubble } from '@/components/ChatBubble';
 import { RoleBadge } from '@/components/RoleBadge';
+import { areaLabel, areaOf } from '@/lib/notifAreas';
 import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
 import { IOS_ADMIN_NOTE, billingNote, useInApp } from './inApp';
@@ -81,6 +82,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // 302차 #862: 관리자가 휴대폰 브라우저·PC 에서 결제한 뒤 앱으로 돌아오면 다시 열지 않아도 읽기 전용 띠·체험 상태가 풀리게 — 앱이 앞으로 올 때 화면 정보 새로 읽기(20초에 한 번까지)
   useEffect(() => { let last = Date.now(); onAppActive(() => { if (Date.now() - last < 20_000) return; last = Date.now(); router.refresh(); }); }, [router]);
   const [unread, setUnread] = useState(0);
+  // 394차(대표 11/13 '각 페이지별 알람이 보일 수 있도록'): 화면별 안 읽은 알림 수 — 메뉴·하단 탭 숫자, 화면 위 '이 화면 새 알림' 줄
+  const [areas, setAreas] = useState<Record<string, number>>({});
+  const pollRef = useRef<() => Promise<void> | void>(() => {});
+  const [readyPath, setReadyPath] = useState(''); // 394차: 이 화면 자동 읽음(V32 0)이 끝난 주소 — 그 뒤에 남은 것만 화면 위 줄로(떴다 사라지지 않게)
   const [alarms, setAlarms] = useState<AlarmItem[]>([]); // 로컬 10/20(대표): 웹 알람 띠(알람처럼 울리는 알림, 해제 전)
   const [approvalsTodo, setApprovalsTodo] = useState(0); // #114 ⑦ 휴대폰 상단 '결재할 것 n건'(알림 폴링에 실려 옴)
   const [chatUnread, setChatUnread] = useState(0);
@@ -221,15 +226,16 @@ export function AppShell({ session, children }: { session: Sess; children: React
     let alive = true;
     const poll = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // 10/21 DB 쿼터 장애: 가려진 탭은 폴링하지 않음
-      try { const r = await api('/api/notifications?unread=1'); if (alive) { setUnread(r.unread); setAlarms(r.alarms ?? []); setApprovalsTodo(r.approvalsTodo ?? 0); } } catch {}
+      try { const r = await api('/api/notifications?unread=1'); if (alive) { setUnread(r.unread); setAlarms(r.alarms ?? []); setApprovalsTodo(r.approvalsTodo ?? 0); setAreas(r.areas ?? {}); } } catch {}
       try { const c = await api('/api/chat/unread'); if (alive) setChatUnread(c.unread); } catch {}
     };
-    poll();
+    poll(); pollRef.current = poll;
     const t = setInterval(poll, 120_000); // 10/21: 60초 → 120초(탭 포커스·wos-refresh 때는 바로)
     const onFocus = () => { poll(); };
     window.addEventListener('focus', onFocus);
     // V32 0: 읽음 즉시 배지 반영(알림 화면이 보내는 값) + 다른 화면에서 바뀌면 다시 셈
-    const onUnread = (e: Event) => { const d = (e as CustomEvent<{ delta?: number; value?: number }>).detail ?? {}; setUnread((u) => Math.max(0, d.value ?? u + (d.delta ?? 0))); };
+    const onUnread = (e: Event) => { const d = (e as CustomEvent<{ delta?: number; value?: number }>).detail ?? {}; setUnread((u) => Math.max(0, d.value ?? u + (d.delta ?? 0)));
+      if (d.value === 0) setAreas({}); else { clearTimeout(rt); rt = setTimeout(poll, 400); } }; // 394차: 화면별 숫자도 다시 셈
     let rt: ReturnType<typeof setTimeout> | undefined;
     const onRefresh = () => { clearTimeout(rt); rt = setTimeout(poll, 400); };
     window.addEventListener('wos-unread', onUnread);
@@ -265,10 +271,11 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const readTried = useRef('');
   useEffect(() => {
     // 화면을 처음 열 때는 안 읽은 수를 아직 모를 수 있어(0 으로 시작) 한 번은 늘 확인 — 그 뒤엔 안 읽은 게 있을 때만
-    if (path === '/notifications' || path === '/' || (!hasUnread && readTried.current === path)) return;
+    if (path === '/notifications' || path === '/' || (!hasUnread && readTried.current === path)) { setReadyPath(path); return; }
     readTried.current = path;
     api<{ changed: number; unread: number }>('/api/notifications/read', { body: { link: path } })
-      .then((r) => { if (r.changed) setUnread(r.unread); }).catch(() => {});
+      .then(async (r) => { if (r.changed) { setUnread(r.unread); await pollRef.current(); } }).catch(() => {}) // 394차: 화면별 숫자도
+      .finally(() => setReadyPath(path));
   }, [path, hasUnread]);
 
   // 공간별 하단 탭 4개(+ 더보기) — 배지: 메시지 안 읽음 · 마케팅 승인 대기
@@ -316,7 +323,12 @@ export function AppShell({ session, children }: { session: Sess; children: React
     else router.push(what === 'event' ? '/calendar?new=1' : '/projects?new=1');
   };
 
-  const navLink = (n: NavItem, badge?: number) => {
+  /** 394차: 메뉴·하단 탭 주소 → 그 화면 안 읽은 알림 수(홈·공간 첫 화면은 없음) */
+  const areaBadge = (href: string) => { const a = areaOf(href); return a ? areas[a] ?? 0 : 0; };
+  const pageArea = areaOf(path);
+  const pageAlarms = pageArea && path !== '/notifications' && readyPath === path ? areas[pageArea] ?? 0 : 0;
+  /** quiet = 394차 화면별 알림 숫자(링크 이름에 섞지 않음 — '업무'를 '업무 3'으로 바꾸지 않게, 전체 수는 알림 종의 이름에) */
+  const navLink = (n: NavItem, badge?: number, quiet = false) => {
     const on = active(n.href);
     return (
       <Link key={n.href} href={n.href} prefetch={NAV_PREFETCH.has(n.href) ? undefined : false} aria-current={on ? 'page' : undefined} title={collapsed ? n.label : undefined} style={on && space !== 'work' ? { background: sm.color } : undefined}
@@ -324,7 +336,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         <NavPending className="inset-x-2 bottom-0.5" />
         <n.icon className={cx('size-[18px] shrink-0', on ? 'text-white' : 'text-slate-400 group-hover:text-slate-600')} aria-hidden />
         {!collapsed && <span className="flex-1 truncate">{n.label}</span>}
-        {!!badge && <span className={cx('rounded-full bg-red-500 text-[10px] font-semibold leading-4 text-white tabular-nums', collapsed ? 'absolute ml-5 -mt-5 px-1' : 'px-1.5')}>{badge > 99 ? '99+' : badge}</span>}
+        {!!badge && <span aria-hidden={quiet || undefined} data-nav-badge={quiet ? 'area' : undefined} className={cx('rounded-full bg-red-500 text-[10px] font-semibold leading-4 text-white tabular-nums', collapsed ? 'absolute ml-5 -mt-5 px-1' : 'px-1.5')}>{badge > 99 ? '99+' : badge}</span>}
       </Link>
     );
   };
@@ -386,7 +398,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 {/* 로컬 검수 10/19 → #481(대표 10/23): 마케팅 메뉴 묶음 계획·제작·게시·성과·설정 */}
                 {k < spaceNav.length && n.group && n.group !== spaceNav[k - 1]?.group && <div className={cx('px-2.5 pb-1 pt-2.5 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-group">{n.group}</div>}
                 {!v3 && space !== 'work' && k === spaceNav.length && <div className={cx('px-2.5 pb-1 pt-3 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-common">공통</div>}
-                {navLink(n, n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0)}
+                {n.href === '/notifications' ? navLink(n, unread) : n.href === '/messages' ? navLink(n, chatUnread) : navLink(n, areaBadge(n.href), true)}
                 {/* 즐겨찾는 프로젝트는 "프로젝트" 바로 아래 */}
                 {n.href === '/projects' && !collapsed && favorites.length > 0 && (
                   <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l border-line pl-2">
@@ -402,7 +414,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
             {v3 && (<div className="pt-2" data-testid="nav-common-v3">
               <div className="my-1.5 border-t border-line" />
               <div className={cx('px-2.5 pb-1 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-common">공통</div>
-              {commonV3.map((n) => <div key={n.href}>{navLink(n, n.href === '/notifications' ? unread : n.href === '/messages' ? chatUnread : 0)}</div>)}
+              {commonV3.map((n) => <div key={n.href}>{n.href === '/notifications' ? navLink(n, unread) : n.href === '/messages' ? navLink(n, chatUnread) : navLink(n, areaBadge(n.href), true)}</div>)}
             </div>)}
             {(adminMenu.length > 0 || session.user.platformAdmin) && (
               <div className="pt-3" data-testid="nav-admin">
@@ -515,7 +527,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{!!homeInfo?.badge && homeInfo.href && <Link href={homeInfo.href} prefetch={false} data-testid="space-badge-line"
             className="mb-3 flex items-center gap-2 rounded-card border px-3 py-2 text-xs text-ink-2 hover:bg-white" style={{ borderColor: sm.border, background: sm.soft }}>
             <SpaceBadge sp={space} n={homeInfo.badge} label={homeInfo.label} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />
-            <span className="min-w-0 flex-1"><b className="text-ink">{homeInfo.label} {homeInfo.badge}건</b> — 공간 전환 칸의 {sm.short} 숫자는 이 숫자입니다(알림 종 숫자와 다름)</span><span className="shrink-0 font-medium" style={{ color: sm.color }}>보기 →</span></Link>}{children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
+            <span className="min-w-0 flex-1"><b className="text-ink">{homeInfo.label} {homeInfo.badge}건</b> — 공간 전환 칸의 {sm.short} 숫자는 이 숫자입니다(알림 종 숫자와 다름)</span><span className="shrink-0 font-medium" style={{ color: sm.color }}>보기 →</span></Link>}
+            {pageAlarms > 0 && pageArea && <PageAlarms area={pageArea} n={pageAlarms} onRead={(u) => { setUnread(u); setAreas((a) => ({ ...a, [pageArea]: 0 })); pollRef.current(); }} />}
+            {children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>
 
         {session.tenant?.onboarding && <Onboarding />}
@@ -582,7 +596,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         {/* 대표 결정(10/19): 가운데 + 버튼 없이 공간마다 같은 크기 5칸 — 4개 메뉴 + 더보기(그 공간 나머지 메뉴·공통·공간 전환·만들기) */}
         <nav className={cx('fixed bottom-0 left-0 right-0 z-40 grid border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden [[data-chat-room]_&]:hidden', mobileTabs.length >= 5 ? 'grid-cols-5' : 'grid-cols-4')} aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
-          {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={n.match ? n.match.some((m) => path.startsWith(m)) : active(n.href)} badge={n.badge} />)}
+          {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={n.match ? n.match.some((m) => path.startsWith(m)) : active(n.href)} badge={n.badge || areaBadge(n.href)} quiet={!n.badge && !!areaBadge(n.href)} />)}
         </nav>
         {/* 대표 10/20 16:20 (#106) 휴대폰 오른쪽 아래 말풍선 — 최근 대화방 바로·안 읽은 수·길게 누르면 AI 비서, 대화방·키보드·알람 띠에서 숨김 */}
         <ChatBubble unread={chatUnread} ai={!!session.features.ai} alarm={alarms.length > 0} />
@@ -699,12 +713,26 @@ function NavPending({ className }: { className?: string }) {
   return <span aria-hidden data-pending={pending ? '1' : undefined} className={cx('pointer-events-none absolute h-0.5 rounded-full bg-brand-600 transition-opacity duration-100', pending ? 'animate-pulse opacity-100' : 'opacity-0', className)} />;
 }
 
-function TabLink({ n, on, badge }: { n: NavItem; on: boolean; badge?: number }) {
+/** 394차(대표 11/13 '각 페이지별 알람이 보일 수 있도록'): 화면 위 한 줄 — 이 화면으로 가는 안 읽은 알림 수 · [보기](알림 화면에서 이 화면 알림만) · [모두 읽음](이 화면 것만) */
+function PageAlarms({ area, n, onRead }: { area: string; n: number; onRead: (unread: number) => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="mb-3 flex items-center gap-2 rounded-input border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-900" data-testid="page-alarms" data-area={area}>
+      <Bell className="size-4 shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1 truncate"><b className="font-semibold">{areaLabel(area)}</b> 새 알림 <b className="font-semibold tabular-nums" data-testid="page-alarms-count">{n > 99 ? '99+' : n}</b>건</span>
+      <Link prefetch={false} href={`/notifications?area=${encodeURIComponent(area)}`} className="inline-flex min-h-[32px] shrink-0 items-center rounded-input bg-white px-2.5 text-xs font-semibold text-red-800 ring-1 ring-red-200" data-testid="page-alarms-open">보기</Link>
+      <button type="button" disabled={busy} className="inline-flex min-h-[32px] shrink-0 items-center px-1 text-xs text-red-800 underline disabled:opacity-50" data-testid="page-alarms-read"
+        onClick={async () => { setBusy(true); try { const r = await api<{ unread: number }>('/api/notifications/read', { body: { area } }); onRead(r.unread); window.dispatchEvent(new CustomEvent('wos-unread', { detail: { value: r.unread } })); } catch (e: any) { toast.error(e?.message || '읽음 처리를 못 했습니다'); } setBusy(false); }}>모두 읽음</button>
+    </div>
+  );
+}
+
+function TabLink({ n, on, badge, quiet }: { n: NavItem; on: boolean; badge?: number; quiet?: boolean }) {
   return (
     <Link href={n.href} className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs active:bg-slate-100', on ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
       <NavPending className="inset-x-4 top-0" />
       <n.icon className="size-6" strokeWidth={on ? 2.4 : 1.8} aria-hidden />{n.label}
-      {!!badge && <span className="absolute left-1/2 top-1 ml-2 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{badge > 99 ? '99+' : badge}</span>}
+      {!!badge && <span aria-hidden={quiet || undefined} data-nav-badge={quiet ? 'area' : undefined} className="absolute left-1/2 top-1 ml-2 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{badge > 99 ? '99+' : badge}</span>}
     </Link>
   );
 }
