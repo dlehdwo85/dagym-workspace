@@ -15,7 +15,7 @@ export async function metaCapi({ owner, ctx, sql, BASE, SHOTS }) {
     values ('default', '880001', 'e2e-capi-1', 'webhook', 'created', ${l.id}, now() - interval '30 minutes', now() - interval '31 minutes') returning id`;
   await sql`insert into sales_status_log (tenant, lead_id, from_status, to_status, changed_by) values ('default', ${l.id}, '신규리드', '미팅예정', ${ctx.ownerId})`;
 
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   const box = owner.getByTestId('capi'); await box.waitFor();
   assert.equal(await box.getAttribute('data-on'), '0'); assert.equal(await box.getByTestId('capi-state').innerText(), '꺼짐', '기본 꺼짐');
   assert.match(await box.innerText(), /메타 리드 번호·단계 이름·바뀐 시각[\s\S]*이름·전화·이메일은 보내지 않습니다/);
@@ -70,7 +70,7 @@ export async function metaCapi({ owner, ctx, sql, BASE, SHOTS }) {
   await box.screenshot({ path: `${SHOTS}/223-capi.png` });
   // 휴대폰 폭: 표는 상자 안에서만 옆으로
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   await owner.getByTestId('capi-row').first().waitFor();
   const over = await owner.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(over <= 1, `휴대폰 가로 넘침 ${over}px`);

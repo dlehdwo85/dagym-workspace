@@ -26,7 +26,7 @@ export async function metaAuto({ owner, ctx, sql, BASE, SHOTS }) {
         imageText: { checked: true, ratio: 8, note: '이미지 속 글자 약 8%' },
         checks: { at: new Date().toISOString(), warnings: ['하루 예산 × 20일 = 200,000원 — 총 상한 150,000원에 닿으면 그 뒤로는 멈춥니다'] } })}, ${ctx.ownerId}) returning id`;
   // 리드 양식 목록은 페이지 토큰이 필요(시험 연결엔 없음) → 화면은 번호 직접 입력으로 바뀌어야
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   const box = owner.getByTestId('meta-auto');
   await box.waitFor();
   const row = box.getByTestId('meta-plan').filter({ hasText: 'E2E 가을 PT 리드' });

@@ -24,7 +24,7 @@ describe('⑥ 마케팅 홈', () => {
     await sql`insert into ai_doc_jobs (tenant, user_id, status, mode, kind, title, instructions) values (${tenant}, ${ctx.ownerId}, 'queued', 'create', 'docx', '10월 보고서', '표 하나')`;
     const h = await ctx.owner.ok('GET', '/api/marketing/home');
     assert.equal(h.canEdit, true);
-    assert.deepEqual(h.cards.cards, ['chat', 'kpi', 'approve', 'queue', 'week', 'perf', 'recent', 'channels'], '기본 카드 순서');
+    assert.deepEqual(h.cards.cards, ['chat', 'kpi', 'brief', 'approve', 'queue', 'week', 'perf', 'recent', 'channels'], '기본 카드 순서(399차: 사업별 광고 요약)');
     assert.deepEqual([h.kpi.approvals, h.kpi.approvalsDetail.contents, h.kpi.week.planned, h.kpi.ads, h.kpi.calls7], [1, 1, 1, null, 1], '광고 연결 없으면 7일 문의만');
     assert.equal(h.approve.length, 1); assert.equal(h.approve[0].title, '내일 인스타 피드'); assert.equal(h.approve[0].media, null, '시안 없으면 채널 색 카드');
     assert.ok(h.approve[0].deadline, '승인 마감');

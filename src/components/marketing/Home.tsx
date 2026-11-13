@@ -9,6 +9,7 @@ import { api, useApi } from '@/components/client';
 import { useInApp } from '@/components/inApp';
 import { Button, Modal, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { NaverForm } from './Ads';
+import { BrandBriefs } from './BrandBriefs';
 import { ApproveRow, CH_DOT, CH_STATE, ChannelSetup, ConnectButton, type HomeCh } from './Marketing';
 import { channelLabel, whenLabel, type CardContent } from './ApprovalCard';
 
@@ -158,6 +159,7 @@ export function MarketingHome() {
       {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적(영업 계약 + 워크인 결제) */}
       <RevenueGoal canEdit={data.canEdit} />
     </div>,
+    brief: <BrandBriefs key="brief" compact />, // 399차 #1025 사업별 광고 요약(이번 달 광고비·클릭·문의·할 일 한 줄)
     approve: <section key="approve" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-now">
       <h2 className="flex items-center justify-between text-base font-bold" data-testid="mkt-home-head"><span>{data.kpi.approvalsDetail.contents ? <>① 지금 승인할 것 <span className="text-orange-700">{data.kpi.approvalsDetail.contents}건</span></> : '① 지금 승인할 것 없음 ✓'}</span>
         {data.kpi.approvalsDetail.contents > 0 && <Link href="/s/marketing/approvals" className="text-xs font-medium" style={{ color: C }}>전체 →</Link>}</h2>

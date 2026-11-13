@@ -19,7 +19,7 @@ export async function adImport358({ owner, ctx, sql, BASE, SHOTS }) {
   const until = async (n) => { for (let k = 0; k < 50 && sent.length < n; k++) await owner.waitForTimeout(100); assert.equal(sent.length, n, JSON.stringify(sent)); };
   await owner.route(`**/api/marketing/ad-ops/plans/${p.id}/action`, async (r) => { sent.push(JSON.parse(r.request().postData() || '{}')); await r.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }); });
   try {
-    await owner.goto(`${BASE}/s/marketing/ad-ops`);
+    await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
     const card = owner.getByTestId('ad-plan').filter({ hasText: 'E2E 워크인 검색광고' });
     await card.getByTestId('ad-plan-imported').waitFor();
     assert.match(await card.innerText(), /하루 5,000원 · 광고 그룹 3개/);

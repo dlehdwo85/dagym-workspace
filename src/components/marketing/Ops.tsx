@@ -187,7 +187,7 @@ export function BudgetCard({ b, month, canEdit, busy, onDraft, onChange, ownerTo
             <td className="py-1.5"><span className="mr-1 rounded-full bg-slate-100 px-1.5 text-[10px] text-ink-3">{x.priority ?? '-'}순위</span>{x.name}</td>
             <td className="py-1.5 text-right tabular-nums">{x.share}%</td>
             <td className="py-1.5 text-right tabular-nums">{edit ? <input className={cx(inputCls, 'h-7 w-28 py-0 text-right text-xs')} value={bplan[x.brandId] ?? ''} onChange={(e) => setBplan({ ...bplan, [x.brandId]: e.target.value })} inputMode="numeric" aria-label={`${x.name} 월 예산`} data-testid={`budget-brand-in-${x.name}`} /> : won(x.monthly)}</td>
-            <td className="py-1.5">{x.plans ? <span className="text-emerald-800">네이버 {x.plans}건</span> : <Link href="/s/marketing/ad-ops" className="font-semibold text-amber-800 underline" data-testid={`budget-brand-needs-${x.name}`}>세팅안 필요 →</Link>}</td>
+            <td className="py-1.5">{x.plans ? <span className="text-emerald-800">네이버 {x.plans}건</span> : <Link href="/s/marketing/ad-ops?tab=naver" className="font-semibold text-amber-800 underline" data-testid={`budget-brand-needs-${x.name}`}>세팅안 필요 →</Link>}</td>
             <td className="py-1.5 text-ink-2">{x.note}</td></tr>)}</tbody></table>}
         {b.reject_note && <p className="mt-2 text-[11px] text-ink-3" data-testid="budget-reject-note">반려 사유: {b.reject_note}</p>}
         {b.revision_note && <p className="mt-1 rounded-input border border-amber-200 bg-amber-50/50 px-2.5 py-1.5 text-[11px] text-ink-2" data-testid="budget-revision"><b className="text-amber-800">반려 사유 → 반영한 점</b> {b.revision_note}</p>}

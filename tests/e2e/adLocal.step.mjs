@@ -24,7 +24,7 @@ export async function adLocal({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.route('**/api/marketing/ad-ops/channels*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ channels: [] }) }));
   await owner.route('**/api/marketing/ad-ops/local/keywords', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ROWS) }));
 
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   const card = owner.getByTestId('ad-plan').filter({ hasText: 'E2E 두정 켠 광고' });
   assert.match(await card.getByTestId('ad-plan-local').innerText(), /동네 타깃: 천안 두정동 다짐 반경 3km · 동네 1곳\(두정동\) · 광고 지역 충남/);
   // 변경 기록: 광고 지역 변경(충남 → 충남·충북) · 키워드 추가 — 둘 다 되돌리기 단추
@@ -115,7 +115,7 @@ export async function adLocal({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.unroute('**/api/marketing/ad-ops/channels*');
   // 휴대폰 폭: 동네 타깃 줄·단추가 있는 목록도 넘침 없음
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/s/marketing/ad-ops`);
+  await owner.goto(`${BASE}/s/marketing/ad-ops?tab=all`);
   await owner.getByTestId('ad-plan-local').first().waitFor();
   const over2 = await owner.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(over2 <= 1, `휴대폰 목록 가로 넘침 ${over2}px`);

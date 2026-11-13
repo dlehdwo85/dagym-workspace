@@ -12,9 +12,11 @@ import { zUuid } from './api';
  * · 4 이번 주 게시 캘린더 줄(7일 × 채널 점) · 5 성과 7일 미니 차트 + 광고 카드 · 6 최근 게시물 6 + [다음 할 일 제안] → [업무로 만들기] · 7 채널 상태 한 줄 · ⚙ 카드 켜기/끄기·순서(사람별, 관리자는 회사 기본도)
  * 돈·외부 발송은 절대 자동 아님(V19 — 사람이 [보내기]). 밤사이 비서 범위는 회사 AI 설정(ai_settings.night_scope, 기본 모두 끔).
  */
-export const HOME_CARDS = ['chat', 'kpi', 'approve', 'queue', 'week', 'perf', 'recent', 'channels'] as const;
+export const HOME_CARDS = ['chat', 'kpi', 'brief', 'approve', 'queue', 'week', 'perf', 'recent', 'channels'] as const;
+/** 399차 #1025: 저장해 둔 카드 구성에 붙이는 표식 — '사업별 광고 요약'(brief)이 생긴 뒤에 저장한 구성(없으면 brief 를 숫자 4칸 아래에 한 번 끼워 넣음) */
+const CARDS_V2 = '_v2';
 export type HomeCard = (typeof HOME_CARDS)[number];
-export const HOME_CARD_LABEL: Record<HomeCard, string> = { chat: 'AI 비서 입력창', kpi: '숫자 4칸', approve: '지금 승인할 것', queue: 'AI 작업 큐 · 밤사이 결과', week: '이번 주 게시 캘린더', perf: '성과 7일 · 광고', recent: '최근 게시물 · 다음 할 일 제안', channels: '채널 상태' };
+export const HOME_CARD_LABEL: Record<HomeCard, string> = { chat: 'AI 비서 입력창', kpi: '숫자 4칸', brief: '사업별 광고 요약', approve: '지금 승인할 것', queue: 'AI 작업 큐 · 밤사이 결과', week: '이번 주 게시 캘린더', perf: '성과 7일 · 광고', recent: '최근 게시물 · 다음 할 일 제안', channels: '채널 상태' };
 /** 밤사이 비서 범위 4개(기본 모두 끔 → 대표가 켬). draft 만 지금 실행기가 처리, 나머지 셋은 저장만(다음 단계) */
 export const NIGHT_SCOPE = ['draft', 'lead_next', 'bid_summary', 'report', 'goal'] as const;
 export const NIGHT_LABEL: Record<(typeof NIGHT_SCOPE)[number], string> = { draft: '원고 초안(자동 제작 시안을 밤에 미리)', lead_next: '리드 다음 연락 제안', bid_summary: '입찰 요약', report: '보고서 초안', goal: '목표 설정·주간 계획·리뷰(밤에도)' };
@@ -31,7 +33,13 @@ async function cardsOf(u: SessionUser) {
   const sql = db(); const t = tenantOf(u);
   const [me] = await sql<{ c: HomeCard[] | null }[]>`select mkt_home_cards as c from user_settings where user_id = ${u.id}`;
   const [co] = await sql<{ value: HomeCard[] }[]>`select value from app_settings where key = ${`mkt_home_cards:${t}`}`;
-  const pick = (v: unknown): HomeCard[] | null => (Array.isArray(v) && v.length ? (v.filter((x) => (HOME_CARDS as readonly string[]).includes(String(x))) as HomeCard[]) : null);
+  const pick = (v: unknown): HomeCard[] | null => {
+    if (!Array.isArray(v) || !v.length) return null;
+    const list = v.filter((x) => (HOME_CARDS as readonly string[]).includes(String(x))) as HomeCard[];
+    // brief 가 생기기 전에 저장한 구성: 숫자 4칸 바로 아래(없으면 맨 위)에 끼워 넣음 — 그 뒤에 다시 저장하면(표식) 끈 것도 그대로 지킴
+    if (!v.includes(CARDS_V2) && !list.includes('brief')) { const i = list.indexOf('kpi'); list.splice(i >= 0 ? i + 1 : (list[0] === 'chat' ? 1 : 0), 0, 'brief'); }
+    return list.length ? list : null;
+  };
   return { cards: pick(me?.c) ?? pick(co?.value) ?? [...HOME_CARDS], mine: !!pick(me?.c), company: pick(co?.value) };
 }
 
@@ -70,7 +78,7 @@ export async function homeView(u: SessionUser) {
       canRun: admin && !c.produced_at && !c.needs_topic, canNight: admin && !c.produced_at && !c.needs_topic && !c.night_run, note: c.needs_topic ? '주제 필요' : undefined })),
     ...docs.map((d): Q => ({ kind: 'doc', id: d.id, title: `문서: ${d.title}`, href: '/assistant?space=marketing', night: !!d.run_after, state: d.status === 'running' ? 'running' : d.status === 'queued' ? 'waiting' : 'done', at: d.finished_at ?? d.created_at,
       canRun: d.status === 'queued', canNight: d.status === 'queued' && !d.run_after, note: d.status === 'failed' ? '실패' : undefined })),
-    ...plans.map((p): Q => ({ kind: 'adplan', id: p.id, title: `광고 세팅안: ${p.name}`, href: '/s/marketing/ad-ops', night: false, state: p.status === 'draft' ? 'waiting' : 'done', at: p.created_at, canRun: false, canNight: false, note: p.status === 'draft' ? '대표 승인 필요' : undefined })),
+    ...plans.map((p): Q => ({ kind: 'adplan', id: p.id, title: `광고 세팅안: ${p.name}`, href: '/s/marketing/ad-ops?tab=naver', night: false, state: p.status === 'draft' ? 'waiting' : 'done', at: p.created_at, canRun: false, canNight: false, note: p.status === 'draft' ? '대표 승인 필요' : undefined })),
     ...props.map((p): Q => ({ kind: 'proposal', id: p.id, title: p.summary, href: '/assistant?space=marketing', night: false, state: 'waiting', at: p.created_at, canRun: false, canNight: false, note: '사람이 [보내기]' })),
   ];
   // 대표 10/20 18:00 ③: 목표 설정·주간 계획·리뷰도 큐 종류 — 승인 대기 목표는 '대표 승인 필요', 승인된 이달 목표는 주간 리뷰 상태
@@ -175,12 +183,13 @@ export async function homeAct(u: SessionUser, i: z.infer<typeof homeAction>) {
     return { ok: true, ids, count: picked.length };
   }
   // cards: 사람별 덮어쓰기(빈 목록 = 회사 기본으로 되돌림), 관리자는 회사 기본으로도
+  const stored = i.cards.length ? [...i.cards, CARDS_V2] : []; // 표식: brief 가 생긴 뒤에 저장한 구성(끈 것도 그대로)
   if (i.company) {
     if (!isAdmin(u)) throw forbidden('회사 기본은 관리자만');
-    await sql`insert into app_settings (key, value) values (${`mkt_home_cards:${t}`}, ${sql.json(i.cards as never)}) on conflict (key) do update set value = excluded.value`;
+    await sql`insert into app_settings (key, value) values (${`mkt_home_cards:${t}`}, ${sql.json(stored as never)}) on conflict (key) do update set value = excluded.value`;
     await sql`insert into user_settings (user_id, mkt_home_cards) values (${u.id}, null) on conflict (user_id) do update set mkt_home_cards = null`;
   } else {
-    await sql`insert into user_settings (user_id, mkt_home_cards) values (${u.id}, ${i.cards.length ? sql.json(i.cards as never) : null}) on conflict (user_id) do update set mkt_home_cards = excluded.mkt_home_cards`;
+    await sql`insert into user_settings (user_id, mkt_home_cards) values (${u.id}, ${stored.length ? sql.json(stored as never) : null}) on conflict (user_id) do update set mkt_home_cards = excluded.mkt_home_cards`;
   }
   return { ok: true, ...(await cardsOf(u)) };
 }
