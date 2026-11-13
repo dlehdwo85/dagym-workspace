@@ -1,9 +1,14 @@
 // #611(대표 10/25 17:30 ⑦, 로컬 SALES_HUB_REQUESTS): 영업기회 허브 탭 = 회사가 켠 수집 DB 종류 — 데이터 설정에서 그 종류의 수집기(공공데이터는 원천)를 모두 끈 회사는 그 탭이 안 보임.
-// 기본값은 켜짐(수집기 설정 행이 없으면 켜진 것) — 신규 현장·협력사 등록·지역별은 수집기가 아닌 자료(영업관리 이관·리드)라 늘 보임.
+// 기본값은 켜짐(수집기 설정 행이 없으면 켜진 것) — 지역별은 수집기가 아닌 자료(리드)라 늘 보임. 신규 현장·협력사 등록(영업관리 이관)은 기본 회사만(413차).
 import { db } from '../db';
 
 export const HUB_TABS = ['bids', 'buildings', 'facilities', 'vendors', 'contracts', 'prospects', 'regions'] as const;
 export type HubTab = (typeof HUB_TABS)[number];
+/** 413차: 옛 영업관리에서 옮겨 온 자료(신규 현장·협력사 등록)는 기본 회사가 직접 모은 것 — 수집기가 채우는 공용 자료가 아니다.
+ *  다른 회사에는 탭·목록·건수·진행 기록·넘기기 어디에도 내보내지 않는다(기본 회사는 예전 그대로) */
+export const BASE_ONLY_TABS: readonly HubTab[] = ['buildings', 'vendors'];
+export const BASE_ONLY_TBLS: ReadonlySet<string> = new Set(['building_sales_pipeline', 'vendor_registrations']);
+export const ownsMoved = (tenant: string) => tenant === 'default';
 /** 준공·입주 시설 표(operating_facility_prospects)를 채우는 수집기 */
 const FACILITY_COLLECTORS = ['kicox_industrial_complexes', 'public_sports_facilities', 'tourist_hotels_localdata', 'kapt_weekly_complexes', 'reb_recent_complexes', 'kapt_new_complexes', 'operating_from_kapt', 'kapt_sa_sun'];
 
@@ -20,5 +25,5 @@ export async function hubTabsOn(tenant: string, bidsOn: boolean): Promise<HubTab
   const bids = bidsOn && [...BID_COLLECTORS].some(on);
   const facilities = FACILITY_COLLECTORS.some(on);
   const prospects = (ds[0]?.n ?? 0) === 0 || (ds[0]?.on ?? 0) > 0; // 원천을 하나도 안 고른 회사는 안내가 있는 빈 탭을 봄
-  return HUB_TABS.filter((t) => (t === 'bids' || t === 'contracts' ? bids : t === 'facilities' ? facilities : t === 'prospects' ? prospects : true));
+  return HUB_TABS.filter((t) => (BASE_ONLY_TABS.includes(t) ? ownsMoved(tenant) : t === 'bids' || t === 'contracts' ? bids : t === 'facilities' ? facilities : t === 'prospects' ? prospects : true));
 }

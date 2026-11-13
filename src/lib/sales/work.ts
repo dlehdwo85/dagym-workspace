@@ -8,6 +8,7 @@ import { audit } from '../log';
 import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
+import { BASE_ONLY_TBLS, ownsMoved } from './hubTabs';
 import { sameProject } from './noticeGroups';
 
 export const WORK_KINDS = ['bid', 'building', 'facility', 'vendor'] as const;
@@ -45,7 +46,8 @@ async function assertWritesOpen(tenant: string) {
   if (!(await writesOpen(tenant))) throw new HttpError(409, 'sales_read_only', '영업관리 전환 전이라 워크인에서는 고칠 수 없습니다 — 전환일까지는 영업관리에서 수정해 주세요');
 }
 /** 공용 수집 행(원본 복사) — 없으면 404 */
-async function item(sql: Sql, kind: WorkKind, id: string) {
+async function item(sql: Sql, kind: WorkKind, id: string, tenant: string) {
+  if (BASE_ONLY_TBLS.has(ITEM_TBL[kind]) && !ownsMoved(tenant)) throw notFound('대상을 찾을 수 없습니다'); // 413차: 옮겨 온 신규 현장·협력사 등록은 기본 회사만
   const [r] = await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = ${ITEM_TBL[kind]} and src_id = ${id} and not gone`;
   if (!r) throw notFound('대상을 찾을 수 없습니다');
   return r.row;
@@ -68,7 +70,7 @@ async function projectSkipped(sql: Sql, tenant: string, id: string, row: any) {
 export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>, opt: { linked?: boolean } = {}) {
   await assertSpace(u, 'sales');
   const t = tenantOf(u); const sql = db();
-  const row0 = await item(sql, i.kind, i.id);
+  const row0 = await item(sql, i.kind, i.id, t);
   await assertWritesOpen(t);
   if (i.status !== undefined && !WORK_STATUS[i.kind].includes(i.status)) throw badRequest(`상태는 ${WORK_STATUS[i.kind].join('·')} 중 하나입니다`);
   const cur = await workRecord(sql, t, i.kind, i.id);
@@ -117,7 +119,7 @@ export async function convertToLead(u: SessionUser, i: z.infer<typeof convertInp
   // 결정 15-35(대표 10/26 17:00): 입찰 공고는 리드로 넘기지 않음 — [입찰 업무로 넘기기](업무)로
   if (i.kind === 'bid') throw badRequest('입찰 공고는 리드로 넘기지 않습니다 — [입찰 업무로 넘기기]로 업무를 만드세요');
   const t = tenantOf(u); const sql = db();
-  const r = await item(sql, i.kind, i.id);
+  const r = await item(sql, i.kind, i.id, t);
   await assertWritesOpen(t);
   const cur = await workRecord(sql, t, i.kind, i.id);
   if (cur?.lead_id) return { leadId: cur.lead_id, already: true };

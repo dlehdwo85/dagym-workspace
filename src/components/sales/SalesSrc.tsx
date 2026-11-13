@@ -305,10 +305,13 @@ export function TodayRow({ date, cards, color = C }: { date: string; cards: [str
 export function SalesHome() {
   const T = useSalesTerms(); // #408 업종 중립 문구 — 메뉴·타일·묶음 이름은 회사 업종 템플릿
   const { data, error, reload } = useApi<any>('/api/sales/src?view=summary');
+  const hubTabs: string[] | null = useSession().features.salesHubTabs ?? null;
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={4} />;
   const k = data.kpi;
   const bids = data.bidsOn !== false; // 입찰·공고 끈 회사는 입찰 카드 숨김
+  // 413차: 신규 현장·협력사 등록 탭이 없는 회사(옮겨 온 자료는 기본 회사만)는 그 타일·숫자도 안 보임 — 기본 회사는 늘 보임
+  const movedOn = (k: 'buildings' | 'vendors') => !hubTabs || hubTabs.includes(k);
   const cards: [string, number, string][] = [['리드', k.leads, '/s/sales/leads'], ['7일 안 연락', k.dueSoon, '/s/sales/leads'], ['연락 지남', k.overdue, '/s/sales/leads'],
     ...(bids ? [['진행 중 입찰', k.bidsOpen ?? k.bidsWorking, '/s/sales/hub?tab=bids&bt=open'], ['작업 중 입찰', k.bidsWorking, '/s/sales/hub?tab=bids&bt=working'], ['관련 공고', k.relatedNotices, '/s/sales/hub?tab=bids&bt=all'], ['최근 7일 공고(공고일)', k.newNotices7d, '/s/sales/hub?tab=bids&bt=all']] as [string, number, string][] : []),
     ...(data.support ? [['마감 임박 지원사업', data.support.closing, '/s/sales/support?tab=closing']] as [string, number, string][] : [])]; // #450 7일 안 마감(관심·준비 + 맞춤)
@@ -334,17 +337,17 @@ export function SalesHome() {
       {data.today && <TodayRow date={data.today.date} cards={[
         ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/hub?tab=bids&sub=today'] as [string, number, string]] : []), // #537 영업기회 › 입찰 › 오늘 새 공고
         ['오늘 새 영업 DB', data.today.newDb.buildings + data.today.newDb.facilities + data.today.newDb.vendors, `/s/sales/hub?day=today&tab=${data.today.newDb.facilities >= data.today.newDb.buildings && data.today.newDb.facilities >= data.today.newDb.vendors ? 'facilities' : data.today.newDb.vendors > data.today.newDb.buildings ? 'vendors' : 'buildings'}`,
-          `${T.kind.building} ${data.today.newDb.buildings} · ${T.kind.facility} ${data.today.newDb.facilities} · ${T.kind.vendor} ${data.today.newDb.vendors}`],
+          [movedOn('buildings') && `${T.kind.building} ${data.today.newDb.buildings}`, `${T.kind.facility} ${data.today.newDb.facilities}`, movedOn('vendors') && `${T.kind.vendor} ${data.today.newDb.vendors}`].filter(Boolean).join(' · ')],
         ['오늘 연락할 리드', data.today.contact, '/s/sales/leads?day=today'],
         ...(bids ? [['오늘 마감 입찰', data.today.closing, '/s/sales/hub?tab=bids&bt=closing'] as [string, number, string]] : [])]} />}
       {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적(계약 등록 금액) — 마케팅 홈과 같은 막대 */}
       <RevenueGoal color={C} canEdit={!!data.canEdit} />
       {/* S2-5 오늘 할 일 7묶음(영업관리 2-2) — 업무 공간과 같은 업무 표(자동 업무 포함), 누르면 그 화면으로 */}
-      {data.todo && <TodoGroups todo={data.todo} bids={bids} />}
+      {data.todo && <TodoGroups todo={data.todo} bids={bids} vendors={movedOn('vendors')} />}
       {/* S2-6 영업기회 요약 타일 6 + 목록별 진행 현황표 */}
       {data.tiles && <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="sales-tiles">
         <h2 className="mb-2 text-sm font-semibold">영업기회 요약</h2>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 text-center">{([['지금 영업할 곳', data.tiles.nowSales, '/s/sales/hub?tab=bids&bt=working'], ...(bids ? [['진행 중 입찰', data.tiles.bidsOpen, '/s/sales/hub?tab=bids&bt=open'], ['계약만료·재입찰', data.tiles.contracts, '/s/sales/contracts']] : []), [T.kind.building, data.tiles.buildings, '/s/sales/hub?tab=buildings'], [T.facilitiesTab, data.tiles.facilities, '/s/sales/hub?tab=facilities'], [T.vendorsTab, data.tiles.vendors, '/s/sales/hub?tab=vendors']] as [string, number, string][]).map(([l, n, h]) => (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 text-center">{([['지금 영업할 곳', data.tiles.nowSales, '/s/sales/hub?tab=bids&bt=working'], ...(bids ? [['진행 중 입찰', data.tiles.bidsOpen, '/s/sales/hub?tab=bids&bt=open'], ['계약만료·재입찰', data.tiles.contracts, '/s/sales/contracts']] : []), ...(movedOn('buildings') ? [[T.kind.building, data.tiles.buildings, '/s/sales/hub?tab=buildings']] : []), [T.facilitiesTab, data.tiles.facilities, '/s/sales/hub?tab=facilities'], ...(movedOn('vendors') ? [[T.vendorsTab, data.tiles.vendors, '/s/sales/hub?tab=vendors']] : [])] as [string, number, string][]).map(([l, n, h]) => (
           <Link key={l} href={h} className="rounded-input border border-line p-2 hover:border-blue-300" data-testid="sales-tile"><div className="text-[11px] text-ink-2">{l}</div><div className="text-lg font-bold tabular-nums" style={{ color: C }}>{n}</div></Link>))}</div>
         {data.progress && <div className="mt-2 hidden overflow-x-auto md:block" data-testid="sales-progress"><table className="w-full text-xs"><thead><tr className="text-left text-ink-3"><th className="py-1 pr-2">목록</th>{PROG_COLS.map((c) => <th key={c} className="py-1 pr-2 text-right">{c}</th>)}</tr></thead>
           <tbody>{(data.progress as [string, Record<string, number>][]).map(([name, m]) => <tr key={name} className="border-t border-line"><td className="py-1 pr-2 font-medium">{name}</td>{PROG_COLS.map((c) => <td key={c} className="py-1 pr-2 text-right tabular-nums">{Object.entries(m).filter(([k]) => PROG_MATCH[c].test(k)).reduce((a, [, v]) => a + v, 0) || ''}</td>)}</tr>)}</tbody></table></div>}
@@ -371,9 +374,9 @@ const PROG_MATCH: Record<string, RegExp> = { '미검토·미연락': /미검토|
 const todoGroups = (T: ReturnType<typeof useSalesTerms>): [string, string, string][] => [['followUp', T.todo.followUp, '후속 기한이 오늘이거나 지난 건'], ['facilities', T.todo.facilities, `다음 연락일이 오늘이거나 지난 ${T.kind.facility}`], ['vendors', T.todo.vendors, '등록 신청 기한'],
   ['pastTasks', '지난 영업 업무', '마감이 지난 영업 업무(자동 업무 포함)'], ['nowSales', '지금 영업할 곳 상위 5', '작업 중 입찰, 마감 임박순'], ['leads', '리드 연락', '연락 지남·오늘 연락'], ['closingSoon', '입찰 오늘·내일 마감', '즉시 검토·검토중·연락중']];
 /** S2-5 오늘 할 일 7묶음 — 묶음마다 건수·목록(5개 접힘), [순서대로 시작]은 첫 항목으로 */
-function TodoGroups({ todo, bids }: { todo: Record<string, any[]>; bids: boolean }) {
+function TodoGroups({ todo, bids, vendors = true }: { todo: Record<string, any[]>; bids: boolean; vendors?: boolean }) {
   const [openK, setOpenK] = useState<string | null>(null); const T = useSalesTerms();
-  const groups = todoGroups(T).filter(([k]) => bids || !['nowSales', 'closingSoon'].includes(k));
+  const groups = todoGroups(T).filter(([k]) => (bids || !['nowSales', 'closingSoon'].includes(k)) && (vendors || k !== 'vendors')); // 413차: 협력사 등록 탭이 없는 회사는 그 묶음도 없음
   const total = groups.reduce((n, [k]) => n + (todo[k]?.length ?? 0), 0);
   const first = groups.map(([k]) => todo[k]?.[0]).find(Boolean);
   const hrefOf = (x: any) => (x.sales_ref || x.title ? `/tasks/${x.id}` : x.href);
@@ -1397,18 +1400,19 @@ function HubDetail({ tab, r, admin, canWrite, onChange, onClose }: { tab: string
 
 export function Regions() {
   const { data, error, reload } = useApi<any>('/api/sales/src?view=regions');
+  const hubTabs: string[] | null = useSession().features.salesHubTabs ?? null; const bldOn = !hubTabs || hubTabs.includes('buildings'); // 413차: 건물(신규 현장) 탭이 없는 회사는 그 칸도 없음
   if (error) return <ErrorBox error={error} retry={reload} />;
   return (
     <div className="space-y-3" data-testid="sales-regions">
       <Head title="지역별" meta={data} />
       {/* 339차(대표 11/02 #924 '영업기회 허브 지역별로 구분'): 지역(시·도) × 리드·진행 중 공고·건물·시설 건수 표 — 숫자를 누르면 그 탭이 그 지역으로 열림 */}
       {!!data?.matrix?.length && <div className="overflow-x-auto rounded-card border border-line bg-white shadow-card" data-testid="sales-regions-matrix">
-        <table className="w-full text-sm"><thead><tr className="border-b border-line text-left text-xs text-ink-3"><th className="px-3 py-2">지역</th><th className="px-2 py-2 text-right">리드</th><th className="px-2 py-2 text-right">진행 중 공고</th><th className="px-2 py-2 text-right">건물</th><th className="px-2 py-2 text-right">시설</th></tr></thead>
+        <table className="w-full text-sm"><thead><tr className="border-b border-line text-left text-xs text-ink-3"><th className="px-3 py-2">지역</th><th className="px-2 py-2 text-right">리드</th><th className="px-2 py-2 text-right">진행 중 공고</th>{bldOn && <th className="px-2 py-2 text-right">건물</th>}<th className="px-2 py-2 text-right">시설</th></tr></thead>
           <tbody>{data.matrix.map((r: any) => { const sido = r.region === '지역 미정' ? '' : r.region; const cell = (n: number, href: string | null, tid: string) => <td className="px-2 py-1.5 text-right tabular-nums" data-testid={tid}>{n && href ? <Link href={href} className="text-brand-700 underline">{n}</Link> : n ? String(n) : <span className="text-ink-3">0</span>}</td>; return (
             <tr key={r.region} className="border-b border-line/60 last:border-0" data-testid="sales-region-row" data-region={r.region}><td className="px-3 py-1.5 font-medium">{r.region}</td>
               {cell(r.leads, sido ? `/s/sales/leads?region=${encodeURIComponent(sido)}` : '/s/sales/leads', 'rm-leads')}
               {cell(r.bids, `/s/sales/hub?tab=bids&bt=open&br=${encodeURIComponent(r.region)}`, 'rm-bids')}
-              {cell(r.buildings, sido ? `/s/sales/hub?tab=buildings&region=${encodeURIComponent(sido)}` : null, 'rm-buildings')}
+              {bldOn && cell(r.buildings, sido ? `/s/sales/hub?tab=buildings&region=${encodeURIComponent(sido)}` : null, 'rm-buildings')}
               {cell(r.facilities, sido ? `/s/sales/hub?tab=facilities&region=${encodeURIComponent(sido)}` : null, 'rm-facilities')}</tr>); })}</tbody></table>
         <p className="px-3 py-1.5 text-[11px] text-ink-3">공고는 진행 중(마감 전) 기준 · 원천 지역이 비면 발주처·수요기관·주소·제목에서 시·도를 찾음 · 숫자를 누르면 그 탭이 그 지역으로 열립니다</p></div>}
       {!data ? <Skeleton rows={4} /> : <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{data.regions.map((r: any) => (

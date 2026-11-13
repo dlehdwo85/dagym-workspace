@@ -6,6 +6,7 @@ import { notify } from '../notifications';
 import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
 import { writesOpen } from './cutover';
+import { BASE_ONLY_TBLS, ownsMoved } from './hubTabs';
 import { WORK_KINDS, type WorkKind, workRecord } from './work';
 
 /**
@@ -37,6 +38,7 @@ export async function handoff(u: SessionUser, i: z.infer<typeof handoffInput>) {
   // 결정 15-35(대표 10/26 17:00): 입찰 공고는 리드를 만들지 않고 입찰 업무로(bidTasks.handoffBid) — 아래는 현장 영업(신규단지·시설·협력사) → 리드
   if (i.kind === 'bid') return (await import('./bidTasks')).handoffBid(u, { id: i.id, assigneeIds: i.assigneeIds, note: i.note });
   await assertSpace(u, 'sales'); const t = tenantOf(u); const sql = db();
+  if (BASE_ONLY_TBLS.has(ITEM_TBL[i.kind]) && !ownsMoved(t)) throw notFound('대상을 찾을 수 없습니다'); // 413차: 옮겨 온 신규 현장·협력사 등록은 기본 회사만
   const [row] = await sql<{ row: any }[]>`select row from sales_src_rows where scope = 'global' and tbl = ${ITEM_TBL[i.kind]} and src_id = ${i.id} and not gone`;
   if (!row) throw notFound('대상을 찾을 수 없습니다');
   const r = row.row;

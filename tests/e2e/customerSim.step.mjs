@@ -121,6 +121,19 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     const runs = await p.locator('[data-testid="sales-collector-runs"] li').count();
     if (runs) note('§2 공용 실행 기록', `최근 실행 ${runs}건이 새 회사에도 보임(공용 수집 기록·오류 원인)`);
     if (await p.locator('[data-testid="sales-collector-sent"], [data-testid="sales-collector-keys"]').count()) note('§2 보낸 주소·칸 이름', '원천 주소·첫 줄 칸 이름 상세가 고객 관리자에게 보임');
+    // ── 5-1) 413차: 새 회사의 영업 홈·영업기회 허브 — 옛 영업관리에서 옮겨 온 신규 현장·협력사 등록(기본 회사 자료)의 탭·타일·할 일 묶음이 없다
+    await p.goto(BASE + '/s/sales'); await p.getByTestId('sales-tiles').waitFor();
+    const tileLinks = await p.locator('[data-testid="sales-tile"]').evaluateAll((els) => els.map((el) => el.getAttribute('href') ?? ''));
+    assert.ok(tileLinks.length >= 2 && !tileLinks.some((h) => /tab=(buildings|vendors)/.test(h)), `영업 홈 타일: ${tileLinks.join(' , ')}`);
+    assert.ok(tileLinks.some((h) => /tab=facilities/.test(h)), '공용 자료(시설) 타일은 그대로');
+    assert.equal(await p.getByTestId('sales-todo-vendors').count(), 0, '협력사 등록 할 일 묶음 없음');
+    assert.equal(await p.getByTestId('sales-todo-facilities').count(), 1, '시설 연락 묶음은 그대로');
+    await p.goto(BASE + '/s/sales/hub'); await p.getByTestId('sales-hub-tabs').waitFor();
+    assert.equal(await p.getByTestId('sales-hub-buildings').count() + await p.getByTestId('sales-hub-vendors').count(), 0, '허브에 신규 현장·협력사 등록 탭 없음');
+    assert.equal(await p.getByTestId('sales-hub-facilities').count(), 1, '허브 시설 탭은 그대로');
+    await p.goto(BASE + '/s/sales/hub?tab=vendors'); await p.getByTestId('sales-hub-tabs').waitFor(); // 주소를 직접 넣어도 그 탭으로 가지 않는다
+    assert.equal(await p.getByTestId('sales-hub-vendors').count(), 0);
+    await shot('413-cust-sales-hub.png');
     // ── 6) 마케팅 첫 화면: 연결 계정 0개 → '채널 연결 3단계'
     await p.goto(BASE + '/s/marketing');
     await p.getByTestId('space-home-marketing').waitFor();

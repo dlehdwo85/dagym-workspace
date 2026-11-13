@@ -8,7 +8,7 @@ import { vendorDateOk } from './collectors/vendorRules';
 import { isAwardResult, onbidSale, partnerNeed, zonedKst } from './collectors/procurement';
 import { groupNotices, isCancel, oneCardPerNotice, plainTitle, renoticeKey, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
-import { hubTabsOn } from './hubTabs';
+import { BASE_ONLY_TBLS, hubTabsOn, ownsMoved } from './hubTabs';
 import { LEAD_STAGES, stageName } from './terms';
 import { sourceAsOf } from './collectors/store';
 import { briefingLine, briefingOf, termsLine, termsRows } from './bidTerms';
@@ -223,6 +223,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
   // S1-2(로컬 10/20): 전환 뒤에는 회사별 진행 기록(입찰·신규단지·시설·협력사)을 정식 표 sales_work_records 에서 — 원본 행 모양으로 돌려줘 아래 읽기 코드는 그대로
   const { workRows } = await import('./work');
   const prog = (tbl: string, limit = 5000) => (formal ? workRows(sql, t, tbl) : rows(t, tbl, limit));
+  // 413차: 공용 자료 읽기 — 옮겨 온 신규 현장·협력사 등록은 기본 회사만(다른 회사는 빈 목록: 이름·건수·지역이 새지 않게)
+  const grows = (tbl: string, limit?: number): ReturnType<typeof rows> => (BASE_ONLY_TBLS.has(tbl) && !ownsMoved(t) ? Promise.resolve([]) : rows('global', tbl, limit));
   const names = await userNames(t);
   const term = (q.q ?? '').trim().toLowerCase();
   const hit = (o: any) => !term || JSON.stringify(o).toLowerCase().includes(term);
@@ -284,7 +286,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const td = today(), tm = plus(1);
     const notDone = (st: unknown) => !/완료|미참여|대상아님|대상 아님|전환|done|closed/i.test(String(st ?? ''));
     const byNoticeId = new Map(NR.map((r) => [String(r.id ?? r.__id), notice(r, cats)]));
-    const buildings = new Map((await rows('global', 'building_sales_pipeline', 20000)).map((r) => [String(r.id ?? r.__id), pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)']));
+    const buildings = new Map((await grows('building_sales_pipeline', 20000)).map((r) => [String(r.id ?? r.__id), pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)']));
     const nextOf = (w: any) => day(pick(w, 'next_date', 'next_action_date'));
     const followUp = W.filter((w) => notDone(pick(w, 'status')) && nextOf(w) && nextOf(w)! <= td).map((w) => {
       const nid = String(pick(w, 'notice_id', 'procurement_notice_id') ?? ''); const bid = String(pick(w, 'source_id', 'building_id') ?? '');
@@ -297,7 +299,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const facilities = FP.map((p) => ({ id: String(p.id ?? p.__id), kind: 'facility', name: facNames.get(String(p.id ?? p.__id)) ?? '(이름 없음)', status: pick(p, 'contact_status', 'status'), next: day(pick(p, 'next_action_date', 'next_date')), memo: pick(p, 'last_note', 'memo'), href: '/s/sales/hub?tab=facilities' })).sort((a, b) => String(a.next).localeCompare(String(b.next)));
     const VPall = await prog('vendor_registrations__progress', 20000);
     const VP = VPall.filter((p) => notDone(pick(p, 'status')) && day(pick(p, 'next_date')) && day(pick(p, 'next_date'))! <= td);
-    const venNames = VP.length ? new Map((await rows('global', 'vendor_registrations', 20000)).map((r) => [String(r.id ?? r.__id), pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)'])) : new Map<string, string>();
+    const venNames = VP.length ? new Map((await grows('vendor_registrations', 20000)).map((r) => [String(r.id ?? r.__id), pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)'])) : new Map<string, string>();
     const vendors = VP.map((p) => ({ id: String(p.id ?? p.__id), kind: 'vendor', name: venNames.get(String(p.id ?? p.__id)) ?? '(이름 없음)', status: pick(p, 'status'), next: day(pick(p, 'next_date')), memo: pick(p, 'memo'), href: '/s/sales/hub?tab=vendors' })).sort((a, b) => String(a.next).localeCompare(String(b.next)));
     // ④ 지난 영업 업무(space=sales, 자동 업무 포함) — 업무 공간과 같은 표(한쪽에서 완료하면 양쪽 반영)
     const pastTasks = await sql<{ id: string; title: string; due_date: string | null; status: string; assignee: string | null; sales_ref: any }[]>`select t.id, t.title, t.due_date::text, t.status, au.name as assignee, t.sales_ref from tasks t join users cu on cu.id = t.created_by left join users au on au.id = t.assignee_id
@@ -313,11 +315,12 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     // S2-6 영업기회 요약 타일 6 + 목록별 진행 현황표(4행 × 상태)
     const endOf = (r: any) => day(pick(r, 'contract_end_date', 'contract_end', 'service_end_date', 'contract_expiry_date'));
     const tiles = { nowSales: W.filter((w) => notDone(pick(w, 'status')) && /검토중|연락중/.test(String(pick(w, 'status') ?? ''))).length, bidsOpen: NR.filter((r) => isOpenBid(notice(r), workOf.get(String(r.id ?? r.__id)), td)).length,
-      contracts: NR.map(endOf).filter((e) => !!e && e >= td && e <= plus(365)).length, buildings: buildings.size, facilities: (await rows('global', 'operating_facility_prospects', 20000)).length, vendors: (await rows('global', 'vendor_registrations', 20000)).length };
+      contracts: NR.map(endOf).filter((e) => !!e && e >= td && e <= plus(365)).length, buildings: buildings.size, facilities: (await rows('global', 'operating_facility_prospects', 20000)).length, vendors: (await grows('vendor_registrations', 20000)).length };
     const tally = (arr: any[], key: (x: any) => unknown) => arr.reduce((m: Record<string, number>, x) => { const k = String(key(x) ?? '미검토'); m[k] = (m[k] ?? 0) + 1; return m; }, {} as Record<string, number>);
     const isBuildingWork = (w: any) => String(pick(w, 'source_type') ?? '') === 'building' || !!pick(w, 'building_id'); // 정식 표는 notice_id 에 ref_id 가 들어가므로 source_type 으로 구분
-    const progress: [string, Record<string, number>][] = [['입찰', tally(W.filter((w: any) => !isBuildingWork(w)), (w) => pick(w, 'status'))], [terms.kind.building, tally(W.filter(isBuildingWork), (w) => pick(w, 'status'))],
+    const progressAll: [string, Record<string, number>][] = [['입찰', tally(W.filter((w: any) => !isBuildingWork(w)), (w) => pick(w, 'status'))], [terms.kind.building, tally(W.filter(isBuildingWork), (w) => pick(w, 'status'))],
       [terms.facilitiesTab, tally(FPall, (p) => pick(p, 'contact_status', 'status'))], [terms.kind.vendor, tally(VPall, (p) => pick(p, 'status'))]];
+    const progress = ownsMoved(t) ? progressAll : [progressAll[0], progressAll[2]]; // 413차: 다른 회사는 신규 현장·협력사 줄 없음
     // #450 홈 카드 '마감 임박 지원사업 n건'(7일 안: 관심·준비 중 + 맞춤)
     const support = await (await import('./support')).supportHomeCard(t, sql).catch(() => null);
     // #522 영업 DB 누락 점검 — 원천이 24시간 넘게 성공 없음·2회 연속 실패면 홈 맨 위 빨간 띠
@@ -327,7 +330,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
       relatedNotices: N.length, newNotices7d: N.filter((n) => n.noticeDate && n.noticeDate >= plus(-7) && n.noticeDate <= today()).length /* 로컬 10/19: 원본 초기 적재(10/13 3,343건) 때문에 first_seen 7일은 부풀려짐 → 공고일 기준 */ }, due: due.slice(0, 10), overdueList: overdue.slice(0, 10), statuses,
       // 대표(10/19): 첫 화면 맨 위 '오늘' — 새 공고·새 영업 DB(신규단지·시설·협력사)·오늘 연락할 리드·오늘 마감 입찰
       today: await (async () => { const td = today();
-        const db3 = await Promise.all((['building_sales_pipeline', 'operating_facility_prospects', 'vendor_registrations'] as const).map(async (tb) => (await rows('global', tb, 20000)).filter((r) => firstSeen(r) === td).length));
+        const db3 = await Promise.all((['building_sales_pipeline', 'operating_facility_prospects', 'vendor_registrations'] as const).map(async (tb) => (await grows(tb, 20000)).filter((r) => firstSeen(r) === td).length));
         const since = await lastMailAt(t); // #476 b: 홈 '오늘 새 공고' 수 = 오늘 탭과 같은 기준
         return { date: td, newNotices: NR.filter((r, i) => !isAwardResult(r) && todayReason(N[i], r.first_seen_at, since, r.refound_at).hit && !bidEnded(N[i], td)).length /* 결과(낙찰·유찰)·끝난 공고는 새 공고가 아님 */, newDb: { buildings: db3[0], facilities: db3[1], vendors: db3[2] }, contact: live.filter((l) => l.next === td).length, closing: N.filter((n) => n.close === td).length }; })() };
   }
@@ -670,7 +673,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     };
     // S1-2: 신규단지 진행(opportunity_work · source_id = 단지 id)
     if (tab === 'buildings') {
-      const [BWRows, BRows] = await Promise.all([prog('opportunity_work'), rows('global', 'building_sales_pipeline')]); // 343차: 서로 상관없는 두 읽기를 한꺼번에
+      const [BWRows, BRows] = await Promise.all([prog('opportunity_work'), grows('building_sales_pipeline')]); // 343차: 서로 상관없는 두 읽기를 한꺼번에
       const BW = new Map(BWRows.filter((w) => String(pick(w, 'source_type') ?? '') === 'building' || pick(w, 'building_id')).map((w) => [String(pick(w, 'source_id', 'building_id') ?? ''), w])); const tRead = Date.now();
       const list = dayFilter(BRows).map((r) => { const w = BW.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'name', 'complex_name', 'project_name', 'house_name') ?? '(이름 없음)',
@@ -723,7 +726,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     }
     if (tab === 'vendors') {
       const P = new Map((await prog('vendor_registrations__progress')).map((p) => [String(p.id ?? p.__id), p]));
-      const list = dayFilter(await rows('global', 'vendor_registrations')).map((r) => { const p = P.get(String(r.id ?? r.__id));
+      const list = dayFilter(await grows('vendor_registrations')).map((r) => { const p = P.get(String(r.id ?? r.__id));
         return { id: r.__id, name: pick(r, 'company', 'company_name', 'name') ?? '(이름 없음)', division: pick(r, 'category', 'division', 'kind'), rank: pick(r, 'rank_label', 'rank'), notice: pick(r, 'notice_title', 'title', 'notice'),
           url: pick(r, 'recruit_url', 'url', 'notice_url'), status: p?.status ?? null, memo: p?.memo ?? null, next: day(p?.next_date ?? null), leadId: p?.lead_id ?? null, handoff: !!(p?.lead_id && pick(p, 'handoff_by')), archive: archiveOf(p), region: pick(r, 'region', 'sido'),
           // 영업관리 2-9 카드: 모집 공지 공개 여부·모집 시기·등록 요건·공동인증서·비고·링크
