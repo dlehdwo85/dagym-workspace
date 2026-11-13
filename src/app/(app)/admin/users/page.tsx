@@ -4,7 +4,7 @@ import { RoleBadge } from '@/components/RoleBadge';
 import { useEffect, useState } from 'react';
 import { SpacesTab } from '@/components/SpacesTab';
 import { api, useApi } from '@/components/client';
-import { useSession, useTerms } from '@/components/session';
+import { useMultiSite, useSession, useTerms } from '@/components/session';
 import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, refreshBadges, toast } from '@/components/ui';
 import { TeamPath, TeamPicker } from '@/components/TeamPicker';
 import { type Role } from '@/lib/types';
@@ -58,7 +58,7 @@ export default function UsersPage() {
 
 function Users() {
   const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
-  const { user, dir, menus } = useSession();
+  const { user, dir, menus } = useSession(); const multiSite = useMultiSite();
   const canEdit = (menus?.admin_users ?? 'none') === 'edit'; // V14 7번: 조회만이면 읽기 전용
   const { data, error, loading, reload } = useApi<{ users: any[] }>('/api/admin/users');
   const [inv, setInv] = useState<any>(null);
@@ -166,7 +166,8 @@ function Users() {
           <fieldset data-testid="invite-teams"><legend className="mb-1 text-xs font-medium text-slate-600">소속</legend>
             <TeamPicker key={invKey} teamIds={inv.teamIds ?? []} primaryTeamId={inv.primaryTeamId ?? null}
               onChange={({ teamIds, primaryTeamId, teams }) => setInv({ ...inv, teamIds, primaryTeamId, spaces: teams.length ? [...new Set<string>(teams.flatMap((x) => x.default_spaces ?? ['work']))] : inv.spaces })} /></fieldset>
-          <details className="text-xs" data-testid="invite-advanced"><summary className="cursor-pointer text-slate-600">고급 — 접근 가능한 조직(비우면 소속에서 자동)</summary>
+          {/* 405차 조직 모델: 지점을 하나만 쓰는 회사는 조직 고르기가 없다(서버가 그 회사의 조직에 넣음) */}
+          <details className="text-xs" data-testid="invite-advanced" hidden={!multiSite}><summary className="cursor-pointer text-slate-600">고급 — 접근 가능한 조직(비우면 소속에서 자동)</summary>
             <div className="mt-1"><UnitChecks key={invKey} value={inv.orgUnitIds} onChange={(v) => setInv({ ...inv, orgUnitIds: v })} />
               <p className="mt-1 text-slate-500">직접 고르면 그 조직과 하위 조직의 업무·일정만 봅니다. 비우면 본사 기준으로 소속 부서·팀 규칙을 따릅니다.</p></div></details>
           <fieldset data-testid="invite-spaces"><legend className="mb-1 text-xs font-medium text-slate-600">공간 {inv.teamIds?.length ? <span className="font-normal text-ink-3">(고른 부서·팀의 기본 공간을 제안)</span> : null}</legend>
@@ -222,7 +223,7 @@ function Users() {
               })}
             </div>
           )}
-          <details className="text-xs"><summary className="cursor-pointer text-slate-600">고급 — 접근 가능한 조직</summary><div className="mt-1"><UnitChecks value={edit.org_unit_ids} onChange={(v) => setEdit({ ...edit, org_unit_ids: v })} /></div></details>
+          <details className="text-xs" hidden={!multiSite}><summary className="cursor-pointer text-slate-600">고급 — 접근 가능한 조직</summary><div className="mt-1"><UnitChecks value={edit.org_unit_ids} onChange={(v) => setEdit({ ...edit, org_unit_ids: v })} /></div></details>
           <UserContracts userId={edit.id} />
           <p className="text-xs text-slate-500">사용 중지·퇴사로 바꾸면 모든 기기에서 즉시 로그아웃되고 푸시·Google 동기화도 멈춥니다. 작성한 업무 기록은 남습니다.</p>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEdit(null)}>취소</Button><Button type="submit">저장</Button></div>

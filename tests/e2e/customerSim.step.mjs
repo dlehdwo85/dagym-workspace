@@ -165,6 +165,25 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     assert.deepEqual((await roleOpts()).filter((x) => x !== '대표'), ['관리자', '팀 책임자', '점장', '크루'], '바꾼 역할 이름이 화면에 반영');
     await p.goto(BASE + '/admin/company'); await p.getByTestId('role-names-setting').waitFor();
     assert.equal(await p.getByTestId('role-name-site_manager').inputValue(), '점장');
+    // ── 7-3) 405차 조직 모델: 새 회사는 지점(조직) 고르기가 없고, 회사 정보에서 "지점이 여러 곳"을 켜면 조직 구성이 열린다
+    await p.goto(BASE + '/admin/users'); await p.getByTestId('invite-open').click();
+    await p.waitForFunction(() => [...document.querySelectorAll('select option')].some((o) => o.textContent === '관리자'));
+    assert.equal(await p.getByTestId('invite-advanced').isVisible(), false, '초대 화면에 조직 고르기 없음');
+    await p.goto(BASE + '/admin/org');
+    await p.getByTestId('org-single-site').waitFor();
+    assert.equal(await p.getByTestId('org-tree').count(), 0);
+    await p.goto(BASE + '/admin/company'); await p.getByTestId('org-model-setting').waitFor();
+    assert.equal(await p.getByTestId('org-multi-site').isChecked(), false, '처음은 끔');
+    await p.getByTestId('org-multi-site').click();
+    await p.getByText('지점이 여러 곳으로 바꿨습니다').first().waitFor();
+    await p.goto(BASE + '/admin/org'); await p.getByTestId('org-tree').waitFor();
+    const orgText = await body();
+    if (/본사|위탁운영 현장|앱 심사용 격리 조직/.test(orgText)) note('조직 모델: 조직 구성', '다짐식 조직 이름·심사용 칸이 보임');
+    await p.goto(BASE + '/admin/users'); await p.getByTestId('invite-open').click();
+    await p.getByTestId('invite-advanced').waitFor();
+    await p.goto(BASE + '/admin/company'); await p.getByTestId('org-model-setting').waitFor();
+    await p.getByTestId('org-multi-site').click(); // 다시 끔(조직이 1곳이라 가능)
+    await p.getByText('지점을 한 곳만 쓰도록 바꿨습니다').first().waitFor();
     // ── 8) 알림: 첫날 받은 알림
     await p.goto(BASE + '/notifications');
     await p.waitForLoadState('networkidle');

@@ -1,14 +1,15 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { api, useApi } from '@/components/client';
-import { useSession, useTerms } from '@/components/session';
+import { useSession, useTerms, useMultiSite } from '@/components/session';
 import { Button, ErrorBox, Field, Loading, Modal, cx, inputCls, toast } from '@/components/ui';
 import { HIDDEN_BRANDS } from '@/lib/types';
 import type { UnitType } from '@/lib/terms';
 
 export default function Org() {
   const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
-  const { dir } = useSession();
+  const { dir, tenant } = useSession(); const multiSite = useMultiSite();
   const { data, error, loading, reload } = useApi<{ units: any[] }>('/api/admin/org-units');
   const [f, setF] = useState<any>(null);
   async function save(e: React.FormEvent) {
@@ -36,6 +37,14 @@ export default function Org() {
     </li>,
     ...render(u.id, depth + 1),
   ]);
+  // 405차 조직 모델: 지점을 하나만 쓰는 회사는 조직을 나누지 않는다 — 여러 곳이면 회사 정보에서 켠 뒤 이 화면을 쓴다
+  if (!multiSite) return (
+    <div className="mx-auto mt-6 max-w-lg rounded-card border border-line bg-white p-6 text-sm shadow-card" data-testid="org-single-site">
+      <p className="text-base font-semibold">지점을 한 곳만 쓰는 회사입니다</p>
+      <p className="mt-2 text-ink-2">모든 사람이 한 조직({units[0]?.name ?? '회사'})에 속하고, 부서·팀으로 나눠 씁니다. 지점이 여러 곳이면 회사 정보에서 <b>지점이 여러 곳</b>을 켜 주세요.</p>
+      <div className="mt-4 flex gap-2"><Link href="/admin/company" className="rounded-input bg-brand-600 px-4 py-2 font-medium text-white">회사 정보 열기</Link><Link href="/teams" className="rounded-input border border-line px-4 py-2 font-medium">부서·팀</Link></div>
+    </div>
+  );
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -53,7 +62,8 @@ export default function Org() {
           </div>
           <Field label="상위 조직"><select className={inputCls} value={f.parentId ?? ''} onChange={(e) => setF({ ...f, parentId: e.target.value })}><option value="">(최상위)</option>{units.filter((u) => u.id !== f.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
           {f.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />사용 중</label>}
-          <label className="flex items-start gap-2 rounded-input bg-amber-50 p-2 text-sm"><input type="checkbox" className="mt-0.5" checked={!!f.isDemo} onChange={(e) => setF({ ...f, isDemo: e.target.checked, parentId: e.target.checked ? '' : f.parentId })} />
+          {/* 405차: 앱 심사용 격리 조직은 기본 회사에서만(다른 회사는 서버도 거절) */}
+          <label hidden={!tenant?.internal} className="flex items-start gap-2 rounded-input bg-amber-50 p-2 text-sm"><input type="checkbox" className="mt-0.5" checked={!!f.isDemo} onChange={(e) => setF({ ...f, isDemo: e.target.checked, parentId: e.target.checked ? '' : f.parentId })} />
             <span><b>앱 심사용 격리 조직</b><span className="block text-xs text-ink-2">App Store·Play 심사용 계정을 넣는 조직. 최상위로만 만들 수 있고, 소속 직원은 이 조직 밖의 업무·일정·사람을 전혀 볼 수 없으며 대표·본사 화면에도 이 조직 데이터가 섞이지 않습니다.</span></span></label>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setF(null)}>취소</Button><Button type="submit">저장</Button></div>
         </form>}

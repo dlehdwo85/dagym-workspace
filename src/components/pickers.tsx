@@ -2,14 +2,18 @@
 import { dtf } from '@/lib/dtf';
 import { RoleBadge } from '@/components/RoleBadge';
 import { useMemo, useState } from 'react';
-import { useSession, useTerms } from './session';
+import { useMultiSite, useSession, useTerms } from './session';
 import { Modal, cx, inputCls } from './ui';
 import { HIDDEN_BRANDS } from '@/lib/types';
 import type { UnitType } from '@/lib/terms';
 
+/** 405차 조직 모델: 지점(조직)을 여러 곳 쓰는 회사에서만 보이는 칸(다짐은 늘 보임) — '소속'·'현장' 고르기 칸을 감싼다 */
+export function MultiSiteOnly({ children }: { children: React.ReactNode }) {
+  return useMultiSite() ? <>{children}</> : null;
+}
 export function UnitSelect({ value, onChange, allowEmpty, id, className }: { value: string | null | undefined; onChange: (v: string) => void; allowEmpty?: string; id?: string; className?: string }) {
   const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
-  const { dir } = useSession();
+  const { dir } = useSession(); const multiSite = useMultiSite();
   const tree = useMemo(() => {
     const out: { id: string; label: string }[] = [];
     const byParent = new Map<string | null, typeof dir.orgUnits>();
@@ -26,6 +30,7 @@ export function UnitSelect({ value, onChange, allowEmpty, id, className }: { val
     walk(null, 0);
     return out;
   }, [dir.orgUnits]);
+  if (!multiSite) return null; // 지점을 하나만 쓰는 회사: 고를 것이 없음(값은 부르는 쪽 기본값 = 첫 조직)
   return (
     <select id={id} className={className ?? inputCls} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       {allowEmpty !== undefined && <option value="">{allowEmpty}</option>}

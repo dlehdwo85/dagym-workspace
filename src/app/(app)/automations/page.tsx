@@ -5,7 +5,7 @@ import { Workflow } from 'lucide-react';
 import { AutomationRules } from '@/components/Automations';
 import { useSession, canManage, isAdminRole, useTerms } from '@/components/session';
 import { ErrorBox, Field, PageHeader, fmtDateTime } from '@/components/ui';
-import { UnitSelect } from '@/components/pickers';
+import { MultiSiteOnly, UnitSelect } from '@/components/pickers';
 import { useApi } from '@/components/client';
 
 /** B-10 조직·전사 자동화 규칙 (프로젝트 규칙은 프로젝트 화면의 "자동화" 탭) */
@@ -13,15 +13,17 @@ export default function AutomationsPage() {
   const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { user } = useSession();
   const admin = isAdminRole(user.role);
-  const [unit, setUnit] = useState('');
+  const { dir, tenant } = useSession();
+  // 405차 조직 모델: 지점을 하나만 쓰는 회사는 범위 고르기가 없다 — 관리자는 전사, 그 밖은 그 회사의 조직 1곳
+  const [unit, setUnit] = useState(() => (tenant?.multiSite === false && !isAdminRole(user.role) ? dir.orgUnits[0]?.id ?? '' : ''));
   const runs = useApi<{ runs: any[] }>('/api/automations');
   if (!canManage(user.role)) return <ErrorBox error={{ status: 403, message: `자동화 규칙은 ${roleOrAbove(T, 'site_manager')}이 관리합니다.` }} />;
   return (
     <div className="space-y-5">
       <PageHeader title="자동화" icon={Workflow} sub="조직(현장·부서) 단위 또는 전사 규칙입니다. 프로젝트 전용 규칙은 프로젝트 화면의 자동화 탭에서 만듭니다." />
-      <Field label="적용 범위" className="max-w-sm">
+      <MultiSiteOnly><Field label="적용 범위" className="max-w-sm">
         <UnitSelect value={unit} onChange={setUnit} allowEmpty={admin ? '전사 (모든 조직)' : '조직을 선택하세요'} />
-      </Field>
+      </Field></MultiSiteOnly>
       {admin || unit ? <AutomationRules key={unit} orgUnitId={unit || undefined} canEdit /> : <p className="text-sm text-ink-2">규칙을 볼 조직을 선택하세요.</p>}
       <section>
         <h2 className="mb-2 text-sm font-semibold">최근 실행 기록</h2>
