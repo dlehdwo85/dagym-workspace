@@ -27,7 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (sp && (sp === 'work' || !(spaces as string[]).includes(sp))) notFound();
   const dir = await directory(user);
   const menus = await menuLevels(user); // V13 메뉴 권한
-  const [t] = await db()<{ name: string; kind: string; owner_user_id: string | null; onboarded_at: Date | null; sales_template: string | null; sales_stages: unknown; industries: string[] | null; industry: string | null; role_badge: string | null; capture_block: boolean | null; signup_status: string; signup_reason: string | null }[]>`select name, kind, owner_user_id, onboarded_at, sales_template, sales_stages, industries, industry, role_badge, capture_block, signup_status, signup_reason from tenants where id = ${tenantOf(user)}`;
+  const [t] = await db()<{ name: string; kind: string; owner_user_id: string | null; onboarded_at: Date | null; sales_template: string | null; sales_stages: unknown; industries: string[] | null; industry: string | null; role_badge: string | null; capture_block: boolean | null; multi_site: boolean | null; signup_status: string; signup_reason: string | null }[]>`select name, kind, owner_user_id, onboarded_at, sales_template, sales_stages, industries, industry, role_badge, capture_block, multi_site, signup_status, signup_reason from tenants where id = ${tenantOf(user)}`;
   // 359차 승인제 가입: 승인 대기·거절 회사는 안내 화면만(체험 띠·첫 로그인 안내 없음)
   const signup = !['default', 'demo'].includes(tenantOf(user)) && t && t.signup_status !== 'approved' ? { status: t.signup_status as 'pending' | 'rejected', reason: t.signup_reason } : null;
   // #408 업종 중립 문구: 영업 화면 용어는 회사 업종 템플릿(없으면 업종으로 추정) — 코드에 우리 회사 용어를 박지 않음
@@ -54,7 +54,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     spaces, // V41 공간
     tours: { seen: await (await import('@/lib/tours')).seenTours(user.id).catch(() => []), auto: (await import('@/lib/tours')).toursAuto(user) }, // #77 처음 사용 안내
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)
-    tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), captureBlock: cap.block, captureAutomation: cap.automation, inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && !signup && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)), signup,
+    tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), multiSite: (await import('@/lib/orgModel')).multiSiteOf(tenantOf(user), t?.multi_site) /* 405차 조직 모델: 다른 회사는 켰을 때만 지점 */, captureBlock: cap.block, captureAutomation: cap.automation, inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && !signup && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)), signup,
       trial: trial ? { trial: trial.trial, readOnly: trial.readOnly, daysLeft: trial.daysLeft, partner: trial.partner } : null, billingLock: billingLock as 'read_only' | 'suspended' | null },
   };
   return <><LaunchIntro />{/* #443 실행 애니메이션(세션당 1번·동작 줄이기면 안 함) */}<AppShell session={session}><Suspense>{children}</Suspense></AppShell></>;

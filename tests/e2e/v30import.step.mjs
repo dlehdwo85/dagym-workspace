@@ -26,7 +26,13 @@ export async function v30import({ owner, BASE, SHOTS }) {
   // 휴대폰: 같은 파일 → 카드 미리보기
   await owner.setViewportSize({ width: 390, height: 844 });
   await owner.goto(`${BASE}/tasks/import`);
+  // CI(8b69e58·103c245)에서 두 번 연속 시간 초과: 주소로 바로 연 화면은 스크립트가 붙기 전에 파일을 넣으면 고르기 신호가 사라진다(PC 쪽은 화면 안 이동이라 문제없음)
+  // → 화면이 다 붙을 때까지 기다리고, 그래도 미리보기가 안 뜨면 한 번 더 넣는다
+  await owner.waitForLoadState('networkidle');
   await owner.getByTestId('import-file').setInputFiles(file);
+  if (!(await owner.getByTestId('preview-card').first().waitFor({ timeout: 8000 }).then(() => true).catch(() => false))) {
+    await owner.getByTestId('import-file').setInputFiles([]); await owner.getByTestId('import-file').setInputFiles(file);
+  }
   await owner.getByTestId('preview-card').first().waitFor();
   assert.equal(await owner.getByTestId('preview-card').count(), 3);
   const sw = await owner.evaluate(() => document.documentElement.scrollWidth);

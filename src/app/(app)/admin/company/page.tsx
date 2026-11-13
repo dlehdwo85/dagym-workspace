@@ -43,6 +43,7 @@ export default function CompanyPage() {
       <AttachToLibrary />
       <RoleBadgeSetting />
       <RoleNamesSetting />
+      <OrgModelSetting />
       <SmsSignSetting />
       {loading && !data ? <Skeleton rows={3} /> : !data?.profiles.length ? <Empty title="아직 회사 정보가 없습니다" icon={Building2}>회사 추가를 눌러 상호·사업자번호·주소·로고·브랜드 색을 넣어 주세요.</Empty> : (
         <ul className="grid gap-3 sm:grid-cols-2" data-testid="company-list">
@@ -132,6 +133,30 @@ function RoleNamesSetting() {
           <input className={cx(inputCls, 'mt-0.5')} value={cur[r]} maxLength={d.max} placeholder={d.defaults[r]} onChange={(e) => setF({ ...cur, [r]: e.target.value })} aria-label={`${d.defaults[r]} 역할 이름`} data-testid={`role-name-${r}`} /></label>)}
       </div>
       <div className="mt-2 flex justify-end"><Button size="sm" onClick={save} disabled={busy || !f} data-testid="role-names-save">저장</Button></div>
+    </section>
+  );
+}
+
+/**
+ * 405차 범용화 조직 모델(대표 11/13 밤 확정): 다른 회사는 '부서·팀'만 쓰고, 지점이 여러 곳인 회사만 이 스위치를 켜 조직 구성·조직 고르기를 쓴다.
+ * 기본 회사는 지금처럼 본사·지점·현장을 그대로 쓰므로 이 칸이 나오지 않는다.
+ */
+function OrgModelSetting() {
+  const st = useApi<{ multiSite: boolean; fixed: boolean; units: number }>('/api/org/model');
+  const [busy, setBusy] = useState(false);
+  if (!st.data || st.data.fixed) return null;
+  const d = st.data;
+  const set = async (on: boolean) => {
+    setBusy(true);
+    try { await api('/api/org/model', { method: 'PUT', body: { multiSite: on } }); st.reload(); toast.ok(on ? '지점이 여러 곳으로 바꿨습니다 — 화면을 새로 고치면 조직 고르기가 보입니다' : '지점을 한 곳만 쓰도록 바꿨습니다 — 화면을 새로 고치면 적용됩니다'); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="org-model-setting">
+      <h2 className="text-sm font-semibold">지점</h2>
+      <label className="mt-1 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={d.multiSite} disabled={busy} onChange={(e) => set(e.target.checked)} data-testid="org-multi-site" />
+        <span><b>지점이 여러 곳</b><span className="block text-xs text-ink-3">끄면 모든 사람이 한 조직에 속하고 부서·팀으로만 나눕니다. 켜면 지점마다 조직을 만들어, 직원이 자기 지점과 그 아래 업무만 보게 할 수 있습니다.</span></span></label>
+      {d.multiSite && <a href="/admin/org" className="mt-2 inline-block text-xs font-medium text-brand-700 underline" data-testid="org-model-open">조직 구성 열기 →</a>}
     </section>
   );
 }

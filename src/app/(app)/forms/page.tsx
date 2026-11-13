@@ -6,7 +6,7 @@ import { Copy, Plus, Printer, QrCode, RefreshCw } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession, canManage, useTerms } from '@/components/session';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
-import { UnitSelect, UserSelect } from '@/components/pickers';
+import { MultiSiteOnly, UnitSelect, UserSelect } from '@/components/pickers';
 
 const KIND: Record<string, { label: string; desc: string; color: string }> = {
   facility: { label: '시설 고장', desc: '운동기구·샤워실·조명 등 고장 신고', color: '#ea580c' },
@@ -64,7 +64,7 @@ export default function FormsPage() {
       )}
       <Modal open={open} onClose={() => setOpen(false)} title="신고 양식 만들기">
         <form onSubmit={create} className="space-y-3">
-          <Field label="현장"><UnitSelect value={f.orgUnitId ?? dir.orgUnits[0]?.id} onChange={(v) => setF({ ...f, orgUnitId: v })} /></Field>
+          <MultiSiteOnly><Field label="현장"><UnitSelect value={f.orgUnitId ?? dir.orgUnits[0]?.id} onChange={(v) => setF({ ...f, orgUnitId: v })} /></Field></MultiSiteOnly>
           <div className="grid gap-2">
             {Object.entries(KIND).map(([k, v]) => (
               <label key={k} className={cx('flex cursor-pointer items-center gap-3 rounded-input border p-3', f.kind === k ? 'border-brand-500 bg-brand-50' : 'border-line')}>

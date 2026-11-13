@@ -6,7 +6,7 @@ import { Archive, FolderKanban, FolderPlus, Star } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession, canManage } from '@/components/session';
 import { Avatar, BrandDot, Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
-import { BrandSelect, UnitSelect, UserSelect } from '@/components/pickers';
+import { BrandSelect, MultiSiteOnly, UnitSelect, UserSelect } from '@/components/pickers';
 import { useUrlState } from '@/components/urlState';
 
 export default function Projects() {
@@ -63,7 +63,7 @@ export default function Projects() {
           <Field label="이름"><input className={inputCls} required value={f.name ?? ''} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
           <Field label="설명"><textarea className={inputCls} value={f.description ?? ''} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="소속"><UnitSelect value={f.orgUnitId ?? dir.orgUnits[0]?.id} onChange={(v) => setF({ ...f, orgUnitId: v })} /></Field>
+            <MultiSiteOnly><Field label="소속"><UnitSelect value={f.orgUnitId ?? dir.orgUnits[0]?.id} onChange={(v) => setF({ ...f, orgUnitId: v })} /></Field></MultiSiteOnly>
             <Field label="브랜드"><BrandSelect value={f.brandId} onChange={(v) => setF({ ...f, brandId: v })} /></Field>
             <Field label="프로젝트 담당"><UserSelect value={f.ownerId} onChange={(v) => setF({ ...f, ownerId: v })} /></Field>
             <Field label="색"><input type="color" className="h-9 w-full rounded border" value={f.color ?? '#2563eb'} onChange={(e) => setF({ ...f, color: e.target.value })} /></Field>

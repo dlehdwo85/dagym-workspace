@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api, useApi } from '@/components/client';
 import { useSession, useTerms } from '@/components/session';
 import { Button, ErrorBox, Field, Loading, Modal, inputCls, toast } from '@/components/ui';
-import { UnitSelect, UserSelect } from '@/components/pickers';
+import { MultiSiteOnly, UnitSelect, UserSelect } from '@/components/pickers';
 import { PRIORITY_LABEL } from '@/lib/types';
 import { describeRule } from '@/lib/recurrence';
 
@@ -44,7 +44,7 @@ export default function Templates() {
             <Field label="담당자"><UserSelect value={f.assigneeId} onChange={(v) => setF({ ...f, assigneeId: v })} /></Field>
             <Field label="마감일 (비우면 기본값)"><input type="date" className={inputCls} value={f.dueDate ?? ''} onChange={(e) => setF({ ...f, dueDate: e.target.value })} /></Field>
           </div>
-          <Field label="소속"><UnitSelect value={f.orgUnitId} onChange={(v) => setF({ ...f, orgUnitId: v })} /></Field>
+          <MultiSiteOnly><Field label="소속"><UnitSelect value={f.orgUnitId} onChange={(v) => setF({ ...f, orgUnitId: v })} /></Field></MultiSiteOnly>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setUse(null)}>취소</Button><Button type="submit">만들기</Button></div>
         </form>
       </Modal>
