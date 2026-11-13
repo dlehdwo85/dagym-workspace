@@ -13,7 +13,7 @@ type Acc = { id: string; provider: string; external_id: string; label: string; s
 type Src = 'manual' | 'account' | 'name' | null;
 type Camp = { account_id: string; provider: string; label: string; campaign_id: string; campaign_name: string; currency: string; impressions: number; clicks: number; cost: number; conversions: number;
   brand?: string | null; brand_id?: string | null; brand_source?: Src; auto_brand_id?: string | null; auto_source?: Src };
-type Balance = { id: string; provider: string; label: string; balance: number; currency: string; source: 'manual' | 'api'; checked_at: string; pace: number; days: number | null; level: 'ok' | 'warn' | 'action'; link: string; how: string };
+type Balance = { id: string; provider: string; label: string; balance: number; currency: string; source: 'manual' | 'api'; checked_at: string; pace: number; days: number | null; level: 'ok' | 'warn' | 'action'; link: string; how: string; guard?: boolean };
 type Item = { provider: string; label: string; brand: string | null; item_id: string; item_name: string; campaign_name: string; adgroup_name: string; currency: string; impressions: number; clicks: number; cost: number; conversions: number };
 type Data = { days: number; accounts: Acc[]; balances?: Balance[]; lowBalanceKrw?: number; totals: { impressions: number; clicks: number; cost: number; conversions: number }; campaigns: Camp[]; keywords?: Item[]; creatives?: Item[];
   daily: { day: string; clicks: number; cost: number; conversions: number }[]; providers: { key: string; label: string; ready: boolean }[]; canEdit: boolean; callbacks: { meta: string; google: string; metaPublish?: string } | null };
@@ -486,6 +486,11 @@ function Balances({ rows, min, canEdit, onChange }: { rows: Balance[]; min: numb
     try { await api('/api/marketing/ads/balances', { method: 'PUT', body: { provider: f.provider, label: f.label.trim(), balanceKrw: Number(f.balanceKrw.replace(/[^\d.]/g, '')) || 0 } }); toast.ok('잔액을 적었습니다 — 페이스 기준으로 충전 필요 여부를 바로 확인합니다'); setF(null); onChange(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
+  async function guard(b: Balance, on: boolean) {
+    setBusy(true);
+    try { const r = await api<{ sent: number }>('/api/marketing/ads/balances', { method: 'PATCH', body: { id: b.id, guard: on } }); toast.ok(on ? `끊김 방지 메일을 켰습니다 — 남은 날 14·7·3일 아래·잔액 0원에 대표에게 메일${r.sent ? ' (지금 기준 아래라 바로 보냈습니다)' : ''}` : '끊김 방지 메일을 껐습니다'); onChange(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
   return (
     <div className="mt-4 border-t border-line pt-3" data-testid="ads-balances">
       <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">매체 잔액</h3><span className="text-xs text-ink-3">최근 7일 하루 평균 지출 기준 7일분 미만이면 운영실에 [충전 필요] 카드 · 충전은 매체 화면에서(API 불가)</span>
@@ -503,7 +508,11 @@ function Balances({ rows, min, canEdit, onChange }: { rows: Balance[]; min: numb
           <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', b.level === 'action' ? 'bg-red-50 text-red-800' : b.level === 'warn' ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800')} data-testid="ads-balance-days">{b.days === null ? '지출 기록 없음' : `약 ${b.days}일분`}{b.pace ? ` · 하루 ${n0(b.pace)}원` : ''}</span>
           <span className="text-xs text-ink-3">{b.source === 'api' ? '매체 조회' : '직접 입력'} {fmtDateTime(b.checked_at)}</span>
           {b.link && <a href={b.link} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{ color: C }}>충전 페이지</a>}
-          {canEdit && <button type="button" className="text-xs text-ink-3 underline" onClick={() => setF({ provider: b.provider, label: b.label, balanceKrw: String(Math.round(b.balance)) })}>고치기</button>}</li>))}</ul>
+          {canEdit && <button type="button" className="text-xs text-ink-3 underline" onClick={() => setF({ provider: b.provider, label: b.label, balanceKrw: String(Math.round(b.balance)) })}>고치기</button>}
+          {/* 402차 #1028: 끊기면 안 되는 계정 — 남은 날 14·7·3일 아래·잔액 0 에 대표 메일 */}
+          {canEdit ? <label className="ml-auto inline-flex items-center gap-1 text-xs text-ink-2" title="남은 날이 14일·7일·3일 아래로 내려가거나 잔액이 0원이 되면 회사 대표에게 메일을 보냅니다(3일 아래부터는 채워질 때까지 하루 한 번)">
+            <input type="checkbox" checked={!!b.guard} disabled={busy} onChange={(e) => guard(b, e.target.checked)} data-testid="ads-balance-guard" />끊김 방지 메일</label>
+            : b.guard ? <span className="ml-auto rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="ads-balance-guard-on">끊김 방지 메일 켜짐</span> : null}</li>))}</ul>
         : <p className="mt-2 text-xs text-ink-3" data-testid="ads-balance-empty">아직 잔액 기록이 없습니다 — 네이버·Meta 는 다음 동기화 때 자동으로 읽고, 구글 선불·Higgsfield 는 직접 입력하세요.</p>}
     </div>
   );
