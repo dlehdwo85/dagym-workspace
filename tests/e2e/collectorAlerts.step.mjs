@@ -19,7 +19,9 @@ export async function collectorAlerts({ owner, ctx, sql, BASE, SHOTS }) {
   await box.waitFor();
   const lines = await box.getByTestId('sales-collector-alert').allInnerTexts();
   // #629(대표 10/25 21:20): 첫 줄은 '할 일' 문장 — 연속 실패 수·영문 오류 코드·HTTP 코드는 접힘 '자세히'에만, 서비스 번호를 알면 [신청 방법] 링크
-  assert.ok(lines.some((l) => /^LH·국방·온비드 공고 › 온비드 공고\(차세대\) — 공공데이터포털 활용신청이 필요합니다/.test(l)), lines.join('\n'));
+  // 390차(대표 11/13 '수자원공사·마사회 — 활용신청이 필요합니다'에 번호·링크가 없었음): 공공기관 입찰 원천도 서비스 번호 + [신청 방법]
+  assert.ok(lines.some((l) => /^LH·국방·온비드 공고 › 온비드 공고\(차세대\) — 공공데이터포털 활용신청\(서비스 15157216\)이 필요합니다 \[신청 방법\]/.test(l)), lines.join('\n'));
+  assert.equal(await box.getByTestId('sales-collector-alert').filter({ hasText: '온비드' }).getByTestId('sales-collector-alert-link').getAttribute('href'), 'https://www.data.go.kr/data/15157216/openapi.do');
   assert.ok(lines.some((l) => /^관광숙박업\(호텔·리조트\) — 공공데이터포털 활용신청\(서비스 15155090\)이 필요합니다 \[신청 방법\]/.test(l)), `원천 하나뿐인 수집기는 수집기 이름만 + 코드에 적힌 서비스 번호 · ${lines.join('\n')}`);
   assert.ok(!lines.some((l) => /SERVICE_KEY|HTTP ?\d{3}|_ERROR|연속 실패/.test(l)), `접기 전 첫 줄에 원문·코드 없음 · ${lines.join('\n')}`);
   const hotelLine = box.getByTestId('sales-collector-alert').filter({ hasText: '관광숙박업' });
