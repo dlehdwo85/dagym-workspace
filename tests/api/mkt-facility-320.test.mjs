@@ -136,7 +136,7 @@ test('⑥ 글에 없는 다른 시설 사진(카페·주차장)은 표지·4분�
   const t = '이사 나간 다음 날, 그 세대의 헬스장 출입은';
   const [c] = await sql`insert into mkt_contents (tenant, brand_id, title, channel, scheduled_at, status, current_version, created_by, kind, auto, produce_at, is_test, cross_channels, mode)
     values ('default', ${b3}, ${t}, 'instagram', now() + make_interval(days => 20), 'pending', 1, ${ctx.ownerId}, 'reels', false, now(), false, ${[]}, 'content') returning id`;
-  await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, '이사 나간 세대의 출입은 다음 날 자동으로 막힙니다.', ${[]}, '시험', ${ctx.ownerId})`;
+  await sql`insert into mkt_versions (content_id, version, body, media_ids, note, created_by) values (${c.id}, 1, ${'이사 나간 세대의 출입은 다음 날 자동으로 막힙니다.\n관리사무소가 명단을 따로 지우지 않아도 됩니다.\n입주민 앱 등록이 풀리면 출입도 함께 풀립니다.\n운영 인력은 그대로, 확인할 일은 줄어듭니다.'}, ${[]}, '시험', ${ctx.ownerId})`; // 398차 #1024: 영상 대본은 4줄 넘게
   const ids = [door, cafe1, cafe2, park, ...P.gym.slice(0, 2)];
   const e = await ctx.owner.req('POST', '/api/marketing/studio/slideshow', { contentId: c.id, photoIds: ids });
   assert.equal(e.status, 200, JSON.stringify(e.body));
@@ -145,7 +145,7 @@ test('⑥ 글에 없는 다른 시설 사진(카페·주차장)은 표지·4분�
   assert.ok((brief.reuse.faceDropped ?? []).includes(cafe1) && (brief.reuse.faceDropped ?? []).includes(park), `뺀 사진 기록: ${JSON.stringify(brief.reuse)}`);
   await sql`update mkt_briefs set status = 'failed' where content_id = ${c.id}`; // 합성은 이 시험 범위 밖
   // 글이 카페를 말하면 카페 사진도 후보
-  await sql`update mkt_versions set body = '헬스장과 카페 출입을 한 번에 관리합니다.' where content_id = ${c.id}`;
+  await sql`update mkt_versions set body = ${'헬스장과 카페 출입을 한 번에 관리합니다.\n이사 나간 세대는 다음 날 자동으로 막힙니다.\n관리사무소가 명단을 따로 지우지 않아도 됩니다.\n운영 인력은 그대로, 확인할 일은 줄어듭니다.'} where content_id = ${c.id}`;
   await ctx.owner.ok('POST', '/api/marketing/studio/slideshow', { contentId: c.id, photoIds: ids });
   const [brief2] = await sql`select result->'reuse' as reuse from mkt_briefs where content_id = ${c.id} order by created_at desc limit 1`;
   assert.ok(brief2.reuse.photos.includes(cafe1), JSON.stringify(brief2.reuse)); assert.ok(!brief2.reuse.photos.includes(park));
