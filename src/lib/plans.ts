@@ -130,7 +130,7 @@ export async function assertSeat(tenant: string, sql: Sql = db()) {
 
 // ---------------- 회사 관리자: 사용량·요금제 ----------------
 export async function requireTenantAdmin(u: SessionUser, need: 'view' | 'edit' = 'view') { // V14 7번: 메뉴 권한 "사용량·요금제"
-  if (u.isDemo) throw forbidden('대표·본사 관리자만 볼 수 있습니다');
+  if (u.isDemo) { const t = (await (await import('./termsServer')).termsOfUser(u)); throw forbidden(`${t.role.owner}·${t.role.admin}만 볼 수 있습니다`); }
   await (await import('./menuPerms')).requireMenu(u, 'usage', need);
 }
 export async function usageOverview(u: SessionUser) {

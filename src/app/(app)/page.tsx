@@ -5,12 +5,13 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, Check, CheckCircle2, ChevronLeft, CircleCheck, Hourglass, MapPin, Megaphone, MessageSquare, PlusCircle, Sparkles, Users, Activity as ActivityIcon } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { ClockCard } from '@/components/ClockCard';
-import { useSession } from '@/components/session';
+import { useSession, useTerms } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
 import { InlineAddTask } from '@/components/TaskQuick';
 import { useCalColors, type CalColors } from '@/components/calColors';
 import { SPACE_META } from '@/components/spaceMeta';
-import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
+import { ABSENCE_KINDS } from '@/lib/types';
+import type { EventKind } from '@/lib/terms';
 import { useRowOpen } from '@/components/rowOpen';
 import { showTask } from '@/components/TaskPanelHost';
 import { ConnectCard } from '@/components/ConnectCard';
@@ -153,6 +154,7 @@ function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: CalColors; onDone
 }
 
 export default function Dashboard() {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { user, dir, features } = useSession();
   const { data, error, loading, reload } = useApi<any>('/api/dashboard');
   const [aiQ, setAiQ] = useState('');
@@ -225,7 +227,7 @@ export default function Dashboard() {
     const linked = new Set(evs.flatMap((e) => [e.linkedTask?.id, ...(e.linkedTaskIds ?? [])]).filter(Boolean));
     const items: WeekItem[] = [
       ...evs.map((e) => ({ key: `e${e.id}${e.start}`, time: e.allDay || seoulDay(e.start) !== d ? '' : fmtHM(e.start), title: cleanTitle(e.title), personal: e.calendarType === 'personal',
-        tag: e.linkedTask ? '일정·업무' : (ABSENCE_KINDS as readonly string[]).includes(e.kind) ? EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL] : '일정', href: `/calendar?date=${d}&event=${e.id}`, task: e.linkedTask ? { id: e.linkedTask.id, status: e.linkedTask.status } : null, kind: e.kind === 'task_block' ? undefined : ('event' as const) })),
+        tag: e.linkedTask ? '일정·업무' : (ABSENCE_KINDS as readonly string[]).includes(e.kind) ? T.event[e.kind as EventKind] : '일정', href: `/calendar?date=${d}&event=${e.id}`, task: e.linkedTask ? { id: e.linkedTask.id, status: e.linkedTask.status } : null, kind: e.kind === 'task_block' ? undefined : ('event' as const) })),
       ...(tasksByDay.get(d) ?? []).filter((t) => !linked.has(t.id)).map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id,
         tag: '업무', href: `/tasks/${t.id}`, task: t, kind: 'task' as const })),
       ...(agenda.data?.items ?? []).filter((x) => x.date === d).map((x, i) => ({ key: `s${x.space}${i}${x.title}`, time: x.time ?? '', title: x.title, personal: false, tag: x.space, href: x.href, task: null, kind: 'space' as const, space: x.space })),

@@ -38,7 +38,7 @@ export const ruleInput = z.object({
 type Rule = { id: string; name: string; org_unit_id: string | null; project_id: string | null; trigger: string; conditions: any; actions: z.infer<typeof actionSchema>[] };
 
 async function assertRuleScope(u: SessionUser, i: { orgUnitId?: string | null; projectId?: string | null }, sql: Sql) {
-  if (!atLeast(u, 'site_manager')) throw forbidden('자동화 규칙은 현장 관리자 이상이 만듭니다');
+  if (!atLeast(u, 'site_manager')) throw forbidden(`자동화 규칙은 ${(await (await import('./termsServer')).termsOfUser(u)).role.site_manager} 이상이 만듭니다`);
   if (i.projectId) {
     const [p] = await sql<{ org_unit_id: string }[]>`select org_unit_id from projects where id = ${i.projectId}`;
     if (!p) throw badRequest('프로젝트가 없습니다');

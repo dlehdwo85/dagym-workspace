@@ -14,7 +14,7 @@ const r1 = (n: number | null) => (n === null || Number.isNaN(n) ? null : Math.ro
  * 현장 관리자 이상, 자기 권한 범위의 현장만.
  */
 export async function siteComparison(u: SessionUser, weeks = 4, brand?: string | null) {
-  if (!atLeast(u, 'site_manager')) throw forbidden('현장 비교는 현장 관리자 이상이 봅니다');
+  if (!atLeast(u, 'site_manager')) throw forbidden(`현장 비교는 ${(await (await import('./termsServer')).termsOfUser(u)).role.site_manager} 이상이 봅니다`);
   const sql = db();
   const units = await accessibleUnitIds(u, sql);
   const today = todaySeoul();
@@ -164,18 +164,20 @@ export async function weeklyReportJob(now = new Date()) {
 }
 
 export async function listReports(u: SessionUser) {
-  if (!isAdmin(u)) throw forbidden('주간 보고는 대표·본사 관리자가 봅니다');
+  if (!isAdmin(u)) throw forbidden(`주간 보고는 ${await adminsWord(u)} 봅니다`);
   if (tenantOf(u) !== 'default') return [];
   return db()`select id, week_start, created_at, data->'totals' as totals from weekly_reports order by week_start desc limit 52`;
 }
 export async function getReport(u: SessionUser, id: string) {
-  if (!isAdmin(u)) throw forbidden('주간 보고는 대표·본사 관리자가 봅니다');
+  if (!isAdmin(u)) throw forbidden(`주간 보고는 ${await adminsWord(u)} 봅니다`);
   if (!/^[0-9a-f-]{36}$/.test(id) || tenantOf(u) !== 'default') throw notFound();
   const [r] = await db()`select id, week_start, created_at, data from weekly_reports where id = ${id}`;
   if (!r) throw notFound('보고서가 없습니다');
   return r;
 }
 
+/** 범용화 2단계: "대표·본사 관리자" — 그 회사의 역할 이름으로 */
+const adminsWord = async (u: SessionUser) => { const t = await (await import('./termsServer')).termsOfUser(u); return `${t.role.owner}·${t.role.admin}${(await import('./terms')).josaIGa(t.role.admin)}`; };
 export async function listHolidays(from: string, to: string, tenant?: string | null) {
   return (await import('./holidays')).holidaysBetween(tenant, from, to);
 }

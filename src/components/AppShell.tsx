@@ -33,7 +33,7 @@ import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
-import { ROLE_LABEL } from '@/lib/types';
+import { TERMS_BASE } from '@/lib/terms';
 import { clearReminders, enableNativePush, initNative, onAppActive, refreshWidget, setNativeBadge } from './native';
 import { PushRehome } from './PushRehome';
 import { restoreScroll, useSheetBack } from './backClose';
@@ -474,7 +474,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                   <div role="menu" className="absolute right-0 z-50 mt-1.5 w-60 animate-fade-up rounded-card border border-line bg-white p-1 shadow-pop">
                     <div className="flex items-center gap-2.5 px-2.5 py-2.5">
                       <Avatar id={session.user.id} name={session.user.name} size={36} />
-                      <div className="min-w-0"><div className="flex items-center gap-1.5 truncate text-sm font-semibold">{session.user.name}<RoleBadge role={session.user.role} /></div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
+                      <div className="min-w-0"><div className="flex items-center gap-1.5 truncate text-sm font-semibold">{session.user.name}<RoleBadge role={session.user.role} /></div><div className="truncate text-xs text-ink-2">{(session.terms ?? TERMS_BASE).role[session.user.role]} · {session.user.email}</div></div>
                     </div>
                     <div className="my-1 border-t border-line" />
                     <Link prefetch={false} role="menuitem" href="/settings" className="flex items-center gap-2.5 rounded-input px-2.5 py-2 text-sm hover:bg-slate-50"><Settings className="size-4 text-ink-2" />설정·알림</Link>
@@ -628,7 +628,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               <div className="flex items-center gap-3 px-3 py-2">
                 <Avatar id={session.user.id} name={session.user.name} size={40} />
                 {/* 대표 결정 15-25(10/26 15:50, #462): 휴대폰 프로필 시트에서만 직책 배지를 뺌 — PC 메뉴·목록·메신저는 그대로 */}
-                <div className="min-w-0 flex-1"><div className="flex items-center gap-1.5 font-semibold" data-testid="more-sheet-name">{session.user.name}</div><div className="truncate text-xs text-ink-2">{ROLE_LABEL[session.user.role]} · {session.user.email}</div></div>
+                <div className="min-w-0 flex-1"><div className="flex items-center gap-1.5 font-semibold" data-testid="more-sheet-name">{session.user.name}</div><div className="truncate text-xs text-ink-2">{(session.terms ?? TERMS_BASE).role[session.user.role]} · {session.user.email}</div></div>
                 <button onClick={() => setMore(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button>
               </div>
               {/* 대표 확정 10/22(#422 b): 하단 '더보기'를 없애고 이 시트는 오른쪽 위 프로필 버튼으로 연다 — '만들기' 줄은 뺌(업무 화면 [업무 추가]·캘린더·리드 화면에 있음, 음성은 업무 등록 창 안 [음성]) */}

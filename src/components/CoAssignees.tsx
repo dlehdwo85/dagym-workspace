@@ -2,6 +2,7 @@
 import type { ReactNode } from 'react';
 import { Check, X } from 'lucide-react';
 import { useSession } from '@/components/session';
+import { TERMS_BASE, type CapacityKey } from '@/lib/terms';
 import { Avatar, Button, cx } from '@/components/ui';
 import { UserSelect } from '@/components/pickers';
 
@@ -71,7 +72,9 @@ export function Assignees({ t, canEdit, onPatch, onAdded, extra }: { t: any; can
 
 /** 상세 위쪽(담당자가 여럿일 때): 담당자에게 [내 몫 완료]·취소 + '담당 n명 중 k명 완료 · 남은 사람' — 담당자가 아니면 진행 상황만 */
 export function PartBox({ t, onPatch, finishAs = null }: { t: any; onPatch: (body: Record<string, unknown>, okMsg?: string | ((r: any) => string)) => void; finishAs?: string | null }) {
-  const { user } = useSession();
+  const { user, terms } = useSession();
+  // 범용화 2단계(G-68): finishAs 는 자격 키 — 보이는 이름은 회사 용어에서(다짐은 지금 글자 그대로)
+  const asLabel = finishAs ? (terms ?? TERMS_BASE).capacity[finishAs as CapacityKey] ?? finishAs : null;
   if (t.status === 'done' || !multiOf(t)) return null;
   const { done, total, left } = progressOf(t);
   const me = partsOf(t).find((p) => p.id === user.id);
@@ -82,12 +85,12 @@ export function PartBox({ t, onPatch, finishAs = null }: { t: any; onPatch: (bod
         <b className="tabular-nums" data-testid="part-progress">담당 {total}명 중 {done}명 완료</b>
         {review ? ' — 모두 마쳐 검토 중입니다' : left.length ? ` — 남은 사람: ${left.map((p) => p.name).join(', ')}` : ' — 모두 마쳤습니다'}
         {me && !review && <span className="block text-xs text-violet-800">{me.done ? '내 몫을 마쳤습니다 ✓ 다른 담당자가 끝낼 때까지 내 업무에 흐리게 남고, 모두 끝나면 업무가 완료됩니다'
-          : finishAs ? `${finishAs} 자격 — [완료]를 누르면 남은 담당 몫까지 업무가 완료됩니다(남은 담당자에게 알림)` : '각자 [완료]를 누르면 내 몫이 끝나고, 마지막 사람이 끝낼 때 업무가 완료됩니다'}</span>}
+          : finishAs ? `${asLabel} 자격 — [완료]를 누르면 남은 담당 몫까지 업무가 완료됩니다(남은 담당자에게 알림)` : '각자 [완료]를 누르면 내 몫이 끝나고, 마지막 사람이 끝낼 때 업무가 완료됩니다'}</span>}
       </span>
       {/* 365차 #989(대표 11/05): 단추는 [완료] 하나 — 자격자 = 바로 업무 완료(남은 몫 기록·알림), 그 밖 함께 담당 = 내 몫 완료(마지막이면 업무 완료) */}
       {me && !review && (me.done
         ? <Button size="sm" variant="secondary" onClick={() => onPatch({ myPart: 'open' })} data-testid="part-btn">내 몫 완료 취소</Button>
-        : <Button size="sm" data-testid="part-btn" data-finish={finishAs ? '1' : undefined} title={finishAs ? `${finishAs} 자격 — 남은 담당 몫까지 완료` : '내 몫 완료(마지막 사람이면 업무 완료)'}
+        : <Button size="sm" data-testid="part-btn" data-finish={finishAs ? '1' : undefined} title={finishAs ? `${asLabel} 자격 — 남은 담당 몫까지 완료` : '내 몫 완료(마지막 사람이면 업무 완료)'}
             onClick={() => { if (finishAs) { if (confirmFinishAll(left.filter((p) => p.id !== me.id))) onPatch({ status: 'done', finish: true }, '완료 처리했습니다'); } else onPatch({ myPart: 'done' }, finishMsg); }}>완료</Button>)}
     </div>
   );

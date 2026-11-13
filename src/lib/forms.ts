@@ -34,7 +34,7 @@ export async function listForms(u: SessionUser) {
 }
 
 export async function saveForm(u: SessionUser, id: string | null, i: z.infer<typeof formInput>) {
-  if (!atLeast(u, 'site_manager')) throw forbidden('신고 양식은 현장 관리자 이상이 만듭니다');
+  if (!atLeast(u, 'site_manager')) throw forbidden(`신고 양식은 ${(await (await import('./termsServer')).termsOfUser(u)).role.site_manager} 이상이 만듭니다`);
   const sql = db();
   await assertUnitAccess(u, i.orgUnitId, sql);
   const title = i.title ?? KIND_LABEL[i.kind];

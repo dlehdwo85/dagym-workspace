@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Contact, Download, FileSpreadsheet, Mail, Phone, Plus, RotateCcw, Search, Trash2, Upload, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
-import { useSession } from '@/components/session';
+import { useSession, useTerms } from '@/components/session';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 type C = { id: string; name: string; organization: string | null; title: string | null; phone: string | null; email: string | null; memo: string; tags: string[]; owner_id: string | null; owner_name: string | null; source: string; last_contact_at: string | null; created_by_name: string | null; created_at: string; deleted_at: string | null; task_count: number; canEdit: boolean };
@@ -67,6 +67,7 @@ export default function ContactsPage() {
 }
 
 function EditModal({ init, onClose, onSaved }: { init: Partial<C>; onClose: () => void; onSaved: () => void }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { dir } = useSession();
   const [f, setF] = useState({ name: init.name ?? '', organization: init.organization ?? '', title: init.title ?? '', phone: init.phone ?? '', email: init.email ?? '', memo: init.memo ?? '', tags: (init.tags ?? []).join(', '), ownerId: init.owner_id ?? '' });
   const [busy, setBusy] = useState(false);
@@ -86,7 +87,7 @@ function EditModal({ init, onClose, onSaved }: { init: Partial<C>; onClose: () =
           <Field label="이름 *"><input className={inputCls} value={f.name} onChange={set('name')} aria-label="이름" data-testid="cf-name" autoFocus /></Field>
           <Field label="직함"><input className={inputCls} value={f.title} onChange={set('title')} aria-label="직함" data-testid="cf-title" /></Field>
         </div>
-        <Field label="회사·단지"><input className={inputCls} value={f.organization} onChange={set('organization')} aria-label="회사·단지" data-testid="cf-org" /></Field>
+        <Field label={T.contactOrg}><input className={inputCls} value={f.organization} onChange={set('organization')} aria-label={T.contactOrg} data-testid="cf-org" /></Field>
         <div className="grid grid-cols-2 gap-2">
           <Field label="휴대폰"><input className={inputCls} value={f.phone} onChange={set('phone')} inputMode="tel" placeholder="010-0000-0000" aria-label="휴대폰" data-testid="cf-phone" /></Field>
           <Field label="이메일"><input className={inputCls} value={f.email} onChange={set('email')} inputMode="email" aria-label="이메일" data-testid="cf-email" /></Field>
@@ -104,6 +105,7 @@ function EditModal({ init, onClose, onSaved }: { init: Partial<C>; onClose: () =
 }
 
 function DetailModal({ id, onClose, onEdit, onChanged }: { id: string; onClose: () => void; onEdit: (c: C) => void; onChanged: () => void }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const st = useApi<Detail>(`/api/contacts/${id}`, [id]);
   const c = st.data?.contact;
   const del = async () => {
@@ -128,7 +130,7 @@ function DetailModal({ id, onClose, onEdit, onChanged }: { id: string; onClose: 
           </div>
           {st.data!.tasks.length > 0 && <div><h3 className="text-xs font-semibold text-ink-2">연결된 업무</h3><ul className="mt-1 space-y-0.5 text-xs" data-testid="cd-tasks">{st.data!.tasks.map((t) => <li key={t.id}><Link href={`/tasks/${t.id}`} className="underline">{t.title}</Link> <span className="text-ink-3">· {fmtDateTime(t.linked_at)}</span></li>)}</ul></div>}
           {st.data!.sent.length > 0 && <div><h3 className="text-xs font-semibold text-ink-2">보낸 기록</h3><ul className="mt-1 space-y-0.5 text-xs" data-testid="cd-sent">{st.data!.sent.map((s) => <li key={s.id}>{CHANNEL[s.channel] ?? s.channel} · {s.subject ?? ''} <span className="text-ink-3">· {s.sender} · {fmtDateTime(s.sent_at ?? s.created_at)}</span></li>)}</ul></div>}
-          {st.data!.history.length > 0 && <details className="text-xs"><summary className="cursor-pointer text-ink-2">변경 기록 {st.data!.history.length}건</summary><ul className="mt-1 space-y-0.5">{st.data!.history.map((h, i) => <li key={i} className="text-ink-3">{fmtDateTime(h.created_at)} · {h.actor ?? '자동'} · {ACTION[h.action] ?? h.action}{h.action === 'updated' && h.changes && ` (${Object.keys(h.changes).map((k) => FIELD_KO[k] ?? k).join(', ')})`}</li>)}</ul></details>}
+          {st.data!.history.length > 0 && <details className="text-xs"><summary className="cursor-pointer text-ink-2">변경 기록 {st.data!.history.length}건</summary><ul className="mt-1 space-y-0.5">{st.data!.history.map((h, i) => <li key={i} className="text-ink-3">{fmtDateTime(h.created_at)} · {h.actor ?? '자동'} · {ACTION[h.action] ?? h.action}{h.action === 'updated' && h.changes && ` (${Object.keys(h.changes).map((k) => (k === 'organization' ? T.contactOrg : FIELD_KO[k]) ?? k).join(', ')})`}</li>)}</ul></details>}
           <div className="flex flex-wrap justify-end gap-2">
             {c.deleted_at ? (c.canEdit && <Button size="sm" variant="secondary" onClick={restore} data-testid="cd-restore"><RotateCcw />되살리기</Button>) : c.canEdit && <>
               <Button size="sm" variant="danger" onClick={del} data-testid="cd-delete"><Trash2 />휴지통</Button>
@@ -148,6 +150,7 @@ const IMPORT_FIELDS: [string, string][] = [['name', '이름 *'], ['organization'
 const toBase64 = (f: File) => new Promise<string>((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] ?? ''); r.onerror = () => fail(r.error); r.readAsDataURL(f); });
 
 function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const [parsed, setParsed] = useState<Parsed | null>(null);
   const [mapping, setMapping] = useState<Record<string, number | undefined>>({});
   const [tags, setTags] = useState('');
@@ -190,7 +193,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
           <>
             <p className="flex items-center gap-2 text-xs text-ink-2"><FileSpreadsheet className="size-4" />{fileName} · {parsed.rows.length}줄 <button className="ml-auto inline-flex items-center gap-1 text-ink-3 hover:text-ink" onClick={() => { setParsed(null); setPv(null); }}><X className="size-3.5" />다른 파일</button></p>
             {!parsed.vcard && <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="contacts-mapping">
-              {IMPORT_FIELDS.map(([k, label]) => <label key={k} className="text-xs text-ink-2">{label}<select className={cx(inputCls, 'mt-0.5 py-1')} value={mapping[k] ?? ''} onChange={(e) => setMapping({ ...mapping, [k]: e.target.value === '' ? undefined : Number(e.target.value) })} aria-label={`${label} 열`}><option value="">— 없음 —</option>{parsed.headers.map((h, i) => <option key={i} value={i}>{h}</option>)}</select></label>)}
+              {IMPORT_FIELDS.map(([k, l0]) => { const label = k === 'organization' ? T.contactOrg : l0; return <label key={k} className="text-xs text-ink-2">{label}<select className={cx(inputCls, 'mt-0.5 py-1')} value={mapping[k] ?? ''} onChange={(e) => setMapping({ ...mapping, [k]: e.target.value === '' ? undefined : Number(e.target.value) })} aria-label={`${label} 열`}><option value="">— 없음 —</option>{parsed.headers.map((h, i) => <option key={i} value={i}>{h}</option>)}</select></label>; })}
             </div>}
             <Field label="모두에게 붙일 태그 (선택, 쉼표)"><input className={inputCls} value={tags} onChange={(e) => setTags(e.target.value)} placeholder="예: 2026 박람회" aria-label="가져오기 태그" /></Field>
             {pv && <div className="rounded-card border border-line p-3" data-testid="contacts-preview">

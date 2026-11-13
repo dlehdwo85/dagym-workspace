@@ -6,9 +6,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Download, ExternalLink, FilePenLine, FileSpreadsheet, FileText, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock,
   Check, Pencil, Search, ShieldAlert, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
-import { useSession } from '@/components/session';
+import { useSession, useTerms } from '@/components/session';
 import { DropZone, PICK_MAX, UploadProgress, fileHash, putFile } from '@/components/upload';
-import { ROLE_LABEL } from '@/lib/types';
+import { type Role } from '@/lib/types';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 type Sec = 'public' | 'internal' | 'confidential';
@@ -585,6 +585,7 @@ function ConfLog({ onClose }: { onClose: () => void }) {
 
 /** V13 4번 폴더 권한 (대표만): 등급마다 이 폴더(와 하위 폴더)를 좁힌다. "상속" = 상위 폴더·메뉴 권한을 따름 */
 function FolderPerms({ folder, onClose }: { folder: string; onClose: () => void }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { data, reload } = useApi<{ perms: { folder: string; role: string; level: string }[] }>('/api/library/folder-perms');
   const roles = ['admin', 'dept_lead', 'site_manager', 'staff'] as const;
   const inherited = (role: string) => { const parts = folder.split('/'); for (let n = parts.length - 1; n >= 1; n--) { const p = data?.perms.find((x) => x.role === role && x.folder === parts.slice(0, n).join('/')); if (p) return `${p.folder} 설정`; } return '메뉴 권한'; };
@@ -596,8 +597,8 @@ function FolderPerms({ folder, onClose }: { folder: string; onClose: () => void 
       <div className="space-y-2" data-testid="folder-perms">
         <p className="text-xs text-ink-2">하위 폴더는 이 설정을 그대로 따릅니다. 메뉴 권한(사용자 관리 → 메뉴 권한)보다 넓힐 수는 없습니다. 대표는 항상 모든 폴더를 봅니다.</p>
         {roles.map((r) => (
-          <label key={r} className="flex items-center justify-between gap-2 text-sm">{ROLE_LABEL[r]}
-            <select className={cx(inputCls, 'h-9 w-44')} value={data?.perms.find((x) => x.folder === folder && x.role === r)?.level ?? ''} onChange={(e) => set(r, e.target.value)} aria-label={`${ROLE_LABEL[r]} 폴더 권한`}>
+          <label key={r} className="flex items-center justify-between gap-2 text-sm">{T.role[r as Role]}
+            <select className={cx(inputCls, 'h-9 w-44')} value={data?.perms.find((x) => x.folder === folder && x.role === r)?.level ?? ''} onChange={(e) => set(r, e.target.value)} aria-label={`${T.role[r as Role]} 폴더 권한`}>
               <option value="">상속 ({inherited(r)})</option><option value="none">안 보임</option><option value="view">보기</option><option value="edit">올리기·수정</option><option value="delete">삭제까지</option>
             </select>
           </label>

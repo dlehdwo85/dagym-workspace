@@ -901,7 +901,7 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       const left = (await partsOf(tx, id)).filter((p) => !p.done && p.id !== u.id);
       if (left.length) {
         await activity(tx, 'task', id, u.id, 'closed_by', { as: perms.finish, left: left.map((p) => p.name) });
-        await notify(tx, { userIds: left.map((p) => p.id), type: 'task_closed', title: `완료 처리됨: ${title}`, body: `${u.name}(${perms.finish})님이 업무를 완료 처리했습니다 — 남은 내 몫도 완료로 봅니다`,
+        await notify(tx, { userIds: left.map((p) => p.id), type: 'task_closed', title: `완료 처리됨: ${title}`, body: `${u.name}(${(await (await import('./termsServer')).termsOfUser(u)).capacity[perms.finish] ?? perms.finish})님이 업무를 완료 처리했습니다 — 남은 내 몫도 완료로 봅니다`,
           link: `/tasks/${id}`, entityType: 'task', entityId: id, actorId: u.id, dedupeKey: `closed:${id}:${upd.version}` });
       }
     }

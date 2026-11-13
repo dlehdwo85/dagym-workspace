@@ -15,7 +15,7 @@ import dynamic from 'next/dynamic';
 import { createPlugin, type EventDropArg, type DatesSetArg, type EventClickArg } from '@fullcalendar/core';
 import { Interaction, type InteractionSettings } from '@fullcalendar/core/internal';
 import { api, broadcastRefresh, useApi } from '@/components/client';
-import { useSession } from '@/components/session';
+import { useSession, useTerms } from '@/components/session';
 import { MeetingRecordLine, WorkinMeetingToggle, enableEventMeeting, isWorkinMeet } from '@/components/meet/EventMeeting';
 import { Bell, CalendarPlus, Check, ChevronDown, FileSpreadsheet, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock, ExternalLink, ListChecks, MapPin, Pencil, Plus, Timer, Trash2, Users, Video, X } from 'lucide-react';
 import { Avatar, AvatarStack, avatarColor, initials, Button, DueChip, ErrorBox, Field, Modal, StatusBadge, cx, fmtDateTime, fmtTime, fmtTimeRange, inputCls, toast } from '@/components/ui';
@@ -26,7 +26,8 @@ import { swipeState, useCalendarSwipe } from '@/components/calSwipe';
 import { EventWork, LinkedTaskList } from '@/components/EventWork';
 import { MultiUserSelect, RecurSelect, ReminderEditor, UserSelect } from '@/components/pickers';
 import { Attachments } from '@/components/Attachments';
-import { ABSENCE_KINDS, EVENT_KIND_LABEL } from '@/lib/types';
+import { ABSENCE_KINDS } from '@/lib/types';
+import type { EventKind } from '@/lib/terms';
 import { SPACE_META } from '@/components/spaceMeta';
 import { DeletedEvents } from '@/components/DeletedEvents';
 import { CalColorsDialog, ColorDot, PALETTE_NAMES, eventColorOf, isPersonalTask, saveColorPart, useCalColors } from '@/components/calColors';
@@ -86,6 +87,7 @@ function ScopeDialog() {
 
 /** 점검 2026-10-16 ④: 이 기기 기억(localStorage)·화면 폭을 첫 렌더에서 읽으므로 브라우저에서만 그린다(하이드레이션 오류 #418 방지) */
 function CalendarPage() {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { dir, user } = useSession();
   const sp = useSearchParams();
   const router = useRouter();
@@ -331,7 +333,7 @@ function CalendarPage() {
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
     ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e) && (showDone || (e.linkedTask ?? e.blockTask)?.status !== 'done')).map((e) => ({ // 완료된 업무의 일정·업무 시간 블록은 "완료 보기"를 켤 때만
-      id: `${e.id}|${e.originalStart ?? ''}`, title: `${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${EVENT_KIND_LABEL[e.kind as keyof typeof EVENT_KIND_LABEL]}] ` : ''}${cleanTitle(e.title)}${foldTail(foldedBy.get(`${seoulDate(e.start)}|${normT(e.title)}`) ?? [])}`,
+      id: `${e.id}|${e.originalStart ?? ''}`, title: `${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${T.event[e.kind as EventKind]}] ` : ''}${cleanTitle(e.title)}${foldTail(foldedBy.get(`${seoulDate(e.start)}|${normT(e.title)}`) ?? [])}`,
       classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(!e.masked && e.location?.trim() ? ['is-travel'] : []), /* V36 4: 장소 있음 = 이동 일정 */ ...(e.linkedTask || foldedBy.has(`${seoulDate(e.start)}|${normT(e.title)}`) ? ['has-task'] : []), ...((e.linkedTask ?? e.blockTask)?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
       // V7 4번: 색은 개인/회사 두 가지만(사람 구분은 제목 앞 머리글자)
@@ -1089,6 +1091,7 @@ function ColorRow({ value, onChange, testId }: { value: string | null; onChange:
 }
 
 function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved, dirUsers }: { id?: string; occurrenceStart?: string; draft?: any; calendars: any[]; onClose: () => void; onSaved: () => void; dirUsers: any[] }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { user, features } = useSession();
   const meetOn = !!features.meetings; const [meetNew, setMeetNew] = useState(false); // 219차 [워크인 화상회의](새 일정은 저장할 때 켬)
   const existing = useApi<any>(id ? `/api/events/${id}` : null);
@@ -1266,7 +1269,7 @@ function EventEditor({ id, occurrenceStart, draft, calendars, onClose, onSaved, 
             </Field>}
             <Field label="종류">
               <select className={inputCls} value={f.kind} onChange={(e) => { set('kind')(e.target.value); if (e.target.value === 'vacation' || e.target.value === 'business_trip') set('allDay')(true); }}>
-                {Object.entries(EVENT_KIND_LABEL).filter(([k]) => k !== 'task_block' || f.kind === 'task_block').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                {Object.entries(T.event).filter(([k]) => k !== 'task_block' || f.kind === 'task_block').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </Field>
             <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={f.allDay} onChange={(e) => set('allDay')(e.target.checked)} />종일</label>

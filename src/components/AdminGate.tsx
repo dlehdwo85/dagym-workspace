@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { useTerms } from './session';
 import { usePathname } from 'next/navigation';
 import { ShieldAlert } from 'lucide-react';
 import { adminPageFor } from '@/lib/adminPages';
@@ -15,10 +16,11 @@ export function AdminGate({ levels, children }: { levels: Record<string, string>
   return <>{page && !page.selfBack && <BackBar fallback={page.parent?.href ?? '/'} crumbs={[page.parent ?? { label: '관리' }, { label: inApp && page.href === '/admin/usage' ? '사용량' : page.label }]} />}{children}</>;
 }
 export function NoAccess({ what }: { what?: string }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   return (
     <div className="mx-auto mt-6 max-w-lg rounded-card border border-line bg-white p-6 text-sm shadow-card" data-testid="admin-no-access">
       <p className="flex items-center gap-2 text-base font-semibold"><ShieldAlert className="size-5 text-amber-600" />{what ? `"${what}" 화면 권한이 없습니다` : '관리 화면 권한이 없습니다'}</p>
-      <p className="mt-2 text-ink-2">관리 메뉴는 회사 관리자 화면입니다. 필요하면 대표에게 <b>사용자 관리 → 메뉴 권한</b>에서 이 메뉴를 켜 달라고 요청하세요.</p>
+      <p className="mt-2 text-ink-2">관리 메뉴는 회사 관리자 화면입니다. 필요하면 {T.role.owner}에게 <b>사용자 관리 → 메뉴 권한</b>에서 이 메뉴를 켜 달라고 요청하세요.</p>
       <Link href="/" className="mt-4 inline-block rounded-input bg-brand-600 px-4 py-2 font-medium text-white">홈으로</Link>
     </div>
   );

@@ -4,11 +4,10 @@ import { RoleBadge } from '@/components/RoleBadge';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { api, useApi } from '@/components/client';
-import { useSession } from '@/components/session';
+import { useSession, useTerms } from '@/components/session';
 import { Button, ErrorBox, cx, Field, Loading, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { alarmDeviceStatus, enableNativePush, isNativeApp, openAlarmSettings, subscribeWebPush } from '@/components/native';
 import { BioLockSetting } from '@/components/BioLock';
-import { ROLE_LABEL } from '@/lib/types';
 import { UserSelect } from '@/components/pickers';
 import { useInApp } from '@/components/inApp';
 
@@ -30,6 +29,7 @@ function FullScreenAlarmNotice() {
 }
 
 export default function Settings() {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { user, features } = useSession();
   const { data, error, loading, reload } = useApi<any>('/api/notifications/prefs');
   const [types, setTypes] = useState<any[]>([]);
@@ -59,7 +59,7 @@ export default function Settings() {
       {(user.role === 'owner' || user.role === 'admin') && <p className="text-sm text-ink-2">관리: <a href="/admin/holidays" className="font-medium text-accent-600 underline">공휴일</a> · <a href="/admin/users" className="font-medium text-accent-600 underline">사용자 관리</a> · <a href="/revenue" className="font-medium text-accent-600 underline">매출</a></p>}
       <section className="rounded-lg border bg-white p-4 text-sm">
         <div className="font-semibold">{user.name}</div>
-        <div className="flex items-center gap-1.5 text-slate-500">{user.email} · {ROLE_LABEL[user.role]}<RoleBadge role={user.role} size="sm" /></div>
+        <div className="flex items-center gap-1.5 text-slate-500">{user.email} · {T.role[user.role]}<RoleBadge role={user.role} size="sm" /></div>
         {features.googleSync && <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 (선택 기능) →</Link>}
         {/* 397차 #1023(애플 11/06 반려 5.1.1(v) '앱 안에 계정 삭제를 시작하는 메뉴가 없음'): 설정 맨 위에서 바로 — 아래 '계정 › 계정 삭제' 칸을 펼쳐 보여 줌 */}
         <a href="#delete-account" className="mt-2 block w-fit text-xs text-red-700 underline" data-testid="to-delete-account">계정 삭제</a>

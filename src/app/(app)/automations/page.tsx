@@ -1,19 +1,21 @@
 'use client';
 import { useState } from 'react';
+import { roleOrAbove } from '@/lib/terms';
 import { Workflow } from 'lucide-react';
 import { AutomationRules } from '@/components/Automations';
-import { useSession, canManage, isAdminRole } from '@/components/session';
+import { useSession, canManage, isAdminRole, useTerms } from '@/components/session';
 import { ErrorBox, Field, PageHeader, fmtDateTime } from '@/components/ui';
 import { UnitSelect } from '@/components/pickers';
 import { useApi } from '@/components/client';
 
 /** B-10 조직·전사 자동화 규칙 (프로젝트 규칙은 프로젝트 화면의 "자동화" 탭) */
 export default function AutomationsPage() {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { user } = useSession();
   const admin = isAdminRole(user.role);
   const [unit, setUnit] = useState('');
   const runs = useApi<{ runs: any[] }>('/api/automations');
-  if (!canManage(user.role)) return <ErrorBox error={{ status: 403, message: '자동화 규칙은 현장 관리자 이상이 관리합니다.' }} />;
+  if (!canManage(user.role)) return <ErrorBox error={{ status: 403, message: `자동화 규칙은 ${roleOrAbove(T, 'site_manager')}이 관리합니다.` }} />;
   return (
     <div className="space-y-5">
       <PageHeader title="자동화" icon={Workflow} sub="조직(현장·부서) 단위 또는 전사 규칙입니다. 프로젝트 전용 규칙은 프로젝트 화면의 자동화 탭에서 만듭니다." />

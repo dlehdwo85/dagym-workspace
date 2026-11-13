@@ -22,7 +22,7 @@ export const POST = handler(async ({ req, user }) => {
     name: z.string().trim().min(1).max(60), description: z.string().max(500).optional(),
     orgUnitId: zUuid.nullable().optional(), payload: templatePayload.optional(), fromTaskId: zUuid.optional(),
   }));
-  if (!i.personal && !atLeast(user, 'site_manager')) throw forbidden('공용 템플릿은 현장 관리자 이상이 만들 수 있습니다 — 개인 템플릿으로 저장하세요');
+  if (!i.personal && !atLeast(user, 'site_manager')) throw forbidden(`공용 템플릿은 ${(await (await import('@/lib/termsServer')).termsOfUser(user)).role.site_manager} 이상이 만들 수 있습니다 — 개인 템플릿으로 저장하세요`);
   const sql = db();
   let payload = i.payload;
   if (i.fromTaskId) {

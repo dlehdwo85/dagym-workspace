@@ -703,7 +703,7 @@ async function runTool(c: Ctx, name: string, input: any): Promise<unknown> {
         const G = await import('./guard');
         const b = await G.userAiBudget(u);
         const est = Math.round(b.avgDocKrw * (i.design ? 3 : 1));
-        if (est > b.remainingKrw) return { error: `예상 비용 약 ${est.toLocaleString('ko-KR')}원이 남은 AI 한도 ${b.remainingKrw.toLocaleString('ko-KR')}원보다 커서 시작하지 않았습니다. 양식 채우기(fill_template)를 쓰거나 대표에게 한도 추가를 요청하라고 안내하세요.` };
+        if (est > b.remainingKrw) return { error: `예상 비용 약 ${est.toLocaleString('ko-KR')}원이 남은 AI 한도 ${b.remainingKrw.toLocaleString('ko-KR')}원보다 커서 시작하지 않았습니다. 양식 채우기(fill_template)를 쓰거나 ${await (await import('../termsServer')).ownerWord(u)}에게 한도 추가를 요청하라고 안내하세요.` };
         if (est > 500 && !i.confirmedCost) return { needConfirm: true, estimateKrw: est, note: `비용이 큰 작업입니다(약 ${est.toLocaleString('ko-KR')}원). 사용자에게 "계속할까요?"라고 물어보고, 동의하면 confirmedCost=true 로 다시 부르세요.` };
       }
       let version = 1;
@@ -1270,7 +1270,7 @@ export async function decideProposal(u: SessionUser, id: string, accept: boolean
         const body = z.string().trim().min(1).max(2000).parse(x.body);
         if (x.taskId) { const r = await logSms(u, { taskId: x.taskId, to, body }, null); result = { outboxId: r.id, link: `/tasks/${x.taskId}` }; }
         else {
-          if (!(await canSend(u))) throw forbidden('문자 보내기 권한이 없습니다. 대표에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)');
+          if (!(await canSend(u))) throw forbidden(`문자 보내기 권한이 없습니다. ${await (await import('../termsServer')).ownerWord(u)}에게 요청하세요(설정 > 메뉴 권한 > 외부 발송)`);
           const oid = crypto.randomUUID();
           await sql`insert into outbox (id, tenant, channel, status, created_by, to_addrs, subject, body_text, message_id, sent_at) values (${oid}, ${tenantOf(u)}, 'sms:handoff', 'sent', ${u.id}, ${to}, '문자', ${body}, ${`sms-${oid}`}, now())`;
           result = { outboxId: oid, link: '/mail/outbox' };

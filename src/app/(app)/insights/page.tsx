@@ -3,9 +3,10 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { ArrowDownUp, BarChart3, MapPin } from 'lucide-react';
 import { useApi } from '@/components/client';
-import { useSession, canManage } from '@/components/session';
+import { useSession, canManage, useTerms } from '@/components/session';
 import { BRAND_TONE, ErrorBox, PageHeader, Skeleton, cx, fmtDate } from '@/components/ui';
-import { HIDDEN_BRANDS, UNIT_TYPE_LABEL } from '@/lib/types';
+import { HIDDEN_BRANDS } from '@/lib/types';
+import { roleOrAbove, type UnitType } from '@/lib/terms';
 
 type Site = any;
 const COLS: { key: string; label: string; hint: string; fmt: (s: Site) => string; tone?: (s: Site) => string; sortVal: (s: Site) => number }[] = [
@@ -28,6 +29,7 @@ function Spark({ points }: { points: { done: number; onTimeRate: number | null }
 
 /** B-14 현장 비교 대시보드 */
 export default function InsightsPage() {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { user, dir } = useSession();
   const [weeks, setWeeks] = useState(4);
   const [brand, setBrand] = useState('');
@@ -37,7 +39,7 @@ export default function InsightsPage() {
     const col = COLS.find((c) => c.key === sort.key)!;
     return [...(data?.sites ?? [])].sort((a, b) => (col.sortVal(a) - col.sortVal(b)) * sort.dir);
   }, [data, sort]);
-  if (!canManage(user.role)) return <ErrorBox error={{ status: 403, message: '현장 비교는 현장 관리자 이상이 봅니다.' }} />;
+  if (!canManage(user.role)) return <ErrorBox error={{ status: 403, message: `현장 비교는 ${roleOrAbove(T, 'site_manager')}이 봅니다.` }} />;
   return (
     <div className="space-y-4">
       <PageHeader title="현장 비교" icon={BarChart3} sub={data ? `${fmtDate(data.from)} ~ ${fmtDate(data.to)} · 지점·위탁현장별` : '지점·위탁현장별 운영 지표'} actions={<>
@@ -75,7 +77,7 @@ export default function InsightsPage() {
                       <Link href={`/tasks?orgUnitId=${s.id}`} className="flex items-center gap-2 font-medium hover:underline">
                         {s.brand_id && <span className="size-2 rounded-full" style={{ background: BRAND_TONE[s.brand_id]?.hex }} />}{s.name}
                       </Link>
-                      <span className="text-xs text-ink-3">{UNIT_TYPE_LABEL[s.type as keyof typeof UNIT_TYPE_LABEL]} · 진행 {s.open}</span>
+                      <span className="text-xs text-ink-3">{T.unit[s.type as UnitType]} · 진행 {s.open}</span>
                     </td>
                     {COLS.map((c) => <td key={c.key} className={cx('px-3 py-3 text-right font-semibold tabular-nums', c.tone?.(s))}>{c.fmt(s)}</td>)}
                     <td className="px-4 py-3"><Spark points={s.trend} /></td>

@@ -1,14 +1,16 @@
 'use client';
 import { useState } from 'react';
+import { roleOrAbove } from '@/lib/terms';
 import { useRouter } from 'next/navigation';
 import { api, useApi } from '@/components/client';
-import { useSession } from '@/components/session';
+import { useSession, useTerms } from '@/components/session';
 import { Button, ErrorBox, Field, Loading, Modal, inputCls, toast } from '@/components/ui';
 import { UnitSelect, UserSelect } from '@/components/pickers';
 import { PRIORITY_LABEL } from '@/lib/types';
 import { describeRule } from '@/lib/recurrence';
 
 export default function Templates() {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const router = useRouter();
   const { user, dir } = useSession();
   const { data, error, loading, reload } = useApi<{ templates: any[] }>('/api/templates');
@@ -21,7 +23,7 @@ export default function Templates() {
   return (
     <div className="space-y-3">
       <h1 className="text-lg font-bold">업무 템플릿</h1>
-      <p className="text-sm text-slate-500">자주 하는 업무를 복사해 바로 시작합니다. 업무 상세 화면의 “템플릿으로 저장”으로 새 템플릿을 만들 수 있습니다(현장 관리자 이상).</p>
+      <p className="text-sm text-slate-500">자주 하는 업무를 복사해 바로 시작합니다. 업무 상세 화면의 “템플릿으로 저장”으로 새 템플릿을 만들 수 있습니다({roleOrAbove(T, 'site_manager')}).</p>
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="templates">
           {data!.templates.map((t) => (

@@ -50,6 +50,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       meetings: (await import('@/lib/meetings')).meetingsOn(tenantOf(user)), // 219차 워크인 화상회의(기본 꺼짐) · #946 MEETINGS_TENANTS 면 그 회사만
       appHost: (() => { const h = hostSplit(); return h.on ? h.app : null; })() /* 198차 결정 15-29 주소 분리(켰을 때만) */ },
     menus,
+    terms: await (await import('@/lib/termsServer')).termsOfUser(user), // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
     spaces, // V41 공간
     tours: { seen: await (await import('@/lib/tours')).seenTours(user.id).catch(() => []), auto: (await import('@/lib/tours')).toursAuto(user) }, // #77 처음 사용 안내
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)

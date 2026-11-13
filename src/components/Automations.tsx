@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Bell, Flag, Plus, Trash2, UserRound, Workflow, Zap, CornerDownRight } from 'lucide-react';
 import { api, useApi } from './client';
-import { useSession } from './session';
+import { useSession, useTerms } from './session';
 import { Button, Empty, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
 import { STATUS_LABEL, STATUSES, PRIORITY_LABEL } from '@/lib/types';
 
@@ -11,9 +11,9 @@ export const TRIGGER_LABEL: Record<string, string> = {
 };
 const NOTIFY_TO: Record<string, string> = { assignee: '담당자', creator: '만든 사람', unit_managers: '현장 관리자', user: '지정한 사람' };
 
-export function describeAction(a: any, userName: (id: string) => string) {
+export function describeAction(a: any, userName: (id: string) => string, unitManagers: string = NOTIFY_TO.unit_managers) {
   switch (a.type) {
-    case 'notify': return `${a.to === 'user' ? userName(a.userId) : NOTIFY_TO[a.to]}에게 알림${a.message ? ` “${a.message}”` : ''}`;
+    case 'notify': return `${a.to === 'user' ? userName(a.userId) : (a.to === 'unit_managers' ? unitManagers : NOTIFY_TO[a.to])}에게 알림${a.message ? ` “${a.message}”` : ''}`;
     case 'set_assignee': return `담당자를 ${userName(a.userId)}(으)로`;
     case 'set_priority': return `우선순위를 ${PRIORITY_LABEL[a.priority as keyof typeof PRIORITY_LABEL]}(으)로`;
     case 'create_follow_up': return `후속 업무 “${a.title}” 만들기${a.dueInDays !== undefined ? ` (${a.dueInDays}일 뒤 마감)` : ''}`;
@@ -24,6 +24,7 @@ const ACTION_ICON: Record<string, typeof Bell> = { notify: Bell, set_assignee: U
 
 /** B-10 자동화 규칙 목록·추가. scope: 프로젝트 또는 조직(없으면 전사) */
 export function AutomationRules({ projectId, orgUnitId, canEdit }: { projectId?: string; orgUnitId?: string; canEdit: boolean }) {
+  const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
   const { dir } = useSession();
   const { data, reload } = useApi<{ rules: any[]; runs: any[] }>('/api/automations');
   const [open, setOpen] = useState(false);
@@ -42,7 +43,7 @@ export function AutomationRules({ projectId, orgUnitId, canEdit }: { projectId?:
         <p className="text-sm text-ink-2">조건이 맞으면 알림·배정·후속 업무를 자동으로 처리합니다. 규칙이 만든 변경은 다시 규칙을 부르지 않습니다.</p>
         {canEdit && <Button size="sm" onClick={() => setOpen(true)}><Plus />규칙 추가</Button>}
       </div>
-      {!rules.length ? <Empty title="자동화 규칙이 없습니다" icon={Workflow}>예: “검토 요청이 되면 현장 관리자에게 알림”, “완료되면 비용 정산 후속 업무 만들기”</Empty> : (
+      {!rules.length ? <Empty title="자동화 규칙이 없습니다" icon={Workflow}>예: “검토 요청이 되면 {T.role.site_manager}에게 알림”, “완료되면 비용 정산 후속 업무 만들기”</Empty> : (
         <ul className="space-y-2">
           {rules.map((r) => (
             <li key={r.id} className={cx('rounded-card border border-line bg-white p-4 shadow-card', !r.enabled && 'opacity-60')}>
@@ -57,7 +58,7 @@ export function AutomationRules({ projectId, orgUnitId, canEdit }: { projectId?:
                 <span className="rounded-md bg-accent-50 px-2 py-0.5 font-medium text-accent-700">{TRIGGER_LABEL[r.trigger]}{r.conditions?.toStatus ? ` (→ ${STATUS_LABEL[r.conditions.toStatus as keyof typeof STATUS_LABEL]})` : ''}{r.conditions?.hoursBefore ? ` (${r.conditions.hoursBefore}시간 전)` : ''}</span>
                 {r.actions.map((a: any, i: number) => {
                   const I = ACTION_ICON[a.type] ?? Bell;
-                  return <span key={i} className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-ink"><I className="size-3.5 text-ink-2" />{describeAction(a, userName)}</span>;
+                  return <span key={i} className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-ink"><I className="size-3.5 text-ink-2" />{describeAction(a, userName, T.role.site_manager)}</span>;
                 })}
               </div>
             </li>
