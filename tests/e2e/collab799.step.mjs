@@ -9,6 +9,12 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
   const rows = await sql`select id, assignee_id from tasks where id = any(${r.ids}::uuid[])`;
   const bA = rows.find((x) => x.assignee_id === ctx.staffA.id).id, bB = rows.find((x) => x.assignee_id === ctx.staffB.id).id;
   const solo = (await o.ok('POST', '/api/tasks', { title: 'E2E 개인 업무 799', orgUnitId: ctx.hq, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
+  // 392차(대표 11/13 '공고 D-day 순'): 입찰 업무(마감 D-10)·기한 지난 공동 업무(2일 지남)·오늘 공동 업무 — 입찰을 먼저 모으지 않고 마감 가까운 순
+  const ymd = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + n * 864e5));
+  const bid392 = (await o.ok('POST', '/api/tasks', { title: 'E2E 392 입찰 D-10', orgUnitId: ctx.hq, assigneeId: ctx.staffA.id, coAssigneeIds: [ctx.staffB.id], dueDate: ymd(10), approvalRequired: false })).id;
+  await sql`update tasks set sales_ref = ${sql.json({ kind: 'bid', name: 'E2E 392 공고' })} where id = ${bid392}`;
+  const past392 = (await o.ok('POST', '/api/tasks', { title: 'E2E 392 지난 공동', orgUnitId: ctx.hq, assigneeId: ctx.staffA.id, coAssigneeIds: [ctx.staffB.id], dueDate: ymd(-2), approvalRequired: false })).id;
+  const today392 = (await o.ok('POST', '/api/tasks', { title: 'E2E 392 오늘 공동', orgUnitId: ctx.hq, assigneeId: ctx.staffA.id, coAssigneeIds: [ctx.staffB.id], dueDate: ymd(0), approvalRequired: false })).id;
   await b.ok('PATCH', `/api/tasks/${co}`, { status: 'done' }); // 박직원 내 몫 완료(업무는 이직원 몫이 남아 그대로)
   await b.ok('PATCH', `/api/tasks/${bB}`, { status: 'in_progress' });
   await staff.goto(`${BASE}/tasks?view=my&group=due`); // 앞 단계가 이 기기에 '직원별' 묶음을 기억시켰을 수 있음 — 내 업무 기본(마감일 묶음)으로
@@ -17,6 +23,8 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
   const n = Number(await box.getByTestId('my-collab-count').innerText()); // 앞 단계가 만든 함께 담당 업무도 있을 수 있음
   assert.ok(n >= 2, `공동 업무 ${n}`);
   assert.match(await box.locator('h2').innerText(), /^공동 업무/);
+  const order = (await box.getByTestId('collab-row').allInnerTexts()).map((t) => ['E2E 392 지난 공동', 'E2E 392 오늘 공동', 'E2E 392 입찰 D-10'].find((x) => t.includes(x))).filter(Boolean);
+  assert.deepEqual(order, ['E2E 392 지난 공동', 'E2E 392 오늘 공동', 'E2E 392 입찰 D-10'], '392차: 입찰을 먼저 모으지 않고 마감 가까운 순(기한 지난 것 먼저)');
   const rowOf = (title) => box.getByTestId('collab-row').filter({ hasText: title });
   // 308차 #866: 함께하는 사람은 '함께' 열의 얼굴(끝낸 사람 초록 테두리) — 이름·상태는 마우스를 올리면
   assert.equal(await rowOf('E2E 협업 입찰 서류').getByTestId('collab-person').getAttribute('aria-label'), '박직원 · 내 몫 완료', '끝낸 사람 표시');
@@ -82,7 +90,9 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
   await home.waitFor();
   assert.equal(await home.getByTestId('home-collab-row').count(), n);
   assert.match(await home.innerText(), /^공동 업무/); assert.match(await home.innerText(), /✓ 박직원/);
+  const homeOrder = (await home.getByTestId('home-collab-row').allInnerTexts()).map((t) => ['E2E 392 지난 공동', 'E2E 392 오늘 공동', 'E2E 392 입찰 D-10'].find((x) => t.includes(x))).filter(Boolean);
+  assert.deepEqual(homeOrder, ['E2E 392 지난 공동', 'E2E 392 오늘 공동', 'E2E 392 입찰 D-10'], '392차: 홈 공동 업무 카드도 마감 가까운 순');
   await home.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await staff.screenshot({ path: `${SHOTS}/268-collab-home.png` });
-  for (const id of [co, bA, bB, solo]) await o.ok('DELETE', `/api/tasks/${id}`);
+  for (const id of [co, bA, bB, solo, bid392, past392, today392]) await o.ok('DELETE', `/api/tasks/${id}`);
 }

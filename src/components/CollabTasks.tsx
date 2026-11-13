@@ -13,9 +13,10 @@ type CollabTask = {
   sales_ref?: unknown; project_id?: string | null; due_date?: string | null; due_time?: string | null;
 };
 export const isCollab = (t: CollabTask) => t.status !== 'done' && (multiOf(t) || (t.batch?.total ?? 0) > 1);
-/** 입찰·프로젝트 업무 먼저 → 마감 가까운 순(마감 없는 것 뒤) → 시각 */
+/** 392차(대표 11/13 휴대폰 사진 '공고 D-day 순으로 정리돼야 하는데 공동 업무가 위아래 순서가 안 맞는다'): 예전(#799)엔 입찰·프로젝트 업무를 먼저 모은 뒤 그 안에서만
+ *  마감순이라 입찰 묶음(D-3~D-11) 아래에 기한 지난 공동 업무가 다시 나왔음 → 전부 마감 가까운 순(기한 지난 것 먼저, 마감 없는 것 맨 뒤) → 시각 → 같은 날·시각이면 입찰·프로젝트 먼저 */
 const lead = (t: CollabTask) => (t.sales_ref || t.project_id ? 0 : 1);
-export const collabSort = <T extends CollabTask>(a: T, b: T) => lead(a) - lead(b) || (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999') || (a.due_time ?? '99').localeCompare(b.due_time ?? '99');
+export const collabSort = <T extends CollabTask>(a: T, b: T) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999') || (a.due_time ?? '99').localeCompare(b.due_time ?? '99') || lead(a) - lead(b);
 /** 함께하는 사람(나 말고)과 진행 — 공동 담당은 '내 몫 완료·진행 중·확인 전', 묶음은 그 사람 업무의 상태 */
 export function collabPeople(t: CollabTask, uid: string): { id: string; name: string; state: string; done: boolean }[] {
   if (multiOf(t)) return partsOf(t).filter((p) => p.id !== uid).map((p) => ({ id: p.id, name: p.name || '이름 없음', state: p.done ? '내 몫 완료' : !p.acked ? '확인 전' : '진행 중', done: p.done }));
