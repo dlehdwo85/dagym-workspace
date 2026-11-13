@@ -197,13 +197,16 @@ export async function homeAct(u: SessionUser, i: z.infer<typeof homeAction>) {
 /** 밤사이 비서(정기 실행): 22시~06시(KST), night_scope.draft 켠 회사만 — 3일 안에 게시할 자동 시안을 미리 만든다(만든 건 night_run 표시 → 아침 홈 '🌙 밤사이 결과'·브리핑). 돈·외부 발송 없음 */
 export async function nightAssistantTick() {
   const h = hourKst();
-  if (h < 22 && h >= 6) return { skipped: 'day' };
+  if (h < 22 && h >= 6 && process.env.MKT_NIGHT_ANYHOUR !== '1') return { skipped: 'day' }; // MKT_NIGHT_ANYHOUR=1 은 시험용(시각 조건 없이)
   const sql = db();
   const ts = await sql<{ tenant: string }[]>`select tenant from ai_settings where coalesce((night_scope->>'draft')::boolean, false) limit 5`;
-  const out: { tenant: string; due: number }[] = [];
-  const { produceContent } = await import('./mktAuto');
+  const out: { tenant: string; due: number; paused?: boolean }[] = [];
+  const { produceContent, autoPaused } = await import('./mktAuto');
   const L = await import('./later');
   for (const { tenant } of ts) {
+    // 대표 11/14 #1049(자동 제작을 멈춤 — "AI 한도가 닳으니"): 자동 제작 일시정지 중에는 밤사이 비서도 시안을 만들지 않는다.
+    // 예전엔 이 확인이 없어, 일시정지 전에 잡힌 칸(3일 안 게시)을 밤마다 3건씩 만들 수 있었다(화면 안내는 '밤사이 제작도 멈춤'이었음 — mktStatus)
+    if (await autoPaused(tenant)) { out.push({ tenant, due: 0, paused: true }); continue; }
     const due = await sql<any[]>`select * from mkt_contents where tenant = ${tenant} and auto and status = 'draft' and produced_at is null and not is_test
       and scheduled_at between now() and now() + interval '3 days' and not coalesce(quality ? 'failed', false)
       and not exists (select 1 from mkt_production_requests q where q.content_id = mkt_contents.id and q.kind = 'topic' and q.status = 'open') order by scheduled_at limit 3`;

@@ -3,10 +3,10 @@
 // A 미게시 글 일괄 보관 — dryRun 건수 → 초안·승인 대기·수정 요청·보류 → '취소'(quality.archived_from·archived_at·archived_reason) · 게시됨 그대로 · 감사 기록 · [되돌리기] 원래 상태 · 직원 불가
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
+import { BASE, bootstrap, resetDb, startServer, testDb } from '../helpers.mjs';
 
 let srv, ctx, sql;
-before(async () => { await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap(); await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); });
+before(async () => { await resetDb(); srv = await startServer({ MKT_NIGHT_ANYHOUR: '1' }); sql = testDb(); ctx = await bootstrap(); await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true }); });
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 
 test('요청 B: 자동 생성 일시정지 — 규칙이 있어도 정기 실행이 아무것도 만들지 않음(paused) · 승인함 paused · 끄면 풀림 · 감사 기록', async () => {
@@ -52,4 +52,24 @@ test('요청 A: 미게시 글 일괄 보관 — dryRun 건수 → 취소 + 원�
   const after = Object.fromEntries((await sql`select id, status, quality from mkt_contents where id in (${p1}, ${h}, ${d})`).map((x) => [x.id, x]));
   assert.deepEqual([after[p1].status, after[h].status, after[d].status, after[p1].quality.archived_from, !!after[p1].quality.unarchived_at], ['pending', 'hold', 'draft', undefined, true]);
   assert.equal((await ctx.owner.req('POST', '/api/marketing/contents/unarchive', {})).status, 400, '되돌릴 묶음이 없으면 400');
+});
+
+// 대표 11/14 #1049: 자동 제작을 멈춘 동안에는 밤사이 비서(22~06시, 3일 안 게시할 자동 칸을 미리 제작)도 만들지 않는다 — 예전엔 일시정지 확인이 없었음
+test('#1049 일시정지 중 밤사이 비서: 켜 둔 회사도 건너뜀(paused) · 풀면 다시 대상', async () => {
+  const tick = async () => { const r = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(r.status, 200); return r.json(); };
+  await ctx.owner.ok('PUT', '/api/ai/settings', { nightScope: { draft: true } });
+  const [{ tenant }] = await sql`select tenant from users where id = ${ctx.ownerId}`;
+  const [c] = await sql`insert into mkt_contents (tenant, title, channel, kind, scheduled_at, status, current_version, created_by, auto)
+    values (${tenant}, '밤사이 시험 칸', 'instagram', 'feed', now() + interval '1 day', 'draft', 0, ${ctx.ownerId}, true) returning id`;
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { autoPause: true });
+  let d = await tick();
+  const mine = (x) => (Array.isArray(x.nightAssistant) ? x.nightAssistant.find((r) => r.tenant === tenant) : null);
+  assert.deepEqual(mine(d.detail ?? d), { tenant, due: 0, paused: true }, JSON.stringify((d.detail ?? d).nightAssistant));
+  assert.deepEqual((await sql`select night_run, produced_at from mkt_contents where id = ${c.id}`)[0], { night_run: false, produced_at: null }, '일시정지 중에는 손대지 않음');
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { autoPause: false });
+  d = await tick();
+  assert.ok(mine(d.detail ?? d)?.due >= 1, '풀면 3일 안 게시 칸이 다시 대상(앞 시험이 만든 칸 포함, 한 번에 3건까지)');
+  assert.equal(mine(d.detail ?? d)?.paused, undefined);
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { autoPause: true }); // 뒤 시험에 영향 없게 다시 멈춤 → 끔
+  await ctx.owner.ok('PUT', '/api/marketing/auto', { autoPause: false });
 });
