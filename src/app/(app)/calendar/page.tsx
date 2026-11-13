@@ -248,6 +248,12 @@ function CalendarPage() {
   // 시간 보기 높이 = 화면 높이 - 달력 위쪽 - (휴대폰 하단 탭) → FullCalendar 가 시간 칸 안에서 스크롤해 scrollTime 이 먹음
   const calBox = useRef<HTMLDivElement>(null);
   const [calH, setCalH] = useState(640);
+  // 391차(대표 11/13 휴대폰 사진 '화면을 내리면 위에 날짜가 안 보인다'): 페이지를 내려도 날짜 줄이 앱 머리줄 바로 아래에 붙어 있게 — 붙는 위치 = 화면 맨 위에 붙은 앱 머리줄 높이
+  const [stickyTop, setStickyTop] = useState(0);
+  useEffect(() => {
+    const top = () => setStickyTop([...document.querySelectorAll<HTMLElement>('header.sticky')].reduce((m, h) => Math.max(m, Math.round(h.getBoundingClientRect().height)), 0));
+    top(); const t = setTimeout(top, 500); window.addEventListener('resize', top); return () => { clearTimeout(t); window.removeEventListener('resize', top); };
+  }, []);
   useEffect(() => {
     // #592: 위치는 머리줄 아래 달력 자리(swipeWrap)부터 — 예전엔 머리줄 높이만큼 아래 탭 뒤로 밀려 시간 칸 끝이 가려졌음. 아래는 하단 탭 실제 높이
     const fit = () => { const top = (swipeWrap.current ?? calBox.current)?.getBoundingClientRect().top ?? 160; const nav = window.innerWidth < 1024 ? (document.querySelector('nav[aria-label="하단 메뉴"]')?.getBoundingClientRect().height || 56) + 2 : 24;
@@ -653,7 +659,7 @@ function CalendarPage() {
             </div>
             {monthPicker && <div className="mt-1 rounded-card border border-line p-2"><MiniMonth anchor={visibleStart} holidays={holidaySet} onPick={(d) => { goto(d); setMonthPicker(false); }} /></div>}
           </div>
-          <div ref={swipeWrap} className={cx('relative overflow-x-clip', mobile && 'cal-phone', mobile && range?.view && `cal-v-${range.view}`)} data-testid="cal-swipe">
+          <div ref={swipeWrap} className={cx('cal-sticky relative overflow-x-clip', mobile && 'cal-phone', mobile && range?.view && `cal-v-${range.view}`)} style={{ ['--cal-top' as string]: `${stickyTop}px` }} data-testid="cal-swipe">
           <FullCalendar
             ref={calRef}
             plugins={[grabWhereHeld, dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, luxonPlugin]}
