@@ -126,9 +126,11 @@ test('자동 제작: 브랜드 영상 방법 = 실제 사진 → 릴스 원고 �
   await ctl({ anthropicReset: true, anthropicQueue: [draft, draft] });
   await ctx.owner.ok('POST', '/api/marketing/auto/run', {});
   const [q2] = await sql`select status, brief, est_credits from mkt_production_requests where content_id = ${slots[1].id} and kind = 'video'`;
-  assert.ok(q2 && ['open', 'needs_approval'].includes(q2.status), JSON.stringify(q2));
-  assert.equal(Number(q2.est_credits), 0); assert.match(q2.brief, /^앱 화면 녹화로 만듭니다\(생성 비용 0\)/);
-  assert.equal((await sql`select count(*)::int n from mkt_briefs where content_id = ${slots[1].id}`)[0].n, 0, '사진 영상 안 만듦');
+  // 404차: 녹화가 없으면 기다리지 않고 그래픽·화면 캡처 영상을 바로 시작(의뢰 1건 · 생성 비용 0) — 예전엔 녹화가 올라올 때까지 카드만 남았다
+  assert.ok(q2, '제작 요청 카드'); assert.equal(Number(q2.est_credits), 0);
+  assert.equal((await sql`select count(*)::int n from mkt_briefs where content_id = ${slots[1].id}`)[0].n, 1, '그래픽·화면 캡처 영상 의뢰 1건');
+  assert.equal((await sql`select count(*)::int n from mkt_credit_ledger where content_id = ${slots[1].id} and kind = 'generate_video'`)[0].n, 0, '생성 비용 없음');
+  await sql`update mkt_briefs set status = 'failed' where content_id = ${slots[1].id} and status = 'generating'`; // 합성은 이 시험 범위 밖
   await sql`update mkt_rules set active = false where id = ${r.id}`;
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${P.brand}`, { video: { method: 'photos', photoSource: null } }); // 뒤 시험은 실사 브랜드로
 });

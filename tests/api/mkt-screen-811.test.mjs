@@ -117,7 +117,7 @@ async function stuck(brandId, title) {
   await sql`insert into mkt_production_requests (tenant, content_id, version, kind, brief, est_credits, status) values ('default', ${c.id}, 1, 'video', '앱 화면 녹화로 만듭니다(생성 비용 0)', 0, 'open')`;
   return c.id;
 }
-test('301차 #865: 영상 방법 = 앱 화면 녹화인데 녹화가 없고 시안 사진이 장면(scenes)인 브랜드 → 정기 실행이 장면·캡처로 사진 영상을 붙여 승인 대기로 · 앱 화면 캡처만(screen) 브랜드는 녹화를 기다렸다가 녹화가 올라오면 붙임 · 6시간에 한 번', async () => {
+test('301차 #865: 영상 방법 = 앱 화면 녹화인데 녹화가 없고 시안 사진이 장면(scenes)인 브랜드 → 정기 실행이 장면·캡처로 사진 영상을 붙여 승인 대기로 · 앱 화면 캡처만(screen) 브랜드도 녹화가 없으면 그래픽·화면 캡처 영상(404차) · 안 쓴 녹화가 있으면 그 녹화가 먼저', async () => {
   const hi = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '하이시험' })).id;
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${hi}`, { video: { method: 'screen', photoSource: 'scenes' } });
   for (let k = 0; k < 4; k++) await image(`하이시험 출입 화면 ${k + 1}.jpg`, '마케팅/영상 화면 캡처');
@@ -132,23 +132,23 @@ test('301차 #865: 영상 방법 = 앱 화면 녹화인데 녹화가 없고 시�
   assert.equal(q.status, 'done'); assert.match(q.brief, /실제 사진 영상으로 대신함/);
   assert.equal((await sql`select count(*)::int n from mkt_credit_ledger where content_id = ${a}`)[0].n, 0, '생성 비용 없음');
 
-  // 앱 화면 캡처만(워크인 꼴): 캡처가 있어도 녹화를 기다림 — 이유를 남기고 6시간 안에는 다시 안 함
+  // 404차: 앱 화면 캡처만(워크인 꼴)도 녹화가 없으면 기다리지 않고 그래픽·화면 캡처 영상으로(예전엔 녹화가 올라올 때까지 영상 없는 글로 남음)
   const wi = (await ctx.owner.ok('POST', '/api/marketing/brands', { name: '워크시험' })).id;
   await ctx.owner.ok('PATCH', `/api/marketing/auto/brands/${wi}`, { video: { method: 'screen', photoSource: 'screen' } });
   for (let k = 0; k < 3; k++) await image(`워크시험 앱 화면 ${k + 1}.jpg`, '마케팅/영상 화면 캡처');
   const b = await stuck(wi, '워크시험 업무 앱');
   await tick();
-  let [w] = await sql`select quality from mkt_contents where id = ${b}`;
-  assert.equal(w.quality.videoRetry.via, 'screen'); assert.match(w.quality.videoRetry.skipped, /안 쓴 화면 녹화 없음/);
-  const at = w.quality.videoRetry.at;
-  await tick();
-  [w] = await sql`select quality from mkt_contents where id = ${b}`;
-  assert.equal(w.quality.videoRetry.at, at, '6시간 안에는 다시 안 함');
-  // 녹화 실행기가 녹화를 올린 뒤(6시간 지남) → 그 녹화로
+  const [w] = await sql`select status, quality from mkt_contents where id = ${b}`;
+  assert.equal(w.quality.videoRetry.via, 'photos', JSON.stringify(w.quality.videoRetry));
+  const [vb] = await sql`select media_ids, note from mkt_versions where content_id = ${b} and version = 1`;
+  assert.equal(vb.media_ids.length, 1, vb.note); assert.match(vb.note, /화면 녹화가 없어 그래픽·화면 캡처 영상으로/);
+  assert.equal(w.status, 'pending', '영상이 붙어 승인 대기로');
+  assert.equal((await sql`select count(*)::int n from mkt_credit_ledger where content_id = ${b}`)[0].n, 0, '생성 비용 없음');
+  // 안 쓴 녹화가 있으면 그 녹화가 먼저(같은 브랜드의 다음 글)
   await upload('워크시험_업무_녹화.mp4', clip(3), { title: '워크시험 업무 녹화', tags: ['워크시험', '화면 녹화'], description: '업무를 한 화면에서' });
-  await sql`update mkt_contents set quality = jsonb_set(quality, '{videoRetry,at}', to_jsonb((now() - interval '7 hours')::text)) where id = ${b}`;
+  const b2 = await stuck(wi, '워크시험 일정 앱');
   await tick();
-  const [v2] = await sql`select media_ids, note from mkt_versions where content_id = ${b} and version = 1`;
+  const [v2] = await sql`select media_ids, note from mkt_versions where content_id = ${b2} and version = 1`;
   assert.equal(v2.media_ids.length, 1, v2.note); assert.match(v2.note, /앱 화면 녹화로 만든 영상/);
-  assert.equal((await sql`select status from mkt_contents where id = ${b}`)[0].status, 'pending');
+  assert.equal((await sql`select status from mkt_contents where id = ${b2}`)[0].status, 'pending');
 });

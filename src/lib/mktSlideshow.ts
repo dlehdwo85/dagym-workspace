@@ -223,9 +223,12 @@ export async function autoVideo(c: any, version: number, body: string, method: s
   Promise<{ briefId?: string; skipped?: string; via: 'photos' | 'screen'; note?: string }> {
   if (method === 'photos') return { ...(await autoSlideshow(c, version, body, picked, ruleText)), via: 'photos' };
   const r = await autoRecording(c, version, body);
-  if (!r.none || photoSource === 'screen') return { ...r, via: 'screen' };
+  if (!r.none) return { ...r, via: 'screen' };
+  // 404차(노트북 11/13 밤 '워크인 쇼츠·릴스 2건이 영상 없이 올라옴'): 예전엔 '앱 화면 캡처만' 브랜드(워크인)는 녹화가 올라올 때까지 기다려 영상 없는 글로 남았다 →
+  // 398차 #1024(대표 "무조건 실사 사용하지 않아도 된다" · 기본은 화면 캡처·도형·큰 글자)에 맞춰 녹화가 없으면 기다리지 않고 그래픽·화면 캡처 영상으로. 녹화가 있으면 그 녹화가 먼저
   const s = await autoSlideshow(c, version, body, picked, ruleText);
-  return s.skipped ? { skipped: `${r.skipped} · 장면 사진도 ${s.skipped}`, via: 'screen' } : { briefId: s.briefId, via: 'photos', note: '화면 녹화가 없어 장면 사진·캡처 영상으로' };
+  const what = photoSource === 'screen' ? '그래픽·화면 캡처' : '장면 사진·캡처';
+  return s.skipped ? { skipped: `${r.skipped} · ${what} 영상도 ${s.skipped}`, via: 'screen' } : { briefId: s.briefId, via: 'photos', note: `화면 녹화가 없어 ${what} 영상으로` };
 }
 
 /**
