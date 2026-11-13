@@ -1,4 +1,5 @@
 'use client';
+import { useTerms } from '@/components/session';
 import { useState } from 'react';
 import { Building2, ImagePlus, Plus, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
@@ -13,6 +14,7 @@ const FIELDS: [keyof P, string, string?][] = [['name', '상호'], ['ceo', '대�
 
 /** V22 회사 정보·디자인 기준 — AI 비서가 견적서·문서를 만들 때 공급자 칸·로고·브랜드 색을 여기서 읽는다(회사마다, 코드에 쓰지 않음) */
 export default function CompanyPage() {
+  const T = useTerms(); // 410차 G-36: 구분 키 예시는 회사별(다짐은 지금 그대로)
   const { data, error, loading, reload } = useApi<{ profiles: P[] }>('/api/org/company-profiles');
   const [edit, setEdit] = useState<P | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,7 +69,7 @@ export default function CompanyPage() {
       {edit && (
         <form onSubmit={save} className="space-y-3 rounded-card border border-line bg-white p-4 shadow-card" data-testid="company-form">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="구분 키 (영문, 예: dagym)"><input className={inputCls} value={edit.key} onChange={(e) => setEdit({ ...edit, key: e.target.value })} disabled={!!edit.id} required pattern="[a-z0-9_-]{2,30}" /></Field>
+            <Field label={`구분 키 (영문, 예: ${T.example.profileKey})`}><input className={inputCls} value={edit.key} onChange={(e) => setEdit({ ...edit, key: e.target.value })} disabled={!!edit.id} required pattern="[a-z0-9_-]{2,30}" /></Field>
             {FIELDS.map(([k, label, ph]) => (
               <Field key={k} label={label}><input className={inputCls} value={(edit[k] as string | null) ?? ''} placeholder={ph} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} required={k === 'name'} /></Field>
             ))}

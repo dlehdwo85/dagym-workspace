@@ -68,8 +68,19 @@ export const TEMPLATES: Record<string, { name: string; steps: Step[] }> = {
   three: { name: '3단계(팀장 → 본부장 → 대표)', steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: '본부장', type: 'lead', up: 1 }, { label: '대표', type: 'role', role: 'owner' }] },
   leave3: { name: '휴가(팀장, 3일 이상 대표)', steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: '대표', type: 'role', role: 'owner', when: { minDays: 3 } }] },
 };
+/** 410차 범용화 G-28: 예시 결재선의 직함 — 기본 회사(다짐)는 '팀장 → 본부장 → 대표' 그대로, 다른 회사는 '본부장' 대신 '부서장'·대표는 그 회사의 대표 이름 */
+async function templatesFor(u: SessionUser): Promise<typeof TEMPLATES> {
+  if (tenantOf(u) === 'default') return TEMPLATES;
+  const t = await (await import('./termsServer')).termsOfUser(u);
+  const owner = t.role.owner, up = t.example.upperLead;
+  return {
+    two: { name: `2단계(팀장 → ${owner})`, steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: owner, type: 'role', role: 'owner' }] },
+    three: { name: `3단계(팀장 → ${up} → ${owner})`, steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: up, type: 'lead', up: 1 }, { label: owner, type: 'role', role: 'owner' }] },
+    leave3: { name: `휴가(팀장, 3일 이상 ${owner})`, steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: owner, type: 'role', role: 'owner', when: { minDays: 3 } }] },
+  };
+}
 export async function createTemplate(u: SessionUser, key: string, ip: string | null) {
-  const tpl = TEMPLATES[key];
+  const tpl = (await templatesFor(u))[key];
   if (!tpl) throw badRequest('없는 예시입니다');
   const [{ n }] = await db()<{ n: number }[]>`select count(*)::int n from approval_lines where tenant = ${tenantOf(u)} and name like ${tpl.name + '%'}`;
   return saveLine(u, null, { name: n ? `${tpl.name} ${n + 1}` : tpl.name, orgUnitId: null, steps: tpl.steps, active: true }, ip);

@@ -22,6 +22,8 @@ type EStep = Step & { key: string };
 type Line = { id: string; name: string; org_unit_id: string | null; org_unit_name: string | null; steps: Step[]; active: boolean; assigned: number };
 const ROLES = ['site_manager', 'dept_lead', 'admin', 'owner'] as const;
 const LEAD_UP = ['소속 부서·팀의 장(팀장)', '한 단계 위 부서의 장(본부장)', '두 단계 위 부서의 장', '세 단계 위 부서의 장'];
+/** 410차 G-28: 다른 회사는 '본부장' 대신 그 회사 사전의 직함(부서장) — 다짐은 지금 글 그대로 */
+const leadUp = (T: { base: boolean; example: { upperLead: string } }) => (T.base ? LEAD_UP : LEAD_UP.map((x, i) => (i === 1 ? `한 단계 위 부서의 장(${T.example.upperLead})` : x)));
 const LEAD_SHORT = ['소속 팀장', '상위 부서장', '2단계 위 부서장', '3단계 위 부서장'];
 const whenText = (w?: Step['when']) => (!w ? '' : [w.minDays !== undefined ? `${w.minDays}일 이상` : '', w.minAmount !== undefined ? `${Number(w.minAmount).toLocaleString('ko-KR')}원 이상` : ''].filter(Boolean).join(' 또는 ') + '일 때만');
 let seq = 0;
@@ -90,11 +92,11 @@ function LinesTab() {
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => setEdit({ name: '', orgUnitId: '', steps: [{ key: key(), label: T.role.site_manager, type: 'role', role: 'site_manager' }, { key: key(), label: T.role.owner, type: 'role', role: 'owner' }], active: true })}><Plus />결재선 만들기</Button>
         <span className="text-xs text-ink-3">예시로 시작:</span>
-        <Button size="sm" variant="secondary" onClick={() => template('two')} data-testid="tpl-two">2단계 · 팀장 → 대표</Button>
-        <Button size="sm" variant="secondary" onClick={() => template('three')} data-testid="tpl-three">3단계 · 팀장 → 본부장 → 대표</Button>
-        <Button size="sm" variant="secondary" onClick={() => template('leave3')} data-testid="tpl-leave3">휴가 · 3일 이상이면 대표 추가</Button>
+        <Button size="sm" variant="secondary" onClick={() => template('two')} data-testid="tpl-two">2단계 · 팀장 → {T.role.owner}</Button>
+        <Button size="sm" variant="secondary" onClick={() => template('three')} data-testid="tpl-three">3단계 · 팀장 → {T.example.upperLead} → {T.role.owner}</Button>
+        <Button size="sm" variant="secondary" onClick={() => template('leave3')} data-testid="tpl-leave3">휴가 · 3일 이상이면 {T.role.owner} 추가</Button>
       </div>
-      {!data ? <Skeleton rows={3} /> : !data.lines.length ? <Empty title="결재선이 없습니다" icon={Stamp}>위 예시 버튼으로 2단계·3단계 결재선을 바로 만들 수 있습니다. 예: 팀장 → 본부장 → 대표</Empty> : (
+      {!data ? <Skeleton rows={3} /> : !data.lines.length ? <Empty title="결재선이 없습니다" icon={Stamp}>위 예시 버튼으로 2단계·3단계 결재선을 바로 만들 수 있습니다. 예: 팀장 → {T.example.upperLead} → {T.role.owner}</Empty> : (
         <ul className="space-y-2" data-testid="approval-lines">
           {data.lines.map((l) => (
             <li key={l.id} className={cx('flex flex-wrap items-center gap-3 rounded-card border border-line bg-white p-4 shadow-card', !l.active && 'opacity-60')} data-testid="approval-line-card">
@@ -167,7 +169,7 @@ function StepRow({ s, i, total, users, set, move, remove }: { s: EStep; i: numbe
         </select>
         {s.type === 'role' && <select className={inputCls + ' h-9 min-w-40 flex-1'} value={s.role} onChange={(e) => set({ role: e.target.value })} aria-label={`${n} 역할`}>{ROLES.map((r) => <option key={r} value={r}>{T.role[r as Role]}{r === 'site_manager' || r === 'dept_lead' ? ' (업무 소속·상위 조직)' : ''}</option>)}</select>}
         {s.type === 'user' && <select className={inputCls + ' h-9 min-w-40 flex-1'} value={s.userId ?? ''} onChange={(e) => set({ userId: e.target.value })} aria-label={`${n} 사람`} required><option value="">선택(본부장처럼 역할에 없는 직책)</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}</select>}
-        {s.type === 'lead' && <select className={inputCls + ' h-9 min-w-40 flex-1'} value={s.up ?? 0} onChange={(e) => set({ up: Number(e.target.value) })} aria-label={`${n} 소속 장`}>{LEAD_UP.map((l, k) => <option key={k} value={k}>{l}</option>)}</select>}
+        {s.type === 'lead' && <select className={inputCls + ' h-9 min-w-40 flex-1'} value={s.up ?? 0} onChange={(e) => set({ up: Number(e.target.value) })} aria-label={`${n} 소속 장`}>{leadUp(T).map((l, k) => <option key={k} value={k}>{l}</option>)}</select>}
         <span className="flex items-center gap-0.5">
           <button type="button" className="rounded p-1 text-ink-3 hover:bg-slate-100 disabled:opacity-30" onClick={() => move(-1)} disabled={i === 0} aria-label={`${n} 위로`}><ArrowUp className="size-4" /></button>
           <button type="button" className="rounded p-1 text-ink-3 hover:bg-slate-100 disabled:opacity-30" onClick={() => move(1)} disabled={i === total - 1} aria-label={`${n} 아래로`}><ArrowDown className="size-4" /></button>
@@ -252,6 +254,7 @@ type TeamRow = { id: string; name: string; path: string; kind: 'hq' | 'division'
 type Resolved = { user: { id: string; name: string }; path: string | null; results: { kind: string; lineId: string | null; lineName: string | null; sourceLabel: string | null; via: string | null; steps: { label: string; names: string[]; cond: string | null }[] }[] };
 
 function AssignTab() {
+  const T = useTerms(); // 410차 G-28: 예시 문장의 직함은 회사별
   const { dir } = useSession();
   const a = useApi<{ assignments: Assign[]; teams: TeamRow[] }>('/api/approval-lines/assignments');
   const lines = useApi<{ lines: Line[] }>('/api/approval-lines');
@@ -269,7 +272,8 @@ function AssignTab() {
     <div className="space-y-4">
       <div className="rounded-card border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900" data-testid="assign-order">
         <b>어떤 결재선을 쓰나</b> — 위에서 먼저 맞는 것: ① 작성자가 직접 고른 결재선 ② <b>양식 × 작성자 부서·팀</b>(없으면 상위 부서) ③ 양식 기본(양식 × 회사 전체) ④ 팀 기본(모든 양식 × 부서·팀) ⑤ 회사 기본(모든 양식 × 회사 전체).
-        예: 휴가 × 영업부 = 팀장 → 본부장 → 대표, 휴가 × 운영팀 = 현장관리자 → 대표, 지출결의 × 회사 전체 = 팀장 → 대표.
+        {T.base ? '예: 휴가 × 영업부 = 팀장 → 본부장 → 대표, 휴가 × 운영팀 = 현장관리자 → 대표, 지출결의 × 회사 전체 = 팀장 → 대표.'
+          : `예: 휴가 × 영업부 = 팀장 → ${T.example.upperLead} → ${T.role.owner}, 휴가 × 운영팀 = ${T.role.site_manager} → ${T.role.owner}, 지출결의 × 회사 전체 = 팀장 → ${T.role.owner}.`}
       </div>
       <section className="rounded-card border border-line bg-white p-3 shadow-card">
         <h2 className="mb-2 text-sm font-semibold">배정 추가</h2>

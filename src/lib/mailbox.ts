@@ -356,6 +356,11 @@ export const MAIL_KINDS = {
   material: { label: '자료 송부', subject: '요청하신 자료 송부', body: '안녕하세요.\n\n요청하신 자료를 보내 드립니다.\n확인 부탁드립니다.\n\n감사합니다.' },
 } as const;
 export type MailKind = keyof typeof MAIL_KINDS;
+/** 410차 범용화 G-27: '용역비 청구'는 용역 회사 말 — 다른 회사는 '대금 청구'(기본 회사는 지금 양식 그대로) */
+export function mailKindsFor(tenant: string): Record<MailKind, { label: string; subject: string; body: string }> {
+  if (tenant === 'default') return MAIL_KINDS;
+  return { ...MAIL_KINDS, invoice: { label: '대금 청구', subject: '대금 청구의 건', body: '안녕하세요.\n\n대금 청구서를 첨부와 같이 보내 드립니다.\n확인 후 지급 일정 안내 부탁드립니다.\n\n감사합니다.' } };
+}
 
 export async function canSend(u: SessionUser, sql: Sql = db()) {
   return RANK[await menuLevel(u, 'send_external', sql)] >= RANK.use;
@@ -416,7 +421,7 @@ export async function mailContext(u: SessionUser, taskId: string) {
     channel: mine ? 'email:smtp' as const : await pickChannel(t, sql), workinFrom: workinMailEnabled() ? workinFrom() : null,
     defaults: { fromName: defaultFromName(me, (profiles.find((p) => p.key === guess) ?? profiles[0])?.name ?? ''), replyTo: mine ? mine.from_email : me.workEmail || account?.from_email || u.email },
     replyToEditable: await replyToEditable(u, sql),
-    kinds: Object.entries(MAIL_KINDS).map(([k, v]) => ({ key: k, ...v })), companies: sigs, company: guess,
+    kinds: Object.entries(mailKindsFor(t)).map(([k, v]) => ({ key: k, ...v })), companies: sigs, company: guess,
     to: candidates.emails[0] ? [candidates.emails[0].value] : [], phone: candidates.phones[0]?.value ?? null, candidates, contact, me: { name: me.name, title: me.title, phone: me.phone, email: me.email, workEmail: me.workEmail },
     // V34 C1: 기밀·자료실에서 지운 첨부는 외부 발송 불가 — 대표 05:20 ①: 목록에서 조용히 빼지 않고 '왜 못 보내는지'와 함께 보여 준다(자료실 연결 첨부는 출처 '자료실' 배지)
     attachments: (await Promise.all(atts.map(async (a: any) => { const sec = await (await import('./library')).storageSecurity(t, a.storage_key); const blocked = sec?.deleted ? 'deleted' : sec?.security === 'confidential' ? 'confidential' : null;
@@ -857,7 +862,7 @@ export async function draftMail(u: SessionUser, i: z.infer<typeof draftInput>) {
   // V38 4: 이 업무에 이미 올린 첨부(자동 등록된 자료실 행)는 추천 후보에서 뺀다 — 같은 파일을 다시 권하지 않게
   const cands = (lib.files as any[]).filter((f) => f.effective_security !== 'confidential' && f.task_id !== i.taskId).slice(0, 60);
   const desc = (t?.description ?? '').replace(/\*\*연락처[\s\S]*?(?=\*\*문의 내용 원문\*\*|$)/, ''); // 연락처는 AI 에 보내지 않는다
-  const kind = MAIL_KINDS[i.kind];
+  const kind = mailKindsFor(tenantOf(u))[i.kind];
   const profile = i.company ? (await companyProfiles(tenantOf(u), sql)).find((p) => p.key === i.company) : null;
   const Pn = await import('./ai/persona');
   const [co, me] = await Promise.all([Pn.companyAi(u, sql), Pn.writerOf(u, sql)]);
