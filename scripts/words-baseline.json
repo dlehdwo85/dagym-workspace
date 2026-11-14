@@ -22,9 +22,6 @@
   "src/app/r/[token]/page.tsx": {
    "brand": 2
   },
-  "src/app/welcome/page.tsx": {
-   "domain": 1
-  },
   "src/components/PhoneInquiry.tsx": {
    "domain": 2,
    "brand": 3
