@@ -15,6 +15,8 @@ const viaKr = (f: typeof fetch): typeof fetch => ((u: any, init?: any) => (needs
 const kstDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 const s0 = (v: unknown) => { const t = String(v ?? '').trim(); return t ? t : null; };
 type Src = { deadline: string | null; briefingKind: string | null; briefingAt: string | null; from: string[] };
+/** 같은 공고의 원천 상세를 연달아 이만큼 못 읽으면 운영자에게 알림(한 번 못 읽은 것은 다음 차례에 다시 읽으므로 기록만) */
+const FAIL_ALERT = 3;
 
 /** 한 공고 번호의 원천 상세에서 입찰 마감·현장설명 — 못 읽으면 오류 */
 async function readSource(st: string, ext: string, f: typeof fetch): Promise<{ kg: Src | null; kapt: Src | null; errors: string[] }> {
@@ -69,6 +71,9 @@ export async function bidDatesVerifyTick(now = new Date(), fetchImpl: typeof fet
   const due = recs.filter((r) => { const at = Date.parse(String(r.data?.bid_verified_at ?? '')); const gap = r.dl && r.dl.slice(0, 10) <= soon ? 3600e3 : 3 * 3600e3; return !Number.isFinite(at) || now.getTime() - at >= gap; });
   const byNotice = new Map<string, typeof due>(); for (const r of due) { const k = `${r.st}|${r.ext}`; if (!byNotice.has(k)) byNotice.set(k, []); byNotice.get(k)!.push(r); }
   const out = { checked: 0, fixed: 0, errors: [] as string[] }; const f = viaKr(fetchImpl);
+  // 대표 11/14 '서버 오류' 알림: 원천 상세(K-apt·KG2B)를 한 번 못 읽을 때마다 서버 오류 알림이 갔다(11/10~11/14 19번 — 같은 공고가 다음 차례에는 읽힘).
+  // 한 번 못 읽은 것은 기록만 하고, 같은 공고를 연달아 FAIL_ALERT 번 못 읽을 때(그 뒤로는 8번마다) 알린다
+  const stuck: string[] = [];
   for (const [k, group] of [...byNotice.entries()].slice(0, 6)) {
     if (left() < 9000) break;
     const [st, ext] = k.split('|');
@@ -87,10 +92,15 @@ export async function bidDatesVerifyTick(now = new Date(), fetchImpl: typeof fet
     }
     out.checked++;
     // 읽기를 시도한 때 — 원천이 막혀도 다음 차례까지 기다림(정기 실행마다 같은 공고만 붙잡지 않게)
-    for (const g of group) await sql`update sales_work_records set data = data || ${sql.json({ bid_verified_at: now.toISOString(), ...(src.errors.length ? { bid_verify_error: src.errors.join(' · ').slice(0, 200) } : {}) } as never)}::jsonb
-      where tenant = ${g.tenant} and src_tbl = ${SRC} and src_id = ${g.src_id}`;
+    const failed = src.errors.length > 0; let fails = 0;
+    for (const g of group) {
+      const n = failed ? (Number(g.data?.bid_verify_fails) || 0) + 1 : 0; fails = Math.max(fails, n);
+      await sql`update sales_work_records set data = data || ${sql.json({ bid_verified_at: now.toISOString(), bid_verify_fails: n, ...(failed ? { bid_verify_error: src.errors.join(' · ').slice(0, 200) } : {}) } as never)}::jsonb
+        where tenant = ${g.tenant} and src_tbl = ${SRC} and src_id = ${g.src_id}`;
+    }
+    if (failed && (fails === FAIL_ALERT || (fails > FAIL_ALERT && (fails - FAIL_ALERT) % 8 === 0))) stuck.push(`${src.errors.join(' · ').slice(0, 120)} (연달아 ${fails}번)`);
   }
-  if (out.errors.length) await (await import('../log')).logError('tick:bidDatesVerify', new Error(out.errors.slice(0, 5).join(' | '))).catch(() => {});
+  if (stuck.length) await (await import('../log')).logError('tick:bidDatesVerify', new Error(`입찰 일정 재확인: 원천 상세를 연달아 못 읽음 — ${stuck.slice(0, 4).join(' | ')}`)).catch(() => {});
   return out.checked || out.errors.length ? { ...out, errors: out.errors.length } : { checked: 0 };
 }
 
