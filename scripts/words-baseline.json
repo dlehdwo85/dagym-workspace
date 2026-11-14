@@ -1,0 +1,176 @@
+{
+ "note": "금칙어 검사 기준 — 파일별 지금 개수. 손으로 고치지 말고 `node scripts/check-words.mjs --write`.",
+ "files": {
+  "src/app/(app)/contacts/page.tsx": {
+   "domain": 2
+  },
+  "src/app/(app)/forms/page.tsx": {
+   "domain": 2
+  },
+  "src/app/(app)/insights/page.tsx": {
+   "domain": 2
+  },
+  "src/app/(app)/platform/page.tsx": {
+   "brand": 4
+  },
+  "src/app/(app)/reports/[id]/page.tsx": {
+   "brand": 2
+  },
+  "src/app/api/public/revenue/openapi.json/route.ts": {
+   "brand": 1
+  },
+  "src/app/r/[token]/page.tsx": {
+   "brand": 2
+  },
+  "src/app/welcome/page.tsx": {
+   "domain": 1
+  },
+  "src/components/PhoneInquiry.tsx": {
+   "domain": 2,
+   "brand": 3
+  },
+  "src/components/PlatformTenants.tsx": {
+   "brand": 2
+  },
+  "src/components/marketing/AdOps.tsx": {
+   "domain": 2,
+   "brand": 1
+  },
+  "src/components/marketing/Ads.tsx": {
+   "brand": 3
+  },
+  "src/components/marketing/Marketing.tsx": {
+   "brand": 2
+  },
+  "src/components/marketing/MetaAuto.tsx": {
+   "domain": 1
+  },
+  "src/components/marketing/Ops.tsx": {
+   "brand": 3
+  },
+  "src/components/sales/BidInfoBox.tsx": {
+   "domain": 1
+  },
+  "src/components/sales/Prospects.tsx": {
+   "domain": 7
+  },
+  "src/components/sales/ResearchAsk.tsx": {
+   "domain": 2
+  },
+  "src/components/sales/SalesSrc.tsx": {
+   "domain": 12
+  },
+  "src/components/sales/Sources.tsx": {
+   "domain": 1
+  },
+  "src/components/ui.tsx": {
+   "brand": 3
+  },
+  "src/lib/adOps.ts": {
+   "brand": 1
+  },
+  "src/lib/ai/assistant.ts": {
+   "brand": 2,
+   "domain": 2
+  },
+  "src/lib/bidAlerts.ts": {
+   "domain": 5
+  },
+  "src/lib/contacts.ts": {
+   "domain": 1
+  },
+  "src/lib/forms.ts": {
+   "domain": 2
+  },
+  "src/lib/inquiries.ts": {
+   "domain": 6,
+   "brand": 10
+  },
+  "src/lib/insights.ts": {
+   "domain": 2
+  },
+  "src/lib/landingPages.ts": {
+   "domain": 2
+  },
+  "src/lib/mktAuto.ts": {
+   "domain": 1
+  },
+  "src/lib/mktChannels.ts": {
+   "brand": 3
+  },
+  "src/lib/mktConcepts.ts": {
+   "domain": 3
+  },
+  "src/lib/mktOps.ts": {
+   "domain": 3,
+   "brand": 1
+  },
+  "src/lib/mktQuality.ts": {
+   "domain": 3
+  },
+  "src/lib/opsConvert.ts": {
+   "brand": 6
+  },
+  "src/lib/sales/bidTasks.ts": {
+   "domain": 4
+  },
+  "src/lib/sales/collectors/facilities.ts": {
+   "domain": 24
+  },
+  "src/lib/sales/collectors/g2b.ts": {
+   "domain": 2
+  },
+  "src/lib/sales/collectors/kapt.ts": {
+   "domain": 5,
+   "brand": 4
+  },
+  "src/lib/sales/collectors/kaptComplexes.ts": {
+   "domain": 13
+  },
+  "src/lib/sales/collectors/kaptWeekly.ts": {
+   "domain": 15
+  },
+  "src/lib/sales/collectors/kg2b.ts": {
+   "domain": 1
+  },
+  "src/lib/sales/collectors/procurement.ts": {
+   "domain": 7,
+   "brand": 21
+  },
+  "src/lib/sales/collectors/prospects.ts": {
+   "domain": 7
+  },
+  "src/lib/sales/collectors/publicAgency.ts": {
+   "domain": 1,
+   "brand": 1
+  },
+  "src/lib/sales/collectors/store.ts": {
+   "brand": 9,
+   "domain": 1
+  },
+  "src/lib/sales/eligibilityText.ts": {
+   "domain": 5
+  },
+  "src/lib/sales/region.ts": {
+   "domain": 4
+  },
+  "src/lib/sales/sources.ts": {
+   "domain": 16
+  },
+  "src/lib/sales/srcViews.ts": {
+   "domain": 1
+  },
+  "src/lib/sales/support.ts": {
+   "domain": 5
+  },
+  "src/lib/sales/terms.ts": {
+   "domain": 17
+  },
+  "src/lib/terms.ts": {
+   "domain": 2
+  },
+  "src/lib/types.ts": {
+   "domain": 1
+  }
+ }
+}

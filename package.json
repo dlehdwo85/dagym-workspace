@@ -11,6 +11,7 @@
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
     "db:seed": "node --env-file-if-exists=.env.local scripts/seed.mjs",
     "test": "node --test --test-concurrency=1 tests/api/*.test.mjs",
+    "check:words": "node scripts/check-words.mjs",
     "test:e2e": "node tests/e2e/run.mjs"
   },
   "dependencies": {
