@@ -13,7 +13,6 @@ export const PRIORITY_LABEL: Record<Priority, string> = { low: '낮음', normal:
 /** 화면에서 숨기는 브랜드 (WORKIN_V2: BODY LAB 은 DB 값만 보존, 선택지·문구에서 제외) */
 export const HIDDEN_BRANDS = ['bodylab'];
 export const SERVICE_NAME = '워크인';
-export const SERVICE_SUB = '다짐 · 하이링크';
 export const UNIT_TYPE_LABEL = { hq: '본사', department: '부서', branch: '지점', site: '위탁운영 현장' } as const;
 export const EVENT_KIND_LABEL = { normal: '일정', vacation: '연차', half_day: '반차', outside: '외근', business_trip: '출장', task_block: '업무 시간' } as const;
 /** V8 6번: 부재(본사 모두에게 보임, 업무 배정 경고) */
