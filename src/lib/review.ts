@@ -49,8 +49,8 @@ async function ensureUnit(tx: Sql) {
  * 306차 #877(대표 11/01 '피트니스 말고 보편적인 회사 툴로 보이게'): 직원 15명쯤 B2B 회사(영업·마케팅·경영지원) 하루 업무로.
  */
 const SAMPLE = 'review-sample';
-/** 체험 조직의 입찰 관심 검색어(260 마이그레이션과 같은 값) */
-export const DEMO_BID_WORDS = ['위탁운영', '커뮤니티', '시설관리', '출입통제'];
+/** 체험 조직의 입찰 관심 검색어(261 마이그레이션과 같은 값) — 대표 11/01 '체험 화면은 보편적인 회사 툴로 보이게'에 맞춘 업종 중립 낱말 */
+export const DEMO_BID_WORDS = ['시설관리', '유지보수', '시스템 구축'];
 async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: string | null, reviewerActive: boolean) {
   const T = 'demo';
   await tx`update tasks set deleted_at = now() where org_unit_id = ${unitId} and deleted_at is null`;
