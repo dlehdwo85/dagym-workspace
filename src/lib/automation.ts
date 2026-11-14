@@ -54,7 +54,7 @@ export async function listRules(u: SessionUser) {
       (select count(*)::int from automation_runs x where x.rule_id = r.id) as run_count,
       (select max(created_at) from automation_runs x where x.rule_id = r.id) as last_run
     from automation_rules r left join org_units o on o.id = r.org_unit_id left join projects p on p.id = r.project_id
-    where ${units === null ? sql`true` : sql`(r.org_unit_id = any(${units}::uuid[]) or p.org_unit_id = any(${units}::uuid[]) or (r.org_unit_id is null and r.project_id is null and r.tenant = ${tenantOf(u)}))`}
+    where r.tenant = ${tenantOf(u)} and ${units === null ? sql`true` : sql`(r.org_unit_id = any(${units}::uuid[]) or p.org_unit_id = any(${units}::uuid[]) or (r.org_unit_id is null and r.project_id is null))`}
     order by r.created_at desc`;
   const runs = await sql`select x.id, x.rule_id, x.task_id, x.status, x.detail, x.created_at, t.title as task_title, r.name as rule_name
     from automation_runs x join automation_rules r on r.id = x.rule_id left join tasks t on t.id = x.task_id and ${taskVisibleSql(sql, u, units)}
@@ -66,23 +66,30 @@ export async function saveRule(u: SessionUser, id: string | null, i: z.infer<typ
   const sql = db();
   await assertRuleScope(u, i, sql);
   for (const a of i.actions) if ((a.type === 'set_assignee' || (a.type === 'notify' && a.to === 'user')) && !('userId' in a && a.userId)) throw badRequest('사용자를 지정하세요');
+  // 415차(범용화 S-06): 규칙이 가리키는 사람은 같은 회사 사람만(다른 회사 사람이 담당자·알림 대상으로 들어가지 않게)
+  const picked = [...new Set(i.actions.flatMap((a) => ('userId' in a && a.userId ? [a.userId] : [])))];
+  if (picked.length) {
+    const ok = await sql<{ id: string }[]>`select id from users where id = any(${picked}::uuid[]) and tenant = ${tenantOf(u)}`;
+    if (ok.length !== picked.length) throw badRequest('지정한 사용자를 찾을 수 없습니다');
+  }
   if (id) {
-    const [old] = await sql`select org_unit_id, project_id from automation_rules where id = ${id}`;
+    const [old] = await sql`select org_unit_id, project_id from automation_rules where id = ${id} and tenant = ${tenantOf(u)}`; // 415차: 다른 회사 규칙은 없는 것처럼
     if (!old) throw notFound('규칙이 없습니다');
     await assertRuleScope(u, { orgUnitId: old.org_unit_id, projectId: old.project_id }, sql);
     await sql`update automation_rules set name = ${i.name}, org_unit_id = ${i.orgUnitId ?? null}, project_id = ${i.projectId ?? null}, trigger = ${i.trigger},
       conditions = ${sql.json(i.conditions as never)}, actions = ${sql.json(i.actions as never)}, enabled = ${i.enabled ?? true} where id = ${id}`;
     return { id };
   }
-  const [r] = await sql<{ id: string }[]>`insert into automation_rules (name, org_unit_id, project_id, trigger, conditions, actions, enabled, created_by)
-    values (${i.name}, ${i.orgUnitId ?? null}, ${i.projectId ?? null}, ${i.trigger}, ${sql.json(i.conditions as never)}, ${sql.json(i.actions as never)}, ${i.enabled ?? true}, ${u.id})
+  // 415차(범용화 S-06): 회사를 적어 저장 — 전에는 칸 기본값 'default'(기본 회사)로 들어가 다른 회사가 만든 회사 전체 규칙이 기본 회사 것으로 보였다
+  const [r] = await sql<{ id: string }[]>`insert into automation_rules (name, org_unit_id, project_id, trigger, conditions, actions, enabled, created_by, tenant)
+    values (${i.name}, ${i.orgUnitId ?? null}, ${i.projectId ?? null}, ${i.trigger}, ${sql.json(i.conditions as never)}, ${sql.json(i.actions as never)}, ${i.enabled ?? true}, ${u.id}, ${tenantOf(u)})
     returning id`;
   return { id: r.id };
 }
 
 export async function deleteRule(u: SessionUser, id: string) {
   const sql = db();
-  const [old] = await sql`select org_unit_id, project_id from automation_rules where id = ${id}`;
+  const [old] = await sql`select org_unit_id, project_id from automation_rules where id = ${id} and tenant = ${tenantOf(u)}`; // 415차: 다른 회사 규칙은 없는 것처럼
   if (!old) throw notFound('규칙이 없습니다');
   await assertRuleScope(u, { orgUnitId: old.org_unit_id, projectId: old.project_id }, sql);
   await sql`delete from automation_rules where id = ${id}`;
@@ -103,8 +110,12 @@ export interface AutomationEvent {
 export async function runAutomations(sql: Sql, ev: AutomationEvent) {
   const [t] = await sql<any[]>`select * from tasks where id = ${ev.taskId}`;
   if (!t || t.deleted_at) return 0;
+  // 415차(범용화 S-06): 규칙은 그 회사 업무에만 — 전에는 회사 전체 규칙(조직·프로젝트 없음)이 모든 회사 업무에 실행됐다(담당자 변경·후속 업무·알림). 업무의 회사 = 조직의 회사(없으면 만든 사람의 회사)
+  const [tt] = await sql<{ tenant: string | null }[]>`select coalesce((select tenant from org_units where id = ${t.org_unit_id}), (select tenant from users where id = ${t.created_by})) as tenant`;
+  t.__tenant = tt?.tenant ?? null;
   const rules = await sql<Rule[]>`
     select r.* from automation_rules r where r.enabled and r.trigger = ${ev.trigger} and (${ev.onlyRuleId ?? null}::uuid is null or r.id = ${ev.onlyRuleId ?? null})
+      and r.tenant = ${t.__tenant}
       and (r.project_id is null or r.project_id = ${t.project_id})
       and (r.org_unit_id is null or ${t.org_unit_id} in (with recursive d as (select id from org_units where id = r.org_unit_id
            union select c.id from org_units c join d on c.parent_id = d.id) select id from d))`;
@@ -147,13 +158,14 @@ async function runAction(sql: Sql, r: Rule, a: z.infer<typeof actionSchema>, t: 
   const link = `/tasks/${t.id}`;
   switch (a.type) {
     case 'notify': {
-      const to = a.to === 'assignee' ? [t.assignee_id] : a.to === 'creator' ? [t.created_by] : a.to === 'user' ? [a.userId] : await unitManagers(sql, t.org_unit_id);
+      const to = a.to === 'assignee' ? [t.assignee_id] : a.to === 'creator' ? [t.created_by]
+        : a.to === 'user' ? (await sql<{ id: string }[]>`select id from users where id = ${a.userId ?? null} and tenant = ${t.__tenant}`).map((x) => x.id) /* 415차: 같은 회사 사람만 */ : await unitManagers(sql, t.org_unit_id);
       await notify(sql, { userIds: to, type: 'task_assigned', title: `[자동화] ${a.message || r.name}: ${t.title}`, body: `규칙 '${r.name}'`,
         link, entityType: 'task', entityId: t.id, dedupeKey: `auto:${r.id}:${t.id}:${t.version}:${a.to}` });
       return `알림(${a.to})`;
     }
     case 'set_assignee': {
-      const ok = await sql`select 1 from users where id = ${a.userId} and status = 'active'`;
+      const ok = await sql`select 1 from users where id = ${a.userId} and status = 'active' and tenant = ${t.__tenant}`; // 415차: 같은 회사 사람만
       if (!ok.length) throw new Error('지정한 담당자가 비활성입니다');
       if (t.assignee_id === a.userId) return '담당자 동일(변경 없음)';
       await sql`update tasks set assignee_id = ${a.userId}, assignee_ack_at = null, version = version + 1, updated_at = now() where id = ${t.id}`;

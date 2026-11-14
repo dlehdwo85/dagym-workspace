@@ -255,7 +255,7 @@ export async function visibleCalendars(u: SessionUser, sql: Sql = db()) {
 
 export async function ensurePersonalCalendar(userId: string, name: string, sql: Sql = db()) {
   const r = await sql<{ id: string }[]>`
-    insert into calendars (type, owner_user_id, name, color) values ('personal', ${userId}, ${name + ' 개인 일정'}, '#7c3aed')
+    insert into calendars (type, owner_user_id, name, color, tenant) values ('personal', ${userId}, ${name + ' 개인 일정'}, '#7c3aed', coalesce((select tenant from users where id = ${userId}), 'default'))
     on conflict (owner_user_id) where type = 'personal' do update set name = calendars.name
     returning id`;
   return r[0].id;
