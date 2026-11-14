@@ -209,14 +209,17 @@ export function parseKg2bList(html: string, at = Date.now()): { rows: Kg2bListRo
 /** 발주처 이름으로 건물 종류 짐작 — 383차: 판정 맥락(aptContext)도 써서 procurement 로 옮김 */
 export { kg2bIssuerKind };
 /** 383차: KG2B 진행 공고 목록 여러 장(한 장 10줄) — 첫 장 GET, 다음 장은 같은 화면 theForm(__encrypted) POST · 1.2초 간격 · 서울 중계. 미리 보기와 정기 수집이 같이 씀 */
-export async function readKg2bList(fetchImpl0: typeof fetch, opts: { pages: number; days: number; budgetMs: number }) {
+//   대표 11/14 '영업 DB 누락'(이어 읽기): 정해 둔 장수를 다 읽었는데 앞 수집과 아직 안 이어졌으면(more 가 true — 이미 받아 둔 공고가 하나도 안 보임) 다음 장도 읽음(maxPages·시간 한도까지).
+//   평일 오후에는 4시간 사이 공고가 40~50줄 올라와 5장(50줄)의 겹침이 1~2줄뿐이었음(11/11·11/12 실행 기록) — 공고가 몰리거나 오래 못 받은 뒤에 사이가 비지 않게
+export async function readKg2bList(fetchImpl0: typeof fetch, opts: { pages: number; days: number; budgetMs: number; maxPages?: number; more?: (rows: Kg2bListRow[]) => Promise<boolean> }) {
   const fetchImpl = viaKr(fetchImpl0);
   const { pages, days } = opts;
   const since = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() - days * 864e5));
   const url = `${kg2bBase()}/user/bid_list/bidAll`; const UA = 'Mozilla/5.0 (WorkIn sales)'; const t0 = Date.now();
   let cookie = ''; const keep = (r: Response) => { const sc = (r.headers as any).getSetCookie?.() as string[] | undefined; const c = (sc ?? []).map((x) => x.split(';')[0]).filter(Boolean); if (c.length) cookie = c.join('; '); };
   const all: Kg2bListRow[] = []; const seen = new Set<string>(); let total: number | null = null, enc: string | null = null, read = 0, stop = '', retried = false; const errors: string[] = [];
-  for (let page = 1; page <= pages; page++) {
+  let limit = pages; let joined: boolean | null = null; // joined: 앞 수집과 이어졌는지(more 를 안 물었으면 null)
+  for (let page = 1; page <= limit; page++) {
     if (page > 1) { if (!enc) { stop = '다음 장 열쇠(__encrypted) 없음'; break; } if (Date.now() - t0 > opts.budgetMs) { stop = `${Math.round(opts.budgetMs / 1000)}초 넘음`; break; } await new Promise((r) => setTimeout(r, 1200)); }
     try {
       const at = Date.now();
@@ -229,13 +232,14 @@ export async function readKg2bList(fetchImpl0: typeof fetch, opts: { pages: numb
       const fresh = p.rows.filter((r) => !seen.has(r.code)); fresh.forEach((r) => seen.add(r.code)); all.push(...fresh);
       if (!fresh.length) { stop = `${page}장에 새 줄 없음`; break; }
       if (fresh.every((r) => r.posted && r.posted < since)) { stop = `${page}장이 모두 ${days}일 전`; break; }
+      if (page === limit && opts.more) { const need = await opts.more(all).catch(() => false); joined = !need; if (need && limit < (opts.maxPages ?? pages)) limit++; }
     } catch (e) {
       // 374차(로컬 11/06 02:40 운영 'fetch failed' 10.5초): 원인(코드·시스템 호출·주소)을 그대로 남기고 첫 장은 2초 뒤 한 번 더
       if (page === 1 && !retried) { retried = true; errors.push(`1장 ${fetchErr(e)} — 2초 뒤 다시`); await new Promise((r) => setTimeout(r, 2000)); page = 0; continue; }
       errors.push(`${page}장 ${fetchErr(e)}`); break;
     }
   }
-  return { url, since, rows: all.filter((r) => !r.posted || r.posted >= since), total, read, stop: stop || (read >= pages ? `${pages}장까지(최대)` : ''), errors, ms: Date.now() - t0 };
+  return { url, since, rows: all.filter((r) => !r.posted || r.posted >= since), total, read, stop: stop || (read >= limit ? `${limit}장까지(최대)` : ''), errors, ms: Date.now() - t0, extra: limit - pages, joined };
 }
 /** 이미 있는 'kg2b_번호' 공고(어느 원천이든 — K-apt 가 공유한 줄 포함) → 원천 종류 */
 async function knownKg2b(codes: string[]) {
@@ -306,7 +310,9 @@ export const kg2bBidNotices: Collector = {
   async run(ctx: CollectorCtx): Promise<CollectorResult> {
     const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const errors: string[] = [];
     const full = ctx.params?.full === true || kgHourNow() < 10;
-    const L = await readKg2bList(ctx.fetchImpl, { pages: full ? 8 : 5, days: Number(ctx.params?.days) > 0 ? Math.min(14, Number(ctx.params?.days)) : 3, budgetMs: Math.max(4000, Math.min(left() - 22_000, 30_000)) });
+    // 이어 읽기: 이미 받아 둔 KG2B 공고(K-apt 가 공유한 줄 말고)가 읽은 줄 가운데 하나도 없으면 앞 수집과 안 이어진 것 → 다음 장도(최대 14장·시간 한도 안)
+    const apart = async (rows: Kg2bListRow[]) => ![...(await knownKg2b(rows.map((r) => r.code))).values()].some((st) => st !== 'kapt_bid');
+    const L = await readKg2bList(ctx.fetchImpl, { pages: full ? 8 : 5, maxPages: 14, more: apart, days: Number(ctx.params?.days) > 0 ? Math.min(14, Number(ctx.params?.days)) : 3, budgetMs: Math.max(4000, Math.min(left() - 22_000, 30_000)) });
     errors.push(...L.errors);
     if (!L.rows.length) return { inserted: 0, updated: 0, unchanged: 0, errors: L.errors.length ? 1 : 0, errorLog: errors.join('\n') || undefined, providerMode: 'web_scrape', retry: L.errors.length > 0,
       summary: `KG2B 목록 ${L.read}장 · ${L.errors.length ? '불러오기 실패' : '최근 공고 0건'}${L.stop ? ` · ${L.stop}` : ''}`,
@@ -326,7 +332,7 @@ export const kg2bBidNotices: Collector = {
     const byKind: Record<string, number> = {}; for (const r of fresh) { const k = kg2bIssuerKind(r.issuer, r.title); byKind[k] = (byKind[k] ?? 0) + 1; }
     const kinds = Object.entries(byKind).map(([k, n]) => `${k} ${n}`).join('·');
     return { inserted: w.inserted, updated: w.updated, unchanged: w.unchanged, errors: w.errors + w.invalid + (L.errors.length ? 1 : 0), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
-      summary: `KG2B 목록 ${L.read}장 ${L.rows.length}건(최근 공고${L.stop ? ` · ${L.stop}` : ''}) · K-apt 에 이미 있음 ${kapt.length} · K-apt 에 없는 공고 ${mine.length}건(새로 ${fresh.length}${kinds ? `: ${kinds}` : ''} · 관련 ${rel.length})`
+      summary: `KG2B 목록 ${L.read}장 ${L.rows.length}건(최근 공고${L.stop ? ` · ${L.stop}` : ''}${L.extra > 0 ? ` · 앞 수집과 ${L.joined ? '이어질 때까지' : '아직 안 이어져'} ${L.extra}장 더 읽음` : ''}) · K-apt 에 이미 있음 ${kapt.length} · K-apt 에 없는 공고 ${mine.length}건(새로 ${fresh.length}${kinds ? `: ${kinds}` : ''} · 관련 ${rel.length})`
         + (kg?.read ? ` · KG2B 상세 ${kg.read}건(공고서 ${kg.files}${kg.attached ? `, 넘긴 업무 ${kg.attached}건에 붙임` : ''})` : '') + ` · 적재 신규 ${w.inserted} · 갱신 ${w.updated} · 변화없음 ${w.unchanged}`,
       sources: { kg2b: { label: 'KG2B 입찰 목록', ok: !L.errors.length, calls: L.read, received: L.rows.length, kept: mine.length, ...(L.total != null ? { total: L.total } : {}), ...(L.errors.length ? { error: L.errors[0] } : {}) } } };
   },
