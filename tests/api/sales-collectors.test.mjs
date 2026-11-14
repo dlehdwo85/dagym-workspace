@@ -61,6 +61,7 @@ before(async () => {
     if (u.pathname === '/vendor/notice') return send(vendorStatus, vendorHtml);
     if (u.pathname === '/files/kicox.csv') return send(200, '﻿유형,시도,시군,단지명,조성상태,입주업체(개),가동업체(개),관리면적(천제곱미터)\n일반,경기,성남시,판교테크노밸리,완료,1200,1150,660\n일반,경기,화성시,동탄,조성중,30,0,100\n', 'text/csv');
     if (u.pathname === '/files/reb.csv') return send(200, `﻿단지고유번호,주소,단지명_공시가격,단지종류,세대수,동수,사용승인일,도로명주소\nA100,경기도 성남시 분당구 정자동 1,분당 새아파트,1,850,8,${plus(-100)},경기도 성남시 분당구 정자로 1\nA101,서울특별시 강남구 역삼동 2,옛날아파트,1,300,3,2010-01-01,\n`, 'text/csv');
+    if (u.pathname === '/hotels/info' && hotelMode === 'drop') { req.socket.destroy(); return; } // 대표 11/14: 원천이 잠깐 연결을 끊음
     if (u.pathname === '/hotels/info' && hotelMode === 'denied') return send(401, JSON.stringify({ OpenAPI_ServiceResponse: { cmmMsgHeader: { errMsg: 'SERVICE_KEY_IS_NOT_REGISTERED_ERROR', returnAuthMsg: 'SERVICE_KEY_IS_NOT_REGISTERED_ERROR', returnReasonCode: '30' } } }), 'application/json');
     if (u.pathname === '/hotels/info' && hotelMode === 'nocond' && u.searchParams.has('cond[SALS_STTS_CD::EQ]')) return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 0, items: '' } } }), 'application/json');
     if (u.pathname === '/hotels/info') return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 1, items: { item: [{ BPLC_NM: '판교 호텔', SALS_STTS_CD: '01', ROAD_NM_ADDR: '경기도 성남시 분당구 대왕판교로 1', GSRM_CNT: '320', LCPMT_YMD: '20200101', TOUR_LDGBIZ_DTL_NM: '관광호텔업', MNG_NO: 'H1' }] } } } }), 'application/json');
@@ -608,4 +609,33 @@ test('278차 #816 나라장터가 웹페이지(HTML)를 주면 실패 · 앞 500
     g2bMode = 'ok'; nuriMode = 'denied';
     await sql`update sales_collector_state set enabled = true where slug = any(${COLL})`;
   }
+});
+
+test('대표 11/14 영업 DB 누락: 원천이 잠깐 안 받아 준 실패(연결 끊김·시간 초과)는 서버 오류로 알리지 않고 30분 뒤 다시 받음 — 다음 날까지 기다리지 않음', async () => {
+  await sql`delete from error_logs where source like 'sales-collect:%'`;
+  hotelMode = 'drop';
+  const f = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
+  assert.equal(f.status, 'failed', f.summary);
+  const [d] = await sql`select detail from sales_collector_runs where id = ${f.runId}`;
+  assert.equal(d.detail?.retry, true, `다시 받기 표시: ${f.summary}`);
+  assert.equal((await sql`select count(*)::int n from error_logs where source like 'sales-collect:%'`)[0].n, 0, '서버 오류 기록·알림 없음');
+  hotelMode = 'ok';
+  // 다른 수집기는 잠시 끔(이 시험만 보려고 — 정기 실행 한 번에 수집기 하나라 다른 수집기 차례가 먼저 올 수 있음)
+  const others = (await ctx.owner.ok('GET', '/api/sales/collectors')).collectors.map((c) => c.slug).filter((x) => x !== 'tourist_hotels_localdata');
+  try {
+    for (const slug of others) await sql`insert into sales_collector_state (slug, enabled) values (${slug}, false) on conflict (slug) do update set enabled = false`;
+    await sql`update sales_collector_state set last_run_at = now(), enabled = true where slug = 'tourist_hotels_localdata'`; // 정기 시각 차례는 아님
+    const tick = async () => { const t = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(t.status, 200); };
+    const retries = async () => (await sql`select status, detail from sales_collector_runs where slug = 'tourist_hotels_localdata' and trigger = 'retry' order by id desc limit 1`)[0];
+    await tick(); assert.equal(await retries(), undefined, '30분 안에는 다시 안 함');
+    await sql`update sales_collector_runs set started_at = started_at - interval '31 minutes' where slug = 'tourist_hotels_localdata'`;
+    await tick();
+    const re = await retries();
+    assert.ok(re, '30분 뒤 다시 받음'); assert.notEqual(re.status, 'failed'); assert.ok(!re.detail?.retry, '받으면 더 안 함');
+  } finally { await sql`update sales_collector_state set enabled = true where slug = any(${others})`; }
+  // 설정 문제(활용신청 필요)는 다시 받아도 같으므로 다시 받기 표시 없음
+  hotelMode = 'denied';
+  const den = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
+  assert.ok(!(await sql`select detail from sales_collector_runs where id = ${den.runId}`)[0].detail?.retry, '활용신청 필요는 다시 받지 않음');
+  hotelMode = 'ok';
 });

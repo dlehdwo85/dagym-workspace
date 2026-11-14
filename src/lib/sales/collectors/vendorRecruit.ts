@@ -147,7 +147,7 @@ export const vendorRecruitWatch: Collector = {
       const st = state[p.url];
       // 396차(노트북 11/13 운영 확인 '쉬는 페이지 1: 서희건설(11/15까지)'): 서울 중계가 생기기 전 실패로 쉬는 중인 곳은 쉬지 않고 바로 중계까지 시도 — 쉬기는 중계로도 못 받은 실패에만
       const relayTried = !relayOn() || /서울 중계/.test(st?.err ?? '');
-      if (st?.restUntil && st.restUntil > new Date().toISOString() && relayTried) { resting.push(`${p.company}(${kstMd(st.restUntil)}까지)`); Object.assign(src, { error: `${st.err ?? '연속 실패'} — ${FAIL_REST}번 연속 실패라 ${kstMd(st.restUntil)}까지 쉬고 다시 시도` }); return; }
+      if (st?.restUntil && st.restUntil > new Date().toISOString() && relayTried) { resting.push(`${p.company}(${kstMd(st.restUntil)}까지)`); Object.assign(src, { rest: true, error: `${st.err ?? '연속 실패'} — ${FAIL_REST}번 연속 실패라 ${kstMd(st.restUntil)}까지 쉬고 다시 시도` }); return; }
       if (left() < 6000) { late.push(p.company); Object.assign(src, { error: '시간 한도 근접 — 다음 실행에서' }); errors.push(`시간 한도 근접 — ${p.company} 은(는) 다음 실행에서`); return; }
       const fail = (msg: string) => { const n = (st?.fails ?? 0) + 1; const rest = n >= FAIL_REST ? new Date(Date.now() + REST_DAYS * 864e5).toISOString() : null;
         state[p.url] = { ...st, fails: n, restUntil: rest, err: msg.slice(0, 160) }; failed.push(p.company); src.error = msg.slice(0, 200); errors.push(`${p.company}: ${msg}${rest ? ` — ${n}번 연속 실패라 ${REST_DAYS}일 쉬고 다시 시도` : ''}`); };
@@ -168,7 +168,7 @@ export const vendorRecruitWatch: Collector = {
     await Promise.all(Array.from({ length: Math.min(POOL, queue.length) }, worker));
     const r = items.length ? await upsertNotices(items) : { inserted: 0, updated: 0, unchanged: 0, errors: 0, invalid: 0, errorLog: undefined as string | undefined }; if (r.errorLog) errors.push(r.errorLog);
     await markChecked(checked); await saveState(state);
-    return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + errors.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape', sources,
+    return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + errors.length, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape', sources, someRead: Object.values(sources).some((s) => s.ok),
       summary: `감시 ${pages.length}곳 · 모집 글 ${posts}건(최근 30일·게시일 있는 글) · ${PAGE_CHANGED} ${changed}` + (baseline ? `(처음 본 페이지 ${baseline}곳은 기준만 저장)` : '') + ` · 신규 ${r.inserted} · 변화없음 ${r.unchanged}`
         + (relayed ? ` · 서울 중계로 받은 곳 ${relayed}` : '')
         + (moved || hidden || cleared ? ` · 옛 줄 정리: 제목 고침 ${moved} · 숨김 ${hidden}${cleared ? ` · 게시일 지움 ${cleared}` : ''}` : '') + (failed.length ? ` · 못 읽은 곳 ${failed.length}: ${failed.join(', ')}` : '') + (late.length ? ` · 시간 한도로 다음 실행: ${late.join(', ')}` : '') + (resting.length ? ` · 쉬는 페이지 ${resting.length}: ${resting.join(', ')}` : ''),
