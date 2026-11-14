@@ -49,6 +49,8 @@ async function ensureUnit(tx: Sql) {
  * 306차 #877(대표 11/01 '피트니스 말고 보편적인 회사 툴로 보이게'): 직원 15명쯤 B2B 회사(영업·마케팅·경영지원) 하루 업무로.
  */
 const SAMPLE = 'review-sample';
+/** 체험 조직의 입찰 관심 검색어(261 마이그레이션과 같은 값) — 대표 11/01 '체험 화면은 보편적인 회사 툴로 보이게'에 맞춘 업종 중립 낱말 */
+export const DEMO_BID_WORDS = ['시설관리', '유지보수', '시스템 구축'];
 async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: string | null, reviewerActive: boolean) {
   const T = 'demo';
   await tx`update tasks set deleted_at = now() where org_unit_id = ${unitId} and deleted_at is null`;
@@ -140,6 +142,10 @@ async function seedSamples(tx: Sql, unitId: string, people: string[], reviewer: 
   await tx`update tenants set spaces = (select array_agg(distinct x) from unnest(coalesce(spaces, '{work}') || ${['work', 'sales', 'marketing']}::text[]) x) where id = ${T}`;
   for (const u of new Set([me, lead, mgr])) await tx`insert into space_members (user_id, tenant, spaces) values (${u}, ${T}, ${['work', 'sales', 'marketing']}) on conflict (user_id, tenant) do update set spaces = excluded.spaces, updated_at = now()`;
   await tx`insert into sales_cutover (tenant, ok, writes_open) values (${T}, true, true) on conflict (tenant) do update set writes_open = true`;
+  // 414차 후속(로컬 11/14 — 앱 심사 중): 다른 회사의 입찰 목록은 회사 검색어 기준이라, 체험 조직은 검색어가 없으면 '입찰 모아 보기'가 빈다 →
+  // 체험용 관심 검색어를 기본으로(비어 있을 때만 — 심사 계정이 바꾼 값은 그대로). 아침 메일은 끔(받는 사람이 없는 조직)
+  await tx`insert into sales_bid_prefs (tenant, keywords, digest_enabled) values (${T}, ${DEMO_BID_WORDS}, false)
+    on conflict (tenant) do update set keywords = excluded.keywords where sales_bid_prefs.keywords = '{}'`;
   const leads: [string, string, string, string, string | null, string][] = [
     ['체험 상사(가상)', '미팅예정', 'high', '서울', addDays(today, 1), '체험 이대리'],
     ['가나 물류(가상)', '1차연락완료', 'medium', '경기', addDays(today, 3), '체험 최실장'],
