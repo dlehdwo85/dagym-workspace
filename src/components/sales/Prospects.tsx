@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { useUrlState } from '@/components/urlState';
+import { useSalesTerms } from '@/components/session';
 import { ErrorBox, Skeleton, cx, inputCls, toast } from '@/components/ui';
 
 const ST = { new: '새로', contacting: '연락 중', lead: '리드로', skip: '제외' } as const;
@@ -30,6 +31,8 @@ type MoveInfo = { from: string; to: string; months: { ym: string; n: number }[] 
 type Kapt = { id: string; name: string; date?: string | null; completion?: string | null; moveIn?: string | null; households?: number | string | null; address?: string | null; region?: string | null };
 
 export function Prospects() {
+  // 414차 G-43: 입주 시기·세대수 거르기 줄은 주택 자료(청약홈·K-apt)용 — 시설 운영·위탁/건설 묶음 회사에만 보임(다른 묶음은 주소에 ?mi= 가 있을 때만)
+  const housing = ['facility', 'construction'].includes(useSalesTerms().template);
   const [status, setStatus] = useState('');
   const [q, setQ] = useState(''); const [query, setQuery] = useState('');
   // 242차 #759(대표 10/28 '26년도 입주 아파트 리스트'): 입주 고르기(?mi=) · 아파트만(기본 켬, ?mapt=0 끔) · 세대수 이상(?mhh=) — 주소에 남음
@@ -64,7 +67,7 @@ export function Prospects() {
         <form onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }} className="ml-auto w-full sm:w-64"><input className={inputCls} value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름·주소 검색" aria-label="영업기회 검색" /></form>
       </div>
       {/* 242차 #759: 입주 고르기 — 올해·다음 해 바로, 다른 해는 고르기 · 6개월 전~12개월 뒤 창(186차) */}
-      <div className="flex flex-wrap items-center gap-1.5" data-testid="prospects-movein-row">
+      <div className={cx('flex flex-wrap items-center gap-1.5', !housing && !mi && 'hidden')} data-testid="prospects-movein-row">
         <span className="text-xs text-ink-3">입주</span>
         {[String(y), String(y + 1), `${y}-${y + 1}`].map((k) => (
           <button key={k} type="button" onClick={() => setMi(mi === k ? '' : k)} aria-pressed={mi === k || (k.length === 4 && mi.startsWith(`${k}-`) && mi.length === 7)} className={chip(mi === k || (k.length === 4 && mi.startsWith(`${k}-`) && mi.length === 7))} data-testid={`prospects-mi-${k}`}>{k.length === 4 ? `${k}년 입주` : '올해·다음 해'}</button>))}

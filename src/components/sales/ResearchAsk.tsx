@@ -16,7 +16,7 @@ type Item = { id: number; srcId: string; name: string; region: string | null; ho
 /** 247차 #778(대표 10/28 21:35 '계약 만료일을 묻는건 잘 안 알려 줌 — 컨택해서 미팅을 유도'): 연락 결과 먼저 — 통화·통화한 분 직함·반응·미팅 약속·다음 연락일 */
 type Call = '' | '통화함' | '안 받음' | '번호 틀림';
 type React0 = '' | '관심 있음' | '보통' | '관심 없음';
-type Data = { terms: { operator: string; office: string; opCheck?: string; facility?: string }; items: Item[] };
+type Data = { terms: { operator: string; office: string; opCheck?: string; facility?: string; /** 414차 G-44: 시설 운영·위탁 묶음이 아닌 회사 — 중립 대본 */ plain?: boolean }; items: Item[] };
 type Ask = 'ok' | 'skip' | null;
 
 /** 쓰는 쪽: const rs = useResearchAsk(); if (await rs.ask(task) === null) return(완료 안 함) — 화면에 {rs.node} */
@@ -83,7 +83,7 @@ function ResearchDialog({ title, data, onDone }: { title: string; data: Data; on
               </div>
               <div className={cx('mt-1.5 grid gap-1.5', rows[i].mode === '미개관' ? 'sm:grid-cols-[1fr_9.5rem]' : rows[i].mode === '직영' ? 'sm:grid-cols-[9.5rem]' : 'sm:grid-cols-[1fr_9.5rem_9.5rem]')}>
                 {rows[i].mode === '미개관'
-                  ? <input className={cx(inputCls, 'h-8 text-xs')} value={rows[i].firstPick} onChange={(e) => set(i, 'firstPick', e.target.value)} maxLength={40} placeholder="첫 운영사 선정 예정 시기(예: 2027년 3월 입주 뒤)" aria-label="첫 운영사 선정 예정 시기" data-testid="research-ask-first" />
+                  ? <input className={cx(inputCls, 'h-8 text-xs')} value={rows[i].firstPick} onChange={(e) => set(i, 'firstPick', e.target.value)} maxLength={40}  placeholder={T.plain ? '첫 운영사 선정 예정 시기(예: 2027년 3월)' : '첫 운영사 선정 예정 시기(예: 2027년 3월 입주 뒤)'} aria-label="첫 운영사 선정 예정 시기" data-testid="research-ask-first" />
                   : rows[i].mode !== '직영' && <>
                     <input className={cx(inputCls, 'h-8 text-xs')} value={rows[i].operator} onChange={(e) => set(i, 'operator', e.target.value)} maxLength={100} placeholder={x.operator ? `${T.operator}(지금 ${x.operator})` : `${T.operator}(위탁이면)`} aria-label={T.operator} data-testid="research-ask-operator" />
                     <input type="date" className={cx(inputCls, 'h-8 text-xs')} value={rows[i].contractEnd} onChange={(e) => set(i, 'contractEnd', e.target.value)} aria-label="계약 만료일(선택)" title="계약 만료일 — 알려 준 경우만(선택)" data-testid="research-ask-end" />
@@ -111,7 +111,10 @@ function ResearchDialog({ title, data, onDone }: { title: string; data: Data; on
 function Questions({ x, T }: { x: Item; T: Data['terms'] }) {
   const fac = T.facility ?? '커뮤니티 시설';
   const known = [x.phone && `${T.office} ${x.phone}`, x.mgmt && `관리회사 ${x.mgmt}`, (x.notices ?? 0) > 0 && `관련 공고 ${x.notices}건`, x.moveIn && `입주 ${x.moveIn}`, !x.moveIn && x.approval && `사용승인 ${x.approval}`].filter(Boolean);
-  const q = [`${fac} 운영은 관리사무소에서 직접 하시나요, 위탁 업체에 맡기시나요?`,
+  const q = T.plain ? [`${fac} 운영은 ${T.office}에서 직접 하시나요, 다른 업체에 맡기시나요?`,
+    `${fac} 운영을 맡고 계신 분(직함)과 잠깐 뵐 수 있는 시간이 있을까요?`,
+    `다음 업체 선정(입찰)은 언제쯤 하실 예정인가요?`]
+    : [`${fac} 운영은 관리사무소에서 직접 하시나요, 위탁 업체에 맡기시나요?`,
     x.mgmt ? `관리회사(${x.mgmt})와 별도로 ${fac} 위탁 업체가 있나요? ${fac} 운영을 맡고 계신 분(직함)과 잠깐 뵐 수 있는 시간이 있을까요?` : `${fac} 운영을 맡고 계신 분(직함)과 잠깐 뵐 수 있는 시간이 있을까요?`, // 247차 #778 계약 만료일 대신 미팅
     (x.notices ?? 0) > 0 ? `다음 위탁 업체 선정(입찰) 공고는 언제쯤 내실 예정인가요? (지난 관련 공고 ${x.notices}건)` : x.moveIn && x.moveIn > new Date().toISOString().slice(0, 10) ? `아직 개관 전이면 ${fac} 운영사는 언제쯤 정하시나요?` : `다음 위탁 업체 선정(입찰)은 언제쯤 하실 예정인가요?`];
   return (

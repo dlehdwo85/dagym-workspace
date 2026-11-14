@@ -6,6 +6,7 @@ import { corpName, isOurs, ourIdentity } from './bidTasks';
 import { passPrefs, prefsOf } from './digest';
 import { salesBidsOn } from './options';
 import { sidoIn } from './region';
+import { judgeWords, ownsJudge, plainNotice } from './tenantJudge';
 
 /**
  * 226차 #497 R21-4(21라인 레퍼런스 '낙찰 결과·낙찰가·경쟁업체 분석'): 관련 공고(맞춤 조건 — 업종 적합·관심 검색어·지역 등)의 낙찰 결과를 업체별로 묶음.
@@ -41,6 +42,8 @@ export async function awardStats(u: SessionUser, days0: number) {
       and coalesce(nullif(row->>'award_date', ''), nullif(row->>'posted_date', ''), to_char(synced_at at time zone 'Asia/Seoul', 'YYYY-MM-DD')) >= ${since}
     limit 5000`;
   const p = await prefsOf(t); const me = await ourIdentity(sql, t);
+  // 414차: 다른 회사는 공용 줄의 적합 판정 대신 회사 검색어(맞춤 검색어 + 관심 사업 낱말)로 맞춤 조건을 봄 — 기본 회사는 예전 그대로
+  const base = ownsJudge(t); const pj = base ? p : { ...p, keywords: await judgeWords(t) };
   const groups = new Map<string, { names: Map<string, number>; latest: Map<string, string>; ours: boolean; recs: Rec[] }>();
   let total = 0, failed = 0, participated = 0; const lost: Lost[] = [];
   for (const { id, row: r } of rows) {
@@ -54,7 +57,7 @@ export async function awardStats(u: SessionUser, days0: number) {
       lost.push({ id: String(r.id ?? id), title: String(r.title ?? '').trim(), date: String(r.award_date ?? r.posted_date ?? '').slice(0, 10) || null, issuer: String(r.issuer ?? r.facility_name ?? '').trim() || null,
         url: String(r.source_url ?? '').trim() || null, our, winner: name, winnerAmount: wa, gap: our != null && wa != null ? our - wa : null, bidders: ps.length || num(r.bidders), score: scoreOf(ps, us, top),
         ...(typeof us.docs === 'boolean' ? { docs: us.docs } : {}), ...(us.hidden === true || (our == null && us.amount == null) ? { hidden: true } : {}) }); }
-    if (!mine && !passPrefs(r, p).ok) continue; // 227차: 우리 회사 낙찰은 맞춤 조건(지역·검색어 등) 밖이어도 셈
+    if (!mine && !passPrefs(base ? r : plainNotice(r), pj, base).ok) continue; // 227차: 우리 회사 낙찰은 맞춤 조건(지역·검색어 등) 밖이어도 셈
     total++;
     if (!name) { failed++; continue; }
     const key = (mine ? 'ours:' : '') + (corpName(name) || name.toLowerCase()); // 같은 이름의 다른 회사(사업자번호 다름)와 섞지 않음

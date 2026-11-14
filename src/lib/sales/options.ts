@@ -10,7 +10,14 @@ import { HIDEABLE_STAGES, LEAD_STAGES, SALES_TEMPLATES, STAGE_LABEL_MAX, type Sa
 /** 영업 공간 회사별 선택 기능 — 입찰·공고 사용(null = 자동 → 켜짐). 끄면 화면·메뉴·카드·하단 탭에서 숨김(공용 수집 데이터는 그대로) */
 export async function salesBidsOn(tenant: string) {
   const [t] = await db()<{ sales_bids: boolean | null }[]>`select sales_bids from tenants where id = ${tenant}`;
-  return t?.sales_bids ?? true;
+  return t?.sales_bids ?? (await salesAutoOn(tenant));
+}
+/** 414차(안 표 A·D): 회사가 따로 고르지 않았을 때 입찰·시설 수집을 켜 둘지 — 기본 회사는 예전처럼 켜짐.
+ *  다른 회사는 영업 용어 묶음이 '시설 운영·위탁'·'건설·시공'일 때만 켜짐(일반·IT 묶음은 데이터 설정에서 직접 켬) */
+const AUTO_ON_TEMPLATES: readonly string[] = ['facility', 'construction'];
+export async function salesAutoOn(tenant: string) {
+  if (tenant === 'default') return true;
+  return AUTO_ON_TEMPLATES.includes((await salesTerms(tenant)).template);
 }
 /** #408 회사 영업 용어(업종 템플릿) — null 이면 회사 업종으로 추정 */
 export async function salesTerms(tenant: string): Promise<SalesTerms & { auto: boolean }> {
@@ -21,7 +28,7 @@ export async function salesOptions(u: SessionUser) {
   await assertSpace(u, 'sales');
   const [t] = await db()<{ sales_bids: boolean | null; sales_template: string | null; industries: string[] | null; industry: string | null; sales_stages: unknown }[]>`select sales_bids, sales_template, industries, industry, sales_stages from tenants where id = ${tenantOf(u)}`;
   const terms = salesTermsFor(t?.sales_template, tenantIndustries(t), t?.sales_stages, tenantOf(u) === 'default');
-  return { bids: t?.sales_bids ?? true, bidsAuto: t?.sales_bids == null, canEdit: isAdmin(u), template: { code: terms.template, label: terms.label, auto: terms.auto }, terms, templates: salesTemplateList() };
+  return { bids: t?.sales_bids ?? (tenantOf(u) === 'default' || AUTO_ON_TEMPLATES.includes(terms.template)), bidsAuto: t?.sales_bids == null, canEdit: isAdmin(u), template: { code: terms.template, label: terms.label, auto: terms.auto }, terms, templates: salesTemplateList() };
 }
 /** 207차: 단계 표시 이름·색·숨김 — null = 기본 이름으로 되돌림 */
 const stageInput = z.object({ label: z.string().trim().max(STAGE_LABEL_MAX, `단계 이름은 ${STAGE_LABEL_MAX}자까지`).optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(), hidden: z.boolean().optional() });

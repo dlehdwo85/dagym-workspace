@@ -18,6 +18,9 @@ export type SalesTerms = {
   opCheck: string;
   /** 홈 '오늘 할 일' 묶음 이름 */
   todo: { followUp: string; facilities: string; vendors: string };
+  /** 414차 G-43: 화면에 직접 적혀 있던 낱말 — 시설 운영·위탁 묶음은 예전 글자 그대로, 다른 묶음은 그 업종 말로.
+   *  site = 영업 대상 한 곳('단지') · scaleEx·facTypeEx = 리드 입력 예시 · find = [전체] 찾기 안내 · sameSite = 입찰 [취소] 안내 */
+  words: { site: string; scaleEx: string; facTypeEx: string; find: string; sameSite: string };
   /** 입력 칸 예시(placeholder) — 회사 이름·브랜드 없이 업종 기준 */
   examples: { industry: string; product: string; business: string; keywords: string; excludes: string; aiProfile: string };
   /** 207차: 리드 단계 표시 이름·색·숨김(회사 설정, tenants.sales_stages) */
@@ -48,6 +51,7 @@ export const stageKeyOf = (cfg: StageCfg | undefined, v: string) => { const t = 
 const T: Record<SalesTemplate, Omit<SalesTerms, 'stages'>> = {
   facility: {
     template: 'facility', label: '시설 운영·위탁', desc: '아파트·커뮤니티·체육시설 위탁 운영, 시설 관리',
+    words: { site: '단지', scaleEx: '예: 1,200세대', facTypeEx: '아파트·오피스텔…', find: '단지·업체·공고', sameSite: '같은 단지의' },
     kind: { bid: '입찰', building: '신규단지', facility: '시설', vendor: '협력사', lead: '리드' },
     buildingsTab: '건설 예정/계획', facilitiesTab: '준공·입주 시설', vendorsTab: '협력사 등록', // #607 대표 결정 10/25 19:00: '신규 현장' → '건설 예정/계획'(단지라는 말 안 씀)
     unitName: '단지명', facilityName: '시설명', office: '관리사무소', operator: '현 위탁사', opCheck: '커뮤니티(주민공동시설) 운영 방식',
@@ -57,6 +61,7 @@ const T: Record<SalesTemplate, Omit<SalesTerms, 'stages'>> = {
   },
   construction: {
     template: 'construction', label: '건설·시공', desc: '건설·리모델링·인테리어·설비 시공',
+    words: { site: '현장', scaleEx: '예: 연면적 3,000㎡', facTypeEx: '아파트·상가·공장…', find: '현장·업체·공고', sameSite: '같은 현장의' },
     kind: { bid: '입찰', building: '신규 현장', facility: '준공 현장', vendor: '협력사', lead: '리드' },
     buildingsTab: '신규 현장', facilitiesTab: '준공 현장', vendorsTab: '협력사 등록',
     unitName: '현장명', facilityName: '현장명', office: '발주처 담당', operator: '현 시공사', opCheck: '시설 관리·운영 방식',
@@ -66,6 +71,7 @@ const T: Record<SalesTemplate, Omit<SalesTerms, 'stages'>> = {
   },
   it: {
     template: 'it', label: 'IT·소프트웨어', desc: '소프트웨어 개발·SI·SaaS·IT 서비스',
+    words: { site: '고객사', scaleEx: '예: 직원 200명', facTypeEx: '사무실·매장…', find: '고객사·업체·공고', sameSite: '같은 발주처의' },
     kind: { bid: '입찰', building: '신규 프로젝트', facility: '운영 고객', vendor: '파트너사', lead: '리드' },
     buildingsTab: '신규 프로젝트', facilitiesTab: '운영 중 고객', vendorsTab: '파트너 등록',
     unitName: '프로젝트명', facilityName: '고객사명', office: '담당 부서', operator: '현 공급사', opCheck: '시스템 운영 방식',
@@ -75,6 +81,7 @@ const T: Record<SalesTemplate, Omit<SalesTerms, 'stages'>> = {
   },
   general: {
     template: 'general', label: '일반', desc: '업종을 정하지 않은 회사 — 중립 용어',
+    words: { site: '거래처', scaleEx: '예: 직원 50명', facTypeEx: '사무실·매장…', find: '거래처·업체·공고', sameSite: '같은 발주처의' },
     kind: { bid: '입찰', building: '신규 기회', facility: '기존 거래처', vendor: '협력사', lead: '리드' },
     buildingsTab: '신규 기회', facilitiesTab: '기존 거래처', vendorsTab: '협력사 등록',
     unitName: '거래처명', facilityName: '거래처명', office: '담당 부서', operator: '현 거래처', opCheck: '운영 방식',

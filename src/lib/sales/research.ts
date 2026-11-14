@@ -68,7 +68,8 @@ async function adminActor(sql: Sql, t: string): Promise<SessionUser | null> {
 type FacilityItem = { id: string; name: string; region?: string | null; households?: unknown; date?: string | null; phone?: string | null; operator?: string | null; contractEnd?: string | null; leadId?: string | null; handoff?: boolean; notices?: number };
 const nameKey = (v: unknown) => String(v ?? '').replace(/\s+/g, '');
 /** #758(대표 10/28 '위 시설들은 커뮤니티 입찰이 올라온 곳이 맞는지?'): 단지(시설) 이름별 관련 공고 수 — 시설명(없으면 발주처) 띄어쓰기 무시, 같은 공고 두 줄(원본 복사·워크인 수집)은 한 번 */
-export async function relatedNoticeCounts(sql: Sql) {
+export async function relatedNoticeCounts(sql: Sql, tenant = 'default') {
+  if (tenant !== 'default') return new Map<string, number>(); // 414차: '관련 공고'는 기본 회사 판정 — 다른 회사에는 세지 않음
   const rows = await sql<{ k: string; n: number }[]>`select regexp_replace(coalesce(nullif(row->>'facility_name', ''), row->>'issuer', ''), '[[:space:]]+', '', 'g') as k,
       count(distinct coalesce(row->>'source_type', '') || '|' || coalesce(row->>'source_external_id', src_id))::int as n
     from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and coalesce(row->>'related', 'false') = 'true' group by 1`;
@@ -102,7 +103,7 @@ export async function researchWeekly(t: string, opt: { now?: Date; actor?: Sessi
   }
   const terms = await salesTerms(t);
   const label: Record<Missing, string> = { operator: `운영 방식(직영·위탁·미개관)·${terms.operator}`, contract: '계약 만료일(위탁이면)', phone: `${terms.office} 번호` };
-  const counts = await relatedNoticeCounts(sql).catch(() => new Map<string, number>());
+  const counts = await relatedNoticeCounts(sql, t).catch(() => new Map<string, number>());
   const rule = await (await import('../assignees')).resolveAssignee(sql, t, 'sales_source', 'facility').catch(() => null);
   const assigneeId = rule?.userId ?? actor.id; const due = addDays(today, RESEARCH_DUE_DAYS);
   const hh = (n: unknown) => (Number(n) > 0 ? `${Number(n).toLocaleString('ko-KR')}세대` : null);
@@ -145,7 +146,8 @@ export async function researchWeeklyTick(opt: { now?: Date } = {}) {
   const tenants = await sql<{ id: string }[]>`select t.id from tenants t where 'sales' = any(t.spaces) and t.status = 'active'
     and not exists (select 1 from sales_research_weekly w where w.tenant = t.id and w.week = ${week}::date) order by t.id limit 20`;
   const out: Record<string, unknown> = {};
-  for (const t of tenants) out[t.id] = await researchWeekly(t.id, { now }).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }));
+  // 414차(안 표 B): 자동 생성은 기본 회사만 — 다른 회사는 시설 탭을 켠 관리자가 [지금 만들기]를 누를 때만(researchNow)
+  for (const t of tenants.filter((x) => x.id === 'default')) out[t.id] = await researchWeekly(t.id, { now }).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }));
   return { week, tenants: tenants.length, out };
 }
 
@@ -159,7 +161,7 @@ export async function researchOverview(u: SessionUser) {
   const [n] = w?.task_id ? await sql<{ done: number; none: number }[]>`select count(*) filter (where status = 'done')::int as done, count(*) filter (where status = 'none')::int as none from sales_research where task_id = ${w.task_id}` : [{ done: 0, none: 0 }];
   const gate = RESEARCH_WEEKLY_GATE();
   return { latest: w ? { week: w.week, thisWeek: w.week === week, taskId: w.deleted ? null : w.task_id, items: w.items, due: w.due, assignee: w.assignee, taskDone: w.task_status === 'done', done: n.done, none: n.none } : null,
-    max: RESEARCH_MAX(), auto: gate !== 'off', canRun: isAdmin(u) && w?.week !== week };
+    max: RESEARCH_MAX(), auto: t === 'default' && gate !== 'off' /* 414차(안 표 B): 자동 묶음은 기본 회사만 */, canRun: isAdmin(u) && w?.week !== week };
 }
 /** [이번 주 후속조사 지금 만들기] — 관리자. 이번 주 묶음이 이미 있으면 그것을 돌려줌 */
 export async function runResearchManual(u: SessionUser) {
@@ -189,7 +191,7 @@ export async function handoffResearch(u: SessionUser, i: z.infer<typeof research
   }
   if (!picked.length) return { taskId: null, items: 0, skipped };
   const terms = await (await import('./options')).salesTerms(t);
-  const counts = await relatedNoticeCounts(sql).catch(() => new Map<string, number>());
+  const counts = await relatedNoticeCounts(sql, t).catch(() => new Map<string, number>());
   const hh = (n: unknown) => (Number(n) > 0 ? `${Number(n).toLocaleString('ko-KR')}세대` : null);
   const lines = picked.map(({ name, r }, k) => { const phone = r.office_phone ?? r.management_phone ?? r.phone; const n = noticeCountOf(counts, name);
     return `${k + 1}. ${name}${[r.region, hh(r.household_count)].filter(Boolean).length ? ` (${[r.region, hh(r.household_count)].filter(Boolean).join(' · ')})` : ''}${phone ? ` · ${terms.office} ${phone}` : ''}${n ? ` · 관련 공고 ${n}건` : ''}`
@@ -221,8 +223,8 @@ export async function researchForTask(u: SessionUser, taskId: string) {
   if (!items.length) return { items: [] };
   const src = new Map((await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'operating_facility_prospects' and src_id = any(${items.map((x) => x.src_id)}::text[])`).map((r) => [r.src_id, r.row]));
   const terms = await (await import('./options')).salesTerms(t);
-  const counts = await relatedNoticeCounts(sql).catch(() => new Map<string, number>());
-  return { terms: { operator: terms.operator, office: terms.office, opCheck: terms.opCheck, facility: terms.kind.facility },
+  const counts = await relatedNoticeCounts(sql, t).catch(() => new Map<string, number>());
+  return { terms: { operator: terms.operator, office: terms.office, opCheck: terms.opCheck, facility: terms.kind.facility, ...(terms.template !== 'facility' ? { plain: true } : {}) /* 414차 G-44: 시설 운영·위탁 묶음이 아닌 회사만 중립 대본 표시(그 묶음은 응답도 예전 그대로) */ },
     items: items.map((x) => { const r = src.get(x.src_id) ?? {};
       return { id: x.id, srcId: x.src_id, name: x.name, region: r.region ?? null, households: r.household_count ?? null, missing: x.missing, status: x.status, notices: noticeCountOf(counts, x.name),
         phone: r.office_phone ?? r.management_phone ?? r.phone ?? null, operator: communityOperator(x.result?.operator ?? r.current_operator, r.management_company), mgmt: r.management_company ?? null,

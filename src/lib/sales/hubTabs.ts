@@ -10,7 +10,7 @@ export const BASE_ONLY_TABS: readonly HubTab[] = ['buildings', 'vendors'];
 export const BASE_ONLY_TBLS: ReadonlySet<string> = new Set(['building_sales_pipeline', 'vendor_registrations']);
 export const ownsMoved = (tenant: string) => tenant === 'default';
 /** 준공·입주 시설 표(operating_facility_prospects)를 채우는 수집기 */
-const FACILITY_COLLECTORS = ['kicox_industrial_complexes', 'public_sports_facilities', 'tourist_hotels_localdata', 'kapt_weekly_complexes', 'reb_recent_complexes', 'kapt_new_complexes', 'operating_from_kapt', 'kapt_sa_sun'];
+export const FACILITY_COLLECTORS = ['kicox_industrial_complexes', 'public_sports_facilities', 'tourist_hotels_localdata', 'kapt_weekly_complexes', 'reb_recent_complexes', 'kapt_new_complexes', 'operating_from_kapt', 'kapt_sa_sun'];
 
 /** 회사가 볼 허브 탭(순서는 화면 그대로). bidsOn = 입찰·공고 선택 기능(tenants.sales_bids) */
 export async function hubTabsOn(tenant: string, bidsOn: boolean): Promise<HubTab[]> {
@@ -23,7 +23,9 @@ export async function hubTabsOn(tenant: string, bidsOn: boolean): Promise<HubTab
   const m = new Map(mine.map((r) => [r.slug, r.enabled]));
   const on = (slug: string) => m.get(slug) ?? true;
   const bids = bidsOn && [...BID_COLLECTORS].some(on);
-  const facilities = FACILITY_COLLECTORS.some(on);
+  // 414차(안 표 A): 시설 수집기를 따로 켜고 끄지 않은 회사의 기본값 — 기본 회사·시설/건설 묶음은 켜짐, 그 밖은 꺼짐(데이터 설정에서 하나라도 켜면 탭이 보임)
+  const facDef = await (await import('./options')).salesAutoOn(tenant);
+  const facilities = FACILITY_COLLECTORS.some((slug) => m.get(slug) ?? facDef);
   const prospects = (ds[0]?.n ?? 0) === 0 || (ds[0]?.on ?? 0) > 0; // 원천을 하나도 안 고른 회사는 안내가 있는 빈 탭을 봄
   return HUB_TABS.filter((t) => (BASE_ONLY_TABS.includes(t) ? ownsMoved(tenant) : t === 'bids' || t === 'contracts' ? bids : t === 'facilities' ? facilities : t === 'prospects' ? prospects : true));
 }

@@ -7,7 +7,7 @@ import type { DigestCond, DigestItem, DigestSection } from './digest';
 import type { RegionLimit } from './region';
 import { sidoIn } from './region';
 
-type Digest = { day: string; since?: string; until?: string; cond?: DigestCond; items: DigestItem[]; counts: { total: number; new: number; now: number; review: number; soon: number; result?: number; ref: number; amend: number; cancel: number; merged: number; skipped: Record<string, number> } };
+type Digest = { day: string; since?: string; until?: string; cond?: DigestCond; /** 414차: 기본 회사가 아닌 회사(회사 검색어로만 고른 메일) */ plain?: boolean; items: DigestItem[]; counts: { total: number; new: number; now: number; review: number; soon: number; result?: number; ref: number; amend: number; cancel: number; merged: number; skipped: Record<string, number> } };
 
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
 /** 'YYYY-MM-DD' → '10/24(금)' */
@@ -57,6 +57,8 @@ export const SECTIONS: { key: Exclude<DigestSection, 'ref'>; title: string; sub:
   { key: 'change', title: '정정·취소', sub: '관련 사업이거나 진행 기록이 있는 공고만' },
   { key: 'result', title: '결과(낙찰·유찰)', sub: '영업 기회가 아닌 결과 — 새 공고 수에는 넣지 않음' }, // 로컬 10/24 12:20(#537 후속·#530)
 ];
+/** 414차: 다른 회사 메일의 구역 설명 — '관련 사업' 판정이 아니라 회사 검색어 기준 */
+const sectionsOf = (d: Digest) => (!d.plain ? SECTIONS : SECTIONS.map((s) => (s.key === 'review' ? { ...s, sub: '관심 검색어에 맞는 공고' } : s.key === 'change' ? { ...s, sub: '관심 검색어에 맞거나 진행 기록이 있는 공고만' } : s)));
 const of = (d: Digest, s: DigestSection) => d.items.filter((i) => i.section === s);
 /** 로컬 10/23 22:45: 마감 임박은 10건까지 보이고 나머지는 '나머지 n건 — [보기]'(입찰 화면 진행 중·마감 임박순) */
 const SOON_MAX = 10;
@@ -127,7 +129,7 @@ export function digestMail(fromName: string, d: Digest, base: string, opt: { tes
   const testNote = test ? `시험 발송 — 누른 사람에게만 보냈습니다. 오늘 ${String(opt.testHour).padStart(2, '0')}:00 정기 메일은 그대로 갑니다.` : null;
   // 본사 시·도를 모르는데 지역 제한 공고가 있으면 끝에 한 줄 안내
   const hqHint = !hq && d.items.some((i) => i.section !== 'ref' && i.limit) ? '회사 프로필(영업 › 지원사업)에 본사 시·도를 넣으면 지역 제한 공고마다 참가 가능 여부를 함께 보여 줍니다' : null;
-  const sections = SECTIONS.map((s) => { const list = of(d, s.key); if (!list.length) return '';
+  const sections = sectionsOf(d).map((s) => { const list = of(d, s.key); if (!list.length) return '';
     const shown = cap(s.key, list); const rest = list.length - shown.length;
     const groups = s.key === 'soon' ? [shown] : grouped(shown, order); let n = 0;
     const rows = groups.map((g) => `${groups.length > 1 ? groupHtml(g) : ''}${g.map((x) => itemHtml(x, ++n, base, d.day, hq)).join('')}`).join('');
@@ -157,7 +159,7 @@ ${sections}${ref}${empty}
       i.progress || l4.length ? `   ${[i.progress, ...l4].filter(Boolean).join(' · ')}` : null,
       `   보기: ${base}/s/sales/hub?tab=bids&bt=all&id=${encodeURIComponent(i.id)}`].filter(Boolean).join('\n'); };
   const text = [subject, ...(period ? [period] : []), ...(testNote ? [testNote] : []), '', summary(d), ...(bizs ? [bizs] : []), ...(cond ? [`맞춤 조건: ${cond.join(' · ')} — 바꾸기: ${prefs}`] : []), `오늘 공고 전체 보기: ${today}`, `맞춤 설정: ${prefs}`,
-    ...SECTIONS.flatMap((s) => { const list = of(d, s.key); const shown = cap(s.key, list); const rest = list.length - shown.length;
+    ...sectionsOf(d).flatMap((s) => { const list = of(d, s.key); const shown = cap(s.key, list); const rest = list.length - shown.length;
       const groups = s.key === 'soon' ? [shown] : grouped(shown, order); let n = 0;
       return list.length ? ['', `■ ${s.title} (${list.length})${s.sub ? ` — ${s.sub}` : ''}`, ...groups.flatMap((g) => [...(groups.length > 1 ? [`  ◇ ${bizName(g[0]) || '기타'} ${g.length}건`] : []), ...g.map((x) => txt(x, ++n))]), ...(rest > 0 ? [`   나머지 ${rest}건 — 보기: ${open}`] : [])] : []; }),
     ...(d.counts.ref ? ['', `■ 참고(검색어만 일치) ${d.counts.ref}건 — 보기: ${refs}`] : []),

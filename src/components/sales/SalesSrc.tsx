@@ -12,7 +12,7 @@ import type { SearchHint } from '@/lib/sales/sourceLink';
 import { mdhm } from '@/lib/sales/bidTerms';
 import { AI_ITEMS_NOTE, ELIG_FAIL, ELIG_MISS, VISION_NOTE } from '@/lib/sales/eligibilityText';
 import { api, useApi } from '@/components/client';
-import { useSalesTerms, useSession } from '@/components/session';
+import { useSalesTerms, useSession, useTerms } from '@/components/session';
 import { Prospects } from '@/components/sales/Prospects';
 import { CollectorAlerts } from '@/components/sales/Collectors';
 import { AwardStats } from '@/components/sales/AwardStats';
@@ -89,13 +89,13 @@ function MetaLeadBox({ id, raw, phone }: { id: string; raw: any; phone?: string 
 }
 /** 243차 #765(대표 10/28 '대상아님이나 체크박스를 클릭 후 그다음 동작을 누르게 되는데 버튼하나로 처리'): 줄마다 [대상 아님] 한 번 — 안내의 [되돌리기](여러 개는 체크 그대로) */
 function SkipButton({ kind, id, onDone }: { kind: 'bid' | 'building' | 'facility' | 'vendor'; id: string; onDone?: () => void }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false); const W = useSalesTerms().words; // 414차 G-43
   async function go() {
     setBusy(true);
     try {
       await api('/api/sales/work', { body: { kind, id, status: WORK_STATUS[kind].find((x) => SKIP_ST.test(x)) ?? '대상아님' } });
       // 380차 #1015·#1014(대표 11/07 '대상 아님 말고 [취소] · 그래도 지속적으로 공고는 보내 달라'): 입찰은 [취소] — 그 공고 한 건만 치움
-      toast.ok(kind === 'bid' ? '취소로 옮겼습니다 — 이 공고만 치웠고, 같은 단지의 재공고·정정·새 공고·결과는 계속 보입니다' : '대상 아님으로 옮겼습니다', { label: '되돌리기', run: () => { api('/api/sales/work', { body: { kind, id, restore: true } }).then(() => { toast.ok('되돌렸습니다'); onDone?.(); }, (e: Error) => toast.error(e.message)); } });
+      toast.ok(kind === 'bid' ? `취소로 옮겼습니다 — 이 공고만 치웠고, ${W.sameSite} 재공고·정정·새 공고·결과는 계속 보입니다` : '대상 아님으로 옮겼습니다', { label: '되돌리기', run: () => { api('/api/sales/work', { body: { kind, id, restore: true } }).then(() => { toast.ok('되돌렸습니다'); onDone?.(); }, (e: Error) => toast.error(e.message)); } });
       onDone?.();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
@@ -306,12 +306,14 @@ export function SalesHome() {
   const T = useSalesTerms(); // #408 업종 중립 문구 — 메뉴·타일·묶음 이름은 회사 업종 템플릿
   const { data, error, reload } = useApi<any>('/api/sales/src?view=summary');
   const hubTabs: string[] | null = useSession().features.salesHubTabs ?? null;
+  const baseCo = useTerms().base; // 414차: 시설 탭을 끈 다른 회사는 시설 타일·묶음도 안 보임(기본 회사 화면은 예전 그대로)
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data) return <Skeleton rows={4} />;
   const k = data.kpi;
   const bids = data.bidsOn !== false; // 입찰·공고 끈 회사는 입찰 카드 숨김
   // 413차: 신규 현장·협력사 등록 탭이 없는 회사(옮겨 온 자료는 기본 회사만)는 그 타일·숫자도 안 보임 — 기본 회사는 늘 보임
   const movedOn = (k: 'buildings' | 'vendors') => !hubTabs || hubTabs.includes(k);
+  const facOn = baseCo || !hubTabs || hubTabs.includes('facilities');
   const cards: [string, number, string][] = [['리드', k.leads, '/s/sales/leads'], ['7일 안 연락', k.dueSoon, '/s/sales/leads'], ['연락 지남', k.overdue, '/s/sales/leads'],
     ...(bids ? [['진행 중 입찰', k.bidsOpen ?? k.bidsWorking, '/s/sales/hub?tab=bids&bt=open'], ['작업 중 입찰', k.bidsWorking, '/s/sales/hub?tab=bids&bt=working'], ['관련 공고', k.relatedNotices, '/s/sales/hub?tab=bids&bt=all'], ['최근 7일 공고(공고일)', k.newNotices7d, '/s/sales/hub?tab=bids&bt=all']] as [string, number, string][] : []),
     ...(data.support ? [['마감 임박 지원사업', data.support.closing, '/s/sales/support?tab=closing']] as [string, number, string][] : [])]; // #450 7일 안 마감(관심·준비 + 맞춤)
@@ -336,18 +338,18 @@ export function SalesHome() {
       </Link>}
       {data.today && <TodayRow date={data.today.date} cards={[
         ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/hub?tab=bids&sub=today'] as [string, number, string]] : []), // #537 영업기회 › 입찰 › 오늘 새 공고
-        ['오늘 새 영업 DB', data.today.newDb.buildings + data.today.newDb.facilities + data.today.newDb.vendors, `/s/sales/hub?day=today&tab=${data.today.newDb.facilities >= data.today.newDb.buildings && data.today.newDb.facilities >= data.today.newDb.vendors ? 'facilities' : data.today.newDb.vendors > data.today.newDb.buildings ? 'vendors' : 'buildings'}`,
-          [movedOn('buildings') && `${T.kind.building} ${data.today.newDb.buildings}`, `${T.kind.facility} ${data.today.newDb.facilities}`, movedOn('vendors') && `${T.kind.vendor} ${data.today.newDb.vendors}`].filter(Boolean).join(' · ')],
+        ...(movedOn('buildings') || facOn || movedOn('vendors') ? [['오늘 새 영업 DB', data.today.newDb.buildings + (facOn ? data.today.newDb.facilities : 0) + data.today.newDb.vendors, `/s/sales/hub?day=today&tab=${data.today.newDb.facilities >= data.today.newDb.buildings && data.today.newDb.facilities >= data.today.newDb.vendors ? 'facilities' : data.today.newDb.vendors > data.today.newDb.buildings ? 'vendors' : 'buildings'}`,
+          [movedOn('buildings') && `${T.kind.building} ${data.today.newDb.buildings}`, facOn && `${T.kind.facility} ${data.today.newDb.facilities}`, movedOn('vendors') && `${T.kind.vendor} ${data.today.newDb.vendors}`].filter(Boolean).join(' · ')] as [string, number, string, string]] : []),
         ['오늘 연락할 리드', data.today.contact, '/s/sales/leads?day=today'],
         ...(bids ? [['오늘 마감 입찰', data.today.closing, '/s/sales/hub?tab=bids&bt=closing'] as [string, number, string]] : [])]} />}
       {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적(계약 등록 금액) — 마케팅 홈과 같은 막대 */}
       <RevenueGoal color={C} canEdit={!!data.canEdit} />
       {/* S2-5 오늘 할 일 7묶음(영업관리 2-2) — 업무 공간과 같은 업무 표(자동 업무 포함), 누르면 그 화면으로 */}
-      {data.todo && <TodoGroups todo={data.todo} bids={bids} vendors={movedOn('vendors')} />}
+      {data.todo && <TodoGroups todo={data.todo} bids={bids} vendors={movedOn('vendors')} facilities={facOn} />}
       {/* S2-6 영업기회 요약 타일 6 + 목록별 진행 현황표 */}
       {data.tiles && <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="sales-tiles">
         <h2 className="mb-2 text-sm font-semibold">영업기회 요약</h2>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 text-center">{([['지금 영업할 곳', data.tiles.nowSales, '/s/sales/hub?tab=bids&bt=working'], ...(bids ? [['진행 중 입찰', data.tiles.bidsOpen, '/s/sales/hub?tab=bids&bt=open'], ['계약만료·재입찰', data.tiles.contracts, '/s/sales/contracts']] : []), ...(movedOn('buildings') ? [[T.kind.building, data.tiles.buildings, '/s/sales/hub?tab=buildings']] : []), [T.facilitiesTab, data.tiles.facilities, '/s/sales/hub?tab=facilities'], ...(movedOn('vendors') ? [[T.vendorsTab, data.tiles.vendors, '/s/sales/hub?tab=vendors']] : [])] as [string, number, string][]).map(([l, n, h]) => (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 text-center">{([['지금 영업할 곳', data.tiles.nowSales, '/s/sales/hub?tab=bids&bt=working'], ...(bids ? [['진행 중 입찰', data.tiles.bidsOpen, '/s/sales/hub?tab=bids&bt=open'], ['계약만료·재입찰', data.tiles.contracts, '/s/sales/contracts']] : []), ...(movedOn('buildings') ? [[T.kind.building, data.tiles.buildings, '/s/sales/hub?tab=buildings']] : []), ...(facOn ? [[T.facilitiesTab, data.tiles.facilities, '/s/sales/hub?tab=facilities']] : []), ...(movedOn('vendors') ? [[T.vendorsTab, data.tiles.vendors, '/s/sales/hub?tab=vendors']] : [])] as [string, number, string][]).map(([l, n, h]) => (
           <Link key={l} href={h} className="rounded-input border border-line p-2 hover:border-blue-300" data-testid="sales-tile"><div className="text-[11px] text-ink-2">{l}</div><div className="text-lg font-bold tabular-nums" style={{ color: C }}>{n}</div></Link>))}</div>
         {data.progress && <div className="mt-2 hidden overflow-x-auto md:block" data-testid="sales-progress"><table className="w-full text-xs"><thead><tr className="text-left text-ink-3"><th className="py-1 pr-2">목록</th>{PROG_COLS.map((c) => <th key={c} className="py-1 pr-2 text-right">{c}</th>)}</tr></thead>
           <tbody>{(data.progress as [string, Record<string, number>][]).map(([name, m]) => <tr key={name} className="border-t border-line"><td className="py-1 pr-2 font-medium">{name}</td>{PROG_COLS.map((c) => <td key={c} className="py-1 pr-2 text-right tabular-nums">{Object.entries(m).filter(([k]) => PROG_MATCH[c].test(k)).reduce((a, [, v]) => a + v, 0) || ''}</td>)}</tr>)}</tbody></table></div>}
@@ -374,9 +376,9 @@ const PROG_MATCH: Record<string, RegExp> = { '미검토·미연락': /미검토|
 const todoGroups = (T: ReturnType<typeof useSalesTerms>): [string, string, string][] => [['followUp', T.todo.followUp, '후속 기한이 오늘이거나 지난 건'], ['facilities', T.todo.facilities, `다음 연락일이 오늘이거나 지난 ${T.kind.facility}`], ['vendors', T.todo.vendors, '등록 신청 기한'],
   ['pastTasks', '지난 영업 업무', '마감이 지난 영업 업무(자동 업무 포함)'], ['nowSales', '지금 영업할 곳 상위 5', '작업 중 입찰, 마감 임박순'], ['leads', '리드 연락', '연락 지남·오늘 연락'], ['closingSoon', '입찰 오늘·내일 마감', '즉시 검토·검토중·연락중']];
 /** S2-5 오늘 할 일 7묶음 — 묶음마다 건수·목록(5개 접힘), [순서대로 시작]은 첫 항목으로 */
-function TodoGroups({ todo, bids, vendors = true }: { todo: Record<string, any[]>; bids: boolean; vendors?: boolean }) {
+function TodoGroups({ todo, bids, vendors = true, facilities = true }: { todo: Record<string, any[]>; bids: boolean; vendors?: boolean; facilities?: boolean }) {
   const [openK, setOpenK] = useState<string | null>(null); const T = useSalesTerms();
-  const groups = todoGroups(T).filter(([k]) => (bids || !['nowSales', 'closingSoon'].includes(k)) && (vendors || k !== 'vendors')); // 413차: 협력사 등록 탭이 없는 회사는 그 묶음도 없음
+  const groups = todoGroups(T).filter(([k]) => (bids || !['nowSales', 'closingSoon'].includes(k)) && (vendors || k !== 'vendors') && (facilities || k !== 'facilities')); // 413차: 협력사 등록 탭이 없는 회사는 그 묶음도 없음 · 414차: 시설 탭을 끈 다른 회사도
   const total = groups.reduce((n, [k]) => n + (todo[k]?.length ?? 0), 0);
   const first = groups.map(([k]) => todo[k]?.[0]).find(Boolean);
   const hrefOf = (x: any) => (x.sales_ref || x.title ? `/tasks/${x.id}` : x.href);
@@ -439,6 +441,7 @@ function BulkBar({ kind, ids, onDone, onClear }: { kind: 'bid' | 'building' | 'f
 /** 전환 뒤: 단계(보류·실패는 사유 필수)·다음 연락일·메모·담당(관리자) 고치기 + 상담 기록 추가 */
 function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () => void }) {
   const l = data.lead; const ST = useStages(); // 207차: 단계 이름은 회사 설정
+  const W = useSalesTerms().words; // 414차 G-43: 입력 예시는 회사 업종 묶음 말로
   const [f, setF] = useState({ status: l.status ?? '신규리드', reason: '', next: l.next ?? '', memo: l.memo ?? '', owner: l.ownerId ?? '',
     facility: l.facility ?? '', region: l.region ?? '', scale: l.scale ?? '', revenue: l.revenue ? String(l.revenue) : '', contact: l.contact ?? '', phone: l.phone ?? '', email: l.email ?? '', homepage: l.homepage ?? '', biz: l.bizNo ?? '' });
   const needReason = (f.status === '보류' || f.status === '실패') && f.status !== l.status;
@@ -462,7 +465,7 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
         <div className="mt-2 grid gap-2 sm:grid-cols-4">
           <Field label="시설 유형"><input className={inputCls} value={f.facility} onChange={S('facility')} maxLength={100} aria-label="시설 유형" data-testid="lead-facility" /></Field>
           <Field label="지역"><input className={inputCls} value={f.region} onChange={S('region')} maxLength={50} aria-label="지역" /></Field>
-          <Field label="규모"><input className={inputCls} value={f.scale} onChange={S('scale')} maxLength={60} placeholder="예: 1,200세대" aria-label="규모" data-testid="lead-scale" /></Field>
+          <Field label="규모"><input className={inputCls} value={f.scale} onChange={S('scale')} maxLength={60} placeholder={W.scaleEx} aria-label="규모" data-testid="lead-scale" /></Field>
           <Field label="예상매출(원)"><input className={inputCls} value={f.revenue} onChange={S('revenue')} inputMode="numeric" aria-label="예상매출" data-testid="lead-revenue" /></Field>
           <Field label="고객 담당자"><input className={inputCls} value={f.contact} onChange={S('contact')} maxLength={100} aria-label="고객 담당자" /></Field>
           <Field label="연락처"><input className={inputCls} value={f.phone} onChange={S('phone')} maxLength={40} inputMode="tel" aria-label="연락처" /></Field>
@@ -751,6 +754,7 @@ function SwipeCard({ on, onLeft, onRight, children }: { on: boolean; onLeft: () 
 }
 
 export function Leads({ initialId, initialView }: { initialId?: string; initialDay?: string; initialView?: string }) { // initialDay 는 주소(?day)에서 직접 읽음
+  const W = useSalesTerms().words; // 414차 G-43: 새 리드 입력 예시는 회사 업종 묶음 말로(훅은 맨 위에서)
   // #242 2단계: 검색어·단계·오늘·칩·정렬·우선·담당·지역은 주소에 — 리드에서 업무·일정을 열었다 뒤로 와도 같은 목록. ?id= 는 뒤로가기로 돌아온 상세(서버가 준 값이 없을 때)
   const sp = useSearchParams();
   const [s, setS] = useUrlState('q', ''); const [status, setStatus] = useUrlState('status', ''); const [open, setOpen] = useState<string | null>(initialId ?? sp.get('id'));
@@ -995,7 +999,7 @@ export function Leads({ initialId, initialView }: { initialId?: string; initialD
               <Field label="우선순위"><select className={inputCls} value={nl.priority} onChange={(e) => setNl({ ...nl, priority: e.target.value })} aria-label="우선순위"><option value="">—</option>{Object.entries(PRI_KO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
               {data?.canAssign ? <Field label="담당"><select className={inputCls} value={nl.ownerId} onChange={(e) => setNl({ ...nl, ownerId: e.target.value })} aria-label="담당"><option value="">나</option>{(data.people ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field> : NLF('nextContactDate', '다음 연락일', { type: 'date' })}
             </div>
-            <div className="grid gap-3 sm:grid-cols-4">{NLF('facilityType', '시설 유형', { maxLength: 100, placeholder: '아파트·오피스텔…' })}{NLF('region', '지역', { maxLength: 50 })}{NLF('scale', '규모', { maxLength: 60, placeholder: '1,200세대' })}{NLF('expectedRevenue', '예상매출(원)', { inputMode: 'numeric' })}</div>
+            <div className="grid gap-3 sm:grid-cols-4">{NLF('facilityType', '시설 유형', { maxLength: 100, placeholder: W.facTypeEx })}{NLF('region', '지역', { maxLength: 50 })}{NLF('scale', '규모', { maxLength: 60, placeholder: '1,200세대' })}{NLF('expectedRevenue', '예상매출(원)', { inputMode: 'numeric' })}</div>
             <div className="grid gap-3 sm:grid-cols-4">{NLF('contactName', '고객 담당자', { maxLength: 100 })}{NLF('phone', '연락처', { maxLength: 40, inputMode: 'tel' })}{NLF('email', '이메일', { maxLength: 200, inputMode: 'email' })}{NLF('homepage', '홈페이지', { maxLength: 300, inputMode: 'url' })}</div>
             <div className="grid gap-3 sm:grid-cols-4">{NLF('bizNo', '사업자번호', { maxLength: 20, inputMode: 'numeric', placeholder: '123-45-67890' })}{data?.canAssign && NLF('nextContactDate', '다음 연락일', { type: 'date' })}</div>
             <Field label="메모"><textarea className={inputCls} rows={2} value={nl.memo} onChange={(e) => setNl({ ...nl, memo: e.target.value })} maxLength={5000} aria-label="메모" /></Field>
@@ -1147,6 +1151,7 @@ export { Deals };
 const BID_CHIPS: [string, string][] = [['open', '진행 중(마감 임박순)'], ['today', '오늘 새 공고'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['closing', '오늘 마감'], ['recruit', '협력사 모집'], ['awards', '낙찰 분석']]; // 226차 #497 R21-4 // #608: '마감 임박'·'준비 기간' 칩은 뺌(카드 왼쪽 줄로)
 const BID_SORTS: [string, string][] = [['', '기본 순서'], ['deadline', '마감 D-day순'], ['notice', '공고일 최신순'], ['amount', '예산 큰 순']];
 export function Bids({ initialTab, initialId, embedded }: { initialTab?: string; initialId?: string; embedded?: boolean }) {
+  const baseCo = useTerms().base; // 414차: 기본 회사 전용 칩(협력사 모집) 가리기
   // #242 2단계: 탭·검색어·사업·정렬은 주소에 — 공고에서 업무·리드로 갔다 뒤로 와도 같은 목록
   // 기본 칩은 고정 '진행 중'(#613 대표 10/25: 모니터링은 진행 중 먼저) — 앱 하단 '영업기회'·당일 메일 링크는 ?bt=today 로 오늘 새 공고를 바로 연다
   const sp = useSearchParams();
@@ -1163,7 +1168,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
   if (error) return <ErrorBox error={error} retry={reload} />;
   // 메일·홈 링크로 온 soon(마감 임박)·prep(준비 기간)·ref(참고) 탭은 칩에 없지만 그 탭에 있는 동안만 칩으로 보여 줌
   const extra: [string, string][] = tab === 'ref' ? [['ref', '참고(검색어만 일치)']] : tab === 'soon' ? [['soon', '마감 임박(3일)']] : tab === 'prep' ? [['prep', '준비 기간(D-10 안)']] : [];
-  const chips: [string, string][] = [...BID_CHIPS.map(([k, l]) => [k, k === 'today' && data ? `${l} ${data.todayCount ?? 0}` : l] as [string, string]), ...extra, ['skip', `취소${data ? ` ${data.skipCount ?? 0}건` : ''}`], ['done', `완료${data ? ` ${data.doneCount ?? 0}건` : ''}`], ...(tab === 'canceled' || data?.canceledCount ? [['canceled', `발주처 취소${data ? ` ${data.canceledCount ?? 0}건` : ''}`] as [string, string]] : [])]; // 380차 #1015: 사람이 누른 [취소]·[완료] 탭 · 발주처가 취소한 공고는 '발주처 취소'로 구분
+  const chips: [string, string][] = [...BID_CHIPS.filter(([k]) => baseCo || k !== 'recruit' /* 414차 F: 협력사 모집 감시는 기본 회사 원천 — 다른 회사에는 칩 없음 */).map(([k, l]) => [k, k === 'today' && data ? `${l} ${data.todayCount ?? 0}` : l] as [string, string]), ...extra, ['skip', `취소${data ? ` ${data.skipCount ?? 0}건` : ''}`], ['done', `완료${data ? ` ${data.doneCount ?? 0}건` : ''}`], ...(tab === 'canceled' || data?.canceledCount ? [['canceled', `발주처 취소${data ? ` ${data.canceledCount ?? 0}건` : ''}`] as [string, string]] : [])]; // 380차 #1015: 사람이 누른 [취소]·[완료] 탭 · 발주처가 취소한 공고는 '발주처 취소'로 구분
   const row = (n: any) => <li key={n.id} className="relative">{data?.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data?.readOnly === false} /></li>;
   return (
     <div className="space-y-3" data-testid="sales-bids">
@@ -1186,6 +1191,10 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
         <input type="date" className={cx(inputCls, 'h-7 !min-h-0 !w-auto py-0 text-xs')} value={dayTab ?? data.day ?? ''} max={data.days[0].day} onChange={(e) => { const v = e.target.value; if (v) setTab(v === data.days[0].day ? 'today' : v); }} aria-label="날짜 고르기" data-testid="bids-day-pick" />
         {dayTab && <span className="text-xs text-ink-2" data-testid="bids-day-note">{dayLabel(dayTab, data.days[0].day)} 새 공고 {data.items.length}건 — 그날 처음 수집했거나 공고일이 그날인 공고(마감이 지난 것도 포함)</span>}
       </div>}
+      {/* 414차: 관심 검색어가 없는 회사(기본 회사 제외) — 무엇을 넣으면 공고가 모이는지 안내 */}
+      {data?.needKeywords && tab !== 'awards' && <div className="rounded-card border border-dashed border-blue-200 bg-blue-50/60 p-3 text-sm text-ink-2" data-testid="bids-need-keywords">
+        <b className="text-ink">관심 검색어를 넣어 주세요.</b> 관심 사업의 낱말이나 맞춤 검색어를 넣으면, 제목·분류에 그 낱말이 들어간 공고가 여기에 모이고 아침 메일로도 갑니다.
+        <Link href="/s/sales/sources" className="ml-1 font-medium text-brand-700 underline">데이터 설정에서 넣기</Link></div>}
       {tab === 'awards' ? <AwardStats onOpen={setDeep} /> : !data ? <Skeleton rows={6} /> : tab === 'skip' && data.items.length > 0 ? <SkipGroups items={data.items} row={row} />
         : tab === 'open' && data.noClose > 0 ? <>
           <ul className="space-y-1.5">{data.items.filter((n: any) => n.close).map(row)}</ul>
@@ -1256,6 +1265,7 @@ function EligBox({ n, onChange }: { n: any; onChange?: () => void }) {
 /** 대표 검수 10/20 ②: 입찰 상세 — 한국어 칸만(공고명·단지·발주처·마감·예산·문서·연락처·상태·메모·다음 조치), 관리자 '원본 보기' 접힘 */
 function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: boolean; canWrite?: boolean; onChange?: () => void; onClose: () => void }) {
   useBackClose(true, onClose, ['id', String(n.id)]); // #535: 휴대폰 뒤로가기 = 공고 상세만 닫힘(메일 링크 ?id= 와 같은 주소)
+  const W = useSalesTerms().words; // 414차 G-43: '단지' 칸 이름은 회사 업종 묶음 말로
   // S1-4: 원본 상세 그대로 — [공식 원문][공고문][첨부 각각], 정보 칸(마감·예산·낙찰·추정가격·계약방식·계약기간·공고일·DB 등록)은 값이 없으면 '후속조사 필요', 접힘 '과업·참가자격·요건 상세'
   const docs = [n.search ? <SearchHintChip key="u" h={n.search} /> : n.url && <a key="u" href={n.url} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-url"><ExternalLink className="size-3.5" aria-hidden />공식 원문</a>,
     ...(n.attachments ?? []).map((a: any, i: number) => attUrl(a) && <a key={i} href={attHref(a, i, bidCtx(n))} target="_blank" rel="noopener noreferrer" className={cx(linkCls, 'text-ink-2')} data-testid="bid-doc-file"><Download className="size-3.5" aria-hidden />{attName(a, i)}</a>)].filter(Boolean);
@@ -1267,7 +1277,7 @@ function BidDetail({ n, admin, canWrite, onChange, onClose }: { n: any; admin?: 
         <AiAsk space="sales" examples={AI_ASK_EXAMPLES.salesBid} subject={`공고 ${String(n.title).slice(0, 40)}`} compact testId="ai-ask-bid" />
         <div className="flex flex-wrap gap-1.5 text-[11px]">{[n.classification ?? n.category, n.businesses?.map((b: any) => b.name).join('·') || null, n.status, n.fit !== null && n.fit !== undefined && `적합 ${n.fit}`, n.sourceLabel && `${n.sourceLabel}${n.noticeNo ? ` ${n.noticeNo}` : ''}`].filter(Boolean).map((b, i) => <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-2">{String(b)}</span>)}</div>
         <KoDl rows={[['공고명', n.title], ...(n.cancelReason || n.prevCancel ? [['취소', n.cancelReason ? `취소 사유: ${n.cancelReason}${n.renotice ? ` · 재공고 올라옴${n.renotice.close ? `(마감 ${kd(n.renotice.close)})` : ''}` : ''}`
-            : `재공고 — 이전 공고 취소${n.prevCancel.day ? `(${kd(n.prevCancel.day)})` : ''}${n.prevCancel.reason ? ` · 사유: ${n.prevCancel.reason}` : ''}`] as [string, string]] : []), ['단지', n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.businesses?.length ? n.businesses.map((b: { name: string }) => b.name).join(' · ') : n.fitBusiness], ['참가 방법', n.partner && `${n.partner} — 공사 공고라 단독 입찰이 어려워 면허를 가진 업체와 함께 참가를 준비합니다`],
+            : `재공고 — 이전 공고 취소${n.prevCancel.day ? `(${kd(n.prevCancel.day)})` : ''}${n.prevCancel.reason ? ` · 사유: ${n.prevCancel.reason}` : ''}`] as [string, string]] : []), [W.site, n.complex], ['발주처', n.agency], ['지역', n.region], ['공고 종류', n.noticeType], ['적합 사업', n.businesses?.length ? n.businesses.map((b: { name: string }) => b.name).join(' · ') : n.fitBusiness], ['참가 방법', n.partner && `${n.partner} — 공사 공고라 단독 입찰이 어려워 면허를 가진 업체와 함께 참가를 준비합니다`],
           ['마감', n.deadline ? kdt(n.deadline) : unk(null)], ['예산', won(n.amount) || (n.amount ? String(n.amount) : unk(null))], ['낙찰', n.winner ? [n.winner, won(n.awardAmount), n.awardDate && kd(n.awardDate)].filter(Boolean).join(' · ') : unk(null)],
           ['추정가격', won(n.estimated) || unk(n.estimated)], ['계약방식', unk(n.contractMethod)], ['계약기간', unk(n.contractPeriod)], ['공고일', n.noticeDate ? kd(n.noticeDate) : unk(null)], ['DB 등록', n.posted ? kd(n.posted) : unk(null)],
           ['세대수', n.households && `${n.households}세대`], ['업종', n.industry !== n.noticeType && n.industry], ['키워드', n.keywords], ['대표 판단', n.judgment && `${n.judgment}${n.salesPoint ? ` · 영업 포인트: ${n.salesPoint}` : ''}`], ['부족 자격', n.qualificationGap],
@@ -1668,7 +1678,7 @@ function ResearchBar({ onDone }: { onDone?: () => void }) {
       {l?.thisWeek && l.items ? <>
         <span data-testid="hub-research-week">이번 주 {l.items}곳{l.assignee ? ` · 담당 ${l.assignee}` : ''}{l.due ? ` · ${mdd(l.due)}까지` : ''}{l.done || l.none ? ` · 조사함 ${l.done + l.none}곳${l.none ? `(확인 못함 ${l.none})` : ''}` : ''}{l.taskDone ? ' · 업무 완료' : ''}</span>
         {l.taskId && <Link href={`/tasks/${l.taskId}`} className="font-medium text-amber-900 underline" data-testid="hub-research-task">업무 열기</Link>}
-      </> : <span data-testid="hub-research-week">{l?.thisWeek ? '이번 주 조사할 곳 없음 · ' : ''}{data.auto ? `${T.operator}·계약만료일·${T.office} 번호가 빈 큰 단지부터 ${data.max}곳을 매주 월요일 아침 업무 하나로 묶습니다` : '카드를 확인한 뒤 [후속조사 넘기기](여러 개는 체크 → 아래 줄)로 사람이 넘깁니다 — 자동 묶음 꺼짐'}</span>}
+      </> : <span data-testid="hub-research-week">{l?.thisWeek ? '이번 주 조사할 곳 없음 · ' : ''}{data.auto ? `${T.operator}·계약만료일·${T.office} 번호가 빈 큰 ${T.words.site}부터 ${data.max}곳을 매주 월요일 아침 업무 하나로 묶습니다` : '카드를 확인한 뒤 [후속조사 넘기기](여러 개는 체크 → 아래 줄)로 사람이 넘깁니다 — 자동 묶음 꺼짐'}</span>}
       {data.canRun && data.auto && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={run} data-testid="hub-research-run">이번 주 묶음 지금 만들기</Button>}
     </div>
   );
@@ -1681,13 +1691,14 @@ const keyDates = (dates?: [string, unknown][]) => { const has = (dates ?? []).fi
 /** 243차 #764(대표 10/28 '단지 검색이나 업체 검색할 때 카테고리별 하나씩 들어가서 검색해야 하는 상황'): 허브 [전체] — 입찰·신규 단지·준공·입주 시설·협력사·공공데이터를 한 번에 찾아
  *  갈래마다 건수와 앞 8건(누르면 그 갈래의 상세) · 검색어가 없으면 안내만(전부 불러오지 않음) */
 function HubAll({ term: t0, tabs }: { term: string; tabs: [string, string][] }) {
+  const W = useSalesTerms().words; // 414차 G-43
   const term = t0.trim(); const has = (k: string) => tabs.some(([x]) => x === k); const e = encodeURIComponent(term);
   const bids = useApi<any>(term && has('bids') ? `/api/sales/src?view=bids&tab=all&q=${e}` : null, [term]);
   const bld = useApi<any>(term && has('buildings') ? `/api/sales/src?view=hub&tab=buildings&q=${e}` : null, [term]);
   const fac = useApi<any>(term && has('facilities') ? `/api/sales/src?view=hub&tab=facilities&q=${e}` : null, [term]);
   const ven = useApi<any>(term && has('vendors') ? `/api/sales/src?view=hub&tab=vendors&q=${e}` : null, [term]);
   const pro = useApi<any>(term && has('prospects') ? `/api/sales/prospects?q=${e}&limit=8` : null, [term]);
-  if (!term) return <p className="rounded-card border border-dashed border-line bg-white p-4 text-center text-sm text-ink-3" data-testid="hub-all-empty">위 찾기 칸에 단지·업체·공고 이름을 넣으면 {tabs.filter(([k]) => ['bids', 'buildings', 'facilities', 'vendors', 'prospects'].includes(k)).map(([, l]) => l).join('·')}을 한 번에 찾습니다</p>;
+  if (!term) return <p className="rounded-card border border-dashed border-line bg-white p-4 text-center text-sm text-ink-3" data-testid="hub-all-empty">위 찾기 칸에 {W.find} 이름을 넣으면 {tabs.filter(([k]) => ['bids', 'buildings', 'facilities', 'vendors', 'prospects'].includes(k)).map(([, l]) => l).join('·')}을 한 번에 찾습니다</p>;
   type G = { key: string; label: string; api: { data: any; error: unknown }; rows: (d: any) => { id: string; name: string; meta: string; href: string }[]; total: (d: any) => number };
   const hub = (tab: string) => (d: any) => (d?.items ?? []).slice(0, 8).map((r: any) => ({ id: String(r.id), name: String(r.name ?? '(이름 없음)'), meta: [r.region, r.households && `${r.households}세대`, r.status ?? r.contact].filter(Boolean).join(' · '), href: `/s/sales/hub?tab=${tab}&q=${e}&id=${encodeURIComponent(String(r.id))}` }));
   const all: G[] = [

@@ -23,7 +23,7 @@ before(async () => {
   await ctx.owner.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   // 다른 회사(공개 가입) — 영업 공간을 켠다
   const c = new Client('ceo@moved-1026.test');
-  const r = await c.ok('POST', '/api/auth/signup', { email: 'ceo@moved-1026.test', password: 'signup-pass-1234', name: '새대표', mode: 'team', company: '든든시설', industry: '시설관리·용역', agree: { terms: true, age14: true, privacy: true, ai: true } });
+  const r = await c.ok('POST', '/api/auth/signup', { email: 'ceo@moved-1026.test', password: 'signup-pass-1234', name: '새대표', mode: 'team', company: '든든건설', industry: '건설·시설관리' /* 414차: 시설 탭이 기본 켜지는 묶음(건설) — 일반 묶음은 시설 탭이 기본 꺼짐 */, agree: { terms: true, age14: true, privacy: true, ai: true } });
   await c.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
   const me = await c.ok('GET', '/api/auth/me');
   assert.ok(me.user.tenant && me.user.tenant !== 'default');

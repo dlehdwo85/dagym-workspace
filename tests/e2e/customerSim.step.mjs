@@ -121,19 +121,40 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     const runs = await p.locator('[data-testid="sales-collector-runs"] li').count();
     if (runs) note('§2 공용 실행 기록', `최근 실행 ${runs}건이 새 회사에도 보임(공용 수집 기록·오류 원인)`);
     if (await p.locator('[data-testid="sales-collector-sent"], [data-testid="sales-collector-keys"]').count()) note('§2 보낸 주소·칸 이름', '원천 주소·첫 줄 칸 이름 상세가 고객 관리자에게 보임');
-    // ── 5-1) 413차: 새 회사의 영업 홈·영업기회 허브 — 옛 영업관리에서 옮겨 온 신규 현장·협력사 등록(기본 회사 자료)의 탭·타일·할 일 묶음이 없다
+    // ── 5-1) 413·414차: 새 회사(유통·판매 = 영업 용어 묶음 '일반')의 영업 홈·영업기회 허브
+    //   413차: 옛 영업관리에서 옮겨 온 신규 현장·협력사 등록(기본 회사 자료)의 탭·타일·할 일 묶음이 없다
+    //   414차: 입찰·시설 수집은 일반 묶음에서 기본 꺼짐 → 그 탭·타일·묶음도 없다. 입찰을 켜면 '관심 검색어를 넣어 주세요', 검색어를 넣으면 그 낱말 공고만
     await p.goto(BASE + '/s/sales'); await p.getByTestId('sales-tiles').waitFor();
     const tileLinks = await p.locator('[data-testid="sales-tile"]').evaluateAll((els) => els.map((el) => el.getAttribute('href') ?? ''));
-    assert.ok(tileLinks.length >= 2 && !tileLinks.some((h) => /tab=(buildings|vendors)/.test(h)), `영업 홈 타일: ${tileLinks.join(' , ')}`);
-    assert.ok(tileLinks.some((h) => /tab=facilities/.test(h)), '공용 자료(시설) 타일은 그대로');
-    assert.equal(await p.getByTestId('sales-todo-vendors').count(), 0, '협력사 등록 할 일 묶음 없음');
-    assert.equal(await p.getByTestId('sales-todo-facilities').count(), 1, '시설 연락 묶음은 그대로');
+    assert.ok(tileLinks.length >= 1 && !tileLinks.some((h) => /tab=(buildings|vendors|facilities)/.test(h)), `영업 홈 타일: ${tileLinks.join(' , ')}`);
+    assert.equal(await p.getByTestId('sales-todo-vendors').count() + await p.getByTestId('sales-todo-facilities').count(), 0, '협력사·시설 할 일 묶음 없음');
+    assert.equal(await p.getByTestId('sales-todo-leads').count(), 1, '리드 연락 묶음은 그대로');
     await p.goto(BASE + '/s/sales/hub'); await p.getByTestId('sales-hub-tabs').waitFor();
-    assert.equal(await p.getByTestId('sales-hub-buildings').count() + await p.getByTestId('sales-hub-vendors').count(), 0, '허브에 신규 현장·협력사 등록 탭 없음');
-    assert.equal(await p.getByTestId('sales-hub-facilities').count(), 1, '허브 시설 탭은 그대로');
+    for (const k of ['buildings', 'vendors', 'facilities', 'bids', 'contracts']) assert.equal(await p.getByTestId(`sales-hub-${k}`).count(), 0, `허브에 ${k} 탭 없음`);
+    assert.equal(await p.getByTestId('sales-hub-prospects').count() + await p.getByTestId('sales-hub-regions').count(), 2, '공공데이터·지역별 탭은 그대로');
+    const allHint = await p.getByTestId('hub-all-empty').innerText().catch(() => '');
+    if (allHint) assert.ok(!/단지/.test(allHint) && /거래처·업체·공고/.test(allHint), `[전체] 안내문: ${allHint}`);
     await p.goto(BASE + '/s/sales/hub?tab=vendors'); await p.getByTestId('sales-hub-tabs').waitFor(); // 주소를 직접 넣어도 그 탭으로 가지 않는다
     assert.equal(await p.getByTestId('sales-hub-vendors').count(), 0);
     await shot('413-cust-sales-hub.png');
+    // 입찰을 켬(데이터 설정의 '입찰·공고 사용'과 같은 값) → 검색어가 없으면 안내, 검색어를 넣으면 그 낱말이 든 공고만(기본 회사 판정 공고는 안 나옴)
+    await sql`update tenants set sales_bids = true where id = ${t.id}`;
+    const jid = 'E2E-414-N1', jid2 = 'E2E-414-N2'; const nowIso = new Date().toISOString();
+    await sql`delete from sales_src_rows where src_id = any(${[jid, jid2]})`;
+    const mk = (id, title, more) => ({ scope: 'global', tbl: 'procurement_notices', src_id: id, origin: 'workin', row: sql.json({ id, title, source_type: 'g2b_bid', source_external_id: id, source_url: 'https://example.test/' + id, issuer: '시험시청', region: '경기',
+      first_seen_at: nowIso, created_at: nowIso, updated_at: nowIso, deadline_at: new Date(Date.now() + 6 * 864e5).toISOString(), current_status: '공고중', notice_kind: 'new', ...more }) });
+    await sql`insert into sales_src_rows ${sql([mk(jid, 'E2E414 사무용품 납품 업체 선정', { related: false, classification: '참고(비관련)' }), mk(jid2, 'E2E414 아파트 헬스장 위탁운영 입찰', { related: true, fit_business: '다짐', matched_keywords: ['헬스장'], classification: '즉시 검토' })])}`;
+    await p.goto(BASE + '/s/sales/hub?tab=bids&bt=all'); await p.getByTestId('bids-need-keywords').waitFor();
+    assert.ok(!(await body()).includes('E2E414'), '검색어가 없으면 공고가 없음');
+    assert.ok(!/협력사 모집/.test(await body()), "다른 회사 입찰 화면에 '협력사 모집' 칩 없음");
+    await shot('414-cust-bids-need-keywords.png');
+    await sql`insert into sales_bid_prefs (tenant, keywords) values (${t.id}, ${['사무용품']}) on conflict (tenant) do update set keywords = excluded.keywords`;
+    await p.reload(); await p.getByText('E2E414 사무용품 납품 업체 선정').first().waitFor();
+    assert.equal(await p.getByTestId('bids-need-keywords').count(), 0);
+    const bidsText = await body();
+    assert.ok(!/E2E414 아파트 헬스장|즉시 검토|적합 다짐/.test(bidsText), `다른 회사 입찰 목록에 기본 회사 판정: ${bidsText.match(/E2E414 아파트 헬스장|즉시 검토|적합 다짐/)?.[0]}`);
+    await shot('414-cust-bids-keywords.png');
+    await sql`delete from sales_src_rows where src_id = any(${[jid, jid2]})`;
     // ── 6) 마케팅 첫 화면: 연결 계정 0개 → '채널 연결 3단계'
     await p.goto(BASE + '/s/marketing');
     await p.getByTestId('space-home-marketing').waitFor();

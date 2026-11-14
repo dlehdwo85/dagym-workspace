@@ -122,6 +122,11 @@ test('고객사도 KG2B 공고를 봄(수집기 목록 연결됨 · 입찰 목�
   await cust.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
   const c = (await cust.ok('GET', '/api/sales/collectors')).collectors.find((x) => x.slug === 'kg2b_bid_notices');
   assert.ok(c, '고객사 수집기 목록에 KG2B'); assert.equal(c.state, 'connected'); assert.equal(c.source, null, '원천 주소는 고객에게 안 보임');
+  // 414차 영업 일반화: 다른 회사는 공용 판정('관련')을 쓰지 않는다 — 입찰을 켜고(업종을 안 고른 회사는 기본 꺼짐) 관심 검색어를 넣으면 그 낱말이 든 공고가 보임
+  assert.equal((await cust.req('GET', '/api/sales/src?view=bids&tab=all')).status, 404, '입찰 기본 꺼짐');
+  await cust.ok('PUT', '/api/sales/options', { bids: true });
+  assert.equal((await cust.ok('GET', '/api/sales/src?view=bids&tab=all')).needKeywords, true, '검색어 넣기 전에는 안내');
+  await cust.ok('PUT', '/api/sales/digest/prefs', { keywords: ['피트니스'] });
   const items = (await cust.ok('GET', `/api/sales/src?view=bids&tab=all&q=${encodeURIComponent('시험1009')}`)).items;
   assert.ok(items.some((n) => n.noticeNo === 'kg2b_1009001'), JSON.stringify(items.map((n) => n.noticeNo)));
   assert.equal(items.find((n) => n.noticeNo === 'kg2b_1009001').source, 'kg2b_bid');

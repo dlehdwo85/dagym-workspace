@@ -21,6 +21,7 @@ import { digestMail } from './digestMail';
 import { eligSay, eligView } from './eligibilityText';
 import { SKIP_ONLY, isCancel, isPrespec, noKey, noticeKeys, projectSkipOf, settledWork, titleKey } from './noticeGroups';
 import { fixG2bUrl, searchHint, type SearchHint } from './sourceLink';
+import { judgeWords, ownsJudge, plainNotice } from './tenantJudge';
 
 const SIDO = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
 const words = z.array(z.string().trim().min(1).max(40)).max(50);
@@ -96,18 +97,20 @@ export async function digestSince(tenant: string, day: string): Promise<Date> {
   const at = prev ? new Date(prev.created_at) : null;
   return at && at < start && start.getTime() - at.getTime() <= 3 * 864e5 ? at : start;
 }
-/** 회사 맞춤 필터: 우리 업종 적합(matchFit) 또는 관심 검색어 → 제외어·지역·발주처·금액으로 거름. fit = 적합 사업(없으면 검색어만 일치 → '참고') */
-export function passPrefs(r: any, p: Prefs): { ok: boolean; why: string; fit: string | null } {
+/** 회사 맞춤 필터: 우리 업종 적합(matchFit) 또는 관심 검색어 → 제외어·지역·발주처·금액으로 거름. fit = 적합 사업(없으면 검색어만 일치 → '참고')
+ *  414차: base = false(기본 회사가 아님)면 공용 줄의 적합 판정·협력사 모집을 쓰지 않고 회사 검색어로만 — words = 맞은 검색어 */
+export function passPrefs(r: any, p: Prefs, base = true): { ok: boolean; why: string; fit: string | null; words?: string[] } {
   const text = `${r.title ?? ''} ${r.bid_category ?? ''} ${r.task_scope ?? ''}`; const t = norm(text);
   if (p.excludes.some((w) => t.includes(norm(w)))) return { ok: false, why: '제외어', fit: null };
-  const fit = r.fit_business ? String(r.fit_business) : matchFit(String(r.title ?? ''), r.bid_category, r.task_scope).fit;
+  const fit = !base ? null : r.fit_business ? String(r.fit_business) : matchFit(String(r.title ?? ''), r.bid_category, r.task_scope).fit;
   const kw = p.keywords.filter((w) => t.includes(norm(w)));
+  if (!base && (!kw.length || r.source_type === 'vendor_recruit')) return { ok: false, why: '검색어 밖', fit: null };
   if (!fit && !kw.length && r.source_type !== 'vendor_recruit') return { ok: false, why: '업종 무관', fit: null };
   if (p.regions.length) { const reg = String(r.region ?? r.region_restriction ?? ''); if (reg && !/전국/.test(reg) && !p.regions.some((s) => reg.includes(s))) return { ok: false, why: '지역', fit }; }
   if (p.issuers.length) { const iss = `${r.issuer ?? ''} ${r.demand_agency ?? ''}`; if (!p.issuers.some((w) => norm(iss).includes(norm(w)))) return { ok: false, why: '발주처', fit }; }
   if (p.item_codes.length) { const code = String(r.industry_code ?? r.item_code ?? ''); if (code && !p.item_codes.some((c) => code.includes(c))) return { ok: false, why: '물품코드', fit }; }
   const amt = r.estimated_amount ?? r.budget_amount; if (amt != null && amt !== '') { const n = Number(amt); if (p.amount_min != null && n < p.amount_min) return { ok: false, why: '금액 미만', fit }; if (p.amount_max != null && n > p.amount_max) return { ok: false, why: '금액 초과', fit }; }
-  return { ok: true, why: [fit ? `적합 ${fit}` : null, kw.length ? `검색어 ${kw.join('·')}` : null, r.source_type === 'vendor_recruit' ? '협력사 모집' : null].filter(Boolean).join(' · '), fit };
+  return { ok: true, why: [fit ? `적합 ${fit}` : null, kw.length ? `검색어 ${kw.join('·')}` : null, r.source_type === 'vendor_recruit' ? '협력사 모집' : null].filter(Boolean).join(' · '), fit, words: kw };
 }
 const SRC: Record<string, string> = { kapt_bid: 'K-apt', kg2b_bid: 'KG2B', kwater_bid: '수자원공사', kra_bid: '마사회', g2b_bid: '나라장터', nuri_bid: '누리장터', g2b_prespec: '나라장터 사전규격', lh_bid: 'LH', lh_prespec: 'LH 사전규격', d2b_bid: '국방', onbid_lease: '온비드 임대', vendor_recruit: '협력사 모집' };
 const SLUG_OF: Record<string, string> = { kapt_bid: 'kapt_bid_notices', kg2b_bid: 'kg2b_bid_notices', kwater_bid: 'public_agency_bids', kra_bid: 'public_agency_bids', g2b_bid: 'g2b_bid_notices', nuri_bid: 'g2b_bid_notices', g2b_prespec: 'g2b_prespec_awards', lh_bid: 'public_agency_bids', lh_prespec: 'public_agency_bids', d2b_bid: 'public_agency_bids', onbid_lease: 'public_agency_bids', vendor_recruit: 'vendor_recruit_watch' };
@@ -188,10 +191,12 @@ async function notTargets(tenant: string) {
   const newerRevision = (r: any) => { const n = noKey(r); return !!n.key && skippedOrd.has(n.key) && n.ord > skippedOrd.get(n.key)! && !isCancel(r); };
   return (id: string, r: any) => ids.has(id) || (!live.has(id) && !newerRevision(r) && noticeKeys(r).some((k) => keys.has(k))) || (!settled.has(id) && isPrespec(r) && !!project(r));
 }
-type Cand = { id: string; r: any; isNew: boolean; kind: string; late: boolean; fit: string | null; why: string; soon?: boolean; refound?: boolean; filled?: boolean };
+type Cand = { id: string; r: any; isNew: boolean; kind: string; late: boolean; fit: string | null; why: string; words?: string[]; soon?: boolean; refound?: boolean; filled?: boolean };
 /** 지난 메일 이후(digestSince) 처음 본 공고 + 그 뒤 정정·취소로 바뀐 공고 → 회사 맞춤 통과분 → 구역. 마감 임박 = 이미 받은 관련 공고 중 D-3 이내·진행 기록 없음 */
 export async function buildDigest(tenant: string, day = kstDay()) {
   const sql = db(); const p = await prefsOf(tenant); const cats: BizCat[] = await listBizCats(tenant).catch(() => []);
+  // 414차: 기본 회사는 공용 줄의 판정 그대로(예전 경로). 다른 회사는 그 판정을 떼고(plainNotice) 회사 검색어(맞춤 검색어 + 관심 사업 낱말)로만 고른다
+  const base = ownsJudge(tenant); const pj: Prefs = base ? p : { ...p, keywords: await judgeWords(tenant) };
   const off = new Set((await sql<{ slug: string }[]>`select slug from sales_collector_settings where tenant = ${tenant} and not enabled`).map((r) => r.slug));
   const since = await digestSince(tenant, day); const sinceMs = since.getTime(); const dayStart = Date.parse(`${day}T00:00:00+09:00`);
   // first_seen_at·updated_at 은 UTC ISO 문자열 — 하루 넓게 거르고(#148) 정확한 비교는 아래 시각으로
@@ -209,8 +214,10 @@ export async function buildDigest(tenant: string, day = kstDay()) {
   const skipped: Record<string, number> = {}; const skip = (why: string) => { skipped[why] = (skipped[why] ?? 0) + 1; };
   const notTarget = await notTargets(tenant);
   const cands: Cand[] = [];
-  for (const { src_id, row: r } of rows) {
+  for (const { src_id, row } of rows) {
+    const r = base ? row : plainNotice(row);
     const slug = SLUG_OF[String(r.source_type)] ?? ''; if (slug && off.has(slug)) continue;
+    if (!base && r.source_type === 'vendor_recruit') continue; // 협력사 모집 감시(건설사 공지)는 기본 회사 원천
     const seen = at(r.first_seen_at); const upd = at(r.updated_at);
     const ref = at(r.refound_at); const refound = ref != null && ref >= sinceMs && !(seen != null && seen >= sinceMs); // 185차: 다시 판정으로 찾은 공고는 찾은 날 한 번 새 공고로
     const isNew = (seen != null && seen >= sinceMs) || refound; const kind0 = String(r.notice_kind ?? 'new'); const result = isAwardResult(r);
@@ -227,12 +234,12 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     if (r.source_type === 'vendor_recruit' && (!r.posted_date || !vendorDateOk(r))) { skip('게시일 미상'); continue; } // #476 e·후속: 게시판 날짜로 확인 못 한 협력사 줄(조각·메뉴·예전 방식)은 메일·오늘 탭에서 뺌
     if (onbidSale(r)) { skip('온비드 매각'); continue; } // #537 후속2(로컬 10/24 12:58): 온비드는 임대·사용허가만
     if (!result && notTarget(String(r.id ?? src_id), r)) { skip('대상 아님'); continue; } // 380차 #1014: [취소]한 공고의 낙찰 결과는 계속 메일로
-    const f = passPrefs(r, p); if (!f.ok) { skip(f.why); continue; }
+    const f = passPrefs(r, pj, base); if (!f.ok) { skip(f.why); continue; }
     // 234차: 결과 줄은 처음 본 날이 아니라 결과를 안 때로 — 새로 들어온 오래된 결과(result_at 이 그날 끝)는 오늘 결과가 아님
-    if (result) { if ((isNew && resAt == null) || resultToday || filledToday) cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why, ...(filledToday && !isNew ? { filled: true } : {}) }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
+    if (result) { if ((isNew && resAt == null) || resultToday || filledToday) cands.push({ id: String(r.id ?? src_id), r, isNew, kind: 'result', late: false, fit: f.fit, why: f.why, words: f.words, ...(filledToday && !isNew ? { filled: true } : {}) }); continue; } // 결과는 마감이 지났어도(낙찰은 마감 뒤) '결과' 묶음
     const dl = dayOf(r.deadline_at);
     if (dl && dl < day) { skip('마감 지남'); continue; } // 첫 수집일에 과거 마감 공고가 '새 공고'로 섞이지 않게(로컬 10/21 10:55)
-    cands.push({ id: String(r.id ?? src_id), r, isNew, kind: String(r.current_status ?? '') === '취소' ? 'cancel' : kind0, late: isNew && !refound && seen! < dayStart, fit: f.fit, why: f.why, refound });
+    cands.push({ id: String(r.id ?? src_id), r, isNew, kind: String(r.current_status ?? '') === '취소' ? 'cancel' : kind0, late: isNew && !refound && seen! < dayStart, fit: f.fit, why: f.why, words: f.words, refound });
   }
   // 같은 공고(원천 + 번호, 나라장터는 차수 뺌) → 최신 차수 1줄 · 번호가 달라도 제목·발주처·마감·종류가 같으면 1줄(삼척 정정 001·002, 같은 취소 두 줄)
   let merged = 0;
@@ -250,17 +257,18 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     and ((row->>'deadline_at' >= ${plusDays(day, -1)} and row->>'deadline_at' < ${end})
       or (row->>'site_briefing_kind' = '필수' and row->>'site_briefing_at' >= ${plusDays(day, -1)} and row->>'site_briefing_at' < ${end} and row->>'deadline_at' >= ${day})) limit 3000`;
   const soonCands: Cand[] = [];
-  for (const { src_id, row: r } of soonRows) {
+  for (const { src_id, row } of soonRows) {
+    const r = base ? row : plainNotice(row);
     const slug = SLUG_OF[String(r.source_type)] ?? ''; if (slug && off.has(slug)) continue;
     if (todayKeys.has(nk(r, String(r.id ?? src_id))) || notTarget(String(r.id ?? src_id), r)) continue;
     const seen = at(r.first_seen_at); if (seen != null && seen >= sinceMs) continue;
     if (r.source_type === 'vendor_recruit' || String(r.notice_kind ?? '') === 'cancel' || CLOSED_STATUS.test(String(r.current_status ?? '')) || onbidSale(r)) continue; // '마감임박'은 진행 중(#537 후속2)
-    const f = passPrefs(r, p); if (!f.ok || !f.fit) continue;
+    const f = passPrefs(r, pj, base); if (!f.ok || (base && !f.fit)) continue;
     const dl = when(r.deadline_at); if (!dl) continue;
     const ahead = (w: NonNullable<ReturnType<typeof when>>) => { const n = Math.round((Date.parse(w.d) - Date.parse(day)) / 864e5); return n >= 0 && n <= 3 && !(n === 0 && w.t && Date.parse(`${w.d}T${w.t}:00+09:00`) < Date.now()); }; // 오늘인데 시각이 지남은 뺌
     const bf = r.site_briefing_kind === '필수' ? when(r.site_briefing_at) : null;
     if (!ahead(dl) && !(bf && ahead(bf) && dl.d >= day)) continue;
-    soonCands.push({ id: String(r.id ?? src_id), r, isNew: false, kind: String(r.notice_kind ?? 'new'), late: false, fit: f.fit, why: f.why, soon: true });
+    soonCands.push({ id: String(r.id ?? src_id), r, isNew: false, kind: String(r.notice_kind ?? 'new'), late: false, fit: f.fit, why: f.why, words: f.words, soon: true });
   }
   const soon = latest(soonCands, (c) => nk(c.r, c.id), (c) => noKey(c.r).ord);
   // 대표 10/24 추가 ②: 같은 제목·기관·마감으로 먼저 게시된 공고가 있으면 '재게시'(K-apt 같은 공고 두 번 게시) — 화면은 한 카드 '2회 게시(…)'
@@ -281,11 +289,12 @@ export async function buildDigest(tenant: string, day = kstDay()) {
   for (const c of [...today, ...soon]) {
     const r = c.r; const st = String(r.source_type ?? ''); const isChange = c.kind === 'amend' || c.kind === 'cancel'; const partner = c.kind === 'result' ? null : partnerNeed(r);
     let section: DigestSection;
+    const mine = base ? !!c.fit : true; // 414차: 다른 회사는 검색어에 맞은 공고가 곧 그 회사의 관련 공고('참고' 구역 없음)
     if (c.soon) { if (linked.has(c.id)) continue; section = 'soon'; }
     else if (c.kind === 'result') section = 'result';
-    else if (isChange) section = c.fit || linked.has(c.id) ? 'change' : 'ref'; // 정정·취소는 관련 사업이거나 진행 기록이 걸린 것만 — 나머지는 '참고'
-    else if (!c.fit && st !== 'vendor_recruit') section = 'ref'; // 검색어만 일치
-    else section = (cls.get(c.id) ?? (partner ? '검토' : r.classification ?? initialClassification({ ...r, fit_business: c.fit }))) === '즉시 검토' ? 'now' : 'review'; // #752 면허 업체 협력 필요는 검토(회사가 바꾼 분류는 그대로)
+    else if (isChange) section = mine || linked.has(c.id) ? 'change' : 'ref'; // 정정·취소는 관련 사업이거나 진행 기록이 걸린 것만 — 나머지는 '참고'
+    else if (!mine && st !== 'vendor_recruit') section = 'ref'; // 검색어만 일치
+    else section = (cls.get(c.id) ?? (!base ? '검토' : partner ? '검토' : r.classification ?? initialClassification({ ...r, fit_business: c.fit }))) === '즉시 검토' ? 'now' : 'review'; // #752 면허 업체 협력 필요는 검토(회사가 바꾼 분류는 그대로) · 다른 회사는 회사가 '즉시 검토'로 바꾼 것만 ★
     const dl = when(r.deadline_at); const dd = dl ? Math.round((Date.parse(dl.d) - Date.parse(day)) / 864e5) : null; const dday = c.kind === 'cancel' || (dd != null && dd < 0) ? null : dd; // 결과 줄은 마감이 지났음 — D-day 없음 · 로컬 10/25 10:55 취소 공고는 'D-n · 준비 시작' 없이 마감일만
     const state = String(r.notice_state ?? '');
     const method = `${r.contract_method ?? ''} ${r.award_method ?? ''}`; const briefing = fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at));
@@ -297,7 +306,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const progress = wk && (wk.status || wk.who) ? [wk.status ? `진행 ${wk.status}` : '진행 기록 있음', wk.who ? `담당 ${wk.who}` : null].filter(Boolean).join(' · ') : null;
     const biz = matchBiz(r, cats).map((b) => ({ name: b.name, color: b.color }));
     items.push({ id: c.id, title: String(r.title ?? ''), issuer: r.issuer ?? r.demand_agency ?? null, region: regionOf(r), source: SRC[st] ?? st, url: fixG2bUrl(r.source_url) ?? '', search: searchHint({ source: st, url: r.source_url, externalId: r.source_external_id, noticeNo: r.notice_no }), kind: c.kind,
-      fit: c.fit, keywords: Array.isArray(r.matched_keywords) ? r.matched_keywords : [], estimated: num(r.estimated_amount) ?? num(r.budget_amount), deadline: dl?.d ?? null, dday,
+      fit: c.fit, keywords: !base ? c.words ?? [] : Array.isArray(r.matched_keywords) ? r.matched_keywords : [], estimated: num(r.estimated_amount) ?? num(r.budget_amount), deadline: dl?.d ?? null, dday,
       participation: dayOf(r.participation_deadline_at), opening: dayOf(r.opening_at), attachments: Array.isArray(r.attachment_urls) ? r.attachment_urls.length : 0, why: c.why, seenAt: r.first_seen_at ?? null, late: c.late, refound: !!c.refound, posted: dayOf(r.posted_date),
       section, noticeNo: st === 'vendor_recruit' ? null : String(r.source_external_id ?? '').trim() || null, badges, biz: biz.length ? biz : c.fit ? [{ name: c.fit, color: '#2563EB' }] : [], tags: tagsOf(r), amount: amounts.join(' · ') || null, amounts,
       limit: c.kind === 'result' || c.kind === 'cancel' ? null : regionLimit(r.region_restriction, hq), progress,
@@ -312,9 +321,9 @@ export async function buildDigest(tenant: string, day = kstDay()) {
   const by = (s: DigestSection) => items.filter((i) => i.section === s).length;
   const now = by('now'), review = by('review'), change = items.filter((i) => i.section === 'change');
   const counts = { total: now + review + change.length, new: now + review, now, review, soon: by('soon'), result: by('result'), ref: by('ref'), amend: change.filter((i) => i.kind !== 'cancel').length, cancel: change.filter((i) => i.kind === 'cancel').length, merged, skipped };
-  const cond: DigestCond = { biz: cats.map((c) => c.name), keywords: p.keywords.length, excludes: p.excludes.length, regions: p.regions, issuers: p.issuers.length, itemCodes: p.item_codes.length, amountMin: p.amount_min, amountMax: p.amount_max,
+  const cond: DigestCond = { biz: cats.map((c) => c.name), keywords: pj.keywords.length, excludes: p.excludes.length, regions: p.regions, issuers: p.issuers.length, itemCodes: p.item_codes.length, amountMin: p.amount_min, amountMax: p.amount_max,
     hq: hq ? `${hq.sido}${hq.sigungu ? ` ${hq.sigungu}` : ''}` : null };
-  return { day, since: since.toISOString(), until: new Date().toISOString(), items: items.slice(0, 300), counts, prefs: p, cond };
+  return { day, since: since.toISOString(), until: new Date().toISOString(), items: items.slice(0, 300), counts, prefs: p, cond, ...(base ? {} : { plain: true as const }) };
 }
 /** 보내기(하루 1건, force 면 다시 만들어 덮어쓰고 다시 보냄). 받는 사람: digest_to 또는 영업 담당 규칙·대표 + 직접 넣은 주소 */
 export async function sendDigest(tenant: string, opt: { force?: boolean; day?: string; actorId?: string | null } = {}) {
@@ -366,6 +375,8 @@ export async function salesDigestTick() {
   const tenants = await sql<{ id: string }[]>`select id from tenants where spaces @> array['sales']::text[] and coalesce(sales_bids, true)`;
   for (const t of tenants) {
     const p = await prefsOf(t.id); if (!p.digest_enabled || hour < p.digest_hour) continue;
+    // 414차(안 표 D): 다른 회사는 입찰을 쓰는 회사(업종 묶음 기본값·직접 켬)이고 검색어를 하나라도 넣었을 때만 — 기본 회사는 예전 그대로
+    if (!ownsJudge(t.id) && (!(await (await import('./options')).salesBidsOn(t.id)) || !(await judgeWords(t.id)).length)) continue;
     const [done] = await sql<{ id: string }[]>`select id from sales_digests where tenant = ${t.id} and day = ${day}`; if (done) continue;
     const r = await sendDigest(t.id, { day }).catch(() => null); if (r?.sent) sent++;
   }

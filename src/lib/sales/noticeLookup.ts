@@ -10,6 +10,7 @@ import { salesBidsOn } from './options';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { SOURCE_LABEL } from './srcViews';
 import { eligSay, eligView } from './eligibilityText';
+import { ownsJudge, plainNotice } from './tenantJudge';
 
 type Row = Record<string, any>;
 const pick = (r: Row, ...keys: string[]) => { for (const k of keys) { const v = r?.[k]; if (v !== undefined && v !== null && v !== '') return v; } return null; };
@@ -17,9 +18,12 @@ const clipText = (v: unknown, n: number) => { const s = typeof v === 'string' ? 
 const filesOf = (r: Row): SrcFile[] => sourceFiles(r.attachment_urls ?? r.attachments, r.notice_file_url);
 const titleOf = (r: Row) => String(pick(r, 'title', 'notice_title', 'bid_name', 'name') ?? '(제목 없음)');
 
-async function loadRow(id: string): Promise<Row | null> {
+/** 414차: 기본 회사가 아니면 공용 줄의 기본 회사 판정(분류·적합 사업·영업 메모)을 떼고, 협력사 모집 감시 줄(기본 회사 원천)은 없는 것으로 */
+async function loadRow(id: string, tenant = 'default'): Promise<Row | null> {
   const [r] = await db()<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = ${id}`;
-  return r ? { ...r.row, __id: r.src_id } : null;
+  if (!r) return null;
+  if (ownsJudge(tenant)) return { ...r.row, __id: r.src_id };
+  return String(r.row?.source_type ?? '') === 'vendor_recruit' ? null : plainNotice({ ...r.row, __id: r.src_id });
 }
 /** 목록용 요약(한국어 칸만, 영문 키 없음) — 바로 가는 주소가 없는 원천(온비드·국방 등)은 '공고번호 검색' 안내 */
 function brief(r: Row) {
@@ -47,7 +51,9 @@ export async function searchNotices(u: SessionUser, q: string, limit = 8) {
     and (coalesce(row->>'title', row->>'notice_title', row->>'bid_name', '') ilike ${like} or coalesce(row->>'notice_no', '') ilike ${like} or coalesce(row->>'source_external_id', '') ilike ${like}
       or coalesce(row->>'issuer', '') ilike ${like} or coalesce(row->>'demand_agency', '') ilike ${like} or coalesce(row->>'complex_name', '') ilike ${like} or coalesce(row->>'facility_name', '') ilike ${like})
     order by coalesce(row->>'posted_date', row->>'first_seen_at', row->>'updated_at') desc nulls last limit ${Math.min(20, Math.max(1, Math.floor(limit) || 8))}`;
-  return { items: rows.map((r) => brief({ ...r.row, __id: r.src_id })), note: rows.length ? '결과 id 로 read_sales_notice 를 부르면 상세·첨부 본문을 읽습니다' : '영업 DB 에 없는 공고 — 다른 말로 다시 찾거나, 그래도 없으면 웹에서 찾아 출처를 밝히세요' };
+  const base = ownsJudge(tenantOf(u));
+  const shown = base ? rows : rows.filter((r) => String(r.row?.source_type ?? '') !== 'vendor_recruit'); // 414차: 협력사 모집 감시는 기본 회사 원천
+  return { items: shown.map((r) => brief(base ? { ...r.row, __id: r.src_id } : plainNotice({ ...r.row, __id: r.src_id }))), note: rows.length ? '결과 id 로 read_sales_notice 를 부르면 상세·첨부 본문을 읽습니다' : '영업 DB 에 없는 공고 — 다른 말로 다시 찾거나, 그래도 없으면 웹에서 찾아 출처를 밝히세요' };
 }
 
 /** 첨부 한 개: 자료실에 같은 주소로 저장된 파일이 있으면 그 본문, 없으면 서버가 받아 자료실 '영업/공고/<공고명>'에 저장(본문 글자 추출은 저장 때) */
@@ -69,7 +75,7 @@ async function attachmentText(u: SessionUser, r: Row, f: SrcFile, k: number, bid
 export async function readNotice(u: SessionUser, id: string, opt: { maxFiles?: number; maxChars?: number } = {}) {
   await assertSpace(u, 'sales');
   if (!/^[\w.:-]{1,80}$/.test(id)) throw notFound('공고를 찾을 수 없습니다');
-  const r = await loadRow(id);
+  const r = await loadRow(id, tenantOf(u));
   if (!r) throw notFound('공고를 찾을 수 없습니다');
   const b = brief(r);
   const detail = {

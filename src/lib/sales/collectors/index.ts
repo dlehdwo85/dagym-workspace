@@ -165,9 +165,11 @@ export async function collectorsView(u: SessionUser) {
   const runs = await sql<any[]>`select id, slug, trigger, started_at, finished_at, status, inserted, updated, unchanged, errors, summary, error_log from sales_collector_runs order by started_at desc limit 30`;
   const ready = new Map(await Promise.all(COLLECTORS.filter((c) => c.keyReady).map(async (c) => [c.slug, await c.keyReady!().catch(() => false)] as const))); // 플랫폼 운영에 넣은 키도 '있음'
   const alerts = await collectorAlerts().catch(() => []);
+  // 414차(안 표 A): 시설 수집기의 회사 기본값은 hubTabs 와 같은 규칙(기본 회사·시설/건설 묶음 켜짐, 그 밖 꺼짐)
+  const { FACILITY_COLLECTORS } = await import('../hubTabs'); const facDef = await (await import('../options')).salesAutoOn(t);
   const collectors = COLLECTORS.map((c) => {
     const needs = (c.needs ?? []).map((k) => ({ key: k, present: env(k) || !!ready.get(c.slug) })); const st = states.get(c.slug); const l = last.get(c.slug) ?? null;
-    const base = { slug: c.slug, label: c.label, hourKst: c.hourKst, againKst: c.againKst ?? null, hours: hoursOf(c), bid: BID_COLLECTORS.has(c.slug), support: SUPPORT_COLLECTORS.has(c.slug), globalEnabled: st?.enabled ?? true, enabled: mine.get(c.slug) ?? true, lastRunAt: st?.last_run_at ?? null, lastStatus: st?.last_status ?? null };
+    const base = { slug: c.slug, label: c.label, hourKst: c.hourKst, againKst: c.againKst ?? null, hours: hoursOf(c), bid: BID_COLLECTORS.has(c.slug), support: SUPPORT_COLLECTORS.has(c.slug), globalEnabled: st?.enabled ?? true, enabled: mine.get(c.slug) ?? (FACILITY_COLLECTORS.includes(c.slug) ? facDef : true), lastRunAt: st?.last_run_at ?? null, lastStatus: st?.last_status ?? null };
     if (full) return { ...base, source: c.source as string | null, needs, last: l, state: null as ReturnType<typeof collectorState> | null, how: null as string | null };
     const missing = needs.filter((n) => !n.present && !/선택/.test(n.key)).length;
     const state = collectorState({ globalEnabled: base.globalEnabled, missingKeys: missing, lastStatus: base.lastStatus });

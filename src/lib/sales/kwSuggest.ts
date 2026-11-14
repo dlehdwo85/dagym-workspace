@@ -8,6 +8,7 @@ import { assertSpace } from '../spaces';
 import { tenantOf, type SessionUser } from '../types';
 import { aiEnabled, anthropicProvider, costUsd } from '../ai/provider';
 import { passPrefs, prefsOf, savePrefs, type Prefs } from './digest';
+import { ownsJudge } from './tenantJudge';
 import { listBizCats } from './bizCats';
 import { salesBidsOn } from './options';
 
@@ -40,13 +41,14 @@ async function signals(sql: Sql, t: string) {
 }
 type Sig = Awaited<ReturnType<typeof signals>>;
 /** 낱말 하나의 숫자: 진행·대상 아님 공고에 몇 번 · 넣으면 지난 30일에 더 보일 공고(관심 검색어) / 가려질 공고(제외어) */
-function measure(word: string, kind: 'add' | 'exclude' | 'remove', s: Sig, p: Prefs) {
+/** 414차: base = 기본 회사(공용 줄의 적합 판정을 함께 씀). 다른 회사는 회사 검색어로만 통과 여부를 잼 */
+function measure(word: string, kind: 'add' | 'exclude' | 'remove', s: Sig, p: Prefs, base = true) {
   const k = key(word);
   const pos = s.pos.filter((x) => hay(x.row).includes(k)).length, neg = s.neg.filter((x) => hay(x.row).includes(k)).length;
   let more = 0, hidden = 0; const newly: { id: string; title: string }[] = [];
-  if (kind === 'add') { const p2 = { ...p, keywords: [...p.keywords, word] }; for (const r of s.pool) if (hay(r.row).includes(k) && !passPrefs(r.row, p).ok && passPrefs(r.row, p2).ok) { more++; if (newly.length < 5) newly.push({ id: r.id, title: titleOf(r.row) }); } }
-  if (kind === 'exclude') { const p2 = { ...p, excludes: [...p.excludes, word] }; for (const r of s.pool) if (hay(r.row).includes(k) && passPrefs(r.row, p).ok && !passPrefs(r.row, p2).ok) hidden++; }
-  if (kind === 'remove') { const p2 = { ...p, keywords: p.keywords.filter((w) => key(w) !== k) }; for (const r of s.pool) if (passPrefs(r.row, p).ok && !passPrefs(r.row, p2).ok) hidden++; }
+  if (kind === 'add') { const p2 = { ...p, keywords: [...p.keywords, word] }; for (const r of s.pool) if (hay(r.row).includes(k) && !passPrefs(r.row, p, base).ok && passPrefs(r.row, p2, base).ok) { more++; if (newly.length < 5) newly.push({ id: r.id, title: titleOf(r.row) }); } }
+  if (kind === 'exclude') { const p2 = { ...p, excludes: [...p.excludes, word] }; for (const r of s.pool) if (hay(r.row).includes(k) && passPrefs(r.row, p, base).ok && !passPrefs(r.row, p2, base).ok) hidden++; }
+  if (kind === 'remove') { const p2 = { ...p, keywords: p.keywords.filter((w) => key(w) !== k) }; for (const r of s.pool) if (passPrefs(r.row, p, base).ok && !passPrefs(r.row, p2, base).ok) hidden++; }
   return { pos, neg, more, hidden, newly };
 }
 /** AI 없이: 진행한 공고 제목에 자주 나오는 낱말(대상 아님에는 드문 것) · 대상 아님에만 자주 나오는 낱말 · 진행한 공고에는 없고 대상 아님에만 걸리는 지금 검색어 */
@@ -93,6 +95,7 @@ async function byAi(u: SessionUser, s: Sig, p: Prefs) {
 /** 추천 만들기(숫자는 서버가 셈) — AI 결과가 근거 없으면 버리고, 낱말 세기 결과로 채움 */
 export async function buildKwSuggestion(tenant: string, opt: { user?: SessionUser; ai?: boolean } = {}): Promise<KwSuggestion> {
   const sql = db(); const p = await prefsOf(tenant); const s = await signals(sql, tenant);
+  const base = ownsJudge(tenant); // 414차: 다른 회사의 '더 보일 공고·가려질 공고' 수는 회사 검색어 기준
   const rules = byRules(s, p);
   const ai = opt.ai && opt.user ? await byAi(opt.user, s, p) : null;
   const seen = new Set<string>();
@@ -102,7 +105,7 @@ export async function buildKwSuggestion(tenant: string, opt: { user?: SessionUse
       const k = `${kind}:${key(it.word)}`; if (seen.has(k) || out.length >= cap) continue;
       if (kind === 'remove' && !p.keywords.some((w) => key(w) === key(it.word))) continue; // 지금 검색어만 뺄 수 있음
       if (kind !== 'remove' && [...p.keywords, ...p.excludes].some((w) => key(w) === key(it.word))) continue;
-      const m = measure(it.word, kind, s, p);
+      const m = measure(it.word, kind, s, p, base);
       if (kind === 'add' && !m.pos && !m.more) continue; // 근거 없는 낱말은 버림
       if (kind === 'exclude' && !m.neg) continue;
       seen.add(k); out.push({ word: it.word, why: it.why, pos: m.pos, neg: m.neg, more: m.more, hidden: m.hidden, ...(kind === 'exclude' && m.pos ? { risky: true } : {}) });
@@ -111,7 +114,7 @@ export async function buildKwSuggestion(tenant: string, opt: { user?: SessionUse
   };
   const add = pick('add', [...(ai?.add ?? []), ...rules.add], 6), exclude = pick('exclude', [...(ai?.exclude ?? []), ...rules.exclude], 6), remove = pick('remove', [...(ai?.remove ?? []), ...rules.remove], 4);
   const missed: KwSuggestion['missed'] = [];
-  for (const a of add) for (const n of measure(a.word, 'add', s, p).newly) if (missed.length < 12 && !missed.some((x) => x.id === n.id)) missed.push({ ...n, word: a.word });
+  for (const a of add) for (const n of measure(a.word, 'add', s, p, base).newly) if (missed.length < 12 && !missed.some((x) => x.id === n.id)) missed.push({ ...n, word: a.word });
   const out: KwSuggestion = { at: new Date().toISOString(), via: ai ? 'ai' : 'rules', add, exclude, remove, missed, base: { pos: s.pos.length, neg: s.neg.length, pool: s.pool.length } };
   await sql`insert into sales_settings (tenant, kw_suggestion) values (${tenant}, ${sql.json(out as never)}) on conflict (tenant) do update set kw_suggestion = excluded.kw_suggestion, updated_at = now()`;
   return out;
