@@ -18,7 +18,7 @@ const KG2B = `<html><body><table class="tbl">
 <tr><th>현장설명회실시유무</th><td> 필수 </td><th>현설일시</th><td><span class="red2"> ${B} 14:00 </span></td></tr>
 <tr><th>입찰개시일시</th><td>${plus(-5)} 16:00</td><th>입찰마감일시</th><td>${D} 17:00</td></tr>
 <tr><th>개찰일시</th><td>${D} 18:00</td><th>개찰장소</th><td>입찰 담당자PC</td></tr></table></body></html>`;
-let srv, ctx, sql, fake, kapt; const kg2bHits = [];
+let srv, ctx, sql, fake, kapt; const kg2bHits = []; let kgDown = false;
 const tick = async () => { const r = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(r.status, 200); return (await r.json()).detail ?? {}; };
 const evOf = async (id) => (await sql`select title, description, to_char(start_at at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') s, (select array_agg(user_id::text order by user_id) from event_attendees a where a.event_id = e.id) att from events e where id = ${id}`)[0];
 const work = async () => (await sql`select data from sales_work_records where tenant = 'default' and src_tbl = 'opportunity_work' and ref_id = 'src388'`)[0]?.data;
@@ -31,7 +31,7 @@ before(async () => {
   fake = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'); let body = ''; for await (const c of req) body += c;
     const send = (code, text, type = 'text/html; charset=utf-8') => { res.statusCode = code; res.setHeader('content-type', type); res.end(text); };
-    if (u.pathname === '/kg2b/user/bid_list/KaptBidView') { kg2bHits.push(u.searchParams.get('bidcode')); return u.searchParams.get('bidcode') === CODE ? send(200, KG2B) : send(404, 'no'); }
+    if (u.pathname === '/kg2b/user/bid_list/KaptBidView') { kg2bHits.push(u.searchParams.get('bidcode')); if (kgDown) return send(503, 'down'); return u.searchParams.get('bidcode') === CODE ? send(200, KG2B) : send(404, 'no'); }
     if (u.pathname === '/kapt/bid/bidList.do') return send(200, '<html><table></table></html>');
     if (kapt.handle(req, res, body)) return;
     send(404, 'nope');
@@ -80,4 +80,28 @@ test('정기 실행: 원천 상세로 마감 17:00·현장설명회(필수) 바�
   assert.deepEqual([(await evOf(closeId)).att, (await evOf(w.bid_events.briefing)).att], [two, two]);
   // 3시간 안에는 원천을 다시 읽지 않음
   const n = kg2bHits.length; await tick(); assert.equal(kg2bHits.length, n);
+});
+
+
+test('대표 11/14: 원천 상세를 한두 번 못 읽은 것은 기록만(서버 오류 알림 없음) · 같은 공고를 연달아 3번 못 읽으면 한 번 알림 · 다시 읽히면 처음부터', async () => {
+  const errs = async () => (await sql`select message from error_logs where source = 'tick:bidDatesVerify' order by created_at`).map((r) => r.message);
+  const pushes = async () => (await sql`select count(*)::int as n from notifications where type = 'server_error' and title = '서버 오류 (tick:bidDatesVerify)'`)[0].n;
+  const again = () => sql`update sales_work_records set data = data - 'bid_verified_at' where tenant = 'default' and src_tbl = 'opportunity_work' and ref_id = 'src388'`; // 다음 실행에서 바로 다시 읽게
+  await sql`delete from error_logs where source = 'tick:bidDatesVerify'`;
+  const p0 = await pushes();
+  kgDown = true;
+  await again(); const t1 = await tick(); assert.equal(t1.bidDatesVerify.errors, 1, '실행 결과에는 오류 1로 남음');
+  assert.deepEqual([(await work()).bid_verify_fails, (await errs()).length, await pushes() - p0], [1, 0, 0], '1번째: 기록만');
+  assert.match((await work()).bid_verify_error, /KG2B kg2b_388001: HTTP 503/);
+  await again(); await tick();
+  assert.deepEqual([(await work()).bid_verify_fails, (await errs()).length, await pushes() - p0], [2, 0, 0], '2번째: 기록만');
+  await again(); await tick();
+  const e3 = await errs();
+  assert.deepEqual([(await work()).bid_verify_fails, e3.length, await pushes() - p0], [3, 1, 1], '3번째: 한 번 알림');
+  assert.match(e3[0], /연달아 못 읽음 — KG2B kg2b_388001: HTTP 503.*연달아 3번/);
+  await again(); await tick();
+  assert.deepEqual([(await work()).bid_verify_fails, (await errs()).length], [4, 1], '4번째: 다시 알리지 않음');
+  kgDown = false;
+  await again(); const ok = await tick(); assert.equal(ok.bidDatesVerify.errors, 0);
+  assert.equal((await work()).bid_verify_fails, 0, '다시 읽히면 0으로');
 });
