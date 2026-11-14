@@ -389,10 +389,11 @@ test('264차 1,500자에서 잘린 절: 공고문에서 4,000자로 다시 잘�
 
 test('267차 AI 답 읽기: ```json 울타리·앞뒤 말이 붙어도 항목으로 · 못 읽으면 이유에 끝 이유·답 앞부분 — 목록 한 줄 (AI 정리 실패)', async () => {
   docs['/g2b/notice-proshop.txt'] = `1. 건명: 시험267 골프장 프로샵 임대\n${PROSHOP}`;
-  const row = (id, no) => put(id, { source_type: 'g2b_bid', source_external_id: no, title: '시험267 골프장 프로샵 임대', issuer: '시험267 공단', related: true, fit_business: '다짐', current_status: '공고중', notice_kind: 'new',
-    posted_date: today, deadline_at: `${plus(8)}T10:00:00+09:00`, first_seen_at: new Date().toISOString(), attachment_urls: [{ name: '입찰공고서.txt', url: `http://127.0.0.1:${PORT}/g2b/notice-proshop.txt` }] });
+  // 두 줄의 마감일을 다르게 — 제목·발주처·마감이 모두 같으면 목록이 '같은 공고'로 한 장에 묶어, 어느 줄이 대표가 될지가 처음 본 때(1/1000초)에 달려 가끔 BAD 줄을 못 찾았다(CI 11/13 fbc915e)
+  const row = (id, no, dl = 8) => put(id, { source_type: 'g2b_bid', source_external_id: no, title: '시험267 골프장 프로샵 임대', issuer: '시험267 공단', related: true, fit_business: '다짐', current_status: '공고중', notice_kind: 'new',
+    posted_date: today, deadline_at: `${plus(dl)}T10:00:00+09:00`, first_seen_at: new Date().toISOString(), attachment_urls: [{ name: '입찰공고서.txt', url: `http://127.0.0.1:${PORT}/g2b/notice-proshop.txt` }] });
   const OK = '00000000-0000-4000-8000-000000267001', BAD = '00000000-0000-4000-8000-000000267002';
-  await row(OK, 'R26BK267001-000'); await row(BAD, 'R26BK267002-000');
+  await row(OK, 'R26BK267001-000'); await row(BAD, 'R26BK267002-000', 9);
   await queue([{ content: [{ type: 'text', text: '다음과 같습니다.\n```json\n' + JSON.stringify({ items: [{ k: 'license', label: '골프장 프로샵 운영 업체' }] }) + '\n```' }], stop_reason: 'end_turn' }]);
   const a = (await ctx.owner.ok('POST', '/api/sales/eligibility', { id: OK })).eligibility;
   assert.deepEqual([a.ai.items, a.ai.error ?? null, a.line], [[{ k: 'license', label: '골프장 프로샵 운영 업체' }], null, '골프장 프로샵 운영 업체']);

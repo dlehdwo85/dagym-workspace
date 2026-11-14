@@ -18,7 +18,18 @@ export async function docsCoedit({ browser, owner, staff, ctx, sql, BASE, SHOTS,
   await owner.waitForURL(/\/library\/doc\//);
   const id = owner.url().split('/').pop();
   // CI 1938·1939·1954(기록만 바꾼 커밋): 편집기(doc-editor)가 30초 안에 안 보이는 흔들림 — 늦으면 한 번 새로 고쳐서 기다림
-  try { await owner.getByTestId('doc-editor').waitFor({ timeout: 30000 }); } catch { await owner.reload(); await owner.getByTestId('doc-editor').waitFor({ timeout: 45000 }); }
+  // CI 11/13 bba8ec5·6fc64d9: 새로 고친 뒤 45초에도 안 뜸(같은 코드의 다른 실행은 통과) — 원인을 알 수 있게 그때 화면 상태(주소·문서 틀·오류 상자·콘솔 오류·문서 열기 응답)를 실패 글에 붙인다
+  const conErr = []; const onCon = (m) => { if (m.type() === 'error') conErr.push(m.text().slice(0, 160)); }; owner.on('console', onCon);
+  const openRes = []; const onRes = (r) => { if (/\/api\/library\/docs\//.test(r.url())) openRes.push(`${r.status()} ${r.url().split('/api/')[1].slice(0, 60)}`); }; owner.on('response', onRes);
+  try { await owner.getByTestId('doc-editor').waitFor({ timeout: 30000 }); } catch {
+    await owner.reload();
+    try { await owner.getByTestId('doc-editor').waitFor({ timeout: 45000 }); } catch (e) {
+      const st = await owner.evaluate(() => ({ url: location.pathname, page: !!document.querySelector('[data-testid="doc-page"]'), status: document.querySelector('[data-testid="doc-status"]')?.getAttribute('data-status') ?? null,
+        body: document.body.innerText.replace(/\s+/g, ' ').slice(0, 200) })).catch(() => null);
+      throw new Error(`${e.message.split('\n')[0]} — 화면 ${JSON.stringify(st)} · 문서 응답 ${openRes.slice(-6).join(' | ') || '없음'} · 콘솔 오류 ${conErr.slice(-4).join(' | ') || '없음'}`);
+    }
+  }
+  owner.off('console', onCon); owner.off('response', onRes);
   await owner.getByTestId('doc-status').waitFor();
   const ed = owner.getByTestId('doc-editor');
   await ed.click();
