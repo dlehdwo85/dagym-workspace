@@ -62,6 +62,16 @@ test('협력사 모집 감시: 직접 접속이 끊긴 사이트는 서울 중�
   await setState({ ...cur.v, fails: 3, restUntil: later, err: 'fetch failed · 서울 중계로도 못 받음(…)' });
   const rest = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
   assert.match(rest.summary, /쉬는 페이지 1: 시험건설/, '중계로도 못 받은 실패면 쉼');
+  // 대표 11/14: 여러 번 실패해 쉬는 중인 곳은 날마다 누락 알림에 다시 올리지 않음(쉬기 전에 이미 알림) — 쉬기가 끝나고도 못 읽으면 그때 다시
+  assert.equal(Object.values(rest.sources)[0].rest, true);
+  const alRest = (await ctx.owner.ok('GET', '/api/sales/collectors')).alerts.filter((a) => a.slug === 'vendor_recruit_watch');
+  assert.deepEqual(alRest, [], '쉬는 동안에는 누락 알림에 없음');
+  vendorMode = 'down';
+  await setState({ ...cur.v, fails: 3, restUntil: new Date(Date.now() - 3600e3).toISOString(), err: 'fetch failed · 서울 중계로도 못 받음(…)' }); // 쉬기 끝남
+  const after = await ctx.owner.ok('POST', '/api/sales/collectors/vendor_recruit_watch/run', {});
+  assert.ok(!Object.values(after.sources)[0].rest && !Object.values(after.sources)[0].ok);
+  const alBack = (await ctx.owner.ok('GET', '/api/sales/collectors')).alerts.filter((a) => a.slug === 'vendor_recruit_watch');
+  assert.equal(alBack.length, 1, '쉬기가 끝나고도 못 읽으면 다시 알림');
 });
 
 test('공공기관 입찰: 연결 끊김은 한 번 더 받아 성공 · 오류 화면(HTML)은 호출 한도가 아님 · 못 받은 원천이 있으면 30분 뒤 다시 실행 · 활용신청 줄에 서비스 번호', async () => {

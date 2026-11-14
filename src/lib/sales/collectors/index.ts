@@ -40,13 +40,21 @@ export function isDue(c: Pick<Collector, 'hourKst' | 'againKst'>, lastRunAt: Dat
 }
 
 /** 한 수집기 실행(실행 이력·공용 상태 갱신). 예산은 Vercel 60초 안 — 기본 45초 */
+/** 원천이 잠깐 안 받아 준 실패(시간 초과·연결 끊김) — 다시 받으면 되는 것 */
+export const TRANSIENT = /timeout|timed out|aborted|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|network|시간 초과/i;
 export async function runCollector(slug: string, trigger: 'cron' | 'manual' | 'retry', opt: { deadlineMs?: number; params?: Record<string, unknown>; fetchImpl?: typeof fetch } = {}) {
   const c = find(slug); if (!c) throw notFound('그런 수집기가 없습니다');
   const runId = await startRun(slug, trigger);
   const ctx: CollectorCtx = { fetchImpl: opt.fetchImpl ?? fetch, deadlineMs: opt.deadlineMs ?? 45000, params: opt.params, now: Date.now };
   let result: CollectorResult;
   try { result = await Promise.race([c.run(ctx), new Promise<CollectorResult>((_, rej) => setTimeout(() => rej(new Error('수집기 시간 초과')), ctx.deadlineMs + 8000))]); }
-  catch (e) { const msg = e instanceof Error ? e.message : String(e); result = { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: msg, summary: `실행 중 예외: ${msg}`, providerMode: 'manual' }; await logError(`sales-collect:${slug}`, e).catch(() => {}); }
+  catch (e) { const msg = e instanceof Error ? e.message : String(e); result = { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: msg, summary: `실행 중 예외: ${msg}`, providerMode: 'manual' };
+    // 대표 11/14 '서버 오류' 알림: 원천이 잠깐 안 받아 준 것(시간 초과·연결 끊김)은 서버 오류가 아님 — 실행 기록에 남기고 아래에서 다시 받기로. 그 밖의 예외만 오류 기록·알림
+    if (!TRANSIENT.test(msg)) await logError(`sales-collect:${slug}`, e).catch(() => {}); }
+  // 대표 11/14 '영업 DB 누락': 원천이 잠깐 안 받아 줘서 한 건도 못 받은 실행은 다음 날까지 기다리지 않고 30분 뒤 다시(하루 RETRY_MAX 번) — 예전에는 웹페이지 응답·목록 실패만 다시 받았다
+  //   (원천이 여럿이면 하나도 못 읽었을 때만 — 21곳 중 1곳만 막힌 감시는 다음 날 차례에)
+  if (!result.retry && result.errors > 0 && result.inserted + result.updated + result.unchanged === 0 && !Object.values(result.sources ?? {}).some((s) => s.ok)
+    && TRANSIENT.test(`${result.errorLog ?? ''} ${result.summary ?? ''}`)) result = { ...result, retry: true };
   // #507 후속: 공고 수집 뒤 같은 공고 여러 줄(원본 복사 + 워크인 수집)을 한 줄로 — 진행 기록·업무가 걸린 줄을 살림
   if (BID_COLLECTORS.has(slug)) {
     let mergeErr: string | null = null; // 377차: 합치기·취소 맞춤이 실패하면 요약에 남김(예전엔 오류 기록에만 — 로컬이 '맞춤 문구 없음'만 봄)
@@ -106,6 +114,7 @@ export async function collectorAlerts(now = Date.now()): Promise<CollectorAlert[
       : [{ source: null as string | null, label: c.label, ok: (r: RunRow) => r.status !== 'failed', err: (r: RunRow) => r.error_log }];
     for (const u of units) {
       let streak = 0, lastOk: Date | null = null, err: string | null = null, hint: string | null = null, oldest: Date | null = null;
+      if (u.source && rs[0]?.detail?.sources?.[u.source]?.rest) continue; // 여러 번 실패해 쉬는 중인 곳(협력사 감시 페이지) — 쉬기 전 실패 때 이미 알렸고, 쉬기가 끝나 다시 실패하면 그때 다시 알림
       for (const r of rs) { const ok = u.ok(r); if (ok === null) continue; oldest = new Date(r.started_at); if (ok) { lastOk = oldest; break; } streak++; err ??= u.err(r); hint ??= [r.summary, r.error_log].filter(Boolean).join(' ') || null; }
       if (!oldest) continue;
       const stale = now - (lastOk ?? oldest).getTime() > LIMIT;

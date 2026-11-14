@@ -307,7 +307,8 @@ export async function startRun(slug: string, trigger: string) {
   return r.id;
 }
 export async function completeRun(id: number, slug: string, r: CollectorResult, status?: 'success' | 'partial' | 'failed' | 'skipped') {
-  const st = status ?? (r.errors > 0 && r.inserted + r.updated + r.unchanged === 0 ? 'failed' : r.errors > 0 ? 'partial' : 'success');
+  // someRead(협력사 감시): 한 건도 안 들어왔어도 읽힌 페이지가 있으면 '일부 받음' — 21곳 중 1곳만 못 읽고 새 글이 0건인 날을 '실패'로 적지 않게. 다른 수집기는 예전 판정 그대로
+  const st = status ?? (r.errors > 0 && r.inserted + r.updated + r.unchanged === 0 && !r.someRead ? 'failed' : r.errors > 0 ? 'partial' : 'success');
   const sql = db();
   await sql`update sales_collector_runs set finished_at = now(), status = ${st}, inserted = ${r.inserted}, updated = ${r.updated}, unchanged = ${r.unchanged}, errors = ${r.errors}, error_log = ${r.errorLog?.slice(0, 4000) ?? null}, summary = ${r.summary?.slice(0, 1000) ?? null}, provider_mode = ${r.providerMode},
     detail = ${r.sources || r.retry ? sql.json({ ...(r.sources ? { sources: r.sources } : {}), ...(r.retry ? { retry: true } : {}), ...(r.maint ? { maint: r.maint } : {}) } as never) : null} where id = ${id}`;
