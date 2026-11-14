@@ -1290,6 +1290,15 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
     assert.equal((await sql`select daily_limit from ai_settings where tenant = 'demo'`)[0].daily_limit, 30);
     assert.ok((await c.ok('GET', '/api/library')).files.length >= 4, '자료실 파일');
     assert.equal((await c.ok('GET', '/api/sales/src?view=leads')).leads.length, 5, '영업 리드 5(공간 켜짐·배정)');
+    // 414차 후속(로컬 11/14, 앱 심사 중): 체험 조직은 체험용 관심 검색어가 들어 있어 '입찰 모아 보기'가 비지 않는다 — 검색어에 맞는 공고만, 기본 회사 판정(분류·적합 사업)은 안 보임
+    assert.deepEqual((await sql`select keywords, digest_enabled from sales_bid_prefs where tenant = 'demo'`)[0], { keywords: ['위탁운영', '커뮤니티', '시설관리', '출입통제'], digest_enabled: false });
+    const nowIso = new Date().toISOString(); const dl = new Date(Date.now() + 6 * 864e5).toISOString();
+    const nrow = (id, title, more = {}) => ({ scope: 'global', tbl: 'procurement_notices', src_id: id, origin: 'workin', row: sql.json({ id, title, source_type: 'g2b_bid', source_external_id: id, source_url: `https://example.test/${id}`, issuer: '시험시청', region: '경기', first_seen_at: nowIso, created_at: nowIso, updated_at: nowIso, deadline_at: dl, current_status: '공고중', notice_kind: 'new', ...more }) });
+    await sql`insert into sales_src_rows ${sql([nrow('RV-N1', '심사시험 주민공동시설 위탁운영 업체 선정', { related: true, fit_business: '다짐', classification: '즉시 검토' }), nrow('RV-N2', '심사시험 청사 시설관리 용역'), nrow('RV-N3', '심사시험 도로 포장 공사')])}`;
+    const bids = await c.ok('GET', '/api/sales/src?view=bids&tab=all'); const rv = bids.items.filter((x) => String(x.id).startsWith('RV-'));
+    assert.deepEqual(rv.map((x) => x.id).sort(), ['RV-N1', 'RV-N2'], '검색어에 맞는 공고만'); assert.ok(!bids.needKeywords);
+    assert.deepEqual(rv.map((x) => [x.category ?? null, x.fitBusiness ?? null]), [[null, null], [null, null]]);
+    await sql`delete from sales_src_rows where src_id in ('RV-N1', 'RV-N2', 'RV-N3')`;
     assert.equal((await c.ok('GET', '/api/marketing/contents')).contents.length, 2, '마케팅 시안 2');
     const csv = (await c.ok('GET', '/api/library')).files.find((f) => f.file_name === '팀 일정표(예시).csv');
     assert.equal((await c.get(`/api/library/${csv.id}/download`)).status < 400, true, '파일 내려받기 됨');
@@ -1302,8 +1311,10 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
     const add = await c.ok('POST', '/api/tasks', { title: '심사 중 추가', orgUnitId: r.unitId });
     assert.ok(add.id);
     assert.ok(!(await ctx.owner.ok('GET', '/api/tasks?limit=500')).tasks.some((x) => x.org_unit_id === r.unitId), '대표 화면에 체험 데이터 없음');
+    await sql`update sales_bid_prefs set keywords = ${['직접 넣은 말']} where tenant = 'demo'`;
     const again = await ctx.owner.ok('POST', '/api/admin/review-account', { email: 'review@workin.test' });
     assert.equal(again.alreadyActive, true); assert.equal(again.invitePath, null);
+    assert.deepEqual((await sql`select keywords from sales_bid_prefs where tenant = 'demo'`)[0].keywords, ['직접 넣은 말'], '다시 눌러도 바꾼 검색어는 그대로');
     const after = await c.ok('GET', '/api/tasks?limit=500');
     assert.ok(!after.tasks.some((x) => x.title === '심사 중 추가'), '예시 초기화');
     assert.ok((await c.ok('GET', '/api/notifications')).items.length >= 1, '예시 알림');
