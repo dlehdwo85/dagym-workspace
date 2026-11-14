@@ -13,6 +13,8 @@ const sign = (body: string) => createHmac('sha256', secret()).update(body).diges
 
 export async function issueMarketingToken(u: SessionUser) {
   if (!(await userSpaces(u)).includes('marketing')) throw notFound();
+  // 416차(범용화 G-58): 이 바로가기는 기본 회사의 옛 마케팅 운영실(외부 앱)로 가는 길 — 다른 회사 사람의 이름·메일이 든 토큰을 그 앱으로 보내지 않는다(없는 것처럼 404)
+  if (tenantOf(u) !== 'default') throw notFound();
   if (!ssoConfigured()) throw new HttpError(503, 'sso_not_configured', '마케팅 운영실 연결 설정(MARKETING_SSO_SECRET)이 아직 없습니다');
   const now = Math.floor(Date.now() / 1000);
   const claims = { iss: 'workin', aud: 'marketing', jti: randomUUID(), sub: u.id, email: u.email, name: u.name, role: u.role, tenant: tenantOf(u), iat: now, exp: now + TTL_S };
