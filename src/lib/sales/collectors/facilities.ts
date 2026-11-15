@@ -4,7 +4,7 @@ import { RECENT_COMPLETION_DAYS } from './prospects';
 import { addDaysYmd, parseCsv, regionFromAddress, resolveDataGoKrFile, resolveDataGoKrFileUrl, rotatingWindow, runFileProspectCollector, todayIndex, todayKst, toYmd, type Extracted, type FileSourceSpec, type ProspectPayload } from './files';
 import { setSourceAsOf, upsertProspects } from './store';
 import { readXlsx } from './xlsx';
-import type { Collector, CollectorCtx, CollectorResult, SourceStat } from './types';
+import { TRANSIENT, type Collector, type CollectorCtx, type CollectorResult, type SourceStat } from './types';
 
 const T = () => process.env.SALES_COLLECT_TEST_BASE?.replace(/\/$/, '');
 // ---- 산업단지 ----
@@ -98,8 +98,8 @@ export const touristHotels: Collector = {
     const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const safe = (s: string) => s.split(key).join('***').split(encodeURIComponent(key)).join('***').slice(0, 160);
     // #522(로컬 10/24 '10/22부터 실패'): 주소는 명세(15155090)와 같음 — 오류 응답이 JSON(OpenAPI_ServiceResponse)·XML 이라 예전 코드는 '0건'으로만 보였다 → 코드·사유를 그대로 남김
     let cond = true;
-    const page = async (p: number) => { const u = new URL(HOTEL_API()); u.searchParams.set('serviceKey', key); u.searchParams.set('pageNo', String(p)); u.searchParams.set('numOfRows', '100'); u.searchParams.set('returnType', 'json'); if (cond) u.searchParams.set('cond[SALS_STTS_CD::EQ]', '01');
-      const res = await ctx.fetchImpl(u.toString(), { signal: AbortSignal.timeout(Math.min(15000, Math.max(1000, left() - 2000))) }); const txt = await res.text(); st.calls++;
+    const page = async (p: number, ms = 15000) => { const u = new URL(HOTEL_API()); u.searchParams.set('serviceKey', key); u.searchParams.set('pageNo', String(p)); u.searchParams.set('numOfRows', '100'); u.searchParams.set('returnType', 'json'); if (cond) u.searchParams.set('cond[SALS_STTS_CD::EQ]', '01');
+      const res = await ctx.fetchImpl(u.toString(), { signal: AbortSignal.timeout(Math.min(ms, Math.max(1000, left() - 2000))) }); const txt = await res.text(); st.calls++;
       let body: any; try { body = JSON.parse(txt); } catch { const code = txt.match(/<returnReasonCode>([^<]+)</)?.[1] ?? txt.match(/<resultCode>([^<]+)</)?.[1] ?? ''; const msg = txt.match(/<returnAuthMsg>([^<]+)</)?.[1] ?? txt.match(/<errMsg>([^<]+)</)?.[1] ?? txt.match(/<resultMsg>([^<]+)</)?.[1] ?? 'non-json';
         throw new Error(`관광숙박업 API 오류(HTTP ${res.status}): ${safe(`${code} ${msg}`.trim())}`); }
       const cm = body?.OpenAPI_ServiceResponse?.cmmMsgHeader; if (cm) { const rc = String(cm.returnReasonCode ?? ''); const em = String(cm.errMsg ?? cm.returnAuthMsg ?? '');
@@ -116,13 +116,21 @@ export const touristHotels: Collector = {
     if (!first.totalCount) return fail('관광숙박업 API 응답 0건 — 서비스키 권한·요청 조건 확인 필요');
     st.total = first.totalCount;
     const totalPages = Math.max(1, Math.ceil(first.totalCount / 100)); const win = rotatingWindow(totalPages, 12, todayIndex()); const items: any[] = []; const errs: string[] = [];
-    for (let p = win.start + 1; p <= win.end; p++) { if (left() < 5000) { errs.push(`시간 한도 근접 — ${win.end - p + 1}쪽은 다음 순환에서`); break; } try { items.push(...(p === 1 ? first.items : (await page(p)).items)); } catch (e) { errs.push(safe(`page ${p}: ${e instanceof Error ? e.message : String(e)}`)); } }
+    // 대표 11/14 '영업 DB 누락'(11/15 07:35 운영: 2·11·12쪽 시간 초과(15초씩)로 시간을 다 써서 받아 둔 800건을 한 건도 저장 못 하고 '실패' — 원천은 읽힌 것으로 적혀 누락 알림·다시 받기도 안 됨)
+    //   → 한 쪽은 10초까지만 기다리고, 저장할 시간(SAVE_MS)을 남기고 읽기를 멈춤 — 받은 만큼은 반드시 저장
+    const SAVE_MS = 14000; let pageFails = 0;
+    for (let p = win.start + 1; p <= win.end; p++) { if (left() < SAVE_MS) { errs.push(`시간 한도 근접 — ${win.end - p + 1}쪽은 다음 순환에서`); break; } try { items.push(...(p === 1 ? first.items : (await page(p, 10000)).items)); } catch (e) { pageFails++; errs.push(safe(`page ${p}: ${e instanceof Error ? e.message : String(e)}`)); } }
     const observedAt = new Date().toISOString(); const payloads: ProspectPayload[] = []; let filtered = 0;
     for (const it of items) { const p = mapHotelItem(it); if (!p) { filtered++; continue; } payloads.push({ source_slug: 'tourist_hotels_localdata', source_name: '행정안전부 관광숙박업 조회서비스', source_url: HOTEL_PAGE_URL, source_observed_at: observedAt, ...p }); }
-    st.kept = payloads.length; st.ok = true;
+    st.kept = payloads.length;
     let inserted = 0, updated = 0, unchanged = 0, errors = errs.length, invalid = 0;
     for (let i = 0; i < payloads.length; i += 300) { if (left() < 5000) { errs.push(`시간 한도 근접 — ${payloads.length - i}건은 다음 순환에서`); errors++; break; } try { const r = await upsertProspects(payloads.slice(i, i + 300)); inserted += r.inserted; updated += r.updated; unchanged += r.unchanged; errors += r.errors; invalid += r.invalid; if (r.errorLog && errs.length < 10) errs.push(r.errorLog); } catch (e) { errors += Math.min(300, payloads.length - i); if (errs.length < 10) errs.push(e instanceof Error ? e.message : String(e)); } }
-    return { inserted, updated, unchanged, errors: errors + invalid, errorLog: errs.length ? errs.join('\n') : undefined, providerMode: 'api', sources: { tourist_hotels: st }, summary: `영업중 ${first.totalCount}건 · 이번 페이지 ${win.start + 1}~${win.end}/${totalPages}` + (win.cycleDays > 1 ? ` (${win.cycleDays}일 순환)` : '') + ` · 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged} · 대상외 ${filtered}` + (errors ? ` · 오류 ${errors}` : '') + (st.note ? ` · ${st.note}` : '') };
+    // 원천이 읽혔다고 적는 것은 저장까지 된 때만(받을 게 없던 날은 오류가 없을 때) — 한 건도 저장 못 한 실행은 누락 점검·30분 뒤 다시 받기 대상
+    const saved = inserted + updated + unchanged; st.ok = saved > 0 || (!payloads.length && !errs.length);
+    if (!st.ok && errs.length) st.error = errs[0].slice(0, 200);
+    // 일부 쪽만 잠깐 못 받은 정기 실행은 30분 뒤 한 번 더(다시 받는 실행 full 에서는 또 걸지 않음 — 그 쪽이 계속 느리면 다음 순환에)
+    const again = pageFails > 0 && TRANSIENT.test(errs.join(' ')) && (saved === 0 || ctx.params?.full !== true);
+    return { inserted, updated, unchanged, errors: errors + invalid, errorLog: errs.length ? errs.join('\n') : undefined, providerMode: 'api', sources: { tourist_hotels: st }, ...(again ? { retry: true } : {}), summary: `영업중 ${first.totalCount}건 · 이번 페이지 ${win.start + 1}~${win.end}/${totalPages}` + (win.cycleDays > 1 ? ` (${win.cycleDays}일 순환)` : '') + ` · 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged} · 대상외 ${filtered}` + (errors ? ` · 오류 ${errors}` : '') + (st.note ? ` · ${st.note}` : '') };
   },
 };
 // ---- 신규 준공 공동주택(부동산원 CSV) ----

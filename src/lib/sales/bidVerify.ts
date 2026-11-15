@@ -24,12 +24,17 @@ async function readSource(st: string, ext: string, f: typeof fetch): Promise<{ k
   const K = await import('./collectors/kg2b');
   const code = K.kg2bCode(ext);
   if (code) {
-    try {
+    const once = async (): Promise<Src> => {
       const res = await f(K.kg2bDetailUrl(code), { headers: { 'User-Agent': 'Mozilla/5.0 (WorkIn sales)' }, signal: AbortSignal.timeout(relayOn() ? 20000 : 8000), redirect: 'follow' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = K.parseKg2bDetail(await res.text());
       if (!d.noticeNo && !d.close) throw new Error('KG2B 상세 칸을 못 읽음');
-      kg = { deadline: d.close, briefingKind: d.briefingKind, briefingAt: d.briefingAt, from: ['KG2B'] };
+      return { deadline: d.close, briefingKind: d.briefingKind, briefingAt: d.briefingAt, from: ['KG2B'] };
+    };
+    try {
+      const t0 = Date.now();
+      // 대표 11/14(노트북 11/15 오류 목록: 'KG2B kg2b_143176: HTTP 400' — 같은 주소가 다른 곳에서는 바로 열림): KG2B 가 가끔 요청을 받지 않음 → 금방 거절된 것(5초 안)은 1.5초 뒤 한 번 더
+      try { kg = await once(); } catch (e) { if (Date.now() - t0 > 5000) throw e; await new Promise((r) => setTimeout(r, 1500)); kg = await once(); }
     } catch (e) { errors.push(`KG2B ${ext}: ${String((e as Error)?.message ?? e).slice(0, 80)}`); }
   }
   if (st === 'kapt_bid') {
@@ -92,15 +97,24 @@ export async function bidDatesVerifyTick(now = new Date(), fetchImpl: typeof fet
     }
     out.checked++;
     // 읽기를 시도한 때 — 원천이 막혀도 다음 차례까지 기다림(정기 실행마다 같은 공고만 붙잡지 않게)
-    const failed = src.errors.length > 0; let fails = 0;
+    // 못 읽은 것으로 세는 것은 어느 원천에서도 일정을 못 읽었을 때만(KG2B 가 막혀도 K-apt 상세로 확인했으면 확인한 것 — 오류 글은 남김)
+    const failed = src.errors.length > 0 && !src.kg && !src.kapt; let fails = 0;
     for (const g of group) {
       const n = failed ? (Number(g.data?.bid_verify_fails) || 0) + 1 : 0; fails = Math.max(fails, n);
-      await sql`update sales_work_records set data = data || ${sql.json({ bid_verified_at: now.toISOString(), bid_verify_fails: n, ...(failed ? { bid_verify_error: src.errors.join(' · ').slice(0, 200) } : {}) } as never)}::jsonb
+      await sql`update sales_work_records set data = data || ${sql.json({ bid_verified_at: now.toISOString(), bid_verify_fails: n, ...(src.errors.length ? { bid_verify_error: src.errors.join(' · ').slice(0, 200) } : {}) } as never)}::jsonb
         where tenant = ${g.tenant} and src_tbl = ${SRC} and src_id = ${g.src_id}`;
     }
     if (failed && (fails === FAIL_ALERT || (fails > FAIL_ALERT && (fails - FAIL_ALERT) % 8 === 0))) stuck.push(`${src.errors.join(' · ').slice(0, 120)} (연달아 ${fails}번)`);
   }
-  if (stuck.length) await (await import('../log')).logError('tick:bidDatesVerify', new Error(`입찰 일정 재확인: 원천 상세를 연달아 못 읽음 — ${stuck.slice(0, 4).join(' | ')}`)).catch(() => {});
+  // 원천(KG2B·K-apt)이 안 열어 주는 것은 서버 고장이 아님 → '서버 오류' 알림 대신 영업 수집 알림으로(플랫폼 운영자). 운영 오류 목록에는 출처 sales:bidDatesVerify 로 남김
+  if (stuck.length) {
+    const msg = `입찰 일정 재확인: 원천 상세를 연달아 못 읽음 — ${stuck.slice(0, 4).join(' | ')}`;
+    await sql`insert into error_logs (source, message, context) values ('sales:bidDatesVerify', ${msg.slice(0, 2000)}, ${sql.json({ kind: 'source_unreachable' } as never)})`.catch(() => {});
+    const admins = await (await import('../superAdmin')).platformAdminIds(sql).catch(() => [] as string[]);
+    if (admins.length) await notify(sql, { userIds: admins, type: 'sales_collector_alert', title: `입찰 일정 재확인 지연 ${stuck.length}건 — 원천(KG2B·K-apt)이 상세를 열어 주지 않습니다`,
+      body: `${stuck.slice(0, 4).join('\n')}\n자동으로 계속 다시 읽습니다 — 마감·현장설명 일정이 바뀌었는지는 공고 원문에서 확인해 주세요.`.slice(0, 600), link: '/s/sales/sources#collectors',
+      entityType: 'sales_collector', actorId: null, dedupeKey: `bidverify:${kstDay(now)}:${stuck.length}:${Math.floor(now.getTime() / 3600e3)}`, space: 'sales' } as never).catch(() => {});
+  }
   return out.checked || out.errors.length ? { ...out, errors: out.errors.length } : { checked: 0 };
 }
 

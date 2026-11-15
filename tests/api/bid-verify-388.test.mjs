@@ -18,7 +18,7 @@ const KG2B = `<html><body><table class="tbl">
 <tr><th>현장설명회실시유무</th><td> 필수 </td><th>현설일시</th><td><span class="red2"> ${B} 14:00 </span></td></tr>
 <tr><th>입찰개시일시</th><td>${plus(-5)} 16:00</td><th>입찰마감일시</th><td>${D} 17:00</td></tr>
 <tr><th>개찰일시</th><td>${D} 18:00</td><th>개찰장소</th><td>입찰 담당자PC</td></tr></table></body></html>`;
-let srv, ctx, sql, fake, kapt; const kg2bHits = []; let kgDown = false;
+let srv, ctx, sql, fake, kapt; const kg2bHits = []; let kgDown = false, kaptDown = false, kgOnce400 = false;
 const tick = async () => { const r = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(r.status, 200); return (await r.json()).detail ?? {}; };
 const evOf = async (id) => (await sql`select title, description, to_char(start_at at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') s, (select array_agg(user_id::text order by user_id) from event_attendees a where a.event_id = e.id) att from events e where id = ${id}`)[0];
 const work = async () => (await sql`select data from sales_work_records where tenant = 'default' and src_tbl = 'opportunity_work' and ref_id = 'src388'`)[0]?.data;
@@ -31,7 +31,8 @@ before(async () => {
   fake = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'); let body = ''; for await (const c of req) body += c;
     const send = (code, text, type = 'text/html; charset=utf-8') => { res.statusCode = code; res.setHeader('content-type', type); res.end(text); };
-    if (u.pathname === '/kg2b/user/bid_list/KaptBidView') { kg2bHits.push(u.searchParams.get('bidcode')); if (kgDown) return send(503, 'down'); return u.searchParams.get('bidcode') === CODE ? send(200, KG2B) : send(404, 'no'); }
+    if (kaptDown && u.pathname.startsWith('/kapt/')) return send(503, 'down');
+    if (u.pathname === '/kg2b/user/bid_list/KaptBidView') { kg2bHits.push(u.searchParams.get('bidcode')); if (kgDown) return send(503, 'down'); if (kgOnce400) { kgOnce400 = false; return send(400, 'bad'); } return u.searchParams.get('bidcode') === CODE ? send(200, KG2B) : send(404, 'no'); }
     if (u.pathname === '/kapt/bid/bidList.do') return send(200, '<html><table></table></html>');
     if (kapt.handle(req, res, body)) return;
     send(404, 'nope');
@@ -83,25 +84,35 @@ test('정기 실행: 원천 상세로 마감 17:00·현장설명회(필수) 바�
 });
 
 
-test('대표 11/14: 원천 상세를 한두 번 못 읽은 것은 기록만(서버 오류 알림 없음) · 같은 공고를 연달아 3번 못 읽으면 한 번 알림 · 다시 읽히면 처음부터', async () => {
-  const errs = async () => (await sql`select message from error_logs where source = 'tick:bidDatesVerify' order by created_at`).map((r) => r.message);
-  const pushes = async () => (await sql`select count(*)::int as n from notifications where type = 'server_error' and title = '서버 오류 (tick:bidDatesVerify)'`)[0].n;
+test('대표 11/14: 금방 거절되면 한 번 더 읽음 · 한 원천이라도 읽히면 확인한 것 · 어디서도 못 읽기를 연달아 3번이면 한 번 알림(서버 오류 아님 — 영업 수집 알림) · 다시 읽히면 처음부터', async () => {
+  const errs = async () => (await sql`select source, message from error_logs where source like '%bidDatesVerify' order by created_at`);
+  const serverPush = async () => (await sql`select count(*)::int as n from notifications where type = 'server_error' and title like '서버 오류 (%bidDatesVerify)'`)[0].n;
+  const delay = async () => (await sql`select title, body from notifications where type = 'sales_collector_alert' and title like '입찰 일정 재확인 지연%' group by title, body`);
   const again = () => sql`update sales_work_records set data = data - 'bid_verified_at' where tenant = 'default' and src_tbl = 'opportunity_work' and ref_id = 'src388'`; // 다음 실행에서 바로 다시 읽게
-  await sql`delete from error_logs where source = 'tick:bidDatesVerify'`;
-  const p0 = await pushes();
+  await sql`delete from error_logs where source like '%bidDatesVerify'`;
+  const p0 = await serverPush();
+  // KG2B 가 한 번 거절(HTTP 400)한 뒤 바로 열림 → 1.5초 뒤 한 번 더 읽어 오류 없음
+  kgOnce400 = true; const h0 = kg2bHits.length;
+  await again(); const r0 = await tick();
+  assert.equal(r0.bidDatesVerify.errors, 0, JSON.stringify(r0.bidDatesVerify)); assert.equal(kg2bHits.length - h0, 2, '한 번 더 읽음');
+  // KG2B 만 막힘 — K-apt 상세로 확인했으므로 못 읽은 것으로 세지 않음(오류 글은 남김)
   kgDown = true;
   await again(); const t1 = await tick(); assert.equal(t1.bidDatesVerify.errors, 1, '실행 결과에는 오류 1로 남음');
-  assert.deepEqual([(await work()).bid_verify_fails, (await errs()).length, await pushes() - p0], [1, 0, 0], '1번째: 기록만');
-  assert.match((await work()).bid_verify_error, /KG2B kg2b_388001: HTTP 503/);
+  assert.equal((await work()).bid_verify_fails, 0, 'K-apt 로 확인함'); assert.match((await work()).bid_verify_error, /KG2B kg2b_388001: HTTP 503/);
+  // 두 원천 모두 막힘 — 1·2번째는 기록만, 3번째에 한 번 알림
+  kaptDown = true;
   await again(); await tick();
-  assert.deepEqual([(await work()).bid_verify_fails, (await errs()).length, await pushes() - p0], [2, 0, 0], '2번째: 기록만');
+  assert.deepEqual([(await work()).bid_verify_fails, (await errs()).length, (await delay()).length], [1, 0, 0], '1번째: 기록만');
   await again(); await tick();
-  const e3 = await errs();
-  assert.deepEqual([(await work()).bid_verify_fails, e3.length, await pushes() - p0], [3, 1, 1], '3번째: 한 번 알림');
-  assert.match(e3[0], /연달아 못 읽음 — KG2B kg2b_388001: HTTP 503.*연달아 3번/);
+  assert.deepEqual([(await work()).bid_verify_fails, (await errs()).length, (await delay()).length], [2, 0, 0], '2번째: 기록만');
   await again(); await tick();
-  assert.deepEqual([(await work()).bid_verify_fails, (await errs()).length], [4, 1], '4번째: 다시 알리지 않음');
-  kgDown = false;
+  const e3 = await errs(); const d3 = await delay();
+  assert.deepEqual([(await work()).bid_verify_fails, e3.length, d3.length, await serverPush() - p0], [3, 1, 1, 0], '3번째: 영업 수집 알림 한 번 · 서버 오류 알림은 없음');
+  assert.equal(e3[0].source, 'sales:bidDatesVerify'); assert.match(e3[0].message, /연달아 못 읽음 — KG2B kg2b_388001: HTTP 503.*연달아 3번/);
+  assert.match(d3[0].title, /^입찰 일정 재확인 지연 1건 — 원천\(KG2B·K-apt\)이 상세를 열어 주지 않습니다$/); assert.match(d3[0].body, /공고 원문에서 확인/);
+  await again(); await tick();
+  assert.deepEqual([(await work()).bid_verify_fails, (await errs()).length, (await delay()).length], [4, 1, 1], '4번째: 다시 알리지 않음');
+  kgDown = false; kaptDown = false;
   await again(); const ok = await tick(); assert.equal(ok.bidDatesVerify.errors, 0);
   assert.equal((await work()).bid_verify_fails, 0, '다시 읽히면 0으로');
 });

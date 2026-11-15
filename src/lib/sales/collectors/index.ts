@@ -8,7 +8,7 @@ import { tenantOf, type SessionUser } from '../../types';
 import { CUSTOMER_COPY, INTERNAL_TENANT, collectorState, seesInternals } from '../../customerScope';
 import { completeRun, mergeNoticeDuplicates, startRun } from './store';
 import { collectorTodo, type CollectorTodo } from './todo';
-import type { Collector, CollectorCtx, CollectorResult } from './types';
+import { TRANSIENT, type Collector, type CollectorCtx, type CollectorResult } from './types';
 import { kaptBidNotices, kaptBidResults, kaptSaSun, operatingFromKapt } from './kapt';
 import { g2bBidNotices, g2bPrespecAwards } from './g2b';
 import { kg2bBidNotices } from './kg2b';
@@ -40,8 +40,7 @@ export function isDue(c: Pick<Collector, 'hourKst' | 'againKst'>, lastRunAt: Dat
 }
 
 /** 한 수집기 실행(실행 이력·공용 상태 갱신). 예산은 Vercel 60초 안 — 기본 45초 */
-/** 원천이 잠깐 안 받아 준 실패(시간 초과·연결 끊김) — 다시 받으면 되는 것 */
-export const TRANSIENT = /timeout|timed out|aborted|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|network|시간 초과/i;
+export { TRANSIENT };
 export async function runCollector(slug: string, trigger: 'cron' | 'manual' | 'retry', opt: { deadlineMs?: number; params?: Record<string, unknown>; fetchImpl?: typeof fetch } = {}) {
   const c = find(slug); if (!c) throw notFound('그런 수집기가 없습니다');
   const runId = await startRun(slug, trigger);
@@ -75,14 +74,24 @@ export async function collectorsTick(opt: { now?: Date } = {}) {
   const states = new Map((await sql<{ slug: string; enabled: boolean; last_run_at: Date | null }[]>`select slug, enabled, last_run_at from sales_collector_state`).map((r) => [r.slug, r]));
   const [anyTenant] = await sql<{ n: number }[]>`select count(*)::int as n from tenants where spaces @> array['sales']::text[]`;
   if (!anyTenant?.n) return { skipped: 'no sales tenant' };
-  const due = COLLECTORS.find((c) => { const s = states.get(c.slug); if (s && !s.enabled) return false; return isDue(c, s?.last_run_at ? new Date(s.last_run_at) : null, hour, today); });
-  if (due) { const r = await runCollector(due.slug, 'cron'); return { ran: due.slug, status: r.status, summary: r.summary }; }
+  const dueAll = COLLECTORS.filter((c) => { const s = states.get(c.slug); if (s && !s.enabled) return false; return isDue(c, s?.last_run_at ? new Date(s.last_run_at) : null, hour, today); });
+  // 대표 11/14 '영업 DB 누락'(실행 기록 11/11~11/15): 한 번에 수집기 하나라 06시 차례인 나라장터·LH 수집이 07시 시설 수집기(목록 앞쪽)에 밀려 매일 08:49·09:50경에야 돌았다
+  //   → 아침 8시 메일에 그날 새 나라장터·LH 공고가 못 들어감(다음 날 메일에 들어감). 차례가 된 수집기 가운데 입찰 공고 수집기를 먼저 돌린다(그 밖은 예전 순서)
+  const firstBid = FIRST.map((slug) => dueAll.find((c) => c.slug === slug)).find(Boolean);
   // 278차 #816: 원천이 웹페이지·요청 실패로 못 받았으면(detail.retry) 30분 뒤 다시 — 최근 14일 전체로 받아 놓친 공고를 채움. 하루 RETRY_MAX 번까지
-  const again = await retryDue(now);
-  if (!again) return { ran: null };
-  const r = await runCollector(again, 'retry', { params: { full: true } });
-  return { ran: again, retry: true, status: r.status, summary: r.summary };
+  //   11/15 06:34 KG2B 실패 → 정기 차례가 13시까지 이어져 '30분 뒤 다시'가 한 번도 못 돌았음 → 입찰 공고 정기 차례 다음으로는 다시 받기를 먼저(연달아 두 번은 안 함 — 정기 차례가 굶지 않게)
+  const again = firstBid ? null : await retryDue(now);
+  const due = firstBid ?? dueAll[0] ?? null;
+  if (again && due) {
+    const [last] = await sql<{ trigger: string }[]>`select trigger from sales_collector_runs order by id desc limit 1`;
+    if (last?.trigger === 'retry') { const r = await runCollector(due.slug, 'cron'); return { ran: due.slug, status: r.status, summary: r.summary }; }
+  }
+  if (again) { const r = await runCollector(again, 'retry', { params: { full: true } }); return { ran: again, retry: true, status: r.status, summary: r.summary }; }
+  if (due) { const r = await runCollector(due.slug, 'cron'); return { ran: due.slug, status: r.status, summary: r.summary }; }
+  return { ran: null };
 }
+/** 차례가 겹치면 먼저 도는 수집기 — 그날 아침 메일·입찰 목록에 바로 쓰이는 입찰 공고 */
+export const FIRST = ['kapt_bid_notices', 'kg2b_bid_notices', 'g2b_bid_notices', 'public_agency_bids'];
 export const RETRY_MIN = 30, RETRY_MAINT_MIN = 120, RETRY_MAX = 12; // 279차: 원천 점검 중이면 2시간마다(같은 실패를 30분마다 되풀이하지 않게)
 async function retryDue(now: Date) {
   const sql = db();
