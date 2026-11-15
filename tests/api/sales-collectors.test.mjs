@@ -62,6 +62,11 @@ before(async () => {
     if (u.pathname === '/files/kicox.csv') return send(200, '﻿유형,시도,시군,단지명,조성상태,입주업체(개),가동업체(개),관리면적(천제곱미터)\n일반,경기,성남시,판교테크노밸리,완료,1200,1150,660\n일반,경기,화성시,동탄,조성중,30,0,100\n', 'text/csv');
     if (u.pathname === '/files/reb.csv') return send(200, `﻿단지고유번호,주소,단지명_공시가격,단지종류,세대수,동수,사용승인일,도로명주소\nA100,경기도 성남시 분당구 정자동 1,분당 새아파트,1,850,8,${plus(-100)},경기도 성남시 분당구 정자로 1\nA101,서울특별시 강남구 역삼동 2,옛날아파트,1,300,3,2010-01-01,\n`, 'text/csv');
     if (u.pathname === '/hotels/info' && hotelMode === 'drop') { req.socket.destroy(); return; } // 대표 11/14: 원천이 잠깐 연결을 끊음
+    if (u.pathname === '/hotels/info' && (hotelMode === 'pages3' || hotelMode === 'drop2')) { // 3쪽(250건) — drop2 는 2쪽만 연결 끊김
+      const pg = Number(u.searchParams.get('pageNo')); if (hotelMode === 'drop2' && pg === 2) { req.socket.destroy(); return; }
+      const from = (pg - 1) * 100 + 1, to = Math.min(250, pg * 100);
+      const item = Array.from({ length: Math.max(0, to - from + 1) }, (_, k) => ({ BPLC_NM: `시험호텔 ${from + k}`, SALS_STTS_CD: '01', ROAD_NM_ADDR: `경기도 성남시 분당구 대왕판교로 ${from + k}`, GSRM_CNT: '120', LCPMT_YMD: '20200101', TOUR_LDGBIZ_DTL_NM: '관광호텔업', MNG_NO: `HP${from + k}` }));
+      return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 250, items: { item } } } }), 'application/json'); }
     if (u.pathname === '/hotels/info' && hotelMode === 'denied') return send(401, JSON.stringify({ OpenAPI_ServiceResponse: { cmmMsgHeader: { errMsg: 'SERVICE_KEY_IS_NOT_REGISTERED_ERROR', returnAuthMsg: 'SERVICE_KEY_IS_NOT_REGISTERED_ERROR', returnReasonCode: '30' } } }), 'application/json');
     if (u.pathname === '/hotels/info' && hotelMode === 'nocond' && u.searchParams.has('cond[SALS_STTS_CD::EQ]')) return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 0, items: '' } } }), 'application/json');
     if (u.pathname === '/hotels/info') return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 1, items: { item: [{ BPLC_NM: '판교 호텔', SALS_STTS_CD: '01', ROAD_NM_ADDR: '경기도 성남시 분당구 대왕판교로 1', GSRM_CNT: '320', LCPMT_YMD: '20200101', TOUR_LDGBIZ_DTL_NM: '관광호텔업', MNG_NO: 'H1' }] } } } }), 'application/json');
@@ -638,4 +643,47 @@ test('대표 11/14 영업 DB 누락: 원천이 잠깐 안 받아 준 실패(연�
   const den = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
   assert.ok(!(await sql`select detail from sales_collector_runs where id = ${den.runId}`)[0].detail?.retry, '활용신청 필요는 다시 받지 않음');
   hotelMode = 'ok';
+});
+
+test('대표 11/14 관광숙박업: 일부 쪽만 잠깐 못 받아도 받은 쪽은 저장(일부 받음) · 정기 실행이면 30분 뒤 한 번 더 · 다시 받는 실행에서는 또 걸지 않음', async () => {
+  hotelMode = 'drop2';
+  try {
+    const a = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
+    assert.equal(a.status, 'partial', a.summary); assert.equal(a.inserted, 150, '1쪽 100 + 3쪽 50 저장'); assert.match(a.summary, /오류 1/);
+    assert.equal(a.sources.tourist_hotels.ok, true, '저장까지 됐으므로 원천은 읽힌 것');
+    assert.equal((await sql`select detail from sales_collector_runs where id = ${a.runId}`)[0].detail?.retry, true, '못 받은 쪽 때문에 30분 뒤 한 번 더');
+    const b = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', { full: true });
+    assert.equal(b.status, 'partial'); assert.ok(!(await sql`select detail from sales_collector_runs where id = ${b.runId}`)[0].detail?.retry, '다시 받는 실행에서 또 못 받으면 더 걸지 않음(다음 순환에)');
+    hotelMode = 'pages3';
+    const c = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
+    assert.equal(c.status, 'success', c.summary); assert.equal(c.inserted, 100, '못 받았던 2쪽 100건');
+  } finally { hotelMode = 'ok'; }
+});
+
+test('대표 11/14 정기 실행 순서: 차례가 겹치면 입찰 공고 수집기 먼저(아침 메일 전에) · 다시 받기는 다른 정기 차례보다 먼저 돌되 연달아 두 번은 아님', async (t) => {
+  const kstHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date())) % 24;
+  if (kstHour < 7) { t.skip('KST 07시 전에는 차례가 된 수집기가 없어 순서를 볼 수 없음'); return; }
+  const all = (await ctx.owner.ok('GET', '/api/sales/collectors')).collectors.map((c) => c.slug);
+  const tick = async () => { const r = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(r.status, 200); return (await r.json()).detail?.salesCollectors ?? {}; };
+  const old = async (slug) => sql`insert into sales_collector_state (slug, enabled, last_run_at) values (${slug}, true, now() - interval '2 days') on conflict (slug) do update set enabled = true, last_run_at = now() - interval '2 days'`;
+  try {
+    for (const slug of all) await sql`insert into sales_collector_state (slug, enabled) values (${slug}, false) on conflict (slug) do update set enabled = false`;
+    await sql`update sales_collector_runs set detail = coalesce(detail, '{}'::jsonb) - 'retry'`; // 앞 시험이 남긴 다시 받기 표시 지움
+    // ① 관광숙박업(목록 앞쪽·07시)과 나라장터(06시)가 함께 차례 → 나라장터 먼저
+    hotelMode = 'ok'; g2bMode = 'ok';
+    await old('tourist_hotels_localdata'); await old('g2b_bid_notices');
+    const t1 = await tick(); assert.equal(t1.ran, 'g2b_bid_notices', JSON.stringify(t1));
+    // ② 나라장터가 웹페이지 응답으로 실패(다시 받기 표시) + 30분 지남, 관광숙박업은 아직 정기 차례 → 다시 받기 먼저
+    g2bMode = 'html';
+    const f = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
+    assert.equal((await sql`select detail from sales_collector_runs where id = ${f.runId}`)[0].detail?.retry, true);
+    await sql`update sales_collector_runs set started_at = started_at - interval '31 minutes' where slug = 'g2b_bid_notices'`;
+    const t2 = await tick(); assert.deepEqual([t2.ran, t2.retry], ['g2b_bid_notices', true], JSON.stringify(t2));
+    // ③ 바로 앞이 다시 받기였으면 이번에는 정기 차례(관광숙박업) — 다시 받기가 계속 실패해도 정기 수집이 굶지 않음
+    await sql`update sales_collector_runs set started_at = started_at - interval '31 minutes' where slug = 'g2b_bid_notices'`;
+    const t3 = await tick(); assert.deepEqual([t3.ran, t3.retry ?? false], ['tourist_hotels_localdata', false], JSON.stringify(t3));
+    // ④ 정기 차례가 없으면 다시 받기
+    g2bMode = 'ok';
+    const t4 = await tick(); assert.deepEqual([t4.ran, t4.retry], ['g2b_bid_notices', true], JSON.stringify(t4));
+  } finally { g2bMode = 'ok'; hotelMode = 'ok'; await sql`update sales_collector_state set enabled = true where slug = any(${all})`; }
 });

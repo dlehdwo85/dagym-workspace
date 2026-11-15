@@ -41,6 +41,8 @@ export function collectorTodo(i: { slug: string; source: string | null; error: s
   if (/주소 확인 필요|\b404\b|주소가 바뀌/.test(text)) return { action: 'url', service, link: null, todo: '원천 주소 확인이 필요합니다 — 플랫폼 운영 › 영업 수집기 설정에서 현재 주소로 바꿔 주세요' };
   // 390차: '요청 실패 (TypeError)'(연결 끊김 — LH 입찰공고)가 여기 안 걸려 '수집에 실패했습니다'로만 보였음
   if (/timeout|시간 초과|ECONN|fetch failed|요청 실패|HTTP ?5\d\d|응답하지 않|abort|socket|서울 중계/i.test(text)) return { action: 'retry', service, link: null, todo: '원천 서버가 응답하지 않았습니다 — 자동으로 다시 받습니다(이틀 넘게 계속되면 원천 주소 확인)' };
+  // 대표 11/14(알림 'KG2B 입찰공고 — 수집에 실패했습니다 … [지금 수집]으로'): KG2B 가 요청을 받지 않은 것(HTTP 4xx — 같은 주소가 다른 곳에서는 열림)은 30분마다 자동으로 다시 받는 중
+  if (i.slug === 'kg2b_bid_notices' && /HTTP 4\d\d/.test(text)) return { action: 'retry', service, link: null, todo: 'KG2B 가 요청을 받지 않았습니다 — 30분마다 자동으로 다시 받습니다(하루 넘게 계속되면 클라우드 요청)' };
   // 390차: 공공데이터포털 결과 코드 — 10·11 = 요청 칸(날짜 형식 등)이 명세와 다름 · 01·02·04·05·99 = 원천 시스템 내부 오류 · 03 = 자료 없음
   if (/\b(10|11)\b\s*(INVALID_REQUEST_PARAMETER|NO_MANDATORY_REQUEST_PARAMETERS)|INVALID_REQUEST_PARAMETER|NO_MANDATORY_REQUEST_PARAMETERS/i.test(text)) return { action: 'check', service, link: null, todo: '원천이 요청 형식(날짜 등 입력 칸)을 받지 않았습니다 — 원천 명세가 바뀐 것 같아 수집기를 손봐야 합니다(클라우드 요청)' };
   if (/APPLICATION_ERROR|DB_ERROR|HTTP_ERROR|SERVICETIME_OUT|UNKNOWN_ERROR|(?:응답 오류|결과코드) \(?(?:HTTP \d+\)?:? )?(0[1245]|99)\b/i.test(text)) return { action: 'retry', service, link: null, todo: '원천 시스템 내부 오류 응답입니다 — 원천 쪽 장애라 다음 수집 때 다시 받습니다(이틀 넘게 계속되면 클라우드 요청)' };
