@@ -5,7 +5,10 @@ export async function cal1019({ owner, ctx, sql, BASE }) {
   await owner.setViewportSize({ width: 1366, height: 900 });
   const cals = (await ctx.owner.ok('GET', '/api/calendars')).calendars;
   const personal = cals.find((c) => c.type === 'personal');
-  const day = '2026-11-18';
+  // 11/15 CI 실패(94492d1·849e545·a922a04 — '첫 스크롤 = 07:00' top 556 ≠ 336): 날짜가 2026-11-18 로 박혀 있어, 오늘이 그 주(11/15~11/22)에 들면
+  // 주 보기가 07:00 이 아니라 지금 시각으로 스크롤됨 → '오늘이 없는 주' 검사가 그 주 내내 실패. 오늘이 그 주에 들면 다른 주(12/09)로 본다
+  const todayKst = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const day = todayKst >= '2026-11-15' && todayKst <= '2026-11-22' ? '2026-12-09' : '2026-11-18';
   const mk = (title, s, e) => ctx.owner.ok('POST', '/api/events', { calendarId: personal.id, title, start: `${day}T${s}:00+09:00`, end: `${day}T${e}:00+09:00` });
   const a = await mk('E2E 겹침 가', '10:00', '11:00');
   await mk('E2E 겹침 나', '10:00', '11:00');

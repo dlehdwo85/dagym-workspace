@@ -81,7 +81,8 @@ export async function collectorsTick(opt: { now?: Date } = {}) {
   // 278차 #816: 원천이 웹페이지·요청 실패로 못 받았으면(detail.retry) 30분 뒤 다시 — 최근 14일 전체로 받아 놓친 공고를 채움. 하루 RETRY_MAX 번까지
   //   11/15 06:34 KG2B 실패 → 정기 차례가 13시까지 이어져 '30분 뒤 다시'가 한 번도 못 돌았음 → 입찰 공고 정기 차례 다음으로는 다시 받기를 먼저(연달아 두 번은 안 함 — 정기 차례가 굶지 않게)
   const again = firstBid ? null : await retryDue(now);
-  const due = firstBid ?? dueAll[0] ?? null;
+  // 그다음은 입찰 결과·사전규격(예전에는 09:30경 — 11/16 에는 시설 수집기 뒤로 밀려 11:37·11:51 에 돎), 나머지는 예전 순서
+  const due = firstBid ?? SECOND.map((slug) => dueAll.find((c) => c.slug === slug)).find(Boolean) ?? dueAll[0] ?? null;
   if (again && due) {
     const [last] = await sql<{ trigger: string }[]>`select trigger from sales_collector_runs order by id desc limit 1`;
     if (last?.trigger === 'retry') { const r = await runCollector(due.slug, 'cron'); return { ran: due.slug, status: r.status, summary: r.summary }; }
@@ -92,6 +93,7 @@ export async function collectorsTick(opt: { now?: Date } = {}) {
 }
 /** 차례가 겹치면 먼저 도는 수집기 — 그날 아침 메일·입찰 목록에 바로 쓰이는 입찰 공고 */
 export const FIRST = ['kapt_bid_notices', 'kg2b_bid_notices', 'g2b_bid_notices', 'public_agency_bids'];
+export const SECOND = ['g2b_prespec_awards', 'kapt_bid_results'];
 export const RETRY_MIN = 30, RETRY_MAINT_MIN = 120, RETRY_MAX = 12; // 279차: 원천 점검 중이면 2시간마다(같은 실패를 30분마다 되풀이하지 않게)
 async function retryDue(now: Date) {
   const sql = db();
@@ -103,11 +105,14 @@ async function retryDue(now: Date) {
 }
 /**
  * #522 누락 점검(로컬 10/24 '실패가 3일째 조용히 지나갔다'): 켜진 수집기마다(원천이 여럿이면 원천마다) 마지막 성공·연속 실패.
- * 마지막 성공이 25시간(하루 + 1시간 여유) 넘었거나 2회 연속 실패면 문제 → 영업 홈 빨간 띠 + 하루 한 번 관리자 알림. 한 번도 안 돈 수집기는 보지 않음.
+ * 마지막 성공이 30시간(하루 + 차례가 밀리는 여유 6시간) 넘었거나 2회 연속 실패면 문제 → 영업 홈 빨간 띠 + 하루 한 번 관리자 알림. 한 번도 안 돈 수집기는 보지 않음.
  */
 export type CollectorAlert = { slug: string; source: string | null; label: string; lastOkAt: string | null; failStreak: number; reason: string; error: string | null } & CollectorTodo;
 export async function collectorAlerts(now = Date.now()): Promise<CollectorAlert[]> {
-  const sql = db(); const LIMIT = 25 * 3600e3;
+  // 노트북 11/17(11/16 누락 알림 3번 — 신규 준공·사전규격·입찰결과 '마지막 성공 25시간 전'): 원천 고장이 아니라 그날 차례가 전날보다 1시간 넘게 늦게 돌아온 것
+  //   (한 번에 수집기 하나라 순서·다시 받기에 따라 도는 시각이 날마다 다름). 하루에 한 번 도는 수집기가 전날보다 늦게 돌아도 누락으로 세지 않게 25 → 30시간.
+  //   못 받는 원천은 '2회 연속 실패'(30분 뒤 다시 받기까지 실패)로 그 전에 걸린다
+  const sql = db(); const LIMIT = 30 * 3600e3;
   const off = new Set((await sql<{ slug: string }[]>`select slug from sales_collector_state where not enabled`).map((r) => r.slug));
   type RunRow = { slug: string; status: string; started_at: Date; detail: any; error_log: string | null; summary: string | null };
   const runs = await sql<RunRow[]>`select slug, status, started_at, detail, error_log, summary from (
