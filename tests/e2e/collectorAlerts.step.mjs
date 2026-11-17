@@ -11,7 +11,7 @@ export async function collectorAlerts({ owner, ctx, sql, BASE, SHOTS }) {
   await sql`insert into sales_collector_runs (slug, trigger, started_at, finished_at, status, errors, summary, error_log, detail) values
     ('public_agency_bids', 'cron', now() - interval '26 hours', now() - interval '26 hours', 'partial', 1, '관련 공고 1건 · 신규 1 · 갱신 0 — LH 입찰공고 받음 2·관련 1 / 온비드 공고(차세대) 실패', 'onbid_lease: 활용신청 필요', ${agency}),
     ('public_agency_bids', 'manual', now() - interval '5 minutes', now() - interval '5 minutes', 'partial', 1, '관련 공고 1건 · 신규 0 · 갱신 1 — LH 입찰공고 받음 2·관련 1 / 온비드 공고(차세대) 실패', 'onbid_lease: 활용신청 필요', ${agency}),
-    ('tourist_hotels_localdata', 'cron', now() - interval '30 hours', now() - interval '30 hours', 'failed', 1, '활용신청 필요(HTTP 401): 30 SERVICE_KEY_IS_NOT_REGISTERED_ERROR', '활용신청 필요(HTTP 401)', ${hotel})`;
+    ('tourist_hotels_localdata', 'cron', now() - interval '34 hours', now() - interval '34 hours', 'failed', 1, '활용신청 필요(HTTP 401): 30 SERVICE_KEY_IS_NOT_REGISTERED_ERROR', '활용신청 필요(HTTP 401)', ${hotel})`;
 
   await owner.setViewportSize({ width: 1366, height: 1000 });
   await owner.goto(`${BASE}/s/sales`);

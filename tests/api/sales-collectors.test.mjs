@@ -492,7 +492,7 @@ test('#522 관광숙박업 오류 응답(JSON)도 코드·사유 그대로 · �
   assert.equal(al.todo, '공공데이터포털 활용신청(서비스 15155090)이 필요합니다'); assert.equal(al.action, 'apply'); assert.equal(al.link, 'https://www.data.go.kr/data/15155090/openapi.do');
   const home = await ctx.owner.ok('GET', '/api/sales/src?view=summary');
   assert.ok(home.collectorAlerts.some((x) => x.slug === 'tourist_hotels_localdata'), '영업 홈 빨간 띠 자료');
-  // 마지막 성공이 25시간 넘음 → 문제(연속 실패가 아니어도)
+  // 마지막 성공이 30시간 넘음 → 문제(연속 실패가 아니어도). 노트북 11/17: 전날보다 늦게 도는 날(26시간)은 누락이 아님 — 예전 기준 25시간은 순서가 밀린 날마다 알림이 갔다
   hotelMode = 'nocond';
   const b = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
   assert.notEqual(b.status, 'failed', JSON.stringify(b)); assert.match(b.summary, /영업상태 조건 없이 받음/);
@@ -500,7 +500,10 @@ test('#522 관광숙박업 오류 응답(JSON)도 코드·사유 그대로 · �
   assert.ok(!v.alerts.some((x) => x.slug === 'tourist_hotels_localdata'), '성공하면 사라짐');
   await sql`update sales_collector_runs set started_at = started_at - interval '26 hours' where slug = 'tourist_hotels_localdata'`;
   v = await ctx.owner.ok('GET', '/api/sales/collectors');
-  assert.match(v.alerts.find((x) => x.slug === 'tourist_hotels_localdata').reason, /^마지막 성공 2\d시간 전$/);
+  assert.ok(!v.alerts.some((x) => x.slug === 'tourist_hotels_localdata'), '26시간 전 성공 — 오늘 차례가 늦는 것일 뿐 누락 아님');
+  await sql`update sales_collector_runs set started_at = started_at - interval '5 hours' where slug = 'tourist_hotels_localdata'`;
+  v = await ctx.owner.ok('GET', '/api/sales/collectors');
+  assert.match(v.alerts.find((x) => x.slug === 'tourist_hotels_localdata').reason, /^마지막 성공 3\d시간 전$/);
   // 361차(노트북 11/05 09~10시 같은 알림 4번): 오늘 이미 알린 원천만 남았으면 정기 실행이 다시 보내지 않음(09시 뒤에만 도는 알림이라 그 시각에만 확인)
   const kh = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
   if (kh >= 9) {
@@ -671,8 +674,10 @@ test('대표 11/14 정기 실행 순서: 차례가 겹치면 입찰 공고 수�
     await sql`update sales_collector_runs set detail = coalesce(detail, '{}'::jsonb) - 'retry'`; // 앞 시험이 남긴 다시 받기 표시 지움
     // ① 관광숙박업(목록 앞쪽·07시)과 나라장터(06시)가 함께 차례 → 나라장터 먼저
     hotelMode = 'ok'; g2bMode = 'ok';
-    await old('tourist_hotels_localdata'); await old('g2b_bid_notices');
+    await old('tourist_hotels_localdata'); await old('g2b_bid_notices'); await old('g2b_prespec_awards');
     const t1 = await tick(); assert.equal(t1.ran, 'g2b_bid_notices', JSON.stringify(t1));
+    // ①-2 노트북 11/17: 그다음은 사전규격·낙찰정보(입찰 결과) — 시설 수집기보다 먼저(예전 시각대 유지)
+    const t1b = await tick(); assert.equal(t1b.ran, 'g2b_prespec_awards', JSON.stringify(t1b));
     // ② 나라장터가 웹페이지 응답으로 실패(다시 받기 표시) + 30분 지남, 관광숙박업은 아직 정기 차례 → 다시 받기 먼저
     g2bMode = 'html';
     const f = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_bid_notices/run', {});
