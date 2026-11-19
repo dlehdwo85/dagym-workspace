@@ -71,6 +71,7 @@ export function anthropicProvider(opt: { tier?: AiTier; maxTokens?: number } = {
     chat: async ({ system, messages, tools, format, signal, onText }) => {
       // V23-1: 크레딧 부족으로 막혀 있으면 호출하지 않고 바로 안내, 실패하면 종류별 문구(크레딧 부족은 1시간 차단)
       const G = await import('./guard');
+      await (await import('./consent')).assertScopeConsent(); // AI 동의(대표 11/19): 요청을 보낸 사람이 동의하지 않았으면 바깥으로 보내지 않는다
       await G.assertAiCredit();
       try {
         const params: Anthropic.Beta.Messages.MessageCreateParamsNonStreaming = {

@@ -33,6 +33,7 @@ import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
 import { Avatar, Kbd, Modal, Toaster, toast, cx } from './ui';
+import { AiConsentGate } from './AiConsent';
 import { TERMS_BASE } from '@/lib/terms';
 import { clearReminders, enableNativePush, initNative, onAppActive, refreshWidget, setNativeBadge } from './native';
 import { PushRehome } from './PushRehome';
@@ -697,6 +698,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         </Modal>
         <QuickAddTask open={quick} onClose={() => setQuick(false)} />
         <CommandPalette open={palette} onClose={() => setPalette(false)} onQuickAdd={() => setQuick(true)} />
+        <AiConsentGate off={!!session.support} />
         <Toaster />
       </div>
     </SessionCtx.Provider>

@@ -6,6 +6,7 @@ import { api, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Field, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { uploadToLibrary } from '@/components/libraryUpload';
 import { CompanyAiProfile } from '@/components/CompanyAiProfile';
+import { AiAutoSetting } from '@/components/AiConsent';
 
 type P = { id?: string; key: string; name: string; ceo: string | null; biz_no: string | null; address: string | null; phone: string | null; fax: string | null; email: string | null;
   website: string | null; bank: string | null; logo_file_id: string | null; brand_color: string | null; font: string | null; note: string | null; is_default: boolean };
@@ -43,6 +44,7 @@ export default function CompanyPage() {
         actions={<Button onClick={() => setEdit({ ...EMPTY })} data-testid="company-new"><Plus />회사 추가</Button>} />
       <AiProfile />
       <AttachToLibrary />
+      <AiAutoSetting />
       <RoleBadgeSetting />
       <RoleNamesSetting />
       <OrgModelSetting />

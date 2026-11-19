@@ -11,6 +11,7 @@ export const sttCostUsd = (seconds: number) => (seconds / 60) * (sttModel() === 
 
 export async function transcribeAudio(data: Buffer, fileName: string, mime: string, opt: { language?: string; signal?: AbortSignal } = {}): Promise<{ text: string; model: string }> {
   if (!sttConfigured()) throw new Error('STT 미설정');
+  await (await import('./consent')).assertScopeConsent(); // AI 동의(대표 11/19): 요청을 보낸 사람이 동의하지 않았으면 녹음을 바깥으로 보내지 않는다
   const base = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(data)], { type: mime || 'audio/wav' }), fileName || 'audio.wav');
