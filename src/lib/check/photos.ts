@@ -37,6 +37,27 @@ export async function addItemPhoto(u: SessionUser, itemId: string, i: z.infer<ty
     values (${id}, ${t}, 'item', ${itemId}, ${key}, ${i.fileName}, ${i.mimeType}, ${buf.length}, 'ready', ${u.id})`;
   return { id, sizeBytes: buf.length };
 }
+/** 점검 결과 사진 — 점검을 시작한 사람이, 끝내기 전까지(결과마다 6장) */
+export async function addResultPhoto(u: SessionUser, roundId: string, resultId: string, i: z.infer<typeof photoInput>) {
+  await requireMenu(u, 'check_run', 'use');
+  const sql = db(); const t = tenantOf(u);
+  const [r] = await sql<{ checker_id: string | null; ended_at: Date | null }[]>`select r.checker_id, r.ended_at from chk_results x join chk_rounds r on r.id = x.round_id
+    where x.id = ${resultId} and x.round_id = ${roundId} and x.tenant = ${t}`;
+  if (!r || r.checker_id !== u.id) throw notFound();
+  if (r.ended_at) throw badRequest('이미 끝낸 점검에는 사진을 더할 수 없습니다');
+  const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from chk_photos where tenant = ${t} and owner_kind = 'result' and owner_id = ${resultId}`;
+  if (n >= MAX_ITEM_PHOTOS) throw badRequest(`사진은 항목마다 ${MAX_ITEM_PHOTOS}장까지 올릴 수 있습니다`);
+  const buf = Buffer.from(i.data.replace(/^data:[^,]*,/, ''), 'base64');
+  if (!buf.length) throw badRequest('사진을 읽지 못했습니다');
+  if (buf.length > MAX_PHOTO_BYTES) throw badRequest('사진이 너무 큽니다(3MB 까지) — 다시 찍거나 작은 사진으로 올려 주세요');
+  await (await import('../plans')).assertStorage(u, buf.length);
+  const id = crypto.randomUUID();
+  const key = `chk/${t}/result/${resultId}/${id}.${EXT[i.mimeType]}`;
+  await putObject(key, buf, i.mimeType);
+  await sql`insert into chk_photos (id, tenant, owner_kind, owner_id, storage_key, file_name, mime_type, size_bytes, upload_status, taken_at, by_user)
+    values (${id}, ${t}, 'result', ${resultId}, ${key}, ${i.fileName}, ${i.mimeType}, ${buf.length}, 'ready', now(), ${u.id})`;
+  return { id, sizeBytes: buf.length };
+}
 export async function itemPhotos(tenant: string, itemIds: string[]) {
   if (!itemIds.length) return new Map<string, { id: string; fileName: string | null }[]>();
   const rows = await db()<{ id: string; owner_id: string; file_name: string | null }[]>`select id, owner_id, file_name from chk_photos
@@ -58,7 +79,13 @@ export async function photoUrl(u: SessionUser, id: string) {
   const [p] = await sql<{ storage_key: string; file_name: string | null; mime_type: string | null; owner_kind: string; owner_id: string }[]>`
     select storage_key, file_name, mime_type, owner_kind, owner_id from chk_photos where id = ${id} and tenant = ${t} and upload_status = 'ready'`;
   if (!p) throw notFound();
-  if ((await menuLevel(u, 'check_guide')) === 'none') {
+  if (p.owner_kind === 'result') {
+    // 점검 결과 사진: 점검하기 권한이 있는 사람만(볼 수 있는 조직 안에서)
+    if ((await menuLevel(u, 'check_run')) === 'none') throw notFound();
+    const [r] = await sql<{ org_unit_id: string }[]>`select r.org_unit_id from chk_results x join chk_rounds r on r.id = x.round_id where x.id = ${p.owner_id} and x.tenant = ${t}`;
+    const mine = await (await import('../access')).accessibleUnitIds(u, sql);
+    if (!r || (mine !== null && !mine.includes(r.org_unit_id))) throw notFound();
+  } else if ((await menuLevel(u, 'check_guide')) === 'none') {
     const [shared] = p.owner_kind === 'item' ? await sql`select 1 from chk_items where id = ${p.owner_id} and tenant = ${t} and active and share_staff` : [];
     if (!shared) throw notFound();
   }
