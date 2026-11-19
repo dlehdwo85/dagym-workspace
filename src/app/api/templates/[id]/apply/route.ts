@@ -18,7 +18,7 @@ export const POST = handler<{ id: string }>(async ({ req, user, params }) => {
   const p = t.payload as TemplatePayload;
   const due = i.dueDate ?? (p.dueInDays !== undefined ? addDays(todaySeoul(), p.dueInDays) : null);
   const created = await createTask(user, {
-    title: i.title ?? p.title, description: p.description, priority: p.priority, approvalRequired: p.approvalRequired ?? true,
+    title: i.title ?? p.title, description: p.description, priority: p.priority, approvalRequired: false /* 대표 11/18: 검토는 완료의 조건이 아님 — 옛 서식에 남은 값은 쓰지 않음 */,
     tags: p.tags, checklist: p.checklist, orgUnitId: i.orgUnitId, projectId: i.projectId ?? null, assigneeId: i.assigneeId !== undefined ? i.assigneeId : p.assigneeId ?? null,
     requestedById: i.requestedById ?? p.requestedById ?? undefined,
     dueDate: due, recurrenceRule: p.recurrence ?? null, brandId: i.brandId,

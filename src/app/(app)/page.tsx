@@ -186,7 +186,7 @@ export default function Dashboard() {
     .sort((a, b) => rank(a) - rank(b) || (a.due_date ?? '').localeCompare(b.due_date ?? '') || (a.due_time ?? '99').localeCompare(b.due_time ?? '99'));
 
   async function done(t: any) {
-    const toReview = !!t.approval_line_id || (t.approval_required && user.role === 'staff');
+    const toReview = !!t.approval_line_id; // 대표 11/18: 검토는 완료의 조건이 아님 — 결재선 업무만 결재로
     const c = !toReview && t.lead_id ? await fu.ask(t) : 'skip';
     if (c === null) return;
     try {

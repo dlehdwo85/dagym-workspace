@@ -28,14 +28,14 @@ describe('위젯 API', () => {
     assert.equal(w.links.task, 'workos://tasks/{id}');
     assert.equal((await fetch(`${BASE}/api/widget/today`)).status, 401);
   });
-  test('완료 체크: 내 업무 → done, 다시 → in_progress, 검토 필요 업무 → review, 남의 업무 403', async () => {
+  test('완료 체크: 내 업무 → done, 다시 → in_progress, 예전 검토 필수 표시가 있어도 → done(대표 11/18: 검토는 완료의 조건이 아님), 남의 업무 403', async () => {
     const [t] = await sql`select id from tasks where title = '위젯 업무 0'`;
     const [other] = await sql`select id from tasks where title = '남의 업무'`;
     assert.equal((await ctx.staffA.client.ok('POST', `/api/widget/tasks/${t.id}/done`)).status, 'done');
     assert.equal((await ctx.staffA.client.ok('POST', `/api/widget/tasks/${t.id}/done`)).status, 'in_progress');
     assert.ok([403, 404].includes((await ctx.staffA.client.req('POST', `/api/widget/tasks/${other.id}/done`)).status), '남의 업무(다른 현장은 404로 숨김)');
     const rv = (await ctx.owner.ok('POST', '/api/tasks', { title: '위젯 검토 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: true, dueDate: today })).id;
-    assert.equal((await ctx.staffA.client.ok('POST', `/api/widget/tasks/${rv}/done`)).status, 'review');
+    assert.equal((await ctx.staffA.client.ok('POST', `/api/widget/tasks/${rv}/done`)).status, 'done');
     const w = await ctx.staffA.client.ok('GET', '/api/widget/today');
     assert.ok(w.tasks.some((x) => x.done === false), '완료 아닌 업무가 먼저');
   });

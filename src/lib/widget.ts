@@ -41,14 +41,14 @@ export async function widgetToday(u: SessionUser) {
   };
 }
 
-/** 위젯 체크: 내 업무 완료(권한·검토 규칙은 updateTask 그대로 — 검토 필요 업무는 검토 요청 상태로) */
+/** 위젯 체크: 내 업무 완료(권한은 updateTask 그대로). 대표 11/18: 검토는 완료의 조건이 아님 — 결재선 업무만 결재 올리기 */
 export async function widgetDone(u: SessionUser, id: string) {
   const sql = db();
-  const [t] = await sql<{ version: number; status: string; approval_required: boolean }[]>`select version, status, approval_required from tasks where id = ${id} and deleted_at is null`;
+  const [t] = await sql<{ version: number; status: string; approval_line_id: string | null }[]>`select version, status, approval_line_id from tasks where id = ${id} and deleted_at is null`;
   const { notFound } = await import('./errors');
   if (!t) throw notFound('업무가 없습니다');
   const { updateTask } = await import('./tasks');
-  const r = await updateTask(u, id, { status: t.status === 'done' ? 'in_progress' : t.approval_required ? 'review' : 'done', version: t.version });
+  const r = await updateTask(u, id, { status: t.status === 'done' ? 'in_progress' : t.approval_line_id ? 'review' : 'done', version: t.version });
   const [after] = await sql<{ status: string }[]>`select status from tasks where id = ${id}`;
   return { ok: true, status: after.status, version: r.version };
 }

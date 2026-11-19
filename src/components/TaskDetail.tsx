@@ -297,7 +297,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
 
   // "필드 더보기" 안에 값이 들어 있는 항목 수
   const moreSet = [t.start_date, t.priority !== 'normal', t.estimate_minutes, t.task_type && t.task_type !== 'normal', t.tags?.length, t.approval_line_id,
-    Number(t.photo_required ?? 0) > 0, t.approval_required, data.collaborators?.length, data.dependencies?.length].filter(Boolean).length;
+    Number(t.photo_required ?? 0) > 0, data.collaborators?.length, data.dependencies?.length].filter(Boolean).length;
   const photoNeed = Number(t.photo_required ?? 0);
   const photoHave = Number(t.photo_count ?? 0);
   const photoShort = photoNeed > 0 && photoHave < photoNeed;
@@ -343,11 +343,11 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const isReviewer = t.status === 'review' && !!reviewer && reviewer.id === user.id;
   const isTaskOwner = (t.assignee_id ?? t.requested_by ?? t.created_by) === user.id || (multi && !!myPart);
   const reviewerLabel = reviewer ? `${reviewer.id === t.requested_by ? '요청자' : '검토 담당'} ${reviewer.name}님` : '검토자';
-  // 393차(대표 11/13 '업무 담당자가 검토 승인 요청 후 완료 처리를 할 수 없는 상황'): 검토 필수가 아닌 업무는 검토를 기다리는 중에도 담당자가 바로 [완료](서버와 같은 기준)
-  const finishNoReview = t.status === 'review' && isTaskOwner && !isReviewer && !t.approval_required && !t.approval_line_id;
+  // 393차(대표 11/13) + 대표 11/18 '검토는 담당자가 필요시에 요청하는 것이지 완료의 조건으로 두지는 않는다': 검토를 기다리는 중에도 담당자가 바로 [완료](서버와 같은 기준 — 결재선 업무만 예외)
+  const finishNoReview = t.status === 'review' && isTaskOwner && !isReviewer && !t.approval_line_id;
   const ownerLabel = t.assignee_id ? `담당자 ${t.assignee_name}님` : t.requested_by ? `요청자 ${t.requested_by_name}님` : `만든 사람 ${t.created_by_name}님`;
   const lockMsg = statusOwner ? null : t.status === 'review'
-    ? (isReviewer ? '검토 중인 업무는 아래 [승인]·[반려]로 처리하세요' : finishNoReview ? `검토 요청 중 — 검토 필수 업무가 아니라 ${reviewerLabel}의 승인 없이도 아래 [완료]로 끝낼 수 있어요` : isTaskOwner ? `검토 중에는 ${reviewerLabel}의 승인·반려를 기다립니다 — 고칠 게 있으면 [검토 요청 취소]` : `검토 중 — ${reviewerLabel}이 승인·반려합니다`)
+    ? (isReviewer ? '검토 중인 업무는 아래 [승인]·[반려]로 처리하세요' : finishNoReview ? `검토 요청 중 — ${reviewerLabel}의 승인을 기다리지 않고 아래 [완료]로 바로 끝낼 수 있어요` : isTaskOwner ? `검토 중에는 ${reviewerLabel}의 승인·반려를 기다립니다 — 고칠 게 있으면 [검토 요청 취소]` : `검토 중 — ${reviewerLabel}이 승인·반려합니다`)
     : `상태는 ${ownerLabel}만 바꿀 수 있어요`;
   // 예상 처리 기간: 1일 이상 · 완료 표본 3건 이상일 때만(0일·1건 기준은 의미 없음)
   const showSpeed = !!data.speed && data.speed.median_days != null && data.speed.median_days >= 1 && (data.speed.done ?? 0) >= 3;
@@ -365,7 +365,6 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     : t.status === 'review' ? (data.approvals?.length && t.approval_line_id ? null : isReviewer ? { label: '승인(최종 완료)', run: () => patch({ status: 'done' }, '승인했습니다 — 최종 완료') } : null)
     : multi ? (myPart && !myPart.done ? { label: '완료', run: () => patch({ myPart: 'done' }, (r) => (r.status === 'review' ? '모두 마쳐 검토를 요청했습니다' : '모두 마쳐 업무를 완료했습니다')) } : null) // #989 글자는 [완료] 하나
     : t.approval_line_id ? { label: '결재 올리기', run: () => patch({ status: 'review' }, '결재를 요청했습니다') }
-    : t.approval_required && reviewerCandidate0 && reviewerCandidate0 !== user.id ? { label: '완료 → 검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') } // #410 보강: 담당자가 관리자여도 검토자가 따로 있으면 검토 요청
     : { label: '완료', run: () => patch({ status: 'done' }, '완료 처리했습니다') };
   // 334차(대표 11/02 16:4x·17:0x): 요청자(지시자)·관리자급(관리자·부서장·팀장)은 담당자 전원이 [내 몫 완료]를 누르기 전에도 [완료 처리] — 남은 몫은 기록(closed_by)·알림. 서버 perms.finish 와 같은 기준
   const finishAs: string | null = t.status !== 'done' && t.status !== 'review' ? (perms.finish ?? null) : null;
@@ -379,7 +378,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   // 자격자는 내 몫이 있어도 업무 완료(#989) — 검토 중 승인 등 다른 단계는 그대로
   const primary = finishBtn && multi && t.status !== 'review' ? finishBtn : primary0 && (statusOwner || isReviewer) ? primary0 : finishBtn;
   const closedBy = t.status === 'done' ? (data.history as any[]).find((h) => h.action === 'closed_by' && (!t.completed_at || Math.abs(new Date(h.created_at).getTime() - new Date(t.completed_at).getTime()) < 300000)) : null;
-  // 대표 10/21 13:50 #410 ①: 모든 업무에서 담당자가 완료 대신 [검토 요청]을 누를 수 있다(요청자·없으면 만든 사람이 검토) — 결재선·검토 필수 업무는 기존 흐름 그대로
+  // 대표 10/21 13:50 #410 ①: 모든 업무에서 담당자가 완료 대신 [검토 요청]을 누를 수 있다(요청자·없으면 만든 사람이 검토) — 결재선 업무는 기존 흐름 그대로. 대표 11/18: 검토는 고르는 것이지 완료의 조건이 아님
   const reviewerCandidate = reviewerCandidate0;
   const reviewAsk = !!primary && primary.label === '완료' && !multi && primary !== finishBtn && (t.status === 'todo' || t.status === 'in_progress') && !t.approval_line_id && !!reviewerCandidate && reviewerCandidate !== user.id
     ? { label: '검토 요청', run: () => patch({ status: 'review' }, '검토를 요청했습니다') } : null;
@@ -480,11 +479,12 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               locked={lockMsg}
               finish={primary && t.status !== 'review' ? primary : null} finishBlocked={photoShort ? `증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)` : null}
               onReview={reviewAsk ? () => { if (photoShort) return toast.error(`증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)`); reviewAsk.run(); } : undefined}
+              onFinishInReview={finishNoReview ? () => { if (photoShort) return toast.error(`증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)`); patch({ status: 'done' }, '완료 처리했습니다 — 검토 담당자에게 알렸습니다'); } : undefined}
               onSet={(v, msg) => patch({ status: v }, msg)} />
             {reviewAsk && <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2"><span>바로 완료하지 않고 {t.requested_by_name ?? t.created_by_name ?? '요청자'}님에게 확인을 받으려면</span><Button size="sm" variant="secondary" onClick={() => { if (photoShort) return toast.error(`증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)`); reviewAsk.run(); }} data-testid="review-ask">검토 요청</Button></p>}
             {t.status === 'review' && isTaskOwner && !isReviewer && (
               <div className="flex flex-wrap items-center gap-2 rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="review-wait">
-                <Hourglass className="size-4 shrink-0" /><span className="flex-1">{finishNoReview ? `${reviewerLabel}의 검토를 기다리는 중입니다 — 검토 필수 업무가 아니라 승인 없이도 바로 완료할 수 있어요.` : `검토 중에는 ${reviewerLabel}의 승인·반려를 기다립니다.`}</span>
+                <Hourglass className="size-4 shrink-0" /><span className="flex-1">{finishNoReview ? `${reviewerLabel}의 검토를 기다리는 중입니다 — 승인을 기다리지 않고 바로 완료할 수도 있어요.` : `검토 중에는 ${reviewerLabel}의 승인·반려를 기다립니다.`}</span>
                 {finishNoReview && <Button size="sm" onClick={() => { if (photoShort) return toast.error(`증빙 사진 ${photoNeed}장이 필요합니다 (현재 ${photoHave}장)`); patch({ status: 'done' }, '완료 처리했습니다 — 검토 담당자에게 알렸습니다'); }} data-testid="review-finish"><CircleCheck />완료</Button>}
                 <Button size="sm" variant="secondary" onClick={() => patch({ status: 'in_progress' }, '검토 요청을 취소했습니다 — 다시 진행 중')} data-testid="review-cancel">검토 요청 취소</Button>
               </div>
@@ -802,10 +802,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               {/* 로컬 10/20(대표): 마감 알림을 알람처럼(전체 화면·소리·[해제]) — 기본값은 설정(높음·긴급은 켬) */}
               {perms.edit && <select className="ml-2 rounded-full border border-line bg-white px-1.5 py-0.5 text-[11px] text-ink-2" value={t.alarm === true ? 'on' : t.alarm === false ? 'off' : 'default'} onChange={(e) => patch({ alarm: e.target.value === 'on' ? true : e.target.value === 'off' ? false : null })} aria-label="알람처럼 울리기" data-testid="task-alarm">
                 <option value="default">알람 기본{(t.priority === 'high' || t.priority === 'urgent') ? '(중요 → 켬)' : ''}</option><option value="on">알람처럼 울림</option><option value="off">알람 끔</option></select>}</span></Prop>
-            {/* #410 ②③: 요청자·관리자가 '검토 필수'를 켜면 담당자는 바로 완료하지 못하고 검토 요청으로 넘긴다 */}
-            {(isRequester || perms.approve || t.created_by === user.id) && t.status !== 'done' && <Prop icon={BadgeCheck} label="검토 필수">
-              <label className="inline-flex cursor-pointer items-center gap-2 text-sm"><input type="checkbox" className="size-4" checked={!!t.approval_required} onChange={(e) => patch({ approvalRequired: e.target.checked }, e.target.checked ? '검토 필수로 바꿨습니다 — 담당자는 검토 요청으로 넘깁니다' : '검토 필수를 껐습니다')} aria-label="검토 필수" data-testid="approval-required" /><span className="text-ink-2">{t.approval_required ? '담당자가 완료하면 요청자 확인 뒤 완료' : '담당자가 바로 완료 가능'}</span></label>
-            </Prop>}
+            {/* 대표 11/18: 검토는 담당자가 필요할 때 요청하는 것 — 완료의 조건으로 두지 않음. 요청자가 켜던 '검토 필수' 칸(#410 ②③)은 뺌 */}
             {/* R-15 5번: 우선순위는 마감일·미리 알림과 같은 묶음 */}
             <Prop icon={Flag} label="우선순위">
               <select className={ghostCls} value={t.priority} onChange={(e) => patch({ priority: e.target.value })} aria-label="우선순위">
@@ -983,9 +980,9 @@ function Prop({ icon: Icon, label, children, asDiv, className, hint }: { icon: L
 }
 /** 상태 칩 하나: 누르면 할 일·진행 중·검토·보류·완료 중 선택 (배지·버튼·select 중복 정리) */
 /** 진행 단계: 진행 전 → 진행 중 → (검토) → 완료. 현재 단계는 색으로 채우고, 지난 단계는 ✓. 누르면 그 단계로(완료·검토는 결재·사진 규칙을 따름) */
-function StatusSteps({ status, reviewStep, reviewSkipped, canChange, canReopen, locked, finish, finishBlocked, onReview, onSet }: {
+function StatusSteps({ status, reviewStep, reviewSkipped, canChange, canReopen, locked, finish, finishBlocked, onReview, onFinishInReview, onSet }: {
   status: TaskStatus; reviewStep: boolean; reviewSkipped?: boolean; canChange: boolean; canReopen: boolean; locked: string | null;
-  finish: { label: string; run: () => void } | null; finishBlocked: string | null; onReview?: () => void; onSet: (v: TaskStatus, msg?: string) => void;
+  finish: { label: string; run: () => void } | null; finishBlocked: string | null; onReview?: () => void; onFinishInReview?: () => void; onSet: (v: TaskStatus, msg?: string) => void;
 }) {
   const order: TaskStatus[] = reviewStep ? ['todo', 'in_progress', 'review', 'done'] : ['todo', 'in_progress', 'done'];
   const label: Partial<Record<TaskStatus, string>> = { todo: '진행 전', in_progress: '진행 중', review: '검토', done: '완료' };
@@ -995,13 +992,15 @@ function StatusSteps({ status, reviewStep, reviewSkipped, canChange, canReopen, 
   function click(s: TaskStatus) {
     if (s === status) return;
     if (status === 'done') { if (!canReopen) return toast.info('다시 진행은 담당자·요청자만 할 수 있어요'); if (s === 'todo' || s === 'in_progress') return onSet(s, s === 'in_progress' ? '다시 진행 중으로 바꿨습니다' : '진행 전으로 바꿨습니다'); return; }
+    // 대표 11/18(휴대폰 화면: 검토 중 업무의 [완료] 칸을 눌러도 잠김): 검토를 기다리는 담당자가 [완료] 칸을 누르면 바로 완료 — 검토는 완료의 조건이 아님
+    if (status === 'review' && s === 'done' && onFinishInReview) return onFinishInReview();
     if (locked) return toast.info(locked);
     if (s === 'todo') return onSet('todo', '진행 전으로 바꿨습니다');
     if (s === 'in_progress') return onSet('in_progress', '시작했습니다');
     if (!finish) return;
     if (finishBlocked) return toast.error(finishBlocked);
     if (s === 'review') return goesToReview ? finish.run() : onReview ? onReview() : toast.info('검토 요청은 담당자가 요청자에게 보낼 때 씁니다');
-    if (s === 'done') return goesToReview ? toast.info(`완료는 검토를 거쳐야 해요 — [검토]를 눌러 ${finish.label.replace('완료 → ', '')}하세요`) : finish.run();
+    if (s === 'done') return goesToReview ? toast.info('결재선이 지정된 업무예요 — [검토]를 눌러 결재를 올려 주세요') : finish.run();
   }
   return (
     <div data-testid="status-chip" data-status={status}>

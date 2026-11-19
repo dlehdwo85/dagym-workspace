@@ -126,12 +126,12 @@ export async function performAction(u: SessionUser, notificationId: string, i: z
       await T.updateTask(u, taskId, { startDate: todaySeoul(), version: t.version });
       break;
     }
-    case 'done': { // #618 마감 알림 [완료]: 위젯 체크와 같은 길(검토 필수면 검토 요청, 함께 맡은 업무면 내 몫 완료) — 권한은 updateTask(담당자만)
+    case 'done': { // #618 마감 알림 [완료]: 위젯 체크와 같은 길(결재선 업무면 결재 올리기, 함께 맡은 업무면 내 몫 완료 · 대표 11/18: 검토는 완료의 조건이 아님) — 권한은 updateTask(담당자만)
       if (!taskId) throw badRequest('업무 알림이 아닙니다');
-      const [t] = await sql<{ version: number; status: string; approval_required: boolean }[]>`select version, status, approval_required from tasks where id = ${taskId} and deleted_at is null`;
+      const [t] = await sql<{ version: number; status: string; approval_line_id: string | null }[]>`select version, status, approval_line_id from tasks where id = ${taskId} and deleted_at is null`;
       if (!t) throw notFound('업무가 없습니다');
       if (t.status === 'done') { label = '이미 완료됨'; break; }
-      await T.updateTask(u, taskId, { status: t.approval_required ? 'review' : 'done', version: t.version });
+      await T.updateTask(u, taskId, { status: t.approval_line_id ? 'review' : 'done', version: t.version });
       const [after] = await sql<{ status: string }[]>`select status from tasks where id = ${taskId}`;
       if (after?.status === 'review') label = '검토 요청함';
       else if (after?.status !== 'done') label = '내 몫 완료함';
