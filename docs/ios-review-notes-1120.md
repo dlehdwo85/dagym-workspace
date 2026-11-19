@@ -48,8 +48,13 @@ We updated the Age Rating questionnaire in App Store Connect (Messaging and Chat
 4. Guidelines 5.1.1(i) and 5.1.2(i) – sharing data with a third-party AI service
 The app now discloses the data sharing and asks for explicit permission before anything is
 sent to a third-party AI service.
-- After login, a consent screen titled "AI 기능을 쓰기 전에 알려 드립니다" (Before you use the AI
-  features) is shown. It states:
+- After login, a consent screen titled "AI 기능 사용 안내" (About using AI features) is shown.
+  The first lines, visible without any tap, state the purpose and the recipient: AI features
+  send only the content needed for an answer, only while an answer is being made, to the AI
+  company (Anthropic); the content is not used to train AI; if the user does not use AI
+  features their content is not sent; tasks, calendar, messenger and approvals work without
+  consent.
+- On the same screen, tapping "자세히 보기" (See details) expands the full disclosure:
   * what is sent: text and voice input the user gives to the AI, files/photos the user
     attaches, the user's own tasks/schedule/documents needed to answer, and files uploaded
     to the library when they are automatically named and sorted;
@@ -58,7 +63,7 @@ sent to a third-party AI service.
     commercial terms the data is not used to train its models;
   * what happens if the user declines: only the AI features are unavailable; tasks,
     calendar, messenger and approvals keep working, and nothing is sent.
-- Buttons: "동의하고 AI 쓰기" (Agree and use AI), "동의하지 않음" (Do not agree),
+- Buttons: "AI 기능 쓰기" (Use AI features), "쓰지 않기" (Do not use),
   "나중에 정하기" (Decide later).
 - Until the user agrees, our server rejects every AI request, so no data leaves our service.
 - The choice can be changed at any time in 설정 (Settings) > 개인정보·AI (Privacy & AI).
@@ -66,10 +71,11 @@ sent to a third-party AI service.
   AI notice: https://www.work-in.dev/ai-notice
 
 How to verify with the demo account:
-  a. Log in. The consent screen appears.
+  a. Log in. The consent screen appears. Tap "자세히 보기" to see what is sent, the
+     recipient (Anthropic, USA) and the purpose.
   b. Tap "나중에 정하기" (Decide later). Open the AI assistant and send any message:
      the consent prompt appears again and no answer is produced.
-  c. Tap "동의하고 AI 쓰기". Send the message again: the assistant answers.
+  c. Tap "AI 기능 쓰기". Send the message again: the assistant answers.
   d. Settings > 개인정보·AI shows the switch and the date of consent; turning it off
      blocks AI requests again.
 
@@ -87,9 +93,9 @@ Thank you for your time.
 ## 3. 확인 순서 (로컬·대표가 실제 기기에서)
 
 1. 아이폰 또는 아이패드 앱을 열고 로그인 화면에 **소셜 단추가 없는지**(이메일·비밀번호만).
-2. 로그인하면 **「AI 기능을 쓰기 전에 알려 드립니다」 창**이 뜨는지. 받는 곳에 **Anthropic(미국)** 이 보이는지.
+2. 로그인하면 **「AI 기능 사용 안내」 창**이 뜨는지. 첫 문장에 받는 곳 **Anthropic** 이 보이고, **[자세히 보기]** 를 누르면 보내는 항목·**Anthropic(미국)**·까닭이 펼쳐지는지.
 3. [나중에 정하기] → AI 비서에 아무 말이나 보내면 **다시 창이 뜨고 답이 안 나오는지**.
-4. [동의하고 AI 쓰기] → 다시 보내면 **답이 나오는지**.
+4. [AI 기능 쓰기] → 다시 보내면 **답이 나오는지**.
 5. 설정 › 개인정보·AI 에서 **끄면 다시 막히는지**.
 
 ## 4. 확인 못한 것 · 알아 둘 것

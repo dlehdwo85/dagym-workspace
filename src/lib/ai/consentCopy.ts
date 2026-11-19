@@ -18,10 +18,22 @@ export const aiRecipients = (stt: boolean): AiRecipient[] => [
   ...(stt ? [{ name: 'OpenAI', country: '미국', what: '회의 녹음을 글로 바꿀 때만 씁니다.' }] : []),
 ];
 export const aiRecipientNames = (stt: boolean) => aiRecipients(stt).map((r) => `${r.name}(${r.country})`).join('·');
+/** 나라 없이 이름만 — 동의 창의 펼치지 않은 본문(나라·항목은 [자세히 보기] 안과 처리방침·AI 이용 안내에 그대로) */
+export const aiRecipientShort = (stt: boolean) => aiRecipients(stt).map((r) => r.name).join('·');
 
 export const AI_CONSENT_COPY = {
-  title: 'AI 기능을 쓰기 전에 알려 드립니다',
-  lead: '워크인의 AI 기능은 답을 만들기 위해 내용을 바깥 AI 회사로 보냅니다. 아래를 읽고 정해 주세요.',
+  // 대표 11/19 밤(운영 창을 보고): "굳이 필요한가 · 미국으로 유출되는 느낌" → 사실은 그대로 두고 순서와 양을 바꿈.
+  // 펼치지 않아도 보이는 것 = 한 문장(무엇을 위해·누구에게) + 세 줄(가르치는 데 안 씀 · 안 쓰면 안 보냄 · 다른 기능은 그대로). 항목·나라·까닭은 [자세히 보기] 안.
+  // 받는 곳 이름은 펼치지 않은 본문에도 둔다(애플 5.1.2 '누구에게'). 판 번호는 그대로(뜻이 바뀌지 않음 — 이미 정한 사람에게 다시 묻지 않음).
+  title: 'AI 기능 사용 안내',
+  lead: (stt: boolean) => `AI 비서·자동 정리 같은 AI 기능은 답을 만들 때만, 그때 필요한 내용만 AI 회사(${aiRecipientShort(stt)})에 보내 처리합니다.`,
+  points: [
+    '보낸 내용은 AI를 가르치는 데 쓰이지 않습니다.',
+    'AI 기능을 쓰지 않으면 내 내용은 보내지 않습니다.',
+    '동의하지 않아도 업무·일정·메신저·결재는 그대로 씁니다.',
+  ],
+  more: '자세히 보기',
+  moreHint: '무엇을 · 어디로 · 왜',
   whatTitle: '무엇을 보내나요',
   what: (stt: boolean) => [
     'AI에게 쓴 글과 말한 내용',
@@ -42,8 +54,8 @@ export const AI_CONSENT_COPY = {
     '내 내용은 바깥으로 나가지 않습니다.',
     '언제든 설정 › 개인정보·AI 에서 바꿀 수 있습니다.',
   ],
-  agree: '동의하고 AI 쓰기',
-  refuse: '동의하지 않음',
+  agree: 'AI 기능 쓰기',
+  refuse: '쓰지 않기',
   later: '나중에 정하기',
   /** 동의하지 않은 사람이 AI 단추를 눌렀을 때 */
   blockedTitle: 'AI 기능은 동의한 뒤에 쓸 수 있습니다',
