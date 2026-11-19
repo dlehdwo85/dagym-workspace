@@ -14,6 +14,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   { href: '/revenue', label: '매출', menu: 'revenue', sidebar: true },
   { href: '/admin/users', label: '사용자 관리', menu: 'admin_users', sidebar: true },
   { href: '/contracts', label: '전자계약', menu: 'admin_users', sidebar: true }, // 2차(글로싸인 레퍼런스): 올린 계약서에 칸 놓아 보내기·상태 바구니
+  { href: '/agreements', label: '계약 관리', menu: 'agreements', sidebar: true }, // 계약 관리 1단계: 맺은 계약 보관·만료 알림(전자계약 = 서명 받는 도구와 따로)
   { href: '/admin/ops', label: '운영 상태', menu: 'ops', gate: 'ops_platform', sidebar: true },
   { href: '/admin/org', label: '조직 구성', menu: 'ops' },
   { href: '/admin/audit', label: '감사 기록', menu: 'ops', gate: 'audit_company', sideGate: 'audit_sidebar', sidebar: true },
