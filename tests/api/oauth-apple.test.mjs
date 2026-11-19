@@ -75,6 +75,12 @@ after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
 describe('299차 Apple로 로그인', () => {
   test('버튼 · 처음이면 회사 만들기(처음 한 번 오는 이름·숨김 이메일 채움) · 클라이언트 비밀·id_token 확인 · 토큰은 암호화 보관 · 다음부터 로그인', async () => {
     assert.deepEqual((await new Client().ok('GET', '/api/auth/oauth/providers')).providers, ['apple'], '키 넷이 있는 Apple 만');
+    // 대표 11/19(애플 11/15 반려 뒤): 아이폰·아이패드 앱은 이메일 로그인만 — 앱 표시가 있고 안드로이드가 아니면 단추 목록이 빔(Apple 포함). 안드로이드 앱·웹은 그대로
+    const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WorkInApp';
+    const ipad = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) WorkInApp';
+    const android = 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36 WorkInApp';
+    for (const ua of [iphone, ipad]) assert.deepEqual((await new Client().ok('GET', '/api/auth/oauth/providers', undefined, { 'user-agent': ua })).providers, [], '아이폰·아이패드 앱: 소셜 단추 없음');
+    assert.deepEqual((await new Client().ok('GET', '/api/auth/oauth/providers', undefined, { 'user-agent': android })).providers, ['apple'], '안드로이드 앱은 그대로');
     const c = new Client('a1');
     const to = await apple(c, { sub: 'apple.001', email: 'x7k2@privaterelay.appleid.com', private: true }, '', { name: { firstName: '길동', lastName: '홍' }, email: 'x7k2@privaterelay.appleid.com' });
     assert.equal(to.pathname, '/signup/social', to.href);

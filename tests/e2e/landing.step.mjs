@@ -29,6 +29,10 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   const fired = await p.evaluate(() => new Promise((r) => { document.addEventListener('wos:landing', (e) => r(e.detail.kind), { once: true }); document.querySelector('[data-testid="landing-app"]').click(); }));
   assert.equal(fired, 'app', '앱 다운로드 클릭 이벤트');
   await p.getByTestId('landing-stores').getByText(/Google Play/).waitFor();
+  // 대표 11/19: Google Play 는 공개 주소로 바로(‘심사 중’ 글자 없음) · App Store 는 ‘준비 중’
+  assert.equal(await p.getByTestId('landing-stores').locator('a[data-track="play"]').getAttribute('href'), 'https://play.google.com/store/apps/details?id=kr.co.dagym.workos');
+  await p.getByTestId('appstore-soon').getByText('App Store 준비 중').waitFor();
+  assert.equal(await p.getByTestId('landing-stores').getByText(/심사 중/).count(), 0, '‘심사 중’ 글자 없음');
   await p.screenshot({ path: `${SHOTS}/163-landing.png`, fullPage: true });
   await p.setViewportSize({ width: 390, height: 844 }); await p.goto(`${BASE}/`);
   await p.getByTestId('landing-title').waitFor();

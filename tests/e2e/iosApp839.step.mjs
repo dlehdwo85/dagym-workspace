@@ -9,7 +9,8 @@ export async function iosApp839({ browser, BASE, devices }) {
   await p.getByTestId('invite-only').getByText('계정은 회사 관리자의 초대로 만들어집니다.').waitFor();
   await p.getByTestId('ios-password-hint').waitFor();
   assert.equal(await p.getByTestId('to-signup').count(), 0, '가입(무료 체험) 링크 없음');
-  assert.equal(await p.getByTestId('social-buttons').count(), 0, '카카오·네이버·구글 로그인 없음');
+  assert.equal(await p.getByTestId('social-buttons').count(), 0, '카카오·네이버·구글·Apple 로그인 없음(대표 11/19: 이메일 로그인만)');
+  assert.deepEqual(await p.evaluate(() => fetch('/api/auth/oauth/providers').then((r) => r.json()).then((j) => j.providers)), [], '아이폰 앱: 소셜 단추 목록이 빔');
   assert.equal(await p.getByText(/무료|체험|요금/).count(), 0, '무료·체험·요금 글자 없음');
   for (const path of ['/signup', '/welcome']) {
     await p.goto(`${BASE}${path}`);

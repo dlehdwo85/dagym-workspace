@@ -13,7 +13,8 @@ import { ArrowRight, BellRing, Briefcase, Check, Download, Mail, Megaphone, Mic,
  * H1 "업무도, 영업도, 마케팅도 한 화면에서" · 14일 무료 체험(#466 대표 결정 10/23 — 5명 무료 폐지) · [14일 무료 체험 신청]/[앱 다운로드] · 세 공간 소개 · AI 비서 · 도입 3단계 · 요금(14일 체험) · 문의 · 푸터(개인정보·계정 삭제·운영사) · JSON-LD·OG · UTM·sign_up/CompleteRegistration/tel 이벤트 · 390px.
  */
 // #627: 주소(호스트)는 src/lib/landingPages SITE 하나로(NEXT_PUBLIC_SITE_URL, 기본 www) — 도메인 방향(apex → www)은 Vercel 설정
-const PLAY = process.env.NEXT_PUBLIC_PLAY_URL || ''; // 정식 출시 전엔 스토어 주소가 404 — 로컬이 출시 뒤 env 로(내부 테스트 링크도 가능)
+// 대표 11/19: Google Play 는 출시됨 → 공개 주소를 코드 기본값으로(환경 변수로 바꿀 수 있음). App Store 는 아직 — 주소가 생기면 env 로
+const PLAY = process.env.NEXT_PUBLIC_PLAY_URL || 'https://play.google.com/store/apps/details?id=kr.co.dagym.workos';
 const APPSTORE = process.env.NEXT_PUBLIC_APPSTORE_URL || '';
 const CONTACT_MAIL = 'dagym-in@naver.com';
 const TITLE = '워크인 — 중소기업 업무관리·전자결재·협업툴을 한 화면에서'; // #627: 검색어(업무관리·전자결재·협업툴)를 제목에, H1 은 대표 문구 그대로
@@ -131,7 +132,7 @@ export default async function Welcome() {
             {PLAY ? <a href={PLAY} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[48px] items-center gap-2 rounded-input bg-ink px-5 py-3 font-semibold text-white" data-track="play">Google Play</a>
               : <span className="inline-flex min-h-[48px] items-center rounded-input border border-line px-5 py-3 text-sm text-ink-2">Google Play 심사 중</span>}
             {APPSTORE ? <a href={APPSTORE} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[48px] items-center gap-2 rounded-input bg-ink px-5 py-3 font-semibold text-white" data-track="appstore">App Store</a>
-              : <span className="inline-flex min-h-[48px] items-center rounded-input border border-line px-5 py-3 text-sm text-ink-2">App Store 심사 중</span>}
+              : <span className="inline-flex min-h-[48px] items-center rounded-input border border-line px-5 py-3 text-sm text-ink-2" data-testid="appstore-soon">App Store 준비 중</span>}
           </div></div>
       </section>
       {/* 문의 */}

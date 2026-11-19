@@ -21,11 +21,11 @@ export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady
     // 점검 2026-10-16: 앱(WebView)에서는 Google 로그인이 정책상 막힘(disallowed_useragent) → 앱에서는 카카오·네이버만
     // 시스템 브라우저 플러그인이 있는 앱의 로그인은 브라우저에서 하므로 Google 도 됨
     const inApp = Capacitor.isNativePlatform() && !(hasBrowser() && mode === 'login');
-    // #839 아이폰 앱(App Store 4.8): 제3자 로그인은 'Apple로 로그인'이 켜졌을 때만(299차 #858) — Apple 을 맨 앞에. 켜지기 전에는 지금처럼 이메일 로그인만. 웹·안드로이드 앱은 그대로
+    // 대표 11/19 결정(애플 11/15 반려 — 로그인 창에 가입·요금, Apple 로그인 오류): 아이폰·아이패드 앱은 이메일 로그인만 — 소셜 단추(Apple 포함)를 모두 뺌. 웹·안드로이드 앱은 그대로
     const ios = isIosApp();
     api('/api/auth/oauth/providers').then((r) => {
       let p = (r.providers as string[]).filter((x) => !(inApp && x === 'google'));
-      if (ios) p = p.includes('apple') ? ['apple', ...p.filter((x) => x !== 'apple')] : [];
+      if (ios) p = [];
       setPs(p); onReady?.(p.length);
     }).catch(() => onReady?.(0));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
