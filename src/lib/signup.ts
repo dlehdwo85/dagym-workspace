@@ -75,6 +75,8 @@ export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
     await tx`insert into templates (name, description, payload, org_unit_id, created_by, personal, tenant)
       values (${s.name}, ${s.description}, ${tx.json({ title: s.name, checklist: s.checklist, ...(s.dueInDays !== undefined ? { dueInDays: s.dueInDays } : {}) } as never)}, null, ${u.id}, false, ${tenant})`;
   }
+  // 점검 1단계: 공통 기본 템플릿 + 고른 업종의 점검 템플릿(없는 업종은 공통만) — 다른 회사 자료는 복사하지 않음
+  { const C = await import('./check/install'); const T = await import('./check/templates'); await C.installCheckTemplates(tx, tenant, T.templatesForIndustries(inds), u.id); }
   await ensurePersonalCalendar(u.id, i.name, tx);
   for (const [kind, agreed] of Object.entries(i.agree)) await tx`insert into consents (user_id, kind, version, agreed) values (${u.id}, ${kind}, ${TERMS_VERSION}, ${agreed})`;
   await audit(tx, u.id, 'auth.signup', 'user', u.id, { mode: i.mode, tenant, social: !i.passwordHash }, i.ip);

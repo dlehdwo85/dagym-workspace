@@ -16,6 +16,9 @@ export type Method = keyof typeof METHODS;
 export const CYCLES = { daily: '매일', weekly: '매주', monthly: '매월', quarterly: '분기마다', yearly: '해마다', as_needed: '필요할 때' } as const;
 export type Cycle = keyof typeof CYCLES;
 
+/** 처음 여는 회사(가입 때 템플릿을 못 넣은 예전 회사 포함)는 공통 기본 + 회사 업종 템플릿을 한 번 설치 */
+const ready = async (u: SessionUser) => (await import('./install')).ensureCheckTemplates(tenantOf(u), u.id);
+
 const uuid = z.string().uuid();
 const name = z.string().trim().min(1).max(60);
 
@@ -23,6 +26,7 @@ const name = z.string().trim().min(1).max(60);
 export const categoryInput = z.object({ name, parentId: uuid.nullable().optional(), icon: z.string().trim().max(40).nullable().optional(), sort: z.number().int().min(0).max(9999).optional(), active: z.boolean().optional() });
 export async function listCategories(u: SessionUser) {
   await requireMenu(u, 'check_guide', 'view');
+  await ready(u);
   const rows = await db()<{ id: string; parent_id: string | null; name: string; icon: string | null; sort: number; active: boolean; items: number }[]>`
     select c.id, c.parent_id, c.name, c.icon, c.sort, c.active,
       (select count(*)::int from chk_items i where i.tenant = c.tenant and i.category_id = c.id and i.active) as items
@@ -67,6 +71,7 @@ export async function removeCategory(u: SessionUser, id: string) {
 export const placeTypeInput = z.object({ name, sort: z.number().int().min(0).max(9999).optional(), active: z.boolean().optional() });
 export async function listPlaceTypes(u: SessionUser) {
   await requireMenu(u, 'check_guide', 'view');
+  await ready(u);
   return { placeTypes: await db()`select id, name, sort, active from chk_place_types where tenant = ${tenantOf(u)} order by sort, name` };
 }
 export async function savePlaceType(u: SessionUser, id: string | null, i: z.infer<typeof placeTypeInput>) {
@@ -160,6 +165,7 @@ async function assertItemRefs(u: SessionUser, i: ItemInput, sql: Sql) {
 }
 export async function listItems(u: SessionUser, f: { categoryId?: string | null; placeTypeId?: string | null; unitId?: string | null; q?: string | null; all?: boolean } = {}) {
   await requireMenu(u, 'check_guide', 'view');
+  await ready(u);
   const sql = db(); const t = tenantOf(u);
   const q = (f.q ?? '').trim().slice(0, 60);
   const rows = await sql`select ${COLS(sql)}, c.name as category_name,
@@ -180,7 +186,8 @@ export async function getItem(u: SessionUser, id: string) {
   if (!item) throw notFound();
   const versions = await sql`select v.version, v.reason, v.at, v.snapshot, us.name as by_name from chk_item_versions v left join users us on us.id = v.by_user
     where v.item_id = ${id} and v.tenant = ${t} order by v.version desc limit 50`;
-  return { item, versions };
+  const photos = (await (await import('./photos')).itemPhotos(t, [id])).get(id) ?? [];
+  return { item, versions, photos };
 }
 export async function createItem(u: SessionUser, i: ItemInput) {
   await requireMenu(u, 'check_guide', 'edit');
@@ -227,11 +234,13 @@ export async function updateItem(u: SessionUser, id: string, i: Partial<ItemInpu
 // ---------- 직원 공유: 양호 기준만 ----------
 /** 메뉴 권한이 없어도 같은 회사 사람이면 봄 — '직원 공유' 표시된 사용 중 항목의 제목·분야·확인 방법·양호 기준·놓치기 쉬운 곳만(근거 메모·조치·연결값은 안 줌) */
 export async function sharedItems(u: SessionUser) {
+  await ready(u);
   const sql = db(); const mine = await accessibleUnitIds(u, sql);
   const rows = await sql`select i.id, i.title, c.name as category_name, i.method, i.pass_criteria, i.blind_spots
     from chk_items i left join chk_categories c on c.id = i.category_id
     where i.tenant = ${tenantOf(u)} and i.active and i.share_staff
       ${mine === null ? sql`` : sql`and (i.unit_scope = 'all' or i.org_unit_ids && ${mine}::uuid[])`}
     order by c.sort nulls last, c.name nulls last, i.title limit 500`;
-  return { items: rows, methods: METHODS };
+  const photos = await (await import('./photos')).itemPhotos(tenantOf(u), rows.map((r) => r.id as string));
+  return { items: rows.map((r) => ({ ...r, photos: photos.get(r.id as string) ?? [] })), methods: METHODS };
 }
