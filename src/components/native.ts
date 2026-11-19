@@ -134,6 +134,32 @@ export async function shareLink(o: { title: string; text: string; url: string })
   if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('Share')) { await Share.share({ ...o, dialogTitle: o.title }); return true; }
   return false;
 }
+/**
+ * 화상회의 — 휴대폰 화면 전체 공유(대표 11/19). 웹 화면(브라우저·앱의 WebView)은 기기 화면을 잡을 수 없어 앱 쪽 기능(플러그인 'WorkinScreenShare')이 맡는다:
+ * 앱이 기기 화면을 잡아(안드로이드 화면 녹화 권한 · 아이폰 방송 확장), 서버가 준 '화면 전용 입장권'(POST …/screen-ticket)으로 영상 서버에 따로 접속해 보낸다.
+ * 플러그인이 없는 앱(예전 버전)·브라우저에서는 available = false → 단추가 보이지 않는다. 규격: docs/handoff/LOCAL_LOG.md '휴대폰 화면 공유' 요청.
+ */
+interface ScreenSharePlugin {
+  isSupported(): Promise<{ supported: boolean }>;
+  start(o: { url: string; token: string; title?: string }): Promise<{ started: boolean }>;
+  stop(): Promise<void>;
+  addListener(event: 'stopped', fn: () => void): Promise<PluginListenerHandle>;
+}
+const ScreenShareNative = registerPlugin<ScreenSharePlugin>('WorkinScreenShare');
+export async function nativeScreenShareAvailable(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('WorkinScreenShare')) return false;
+  try { return (await ScreenShareNative.isSupported()).supported === true; } catch { return false; }
+}
+export async function nativeScreenShareStart(o: { url: string; token: string; title?: string }) {
+  const r = await ScreenShareNative.start(o);
+  if (!r?.started) throw new Error('화면 공유를 시작하지 않았습니다(권한을 허용해야 합니다)');
+}
+export async function nativeScreenShareStop() { if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('WorkinScreenShare')) await ScreenShareNative.stop().catch(() => {}); }
+/** 기기 쪽에서 공유가 끝났을 때(알림창의 [중지] 등) — 돌려주는 함수를 부르면 듣기를 멈춘다 */
+export async function onNativeScreenShareStopped(fn: () => void): Promise<() => void> {
+  const h = await ScreenShareNative.addListener('stopped', fn);
+  return () => { void h.remove(); };
+}
 const canShareFiles = () => Capacitor.getPlatform() === 'ios' && Capacitor.isPluginAvailable('Filesystem') && Capacitor.isPluginAvailable('Share');
 /** 예전 앱(플러그인 없음)에서는 서버 알림을 그대로 받는다 */
 const hasLocal = () => Capacitor.isPluginAvailable('LocalNotifications');

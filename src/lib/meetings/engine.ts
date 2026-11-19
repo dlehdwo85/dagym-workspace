@@ -4,7 +4,10 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export type EngineRole = 'host' | 'cohost' | 'member' | 'guest';
-export type IssueInput = { room: string; identity: string; name: string; role: EngineRole; canShare: boolean; ttlSec: number };
+/** screenOf = 휴대폰 앱의 '화면 공유 전용' 입장(그 사람의 두 번째 접속 — 화면만 보내고, 듣지도 말하지도 않는다). 값은 본 참가자의 이름표 */
+export type IssueInput = { room: string; identity: string; name: string; role: EngineRole; canShare: boolean; ttlSec: number; screenOf?: string };
+/** 화면 공유 전용 접속의 이름표: '<참가자 id>~screen' — 회의 기록·인원에는 세지 않는다 */
+export const SCREEN_SUFFIX = '~screen';
 export type EngineEvent = { kind: 'join' | 'leave' | 'end'; room: string; identity?: string; at: Date };
 export interface MeetingEngine {
   id: 'livekit' | 'mediasoup' | 'fake';
@@ -14,6 +17,8 @@ export interface MeetingEngine {
   remove(room: string, identity: string): Promise<void>;
   /** 전체 음소거(한 사람 빼고) */
   muteAll(room: string, exceptIdentity?: string): Promise<void>;
+  /** 한 사람 마이크 끄기(다시 켜는 것은 본인만) */
+  mute(room: string, identity: string): Promise<void>;
   /** 방 닫기 → 모두 나감 */
   end(room: string): Promise<void>;
   /** 엔진 알림 → 공통 사건(서명이 틀리면 throw) */
@@ -40,12 +45,13 @@ function verifyJwt(token: string, secret: string): Record<string, any> {
 const fake: MeetingEngine = {
   id: 'fake',
   async issue(p) {
-    const token = `fake.${b64u(JSON.stringify({ room: p.room, identity: p.identity, name: p.name, role: p.role, canShare: p.canShare, exp: Math.floor(Date.now() / 1000) + p.ttlSec }))}`;
-    await tell('issue', { room: p.room, identity: p.identity, role: p.role, canShare: p.canShare });
+    const token = `fake.${b64u(JSON.stringify({ room: p.room, identity: p.identity, name: p.name, role: p.role, canShare: p.canShare, ...(p.screenOf ? { screenOf: p.screenOf } : {}), exp: Math.floor(Date.now() / 1000) + p.ttlSec }))}`;
+    await tell('issue', { room: p.room, identity: p.identity, role: p.role, canShare: p.canShare, ...(p.screenOf ? { screenOf: p.screenOf } : {}) });
     return { url: process.env.MEETING_FAKE_URL || 'fake://meet', token };
   },
   async remove(room, identity) { await tell('remove', { room, identity }); },
   async muteAll(room, exceptIdentity) { await tell('muteAll', { room, except: exceptIdentity ?? null }); },
+  async mute(room, identity) { await tell('mute', { room, identity }); },
   async end(room) { await tell('end', { room }); },
   async hook(req) {
     const secret = process.env.MEETING_HOOK_SECRET;
@@ -78,6 +84,9 @@ function livekit(): MeetingEngine {
     id: 'livekit',
     async issue(p) {
       const now = Math.floor(Date.now() / 1000);
+      // 화면 공유 전용 접속: 화면(+화면 소리)만 보낼 수 있고, 받지도·채팅도·방 관리도 못 한다
+      if (p.screenOf) return { url, token: signJwt({ iss: key, sub: p.identity, name: p.name, nbf: now, exp: now + p.ttlSec, metadata: JSON.stringify({ role: 'screen', of: p.screenOf }),
+        video: { room: p.room, roomJoin: true, canPublish: true, canSubscribe: false, canPublishData: false, canPublishSources: ['screen_share', 'screen_share_audio'] } }, secret) };
       const token = signJwt({ iss: key, sub: p.identity, name: p.name, nbf: now, exp: now + p.ttlSec, metadata: JSON.stringify({ role: p.role }),
         video: { room: p.room, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true, canPublishSources: p.canShare ? ['camera', 'microphone', 'screen_share', 'screen_share_audio'] : ['camera', 'microphone'], ...(p.role === 'host' || p.role === 'cohost' ? { roomAdmin: true } : {}) } }, secret);
       return { url, token };
@@ -86,6 +95,10 @@ function livekit(): MeetingEngine {
     async muteAll(room, exceptIdentity) {
       const list = (await call('ListParticipants', room, { room }))?.participants ?? [];
       for (const pt of list) { if (pt.identity === exceptIdentity) continue; for (const t of pt.tracks ?? []) if (t.type === 'AUDIO' || t.type === 0) await call('MutePublishedTrack', room, { room, identity: pt.identity, track_sid: t.sid, muted: true }); }
+    },
+    async mute(room, identity) {
+      const pt = await call('GetParticipant', room, { room, identity });
+      for (const t of pt?.tracks ?? []) if ((t.type === 'AUDIO' || t.type === 0) && t.source !== 'SCREEN_SHARE_AUDIO') await call('MutePublishedTrack', room, { room, identity, track_sid: t.sid, muted: true });
     },
     async end(room) { await call('DeleteRoom', room, { room }, true); },
     async hook(req) {
