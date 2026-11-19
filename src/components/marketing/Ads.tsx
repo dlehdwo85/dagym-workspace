@@ -482,6 +482,8 @@ function LowBalanceRule({ min, canEdit, onChange }: { min: number; canEdit: bool
   );
 }
 function Balances({ rows, min, canEdit, onChange }: { rows: Balance[]; min: number; canEdit: boolean; onChange: () => void }) {
+  // 순회 검증(범용화 마지막 단계)에서 걸림: 영상 제작 외부 서비스 이름은 기본 회사 내부 도구 — 다른 회사 화면의 매체 고르기·안내 글에는 내보내지 않는다
+  const base = useTerms().base; const providers = Object.entries(B_LABEL).filter(([k]) => base || k !== 'higgsfield');
   const [f, setF] = useState<{ provider: string; label: string; balanceKrw: string } | null>(null); const [busy, setBusy] = useState(false);
   async function save() {
     if (!f) return; setBusy(true);
@@ -499,7 +501,7 @@ function Balances({ rows, min, canEdit, onChange }: { rows: Balance[]; min: numb
         {canEdit && !f && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setF({ provider: 'google', label: '', balanceKrw: '' })} data-testid="ads-balance-add">잔액 직접 입력</Button>}</div>
       <LowBalanceRule min={min} canEdit={canEdit} onChange={onChange} />
       {f && <div className="mt-2 flex flex-wrap items-end gap-2 rounded-input border border-line bg-slate-50 p-2" data-testid="ads-balance-form">
-        <select className={cx(inputCls, 'h-9 w-auto')} value={f.provider} onChange={(e) => setF({ ...f, provider: e.target.value })} aria-label="매체">{Object.entries(B_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <select className={cx(inputCls, 'h-9 w-auto')} value={f.provider} onChange={(e) => setF({ ...f, provider: e.target.value })} aria-label="매체">{providers.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
         <input className={cx(inputCls, 'h-9 w-40')} value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} placeholder="계정·브랜드 이름(선택)" aria-label="라벨" maxLength={80} />
         <input className={cx(inputCls, 'h-9 w-36')} value={f.balanceKrw} onChange={(e) => setF({ ...f, balanceKrw: e.target.value })} placeholder="잔액(원)" aria-label="잔액(원)" inputMode="numeric" data-testid="ads-balance-input" />
         <Button size="sm" onClick={save} disabled={busy} data-testid="ads-balance-save">저장</Button><Button size="sm" variant="secondary" onClick={() => setF(null)}>취소</Button></div>}
@@ -515,7 +517,7 @@ function Balances({ rows, min, canEdit, onChange }: { rows: Balance[]; min: numb
           {canEdit ? <label className="ml-auto inline-flex items-center gap-1 text-xs text-ink-2" title="남은 날이 14일·7일·3일 아래로 내려가거나 잔액이 0원이 되면 회사 대표에게 메일을 보냅니다(3일 아래부터는 채워질 때까지 하루 한 번)">
             <input type="checkbox" checked={!!b.guard} disabled={busy} onChange={(e) => guard(b, e.target.checked)} data-testid="ads-balance-guard" />끊김 방지 메일</label>
             : b.guard ? <span className="ml-auto rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="ads-balance-guard-on">끊김 방지 메일 켜짐</span> : null}</li>))}</ul>
-        : <p className="mt-2 text-xs text-ink-3" data-testid="ads-balance-empty">아직 잔액 기록이 없습니다 — 네이버·Meta 는 다음 동기화 때 자동으로 읽고, 구글 선불·Higgsfield 는 직접 입력하세요.</p>}
+        : <p className="mt-2 text-xs text-ink-3" data-testid="ads-balance-empty">아직 잔액 기록이 없습니다 — 네이버·Meta 는 다음 동기화 때 자동으로 읽고, {base ? '구글 선불·Higgsfield 는' : '구글 선불은'} 직접 입력하세요.</p>}
     </div>
   );
 }
