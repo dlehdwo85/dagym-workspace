@@ -52,7 +52,8 @@ export async function runCollector(slug: string, trigger: 'cron' | 'manual' | 'r
     if (!TRANSIENT.test(msg)) await logError(`sales-collect:${slug}`, e).catch(() => {}); }
   // 대표 11/14 '영업 DB 누락': 원천이 잠깐 안 받아 줘서 한 건도 못 받은 실행은 다음 날까지 기다리지 않고 30분 뒤 다시(하루 RETRY_MAX 번) — 예전에는 웹페이지 응답·목록 실패만 다시 받았다
   //   (원천이 여럿이면 하나도 못 읽었을 때만 — 21곳 중 1곳만 막힌 감시는 다음 날 차례에)
-  if (!result.retry && result.errors > 0 && result.inserted + result.updated + result.unchanged === 0 && !Object.values(result.sources ?? {}).some((s) => s.ok)
+  //   협력사 모집 감시는 뺌 — 페이지마다 3번 연속 실패하면 며칠 쉬는 규칙이 따로 있어, 30분마다 다시 받으면 잠깐의 장애로 모든 페이지가 쉬게 됨
+  if (!result.retry && slug !== 'vendor_recruit_watch' && result.errors > 0 && result.inserted + result.updated + result.unchanged === 0 && !Object.values(result.sources ?? {}).some((s) => s.ok)
     && TRANSIENT.test(`${result.errorLog ?? ''} ${result.summary ?? ''}`)) result = { ...result, retry: true };
   // #507 후속: 공고 수집 뒤 같은 공고 여러 줄(원본 복사 + 워크인 수집)을 한 줄로 — 진행 기록·업무가 걸린 줄을 살림
   if (BID_COLLECTORS.has(slug)) {
@@ -133,7 +134,10 @@ export async function collectorAlerts(now = Date.now()): Promise<CollectorAlert[
       if (!oldest) continue;
       const stale = now - (lastOk ?? oldest).getTime() > LIMIT;
       const html = streak >= 1 && /웹페이지\(HTML\)/.test(`${err ?? ''} ${hint ?? ''}`); // 278차 #816: 원천이 웹페이지를 주면 한 번에 알림(점검·한도 초과·차단 — 사람이 봐야 함)
-      if (streak >= 2 || stale || html) {
+      // 노트북 11/19(KG2B 누락 알림 11/17 두 번·11/19 한 번 — 오후에 한두 시간 요청을 안 받다가 30분마다 다시 받기로 채워짐, 이어 읽기로 사이 공고도 채움):
+      //   다시 받는 중(detail.retry)인 원천은 2회가 아니라 4회 연속(2시간쯤) 못 받을 때 알림 — 스스로 채워지는 일로 알림이 가지 않게. 웹페이지 응답·점검 안내는 예전 그대로
+      const retrying = streak >= 1 && rs[0]?.detail?.retry === true && !rs[0]?.detail?.maint && !html;
+      if (streak >= (retrying ? 4 : 2) || stale || html) {
         const m0 = streak >= 1 ? rs[0]?.detail?.maint as { until?: string | null } | undefined : undefined; const until = m0 ? m0.until ?? '' : null; // 279차: 가장 최근 실행이 원천 점검 안내
         const reason = until != null ? `원천 시스템 점검 중${until ? `(~${until.slice(5).replace('-', '/')})` : ''} — 2시간마다 다시 시도, 끝나면 최근 14일 다시 받음` : html && streak < 2 ? '원천이 웹페이지(HTML)를 돌려줌 — 30분마다 다시 시도 중' : streak >= 2 ? `${streak}회 연속 실패` : lastOk ? `마지막 성공 ${Math.floor((now - lastOk.getTime()) / 3600e3)}시간 전` : '최근 성공 없음';
         const error = err?.split('\n')[0].slice(0, 160) ?? null;
