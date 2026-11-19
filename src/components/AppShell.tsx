@@ -122,17 +122,24 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const [userMenu, setUserMenu] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   // 359차: PC 체험 띠(오른쪽 위 고정)가 [+ 만들기]·알림·내 계정을 가리지 않게 — 띠 너비만큼 머리줄 오른쪽을 비움
+  // 418차 2부(대표 11/19): 휴대폰에서는 맨 위 띠(체험 D-n · 읽기 전용)가 머리줄을 덮어 로고·아이콘 윗부분이 잘렸다 → 띠 높이를 --band 로 넣어 머리줄이 띠 아래에서 시작(globals.css --sat)
   const bandRef = useRef<HTMLDivElement>(null);
+  const roBandRef = useRef<HTMLDivElement>(null);
   const [bandW, setBandW] = useState(0);
   useEffect(() => {
-    const el = bandRef.current;
-    if (!el) { setBandW(0); return; }
-    const fit = () => setBandW(window.innerWidth >= 640 ? el.offsetWidth : 0);
+    const el = bandRef.current, ro0 = roBandRef.current; const root = document.documentElement;
+    if (!el && !ro0) { setBandW(0); root.style.removeProperty('--band'); return; }
+    const fit = () => {
+      const wide = window.innerWidth >= 640;
+      setBandW(wide && el ? el.offsetWidth : 0);
+      const h = Math.max(ro0?.offsetHeight ?? 0, wide ? 0 : el?.offsetHeight ?? 0); // PC 의 체험 띠는 오른쪽 위 알약 모양이라 높이를 밀지 않음
+      if (h > 0) root.style.setProperty('--band', `${h}px`); else root.style.removeProperty('--band');
+    };
     fit();
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit);
-    ro?.observe(el); window.addEventListener('resize', fit);
-    return () => { ro?.disconnect(); window.removeEventListener('resize', fit); };
-  }, [session.tenant?.trial?.readOnly, session.tenant?.trial?.daysLeft, inApp]);
+    if (el) ro?.observe(el); if (ro0) ro?.observe(ro0); window.addEventListener('resize', fit);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', fit); root.style.removeProperty('--band'); };
+  }, [session.tenant?.trial?.readOnly, session.tenant?.trial?.daysLeft, session.tenant?.billingLock, inApp]);
   const [adminOpen, setAdminOpen] = useState(true);
   const [search, setSearch] = useState('');
   const [pushAsk, setPushAsk] = useState(false);
@@ -574,7 +581,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         )}
         {/* V28 B2 미납: 7일 읽기 전용 띠 · 30일 이용 중지(결제 안내만) */}
         {session.tenant?.billingLock === 'read_only' && (
-          <div className="fixed inset-x-0 top-0 z-[36] bg-red-600 px-3 py-1 text-center text-xs font-medium text-white" data-testid="billing-ro-banner">
+          <div className="fixed inset-x-0 top-[var(--sat0)] z-[36] bg-red-600 px-3 py-1 text-center text-xs font-medium text-white" data-testid="billing-ro-banner" ref={roBandRef}>
             {inApp ? `지금은 읽기 전용입니다 — ${IOS_ADMIN_NOTE}` : <>결제가 7일 넘게 밀려 읽기 전용입니다 — {<><a href="/admin/usage" className="underline">결제하면 바로 복구</a> (30일 미납이면 이용 중지)</>}</>}
           </div>
         )}
@@ -589,7 +596,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         )}
         {/* 17차: 무료 체험 D-n · 끝나면 읽기 전용 안내 */}
         {session.tenant?.trial && !(inApp && !session.tenant.trial.readOnly) && ( /* 298차 #861: 두 앱 모두 체험 D-day 띠 없음(끝나기 전 안내는 관리자 이메일) — 읽기 전용일 때만 관리자 문의 */
-          <div className={cx('fixed inset-x-0 top-0 z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',
+          <div className={cx('fixed inset-x-0 top-[var(--sat0)] z-[35] flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium sm:left-auto sm:right-4 sm:top-2 sm:rounded-full sm:shadow-card',
             session.tenant.trial.readOnly ? 'bg-red-600 text-white' : session.tenant.trial.daysLeft <= 3 ? 'bg-warm-500 text-white' : 'bg-brand-50 text-brand-800')} data-testid="trial-banner" ref={bandRef}>
             {(() => { const n = session.tenant.trial.partner ? '설계 파트너 기간' : inApp ? '이용 기간' : '무료 체험'; /* #667 */ return session.tenant.trial.readOnly ? `${n}이 끝나 읽기 전용입니다` : session.tenant.trial.daysLeft === 0 ? `${n} 오늘 종료` : `${n} D-${session.tenant.trial.daysLeft}`; })()}
             {inApp ? <span className="font-normal">· {billingNote()}</span> : <Link prefetch={false} href="/admin/usage" className="underline">요금제 선택</Link>}
