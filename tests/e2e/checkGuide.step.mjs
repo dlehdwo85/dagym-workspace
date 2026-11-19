@@ -10,6 +10,7 @@ export async function checkGuide({ owner, staff, BASE, SHOTS }) {
   await owner.setViewportSize({ width: 375, height: 812 });
   await owner.goto(BASE + '/check');
   await owner.getByTestId('check-home').waitFor();
+  await owner.getByTestId('check-tab-guide').click(); // 점검 2단계부터: 점검하기 권한이 있으면 '점검하기' 탭이 먼저 열림
   // 처음 열면 공통 기본 템플릿(분야 8개 묶음)
   await owner.getByTestId('check-group').first().waitFor({ timeout: 20000 });
   assert.ok(await owner.getByTestId('check-item-row').count() >= 19, '공통 기본 항목이 보임');
