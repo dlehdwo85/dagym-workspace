@@ -67,6 +67,7 @@ export async function checkRun({ owner, ctx, BASE, SHOTS }) {
   await sheet.getByText('점검 때 본 것:').waitFor();
   await sheet.getByTestId('check-fix-photo').first().waitFor();
   await fit('보완 확인 창');
+  await owner.waitForTimeout(400); // 창이 올라오는 움직임이 끝난 뒤에 찍음
   await owner.screenshot({ path: `${SHOTS}/check-followup-mobile.png` });
   await owner.getByTestId('check-confirm-again').click();
   await owner.getByText('무엇을 더 살펴보면 좋을지 한 줄 적어 주세요').first().waitFor(); // 까닭 없이 다시 보완은 안 됨

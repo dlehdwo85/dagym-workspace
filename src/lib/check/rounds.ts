@@ -346,13 +346,13 @@ export async function checkHome(u: SessionUser) {
 /** 담당자가 업무를 끝낸 보완 요청 → 요청한 점검자에게 한 번(회차마다). 외부 연락 회신 기한이 지난 것 → 한 번 */
 export async function checkTick(now = new Date()) {
   const sql = db();
-  const waiting = await sql<{ id: string; tenant: string; requested_by: string | null; item_title: string; org_unit_name: string; task_id: string }[]>`
-    select f.id, f.tenant, f.requested_by, x.item_title, o.name as org_unit_name, f.task_id from chk_followups f join chk_results x on x.id = f.result_id join org_units o on o.id = f.org_unit_id
+  const waiting = await sql<{ id: string; tenant: string; requested_by: string | null; item_title: string; org_unit_name: string; task_id: string; round_no: number }[]>`
+    select f.id, f.tenant, f.requested_by, x.item_title, o.name as org_unit_name, f.task_id, f.round_no from chk_followups f join chk_results x on x.id = f.result_id join org_units o on o.id = f.org_unit_id
       join tasks tk on tk.id = f.task_id and tk.deleted_at is null
     where f.status = 'requested' and tk.status = 'done' and f.waiting_notified_at is null limit 200`;
   for (const f of waiting) {
     await sql`update chk_followups set waiting_notified_at = now() where id = ${f.id} and waiting_notified_at is null`;
-    if (f.requested_by) await notify(sql, { userIds: [f.requested_by], type: 'check_followup', title: `보완 확인 요청: ${f.item_title}`, body: `${f.org_unit_name} — 담당자가 조치를 끝냈습니다. 사진을 보고 확인해 주세요.`, link: '/check?tab=run', dedupeKey: `chkwait:${f.id}:${now.toISOString().slice(0, 10)}` }).catch(() => []);
+    if (f.requested_by) await notify(sql, { userIds: [f.requested_by], type: 'check_followup', title: `보완 확인 요청: ${f.item_title}`, body: `${f.org_unit_name} — 담당자가 조치를 끝냈습니다. 사진을 보고 확인해 주세요.`, link: '/check?tab=run', dedupeKey: `chkwait:${f.id}:${f.round_no}` }).catch(() => []); // 회차마다 한 번(같은 날 다시 보완 → 다시 완료도 알림)
   }
   const today = todaySeoul(now);
   const overdue = await sql<{ id: string; target: string; by_user: string | null; item_title: string; reply_due: string }[]>`
