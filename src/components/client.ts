@@ -2,7 +2,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string, public detail?: any) { super(message); }
+  constructor(public status: number, public code: string, message: string, public detail?: any) {
+    super(message);
+    // AI 동의(대표 11/19): 서버가 'AI 동의 전'이라 막으면 앱 틀의 동의 창(AiConsentGate)을 띄운다 — 어느 화면의 AI 단추든 한곳에서
+    if (code === 'ai_consent' && typeof window !== 'undefined') window.dispatchEvent(new Event('wos-ai-consent'));
+  }
 }
 
 const OUTBOX = 'wos_outbox_v1';

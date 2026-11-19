@@ -124,6 +124,7 @@ export async function auditPendingTick(max = 8) {
   if (!auditOn()) return { skipped: 'off' };
   const sql = db();
   const rows = await sql<{ id: string }[]>`select id from mkt_contents where deleted_at is null and not is_test and status in ('pending', 'draft', 'changes')
+    and tenant in (${(await import('./ai/consent')).autoAiTenants(sql)}) -- AI 동의(대표 11/19): 회사 자료 자동 AI 처리가 켜진 회사만
     and (quality->'photoAudit'->>'pending' = 'true' or (status = 'pending' and current_version > 0 and coalesce((quality->'photoAudit'->>'version')::int, -1) <> current_version))
     order by (quality->'photoAudit'->>'pending' = 'true') desc nulls last, updated_at limit ${max}`;
   let done = 0, failed = 0, pending = 0;

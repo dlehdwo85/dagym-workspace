@@ -137,8 +137,10 @@ export async function kickScenes(tenant: string | null, o: { limit?: number; bud
 }
 /** 마케팅을 쓰는 회사(브랜드가 있음) 가운데 뽑을 영상이 있는 회사 — 한 번에 3곳 */
 async function sceneTenants() {
-  return db()<{ tenant: string }[]>`select distinct tenant from library_files where deleted_at is null and upload_status = 'ready' and mime_type like 'video/%'
-    and coalesce(source, '') not in ('ai', 'ai_attach', 'revenue') and ${pendingCond(db())} and exists (select 1 from mkt_brands b where b.tenant = library_files.tenant) order by tenant limit 3`;
+  const sql = db();
+  return sql<{ tenant: string }[]>`select distinct tenant from library_files where deleted_at is null and upload_status = 'ready' and mime_type like 'video/%'
+    and coalesce(source, '') not in ('ai', 'ai_attach', 'revenue') and ${pendingCond(sql)} and exists (select 1 from mkt_brands b where b.tenant = library_files.tenant)
+    and tenant in (${(await import('./ai/consent')).autoAiTenants(sql)}) order by tenant limit 3`; // AI 동의(대표 11/19): 회사 자료 자동 AI 처리가 켜진 회사만
 }
 /** 합성 함수에서(또는 시험·로컬 정기 실행 응답 뒤): 회사마다 영상 4편, 전체 200초 안 */
 export async function scenesRun(tenant?: string | null) {

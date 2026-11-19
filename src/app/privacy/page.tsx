@@ -1,10 +1,12 @@
 import { H, LegalDoc, biz } from '@/components/Legal';
 import { META_PRIVACY_PARAGRAPHS } from '@/components/legalMeta';
+import { sttConfigured } from '@/lib/ai/stt';
 export const metadata = { title: '개인정보 처리방침' };
 export const dynamic = 'force-dynamic';
 
 export default async function Privacy({ searchParams }: { searchParams: Promise<{ deletion?: string }> }) {
   const b = biz();
+  const stt = sttConfigured(); // AI 동의(대표 11/19): 받는 곳은 지금 실제로 보내는 곳만
   const deletion = String((await searchParams).deletion ?? '').replace(/[^0-9a-f]/g, '').slice(0, 32); // Meta 데이터 삭제 콜백이 돌려준 확인 코드
   return (
     <LegalDoc title="개인정보 처리방침">
@@ -24,7 +26,8 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
         <li>고객·거래처 연락처(회사 연락처): 회사가 업무 연락 목적으로 받은 이름·소속·직함·전화번호·이메일·메모 — 문의 접수, 메일·문자·견적서 발송, 직원의 직접 등록·파일 가져오기로 저장되며 같은 회사 직원만 봅니다. 고객이 삭제를 요청하면 회사 관리자가 지웁니다(휴지통 30일 뒤 완전 삭제)</li>
         <li>출퇴근 기록을 쓰는 경우(동의한 사람만): [출근]·[퇴근]을 누른 시각과 그 순간의 위치(위도·경도) — 회사가 등록한 현장 안인지 표시하는 데만 쓰고, 그 밖의 시간에는 위치를 받지 않습니다</li>
         <li>광고 효과 측정(선택 동의한 경우에만): 가입을 마친 순간 1회 Meta 픽셀·Google 태그(GA4·Google Ads)·네이버 프리미엄로그분석이 쿠키·기기 정보로 &ldquo;가입 완료&rdquo;를 기록합니다. 업무·일정 내용은 보내지 않으며, 동의하지 않으면 이 태그를 불러오지 않습니다.</li>
-        <li>선택: AI 기능 이용 시 입력 내용, Google Calendar 연동 시 Google 계정 이메일과 선택한 캘린더 일정(토큰은 암호화 저장), 마케팅 수신 동의</li>
+        <li>AI 기능 이용 시(동의한 사람만): AI에게 쓴 글과 말한 내용, 붙인 파일·사진, 답에 필요한 업무·일정·자료 내용{stt ? ', 회의록을 만들 때의 회의 녹음' : ''}</li>
+        <li>선택: Google Calendar 연동 시 Google 계정 이메일과 선택한 캘린더 일정(토큰은 암호화 저장), 마케팅 수신 동의</li>
         <li>현장 QR 신고(회원·방문자): 신고 내용·사진, 선택한 경우 회신용 이름·연락처 — 처리 완료 1년 뒤 파기</li>
       </ul>
       <H>3. 보유 기간</H>
@@ -38,7 +41,7 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
         <li>결제: (주)나이스페이먼츠 — 카드·계좌이체·가상계좌 결제, 정기 결제(빌링)</li>
         <li>소셜 로그인: Google LLC, (주)카카오, 네이버(주) — 로그인·가입 시 본인 확인</li>
         <li>푸시 알림: Google(Firebase), Apple — 앱 알림</li>
-        <li>AI 처리(선택): Anthropic PBC, OpenAI(미국) — AI 비서·매출 분석 요청 시 입력 내용 전송. 업체의 모델 학습에 쓰이지 않는 API 로 전송합니다</li>
+        <li data-testid="privacy-ai">AI 처리(동의한 사람만): Anthropic PBC(미국) — AI 기능을 쓸 때 AI에게 쓴 글·붙인 파일·답에 필요한 업무·일정·자료 내용을 전송합니다.{stt ? ' OpenAI(미국) — 회의 녹음을 글로 바꿀 때 녹음을 전송합니다.' : ''} 받는 회사의 이용 조건에 따라 그 회사 AI를 가르치는 데 쓰이지 않습니다. 처음 한 번 동의를 묻고, 설정 › 개인정보·AI 에서 언제든 철회할 수 있습니다(<a href="/ai-notice" className="underline">AI 이용 안내</a>)</li>
       </ul>
       <p className="text-xs text-slate-500">국외 이전 항목: 위 2번 항목 중 해당 기능 처리에 필요한 정보 · 이전 시기: 서비스 이용 시 네트워크로 전송 · 보유 기간: 위탁 계약 종료 또는 탈퇴 시까지.</p>
       <H>6. Google 사용자 데이터</H>

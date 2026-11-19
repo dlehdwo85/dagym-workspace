@@ -31,7 +31,7 @@ export function aiErrorMessage(kind: AiErrKind, status?: number) {
 
 /** 371차 #994: 한도·크레딧·속도 제한·AI 꺼짐 = '나중에 다시' 할 막힘(항목 실패로 세지 않고 멈춤·못 함으로 기록).
  *  크레딧 소진은 503 ai_credit 으로 온다(예전 코드는 402 만 봐서 크레딧이 떨어진 동안 공고마다 실패 1회로 셈해 3번이면 차례에서 빠졌다) */
-export const AI_STOP_CODES = new Set(['ai_credit', 'ai_budget', 'ai_quota', 'ai_off', 'ai_user_limit', 'ai_user_day_limit', 'mkt_ai_quota']);
+export const AI_STOP_CODES = new Set(['ai_credit', 'ai_budget', 'ai_quota', 'ai_off', 'ai_user_limit', 'ai_user_day_limit', 'mkt_ai_quota', 'ai_consent', 'ai_auto_off']); // ai_consent·ai_auto_off = AI 동의 전·회사 자동 AI 꺼짐(대표 11/19)
 export function isAiStop(e: unknown) {
   const x = e as { status?: number; code?: string } | null;
   return !!x && (AI_STOP_CODES.has(String(x.code ?? '')) || x.status === 402 || x.status === 429);
