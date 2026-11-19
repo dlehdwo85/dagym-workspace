@@ -83,6 +83,13 @@ describe('359차 승인제 가입', () => {
     assert.match(am[0].text, /연락처: 010-1234-5678/); assert.match(am[0].text, /가입 경로: email · 유입 source=meta campaign=trial/);
     assert.match(am[0].text, /24시간 안에 연락드린다고 안내했습니다/);
     assert.match(am[0].text, /메일 주소 확인: 아직/);
+    // 대표 11/19(글자뿐인 확인 메일은 네이버 메일 앱에서 주소가 안 눌림): 틀 = 로고·제목·본문·[이메일 확인] 단추 + 단추 아래 주소 글자, 글자 판에도 주소
+    const vm = mailTo('boss@approval.test', /이메일 확인/).at(-1);
+    const vurl = vm.text.match(/https?:\/\/\S+\/verify\/[A-Za-z0-9_-]+/)[0];
+    assert.match(vm.text, /이메일 확인: http/, '글자 판: 단추 이름과 주소');
+    assert.ok(vm.html.includes(`href="${vurl}"`) && />이메일 확인<\/a>/.test(vm.html), '[이메일 확인] 단추');
+    assert.ok(vm.html.includes(`>${vurl}</a>`), '단추 아래에 주소가 글자로도 보임(누르거나 복사)');
+    assert.match(vm.html, /icon-192\.png/, '로고'); assert.match(vm.html, /체험 신청을 받았습니다/);
     await boss.ok('POST', '/api/auth/verify', { token: verifyToken('boss@approval.test') });
     assert.equal((await sql`select count(*)::int n from notifications where type = 'signup_request'`)[0].n, 1, '메일 확인 뒤 다시 알리지 않음');
     assert.equal(mailTo('boss@approval.test', /승인/).length, 0, '신청자에게는 아직 승인 메일 없음');

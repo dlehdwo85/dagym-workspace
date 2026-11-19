@@ -3,7 +3,7 @@ import { db } from './db';
 import { newToken, sha256 } from './crypto';
 import { HttpError, badRequest, conflict, forbidden, notFound } from './errors';
 import { audit } from './log';
-import { appUrl, sendMail } from './mail';
+import { appUrl, sendFramedMail, sendMail } from './mail';
 import { PARTNER } from './partner';
 import { tenantOf, type SessionUser } from './types';
 
@@ -192,7 +192,7 @@ export async function platformUserAction(u: SessionUser, userId: string, i: z.in
     if (t.status !== 'active') throw badRequest('활성 사용자만 재설정할 수 있습니다');
     const token = newToken();
     await sql`insert into password_resets (token_hash, user_id, created_by, expires_at) values (${sha256(token)}, ${t.id}, ${u.id}, now() + interval '24 hours')`;
-    const r = await sendMail(t.email, '[워크인] 비밀번호 재설정', `${t.name}님, 워크인 운영팀 요청으로 비밀번호 재설정 링크를 보냅니다(24시간 유효).\n\n${appUrl()}/reset/${token}\n\n요청하지 않았다면 이 메일을 무시하세요.`);
+    const r = await sendFramedMail(t.email, '비밀번호 재설정', [`${t.name}님, 워크인 운영팀 요청으로 비밀번호 재설정 링크를 보냅니다(24시간 유효).`, '', '요청하지 않았다면 이 메일을 무시하세요.'], { label: '비밀번호 재설정', url: `${appUrl()}/reset/${token}` });
     out = { ok: true, sentTo: t.email, ...(r === 'dev' ? { devLink: `/reset/${token}` } : {}) };
   }
   await audit(sql, u.id, `platform.user_${i.action}`, 'user', t.id, { tenant: t.tenant }, ip);
