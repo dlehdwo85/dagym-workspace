@@ -4,7 +4,7 @@
  * - 점검 1회(round): 항목마다 양호(ok) · 보완 필요(fix) · 해당 없음(na) + 메모 + 사진
  * - 끝내기: 보완 필요 건마다 보완 요청 = **업무 1건**(사진 증빙 1장, 정중한 요청형 글) + 외부 연락 기록 + 같은 항목 N회 연속이면 개선 과제
  * - 보완 확인: 업무의 검토 기능에 기대지 않는다(대표 11/18 "검토는 완료의 조건이 아니다"). 담당자가 업무를 [완료]하면 보완 요청이 '확인 대기'로 보이고,
- *   점검자가 여기서 [양호 확인](닫힘) 또는 [다시 보완](같은 업무를 다시 열고 회차 +1).
+ *   점검자가 여기서 [양호 확인](닫힘) 또는 [다시 보완](같은 담당자에게 새 업무 · 회차 +1 — 업무의 상태는 담당자만 바꾸는 규칙이라 끝낸 업무를 다시 열지 않는다).
  * 권한: 메뉴 권한 '점검하기·보완 확인'(check_run). 볼 수 있는 조직(accessibleUnitIds) 안에서만. 다른 회사·범위 밖은 없는 것처럼(404).
  */
 import { z } from 'zod';
@@ -200,9 +200,10 @@ export const finishInput = z.object({
     external: z.object({ target: z.string().trim().min(1).max(100), replyDue: date.nullable().optional() }).nullable().optional() })).max(200).optional(),
 });
 /** 직원에게 가는 글 — "무엇을, 어디를, 언제까지" 중심의 정중한 요청형(지적·평가 말투 없음) */
-export function followupText(o: { title: string; place: string | null; unit: string; pass: string; memo: string | null; note: string | null; fix: string | null; due: string | null }) {
+export function followupText(o: { title: string; place: string | null; unit: string; pass: string; memo: string | null; note: string | null; fix: string | null; due: string | null; again?: string | null }) {
   return [
-    `${o.unit}${o.place ? ` ${o.place}` : ''}의 "${o.title}"을(를) 살펴봐 주세요.`,
+    `${o.unit}${o.place ? ` ${o.place}` : ''}의 "${o.title}"을(를) ${o.again ? '한 번 더 ' : ''}살펴봐 주세요.`,
+    o.again ? `**다시 살펴볼 것**: ${o.again}` : null,
     o.due ? `**언제까지**: ${o.due}` : null,
     o.pass ? `**양호 기준**: ${o.pass}` : null,
     o.memo ? `**점검 때 본 것**: ${o.memo}` : null,
@@ -268,6 +269,8 @@ export async function listFollowups(u: SessionUser, f: { state?: string | null; 
   const rows = await sql<any[]>`select f.id, f.status, f.round_no, f.due_date, f.note, f.created_at, f.closed_at, f.close_note, f.task_id, f.org_unit_id, o.name as org_unit_name,
       x.item_title, x.pass_criteria, x.memo, pt.name as place_type_name, tk.status as task_status, tk.completed_at, a.name as assignee_name, rq.name as requested_by_name,
       (select count(*)::int from attachments at where at.task_id = f.task_id and at.deleted_at is null and at.upload_status = 'ready' and at.kind = 'file' and at.mime_type like 'image/%') as photos,
+      (select json_agg(at.id order by at.created_at) from attachments at where at.task_id = f.task_id and at.deleted_at is null and at.upload_status = 'ready' and at.kind = 'file' and at.mime_type like 'image/%') as photo_ids,
+      (select json_agg(p.id order by p.created_at) from chk_photos p where p.tenant = f.tenant and p.owner_kind = 'result' and p.owner_id = f.result_id and p.upload_status = 'ready') as check_photo_ids,
       (select json_agg(json_build_object('id', e.id, 'target', e.target, 'replyDue', e.reply_due, 'outcome', e.outcome, 'closed', e.closed_at is not null) order by e.created_at) from chk_external e where e.followup_id = f.id) as external
     from chk_followups f join chk_results x on x.id = f.result_id join org_units o on o.id = f.org_unit_id left join chk_place_types pt on pt.id = x.place_type_id
       left join tasks tk on tk.id = f.task_id and tk.deleted_at is null left join users a on a.id = f.assignee_id left join users rq on rq.id = f.requested_by
@@ -275,18 +278,20 @@ export async function listFollowups(u: SessionUser, f: { state?: string | null; 
     order by (f.status = 'requested') desc, (tk.status = 'done') desc, f.due_date nulls last, f.created_at desc limit 300`;
   const items = rows.map((r) => ({ id: r.id, state: stateOf(r.status, r.task_status), roundNo: r.round_no, dueDate: r.due_date, note: r.note, createdAt: r.created_at, closedAt: r.closed_at, closeNote: r.close_note, taskId: r.task_id,
     orgUnitId: r.org_unit_id, orgUnitName: r.org_unit_name, itemTitle: r.item_title, passCriteria: r.pass_criteria, memo: r.memo, placeTypeName: r.place_type_name, assigneeName: r.assignee_name, requestedByName: r.requested_by_name,
-    taskDoneAt: r.completed_at, photos: r.photos, external: r.external ?? [] }));
+    taskDoneAt: r.completed_at, photos: r.photos, photoIds: (r.photo_ids ?? []) as string[], checkPhotoIds: (r.check_photo_ids ?? []) as string[], external: r.external ?? [] }));
   const want = f.state && ['requested', 'waiting', 'closed', 'open'].includes(f.state) ? f.state : null;
   const list = want === 'open' ? items.filter((x) => x.state === 'requested' || x.state === 'waiting') : want ? items.filter((x) => x.state === want) : items;
   return { followups: list, counts: { requested: items.filter((x) => x.state === 'requested').length, waiting: items.filter((x) => x.state === 'waiting').length, closed: items.filter((x) => x.state === 'closed').length } };
 }
-export const confirmInput = z.object({ ok: z.boolean(), note: z.string().trim().max(500).optional() });
-/** 보완 확인: [양호 확인] = 닫힘 · [다시 보완] = 같은 업무를 다시 열고(담당자에게 알림) 회차 +1. 업무가 완료된 뒤(확인 대기)에만 */
+export const confirmInput = z.object({ ok: z.boolean(), note: z.string().trim().max(500).optional(), dueDate: date.nullable().optional() });
+/** 보완 확인: [양호 확인] = 닫힘 · [다시 보완] = 같은 담당자에게 새 업무(앞 업무는 완료 그대로 남음) · 회차 +1. 업무가 완료된 뒤(확인 대기)에만 */
 export async function confirmFollowup(u: SessionUser, id: string, i: z.infer<typeof confirmInput>) {
   await requireMenu(u, 'check_run', 'use');
   const sql = db(); const t = tenantOf(u); const mine = await myUnits(u, sql);
-  const [f] = await sql<{ id: string; status: string; task_id: string | null; org_unit_id: string; assignee_id: string | null; round_no: number; item_title: string; task_status: string | null }[]>`
-    select f.id, f.status, f.task_id, f.org_unit_id, f.assignee_id, f.round_no, x.item_title, tk.status as task_status from chk_followups f join chk_results x on x.id = f.result_id
+  const [f] = await sql<{ id: string; status: string; task_id: string | null; org_unit_id: string; org_unit_name: string; assignee_id: string | null; round_no: number; item_title: string; pass_criteria: string; memo: string | null;
+    place_type_name: string | null; fix_action: GuideItem['fix_action'] | null; note: string | null; task_status: string | null }[]>`
+    select f.id, f.status, f.task_id, f.org_unit_id, o.name as org_unit_name, f.assignee_id, f.round_no, x.item_title, x.pass_criteria, x.memo, pt.name as place_type_name, it.fix_action, f.note, tk.status as task_status
+    from chk_followups f join chk_results x on x.id = f.result_id join org_units o on o.id = f.org_unit_id left join chk_place_types pt on pt.id = x.place_type_id left join chk_items it on it.id = f.item_id
       left join tasks tk on tk.id = f.task_id and tk.deleted_at is null where f.id = ${id} and f.tenant = ${t}`;
   if (!f || (mine !== null && !mine.includes(f.org_unit_id))) throw notFound();
   if (f.status !== 'requested') throw conflict('이미 닫힌 보완 요청입니다');
@@ -298,16 +303,15 @@ export async function confirmFollowup(u: SessionUser, id: string, i: z.infer<typ
     return { id, state: 'closed' };
   }
   if (!i.note) throw badRequest('무엇을 더 살펴보면 좋을지 한 줄 적어 주세요');
-  // 다시 보완: 같은 업무를 다시 열고 댓글로 까닭을 남김(업무의 다시 열기 알림이 담당자에게 감)
-  if (f.task_id) {
-    const T = await import('../tasks');
-    await T.updateTask(u, f.task_id, { status: 'todo' } as never);
-    await sql`insert into comments (task_id, author_id, body) values (${f.task_id}, ${u.id}, ${`다시 살펴봐 주세요: ${i.note}`})`.catch(() => {});
-  }
-  await sql`update chk_followups set round_no = round_no + 1, waiting_notified_at = null, close_note = ${i.note}, updated_at = now() where id = ${id}`;
-  if (f.assignee_id) await notify(sql, { userIds: [f.assignee_id], actorId: u.id, type: 'check_followup', title: `다시 살펴봐 주세요: ${f.item_title}`, body: i.note, link: f.task_id ? `/tasks?task=${f.task_id}` : '/check',
-    entityType: 'task', entityId: f.task_id ?? undefined, dedupeKey: `chkagain:${id}:${f.round_no + 1}` }).catch(() => []);
-  return { id, state: 'requested', roundNo: f.round_no + 1 };
+  // 다시 보완: 같은 담당자에게 새 업무(업무 배정 알림이 감). 앞 업무는 완료 그대로 두고 기록에 남긴다
+  const round = f.round_no + 1;
+  const due = i.dueDate ?? addDays(todaySeoul(), Math.max(1, Number(f.fix_action?.dueDays ?? 1)));
+  const { createTask } = await import('../tasks');
+  const text = followupText({ title: f.item_title, place: f.place_type_name, unit: f.org_unit_name, pass: f.pass_criteria, memo: f.memo, note: f.note, fix: f.fix_action?.note ?? null, due, again: i.note });
+  const task = await createTask(u, { title: `${f.item_title} 보완 요청(${round}차)`, description: text, orgUnitId: f.org_unit_id, assigneeId: f.assignee_id, dueDate: due, photoRequired: 1, tags: [FOLLOWUP_TAG] } as never, { quiet: false });
+  await sql`update chk_followups set round_no = ${round}, task_id = ${task.id}, prev_task_ids = ${f.task_id ? sql`array_append(prev_task_ids, ${f.task_id}::uuid)` : sql`prev_task_ids`}, due_date = ${due},
+    waiting_notified_at = null, close_note = ${i.note}, updated_at = now() where id = ${id}`;
+  return { id, state: 'requested', roundNo: round, taskId: task.id };
 }
 export const externalInput = z.object({ outcome: z.string().trim().min(1).max(500) });
 /** 외부 연락 결과 적기(적으면 닫힘) */

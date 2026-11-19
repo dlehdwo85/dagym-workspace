@@ -56,14 +56,16 @@ create table if not exists chk_results (
 create unique index if not exists chk_results_one on chk_results(round_id, item_id, coalesce(place_type_id, '00000000-0000-0000-0000-000000000000'::uuid));
 create index if not exists chk_results_item on chk_results(tenant, item_id, created_at desc);
 
--- 보완 요청: 업무 1건과 이어짐. 상태 = 요청됨(requested) → (업무가 완료되면 화면에서 '확인 대기'로 보임) → 양호 확인(ok) / 다시 보완은 requested 로 되돌리고 회차(round_no)를 올림
+-- 보완 요청: 업무 1건과 이어짐. 상태 = 요청됨(requested) → (업무가 완료되면 화면에서 '확인 대기'로 보임) → 양호 확인(ok) / 다시 보완은 같은 담당자에게 새 업무를 만들고 회차(round_no)를 올림
+--   (업무의 상태는 담당자만 바꾸는 것이 규칙이라, 끝낸 업무를 점검자가 다시 열지 않는다)
 create table if not exists chk_followups (
   id uuid primary key default gen_random_uuid(),
   tenant text not null,
   result_id uuid not null references chk_results(id) on delete cascade,
   item_id uuid not null references chk_items(id) on delete cascade,
   org_unit_id uuid not null references org_units(id) on delete cascade,
-  task_id uuid references tasks(id) on delete set null,
+  task_id uuid references tasks(id) on delete set null,          -- 지금 회차의 업무
+  prev_task_ids uuid[] not null default '{}',                    -- 지난 회차의 업무(다시 보완을 요청하면 새 업무가 생기고 앞의 것은 여기로)
   assignee_id uuid references users(id) on delete set null,
   requested_by uuid references users(id) on delete set null,
   due_date date,

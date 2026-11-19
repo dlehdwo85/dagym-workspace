@@ -8,6 +8,7 @@ import { useMultiSite, useSession, useTerms } from '@/components/session';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { shrinkImage } from '@/components/shrink';
 import { CHECK_COPY as C, sharedText } from '@/lib/check/copy';
+import { RunHome } from './CheckRun';
 
 type Cat = { id: string; parent_id: string | null; name: string; sort: number; active: boolean; items: number };
 type PT = { id: string; name: string; sort: number; active: boolean };
@@ -23,12 +24,14 @@ export function CheckHome() {
   const sess = useSession();
   const level = sess.menus?.check_guide ?? 'none';
   const canView = level !== 'none'; const canEdit = level === 'edit';
-  const [tab, setTab] = useState<'guide' | 'shared' | 'setup'>(canView ? 'guide' : 'shared');
-  const tabs: [typeof tab, string][] = [['guide', C.tabs.guide], ['shared', C.tabs.shared], ...(canEdit ? [['setup', C.tabs.setup] as [typeof tab, string]] : [])];
+  const canRun = (sess.menus?.check_run ?? 'none') === 'use'; // 점검 2단계: 점검하기·보완 확인
+  const [tab, setTab] = useState<'run' | 'guide' | 'shared' | 'setup'>(canRun ? 'run' : canView ? 'guide' : 'shared');
+  useEffect(() => { const t = new URLSearchParams(location.search).get('tab'); if (t === 'run' && canRun) setTab('run'); else if (t === 'guide' && canView) setTab('guide'); else if (t === 'shared') setTab('shared'); else if (t === 'setup' && canEdit) setTab('setup'); }, [canRun, canView, canEdit]);
+  const tabs: [typeof tab, string][] = [...(canRun ? [['run', C.tabs.run] as [typeof tab, string]] : []), ...(canView ? [['guide', C.tabs.guide] as [typeof tab, string]] : []), ['shared', C.tabs.shared], ...(canEdit ? [['setup', C.tabs.setup] as [typeof tab, string]] : [])];
   return (
     <div className="mx-auto max-w-4xl" data-testid="check-home">
-      <PageHeader title={C.menu} sub={canView ? C.sub : C.subShared} icon={ClipboardCheck} />
-      {canView && (
+      <PageHeader title={C.menu} sub={canRun || canView ? C.sub : C.subShared} icon={ClipboardCheck} />
+      {(canView || canRun) && (
         <div role="tablist" aria-label={C.menu} className="mb-3 flex gap-1 overflow-x-auto rounded-input border border-line bg-white p-0.5 text-sm shadow-card">
           {tabs.map(([k, l]) => (
             <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-testid={`check-tab-${k}`}
@@ -36,6 +39,7 @@ export function CheckHome() {
           ))}
         </div>
       )}
+      {tab === 'run' && canRun && <RunHome />}
       {tab === 'guide' && canView && <Guide canEdit={canEdit} />}
       {tab === 'shared' && <SharedList />}
       {tab === 'setup' && canEdit && <Setup />}
@@ -331,6 +335,10 @@ function Setup() {
   const places = useApi<{ places: { id: string; name: string; place_type_id: string | null; place_type_name: string | null; active: boolean }[] }>(unit ? `/api/check/places?unit=${unit}` : null);
   const [busy, setBusy] = useState(false);
   const [nc, setNc] = useState(''); const [ncParent, setNcParent] = useState(''); const [np, setNp] = useState(''); const [npl, setNpl] = useState(''); const [nplType, setNplType] = useState('');
+  // 점검 2단계: 점검 코스(공간 유형을 도는 순서) — 목록은 점검하기 권한이 있어야 보임(없으면 이 칸을 숨김)
+  const courses = useApi<{ courses: { id: string; name: string; orgUnitId: string | null; placeTypeIds: string[]; includeGeneral: boolean; active: boolean }[] }>((sess.menus?.check_run ?? 'none') === 'use' ? '/api/check/courses?all=1' : null);
+  const [cn, setCn] = useState(''); const [cOrder, setCOrder] = useState<string[]>([]); const [cUnit, setCUnit] = useState('');
+  const ptName = (id: string) => (pts.data?.placeTypes ?? []).find((p) => p.id === id)?.name ?? '';
   const run = async (fn: () => Promise<unknown>, after: () => void) => { setBusy(true); try { await fn(); after(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } };
   const box = 'rounded-card border border-line bg-white p-3 shadow-card';
   const top = (cats.data?.categories ?? []).filter((c) => !c.parent_id);
@@ -378,6 +386,32 @@ function Setup() {
           <Button size="sm" type="submit" disabled={busy || !npl.trim() || !unit} data-testid="check-place-add"><Plus />추가</Button>
         </form>
       </section>
+      {courses.data && (
+        <section className={box} data-testid="check-setup-courses">
+          <h2 className="font-semibold">{C.setup.courses}</h2><p className="text-xs text-ink-3">{C.setup.coursesHint}</p>
+          <ul className="mt-2 space-y-1.5">
+            {courses.data.courses.map((c) => (
+              <li key={c.id} className="flex items-start gap-2">
+                <span className="min-w-0 flex-1"><span className={cx('font-medium', !c.active && 'text-ink-3 line-through')}>{c.name}</span>{c.orgUnitId && <span className="ml-1.5 text-xs text-ink-3">{units.find((o) => o.id === c.orgUnitId)?.name}</span>}
+                  <span className="block text-xs text-ink-2">{c.placeTypeIds.map(ptName).filter(Boolean).join(' → ') || '-'}{c.includeGeneral ? ' → 공간 없이 보는 항목' : ''}</span></span>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(() => api(`/api/check/courses/${c.id}`, { method: 'PATCH', body: { name: c.name, placeTypeIds: c.placeTypeIds, active: !c.active } }), courses.reload)}>{c.active ? '안 씀' : '다시 씀'}</Button>
+              </li>
+            ))}
+          </ul>
+          <form className="mt-3 space-y-2 border-t border-line pt-3" onSubmit={(e) => { e.preventDefault(); if (!cn.trim() || !cOrder.length) return; run(() => api('/api/check/courses', { body: { name: cn.trim(), placeTypeIds: cOrder, orgUnitId: cUnit || null } }), () => { setCn(''); setCOrder([]); courses.reload(); }); }}>
+            <div className="flex flex-wrap gap-2">
+              <input className={cx(inputCls, 'h-9 min-w-0 flex-1 basis-40')} value={cn} onChange={(e) => setCn(e.target.value)} placeholder={C.setup.courseAdd} maxLength={60} data-testid="check-course-name" />
+              {multi && units.length > 1 && <select className={cx(inputCls, 'h-9 !w-auto py-1 text-xs')} value={cUnit} onChange={(e) => setCUnit(e.target.value)} aria-label={terms.unit.branch}><option value="">모든 곳</option>{units.map((o) => <option key={o.id} value={o.id}>{o.name}만</option>)}</select>}
+            </div>
+            <div className="flex flex-wrap gap-1.5" aria-label={C.setup.courseOrder}>
+              {(pts.data?.placeTypes ?? []).filter((p) => p.active).map((p) => { const n = cOrder.indexOf(p.id); return (
+                <button key={p.id} type="button" onClick={() => setCOrder((o) => (o.includes(p.id) ? o.filter((x) => x !== p.id) : [...o, p.id]))} data-testid="check-course-place"
+                  className={cx('rounded-full border px-2.5 py-1 text-xs', n >= 0 ? 'border-brand-600 bg-brand-50 font-medium text-brand-700' : 'border-line text-ink-2')}>{n >= 0 ? `${n + 1}. ` : ''}{p.name}</button>); })}
+            </div>
+            <div className="flex items-center justify-between gap-2"><span className="text-xs text-ink-3">{C.setup.courseOrder}</span><Button size="sm" type="submit" disabled={busy || !cn.trim() || !cOrder.length} data-testid="check-course-add"><Plus />추가</Button></div>
+          </form>
+        </section>
+      )}
       <section className={box} data-testid="check-setup-templates">
         <h2 className="font-semibold">{C.setup.templates}</h2><p className="text-xs text-ink-3">{C.setup.templatesHint}</p>
         <ul className="mt-2 space-y-1.5">
