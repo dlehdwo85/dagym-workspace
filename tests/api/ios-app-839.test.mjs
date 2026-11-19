@@ -78,3 +78,33 @@ test('295차: 관리 › 사용자 — 카카오·네이버로만 가입해 비�
   assert.ok(users.every((u) => !('password_hash' in u)), '비밀번호 값은 응답에 없음');
   assert.equal(users.filter((u) => !u.has_password && u.social.length).length, 1, '아이폰에서 비밀번호가 필요한 사람 수');
 });
+
+// 애플 11/15 반려(3.1.1 '로그인 화면에 https://www.work-in.dev/#pricing' · '사업자·단체 가입 기능'):
+// 앱의 소셜 로그인은 시스템 브라우저 창에서 열리는데, 그 창은 일반 사파리·크롬 표시라 서버가 앱인지 몰라 웹 화면(소개·요금·체험 신청·가입)을 보여 줬다.
+// 이제 앱에서 시작한 로그인(client=ios|android)은 그 창에 표시(wos_app=1, 15분)를 심고, 표시가 있으면 첫 화면·소개·가입은 로그인으로, 로그인 화면은 앱 모양.
+test('애플 11/15 반려: 앱이 띄운 로그인 브라우저 창(일반 브라우저 표시)에서도 소개·요금·가입에 닿지 않음 · 웹에서 시작한 로그인과 보통 브라우저는 그대로', async () => {
+  const safari = UA.iphoneSafari;
+  const sheet = (path) => fetch(BASE + path, { headers: { 'user-agent': safari, cookie: 'wos_app=1' }, redirect: 'manual' });
+  // 표시 심기: 앱에서 시작(client=ios·android)하면 심고, 웹에서 시작하면 안 심음 — 제공자 설정이 없어 시작이 실패해도(로그인 화면으로 돌아가도) 심음
+  for (const client of ['ios', 'android']) {
+    const r = await get(`/api/auth/oauth/apple/start?mode=login&client=${client}&ac=${'a'.repeat(64)}`, safari);
+    assert.match(r.headers.get('set-cookie') ?? '', /wos_app=1;.*Max-Age=900/i, `client=${client} 표시`);
+  }
+  assert.doesNotMatch((await get('/api/auth/oauth/apple/start?mode=login&client=web', safari)).headers.get('set-cookie') ?? '', /wos_app=/, '웹에서 시작한 로그인은 표시 없음');
+  // 표시가 있는 창: 첫 화면·소개·랜딩·가입 → 로그인(예전: 소개 화면 = [요금]·[체험 신청])
+  const root = await sheet('/');
+  assert.ok(root.status === 307 || root.status === 200, `첫 화면 ${root.status}`);
+  if (root.status === 200) assert.ok(!/id="pricing"|data-testid="pricing"|체험 신청/.test(await root.text()), '첫 화면에 소개(요금·체험 신청)가 안 나옴');
+  else assert.equal(new URL(root.headers.get('location'), BASE).pathname, '/login');
+  for (const p of ['/welcome', '/landing/workin', '/signup', '/signup/social?t=abc']) {
+    const r = await sheet(p);
+    assert.equal(r.status, 307, `${p} → 307`); assert.equal(new URL(r.headers.get('location'), BASE).pathname, '/login', `${p} → /login`);
+  }
+  // 그 창의 로그인 화면은 앱 모양(체험 문구·소개 링크·사업자 표시 없음)
+  const html = await (await sheet('/login')).text();
+  assert.ok(!/14일 무료 체험/.test(html) && !/data-testid="auth-site-link"/.test(html) && !/통신판매업|사업자등록번호/.test(html), '로그인 화면 = 앱 모양');
+  assert.match(html, /회사 관리자가 초대한 계정으로 로그인/);
+  // 표시 없는 보통 브라우저는 그대로(소개·가입 열림)
+  const web = await get('/', safari); assert.equal(web.status, 200); assert.match(await web.text(), /id="pricing"/, '웹 첫 화면은 소개 그대로');
+  assert.equal((await get('/welcome', safari)).status, 200);
+});

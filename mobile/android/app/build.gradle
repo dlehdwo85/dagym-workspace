@@ -30,7 +30,9 @@ android {
     buildTypes {
         release {
             if (System.getenv('ANDROID_KEYSTORE_PATH')) signingConfig signingConfigs.release
-            minifyEnabled false
+            // Play Console 경고(난독화 1% — 25% 미만이면 게시에 영향 가능, 기한 2027-02) 대응: release.yml 의 minify 칸을 켜면 ANDROID_MINIFY=1
+            // 내부 테스트에서 로그인·푸시·사진 첨부·공유·위젯·알람을 확인한 뒤 기본값으로 바꿈. 유지 규칙은 proguard-rules.pro
+            minifyEnabled(System.getenv('ANDROID_MINIFY') == '1')
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }

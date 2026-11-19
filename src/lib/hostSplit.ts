@@ -7,6 +7,14 @@
  */
 export type HostSplit = { on: boolean; site: string; app: string; graceUntil: string | null };
 
+/**
+ * 애플 11/15 반려(3.1.1 — '로그인 화면에 요금 주소(/#pricing)' · '사업자 가입 기능'): 앱의 소셜 로그인은 시스템 브라우저 창(아이폰 SFSafariViewController·안드로이드 Custom Tabs)에서 열린다.
+ * 그 창은 일반 브라우저 표시라 서버가 앱인지 몰라 웹 화면(소개·요금·체험 신청·가입)을 그대로 보여 줬다 — 앱 화면 안에는 그런 길이 없는데 이 창에서 닿았다.
+ * 앱에서 시작한 로그인(client=ios|android)에는 이 표시를 15분 심어, 그 창에서 열리는 우리 화면을 모두 앱 모양(소개·요금·가입 없음, 첫 화면은 로그인)으로 보여 준다. 값은 '1' 뿐(누구인지 없음)
+ */
+export const APP_SHEET_COOKIE = 'wos_app';
+export const APP_SHEET_MAX_AGE = 900;
+
 const hostOf = (u: string | undefined, d: string) => { try { return new URL(u || d).host.toLowerCase(); } catch { return new URL(d).host; } };
 export function hostSplit(env: Record<string, string | undefined> = process.env): HostSplit {
   const site = hostOf(env.NEXT_PUBLIC_SITE_URL, 'https://www.work-in.dev');

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { hostDecision, hostSplit, markCookie, SIGNED_MARK } from '@/lib/hostSplit';
+import { APP_SHEET_COOKIE, hostDecision, hostSplit, markCookie, SIGNED_MARK } from '@/lib/hostSplit';
 
 /** 카카오톡·인스타그램·페이스북·네이버·라인·밴드 등 다른 앱 안 브라우저 — WebView 지만 우리 앱이 아님(광고·공유 링크로 온 사람은 소개 화면) */
 const OTHER_IN_APP = /KAKAOTALK|Instagram|FBAN|FBAV|FBIOS|FB_IAB|NAVER\(inapp|Line\/|DaumApps|BAND\/|Twitter|everytimeApp|Snapchat/i;
@@ -23,8 +23,10 @@ const APP_NO_PRICING = /^\/(welcome|landing|signup)(\/|$)/;
 export function middleware(req: NextRequest) {
   // 도메인 방향(www ↔ apex)은 코드가 아니라 Vercel 도메인 설정에서만 정한다 — 10/20 20:40 양방향 308 루프 롤백(28ce95f)
   const ua = req.headers.get('user-agent') ?? '';
-  const app = isApp(ua);
-  if ((isIosApp(ua) && IOS_APP_LOGIN_ONLY.test(req.nextUrl.pathname)) || (/WorkinApp/i.test(ua) && APP_NO_PRICING.test(req.nextUrl.pathname))) { const u = req.nextUrl.clone(); u.pathname = '/login'; u.search = ''; return NextResponse.redirect(u, 307); }
+  // 애플 11/15 반려: 앱이 띄운 로그인 브라우저 창(일반 브라우저 표시)도 앱으로 침 — 그 창에서 소개·요금·가입 화면에 닿지 않게
+  const sheet = req.cookies.get(APP_SHEET_COOKIE)?.value === '1';
+  const app = isApp(ua) || sheet;
+  if ((isIosApp(ua) && IOS_APP_LOGIN_ONLY.test(req.nextUrl.pathname)) || ((/WorkinApp/i.test(ua) || sheet) && APP_NO_PRICING.test(req.nextUrl.pathname))) { const u = req.nextUrl.clone(); u.pathname = '/login'; u.search = ''; return NextResponse.redirect(u, 307); }
   const signedIn = !!req.cookies.get('wos_session')?.value || !!req.headers.get('authorization');
   const cfg = hostSplit(); const host = req.headers.get('host') ?? req.nextUrl.host;
   const d = hostDecision(cfg, host, req.nextUrl.pathname, req.nextUrl.search, { isApp: app, signedIn });
