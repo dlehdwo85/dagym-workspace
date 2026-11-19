@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, useApi } from './client';
+import { Check, ChevronRight } from 'lucide-react';
 import { Button, Modal, fmtDateTime, toast } from './ui';
 import { AI_CONSENT_COPY as C, aiRecipients } from '@/lib/ai/consentCopy';
 
@@ -20,13 +21,22 @@ export function AiConsentNotice({ stt }: { stt: boolean }) {
   const L = ({ items }: { items: string[] }) => <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-2">{items.map((x) => <li key={x}>{x}</li>)}</ul>;
   return (
     <div className="text-sm leading-relaxed" data-testid="ai-consent-notice">
-      <p>{C.lead}</p>
-      <H>{C.whatTitle}</H><L items={C.what(stt)} />
-      <H>{C.whereTitle}</H>
-      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-2" data-testid="ai-consent-recipients">{aiRecipients(stt).map((r) => <li key={r.name}><b className="text-ink">{r.name}</b>({r.country}) — {r.what}</li>)}</ul>
-      <H>{C.whyTitle}</H><L items={C.why(stt)} />
-      <H>{C.declineTitle}</H><L items={C.decline} />
-      <p className="mt-3 text-xs text-ink-3">자세히: <Link href="/privacy" target="_blank" className="underline">개인정보 처리방침</Link> · <Link href="/ai-notice" target="_blank" className="underline">AI 이용 안내</Link></p>
+      {/* 펼치지 않아도 보이는 부분: 무엇을 위해·누구에게 + 세 줄 */}
+      <p data-testid="ai-consent-lead">{C.lead(stt)}</p>
+      <ul className="mt-2 space-y-1 text-ink-2" data-testid="ai-consent-points">{C.points.map((x) => <li key={x} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden />{x}</li>)}</ul>
+      {/* 접어 둔 부분: 무엇을·어디로(나라 포함)·왜 — 숨기는 것이 아니라 접는 것(처리방침·AI 이용 안내에도 같은 내용) */}
+      <details className="group mt-3 rounded-input border border-line" data-testid="ai-consent-more">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-ink hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+          <ChevronRight className="size-4 shrink-0 text-ink-3 transition-transform group-open:rotate-90" aria-hidden />{C.more}<span className="font-normal text-ink-3">— {C.moreHint}</span></summary>
+        <div className="border-t border-line px-3 pb-3">
+          <H>{C.whatTitle}</H><L items={C.what(stt)} />
+          <H>{C.whereTitle}</H>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-2" data-testid="ai-consent-recipients">{aiRecipients(stt).map((r) => <li key={r.name}><b className="text-ink">{r.name}</b>({r.country}) — {r.what}</li>)}</ul>
+          <H>{C.whyTitle}</H><L items={C.why(stt)} />
+          <H>{C.declineTitle}</H><L items={C.decline} />
+        </div>
+      </details>
+      <p className="mt-2 text-xs text-ink-3"><Link href="/privacy" target="_blank" className="underline">개인정보 처리방침</Link> · <Link href="/ai-notice" target="_blank" className="underline">AI 이용 안내</Link></p>
     </div>
   );
 }
@@ -74,7 +84,7 @@ export function AiConsentGate({ off }: { off?: boolean }) {
     try {
       const r = await api<St>('/api/account/ai-consent', { method: 'PUT', body: { agreed } });
       setSt(r); setOpen(false); window.dispatchEvent(new Event('wos-ai-consent-changed'));
-      toast.ok(agreed ? (fromBlock ? '동의했습니다 — 방금 누른 것을 한 번 더 눌러 주세요' : '동의했습니다 — AI 기능을 쓸 수 있습니다') : '동의하지 않았습니다 — 설정 › 개인정보·AI 에서 언제든 바꿀 수 있습니다');
+      toast.ok(agreed ? (fromBlock ? 'AI 기능을 켰습니다 — 방금 누른 것을 한 번 더 눌러 주세요' : 'AI 기능을 켰습니다') : 'AI 기능을 쓰지 않습니다 — 설정 › 개인정보·AI 에서 언제든 바꿀 수 있습니다');
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   const later = () => { try { localStorage.setItem(laterKey(st.version), '1'); } catch {} setOpen(false); };
@@ -83,7 +93,8 @@ export function AiConsentGate({ off }: { off?: boolean }) {
       <Modal open={open === 'full'} onClose={later} title={C.title}>
         <div data-testid="ai-consent">
           <AiConsentNotice stt={st.stt} />
-          <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+          {/* 단추 줄은 창 아래에 붙여 둔다 — [자세히 보기]를 펼쳐 글이 길어져도(휴대폰) 단추가 늘 보이게 */}
+          <div className="sticky bottom-0 -mx-5 -mb-[calc(var(--sab)+20px)] mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-line bg-white px-5 pb-[calc(var(--sab)+12px)] pt-3 sm:-mb-5 sm:pb-4" data-testid="ai-consent-actions">
             <button type="button" className="mr-auto h-9 rounded-input px-2 text-sm text-ink-3 hover:bg-slate-100" onClick={later} data-testid="ai-consent-later">{C.later}</button>
             <Button variant="secondary" disabled={busy} onClick={() => decide(false)} data-testid="ai-consent-refuse">{C.refuse}</Button>
             <Button disabled={busy} onClick={() => decide(true)} data-testid="ai-consent-agree">{C.agree}</Button>
@@ -111,7 +122,7 @@ export function AiConsentSetting() {
   if (!data) return null;
   const on = data.state === 'agreed';
   async function toggle(next: boolean) {
-    if (next) { openAiConsent(); return; } // 켤 때는 안내 글을 읽고 [동의하고 AI 쓰기]로
+    if (next) { openAiConsent(); return; } // 켤 때는 안내 글을 읽고 [AI 기능 쓰기]로
     setBusy(true);
     try { await api('/api/account/ai-consent', { method: 'PUT', body: { agreed: false } }); toast.ok('AI 기능을 껐습니다 — 이제 내 내용을 바깥으로 보내지 않습니다'); reload(); window.dispatchEvent(new Event('wos-ai-consent-changed')); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
