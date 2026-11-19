@@ -92,7 +92,22 @@ async function issueFor(sql: Sql, m: MeetingRow, p: { id: string; role: EngineRo
 async function goLive(sql: Sql, m: MeetingRow, by: string) {
   if (m.status !== 'open') return;
   const r = await sql`update meetings set status = 'live', started_at = coalesce(started_at, now()), updated_at = now() where id = ${m.id} and status = 'open' returning id`;
-  if (r.length) await log(sql, m.id, 'start', { by });
+  if (r.length) { await log(sql, m.id, 'start', { by }); await startNotify(sql, m, by); }
+}
+/**
+ * 회의 시작 알림(줌 대조 필수 '참석자에게 회의 알림·링크 자동' — 11/20): 첫 직원이 들어와 회의가 시작되면 초대받은 사람에게 "회의가 시작됐습니다 — 눌러서 참가".
+ * 일정 회의 = 그 일정의 참석자와 만든 사람 · 대화방 통화 = 방 멤버(그 방 알림을 끈 사람 빼고). 즉석 회의·내 회의실은 누구를 불렀는지 모르므로 보내지 않는다(주소를 직접 보냄).
+ * 들어온 사람 본인에게는 안 보냄. 같은 회의는 30분에 한 번만.
+ */
+async function startNotify(sql: Sql, m: MeetingRow, by: string) {
+  let ids: string[] = [];
+  if (m.kind === 'event' && m.event_id) ids = (await sql<{ id: string | null }[]>`select a.user_id as id from event_attendees a where a.event_id = ${m.event_id} union select e.created_by as id from events e where e.id = ${m.event_id}`).map((r) => r.id).filter((x): x is string => !!x);
+  else if (m.kind === 'room' && m.room_id) ids = (await sql<{ id: string }[]>`select user_id as id from chat_members where room_id = ${m.room_id} and not muted`).map((r) => r.id);
+  ids = [...new Set(ids)].filter((x) => x !== by);
+  if (!ids.length) return;
+  const [st] = await sql<{ name: string }[]>`select name from users where id = ${by}`;
+  await notify(sql, { userIds: ids, type: 'meeting_start', title: `회의가 시작됐습니다: ${(m.title || '화상회의').slice(0, 60)}`, body: `${st?.name ?? '주최 측'} 님이 들어와 있습니다 — 눌러서 참가`, link: `/meet/${m.code}`,
+    entityType: 'meeting', entityId: m.id, actorId: by, dedupeKey: `meeting_start:${m.id}:${Math.floor(Date.now() / 1_800_000)}`, space: 'work' }).catch(() => []);
 }
 /** 대기실에 사람이 오면 주최자·공동 주최자에게(앱 푸시) */
 async function lobbyNotify(sql: Sql, m: MeetingRow, pid: string, name: string, by: string | null) {
