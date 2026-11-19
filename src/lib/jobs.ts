@@ -222,6 +222,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('bidDueAlign', async () => (await import('./sales/bidTasks')).bidDueAlignTick()); // 331차(대표 11/02 '업무 마감일 = 입찰 마감일'): 공고에서 온 열린 업무 마감을 공고 마감 일시에 맞춤(첫 실행 = 전수 보정)
   await step('bidCancelSweep', async () => (await import('./sales/bidTasks')).canceledBidTaskSweep()); // 278차 #817·#830 취소된 공고에 남은 열린 입찰 업무(진행 기록 없이 만든 것·합쳐진 줄) → 휴지통 + 알림
   await step('contractCare', async () => (await import('./sales/bidTasks')).contractCareTick()); // 결정 15-35 재계약 사후관리: 계약 종료 120일 전 '재계약 준비' 업무 1건
+  await step('agreements', async () => (await import('./agreements')).agreementTick()); // 계약 관리 1단계: 만료·해지 통보 기한 90·60·30·7일 전 알림(가장 가까운 단계 하나) + 담당자 '[계약 갱신 검토]' 업무 1건
   await step('leadNext', async () => (await import('./sales/bidTasks')).leadNextTick()); // 결정 15-35 업무가 없던 리드의 가까운 다음 연락 → '다음 연락' 업무(알림 없이)
   await step('leadRevisit', async () => (await import('./sales/leadList')).leadRevisitTick()); // 197차(#461): 보류·실패로 닫으며 고른 '다시 볼 날' → 담당자 업무 1건 + 알림
   await step('inquiryLeads', async () => (await import('./inquiries')).inquiryLeadsTick()); // 대표 10/27 ③: 끝나지 않은 다짐·하이링크 문의 업무도 영업 진행(리드)에 연결 — 완료 때 다음 연락·종결
