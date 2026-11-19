@@ -98,6 +98,17 @@ export async function signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }
     // PC 체험 띠가 [+ 만들기]·알림·내 계정을 가리지 않음(359차 — 머리줄 오른쪽을 띠 너비만큼 비움)
     await p.waitForFunction(() => { const b = document.querySelector('[data-testid="trial-banner"]')?.getBoundingClientRect(); const c = document.querySelector('[data-testid="create-menu"]')?.getBoundingClientRect(); return !!b && !!c && c.right <= b.left; }, null, { timeout: 5000 });
     await shot('312-journey-home.png');
+    // 418차 2부(대표 11/19 — 시험상사로 본 휴대폰 화면): ⓐ 체험 띠가 휴대폰 머리줄(로고·검색·알림·프로필)을 가리지 않음 ⓑ 출근 칸에 '현장' 낱말 없음 ⓒ 영업·마케팅 공간이 없는 새 회사의 달력 범례에 그 이름이 없음
+    await p.setViewportSize({ width: 390, height: 844 });
+    await p.waitForFunction(() => { const b = document.querySelector('[data-testid="trial-banner"]')?.getBoundingClientRect(); const h = document.querySelector('[data-testid="mobile-header"] > div')?.getBoundingClientRect();
+      return !!b && !!h && b.height > 0 && h.top >= b.bottom - 0.5; }, null, { timeout: 5000 });
+    const icons = await p.evaluate(() => { const b = document.querySelector('[data-testid="trial-banner"]').getBoundingClientRect(); return [...document.querySelectorAll('[data-testid="mobile-header"] button, [data-testid="mobile-header"] a')].filter((e) => e.getBoundingClientRect().height > 0).map((e) => e.getBoundingClientRect().top >= b.bottom - 0.5); });
+    assert.ok(icons.length >= 2 && icons.every(Boolean), '머리줄 단추가 모두 띠 아래');
+    assert.match(await p.getByText(/아직 출근 전입니다/).first().innerText(), /근무지 미등록 — 시각만 기록/);
+    const legend = await p.getByTestId('home-month').innerText();
+    assert.ok(/일정/.test(legend) && /지난 업무/.test(legend) && !/영업|마케팅/.test(legend), '공간이 없는 회사: 달력 범례에 영업·마케팅 없음');
+    await shot('312b-journey-home-mobile-band.png');
+    await p.setViewportSize({ width: 1366, height: 900 });
     // ── 6) 동료가 초대 링크로 가입(승인 없이 바로 — 이미 승인된 회사)
     const invPath = inv.path ?? inv.users?.[0]?.path ?? inv.results?.[0]?.path ?? inv.invites?.[0]?.path;
     assert.ok(invPath, `초대 링크 ${JSON.stringify(inv).slice(0, 200)}`);
