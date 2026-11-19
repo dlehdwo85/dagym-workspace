@@ -10,6 +10,15 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   assert.equal(await p.getByTestId('landing-title').innerText(), '업무도, 영업도, 마케팅도 한 화면에서');
   assert.equal(await p.getByTestId('landing-space-work').count() + await p.getByTestId('landing-space-sales').count() + await p.getByTestId('landing-space-marketing').count(), 3);
   await p.getByTestId('landing-ai').waitFor(); await p.getByTestId('landing-steps').waitFor();
+  // 대표 11/19 '주요 기능을 홍보 사이트와 네비게이션에 추가': 자주 쓰는 기능 구역(자료실·결재·메시지·점검 = 실제 화면 그림 · AI 비서·영업·마케팅 공간 = 아래 구역으로) · 머리줄 [기능] = 이 구역
+  const feats = p.getByTestId('landing-features'); await feats.waitFor();
+  assert.deepEqual(await feats.locator('article').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid').replace('landing-feature-', ''))), ['library', 'approvals', 'messages', 'check', 'ai', 'spaces']);
+  assert.equal(await feats.locator('article img').count(), 4, '그림 4장(자료실·결재·메시지·점검)');
+  for (const src of await feats.locator('article img').evaluateAll((els) => els.map((e) => e.getAttribute('src')))) assert.equal((await p.request.get(BASE + src)).status(), 200, `${src} 그림이 있음`);
+  assert.ok(!/화상회의/.test(await feats.innerText()), '화상회의는 넣지 않음(지금은 우리 회사만 — 대표 결정 뒤)');
+  assert.match(await feats.innerText(), /14일 무료 체험/);
+  assert.equal(await p.locator('header nav a', { hasText: '기능' }).getAttribute('href'), '#features');
+  assert.equal(await feats.getByTestId('landing-feature-ai').locator('a').getAttribute('href'), '#ai'); assert.equal(await p.locator('#ai').count(), 1);
   assert.match(await p.getByTestId('pricing').innerText(), /14일 무료 체험[\s\S]*0원/); assert.equal(await p.getByTestId('pricing').getByText(/베이직|스탠다드|프로/).count(), 0, '요금은 14일 체험만');
   assert.doesNotMatch(await p.locator('body').innerText(), /5명까지|카드 등록 없음|6명 이상/, '#466 5명 무료 폐지 · 카드 등록 문구는 대표 결정 전'); // 대표 10/23
   assert.match(await p.getByTestId('landing-contact').innerText(), /dagym-in@naver\.com/);

@@ -16,7 +16,18 @@ try {
     await card.setContent(`<html><body style="margin:0;width:640px;height:640px;display:flex;flex-direction:column;justify-content:flex-end;padding:56px;box-sizing:border-box;font-family:Pretendard,'Noto Sans KR',system-ui,sans-serif;color:#fff;background:linear-gradient(150deg,rgb(${r},${g},${b}) 0%,rgb(${Math.round(r * 0.55)},${Math.round(g * 0.55)},${Math.round(b * 0.55)}) 100%)"><div style="font-size:26px;font-weight:600;opacity:.85">하늘솔루션</div><div style="font-size:62px;font-weight:800;line-height:1.2;margin-top:12px;word-break:keep-all">${title}</div></body></html>`);
     return card.screenshot({ type: 'png' });
   };
-  await seedSample(sql, today, { image }); await card.close();
+  const seed = await seedSample(sql, today, { image }); await card.close();
+  // 11/20 '자주 쓰는 기능' 구역 그림(자료실·결재·메시지·점검)용 자료: 자료실에 일반 회사 문서 몇 건(폴더별)
+  for (const [folder, name, mime] of [['계약·견적', '표준 견적서 양식.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'], ['계약·견적', '거래처 기본 계약서.pdf', 'application/pdf'], ['회사 소개', '회사 소개서 2026.pdf', 'application/pdf'],
+    ['회사 소개', '제품 소개 자료.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'], ['회의록', '11월 주간 회의록.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], ['인사·총무', '휴가 규정.pdf', 'application/pdf']]) {
+    const lf = await seed.c.ok('POST', '/api/library', { fileName: name, mimeType: mime, size: 2048, folder }).catch((e) => { console.log('library', e.message); return null; });
+    if (!lf) continue;
+    const buf = Buffer.alloc(2048, 32);
+    await fetch(BASE + lf.upload.url, { method: 'PUT', headers: { ...lf.upload.headers, 'content-length': String(buf.length) }, body: buf });
+    await seed.c.ok('POST', `/api/library/${lf.id}/complete`).catch((e) => console.log('library complete', e.message));
+  }
+  // 메신저 그림의 보낸 시각이 찍는 시각(밤)으로 보이지 않게 오전 업무 시간으로
+  if (seed.room) { const ms = await sql`select id from chat_messages where room_id = ${seed.room} order by id`; for (const [k, m] of ms.entries()) await sql`update chat_messages set created_at = ${`${today}T09:${String(20 + k * 3).padStart(2, '0')}:00+09:00`} where id = ${m.id}`; await sql`update chat_rooms set last_message_at = ${`${today}T09:${String(20 + Math.max(0, ms.length - 1) * 3).padStart(2, '0')}:00+09:00`} where id = ${seed.room}`; }
   // 로그인 → 캡처
   const ctx0 = await browser.newContext(); const p0 = await ctx0.newPage();
   await p0.goto(BASE + '/login'); await p0.getByLabel('이메일', { exact: true }).fill('sample@workin.test'); await p0.getByLabel('비밀번호').fill('sample-pass-1234');
@@ -27,11 +38,15 @@ try {
   const p = await lc.newPage();
   // 대표 11/14 #1047 · 범용화 G-13: 소개 그림에 우리 업무·이전 문구가 찍히면 안 된다 — 있으면 알림
   const OURS = /심사|\(가상\)|영업관리|현장 미등록|피트니스|헬스|아파트|단지|관리사무소|입주|회원|운동기구|다짐|하이링크/g; const found = [];
-  for (const [path, file] of [['/', 'home'], ['/tasks', 'tasks'], ['/calendar?view=week', 'calendar'], ['/s/sales', 'sales'], ['/s/marketing/approvals', 'marketing']]) { // 316차 #886: 마케팅 그림 = 승인함(인스타그램·페이스북 시안만) — 마케팅 홈은 다른 채널 단추가 보여 자동 게시처럼 읽힘
+  for (const [path, file] of [['/', 'home'], ['/tasks', 'tasks'], ['/calendar?view=week', 'calendar'], ['/s/sales', 'sales'], ['/s/marketing/approvals', 'marketing'],
+    ['/library', 'library'], ['/approvals', 'approvals'], [`/messages${seed.room ? `?room=${seed.room}` : ''}`, 'messages'], ['/check?tab=guide', 'check']]) { // 11/20 '자주 쓰는 기능' 구역
+ // 316차 #886: 마케팅 그림 = 승인함(인스타그램·페이스북 시안만) — 마케팅 홈은 다른 채널 단추가 보여 자동 게시처럼 읽힘
+    if (['library', 'approvals', 'messages', 'check'].includes(file)) await p.evaluate(() => { try { localStorage.setItem('wos_space', 'work'); sessionStorage.setItem('wos_space_ctx', 'work'); } catch {} }); // 공통 화면은 업무 공간 메뉴로(앞에서 마케팅 공간을 찍은 뒤라)
     await p.goto(BASE + path); await p.waitForLoadState('networkidle').catch(() => {}); await p.waitForTimeout(1200);
-    await p.addStyleTag({ content: '[data-testid="trial-banner"],[data-testid="daily-welcome"]{display:none!important}' }); await p.waitForTimeout(150); // 316차: 체험 D-n 띠(계정 상태)는 소개 그림에서 뺌
+    await p.addStyleTag({ content: '[data-testid="trial-banner"],[data-testid="daily-welcome"],[data-testid="tour-overlay"],[data-modal-root]{display:none!important}' }); await p.waitForTimeout(150); // 316차: 체험 D-n 띠(계정 상태)는 소개 그림에서 뺌
     const hit = [...new Set(((await p.evaluate(() => document.body.innerText)).match(OURS) ?? []))]; if (hit.length) found.push(`${file}: ${hit.join(' · ')}`);
-    await p.screenshot({ path: `public/landing/${file}.png` });
+    // '자주 쓰는 기능' 그림은 왼쪽 메뉴·머리줄을 빼고 본문만(카드 안에서 글자가 읽히게) 1040×585
+    await p.screenshot({ path: `public/landing/${file}.png`, ...(['library', 'approvals', 'messages', 'check'].includes(file) ? { clip: { x: 240, y: 56, width: 1040, height: 585 } } : {}) });
   }
   // OG 그림 1200×630
   const og = await lc.newPage(); await og.setViewportSize({ width: 1200, height: 630 });
@@ -40,5 +55,5 @@ try {
     <div style="font-size:30px;margin-top:28px;opacity:.95">14일 무료 체험 · 웹 · Android · iOS</div></body></html>`);
   await og.screenshot({ path: '/tmp/landing-og-preview.png' }); // 로고 S3 확정: public/landing/og.png 는 docs/handoff/brand/workin-s3/og-1200x630.png 고정본(덮어쓰지 않음)
   if (found.length) { console.log(`⚠ 소개 그림에 우리 업무·이전 문구:\n- ${found.join('\n- ')}`); process.exitCode = 1; }
-  console.log('랜딩 그림 저장: public/landing/{home,tasks,calendar,sales,marketing,approvals,og}.png');
+  console.log('랜딩 그림 저장: public/landing/{home,tasks,calendar,sales,marketing,library,approvals,messages,check}.png');
 } finally { await browser.close(); srv.proc.kill(); await sql.end(); }
