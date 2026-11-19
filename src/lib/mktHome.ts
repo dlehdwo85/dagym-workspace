@@ -199,7 +199,8 @@ export async function nightAssistantTick() {
   const h = hourKst();
   if (h < 22 && h >= 6 && process.env.MKT_NIGHT_ANYHOUR !== '1') return { skipped: 'day' }; // MKT_NIGHT_ANYHOUR=1 은 시험용(시각 조건 없이)
   const sql = db();
-  const ts = await sql<{ tenant: string }[]>`select tenant from ai_settings where coalesce((night_scope->>'draft')::boolean, false) limit 5`;
+  const ts = await sql<{ tenant: string }[]>`select tenant from ai_settings where coalesce((night_scope->>'draft')::boolean, false)
+    and tenant in (${(await import('./ai/consent')).autoAiTenants(sql)}) limit 5`; // AI 동의(대표 11/19): 회사 자료 자동 AI 처리가 켜진 회사만
   const out: { tenant: string; due: number; paused?: boolean }[] = [];
   const { produceContent, autoPaused } = await import('./mktAuto');
   const L = await import('./later');

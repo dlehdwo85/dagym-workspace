@@ -166,6 +166,7 @@ export async function mktAiUsd(tenant: string) {
  *  video = 영상 제작(기획·검수) — 마케팅 크레딧으로 따로 세므로 회사 AI 예산·요청 수는 보지 않는다 */
 export async function assertMktAi(tenant: string, o: { video?: boolean } = {}) {
   const { HttpError } = await import('./errors');
+  await (await import('./ai/consent')).assertAutoAi(tenant); // AI 동의(대표 11/19): 사람이 누르지 않은 자동 제작은 회사 스위치가 켜진 회사만
   await (await import('./ai/guard')).assertAiCredit();
   if (!o.video) {
     const B = await import('./ai/companyBudget');
@@ -1059,8 +1060,11 @@ export async function releaseBatches(tenant: string, s?: MktSettings): Promise<{
 /** tick: 규칙이 있는 회사만(한 번에 3곳) — 글 제작은 응답 뒤(runLater) */
 export async function mktAutoTick() {
   // 170차: 규칙이 없는 회사라도 이어서 만들 시안 세트 칸이 있으면 포함(자동 생성 일시정지 중에도)
-  const ts = await db()<{ tenant: string }[]>`select tenant from (select distinct tenant from mkt_rules where active
-    union select distinct tenant from mkt_contents where auto and status = 'draft' and produced_at is null and produce_at <= now() and (quality->>'sample' = 'true' or (rule_id is null and title like '%시안 세트%'))) x order by tenant limit 3`;
+  // AI 동의(대표 11/19): 회사 자료 자동 AI 처리가 꺼진 회사는 자동 제작 차례에 넣지 않는다(칸을 '실패'로 만들지 않게 고를 때부터 뺌)
+  const sql = db(); const { autoAiTenants } = await import('./ai/consent');
+  const ts = await sql<{ tenant: string }[]>`select tenant from (select distinct tenant from mkt_rules where active
+    union select distinct tenant from mkt_contents where auto and status = 'draft' and produced_at is null and produce_at <= now() and (quality->>'sample' = 'true' or (rule_id is null and title like '%시안 세트%'))) x
+    where tenant in (${autoAiTenants(sql)}) order by tenant limit 3`;
   const out = [];
   for (const t of ts) out.push({ tenant: t.tenant, ...(await runTenant(t.tenant, undefined, { later: true })) });
   return out;

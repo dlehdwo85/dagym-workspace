@@ -61,6 +61,17 @@ export async function companyAiAuto(tenant: string, sql: Sql = db()) {
   if (t && !t.ai_auto_at && testDefault()) return true;
   return !!t?.ai_auto;
 }
+/** 정기 작업의 회사 고르기 SQL 에 끼우는 조각: 회사 자료 자동 AI 처리가 켜진 회사 id — `and tenant in (${autoAiTenants(sql)})` */
+export const autoAiTenants = (sql: Sql) => sql`select id from tenants where ai_auto or (${testDefault()} and ai_auto_at is null)`;
+/**
+ * 사람이 누르지 않은 자동 작업이 이 회사 자료를 바깥 AI 로 보내도 되는지(회사 스위치) — 꺼져 있으면 403 ai_auto_off(한도 초과처럼 '멈춤'으로 다뤄짐: AI_STOP_CODES).
+ * 요청에 사람이 있으면(누가 단추를 눌러 시작한 일) 지나간다 — 그때는 그 사람의 동의를 바깥 호출 직전에 본다(assertScopeConsent).
+ */
+export async function assertAutoAi(tenant: string, sql: Sql = db()) {
+  if (aiScope.getStore()?.userId) return;
+  if (!(await companyAiAuto(tenant, sql))) throw new HttpError(403, 'ai_auto_off', '회사 자료 자동 AI 처리가 꺼져 있습니다 — 관리 › 회사 정보에서 켤 수 있습니다');
+}
+
 /** 관리 › 회사 정보의 스위치 보기 */
 export async function getCompanyAiAuto(u: SessionUser) {
   const tenant = (await import('../plans')).tenantOfUser(u);

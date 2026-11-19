@@ -119,7 +119,7 @@ export async function assertAiRequest(u: SessionUser, o: { legacy?: boolean; aut
   const tenant = tenantOfUser(u);
   // AI 동의(대표 11/19 — 애플 5.1.2): 사람이 누른 AI 는 그 사람의 동의, 사람이 누르지 않은 자동 작업(auto)은 회사 스위치
   const C = await import('./ai/consent');
-  if (o.auto) { if (!(await C.companyAiAuto(tenant))) throw new HttpError(403, 'ai_auto_off', '회사 자료 자동 AI 처리가 꺼져 있습니다'); }
+  if (o.auto) await C.assertAutoAi(tenant);
   else await C.assertAiConsent(u);
   await (await import('./ai/companyBudget')).assertCompanyAi(tenant, { legacy: !!o.legacy });
   const { limits } = await effectiveLimits(tenant);

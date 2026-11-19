@@ -87,6 +87,7 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
   let model = docModel(job.design);
   try {
     await (await import('./guard')).assertAiCredit(); // 크레딧 부족으로 막혀 있으면 호출하지 않음
+    if (job.user_id) await (await import('./consent')).assertAiConsent({ id: job.user_id }, sql); // AI 동의(대표 11/19): 문서를 시킨 사람이 그사이 동의를 거뒀으면 바깥으로 보내지 않는다(밤으로 미룬 작업·다시 하기)
     // 참고 파일 + (고치기면) 직전 버전 결과 + 회사 로고 → 컨테이너에 올림
     const uploads: { id: string; name: string; role: string }[] = [];
     for (const r of job.ref_file_ids) { const f = await anthropicFileFor(r); if (f) uploads.push({ ...f, role: '참고 자료' }); }
