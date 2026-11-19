@@ -17,6 +17,10 @@ before(async () => {
   const me = await c.ok('GET', '/api/auth/me');
   other = { c, tenant: me.user.tenant, unit: me.orgUnits[0].id };
   assert.ok(other.tenant && other.tenant !== 'default');
+  // 이 파일은 손으로 만든 자료만 본다 — 템플릿(가입 때·처음 열 때 자동 설치)은 check-templates.test.mjs 에서.
+  // 기본 회사는 '이미 설치함'으로 표시해 자동 설치를 건너뛰고, 가입한 회사는 설치된 템플릿 자료를 비워 빈 상태에서 시작
+  await sql`insert into chk_installs (tenant, tpl) values ('default', 'common') on conflict do nothing`;
+  await sql`delete from chk_items where tenant = ${other.tenant}`; await sql`delete from chk_place_types where tenant = ${other.tenant}`; await sql`delete from chk_categories where tenant = ${other.tenant}`;
 });
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 

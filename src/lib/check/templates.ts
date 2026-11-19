@@ -63,7 +63,7 @@ const FITNESS: CheckTemplate = {
 };
 
 const COMMUNITY: CheckTemplate = {
-  key: 'community', name: '아파트·건물 커뮤니티 시설', description: '독서실·도서관·골프연습장·사우나 등 공용 시설',
+  key: 'community', name: '아파트·건물 공용 시설', description: '독서실·도서관·골프연습장·사우나 등 함께 쓰는 시설',
   placeTypes: [{ key: 'reading-room', name: '독서실' }, { key: 'library', name: '작은도서관' }, { key: 'golf-range', name: '골프연습장' }, { key: 'screen-golf', name: '스크린 골프룸' }, { key: 'cafe', name: '카페' }, { key: 'sauna', name: '사우나' }],
   items: [
     { key: 'reading-seats', title: '독서실 좌석·사물함', category: 'facility', places: ['reading-room'], method: 'look', pass: '좌석·사물함 번호가 고정돼 있고 이용자 이름이 가려져 있음', blind: ['사물함 이름표'], fix: { note: '다시 붙이기·가림 처리', dueDays: 3 }, cycle: 'weekly' },

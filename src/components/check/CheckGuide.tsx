@@ -62,7 +62,7 @@ function Guide({ canEdit }: { canEdit: boolean }) {
     return [...m.entries()];
   }, [list.data]);
   const filtered = !!(dq || cat || pt || unit);
-  const sel = cx(inputCls, 'h-9 w-auto min-w-0 py-1 text-xs');
+  const sel = cx(inputCls, 'h-9 min-w-0 py-1 text-xs sm:!w-auto');
   return (
     <div className="space-y-3" data-testid="check-guide">
       <div className="flex flex-wrap items-center gap-2">
@@ -72,7 +72,7 @@ function Guide({ canEdit }: { canEdit: boolean }) {
         </label>
         {canEdit && <Button size="sm" onClick={() => setOpen('new')} data-testid="check-item-add"><Plus />{C.add}</Button>}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap">
         <select className={sel} value={cat} onChange={(e) => setCat(e.target.value)} aria-label={C.category} data-testid="check-filter-category">
           <option value="">{C.category}: {C.all}</option>
           {(cats.data?.categories ?? []).filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.parent_id ? '— ' : ''}{c.name}</option>)}
@@ -87,7 +87,7 @@ function Guide({ canEdit }: { canEdit: boolean }) {
             {units.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         )}
-        {canEdit && <label className="ml-auto flex items-center gap-1.5 text-xs text-ink-2"><input type="checkbox" checked={off} onChange={(e) => setOff(e.target.checked)} />안 쓰는 항목도</label>}
+        {canEdit && <label className="ml-auto flex items-center gap-1.5 text-xs text-ink-2 max-sm:col-span-2"><input type="checkbox" checked={off} onChange={(e) => setOff(e.target.checked)} />안 쓰는 항목도</label>}
       </div>
       {list.error ? <ErrorBox error={list.error} retry={list.reload} /> : !list.data ? <Skeleton rows={6} />
         : !groups.length ? (filtered ? <Empty title={C.emptyFiltered} /> : <Empty title={C.emptyTitle} action={canEdit ? <Button size="sm" onClick={() => setOpen('new')}><Plus />{C.add}</Button> : undefined}>{C.emptyHint}</Empty>)
