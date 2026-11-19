@@ -26,21 +26,9 @@ export function contactPhone(raw: string | undefined | null) {
   return d.length === 11 ? `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}` : d.startsWith('02') ? `${d.slice(0, 2)}-${d.slice(2, d.length - 4)}-${d.slice(-4)}` : `${d.slice(0, 3)}-${d.slice(3, d.length - 4)}-${d.slice(-4)}`;
 }
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-function mailHtml(title: string, lines: string[], button?: { label: string; url: string }) {
-  return `<!doctype html><html lang="ko"><body style="margin:0;padding:0;background:#f4f6fa">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fa;padding:24px 12px"><tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;border:1px solid #e5e7eb;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#111827">
-<tr><td style="padding:24px 24px 8px;font-size:13px;color:#0f766e;font-weight:700">워크인</td></tr>
-<tr><td style="padding:0 24px 12px;font-size:20px;font-weight:700;line-height:1.4">${esc(title)}</td></tr>
-<tr><td style="padding:0 24px ${button ? 16 : 24}px;font-size:15px;line-height:1.6;color:#374151">${lines.map(esc).join('<br>')}</td></tr>
-${button ? `<tr><td align="center" style="padding:0 24px 24px"><a href="${esc(button.url)}" style="display:block;background:#0f766e;color:#ffffff;text-decoration:none;font-size:17px;font-weight:700;padding:16px 12px;border-radius:10px;text-align:center">${esc(button.label)}</a></td></tr>` : ''}
-</table></td></tr></table></body></html>`;
-}
 async function mailTo(to: string, title: string, lines: string[], button?: { label: string; url: string }) {
-  const { sendMail } = await import('./mail');
-  const text = [title, '', ...lines, ...(button ? ['', `${button.label}: ${button.url}`] : [])].join('\n');
-  try { await sendMail(to, `[워크인] ${title}`, text, mailHtml(title, lines, button)); return true; }
+  const { sendFramedMail } = await import('./mail'); // 대표 11/19: 가입 흐름 메일은 한 틀(로고·제목·본문·단추 + 주소 글자)
+  try { await sendFramedMail(to, title, lines, button); return true; }
   catch (e) { await (await import('./log')).logError('signup_mail', e).catch(() => {}); return false; }
 }
 

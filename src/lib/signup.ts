@@ -4,7 +4,7 @@ import { db, type Sql } from './db';
 import { HttpError, badRequest, notFound } from './errors';
 import { hashPassword, newToken, sha256 } from './crypto';
 import { audit } from './log';
-import { appUrl, mailConfigured, mailDevMode, sendMail } from './mail';
+import { appUrl, mailConfigured, mailDevMode, sendFramedMail } from './mail';
 import { ensurePersonalCalendar } from './access';
 import { contactPhone, signupApprovalOn } from './signupApproval';
 
@@ -100,9 +100,12 @@ export async function verificationLink(sql: Sql, userId: string, hours = 24) {
 async function issueVerification(sql: Sql, userId: string, email: string) {
   const approval = signupApprovalOn();
   const { token, url: link } = await verificationLink(sql, userId, approval ? 24 * 7 : 24);
+  // 대표 11/19: 글자뿐인 메일은 네이버 메일 앱에서 주소가 안 눌림 → 틀(로고·제목·본문·[이메일 확인] 단추 + 주소 글자)로. 글자 판에도 주소가 그대로 들어간다
+  const button = { label: '이메일 확인', url: link };
   const r = approval
-    ? await sendMail(email, '[워크인] 체험 신청을 받았습니다 — 이메일 확인', `워크인 14일 무료 체험 신청을 받았습니다. 24시간 안에 연락드립니다.\n승인되면 메일로 알려 드리고, 그때부터 14일 체험이 시작됩니다.\n\n아래 링크로 메일 주소를 확인해 두시면 승인 뒤 바로 로그인할 수 있어요(7일 유효 — 승인 메일에서도 확인할 수 있습니다).\n\n${link}\n\n본인이 신청하지 않았다면 이 메일을 무시하세요.`)
-    : await sendMail(email, '[워크인] 이메일 확인', `워크인 가입을 마치려면 아래 링크를 눌러 주세요 (24시간 유효).\n\n${link}\n\n본인이 가입하지 않았다면 이 메일을 무시하세요.`);
+    ? await sendFramedMail(email, '체험 신청을 받았습니다', ['워크인 14일 무료 체험 신청을 받았습니다. 24시간 안에 연락드립니다.', '승인되면 메일로 알려 드리고, 그때부터 14일 체험이 시작됩니다.', '',
+      '아래 [이메일 확인]을 눌러 메일 주소를 확인해 두시면 승인 뒤 바로 로그인할 수 있어요(7일 유효 — 승인 메일에서도 확인할 수 있습니다).', '', '본인이 신청하지 않았다면 이 메일을 무시하세요.'], button, '[워크인] 체험 신청을 받았습니다 — 이메일 확인')
+    : await sendFramedMail(email, '이메일 확인', ['워크인 가입을 마치려면 아래 [이메일 확인]을 눌러 주세요(24시간 유효).', '', '본인이 가입하지 않았다면 이 메일을 무시하세요.'], button);
   return r === 'dev' ? `/verify/${token}` : undefined;
 }
 

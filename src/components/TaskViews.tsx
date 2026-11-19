@@ -2,6 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import { SPACE_META } from './spaceMeta';
 import { PhoneInquiryButton } from './PhoneInquiry';
+import { QuickMeetingButton } from './meet/QuickMeeting';
 import { attKindSummaryCounts } from './Attachments';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -360,8 +361,10 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     <div className="space-y-3">{/* 상세 패널은 늘 목록 위 덮개 — 목록 열·업무 이름이 눌리지 않게(로컬 검수 81·82: 1280~1720px) */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold tracking-tight">{title ?? '업무'}</h1>
-        {sess.tenant?.inquiries && !fixed?.view && <PhoneInquiryButton className="ml-auto" />}
-        {!fixed?.view && <Link href="/tasks/import" className={cx('inline-flex items-center gap-1 rounded-input border border-line bg-white px-2.5 py-1.5 text-xs font-medium text-ink-2 shadow-card hover:border-brand-600 hover:text-brand-700', !sess.tenant?.inquiries && 'ml-auto', 'max-sm:hidden')} data-testid="task-import-open"><FileSpreadsheet className="size-4" />엑셀로 가져오기</Link>}
+        {/* 대표 11/19 #1070: 일정 없이 바로 회의 — 작은 단추(화상회의가 켜진 회사만). 오른쪽 단추 줄의 맨 앞이라 여기가 ml-auto 를 가짐 */}
+        {!fixed?.view && <QuickMeetingButton className="ml-auto" />}
+        {sess.tenant?.inquiries && !fixed?.view && <PhoneInquiryButton className={sess.features.meetings ? undefined : 'ml-auto'} />}
+        {!fixed?.view && <Link href="/tasks/import" className={cx('inline-flex items-center gap-1 rounded-input border border-line bg-white px-2.5 py-1.5 text-xs font-medium text-ink-2 shadow-card hover:border-brand-600 hover:text-brand-700', !sess.tenant?.inquiries && !sess.features.meetings && 'ml-auto', 'max-sm:hidden')} data-testid="task-import-open"><FileSpreadsheet className="size-4" />엑셀로 가져오기</Link>}
         <div className="flex rounded-input border border-line bg-white p-0.5 text-sm shadow-card" role="tablist" aria-label="보기 방식">
           {MODES.map(([m, l, I]) => (
             <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}
