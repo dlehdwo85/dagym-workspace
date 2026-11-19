@@ -172,6 +172,7 @@ import { checkGuide } from './checkGuide.step.mjs';
 import { checkRun } from './checkRun.step.mjs';
 import { quickMeeting } from './quickMeeting.step.mjs';
 import { aiConsent } from './aiConsent.step.mjs';
+import { agreements } from './agreements.step.mjs';
 import { meeting } from './meeting.step.mjs';
 import { spaces } from './spaces.step.mjs';
 import { marketing } from './marketing.step.mjs';
@@ -2717,6 +2718,7 @@ await step('#497 R44 AI 비서 답 실시간 출력: 쓰는 중 말풍선(글이
 await step('점검 1단계 점검 가이드(375): 공통 기본 템플릿 · 찾기 · 항목 추가 · 기준 사진 · 직원 공유(2판·개정 이력) · 글자로 복사 · 업종 템플릿 넣기 · 직원은 공유된 양호 기준만', () => checkGuide({ owner, staff, BASE, SHOTS }));
 await step('AI 동의(대표 11/19·애플 5.1.2): 들어오면 동의 창(무엇을·어디로·왜·동의하지 않으면) · 나중에 정하기 · 동의 전 AI 는 막힘 → 동의 뒤 답 · 설정에서 끄고 켜기 · 회사 자동 AI 스위치 · 휴대폰 폭', () => aiConsent({ owner, BASE, FAKE, SHOTS }));
 await step('점검 2단계 점검하기·보완 흐름(375): 코스로 점검(양호·보완 필요·메모·사진) → 끝내기 = 보완 요청 업무 → 완료되면 확인 대기 → 다시 보완(새 업무 2차) → 양호 확인 · 수시 점검 · 코스 만들기', () => checkRun({ owner, ctx, BASE, SHOTS }));
+await step('계약 관리 1단계: 관리 메뉴 [계약 관리] → 등록 → 상세(만료 임박 D-n)·계약서 파일 → 요약 숫자 → 자동 연장은 통보 기한 기준 → 갱신 등록(지난 기간) → 알림 날짜 → 종료 → 390 · 권한 없는 직원은 화면 없음', () => agreements({ owner, staff, ctx, sql, BASE, SHOTS }));
 await step('#516 승인함 시안 없음: 승인할 시안 수에서 빼고 빨간 묶음·빨간 띠·[승인] 없음 → [지금 만들기](서버 그리기·크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧]', () => mktVisual({ owner, ctx, sql, BASE, SHOTS }));
 await step('#545(+#534) 수정 요청 → AI 수정본: 카드 [수정 요청] → AI 가 글·시안을 함께 고친 수정본 v3 바로 승인함 → 배지 \'수정본 v3 — 반영한 요청\'·AI 수정 1번째·[수정본 v3 승인] → 이전 버전과 나란히 비교(시안·바뀐 줄) → 같은 카드 다시 수정 요청(사진만 = v4) → 상세 비교 · 휴대폰 폭', () => mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('255차 #791·#792 승인함: 게시일 지난 승인 대기 → 게시일 지남 띠·[승인] = 다음 빈 게시 칸 · 영상 다시 만들기 비용 카드([승인하고 제작 요청]·[이미지 카드뉴스로]) · 처리 안 된 수정 요청 [AI 수정본 만들기] · 휴대폰 폭', () => mktInbox255({ owner, ctx, sql, BASE, FAKE, SHOTS }));

@@ -258,7 +258,7 @@ export async function agreementSummary(u: SessionUser) {
 
 // ---------- 정기 실행: 만료 알림 ----------
 type TickRow = { id: string; tenant: string; title: string; counterparty: string; owner_id: string | null; end_date: string; auto_renew: boolean; notice_days: number | null; alert_days: number[] | null; notify_user_ids: string[];
-  notified: Record<string, string>; review_task: boolean; review_task_basis: string | null; created_by: string | null };
+  notified: Record<string, string>; review_task: boolean; review_task_id: string | null; created_by: string | null };
 const md = (d: string) => `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일`;
 /** 알림 한 건의 글(기준일 종류에 따라) */
 export function alertText(a: { title: string; end_date: string; auto_renew: boolean }, b: { date: string; kind: 'notice' | 'end' }, stage: number | 'passed') {
@@ -277,7 +277,7 @@ async function actorFor(userId: string, sql: Sql): Promise<SessionUser | null> {
 }
 export async function agreementTick(now = new Date()) {
   const sql = db(); const today = todaySeoul(now);
-  const rows = await sql<TickRow[]>`select a.id, a.tenant, a.title, a.counterparty, a.owner_id, a.end_date::text, a.auto_renew, a.notice_days, a.alert_days, a.notify_user_ids, a.notified, a.review_task, a.review_task_basis::text, a.created_by
+  const rows = await sql<TickRow[]>`select a.id, a.tenant, a.title, a.counterparty, a.owner_id, a.end_date::text, a.auto_renew, a.notice_days, a.alert_days, a.notify_user_ids, a.notified, a.review_task, a.review_task_id, a.created_by
     from agreements a join tenants t on t.id = a.tenant where a.status = 'active' and a.deleted_at is null and a.end_date is not null and t.status = 'active'
       and a.end_date > (${today}::date - interval '60 days') limit 2000`;
   const tdays = new Map<string, number[]>(); let sent = 0, tasks = 0;
@@ -299,8 +299,8 @@ export async function agreementTick(now = new Date()) {
       await sql`update agreements set notified = notified || ${sql.json({ [key]: now.toISOString() } as never)} where id = ${a.id}`;
       const text = alertText(a, b, stage);
       if (active.length) { await notify(sql, { userIds: active, type: 'agreement_expiry', title: text.title, body: `${a.counterparty ? a.counterparty + ' · ' : ''}${text.body}`, link: `/agreements?open=${a.id}`, entityType: 'agreement', entityId: a.id, dedupeKey: `agr:${a.id}:${key}` }); sent++; }
-      // 첫 알림 때 담당자에게 '[계약 갱신 검토]' 업무 1건(이 기준일에 한 번)
-      if (a.review_task && stage !== 'passed' && a.owner_id && a.review_task_basis !== b.date) {
+      // 첫 알림 때 담당자에게 '[계약 갱신 검토]' 업무 1건 — 이 기간에 한 번(만료일을 조금 고쳐도 다시 만들지 않음 · [갱신 등록]하면 다음 기간에 새로)
+      if (a.review_task && stage !== 'passed' && a.owner_id && !a.review_task_id) {
         const actor = await actorFor(a.owner_id, sql);
         if (actor) {
           const { createTask } = await import('./tasks');
