@@ -40,7 +40,7 @@ export function ClockCard() {
     <section className="flex flex-wrap items-center gap-2 rounded-card border border-line bg-white px-3 py-2 shadow-card" data-testid="home-clock">
       <MapPin className="size-4 shrink-0 text-emerald-600" />
       <div className="min-w-0 flex-1 text-sm" data-testid="home-clock-status">
-        {!t?.inTime ? <span className="text-ink-2">아직 출근 전입니다{d.sites ? '' : ' (현장 미등록 — 시각만 기록)'}</span>
+        {!t?.inTime ? <span className="text-ink-2">아직 출근 전입니다{d.sites ? '' : ' (근무지 미등록 — 시각만 기록)'}</span>
           : <span><b>출근 {t.inTime}</b>{t.inSite && <span className={cx('ml-1 text-xs', t.inInside === false ? 'text-amber-700' : 'text-ink-3')}>{t.inSite}{t.inInside === false ? ` 밖 · ${t.inReason}` : ''}</span>}
             {t.outTime && <> · <b>퇴근 {t.outTime}</b>{t.outSite && <span className={cx('ml-1 text-xs', t.outInside === false ? 'text-amber-700' : 'text-ink-3')}>{t.outSite}{t.outInside === false ? ` 밖 · ${t.outReason}` : ''}</span>}</>}</span>}
       </div>

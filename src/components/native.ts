@@ -134,6 +134,32 @@ export async function shareLink(o: { title: string; text: string; url: string })
   if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('Share')) { await Share.share({ ...o, dialogTitle: o.title }); return true; }
   return false;
 }
+/**
+ * 화상회의 — 휴대폰 화면 전체 공유(대표 11/19). 웹 화면(브라우저·앱의 WebView)은 기기 화면을 잡을 수 없어 앱 쪽 기능(플러그인 'WorkinScreenShare')이 맡는다:
+ * 앱이 기기 화면을 잡아(안드로이드 화면 녹화 권한 · 아이폰 방송 확장), 서버가 준 '화면 전용 입장권'(POST …/screen-ticket)으로 영상 서버에 따로 접속해 보낸다.
+ * 플러그인이 없는 앱(예전 버전)·브라우저에서는 available = false → 단추가 보이지 않는다. 규격: docs/handoff/LOCAL_LOG.md '휴대폰 화면 공유' 요청.
+ */
+interface ScreenSharePlugin {
+  isSupported(): Promise<{ supported: boolean }>;
+  start(o: { url: string; token: string; title?: string }): Promise<{ started: boolean }>;
+  stop(): Promise<void>;
+  addListener(event: 'stopped', fn: () => void): Promise<PluginListenerHandle>;
+}
+const ScreenShareNative = registerPlugin<ScreenSharePlugin>('WorkinScreenShare');
+export async function nativeScreenShareAvailable(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('WorkinScreenShare')) return false;
+  try { return (await ScreenShareNative.isSupported()).supported === true; } catch { return false; }
+}
+export async function nativeScreenShareStart(o: { url: string; token: string; title?: string }) {
+  const r = await ScreenShareNative.start(o);
+  if (!r?.started) throw new Error('화면 공유를 시작하지 않았습니다(권한을 허용해야 합니다)');
+}
+export async function nativeScreenShareStop() { if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('WorkinScreenShare')) await ScreenShareNative.stop().catch(() => {}); }
+/** 기기 쪽에서 공유가 끝났을 때(알림창의 [중지] 등) — 돌려주는 함수를 부르면 듣기를 멈춘다 */
+export async function onNativeScreenShareStopped(fn: () => void): Promise<() => void> {
+  const h = await ScreenShareNative.addListener('stopped', fn);
+  return () => { void h.remove(); };
+}
 const canShareFiles = () => Capacitor.getPlatform() === 'ios' && Capacitor.isPluginAvailable('Filesystem') && Capacitor.isPluginAvailable('Share');
 /** 예전 앱(플러그인 없음)에서는 서버 알림을 그대로 받는다 */
 const hasLocal = () => Capacitor.isPluginAvailable('LocalNotifications');
@@ -402,9 +428,19 @@ export function isNativeApp() {
   return Capacitor.isNativePlatform();
 }
 
+/**
+ * 418차 2부(대표 11/19 — 안드로이드의 네이버 앱 안 브라우저에서 '아이폰은…' 안내가 나옴): 알림을 못 받는 까닭을 기기·브라우저에 맞게.
+ * 아이폰·아이패드 = 앱 또는 홈 화면 웹앱 · 다른 앱 안 브라우저(네이버·카카오톡 등) = 크롬으로 열기 또는 앱 설치 · 그 밖 = 최신 브라우저
+ */
+export function pushUnsupportedMsg(ua: string, touchPoints = 0) {
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && touchPoints > 1);
+  if (ios) return '아이폰·아이패드는 워크인 앱 또는 "홈 화면에 추가"한 웹앱에서 알림을 받을 수 있습니다.';
+  if (/NAVER\(inapp|KAKAOTALK|Instagram|FBAN|FBAV|FB_IAB|Line\/|DaumApps|BAND\/|; wv\)/i.test(ua)) return '지금은 다른 앱 안의 브라우저라 알림을 받을 수 없습니다. 크롬(또는 삼성 인터넷)으로 열거나 워크인 앱을 설치해 주세요.';
+  return '이 브라우저는 알림(웹 푸시)을 지원하지 않습니다. 크롬·엣지 같은 최신 브라우저나 워크인 앱을 써 주세요.';
+}
 /** 웹 푸시 구독 (PC·안드로이드 크롬, iOS 홈 화면 웹앱 16.4+) */
 export async function subscribeWebPush(): Promise<string> {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('이 브라우저는 웹 푸시를 지원하지 않습니다. (iPhone 은 앱 또는 홈 화면에 추가한 웹앱에서 가능)');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error(pushUnsupportedMsg(navigator.userAgent, navigator.maxTouchPoints));
   const { publicKey } = await api('/api/push/vapid');
   if (!publicKey) throw new Error('서버에 웹 푸시 키가 설정되지 않았습니다 (관리자 설정 필요)');
   const perm = await Notification.requestPermission();

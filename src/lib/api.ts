@@ -4,6 +4,7 @@ import { currentUser } from './auth';
 import { db } from './db';
 import { HttpError, unauthorized, badRequest, forbidden } from './errors';
 import { logError } from './log';
+import { aiScope } from './ai/consent';
 import { describeZod } from './zod-ko';
 import type { SessionUser } from './types';
 
@@ -65,11 +66,14 @@ export function handler<P = Record<string, string>>(
   opts: Opts & { public: true },
 ): (req: NextRequest, ctx: { params: Promise<P> }) => Promise<Response>;
 export function handler<P>(fn: (ctx: any) => Promise<unknown>, opts: Opts = {}) {
-  return async (req: NextRequest, ctx: { params: Promise<P> }) => {
+  // AI 동의(대표 11/19): 이 요청을 보낸 사람을 적어 둔다 → 바깥 AI 호출 바로 앞(provider·stt)에서 그 사람의 동의를 한 번 더 본다
+  return (req: NextRequest, ctx: { params: Promise<P> }) => aiScope.run({}, () => run(req, ctx));
+  async function run(req: NextRequest, ctx: { params: Promise<P> }) {
     try {
       checkOrigin(req);
       const user = await currentUser();
       if (!user && !opts.public) throw unauthorized();
+      const scope = aiScope.getStore(); if (scope && user) scope.userId = user.id;
       const params = (await ctx?.params) ?? ({} as P);
       // V28-3 지원 모드: 읽기 전용(끝내기만 허용), 모든 요청을 운영자 이름으로 감사 기록
       if (user?.support) {
@@ -117,7 +121,7 @@ export function handler<P>(fn: (ctx: any) => Promise<unknown>, opts: Opts = {}) 
     } catch (e) {
       return errorResponse(e, req);
     }
-  };
+  }
 }
 
 export async function body<T extends ZodTypeAny>(req: NextRequest, schema: T): Promise<z.infer<T>> {
@@ -157,7 +161,8 @@ function afterRequest(method: string) {
         const [r] = await db()<{ age: number | null }[]>`select extract(epoch from now() - max(started_at))::int as age from job_runs where job = 'tick' and status in ('ok', 'running', 'error')`;
         if (r?.age !== null && r?.age !== undefined && r.age < Number(process.env.PIGGYBACK_MIN_AGE_S ?? 900)) return; // 10/21: 10분 → 15분(스케줄러와 같은 간격)
         const { runTick } = await import('./jobs');
-        await runTick('piggyback');
+        // 정기 작업은 '이 요청을 보낸 사람'의 일이 아니다 → 그 사람의 AI 동의와 묶지 않는다(빈 범위에서 실행)
+        await aiScope.run({}, () => runTick('piggyback'));
       } catch (e) { await logError('piggyback-tick', e); }
     });
   } catch { /* after() 를 쓸 수 없는 환경(시험 스크립트 등)은 건너뜀 */ }

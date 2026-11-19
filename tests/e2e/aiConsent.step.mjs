@@ -1,0 +1,99 @@
+// AI 동의(대표 11/19 결정 — 애플 11/15 반려 5.1.2): 바깥 AI 로 보내기 전에 무엇을·어디로·왜 보내는지 알리고 허락받기
+// ① 아직 정하지 않은 사람은 들어오면 동의 창(무엇을·어디로·왜·동의하지 않으면, 받는 곳 = Anthropic) ② [나중에 정하기] → 이 기기에서는 다시 안 뜸
+// ③ 동의하지 않은 사람이 AI 를 누르면 짧은 안내 → [내용 보고 정하기] → [AI 기능 쓰기] → AI 가 답함 ④ 설정 › 개인정보·AI 에서 끄고 다시 켜기
+// ⑤ 관리 › 회사 정보의 '회사 자료 자동 AI 처리' ⑥ 휴대폰 폭에서 넘침 없음. (시험 서버는 '아직 정하지 않음'을 동의함으로 보므로, 들어올 때 뜨는 창은 상태 응답만 바꿔서 봄)
+import assert from 'node:assert/strict';
+
+export async function aiConsent({ owner, BASE, FAKE, SHOTS }) {
+  const q = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: items }) });
+  const say = (text) => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn' });
+  const put = (agreed) => owner.evaluate((a) => fetch('/api/account/ai-consent', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agreed: a }) }).then((r) => r.json()), agreed);
+  let fakeNone = true; // 들어올 때: 아직 정하지 않은 사람처럼
+  const route = (r) => (fakeNone && r.request().method() === 'GET' ? r.fulfill({ json: { state: 'none', at: null, version: '2026-11', stt: false } }) : r.continue());
+  await owner.route('**/api/account/ai-consent', route);
+  try {
+    await owner.setViewportSize({ width: 1366, height: 900 });
+    await owner.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('wos_ai_later_')) localStorage.removeItem(k); });
+    // ① 들어오면 동의 창
+    await owner.goto(BASE + '/tasks');
+    const box = owner.getByTestId('ai-consent');
+    await box.waitFor({ timeout: 15000 });
+    // 대표 11/19 밤: 펼치지 않아도 보이는 것 = 한 문장(받는 곳 이름 포함) + 세 줄. 항목·나라·까닭은 [자세히 보기] 안(접혀 있음)
+    assert.equal((await owner.getByRole('dialog', { name: 'AI 기능 사용 안내' }).count()) > 0, true, '창 제목');
+    assert.match(await box.getByTestId('ai-consent-lead').innerText(), /답을 만들 때만, 그때 필요한 내용만 AI 회사\(Anthropic\)에 보내 처리합니다/);
+    assert.equal(await box.getByTestId('ai-consent-points').locator('li').count(), 3, '세 줄');
+    await box.getByText('보낸 내용은 AI를 가르치는 데 쓰이지 않습니다.').waitFor();
+    await box.getByText('동의하지 않아도 업무·일정·메신저·결재는 그대로 씁니다.').waitFor();
+    assert.equal(await box.getByText('무엇을 보내나요', { exact: true }).isVisible(), false, '자세한 것은 접혀 있음');
+    assert.ok(!/미국/.test(await box.getByTestId('ai-consent-lead').innerText()), '펼치지 않은 본문에는 나라 없이 받는 곳 이름만');
+    await owner.screenshot({ path: `${SHOTS}/ai-consent-short.png` });
+    await box.getByTestId('ai-consent-more').locator('summary').click();
+    for (const t of ['무엇을 보내나요', '어디로 보내나요', '왜 보내나요', '동의하지 않으면']) await box.getByText(t, { exact: true }).waitFor();
+    const where = await owner.getByTestId('ai-consent-recipients').innerText();
+    assert.match(where, /Anthropic\(미국\)/); assert.ok(!/OpenAI/.test(where), '지금 실제로 보내는 곳만(받아쓰기 키 없음 → OpenAI 줄 없음)');
+    await box.getByText('AI 기능만 쓸 수 없습니다. 업무·일정·메신저·결재는 그대로 씁니다.').waitFor();
+    await owner.screenshot({ path: `${SHOTS}/ai-consent.png` });
+    // ⑥ 휴대폰 폭
+    await owner.setViewportSize({ width: 390, height: 844 });
+    await owner.getByTestId('ai-consent-agree').waitFor();
+    assert.ok(await owner.evaluate(() => document.documentElement.scrollWidth <= 390), '390 가로 넘침 없음');
+    const btn = await owner.getByTestId('ai-consent-agree').boundingBox();
+    assert.ok(btn && btn.y + btn.height <= 844, '동의 단추가 화면 안에 보임');
+    await owner.screenshot({ path: `${SHOTS}/ai-consent-mobile-open.png` }); // 펼친 채로도 단추 줄은 아래에 붙어 보임
+    await owner.getByTestId('ai-consent-more').locator('summary').click(); // 다시 접기
+    await owner.waitForTimeout(150);
+    await owner.screenshot({ path: `${SHOTS}/ai-consent-mobile.png` });
+    await owner.getByTestId('ai-consent-more').locator('summary').click();
+    await owner.setViewportSize({ width: 1366, height: 900 });
+    // ② 나중에 정하기 → 닫히고, 다시 들어와도 이 기기에서는 안 뜸
+    await owner.getByTestId('ai-consent-later').click();
+    await box.waitFor({ state: 'hidden' });
+    await owner.reload(); await owner.waitForTimeout(2500);
+    assert.equal(await box.count(), 0, '나중에 정하기를 누른 기기에서는 들어올 때 다시 안 뜸');
+    // ③ 동의하지 않음 상태에서 AI 를 누름 → 짧은 안내 → 내용 보고 정하기 → 동의 → AI 가 답함
+    fakeNone = false;
+    assert.equal((await put(false)).state, 'declined');
+    await owner.goto(BASE + '/assistant');
+    const ask = owner.getByLabel('AI 에게 요청', { exact: true });
+    await ask.fill('이번 주 내 업무 정리해줘'); await ask.press('Enter');
+    const blocked = owner.getByTestId('ai-consent-blocked');
+    await blocked.waitFor();
+    await blocked.getByText(/Anthropic\(미국\)/).waitFor();
+    await owner.getByTestId('ai-consent-blocked-open').click();
+    await box.waitFor();
+    await owner.getByTestId('ai-consent-agree').click();
+    await box.waitFor({ state: 'hidden' });
+    await owner.getByText(/AI 기능을 켰습니다/).first().waitFor();
+    await q([say('이번 주 업무는 2건입니다.')]);
+    await ask.fill('이번 주 내 업무 정리해줘'); await ask.press('Enter');
+    await owner.getByTestId('ai-chat').getByText('이번 주 업무는 2건입니다.').waitFor({ timeout: 20000 });
+    // ④ 설정 › 개인정보·AI: 끄기 → 다시 켜기(켤 때는 안내 글을 읽고 동의)
+    await owner.goto(BASE + '/settings');
+    const set = owner.getByTestId('ai-consent-setting');
+    await set.scrollIntoViewIfNeeded();
+    const tg = owner.getByTestId('ai-consent-toggle');
+    await owner.waitForFunction(() => document.querySelector('[data-testid=ai-consent-toggle]')?.checked === true);
+    await set.getByText(/Anthropic\(미국\).*전송됩니다/).waitFor();
+    await tg.click();
+    await owner.getByText(/AI 기능을 껐습니다/).first().waitFor();
+    await owner.waitForFunction(() => document.querySelector('[data-testid=ai-consent-toggle]')?.checked === false);
+    await set.getByText('동의하지 않음').waitFor();
+    await tg.click(); // 켜기 = 동의 창
+    await box.waitFor();
+    await owner.getByTestId('ai-consent-agree').click();
+    await owner.waitForFunction(() => document.querySelector('[data-testid=ai-consent-toggle]')?.checked === true);
+    await owner.getByTestId('ai-consent-review').click(); // 내용 다시 보기
+    await box.waitFor();
+    await owner.keyboard.press('Escape');
+    // ⑤ 관리 › 회사 정보: 회사 자료 자동 AI 처리(기본 회사는 켜짐)
+    await owner.goto(BASE + '/admin/company');
+    const auto = owner.getByTestId('ai-auto-setting');
+    await auto.scrollIntoViewIfNeeded();
+    await auto.getByText('회사 자료 자동 AI 처리').waitFor();
+    assert.equal(await owner.getByTestId('ai-auto-toggle').isChecked(), true);
+  } finally {
+    await owner.unroute('**/api/account/ai-consent', route);
+    fakeNone = false;
+    await put(true).catch(() => {}); // 뒤 단계가 AI 를 그대로 쓰게 동의 상태로 둠
+  }
+}

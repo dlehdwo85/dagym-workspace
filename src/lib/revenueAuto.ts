@@ -53,6 +53,7 @@ async function actorFor(userId: string): Promise<SessionUser> {
 
 /** 회사 시스템 작업(올린 사람 개인 한도가 아니라 회사 한도에 합산): 크레딧 차단·회사 월 AI 예산(원)·예전 달러 한도·회사 요청 수 */
 async function assertSystemAi(tenant: string) {
+  await (await import('./ai/consent')).assertAutoAi(tenant); // AI 동의(대표 11/19): 사람이 누르지 않은 자동 읽기·분석은 회사 스위치가 켜진 회사만
   await (await import('./ai/guard')).assertAiCredit();
   const B = await import('./ai/companyBudget');
   const b = await B.companyAiBudget(tenant);

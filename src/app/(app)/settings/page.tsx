@@ -10,6 +10,7 @@ import { alarmDeviceStatus, enableNativePush, isNativeApp, openAlarmSettings, su
 import { BioLockSetting } from '@/components/BioLock';
 import { UserSelect } from '@/components/pickers';
 import { useInApp, useIosApp } from '@/components/inApp';
+import { AiConsentSetting } from '@/components/AiConsent';
 
 /** #447 앱 1.1.3 전체화면 알람: 이 휴대폰이 잠금 화면 위 전체 화면을 막아 두었거나 정확한 시각 예약이 꺼져 있으면 안내(안드로이드 14+ 는 사용자가 설정에서 허용) */
 function FullScreenAlarmNotice() {
@@ -436,6 +437,7 @@ function AccountSection() {
       <p className="mt-1 text-ink-2">내 업무·일정·댓글·메시지를 파일(JSON)로 내려받을 수 있습니다.</p>
       <a href="/api/account/export" className="mt-2 inline-block rounded-input border border-line px-3 py-1.5 font-medium hover:bg-slate-50" data-testid="account-export">내 데이터 내려받기</a>
       <LinkedAccounts />
+      <AiConsentSetting />
       <MarketingConsent />
       {user.role === 'owner' && <SupportConsent />}
       {/* 397차 #1023(3.1.1): 앱 안에는 회사(팀) 만들기가 없음 — 웹에서만 */}

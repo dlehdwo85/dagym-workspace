@@ -10,7 +10,7 @@ import { HttpError, badRequest, forbidden, notFound } from '../errors';
 import { appUrl } from '../mail';
 import { notify } from '../notifications';
 import { tenantOf, type SessionUser } from '../types';
-import { EngineAuthError, meetingEngine, type EngineRole, type MeetingEngine } from './engine';
+import { EngineAuthError, SCREEN_SUFFIX, meetingEngine, type EngineRole, type MeetingEngine } from './engine';
 
 /**
  * 기능 스위치: FEATURE_MEETINGS=1 일 때만. #946(대표 11/04 0단계 '우리 회사만'): MEETINGS_TENANTS(쉼표로 회사 id, 예 'default')를 적으면 그 회사만 —
@@ -199,7 +199,7 @@ export async function staffSeen(u: SessionUser, id: string, leave = false) {
 }
 async function seen(sql: Sql, m: MeetingRow, p: PartRow, leave: boolean, by: string | null) {
   if (m.status === 'ended') return { state: 'ended' as const }; // 끝난 회의에 늦게 온 신호로 다시 입장 처리하지 않음
-  if (leave) { await leftAt(sql, p.id, new Date()); await log(sql, m.id, 'leave', { participantId: p.id, by, data: { via: 'client' } }); return { state: 'left' as const }; }
+  if (leave) { await leftAt(sql, p.id, new Date()); await log(sql, m.id, 'leave', { participantId: p.id, by, data: { via: 'client' } }); await dropScreen(sql, m, p.id); return { state: 'left' as const }; }
   if (p.state === 'admitted' || p.state === 'left') {
     await sql`update meeting_participants set state = 'joined', first_joined_at = coalesce(first_joined_at, now()), last_joined_at = now(), left_at = null, last_seen_at = now() where id = ${p.id} and state in ('admitted', 'left')`;
     await log(sql, m.id, 'join', { participantId: p.id, by, data: { via: 'client' } });
@@ -294,7 +294,7 @@ export async function lobbyAction(u: SessionUser, id: string, i: z.infer<typeof 
   for (const x of r) await log(sql, m.id, 'admit', { participantId: x.id, by: u.id });
   return lobby(u, id);
 }
-export const participantInput = z.object({ action: z.enum(['remove', 'cohost', 'uncohost']) });
+export const participantInput = z.object({ action: z.enum(['remove', 'cohost', 'uncohost', 'mute']) });
 export async function participantAction(u: SessionUser, id: string, pid: string, i: z.infer<typeof participantInput>) {
   const sql = db(); const { m } = await hostAccess(u, id, sql);
   if (!zUuid.safeParse(pid).success) throw notFound('참가자가 없습니다');
@@ -306,7 +306,13 @@ export async function participantAction(u: SessionUser, id: string, pid: string,
     await sql`update meeting_participants set state = 'removed' where id = ${p.id}`;
     await log(sql, m.id, 'remove', { participantId: p.id, by: u.id });
     await meetingEngine()?.remove(m.id, p.id).catch(() => null);
+    await dropScreen(sql, m, p.id);
     return { ok: true, state: 'removed' };
+  }
+  if (i.action === 'mute') { // 한 사람 마이크 끄기(다시 켜는 것은 본인만 — 주최자가 남의 마이크를 켤 수는 없다)
+    if (p.state !== 'joined' && p.state !== 'admitted') throw badRequest('지금 회의에 없는 사람입니다');
+    await engineOr503().mute(m.id, p.id); await log(sql, m.id, 'mute', { participantId: p.id, by: u.id });
+    return { ok: true, muted: true };
   }
   if (!p.user_id) throw badRequest('손님은 공동 주최자가 될 수 없습니다');
   const role = i.action === 'cohost' ? 'cohost' : 'member';
@@ -347,6 +353,65 @@ export async function endMeeting(u: SessionUser, id: string) {
   if (m.status !== 'ended') await endNow(sql, m, u.id);
   return { ok: true, record: await record(sql, { ...m, status: 'ended' }) };
 }
+
+// ---------------- 휴대폰 앱 화면 공유(화면 전용 접속) ----------------
+// 휴대폰 브라우저·앱의 웹 화면은 '화면 전체 공유'를 할 수 없다(운영체제 제약) → 앱이 기기 화면을 따로 잡아, 그 사람의 두 번째 접속('<참가자 id>~screen')으로 보낸다.
+// 이 접속은 화면(+화면 소리)만 보낼 수 있고, 회의 기록·인원에는 세지 않는다. 본 참가자가 나가거나 내보내지면 함께 끊는다.
+async function screenIssue(sql: Sql, m: MeetingRow, p: { id: string; role: EngineRole; name: string; state: string }) {
+  if (m.status === 'ended') throw new HttpError(410, 'ended', '회의가 끝났습니다');
+  if (p.state !== 'joined' && p.state !== 'admitted') throw forbidden('회의에 들어온 뒤에 공유할 수 있습니다');
+  if (!(m.share === 'all' || isHost(p.role))) throw forbidden('이 회의는 주최자만 화면을 공유할 수 있습니다');
+  const t = await engineOr503().issue({ room: m.id, identity: `${p.id}${SCREEN_SUFFIX}`, name: `${p.name.slice(0, 50)} 화면`, role: p.role, canShare: true, ttlSec: ttlOf(), screenOf: p.id });
+  await log(sql, m.id, 'screen_token', { participantId: p.id });
+  return { engine: engineOr503().id, url: t.url, token: t.token, identity: `${p.id}${SCREEN_SUFFIX}`, expiresIn: ttlOf() };
+}
+/** 화면 공유용 입장권을 받은 적이 있는 사람만(대부분은 없으므로 엔진을 한 번 더 부르지 않는다) */
+async function dropScreen(sql: Sql, m: MeetingRow, pid: string) {
+  const [had] = await sql`select 1 from meeting_log where meeting_id = ${m.id} and participant_id = ${pid} and kind = 'screen_token' limit 1`;
+  if (had) await meetingEngine()?.remove(m.id, `${pid}${SCREEN_SUFFIX}`).catch(() => null);
+}
+export async function screenTicket(u: SessionUser, id: string) {
+  const sql = db(); const { m, role } = await access(u, id, sql);
+  const [p] = await sql<PartRow[]>`select * from meeting_participants where meeting_id = ${m.id} and user_id = ${u.id}`;
+  if (!p) throw notFound('참가 기록이 없습니다');
+  return screenIssue(sql, m, { id: p.id, role, name: u.name, state: p.state });
+}
+export async function guestScreenTicket(code: string, pid: string, secret: string | null) {
+  const sql = db(); const { m, p } = await guestOf(sql, code, pid, secret);
+  return screenIssue(sql, m, { id: p.id, role: 'guest', name: `${p.guest_name}(손님)`, state: p.state });
+}
+
+// ---------------- 회의 중 채팅 ----------------
+// 워크인 서버에 남긴다(엔진과 무관). 직원은 최근 12시간의 글(같은 주소를 다시 쓰는 회의실·반복 일정에서 지난 회의 글이 섞이지 않게), 손님은 자기가 참가 요청한 뒤의 글만.
+const CHAT_MAX = 1000, CHAT_PER_MIN = 30, CHAT_PAGE = 200;
+export const chatInput = z.object({ text: z.string().trim().min(1, '내용을 적어 주세요').max(CHAT_MAX, `${CHAT_MAX}자까지 보낼 수 있습니다`) });
+type ChatRow = { id: string; pid: string | null; name: string; guest: boolean; body: string; at: Date };
+async function chatList(sql: Sql, m: MeetingRow, p: PartRow, after: string | null) {
+  if (p.state !== 'joined' && p.state !== 'admitted') throw forbidden('회의에 들어온 뒤에 볼 수 있습니다');
+  const a = after && /^\d{1,18}$/.test(after) ? after : '0';
+  const rows = await sql<ChatRow[]>`select id::text, participant_id as pid, name, guest, body, created_at as at from meeting_messages
+    where meeting_id = ${m.id} and id > ${a}::bigint and created_at > now() - interval '12 hours' ${p.user_id ? sql`` : sql`and created_at >= ${p.created_at}`}
+    order by id desc limit ${CHAT_PAGE}`;
+  return { messages: rows.reverse().map((r) => ({ id: r.id, mine: r.pid === p.id, name: r.name, guest: r.guest, text: r.body, at: r.at })) };
+}
+async function chatSend(sql: Sql, m: MeetingRow, p: PartRow, name: string, text: string) {
+  if (m.status === 'ended') throw new HttpError(410, 'ended', '회의가 끝났습니다');
+  if (p.state !== 'joined' && p.state !== 'admitted') throw forbidden('회의에 들어온 뒤에 보낼 수 있습니다');
+  const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from meeting_messages where meeting_id = ${m.id} and participant_id = ${p.id} and created_at > now() - interval '1 minute'`;
+  if (n >= CHAT_PER_MIN) throw new HttpError(429, 'too_many', '잠시 뒤 다시 보내 주세요');
+  const [r] = await sql<{ id: string; at: Date }[]>`insert into meeting_messages (meeting_id, participant_id, name, guest, body) values (${m.id}, ${p.id}, ${name}, ${!p.user_id}, ${text}) returning id::text, created_at as at`;
+  return { id: r.id, at: r.at };
+}
+async function staffPart(u: SessionUser, id: string, sql: Sql) {
+  const { m } = await access(u, id, sql);
+  const [p] = await sql<PartRow[]>`select * from meeting_participants where meeting_id = ${m.id} and user_id = ${u.id}`;
+  if (!p) throw forbidden('회의에 들어온 뒤에 쓸 수 있습니다');
+  return { m, p };
+}
+export async function listChat(u: SessionUser, id: string, after: string | null) { const sql = db(); const { m, p } = await staffPart(u, id, sql); return chatList(sql, m, p, after); }
+export async function sendChat(u: SessionUser, id: string, i: z.infer<typeof chatInput>) { const sql = db(); const { m, p } = await staffPart(u, id, sql); return chatSend(sql, m, p, u.name, i.text); }
+export async function guestListChat(code: string, pid: string, secret: string | null, after: string | null) { const sql = db(); const { m, p } = await guestOf(sql, code, pid, secret); return chatList(sql, m, p, after); }
+export async function guestSendChat(code: string, pid: string, secret: string | null, i: z.infer<typeof chatInput>) { const sql = db(); const { m, p } = await guestOf(sql, code, pid, secret); return chatSend(sql, m, p, `${p.guest_name}(손님)`, i.text); }
 
 // ---------------- 회의 기록 ----------------
 async function record(sql: Sql, m: MeetingRow) {
@@ -395,6 +460,7 @@ export async function meetingsTick() {
   const keep = Math.max(7, Number(process.env.MEETING_KEEP_DAYS ?? 90) || 90);
   const purged = await sql`delete from meetings where status = 'ended' and kind <> 'personal' and coalesce(ended_at, updated_at) < now() - make_interval(days => ${keep}) returning id`;
   const logs = await sql`delete from meeting_log where at < now() - make_interval(days => ${keep}) returning id`; // 내 고정 회의실처럼 회의 줄이 남는 것의 오래된 기록
+  await sql`delete from meeting_messages where created_at < now() - make_interval(days => ${keep})`; // 회의 중 채팅도 같은 기간(내 고정 회의실처럼 회의 줄이 남는 것)
   await sql`delete from meeting_participants where state in ('left', 'denied') and coalesce(left_at, created_at) < now() - make_interval(days => ${keep})`; // 내보낸 사람(removed)은 재입장 금지라 남김
   return { left, ended, purged: purged.length, logs: logs.length };
 }

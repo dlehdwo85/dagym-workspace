@@ -117,8 +117,12 @@ export async function assertStorage(u: SessionUser, addBytes: number) {
 }
 /** AI 요청 전 회사 한도: 대표 10/24 ② 회사 월 AI 예산(원, 다 쓰면 다음 달 1일까지 멈춤) → 요금제 월 AI 요청 수.
  *  legacy = 요금제에 원 예산이 없을 때 예전 회사 월 한도($)도 확인(예전부터 확인하던 AI 비서·문서·회의록 등에서만) */
-export async function assertAiRequest(u: SessionUser, o: { legacy?: boolean } = {}) {
+export async function assertAiRequest(u: SessionUser, o: { legacy?: boolean; auto?: boolean } = {}) {
   const tenant = tenantOfUser(u);
+  // AI 동의(대표 11/19 — 애플 5.1.2): 사람이 누른 AI 는 그 사람의 동의, 사람이 누르지 않은 자동 작업(auto)은 회사 스위치
+  const C = await import('./ai/consent');
+  if (o.auto) await C.assertAutoAi(tenant);
+  else await C.assertAiConsent(u);
   await (await import('./ai/companyBudget')).assertCompanyAi(tenant, { legacy: !!o.legacy });
   const { limits } = await effectiveLimits(tenant);
   if (limits.aiRequests === null) return;

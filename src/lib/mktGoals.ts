@@ -281,7 +281,9 @@ export async function goalTick(tenant: string, now = new Date()) {
   return out;
 }
 export async function goalTickAll() {
-  const ts = await db()<{ tenant: string }[]>`select distinct tenant from mkt_brands where tenant in (select tenant from mkt_rules where active union select tenant from mkt_goals) limit 5`;
+  const sql = db();
+  const ts = await sql<{ tenant: string }[]>`select distinct tenant from mkt_brands where tenant in (select tenant from mkt_rules where active union select tenant from mkt_goals)
+    and tenant in (${(await import('./ai/consent')).autoAiTenants(sql)}) limit 5`; // AI 동의(대표 11/19): 회사 자료 자동 AI 처리가 켜진 회사만
   const out = [];
   for (const t of ts) out.push({ tenant: t.tenant, ...(await goalTick(t.tenant).catch((e) => ({ error: String(e?.message ?? e) }))) });
   return out;

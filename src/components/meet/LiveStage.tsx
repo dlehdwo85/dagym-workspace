@@ -1,34 +1,44 @@
 'use client';
-// #946(대표 11/04 화상회의 0단계 — 라이브킷): 회의 중 화면의 실제 영상·음성 칸. 영상·음성은 브라우저 ↔ 라이브킷 서버로 바로 가고 워크인 서버를 지나지 않는다.
+// #946(대표 11/04 화상회의 0단계 — 라이브킷): 회의 중 실제 영상·음성. 영상·음성은 브라우저 ↔ 라이브킷 서버로 바로 가고 워크인 서버를 지나지 않는다.
 // 카메라·마이크·화면 공유(입장권이 허락할 때만) · 말하는 사람 테두리 · 자동 화질(adaptiveStream·dynacast·simulcast) · 연결 약함 표시 · 다시 연결 중 띠 · 소리 막힘(자동 재생) 단추.
 // 주최자가 내보내면 'removed', 회의를 끝내면 'ended' 로 부모에게 알린다. 녹화는 하지 않는다(입장권에 녹화 권한 없음).
+// 대표 11/19 보강: 화면은 StageView 가 그리고 여기는 연결만 — 화면 공유(탭 소리 포함) · 사진·PDF 자료 공유(그림판 → 화면 공유 길) · 앞뒤 카메라 전환 · 반응·손들기·새 채팅 신호(데이터 통로).
 // 라이브킷 라이브러리는 이 칸이 처음 열릴 때만 받는다(회의 화면 밖에서는 안 받음).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, LogOut, Mic, MicOff, MonitorUp, RefreshCw, SignalLow, UserRound, Video, VideoOff, Volume2 } from 'lucide-react';
-import { Button, cx, toast } from '@/components/ui';
+import { toast } from '@/components/ui';
 import type { Room, RemoteTrack, Track as LkTrack } from 'livekit-client';
+import { StageView, type StageProps } from './StageView';
+import { SCREEN_SUFFIX, parseSignal, type Signal, type StageConn, type Tile, type VideoSrc } from './stage';
 
 type LK = typeof import('livekit-client');
-type Tile = { key: string; identity: string; name: string; local: boolean; speaking: boolean; cam: LkTrack | null; screen: LkTrack | null; micOn: boolean; camOn: boolean; poor: boolean; role: string };
 export type LiveGone = 'removed' | 'ended';
-type Props = {
-  url: string; token: string; canShare: boolean;
+type Props = Omit<StageProps, 'conn'> & {
+  url: string; token: string;
   start: { mic: boolean; cam: boolean; camId?: string; micId?: string };
-  header: React.ReactNode; side?: React.ReactNode; selfLabel: string;
-  onLeave: () => void; onGone: (why: LiveGone) => void; onRetry: () => void; busy?: boolean;
+  onGone: (why: LiveGone) => void; onRetry: () => void;
 };
-
+const TOPIC = 'wos';
 function roleOf(metadata?: string) { try { return JSON.parse(metadata || '{}').role ?? ''; } catch { return ''; } }
 
-export function LiveStage({ url, token, canShare, start, header, side, selfLabel, onLeave, onGone, onRetry, busy }: Props) {
-  const [state, setState] = useState<'connecting' | 'live' | 'reconnecting' | 'error'>('connecting');
+export function LiveStage({ url, token, start, onGone, onRetry, onLeave, ...view }: Props) {
+  const [state, setState] = useState<StageConn['state']>('connecting');
   const [err, setErr] = useState('');
   const [tiles, setTiles] = useState<Tile[]>([]);
-  const [mic, setMic] = useState(start.mic); const [cam, setCam] = useState(start.cam); const [sharing, setSharing] = useState(false);
+  const [mic, setMic] = useState(start.mic); const [cam, setCam] = useState(start.cam); const [sharing, setSharing] = useState<StageConn['sharing']>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
-  const roomRef = useRef<Room | null>(null); const audioBox = useRef<HTMLDivElement | null>(null);
+  const roomRef = useRef<Room | null>(null); const lkRef = useRef<LK | null>(null); const audioBox = useRef<HTMLDivElement | null>(null);
   const goneRef = useRef(onGone); goneRef.current = onGone;
   const leftByMe = useRef(false);
+  const docTrack = useRef<MediaStreamTrack | null>(null);
+  const facing = useRef<'user' | 'environment'>('user');
+  const listeners = useRef(new Set<(from: string, sig: Signal) => void>());
+  const srcs = useRef(new WeakMap<object, VideoSrc>());
+  const srcOf = (track: LkTrack | null | undefined): VideoSrc | null => {
+    if (!track) return null;
+    let s = srcs.current.get(track);
+    if (!s) { s = { id: track.sid || track.mediaStreamTrack?.id || String(Math.random()), attach: (el) => { track.attach(el); return () => { track.detach(el); }; } }; srcs.current.set(track, s); }
+    return s;
+  };
 
   useEffect(() => {
     let alive = true; let lk: LK; let room: Room;
@@ -37,17 +47,20 @@ export function LiveStage({ url, token, canShare, start, header, side, selfLabel
       const all = [room.localParticipant, ...room.remoteParticipants.values()];
       setTiles(all.map((p) => {
         const camPub = p.getTrackPublication(lk.Track.Source.Camera); const scrPub = p.getTrackPublication(lk.Track.Source.ScreenShare);
-        const micPub = p.getTrackPublication(lk.Track.Source.Microphone);
-        return { key: p.sid || p.identity, identity: p.identity, name: p.name || p.identity, local: p === room.localParticipant, speaking: p.isSpeaking,
-          cam: camPub && !camPub.isMuted ? (camPub.track ?? null) : null, screen: scrPub?.track ?? null, micOn: !!micPub && !micPub.isMuted, camOn: !!camPub && !camPub.isMuted,
-          poor: p.connectionQuality === lk.ConnectionQuality.Poor || p.connectionQuality === lk.ConnectionQuality.Lost, role: roleOf(p.metadata) };
+        const micPub = p.getTrackPublication(lk.Track.Source.Microphone); const local = p === room.localParticipant; const role = roleOf(p.metadata);
+        return { key: p.sid || p.identity, identity: p.identity, name: p.name || p.identity, local, speaking: p.isSpeaking,
+          cam: camPub && !camPub.isMuted ? srcOf(camPub.track) : null, screen: srcOf(scrPub?.track), micOn: !!micPub && !micPub.isMuted, camOn: !!camPub && !camPub.isMuted,
+          poor: p.connectionQuality === lk.ConnectionQuality.Poor || p.connectionQuality === lk.ConnectionQuality.Lost, role,
+          screenOnly: role === 'screen' || p.identity.endsWith(SCREEN_SUFFIX), mirror: local && facing.current === 'user' };
       }));
-      setMic(room.localParticipant.isMicrophoneEnabled); setCam(room.localParticipant.isCameraEnabled); setSharing(room.localParticipant.isScreenShareEnabled);
+      setMic(room.localParticipant.isMicrophoneEnabled); setCam(room.localParticipant.isCameraEnabled);
+      setSharing(room.localParticipant.isScreenShareEnabled ? (docTrack.current ? 'doc' : 'screen') : null);
+      if (!room.localParticipant.isScreenShareEnabled) docTrack.current = null;
       setAudioBlocked(!room.canPlaybackAudio);
     };
     (async () => {
       try {
-        lk = await import('livekit-client');
+        lk = await import('livekit-client'); lkRef.current = lk;
         room = new lk.Room({
           adaptiveStream: true, dynacast: true, // 자동 화질: 보이는 칸 크기만큼만 받고, 아무도 안 보는 화질은 보내지 않음
           videoCaptureDefaults: { resolution: lk.VideoPresets.h720.resolution, ...(start.camId ? { deviceId: start.camId } : {}) },
@@ -62,6 +75,12 @@ export function LiveStage({ url, token, canShare, start, header, side, selfLabel
           refresh();
         });
         room.on(E.TrackUnsubscribed, (track: RemoteTrack) => { track.detach().forEach((el) => el.remove()); refresh(); });
+        // 반응·손들기·새 채팅 신호(같은 방 사람끼리 — 내용은 짧은 신호만, 채팅 글은 워크인 서버에)
+        room.on(E.DataReceived, (payload: Uint8Array, participant?: { identity: string }, _kind?: unknown, topic?: string) => {
+          if (topic !== TOPIC || !participant) return;
+          let sig: Signal | null = null; try { sig = parseSignal(JSON.parse(new TextDecoder().decode(payload))); } catch { /* 모르는 신호는 버림 */ }
+          if (sig) for (const fn of listeners.current) fn(participant.identity, sig);
+        });
         room.on(E.Reconnecting, () => alive && setState('reconnecting'));
         room.on(E.Reconnected, () => { if (alive) { setState('live'); refresh(); } });
         room.on(E.Disconnected, (reason?: number) => {
@@ -83,71 +102,75 @@ export function LiveStage({ url, token, canShare, start, header, side, selfLabel
         setState('error');
       }
     })();
-    return () => { alive = false; leftByMe.current = true; void roomRef.current?.disconnect(); roomRef.current = null; };
+    return () => { alive = false; leftByMe.current = true; docTrack.current?.stop(); docTrack.current = null; void roomRef.current?.disconnect(); roomRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, token]);
 
-  const toggle = useCallback(async (what: 'mic' | 'cam' | 'screen') => {
+  const sync = useCallback(() => {
+    const r = roomRef.current; if (!r) return;
+    setMic(r.localParticipant.isMicrophoneEnabled); setCam(r.localParticipant.isCameraEnabled);
+    setSharing(r.localParticipant.isScreenShareEnabled ? (docTrack.current ? 'doc' : 'screen') : null);
+  }, []);
+  const toggleMic = useCallback(() => { const r = roomRef.current; if (!r) return; void r.localParticipant.setMicrophoneEnabled(!r.localParticipant.isMicrophoneEnabled).catch(() => toast.error('마이크를 켜지 못했습니다 — 브라우저에서 마이크를 허용해 주세요')).finally(sync); }, [sync]);
+  const toggleCam = useCallback(() => { const r = roomRef.current; if (!r) return; void r.localParticipant.setCameraEnabled(!r.localParticipant.isCameraEnabled).catch(() => toast.error('카메라를 켜지 못했습니다 — 브라우저에서 카메라를 허용해 주세요')).finally(sync); }, [sync]);
+  const flipCam = useCallback(() => {
+    const r = roomRef.current, lk = lkRef.current; if (!r || !lk) return;
+    const vt = r.localParticipant.getTrackPublication(lk.Track.Source.Camera)?.videoTrack; if (!vt) return;
+    const next = facing.current === 'user' ? 'environment' : 'user';
+    void vt.restartTrack({ facingMode: next }).then(() => { facing.current = next; setTiles((ts) => ts.map((t) => (t.local ? { ...t, mirror: next === 'user' } : t))); })
+      .catch(() => toast.error('카메라를 바꾸지 못했습니다 — 이 기기에 다른 카메라가 없을 수 있습니다'));
+  }, []);
+  const stopShare = useCallback(async () => {
     const r = roomRef.current; if (!r) return;
     try {
-      if (what === 'mic') await r.localParticipant.setMicrophoneEnabled(!r.localParticipant.isMicrophoneEnabled);
-      else if (what === 'cam') await r.localParticipant.setCameraEnabled(!r.localParticipant.isCameraEnabled);
-      else await r.localParticipant.setScreenShareEnabled(!r.localParticipant.isScreenShareEnabled, { audio: false });
-    } catch {
-      toast.error(what === 'screen' ? '화면 공유를 시작하지 못했습니다(취소했거나 주최자만 공유할 수 있는 회의)' : what === 'mic' ? '마이크를 켜지 못했습니다' : '카메라를 켜지 못했습니다');
+      if (docTrack.current) { const t = docTrack.current; docTrack.current = null; await r.localParticipant.unpublishTrack(t, true); }
+      else await r.localParticipant.setScreenShareEnabled(false);
+    } catch { /* 이미 멈춘 경우 */ }
+    sync();
+  }, [sync]);
+  const startScreen = useCallback(async () => {
+    const r = roomRef.current; if (!r) return;
+    if (!navigator.mediaDevices?.getDisplayMedia) { toast.error('이 기기의 브라우저는 화면 전체 공유를 지원하지 않습니다 — 사진·PDF 보여 주기를 써 주세요'); return; }
+    if (docTrack.current) await stopShare();
+    const opts = { selfBrowserSurface: 'exclude' as const, surfaceSwitching: 'include' as const, systemAudio: 'include' as const };
+    try { await r.localParticipant.setScreenShareEnabled(true, { ...opts, audio: true }); }
+    catch (e: any) {
+      if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') toast.info('화면 공유를 취소했습니다');
+      else {
+        // 소리 공유를 받지 않는 브라우저 → 화면만 다시
+        try { await r.localParticipant.setScreenShareEnabled(true, opts); }
+        catch (e2: any) { if (e2?.name === 'NotAllowedError' || e2?.name === 'AbortError') toast.info('화면 공유를 취소했습니다'); else toast.error('화면 공유를 시작하지 못했습니다 — 주최자만 공유할 수 있는 회의이거나, 브라우저가 화면 공유를 막고 있습니다'); }
+      }
     }
-    setMic(r.localParticipant.isMicrophoneEnabled); setCam(r.localParticipant.isCameraEnabled); setSharing(r.localParticipant.isScreenShareEnabled);
+    sync();
+  }, [stopShare, sync]);
+  const shareCanvas = useCallback(async (canvas: HTMLCanvasElement) => {
+    const r = roomRef.current, lk = lkRef.current; if (!r || !lk) throw new Error('아직 연결되지 않았습니다');
+    if (r.localParticipant.isScreenShareEnabled) await stopShare();
+    const track = canvas.captureStream(8).getVideoTracks()[0]; if (!track) throw new Error('이 브라우저에서는 자료 공유를 쓸 수 없습니다');
+    try { track.contentHint = 'detail'; } catch { /* 힌트를 모르는 브라우저 */ }
+    docTrack.current = track;
+    try { await r.localParticipant.publishTrack(track, { source: lk.Track.Source.ScreenShare, name: 'doc', simulcast: false, screenShareEncoding: { maxBitrate: 1_500_000, maxFramerate: 8 } }); }
+    catch (e) { docTrack.current = null; track.stop(); throw new Error('자료 공유를 시작하지 못했습니다 — 주최자만 공유할 수 있는 회의일 수 있습니다'); }
+    sync();
+  }, [stopShare, sync]);
+  const send = useCallback((sig: Signal) => {
+    const r = roomRef.current; if (!r || r.state !== 'connected') return;
+    void r.localParticipant.publishData(Uint8Array.from(new TextEncoder().encode(JSON.stringify(sig))), { reliable: true, topic: TOPIC }).catch(() => {});
   }, []);
-  async function leave() { leftByMe.current = true; await roomRef.current?.disconnect().catch(() => {}); onLeave(); }
+  const onSignal = useCallback((fn: (from: string, sig: Signal) => void) => { listeners.current.add(fn); return () => { listeners.current.delete(fn); }; }, []);
+  const unblockAudio = useCallback(() => { void roomRef.current?.startAudio().then(() => setAudioBlocked(false)); }, []);
+  const leave = useCallback(() => { leftByMe.current = true; void (roomRef.current?.disconnect() ?? Promise.resolve()).catch(() => {}).finally(onLeave); }, [onLeave]);
 
-  const screenTile = useMemo(() => tiles.find((t) => t.screen), [tiles]);
-  const n = tiles.length;
-  return (
-    <main className="flex min-h-dvh flex-col bg-slate-900 text-white" data-testid="meet-room" data-engine="livekit">
-      <header className="flex items-center gap-2 px-4 py-2 text-sm">
-        {header}
-        <span className={cx('ml-auto shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px]', state === 'live' ? 'bg-emerald-700/70 text-emerald-50' : state === 'error' ? 'bg-red-700/80' : 'bg-slate-700 text-slate-200')} data-testid="meet-live-state" data-state={state}>
-          {state === 'live' ? `연결됨 · ${n}명` : state === 'reconnecting' ? '다시 연결 중…' : state === 'error' ? '연결 안 됨' : '연결 중…'}</span>
-      </header>
-      {state === 'reconnecting' && <p className="mx-3 rounded-input bg-amber-500/20 px-3 py-1.5 text-xs text-amber-100" role="status">네트워크가 불안정해 다시 연결하고 있습니다 — 잠시만 기다려 주세요</p>}
-      {audioBlocked && state === 'live' && <button type="button" className="mx-3 mt-2 inline-flex items-center gap-1.5 self-start rounded-input bg-brand-600 px-3 py-1.5 text-xs font-medium hover:bg-brand-700" onClick={() => void roomRef.current?.startAudio().then(() => setAudioBlocked(false))} data-testid="meet-audio-unblock"><Volume2 className="size-4" />소리 켜기(브라우저가 자동 재생을 막았습니다)</button>}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row">
-        <section className="flex min-h-0 flex-1 flex-col gap-3">
-          {state === 'connecting' && <p className="flex items-center gap-2 text-sm text-slate-300" data-testid="meet-live-connecting"><Loader2 className="size-4 animate-spin" />영상 서버에 연결하는 중…</p>}
-          {state === 'error' && <div className="rounded-card bg-red-900/40 p-3 text-sm" role="alert" data-testid="meet-live-error"><p>{err}</p>
-            <Button size="sm" variant="secondary" className="mt-2" disabled={busy} onClick={onRetry} data-testid="meet-live-retry"><RefreshCw />다시 연결</Button></div>}
-          {screenTile && <div className="relative aspect-video w-full overflow-hidden rounded-card bg-black" data-testid="meet-screen-share">
-            <TrackVideo track={screenTile.screen} contain /><span className="absolute bottom-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-xs">{screenTile.local ? '내 화면 공유 중' : `${screenTile.name} 화면`}</span></div>}
-          <div className={cx('grid auto-rows-min gap-3', screenTile ? 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-6' : n <= 1 ? 'grid-cols-1' : n <= 4 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-2 lg:grid-cols-3')} data-testid="meet-tiles">
-            {tiles.map((t) => (
-              <div key={t.key} className={cx('relative aspect-video overflow-hidden rounded-card bg-slate-800 ring-2 transition-shadow', t.speaking ? 'ring-emerald-400' : 'ring-transparent')} data-testid="meet-tile" data-local={t.local ? '1' : '0'} data-speaking={t.speaking ? '1' : '0'} data-video={t.cam ? '1' : '0'}>
-                {t.cam ? <TrackVideo track={t.cam} mirror={t.local} /> : <div className="absolute inset-0 flex items-center justify-center"><span className="flex size-14 items-center justify-center rounded-full bg-slate-700 text-lg font-semibold">{t.local ? <UserRound className="size-7" /> : t.name.slice(0, 1)}</span></div>}
-                <span className="absolute bottom-2 left-2 flex max-w-[85%] items-center gap-1 truncate rounded bg-black/55 px-1.5 py-0.5 text-xs">
-                  {!t.micOn && <MicOff className="size-3 shrink-0 text-red-300" aria-label="마이크 꺼짐" />}{t.local ? selfLabel : t.name}{t.role === 'host' ? ' · 주최자' : t.role === 'cohost' ? ' · 공동 주최자' : ''}</span>
-                {t.poor && <span className="absolute right-2 top-2 rounded bg-black/60 p-0.5" title="연결 약함"><SignalLow className="size-4 text-amber-300" /></span>}
-              </div>
-            ))}
-          </div>
-        </section>
-        {side}
-      </div>
-      <div ref={audioBox} className="hidden" aria-hidden />
-      <footer className="flex items-center justify-center gap-3 border-t border-slate-800 px-4 py-3" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
-        <Round on={mic} disabled={state !== 'live'} onClick={() => void toggle('mic')} label={mic ? '마이크 끄기' : '마이크 켜기'} testid="meet-mic">{mic ? <Mic /> : <MicOff />}</Round>
-        <Round on={cam} disabled={state !== 'live'} onClick={() => void toggle('cam')} label={cam ? '카메라 끄기' : '카메라 켜기'} testid="meet-cam">{cam ? <Video /> : <VideoOff />}</Round>
-        {canShare && <Round on={!sharing} disabled={state !== 'live'} onClick={() => void toggle('screen')} label={sharing ? '화면 공유 멈추기' : '화면 공유'} testid="meet-share"><MonitorUp /></Round>}
-        <Button variant="danger" onClick={() => void leave()} disabled={busy} data-testid="meet-leave"><LogOut />나가기</Button>
-      </footer>
-    </main>
-  );
-}
+  const conn: StageConn = useMemo(() => ({
+    engine: 'livekit', state, err, tiles, mic, cam, sharing, audioBlocked,
+    canScreen: typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia,
+    canFlip: typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches,
+    toggleMic, toggleCam, flipCam, unblockAudio, startScreen, shareCanvas, stopShare, send, onSignal, leave, retry: onRetry,
+  }), [state, err, tiles, mic, cam, sharing, audioBlocked, toggleMic, toggleCam, flipCam, unblockAudio, startScreen, shareCanvas, stopShare, send, onSignal, leave, onRetry]);
 
-function TrackVideo({ track, mirror, contain }: { track: LkTrack | null; mirror?: boolean; contain?: boolean }) {
-  const ref = useRef<HTMLVideoElement | null>(null);
-  useEffect(() => { const el = ref.current; if (!el || !track) return; track.attach(el); return () => { track.detach(el); }; }, [track]);
-  return <video ref={ref} autoPlay playsInline muted className={cx('absolute inset-0 size-full', contain ? 'object-contain' : 'object-cover', mirror && '-scale-x-100')} />;
-}
-function Round({ on, onClick, label, children, testid, disabled }: { on: boolean; onClick: () => void; label: string; children: React.ReactNode; testid: string; disabled?: boolean }) {
-  return <button type="button" onClick={onClick} aria-label={label} title={label} aria-pressed={!on} disabled={disabled} data-testid={testid}
-    className={cx('inline-flex size-10 items-center justify-center rounded-full disabled:opacity-50 [&>svg]:size-5', on ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-red-600 text-white hover:bg-red-700')}>{children}</button>;
+  return (<>
+    <StageView {...view} conn={conn} onLeave={leave} />
+    <div ref={audioBox} className="hidden" aria-hidden />
+  </>);
 }
