@@ -3,6 +3,7 @@ import { createSession, currentUser, sessionCookie } from '@/lib/auth';
 import { clientIp } from '@/lib/api';
 import { HttpError } from '@/lib/errors';
 import { STATE_COOKIE, createHandoff, isProvider, oauthCallback, stateAppChallenge } from '@/lib/oauth';
+import { APP_SHEET_COOKIE } from '@/lib/hostSplit';
 
 /** 299차 Apple: 처음 한 번 오는 이름을 GET 으로 넘길 때 잠깐 담는 쿠키(주소에 개인정보를 싣지 않음) */
 const NAME_COOKIE = 'wos_oauth_name';
@@ -17,6 +18,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
   // 앱(시스템 브라우저)에서 시작했으면 결과를 앱으로 넘기는 화면(/auth/app-return → workos://)으로 — 세션 쿠키는 브라우저가 아니라 앱이 받는다
   const ac = stateAppChallenge(req.cookies.get(STATE_COOKIE)?.value);
   const toApp = (p: Record<string, string>) => go(`/auth/app-return?${new URLSearchParams(p)}`);
+  // 애플 11/15 반려: 앱이 띄운 창인데 상태 쿠키를 못 읽은 경우(만료 등)에도 웹 로그인 화면을 그 창에 띄우지 않고 앱으로 돌려보냄
+  //   (앱 화면 안(WebView — 표시 WorkInApp)에서 끝나는 옛 방식 로그인·계정 연결은 예전 그대로)
+  const sheet = req.cookies.get(APP_SHEET_COOKIE)?.value === '1' && !/WorkInApp/i.test(req.headers.get('user-agent') ?? '');
   try {
     const me = await currentUser().catch(() => null);
     const nameC = req.cookies.get(NAME_COOKIE)?.value;
@@ -27,6 +31,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
       if (r.kind === 'pending') return toApp({ pending: r.token });
       if (r.kind === 'login') return toApp({ t: await createHandoff(r.userId, r.mfa, r.client, ac) });
     }
+    if (sheet && r.kind !== 'linked') return toApp({ error: r.kind === 'error' ? r.message : '로그인을 마치지 못했습니다. 앱에서 다시 시도해 주세요.' });
     if (r.kind === 'error') return go(`/login?oauth_error=${encodeURIComponent(r.message)}${r.code ? `&code=${r.code}` : ''}`);
     if (r.kind === 'linked') return go(`/settings?linked=${provider}`);
     if (r.kind === 'pending') return go(`/signup/social?t=${encodeURIComponent(r.token)}`);
@@ -37,7 +42,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
   } catch (e) {
     const msg = e instanceof HttpError ? e.message : '로그인 중 오류가 났습니다. 다시 시도해 주세요.';
     if (!(e instanceof HttpError)) console.error('[oauth]', provider, e);
-    return ac ? toApp({ error: msg }) : go(`/login?oauth_error=${encodeURIComponent(msg)}`);
+    return ac || sheet ? toApp({ error: msg }) : go(`/login?oauth_error=${encodeURIComponent(msg)}`);
   }
 }
 

@@ -6,7 +6,9 @@ import { Capacitor } from '@capacitor/core';
  * 스토어 심사(로컬 10/19 대표): Google Play 결제 정책·Apple 3.1.1 — 앱(Android·iOS 네이티브) 안에서는 디지털 상품 결제 화면·버튼·가격·외부 결제 링크를 보이지 않는다.
  * 앱 판별 = Capacitor 네이티브(또는 앱 user-agent 'WorkInApp'). 첫 그림은 웹과 같게(false) 그린 뒤 바꿈 → 서버 렌더와 어긋나지 않음.
  */
-export const isInApp = () => typeof window !== 'undefined' && (Capacitor.isNativePlatform() || /WorkInApp/i.test(navigator.userAgent));
+/** 앱이 띄운 로그인 브라우저 창(시스템 브라우저)인지 — 서버가 심은 표시(wos_app=1, 15분). 애플 11/15 반려 3.1.1 */
+const inAppSheet = () => typeof document !== 'undefined' && /(?:^|;\s*)wos_app=1(?:;|$)/.test(document.cookie);
+export const isInApp = () => typeof window !== 'undefined' && (Capacitor.isNativePlatform() || /WorkInApp/i.test(navigator.userAgent) || inAppSheet());
 /** 397차 #1023(애플 11/06 반려 3.1.1 '사업자 가입 기능이 아직 있음'): 서버가 요청의 앱 표시(WorkInApp)를 보고 처음 그림부터 앱 모양으로 —
  *  예전엔 첫 그림을 웹과 같게 그린 뒤 바꿔서, 아이패드 가로 로그인 화면 왼쪽 판에 '14일 무료 체험으로 시작'·소개 링크가 잠깐 보였음 */
 const AppHint = createContext(false);
