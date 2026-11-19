@@ -66,7 +66,12 @@ describe('V22 문서 엔진', () => {
     assert.ok(brief.includes('시험상호 다짐') && brief.includes('000-00-00000'), '다짐 회사 정보 주입');
     assert.ok(!brief.includes('시험상호 하이링크') && !brief.includes('999-99-99999'), '다른 회사 정보는 안 넣음');
     assert.ok(st.anthropicUploads.includes('하이링크 견적서 양식.xlsx'));
-    assert.equal((await sql`select anthropic_file_id from library_files where id = ${ref}`)[0].anthropic_file_id !== null, true, '한 번 올린 파일 id 기억');
+    // 11/20: AI 회사 파일 보관소에 사본을 남기지 않는다 — 올린 참고 자료와 결과 사본(결과·미리보기)은 작업이 끝나면 지우고, id 도 기억하지 않는다(결과는 우리 저장소에)
+    assert.equal((await sql`select anthropic_file_id from library_files where id = ${ref}`)[0].anthropic_file_id, null, '올린 사본 id 를 기억하지 않음');
+    assert.equal((await sql`select result_anthropic_file_id from ai_doc_jobs where id = ${job1}`)[0].result_anthropic_file_id, null);
+    const upId = content.find((b) => b.type === 'container_upload').file_id;
+    for (const id of [upId, 'file_out_1', 'file_out_2']) assert.ok(st.anthropicDeleted.includes(id), `${id} 를 작업 뒤 지움 (${st.anthropicDeleted.join(',')})`);
+    assert.equal(done.job.debug?.copiesDropped ?? (await sql`select debug from ai_doc_jobs where id = ${job1}`)[0].debug.copiesDropped, 3);
     const f = await fetch(`${BASE}/api/ai/doc-jobs/${job1}/file`, { headers: { cookie: ctx.owner.cookie } });
     assert.equal(f.status, 200); assert.match(f.headers.get('content-disposition'), /attachment/);
     assert.deepEqual(Buffer.from(await f.arrayBuffer()), xlsxBytes);
@@ -93,7 +98,11 @@ describe('V22 문서 엔진', () => {
     assert.equal(d.job.status, 'done');
     const eng = (await fakeState()).anthropic.slice(n0).find((x) => x.body.container);
     assert.equal(eng.body.container.id, container, '같은 컨테이너');
-    assert.ok(eng.body.messages[0].content.some((b) => b.type === 'container_upload' && b.file_id === 'file_out_1'), '이전 결과를 다시 올리지 않고 file_id 로');
+    // 11/20: 이전 버전은 우리 저장소의 결과 파일을 다시 올려 쓰고(AI 회사에 남겨 둔 사본을 쓰지 않음), 작업이 끝나면 그 사본과 새 결과 사본을 지운다
+    const st2 = await fakeState();
+    const baseUp = eng.body.messages[0].content.find((b) => b.type === 'container_upload').file_id;
+    assert.match(baseUp, /^file_up_/, '이전 결과를 우리 저장소에서 다시 올림'); assert.ok(st2.anthropicUploads.includes('다짐 견적서.xlsx'));
+    assert.ok(st2.anthropicDeleted.includes(baseUp) && st2.anthropicDeleted.includes('file_out_3'), '끝나면 지움');
     assert.deepEqual(d.versions.map((v) => v.version), [1, 2]);
     // 자료실에 저장(사람이 누를 때) → AI 문서 폴더·v2 태그·업무 첨부
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '견적 발송', assigneeId: ctx.ownerId, approvalRequired: false })).id;
@@ -249,6 +258,28 @@ describe('V22 문서 엔진', () => {
     const s3 = await ctx.owner.ok('POST', `/api/ai/doc-jobs/${r3.docJobs[0].id}/save`, {});
     const [lf3] = await sql`select text_content from library_files where id = ${s3.fileId}`;
     assert.ok(lf3.text_content.includes('발신: 시험상호 다짐') && lf3.text_content.includes('10월 휴관 안내'));
+  });
+
+  test('예전에 남은 사본 지우기: 남은 수 보기(조회 권한) · [지금 지우기](편집 권한 — 기본 대표만) · 우리 원본은 그대로 · 다른 회사 것은 건드리지 않음', async () => {
+    // 예전 방식으로 id 가 기억돼 있던 상태를 만든다(참고 자료 1 · 결과 1) + 다른 회사 것 1
+    await ctl({ anthropicFiles: { file_old_ref: { filename: '옛 참고.xlsx', mime: 'application/octet-stream', b64: '' }, file_old_res: { filename: '옛 결과.xlsx', mime: 'application/octet-stream', b64: '' }, file_other_co: { filename: '남의 것.xlsx', mime: 'application/octet-stream', b64: '' } } });
+    await sql`update library_files set anthropic_file_id = 'file_old_ref' where id = ${ref}`;
+    await sql`update ai_doc_jobs set result_anthropic_file_id = 'file_old_res' where id = ${job1}`;
+    await sql`insert into tenants (id, name) values ('t_docs2', '남의회사') on conflict do nothing`;
+    const [ou] = await sql`insert into users (email, name, role, status, tenant) values ('boss@other-docs.test', '남대표', 'owner', 'active', 't_docs2') returning id`;
+    await sql`insert into library_files (tenant, title, file_name, mime_type, size_bytes, storage_key, upload_status, created_by, anthropic_file_id) values ('t_docs2', '남의 파일', '남의 것.xlsx', 'application/octet-stream', 1, 'lib/t_docs2/x', 'ready', ${ou.id}, 'file_other_co')`;
+    assert.deepEqual(await ctx.owner.ok('GET', '/api/org/ai-doc-copies'), { refs: 1, results: 1, total: 2 });
+    assert.ok([403, 404].includes((await ctx.staffA.client.req('POST', '/api/org/ai-doc-copies', {})).status), '직원은 못 지움');
+    const before = (await fakeState()).anthropicDeleted.length;
+    assert.deepEqual(await ctx.owner.ok('POST', '/api/org/ai-doc-copies', {}), { removed: 2, failed: 0, left: 0 });
+    const st = await fakeState();
+    assert.deepEqual(st.anthropicDeleted.slice(before).sort(), ['file_old_ref', 'file_old_res']);
+    assert.ok(st.anthropicFiles.file_other_co, '다른 회사 사본은 그대로');
+    assert.equal((await sql`select anthropic_file_id from library_files where id = ${ref}`)[0].anthropic_file_id, null);
+    assert.equal((await sql`select count(*)::int c from audit_logs where action = 'ai.doc_copies_purge'`)[0].c, 1, '지운 기록');
+    // 우리 저장소의 원본·결과는 그대로 열림
+    assert.equal((await fetch(`${BASE}/api/ai/doc-jobs/${job1}/file`, { headers: { cookie: ctx.owner.cookie } })).status, 200);
+    assert.deepEqual(await ctx.owner.ok('GET', '/api/org/ai-doc-copies'), { refs: 0, results: 0, total: 0 });
   });
 
   test('회사 설정: 웹 도구 끄기·문서 작업 끄기', async () => {

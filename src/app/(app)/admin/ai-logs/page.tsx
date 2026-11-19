@@ -34,6 +34,7 @@ export default function AiLogsPage() {
       <PageHeader title="AI 사용 내역" icon={Sparkles} sub="누가·언제·무슨 질문을 했는지와 비용. 열어 본 기록은 감사 기록에 남습니다."
         actions={canEdit && data && <Button variant="secondary" onClick={() => setSet({ ...data.settings, allowText: (data.settings.topic_allow ?? []).join(', ') })} data-testid="ai-settings-open">보관·한도 설정</Button>} />
       {data && <p className="text-xs text-ink-2" data-testid="ai-settings-line">보관 {data.settings.retention_days ? `${data.settings.retention_days}일` : '무기한'} · 1인 하루 {data.settings.daily_limit}회 · 1회 {data.settings.input_max.toLocaleString('ko-KR')}자 · 업무 무관 질문 {data.settings.topic_filter ? '차단' : '허용'} · 웹 검색 {data.settings.web_tools ? '켜짐' : '꺼짐'} · 문서 작업 {data.settings.doc_engine ? '켜짐' : '꺼짐'}</p>}
+      <DocCopies canEdit={canEdit} />
       <div className="flex flex-col gap-2 sm:flex-row">
         <select className={cx(inputCls, 'sm:w-48')} value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="사람">
           <option value="">모든 사람</option>{dir.users.map((u: any) => <option key={u.id} value={u.id}>{u.name}{u.title ? ` · ${u.title}` : ''}</option>)}
@@ -106,6 +107,25 @@ export default function AiLogsPage() {
           </form>
         )}
       </Modal>
+    </div>
+  );
+}
+
+/** 문서 만들기가 예전에 AI 회사 파일 보관소에 남겨 둔 사본(11/20부터는 작업이 끝나면 스스로 지움) — 남아 있을 때만 보이고, 지우기는 누를 때만 */
+function DocCopies({ canEdit }: { canEdit: boolean }) {
+  const c = useApi<{ refs: number; results: number; total: number }>('/api/org/ai-doc-copies');
+  const [busy, setBusy] = useState(false);
+  if (!c.data?.total) return null;
+  async function purge() {
+    if (!confirm(`AI 회사(Anthropic)에 남아 있는 사본 ${c.data!.total}개를 지울까요? 워크인에 있는 원본 파일은 그대로입니다.`)) return;
+    setBusy(true);
+    try { const r = await api<{ removed: number; failed: number; left: number }>('/api/org/ai-doc-copies', { body: {} }); toast.ok(`${r.removed}개 지웠습니다${r.left ? ` — ${r.left}개 남음(한 번 더 눌러 주세요)` : ''}${r.failed ? ` · ${r.failed}개는 지우지 못함` : ''}`); c.reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-card border border-amber-200 bg-amber-50 px-3 py-2 text-sm" data-testid="ai-doc-copies">
+      <span className="min-w-0 flex-1 text-amber-900">문서 만들기에 쓴 파일 사본 <b>{c.data.total}개</b>가 AI 회사(Anthropic) 파일 보관소에 남아 있습니다(참고 자료 {c.data.refs} · 결과 {c.data.results}). 이제는 작업이 끝나면 바로 지우며, 예전 것은 여기서 지울 수 있습니다. 워크인의 원본은 그대로입니다.</span>
+      {canEdit && <Button size="sm" variant="secondary" disabled={busy} onClick={purge} data-testid="ai-doc-copies-purge">지금 지우기</Button>}
     </div>
   );
 }
