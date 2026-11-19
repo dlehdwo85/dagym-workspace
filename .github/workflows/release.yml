@@ -9,6 +9,9 @@ on:
       version_name: { description: '표시 버전 (예: 1.0.1)', required: true, default: '1.0.0' }
       android: { type: boolean, default: true, description: 'Google Play 내부 테스트 업로드' }
       ios: { type: boolean, default: true, description: 'TestFlight 업로드' }
+      # Play Console 경고(11/19 로컬: 난독화 1% — 25% 미만이면 게시에 영향 가능, 기한 2027년 2월) 대응 시험용.
+      # 켜면 ANDROID_MINIFY=1 로 빌드 — mobile/android/app/build.gradle 이 이 값을 읽어 minifyEnabled 를 켜야 효과가 있음(네이티브 설정은 로컬 담당). 내부 테스트 트랙에서 푸시·플러그인을 확인한 뒤 기본값으로
+      minify: { type: boolean, default: false, description: 'Android 코드 줄이기(R8) 켜고 빌드 — 내부 테스트 확인용' }
 permissions:
   contents: read
 jobs:
@@ -21,6 +24,7 @@ jobs:
       APP_URL: ${{ vars.APP_URL }}
       ANDROID_VERSION_CODE: ${{ github.run_number }}
       APP_VERSION_NAME: ${{ inputs.version_name }}
+      ANDROID_MINIFY: ${{ inputs.minify && '1' || '' }}
     steps:
       - name: 설정 확인
         id: cfg
