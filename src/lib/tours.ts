@@ -1,7 +1,8 @@
 import { db } from './db';
 
 /** #77 처음 사용 안내(코치마크 투어) — 사람별·화면별 1번. 화면 쪽 단계 정의는 components/Tour.tsx */
-export const TOUR_IDS = ['home', 'tasks', 'calendar', 'messages', 'library', 'assistant', 'task'] as const;
+// 11/20: 결재·점검 안내(11/19 추가)가 이 목록에 없어 '봤음'이 서버에 안 남았음(400 → 다른 기기·앱 다시 깔면 또 뜸) → 추가. 화면 쪽 목록(Tour.tsx TOUR_PAGES)과 같아야 함 — tests/api/audit-1023 이 대조
+export const TOUR_IDS = ['home', 'tasks', 'calendar', 'messages', 'library', 'assistant', 'approvals', 'check', 'task'] as const;
 export type TourId = (typeof TOUR_IDS)[number];
 
 /** 자동으로 띄울지: 기본 켬. TOURS_AUTO=0 이면 끔(시험 서버 — 모든 화면 시험을 가리지 않게), 지원 모드(대신 보기)는 끔 */
