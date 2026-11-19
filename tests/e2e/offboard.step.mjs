@@ -11,18 +11,20 @@ export async function offboardFlow({ owner, ctx, BASE, SHOTS }) {
   const row = owner.getByTestId('users').locator('tr').filter({ hasText: '이퇴사' });
   await row.getByTestId('user-leave').click();
   const dlg = owner.getByTestId('offboard'); await dlg.waitFor();
-  await dlg.getByTestId('offboard-date').fill('2026-10-20');
+  // CI 11/20: 퇴사일을 '2026-10-20' 으로 고정해 두었더니 복직 기한(퇴사일 + 30일 = 11/19)이 지난 11/20 부터 [복직] 단추가 안 보여 매번 실패 → 퇴사일은 오늘(서울)
+  const leftDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  await dlg.getByTestId('offboard-date').fill(leftDay);
   await dlg.getByTestId('offboard-to').selectOption({ label: '이직원' });
   assert.equal(await dlg.getByTestId('offboard-item-tasks').isChecked(), true, '담당 업무 1건은 기본 체크');
   assert.match(await dlg.getByTestId('offboard-items').innerText(), /담당 업무\(진행 중\)\s*1/);
   await owner.screenshot({ path: `${SHOTS}/148-offboard.png` });
   await dlg.getByTestId('offboard-go').click();
   await owner.getByText(/퇴사 처리했습니다/).waitFor();
-  // 목록: 퇴사자는 접힘 → 펼치면 '퇴사(10/20)'·[인수인계]·[복직]
+  // 목록: 퇴사자는 접힘 → 펼치면 '퇴사(오늘 날짜)'·[인수인계]·[복직]
   await owner.getByTestId('left-toggle').click();
   const row2 = owner.getByTestId('users').locator('tr').filter({ hasText: '이퇴사' });
   await row2.waitFor();
-  assert.match(await row2.getByTestId('user-status').innerText(), /퇴사\(10\/20\)/);
+  assert.ok((await row2.getByTestId('user-status').innerText()).includes(`퇴사(${leftDay.slice(5).replace('-', '/')})`), '목록에 퇴사(월/일)');
   await row2.getByTestId('user-handover').waitFor(); await row2.getByTestId('user-rejoin').waitFor();
   assert.equal((await c.req('GET', '/api/auth/me')).status, 401, '퇴사 즉시 로그인 차단');
   const t = (await ctx.owner.ok('GET', `/api/tasks?limit=100&assigneeId=${ctx.staffA.id}`)).tasks.find((x) => x.title === 'E2E 퇴사자 업무');

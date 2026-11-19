@@ -297,7 +297,7 @@ function Coach({ run, admin, userId, onSample, onNext, onPrev, onClose }: { run:
           <button type="button" onClick={onClose} className="text-xs text-ink-3 underline-offset-2 hover:underline" data-testid="tour-skip">건너뛰기</button>
           <div className="flex gap-1.5">
             {idx > 1 && <Button size="sm" variant="secondary" onClick={onPrev} data-testid="tour-prev">이전</Button>}
-            <Button size="sm" onClick={onNext} data-testid="tour-next">{last ? (run.id === 'home' ? '시작하기' : '확인') : '다음'}</Button>
+            <Button size="sm" onClick={onNext} disabled={acting} data-testid="tour-next">{last ? (run.id === 'home' ? '시작하기' : '확인') : '다음'}</Button>
           </div>
         </div>
       </div>

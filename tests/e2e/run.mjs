@@ -2942,6 +2942,8 @@ await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리�
   await p.getByTestId('task-list').getByText('[예시] 워크인 둘러보기').first().waitFor({ timeout: 10000 });
   const [smp] = await sql`select t.title, t.due_date::text due, t.assignee_id, (select count(*)::int from task_checklist_items c where c.task_id = t.id) items from tasks t where t.title = '[예시] 워크인 둘러보기' and t.created_by = (select id from users where email = 'tour77@dagym.test')`;
   assert.ok(smp && smp.items === 4 && smp.due === new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), `예시 업무 1건(오늘 마감·체크리스트 4줄) ${JSON.stringify(smp)}`);
+  // CI 11/20(e839445): 예시 업무가 목록에 보인 직후에는 아직 첫 단계 — 안내가 스스로 '① 업무 만들기'로 넘어가는 순간과 [다음] 누름이 겹쳐 그 단계를 건너뜀 → 넘어간 것을 보고 시작
+  await p.waitForFunction(() => document.querySelector('[data-testid="tour-title"]')?.textContent === '① 업무 만들기', null, { timeout: 10000 });
   const ttl = [];
   for (let k = 0; k < 12 && (await tour.count()); k++) { ttl.push(await p.getByTestId('tour-title').innerText()); await p.getByTestId('tour-next').click(); await p.waitForTimeout(150); }
   for (const t of ['① 업무 만들기', '② 업무 열기', '③ 완료하기', '보기 바꾸기']) assert.ok(ttl.includes(t), `${t} 단계 (${ttl.join(' / ')})`);
