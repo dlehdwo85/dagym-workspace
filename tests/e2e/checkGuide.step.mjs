@@ -32,6 +32,8 @@ export async function checkGuide({ owner, staff, BASE, SHOTS }) {
   await owner.getByText('저장했습니다').first().waitFor();
   await owner.getByTestId('check-photo-input').setInputFiles({ name: 'shelf.png', mimeType: 'image/png', buffer: PNG });
   await owner.getByTestId('check-photo').first().waitFor({ timeout: 15000 });
+  // 그림 칸이 생긴 직후에는 아직 받는 중일 수 있다(CI 에서 한 번 실패) → 다 열릴 때까지 기다린 뒤 확인
+  await owner.waitForFunction(() => { const img = document.querySelector('[data-testid=check-photo]'); return !!img && img.complete && img.naturalWidth > 0; }, null, { timeout: 15000 }).catch(() => {});
   assert.ok(await owner.getByTestId('check-photo').first().evaluate((img) => img.complete && img.naturalWidth > 0), '기준 사진이 실제로 열림');
   assert.ok(await owner.evaluate(() => document.documentElement.scrollWidth <= 375), '항목 창도 375 가로 넘침 없음');
   await owner.screenshot({ path: `${SHOTS}/check-item-mobile.png` });
