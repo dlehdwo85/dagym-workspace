@@ -54,6 +54,23 @@ export async function checkRun({ owner, ctx, BASE, SHOTS }) {
   const row = owner.getByTestId('check-followup-row').filter({ hasText: '화장실' });
   await row.getByText('조치 중').waitFor();
   await row.getByText(/다짐 강남점 · 화장실 · 이직원/).waitFor();
+  // 점검 2단계 남은 것(11/20): 홈 '점검' 카드(조치 중 1 · 마지막 점검) → 점검 화면 [업무 목록에서 보기] = 업무 목록 '점검 보완만'
+  await owner.goto(BASE + '/');
+  const hc = owner.getByTestId('home-check'); await hc.waitFor({ timeout: 15000 });
+  await hc.getByTestId('home-check-requested').getByText('조치 중 1').waitFor();
+  await hc.getByTestId('home-check-last').getByText(/마지막 점검 .*다짐 강남점 · 기본 매장 점검/).waitFor();
+  await fit('홈 점검 카드');
+  await hc.scrollIntoViewIfNeeded(); await owner.screenshot({ path: `${SHOTS}/check-home-card-mobile.png` });
+  await hc.getByTestId('home-check-go').click();
+  await owner.waitForURL((u) => u.pathname === '/check');
+  await owner.getByTestId('check-tasks-link').click();
+  await owner.waitForURL(/\/tasks\?.*tag=/);
+  await owner.getByTestId('filter-chip').filter({ hasText: '점검 보완만' }).waitFor({ timeout: 15000 });
+  await owner.getByTestId('task-list').getByText('화장실 보완 요청').first().waitFor({ timeout: 15000 });
+  assert.equal(await owner.getByTestId('task-list').getByTestId('row-title').count(), 1, '점검 보완 업무만 보임');
+  await fit('업무 목록 점검 보완만');
+  await owner.goto(BASE + '/check');
+  await owner.getByTestId('check-followup-row').filter({ hasText: '화장실' }).waitFor({ timeout: 15000 });
   // 담당자가 사진을 올리고 완료 → 확인 대기 → 다시 보완(새 업무 · 2차)
   const fu = async () => (await ctx.owner.ok('GET', '/api/check/followups?state=open')).followups.find((f) => f.itemTitle === '화장실');
   const first = await fu();

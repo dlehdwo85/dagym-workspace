@@ -167,6 +167,8 @@ export const listQuery = z.object({
   carried: z.enum(['1']).optional().catch(undefined),
   /** V35 1 첨부 있음 */
   hasAttach: z.enum(['1']).optional().catch(undefined),
+  /** 꼬리표가 정확히 이 값인 업무만 — 업무 목록 '점검 보완만'(점검에서 만든 보완 요청 업무) */
+  tag: z.string().trim().min(1).max(40).optional().catch(undefined),
 });
 
 /** V20 완료 보관: 달별 완료 개수 (서울 기준 완료일, 볼 수 있는 업무만, 담당자 필터 선택) */
@@ -233,6 +235,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
   }
   if (q.doneMonth) conds.push(sql`t.completed_at >= (${q.doneMonth + '-01'}::date::timestamp at time zone 'Asia/Seoul') and t.completed_at < ((${q.doneMonth + '-01'}::date + interval '1 month')::timestamp at time zone 'Asia/Seoul')`);
   if (q.hasAttach) conds.push(sql`exists (select 1 from attachments at where at.task_id = t.id and at.deleted_at is null)`);
+  if (q.tag) conds.push(sql`${q.tag} = any(t.tags)`);
   if (q.carried) conds.push(sql`t.status <> 'done' and coalesce(t.due_date, (t.created_at at time zone 'Asia/Seoul')::date) < date_trunc('month', (now() at time zone 'Asia/Seoul'))::date`);
   if (q.from) conds.push(sql`coalesce(t.due_date, t.start_date) >= ${q.from}`);
   if (q.to) conds.push(sql`coalesce(t.start_date, t.due_date) <= ${q.to}`);

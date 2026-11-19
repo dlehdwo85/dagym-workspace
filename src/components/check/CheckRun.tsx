@@ -9,6 +9,7 @@ import { api, useApi } from '@/components/client';
 import { useMultiSite, useSession, useTerms } from '@/components/session';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { shrinkImage } from '@/components/shrink';
+import { FOLLOWUP_TAG } from '@/lib/check/tags';
 
 type Course = { id: string; name: string; orgUnitId: string | null };
 type Followup = { id: string; state: 'requested' | 'waiting' | 'closed' | 'canceled'; roundNo: number; dueDate: string | null; note: string | null; closeNote: string | null; taskId: string | null; orgUnitName: string; itemTitle: string;
@@ -66,7 +67,8 @@ export function RunHome() {
       <section className={box} data-testid="check-followups">
         <h2 className="flex items-center gap-2 border-b border-line px-3 py-2 font-semibold">보완 요청
           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800" data-testid="check-count-waiting">확인 대기 {h.counts.waiting}</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2">조치 중 {h.counts.requested}</span></h2>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2">조치 중 {h.counts.requested}</span>
+          <Link href={`/tasks?tag=${encodeURIComponent(FOLLOWUP_TAG)}`} className="ml-auto text-xs font-medium text-brand-700 underline" data-testid="check-tasks-link">업무 목록에서 보기</Link></h2>
         {!fus.data ? <div className="p-3"><Skeleton rows={2} /></div> : !fus.data.followups.length ? <p className="p-3 text-ink-3">열린 보완 요청이 없습니다.</p> : (
           <ul className="divide-y divide-line">
             {fus.data.followups.map((f) => (
