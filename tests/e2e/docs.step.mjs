@@ -11,9 +11,12 @@ export async function docsCoedit({ browser, owner, staff, ctx, sql, BASE, SHOTS,
   // 만들기
   await owner.goto(BASE + '/library');
   // 293차 #837: 대표도 새 문서 기본 올릴 곳 = 주 팀 — 앞 단계에서 대표가 팀에 들어가 있으면 그 팀 밖 직원은 못 연다 → 함께 쓸 문서는 '회사 전체'로
-  await owner.getByTestId('library-upload-to').selectOption('company');
+  // CI 11/20(e839445): 직원 화면이 문서를 404 로 받음 — 화면이 자리 잡는 동안(공간·범위가 정해질 때) '올릴 곳' 선택이 기본값(주 팀)으로 되돌아가 팀 문서로 만들어진 것 → 고른 값이 남아 있는지 보고 만들고, 만든 뒤 회사 전체 문서인지 확인
+  const upSel = owner.getByTestId('library-upload-to');
+  for (let i = 0; i < 6; i++) { await upSel.selectOption('company'); await owner.waitForTimeout(400); if ((await upSel.inputValue()) === 'company') break; }
   await owner.getByTestId('library-new-doc').click();
   await owner.getByLabel('문서 제목').fill('E2E 공동 편집 회의록');
+  assert.equal(await upSel.inputValue(), 'company', '올릴 곳 = 회사 전체');
   await owner.getByTestId('folder-save').click();
   await owner.waitForURL(/\/library\/doc\//);
   const id = owner.url().split('/').pop();
