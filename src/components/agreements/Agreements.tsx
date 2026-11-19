@@ -9,6 +9,7 @@ import { MultiUserSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { useSession } from '@/components/session';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, inputCls, toast } from '@/components/ui';
 import { putFile } from '@/components/upload';
+import { agreementLeftText } from '@/lib/agreementLabel';
 
 type State = 'active' | 'soon' | 'notice_passed' | 'expired' | 'renew_check' | 'open_ended' | 'ended';
 type Agr = { id: string; title: string; counterparty: string; amount: number | null; ownerId: string | null; ownerName: string | null; orgUnitId: string | null; orgUnitName: string | null; tags: string[]; memo: string | null;
@@ -20,15 +21,7 @@ type Detail = { agreement: Agr; terms: { term_no: number; start_date: string | n
 
 const won = (n: number | null) => (n === null ? '' : `${n.toLocaleString('ko-KR')}원`);
 const TONE: Record<State, string> = { active: 'bg-slate-100 text-ink-2', soon: 'bg-amber-100 text-amber-800', notice_passed: 'bg-red-100 text-red-700', expired: 'bg-red-100 text-red-700', renew_check: 'bg-red-100 text-red-700', open_ended: 'bg-slate-100 text-ink-3', ended: 'bg-slate-100 text-ink-3' };
-/** 남은 날 한 줄 — 자동 연장 + 통보 기한이 있으면 통보 마감일 기준 */
-function leftText(a: Agr) {
-  if (a.state === 'ended') return '종료';
-  if (a.state === 'open_ended') return '기한 없음';
-  if (a.state === 'expired') return `만료 ${Math.abs(a.daysLeft ?? 0)}일 지남`;
-  if (a.state === 'renew_check') return '연장 확인 필요';
-  if (a.state === 'notice_passed') return `통보 기한 지남 · 만료 D-${a.daysLeft ?? 0}`;
-  return a.basisKind === 'notice' ? `통보 기한 D-${a.daysLeft}` : a.daysLeft === 0 ? '오늘 만료' : `D-${a.daysLeft}`;
-}
+const leftText = agreementLeftText; // 남은 날 한 줄 — 홈 카드와 같은 글
 const size = (b: number) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)}MB` : `${Math.max(1, Math.round(b / 1024))}KB`);
 const daysText = (d: number[]) => d.join('·');
 const parseDays = (s: string) => [...new Set(s.split(/[^0-9]+/).map((x) => Number(x)).filter((n) => Number.isInteger(n) && n >= 1 && n <= 365))].sort((a, b) => b - a).slice(0, 6);
