@@ -1,7 +1,7 @@
 -- 점검 1단계 — 점검 가이드(분야 · 공간 유형 · 공간 · 점검 항목 · 개정 이력 · 사진)
 -- 대표 11/19 "점검 개발 시작" (docs/check-feature-design.md · docs/reference/prompt-b-check-feature.md)
 -- 새 표만 만든다 — 기존 표는 건드리지 않음(기본 회사 화면·자료 영향 없음). 모든 표에 회사(tenant) 칸.
--- 되돌릴 때: drop table chk_photos, chk_item_versions, chk_items, chk_places, chk_place_types, chk_categories;
+-- 되돌릴 때: drop table chk_installs, chk_photos, chk_item_versions, chk_items, chk_places, chk_place_types, chk_categories;
 
 create table if not exists chk_categories (
   id uuid primary key default gen_random_uuid(),
@@ -97,3 +97,12 @@ create table if not exists chk_photos (
   created_at timestamptz not null default now()
 );
 create index if not exists chk_photos_owner on chk_photos(tenant, owner_kind, owner_id);
+
+-- 어느 템플릿을 이 회사에 설치했는지(공통 기본 · 업종) — 한 번 설치한 것은 다시 넣지 않는다(지운 항목이 되살아나지 않게)
+create table if not exists chk_installs (
+  tenant text not null,
+  tpl text not null,                              -- common · fitness · community · cafe …
+  by_user uuid references users(id) on delete set null,
+  installed_at timestamptz not null default now(),
+  primary key (tenant, tpl)
+);

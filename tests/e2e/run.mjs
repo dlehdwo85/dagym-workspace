@@ -169,6 +169,7 @@ import { permIntroIos199 } from './permIntroIos199.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { iosApp839 } from './iosApp839.step.mjs';
 import { aiConsent } from './aiConsent.step.mjs';
+import { checkGuide } from './checkGuide.step.mjs';
 import { quickMeeting } from './quickMeeting.step.mjs';
 import { meeting } from './meeting.step.mjs';
 import { spaces } from './spaces.step.mjs';
@@ -2713,6 +2714,7 @@ await step('190차 브랜드 키트 AI로 채우기(대표 #689): 자동 제작 
 await step('#497 R06 채널별 실제 게시 화면 미리보기: 인스타 피드(3장 옆으로 넘기기·n/N·점·2번째 장 보임·더 보기·해시태그·계정 이름) · 승인함 카드 [게시 화면으로 보기] · 페이스북(글 위·사진 격자) · 릴스(세로·오른쪽 아이콘·팔로우) · 스레드 · 블로그(문단 사이 사진) · 유튜브 · 휴대폰 손가락 넘기기', () => mktPreview({ owner, ctx, sql, BASE, SHOTS }));
 await step('#497 R44 AI 비서 답 실시간 출력: 쓰는 중 말풍선(글이 이어서·[멈춤]) → 끝나면 서식(제목·굵게·목록·표·링크) · 도구 단계 한 줄 · 패널 같음 · 휴대폰 표 넘침 없음', () => aiStream({ browser, desk, owner, BASE, FAKE, SHOTS }));
 await step('AI 동의(대표 11/19·애플 5.1.2): 들어오면 동의 창(무엇을·어디로·왜·동의하지 않으면) · 나중에 정하기 · 동의 전 AI 는 막힘 → 동의 뒤 답 · 설정에서 끄고 켜기 · 회사 자동 AI 스위치 · 휴대폰 폭', () => aiConsent({ owner, BASE, FAKE, SHOTS }));
+await step('점검 1단계 점검 가이드(375): 공통 기본 템플릿 · 찾기 · 항목 추가 · 기준 사진 · 직원 공유(2판·개정 이력) · 글자로 복사 · 업종 템플릿 넣기 · 직원은 공유된 양호 기준만', () => checkGuide({ owner, staff, BASE, SHOTS }));
 await step('#516 승인함 시안 없음: 승인할 시안 수에서 빼고 빨간 묶음·빨간 띠·[승인] 없음 → [지금 만들기](서버 그리기·크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧]', () => mktVisual({ owner, ctx, sql, BASE, SHOTS }));
 await step('#545(+#534) 수정 요청 → AI 수정본: 카드 [수정 요청] → AI 가 글·시안을 함께 고친 수정본 v3 바로 승인함 → 배지 \'수정본 v3 — 반영한 요청\'·AI 수정 1번째·[수정본 v3 승인] → 이전 버전과 나란히 비교(시안·바뀐 줄) → 같은 카드 다시 수정 요청(사진만 = v4) → 상세 비교 · 휴대폰 폭', () => mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('255차 #791·#792 승인함: 게시일 지난 승인 대기 → 게시일 지남 띠·[승인] = 다음 빈 게시 칸 · 영상 다시 만들기 비용 카드([승인하고 제작 요청]·[이미지 카드뉴스로]) · 처리 안 된 수정 요청 [AI 수정본 만들기] · 휴대폰 폭', () => mktInbox255({ owner, ctx, sql, BASE, FAKE, SHOTS }));

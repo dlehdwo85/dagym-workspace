@@ -58,6 +58,7 @@ const NAV: NavItem[] = [
   { href: '/mail/outbox', label: '보낸 메일', icon: Send }, // 375차 #997 보낸 메일 모아 보기(공통 — 어느 공간에서나, 휴대폰은 프로필 시트)
   { href: '/reports/mine', label: '내 주간 보고', icon: FileText },
   { href: '/notices', label: '공지', icon: Megaphone }, // V30 ② 공지(게시판)
+  { href: '/check', label: '점검', icon: ClipboardCheck }, // 점검 1단계(대표 11/19): 점검 가이드 — 권한이 없는 직원은 공유된 양호 기준만 봄
   { href: '/approvals', label: '결재', icon: Stamp }, // V30 ④ 결재 양식(휴가·지출결의·품의)
   { href: '/contacts', label: '연락처', icon: Contact }, // V31 회사 공용 연락처
 ];
@@ -199,7 +200,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
   const sp_ = space === 'work' ? '' : `?space=${space}`;
   const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'), byHref('/mail/outbox'),
-    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: Sparkles }] : [])];
+    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), byHref('/check'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: Sparkles }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);
