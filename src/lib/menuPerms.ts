@@ -39,6 +39,10 @@ export const MENUS = {
   // V30 ② 공지 쓰기(읽기는 대상 모두)
   notices: { label: '공지 쓰기', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'none' } },
   mail_settings: { label: '메일 계정·명함 설정', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  // 점검(대표 11/19 개발 시작 · docs/check-feature-design.md 3-4): 가이드 편집 / 점검하기·보완 확인 / 리포트. 직원은 '직원 공유' 표시된 양호 기준만 따로 봄
+  check_guide: { label: '점검 가이드', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'view', site_manager: 'view', staff: 'none' } },
+  check_run: { label: '점검하기·보완 확인', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'none' } },
+  check_report: { label: '점검 리포트', levels: ['none', 'view'], defaults: { owner: 'view', admin: 'view', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
 } as const;
 export type MenuKey = keyof typeof MENUS;
 export const LEVEL_LABEL: Record<string, string> = { none: '끔', view: '조회', edit: '조회·편집', use: '사용', delete: '삭제까지' };
