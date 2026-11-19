@@ -455,7 +455,7 @@ export async function createTask(u: SessionUser, i: TaskInput, opts: { quiet?: b
         task_type, photo_required, approval_line_id, estimate_minutes, requested_by, batch_id, reminder_minutes, team_id, space, alarm, complete_rule)
       values (${i.projectId ?? null}, ${i.parentId ?? null}, ${orgUnitId}, ${brandId ?? null}, ${i.title}, ${i.description ?? ''},
         ${status}, ${i.priority ?? 'normal'}, ${i.assigneeId ?? null}, ${i.startDate ?? null}, ${i.dueDate ?? null},
-        ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? true}, ${rule}, ${u.id}, extract(epoch from now()),
+        ${i.dueTime ?? null}, ${i.tags ?? []}, ${i.approvalRequired ?? false /* 대표 11/18: 기본은 검토 없음 — 예전 기본값 true 가 후속 업무 등 '따로 안 적은' 길에서 검토 필수를 켰음 */}, ${rule}, ${u.id}, extract(epoch from now()),
         ${sectionId}, ${i.assigneeId && i.assigneeId === u.id ? new Date() : null},
         ${i.taskType ?? 'normal'}, ${i.photoRequired ?? (i.taskType === 'inspection' ? 1 : 0)}, ${i.approvalLineId ?? null}, ${i.estimateMinutes ?? null}, ${i.requestedById ?? u.id}, ${(i as { batchId?: string }).batchId ?? null}, ${i.reminderMinutes ?? null}, ${i.teamId ?? null}, ${i.space ?? null}, ${i.alarm ?? null}, ${i.completeRule ?? 'primary'})
       returning id`;
@@ -604,8 +604,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
       const want = i.myPart !== undefined ? i.myPart === 'done' : i.status === 'done' || i.status === 'review' ? true : cur.status === 'done' ? false : null;
       // 검토 중인 업무의 승인·반려·검토 요청 취소는 아래 원래 길로(담당자가 검토 담당자이기도 한 경우 포함)
       if (want !== null && !(cur.status === 'review' && i.myPart === undefined)) {
-        const reviewerOf = cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : cur.created_by && cur.created_by !== cur.assignee_id ? cur.created_by : null;
-        const finish = (i.status === 'review' || cur.approval_line_id || (cur.approval_required && reviewerOf && reviewerOf !== u.id) ? 'review' : 'done') as TaskStatus;
+        // 대표 11/18 '검토는 담당자가 필요시에 요청자에게 요청하는 것이지 완료의 조건으로 두지는 않는다': [완료] = 완료.
+        // 검토로 가는 것은 담당자가 [검토 요청]을 골랐을 때와 결재선(전자결재) 업무뿐 — '검토 필수' 표시(approval_required)는 더 이상 완료를 막지 않음
+        const finish = (i.status === 'review' || cur.approval_line_id ? 'review' : 'done') as TaskStatus;
         if (!multi) { // 혼자 맡은 업무: 내 몫 = 업무 상태
           if (want ? cur.status === 'done' || cur.status === 'review' : cur.status !== 'done') return { id, version: cur.version, changed: false };
           i = { status: want ? finish : 'in_progress' };
@@ -737,9 +738,9 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         const reviewer = rv?.assignee_id ?? (cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : null);
         // 대표 피드백(10/15): 담당자는 자기 검토 요청을 취소(→ 진행 중)할 수 있다. 승인(완료)·반려는 검토 담당자만
         const cancelByOwner = (owner === u.id || (multi && isCo)) && i.status === 'in_progress';
-        // 393차(대표 11/13 '업무 담당자가 검토 승인 요청 후 완료 처리를 할 수 없는 상황'): 검토 필수가 아닌 업무(담당자가 골라서 [검토 요청]을 누른 것)는
-        // 검토를 기다리는 중에도 담당자가 바로 [완료] — 검토 담당자에게는 '검토 없이 완료' 알림, [검토] 업무는 자동으로 닫힘. 검토 필수·결재선 업무는 그대로 승인 필요
-        const finishByOwner = (owner === u.id || (multi && isCo)) && i.status === 'done' && !cur.approval_required;
+        // 393차(대표 11/13 '업무 담당자가 검토 승인 요청 후 완료 처리를 할 수 없는 상황') + 대표 11/18(검토는 완료의 조건이 아님):
+        // 검토를 기다리는 중에도 담당자가 바로 [완료] — 검토 담당자에게는 '검토 없이 완료' 알림, [검토] 업무는 자동으로 닫힘. 결재선 업무만 그대로 결재 필요(이 갈래는 결재선 없는 업무)
+        const finishByOwner = (owner === u.id || (multi && isCo)) && i.status === 'done';
         if (finishByOwner && reviewer && reviewer !== u.id) skippedReviewer = reviewer;
         if (reviewer && reviewer !== u.id && !cancelByOwner && !finishByOwner) {
           const [nm] = await tx<{ name: string }[]>`select name from users where id = ${reviewer}`;
@@ -771,16 +772,13 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
         if (left.length) throw conflict(`담당자 ${left.join(', ')}님이 아직 완료하지 않았어요 — 담당자가 각자 [완료]를 누르면 마지막 사람이 끝낼 때 업무가 완료돼요`);
       }
       if (to === 'done') {
-        // #410 보강(로컬 14:10): 검토 필수면 담당자가 관리자여도 바로 완료 불가 — 검토자(요청자, 없으면 만든 사람)가 따로 있을 때. 담당자 = 요청자면 자기 승인(바로 완료)
-        const reviewerOf = cur.requested_by && cur.requested_by !== cur.assignee_id ? cur.requested_by : cur.created_by && cur.created_by !== cur.assignee_id ? cur.created_by : null;
-        if (cur.approval_required && cur.status !== 'review' && reviewerOf && reviewerOf !== u.id) { // 검토 승인은 위에서 검토 담당자 확인
-          throw forbidden('검토 필수 업무입니다. "검토 요청"으로 요청자에게 넘겨 주세요.');
-        }
+        // 대표 11/18: 검토는 완료의 조건이 아님 — 예전 '검토 필수 업무입니다. "검토 요청"으로…' 막기(#410)는 없앰. 담당자는 검토 없이도 바로 완료
         const blockers = await tx`select 1 from task_dependencies d join tasks dt on dt.id = d.depends_on_id
           where d.task_id = ${id} and dt.status <> 'done' and dt.deleted_at is null`;
         if (blockers.length) throw conflict('선행 업무가 아직 완료되지 않았습니다');
         set.completed_at = new Date();
-        if (cur.approval_required) { set.approved_at = new Date(); set.approved_by = u.id; }
+        // '○○님이 최종 완료를 확인했습니다'는 검토 담당자가 실제로 승인했을 때만(담당자가 스스로 끝낸 것은 승인 아님)
+        if (cur.status === 'review' && !skippedReviewer && !mine) { set.approved_at = new Date(); set.approved_by = u.id; }
         statusEvent = cur.status === 'review' && !skippedReviewer ? 'approved' : 'completed';
       } else if (to === 'review') {
         set.review_requested_at = new Date();

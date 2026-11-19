@@ -146,9 +146,8 @@ describe('② 등록 → 배정 → 알림 → 댓글·자료 → 검토 요청 
     const content = await fetch(new URL(dl.headers.get('location'), BASE)).then((r) => r.text());
     assert.equal(content, '%PDF-1.4 abc');
   });
-  test('직원은 바로 완료할 수 없고 검토 요청만 가능', async () => {
-    const r = await ctx.staffA.client.patch(`/api/tasks/${id}`, { status: 'done' });
-    assert.equal(r.status, 403);
+  // 대표 11/18: 검토는 담당자가 필요할 때 요청하는 것 — 완료의 조건이 아님(바로 완료는 task-review.test). 여기서는 담당자가 골라서 검토를 요청하는 흐름
+  test('직원이 검토를 요청하면 요청자(현장 관리자)에게 알림', async () => {
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
     const n = await notifs(ctx.managerA.client);
     assert.ok(n.some((x) => x.type === 'review_requested' && x.link === `/tasks/${id}`), '현장 관리자에게 검토 요청 알림');
@@ -1999,14 +1998,14 @@ describe('V28-5 계정 삭제 요청(스토어)', () => {
 });
 
 describe('대표 피드백 10/15 검토 중 업무', () => {
-  test('담당자는 [검토 요청 취소](→ 진행 중)만, 승인·반려는 검토 담당자(요청자) · 상세에 검토자 이름', async () => {
-    // 393차(대표 11/13): 검토 필수가 아닌 업무는 검토 중에도 담당자가 바로 완료할 수 있게 바뀜(task-review.test) — '담당자 본인은 승인 불가'는 검토 필수 업무로 확인
+  test('담당자는 [검토 요청 취소](→ 진행 중)·바로 완료, 승인·반려는 검토 담당자(요청자) · 상세에 검토자 이름', async () => {
+    // 대표 11/18: 검토는 완료의 조건이 아님 — 담당자는 검토 중에도 바로 완료(task-review.test). 담당·검토 담당이 아닌 사람은 그대로 불가
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '검토 취소 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, requestedById: ctx.managerA.id, approvalRequired: true })).id;
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });
     const d = await ctx.staffA.client.ok('GET', `/api/tasks/${t}`);
     assert.equal(d.reviewer.id, ctx.managerA.id); assert.ok(d.reviewer.name);
-    const self = await ctx.staffA.client.req('PATCH', `/api/tasks/${t}`, { status: 'done' });
-    assert.equal(self.status, 403, '담당자 본인은 승인 불가'); assert.match(self.body.error.message, new RegExp(d.reviewer.name));
+    const outsider = await ctx.owner.req('PATCH', `/api/tasks/${t}`, { status: 'done' });
+    assert.equal(outsider.status, 403, '담당·검토 담당이 아닌 사람은 불가'); assert.match(outsider.body.error.message, new RegExp(d.reviewer.name));
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'in_progress' });
     assert.equal((await ctx.staffA.client.ok('GET', `/api/tasks/${t}`)).task.status, 'in_progress', '검토 요청 취소');
     await ctx.staffA.client.ok('PATCH', `/api/tasks/${t}`, { status: 'review' });

@@ -373,7 +373,7 @@ function CalendarPage() {
   };
 
   async function completeTask(t: any) {
-    const to = t.status === 'done' ? 'in_progress' : t.status === 'review' ? 'done' : t.approval_line_id || (t.approval_required && user.role === 'staff') ? 'review' : 'done';
+    const to = t.status === 'done' ? 'in_progress' : t.status === 'review' ? 'done' : t.approval_line_id ? 'review' : 'done'; // 대표 11/18: 검토는 완료의 조건이 아님
     setTasks((xs) => xs.map((x) => (x.id === t.id ? { ...x, status: to } : x)));
     try {
       await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: to, version: t.version } });
@@ -1405,7 +1405,7 @@ function EventPreview({ ev, folded = [], x, y, calendarName, onClose, onEdit, on
   }
   const [doneIds, setDoneIds] = useState<string[]>([]);
   async function complete(t: any) {
-    const to = t.status === 'review' ? 'done' : t.approval_line_id || t.approval_required ? 'review' : 'done';
+    const to = t.status === 'review' ? 'done' : t.approval_line_id ? 'review' : 'done';
     try {
       await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: to, version: t.version } });
       toast.ok(to === 'review' ? '검토를 요청했습니다' : '업무를 완료했습니다'); setDoneIds((xs) => [...xs, t.id]); linked.reload(); onChanged();

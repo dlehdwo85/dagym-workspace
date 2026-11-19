@@ -355,7 +355,9 @@ await step('② 직원(모바일) 댓글·멘션·사진 첨부·문서 링크 �
   await dlg.getByLabel('버전').fill('v1');
   await dlg.getByRole('button', { name: '연결' }).click();
   await staff.getByTestId('attachments').getByText('ChatGPT 결과물').waitFor();
-  await staff.getByTestId('next-action').getByText('검토 요청').click(); // 대표 피드백: 진행 단계 바의 [검토 요청]
+  // 대표 11/18: 검토는 담당자가 고르는 것 — 큰 단추는 언제나 [완료], 검토를 받고 싶을 때만 그 아래 [검토 요청](예전: 검토 필수 업무는 큰 단추가 '완료 → 검토 요청')
+  assert.equal((await staff.getByTestId('next-action').first().innerText()).trim(), '완료', '예전 검토 필수 표시가 있어도 큰 단추는 완료');
+  await staff.getByTestId('review-ask').click();
   await staff.getByTestId('review-wait').waitFor(); // 담당자: 검토자 이름 안내 + [검토 요청 취소]
   await staff.screenshot({ path: `${SHOTS}/06-mobile-task-review.png`, fullPage: true });
   const n = await ctx.managerA.client.ok('GET', '/api/notifications');
@@ -2609,8 +2611,9 @@ await step('V32 2 정산: 플랫폼 정산 집계·장부 [정산 완료] → �
 
 await step('로컬 10/20 알림 바로 처리: 배정 알림 [오늘 할 일에 넣기] → 처리 표시·버튼 사라짐 → 설정 조용한 시간 칸', () => notifActionsFlow({ staff, ctx, BASE, SHOTS }));
 
-// 대표 10/21 13:50 #410: 검토 필수가 아닌 일반 업무에서도 담당자가 [검토 요청] → 요청자가 [반려(보완 요청)]/[승인(최종 완료)] · '검토' 칸 항상 표시 · 요청자 '검토 필수' 토글
-await step('#410 일반 업무 검토 요청(휴대폰 담당자) → 요청자 반려 → 다시 요청 → 승인(PC) · 검토 필수 토글', async () => {
+// 대표 10/21 13:50 #410: 모든 업무에서 담당자가 [검토 요청] → 요청자가 [반려(보완 요청)]/[승인(최종 완료)] · '검토' 칸 항상 표시
+// 대표 11/18: 검토는 완료의 조건이 아님 — '검토 필수' 칸 없음 · 예전 표시가 있어도 바로 완료 · 검토 중에도 바로 완료
+await step('#410 일반 업무 검토 요청(휴대폰 담당자) → 요청자 반려 → 다시 요청 → 승인(PC) · 검토 없이 바로 완료(대표 11/18)', async () => {
   const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '#410 검토 흐름 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
   await staff.goto(`${BASE}/tasks/${id}`);
   await staff.getByTestId('review-ask').waitFor();
@@ -2629,29 +2632,37 @@ await step('#410 일반 업무 검토 요청(휴대폰 담당자) → 요청자 
   await owner.getByText('승인했습니다').waitFor();
   d = await ctx.owner.ok('GET', `/api/tasks/${id}`); assert.equal(d.task.status, 'done');
   assert.ok((await sql`select 1 from activities where entity_type = 'task' and entity_id = ${id} and action = 'approved'`).length, '활동 approved');
-  // 요청자 '검토 필수' 토글(세부 정보 칸) — 켜면 담당자 바로 완료 불가(서버 403)
-  const id2 = (await ctx.owner.ok('POST', '/api/tasks', { title: '#410 검토 필수 토글 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
+  // 대표 11/18 '검토는 담당자가 필요시에 요청자에게 검토를 요청하는 것이지 완료의 조건으로 두지는 않는다':
+  //   요청자 '검토 필수' 칸(#410 ②③)은 없앰 · 예전에 검토 필수가 켜진 업무도 담당자가 큰 단추 [완료]로 바로 완료
+  const id2 = (await ctx.owner.ok('POST', '/api/tasks', { title: '#410 예전 검토 필수 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: true })).id;
   await owner.goto(`${BASE}/tasks/${id2}`);
-  const cb = owner.getByTestId('approval-required');
-  if (!(await cb.isVisible().catch(() => false))) await owner.getByRole('button', { name: /세부 정보/ }).first().click().catch(() => {});
-  await cb.click();
-  await owner.getByText('검토 필수로 바꿨습니다').waitFor();
-  const t2 = (await ctx.staffA.client.ok('GET', `/api/tasks/${id2}`)).task; assert.equal(t2.approval_required, true);
-  assert.equal((await ctx.staffA.client.req('PATCH', `/api/tasks/${id2}`, { status: 'done', version: t2.version })).status, 403, '검토 필수 → 담당자 바로 완료 불가');
-  // 393차(대표 11/13 '업무 담당자가 검토 승인 요청 후 완료 처리를 할 수 없는 상황'): 검토 필수가 아닌 업무는 검토를 기다리는 중에도 담당자 [완료] → 바로 완료
-  const id3 = (await ctx.owner.ok('POST', '/api/tasks', { title: '#393 검토 기다리다 완료', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
+  await owner.getByTestId('task-title').waitFor();
+  await owner.getByRole('button', { name: /세부 정보/ }).first().click().catch(() => {});
+  assert.equal(await owner.getByTestId('approval-required').count(), 0, "요청자 화면에 '검토 필수' 칸 없음");
+  await staff.goto(`${BASE}/tasks/${id2}`);
+  await staff.getByTestId('review-ask').waitFor();
+  assert.equal((await staff.getByTestId('next-action').first().innerText()).trim(), '완료', "큰 단추는 [완료](예전: '완료 → 검토 요청')");
+  await staff.getByTestId('next-action').first().click();
+  await staff.getByText('완료 처리했습니다').first().waitFor();
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id2}`)).task.status, 'done', '예전 검토 필수 업무도 검토 없이 바로 완료');
+  // 393차(대표 11/13 '업무 담당자가 검토 승인 요청 후 완료 처리를 할 수 없는 상황'): 검토를 기다리는 중에도 담당자 [완료] → 바로 완료 — 예전 검토 필수 표시가 있어도 같음
+  const id3 = (await ctx.owner.ok('POST', '/api/tasks', { title: '#393 검토 기다리다 완료', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: true })).id;
   await staff.goto(`${BASE}/tasks/${id3}`);
   await staff.getByTestId('review-ask').waitFor(); await staff.getByTestId('review-ask').click();
   const wait = staff.getByTestId('review-wait'); await wait.waitFor();
-  assert.match(await wait.innerText(), /승인 없이도 바로 완료할 수 있어요/);
+  assert.match(await wait.innerText(), /승인을 기다리지 않고 바로 완료할 수도 있어요/);
+  await staff.screenshot({ path: `${SHOTS}/176b-task-review-finish.png`, fullPage: true });
   await wait.getByTestId('review-finish').click();
   await staff.getByText('완료 처리했습니다 — 검토 담당자에게 알렸습니다').waitFor();
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id3}`)).task.status, 'done', '검토를 기다리던 업무를 담당자가 완료');
-  // 검토 필수 업무는 검토 중 [완료] 단추 없음(승인 대기 그대로)
-  await ctx.staffA.client.ok('PATCH', `/api/tasks/${id2}`, { status: 'review', version: t2.version });
-  await staff.goto(`${BASE}/tasks/${id2}`); await staff.getByTestId('review-wait').waitFor();
-  assert.equal(await staff.getByTestId('review-finish').count(), 0, '검토 필수는 담당자 [완료] 없음');
-  for (const x of [id3, id2]) await ctx.owner.ok('DELETE', `/api/tasks/${x}`);
+  // 대표 11/18 휴대폰 화면 그대로: 검토 중인 업무에서 위쪽 단계 줄의 [완료] 칸을 눌러도 바로 완료(예전: 잠김 안내만)
+  const id4 = (await ctx.owner.ok('POST', '/api/tasks', { title: '#1118 검토 중 완료 칸', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: true })).id;
+  await ctx.staffA.client.ok('PATCH', `/api/tasks/${id4}`, { status: 'review' });
+  await staff.goto(`${BASE}/tasks/${id4}`); await staff.getByTestId('review-wait').waitFor();
+  await staff.getByTestId('step-done').click();
+  await staff.getByText('완료 처리했습니다 — 검토 담당자에게 알렸습니다').waitFor();
+  assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id4}`)).task.status, 'done', '검토 중 [완료] 칸 → 바로 완료');
+  for (const x of [id4, id3, id2]) await ctx.owner.ok('DELETE', `/api/tasks/${x}`);
 });
 
 await step('대표 검수 10/20 ② 앱 영업 정리(390): 리드 전화·문자·홈페이지 → 파이프라인 단계 칩 목록 → 입찰 원문·공고문·한국어 상세·관리자 원본 접힘 → 허브 시설 전화 줄', () => salesAppFlow({ browser, desk, ctx, sql, BASE, SHOTS }));

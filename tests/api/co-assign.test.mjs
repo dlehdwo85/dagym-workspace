@@ -81,17 +81,17 @@ test("대표 10/24: 대표가 첫 담당자여도 [완료] = 내 몫 완료(예�
   assert.equal((await ctx.managerA.client.req('PATCH', `/api/tasks/${r.id}`, { myPart: 'done' })).status, 403);
 });
 
-test('대표 10/24: 검토 필수 업무는 마지막 사람이 끝내면 검토 요청 → 요청자 반려 = 모두 다시 · 다시 모두 끝내면 검토 요청 → 승인 = 완료', async () => {
+test('대표 10/24 + 11/18: 마지막 사람이 [검토 요청]으로 끝내면 검토 요청 → 요청자 반려 = 모두 다시 · 다시 [검토 요청] → 승인 = 완료 (검토는 고르는 것 — [완료]로 끝내면 바로 완료)', async () => {
   const r = await ctx.managerA.client.ok('POST', '/api/tasks', { title: '공동 검토 C', assigneeId: ctx.staffA.id, coAssigneeIds: [ctx.ownerId], orgUnitId: ctx.siteA, approvalRequired: true });
   assert.equal((await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.id}`, { status: 'review' })).part, 'done');
-  const fin = await ctx.owner.ok('PATCH', `/api/tasks/${r.id}`, { status: 'done' });
-  assert.equal(fin.status, 'review', '검토 필수 — 마지막 사람이 끝내면 검토 요청');
+  const fin = await ctx.owner.ok('PATCH', `/api/tasks/${r.id}`, { status: 'review' });
+  assert.equal(fin.status, 'review', '마지막 사람이 검토 요청으로 끝냄');
   let v = (await ctx.managerA.client.ok('GET', `/api/tasks/${r.id}`)).task.version;
   await ctx.managerA.client.ok('PATCH', `/api/tasks/${r.id}`, { status: 'in_progress', reviewNote: '사진 다시', version: v }); // 반려
   assert.equal((await sql`select assignee_done_at from tasks where id = ${r.id}`)[0].assignee_done_at, null, '반려 = 모두 다시');
   assert.equal((await sql`select count(*)::int n from task_assignees where task_id = ${r.id} and done_at is not null`)[0].n, 0);
   await ctx.owner.ok('PATCH', `/api/tasks/${r.id}`, { myPart: 'done' });
-  assert.equal((await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.id}`, { myPart: 'done' })).status, 'review');
+  assert.equal((await ctx.staffA.client.ok('PATCH', `/api/tasks/${r.id}`, { status: 'review' })).status, 'review');
   v = (await ctx.managerA.client.ok('GET', `/api/tasks/${r.id}`)).task.version;
   await ctx.managerA.client.ok('PATCH', `/api/tasks/${r.id}`, { status: 'done', version: v }); // 승인
   assert.equal((await sql`select status from tasks where id = ${r.id}`)[0].status, 'done');

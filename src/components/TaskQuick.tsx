@@ -296,7 +296,6 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
   const [dueTime, setDueTime] = useState<string | null>(null);
   const [remind, setRemind] = useState<number[] | null>(null);
   const [priority, setPriority] = useState<string>('normal');
-  const [review, setReview] = useState(false); // #410 ③: 검토 필수(기본 꺼짐)
   const [proj, setProj] = useState<{ id: string; name: string } | null>(null); // 검수 20: "#프로젝트" 인식
   const projList = useApi<{ projects: { id: string; name: string }[] }>(projectId === undefined ? '/api/projects' : null);
   const [busy, setBusy] = useState(false);
@@ -317,8 +316,8 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
     try {
       const multi = assignees.length > 1;
       const each = multi && multiMode === 'each';
-      const r = await api('/api/tasks', { body: { title: autoTitle(t), priority, assigneeId: assignee, ...(each ? { assigneeIds: assignees } : multi ? { coAssigneeIds: assignees.slice(1) } : {}), requestedById: user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? proj?.id ?? null, sectionId: sectionId ?? null, approvalRequired: review } });
-      markNew(r.id); setRemind(null); setPriority('normal'); setProj(null); setReview(false);
+      const r = await api('/api/tasks', { body: { title: autoTitle(t), priority, assigneeId: assignee, ...(each ? { assigneeIds: assignees } : multi ? { coAssigneeIds: assignees.slice(1) } : {}), requestedById: user.id, dueDate: keepRrule && !due ? todayStr() : due, dueTime: due ? dueTime : null, recurrenceRule: keepRrule, reminderMinutes: remind, projectId: projectId ?? proj?.id ?? null, sectionId: sectionId ?? null, approvalRequired: false /* 대표 11/18: 검토는 완료의 조건이 아님 — 만들 때 '검토 필수' 칩(#410 ③)은 뺌 */ } });
+      markNew(r.id); setRemind(null); setPriority('normal'); setProj(null);
       const who = each ? `${assignees.length}명 각각` : multi ? `${assignees.length}명 함께 담당으로` : assignee ? (assignee === user.id ? '나' : `${dir.users.find((u) => u.id === assignee)?.name ?? ''}님`) : '담당자 없이';
       toast.ok(`${who}에게 추가됨: ${t}${assignee && assignee !== user.id ? '. 담당자에게 알렸습니다' : assignee ? '. 본인 업무는 마감 때 알려 드립니다' : ''}`, { label: '보기', run: () => router.push(`/tasks/${r.id}`) });
       broadcastRefresh(); onCreated?.(r.id); noteAway(r);
@@ -386,7 +385,6 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
           <RepeatChip value={rrule} anchorDate={due} onChange={back(setRrule)} />
           <BellChip value={remind} onChange={setRemind} />
           <PriorityPicker value={priority} onChange={back(setPriority)} />
-          <button type="button" onClick={() => setReview((v) => !v)} className={cx('rounded-full border px-2 py-0.5 text-xs', review ? 'border-amber-500 bg-amber-50 font-semibold text-amber-900' : 'border-line bg-white text-ink-3')} aria-pressed={review} title="켜면 담당자가 바로 완료하지 못하고 검토 요청으로 넘깁니다" data-testid="inline-review">검토 필수{review ? ' ✓' : ''}</button>
           {proj && <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs" data-testid="inline-project">#{proj.name}<button type="button" aria-label="프로젝트 빼기" onClick={() => setProj(null)}>×</button></span>}
         </div>
       )}
