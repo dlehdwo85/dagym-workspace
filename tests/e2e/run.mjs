@@ -168,6 +168,7 @@ import { permIntro528 } from './permIntro528.step.mjs';
 import { permIntroIos199 } from './permIntroIos199.step.mjs';
 import { inApp } from './inapp.step.mjs';
 import { iosApp839 } from './iosApp839.step.mjs';
+import { quickMeeting } from './quickMeeting.step.mjs';
 import { meeting } from './meeting.step.mjs';
 import { spaces } from './spaces.step.mjs';
 import { marketing } from './marketing.step.mjs';
@@ -3136,10 +3137,14 @@ await step('219차 워크인 화상회의(가짜 엔진): 일정 창 [워크인 
   const stop = async () => { const p = srv.proc; if (p.exitCode !== null || p.signalCode !== null) return; const gone = new Promise((r) => p.once('exit', r)); p.kill('SIGTERM');
     if (!(await Promise.race([gone.then(() => true), new Promise((r) => setTimeout(() => r(false), 10_000))]))) { p.kill('SIGKILL'); await gone; } };
   const env = { PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SIGNUP_IP_PER_DAY: '50' }; // 앞 단계(#599·#626)가 띄운 설정 그대로 + 화상회의
+  // 대표 11/19 #1070: 화상회의가 꺼진 회사(지금 서버)는 업무 탭에 [회의] 단추가 없다
+  await owner.goto(`${BASE}/tasks`); await owner.getByRole('heading', { name: '업무', exact: true }).first().waitFor();
+  assert.equal(await owner.getByTestId('quick-meeting-open').count(), 0, '화상회의 꺼짐 → [회의] 단추 없음');
   await stop(); srv = await startServer({ ...env, FEATURE_MEETINGS: '1', MEETING_ENGINE: 'fake' });
   try {
     assert.ok((await (await fetch(`${BASE}/calendar`, { headers: { cookie: ctx.owner.cookie } })).text()).includes('\\"meetings\\":true'), '화상회의 스위치 켠 서버');
     await meet219({ owner, ctx, sql, BASE, SHOTS, browser });
+    await quickMeeting({ owner, BASE, SHOTS }); // 대표 11/19 #1070: 업무 탭 [회의] 단추 → 바로 회의
   } finally { await stop(); srv = await startServer(env); }
 });
 

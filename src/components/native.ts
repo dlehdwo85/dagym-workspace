@@ -123,11 +123,17 @@ export async function onNativeScreenshot(fn: () => void): Promise<(() => void) |
 // 52ec734(로컬): filesystem·share·browser 플러그인 — 이 플러그인이 없는 예전 앱은 지금처럼 동작
 interface BrowserPlugin { open(o: { url: string; presentationStyle?: string }): Promise<void>; close(): Promise<void> }
 interface FsPlugin { writeFile(o: { path: string; data: string; directory: string; recursive?: boolean }): Promise<{ uri: string }> }
-interface SharePlugin { share(o: { title?: string; files?: string[]; dialogTitle?: string }): Promise<unknown> }
+interface SharePlugin { share(o: { title?: string; text?: string; url?: string; files?: string[]; dialogTitle?: string }): Promise<unknown> }
 const Browser = registerPlugin<BrowserPlugin>('Browser');
 const Filesystem = registerPlugin<FsPlugin>('Filesystem');
 const Share = registerPlugin<SharePlugin>('Share');
 export const hasBrowser = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('Browser');
+/** 주소·글 공유(회의 주소 등 — 대표 11/19 #1070): 브라우저 공유 창 → 앱 공유 창. 둘 다 없으면 false(부르는 쪽이 복사로 대신) */
+export async function shareLink(o: { title: string; text: string; url: string }): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') { await navigator.share(o); return true; }
+  if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('Share')) { await Share.share({ ...o, dialogTitle: o.title }); return true; }
+  return false;
+}
 const canShareFiles = () => Capacitor.getPlatform() === 'ios' && Capacitor.isPluginAvailable('Filesystem') && Capacitor.isPluginAvailable('Share');
 /** 예전 앱(플러그인 없음)에서는 서버 알림을 그대로 받는다 */
 const hasLocal = () => Capacitor.isPluginAvailable('LocalNotifications');
