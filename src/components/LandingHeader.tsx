@@ -10,7 +10,7 @@ export function LandingHeader({ home = false }: { home?: boolean }) {
     <header className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-4">
       <Link href="/" aria-label="워크인"><img src="/brand/lockup-light.svg" alt="WorkIn 워크인" className="h-8 w-auto" width={160} height={48} /></Link>
       <nav className="ml-auto flex items-center gap-1.5 text-sm">
-        <a href={to('spaces')} className="hidden px-2 text-ink-2 hover:text-ink sm:inline">기능</a>
+        <a href={to('features')} className="hidden px-2 text-ink-2 hover:text-ink sm:inline">기능</a>
         <a href={to('pricing')} className="hidden px-2 text-ink-2 hover:text-ink sm:inline">요금</a>
         <a href={to('contact')} className="hidden px-2 text-ink-2 hover:text-ink sm:inline">문의</a>
         <LandingLogin app={app} />

@@ -6,7 +6,7 @@ import { BizFooter } from '@/components/BizFooter';
 import { LandingHeader } from '@/components/LandingHeader';
 import { conversionTags } from '@/lib/conversionTags';
 import { LANDING_PAGES, SITE } from '@/lib/landingPages';
-import { ArrowRight, BellRing, Briefcase, Check, Download, Mail, Megaphone, Mic, Phone, Sparkles, TrendingUp, Users } from 'lucide-react';
+import { ArrowRight, BellRing, Briefcase, Check, ClipboardCheck, Download, FolderOpen, LayoutGrid, Mail, Megaphone, MessageSquare, Mic, Phone, Sparkles, Stamp, TrendingUp, Users } from 'lucide-react';
 
 /**
  * 워크인 소개 사이트(대표 10/20 16:45): work-in.dev 루트(로그인 전) — 로그인하면 홈(middleware). 앱은 로그인 화면.
@@ -32,6 +32,16 @@ const SPACES = [
     f: ['오늘 할 일 7묶음 · 입찰 마감 D-1 자동 업무', '리드 13칸 · 상담 기록 · 타임라인 · CSV', '제안·계약·ROI · 계약만료·재입찰 역산'] },
   { key: 'marketing', name: '마케팅', color: '#7C3AED', icon: Megaphone, img: '/landing/marketing.png', t: '시안 승인·자동 제작·광고', d: '피드·블로그·릴스 원고를 AI가 묶음으로 만들고, 대표는 승인함에서 [승인]만. 사람 승인 없이 밖으로 나가는 것은 없습니다.',
     f: ['승인함 — 썸네일·게시 화면 미리보기·마감', '브랜드별 게시 묶음(주말 건너뛰기) · 콘텐츠 캘린더', '네이버·구글 광고 성과 · 월간 보고'] },
+];
+// 대표 11/19 "화상 기능이나 자료실 기능, AI 기능 등 각 주요 기능을 홍보 사이트와 네비게이션에 추가" — 문구는 docs/landing-store-copy-draft-1120.md(로컬 검수 11/20 통과).
+// 화상회의는 지금 '우리 회사만' 켜져 있어 넣지 않았다(모든 회사에 켜기로 하면 한 칸 추가). 그림은 가상 회사(하늘솔루션) 자료로 찍은 실제 화면(tests/e2e/landing-shots.mjs).
+const FEATURES: { key: string; icon: typeof Mic; name: string; t: string; d: string; img?: string; href?: string; go?: string }[] = [
+  { key: 'library', icon: FolderOpen, name: '자료실', t: '회사 파일을 한곳에, 찾기 쉽게', d: '폴더마다 볼 수 있는 사람을 정하고, PDF·한글·엑셀은 본문까지 검색됩니다. 문서는 워크인 안에서 동료와 함께 씁니다.', img: '/landing/library.png' },
+  { key: 'approvals', icon: Stamp, name: '결재', t: '휴가·지출을 양식대로', d: '회사 양식으로 올리면 결재선을 따라 차례로 승인됩니다. 승인된 휴가는 캘린더에 자동으로 들어갑니다.', img: '/landing/approvals.png' },
+  { key: 'messages', icon: MessageSquare, name: '메시지', t: '업무 이야기는 업무 옆에서', d: '1:1·그룹 대화에 사진·파일을 함께 보내고, 업무 상세의 [대화]에서 그 업무 이야기를 바로 이어 갑니다.', img: '/landing/messages.png' },
+  { key: 'check', icon: ClipboardCheck, name: '점검', t: '매장·시설 점검을 기준대로', d: '무엇을 보고 어떤 상태가 양호인지 사진과 함께 정해 두고, 돌면서 양호·보완 필요를 누릅니다. 보완 필요는 담당자 업무로 넘어가고 조치 뒤 확인합니다.', img: '/landing/check.png' },
+  { key: 'ai', icon: Sparkles, name: 'AI 비서', t: '말하면 업무·일정이 됩니다', d: '"내일 3시 거래처 미팅 잡아 줘"처럼 말하거나 쓰면 등록해 주고, 메일·문자 초안도 써 줍니다. 등록하거나 보내기 전에는 꼭 확인을 받고, 사용에 동의한 사람만 씁니다.', href: '#ai', go: 'AI 비서 자세히' },
+  { key: 'spaces', icon: LayoutGrid, name: '영업·마케팅 공간', t: '필요할 때 켜는 공간', d: '영업(리드·입찰·계약)과 마케팅(콘텐츠 승인·광고 성과)은 관리자가 켤 때만 보입니다. 안 쓰는 회사는 업무 공간만 씁니다.', href: '#spaces', go: '세 공간 보기' },
 ];
 const STEPS = [['체험 신청 1분', '이메일이나 구글·카카오·네이버 계정으로 신청하면 24시간 안에 연락드리고, 승인되면 14일 동안 체험합니다.'], ['직원 초대', '링크 하나로 초대. 부서·팀과 권한은 소속에서 자동.'], ['공간 켜기', '영업·마케팅은 필요할 때 관리자가 켭니다. 안 쓰는 회사는 업무만.']];
 const AI_DEMO = [['내일 3시 거래처 미팅 잡아 줘', '내일 15:00 “거래처 미팅” 일정을 만들고 30분 전 알림을 걸었습니다. 준비 업무도 하나 만들까요?'], ['이번 주 연락할 리드 알려 줘', '다음 연락일이 이번 주인 리드 4곳입니다 — 한빛상사(수), 새봄디자인(목)… 첫 연락 업무를 담당자에게 만들었습니다.'], ['10월 블로그 원고 초안 써 줘', '브랜드 키트의 말투로 원고 2편을 만들어 승인함에 올렸습니다. 표지·본문 사진을 붙이면 승인 요청됩니다.']];
@@ -83,6 +93,21 @@ export default async function Welcome() {
           {LANDING_PAGES.map((p) => <Link key={p.slug} href={`/landing/${p.slug}`} className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-ink-2 hover:border-brand-600 hover:text-brand-700">{p.keyword}<ArrowRight className="size-3.5" /></Link>)}
         </nav>
       </section>
+      {/* 자주 쓰는 기능 — 업무 공간에 처음부터 들어 있는 것 */}
+      <section id="features" className="mx-auto max-w-6xl px-4 py-12" data-testid="landing-features">
+        <h2 className="text-center text-2xl font-bold">자주 쓰는 기능</h2>
+        <p className="mt-1 text-center text-sm text-ink-2">업무 공간에 처음부터 들어 있습니다. 따로 설치하거나 다른 서비스에 가입하지 않습니다.</p>
+        <div className="mt-8 grid gap-4 sm:grid-cols-2">{FEATURES.map((f) => (
+          <article key={f.key} className="flex flex-col overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid={`landing-feature-${f.key}`}>
+            {f.img && <img src={f.img} alt={`${f.name} 화면`} loading="lazy" className="aspect-[16/9] w-full border-b border-line bg-slate-50 object-cover object-left-top" width={1040} height={585} />}
+            <div className="flex flex-1 flex-col p-4">
+              <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-800"><f.icon className="size-3.5" />{f.name}</span>
+              <h3 className="mt-2 text-lg font-bold">{f.t}</h3><p className="mt-1 text-sm text-ink-2">{f.d}</p>
+              {f.href && <a href={f.href} className="mt-3 inline-flex w-fit items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">{f.go}<ArrowRight className="size-4" /></a>}
+            </div>
+          </article>))}</div>
+        <p className="mt-6 text-center text-sm text-ink-2">14일 무료 체험으로 먼저 써 보세요. <Link href="/signup" className="font-semibold text-brand-700 underline" data-track="start-features">14일 무료 체험 신청</Link></p>
+      </section>
       {/* 세 공간 */}
       <section id="spaces" className="bg-slate-50 py-12">
         <div className="mx-auto max-w-6xl px-4">
@@ -100,7 +125,7 @@ export default async function Welcome() {
         </div>
       </section>
       {/* AI 비서 */}
-      <section className="mx-auto max-w-6xl px-4 py-12" data-testid="landing-ai">
+      <section id="ai" className="mx-auto max-w-6xl px-4 py-12" data-testid="landing-ai">
         <div className="grid items-center gap-6 md:grid-cols-2">
           <div><span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-800"><Sparkles className="size-3.5" />AI 비서</span>
             <h2 className="mt-2 text-2xl font-bold">말하면 업무·일정이 되고, 물으면 회사 상황을 답합니다</h2>
