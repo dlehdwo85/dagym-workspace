@@ -30,9 +30,20 @@ jobs:
         id: cfg
         working-directory: .
         run: echo "ready=${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.PLAY_SERVICE_ACCOUNT_JSON != '' && vars.APP_URL != '' }}" >> "$GITHUB_OUTPUT"
+      # 로컬 11/19: 아무것도 안 했는데 초록으로 끝나 '올라갔다'고 잘못 읽힘 → 요약 맨 위에 크게 '빌드하지 않음'과 빠진 설정 이름(값은 보지 않음)
       - if: steps.cfg.outputs.ready != 'true'
         working-directory: .
-        run: echo "::warning::Android 업로드 설정 대기 (서명 키·Play 서비스 계정·APP_URL 필요)"
+        run: |
+          echo "::warning title=Android — 빌드하지 않음::업로드 설정이 없어 빌드·업로드를 하지 않았습니다(서명 키·Play 서비스 계정·APP_URL 필요)"
+          {
+            echo "# ⚠️ Android: 빌드하지 않음 · 올리지 않음"
+            echo "이 실행은 초록으로 끝나지만 **안드로이드 빌드도 Play 업로드도 하지 않았습니다.** 아래 설정이 있어야 합니다."
+            echo "- 서명 키(ANDROID_KEYSTORE_BASE64): ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && '있음' || '**없음**' }}"
+            echo "- Play 서비스 계정(PLAY_SERVICE_ACCOUNT_JSON): ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' && '있음' || '**없음**' }}"
+            echo "- 저장소 변수 APP_URL: ${{ vars.APP_URL != '' && '있음' || '**없음**' }}"
+            echo ""
+            echo "서명 안 된 AAB 가 필요하면 **mobile** 워크플로를 쓰세요(코드 줄이기 선택 칸 있음)."
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
         if: steps.cfg.outputs.ready == 'true'
       - uses: actions/setup-node@v4
@@ -79,7 +90,15 @@ jobs:
         run: echo "ready=${{ secrets.ASC_KEY_P8 != '' && vars.APPLE_TEAM_ID != '' && vars.APP_URL != '' }}" >> "$GITHUB_OUTPUT"
       - if: steps.cfg.outputs.ready != 'true'
         working-directory: .
-        run: echo "::warning::iOS 업로드 설정 대기 (App Store Connect API 키·APPLE_TEAM_ID·APP_URL 필요)"
+        run: |
+          echo "::warning title=iOS — 빌드하지 않음::업로드 설정이 없어 빌드·업로드를 하지 않았습니다(App Store Connect API 키·APPLE_TEAM_ID·APP_URL 필요)"
+          {
+            echo "# ⚠️ iOS: 빌드하지 않음 · 올리지 않음"
+            echo "이 실행은 초록으로 끝나지만 **아이폰 빌드도 업로드도 하지 않았습니다.** 아래 설정이 있어야 합니다."
+            echo "- App Store Connect API 키(ASC_KEY_P8): ${{ secrets.ASC_KEY_P8 != '' && '있음' || '**없음**' }}"
+            echo "- 저장소 변수 APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID != '' && '있음' || '**없음**' }}"
+            echo "- 저장소 변수 APP_URL: ${{ vars.APP_URL != '' && '있음' || '**없음**' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
         if: steps.cfg.outputs.ready == 'true'
       - uses: actions/setup-node@v4
