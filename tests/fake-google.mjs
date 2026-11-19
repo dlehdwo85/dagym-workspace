@@ -50,6 +50,7 @@ export function startFakeGoogle(port = 3199) {
     anthropicQueue: [], // 다음 응답들 (비면 짧은 글 답)
     anthropicFiles: {}, // V22 Files API: id → { filename, mime, b64 } (코드 실행 결과·올린 파일)
     anthropicUploads: [], // 올린 파일 이름 기록
+    anthropicDeleted: [], // 지운 파일 id 기록
     classified: [], classifyQueue: [], // V14 5번 업무 무관 질문 분류
     vision: [], visionQueue: [], // #235 ⓒ 사진 AI 설명(다른 응답 줄과 따로)
     audits: [], auditQueue: [], // 329차 AI 사진·글 대조(지시문 MKT_PHOTO_AUDIT — 다른 응답 줄과 따로, 기본 답 = 모든 칸 ok)
@@ -129,6 +130,11 @@ export function startFakeGoogle(port = 3199) {
       return json(res, 200, { data, has_more: false, first_id: data[0]?.id ?? null, last_id: data.at(-1)?.id ?? null });
     }
     const afm = /^\/v1\/files\/([^/]+)(\/content)?$/.exec(p);
+    if (afm && !afm[2] && req.method === 'DELETE') { // 11/20 문서 엔진: 작업이 끝나면 사본을 지움
+      if (!state.anthropicFiles[afm[1]]) return json(res, 404, { type: 'error', error: { type: 'not_found_error', message: 'file not found' } });
+      delete state.anthropicFiles[afm[1]]; state.anthropicDeleted.push(afm[1]);
+      return json(res, 200, { id: afm[1], type: 'file_deleted' });
+    }
     if (afm && req.method === 'GET') {
       const f = state.anthropicFiles[afm[1]];
       if (!f) return json(res, 404, { type: 'error', error: { type: 'not_found_error', message: 'file not found' } });

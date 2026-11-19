@@ -7,7 +7,10 @@ import { logError } from '../log';
 
 /**
  * V22 문서 엔진 — Claude 의 Agent Skills(xlsx·docx·pptx·pdf) + 코드 실행으로 서식 있는 파일을 만들고 고친다.
- * - 대화마다 코드 실행 컨테이너를 재사용(이어서 "더 다듬기"), 참고 파일은 Files API 에 한 번만 올림(library_files.anthropic_file_id)
+ * - 대화마다 코드 실행 컨테이너를 재사용(이어서 "더 다듬기")
+ * - 11/20(대표 "내 정보가 유출되는 느낌" · 조사 docs/research/AI_KOREA_REGION_2026-11-20.md): **AI 회사 파일 보관소(Files API)에 사본을 남기지 않는다.**
+ *   작업이 올린 것(참고 자료·이전 버전·회사 로고)과 작업이 만든 결과 사본(결과 파일·미리보기)은 우리 저장소로 받은 뒤 작업이 끝날 때 지운다(성공·실패 모두).
+ *   예전엔 한 번 올린 id 를 기억해 다시 썼다(library_files.anthropic_file_id · result_anthropic_file_id) — 이제 매번 올리고 지우며, 예전에 남은 사본은 purgeDocCopies 로 지운다(대표가 누를 때만).
  * - 결과 파일 + 첫 페이지 미리보기(preview.png)를 받아 작업 결과로 보관 — 자료실 저장은 사람이 [자료실에 저장]을 눌러야 한다
  * - 회사 정보·로고·브랜드 색은 조직 설정(company_profiles)에서 데이터로 넣는다(다른 회사 정보와 섞지 않게)
  * - 사용량: purpose 'doc_engine' 으로 따로 기록(월 한도 합산), 이어받기(pause_turn·max_tokens) 최대 8번
@@ -58,16 +61,46 @@ function trimDangling(content: any[]) {
   return content.filter((b, i) => !(b.type === 'server_tool_use' && !done.has(b.id) && i === content.length - 1) && !(b.type === 'text' && !b.text));
 }
 
-async function anthropicFileFor(libId: string): Promise<{ id: string; name: string } | null> {
+/** 참고 자료·로고를 이번 작업용으로 올린다(작업이 끝나면 지움). 예전에 올려 둔 사본 id 가 남아 있으면 그것도 함께 지울 목록에 넣는다 */
+async function anthropicFileFor(libId: string, temp: Set<string>): Promise<{ id: string; name: string } | null> {
   const sql = db();
   const [f] = await sql<{ id: string; file_name: string; mime_type: string; storage_key: string; anthropic_file_id: string | null }[]>`
     select id, file_name, mime_type, storage_key, anthropic_file_id from library_files where id = ${libId} and deleted_at is null`;
   if (!f) return null;
-  if (f.anthropic_file_id) return { id: f.anthropic_file_id, name: f.file_name };
+  if (f.anthropic_file_id) { temp.add(f.anthropic_file_id); await sql`update library_files set anthropic_file_id = null where id = ${f.id}`; }
   const buf = await getObject(f.storage_key);
   const up = await api().files.upload({ file: await toFile(buf, f.file_name, { type: f.mime_type || 'application/octet-stream' }) });
-  await sql`update library_files set anthropic_file_id = ${up.id} where id = ${f.id}`;
+  temp.add(up.id);
   return { id: up.id, name: f.file_name };
+}
+/** AI 회사 파일 보관소의 사본 지우기 — 이미 없으면(404) 지운 것으로 본다. 돌려주는 값 = 지운 수 */
+async function dropCopies(ids: Iterable<string>) {
+  let n = 0;
+  for (const id of new Set(ids)) { try { await api().files.delete(id); n++; } catch (e: any) { if (e?.status === 404) n++; } }
+  return n;
+}
+/**
+ * 예전 방식으로 남아 있는 사본(기억해 둔 id) 지우기 — 회사별, 한 번에 limit 개. 지우는 일이라 자동으로 돌리지 않고 대표(AI 사용 내역 편집 권한)가 누를 때만.
+ * 우리 저장소의 원본(자료실 파일·결과 파일)은 그대로다.
+ */
+export async function docCopiesLeft(tenant: string) {
+  const sql = db();
+  const [r] = await sql<{ refs: number; results: number }[]>`select (select count(*)::int from library_files where tenant = ${tenant} and anthropic_file_id is not null) as refs,
+    (select count(*)::int from ai_doc_jobs where tenant = ${tenant} and result_anthropic_file_id is not null) as results`;
+  return { refs: r.refs, results: r.results, total: r.refs + r.results };
+}
+export async function purgeDocCopies(tenant: string, limit = 100) {
+  const sql = db();
+  const refs = await sql<{ id: string; fid: string }[]>`select id, anthropic_file_id as fid from library_files where tenant = ${tenant} and anthropic_file_id is not null limit ${limit}`;
+  const results = await sql<{ id: string; fid: string }[]>`select id, result_anthropic_file_id as fid from ai_doc_jobs where tenant = ${tenant} and result_anthropic_file_id is not null and status <> 'running' limit ${Math.max(0, limit - refs.length)}`;
+  let removed = 0, failed = 0;
+  for (const [rows, clear] of [[refs, (id: string) => sql`update library_files set anthropic_file_id = null where id = ${id}`], [results, (id: string) => sql`update ai_doc_jobs set result_anthropic_file_id = null where id = ${id}`]] as const) {
+    for (const r of rows) {
+      try { await api().files.delete(r.fid); } catch (e: any) { if (e?.status !== 404) { failed++; continue; } }
+      await clear(r.id); removed++;
+    }
+  }
+  return { removed, failed, left: (await docCopiesLeft(tenant)).total };
 }
 
 /** 작업 하나 실행 (중복 실행 방지: queued → running 으로 바꾼 쪽만). 가벼운 모델이 실패하면 깊은 모델로 1번 더 */
@@ -81,7 +114,8 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
     where id = ${id} and (status = 'queued' or (status = 'running' and started_at < now() - interval '10 minutes')) returning *`;
   if (!job) return { skipped: true };
   let inTok = 0, outTok = 0, cost = 0, cacheR = 0, cacheW = 0, retry = false;
-  const debug: { steps: any[]; container?: string | null; found?: number; fallback?: string; lastText?: string; skipped?: string[]; error?: string } = { steps: [] };
+  const debug: { steps: any[]; container?: string | null; found?: number; fallback?: string; lastText?: string; skipped?: string[]; error?: string; copiesDropped?: number } = { steps: [] };
+  const temp = new Set<string>(); // 이 작업이 AI 회사 파일 보관소에 올리거나 만든 사본 — 끝나면 지운다
   const saveDebug = () => sql`update ai_doc_jobs set debug = ${sql.json(debug as never)} where id = ${job.id}`.catch(() => {});
   // V22 부록 2: 기본은 가벼운 모델(Haiku), "새로 디자인"·가벼운 모델 실패 뒤 다시 할 때만 깊은 모델(Sonnet)
   let model = docModel(job.design);
@@ -90,19 +124,21 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
     if (job.user_id) await (await import('./consent')).assertAiConsent({ id: job.user_id }, sql); // AI 동의(대표 11/19): 문서를 시킨 사람이 그사이 동의를 거뒀으면 바깥으로 보내지 않는다(밤으로 미룬 작업·다시 하기)
     // 참고 파일 + (고치기면) 직전 버전 결과 + 회사 로고 → 컨테이너에 올림
     const uploads: { id: string; name: string; role: string }[] = [];
-    for (const r of job.ref_file_ids) { const f = await anthropicFileFor(r); if (f) uploads.push({ ...f, role: '참고 자료' }); }
+    for (const r of job.ref_file_ids) { const f = await anthropicFileFor(r, temp); if (f) uploads.push({ ...f, role: '참고 자료' }); }
     if (job.base_job_id) {
       const [b] = await sql<{ result_anthropic_file_id: string | null; result_name: string | null; result_key: string | null; result_mime: string | null }[]>`
         select result_anthropic_file_id, result_name, result_key, result_mime from ai_doc_jobs where id = ${job.base_job_id}`;
-      if (b?.result_anthropic_file_id) uploads.push({ id: b.result_anthropic_file_id, name: b.result_name ?? '이전 버전', role: '고칠 이전 버전' });
-      else if (b?.result_key) {
+      // 이전 버전은 우리 저장소의 결과 파일을 다시 올려 쓴다(예전에 남겨 둔 사본 id 가 있으면 이번에 함께 지움)
+      if (b?.result_anthropic_file_id) { temp.add(b.result_anthropic_file_id); await sql`update ai_doc_jobs set result_anthropic_file_id = null where id = ${job.base_job_id}`; }
+      if (b?.result_key) {
         const up = await api().files.upload({ file: await toFile(await getObject(b.result_key), b.result_name ?? 'base', { type: b.result_mime ?? 'application/octet-stream' }) });
+        temp.add(up.id);
         uploads.push({ id: up.id, name: b.result_name ?? '이전 버전', role: '고칠 이전 버전' });
       }
     }
     const profiles = await companyProfiles(job.tenant, sql);
     const company = profiles.find((p) => p.key === job.company_key) ?? profiles.find((p) => p.is_default) ?? null;
-    if (company?.logo_file_id) { const f = await anthropicFileFor(company.logo_file_id); if (f) uploads.push({ ...f, role: '회사 로고' }); }
+    if (company?.logo_file_id) { const f = await anthropicFileFor(company.logo_file_id, temp); if (f) uploads.push({ ...f, role: '회사 로고' }); }
     const companyBlock = company ? profileText(company) : '[회사] 조직 설정에 회사 정보가 없습니다 — 공급자 칸은 비워 두고 "회사 정보 설정 필요"로 표시';
     const brief = `${companyBlock}\n\n작업: ${job.mode === 'edit' ? `이전 버전(v${job.version - 1})을 고쳐 v${job.version} 만들기` : job.mode === 'analyze' ? '자료 분석' : '새로 만들기'}\n` +
       `파일 종류: ${job.kind}\n제목: ${job.title}\n` + (uploads.length ? `올린 파일:\n${uploads.map((u) => `- ${u.name} (${u.role})`).join('\n')}\n` : '') + `\n요청:\n${job.instructions}`;
@@ -129,7 +165,7 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
       inTok += r.usage.input_tokens; outTok += r.usage.output_tokens; cacheR += r.usage.cache_read_input_tokens ?? 0; cacheW += r.usage.cache_creation_input_tokens ?? 0; cost += costUsd(r.model ?? model, r.usage);
       container = r.container?.id ?? container;
       const ids = collectFileIds(r.content).filter((x) => !uploadedIds.has(x));
-      outputs.push(...ids);
+      outputs.push(...ids); for (const x of ids) temp.add(x);
       const stepText = (r.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
       if (stepText) text = stepText; // 마지막 단계의 글이 요약
       debug.steps.push({ stop: r.stop_reason, types: countTypes(r.content as any[]), files: ids.length, in: r.usage.input_tokens, out: r.usage.output_tokens, cacheR: r.usage.cache_read_input_tokens ?? 0, model: r.model ?? model });
@@ -162,7 +198,7 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
           for (const f of all.data as any[]) if (f.downloadable && !uploadedIds.has(f.id) && Date.parse(f.created_at) >= since && norm(f.filename ?? '').includes(norm(job.title))) seen.push(f.id);
         }
         debug.fallback = `files.list ${seen.length}`;
-        outputs.push(...seen.reverse());
+        outputs.push(...seen.reverse()); for (const x of seen) temp.add(x);
       } catch (e: any) { debug.fallback = `files.list 실패 ${e?.status ?? ''}`; }
     }
     debug.found = new Set(outputs).size;
@@ -191,7 +227,7 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
     if (preview && preview !== main) await putObject(`${base}/preview.png`, preview.buf, 'image/png');
     await sql`update ai_doc_jobs set status = 'done', finished_at = now(), summary = ${summary || null}, pages = ${pages},
       result_key = ${main ? `${base}/${main.name}` : null}, result_name = ${main?.name ?? null}, result_mime = ${main ? MIME[extOf(main.name)] ?? 'application/octet-stream' : null},
-      result_size = ${main?.buf.length ?? null}, result_anthropic_file_id = ${main?.fileId ?? null},
+      result_size = ${main?.buf.length ?? null}, result_anthropic_file_id = null,
       preview_key = ${preview ? (preview === main ? `${base}/${main!.name}` : `${base}/preview.png`) : null},
       input_tokens = input_tokens + ${inTok}, output_tokens = output_tokens + ${outTok}, cache_read_tokens = cache_read_tokens + ${cacheR}, cache_write_tokens = cache_write_tokens + ${cacheW}, cost_usd = cost_usd + ${cost}, model = ${model} where id = ${job.id}`;
     return { done: true };
@@ -211,6 +247,8 @@ async function runDocJob(id: string): Promise<Record<string, unknown>> {
     await sql`update ai_doc_jobs set status = 'failed', finished_at = now(), error = ${msg}, input_tokens = input_tokens + ${inTok}, output_tokens = output_tokens + ${outTok}, cache_read_tokens = cache_read_tokens + ${cacheR}, cache_write_tokens = cache_write_tokens + ${cacheW}, cost_usd = cost_usd + ${cost}, model = ${model} where id = ${job.id}`;
     return { failed: msg };
   } finally {
+    // 작업이 끝나면(성공·실패·다시 하기 모두) 이 작업이 AI 회사에 올리거나 만든 사본을 지운다 — 결과는 이미 우리 저장소에 받아 둠
+    if (temp.size) { debug.copiesDropped = await dropCopies(temp).catch(() => 0); await saveDebug(); }
     if (inTok || outTok) await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
       values (${job.tenant}, ${job.user_id}, ${crypto.randomUUID()}, 'anthropic', ${model}, ${inTok}, ${outTok}, ${cacheR}, ${cacheW}, ${cost}, 'doc_engine')`.catch(() => {});
   }
