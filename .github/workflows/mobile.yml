@@ -5,7 +5,11 @@ name: mobile
 on:
   push:
     paths: ['mobile/**', '.github/workflows/mobile.yml']
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      # 로컬 11/19 요청: 안드로이드는 여기서 만든 AAB 를 로컬이 서명해 Play Console 에 올린다(저장소에 서명 키·Play 서비스 계정 Secrets 없음) → 난독화 빌드도 여기서 고를 수 있게.
+      # 켜면 ANDROID_MINIFY=1 — mobile/android/app/build.gradle 이 이 값을 읽어 코드 줄이기(R8)를 켠다(네이티브 설정은 로컬 담당, 601fccd). 푸시로 도는 빌드는 늘 끔.
+      minify: { type: boolean, default: false, description: 'Android 코드 줄이기(R8) 켜고 빌드 — 내부 테스트 확인용' }
 permissions:
   contents: read
 jobs:
@@ -17,6 +21,7 @@ jobs:
       APP_URL: ${{ vars.APP_URL || 'https://dagym-workspace.vercel.app' }}
       # Play 업로드는 매번 더 큰 versionCode 필요 (1 은 내부 테스트 1.0 에 사용됨)
       ANDROID_VERSION_CODE: ${{ github.run_number }}
+      ANDROID_MINIFY: ${{ inputs.minify && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,12 +44,25 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew assembleDebug assembleRelease bundleRelease --no-daemon
+      - name: 요약
+        if: always()
+        working-directory: .
+        run: |
+          {
+            echo "## Android 빌드"
+            echo "- versionCode: ${ANDROID_VERSION_CODE}"
+            echo "- 코드 줄이기(R8): $([ -n "$ANDROID_MINIFY" ] && echo '**켬**' || echo '끔')"
+            echo "- 서명: $([ -n "$ANDROID_KEYSTORE_PATH" ] && echo '저장소 키로 서명함' || echo '**서명 안 함** — 받은 AAB 를 로컬에서 서명해 올림')"
+            if [ -f mobile/android/app/build/outputs/mapping/release/mapping.txt ]; then echo "- 난독화 대응표(mapping.txt): 산출물에 함께 들어 있음 — Play Console 에 같이 올리면 오류 기록을 읽을 수 있음"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: android-build
+          # mapping.txt 는 코드 줄이기를 켰을 때만 생김(없으면 건너뜀)
           path: |
             mobile/android/app/build/outputs/apk/**/*.apk
             mobile/android/app/build/outputs/bundle/release/*.aab
+            mobile/android/app/build/outputs/mapping/release/mapping.txt
           retention-days: 14
   ios:
     runs-on: macos-15

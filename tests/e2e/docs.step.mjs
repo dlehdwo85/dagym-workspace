@@ -19,17 +19,25 @@ export async function docsCoedit({ browser, owner, staff, ctx, sql, BASE, SHOTS,
   const id = owner.url().split('/').pop();
   // CI 1938·1939·1954(기록만 바꾼 커밋): 편집기(doc-editor)가 30초 안에 안 보이는 흔들림 — 늦으면 한 번 새로 고쳐서 기다림
   // CI 11/13 bba8ec5·6fc64d9: 새로 고친 뒤 45초에도 안 뜸(같은 코드의 다른 실행은 통과) — 원인을 알 수 있게 그때 화면 상태(주소·문서 틀·오류 상자·콘솔 오류·문서 열기 응답)를 실패 글에 붙인다
-  const conErr = []; const onCon = (m) => { if (m.type() === 'error') conErr.push(m.text().slice(0, 160)); }; owner.on('console', onCon);
-  const openRes = []; const onRes = (r) => { if (/\/api\/library\/docs\//.test(r.url())) openRes.push(`${r.status()} ${r.url().split('/api/')[1].slice(0, 60)}`); }; owner.on('response', onRes);
-  try { await owner.getByTestId('doc-editor').waitFor({ timeout: 30000 }); } catch {
-    await owner.reload();
-    try { await owner.getByTestId('doc-editor').waitFor({ timeout: 45000 }); } catch (e) {
-      const st = await owner.evaluate(() => ({ url: location.pathname, page: !!document.querySelector('[data-testid="doc-page"]'), status: document.querySelector('[data-testid="doc-status"]')?.getAttribute('data-status') ?? null,
-        body: document.body.innerText.replace(/\s+/g, ' ').slice(0, 200) })).catch(() => null);
-      throw new Error(`${e.message.split('\n')[0]} — 화면 ${JSON.stringify(st)} · 문서 응답 ${openRes.slice(-6).join(' | ') || '없음'} · 콘솔 오류 ${conErr.slice(-4).join(' | ') || '없음'}`);
-    }
-  }
-  owner.off('console', onCon); owner.off('response', onRes);
+  // CI 11/19 a0a43cb: 이번에는 휴대폰 직원 화면에서 같은 일(그쪽에는 진단이 없어 원인을 못 봄) → 두 화면이 같은 기다림·같은 진단을 쓰게 하고, 그때 돌고 있던 정기 실행(job_runs)도 함께 적는다
+  const waitEditor = async (pg, who) => {
+    const conErr = []; const onCon = (m) => { if (m.type() === 'error') conErr.push(m.text().slice(0, 160)); }; pg.on('console', onCon);
+    const res = []; const onRes = (r) => { if (/\/api\/library\/docs\//.test(r.url())) res.push(`${r.status()} ${r.url().split('/api/')[1].slice(0, 60)}`); }; pg.on('response', onRes);
+    const pending = new Set(); const onReq = (r) => { if (/\/api\//.test(r.url())) pending.add(r.url().split('/api/')[1].slice(0, 50)); }; const onEnd = (r) => pending.delete(r.url().split('/api/')[1]?.slice(0, 50));
+    pg.on('request', onReq); pg.on('requestfinished', onEnd); pg.on('requestfailed', onEnd);
+    try {
+      try { await pg.getByTestId('doc-editor').waitFor({ timeout: 30000 }); } catch {
+        await pg.reload();
+        try { await pg.getByTestId('doc-editor').waitFor({ timeout: 45000 }); } catch (e) {
+          const st = await pg.evaluate(() => ({ url: location.pathname, page: !!document.querySelector('[data-testid="doc-page"]'), status: document.querySelector('[data-testid="doc-status"]')?.getAttribute('data-status') ?? null,
+            skeleton: !!document.querySelector('.animate-pulse'), body: document.body.innerText.replace(/\s+/g, ' ').slice(0, 200) })).catch(() => null);
+          const jobs = await sql`select job, status, round(extract(epoch from now() - started_at))::int as age from job_runs where started_at > now() - interval '5 minutes' order by started_at desc limit 4`.catch(() => []);
+          throw new Error(`${e.message.split('\n')[0]} — ${who} 화면 ${JSON.stringify(st)} · 문서 응답 ${res.slice(-6).join(' | ') || '없음'} · 답 못 받은 요청 ${[...pending].slice(-6).join(' | ') || '없음'} · 콘솔 오류 ${conErr.slice(-4).join(' | ') || '없음'} · 최근 정기 실행 ${jobs.map((x) => `${x.job}:${x.status}:${x.age}s`).join(' | ') || '없음'}`);
+        }
+      }
+    } finally { pg.off('console', onCon); pg.off('response', onRes); pg.off('request', onReq); pg.off('requestfinished', onEnd); pg.off('requestfailed', onEnd); }
+  };
+  await waitEditor(owner, '대표(PC)');
   await owner.getByTestId('doc-status').waitFor();
   const ed = owner.getByTestId('doc-editor');
   await ed.click();
@@ -40,7 +48,7 @@ export async function docsCoedit({ browser, owner, staff, ctx, sql, BASE, SHOTS,
   // 휴대폰 직원이 같은 문서를 열면 대표 글이 보이고, 직원이 쓴 글이 대표 화면에도
   await staff.goto(`${BASE}/library/doc/${id}`);
   // 386차(CI 2285·2286·2291 — 로컬은 통과): 휴대폰 직원 화면도 편집기가 30초 안에 안 뜨는 흔들림 — 대표 화면과 같이 늦으면 한 번 새로 고쳐서 기다림
-  try { await staff.getByTestId('doc-editor').waitFor({ timeout: 30000 }); } catch { await staff.reload(); await staff.getByTestId('doc-editor').waitFor({ timeout: 45000 }); }
+  await waitEditor(staff, '직원(휴대폰)');
   await waitText(staff, '안건 1: 매출 점검');
   await staff.getByTestId('doc-editor').click();
   await staff.keyboard.press('End');
