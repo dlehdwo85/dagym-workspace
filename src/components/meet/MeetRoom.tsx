@@ -2,27 +2,22 @@
 // 219차 워크인 화상회의 화면(결정 15-37, 설계 docs/research/VIDEO_MEETINGS_DESIGN_2026-10-28.md 6-2·6-3) — 참가 전 미리보기 → (손님 이름) → 대기실 → 회의 → 나가기.
 // 영상·음성은 엔진(중계 서버)으로 직접 간다. #946: 엔진이 라이브킷이면 LiveStage(실제 영상·음성·화면 공유), 가짜 엔진이면 '시험 연결'로 내 화면·참가자·주최자 도구만.
 // 줌·구글·마이크로소프트의 로고·색·아이콘·문구는 쓰지 않는다 — 워크인 디자인 문서(docs/DESIGN_SYSTEM.md) 기준.
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Loader2, Lock, LogOut, Mic, MicOff, ShieldCheck, Unlock, UserRound, Users, Video, VideoOff, X } from 'lucide-react';
+// 대표 11/19 보강: 회의 중 화면은 StageView(도구줄·참가자·채팅·대기실 띠·공유 창) 한 가지 — LiveStage(라이브킷)·FakeStage(시험 연결)는 영상 연결만 맡는다.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, Mic, MicOff, ShieldCheck, UserRound, Video, VideoOff } from 'lucide-react';
 import { Button, Field, Toaster, cx, inputCls, toast } from '@/components/ui';
+import { call } from './api';
+import { FakeStage } from './FakeStage';
 import { LiveStage } from './LiveStage';
+import type { ChatApi } from './StageView';
 
 type Pub = { title: string; company: string; status: 'open' | 'live' | 'ended'; locked: boolean; staffFirst: boolean; started: boolean; staff: boolean; meetingId: string | null; engine: string | null };
 type Grant = { token: string; url: string; engine: string; expiresIn: number; canShare?: boolean };
-type Person = { id: string; name: string; guest: boolean; role: string; state: string };
 type Phase = 'loading' | 'error' | 'ended' | 'pre' | 'waiting' | 'waitingStaff' | 'in' | 'left' | 'removed' | 'denied';
 type Guest = { pid: string; secret: string; name: string };
 
-async function call<T = any>(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string>; keepalive?: boolean } = {}): Promise<T> {
-  const r = await fetch(path, { method: init.method ?? (init.body !== undefined ? 'POST' : 'GET'), headers: { ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}), ...init.headers },
-    body: init.body !== undefined ? JSON.stringify(init.body) : undefined, credentials: 'same-origin', keepalive: init.keepalive });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(j?.error?.message ?? '오류가 났습니다'), { status: r.status });
-  return j as T;
-}
 const store = { get(code: string): Guest | null { try { return JSON.parse(sessionStorage.getItem(`wos_meet_${code}`) ?? 'null'); } catch { return null; } },
   set(code: string, g: Guest | null) { try { if (g) sessionStorage.setItem(`wos_meet_${code}`, JSON.stringify(g)); else sessionStorage.removeItem(`wos_meet_${code}`); } catch { /* 저장 못 해도 이번 화면에서는 그대로 */ } } };
-const LOBBY: [string, string][] = [['guests', '손님만 대기'], ['everyone', '주최자 말고 모두 대기'], ['invited', '초대받은 사람 말고 대기'], ['none', '대기실 없음']];
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 export function MeetRoom({ code }: { code: string }) {
@@ -104,6 +99,16 @@ export function MeetRoom({ code }: { code: string }) {
   }, [phase, seen]);
   async function leave() { setBusy(true); try { await seen(true); } catch { /* 나가기는 화면에서 먼저 */ } setGrant(null); setPhase('left'); setBusy(false); }
 
+  // 회의 중 채팅(서버 보관) · 휴대폰 앱 화면 공유용 입장권 — 직원은 로그인으로, 손님은 브라우저에 둔 비밀값으로
+  const staffId = pub?.staff ? pub.meetingId : null; const gPid = guest?.pid ?? null, gSecret = guest?.secret ?? null;
+  const chatApi: ChatApi = useMemo(() => {
+    const base = staffId ? `/api/meetings/${staffId}/chat` : `/api/meet/${code}/guest/${gPid}/chat`;
+    const headers = staffId || !gSecret ? undefined : { 'x-guest-secret': gSecret };
+    return { list: (after) => (staffId || gPid ? call(`${base}${after ? `?after=${after}` : ''}`, { headers }) : Promise.resolve({ messages: [] })), send: (text) => call(base, { body: { text }, headers }) };
+  }, [staffId, gPid, gSecret, code]);
+  const screenTicket = useCallback(() => call<{ url: string; token: string }>(staffId ? `/api/meetings/${staffId}/screen-ticket` : `/api/meet/${code}/guest/${gPid}/screen-ticket`,
+    { body: {}, headers: staffId || !gSecret ? undefined : { 'x-guest-secret': gSecret } }), [staffId, gPid, gSecret, code]);
+
   // 회의 시간
   const [since, setSince] = useState(0); const [tick, setTick] = useState(0);
   useEffect(() => { if (phase === 'in') { setSince(Date.now()); const h = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(h); } }, [phase]);
@@ -120,7 +125,7 @@ export function MeetRoom({ code }: { code: string }) {
     <Shell>{head}
       <div className="mt-5 flex items-center gap-3 rounded-card border border-line bg-white p-4" data-testid="meet-waiting" data-phase={phase}>
         <Loader2 className="size-5 shrink-0 animate-spin text-brand-600" />
-        <div><p className="font-medium">{phase === 'waitingStaff' ? '주최 측이 들어오면 시작합니다' : '주최자가 허락하면 들어갑니다'}</p>
+        <div><p className="font-medium">{phase === 'waitingStaff' ? '주최 측이 들어오면 시작합니다' : '대기실에서 기다리는 중입니다 — 주최자가 들여보내면 회의에 들어갑니다'}</p>
           <p className="mt-0.5 text-xs text-ink-2">{guest ? `${guest.name}(손님)` : '직원'} · 이 화면을 닫지 말고 기다려 주세요</p></div>
       </div>
     </Shell>
@@ -151,36 +156,25 @@ export function MeetRoom({ code }: { code: string }) {
       </div>
     </Shell>
   );
-  // 회의 중
+  // 회의 중 — 화면은 StageView 한 가지, 영상 연결만 엔진에 따라(라이브킷 / 시험 연결)
   const host = role === 'host' || role === 'cohost';
+  const common = {
+    title: pub.title, elapsed: mmss(elapsed), selfLabel: guest ? `${guest.name}(손님)` : '나', canShare: grant?.canShare !== false,
+    hostMeetingId: host && pub.meetingId ? pub.meetingId : null, onEnded: () => { setPhase('ended'); setGrant(null); },
+    chat: chatApi, inviteUrl: typeof location !== 'undefined' ? `${location.origin}/meet/${code}` : `/meet/${code}`, busy, screenTicket,
+  };
   if (grant?.engine === 'livekit') return (
     <><Toaster />
-      <LiveStage key={attempt} url={grant.url} token={grant.token} canShare={!!grant.canShare} start={{ mic, cam, camId: camId || undefined, micId: micId || undefined }} selfLabel={guest ? `${guest.name}(손님)` : '나'} busy={busy}
-        header={<><span className="min-w-0 truncate font-semibold">{pub.title}</span><span className="tabular-nums text-slate-300" data-testid="meet-elapsed">{mmss(elapsed)}</span></>}
-        side={host && pub.meetingId ? <HostPanel meetingId={pub.meetingId} onEnded={() => { setPhase('ended'); setGrant(null); }} /> : undefined}
+      <LiveStage key={attempt} {...common} url={grant.url} token={grant.token} start={{ mic, cam, camId: camId || undefined, micId: micId || undefined }}
         onLeave={() => void leave()} onRetry={() => { setAttempt((x) => x + 1); void join(); }}
         onGone={(why) => { setGrant(null); setPhase(why); if (why === 'removed' && guest) store.set(code, null); }} />
     </>
   );
   return (
-    <main className="flex min-h-dvh flex-col bg-slate-900 text-white" data-testid="meet-room">
-      <Toaster />
-      <header className="flex items-center gap-2 px-4 py-2 text-sm">
-        <span className="min-w-0 truncate font-semibold">{pub.title}</span>
-        <span className="tabular-nums text-slate-300" data-testid="meet-elapsed">{mmss(elapsed)}</span>
-        <span className="ml-auto shrink-0 whitespace-nowrap rounded-full bg-slate-700 px-2 py-0.5 text-[11px] text-slate-200" data-testid="meet-engine" title={grant?.engine === 'fake' ? '실제 영상은 오가지 않습니다' : '지금은 내 화면만 보입니다'}>
-          {grant?.engine === 'fake' ? <>시험 연결<span className="hidden sm:inline"> — 실제 영상은 오가지 않습니다</span></> : <>연결 준비 중<span className="hidden sm:inline"> — 지금은 내 화면만</span></>}</span>
-      </header>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row">
-        <Tiles self={<Preview vref={vref} on={!!stream && cam} label={guest ? `${guest.name}(손님)` : '나'} dark />} meetingId={pub.staff ? pub.meetingId : null} selfId={selfId} />
-        {host && pub.meetingId && <HostPanel meetingId={pub.meetingId} onEnded={() => { setPhase('ended'); setGrant(null); }} />}
-      </div>
-      <footer className="flex items-center justify-center gap-3 border-t border-slate-800 px-4 py-3" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
-        <RoundBtn on={mic} onClick={toggleMic} label={mic ? '마이크 끄기' : '마이크 켜기'} dark testid="meet-mic">{mic ? <Mic /> : <MicOff />}</RoundBtn>
-        <RoundBtn on={cam} onClick={toggleCam} label={cam ? '카메라 끄기' : '카메라 켜기'} dark testid="meet-cam">{cam ? <Video /> : <VideoOff />}</RoundBtn>
-        <Button variant="danger" onClick={leave} disabled={busy} data-testid="meet-leave"><LogOut />나가기</Button>
-      </footer>
-    </main>
+    <><Toaster />
+      <FakeStage {...common} stream={stream} mic={mic} cam={cam} toggleMic={toggleMic} toggleCam={toggleCam} meetingId={pub.staff ? pub.meetingId : null} selfId={guest ? guest.pid : selfId} role={guest ? 'guest' : role}
+        fake={grant?.engine === 'fake'} onLeave={() => void leave()} />
+    </>
   );
 }
 
@@ -201,60 +195,5 @@ function Preview({ vref, on, label, dark }: { vref: React.MutableRefObject<HTMLV
       {!on && <div className="absolute inset-0 flex items-center justify-center"><span className={cx('flex size-16 items-center justify-center rounded-full', dark ? 'bg-slate-700 text-slate-200' : 'bg-white text-ink-2')}><UserRound className="size-8" /></span></div>}
       <span className="absolute bottom-2 left-2 max-w-[80%] truncate rounded bg-black/55 px-1.5 py-0.5 text-xs text-white">{label}</span>
     </div>
-  );
-}
-/** 참가자 칸 — 직원은 회의 참가자 목록(5초마다), 손님은 내 칸만(참가자 목록은 직원에게만) */
-function Tiles({ self, meetingId, selfId }: { self: React.ReactNode; meetingId: string | null; selfId: string | null }) {
-  const [people, setPeople] = useState<Person[]>([]);
-  useEffect(() => { if (!meetingId) return; const load = () => call<{ people: Person[] }>(`/api/meetings/${meetingId}`).then((r) => setPeople(r.people.filter((p) => p.state !== 'waiting' && p.id !== selfId))).catch(() => {});
-    void load(); const h = setInterval(load, 5000); return () => clearInterval(h); }, [meetingId, selfId]);
-  return (
-    <section className="grid min-h-0 flex-1 auto-rows-min grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="meet-tiles">
-      {self}
-      {people.map((p) => (
-        <div key={p.id} className="relative flex aspect-video items-center justify-center rounded-card bg-slate-800" data-testid="meet-tile" data-state={p.state}>
-          <span className="flex size-14 items-center justify-center rounded-full bg-slate-700 text-lg font-semibold">{p.name.slice(0, 1)}</span>
-          <span className="absolute bottom-2 left-2 max-w-[80%] truncate rounded bg-black/55 px-1.5 py-0.5 text-xs">{p.name}{p.guest ? '(손님)' : ''}{p.role === 'host' ? ' · 주최자' : p.role === 'cohost' ? ' · 공동 주최자' : ''}{p.state === 'admitted' ? ' · 들어오는 중' : ''}</span>
-        </div>
-      ))}
-    </section>
-  );
-}
-/** 주최자·공동 주최자 도구: 대기실(허락·거절·모두 허락) · 잠금 · 대기실 정책 · 화면 공유 · 모두 음소거 · 끝내기 */
-function HostPanel({ meetingId, onEnded }: { meetingId: string; onEnded: () => void }) {
-  const [wait, setWait] = useState<{ id: string; name: string; guest: boolean }[]>([]);
-  const [m, setM] = useState<{ locked: boolean; lobby: string; share: string } | null>(null);
-  const [busy, setBusy] = useState(false); const seenIds = useRef(new Set<string>());
-  const load = useCallback(async () => {
-    const [l, g] = await Promise.all([call<{ waiting: { id: string; name: string; guest: boolean }[] }>(`/api/meetings/${meetingId}/lobby`), call<any>(`/api/meetings/${meetingId}`)]);
-    setWait(l.waiting); setM({ locked: g.meeting.locked, lobby: g.meeting.lobby, share: g.meeting.share });
-    for (const w of l.waiting) if (!seenIds.current.has(w.id)) { seenIds.current.add(w.id); toast.info(`대기 중: ${w.name}${w.guest ? '(손님)' : ''}`); }
-  }, [meetingId]);
-  useEffect(() => { void load().catch(() => {}); const h = setInterval(() => void load().catch(() => {}), 3000); return () => clearInterval(h); }, [load]);
-  const act = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn(); await load(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } };
-  const lobby = (action: string, ids?: string[]) => act(() => call(`/api/meetings/${meetingId}/lobby`, { body: { action, ids } }));
-  const patch = (body: Record<string, unknown>) => act(() => call(`/api/meetings/${meetingId}`, { method: 'PATCH', body }));
-  async function end() { if (!confirm('회의를 끝낼까요? 모두 나가게 됩니다.')) return; setBusy(true); try { await call(`/api/meetings/${meetingId}/end`, { body: {} }); onEnded(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } }
-  return (
-    <aside className="w-full shrink-0 space-y-3 rounded-card bg-slate-800 p-3 text-sm md:w-72" data-testid="meet-host">
-      <div>
-        <p className="flex items-center gap-1.5 font-semibold"><Users className="size-4" />대기 중 <span data-testid="meet-wait-count">{wait.length}</span>명
-          {wait.length > 1 && <button type="button" className="ml-auto rounded bg-brand-600 px-2 py-0.5 text-xs font-medium hover:bg-brand-700" disabled={busy} onClick={() => lobby('admitAll')} data-testid="meet-admit-all">모두 허락</button>}</p>
-        <ul className="mt-1.5 space-y-1">{wait.map((w) => (
-          <li key={w.id} className="flex items-center gap-1.5 rounded bg-slate-700/60 px-2 py-1" data-testid="meet-wait-row">
-            <span className="min-w-0 flex-1 truncate">{w.name}{w.guest ? '(손님)' : ''}</span>
-            <button type="button" aria-label={`${w.name} 허락`} title="허락" className="rounded p-1 hover:bg-slate-600" disabled={busy} onClick={() => lobby('admit', [w.id])} data-testid="meet-admit"><Check className="size-4" /></button>
-            <button type="button" aria-label={`${w.name} 거절`} title="거절" className="rounded p-1 hover:bg-slate-600" disabled={busy} onClick={() => lobby('deny', [w.id])} data-testid="meet-deny"><X className="size-4" /></button>
-          </li>))}
-          {!wait.length && <li className="text-xs text-slate-400">기다리는 사람이 없습니다</li>}</ul>
-      </div>
-      {m && <div className="space-y-2 border-t border-slate-700 pt-2">
-        <button type="button" className="flex w-full items-center gap-1.5 rounded px-1 py-1 hover:bg-slate-700" disabled={busy} onClick={() => patch({ locked: !m.locked })} data-testid="meet-lock">{m.locked ? <Lock className="size-4 text-amber-300" /> : <Unlock className="size-4" />}{m.locked ? '회의 잠김 — 풀기' : '회의 잠그기(새로 못 들어옴)'}</button>
-        <label className="block text-xs text-slate-300">대기실<select className="mt-0.5 block w-full rounded bg-slate-700 px-2 py-1 text-sm text-white" value={m.lobby} disabled={busy} onChange={(e) => patch({ lobby: e.target.value })} data-testid="meet-lobby-policy">{LOBBY.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-        <label className="block text-xs text-slate-300">화면 공유<select className="mt-0.5 block w-full rounded bg-slate-700 px-2 py-1 text-sm text-white" value={m.share} disabled={busy} onChange={(e) => patch({ share: e.target.value })} data-testid="meet-share-policy"><option value="all">누구나</option><option value="host">주최자·공동 주최자만</option></select></label>
-        <button type="button" className="flex w-full items-center gap-1.5 rounded px-1 py-1 hover:bg-slate-700" disabled={busy} onClick={() => patch({ muteAll: true })} data-testid="meet-mute-all"><MicOff className="size-4" />모두 음소거</button>
-      </div>}
-      <Button variant="danger" size="sm" className="w-full" disabled={busy} onClick={end} data-testid="meet-end">회의 끝내기</Button>
-    </aside>
   );
 }

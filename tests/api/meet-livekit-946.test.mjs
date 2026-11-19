@@ -92,9 +92,11 @@ test('③ 라이브킷 웹훅(본문 sha256 서명) → 입장·퇴장 기록 ·
 
 test('⑤ 화면: [참가] → 라이브킷 서버에 그 입장권으로 접속 시도 · 접속 못 하면 안내·[다시 연결](브라우저 있을 때만)', async (t) => {
   let chromium; try { ({ chromium } = await import('playwright')); } catch { return t.skip('playwright 없음'); }
-  if (!existsSync(chromium.executablePath())) return t.skip('브라우저 설치 전(CI API 단계)');
+  // 클라우드 작업 환경은 브라우저가 /opt/pw-browsers/chromium 에 있다(화면 시험 run.mjs 와 같은 길)
+  const exe = existsSync(chromium.executablePath()) ? undefined : existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : null;
+  if (exe === null) return t.skip('브라우저 설치 전(CI API 단계)');
   const m = await ctx.owner.ok('POST', '/api/meetings', { kind: 'instant', title: '화면 시험' });
-  const browser = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
+  const browser = await chromium.launch({ ...(exe ? { executablePath: exe } : {}), args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   try {
     const bctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['camera', 'microphone'] });
     const [kv] = ctx.owner.cookie.split(';'); const [name, value] = kv.split('=');
@@ -118,6 +120,7 @@ test('⑤ 화면: [참가] → 라이브킷 서버에 그 입장권으로 접속
     for (let i = 0; i < 50 && seen.upgrades.length === before; i++) await p.waitForTimeout(200);
     assert.ok(seen.upgrades.length > before, '[다시 연결] = 새 입장권으로 다시 접속');
     await p.getByTestId('meet-leave').click();
+    await p.getByTestId('meet-leave-only').click(); // 주최자는 [나만 나가기] / [회의 끝내기] 가운데 고름(대표 11/19 보강)
     await p.getByTestId('meet-left').waitFor();
   } finally { await browser.close(); }
 });

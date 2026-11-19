@@ -365,7 +365,11 @@ async function screenIssue(sql: Sql, m: MeetingRow, p: { id: string; role: Engin
   await log(sql, m.id, 'screen_token', { participantId: p.id });
   return { engine: engineOr503().id, url: t.url, token: t.token, identity: `${p.id}${SCREEN_SUFFIX}`, expiresIn: ttlOf() };
 }
-async function dropScreen(_sql: Sql, m: MeetingRow, pid: string) { await meetingEngine()?.remove(m.id, `${pid}${SCREEN_SUFFIX}`).catch(() => null); }
+/** 화면 공유용 입장권을 받은 적이 있는 사람만(대부분은 없으므로 엔진을 한 번 더 부르지 않는다) */
+async function dropScreen(sql: Sql, m: MeetingRow, pid: string) {
+  const [had] = await sql`select 1 from meeting_log where meeting_id = ${m.id} and participant_id = ${pid} and kind = 'screen_token' limit 1`;
+  if (had) await meetingEngine()?.remove(m.id, `${pid}${SCREEN_SUFFIX}`).catch(() => null);
+}
 export async function screenTicket(u: SessionUser, id: string) {
   const sql = db(); const { m, role } = await access(u, id, sql);
   const [p] = await sql<PartRow[]>`select * from meeting_participants where meeting_id = ${m.id} and user_id = ${u.id}`;
