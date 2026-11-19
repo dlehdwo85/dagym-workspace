@@ -9,7 +9,7 @@ import { Button, ErrorBox, cx, Field, Loading, fmtDateTime, inputCls, toast } fr
 import { alarmDeviceStatus, enableNativePush, isNativeApp, openAlarmSettings, subscribeWebPush } from '@/components/native';
 import { BioLockSetting } from '@/components/BioLock';
 import { UserSelect } from '@/components/pickers';
-import { useInApp } from '@/components/inApp';
+import { useInApp, useIosApp } from '@/components/inApp';
 
 /** #447 앱 1.1.3 전체화면 알람: 이 휴대폰이 잠금 화면 위 전체 화면을 막아 두었거나 정확한 시각 예약이 꺼져 있으면 안내(안드로이드 14+ 는 사용자가 설정에서 허용) */
 function FullScreenAlarmNotice() {
@@ -483,8 +483,10 @@ const PROVIDER_NAME: Record<string, string> = { google: 'Google', kakao: '카카
 function LinkedAccounts() {
   const r = useApi<{ identities: { provider: string; email: string | null; last_login_at: string | null }[]; enabled: string[]; hasPassword: boolean }>('/api/account/identities');
   const [justLinked, setJustLinked] = useState<string | null>(null);
+  const ios = useIosApp();
   useEffect(() => { const p = new URLSearchParams(location.search).get('linked'); if (p) { setJustLinked(p); toast.ok(`${PROVIDER_NAME[p] ?? p} 계정을 연결했습니다`); } }, []);
   if (!r.data || (!r.data.enabled.length && !r.data.identities.length)) return null;
+  if (ios) return null; // 대표 11/19: 아이폰·아이패드 앱은 이메일 로그인만 — 소셜 계정 연결·끊기는 웹에서
   const linked = new Set(r.data.identities.map((x) => x.provider));
   async function unlink(p: string) {
     if (!window.confirm(`${PROVIDER_NAME[p]} 연결을 끊을까요?`)) return;
