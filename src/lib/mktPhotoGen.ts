@@ -334,7 +334,7 @@ export async function photoFillTick(o: { tenant?: string; limit?: number; budget
   let started = 0; const skipped: Record<string, number> = {};
   if (await ready()) {
     const cand = await sql<Row[]>`select ${sql.unsafe(COLS)} from mkt_contents c join mkt_settings s on s.tenant = c.tenant and s.photo_gen and not coalesce(s.auto_pause, false)
-      where c.status in ('pending', 'changes') and not coalesce(c.is_test, false) and c.channel <> 'blog' and c.kind in ('feed', 'story') and c.quality->'visual'->>'by' = 'server'
+      where c.tenant in (${(await import('./ai/consent')).autoAiTenants(sql)}) and c.status in ('pending', 'changes') and not coalesce(c.is_test, false) and c.channel <> 'blog' and c.kind in ('feed', 'story') and c.quality->'visual'->>'by' = 'server'
         and (c.quality->'fill' is null or (c.quality->'visual'->>'plain' = 'true' and coalesce((c.quality->'fill'->>'v')::int, 0) < c.current_version and c.quality->'fill'->>'status' <> 'generating') -- 295차 #835: 단색 표지는 예전 판에서 채웠어도 새 판에서 한 번 더
           or (c.quality->'fill'->>'status' in ('done', 'none') and coalesce((c.quality->'fill'->>'checked')::int, (c.quality->'fill'->>'v')::int, 0) < c.current_version)) -- 296차: 새 판에서 사진 장이 아직 절반이 안 되면 더 채움(절반이면 'none'·checked 로 끝)
         and (c.scheduled_at is null or c.scheduled_at > now() + interval '2 hours' or c.scheduled_at < now()) ${tf} -- 297차: 게시 예정이 지난 승인 대기 글도(승인 전이라 바로 게시되지 않음) — 막는 건 게시 직전 2시간만

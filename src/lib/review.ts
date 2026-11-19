@@ -190,6 +190,8 @@ export async function setupReviewAccount(actor: SessionUser, i: z.infer<typeof r
     invitePath = r.path; reviewerId = r.userId;
   }
   const sample = await sql.begin(async (tx) => seedSamples(tx as unknown as Sql, unitId, mates, reviewerId, existing?.status === 'active'));
+  // AI 동의(대표 11/19 — 애플 5.1.2): 심사용 계정은 버튼을 누를 때마다 '아직 정하지 않음'으로 되돌린다 → 심사 담당자가 들어오면 동의 창을 처음부터 본다
+  if (reviewerId) await sql`delete from consents where user_id = ${reviewerId} and kind = 'ai_share'`;
   await audit(sql, actor.id, 'review_account.setup', 'user', reviewerId, { email: i.email, unitId, reseeded: true }, ip);
   return { unitId, reviewerId, invitePath, alreadyActive: existing?.status === 'active', sample };
 }

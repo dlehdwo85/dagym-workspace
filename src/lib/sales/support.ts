@@ -692,7 +692,7 @@ export async function analyzeProgram(u: SessionUser, id: string, provider: AiPro
   const t = tenantOf(u); const sql = db(); const today = ymd();
   let p = await programFor(sql, t, id);
   // 382차 #1004: 정기 자동 판단은 회사 AI 한도 밖 '시스템 몫'(안전 상한만) — 사람이 누른 판단은 예전처럼 회사 월 AI 예산·요청 수
-  if (opt.auto) await (await import('../ai/systemShare')).assertSystemAi(sql);
+  if (opt.auto) { await (await import('../ai/consent')).assertAutoAi(t, sql); await (await import('../ai/systemShare')).assertSystemAi(sql); } // AI 동의(대표 11/19): 정기 자동 판단은 회사 스위치가 켜진 회사만
   else await (await import('../plans')).assertAiRequest(u, { legacy: true }); // 회사 월 AI 예산(원)·예전 달러 한도·요청 수
   // 361차(노트북 11/05 10:40 '지원사업 AI 판단 멈춤'): 정기 자동 판단은 회사 대표 이름으로 돌지만 대표 개인 AI 한도(월·하루 20%)는 쓰지 않음 —
   // 회사 월 AI 예산·요금제 요청 수만 봄(대표 결정: 지원사업은 매번 판단). 사람이 누른 판단은 예전처럼 본인 한도

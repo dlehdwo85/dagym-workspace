@@ -227,7 +227,8 @@ export async function summarizeInquiry(taskIds: string[], ceoId: string) {
   try {
     const [u] = await sql`select id, tenant, is_demo from users where id = ${ceoId}`;
     if (!u) return;
-    const ok = await (await import('./plans')).assertAiRequest({ id: u.id, tenant: u.tenant, isDemo: u.is_demo } as SessionUser).then(() => true, () => false);
+    // AI 동의(대표 11/19): 문의가 들어올 때 자동으로 도는 요약 = 사람이 누른 것이 아님 → 회사 스위치(회사 자료 자동 AI 처리)로 가림
+    const ok = await (await import('./plans')).assertAiRequest({ id: u.id, tenant: u.tenant, isDemo: u.is_demo } as SessionUser, { auto: true }).then(() => true, () => false);
     if (!ok) return;
     const [t] = await sql<{ description: string }[]>`select description from tasks where id = ${taskId}`;
     if (!t || t.description.startsWith('> AI 요약')) return;
