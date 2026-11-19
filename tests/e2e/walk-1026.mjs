@@ -37,18 +37,22 @@ const MKT_PAGES = [['마케팅 홈', '/s/marketing'], ['마케팅 캘린더', '/
 const MOBILE = [['홈', '/'], ['업무', '/tasks'], ['캘린더', '/calendar'], ['알림', '/notifications'], ['도움말', '/help'], ['영업 홈', '/s/sales'], ['영업기회 허브', '/s/sales/hub']];
 
 /** 걸려도 되는 것(이름 그 자체) — 보고서에 '허용'으로 따로 적는다 */
-const ALLOW = [[/운동·피트니스/, '업종 이름'], [/산업단지|공동주택 단지|새로 생기는 단지|공동주택\(|청약홈|신규 분양 단지/, '수집 자료 이름'], [/아파트·커뮤니티·체육시설 위탁 운영, 시설 관리/, '영업 용어 묶음 설명(고르는 칸)']];
+const ALLOW = [[/운동·피트니스/, '업종 이름'], [/산업단지|공동주택 단지|새로 생기는 단지|공동주택\(|청약홈|신규 분양 단지/, '수집 자료 이름'], [/아파트·커뮤니티·체육시설 위탁 운영, 시설 관리/, '영업 용어 묶음 설명(고르는 칸)'],
+  // 11/19 정식 실행에서 걸림: 영업 데이터 설정의 공공데이터 분류 이름(의료·요양 / 식품·외식 / 건설·인테리어 / 시설관리·위탁운영 … 12개 중 하나 — 모든 회사가 같은 목록을 봄)
+  [/시설관리·위탁운영/, '공공데이터 분류 이름'],
+  // 영업 데이터 설정의 공공데이터 목록 — 자료마다 붙은 한 줄 설명(src/lib/sales/sources.ts). 그 자료가 무엇인지 적은 글이라 모든 회사가 같은 글을 봄
+  [/직접 제안할 단지 목록|관리사무소·입주자대표회의|단지 규모·세대수|큰 단지부터|입주 예정·신규 분양|체력단련장\(헬스장\)|위탁 운영 대상|위탁·관리 대상|위탁급식/, '공공데이터 자료 설명']];
 const findings = []; const allowed = []; const visited = []; const mails = [];
 function scan(persona, where, kind, text) {
   for (const [cat, re] of CHECKS) {
-    re.lastIndex = 0; let m; const seen = new Set();
+    re.lastIndex = 0; let m; const seen = new Set(); let found = 0;
     while ((m = re.exec(text))) {
       const ctx = text.slice(Math.max(0, m.index - 26), m.index + m[0].length + 26).replace(/\s+/g, ' ').trim();
       const k = `${m[0]}|${ctx}`; if (seen.has(k)) continue; seen.add(k);
       const ok = ALLOW.find(([re2]) => re2.test(ctx));
       if (ok) { allowed.push({ persona, where, word: m[0], why: ok[1] }); continue; }
       findings.push({ persona, where, kind, cat, word: m[0], ctx });
-      if (seen.size >= 6) break;
+      if (++found >= 6) break; // 한 화면·한 갈래에서 걸린 곳은 6건까지만 적음(허용한 것은 세지 않음 — 11/19: 허용이 먼저 6건 차면 뒤의 걸린 곳을 못 보던 것 고침)
     }
   }
 }

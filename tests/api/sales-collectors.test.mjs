@@ -621,12 +621,19 @@ test('278차 #816 나라장터가 웹페이지(HTML)를 주면 실패 · 앞 500
 
 test('대표 11/14 영업 DB 누락: 원천이 잠깐 안 받아 준 실패(연결 끊김·시간 초과)는 서버 오류로 알리지 않고 30분 뒤 다시 받음 — 다음 날까지 기다리지 않음', async () => {
   await sql`delete from error_logs where source like 'sales-collect:%'`;
+  hotelMode = 'ok'; await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {}); // 방금까지는 잘 받던 원천
   hotelMode = 'drop';
   const f = await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
   assert.equal(f.status, 'failed', f.summary);
   const [d] = await sql`select detail from sales_collector_runs where id = ${f.runId}`;
   assert.equal(d.detail?.retry, true, `다시 받기 표시: ${f.summary}`);
   assert.equal((await sql`select count(*)::int n from error_logs where source like 'sales-collect:%'`)[0].n, 0, '서버 오류 기록·알림 없음');
+  // 노트북 11/19(KG2B 오후 실패 알림): 다시 받는 중인 원천은 2회 연속으로는 알리지 않음(스스로 채워지는 일) — 4회 연속(2시간쯤)이면 알림
+  const hotelAlerts = async () => (await ctx.owner.ok('GET', '/api/sales/collectors')).alerts.filter((a) => a.slug === 'tourist_hotels_localdata');
+  await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
+  assert.deepEqual(await hotelAlerts(), [], '2회 연속 — 다시 받는 중이라 아직 알리지 않음');
+  for (let i = 0; i < 2; i++) await ctx.owner.ok('POST', '/api/sales/collectors/tourist_hotels_localdata/run', {});
+  assert.equal((await hotelAlerts())[0]?.reason, '4회 연속 실패');
   hotelMode = 'ok';
   // 다른 수집기는 잠시 끔(이 시험만 보려고 — 정기 실행 한 번에 수집기 하나라 다른 수집기 차례가 먼저 올 수 있음)
   const others = (await ctx.owner.ok('GET', '/api/sales/collectors')).collectors.map((c) => c.slug).filter((x) => x !== 'tourist_hotels_localdata');
