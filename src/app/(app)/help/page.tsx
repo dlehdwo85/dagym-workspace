@@ -1,10 +1,11 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { HelpCircle } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, Field, PageHeader, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
-import { restartTours } from '@/components/Tour';
+import { TOUR_PAGES, requestTour, restartTours } from '@/components/Tour';
 import { useTerms } from '@/components/session';
 
 const FAQ: [string, string][] = [
@@ -25,6 +26,7 @@ const NEWS: [string, string][] = [
 
 /** V12 3번 도움말·문의 · 업데이트 소식 · 서비스 상태 */
 export default function HelpPage() {
+  const router = useRouter();
   const person = useTerms().example.person; // 410차 G-20: 도움말 예시의 사람 이름은 회사별(다짐은 지금 그대로)
   const mine = useApi<{ tickets: any[] }>('/api/support');
   const [f, setF] = useState({ category: 'question', subject: '', body: '' });
@@ -37,6 +39,12 @@ export default function HelpPage() {
     <div className="mx-auto max-w-3xl space-y-4">
       <PageHeader title="도움말·문의" icon={HelpCircle} sub={<>자주 묻는 질문과 문의. 서비스 상태는 <Link href="/status" className="text-brand-600 underline">상태 페이지</Link>에서 볼 수 있습니다.</>}
         actions={<Button variant="secondary" onClick={() => restartTours()} data-testid="help-tour-restart">사용 안내 다시 보기</Button>} />
+      {/* 대표 11/19: 안내는 화면마다 처음 한 번만 뜨고, 여기서 화면별로 다시 볼 수 있다 */}
+      <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="help-tours">
+        <h2 className="text-sm font-semibold">화면별 사용 안내 다시 보기</h2>
+        <p className="mt-1 text-xs text-ink-2">누르면 그 화면으로 가서 단추를 하나씩 짚어 드립니다. 업무 안내에서는 예시 업무를 만들어 직접 눌러 볼 수 있습니다.</p>
+        <div className="mt-2 flex flex-wrap gap-1.5">{TOUR_PAGES.map((t) => <Button key={t.id} size="sm" variant="secondary" onClick={() => { router.push(t.href); requestTour(t.id, true); }} data-testid={`help-tour-${t.id}`}>{t.label}</Button>)}</div>
+      </section>
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
         <h2 className="text-sm font-semibold">자주 묻는 질문</h2>
         <div className="mt-2 divide-y divide-line">{FAQ.map(([q, a0]) => [q, a0.replace('김민수', person)] as const).map(([q, a]) => <details key={q} className="py-2"><summary className="cursor-pointer text-sm font-medium">{q}</summary><p className="mt-1 text-sm text-ink-2">{a}</p></details>)}</div>

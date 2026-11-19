@@ -2932,10 +2932,41 @@ await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리�
   // 업무 화면 처음 → 그 화면 안내, Esc = 건너뛰기(봤음)
   await p.goto(BASE + '/tasks');
   await tour.waitFor({ timeout: 15000 });
-  assert.equal(await p.getByTestId('tour-title').innerText(), '업무 추가');
-  await p.keyboard.press('Escape');
-  await tour.waitFor({ state: 'detached' });
+  // 대표 11/19(시험상사로 본 뒤 "업무 파트는 2개만 — 실제로 생성하고 파일 업로드하는 부분을 설명해야"): 업무 안내 = 해 보는 순서 + [예시 업무 만들어 보기]
+  assert.equal(await p.getByTestId('tour-title').innerText(), '업무는 이렇게 씁니다');
+  assert.deepEqual(await p.getByTestId('tour-list').locator('li').allInnerTexts().then((x) => x.map((t) => t.replace(/^·\s*/, '').trim())), ['① 만들기 — 제목·담당자·마감', '② 열기 — 파일·사진, 체크리스트, 댓글·대화', '③ 완료 — 상태를 완료로(검토는 필요할 때만)']);
+  await p.waitForTimeout(350); await p.screenshot({ path: `${SHOTS}/197-tour-tasks-intro.png` }); // 말풍선 자리 잡는 움직임(0.2초) 뒤
+  await p.getByTestId('tour-sample').click();
+  await p.getByTestId('task-list').getByText('[예시] 워크인 둘러보기').first().waitFor({ timeout: 10000 });
+  const [smp] = await sql`select t.title, t.due_date::text due, t.assignee_id, (select count(*)::int from task_checklist_items c where c.task_id = t.id) items from tasks t where t.title = '[예시] 워크인 둘러보기' and t.created_by = (select id from users where email = 'tour77@dagym.test')`;
+  assert.ok(smp && smp.items === 4 && smp.due === new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), `예시 업무 1건(오늘 마감·체크리스트 4줄) ${JSON.stringify(smp)}`);
+  const ttl = [];
+  for (let k = 0; k < 12 && (await tour.count()); k++) { ttl.push(await p.getByTestId('tour-title').innerText()); await p.getByTestId('tour-next').click(); await p.waitForTimeout(150); }
+  for (const t of ['① 업무 만들기', '② 업무 열기', '③ 완료하기', '보기 바꾸기']) assert.ok(ttl.includes(t), `${t} 단계 (${ttl.join(' / ')})`);
+  assert.ok(ttl.length >= 5, `업무 안내 5단계 이상(예전 2~4) — ${ttl.length}`);
   assert.ok((await seenWait(p, (s) => s.includes('tasks'))).includes('tasks'));
+  // 예시 업무를 열면 업무 상세 안내: 담당자·체크리스트·파일·사진·댓글까지
+  await p.getByTestId('task-list').getByText('[예시] 워크인 둘러보기').first().click();
+  await tour.waitFor({ timeout: 15000 });
+  const dtl = [];
+  for (let k = 0; k < 12 && (await tour.count()); k++) { dtl.push(await p.getByTestId('tour-title').innerText()); if (dtl.at(-1) === '파일·사진 붙이기') { await p.waitForTimeout(350); await p.screenshot({ path: `${SHOTS}/198-tour-task-attach.png` }); } await p.getByTestId('tour-next').click(); await p.waitForTimeout(150); }
+  for (const t of ['진행 단계', '체크리스트', '파일·사진 붙이기', '댓글']) assert.ok(dtl.includes(t), `${t} 단계 (${dtl.join(' / ')})`);
+  await p.keyboard.press('Escape');
+  // 도움말에서 화면별로 다시 보기(결재) — 이미 본 안내도 다시 뜸. 예시 업무는 한 번 만들었으면 단추 대신 안내
+  await p.goto(BASE + '/help');
+  await p.getByTestId('help-tours').waitFor();
+  assert.equal(await p.getByTestId('help-tours').getByRole('button').count(), 8, '홈·업무·캘린더·메시지·자료실·AI 비서·결재·점검');
+  await p.getByTestId('help-tour-approvals').click();
+  await p.waitForURL((u) => new URL(u).pathname === '/approvals');
+  await tour.waitFor({ timeout: 15000 });
+  assert.equal(await p.getByTestId('tour-title').innerText(), '결재 올리기');
+  await p.getByTestId('tour-skip').click(); await tour.waitFor({ state: 'detached' });
+  await p.goto(BASE + '/help'); await p.getByTestId('help-tour-tasks').click();
+  await p.waitForURL((u) => new URL(u).pathname === '/tasks');
+  await tour.waitFor({ timeout: 15000 });
+  await p.getByTestId('tour-sample-done').waitFor();
+  assert.equal(await p.getByTestId('tour-sample').count(), 0, '예시 업무는 한 번만');
+  await p.getByTestId('tour-skip').click(); await tour.waitFor({ state: 'detached' });
   // [사용 안내 다시 보기] → 홈부터 다시
   await p.getByRole('button', { name: '내 계정 메뉴' }).click();
   await p.getByTestId('tour-restart').click();

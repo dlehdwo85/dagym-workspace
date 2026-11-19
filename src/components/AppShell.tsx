@@ -543,7 +543,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
         {session.tenant?.onboarding && <Onboarding />}
         {/* #77 처음 사용 안내 — 회사 첫 안내 창·결제 잠금 동안은 기다림 */}
-        {session.tours && <TourHost userId={session.user.id} seen={session.tours.seen} auto={session.tours.auto} admin={admin} blocked={!!session.tenant?.onboarding || !!session.tenant?.billingLock || !!session.tenant?.signup} />}
+        {session.tours && <TourHost userId={session.user.id} seen={session.tours.seen} auto={session.tours.auto} admin={admin} blocked={!!session.tenant?.onboarding || !!session.tenant?.billingLock || !!session.tenant?.signup} features={session.features as Record<string, unknown>} />}
         <BioLock />
         {session.features.ai && <Suspense><AiDock open={aiDock} onOpenChange={setAiDock} name={aiName(space)} /></Suspense>}
         <MessengerDock aiOpen={aiDock} />
