@@ -10,7 +10,7 @@ jobs:
   test:
     # 376차: ubuntu-latest 가 26.04 로 바뀌어 Playwright 1.56 이 chromium·의존성을 못 깖(CI 2225~2235 E2E 단계 실패, API 시험은 통과) → 지원되는 24.04 로 고정
     runs-on: ubuntu-24.04
-    timeout-minutes: 90 # API 시험 ~25분 + E2E 까지 한 작업
+    timeout-minutes: 210 # API 시험 ~25분 + E2E ~70분 + 자정(KST) 넘김을 피하려고 기다리는 시간(최대 약 105분)
     services:
       postgres:
         image: postgres:16
@@ -32,6 +32,17 @@ jobs:
       - run: for i in 1 2 3; do test -x node_modules/ffmpeg-static/ffmpeg && break; node node_modules/ffmpeg-static/install.js || sleep 5; done; test -x node_modules/ffmpeg-static/ffmpeg
       - run: npm run typecheck
       - run: npm run build
+      # 11/19 밤 실패 7건(main·작업 브랜치)이 모두 '자정(KST)을 넘겨 끝난 실행'이었다 — 시험은 시작할 때의 오늘로 자료를 만들고 서버·화면은 지금 날짜로 계산해
+      # D-2 → D-1, "2일 지남" → "3일 지남", 퇴사일·날짜 같음 비교가 어긋난다(자정 전에 끝난 실행은 모두 통과). 시험(API ~25분 + 화면 ~70분)이 자정을 넘길 것 같으면 자정이 지난 뒤에 시작한다.
+      - name: 자정(KST) 넘김 피하기
+        run: |
+          left=$(( $(TZ=Asia/Seoul date -d 'tomorrow 00:00' +%s) - $(date +%s) ))
+          if [ "$left" -lt 6300 ]; then
+            echo "자정(KST)까지 ${left}초 — 시험이 자정을 넘기지 않게 $((left + 30))초 기다린 뒤 시작합니다" | tee -a "$GITHUB_STEP_SUMMARY"
+            sleep $((left + 30))
+          else
+            echo "자정(KST)까지 ${left}초 — 바로 시작"
+          fi
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

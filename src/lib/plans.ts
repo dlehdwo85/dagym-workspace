@@ -61,7 +61,7 @@ export async function effectiveLimits(tenant: string, sql: Sql = db()): Promise<
 export async function currentUsage(tenant: string, sql: Sql = db()) {
   const demo = tenant === 'demo';
   const start = monthStart().toJSDate();
-  const [[att], [lib], [ai], [users], [tk], [chk]] = await Promise.all([
+  const [[att], [lib], [ai], [users], [tk], [chk], [agr]] = await Promise.all([
     sql<{ bytes: number; photo: number; doc: number }[]>`select coalesce(sum(a.size_bytes), 0)::float8 bytes,
         coalesce(sum(a.size_bytes) filter (where a.mime_type like 'image/%'), 0)::float8 photo,
         coalesce(sum(a.size_bytes) filter (where a.mime_type ~ '(pdf|word|sheet|excel|presentation|powerpoint|text|csv|hwp)'), 0)::float8 doc
@@ -79,8 +79,10 @@ export async function currentUsage(tenant: string, sql: Sql = db()) {
     taskCount(tenant, sql).then((n) => [n]),
     // 점검 1단계: 점검 사진(기준 사진·점검 사진)도 회사 저장공간에 셈
     sql<{ bytes: number }[]>`select coalesce(sum(size_bytes), 0)::float8 bytes from chk_photos where tenant = ${tenant} and upload_status = 'ready'`,
+    // 계약 관리 1단계: 계약서 파일도 회사 저장공간에 셈(문서로)
+    sql<{ bytes: number }[]>`select coalesce(sum(size_bytes), 0)::float8 bytes from agreement_files where tenant = ${tenant} and upload_status = 'ready'`,
   ]);
-  const bytes = att.bytes + lib.bytes + chk.bytes, photo = att.photo + lib.photo + chk.bytes, doc = att.doc + lib.doc;
+  const bytes = att.bytes + lib.bytes + chk.bytes + agr.bytes, photo = att.photo + lib.photo + chk.bytes, doc = att.doc + lib.doc + agr.bytes;
   return { storageBytes: bytes, byKind: { photo, doc, other: Math.max(0, bytes - photo - doc) }, aiRequests: ai.requests, aiTokens: ai.tokens, aiCostUsd: Math.round(ai.cost * 100) / 100,
     users: users.active, invited: users.invited, tasks: tk };
 }

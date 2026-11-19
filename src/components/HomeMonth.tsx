@@ -7,6 +7,7 @@ import { CalendarRange, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useApi } from './client';
 import { Card, cx } from './ui';
 import { SPACE_META } from './spaceMeta';
+import { useSession } from './session';
 import { useUrlState } from './urlState';
 
 const seoulDay = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
@@ -30,6 +31,7 @@ const C = { event: '#0F766E', task: '#64748B', overdue: '#DC2626' };
  */
 export function HomeMonth({ today, className }: { today: string; className?: string }) {
   const router = useRouter();
+  const spaces = (useSession().spaces ?? ['work']) as string[];
   // #242 2단계: 보던 달(?hm)·펼친 날(?hd)을 주소에 — 그날 업무·일정을 열었다 돌아와도 같은 달·같은 날 목록
   const [month, setMonth] = useUrlState('hm', monthOf(today));
   const [selDay, setSelDay] = useUrlState('hd', '');
@@ -80,7 +82,7 @@ export function HomeMonth({ today, className }: { today: string; className?: str
           {days.map((d) => <Cell key={d} d={d} />)}
         </div>
       </div>
-      <p className="px-4 pb-1 text-[11px] text-ink-3"><span className="mr-2 inline-block size-1.5 rounded-full" style={{ background: C.event }} />일정<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: C.task }} />업무<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: C.overdue }} />지난 업무<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: SPACE_META.sales.color }} />영업<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: SPACE_META.marketing.color }} />마케팅 · 한 번 더 누르면 캘린더</p>
+      <p className="px-4 pb-1 text-[11px] text-ink-3"><span className="mr-2 inline-block size-1.5 rounded-full" style={{ background: C.event }} />일정<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: C.task }} />업무<span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: C.overdue }} />지난 업무{/* 418차 2부(대표 11/19): 영업·마케팅 공간이 없는 회사에는 그 범례를 보이지 않는다 */}{spaces.includes('sales') && <><span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: SPACE_META.sales.color }} />영업</>}{spaces.includes('marketing') && <><span className="mx-1.5 inline-block size-1.5 rounded-full" style={{ background: SPACE_META.marketing.color }} />마케팅</>} · 한 번 더 누르면 캘린더</p>
       {sel && (
         <div className="border-t border-line px-2 pb-2 pt-1" data-testid="home-month-list">
           <p className="px-2 py-1 text-xs font-semibold text-ink-2">{Number(sel.slice(5, 7))}/{Number(sel.slice(8))}({'일월화수목금토'[dow(sel)]}) · {list.length}건 <Link prefetch={false} href={`/calendar?view=dayGridMonth&date=${sel}`} className="ml-1 font-medium text-brand-600 hover:underline">캘린더에서 보기</Link></p>
