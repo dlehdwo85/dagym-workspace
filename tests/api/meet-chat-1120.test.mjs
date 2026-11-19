@@ -2,6 +2,7 @@
 // ① 회의 중 채팅(서버 보관): 직원·손님 주고받기 · after 로 새 글만 · 손님은 자기가 참가 요청한 뒤의 글만 · 대기실에 있는 손님·회의 밖 직원·다른 회사는 못 봄 · 길이·횟수 한도
 // ② 한 사람 마이크 끄기(주최자만, 엔진에 그 사람만 요청) ③ 휴대폰 앱 화면 공유용 입장권(화면 전용 접속 '<참가자 id>~screen' · 주최자만 공유인 회의에서 손님은 403 · 내보내면 화면 접속도 끊음)
 // ④ 엔진 알림에 화면 전용 접속이 와도 회의 기록에 넣지 않음
+// ⑤ 회의 시작 알림(일정 참석자·대화방 멤버 — 첫 직원 입장 때 한 번)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -118,4 +119,37 @@ test('③ 휴대폰 앱 화면 공유용 입장권: 화면 전용 접속 · 주�
   await ctx.owner.ok('POST', `/api/meetings/${m.id}/end`, {});
   assert.equal((await ctx.owner.req('POST', `/api/meetings/${m.id}/screen-ticket`, {})).status, 410);
   assert.equal((await ctx.owner.req('POST', `/api/meetings/${m.id}/chat`, { text: '끝난 뒤' })).status, 410);
+});
+
+test('⑤ 회의 시작 알림: 일정 회의 = 참석자에게 · 대화방 통화 = 방 멤버에게 · 들어온 본인·초대 안 된 사람은 안 받음 · 즉석 회의는 안 보냄 · 한 번만', async () => {
+  const starts = async (userId) => [...(await sql`select title, body, link from notifications where user_id = ${userId} and type = 'meeting_start' order by created_at`)];
+  const iso = (min) => new Date(Date.now() + min * 60000).toISOString();
+  assert.ok((await ctx.owner.ok('GET', '/api/notifications/prefs')).types.some((t) => t.type === 'meeting_start'), '화상회의가 켜진 회사: 알림 설정에 보임');
+  // 일정 회의: 참석자(이직원)에게 — 시작한 대표 본인·참석자가 아닌 박직원은 안 받음
+  const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'personal').id;
+  const ev = (await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '주간 회의 1120', start: iso(5), end: iso(65), attendeeIds: [ctx.staffA.id] })).id;
+  const on = await ctx.owner.ok('PUT', `/api/events/${ev}/meeting`, { on: true });
+  assert.deepEqual(await starts(ctx.staffA.id), [], '켜기만 해서는 알림 없음');
+  await ctx.owner.ok('POST', `/api/meetings/${on.meeting.id}/join`);
+  const a = await starts(ctx.staffA.id);
+  assert.deepEqual(a.map((n) => [n.title, n.body, n.link]), [['회의가 시작됐습니다: 주간 회의 1120', '김대표 님이 들어와 있습니다 — 눌러서 참가', `/meet/${on.meeting.code}`]]);
+  assert.deepEqual(await starts(ctx.ownerId), [], '들어온 본인은 안 받음');
+  assert.deepEqual(await starts(ctx.staffB.id), [], '참석자가 아닌 사람');
+  // 다시 들어와도·다른 사람이 들어와도 또 보내지 않음
+  await ctx.owner.ok('POST', `/api/meetings/${on.meeting.id}/join`);
+  await ctx.staffA.client.ok('POST', `/api/meetings/${on.meeting.id}/join`);
+  assert.equal((await starts(ctx.staffA.id)).length, 1);
+  // 대화방 통화: 방 멤버(박직원)에게
+  const room = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.staffB.id })).id;
+  const rm = await ctx.owner.ok('POST', '/api/meetings', { kind: 'room', roomId: room });
+  await ctx.owner.ok('POST', `/api/meetings/${rm.id}/join`);
+  const b = await starts(ctx.staffB.id);
+  assert.equal(b.length, 1); assert.match(b[0].title, /^회의가 시작됐습니다: /); assert.equal(b[0].link, `/meet/${rm.code}`);
+  // 즉석 회의: 누구를 불렀는지 모르므로 보내지 않음
+  const before = (await sql`select count(*)::int c from notifications where type = 'meeting_start'`)[0].c;
+  const inst = await ctx.owner.ok('POST', '/api/meetings', { kind: 'instant', title: '즉석' });
+  await ctx.owner.ok('POST', `/api/meetings/${inst.id}/join`);
+  assert.equal((await sql`select count(*)::int c from notifications where type = 'meeting_start'`)[0].c, before);
+  // 다른 회사에는 화상회의 알림 설정이 그대로 보임(스위치가 회사 목록 없이 켜진 시험 서버) — 알림 자체는 가지 않음
+  assert.equal((await sql`select count(*)::int c from notifications n join users u on u.id = n.user_id where n.type = 'meeting_start' and u.tenant <> 'default'`)[0].c, 0);
 });
