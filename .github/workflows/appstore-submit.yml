@@ -2,7 +2,9 @@
 # — release.yml 과 같은 키(ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8). mode=plan 은 읽기만(무엇을 바꿀지 보고), mode=apply 는 버전 문자열·빌드·설명·키워드·심사 메모·스크린샷(6.9형·6.1형·아이패드 13형)을 바꾸고,
 # cancel_unresolved=true 이면 반려·초안 제출 묶음을 먼저 거둠(묶음 만들기 409 STATE_ERROR 일 때 — 353차),
 # 356차: 처리 대기가 길면 다음 장으로 넘어가고 끝에 다시 확인 → COMPLETE 아닌 장만 다시 올림, 같은 이름·체크섬 장은 그대로(다시 돌려도 같음), 처리 안 끝난 장이 있으면 제출 안 함.
-# submit=true 일 때만 심사 제출(대표 승인 뒤). 비밀번호·키는 출력하지 않음. 스크린샷은 docs/handoff/store/ios-v4/iphone-01..06.png, 심사 메모 새 글은 docs/handoff/store/ios-v4/review-notes.md
+# submit=true 일 때만 심사 제출(대표 승인 뒤). 비밀번호·키는 출력하지 않음.
+# 11/20: 기본값 = v6 — 스크린샷 docs/handoff/store/v6-features(iphone·iphone61·ipad 각 8장, 폴더에 있는 만큼 최대 10장) · 등록 글 ios-listing.md(설명·키워드·프로모션 텍스트) · 심사 메모 review-notes.md.
+#   plan 끝의 '바뀔 것 요약'에서 묶음별 장 수 · 메모 글자 수 · 설명·키워드가 바뀌는지 본다. 예전 묶음으로 돌리려면 shots_dir=docs/handoff/store/ios-v4 처럼 입력
 name: appstore-submit
 on:
   workflow_dispatch:
@@ -14,6 +16,9 @@ on:
       display_type: { description: '스크린샷 슬롯(6.9형 = APP_IPHONE_67)', required: true, default: 'APP_IPHONE_67' }
       whats_new: { description: '새 기능 글(첫 버전이면 비움)', required: false, default: '' }
       cancel_unresolved: { description: '반려·초안 제출 묶음을 거두고(canceled) 진행 — 스크린샷 묶음이 409 로 막힐 때(대표 재제출 승인 범위)', type: boolean, default: false }
+      shots_dir: { description: '스크린샷 폴더(iphone-0n · iphone61-0n · ipad-0n)', required: false, default: 'docs/handoff/store/v6-features' }
+      notes_file: { description: '심사 메모 새 글 파일', required: false, default: 'docs/handoff/store/v6-features/review-notes.md' }
+      listing: { description: '등록 글 파일(자세한 설명 · App Store 키워드 · 프로모션 텍스트)', required: false, default: 'docs/handoff/store/v6-features/ios-listing.md' }
 jobs:
   asc:
     runs-on: ubuntu-latest
@@ -39,4 +44,7 @@ jobs:
           DISPLAY_TYPE: ${{ inputs.display_type }}
           WHATS_NEW: ${{ inputs.whats_new }}
           CANCEL_UNRESOLVED: ${{ inputs.cancel_unresolved && '1' || '0' }}
+          SHOTS_DIR: ${{ inputs.shots_dir }}
+          NOTES_FILE: ${{ inputs.notes_file }}
+          LISTING: ${{ inputs.listing }}
         run: node scripts/asc-submit.mjs
