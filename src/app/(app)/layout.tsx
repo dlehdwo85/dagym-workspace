@@ -36,7 +36,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const trial = ['default', 'demo'].includes(tenantOf(user)) || signup ? null : await (await import('@/lib/plans')).trialInfo(tenantOf(user)).catch(() => null);
   const billingLock = user.support ? null : await (await import('@/lib/plans')).billingLock(tenantOf(user)).catch(() => null); // V28 B2 미납
   // #626 캡처 차단 정책(서버 판정 한 번): 외부 고객사 켬 · 우리 회사/체험/슈퍼관리자 끔 · 회사별 스위치
-  const cap = capturePolicy({ tenant: tenantOf(user), override: t?.capture_block, email: user.email, platformAdmin: !!user.platformAdmin });
+  const cap = capturePolicy({ tenant: tenantOf(user), override: t?.capture_block, email: user.email, platformAdmin: !!user.platformAdmin, trial: !!trial?.trial }); // 대표 11/20: 체험 중에는 물표시만 끔
   const session = {
     user: { id: user.id, name: user.name, email: user.email, role: user.role, platformAdmin: !!user.platformAdmin },
     support: user.support ?? null, // V28-3 지원 모드 빨간 띠
@@ -54,7 +54,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     spaces, // V41 공간
     tours: { seen: await (await import('@/lib/tours')).seenTours(user.id).catch(() => []), auto: (await import('@/lib/tours')).toursAuto(user) }, // #77 처음 사용 안내
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)
-    tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), multiSite: (await import('@/lib/orgModel')).multiSiteOf(tenantOf(user), t?.multi_site) /* 405차 조직 모델: 다른 회사는 켰을 때만 지점 */, captureBlock: cap.block, captureAutomation: cap.automation, inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && !signup && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)), signup,
+    tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), multiSite: (await import('@/lib/orgModel')).multiSiteOf(tenantOf(user), t?.multi_site) /* 405차 조직 모델: 다른 회사는 켰을 때만 지점 */, captureBlock: cap.block, captureWatermark: cap.watermark, captureAutomation: cap.automation, inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && !signup && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)), signup,
       trial: trial ? { trial: trial.trial, readOnly: trial.readOnly, daysLeft: trial.daysLeft, partner: trial.partner } : null, billingLock: billingLock as 'read_only' | 'suspended' | null },
   };
   return <><LaunchIntro />{/* #443 실행 애니메이션(세션당 1번·동작 줄이기면 안 함) */}<AppShell session={session}><Suspense>{children}</Suspense></AppShell></>;

@@ -21,7 +21,7 @@ function markSvg(text: string) {
 }
 type Win = Record<string, unknown>;
 
-export function CaptureGuard({ on, automation, company, userName }: { on: boolean; automation: boolean; company: string; userName: string }) {
+export function CaptureGuard({ on, watermark = true, automation, company, userName }: { on: boolean; /** 사선 물표시 — 체험 중인 회사는 끔(대표 11/20), 나머지 차단은 그대로 */ watermark?: boolean; automation: boolean; company: string; userName: string }) {
   const [stamp, setStamp] = useState('');
   const [away, setAway] = useState(false);
   const [blocked, setBlocked] = useState<string[] | null>(null);
@@ -76,7 +76,7 @@ export function CaptureGuard({ on, automation, company, userName }: { on: boolea
   return (
     <>
       <div id="capture-print-notice" className="hidden">인쇄가 제한된 화면입니다 — {company} · {userName}</div>
-      <div aria-hidden data-testid="capture-watermark" className="pointer-events-none fixed inset-0 z-[200] select-none" style={{ opacity: 0.07, backgroundImage: markSvg(`${company} · ${userName} · ${stamp}`), backgroundRepeat: 'repeat', backgroundSize: '360px 200px' }} />
+      {watermark && <div aria-hidden data-testid="capture-watermark" className="pointer-events-none fixed inset-0 z-[200] select-none" style={{ opacity: 0.07, backgroundImage: markSvg(`${company} · ${userName} · ${stamp}`), backgroundRepeat: 'repeat', backgroundSize: '360px 200px' }} />}
       {away && (
         <div className="fixed inset-0 z-[199] flex items-center justify-center bg-white/60 backdrop-blur-md" data-testid="capture-away" onClick={() => setAway(false)}>
           <div className="rounded-input bg-white px-4 py-3 text-sm shadow"><b>다른 창으로 나가 있는 동안 화면을 가립니다</b><div className="mt-1 text-xs text-ink-2">눌러서 다시 보기</div></div>

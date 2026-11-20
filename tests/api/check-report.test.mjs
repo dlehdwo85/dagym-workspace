@@ -74,6 +74,8 @@ test('셈: 양호율(해당 없음 제외) · 곳별·분야별·항목별 · �
   assert.deepEqual(r.byItem.map((x) => [x.title, x.ok, x.fix, x.na, x.rate]), [['화장실', 0, 2, 0, 0], ['출입구 바닥', 3, 0, 0, 100], ['거울·유리문', 0, 0, 1, null]], '보완 필요가 많은 순 · 본 것이 없으면 양호율 없음');
   assert.deepEqual(r.repeats.map((x) => [x.title, x.unitName, x.fix, x.streak, x.improvement]), [['화장실', '다짐 강남점', 2, 2, false]]);
   assert.deepEqual(r.followups, { total: 2, closed: 1, waiting: 0, requested: 1, canceled: 0, avgDays: 0, maxDays: 0, buckets: { d0: 1, d1_3: 0, d4_7: 0, d8: 0 }, overdue: 0, again: 0 });
+  // 대표 11/20: 담당자별 보완 처리 표(받은 수·닫힌 수·열린 수·평균 처리 기간·기한 넘긴 수) — 이름순, 순위 없음
+  assert.deepEqual(r.byAssignee, [{ id: ctx.staffA.id, name: '이직원', received: 2, closed: 1, open: 1, overdue: 0, avgDays: 0 }]);
 });
 
 test('보완 처리 기간(며칠 걸림 · 기한 넘김 · 다시 보완) · 지난 기간과 견줌 · 기간 경계는 서울 날짜', async () => {
@@ -84,6 +86,7 @@ test('보완 처리 기간(며칠 걸림 · 기한 넘김 · 다시 보완) · �
   await sql`update chk_followups set due_date = ${day(-1)} where id = ${S.fu2}`;
   let r = await rep(ctx.owner, `from=${day(-10)}&to=${day(0)}`);
   assert.deepEqual([r.followups.avgDays, r.followups.maxDays, r.followups.buckets, r.followups.overdue, r.followups.again], [5, 5, { d0: 0, d1_3: 0, d4_7: 1, d8: 0 }, 2, 0]);
+  assert.deepEqual(r.byAssignee.map((x) => [x.name, x.received, x.closed, x.open, x.avgDays, x.overdue]), [['이직원', 2, 1, 1, 5, 2]], '담당자별: 닫힌 것의 평균 5일 · 기한 넘긴 것 2');
   await finishTask(ctx.staffA.client, S.task2);
   assert.equal((await rep(ctx.owner, `from=${day(-10)}&to=${day(0)}`)).followups.waiting, 1, '담당자가 끝내면 확인 대기');
   await m.ok('POST', `/api/check/followups/${S.fu2}`, { ok: false, note: '칸막이 아래도 부탁드려요' });
@@ -111,7 +114,7 @@ test('곳 범위(볼 수 있는 곳만) · 곳 하나만 보기 · 회사 분리
   assert.deepEqual([b.byUnit.map((x) => x.name), b.summary.rounds, b.summary.openRounds, b.followups.total], [[SITE_B], 1, 1, 0]);
   // 다른 회사: 자기 것만(0) — 우리 점검이 섞이지 않음
   const c = await rep(cafe.c, `from=${day(-30)}&to=${day(0)}`);
-  assert.deepEqual([c.summary.rounds, c.byUnit, c.followups.total], [0, [], 0]);
+  assert.deepEqual([c.summary.rounds, c.byUnit, c.followups.total, c.byAssignee], [0, [], 0, []]);
   // 엑셀
   const x = await fetch(`${BASE}/api/check/report/export?from=${day(-30)}&to=${day(0)}`, { headers: { cookie: ctx.owner.cookie } });
   assert.equal(x.status, 200); assert.match(x.headers.get('content-type') ?? '', /spreadsheetml/);

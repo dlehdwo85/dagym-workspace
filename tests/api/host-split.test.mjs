@@ -29,7 +29,9 @@ describe('주소 분리 켬(유예 날짜 앞)', () => {
       const r = await raw(WWW, p);
       assert.equal(r.status, 308, `${p} → 308`); assert.equal(r.headers.location, `https://${APP}${to}`);
     }
-    for (const p of ['/privacy', '/terms', '/api/health', '/sw.js', '/manifest.webmanifest', '/robots.txt']) assert.equal((await raw(WWW, p)).status, 200, `${p} 그대로`);
+    for (const p of ['/privacy', '/terms', '/app', '/api/health', '/sw.js', '/manifest.webmanifest', '/robots.txt']) assert.equal((await raw(WWW, p)).status, 200, `${p} 그대로`);
+    // 대표 11/20 앱 받기(/app)는 소개 사이트(www)에 있고, 거기서 [로그인]·[웹으로 로그인]은 app. 으로 바로
+    assert.match((await raw(WWW, '/app')).body, new RegExp(`href="https://${APP}/login"[^>]*data-testid="app-get-web"`), '앱 받기 화면의 웹 로그인은 app. 주소');
     const home = await raw(WWW, '/'); assert.equal(home.status, 200); assert.ok(!home.headers['x-robots-tag'], 'www 는 색인');
     const signedHome = await raw(WWW, '/', { cookie: 'wos_session=anything' });
     assert.equal(signedHome.status, 200, '로그인 쿠키가 있어도 www 첫 화면은 소개(앱 화면 아님)');
@@ -42,7 +44,7 @@ describe('주소 분리 켬(유예 날짜 앞)', () => {
   });
 
   test('app.: 소개 화면은 www 로 · robots 전부 막음 · noindex · 첫 화면 로그인 전 → /login · API 그대로', async () => {
-    for (const p of ['/welcome', '/privacy', '/landing/fitness']) {
+    for (const p of ['/welcome', '/privacy', '/landing/fitness', '/app', '/app?os=ios']) {
       const r = await raw(APP, p); assert.equal(r.status, 308, p); assert.equal(r.headers.location, `https://${WWW}${p}`);
     }
     const rb = await raw(APP, '/robots.txt');

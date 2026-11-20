@@ -45,7 +45,7 @@ export const markCookie = (cfg: HostSplit, host: string, on: boolean, secure: bo
 };
 
 /** 소개 사이트(www)에 남는 화면 — 로그인 없이 보는 홍보·약관 화면 */
-const SITE_PAGES = ['/welcome', '/landing', '/privacy', '/terms', '/account-deletion', '/data-deletion', '/ai-notice'];
+const SITE_PAGES = ['/welcome', '/landing', '/privacy', '/terms', '/account-deletion', '/data-deletion', '/ai-notice', '/app']; // '/app' = 앱 받기(대표 11/20 — 직원에게 알려 주는 주소)
 export const isSitePage = (p: string) => p === '/' || SITE_PAGES.some((x) => p === x || p.startsWith(`${x}/`));
 /** 두 호스트 모두 그대로 응답하는 것: API(외부 연동·콘솔 콜백·비콘·ICS) · 앱 링크 파일 · Next 정적 파일 · 확장자가 있는 정적 파일(아이콘·sw.js·manifest) */
 export const isShared = (p: string) => p.startsWith('/api/') || p.startsWith('/_next/') || p.startsWith('/.well-known/') || /\/[^/]+\.[a-z0-9]{2,12}$/i.test(p) || p === '/apple-app-site-association';

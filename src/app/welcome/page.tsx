@@ -6,6 +6,8 @@ import { BizFooter } from '@/components/BizFooter';
 import { LandingHeader } from '@/components/LandingHeader';
 import { conversionTags } from '@/lib/conversionTags';
 import { LANDING_PAGES, SITE } from '@/lib/landingPages';
+import { APPSTORE_URL, APP_GET_PATH, PLAY_URL } from '@/lib/storeLinks';
+import { AppGetBar } from '@/components/AppGetBar';
 import { ArrowRight, BellRing, Briefcase, Check, ClipboardCheck, Download, FolderOpen, LayoutGrid, Mail, Megaphone, MessageSquare, Mic, Phone, Sparkles, Stamp, TrendingUp, Users } from 'lucide-react';
 
 /**
@@ -14,8 +16,7 @@ import { ArrowRight, BellRing, Briefcase, Check, ClipboardCheck, Download, Folde
  */
 // #627: 주소(호스트)는 src/lib/landingPages SITE 하나로(NEXT_PUBLIC_SITE_URL, 기본 www) — 도메인 방향(apex → www)은 Vercel 설정
 // 대표 11/19: Google Play 는 출시됨 → 공개 주소를 코드 기본값으로(환경 변수로 바꿀 수 있음). App Store 는 아직 — 주소가 생기면 env 로
-const PLAY = process.env.NEXT_PUBLIC_PLAY_URL || 'https://play.google.com/store/apps/details?id=kr.co.dagym.workos';
-const APPSTORE = process.env.NEXT_PUBLIC_APPSTORE_URL || '';
+const PLAY = PLAY_URL, APPSTORE = APPSTORE_URL; // 주소는 src/lib/storeLinks 한 곳(앱 받기 화면·휴대폰 띠와 같이 씀)
 const CONTACT_MAIL = 'dagym-in@naver.com';
 const TITLE = '워크인 — 중소기업 업무관리·전자결재·협업툴을 한 화면에서'; // #627: 검색어(업무관리·전자결재·협업툴)를 제목에, H1 은 대표 문구 그대로
 const DESC = '업무·일정·메신저·전자결재와 영업·마케팅까지 한 화면에서. 중소기업 업무관리·협업툴, 14일 무료 체험. 웹·휴대폰 앱.';
@@ -62,6 +63,7 @@ export default async function Welcome() {
     <div className="min-h-screen bg-white text-ink" data-testid="landing">
       <LandingEvents ga4={tags?.ga4} ads={tags?.googleAds} naverWa={tags?.naverWa} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
+      <AppGetBar appstore={!!APPSTORE} />
       <LandingHeader home />
       {/* 대표 10/20 22:30 ③: 첫 화면 전체 폭 배경(실제 앱 화면 콜라주 + 어두운 오버레이 + 흰 글자, 휴대폰도 유지). 생성 인물 없음 */}
       <section className="relative overflow-hidden bg-slate-900 text-white" data-testid="landing-hero">
@@ -77,7 +79,7 @@ export default async function Welcome() {
         <p className="mx-auto mt-4 max-w-2xl text-base text-slate-200 sm:text-lg">직원은 업무와 일정을, 영업팀은 리드와 입찰을, 마케팅은 시안 승인과 광고를 — 회사마다 켜고 끄는 세 공간을 한 계정으로. AI 비서가 등록·요약·초안을 돕습니다.</p>
         <div className="mt-7 flex flex-wrap justify-center gap-2">
           <Link href="/signup" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input bg-brand-600 px-6 py-3 text-base font-semibold text-white shadow-card hover:bg-brand-700" data-testid="landing-start" data-track="start">14일 무료 체험 신청<ArrowRight className="size-4" /></Link>
-          <a href="#app" className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input border border-white/40 px-6 py-3 text-base font-semibold text-white hover:bg-white/10" data-testid="landing-app" data-track="app">앱 다운로드<Download className="size-4" /></a>
+          <a href={APP_GET_PATH} className="inline-flex min-h-[48px] items-center gap-1.5 rounded-input border border-white/40 px-6 py-3 text-base font-semibold text-white hover:bg-white/10" data-testid="landing-app" data-track="app">앱 다운로드<Download className="size-4" /></a>
         </div>
         <p className="mt-3 text-xs text-slate-300">웹 · 휴대폰 앱 · 한국어</p>
         </div>
@@ -158,7 +160,8 @@ export default async function Welcome() {
               : <span className="inline-flex min-h-[48px] items-center rounded-input border border-line px-5 py-3 text-sm text-ink-2">Google Play 심사 중</span>}
             {APPSTORE ? <a href={APPSTORE} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[48px] items-center gap-2 rounded-input bg-ink px-5 py-3 font-semibold text-white" data-track="appstore">App Store</a>
               : <span className="inline-flex min-h-[48px] items-center rounded-input border border-line px-5 py-3 text-sm text-ink-2" data-testid="appstore-soon">App Store 준비 중</span>}
-          </div></div>
+          </div>
+          <p className="mt-3 text-sm text-ink-2">직원에게는 이 주소 하나만 알려 주세요 — <a href={APP_GET_PATH} className="font-semibold text-brand-700 underline" data-testid="landing-app-page">{SITE.replace(/^https?:\/\//, '')}{APP_GET_PATH}</a> (PC 에서는 QR)</p></div>
       </section>
       {/* 문의 */}
       <section id="contact" className="mx-auto max-w-6xl px-4 py-12 text-center" data-testid="landing-contact">

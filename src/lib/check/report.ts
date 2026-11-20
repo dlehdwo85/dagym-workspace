@@ -1,6 +1,7 @@
 // 점검 4단계 가운데 "점검 리포트"(숫자·표) — docs/check-feature-design.md 12절 · 원문 범위 4번
 //  곳·분야·항목별 양호율 · 반복 항목 · 보완 처리 기간. AI 요약·고객사 보고용 문장은 대표 결정 뒤(여기에는 없음).
-//  읽기만 한다(새 표 없음). 사람 이름은 싣지 않는다 — 직원 평가표가 아니라 기준이 지켜지는지 보는 표.
+//  읽기만 한다(새 표 없음). 점검자 이름·사람별 순위는 싣지 않는다 — 직원 평가표가 아니라 기준이 지켜지는지 보는 표.
+//  대표 11/20: 보완 요청을 받은 담당자별 처리 표(받은 수·닫힌 수·평균 처리 기간·기한 넘긴 수)는 넣는다 — 순위·점수 없이 이름순.
 import { db } from '../db';
 import { accessibleUnitIds, isUuid } from '../access';
 import { badRequest, notFound } from '../errors';
@@ -57,9 +58,9 @@ export async function checkReport(u: SessionUser, q: { from?: string | null; to?
   const [{ n: openRounds }] = await sql<{ n: number }[]>`select count(*)::int as n from chk_rounds r where r.tenant = ${t} and r.ended_at is null ${scopeR}`;
 
   // 기간 안에 보낸 보완 요청
-  const fus = await sql<{ id: string; org_unit_id: string; status: 'requested' | 'ok' | 'canceled'; round_no: number; due: string | null; asked: string; closed: string | null; task_status: string | null }[]>`select f.id, f.org_unit_id, f.status, f.round_no,
+  const fus = await sql<{ id: string; org_unit_id: string; status: 'requested' | 'ok' | 'canceled'; round_no: number; due: string | null; asked: string; closed: string | null; task_status: string | null; assignee_id: string | null; assignee_name: string | null }[]>`select f.id, f.org_unit_id, f.status, f.round_no, f.assignee_id, au.name as assignee_name,
       f.due_date::text as due, (f.created_at at time zone 'Asia/Seoul')::date::text as asked, (f.closed_at at time zone 'Asia/Seoul')::date::text as closed, tk.status as task_status
-    from chk_followups f left join tasks tk on tk.id = f.task_id and tk.deleted_at is null
+    from chk_followups f left join tasks tk on tk.id = f.task_id and tk.deleted_at is null left join users au on au.id = f.assignee_id
     where f.tenant = ${t} and (f.created_at at time zone 'Asia/Seoul')::date between ${p.from}::date and ${p.to}::date ${scopeF}`;
 
   // 묶기
@@ -88,6 +89,16 @@ export async function checkReport(u: SessionUser, q: { from?: string | null; to?
     buckets: { d0: closedDays.filter((d) => d === 0).length, d1_3: closedDays.filter((d) => d >= 1 && d <= 3).length, d4_7: closedDays.filter((d) => d >= 4 && d <= 7).length, d8: closedDays.filter((d) => d >= 8).length },
     overdue: fus.filter(overdue).length, again: fus.filter((f) => f.round_no >= 2).length,
   };
+  // 담당자별 보완 처리(대표 11/20): 받은 수 · 닫힌 수 · 열린 수 · 평균 처리 기간 · 기한 넘긴 수 — 취소한 요청은 빼고, 이름순
+  const people = new Map<string, { id: string | null; name: string; received: number; closed: number; open: number; overdue: number; days: number[] }>();
+  for (const f of fus) {
+    if (f.status === 'canceled') continue;
+    const k = f.assignee_id ?? ''; const x = people.get(k) ?? { id: f.assignee_id, name: f.assignee_name ?? '담당자 없음', received: 0, closed: 0, open: 0, overdue: 0, days: [] };
+    x.received++; if (f.status === 'ok') { x.closed++; if (f.closed) x.days.push(Math.max(0, dayDiff(f.closed, f.asked))); } else x.open++;
+    if (overdue(f)) x.overdue++;
+    people.set(k, x);
+  }
+  const byAssignee = [...people.values()].map(({ days, ...x }) => ({ ...x, avgDays: avg(days) })).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   const fuByUnit = new Map<string, { open: number; days: number[] }>();
   for (const f of fus) { const x = fuByUnit.get(f.org_unit_id) ?? { open: 0, days: [] }; if (f.status === 'requested') x.open++; if (f.status === 'ok' && f.closed) x.days.push(Math.max(0, dayDiff(f.closed, f.asked))); fuByUnit.set(f.org_unit_id, x); }
 
@@ -114,12 +125,12 @@ export async function checkReport(u: SessionUser, q: { from?: string | null; to?
     byUnit: [...units.values()].map((x) => ({ ...withRate(x), followupsOpen: fuByUnit.get(x.id)?.open ?? 0, avgDays: avg(fuByUnit.get(x.id)?.days ?? []) })).sort((a, b) => a.name.localeCompare(b.name, 'ko')),
     byCategory: [...cats.values()].map(withRate).sort((a, b) => byRate(a, b) || a.name.localeCompare(b.name, 'ko')),
     byItem: [...items.values()].map(withRate).sort((a, b) => byRate(a, b) || a.title.localeCompare(b.title, 'ko')).slice(0, 200),
-    repeats, followups,
+    repeats, followups, byAssignee,
   };
 }
 
 const pct = (r: number | null) => (r === null ? '' : r);
-/** 엑셀: 요약 · 곳별 · 분야별 · 항목별 · 보완 요청 */
+/** 엑셀: 요약 · 곳별 · 분야별 · 항목별 · 보완 요청 · 담당자별 */
 export async function exportCheckReport(u: SessionUser, q: { from?: string | null; to?: string | null; unitId?: string | null }) {
   const r = await checkReport(u, q);
   const { writeXlsx } = await import('../xlsx');
@@ -134,6 +145,7 @@ export async function exportCheckReport(u: SessionUser, q: { from?: string | nul
       ['반복 항목(같은 곳에서 보완 필요 2번 이상)'], ['항목', '곳', '보완 필요(번)', '지금 연속(번)', '개선 과제'], ...r.repeats.map((x) => [x.title, x.unitName, x.fix, x.streak, x.improvement ? '열림' : ''])] },
     { name: '보완 요청', rows: [['보낸 보완 요청(건)', f.total], ['닫힘(양호 확인)', f.closed], ['확인 대기', f.waiting], ['조치 중', f.requested], ['취소', f.canceled], ['평균 처리 기간(일)', f.avgDays ?? ''], ['가장 긴 처리 기간(일)', f.maxDays ?? ''],
       ['당일', f.buckets.d0], ['1~3일', f.buckets.d1_3], ['4~7일', f.buckets.d4_7], ['8일 이상', f.buckets.d8], ['기한을 넘긴 것', f.overdue], ['다시 보완(2차 이상)', f.again]] },
+    { name: '담당자별', rows: [['담당자', '받은 보완 요청', '닫힘(양호 확인)', '열린 것', '평균 처리 기간(일)', '기한을 넘긴 것'], ...r.byAssignee.map((x) => [x.name, x.received, x.closed, x.open, x.avgDays ?? '', x.overdue])] },
   ]);
   return { fileName: `점검리포트_${r.period.from}_${r.period.to}.xlsx`, data };
 }

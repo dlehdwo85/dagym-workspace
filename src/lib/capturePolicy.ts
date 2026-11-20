@@ -10,22 +10,29 @@ import { INTERNAL_TENANT } from './customerScope';
 import { superAdmin } from './superAdmin';
 import { tenantOf, type SessionUser } from './types';
 
-export type CapturePolicy = { block: boolean; automation: boolean; reason: 'env' | 'internal' | 'demo' | 'super_admin' | 'tenant_off' | 'on' };
-export function capturePolicy(i: { tenant: string; override: boolean | null | undefined; email: string; platformAdmin: boolean }): CapturePolicy {
+/** watermark = 화면의 사선 물표시(회사·이름·시각). 대표 11/20: **체험 중인 회사는 물표시를 끔**(써 보는 동안 화면이 가려 보이지 않게) — 체험이 끝나 유료가 되면 기본값(켬).
+ *  플랫폼 운영에서 그 회사 스위치를 일부러 켠 경우(override = true)는 체험 중에도 보임. 인쇄 차단·창 이탈 가림·자동화 차단·앱 캡처 검정(block)은 체험 중에도 그대로 */
+export type CapturePolicy = { block: boolean; automation: boolean; reason: 'env' | 'internal' | 'demo' | 'super_admin' | 'tenant_off' | 'on'; watermark: boolean };
+export function capturePolicy(i: { tenant: string; override: boolean | null | undefined; email: string; platformAdmin: boolean; trial?: boolean }): CapturePolicy {
   const env = process.env.CAPTURE_BLOCK ?? '';
-  const off = (reason: CapturePolicy['reason']): CapturePolicy => ({ block: false, automation: false, reason });
+  const off = (reason: CapturePolicy['reason']): CapturePolicy => ({ block: false, automation: false, reason, watermark: false });
   if (env === '0') return off('env');
   if (i.tenant === INTERNAL_TENANT) return off('internal');
   if (i.tenant === 'demo') return off('demo');
   if (superAdmin(i.email, i.platformAdmin)) return off('super_admin');
   if (i.override === false) return off('tenant_off');
-  return { block: true, automation: env !== 'noauto', reason: 'on' };
+  return { block: true, automation: env !== 'noauto', reason: 'on', watermark: !(i.trial && i.override !== true) };
+}
+/** 지금 체험 중인 회사인지(체험이 끝났거나 유료·내부 회사는 false) */
+export async function onTrial(tenant: string, sql: Sql = db()) {
+  const [s] = await sql<{ status: string; trial_ends_at: Date | null }[]>`select status, trial_ends_at from tenant_subscriptions where tenant = ${tenant}`;
+  return !!s && s.status === 'trial' && (!s.trial_ends_at || s.trial_ends_at.getTime() > Date.now());
 }
 /** 세션 사용자의 정책(회사 스위치 포함) — 레이아웃 세션·/api/auth/me·사건 기록이 같은 판정을 쓴다 */
 export async function captureFor(u: Pick<SessionUser, 'email' | 'platformAdmin' | 'tenant' | 'isDemo'>, sql: Sql = db()) {
   const t = tenantOf(u);
   const [row] = await sql<{ capture_block: boolean | null }[]>`select capture_block from tenants where id = ${t}`;
-  return capturePolicy({ tenant: t, override: row?.capture_block, email: u.email, platformAdmin: !!u.platformAdmin });
+  return capturePolicy({ tenant: t, override: row?.capture_block, email: u.email, platformAdmin: !!u.platformAdmin, trial: await onTrial(t, sql) });
 }
 /** 봇·헤드리스·스크립트 UA(외부 고객사 로그인 거부 대상) — 위장한 자동화는 못 잡는다 */
 export const automatedUserAgent = (ua: string | null | undefined) =>
