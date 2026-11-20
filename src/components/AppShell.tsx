@@ -553,7 +553,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         <PermissionIntro userId={session.user.id} />{/* #528 앱 처음 시작 휴대폰 알림 맞추기(권한 안내) */}
         <TaskPanelHost />{/* 300차 #850 업무는 어디서 눌러도 오른쪽 패널 */}
         <PerfBeacon />{/* #948 실제 사용자 화면 속도(첫 표시·목록 표시) */}
-        <CaptureGuard on={!!session.tenant?.captureBlock} automation={!!session.tenant?.captureAutomation} company={session.tenant?.name ?? '워크인'} userName={session.user.name} />
+        <CaptureGuard on={!!session.tenant?.captureBlock} watermark={session.tenant?.captureWatermark !== false} automation={!!session.tenant?.captureAutomation} company={session.tenant?.name ?? '워크인'} userName={session.user.name} />
         {/* V28-3 지원 모드: 빨간 띠(읽기 전용·남은 시간) + 끝내기 */}
         {session.support && (
           <div className="fixed inset-x-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-2 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white" data-testid="support-banner">

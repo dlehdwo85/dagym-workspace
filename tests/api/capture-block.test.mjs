@@ -16,8 +16,9 @@ before(async () => {
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 
 test('정책: 우리 회사(내부)·직원은 꺼짐, 외부 고객사는 켜짐(시험 서버 noauto = 자동화 감지만 끔)', async () => {
-  assert.deepEqual((await ctx.owner.ok('GET', '/api/auth/me')).capture, { block: false, automation: false, reason: 'internal' });
-  assert.deepEqual((await cust.ok('GET', '/api/auth/me')).capture, { block: true, automation: false, reason: 'on' });
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/auth/me')).capture, { block: false, automation: false, reason: 'internal', watermark: false });
+  // 대표 11/20: 체험 중인 회사는 물표시(watermark)만 끔 — 나머지 차단(block)은 그대로
+  assert.deepEqual((await cust.ok('GET', '/api/auth/me')).capture, { block: true, automation: false, reason: 'on', watermark: false }, '새로 가입한 회사 = 체험 중');
   assert.equal((await ctx.staffA.client.ok('GET', '/api/auth/me')).capture.block, false);
 });
 
@@ -61,3 +62,27 @@ test('봇·헤드리스 UA 로그인 거부(CAPTURE_BLOCK 전부 켠 서버): �
   const o2 = new Client('owner-bot');
   assert.equal((await o2.req('POST', '/api/auth/login', { email: 'ceo@dagym.test', password: 'owner-pass-1234' }, bot)).status, 200, '우리 회사는 자동화 접속 허용');
 });
+
+test('체험 중 물표시(대표 11/20): 체험 중 = 끔 → 유료가 되면 켬 · 체험이 끝나도(읽기 전용) 켬 · 스위치를 직접 켠 회사는 체험 중에도 켬 · 끈 회사는 전부 끔', async () => {
+  // 앞 시험이 서버를 '전부 켠' 설정으로 다시 띄웠을 수 있어 automation 값은 보지 않음(차단·까닭·물표시만)
+  const wm = async () => { const c = (await cust.ok('GET', '/api/auth/me')).capture; return { block: c.block, reason: c.reason, watermark: c.watermark }; };
+  await sql`update tenants set capture_block = null where id = ${custTenant}`;
+  const sub = async (status, ends) => { await sql`update tenant_subscriptions set status = ${status}, trial_ends_at = ${ends} where tenant = ${custTenant}`; };
+  const [orig] = await sql`select status, trial_ends_at from tenant_subscriptions where tenant = ${custTenant}`;
+  assert.equal(orig.status, 'trial', '가입 직후는 체험');
+  assert.deepEqual(await wm(), { block: true, reason: 'on', watermark: false }, '체험 중: 물표시만 끔');
+  await sub('active', orig.trial_ends_at);
+  assert.deepEqual(await wm(), { block: true, reason: 'on', watermark: true }, '유료: 기본값(켬)');
+  await sub('trial', new Date(Date.now() - 86_400_000));
+  assert.equal((await wm()).watermark, true, '체험 기간이 지남: 켬');
+  await sub('expired', new Date(Date.now() - 86_400_000));
+  assert.equal((await wm()).watermark, true, '체험 끝(읽기 전용): 켬');
+  await sub('trial', new Date(Date.now() + 5 * 86_400_000));
+  assert.equal((await wm()).watermark, false, '다시 체험 중: 끔');
+  await ctx.owner.ok('PUT', `/api/platform/tenants/${custTenant}/capture`, { on: true });
+  assert.equal((await wm()).watermark, true, '플랫폼 운영에서 직접 켠 회사는 체험 중에도 보임');
+  await ctx.owner.ok('PUT', `/api/platform/tenants/${custTenant}/capture`, { on: false, note: '화면 공유' });
+  assert.deepEqual(await wm(), { block: false, reason: 'tenant_off', watermark: false }, '끈 회사는 전부 끔');
+  await sql`update tenants set capture_block = null where id = ${custTenant}`; await sub(orig.status, orig.trial_ends_at);
+});
+

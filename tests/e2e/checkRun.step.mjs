@@ -134,6 +134,7 @@ export async function checkRun({ owner, ctx, BASE, SHOTS }) {
   await rp.getByTestId('check-report-units-row').filter({ hasText: '다짐 강남점' }).waitFor();
   assert.match(await rp.getByTestId('check-report-items').innerText(), /화장실/);
   assert.match(await rp.getByTestId('check-report-fu').innerText(), /다시 보완\(2차 이상\)\s*1건/);
+  assert.match((await rp.getByTestId('check-report-people-row').first().innerText()).replace(/\s+/g, ' '), /^이직원 1 1 /, '담당자별 보완 처리: 이직원 — 받은 1 · 닫힘 1');
   assert.match(await rp.getByTestId('check-report-export').getAttribute('href'), /^\/api\/check\/report\/export\?from=\d{4}-\d{2}-01&to=/);
   await fit('리포트 탭');
   await owner.screenshot({ path: `${SHOTS}/check-report-mobile.png`, fullPage: true });
