@@ -2,13 +2,15 @@
 //  곳·분야·항목별 양호율 · 반복 항목 · 보완 처리 기간. AI 요약·고객사 보고용 문장은 대표 결정 뒤(여기에는 없음).
 //  읽기만 한다(새 표 없음). 사람 이름은 싣지 않는다 — 직원 평가표가 아니라 기준이 지켜지는지 보는 표.
 import { db } from '../db';
-import { accessibleUnitIds } from '../access';
+import { accessibleUnitIds, isUuid } from '../access';
 import { badRequest, notFound } from '../errors';
 import { requireMenu } from '../menuPerms';
 import { addDays, todaySeoul } from '../time';
 import { tenantOf, type SessionUser } from '../types';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** 달력에 있는 날짜인지(2월 31일 같은 값은 DB 가 오류를 내므로 여기서 거름) — 아니면 기본 기간을 씀 */
+const realDate = (s: string | null) => { if (!s || !DATE.test(s)) return false; const d = new Date(`${s}T00:00:00Z`); return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; };
 const dayDiff = (a: string, b: string) => Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000);
 /** 양호율(%) — 해당 없음은 나누는 수에서 뺌. 본 것이 없으면 null */
 export const passRate = (ok: number, fix: number) => (ok + fix > 0 ? Math.round((ok / (ok + fix)) * 1000) / 10 : null);
@@ -19,8 +21,8 @@ const withRate = <T extends Tally>(x: T) => ({ ...x, rate: passRate(x.ok, x.fix)
 /** 기간 정하기: 없으면 이번 달 1일 ~ 오늘(서울). 최대 366일 */
 export function reportPeriod(from: string | null, to: string | null) {
   const today = todaySeoul();
-  const t = to && DATE.test(to) ? to : today;
-  const f = from && DATE.test(from) ? from : `${t.slice(0, 7)}-01`;
+  const t = realDate(to) ? to! : today;
+  const f = realDate(from) ? from! : `${t.slice(0, 7)}-01`;
   if (f > t) throw badRequest('기간의 시작이 끝보다 뒤입니다');
   const days = dayDiff(t, f) + 1;
   if (days > 366) throw badRequest('기간은 366일까지 고를 수 있습니다');
@@ -34,6 +36,7 @@ export async function checkReport(u: SessionUser, q: { from?: string | null; to?
   const mine = await accessibleUnitIds(u, sql);
   const unitId = q.unitId || null;
   if (unitId) {
+    if (!isUuid(unitId)) throw notFound(); // 주소에 엉뚱한 값이 와도 서버 오류가 아니라 없는 곳으로
     const [o] = await sql`select 1 from org_units where id = ${unitId} and tenant = ${t}`;
     if (!o || (mine !== null && !mine.includes(unitId))) throw notFound();
   }

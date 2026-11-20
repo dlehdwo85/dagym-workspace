@@ -9,7 +9,7 @@
  */
 import { z } from 'zod';
 import { db, type Sql } from '../db';
-import { accessibleUnitIds } from '../access';
+import { accessibleUnitIds, isUuid } from '../access';
 import { badRequest, conflict, notFound } from '../errors';
 import { menuLevel, requireMenu } from '../menuPerms';
 import { notify } from '../notifications';
@@ -274,7 +274,7 @@ export async function listFollowups(u: SessionUser, f: { state?: string | null; 
       (select json_agg(json_build_object('id', e.id, 'target', e.target, 'replyDue', e.reply_due, 'outcome', e.outcome, 'closed', e.closed_at is not null) order by e.created_at) from chk_external e where e.followup_id = f.id) as external
     from chk_followups f join chk_results x on x.id = f.result_id join org_units o on o.id = f.org_unit_id left join chk_place_types pt on pt.id = x.place_type_id
       left join tasks tk on tk.id = f.task_id and tk.deleted_at is null left join users a on a.id = f.assignee_id left join users rq on rq.id = f.requested_by
-    where f.tenant = ${t} ${mine === null ? sql`` : sql`and f.org_unit_id = any(${mine}::uuid[])`} ${f.unitId ? sql`and f.org_unit_id = ${f.unitId}` : sql``}
+    where f.tenant = ${t} ${mine === null ? sql`` : sql`and f.org_unit_id = any(${mine}::uuid[])`} ${f.unitId && isUuid(f.unitId) ? sql`and f.org_unit_id = ${f.unitId}` : sql``}
     order by (f.status = 'requested') desc, (tk.status = 'done') desc, f.due_date nulls last, f.created_at desc limit 300`;
   const items = rows.map((r) => ({ id: r.id, state: stateOf(r.status, r.task_status), roundNo: r.round_no, dueDate: r.due_date, note: r.note, createdAt: r.created_at, closedAt: r.closed_at, closeNote: r.close_note, taskId: r.task_id,
     orgUnitId: r.org_unit_id, orgUnitName: r.org_unit_name, itemTitle: r.item_title, passCriteria: r.pass_criteria, memo: r.memo, placeTypeName: r.place_type_name, assigneeName: r.assignee_name, requestedByName: r.requested_by_name,

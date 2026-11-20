@@ -54,6 +54,7 @@ test('분야 2단계 · 공간 유형 · 지점별 공간', async () => {
 });
 
 test('점검 항목: 등록 · 거름 · 고치면 판이 오르고 개정 이력에 까닭 · 사용 여부만 바꾸면 개정 아님', async () => {
+  assert.equal((await ctx.owner.req('GET', '/api/check/items?category=abc&placeType=abc&unit=abc')).status, 200, '주소에 모양이 틀린 값이 와도 서버 오류가 아님(그 값으로는 거르지 않음)');
   const door = await ctx.owner.ok('POST', '/api/check/items', { title: '출입구 바닥', categoryId: S.sub, placeTypeIds: [S.ptDoor], method: 'look', passCriteria: '먼지·물기·이물 없음',
     blindSpots: ['매트 아래', '모서리'], fixAction: { note: '즉시 청소', dueDays: 0 }, cycle: 'daily', shareStaff: true, basisNote: '대표 현장 메모' });
   assert.equal(door.version, 1); S.door = door.id;

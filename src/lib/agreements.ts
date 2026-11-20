@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { db, type Sql } from './db';
 import { badRequest, notFound } from './errors';
 import { audit, logError } from './log';
+import { isUuid } from './access';
 import { menuLevel, requireMenu } from './menuPerms';
 import { agreementLeftText } from './agreementLabel';
 import { notify } from './notifications';
@@ -87,9 +88,10 @@ export async function listAgreements(u: SessionUser, f: { q?: string | null; tag
   await requireMenu(u, 'agreements', 'view');
   const sql = db(); const t = tenantOf(u); const today = todaySeoul(); const tdays = await tenantAlertDays(t, sql);
   const q = (f.q ?? '').trim().slice(0, 60);
+  const ownerId = f.ownerId && isUuid(f.ownerId) ? f.ownerId : null; // 주소에 엉뚱한 값이 와도 서버 오류가 나지 않게(모양이 틀리면 거르지 않음)
   const rows = await sql<Row[]>`select ${COLS(sql)} ${FROM(sql)} where a.tenant = ${t} and a.deleted_at is null
     ${q ? sql`and (a.title ilike ${'%' + q + '%'} or a.counterparty ilike ${'%' + q + '%'} or a.memo ilike ${'%' + q + '%'})` : sql``}
-    ${f.tag ? sql`and ${f.tag} = any(a.tags)` : sql``} ${f.ownerId ? sql`and a.owner_id = ${f.ownerId}` : sql``} limit 1000`;
+    ${f.tag ? sql`and ${f.tag} = any(a.tags)` : sql``} ${ownerId ? sql`and a.owner_id = ${ownerId}` : sql``} limit 1000`;
   let items = rows.map((r) => view(r, today, tdays));
   const all = items;
   if (f.state === 'open') items = items.filter((x) => x.state !== 'ended');
