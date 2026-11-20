@@ -7,6 +7,8 @@ import { enableNativePush, isNativeApp, subscribeWebPush } from './native';
 import { useSession } from './session';
 import { kakaoEnabled, shareKakao } from './kakao';
 import { SignupSteps } from './SignupSteps';
+import { useInApp } from './inApp';
+import { APP_GET_URL } from '@/lib/storeLinks';
 import { Button, Field, Modal, cx, inputCls, toast } from './ui';
 
 type Status = { email: string; workEmail: string | null; phone: string | null; mailChannel: string | null; kakaoLinked: boolean; people: number; admin: boolean };
@@ -17,6 +19,7 @@ type Status = { email: string; workEmail: string | null; phone: string | null; m
  */
 export function Onboarding() {
   const s = useSession();
+  const inApp = useInApp(); // 앱 안에서는 앱 받기 주소를 적지 않음(이미 앱)
   const router = useRouter();
   const st = useApi<Status>('/api/onboarding');
   const [open, setOpen] = useState(true);
@@ -51,7 +54,7 @@ export function Onboarding() {
       catch (e: any) { toast.error(`${email}: ${e.message}`); }
     }
     setLinks([...links, ...out]); setEmails(''); setBusy(false);
-    if (out.length) { toast.ok(`${out.length}명에게 초대 메일을 보냈습니다`); api('/api/onboarding', { body: { invited: true } }).catch(() => {}); }
+    if (out.length) { toast.ok(`${out.length}명의 초대 링크를 만들었습니다 — 복사해서 보내 주세요`); api('/api/onboarding', { body: { invited: true } }).catch(() => {}); }
   }
   const copy = (t: string) => navigator.clipboard?.writeText(t).then(() => toast.ok('복사했습니다'), () => toast.error('복사하지 못했습니다'));
   async function push() {
@@ -91,7 +94,7 @@ export function Onboarding() {
           </section>
         </>}
         {step === 'invite' && <>
-          <p className="text-sm text-ink-2">함께 일할 동료의 이메일을 적으면 초대 메일이 갑니다. 링크를 복사해 카카오톡·문자로 보내도 됩니다.</p>
+          <p className="text-sm text-ink-2" data-testid="ob-invite-help">함께 일할 동료의 이메일을 적으면 사람마다 초대 링크가 만들어집니다. 링크를 복사해 카카오톡·문자로 보내 주세요.{!inApp && <> 휴대폰 앱은 <b className="font-mono text-ink">{APP_GET_URL.replace(/^https?:\/\//, '')}</b> 에서 받습니다.</>}</p>
           <Field label="이메일 (여러 명은 쉼표·줄바꿈)"><textarea className={inputCls} rows={3} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="kim@company.co.kr, lee@company.co.kr" data-testid="ob-invite-emails" /></Field>
           <Button variant="secondary" onClick={invite} disabled={busy} data-testid="ob-invite-send"><UserPlus />초대 보내기</Button>
           {links.length > 0 && (

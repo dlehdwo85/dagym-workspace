@@ -10,6 +10,7 @@ import { TeamPath, TeamPicker } from '@/components/TeamPicker';
 import { type Role } from '@/lib/types';
 import { ROLES } from '@/lib/terms';
 import { MenuPermsTab } from '@/components/MenuPerms';
+import { APP_GET_URL, inviteGuideText } from '@/lib/storeLinks';
 import { LeadChip, TeamsTab } from '@/components/Teams';
 import { iGa, leadTitle } from '@/lib/orgKinds';
 import { AlertTriangle } from 'lucide-react';
@@ -190,6 +191,13 @@ function Users() {
         <p className="text-sm text-slate-600">아래 링크를 카카오톡·문자·메일로 본인에게만 전달하세요. 링크는 1회용이며 초대 7일·재설정 24시간 후 만료됩니다.</p>
         <input readOnly className={cx(inputCls, 'mt-2 font-mono text-xs')} value={link} onFocus={(e) => e.target.select()} data-testid="invite-link" />
         <div className="mt-3 flex justify-end"><Button onClick={() => { navigator.clipboard?.writeText(link); toast.ok('복사했습니다'); }}>복사</Button></div>
+        {/* 대표 11/20: 직원이 앱부터 받게 — 초대 링크와 앱 받기 주소를 한 번에 붙여 보낼 안내 글 */}
+        {link.includes('/invite/') && !reviewMsg && (
+          <div className="mt-3 rounded-input bg-slate-50 p-2.5 text-xs text-ink-2" data-testid="invite-app-guide">
+            <p>직원이 휴대폰 앱부터 받게 하려면 앱 받기 주소도 함께 보내세요: <b className="font-mono text-ink">{APP_GET_URL.replace(/^https?:\/\//, '')}</b></p>
+            <button type="button" className="mt-1.5 font-semibold text-brand-700 underline" onClick={() => { navigator.clipboard?.writeText(inviteGuideText(link, APP_GET_URL)); toast.ok('안내 문구를 복사했습니다'); }} data-testid="invite-guide-copy">초대 링크 + 앱 받기 안내 문구 복사</button>
+          </div>
+        )}
       </Modal>
       {off && <OffboardModal userId={off.id} mode={off.mode} onClose={() => setOff(null)} onDone={() => { setOff(null); reload(); }} />}
       {contract && <SendContractModal preset={contract} onClose={() => setContract(null)} />}

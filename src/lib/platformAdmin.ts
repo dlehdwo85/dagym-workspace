@@ -5,6 +5,7 @@ import { HttpError, badRequest, conflict, forbidden, notFound } from './errors';
 import { audit } from './log';
 import { appUrl, sendFramedMail, sendMail } from './mail';
 import { PARTNER } from './partner';
+import { APP_GET_URL } from './storeLinks';
 import { tenantOf, type SessionUser } from './types';
 
 /**
@@ -255,7 +256,7 @@ export const newTenantInput = z.object({
     if (v.planCode && v.planCode !== 'trial') ctx.addIssue({ code: 'custom', path: ['planCode'], message: '설계 파트너는 체험으로 시작합니다 — 유료 전환은 고객사 관리에서 해 주세요' });
     if (!v.trialDays) ctx.addIssue({ code: 'custom', path: ['trialDays'], message: '설계 파트너 기간(일)을 적어 주세요' });
   });
-const inviteMail = (company: string, ownerName: string, link: string) => `${ownerName}님, 워크인에 "${company}" 회사가 만들어졌습니다.\n아래 링크에서 비밀번호를 정하면 대표 계정으로 바로 시작할 수 있습니다 (7일 유효).\n\n${link}\n\n모르는 초대라면 이 메일을 무시해 주세요.`;
+const inviteMail = (company: string, ownerName: string, link: string) => `${ownerName}님, 워크인에 "${company}" 회사가 만들어졌습니다.\n아래 링크에서 비밀번호를 정하면 대표 계정으로 바로 시작할 수 있습니다 (7일 유효).\n\n${link}\n\n휴대폰 앱 받기: ${APP_GET_URL}\n(앱에서는 이 이메일과 위에서 정한 비밀번호로 로그인합니다.)\n\n모르는 초대라면 이 메일을 무시해 주세요.`;
 /** 메일이 안 가도(미설정·발송 실패) 회사 만들기는 성공 — 운영자가 링크를 직접 전달한다 */
 async function tryMail(to: string, subject: string, text: string): Promise<'sent' | 'dev' | 'failed'> { try { return await sendMail(to, subject, text); } catch { return 'failed'; } }
 /** [고객사 추가]: 회사(+대표 계정·본사 조직·달력·업종 템플릿) 만들고 대표에게 초대 메일 — 비밀번호는 대표가 직접 정한다 */
