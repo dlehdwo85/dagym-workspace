@@ -8,7 +8,8 @@ export async function quickMeeting({ owner, BASE, SHOTS }) {
   await owner.goto(BASE + '/tasks');
   const open = owner.getByTestId('quick-meeting-open');
   await open.waitFor();
-  const bb = await open.boundingBox();
+  // CI 11/20(4091c31): 화면이 다시 그려지는 순간에 재면 크기가 없음(0×0) → 크기가 잡힐 때까지 잠깐 기다려 잼
+  let bb = null; for (let i = 0; i < 30 && !(bb && bb.width > 0); i++) { bb = await open.boundingBox().catch(() => null); if (!(bb && bb.width > 0)) await owner.waitForTimeout(150); }
   assert.ok(bb && bb.width <= 90 && bb.height <= 40, `작은 단추(${Math.round(bb?.width ?? 0)}×${Math.round(bb?.height ?? 0)})`);
   // 휴대폰 폭: 단추가 보이고 가로로 넘치지 않음
   await owner.setViewportSize({ width: 390, height: 844 });
