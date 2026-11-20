@@ -36,6 +36,8 @@ test('권한: 직원·점검하기만 있는 사람은 404 · 대표는 빈 리�
   assert.equal((await ctx.owner.req('GET', `/api/check/report?from=${day(1)}&to=${day(0)}`)).status, 400, '시작이 끝보다 뒤');
   assert.equal((await ctx.owner.req('GET', `/api/check/report?from=${day(-400)}&to=${day(0)}`)).status, 400, '366일까지');
   assert.equal((await ctx.owner.req('GET', `/api/check/report?unitId=${cafe.unit}`)).status, 404, '다른 회사의 곳');
+  assert.equal((await ctx.owner.req('GET', '/api/check/report?unitId=abc')).status, 404, '엉뚱한 곳 값은 서버 오류가 아니라 404');
+  for (const qs of ['from=2026-13-45&to=nope', 'from=2026-02-31', 'to=2026-02-30']) { const x = (await rep(ctx.owner, qs)).period; assert.deepEqual([x.from, x.to], [`${day(0).slice(0, 7)}-01`, day(0)], `달력에 없는 날짜는 기본 기간으로 — ${qs}`); }
 });
 
 test('셈: 양호율(해당 없음 제외) · 곳별·분야별·항목별 · 반복 항목과 지금 연속 · 보완 처리 기간(당일 닫힘) · 진행 중 점검은 빼고 셈', async () => {

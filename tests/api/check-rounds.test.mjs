@@ -105,6 +105,7 @@ test('보완 확인: 업무가 완료돼야(검토 요청 없이 [완료]) 확�
   assert.equal(noPhoto.status, 409); assert.match(noPhoto.body.error.message, /사진 1장/);
   await upPhoto(ctx.staffA.client, S.task1);
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${S.task1}`, { status: 'done' }); // 검토 요청 없이 바로 완료
+  assert.equal((await ctx.managerA.client.req('GET', '/api/check/followups?unitId=abc')).status, 200, '모양이 틀린 곳 값은 서버 오류가 아님');
   let fu = (await ctx.managerA.client.ok('GET', '/api/check/followups')).followups.find((f) => f.id === S.fu1);
   assert.deepEqual([fu.state, fu.photos], ['waiting', 1], '업무가 완료되면 확인 대기');
   await tick();

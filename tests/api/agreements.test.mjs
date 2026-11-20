@@ -55,6 +55,8 @@ test('① 권한 · ② 등록·목록·고치기: 기본은 대표·관리자�
   assert.deepEqual((await ctx.owner.ok('GET', `/api/agreements?tag=${encodeURIComponent('렌탈')}`)).agreements.map((x) => x.title), ['정수기 렌탈']);
   assert.deepEqual((await ctx.owner.ok('GET', `/api/agreements?q=${encodeURIComponent('한빛')}`)).agreements.map((x) => x.title), ['사무실 임대차']);
   assert.deepEqual((await ctx.owner.ok('GET', '/api/agreements?state=soon')).agreements.map((x) => x.title), ['사무실 임대차']);
+  assert.deepEqual((await ctx.owner.ok('GET', `/api/agreements?owner=${ctx.managerA.id}`)).agreements.map((x) => x.title), ['정수기 렌탈'], '담당자로 거르기');
+  assert.equal((await ctx.owner.ok('GET', '/api/agreements?owner=abc')).agreements.length, 4, '모양이 틀린 담당자 값은 서버 오류가 아니라 거르지 않음');
   // 고치기: 담당자를 바꾸면 새 담당자가 알림 받는 사람에 들어감
   await ctx.owner.ok('PATCH', `/api/agreements/${a1}`, { ownerId: ctx.managerA.id, memo: null });
   const g3 = await ctx.owner.ok('GET', `/api/agreements/${a1}`);

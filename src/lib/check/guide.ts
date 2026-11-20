@@ -4,7 +4,7 @@
 // 직원은 가이드 전체가 아니라 '직원 공유' 표시된 양호 기준만 본다(sharedItems).
 import { z } from 'zod';
 import { db, type Sql } from '../db';
-import { accessibleUnitIds } from '../access';
+import { accessibleUnitIds, isUuid } from '../access';
 import { badRequest, notFound } from '../errors';
 import { requireMenu } from '../menuPerms';
 import { tenantOf, type SessionUser } from '../types';
@@ -168,6 +168,8 @@ export async function listItems(u: SessionUser, f: { categoryId?: string | null;
   await ready(u);
   const sql = db(); const t = tenantOf(u);
   const q = (f.q ?? '').trim().slice(0, 60);
+  // 주소에 모양이 틀린 값(?category=abc)이 와도 서버 오류가 나지 않게 — 그런 값으로는 거르지 않음
+  f = { ...f, categoryId: f.categoryId && isUuid(f.categoryId) ? f.categoryId : null, placeTypeId: f.placeTypeId && isUuid(f.placeTypeId) ? f.placeTypeId : null, unitId: f.unitId && isUuid(f.unitId) ? f.unitId : null };
   const rows = await sql`select ${COLS(sql)}, c.name as category_name,
       (select count(*)::int from chk_photos p where p.tenant = i.tenant and p.owner_kind = 'item' and p.owner_id = i.id and p.upload_status = 'ready') as photos
     from chk_items i left join chk_categories c on c.id = i.category_id
