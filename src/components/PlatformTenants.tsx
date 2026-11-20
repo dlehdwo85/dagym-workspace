@@ -171,7 +171,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
         </div>
         {d.data.mktWrite && <MktWriteBox id={id} w={d.data.mktWrite} pick={wt} setPick={setWt} run={run} />}
-        {!internal && <CaptureBox id={id} t={d.data.tenant} events={d.data.captureEvents30d ?? 0} run={run} />}{/* #626 캡처 차단 스위치(외부 고객사만) */}
+        {!internal && <CaptureBox id={id} t={d.data.tenant} trial={d.data.subscription?.status === 'trial'} events={d.data.captureEvents30d ?? 0} run={run} />}{/* #626 캡처 차단 스위치(외부 고객사만) */}
         <div>
           <p className="mb-1 text-xs font-medium text-ink-2">사용자 {d.data.users.length}명 — 비밀번호는 보거나 정할 수 없고 재설정 메일만 보냅니다</p>
           <ul className="divide-y divide-line rounded-input border border-line" data-testid="company-users">
@@ -348,8 +348,9 @@ function MktWriteBox({ id, w, pick, setPick, run }: { id: string; w: { company: 
 }
 
 /** #626 캡처 차단 스위치(외부 고객사만 보임): 기본 켬 — 끌 때 사유 한 줄(감사 기록). 최근 30일 사건 = 인쇄 시도·캡처키·자동화 감지·아이폰 캡처 기록 */
-function CaptureBox({ id, t, events, run }: { id: string; t: any; events: number; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+function CaptureBox({ id, t, trial, events, run }: { id: string; t: any; trial?: boolean; events: number; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
   const on = t?.capture_block !== false;
+  const forced = t?.capture_block === true; // 스위치를 일부러 켠 회사 — 체험 중에도 물표시가 보임
   const [note, setNote] = useState('');
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-input border border-line p-3 text-xs" data-testid="company-capture">
@@ -358,6 +359,13 @@ function CaptureBox({ id, t, events, run }: { id: string; t: any; events: number
         <input className={cx(inputCls, 'h-8 w-44 py-1 text-xs')} value={note} onChange={(e) => setNote(e.target.value)} placeholder="끄는 사유(화면 공유 회의 등)" maxLength={200} data-testid="company-capture-note" />
         <Button size="sm" variant="secondary" disabled={!note.trim()} onClick={() => run(() => api(`/api/platform/tenants/${id}/capture`, { method: 'PUT', body: { on: false, note: note.trim() } }), '캡처 차단을 껐습니다')} data-testid="company-capture-off">끄기</Button>
       </> : <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/platform/tenants/${id}/capture`, { method: 'PUT', body: { on: true } }), '캡처 차단을 켰습니다')} data-testid="company-capture-on">다시 켜기</Button>}
+      {/* 대표 11/20: 체험 중인 회사는 물표시만 꺼 둠(인쇄 차단·창 이탈 가림·자동화 차단·앱 캡처 검정은 그대로) — 일부러 켠 회사는 체험 중에도 보임 */}
+      {trial && on && (
+        <p className="basis-full text-ink-2" data-testid="company-capture-trial">
+          {forced ? '체험 중인 회사지만 스위치를 직접 켠 회사라 화면 물표시가 보입니다.' : <>체험 중이라 화면 물표시(사선 글자)는 꺼 둡니다 — 체험이 끝나면 자동으로 켜집니다.{' '}
+            <button type="button" className="font-medium text-brand-700 underline" onClick={() => run(() => api(`/api/platform/tenants/${id}/capture`, { method: 'PUT', body: { on: true } }), '체험 중에도 물표시를 켰습니다')} data-testid="company-capture-trial-on">체험 중에도 켜기</button></>}
+        </p>
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@ type Report = {
   byCategory: (Tally & { id: string | null; name: string })[];
   byItem: (Tally & { itemId: string; title: string })[];
   repeats: { itemId: string; title: string; unitId: string; unitName: string; fix: number; streak: number; improvement: boolean }[];
+  byAssignee: { id: string | null; name: string; received: number; closed: number; open: number; avgDays: number | null; overdue: number }[];
   followups: { total: number; closed: number; waiting: number; requested: number; canceled: number; avgDays: number | null; maxDays: number | null; buckets: { d0: number; d1_3: number; d4_7: number; d8: number }; overdue: number; again: number };
 };
 const box = 'rounded-card border border-line bg-white shadow-card';
@@ -92,10 +93,13 @@ export function CheckReport() {
                 {d.followups.closed > 0 && (
                   <p className="border-t border-line px-3 py-2 text-xs text-ink-2" data-testid="check-report-buckets">닫히기까지: 당일 {d.followups.buckets.d0} · 1~3일 {d.followups.buckets.d1_3} · 4~7일 {d.followups.buckets.d4_7} · 8일 이상 {d.followups.buckets.d8}</p>)}
               </section>
+              {/* 대표 11/20: 보완 요청을 받은 담당자별 처리 — 순위·점수 없이 이름순 */}
+              <Table title="담당자별 보완 처리" note="보완 요청을 받은 사람 — 이름순" testid="check-report-people" head={['', '받은\n요청', '닫힘', '평균\n처리', '기한\n넘김']}
+                rows={d.byAssignee.map((x) => [x.name, x.received, x.closed, daysText(x.avgDays), x.overdue])} empty="이 기간에 보낸 보완 요청이 없습니다." />
             </>
           )}
           <p className="px-1 text-xs leading-relaxed text-ink-3" data-testid="check-report-rules">
-            셈 규칙: {d.period.from} ~ {d.period.to}에 <b>끝낸</b> 점검을 셉니다. 양호율 = 양호 ÷ (양호 + 보완 필요)이고 &lsquo;해당 없음&rsquo;은 뺍니다. 처리 기간은 보완 요청을 보낸 날부터 [양호 확인]으로 닫힌 날까지입니다. 사람별 순위는 만들지 않습니다.
+            셈 규칙: {d.period.from} ~ {d.period.to}에 <b>끝낸</b> 점검을 셉니다. 양호율 = 양호 ÷ (양호 + 보완 필요)이고 &lsquo;해당 없음&rsquo;은 뺍니다. 처리 기간은 보완 요청을 보낸 날부터 [양호 확인]으로 닫힌 날까지입니다. 담당자별 표는 보완 요청을 받은 사람을 이름순으로 보여 주며, 순위나 점수는 매기지 않습니다.
           </p>
         </>
       )}

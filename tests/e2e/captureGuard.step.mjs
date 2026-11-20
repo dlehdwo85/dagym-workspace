@@ -1,4 +1,4 @@
-// #626 캡처 차단(대표 10/25 20:05): 외부 고객사 로그인 → 워터마크 레이어(회사·이름)·인쇄 차단 표시(html.capture-block)·Ctrl+P 안내·창 이탈 가림·자동화 판정 함수(시험 서버는 감지만 끔) → 사건 기록 / 우리 회사(내부)는 아무것도 없음
+// #626 캡처 차단(대표 10/25 20:05): 외부 고객사 로그인 → (11/20 체험 중에는 물표시 없음 → 유료가 되면) 워터마크 레이어(회사·이름)·인쇄 차단 표시(html.capture-block)·Ctrl+P 안내·창 이탈 가림·자동화 판정 함수(시험 서버는 감지만 끔) → 사건 기록 / 우리 회사(내부)는 아무것도 없음
 import assert from 'node:assert/strict';
 
 export async function captureGuard({ browser, BASE, SHOTS, sql, Client, owner }) {
@@ -12,6 +12,12 @@ export async function captureGuard({ browser, BASE, SHOTS, sql, Client, owner })
     await p.goto(BASE + '/login');
     await p.getByLabel('이메일', { exact: true }).fill('boss@capture-e2e.test'); await p.getByLabel('비밀번호').fill('signup-pass-1234');
     await p.getByRole('button', { name: '로그인' }).click();
+    // 대표 11/20: 체험 중인 회사(가입 직후)는 물표시가 없음 — 인쇄 차단 등 나머지는 그대로. 유료가 되면(구독 상태 active) 물표시가 보임
+    await p.waitForFunction(() => document.documentElement.classList.contains('capture-block'), null, { timeout: 60_000 });
+    assert.equal(await p.getByTestId('capture-watermark').count(), 0, '체험 중: 물표시 없음');
+    await p.screenshot({ path: `${SHOTS}/302-capture-guard-trial.png` });
+    await sql`update tenant_subscriptions set status = 'active' where tenant = (select tenant from users where email = 'boss@capture-e2e.test')`;
+    await p.reload();
     const wm = p.getByTestId('capture-watermark'); await wm.waitFor({ state: 'attached', timeout: 60_000 });
     const bg = decodeURIComponent(await wm.evaluate((el) => getComputedStyle(el).backgroundImage));
     assert.ok(/data:image\/svg\+xml/.test(bg) && bg.includes('캡처고객사') && bg.includes('캡처대표'), `워터마크에 회사·이름 ${bg.slice(0, 120)}`);
