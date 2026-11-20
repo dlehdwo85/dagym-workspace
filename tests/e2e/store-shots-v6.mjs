@@ -29,17 +29,20 @@ const OURS = /심사|\(가상\)|영업관리|현장 미등록|피트니스|헬�
 const NO_ALARM = '[data-testid="page-alarms"]{display:none!important}'; // 업무 상세: 화면 위 '새 알림' 한 줄을 접어 체크리스트가 한 화면에 들어오게
 // 위 글자 = 검수 통과분 한 줄을 두 줄로 나눈 것(작은 글 없음 — 검수받지 않은 문구를 더하지 않음)
 const NO_BAR = '[data-testid="approvals-todo-bar"]{display:none!important}'; // '결재할 것 n건' 띠는 홈 한 장에만(나머지는 그 화면 내용이 더 보이게)
-const NO_TIP = '[data-testid="ios-pick-hint"]{display:none!important}'; // 아이폰 사진 여러 장 고르기 요령 한 줄(사용 중 안내)은 스토어 그림에서 뺌
-const SLIDES = [
+const NO_TIP = '[data-testid="ios-pick-hint"],[data-testid="subtask-add"]{display:none!important}'; // 아이폰 사진 여러 장 고르기 요령 한 줄(사용 중 안내)은 스토어 그림에서 뺌 · 하위 업무 추가 칸은 날짜 입력이 시험 브라우저에서 영어(mm/dd/yyyy)로 찍혀서 뺌(아이패드 그림에만 보이던 칸)
+const ALL_SLIDES = [
   { n: 1, path: '/', title: ['오늘 할 일이', '한 화면에'] },
   { n: 2, path: '/tasks', title: ['업무는 한 줄로 추가,', '담당·마감까지'], css: NO_BAR },
-  { n: 3, path: '/tasks/TASK', title: ['사진·파일·댓글이', '업무에 그대로'], css: NO_ALARM + NO_BAR + NO_TIP, scrollTo: 'attach-section' }, // 첨부(사진·파일)와 댓글 입력이 한 화면에
+  { n: 3, path: '/tasks/TASK', title: ['사진·파일·댓글이', '업무에 그대로'], css: NO_ALARM + NO_BAR + NO_TIP, scrollAfter: 'att-head', scrollPad: 56, as: 'viewer', playCtx: { viewport: { width: 440, height: 744 }, deviceScaleFactor: 1200 / 440 } }, // 첨부(사진·파일)와 달린 댓글이 한 화면에 — 동료가 보는 화면(아래 설명)
   { n: 4, path: '/calendar?view=week', title: ['일정과 마감을', '함께'], css: NO_BAR },
   { n: 5, path: '/messages?room=ROOM', title: ['업무 이야기는', '업무 옆에서'], css: NO_BAR },
   { n: 6, path: '/library', title: ['회사 파일을', '한곳에'], css: NO_BAR, playScrollTo: 'library-spaces', scrollPad: 52 }, // Play 화면은 짧아 폴더 목록이 보이게 조금 내림(공간 고르는 줄이 머리줄 바로 아래)
   { n: 7, path: '/check/round/ROUND', title: ['점검은 기준대로,', '보완은 업무로'], css: NO_BAR },
   { n: 8, path: '/assistant?thread=THREAD', playPath: '/assistant?thread=THREAD2', title: ['말하면', '업무·일정이 됩니다'], css: NO_BAR }, // Play 화면은 짧아 두 마디 대화(말하기 → 확인 받기)
 ];
+// 고칠 때 빨리 보기: SHOT_ONLY=3 (그 장만 찍음 — 시트·다른 장은 그대로 두려면 끝나고 전체를 다시 돌릴 것) · SHOT_FULL=1 (raw/full-*.png 로 화면 전체도 저장)
+const ONLY = (process.env.SHOT_ONLY ?? '').split(',').map(Number).filter(Boolean);
+const SLIDES = ONLY.length ? ALL_SLIDES.filter((s) => ONLY.includes(s.n)) : ALL_SLIDES;
 const HIDE = '[data-testid="trial-banner"],[data-testid="pwa-install"],[data-testid="push-ask"],[data-testid="daily-welcome"],[data-tour-root]{display:none!important}'; // 계정 상태 띠·설치 권유·알림 권한 묻기·아침 인사 말풍선(잠깐 떴다 사라짐)은 뺌
 const pad2 = (n) => String(n).padStart(2, '0');
 const CHECK_MEMO = '오늘 중 다시 확인 필요'; const CHECK_MEMOS = { '출입구 바닥': '매트 아래 물기 — 오늘 중 닦기', '거울·유리문': '유리문 아래쪽 얼룩 — 오늘 중 닦기' };
@@ -67,7 +70,8 @@ try {
   for (const text of ['견적서 단가·납기 확인', '제안서 요약본 2장 준비', '참석자에게 장소·시간 공유']) await c.ok('POST', `/api/tasks/${task.id}/checklist`, { text }).catch(log('check'));
   const [first] = await sql`select id from task_checklist_items where task_id = ${task.id} order by sort limit 1`.catch(() => []);
   if (first) await staff[1].ok('PATCH', `/api/checklist/${first.id}`, { done: true }).catch(log('check-done'));
-  await staff[1].ok('POST', `/api/tasks/${task.id}/comments`, { body: '견적서는 납기만 바꿔서 다시 올렸습니다. 요약본은 오늘 저녁까지 올릴게요. 검토 부탁드립니다.' }).catch(log('comment'));
+  await staff[1].ok('POST', `/api/tasks/${task.id}/comments`, { body: '견적서 납기만 바꿔 다시 올렸습니다.' }).catch(log('comment'));
+  await c.ok('POST', `/api/tasks/${task.id}/comments`, { body: '확인했습니다. 회의실 사진도 잘 봤어요.' }).catch(log('comment 2')); // 로컬 검토 11/20: 3번 장에 달린 댓글이 보이게
   await staff[1].ok('PATCH', `/api/tasks/${task.id}`, { status: 'in_progress' }).catch(log('in_progress'));
   await staff[1].ok('PATCH', `/api/tasks/${task.id}`, { status: 'review' }).catch(log('review'));
   const [{ status: tstatus }] = await sql`select status from tasks where id = ${task.id}`;
@@ -126,17 +130,29 @@ try {
   await p0.goto(BASE + '/login'); await p0.getByLabel('이메일', { exact: true }).fill('sample@workin.test'); await p0.getByLabel('비밀번호').fill('sample-pass-1234');
   await p0.getByRole('button', { name: '로그인' }).click(); await p0.waitForURL(BASE + '/');
   const st = await ctx0.storageState(); await ctx0.close();
+  // 3번(업무 상세)은 같은 팀 동료(최민서 — 담당자·요청자가 아님)가 보는 화면으로: 올리기 칸·단추가 없어 첨부(사진·파일)와 댓글이 한 화면에 들어온다(대표 화면은 그 사이에 올리기 칸·메일·미팅 단추가 있어 한 화면에 안 들어옴)
+  await staff[2].ok('PUT', '/api/account/ai-consent', { agreed: true }).catch(log('ai-consent viewer'));
+  await sql`update comments set created_at = ${`${today}T09:27:00+09:00`}::timestamptz + (row_number * interval '6 minutes') from (select id, row_number() over (order by created_at) from comments where task_id = ${task.id}) x where comments.id = x.id`.catch(log('comment time'));
+  const ctx1 = await browser.newContext(); const p1 = await ctx1.newPage();
+  await p1.goto(BASE + '/login'); await p1.getByLabel('이메일', { exact: true }).fill('minseo@workin.test'); await p1.getByLabel('비밀번호').fill('sample-pass-1234');
+  await p1.getByRole('button', { name: '로그인' }).click(); await p1.waitForURL(BASE + '/');
+  const stViewer = await ctx1.storageState(); await ctx1.close();
   const fill = (path) => path.replace('THREAD2', th2).replace('THREAD', th1).replace('TASK', task.id).replace('ROOM', seeded.room ?? '').replace('ROUND', round.id);
   /** 한 묶음 찍기: 화면 글 검사 + raw 저장 */
   const capture = async (label, slides, ctxOpts, size, prefix) => {
-    const cx = await browser.newContext({ ...ctxOpts, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: st });
-    await cx.addInitScript(() => { try { localStorage.setItem('wos_connect_card', 'off'); localStorage.setItem('wos_status_tip', '3'); localStorage.setItem('wos_push_asked', '1'); localStorage.setItem('wos_sel_tip', '1'); localStorage.setItem('wos_space', 'work'); sessionStorage.setItem('wos_space_ctx', 'work'); } catch {} });
+    const open = async (state, over = {}) => {
+    const cx = await browser.newContext({ ...ctxOpts, ...over, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: state });
+    await cx.addInitScript(() => { try { localStorage.setItem('wos_connect_card', 'off'); localStorage.setItem('wos_status_tip', '3'); localStorage.setItem('wos_push_asked', '1'); localStorage.setItem('wos_sel_tip', '1'); localStorage.setItem('wos_space', 'work'); sessionStorage.setItem('wos_space_ctx', 'work'); localStorage.setItem('wos_td_fold', JSON.stringify({ ai: true, sub: true })); } catch {} }); // 업무 상세의 '이 업무의 AI 비서'·'하위 업무' 칸은 접어 둔 상태(사람이 접으면 기억되는 값) — 하위 업무 칸의 날짜 입력이 시험 브라우저에서는 영어(mm/dd/yyyy)로 찍혀서
     await cx.clock.setFixedTime(new Date(`${today}T09:41:00+09:00`)); // 밤에 찍어도 캘린더·인사말이 오전 업무 시간(상태줄 9:41 과 같음)
-    const p = await cx.newPage(); const raws = {};
+    return { cx, p: await cx.newPage() }; };
+    const main = await open(st); let viewer = null; const raws = {};
     for (const s of slides) {
+      if (s.as === 'viewer' && !viewer) viewer = await open(stViewer, (label === 'Play' && s.playCtx) || {}); // Play 3번은 조금 더 큰 휴대폰 폭(440)으로 — 사진·파일·댓글이 한 화면에
+      const p = s.as === 'viewer' ? viewer.p : main.p;
       const path = fill((label === 'Play' && s.playPath) || s.path); const scrollTo = s.scrollTo ?? (label === 'Play' ? s.playScrollTo : null);
       await p.goto(BASE + path); await p.waitForLoadState('networkidle').catch(() => {}); await p.waitForTimeout(1800);
       await p.addStyleTag({ content: HIDE + (s.css ?? '') }); await p.waitForTimeout(200);
+      if (s.scrollAfter) { await p.getByTestId(s.scrollAfter).first().evaluate((el, pad) => window.scrollBy(0, el.getBoundingClientRect().bottom - pad), s.scrollPad ?? 56).catch(() => problems.push(`${label} ${s.n}: ${s.scrollAfter} 없음`)); await p.waitForTimeout(400); }
       if (scrollTo) { await p.getByTestId(scrollTo).first().evaluate((el, pad) => { const y = el.getBoundingClientRect().top + window.scrollY - pad; window.scrollTo(0, Math.max(0, y)); for (let e = el.parentElement; e; e = e.parentElement) { if (e.scrollHeight > e.clientHeight + 40 && getComputedStyle(e).overflowY !== 'visible') { e.scrollTop = Math.max(0, el.offsetTop - 12); } } }, s.scrollPad ?? 118).catch(() => problems.push(`${label} ${s.n}: ${scrollTo} 없음`)); await p.waitForTimeout(400); }
       if (/assistant/.test(path)) await p.getByTestId('ai-answer').first().waitFor({ timeout: 15000 }).catch(() => problems.push(`${label} ${s.n}: AI 답 안 보임`));
       // 스크린샷에 찍히는 글만 검사(화면 밖 글 — 예: 점검 기준 문구의 낱말 — 은 그림에 없음)
@@ -154,12 +170,13 @@ try {
           return out; }, bad);
         problems.push(`${label} ${s.n} ${path}: 금지 글자 ${bad.join(' · ')} — ${where.join(' | ')}`);
       }
+      if (process.env.SHOT_FULL) await p.screenshot({ path: `${OUT}/raw/full-${prefix}${pad2(s.n)}.png`, fullPage: true });
       const raw = `${OUT}/raw/${prefix}${pad2(s.n)}.png`;
       await p.screenshot({ path: raw }); raws[s.n] = raw;
-      const meta = await sharp(raw).metadata(); if (meta.width !== size[0] || meta.height !== size[1]) problems.push(`${label} ${s.n}: 캡처 크기 ${meta.width}×${meta.height}`);
+      const meta = await sharp(raw).metadata(); if (meta.width !== size[0] || Math.abs(meta.height - size[1]) > 2) problems.push(`${label} ${s.n}: 캡처 크기 ${meta.width}×${meta.height}`);
       console.log(label, '캡처', s.n, path, bad.length ? `⚠ ${bad.join(' · ')}` : '글자 OK');
     }
-    await cx.close(); return raws;
+    await main.cx.close(); await viewer?.cx.close(); return raws;
   };
   const playRaws = await capture('Play', SLIDES, { viewport: { width: 400, height: 676 }, deviceScaleFactor: 3, userAgent: UA_AND }, [1200, 2028], 'play-');
   const raws = await capture('아이폰', SLIDES, { viewport: { width: 440, height: 956 }, deviceScaleFactor: 3, userAgent: UA }, [W, H], 'iphone-');
@@ -228,7 +245,7 @@ try {
   }
   await cp.close();
   // 6.1형(1179×2556) — 6.9형 그림을 그대로 줄임(비율 같음)
-  for (const [i, f] of outs.entries()) await sharp(f).resize(1179, 2556, { kernel: 'lanczos3' }).png({ compressionLevel: 9 }).toFile(`${OUT}/iphone61-${pad2(i + 1)}.png`);
+  for (const [i, f] of outs.entries()) await sharp(f).resize(1179, 2556, { kernel: 'lanczos3' }).png({ compressionLevel: 9 }).toFile(`${OUT}/iphone61-${pad2(SLIDES[i].n)}.png`);
 
   // 아이패드 13형 2048×2732
   const tp = await browser.newPage({ viewport: { width: PW, height: PH }, deviceScaleFactor: 1 });
@@ -262,7 +279,7 @@ try {
   for (const [files, w, h, what] of [[plays, AW, AH, 'Play'], [outs, W, H, '아이폰'], [pads, PW, PH, '아이패드']]) for (const f of files) { const m = await sharp(f).metadata(); if (m.width !== w || m.height !== h) problems.push(`${what} ${f}: ${m.width}×${m.height}`); }
   const tw = 300, gap = 20; const rows = [[plays, AW, AH], [outs, W, H], [pads, PW, PH]]; const layers = []; let top = gap;
   for (const [files, w, h] of rows) { const th = Math.round(tw * h / w); for (let i = 0; i < files.length; i++) layers.push({ input: await sharp(files[i]).resize(tw, th).png().toBuffer(), top, left: gap + i * (tw + gap) }); top += th + gap; }
-  await sharp({ create: { width: 8 * (tw + gap) + gap, height: top, channels: 3, background: '#e5e7eb' } }).composite(layers).jpeg({ quality: 86 }).toFile(`${OUT}/00_sheet.jpg`);
+  if (!ONLY.length) await sharp({ create: { width: 8 * (tw + gap) + gap, height: top, channels: 3, background: '#e5e7eb' } }).composite(layers).jpeg({ quality: 86 }).toFile(`${OUT}/00_sheet.jpg`); // 한 장만 찍을 때는 시트를 건드리지 않음
   console.log(problems.length ? `⚠ 확인 필요:\n- ${problems.join('\n- ')}` : '✔ 금지 글자 0 · Play 8장 1080×1920 · 아이폰 6.9형 8장 1320×2868 · 6.1형 8장 1179×2556 · 아이패드 13형 8장 2048×2732');
 } finally { await browser.close(); srv.proc.kill(); await sql.end(); }
 if (problems.length) process.exit(1);

@@ -8,7 +8,7 @@ export const CHECK_COPY = {
   menu: '점검',
   sub: '무엇을 어떻게 확인하고, 어떤 상태가 양호한지 정해 둡니다.',
   subShared: '우리 회사가 정한 양호 기준입니다.',
-  tabs: { run: '점검하기', guide: '점검 가이드', shared: '직원 공유 양호 기준', setup: '분야·공간' },
+  tabs: { run: '점검하기', guide: '점검 가이드', shared: '직원 공유 양호 기준', setup: '분야·공간', report: '리포트' },
   search: '항목 이름·양호 기준 찾기',
   all: '전체',
   category: '분야', placeType: '공간 유형', uncategorized: '분야 없음',
