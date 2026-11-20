@@ -35,8 +35,12 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   assert.deepEqual(views, ['home'], '홈 방문 1번');
   await p.reload(); await p.getByTestId('landing-title').waitFor(); await p.waitForTimeout(500);
   assert.deepEqual(views, ['home'], '같은 날 다시 와도 1번');
-  const fired = await p.evaluate(() => new Promise((r) => { document.addEventListener('wos:landing', (e) => r(e.detail.kind), { once: true }); document.querySelector('[data-testid="landing-app"]').click(); }));
+  // 대표 11/20: [앱 다운로드] = 앱 받기 화면(/app)으로 — 이벤트만 볼 때는 화면이 넘어가지 않게 잡아 둔다
+  const fired = await p.evaluate(() => new Promise((r) => { const a = document.querySelector('[data-testid="landing-app"]'); a.addEventListener('click', (e) => e.preventDefault(), { once: true });
+    document.addEventListener('wos:landing', (e) => r(e.detail.kind), { once: true }); a.click(); }));
   assert.equal(fired, 'app', '앱 다운로드 클릭 이벤트');
+  assert.equal(await p.getByTestId('landing-app').getAttribute('href'), '/app');
+  assert.equal(await p.getByTestId('landing-app-page').innerText(), 'www.work-in.dev/app', '앱 구역에 직원에게 알려 줄 주소');
   await p.getByTestId('landing-stores').getByText(/Google Play/).waitFor();
   // 대표 11/19: Google Play 는 공개 주소로 바로(‘심사 중’ 글자 없음) · App Store 는 ‘준비 중’
   assert.equal(await p.getByTestId('landing-stores').locator('a[data-track="play"]').getAttribute('href'), 'https://play.google.com/store/apps/details?id=kr.co.dagym.workos');
