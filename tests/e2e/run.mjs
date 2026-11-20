@@ -1887,8 +1887,9 @@ await step('V8: 등록 창 한 번에(자동 인식·템플릿·우선순위·�
   const mc = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   const m = await mc.newPage();
   await m.goto(BASE + '/tasks');
-  await m.getByTestId('add-task-top').tap();
   const sd = m.getByRole('dialog', { name: '업무 등록' });
+  // CI 11/20(4c7ca9e): 새 창을 열자마자 누르면 화면이 준비되기 전이라 누름이 먹지 않아 등록 창이 안 뜸(30초 기다리다 실패) → 창이 뜰 때까지 다시 누름
+  for (let i = 0; i < 6 && !(await sd.isVisible()); i++) { await m.getByTestId('add-task-top').tap({ timeout: 5000 }).catch(() => {}); await sd.waitFor({ timeout: 4000 }).catch(() => {}); }
   await sd.getByTestId('quick-chips').waitFor();
   await sd.getByLabel('제목').fill('모레 오전 10시 현장 점검표 제출');
   await sd.getByTestId('quick-nl-apply').waitFor();
