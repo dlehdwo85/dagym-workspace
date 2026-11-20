@@ -5,6 +5,8 @@
 //   CANCEL_UNRESOLVED=1(workflow 입력 cancel_unresolved)이면 반려(UNRESOLVED_ISSUES)·초안(READY_FOR_REVIEW) 제출을 거두고(canceled=true) 버전이 고칠 수 있는 상태로 돌아올 때까지 기다린 뒤 진행, 제출 때 새 묶음.
 //   설명·키워드·심사 메모는 같은 값이면 건너뜀(다시 돌려도 같음 — 심사 메모 새 글이 두 번 붙지 않게).
 // 356차(로컬 11/04 iphone-02 '처리 대기 초과'): 처리 대기를 넘긴 장은 다음 장으로 → 끝에 모든 장 다시 확인(최대 10분) → COMPLETE 아닌 장만 다시 올림 · 같은 이름·체크섬 장은 지우지 않음 · 처리 안 끝난 장이 있으면 제출 안 함.
+// 11/20(대표 재제출 승인 · 로컬 요청): 기본값을 v6 로 — 스크린샷 docs/handoff/store/v6-features(폴더에 있는 만큼, 01 부터 이어진 번호로 최대 10장 · 세 묶음이 같은 장 수여야 올림) · 등록 글 ios-listing.md(설명·키워드·프로모션 텍스트)
+//   · 심사 메모 review-notes.md(4000자 제한 때문에 줄인 판 — 긴 답글은 해결 센터에 사람이 붙임) · 지난 재제출 때 붙인 글(PREV_NOTES_FILES)은 기존 메모에서 빼고 그 앞의 권한·계정 삭제·개인정보 줄만 유지 · 끝에 '바뀌는 것 요약'.
 // 외부 패키지 없음(Node 22 fetch + node:crypto ES256). 참고: 6.9형 슬롯의 API 이름은 APP_IPHONE_67(애플이 6.7형 슬롯을 6.9형으로 넓힘) — 다르면 DISPLAY_TYPE 으로 바꿈.
 import { createHash, createPrivateKey, sign } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
@@ -19,9 +21,11 @@ const CANCEL_UNRESOLVED = env('CANCEL_UNRESOLVED', '0') === '1'; // 반려·초�
 const DISPLAY = env('DISPLAY_TYPE', 'APP_IPHONE_67'); // 6.9형 슬롯 이름(애플이 6.7형 슬롯을 6.9형으로 넓힘) — 다르면 입력으로
 const IPAD_DISPLAY = env('IPAD_DISPLAY_TYPE', 'APP_IPAD_PRO_3GEN_129'); // 아이패드 13형(2048×2732) 슬롯
 const LOCALE = env('LOCALE', 'ko');
-const SHOTS_DIR = env('SHOTS_DIR', 'docs/handoff/store/ios-v4');
-const LISTING = env('LISTING', 'docs/handoff/WORKIN_STORE_LISTING.md');
-const NOTES_FILE = env('NOTES_FILE', 'docs/handoff/store/ios-v4/review-notes.md');
+const SHOTS_DIR = env('SHOTS_DIR', '') || 'docs/handoff/store/v6-features';
+const LISTING = env('LISTING', '') || 'docs/handoff/store/v6-features/ios-listing.md';
+const NOTES_FILE = env('NOTES_FILE', '') || 'docs/handoff/store/v6-features/review-notes.md';
+/** 지난 재제출 때 메모 앞에 붙였던 글 — 이번 메모와 어긋나므로(예: 'Apple 로그인 추가') 기존 메모에서 뺀다. 쉼표로 여러 개, 'none' 이면 빼지 않음 */
+const PREV_NOTES_FILES = (env('PREV_NOTES_FILES', '') || 'docs/handoff/store/ios-v4/review-notes.md').split(',').map((x) => x.trim()).filter((x) => x && x !== 'none');
 const WHATS_NEW = env('WHATS_NEW', '');
 const API = env('ASC_API_BASE', 'https://api.appstoreconnect.apple.com/v1'); // 시험은 가짜 서버(tests/api/asc-submit-353.test.mjs)
 if (!KEY_ID || !ISSUER || !P8) { console.error('ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8 가 필요합니다(Secrets)'); process.exit(2); }
@@ -67,16 +71,24 @@ function section(md, heading) {
 const listing = readFileSync(LISTING, 'utf8');
 const description = section(listing, '## 자세한 설명');
 const keywords = section(listing, '## App Store 키워드').split('\n')[0].trim();
+const promo = section(listing, '## 프로모션 텍스트').split('\n')[0].trim(); // 없으면 건드리지 않음(170자 안)
+if (!description || !keywords) { console.error(`${LISTING} 에서 '## 자세한 설명' 또는 '## App Store 키워드' 칸을 찾지 못했습니다`); process.exit(3); }
+if (promo.length > 170) { console.error(`프로모션 텍스트가 ${promo.length}자입니다(170자까지)`); process.exit(3); }
+if (keywords.length > 100) { console.error(`키워드가 ${keywords.length}자입니다(100자까지)`); process.exit(3); }
 const newNotes = (() => { try { return readFileSync(NOTES_FILE, 'utf8').trim(); } catch { return ''; } })();
 const BAD_META = /\d[\d,]*\s*원|무료|체험|요금|가격|free|pricing|price|trial/i;
-for (const [name, text] of [['설명', description], ['키워드', keywords]]) { // 심사 메모는 심사관에게 '요금 문장을 뺐다'고 설명하는 글이라 검사 대상이 아님
+for (const [name, text] of [['설명', description], ['키워드', keywords], ['프로모션 텍스트', promo]]) { // 심사 메모는 심사관에게 '요금 문장을 뺐다'고 설명하는 글이라 검사 대상이 아님
   const m = text.match(BAD_META); if (m) { console.error(`${name}에 요금·무료 관련 글자('${m[0]}')가 있습니다 — 2.3.7 재발 방지로 멈춤`); process.exit(3); }
 }
 // 397차 #1023(애플 11/06 반려 3.1.1 — 설명의 '문의: 메일' 줄을 앱 밖 구매로 이끄는 문구로 지적): 설명에 문의 안내·메일·웹 주소가 있으면 멈춤
 { const m = description.match(/문의\s*[:：]|[\w.+-]+@[\w-]+\.[\w.-]+|https?:\/\/|www\./i); if (m) { console.error(`설명에 문의·메일·주소('${m[0]}')가 있습니다 — 3.1.1 재발 방지로 멈춤`); process.exit(3); } }
-const six = (prefix) => [1, 2, 3, 4, 5, 6].map((n) => path.join(SHOTS_DIR, `${prefix}-${String(n).padStart(2, '0')}.png`)).filter((f) => { try { return statSync(f).size > 0; } catch { return false; } });
+/** 폴더에 있는 만큼: prefix-01.png 부터 번호가 이어진 데까지(최대 10장 — 애플 한 묶음 한도) */
+const shotsOf = (prefix) => { const out = []; for (let n = 1; n <= 10; n++) { const f = path.join(SHOTS_DIR, `${prefix}-${String(n).padStart(2, '0')}.png`); try { if (statSync(f).size > 0) { out.push(f); continue; } } catch { /* 없음 */ } break; } return out; };
 /** 묶음(슬롯) → 올릴 파일: 6.9형·6.1형·아이패드 13형. 그 밖 묶음은 파일 없음(옛 그림만 지움) */
-const FILES_OF = { [DISPLAY]: six('iphone'), APP_IPHONE_61: six('iphone61'), [IPAD_DISPLAY]: six('ipad') };
+const FILES_OF = { [DISPLAY]: shotsOf('iphone'), APP_IPHONE_61: shotsOf('iphone61'), [IPAD_DISPLAY]: shotsOf('ipad') };
+/** 한 묶음에 올릴 장 수 = 6.9형 폴더에 있는 장 수(SHOTS_COUNT 로 정할 수도). 이 수와 다른 묶음은 올리지 않음(빠진 장이 있는 채로 올라가지 않게) */
+const SHOTS_N = Number(env('SHOTS_COUNT', '')) || FILES_OF[DISPLAY].length;
+const summary = []; // 끝에 찍는 '바뀌는 것 요약'
 const REQUIRED = [DISPLAY, IPAD_DISPLAY]; // 앱이 아이폰·아이패드 둘 다 지원(TARGETED_DEVICE_FAMILY 1,2)
 
 // ---------- 1. 앱·버전 ----------
@@ -145,9 +157,12 @@ if (verId) {
   else {
     const a = loc.attributes;
     log(`ⓒ 언어 ${a.locale}: 설명 ${a.description?.length ?? 0}자 → ${description.length}자 · 키워드 '${a.keywords ?? ''}' → '${keywords}'${WHATS_NEW ? ` · 새 기능 ${WHATS_NEW.length}자` : ''}`);
-    const attrs = { description, keywords };
-    if (a.description === description && (a.keywords ?? '') === keywords) log('  설명·키워드 이미 같음 — 건너뜀');
-    else await act('설명·키워드 바꾸기', () => api('PATCH', `/appStoreVersionLocalizations/${loc.id}`, { data: { type: 'appStoreVersionLocalizations', id: loc.id, attributes: attrs } }));
+    const attrs = { description, keywords, ...(promo ? { promotionalText: promo } : {}) };
+    const same = { desc: a.description === description, kw: (a.keywords ?? '') === keywords, promo: !promo || (a.promotionalText ?? '') === promo };
+    if (promo) log(`  프로모션 텍스트 ${(a.promotionalText ?? '').length}자 → ${promo.length}자`);
+    summary.push(`설명 ${same.desc ? '그대로' : `바뀜(${a.description?.length ?? 0}자 → ${description.length}자)`} · 키워드 ${same.kw ? '그대로' : '바뀜'} · 프로모션 텍스트 ${!promo ? '건드리지 않음' : same.promo ? '그대로' : '바뀜'}`);
+    if (same.desc && same.kw && same.promo) log('  설명·키워드 이미 같음 — 건너뜀');
+    else await act(`설명·키워드${promo ? '·프로모션 텍스트' : ''} 바꾸기`, () => api('PATCH', `/appStoreVersionLocalizations/${loc.id}`, { data: { type: 'appStoreVersionLocalizations', id: loc.id, attributes: attrs } }));
     if (WHATS_NEW) await act('새 기능(whatsNew) 적기', () => api('PATCH', `/appStoreVersionLocalizations/${loc.id}`, { data: { type: 'appStoreVersionLocalizations', id: loc.id, attributes: { whatsNew: WHATS_NEW } } }).catch((e) => log(`  (첫 버전이면 새 기능 칸이 없음 — 건너뜀: ${e.message.slice(0, 120)})`)));
   }
 }
@@ -157,9 +172,16 @@ if (verId) {
   const det = (await api('GET', `/appStoreVersions/${verId}/appStoreReviewDetail?fields[appStoreReviewDetails]=notes,demoAccountRequired,demoAccountName`).catch(() => ({ data: null }))).data;
   const old = det?.attributes?.notes ?? '';
   const newLines = new Set(newNotes.split('\n').map((l) => l.trim()).filter(Boolean));
+  const prevLines = new Set(PREV_NOTES_FILES.filter((f) => path.resolve(f) !== path.resolve(NOTES_FILE)).flatMap((f) => { try { return readFileSync(f, 'utf8').split('\n'); } catch { return []; } }).map((l) => l.trim()).filter(Boolean));
   // 지난 실행이 앞에 붙인 새 글(통째·줄 단위)은 빼고 나머지만 '기존 줄'로 — 다시 돌려도 같은 메모
-  const keep = (newNotes ? old.split(newNotes).join('') : old).split('\n').filter((l) => !newLines.has(l.trim()) && !/무료|요금|PC 웹|free|pric|trial|1\.1\.1|1\.2\.0 changes/i.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  const notes = [newNotes, keep].filter(Boolean).join('\n\n').slice(0, 4000);
+  const rest = (newNotes ? old.split(newNotes).join('') : old).split('\n').filter((l) => !newLines.has(l.trim()));
+  const droppedPrev = rest.filter((l) => prevLines.has(l.trim())).length;
+  const keep = rest.filter((l) => !prevLines.has(l.trim()) && !/무료|요금|PC 웹|free|pric|trial|1\.1\.1|1\.2\.0 changes/i.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const full = [newNotes, keep].filter(Boolean).join('\n\n');
+  const notes = full.slice(0, 4000);
+  if (droppedPrev) log(`  지난 재제출 때 붙인 글 ${droppedPrev}줄은 뺌(${PREV_NOTES_FILES.join(', ')})`);
+  if (full.length > 4000) log(`  ⚠ 심사 메모가 4000자를 넘어 뒤 ${full.length - 4000}자가 잘립니다(새 글 ${newNotes.length}자는 그대로, 잘리는 것은 기존 줄의 끝) — 새 글을 줄이거나 기존 줄을 화면에서 정리하세요`);
+  summary.push(`심사 메모 ${newNotes ? (det && old === notes ? '그대로' : `바뀜 — 새 글 ${newNotes.length}자 + 기존 줄 ${keep.length}자 = ${notes.length}자${full.length > 4000 ? `(4000자 넘어 ${full.length - 4000}자 잘림)` : ''}${droppedPrev ? ` · 지난 재제출 글 ${droppedPrev}줄 뺌` : ''}`) : '건드리지 않음(새 글 파일 없음)'}`);
   log(`ⓓ 심사 메모: 기존 ${old.length}자(유지 ${keep.length}자) + 새 글 ${newNotes.length}자 → ${notes.length}자 · 데모 계정 ${det?.attributes?.demoAccountName ? '있음' : '없음'}(비밀번호는 기존 칸 그대로)`);
   if (!newNotes) log('  (review-notes.md 없음 — 메모는 그대로 둠)');
   else if (det && old === notes) log('  심사 메모 이미 같음 — 건너뜀');
@@ -204,7 +226,7 @@ if (loc) {
     const files = FILES_OF[type] ?? [];
     let set = have.get(type) ?? null;
     const olds = set ? (await api('GET', `/appScreenshotSets/${set.id}/appScreenshots?limit=50`)).data : [];
-    const ready = files.length === 6;
+    const ready = SHOTS_N > 0 && files.length === SHOTS_N;
     // ② 같은 이름·체크섬으로 이미 올라간 장은 그대로(처리 실패한 장은 빼고) — 한 장에 하나만
     const want = ready ? files.map((file, idx) => ({ file, idx, name: shotName(file, idx), md5: md5Of(file) })) : [];
     const slots = new Map(); const keptIds = new Set();
@@ -213,7 +235,8 @@ if (loc) {
       if (o) { keptIds.add(o.id); slots.set(w.idx, { id: o.id, state: o.attributes.assetDeliveryState?.state ?? '?' }); }
     }
     const dels = olds.filter((o) => !keptIds.has(o.id)); const ups = want.filter((w) => !slots.has(w.idx));
-    log(`  ${type}: 지울 ${dels.length}장 · 올릴 ${ready ? ups.length : files.length ? `${files.length}(6장이 아니라 건너뜀)` : '0(새 그림 없음 — 옛 그림만 지움)'}장${keptIds.size ? ` · 그대로 ${keptIds.size}장(같은 이름·체크섬으로 이미 올라감)` : ''}${!set ? ' · 묶음 새로 만듦' : ''}`);
+    summary.push(`스크린샷 ${type}: ${ready ? `${want.length}장(지울 ${dels.length} · 올릴 ${ups.length} · 그대로 ${keptIds.size})` : files.length ? `건너뜀 — 폴더에 ${files.length}장(${SHOTS_N}장이어야 함)` : `새 그림 없음(옛 그림 ${dels.length}장만 지움)`}`);
+    log(`  ${type}: 지울 ${dels.length}장 · 올릴 ${ready ? ups.length : files.length ? `${files.length}(${SHOTS_N}장이 아니라 건너뜀)` : '0(새 그림 없음 — 옛 그림만 지움)'}장${keptIds.size ? ` · 그대로 ${keptIds.size}장(같은 이름·체크섬으로 이미 올라감)` : ''}${!set ? ' · 묶음 새로 만듦' : ''}`);
     if (!set && !ready) continue; // 필수인데 파일이 없으면 만들지 않음(빈 묶음은 의미 없음)
     try {
       if (!set) set = await act(`${type} 묶음 만들기`, () => api('POST', '/appScreenshotSets', { data: { type: 'appScreenshotSets', attributes: { screenshotDisplayType: type }, relationships: { appStoreVersionLocalization: { data: { type: 'appStoreVersionLocalizations', id: loc.id } } } } }).then((j) => j.data));
@@ -254,7 +277,7 @@ if (loc) {
   }
   for (const wk of work) {
     const ids = wk.want.map((w) => wk.slots.get(w.idx)?.id).filter(Boolean);
-    if (ids.length === 6) await act(`${wk.type} 순서 맞추기`, () => api('PATCH', `/appScreenshotSets/${wk.set.id}/relationships/appScreenshots`, { data: ids.map((id) => ({ type: 'appScreenshots', id })) }));
+    if (ids.length === wk.want.length) await act(`${wk.type} 순서 맞추기`, () => api('PATCH', `/appScreenshotSets/${wk.set.id}/relationships/appScreenshots`, { data: ids.map((id) => ({ type: 'appScreenshots', id })) }));
     const bad = wk.want.filter((w) => wk.slots.get(w.idx)?.state !== 'COMPLETE');
     if (bad.length) shotIncomplete.push({ type: wk.type, shots: bad.map((w) => `${w.name}(${wk.slots.get(w.idx)?.state ?? '없음'})`) });
   }
@@ -282,4 +305,6 @@ if (verId) {
     }
   }
 }
+log(`■ ${plan ? '바뀔 것' : '바꾼 것'} 요약 — 스크린샷 폴더 ${SHOTS_DIR}(묶음마다 ${SHOTS_N}장) · 등록 글 ${LISTING} · 심사 메모 ${NOTES_FILE}`);
+for (const x of summary) log(`  · ${x}`);
 log(plan ? '계획 끝 — 바꾼 것 없음' : '끝');

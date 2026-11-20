@@ -14,6 +14,10 @@ import { readFileSync } from 'node:fs';
 const PORT = 3291; const BASE = `http://localhost:${PORT}/v1`;
 const P8 = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' });
 const NOTES = readFileSync('docs/handoff/store/ios-v4/review-notes.md', 'utf8').trim();
+// 11/20: 스크립트 기본값이 v6(8장·새 메모·새 등록 글)로 바뀜 — 앞의 시험(353·356차)은 예전 묶음(ios-v4 6장)을 그대로 쓰도록 고정하고, v6 기본값은 맨 아래 시험이 본다
+const OLD_SET = { SHOTS_DIR: 'docs/handoff/store/ios-v4', NOTES_FILE: 'docs/handoff/store/ios-v4/review-notes.md', LISTING: 'docs/handoff/WORKIN_STORE_LISTING.md', PREV_NOTES_FILES: 'none' };
+const V6 = { SHOTS_DIR: '', NOTES_FILE: '', LISTING: '', PREV_NOTES_FILES: '' }; // 빈 값 = 스크립트 기본값(v6)
+const NOTES6 = readFileSync('docs/handoff/store/v6-features/review-notes.md', 'utf8').trim();
 let st, srv; const calls = [];
 function fresh() {
   let n = 0; const id = (p) => `${p}${++n}`;
@@ -67,7 +71,7 @@ function handle(req, res, body) {
   if (r && m === 'GET') return ok({ id: r[1], attributes: { assetDeliveryState: { state: st.shots.get(r[1]) ? shotState(st.shots.get(r[1]), true) : 'COMPLETE' } } });
   res.statusCode = 404; res.end(JSON.stringify({ errors: [{ status: '404', code: 'NOT_FOUND', title: `${m} ${p}` }] }));
 }
-const run = (extra) => new Promise((resolve) => execFile(process.execPath, ['scripts/asc-submit.mjs'], { env: { ...process.env, ASC_API_BASE: BASE, ASC_KEY_ID: 'KEYTEST', ASC_ISSUER_ID: 'issuer-test', ASC_KEY_P8: P8, ASC_POLL_MS: '20', VERSION: '1.2.0', BUILD: '13', ...extra } }, (e, out, errOut) => resolve({ code: e ? e.code ?? 1 : 0, out: out + errOut })));
+const run = (extra) => new Promise((resolve) => execFile(process.execPath, ['scripts/asc-submit.mjs'], { env: { ...process.env, ASC_API_BASE: BASE, ASC_KEY_ID: 'KEYTEST', ASC_ISSUER_ID: 'issuer-test', ASC_KEY_P8: P8, ASC_POLL_MS: '20', VERSION: '1.2.0', BUILD: '13', ...OLD_SET, ...extra } }, (e, out, errOut) => resolve({ code: e ? e.code ?? 1 : 0, out: out + errOut })));
 const count = (setType) => { const s = [...st.sets.values()].find((x) => x.type === setType); return s ? [...st.shots.values()].filter((x) => x.set === s.id) : null; };
 
 before(() => new Promise((r) => { srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => handle(req, res, b)); }).listen(PORT, r); }));
@@ -179,5 +183,45 @@ test('ⓔ 다시 올려도 처리 안 끝나면 submit=true 여도 제출 안 �
   assert.ok(!calls.some((c) => c.startsWith('DELETE /appScreenshots/')), '아무것도 지우지 않음');
   assert.match(r2.out, /APP_IPHONE_67: 지울 0장 · 올릴 0장 · 그대로 6장/);
   const nw = [...st.subs.values()][0]; assert.equal(nw?.state, 'WAITING_FOR_REVIEW', '이번엔 제출');
+});
+
+// ---------- 11/20 재제출: v6 기본값(스크린샷 8장 · 새 심사 메모 · 새 등록 글 · 프로모션 텍스트 · 바뀔 것 요약) ----------
+test('ⓕ v6 기본값: plan 은 묶음마다 8장·메모·설명이 바뀐다고 요약만 → apply 는 8장씩 올리고 순서 맞춤 · 지난 재제출 글은 메모에서 빠지고 그 앞의 권한 줄은 남음 · 프로모션 텍스트 · 다시 돌리면 그대로', async () => {
+  const start = () => { const t = fresh(); t.ver = 'DEVELOPER_REJECTED'; t.subs = new Map(); t.notes = `${NOTES}\n\nPermissions: camera for attachments.\nThe app is free during the trial.`; t.loc = { description: 'old desc', keywords: 'old', promotionalText: '' }; return t; };
+  st = start(); calls.length = 0;
+  let r = await run({ ...V6, MODE: 'plan' }); assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /APP_IPHONE_67: 지울 0장 · 올릴 8장/); assert.match(r.out, /APP_IPHONE_61: 지울 7장 · 올릴 8장/); assert.match(r.out, /APP_IPAD_PRO_3GEN_129: 지울 10장 · 올릴 8장/);
+  assert.match(r.out, /■ 바뀔 것 요약 — 스크린샷 폴더 docs\/handoff\/store\/v6-features\(묶음마다 8장\) · 등록 글 docs\/handoff\/store\/v6-features\/ios-listing\.md · 심사 메모 docs\/handoff\/store\/v6-features\/review-notes\.md/);
+  assert.match(r.out, /· 설명 바뀜\(8자 → \d+자\) · 키워드 바뀜 · 프로모션 텍스트 바뀜/);
+  assert.match(r.out, new RegExp(`· 심사 메모 바뀜 — 새 글 ${NOTES6.length}자 \\+ 기존 줄 \\d+자 = \\d+자 · 지난 재제출 글 \\d+줄 뺌`));
+  assert.match(r.out, /· 스크린샷 APP_IPHONE_67: 8장\(지울 0 · 올릴 8 · 그대로 0\)/);
+  assert.ok(!calls.some((c) => /^(POST|PATCH|DELETE)/.test(c)), 'plan 은 아무것도 안 바꿈');
+  // apply
+  r = await run({ ...V6, MODE: 'apply' }); assert.equal(r.code, 0, r.out);
+  for (const t of ['APP_IPHONE_67', 'APP_IPHONE_61', 'APP_IPAD_PRO_3GEN_129']) {
+    const sh = count(t); assert.equal(sh.length, 8, `${t} 8장`); assert.ok(sh.every((x) => x.id.startsWith('new')), `${t} 새 그림만`);
+    assert.deepEqual([...st.sets.values()].find((x) => x.type === t).order, sh.map((x) => x.id), `${t} 순서(8장)`);
+  }
+  assert.ok(st.notes.startsWith(NOTES6), '메모 맨 앞 = 새 글');
+  assert.ok(st.notes.includes('Permissions: camera for attachments.'), '그 앞부터 있던 권한 줄은 남음');
+  assert.ok(!st.notes.includes('4.8 Sign in with Apple added') && !/free during/.test(st.notes), '지난 재제출 글(Apple 로그인 추가 등)과 요금 줄은 빠짐');
+  assert.ok(st.notes.length <= 4000);
+  assert.ok(/워크인은 회사의 업무와 일정을/.test(st.loc.description) && !/www\.|화상회의|위젯|무료|체험/.test(st.loc.description), '설명 = 검수 반영본(주소·화상회의·위젯·요금 글자 없음)');
+  assert.equal(st.loc.keywords, '업무관리,일정관리,협업,캘린더,할일,결재,전자결재,메신저,자료실,점검,그룹웨어');
+  assert.match(st.loc.promotionalText, /^업무는 한 줄로 추가하고/);
+  // 다시 돌리면 그대로
+  calls.length = 0; const notes1 = st.notes;
+  r = await run({ ...V6, MODE: 'apply' }); assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /설명·키워드 이미 같음 — 건너뜀/); assert.match(r.out, /심사 메모 이미 같음 — 건너뜀/); assert.match(r.out, /APP_IPHONE_67: 지울 0장 · 올릴 0장 · 그대로 8장/);
+  assert.equal(st.notes, notes1);
+  assert.ok(!calls.some((c) => /PATCH \/(appStoreVersionLocalizations|appStoreReviewDetails)|POST \/appScreenshots|DELETE/.test(c)), calls.filter((c) => !c.startsWith('GET')).join(', '));
+});
+
+test('ⓖ 장 수가 맞지 않는 묶음은 올리지 않음(빠진 장이 있는 채로 올라가지 않게) · 4000자를 넘으면 기존 줄의 끝이 잘린다고 알림', async () => {
+  st = fresh(); st.ver = 'DEVELOPER_REJECTED'; st.subs = new Map(); st.notes = 'Permissions: camera.\n' + 'x'.repeat(2000); calls.length = 0;
+  const r = await run({ ...V6, MODE: 'plan', SHOTS_COUNT: '9' }); assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /APP_IPHONE_67: 지울 0장 · 올릴 8\(9장이 아니라 건너뜀\)장/);
+  assert.match(r.out, /· 스크린샷 APP_IPHONE_61: 건너뜀 — 폴더에 8장\(9장이어야 함\)/);
+  assert.match(r.out, /⚠ 심사 메모가 4000자를 넘어 뒤 \d+자가 잘립니다/);
 });
 

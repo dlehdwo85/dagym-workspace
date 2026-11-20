@@ -15,6 +15,8 @@
 | `iphone61-01.png` ~ `iphone61-08.png` | 1179×2556 | App Store 6.1형 8장(6.9형 그림을 줄인 것) |
 | `ipad-01.png` ~ `ipad-08.png` | 2048×2732 | App Store 아이패드 13형 8장 |
 | `00_sheet.jpg` | — | 한눈에 보는 축소 시트(검토용) |
+| `ios-listing.md` | — | App Store 등록 글(설명·키워드·프로모션 텍스트 — 검수 반영본). `scripts/asc-submit.mjs` 가 읽음 |
+| `review-notes.md` | 2546자 | App Store 심사 메모 칸에 넣는 줄인 판(4000자 제한 — 긴 답글은 docs/ios-review-notes-1120.md 2절을 해결 센터에) |
 
 ## 8장
 
