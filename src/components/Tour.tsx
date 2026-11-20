@@ -167,11 +167,16 @@ export function TourHost({ userId, seen: seen0, auto, admin, blocked, features }
     try {
       const steps = TOURS[id].filter((s) => (!s.admin || admin) && (!s.widget || !!widgetPlugin()) && (!s.feature || !!featRef.current?.[s.feature]));
       // 화면이 그려지고(대상 버튼이 생기고) 다른 창이 닫힐 때까지 최대 8초
+      // 11/20: 첫 단계의 단추가 다른 것보다 늦게 그려지는 화면(결재 — 양식 단추는 양식을 받아 온 뒤에 생김)에서 첫 단계를 건너뛰고 시작하던 것 →
+      //        대상이 하나라도 보인 뒤에도 첫 단계의 단추가 보일 때까지 최대 2초 더 기다림(그 사람에게 없는 단추면 2초 뒤 그다음 단계부터)
+      const first = steps.find((s) => s.sel.length);
+      let since = 0;
       for (let t = 0; t < 32; t++) {
         await new Promise((r) => setTimeout(r, 250));
         if (blockedRef.current || otherDialog()) continue;
-        const ready = steps.some((s) => s.sel.length && find(s.sel));
-        if (ready) { if (!go(steps, id, 0, 1, null)) markSeen(id); return; }
+        if (!steps.some((s) => s.sel.length && find(s.sel))) continue;
+        since++;
+        if (!first || find(first.sel) || since > 8) { if (!go(steps, id, 0, 1, null)) markSeen(id); return; }
       }
     } finally { busy.current = false; }
   }, [admin, auto, go, markSeen]);
