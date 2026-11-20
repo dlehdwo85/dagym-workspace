@@ -9,6 +9,7 @@ import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputC
 import { shrinkImage } from '@/components/shrink';
 import { CHECK_COPY as C, sharedText } from '@/lib/check/copy';
 import { RunHome } from './CheckRun';
+import { CheckReport } from './CheckReport';
 
 type Cat = { id: string; parent_id: string | null; name: string; sort: number; active: boolean; items: number };
 type PT = { id: string; name: string; sort: number; active: boolean };
@@ -25,13 +26,14 @@ export function CheckHome() {
   const level = sess.menus?.check_guide ?? 'none';
   const canView = level !== 'none'; const canEdit = level === 'edit';
   const canRun = (sess.menus?.check_run ?? 'none') === 'use'; // 점검 2단계: 점검하기·보완 확인
-  const [tab, setTab] = useState<'run' | 'guide' | 'shared' | 'setup'>(canRun ? 'run' : canView ? 'guide' : 'shared');
-  useEffect(() => { const t = new URLSearchParams(location.search).get('tab'); if (t === 'run' && canRun) setTab('run'); else if (t === 'guide' && canView) setTab('guide'); else if (t === 'shared') setTab('shared'); else if (t === 'setup' && canEdit) setTab('setup'); }, [canRun, canView, canEdit]);
-  const tabs: [typeof tab, string][] = [...(canRun ? [['run', C.tabs.run] as [typeof tab, string]] : []), ...(canView ? [['guide', C.tabs.guide] as [typeof tab, string]] : []), ['shared', C.tabs.shared], ...(canEdit ? [['setup', C.tabs.setup] as [typeof tab, string]] : [])];
+  const canReport = (sess.menus?.check_report ?? 'none') !== 'none'; // 점검 4단계: 리포트(숫자·표)
+  const [tab, setTab] = useState<'run' | 'guide' | 'shared' | 'setup' | 'report'>(canRun ? 'run' : canView ? 'guide' : 'shared');
+  useEffect(() => { const t = new URLSearchParams(location.search).get('tab'); if (t === 'run' && canRun) setTab('run'); else if (t === 'guide' && canView) setTab('guide'); else if (t === 'shared') setTab('shared'); else if (t === 'setup' && canEdit) setTab('setup'); else if (t === 'report' && canReport) setTab('report'); }, [canRun, canView, canEdit, canReport]);
+  const tabs: [typeof tab, string][] = [...(canRun ? [['run', C.tabs.run] as [typeof tab, string]] : []), ...(canView ? [['guide', C.tabs.guide] as [typeof tab, string]] : []), ['shared', C.tabs.shared], ...(canEdit ? [['setup', C.tabs.setup] as [typeof tab, string]] : []), ...(canReport ? [['report', C.tabs.report] as [typeof tab, string]] : [])];
   return (
     <div className="mx-auto max-w-4xl" data-testid="check-home">
       <PageHeader title={C.menu} sub={canRun || canView ? C.sub : C.subShared} icon={ClipboardCheck} />
-      {(canView || canRun) && (
+      {(canView || canRun || canReport) && (
         <div role="tablist" aria-label={C.menu} className="mb-3 flex gap-1 overflow-x-auto rounded-input border border-line bg-white p-0.5 text-sm shadow-card">
           {tabs.map(([k, l]) => (
             <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-testid={`check-tab-${k}`}
@@ -43,6 +45,7 @@ export function CheckHome() {
       {tab === 'guide' && canView && <Guide canEdit={canEdit} />}
       {tab === 'shared' && <SharedList />}
       {tab === 'setup' && canEdit && <Setup />}
+      {tab === 'report' && canReport && <CheckReport />}
     </div>
   );
 }

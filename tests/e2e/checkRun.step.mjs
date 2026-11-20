@@ -124,5 +124,22 @@ export async function checkRun({ owner, ctx, BASE, SHOTS }) {
   await owner.getByTestId('check-course-add').click();
   await cs.getByText('화장실 → 출입구·로비 → 공간 없이 보는 항목').waitFor();
   await fit('분야·공간 탭');
+  // 점검 4단계 리포트(숫자·표 — 설계 12절): [리포트] 탭 — 끝낸 점검 2회(코스 1 + 수시 1) · 양호율(양호 2 ÷ 3) · 보완 요청 1건(다시 보완 1) · 지난달은 빈 화면 · 엑셀 단추
+  await owner.getByTestId('check-tab-report').click();
+  const rp = owner.getByTestId('check-report'); await rp.waitFor();
+  await rp.getByTestId('check-report-summary').waitFor({ timeout: 15000 });
+  assert.match(await rp.getByTestId('check-report-rounds').innerText(), /끝낸 점검\s*2회/);
+  assert.match(await rp.getByTestId('check-report-rate').innerText(), /66\.7%/);
+  assert.match(await rp.getByTestId('check-report-followups').innerText(), /보완 요청\s*1건[\s\S]*열린 것 0건/);
+  await rp.getByTestId('check-report-units-row').filter({ hasText: '다짐 강남점' }).waitFor();
+  assert.match(await rp.getByTestId('check-report-items').innerText(), /화장실/);
+  assert.match(await rp.getByTestId('check-report-fu').innerText(), /다시 보완\(2차 이상\)\s*1건/);
+  assert.match(await rp.getByTestId('check-report-export').getAttribute('href'), /^\/api\/check\/report\/export\?from=\d{4}-\d{2}-01&to=/);
+  await fit('리포트 탭');
+  await owner.screenshot({ path: `${SHOTS}/check-report-mobile.png`, fullPage: true });
+  await rp.getByTestId('check-report-prev').click();
+  await rp.getByTestId('check-report-empty').waitFor({ timeout: 15000 });
+  await rp.getByTestId('check-report-month').click();
+  await rp.getByTestId('check-report-units').waitFor({ timeout: 15000 });
   await owner.setViewportSize({ width: 1366, height: 900 });
 }
