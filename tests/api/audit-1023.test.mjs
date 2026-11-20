@@ -1,4 +1,5 @@
 // 로컬 10/23 전수 점검(클라우드 누락·회귀): #77 처음 사용 안내 기록 API · #449 가입 전환 태그(플랫폼 운영에서 넣으면 가입 화면에 바로) · #436 '음성 등록' 문구
+import { readFileSync } from 'node:fs';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client, bootstrap, resetDb, startServer, testDb, BASE } from '../helpers.mjs';
@@ -20,6 +21,11 @@ test('#77 처음 사용 안내: 사람별 본 기록(봤음·다시 보기 초�
   assert.deepEqual(r.seen.sort(), ['home', 'tasks']);
   assert.deepEqual((await ctx.owner.ok('GET', '/api/tours')).seen, [], '다른 사람 기록과 섞이지 않음');
   assert.equal((await ctx.staffA.client.post('/api/tours', { tourId: 'nope' })).status, 400);
+  // 11/20: 화면 쪽 안내 목록(도움말 [화면별 안내] = Tour.tsx TOUR_PAGES)의 모든 화면이 서버에 '봤음'으로 남아야 함 — 결재·점검이 빠져 있어 400 이던 것
+  const pages = [...readFileSync(new URL('../../src/components/Tour.tsx', import.meta.url), 'utf8').match(/export const TOUR_PAGES[\s\S]*?\];/)[0].matchAll(/id: '([a-z]+)'/g)].map((m) => m[1]);
+  assert.ok(pages.includes('approvals') && pages.includes('check') && pages.length >= 8, `화면별 안내 ${pages.join(',')}`);
+  for (const id of pages) await ctx.staffA.client.ok('POST', '/api/tours', { tourId: id });
+  assert.deepEqual((await ctx.staffA.client.ok('GET', '/api/tours')).seen.sort(), [...pages].sort(), '화면별 안내가 모두 서버에 남음');
   await ctx.staffA.client.ok('DELETE', '/api/tours');
   assert.deepEqual((await ctx.staffA.client.ok('GET', '/api/tours')).seen, [], '[사용 안내 다시 보기] = 초기화');
   assert.equal((await new Client('anon-tour').get('/api/tours')).status, 401);

@@ -12,7 +12,8 @@ import { z } from 'zod';
 import { db, type Sql } from './db';
 import { badRequest, notFound } from './errors';
 import { audit, logError } from './log';
-import { requireMenu } from './menuPerms';
+import { menuLevel, requireMenu } from './menuPerms';
+import { agreementLeftText } from './agreementLabel';
 import { notify } from './notifications';
 import { MAX_UPLOAD_BYTES, completeMultipart, downloadUrl, objectSize, uploadTargetFor } from './storage';
 import { addDays, todaySeoul } from './time';
@@ -250,10 +251,16 @@ export async function exportAgreements(u: SessionUser) {
 }
 
 // ---------- 홈 카드 ----------
-/** 권한이 있는 사람에게만: 30일·90일 안 만료, 챙겨야 할 것(만료·연장 확인·통보 기한 지남) */
+/** 홈 '계약' 카드(2단계 · 11/20): 계약 관리 권한이 없으면 show:false(홈이 404 를 받지 않게).
+ *  챙길 것(만료·연장 확인·통보 기한 지남)이나 30일 안에 손써야 하는 계약(만료일 또는 해지 통보 마감일 기준)이 있을 때만 — 가까운 순으로 3건 */
 export async function agreementSummary(u: SessionUser) {
-  const { counts } = await listAgreements(u, {});
-  return counts;
+  if ((await menuLevel(u, 'agreements')) === 'none') return { show: false as const };
+  const { agreements } = await listAgreements(u, { state: 'open' });
+  const attention = agreements.filter((x) => ['renew_check', 'expired', 'notice_passed'].includes(x.state));
+  const soon = agreements.filter((x) => x.state === 'soon' && x.daysLeft !== null && x.daysLeft <= 30);
+  if (!attention.length && !soon.length) return { show: false as const };
+  return { show: true as const, attention: attention.length, soon: soon.length,
+    items: [...attention, ...soon].slice(0, 3).map((x) => ({ id: x.id, title: x.title, counterparty: x.counterparty, state: x.state, left: agreementLeftText(x) })) };
 }
 
 // ---------- 정기 실행: 만료 알림 ----------

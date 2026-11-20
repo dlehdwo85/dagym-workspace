@@ -28,6 +28,9 @@ test('① 권한 · ② 등록·목록·고치기: 기본은 대표·관리자�
   assert.equal((await ctx.staffA.client.req('GET', '/api/agreements')).status, 404, '직원은 기본 권한 없음 — 없는 메뉴처럼');
   assert.equal((await ctx.staffA.client.req('POST', '/api/agreements', { title: 'x' })).status, 404);
   assert.deepEqual((await ctx.owner.ok('GET', '/api/agreements')).agreements, []);
+  // 홈 '계약' 카드(2단계 11/20): 권한 없는 직원은 show:false(404 아님 — 홈이 오류를 받지 않게) · 계약이 없으면 카드 없음
+  assert.deepEqual(await ctx.staffA.client.ok('GET', '/api/agreements/summary'), { show: false });
+  assert.deepEqual(await ctx.owner.ok('GET', '/api/agreements/summary'), { show: false });
   assert.equal((await ctx.owner.req('POST', '/api/agreements', { title: '  ' })).status, 400);
   assert.equal((await ctx.owner.req('POST', '/api/agreements', { title: '거꾸로', startDate: day(10), endDate: day(1) })).status, 400, '만료일이 시작일보다 앞');
   a1 = (await ctx.owner.ok('POST', '/api/agreements', { title: '사무실 임대차', counterparty: '한빛빌딩', amount: 3300000, tags: ['임대차', '임대차', ' 본사 '], startDate: day(-340), endDate: day(25), memo: '보증금 별도' })).id;
@@ -38,6 +41,10 @@ test('① 권한 · ② 등록·목록·고치기: 기본은 대표·관리자�
   assert.deepEqual(l.agreements.map((x) => [x.title, x.state, x.daysLeft]), [['지난 유지보수', 'expired', -3], ['사무실 임대차', 'soon', 25], ['정수기 렌탈', 'active', 200], ['기한 없는 협약', 'open_ended', null]]);
   assert.deepEqual(l.counts, { total: 4, in30: 1, in90: 1, attention: 1, ended: 0 });
   assert.deepEqual(l.tags, ['렌탈', '본사', '임대차', '협약']);
+  // 홈 카드: 챙길 것(만료 지남) → 30일 안에 손써야 하는 것 순, 멀리 남은 계약·기한 없는 계약은 빼고
+  const hs = await ctx.owner.ok('GET', '/api/agreements/summary');
+  assert.deepEqual([hs.show, hs.attention, hs.soon, hs.items.map((x) => [x.title, x.counterparty, x.state, x.left])], [true, 1, 1, [['지난 유지보수', '', 'expired', '만료 3일 지남'], ['사무실 임대차', '한빛빌딩', 'soon', 'D-25']]]);
+  assert.equal(hs.items[1].id, a1);
   assert.deepEqual(l.alertDays, [90, 60, 30, 7]);
   const g = await ctx.owner.ok('GET', `/api/agreements/${a1}`);
   assert.deepEqual([g.agreement.amount, g.agreement.tags, g.agreement.ownerName, g.agreement.termNo, g.agreement.stateLabel], [3300000, ['임대차', '본사'], '김대표', 1, '만료 임박']);
@@ -55,11 +62,13 @@ test('① 권한 · ② 등록·목록·고치기: 기본은 대표·관리자�
   assert.equal((await ctx.owner.req('PATCH', `/api/agreements/${a1}`, { ownerId: other.cookie ? (await sql`select id from users where email = 'boss@other-agr.test'`)[0].id : null })).status, 400, '다른 회사 사람은 담당자로 못 넣음');
   // 다른 회사: 목록은 자기 것만 · 남의 계약은 404
   assert.deepEqual((await other.ok('GET', '/api/agreements')).agreements, []);
+  assert.deepEqual(await other.ok('GET', '/api/agreements/summary'), { show: false }, '다른 회사 홈 카드에는 우리 계약이 없음');
   for (const [m, p, b] of [['GET', `/api/agreements/${a1}`], ['PATCH', `/api/agreements/${a1}`, { title: '탈취' }], ['POST', `/api/agreements/${a1}/renew`, { endDate: day(400) }], ['POST', `/api/agreements/${a1}/end`, { reason: 'x' }], ['POST', `/api/agreements/${a1}/files`, { fileName: 'a.pdf', size: 10 }]])
     assert.equal((await other.req(m, p, b)).status, 404, `${m} ${p}`);
   // 권한을 켜 주면 직원도 조회(편집은 안 됨)
   await sql`insert into menu_user_perms (menu, user_id, level) values ('agreements', ${ctx.staffA.id}, 'view')`;
   assert.equal((await ctx.staffA.client.ok('GET', '/api/agreements')).agreements.length, 4);
+  assert.equal((await ctx.staffA.client.ok('GET', '/api/agreements/summary')).show, true, '조회 권한이 생기면 홈 카드도');
   assert.equal((await ctx.staffA.client.req('PATCH', `/api/agreements/${a1}`, { title: '바꿈' })).status, 403);
   void open; void past;
 });

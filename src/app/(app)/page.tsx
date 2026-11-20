@@ -5,6 +5,8 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, Check, CheckCircle2, ChevronLeft, CircleCheck, Hourglass, MapPin, Megaphone, MessageSquare, PlusCircle, Sparkles, Users, Activity as ActivityIcon } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { ClockCard } from '@/components/ClockCard';
+import { CheckHomeCard } from '@/components/check/CheckHomeCard';
+import { AgreementHomeCard } from '@/components/agreements/AgreementHomeCard';
 import { useSession, useTerms } from '@/components/session';
 import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
 import { InlineAddTask } from '@/components/TaskQuick';
@@ -272,6 +274,8 @@ export default function Dashboard() {
       )}
       <ClockCard />
       <NoticeCard />
+      <CheckHomeCard />
+      <AgreementHomeCard />
       <HomeCollab tasks={myOpen.data?.tasks ?? []} />
       {/* V14 8번: 우리 팀 오늘의 일정 (팀에 속해 있을 때만) */}
       {(myTeams.data?.teams.length ?? 0) > 0 && (

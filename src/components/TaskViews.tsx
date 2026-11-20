@@ -13,7 +13,8 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import dynamic from 'next/dynamic';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSalesTerms, useSession } from './session';
-import { CalendarDays as CalIcon, Camera, CheckCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock, Flag, Users } from 'lucide-react';
+import { CalendarDays as CalIcon, Camera, CheckCheck, ClipboardCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock, Flag, Users } from 'lucide-react';
+import { FOLLOWUP_TAG } from '@/lib/check/tags';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, ROLE_RANK, STATUSES, STATUS_LABEL, type Role, type TaskStatus } from '@/lib/types';
 import { hourLabel } from '@/components/ui';
@@ -87,7 +88,7 @@ const VIEW_MODES: ViewMode[] = ['list', 'board', 'calendar', 'timeline'];
 const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done', 'extend'];
 const cleanView = (v: string | null) => (v && LIST_VIEWS.includes(v) ? v : '');
 /** #242(대표 10/24 '내 업무에서 업무를 열었다 닫으면 전체로'): 목록 거르기·검색어·보기 방식은 주소에 둔다(기록은 쌓지 않음) — 닫기·뒤로가기·새로 고침·링크 공유에도 같은 목록 */
-const URL_KEYS = ['view', 'brandId', 'space', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId', 'hasAttach', 'carried'] as const;
+const URL_KEYS = ['view', 'brandId', 'space', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId', 'hasAttach', 'carried', 'tag'] as const;
 const PANEL_PATH = /^\/tasks\/([0-9a-f-]{36})$/;
 function filtersOf(sp: { get: (k: string) => string | null }) {
   const f: Record<string, string> = {};
@@ -350,6 +351,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     ...(filters.status ? [['status', `상태: ${filters.status.split(',').map((x) => STATUS_LABEL[x as TaskStatus] ?? x).join('·')}`]] : []),
     ...(filters.carried ? [['carried', '이월만']] : []),
     ...(filters.hasAttach ? [['hasAttach', '첨부 있음']] : []),
+    ...(filters.tag ? [['tag', filters.tag === FOLLOWUP_TAG ? '점검 보완만' : `꼬리표: ${filters.tag}`]] : []),
     ...(filters.from || filters.to ? [['period', `기간: ${filters.from ? fmtDate(filters.from) : '처음'} ~ ${filters.to ? fmtDate(filters.to) : '끝'}`]] : []),
   ] as [string, string][];
   const clearChip = (k: string) => setFilters((f) => (k === 'period' ? { ...f, from: '', to: '' } : { ...f, [k]: '' }));
@@ -508,6 +510,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           {/* V20 이월만 보기 (담당자 묶음 안에서도) */}
           <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.carried === '1'} onChange={(e) => setFilters((f) => ({ ...f, carried: e.target.checked ? '1' : '' }))} data-testid="filter-carried" />이월만 보기</label>
           <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.hasAttach === '1'} onChange={(e) => setFilters((f) => ({ ...f, hasAttach: e.target.checked ? '1' : '' }))} data-testid="filter-attach" /><Paperclip className="size-3.5 text-sky-700" />첨부 있음</label>
+          {/* 점검 2단계: 점검에서 만든 보완 요청 업무만 — 점검을 하는 사람(점검하기 권한)에게만 보이고, 주소로 들어온 경우에는 누구에게나 */}
+          {((sess.menus?.check_run ?? 'none') !== 'none' || filters.tag === FOLLOWUP_TAG) && (
+            <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.tag === FOLLOWUP_TAG} onChange={(e) => setFilters((f) => ({ ...f, tag: e.target.checked ? FOLLOWUP_TAG : '' }))} data-testid="filter-check" /><ClipboardCheck className="size-3.5 text-brand-700" />점검 보완만</label>)}
         </div>
       )}
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton /> : (

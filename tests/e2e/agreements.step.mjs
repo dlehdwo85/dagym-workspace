@@ -1,6 +1,6 @@
 // 계약 관리 1단계 화면(대표 11/19 · docs/contract-docs-design.md): 관리 메뉴 [계약 관리] → 빈 화면 [첫 계약 등록] → 등록(계약명·상대방·꼬리표·만료일·금액) →
 // 상세(만료 임박 · D-n) → 계약서 파일 올리기 → 목록 요약(30일 안 만료 1) → 갱신 등록(지난 기간) → 자동 연장 계약은 '통보 기한 D-n' →
-// 알림 날짜 바꾸기 → 종료 → 휴대폰 폭 넘침 없음 → 권한 없는 직원은 메뉴·화면 없음
+// 홈 '계약' 카드(챙길 것·30일 안) → 알림 날짜 바꾸기 → 종료 → 휴대폰 폭 넘침 없음 → 권한 없는 직원은 메뉴·화면 없음
 import assert from 'node:assert/strict';
 
 export async function agreements({ owner, staff, ctx, sql, BASE, SHOTS }) {
@@ -44,6 +44,17 @@ export async function agreements({ owner, staff, ctx, sql, BASE, SHOTS }) {
     [['지난 유지보수', '만료 3일 지남'], ['보안 용역', '통보 기한 D-20'], ['본사 사무실 임대차', 'D-25']], '챙길 것 → 임박한 순');
   assert.equal(await owner.getByTestId('agr-attention').innerText(), '1');
   await owner.screenshot({ path: `${SHOTS}/agreements-list.png` });
+  // 홈 '계약' 카드(2단계 11/20): 챙길 것 1 · 30일 안 2(통보 마감일 기준 포함) — 가까운 순 3건, 줄을 누르면 그 계약 상세
+  await owner.goto(BASE + '/');
+  const hc = owner.getByTestId('home-agreements'); await hc.waitFor({ timeout: 15000 });
+  assert.deepEqual([await hc.getByTestId('home-agr-attention').innerText(), await hc.getByTestId('home-agr-soon').innerText()], ['챙길 것 1', '30일 안 2']);
+  assert.deepEqual(await hc.getByTestId('home-agr-row').evaluateAll((els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim())), ['지난 유지보수 만료 3일 지남', '보안 용역 · 든든보안 통보 기한 D-20', '본사 사무실 임대차 · 한빛빌딩 D-25']);
+  await hc.scrollIntoViewIfNeeded(); await owner.screenshot({ path: `${SHOTS}/agreements-home-card.png` });
+  await hc.getByTestId('home-agr-row').nth(1).click();
+  await owner.waitForURL(/\/agreements\?open=/); await det.waitFor();
+  await owner.waitForFunction(() => /통보 기한 D-20/.test(document.querySelector('[data-testid=agr-detail-state]')?.textContent ?? ''), null, { timeout: 15000 }); // 누른 줄(보안 용역)의 상세
+  await owner.keyboard.press('Escape'); await det.waitFor({ state: 'hidden' });
+  await owner.getByTestId('agr-list').waitFor();
   await owner.getByTestId('agr-state-attention').click();
   await owner.waitForFunction(() => document.querySelectorAll('[data-testid=agr-row]').length === 1);
   await owner.getByTestId('agr-state-open').click();

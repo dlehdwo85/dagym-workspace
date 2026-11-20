@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { db, type Sql } from '../db';
 import { accessibleUnitIds } from '../access';
 import { badRequest, conflict, notFound } from '../errors';
-import { requireMenu } from '../menuPerms';
+import { menuLevel, requireMenu } from '../menuPerms';
 import { notify } from '../notifications';
 import { addDays, todaySeoul } from '../time';
 import { tenantOf, type SessionUser } from '../types';
@@ -25,8 +25,8 @@ export type Verdict = keyof typeof VERDICTS;
 export const ROUND_KINDS = { regular: '정기', sample: '표본', adhoc: '수시' } as const;
 /** 같은 항목·같은 곳이 이만큼 연속 보완 필요면 개선 과제(회사 설정으로 바꿀 수 있게 한곳에) */
 export const IMPROVE_STREAK = 3;
-export const FOLLOWUP_TAG = '점검 보완';
-export const IMPROVE_TAG = '개선 과제';
+import { FOLLOWUP_TAG, IMPROVE_TAG } from './tags';
+export { FOLLOWUP_TAG, IMPROVE_TAG };
 
 async function myUnits(u: SessionUser, sql: Sql) { return accessibleUnitIds(u, sql); }
 async function assertUnit(u: SessionUser, unitId: string, sql: Sql) {
@@ -340,6 +340,28 @@ export async function checkHome(u: SessionUser) {
     where m.tenant = ${t} and m.status = 'open' ${mine === null ? sql`` : sql`and m.org_unit_id = any(${mine}::uuid[])`} order by m.created_at desc limit 20`;
   const external = fu.followups.flatMap((f) => (f.external as { id: string; target: string; replyDue: string | null; outcome: string | null; closed: boolean }[]).filter((e) => !e.closed).map((e) => ({ ...e, followupId: f.id, itemTitle: f.itemTitle, orgUnitName: f.orgUnitName })));
   return { open, recent, counts: fu.counts, improvements, external, kinds: ROUND_KINDS };
+}
+
+/** 홈 '점검' 카드(가벼운 요약 — 대표 11/19 점검 2단계 남은 것): 진행 중인 내 점검 · 보완 요청의 확인 대기/조치 중 · 마지막 점검.
+ *  점검하기 권한이 없으면 show:false(홈이 404 를 받지 않게). 점검을 한 번도 하지 않은 회사의 홈에는 안 보임(쓰기 시작하면 휴대폰에서 점검으로 들어가는 길이 됨 — 설계 6절) */
+export async function checkSummary(u: SessionUser) {
+  const sql = db();
+  if ((await menuLevel(u, 'check_run', sql)) === 'none') return { show: false as const };
+  const t = tenantOf(u); const mine = await myUnits(u, sql);
+  const open = await sql<{ id: string; org_unit_name: string; course_name: string | null; kind: keyof typeof ROUND_KINDS; done: number }[]>`select r.id, o.name as org_unit_name, r.course_name, r.kind,
+      (select count(*)::int from chk_results x where x.round_id = r.id) as done
+    from chk_rounds r join org_units o on o.id = r.org_unit_id where r.tenant = ${t} and r.ended_at is null and r.checker_id = ${u.id}
+      ${mine === null ? sql`` : sql`and r.org_unit_id = any(${mine}::uuid[])`} order by r.started_at desc limit 3`;
+  const [c] = await sql<{ waiting: number; requested: number }[]>`select count(*) filter (where tk.status = 'done')::int as waiting, count(*) filter (where tk.status is distinct from 'done')::int as requested
+    from chk_followups f left join tasks tk on tk.id = f.task_id and tk.deleted_at is null
+    where f.tenant = ${t} and f.status not in ('ok', 'canceled') ${mine === null ? sql`` : sql`and f.org_unit_id = any(${mine}::uuid[])`}`;
+  const [last] = await sql<{ ended_at: Date; org_unit_name: string; course_name: string | null; kind: keyof typeof ROUND_KINDS }[]>`select r.ended_at, o.name as org_unit_name, r.course_name, r.kind
+    from chk_rounds r join org_units o on o.id = r.org_unit_id where r.tenant = ${t} and r.ended_at is not null
+      ${mine === null ? sql`` : sql`and r.org_unit_id = any(${mine}::uuid[])`} order by r.ended_at desc limit 1`;
+  if (!open.length && !c.waiting && !c.requested && !last) return { show: false as const };
+  const label = (r: { course_name: string | null; kind: keyof typeof ROUND_KINDS }) => r.course_name ?? `${ROUND_KINDS[r.kind]} 점검`;
+  return { show: true as const, open: open.map((r) => ({ id: r.id, orgUnitName: r.org_unit_name, name: label(r), done: r.done })), waiting: c.waiting, requested: c.requested,
+    last: last ? { endedAt: last.ended_at, orgUnitName: last.org_unit_name, name: label(last) } : null };
 }
 
 // ---------------- 정기 실행: '확인 대기' 알림 · 외부 연락 회신 기한 ----------------
