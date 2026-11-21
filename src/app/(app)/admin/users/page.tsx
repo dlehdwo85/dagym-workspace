@@ -191,7 +191,7 @@ function Users() {
         {reviewMsg && <p className="mb-2 rounded-input bg-amber-50 p-2 text-sm text-amber-900" data-testid="review-msg">{reviewMsg}</p>}
         {/* 대표 11/20 #1083: 이메일 초대는 메일이 자동으로 감 — 결과를 먼저 알리고, 링크는 카카오톡·문자로도 보낼 수 있게 그대로 둠 */}
         {mailRes && mailRes.mail !== 'off' && (mailRes.mail === 'sent'
-          ? <p className="mb-2 rounded-input bg-brand-50 p-2 text-sm text-brand-800" data-testid="invite-mail-result" data-mail="sent"><b>{mailRes.to}</b> 로 초대 메일을 보냈습니다. 메일이 안 보인다고 하면 스팸함을 확인하게 하거나, 아래 링크를 카카오톡·문자로 보내 주세요.</p>
+          ? <p className="mb-2 rounded-input bg-brand-50 p-2 text-sm text-brand-800" data-testid="invite-mail-result" data-mail="sent"><b>{mailRes.to}</b> 로 초대 메일을 보냈습니다. 메일이 안 보인다고 하면 스팸함·지메일 &lsquo;업데이트&rsquo; 탭을 확인하게 하거나, 아래 링크를 카카오톡·문자로 보내 주세요.</p>
           : mailRes.mail === 'failed'
             ? <p className="mb-2 rounded-input bg-red-50 p-2 text-sm text-red-800" role="alert" data-testid="invite-mail-result" data-mail="failed">초대 메일을 보내지 못했습니다. 아래 링크를 카카오톡·문자로 직접 전달하세요.</p>
             : <p className="mb-2 rounded-input bg-slate-50 p-2 text-sm text-ink-2" data-testid="invite-mail-result" data-mail="dev">메일 발송이 설정되지 않은 환경이라 메일은 보내지 않았습니다. 아래 링크를 전달하세요.</p>)}

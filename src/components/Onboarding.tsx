@@ -94,7 +94,7 @@ export function Onboarding() {
           </section>
         </>}
         {step === 'invite' && <>
-          <p className="text-sm text-ink-2" data-testid="ob-invite-help">함께 일할 동료의 이메일을 적으면 초대 메일이 갑니다. 링크를 복사해 카카오톡·문자로 보내도 됩니다.{!inApp && <> 휴대폰 앱은 <b className="font-mono text-ink">{APP_GET_URL.replace(/^https?:\/\//, '')}</b> 에서 받습니다.</>}</p>
+          <p className="text-sm text-ink-2" data-testid="ob-invite-help">함께 일할 동료의 이메일을 적으면 초대 메일이 갑니다(안 보이면 스팸함·지메일 &lsquo;업데이트&rsquo; 탭을 확인하게 해 주세요). 링크를 복사해 카카오톡·문자로 보내도 됩니다.{!inApp && <> 휴대폰 앱은 <b className="font-mono text-ink">{APP_GET_URL.replace(/^https?:\/\//, '')}</b> 에서 받습니다.</>}</p>
           <Field label="이메일 (여러 명은 쉼표·줄바꿈)"><textarea className={inputCls} rows={3} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="kim@company.co.kr, lee@company.co.kr" data-testid="ob-invite-emails" /></Field>
           <Button variant="secondary" onClick={invite} disabled={busy} data-testid="ob-invite-send"><UserPlus />초대 보내기</Button>
           {links.length > 0 && (
