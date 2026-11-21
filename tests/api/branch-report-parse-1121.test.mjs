@@ -185,3 +185,12 @@ test('#1096 2단계 월간: 주차 이름 · 증감·증감률 · 미완료 추�
   assert.deepEqual(usageC([w('2026-10-02', [], [{ item: '헬스', count: '410' }, { item: '골프', count: '45' }]), w('2026-10-16', [], [{ item: '헬스', count: '443' }])], null),
     [{ item: '헬스', prev: '', cur: '443' }, { item: '골프', prev: '', cur: '45' }], '마지막 주에 없는 항목은 그 전 주 값');
 });
+
+test("로컬 11/21: 시설별 이용 현황 합계에 단위 — 같은 단위면 '543명', 섞이거나 없으면 숫자만, 빈 칸이 있으면 빈 글", async () => {
+  const { sumCol, delta } = await import('../../src/lib/branchReport/monthly.ts');
+  assert.equal(sumCol(['443명', '47명', '15명', '16명', '22명']), '543명');
+  assert.equal(sumCol(['443', '47']), '490');
+  assert.equal(sumCol(['443명', '5건']), '448', '단위가 섞이면 숫자만');
+  assert.equal(sumCol(['443명', '']), '', '빈 칸이 있으면 합계 없음');
+  assert.deepEqual(delta('500명', '543명'), { diff: '+43', rate: '▲8.6%' });
+});

@@ -341,14 +341,13 @@ export async function reportEvidence(u: SessionUser, id: string, refs: string[])
 export async function exportReport(u: SessionUser, id: string) {
   const sql = db(); const { r } = await loadReport(u, id, sql);
   const { writeXlsx } = await import('../xlsx');
-  const { delta, numOf } = await import('./monthly');
+  const { delta, numOf, sumCol } = await import('./monthly');
   const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   const b = r.body ?? {};
   const author = r.submitted_by_name ?? r.created_by_name ?? '';
   if (r.kind === 'monthly') {
     const usage: { item: string; prev: string; cur: string }[] = b.usage ?? [];
-    const sum = (k: 'prev' | 'cur') => { const v = usage.map((x) => numOf(x[k])); return v.length && v.every((n) => n !== null) ? String(v.reduce((a, n) => a + (n as number), 0)) : ''; };
-    const tot = { prev: sum('prev'), cur: sum('cur') };
+    const tot = { prev: sumCol(usage.map((x) => x.prev)), cur: sumCol(usage.map((x) => x.cur)) };
     const main = [
       ['월간 업무 보고서', r.unit_name], ['작성자', author], ['소속', '주식회사 다짐 운영팀'], ['기간', `${r.period_start} ~ ${r.period_end}`], ['보고일', r.submitted_at ? new Date(r.submitted_at).toISOString().slice(0, 10) : '(초안)'], [],
       ['■ 당월 중요업무 내역'], ['번호', '업무내용', '결과/산출물'], ...(b.important ?? []).map((x: any, k: number) => [k + 1, x.work, x.result]), [],
