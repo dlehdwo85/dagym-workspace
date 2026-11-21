@@ -9,7 +9,7 @@ import { Client, bootstrap, resetDb, startServer, testDb, BASE } from '../helper
 
 const PORT = 3206, FAKE = `http://localhost:${PORT}`;
 const TEAM = 'TEAM123456', SID = 'dev.work-in.signin.test', KID = 'KEY1234567', ISS = 'https://appleid.apple.com';
-let fake, srv, sql, ctx, ec, rsa, jwk;
+let fake, srv, sql, ctx, ec, rsa, jwk, PEM;
 const seen = { token: [], revoke: [] };
 let forceClient = false; // 로컬 11/21 #1094: 애플이 클라이언트를 거절하는 경우(키·팀 ID 등이 틀림) 흉내
 
@@ -70,7 +70,7 @@ before(async () => {
   fake = fakeApple();
   await resetDb();
   srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', OAUTH_TEST_BASE: FAKE, APPLE_TEAM_ID: TEAM, APPLE_SERVICES_ID: SID, APPLE_KEY_ID: KID,
-    APPLE_PRIVATE_KEY: (await exportPKCS8(ec.privateKey)).replace(/\n/g, '\\n') }); // 운영 환경 변수처럼 한 줄(\n) 로도 읽힘
+    APPLE_PRIVATE_KEY: (PEM = await exportPKCS8(ec.privateKey)).replace(/\n/g, '\\n') }); // 운영 환경 변수처럼 한 줄(\n) 로도 읽힘
   sql = testDb(); ctx = await bootstrap();
 });
 after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
@@ -141,7 +141,10 @@ describe('299차 Apple로 로그인', () => {
       const ok = await ctx.owner.ok('GET', '/api/platform/apple-check');
       assert.equal(ok.configured, true); assert.equal(ok.ok, true); assert.equal(ok.error, 'invalid_grant'); assert.match(ok.verdict, /^정상/);
       assert.deepEqual([ok.servicesId, ok.teamId, ok.keyId, ok.redirectUri], [SID, TEAM, KID, `${BASE}/api/auth/oauth/apple/callback`]);
-      assert.ok(!JSON.stringify(ok).includes('PRIVATE') && !JSON.stringify(ok).includes('client_secret'), '키·클라이언트 비밀 없음');
+      const keyBody = PEM.replace(/-----[^-]+-----/g, '').replace(/\s/g, '');
+      assert.ok(!JSON.stringify(ok).includes(keyBody.slice(20, 60)) && !JSON.stringify(ok).includes('client_secret'), '키 본문·클라이언트 비밀 없음');
+      // 로컬 11/21 긴급: 키의 '모양'만 진단(값 없음) — 시험 서버는 운영처럼 글자 \n 한 줄
+      assert.deepEqual([ok.keyShape.header, ok.keyShape.literalBackslashN, ok.keyShape.lines, ok.keyShape.readable, ok.keyShape.curve, ok.keyShape.fixedByNormalize], ['PRIVATE KEY', true, 1, true, 'prime256v1', false]);
       assert.equal(seen.token.at(-1).code, 'workin-selfcheck-not-a-real-code'); assert.equal(seen.token.at(-1).cs, true, '실제 로그인과 같은 서명');
       forceClient = true;
       const bad = await ctx.owner.ok('GET', '/api/platform/apple-check');

@@ -1,4 +1,5 @@
-import { createRemoteJWKSet, decodeJwt, importPKCS8, jwtVerify, SignJWT, type JWTPayload } from 'jose';
+import { createRemoteJWKSet, decodeJwt, jwtVerify, SignJWT, type JWTPayload } from 'jose';
+import { appleKeyObject, appleKeyShape } from './appleKey';
 import { db } from './db';
 import { decrypt, encrypt } from './crypto';
 
@@ -13,7 +14,7 @@ import { decrypt, encrypt } from './crypto';
 export const APPLE_ISS = 'https://appleid.apple.com';
 export function appleEnv() {
   const teamId = process.env.APPLE_TEAM_ID?.trim() ?? '', servicesId = process.env.APPLE_SERVICES_ID?.trim() ?? '', keyId = process.env.APPLE_KEY_ID?.trim() ?? '';
-  const privateKey = (process.env.APPLE_PRIVATE_KEY ?? '').replace(/\\n/g, '\n').trim();
+  const privateKey = (process.env.APPLE_PRIVATE_KEY ?? '').trim(); // 모양 정리(따옴표·\\n·머리줄 없음 등)는 appleKey.ts 가 읽을 때
   if (!teamId || !servicesId || !keyId || !privateKey) return null;
   const t = process.env.OAUTH_TEST_BASE?.replace(/\/$/, '');
   const base = t ? `${t}/oauth/apple` : `${APPLE_ISS}/auth`;
@@ -26,7 +27,7 @@ const keySet = (url: string) => { let k = jwks.get(url); if (!k) { k = createRem
 
 /** 클라이언트 비밀(5분) — Apple 이 요구하는 ES256 JWT */
 async function clientSecret(e: Env) {
-  const key = await importPKCS8(e.privateKey, 'ES256');
+  const key = appleKeyObject(e.privateKey); // 로컬 11/21 긴급: 운영 값이 엄격한 PKCS#8 모양이 아니라 importPKCS8 이 실패(key_parse) → 너그럽게 읽음
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT({}).setProtectedHeader({ alg: 'ES256', kid: e.keyId }).setIssuer(e.teamId).setSubject(e.servicesId).setAudience(APPLE_ISS)
     .setIssuedAt(now).setExpirationTime(now + 300).sign(key);
@@ -81,17 +82,18 @@ export async function appleProfile(code: string, redirectUri: string) {
 export async function appleSelfCheck(redirectUri: string) {
   const e = appleEnv();
   if (!e) return { configured: false as const, verdict: 'Apple 로그인 환경 변수 4개(APPLE_TEAM_ID·APPLE_SERVICES_ID·APPLE_KEY_ID·APPLE_PRIVATE_KEY) 중 빠진 것이 있습니다' };
+  const keyShape = appleKeyShape(e.privateKey); // 값은 돌려주지 않고 모양만(머리줄·줄 수·\\n·따옴표·본문 길이·고쳐서 읽었는지)
   let secret: string;
-  try { secret = await clientSecret(e); } catch (x) { return { configured: true as const, ok: false, error: 'key_parse', verdict: `APPLE_PRIVATE_KEY(.p8 내용)를 읽지 못했습니다 — 줄바꿈·머리줄 확인 (${String((x as Error)?.message ?? '').slice(0, 80)})` }; }
+  try { secret = await clientSecret(e); } catch (x) { return { configured: true as const, ok: false, error: 'key_parse', keyShape, verdict: `APPLE_PRIVATE_KEY(.p8 내용)를 읽지 못했습니다 — Vercel 에 애플에서 받은 .p8 파일 전체(-----BEGIN PRIVATE KEY----- 부터 -----END PRIVATE KEY----- 까지)를 다시 붙여 넣어 주세요 (${String((x as Error)?.message ?? '').slice(0, 80)})` }; }
   const form = new URLSearchParams({ grant_type: 'authorization_code', client_id: e.servicesId, client_secret: secret, code: 'workin-selfcheck-not-a-real-code', redirect_uri: redirectUri });
   const r = await fetch(e.token, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form, signal: AbortSignal.timeout(10_000) }).catch(() => null);
-  if (!r) return { configured: true as const, ok: false, error: 'network', verdict: '애플 토큰 주소에 닿지 못했습니다(잠시 뒤 다시)' };
+  if (!r) return { configured: true as const, ok: false, error: 'network', keyShape, verdict: '애플 토큰 주소에 닿지 못했습니다(잠시 뒤 다시)' };
   const j = await r.json().catch(() => ({})) as { error?: string };
   const err = String(j.error ?? r.status);
   const verdict = err === 'invalid_grant' ? '정상 — 클라이언트 비밀 서명을 애플이 받아들였습니다(키·팀 ID·키 ID·서비스 ID 맞음). 실제 로그인이 실패하면 redirect 주소(애플 개발자 화면의 Return URL)와 id_token 확인 쪽을 보세요.'
     : err === 'invalid_client' ? '설정 문제 — 애플이 클라이언트를 거절했습니다. APPLE_TEAM_ID·APPLE_KEY_ID·APPLE_SERVICES_ID 가 애플 개발자 화면과 같은지, 키가 그 서비스 ID 의 "Sign in with Apple" 에 연결돼 있는지 확인하세요.'
     : `예상 밖 응답(${err}) — 애플 상태를 확인하세요.`;
-  return { configured: true as const, ok: err === 'invalid_grant', error: err, servicesId: e.servicesId, teamId: e.teamId, keyId: e.keyId, redirectUri, verdict };
+  return { configured: true as const, ok: err === 'invalid_grant', error: err, servicesId: e.servicesId, teamId: e.teamId, keyId: e.keyId, redirectUri, keyShape, verdict };
 }
 
 /** 처음 한 번 오는 이름(form 의 user JSON) — 한글이면 성+이름, 아니면 이름 성 */
