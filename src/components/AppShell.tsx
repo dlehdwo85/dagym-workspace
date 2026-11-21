@@ -706,7 +706,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         </Modal>
         <QuickAddTask open={quick} onClose={() => setQuick(false)} />
         <CommandPalette open={palette} onClose={() => setPalette(false)} onQuickAdd={() => setQuick(true)} />
-        <AiConsentGate off={!!session.support} />
+        <AiConsentGate off={!!session.support || !!session.tenant?.signup} />{/* 로컬 11/21 #1092: 승인 대기·거절 회사는 '가입 신청이 접수됐습니다' 창만(AI 창이 겹쳐 뜨지 않게) */}
         <Toaster />
         <ConfirmHost />
       </div>

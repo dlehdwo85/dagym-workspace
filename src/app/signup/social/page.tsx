@@ -22,6 +22,7 @@ function SocialSignup() {
   const [f, setF] = useState({ name: '', company: '', size: '', industry: '', industries: [] as string[] });
   const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false, alimtalk: false });
   const [aiStt, setAiStt] = useState(false);
+  const all = agree.terms && agree.age14 && agree.privacy && agree.ai && agree.marketing;
   const [phone, setPhone] = useState(''); // 304차 #871 결제·약관 안내 알림톡(선택)
   const [contact, setContact] = useState(''); // 359차 승인제 가입: 연락받을 전화
   const [approval, setApproval] = useState(true);
@@ -62,6 +63,8 @@ function SocialSignup() {
       <Field label="이름"><input className={inputCls + ' h-11'} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={50} aria-label="이름" /></Field>
       {mode === 'team' && <CompanyFields v={f} onChange={(v) => setF({ ...f, ...v })} />}
       <div className="space-y-2 rounded-card border border-line p-3">
+        {/* 로컬 11/21 #1091(대표 지적): 이메일 가입처럼 [전체 동의] — 필수 3 + AI + 소식(알림톡은 전화번호가 필요해 따로) */}
+        <label className="flex items-center gap-2 border-b border-line pb-2 text-sm font-semibold"><input type="checkbox" checked={all} onChange={(e) => setAgree({ ...agree, terms: e.target.checked, age14: e.target.checked, privacy: e.target.checked, ai: e.target.checked, marketing: e.target.checked })} aria-label="전체 동의" data-testid="agree-all" />전체 동의</label>
         {box('terms', <><Link href="/terms" target="_blank" className="underline">이용약관</Link> 동의</>, true)}
         {box('privacy', <><Link href="/privacy" target="_blank" className="underline">개인정보 수집·이용</Link> 동의</>, true)}
         {box('age14', '만 14세 이상입니다', true)}

@@ -32,6 +32,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
       if (r.kind === 'login') return toApp({ t: await createHandoff(r.userId, r.mfa, r.client, ac) });
     }
     if (sheet && r.kind !== 'linked') return toApp({ error: r.kind === 'error' ? r.message : '로그인을 마치지 못했습니다. 앱에서 다시 시도해 주세요.' });
+    if (r.kind === 'error') console.warn('[oauth] 실패', provider, r.code ?? 'error'); // 로컬 11/21 #1094: 운영 기록에 코드만(이메일이 든 문구는 남기지 않음)
     if (r.kind === 'error') return go(`/login?oauth_error=${encodeURIComponent(r.message)}${r.code ? `&code=${r.code}` : ''}`);
     if (r.kind === 'linked') return go(`/settings?linked=${provider}`);
     if (r.kind === 'pending') return go(`/signup/social?t=${encodeURIComponent(r.token)}`);
@@ -42,6 +43,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
   } catch (e) {
     const msg = e instanceof HttpError ? e.message : '로그인 중 오류가 났습니다. 다시 시도해 주세요.';
     if (!(e instanceof HttpError)) console.error('[oauth]', provider, e);
+    else console.warn('[oauth] 실패', provider, e.status, e.message.slice(0, 80)); // 이 단계 문구에는 이메일·비밀값이 없음(상태 만료·코드 없음·Apple 실패 이유 코드)
     return ac || sheet ? toApp({ error: msg }) : go(`/login?oauth_error=${encodeURIComponent(msg)}`);
   }
 }
