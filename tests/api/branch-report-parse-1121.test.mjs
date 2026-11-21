@@ -205,3 +205,13 @@ test('#1106 하이링크 이용현황 표 읽기: 줄 모양·글자가 붙은 P
   assert.deepEqual(c.rows.map((r) => r.item), ['스크린 골프', '독서실']);
   assert.deepEqual(parseHilinkUsage('안녕하세요 11월 21일 보고서 3쪽'), { rows: [], total: null });
 });
+
+test("로컬 11/21 실제 하이링크 PDF: 머리줄 '증감률(%)' 이 '증감률'·'(%)' 로 끊겨도 첫 시설 이름에 붙지 않음 · '|' 칸 구분 · 떨어진 '%'", async () => {
+  const { parseHilinkUsage } = await import('../../src/lib/branchReport/hilinkUsage.ts');
+  const a = parseHilinkUsage('■ 시설별 이용 현황 (전월 대비)\n시설 전달 인원 이번달 인원 인원 증감 증감률\n(%)\n헬스장 1,690명 1,696명 +6명 ▲ 0.4%\n실내체육관 10명 8명 -2명 ▼ 20.0%\n전시설 총 이용현황 7,407명 5,308명 -2,099명 ▼ 28.3%\n비고');
+  assert.deepEqual(a.rows.map((r) => r.item), ['헬스장', '실내체육관']); assert.equal(a.total.cur, '5,308명'); assert.equal(a.total.diff, '-2,099명');
+  const b = parseHilinkUsage('시설전달 인원이번달 인원인원 증감증감률(%)헬스장1,690명1,696명+6명▲ 0.4%');
+  assert.equal(b.rows[0].item, '헬스장', '붙어 나온 머리줄');
+  const c = parseHilinkUsage('시설 | 전달 인원 | 이번달 인원 | 인원 증감 | 증감률(%)\n헬스장 | 1,690명 | 1,696명 | +6명 | ▲ 0.4 %\n스크린골프(2층) 30명 31명 +1명 ▲ 3.3%');
+  assert.deepEqual(c.rows.map((r) => [r.item, r.rate]), [['헬스장', '▲0.4%'], ['스크린골프(2층)', '▲3.3%']], "'|' 칸 구분·떨어진 % · 괄호 든 이름");
+});

@@ -22,7 +22,13 @@ export function tokens(text: string): string[] {
     .replace(/([▲▼△▽])\s+/g, '$1')
     .replace(/(?<=\S)(?=[▲▼△▽+])/g, ' ')
     .replace(/(?<=[가-힣A-Za-z)\]])(?=[\d])/g, ' ');
-  return t.split(/\s+/).filter(Boolean);
+  // 기호뿐인 조각('|'·'(%)'·'%'·')'·'■' — 표 칸 구분·머리줄 조각)은 버림. '-'(빈 값)는 남기고, 따로 떨어진 '%' 는 앞 숫자에 붙임
+  const out: string[] = [];
+  for (const w of t.split(/\s+/).filter(Boolean)) {
+    if (w === '%' && out.length && /^[▲▼△▽]?-?[\d.]+$/.test(out[out.length - 1])) { out[out.length - 1] += '%'; continue; }
+    if (DASH.test(w) || /[\p{L}\p{N}]/u.test(w)) out.push(w);
+  }
+  return out;
 }
 const isNum = (s: string) => COUNT.test(s) || SIGNED.test(s) || RATE.test(s) || DASH.test(s);
 
@@ -34,9 +40,13 @@ export function parseHilinkUsage(text: string): { rows: UsageRow[]; total: Usage
   for (let i = 0; i < ts.length; i++) {
     const t = ts[i];
     if (!isNum(t)) {
-      if (HEAD_END.test(t) && !HEADER.test(t)) { const rest = t.split(HEAD_END).pop() ?? ''; name = rest ? [rest] : []; continue; }
-      if (HEADER.test(t) || DATEISH.test(t)) { name = []; continue; }
-      name.push(t); if (name.length > 4) name.shift();
+      // 로컬 11/21 실제 PDF: 머리줄 '증감률(%)' 이 '증감률' · '(%)' 로 끊겨 첫 시설 이름이 '(% ) 헬스장' 이 됨 → 기호 조각은 tokens() 에서 버리고,
+      // 낱말 앞에 붙은 닫는 기호·%(')헬스장')는 떼어 냄
+      const w = (HEAD_END.test(t) && !HEADER.test(t) ? t.split(HEAD_END).pop() ?? '' : t).replace(/^[)\]}>|·:,.\-–—%]+/, '');
+      if (HEAD_END.test(t) && !HEADER.test(t)) { name = []; if (/[\p{L}\p{N}]/u.test(w)) name.push(w); continue; }
+      if (!/[\p{L}\p{N}]/u.test(w)) continue;
+      if (HEADER.test(w) || DATEISH.test(w)) { name = []; continue; }
+      name.push(w); if (name.length > 4) name.shift();
       continue;
     }
     if (!name.length || !(COUNT.test(t) || DASH.test(t)) || !(COUNT.test(ts[i + 1] ?? '') || DASH.test(ts[i + 1] ?? ''))) { name = []; continue; }
