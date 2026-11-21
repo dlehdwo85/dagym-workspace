@@ -87,6 +87,17 @@ export async function appGet({ browser, owner, BASE, SHOTS, sql }) {
   assert.match(await guide.innerText(), /www\.work-in\.dev\/app/);
   await owner.getByTestId('invite-guide-copy').click(); await owner.getByText('안내 문구를 복사했습니다').waitFor();
   await owner.keyboard.press('Escape');
+  // 로컬 11/21: 잘못 보낸 초대는 화면에서 [초대 취소] — 한 번 더 확인 → 목록에 '초대 취소됨'
+  await owner.getByTestId('invite-open').click();
+  const dlg2 = owner.getByRole('dialog', { name: '직원 초대' });
+  await dlg2.getByLabel('이름').fill('잘못보낸 초대'); await dlg2.getByLabel('회사 이메일').fill('appget-oops@dagym.test');
+  await dlg2.getByRole('button', { name: '초대 링크 만들기' }).click(); await owner.getByTestId('invite-link').waitFor(); await owner.keyboard.press('Escape');
+  const oops = owner.locator('tr', { hasText: 'appget-oops@dagym.test' });
+  owner.once('dialog', (d) => { assert.match(d.message(), /잘못보낸 초대\(appget-oops@dagym\.test\) 초대를 취소할까요\?/); d.accept(); });
+  await oops.getByTestId('user-cancel-invite').click();
+  await owner.getByText('잘못보낸 초대 초대를 취소했습니다').first().waitFor();
+  await oops.getByTestId('user-status').getByText('초대 취소됨').waitFor();
+  assert.equal(await oops.getByTestId('user-cancel-invite').count() + await oops.getByTestId('user-reinvite').count(), 0, '취소한 줄에는 초대 단추가 없음');
   await a.goto(link); await a.getByText('초대했습니다').waitFor();
   await a.getByLabel('비밀번호 (8자 이상)').fill('appget-pass-1'); await a.getByLabel('비밀번호 확인').fill('appget-pass-1');
   // #1086: 초대 수락에도 [선택] AI 기능 이용 동의 한 줄 — 체크하면 AI 동의(지금 판)로 저장

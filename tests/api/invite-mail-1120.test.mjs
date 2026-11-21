@@ -77,6 +77,27 @@ describe('직원 초대 메일 자동 발송', () => {
     const [inv] = await sql`select mail_status from invitations where email = 'review@workin.test' and revoked_at is null`; assert.equal(inv.mail_status, null);
   });
 
+  test('[초대 취소](로컬 11/21): 링크 취소 + 사용 중지 · 감사 기록 · 다시 취소 400 · 직원 막힘 · 모양 틀린 id 404 · 같은 이메일로 다시 초대하면 가입됨', async () => {
+    const r = await ctx.owner.ok('POST', '/api/admin/users', { email: 'oops@dagym.test', name: '잘못보냄', role: 'staff' });
+    const token = r.path.split('/').pop();
+    const u = (await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.email === 'oops@dagym.test');
+    assert.equal((await ctx.staffA.client.post(`/api/admin/users/${u.id}/cancel-invite`, {})).status >= 403, true, '직원은 못 함');
+    assert.equal((await ctx.owner.req('POST', '/api/admin/users/not-a-uuid/cancel-invite', {})).status, 404, '모양이 틀린 id 는 404(500 아님)');
+    assert.equal((await ctx.owner.req('DELETE', '/api/admin/invitations/not-a-uuid')).status, 404, '예전 초대 취소 API 도 404');
+    const c = await ctx.owner.ok('POST', `/api/admin/users/${u.id}/cancel-invite`, {});
+    assert.equal(c.revoked, 1);
+    const after = (await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.id === u.id);
+    assert.equal(after.status, 'disabled'); assert.equal(after.has_password, false); assert.equal(after.last_login_at, null, '화면은 "초대 취소됨"으로 표시');
+    const old = await new Client('o').req('GET', `/api/invitations/${token}`); assert.equal(old.status, 400); assert.match(old.body.error.message, /취소된 초대/);
+    assert.equal((await sql`select count(*)::int n from audit_logs where action = 'user.invite_cancel' and target_id = ${u.id}`)[0].n, 1);
+    assert.equal((await ctx.owner.req('POST', `/api/admin/users/${u.id}/cancel-invite`, {})).status, 400, '이미 취소됨');
+    assert.equal((await ctx.owner.req('POST', `/api/admin/users/${ctx.staffA.id}/cancel-invite`, {})).status, 400, '가입한 사람은 초대 취소 대상 아님');
+    const again = await ctx.owner.ok('POST', '/api/admin/users', { email: 'oops@dagym.test', name: '다시초대', role: 'staff' });
+    assert.equal((await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.id === u.id).status, 'invited', '다시 초대하면 초대됨으로');
+    await new Client('oops').ok('POST', `/api/invitations/${again.path.split('/').pop()}/accept`, { password: 'oops-pass-1234' });
+    assert.equal((await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.id === u.id).status, 'active');
+  });
+
   test('직원·다른 회사는 초대 못 함(그대로) · 267 마이그레이션 전(칸 없음)에도 초대·메일·목록이 오류 없이 동작', async () => {
     assert.equal((await ctx.staffA.client.post('/api/admin/users', { email: 'x@dagym.test', name: 'x', role: 'staff' })).status === 403 || (await ctx.staffA.client.post('/api/admin/users', { email: 'x@dagym.test', name: 'x', role: 'staff' })).status === 404, true);
     await sql`alter table invitations drop column mail_status, drop column mail_at, drop column mail_error`;
