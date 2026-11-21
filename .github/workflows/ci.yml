@@ -3,7 +3,14 @@ name: ci
 on:
   push:
     branches: [main, 'claude/**']
+    # 로컬 11/21: 기록만 바꾼 푸시(docs·*.md — 로컬·클라우드 기록 커밋)는 시험을 돌리지 않음(실행이 줄을 서서 1시간 넘게 밀리던 것). 코드가 함께 바뀌면 그대로 돌림
+    paths-ignore: ['docs/**', '**/*.md']
   pull_request:
+    paths-ignore: ['docs/**', '**/*.md']
+# 작업 브랜치(claude/**)는 같은 내용이 main 에도 올라가므로 새 푸시가 오면 앞 실행을 취소 — main 은 커밋마다 끝까지 돌림
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 permissions:
   contents: read
 jobs:
