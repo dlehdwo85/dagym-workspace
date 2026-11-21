@@ -5,7 +5,11 @@ export type MonthlyBody = {
   important: { work: string; result: string; evidence: string[]; check?: boolean }[];
   progress: { week: string; task: string; focus: string; result: string; note: string; evidence: string[]; check?: boolean }[];
   next: { goal: string; actions: string }[];
-  usage: { item: string; prev: string; cur: string }[];
+  usage: { item: string; prev: string; cur: string; diff?: string; rate?: string }[];
+  /** #1106: 하이링크 이용현황 파일에서 읽은 합계 줄(원문 그대로) · 올린 파일 표시 · 주간 값 제안 */
+  usageTotal?: { item: string; prev: string; cur: string; diff: string; rate: string } | null;
+  usageFile?: { name: string; size: number; parsed: boolean; rows: number; at: string } | null;
+  usageWeekly?: { item: string; prev: string; cur: string }[];
   unfinished: { title: string; since: string; lastWeek: string; state: string }[];
   resolved: { title: string; doneWeek: string }[];
   notes: string;
@@ -30,7 +34,9 @@ export const sumCol = (vals: string[]) => {
 export const usageTotal = (usage: MonthlyBody['usage']) => ({ prev: sumCol(usage.map((x) => x.prev)), cur: sumCol(usage.map((x) => x.cur)) });
 
 export function MonthlyView({ unit, start, end, author, reportDay, body }: { unit: string; start: string; end: string; author: string; reportDay: string; body: MonthlyBody }) {
-  const tot = usageTotal(body.usage); const td2 = delta(tot.prev, tot.cur);
+  const st = body.usageTotal; const calc = usageTotal(body.usage);
+  const tot = st ?? { item: '전 시설 합계', prev: calc.prev, cur: calc.cur, diff: '', rate: '' }; const td2 = delta(tot.prev, tot.cur);
+  const file = body.usageFile;
   return (
     <article className="space-y-4 text-[13px] leading-relaxed text-slate-900" data-testid="branch-monthly-view">
       <header className="flex items-start justify-between gap-3 border-b-2 border-slate-800 pb-2">
@@ -66,10 +72,10 @@ export function MonthlyView({ unit, start, end, author, reportDay, body }: { uni
       <section className="break-before-page">
         <h2 className="mb-1.5 font-bold">시설별 이용 현황</h2>
         {body.usage.length ? <table className="w-full border-collapse"><thead><tr><th className={th}>시설</th><th className={th}>전달 인원</th><th className={th}>이번달 인원</th><th className={th}>증감</th><th className={th}>증감률</th></tr></thead>
-          <tbody>{body.usage.map((x, k) => { const d = delta(x.prev, x.cur); return <tr key={k}><td className={td}>{x.item}</td><td className={td}>{x.prev || '-'}</td><td className={td}>{x.cur || '-'}</td><td className={td}>{d.diff || '-'}</td><td className={td}>{d.rate || '-'}</td></tr>; })}
-            <tr className="font-semibold"><td className={td}>전 시설 합계</td><td className={td}>{tot.prev || '-'}</td><td className={td}>{tot.cur || '-'}</td><td className={td}>{td2.diff || '-'}</td><td className={td}>{td2.rate || '-'}</td></tr></tbody></table>
-          : <p className="text-slate-500">이용 인원 자료 없음</p>}
-        <p className="mt-1 text-[11px] text-slate-500">이번달 = 그 달 마지막 주간보고의 이용 인원 · 전달 = 지난달 마지막 주간보고의 이용 인원</p>
+          <tbody>{body.usage.map((x, k) => { const d = delta(x.prev, x.cur); return <tr key={k}><td className={td}>{x.item}</td><td className={td}>{x.prev || '-'}</td><td className={td}>{x.cur || '-'}</td><td className={td}>{x.diff || d.diff || '-'}</td><td className={td}>{x.rate || d.rate || '-'}</td></tr>; })}
+            <tr className="font-semibold"><td className={td}>{tot.item || '전 시설 합계'}</td><td className={td}>{tot.prev || '-'}</td><td className={td}>{tot.cur || '-'}</td><td className={td}>{tot.diff || td2.diff || '-'}</td><td className={td}>{tot.rate || td2.rate || '-'}</td></tr></tbody></table>
+          : <p className="text-slate-500" data-testid="branch-usage-empty">{file ? `하이링크 이용현황 첨부: ${file.name} — 표를 읽지 못해 원본을 첨부했습니다` : '하이링크 이용현황 미첨부 — 월간 화면에서 하이링크 이용현황(PDF·엑셀)을 올려 주세요'}</p>}
+        <p className="mt-1 text-[11px] text-slate-500">{file ? `출처: 하이링크 이용현황(${file.name})${file.parsed ? '' : ' — 원본 첨부'}` : body.usage.length ? '직접 입력한 값' : ''}</p>
       </section>
       {body.notes && <section><h2 className="mb-1 font-bold">메모</h2><p className="whitespace-pre-line">{body.notes}</p></section>}
     </article>

@@ -258,7 +258,7 @@ export async function generateMonthly(u: SessionUser, i: z.infer<typeof monthlyI
   const sql = db();
   const t = await siteFor(u, i.siteId, sql);
   if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
-  const [ex] = await sql<{ status: string }[]>`select status from branch_reports where site_id = ${t.id} and kind = 'monthly' and report_day = ${range.end}`;
+  const [ex] = await sql<{ status: string; body: any }[]>`select status, body from branch_reports where site_id = ${t.id} and kind = 'monthly' and report_day = ${range.end}`;
   if (ex?.status === 'submitted') throw new HttpError(409, 'submitted', '이미 제출한 월간 보고서입니다 — 고치려면 [제출 취소]를 요청하세요');
   const rows = await sql<{ id: string; day: string; body: any }[]>`select id, report_day::text as day, body from branch_reports
     where site_id = ${t.id} and kind = 'weekly' and status = 'submitted' and report_day between ${range.start} and ${range.end} order by report_day`;
@@ -281,7 +281,9 @@ export async function generateMonthly(u: SessionUser, i: z.infer<typeof monthlyI
   await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
     values (${tenantOf(u)}, ${u.id}, ${randomUUID()}, 'anthropic', ${r.model ?? prov.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${costUsd(r.model ?? prov.model, r.usage)}, 'branch_report')`;
   let raw: unknown; try { raw = JSON.parse((r.content as any[]).find((b) => b.type === 'text')?.text ?? '{}'); } catch { throw new HttpError(502, 'ai_format', 'AI 답을 읽지 못했습니다 — 다시 눌러 주세요'); }
-  const parsed = monthlyBodySchema.safeParse({ ...(raw as object), usage: usageC(weeklies, prev ? { id: prev.id, day: prev.day, body: prev.body ?? {} } : null), unfinished: track.unfinished, resolved: track.resolved, sources: { w: digest.sources } });
+  // #1106(대표 11/21): C 는 하이링크 이용현황 파일에서 — 주간 글로 계산한 값은 제안(usageWeekly)으로만. 다시 만들어도 올린 하이링크 값·파일은 그대로
+  const keep = ex?.body?.usageFile ? { usage: ex.body.usage ?? [], usageTotal: ex.body.usageTotal ?? null, usageFile: ex.body.usageFile } : { usage: [], usageTotal: null, usageFile: null };
+  const parsed = monthlyBodySchema.safeParse({ ...(raw as object), ...keep, usageWeekly: usageC(weeklies, prev ? { id: prev.id, day: prev.day, body: prev.body ?? {} } : null), unfinished: track.unfinished, resolved: track.resolved, sources: { w: digest.sources } });
   if (!parsed.success) throw new HttpError(502, 'ai_format', 'AI 답의 모양이 양식과 달랐습니다 — 다시 눌러 주세요');
   const { body, fixed } = verifyMonthly(parsed.data, { refs: new Set(digest.sources.map((x) => x.ref)), text: digest.text });
   const [row] = await sql<{ id: string }[]>`insert into branch_reports (tenant, site_id, kind, period_start, period_end, report_day, status, source_text, body, ai_model, created_by, updated_by)
@@ -298,7 +300,9 @@ export async function saveReport(u: SessionUser, id: string, b: unknown, ip: str
   if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
   if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다 — 관리자에게 [제출 취소]를 요청하세요');
   const schema = r.kind === 'monthly' ? monthlyBodySchema : bodySchema;
-  const body = schema.parse({ ...(b as object), sources: r.body?.sources ?? { w: [] } });
+  // 서버가 정하는 칸(근거 목록·올린 하이링크 파일 표시·주간 값 제안)은 화면에서 온 값으로 바꾸지 않음
+  const fixedKeys = r.kind === 'monthly' ? { usageFile: r.body?.usageFile ?? null, usageWeekly: r.body?.usageWeekly ?? [] } : {};
+  const body = schema.parse({ ...(b as object), ...fixedKeys, sources: r.body?.sources ?? { w: [] } });
   await sql`update branch_reports set body = ${sql.json(body as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
   await audit(sql, u.id, 'branch_report.edit', 'branch_report', id, {}, ip);
   return getReport(u, id);
@@ -337,6 +341,51 @@ export async function reportEvidence(u: SessionUser, id: string, refs: string[])
   }) };
 }
 
+// ---------------- #1106 하이링크 이용현황 파일(월간 C) — 올리기·내려받기·빼기 ----------------
+export const usageFileInput = z.object({ name: z.string().trim().min(1).max(200), b64: z.string().min(1).max(5_600_000) });
+const USAGE_EXT: Record<string, string> = { pdf: 'application/pdf', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', csv: 'text/csv' };
+export async function uploadUsageFile(u: SessionUser, id: string, i: z.infer<typeof usageFileInput>, ip: string | null) {
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  if (r.kind !== 'monthly') throw badRequest('월간 보고서에만 올릴 수 있습니다');
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다 — [제출 취소] 뒤에 올리세요');
+  const ext = i.name.toLowerCase().split('.').pop() ?? '';
+  const mime = USAGE_EXT[ext];
+  if (!mime) throw badRequest('PDF·엑셀(xlsx)·CSV 파일만 올릴 수 있습니다');
+  const buf = Buffer.from(i.b64, 'base64');
+  if (!buf.length || buf.length > 4_000_000) throw badRequest('파일이 비었거나 4MB 를 넘습니다');
+  // 표 읽기: PDF 는 글자 추출(스캔 PDF 는 못 읽음 → 첨부만), 엑셀·CSV 는 칸을 띄어 이어 붙인 글
+  let text = '';
+  try {
+    if (ext === 'pdf') text = (await (await import('../pdfText')).pdfText(buf)) ?? '';
+    else { const ti = await import('../taskImport'); text = (ext === 'xlsx' ? ti.parseXlsx(buf) : ti.parseCsv(buf)).map((row) => row.join(' ')).join('\n'); }
+  } catch { text = ''; }
+  const { parseHilinkUsage } = await import('./hilinkUsage');
+  const got = parseHilinkUsage(text);
+  await sql`insert into branch_report_files (tenant, report_id, kind, name, mime, size, data, created_by) values (${tenantOf(u)}, ${id}, 'hilink_usage', ${i.name}, ${mime}, ${buf.length}, ${buf}, ${u.id})
+    on conflict (report_id, kind) do update set name = excluded.name, mime = excluded.mime, size = excluded.size, data = excluded.data, created_by = excluded.created_by, created_at = now()`;
+  const usageFile = { name: i.name, size: buf.length, parsed: got.rows.length > 0, rows: got.rows.length, at: new Date().toISOString() };
+  const body = { ...(r.body ?? {}), usageFile, ...(got.rows.length ? { usage: got.rows, usageTotal: got.total } : {}) };
+  await sql`update branch_reports set body = ${sql.json(body as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
+  await audit(sql, u.id, 'branch_report.usage_file', 'branch_report', id, { rows: got.rows.length, total: !!got.total, ext }, ip);
+  return { ...(await getReport(u, id)), parsed: got.rows.length, total: !!got.total };
+}
+export async function getUsageFile(u: SessionUser, id: string) {
+  const sql = db(); await loadReport(u, id, sql);
+  const [f] = await sql<{ name: string; mime: string; data: Buffer }[]>`select name, mime, data from branch_report_files where report_id = ${id} and kind = 'hilink_usage'`;
+  if (!f) throw notFound('올린 하이링크 이용현황 파일이 없습니다');
+  return f;
+}
+export async function removeUsageFile(u: SessionUser, id: string, ip: string | null) {
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다');
+  await sql`delete from branch_report_files where report_id = ${id} and kind = 'hilink_usage'`;
+  await sql`update branch_reports set body = ${sql.json({ ...(r.body ?? {}), usageFile: null } as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
+  await audit(sql, u.id, 'branch_report.usage_file_remove', 'branch_report', id, {}, ip);
+  return getReport(u, id);
+}
+
 // ---------------- 내려받기(엑셀, 2단계) — 주간·월간 ----------------
 export async function exportReport(u: SessionUser, id: string) {
   const sql = db(); const { r } = await loadReport(u, id, sql);
@@ -346,8 +395,9 @@ export async function exportReport(u: SessionUser, id: string) {
   const b = r.body ?? {};
   const author = r.submitted_by_name ?? r.created_by_name ?? '';
   if (r.kind === 'monthly') {
-    const usage: { item: string; prev: string; cur: string }[] = b.usage ?? [];
-    const tot = { prev: sumCol(usage.map((x) => x.prev)), cur: sumCol(usage.map((x) => x.cur)) };
+    const usage: { item: string; prev: string; cur: string; diff?: string; rate?: string }[] = b.usage ?? [];
+    const st = b.usageTotal as { item: string; prev: string; cur: string; diff: string; rate: string } | null;
+    const tot = st ?? { item: '전 시설 합계', prev: sumCol(usage.map((x) => x.prev)), cur: sumCol(usage.map((x) => x.cur)), diff: '', rate: '' };
     const main = [
       ['월간 업무 보고서', r.unit_name], ['작성자', author], ['소속', '주식회사 다짐 운영팀'], ['기간', `${r.period_start} ~ ${r.period_end}`], ['보고일', r.submitted_at ? new Date(r.submitted_at).toISOString().slice(0, 10) : '(초안)'], [],
       ['■ 당월 중요업무 내역'], ['번호', '업무내용', '결과/산출물'], ...(b.important ?? []).map((x: any, k: number) => [k + 1, x.work, x.result]), [],
@@ -356,8 +406,9 @@ export async function exportReport(u: SessionUser, id: string) {
       ['■ 미완료(다음 달 확인)'], ['항목', '상태', '처음', '마지막 주'], ...(b.unfinished ?? []).map((x: any) => [x.title, x.state, x.since, x.lastWeek]),
       ...(b.notes ? [[], ['메모', b.notes]] : []),
     ];
-    const c = [['시설', '전달 인원', '이번달 인원', '증감', '증감률'], ...usage.map((x) => { const d = delta(x.prev, x.cur); return [x.item, x.prev, x.cur, d.diff, d.rate]; }),
-      (() => { const d = delta(tot.prev, tot.cur); return ['전 시설 합계', tot.prev, tot.cur, d.diff, d.rate]; })()];
+    const fileNote = b.usageFile ? [[], [`하이링크 이용현황 첨부: ${b.usageFile.name}${b.usageFile.parsed ? '' : ' (표를 읽지 못해 원본을 첨부함)'}`]] : usage.length ? [] : [[], ['하이링크 이용현황 미첨부']];
+    const c = [['시설', '전달 인원', '이번달 인원', '증감', '증감률'], ...usage.map((x) => { const d = delta(x.prev, x.cur); return [x.item, x.prev, x.cur, x.diff || d.diff, x.rate || d.rate]; }),
+      ...(usage.length || st ? [(() => { const d = delta(tot.prev, tot.cur); return [tot.item || '전 시설 합계', tot.prev, tot.cur, tot.diff || d.diff, tot.rate || d.rate]; })()] : []), ...fileNote];
     return { fileName: `${r.unit_name}_월간보고_${r.period_start.slice(0, 7)}.xlsx`, data: writeXlsx([{ name: '월간 업무 보고서', rows: main }, { name: '시설별 이용 현황', rows: c }]) };
   }
   const rows = [
