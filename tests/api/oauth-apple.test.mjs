@@ -11,6 +11,7 @@ const PORT = 3206, FAKE = `http://localhost:${PORT}`;
 const TEAM = 'TEAM123456', SID = 'dev.work-in.signin.test', KID = 'KEY1234567', ISS = 'https://appleid.apple.com';
 let fake, srv, sql, ctx, ec, rsa, jwk;
 const seen = { token: [], revoke: [] };
+let forceClient = false; // 로컬 11/21 #1094: 애플이 클라이언트를 거절하는 경우(키·팀 ID 등이 틀림) 흉내
 
 const idToken = (o, aud = SID) => new SignJWT({ email: o.email, email_verified: 'true', is_private_email: o.private ? 'true' : 'false' })
   .setProtectedHeader({ alg: 'RS256', kid: 'apple-test' }).setIssuer(ISS).setAudience(aud).setSubject(o.sub).setIssuedAt().setExpirationTime('10m').sign(rsa.privateKey);
@@ -26,6 +27,8 @@ function fakeApple() {
       if (path === '/oauth/apple/token') {
         seen.token.push({ ...f, cs });
         if (!cs || f.client_id !== SID || f.grant_type !== 'authorization_code') return j({ error: 'invalid_client' }, 400);
+        if (forceClient) return j({ error: 'invalid_client' }, 400);
+        if (String(f.code ?? '').startsWith('workin-selfcheck')) return j({ error: 'invalid_grant' }, 400); // 자가 점검의 가짜 코드
         const prof = JSON.parse(Buffer.from(f.code, 'base64url').toString());
         return j({ access_token: 'at', token_type: 'Bearer', id_token: await idToken(prof, prof.aud ?? SID), refresh_token: `rt-${prof.sub}` });
       }
@@ -110,6 +113,40 @@ describe('299차 Apple로 로그인', () => {
     assert.match(ios.searchParams.get('oauth_error'), /회사 관리자의 초대로 만들어집니다/);
     // 아이폰 앱이어도 이미 연결된 계정은 로그인
     assert.equal((await apple(new Client(), { sub: 'apple.001', email: 'x7k2@privaterelay.appleid.com' }, 'client=ios')).pathname, '/');
+  });
+
+  test('#1094 실패 이유를 남김: id_token 대상이 다르면 이유 코드(id_token)·aud·기대 aud — 이메일·코드·토큰은 남기지 않음 · 애플이 클라이언트를 거절하면 token_invalid_client', async () => {
+    await sql`delete from audit_logs where action = 'auth.oauth_failed'`;
+    const prof = { sub: 'apple.bad2', email: 'bad2@example.com', aud: 'someone.else' };
+    const bad = await apple(new Client(), prof);
+    assert.match(bad.searchParams.get('oauth_error') ?? '', /Apple 로그인에 실패했습니다\. 다시 시도해 주세요\. \(id_token\)/);
+    const [a1] = await sql`select detail, actor_id from audit_logs where action = 'auth.oauth_failed' order by id desc limit 1`;
+    assert.equal(a1.detail.provider, 'apple'); assert.equal(a1.detail.reason, 'id_token'); assert.equal(a1.detail.aud, 'someone.else'); assert.equal(a1.detail.expectAud, SID);
+    assert.match(a1.detail.msg, /aud/); assert.equal(a1.actor_id, null);
+    const raw = JSON.stringify(a1.detail);
+    assert.ok(!raw.includes('bad2@example.com') && !raw.includes(code(prof)) && !raw.includes('rt-apple'), '이메일·인가 코드·토큰 없음');
+    forceClient = true;
+    try {
+      const r = await apple(new Client(), { sub: 'apple.bad3', email: 'bad3@example.com' });
+      assert.match(r.searchParams.get('oauth_error') ?? '', /\(token_invalid_client\)/);
+      const [a2] = await sql`select detail from audit_logs where action = 'auth.oauth_failed' order by id desc limit 1`;
+      assert.equal(a2.detail.reason, 'token_invalid_client'); assert.equal(a2.detail.status, 400); assert.equal(a2.detail.redirect, `${BASE}/api/auth/oauth/apple/callback`);
+    } finally { forceClient = false; }
+  });
+
+  test('#1094 운영 자가 점검(플랫폼 운영자만): 가짜 코드 → invalid_grant = 정상 / invalid_client = 설정 문제 · 그 밖의 사람은 404 · 비밀값은 돌려주지 않음', async () => {
+    assert.equal((await ctx.staffA.client.get('/api/platform/apple-check')).status, 404, '플랫폼 운영자가 아니면 404');
+    await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
+    try {
+      const ok = await ctx.owner.ok('GET', '/api/platform/apple-check');
+      assert.equal(ok.configured, true); assert.equal(ok.ok, true); assert.equal(ok.error, 'invalid_grant'); assert.match(ok.verdict, /^정상/);
+      assert.deepEqual([ok.servicesId, ok.teamId, ok.keyId, ok.redirectUri], [SID, TEAM, KID, `${BASE}/api/auth/oauth/apple/callback`]);
+      assert.ok(!JSON.stringify(ok).includes('PRIVATE') && !JSON.stringify(ok).includes('client_secret'), '키·클라이언트 비밀 없음');
+      assert.equal(seen.token.at(-1).code, 'workin-selfcheck-not-a-real-code'); assert.equal(seen.token.at(-1).cs, true, '실제 로그인과 같은 서명');
+      forceClient = true;
+      const bad = await ctx.owner.ok('GET', '/api/platform/apple-check');
+      assert.equal(bad.ok, false); assert.equal(bad.error, 'invalid_client'); assert.match(bad.verdict, /^설정 문제/);
+    } finally { forceClient = false; await sql`update users set platform_admin = false where id = ${ctx.ownerId}`; }
   });
 
   test('설정 › 계정에서 연결(세션은 GET 단계에서 실림) → 끊기 = Apple 토큰 해지', async () => {

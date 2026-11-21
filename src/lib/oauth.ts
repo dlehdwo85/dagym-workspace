@@ -107,9 +107,15 @@ export async function exchangeHandoff(i: z.infer<typeof exchangeInput>) {
 type Profile = { subject: string; email: string | null; emailVerified: boolean; name: string | null; secret?: string | null };
 async function fetchProfile(p: Provider, code: string, state: string): Promise<Profile> {
   if (p === 'apple') {
-    const a = await (await import('./oauthApple')).appleProfile(code, redirectUri(p)).catch(() => null);
-    if (!a) throw badRequest('Apple 로그인에 실패했습니다. 다시 시도해 주세요.');
-    return a;
+    const A = await import('./oauthApple');
+    try { return await A.appleProfile(code, redirectUri(p)); }
+    catch (x) {
+      // 로컬 11/21 #1094: 실패 이유를 남김(비밀값·코드·토큰·이메일 없음) — 운영 기록(console.warn)과 감사 기록(플랫폼 운영 화면에만 보임)
+      const f = x instanceof A.AppleLoginFail ? x : new A.AppleLoginFail('unknown', { msg: String((x as Error)?.message ?? x).slice(0, 100) });
+      console.warn('[oauth:apple] 실패', f.reason, JSON.stringify(f.detail));
+      await audit(db(), null, 'auth.oauth_failed', null, null, { provider: 'apple', reason: f.reason, ...f.detail }, null).catch(() => {});
+      throw badRequest(`Apple 로그인에 실패했습니다. 다시 시도해 주세요. (${f.reason})`);
+    }
   }
   const c = conf(p)!;
   const form = new URLSearchParams({ grant_type: 'authorization_code', client_id: c.id, redirect_uri: redirectUri(p), code });
@@ -137,6 +143,12 @@ export type CallbackResult =
   | { kind: 'error'; message: string; code?: string };
 
 /** 콜백 처리 — 결과에 따라 라우트가 로그인 세션을 만들거나 화면으로 보낸다 */
+/** 애플 자가 점검(플랫폼 운영자) — 실제 로그인과 같은 redirect 주소로 */
+export async function appleSelfCheckFor(u: SessionUser) {
+  if (!u.platformAdmin || u.support) throw notFound();
+  return (await import('./oauthApple')).appleSelfCheck(redirectUri('apple'));
+}
+
 export async function oauthCallback(p: Provider, q: { code: string | null; state: string | null; error: string | null; name?: string | null }, cookie: string | undefined, me: SessionUser | null, ip: string | null): Promise<CallbackResult> {
   if (q.error) return { kind: 'error', message: '로그인을 취소했습니다' };
   const st = readState(cookie, q.state, p);
