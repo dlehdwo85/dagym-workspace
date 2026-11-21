@@ -105,6 +105,32 @@ describe('V29 소셜 가입·로그인', () => {
     assert.match(i.searchParams.get('error'), /회사 관리자의 초대로 만들어집니다/);
   });
 
+  test('#1107 안드로이드(크롬) 앱 로그인 복귀: 콜백이 intent:// 로 바로(패키지·대체 주소 app-return) — 앱이 받은 표로 세션', async () => {
+    const { createHash } = await import('node:crypto');
+    const v = 'c'.repeat(40) + 'android-1107', ac = createHash('sha256').update(v).digest('hex');
+    const UA = { 'user-agent': 'Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36' };
+    const c = new Client('android-tab');
+    const s = await c.req('GET', `/api/auth/oauth/google/start?client=android&ac=${ac}`, undefined, UA);
+    assert.equal(s.status, 303);
+    const auth = new URL(s.headers.get('location'));
+    c.cookie = (s.headers.getSetCookie?.() ?? []).find((x) => x.startsWith('wos_oauth=')).split(';')[0];
+    const r = await c.req('GET', `/api/auth/oauth/google/callback?code=${code({ sub: 'g-100', email: 'boss@social.test' })}&state=${auth.searchParams.get('state')}`, undefined, UA);
+    assert.equal(r.status, 303);
+    const loc = r.headers.get('location');
+    assert.match(loc, /^intent:\/\/open\/auth\/app\?t=[^#]+#Intent;scheme=workos;package=kr\.co\.dagym\.workos;S\.browser_fallback_url=[^;]+;end$/);
+    const fb = new URL(decodeURIComponent(loc.match(/S\.browser_fallback_url=([^;]+)/)[1]));
+    const t = new URLSearchParams(loc.slice('intent://open/auth/app?'.length).split('#')[0]).get('t');
+    assert.equal(fb.pathname, '/auth/app-return'); assert.equal(fb.searchParams.get('t'), t, '대체 화면도 같은 표');
+    assert.equal((await new Client('app').post('/api/auth/oauth/app-exchange', { t, v })).status, 200, '앱이 받은 표로 세션');
+    // 오류도 안드로이드는 intent 로(앱이 로그인 화면에 오류를 보여 줌)
+    const c2 = new Client('android-tab2');
+    const s2 = await c2.req('GET', `/api/auth/oauth/kakao/start?client=android&ac=${ac}`, undefined, UA);
+    const a2 = new URL(s2.headers.get('location'));
+    c2.cookie = (s2.headers.getSetCookie?.() ?? []).find((x) => x.startsWith('wos_oauth=')).split(';')[0];
+    const r2 = await c2.req('GET', `/api/auth/oauth/kakao/callback?code=${code({ sub: '9102', email: null })}&state=${a2.searchParams.get('state')}`, undefined, UA);
+    assert.match(r2.headers.get('location'), /^intent:\/\/open\/auth\/app\?error=/);
+  });
+
   test('같은 이메일의 기존 계정은 자동으로 묶지 않음 · 인증 안 된 이메일·이메일 미동의는 가입 불가 · 상태 위조는 거절', async () => {
     let to = await social(new Client(), 'naver', { sub: 'n-1', email: 'boss@social.test', name: '다른사람' });
     assert.equal(to.pathname, '/login'); assert.equal(to.searchParams.get('code'), 'exists');

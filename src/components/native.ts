@@ -3,7 +3,7 @@ import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor
 
 // 네이티브 플러그인은 앱(mobile/)에 설치되어 있고, 웹 번들에는 프록시만 둔다
 type L = (e: any) => void;
-interface AppPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; exitApp(): Promise<void> }
+interface AppPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; exitApp(): Promise<void>; getLaunchUrl(): Promise<{ url: string } | undefined> }
 interface FcmPlugin { addListener(ev: string, fn: L): Promise<PluginListenerHandle>; requestPermissions(): Promise<{ receive: string }>; checkPermissions(): Promise<{ receive: string }>; getToken(): Promise<{ token: string }>; removeDeliveredNotifications(o: { notifications: { id: string }[] }): Promise<void> }
 const App = registerPlugin<AppPlugin>('App');
 // 로컬 10/19(대표) 앱 생체 인증 잠금: @aparajita/capacitor-biometric-auth(네이티브 이름 BiometricAuthNative). 앱에 설치되지 않았으면 기능을 숨긴다
@@ -479,8 +479,28 @@ async function saveViaShare(path: string) {
   } catch (e: any) { if (!/cancel/i.test(String(e?.message))) toast.error(e?.message || '내려받지 못했습니다'); }
 }
 
+/**
+ * #1107(대표 안드로이드 실기기 11/21 — 카카오 로그인 뒤 '아무 표시 없이 제자리'): 복귀 링크 workos://open/auth/app?t=… 를 받는 처리기(appUrlOpen)가
+ * 앱 틀(AppShell → initNative)에만 있어, 로그인 화면에서 시작한 소셜 로그인의 복귀를 아무도 받지 않았음. 로그인 화면에서도 받게 함.
+ * 앱이 뒤에서 꺼졌다가 그 링크로 다시 켜진 경우(launch URL)도 받고, 같은 링크를 두 번 쓰지 않음(표는 1회용)
+ */
+let oauthWatching = false;
+export async function watchOAuthReturn() {
+  if (!Capacitor.isNativePlatform() || oauthWatching) return;
+  oauthWatching = true;
+  const take = (raw: string) => {
+    const p = deepPath(raw);
+    if (!/^\/auth\/app(\?|$)/.test(p)) return;
+    try { if (sessionStorage.getItem('wos_oauth_return') === raw) return; sessionStorage.setItem('wos_oauth_return', raw); } catch {}
+    location.assign(p);
+  };
+  App.addListener('appUrlOpen', (e: any) => take(String(e?.url ?? '')));
+  try { const l = await App.getLaunchUrl(); if (l?.url) take(l.url); } catch {}
+}
+
 /** 앱 소셜 로그인: 검증값(앱 보관) 만들고 시스템 브라우저로 시작 → 끝나면 workos://open/auth/app 으로 돌아옴 */
 export async function openOAuthInBrowser(startPath: string) {
+  await watchOAuthReturn();
   const v = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
   const ac = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v))), (b) => b.toString(16).padStart(2, '0')).join('');
   try { localStorage.setItem('wos_oauth_v', v); } catch {}
