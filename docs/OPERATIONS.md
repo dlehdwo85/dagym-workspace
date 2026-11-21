@@ -32,11 +32,11 @@
 | ANDROID_CERT_SHA256, APPLE_TEAM_ID | 앱 링크 | 앱 서명 후 |
 | PRIVACY_CONTACT, COMPANY_NAME | 권장 | 개인정보처리방침 표시 |
 
-DB 스키마는 `npm run db:migrate`(=`node scripts/migrate.mjs`)로 적용하고, 이미 적용된 파일은 건너뜁니다. 배포 전에 반드시 실행하세요.
+DB 스키마는 `scripts/migrate.mjs`가 적용하고, 이미 적용된 파일은 건너뜁니다. **운영은 배포 빌드가 자동으로 적용합니다**: `vercel.json`의 빌드 명령이 `node scripts/migrate.mjs --soft-connect && next build`라서, 새 코드가 뜨기 전에 마이그레이션이 먼저 들어갑니다(예: 11/21 `267_invitation_mail.sql` 은 그 커밋의 운영 빌드가 적용). **Preview 빌드는 건너뜁니다**(`VERCEL_ENV` 가 `production` 이 아니면 한 줄만 남기고 끝) — Vercel 의 `DATABASE_URL` 이 Preview·Production 한 항목이라 Preview 도 운영 DB 를 보기 때문입니다(11/21 로컬 확인). DB 에 접속하지 못하면(`--soft-connect`) 경고만 남기고 빌드는 계속하며, 그때는 `/api/health` 의 `migrationBehind` 가 `true` 입니다.
 
 ## 4. 배포 절차와 복구 경로
 1. 기능 브랜치를 푸시하면 CI(타입 검사 → 빌드 → API 시험 49건 → 브라우저 E2E 18건)가 돌고, Vercel Preview가 만들어집니다.
-2. 마이그레이션 파일이 바뀌었으면 **운영 DB 백업**(`backup.yml` 수동 실행)을 먼저 하고, `DATABASE_URL=<운영> npm run db:migrate`를 실행합니다. 마이그레이션은 추가형으로만 작성합니다.
+2. 마이그레이션 파일이 바뀌었으면 `main` 에 올리기 전에 **운영 DB 백업**(`backup.yml` 수동 실행 — 매일 자동 백업도 있음)을 확인합니다. 적용은 `main` 의 운영 배포 빌드가 자동으로 합니다(직접 `db:migrate` 할 필요 없음 — 빌드가 DB 에 접속하지 못해 건너뛴 경우에만 `DATABASE_URL=<운영> npm run db:migrate` 또는 Redeploy). 마이그레이션은 추가형으로만 작성하고, 코드는 칸이 아직 없을 때도 동작하게 둡니다(빌드 순서상 새 코드가 뜨기 직전에 적용되지만, 건너뛰는 경우를 대비).
 3. `main`에 병합하면 Vercel Production이 배포됩니다. `/api/health`의 `commit` 값이 새 커밋인지 확인합니다.
 4. **되돌리기**: Vercel → Deployments에서 이전 배포의 "Promote to Production"을 누르면 즉시 되돌아갑니다. DB를 되돌려야 하면 아래 5번의 복원 절차를 따릅니다.
 
