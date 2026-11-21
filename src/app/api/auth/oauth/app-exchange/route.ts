@@ -12,9 +12,11 @@ export async function POST(req: NextRequest) {
     const { token, maxAge } = await createSession(r.userId, r.client, req.headers.get('user-agent'), { ip: clientIp(req), mfaPending: r.mfa });
     const res = NextResponse.json({ ok: true, mfa: r.mfa });
     res.cookies.set(sessionCookie(token, r.mfa ? 600 : maxAge));
+    console.info('[oauth] 앱 넘겨받기 성공', r.client); // #1107: 앱이 표를 받았는지(사람 정보 없음)
     return res;
   } catch (e) {
     const msg = e instanceof HttpError ? e.message : '로그인 정보를 확인하지 못했습니다. 다시 시도해 주세요.';
+    console.warn('[oauth] 앱 넘겨받기 실패', e instanceof HttpError ? e.code : 'error', msg.slice(0, 60)); // 만료·검증값 다름·한 번 쓴 표
     return NextResponse.json({ error: { code: 'bad_request', message: msg } }, { status: 400 });
   }
 }

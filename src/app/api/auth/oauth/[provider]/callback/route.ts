@@ -9,6 +9,8 @@ import { audit } from '@/lib/log';
 
 /** 299차 Apple: 처음 한 번 오는 이름을 GET 으로 넘길 때 잠깐 담는 쿠키(주소에 개인정보를 싣지 않음) */
 const NAME_COOKIE = 'wos_oauth_name';
+/** 안드로이드 앱 패키지(mobile/android/app/build.gradle applicationId) */
+const ANDROID_APP_ID = 'kr.co.dagym.workos';
 
 /** V29 소셜 로그인 콜백 — 결과: 로그인(2단계 인증이면 코드 화면) · 계정 연결 · 처음이면 회사 만들기 · 오류는 로그인 화면에 안내 */
 export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: string }> }) {
@@ -19,7 +21,17 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
   const q = req.nextUrl.searchParams;
   // 앱(시스템 브라우저)에서 시작했으면 결과를 앱으로 넘기는 화면(/auth/app-return → workos://)으로 — 세션 쿠키는 브라우저가 아니라 앱이 받는다
   const ac = stateAppChallenge(req.cookies.get(STATE_COOKIE)?.value);
-  const toApp = (p: Record<string, string>) => go(`/auth/app-return?${new URLSearchParams(p)}`);
+  // #1107(대표 안드로이드 실기기): 안드로이드는 서버가 바로 intent:// 로 넘김(크롬은 화면이 뜬 뒤 스크립트로 여는 외부 앱 이동을 막을 수 있음) — 앱을 못 열면 크롬이 app-return 화면(큰 단추)으로
+  const android = /Android/i.test(req.headers.get('user-agent') ?? '');
+  const toApp = (p: Record<string, string>) => {
+    const q = new URLSearchParams(p);
+    console.info('[oauth] 앱으로 넘김', provider, Object.keys(p)[0], android ? 'intent' : 'page');
+    if (!android) return go(`/auth/app-return?${q}`);
+    const fallback = new URL(`/auth/app-return?${q}`, req.nextUrl.origin).toString();
+    const r = go('/auth/app-return');
+    r.headers.set('location', `intent://open/auth/app?${q}#Intent;scheme=workos;package=${ANDROID_APP_ID};S.browser_fallback_url=${encodeURIComponent(fallback)};end`);
+    return r;
+  };
   // 애플 11/15 반려: 앱이 띄운 창인데 상태 쿠키를 못 읽은 경우(만료 등)에도 웹 로그인 화면을 그 창에 띄우지 않고 앱으로 돌려보냄
   //   (앱 화면 안(WebView — 표시 WorkInApp)에서 끝나는 옛 방식 로그인·계정 연결은 예전 그대로)
   const sheet = req.cookies.get(APP_SHEET_COOKIE)?.value === '1' && !/WorkInApp/i.test(req.headers.get('user-agent') ?? '');

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { api } from './client';
 import { readUtm } from './conversion';
-import { hasBrowser, openOAuthInBrowser } from './native';
+import { hasBrowser, openOAuthInBrowser, watchOAuthReturn } from './native';
 import { isIosApp } from './inApp';
 
 const LOOK: Record<string, { label: string; cls: string; mark: React.ReactNode }> = {
@@ -17,6 +17,7 @@ const LOOK: Record<string, { label: string; cls: string; mark: React.ReactNode }
 /** V29 소셜 가입·로그인 버튼 — 키가 등록된 제공자만(없으면 아무것도 안 보임) */
 export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady }: { verb?: string; invite?: string; mode?: 'login' | 'link'; onReady?: (n: number) => void }) {
   const [ps, setPs] = useState<string[]>([]);
+  useEffect(() => { if (hasBrowser() && mode === 'login') watchOAuthReturn().catch(() => {}); }, [mode]); // #1107 로그인 화면에서도 앱 복귀 링크를 받음(앱이 다시 켜진 경우 포함)
   useEffect(() => {
     // 점검 2026-10-16: 앱(WebView)에서는 Google 로그인이 정책상 막힘(disallowed_useragent) → 앱에서는 카카오·네이버만
     // 시스템 브라우저 플러그인이 있는 앱의 로그인은 브라우저에서 하므로 Google 도 됨
