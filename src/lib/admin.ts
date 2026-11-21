@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
-import { ensurePersonalCalendar, accessibleUnitIds, isAdmin, teamScope } from './access';
+import { ensurePersonalCalendar, accessibleUnitIds, isAdmin, isUuid, teamScope } from './access';
 import { revokeAllSessions } from './auth';
 import { newToken, sha256, hashPassword } from './crypto';
 import { badRequest, conflict, forbidden, notFound } from './errors';
@@ -95,6 +95,8 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
       userId = u.id;
     } else {
       await tx`update users set name = ${i.name}, role = ${i.role}, title = ${i.title ?? null}, updated_at = now() where id = ${userId}`;
+      // 11/21 [초대 취소]로 사용 중지된 사람(한 번도 가입하지 않음)을 다시 초대하면 '초대됨'으로 되돌림 — 아니면 수락 때 '비활성화된 계정'으로 막힘
+      await tx`update users set status = 'invited' where id = ${userId} and status = 'disabled' and password_hash is null and last_login_at is null`;
     }
     const revoked = await tx`update invitations set revoked_at = now() where user_id = ${userId} and accepted_at is null and revoked_at is null returning id`;
     const [inv] = await tx<{ id: string; expires_at: Date }[]>`
@@ -225,6 +227,24 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
     }
     await audit(tx, actor.id, 'user.update', 'user', id, { before: { role: cur.role, status: cur.status }, change: p, ...(leadless.length ? { leadless: leadless.map((l) => l.name) } : {}) }, ip);
     return { ok: true, leadless };
+  });
+}
+
+/**
+ * 로컬 11/21: 사용자·권한의 [초대 취소] — 잘못 보낸 초대를 화면에서 거둔다. 아직 가입하지 않은(초대됨) 사람만.
+ * 보낸 초대 링크를 모두 취소하고 사람은 사용 중지(목록에는 '초대 취소됨')로 둔다 — 지우지 않음(업무 담당 등 남은 기록 보존, 같은 이메일로 다시 초대 가능). 감사 기록 user.invite_cancel
+ */
+export async function cancelInvite(actor: SessionUser, userId: string, ip: string | null) {
+  await (await import('./menuPerms')).requireMenu(actor, 'admin_users', 'edit');
+  const sql = db();
+  await assertHomeUser(actor, userId, sql);
+  return sql.begin(async (tx) => {
+    const [u] = await tx<{ status: string; email: string }[]>`select status, email from users where id = ${userId} for update`;
+    if (!u || u.status !== 'invited') throw badRequest('초대 대기 중인 사람만 초대를 취소할 수 있습니다');
+    const revoked = await tx`update invitations set revoked_at = now() where user_id = ${userId} and accepted_at is null and revoked_at is null returning id`;
+    await tx`update users set status = 'disabled', updated_at = now() where id = ${userId}`;
+    await audit(tx, actor.id, 'user.invite_cancel', 'user', userId, { email: u.email, revoked: revoked.length }, ip);
+    return { ok: true, revoked: revoked.length };
   });
 }
 
@@ -363,6 +383,7 @@ export async function assertHomeUnit(u: SessionUser, unitId: string, sql: Sql = 
   if (!o || !homeTenants(u).includes(o.tenant)) throw notFound('조직이 없습니다');
 }
 export async function assertHomeUser(u: SessionUser, userId: string, sql: Sql = db()) {
+  if (!isUuid(userId)) throw notFound('사용자가 없습니다'); // 모양이 틀린 주소 값 → DB 형 변환 오류(500) 대신 404
   const [o] = await sql<{ tenant: string }[]>`select tenant from users where id = ${userId}`;
   if (!o || !homeTenants(u).includes(o.tenant)) throw notFound('사용자가 없습니다');
 }
