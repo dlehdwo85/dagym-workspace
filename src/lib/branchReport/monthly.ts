@@ -74,6 +74,13 @@ export function usageC(month: WeeklyIn[], prev: WeeklyIn | null) {
 }
 /** 숫자 읽기('443명'·'1,234' → 수) — 숫자가 아니면 null */
 export const numOf = (v: string) => { const m = v.replace(/,/g, '').match(/^\s*(-?\d+(?:\.\d+)?)\s*(명|건|개|회)?\s*$/); return m ? Number(m[1]) : null; };
+/** 합계(로컬 11/21: 다른 칸처럼 단위를 붙임 — 값들이 같은 단위(명·건·개·회)면 '543명') — 빈 칸·숫자 아닌 값이 있으면 빈 글 */
+export const sumCol = (vals: string[]) => {
+  const n = vals.map(numOf);
+  if (!vals.length || n.some((x) => x === null)) return '';
+  const units = new Set(vals.map((v) => String(v ?? '').match(/(명|건|개|회)\s*$/)?.[1]).filter(Boolean));
+  return `${n.reduce<number>((a, x) => a + (x ?? 0), 0)}${units.size === 1 ? [...units][0] : ''}`;
+};
 /** 증감·증감률(▲▼) — 둘 다 숫자일 때만 */
 export function delta(prev: string, cur: string) {
   const a = numOf(prev), b = numOf(cur);

@@ -20,10 +20,14 @@ export function delta(prev: string, cur: string) {
   const d = b - a;
   return { diff: `${d > 0 ? '+' : ''}${d}`, rate: a === 0 ? '' : `${d > 0 ? '▲' : d < 0 ? '▼' : ''}${Math.abs(Math.round((d / a) * 1000) / 10)}%` };
 }
-export const usageTotal = (usage: MonthlyBody['usage']) => {
-  const sum = (k: 'prev' | 'cur') => { const v = usage.map((x) => numOf(x[k])); return v.length && v.every((n) => n !== null) ? String(v.reduce((a, n) => a + (n as number), 0)) : ''; };
-  return { prev: sum('prev'), cur: sum('cur') };
+/** 합계(로컬 11/21: 다른 칸처럼 단위를 붙임 — 값들이 같은 단위(명·건·개·회)면 '543명') — 빈 칸·숫자 아닌 값이 있으면 빈 글 */
+export const sumCol = (vals: string[]) => {
+  const n = vals.map(numOf);
+  if (!vals.length || n.some((x) => x === null)) return '';
+  const units = new Set(vals.map((v) => String(v ?? '').match(/(명|건|개|회)\s*$/)?.[1]).filter(Boolean));
+  return `${n.reduce<number>((a, x) => a + (x ?? 0), 0)}${units.size === 1 ? [...units][0] : ''}`;
 };
+export const usageTotal = (usage: MonthlyBody['usage']) => ({ prev: sumCol(usage.map((x) => x.prev)), cur: sumCol(usage.map((x) => x.cur)) });
 
 export function MonthlyView({ unit, start, end, author, reportDay, body }: { unit: string; start: string; end: string; author: string; reportDay: string; body: MonthlyBody }) {
   const tot = usageTotal(body.usage); const td2 = delta(tot.prev, tot.cur);
