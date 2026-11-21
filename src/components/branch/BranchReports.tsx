@@ -23,7 +23,7 @@ const PLACEHOLDER = `예) ○○ 주간보고
 - 11/18 접수, 설비 업체 점검 예정(11/25)
 <골프장> 총이용인원 35 / 청소상태 청결 / 시설상태 양호
 - 타석 3번 센서 : 완료`;
-const countCheck = (b: Body | null) => !b ? 0 : b.usage.filter((x) => x.count === '확인 필요').length + b.facilities.reduce((a, f) => a + (f.visitors === '확인 필요' ? 1 : 0) + f.lines.filter((l) => l.state === '확인 필요').length, 0) + b.issues.filter((x) => x.state === '확인 필요').length;
+const countCheck = (b: Body | null) => !b ? 0 : b.usage.filter((x) => x.count === '확인 필요').length + b.facilities.reduce((a, f) => a + [f.visitors, f.cleaning, f.condition].filter((v) => v === '확인 필요').length + f.lines.filter((l) => l.state === '확인 필요').length, 0) + b.issues.filter((x) => x.state === '확인 필요').length;
 
 export function BranchReports() {
   const [site, setSite] = useState<string | null>(null);
@@ -135,7 +135,7 @@ function Editor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite: boole
       </div>
       <h3 className="text-sm font-semibold">1. 이용 인원 현황</h3>
       {b.usage.map((x, k) => <div key={k} className="grid grid-cols-[minmax(0,1fr)_8rem_1rem] items-center gap-1.5"><input className={inp} value={x.item} onChange={(e) => set({ ...b, usage: b.usage.map((y, j) => j === k ? { ...y, item: e.target.value } : y) })} disabled={!canWrite} aria-label="항목" />
-        <input className={cx(inp, x.count === '확인 필요' && 'border-amber-400')} value={x.count} onChange={(e) => set({ ...b, usage: b.usage.map((y, j) => j === k ? { ...y, count: e.target.value } : y) })} disabled={!canWrite} aria-label="인원" data-testid="branch-usage-count" />
+        <input className={cx(inp, x.count === '확인 필요' && '!border-amber-400 !bg-amber-50')} value={x.count} onChange={(e) => set({ ...b, usage: b.usage.map((y, j) => j === k ? { ...y, count: e.target.value } : y) })} disabled={!canWrite} aria-label="인원" data-testid="branch-usage-count" />
         {canWrite && <button type="button" onClick={() => set({ ...b, usage: b.usage.filter((_, j) => j !== k) })} aria-label="빼기" className="text-ink-3"><Trash2 className="size-4" /></button>}</div>)}
       {canWrite && <button type="button" className="inline-flex items-center gap-1 text-xs text-brand-700" onClick={() => set({ ...b, usage: [...b.usage, { item: '', count: '' }] })}><Plus className="size-3.5" />이용 항목</button>}
       <h3 className="text-sm font-semibold">락커 사용 현황(하이링크 관리자 화면 값 — 손으로)</h3>
@@ -150,9 +150,9 @@ function Editor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite: boole
         return (
           <div key={k} className="space-y-1.5 rounded-input border border-line p-2" data-testid="branch-facility">
             <div className="grid grid-cols-2 items-center gap-1.5 sm:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_1rem]"><input className={cx(inp, 'font-semibold')} value={f.name} placeholder="시설"  onChange={(e) => setF({ ...f, name: e.target.value })} disabled={!canWrite} aria-label="시설" />
-              <input className={cx(inp, f.visitors === '확인 필요' && 'border-amber-400')} value={f.visitors} placeholder="총 이용인원" onChange={(e) => setF({ ...f, visitors: e.target.value })} disabled={!canWrite} aria-label="총 이용인원" />
-              <input className={inp} value={f.cleaning} placeholder="청소 상태" onChange={(e) => setF({ ...f, cleaning: e.target.value })} disabled={!canWrite} aria-label="청소 상태" />
-              <input className={inp} value={f.condition} placeholder="시설 상태" onChange={(e) => setF({ ...f, condition: e.target.value })} disabled={!canWrite} aria-label="시설 상태" />
+              <input className={cx(inp, f.visitors === '확인 필요' && '!border-amber-400 !bg-amber-50')} value={f.visitors} placeholder="총 이용인원" onChange={(e) => setF({ ...f, visitors: e.target.value })} disabled={!canWrite} aria-label="총 이용인원" />
+              <input className={cx(inp, f.cleaning === '확인 필요' && '!border-amber-400 !bg-amber-50')} value={f.cleaning} placeholder="청소 상태" onChange={(e) => setF({ ...f, cleaning: e.target.value })} disabled={!canWrite} aria-label="청소 상태" />
+              <input className={cx(inp, f.condition === '확인 필요' && '!border-amber-400 !bg-amber-50')} value={f.condition} placeholder="시설 상태" onChange={(e) => setF({ ...f, condition: e.target.value })} disabled={!canWrite} aria-label="시설 상태" />
               {canWrite && <button type="button" onClick={() => set({ ...b, facilities: b.facilities.filter((_, j) => j !== k) })} aria-label="시설 빼기" className="justify-self-end text-ink-3"><Trash2 className="size-4" /></button>}</div>
             {f.lines.map((l, j) => { const setL = (nl: Line) => setF({ ...f, lines: f.lines.map((y, i) => i === j ? nl : y) }); return (
               <div key={j} className="grid grid-cols-2 items-center gap-1.5 border-l-2 border-line pl-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,2fr)_6.5rem_auto_1rem]">

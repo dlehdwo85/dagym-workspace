@@ -31,7 +31,9 @@ const D = `강남점 주간보고
 내용 : 사우나 온도 민원 (연락처 010-2222-3333)
 - 업체 점검 예정
 <골프장> 총이용인원 35 / 청소상태 청결 / 시설상태 양호
-- 타석 3번 센서 : 완료`;
+- 타석 3번 센서 : 완료
+<헬스장> 청소상태 : 청결 / 시설상태 : 런닝머신 인버터 청소완료
+- 프로젝터 램프 : 0`;
 
 before(async () => {
   await resetDb(); await ensureTls(); fake = await startFakeGoogle();
@@ -107,7 +109,8 @@ describe('#1096 지점 주간보고', () => {
     const ai = { usage: [{ item: '헬스', count: '120' }, { item: '골프', count: '999명' }], lockers: [],
       facilities: [{ name: '골프장', visitors: '35', cleaning: '청결', condition: '양호', lines: [
         { item: '타석 3번 센서', status: '완료', action: '교체', state: '완료', evidence: ['D7', `M${msgId}`] },
-        { item: '조명', status: '', action: '', state: '완료', evidence: ['M999999', 'D99'] }] }],
+        { item: '조명', status: '', action: '', state: '완료', evidence: ['M999999', 'D99'] }] },
+        { name: '헬스장', visitors: '', cleaning: '청결', condition: '청결', lines: [{ item: '프로젝터 램프', status: '0', action: '', state: '확인 필요', evidence: [] }] }],
       issues: [{ title: '사우나 온도 민원', details: ['업체 점검 예정'], state: '진행 중', evidence: ['D4', `M${msgId}`] }], notes: '' };
     await ctl({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify(ai) }], stop_reason: 'end_turn' }] });
     const n0 = (await fakeState()).anthropic.length;
@@ -122,7 +125,10 @@ describe('#1096 지점 주간보고', () => {
     assert.equal(b.usage[0].count, '120'); assert.equal(b.usage[1].count, '확인 필요', '글에 없는 숫자');
     assert.deepEqual(b.facilities[0].lines[0].evidence, ['D7', `M${msgId}`]); assert.equal(b.facilities[0].lines[0].state, '완료');
     assert.deepEqual(b.facilities[0].lines[1].evidence, [], '없는 근거 번호는 지움'); assert.equal(b.facilities[0].lines[1].state, '확인 필요', '근거 없는 완료');
-    assert.equal(r.fixed, 1); assert.equal(r.report.status, 'draft'); assert.equal(r.report.unit_name, '시험 강남점');
+    assert.equal(b.facilities[0].condition, '양호', '원문 시설상태 등급 그대로'); assert.equal(b.facilities[1].cleaning, '청결');
+    assert.equal(b.facilities[1].condition, '확인 필요', '로컬 11/21: 청소 상태 값을 시설 상태에 옮겨 적으면 확인 필요');
+    assert.deepEqual(b.facilities[1].lines[0], { item: '프로젝터 램프', status: '이상 없음', action: '', state: '완료', evidence: ['D9'] }, "#1105 '0' = 이상 없음·완료(근거 = 그 줄)");
+    assert.equal(r.fixed, 2); assert.equal(r.report.status, 'draft'); assert.equal(r.report.unit_name, '시험 강남점');
     assert.equal(r.report.period_start, addDays(friday, -7)); assert.equal(r.report.period_end, addDays(friday, -1));
     assert.ok(!/010-2222/.test(r.report.source_text), '저장한 붙여 넣은 글도 가린 글');
     const [u] = await sql`select count(*)::int as n from ai_usage where purpose = 'branch_report'`; assert.equal(u.n, 1, 'AI 사용 기록');

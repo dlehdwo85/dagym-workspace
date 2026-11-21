@@ -16,7 +16,11 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
   const p = await c.newPage();
   const errs = []; p.on('pageerror', (e) => errs.push(String(e).slice(0, 160)));
   const shot = (name, opt = {}) => p.screenshot({ path: `${SHOTS}/${name}`, ...opt });
-  const body = () => p.locator('body').innerText();
+  // AI 동의 안내(가입·초대 목록의 AI 줄, 로그인 뒤 동의 창)는 개인정보 국외 이전 고지라 받는 회사 이름(Anthropic·OpenAI)을 적어야 함 — 대표 11/19 결정(동의 창 '누구에게')·#1086.
+  // 그래서 §4 검사 본문에서는 그 안내만 빼고, 안내 글 자체는 아래 consentScan 에서 '받는 회사 이름 말고 다른 금지 낱말이 없는지' 따로 본다
+  const CONSENT = '[data-testid="ai-consent-line"],[data-testid="ai-consent"]';
+  const body = () => p.evaluate((sel) => { const els = [...document.querySelectorAll(sel)]; const was = els.map((e) => e.style.display); els.forEach((e) => { e.style.display = 'none'; }); const t = document.body.innerText; els.forEach((e, i) => { e.style.display = was[i]; }); return t; }, CONSENT);
+  const consentScan = async (k) => { for (const t of await p.locator(CONSENT).allInnerTexts()) scanText(`${k} AI 동의 안내`, t.replace(/Anthropic|OpenAI/g, '')); };
   let mc = null;
   try {
     // ── 1) 가입: 계정 → 회사 정보·업종(1366)
@@ -25,7 +29,7 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     await p.locator('input[type="password"]').first().fill(pw);
     for (const k of ['terms', 'privacy', 'age14']) await p.getByTestId(`agree-${k}`).check();
     await shot('281-cust-signup-account.png');
-    scanText('가입 1단계', await body());
+    scanText('가입 1단계', await body()); await consentScan('가입 1단계');
     await p.getByTestId('signup-next').click();
     await p.getByTestId('mode-team').click();
     await p.getByTestId('signup-step-company').locator('input').first().fill(company);
