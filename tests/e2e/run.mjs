@@ -2690,7 +2690,7 @@ await step('대표 10/20 15:15 부서·팀 재정비: 트리(들여쓰기·경�
 await step('영업 S2 1차(대표 14:15): 허브 일괄 [영업 진행으로] → 업무 자동 → 홈 오늘 할 일 7묶음·요약 타일·진행표 → 업무 영업 원천 배지 → 계약만료·재입찰', () => salesTodo({ owner, ctx, sql, BASE, SHOTS }));
 await step('영업 S2 2차(감사 1-13~1-16): 새 리드 13칸·비슷한 거래처 경고 → 칩·정렬·보기·CSV → 상세 업무 탭·타임라인·상담 다음 연락일 → 제안·계약·ROI → 삭제(사유)', () => salesLeads2({ owner, ctx, sql, BASE, SHOTS }));
 await step('소개 사이트(대표 16:45): / 랜딩(H1·무료로 시작·앱·세 공간·AI·3단계·요금 14일 무료 체험·문의·계정 삭제·JSON-LD·OG·UTM·클릭 이벤트·390) → 로그인하면 홈', () => landing({ browser, owner, BASE, SHOTS }));
-await step('앱 받기(대표 11/20): 소개 [앱 다운로드] → /app(PC QR) · 휴대폰 브라우저 띠 → Google Play 단추 · 아이폰 홈 화면 추가 안내 · 앱 안에는 없음 · 초대 창 안내 문구 · 휴대폰 초대 수락 뒤 [앱 받기]', () => appGet({ browser, owner, BASE, SHOTS }));
+await step('앱 받기(대표 11/20): 소개 [앱 다운로드] → /app(PC QR) · 휴대폰 브라우저 띠 → Google Play 단추 · 아이폰 홈 화면 추가 안내 · 앱 안에는 없음 · 초대 창 안내 문구 · 휴대폰 초대 수락 뒤 [앱 받기]', () => appGet({ browser, owner, BASE, SHOTS, sql }));
 await step('#949 입찰 공고 아침 메일 무료 구독 소개 페이지: 폼(이메일·지역·분야·동의) → [무료로 받기] → 신청됨 · 방문 1번 · 가격 숫자 없음', () => bidAlerts949({ browser, BASE, SHOTS, sql }));
 await step('#948 속도 정기 검침: 화면 비콘(첫 표시·목록 표시) → 플랫폼 운영 › 속도(느린 곳 상위 5 · 7곳 7일 막대 · 실제 화면 표 · 휴대폰 폭)', () => perf948({ owner, ctx, sql, BASE, SHOTS }));
 await step('대표 18:00 월 운영 목표·근거: 초안 → 고치기 → 승인 → 홈 막대 → 새 콘텐츠 근거 칸 → 승인함 왜 이 글인가', () => mktGoals({ owner, ctx, BASE, SHOTS }));
@@ -3056,6 +3056,14 @@ await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]�
     await p.getByLabel('이름').fill('전환시험'); await p.getByLabel('이메일').fill(email);
     await p.locator('input[type="password"]').first().fill('signup-pass-1234');
     for (const k of ['terms', 'privacy', 'age14']) await p.getByTestId(`agree-${k}`).check();
+    // 대표 11/20 #1086: [선택] AI 기능 이용 동의 한 줄(약관처럼) — 기본 체크 안 됨 · [자세히]를 펼치면 무엇을·어디로·국외 이전(시기·방법·보유 기간)
+    const aiLine = p.getByTestId('ai-consent-line'); await aiLine.waitFor();
+    assert.match(await aiLine.innerText(), /\[선택\] AI 기능 이용 동의 — 답을 만들 때 필요한 내용만 AI 회사\(Anthropic(·OpenAI)?\)에 보내 처리/); // 시험 서버는 받아쓰기 키(가짜)가 있어 OpenAI 도
+    assert.equal(await p.getByTestId('agree-ai').isChecked(), false, 'AI 줄은 기본 체크 안 됨');
+    assert.equal(await p.getByTestId('ai-consent-line-detail').count(), 0, '자세한 것은 접혀 있음');
+    await p.getByTestId('ai-consent-line-more').click();
+    assert.match(await p.getByTestId('ai-consent-line-detail').innerText(), /무엇을 보내나요[\s\S]*Anthropic\(미국\)[\s\S]*국외 이전[\s\S]*보유 기간: 위탁 계약 종료 또는 탈퇴 시까지/);
+    if (consent) await p.getByTestId('agree-ai').check();
     await p.getByTestId('agree-ads').waitFor();
     if (consent) await p.getByTestId('agree-ads').check();
     await p.getByTestId('signup-next').click();
@@ -3080,6 +3088,10 @@ await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]�
   const no = await signupWith('conv-no@workin.test', false);
   assert.equal(no.dl.filter((a) => a[1] === 'conversion').length, 0, '동의 안 하면 안 보냄');
   assert.equal(no.hits.filter((u) => /googleadservices/.test(u)).length, 0, '동의 안 하면 전환 호출 없음(소개 화면 측정 태그는 #627 로 실림)'); assert.equal(no.gcl, undefined);
+  // #1086: 가입 목록의 AI 줄을 체크한 사람 = AI 동의(지금 판) 저장 → 로그인 뒤 창이 다시 뜨지 않음 · 체크 안 한 사람은 '아직 안 정함'(줄 없음 — 거절 아님)
+  const aiRows = async (email) => (await sql`select c.agreed, c.version from consents c join users u on u.id = c.user_id where lower(u.email) = ${email} and c.kind = 'ai_share'`).map((r) => [r.agreed, r.version.replace(/\+stt$/, '')]);
+  assert.deepEqual(await aiRows('conv-yes@workin.test'), [[true, '2026-11']], '가입 때 체크 = AI 동의(지금 판 — 시험 서버는 +stt)');
+  assert.deepEqual(await aiRows('conv-no@workin.test'), [], '체크 안 함 = 아직 안 정함');
   await ctx.owner.ok('PUT', '/api/platform/conversion-tags', { googleAds: '' });
 });
 

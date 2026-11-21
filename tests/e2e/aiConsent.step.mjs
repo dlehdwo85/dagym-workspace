@@ -18,17 +18,20 @@ export async function aiConsent({ owner, BASE, FAKE, SHOTS }) {
     await owner.goto(BASE + '/tasks');
     const box = owner.getByTestId('ai-consent');
     await box.waitFor({ timeout: 15000 });
-    // 대표 11/19 밤: 펼치지 않아도 보이는 것 = 한 문장(받는 곳 이름 포함) + 세 줄. 항목·나라·까닭은 [자세히 보기] 안(접혀 있음)
+    // 대표 11/20 #1086 '약관처럼 상세를 접어서': 펼치지 않아도 보이는 것 = 한 문장(무엇을 위해·받는 곳 이름). 세 줄·항목·나라·까닭·국외 이전은 [자세히 보기] 안(접혀 있음)
+    // 창 제목·[자세히 보기]·[나중에 정하기]·[AI 기능 쓰기] 글자는 아이폰 1.2.0 심사 메모에 적힌 그대로 둔다(심사 통과 뒤 2단계에서 바꿈)
     assert.equal((await owner.getByRole('dialog', { name: 'AI 기능 사용 안내' }).count()) > 0, true, '창 제목');
     assert.match(await box.getByTestId('ai-consent-lead').innerText(), /답을 만들 때만, 그때 필요한 내용만 AI 회사\(Anthropic\)에 보내 처리합니다/);
-    assert.equal(await box.getByTestId('ai-consent-points').locator('li').count(), 3, '세 줄');
-    await box.getByText('보낸 내용은 AI를 가르치는 데 쓰이지 않습니다.').waitFor();
-    await box.getByText('동의하지 않아도 업무·일정·메신저·결재는 그대로 씁니다.').waitFor();
+    assert.equal(await box.getByText('보낸 내용은 AI를 가르치는 데 쓰이지 않습니다.').isVisible(), false, '세 줄도 접혀 있음');
     assert.equal(await box.getByText('무엇을 보내나요', { exact: true }).isVisible(), false, '자세한 것은 접혀 있음');
     assert.ok(!/미국/.test(await box.getByTestId('ai-consent-lead').innerText()), '펼치지 않은 본문에는 나라 없이 받는 곳 이름만');
     await owner.screenshot({ path: `${SHOTS}/ai-consent-short.png` });
     await box.getByTestId('ai-consent-more').locator('summary').click();
-    for (const t of ['무엇을 보내나요', '어디로 보내나요', '왜 보내나요', '동의하지 않으면']) await box.getByText(t, { exact: true }).waitFor();
+    assert.equal(await box.getByTestId('ai-consent-points').locator('li').count(), 3, '세 줄(펼치면)');
+    await box.getByText('보낸 내용은 AI를 가르치는 데 쓰이지 않습니다.').waitFor();
+    await box.getByText('동의하지 않아도 업무·일정·메신저·결재는 그대로 씁니다.').waitFor();
+    for (const t of ['무엇을 보내나요', '어디로 보내나요', '왜 보내나요', '동의하지 않으면', '국외 이전']) await box.getByText(t, { exact: true }).waitFor();
+    assert.match(await box.getByTestId('ai-consent-transfer').innerText(), /받는 곳·나라: Anthropic\(미국\)[\s\S]*이전 시기·방법: AI 기능을 쓸 때마다[\s\S]*보유 기간: 위탁 계약 종료 또는 탈퇴 시까지/, '국외 이전 고지(시기·방법·보유 기간)');
     const where = await owner.getByTestId('ai-consent-recipients').innerText();
     assert.match(where, /Anthropic\(미국\)/); assert.ok(!/OpenAI/.test(where), '지금 실제로 보내는 곳만(받아쓰기 키 없음 → OpenAI 줄 없음)');
     await box.getByText('AI 기능만 쓸 수 없습니다. 업무·일정·메신저·결재는 그대로 씁니다.').waitFor();
