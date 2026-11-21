@@ -5,7 +5,7 @@ import { deflateRawSync } from 'node:zlib';
 
 const { parseKakaoExport, unzipTexts } = await import('../../src/lib/branchReport/kakaoParse.ts');
 const { maskPII } = await import('../../src/lib/branchReport/mask.ts');
-const { checkFacilityStatus, gradesIn, applyOkMark, splitGrade, fixFacilityStatus } = await import('../../src/lib/branchReport/facilityStatus.ts');
+const { checkFacilityStatus, gradesIn, applyOkMark, splitGrade, fixFacilityStatus, tidyCheckLine, settleDone } = await import('../../src/lib/branchReport/facilityStatus.ts');
 
 const PC = `가상지점 운영방 님과 카카오톡 대화
 저장한 날짜 : 2026-11-21 18:00:00
@@ -154,4 +154,21 @@ test("로컬 11/21 재확인: 등급 뒤에 설명이 붙으면 등급만 받고
   assert.equal(made.cleaning, '청결'); assert.deepEqual(made.extra, [], '원문에 없는 설명은 버림');
   const badGrade = fixFacilityStatus(D, { name: '골프장', cleaning: '미흡 / 연습실 내부룸 먼지로 청소완료', condition: '', lines: [] });
   assert.equal(badGrade.cleaning, '확인 필요', '원문과 다른 등급은 확인 필요');
+});
+
+test("로컬 11/21 재확인: 점검 줄 이름에서 원문 칸 이름을 떼고 '…완료'는 상태로 · 원문 줄에 '완료'가 있으면 완료('예정'은 그대로)", () => {
+  const L = (item, status = '', state = '확인 필요', evidence = [], action = '') => ({ item, status, action, state, evidence });
+  assert.deepEqual(tidyCheckLine(L('청소상태 부가 설명 : 연습실 내부룸 먼지로 청소완료')), L('연습실 내부룸 먼지로 청소', '완료'));
+  assert.deepEqual(tidyCheckLine(L('시설상태 : 런닝머신 인버터 청소완료', '완료')), L('런닝머신 인버터 청소', '완료'));
+  assert.deepEqual(tidyCheckLine(L('타석 3번 센서', '완료')), L('타석 3번 센서', '완료'), '그대로');
+  assert.deepEqual(tidyCheckLine(L('조명 교체 완료 예정')), L('조명 교체 완료 예정'), "'예정'은 그대로");
+  const D = `<헬스장>
+- 런닝머신 인버터 청소완료
+- 사이클 페달 교체 완료 예정
+- 바닥 매트 점검중`;
+  assert.deepEqual(settleDone(D, L('시설상태 : 런닝머신 인버터 청소완료')), L('시설상태 : 런닝머신 인버터 청소완료', '완료', '완료', ['D2']), '근거가 없으면 원문 줄을 찾아 완료');
+  assert.equal(settleDone(D, L('런닝머신 인버터 청소완료', '', '확인 필요', ['D4'])).state, '확인 필요', "근거 줄에 '완료'가 없으면 그대로");
+  assert.equal(settleDone(D, L('사이클 페달 교체 완료 예정')).state, '확인 필요', "'예정'은 그대로");
+  assert.equal(settleDone(D, L('런닝머신 인버터 청소완료', '', '진행 중')).state, '진행 중', "'확인 필요'만 바꿈");
+  assert.equal(settleDone(D, L('바닥 왁스 코팅 완료')).state, '확인 필요', '원문에 없는 완료는 그대로');
 });

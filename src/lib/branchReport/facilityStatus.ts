@@ -126,3 +126,32 @@ export function fixFacilityStatus(dText: string, f: { name: string; cleaning: st
   const cleaning = one('cleaning', f.cleaning), condition = one('condition', f.condition);
   return { cleaning, condition, extra };
 }
+
+/**
+ * 로컬 11/21 재확인 ①: 점검 줄 이름에 원문 칸 이름이 붙어 나옴("청소상태 부가 설명 : 연습실 내부룸 먼지로 청소완료", "시설상태 : 런닝머신 인버터 청소완료").
+ * 칸 이름을 떼고, 이름이 '…완료'로 끝나면 이름은 내용만("런닝머신 인버터 청소"), 상태가 비었으면 '완료'. '예정'이 있으면 그대로
+ */
+const FIELD_PREFIX = /^\s*(?:청소|시설)\s*상태\s*(?:부가\s*설명|설명|비고)?\s*[:：]\s*/;
+export function tidyCheckLine<T extends { item: string; status: string }>(line: T): T {
+  let item = line.item.replace(FIELD_PREFIX, '').trim(); let status = line.status;
+  const m = item.match(/^(.+?)\s*완료$/);
+  if (m && !/예정/.test(item)) { item = m[1].trim(); if (!status.trim()) status = '완료'; }
+  if (!item) return line;
+  return item === line.item && status === line.status ? line : { ...line, item, status };
+}
+
+/**
+ * 로컬 11/21 재확인 ②: 원문에 '청소완료'가 있는데 점검 줄 상태가 '확인 필요'로 나옴.
+ * 줄 글(이름·상태·조치)에 '완료'가 있고, 근거 D 줄(없으면 원문에서 찾은 줄)에도 '완료'가 있으면 '완료'('예정'이 있으면 그대로)
+ */
+export function settleDone<T extends { item: string; status: string; action: string; state: string; evidence: string[] }>(dText: string, line: T): T {
+  if (line.state !== CHECK) return line;
+  const text = `${line.item} ${line.status} ${line.action}`;
+  if (!/완료/.test(text) || /예정/.test(text)) return line;
+  const lines = dText.split(/\r?\n/);
+  const refs = line.evidence.map((r) => r.match(/^D(\d+)$/)).filter((m): m is RegExpMatchArray => !!m).map((m) => Number(m[1])).filter((n) => n >= 1 && n <= lines.length);
+  const found = refs.length ? 0 : sourceLine(dText, `${line.item} ${line.status}`.replace(FIELD_PREFIX, ''));
+  const look = refs.length ? refs : found ? [found] : [];
+  if (!look.some((n) => /완료/.test(lines[n - 1]) && !/예정/.test(lines[n - 1]))) return line;
+  return { ...line, state: '완료', status: line.status.trim() || '완료', evidence: refs.length ? line.evidence : [`D${found}`] };
+}
