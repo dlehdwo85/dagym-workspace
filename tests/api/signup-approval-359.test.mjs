@@ -162,6 +162,7 @@ describe('359차 승인제 가입', () => {
     assert.equal(ns.length, 2); assert.match(ns[1].title, /소셜승인 · 소셜신청 · 11-30명 · google 가입/);
     assert.equal((await c.post('/api/tasks', { title: 'x' })).status, 403);
 
+    assert.equal((await ctx.owner.ok('GET', '/api/platform/tenants')).tenants.find((x) => x.id === st).stage, 'hold', '승인 대기 = 보류(체험은 승인 때 시작)');
     assert.equal((await ctx.owner.post(`/api/platform/signups/${st}/reject`, { reason: '' })).status, 400, '거절 사유 필수');
     const rj = await ctx.owner.ok('POST', `/api/platform/signups/${st}/reject`, { reason: '연락이 닿지 않았습니다' });
     assert.equal(rj.mailed, true);
@@ -172,6 +173,12 @@ describe('359차 승인제 가입', () => {
     assert.equal((await c.req('GET', '/api/auth/me')).status, 200, '로그인 정보(안내 화면용)는 됨');
     const [rr] = await sql`select signup_status, signup_reason from tenants where id = ${st}`;
     assert.deepEqual([rr.signup_status, rr.signup_reason], ['rejected', '연락이 닿지 않았습니다']);
+    // 로컬 11/21: 거절된 신청은 구독 상태가 'trial' 로 남아도 고객 목록 단계는 '해지'(체험으로 세지 않음) · 체험 만료 알림 대상도 아님(체험 시작 전 — 끝나는 날 없음)
+    const dir = await ctx.owner.ok('GET', '/api/platform/tenants');
+    const rowR = dir.tenants.find((x) => x.id === st); assert.equal(rowR.sub_status, 'trial'); assert.equal(rowR.stage, 'churned', '거절 = 해지');
+    assert.ok(!(await ctx.owner.ok('GET', '/api/platform/tenants?status=trial')).tenants.some((x) => x.id === st), '체험 거름에 안 나옴');
+    assert.equal((await ctx.owner.ok('GET', `/api/platform/tenants/${st}/detail`)).stage, 'churned', '회사 상세도 해지');
+    assert.equal((await sql`select trial_ends_at from tenant_subscriptions where tenant = ${st}`)[0].trial_ends_at, null, '체험 만료 알림 대상 아님(끝나는 날 없음)');
     // 로컬 11/21 #1095: 거절된 신청의 소셜 연결 풀기(플랫폼 운영자) — 같은 구글 계정을 다른 워크인 계정에 연결할 수 있게
     const list = (await ctx.owner.ok('GET', '/api/platform/signups')).tenants.find((x) => x.id === st);
     assert.equal(list.social_links, 1, '목록에 소셜 연결 수');
