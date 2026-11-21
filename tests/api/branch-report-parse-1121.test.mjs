@@ -5,6 +5,7 @@ import { deflateRawSync } from 'node:zlib';
 
 const { parseKakaoExport, unzipTexts } = await import('../../src/lib/branchReport/kakaoParse.ts');
 const { maskPII } = await import('../../src/lib/branchReport/mask.ts');
+const { checkFacilityStatus, gradesIn, applyOkMark } = await import('../../src/lib/branchReport/facilityStatus.ts');
 
 const PC = `가상지점 운영방 님과 카카오톡 대화
 저장한 날짜 : 2026-11-21 18:00:00
@@ -92,3 +93,42 @@ function makeZip(entries) {
   const cd = Buffer.concat(centrals); const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(off, 16);
   return Buffer.concat([...locals, cd, end]);
 }
+
+test('로컬 11/21: 청소 상태·시설 상태는 그 시설의 원문 줄 값만 — 시설 상태가 설명뿐이거나 줄이 없으면 확인 필요', () => {
+  const D = `오산더샵 주간보고
+<헬스장>
+청소상태 : 청결
+시설상태 : 런닝머신 인버터 청소완료
+<골프장> 총이용인원 47 / 청소상태 청결
+<독서실> 청소상태 보통 / 시설상태 부분양호`;
+  const c = (f, field, v) => checkFacilityStatus(D, f, field, v);
+  assert.equal(c('헬스장', 'cleaning', '청결'), '청결');
+  assert.equal(c('헬스장', 'condition', '청결'), '확인 필요', '청소 상태 값을 옮겨 적음(원문 시설상태는 설명뿐)');
+  assert.equal(c('헬스장', 'condition', '런닝머신 인버터 청소완료'), '확인 필요', '시설 상태는 등급 단어만');
+  assert.equal(c('골프장', 'condition', '청결'), '확인 필요', '골프장에는 시설상태 줄이 없음');
+  assert.equal(c('골프장', 'cleaning', '청결'), '청결');
+  assert.equal(c('독서실', 'condition', '부분양호'), '부분양호');
+  assert.equal(c('독서실', 'condition', '양호'), '확인 필요', "'부분양호' 안의 '양호'를 따로 세지 않음");
+  assert.equal(c('독서실', 'cleaning', '청결'), '확인 필요', '다른 시설의 값');
+  assert.equal(c('헬스장', 'condition', ''), ''); assert.equal(c('헬스장', 'condition', '확인 필요'), '확인 필요');
+  assert.equal(checkFacilityStatus('청소상태 양호 / 시설상태 양호', '사우나', 'condition', '양호'), '양호', '시설 머리 줄이 없으면 글 전체에서');
+  assert.deepEqual(gradesIn('부분양호, 일부 미흡'), ['부분양호', '미흡']);
+});
+
+test("#1105: 점검 줄 값이 0·O·○ 하나뿐이면 '이상 없음'·완료(원문 줄에서 확인) — '진행0'·다른 시설·숫자 칸은 그대로", () => {
+  const D = `<골프장> 총이용인원 47
+- 프로젝터 램프 : 0
+- 티업기계 작동 여부 : O
+- 고무패드 : ○
+- 기구윤활유 : 머신전체 WD 진행0
+<헬스장>
+- 프로젝터 램프 : 교체 필요`;
+  const L = (item, evidence = [], status = '0', state = '확인 필요') => ({ item, status, action: '', state, evidence });
+  assert.deepEqual(applyOkMark(D, '골프장', L('프로젝터 램프')), { ...L('프로젝터 램프'), status: '이상 없음', state: '완료', evidence: ['D2'] }, '근거가 없으면 그 줄 번호');
+  assert.deepEqual(applyOkMark(D, '골프장', L('티업기계 작동', ['D3'])).status, '이상 없음');
+  assert.deepEqual(applyOkMark(D, '골프장', L('티업기계 작동 여부', ['D3'])).evidence, ['D3'], '근거 번호 그대로');
+  assert.equal(applyOkMark(D, '골프장', L('고무패드')).state, '완료');
+  assert.equal(applyOkMark(D, '골프장', L('기구윤활유', ['D5'], '진행0')).status, '진행0', "'진행0'은 그대로");
+  assert.equal(applyOkMark(D, '헬스장', L('프로젝터 램프', [], '교체 필요')).status, '교체 필요', '다른 시설의 0 을 가져오지 않음');
+  assert.equal(applyOkMark(D, '골프장', L('없는 항목')).status, '0', '원문에 없으면 그대로');
+});
