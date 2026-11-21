@@ -194,3 +194,14 @@ test("로컬 11/21: 시설별 이용 현황 합계에 단위 — 같은 단위�
   assert.equal(sumCol(['443명', '']), '', '빈 칸이 있으면 합계 없음');
   assert.deepEqual(delta('500명', '543명'), { diff: '+43', rate: '▲8.6%' });
 });
+
+test('#1106 하이링크 이용현황 표 읽기: 줄 모양·글자가 붙은 PDF 글·칸마다 줄바꿈·표 아닌 글', async () => {
+  const { parseHilinkUsage } = await import('../../src/lib/branchReport/hilinkUsage.ts');
+  const a = parseHilinkUsage('시설별 이용현황 2026년 11월\n시설 전달 인원 이번달 인원 증감 증감률\n헬스장 1,234명 1,240명 +6명 ▲ 0.4%\n골프장 269명 174명 -95명 ▼ 35.3%\n전시설 총 이용현황 1,503명 1,414명 -89명 ▼ 5.9%');
+  assert.deepEqual(a.rows.map((r) => r.item), ['헬스장', '골프장']); assert.equal(a.rows[1].diff, '-95명'); assert.equal(a.total.item, '전시설 총 이용현황');
+  const b = parseHilinkUsage('시설별 이용현황시설전달 인원이번달 인원증감증감률헬스장1,234명1,240명+6명▲ 0.4%골프장269명174명-95명▼ 35.3%');
+  assert.deepEqual(b.rows.map((r) => [r.item, r.prev, r.cur, r.diff, r.rate]), [['헬스장', '1,234명', '1,240명', '+6명', '▲0.4%'], ['골프장', '269명', '174명', '-95명', '▼35.3%']]);
+  const c = parseHilinkUsage('시설\n전달 인원\n이번달 인원\n증감\n증감률\n스크린 골프\n120명\n-\n-\n-\n독서실\n38명\n40명\n+2명\n▲ 5.3%');
+  assert.deepEqual(c.rows.map((r) => r.item), ['스크린 골프', '독서실']);
+  assert.deepEqual(parseHilinkUsage('안녕하세요 11월 21일 보고서 3쪽'), { rows: [], total: null });
+});
