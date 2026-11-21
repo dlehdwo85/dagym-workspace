@@ -7,6 +7,8 @@ import { badRequest, conflict, forbidden, notFound } from './errors';
 import { audit } from './log';
 import { tenantOf, ROLE_RANK, type Role, type SessionUser } from './types';
 import { zUuid } from './api';
+import { appUrl, sendFramedMail } from './mail';
+import { APP_GET_URL } from './storeLinks';
 
 export const inviteInput = z.object({
   email: z.string().trim().toLowerCase().email('이메일 형식이 아닙니다'),
@@ -26,7 +28,41 @@ function assertCanGrant(actor: SessionUser, role: Role) {
   if (ROLE_RANK[role] > ROLE_RANK[actor.role]) throw forbidden('본인보다 높은 권한은 부여할 수 없습니다');
 }
 
-export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInput>, ip: string | null) {
+export type InviteMail = 'sent' | 'dev' | 'failed' | 'off';
+/** 초대 메일 한 통(대표 11/20 #1083): 회사 이름 · 초대한 사람(직책) · [초대 수락] 단추 + 주소 글자 · 앱 받기 주소 · 만료일. 받는 사람에게 실제로 보이는 글은 여기 한곳 */
+export function inviteMailParts(i: { company: string; name: string; by: string; link: string; expires: Date }) {
+  const when = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(i.expires);
+  return {
+    title: `${i.company} 워크인 초대`,
+    subject: `[워크인] ${i.company}에서 초대했습니다`,
+    lines: [
+      `${i.name}님, ${i.by}님이 ${i.company} 워크인에 초대했습니다.`,
+      '아래 [초대 수락]을 눌러 비밀번호를 정하면 바로 시작합니다.',
+      `초대 링크는 ${when}까지, 한 번만 쓸 수 있습니다.`,
+      '',
+      '휴대폰 앱을 받아 이 이메일과 방금 정한 비밀번호로 로그인하면 알림을 받습니다.',
+      '',
+      '모르는 초대라면 이 메일을 무시해 주세요.',
+    ],
+    button: { label: '초대 수락', url: i.link },
+    links: [{ label: '휴대폰 앱 받기', url: APP_GET_URL }],
+  };
+}
+/** 초대 메일 보내기 + 결과를 초대 줄에 남김(267 마이그레이션 전이면 남기기만 건너뜀). 메일이 안 가도 초대는 그대로 — 관리자가 링크를 직접 전달 */
+export async function sendInviteMail(actor: SessionUser, inv: { id: string; userId?: string; email: string; name: string; token: string; expires: Date }, sql: Sql = db()): Promise<{ mail: InviteMail; mailError?: string }> {
+  const [me] = await sql<{ name: string; title: string | null; company: string | null }[]>`
+    select u.name, coalesce(nullif(u.title_short, ''), nullif(u.title, '')) as title, (select nullif(t.name, '') from tenants t where t.id = ${tenantOf(actor)}) as company from users u where u.id = ${actor.id}`;
+  const m = inviteMailParts({ company: me?.company ?? '우리 회사', name: inv.name, by: me ? (me.title ? `${me.name} ${me.title}` : me.name) : '관리자', link: `${appUrl()}/invite/${inv.token}`, expires: inv.expires });
+  let mail: InviteMail; let mailError: string | undefined;
+  try { mail = await sendFramedMail(inv.email, m.title, m.lines, m.button, m.subject, m.links); }
+  catch (e) { mail = 'failed'; mailError = String((e as Error)?.message ?? e).slice(0, 200); }
+  try { await sql`update invitations set mail_status = ${mail}, mail_at = now(), mail_error = ${mailError ?? null} where id = ${inv.id}`; } catch { /* 267 전: 칸이 없으면 기록만 건너뜀 */ }
+  await audit(sql, actor.id, mail === 'failed' ? 'user.invite_mail_failed' : 'user.invite_mail', 'user', inv.userId ?? null, { invitationId: inv.id, mail }, null);
+  return { mail, ...(mailError ? { mailError } : {}) };
+}
+
+/** opts.mail = false: 메일 없이 링크만(앱 심사용 계정 — 심사 담당자에게 메일이 가면 안 됨) */
+export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInput>, ip: string | null, opts: { mail?: boolean } = {}) {
   await (await import('./menuPerms')).requireMenu(actor, 'admin_users', 'edit');
   assertCanGrant(actor, i.role);
   const sql = db();
@@ -49,7 +85,7 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
     await (await import('./plans')).assertSeat(demoOnly ? 'demo' : tn, sql);
   }
   const token = newToken();
-  return sql.begin(async (tx) => {
+  const r = await sql.begin(async (tx) => {
     let userId = existing[0]?.id;
     if (!userId) {
       const [u] = await tx<{ id: string }[]>`
@@ -59,10 +95,10 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
       await tx`update users set name = ${i.name}, role = ${i.role}, title = ${i.title ?? null}, updated_at = now() where id = ${userId}`;
     }
     await tx`update invitations set revoked_at = now() where user_id = ${userId} and accepted_at is null and revoked_at is null`;
-    const [inv] = await tx<{ id: string }[]>`
+    const [inv] = await tx<{ id: string; expires_at: Date }[]>`
       insert into invitations (email, name, role, org_unit_ids, token_hash, invited_by, user_id, expires_at)
       values (${i.email}, ${i.name}, ${i.role}, ${i.orgUnitIds}, ${sha256(token)}, ${actor.id}, ${userId}, now() + interval '7 days')
-      returning id`;
+      returning id, expires_at`;
     await tx`delete from memberships where user_id = ${userId}`;
     for (const o of i.orgUnitIds) await tx`insert into memberships (user_id, org_unit_id) values (${userId}, ${o})`;
     // 부서·팀 소속(팀원으로) + 팀 대화방 + 공간(초대 때 고른 것, 없으면 부서·팀 기본 공간의 합)
@@ -78,8 +114,11 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
     }
     await syncDemoFlag(tx, [userId]);
     await audit(tx, actor.id, 'user.invite', 'user', userId, { email: i.email, role: i.role, orgUnitIds: i.orgUnitIds }, ip);
-    return { invitationId: inv.id, userId, token, path: `/invite/${token}` };
+    return { invitationId: inv.id, userId, token, path: `/invite/${token}`, expires: inv.expires_at };
   });
+  // 대표 11/20 #1083: 이메일로 초대하면 초대 메일을 자동으로 보냄(트랜잭션 밖 — 메일이 늦거나 실패해도 초대는 만들어져 있음)
+  const sent = opts.mail === false ? { mail: 'off' as const } : await sendInviteMail(actor, { id: r.invitationId, userId: r.userId, email: i.email, name: i.name, token: r.token, expires: r.expires }, sql);
+  return { invitationId: r.invitationId, userId: r.userId, token: r.token, path: r.path, expiresAt: r.expires, ...sent };
 }
 
 export async function invitationInfo(token: string) {

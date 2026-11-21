@@ -51,6 +51,8 @@ function handle(req, res, body) {
   let r = p.match(/^\/reviewSubmissions\/(\w+)(\/items)?$/);
   if (r) {
     const s = st.subs.get(r[1]);
+    if (!s) { res.statusCode = 404; return res.end(JSON.stringify({ errors: [{ status: '404', code: 'NOT_FOUND', title: 'The specified resource does not exist' }] })); }
+    if (m === 'GET' && !r[2] && s.vanish && s.state === 'CANCELING') { st.subs.delete(s.id); st.ver = 'PREPARE_FOR_SUBMISSION'; res.statusCode = 404; return res.end(JSON.stringify({ errors: [{ status: '404', code: 'NOT_FOUND', title: 'The specified resource does not exist' }] })); } // 11/20 실제: 거둔 묶음이 바로 사라짐
     if (r[2]) return ok(Array.from({ length: s.items }, (_, i) => ({ id: `it${i}`, attributes: { state: s.state === 'UNRESOLVED_ISSUES' ? 'REJECTED' : 'READY_FOR_REVIEW' } })));
     if (m === 'GET') { if (s.state === 'CANCELING' && ++s.polls >= 2) { s.state = 'COMPLETE'; st.ver = 'PREPARE_FOR_SUBMISSION'; } return ok({ id: s.id, attributes: { state: s.state } }); }
     if (m === 'PATCH' && j.data.attributes.canceled) { s.state = 'CANCELING'; return ok({ id: s.id, attributes: { state: s.state } }); }
@@ -115,6 +117,15 @@ test('ⓑ apply + cancel_unresolved + submit: 반려 제출 거두기 → 버전
   assert.match(r.out, /ⓔ 결과: 바꾼 묶음 APP_IPHONE_67, APP_IPAD_PRO_3GEN_129, APP_IPHONE_61$/m);
   const subs = [...st.subs.values()]; const nw = subs.find((s) => s.id !== 'a048');
   assert.deepEqual([st.subs.get('a048').state, nw?.state, nw?.items], ['COMPLETE', 'WAITING_FOR_REVIEW', 1], '새 제출 묶음에 버전 넣고 제출');
+});
+
+test('ⓗ 거둔 제출 묶음이 바로 사라져 상태 조회가 404(11/20 apply 44669109536) → 거둬진 것으로 보고 계속: 버전 돌아옴 → 묶음 바꾸기 → 새 제출 묶음 → 제출', async () => {
+  st = fresh(); calls.length = 0; st.subs.get('a048').vanish = true;
+  const r = await run({ MODE: 'apply', SUBMIT: '1', CANCEL_UNRESOLVED: '1' }); assert.equal(r.code, 0, r.out);
+  assert.ok(calls.includes('GET /reviewSubmissions/a048'), '거둔 뒤 상태 조회를 함');
+  assert.match(r.out, /제출 묶음 상태 → 사라짐\(조회 404 — 거둬진 것으로 봄\)/); assert.match(r.out, /ⓢ 버전 상태 → PREPARE_FOR_SUBMISSION/);
+  assert.ok(!st.subs.has('a048'), '옛 묶음은 사라짐');
+  const nw = [...st.subs.values()][0]; assert.deepEqual([nw?.state, nw?.items], ['WAITING_FOR_REVIEW', 1], '새 제출 묶음에 버전 넣고 제출');
 });
 
 test('ⓒ 다시 돌려도 같은 값: 설명·키워드·심사 메모 건너뜀(새 글 두 번 안 붙음)', async () => {

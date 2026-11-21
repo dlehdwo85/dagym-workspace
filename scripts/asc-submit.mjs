@@ -127,8 +127,10 @@ if (verId) {
     await act(`ⓢ 제출 묶음 ${sb.id}(${sb.attributes.state}) 거두기(canceled = true)`, async () => {
       await api('PATCH', `/reviewSubmissions/${sb.id}`, { data: { type: 'reviewSubmissions', id: sb.id, attributes: { canceled: true } } });
       let st = 'CANCELING';
-      for (let i = 0; i < 40 && ['CANCELING', 'UNRESOLVED_ISSUES', 'READY_FOR_REVIEW'].includes(st); i++) { await sleep(3000); st = (await api('GET', `/reviewSubmissions/${sb.id}`)).data.attributes.state; }
-      log(`    제출 묶음 상태 → ${st}`);
+      // 11/20 apply 44669109536: 거두기(PATCH) 직후 애플이 그 묶음을 지워 상태 조회가 404 → 예외로 끝났다(거두기 자체는 됨). 404 = 거둬져 사라진 것으로 보고 계속한다
+      const subState = async () => { try { return (await api('GET', `/reviewSubmissions/${sb.id}`)).data.attributes.state; } catch (e) { if (/ → 404 /.test(String(e?.message))) return 'GONE'; throw e; } };
+      for (let i = 0; i < 40 && ['CANCELING', 'UNRESOLVED_ISSUES', 'READY_FOR_REVIEW'].includes(st); i++) { await sleep(3000); st = await subState(); }
+      log(`    제출 묶음 상태 → ${st === 'GONE' ? '사라짐(조회 404 — 거둬진 것으로 봄)' : st}`);
     });
   }
   if (CANCEL_UNRESOLVED && cancelable.length && !plan) {
