@@ -4,6 +4,8 @@ import { clientIp } from '@/lib/api';
 import { HttpError } from '@/lib/errors';
 import { STATE_COOKIE, createHandoff, isProvider, oauthCallback, stateAppChallenge } from '@/lib/oauth';
 import { APP_SHEET_COOKIE } from '@/lib/hostSplit';
+import { db } from '@/lib/db';
+import { audit } from '@/lib/log';
 
 /** 299차 Apple: 처음 한 번 오는 이름을 GET 으로 넘길 때 잠깐 담는 쿠키(주소에 개인정보를 싣지 않음) */
 const NAME_COOKIE = 'wos_oauth_name';
@@ -43,7 +45,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
   } catch (e) {
     const msg = e instanceof HttpError ? e.message : '로그인 중 오류가 났습니다. 다시 시도해 주세요.';
     if (!(e instanceof HttpError)) console.error('[oauth]', provider, e);
-    else console.warn('[oauth] 실패', provider, e.status, e.message.slice(0, 80)); // 이 단계 문구에는 이메일·비밀값이 없음(상태 만료·코드 없음·Apple 실패 이유 코드)
+    else {
+      const host = (req.headers.get('host') ?? '').toLowerCase();
+      console.warn('[oauth] 실패', provider, e.status, e.code, `host=${host}`, e.message.slice(0, 80)); // 이 단계 문구에는 이메일·비밀값이 없음(상태 만료 하위 이유·코드 없음·Apple 실패 이유 코드)
+      if (e.code.startsWith('state_')) await audit(db(), null, 'auth.oauth_failed', null, null, { provider, reason: e.code, host }, clientIp(req)).catch(() => {}); // 로컬 11/21 #1101: '만료' 하위 이유
+    }
     return ac || sheet ? toApp({ error: msg }) : go(`/login?oauth_error=${encodeURIComponent(msg)}`);
   }
 }

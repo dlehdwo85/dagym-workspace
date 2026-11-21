@@ -207,7 +207,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
   const sp_ = space === 'work' ? '' : `?space=${space}`;
   const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'), byHref('/mail/outbox'),
-    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), byHref('/check'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: Sparkles }] : [])];
+    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), byHref('/check'), ...(session.features.branchReport ? [{ href: '/branch-reports', label: '지점 보고', icon: FileText }] : []), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: Sparkles }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);

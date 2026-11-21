@@ -72,6 +72,8 @@ test('가림: 전화·주민번호·카드·계좌·차량·동호수·이메일
   const { text, counts } = maskPII(src);
   assert.equal(text, '[호수] 누수, [호수]도 확인. 연락처 [전화] / [전화] / [전화], 주민 [주민번호], 카드 [카드], 계좌 [계좌], 차량 [차량]·[차량], 메일 [이메일]');
   assert.deepEqual(counts, { email: 1, rrn: 1, card: 1, phone: 3, car: 2, unit: 2, account: 1 });
+  // 로컬 11/21 실측에서 새던 모양: 줄 맨 앞 목록 표시 '-' 바로 뒤에 붙은 휴대폰 번호
+  assert.equal(maskPII('민원 접수\n -010-1234-5678 (입주민)\n- 010 9876 5432').text, '민원 접수\n -[전화] (입주민)\n- [전화]');
   const keep = '2026년 11월 21일 오후 2:05, 12월 2026 계획, 30분 1000원, 엘리베이터 2호기, 3번 러닝머신, 온도 26도';
   assert.equal(maskPII(keep).text, keep, '건드리지 않음');
 });

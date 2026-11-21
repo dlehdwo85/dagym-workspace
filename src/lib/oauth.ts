@@ -74,11 +74,16 @@ export function startOAuth(p: Provider, i: z.infer<typeof startInput>) {
   if (p === 'apple') q.set('response_mode', 'form_post'); // 이름·이메일을 받으려면 form_post(콜백 POST → 같은 주소 GET 으로 넘김)
   return { url: `${c.auth}?${q}`, cookie };
 }
+/** 로컬 11/21 #1101: '만료'의 하위 이유를 코드로(state_no_cookie·state_bad_sig·state_provider·state_mismatch·state_timeout) — 운영 기록·감사 기록에 남김. 화면 문구는 그대로 */
 function readState(cookie: string | undefined, state: string | null, p: Provider): State {
-  const [body, sig] = (cookie ?? '').split('.');
-  if (!body || !sig || hmac('oauth:' + body) !== sig) throw badRequest('로그인 요청이 만료되었습니다. 다시 시도해 주세요.');
-  const st = JSON.parse(Buffer.from(body, 'base64url').toString()) as State;
-  if (st.p !== p || !state || st.n !== state || Date.now() - st.at > 10 * 60_000) throw badRequest('로그인 요청이 만료되었습니다. 다시 시도해 주세요.');
+  const fail = (why: string) => new HttpError(400, `state_${why}`, '로그인 요청이 만료되었습니다. 다시 시도해 주세요.');
+  if (!cookie) throw fail('no_cookie'); // 시작한 주소와 돌아온 주소(콜백)가 다르면 여기(쿠키는 시작한 호스트에만 있음)
+  const [body, sig] = cookie.split('.');
+  if (!body || !sig || hmac('oauth:' + body) !== sig) throw fail('bad_sig');
+  let st: State; try { st = JSON.parse(Buffer.from(body, 'base64url').toString()) as State; } catch { throw fail('bad_sig'); }
+  if (st.p !== p) throw fail('provider');
+  if (!state || st.n !== state) throw fail('mismatch');
+  if (Date.now() - st.at > 10 * 60_000) throw fail('timeout');
   return st;
 }
 

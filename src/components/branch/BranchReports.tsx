@@ -1,0 +1,244 @@
+'use client';
+import { useEffect, useMemo, useState } from 'react';
+import { FileUp, Loader2, Plus, Printer, Settings2, Sparkles, Trash2 } from 'lucide-react';
+import { api, useApi } from '@/components/client';
+import { Button, Empty, ErrorBox, Field, Loading, Modal, PageHeader, askConfirm, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { ReportView, STATE_TONE, type Body, type Line } from './ReportView';
+
+/**
+ * #1096 지점 주간보고(다짐 전용) — 설계 docs/branch-report-design.md, 대표 결정 11/21.
+ * 지점·주(금요일) 고르기 → 지점 관리자가 카톡에 올린 주간보고 글 붙여 넣기(+선택: 대화 파일) → [초안 만들기](AI) → 고치기 → [제출](잠김)
+ * 항목마다 근거(D줄·대화)를 눌러 봄. '확인 필요'는 제출 전에 확인. PDF 는 인쇄 화면에서.
+ * 지점 = 기능 안의 '보고 지점' 목록(다짐 조직 단위와 따로) — 작성 담당은 자기 지점만, 검토 담당·대표·관리자는 전체
+ */
+type Home = { admin: boolean; friday: string; siteId: string | null; canWrite: boolean; canReopen: boolean; sites: { id: string; name: string; writer: string | null; reviewer: string | null; hidden: boolean }[];
+  reports: { id: string; report_day: string; status: string; updated_at: string; submitted_at: string | null }[]; chat: { n: number; last: string | null } | null };
+const STATES = ['완료', '진행 중', '확인 필요'] as const;
+const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+const PLACEHOLDER = `예) ○○ 주간보고
+<이용인원> 헬스 120 / 골프 35 / 독서실 18
+<특이사항 건의사항 및 민원>
+내용 : 사우나 온도 민원
+- 11/18 접수, 설비 업체 점검 예정(11/25)
+<골프장> 총이용인원 35 / 청소상태 청결 / 시설상태 양호
+- 타석 3번 센서 : 완료`;
+const countCheck = (b: Body | null) => !b ? 0 : b.usage.filter((x) => x.count === '확인 필요').length + b.facilities.reduce((a, f) => a + (f.visitors === '확인 필요' ? 1 : 0) + f.lines.filter((l) => l.state === '확인 필요').length, 0) + b.issues.filter((x) => x.state === '확인 필요').length;
+
+export function BranchReports() {
+  const [site, setSite] = useState<string | null>(null);
+  useEffect(() => { const q = new URLSearchParams(location.search).get('site'); if (q) setSite(q); }, []);
+  const home = useApi<Home>(`/api/branch-reports${site ? `?site=${site}` : ''}`);
+  const h = home.data;
+  const [day, setDay] = useState<string | null>(null);
+  const curDay = day ?? h?.friday ?? null;
+  const fridays = useMemo(() => (h ? Array.from({ length: 12 }, (_, k) => addDays(h.friday, -7 * k)) : []), [h]);
+  const rep = h?.reports.find((r) => r.report_day === curDay) ?? null;
+  const detail = useApi<{ report: any; canWrite: boolean; canReopen: boolean; admin: boolean }>(rep ? `/api/branch-reports/${rep.id}` : null);
+  const [setup, setSetup] = useState(false);
+  const [ev, setEv] = useState<{ refs: string[]; items?: any[] } | null>(null);
+  if (home.error) return <ErrorBox error={home.error} retry={home.reload} />;
+  if (!h) return <Loading />;
+  const siteId = h.siteId; const siteName = h.sites.find((t) => t.id === siteId)?.name ?? '';
+  const reload = () => { home.reload(); detail.reload(); };
+  const showEvidence = async (refs: string[]) => {
+    if (!rep || !refs.length) return;
+    setEv({ refs });
+    try { const r = await api<{ items: any[] }>(`/api/branch-reports/${rep.id}/evidence?refs=${refs.join(',')}`); setEv({ refs, items: r.items }); } catch (e: any) { toast.error(e.message); setEv(null); }
+  };
+  return (
+    <div className="space-y-3" data-testid="branch-reports">
+      <PageHeader title="지점 주간보고" sub="지점 관리자의 주간보고 글로 AI 가 초안을 만들고, 담당이 고쳐서 제출합니다 — 숫자는 글에 있는 것만, 모르면 '확인 필요'" actions={h.admin ? <Button size="sm" variant="secondary" onClick={() => setSetup(true)} data-testid="branch-setup-open"><Settings2 />보고 지점</Button> : undefined} />
+      {!h.sites.length ? <Empty title="아직 보고 지점이 없습니다">{h.admin ? '[보고 지점]에서 지점 이름을 한 번에 붙여 넣고 작성 담당·검토 담당을 고르세요.' : '관리자에게 내 지점의 작성 담당 지정을 요청하세요.'}</Empty> : <>
+        <div className="flex flex-wrap items-end gap-2 rounded-card border border-line bg-white p-3 shadow-card">
+          <Field label="지점" className="min-w-[180px] flex-1"><select className={inputCls} value={siteId ?? ''} onChange={(e) => { setSite(e.target.value); setDay(null); }} data-testid="branch-unit">
+            {h.sites.map((t) => <option key={t.id} value={t.id}>{t.name}{t.hidden ? ' (숨김)' : ''}{t.writer ? ` — ${t.writer}` : ''}</option>)}</select></Field>
+          <Field label="보고 주(금요일 11:00 기준)" className="min-w-[200px] flex-1"><select className={inputCls} value={curDay ?? ''} onChange={(e) => setDay(e.target.value)} data-testid="branch-week">
+            {fridays.map((f) => { const r = h.reports.find((x) => x.report_day === f); return <option key={f} value={f}>{md(f)}(금) · {md(addDays(f, -7))}~{md(addDays(f, -1))}{r ? (r.status === 'submitted' ? ' · 제출함' : ' · 초안') : ''}</option>; })}</select></Field>
+          {h.chat && h.chat.n > 0 && <p className="w-full text-xs text-ink-3" data-testid="branch-chat-count">올린 대화 {h.chat.n.toLocaleString('ko-KR')}건(가린 글){h.chat.last ? ` · 마지막 ${h.chat.last.slice(0, 16)}` : ''}</p>}
+        </div>
+        {siteId && curDay && (detail.data?.report?.status === 'submitted'
+          ? <Submitted r={detail.data.report} canReopen={detail.data.canReopen} onChange={reload} onEvidence={showEvidence} />
+          : <>
+            {h.canWrite && <Composer key={`${siteId}:${curDay}`} siteId={siteId} day={curDay} hasDraft={!!rep} onDone={reload} />}
+            {detail.data?.report && <Editor key={detail.data.report.id + detail.data.report.updated_at} r={detail.data.report} canWrite={detail.data.canWrite} onChange={reload} onEvidence={showEvidence} />}
+            {!rep && !h.canWrite && <Empty title={`${siteName} ${md(curDay)} 주간보고가 아직 없습니다`}>작성 담당이 초안을 만들면 여기서 볼 수 있습니다.</Empty>}
+          </>)}
+      </>}
+      {setup && <Setup onClose={() => { setSetup(false); home.reload(); }} />}
+      <Modal open={!!ev} onClose={() => setEv(null)} title="근거">
+        <div className="space-y-2 text-sm" data-testid="branch-evidence">{!ev?.items ? <Loading /> : ev.items.map((x) => (
+          <div key={x.ref} className="rounded-input border border-line p-2"><div className="text-xs text-ink-3">{x.ref} · {x.kind}{x.at ? ` · ${x.at}` : ''}{x.sender ? ` · ${x.sender}` : ''}</div><p className="mt-0.5 whitespace-pre-line">{x.text}</p></div>))}</div>
+      </Modal>
+    </div>
+  );
+}
+
+/** 입력: 주간보고 글 붙여 넣기 + (선택) 대화 파일 → [초안 만들기] */
+function Composer({ siteId, day, hasDraft, onDone }: { siteId: string; day: string; hasDraft: boolean; onDone: () => void }) {
+  const [text, setText] = useState(''); const [useChat, setUseChat] = useState(true);
+  const [busy, setBusy] = useState<'' | 'upload' | 'draft'>(''); const [up, setUp] = useState<string>('');
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setBusy('upload');
+    try {
+      const list = await Promise.all(Array.from(files).slice(0, 5).map(async (f) => {
+        if (f.size > 4_000_000) throw new Error(`${f.name}: 4MB 가 넘습니다 — 기간을 줄여 다시 내보내 주세요`);
+        if (/\.zip$/i.test(f.name)) { const b = new Uint8Array(await f.arrayBuffer()); let s = ''; for (let k = 0; k < b.length; k += 0x8000) s += String.fromCharCode(...b.subarray(k, k + 0x8000)); return { name: f.name, b64: btoa(s) }; }
+        return { name: f.name, text: await f.text() };
+      }));
+      const r = await api<any>('/api/branch-reports/upload', { body: { siteId, files: list } });
+      setUp(`대화 ${r.added.toLocaleString('ko-KR')}건을 가려서 넣었습니다(${r.from ?? '?'} ~ ${r.to ?? '?'} · 겹침 ${r.duplicates} · 사진 등 ${r.skipped})`); onDone();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
+  };
+  const draft = async () => {
+    if (hasDraft && !(await askConfirm('이 주 초안을 새로 만들까요? 지금 고친 내용은 새 초안으로 바뀝니다.', { title: '초안 다시 만들기', ok: '다시 만들기' }))) return;
+    setBusy('draft');
+    try { const r = await api<any>('/api/branch-reports/draft', { body: { siteId, day, text, useChat } }); toast.ok(`초안을 만들었습니다${r.fixed ? ` — 근거가 약한 ${r.fixed}곳은 '확인 필요'로 바꿨습니다` : ''}`); setText(''); onDone(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
+  };
+  return (
+    <section className="space-y-2 rounded-card border border-line bg-white p-3 shadow-card" data-testid="branch-composer">
+      <Field label="이번 주 주간보고 글(카톡에 올린 글 그대로 붙여 넣기)"><textarea className={cx(inputCls, 'min-h-[160px] font-mono text-[13px]')} value={text} onChange={(e) => setText(e.target.value)} placeholder={PLACEHOLDER} maxLength={20000} data-testid="branch-text" /></Field>
+      <p className="text-xs text-ink-3">전화번호·동호수·주민번호·계좌·카드·차량번호·이메일은 AI 로 보내기 전에 가립니다. 원본 파일은 저장하지 않습니다.</p>
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-input border border-line px-2.5 py-1.5 hover:bg-slate-50" data-testid="branch-upload-label">
+          {busy === 'upload' ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}대화 파일 올리기(선택 · txt·csv·zip)
+          <input type="file" className="hidden" accept=".txt,.csv,.zip" multiple onChange={(e) => { void upload(e.target.files); e.target.value = ''; }} data-testid="branch-upload" disabled={!!busy} /></label>
+        <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={useChat} onChange={(e) => setUseChat(e.target.checked)} data-testid="branch-use-chat" />올린 대화도 근거로</label>
+      </div>
+      {up && <p className="text-xs text-brand-800" data-testid="branch-upload-result">{up}</p>}
+      <div className="flex justify-end"><Button onClick={draft} disabled={!!busy} data-testid="branch-draft">{busy === 'draft' ? <Loader2 className="animate-spin" /> : <Sparkles />}{hasDraft ? '초안 다시 만들기' : '초안 만들기'}</Button></div>
+    </section>
+  );
+}
+
+/** 초안 고치기 — 표 칸을 바로 고침, 항목 더하기·빼기, 근거 보기, [저장]·[제출] */
+function Editor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
+  const [b, setB] = useState<Body>(r.body as Body); const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false);
+  const set = (nb: Body) => { setB(nb); setDirty(true); };
+  const need = countCheck(b);
+  const save = async () => { setBusy(true); try { await api(`/api/branch-reports/${r.id}`, { method: 'PUT', body: b }); setDirty(false); toast.ok('저장했습니다'); onChange(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } };
+  const submit = async () => {
+    if (!(await askConfirm(`${r.unit_name} ${md(r.report_day)} 주간보고를 제출할까요?${need ? `\n\n'확인 필요'가 ${need}곳 남아 있습니다.` : ''}\n\n제출하면 잠기고, 고치려면 검토 담당·관리자의 [제출 취소]가 필요합니다.`, { title: '주간보고 제출', ok: '제출' }))) return;
+    setBusy(true); try { if (dirty) await api(`/api/branch-reports/${r.id}`, { method: 'PUT', body: b }); await api(`/api/branch-reports/${r.id}/submit`, { body: {} }); toast.ok('제출했습니다'); onChange(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  const inp = cx(inputCls, 'h-8 px-2 py-1 text-[13px]');
+  const Ev = ({ refs }: { refs: string[] }) => refs.length ? <button type="button" onClick={() => onEvidence(refs)} className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2 hover:bg-slate-200" data-testid="branch-ev">근거 {refs.length}</button> : <span className="shrink-0 text-[11px] text-amber-700">근거 없음</span>;
+  const StateSel = ({ v, on }: { v: string; on: (s: string) => void }) => <select className={cx(inp, STATE_TONE[v])} value={v} onChange={(e) => on(e.target.value)} disabled={!canWrite} aria-label="처리 상태">{STATES.map((s) => <option key={s}>{s}</option>)}</select>;
+  return (
+    <section className="space-y-3 rounded-card border border-line bg-white p-3 shadow-card" data-testid="branch-editor">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <b>{r.unit_name} {md(r.report_day)}(금) 초안</b><span className="text-xs text-ink-3">고친 시각 {fmtDateTime(r.updated_at)}</span>
+        {need > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800" data-testid="branch-need">확인 필요 {need}곳 — 제출 전에 확인하세요</span>}
+        <a href={`/branch-print/${r.id}`} target="_blank" className="ml-auto inline-flex items-center gap-1 text-xs text-ink-2 underline" data-testid="branch-print-link"><Printer className="size-3.5" />미리 보기·PDF</a>
+      </div>
+      <h3 className="text-sm font-semibold">1. 이용 인원 현황</h3>
+      {b.usage.map((x, k) => <div key={k} className="grid grid-cols-[minmax(0,1fr)_8rem_1rem] items-center gap-1.5"><input className={inp} value={x.item} onChange={(e) => set({ ...b, usage: b.usage.map((y, j) => j === k ? { ...y, item: e.target.value } : y) })} disabled={!canWrite} aria-label="항목" />
+        <input className={cx(inp, x.count === '확인 필요' && 'border-amber-400')} value={x.count} onChange={(e) => set({ ...b, usage: b.usage.map((y, j) => j === k ? { ...y, count: e.target.value } : y) })} disabled={!canWrite} aria-label="인원" data-testid="branch-usage-count" />
+        {canWrite && <button type="button" onClick={() => set({ ...b, usage: b.usage.filter((_, j) => j !== k) })} aria-label="빼기" className="text-ink-3"><Trash2 className="size-4" /></button>}</div>)}
+      {canWrite && <button type="button" className="inline-flex items-center gap-1 text-xs text-brand-700" onClick={() => set({ ...b, usage: [...b.usage, { item: '', count: '' }] })}><Plus className="size-3.5" />이용 항목</button>}
+      <h3 className="text-sm font-semibold">락커 사용 현황(하이링크 관리자 화면 값 — 손으로)</h3>
+      {b.lockers.map((x, k) => <div key={k} className="grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_1rem] items-center gap-1.5"><input className={inp} value={x.name} placeholder="구분" onChange={(e) => set({ ...b, lockers: b.lockers.map((y, j) => j === k ? { ...y, name: e.target.value } : y) })} disabled={!canWrite} aria-label="락커 구분" />
+        <input className={inp} value={x.used} placeholder="사용" onChange={(e) => set({ ...b, lockers: b.lockers.map((y, j) => j === k ? { ...y, used: e.target.value } : y) })} disabled={!canWrite} aria-label="사용" />
+        <input className={inp} value={x.total} placeholder="전체" onChange={(e) => set({ ...b, lockers: b.lockers.map((y, j) => j === k ? { ...y, total: e.target.value } : y) })} disabled={!canWrite} aria-label="전체" />
+        {canWrite && <button type="button" onClick={() => set({ ...b, lockers: b.lockers.filter((_, j) => j !== k) })} aria-label="빼기" className="text-ink-3"><Trash2 className="size-4" /></button>}</div>)}
+      {canWrite && <button type="button" className="inline-flex items-center gap-1 text-xs text-brand-700" onClick={() => set({ ...b, lockers: [...b.lockers, { name: '', used: '', total: '' }] })}><Plus className="size-3.5" />락커 구분</button>}
+      <h3 className="text-sm font-semibold">2. 시설 점검 보고</h3>
+      {b.facilities.map((f, k) => {
+        const setF = (nf: typeof f) => set({ ...b, facilities: b.facilities.map((y, j) => j === k ? nf : y) });
+        return (
+          <div key={k} className="space-y-1.5 rounded-input border border-line p-2" data-testid="branch-facility">
+            <div className="grid grid-cols-2 items-center gap-1.5 sm:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_1rem]"><input className={cx(inp, 'font-semibold')} value={f.name} placeholder="시설"  onChange={(e) => setF({ ...f, name: e.target.value })} disabled={!canWrite} aria-label="시설" />
+              <input className={cx(inp, f.visitors === '확인 필요' && 'border-amber-400')} value={f.visitors} placeholder="총 이용인원" onChange={(e) => setF({ ...f, visitors: e.target.value })} disabled={!canWrite} aria-label="총 이용인원" />
+              <input className={inp} value={f.cleaning} placeholder="청소 상태" onChange={(e) => setF({ ...f, cleaning: e.target.value })} disabled={!canWrite} aria-label="청소 상태" />
+              <input className={inp} value={f.condition} placeholder="시설 상태" onChange={(e) => setF({ ...f, condition: e.target.value })} disabled={!canWrite} aria-label="시설 상태" />
+              {canWrite && <button type="button" onClick={() => set({ ...b, facilities: b.facilities.filter((_, j) => j !== k) })} aria-label="시설 빼기" className="justify-self-end text-ink-3"><Trash2 className="size-4" /></button>}</div>
+            {f.lines.map((l, j) => { const setL = (nl: Line) => setF({ ...f, lines: f.lines.map((y, i) => i === j ? nl : y) }); return (
+              <div key={j} className="grid grid-cols-2 items-center gap-1.5 border-l-2 border-line pl-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,2fr)_6.5rem_auto_1rem]">
+                <input className={inp} value={l.item} placeholder="점검 항목" onChange={(e) => setL({ ...l, item: e.target.value })} disabled={!canWrite} aria-label="점검 항목" />
+                <input className={inp} value={l.status} placeholder="상태" onChange={(e) => setL({ ...l, status: e.target.value })} disabled={!canWrite} aria-label="상태" />
+                <input className={inp} value={l.action} placeholder="조치(예정이면 날짜)" onChange={(e) => setL({ ...l, action: e.target.value })} disabled={!canWrite} aria-label="조치" />
+                <StateSel v={l.state} on={(s) => setL({ ...l, state: s })} /><Ev refs={l.evidence} />
+                {canWrite && <button type="button" onClick={() => setF({ ...f, lines: f.lines.filter((_, i) => i !== j) })} aria-label="빼기" className="text-ink-3"><Trash2 className="size-3.5" /></button>}</div>); })}
+            {canWrite && <button type="button" className="inline-flex items-center gap-1 pl-2 text-xs text-brand-700" onClick={() => setF({ ...f, lines: [...f.lines, { item: '', status: '', action: '', state: '확인 필요', evidence: [] }] })}><Plus className="size-3.5" />점검 항목</button>}
+          </div>);
+      })}
+      {canWrite && <button type="button" className="inline-flex items-center gap-1 text-xs text-brand-700" onClick={() => set({ ...b, facilities: [...b.facilities, { name: '', visitors: '', cleaning: '', condition: '', lines: [] }] })}><Plus className="size-3.5" />시설</button>}
+      <h3 className="text-sm font-semibold">3. 특이사항 · 건의사항 · 민원</h3>
+      {b.issues.map((x, k) => { const setI = (ni: typeof x) => set({ ...b, issues: b.issues.map((y, j) => j === k ? ni : y) }); return (
+        <div key={k} className="space-y-1 rounded-input border border-line p-2" data-testid="branch-issue">
+          <div className="grid grid-cols-[minmax(0,1fr)_6.5rem] items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_6.5rem_auto_1rem]"><input className={cx(inp, 'font-semibold')} value={x.title} placeholder="제목" onChange={(e) => setI({ ...x, title: e.target.value })} disabled={!canWrite} aria-label="제목" />
+            <StateSel v={x.state} on={(s) => setI({ ...x, state: s })} /><Ev refs={x.evidence} />
+            {canWrite && <button type="button" onClick={() => set({ ...b, issues: b.issues.filter((_, j) => j !== k) })} aria-label="빼기" className="text-ink-3"><Trash2 className="size-4" /></button>}</div>
+          <textarea className={cx(inputCls, 'min-h-[56px] text-[13px]')} value={x.details.join('\n')} onChange={(e) => setI({ ...x, details: e.target.value.split('\n') })} disabled={!canWrite} aria-label="세부(한 줄에 하나)" />
+        </div>); })}
+      {canWrite && <button type="button" className="inline-flex items-center gap-1 text-xs text-brand-700" onClick={() => set({ ...b, issues: [...b.issues, { title: '', details: [], state: '확인 필요', evidence: [] }] })}><Plus className="size-3.5" />특이사항</button>}
+      <Field label="메모"><textarea className={cx(inputCls, 'min-h-[48px] text-[13px]')} value={b.notes} onChange={(e) => set({ ...b, notes: e.target.value })} disabled={!canWrite} /></Field>
+      {canWrite && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={save} disabled={busy || !dirty} data-testid="branch-save">저장</Button><Button onClick={submit} disabled={busy} data-testid="branch-submit">제출</Button></div>}
+    </section>
+  );
+}
+
+/** 제출한 보고서 — 읽기 화면 · PDF · (관리자·검토 담당) 제출 취소 */
+function Submitted({ r, canReopen, onChange, onEvidence }: { r: any; canReopen: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
+  const refs = useMemo(() => { const b = r.body as Body; return [...b.facilities.flatMap((f) => f.lines.flatMap((l) => l.evidence)), ...b.issues.flatMap((x) => x.evidence)]; }, [r]);
+  const undo = async () => {
+    if (!(await askConfirm('제출을 취소하고 초안으로 되돌릴까요? 기록이 남습니다.', { title: '제출 취소', ok: '제출 취소', danger: true }))) return;
+    try { await api(`/api/branch-reports/${r.id}/submit`, { method: 'DELETE' }); toast.ok('초안으로 되돌렸습니다'); onChange(); } catch (e: any) { toast.error(e.message); }
+  };
+  return (
+    <section className="space-y-3 rounded-card border border-line bg-white p-4 shadow-card" data-testid="branch-submitted">
+      <div className="flex flex-wrap items-center gap-2 text-sm"><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">제출함</span>
+        <span className="text-xs text-ink-3">{r.submitted_by_name ?? ''} · {r.submitted_at ? fmtDateTime(r.submitted_at) : ''}{r.purged_at ? ' · 근거 글은 30일이 지나 지웠습니다' : ''}</span>
+        <span className="ml-auto flex gap-2">{refs.length > 0 && !r.purged_at && <Button size="sm" variant="ghost" onClick={() => onEvidence(Array.from(new Set(refs)).slice(0, 30))}>근거 보기</Button>}
+          <a href={`/branch-print/${r.id}`} target="_blank" className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-sm" data-testid="branch-pdf"><Printer className="size-4" />PDF</a>
+          {canReopen && <Button size="sm" variant="secondary" onClick={undo} data-testid="branch-unsubmit">제출 취소</Button>}</span></div>
+      <ReportView unit={r.unit_name} day={r.report_day} start={r.period_start} end={r.period_end} body={r.body as Body} />
+    </section>
+  );
+}
+
+/** 보고 지점 목록(관리자): 이름 한 번에 붙여 넣기 · 이름·숨김·작성 담당(자기 지점만)·검토 담당(전체) — 다짐 조직 단위는 건드리지 않음 */
+type SiteRow = { key: string; id?: string; name: string; hidden: boolean; writer: string; reviewer: string; reports: number };
+function Setup({ onClose }: { onClose: () => void }) {
+  const s = useApi<{ sites: any[]; users: { id: string; name: string; title: string | null }[] }>('/api/branch-reports/setup');
+  const [rows, setRows] = useState<SiteRow[] | null>(null);
+  const [names, setNames] = useState(''); const [busy, setBusy] = useState(false);
+  useEffect(() => { if (s.data && !rows) setRows(s.data.sites.map((x) => ({ key: x.id, id: x.id, name: x.name, hidden: x.hidden, writer: x.writer_user_id ?? '', reviewer: x.reviewer_user_id ?? '', reports: x.reports }))); }, [s.data, rows]);
+  const addNames = () => {
+    const have = new Set((rows ?? []).map((r) => r.name.replace(/\s+/g, '')));
+    const fresh = Array.from(new Set(names.split(/\n|·|,/).map((x) => x.trim().replace(/\s+/g, ' ')).filter(Boolean))).filter((n) => !have.has(n.replace(/\s+/g, '')));
+    setRows([...(rows ?? []), ...fresh.map((name, k) => ({ key: `n${Date.now()}${k}`, name, hidden: false, writer: '', reviewer: '', reports: 0 }))]); setNames('');
+    toast.ok(fresh.length ? `${fresh.length}곳을 넣었습니다 — [저장]을 눌러야 반영됩니다` : '새로 넣을 이름이 없습니다(이미 있음)');
+  };
+  const set = (key: string, p: Partial<SiteRow>) => setRows((rows ?? []).map((r) => (r.key === key ? { ...r, ...p } : r)));
+  const move = (k: number, d: number) => { if (!rows) return; const n = [...rows]; const j = k + d; if (j < 0 || j >= n.length) return; [n[k], n[j]] = [n[j], n[k]]; setRows(n); };
+  const save = async () => {
+    if (!rows) return; setBusy(true);
+    try { await api('/api/branch-reports/setup', { method: 'PUT', body: { sites: rows.map((r) => ({ id: r.id, name: r.name, hidden: r.hidden, writerUserId: r.writer || null, reviewerUserId: r.reviewer || null })) } }); toast.ok('저장했습니다'); onClose(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  const person = (v: string, on: (v: string) => void, label: string) => <select className={cx(inputCls, 'h-8 w-36 py-1 text-[13px]')} value={v} onChange={(e) => on(e.target.value)} aria-label={label}>
+    <option value="">{label} 없음</option>{s.data!.users.map((p) => <option key={p.id} value={p.id}>{p.name}{p.title ? ` ${p.title}` : ''}</option>)}</select>;
+  return (
+    <Modal open onClose={onClose} title="보고 지점" wide>
+      {!s.data || !rows ? <Loading /> : <div className="space-y-3 text-sm" data-testid="branch-setup">
+        <p className="text-xs text-ink-3">조직 단위와 따로인 목록입니다. 작성 담당(지점 관리자)은 자기 지점만, 검토 담당은 모든 지점을 봅니다. 지점 관리자는 [사람 관리]에서 &lsquo;직원&rsquo;으로 초대한 뒤 여기서 작성 담당으로 고르세요.</p>
+        <Field label="지점 이름 한 번에 넣기(한 줄에 하나)"><textarea className={cx(inputCls, 'min-h-[72px]')} value={names} onChange={(e) => setNames(e.target.value)} data-testid="branch-setup-names" /></Field>
+        <div><Button size="sm" variant="secondary" onClick={addNames} disabled={!names.trim()} data-testid="branch-setup-add"><Plus />목록에 넣기</Button></div>
+        {!rows.length ? <p className="text-xs text-ink-3">아직 지점이 없습니다.</p> : <ul className="max-h-[50vh] divide-y divide-line overflow-auto rounded-input border border-line">{rows.map((r, k) => (
+          <li key={r.key} className="flex flex-wrap items-center gap-2 px-2 py-1.5" data-testid="branch-setup-site" data-name={r.name}>
+            <span className="flex flex-col text-[10px] leading-none text-ink-3"><button type="button" onClick={() => move(k, -1)} aria-label="위로">▲</button><button type="button" onClick={() => move(k, 1)} aria-label="아래로">▼</button></span>
+            <input className={cx(inputCls, 'h-8 min-w-[160px] flex-1 py-1 text-[13px]', r.hidden && 'text-ink-3')} value={r.name} maxLength={60} onChange={(e) => set(r.key, { name: e.target.value })} aria-label="지점 이름" />
+            {person(r.writer, (v) => set(r.key, { writer: v }), '작성 담당')}
+            {person(r.reviewer, (v) => set(r.key, { reviewer: v }), '검토 담당')}
+            <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={r.hidden} onChange={(e) => set(r.key, { hidden: e.target.checked })} />숨김</label>
+            {r.reports ? <span className="text-[11px] text-ink-3" title="보고서가 있는 지점은 지울 수 없습니다 — 숨김으로 두세요">보고서 {r.reports}</span>
+              : <button type="button" onClick={() => setRows(rows.filter((x) => x.key !== r.key))} aria-label="지점 빼기" className="text-ink-3"><Trash2 className="size-4" /></button>}
+          </li>))}</ul>}
+        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>닫기</Button><Button onClick={save} disabled={busy || rows.some((r) => !r.name.trim())} data-testid="branch-setup-save">저장</Button></div>
+      </div>}
+    </Modal>
+  );
+}
