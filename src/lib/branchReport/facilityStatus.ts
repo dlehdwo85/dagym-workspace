@@ -81,3 +81,48 @@ export function applyOkMark<T extends { item: string; status: string; state: str
   }
   return line;
 }
+
+/**
+ * 로컬 11/21 재확인: '청결 / 연습실 내부룸 먼지로 청소완료'처럼 등급 단어 뒤에 설명이 붙으면 통째로 '확인 필요'가 되던 것(과잉 거부).
+ * 등급 단어로 시작하면(뒤에 띄어쓰기·'/'·괄호·쉼표 등이 오거나 끝) 등급만 칸에 받고, 뒤 설명은 따로 돌려준다.
+ */
+export function splitGrade(value: string): { grade: string | null; rest: string } {
+  const v = value.trim();
+  for (const g of BY_LEN) {
+    const m = v.match(new RegExp(`^${g.split('').join('\\s*')}(?=$|[\\s/,(:：·\\-])`));
+    if (m) return { grade: m[0], rest: v.slice(m[0].length).replace(/^[\s/,:：·()\-–—]+/, '').replace(/[\s)]+$/, '').trim() };
+  }
+  return { grade: null, rest: v };
+}
+
+type CheckLine = { item: string; status: string; action: string; state: '완료' | '진행 중' | '확인 필요'; evidence: string[] };
+const tokens = (s: string) => s.split(/[\s/,·()]+/).map(norm).filter((t) => t.length >= 2);
+/** 원문에서 그 설명이 든 줄 번호(낱말이 가장 많이 겹치는 줄, 60% 이상) — 없으면 0 */
+function sourceLine(dText: string, text: string): number {
+  const ts = tokens(text); if (!ts.length) return 0;
+  let best = 0, at = 0;
+  dText.split(/\r?\n/).forEach((l, k) => { const n = norm(l); const hit = ts.filter((t) => n.includes(t)).length; if (hit > best) { best = hit; at = k + 1; } });
+  return best >= Math.max(1, Math.ceil(ts.length * 0.6)) ? at : 0;
+}
+/**
+ * 시설 하나의 청소 상태·시설 상태 정리: 등급으로 시작하면 등급만 받고(원문 검사 그대로), 뒤 설명이나 받지 못한 설명은 원문에 있을 때만 점검 줄로 살림
+ * (이미 같은 내용의 점검 줄이 있으면 더하지 않음). 원문에 없는 설명은 버림(지어낸 것일 수 있음)
+ */
+export function fixFacilityStatus(dText: string, f: { name: string; cleaning: string; condition: string; lines: CheckLine[] }) {
+  const extra: CheckLine[] = [];
+  const keep = (text: string) => {
+    const ts = tokens(text); if (!ts.length) return;
+    const dup = [...f.lines, ...extra].some((l) => { const c = norm(`${l.item}${l.status}${l.action}`); return ts.filter((t) => c.includes(t)).length >= Math.min(2, ts.length); });
+    const n = dup ? 0 : sourceLine(dText, text);
+    if (n) extra.push({ item: text, status: /완료/.test(text) ? '완료' : '', action: '', state: /완료/.test(text) ? '완료' : CHECK, evidence: [`D${n}`] });
+  };
+  const one = (field: 'cleaning' | 'condition', value: string) => {
+    const s = splitGrade(value);
+    const checked = checkFacilityStatus(dText, f.name, field, s.grade && s.rest ? s.grade : value);
+    if (s.grade && s.rest) keep(s.rest);
+    else if (checked === CHECK && value.trim() && value.trim() !== CHECK && !s.grade) keep(value.trim()); // 등급이 아닌 설명만 들어온 경우
+    return checked;
+  };
+  const cleaning = one('cleaning', f.cleaning), condition = one('condition', f.condition);
+  return { cleaning, condition, extra };
+}

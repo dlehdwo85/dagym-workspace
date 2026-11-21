@@ -5,7 +5,7 @@ import { deflateRawSync } from 'node:zlib';
 
 const { parseKakaoExport, unzipTexts } = await import('../../src/lib/branchReport/kakaoParse.ts');
 const { maskPII } = await import('../../src/lib/branchReport/mask.ts');
-const { checkFacilityStatus, gradesIn, applyOkMark } = await import('../../src/lib/branchReport/facilityStatus.ts');
+const { checkFacilityStatus, gradesIn, applyOkMark, splitGrade, fixFacilityStatus } = await import('../../src/lib/branchReport/facilityStatus.ts');
 
 const PC = `가상지점 운영방 님과 카카오톡 대화
 저장한 날짜 : 2026-11-21 18:00:00
@@ -131,4 +131,27 @@ test("#1105: 점검 줄 값이 0·O·○ 하나뿐이면 '이상 없음'·완료
   assert.equal(applyOkMark(D, '골프장', L('기구윤활유', ['D5'], '진행0')).status, '진행0', "'진행0'은 그대로");
   assert.equal(applyOkMark(D, '헬스장', L('프로젝터 램프', [], '교체 필요')).status, '교체 필요', '다른 시설의 0 을 가져오지 않음');
   assert.equal(applyOkMark(D, '골프장', L('없는 항목')).status, '0', '원문에 없으면 그대로');
+});
+
+test("로컬 11/21 재확인: 등급 뒤에 설명이 붙으면 등급만 받고 설명은 원문에 있을 때 점검 줄로(과잉 거부 고침)", () => {
+  assert.deepEqual(splitGrade('청결 / 연습실 내부룸 먼지로 청소완료'), { grade: '청결', rest: '연습실 내부룸 먼지로 청소완료' });
+  assert.deepEqual(splitGrade('부분양호(런닝머신 1대 점검)'), { grade: '부분양호', rest: '런닝머신 1대 점검' });
+  assert.deepEqual(splitGrade('청결함'), { grade: null, rest: '청결함' }, '등급 단어 뒤에 글자가 붙으면 등급 아님');
+  assert.deepEqual(splitGrade('양호'), { grade: '양호', rest: '' });
+  const D = `<골프장> 총이용인원 47
+- 청소상태 : 청결 / 연습실 내부룸 먼지로 청소완료
+- 프로젝터 램프 점검 여부 : 0
+<헬스장>
+시설상태 : 런닝머신 인버터 청소완료`;
+  const golf = fixFacilityStatus(D, { name: '골프장', cleaning: '청결 / 연습실 내부룸 먼지로 청소완료', condition: '', lines: [] });
+  assert.equal(golf.cleaning, '청결');
+  assert.deepEqual(golf.extra, [{ item: '연습실 내부룸 먼지로 청소완료', status: '완료', action: '', state: '완료', evidence: ['D2'] }]);
+  const golf2 = fixFacilityStatus(D, { name: '골프장', cleaning: '청결 / 연습실 내부룸 먼지로 청소완료', condition: '', lines: [{ item: '연습실 내부룸 청소', status: '완료', action: '', state: '완료', evidence: ['D2'] }] });
+  assert.equal(golf2.cleaning, '청결'); assert.deepEqual(golf2.extra, [], '같은 내용 점검 줄이 있으면 더하지 않음');
+  const gym = fixFacilityStatus(D, { name: '헬스장', cleaning: '', condition: '런닝머신 인버터 청소완료', lines: [] });
+  assert.equal(gym.condition, '확인 필요'); assert.deepEqual(gym.extra.map((x) => [x.item, x.evidence[0]]), [['런닝머신 인버터 청소완료', 'D5']], '설명은 점검 줄로');
+  const made = fixFacilityStatus(D, { name: '골프장', cleaning: '청결 / 바닥 왁스 코팅 완료', condition: '', lines: [] });
+  assert.equal(made.cleaning, '청결'); assert.deepEqual(made.extra, [], '원문에 없는 설명은 버림');
+  const badGrade = fixFacilityStatus(D, { name: '골프장', cleaning: '미흡 / 연습실 내부룸 먼지로 청소완료', condition: '', lines: [] });
+  assert.equal(badGrade.cleaning, '확인 필요', '원문과 다른 등급은 확인 필요');
 });
