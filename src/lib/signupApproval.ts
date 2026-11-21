@@ -144,6 +144,28 @@ export async function approveSignup(u: SessionUser, tenant: string) {
 
 export const rejectInput = z.object({ reason: z.string().trim().min(2, '거절 사유를 적어 주세요').max(300) });
 /** [거절](사유): 안내 메일 · 로그인하면 거절 안내만(쓰기·보기 막힘). 다시 승인할 수 있음 */
+/**
+ * 로컬 11/21 #1095: 거절된 가입 회사의 소셜 로그인 연결 풀기(플랫폼 운영자). 시험 가입을 거절해도 그 회사 사용자에 소셜 계정(카카오 등)이 붙어 있어
+ * 같은 소셜 계정을 다른 워크인 계정에 '연결'하면 "이미 다른 워크인 계정에 연결"로 막혔다. 거절된 회사만 — 승인·대기 회사는 그대로.
+ * 연결 줄을 지우고, 애플은 애플 쪽 토큰도 해지(5.1.1(v)). 사용자·회사 자료는 지우지 않음. 감사 기록 signup.social_unlink
+ */
+export async function unlinkRejectedSocial(u: SessionUser, tenant: string) {
+  requirePlatform(u);
+  const sql = db();
+  const t = await pendingTenant(sql, tenant);
+  if (t.signup_status !== 'rejected') throw new HttpError(409, 'not_rejected', '거절된 가입 신청만 소셜 연결을 풀 수 있습니다');
+  const rows = await sql<{ provider: string; subject: string; secret: string | null }[]>`
+    select ui.provider, ui.subject, ui.secret from user_identities ui join users us on us.id = ui.user_id where us.tenant = ${tenant}`;
+  if (!rows.length) throw new HttpError(400, 'no_links', '풀 소셜 연결이 없습니다');
+  const A = await import('./oauthApple');
+  const apple = rows.filter((r) => r.provider === 'apple' && r.secret);
+  const appleRevoked = (await Promise.all(apple.map((r) => A.revokeApple(r.secret).catch(() => false)))).filter(Boolean).length;
+  await sql`delete from user_identities where user_id in (select id from users where tenant = ${tenant})`;
+  const providers = [...new Set(rows.map((r) => r.provider))].sort();
+  await audit(sql, u.id, 'signup.social_unlink', 'tenant', null, { tenant, removed: rows.length, providers, appleRevoked, appleTotal: apple.length }, null);
+  return { ok: true, removed: rows.length, providers, appleRevoked, appleTotal: apple.length };
+}
+
 export async function rejectSignup(u: SessionUser, tenant: string, i: z.infer<typeof rejectInput>) {
   requirePlatform(u);
   const sql = db();

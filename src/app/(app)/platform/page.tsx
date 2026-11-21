@@ -23,7 +23,7 @@ import { PlatformAudit } from '@/components/platform/PlatformAudit';
 import { PlanBands } from '@/components/platform/PlanBands';
 import { PlatformSalesMigrate } from '@/components/sales/PlatformSalesMigrate';
 import { PlatformOpsImport } from '@/components/marketing/PlatformOpsImport';
-import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { Button, ErrorBox, PageHeader, Skeleton, askConfirm, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
 const num = (v: string) => (v.trim() === '' ? null : Number(v));
 const cell = 'px-2 py-1.5';
@@ -220,6 +220,12 @@ function Signups() {
     if (!ok && !reason) return;
     try { await api(`/api/platform/signups/${t.id}/${ok ? 'approve' : 'reject'}`, { body: ok ? {} : { reason } }); reload(); toast.ok(ok ? '승인했습니다 — 환영 메일을 보냈습니다' : '거절했습니다 — 안내 메일을 보냈습니다'); } catch (e: any) { toast.error(e.message); }
   };
+  // 로컬 11/21 #1095: 거절된 신청의 소셜 연결 풀기 — 같은 소셜 계정을 다른 워크인 계정에 연결할 수 있게(애플은 토큰 해지까지)
+  const unlinkSocial = async (t: any) => {
+    const label = t.signup_info?.company ?? t.name;
+    if (!(await askConfirm(`'${label}' 사용자에 붙은 소셜 로그인 연결 ${t.social_links}건을 풀까요?\n\n그 소셜 계정으로는 이 회사에 다시 로그인할 수 없고, 다른 워크인 계정에 연결할 수 있게 됩니다. 애플 연결은 애플 쪽 토큰도 해지합니다. 사용자·회사 자료는 지우지 않습니다.`, { title: '소셜 연결 풀기', ok: '연결 풀기', danger: true }))) return;
+    try { const r = await api(`/api/platform/signups/${t.id}/unlink-social`, { body: {} }); reload(); toast.ok(`소셜 연결 ${r.removed}건을 풀었습니다(${r.providers.join('·')}${r.appleTotal ? ` · 애플 토큰 해지 ${r.appleRevoked}/${r.appleTotal}` : ''})`); } catch (e: any) { toast.error(e.message); }
+  };
   const reqs = data.tenants.filter((t: any) => t.signup_status === 'pending' || t.signup_status === 'rejected');
   const pendingN = reqs.filter((t: any) => t.signup_status === 'pending').length;
   return (<>
@@ -237,6 +243,7 @@ function Signups() {
           <div className="flex gap-1.5">
             <Button size="sm" onClick={() => decide(t, true)} data-testid="signup-approve">{t.signup_status === 'rejected' ? '다시 승인' : '승인'}</Button>
             {t.signup_status === 'pending' && <Button size="sm" variant="secondary" onClick={() => decide(t, false)} data-testid="signup-reject">거절</Button>}
+            {t.signup_status === 'rejected' && t.social_links > 0 && <Button size="sm" variant="ghost" onClick={() => unlinkSocial(t)} data-testid="signup-unlink-social" title="이 회사 사용자에 붙은 소셜 로그인(카카오·구글·네이버·애플)을 풉니다">소셜 연결 풀기 {t.social_links}</Button>}
           </div>
         </li>); })}{!reqs.length && <li className="px-3 py-2 text-xs text-ink-3">신청이 없습니다</li>}</ul>
     </section>

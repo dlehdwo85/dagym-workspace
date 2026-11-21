@@ -390,6 +390,7 @@ export async function platformSignups(u: SessionUser) {
           t.signup_status, t.signup_info, t.signup_decided_at, t.signup_reason, dby.name as signup_decided_by_name,
           ts.status as sub_status, ts.plan_code, ts.trial_ends_at, ts.chosen_plan,
           (select count(*)::int from users x where x.tenant = t.id and x.status = 'active') as users,
+          (select count(*)::int from user_identities ui join users us on us.id = ui.user_id where us.tenant = t.id) as social_links, -- #1095 거절된 신청의 [소셜 연결 풀기]
           (select count(*)::int from tasks k join org_units o on o.id = k.org_unit_id where o.tenant = t.id and k.deleted_at is null) as tasks
         from tenants t left join users ow on ow.id = t.owner_user_id left join users dby on dby.id = t.signup_decided_by left join tenant_subscriptions ts on ts.tenant = t.id
         where t.id not in ('default','demo') and not t.is_test order by (t.signup_status = 'pending') desc, t.created_at desc limit 200`,
