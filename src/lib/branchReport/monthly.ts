@@ -25,7 +25,11 @@ export const monthlyBodySchema = z.object({
   important: z.array(z.object({ work: s(300), result: s(500), evidence: ev, check: z.boolean().default(false) })).max(10).default([]),
   progress: z.array(z.object({ week: s(40), task: s(500), focus: s(300), result: s(500), note: s(300), evidence: ev, check: z.boolean().default(false) })).max(10).default([]),
   next: z.array(z.object({ goal: s(300), actions: s(500) })).max(10).default([]),
-  usage: z.array(z.object({ item: s(100), prev: s(40), cur: s(40) })).max(40).default([]),
+  // #1106: C 는 하이링크 이용현황 파일에서(원문 그대로 — 증감·증감률 포함). 파일이 없으면 빈칸. usageWeekly = 주간 값(월말) 제안 — [주간 값으로 채우기]
+  usage: z.array(z.object({ item: s(100), prev: s(40), cur: s(40), diff: s(40), rate: s(40) })).max(40).default([]),
+  usageTotal: z.object({ item: s(100), prev: s(40), cur: s(40), diff: s(40), rate: s(40) }).nullable().default(null),
+  usageFile: z.object({ name: s(200), size: z.number().default(0), parsed: z.boolean().default(false), rows: z.number().default(0), at: s(40) }).nullable().default(null),
+  usageWeekly: z.array(z.object({ item: s(100), prev: s(40), cur: s(40) })).max(40).default([]),
   unfinished: z.array(z.object({ title: s(300), since: s(20), lastWeek: s(20), state: s(20) })).max(60).default([]),
   resolved: z.array(z.object({ title: s(300), doneWeek: s(20) })).max(60).default([]),
   notes: z.string().max(2000).default(''),

@@ -255,7 +255,25 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
   const Ev = ({ refs }: { refs: string[] }) => refs.length ? <button type="button" onClick={() => onEvidence(refs)} className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-2 hover:bg-slate-200" data-testid="branch-ev">근거 {refs.length}</button> : <span className="shrink-0 text-[11px] text-amber-700">근거 없음</span>;
   const Del = ({ on }: { on: () => void }) => canWrite ? <button type="button" onClick={on} aria-label="빼기" className="text-ink-3"><Trash2 className="size-4" /></button> : null;
   const Add = ({ on, label }: { on: () => void; label: string }) => canWrite ? <button type="button" className="inline-flex items-center gap-1 text-xs text-brand-700" onClick={on}><Plus className="size-3.5" />{label}</button> : null;
-  const tot = usageTotal(b.usage); const dt = delta(tot.prev, tot.cur);
+  const calc = usageTotal(b.usage); const tot = b.usageTotal ?? { item: '전 시설 합계', prev: calc.prev, cur: calc.cur, diff: '', rate: '' }; const dt = delta(tot.prev, tot.cur);
+  // #1106: C 는 하이링크 이용현황 파일에서 — 올리면 서버가 표를 읽어 채우고 원본을 첨부로 보관(못 읽어도 첨부)
+  const [upBusy, setUpBusy] = useState(false);
+  const uploadUsage = async (f: File | undefined) => {
+    if (!f) return;
+    if (f.size > 4_000_000) { toast.error('4MB 가 넘습니다'); return; }
+    setUpBusy(true);
+    try {
+      if (dirty) await api(`/api/branch-reports/${r.id}`, { method: 'PUT', body: b }); // 고친 내용을 먼저 저장(올리면 화면을 다시 불러옴)
+      const buf = new Uint8Array(await f.arrayBuffer()); let bin = ''; for (let k = 0; k < buf.length; k += 0x8000) bin += String.fromCharCode(...buf.subarray(k, k + 0x8000));
+      const res = await api<any>(`/api/branch-reports/${r.id}/usage-file`, { body: { name: f.name, b64: btoa(bin) } });
+      if (res.parsed) toast.ok(`하이링크 이용현황 ${res.parsed}줄을 읽었습니다${res.total ? ' (합계 줄 포함)' : ''}`); else toast.info('표를 읽지 못해 원본 파일을 첨부했습니다 — 값은 직접 넣거나 그대로 두세요');
+      onChange();
+    } catch (e: any) { toast.error(e.message); } finally { setUpBusy(false); }
+  };
+  const removeUsage = async () => {
+    if (!(await askConfirm('첨부한 하이링크 이용현황 파일을 뺄까요? 표에 채운 값은 그대로 둡니다.', { title: '첨부 빼기', ok: '빼기' }))) return;
+    try { await api(`/api/branch-reports/${r.id}/usage-file`, { method: 'DELETE' }); toast.ok('첨부를 뺐습니다'); onChange(); } catch (e: any) { toast.error(e.message); }
+  };
   return (
     <section className="space-y-3 rounded-card border border-line bg-white p-3 shadow-card" data-testid="branch-monthly-editor">
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -291,16 +309,25 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
         <span className="min-w-0 flex-1">{x.title}</span><span className={cx('shrink-0 text-xs', STATE_TONE[x.state])}>{x.state}</span><span className="shrink-0 text-xs text-ink-3">{x.since}~{x.lastWeek}</span>
         <Del on={() => set({ ...b, unfinished: b.unfinished.filter((_, j) => j !== k) })} /></div>) : <p className="text-xs text-ink-3">없음</p>}
       {b.resolved.length > 0 && <p className="text-xs text-ink-3" data-testid="branch-monthly-resolved">이 달 안에 완료로 바뀐 것: {b.resolved.map((x) => `${x.title}(${x.doneWeek})`).join(' · ')}</p>}
-      <h3 className="text-sm font-semibold">시설별 이용 현황 <span className="font-normal text-xs text-ink-3">— 이번달 = 그 달 마지막 주간보고, 전달 = 지난달 마지막 주간보고(다르면 고치세요)</span></h3>
+      <h3 className="text-sm font-semibold">시설별 이용 현황 <span className="font-normal text-xs text-ink-3">— 하이링크 이용현황(PDF·엑셀)을 올리면 표를 읽어 채웁니다(값은 원문 그대로)</span></h3>
+      <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="branch-usage-file">
+        {canWrite && <label className={cx('inline-flex cursor-pointer items-center gap-1.5 rounded-input border border-line px-2.5 py-1.5 hover:bg-slate-50', upBusy && 'opacity-60')}>
+          {upBusy ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}하이링크 이용현황 올리기
+          <input type="file" className="hidden" accept=".pdf,.xlsx,.csv" onChange={(e) => { void uploadUsage(e.target.files?.[0]); e.target.value = ''; }} disabled={upBusy} data-testid="branch-usage-upload" /></label>}
+        {b.usageFile ? <span className="text-xs text-ink-2" data-testid="branch-usage-file-name">첨부: <a className="underline" href={`/api/branch-reports/${r.id}/usage-file`}>{b.usageFile.name}</a> · {b.usageFile.parsed ? `${b.usageFile.rows}줄 읽음` : '표를 읽지 못함(원본 첨부)'}
+          {canWrite && <button type="button" className="ml-2 text-ink-3 underline" onClick={removeUsage}>첨부 빼기</button>}</span>
+          : <span className="text-xs text-amber-800">하이링크 이용현황을 올려 주세요</span>}
+        {canWrite && (b.usageWeekly?.length ?? 0) > 0 && <button type="button" className="ml-auto text-xs text-ink-3 underline" onClick={() => set({ ...b, usage: b.usageWeekly!.map((x) => ({ ...x, diff: '', rate: '' })), usageTotal: null })} data-testid="branch-usage-weekly">주간 값으로 채우기(월말 기준)</button>}
+      </div>
       <div className="overflow-x-auto"><table className="w-full min-w-[420px] border-collapse text-[13px]" data-testid="branch-monthly-usage">
         <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">시설</th><th>전달 인원</th><th>이번달 인원</th><th>증감</th><th>증감률</th><th /></tr></thead>
-        <tbody>{b.usage.map((x, k) => { const d = delta(x.prev, x.cur); const setU = (p: Partial<typeof x>) => set({ ...b, usage: b.usage.map((y, j) => j === k ? { ...y, ...p } : y) }); return (
+        <tbody>{b.usage.map((x, k) => { const d = delta(x.prev, x.cur); const setU = (p: Partial<typeof x>) => set({ ...b, usage: b.usage.map((y, j) => j === k ? { ...y, ...p } : y), ...('prev' in p || 'cur' in p ? { usageTotal: null } : {}) }); /* 값을 고치면 하이링크 합계 대신 계산한 합계 */ return (
           <tr key={k}><td className="py-0.5 pr-1"><input className={inp} value={x.item} onChange={(e) => setU({ item: e.target.value })} disabled={!canWrite} aria-label="시설" /></td>
-            <td className="pr-1"><input className={cx(inp, 'w-24')} value={x.prev} onChange={(e) => setU({ prev: e.target.value })} disabled={!canWrite} aria-label="전달 인원" /></td>
-            <td className="pr-1"><input className={cx(inp, 'w-24')} value={x.cur} onChange={(e) => setU({ cur: e.target.value })} disabled={!canWrite} aria-label="이번달 인원" /></td>
-            <td className="whitespace-nowrap px-1">{d.diff || '-'}</td><td className="whitespace-nowrap px-1">{d.rate || '-'}</td><td><Del on={() => set({ ...b, usage: b.usage.filter((_, j) => j !== k) })} /></td></tr>); })}
-          <tr className="font-semibold"><td className="py-1">전 시설 합계</td><td>{tot.prev || '-'}</td><td>{tot.cur || '-'}</td><td className="px-1">{dt.diff || '-'}</td><td className="px-1">{dt.rate || '-'}</td><td /></tr></tbody></table></div>
-      <Add label="시설" on={() => set({ ...b, usage: [...b.usage, { item: '', prev: '', cur: '' }] })} />
+            <td className="pr-1"><input className={cx(inp, 'w-24')} value={x.prev} onChange={(e) => setU({ prev: e.target.value, diff: '', rate: '' })} disabled={!canWrite} aria-label="전달 인원" /></td>
+            <td className="pr-1"><input className={cx(inp, 'w-24')} value={x.cur} onChange={(e) => setU({ cur: e.target.value, diff: '', rate: '' })} disabled={!canWrite} aria-label="이번달 인원" /></td>
+            <td className="whitespace-nowrap px-1">{x.diff || d.diff || '-'}</td><td className="whitespace-nowrap px-1">{x.rate || d.rate || '-'}</td><td><Del on={() => set({ ...b, usage: b.usage.filter((_, j) => j !== k), usageTotal: null })} /></td></tr>); })}
+          {(b.usage.length > 0 || b.usageTotal) && <tr className="font-semibold"><td className="py-1">{tot.item || '전 시설 합계'}</td><td>{tot.prev || '-'}</td><td>{tot.cur || '-'}</td><td className="px-1">{tot.diff || dt.diff || '-'}</td><td className="px-1">{tot.rate || dt.rate || '-'}</td><td /></tr>}</tbody></table></div>
+      <Add label="시설" on={() => set({ ...b, usage: [...b.usage, { item: '', prev: '', cur: '', diff: '', rate: '' }], usageTotal: null })} />
       <Field label="메모"><textarea className={cx(inputCls, 'min-h-[48px] text-[13px]')} value={b.notes} onChange={(e) => set({ ...b, notes: e.target.value })} disabled={!canWrite} /></Field>
       {canWrite && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={save} disabled={busy || !dirty} data-testid="branch-monthly-save">저장</Button><Button onClick={submit} disabled={busy} data-testid="branch-monthly-submit">제출</Button></div>}
     </section>

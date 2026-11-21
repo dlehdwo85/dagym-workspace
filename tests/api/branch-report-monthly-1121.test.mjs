@@ -65,7 +65,8 @@ describe('#1096 2단계 월간 보고서', () => {
     assert.ok(!/초안 민원|777|999/.test(text), '초안·다른 달 주간보고는 보내지 않음');
     assert.ok(sent.output_config.format.schema.required.includes('progress'));
     const b = r.report.body;
-    assert.deepEqual(b.usage, [{ item: '헬스', prev: '400', cur: '443' }, { item: '골프', prev: '50명', cur: '47' }, { item: '독서실', prev: '', cur: '38' }], 'C: 마지막 주 기준');
+    assert.deepEqual(b.usage, [], '#1106: C 는 하이링크 이용현황 파일에서 — 주간 글로 채우지 않음'); assert.equal(b.usageFile, null);
+    assert.deepEqual(b.usageWeekly, [{ item: '헬스', prev: '400', cur: '443' }, { item: '골프', prev: '50명', cur: '47' }, { item: '독서실', prev: '', cur: '38' }], '주간 값(월말)은 제안으로만');
     assert.deepEqual(b.unfinished, [{ title: '주차 스티커 문의', since: '10/2', lastWeek: '10/2', state: '확인 필요' }], '마지막 상태가 완료가 아닌 것');
     assert.deepEqual(b.resolved.map((x) => [x.title, x.doneWeek]).sort(), [['골프장 · 타석 3번 센서', '10/16'], ['사우나 온도 민원', '10/16']]);
     assert.deepEqual(b.important[0].evidence, ['W1', 'W3'], '없는 W번호는 지움'); assert.equal(b.important[0].check, false);
@@ -80,9 +81,10 @@ describe('#1096 2단계 월간 보고서', () => {
 
   test('고치기(월간 양식으로 저장) · 제출 잠김 · 엑셀·인쇄 · 다른 지점 404 · 제출 취소', async () => {
     const cur = (await ctx.staffA.client.ok('GET', `/api/branch-reports/${reportId}`)).report.body;
-    const edited = { ...cur, usage: cur.usage.map((x) => (x.item === '골프' ? { ...x, prev: '50' } : x)), important: cur.important.slice(0, 1), notes: '담당 확인' };
+    const edited = { ...cur, usage: cur.usageWeekly.map((x) => ({ ...x, prev: x.item === '골프' ? '50' : x.prev })), important: cur.important.slice(0, 1), notes: '담당 확인', usageFile: { name: '위조.pdf', size: 1, parsed: true, rows: 9, at: '' } };
     const s = await ctx.staffA.client.ok('PUT', `/api/branch-reports/${reportId}`, edited);
     assert.equal(s.report.body.usage[1].prev, '50'); assert.equal(s.report.body.important.length, 1); assert.equal(s.report.body.unfinished.length, 1, '미완료 그대로');
+    assert.equal(s.report.body.usageFile, null, '첨부 표시는 화면에서 바꿀 수 없음');
     assert.equal((await ctx.staffB.client.req('GET', `/api/branch-reports/${reportId}`)).status, 404);
     const x = await fetch(`${BASE}/api/branch-reports/${reportId}/xlsx`, { headers: { cookie: ctx.staffA.client.cookie } });
     assert.equal(x.status, 200); assert.match(x.headers.get('content-type'), /spreadsheetml/);
@@ -100,6 +102,50 @@ describe('#1096 2단계 월간 보고서', () => {
     const [row] = await sql`select purged_at from branch_reports where id = ${reportId}`; assert.equal(row.purged_at, null);
     const un = await ctx.owner.ok('DELETE', `/api/branch-reports/${reportId}/submit`); assert.equal(un.report.status, 'draft');
     const acts = (await sql`select action from audit_logs where action = 'branch_report.monthly_draft'`).length; assert.equal(acts, 1);
+  });
+
+  test('#1106 하이링크 이용현황 올리기: 못 읽는 파일은 첨부만 · CSV·엑셀·PDF 표 읽기(원문 그대로·합계 줄) · 내려받기 · 다시 만들어도 유지 · 빼기 · 권한', async () => {
+    const up = (c, name, buf) => c.req('POST', `/api/branch-reports/${reportId}/usage-file`, { name, b64: Buffer.from(buf).toString('base64') });
+    const { PDFDocument, StandardFonts } = await import('pdf-lib');
+    const pdf = async (lines) => { const d = await PDFDocument.create(); const pg = d.addPage([595, 842]); const f = await d.embedFont(StandardFonts.Helvetica); lines.forEach((t, k) => pg.drawText(t, { x: 40, y: 780 - k * 24, size: 12, font: f })); return Buffer.from(await d.save()); };
+    // 표가 없는 PDF → 첨부만(값은 그대로 빈칸 아님 — 앞에서 손으로 넣은 값 유지)
+    const r0 = await (await up(ctx.staffA.client, 'scan.pdf', await pdf(['Monthly usage report', 'see attached']))).body;
+    assert.equal(r0.parsed, 0); assert.equal(r0.report.body.usageFile.parsed, false); assert.equal(r0.report.body.usageFile.name, 'scan.pdf');
+    assert.equal(r0.report.body.usage.length, 3, '못 읽으면 표 값은 건드리지 않음');
+    const p0 = await ctx.staffA.client.req('GET', `/branch-print/${reportId}`); assert.match(p0.body, /원본 첨부/);
+    // CSV(하이링크 표 모양) → 원문 그대로
+    const csv = '시설,전달 인원,이번달 인원,증감,증감률\n헬스장,"1,234명","1,240명",+6명,▲ 0.4%\n골프장,269명,174명,-95명,▼ 35.3%\n카페&키즈룸,50명,50명,0명,0%\n전시설 총 이용현황,"1,553명","1,464명",-89명,▼ 5.7%\n';
+    const r1 = (await up(ctx.staffA.client, '11월 시설별_이용현황.csv', csv)).body;
+    assert.equal(r1.parsed, 3); assert.equal(r1.total, true);
+    assert.deepEqual(r1.report.body.usage, [{ item: '헬스장', prev: '1,234명', cur: '1,240명', diff: '+6명', rate: '▲0.4%' }, { item: '골프장', prev: '269명', cur: '174명', diff: '-95명', rate: '▼35.3%' }, { item: '카페&키즈룸', prev: '50명', cur: '50명', diff: '0명', rate: '0%' }]);
+    assert.equal(r1.report.body.usageTotal.cur, '1,464명');
+    const dl = await fetch(`${BASE}/api/branch-reports/${reportId}/usage-file`, { headers: { cookie: ctx.staffA.client.cookie } });
+    assert.equal(dl.status, 200); assert.equal(Buffer.from(await dl.arrayBuffer()).toString('utf8'), csv, '원본 그대로 내려받기');
+    const p1 = await ctx.staffA.client.req('GET', `/branch-print/${reportId}`);
+    assert.match(p1.body, /▼35\.3%/); assert.match(p1.body, /전시설 총 이용현황/); assert.match(p1.body, /출처: 하이링크 이용현황/);
+    // 엑셀(xlsx) → 같은 결과
+    const { writeXlsx } = await import('../../src/lib/xlsx.ts');
+    const x = writeXlsx([{ name: 'S', rows: [['시설', '전달 인원', '이번달 인원', '증감', '증감률'], ['독서실', '38명', '40명', '+2명', '▲ 5.3%'], ['합계', '38명', '40명', '+2명', '▲ 5.3%']] }]);
+    const r2 = (await up(ctx.staffA.client, 'usage.xlsx', x)).body;
+    assert.deepEqual(r2.report.body.usage, [{ item: '독서실', prev: '38명', cur: '40명', diff: '+2명', rate: '▲5.3%' }]); assert.equal(r2.report.body.usageTotal.item, '합계');
+    // PDF(글자 PDF) → 표 읽기
+    const r3 = (await up(ctx.staffA.client, 'hilink.pdf', await pdf(['Gym 1,234 1,240 +6 0.4%', 'Golf 269 174 -95 35.3%']))).body;
+    assert.deepEqual(r3.report.body.usage.map((u) => [u.item, u.prev, u.cur, u.diff, u.rate]), [['Gym', '1,234', '1,240', '+6', '0.4%'], ['Golf', '269', '174', '-95', '35.3%']]);
+    // 다시 만들기(AI) 해도 올린 하이링크 값·첨부는 그대로
+    await ctl({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ important: [], progress: [], next: [], notes: '' }) }], stop_reason: 'end_turn' }] });
+    const re = await ctx.staffA.client.ok('POST', '/api/branch-reports/monthly', { siteId: siteA, month: '2026-10' });
+    assert.equal(re.report.body.usageFile.name, 'hilink.pdf'); assert.equal(re.report.body.usage[0].item, 'Gym');
+    // 막힘: 다른 지점 작성 담당 404 · 다른 회사 404 · 모르는 형식 400 · 주간보고에는 못 올림 400
+    assert.equal((await up(ctx.staffB.client, 'a.csv', csv)).status, 404);
+    assert.equal((await up(other, 'a.csv', csv)).status, 404);
+    assert.equal((await up(ctx.staffA.client, 'a.hwp', 'x')).status, 400);
+    const [wk] = await sql`select id from branch_reports where site_id = ${siteA} and report_day = '2026-10-16'`;
+    assert.equal((await ctx.staffA.client.req('POST', `/api/branch-reports/${wk.id}/usage-file`, { name: 'a.csv', b64: Buffer.from(csv).toString('base64') })).status, 400);
+    // 빼기 → 첨부 없음(값은 그대로) · 내려받기 404
+    const rm = await ctx.staffA.client.ok('DELETE', `/api/branch-reports/${reportId}/usage-file`);
+    assert.equal(rm.report.body.usageFile, null); assert.equal(rm.report.body.usage.length, 2);
+    assert.equal((await ctx.staffA.client.req('GET', `/api/branch-reports/${reportId}/usage-file`)).status, 404);
+    const acts = (await sql`select count(*)::int as n from audit_logs where action = 'branch_report.usage_file'`)[0].n; assert.equal(acts, 4);
   });
 
   test('주간보고 엑셀 내려받기', async () => {
