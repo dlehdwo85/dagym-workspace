@@ -93,6 +93,8 @@ describe('직원 초대 메일 자동 발송', () => {
     assert.equal((await ctx.owner.req('POST', `/api/admin/users/${u.id}/cancel-invite`, {})).status, 400, '이미 취소됨');
     assert.equal((await ctx.owner.req('POST', `/api/admin/users/${ctx.staffA.id}/cancel-invite`, {})).status, 400, '가입한 사람은 초대 취소 대상 아님');
     const again = await ctx.owner.ok('POST', '/api/admin/users', { email: 'oops@dagym.test', name: '다시초대', role: 'staff' });
+    assert.equal(to('oops@dagym.test').at(-1).subject, '[워크인] 시험회사에서 초대했습니다(새 링크)', '취소 뒤 다시 초대한 메일도 "(새 링크)" — 첫 메일과 다른 제목(로컬 11/21: 같은 제목이라 지메일에서 묻힘)');
+    assert.match(to('oops@dagym.test').at(-1).text, /이전에 받은 초대 메일의 링크는 쓸 수 없습니다/);
     assert.equal((await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.id === u.id).status, 'invited', '다시 초대하면 초대됨으로');
     await new Client('oops').ok('POST', `/api/invitations/${again.path.split('/').pop()}/accept`, { password: 'oops-pass-1234' });
     assert.equal((await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.id === u.id).status, 'active');

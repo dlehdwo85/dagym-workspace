@@ -93,11 +93,19 @@ export async function appGet({ browser, owner, BASE, SHOTS, sql }) {
   await dlg2.getByLabel('이름').fill('잘못보낸 초대'); await dlg2.getByLabel('회사 이메일').fill('appget-oops@dagym.test');
   await dlg2.getByRole('button', { name: '초대 링크 만들기' }).click(); await owner.getByTestId('invite-link').waitFor(); await owner.keyboard.press('Escape');
   const oops = owner.locator('tr', { hasText: 'appget-oops@dagym.test' });
-  owner.once('dialog', (d) => { assert.match(d.message(), /잘못보낸 초대\(appget-oops@dagym\.test\) 초대를 취소할까요\?/); d.accept(); });
+  let nativeDialog = false; const onNative = (d) => { nativeDialog = true; d.dismiss(); }; owner.on('dialog', onNative);
   await oops.getByTestId('user-cancel-invite').click();
+  // 로컬 11/21: 브라우저 기본 confirm() 대신 화면 안 확인 창(자동 조작 도구가 멈추지 않게) — [취소]면 아무것도 안 바뀜, [초대 취소]면 취소
+  const cdlg = owner.getByTestId('confirm-dialog'); await cdlg.waitFor();
+  assert.match(await owner.getByTestId('confirm-message').innerText(), /잘못보낸 초대\(appget-oops@dagym\.test\) 초대를 취소할까요\?/);
+  await owner.getByTestId('confirm-cancel').click(); await cdlg.waitFor({ state: 'detached' });
+  await oops.getByTestId('user-cancel-invite').waitFor();
+  await oops.getByTestId('user-cancel-invite').click(); await cdlg.waitFor();
+  await owner.getByTestId('confirm-ok').click();
+  owner.off('dialog', onNative); assert.equal(nativeDialog, false, '브라우저 기본 확인 창이 뜨지 않음');
   await owner.getByText('잘못보낸 초대 초대를 취소했습니다').first().waitFor();
   await oops.getByTestId('user-status').getByText('초대 취소됨').waitFor();
-  assert.equal(await oops.getByTestId('user-cancel-invite').count() + await oops.getByTestId('user-reinvite').count(), 0, '취소한 줄에는 초대 단추가 없음');
+  assert.equal(await oops.getByTestId('user-cancel-invite').count() + await oops.getByTestId('user-reinvite').count() + await oops.getByTestId('user-contract').count(), 0, '취소한 줄에는 초대·전자계약서 단추가 없음');
   await a.goto(link); await a.getByText('초대했습니다').waitFor();
   await a.getByLabel('비밀번호 (8자 이상)').fill('appget-pass-1'); await a.getByLabel('비밀번호 확인').fill('appget-pass-1');
   // #1086: 초대 수락에도 [선택] AI 기능 이용 동의 한 줄 — 체크하면 AI 동의(지금 판)로 저장

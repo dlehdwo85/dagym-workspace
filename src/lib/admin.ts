@@ -98,7 +98,9 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
       // 11/21 [초대 취소]로 사용 중지된 사람(한 번도 가입하지 않음)을 다시 초대하면 '초대됨'으로 되돌림 — 아니면 수락 때 '비활성화된 계정'으로 막힘
       await tx`update users set status = 'invited' where id = ${userId} and status = 'disabled' and password_hash is null and last_login_at is null`;
     }
-    const revoked = await tx`update invitations set revoked_at = now() where user_id = ${userId} and accepted_at is null and revoked_at is null returning id`;
+    await tx`update invitations set revoked_at = now() where user_id = ${userId} and accepted_at is null and revoked_at is null`;
+    // 전에 이 사람에게 보낸 초대가 있으면(다시 보내기·[초대 취소] 뒤 다시 초대) '다시 보낸 메일' — 로컬 11/21: 취소 뒤 다시 초대한 메일이 첫 메일과 같은 제목이라 지메일에서 묻힘
+    const [prior] = await tx<{ n: number }[]>`select count(*)::int as n from invitations where user_id = ${userId}`;
     const [inv] = await tx<{ id: string; expires_at: Date }[]>`
       insert into invitations (email, name, role, org_unit_ids, token_hash, invited_by, user_id, expires_at)
       values (${i.email}, ${i.name}, ${i.role}, ${i.orgUnitIds}, ${sha256(token)}, ${actor.id}, ${userId}, now() + interval '7 days')
@@ -118,7 +120,7 @@ export async function inviteUser(actor: SessionUser, i: z.infer<typeof inviteInp
     }
     await syncDemoFlag(tx, [userId]);
     await audit(tx, actor.id, 'user.invite', 'user', userId, { email: i.email, role: i.role, orgUnitIds: i.orgUnitIds }, ip);
-    return { invitationId: inv.id, userId, token, path: `/invite/${token}`, expires: inv.expires_at, resent: revoked.length > 0 };
+    return { invitationId: inv.id, userId, token, path: `/invite/${token}`, expires: inv.expires_at, resent: prior.n > 0 };
   });
   // 대표 11/20 #1083: 이메일로 초대하면 초대 메일을 자동으로 보냄(트랜잭션 밖 — 메일이 늦거나 실패해도 초대는 만들어져 있음)
   const sent = opts.mail === false ? { mail: 'off' as const } : await sendInviteMail(actor, { id: r.invitationId, userId: r.userId, email: i.email, name: i.name, token: r.token, expires: r.expires, resent: r.resent }, sql);
