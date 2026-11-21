@@ -132,7 +132,8 @@ export async function invitationInfo(token: string) {
   return inv;
 }
 
-export async function acceptInvitation(token: string, password: string) {
+/** ai = 초대 수락 화면의 [선택] AI 기능 이용 동의 한 줄(#1086) — 체크했으면 AI 동의(지금 판)로 저장 */
+export async function acceptInvitation(token: string, password: string, ai = false) {
   if (password.length < 8) throw badRequest('비밀번호는 8자 이상이어야 합니다');
   const sql = db();
   return sql.begin(async (tx) => {
@@ -144,6 +145,7 @@ export async function acceptInvitation(token: string, password: string) {
     await tx`update invitations set accepted_at = now() where id = ${inv.id}`;
     await ensurePersonalCalendar(u.id, u.name, tx);
     await audit(tx, u.id, 'user.accept_invite', 'user', u.id, {});
+    if (ai) await (await import('./ai/consent')).recordAiAgree(tx as unknown as Sql, u.id, 'invite');
     return { userId: u.id };
   });
 }

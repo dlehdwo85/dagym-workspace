@@ -79,6 +79,7 @@ export async function createOwnerSpace(tx: Sql, i: OwnerSpace) {
   { const C = await import('./check/install'); const T = await import('./check/templates'); await C.installCheckTemplates(tx, tenant, T.templatesForIndustries(inds), u.id); }
   await ensurePersonalCalendar(u.id, i.name, tx);
   for (const [kind, agreed] of Object.entries(i.agree)) await tx`insert into consents (user_id, kind, version, agreed) values (${u.id}, ${kind}, ${TERMS_VERSION}, ${agreed})`;
+  if (i.agree.ai) await (await import('./ai/consent')).recordAiAgree(tx as never, u.id, 'signup', i.ip); // #1086: 가입 목록의 [선택] AI 줄 = AI 동의(지금 판) — 로그인 뒤 창이 다시 뜨지 않음
   await audit(tx, u.id, 'auth.signup', 'user', u.id, { mode: i.mode, tenant, social: !i.passwordHash }, i.ip);
   return u.id;
 }
