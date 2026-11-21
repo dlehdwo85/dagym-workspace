@@ -49,6 +49,10 @@ describe('직원 초대 메일 자동 발송', () => {
     const r = await ctx.owner.ok('POST', '/api/admin/users', { email: 'newbie@dagym.test', name: '정신입', role: 'staff' });
     assert.equal(r.mail, 'sent'); const token = r.path.split('/').pop(); assert.notEqual(token, firstToken);
     assert.equal(to('newbie@dagym.test').length, 2, '두 번째 메일');
+    // 로컬 11/21 운영 시험: 같은 제목이면 지메일이 한 대화로 묶어 위의 예전 메일 단추('취소된 초대')를 누르게 됨 → 다시 보낸 메일은 제목·첫 줄로 구분
+    const [m1, m2] = to('newbie@dagym.test');
+    assert.equal(m2.subject, '[워크인] 시험회사에서 초대했습니다(새 링크)'); assert.doesNotMatch(m1.subject, /새 링크/);
+    assert.match(m2.text, /^시험회사 워크인 초대\n\n이전에 받은 초대 메일의 링크는 쓸 수 없습니다\. 이 메일의 \[초대 수락\]을 눌러 주세요\./); assert.doesNotMatch(m1.text, /이전에 받은/);
     assert.ok(to('newbie@dagym.test')[1].html.includes(`/invite/${token}`), '새 링크가 메일에');
     const old = await new Client('x').req('GET', `/api/invitations/${firstToken}`); assert.equal(old.status, 400); assert.match(old.body.error.message, /취소된 초대/);
     await new Client('newbie').ok('POST', `/api/invitations/${token}/accept`, { password: 'newbie-pass-1' });
