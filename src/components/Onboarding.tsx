@@ -31,7 +31,7 @@ export function Onboarding() {
   const [phone, setPhone] = useState('');
   const [title, setTitle] = useState('');
   const [emails, setEmails] = useState('');
-  const [links, setLinks] = useState<{ email: string; url: string }[]>([]);
+  const [links, setLinks] = useState<{ email: string; url: string; mail?: string }[]>([]);
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (st.data) { setPhone(st.data.phone ?? ''); setWork(st.data.workEmail ?? ''); } }, [st.data]);
   async function finish() { try { await api('/api/onboarding', { body: { done: true } }); } catch {} setOpen(false); router.refresh(); }
@@ -48,13 +48,13 @@ export function Onboarding() {
     if (!list.length) { toast.error('초대할 이메일을 적어 주세요'); return; }
     setBusy(true);
     const hq = s.dir.orgUnits[0]?.id;
-    const out: { email: string; url: string }[] = [];
+    const out: { email: string; url: string; mail?: string }[] = [];
     for (const email of list) {
-      try { const r = await api('/api/admin/users', { body: { email, name: email.split('@')[0].slice(0, 50), role: 'staff', orgUnitIds: hq ? [hq] : [] } }); out.push({ email, url: `${location.origin}${r.path}` }); }
+      try { const r = await api('/api/admin/users', { body: { email, name: email.split('@')[0].slice(0, 50), role: 'staff', orgUnitIds: hq ? [hq] : [] } }); out.push({ email, url: `${location.origin}${r.path}`, mail: r.mail }); }
       catch (e: any) { toast.error(`${email}: ${e.message}`); }
     }
     setLinks([...links, ...out]); setEmails(''); setBusy(false);
-    if (out.length) { toast.ok(`${out.length}명의 초대 링크를 만들었습니다 — 복사해서 보내 주세요`); api('/api/onboarding', { body: { invited: true } }).catch(() => {}); }
+    if (out.length) { { const failed = out.filter((x) => x.mail === 'failed').length; toast.ok(failed ? `${out.length - failed}명에게 초대 메일을 보냈습니다 · ${failed}명은 메일을 못 보내 링크를 복사해 보내 주세요` : `${out.length}명에게 초대 메일을 보냈습니다`); } api('/api/onboarding', { body: { invited: true } }).catch(() => {}); }
   }
   const copy = (t: string) => navigator.clipboard?.writeText(t).then(() => toast.ok('복사했습니다'), () => toast.error('복사하지 못했습니다'));
   async function push() {
@@ -94,14 +94,14 @@ export function Onboarding() {
           </section>
         </>}
         {step === 'invite' && <>
-          <p className="text-sm text-ink-2" data-testid="ob-invite-help">함께 일할 동료의 이메일을 적으면 사람마다 초대 링크가 만들어집니다. 링크를 복사해 카카오톡·문자로 보내 주세요.{!inApp && <> 휴대폰 앱은 <b className="font-mono text-ink">{APP_GET_URL.replace(/^https?:\/\//, '')}</b> 에서 받습니다.</>}</p>
+          <p className="text-sm text-ink-2" data-testid="ob-invite-help">함께 일할 동료의 이메일을 적으면 초대 메일이 갑니다. 링크를 복사해 카카오톡·문자로 보내도 됩니다.{!inApp && <> 휴대폰 앱은 <b className="font-mono text-ink">{APP_GET_URL.replace(/^https?:\/\//, '')}</b> 에서 받습니다.</>}</p>
           <Field label="이메일 (여러 명은 쉼표·줄바꿈)"><textarea className={inputCls} rows={3} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="kim@company.co.kr, lee@company.co.kr" data-testid="ob-invite-emails" /></Field>
           <Button variant="secondary" onClick={invite} disabled={busy} data-testid="ob-invite-send"><UserPlus />초대 보내기</Button>
           {links.length > 0 && (
             <ul className="space-y-1.5 text-sm" data-testid="ob-invite-links">
               {links.map((l) => (
                 <li key={l.email} className="flex flex-wrap items-center gap-1.5 rounded-input bg-slate-50 px-2 py-1.5">
-                  <span className="min-w-0 flex-1 truncate">{l.email}</span>
+                  <span className="min-w-0 flex-1 truncate">{l.email}{l.mail === 'failed' && <span className="ml-1.5 text-xs text-red-600">메일 못 보냄</span>}{l.mail === 'sent' && <span className="ml-1.5 text-xs text-ink-3">메일 보냄</span>}</span>
                   <Button size="sm" variant="ghost" onClick={() => copy(l.url)}><Copy />링크 복사</Button>
                   {kakaoEnabled() && <Button size="sm" variant="ghost" onClick={() => shareKakao({ text: `워크인에서 함께 일해요 — ${s.tenant?.name ?? ''} 초대`, url: l.url, buttonTitle: '초대 받기' }).catch((e) => toast.error(e.message))}><MessageCircle />카카오톡</Button>}
                 </li>

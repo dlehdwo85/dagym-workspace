@@ -186,7 +186,7 @@ export async function setupReviewAccount(actor: SessionUser, i: z.infer<typeof r
   let reviewerId = existing?.id ?? null;
   if (!existing || existing.status === 'invited') {
     // 데모 조직 관리자(현장 관리자) 권한, 소속은 격리 조직만 → 자동으로 격리 계정
-    const r = await inviteUser(actor, { email: i.email, name: i.name, role: 'site_manager', orgUnitIds: [unitId], title: '앱 심사용' } as never, ip);
+    const r = await inviteUser(actor, { email: i.email, name: i.name, role: 'site_manager', orgUnitIds: [unitId], title: '앱 심사용' } as never, ip, { mail: false }); // 심사 담당자 이메일로 초대 메일을 보내지 않음(링크는 관리자가 TestFlight 정보에)
     invitePath = r.path; reviewerId = r.userId;
   }
   const sample = await sql.begin(async (tx) => seedSamples(tx as unknown as Sql, unitId, mates, reviewerId, existing?.status === 'active'));

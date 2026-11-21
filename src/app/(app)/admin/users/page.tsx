@@ -67,6 +67,7 @@ function Users() {
   const teamsList = useApi<{ teams: any[] }>('/api/teams');
   const spaceInfo = useApi<{ spaces: string[] }>('/api/spaces');
   const [link, setLink] = useState('');
+  const [mailRes, setMailRes] = useState<{ mail: string; to: string } | null>(null); // 대표 11/20 #1083: 방금 만든 초대의 메일 결과(보냄·못 보냄)
   const [edit, setEdit] = useState<any>(null);
   const [contract, setContract] = useState<ContractPreset | null>(null); // #116 전자계약서 보내기(초대 직후·줄 버튼)
   const [withContract, setWithContract] = useState(false);
@@ -86,7 +87,7 @@ function Users() {
 
   async function invite(e: React.FormEvent) {
     e.preventDefault();
-    try { const r = await api('/api/admin/users', { body: inv }); setLink(location.origin + r.path); const wc = withContract ? { userId: r.userId as string, name: inv.name as string, email: inv.email as string } : null; setInv(null); reload(); if (wc) setContract(wc); } catch (er: any) { toast.error(er.message); }
+    try { const r = await api('/api/admin/users', { body: inv }); setMailRes({ mail: r.mail, to: inv.email }); setLink(location.origin + r.path); const wc = withContract ? { userId: r.userId as string, name: inv.name as string, email: inv.email as string } : null; setInv(null); reload(); if (wc) setContract(wc); } catch (er: any) { toast.error(er.message); }
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -104,10 +105,10 @@ function Users() {
   /** #681 편집 중 소속에서 빠지는데 이 사람이 장인 곳 */
   const lostLeads = (e: any) => { const ids: string[] = e.teamIds ?? (e.teams ?? []).map((t: any) => t.id); return (e.teams ?? []).filter((t: any) => t.lead && !ids.includes(t.id)); };
   async function reset(u: any) {
-    try { const r = await api(`/api/admin/users/${u.id}/reset-password`, { body: {} }); setLink(location.origin + r.path); } catch (er: any) { toast.error(er.message); }
+    try { const r = await api(`/api/admin/users/${u.id}/reset-password`, { body: {} }); setMailRes(null); setLink(location.origin + r.path); } catch (er: any) { toast.error(er.message); }
   }
   async function reinvite(u: any) {
-    try { const r = await api('/api/admin/users', { body: { email: u.email, name: u.name, role: u.role, orgUnitIds: u.org_unit_ids, title: u.title ?? undefined } }); setLink(location.origin + r.path); reload(); } catch (er: any) { toast.error(er.message); }
+    try { const r = await api('/api/admin/users', { body: { email: u.email, name: u.name, role: u.role, orgUnitIds: u.org_unit_ids, title: u.title ?? undefined } }); setMailRes({ mail: r.mail, to: u.email }); setLink(location.origin + r.path); reload(); } catch (er: any) { toast.error(er.message); }
   }
   const unitName = (id: string) => allUnits.data?.units.find((o) => o.id === id)?.name ?? dir.orgUnits.find((o) => o.id === id)?.name ?? '';
   async function setupReview(e: React.FormEvent) {
@@ -116,7 +117,7 @@ function Users() {
       const r = await api('/api/admin/review-account', { body: review });
       setReview(null); reload(); allUnits.reload();
       setReviewMsg(r.alreadyActive ? '이미 비밀번호를 정한 심사용 계정입니다. 예시 데이터만 새로 만들었습니다.' : '초대 링크에서 비밀번호를 직접 정하세요. 그 아이디·비밀번호를 TestFlight "베타 앱 심사 정보"에 입력합니다.');
-      if (r.invitePath) setLink(location.origin + r.invitePath); else toast.ok('예시 데이터를 새로 만들었습니다');
+      setMailRes(null); if (r.invitePath) setLink(location.origin + r.invitePath); else toast.ok('예시 데이터를 새로 만들었습니다');
     } catch (er: any) { toast.error(er.message); }
   }
   return (
@@ -139,13 +140,13 @@ function Users() {
                 <td className="p-2"><div className="font-medium">{u.name}{u.is_demo && <span className="ml-1.5 rounded bg-amber-100 px-1.5 text-[11px] font-medium text-amber-800">심사용</span>}{!u.has_password && u.social?.length > 0 && <span className="ml-1.5 rounded bg-sky-50 px-1.5 text-[11px] font-medium text-sky-800" title="아이폰 앱은 이메일·비밀번호로만 로그인합니다 — 아이폰을 쓰면 [재설정 링크]로 비밀번호를 만들게 해 주세요" data-testid="user-social-only">{u.social.map((p: string) => ({ kakao: '카카오', naver: '네이버', google: 'Google', apple: 'Apple' } as Record<string, string>)[p] ?? p).join('·')}만 · 비밀번호 없음</span>}</div><div className="text-xs text-slate-500">{u.email}{u.title ? ` · ${u.title}` : ''}{u.title_short ? ` (${u.title_short})` : ''}</div></td>
                 <td className="p-2"><span className="flex items-center gap-1.5"><RoleBadge role={u.role} guest={u.is_demo} size="sm" /><span className="text-xs text-ink-2">{T.role[u.role as Role]}</span></span></td>
                 <td className="p-2 text-xs">{(u.teams ?? []).length ? (u.teams as any[]).map((t, i) => <span key={t.id} className="mr-1.5 inline-flex items-center gap-0.5"><TeamPath path={t.path} />{t.primary && (u.teams as any[]).length > 1 && <span className="rounded bg-brand-50 px-1 text-[10px] text-brand-700">주</span>}{t.lead && <LeadChip kind={t.kind} />}{i < (u.teams as any[]).length - 1 ? '' : ''}</span>) : <span className="text-ink-3">{u.org_unit_ids.map(unitName).join(', ') || '-'}</span>}</td>
-                <td className="p-2" data-testid="user-status">{u.status === 'left' && u.left_at ? `퇴사(${u.left_at.slice(5).replace('-', '/')})` : STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}{u.status === 'left' && u.rejoin_until && u.rejoin_until >= todayK && <div className="text-xs text-slate-400">복직 가능 ~{u.rejoin_until.slice(5).replace('-', '/')}</div>}</td>
+                <td className="p-2" data-testid="user-status">{u.status === 'left' && u.left_at ? `퇴사(${u.left_at.slice(5).replace('-', '/')})` : STATUS[u.status]}{u.status === 'invited' && u.invite_expires_at && <div className="text-xs text-slate-400">만료 {fmtDateTime(u.invite_expires_at)}</div>}{u.status === 'invited' && u.invite_mail?.status && u.invite_mail.status !== 'off' && <div className={cx('text-xs', u.invite_mail.status === 'failed' ? 'text-red-600' : 'text-slate-400')} data-testid="user-invite-mail">{u.invite_mail.status === 'failed' ? '초대 메일 못 보냄 — 링크를 직접 전달' : u.invite_mail.status === 'sent' ? `메일 보냄${u.invite_mail.at ? ` ${fmtDateTime(u.invite_mail.at)}` : ''}` : '메일 안 보냄(시험 환경)'}</div>}{u.status === 'left' && u.rejoin_until && u.rejoin_until >= todayK && <div className="text-xs text-slate-400">복직 가능 ~{u.rejoin_until.slice(5).replace('-', '/')}</div>}</td>
                 <td className="p-2 text-xs">{u.last_login_at ? fmtDateTime(u.last_login_at) : '-'}</td>
                 <td className="p-2 text-right whitespace-nowrap">{canEdit && <>
                   <Button size="sm" variant="ghost" onClick={() => setEdit({ ...u })}>편집</Button>
                   {u.status !== 'left' && !u.is_demo && <Button size="sm" variant="ghost" onClick={() => setContract({ userId: u.id, name: u.name, email: u.email, phone: u.phone })} data-testid="user-contract">전자계약서</Button>}
                   {u.status === 'active' && <Button size="sm" variant="ghost" onClick={() => reset(u)}>비번 재설정 링크</Button>}
-                  {u.status === 'invited' && <Button size="sm" variant="ghost" onClick={() => reinvite(u)}>초대 링크 재발급</Button>}
+                  {u.status === 'invited' && <Button size="sm" variant="ghost" onClick={() => reinvite(u)} data-testid="user-reinvite" title="새 초대 링크를 만들어 메일로 다시 보냅니다(예전 링크는 더 이상 쓸 수 없음)">초대 메일 다시 보내기</Button>}
                   {u.status === 'active' && u.id !== user.id && <Button size="sm" variant="ghost" onClick={() => setOff({ id: u.id, mode: 'leave' })} data-testid="user-leave">퇴사 처리</Button>}
                   {u.status === 'left' && <Button size="sm" variant="ghost" onClick={() => setOff({ id: u.id, mode: 'handover' })} data-testid="user-handover">인수인계</Button>}
                   {u.status === 'left' && u.rejoin_until && u.rejoin_until >= todayK && <Button size="sm" variant="ghost" onClick={() => rejoin(u)} data-testid="user-rejoin">복직</Button>}
@@ -186,9 +187,15 @@ function Users() {
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setReview(null)}>취소</Button><Button type="submit">만들기</Button></div>
         </form>}
       </Modal>
-      <Modal open={!!link} onClose={() => { setLink(''); setReviewMsg(''); }} title="링크를 전달하세요">
+      <Modal open={!!link} onClose={() => { setLink(''); setReviewMsg(''); setMailRes(null); }} title={mailRes?.mail === 'sent' ? '초대 메일을 보냈습니다' : '링크를 전달하세요'}>
         {reviewMsg && <p className="mb-2 rounded-input bg-amber-50 p-2 text-sm text-amber-900" data-testid="review-msg">{reviewMsg}</p>}
-        <p className="text-sm text-slate-600">아래 링크를 카카오톡·문자·메일로 본인에게만 전달하세요. 링크는 1회용이며 초대 7일·재설정 24시간 후 만료됩니다.</p>
+        {/* 대표 11/20 #1083: 이메일 초대는 메일이 자동으로 감 — 결과를 먼저 알리고, 링크는 카카오톡·문자로도 보낼 수 있게 그대로 둠 */}
+        {mailRes && mailRes.mail !== 'off' && (mailRes.mail === 'sent'
+          ? <p className="mb-2 rounded-input bg-brand-50 p-2 text-sm text-brand-800" data-testid="invite-mail-result" data-mail="sent"><b>{mailRes.to}</b> 로 초대 메일을 보냈습니다. 메일이 안 보인다고 하면 스팸함을 확인하게 하거나, 아래 링크를 카카오톡·문자로 보내 주세요.</p>
+          : mailRes.mail === 'failed'
+            ? <p className="mb-2 rounded-input bg-red-50 p-2 text-sm text-red-800" role="alert" data-testid="invite-mail-result" data-mail="failed">초대 메일을 보내지 못했습니다. 아래 링크를 카카오톡·문자로 직접 전달하세요.</p>
+            : <p className="mb-2 rounded-input bg-slate-50 p-2 text-sm text-ink-2" data-testid="invite-mail-result" data-mail="dev">메일 발송이 설정되지 않은 환경이라 메일은 보내지 않았습니다. 아래 링크를 전달하세요.</p>)}
+        <p className="text-sm text-slate-600">{mailRes?.mail === 'sent' ? '같은 링크를 카카오톡·문자로 보내도 됩니다(본인에게만).' : '아래 링크를 카카오톡·문자·메일로 본인에게만 전달하세요.'} 링크는 1회용이며 초대 7일·재설정 24시간 후 만료됩니다.</p>
         <input readOnly className={cx(inputCls, 'mt-2 font-mono text-xs')} value={link} onFocus={(e) => e.target.select()} data-testid="invite-link" />
         <div className="mt-3 flex justify-end"><Button onClick={() => { navigator.clipboard?.writeText(link); toast.ok('복사했습니다'); }}>복사</Button></div>
         {/* 대표 11/20: 직원이 앱부터 받게 — 초대 링크와 앱 받기 주소를 한 번에 붙여 보낼 안내 글 */}

@@ -30,7 +30,8 @@ export type MailButton = { label: string; url: string };
  * 가입 흐름 메일(이메일 확인·승인·환영·거절·비밀번호 재설정)이 같은 틀을 쓴다. 표(table)와 줄 안 스타일만 — 메일 앱은 바깥 스타일·스크립트를 지운다.
  * 주소 글자는 단추가 안 눌리는 메일 앱(그림·단추를 막는 설정)에서도 누르거나 복사할 수 있게 링크 + 그대로 보이는 글자로 둔다.
  */
-export function mailHtml(title: string, lines: string[], button?: MailButton) {
+/** links = 단추 아래 덧붙이는 작은 링크 줄(예: 앱 받기) — 주소 글자도 함께 보여 눌리지 않는 앱에서 복사할 수 있게 */
+export function mailHtml(title: string, lines: string[], button?: MailButton, links: MailButton[] = []) {
   const logo = `${appUrl()}/icon-192.png`;
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f4f6fa">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fa;padding:24px 12px"><tr><td align="center">
@@ -42,13 +43,14 @@ export function mailHtml(title: string, lines: string[], button?: MailButton) {
 <tr><td style="padding:0 24px ${button ? 16 : 24}px;font-size:15px;line-height:1.6;color:#374151">${lines.map(esc).join('<br>')}</td></tr>
 ${button ? `<tr><td align="center" style="padding:0 24px 12px"><a href="${esc(button.url)}" style="display:block;background:#0f766e;color:#ffffff;text-decoration:none;font-size:17px;font-weight:700;padding:16px 12px;border-radius:10px;text-align:center">${esc(button.label)}</a></td></tr>
 <tr><td style="padding:0 24px 24px;font-size:12px;line-height:1.6;color:#6b7280">단추가 눌리지 않으면 아래 주소를 눌러 주세요. 그래도 안 되면 주소를 길게 눌러 복사한 뒤 인터넷 창에 붙여 넣으세요.<br><a href="${esc(button.url)}" style="color:#0f766e;text-decoration:underline;word-break:break-all">${esc(button.url)}</a></td></tr>` : ''}
+${links.map((l) => `<tr><td style="padding:0 24px 20px;font-size:14px;line-height:1.6;color:#374151">${esc(l.label)}: <a href="${esc(l.url)}" style="color:#0f766e;font-weight:600">${esc(l.url.replace(/^https?:\/\//, ''))}</a></td></tr>`).join('')}
 </table>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px"><tr><td style="padding:12px 8px 0;font-size:11px;line-height:1.6;color:#9ca3af;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif">이 메일은 워크인에서 자동으로 보낸 안내 메일입니다.</td></tr></table>
 </td></tr></table></body></html>`;
 }
 /** 글자 판(HTML 을 못 보는 메일 앱·미리보기): 제목 · 본문 · 단추 이름과 주소 */
-export const mailText = (title: string, lines: string[], button?: MailButton) => [title, '', ...lines, ...(button ? ['', `${button.label}: ${button.url}`] : [])].join('\n');
+export const mailText = (title: string, lines: string[], button?: MailButton, links: MailButton[] = []) => [title, '', ...lines, ...(button ? ['', `${button.label}: ${button.url}`] : []), ...links.map((l) => `${l.label}: ${l.url}`)].join('\n');
 /** 틀을 써서 보내기 — 제목 앞에 [워크인] */
-export async function sendFramedMail(to: string, title: string, lines: string[], button?: MailButton, subject?: string) {
-  return sendMail(to, subject ?? `[워크인] ${title}`, mailText(title, lines, button), mailHtml(title, lines, button));
+export async function sendFramedMail(to: string, title: string, lines: string[], button?: MailButton, subject?: string, links: MailButton[] = []) {
+  return sendMail(to, subject ?? `[워크인] ${title}`, mailText(title, lines, button, links), mailHtml(title, lines, button, links));
 }

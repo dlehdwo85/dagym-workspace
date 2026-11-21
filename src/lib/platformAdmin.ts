@@ -256,9 +256,14 @@ export const newTenantInput = z.object({
     if (v.planCode && v.planCode !== 'trial') ctx.addIssue({ code: 'custom', path: ['planCode'], message: '설계 파트너는 체험으로 시작합니다 — 유료 전환은 고객사 관리에서 해 주세요' });
     if (!v.trialDays) ctx.addIssue({ code: 'custom', path: ['trialDays'], message: '설계 파트너 기간(일)을 적어 주세요' });
   });
-const inviteMail = (company: string, ownerName: string, link: string) => `${ownerName}님, 워크인에 "${company}" 회사가 만들어졌습니다.\n아래 링크에서 비밀번호를 정하면 대표 계정으로 바로 시작할 수 있습니다 (7일 유효).\n\n${link}\n\n휴대폰 앱 받기: ${APP_GET_URL}\n(앱에서는 이 이메일과 위에서 정한 비밀번호로 로그인합니다.)\n\n모르는 초대라면 이 메일을 무시해 주세요.`;
+/** 대표 계정 초대 메일 — 직원 초대 메일(#1083)과 같은 틀: [초대 수락] 단추 + 주소 글자 + 앱 받기(11/19 가입 메일처럼 주소가 안 눌리는 일 없게) */
+const inviteMail = (company: string, ownerName: string, link: string) => ({
+  title: `${company} 대표 계정 초대`,
+  lines: [`${ownerName}님, 워크인에 "${company}" 회사가 만들어졌습니다.`, '아래 [초대 수락]을 눌러 비밀번호를 정하면 대표 계정으로 바로 시작할 수 있습니다(7일 유효).', '', '휴대폰 앱을 받아 이 이메일과 방금 정한 비밀번호로 로그인하면 알림을 받습니다.', '', '모르는 초대라면 이 메일을 무시해 주세요.'],
+  button: { label: '초대 수락', url: link }, links: [{ label: '휴대폰 앱 받기', url: APP_GET_URL }],
+});
 /** 메일이 안 가도(미설정·발송 실패) 회사 만들기는 성공 — 운영자가 링크를 직접 전달한다 */
-async function tryMail(to: string, subject: string, text: string): Promise<'sent' | 'dev' | 'failed'> { try { return await sendMail(to, subject, text); } catch { return 'failed'; } }
+async function tryMail(to: string, m: ReturnType<typeof inviteMail>): Promise<'sent' | 'dev' | 'failed'> { try { return await sendFramedMail(to, m.title, m.lines, m.button, undefined, m.links); } catch { return 'failed'; } }
 /** [고객사 추가]: 회사(+대표 계정·본사 조직·달력·업종 템플릿) 만들고 대표에게 초대 메일 — 비밀번호는 대표가 직접 정한다 */
 export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof newTenantInput>, ip: string | null) {
   requirePlatform(u);
@@ -283,7 +288,7 @@ export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof n
     await audit(tx, u.id, 'platform.tenant_create', 'tenant', tenant, { company: i.company, ownerEmail: i.ownerEmail, plan: plan ?? `trial${i.trialDays ? `(${i.trialDays}d)` : ''}`, spaces: i.spaces, industries: inds, segment: i.segment ?? null, ...(i.segment === 'partner' ? { preset: PARTNER } : {}) }, ip);
     return { tenant, userId };
   });
-  const m = await tryMail(i.ownerEmail, `[워크인] ${i.company} 대표 계정 초대`, inviteMail(i.company, i.ownerName, `${appUrl()}/invite/${token}`));
+  const m = await tryMail(i.ownerEmail, inviteMail(i.company, i.ownerName, `${appUrl()}/invite/${token}`));
   return { ok: true, tenant: r.tenant, ownerUserId: r.userId, mail: m, inviteLink: `/invite/${token}` }; // 링크는 직원 초대와 같이 운영자에게도 보여 직접 전달 가능
 }
 /** 대표가 아직 초대를 안 받았을 때 초대 메일 다시 보내기(새 링크, 이전 링크는 무효) */
@@ -301,7 +306,7 @@ export async function reinviteOwner(u: SessionUser, tenant: string, ip: string |
     await tx`insert into invitations (email, name, role, org_unit_ids, token_hash, invited_by, user_id, expires_at) values (${ow.email}, ${ow.name}, 'owner', ${hq ? [hq.id] : []}, ${sha256(token)}, ${u.id}, ${ow.id}, now() + interval '7 days')`;
     await audit(tx, u.id, 'platform.tenant_reinvite', 'tenant', tenant, { ownerEmail: ow.email }, ip);
   });
-  const m = await tryMail(ow.email, `[워크인] ${t.name} 대표 계정 초대`, inviteMail(t.name, ow.name, `${appUrl()}/invite/${token}`));
+  const m = await tryMail(ow.email, inviteMail(t.name, ow.name, `${appUrl()}/invite/${token}`));
   return { ok: true, mail: m, inviteLink: `/invite/${token}` };
 }
 export const tenantSpacesInput = z.object({ spaces: z.array(z.enum(['sales', 'marketing'])).max(2) });

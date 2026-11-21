@@ -11,6 +11,8 @@ export const GET = handler(async ({ user }) => {
       coalesce(array_agg(m.org_unit_id) filter (where m.org_unit_id is not null), '{}') as org_unit_ids,
       (select count(*)::int from sessions s where s.user_id = u.id and s.revoked_at is null and s.expires_at > now()) as active_sessions,
       (select max(i.expires_at) from invitations i where i.user_id = u.id and i.accepted_at is null and i.revoked_at is null) as invite_expires_at,
+      -- 대표 11/20 #1083: 마지막 초대 메일 결과(보냄·못 보냄·시각). to_jsonb 로 읽어 267 마이그레이션 전에도 오류 없이 null
+      (select jsonb_build_object('status', to_jsonb(i)->>'mail_status', 'at', to_jsonb(i)->>'mail_at') from invitations i where i.user_id = u.id and i.accepted_at is null and i.revoked_at is null order by i.created_at desc limit 1) as invite_mail,
       -- 295차 #839: 아이폰 앱은 이메일·비밀번호 로그인만 — 카카오·네이버로만 가입해 비밀번호가 없는 사람은 관리자가 재설정 링크를 보내야 함(값은 안 보냄, 있다/없다만)
       (select coalesce(array_agg(distinct ui.provider order by ui.provider), '{}') from user_identities ui where ui.user_id = u.id) as social, u.password_hash is not null as has_password,
       (select coalesce(json_agg(json_build_object('id', t.id, 'name', t.name, 'kind', t.kind, 'path', tp.path, 'primary', tm.is_primary, 'lead', tm.is_lead) order by tm.is_primary desc, tp.path), '[]')
