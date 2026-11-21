@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { SpacesTab } from '@/components/SpacesTab';
 import { api, useApi } from '@/components/client';
 import { useMultiSite, useSession, useTerms } from '@/components/session';
-import { Button, ErrorBox, Field, Loading, Modal, cx, fmtDateTime, inputCls, refreshBadges, toast } from '@/components/ui';
+import { Button, ErrorBox, Field, Loading, Modal, askConfirm, cx, fmtDateTime, inputCls, refreshBadges, toast } from '@/components/ui';
 import { TeamPath, TeamPicker } from '@/components/TeamPicker';
 import { type Role } from '@/lib/types';
 import { ROLES } from '@/lib/terms';
@@ -80,7 +80,7 @@ function Users() {
   const [showLeft, setShowLeft] = useState(false);
   const leftN = data?.users.filter((u: any) => u.status === 'left').length ?? 0;
   const todayK = dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-  async function rejoin(u: any) { if (!confirm(`${u.name}님을 복직 처리할까요? (퇴사일부터 30일 안)`)) return; try { await api(`/api/admin/users/${u.id}/rejoin`, { body: {} }); toast.ok('복직 처리했습니다'); reload(); } catch (e: any) { toast.error(e.message); } }
+  async function rejoin(u: any) { if (!(await askConfirm(`${u.name}님을 복직 처리할까요? (퇴사일부터 30일 안)`, { title: '복직 처리', ok: '복직' }))) return; try { await api(`/api/admin/users/${u.id}/rejoin`, { body: {} }); toast.ok('복직 처리했습니다'); reload(); } catch (e: any) { toast.error(e.message); } }
   const demoN = data?.users.filter((u: any) => u.is_demo).length ?? 0;
   const allUnits = useApi<{ units: any[] }>('/api/admin/org-units');
   const roles = ROLES.filter((r) => r !== 'owner' || user.role === 'owner');
@@ -108,7 +108,7 @@ function Users() {
     try { const r = await api(`/api/admin/users/${u.id}/reset-password`, { body: {} }); setMailRes(null); setLink(location.origin + r.path); } catch (er: any) { toast.error(er.message); }
   }
   async function cancelInv(u: any) {
-    if (!confirm(`${u.name}(${u.email}) 초대를 취소할까요?\n\n보낸 초대 링크는 더 쓸 수 없고, 목록에는 '초대 취소됨'으로 남습니다. 다시 초대하려면 [+ 직원 초대]에 같은 이메일을 넣으세요.`)) return;
+    if (!(await askConfirm(`${u.name}(${u.email}) 초대를 취소할까요?\n\n보낸 초대 링크는 더 쓸 수 없고, 목록에는 '초대 취소됨'으로 남습니다. 다시 초대하려면 [+ 직원 초대]에 같은 이메일을 넣으세요.`, { title: '초대 취소', ok: '초대 취소', danger: true }))) return;
     try { await api(`/api/admin/users/${u.id}/cancel-invite`, { body: {} }); toast.ok(`${u.name} 초대를 취소했습니다`); reload(); } catch (er: any) { toast.error(er.message); }
   }
   async function reinvite(u: any) {
@@ -148,7 +148,7 @@ function Users() {
                 <td className="p-2 text-xs">{u.last_login_at ? fmtDateTime(u.last_login_at) : '-'}</td>
                 <td className="p-2 text-right whitespace-nowrap">{canEdit && <>
                   <Button size="sm" variant="ghost" onClick={() => setEdit({ ...u })}>편집</Button>
-                  {u.status !== 'left' && !u.is_demo && <Button size="sm" variant="ghost" onClick={() => setContract({ userId: u.id, name: u.name, email: u.email, phone: u.phone })} data-testid="user-contract">전자계약서</Button>}
+                  {u.status !== 'left' && !u.is_demo && !(u.status === 'disabled' && !u.has_password && !u.last_login_at) /* 초대 취소됨에는 안 보임(로컬 11/21) */ && <Button size="sm" variant="ghost" onClick={() => setContract({ userId: u.id, name: u.name, email: u.email, phone: u.phone })} data-testid="user-contract">전자계약서</Button>}
                   {u.status === 'active' && <Button size="sm" variant="ghost" onClick={() => reset(u)}>비번 재설정 링크</Button>}
                   {u.status === 'invited' && <Button size="sm" variant="ghost" onClick={() => reinvite(u)} data-testid="user-reinvite" title="새 초대 링크를 만들어 메일로 다시 보냅니다(예전 링크는 더 이상 쓸 수 없음)">초대 메일 다시 보내기</Button>}
                   {u.status === 'invited' && <Button size="sm" variant="ghost" onClick={() => cancelInv(u)} data-testid="user-cancel-invite" title="보낸 초대 링크를 취소합니다(가입 전인 사람만)">초대 취소</Button>}

@@ -107,6 +107,38 @@ type ToastAction = { label: string; run: () => void };
 type ToastMsg = { id: number; text: string; kind: 'ok' | 'error' | 'info'; action?: ToastAction };
 let pushToast: (t: Omit<ToastMsg, 'id'>) => void = () => {};
 /** 저장·이동·완료 피드백. action 을 주면 "되돌리기" 같은 버튼이 붙는다 */
+/**
+ * 화면 안 확인 창(로컬 11/21): 브라우저 기본 confirm() 은 디자인과 다르고, 그 창이 떠 있는 동안 자동 조작 도구(운영 화면 시험)가 멈춘다.
+ * askConfirm('…할까요?', { title, ok, danger }) → true/false. 앱 틀(AppShell)의 <ConfirmHost/> 가 그린다 — 없는 화면에서는 기본 confirm 으로.
+ */
+type ConfirmOpts = { title?: string; ok?: string; danger?: boolean };
+type ConfirmReq = ConfirmOpts & { message: string; resolve: (v: boolean) => void };
+let confirmSink: ((r: ConfirmReq) => void) | null = null;
+export function askConfirm(message: string, o: ConfirmOpts = {}): Promise<boolean> {
+  if (!confirmSink) return Promise.resolve(typeof window !== 'undefined' && window.confirm(message));
+  return new Promise((resolve) => confirmSink!({ ...o, message, resolve }));
+}
+export function ConfirmHost() {
+  const [req, setReq] = useState<ConfirmReq | null>(null);
+  const cur = useRef<ConfirmReq | null>(null);
+  useEffect(() => {
+    confirmSink = (r) => { cur.current?.resolve(false); cur.current = r; setReq(r); };
+    return () => { confirmSink = null; cur.current?.resolve(false); cur.current = null; };
+  }, []);
+  const done = (v: boolean) => { cur.current?.resolve(v); cur.current = null; setReq(null); };
+  return (
+    <Modal open={!!req} onClose={() => done(false)} title={req?.title ?? '확인'}>
+      {req && <div data-testid="confirm-dialog">
+        <p className="whitespace-pre-line text-sm leading-relaxed text-ink-2" data-testid="confirm-message">{req.message}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => done(false)} data-testid="confirm-cancel">취소</Button>
+          <Button variant={req.danger ? 'danger' : 'primary'} onClick={() => done(true)} data-testid="confirm-ok" autoFocus>{req.ok ?? '확인'}</Button>
+        </div>
+      </div>}
+    </Modal>
+  );
+}
+
 export const toast = {
   ok: (text: string, action?: ToastAction) => pushToast({ text, kind: 'ok', action }),
   error: (text: string) => pushToast({ text, kind: 'error' }),
