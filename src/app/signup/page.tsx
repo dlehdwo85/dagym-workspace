@@ -10,6 +10,7 @@ import { CompanyFields } from '@/components/SignupFields';
 import { captureUtm, conversionTagsConfigured, fireSignupConversion, readUtm, setAdsConsent, setConversionTags, signupStep } from '@/components/conversion';
 import { SignupSteps } from '@/components/SignupSteps';
 import { useInApp } from '@/components/inApp';
+import { AiConsentLine } from '@/components/AiConsent';
 
 /** V15 공개 가입 → V32 3 한 화면씩: ① 계정(소셜·이메일·약관) → ② 회사(개인/팀·이름·규모·업종) → 확인 메일. ③ 연락 채널·④ 동료 초대는 첫 로그인 안내에서 */
 export default function SignupPage() {
@@ -19,6 +20,7 @@ export default function SignupPage() {
   const [f, setF] = useState({ name: '', email: '', password: '', company: '', size: '', industry: '', industries: [] as string[], website: '' });
   const [social, setSocial] = useState(0);
   const [agree, setAgree] = useState({ terms: false, age14: false, privacy: false, ai: false, marketing: false, alimtalk: false });
+  const [aiStt, setAiStt] = useState(false);
   const [phone, setPhone] = useState(''); // 304차 #871 결제·약관 안내 알림톡(선택)
   const [contact, setContact] = useState(''); // 359차 승인제 가입: 연락받을 전화(24시간 안에 연락)
   const [approval, setApproval] = useState(true);
@@ -30,7 +32,7 @@ export default function SignupPage() {
   const opened = useRef(Date.now());
   useEffect(() => { captureUtm(); }, []);
   useEffect(() => { if (enabled) signupStep(step === 1 ? 'account_view' : 'company_view'); }, [step, enabled]);
-  useEffect(() => { api('/api/auth/signup').then((r) => { setConversionTags(r.tags); setEnabled(!!r.enabled); setApproval(r.approval !== false); }).catch(() => setEnabled(false)); }, []);
+  useEffect(() => { api('/api/auth/signup').then((r) => { setConversionTags(r.tags); setEnabled(!!r.enabled); setApproval(r.approval !== false); setAiStt(!!r.aiStt); }).catch(() => setEnabled(false)); }, []);
   const all = agree.terms && agree.age14 && agree.privacy && agree.ai && agree.marketing;
 
   function toCompany(e: React.FormEvent) {
@@ -90,7 +92,7 @@ export default function SignupPage() {
           {box('terms', <><Link href="/terms" target="_blank" className="underline">이용약관</Link> 동의</>, true)}
           {box('privacy', <><Link href="/privacy" target="_blank" className="underline">개인정보 수집·이용</Link> 동의</>, true)}
           {box('age14', '만 14세 이상입니다', true)}
-          {box('ai', <><Link href="/ai-notice" target="_blank" className="underline">AI 기능 이용</Link>(입력 내용이 AI 처리 업체로 전송) 동의</>, false)}
+          <AiConsentLine checked={agree.ai} onChange={(v) => setAgree({ ...agree, ai: v })} stt={aiStt} />{/* #1086 약관처럼 한 줄 + 자세히(접힘) */}
           {box('marketing', '새 기능·혜택 소식 받기', false)}
           {box('alimtalk', '결제·가입 안내를 카카오 알림톡으로 받기(관리자, 광고 없음)', false)}
           {agree.alimtalk && <input className={inputCls + ' h-10'} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" maxLength={20} placeholder="휴대폰 번호 (예: 010-1234-5678)" aria-label="알림톡 받을 휴대폰" data-testid="signup-alimtalk-phone" />}

@@ -12,7 +12,7 @@ const PLAY = 'https://play.google.com/store/apps/details?id=kr.co.dagym.workos';
 const phone = (browser, userAgent) => browser.newContext({ viewport: { width: 390, height: 844 }, userAgent, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
 const noOverflow = async (p, what) => assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${what}: 가로 넘침 없음`);
 
-export async function appGet({ browser, owner, BASE, SHOTS }) {
+export async function appGet({ browser, owner, BASE, SHOTS, sql }) {
   // ① PC: 소개 첫 화면 [앱 다운로드] → 앱 받기 화면(QR · 두 스토어 · 웹 로그인) · PC 에는 띠 없음
   const pcCtx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR' });
   const pc = await pcCtx.newPage();
@@ -89,10 +89,14 @@ export async function appGet({ browser, owner, BASE, SHOTS }) {
   await owner.keyboard.press('Escape');
   await a.goto(link); await a.getByText('초대했습니다').waitFor();
   await a.getByLabel('비밀번호 (8자 이상)').fill('appget-pass-1'); await a.getByLabel('비밀번호 확인').fill('appget-pass-1');
+  // #1086: 초대 수락에도 [선택] AI 기능 이용 동의 한 줄 — 체크하면 AI 동의(지금 판)로 저장
+  assert.match(await a.getByTestId('ai-consent-line').innerText(), /\[선택\] AI 기능 이용 동의/); assert.equal(await a.getByTestId('agree-ai').isChecked(), false);
+  await a.getByTestId('agree-ai').check(); await noOverflow(a, '초대 수락(AI 줄)');
   await a.getByRole('button', { name: '가입하고 시작하기' }).click();
   const done = a.getByTestId('invite-done'); await done.waitFor();
   assert.match(await done.innerText(), /가입이 끝났습니다[\s\S]*appget@dagym\.test[\s\S]*앱 받기[\s\S]*웹으로 계속하기/);
   assert.equal(await a.getByTestId('invite-app').getAttribute('href'), '/app');
+  if (sql) assert.deepEqual((await sql`select c.agreed from consents c join users u on u.id = c.user_id where u.email = 'appget@dagym.test' and c.kind = 'ai_share'`).map((r) => r.agreed), [true], '초대 수락 때 체크 = AI 동의');
   await a.screenshot({ path: `${SHOTS}/app-get-invite-done.png` });
   await a.getByTestId('invite-web').click(); await a.waitForURL(`${BASE}/`);
   assert.equal(await a.getByTestId('landing-title').count(), 0, '가입한 채로 홈(소개 화면 아님)');

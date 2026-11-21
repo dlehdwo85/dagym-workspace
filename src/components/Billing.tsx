@@ -4,6 +4,7 @@ import { CreditCard } from 'lucide-react';
 import { api, useApi } from './client';
 import { Button, Field, cx, fmtDateTime, inputCls, toast } from './ui';
 import { TaxInvoiceButton } from './PlatformSettlement';
+import { AiConsentLine } from './AiConsent';
 
 const won = (n: number | null | undefined) => (n == null ? '-' : `${n.toLocaleString('ko-KR')}원`);
 const STATUS: Record<string, string> = { pending: '대기', paid: '결제 완료', failed: '실패', canceled: '환불', partial_canceled: '부분 환불' };
@@ -57,6 +58,10 @@ export function BillingSection() {
   // 200차 #706: 간편결제 바로 열기(나이스페이 결제창 생략 — 결제 대행 약관 동의는 여기서). 켠 간편결제(data.easyPays)만 보임
   const [ep, setEp] = useState<string | null>(null); const [epOk, setEpOk] = useState(false);
   const [renewOk, setRenewOk] = useState(false); // V34-B (#282) 정기결제 별도 동의(체크해야 결제)
+  // 대표 11/20 #1086: 요금제 동의 목록에도 [선택] AI 기능 이용 동의 한 줄 — 누르는 관리자 본인의 동의로 기록(결제와 함께 보낼 때). 이미 동의한 사람에게는 안 보임
+  const aiSt = useApi<{ state: string; stt: boolean }>('/api/account/ai-consent');
+  const [aiOk, setAiOk] = useState(false);
+  const saveAi = async () => { if (aiOk && aiSt.data?.state !== 'agreed') { await api('/api/account/ai-consent', { method: 'PUT', body: { agreed: true, via: 'billing' } }).catch(() => {}); window.dispatchEvent(new Event('wos-ai-consent-changed')); } };
   const [pageMode, setPageMode] = useState(false); // #413 레이어가 바로 닫히는 환경 — 같은 탭 이동 방식
   // 302차 #862: 휴대폰 브라우저는 나이스페이 모바일 방식(같은 탭 이동)이 기본 — 결제 안내 메일 [결제하기]를 휴대폰에서 눌러도 막힘 없이
   useEffect(() => { if (window.matchMedia?.('(max-width: 639px)').matches) setPageMode(true); }, []);
@@ -90,11 +95,13 @@ export function BillingSection() {
   async function subscribe(code: string) {
     const q = monthly.find((x: any) => x.planCode === code);
     if (!q || !renewOk) return;
+    await saveAi();
     setBusy(true);
     try { await api('/api/billing/subscribe', { body: { planCode: code, consent: true } }); toast.ok('구독을 시작했습니다'); location.reload(); } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   async function openWindow(body: any) {
     if (ep && !epOk) { toast.error('간편결제는 결제 대행 약관에 동의해야 열 수 있습니다'); return; }
+    await saveAi();
     setBusy(true);
     try {
       await launchNicepay(await api('/api/billing/window', { body: { ...body, payMethod: ep ? 'CARD' : pm, ...(ep ? { easyPay: ep, agree: epOk } : {}) } }), { page: pageMode, onClose: (i) => { if (i.quick) setPageMode(true); } });
@@ -142,6 +149,7 @@ export function BillingSection() {
                   <input type="checkbox" className="mt-0.5" checked={renewOk} onChange={(e) => setRenewOk(e.target.checked)} aria-label="자동 결제 동의" />
                   <span><b className="text-ink-1">[필수] 정기결제 동의</b> — {q.name} 요금제를 매월 {won(q.amount)}(VAT 포함, 인원이 바뀌면 다음 결제부터 반영)씩 등록한 카드로 자동 결제합니다. 설정에서 언제든 해지를 예약할 수 있고, 해지하면 이미 결제한 기간까지 쓴 뒤 자동 결제가 멈춥니다. 청약철회·환불 기준은 <a href="/terms" target="_blank" className="underline">이용약관 제6조</a>를 따릅니다.</span>
                 </label>) : null; })()}
+              {plan && aiSt.data && aiSt.data.state !== 'agreed' && <div className="mt-1.5 rounded-input border border-line bg-slate-50 p-2" data-testid="billing-ai-consent"><AiConsentLine checked={aiOk} onChange={setAiOk} stt={aiSt.data.stt} /></div>}
               {data.autoRenewConsent && <p className="mt-1 text-[11px] text-ink-3" data-testid="billing-consent-log">정기결제 동의 기록: {fmtDateTime(data.autoRenewConsent.created_at)} · {data.autoRenewConsent.plan_code} · {won(data.autoRenewConsent.amount_krw)}/{data.autoRenewConsent.cycle === 'annual' ? '년' : '월'}</p>}
               <p className="mt-1 text-[11px] text-ink-3">결제창 결제는 카드 등록 없이 이번 1개월만 — 다음 달부터 자동 결제하려면 카드를 등록하세요.</p>
             </div>

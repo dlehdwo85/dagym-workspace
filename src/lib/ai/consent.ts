@@ -28,15 +28,23 @@ export async function aiConsentOf(userId: string, sql: Sql = db()) {
   return { state, at: c?.created_at ?? null, version, stt: sttConfigured() };
 }
 
-export const aiConsentInput = z.object({ agreed: z.boolean() });
+export const aiConsentInput = z.object({ agreed: z.boolean(), /** #1086: 요금제 동의 목록의 한 줄에서 왔는지(감사 기록에만) */ via: z.enum(['billing']).optional() });
 export async function setAiConsent(u: SessionUser, i: z.infer<typeof aiConsentInput>, ip: string | null) {
   const sql = db();
   const version = aiConsentVersion();
   // consents 기본 키 = (사람·종류·판) — 같은 판이면 덮어쓰고 시각을 새로(바뀐 내역은 감사 기록에 남는다)
   await sql`insert into consents (user_id, kind, version, agreed) values (${u.id}, ${AI_CONSENT_KIND}, ${version}, ${i.agreed})
     on conflict (user_id, kind, version) do update set agreed = excluded.agreed, created_at = now()`;
-  await audit(sql, u.id, i.agreed ? 'consent.ai_agree' : 'consent.ai_withdraw', 'user', u.id, { version }, ip);
+  await audit(sql, u.id, i.agreed ? 'consent.ai_agree' : 'consent.ai_withdraw', 'user', u.id, { version, ...(i.via ? { via: i.via } : {}) }, ip);
   return aiConsentOf(u.id, sql);
+}
+
+/** 대표 11/20 #1086: 가입·초대 수락·요금제 동의 목록의 한 줄을 체크한 경우 — 지금 판으로 '동의함' 저장(창에서 [AI 기능 쓰기]를 누른 것과 같은 기록). 체크하지 않으면 아무것도 저장하지 않음 = '아직 안 정함' */
+export async function recordAiAgree(sql: Sql, userId: string, via: 'signup' | 'invite' | 'billing', ip: string | null = null) {
+  const version = aiConsentVersion();
+  await sql`insert into consents (user_id, kind, version, agreed) values (${userId}, ${AI_CONSENT_KIND}, ${version}, true)
+    on conflict (user_id, kind, version) do update set agreed = true, created_at = now()`;
+  await audit(sql, userId, 'consent.ai_agree', 'user', userId, { version, via }, ip);
 }
 
 export const aiConsentError = () => new HttpError(403, AI_CONSENT_CODE, AI_CONSENT_MSG);

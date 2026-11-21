@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, useApi } from './client';
-import { Check, ChevronRight } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button, Modal, fmtDateTime, toast } from './ui';
 import { AI_CONSENT_COPY as C, aiRecipients } from '@/lib/ai/consentCopy';
 
@@ -16,27 +16,55 @@ type St = { state: 'agreed' | 'declined' | 'none'; at: string | null; version: s
 const laterKey = (v: string) => `wos_ai_later_${v}`;
 export const openAiConsent = () => window.dispatchEvent(new Event('wos-ai-consent-open'));
 
-export function AiConsentNotice({ stt }: { stt: boolean }) {
+/** 접어 둔 자세한 내용(동의 창·가입 목록 한 줄이 함께 씀): 세 줄 · 무엇을 · 어디로(나라) · 왜 · 동의하지 않으면 · 국외 이전(시기·방법·보유 기간) */
+export function AiConsentDetail({ stt }: { stt: boolean }) {
   const H = ({ children }: { children: React.ReactNode }) => <h3 className="mt-3 text-[13px] font-semibold text-ink">{children}</h3>;
-  const L = ({ items }: { items: string[] }) => <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-2">{items.map((x) => <li key={x}>{x}</li>)}</ul>;
+  const L = ({ items, testid }: { items: string[]; testid?: string }) => <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-2" data-testid={testid}>{items.map((x) => <li key={x}>{x}</li>)}</ul>;
+  return (
+    <>
+      <ul className="mt-3 space-y-1 text-ink-2" data-testid="ai-consent-points">{C.points.map((x) => <li key={x} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden />{x}</li>)}</ul>
+      <H>{C.whatTitle}</H><L items={C.what(stt)} />
+      <H>{C.whereTitle}</H>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-2" data-testid="ai-consent-recipients">{aiRecipients(stt).map((r) => <li key={r.name}><b className="text-ink">{r.name}</b>({r.country}) — {r.what}</li>)}</ul>
+      <H>{C.whyTitle}</H><L items={C.why(stt)} />
+      <H>{C.declineTitle}</H><L items={C.decline} />
+      <H>{C.transferTitle}</H><L items={C.transfer(stt)} testid="ai-consent-transfer" />
+      <p className="mt-2 text-xs text-ink-3"><Link href="/privacy" target="_blank" className="underline">개인정보 처리방침</Link> · <Link href="/ai-notice" target="_blank" className="underline">AI 이용 안내</Link></p>
+    </>
+  );
+}
+
+export function AiConsentNotice({ stt }: { stt: boolean }) {
   return (
     <div className="text-sm leading-relaxed" data-testid="ai-consent-notice">
-      {/* 펼치지 않아도 보이는 부분: 무엇을 위해·누구에게 + 세 줄 */}
+      {/* 대표 11/20 #1086 '약관처럼 상세를 접어서': 펼치지 않아도 보이는 것 = 한 문장(무엇을 위해·누구에게). 세 줄·항목·나라·까닭·국외 이전은 [자세히 보기] 안 */}
       <p data-testid="ai-consent-lead">{C.lead(stt)}</p>
-      <ul className="mt-2 space-y-1 text-ink-2" data-testid="ai-consent-points">{C.points.map((x) => <li key={x} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden />{x}</li>)}</ul>
-      {/* 접어 둔 부분: 무엇을·어디로(나라 포함)·왜 — 숨기는 것이 아니라 접는 것(처리방침·AI 이용 안내에도 같은 내용) */}
       <details className="group mt-3 rounded-input border border-line" data-testid="ai-consent-more">
         <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-ink hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
           <ChevronRight className="size-4 shrink-0 text-ink-3 transition-transform group-open:rotate-90" aria-hidden />{C.more}<span className="font-normal text-ink-3">— {C.moreHint}</span></summary>
-        <div className="border-t border-line px-3 pb-3">
-          <H>{C.whatTitle}</H><L items={C.what(stt)} />
-          <H>{C.whereTitle}</H>
-          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-2" data-testid="ai-consent-recipients">{aiRecipients(stt).map((r) => <li key={r.name}><b className="text-ink">{r.name}</b>({r.country}) — {r.what}</li>)}</ul>
-          <H>{C.whyTitle}</H><L items={C.why(stt)} />
-          <H>{C.declineTitle}</H><L items={C.decline} />
-        </div>
+        <div className="border-t border-line px-3 pb-3"><AiConsentDetail stt={stt} /></div>
       </details>
-      <p className="mt-2 text-xs text-ink-3"><Link href="/privacy" target="_blank" className="underline">개인정보 처리방침</Link> · <Link href="/ai-notice" target="_blank" className="underline">AI 이용 안내</Link></p>
+    </div>
+  );
+}
+
+/**
+ * 대표 11/20 #1086: 가입·초대 수락·요금제 동의 목록의 한 줄 — "[선택] AI 기능 이용 동의 — 답을 만들 때 필요한 내용만 AI 회사(Anthropic)에 보내 처리 [자세히 ▾]".
+ * 기본은 체크 안 됨(선택). 체크하면 그 사람의 AI 동의(지금 판)로 저장 → 로그인 뒤 창이 다시 뜨지 않음. 체크하지 않으면 '아직 안 정함'(거절 아님).
+ */
+export function AiConsentLine({ checked, onChange, stt = false }: { checked: boolean; onChange: (v: boolean) => void; stt?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="text-sm" data-testid="ai-consent-line">
+      <div className="flex items-start gap-2">
+        <label className="flex min-w-0 flex-1 items-start gap-2">
+          <input type="checkbox" className="mt-0.5" checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label="[선택] AI 기능 이용 동의" data-testid="agree-ai" />
+          <span><span className="text-ink-3">[선택]</span> {C.lineLabel} <span className="text-ink-3">— {C.line(stt)}</span></span>
+        </label>
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="inline-flex shrink-0 items-center gap-0.5 text-xs text-ink-3 underline hover:text-ink" data-testid="ai-consent-line-more">
+          {C.lineMore}<ChevronDown className={`size-3.5 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden /></button>
+      </div>
+      {open && <div className="ml-6 mt-1.5 rounded-input border border-line bg-slate-50 px-3 pb-3 text-xs leading-relaxed" data-testid="ai-consent-line-detail"><AiConsentDetail stt={stt} /></div>}
     </div>
   );
 }
