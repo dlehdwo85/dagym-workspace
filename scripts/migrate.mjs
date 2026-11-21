@@ -7,6 +7,15 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// 11/21(로컬 확인): Vercel 환경 변수 DATABASE_URL 이 'Preview, Production' 한 항목 — Preview 빌드도 운영 DB 를 본다.
+// 빌드 명령(vercel.json)이 이 스크립트를 먼저 돌리므로, Vercel 빌드는 운영(VERCEL_ENV=production)일 때만 마이그레이션을 적용한다
+// → main 에 들어가지 않은 브랜치의 마이그레이션이 Preview 빌드로 운영 DB 에 들어가지 않게. Vercel 이 아닌 곳(로컬·CI·시험)은 그대로.
+// VERCEL_ENV 가 비어 있으면 운영인지 알 수 없으므로 건너뜀(운영이었다면 /api/health 의 migrationBehind 가 true 로 드러남 → Redeploy 또는 npm run db:migrate).
+if (process.env.VERCEL === '1' && process.env.VERCEL_ENV !== 'production') {
+  console.log(`[migrate] Vercel ${process.env.VERCEL_ENV || '환경 모름'} 빌드 — 운영 배포가 아니라 마이그레이션을 건너뜁니다(Preview 가 운영 DB 를 함께 쓰므로).`);
+  process.exit(0);
+}
+
 const url = process.env.DATABASE_URL;
 const soft = process.argv.includes('--soft-connect');
 if (!url) { console.error('DATABASE_URL 이 없습니다'); process.exit(soft ? 0 : 1); }
