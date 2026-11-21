@@ -1,0 +1,312 @@
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { db, type Sql } from '../db';
+import { HttpError, badRequest, forbidden, notFound } from '../errors';
+import { audit } from '../log';
+import { isAdmin, isUuid } from '../access';
+import { tenantOf, type SessionUser } from '../types';
+import { maskPII } from './mask';
+
+/**
+ * #1096 지점 주간보고 — 다짐 전용(대표 #1097: 상업화하지 않음). 설계 docs/branch-report-design.md, 대표 결정 11/21:
+ *  - 기본 입력 = 지점 관리자가 금요일마다 카톡에 올리는 주간보고 글(붙여 넣기). 카톡 대화 내보내기 파일은 '근거 보강' 선택
+ *  - 원본 파일은 저장하지 않고 가린 메시지만, 제출 30일 뒤 삭제 · 앱 안 강제 고지 없음(처리방침만)
+ *  - AI 는 초안만(자동 제출 없음). 숫자는 붙여 넣은 글에 있는 것만 — 없으면 '확인 필요'. 항목마다 근거(D줄·대화), 근거 없는 '완료'는 '확인 필요'로 내림
+ *  - 지점 = 기능 안의 별도 '보고 지점' 목록(로컬 확인 11/21: 다짐 조직 단위에는 지점이 없음 — 다짐 세팅은 바꾸지 않음)
+ *    작성 담당은 자기 지점만, 검토 담당(어느 지점이든)과 대표·관리자는 전체 지점을 봄
+ * 스위치 BRANCH_REPORT_TENANTS(쉼표로 회사 id) — 기본값 'default'(다짐)만. 꺼진 회사는 메뉴·주소·API 모두 404.
+ */
+export const branchReportOn = (tenant?: string | null) => {
+  const list = (process.env.BRANCH_REPORT_TENANTS ?? 'default').split(',').map((s) => s.trim()).filter(Boolean);
+  return !!tenant && list.includes(tenant);
+};
+function requireOn(u: SessionUser) { if (u.isDemo || !branchReportOn(tenantOf(u))) throw notFound(); }
+
+// ---------------- 날짜: 보고일 = 금요일(11:00 기준) · 기간 = 지난 금요일 ~ 목요일 ----------------
+const DAY = 86_400_000;
+const kstToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
+const weekday = (d: string) => new Date(`${d}T00:00:00Z`).getUTCDay();
+/** 그 날 또는 그 전의 가장 가까운 금요일 */
+export const fridayOnOrBefore = (d: string) => addDays(d, -((weekday(d) + 2) % 7));
+export const periodOf = (friday: string) => ({ start: addDays(friday, -7), end: addDays(friday, -1), day: friday });
+const isFriday = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && weekday(d) === 5;
+
+// ---------------- 권한 ----------------
+type Site = { id: string; name: string; hidden: boolean; writer_user_id: string | null; writer_name: string | null; reviewer_user_id: string | null; reviewer_name: string | null };
+async function sitesOf(u: SessionUser, sql: Sql): Promise<Site[]> {
+  const rows = await sql<Site[]>`select s.id, s.name, s.hidden, s.writer_user_id, w.name as writer_name, s.reviewer_user_id, r.name as reviewer_name
+    from branch_sites s left join users w on w.id = s.writer_user_id left join users r on r.id = s.reviewer_user_id
+    where s.tenant = ${tenantOf(u)} order by s.sort, s.name`;
+  const all = isAdmin(u) || rows.some((x) => x.reviewer_user_id === u.id); // 검토 담당·대표·관리자 = 전체
+  return rows.filter((x) => all || x.writer_user_id === u.id);
+}
+/** 쓰기(초안 만들기·고치기·제출): 관리자 · 그 지점 작성 담당 · 그 지점 검토 담당 */
+const canWrite = (u: SessionUser, t: Site) => isAdmin(u) || t.writer_user_id === u.id || t.reviewer_user_id === u.id;
+/** 제출 취소: 관리자 · 그 지점 검토 담당 */
+const canReopen = (u: SessionUser, t: Site) => isAdmin(u) || t.reviewer_user_id === u.id;
+async function siteFor(u: SessionUser, siteId: string, sql: Sql) {
+  if (!isUuid(siteId)) throw notFound('지점을 찾을 수 없습니다');
+  const t = (await sitesOf(u, sql)).find((x) => x.id === siteId);
+  if (!t) throw notFound('지점을 찾을 수 없습니다');
+  return t;
+}
+
+// ---------------- 목록 ----------------
+export async function branchHome(u: SessionUser, q: { siteId?: string | null }) {
+  requireOn(u);
+  const sql = db();
+  const sites = (await sitesOf(u, sql)).filter((t) => !t.hidden || isAdmin(u));
+  const id = q.siteId && sites.find((t) => t.id === q.siteId) ? q.siteId : sites.find((t) => !t.hidden)?.id ?? sites[0]?.id ?? null;
+  const t = sites.find((x) => x.id === id);
+  const reports = t ? await sql<any[]>`select id, report_day::text as report_day, period_start::text as period_start, period_end::text as period_end, status, updated_at, submitted_at
+      from branch_reports where site_id = ${t.id} and kind = 'weekly' order by report_day desc limit 26` : [];
+  const chat = t ? (await sql<{ n: number; last: string | null }[]>`select count(*)::int as n, max(at)::text as last from branch_chat_messages where site_id = ${t.id}`)[0] : null;
+  return { admin: isAdmin(u), today: kstToday(), friday: fridayOnOrBefore(kstToday()), siteId: id, canWrite: t ? canWrite(u, t) : false, canReopen: t ? canReopen(u, t) : false,
+    sites: sites.map((x) => ({ id: x.id, name: x.name, writer: x.writer_name, reviewer: x.reviewer_name, hidden: x.hidden })), reports, chat };
+}
+
+// ---------------- 보고 지점 목록(관리자) — 이름·숨김·작성 담당·검토 담당. 다짐 조직 단위는 건드리지 않음 ----------------
+export async function branchSetup(u: SessionUser) {
+  requireOn(u); if (!isAdmin(u)) throw forbidden('관리자만 정할 수 있습니다');
+  const sql = db();
+  const sites = await sql<any[]>`select s.id, s.name, s.hidden, s.writer_user_id, s.reviewer_user_id, (select count(*)::int from branch_reports r where r.site_id = s.id) as reports
+    from branch_sites s where s.tenant = ${tenantOf(u)} order by s.sort, s.name`;
+  const users = await sql<any[]>`select id, name, title, role from users where tenant = ${tenantOf(u)} and status in ('active', 'invited') and not is_demo order by name`;
+  return { sites, users };
+}
+export const setupInput = z.object({ sites: z.array(z.object({ id: z.string().uuid().optional(), name: z.string().trim().min(1).max(60), hidden: z.boolean().default(false),
+  writerUserId: z.string().uuid().nullable().optional(), reviewerUserId: z.string().uuid().nullable().optional() })).max(100) });
+export async function saveBranchSetup(u: SessionUser, i: z.infer<typeof setupInput>, ip: string | null) {
+  requireOn(u); if (!isAdmin(u)) throw forbidden('관리자만 정할 수 있습니다');
+  const sql = db(); const tn = tenantOf(u);
+  const names = i.sites.map((x) => x.name.replace(/\s+/g, ' '));
+  if (new Set(names).size !== names.length) throw badRequest('같은 이름의 지점이 두 번 들어 있습니다');
+  const people = [...new Set(i.sites.flatMap((x) => [x.writerUserId, x.reviewerUserId]).filter(Boolean) as string[])];
+  if (people.length && (await sql`select id from users where id = any(${people}::uuid[]) and tenant = ${tn}`).length !== people.length) throw badRequest('담당은 이 회사 사람만 정할 수 있습니다');
+  const cur = await sql<{ id: string; name: string; reports: number }[]>`select s.id, s.name, (select count(*)::int from branch_reports r where r.site_id = s.id) as reports from branch_sites s where s.tenant = ${tn}`;
+  const keep = new Set(i.sites.map((x) => x.id).filter(Boolean));
+  if (i.sites.some((x) => x.id && !cur.some((c) => c.id === x.id))) throw badRequest('없는 지점이 들어 있습니다');
+  const gone = cur.filter((c) => !keep.has(c.id));
+  if (gone.some((c) => c.reports > 0)) throw new HttpError(409, 'has_reports', `보고서가 있는 지점은 지울 수 없습니다 — 숨김으로 두세요(${gone.filter((c) => c.reports > 0).map((c) => c.name).join(', ')})`);
+  await sql.begin(async (tx) => {
+    if (gone.length) await tx`delete from branch_sites where id = any(${gone.map((c) => c.id)}::uuid[])`;
+    await tx`update branch_sites set name = '~' || id::text where tenant = ${tn}`; // 이름 바꾸기·맞바꾸기에서 이름 겹침(unique) 피하기
+    let n = 0;
+    for (const [k, x] of i.sites.entries()) {
+      const v = { name: names[k], hidden: x.hidden, sort: n++, writer_user_id: x.writerUserId ?? null, reviewer_user_id: x.reviewerUserId ?? null };
+      if (x.id) await tx`update branch_sites set ${tx(v)} where id = ${x.id}`;
+      else await tx`insert into branch_sites ${tx({ ...v, tenant: tn })}`;
+    }
+  });
+  await audit(sql, u.id, 'branch_report.setup', 'tenant', null, { sites: i.sites.length, removed: gone.length }, ip);
+  return branchSetup(u);
+}
+
+// ---------------- 대화 파일 올리기(근거 보강) ----------------
+export const uploadInput = z.object({ siteId: z.string(), files: z.array(z.object({ name: z.string().max(200), text: z.string().max(6_000_000).optional(), b64: z.string().max(6_000_000).optional() })).min(1).max(5) });
+export async function uploadChat(u: SessionUser, i: z.infer<typeof uploadInput>, ip: string | null) {
+  requireOn(u);
+  const sql = db();
+  const t = await siteFor(u, i.siteId, sql);
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  const { parseKakaoExport } = await import('./kakaoParse');
+  let r: ReturnType<typeof parseKakaoExport>;
+  try { r = parseKakaoExport(i.files.map((f) => ({ name: f.name, data: f.b64 ? Buffer.from(f.b64, 'base64') : f.text ?? '' }))); }
+  catch (e) { throw badRequest(`파일을 읽지 못했습니다 — ${String((e as Error)?.message ?? e).slice(0, 80)}`); }
+  if (!r.messages.length) throw badRequest('카카오톡 대화 내보내기 파일(txt·csv·zip)에서 메시지를 찾지 못했습니다');
+  const up = randomUUID(); let added = 0;
+  await sql.begin(async (tx) => {
+    await tx`insert into branch_chat_uploads (id, tenant, site_id, uploaded_by, from_day, to_day, skipped, duplicates) values (${up}, ${tenantOf(u)}, ${t.id}, ${u.id}, ${r.from}, ${r.to}, ${r.skipped}, ${r.duplicates})`;
+    for (let k = 0; k < r.messages.length; k += 500) {
+      const chunk = r.messages.slice(k, k + 500).map((m) => ({ tenant: tenantOf(u), site_id: t.id, upload_id: up, at: m.at.replace('T', ' ') + ':00', sender: maskPII(m.sender).text, text: maskPII(m.text).text.slice(0, 4000), key: m.key }));
+      const ins = await tx`insert into branch_chat_messages ${tx(chunk, 'tenant', 'site_id', 'upload_id', 'at', 'sender', 'text', 'key')} on conflict (site_id, key) do nothing returning id`;
+      added += ins.length;
+    }
+    await tx`update branch_chat_uploads set added = ${added}, duplicates = ${r.duplicates + (r.messages.length - added)} where id = ${up}`;
+  });
+  await audit(sql, u.id, 'branch_report.chat_upload', 'branch_site', t.id, { added, from: r.from, to: r.to, formats: r.formats }, ip);
+  return { added, duplicates: r.duplicates + (r.messages.length - added), skipped: r.skipped, from: r.from, to: r.to, formats: r.formats };
+}
+
+// ---------------- 보고서 본문(양식 A: 힐스테이트푸르지오주안 커뮤니티 주간 운영 보고서 구조) ----------------
+const STATE = z.enum(['완료', '진행 중', '확인 필요']);
+const s200 = z.string().max(200).default('');
+const lineSchema = z.object({ item: s200, status: s200, action: z.string().max(500).default(''), state: STATE.default('확인 필요'), evidence: z.array(z.string().max(20)).max(20).default([]) });
+export const bodySchema = z.object({
+  usage: z.array(z.object({ item: s200, count: z.string().max(40).default(''), note: z.string().max(200).default('') })).max(40).default([]),
+  lockers: z.array(z.object({ name: s200, used: z.string().max(20).default(''), total: z.string().max(20).default('') })).max(20).default([]),
+  facilities: z.array(z.object({ name: s200, visitors: z.string().max(40).default(''), cleaning: z.string().max(40).default(''), condition: z.string().max(40).default(''), lines: z.array(lineSchema).max(40).default([]) })).max(20).default([]),
+  issues: z.array(z.object({ title: s200, details: z.array(z.string().max(500)).max(20).default([]), state: STATE.default('확인 필요'), evidence: z.array(z.string().max(20)).max(20).default([]) })).max(40).default([]),
+  notes: z.string().max(2000).default(''),
+  sources: z.object({ w: z.array(z.object({ ref: z.string(), taskId: z.string(), title: z.string() })).default([]) }).default({ w: [] }),
+});
+export type ReportBody = z.infer<typeof bodySchema>;
+
+/** AI 결과 다듬기: 근거 번호 확인(없는 것은 지움) · 근거 없는 '완료' → '확인 필요' · 숫자는 붙여 넣은 글에 있는 것만(없으면 '확인 필요') */
+export function verifyBody(b: ReportBody, ctx: { dLines: number; msgIds: Set<string>; wRefs: Set<string>; dText: string }) {
+  const okRef = (r: string) => { const m = r.match(/^([DMW])(\d+)$/); if (!m) return false; return m[1] === 'D' ? Number(m[2]) >= 1 && Number(m[2]) <= ctx.dLines : m[1] === 'M' ? ctx.msgIds.has(m[2]) : ctx.wRefs.has(r); };
+  const digits = (v: string) => (v.match(/\d[\d,]*/g) ?? []).map((x) => x.replace(/,/g, ''));
+  const plain = ctx.dText.replace(/,/g, '');
+  const num = (v: string) => { const ds = digits(v); return !ds.length || ds.every((d) => new RegExp(`(?<!\\d)${d}(?!\\d)`).test(plain)) ? v : '확인 필요'; };
+  let fixed = 0;
+  const fixState = <T extends { state: string; evidence: string[] }>(x: T): T => { const ev = x.evidence.filter(okRef); const state = x.state === '완료' && !ev.length ? '확인 필요' : x.state; if (state !== x.state || ev.length !== x.evidence.length) fixed++; return { ...x, evidence: ev, state }; };
+  const out: ReportBody = {
+    ...b,
+    usage: b.usage.map((x) => ({ ...x, count: num(x.count) })),
+    facilities: b.facilities.map((f) => ({ ...f, visitors: num(f.visitors), lines: f.lines.map(fixState) })),
+    issues: b.issues.map(fixState),
+  };
+  return { body: out, fixed };
+}
+
+const reportCols = (sql: Sql) => sql`r.id, r.site_id, s.name as unit_name, r.kind, r.period_start::text as period_start, r.period_end::text as period_end, r.report_day::text as report_day, r.status, r.source_text, r.body, r.ai_model,
+  r.submitted_at, r.updated_at, r.purged_at, cb.name as created_by_name, sb.name as submitted_by_name`;
+async function loadReport(u: SessionUser, id: string, sql: Sql) {
+  requireOn(u);
+  if (!isUuid(id)) throw notFound('보고서를 찾을 수 없습니다');
+  const [r] = await sql<any[]>`select ${reportCols(sql)} from branch_reports r join branch_sites s on s.id = r.site_id
+    left join users cb on cb.id = r.created_by left join users sb on sb.id = r.submitted_by where r.id = ${id} and r.tenant = ${tenantOf(u)}`;
+  if (!r) throw notFound('보고서를 찾을 수 없습니다');
+  const t = await siteFor(u, r.site_id, sql); // 볼 수 있는 지점(작성 담당은 자기 지점만, 검토 담당·관리자는 전체)
+  return { r, t };
+}
+export async function getReport(u: SessionUser, id: string) {
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  return { report: r, canWrite: canWrite(u, t) && r.status === 'draft', canReopen: canReopen(u, t) && r.status === 'submitted' && !r.purged_at, admin: isAdmin(u) };
+}
+
+// ---------------- 초안 만들기(AI) ----------------
+export const draftInput = z.object({ siteId: z.string(), day: z.string(), text: z.string().max(20000).default(''), useChat: z.boolean().default(true) });
+const SYSTEM = `다짐 커뮤니티(아파트 단지 커뮤니티 시설 위탁 운영) 지점의 '커뮤니티 주간 운영 보고서' 초안을 만듭니다. 한국어, JSON 만.
+자료: [D] 지점 관리자가 쓴 주간보고 글(줄 번호 D1…) · [M] 지점 단체방 대화(번호 M…, 선택). 개인정보는 [전화]·[호수] 등으로 가려져 있습니다 — 되살리지 마세요.
+양식(이 순서):
+1. usage(이용 인원 현황): 시설·이용권별 인원 — D 의 <이용인원> 등에 있는 숫자만. 항목 이름은 D 그대로.
+2. lockers(락커 사용 현황): D 에 있으면만, 없으면 빈 목록(담당이 손으로 넣음).
+3. facilities(시설 점검): 시설별(헬스장·골프장·사우나·카페&키즈룸·도서관/독서실 등 D 에 나온 것) visitors(총 이용인원) · cleaning(청소 상태) · condition(시설 상태: 청결/양호/부분양호/미흡) · lines(점검 항목: item · status(이상무/완료/상태) · action(조치, 예정이면 날짜 포함) · state · evidence).
+4. issues(특이사항·건의사항·민원): 제목 + details(진행 현황·인원·금액·날짜) + state + evidence. 같은 일을 여러 번 말한 것은 하나로 합침.
+5. notes: 짧은 메모(없으면 빈 글).
+규칙: 숫자·날짜·금액은 자료에 있는 것만 — 지어내지 않습니다. 모르면 '확인 필요'. state 는 완료/진행 중/확인 필요 중 하나 — 끝났다는 근거가 분명할 때만 '완료'. evidence 에는 근거가 된 번호(D3, M120)를 넣습니다.`;
+const JSON_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['usage', 'lockers', 'facilities', 'issues', 'notes'],
+  properties: {
+    usage: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['item', 'count'], properties: { item: { type: 'string' }, count: { type: 'string' }, note: { type: 'string' } } } },
+    lockers: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['name', 'used', 'total'], properties: { name: { type: 'string' }, used: { type: 'string' }, total: { type: 'string' } } } },
+    facilities: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['name', 'visitors', 'cleaning', 'condition', 'lines'], properties: { name: { type: 'string' }, visitors: { type: 'string' }, cleaning: { type: 'string' }, condition: { type: 'string' },
+      lines: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['item', 'status', 'action', 'state', 'evidence'], properties: { item: { type: 'string' }, status: { type: 'string' }, action: { type: 'string' }, state: { type: 'string', enum: ['완료', '진행 중', '확인 필요'] }, evidence: { type: 'array', items: { type: 'string' } } } } } } } },
+    issues: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'details', 'state', 'evidence'], properties: { title: { type: 'string' }, details: { type: 'array', items: { type: 'string' } }, state: { type: 'string', enum: ['완료', '진행 중', '확인 필요'] }, evidence: { type: 'array', items: { type: 'string' } } } } },
+    notes: { type: 'string' },
+  },
+};
+
+export async function generateDraft(u: SessionUser, i: z.infer<typeof draftInput>, ip: string | null) {
+  requireOn(u);
+  if (!isFriday(i.day)) throw badRequest('보고일은 금요일이어야 합니다');
+  const sql = db();
+  const t = await siteFor(u, i.siteId, sql);
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  const p = periodOf(i.day);
+  const [ex] = await sql<{ id: string; status: string }[]>`select id, status from branch_reports where site_id = ${t.id} and kind = 'weekly' and report_day = ${p.day}`;
+  if (ex?.status === 'submitted') throw new HttpError(409, 'submitted', '이미 제출한 보고서입니다 — 고치려면 관리자에게 [제출 취소]를 요청하세요');
+  const dText = maskPII(i.text.trim()).text;
+  const dLines = dText ? dText.split(/\r?\n/) : [];
+  const msgs = i.useChat ? await sql<{ id: string; at: string; sender: string; text: string }[]>`select id::text as id, to_char(at, 'MM-DD HH24:MI') as at, sender, text from branch_chat_messages
+      where site_id = ${t.id} and at >= ${p.start}::date and at < ${p.day}::date + interval '11 hours' order by at limit 600` : [];
+  if (!dLines.length && !msgs.length) throw badRequest(i.useChat ? '이번 주 주간보고 글을 붙여 넣거나, 이 주 대화 파일을 올리세요' : '이번 주 주간보고 글을 붙여 넣으세요');
+  const { aiEnabled, anthropicProvider, costUsd } = await import('../ai/provider');
+  if (!aiEnabled()) throw new HttpError(503, 'ai_off', 'AI 가 설정되지 않았습니다');
+  await (await import('../plans')).assertAiRequest(u);
+  await (await import('../ai/guard')).assertAiCredit();
+  // 대화는 3만 자까지(최근 것 우선)
+  let budget = 30_000; const chatLines: string[] = [];
+  for (const m of [...msgs].reverse()) { const l = `M${m.id} ${m.at} ${m.sender}: ${m.text.replace(/\n/g, ' / ')}`; if ((budget -= l.length) < 0) break; chatLines.unshift(l); }
+  const content = [`[지점] ${t.name} · 기간 ${p.start} ~ ${p.end} · 보고일 ${p.day}(금) 11:00 기준`,
+    dLines.length ? `[D] 지점 관리자 주간보고 글\n${dLines.map((l, k) => `D${k + 1} ${l}`).join('\n')}` : '[D] (없음)',
+    chatLines.length ? `[M] 단체방 대화(가린 글)\n${chatLines.join('\n')}` : ''].filter(Boolean).join('\n\n');
+  const prov = anthropicProvider({ maxTokens: 6000 });
+  const r = await prov.chat({ system: SYSTEM, tools: [], messages: [{ role: 'user', content }], format: JSON_SCHEMA });
+  await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+    values (${tenantOf(u)}, ${u.id}, ${randomUUID()}, 'anthropic', ${r.model ?? prov.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${costUsd(r.model ?? prov.model, r.usage)}, 'branch_report')`;
+  let raw: unknown; try { raw = JSON.parse((r.content as any[]).find((b) => b.type === 'text')?.text ?? '{}'); } catch { throw new HttpError(502, 'ai_format', 'AI 답을 읽지 못했습니다 — 다시 눌러 주세요'); }
+  const parsed = bodySchema.safeParse({ ...(raw as object), sources: { w: [] } });
+  if (!parsed.success) throw new HttpError(502, 'ai_format', 'AI 답의 모양이 양식과 달랐습니다 — 다시 눌러 주세요');
+  const { body, fixed } = verifyBody(parsed.data, { dLines: dLines.length, msgIds: new Set(msgs.map((m) => m.id)), wRefs: new Set<string>(), dText });
+  const [row] = await sql<{ id: string }[]>`insert into branch_reports (tenant, site_id, kind, period_start, period_end, report_day, status, source_text, body, ai_model, created_by, updated_by)
+    values (${tenantOf(u)}, ${t.id}, 'weekly', ${p.start}, ${p.end}, ${p.day}, 'draft', ${dText || null}, ${sql.json(body as never)}, ${r.model ?? prov.model}, ${u.id}, ${u.id})
+    on conflict (site_id, kind, report_day) do update set source_text = excluded.source_text, body = excluded.body, ai_model = excluded.ai_model, updated_by = excluded.updated_by, updated_at = now()
+    returning id`;
+  await audit(sql, u.id, 'branch_report.draft', 'branch_report', row.id, { site: t.id, day: p.day, chat: msgs.length, fixed }, ip);
+  return { ...(await getReport(u, row.id)), fixed, used: { dLines: dLines.length, chat: chatLines.length } };
+}
+
+// ---------------- 고치기·제출 ----------------
+export async function saveReport(u: SessionUser, id: string, b: unknown, ip: string | null) {
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다 — 관리자에게 [제출 취소]를 요청하세요');
+  const body = bodySchema.parse({ ...(b as object), sources: r.body?.sources ?? { w: [] } });
+  await sql`update branch_reports set body = ${sql.json(body as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
+  await audit(sql, u.id, 'branch_report.edit', 'branch_report', id, {}, ip);
+  return getReport(u, id);
+}
+export async function submitReport(u: SessionUser, id: string, ip: string | null) {
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  if (r.status === 'submitted') throw new HttpError(409, 'submitted', '이미 제출했습니다');
+  await sql`update branch_reports set status = 'submitted', submitted_by = ${u.id}, submitted_at = now(), updated_at = now() where id = ${id}`;
+  await audit(sql, u.id, 'branch_report.submit', 'branch_report', id, { site: t.id, day: r.report_day }, ip);
+  return getReport(u, id);
+}
+export async function unsubmitReport(u: SessionUser, id: string, ip: string | null) {
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  if (!canReopen(u, t)) throw forbidden('제출 취소는 관리자·검토 담당만 할 수 있습니다');
+  if (r.status !== 'submitted') throw new HttpError(409, 'not_submitted', '제출하지 않은 보고서입니다');
+  if (r.purged_at) throw new HttpError(409, 'purged', '제출 30일이 지나 근거 글을 지운 보고서는 제출 취소할 수 없습니다');
+  await sql`update branch_reports set status = 'draft', submitted_by = null, submitted_at = null, updated_at = now() where id = ${id}`;
+  await audit(sql, u.id, 'branch_report.unsubmit', 'branch_report', id, {}, ip);
+  return getReport(u, id);
+}
+
+/** 근거 보기: D줄(붙여 넣은 글, 가린 뒤) · M(대화, 가린 글) */
+export async function reportEvidence(u: SessionUser, id: string, refs: string[]) {
+  const sql = db(); const { r } = await loadReport(u, id, sql);
+  const d = String(r.source_text ?? '').split(/\r?\n/);
+  const want = refs.filter((x) => /^[DMW]\d{1,9}$/.test(x)).slice(0, 30);
+  const mIds = want.filter((x) => x[0] === 'M').map((x) => x.slice(1));
+  const msgs = mIds.length ? await sql<{ id: string; at: string; sender: string; text: string }[]>`select id::text as id, to_char(at, 'YYYY-MM-DD HH24:MI') as at, sender, text from branch_chat_messages where site_id = ${r.site_id} and id = any(${mIds.map(Number)}::bigint[])` : [];
+  return { items: want.map((ref) => {
+    if (ref[0] === 'D') { const line = d[Number(ref.slice(1)) - 1]; return { ref, kind: '주간보고 글', text: line ?? (r.purged_at ? '(30일이 지나 지웠습니다)' : '(없음)') }; }
+    if (ref[0] === 'M') { const m = msgs.find((x) => x.id === ref.slice(1)); return { ref, kind: '단체방 대화', at: m?.at ?? null, sender: m?.sender ?? null, text: m?.text ?? '(지웠거나 없는 메시지)' }; }
+    const s = (r.body?.sources?.w ?? []).find((x: any) => x.ref === ref); return { ref, kind: '워크인 업무', text: s?.title ?? '(없음)', taskId: s?.taskId ?? null };
+  }) };
+}
+
+// ---------------- 정기 작업: 제출 30일 뒤 근거 지우기 · 금요일 11시 작성 알림 ----------------
+export async function branchReportTick(sql: Sql = db()) {
+  const purged = await sql`delete from branch_chat_messages m using branch_reports r
+    where r.site_id = m.site_id and r.kind = 'weekly' and r.status = 'submitted' and r.submitted_at < now() - interval '30 days'
+      and m.at >= r.period_start and m.at < r.report_day + interval '11 hours' returning m.id`;
+  const cleared = await sql`update branch_reports set source_text = null, purged_at = now() where status = 'submitted' and submitted_at < now() - interval '30 days' and purged_at is null returning id`;
+  const stale = await sql`delete from branch_chat_messages where created_at < now() - interval '120 days' returning id`; // 보고서에 쓰이지 않은 채 남은 대화도 4개월 뒤 지움
+  // 금요일 11시(서울) 뒤 첫 실행: 그 주 보고서가 없는 지점의 작성자에게 알림(한 번)
+  const now = new Date(); const day = kstToday();
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(now));
+  let reminded = 0;
+  if (weekday(day) === 5 && hour >= 11) {
+    const rows = await sql<{ id: string; tenant: string; writer_user_id: string; name: string }[]>`select s.id, s.tenant, s.writer_user_id, s.name from branch_sites s
+      where not s.hidden and s.writer_user_id is not null and not exists (select 1 from branch_reports r where r.site_id = s.id and r.kind = 'weekly' and r.report_day = ${day})`;
+    const { notify } = await import('../notifications');
+    for (const x of rows.filter((r) => branchReportOn(r.tenant))) {
+      const ids = await notify(sql, { userIds: [x.writer_user_id], type: 'branch_report', title: `${x.name} 주간보고를 쓸 차례입니다`, body: '이번 주 주간보고 글을 붙여 넣으면 초안을 만들어 드립니다.', link: `/branch-reports?site=${x.id}`, dedupeKey: `branch-remind:${x.id}:${day}`, space: 'work' });
+      reminded += ids.length;
+    }
+  }
+  return { purged: purged.length, cleared: cleared.length, stale: stale.length, reminded };
+}
+
+/** 메뉴에 보일지(레이아웃): 켜진 회사 + 관리자이거나 볼 수 있는(숨기지 않은) 지점이 있음 — 지점 관리자(직원)는 자기 지점이 정해지면 보임 */
+export async function branchReportVisible(u: SessionUser) {
+  if (u.isDemo || !branchReportOn(tenantOf(u))) return false;
+  if (isAdmin(u)) return true;
+  return (await sitesOf(u, db()).catch(() => [])).some((t) => !t.hidden);
+}

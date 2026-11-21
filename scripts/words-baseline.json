@@ -29,6 +29,12 @@
   "src/components/PlatformTenants.tsx": {
    "brand": 2
   },
+  "src/components/branch/BranchReports.tsx": {
+   "brand": 1
+  },
+  "src/components/branch/ReportView.tsx": {
+   "brand": 2
+  },
   "src/components/marketing/AdOps.tsx": {
    "domain": 2,
    "brand": 1
@@ -72,6 +78,10 @@
   },
   "src/lib/bidAlerts.ts": {
    "domain": 5
+  },
+  "src/lib/branchReport/index.ts": {
+   "brand": 1,
+   "domain": 3
   },
   "src/lib/contacts.ts": {
    "domain": 1

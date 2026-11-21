@@ -29,6 +29,7 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
         <li>AI 기능 이용 시(동의한 사람만): AI에게 쓴 글과 말한 내용, 붙인 파일·사진, 답에 필요한 업무·일정·자료 내용{stt ? ', 회의록을 만들 때의 회의 녹음' : ''}</li>
         <li>선택: Google Calendar 연동 시 Google 계정 이메일과 선택한 캘린더 일정(토큰은 암호화 저장), 마케팅 수신 동의</li>
         <li>현장 QR 신고(회원·방문자): 신고 내용·사진, 선택한 경우 회신용 이름·연락처 — 처리 완료 1년 뒤 파기</li>
+        <li data-testid="privacy-branch">지점 운영 보고(회사가 켠 경우): 지점 관리자가 붙여 넣은 주간 보고 글, 올린 단체 대화 내보내기 파일의 메시지(보낸 사람 이름·시각·내용) — 전화번호·동호수·주민등록번호·계좌·카드·차량번호·이메일은 가린 뒤 저장하고 원본 파일은 저장하지 않습니다. 보고서를 제출하고 30일 뒤 근거 메시지와 붙여 넣은 글을 삭제합니다(제출하지 않은 대화는 120일 뒤 삭제)</li>
       </ul>
       <H>3. 보유 기간</H>
       <p>탈퇴할 때까지 보유하고, 탈퇴하면 지체 없이 파기합니다(공간 삭제는 복구 기간 30일 후 파기). 다만 부정 이용 방지를 위한 가입 시도·접속 기록과 감사 기록은 1년, 관련 법령이 정한 기록은 그 기간 동안 보관합니다.</p>
@@ -41,7 +42,7 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
         <li>결제: (주)나이스페이먼츠 — 카드·계좌이체·가상계좌 결제, 정기 결제(빌링)</li>
         <li>소셜 로그인: Google LLC, (주)카카오, 네이버(주) — 로그인·가입 시 본인 확인</li>
         <li>푸시 알림: Google(Firebase), Apple — 앱 알림</li>
-        <li data-testid="privacy-ai">AI 처리(동의한 사람만): Anthropic PBC(미국) — AI 기능을 쓸 때 AI에게 쓴 글·붙인 파일·답에 필요한 업무·일정·자료 내용을 전송합니다.{stt ? ' OpenAI(미국) — 회의 녹음을 글로 바꿀 때 녹음을 전송합니다.' : ''} 받는 회사의 이용 조건에 따라 그 회사 AI를 가르치는 데 쓰이지 않습니다. 처음 한 번 동의를 묻고, 설정 › 개인정보·AI 에서 언제든 철회할 수 있습니다(<a href="/ai-notice" className="underline">AI 이용 안내</a>)</li>
+        <li data-testid="privacy-ai">AI 처리(동의한 사람만): Anthropic PBC(미국) — AI 기능을 쓸 때 AI에게 쓴 글·붙인 파일·답에 필요한 업무·일정·자료 내용(지점 운영 보고 초안을 만들 때는 가린 뒤의 보고 글·대화)을 전송합니다.{stt ? ' OpenAI(미국) — 회의 녹음을 글로 바꿀 때 녹음을 전송합니다.' : ''} 받는 회사의 이용 조건에 따라 그 회사 AI를 가르치는 데 쓰이지 않습니다. 처음 한 번 동의를 묻고, 설정 › 개인정보·AI 에서 언제든 철회할 수 있습니다(<a href="/ai-notice" className="underline">AI 이용 안내</a>)</li>
       </ul>
       <p className="text-xs text-slate-500">국외 이전 항목: 위 2번 항목 중 해당 기능 처리에 필요한 정보 · 이전 시기: 서비스 이용 시 네트워크로 전송 · 보유 기간: 위탁 계약 종료 또는 탈퇴 시까지.</p>
       <H>6. Google 사용자 데이터</H>

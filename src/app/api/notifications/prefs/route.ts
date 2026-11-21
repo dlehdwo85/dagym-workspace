@@ -10,6 +10,7 @@ import { tenantOf } from '@/lib/types';
 import { meetingsOn } from '@/lib/meetings';
 import { audit } from '@/lib/log';
 import { MKT_KINDS, MKT_MODES, MKT_MODE_LABEL, mktPrefKey } from '@/lib/mktNotifyKinds';
+import { branchReportOn } from '@/lib/branchReport'; // #1096 다짐 전용 — 다른 회사 알림 설정에는 없음
 
 const SPACES: NotifySpace[] = ['sales', 'marketing'];
 const zMode = z.enum(['mine', 'all', 'off']);
@@ -34,7 +35,7 @@ export const GET = handler(async ({ user }) => {
   }) : [];
   return {
     spaces, modeLabels: SPACE_MODE_LABEL, canSetCompany: isAdmin(user), mkt, mktModeLabels: MKT_MODE_LABEL,
-    types: Object.entries(NOTIFICATION_TYPES).filter(([type]) => ((type !== 'server_error' && type !== 'perf_alert' && type !== 'signup_request') || user.platformAdmin) && ((type !== 'meeting_lobby' && type !== 'meeting_start') || meetingsOn(tenantOf(user)))).map(([type, label]) => { // 218차: 화상회의 스위치가 꺼져 있으면 대기실 알림 설정도 숨김
+    types: Object.entries(NOTIFICATION_TYPES).filter(([type]) => ((type !== 'server_error' && type !== 'perf_alert' && type !== 'signup_request') || user.platformAdmin) && ((type !== 'meeting_lobby' && type !== 'meeting_start') || meetingsOn(tenantOf(user))) && (type !== 'branch_report' || branchReportOn(tenantOf(user)))).map(([type, label]) => { // 218차: 화상회의 스위치가 꺼져 있으면 대기실 알림 설정도 숨김
       const p = prefs.find((x) => x.type === type);
       return { type, label, inApp: p?.in_app ?? true, push: p?.push ?? defaultPush(type), pushDefault: defaultPush(type) };
     }),

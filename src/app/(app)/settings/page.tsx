@@ -487,6 +487,8 @@ function LinkedAccounts() {
   const [justLinked, setJustLinked] = useState<string | null>(null);
   const ios = useIosApp();
   useEffect(() => { const p = new URLSearchParams(location.search).get('linked'); if (p) { setJustLinked(p); toast.ok(`${PROVIDER_NAME[p] ?? p} 계정을 연결했습니다`); } }, []);
+  // 로컬 11/21 #1101: 다른 주소(예: vercel.app)에서 [연결하기]를 누르면 정식 주소의 이 화면으로 옴 — 여기서 다시 누르면 연결됨
+  useEffect(() => { const p = new URLSearchParams(location.search).get('relink'); if (p) toast.info(`${PROVIDER_NAME[p] ?? p} 연결은 이 주소에서 합니다 — 아래 [연결하기]를 한 번 더 눌러 주세요`); }, []);
   if (!r.data || (!r.data.enabled.length && !r.data.identities.length)) return null;
   if (ios) return null; // 대표 11/19: 아이폰·아이패드 앱은 이메일 로그인만 — 소셜 계정 연결·끊기는 웹에서
   const linked = new Set(r.data.identities.map((x) => x.provider));
