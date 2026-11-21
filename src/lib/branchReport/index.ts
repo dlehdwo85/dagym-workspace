@@ -7,6 +7,7 @@ import { isAdmin, isUuid } from '../access';
 import { tenantOf, type SessionUser } from '../types';
 import { maskPII } from './mask';
 import { applyOkMark, fixFacilityStatus, settleDone, tidyCheckLine } from './facilityStatus';
+import { MONTHLY_JSON_SCHEMA, MONTHLY_SYSTEM, monthRange, monthlyBodySchema, prevMonth, trackItems, usageC, verifyMonthly, weeklyDigest, type WeeklyIn } from './monthly';
 
 /**
  * #1096 지점 주간보고 — 다짐 전용(대표 #1097: 상업화하지 않음). 설계 docs/branch-report-design.md, 대표 결정 11/21:
@@ -61,10 +62,12 @@ export async function branchHome(u: SessionUser, q: { siteId?: string | null }) 
   const id = q.siteId && sites.find((t) => t.id === q.siteId) ? q.siteId : sites.find((t) => !t.hidden)?.id ?? sites[0]?.id ?? null;
   const t = sites.find((x) => x.id === id);
   const reports = t ? await sql<any[]>`select id, report_day::text as report_day, period_start::text as period_start, period_end::text as period_end, status, updated_at, submitted_at
-      from branch_reports where site_id = ${t.id} and kind = 'weekly' order by report_day desc limit 26` : [];
+      from branch_reports where site_id = ${t.id} and kind = 'weekly' order by report_day desc limit 60` : []; // 월간 '이 달 주간 제출 n건'을 1년치 보여 주려고 60
+  const monthly = t ? await sql<any[]>`select id, to_char(period_start, 'YYYY-MM') as month, status, updated_at, submitted_at
+      from branch_reports where site_id = ${t.id} and kind = 'monthly' order by period_start desc limit 24` : [];
   const chat = t ? (await sql<{ n: number; last: string | null }[]>`select count(*)::int as n, max(at)::text as last from branch_chat_messages where site_id = ${t.id}`)[0] : null;
   return { admin: isAdmin(u), today: kstToday(), friday: fridayOnOrBefore(kstToday()), siteId: id, canWrite: t ? canWrite(u, t) : false, canReopen: t ? canReopen(u, t) : false,
-    sites: sites.map((x) => ({ id: x.id, name: x.name, writer: x.writer_name, reviewer: x.reviewer_name, hidden: x.hidden })), reports, chat };
+    sites: sites.map((x) => ({ id: x.id, name: x.name, writer: x.writer_name, reviewer: x.reviewer_name, hidden: x.hidden })), reports, monthly, chat };
 }
 
 // ---------------- 보고 지점 목록(관리자) — 이름·숨김·작성 담당·검토 담당. 다짐 조직 단위는 건드리지 않음 ----------------
@@ -246,12 +249,56 @@ export async function generateDraft(u: SessionUser, i: z.infer<typeof draftInput
   return { ...(await getReport(u, row.id)), fixed, used: { dLines: dLines.length, chat: chatLines.length } };
 }
 
+// ---------------- 월간 초안(양식 B·C, 2단계) ----------------
+export const monthlyInput = z.object({ siteId: z.string(), month: z.string() });
+export async function generateMonthly(u: SessionUser, i: z.infer<typeof monthlyInput>, ip: string | null) {
+  requireOn(u);
+  const range = monthRange(i.month);
+  if (!range) throw badRequest('달은 YYYY-MM 모양이어야 합니다');
+  const sql = db();
+  const t = await siteFor(u, i.siteId, sql);
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  const [ex] = await sql<{ status: string }[]>`select status from branch_reports where site_id = ${t.id} and kind = 'monthly' and report_day = ${range.end}`;
+  if (ex?.status === 'submitted') throw new HttpError(409, 'submitted', '이미 제출한 월간 보고서입니다 — 고치려면 [제출 취소]를 요청하세요');
+  const rows = await sql<{ id: string; day: string; body: any }[]>`select id, report_day::text as day, body from branch_reports
+    where site_id = ${t.id} and kind = 'weekly' and status = 'submitted' and report_day between ${range.start} and ${range.end} order by report_day`;
+  if (!rows.length) throw badRequest('이 달에 제출된 주간보고가 없습니다 — 주간보고를 먼저 제출하세요');
+  const prevRange = monthRange(prevMonth(i.month))!;
+  const [prev] = await sql<{ id: string; day: string; body: any }[]>`select id, report_day::text as day, body from branch_reports
+    where site_id = ${t.id} and kind = 'weekly' and status = 'submitted' and report_day between ${prevRange.start} and ${prevRange.end} order by report_day desc limit 1`;
+  const weeklies: WeeklyIn[] = rows.map((x) => ({ id: x.id, day: x.day, body: x.body ?? {} }));
+  const track = trackItems(weeklies);
+  const digest = weeklyDigest(weeklies);
+  const { aiEnabled, anthropicProvider, costUsd } = await import('../ai/provider');
+  if (!aiEnabled()) throw new HttpError(503, 'ai_off', 'AI 가 설정되지 않았습니다');
+  await (await import('../plans')).assertAiRequest(u);
+  await (await import('../ai/guard')).assertAiCredit();
+  const content = [`[지점] ${t.name} · 기간 ${range.start} ~ ${range.end}(월간)`, `[주간보고 ${weeklies.length}건]\n${digest.text}`,
+    `[미완료(프로그램 정리)]\n${track.unfinished.map((x) => `- ${x.title} (${x.state}, ${x.since}부터)`).join('\n') || '(없음)'}`,
+    `[이 달 안에 완료로 바뀐 것]\n${track.resolved.map((x) => `- ${x.title} (${x.doneWeek} 완료)`).join('\n') || '(없음)'}`].join('\n\n');
+  const prov = anthropicProvider({ maxTokens: 6000 });
+  const r = await prov.chat({ system: MONTHLY_SYSTEM, tools: [], messages: [{ role: 'user', content }], format: MONTHLY_JSON_SCHEMA });
+  await sql`insert into ai_usage (tenant, user_id, request_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, purpose)
+    values (${tenantOf(u)}, ${u.id}, ${randomUUID()}, 'anthropic', ${r.model ?? prov.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${costUsd(r.model ?? prov.model, r.usage)}, 'branch_report')`;
+  let raw: unknown; try { raw = JSON.parse((r.content as any[]).find((b) => b.type === 'text')?.text ?? '{}'); } catch { throw new HttpError(502, 'ai_format', 'AI 답을 읽지 못했습니다 — 다시 눌러 주세요'); }
+  const parsed = monthlyBodySchema.safeParse({ ...(raw as object), usage: usageC(weeklies, prev ? { id: prev.id, day: prev.day, body: prev.body ?? {} } : null), unfinished: track.unfinished, resolved: track.resolved, sources: { w: digest.sources } });
+  if (!parsed.success) throw new HttpError(502, 'ai_format', 'AI 답의 모양이 양식과 달랐습니다 — 다시 눌러 주세요');
+  const { body, fixed } = verifyMonthly(parsed.data, { refs: new Set(digest.sources.map((x) => x.ref)), text: digest.text });
+  const [row] = await sql<{ id: string }[]>`insert into branch_reports (tenant, site_id, kind, period_start, period_end, report_day, status, source_text, body, ai_model, created_by, updated_by)
+    values (${tenantOf(u)}, ${t.id}, 'monthly', ${range.start}, ${range.end}, ${range.end}, 'draft', null, ${sql.json(body as never)}, ${r.model ?? prov.model}, ${u.id}, ${u.id})
+    on conflict (site_id, kind, report_day) do update set body = excluded.body, ai_model = excluded.ai_model, updated_by = excluded.updated_by, updated_at = now()
+    returning id`;
+  await audit(sql, u.id, 'branch_report.monthly_draft', 'branch_report', row.id, { site: t.id, month: i.month, weeks: weeklies.length, fixed }, ip);
+  return { ...(await getReport(u, row.id)), fixed, weeks: weeklies.length };
+}
+
 // ---------------- 고치기·제출 ----------------
 export async function saveReport(u: SessionUser, id: string, b: unknown, ip: string | null) {
   const sql = db(); const { r, t } = await loadReport(u, id, sql);
   if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
   if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다 — 관리자에게 [제출 취소]를 요청하세요');
-  const body = bodySchema.parse({ ...(b as object), sources: r.body?.sources ?? { w: [] } });
+  const schema = r.kind === 'monthly' ? monthlyBodySchema : bodySchema;
+  const body = schema.parse({ ...(b as object), sources: r.body?.sources ?? { w: [] } });
   await sql`update branch_reports set body = ${sql.json(body as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
   await audit(sql, u.id, 'branch_report.edit', 'branch_report', id, {}, ip);
   return getReport(u, id);
@@ -284,8 +331,46 @@ export async function reportEvidence(u: SessionUser, id: string, refs: string[])
   return { items: want.map((ref) => {
     if (ref[0] === 'D') { const line = d[Number(ref.slice(1)) - 1]; return { ref, kind: '주간보고 글', text: line ?? (r.purged_at ? '(30일이 지나 지웠습니다)' : '(없음)') }; }
     if (ref[0] === 'M') { const m = msgs.find((x) => x.id === ref.slice(1)); return { ref, kind: '단체방 대화', at: m?.at ?? null, sender: m?.sender ?? null, text: m?.text ?? '(지웠거나 없는 메시지)' }; }
-    const s = (r.body?.sources?.w ?? []).find((x: any) => x.ref === ref); return { ref, kind: '워크인 업무', text: s?.title ?? '(없음)', taskId: s?.taskId ?? null };
+    const s = (r.body?.sources?.w ?? []).find((x: any) => x.ref === ref);
+    if (r.kind === 'monthly') return { ref, kind: '주간보고', text: s ? `${Number(s.day.slice(5, 7))}/${Number(s.day.slice(8, 10))}(금) 주간보고` : '(없음)', reportId: s?.reportId ?? null };
+    return { ref, kind: '워크인 업무', text: s?.title ?? '(없음)', taskId: s?.taskId ?? null };
   }) };
+}
+
+// ---------------- 내려받기(엑셀, 2단계) — 주간·월간 ----------------
+export async function exportReport(u: SessionUser, id: string) {
+  const sql = db(); const { r } = await loadReport(u, id, sql);
+  const { writeXlsx } = await import('../xlsx');
+  const { delta, numOf } = await import('./monthly');
+  const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+  const b = r.body ?? {};
+  const author = r.submitted_by_name ?? r.created_by_name ?? '';
+  if (r.kind === 'monthly') {
+    const usage: { item: string; prev: string; cur: string }[] = b.usage ?? [];
+    const sum = (k: 'prev' | 'cur') => { const v = usage.map((x) => numOf(x[k])); return v.length && v.every((n) => n !== null) ? String(v.reduce((a, n) => a + (n as number), 0)) : ''; };
+    const tot = { prev: sum('prev'), cur: sum('cur') };
+    const main = [
+      ['월간 업무 보고서', r.unit_name], ['작성자', author], ['소속', '주식회사 다짐 운영팀'], ['기간', `${r.period_start} ~ ${r.period_end}`], ['보고일', r.submitted_at ? new Date(r.submitted_at).toISOString().slice(0, 10) : '(초안)'], [],
+      ['■ 당월 중요업무 내역'], ['번호', '업무내용', '결과/산출물'], ...(b.important ?? []).map((x: any, k: number) => [k + 1, x.work, x.result]), [],
+      ['■ 업무 진행사항'], ['주차', '실천업무', '중점 확인사항', '결과', '비고'], ...(b.progress ?? []).map((x: any) => [x.week, x.task, x.focus, x.result, x.note]), [],
+      ['■ 차월 업무목표 및 실천사항'], ['업무목표', '실천사항'], ...(b.next ?? []).map((x: any) => [x.goal, x.actions]), [],
+      ['■ 미완료(다음 달 확인)'], ['항목', '상태', '처음', '마지막 주'], ...(b.unfinished ?? []).map((x: any) => [x.title, x.state, x.since, x.lastWeek]),
+      ...(b.notes ? [[], ['메모', b.notes]] : []),
+    ];
+    const c = [['시설', '전달 인원', '이번달 인원', '증감', '증감률'], ...usage.map((x) => { const d = delta(x.prev, x.cur); return [x.item, x.prev, x.cur, d.diff, d.rate]; }),
+      (() => { const d = delta(tot.prev, tot.cur); return ['전 시설 합계', tot.prev, tot.cur, d.diff, d.rate]; })()];
+    return { fileName: `${r.unit_name}_월간보고_${r.period_start.slice(0, 7)}.xlsx`, data: writeXlsx([{ name: '월간 업무 보고서', rows: main }, { name: '시설별 이용 현황', rows: c }]) };
+  }
+  const rows = [
+    ['커뮤니티 주간 운영 보고서', r.unit_name], ['기준일시', `${md(r.report_day)}(금) 11:00`], ['기간', `${md(r.period_start)} ~ ${md(r.period_end)}`], ['작성', '주식회사 다짐 (DAGYM)'], [],
+    ['1. 이용 인원 현황'], ['항목', '인원'], ...(b.usage ?? []).map((x: any) => [x.item, x.count]),
+    ...((b.lockers ?? []).length ? [[], ['락커 구분', '사용', '전체', '사용률'], ...b.lockers.map((x: any) => { const u = numOf(x.used), t = numOf(x.total); return [x.name, x.used, x.total, u !== null && t ? `${Math.round((u / t) * 100)}%` : '']; })] : []), [],
+    ['2. 시설 점검 보고'], ['시설', '총 이용인원', '청소 상태', '시설 상태'],
+    ...(b.facilities ?? []).flatMap((f: any) => [[f.name, f.visitors, f.cleaning, f.condition], ...(f.lines ?? []).map((l: any) => [`  · ${l.item}`, l.status, l.action, l.state])]), [],
+    ['3. 특이사항 · 건의사항 · 민원'], ['제목', '처리', '세부'], ...(b.issues ?? []).map((x: any) => [x.title, x.state, (x.details ?? []).join('\n')]),
+    ...(b.notes ? [[], ['메모', b.notes]] : []),
+  ];
+  return { fileName: `${r.unit_name}_주간보고_${r.report_day}.xlsx`, data: writeXlsx([{ name: '주간 운영 보고서', rows }]) };
 }
 
 // ---------------- 정기 작업: 제출 30일 뒤 근거 지우기 · 금요일 11시 작성 알림 ----------------
@@ -293,7 +378,7 @@ export async function branchReportTick(sql: Sql = db()) {
   const purged = await sql`delete from branch_chat_messages m using branch_reports r
     where r.site_id = m.site_id and r.kind = 'weekly' and r.status = 'submitted' and r.submitted_at < now() - interval '30 days'
       and m.at >= r.period_start and m.at < r.report_day + interval '11 hours' returning m.id`;
-  const cleared = await sql`update branch_reports set source_text = null, purged_at = now() where status = 'submitted' and submitted_at < now() - interval '30 days' and purged_at is null returning id`;
+  const cleared = await sql`update branch_reports set source_text = null, purged_at = now() where kind = 'weekly' and status = 'submitted' and submitted_at < now() - interval '30 days' and purged_at is null returning id`; // 월간은 붙여 넣은 글이 없음
   const stale = await sql`delete from branch_chat_messages where created_at < now() - interval '120 days' returning id`; // 보고서에 쓰이지 않은 채 남은 대화도 4개월 뒤 지움
   // 금요일 11시(서울) 뒤 첫 실행: 그 주 보고서가 없는 지점의 작성자에게 알림(한 번)
   const now = new Date(); const day = kstToday();

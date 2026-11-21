@@ -172,3 +172,16 @@ test("로컬 11/21 재확인: 점검 줄 이름에서 원문 칸 이름을 떼�
   assert.equal(settleDone(D, L('런닝머신 인버터 청소완료', '', '진행 중')).state, '진행 중', "'확인 필요'만 바꿈");
   assert.equal(settleDone(D, L('바닥 왁스 코팅 완료')).state, '확인 필요', '원문에 없는 완료는 그대로');
 });
+
+test('#1096 2단계 월간: 주차 이름 · 증감·증감률 · 미완료 추적(완료 뒤 다시 열린 것은 미완료) · C 는 마지막 주 기준', async () => {
+  const { weekLabel, delta, trackItems, usageC, monthRange, prevMonth } = await import('../../src/lib/branchReport/monthly.ts');
+  assert.equal(weekLabel('2026-10-02'), '1주차(10/2)'); assert.equal(weekLabel('2026-10-30'), '5주차(10/30)');
+  assert.deepEqual(monthRange('2026-02'), { start: '2026-02-01', end: '2026-02-28' }); assert.equal(monthRange('2026-2'), null); assert.equal(prevMonth('2026-01'), '2025-12');
+  assert.deepEqual(delta('50명', '47'), { diff: '-3', rate: '▼6%' }); assert.deepEqual(delta('확인 필요', '47'), { diff: '', rate: '' }); assert.deepEqual(delta('0', '5'), { diff: '+5', rate: '' });
+  const w = (day, issues, usage = []) => ({ id: day, day, body: { usage, issues } });
+  const t = trackItems([w('2026-10-02', [{ title: '누수', state: '진행 중' }, { title: '조명', state: '진행 중' }]), w('2026-10-09', [{ title: '누수', state: '완료' }, { title: '조명', state: '완료' }]), w('2026-10-16', [{ title: '조 명', state: '진행 중' }])]);
+  assert.deepEqual(t.unfinished.map((x) => [x.title, x.state, x.since, x.lastWeek]), [['조명', '진행 중', '10/2', '10/16']], '완료 뒤 다시 열림 → 미완료(띄어쓰기 달라도 같은 항목)');
+  assert.deepEqual(t.resolved, [{ title: '누수', doneWeek: '10/9' }]);
+  assert.deepEqual(usageC([w('2026-10-02', [], [{ item: '헬스', count: '410' }, { item: '골프', count: '45' }]), w('2026-10-16', [], [{ item: '헬스', count: '443' }])], null),
+    [{ item: '헬스', prev: '', cur: '443' }, { item: '골프', prev: '', cur: '45' }], '마지막 주에 없는 항목은 그 전 주 값');
+});
