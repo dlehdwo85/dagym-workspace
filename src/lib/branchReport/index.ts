@@ -6,7 +6,7 @@ import { audit } from '../log';
 import { isAdmin, isUuid } from '../access';
 import { tenantOf, type SessionUser } from '../types';
 import { maskPII } from './mask';
-import { applyOkMark, checkFacilityStatus } from './facilityStatus';
+import { applyOkMark, fixFacilityStatus } from './facilityStatus';
 
 /**
  * #1096 지점 주간보고 — 다짐 전용(대표 #1097: 상업화하지 않음). 설계 docs/branch-report-design.md, 대표 결정 11/21:
@@ -157,9 +157,10 @@ export function verifyBody(b: ReportBody, ctx: { dLines: number; msgIds: Set<str
     usage: b.usage.map((x) => ({ ...x, count: num(x.count) })),
     facilities: b.facilities.map((f) => {
       // 로컬 11/21: 청소 상태·시설 상태는 그 시설의 '청소상태'·'시설상태' 줄에 적힌 값만(시설 상태는 등급 단어만) — 다른 칸 값을 옮겨 적으면 '확인 필요'
-      const cleaning = checkFacilityStatus(ctx.dText, f.name, 'cleaning', f.cleaning), condition = checkFacilityStatus(ctx.dText, f.name, 'condition', f.condition);
+      //   등급 단어로 시작하면 등급만 받고 뒤 설명('청결 / 연습실 내부룸 먼지로 청소완료')은 원문에 있으면 점검 줄로(로컬 재확인 — 과잉 거부 고침)
+      const { cleaning, condition, extra } = fixFacilityStatus(ctx.dText, f);
       if (cleaning !== f.cleaning) fixed++; if (condition !== f.condition) fixed++;
-      return { ...f, visitors: num(f.visitors), cleaning, condition, lines: f.lines.map((l) => fixState(applyOkMark(ctx.dText, f.name, l))) }; // #1105 '0·O·○' 하나 = 이상 없음
+      return { ...f, visitors: num(f.visitors), cleaning, condition, lines: [...f.lines, ...extra].map((l) => fixState(applyOkMark(ctx.dText, f.name, l))) }; // #1105 '0·O·○' 하나 = 이상 없음
     }),
     issues: b.issues.map(fixState),
   };
@@ -189,7 +190,7 @@ const SYSTEM = `다짐 커뮤니티(아파트 단지 커뮤니티 시설 위탁 
 양식(이 순서):
 1. usage(이용 인원 현황): 시설·이용권별 인원 — D 의 <이용인원> 등에 있는 숫자만. 항목 이름은 D 그대로.
 2. lockers(락커 사용 현황): D 에 있으면만, 없으면 빈 목록(담당이 손으로 넣음).
-3. facilities(시설 점검): 시설별(헬스장·골프장·사우나·카페&키즈룸·도서관/독서실 등 D 에 나온 것) visitors(총 이용인원) · cleaning(청소 상태 — D 의 그 시설 '청소상태' 값 그대로) · condition(시설 상태 — D 의 그 시설 '시설상태'에 적힌 등급 단어(청결/양호/부분양호/미흡 등)만. 시설상태가 등급이 아닌 설명(예: 런닝머신 인버터 청소완료)이거나 줄이 없으면 '확인 필요', 그 설명은 lines 의 점검 줄로. 청소 상태 값을 옮겨 적지 않음) · lines(점검 항목: item · status(이상무/완료/상태) · action(조치, 예정이면 날짜 포함) · state · evidence). 점검 줄 값이 0·O·○ 하나뿐이면 지점 관리자가 '이상 없음'으로 쓴 것 — status '이상 없음', state '완료', evidence 에 그 D 줄. '진행0'처럼 다른 글자와 붙은 0 은 원문 그대로 두고 '확인 필요'.
+3. facilities(시설 점검): 시설별(헬스장·골프장·사우나·카페&키즈룸·도서관/독서실 등 D 에 나온 것) visitors(총 이용인원) · cleaning(청소 상태 — D 의 그 시설 '청소상태' 값 그대로) · condition(시설 상태 — D 의 그 시설 '시설상태'에 적힌 등급 단어(청결/양호/부분양호/미흡 등)만. 시설상태가 등급이 아닌 설명(예: 런닝머신 인버터 청소완료)이거나 줄이 없으면 '확인 필요', 그 설명은 lines 의 점검 줄로. 청소 상태 값을 옮겨 적지 않음). cleaning·condition 칸에는 등급 단어만 — 등급 뒤에 붙은 설명(예: '청결 / 연습실 내부룸 먼지로 청소완료'의 뒤쪽)은 lines 의 점검 줄로 · lines(점검 항목: item · status(이상무/완료/상태) · action(조치, 예정이면 날짜 포함) · state · evidence). 점검 줄 값이 0·O·○ 하나뿐이면 지점 관리자가 '이상 없음'으로 쓴 것 — status '이상 없음', state '완료', evidence 에 그 D 줄. '진행0'처럼 다른 글자와 붙은 0 은 원문 그대로 두고 '확인 필요'.
 4. issues(특이사항·건의사항·민원): 제목 + details(진행 현황·인원·금액·날짜) + state + evidence. 같은 일을 여러 번 말한 것은 하나로 합침.
 5. notes: 짧은 메모(없으면 빈 글).
 규칙: 숫자·날짜·금액은 자료에 있는 것만 — 지어내지 않습니다. 모르면 '확인 필요'. state 는 완료/진행 중/확인 필요 중 하나 — 끝났다는 근거가 분명할 때만 '완료'. evidence 에는 근거가 된 번호(D3, M120)를 넣습니다.`;
