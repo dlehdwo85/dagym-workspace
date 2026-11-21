@@ -20,9 +20,12 @@ function requirePlatform(u: SessionUser) {
 export type Stage = 'trial' | 'paid' | 'hold' | 'churned';
 export const STAGE_LABEL: Record<Stage, string> = { trial: '체험', paid: '유료', hold: '보류', churned: '해지' };
 /** #656 고객사 단계: 운영자가 직접 정한 값이 있으면 그것, 없으면 구독 상태에서 자동(체험 → 체험, 체험 끝·중지 → 보류, 사용 중 → 유료, 정지·삭제 예약 → 해지) */
-export function stageOf(t: { lifecycle?: string | null; status?: string | null; delete_scheduled_at?: Date | string | null; sub_status?: string | null }): Stage {
+export function stageOf(t: { lifecycle?: string | null; status?: string | null; delete_scheduled_at?: Date | string | null; sub_status?: string | null; signup_status?: string | null }): Stage {
   if (t.lifecycle) return t.lifecycle as Stage;
   if ((t.status && t.status !== 'active') || t.delete_scheduled_at) return 'churned';
+  // 로컬 11/21: 승인제 가입 — 거절된 신청은 구독 상태가 'trial'(체험 시작 전 그대로)로 남아 고객 목록·통계에 '체험'으로 잡혔음 → 거절 = 해지, 승인 대기 = 보류(체험은 승인 때 시작)
+  if (t.signup_status === 'rejected') return 'churned';
+  if (t.signup_status === 'pending') return 'hold';
   if (t.sub_status === 'trial') return 'trial';
   if (t.sub_status === 'expired' || t.sub_status === 'suspended') return 'hold';
   return 'paid';
@@ -33,7 +36,7 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
   const term = (q.q ?? '').trim();
   const like = `%${term.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
   const rows: any[] = await sql`
-    select t.id, t.name, t.kind, t.status, t.is_test, t.created_at, t.delete_scheduled_at, t.support_consent_at, ow.email as owner_email, (ow.status = 'invited') as owner_invited,
+    select t.id, t.name, t.kind, t.status, t.is_test, t.created_at, t.delete_scheduled_at, t.support_consent_at, t.signup_status, ow.email as owner_email, (ow.status = 'invited') as owner_invited,
       t.contact_name, t.contact_phone, t.contact_title, t.segment, t.source, t.lifecycle, t.lifecycle_note, t.lifecycle_at, t.industries, t.size_band, t.platform_memo,
       ts.plan_code, ts.status as sub_status, ts.trial_ends_at, ts.limit_overrides, ts.discount_pct, to_char(ts.discount_until, 'YYYY-MM-DD') as discount_until,
       ts.billing_cycle, ts.next_billing_on, ts.billing_amount, ts.past_due_since, ts.billing_lock, ts.billing_grace_until,
@@ -49,7 +52,7 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
     from tenants t left join users ow on ow.id = t.owner_user_id left join tenant_subscriptions ts on ts.tenant = t.id
     where (${term} = '' or t.name ilike ${like} or t.id ilike ${like} or coalesce(ow.email, '') ilike ${like})
       and not t.is_test -- #566·192차(대표 10/27 '결제 시험회사 숨겨도 됩니다') 결제 시험 회사는 고객사 목록에서 뺌(결제 기록은 결제 내역·정산에 시험 표시로 남음)
-      and (${q.status ?? ''} = '' or t.status = ${q.status ?? ''} or (${q.status ?? ''} = 'trial' and ts.status in ('trial', 'expired')) or (${q.status ?? ''} = 'deleting' and t.delete_scheduled_at is not null))
+      and (${q.status ?? ''} = '' or t.status = ${q.status ?? ''} or (${q.status ?? ''} = 'trial' and ts.status in ('trial', 'expired') and t.signup_status = 'approved') or (${q.status ?? ''} = 'deleting' and t.delete_scheduled_at is not null))
       and (${q.segment ?? ''} = '' or coalesce(t.segment, 'customer') = ${q.segment ?? ''}) -- #656 구분(설계 파트너/일반)
     order by (t.id in ('default', 'demo')) desc, t.created_at desc limit 300`;
   // #412 회사별 AI 잔여(업무·영업 공유 요청 수 · 마케팅 크레딧) + 플랫폼 전체 원가·마진 한 줄(이달 AI 원가 합계 vs 요금 합계 VAT 제외)
@@ -105,7 +108,7 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   const monthly = charge ? (b.billing_cycle === 'annual' ? Math.round(charge / 12) : charge) : 0;
   const billing = { ...(b ?? {}), expectedThisMonth: monthly, discountApplied: discountActive(b) ? Number(b.discount_pct) : 0, unpaid: b?.past_due_since ? b.billing_amount : 0, aiCostKrw: Math.round(krw), aiCostRate: monthly ? Math.round((krw / (monthly / 1.1)) * 1000) / 10 : null };
   const contacts = await sql`select l.id, l.kind, l.at, l.summary, to_char(l.next_at, 'YYYY-MM-DD') as next_at, l.created_at, c.name as by_name from tenant_contact_logs l left join users c on c.id = l.created_by where l.tenant = ${tenant} order by l.at desc, l.created_at desc limit 100`;
-  const stage = stageOf({ lifecycle: t.lifecycle, status: t.status, delete_scheduled_at: t.delete_scheduled_at, sub_status: sub.status });
+  const stage = stageOf({ lifecycle: t.lifecycle, status: t.status, delete_scheduled_at: t.delete_scheduled_at, sub_status: sub.status, signup_status: t.signup_status });
   // 대표 10/20 ① 고객사 추가로 만든 회사: 대표가 아직 초대를 안 받았으면 '초대 대기'(다시 보내기)
   const [inv] = await sql<{ expires_at: Date; created_at: Date }[]>`select expires_at, created_at from invitations where user_id = ${t.owner_user_id} and accepted_at is null and revoked_at is null order by created_at desc limit 1`;
   const ownerInvite = t.owner_user_id && users.find((x: any) => x.id === t.owner_user_id)?.status === 'invited' ? { pending: true, expiresAt: inv?.expires_at ?? null, expired: !inv || new Date(inv.expires_at) < new Date() } : { pending: false };
@@ -418,7 +421,7 @@ export async function setTenantLifecycle(u: SessionUser, tenant: string, i: z.in
   const sql = db();
   await sql`update tenants set lifecycle = ${i.stage}, lifecycle_note = ${i.stage ? i.note?.trim() || null : null}, lifecycle_at = ${i.stage ? new Date() : null} where id = ${tenant}`;
   await audit(sql, u.id, 'platform.tenant_lifecycle', 'tenant', tenant, { stage: i.stage, note: i.note?.trim() || null }, ip);
-  const [t] = await sql<any[]>`select t.lifecycle, t.status, t.delete_scheduled_at, ts.status as sub_status from tenants t left join tenant_subscriptions ts on ts.tenant = t.id where t.id = ${tenant}`;
+  const [t] = await sql<any[]>`select t.lifecycle, t.status, t.delete_scheduled_at, t.signup_status, ts.status as sub_status from tenants t left join tenant_subscriptions ts on ts.tenant = t.id where t.id = ${tenant}`;
   return { ok: true, stage: stageOf(t) };
 }
 
