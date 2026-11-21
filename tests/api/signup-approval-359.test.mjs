@@ -30,8 +30,8 @@ function fakeProvider() {
     });
   }).listen(OAUTH_PORT);
 }
-async function social(c, p, prof) {
-  const s = await c.req('GET', `/api/auth/oauth/${p}/start?utm_source=meta&utm_campaign=trial`);
+async function social(c, p, prof, q = 'utm_source=meta&utm_campaign=trial') {
+  const s = await c.req('GET', `/api/auth/oauth/${p}/start?${q}`);
   assert.equal(s.status, 303);
   const auth = new URL(s.headers.get('location'));
   const st = (s.headers.getSetCookie?.() ?? []).find((x) => x.startsWith('wos_oauth=')).split(';')[0];
@@ -172,6 +172,22 @@ describe('359차 승인제 가입', () => {
     assert.equal((await c.req('GET', '/api/auth/me')).status, 200, '로그인 정보(안내 화면용)는 됨');
     const [rr] = await sql`select signup_status, signup_reason from tenants where id = ${st}`;
     assert.deepEqual([rr.signup_status, rr.signup_reason], ['rejected', '연락이 닿지 않았습니다']);
+    // 로컬 11/21 #1095: 거절된 신청의 소셜 연결 풀기(플랫폼 운영자) — 같은 구글 계정을 다른 워크인 계정에 연결할 수 있게
+    const list = (await ctx.owner.ok('GET', '/api/platform/signups')).tenants.find((x) => x.id === st);
+    assert.equal(list.social_links, 1, '목록에 소셜 연결 수');
+    assert.equal((await ctx.staffA.client.post(`/api/platform/signups/${st}/unlink-social`, {})).status, 404, '운영자가 아니면 404');
+    const un = await ctx.owner.ok('POST', `/api/platform/signups/${st}/unlink-social`, {});
+    assert.deepEqual([un.removed, un.providers, un.appleTotal], [1, ['google'], 0]);
+    assert.equal((await sql`select count(*)::int n from user_identities ui join users us on us.id = ui.user_id where us.tenant = ${st}`)[0].n, 0, '연결 지움');
+    assert.equal((await sql`select count(*)::int n from users where tenant = ${st}`)[0].n >= 1, true, '사용자는 지우지 않음');
+    const [au] = await sql`select detail from audit_logs where action = 'signup.social_unlink' order by id desc limit 1`;
+    assert.deepEqual([au.detail.tenant, au.detail.removed, au.detail.providers], [st, 1, ['google']]);
+    assert.equal((await ctx.owner.post(`/api/platform/signups/${st}/unlink-social`, {})).status, 400, '풀 연결이 없으면 400');
+    assert.equal((await ctx.owner.post('/api/platform/signups/not-a-tenant/unlink-social', {})).status, 404);
+    // 연결을 푼 구글 계정은 이제 대표 계정에 연결할 수 있음(설정 › 계정에서 연결)
+    const link = await social(ctx.owner, 'google', { sub: 'g-359', email: 'social@approval.test', name: '소셜신청' }, 'mode=link');
+    assert.equal(link.pathname, '/settings', `연결됨(이미 다른 계정에 연결로 막히지 않음): ${link.search}`); assert.equal(link.searchParams.get('linked'), 'google');
+    await sql`delete from user_identities where provider = 'google' and subject = 'g-359'`; // 아래 '다시 승인' 시험은 원래대로(소셜 계정이 이 회사 사람에게) 이어 가지 않아도 됨
     // 다시 승인할 수 있음(연락이 닿은 경우)
     await ctx.owner.ok('POST', `/api/platform/signups/${st}/approve`, {});
     assert.equal((await c.req('GET', '/api/tasks')).status, 200);
