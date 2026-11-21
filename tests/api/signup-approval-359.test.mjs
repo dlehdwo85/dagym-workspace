@@ -195,6 +195,12 @@ describe('359차 승인제 가입', () => {
     const link = await social(ctx.owner, 'google', { sub: 'g-359', email: 'social@approval.test', name: '소셜신청' }, 'mode=link');
     assert.equal(link.pathname, '/settings', `연결됨(이미 다른 계정에 연결로 막히지 않음): ${link.search}`); assert.equal(link.searchParams.get('linked'), 'google');
     await sql`delete from user_identities where provider = 'google' and subject = 'g-359'`; // 아래 '다시 승인' 시험은 원래대로(소셜 계정이 이 회사 사람에게) 이어 가지 않아도 됨
+    // 로컬 11/21: 거절된 신청은 체험 연장·종료·유료 전환을 막음(다시 열려면 [다시 승인])
+    for (const body of [{ action: 'extend', days: 7 }, { action: 'end' }, { action: 'convert', planCode: 'team' }]) {
+      const r = await ctx.owner.post(`/api/platform/tenants/${st}/trial`, body);
+      assert.equal(r.status, 409, body.action); assert.equal(r.body.error.code, 'signup_rejected');
+    }
+    assert.equal((await sql`select trial_ends_at from tenant_subscriptions where tenant = ${st}`)[0].trial_ends_at, null, '체험이 시작되지 않음');
     // 다시 승인할 수 있음(연락이 닿은 경우)
     await ctx.owner.ok('POST', `/api/platform/signups/${st}/approve`, {});
     assert.equal((await c.req('GET', '/api/tasks')).status, 200);

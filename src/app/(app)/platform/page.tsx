@@ -261,12 +261,13 @@ function Signups() {
                 <td className={cell}>{t.users}명 · 업무 {t.tasks}</td>
                 <td className={cell}><div>{fmtDateTime(t.created_at)}</div><div className="text-[11px] text-ink-3">{t.created_ip}</div></td>
                 <td className={cell} data-testid={`trial-${t.id}`}>
-                  <div className="text-xs">{t.sub_status === 'trial' ? (t.trial_ends_at ? `체험 ~${String(t.trial_ends_at).slice(0, 10)}` : '승인 대기(체험 전)') : t.sub_status === 'expired' ? '체험 끝(읽기 전용)' : t.plan_code ?? '-'}{t.chosen_plan && <span className="ml-1 text-brand-700">신청: {t.chosen_plan}</span>}</div>
-                  <div className="mt-1 flex flex-wrap gap-1">
+                  <div className="text-xs">{t.signup_status === 'rejected' ? <span className="text-ink-3" data-testid="trial-rejected">거절(체험 없음)</span> : t.sub_status === 'trial' ? (t.trial_ends_at ? `체험 ~${String(t.trial_ends_at).slice(0, 10)}` : '승인 대기(체험 전)') : t.sub_status === 'expired' ? '체험 끝(읽기 전용)' : t.plan_code ?? '-'}{t.chosen_plan && <span className="ml-1 text-brand-700">신청: {t.chosen_plan}</span>}</div>
+                  {/* 로컬 11/21: 거절된 신청은 체험 단추 없음 — 다시 열려면 위 '가입 신청'의 [다시 승인] */}
+                  {t.signup_status !== 'rejected' && <div className="mt-1 flex flex-wrap gap-1">
                     {[7, 14].map((d) => <Button key={d} size="sm" variant="ghost" onClick={() => trial(t.id, { action: 'extend', days: d })}>+{d}일</Button>)}
                     {t.sub_status !== 'expired' && <Button size="sm" variant="ghost" onClick={() => trial(t.id, { action: 'end' })}>종료</Button>}
                     <Button size="sm" variant="ghost" onClick={() => { const code = prompt('전환할 요금제 코드 (personal · team · business)', t.chosen_plan ?? 'team'); if (code) trial(t.id, { action: 'convert', planCode: code }); }}>유료 전환</Button>
-                  </div>
+                  </div>}
                 </td>
                 <td className={cell}>{({ active: '사용 중', blocked: '차단', deleted: '삭제' } as Record<string, string>)[t.status] ?? t.status}</td>
                 <td className={cell}>{t.status === 'active' ? <Button size="sm" variant="secondary" onClick={() => setStatus(t.id, 'blocked')}>차단</Button> : t.status === 'blocked' ? <Button size="sm" variant="secondary" onClick={() => setStatus(t.id, 'active')}>해제</Button> : null}</td>

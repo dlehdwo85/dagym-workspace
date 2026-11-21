@@ -541,6 +541,9 @@ export async function platformTrial(u: SessionUser, tenant: string, i: z.infer<t
   const sql = db();
   const [s] = await sql<{ status: string; trial_ends_at: Date | null; chosen_plan: string | null }[]>`select status, trial_ends_at, chosen_plan from tenant_subscriptions where tenant = ${tenant}`;
   if (!s) throw notFound('없는 공간입니다');
+  // 로컬 11/21: 거절된 가입 신청은 체험 연장·종료·유료 전환을 막음 — 다시 열려면 '가입 신청'의 [다시 승인](체험 14일 시작·환영 메일)
+  const [sg] = await sql<{ signup_status: string }[]>`select signup_status from tenants where id = ${tenant}`;
+  if (sg?.signup_status === 'rejected') throw new HttpError(409, 'signup_rejected', '거절된 가입 신청입니다 — 다시 열려면 가입 신청의 [다시 승인]을 쓰세요');
   if (i.action === 'extend') {
     const base = s.trial_ends_at && s.trial_ends_at.getTime() > Date.now() ? s.trial_ends_at : new Date();
     const end = new Date(base.getTime() + (i.days ?? 7) * 86400000);
