@@ -499,14 +499,16 @@ export async function watchOAuthReturn() {
 }
 
 /** 앱 소셜 로그인: 검증값(앱 보관) 만들고 시스템 브라우저로 시작 → 끝나면 workos://open/auth/app 으로 돌아옴 */
-export async function openOAuthInBrowser(startPath: string) {
+export async function openOAuthInBrowser(startPath: string, base?: string) {
   await watchOAuthReturn();
   const v = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
   const ac = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v))), (b) => b.toString(16).padStart(2, '0')).join('');
   try { localStorage.setItem('wos_oauth_v', v); } catch {}
   // 397차 #1023(애플 11/06 반려 2.1(a) — 아이패드에서 'Sign in with Apple' 을 누르면 빈 창): 'popover' 는 아이폰에서는 시트로 바뀌지만 아이패드에서는 진짜 팝업으로 뜨고,
   // 크기를 주지 않으면(Capacitor setCenteredPopover 는 위치만 잡음) 로그인 화면이 그려지지 않는 작은 빈 창이 됨 → 기본값인 전체 화면으로(아이폰·아이패드 같은 모양)
-  await Browser.open({ url: `${location.origin}${startPath}${startPath.includes('?') ? '&' : '?'}ac=${ac}`, presentationStyle: 'fullscreen' });
+  // #1114: 처음부터 정식 주소(base = 서버 APP_URL)로 — 앱 주소(dagym-workspace.vercel.app)가 먼저 보였다 넘어가지 않게. 검증값·넘겨받기는 그대로 앱 주소에서
+  const origin = base && /^https:\/\//.test(base) ? base.replace(/\/$/, '') : location.origin;
+  await Browser.open({ url: `${origin}${startPath}${startPath.includes('?') ? '&' : '?'}ac=${ac}`, presentationStyle: 'fullscreen' });
 }
 export function takeOAuthVerifier() {
   try { const v = localStorage.getItem('wos_oauth_v'); localStorage.removeItem('wos_oauth_v'); return v; } catch { return null; }

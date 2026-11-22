@@ -1,5 +1,6 @@
 import { handler } from '@/lib/api';
 import { enabledProviders } from '@/lib/oauth';
+import { appUrl } from '@/lib/mail';
 
 /**
  * 가입·로그인·초대 화면에 보일 소셜 버튼(키가 있는 제공자만).
@@ -7,5 +8,6 @@ import { enabledProviders } from '@/lib/oauth';
  */
 export const GET = handler(async ({ req }) => {
   const ua = req.headers.get('user-agent') ?? '';
-  return { providers: /WorkInApp/i.test(ua) && !/Android/i.test(ua) ? [] : enabledProviders() };
+  // #1114: start 주소의 정식 호스트(APP_URL) — 앱의 시스템 브라우저가 처음부터 정식 주소를 엶(예전 주소가 한 번 보였다 넘어가던 것)
+  return { providers: /WorkInApp/i.test(ua) && !/Android/i.test(ua) ? [] : enabledProviders(), base: appUrl() };
 }, { public: true });

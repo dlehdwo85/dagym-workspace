@@ -322,6 +322,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     try { pushEndpoint = localStorage.getItem('wos_push_endpoint') ?? undefined; } catch {}
     await clearReminders().catch(() => {});
     await api('/api/auth/logout', { body: { pushEndpoint } }).catch(() => {});
+    try { localStorage.setItem('wos_oauth_fresh', '1'); } catch {} // #1114: 로그아웃 뒤 첫 소셜 로그인은 계정 다시 확인
     await refreshWidget(); // #194 바탕화면 위젯이 앞 사람의 할 일을 계속 보이지 않게(로그인 안내로)
     location.href = '/login';
   }
