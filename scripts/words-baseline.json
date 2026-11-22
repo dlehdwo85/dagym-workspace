@@ -30,10 +30,10 @@
    "brand": 2
   },
   "src/components/branch/BranchReports.tsx": {
-   "brand": 6
+   "brand": 8
   },
   "src/components/branch/MonthlyView.tsx": {
-   "brand": 5
+   "brand": 6
   },
   "src/components/branch/ReportView.tsx": {
    "brand": 2
@@ -83,7 +83,7 @@
    "domain": 5
   },
   "src/lib/branchReport/index.ts": {
-   "brand": 7,
+   "brand": 11,
    "domain": 3
   },
   "src/lib/branchReport/monthly.ts": {
