@@ -4,11 +4,12 @@ import { FileText, Send } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { ReportTabs } from '@/components/ReportTabs';
 
 /** V8 2번 내 주간 보고: 금요일 16시에 자동 초안 → 고쳐서 제출. 대표·관리자는 모두의 보고를 아래에서 */
 export default function MyReportPage() {
   const { user, menus, features } = useSession();
-  const br = !!features?.branchReport; // #1118(대표 11/22): 지점 보고를 쓰는 회사(다짐)는 '사내 업무 보고'로 나눠 부름
+  const br = !!features?.branchCompany; // #1118(대표 11/22): 지점 보고를 쓰는 회사(다짐)는 '사내 업무 보고'로 나눠 부름
   const admin = (menus?.team_reports ?? 'none') !== 'none'; // V14 7번 메뉴 권한 "주간 보고(모아보기)"
   const [teamId, setTeamId] = useState(''); // V14 8번 팀별 모아 보기
   const { data, error, loading, reload, setData } = useApi<{ weekStart: string; report: any }>('/api/reports/mine');
@@ -24,6 +25,7 @@ export default function MyReportPage() {
   const r = data?.report;
   return (
     <div className="mx-auto max-w-3xl space-y-4">
+      <ReportTabs />
       <PageHeader title={br ? '사내 업무 보고' : '내 주간 보고'} icon={FileText} sub={`${br ? '대표·본사에 내는 이번 주 사내 업무 보고입니다. ' : ''}매주 금요일 오후 4시에 이번 주 완료·진행·다음 주 마감·일정으로 초안을 만들어 알려 드립니다. 고쳐서 제출하세요.${br ? ' 고객사(단지)에 내는 보고는 [고객사 보고(지점)] — 지점 작성 담당은 그쪽 제출로 대신합니다.' : ''}`} />
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={4} /> : (
         <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="my-report">

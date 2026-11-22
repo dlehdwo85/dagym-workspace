@@ -22,7 +22,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await toggleSpace(owner, 'sales'); // 저장 → 화면 새로고침(사이드바에 공간 카드)
   await owner.getByTestId('space-tabs').waitFor();
   await owner.goto(`${BASE}/`);
-  // ⑦ 사이드바 3구역(대표 승인 10/20 오후): ① 맨 위 공간 전환 탭(요약은 title) ② '업무 메뉴'(홈·업무·프로젝트·내 주간 보고·결재) ③ '공통'(캘린더·알림·메시지·자료실·연락처·공지·AI 비서) + 관리(접힘)
+  // ⑦ 사이드바 3구역(대표 승인 10/20 오후): ① 맨 위 공간 전환 탭(요약은 title) ② '업무 메뉴'(홈·업무·프로젝트·보고·결재) ③ '공통'(캘린더·알림·메시지·자료실·연락처·공지·AI 비서) + 관리(접힘)
   await owner.getByTestId('space-tabs').waitFor();
   await owner.waitForFunction(() => /내 업무 \d+/.test(document.querySelector('[data-testid="space-tab-work"]')?.getAttribute('title') ?? '')); // 요약은 /api/spaces 가 온 뒤
   const navLabels = async (tid) => (await owner.getByTestId(tid).getByRole('link').allInnerTexts()).map((x) => x.replace(/\d+$/, '').trim());
@@ -30,7 +30,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   const side = owner.getByRole('navigation', { name: '주 메뉴' });
   const sideLabels = async () => (await side.getByRole('link').allInnerTexts()).map((x) => x.replace(/\d+$/, '').trim());
   const workLabels = await sideLabels();
-  assert.deepEqual(workLabels.slice(0, 5), ['홈', '업무', '프로젝트', '내 주간 보고', '결재'], `업무 메뉴 ${workLabels}`);
+  assert.deepEqual(workLabels.slice(0, 5), ['홈', '업무', '프로젝트', '보고', '결재'], `업무 메뉴 ${workLabels}`); // #1119 보고 하나
   const commonWork = await navLabels('nav-common-v3');
   // 375차 #997: 공통에 '보낸 메일'(메시지 다음)
   assert.deepEqual(commonWork.slice(0, 5), ['캘린더', '알림', '메시지', '보낸 메일', '자료실'].filter((l) => commonWork.includes(l)).slice(0, 5), `공통 ${commonWork}`);
@@ -122,7 +122,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   assert.deepEqual(await tabs(), ['홈', '업무', '캘린더', '메시지', '결재']); // 대표 확정 10/22(#422)
   await m.getByTestId('profile-menu').tap();
   const sheet2 = m.getByTestId('more-sheet');
-  assert.deepEqual(await sheet2.getByTestId('mobile-space-menu').getByRole('link').allInnerTexts(), ['내 주간 보고'], '#422 c: 업무 메뉴 = 내 주간 보고만');
+  assert.deepEqual(await sheet2.getByTestId('mobile-space-menu').getByRole('link').allInnerTexts(), ['보고'], '#422 c: 업무 메뉴 = 보고만(#1119)');
   for (const dup of ['홈', '업무', '캘린더', '메시지', '결재', '알림']) assert.equal(await sheet2.getByRole('link', { name: dup, exact: true }).count(), 0, `#422 d: 하단 탭·머리줄과 겹치는 '${dup}' 없음`);
   await sheet2.getByTestId('profile-links').getByRole('link', { name: '설정·알림' }).waitFor();
   assert.equal(await sheet2.getByTestId('more-create').count(), 0, '#422 b: 만들기 줄 없음');

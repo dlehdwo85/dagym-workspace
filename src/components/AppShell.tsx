@@ -47,7 +47,7 @@ import { VoiceAddTask } from './VoiceAddTask';
 type NavItem = { href: string; label: string; icon: LucideIcon; group?: string };
 /** 워크인(WORKIN_V2) 사이드바: 홈 · 업무(본사 전체) · 프로젝트 · 캘린더 · 알림 + 관리 묶음. 숨긴 화면(현장 신고 QR·자동화·현장 비교 등)은 코드·주소는 남겨 둔다 */
 /** 대표 10/24 저녁(#567): 업무 공간에만 딸린 화면 — 여기로 갈 때만 업무 공간으로 바뀜('/' 홈 포함). 공통(업무·캘린더·알림·메시지·자료실·연락처·공지·AI)·관리·설정·견적서 등 나머지는 지금 공간 유지 */
-const WORK_PATHS = ['/projects', '/reports/mine', '/approvals', '/templates', '/workload', '/automations', '/insights', '/forms', '/teams'];
+const WORK_PATHS = ['/projects', '/reports', '/branch-reports', '/approvals', '/templates', '/workload', '/automations', '/insights', '/forms', '/teams'];
 const NAV: NavItem[] = [
   { href: '/', label: '홈', icon: House },
   { href: '/tasks', label: '업무', icon: CircleCheck },
@@ -185,9 +185,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
   // V13 메뉴 권한: 매출·주간 보고는 권한 있는 사람만(관리 묶음이 없는 사람도 매출 권한이 있으면 주 메뉴에)
   const menus = session.menus ?? {};
   // #1118(대표 11/22): 지점 보고를 쓰는 회사(다짐)는 보고 이름을 나눔 — 사내 업무 보고(대표에게) / 고객사 보고(지점) / 회사 주간 요약(자동)
-  const br = !!session.features.branchReport;
-  const relabel = (n: NavItem): NavItem => (br && n.href === '/reports/mine' ? { ...n, label: '사내 업무 보고' } : br && n.href === '/reports' ? { ...n, label: '회사 주간 요약' } : n);
-  const adminMenu = ADMIN_MENU.filter((n) => (menus[ADMIN_KEY[n.href]] ?? 'none') !== 'none').map((n) => (inApp && n.href === '/admin/usage' ? { ...n, label: '사용량' } : relabel(n))); // 앱 안: 요금제 글자 없이
+  // #1119(대표 11/22): 사이드바에는 '보고' 하나 — 누르면 위 탭(사내 업무 보고 · 고객사 보고(지점) · 회사 주간 요약). 지점 작성 담당은 고객사 보고부터
+  const relabel = (n: NavItem): NavItem => (n.href === '/reports/mine' ? { ...n, label: '보고', href: session.features.branchWriter ? '/branch-reports' : '/reports/mine' } : n);
+  const adminMenu = ADMIN_MENU.filter((n) => n.href !== '/reports' && (menus[ADMIN_KEY[n.href]] ?? 'none') !== 'none').map((n) => (inApp && n.href === '/admin/usage' ? { ...n, label: '사용량' } : n)); // 앱 안: 요금제 글자 없이
   const nav: NavItem[] = [...NAV.map(relabel), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
     ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
@@ -210,7 +210,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
   const sp_ = space === 'work' ? '' : `?space=${space}`;
   const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'), byHref('/mail/outbox'),
-    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), byHref('/check'), ...(session.features.branchReport ? [{ href: '/branch-reports', label: '고객사 보고(지점)', icon: FileText }] : []), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: Sparkles }] : [])];
+    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), byHref('/check'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: Sparkles }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);
@@ -312,6 +312,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const sheetSpaceMenu: NavItem[] = (v3 ? spaceMenuV3 : spaceNav).filter((n) => !tabHrefs.has(n.href.split('?')[0]) && !(space === 'work' && n.href === '/projects'));
   const active = (href: string) => {
     const [p, q] = href.split('?');
+    if (p === '/reports/mine' || p === '/branch-reports') return path === '/reports' || path.startsWith('/reports/') || path.startsWith('/branch-reports'); // #1119 '보고' 하나
     if (p === '/') return path === '/';
     if (/^\/s\/[a-z]+$/.test(p)) return path === p; // 로컬 검수 10/17: 공간 첫 화면(영업 홈 등)은 하위 메뉴에 있을 때 같이 강조하지 않음
     if (q) return path === p && query.includes(q);

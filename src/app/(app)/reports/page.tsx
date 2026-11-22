@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { adminsLabel } from '@/lib/terms';
 import { useSession, useTerms } from '@/components/session';
+import { ReportTabs } from '@/components/ReportTabs';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { CalendarRange, FileBarChart, Plus } from 'lucide-react';
@@ -11,7 +12,7 @@ import { Button, Empty, ErrorBox, PageHeader, Skeleton, cx, fmtDate, fmtDateTime
 /** B-15 주간 보고 목록 (대표·본사 관리자) */
 export default function ReportsPage() {
   const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
-  const br = !!useSession().features?.branchReport; // #1118: 지점 보고를 쓰는 회사는 '회사 주간 요약'
+  const br = !!useSession().features?.branchCompany; // #1118·#1119: 이름은 모든 회사 '회사 주간 요약'(보고 탭), 지점 보고 쓰는 회사는 설명 한 줄 더
   const router = useRouter();
   const { data, error, loading, reload } = useApi<{ reports: any[] }>('/api/reports');
   async function makeNow() {
@@ -19,9 +20,10 @@ export default function ReportsPage() {
   }
   return (
     <div className="space-y-4">
-      <PageHeader title={br ? '회사 주간 요약' : '주간 보고'} icon={FileBarChart} sub={`매주 월요일 오전 8시 이후 지난주 ${br ? '회사 전체 업무 숫자 요약을' : '보고를'} 자동으로 만들고 ${adminsLabel(T)}에게 알립니다.${br ? ' 직원이 쓰는 보고는 [사내 업무 보고], 고객사에 내는 보고는 [고객사 보고(지점)]에 있습니다.' : ''}`}
+      <ReportTabs />
+      <PageHeader title="회사 주간 요약" icon={FileBarChart} sub={`매주 월요일 오전 8시 이후 지난주 회사 전체 업무 숫자 요약을 자동으로 만들고 ${adminsLabel(T)}에게 알립니다. 직원이 쓰는 보고는 [${br ? '사내 업무 보고' : '내 주간 보고'}]${br ? ', 고객사에 내는 보고는 [고객사 보고(지점)]' : ''}에 있습니다.`}
         actions={<Button variant="secondary" onClick={makeNow}><Plus />지난주 보고 지금 만들기</Button>} />
-      {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={4} /> : !data?.reports.length ? <Empty title="아직 주간 보고가 없습니다" icon={FileBarChart}>다음 월요일에 자동으로 만들어집니다.</Empty> : (
+      {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={4} /> : !data?.reports.length ? <Empty title="아직 회사 주간 요약이 없습니다" icon={FileBarChart}>다음 월요일에 자동으로 만들어집니다.</Empty> : (
         <ul className="divide-y divide-line overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="reports">
           {data.reports.map((r) => (
             <li key={r.id}>
