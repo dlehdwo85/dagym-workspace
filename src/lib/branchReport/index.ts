@@ -181,9 +181,46 @@ async function loadReport(u: SessionUser, id: string, sql: Sql) {
   const t = await siteFor(u, r.site_id, sql); // 볼 수 있는 지점(작성 담당은 자기 지점만, 검토 담당·관리자는 전체)
   return { r, t };
 }
+/**
+ * #1116(대표 11/22 '이용인원과 금액 동선을 추적 · 민원·특이사항을 정리해 고객사에 전달'): 월간 보고에
+ *  ① 최근 6개월 흐름 — 시설 이용인원 합계(하이링크 이용현황: 그 달 월간 합계, 없으면 다음 달 보고의 '전달') · 활성 이용권 · 활성 수강권 · 월 부과 합계(하이링크 회원목록 집계)
+ *     저장된 집계로만(AI·추정 없음), 없는 달은 null('-'). 이용권/수강권 분류·시험 줄 제외는 이 보고서 설정 그대로
+ *  ② 이번 달 민원·특이사항 — 그 달 제출된 주간보고의 특이사항을 한 표로(처리 상태 포함)
+ */
+async function monthExtras(sql: Sql, tenant: string, r: { site_id: string; report_day: string; body: any }) {
+  const { lastMonths, monthIssues, nextMonth, numOf, sumCol } = await import('./monthly');
+  const { viewOf } = await import('./memberList');
+  const month = String(r.report_day).slice(0, 7); const range = monthRange(month)!;
+  const weeklies = await sql<{ id: string; day: string; body: any }[]>`select id, report_day::text as day, body from branch_reports
+    where site_id = ${r.site_id} and kind = 'weekly' and status = 'submitted' and report_day between ${range.start} and ${range.end} order by report_day`;
+  const months = lastMonths(month);
+  const [stats, reps] = await Promise.all([
+    sql<{ month: string; stats: any; stats_all: any }[]>`select month, stats, stats_all from branch_member_stats where tenant = ${tenant} and site_id = ${r.site_id} and month = any(${months})`,
+    sql<{ m: string; ut: any; usage: any }[]>`select to_char(report_day, 'YYYY-MM') as m, body->'usageTotal' as ut, body->'usage' as usage from branch_reports
+      where site_id = ${r.site_id} and kind = 'monthly' and report_day between ${`${months[0]}-01`} and ${monthRange(nextMonth(month))!.end}`,
+  ]);
+  const rep = new Map(reps.map((x) => [x.m, { ut: x.ut, usage: x.usage }])); rep.set(month, { ut: r.body?.usageTotal ?? null, usage: r.body?.usage ?? [] });
+  const col = (b: { ut: any; usage: any } | undefined, k: 'cur' | 'prev') => {
+    const v = b?.ut?.[k] || (Array.isArray(b?.usage) && b!.usage.length ? sumCol(b!.usage.map((x: any) => String(x?.[k] ?? ''))) : '');
+    return numOf(String(v ?? ''));
+  };
+  const usage = months.map((m) => col(rep.get(m), 'cur') ?? col(rep.get(nextMonth(m)), 'prev'));
+  const mem = r.body?.members; const exclude = mem?.exclude ?? true; const kinds = mem?.kinds;
+  const st = new Map(stats.map((x) => [x.month, exclude ? x.stats : x.stats_all]));
+  const view = (m: string, sel: 'all' | 'use' | 'class') => { const a = st.get(m); return a ? viewOf(a, kinds, sel) : null; };
+  const flow = { months, rows: [
+    { key: 'usage', label: '시설 이용인원 합계(명)', vals: usage },
+    { key: 'use', label: '활성 이용권(개)', vals: months.map((m) => view(m, 'use')?.active ?? null) },
+    { key: 'class', label: '활성 수강권(개)', vals: months.map((m) => view(m, 'class')?.active ?? null) },
+    { key: 'billing', label: '월 부과 합계(원)', vals: months.map((m) => view(m, 'all')?.billing ?? null), money: true },
+  ], notes: [`출처: 하이링크 이용현황(시설 이용인원)·하이링크 회원목록(이용권·수강권·부과) — 그 달에 올린 파일의 숫자만, 없는 달은 '-'`,
+    `회원 숫자는 ${exclude ? '시험·직원 줄 제외' : '시험·직원 줄 포함'}, 이용권/수강권 분류는 이 보고서 기준`] };
+  return { flow, issuesMonth: monthIssues(weeklies.map((w) => ({ id: w.id, day: w.day, body: w.body ?? {} }))) };
+}
 export async function getReport(u: SessionUser, id: string) {
   const sql = db(); const { r, t } = await loadReport(u, id, sql);
   if (r.kind === 'monthly' && r.status === 'draft' && r.body?.members) r.body = { ...r.body, members: await withKinds(sql, tenantOf(u), r.body.members) }; // #1115 초안은 회사 분류 지금 값으로(제출하면 그때 값으로 굳음)
+  if (r.kind === 'monthly' && (r.status === 'draft' || !r.body?.flow)) r.body = { ...r.body, ...(await monthExtras(sql, tenantOf(u), r)) }; // #1116 초안은 볼 때 계산
   return { report: r, canWrite: canWrite(u, t) && r.status === 'draft', canReopen: canReopen(u, t) && r.status === 'submitted' && !r.purged_at, admin: isAdmin(u) };
 }
 
@@ -302,7 +339,7 @@ export async function saveReport(u: SessionUser, id: string, b: unknown, ip: str
   if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다 — 관리자에게 [제출 취소]를 요청하세요');
   const schema = r.kind === 'monthly' ? monthlyBodySchema : bodySchema;
   // 서버가 정하는 칸(근거 목록·올린 하이링크 파일 표시·주간 값 제안)은 화면에서 온 값으로 바꾸지 않음
-  const fixedKeys = r.kind === 'monthly' ? { usageFile: r.body?.usageFile ?? null, usageWeekly: r.body?.usageWeekly ?? [], members: r.body?.members ?? null } : {};
+  const fixedKeys = r.kind === 'monthly' ? { usageFile: r.body?.usageFile ?? null, usageWeekly: r.body?.usageWeekly ?? [], members: r.body?.members ?? null, flow: r.body?.flow ?? null, issuesMonth: r.body?.issuesMonth ?? null } : {};
   const body = schema.parse({ ...(b as object), ...fixedKeys, sources: r.body?.sources ?? { w: [] } });
   await sql`update branch_reports set body = ${sql.json(body as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
   await audit(sql, u.id, 'branch_report.edit', 'branch_report', id, {}, ip);
@@ -312,7 +349,10 @@ export async function submitReport(u: SessionUser, id: string, ip: string | null
   const sql = db(); const { r, t } = await loadReport(u, id, sql);
   if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
   if (r.status === 'submitted') throw new HttpError(409, 'submitted', '이미 제출했습니다');
-  if (r.kind === 'monthly' && r.body?.members) await sql`update branch_reports set body = ${sql.json({ ...r.body, members: await withKinds(sql, tenantOf(u), r.body.members) } as never)} where id = ${id}`; // #1115 분류를 제출 때 값으로 굳힘
+  if (r.kind === 'monthly') { // #1115 분류 · #1116 6개월 흐름·민원 모음을 제출 때 값으로 굳힘(고객사에 낸 그대로)
+    const body = { ...r.body, ...(r.body?.members ? { members: await withKinds(sql, tenantOf(u), r.body.members) } : {}) };
+    await sql`update branch_reports set body = ${sql.json({ ...body, ...(await monthExtras(sql, tenantOf(u), { ...r, body })) } as never)} where id = ${id}`;
+  }
   await sql`update branch_reports set status = 'submitted', submitted_by = ${u.id}, submitted_at = now(), updated_at = now() where id = ${id}`;
   await audit(sql, u.id, 'branch_report.submit', 'branch_report', id, { site: t.id, day: r.report_day }, ip);
   return getReport(u, id);
@@ -470,15 +510,20 @@ export async function exportReport(u: SessionUser, id: string) {
   const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   const b = r.body ?? {};
   const author = r.submitted_by_name ?? r.created_by_name ?? '';
+  const mark = r.status === 'submitted' ? '고객사 제출용' : '초안(제출 전)'; const filePre = r.status === 'submitted' ? '고객사제출용' : '초안'; // #1116 표지·파일 이름
   if (r.kind === 'monthly') {
+    // #1116 6개월 흐름·민원 모음 — 초안은 지금 계산(분류도 지금 값), 제출한 것은 굳힌 값
+    const ex = r.status === 'draft' || !b.flow ? await monthExtras(sql, tenantOf(u), { ...r, body: r.status === 'draft' && b.members ? { ...b, members: await withKinds(sql, tenantOf(u), b.members) } : b }) : { flow: b.flow, issuesMonth: b.issuesMonth };
     const usage: { item: string; prev: string; cur: string; diff?: string; rate?: string }[] = b.usage ?? [];
     const st = b.usageTotal as { item: string; prev: string; cur: string; diff: string; rate: string } | null;
     const tot = st ?? { item: '전 시설 합계', prev: sumCol(usage.map((x) => x.prev)), cur: sumCol(usage.map((x) => x.cur)), diff: '', rate: '' };
     const main = [
-      ['월간 업무 보고서', r.unit_name], ['작성자', author], ['소속', '주식회사 다짐 운영팀'], ['기간', `${r.period_start} ~ ${r.period_end}`], ['보고일', r.submitted_at ? new Date(r.submitted_at).toISOString().slice(0, 10) : '(초안)'], [],
+      [`${mark} · 월간 업무 보고서`, r.unit_name], ['작성자', author], ['소속', '주식회사 다짐 운영팀'], ['기간', `${r.period_start} ~ ${r.period_end}`], ['보고일', r.submitted_at ? new Date(r.submitted_at).toISOString().slice(0, 10) : '(초안)'], [],
       ['■ 당월 중요업무 내역'], ['번호', '업무내용', '결과/산출물'], ...(b.important ?? []).map((x: any, k: number) => [k + 1, x.work, x.result]), [],
       ['■ 업무 진행사항'], ['주차', '실천업무', '중점 확인사항', '결과', '비고'], ...(b.progress ?? []).map((x: any) => [x.week, x.task, x.focus, x.result, x.note]), [],
       ['■ 차월 업무목표 및 실천사항'], ['업무목표', '실천사항'], ...(b.next ?? []).map((x: any) => [x.goal, x.actions]), [],
+      ['■ 이번 달 민원·특이사항(처리 결과 포함)'], ['번호', '내용', '처음 보고', '처리 결과', '세부'],
+      ...(ex.issuesMonth ?? []).map((x: any, k: number) => [k + 1, x.title, x.first, `${x.state}${x.last !== x.first ? ` (${x.last} 기준)` : ''}`, (x.details ?? []).join('\n')]), ...(ex.issuesMonth?.length ? [] : [['', '이번 달 주간보고에 적힌 민원·특이사항 없음']]), [],
       ['■ 미완료(다음 달 확인)'], ['항목', '상태', '처음', '마지막 주'], ...(b.unfinished ?? []).map((x: any) => [x.title, x.state, x.since, x.lastWeek]),
       ...(b.notes ? [[], ['메모', b.notes]] : []),
     ];
@@ -486,16 +531,18 @@ export async function exportReport(u: SessionUser, id: string) {
     const c = [['시설', '전달 인원', '이번달 인원', '증감', '증감률'], ...usage.map((x) => { const d = delta(x.prev, x.cur); return [x.item, x.prev, x.cur, x.diff || d.diff, x.rate || d.rate]; }),
       ...(usage.length || st ? [(() => { const d = delta(tot.prev, tot.cur); return [tot.item || '전 시설 합계', tot.prev, tot.cur, tot.diff || d.diff, tot.rate || d.rate]; })()] : []), ...fileNote];
     // #1112 회원(이용권) 현황 시트(있을 때만) — 숫자만
-    const m = b.members as any; const sheets = [{ name: '월간 업무 보고서', rows: main }, { name: '시설별 이용 현황', rows: c }];
+    const fl = ex.flow as { months: string[]; rows: { label: string; vals: (number | null)[] }[]; notes: string[] } | null;
+    const flowRows = fl ? [['구분', ...fl.months.map((x) => `${x.slice(0, 4)}.${x.slice(5)}`)], ...fl.rows.map((x) => [x.label, ...x.vals.map((v) => (v === null ? '-' : v))]), [], ...fl.notes.map((x) => [x])] : [];
+    const m = b.members as any; const sheets = [{ name: '월간 업무 보고서', rows: main }, { name: '시설별 이용 현황', rows: c }, ...(fl ? [{ name: '최근 6개월 흐름', rows: flowRows }] : [])];
     if (m) {
       const { memberTables } = await import('./memberList');
       sheets.push({ name: '회원 현황', rows: memberTables(r.status === 'draft' ? await withKinds(sql, tenantOf(u), m) : m).flatMap((tb) => [[`■ ${tb.title}`], ['구분', '전달', '이번달', '증감', '증감률'],
         ...tb.rows.map((x) => [x.label, x.prev ?? '-', x.cur, x.diff ?? '-', x.rate === null ? '-' : `${x.rate}%${x.drop ? ' (30% 넘게 줄어듦)' : ''}`]), ...tb.notes.map((x) => [x]), []]) });
     }
-    return { fileName: `${r.unit_name}_월간보고_${r.period_start.slice(0, 7)}.xlsx`, data: writeXlsx(sheets) };
+    return { fileName: `${filePre}_${r.unit_name}_월간보고_${r.period_start.slice(0, 7)}.xlsx`, data: writeXlsx(sheets) };
   }
   const rows = [
-    ['커뮤니티 주간 운영 보고서', r.unit_name], ['기준일시', `${md(r.report_day)}(금) 11:00`], ['기간', `${md(r.period_start)} ~ ${md(r.period_end)}`], ['작성', '주식회사 다짐 (DAGYM)'], [],
+    [`${mark} · 커뮤니티 주간 운영 보고서`, r.unit_name], ['기준일시', `${md(r.report_day)}(금) 11:00`], ['기간', `${md(r.period_start)} ~ ${md(r.period_end)}`], ['작성', '주식회사 다짐 (DAGYM)'], [],
     ['1. 이용 인원 현황'], ['항목', '인원'], ...(b.usage ?? []).map((x: any) => [x.item, x.count]),
     ...((b.lockers ?? []).length ? [[], ['락커 구분', '사용', '전체', '사용률'], ...b.lockers.map((x: any) => { const u = numOf(x.used), t = numOf(x.total); return [x.name, x.used, x.total, u !== null && t ? `${Math.round((u / t) * 100)}%` : '']; })] : []), [],
     ['2. 시설 점검 보고'], ['시설', '총 이용인원', '청소 상태', '시설 상태'],
@@ -503,7 +550,7 @@ export async function exportReport(u: SessionUser, id: string) {
     ['3. 특이사항 · 건의사항 · 민원'], ['제목', '처리', '세부'], ...(b.issues ?? []).map((x: any) => [x.title, x.state, (x.details ?? []).join('\n')]),
     ...(b.notes ? [[], ['메모', b.notes]] : []),
   ];
-  return { fileName: `${r.unit_name}_주간보고_${r.report_day}.xlsx`, data: writeXlsx([{ name: '주간 운영 보고서', rows }]) };
+  return { fileName: `${filePre}_${r.unit_name}_주간보고_${r.report_day}.xlsx`, data: writeXlsx([{ name: '주간 운영 보고서', rows }]) };
 }
 
 // ---------------- 정기 작업: 제출 30일 뒤 근거 지우기 · 금요일 11시 작성 알림 ----------------

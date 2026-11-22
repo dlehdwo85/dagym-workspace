@@ -6,7 +6,7 @@ import { Button, Empty, ErrorBox, Field, Loading, Modal, PageHeader, askConfirm,
 import { ReportView, STATE_TONE, type Body, type Line } from './ReportView';
 import { ReportTabs } from '@/components/ReportTabs';
 import { DropZone } from '@/components/upload';
-import { MembersSection, MonthlyView, delta, signed, usageTotal, type MembersBody, type MonthlyBody } from './MonthlyView';
+import { FlowSection, MembersSection, MonthIssuesSection, MonthlyView, delta, signed, usageTotal, type MembersBody, type MonthlyBody } from './MonthlyView';
 import { PASS_KIND_LABEL, isV2, kindOf, viewOf, type MemberSel, type PassKind } from '@/lib/branchReport/memberList';
 
 /**
@@ -222,7 +222,7 @@ function Submitted({ r, canReopen, onChange, onEvidence }: { r: any; canReopen: 
           <a href={`/branch-print/${r.id}`} target="_blank" className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-sm" data-testid="branch-pdf"><Printer className="size-4" />PDF</a>
           <a href={`/api/branch-reports/${r.id}/xlsx`} className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-sm" data-testid="branch-xlsx"><FileDown className="size-4" />엑셀</a>
           {canReopen && <Button size="sm" variant="secondary" onClick={undo} data-testid="branch-unsubmit">제출 취소</Button>}</span></div>
-      <ReportView unit={r.unit_name} day={r.report_day} start={r.period_start} end={r.period_end} body={r.body as Body} />
+      <ReportView unit={r.unit_name} day={r.report_day} start={r.period_start} end={r.period_end} body={r.body as Body} submitted={r.status === 'submitted'} />
     </section>
   );
 }
@@ -376,6 +376,8 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
         <textarea className={ta} value={x.actions} placeholder="실천사항" onChange={(e) => set({ ...b, next: b.next.map((y, j) => j === k ? { ...y, actions: e.target.value } : y) })} disabled={!canWrite} aria-label="실천사항" />
         <Del on={() => set({ ...b, next: b.next.filter((_, j) => j !== k) })} /></div>)}
       <Add label="차월 목표" on={() => set({ ...b, next: [...b.next, { goal: '', actions: '' }] })} />
+      {/* #1116 고객사 보고: 이번 달 민원·특이사항(주간보고에서 모음, 고치려면 그 주 주간보고에서) · 최근 6개월 흐름(올린 파일 숫자) — 읽기만 */}
+      {b.issuesMonth && <div className="rounded-input border border-line p-2 text-[13px]">{<MonthIssuesSection items={b.issuesMonth} />}<p className="mt-1 text-[11px] text-ink-3">그 달 제출된 주간보고의 특이사항·민원을 모은 것 — 고치려면 그 주 주간보고를 고친 뒤 다시 보세요.</p></div>}
       <h3 className="text-sm font-semibold">■ 미완료(다음 달 확인) <span className="font-normal text-xs text-ink-3">— 주간보고에서 마지막 상태가 완료가 아닌 것</span></h3>
       {b.unfinished.length ? b.unfinished.map((x, k) => <div key={k} className="flex items-center gap-2 text-[13px]" data-testid="branch-monthly-unfinished">
         <span className="min-w-0 flex-1">{x.title}</span><span className={cx('shrink-0 text-xs', STATE_TONE[x.state])}>{x.state}</span><span className="shrink-0 text-xs text-ink-3">{x.since}~{x.lastWeek}</span>
@@ -408,6 +410,7 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
         {b.members && <label className="inline-flex items-center gap-1.5 text-xs text-ink-2"><input type="checkbox" checked={b.members.exclude} onChange={(e) => void toggleExclude(e.target.checked)} disabled={!canWrite || memBusy} data-testid="branch-member-exclude" />시험·직원 줄 제외({b.members.excluded}건 — 이용권명 &lsquo;테스트&rsquo;, 동 999·9999·111·빈칸)</label>}
       </div></DropZone>
       {b.members ? <MembersPanel m={b.members} canWrite={canWrite} busy={memBusy} onKind={setKind} /> : <p className="text-xs text-ink-3">아직 올린 회원목록이 없습니다.</p>}
+      {b.flow && <div className="overflow-x-auto rounded-input border border-line p-2 text-[13px]"><FlowSection flow={b.flow} /></div>}
       <Field label="메모"><textarea className={cx(inputCls, 'min-h-[48px] text-[13px]')} value={b.notes} onChange={(e) => set({ ...b, notes: e.target.value })} disabled={!canWrite} /></Field>
       {canWrite && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={save} disabled={busy || !dirty} data-testid="branch-monthly-save">저장</Button><Button onClick={submit} disabled={busy} data-testid="branch-monthly-submit">제출</Button></div>}
     </section>
@@ -429,7 +432,7 @@ function MonthlySubmitted({ r, canReopen, onChange, onEvidence }: { r: any; canR
           <a href={`/branch-print/${r.id}`} target="_blank" className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-sm" data-testid="branch-pdf"><Printer className="size-4" />PDF</a>
           <a href={`/api/branch-reports/${r.id}/xlsx`} className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-sm" data-testid="branch-xlsx"><FileDown className="size-4" />엑셀</a>
           {canReopen && <Button size="sm" variant="secondary" onClick={undo} data-testid="branch-unsubmit">제출 취소</Button>}</span></div>
-      <MonthlyView unit={r.unit_name} start={r.period_start} end={r.period_end} author={r.submitted_by_name ?? r.created_by_name ?? ''} reportDay={r.submitted_at ? String(r.submitted_at).slice(0, 10) : ''} body={r.body as MonthlyBody} />
+      <MonthlyView unit={r.unit_name} start={r.period_start} end={r.period_end} author={r.submitted_by_name ?? r.created_by_name ?? ''} reportDay={r.submitted_at ? String(r.submitted_at).slice(0, 10) : ''} body={r.body as MonthlyBody} submitted={r.status === 'submitted'} />
     </section>
   );
 }

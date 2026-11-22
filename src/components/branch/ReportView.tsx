@@ -2,6 +2,7 @@
  * #1096 지점 주간보고 — 읽기 화면·인쇄(A4) 공용(훅 없음: 서버·클라이언트 모두에서 씀).
  * 양식 A(커뮤니티 주간 운영 보고서): 머리(기준일시·작성) · 1. 이용 인원 현황(이용권·락커) · 2. 시설 점검 보고 · 3. 특이사항·건의사항·민원
  */
+import { ClientMark } from './MonthlyView';
 export type Line = { item: string; status: string; action: string; state: string; evidence: string[] };
 export type Body = {
   usage: { item: string; count: string; note?: string }[]; lockers: { name: string; used: string; total: string }[];
@@ -13,12 +14,12 @@ const th = 'border border-slate-300 bg-slate-50 px-2 py-1 text-left font-semibol
 const td = 'border border-slate-300 px-2 py-1 align-top';
 const rate = (u: string, t: string) => { const a = Number(u), b = Number(t); return Number.isFinite(a) && Number.isFinite(b) && b > 0 ? `${Math.round((a / b) * 100)}%` : '-'; };
 
-export function ReportView({ unit, day, start, end, body }: { unit: string; day: string; start: string; end: string; body: Body }) {
+export function ReportView({ unit, day, start, end, body, submitted = false }: { unit: string; day: string; start: string; end: string; body: Body; submitted?: boolean }) {
   const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   return (
     <article className="space-y-4 text-[13px] leading-relaxed text-slate-900" data-testid="branch-report-view">
       <header className="border-b-2 border-slate-800 pb-2">
-        <h1 className="text-lg font-bold">{unit} 커뮤니티 주간 운영 보고서</h1>
+        <h1 className="text-lg font-bold">{unit} 커뮤니티 주간 운영 보고서<ClientMark submitted={submitted} /></h1>
         <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-slate-600"><span>기준일시 {md(day)}(금) 11:00 기준 · 기간 {md(start)}~{md(end)}</span><span>작성 주식회사 다짐 (DAGYM)</span></div>
       </header>
       <section>

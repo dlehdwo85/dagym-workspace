@@ -89,7 +89,7 @@ describe('#1096 2단계 월간 보고서', () => {
     const x = await fetch(`${BASE}/api/branch-reports/${reportId}/xlsx`, { headers: { cookie: ctx.staffA.client.cookie } });
     assert.equal(x.status, 200); assert.match(x.headers.get('content-type'), /spreadsheetml/);
     const buf = Buffer.from(await x.arrayBuffer()); assert.equal(buf.subarray(0, 2).toString(), 'PK', '엑셀(zip) 파일');
-    assert.match(decodeURIComponent(x.headers.get('content-disposition')), /월간 강남점_월간보고_2026-10\.xlsx/);
+    assert.match(decodeURIComponent(x.headers.get('content-disposition')), /초안_월간 강남점_월간보고_2026-10\.xlsx/);
     const p = await ctx.staffA.client.req('GET', `/branch-print/${reportId}`);
     assert.equal(p.status, 200); assert.match(p.body, /월간 업무 보고서/); assert.match(p.body, /시설별 이용 현황/); assert.match(p.body, /주식회사 다짐 운영팀/);
     assert.equal((await ctx.staffB.client.req('GET', `/api/branch-reports/${reportId}/xlsx`)).status, 404);
@@ -218,6 +218,55 @@ describe('#1096 2단계 월간 보고서', () => {
     assert.equal((await up(ctx.staffA.client, 'b.xlsx', writeXlsx([{ name: '전체', rows: [['순번', '동'], ['1', '401']] }]))).status, 400, '이용권명 머리줄 없음');
     const [wk] = await sql`select id from branch_reports where site_id = ${siteA} and report_day = '2026-10-16'`;
     assert.equal((await ctx.staffA.client.req('POST', `/api/branch-reports/${wk.id}/member-file`, { name: 'a.xlsx', b64: Buffer.from(x).toString('base64') })).status, 400, '주간보고에는 못 올림');
+  });
+
+  test('#1116 고객사 보고: 최근 6개월 흐름(올린 파일 숫자만·없는 달 -) · 이번 달 민원·특이사항 모음 · 고객사 제출용 표시·파일 이름 · 화면 저장으로 못 바꿈 · 제출 때 굳힘', async () => {
+    const { readXlsx } = await import('../../src/lib/xlsxSheet.ts');
+    const agg = (h, s) => ({ v: 2, rows: h + s, names: { '헬스1개월': { name: '헬스 1개월', active: h, billing: h * 50000, newThisMonth: 0, endedThisMonth: 0, byDong: { 401: h } }, '수영강습': { name: '수영 강습', active: s, billing: s * 60000, newThisMonth: 0, endedThisMonth: 0, byDong: { 401: s } } }, hh: { '헬스1개월': h } });
+    await sql`insert into branch_member_stats (site_id, month, tenant, stats, stats_all, excluded, file_name) values (${siteA}, '2026-07', 'default', ${sql.json(agg(5, 2))}, ${sql.json(agg(6, 2))}, 1, 'jul.xlsx')`; // 6월 이전은 없음(9·10월은 앞 시험에서 올림)
+    const g = (await ctx.staffA.client.ok('GET', `/api/branch-reports/${reportId}`)).report;
+    assert.equal(g.status, 'draft');
+    const f = g.body.flow; const row = (k) => f.rows.find((x) => x.key === k).vals;
+    assert.deepEqual(f.months, ['2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10']);
+    assert.deepEqual([row('use')[2], row('class')[2], row('billing')[2]], [5, 2, 370000], '7월 = 저장된 집계(시험·직원 줄 제외)');
+    assert.deepEqual([row('use')[1], row('use')[0]], [null, null], '없는 달은 비움(-)');
+    assert.ok(row('use')[5] !== null && row('billing')[5] !== null, '이번 달 = 올린 회원목록');
+    const num = (v) => Number(String(v ?? '').replace(/[^\d.-]/g, '')) || null;
+    if (g.body.usageTotal) { assert.equal(row('usage')[5], num(g.body.usageTotal.cur)); assert.equal(row('usage')[4], num(g.body.usageTotal.prev), '9월 이용인원 = 10월 보고의 전달 값'); }
+    assert.deepEqual(g.body.issuesMonth, [
+      { title: '사우나 온도 민원', first: '1주차(10/2)', last: '3주차(10/16)', state: '완료', details: ['10/1 접수', '설비 업체 점검 10/8', '온도 조절기 교체 10/15'], weeks: 3 },
+      { title: '주차 스티커 문의', first: '1주차(10/2)', last: '1주차(10/2)', state: '확인 필요', details: [], weeks: 1 },
+    ], '제출된 10월 주간보고만(초안·11월 제외), 같은 제목은 한 줄 · 마지막 상태');
+    // 화면 저장으로 흐름·민원 모음을 바꿀 수 없음
+    const forged = await ctx.staffA.client.ok('PUT', `/api/branch-reports/${reportId}`, { ...g.body, flow: { months: ['위조'], rows: [], notes: [] }, issuesMonth: [] });
+    assert.equal(forged.report.body.flow.months[0], '2026-05'); assert.equal(forged.report.body.issuesMonth.length, 2);
+    // 인쇄·엑셀: 초안 표시·파일 이름
+    const p = await ctx.staffA.client.req('GET', `/branch-print/${reportId}`);
+    assert.match(p.body, /최근 6개월 흐름/); assert.match(p.body, /이번 달 민원·특이사항/); assert.match(p.body, /초안\(제출 전\)/); assert.match(p.body, /<title>초안_월간 강남점_월간보고_2026-10<\/title>/);
+    const x = await fetch(`${BASE}/api/branch-reports/${reportId}/xlsx`, { headers: { cookie: ctx.staffA.client.cookie } });
+    assert.match(decodeURIComponent(x.headers.get('content-disposition')), /초안_월간 강남점_월간보고_2026-10\.xlsx/);
+    const sheets = await readXlsx(await x.arrayBuffer());
+    assert.equal(sheets[0].cells[0][0].v, '초안(제출 전) · 월간 업무 보고서');
+    assert.ok(sheets[0].cells.some((r) => r.some((c) => c?.v === '사우나 온도 민원')), '민원 모음이 엑셀에');
+    const fs = sheets.find((s) => s.name === '최근 6개월 흐름'); assert.ok(fs, '흐름 시트');
+    assert.deepEqual(fs.cells[0].map((c) => c?.v), ['구분', '2026.05', '2026.06', '2026.07', '2026.08', '2026.09', '2026.10']);
+    assert.deepEqual(fs.cells[2].map((c) => c?.v), ['활성 이용권(개)', ...row('use').map((v) => (v === null ? '-' : String(v)))]); assert.equal(fs.cells[2][3].v, '5');
+    // 제출 → 고객사 제출용 · 그때 값으로 굳음(뒤에 6월 집계를 넣어도 제출본은 그대로) · 제출 취소하면 다시 계산
+    await ctx.staffA.client.ok('POST', `/api/branch-reports/${reportId}/submit`, {});
+    const [db1] = await sql`select body->'flow' as flow, body->'issuesMonth' as im from branch_reports where id = ${reportId}`;
+    assert.equal(db1.flow.months.length, 6); assert.equal(db1.im.length, 2);
+    await sql`insert into branch_member_stats (site_id, month, tenant, stats, stats_all, excluded, file_name) values (${siteA}, '2026-06', 'default', ${sql.json(agg(7, 3))}, ${sql.json(agg(7, 3))}, 0, 'jun.xlsx')`;
+    const sub = (await ctx.staffA.client.ok('GET', `/api/branch-reports/${reportId}`)).report;
+    assert.equal(sub.body.flow.rows.find((x) => x.key === 'use').vals[1], null, '제출본은 굳은 값');
+    const ps = await ctx.staffA.client.req('GET', `/branch-print/${reportId}`);
+    assert.match(ps.body, /고객사 제출용/); assert.match(ps.body, /<title>고객사제출용_월간 강남점_월간보고_2026-10<\/title>/);
+    const xs = await fetch(`${BASE}/api/branch-reports/${reportId}/xlsx`, { headers: { cookie: ctx.staffA.client.cookie } });
+    assert.match(decodeURIComponent(xs.headers.get('content-disposition')), /고객사제출용_월간 강남점_월간보고_2026-10\.xlsx/);
+    await ctx.owner.ok('DELETE', `/api/branch-reports/${reportId}/submit`);
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/branch-reports/${reportId}`)).report.body.flow.rows.find((x) => x.key === 'use').vals[1], 7, '초안으로 돌아오면 다시 계산');
+    // 주간보고도 표지 표시
+    const [wk] = await sql`select id from branch_reports where site_id = ${siteA} and report_day = '2026-10-16'`;
+    assert.match((await ctx.staffA.client.req('GET', `/branch-print/${wk.id}`)).body, /고객사 제출용/);
   });
 
   test('주간보고 엑셀 내려받기', async () => {
