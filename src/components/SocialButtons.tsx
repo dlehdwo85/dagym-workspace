@@ -17,6 +17,7 @@ const LOOK: Record<string, { label: string; cls: string; mark: React.ReactNode }
 /** V29 소셜 가입·로그인 버튼 — 키가 등록된 제공자만(없으면 아무것도 안 보임) */
 export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady }: { verb?: string; invite?: string; mode?: 'login' | 'link'; onReady?: (n: number) => void }) {
   const [ps, setPs] = useState<string[]>([]);
+  const [base, setBase] = useState<string | undefined>();
   useEffect(() => { if (hasBrowser() && mode === 'login') watchOAuthReturn().catch(() => {}); }, [mode]); // #1107 로그인 화면에서도 앱 복귀 링크를 받음(앱이 다시 켜진 경우 포함)
   useEffect(() => {
     // 점검 2026-10-16: 앱(WebView)에서는 Google 로그인이 정책상 막힘(disallowed_useragent) → 앱에서는 카카오·네이버만
@@ -27,13 +28,15 @@ export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady
     api('/api/auth/oauth/providers').then((r) => {
       let p = (r.providers as string[]).filter((x) => !(inApp && x === 'google'));
       if (ios) p = [];
-      setPs(p); onReady?.(p.length);
+      setPs(p); setBase(typeof r.base === 'string' ? r.base : undefined); onReady?.(p.length);
     }).catch(() => onReady?.(0));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!ps.length) return null;
   const href = (p: string) => {
     const q = new URLSearchParams({ mode, client: Capacitor.isNativePlatform() ? Capacitor.getPlatform() : 'web' });
     if (invite) q.set('invite', invite);
+    // #1114: 워크인에서 로그아웃한 직후 첫 소셜 로그인 — 제공자에게 다시 로그인을 요청(카카오 prompt=login · 네이버 auth_type=reauthenticate)
+    try { if (mode === 'login' && localStorage.getItem('wos_oauth_fresh') === '1') q.set('fresh', '1'); } catch {}
     const u = readUtm();
     if (u?.source) q.set('utm_source', u.source); if (u?.medium) q.set('utm_medium', u.medium); if (u?.campaign) q.set('utm_campaign', u.campaign);
     return `/api/auth/oauth/${p}/start?${q}`;
@@ -41,7 +44,7 @@ export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady
   return (
     <div className="space-y-2" data-testid="social-buttons">
       {ps.map((p) => (
-        <a key={p} href={href(p)} onClick={(e) => { if (hasBrowser() && mode === 'login') { e.preventDefault(); openOAuthInBrowser(href(p)).catch(() => { location.href = href(p); }); } }} className={`flex h-11 w-full items-center justify-center gap-2 rounded-input text-[15px] font-semibold ${LOOK[p].cls}`} data-testid={`social-${p}`}>
+        <a key={p} href={href(p)} onClick={(e) => { const to = href(p); try { localStorage.removeItem('wos_oauth_fresh'); } catch {} if (hasBrowser() && mode === 'login') { e.preventDefault(); openOAuthInBrowser(to, base).catch(() => { location.href = to; }); } else if (to !== e.currentTarget.getAttribute('href')) { e.preventDefault(); location.href = to; } }} className={`flex h-11 w-full items-center justify-center gap-2 rounded-input text-[15px] font-semibold ${LOOK[p].cls}`} data-testid={`social-${p}`}>
           {LOOK[p].mark}{p === 'apple' ? (verb === '로그인' ? 'Apple로 로그인' : 'Apple로 계속하기') : `${LOOK[p].label}로 ${verb}`}
         </a>
       ))}

@@ -60,6 +60,8 @@ export const startInput = z.object({
   utm_source: z.string().max(80).optional(), utm_medium: z.string().max(80).optional(), utm_campaign: z.string().max(120).optional(),
   /** 앱: 시스템 브라우저에서 로그인 → 앱으로 복귀. 앱이 만든 검증값의 sha256(hex) */
   ac: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /** #1114: 워크인에서 로그아웃한 뒤 첫 소셜 로그인 — 제공자에게 다시 로그인을 요청(다른 계정으로 들어갈 수 있게) */
+  fresh: z.enum(['1']).optional(),
 });
 export function startOAuth(p: Provider, i: z.infer<typeof startInput>) {
   const c = conf(p);
@@ -71,6 +73,9 @@ export function startOAuth(p: Provider, i: z.infer<typeof startInput>) {
   const q = new URLSearchParams({ response_type: 'code', client_id: c.id, redirect_uri: redirectUri(p), state: st.n });
   if (c.scope) q.set('scope', c.scope);
   if (p === 'google') q.set('prompt', 'select_account');
+  // #1114(대표 11/22): 카카오는 브라우저에 로그인 세션이 있으면 계정 확인 없이 바로 넘어감 → 기본은 계정 선택, 로그아웃 직후 첫 로그인은 다시 로그인
+  if (p === 'kakao') q.set('prompt', i.fresh ? 'login' : 'select_account');
+  if (p === 'naver' && i.fresh) q.set('auth_type', 'reauthenticate');
   if (p === 'apple') q.set('response_mode', 'form_post'); // 이름·이메일을 받으려면 form_post(콜백 POST → 같은 주소 GET 으로 넘김)
   return { url: `${c.auth}?${q}`, cookie };
 }

@@ -131,6 +131,18 @@ describe('V29 소셜 가입·로그인', () => {
     assert.match(r2.headers.get('location'), /^intent:\/\/open\/auth\/app\?error=/);
   });
 
+  test('#1114 카카오 계정 확인: 기본 prompt=select_account · 로그아웃 직후(fresh=1) 카카오 prompt=login·네이버 auth_type=reauthenticate · 시작 주소(base)는 APP_URL', async () => {
+    const authUrl = async (p, q = '') => new URL((await new Client().req('GET', `/api/auth/oauth/${p}/start?${q}`)).headers.get('location'));
+    assert.equal((await authUrl('kakao')).searchParams.get('prompt'), 'select_account');
+    assert.equal((await authUrl('kakao', 'fresh=1')).searchParams.get('prompt'), 'login');
+    assert.equal((await authUrl('naver')).searchParams.get('auth_type'), null);
+    assert.equal((await authUrl('naver', 'fresh=1')).searchParams.get('auth_type'), 'reauthenticate');
+    assert.equal((await authUrl('google', 'fresh=1')).searchParams.get('prompt'), 'select_account', '구글은 그대로');
+    assert.equal((await new Client().req('GET', '/api/auth/oauth/kakao/start?fresh=yes')).status, 303, '모르는 값은 로그인 화면 안내(시작 안 함)');
+    const pr = await new Client().ok('GET', '/api/auth/oauth/providers');
+    assert.equal(pr.base, BASE, '앱 시스템 브라우저 시작 주소 = APP_URL');
+  });
+
   test('같은 이메일의 기존 계정은 자동으로 묶지 않음 · 인증 안 된 이메일·이메일 미동의는 가입 불가 · 상태 위조는 거절', async () => {
     let to = await social(new Client(), 'naver', { sub: 'n-1', email: 'boss@social.test', name: '다른사람' });
     assert.equal(to.pathname, '/login'); assert.equal(to.searchParams.get('code'), 'exists');
