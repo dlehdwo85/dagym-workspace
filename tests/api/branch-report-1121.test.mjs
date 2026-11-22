@@ -51,11 +51,14 @@ describe('#1096 지점 주간보고', () => {
   test('스위치: 다짐(기본 회사)만 — 다른 회사는 화면·API 모두 404', async () => {
     const h = await ctx.owner.ok('GET', '/api/branch-reports');
     assert.equal(h.admin, true); assert.deepEqual(h.sites, []); assert.equal(h.friday, friday);
-    // 화면: 앱 틀이 먼저 흘러 나가므로(상태 200) 다른 회사는 없는 화면(404 대체 화면) + 메뉴에 '지점 보고' 없음
+    // 화면: 앱 틀이 먼저 흘러 나가므로(상태 200) 다른 회사는 없는 화면(404 대체 화면) · #1119 사이드바는 '보고' 하나 — 지점 보고는 보고 화면 위 탭
     const own = await ctx.owner.req('GET', '/branch-reports');
-    assert.equal(own.status, 200); assert.ok(!own.body.includes('NEXT_HTTP_ERROR_FALLBACK;404')); assert.ok(own.body.includes('href="/branch-reports"'), '다짐 관리자 메뉴에 지점 보고');
+    assert.equal(own.status, 200); assert.ok(!own.body.includes('NEXT_HTTP_ERROR_FALLBACK;404'));
+    assert.ok((await ctx.owner.req('GET', '/reports/mine')).body.includes('href="/branch-reports"'), '다짐 관리자 보고 화면에 고객사 보고(지점) 탭');
     const oth = await other.req('GET', '/branch-reports');
-    assert.ok(oth.body.includes('NEXT_HTTP_ERROR_FALLBACK;404'), '다른 회사는 없는 화면'); assert.ok(!oth.body.includes('href="/branch-reports"'), '다른 회사 메뉴에 없음');
+    assert.ok(oth.body.includes('NEXT_HTTP_ERROR_FALLBACK;404'), '다른 회사는 없는 화면');
+    const othMine = (await other.req('GET', '/reports/mine')).body;
+    assert.ok(!othMine.includes('href="/branch-reports"'), '다른 회사 보고 화면에 지점 탭 없음'); assert.ok(othMine.includes('href="/reports"'), '다른 회사도 회사 주간 요약 탭은 있음');
     for (const [m, p] of [['GET', '/api/branch-reports'], ['GET', '/api/branch-reports/setup'], ['PUT', '/api/branch-reports/setup'], ['POST', '/api/branch-reports/draft']]) {
       assert.equal((await other.req(m, p, m === 'GET' ? undefined : { sites: [{ name: 'x' }], siteId: ctx.siteA, day: friday })).status, 404, `${m} ${p}`);
     }

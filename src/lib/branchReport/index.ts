@@ -535,3 +535,10 @@ export async function branchReportVisible(u: SessionUser) {
   if (isAdmin(u)) return true;
   return (await sitesOf(u, db()).catch(() => [])).some((t) => !t.hidden);
 }
+/** #1119 보고 메뉴 하나: 회사가 지점 보고를 쓰는지(이름 나눔) · 이 사람이 지점 작성 담당인지(처음 여는 탭 = 고객사 보고) */
+export async function branchReportAccess(u: SessionUser) {
+  const company = !u.isDemo && branchReportOn(tenantOf(u));
+  if (!company) return { company: false, visible: false, writer: false };
+  const sites = await sitesOf(u, db()).catch(() => [] as Site[]);
+  return { company, visible: isAdmin(u) || sites.some((t) => !t.hidden), writer: sites.some((t) => !t.hidden && t.writer_user_id === u.id) };
+}

@@ -1038,7 +1038,7 @@ await step('W-1 이름 워크인·부제 다짐 · 하이링크, 사이드바(�
   assert.equal(await owner.getByText('BODY LAB').count(), 0, 'BODY LAB 문구 없음');
   const nav = owner.getByRole('navigation', { name: '주 메뉴' });
   const labels = (await nav.getByRole('link').allTextContents()).map((x) => x.replace(/\d+$/, '').trim()).filter(Boolean);
-  for (const l of ['홈', '업무', '프로젝트', '캘린더', '알림', '주간 보고', '매출', '사용자 관리', '운영 상태']) assert.ok(labels.includes(l), `${l} 있음 (${labels})`);
+  for (const l of ['홈', '업무', '프로젝트', '캘린더', '알림', '보고', '매출', '사용자 관리', '운영 상태']) assert.ok(labels.includes(l), `${l} 있음 (${labels})`);
   for (const l of ['내 업무', '현장 신고 QR', '자동화', '현장 비교', '업무량', '결재선', '전체 업무', '오늘·이번 주', '템플릿']) assert.ok(!labels.includes(l), `${l} 숨김`);
   await owner.getByRole('button', { name: '내 계정 메뉴' }).click();
   const items = (await owner.getByRole('menuitem').allTextContents()).map((x) => x.replace(/\?$/, '').trim());

@@ -4,6 +4,7 @@ import { FileDown, FileUp, Loader2, Plus, Printer, Settings2, Sparkles, Trash2 }
 import { api, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Field, Loading, Modal, PageHeader, askConfirm, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ReportView, STATE_TONE, type Body, type Line } from './ReportView';
+import { ReportTabs } from '@/components/ReportTabs';
 import { MembersSection, MonthlyView, delta, signed, usageTotal, type MembersBody, type MonthlyBody } from './MonthlyView';
 import { PASS_KIND_LABEL, isV2, kindOf, viewOf, type MemberSel, type PassKind } from '@/lib/branchReport/memberList';
 
@@ -58,7 +59,8 @@ export function BranchReports() {
   };
   return (
     <div className="space-y-3" data-testid="branch-reports">
-      <PageHeader title="고객사 보고(지점)" sub={(mode === 'weekly' ? "고객사(단지)에 내는 지점 주간 보고입니다. 지점 관리자의 주간보고 글로 AI 가 초안을 만들고, 담당이 고쳐서 제출합니다 — 숫자는 글에 있는 것만, 모르면 '확인 필요'" : '고객사(단지)에 내는 월간 보고입니다. 그 달 제출된 주간보고로 월간 업무 보고서(중요업무·진행사항·차월 목표)와 시설별 이용 현황을 만듭니다 — 이용 인원·미완료는 주간보고 그대로') + ' · 대표에게 내는 사내 보고는 [사내 업무 보고]'} actions={h.admin ? <Button size="sm" variant="secondary" onClick={() => setSetup(true)} data-testid="branch-setup-open"><Settings2 />보고 지점</Button> : undefined} />
+      <ReportTabs />
+      <PageHeader title="고객사 보고(지점)" sub={(mode === 'weekly' ? "고객사(단지)에 내는 지점 주간 보고입니다. 지점 관리자의 주간보고 글로 AI 가 초안을 만들고, 담당이 고쳐서 제출합니다 — 숫자는 글에 있는 것만, 모르면 '확인 필요'" : '고객사(단지)에 내는 월간 보고입니다. 그 달 제출된 주간보고로 월간 업무 보고서(중요업무·진행사항·차월 목표)와 시설별 이용 현황을 만듭니다 — 이용 인원·미완료는 주간보고 그대로')} actions={h.admin ? <Button size="sm" variant="secondary" onClick={() => setSetup(true)} data-testid="branch-setup-open"><Settings2 />보고 지점</Button> : undefined} />
       {!h.sites.length ? <Empty title="아직 보고 지점이 없습니다">{h.admin ? '[보고 지점]에서 지점 이름을 한 번에 붙여 넣고 작성 담당·검토 담당을 고르세요.' : '관리자에게 내 지점의 작성 담당 지정을 요청하세요.'}</Empty> : <>
         <div className="inline-flex rounded-input border border-line bg-white p-0.5 text-sm" role="tablist" data-testid="branch-mode">
           {(['weekly', 'monthly'] as const).map((m) => <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)} className={cx('rounded-[6px] px-3 py-1', mode === m ? 'bg-brand-700 text-white' : 'text-ink-2 hover:bg-slate-50')} data-testid={`branch-mode-${m}`}>{m === 'weekly' ? '주간' : '월간'}</button>)}
