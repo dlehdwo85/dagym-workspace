@@ -3,7 +3,7 @@ import { db } from './db';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { hmac, newToken, sha256 } from './crypto';
 import { audit } from './log';
-import { appUrl } from './mail';
+import { appUrl, mailHtml, sendMail } from './mail';
 import { createOwnerSpace, signupEnabled, signupInput, TERMS_VERSION } from './signup';
 import { ensurePersonalCalendar } from './access';
 import type { SessionUser } from './types';
@@ -175,8 +175,12 @@ export async function oauthCallback(p: Provider, q: { code: string | null; state
   if (st.mode === 'link') {
     if (!me || me.support) throw forbidden('로그인한 뒤 연결해 주세요');
     if (idn && idn.user_id !== me.id) return { kind: 'error', code: 'taken', message: `이 ${PROVIDER_LABEL[p]} 계정은 이미 다른 워크인 계정에 연결되어 있습니다` };
+    // #1121(대표 11/22): 직원 계정 하나에 같은 SNS 는 한 계정만(카카오 계정 2개 연결 막기) — 바꾸려면 연결 해제 뒤 다시
+    const [mine] = await sql<{ subject: string }[]>`select subject from user_identities where user_id = ${me.id} and provider = ${p} limit 1`;
+    if (mine && mine.subject !== prof.subject) return { kind: 'error', code: 'already', message: `이미 다른 ${PROVIDER_LABEL[p]} 계정이 연결되어 있습니다 — 바꾸려면 설정 › 계정에서 연결을 해제한 뒤 다시 연결하세요` };
     await sql`insert into user_identities (provider, subject, user_id, email, secret) values (${p}, ${prof.subject}, ${me.id}, ${email}, ${secret}) on conflict (provider, subject) do update set secret = coalesce(excluded.secret, user_identities.secret)`;
     await audit(sql, me.id, 'auth.identity_linked', 'user', me.id, { provider: p }, ip);
+    if (!mine) void identityMail(me.id, p, 'linked'); // 새로 연결했을 때만(같은 계정 다시 연결은 알리지 않음)
     return { kind: 'linked' };
   }
 
@@ -281,5 +285,20 @@ export async function unlinkIdentity(u: SessionUser, p: Provider, ip: string | n
   if (p === 'apple') for (const x of r) await (await import('./oauthApple')).revokeApple(x.secret).catch(() => false); // 299차: Apple 연결 끊기 = 토큰 해지
   if (!r.length) throw notFound('연결되어 있지 않습니다');
   await audit(sql, u.id, 'auth.identity_unlinked', 'user', u.id, { provider: p }, ip);
+  void identityMail(u.id, p, 'unlinked');
   return { ok: true };
+}
+/** #1121: 소셜 계정 연결·해제를 본인 메일로 알림 — 본인이 아니면 바로 알 수 있게(실패해도 연결·해제는 그대로) */
+async function identityMail(userId: string, p: Provider, kind: 'linked' | 'unlinked') {
+  try {
+    const [u] = await db()<{ email: string; name: string }[]>`select email, name from users where id = ${userId}`;
+    if (!u?.email) return;
+    const at = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'long', timeStyle: 'short' }).format(new Date());
+    const label = PROVIDER_LABEL[p];
+    const title = kind === 'linked' ? `${label} 계정이 연결되었습니다` : `${label} 계정 연결이 해제되었습니다`;
+    const lines = kind === 'linked'
+      ? [`${u.name}님, ${at}에 워크인 계정에 ${label} 계정이 연결되었습니다. 이제 ${label} 버튼으로 로그인할 수 있습니다.`, `본인이 한 일이 아니면 설정 › 계정에서 연결을 해제하고 비밀번호를 바꾸세요.`]
+      : [`${u.name}님, ${at}에 워크인 계정에서 ${label} 계정 연결이 해제되었습니다. 이제 ${label} 버튼으로는 로그인할 수 없습니다.`, `본인이 한 일이 아니면 비밀번호를 바꾸고 회사 관리자에게 알려 주세요.`];
+    await sendMail(u.email, `[워크인] ${title}`, lines.join('\n'), mailHtml(title, lines, { label: '설정 › 계정 열기', url: `${appUrl()}/settings` }));
+  } catch { /* 메일 실패는 연결·해제를 막지 않음 */ }
 }

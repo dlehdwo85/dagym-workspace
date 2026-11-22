@@ -8,7 +8,7 @@ import { api, useApi } from '@/components/client';
 import { MultiUserSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { useSession } from '@/components/session';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, inputCls, toast } from '@/components/ui';
-import { putFile } from '@/components/upload';
+import { DropZone, putFile } from '@/components/upload';
 import { agreementLeftText } from '@/lib/agreementLabel';
 
 type State = 'active' | 'soon' | 'notice_passed' | 'expired' | 'renew_check' | 'open_ended' | 'ended';
@@ -187,6 +187,7 @@ function DetailModal({ id, canEdit, onClose, onChanged, onEdit }: { id: string; 
             {row('메모', a.memo ? <span className="whitespace-pre-wrap">{a.memo}</span> : null)}
             {a.status === 'ended' && row('종료 까닭', a.endedReason)}
           </dl>
+          <DropZone onFile={(f) => void upload(f)} disabled={!canEdit || !!up} label="여기에 놓으면 계약서 파일로 올립니다" testid="agr-file-drop">
           <section>
             <div className="mb-1.5 flex items-center gap-2"><h3 className="text-sm font-semibold">계약서 파일</h3><span className="text-xs text-ink-3">계약 관리 권한이 있는 사람만 열 수 있고, 연 기록이 남습니다</span>
               {canEdit && <Button size="sm" variant="secondary" className="ml-auto" disabled={!!up} onClick={() => fileRef.current?.click()} data-testid="agr-file-add">{up ? <Loader2 className="animate-spin" /> : <Paperclip />}{up ? `${up.pct}%` : '파일 올리기'}</Button>}</div>
@@ -197,8 +198,9 @@ function DetailModal({ id, canEdit, onClose, onChanged, onEdit }: { id: string; 
                 <span className="hidden shrink-0 text-xs text-ink-3 sm:inline">{size(f.size_bytes)}{a.termNo > 1 ? ` · ${f.term_no}번째 기간` : ''}</span>
                 <button type="button" className="shrink-0 rounded p-1 text-ink-3 hover:bg-slate-100" onClick={() => void openFile(f.id, false)} aria-label={`${f.file_name} 내려받기`}><Download className="size-4" /></button>
                 {canEdit && <button type="button" className="shrink-0 rounded p-1 text-ink-3 hover:bg-slate-100" onClick={() => void removeFile(f.id, f.file_name)} aria-label={`${f.file_name} 지우기`} data-testid="agr-file-remove"><Trash2 className="size-4" /></button>}
-              </li>))}</ul> : <p className="rounded-card border border-dashed border-line px-3 py-4 text-center text-xs text-ink-3">올린 파일이 없습니다</p>}
+              </li>))}</ul> : <p className="rounded-card border border-dashed border-line px-3 py-4 text-center text-xs text-ink-3">올린 파일이 없습니다{canEdit ? ' — 파일을 여기로 끌어다 놓거나 [파일 올리기]' : ''}</p>}
           </section>
+          </DropZone>
           {d.data!.terms.length > 0 && <section data-testid="agr-terms">
             <h3 className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold"><History className="size-4" />지난 기간</h3>
             <ul className="divide-y divide-line rounded-card border border-line text-sm">{d.data!.terms.map((t) => (

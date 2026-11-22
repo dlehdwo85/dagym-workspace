@@ -7,6 +7,7 @@ import { Contact, Download, FileSpreadsheet, Mail, Phone, Plus, RotateCcw, Searc
 import { api, useApi } from '@/components/client';
 import { useSession, useTerms } from '@/components/session';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { DropZone } from '@/components/upload';
 
 type C = { id: string; name: string; organization: string | null; title: string | null; phone: string | null; email: string | null; memo: string; tags: string[]; owner_id: string | null; owner_name: string | null; source: string; last_contact_at: string | null; created_by_name: string | null; created_at: string; deleted_at: string | null; task_count: number; canEdit: boolean };
 type List = { contacts: C[]; total: number; tags: { tag: string; n: number }[]; isAdmin: boolean };
@@ -182,13 +183,15 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
     <Modal open onClose={onClose} title="연락처 가져오기" wide>
       <div className="space-y-3 text-sm" data-testid="contacts-import-modal">
         {!parsed ? (
+          <DropZone onFile={(f) => void pick(f)} accept=".xlsx,.csv,.txt,.tsv,.vcf,.vcard" acceptLabel="엑셀(.xlsx)·CSV·vCard(.vcf)" disabled={busy} label="여기에 놓으면 연락처 파일을 읽습니다" testid="contacts-drop">
           <div className="rounded-card border-2 border-dashed border-line p-6 text-center">
             <FileSpreadsheet className="mx-auto size-8 text-ink-3" />
-            <p className="mt-2">엑셀(.xlsx)·CSV 또는 휴대폰에서 내보낸 vCard(.vcf) 파일</p>
+            <p className="mt-2">엑셀(.xlsx)·CSV 또는 휴대폰에서 내보낸 vCard(.vcf) 파일 — 끌어다 놓거나 아래 버튼으로 고르세요</p>
             <p className="text-xs text-ink-3">첫 줄은 머리글(이름·회사·직함·휴대폰·이메일·메모·태그). 이미 있는 번호·이메일은 빈 칸만 채웁니다. 한 번에 1,000명까지.</p>
             <input ref={inp} type="file" accept=".xlsx,.csv,.txt,.tsv,.vcf,.vcard" className="hidden" onChange={(e) => pick(e.target.files?.[0])} data-testid="contacts-file" />
             <Button className="mt-3" onClick={() => inp.current?.click()} disabled={busy}><Upload />파일 고르기</Button>
           </div>
+          </DropZone>
         ) : (
           <>
             <p className="flex items-center gap-2 text-xs text-ink-2"><FileSpreadsheet className="size-4" />{fileName} · {parsed.rows.length}줄 <button className="ml-auto inline-flex items-center gap-1 text-ink-3 hover:text-ink" onClick={() => { setParsed(null); setPv(null); }}><X className="size-3.5" />다른 파일</button></p>

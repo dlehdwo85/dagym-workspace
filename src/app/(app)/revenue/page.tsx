@@ -2,7 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Download, FileUp, Info, Sparkles } from 'lucide-react';
-import { DropHint, UploadProgress, putFile } from '@/components/upload';
+import { DropHint, DropZone, UploadProgress, putFile } from '@/components/upload';
 import { api, useApi } from '@/components/client';
 import { RevenueAuto } from '@/components/RevenueAuto';
 import { useSession } from '@/components/session';
@@ -185,7 +185,7 @@ export default function RevenuePage() {
           </details>
         </Card>
 
-        {data?.canEdit ? <Card className="p-4" data-testid="revenue-input">
+        {data?.canEdit ? <DropZone onFile={(f) => void pickFile(f)} accept=".csv,text/csv" acceptLabel="CSV" label="여기에 놓으면 CSV 를 읽어 미리 봅니다" testid="revenue-csv-drop"><Card className="p-4" data-testid="revenue-input">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold">월 실적 입력</h2>
             <div className="flex flex-wrap items-center gap-2">
@@ -228,7 +228,7 @@ export default function RevenuePage() {
               })}
             </ul>
           )}
-        </Card> : <p className="rounded-input bg-slate-50 p-3 text-sm text-ink-2" data-testid="revenue-view-only">보기 권한입니다 — 숫자 입력·가져오기는 대표가 &ldquo;입력&rdquo; 권한을 켜 준 사람만 할 수 있습니다.</p>}
+        </Card></DropZone> : <p className="rounded-input bg-slate-50 p-3 text-sm text-ink-2" data-testid="revenue-view-only">보기 권한입니다 — 숫자 입력·가져오기는 대표가 &ldquo;입력&rdquo; 권한을 켜 준 사람만 할 수 있습니다.</p>}
 
         {data?.canEdit && data?.aiEnabled && <AiInputPanel units={units} onDone={reload} />}
         <p className="flex items-start gap-1.5 text-xs text-ink-3"><Info className="mt-0.5 size-3.5 shrink-0" />
@@ -282,6 +282,7 @@ function AiInputPanel({ units, onDone }: { units: { name: string }[]; onDone: ()
     } catch (e: any) { toast.error(e.message); }
   }
   return (
+    <DropZone onFiles={(fl) => void go(fl)} accept=".xlsx,.xls,.csv,.pdf,image/*" acceptLabel="엑셀·CSV·PDF·사진" disabled={!!busy} label="여기에 놓으면 정산서를 올려 AI 가 숫자를 뽑습니다" testid="revenue-ai-input-drop">
     <Card className="p-4" data-testid="revenue-ai-input">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-violet-500" />자료로 입력 (AI)</h2>
@@ -315,5 +316,6 @@ function AiInputPanel({ units, onDone }: { units: { name: string }[]; onDone: ()
         </div>
       )}
     </Card>
+    </DropZone>
   );
 }

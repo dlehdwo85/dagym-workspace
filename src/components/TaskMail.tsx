@@ -9,6 +9,7 @@ import { api, broadcastRefresh, useApi } from './client';
 import { SuggestInput, SuggestList, useRecipientSuggest } from './contacts/RecipientSuggest';
 import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
 import { LibPreview, uploadTaskFiles, type LibPreviewFile } from './Attachments';
+import { DropZone } from './upload';
 import type { AssistDraft } from './TaskAssist';
 import { KakaoSend } from './KakaoSend';
 import { cacheForSms, canSmsAttach, smsWithFiles, type SmsFile } from './native';
@@ -307,6 +308,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
   const from = fromAddr ? `${f.fromName || d.account?.fromName || ''} <${fromAddr}>`.trim() : null;
   return (
     <Modal open onClose={onClose} title={channel === 'sms' ? '문자 시안' : channel === 'kakao' ? '카카오톡 시안' : '메일 시안 — 실제 나갈 모습'} wide>
+      <DropZone onFiles={(fl) => void upload(fl)} label="여기에 놓으면 이 업무에 올리고 첨부로 담습니다" testid="mail-compose-drop">
       <div className="space-y-3" data-testid="mail-compose">
         {channel === 'email' && !d.channel && <p className="rounded-input bg-amber-50 px-3 py-2 text-sm text-amber-800" data-testid="mail-no-account">메일을 보낼 방법이 아직 없습니다 — 회사 메일 계정을 연결하거나 워크인 발송을 켜 주세요. <Link href="/admin/mail" className="font-medium underline">메일 설정</Link></p>}
         <div className="flex flex-wrap items-center gap-1.5">
@@ -452,6 +454,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
               </span>}
         </div>
       </div>
+      </DropZone>
     </Modal>
   );
 }

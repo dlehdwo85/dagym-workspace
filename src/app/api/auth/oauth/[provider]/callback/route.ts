@@ -47,6 +47,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
     }
     if (sheet && r.kind !== 'linked') return toApp({ error: r.kind === 'error' ? r.message : '로그인을 마치지 못했습니다. 앱에서 다시 시도해 주세요.' });
     if (r.kind === 'error') console.warn('[oauth] 실패', provider, r.code ?? 'error'); // 로컬 11/21 #1094: 운영 기록에 코드만(이메일이 든 문구는 남기지 않음)
+    if (r.kind === 'error' && me && (r.code === 'taken' || r.code === 'already')) return go(`/settings?oauth_error=${encodeURIComponent(r.message)}&code=${r.code}`); // #1121: 설정에서 연결하다 막히면 설정 화면에서 안내
     if (r.kind === 'error') return go(`/login?oauth_error=${encodeURIComponent(r.message)}${r.code ? `&code=${r.code}` : ''}`);
     if (r.kind === 'linked') return go(`/settings?linked=${provider}`);
     if (r.kind === 'pending') return go(`/signup/social?t=${encodeURIComponent(r.token)}`);

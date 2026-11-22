@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, toast } from '@/components/ui';
+import { DropZone } from '@/components/upload';
 
 const C = '#7C3AED';
 /** 운영실 키 → 이름 · 워크인에서 보여 줄 자리(매핑 제안 — docs/research/OPS_DATA_MAPPING.md) */
@@ -88,22 +89,27 @@ function ConvertPanel() {
     try { const x = await api<Conv>('/api/marketing/imported/convert', { body: { mode } }); setR(x); if (mode === 'apply') toast.ok(`콘텐츠 ${x.made}건 · 요청 기록 ${x.requestsMade}건 · 시안 연결 ${x.assets?.linked ?? 0}건`); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
+  /** 자산 주소 목록(JSON) 고르기·끌어다 놓기 공통 (#1122) */
+  async function uploadAssetMap(f: File | undefined) {
+    if (!f) return;
+    setBusy(true);
+    try {
+      const x = await api<{ count: number; usable: number; rejected: number; rejectedHosts: string[] }>('/api/marketing/imported/asset-map', { body: { map: JSON.parse(await f.text()) } });
+      toast.ok(`자산 주소 ${x.count}개를 올렸습니다${x.rejected ? ` — 받을 수 없는 주소 ${x.rejected}개(${x.rejectedHosts.join(', ')})` : ''}`);
+      setR(await api<Conv>('/api/marketing/imported/convert', { body: { mode: 'preview' } }));
+    } catch (er: any) { toast.error(er instanceof SyntaxError ? 'JSON 형식이 아닙니다' : er.message); } finally { setBusy(false); }
+  }
   return (
     <section className="rounded-card border border-violet-200 bg-violet-50/40 p-3 text-sm" data-testid="ops-convert">
+      <DropZone onFile={(f) => void uploadAssetMap(f)} accept=".json,application/json" acceptLabel="JSON" disabled={busy} label="여기에 놓으면 자산 주소 목록(JSON)을 올립니다" testid="ops-asset-map-drop">
       <div className="flex flex-wrap items-center gap-2"><h2 className="font-semibold">워크인 화면으로 옮기기</h2>
         <span className="text-xs text-ink-2">게시물·일일 항목 → 콘텐츠 캘린더(결정 기록 포함), 요청 → 승인 대기 아래 &lsquo;이전 요청 기록&rsquo;</span>
         <span className="ml-auto flex gap-2">
           {/* 로컬 10/19: 게시물 assetIds 는 id 뿐 → 운영실 마케팅 세션이 준 'id → 주소' JSON 을 올리면 그걸로 시안 파일을 찾음 */}
           <label className="inline-flex cursor-pointer items-center rounded-input border border-line bg-white px-2.5 py-1 text-xs font-medium hover:bg-slate-50" data-testid="ops-asset-map">
             자산 주소 목록(JSON)
-            <input type="file" accept=".json,application/json" className="sr-only" disabled={busy} onChange={async (e) => {
-              const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
-              setBusy(true);
-              try {
-                const x = await api<{ count: number; usable: number; rejected: number; rejectedHosts: string[] }>('/api/marketing/imported/asset-map', { body: { map: JSON.parse(await f.text()) } });
-                toast.ok(`자산 주소 ${x.count}개를 올렸습니다${x.rejected ? ` — 받을 수 없는 주소 ${x.rejected}개(${x.rejectedHosts.join(', ')})` : ''}`);
-                setR(await api<Conv>('/api/marketing/imported/convert', { body: { mode: 'preview' } }));
-              } catch (er: any) { toast.error(er instanceof SyntaxError ? 'JSON 형식이 아닙니다' : er.message); } finally { setBusy(false); }
+            <input type="file" accept=".json,application/json" className="sr-only" disabled={busy} onChange={(e) => {
+              const f = e.target.files?.[0]; e.target.value = ''; void uploadAssetMap(f);
             }} />
           </label>
           <Button size="sm" variant="secondary" onClick={() => run('preview')} disabled={busy} data-testid="ops-convert-preview">미리보기</Button>
@@ -127,6 +133,7 @@ function ConvertPanel() {
           {r.unknownBrands.length > 0 && <p className="text-amber-800">처음 보는 브랜드 표기: {r.unknownBrands.join(', ')} (그대로 브랜드 이름으로 만들어짐)</p>}
           <ul className="text-ink-2">{r.sample.map((x, k) => <li key={k}>· {x.title} — {x.brand ?? '브랜드 없음'} · {x.channel} · {ST[x.status] ?? x.status}{x.url ? ' · 주소 있음' : ''}</li>)}</ul>
         </div>)}
+      </DropZone>
     </section>
   );
 }

@@ -5,6 +5,7 @@ import { api, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Field, Loading, Modal, PageHeader, askConfirm, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ReportView, STATE_TONE, type Body, type Line } from './ReportView';
 import { ReportTabs } from '@/components/ReportTabs';
+import { DropZone } from '@/components/upload';
 import { MembersSection, MonthlyView, delta, signed, usageTotal, type MembersBody, type MonthlyBody } from './MonthlyView';
 import { PASS_KIND_LABEL, isV2, kindOf, viewOf, type MemberSel, type PassKind } from '@/lib/branchReport/memberList';
 
@@ -125,12 +126,13 @@ function Composer({ siteId, day, hasDraft, onDone }: { siteId: string; day: stri
     <section className="space-y-2 rounded-card border border-line bg-white p-3 shadow-card" data-testid="branch-composer">
       <Field label="이번 주 주간보고 글(카톡에 올린 글 그대로 붙여 넣기)"><textarea className={cx(inputCls, 'min-h-[160px] font-mono text-[13px]')} value={text} onChange={(e) => setText(e.target.value)} placeholder={PLACEHOLDER} maxLength={20000} data-testid="branch-text" /></Field>
       <p className="text-xs text-ink-3">전화번호·동호수·주민번호·계좌·카드·차량번호·이메일은 AI 로 보내기 전에 가립니다. 원본 파일은 저장하지 않습니다.</p>
+      <DropZone onFiles={(fl) => void upload(fl)} accept=".txt,.csv,.zip" acceptLabel="txt·csv·zip" disabled={!!busy} label="여기에 놓으면 대화 파일을 올립니다" testid="branch-upload-drop">
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-input border border-line px-2.5 py-1.5 hover:bg-slate-50" data-testid="branch-upload-label">
-          {busy === 'upload' ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}대화 파일 올리기(선택 · txt·csv·zip)
+          {busy === 'upload' ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}대화 파일 올리기·끌어다 놓기(선택 · txt·csv·zip)
           <input type="file" className="hidden" accept=".txt,.csv,.zip" multiple onChange={(e) => { void upload(e.target.files); e.target.value = ''; }} data-testid="branch-upload" disabled={!!busy} /></label>
         <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={useChat} onChange={(e) => setUseChat(e.target.checked)} data-testid="branch-use-chat" />올린 대화도 근거로</label>
-      </div>
+      </div></DropZone>
       {up && <p className="text-xs text-brand-800" data-testid="branch-upload-result">{up}</p>}
       <div className="flex justify-end"><Button onClick={draft} disabled={!!busy} data-testid="branch-draft">{busy === 'draft' ? <Loader2 className="animate-spin" /> : <Sparkles />}{hasDraft ? '초안 다시 만들기' : '초안 만들기'}</Button></div>
     </section>
@@ -380,7 +382,7 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
         <Del on={() => set({ ...b, unfinished: b.unfinished.filter((_, j) => j !== k) })} /></div>) : <p className="text-xs text-ink-3">없음</p>}
       {b.resolved.length > 0 && <p className="text-xs text-ink-3" data-testid="branch-monthly-resolved">이 달 안에 완료로 바뀐 것: {b.resolved.map((x) => `${x.title}(${x.doneWeek})`).join(' · ')}</p>}
       <h3 className="text-sm font-semibold">시설별 이용 현황 <span className="font-normal text-xs text-ink-3">— 하이링크 이용현황(PDF·엑셀)을 올리면 표를 읽어 채웁니다(값은 원문 그대로)</span></h3>
-      <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="branch-usage-file">
+      <DropZone onFile={(f) => void uploadUsage(f)} accept=".pdf,.xlsx,.csv" acceptLabel="PDF·엑셀(xlsx)·CSV" disabled={!canWrite || upBusy} label="여기에 놓으면 하이링크 이용현황을 올립니다" testid="branch-usage-drop"><div className="flex flex-wrap items-center gap-2 text-sm" data-testid="branch-usage-file">
         {canWrite && <label className={cx('inline-flex cursor-pointer items-center gap-1.5 rounded-input border border-line px-2.5 py-1.5 hover:bg-slate-50', upBusy && 'opacity-60')}>
           {upBusy ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}하이링크 이용현황 올리기
           <input type="file" className="hidden" accept=".pdf,.xlsx,.csv" onChange={(e) => { void uploadUsage(e.target.files?.[0]); e.target.value = ''; }} disabled={upBusy} data-testid="branch-usage-upload" /></label>}
@@ -388,7 +390,7 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
           {canWrite && <button type="button" className="ml-2 text-ink-3 underline" onClick={removeUsage}>첨부 빼기</button>}</span>
           : <span className="text-xs text-amber-800">하이링크 이용현황을 올려 주세요</span>}
         {canWrite && (b.usageWeekly?.length ?? 0) > 0 && <button type="button" className="ml-auto text-xs text-ink-3 underline" onClick={() => set({ ...b, usage: b.usageWeekly!.map((x) => ({ ...x, diff: '', rate: '' })), usageTotal: null })} data-testid="branch-usage-weekly">주간 값으로 채우기(월말 기준)</button>}
-      </div>
+      </div></DropZone>
       <div className="overflow-x-auto"><table className="w-full min-w-[420px] border-collapse text-[13px]" data-testid="branch-monthly-usage">
         <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">시설</th><th>전달 인원</th><th>이번달 인원</th><th>증감</th><th>증감률</th><th /></tr></thead>
         <tbody>{b.usage.map((x, k) => { const d = delta(x.prev, x.cur); const setU = (p: Partial<typeof x>) => set({ ...b, usage: b.usage.map((y, j) => j === k ? { ...y, ...p } : y), ...('prev' in p || 'cur' in p ? { usageTotal: null } : {}) }); /* 값을 고치면 하이링크 합계 대신 계산한 합계 */ return (
@@ -399,12 +401,12 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
           {(b.usage.length > 0 || b.usageTotal) && <tr className="font-semibold"><td className="py-1">{tot.item || '전 시설 합계'}</td><td>{tot.prev || '-'}</td><td>{tot.cur || '-'}</td><td className="px-1">{tot.diff || dt.diff || '-'}</td><td className="px-1">{tot.rate || dt.rate || '-'}</td><td /></tr>}</tbody></table></div>
       <Add label="시설" on={() => set({ ...b, usage: [...b.usage, { item: '', prev: '', cur: '', diff: '', rate: '' }], usageTotal: null })} />
       <h3 className="text-sm font-semibold">회원 현황(이용권·수강권) <span className="font-normal text-xs text-ink-3">— 하이링크 회원목록 엑셀을 올리면 이용권·수강권별 활성·세대·부과 합계를 셉니다(이름·연락처는 읽지 않고, 파일은 보관하지 않음)</span></h3>
-      <div className="flex flex-wrap items-center gap-3 text-sm" data-testid="branch-member-file">
+      <DropZone onFile={(f) => void uploadMembers(f)} accept=".xlsx" acceptLabel="하이링크 회원목록 엑셀(.xlsx)" disabled={!canWrite || memBusy} label="여기에 놓으면 회원목록을 집계합니다" testid="branch-member-drop"><div className="flex flex-wrap items-center gap-3 text-sm" data-testid="branch-member-file">
         {canWrite && <label className={cx('inline-flex cursor-pointer items-center gap-1.5 rounded-input border border-line px-2.5 py-1.5 hover:bg-slate-50', memBusy && 'opacity-60')}>
           {memBusy ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}하이링크 회원목록 올리기
           <input type="file" className="hidden" accept=".xlsx" onChange={(e) => { void uploadMembers(e.target.files?.[0]); e.target.value = ''; }} disabled={memBusy} data-testid="branch-member-upload" /></label>}
         {b.members && <label className="inline-flex items-center gap-1.5 text-xs text-ink-2"><input type="checkbox" checked={b.members.exclude} onChange={(e) => void toggleExclude(e.target.checked)} disabled={!canWrite || memBusy} data-testid="branch-member-exclude" />시험·직원 줄 제외({b.members.excluded}건 — 이용권명 &lsquo;테스트&rsquo;, 동 999·9999·111·빈칸)</label>}
-      </div>
+      </div></DropZone>
       {b.members ? <MembersPanel m={b.members} canWrite={canWrite} busy={memBusy} onKind={setKind} /> : <p className="text-xs text-ink-3">아직 올린 회원목록이 없습니다.</p>}
       <Field label="메모"><textarea className={cx(inputCls, 'min-h-[48px] text-[13px]')} value={b.notes} onChange={(e) => set({ ...b, notes: e.target.value })} disabled={!canWrite} /></Field>
       {canWrite && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={save} disabled={busy || !dirty} data-testid="branch-monthly-save">저장</Button><Button onClick={submit} disabled={busy} data-testid="branch-monthly-submit">제출</Button></div>}

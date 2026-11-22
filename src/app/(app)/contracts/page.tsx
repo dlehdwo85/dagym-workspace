@@ -5,7 +5,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, Copy, FileSignature, Loader2, Plus, Trash2, Upload } from 'lucide-react';
 import { api, useApi } from '@/components/client';
-import { putFile } from '@/components/upload';
+import { DropZone, putFile } from '@/components/upload';
 import { useSession } from '@/components/session';
 import { Button, Empty, Field, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { SIGNER_COLORS, usePdfPages } from '@/components/pdfPages';
@@ -147,12 +147,15 @@ function NewContract({ onClose }: { onClose: () => void }) {
       </div>
       {step === 1 && (
         <div className="mx-auto max-w-xl space-y-3 rounded-card border border-line bg-white p-4">
-          <label className={cx('flex cursor-pointer flex-col items-center gap-2 rounded-card border-2 border-dashed border-line p-6 text-sm text-ink-2 hover:bg-slate-50', busy && 'pointer-events-none opacity-60')}>
-            {busy ? <Loader2 className="size-6 animate-spin" /> : <Upload className="size-6" />}
-            {src ? <span><b>{src.name}</b> · {src.pages}쪽 — 다른 파일로 바꾸려면 누르세요</span> : <span>계약서 파일을 고르세요 (PDF·사진 png·jpg, 20MB까지)</span>}
-            {pct !== null && <span className="text-xs">{pct}%</span>}
-            <input type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} data-testid="contract-file" />
-          </label>
+          {/* #1122(대표 11/22): 점선 상자에 끌어다 놓기 — 형식 확인, 여러 개면 첫 번째만 */}
+          <DropZone onFile={(f) => void upload(f)} accept="application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg" acceptLabel="PDF·png·jpg" disabled={busy} label="여기에 놓으면 계약서를 올립니다" testid="contract-drop">
+            <label className={cx('flex cursor-pointer flex-col items-center gap-2 rounded-card border-2 border-dashed border-line p-6 text-sm text-ink-2 hover:bg-slate-50', busy && 'pointer-events-none opacity-60')}>
+              {busy ? <Loader2 className="size-6 animate-spin" /> : <Upload className="size-6" />}
+              {src ? <span><b>{src.name}</b> · {src.pages}쪽 — 다른 파일로 바꾸려면 누르거나 끌어다 놓으세요</span> : <span>계약서 파일을 끌어다 놓거나 눌러서 고르세요 (PDF·사진 png·jpg, 20MB까지)</span>}
+              {pct !== null && <span className="text-xs">{pct}%</span>}
+              <input type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} data-testid="contract-file" />
+            </label>
+          </DropZone>
           <p className="text-[11px] text-ink-3">한글·워드 문서는 [PDF로 저장]한 뒤 올려 주세요.</p>
           <Field label="계약명"><input className={inputCls} value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} data-testid="contract-title" /></Field>
           <Field label="전하는 말(선택)"><textarea className={cx(inputCls, 'min-h-16')} value={message} maxLength={1000} onChange={(e) => setMessage(e.target.value)} /></Field>

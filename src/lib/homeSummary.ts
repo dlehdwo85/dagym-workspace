@@ -30,7 +30,7 @@ export async function homeSummary(u: SessionUser) {
     // 결재 대기(내 차례)
     safe(async () => (await import('./approvalForms')).todoCount(sql, u)),
     // 마케팅 승인(마케팅 공간에 들어갈 수 있을 때만)
-    spaces.includes('marketing') ? safe(async () => (await import('./marketing')).approvableCount(t)) : Promise.resolve(null),
+    spaces.includes('marketing') ? safe(async () => (await import('./marketing')).approvalCounts(t)) : Promise.resolve(null), // 공간 탭 '승인할 것'과 같은 수(시안 + 운영)
     // 새 입찰 공고(오늘 아침 메일 = 어제 이후) — 영업 공간 + 입찰 수집을 켠 회사만
     spaces.includes('sales') ? safe(async () => {
       if (!(await (await import('./sales/options')).salesBidsOn(t))) return null;
@@ -76,12 +76,12 @@ export async function homeSummary(u: SessionUser) {
         return r?.end_date ? { earliestDays: daysTo(today, r.end_date), soon: r.soon } : null;
       }),
       spaces.includes('marketing') ? safe(async () => {
-        const [r] = await sql<{ spend: number; n: number }[]>`select coalesce(sum(s.cost_krw), 0)::float as spend, count(distinct a.id)::int as n from mkt_ad_accounts a
-          left join mkt_ad_stats s on s.account_id = a.id and s.day >= date_trunc('month', (now() at time zone 'Asia/Seoul'))::date
-          where a.tenant = ${t} and a.provider in ('meta', 'naver')`;
-        if (!r?.n) return null;
-        const cap = await (await import('./adOps')).capOf(t);
-        return { spend: Math.round(Number(r.spend)), cap: cap?.monthlyCap ?? null };
+        // 광고 운영 화면과 같은 값(adOps.monthSpend — 모든 매체 합계, 월 상한도 이 합계로 지킴) — #1110 로컬 대조 11/22
+        const [a] = await sql<{ n: number }[]>`select count(*)::int as n from mkt_ad_accounts where tenant = ${t}`;
+        if (!a?.n) return null;
+        const ad = await import('./adOps');
+        const [spend, cap] = await Promise.all([ad.monthSpend(t), ad.capOf(t)]);
+        return { spend: Math.round(spend), cap: cap?.monthlyCap ?? null };
       }) : Promise.resolve(null),
     ]);
     return { sales, branch, check, agreement, ads };
@@ -91,7 +91,7 @@ export async function homeSummary(u: SessionUser) {
     today, admin,
     todo: {
       overdue: mine?.overdue ?? 0, overdueOldestDays: mine?.oldestDays ?? null, dueToday: mine?.dueToday ?? 0,
-      approvals: approvals ?? 0, marketing, bids, unread: unread ?? 0,
+      approvals: approvals ?? 0, marketing: marketing ? marketing.drafts + marketing.ops : null, marketingSplit: marketing, bids, unread: unread ?? 0,
     },
     company, notices: notices ?? [],
   };

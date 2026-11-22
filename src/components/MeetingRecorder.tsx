@@ -6,6 +6,7 @@ import { FileAudio, Mic, Square } from 'lucide-react';
 import { api, useApi } from './client';
 import { uploadToLibrary } from './libraryUpload';
 import { Button, cx, toast } from './ui';
+import { DropZone } from './upload';
 
 export type MinutesTodo = { title: string; assignee: string | null; due: string | null; detail: string };
 export type Minutes = { id: string; summary: string; decisions: string[]; todos: MinutesTodo[]; transcript: string | null; durationSec: number; costKrw: number; createdByName: string | null; createdAt: string };
@@ -76,6 +77,7 @@ export function MeetingRecorder({ eventId, occurrenceStart, canWork, followed, o
   const busy = !!status;
   return (
     <section data-testid="minutes">
+      <DropZone onFile={(f) => void pickFile(f)} accept="audio/*,video/webm,.m4a,.mp3,.wav,.webm" acceptLabel="녹음 파일(m4a·mp3·wav·webm)" disabled={!canWork || busy || !!rec || (!!info.data && !info.data.sttReady)} label="여기에 놓으면 녹음 파일로 회의록을 만듭니다" testid="minutes-drop">
       <h3 className="mb-2 flex flex-wrap items-center gap-1.5 text-sm font-semibold"><Mic className="size-4 text-ink-3" />AI 회의록
         {q && <span className="text-xs font-normal text-ink-3" data-testid="minutes-quota">· 이번 달 녹음 {q.usedMin}/{q.capMin}분</span>}</h3>
       {canWork && (
@@ -94,7 +96,7 @@ export function MeetingRecorder({ eventId, occurrenceStart, canWork, followed, o
           {status && <span className="text-xs text-ink-2" aria-live="polite" data-testid="minutes-status">{status}</span>}
         </div>
       )}
-      {!latest && !status && <p className="mt-1 text-xs text-ink-3">회의를 녹음하거나 녹음 파일을 올리면 요약·결정 사항·할 일을 만들어 드립니다. 녹음 원본은 받아쓴 뒤 바로 지웁니다.</p>}
+      {!latest && !status && <p className="mt-1 text-xs text-ink-3">회의를 녹음하거나 녹음 파일을 올리면(여기로 끌어다 놓아도 됩니다) 요약·결정 사항·할 일을 만들어 드립니다. 녹음 원본은 받아쓴 뒤 바로 지웁니다.</p>}
       {latest && (
         <div className="mt-2 space-y-2 rounded-input border border-line bg-white p-3 text-sm" data-testid="minutes-card">
           <p className="text-xs text-ink-3">{new Date(latest.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {mmss(latest.durationSec)} · {latest.createdByName ?? ''}
@@ -122,6 +124,7 @@ export function MeetingRecorder({ eventId, occurrenceStart, canWork, followed, o
           {info.data && info.data.items.length > 1 && <p className="text-xs text-ink-3">이전 회의록 {info.data.items.length - 1}건은 가장 최근 것만 보여 드립니다.</p>}
         </div>
       )}
+      </DropZone>
     </section>
   );
 }

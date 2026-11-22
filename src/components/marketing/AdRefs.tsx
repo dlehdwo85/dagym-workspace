@@ -1,10 +1,10 @@
 'use client';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Star } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
-import { putFile } from '@/components/upload';
+import { DropZone, putFile } from '@/components/upload';
 import { uploadToLibrary } from '@/components/libraryUpload';
 import { extractAudioWav } from '@/components/videoDigest';
 import { ScoreChip } from './QualityPanel';
@@ -151,6 +151,12 @@ async function uploadMedia(file: File, onPct: (n: number) => void) {
 function AdRefForm({ view, onClose, onDone }: { view: View; onClose: () => void; onDone: () => void }) {
   const [f, setF] = useState({ brandId: view.brands.length === 1 ? view.brands[0].id : '', advertiser: '', url: '', format: 'video', startedOn: '', variants: '', transcript: '', hook: '', note: '' });
   const [file, setFile] = useState<File | null>(null);
+  const fileInp = useRef<HTMLInputElement>(null);
+  /** #1122 끌어다 놓기: 고른 것과 같게 state 에 넣고, 파일 칸에도 이름이 보이게 넣어 둔다 */
+  function dropFile(x: File) {
+    setFile(x);
+    try { const dt = new DataTransfer(); dt.items.add(x); if (fileInp.current) fileInp.current.files = dt.files; } catch { /* 칸 표시만 못 바꿈 — 올리기는 state 로 */ }
+  }
   const [status, setStatus] = useState('');
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
   async function save(e: React.FormEvent) {
@@ -186,7 +192,9 @@ function AdRefForm({ view, onClose, onDone }: { view: View; onClose: () => void;
           <Field label="비슷한 소재 수(선택)"><input type="number" min={1} max={999} className={inputCls} value={f.variants} onChange={(e) => set({ variants: e.target.value })} data-testid="adref-variants" /></Field>
           <Field label="우리 브랜드(선택)"><select className={inputCls} value={f.brandId} onChange={(e) => set({ brandId: e.target.value })} data-testid="adref-brand"><option value="">브랜드 없음</option>{view.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
         </div>
-        <Field label="영상·이미지 파일(선택)"><input type="file" accept="video/*,image/*" className="block w-full text-xs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} data-testid="adref-file" /></Field>
+        <DropZone onFile={dropFile} accept="video/*,image/*" acceptLabel="영상·사진" disabled={!!status} label="여기에 놓으면 이 광고 파일로 넣습니다" testid="adref-file-drop">
+          <Field label="영상·이미지 파일(선택 — 끌어다 놓아도 됩니다)"><input ref={fileInp} type="file" accept="video/*,image/*" className="block w-full text-xs" onChange={(e) => setFile(e.target.files?.[0] ?? null)} data-testid="adref-file" /></Field>
+        </DropZone>
         <Field label="대본(선택 — 붙이면 받아쓰기 없이)"><textarea className={inputCls} rows={3} maxLength={8000} value={f.transcript} onChange={(e) => set({ transcript: e.target.value })} data-testid="adref-transcript-input" /></Field>
         <div className="grid gap-2 sm:grid-cols-2">
           <Field label="첫 문장(선택 — 비우면 대본 첫 문장)"><input className={inputCls} value={f.hook} maxLength={200} onChange={(e) => set({ hook: e.target.value })} data-testid="adref-hook-input" /></Field>

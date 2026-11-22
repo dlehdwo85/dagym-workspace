@@ -39,7 +39,7 @@ function eventDays(e: any): string[] {
 
 type Summary = {
   today: string; admin: boolean;
-  todo: { overdue: number; overdueOldestDays: number | null; dueToday: number; approvals: number; marketing: number | null; bids: number | null; unread: number };
+  todo: { overdue: number; overdueOldestDays: number | null; dueToday: number; approvals: number; marketing: number | null; marketingSplit?: { drafts: number; ops: number } | null; bids: number | null; unread: number };
   company: null | {
     sales: { dueThisWeek: number; earliestDays: number | null } | null;
     branch: { submitted: number; total: number; day: string } | null;
@@ -144,7 +144,7 @@ export default function Dashboard() {
     td.overdue > 0 && { k: 'overdue', label: '기한 지남', value: td.overdue, sub: td.overdueOldestDays ? `최대 ${td.overdueOldestDays}일 지남` : '내 업무', href: `/tasks?view=overdue&assigneeId=${user.id}`, tone: 'red' as const },
     td.approvals > 0 && { k: 'approvals', label: '결재 대기', value: td.approvals, sub: '내 차례', href: '/approvals?view=todo', tone: 'amber' as const },
     td.dueToday > 0 && { k: 'today', label: '오늘 마감', value: td.dueToday, sub: '내 업무', href: '/tasks?view=today' },
-    !!td.marketing && { k: 'marketing', label: '마케팅 승인', value: td.marketing, sub: '승인할 시안', href: '/s/marketing/approvals' },
+    !!td.marketing && { k: 'marketing', label: '마케팅 승인', value: td.marketing, sub: td.marketingSplit ? `시안 ${td.marketingSplit.drafts} · 운영 ${td.marketingSplit.ops}` : '승인할 것', href: '/s/marketing/approvals' },
     !!td.bids && { k: 'bids', label: '새 입찰 공고', value: td.bids, sub: '오늘 아침 메일', href: '/s/sales/hub?tab=bids&bt=today' },
     td.unread > 0 && { k: 'unread', label: '안 읽은 메시지', value: td.unread, sub: '메시지', href: '/messages' },
   ].filter(Boolean) as Parameters<typeof Cell>[0][] : [];
@@ -153,7 +153,7 @@ export default function Dashboard() {
     c.sales && { k: 'sales', label: '영업 · 이번 주 입찰 마감', value: `${c.sales.dueThisWeek}건`, sub: c.sales.earliestDays !== null ? `가장 빠른 마감 D-${c.sales.earliestDays}` : '이번 주 마감 없음', href: '/s/sales/hub?tab=bids' },
     c.branch && { k: 'branch', label: '지점 보고 · 이번 주 제출', value: `${c.branch.submitted}/${c.branch.total}`, sub: c.branch.total > c.branch.submitted ? `미제출 ${c.branch.total - c.branch.submitted}곳 · ${md(c.branch.day)}(금) 마감` : `모두 제출 · ${md(c.branch.day)}(금)`, href: '/branch-reports', tone: c.branch.total > c.branch.submitted ? 'amber' as const : undefined },
     (c.check || c.agreement) && { k: 'check', label: '점검 · 계약', value: c.check ? `조치 중 ${c.check.acting}` : c.agreement ? `D-${c.agreement.earliestDays}` : '-', sub: c.agreement ? `계약 만료 가장 빠른 D-${c.agreement.earliestDays}` : '만료 예정 계약 없음', href: c.check ? '/check' : '/agreements' },
-    c.ads && { k: 'ads', label: '이번 달 광고비(메타+네이버)', value: won(c.ads.spend), sub: c.ads.cap ? `월 상한 ${won(c.ads.cap)}` : '월 상한 없음', href: '/s/marketing/ad-ops', tone: c.ads.cap && c.ads.spend > c.ads.cap * 0.9 ? 'amber' as const : undefined },
+    c.ads && { k: 'ads', label: '이번 달 광고비(전체 매체)', value: won(c.ads.spend), sub: c.ads.cap ? `월 상한 ${won(c.ads.cap)}` : '월 상한 없음', href: '/s/marketing/ad-ops', tone: c.ads.cap && c.ads.spend > c.ads.cap * 0.9 ? 'amber' as const : undefined },
   ].filter(Boolean) as Parameters<typeof Cell>[0][] : [];
 
   if (error) return <ErrorBox error={error} retry={reload} />;

@@ -7,6 +7,7 @@ import { Download, FileSpreadsheet, Upload } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { won } from '@/components/usage';
 import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { DropZone } from '@/components/upload';
 
 type Row = { id: string; tenant_name: string; what: string; pay_method_label: string; card_name: string | null; amount: number; canceled_amount: number; net: number; supply: number; vat: number; fee: number; feeEstimated: boolean; deposit: number; paid_at: string | null; created_at: string; expected_on: string | null; settled_on: string | null; settled_amount: number | null; settlement: string; s_note: string | null; test: boolean; tid: string | null };
 type Agg = { count: number; gross: number; canceled: number; net: number; supply: number; vat: number; fee: number; deposit: number; settled: number; pending: number; mismatch: number; byMethod: { key: string; count: number; net: number; fee: number; deposit: number }[]; byPlan: { key: string; count: number; net: number; fee: number; deposit: number }[] };
@@ -98,11 +99,11 @@ function Reconcile({ onDone }: { onDone: () => void }) {
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); if (inp.current) inp.current.value = ''; }
   }
   return (
-    <span className="ml-auto inline-flex items-center gap-2">
+    <DropZone onFile={(f) => void pick(f)} accept=".xlsx,.csv,.txt" acceptLabel="엑셀(.xlsx)·CSV·txt" disabled={busy} label="여기에 놓으면 입금 내역으로 대사합니다" testid="settle-drop" className="ml-auto inline-flex items-center gap-2">
       <input ref={inp} type="file" accept=".xlsx,.csv,.txt" className="hidden" onChange={(e) => pick(e.target.files?.[0])} data-testid="settle-file" />
       <Button size="sm" variant="secondary" onClick={() => inp.current?.click()} disabled={busy}><Upload />입금 내역 올리기(대사)</Button>
       {res && <span className="text-xs text-ink-2" data-testid="settle-recon-result">맞음 {res.counts.matched} · 차이 {res.counts.mismatched} · 장부에 없음 {res.counts.unmatched}{res.rows.filter((r) => r.status !== 'settled').slice(0, 3).map((r) => <span key={r.row} className="ml-1 text-amber-700">[{r.row}줄 {r.note}]</span>)}</span>}
-    </span>
+    </DropZone>
   );
 }
 

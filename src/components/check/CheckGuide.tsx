@@ -7,6 +7,7 @@ import { api, useApi } from '@/components/client';
 import { useMultiSite, useSession, useTerms } from '@/components/session';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { shrinkImage } from '@/components/shrink';
+import { DropZone } from '@/components/upload';
 import { CHECK_COPY as C, sharedText } from '@/lib/check/copy';
 import { RunHome } from './CheckRun';
 import { CheckReport } from './CheckReport';
@@ -242,6 +243,7 @@ function ItemEditor({ id, canEdit, cats, pts, methods, cycles, onClose, onSaved 
             {id && canEdit && <Field label={C.item.reason} hint={C.item.reasonHint}><input className={inputCls} value={f.reason} onChange={(e) => set('reason', e.target.value)} maxLength={300} data-testid="check-item-reason" /></Field>}
           </fieldset>
           {/* 기준 사진 — 저장한 항목에만 */}
+          <DropZone onFiles={(fl) => void addPhotos(fl)} accept="image/*" acceptLabel="사진" disabled={!id || !canEdit || photos.length >= 6 || upBusy} label="여기에 놓으면 기준 사진으로 올립니다" testid="check-item-photos-drop">
           <div className="rounded-input border border-line p-2.5" data-testid="check-item-photos">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium text-ink-2">{C.item.photos}</span>
@@ -266,6 +268,7 @@ function ItemEditor({ id, canEdit, cats, pts, methods, cycles, onClose, onSaved 
                 </ul>
               )}
           </div>
+          </DropZone>
           {id && !!detail.data?.versions.length && (
             <details className="text-xs text-ink-2" data-testid="check-item-history">
               <summary className="cursor-pointer">{C.item.history} · {C.item.version(detail.data.item.version)}</summary>

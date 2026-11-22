@@ -32,6 +32,15 @@ export async function approvableCount(tenant: string) {
   const [r] = await db()<{ n: number }[]>`select count(*)::int as n from mkt_contents where tenant = ${tenant} and ${APPROVABLE_SQL()}`;
   return r.n;
 }
+/** 승인함 머리 '승인할 것 n건'(시안 + 운영 요청) — 공간 탭 배지·홈 칸이 같은 수를 쓰게(#1110 로컬 대조 11/22) */
+export async function approvalCounts(tenant: string) {
+  const drafts = await approvableCount(tenant);
+  // 대표 02:30 ①: 운영실 승인 요청(제안·예산·월 목표·제작 의뢰·#494 메타 광고 초안·#499-4 광고 컨셉)
+  const [o] = await db()<{ n: string }[]>`select (select count(*) from mkt_proposals where tenant = ${tenant} and status = 'pending') + (select count(*) from mkt_ad_budgets where tenant = ${tenant} and status = 'pending')
+    + (select count(*) from mkt_goals where tenant = ${tenant} and status = 'pending') + (select count(*) from mkt_briefs where tenant = ${tenant} and status in ('ready', 'failed'))
+    + (select count(*) from mkt_ad_plans where tenant = ${tenant} and provider = 'meta' and status = 'created') + (select count(*) from mkt_concept_sets where tenant = ${tenant} and status = 'pending') as n`;
+  return { drafts, ops: Number(o?.n ?? 0) };
+}
 
 async function mediaOk(u: SessionUser, ids: string[]) {
   const { loadLibraryFile } = await import('./library');

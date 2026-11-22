@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Bot, Camera, FileImage, Upload, UserRound } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { shrinkImage } from '@/components/Attachments';
-import { PICK_MAX, putFile } from '@/components/upload';
+import { DropZone, PICK_MAX, putFile } from '@/components/upload';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 
 type Row = { id: string; brand_id: string | null; brand: string; content_id: string | null; content_title: string | null; kind: Kind; title: string; detail: string; wanted: number;
@@ -16,6 +16,7 @@ type Data = { rows: Row[]; brands: { id: string; name: string }[]; people: { id:
 
 const KIND: Record<Kind, string> = { photo: '사진', video: '영상', screen: '앱 화면', other: '기타' };
 const ACCEPT: Record<Kind, string> = { photo: 'image/*', video: 'video/*', screen: 'image/*,video/*', other: 'image/*,video/*,.pdf' };
+const ACCEPT_LABEL: Record<Kind, string> = { photo: '사진', video: '영상', screen: '사진·영상', other: '사진·영상·PDF' };
 const STATUS: Record<Status, string> = { requested: '요청 중', received: '받음', used: '사용함', canceled: '취소' };
 const TABS: [Status | 'all', string][] = [['requested', '요청 중'], ['received', '받음'], ['used', '사용함'], ['all', '전체']];
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
@@ -96,6 +97,7 @@ function Card({ r, focus, canEdit, reload }: { r: Row; focus: boolean; canEdit: 
   return (
     <li data-testid="material-card" data-material={r.id} data-status={r.status}
       className={cx('rounded-card border bg-white p-4', focus ? 'border-brand-500 ring-2 ring-brand-100' : 'border-slate-200')}>
+      <DropZone onFiles={(fl) => void pick(fl)} accept={ACCEPT[r.kind]} acceptLabel={ACCEPT_LABEL[r.kind]} disabled={r.status === 'canceled' || pct !== null} label="여기에 놓으면 이 요청에 자료를 올립니다" testid="material-drop">
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-ink">{r.brand || '브랜드 없음'}</span>
         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-ink-2">{KIND[r.kind]} {r.wanted}개</span>
@@ -131,6 +133,7 @@ function Card({ r, focus, canEdit, reload }: { r: Row; focus: boolean; canEdit: 
         {r.status === 'requested' && canEdit && <Button size="sm" variant="ghost" disabled={busy} onClick={() => setStatus('canceled')} data-testid="material-cancel">요청 취소</Button>}
         {r.status === 'canceled' && canEdit && <Button size="sm" variant="secondary" disabled={busy} onClick={() => setStatus('requested')}>다시 요청</Button>}
       </div>
+      </DropZone>
     </li>
   );
 }

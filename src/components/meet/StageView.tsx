@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Check, ChevronLeft, ChevronRight, Copy, FileImage, Hand, LayoutGrid, Loader2, Lock, LogOut, MessageSquare, Mic, MicOff, Minus, MonitorUp, MoreHorizontal, Pin, Plus, RefreshCw, Send, Share2,
   SignalLow, Smartphone, Unlock, UserRound, Users, Video, VideoOff, Volume2, X } from 'lucide-react';
 import { Button, cx, toast } from '@/components/ui';
+import { DropZone } from '@/components/upload';
 import { nativeScreenShareAvailable, nativeScreenShareStart, nativeScreenShareStop, onNativeScreenShareStopped, shareLink } from '@/components/native';
 import { call } from './api';
 import { openDoc, type DocHandle } from './docShare';
@@ -234,7 +235,9 @@ export function StageView({ conn, title, elapsed, selfLabel, canShare, hostMeeti
             {conn.sharing || native.on ? <button type="button" className={cx(row, 'bg-red-600 hover:bg-red-700')} onClick={() => { if (native.on) stopNative(); else void stopShare(); setPanel(null); }} data-testid="meet-share-stop"><X className="size-5" /><span><b className="block text-sm font-semibold">공유 멈추기</b></span></button> : null}
             {conn.canScreen && <button type="button" className={row} disabled={!live} onClick={() => void startScreen()} data-testid="meet-share-screen"><MonitorUp className="size-5 shrink-0" /><span><b className="block text-sm font-semibold">화면 공유</b><span className="text-xs text-slate-300">화면 전체·창·브라우저 탭 가운데 골라 보여 줍니다. 탭을 고르면 그 탭의 소리도 함께 보낼 수 있습니다.</span></span></button>}
             {native.can && screenTicket && <button type="button" className={row} disabled={!live} onClick={() => void startNative()} data-testid="meet-share-native"><Smartphone className="size-5 shrink-0" /><span><b className="block text-sm font-semibold">휴대폰 화면 공유</b><span className="text-xs text-slate-300">지금 이 휴대폰 화면을 그대로 보여 줍니다. 알림 내용도 함께 보일 수 있으니 방해 금지를 켜 두세요.</span></span></button>}
-            <button type="button" className={row} disabled={!live || docBusy} onClick={() => fileRef.current?.click()} data-testid="meet-share-doc">{docBusy ? <Loader2 className="size-5 shrink-0 animate-spin" /> : <FileImage className="size-5 shrink-0" />}<span><b className="block text-sm font-semibold">사진·PDF 보여 주기</b><span className="text-xs text-slate-300">이 기기의 사진이나 PDF 문서를 골라 보여 줍니다. 고른 파일만 보이고, 파일이 서버에 올라가지는 않습니다.</span></span></button>
+            <DropZone onFile={(f) => void pickDoc(f)} accept="image/*,application/pdf" acceptLabel="사진·PDF" disabled={!live || docBusy || !canShare} label="여기에 놓으면 이 파일을 보여 줍니다" testid="meet-share-doc-drop">
+              <button type="button" className={row} disabled={!live || docBusy} onClick={() => fileRef.current?.click()} data-testid="meet-share-doc">{docBusy ? <Loader2 className="size-5 shrink-0 animate-spin" /> : <FileImage className="size-5 shrink-0" />}<span><b className="block text-sm font-semibold">사진·PDF 보여 주기</b><span className="text-xs text-slate-300">이 기기의 사진이나 PDF 문서를 골라(또는 여기로 끌어다 놓아) 보여 줍니다. 고른 파일만 보이고, 파일이 서버에 올라가지는 않습니다.</span></span></button>
+            </DropZone>
             {!conn.canScreen && !native.can && <p className="rounded-input bg-slate-700/50 p-2.5 text-xs leading-relaxed text-slate-300" data-testid="meet-share-unsupported">이 기기의 브라우저는 <b className="text-white">화면 전체 공유</b>를 지원하지 않습니다(휴대폰 브라우저 공통). 사진·PDF 는 위 단추로 바로 보여 줄 수 있고, 실물은 {conn.canFlip ? <>더보기의 <b className="text-white">카메라 전환</b>으로 뒷카메라에 비춰 </> : '카메라에 비춰 '}보여 줄 수 있습니다. 화면 전체 공유는 컴퓨터 브라우저에서 됩니다.</p>}
           </div>
         </Sheet>}

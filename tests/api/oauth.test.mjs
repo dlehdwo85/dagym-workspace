@@ -165,6 +165,13 @@ describe('V29 소셜 가입·로그인', () => {
     assert.equal((await n.ok('GET', '/api/auth/me')).user.id, ctx.staffA.id);
     const taken = await social(ctx.owner, 'naver', { sub: 'n-staff' }, 'mode=link');
     assert.equal(taken.searchParams.get('code'), 'taken');
+    // #1121: 같은 사람에게 같은 SNS 두 번째 계정은 거절(바꾸려면 해제 뒤) · 같은 계정 다시 연결은 그대로 · 연결 날짜·마지막 사용
+    const second = await social(c, 'naver', { sub: 'n-staff-2', email: 'second@naver.test' }, 'mode=link');
+    assert.equal(second.searchParams.get('code'), 'already');
+    assert.equal((await social(c, 'naver', { sub: 'n-staff', email: 'whatever@naver.test' }, 'mode=link')).pathname, '/settings', '같은 계정 다시 연결은 됨');
+    const ids2 = await c.ok('GET', '/api/account/identities');
+    assert.equal(ids2.identities.length, 1); assert.ok(ids2.identities[0].created_at); assert.ok(ids2.identities[0].last_login_at, '버튼으로 로그인한 뒤라 마지막 사용 있음');
+    assert.equal((await sql`select count(*)::int n from user_identities where user_id = ${ctx.staffA.id} and provider = 'naver'`)[0].n, 1);
     await c.ok('DELETE', '/api/account/identities?provider=naver');
     assert.equal((await social(new Client(), 'naver', { sub: 'n-staff', email: 'staff-other@naver.test' })).pathname, '/signup/social', '끊으면 모르는 계정');
     assert.ok((await sql`select count(*)::int n from audit_logs where action in ('auth.identity_linked', 'auth.identity_unlinked')`)[0].n >= 2);

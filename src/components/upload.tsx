@@ -1,7 +1,7 @@
 'use client';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Upload } from 'lucide-react';
-import { cx } from './ui';
+import { cx, toast } from './ui';
 /** 379차 #1003(대표 11/07 '아이폰 사진 한 번에 100장 이상'): 한 번에 고르는 최대 개수 — 메신저(CHAT_FILES_MAX 200, 213차)와 같게 업무 첨부·자료실·마케팅 자료 요청도 200 */
 export const PICK_MAX = 200;
 
@@ -62,16 +62,40 @@ export function uploadErrorText(status: number) {
   return `파일을 보내지 못했습니다(${status}) — 다시 올려 주세요`;
 }
 
-/** 파일을 끌어다 놓는 영역: 놓으면 onFiles(여러 개). 끄는 동안 "여기에 놓으세요" 덮개 */
-export function DropZone({ onFiles, children, className, label = '여기에 놓으면 올라갑니다', disabled, testid }: { onFiles: (f: FileList) => void; children: ReactNode; className?: string; label?: string; disabled?: boolean; testid?: string }) {
+/** input accept 문자열('.pdf,image/*,application/pdf')에 맞는 파일인지 — 비우면 모두 허용 */
+export function acceptOk(f: File, accept?: string) {
+  if (!accept) return true;
+  const name = f.name.toLowerCase(); const type = (f.type || '').toLowerCase();
+  return accept.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean).some((a) =>
+    a.startsWith('.') ? name.endsWith(a) : a.endsWith('/*') ? type.startsWith(a.slice(0, -1)) : type === a);
+}
+
+/**
+ * 파일을 끌어다 놓는 영역: 놓으면 onFiles(여러 개) 또는 onFile(하나). 끄는 동안 "여기에 놓으세요" 덮개.
+ * #1122(대표 11/22 '계약서 끌어다 놓기가 안 됨'): accept 를 주면 형식을 확인('이 형식은 올릴 수 없습니다 — acceptLabel'),
+ * onFile(하나만)에 여러 개를 놓으면 첫 번째만 + 안내.
+ */
+export function DropZone({ onFiles, onFile, accept, acceptLabel, children, className, label = '여기에 놓으면 올라갑니다', disabled, testid }: {
+  onFiles?: (f: FileList) => void; onFile?: (f: File) => void; accept?: string; acceptLabel?: string;
+  children: ReactNode; className?: string; label?: string; disabled?: boolean; testid?: string;
+}) {
   const [over, setOver] = useState(0);
   const has = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  const dropped = (fl: FileList) => {
+    const all = Array.from(fl); const ok = all.filter((f) => acceptOk(f, accept));
+    if (!ok.length) { toast.error(`이 형식은 올릴 수 없습니다${acceptLabel ? ` — ${acceptLabel}` : ''}`); return; }
+    if (ok.length < all.length) toast.info(`올릴 수 없는 형식 ${all.length - ok.length}개는 뺐습니다${acceptLabel ? ` (${acceptLabel})` : ''}`);
+    if (onFile) { if (ok.length > 1) toast.info('파일은 하나만 올릴 수 있어 첫 번째 파일만 올립니다'); onFile(ok[0]); return; }
+    if (!onFiles) return;
+    if (ok.length === all.length) { onFiles(fl); return; }
+    const dt = new DataTransfer(); ok.forEach((f) => dt.items.add(f)); onFiles(dt.files);
+  };
   return (
     <div className={cx('relative', className)} data-testid={testid}
       onDragEnter={(e) => { if (disabled || !has(e)) return; e.preventDefault(); setOver((n) => n + 1); }}
       onDragOver={(e) => { if (disabled || !has(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
       onDragLeave={(e) => { if (disabled || !has(e)) return; setOver((n) => Math.max(0, n - 1)); }}
-      onDrop={(e) => { if (disabled || !has(e)) return; e.preventDefault(); setOver(0); if (e.dataTransfer.files?.length) onFiles(e.dataTransfer.files); }}>
+      onDrop={(e) => { if (disabled || !has(e)) return; e.preventDefault(); setOver(0); if (e.dataTransfer.files?.length) dropped(e.dataTransfer.files); }}>
       {children}
       {over > 0 && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-card border-2 border-dashed border-accent-500 bg-accent-50/90 text-sm font-semibold text-accent-700">
@@ -141,4 +165,20 @@ export async function fileHash(file: Blob): Promise<string | undefined> {
     const h = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
     return Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, '0')).join('');
   } catch { return undefined; }
+}
+
+/**
+ * #1122 앱 전체 보호: 놓는 칸이 아닌 곳에 파일을 떨어뜨려도 브라우저가 그 파일을 열며 쓰던 화면을 떠나지 않게.
+ * DropZone·파일 입력 칸은 그대로(이미 처리했으면 defaultPrevented) — window 에서 마지막으로 받아 기본 동작만 막음.
+ */
+export function DropGuard() {
+  useEffect(() => {
+    const isFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const native = (e: DragEvent) => (e.target as HTMLElement | null)?.closest?.('input[type="file"]');
+    const over = (e: DragEvent) => { if (!isFiles(e) || e.defaultPrevented || native(e)) return; e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'; };
+    const drop = (e: DragEvent) => { if (!isFiles(e) || e.defaultPrevented || native(e)) return; e.preventDefault(); toast.info('여기에는 파일을 놓을 수 없습니다 — 파일을 올리는 칸에 놓아 주세요'); };
+    window.addEventListener('dragover', over); window.addEventListener('drop', drop);
+    return () => { window.removeEventListener('dragover', over); window.removeEventListener('drop', drop); };
+  }, []);
+  return null;
 }

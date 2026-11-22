@@ -2,7 +2,8 @@
 import { use, useEffect, useRef, useState } from 'react';
 import { Camera, CheckCircle2, Loader2, MapPin, ShieldCheck, X } from 'lucide-react';
 import { ApiError, api } from '@/components/client';
-import { Button, Field, inputCls } from '@/components/ui';
+import { Button, Field, Toaster, inputCls } from '@/components/ui';
+import { DropZone } from '@/components/upload';
 
 /** 사진을 긴 변 1600px JPEG 로 줄여 보낸다 (통신량·서버 저장 절약) */
 async function shrink(file: File): Promise<string> {
@@ -26,6 +27,11 @@ export default function ReportPage({ params }: { params: Promise<{ token: string
   const [done, setDone] = useState<string | null>(null);
   const cam = useRef<HTMLInputElement>(null);
   useEffect(() => { api(`/api/public/forms/${token}`).then(setInfo).catch((e) => setErr(e.message)); }, [token]);
+  /** 사진 고르기·끌어다 놓기 공통 (#1122) */
+  async function pickPhoto(file: File | undefined) {
+    if (!file) return;
+    try { setPhoto(await shrink(file)); } catch (er: any) { setErr(er.message); }
+  }
   const needContact = info?.kind === 'complaint';
   const hasPersonal = !!(f.name || f.phone);
   async function submit(e: React.FormEvent) {
@@ -38,6 +44,7 @@ export default function ReportPage({ params }: { params: Promise<{ token: string
   }
   return (
     <div className="min-h-screen bg-canvas px-4 py-6">
+      <Toaster />{/* #1122: 끌어다 놓기 안내(형식이 다름·하나만)가 이 공개 화면에서도 보이게 */}
       <div className="mx-auto max-w-md">
         <div className="mb-5 flex items-center gap-2.5">
           <img src="/icon.svg" alt="" className="size-9" />
@@ -63,14 +70,14 @@ export default function ReportPage({ params }: { params: Promise<{ token: string
               <span className="relative block"><MapPin className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
                 <input className={inputCls + ' pl-8'} value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} placeholder="예: 2층 유산소존" /></span>
             </Field>
-            <div>
+            <DropZone onFile={(file) => void pickPhoto(file)} accept="image/*" acceptLabel="사진" label="여기에 놓으면 사진을 첨부합니다" testid="report-photo-drop">
               <input ref={cam} type="file" accept="image/*" capture="environment" className="hidden" data-testid="report-photo"
-                onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; try { setPhoto(await shrink(file)); } catch (er: any) { setErr(er.message); } }} />
+                onChange={(e) => void pickPhoto(e.target.files?.[0])} />
               {photo ? (
                 <div className="relative inline-block"><img src={photo} alt="첨부한 사진" className="h-32 rounded-input border border-line object-cover" />
                   <button type="button" onClick={() => setPhoto('')} className="absolute -right-2 -top-2 rounded-full bg-slate-800 p-1 text-white" aria-label="사진 빼기"><X className="size-3.5" /></button></div>
-              ) : <Button type="button" variant="secondary" onClick={() => cam.current?.click()}><Camera />사진 첨부 (선택)</Button>}
-            </div>
+              ) : <><Button type="button" variant="secondary" onClick={() => cam.current?.click()}><Camera />사진 첨부 (선택)</Button><span className="ml-2 hidden text-xs text-ink-3 sm:inline">사진을 여기로 끌어다 놓아도 됩니다</span></>}
+            </DropZone>
             <div className="grid grid-cols-2 gap-3">
               <Field label={needContact ? '이름' : '이름 (선택)'}><input className={inputCls} required={needContact} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoComplete="name" /></Field>
               <Field label={needContact ? '연락처' : '연락처 (선택)'}><input className={inputCls} required={needContact} type="tel" inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} autoComplete="tel" /></Field>

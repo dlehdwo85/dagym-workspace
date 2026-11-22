@@ -4,6 +4,7 @@ import { Sparkles } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, Field, cx, inputCls, toast } from '@/components/ui';
 import { uploadToLibrary } from '@/components/libraryUpload';
+import { DropZone } from '@/components/upload';
 import { useSalesTerms } from '@/components/session';
 
 type F = 'business' | 'customers' | 'tone' | 'cautions';
@@ -62,14 +63,20 @@ function AiHelper({ values, onApply }: { values: Partial<Record<F, string | null
     try { const r = await api<{ draft: Partial<Record<F, string>> }>('/api/org/ai-profile/draft', { body: { ...input(), field } }); setDraft((d) => ({ ...(field ? d : {}), ...r.draft })); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
+  /** 회사소개서 파일 고르기·끌어다 놓기 공통 (#1122) */
+  async function pickFile(x: File | undefined) {
+    if (!x) return;
+    try { setFile(await uploadToLibrary(x, '회사 소개', undefined, ['회사 소개'])); } catch (er: any) { toast.error(er.message); }
+  }
   return (
-    <aside className="space-y-2 rounded-card border border-violet-200 bg-violet-50/40 p-4 text-sm shadow-card" data-testid="ai-helper">
+    <aside className="rounded-card border border-violet-200 bg-violet-50/40 p-4 text-sm shadow-card" data-testid="ai-helper">
+      <DropZone onFile={(x) => void pickFile(x)} accept=".pdf,.doc,.docx,.hwp,.hwpx,.txt,.md" acceptLabel="PDF·워드·한글·텍스트" label="여기에 놓으면 회사소개서로 넣습니다" testid="ai-helper-drop" className="space-y-2">
       <p className="flex items-center gap-1.5 font-semibold"><Sparkles className="size-4 text-violet-600" />AI 로 정리</p>
       <p className="text-xs text-ink-2">생각나는 대로 적거나 홈페이지·회사소개서를 넣으면 칸별 초안을 만듭니다. 잘 모르겠으면 [질문으로 시작].</p>
       <textarea className={cx(inputCls, 'min-h-20')} maxLength={6000} value={text} onChange={(e) => setText(e.target.value)} placeholder={T.examples.aiProfile} aria-label="회사 설명" data-testid="ai-helper-text" />
       <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="홈페이지 주소 https://…" aria-label="홈페이지 주소" data-testid="ai-helper-url" />
-      <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2"><span className="rounded-input border border-line bg-white px-2 py-1">회사소개서 파일</span>{file ? file.name : 'PDF·워드·한글·텍스트'}
-        <input type="file" className="hidden" accept=".pdf,.doc,.docx,.hwp,.hwpx,.txt,.md" onChange={async (e) => { const x = e.target.files?.[0]; if (!x) return; try { setFile(await uploadToLibrary(x, '회사 소개', undefined, ['회사 소개'])); } catch (er: any) { toast.error(er.message); } }} data-testid="ai-helper-file" /></label>
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2"><span className="rounded-input border border-line bg-white px-2 py-1">회사소개서 파일</span>{file ? file.name : 'PDF·워드·한글·텍스트 — 끌어다 놓아도 됩니다'}
+        <input type="file" className="hidden" accept=".pdf,.doc,.docx,.hwp,.hwpx,.txt,.md" onChange={(e) => void pickFile(e.target.files?.[0])} data-testid="ai-helper-file" /></label>
       {qs && <ol className="space-y-1.5" data-testid="ai-helper-questions">{qs.map((q, k) => <li key={q}><label className="block text-xs font-medium">{k + 1}. {q}<input className={cx(inputCls, 'mt-0.5')} value={ans[k]} onChange={(e) => setAns(ans.map((a, j) => (j === k ? e.target.value : a)))} data-testid="ai-helper-answer" /></label></li>)}</ol>}
       {/* 대표 10/20 10:50: [질문으로 시작]·[초안 만들기]가 붙어 보임 → 한 줄 flex + 간격(휴대폰은 줄 바꿈) */}
       <div className="flex flex-wrap items-center gap-3" data-testid="ai-helper-actions">
@@ -84,6 +91,7 @@ function AiHelper({ values, onApply }: { values: Partial<Record<F, string | null
           <div className="mt-1.5 flex gap-1.5"><Button size="sm" disabled={!draft[k]} onClick={() => { onApply(k, draft[k]!); toast.ok(`${LABEL[k].split('(')[0]} 칸에 넣었습니다 — [저장]을 눌러야 반영됩니다`); }} data-testid={`ai-apply-${k}`}>적용</Button>
             <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => run(k)} data-testid={`ai-rewrite-${k}`}>{busy === k ? '쓰는 중…' : '다시 쓰기'}</Button></div>
         </div>))}
+      </DropZone>
     </aside>
   );
 }

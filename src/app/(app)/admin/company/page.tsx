@@ -5,6 +5,7 @@ import { Building2, ImagePlus, Plus, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Field, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { uploadToLibrary } from '@/components/libraryUpload';
+import { DropZone } from '@/components/upload';
 import { CompanyAiProfile } from '@/components/CompanyAiProfile';
 import { AiAutoSetting } from '@/components/AiConsent';
 
@@ -77,8 +78,8 @@ export default function CompanyPage() {
             ))}
             <Field label="브랜드 색"><span className="flex items-center gap-2"><input type="color" value={edit.brand_color ?? '#0F766E'} onChange={(e) => setEdit({ ...edit, brand_color: e.target.value.toUpperCase() })} className="h-9 w-12 rounded border border-line" />
               <input className={cx(inputCls, 'flex-1')} value={edit.brand_color ?? ''} onChange={(e) => setEdit({ ...edit, brand_color: e.target.value })} placeholder="#0F766E" /></span></Field>
-            <Field label="로고"><label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-dashed border-line px-3 text-sm text-ink-2 hover:bg-slate-50">
-              <ImagePlus className="size-4" />{edit.logo_file_id ? '로고 바꾸기' : '로고 올리기 (PNG·JPG·SVG)'}<input type="file" accept="image/*" className="hidden" onChange={(e) => logo(e.target.files?.[0])} /></label></Field>
+            <Field label="로고"><DropZone onFile={(f) => void logo(f)} accept="image/*" acceptLabel="사진(PNG·JPG·SVG)" label="여기에 놓으면 로고로 올립니다" testid="company-logo-drop"><label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-dashed border-line px-3 text-sm text-ink-2 hover:bg-slate-50">
+              <ImagePlus className="size-4" />{edit.logo_file_id ? '로고 바꾸기' : '로고 올리기 (PNG·JPG·SVG)'}<input type="file" accept="image/*" className="hidden" onChange={(e) => logo(e.target.files?.[0])} /></label></DropZone></Field>
           </div>
           <Field label="디자인 메모 (예: 표는 얇은 회색 테두리, 제목은 브랜드 색)"><textarea className={inputCls} rows={2} value={edit.note ?? ''} onChange={(e) => setEdit({ ...edit, note: e.target.value })} /></Field>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={edit.is_default} onChange={(e) => setEdit({ ...edit, is_default: e.target.checked })} />기본 회사 (회사를 말하지 않으면 이 정보로)</label>

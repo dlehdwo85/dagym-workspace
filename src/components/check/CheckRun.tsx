@@ -9,6 +9,7 @@ import { api, useApi } from '@/components/client';
 import { useMultiSite, useSession, useTerms } from '@/components/session';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { shrinkImage } from '@/components/shrink';
+import { DropZone } from '@/components/upload';
 import { FOLLOWUP_TAG } from '@/lib/check/tags';
 
 type Course = { id: string; name: string; orgUnitId: string | null };
@@ -238,6 +239,7 @@ function ItemCard({ roundId, placeTypeId, it, data, editable, onSaved }: { round
   const v = it.result?.verdict;
   return (
     <li className="px-3 py-3" data-testid="check-round-item">
+      <DropZone onFiles={(fl) => void addPhoto(fl)} accept="image/*" acceptLabel="사진" disabled={!editable || !it.result || it.result.photos.length >= 6 || busy} label="여기에 놓으면 이 항목 사진으로 올립니다" testid="check-round-photo-drop">
       <button type="button" onClick={() => setMore(!more)} className="flex w-full items-start gap-2 text-left" aria-expanded={more}>
         <span className="min-w-0 flex-1"><span className="font-medium">{it.title}</span><span className="mt-0.5 block text-sm text-ink-2">{it.passCriteria || '-'}</span></span>
         <ChevronDown className={cx('mt-1 size-4 shrink-0 text-ink-3 transition-transform', more && 'rotate-180')} />
@@ -269,6 +271,7 @@ function ItemCard({ roundId, placeTypeId, it, data, editable, onSaved }: { round
           </div>
         </div>
       )}
+      </DropZone>
     </li>
   );
 }

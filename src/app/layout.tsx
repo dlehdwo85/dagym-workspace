@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 // U-0d Pretendard 를 실제로 내려받도록 포함 (한글 범위별로 필요한 조각만 받는 dynamic subset, 외부 CDN 없음)
 import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
 import './globals.css';
+import { DropGuard } from '@/components/upload';
 
 // #627(대표 10/25): 네이버 서치어드바이저·구글 서치콘솔 소유 확인 <meta> — 값은 환경 변수(NEXT_PUBLIC_NAVER_SITE_VERIFICATION · NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION, 로컬이 넣음). 비어 있으면 태그 없음
 const naverVerify = process.env.NEXT_PUBLIC_NAVER_SITE_VERIFICATION?.trim();
@@ -21,7 +22,7 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1, view
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased"><DropGuard />{children}</body>
     </html>
   );
 }

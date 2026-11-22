@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { api, useApi } from '@/components/client';
 import { useSession, useTerms } from '@/components/session';
-import { Button, ErrorBox, cx, Field, Loading, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { Button, ErrorBox, cx, Field, Loading, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { alarmDeviceStatus, enableNativePush, isNativeApp, openAlarmSettings, subscribeWebPush } from '@/components/native';
 import { BioLockSetting } from '@/components/BioLock';
 import { UserSelect } from '@/components/pickers';
@@ -483,11 +483,12 @@ function AccountSection() {
 const PROVIDER_NAME: Record<string, string> = { google: 'Google', kakao: '카카오', naver: '네이버', apple: 'Apple' };
 /** V29 로그인 연결: 소셜 계정 연결·해제(로그인 방법이 하나는 남아야 함) */
 function LinkedAccounts() {
-  const r = useApi<{ identities: { provider: string; email: string | null; last_login_at: string | null }[]; enabled: string[]; hasPassword: boolean }>('/api/account/identities');
+  const r = useApi<{ identities: { provider: string; email: string | null; created_at: string; last_login_at: string | null }[]; enabled: string[]; hasPassword: boolean }>('/api/account/identities');
   const [justLinked, setJustLinked] = useState<string | null>(null);
   const ios = useIosApp();
   useEffect(() => { const p = new URLSearchParams(location.search).get('linked'); if (p) { setJustLinked(p); toast.ok(`${PROVIDER_NAME[p] ?? p} 계정을 연결했습니다`); } }, []);
   // 로컬 11/21 #1101: 다른 주소(예: vercel.app)에서 [연결하기]를 누르면 정식 주소의 이 화면으로 옴 — 여기서 다시 누르면 연결됨
+  useEffect(() => { const m = new URLSearchParams(location.search).get('oauth_error'); if (m) toast.error(m); }, []); // #1121 연결 거절(다른 계정에 연결됨·같은 SNS 이미 연결)
   useEffect(() => { const p = new URLSearchParams(location.search).get('relink'); if (p) toast.info(`${PROVIDER_NAME[p] ?? p} 연결은 이 주소에서 합니다 — 아래 [연결하기]를 한 번 더 눌러 주세요`); }, []);
   if (!r.data || (!r.data.enabled.length && !r.data.identities.length)) return null;
   if (ios) return null; // 대표 11/19: 아이폰·아이패드 앱은 이메일 로그인만 — 소셜 계정 연결·끊기는 웹에서
@@ -505,7 +506,8 @@ function LinkedAccounts() {
           return (
             <li key={p} className="flex flex-wrap items-center gap-2" data-testid={`linked-${p}`}>
               <span className="w-16 font-medium">{PROVIDER_NAME[p] ?? p}</span>
-              {it ? <><span className="text-xs text-ink-2">{it.email ?? '연결됨'}{justLinked === p ? ' · 방금 연결' : ''}</span><Button size="sm" variant="ghost" onClick={() => unlink(p)}>연결 끊기</Button></>
+              {it ? <><span className="text-xs text-ink-2">{it.email ?? '연결됨'}{justLinked === p ? ' · 방금 연결' : ''}</span>
+                <span className="text-[11px] text-ink-3" data-testid={`linked-${p}-dates`}>연결 {fmtDate(it.created_at)} · 마지막 사용 {it.last_login_at ? fmtDate(it.last_login_at) : '아직 없음'}</span><Button size="sm" variant="ghost" onClick={() => unlink(p)}>연결 끊기</Button></>
                 : <a href={`/api/auth/oauth/${p}/start?mode=link`} className="rounded-input border border-line px-2.5 py-1 text-xs font-medium hover:bg-slate-50">연결하기</a>}
             </li>
           );
