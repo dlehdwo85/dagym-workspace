@@ -20,7 +20,10 @@ export async function salesTodo({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.getByTestId('sales-bulk').getByText('2건 선택').waitFor();
   await owner.getByTestId('sales-bulk').locator('input[type=date]').fill(ymd(-1));
   await owner.getByTestId('sales-bulk-go').click();
-  await owner.getByText(/업무 2건 만들었습니다/).waitFor();
+  // #1124: 담당 고르기 창 — 기본 = 원천 담당 규칙 또는 나 → [넘기기]
+  const dlg = owner.getByTestId('assign-dialog'); await dlg.getByTestId('assignee-option').first().waitFor();
+  await dlg.getByTestId('assign-dialog-go').click();
+  await owner.getByText(/2건을 영업 진행으로 넘겼습니다 — 업무 2건/).waitFor();
   const tasks = await sql`select id, title, due_date::text as due from tasks where sales_ref->>'kind' = 'building' and sales_ref->>'id' = any(${ids}) and deleted_at is null`;
   assert.equal(tasks.length, 2); assert.ok(tasks.every((t) => t.title.startsWith('[영업] E2E 할일 단지')));
   // 홈: 오늘 할 일 묶음(지난 영업 업무·입찰·신규단지 후속에 들어감) + 타일 + 진행표
@@ -28,8 +31,8 @@ export async function salesTodo({ owner, ctx, sql, BASE, SHOTS }) {
   const todo = owner.getByTestId('sales-todo'); await todo.waitFor();
   await todo.getByTestId('sales-todo-pastTasks').locator('button').click(); // 칸이 그리드 행 높이만큼 늘어나 칸 가운데는 빈 공간
   await todo.getByText('[영업] E2E 할일 단지 A').first().waitFor();
-  await todo.getByTestId('sales-todo-followUp').locator('button').click();
-  await todo.getByTestId('sales-todo-followUp').getByText('E2E 할일 단지 A').waitFor();
+  await todo.getByTestId('sales-todo-leads').locator('button').click(); // #1124 넘긴 건은 리드로 — 다음 연락일(어제) 지난 리드에
+  await todo.getByTestId('sales-todo-leads').getByText('E2E 할일 단지 A').waitFor();
   await owner.getByTestId('sales-tiles').getByText('계약만료·재입찰').waitFor();
   await owner.getByTestId('sales-progress').getByText('신규단지').waitFor();
   await owner.screenshot({ path: `${SHOTS}/157-sales-home-todo.png`, fullPage: true });

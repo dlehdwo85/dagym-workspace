@@ -148,8 +148,22 @@ export async function convertToLead(u: SessionUser, i: z.infer<typeof convertInp
   return { leadId };
 }
 /** 대표 10/20 14:15 ④ 허브·입찰 목록에서 여러 건 체크 → [영업 진행으로] — 한 번에 상태 바꾸고 업무 n건 */
-export async function bulkWork(u: SessionUser, i: { kind: WorkKind; ids: string[]; status: string; nextDate?: string | null; reason?: string | null }) {
+export async function bulkWork(u: SessionUser, i: { kind: WorkKind; ids: string[]; status: string; nextDate?: string | null; reason?: string | null; assigneeIds?: string[]; note?: string }) {
   const out: { id: string; ok: boolean; taskId?: string | null; error?: string }[] = [];
+  if (i.assigneeIds?.length) { // #1124: 담당 고르기 — 한 건씩 넘기기(입찰처럼)
+    const { handoff } = await import('./handoff');
+    let tasks = 0;
+    for (const id of [...new Set(i.ids)].slice(0, 100)) {
+      try { const r: any = await handoff(u, { kind: i.kind, id, assigneeIds: i.assigneeIds, note: i.note }); const n = r?.taskIds?.length ?? (r?.taskId ? 1 : 0); tasks += n;
+        if (r?.leadId && i.nextDate) { // 고른 다음 연락일 = 리드 다음 연락일 · 첫 연락 업무 마감(입찰은 공고 마감을 따르므로 그대로)
+          await db()`update sales_leads set next_contact_date = ${i.nextDate} where id = ${r.leadId} and tenant = ${tenantOf(u)}`;
+          if (r.taskIds?.length) await db()`update tasks set due_date = ${i.nextDate}::date, updated_at = now() where id = any(${r.taskIds}) and deleted_at is null`;
+        }
+        out.push({ id, ok: true, taskId: r?.taskIds?.[0] ?? r?.taskId ?? null }); }
+      catch (e: any) { out.push({ id, ok: false, error: e?.message ?? String(e) }); }
+    }
+    return { ok: true, results: out, tasks };
+  }
   for (const id of [...new Set(i.ids)].slice(0, 100)) {
     try { const r = await saveWork(u, { kind: i.kind, id, status: i.status, nextDate: i.nextDate ?? undefined, reason: i.reason ?? undefined }); out.push({ id, ok: true, taskId: r.task?.taskId ?? null }); }
     catch (e: any) { out.push({ id, ok: false, error: e?.message ?? String(e) }); }

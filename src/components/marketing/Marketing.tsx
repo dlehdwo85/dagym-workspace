@@ -20,6 +20,7 @@ import { MetaDraftCard, type MetaPlanRow } from './MetaAuto';
 import { ConceptSetCard, type ConceptSet } from './Concepts';
 import { QualityPanel, type QReport } from './QualityPanel';
 import { ChannelPreview } from './ChannelPreview';
+import { AssignDialog } from '@/components/AssigneePicker';
 import { MODE_HINT, MODE_LABEL, ModeChip, ModeToggle, type Mode } from './ModeToggle';
 
 const C = '#7C3AED';
@@ -793,11 +794,14 @@ export function Calls() {
   const { data, error, reload } = useApi<{ adKeywords?: string[]; calls: { id: string; phone: string; called_at: string; source: string | null; status: string; memo: string | null; task_id: string | null; brand: string | null; ad_keyword?: string | null }[] }>('/api/marketing/calls');
   const [f, setF] = useState({ phone: '', source: '', memo: '', adKeyword: '' });
   async function add(e: React.FormEvent) { e.preventDefault(); try { await api('/api/marketing/calls', { body: { phone: f.phone, source: f.source || undefined, memo: f.memo || undefined, adKeyword: f.adKeyword.trim() || undefined } }); setF({ phone: '', source: '', memo: '', adKeyword: '' }); reload(); } catch (er: any) { toast.error(er.message); } }
-  async function convert(id: string) { try { const r = await api<{ taskId: string; leadId: string | null }>(`/api/marketing/calls/${id}/convert`, { body: {} }); toast.ok(r.leadId ? '영업 진행(리드)에 올리고 업무를 만들었습니다 — 완료할 때 다음 연락일을 묻습니다' : '영업 업무로 만들었습니다'); reload(); return r; } catch (e: any) { toast.error(e.message); } }
+  const [conv, setConv] = useState<string | null>(null); const [convBusy, setConvBusy] = useState(false); // #1124 담당 고르기
+  async function convert(id: string, assigneeIds?: string[]) { setConvBusy(true); try { const r = await api<{ taskId: string; leadId: string | null }>(`/api/marketing/calls/${id}/convert`, { body: assigneeIds ? { assigneeIds } : {} }); setConv(null); toast.ok(r.leadId ? '영업 진행(리드)에 올리고 업무를 만들었습니다 — 완료할 때 다음 연락일을 묻습니다' : '영업 업무로 만들었습니다'); reload(); return r; } catch (e: any) { toast.error(e.message); } finally { setConvBusy(false); } }
   async function exclude(id: string, status: string) { try { await api(`/api/marketing/calls/${id}`, { method: 'PATCH', body: { status } }); reload(); } catch (e: any) { toast.error(e.message); } }
   return (
     <div className="space-y-3" data-testid="mkt-calls">
       <h1 className="text-xl font-bold" style={{ color: C }}>전화 문의</h1>
+      <AssignDialog open={!!conv} onClose={() => setConv(null)} title="전화 문의 → 영업 리드로" note="이 문의를 맡을 담당을 고르세요. 업무를 만들고, 영업 공간을 쓰면 영업 진행(리드)에도 올립니다." space="marketing" busy={convBusy} okLabel="업무 만들기"
+        onOk={(ids) => { if (conv) void convert(conv, ids); }} />
       <form onSubmit={add} className="grid gap-2 rounded-card border border-line bg-white p-3 shadow-card sm:grid-cols-[10rem_1fr_1fr_1fr_auto]">
         <input className={inputCls} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} placeholder="전화번호" required aria-label="전화번호" inputMode="tel" data-testid="call-phone" />
         <input className={inputCls} value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} placeholder="들어온 곳(광고·페이지)" aria-label="들어온 곳" />
@@ -814,7 +818,7 @@ export function Calls() {
             <span className="ml-auto flex gap-1.5">
               {c.task_id ? <Link href={`/tasks/${c.task_id}`} className="text-xs underline" style={{ color: '#2563EB' }}>영업 업무 보기</Link>
                 : c.status === 'excluded' ? <Button size="sm" variant="secondary" onClick={() => exclude(c.id, 'new')}>되살리기</Button>
-                : <><Button size="sm" onClick={() => convert(c.id)} data-testid="call-convert">영업 리드로</Button><Button size="sm" variant="secondary" onClick={() => exclude(c.id, 'excluded')}>제외</Button></>}
+                : <><Button size="sm" onClick={() => setConv(c.id)} data-testid="call-convert">영업 리드로</Button><Button size="sm" variant="secondary" onClick={() => exclude(c.id, 'excluded')}>제외</Button></>}
             </span>
           </li>))}{!data.calls.length && <li className="text-sm text-ink-3">아직 전화 문의가 없습니다</li>}</ul>
       )}

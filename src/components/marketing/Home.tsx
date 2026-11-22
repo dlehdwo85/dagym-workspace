@@ -9,6 +9,7 @@ import { api, useApi } from '@/components/client';
 import { useInApp } from '@/components/inApp';
 import { Button, Modal, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { NaverForm } from './Ads';
+import { AssignDialog } from '@/components/AssigneePicker';
 import { BrandBriefs } from './BrandBriefs';
 import { ApproveRow, CH_DOT, CH_STATE, ChannelSetup, ConnectButton, type HomeCh } from './Marketing';
 import { channelLabel, whenLabel, type CardContent } from './ApprovalCard';
@@ -119,7 +120,7 @@ export function MarketingHome() {
   const { data, error, reload } = useApi<Home>('/api/marketing/home');
   const inApp = useInApp(); // 298차 #861: 앱 안에서는 추가 구매 금액·'요금제를 올려 주세요' 없이 관리자 문의만
   const [naver, setNaver] = useState(false); const [cfg, setCfg] = useState(false);
-  const [picked, setPicked] = useState<Set<string>>(new Set()); const [busy, setBusy] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set()); const [busy, setBusy] = useState<string | null>(null); const [assignOpen, setAssignOpen] = useState(false);
   if (error) return <div className="mx-auto max-w-4xl text-sm text-red-700" data-testid="space-home-marketing">{error.message}</div>;
   if (!data) return <div className="mx-auto max-w-4xl" data-testid="space-home-marketing"><Skeleton className="h-40" /></div>;
   const chs = data.channels;
@@ -231,7 +232,10 @@ export function MarketingHome() {
             <input type="checkbox" className="mt-1" checked={picked.has(s.key)} onChange={(e) => { const n = new Set(picked); if (e.target.checked) n.add(s.key); else n.delete(s.key); setPicked(n); }} aria-label={s.title} />
             <span className="min-w-0 flex-1"><Link href={s.href} className="font-medium hover:underline">{s.title}</Link><span className="block text-xs text-ink-3">{s.detail}</span></span>
           </li>))}</ul> : <p className="mt-1 text-xs text-ink-3">지금 당장 할 일이 없습니다 ✓</p>}
-        {data.suggestions.length > 0 && <Button size="sm" className="mt-2" disabled={!picked.size || busy === 'task'} onClick={async () => { await act({ action: 'task', keys: [...picked] }, 'task', '업무로 만들었습니다'); setPicked(new Set()); }} data-testid="mkt-suggest-task">업무로 만들기{picked.size ? ` (${picked.size})` : ''}</Button>}
+        {/* #1124(대표 11/22): 담당 고르기 — 처음 고른 사람이 주 담당 */}
+        <AssignDialog open={assignOpen} onClose={() => setAssignOpen(false)} title="할 일 제안 → 업무로 만들기" note={`고른 제안 ${picked.size}개를 업무로 만듭니다. 담당을 고르세요.`} space="marketing" busy={busy === 'task'} okLabel="업무 만들기"
+          onOk={async (ids) => { await act({ action: 'task', keys: [...picked], assigneeIds: ids }, 'task', '업무로 만들었습니다'); setPicked(new Set()); setAssignOpen(false); }} />
+        {data.suggestions.length > 0 && <Button size="sm" className="mt-2" disabled={!picked.size || busy === 'task'} onClick={() => setAssignOpen(true)} data-testid="mkt-suggest-task">업무로 만들기{picked.size ? ` (${picked.size})` : ''}</Button>}
       </div>
     </section>,
     channels: <section key="channels" className="rounded-card border border-line bg-white px-4 py-3 shadow-card" data-testid="mkt-home-channels">

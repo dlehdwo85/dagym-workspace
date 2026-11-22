@@ -21,6 +21,7 @@ import { LeadImportDialog, type ImportRows } from '@/components/sales/LeadImport
 import { LeadMergeBox } from '@/components/sales/LeadMerge';
 import { StageChip, useStages } from '@/components/sales/stages';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { AssignDialog } from '@/components/AssigneePicker';
 
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
 const C = '#2563EB';
@@ -419,11 +420,17 @@ export function Contracts() {
 }
 /** 대표 10/20 14:15 ④ 일괄: 체크한 건을 한 번에 '영업 진행(연락중)' 등으로 → 업무 n건 */
 function BulkBar({ kind, ids, onDone, onClear }: { kind: 'bid' | 'building' | 'facility' | 'vendor'; ids: string[]; onDone: () => void; onClear: () => void }) {
-  const [busy, setBusy] = useState(false); const [next, setNext] = useState('');
+  const [busy, setBusy] = useState(false); const [next, setNext] = useState(''); const [assign, setAssign] = useState(false);
   const progress = kind === 'facility' ? '연락중' : kind === 'vendor' ? '신청 준비' : '연락중';
-  async function go(status: string) {
+  async function go(status: string, assigneeIds?: string[], note?: string) {
     setBusy(true);
-    try { const r = await api<{ tasks: number; results: { ok: boolean }[] }>('/api/sales/work/bulk', { body: { kind, ids, status, nextDate: next || null } }); toast.ok(`${r.results.filter((x) => x.ok).length}건을 '${status}'(으)로 — 업무 ${r.tasks}건 만들었습니다`); onDone(); onClear(); }
+    try {
+      const r = await api<{ tasks: number; results: { ok: boolean; error?: string }[] }>('/api/sales/work/bulk', { body: { kind, ids, status, nextDate: next || null, ...(assigneeIds ? { assigneeIds, note: note || undefined } : {}) } });
+      const ok = r.results.filter((x) => x.ok).length; const bad = r.results.find((x) => !x.ok);
+      if (ok) toast.ok(assigneeIds ? `${ok}건을 ${kind === 'bid' ? '입찰 업무로' : '영업 진행으로'} 넘겼습니다 — 업무 ${r.tasks}건` : `${ok}건을 '${status}'(으)로 — 업무 ${r.tasks}건 만들었습니다`);
+      if (bad) toast.error(`${r.results.length - ok}건은 넘기지 못했습니다 — ${bad.error ?? ''}`);
+      setAssign(false); onDone(); onClear();
+    }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   }
   if (!ids.length) return null;
@@ -431,7 +438,11 @@ function BulkBar({ kind, ids, onDone, onClear }: { kind: 'bid' | 'building' | 'f
     <div className="sticky bottom-[calc(4rem+var(--sab))] z-20 flex flex-wrap items-center gap-2 rounded-card border border-blue-200 bg-blue-50 p-2 text-sm shadow-pop sm:bottom-2" data-testid="sales-bulk">
       <b>{ids.length}건 선택</b>
       <input type="date" className={cx(inputCls, 'h-8 !w-auto')} value={next} onChange={(e) => setNext(e.target.value)} aria-label="다음 연락일" />
-      <Button size="sm" disabled={busy} onClick={() => go(progress)} data-testid="sales-bulk-go">영업 진행으로({progress}) · 업무 만들기</Button>
+      {/* #1124(대표 11/22): 담당 고르기 — 입찰 [넘기기]처럼 여러 명, 처음 고른 사람이 주 담당(기본 = 원천 담당 규칙 또는 나) */}
+      <Button size="sm" disabled={busy} onClick={() => setAssign(true)} data-testid="sales-bulk-go">{kind === 'bid' ? '입찰 업무로 넘기기' : '영업 진행으로 넘기기'} · 담당 고르기</Button>
+      <AssignDialog open={assign} onClose={() => setAssign(false)} title={`${ids.length}건 ${kind === 'bid' ? '입찰 업무로' : '영업 진행으로'} 넘기기`} space="sales" kind={kind} busy={busy} okLabel="넘기기" withMemo
+        note={kind === 'bid' ? '고른 공고마다 입찰 업무를 만들고 일정(마감)을 넣습니다.' : '고른 건마다 리드를 만들고 \'검토·첫 연락\' 업무를 담당에게 줍니다(마감 3일 뒤).'}
+        onOk={(sel, memo) => go(progress, sel, memo)} />
       {kind === 'facility' && <ResearchHandoff ids={ids} onDone={() => { onDone(); onClear(); }} />}
       <Button size="sm" variant="secondary" disabled={busy} onClick={() => go(kind === 'facility' || kind === 'vendor' ? '대상아님' : '대상아님')}>대상아님</Button>
       <button type="button" className="text-xs text-ink-2 underline" onClick={onClear}>선택 해제</button>

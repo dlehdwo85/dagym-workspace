@@ -394,7 +394,7 @@ export async function updateCall(u: SessionUser, id: string, i: z.infer<typeof c
   return { ok: true };
 }
 /** [영업 리드로]: 영업 담당에게 업무 카드(영업 공간 리드 표는 단계 2에서 — 그때 리드로 옮겨 연결) */
-export const convertInput = z.object({ assigneeId: zUuid.nullable().optional() });
+export const convertInput = z.object({ assigneeId: zUuid.nullable().optional(), assigneeIds: z.array(zUuid).min(1).max(10).optional() }); // #1124 담당 고르기(처음 = 주 담당)
 export async function convertCall(u: SessionUser, id: string, i: z.infer<typeof convertInput>) {
   await assertSpace(u, 'marketing');
   uuidOr404(id);
@@ -403,9 +403,10 @@ export async function convertCall(u: SessionUser, id: string, i: z.infer<typeof 
   if (!c) throw notFound();
   if (c.task_id) return { taskId: c.task_id };
   const { createTask } = await import('./tasks');
+  if (i.assigneeIds?.length) i = { ...i, assigneeId: i.assigneeIds[0] };
   const rule = i.assigneeId ? null : await (await import('./assignees')).resolveAssignee(sql, tenantOf(u), 'marketing_brand', c.brand_id ?? '').catch(() => null); // #100 브랜드별 마케팅 담당
   const r = await createTask(u, { title: `[전화 문의] ${c.phone}${c.brand ? ` · ${c.brand}` : ''}`, description: [`전화 시각: ${new Date(c.called_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`, c.source ? `들어온 곳: ${c.source}` : '', c.memo ?? ''].filter(Boolean).join('\n'),
-    assigneeId: i.assigneeId ?? rule?.userId ?? u.id, requestedById: u.id, approvalRequired: false, space: 'marketing' } as never);
+    assigneeId: i.assigneeId ?? rule?.userId ?? u.id, ...(i.assigneeIds && i.assigneeIds.length > 1 ? { coAssigneeIds: i.assigneeIds.slice(1) } : {}), requestedById: u.id, approvalRequired: false, space: 'marketing' } as never);
   if (rule) await sql`update tasks set assigned_by_rule = ${rule.ruleId} where id = ${(r as any).id}`;
   await sql`update mkt_calls set status = 'lead', task_id = ${(r as any).id} where id = ${id}`;
   // 대표 10/27 ③: [영업 리드로] = 영업 진행(리드)에도 — 업무를 잇고 완료할 때 다음 연락일·종결을 물음(영업 공간을 켠 회사만, 같은 번호면 그 리드)

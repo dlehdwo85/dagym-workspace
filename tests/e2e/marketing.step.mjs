@@ -118,6 +118,8 @@ export async function marketing({ owner, BASE, sql, SHOTS }) {
   await owner.getByTestId('call-phone').fill('010-2222-3333');
   await owner.getByTestId('call-add').click();
   await owner.getByTestId('call-row').filter({ hasText: '010-2222-3333' }).getByTestId('call-convert').click();
+  await owner.getByTestId('assign-dialog').getByTestId('assignee-option').first().waitFor(); // #1124 담당 고르기(기본 = 나)
+  await owner.getByTestId('assign-dialog-go').click();
   await owner.getByTestId('call-row').filter({ hasText: '010-2222-3333' }).getByRole('link', { name: '영업 업무 보기' }).waitFor();
   // 광고 성과(연결 전): 카드 4·빈 안내·네이버 연결 창(관리자)
   await owner.goto(`${BASE}/s/marketing/ads`);

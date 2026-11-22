@@ -149,7 +149,7 @@ export async function homeView(u: SessionUser) {
 export const homeAction = z.discriminatedUnion('action', [
   z.object({ action: z.literal('run'), kind: z.enum(['content', 'doc']), id: zUuid }),
   z.object({ action: z.literal('night'), kind: z.enum(['content', 'doc']), id: zUuid }),
-  z.object({ action: z.literal('task'), keys: z.array(z.string().max(80)).min(1).max(5), assigneeId: zUuid.nullable().optional() }),
+  z.object({ action: z.literal('task'), keys: z.array(z.string().max(80)).min(1).max(5), assigneeId: zUuid.nullable().optional(), assigneeIds: z.array(zUuid).min(1).max(10).optional() }), // #1124 담당 고르기(처음 = 주 담당)
   z.object({ action: z.literal('cards'), cards: z.array(z.enum(HOME_CARDS)).max(HOME_CARDS.length), company: z.boolean().optional() }),
 ]);
 export async function homeAct(u: SessionUser, i: z.infer<typeof homeAction>) {
@@ -179,7 +179,7 @@ export async function homeAct(u: SessionUser, i: z.infer<typeof homeAction>) {
     if (!picked.length) throw badRequest('제안이 바뀌었습니다 — 다시 골라 주세요');
     const { createTask } = await import('./tasks');
     const ids: string[] = [];
-    for (const s of picked) { const r: any = await createTask(u, { title: s.title, description: `${s.detail}\n${s.href}`, space: 'marketing', assigneeId: i.assigneeId ?? u.id } as any, { quiet: true }); ids.push(r?.id ?? r?.task?.id ?? ''); }
+    for (const s of picked) { const r: any = await createTask(u, { title: s.title, description: `${s.detail}\n${s.href}`, space: 'marketing', assigneeId: i.assigneeIds?.[0] ?? i.assigneeId ?? u.id, ...(i.assigneeIds && i.assigneeIds.length > 1 ? { coAssigneeIds: i.assigneeIds.slice(1) } : {}) } as any, { quiet: true }); ids.push(r?.id ?? r?.task?.id ?? ''); }
     return { ok: true, ids, count: picked.length };
   }
   // cards: 사람별 덮어쓰기(빈 목록 = 회사 기본으로 되돌림), 관리자는 회사 기본으로도
