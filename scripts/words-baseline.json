@@ -34,7 +34,7 @@
   },
   "src/components/branch/BranchReports.tsx": {
    "domain": 2,
-   "brand": 8
+   "brand": 10
   },
   "src/components/branch/MonthlyView.tsx": {
    "brand": 6
