@@ -9,7 +9,8 @@ import { LibraryPickModal } from './Attachments';
 import { VoiceButton } from './voice';
 import { parseTaskText } from '@/lib/nlparse';
 import { PRIORITY_LABEL } from '@/lib/types';
-import { Loader2, Mic, Paperclip, Sparkles, Users } from 'lucide-react';
+import { CalendarCheck, Folder, Loader2, MapPin, Mic, Paperclip, PenLine, Users } from 'lucide-react';
+import { AiMark } from '@/components/ui';
 import { AI_ACCEPT, uploadToLibrary } from './libraryUpload';
 import { DropZone } from './upload';
 import { TimePick } from './DateTimePickers';
@@ -208,7 +209,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
         <>
           <DropZone onFiles={(fl) => fillFrom(fl)} disabled={!!filling} label="여기에 놓으면 자료로 채웁니다">
           <button type="button" onClick={() => fillRef.current?.click()} disabled={!!filling} className="mb-3 flex w-full items-center justify-center gap-2 rounded-input border border-amber-300 bg-amber-50 py-2.5 text-sm font-semibold text-amber-800 disabled:opacity-60" data-testid="quick-fill">
-            {filling ? <><Loader2 className="size-4 animate-spin" />{filling}</> : <><Paperclip className="size-4" />📎 자료로 채우기 (사진·PDF·엑셀)</>}
+            {filling ? <><Loader2 className="size-4 animate-spin" />{filling}</> : <><Paperclip className="size-4" />자료로 채우기 (사진·PDF·엑셀)</>}
           </button>
           </DropZone>
           <input ref={fillRef} type="file" multiple accept={AI_ACCEPT} className="hidden" onChange={(e) => fillFrom(e.target.files)} data-testid="quick-fill-input" />
@@ -217,8 +218,8 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
       {/* 대표 10/20 23:55: 새 업무에도 자료실 파일을 바로 연결(저장하면 첨부) */}
       {!defaults?.parentId && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-          <button type="button" onClick={() => setLibOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-sm text-ink-2 hover:bg-slate-50" data-testid="quick-from-library">📁 자료실에서 첨부</button>
-          {(f.fileNames?.length ?? 0) > 0 && <span className="text-ink-2">📎 {f.fileNames.length}개 — 저장하면 업무에 첨부</span>}
+          <button type="button" onClick={() => setLibOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-sm text-ink-2 hover:bg-slate-50" data-testid="quick-from-library"><Folder className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />자료실에서 첨부</button>
+          {(f.fileNames?.length ?? 0) > 0 && <span className="text-ink-2"><Paperclip className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />{f.fileNames.length}개 — 저장하면 업무에 첨부</span>}
           {libOpen && <LibraryPickModal onClose={() => setLibOpen(false)} onPick={(files) => { setF((x: any) => ({ ...x, fileIds: [...new Set([...(x.fileIds ?? []), ...files.map((p) => p.id)])], fileNames: [...(x.fileNames ?? []), ...files.filter((p) => !(x.fileIds ?? []).includes(p.id)).map((p) => p.title)] })); setLibOpen(false); }} />}
         </div>
       )}
@@ -234,13 +235,13 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
         )}
         {features.ai && !defaults?.parentId && (
           <div className="space-y-1.5 rounded-input border border-accent-200 bg-accent-50/50 p-2.5" data-testid="quick-ai">
-            <p className="flex items-center gap-1 text-xs font-semibold text-accent-700"><Sparkles className="size-3.5" />AI 비서 — 말하거나 편하게 적으면 아래 칸을 채워요</p>
+            <p className="flex items-center gap-1 text-xs font-semibold text-ink-2"><AiMark />AI 비서 — 말하거나 편하게 적으면 아래 칸을 채워요</p>
             <textarea className={cx(inputCls, 'min-h-[56px] text-sm')} value={aiText} onChange={(e) => setAiText(e.target.value)} aria-label="AI 비서에게 업무 설명"
               placeholder={T.example.quickTask} />
             <div className="flex items-center gap-2">
               <VoiceButton value={aiText} onChange={setAiText} label="AI 비서에게 말하기" />
               <Button type="button" size="sm" variant="accent" className="ml-auto" disabled={aiBusy || !aiText.trim()} onClick={() => aiFill()} data-testid="quick-ai-fill">
-                {aiBusy ? <><Loader2 className="animate-spin" />정리하는 중…</> : <><Sparkles />AI로 채우기</>}</Button>
+                {aiBusy ? <><Loader2 className="animate-spin" />정리하는 중…</> : <><PenLine />AI로 채우기</>}</Button>
             </div>
           </div>
         )}
@@ -252,7 +253,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
         </Field>
         {!tpl && MEETING_WORDS.test(f.title ?? '') && (
           <div className="flex flex-wrap items-center gap-1.5 rounded-input bg-rose-50 px-2.5 py-2 text-xs text-rose-900" data-testid="quick-meeting">
-            <span className="font-medium">📍 미팅 일정도 만들까요?</span>
+            <span className="font-medium"><MapPin className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />미팅 일정도 만들까요?</span>
             <input className={cx(inputCls, 'h-8 min-w-0 flex-1 py-1 text-xs')} value={meet.location} onChange={(e) => setMeet({ ...meet, location: e.target.value })} placeholder="장소(비우면 업무만)" maxLength={300} aria-label="미팅 장소" data-testid="quick-meeting-location" />
             <input type="time" step={900} className={cx(inputCls, 'h-8 w-28 py-1 text-xs')} value={meet.start} onChange={(e) => setMeet({ ...meet, start: e.target.value || '10:00' })} aria-label="미팅 시작 시각" data-testid="quick-meeting-start" />
             <span className="text-[11px] text-rose-800/80">{f.dueDate ? '마감일' : '오늘'} · 1시간</span>
@@ -261,14 +262,14 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
         {/* V8 9번: "내일 3시 @김민수 !높음 #입찰 매주" 처럼 쓰면 알아봄 → 적용 */}
         {parsed && parsed.matched.length > 0 && (
           <div className={cx('-mt-1 inline-flex flex-wrap items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium', noAuto ? 'bg-slate-100 text-ink-3' : 'bg-accent-50 text-accent-700')} data-testid="quick-nl-apply">
-            <Sparkles className="size-3.5" />{noAuto ? '자동 인식 꺼짐' : '자동 인식'}: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName, parsed.priority && PRIORITY_LABEL[parsed.priority], parsed.projectName && `#${parsed.projectName}`, parsed.rrule && '반복'].filter(Boolean).join(' · ')}
+            <CalendarCheck className="size-3.5" />{noAuto ? '자동 인식 꺼짐' : '자동 인식'}: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName, parsed.priority && PRIORITY_LABEL[parsed.priority], parsed.projectName && `#${parsed.projectName}`, parsed.rrule && '반복'].filter(Boolean).join(' · ')}
             {!noAuto && <span className="font-normal text-ink-2">→ 제목 “{parsed.title}”</span>}
             <button type="button" className="ml-1 underline" onClick={() => setNoAuto(!noAuto)}>{noAuto ? '다시 켜기' : '끄기'}</button>
           </div>
         )}
         {(f.description || f.checklist?.length || f.fileNames?.length) && (
           <div className="space-y-2 rounded-input border border-amber-200 bg-amber-50/50 p-2.5" data-testid="quick-filled">
-            {f.fileNames?.length > 0 && <p className="text-xs text-ink-2">📎 {f.fileNames.join(', ')} — 저장하면 업무에 첨부</p>}
+            {f.fileNames?.length > 0 && <p className="text-xs text-ink-2"><Paperclip className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />{f.fileNames.join(', ')} — 저장하면 업무에 첨부</p>}
             <Field label="설명·메모"><textarea className={cx(inputCls, 'min-h-[80px] text-sm')} value={f.description ?? ''} onChange={(e) => set('description')(e.target.value)} /></Field>
             {f.checklist?.length > 0 && (
               <div>

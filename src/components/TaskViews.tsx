@@ -13,7 +13,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import dynamic from 'next/dynamic';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSalesTerms, useSession } from './session';
-import { CalendarDays as CalIcon, Camera, CheckCheck, ClipboardCheck, ChevronLeft, ChevronRight, ChevronDown, CircleCheck, Diamond, GanttChart, KanbanSquare, LayoutList, ListChecks, MessageSquare, Paperclip, FileSpreadsheet, GripVertical, MoreHorizontal, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, X, Check, Lock, Flag, Users } from 'lucide-react';
+import { CalendarDays as CalIcon, Camera, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, ClipboardCheck, Diamond, FileSpreadsheet, Flag, GanttChart, GripVertical, KanbanSquare, LayoutList, ListChecks, Lock, MapPin, MessageSquare, MoreHorizontal, Paperclip, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, Users, X } from 'lucide-react';
 import { FOLLOWUP_TAG } from '@/lib/check/tags';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, ROLE_RANK, STATUSES, STATUS_LABEL, type Role, type TaskStatus } from '@/lib/types';
@@ -445,7 +445,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
                 const r = el.getBoundingClientRect();
                 if (r.right > window.innerWidth - 8) { el.style.left = 'auto'; el.style.right = '0'; }
               }}
-                className="fixed inset-x-0 bottom-0 z-50 animate-fade-up rounded-t-2xl border-t border-line bg-white p-2 pb-[calc(var(--sab)+12px)] shadow-pop sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:z-40 sm:mt-1 sm:w-60 sm:rounded-card sm:border sm:p-1 sm:pb-1">
+                className="fixed inset-x-0 bottom-0 z-50 animate-fade-up rounded-t-card border-t border-line bg-white p-2 pb-[calc(var(--sab)+12px)] shadow-pop sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:z-40 sm:mt-1 sm:w-60 sm:rounded-card sm:border sm:p-1 sm:pb-1">
                 <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden />
                 <button role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-left text-sm hover:bg-slate-50" onClick={() => { setMoreMenu(false); setExportOpen(true); }}><FileSpreadsheet className="size-4 text-green-700" />엑셀로 내려받기</button>
                 {!fixed?.view && <Link role="menuitem" href="/tasks/import" className="flex min-h-11 w-full items-center gap-2 rounded-input px-3 text-sm hover:bg-slate-50 sm:hidden" onClick={() => setMoreMenu(false)}><FileSpreadsheet className="size-4 text-green-700" />엑셀로 가져오기</Link>}
@@ -484,7 +484,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
         {sq && <p className="basis-full text-xs text-ink-3" data-testid="search-scope">{`‘${sq}’ 검색: 제목·설명·태그·댓글·체크리스트·첨부·하위 업무에서 찾고, 완료 업무와 모든 보기의 업무를 함께 보여 줍니다`}</p>}
       </div>
       {filterOpen && (
-        <div className="grid animate-fade-up grid-cols-2 gap-2 rounded-card border border-line bg-white p-3 shadow-card sm:grid-cols-3 xl:grid-cols-6" data-testid="filter-panel">
+        <div className="grid grid-cols-2 gap-2 rounded-card border border-line bg-white p-3 shadow-card sm:grid-cols-3 xl:grid-cols-6" data-testid="filter-panel">
 {dir.brands.length > 0 && (
           <select className={inputCls} value={filters.brandId ?? ''} onChange={(e) => setFilters((f) => ({ ...f, brandId: e.target.value }))} aria-label="브랜드">
             <option value="">모든 브랜드</option>{dir.brands.filter((b) => !HIDDEN_BRANDS.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -613,7 +613,7 @@ function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onP
       {!collab && t.batch && t.batch.total > 1 && <span className="max-lg:hidden rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
       {t.blocked_by_count > 0 && <span className="shrink-0 font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
       {/* V37 8: 연결 미팅 일정 📍장소·시간 (장소는 일정에 한 번만) */}
-      {t.meeting && <span className="inline-flex min-w-0 max-w-[12rem] shrink items-center gap-0.5 rounded-full bg-rose-50 px-1.5 text-[11px] font-medium text-rose-800" title={`미팅 ${t.meeting.location}`} data-testid="meeting-chip"><span aria-hidden>📍</span><span className="truncate">{t.meeting.location}</span><span className="shrink-0 tabular-nums">· {meetingWhen(t.meeting.start)}</span></span>}
+      {t.meeting && <span className="inline-flex min-w-0 max-w-[12rem] shrink items-center gap-0.5 rounded-full bg-rose-50 px-1.5 text-[11px] font-medium text-rose-800" title={`미팅 ${t.meeting.location}`} data-testid="meeting-chip"><MapPin className="size-3 shrink-0" aria-hidden /><span className="truncate">{t.meeting.location}</span><span className="shrink-0 tabular-nums">· {meetingWhen(t.meeting.start)}</span></span>}
       {!t.ext_pending && !!t.due_extend_count && <span className="max-lg:hidden shrink-0 rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}
     </span>
   );

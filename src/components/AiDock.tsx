@@ -3,7 +3,7 @@ import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Check, Maximize2, Menu, Paperclip, Pin, Plus, Search, Send, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Check, Folder, Maximize2, Menu, MessageSquareText, Paperclip, Pin, Plus, Search, Send, X } from 'lucide-react';
 import { AttachChips, askFor, useAiAttach } from './aiAttach';
 import { DocJobCard } from '@/components/DocJobCard';
 import { VoiceButton } from './voice';
@@ -78,7 +78,7 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
   useEffect(() => { conv.stop(false); conv.cancelEdit(); setMsgs([]); setThreadId(null); setView('chat'); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy, conv.live]); // #497 R44 답이 이어서 나오는 동안에도
   if (path.startsWith('/assistant')) return null;
-  const hideFab = path.startsWith('/messages'); // 메시지 화면은 아래 오른쪽에 보내기 버튼 — 겹치지 않게(휴대폰은 상단 ✨)
+  const hideFab = path.startsWith('/messages'); // 메시지 화면은 아래 오른쪽에 보내기 버튼 — 겹치지 않게(휴대폰은 상단 AI 단추)
 
   async function send(q: string) {
     const t = q.trim() || (att.files.length ? askFor(att.files) : ''); if (!t || busy || att.uploading) return;
@@ -108,17 +108,17 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
     <>
       {!open && !hideFab && (
         <button onClick={() => onOpenChange(true)} aria-label={`${name} 열기`} data-testid="ai-dock-open"
-          className={`fixed bottom-6 right-6 z-40 hidden size-12 items-center justify-center rounded-full bg-violet-600 text-white shadow-pop transition-[transform,opacity] duration-200 hover:bg-violet-700 sm:flex ${dockHideCls(dockHidden)}`}><Sparkles className="size-6" /></button>
+          className={`fixed bottom-6 right-6 z-40 hidden size-12 items-center justify-center rounded-full border border-line bg-white text-brand-700 shadow-pop transition-[transform,opacity] duration-200 hover:bg-slate-50 sm:flex ${dockHideCls(dockHidden)}`}><span className="flex flex-col items-center leading-none"><MessageSquareText className="size-5" /><span className="mt-0.5 text-[9px] font-bold">AI</span></span></button>
       )}
       {open && (
         <div className="fixed inset-0 z-50 bg-slate-900/30 sm:inset-auto sm:bottom-6 sm:right-6 sm:bg-transparent" onClick={() => onOpenChange(false)}>
           <section role="dialog" aria-label={name} onClick={(e) => e.stopPropagation()} data-testid="ai-dock"
-            className="absolute inset-x-0 bottom-0 flex h-[78dvh] flex-col rounded-t-2xl bg-white pb-[var(--sab)] shadow-pop sm:static sm:h-[560px] sm:w-[380px] sm:rounded-card sm:border sm:border-line sm:pb-0">
+            className="absolute inset-x-0 bottom-0 flex h-[78dvh] flex-col rounded-t-card bg-white pb-[var(--sab)] shadow-pop sm:static sm:h-[560px] sm:w-[380px] sm:rounded-card sm:border sm:border-line sm:pb-0">
             <header className="flex items-center gap-2 border-b border-line px-3 py-2">
               {view === 'list'
                 ? <button onClick={() => setView('chat')} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="대화로 돌아가기"><ArrowLeft className="size-4" /></button>
                 : <button onClick={() => setView('list')} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="대화 목록" title="대화 목록" data-testid="ai-dock-list-open"><Menu className="size-4" /></button>}
-              <Sparkles className="size-4 text-violet-600" /><span className="min-w-0 flex-1 truncate text-sm font-semibold">{view === 'list' ? '대화 목록' : name}</span>
+              <MessageSquareText className="size-4 text-ink-2" /><span className="min-w-0 flex-1 truncate text-sm font-semibold">{view === 'list' ? '대화 목록' : name}</span>
               <button onClick={newChat} className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="새 대화" title="새 대화" data-testid="ai-dock-new"><Plus className="size-4" /></button>
               <Link href={`/assistant?${new URLSearchParams({ ...(threadId ? { thread: threadId } : {}), ...(ctx.taskId ? { task: ctx.taskId } : {}) })}`} onClick={() => onOpenChange(false)}
                 className="inline-flex size-8 items-center justify-center rounded-input text-ink-2 hover:bg-slate-100" aria-label="크게 보기" title="크게 보기"><Maximize2 className="size-4" /></Link>
@@ -131,21 +131,21 @@ export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boole
                 <div className="space-y-1.5">
                   <p className="text-xs text-ink-3">이 화면에 맞춰 물어보세요</p>
                   {SUGGEST[ctx.page].map((s) => <button key={s} onClick={() => send(s)} className="block w-full rounded-input border border-line px-3 py-2 text-left text-sm hover:bg-slate-50" data-testid="ai-dock-suggest">{s}</button>)}
-                  <p className="pt-1 text-[11px] text-ink-3">📎 사진·문서를 붙이고 “문서로 만들어줘”, “자료실에 정리해줘”라고 해 보세요</p>
+                  <p className="pt-1 text-[11px] text-ink-3"><Paperclip className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />사진·문서를 붙이고 “문서로 만들어줘”, “자료실에 정리해줘”라고 해 보세요</p>
                 </div>
               )}
               {msgs.map((m, i) => (
                 <div key={i} className={cx('flex flex-col', m.role === 'user' ? 'items-end' : 'items-start')}>
                   {m.stopped ? <div className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-ink-3" data-testid="ai-stopped">■ 멈춤</div>
                   : m.note ? <div className="rounded-input bg-green-50 px-2.5 py-1 text-xs text-green-800" data-testid="ai-kept">✓ {m.text}</div> : <>
-                  <div className={cx('max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.role === 'user' ? 'ai-user-msg' : 'ai-answer'}>
-                    {m.files && <div className="mb-0.5 text-xs opacity-80">📎 {m.files.join(', ')}</div>}
+                  <div className={cx('max-w-[90%] whitespace-pre-wrap break-words rounded-card px-3 py-1.5 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.role === 'user' ? 'ai-user-msg' : 'ai-answer'}>
+                    {m.files && <div className="mb-0.5 text-xs opacity-80"><Paperclip className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />{m.files.join(', ')}</div>}
                     {m.role === 'assistant' && !m.error ? <AiText text={m.text} /> : m.text}
                     {m.proposals?.map((p) => (p.kind === 'draft_sms' || p.kind === 'draft_quote') ? <SpecialProposal key={p.id} p={p} onDecided={(a, patch) => decide(i, p, a, patch)} /> : (
                       <div key={p.id} className="mt-1.5 rounded-input border border-amber-200 bg-white p-2 text-ink">
-                        <div className="text-xs font-semibold text-amber-700">✨ AI 제안</div><div className="text-sm">{p.summary}</div>
+                        <div className="text-xs font-semibold text-amber-800">AI 제안</div><div className="text-sm">{p.summary}</div>
                         {!!p.preview?.moves?.length && <ul className="mt-1 ml-4 list-disc text-xs text-ink-2" data-testid="ai-dock-organize">{p.preview.moves.map((x, k) => <li key={k}>{x}</li>)}</ul>}
-                        {p.preview?.folder && <div className="mt-1 text-xs text-ink-2">📁 저장 폴더: {p.preview.folder}</div>}
+                        {p.preview?.folder && <div className="mt-1 text-xs text-ink-2"><Folder className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />저장 폴더: {p.preview.folder}</div>}
                         {!!p.preview?.warnings?.length && <ul className="mt-1 rounded bg-amber-50 p-1.5 text-xs text-amber-800" data-testid="ai-dock-warnings">{p.preview.warnings.map((w, k) => <li key={k}>⚠ {w}</li>)}</ul>}
                         {p.state === 'done' ? <div className="mt-1 text-xs text-green-700">✓ 반영됨 {p.link && <Link href={p.link} className="underline">열기</Link>}</div>
                           : p.state === 'cancelled' ? <div className="mt-1 text-xs text-ink-3" data-testid={p.replaced ? 'ai-replaced' : undefined}>{p.replaced ? '새 제안으로 바뀜' : '취소함'}</div>
@@ -198,8 +198,8 @@ function ThreadList({ ctx, current, onPick }: { ctx: Ctx; current: string | null
   const mine = all.filter(related), rest = all.filter((t) => !related(t));
   const when = (s: string) => dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }).format(new Date(s));
   const row = (t: Thread) => (
-    <li key={t.id}><button onClick={() => onPick(t.id)} className={cx('flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50', current === t.id && 'bg-violet-50')} data-testid="ai-dock-thread">
-      <span className="min-w-0 flex-1"><span className="flex items-center gap-1"><span className="truncate text-sm font-medium">{t.title}</span>{t.pinned && <Pin className="size-3 shrink-0 text-violet-600" />}</span>
+    <li key={t.id}><button onClick={() => onPick(t.id)} className={cx('flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50', current === t.id && 'bg-slate-100')} data-testid="ai-dock-thread">
+      <span className="min-w-0 flex-1"><span className="flex items-center gap-1"><span className="truncate text-sm font-medium">{t.title}</span>{t.pinned && <Pin className="size-3 shrink-0 text-ink-2" />}</span>
         <span className="block truncate text-[11px] text-ink-3">{t.task_title ? `업무: ${t.task_title} · ` : ''}{t.turns}번 물음</span></span>
       <span className="shrink-0 text-[11px] text-ink-3">{when(t.updated_at)}</span>
     </button></li>
@@ -212,7 +212,7 @@ function ThreadList({ ctx, current, onPick }: { ctx: Ctx; current: string | null
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && !data && <p className="p-3 text-sm text-ink-3">불러오는 중…</p>}
-        {!!mine.length && <><p className="px-3 pt-2 text-[11px] font-semibold text-violet-700">{ctx.taskId ? '이 업무 관련' : '이 화면 관련'}</p><ul data-testid="ai-dock-related">{mine.map(row)}</ul></>}
+        {!!mine.length && <><p className="px-3 pt-2 text-[11px] font-semibold text-ink-2">{ctx.taskId ? '이 업무 관련' : '이 화면 관련'}</p><ul data-testid="ai-dock-related">{mine.map(row)}</ul></>}
         {!!rest.length && <><p className="px-3 pt-2 text-[11px] font-semibold text-ink-3">{mine.length ? '다른 대화' : '최근 대화'}</p><ul>{rest.map(row)}</ul></>}
         {data && !all.length && <p className="p-4 text-center text-sm text-ink-3">{sq ? '찾는 대화가 없습니다' : '아직 대화가 없습니다'}</p>}
       </div>

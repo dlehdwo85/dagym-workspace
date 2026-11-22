@@ -1,5 +1,5 @@
 'use client';
-import { Sparkles } from 'lucide-react';
+import { Gauge } from 'lucide-react';
 import { cx } from './ui';
 import { useInApp } from './inApp';
 
@@ -24,7 +24,7 @@ export function AiLimitsTable({ data }: { data: AiLimitsData }) {
   return (
     <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="ai-limits">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="size-4 text-violet-600" />AI 한도 한눈에 <span className="font-normal text-ink-3">— {data.month}</span></h2>
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Gauge className="size-4 text-ink-2" />AI 한도 한눈에 <span className="font-normal text-ink-3">— {data.month}</span></h2>
         <span className="text-xs text-ink-3">이번 달 쓴 양·남은 양을 %로 표시합니다</span>
       </div>
       <div className="mt-2 overflow-x-auto">

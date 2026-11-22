@@ -3,7 +3,7 @@ import { RoleBadge } from '@/components/RoleBadge';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { ArrowUpDown, Bell, CalendarDays, Check, Mic, Plus, Repeat, Sparkles, UserRound, X } from 'lucide-react';
+import { ArrowUpDown, Bell, CalendarCheck, CalendarDays, Check, Mic, Plus, Repeat, UserRound, X } from 'lucide-react';
 import { recurPresets } from './pickers';
 import { parseTaskText } from '@/lib/nlparse';
 import { correctVoice, learnVoice, listen, voiceAvailable, voiceErrorToast } from './voice';
@@ -54,7 +54,7 @@ export function Popover({ open, onClose, anchor, children, width = 224, title }:
   if (pos === 'sheet') return createPortal(
     <>
       <div className="fixed inset-0 z-[70] bg-slate-900/40" onClick={(e) => { e.stopPropagation(); onClose(); }} />
-      <div role="dialog" aria-label={title} data-sheet className="fixed inset-x-0 bottom-0 z-[71] flex max-h-[min(80dvh,calc(100dvh-var(--sat,0px)-24px))] animate-fade-up flex-col rounded-t-2xl bg-white shadow-pop"
+      <div role="dialog" aria-label={title} data-sheet className="fixed inset-x-0 bottom-0 z-[71] flex max-h-[min(80dvh,calc(100dvh-var(--sat,0px)-24px))] animate-fade-up flex-col rounded-t-card bg-white shadow-pop"
         onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
         <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-slate-200" aria-hidden />
         {title && <p className="px-4 pt-2 text-sm font-semibold">{title}</p>}
@@ -390,7 +390,7 @@ export function InlineAddTask({ projectId, sectionId, defaultDue, defaultAssigne
       )}
       {parsed && parsed.matched.length > 0 && (
         <p className="mx-3 mb-2 ml-12 inline-flex items-center gap-1.5 text-xs text-accent-700" data-testid="nl-apply">
-          <Sparkles className="size-3.5" />자동 인식: {parsed.matched.join(' · ')} — 칩에 반영, 저장하면 제목은 “{parsed.title}”
+          <CalendarCheck className="size-3.5" />자동 인식: {parsed.matched.join(' · ')} — 칩에 반영, 저장하면 제목은 “{parsed.title}”
         </p>
       )}
       {err && <p className="px-3 pb-2 pl-12 text-xs font-medium text-red-600" role="alert">{err} — 입력한 내용은 그대로 있습니다. 저장(Enter)을 다시 눌러 주세요.</p>}

@@ -209,7 +209,7 @@ function NewContract({ onClose }: { onClose: () => void }) {
       {step === 3 && (
         <div className="grid gap-3 lg:grid-cols-[1fr_240px]">
           <div className="space-y-3" onPointerMove={onDrag} onPointerUp={endDrag}>
-            <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 rounded-card border border-line bg-white/95 p-2 text-sm backdrop-blur" data-testid="editor-tools">
+            <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 rounded-card border border-line bg-white p-2 text-sm" data-testid="editor-tools">
               {signers.map((s, i) => <button key={i} onClick={() => setCur(i)} className={cx('rounded-full border-2 px-2 py-0.5 text-xs', cur === i ? 'font-semibold' : 'opacity-60')} style={{ borderColor: SIGNER_COLORS[i % 6], color: SIGNER_COLORS[i % 6] }} data-testid={`editor-signer-${i}`}>{i + 1}. {s.name}</button>)}
               <span className="mx-1 h-5 w-px bg-line" />
               {TOOLS.map(([k, label]) => <button key={k} onClick={() => setTool(tool === k ? null : k)} className={cx('rounded-input border px-2.5 py-1 text-xs', tool === k ? 'border-teal-700 bg-teal-700 text-white' : 'border-line hover:bg-slate-50')} data-testid={`tool-${k}`}>{label}</button>)}

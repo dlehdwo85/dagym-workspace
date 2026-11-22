@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { Search, Sparkles, Trash2 } from 'lucide-react';
+import { ScrollText, Search, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
@@ -31,7 +31,7 @@ export default function AiLogsPage() {
   if (error) return <ErrorBox error={error} retry={reload} />;
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <PageHeader title="AI 사용 내역" icon={Sparkles} sub="누가·언제·무슨 질문을 했는지와 비용. 열어 본 기록은 감사 기록에 남습니다."
+      <PageHeader title="AI 사용 내역" icon={ScrollText} sub="누가·언제·무슨 질문을 했는지와 비용. 열어 본 기록은 감사 기록에 남습니다."
         actions={canEdit && data && <Button variant="secondary" onClick={() => setSet({ ...data.settings, allowText: (data.settings.topic_allow ?? []).join(', ') })} data-testid="ai-settings-open">보관·한도 설정</Button>} />
       {data && <p className="text-xs text-ink-2" data-testid="ai-settings-line">보관 {data.settings.retention_days ? `${data.settings.retention_days}일` : '무기한'} · 1인 하루 {data.settings.daily_limit}회 · 1회 {data.settings.input_max.toLocaleString('ko-KR')}자 · 업무 무관 질문 {data.settings.topic_filter ? '차단' : '허용'} · 웹 검색 {data.settings.web_tools ? '켜짐' : '꺼짐'} · 문서 작업 {data.settings.doc_engine ? '켜짐' : '꺼짐'}</p>}
       <DocCopies canEdit={canEdit} />
@@ -74,9 +74,9 @@ export default function AiLogsPage() {
             {open.thread.task_id && <Link href={`/tasks/${open.thread.task_id}`} className="text-xs text-accent-600 underline">연결된 업무 보기</Link>}
             {open.messages.map((m: any) => (
               <div key={m.id} className={cx('rounded-input px-3 py-2 text-sm', m.role === 'user' ? 'bg-brand-50' : m.status === 'blocked' ? 'bg-amber-50' : 'bg-slate-50')}>
-                <div className="mb-0.5 text-[11px] text-ink-3">{m.role === 'user' ? '질문' : 'AI'} · {fmtDateTime(m.created_at)}{m.status === 'blocked' && ' · 차단됨'}{m.cost_usd > 0 && ` · $${m.cost_usd.toFixed(4)}`}{m.file_names?.length ? ` · 📎 ${m.file_names.join(', ')}` : ''}</div>
+                <div className="mb-0.5 text-[11px] text-ink-3">{m.role === 'user' ? '질문' : 'AI'} · {fmtDateTime(m.created_at)}{m.status === 'blocked' && ' · 차단됨'}{m.cost_usd > 0 && ` · $${m.cost_usd.toFixed(4)}`}{m.file_names?.length ? ` · 첨부 ${m.file_names.join(', ')}` : ''}</div>
                 <div className="whitespace-pre-wrap">{m.text}</div>
-                {m.proposals?.map((p: any) => <div key={p.id} className="mt-1 text-xs text-ink-2">✨ 제안: {p.summary} — {p.status === 'done' ? '실행됨' : p.status === 'cancelled' ? '취소됨' : '대기'}</div>)}
+                {m.proposals?.map((p: any) => <div key={p.id} className="mt-1 text-xs text-ink-2">제안: {p.summary} — {p.status === 'done' ? '실행됨' : p.status === 'cancelled' ? '취소됨' : '대기'}</div>)}
               </div>
             ))}
           </div>
@@ -99,7 +99,7 @@ export default function AiLogsPage() {
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!set.web_tools} onChange={(e) => setSet({ ...set, web_tools: e.target.checked })} data-testid="ai-web-tools" />웹 검색·페이지 읽기 (출처 링크 표시)</label>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!set.doc_engine} onChange={(e) => setSet({ ...set, doc_engine: e.target.checked })} data-testid="ai-doc-engine" />문서 작업 (엑셀·워드·PPT·PDF 만들기·디자인·데이터 분석 — 코드 실행, 사용량 더 듦)</label>
             {/* ⑥ 밤사이 비서(대표 승인 10/20 오후): 22시~06시에 승인된 범위만 — 기본 모두 끔. 돈·외부 발송은 절대 자동 아님 */}
-            <fieldset className="rounded-input border border-line p-2" data-testid="ai-night-scope"><legend className="px-1 text-xs text-ink-2">🌙 밤사이 비서 (22시~06시, 기본 끔 — 결과는 아침 마케팅 홈·브리핑에)</legend>
+            <fieldset className="rounded-input border border-line p-2" data-testid="ai-night-scope"><legend className="px-1 text-xs text-ink-2">밤사이 비서 (22시~06시, 기본 끔 — 결과는 아침 마케팅 홈·브리핑에)</legend>
               {([['draft', '원고 초안 — 3일 안 게시할 자동 제작 시안을 밤에 미리'], ['lead_next', '리드 다음 연락 제안 (준비 중)'], ['bid_summary', '입찰 요약 (준비 중)'], ['report', '보고서 초안 (준비 중)'], ['goal', '마케팅 목표 설정·주간 계획·리뷰 — 밤에도 돌림(기본은 낮 09~22시)']] as [string, string][]).map(([k, l]) => (
                 <label key={k} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!set.night_scope?.[k]} onChange={(e) => setSet({ ...set, night_scope: { ...(set.night_scope ?? {}), [k]: e.target.checked } })} data-testid={`ai-night-${k}`} />{l}</label>))}
             </fieldset>

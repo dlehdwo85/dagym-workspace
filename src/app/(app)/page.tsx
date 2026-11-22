@@ -3,10 +3,10 @@ import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { useState } from 'react';
 import { CalendarPlus, Plus, SquarePen, Stamp } from 'lucide-react';
-import { useApi } from '@/components/client';
+import { api, broadcastRefresh, useApi } from '@/components/client';
 import { ClockCard } from '@/components/ClockCard';
 import { useSession, useTerms } from '@/components/session';
-import { ErrorBox, cx, fmtDate } from '@/components/ui';
+import { Button, ErrorBox, cx, fmtDate, toast } from '@/components/ui';
 import { useCalColors, type CalColors } from '@/components/calColors';
 import { SPACE_META } from '@/components/spaceMeta';
 import { ABSENCE_KINDS } from '@/lib/types';
@@ -48,6 +48,7 @@ type Summary = {
     ads: { spend: number; cap: number | null } | null;
   };
   notices: { id: string; title: string; important: boolean; read: boolean; at: string }[];
+  review: null | { count: number; items: { id: string; title: string; requested_by: string | null; requested_by_name: string | null }[] }; me: string;
 };
 
 type WeekItem = { key: string; time: string; title: string; personal: boolean; tag: string; href: string; task: any | null; kind?: 'event' | 'task' | 'space' | 'overdue'; space?: 'sales' | 'marketing' };
@@ -142,6 +143,7 @@ export default function Dashboard() {
   const td = data?.todo; const c = data?.company;
   const cells = td ? [
     td.overdue > 0 && { k: 'overdue', label: '기한 지남', value: td.overdue, sub: td.overdueOldestDays ? `최대 ${td.overdueOldestDays}일 지남` : '내 업무', href: `/tasks?view=overdue&assigneeId=${user.id}`, tone: 'red' as const },
+    !!data?.review?.count && { k: 'review', label: '검토 대기', value: data.review.count, sub: '완료 확인', href: '/tasks?view=review', tone: 'amber' as const },
     td.approvals > 0 && { k: 'approvals', label: '결재 대기', value: td.approvals, sub: '내 차례', href: '/approvals?view=todo', tone: 'amber' as const },
     td.dueToday > 0 && { k: 'today', label: '오늘 마감', value: td.dueToday, sub: '내 업무', href: '/tasks?view=today' },
     !!td.marketing && { k: 'marketing', label: '마케팅 승인', value: td.marketing, sub: td.marketingSplit ? `시안 ${td.marketingSplit.drafts} · 운영 ${td.marketingSplit.ops}` : '승인할 것', href: '/s/marketing/approvals' },
@@ -156,6 +158,17 @@ export default function Dashboard() {
     c.ads && { k: 'ads', label: '이번 달 광고비(전체 매체)', value: won(c.ads.spend), sub: c.ads.cap ? `월 상한 ${won(c.ads.cap)}` : '월 상한 없음', href: '/s/marketing/ad-ops', tone: c.ads.cap && c.ads.spend > c.ads.cap * 0.9 ? 'amber' as const : undefined },
   ].filter(Boolean) as Parameters<typeof Cell>[0][] : [];
 
+  async function decide(id: string, ok: boolean) { // 예전 홈과 같은 동작: 완료 = done, 보완 = 진행 중 + 보완 요청 댓글
+    try {
+      if (ok) await api(`/api/tasks/${id}`, { method: 'PATCH', body: { status: 'done' } });
+      else {
+        const note = prompt('보완 요청 내용을 입력하세요') ?? ''; if (!note) return;
+        await api(`/api/tasks/${id}`, { method: 'PATCH', body: { status: 'in_progress', reviewNote: note } });
+        await api(`/api/tasks/${id}/comments`, { body: { body: `[보완 요청] ${note}` } });
+      }
+      toast.ok(ok ? '최종 완료 처리했습니다' : '보완을 요청했습니다'); reload(); broadcastRefresh();
+    } catch (e: any) { toast.error(e.message); }
+  }
   if (error) return <ErrorBox error={error} retry={reload} />;
   return (
     <div className="space-y-4" data-testid="home">
@@ -187,6 +200,14 @@ export default function Dashboard() {
         {!data ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-[74px] rounded-input" />)}</div>
           : cells.length ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">{cells.map((x) => <Cell key={x.k} {...x} />)}</div>
           : <p className="rounded-input border border-line bg-white px-3 py-2.5 text-sm text-ink-2" data-testid="home-todo-empty">지금 처리할 것이 없습니다.</p>}
+        {/* 검토 대기 — 요청자는 홈에서 바로 [완료 확인]·[보완 요청](#1110 개편 때 빠진 것 되살림) */}
+        {!!data?.review?.items.length && <ul className="mt-2 divide-y divide-line rounded-input border border-line bg-white" data-testid="home-review">
+          {data.review.items.map((t) => <li key={t.id} className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-2 text-sm">
+            <Link prefetch={false} href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{t.title}</Link>
+            {t.requested_by === data.me ? <span className="flex gap-1"><Button size="sm" onClick={() => void decide(t.id, true)}>완료 확인</Button><Button size="sm" variant="secondary" onClick={() => void decide(t.id, false)}>보완 요청</Button></span>
+              : <span className="text-xs text-ink-3">요청자 확인 대기{t.requested_by_name ? ` · ${t.requested_by_name}` : ''}</span>}
+          </li>)}
+        </ul>}
       </section>
 
       {/* 3) 회사 현황 — 대표·관리자만 */}

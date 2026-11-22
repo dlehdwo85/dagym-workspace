@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Download, FileSpreadsheet, FileText, Library, Loader2, Presentation, Wand2 } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, Library, Loader2, PenLine, Presentation } from 'lucide-react';
 import { api } from './client';
 import { Button, Modal, cx, toast } from './ui';
 
@@ -73,7 +73,7 @@ export function DocJobCard({ id, onRefine }: { id: string; onRefine?: (text: str
               : <Button size="sm" variant="secondary" onClick={() => save()} disabled={busy} data-testid="doc-job-save"><Library />자료실에 저장</Button>)}
             {job.hasFile && /^(xlsx|docx)$/.test(job.kind) && (tpl ? <span className="inline-flex h-8 items-center px-1 text-xs text-green-700">✓ 양식 저장됨</span>
               : <Button size="sm" variant="ghost" onClick={() => save(true)} disabled={busy} data-testid="doc-job-template" title="다음부터 같은 문서를 값만 바꿔 싸고 빠르게"><FileText />양식으로 저장</Button>)}
-            {onRefine && job.hasFile && <Button size="sm" variant="ghost" onClick={() => onRefine(`「${job.title}」 v${job.version}을 `)} data-testid="doc-job-refine"><Wand2 />더 다듬기</Button>}
+            {onRefine && job.hasFile && <Button size="sm" variant="ghost" onClick={() => onRefine(`「${job.title}」 v${job.version}을 `)} data-testid="doc-job-refine"><PenLine />더 다듬기</Button>}
           </div>
           {versions.length > 1 && (
             <div className="flex flex-wrap items-center gap-1 border-t border-line px-2.5 py-1.5 text-[11px] text-ink-3" data-testid="doc-job-versions">버전

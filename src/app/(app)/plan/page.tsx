@@ -8,7 +8,7 @@ import interactionPlugin, { Draggable } from '@fullcalendar/interaction';
 import luxonPlugin from '@fullcalendar/luxon3';
 import type { DatesSetArg } from '@fullcalendar/core';
 type EventReceiveArg = { event: any; revert: () => void };
-import { AlertTriangle, CalendarClock, GripVertical, Sparkles, Timer } from 'lucide-react';
+import { AlertTriangle, CalendarClock, GripVertical, Timer } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
 import { DueChip, PageHeader, PriorityTag, Skeleton, cx, fmtMinutes, fmtTime, toast } from '@/components/ui';
@@ -112,7 +112,7 @@ export default function PlanPage() {
       <PageHeader title="오늘·이번 주" icon={CalendarClock} sub="왼쪽 업무를 오른쪽 시간표 빈칸으로 끌어 놓으면 그 시간에 업무를 배정합니다" />
       {todayGaps.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-card border border-line bg-white px-4 py-3 text-sm shadow-card" data-testid="focus-gaps">
-          <Sparkles className="size-4 text-amber-500" /><span className="font-medium">오늘 집중 가능한 시간</span>
+          <Timer className="size-4 text-ink-2" /><span className="font-medium">오늘 집중 가능한 시간</span>
           {todayGaps.map((g, i) => <span key={i} className="rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700">{fmtTime(new Date(g.s))}~{fmtTime(new Date(g.e)).replace(/^(오전|오후) /, '')} · {fmtMinutes(Math.round((g.e - g.s) / 60000))}</span>)}
         </div>
       )}

@@ -7,7 +7,7 @@ import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import { RevenueGoal } from '@/components/marketing/RevenueGoal';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, ClipboardList, Copy, Download, ExternalLink, MessageSquare, Phone } from 'lucide-react';
+import { ArrowRight, CalendarDays, Circle, CircleCheck, ClipboardList, Copy, Download, ExternalLink, FileText, Handshake, MessageCircle, MessageSquare, Paperclip, Phone, RefreshCw, type LucideIcon } from 'lucide-react';
 import type { SearchHint } from '@/lib/sales/sourceLink';
 import { mdhm } from '@/lib/sales/bidTerms';
 import { AI_ITEMS_NOTE, ELIG_FAIL, ELIG_MISS, VISION_NOTE } from '@/lib/sales/eligibilityText';
@@ -491,7 +491,7 @@ function LeadEdit({ id, data, onSaved }: { id: string; data: any; onSaved: () =>
   );
 }
 
-const TL_ICON: Record<string, string> = { act: '💬', status: '🔁', task: '✅', proposal: '📄', contract: '🤝', event: '📅', comment: '🗨️', file: '📎' };
+const TL_ICON: Record<string, LucideIcon> = { act: MessageSquare, status: RefreshCw, task: CircleCheck, proposal: FileText, contract: Handshake, event: CalendarDays, comment: MessageCircle, file: Paperclip }; // #1113 이모지 → 같은 굵기 아이콘
 /** 197차(#460): 타임라인 종류 거르기 — 업무 댓글·첨부도 거래처 이력에 */
 const TL_KINDS: [string, string, string[]][] = [['', '전체', []], ['act', '상담', ['act']], ['task', '업무', ['task', 'comment', 'file']], ['status', '단계', ['status']], ['event', '일정', ['event']], ['deal', '제안·계약', ['proposal', 'contract']]];
 function LeadTimeline({ items }: { items: any[] }) {
@@ -501,7 +501,7 @@ function LeadTimeline({ items }: { items: any[] }) {
   return (
     <div className="space-y-2" data-testid="lead-timeline-box">
       <div className="flex flex-wrap gap-1 text-xs" role="group" aria-label="종류">{TL_KINDS.map(([x, lb, ks]) => { const n = ks.length ? items.filter((y) => ks.includes(y.kind)).length : items.length; return <button key={x} type="button" onClick={() => setK(x)} className={chipCls(k === x)} aria-pressed={k === x} data-testid={`lead-tl-kind-${x || 'all'}`}>{lb} {n}</button>; })}</div>
-      <ol className="space-y-1.5 text-sm" data-testid="lead-timeline">{shown.map((x: any) => <li key={x.kind + x.id} className="flex gap-2 rounded-input border border-line p-2" data-testid={`lead-tl-${x.kind}`}><span aria-hidden>{TL_ICON[x.kind] ?? '•'}</span><span className="min-w-0 flex-1">{x.href ? <Link href={x.href} className="underline">{x.title}</Link> : x.title}{x.task && <span className="ml-1 text-xs text-ink-3">· {x.task}</span>}{x.by && <span className="ml-1 text-xs text-ink-3">{x.by}</span>}</span><span className="shrink-0 text-xs tabular-nums text-ink-3">{kdt(x.at)}</span></li>)}{!shown.length && <li className="text-xs text-ink-3">아직 기록이 없습니다</li>}</ol>
+      <ol className="space-y-1.5 text-sm" data-testid="lead-timeline">{shown.map((x: any) => <li key={x.kind + x.id} className="flex gap-2 rounded-input border border-line p-2" data-testid={`lead-tl-${x.kind}`}>{(() => { const Ic = TL_ICON[x.kind] ?? Circle; return <Ic className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden />; })()}<span className="min-w-0 flex-1">{x.href ? <Link href={x.href} className="underline">{x.title}</Link> : x.title}{x.task && <span className="ml-1 text-xs text-ink-3">· {x.task}</span>}{x.by && <span className="ml-1 text-xs text-ink-3">{x.by}</span>}</span><span className="shrink-0 text-xs tabular-nums text-ink-3">{kdt(x.at)}</span></li>)}{!shown.length && <li className="text-xs text-ink-3">아직 기록이 없습니다</li>}</ol>
     </div>
   );
 }

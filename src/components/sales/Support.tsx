@@ -3,9 +3,9 @@ import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Check, Download, ExternalLink, ListPlus, Plus, Sparkles } from 'lucide-react';
+import { Check, CircleAlert, CircleCheck, CircleX, Download, ExternalLink, Hourglass, Layers, ListChecks, ListPlus, Plus, ScanSearch, type LucideIcon } from 'lucide-react';
 import { api, useApi } from '@/components/client';
-import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast, AiMark } from '@/components/ui';
 import { PortalApplyLink, portalService } from './PortalApply';
 
 /** #450 영업실 '지원사업' — 기업마당·K-Startup·기관 공지 공고를 회사 프로필로 맞춤(1차 규칙 + AI 세일즈 판단) → 관심·신청 준비(담당 업무·마감 알림) → 신청·선정·탈락 기록 */
@@ -33,7 +33,7 @@ const TABS: [string, string][] = [['fit', '맞춤'], ['closing', '마감 임박'
 /** #781 정렬·D-day·종류(사람별 기억) */
 const SORTS: [string, string][] = [['fit', '맞춤 순'], ['deadline', '마감 임박 순'], ['new', '새로 올라온 순'], ['amount', '지원 금액 큰 순']];
 const DDS: [string, string, string][] = [['all', '전체', ''], ['d3', 'D-3', '오늘부터 3일 안 마감'], ['d7', 'D-7', '7일 안 마감'], ['d14', 'D-14', '14일 안 마감'], ['d30', 'D-30', '30일 안 마감'], ['open', '상시·예산 소진', '마감일 없음(상시·예산 소진 시·마감 미정)']];
-const VERDICT: Record<string, [string, string, string]> = { fit: ['✅', '해당', 'border-emerald-200 bg-emerald-50 text-emerald-800'], maybe: ['⚠', '확인 필요', 'border-amber-200 bg-amber-50 text-amber-800'], no: ['❌', '해당 없음', 'border-red-200 bg-red-50 text-red-700'] };
+const VERDICT: Record<string, [LucideIcon | null, string, string]> = { fit: [CircleCheck, '해당', 'border-emerald-200 bg-emerald-50 text-emerald-800'], maybe: [CircleAlert, '확인 필요', 'border-amber-200 bg-amber-50 text-amber-800'], no: [CircleX, '해당 없음', 'border-red-200 bg-red-50 text-red-700'] };
 const FLAG_CLS: Record<Flag['level'], string> = { ok: 'bg-emerald-50 text-emerald-800', warn: 'bg-amber-50 text-amber-800', no: 'bg-red-50 text-red-700' };
 const STATUS_CLS: Record<string, string> = { interest: 'bg-sky-50 text-sky-800', preparing: 'bg-blue-600 text-white', applied: 'bg-violet-50 text-violet-800', selected: 'bg-emerald-600 text-white', rejected: 'bg-slate-200 text-ink-2', dropped: 'bg-slate-100 text-ink-3' };
 /** 280차 #820: 신청 완료·선정에서 이어 만드는 업무(단계·이름) */
@@ -55,12 +55,12 @@ function Verdict({ it }: { it: Pick<Item, 'ai' | 'rule' | 'queued' | 'final'> })
   const f = it.final ?? { verdict: it.ai?.verdict ?? it.rule.verdict, by: it.ai ? 'ai' : 'rule', conflict: false };
   const v = f.verdict;
   if (it.queued && !it.ai) return <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800" data-testid="support-verdict" data-verdict={v} data-by="rule" data-queued="1"
-    title="새 공고 자동 AI 판단 차례 — 정기 실행(15분마다) 때 차례로 판단합니다(회사 AI 한도 밖 — 자동 수집 몫)">⏳ AI 확인 중</span>; // #785: 실제로 판단 차례에 있을 때만
+    title="새 공고 자동 AI 판단 차례 — 정기 실행(15분마다) 때 차례로 판단합니다(회사 AI 한도 밖 — 자동 수집 몫)"><Hourglass className="mr-0.5 inline size-3 align-[-2px]" aria-hidden />AI 확인 중</span>; // #785: 실제로 판단 차례에 있을 때만
   // #649 ③: 1차 규칙만 맞는 공고는 '해당'이 아님 — #782(대표 10/28 "AI 확인 중이라고 왜?"): 판단 차례가 아니면 '규칙상 맞음 · AI 판단 전'(사람이 [AI 판단]을 눌러야 정해짐)
   const pending = !it.ai && v === 'fit';
-  const [icon, label, cls] = pending ? ['', '규칙상 맞음 · AI 판단 전', 'border-sky-200 bg-sky-50 text-sky-800'] : VERDICT[v];
+  const [Icon, label, cls] = pending ? [null, '규칙상 맞음 · AI 판단 전', 'border-sky-200 bg-sky-50 text-sky-800'] : VERDICT[v];
   return <><span className={cx('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold', cls)} data-testid="support-verdict" data-verdict={v} data-by={f.by} data-pending={pending ? '1' : undefined}
-    title={f.by === 'ai' ? 'AI 세일즈 판단' : it.ai ? `1차 규칙이 자격 '해당 없음'으로 봄(AI 는 '${VERDICT[it.ai.verdict][1]}')` : pending ? '지역·업력·규모·업종 규칙으로는 맞음 — 참여 가능 여부는 [AI 판단]을 눌러야 정해집니다' : '1차 규칙 판단(지역·업력·규모·업종·관심 분야)'}>{icon ? `${icon} ` : ''}{label}{!pending && <span className="ml-1 font-normal opacity-70">{f.by === 'ai' ? 'AI' : '1차'}</span>}</span>
+    title={f.by === 'ai' ? 'AI 세일즈 판단' : it.ai ? `1차 규칙이 자격 '해당 없음'으로 봄(AI 는 '${VERDICT[it.ai.verdict][1]}')` : pending ? '지역·업력·규모·업종 규칙으로는 맞음 — 참여 가능 여부는 [AI 판단]을 눌러야 정해집니다' : '1차 규칙 판단(지역·업력·규모·업종·관심 분야)'}>{Icon && <Icon className="mr-0.5 inline size-3 align-[-2px]" aria-hidden />}{label}{!pending && <span className="ml-1 font-normal opacity-70">{f.by === 'ai' ? 'AI' : '1차'}</span>}</span>
     {f.conflict && <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-900" data-testid="support-rule-conflict" title="AI 는 '해당', 1차 규칙(지역·대상·업종 등)은 '해당 없음' — 원문으로 확인하세요">규칙과 다름 · 확인</span>}</>;
 }
 const Flags = ({ flags, max }: { flags: Flag[]; max?: number }) => (
@@ -158,7 +158,7 @@ export function Support() {
         <span className="text-xs text-ink-2">정부·지자체 지원사업 공고를 우리 회사 기준으로 걸러 봅니다</span>
         <span className="ml-auto flex flex-wrap gap-1.5">
           <input className={cx(inputCls, 'h-8 w-40 py-1 text-sm')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="찾기" aria-label="공고 찾기" data-testid="support-search" />
-          {data?.canEdit && data.aiOn && data.pendingCount > 0 && <Button size="sm" variant="secondary" disabled={busy === 'top'} onClick={() => setBulk(true)} data-testid="support-analyze-top"><Sparkles className="size-3.5" aria-hidden />{busy === 'top' ? '판단 중…' : '공고 여러 건 AI 판단'}</Button>}
+          {data?.canEdit && data.aiOn && data.pendingCount > 0 && <Button size="sm" variant="secondary" disabled={busy === 'top'} onClick={() => setBulk(true)} data-testid="support-analyze-top"><ListChecks className="size-3.5" aria-hidden />{busy === 'top' ? '판단 중…' : '공고 여러 건 AI 판단'}</Button>}
           <Button size="sm" onClick={() => setAdding(true)} data-testid="support-add"><Plus className="size-3.5" aria-hidden />직접 추가</Button>
         </span>
       </div>
@@ -188,7 +188,7 @@ export function Support() {
               <span className="text-ink-3"> · 출처 {it.sourceLabel}{it.alsoOn.length ? `(+${it.alsoOn.join('·')})` : ''}</span></p>
             <div className="mt-1.5"><Flags flags={it.rule.flags} max={4} /></div>
             {it.ai?.effect?.receive && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-effect-line"><b className="font-semibold text-ink">받는 것</b> {it.ai.effect.receive}{it.ai.effect.amount ? ` · ${it.ai.effect.amount}` : ''}{it.ai.effect.prepHours ? ` · 준비 약 ${it.ai.effect.prepHours}시간` : ''}</p>}
-            {it.ai && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-ai-line"><Sparkles className="mr-0.5 inline size-3 text-violet-600" aria-hidden />{it.ai.use[0] ? `접목: ${it.ai.use[0]}` : it.ai.reasons[0] ?? it.ai.summary}{it.ai.brands.length > 0 && <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">{it.ai.brands.map((b) => <span key={b} className="rounded-full border border-violet-200 bg-violet-50 px-1.5 text-[11px] text-violet-800">{b}</span>)}</span>}</p>}
+            {it.ai && <p className="mt-1.5 text-xs text-ink-2" data-testid="support-ai-line"><AiMark className="mr-1" />{it.ai.use[0] ? `접목: ${it.ai.use[0]}` : it.ai.reasons[0] ?? it.ai.summary}{it.ai.brands.length > 0 && <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">{it.ai.brands.map((b) => <span key={b} className="rounded-full border border-line bg-slate-50 px-1.5 text-[11px] text-ink-2">{b}</span>)}</span>}</p>}
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {it.work ? <><span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', STATUS_CLS[it.work.status])} data-testid="support-status">{it.work.statusLabel}</span>
                 <span className="text-xs text-ink-2">{it.work.ownerName ? `담당 ${it.work.ownerName}` : ''}{it.work.appliedAt ? ` · 신청 ${kday(it.work.appliedAt)}` : ''}{it.work.resultMemo ? ` · ${it.work.resultMemo.slice(0, 40)}` : ''}</span>
@@ -197,7 +197,7 @@ export function Support() {
                 <Button size="sm" variant="secondary" onClick={() => go({ id: it.id })}>진행 기록</Button></>
                 : <><Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'interest')} data-testid="support-interest">{busy === `${it.id}:interest` ? '…' : '관심'}</Button>
                   <Button size="sm" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">{busy === `${it.id}:preparing` ? '…' : '신청 준비'}</Button></>}
-              {data.aiOn && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => analyze(it)} data-testid="support-analyze" title="회사 AI 예산에서 씁니다"><Sparkles className="size-3.5" aria-hidden />{busy === `${it.id}:ai` ? '판단 중…' : it.ai ? '다시 판단' : 'AI 판단'}</Button>}
+              {data.aiOn && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => analyze(it)} data-testid="support-analyze" title="회사 AI 예산에서 씁니다"><ScanSearch className="size-3.5" aria-hidden />{busy === `${it.id}:ai` ? '판단 중…' : it.ai ? '다시 판단' : 'AI 판단'}</Button>}
               {(!it.work || ['interest', 'preparing'].includes(it.work.status)) && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => listIt(it, !it.listed)} data-testid="support-list-toggle" data-on={it.listed ? '1' : '0'}>{it.listed ? <><Check className="size-3.5" aria-hidden />목록에 담음</> : <><ListPlus className="size-3.5" aria-hidden />목록에 담기</>}</Button>}
               {it.url && <a href={it.url} target="_blank" rel="noopener noreferrer" className={linkCls}><ExternalLink className="size-3.5" aria-hidden />원문</a>}
               {!it.work && !it.manual && <button type="button" className="ml-auto text-xs text-ink-3 underline" onClick={() => hide(it, !it.hidden)} data-testid="support-hide">{it.hidden ? '숨김 풀기' : '숨기기'}</button>}
@@ -257,7 +257,7 @@ function ApplyList({ data, busy, onOpen, onTask, onUnlist }: { data: ListData; b
                   {!!e?.confirm.length && <p className="mt-1 text-[11px] text-amber-900" data-testid="support-apply-confirm">확인할 것: {e.confirm.join(' · ')}</p>}</td>
                 <td className="whitespace-nowrap px-2 py-2"><Dday d={it.dday} text={it.applyText} /><div className="mt-0.5 text-[11px] text-ink-3">{it.applyEnd ? kday(it.applyEnd) : ''}</div></td>
                 <td className="max-w-[220px] px-2 py-2" data-testid="support-apply-receive">{e?.receive || <span className="text-ink-3">{it.ai ? '—' : 'AI 판단 전'}</span>}
-                  {!!e?.perBusiness.length && <ul className="mt-1 space-y-0.5 text-[11px] text-ink-2">{e.perBusiness.map((b) => <li key={b.brand}><span className="rounded border border-violet-200 bg-violet-50 px-1 text-violet-800">{b.brand}</span> {b.line}</li>)}</ul>}</td>
+                  {!!e?.perBusiness.length && <ul className="mt-1 space-y-0.5 text-[11px] text-ink-2">{e.perBusiness.map((b) => <li key={b.brand}><span className="rounded border border-line bg-slate-50 px-1 text-ink-2">{b.brand}</span> {b.line}</li>)}</ul>}</td>
                 <td className="max-w-[160px] px-2 py-2">{e?.amount ?? it.amount ?? '—'}</td>
                 <td className="max-w-[140px] px-2 py-2">{e?.selfPay ?? '—'}</td>
                 <td className="whitespace-nowrap px-2 py-2">{e?.prepHours ? `약 ${e.prepHours}시간` : '—'}</td>
@@ -310,10 +310,10 @@ function WeeklyBox({ weekly, canEdit, auto, busy, onNow, onOpen }: { weekly: Wee
       <div className="flex flex-wrap items-center gap-2">
         <b className="text-emerald-900">이번 주 맞는 지원사업 {weekly ? `${weekly.items.length}건` : ''}</b>
         <span className="text-xs text-ink-2">{weekly ? `${kday(weekly.week)} 주 기준${weekly.aiCount ? ` · AI 세일즈가 새로 판단 ${weekly.aiCount}건` : ''}` : `월요일 아침마다 AI 판단에서 ‘해당’이 나온 공고를 묶어 드립니다${auto > 0 ? `(판단 전 공고는 ${auto}건까지 그때 판단)` : ''}`}</span>
-        {canEdit && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={onNow} data-testid="support-weekly-now"><Sparkles className="size-3.5" aria-hidden />{busy ? '묶는 중…' : weekly ? '지금 다시 묶기' : '이번 주 묶음 만들기'}</Button>}
+        {canEdit && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={onNow} data-testid="support-weekly-now"><Layers className="size-3.5" aria-hidden />{busy ? '묶는 중…' : weekly ? '지금 다시 묶기' : '이번 주 묶음 만들기'}</Button>}
       </div>
       {weekly && weekly.items.length > 0 && <ul className="mt-1.5 flex flex-wrap gap-1.5">{weekly.items.map((x) => (
-        <li key={x.id}><button type="button" onClick={() => onOpen(x.id)} className="rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs hover:underline" data-testid="support-weekly-item" data-by={x.by}>{x.by === 'ai' ? '✅ ' : ''}{x.title.slice(0, 40)}{x.dday != null ? ` · ${x.dday === 0 ? 'D-day' : `D-${x.dday}`}` : ''}</button></li>))}</ul>}
+        <li key={x.id}><button type="button" onClick={() => onOpen(x.id)} className="rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs hover:underline" data-testid="support-weekly-item" data-by={x.by}>{x.by === 'ai' ? <CircleCheck className="mr-0.5 inline size-3.5 align-[-2px] text-emerald-700" aria-label="AI 판단" /> : ''}{x.title.slice(0, 40)}{x.dday != null ? ` · ${x.dday === 0 ? 'D-day' : `D-${x.dday}`}` : ''}</button></li>))}</ul>}
       {weekly && !weekly.items.length && <p className="mt-1 text-xs text-ink-3">이번 주에는 AI 판단에서 ‘해당’이 나온 공고가 없습니다.</p>}
       {lead?.use && <p className="mt-1 text-xs text-ink-2">접목: {lead.use}</p>}
     </section>
@@ -441,22 +441,22 @@ function Detail({ id, onClose, onChanged }: { id: string; onClose: () => void; o
           {it.applyUrl && <a href={it.applyUrl} target="_blank" rel="noopener noreferrer" className={linkCls}><ExternalLink className="size-3.5" aria-hidden />신청하기</a>}
           {(data.attachments as { name: string; url: string }[]).map((a) => <a key={a.url} href={a.url} target="_blank" rel="noopener noreferrer" className={linkCls}><ExternalLink className="size-3.5" aria-hidden />{a.name.slice(0, 30)}</a>)}</div>
         <section><h4 className="mb-1 text-xs font-semibold text-ink-2">1차 판단(우리 회사 프로필 기준)</h4>{it.rule.flags.length ? <Flags flags={it.rule.flags} /> : <p className="text-xs text-ink-3">걸리는 조건이 없습니다(공고에 지역·업력·규모 조건 표시 없음)</p>}</section>
-        <section className="rounded-input border border-violet-200 bg-violet-50/50 p-2.5" data-testid="support-ai-box">
-          <div className="flex flex-wrap items-center gap-2"><b className="text-xs text-violet-900"><Sparkles className="mr-0.5 inline size-3.5" aria-hidden />AI 세일즈 판단</b>{it.ai && <span className="text-[11px] text-ink-3">{it.ai.at ? fmtDateTime(it.ai.at) : ''}</span>}
+        <section className="rounded-input border border-line bg-slate-50 p-2.5" data-testid="support-ai-box">
+          <div className="flex flex-wrap items-center gap-2"><b className="text-xs text-ink">AI 세일즈 판단</b>{it.ai && <span className="text-[11px] text-ink-3">{it.ai.at ? fmtDateTime(it.ai.at) : ''}</span>}
             {data.aiOn && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy === 'ai'} onClick={analyze} data-testid="support-detail-analyze">{busy === 'ai' ? '판단 중…' : it.ai ? '다시 판단' : 'AI 판단'}</Button>}</div>
           {it.ai ? <div className="mt-1.5 space-y-1.5 text-xs">
-            <p><span className={cx('rounded-full border px-2 py-0.5 font-semibold', VERDICT[it.ai.verdict][2])}>{VERDICT[it.ai.verdict][0]} {VERDICT[it.ai.verdict][1]}</span>{it.ai.summary && <span className="ml-1.5 text-ink-2">{it.ai.summary}</span>}</p>
+            <p><span className={cx('rounded-full border px-2 py-0.5 font-semibold', VERDICT[it.ai.verdict][2])}>{(() => { const V = VERDICT[it.ai.verdict][0]; return V ? <V className="mr-0.5 inline size-3.5 align-[-2px]" aria-hidden /> : null; })()}{VERDICT[it.ai.verdict][1]}</span>{it.ai.summary && <span className="ml-1.5 text-ink-2">{it.ai.summary}</span>}</p>
             {it.ai.reasons.length > 0 && <ul className="list-disc space-y-0.5 pl-4" data-testid="support-ai-reasons">{it.ai.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
-            {it.ai.use.length > 0 ? <div className="rounded-input border border-violet-200 bg-white p-2"><b className="text-violet-900">우리 회사에 접목할 점</b><ul className="mt-0.5 list-disc space-y-0.5 pl-4" data-testid="support-ai-use">{it.ai.use.map((r, i) => <li key={i}>{r}</li>)}</ul></div>
+            {it.ai.use.length > 0 ? <div className="rounded-input border border-line bg-white p-2"><b className="text-ink">우리 회사에 접목할 점</b><ul className="mt-0.5 list-disc space-y-0.5 pl-4" data-testid="support-ai-use">{it.ai.use.map((r, i) => <li key={i}>{r}</li>)}</ul></div>
               : <p className="text-[11px] text-ink-3" data-testid="support-ai-use-missing">‘우리 회사에 접목할 점’·‘마감·일정’은 10/25 이전 판단에는 없습니다 — [다시 판단]을 누르면 채워집니다.</p>}{/* 로컬 10/25 18:50 ③: 상세에 접목 줄이 없는 까닭을 화면에 */}
             {it.ai.effect ? <div className="rounded-input border border-emerald-200 bg-white p-2" data-testid="support-ai-effect"><b className="text-emerald-900">기대 효과</b>
               <dl className="mt-0.5 grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-0.5">{([['받는 것', it.ai.effect.receive], ['예상 금액', it.ai.effect.amount], ['자부담', it.ai.effect.selfPay], ['준비 시간', it.ai.effect.prepHours ? `약 ${it.ai.effect.prepHours}시간` : null]] as [string, string | null][])
                 .filter(([, v]) => v).map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={`${k}:v`}>{v}</dd>])}</dl>
-              {it.ai.effect.perBusiness.length > 0 && <ul className="mt-1 space-y-0.5">{it.ai.effect.perBusiness.map((b) => <li key={b.brand}><span className="rounded border border-violet-200 bg-violet-50 px-1 text-violet-800">{b.brand}</span> {b.line}</li>)}</ul>}
+              {it.ai.effect.perBusiness.length > 0 && <ul className="mt-1 space-y-0.5">{it.ai.effect.perBusiness.map((b) => <li key={b.brand}><span className="rounded border border-line bg-slate-50 px-1 text-ink-2">{b.brand}</span> {b.line}</li>)}</ul>}
               {it.ai.effect.confirm.length > 0 && <p className="mt-1 text-amber-900">신청 전 확인: {it.ai.effect.confirm.join(' · ')}</p>}</div>
               : <p className="text-[11px] text-ink-3" data-testid="support-ai-effect-missing">‘기대 효과’(받는 것·예상 금액·자부담·준비 시간)는 10/29 이전 판단에는 없습니다 — 자동 판단이 차례로 채우거나 [다시 판단]을 누르면 채워집니다.</p>}
             {it.ai.schedule && <p data-testid="support-ai-schedule"><span className="text-ink-3">마감·일정</span> {it.ai.schedule}</p>}
-            {it.ai.brands.length > 0 && <p className="flex flex-wrap items-center gap-1">맞는 브랜드: {it.ai.brands.map((b) => <span key={b} className="rounded-full border border-violet-200 bg-white px-1.5 text-violet-800">{b}</span>)}</p>}{/* 로컬 10/25 18:50: 칩이 글자에 붙어 보임 → 간격·테두리 */}
+            {it.ai.brands.length > 0 && <p className="flex flex-wrap items-center gap-1">맞는 브랜드: {it.ai.brands.map((b) => <span key={b} className="rounded-full border border-line bg-white px-1.5 text-ink-2">{b}</span>)}</p>}{/* 로컬 10/25 18:50: 칩이 글자에 붙어 보임 → 간격·테두리 */}
             <div><span className="text-ink-3">준비 서류</span>{it.ai.docs.length ? <ul className="mt-0.5 list-disc pl-4" data-testid="support-ai-docs">{it.ai.docs.map((d, i) => <li key={i}>{d}</li>)}</ul> : <span className="ml-1 text-ink-3">공고에 서류 목록이 없음 — 원문·첨부 확인</span>}</div>
           </div> : <p className="mt-1 text-xs text-ink-3">{data.aiOn ? '[AI 판단]을 누르면 해당 여부·이유·맞는 브랜드·준비 서류를 정리합니다(회사 AI 한도에서).' : 'AI 가 설정되지 않았습니다.'}</p>}
         </section>

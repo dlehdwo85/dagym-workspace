@@ -21,14 +21,7 @@ import { Onboarding } from './Onboarding';
 import { TourHost, restartTours } from './Tour';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import {
-  Activity, BarChart3, Bell, CalendarClock, CalendarHeart, FileBarChart, FileText, Gauge, CalendarDays, CalendarPlus, ChevronDown, CircleCheck, FolderKanban, FolderPlus, House, Keyboard, LayoutTemplate,
-  Building2, Compass, HelpCircle, ListTodo, Library, LogOut, Sparkles, Network, QrCode, Stamp, Workflow, PanelLeftClose, PanelLeftOpen, Plus, ScrollText, Search, Settings, SquarePen, Star, Users, X,
-  type LucideIcon,
-  MessageCircle, Mail,
-  TrendingUp, Megaphone, ChevronsUpDown, Check, CalendarCheck, SlidersHorizontal as SlidersIcon, Phone, ClipboardCheck, Link2,
-  History, Rocket, Target, Briefcase, Landmark, Bot, Wand2, Camera,
-Contact, Globe, FileSignature, FolderClock, Send } from 'lucide-react';
+import { Activity, BarChart3, Bell, Briefcase, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarPlus, Camera, Check, ChevronDown, ChevronsUpDown, CircleCheck, ClipboardCheck, Compass, Contact, FileBarChart, FileSignature, FileText, FolderClock, FolderKanban, FolderPlus, Gauge, Globe, HelpCircle, History, House, Keyboard, Landmark, LayoutTemplate, Library, Link2, ListTodo, LogOut, Mail, Megaphone, MessageCircle, MessageSquareText, Network, PanelLeftClose, PanelLeftOpen, PenTool, Phone, Plus, QrCode, Rocket, ScrollText, Search, Send, Settings, SlidersHorizontal as SlidersIcon, SquarePen, Stamp, Star, Target, TrendingUp, type LucideIcon, Users, Workflow, X } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
@@ -63,7 +56,7 @@ const NAV: NavItem[] = [
   { href: '/contacts', label: '연락처', icon: Contact }, // V31 회사 공용 연락처
 ];
 /** 사이드바 "관리" 묶음 — 주소·이름·메뉴 키는 lib/adminPages(V36 3 한 곳), 여기는 아이콘만 */
-const ADMIN_ICON: Record<string, NavItem['icon']> = { '/reports': FileBarChart, '/revenue': BarChart3, '/admin/users': Users, '/contracts': FileSignature, '/agreements': FolderClock, '/admin/ops': Activity, '/admin/audit': ScrollText, '/admin/company': Building2, '/admin/mail': Mail, '/admin/usage': Gauge, '/admin/ai-logs': Sparkles, '/admin/approval-settings': Stamp };
+const ADMIN_ICON: Record<string, NavItem['icon']> = { '/reports': FileBarChart, '/revenue': BarChart3, '/admin/users': Users, '/contracts': FileSignature, '/agreements': FolderClock, '/admin/ops': Activity, '/admin/audit': ScrollText, '/admin/company': Building2, '/admin/mail': Mail, '/admin/usage': Gauge, '/admin/ai-logs': ScrollText, '/admin/approval-settings': Stamp };
 const ADMIN_MENU: NavItem[] = ADMIN_PAGES.filter((p) => p.sidebar).map((p) => ({ href: p.href, label: p.label, icon: ADMIN_ICON[p.href] ?? Activity }));
 /** V14 7번: 관리 메뉴 ↔ 메뉴 권한 키 (꺼진 메뉴는 숨김) */
 const ADMIN_KEY: Record<string, string> = Object.fromEntries(ADMIN_PAGES.map((p) => [p.href, p.sideGate ?? p.gate ?? p.menu]));
@@ -189,20 +182,20 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const relabel = (n: NavItem): NavItem => (n.href === '/reports/mine' ? { ...n, label: '보고', href: session.features.branchWriter ? '/branch-reports' : '/reports/mine' } : n);
   const adminMenu = ADMIN_MENU.filter((n) => n.href !== '/reports' && (menus[ADMIN_KEY[n.href]] ?? 'none') !== 'none').map((n) => (inApp && n.href === '/admin/usage' ? { ...n, label: '사용량' } : n)); // 앱 안: 요금제 글자 없이
   const nav: NavItem[] = [...NAV.map(relabel), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
-    ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: Sparkles }] : [])];
+    ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: MessageSquareText }] : [])];
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
   // 대표 10/21 12:00 영업 재편 3): 홈 → 영업 기회 허브(모든 원천 입구: 신규 현장·시설·협력사·계약만료·공공데이터·지역별) → 입찰·공고 → 리드·거래처(진행 단계 포함) → 제안·계약 → 데이터 설정. '파이프라인' 메뉴 없음(리드 안 단계별 보기)
   const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/hub', label: '영업 기회 허브', icon: Building2 } /* #611(대표 10/25): '입찰·공고' 메뉴는 허브 '입찰' 탭으로 합침(옛 주소는 넘김) */, { href: '/s/sales/leads', label: '영업 진행', icon: Users } /* #614 대표 결정 10/25 19:00: '리드·거래처' → '영업 진행' */, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/support', label: '지원사업', icon: Landmark } /* #450 — 하단 탭에는 안 넣음(#438) */, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [
     // #481(대표 10/23 승인 · docs/handoff/MARKETING_MENU_AUDIT_2026-10-21.md): 계획 → 제작 → 게시 → 성과 흐름으로 묶고, 이름 4개(운영실→운영 계획 · 광고 운영→광고 집행 · 승인 대기→승인함 · 운영실 기록→이전 요청 기록), 제작의뢰실은 탭에서 메뉴로(주소 ?tab=studio 그대로)
     { href: '/s/marketing', label: '홈', icon: Megaphone },
-    { href: '/s/marketing/goals', label: '월 운영 목표', icon: Target, group: '계획' }, { href: '/s/marketing/ops', label: '운영 계획', icon: Briefcase, group: '계획' }, { href: '/s/marketing/team', label: 'AI 마케팅팀', icon: Bot, group: '계획' } /* #499-7 */,
-    { href: '/s/marketing/approvals', label: '승인함', icon: ClipboardCheck, group: '제작' }, { href: '/s/marketing/automation', label: '자동 제작', icon: Sparkles, group: '제작' }, { href: '/s/marketing/automation?tab=studio', label: '제작의뢰실', icon: Wand2, group: '제작' }, { href: '/s/marketing/materials', label: '자료 요청', icon: Camera, group: '제작' } /* 297차 #836 */,
+    { href: '/s/marketing/goals', label: '월 운영 목표', icon: Target, group: '계획' }, { href: '/s/marketing/ops', label: '운영 계획', icon: Briefcase, group: '계획' }, { href: '/s/marketing/team', label: 'AI 마케팅팀', icon: Users, group: '계획' } /* #499-7 */,
+    { href: '/s/marketing/approvals', label: '승인함', icon: ClipboardCheck, group: '제작' }, { href: '/s/marketing/automation', label: '자동 제작', icon: CalendarClock, group: '제작' }, { href: '/s/marketing/automation?tab=studio', label: '제작의뢰실', icon: PenTool, group: '제작' }, { href: '/s/marketing/materials', label: '자료 요청', icon: Camera, group: '제작' } /* 297차 #836 */,
     { href: '/s/marketing/calendar', label: '콘텐츠 캘린더', icon: CalendarDays, group: '게시' }, { href: '/s/marketing/connections', label: '연결 계정', icon: Link2, group: '게시' },
     { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3, group: '성과' }, { href: '/s/marketing/ad-ops', label: '광고 집행', icon: Rocket, group: '성과' }, { href: '/s/marketing/sites', label: '사이트별 집계', icon: Globe, group: '성과' }, { href: '/s/marketing/calls', label: '전화 문의', icon: Phone, group: '성과' }, ...(admin ? [{ href: '/s/marketing/report', label: '월간 보고', icon: FileBarChart, group: '성과' }] : []),
     ...(session.user.platformAdmin ? [{ href: '/s/marketing/history', label: '이전 요청 기록', icon: History, group: '설정' }] : []) /* 로컬 10/19: 예전 운영실 이관 기록은 플랫폼 관리자만(고객 화면에 없음) */] : [];
 
   const commonNav: NavItem[] = [{ href: '/tasks', label: '업무', icon: CircleCheck }, { href: '/calendar', label: '캘린더', icon: CalendarDays }, { href: '/messages', label: '메시지', icon: MessageCircle }, { href: '/mail/outbox', label: '보낸 메일', icon: Send },
-    ...(session.features.library ? [{ href: `/library?space=${space}`, label: '자료실', icon: Library }] : []), ...(session.features.ai ? [{ href: `/assistant?space=${space}`, label: aiName(space), icon: Sparkles }] : [])];
+    ...(session.features.library ? [{ href: `/library?space=${space}`, label: '자료실', icon: Library }] : []), ...(session.features.ai ? [{ href: `/assistant?space=${space}`, label: aiName(space), icon: MessageSquareText }] : [])];
 
   // ⑦ 사이드바 3구역(시안 DESIGN_HOME_SIDEBAR 10/20, 대표 승인): ① 공간 전환 탭 ② '○○ 메뉴'(공간마다 바뀜 — 업무: 홈·업무·프로젝트·내 주간 보고·결재(·매출)) ③ '공통'(캘린더·알림·메시지·자료실·연락처·공지·AI 비서 — 어느 공간에서나 같은 자리) + 관리(접힘)
   // 영업·마케팅에서는 공통 맨 위에 '업무'(대표 지적 10/18: 공통 메뉴로 가도 그 공간에 머묾)
@@ -210,7 +203,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
   const sp_ = space === 'work' ? '' : `?space=${space}`;
   const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'), byHref('/mail/outbox'),
-    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), byHref('/check'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: Sparkles }] : [])];
+    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), byHref('/check'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: MessageSquareText }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);
@@ -450,7 +443,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         <div className="min-w-0 flex-1 pb-[calc(6rem+var(--sab))] sm:pb-0 [[data-chat-room]_&]:pb-0">
           <TitleBar title={sm.label} />
           {/* 상단 바 (데스크톱) */}
-          <header className="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b border-line bg-white/90 px-5 backdrop-blur sm:flex" style={bandW ? { paddingRight: bandW + 28 } : undefined}>
+          <header className="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b border-line bg-white px-5 sm:flex" style={bandW ? { paddingRight: bandW + 28 } : undefined}>
             <button onClick={() => setPalette(true)} data-testid="open-palette"
               className="mx-auto flex h-9 w-full max-w-md items-center gap-2 rounded-input border border-line bg-canvas px-3 text-sm text-ink-3 transition-colors hover:border-slate-300 hover:bg-white">
               <Search className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate text-left">{/* 점검 ⑧: 좁은 PC(768)에서 두 줄로 꺾이지 않게 */}<span className="lg:hidden">검색</span><span className="hidden lg:inline">업무·프로젝트·사람·일정 검색</span></span><span className="hidden lg:inline"><Kbd>Ctrl K</Kbd></span>
@@ -510,7 +503,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           )}
           {/* 상단 바 (모바일) */}
           {/* 머리줄은 상태바 높이만큼 아래로 (고정 높이 안에서 눌리지 않게 높이는 내용 줄에만) */}
-          <header className="sticky top-0 z-30 border-b border-line bg-white/95 pt-[var(--sat)] backdrop-blur sm:hidden" data-testid="mobile-header">
+          <header className="sticky top-0 z-30 border-b border-line bg-white pt-[var(--sat)] sm:hidden" data-testid="mobile-header">
             <div className="flex h-12 items-center justify-between px-3">
               {/* 대표(10/19): 앱도 PC 처럼 로고·공간 이름을 누르면 공간 전환 시트 */}
               {spaces.length > 1 ? (
@@ -521,7 +514,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
               {/* 대표(10/19): 아이콘마다 44px·사이 8px, 알림 배지는 아이콘 칸 안에서(프로필과 겹치지 않게) */}
               <span className="flex items-center gap-2" data-testid="mobile-header-actions">
                 <button onClick={() => setPalette(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label="검색"><Search className="size-[22px]" /></button>
-                {session.features.ai && <button onClick={() => setAiDock(true)} className="inline-flex size-11 items-center justify-center rounded-full text-violet-600 active:bg-violet-50" aria-label={aiName(space)} data-testid="mobile-ai"><Sparkles className="size-[22px]" /></button>}
+                {session.features.ai && <button onClick={() => setAiDock(true)} className="inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label={aiName(space)} data-testid="mobile-ai"><MessageSquareText className="size-[22px]" /></button>}
                 <Link prefetch={false} href="/notifications" className="relative inline-flex size-11 items-center justify-center rounded-full text-ink-2 active:bg-slate-100" aria-label={`알림${unread ? ` ${unread}건` : ''}`} data-testid="mobile-bell">
                   <Bell className="size-[22px]" />{unread > 0 && <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{unread > 99 ? '99+' : unread}</span>}
                 </Link>
@@ -609,7 +602,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         )}
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         {/* 대표 결정(10/19): 가운데 + 버튼 없이 공간마다 같은 크기 5칸 — 4개 메뉴 + 더보기(그 공간 나머지 메뉴·공통·공간 전환·만들기) */}
-        <nav className={cx('fixed bottom-0 left-0 right-0 z-40 grid border-t border-line bg-white/95 pb-[var(--sab)] backdrop-blur sm:hidden [[data-chat-room]_&]:hidden', mobileTabs.length >= 5 ? 'grid-cols-5' : 'grid-cols-4')} aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
+        <nav className={cx('fixed bottom-0 left-0 right-0 z-40 grid border-t border-line bg-white pb-[var(--sab)] sm:hidden [[data-chat-room]_&]:hidden', mobileTabs.length >= 5 ? 'grid-cols-5' : 'grid-cols-4')} aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
           {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={n.match ? n.match.some((m) => path.startsWith(m)) : active(n.href)} badge={n.badge || areaBadge(n.href)} quiet={!n.badge && !!areaBadge(n.href)} />)}
         </nav>
         {/* 대표 10/20 16:20 (#106) 휴대폰 오른쪽 아래 말풍선 — 최근 대화방 바로·안 읽은 수·길게 누르면 AI 비서, 대화방·키보드·알람 띠에서 숨김 */}
@@ -617,7 +610,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
 
         {spaceSheet && spaces.length > 1 && (
           <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setSpaceSheet(false)}>
-            <div role="dialog" aria-label="공간 전환" className="absolute bottom-0 left-0 right-0 max-h-[90dvh] animate-fade-up overflow-y-auto overscroll-contain rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()} data-testid="space-sheet">
+            <div role="dialog" aria-label="공간 전환" className="absolute bottom-0 left-0 right-0 max-h-[90dvh] animate-fade-up overflow-y-auto overscroll-contain rounded-t-card bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()} data-testid="space-sheet">
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
               <div className="flex items-center gap-2 px-2 pb-2"><div className="min-w-0 flex-1"><div className="text-base font-bold">공간 전환</div><div className="truncate text-xs text-ink-2">{session.tenant?.name ?? '워크인'}</div></div>
                 <button onClick={() => setSpaceSheet(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button></div>
@@ -637,7 +630,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {more && (
           <div className="fixed inset-0 z-50 bg-slate-900/40 sm:hidden" onClick={() => setMore(false)}>
             {/* 로컬 검수 10/17: 공간 카드가 더해져 화면보다 길어짐 → 화면 90% 까지만, 안에서 스크롤(맨 위 프로필·공간부터 보임) */}
-            <div className="absolute bottom-0 left-0 right-0 max-h-[90dvh] animate-fade-up overflow-y-auto overscroll-contain rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()} data-testid="more-sheet">
+            <div className="absolute bottom-0 left-0 right-0 max-h-[90dvh] animate-fade-up overflow-y-auto overscroll-contain rounded-t-card bg-white p-3 pb-[calc(var(--sab)+16px)]" onClick={(e) => e.stopPropagation()} data-testid="more-sheet">
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
               <div className="flex items-center gap-3 px-3 py-2">
                 <Avatar id={session.user.id} name={session.user.name} size={40} />

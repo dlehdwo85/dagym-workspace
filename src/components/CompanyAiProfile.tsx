@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { ListChecks } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, Field, cx, inputCls, toast } from '@/components/ui';
 import { uploadToLibrary } from '@/components/libraryUpload';
@@ -69,9 +69,9 @@ function AiHelper({ values, onApply }: { values: Partial<Record<F, string | null
     try { setFile(await uploadToLibrary(x, '회사 소개', undefined, ['회사 소개'])); } catch (er: any) { toast.error(er.message); }
   }
   return (
-    <aside className="rounded-card border border-violet-200 bg-violet-50/40 p-4 text-sm shadow-card" data-testid="ai-helper">
+    <aside className="rounded-card border border-line bg-slate-50 p-4 text-sm shadow-card" data-testid="ai-helper">
       <DropZone onFile={(x) => void pickFile(x)} accept=".pdf,.doc,.docx,.hwp,.hwpx,.txt,.md" acceptLabel="PDF·워드·한글·텍스트" label="여기에 놓으면 회사소개서로 넣습니다" testid="ai-helper-drop" className="space-y-2">
-      <p className="flex items-center gap-1.5 font-semibold"><Sparkles className="size-4 text-violet-600" />AI 로 정리</p>
+      <p className="flex items-center gap-1.5 font-semibold"><ListChecks className="size-4 text-ink-2" />AI 로 정리</p>
       <p className="text-xs text-ink-2">생각나는 대로 적거나 홈페이지·회사소개서를 넣으면 칸별 초안을 만듭니다. 잘 모르겠으면 [질문으로 시작].</p>
       <textarea className={cx(inputCls, 'min-h-20')} maxLength={6000} value={text} onChange={(e) => setText(e.target.value)} placeholder={T.examples.aiProfile} aria-label="회사 설명" data-testid="ai-helper-text" />
       <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="홈페이지 주소 https://…" aria-label="홈페이지 주소" data-testid="ai-helper-url" />
@@ -81,13 +81,13 @@ function AiHelper({ values, onApply }: { values: Partial<Record<F, string | null
       {/* 대표 10/20 10:50: [질문으로 시작]·[초안 만들기]가 붙어 보임 → 한 줄 flex + 간격(휴대폰은 줄 바꿈) */}
       <div className="flex flex-wrap items-center gap-3" data-testid="ai-helper-actions">
         <Button size="sm" disabled={!!busy} onClick={() => run()} data-testid="ai-helper-run">{busy === 'all' ? '정리하는 중…' : '초안 만들기'}</Button>
-        {!qs && <button type="button" className="text-xs font-medium text-violet-700 underline" onClick={async () => { try { setQs((await api<{ questions: string[] }>('/api/org/ai-profile/draft')).questions); } catch (e: any) { toast.error(e.message); } }} data-testid="ai-helper-interview">질문으로 시작</button>}
+        {!qs && <button type="button" className="text-xs font-medium text-ink-2 underline" onClick={async () => { try { setQs((await api<{ questions: string[] }>('/api/org/ai-profile/draft')).questions); } catch (e: any) { toast.error(e.message); } }} data-testid="ai-helper-interview">질문으로 시작</button>}
       </div>
       {draft && (Object.keys(LABEL) as F[]).filter((k) => draft[k] !== undefined).map((k) => (
         <div key={k} className="rounded-input border border-line bg-white p-2 text-xs" data-testid={`ai-draft-${k}`}>
           <p className="font-semibold">{LABEL[k]}</p>
           <p className="mt-1 text-ink-3"><span className="mr-1 rounded bg-slate-100 px-1">지금</span>{values[k] || '(비어 있음)'}</p>
-          <p className="mt-1 whitespace-pre-wrap"><span className="mr-1 rounded bg-violet-100 px-1 text-violet-800">초안</span>{draft[k] || '(만들 내용이 없음)'}</p>
+          <p className="mt-1 whitespace-pre-wrap"><span className="mr-1 rounded bg-slate-100 px-1 text-ink-2">초안</span>{draft[k] || '(만들 내용이 없음)'}</p>
           <div className="mt-1.5 flex gap-1.5"><Button size="sm" disabled={!draft[k]} onClick={() => { onApply(k, draft[k]!); toast.ok(`${LABEL[k].split('(')[0]} 칸에 넣었습니다 — [저장]을 눌러야 반영됩니다`); }} data-testid={`ai-apply-${k}`}>적용</Button>
             <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => run(k)} data-testid={`ai-rewrite-${k}`}>{busy === k ? '쓰는 중…' : '다시 쓰기'}</Button></div>
         </div>))}

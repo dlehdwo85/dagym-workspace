@@ -17,9 +17,10 @@ export async function v1447({ owner, BASE, SHOTS }) {
   await owner.reload();
   const wk = owner.getByTestId('home-week'); await wk.locator('ul, p').first().waitFor();
   if (await wk.getByTestId('home-week-more').count()) await wk.getByTestId('home-week-more').click(); // #1110: 7줄을 넘으면 [외 n건 더 보기]
-  const day = wk.locator(`[data-day="${d}"]`);
-  await day.getByText('중복 묶음 시험 회의').first().waitFor();
-  assert.equal(await day.getByText('중복 묶음 시험 회의').count(), 1, '한 줄');
+  // #1110 새 홈: 날짜 묶음이 아니라 줄마다 data-day — 그 날의 그 제목 줄이 하나인지
+  const day = wk.locator(`[data-day="${d}"]`).filter({ hasText: '중복 묶음 시험 회의' });
+  await day.first().waitFor();
+  assert.equal(await day.count(), 1, '한 줄');
   await day.getByText('업무 1 · 일정 1').waitFor();
   assert.match(await day.innerText(), /13:00/, '시각은 일정 기준');
   await owner.screenshot({ path: `${SHOTS}/v14-47-home-merge.png` });

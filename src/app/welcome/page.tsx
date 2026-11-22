@@ -8,7 +8,7 @@ import { conversionTags } from '@/lib/conversionTags';
 import { LANDING_PAGES, SITE } from '@/lib/landingPages';
 import { APPSTORE_URL, APP_GET_PATH, PLAY_URL } from '@/lib/storeLinks';
 import { AppGetBar } from '@/components/AppGetBar';
-import { ArrowRight, BellRing, Briefcase, Check, ClipboardCheck, Download, FolderOpen, LayoutGrid, Mail, Megaphone, MessageSquare, Mic, Phone, Sparkles, Stamp, TrendingUp, Users } from 'lucide-react';
+import { ArrowRight, BellRing, Briefcase, Check, ClipboardCheck, Download, FolderOpen, LayoutGrid, Mail, Megaphone, MessageSquare, MessageSquareText, Mic, Phone, Stamp, TrendingUp, Users } from 'lucide-react';
 
 /**
  * 워크인 소개 사이트(대표 10/20 16:45): work-in.dev 루트(로그인 전) — 로그인하면 홈(middleware). 앱은 로그인 화면.
@@ -41,7 +41,7 @@ const FEATURES: { key: string; icon: typeof Mic; name: string; t: string; d: str
   { key: 'approvals', icon: Stamp, name: '결재', t: '휴가·지출을 양식대로', d: '회사 양식으로 올리면 결재선을 따라 차례로 승인됩니다. 승인된 휴가는 캘린더에 자동으로 들어갑니다.', img: '/landing/approvals.png' },
   { key: 'messages', icon: MessageSquare, name: '메시지', t: '업무 이야기는 업무 옆에서', d: '1:1·그룹 대화에 사진·파일을 함께 보내고, 업무 상세의 [대화]에서 그 업무 이야기를 바로 이어 갑니다.', img: '/landing/messages.png' },
   { key: 'check', icon: ClipboardCheck, name: '점검', t: '매장·시설 점검을 기준대로', d: '무엇을 보고 어떤 상태가 양호인지 사진과 함께 정해 두고, 돌면서 양호·보완 필요를 누릅니다. 보완 필요는 담당자 업무로 넘어가고 조치 뒤 확인합니다.', img: '/landing/check.png' },
-  { key: 'ai', icon: Sparkles, name: 'AI 비서', t: '말하면 업무·일정이 됩니다', d: '"내일 3시 거래처 미팅 잡아 줘"처럼 말하거나 쓰면 등록해 주고, 메일·문자 초안도 써 줍니다. 등록하거나 보내기 전에는 꼭 확인을 받고, 사용에 동의한 사람만 씁니다.', href: '#ai', go: 'AI 비서 자세히' },
+  { key: 'ai', icon: MessageSquareText, name: 'AI 비서', t: '말하면 업무·일정이 됩니다', d: '"내일 3시 거래처 미팅 잡아 줘"처럼 말하거나 쓰면 등록해 주고, 메일·문자 초안도 써 줍니다. 등록하거나 보내기 전에는 꼭 확인을 받고, 사용에 동의한 사람만 씁니다.', href: '#ai', go: 'AI 비서 자세히' },
   { key: 'spaces', icon: LayoutGrid, name: '영업·마케팅 공간', t: '필요할 때 켜는 공간', d: '영업(리드·입찰·계약)과 마케팅(콘텐츠 승인·광고 성과)은 관리자가 켤 때만 보입니다. 안 쓰는 회사는 업무 공간만 씁니다.', href: '#spaces', go: '세 공간 보기' },
 ];
 const STEPS = [['체험 신청 1분', '이메일이나 구글·카카오·네이버 계정으로 신청하면 24시간 안에 연락드리고, 승인되면 14일 동안 체험합니다.'], ['직원 초대', '링크 하나로 초대. 부서·팀과 권한은 소속에서 자동.'], ['공간 켜기', '영업·마케팅은 필요할 때 관리자가 켭니다. 안 쓰는 회사는 업무만.']];
@@ -87,7 +87,7 @@ export default async function Welcome() {
       <section className="mx-auto max-w-6xl px-4 pb-8 pt-8">
         <figure className="mx-auto -mt-16 max-w-5xl overflow-hidden rounded-card border border-line bg-white shadow-card sm:-mt-20"><img src="/landing/home.png" alt="워크인 홈 — 이번 주 일정·업무·영업·마케팅 요약" className="w-full" width={1280} height={960} /></figure>
         <ul className="mx-auto mt-8 grid max-w-4xl gap-3 text-left sm:grid-cols-4">
-          {([[Mic, '음성 등록', '“내일 3시 미팅” 한마디면 끝'], [BellRing, '정확한 알림', '앱·웹 푸시, 알람처럼 울리기'], [Users, '권한·부서', '부서 › 팀, 격리 팀, 결재선'], [Sparkles, 'AI 비서', '요약·초안·리드 제안']] as [typeof Mic, string, string][]).map(([I, t, d]) => (
+          {([[Mic, '음성 등록', '“내일 3시 미팅” 한마디면 끝'], [BellRing, '정확한 알림', '앱·웹 푸시, 알람처럼 울리기'], [Users, '권한·부서', '부서 › 팀, 격리 팀, 결재선'], [MessageSquareText, 'AI 비서', '요약·초안·리드 제안']] as [typeof Mic, string, string][]).map(([I, t, d]) => (
             <li key={t} className="rounded-card border border-line p-3"><I className="size-5 text-brand-700" /><div className="mt-1.5 font-semibold">{t}</div><div className="text-sm text-ink-2">{d}</div></li>))}
         </ul>
         {/* #627: 검색어별 소개 페이지로 가는 안쪽 링크(SEO_AUDIT 2-1 '기능 페이지가 없어 깊이가 없음') */}
@@ -129,12 +129,12 @@ export default async function Welcome() {
       {/* AI 비서 */}
       <section id="ai" className="mx-auto max-w-6xl px-4 py-12" data-testid="landing-ai">
         <div className="grid items-center gap-6 md:grid-cols-2">
-          <div><span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-800"><Sparkles className="size-3.5" />AI 비서</span>
+          <div><span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-800"><MessageSquareText className="size-3.5" />AI 비서</span>
             <h2 className="mt-2 text-2xl font-bold">말하면 업무·일정이 되고, 물으면 회사 상황을 답합니다</h2>
             <p className="mt-2 text-sm text-ink-2">업무·일정·리드·시안을 읽고 만드는 회사 전용 비서. 문자·견적서·메일은 시안까지만 — 보내는 것은 사람이 누릅니다. 회사 자료는 AI 학습에 쓰이지 않고, 사용량은 회사·사람별로 한도를 둡니다.</p>
             <ul className="mt-3 space-y-1.5 text-sm">{['업무 등록·요약·체크리스트 · 회의 메모 → 후속 업무', '리드 다음 연락 제안 · 입찰 요약 · 제안서 초안', '마케팅 원고·시안 묶음 제작 → 승인함', '밤사이 비서(승인된 범위만) → 아침 브리핑'].map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 shrink-0 text-brand-700" />{x}</li>)}</ul></div>
           <div className="space-y-3 rounded-card border border-line bg-slate-50 p-4">{AI_DEMO.map(([q, a]) => (
-            <div key={q} className="space-y-1.5"><p className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-sm bg-brand-600 px-3 py-2 text-sm text-white">{q}</p><p className="w-fit max-w-[90%] rounded-2xl rounded-bl-sm border border-line bg-white px-3 py-2 text-sm">{a}</p></div>))}</div>
+            <div key={q} className="space-y-1.5"><p className="ml-auto w-fit max-w-[85%] rounded-card rounded-br-sm bg-brand-600 px-3 py-2 text-sm text-white">{q}</p><p className="w-fit max-w-[90%] rounded-card rounded-bl-sm border border-line bg-white px-3 py-2 text-sm">{a}</p></div>))}</div>
         </div>
       </section>
       {/* 도입 3단계 */}

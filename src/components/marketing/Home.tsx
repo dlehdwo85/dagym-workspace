@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { RevenueGoal } from './RevenueGoal';
 import { MediaThumb } from '@/components/MediaView';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ArrowDown, Moon, Play, Settings2, Sparkles } from 'lucide-react';
+import { ArrowDown, ArrowUp, MessageSquareText, Moon, Play, Settings2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useInApp } from '@/components/inApp';
 import { Button, Modal, Skeleton, cx, inputCls, toast } from '@/components/ui';
@@ -58,7 +58,7 @@ function HomeChat() {
   return (
     <section className="rounded-card border border-violet-200 bg-white p-3 shadow-card" data-testid="mkt-home-chat">
       <form onSubmit={ask} className="flex items-center gap-2">
-        <Sparkles className="size-5 shrink-0 text-violet-600" aria-hidden />
+        <MessageSquareText className="size-5 shrink-0 text-ink-3" aria-hidden />
         <input className={cx(inputCls, 'min-w-0 flex-1')} value={text} onChange={(e) => setText(e.target.value)} placeholder={`${HOME_AI_LABEL} — 예: 이번 주 인스타 게시 뭐 남았어?`} aria-label={HOME_AI_LABEL} data-testid="mkt-home-ask" maxLength={2000} />
         <Button type="submit" size="sm" disabled={busy || !text.trim()} data-testid="mkt-home-ask-send">{busy ? '생각 중…' : '묻기'}</Button>
       </form>
@@ -162,7 +162,7 @@ export function MarketingHome() {
     </div>,
     brief: <BrandBriefs key="brief" compact />, // 399차 #1025 사업별 광고 요약(이번 달 광고비·클릭·문의·할 일 한 줄)
     approve: <section key="approve" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-now">
-      <h2 className="flex items-center justify-between text-base font-bold" data-testid="mkt-home-head"><span>{data.kpi.approvalsDetail.contents ? <>① 지금 승인할 것 <span className="text-orange-700">{data.kpi.approvalsDetail.contents}건</span></> : '① 지금 승인할 것 없음 ✓'}</span>
+      <h2 className="flex items-center justify-between text-base font-bold" data-testid="mkt-home-head"><span>{data.kpi.approvalsDetail.contents ? <>① 지금 승인할 것 <span className="text-orange-700">{data.kpi.approvalsDetail.contents}건</span></> : '① 지금 승인할 것 없음'}</span>
         {data.kpi.approvalsDetail.contents > 0 && <Link href="/s/marketing/approvals" className="text-xs font-medium" style={{ color: C }}>전체 →</Link>}</h2>
       {data.approve.length ? <ul className="divide-y divide-line">{data.approve.map((c) => (
         <li key={c.id} className="flex gap-3 py-2" data-testid="mkt-home-approve">
@@ -177,7 +177,7 @@ export function MarketingHome() {
       {data.queue.length ? <ul className="divide-y divide-line text-sm">{data.queue.map((q) => (
         <li key={`${q.kind}:${q.id}`} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-queue-row" data-state={q.state}>
           <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', STATE[q.state][1])}>{STATE[q.state][0]}</span>
-          {q.night && <span className="text-[11px] text-violet-700" title="밤사이 비서">🌙</span>}
+          {q.night && <Moon className="size-3.5 text-ink-3" aria-label="밤사이 비서" />}
           <Link href={q.href} className="min-w-0 flex-1 truncate hover:underline">{q.title}</Link>
           {q.note && <span className="text-[11px] text-ink-3">{q.note}</span>}
           {q.at && <span className="text-[11px] text-ink-3">{whenLabel(q.at)}</span>}
@@ -186,7 +186,7 @@ export function MarketingHome() {
         </li>))}</ul>
         : <p className="mt-1 text-xs text-ink-3">기다리는 AI 작업이 없습니다. 자동 제작 규칙·광고 개선안·문서 작업·문자/견적 시안이 여기에 모입니다.</p>}
       {data.night.length > 0 && <div className="mt-3 rounded-input border border-violet-200 bg-violet-50/40 p-2 text-sm" data-testid="mkt-home-night">
-        <div className="font-semibold">🌙 밤사이 결과 <span className="font-normal text-ink-3">{data.night.length}건</span></div>
+        <div className="font-semibold"><Moon className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />밤사이 결과 <span className="font-normal text-ink-3">{data.night.length}건</span></div>
         <ul className="mt-1 space-y-0.5 text-xs">{data.night.map((n) => <li key={n.id}><Link href={n.kind === 'doc' ? '/assistant?space=marketing' : `/s/marketing/approvals?c=${n.id}`} className="hover:underline">{n.title}</Link></li>)}</ul>
       </div>}
       {data.canEdit && !Object.values(data.nightScope).some(Boolean) && <p className="mt-2 text-[11px] text-ink-3">밤사이 비서는 꺼져 있습니다 — 관리 › AI 사용 내역 › 보관·한도 설정에서 범위를 켭니다(돈·외부 발송은 자동 아님).</p>}
@@ -231,7 +231,7 @@ export function MarketingHome() {
           <li key={s.key} className="flex items-start gap-2" data-testid="mkt-suggest-row">
             <input type="checkbox" className="mt-1" checked={picked.has(s.key)} onChange={(e) => { const n = new Set(picked); if (e.target.checked) n.add(s.key); else n.delete(s.key); setPicked(n); }} aria-label={s.title} />
             <span className="min-w-0 flex-1"><Link href={s.href} className="font-medium hover:underline">{s.title}</Link><span className="block text-xs text-ink-3">{s.detail}</span></span>
-          </li>))}</ul> : <p className="mt-1 text-xs text-ink-3">지금 당장 할 일이 없습니다 ✓</p>}
+          </li>))}</ul> : <p className="mt-1 text-xs text-ink-3">지금 당장 할 일이 없습니다</p>}
         {/* #1124(대표 11/22): 담당 고르기 — 처음 고른 사람이 주 담당 */}
         <AssignDialog open={assignOpen} onClose={() => setAssignOpen(false)} title="할 일 제안 → 업무로 만들기" note={`고른 제안 ${picked.size}개를 업무로 만듭니다. 담당을 고르세요.`} space="marketing" busy={busy === 'task'} okLabel="업무 만들기"
           onOk={async (ids) => { await act({ action: 'task', keys: [...picked], assigneeIds: ids }, 'task', '업무로 만들었습니다'); setPicked(new Set()); setAssignOpen(false); }} />

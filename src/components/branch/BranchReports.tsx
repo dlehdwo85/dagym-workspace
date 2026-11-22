@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { FileDown, FileUp, Loader2, Plus, Printer, Settings2, Sparkles, Trash2 } from 'lucide-react';
+import { FileDown, FileUp, Loader2, PenLine, Plus, Printer, Settings2, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
-import { Button, Empty, ErrorBox, Field, Loading, Modal, PageHeader, askConfirm, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { Button, Empty, ErrorBox, Field, Loading, Modal, PageHeader, askConfirm, cx, fmtDateTime, inputCls, toast, AiMark } from '@/components/ui';
 import { ReportView, STATE_TONE, type Body, type Line } from './ReportView';
 import { ReportTabs } from '@/components/ReportTabs';
 import { DropZone } from '@/components/upload';
@@ -135,7 +135,7 @@ function Composer({ siteId, day, hasDraft, onDone }: { siteId: string; day: stri
         <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={useChat} onChange={(e) => setUseChat(e.target.checked)} data-testid="branch-use-chat" />올린 대화도 근거로</label>
       </div></DropZone>
       {up && <p className="text-xs text-brand-800" data-testid="branch-upload-result">{up}</p>}
-      <div className="flex justify-end"><Button onClick={draft} disabled={!!busy} data-testid="branch-draft">{busy === 'draft' ? <Loader2 className="animate-spin" /> : <Sparkles />}{hasDraft ? '초안 다시 만들기' : '초안 만들기'}</Button></div>
+      <div className="flex justify-end"><Button onClick={draft} disabled={!!busy} data-testid="branch-draft">{busy === 'draft' ? <Loader2 className="animate-spin" /> : <PenLine />}{hasDraft ? '초안 다시 만들기' : '초안 만들기'}<AiMark /></Button></div>
     </section>
   );
 }
@@ -242,7 +242,7 @@ function MonthlyComposer({ siteId, month, weeks, hasDraft, onDone }: { siteId: s
   return (
     <section className="flex flex-wrap items-center gap-3 rounded-card border border-line bg-white p-3 text-sm shadow-card" data-testid="branch-monthly-composer">
       <p className="min-w-[200px] flex-1 text-ink-2">{weeks ? `이 달 제출된 주간보고 ${weeks}건으로 만듭니다. 이용 인원·미완료는 주간보고 그대로 옮기고, 중요업무·진행사항·차월 목표만 AI 가 정리합니다.` : '이 달 제출된 주간보고가 없습니다 — 주간보고를 먼저 제출하세요.'}</p>
-      <Button onClick={make} disabled={busy || !weeks} data-testid="branch-monthly-draft">{busy ? <Loader2 className="animate-spin" /> : <Sparkles />}{hasDraft ? '월간 초안 다시 만들기' : '월간 초안 만들기'}</Button>
+      <Button onClick={make} disabled={busy || !weeks} data-testid="branch-monthly-draft">{busy ? <Loader2 className="animate-spin" /> : <PenLine />}{hasDraft ? '월간 초안 다시 만들기' : '월간 초안 만들기'}<AiMark /></Button>
     </section>
   );
 }

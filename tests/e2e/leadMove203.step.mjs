@@ -22,7 +22,10 @@ export async function leadMove203({ owner, ctx, sql, BASE, SHOTS }) {
     const card = (name) => owner.getByTestId('pipeline-card').filter({ hasText: name });
     const dlg = owner.getByTestId('lead-move');
     await card('E2E203 끌기 A').waitFor();
-    await card('E2E203 끌기 A').dragTo(col('미팅예정'));
+    // #1113: dragTo 는 마우스를 한 번에 옮겨 전체 시험(화면이 바쁠 때)에서 끌기 시작을 놓친 적이 있음 — 아래 종결 칸 끌기처럼 여러 걸음으로
+    { const b = await card('E2E203 끌기 A').boundingBox(); const t = await col('미팅예정').boundingBox();
+      await owner.mouse.move(b.x + b.width / 2, b.y + 12); await owner.mouse.down(); await owner.mouse.move(b.x + b.width / 2 + 30, b.y + 40, { steps: 5 });
+      await owner.mouse.move(t.x + t.width / 2, t.y + 80, { steps: 10 }); await owner.mouse.up(); }
     await dlg.waitFor();
     assert.match(await dlg.innerText(), /E2E203 끌기 A을\(를\) ‘미팅예정’\(으\)로 옮깁니다\. 놓치지 않게 다음 연락일을 정해 주세요/);
     assert.equal(await owner.getByTestId('lead-move-save').isDisabled(), true, '다음 연락일을 골라야 옮김');

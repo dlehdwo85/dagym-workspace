@@ -305,7 +305,7 @@ const segOn = 'bg-brand-600 hover:bg-brand-600';
 /** 옆 칸(컴퓨터) · 아래에서 올라오는 창(휴대폰) */
 function Sheet({ title, onClose, children, testid, flush }: { title: string; onClose: () => void; children: React.ReactNode; testid: string; flush?: boolean }) {
   return (
-    <aside className="fixed inset-x-0 bottom-0 z-30 flex max-h-[80dvh] flex-col rounded-t-2xl bg-slate-800 text-sm shadow-2xl md:static md:z-auto md:max-h-none md:w-80 md:shrink-0 md:rounded-card md:shadow-none" data-testid={testid}>
+    <aside className="fixed inset-x-0 bottom-0 z-30 flex max-h-[80dvh] flex-col rounded-t-card bg-slate-800 text-sm shadow-pop md:static md:z-auto md:max-h-none md:w-80 md:shrink-0 md:rounded-card md:shadow-none" data-testid={testid}>
       <div className="flex shrink-0 items-center gap-2 border-b border-slate-700 px-3 py-2.5">
         <b className="font-semibold">{title}</b>
         <button type="button" className="ml-auto rounded p-1 hover:bg-slate-700" onClick={onClose} aria-label={`${title} 닫기`} data-testid="meet-panel-close"><X className="size-4" /></button>
@@ -331,7 +331,7 @@ function ChatSheet({ chat, onClose, onSent }: { chat: ReturnType<typeof useChat>
           {chat.msgs.map((m) => (
             <div key={m.id} className={cx('flex flex-col', m.mine ? 'items-end' : 'items-start')} data-testid="meet-chat-msg" data-mine={m.mine ? '1' : '0'}>
               <span className="text-[11px] text-slate-400">{m.mine ? '나' : m.name} · {hhmm(m.at)}</span>
-              <span className={cx('mt-0.5 max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-sm', m.mine ? 'bg-brand-600' : 'bg-slate-700')}>{m.text}</span>
+              <span className={cx('mt-0.5 max-w-[85%] whitespace-pre-wrap break-words rounded-card px-3 py-1.5 text-sm', m.mine ? 'bg-brand-600' : 'bg-slate-700')}>{m.text}</span>
             </div>))}
           <div ref={end} />
         </div>

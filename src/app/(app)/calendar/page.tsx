@@ -849,7 +849,7 @@ function CalendarPage() {
       {allDaySheet && (
         <div className="fixed inset-0 z-50 bg-slate-900/40" onClick={() => setAllDaySheet(null)}>
           <div role="dialog" aria-label={`${allDaySheet} 종일`} data-testid="allday-sheet" onClick={(e) => e.stopPropagation()}
-            className="absolute bottom-0 left-0 right-0 max-h-[70dvh] overflow-y-auto rounded-t-2xl bg-white p-3 pb-[calc(var(--sab)+16px)] sm:bottom-auto sm:left-1/2 sm:top-24 sm:w-[380px] sm:-translate-x-1/2 sm:rounded-card sm:shadow-pop">
+            className="absolute bottom-0 left-0 right-0 max-h-[70dvh] overflow-y-auto rounded-t-card bg-white p-3 pb-[calc(var(--sab)+16px)] sm:bottom-auto sm:left-1/2 sm:top-24 sm:w-[380px] sm:-translate-x-1/2 sm:rounded-card sm:shadow-pop">
             <div className="flex items-center gap-2 px-1 pb-2"><b className="flex-1 text-sm">{Number(allDaySheet.slice(5, 7))}월 {Number(allDaySheet.slice(8))}일 종일 · {allDayByDate.get(allDaySheet)?.length ?? 0}개</b>
               <button onClick={() => setAllDaySheet(null)} className="rounded-full p-1.5 text-ink-3" aria-label="닫기"><X className="size-4" /></button></div>
             <ul className="space-y-1">{(allDayByDate.get(allDaySheet) ?? []).map((e: any) => (
@@ -1013,7 +1013,7 @@ function QuickCreate({ x, y, date, start: start0, end: end0, endDate, allDay: al
     <>
       {/* V37 3: [저장] 버튼 항상 보임 + Enter·바깥·닫기도 저장(제목이 없으면 그냥 닫기) */}
       <div className="fixed inset-0 z-40" onClick={dismiss} data-testid="quick-outside" />
-      <form ref={quickForm} role="dialog" aria-label="빠른 입력" onSubmit={save} className={cx('fixed z-50 animate-fade-up border border-line bg-white p-4 shadow-pop', sheet ? 'inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-2xl pb-[calc(var(--sab)+16px)]' : 'w-80 overflow-y-auto rounded-card')}
+      <form ref={quickForm} role="dialog" aria-label="빠른 입력" onSubmit={save} className={cx('fixed z-50 animate-fade-up border border-line bg-white p-4 shadow-pop', sheet ? 'inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-card pb-[calc(var(--sab)+16px)]' : 'w-80 overflow-y-auto rounded-card')}
         // "할 일로도 만들기" 칸이 펼쳐져도 [저장]이 화면 밖으로 나가지 않게 — 화면 높이 안에서 스크롤
         style={sheet ? undefined : { left: x, top: Math.max(8, Math.min(y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 420)), maxHeight: `calc(100dvh - ${Math.max(8, Math.min(y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 420)) + 8}px)` }} data-testid="quick-create"
         onKeyDown={(e) => { if (e.key === 'Escape') dismiss(); }}>

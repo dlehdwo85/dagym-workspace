@@ -109,7 +109,7 @@ export function VoiceAddTask() {
             {ask && <VoiceChoice onPick={start} onClose={() => setAsk(false)} />}
             <span className="text-sm text-ink-2" data-testid="voice-state">{listening ? '듣고 있어요… 말을 마치면 자동으로 정리합니다 (최대 60초)' : fixing ? '업무명·담당자·마감 정리하는 중…' : '눌러서 말하기 · 조용히 또박또박 말해도 됩니다'}</span>
           </div>
-          <label className="block text-sm text-ink-2">말한 내용 (키보드 🎤 음성 입력이나 글로도 됩니다)
+          <label className="block text-sm text-ink-2">말한 내용 (키보드의 마이크 음성 입력이나 글로도 됩니다)
             <textarea className={cx(inputCls, 'mt-1 min-h-[72px] text-base')} value={text} onChange={(e) => setText(e.target.value)} placeholder="예: 내일 오후 3시까지 견적서 보내기" aria-label="말한 내용" data-testid="voice-text" />
           </label>
           <Button className="h-12 w-full text-base" onClick={() => recognize(text)} disabled={!text.trim()} data-testid="voice-recognize">인식 결과 보기</Button>

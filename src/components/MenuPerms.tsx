@@ -195,7 +195,7 @@ function LibraryFolders({ roles }: { roles: Role[] }) {
                 <td className="p-1.5">
                   <select className={cx(inputCls, 'h-8 w-28 text-xs', sec === 'confidential' && 'text-red-700')} value={sec} disabled={busy === `sec.${f.folder}`} aria-label={`${f.folder} 보안 등급`}
                     onChange={(e) => call('/api/library/folder-security', { folder: f.folder, security: e.target.value || null }, `sec.${f.folder}`)}>
-                    <option value="">상속(설정 없음)</option><option value="public">일반</option><option value="internal">내부</option><option value="confidential">🔒 기밀</option>
+                    <option value="">상속(설정 없음)</option><option value="public">일반</option><option value="internal">내부</option><option value="confidential">기밀</option>
                   </select>
                 </td>
                 {others.map((r) => {

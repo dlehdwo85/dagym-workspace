@@ -2,7 +2,7 @@
 import { aiName } from '@/lib/aiNames';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles } from 'lucide-react';
+import { MessageSquareText } from 'lucide-react';
 import { useSession } from '@/components/session';
 import { cx } from '@/components/ui';
 
@@ -25,16 +25,16 @@ export function AiAsk({ space, examples, subject, compact, testId = 'ai-ask' }: 
   const [q, setQ] = useState(''); const [open, setOpen] = useState(!compact);
   if (!features.ai) return null;
   const go = (text: string) => { const t = text.trim(); if (!t) return; router.push(`/assistant?space=${space}&q=${encodeURIComponent(subject ? `[${subject}] ${t}` : t)}`); };
-  if (compact && !open) return <button type="button" onClick={() => setOpen(true)} className="inline-flex items-center gap-1 rounded-input border border-violet-200 bg-violet-50/60 px-2.5 py-1 text-xs font-medium text-violet-800 hover:bg-violet-100" data-testid={testId}><Sparkles className="size-3.5" aria-hidden />AI에게 요청</button>;
+  if (compact && !open) return <button type="button" onClick={() => setOpen(true)} className="inline-flex items-center gap-1 rounded-input border border-line bg-white px-2.5 py-1 text-xs font-medium text-ink-2 hover:bg-slate-50" data-testid={testId}><MessageSquareText className="size-3.5" aria-hidden />AI에게 요청</button>;
   return (
-    <form onSubmit={(e) => { e.preventDefault(); go(q); }} className={cx('rounded-card border border-violet-200 bg-white px-3 py-2 shadow-card', compact && 'w-full')} data-testid={testId}>
+    <form onSubmit={(e) => { e.preventDefault(); go(q); }} className={cx('rounded-card border border-line bg-white px-3 py-2 shadow-card', compact && 'w-full')} data-testid={testId}>
       <div className="flex items-center gap-2">
-        <Sparkles className="size-4 shrink-0 text-violet-600" aria-hidden />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`✨ ${aiName(space)}에게 요청${subject ? ` — ${subject}` : ''}`} aria-label={`${aiName(space)}에게 요청`} className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3" maxLength={2000} data-testid={`${testId}-input`} autoFocus={compact} />
+        <MessageSquareText className="size-4 shrink-0 text-ink-3" aria-hidden />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`${aiName(space)}에게 요청${subject ? ` — ${subject}` : ''}`} aria-label={`${aiName(space)}에게 요청`} className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3" maxLength={2000} data-testid={`${testId}-input`} autoFocus={compact} />
         <button type="submit" className="shrink-0 rounded-input px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ background: space === 'sales' ? '#1D4ED8' : '#7C3AED' }} disabled={!q.trim()} data-testid={`${testId}-send`}>요청</button>
       </div>
       <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid={`${testId}-examples`}>
-        {examples.map((x) => <button key={x} type="button" onClick={() => go(x)} className="rounded-full border border-line bg-slate-50 px-2 py-0.5 text-[11px] text-ink-2 hover:border-violet-300 hover:bg-violet-50">{x}</button>)}
+        {examples.map((x) => <button key={x} type="button" onClick={() => go(x)} className="rounded-full border border-line bg-slate-50 px-2 py-0.5 text-[11px] text-ink-2 hover:border-slate-300 hover:bg-white">{x}</button>)}
       </div>
     </form>
   );

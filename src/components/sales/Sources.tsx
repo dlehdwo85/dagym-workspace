@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Settings2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Skeleton, cx, inputCls, toast } from '@/components/ui';
 import { useSalesTerms, useTerms } from '@/components/session';
@@ -46,7 +46,7 @@ export function Sources() {
       <Collectors />
       {data.canEdit && (
         <section className="rounded-card border border-[#BFDBFE] bg-[#EFF6FF] p-4" data-testid="sales-ai-setup">
-          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#1D4ED8]"><Sparkles className="size-4" />AI 자동 세팅</h2>
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-ink"><Settings2 className="size-4 text-ink-2" />AI 자동 세팅</h2>
           <p className="mt-1 text-xs text-ink-2">사업자등록증의 업태·종목(또는 하는 일)과 영업 지역을 넣으면 맞는 공공데이터와 검색어를 골라 드립니다. 켜기 전에 고칠 수 있습니다.</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_10rem_auto]">
             <input className={inputCls} value={ind} onChange={(e) => setInd(e.target.value)} placeholder={data.settings?.industry ?? data.profile?.industry ?? T.examples.industry} aria-label="업태·종목" data-testid="sales-industry" />
