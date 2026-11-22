@@ -566,7 +566,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const inTab = (n: (typeof all)[number], tb: string) => (tb === 'done' ? doneCard(n) && !n.skipped : tb === 'skip' ? n.skipped && !!n.skip : !n.skipped && (tb === 'ref' || !doneCard(n))) && (tb === 'skip' || tb === 'done' || tb === 'ref' /* 참고 = 지난 메일에 실린 그대로 */ || (tb === 'canceled') === canceledCard(n)) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
       && (tb !== 'today' || (dayPick ? dayHit(n, dayPick) : (n.todayHit && (n.result || !bidEnded(n, td))))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
       && (tb !== 'soon' || (((!!n.close && n.close >= td && n.close <= plus(3)) || briefSoon(n, td)) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중 · 239차 필수 현장설명 3일 안
-      && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td))); // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
+      && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td)))
+      && (tb !== 'prespec' || (/pre|사전/i.test(String(n.source ?? '')) && !!n.close && n.close >= td && !canceledCard(n))); // #1123: 사전규격(의견 마감 오늘 이후) — 진행 중 탭은 입찰만이라 메일 '진행 중(D-3 안)'의 사전규격이 안 보였음 // 대표 10/24 추가 ③ 준비 기간 = 오늘~10일 안 마감, 아직 진행 중
     // 191차(로컬 10/27): 플랫폼 조회 — 이 줄이 이 회사 입찰 목록(전체 탭)에 들어가는지, 빠지면 어느 단계에서(목록과 같은 계산)
     if (q.trace?.length) {
       const key = (r: any) => String(r.id ?? r.__id);
@@ -590,12 +591,13 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const cmp = (a: (typeof all)[number], b: (typeof all)[number]) => sortKey === 'deadline' ? String(a.deadline ?? a.close ?? '9999').localeCompare(String(b.deadline ?? b.close ?? '9999'))
       : sortKey === 'notice' ? String(b.noticeDate ?? b.posted ?? '').localeCompare(String(a.noticeDate ?? a.posted ?? ''))
         : sortKey === 'amount' ? (Number(b.amount) || 0) - (Number(a.amount) || 0)
-          : tab === 'open' || tab === 'soon' || tab === 'prep' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : tab === 'skip' ? String(b.skip?.at ?? '').localeCompare(String(a.skip?.at ?? '')) : String(b.posted).localeCompare(String(a.posted));
+          : tab === 'open' || tab === 'soon' || tab === 'prep' || tab === 'prespec' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : tab === 'skip' ? String(b.skip?.at ?? '').localeCompare(String(a.skip?.at ?? '')) : String(b.posted).localeCompare(String(a.posted));
     const items = all.filter((n) => inTab(n, tab) && hit(n) && bizOk(n) && (!regionPick || sidoOfNotice(n) === regionPick)).sort(cmp).slice(0, 300); // 339차: 지역 칩
     // 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 결과(낙찰·유찰)는 빼고 아래 '결과' 묶음으로 — 당일 메일 결과 구역과 같은 기준(isAwardResult)
     const results = tab === 'today' ? items.filter((n) => n.result) : [];
     const skipCount = N.filter((r) => skips.own(r) && !folded(r)).length; // [대상 아님] 탭 장 수(같은 사업은 한 장)
-    const todayCount = all.filter((n) => inTab(n, 'today') && !n.result).length; // #613 '오늘 새 공고 n' 칩(검색어와 무관)
+    const todayCount = all.filter((n) => inTab(n, 'today') && !n.result).length;
+    const prespecCount = all.filter((n) => inTab(n, 'prespec')).length; // #1123 [사전규격] 칩 숫자 // #613 '오늘 새 공고 n' 칩(검색어와 무관)
     // 338차: 최근 7일(오늘부터) 날짜별 새 공고 수 — 오늘 칸은 '오늘 새 공고 n' 과 같은 수, 지난 날은 마감이 지났어도 그날 새 공고로 셈(검색어와 무관)
     const days = Array.from({ length: 7 }, (_, i) => plus(-i)).map((d) => ({ day: d, n: all.filter((n) => !n.skipped && !canceledCard(n) && !n.result && dayHit(n, d) && (d !== td || !bidEnded(n, td))).length }));
     // 339차: 지역 칩 건수 — 지금 칩·검색어·사업 조건 뒤, 지역 조건 전(고른 지역만 켜고 나머지 칩 수는 그대로)
@@ -651,7 +653,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     }
     // 414차: 다른 회사가 검색어를 아직 안 넣었으면 화면이 '관심 검색어를 넣어 주세요' 안내를 보여 줌
     const needKeywords = !ownsJudge(t) && !(await judgeWords(t)).length;
-    return { ...meta, ...(needKeywords ? { needKeywords } : {}), tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, doneCount, todayCount, day: dayPick ?? (tab === 'today' ? td : null), days, region: regionPick || null, regions, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, outside, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
+    return { ...meta, ...(needKeywords ? { needKeywords } : {}), tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, doneCount, todayCount, prespecCount, day: dayPick ?? (tab === 'today' ? td : null), days, region: regionPick || null, regions, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, outside, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings'; const td = today();

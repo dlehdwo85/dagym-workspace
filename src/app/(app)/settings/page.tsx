@@ -481,6 +481,8 @@ function AccountSection() {
 }
 
 const PROVIDER_NAME: Record<string, string> = { google: 'Google', kakao: '카카오', naver: '네이버', apple: 'Apple' };
+/** #1121: 시각(ISO) → 서울 날짜 'YYYY-MM-DD'(fmtDate 는 날짜만 받음 — UTC 앞 10자를 자르면 밤 9시 뒤가 하루 밀림) */
+const seoulYmd = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(iso));
 /** V29 로그인 연결: 소셜 계정 연결·해제(로그인 방법이 하나는 남아야 함) */
 function LinkedAccounts() {
   const r = useApi<{ identities: { provider: string; email: string | null; created_at: string; last_login_at: string | null }[]; enabled: string[]; hasPassword: boolean }>('/api/account/identities');
@@ -507,7 +509,7 @@ function LinkedAccounts() {
             <li key={p} className="flex flex-wrap items-center gap-2" data-testid={`linked-${p}`}>
               <span className="w-16 font-medium">{PROVIDER_NAME[p] ?? p}</span>
               {it ? <><span className="text-xs text-ink-2">{it.email ?? '연결됨'}{justLinked === p ? ' · 방금 연결' : ''}</span>
-                <span className="text-[11px] text-ink-3" data-testid={`linked-${p}-dates`}>연결 {fmtDate(it.created_at)} · 마지막 사용 {it.last_login_at ? fmtDate(it.last_login_at) : '아직 없음'}</span><Button size="sm" variant="ghost" onClick={() => unlink(p)}>연결 끊기</Button></>
+                <span className="text-[11px] text-ink-3" data-testid={`linked-${p}-dates`}>연결 {fmtDate(seoulYmd(it.created_at))} · 마지막 사용 {it.last_login_at ? fmtDate(seoulYmd(it.last_login_at)) : '아직 없음'}</span><Button size="sm" variant="ghost" onClick={() => unlink(p)}>연결 끊기</Button></>
                 : <a href={`/api/auth/oauth/${p}/start?mode=link`} className="rounded-input border border-line px-2.5 py-1 text-xs font-medium hover:bg-slate-50">연결하기</a>}
             </li>
           );

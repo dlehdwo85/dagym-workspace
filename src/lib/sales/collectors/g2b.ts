@@ -46,7 +46,8 @@ export function xmlItems(txt: string): Record<string, string>[] {
   return [...txt.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => Object.fromEntries([...m[1].matchAll(/<([A-Za-z_][\w.-]*)>([\s\S]*?)<\/\1>/g)].map(([, k, v]) => [k, unxml(v).trim()])));
 }
 const noPii = (s: string) => s.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '***@***').replace(/\b0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}\b/g, '***-****-****');
-export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string, timeoutMs = 12000, stats?: DataGoStats, accept = 'application/json'): Promise<any[]> {
+/** out: #1123 페이지 넘기기용 — 그 호출의 원천 전체 건수(totalCount). noTotal = 2쪽 이후(같은 전체 건수를 stats.total 에 또 더하지 않음) */
+export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string, timeoutMs = 12000, stats?: DataGoStats, accept = 'application/json', out?: { total?: number; noTotal?: boolean }): Promise<any[]> {
   const mask = (s: string) => s.split(key).join('***').split(encodeURIComponent(key)).join('***');
   if (stats) stats.sent = mask(url.toString()).slice(0, 400);
   let res: Response; try { res = await fetchImpl(url.toString(), { headers: { Accept: accept }, signal: AbortSignal.timeout(timeoutMs) }); } catch (e) { const c = (e as any)?.cause; throw new Error(`요청 실패 (${[e instanceof Error ? e.name : 'Error', c?.code ?? c?.name].filter(Boolean).join(' · ')})`); } // 390차: 연결 끊김·시간 초과 코드(ECONNRESET 등)까지 — 주소(키)는 넣지 않음
@@ -61,7 +62,8 @@ export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string,
   let j: any = null; try { j = JSON.parse(txt); } catch { const code = txt.match(/<returnReasonCode>([^<]+)</)?.[1] ?? txt.match(/<resultCode>([^<]+)</)?.[1] ?? ''; const msg = txt.match(/<returnAuthMsg>([^<]+)</)?.[1] ?? txt.match(/<errMsg>([^<]+)</)?.[1] ?? txt.match(/<resultMsg>([^<]+)</)?.[1] ?? ''; const both = `${code} ${msg}`;
     if (/^(00|0|INFO-000)$/.test(code.trim())) { // #522 XML 정상 응답(JSON 을 안 주는 원천) → <item> 읽기
       const list = xmlItems(txt); const total = Number(txt.match(/<totalCount>(\d+)</)?.[1] ?? list.length) || 0;
-      if (stats) { delete stats.head; stats.calls++; stats.codes[code.trim()] = (stats.codes[code.trim()] ?? 0) + 1; stats.total += total; stats.raw += list.length; if (list[0] && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 60); }
+      if (out) out.total = total;
+      if (stats) { delete stats.head; stats.calls++; stats.codes[code.trim()] = (stats.codes[code.trim()] ?? 0) + 1; stats.total += out?.noTotal ? 0 : total; stats.raw += list.length; if (list[0] && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 60); }
       return list;
     }
     throw new Error(/^(20|21|22|30|31|32|33)\b/.test(code.trim()) || /DENIED|UNREGISTERED|NOT_REGISTERED|LIMITED|FORBIDDEN|EXPIRED/i.test(both) ? `활용신청 필요: ${safe(both.trim())}` : `응답 오류 (HTTP ${res.status}): ${safe(both.trim() || txt.slice(0, 80))}`); }
@@ -72,7 +74,8 @@ export async function callDataGo(url: URL, fetchImpl: typeof fetch, key: string,
   if (code != null && !['00', '0', 'INFO-000'].includes(code)) throw new Error(/03|04|30|31|32|33/.test(code) ? `활용신청 필요: ${safe(String(header?.resultMsg ?? code))}` : `결과코드 ${code}: ${safe(String(header?.resultMsg ?? ''))}`);
   // #522 LH(OpenBidInfoList 등)는 body.items 없이 body.item 에 바로
   const b = j?.response?.body ?? j?.body ?? {}; const raw = b?.items?.item ?? b?.items ?? b?.item ?? []; const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
-  if (stats) { delete stats.head; stats.calls++; stats.codes[code ?? '없음'] = (stats.codes[code ?? '없음'] ?? 0) + 1; stats.total += Number(b?.totalCount) || 0; stats.raw += list.length; if (list[0] && typeof list[0] === 'object' && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 60); }
+  if (out) out.total = Number(b?.totalCount) || 0;
+  if (stats) { delete stats.head; stats.calls++; stats.codes[code ?? '없음'] = (stats.codes[code ?? '없음'] ?? 0) + 1; stats.total += out?.noTotal ? 0 : Number(b?.totalCount) || 0; stats.raw += list.length; if (list[0] && typeof list[0] === 'object' && !stats.keys) stats.keys = Object.keys(list[0]).slice(0, 60); }
   return list;
 }
 const attachments = (it: any) => { const out: string[] = []; for (let i = 1; i <= 10; i++) { const u = str(it[`ntceSpecDocUrl${i}`] ?? it[`atchFileUrl${i}`]); if (u && /^https?:\/\//.test(u)) out.push(u); } return out; };
@@ -105,17 +108,32 @@ export function nuriPayload(it: any, cat: string): Record<string, unknown> | nul
     office_phone: str(it.aptMngOfficeTelNo), office_address: addr, household_count: str(it.aptHshldNum), attachment_urls: docs, notice_file_url: docs[0] ?? null };
 }
 function windowParams(days: number) { const end = new Date(); const start = new Date(end.getTime() - days * 864e5); return { inqryDiv: '1', inqryBgnDt: `${fmt(start)}0000`, inqryEndDt: `${fmt(end)}2359` }; }
-async function searchAll(ops: readonly (readonly [string, string])[], words: string[], days: number, map: (it: any, cat: string) => Record<string, unknown> | null, ctx: CollectorCtx, key: string, extra: Record<string, string> = {}) {
+/**
+ * #1123(로컬 11/22 — 사전규격이 사흘 늦게·못 잡힘): 예전엔 검색마다 첫 쪽 100건만 받고 뒤는 버렸다(사전규격은 검색어 없이 최근 n일 전체라 하루 100건 넘으면 누락).
+ * 첫 쪽의 원천 전체 건수(totalCount)를 보고 maxPages 쪽까지 이어 받음(시간 예산 안 — 모자라면 못 받은 쪽 수를 셈).
+ * pages = { missed: 시간이 모자라 못 받은 쪽, capped: maxPages 를 넘어 안 받은 쪽 }
+ */
+async function searchAll(ops: readonly (readonly [string, string])[], words: string[], days: number, map: (it: any, cat: string) => Record<string, unknown> | null, ctx: CollectorCtx, key: string, extra: Record<string, string> = {}, maxPages = 10) {
   const items: Record<string, unknown>[] = []; const errors: string[] = []; const denied = new Set<string>(); const seen = new Set<string>(); const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const stats: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 };
-  const tasks: [string, string, string][] = []; for (const [op, cat] of ops) for (const w of words) tasks.push([op, cat, w]);
+  const tasks: [string, string, string, number][] = []; for (const [op, cat] of ops) for (const w of words) tasks.push([op, cat, w, 1]);
+  const pages = { missed: 0, capped: 0 };
   let next = 0;
-  await Promise.all(Array.from({ length: 4 }, async () => { while (next < tasks.length) { const [op, cat, w] = tasks[next++]; if (denied.has(op) || left() < 6000) continue;
-    const u = new URL(/^https?:\/\//.test(op) ? op : `${API()}/${op}`); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', '1'); u.searchParams.set('type', 'json'); for (const [k, v] of Object.entries({ ...windowParams(days), ...extra })) u.searchParams.set(k, v); if (w) u.searchParams.set('bidNtceNm', w);
-    try { for (const it of await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000), stats)) { const p = map(it, cat); if (!p) continue; const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) continue; seen.add(k); items.push(p); } }
-    catch (e) { const m = e instanceof Error ? e.message : String(e); stats.failed = (stats.failed ?? 0) + 1; if (/활용신청 필요|주소 확인 필요/.test(m)) { denied.add(op); errors.push(`${cat}(${op.split('/').slice(-1)[0]}): ${m}`); /* 서비스 단위 오류 — 같은 op 의 남은 검색어는 건너뜀 */ } else if (errors.length < 12) errors.push(`${cat} '${w}': ${m}`); } } }));
+  await Promise.all(Array.from({ length: 4 }, async () => { while (next < tasks.length) { const [op, cat, w, page] = tasks[next++]; if (denied.has(op)) continue; if (left() < 6000) { pages.missed++; continue; }
+    const u = new URL(/^https?:\/\//.test(op) ? op : `${API()}/${op}`); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', String(page)); u.searchParams.set('type', 'json'); for (const [k, v] of Object.entries({ ...windowParams(days), ...extra })) u.searchParams.set(k, v); if (w) u.searchParams.set('bidNtceNm', w);
+    const out: { total?: number; noTotal?: boolean } = { noTotal: page > 1 };
+    try {
+      for (const it of await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000), stats, undefined, out)) { const p = map(it, cat); if (!p) continue; const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) continue; seen.add(k); items.push(p); }
+      if (page === 1 && (out.total ?? 0) > 100) { const all = Math.ceil(out.total! / 100); const upto = Math.min(all, maxPages); for (let pg = 2; pg <= upto; pg++) tasks.push([op, cat, w, pg]); pages.capped += all - upto; }
+    }
+    catch (e) { const m = e instanceof Error ? e.message : String(e); stats.failed = (stats.failed ?? 0) + 1; if (/활용신청 필요|주소 확인 필요/.test(m)) { denied.add(op); errors.push(`${cat}(${op.split('/').slice(-1)[0]}): ${m}`); /* 서비스 단위 오류 — 같은 op 의 남은 검색어는 건너뜀 */ } else if (errors.length < 12) errors.push(`${cat} '${w}'${page > 1 ? ` ${page}쪽` : ''}: ${m}`); } } }));
   if (stats.htmlHead) errors.push(`웹페이지(HTML) 응답 ${stats.html}회 — 앞 500자: ${stats.htmlHead}`);
-  return { items, errors, denied: [...denied], stats, failed: stats.failed ?? 0 };
+  return { items, errors, denied: [...denied], stats, failed: stats.failed ?? 0, pages };
 }
+/** #1123 요약: '원천 전체 N건 중 M건 받음(못 받은 쪽 k)' — 덜 받았으면 경고 글(빈 글이면 다 받음) */
+export const coverage = (r: { stats: DataGoStats; pages: { missed: number; capped: number } }) => {
+  const short = r.pages.missed + r.pages.capped;
+  return { line: `원천 전체 ${r.stats.total}건 중 ${r.stats.raw}건 받음${short ? `(못 받은 쪽 ${short})` : ''}`, short: short > 0 || r.stats.raw < r.stats.total };
+};
 /** 278차 #816: 원천 하나의 성공 여부 — 검색이 하나도 성공 못 했고 실패가 있으면 실패(그 원천만 따로 알림·재시도) */
 const srcStat = (label: string, r: { stats: DataGoStats; failed: number; items: unknown[]; errors: string[] }): SourceStat => {
   const ok = !(r.stats.calls === 0 && r.failed > 0);
@@ -287,19 +305,27 @@ export function awardPayload(it: any, cat: string): Record<string, unknown> | nu
     winner_rate: str(it.sucsfbidRate), bidders: str(it.prtcptCnum) }; // #530 낙찰률·참가 업체 수(당일 메일 결과 구역 — 21라인 '투찰률')
 }
 export const g2bPrespecAwards: Collector = {
-  slug: 'g2b_prespec_awards', label: '나라장터 사전규격·낙찰정보', hourKst: 6, source: 'HrcspSsstndrdInfoService(사전규격 최근 4일 전체 → matchFit) + ScsbidInfoService(낙찰, 검색어·최근 28일 + 돌아가며 지난 1년 중 한 달)', needs: ['DATA_GO_KR_SERVICE_KEY'],
+  slug: 'g2b_prespec_awards', label: '나라장터 사전규격·낙찰정보', hourKst: 6, againKst: [12, 18], source: 'HrcspSsstndrdInfoService(사전규격 최근 4일 전체(쪽 넘김, #1123) → matchFit — 12·18시는 사전규격만) + ScsbidInfoService(낙찰, 06시만) + ScsbidInfoService(낙찰, 검색어·최근 28일 + 돌아가며 지난 1년 중 한 달)', needs: ['DATA_GO_KR_SERVICE_KEY'],
   async run(ctx: CollectorCtx): Promise<CollectorResult> {
     const key = dataGoKey(); if (!key) return noKey('나라장터 사전규격·낙찰');
-    const pre = await searchAll(PRESPEC_OPS, [''], 4, prespecPayload, ctx, key);
+    // #1123(로컬 11/22): 사전규격은 의견 마감이 짧아(5일 안팎) 06·12·18시 — 낮 두 번은 사전규격만(낙찰은 06시·[14일 다시 받기])
+    const full = ctx.params?.full === true; const prespecOnly = !full && ctx.params?.trigger === 'cron' && kstHourNow() >= 10; // 정기 12·18시만(손으로 [지금 수집]·재시도는 전부)
+    const pre = await searchAll(PRESPEC_OPS, [''], full ? 14 : 4, prespecPayload, ctx, key, {}, 40); // 검색어 없이 전체 → 쪽을 넘겨 끝까지(최대 4,000건/종류)
     const r1 = await write(pre.items, pre.errors);
+    const cov = coverage(pre);
+    if (cov.short) pre.errors.push(`사전규격 덜 받음 — ${cov.line}${pre.pages.missed ? ' · 시간이 모자라 못 받은 쪽은 다음 실행·[14일 다시 받기]로' : ''}`);
+    if (prespecOnly) {
+      return { inserted: r1.inserted, updated: r1.updated, unchanged: r1.unchanged, errors: r1.errors + r1.invalid + pre.failed + (cov.short ? 1 : 0), retry: retryable(pre), errorLog: pre.errors.length ? pre.errors.join('\n') : undefined, providerMode: 'api',
+        summary: `사전규격만(낮 수집) · ${cov.line} · 관련 ${pre.items.length}건(신규 ${r1.inserted})${pre.denied.length ? ` · 활용신청·주소 확인 필요 ${pre.denied.length}` : ''}` };
+    }
     const monthBack = (new Date().getUTCDate() % 12) + 1; const old = new Date(Date.now() - monthBack * 30 * 864e5);
     const aw = await searchAll(AWARD_OPS, G2B_WORDS, 28, awardPayload, ctx, key);
     const aw2 = ctx.deadlineMs - (ctx.now() - ctx.now()) > 0 ? await searchAll(AWARD_OPS, G2B_WORDS.slice(0, 5), 30, awardPayload, { ...ctx, deadlineMs: Math.max(0, ctx.deadlineMs - 10000) }, key, { inqryBgnDt: `${fmt(old)}0000`, inqryEndDt: `${fmt(new Date(old.getTime() + 30 * 864e5))}2359` }) : { items: [], errors: [], denied: [] };
     const awardItems = [...aw.items, ...aw2.items].filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit);
     const r2 = await write(awardItems, aw.errors, { mergeScope: 'award' });
     const errors = [...pre.errors, ...aw.errors, ...aw2.errors];
-    return { inserted: r1.inserted + r2.inserted, updated: r1.updated + r2.updated, unchanged: r1.unchanged + r2.unchanged, errors: r1.errors + r2.errors + r1.invalid + r2.invalid + pre.failed + aw.failed + ('failed' in aw2 ? aw2.failed : 0), retry: retryable(pre) && retryable(aw), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
-      summary: `사전규격 관련 ${pre.items.length}건(신규 ${r1.inserted}) · 낙찰 관련 ${awardItems.length}건(병합 ${r2.updated}·신규 ${r2.inserted})` + (pre.denied.length + aw.denied.length ? ` · 활용신청·주소 확인 필요 ${pre.denied.length + aw.denied.length}개 서비스` : '') };
+    return { inserted: r1.inserted + r2.inserted, updated: r1.updated + r2.updated, unchanged: r1.unchanged + r2.unchanged, errors: r1.errors + r2.errors + r1.invalid + r2.invalid + pre.failed + aw.failed + (cov.short ? 1 : 0) + ('failed' in aw2 ? aw2.failed : 0), retry: retryable(pre) && retryable(aw), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
+      summary: `사전규격 ${cov.line} · 관련 ${pre.items.length}건(신규 ${r1.inserted}) · 낙찰 관련 ${awardItems.length}건(병합 ${r2.updated}·신규 ${r2.inserted})` + (pre.denied.length + aw.denied.length ? ` · 활용신청·주소 확인 필요 ${pre.denied.length + aw.denied.length}개 서비스` : '') };
   },
 };
 

@@ -78,6 +78,8 @@ const skippedLine = (d: Digest) => {
   const order = ['업종 무관', '제외어', '마감 지남']; const e = Object.entries(d.counts.skipped).filter(([, v]) => v > 0).sort(([a], [b]) => (order.indexOf(a) + 1 || 9) - (order.indexOf(b) + 1 || 9));
   return e.length ? `걸러진 공고 ${e.map(([k, v]) => `${k} ${v}`).join(' · ')}` : '걸러진 공고 없음';
 };
+/** #1123: 사전규격(나라장터·LH) — 마감은 '의견 마감'(입찰 마감 아님), 입찰 화면 [사전규격] 탭 */
+const isPre = (i: { source?: string | null }) => /사전규격/.test(String(i.source ?? ''));
 /** 2·3·4행 조각(글자) — HTML 은 아래에서 감쌈. 2행 발주·금액 / 3행 일정(현장설명 → 참가신청마감 → 입찰마감 → 개찰) / 4행 첨부·투찰처·출처 */
 function parts(i: DigestItem, day: string, hq: string | null) {
   // 지역 제한이 같은 시·도 하나뿐이면(나라장터 '참가가능지역' = 지역 칸) 지역을 두 번 쓰지 않음
@@ -87,7 +89,7 @@ function parts(i: DigestItem, day: string, hq: string | null) {
   const src = [i.source, i.noticeNo].filter(Boolean).join(' ') || null;
   if (i.section === 'result') return { l2, lim, sched: i.openingAt ? [`개찰 ${whenLabel(i.openingAt)}`] : [], l4: src ? [src] : [], elig: null }; // 결과는 지난 마감·참가신청 대신 개찰·출처만
   // 239차(#744): 현장설명 필수·임의 · 장소까지(K-apt 상세 칸)
-  const sched = [i.briefingAt ? `현장설명${i.briefingKind === '필수' || i.briefingKind === '임의' ? `(${i.briefingKind})` : ''} ${whenLabel(i.briefingAt)}${i.briefingPlace ? ` ${i.briefingPlace}` : ''}` : null, i.participationAt ? `참가신청마감 ${whenLabel(i.participationAt)}` : null, i.deadlineAt ? `입찰마감 ${whenLabel(i.deadlineAt)}${i.deadlineSrc === 'agreement' ? '(공동수급협정 마감 — 입찰 마감 아님 · 공고문 확인)' : i.deadlineSrc === 'doc' ? '(공고문에서 읽은 제출 마감)' : ''}` : null,
+  const sched = [i.briefingAt ? `현장설명${i.briefingKind === '필수' || i.briefingKind === '임의' ? `(${i.briefingKind})` : ''} ${whenLabel(i.briefingAt)}${i.briefingPlace ? ` ${i.briefingPlace}` : ''}` : null, i.participationAt ? `참가신청마감 ${whenLabel(i.participationAt)}` : null, i.deadlineAt ? `${isPre(i) ? '의견마감' : '입찰마감'} ${whenLabel(i.deadlineAt)}${isPre(i) ? '(사전규격 — 입찰 공고는 나중에 올라옴)' : ''}${i.deadlineSrc === 'agreement' ? '(공동수급협정 마감 — 입찰 마감 아님 · 공고문 확인)' : i.deadlineSrc === 'doc' ? '(공고문에서 읽은 제출 마감)' : ''}` : null,
     i.openingAt ? `개찰 ${whenLabel(i.openingAt)}` : null].filter((x): x is string => !!x);
   const l4 = [i.attachments ? `첨부 ${i.attachments}` : null, i.bidSystem ? `투찰 ${i.bidSystem}` : null, src, i.posted && i.posted < day ? `공고일 ${mdw(i.posted)}` : null,
     i.refound ? `다시 찾은 공고(${seenLabel(i.seenAt)} 처음 수집)` : i.late ? `지난 메일 뒤 ${seenLabel(i.seenAt)} 수집` : null].filter((x): x is string => !!x);
@@ -103,7 +105,7 @@ function itemHtml(i: DigestItem, n: number, base: string, day: string, hq: strin
   const tags = i.tags.map((t) => `<span style="display:inline-block;padding:0 6px;margin-left:4px;border:1px solid ${C.line};border-radius:4px;font-size:11px;line-height:16px;color:${C.ink3}">${esc(t)}</span>`).join('');
   const dl = i.deadlineAt && i.dday != null ? ` <b style="color:${ddColor(i.dday)}">${ddText(i.dday)}</b>` : '';
   const l2html = [...l2.map(esc), lim && i.limit ? `<b style="color:${limitColor(i.limit)}" data-digest-limit="${i.limit.ok === true ? 'ok' : i.limit.ok === false ? 'no' : 'unknown'}">${esc(lim)}</b>` : ''].filter(Boolean).join(' · ');
-  const schedHtml = sched.map((x) => (x.startsWith('입찰마감 ') ? `${esc(x)}${dl}` : esc(x))).join(' · ');
+  const schedHtml = sched.map((x) => (/^(입찰|의견)마감 /.test(x) ? `${esc(x)}${dl}` : esc(x))).join(' · ');
   const l4html = [i.progress ? `<b style="color:#047857" data-digest-progress="1">${esc(i.progress)}</b>` : '', ...l4.map(esc)].filter(Boolean).join(' · ');
   // #543 바로 가는 공고 주소가 없는 원천(온비드·국방·LH 첫 화면, 옛 사전규격 주소) — [원문] 대신 '○○에서 공고번호 ○○ 검색'
   const orig = i.search ? `${l4html ? ' · ' : ''}<a href="${esc(i.search.home)}" style="color:${C.brand};text-decoration:underline">${esc(i.search.site)}</a>에서 ${esc(i.search.label)} <b>${esc(i.search.no)}</b> 검색`
@@ -133,7 +135,7 @@ export function digestMail(fromName: string, d: Digest, base: string, opt: { tes
     const shown = cap(s.key, list); const rest = list.length - shown.length;
     const groups = s.key === 'soon' ? [shown] : grouped(shown, order); let n = 0;
     const rows = groups.map((g) => `${groups.length > 1 ? groupHtml(g) : ''}${g.map((x) => itemHtml(x, ++n, base, d.day, hq)).join('')}`).join('');
-    return `<tr><td style="padding:18px 16px 6px" data-digest-section="${s.key}"><div style="font-size:15px;font-weight:800;color:${C.ink}">${esc(s.title)} <span style="color:${C.ink3};font-weight:700">${list.length}</span></div>${s.sub ? `<div style="margin-top:2px;font-size:12px;color:${C.ink3}">${esc(s.sub)}</div>` : ''}</td></tr>${rows}${rest > 0 ? `<tr><td style="padding:10px 16px;border-top:1px solid ${C.line};font-size:13px;color:${C.ink2}" data-digest-more="${s.key}">나머지 ${rest}건 — <a href="${esc(open)}" style="color:${C.brand}">보기</a></td></tr>` : ''}`; }).join('');
+    return `<tr><td style="padding:18px 16px 6px" data-digest-section="${s.key}"><div style="font-size:15px;font-weight:800;color:${C.ink}">${esc(s.title)} <span style="color:${C.ink3};font-weight:700">${list.length}</span></div>${s.sub ? `<div style="margin-top:2px;font-size:12px;color:${C.ink3}">${esc(s.sub)}</div>` : ''}${s.key === 'soon' && list.some(isPre) ? `<div style="margin-top:2px;font-size:12px;color:${C.ink3}" data-digest-prespec="1">이 가운데 사전규격 ${list.filter(isPre).length}건은 의견 마감(입찰 공고는 나중에) — <a href="${esc(`${base}/s/sales/hub?tab=bids&bt=prespec`)}" style="color:${C.brand}">입찰 화면 [사전규격] 탭</a></div>` : ''}</td></tr>${rows}${rest > 0 ? `<tr><td style="padding:10px 16px;border-top:1px solid ${C.line};font-size:13px;color:${C.ink2}" data-digest-more="${s.key}">나머지 ${rest}건 — <a href="${esc(open)}" style="color:${C.brand}">보기</a></td></tr>` : ''}`; }).join('');
   const ref = d.counts.ref ? `<tr><td style="padding:14px 16px;border-top:1px solid ${C.line};font-size:13px;color:${C.ink2}" data-digest-section="ref"><b>참고(검색어만 일치)</b> ${d.counts.ref}건 — <a href="${esc(refs)}" style="color:${C.brand}">보기</a></td></tr>` : '';
   const empty = !sections && !ref ? `<tr><td style="padding:18px 16px;font-size:14px;color:${C.ink2}">지난 메일 뒤 들어온 맞춤 공고가 없습니다.</td></tr>` : '';
   const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(subject)}</title></head>
@@ -154,14 +156,14 @@ ${sections}${ref}${empty}
   const txt = (i: DigestItem, n: number) => { const { l2, lim, sched, l4, elig } = parts(i, d.day, hq);
     return [`${n}. ${i.badges.map((b) => `[${b}] `).join('')}${i.title}${i.biz.length ? ` [${bizName(i)}]` : ''}`,
       l2.length || lim || i.tags.length ? `   ${[...l2, ...(lim ? [lim] : []), ...i.tags].join(' · ')}` : null,
-      sched.length ? `   일정: ${sched.map((x) => (x.startsWith('입찰마감 ') && i.dday != null ? `${x} ${ddText(i.dday)}` : x)).join(' · ')}` : null,
+      sched.length ? `   일정: ${sched.map((x) => (/^(입찰|의견)마감 /.test(x) && i.dday != null ? `${x} ${ddText(i.dday)}` : x)).join(' · ')}` : null,
       elig ? `   참가자격: ${elig}` : null,
       i.progress || l4.length ? `   ${[i.progress, ...l4].filter(Boolean).join(' · ')}` : null,
       `   보기: ${base}/s/sales/hub?tab=bids&bt=all&id=${encodeURIComponent(i.id)}`].filter(Boolean).join('\n'); };
   const text = [subject, ...(period ? [period] : []), ...(testNote ? [testNote] : []), '', summary(d), ...(bizs ? [bizs] : []), ...(cond ? [`맞춤 조건: ${cond.join(' · ')} — 바꾸기: ${prefs}`] : []), `오늘 공고 전체 보기: ${today}`, `맞춤 설정: ${prefs}`,
     ...sectionsOf(d).flatMap((s) => { const list = of(d, s.key); const shown = cap(s.key, list); const rest = list.length - shown.length;
       const groups = s.key === 'soon' ? [shown] : grouped(shown, order); let n = 0;
-      return list.length ? ['', `■ ${s.title} (${list.length})${s.sub ? ` — ${s.sub}` : ''}`, ...groups.flatMap((g) => [...(groups.length > 1 ? [`  ◇ ${bizName(g[0]) || '기타'} ${g.length}건`] : []), ...g.map((x) => txt(x, ++n))]), ...(rest > 0 ? [`   나머지 ${rest}건 — 보기: ${open}`] : [])] : []; }),
+      return list.length ? ['', `■ ${s.title} (${list.length})${s.sub ? ` — ${s.sub}` : ''}`, ...(s.key === 'soon' && list.some(isPre) ? [`  이 가운데 사전규격 ${list.filter(isPre).length}건은 의견 마감(입찰 공고는 나중에) — ${base}/s/sales/hub?tab=bids&bt=prespec`] : []), ...groups.flatMap((g) => [...(groups.length > 1 ? [`  ◇ ${bizName(g[0]) || '기타'} ${g.length}건`] : []), ...g.map((x) => txt(x, ++n))]), ...(rest > 0 ? [`   나머지 ${rest}건 — 보기: ${open}`] : [])] : []; }),
     ...(d.counts.ref ? ['', `■ 참고(검색어만 일치) ${d.counts.ref}건 — 보기: ${refs}`] : []),
     ...(!d.items.some((i) => i.section !== 'ref') && !d.counts.ref ? ['', '지난 메일 뒤 들어온 맞춤 공고가 없습니다.'] : []),
     '', `${skippedLine(d)}${d.counts.merged ? ` · 같은 공고 ${d.counts.merged}줄은 최신 차수 하나로` : ''} — 맞춤 설정에서 바꾸기: ${prefs}`, ...(hqHint ? [`${hqHint}: ${profile}`] : []), '이 메일은 워크인 영업실 당일 공고 알림입니다.'].join('\n');

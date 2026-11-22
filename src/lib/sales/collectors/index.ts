@@ -44,7 +44,7 @@ export { TRANSIENT };
 export async function runCollector(slug: string, trigger: 'cron' | 'manual' | 'retry', opt: { deadlineMs?: number; params?: Record<string, unknown>; fetchImpl?: typeof fetch } = {}) {
   const c = find(slug); if (!c) throw notFound('그런 수집기가 없습니다');
   const runId = await startRun(slug, trigger);
-  const ctx: CollectorCtx = { fetchImpl: opt.fetchImpl ?? fetch, deadlineMs: opt.deadlineMs ?? 45000, params: opt.params, now: Date.now };
+  const ctx: CollectorCtx = { fetchImpl: opt.fetchImpl ?? fetch, deadlineMs: opt.deadlineMs ?? 45000, params: { ...opt.params, trigger }, now: Date.now }; // #1123: 정기(cron)·[지금 수집]·재시도 구분
   let result: CollectorResult;
   try { result = await Promise.race([c.run(ctx), new Promise<CollectorResult>((_, rej) => setTimeout(() => rej(new Error('수집기 시간 초과')), ctx.deadlineMs + 8000))]); }
   catch (e) { const msg = e instanceof Error ? e.message : String(e); result = { inserted: 0, updated: 0, unchanged: 0, errors: 1, errorLog: msg, summary: `실행 중 예외: ${msg}`, providerMode: 'manual' };
