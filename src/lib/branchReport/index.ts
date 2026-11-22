@@ -282,7 +282,7 @@ export async function generateMonthly(u: SessionUser, i: z.infer<typeof monthlyI
     values (${tenantOf(u)}, ${u.id}, ${randomUUID()}, 'anthropic', ${r.model ?? prov.model}, ${r.usage.input_tokens}, ${r.usage.output_tokens}, 0, 0, ${costUsd(r.model ?? prov.model, r.usage)}, 'branch_report')`;
   let raw: unknown; try { raw = JSON.parse((r.content as any[]).find((b) => b.type === 'text')?.text ?? '{}'); } catch { throw new HttpError(502, 'ai_format', 'AI 답을 읽지 못했습니다 — 다시 눌러 주세요'); }
   // #1106(대표 11/21): C 는 하이링크 이용현황 파일에서 — 주간 글로 계산한 값은 제안(usageWeekly)으로만. 다시 만들어도 올린 하이링크 값·파일은 그대로
-  const keep = ex?.body?.usageFile ? { usage: ex.body.usage ?? [], usageTotal: ex.body.usageTotal ?? null, usageFile: ex.body.usageFile } : { usage: [], usageTotal: null, usageFile: null };
+  const keep = { ...(ex?.body?.usageFile ? { usage: ex.body.usage ?? [], usageTotal: ex.body.usageTotal ?? null, usageFile: ex.body.usageFile } : { usage: [], usageTotal: null, usageFile: null }), members: ex?.body?.members ?? null };
   const parsed = monthlyBodySchema.safeParse({ ...(raw as object), ...keep, usageWeekly: usageC(weeklies, prev ? { id: prev.id, day: prev.day, body: prev.body ?? {} } : null), unfinished: track.unfinished, resolved: track.resolved, sources: { w: digest.sources } });
   if (!parsed.success) throw new HttpError(502, 'ai_format', 'AI 답의 모양이 양식과 달랐습니다 — 다시 눌러 주세요');
   const { body, fixed } = verifyMonthly(parsed.data, { refs: new Set(digest.sources.map((x) => x.ref)), text: digest.text });
@@ -301,7 +301,7 @@ export async function saveReport(u: SessionUser, id: string, b: unknown, ip: str
   if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다 — 관리자에게 [제출 취소]를 요청하세요');
   const schema = r.kind === 'monthly' ? monthlyBodySchema : bodySchema;
   // 서버가 정하는 칸(근거 목록·올린 하이링크 파일 표시·주간 값 제안)은 화면에서 온 값으로 바꾸지 않음
-  const fixedKeys = r.kind === 'monthly' ? { usageFile: r.body?.usageFile ?? null, usageWeekly: r.body?.usageWeekly ?? [] } : {};
+  const fixedKeys = r.kind === 'monthly' ? { usageFile: r.body?.usageFile ?? null, usageWeekly: r.body?.usageWeekly ?? [], members: r.body?.members ?? null } : {};
   const body = schema.parse({ ...(b as object), ...fixedKeys, sources: r.body?.sources ?? { w: [] } });
   await sql`update branch_reports set body = ${sql.json(body as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
   await audit(sql, u.id, 'branch_report.edit', 'branch_report', id, {}, ip);
@@ -386,6 +386,52 @@ export async function removeUsageFile(u: SessionUser, id: string, ip: string | n
   return getReport(u, id);
 }
 
+// ---------------- #1112 하이링크 회원목록(엑셀) → 회원(이용권) 현황 — 집계만 저장 ----------------
+export const memberFileInput = z.object({ name: z.string().trim().min(1).max(200), b64: z.string().min(1).max(4_300_000) }); // 운영 요청 크기 한도(약 4.5MB) 안 — 파일 3MB 까지
+export async function uploadMemberFile(u: SessionUser, id: string, i: z.infer<typeof memberFileInput>, ip: string | null) {
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  if (r.kind !== 'monthly') throw badRequest('월간 보고서에만 올릴 수 있습니다');
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다 — [제출 취소] 뒤에 올리세요');
+  if (!/\.xlsx$/i.test(i.name)) throw badRequest('하이링크에서 내려받은 회원목록 엑셀(.xlsx)만 올릴 수 있습니다');
+  const buf = Buffer.from(i.b64, 'base64');
+  if (!buf.length || buf.length > 3_200_000) throw badRequest('파일이 비었거나 3MB 를 넘습니다');
+  const { readXlsx } = await import('../sales/collectors/xlsx');
+  let rows: string[][];
+  try {
+    const wb = readXlsx(new Uint8Array(buf));
+    const sheet = wb.sheetNames.find((n) => n.replace(/\s+/g, '') === '전체') ?? wb.sheetNames[0]; // '전체' 시트만(동별 시트는 같은 내용 중복)
+    rows = wb.rows(sheet);
+  } catch { throw badRequest('엑셀 파일을 열지 못했습니다 — 하이링크 회원목록 엑셀인지 확인해 주세요'); }
+  const hi = rows.findIndex((row) => row.some((c) => /이용권명/.test(String(c))));
+  if (hi < 0) throw badRequest("'이용권명' 머리줄을 찾지 못했습니다 — 하이링크 회원목록 엑셀인지 확인해 주세요");
+  const month = String(r.period_start).slice(0, 7);
+  const { aggregateMembers } = await import('./memberList');
+  const got = aggregateMembers(rows[hi], rows.slice(hi + 1), month);
+  rows = []; // 이름·연락처가 든 행은 여기서 버림(집계만 남김)
+  if (!got.ok) throw badRequest(`필요한 칸을 찾지 못했습니다: ${got.missing.join(', ')}`);
+  await sql`insert into branch_member_stats (site_id, month, tenant, stats, stats_all, excluded, file_name, uploaded_by)
+    values (${t.id}, ${month}, ${tenantOf(u)}, ${sql.json(got.stats as never)}, ${sql.json(got.statsAll as never)}, ${got.excluded}, ${i.name}, ${u.id})
+    on conflict (site_id, month) do update set stats = excluded.stats, stats_all = excluded.stats_all, excluded = excluded.excluded, file_name = excluded.file_name, uploaded_by = excluded.uploaded_by, updated_at = now()`;
+  const { prevMonth } = await import('./monthly');
+  const pm = prevMonth(month);
+  const [p] = await sql<{ stats: any; stats_all: any }[]>`select stats, stats_all from branch_member_stats where site_id = ${t.id} and month = ${pm}`;
+  const members = { month, fileName: i.name, at: new Date().toISOString(), excluded: got.excluded, exclude: r.body?.members?.exclude ?? true, stats: got.stats, statsAll: got.statsAll, prev: p ? { month: pm, stats: p.stats, statsAll: p.stats_all } : null };
+  await sql`update branch_reports set body = ${sql.json({ ...(r.body ?? {}), members } as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
+  await audit(sql, u.id, 'branch_report.member_file', 'branch_report', id, { month, active: got.stats.active, excluded: got.excluded }, ip); // 숫자만(이름·연락처 없음)
+  return { ...(await getReport(u, id)), active: got.stats.active, excluded: got.excluded, prev: !!p };
+}
+export const memberExcludeInput = z.object({ exclude: z.boolean() });
+export async function setMemberExclude(u: SessionUser, id: string, i: z.infer<typeof memberExcludeInput>, ip: string | null) {
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다');
+  if (!r.body?.members) throw badRequest('먼저 회원목록을 올려 주세요');
+  await sql`update branch_reports set body = ${sql.json({ ...r.body, members: { ...r.body.members, exclude: i.exclude } } as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
+  await audit(sql, u.id, 'branch_report.member_exclude', 'branch_report', id, { exclude: i.exclude }, ip);
+  return getReport(u, id);
+}
+
 // ---------------- 내려받기(엑셀, 2단계) — 주간·월간 ----------------
 export async function exportReport(u: SessionUser, id: string) {
   const sql = db(); const { r } = await loadReport(u, id, sql);
@@ -409,7 +455,17 @@ export async function exportReport(u: SessionUser, id: string) {
     const fileNote = b.usageFile ? [[], [`하이링크 이용현황 첨부: ${b.usageFile.name}${b.usageFile.parsed ? '' : ' (표를 읽지 못해 원본을 첨부함)'}`]] : usage.length ? [] : [[], ['하이링크 이용현황 미첨부']];
     const c = [['시설', '전달 인원', '이번달 인원', '증감', '증감률'], ...usage.map((x) => { const d = delta(x.prev, x.cur); return [x.item, x.prev, x.cur, x.diff || d.diff, x.rate || d.rate]; }),
       ...(usage.length || st ? [(() => { const d = delta(tot.prev, tot.cur); return [tot.item || '전 시설 합계', tot.prev, tot.cur, tot.diff || d.diff, tot.rate || d.rate]; })()] : []), ...fileNote];
-    return { fileName: `${r.unit_name}_월간보고_${r.period_start.slice(0, 7)}.xlsx`, data: writeXlsx([{ name: '월간 업무 보고서', rows: main }, { name: '시설별 이용 현황', rows: c }]) };
+    // #1112 회원(이용권) 현황 시트(있을 때만) — 숫자만
+    const m = b.members as any; const sheets = [{ name: '월간 업무 보고서', rows: main }, { name: '시설별 이용 현황', rows: c }];
+    if (m) {
+      const st = m.exclude ? m.stats : m.statsAll; const pv = m.prev ? (m.exclude ? m.prev.stats : m.prev.statsAll) : null;
+      const line = (label: string, cur: number, prev: number | null) => { const d = prev === null ? null : cur - prev; const rt = prev ? Math.round(((cur - prev) / prev) * 1000) / 10 : null; return [label, prev ?? '-', cur, d === null ? '-' : d, rt === null ? '-' : `${rt}%${rt < -30 ? ' (30% 넘게 줄어듦)' : ''}`]; };
+      sheets.push({ name: '회원 현황', rows: [['구분', '전달', '이번달', '증감', '증감률'], line('활성 이용권', st.active, pv?.active ?? null), line('활성 세대', st.households, pv?.households ?? null),
+        ...Object.entries(st.groups as Record<string, number>).filter(([g, n]) => n > 0 || (pv?.groups?.[g] ?? 0) > 0).map(([g, n]) => line(g, n, pv ? (pv.groups?.[g] ?? 0) : null)),
+        line('이번 달 신규', st.newThisMonth, pv?.newThisMonth ?? null), line('이번 달 종료', st.endedThisMonth, pv?.endedThisMonth ?? null), line('월 부과 합계(원)', st.billing, pv?.billing ?? null), [],
+        ['동별 활성', ...Object.entries(st.byDong as Record<string, number>).map(([d, n]) => `${d} ${n}`)], [], [`출처: 하이링크 회원목록(${m.fileName}) · ${m.exclude ? `시험·직원 줄 ${m.excluded}건 제외` : '제외 안 함'}`]] });
+    }
+    return { fileName: `${r.unit_name}_월간보고_${r.period_start.slice(0, 7)}.xlsx`, data: writeXlsx(sheets) };
   }
   const rows = [
     ['커뮤니티 주간 운영 보고서', r.unit_name], ['기준일시', `${md(r.report_day)}(금) 11:00`], ['기간', `${md(r.period_start)} ~ ${md(r.period_end)}`], ['작성', '주식회사 다짐 (DAGYM)'], [],

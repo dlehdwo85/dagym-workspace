@@ -10,6 +10,7 @@ export type MonthlyBody = {
   usageTotal?: { item: string; prev: string; cur: string; diff: string; rate: string } | null;
   usageFile?: { name: string; size: number; parsed: boolean; rows: number; at: string } | null;
   usageWeekly?: { item: string; prev: string; cur: string }[];
+  members?: MembersBody | null;
   unfinished: { title: string; since: string; lastWeek: string; state: string }[];
   resolved: { title: string; doneWeek: string }[];
   notes: string;
@@ -32,6 +33,36 @@ export const sumCol = (vals: string[]) => {
   return `${n.reduce<number>((a, x) => a + (x ?? 0), 0)}${units.size === 1 ? [...units][0] : ''}`;
 };
 export const usageTotal = (usage: MonthlyBody['usage']) => ({ prev: sumCol(usage.map((x) => x.prev)), cur: sumCol(usage.map((x) => x.cur)) });
+
+/** #1112 하이링크 회원목록 집계 — 화면·인쇄 공용 */
+export type MemberStatsView = { active: number; households: number; billing: number; newThisMonth: number; endedThisMonth: number; groups: Record<string, number>; byDong: Record<string, number>; rows: number };
+export type MembersBody = { month: string; fileName: string; at: string; excluded: number; exclude: boolean; stats: MemberStatsView; statsAll: MemberStatsView; prev: { month: string; stats: MemberStatsView; statsAll: MemberStatsView } | null };
+const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
+const cmp = (cur: number, prev?: number | null) => {
+  if (prev === null || prev === undefined) return { diff: '', rate: '', drop: false };
+  const d = cur - prev; const r = prev === 0 ? null : Math.round((d / prev) * 1000) / 10;
+  return { diff: `${d > 0 ? '+' : ''}${d.toLocaleString('ko-KR')}`, rate: r === null ? '' : `${r > 0 ? '▲' : r < 0 ? '▼' : ''}${Math.abs(r)}%`, drop: r !== null && r < -30 };
+};
+export function MembersSection({ m, title = true }: { m: MembersBody; title?: boolean }) {
+  const s = m.exclude ? m.stats : m.statsAll; const p = m.prev ? (m.exclude ? m.prev.stats : m.prev.statsAll) : null;
+  const rows: [string, number, number | null, boolean?][] = [
+    ['활성 이용권', s.active, p?.active ?? null], ['활성 세대', s.households, p?.households ?? null],
+    ...Object.entries(s.groups).filter(([g, n]) => n > 0 || (p?.groups?.[g] ?? 0) > 0).map(([g, n]) => [`· ${g}`, n, p ? (p.groups?.[g] ?? 0) : null] as [string, number, number | null]),
+    ['이번 달 신규', s.newThisMonth, p?.newThisMonth ?? null], ['이번 달 종료', s.endedThisMonth, p?.endedThisMonth ?? null],
+  ];
+  const bill = cmp(s.billing, p?.billing ?? null);
+  return (
+    <section data-testid="branch-members">
+      {title && <h2 className="mb-1.5 font-bold">회원(이용권) 현황</h2>}
+      <table className="w-full border-collapse"><thead><tr><th className={th}>구분</th><th className={th}>전달</th><th className={th}>이번달</th><th className={th}>증감</th><th className={th}>증감률</th></tr></thead>
+        <tbody>{rows.map(([label, cur, prev]) => { const c = cmp(cur, prev); return (
+          <tr key={label} className={c.drop ? 'text-red-700' : undefined}><td className={td}>{label}</td><td className={td}>{prev === null ? '-' : prev.toLocaleString('ko-KR')}</td><td className={td}>{cur.toLocaleString('ko-KR')}</td><td className={td}>{c.diff || '-'}</td><td className={td}>{c.rate || '-'}{c.drop ? ' (30% 넘게 줄어듦)' : ''}</td></tr>); })}
+          <tr className={bill.drop ? 'text-red-700' : undefined}><td className={td}>월 부과 합계</td><td className={td}>{p ? won(p.billing) : '-'}</td><td className={td}>{won(s.billing)}</td><td className={td}>{bill.diff ? `${bill.diff}원` : '-'}</td><td className={td}>{bill.rate || '-'}</td></tr></tbody></table>
+      {Object.keys(s.byDong).length > 0 && <p className="mt-1 text-[12px] text-slate-600">동별 활성: {Object.entries(s.byDong).sort(([a], [b]) => a.localeCompare(b, 'ko', { numeric: true })).map(([d, n]) => `${d === '미분류' ? d : `${d}동`} ${n}`).join(' · ')}</p>}
+      <p className="mt-1 text-[11px] text-slate-500">출처: 하이링크 회원목록({m.fileName}) · {m.exclude ? `시험·직원 줄 ${m.excluded}건 제외(이용권명 '테스트', 동 999·9999·111·빈칸)` : '시험·직원 줄 제외 안 함'} · {p ? `전달(${m.prev!.month}) 대비` : '비교할 지난달 없음'}</p>
+    </section>
+  );
+}
 
 export function MonthlyView({ unit, start, end, author, reportDay, body }: { unit: string; start: string; end: string; author: string; reportDay: string; body: MonthlyBody }) {
   const st = body.usageTotal; const calc = usageTotal(body.usage);
@@ -77,6 +108,7 @@ export function MonthlyView({ unit, start, end, author, reportDay, body }: { uni
           : <p className="text-slate-500" data-testid="branch-usage-empty">{file ? `하이링크 이용현황 첨부: ${file.name} — 표를 읽지 못해 원본을 첨부했습니다` : '하이링크 이용현황 미첨부 — 월간 화면에서 하이링크 이용현황(PDF·엑셀)을 올려 주세요'}</p>}
         <p className="mt-1 text-[11px] text-slate-500">{file ? `출처: 하이링크 이용현황(${file.name})${file.parsed ? '' : ' — 원본 첨부'}` : body.usage.length ? '직접 입력한 값' : ''}</p>
       </section>
+      {body.members && <MembersSection m={body.members} />}
       {body.notes && <section><h2 className="mb-1 font-bold">메모</h2><p className="whitespace-pre-line">{body.notes}</p></section>}
     </article>
   );
