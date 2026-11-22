@@ -234,10 +234,55 @@ test('#1112 하이링크 회원목록 집계: 이용권 묶음·활성(상태를
   ];
   const r = m.aggregateMembers(H, R, '2026-11');
   assert.equal(r.ok, true); assert.equal(r.excluded, 2);
-  assert.deepEqual([r.stats.active, r.stats.households, r.stats.billing, r.stats.newThisMonth, r.stats.endedThisMonth], [3, 2, 570000, 1, 1]);
-  assert.deepEqual(r.stats.byDong, { 401: 2, 403: 1 }); assert.equal(r.stats.groups['헬스'], 1); assert.equal(r.stats.groups['PT'], 1);
-  assert.deepEqual([r.statsAll.active, r.statsAll.households], [5, 3], '제외 끔');
+  const all = m.viewOf(r.stats, {}, 'all');
+  assert.deepEqual([all.active, all.households, all.billing, all.newThisMonth, all.endedThisMonth], [3, 2, 570000, 1, 1]);
+  assert.deepEqual(all.byDong, { 401: 2, 403: 1 }); assert.equal(all.groups['헬스'], 1); assert.equal(all.groups['PT'], 1);
+  const allX = m.viewOf(r.statsAll, {}, 'all'); assert.deepEqual([allX.active, allX.households], [5, 3], '제외 끔');
+  assert.ok(!/"[A-G]"|"P"|1203|"101"|"505"/.test(JSON.stringify(r)), '저장 형태에 이름·연락처·호수 없음');
   assert.equal(m.aggregateMembers(['순번', '동'], [], '2026-11').ok, false, '필요한 칸이 없으면 실패');
   assert.deepEqual(m.compare(6, 10), { diff: -4, rate: -40, drop: true }); assert.equal(m.compare(7, 10).drop, false, '정확히 30% 는 빨강 아님'); assert.equal(m.compare(3, null), null);
   assert.equal(m.monthFromName('회원목록_2026-11-20.xlsx'), '2026-11');
+});
+
+test('#1115 이용권/수강권: 기본 분류 · 띄어쓰기만 다른 이름은 하나 · 선택별 숫자(세대는 겹치면 한 번) · 이용권+수강권 = 전체 · 분류 바꾸기 · 수강권 강좌표(활성 0 접기) · 예전 형태', async () => {
+  const m = await import('../../src/lib/branchReport/memberList.ts');
+  assert.deepEqual(['헬스권', '(남) 헬스+골프+수영', '여자 독서실', '헬스장 락커', '골프장 락커', '오전 수영강습A (월수금 9시)', '어린이 수영', '수영 개인강습 8회 (김T)', '골프레슨', '오후 요가', '줌바', '매트필라', '키즈 댄스', 'PT 10회', '자유수영 24회', '자유수영'].map(m.defaultKind),
+    ['use', 'use', 'use', 'use', 'use', 'class', 'class', 'class', 'class', 'class', 'class', 'class', 'class', 'class', 'class', 'use']);
+  assert.equal(m.nameKey(' 여자 독서실 '), m.nameKey('여자독서실'));
+  const H = ['순번', '동', '호수', '이름', '연락처', '이용권명', '금액', '시작일', '종료일', '이용권 상태'];
+  const R = [
+    ['1', '401', '1', 'A', 'P', '헬스권', '50000', '2026-11-02', '', '활성'],
+    ['2', '401', '1', 'B', 'P', '오후 요가 (화목 19시)', '40000', '2026-11-05', '', '활성'], // 같은 세대가 이용권+수강권
+    ['3', '401', '2', 'C', 'P', '여자 독서실', '30000', '', '', '활성'],
+    ['4', '402', '7', 'D', 'P', '여자독서실', '30000', '', '2026-11-30', '활성'], // 띄어쓰기만 다름 → 같은 이름
+    ['5', '402', '8', 'E', 'P', '줌바 (월수 10시)', '35000', '', '2026-10-31', '만료'], // 활성 0 강좌
+    ['6', '402', '8', 'F', 'P', 'PT 10회', '500000', '2026-11-01', '', '활성'],
+  ];
+  const r = m.aggregateMembers(H, R, '2026-11');
+  assert.equal(Object.keys(r.stats.names).length, 5, '이름 5종(독서실 둘은 하나)');
+  const [all, use, cls] = ['all', 'use', 'class'].map((k) => m.viewOf(r.stats, {}, k));
+  assert.deepEqual([use.active, use.households, use.billing, use.kinds], [3, 3, 110000, 2]);
+  assert.deepEqual([cls.active, cls.households, cls.billing, cls.kinds], [2, 2, 540000, 3]);
+  assert.deepEqual([all.active, all.households, all.billing], [5, 4, 650000], '세대 4: 401-1 은 두 쪽 모두에 있지만 전체에서는 한 번');
+  assert.equal(use.active + cls.active, all.active, '이용권 + 수강권 활성 = 전체');
+  assert.equal(use.newThisMonth + cls.newThisMonth, all.newThisMonth); assert.equal(use.endedThisMonth + cls.endedThisMonth, all.endedThisMonth);
+  // 분류 바꾸기: 요가를 이용권으로 → 수강권 세대 1(PT 세대만)
+  const yk = m.nameKey('오후 요가 (화목 19시)');
+  const cls2 = m.viewOf(r.stats, { [yk]: 'use' }, 'class'); assert.deepEqual([cls2.active, cls2.households], [1, 1]);
+  assert.equal(m.viewOf(r.stats, { [yk]: 'use' }, 'use').households, 3);
+  // 보고서 표: 이용권 현황 · 수강권 현황(강좌별, 활성 0 접기) · 전체 합계 — 전달 대비
+  const prev = m.aggregateMembers(H, [['1', '401', '1', 'A', 'P', '헬스권', '50000', '', '', '활성'], ['2', '402', '8', 'E', 'P', '줌바 (월수 10시)', '35000', '', '', '활성'], ['3', '403', '1', 'X', 'P', '줌바 (월수 10시)', '35000', '', '', '활성']], '2026-10');
+  const T = m.memberTables({ fileName: 'f.xlsx', excluded: 0, exclude: true, stats: r.stats, statsAll: r.statsAll, prev: { month: '2026-10', stats: prev.stats, statsAll: prev.statsAll }, kinds: {} });
+  assert.deepEqual(T.map((t) => t.title), ['이용권 현황', '수강권 현황', '전체 합계(이용권 + 수강권)']);
+  const c = T[1]; const zumba = c.rows.find((x) => x.label.includes('줌바'));
+  assert.deepEqual([zumba.cur, zumba.prev, zumba.rate, zumba.drop], [0, 2, -100, true], '전달에 있던 강좌가 0 이면 보이고 빨강');
+  assert.equal(c.rows.some((x) => x.label.includes('PT 10회')), true); assert.deepEqual(c.folded, [], '전달 활성이 있던 강좌는 접지 않음');
+  const T1 = m.memberTables({ fileName: 'f.xlsx', excluded: 0, exclude: true, stats: r.stats, statsAll: r.statsAll, prev: null, kinds: {} });
+  assert.deepEqual(T1[1].folded, ['줌바 (월수 10시)'], '활성 0 강좌는 접음'); assert.equal(T1[1].rows.some((x) => x.label.includes('줌바')), false);
+  assert.equal(T1[0].rows[0].prev, null); assert.match(T1[2].notes.at(-1), /비교할 지난달 없음/);
+  assert.deepEqual(m.memberTables({ fileName: 'f', excluded: 0, exclude: true, stats: r.stats, statsAll: r.statsAll, prev: null }, 'class').map((t) => t.key), ['class']);
+  // 예전 형태(구분 전): 전체 한 표만, 이용권/수강권 숫자는 없음
+  const legacy = { active: 3, households: 2, billing: 1, newThisMonth: 0, endedThisMonth: 0, groups: { '헬스': 3 }, byDong: {}, rows: 3 };
+  assert.equal(m.viewOf(legacy, {}, 'use'), null); assert.equal(m.viewOf(legacy, {}, 'all').active, 3);
+  const L = m.memberTables({ fileName: 'f', excluded: 0, exclude: true, stats: legacy, statsAll: legacy, prev: null }); assert.equal(L.length, 1); assert.match(L[0].notes.join(' '), /다시 올리면 나뉩니다/);
 });
