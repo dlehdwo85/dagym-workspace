@@ -286,3 +286,22 @@ test('#1115 이용권/수강권: 기본 분류 · 띄어쓰기만 다른 이름�
   assert.equal(m.viewOf(legacy, {}, 'use'), null); assert.equal(m.viewOf(legacy, {}, 'all').active, 3);
   const L = m.memberTables({ fileName: 'f', excluded: 0, exclude: true, stats: legacy, statsAll: legacy, prev: null }); assert.equal(L.length, 1); assert.match(L[0].notes.join(' '), /다시 올리면 나뉩니다/);
 });
+
+test('#1115 엑셀 읽기: 끝에 공백이 있는 글자 칸 <v xml:space="preserve"> (t="str", sharedStrings 없음)도 읽음 — 하이링크 회원목록 락커 누락 고침', async () => {
+  const { zip } = await import('../../src/lib/xlsx.ts');
+  const { readXlsx, eachXlsxRow } = await import('../../src/lib/sales/collectors/xlsx.ts');
+  const x = (t) => Buffer.from(t, 'utf8');
+  const sheet = '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+    + '<row r="1"><c r="A1" t="str"><v>이용권명</v></c><c r="B1" t="str"><v>금액</v></c></row>'
+    + '<row r="2"><c r="A2" s="5" t="str"><v xml:space="preserve">헬스장 락커 (대) </v></c><c r="B2"><v>10000</v></c></row>'
+    + '<row r="3"><c r="A3" t="str"><v>헬스권</v></c><c r="B3"><v xml:space="preserve">50000</v></c></row></sheetData></worksheet>';
+  const buf = zip([
+    { name: 'xl/workbook.xml', data: x('<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="전체" sheetId="1" r:id="rId1"/></sheets></workbook>') },
+    { name: 'xl/_rels/workbook.xml.rels', data: x('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>') },
+    { name: 'xl/worksheets/sheet1.xml', data: x(sheet) },
+  ]);
+  const wb = readXlsx(new Uint8Array(buf));
+  assert.deepEqual(wb.rows('전체'), [['이용권명', '금액'], ['헬스장 락커 (대) ', '10000'], ['헬스권', '50000']]);
+  const got = []; await eachXlsxRow(new Uint8Array(buf), (cells) => { got.push([...cells.values()]); }, { sheetPath: 'xl/worksheets/sheet1.xml' });
+  assert.deepEqual(got[1], ['헬스장 락커 (대) ', '10000'], '흘려 읽기(입찰 큰 파일)도 같음');
+});

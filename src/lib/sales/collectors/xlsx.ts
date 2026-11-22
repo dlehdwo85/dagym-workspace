@@ -128,7 +128,7 @@ export function readXlsx(input: Uint8Array): Workbook {
           const ref = attrs.match(/\br="([A-Z]+\d+)"/)?.[1];
           const t = attrs.match(/\bt="([^"]+)"/)?.[1];
           const inner = cm[2] ?? "";
-          const v = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1];
+          const v = inner.match(/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/)?.[1];
           let val = "";
           if (t === "s" && v != null) val = shared[Number(v)] ?? "";
           else if (t === "inlineStr") val = textOf(inner);
@@ -174,7 +174,7 @@ export async function eachXlsxRow(input: Uint8Array, onRow: (cells: Map<number, 
       const cells = new Map<number, string>();
       for (const cm of seg.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
         const ref = cm[1].match(/\br="([A-Z]+\d+)"/)?.[1]; const t = cm[1].match(/\bt="([^"]+)"/)?.[1]; const inner = cm[2] ?? "";
-        const v = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1];
+        const v = inner.match(/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/)?.[1];
         const val = t === "s" && v != null ? shared[Number(v)] ?? "" : t === "inlineStr" ? textOf(inner) : v != null ? unescapeXml(v) : "";
         const idx = ref ? colIndex(ref) : cells.size;
         if (idx <= MAX_COLS && val !== "") cells.set(idx, val);

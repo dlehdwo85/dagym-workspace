@@ -46,7 +46,7 @@ export function templateLayout(buf: Buffer, ext: string, maxCells = 400) {
       const ref = /\br="([A-Z]+\d+)"/.exec(m[1])?.[1]; const t = /\bt="([^"]+)"/.exec(m[1])?.[1]; const body = m[2] ?? '';
       if (!ref || !body) continue;
       const fm = /<f(?:\s[^>]*)?>([\s\S]*?)<\/f>/.exec(body);
-      const v = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+      const v = /<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body)?.[1];
       const isT = /<is>([\s\S]*?)<\/is>/.exec(body);
       let val: string | number | undefined;
       if (fm) val = `=${unxml(fm[1])}`;

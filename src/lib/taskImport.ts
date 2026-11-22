@@ -75,7 +75,7 @@ export function parseXlsx(buf: Buffer): string[][] {
     const row: string[] = [];
     for (const c of r[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const ref = /\br="([A-Z]+\d+)"/.exec(c[1])?.[1]; const t = /\bt="(\w+)"/.exec(c[1])?.[1]; const st = Number(/\bs="(\d+)"/.exec(c[1])?.[1] ?? -1);
-      const body = c[2] ?? ''; const v = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+      const body = c[2] ?? ''; const v = /<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body)?.[1];
       let val = '';
       if (t === 'inlineStr') val = unxml([...body.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map((m) => m[1]).join(''));
       else if (t === 's') val = shared[Number(v)] ?? '';

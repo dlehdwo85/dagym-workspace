@@ -16,6 +16,9 @@
   "src/app/(app)/reports/[id]/page.tsx": {
    "brand": 2
   },
+  "src/app/(app)/reports/mine/page.tsx": {
+   "domain": 1
+  },
   "src/app/api/public/revenue/openapi.json/route.ts": {
    "brand": 1
   },
@@ -30,6 +33,7 @@
    "brand": 2
   },
   "src/components/branch/BranchReports.tsx": {
+   "domain": 2,
    "brand": 8
   },
   "src/components/branch/MonthlyView.tsx": {
@@ -83,8 +87,11 @@
    "domain": 5
   },
   "src/lib/branchReport/index.ts": {
-   "brand": 11,
+   "brand": 10,
    "domain": 3
+  },
+  "src/lib/branchReport/memberList.ts": {
+   "brand": 1
   },
   "src/lib/branchReport/monthly.ts": {
    "brand": 1,

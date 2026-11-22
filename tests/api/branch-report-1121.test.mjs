@@ -176,6 +176,13 @@ describe('#1096 지점 주간보고', () => {
     assert.equal((await ctx.staffB.client.req('GET', `/branch-print/${reportId}`)).status, 404);
   });
 
+  test('#1118 사내 업무 보고 모아 보기: 지점 작성 담당은 그 주 지점 보고를 한 줄로(숨긴 지점은 빼고) · 다른 회사는 없음', async () => {
+    const t = await ctx.owner.ok('GET', `/api/reports/team?week=${friday}`);
+    const a = t.branch.find((x) => x.userId === ctx.staffA.id);
+    assert.ok(a, '작성 담당 staffA'); assert.equal(a.sites[0].site, '시험 강남점'); assert.equal(a.sites[0].reportId, reportId); assert.ok(['draft', 'submitted'].includes(a.sites[0].status));
+    assert.equal(t.branch.some((x) => x.userId === ctx.staffB.id), false, '숨긴 지점(판교) 담당은 없음');
+    assert.deepEqual((await other.ok('GET', '/api/reports/team')).branch, [], '다른 회사(지점 보고 꺼짐)는 빈 목록');
+  });
   test('정기 작업: 제출 30일 뒤 그 주 대화·붙여 넣은 글 지움 → 제출 취소 막힘', async () => {
     await sql`update branch_reports set submitted_at = now() - interval '31 days' where id = ${reportId}`;
     await tick();

@@ -51,7 +51,7 @@ function xlsx(z: Map<string, () => Buffer>) {
     const rows = [...x.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)].map((r) => [...r[1].matchAll(/<c ([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)].map((c) => {
       const t = /t="(\w+)"/.exec(c[1])?.[1];
       if (t === 'inlineStr') return texts(c[2] ?? '', 't').join('');
-      const v = /<v>([\s\S]*?)<\/v>/.exec(c[2] ?? '')?.[1] ?? '';
+      const v = /<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(c[2] ?? '')?.[1] ?? '';
       return t === 's' ? shared[Number(v)] ?? '' : unxml(v);
     }).join('\t'));
     return `[시트 ${names[i] ?? i + 1}]\n${rows.join('\n')}`;
