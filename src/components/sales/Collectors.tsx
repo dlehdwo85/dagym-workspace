@@ -46,7 +46,7 @@ export function Collectors() {
             <span className="text-xs text-ink-3">{(c.hours ?? [c.hourKst]).map((h) => `${String(h).padStart(2, '0')}:00`).join('·')} · {c.lastRunAt ? `마지막 ${fmtDateTime(c.lastRunAt)}` : '아직 안 돌음'}</span>
             <span className="ml-auto flex items-center gap-1.5">
               {data.canEdit && <Button size="sm" variant="secondary" onClick={() => run(c)} disabled={busy === c.slug || !c.globalEnabled} data-testid="sales-collector-run">{busy === c.slug ? '수집 중…' : '지금 수집'}</Button>}
-              {data.canEdit && c.bid && <Button size="sm" variant="secondary" onClick={() => run(c, true)} disabled={busy === c.slug || !c.globalEnabled} title="놓친 공고 채우기 — 최근 14일을 다시 받습니다" data-testid="sales-collector-run-full">14일 다시 받기</Button>}
+              {data.canEdit && c.bid && <Button size="sm" variant="secondary" onClick={() => run(c, true)} disabled={busy === c.slug || !c.globalEnabled} title="놓친 공고 채우기 — 최근 14일을 다시 받습니다(최대 2분쯤 걸립니다)" data-testid="sales-collector-run-full">14일 다시 받기</Button>}
               {data.canEdit && <label className={cx('inline-flex min-h-[32px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium', c.enabled ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-line bg-white text-ink-3')}><input type="checkbox" className="size-4 accent-brand-600" checked={c.enabled} onChange={() => toggle(c, 'tenant')} aria-label={`${c.label} 사용`} data-testid="sales-collector-toggle" />{c.enabled ? '사용 중' : '사용 안 함'}</label>}
               {data.platformAdmin && <button type="button" className="text-[11px] underline text-ink-3" onClick={() => toggle(c, 'global')}>{c.globalEnabled ? '플랫폼 끄기' : '플랫폼 켜기'}</button>}
             </span>

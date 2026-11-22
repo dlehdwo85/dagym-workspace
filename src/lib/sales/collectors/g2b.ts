@@ -113,21 +113,46 @@ function windowParams(days: number) { const end = new Date(); const start = new 
  * 첫 쪽의 원천 전체 건수(totalCount)를 보고 maxPages 쪽까지 이어 받음(시간 예산 안 — 모자라면 못 받은 쪽 수를 셈).
  * pages = { missed: 시간이 모자라 못 받은 쪽, capped: maxPages 를 넘어 안 받은 쪽 }
  */
-async function searchAll(ops: readonly (readonly [string, string])[], words: string[], days: number, map: (it: any, cat: string) => Record<string, unknown> | null, ctx: CollectorCtx, key: string, extra: Record<string, string> = {}, maxPages = 10) {
+export type PageTask = [op: string, cat: string, word: string, page: number];
+async function searchAll(ops: readonly (readonly [string, string])[], words: string[], days: number, map: (it: any, cat: string) => Record<string, unknown> | null, ctx: CollectorCtx, key: string, extra: Record<string, string> = {}, maxPages = 10, seed?: PageTask[]) {
   const items: Record<string, unknown>[] = []; const errors: string[] = []; const denied = new Set<string>(); const seen = new Set<string>(); const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const stats: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 };
-  const tasks: [string, string, string, number][] = []; for (const [op, cat] of ops) for (const w of words) tasks.push([op, cat, w, 1]);
-  const pages = { missed: 0, capped: 0 };
+  // #1123 보완(로컬 11/23): seed = 지난 실행에서 못 받은 쪽만(같은 조회 기간 extra 로) — 그 쪽부터 이어 받기
+  const tasks: PageTask[] = seed ? seed.map((x) => [...x] as PageTask) : []; if (!seed) for (const [op, cat] of ops) for (const w of words) tasks.push([op, cat, w, 1]);
+  const pages = { missed: 0, capped: 0 }; const rest: PageTask[] = []; // rest = 시간이 모자라 못 받은 쪽·잠깐 실패한 2쪽 이후(다음 실행이 이어 받음)
+  const win = { ...windowParams(days), ...extra };
   let next = 0;
-  await Promise.all(Array.from({ length: 4 }, async () => { while (next < tasks.length) { const [op, cat, w, page] = tasks[next++]; if (denied.has(op)) continue; if (left() < 6000) { pages.missed++; continue; }
-    const u = new URL(/^https?:\/\//.test(op) ? op : `${API()}/${op}`); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', String(page)); u.searchParams.set('type', 'json'); for (const [k, v] of Object.entries({ ...windowParams(days), ...extra })) u.searchParams.set(k, v); if (w) u.searchParams.set('bidNtceNm', w);
+  await Promise.all(Array.from({ length: 4 }, async () => { while (next < tasks.length) { const task = tasks[next++]; const [op, cat, w, page] = task; if (denied.has(op)) continue; if (left() < 6000) { pages.missed++; rest.push(task); continue; }
+    const u = new URL(/^https?:\/\//.test(op) ? op : `${API()}/${op}`); u.searchParams.set('serviceKey', key); u.searchParams.set('numOfRows', '100'); u.searchParams.set('pageNo', String(page)); u.searchParams.set('type', 'json'); for (const [k, v] of Object.entries(win)) u.searchParams.set(k, v); if (w) u.searchParams.set('bidNtceNm', w);
     const out: { total?: number; noTotal?: boolean } = { noTotal: page > 1 };
     try {
       for (const it of await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000), stats, undefined, out)) { const p = map(it, cat); if (!p) continue; const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) continue; seen.add(k); items.push(p); }
       if (page === 1 && (out.total ?? 0) > 100) { const all = Math.ceil(out.total! / 100); const upto = Math.min(all, maxPages); for (let pg = 2; pg <= upto; pg++) tasks.push([op, cat, w, pg]); pages.capped += all - upto; }
     }
-    catch (e) { const m = e instanceof Error ? e.message : String(e); stats.failed = (stats.failed ?? 0) + 1; if (/활용신청 필요|주소 확인 필요/.test(m)) { denied.add(op); errors.push(`${cat}(${op.split('/').slice(-1)[0]}): ${m}`); /* 서비스 단위 오류 — 같은 op 의 남은 검색어는 건너뜀 */ } else if (errors.length < 12) errors.push(`${cat} '${w}'${page > 1 ? ` ${page}쪽` : ''}: ${m}`); } } }));
+    catch (e) { const m = e instanceof Error ? e.message : String(e); stats.failed = (stats.failed ?? 0) + 1; if (page > 1 && !/활용신청 필요|주소 확인 필요/.test(m)) rest.push(task); if (/활용신청 필요|주소 확인 필요/.test(m)) { denied.add(op); errors.push(`${cat}(${op.split('/').slice(-1)[0]}): ${m}`); /* 서비스 단위 오류 — 같은 op 의 남은 검색어는 건너뜀 */ } else if (errors.length < 12) errors.push(`${cat} '${w}'${page > 1 ? ` ${page}쪽` : ''}: ${m}`); } } }));
   if (stats.htmlHead) errors.push(`웹페이지(HTML) 응답 ${stats.html}회 — 앞 500자: ${stats.htmlHead}`);
-  return { items, errors, denied: [...denied], stats, failed: stats.failed ?? 0, pages };
+  return { items, errors, denied: [...denied], stats, failed: stats.failed ?? 0, pages, rest, win };
+}
+/**
+ * #1123 보완(로컬 11/23 '14일 다시 받기에서 7쪽을 못 받음 — 45초 예산'): 못 받은 쪽을 조회 기간과 함께 기억해(app_settings) 다음 실행이 그 쪽부터 이어 받음.
+ * 원천 순서가 새 공고로 밀릴 수 있어 끝 쪽 다음 한 쪽을 더 받음(겹치는 줄은 같은 번호라 한 줄). 사흘 지난 기억은 버림 · 묶음 3개·쪽 120개까지
+ */
+const RESUME_KEY = 'g2b_prespec_resume';
+type ResumeGroup = { win: Record<string, string>; tasks: PageTask[]; at: string };
+async function loadResume(): Promise<ResumeGroup[]> {
+  const [r] = await db()<{ value: { groups?: ResumeGroup[] } }[]>`select value from app_settings where key = ${RESUME_KEY}`.catch(() => [] as never[]);
+  return (r?.value?.groups ?? []).filter((g) => g?.tasks?.length && Date.parse(g.at) > Date.now() - 3 * 864e5);
+}
+function resumeGroup(r: { rest: PageTask[]; win: Record<string, string> }): ResumeGroup | null {
+  if (!r.rest.length) return null;
+  const tasks = [...r.rest]; const maxOf = new Map<string, PageTask>();
+  for (const t of r.rest) { const k = `${t[0]}|${t[2]}`; if (!maxOf.has(k) || maxOf.get(k)![3] < t[3]) maxOf.set(k, t); }
+  for (const t of maxOf.values()) if (t[3] > 1) tasks.push([t[0], t[1], t[2], t[3] + 1]); // 밀린 끝 쪽 대비
+  return { win: r.win, tasks, at: new Date().toISOString() };
+}
+async function saveResume(groups: (ResumeGroup | null)[]) {
+  let room = 120; const keep = groups.filter((g): g is ResumeGroup => !!g).slice(0, 3).map((g) => { const tasks = g.tasks.slice(0, Math.max(0, room)); room -= tasks.length; return { ...g, tasks }; }).filter((g) => g.tasks.length);
+  await db()`insert into app_settings (key, value) values (${RESUME_KEY}, ${db().json({ groups: keep } as never)}) on conflict (key) do update set value = excluded.value, updated_at = now()`.catch(() => {});
+  return keep.reduce((n, g) => n + g.tasks.length, 0);
 }
 /** #1123 요약: '원천 전체 N건 중 M건 받음(못 받은 쪽 k)' — 덜 받았으면 경고 글(빈 글이면 다 받음) */
 export const coverage = (r: { stats: DataGoStats; pages: { missed: number; capped: number } }) => {
@@ -310,13 +335,27 @@ export const g2bPrespecAwards: Collector = {
     const key = dataGoKey(); if (!key) return noKey('나라장터 사전규격·낙찰');
     // #1123(로컬 11/22): 사전규격은 의견 마감이 짧아(5일 안팎) 06·12·18시 — 낮 두 번은 사전규격만(낙찰은 06시·[14일 다시 받기])
     const full = ctx.params?.full === true; const prespecOnly = !full && ctx.params?.trigger === 'cron' && kstHourNow() >= 10; // 정기 12·18시만(손으로 [지금 수집]·재시도는 전부)
+    const t0 = ctx.now(); const remain = () => ctx.deadlineMs - (ctx.now() - t0);
     const pre = await searchAll(PRESPEC_OPS, [''], full ? 14 : 4, prespecPayload, ctx, key, {}, 40); // 검색어 없이 전체 → 쪽을 넘겨 끝까지(최대 4,000건/종류)
-    const r1 = await write(pre.items, pre.errors);
+    // #1123 보완: 지난 실행에서 못 받은 쪽 이어 받기 — 낮(사전규격만) 실행은 남은 시간 전부, 06시·[지금 수집]은 낙찰 몫(25초)을 남기고 최대 15초
+    const saved = await loadResume(); const resumed: Awaited<ReturnType<typeof searchAll>>[] = []; const still: (ResumeGroup | null)[] = [];
+    for (const g of saved) {
+      const budget = prespecOnly ? remain() - 3000 : Math.min(15000, remain() - 25000);
+      if (budget < 8000) { still.push(g); continue; }
+      const r = await searchAll(PRESPEC_OPS, [''], 0, prespecPayload, { ...ctx, deadlineMs: budget }, key, g.win, 40, g.tasks);
+      resumed.push(r); still.push(r.rest.length ? { win: g.win, tasks: r.rest, at: g.at } : null);
+    }
+    const leftPages = await saveResume([resumeGroup(pre), ...still]).catch(() => 0);
+    const resItems = resumed.flatMap((r) => r.items); const resCalls = resumed.reduce((n, r) => n + r.stats.calls, 0);
+    const one = new Map<string, Record<string, unknown>>(); for (const p of [...pre.items, ...resItems]) one.set(`${p.source_type}|${p.source_external_id}`, p); // 겹친 쪽은 한 줄
+    const r1 = await write([...one.values()], pre.errors);
     const cov = coverage(pre);
-    if (cov.short) pre.errors.push(`사전규격 덜 받음 — ${cov.line}${pre.pages.missed ? ' · 시간이 모자라 못 받은 쪽은 다음 실행·[14일 다시 받기]로' : ''}`);
+    if (cov.short) pre.errors.push(`사전규격 덜 받음 — ${cov.line}${leftPages ? ` · 못 받은 쪽 ${leftPages}개는 기억해 두고 다음 실행(06·12·18시)에 이어 받음` : ''}`);
+    const resNote = `${resumed.length ? ` · 지난번 못 받은 쪽 이어 받음 ${resCalls}쪽(관련 ${resItems.length}건)` : ''}${leftPages ? ` · 남은 쪽 ${leftPages}(다음 실행에 이어 받음)` : ''}`;
+    const preCalls = pre.stats.calls + resCalls;
     if (prespecOnly) {
       return { inserted: r1.inserted, updated: r1.updated, unchanged: r1.unchanged, errors: r1.errors + r1.invalid + pre.failed + (cov.short ? 1 : 0), retry: retryable(pre), errorLog: pre.errors.length ? pre.errors.join('\n') : undefined, providerMode: 'api',
-        summary: `사전규격만(낮 수집) · ${cov.line} · 관련 ${pre.items.length}건(신규 ${r1.inserted})${pre.denied.length ? ` · 활용신청·주소 확인 필요 ${pre.denied.length}` : ''}` };
+        summary: `사전규격만(낮 수집) · ${cov.line} · 관련 ${pre.items.length}건(신규 ${r1.inserted})${resNote} · 호출 ${preCalls}회${pre.denied.length ? ` · 활용신청·주소 확인 필요 ${pre.denied.length}` : ''}` };
     }
     const monthBack = (new Date().getUTCDate() % 12) + 1; const old = new Date(Date.now() - monthBack * 30 * 864e5);
     const aw = await searchAll(AWARD_OPS, G2B_WORDS, 28, awardPayload, ctx, key);
@@ -325,7 +364,7 @@ export const g2bPrespecAwards: Collector = {
     const r2 = await write(awardItems, aw.errors, { mergeScope: 'award' });
     const errors = [...pre.errors, ...aw.errors, ...aw2.errors];
     return { inserted: r1.inserted + r2.inserted, updated: r1.updated + r2.updated, unchanged: r1.unchanged + r2.unchanged, errors: r1.errors + r2.errors + r1.invalid + r2.invalid + pre.failed + aw.failed + (cov.short ? 1 : 0) + ('failed' in aw2 ? aw2.failed : 0), retry: retryable(pre) && retryable(aw), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api',
-      summary: `사전규격 ${cov.line} · 관련 ${pre.items.length}건(신규 ${r1.inserted}) · 낙찰 관련 ${awardItems.length}건(병합 ${r2.updated}·신규 ${r2.inserted})` + (pre.denied.length + aw.denied.length ? ` · 활용신청·주소 확인 필요 ${pre.denied.length + aw.denied.length}개 서비스` : '') };
+      summary: `사전규격 ${cov.line} · 관련 ${pre.items.length}건(신규 ${r1.inserted})${resNote} · 낙찰 관련 ${awardItems.length}건(병합 ${r2.updated}·신규 ${r2.inserted}) · 호출 사전규격 ${preCalls}회·낙찰 ${aw.stats.calls + ('stats' in aw2 ? (aw2 as { stats: DataGoStats }).stats.calls : 0)}회` + (pre.denied.length + aw.denied.length ? ` · 활용신청·주소 확인 필요 ${pre.denied.length + aw.denied.length}개 서비스` : '') };
   },
 };
 
