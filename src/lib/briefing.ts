@@ -110,6 +110,8 @@ export async function buildPersonalReport(userId: string, weekStart: string) {
   return { data: { weekStart, done: done.length, open: open.length, overdue: open.filter((t) => t.due_date && t.due_date < today).length, next: next.length, events: evs.length, ...(sales ? { salesNone: sales.none, salesStale: sales.stale } : {}) }, body: lines.join('\n') };
 }
 
+/** #1118(대표 11/22): 지점 보고를 쓰는 회사의 지점 작성 담당은 지점 보고가 사내 보고를 대신 — 금요일 자동 초안·알림을 만들지 않음([지금 만들기]는 그대로) */
+const branchTenants = () => (process.env.BRANCH_REPORT_TENANTS ?? 'default').split(',').map((x) => x.trim()).filter(Boolean);
 /** 금요일 16:00(서울) 이후 첫 정기 실행에서 이번 주 초안을 한 번 만든다 (이미 있으면 그대로) */
 export async function personalReportJob(now = new Date()) {
   const local = DateTime.fromJSDate(now).setZone(TZ);
@@ -120,6 +122,7 @@ export async function ensureDrafts(weekStart: string, onlyUser?: string) {
   const sql = db();
   const users = await sql<{ id: string }[]>`select u.id from users u where u.status = 'active' and not u.is_demo
     and ${onlyUser ? sql`u.id = ${onlyUser}` : sql`true`}
+    and ${onlyUser ? sql`true` : sql`not (u.tenant = any(${branchTenants()}::text[]) and exists (select 1 from branch_sites s where s.writer_user_id = u.id and s.tenant = u.tenant and not s.hidden))`}
     and not exists (select 1 from personal_reports r where r.user_id = u.id and r.week_start = ${weekStart})`;
   let n = 0;
   for (const u of users) {

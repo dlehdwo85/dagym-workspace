@@ -7,11 +7,12 @@ import { Button, ErrorBox, PageHeader, Skeleton, cx, fmtDate, fmtDateTime, input
 
 /** V8 2번 내 주간 보고: 금요일 16시에 자동 초안 → 고쳐서 제출. 대표·관리자는 모두의 보고를 아래에서 */
 export default function MyReportPage() {
-  const { user, menus } = useSession();
+  const { user, menus, features } = useSession();
+  const br = !!features?.branchReport; // #1118(대표 11/22): 지점 보고를 쓰는 회사(다짐)는 '사내 업무 보고'로 나눠 부름
   const admin = (menus?.team_reports ?? 'none') !== 'none'; // V14 7번 메뉴 권한 "주간 보고(모아보기)"
   const [teamId, setTeamId] = useState(''); // V14 8번 팀별 모아 보기
   const { data, error, loading, reload, setData } = useApi<{ weekStart: string; report: any }>('/api/reports/mine');
-  const team = useApi<{ reports: any[]; teams?: { id: string; name: string }[] }>(admin ? `/api/reports/team${teamId ? `?teamId=${teamId}` : ''}` : null, [teamId]);
+  const team = useApi<{ reports: any[]; teams?: { id: string; name: string }[]; branch?: { userId: string; name: string; sites: { site: string; status: string | null; reportId: string | null }[] }[] }>(admin ? `/api/reports/team${teamId ? `?teamId=${teamId}` : ''}` : null, [teamId]);
   const [body, setBody] = useState('');
   useEffect(() => { if (data?.report) setBody(data.report.body); }, [data?.report?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   async function draft() {
@@ -23,7 +24,7 @@ export default function MyReportPage() {
   const r = data?.report;
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <PageHeader title="내 주간 보고" icon={FileText} sub="매주 금요일 오후 4시에 이번 주 완료·진행·다음 주 마감·일정으로 초안을 만들어 알려 드립니다. 고쳐서 제출하세요." />
+      <PageHeader title={br ? '사내 업무 보고' : '내 주간 보고'} icon={FileText} sub={`${br ? '대표·본사에 내는 이번 주 사내 업무 보고입니다. ' : ''}매주 금요일 오후 4시에 이번 주 완료·진행·다음 주 마감·일정으로 초안을 만들어 알려 드립니다. 고쳐서 제출하세요.${br ? ' 고객사(단지)에 내는 보고는 [고객사 보고(지점)] — 지점 작성 담당은 그쪽 제출로 대신합니다.' : ''}`} />
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Skeleton rows={4} /> : (
         <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="my-report">
           <p className="mb-2 text-sm font-semibold">{fmtDate(data!.weekStart)} 주 {r && <span className={cx('ml-1 rounded-full px-2 py-0.5 text-xs', r.status === 'submitted' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-800')}>{r.status === 'submitted' ? `제출 ${fmtDateTime(r.submitted_at)}` : '초안'}</span>}</p>
@@ -40,7 +41,7 @@ export default function MyReportPage() {
       )}
       {admin && (
         <section className="space-y-2" data-testid="team-reports">
-          <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">이번 주 모두의 보고</h2>
+          <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">{br ? '사내 업무 보고 모아 보기' : '이번 주 모두의 보고'}</h2>
             {!!team.data?.teams?.length && <select className="h-8 rounded-input border border-line bg-white px-2 text-xs" value={teamId} onChange={(e) => setTeamId(e.target.value)} aria-label="팀별 보기">
               <option value="">모든 사람</option>{team.data.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}</div>
           {!team.data?.reports.length ? <p className="text-sm text-ink-3">아직 초안이 없습니다 (금요일 오후 4시에 자동으로 만들어집니다)</p> : team.data.reports.map((x) => (
@@ -50,6 +51,10 @@ export default function MyReportPage() {
               <pre className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-ink-2">{x.body}</pre>
             </details>
           ))}
+          {!!team.data?.branch?.length && <div className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="team-branch-reports">
+            <p className="mb-1 text-xs text-ink-3">지점 작성 담당 — 사내 업무 보고 대신 고객사 보고(지점)로 냅니다</p>
+            {team.data.branch.map((w) => <p key={w.userId} className="text-sm">{w.name} — {w.sites.map((x, k) => <span key={k}>{k > 0 && ' · '}<a className="text-brand-700 underline" href="/branch-reports">{x.site}</a> {x.status === 'submitted' ? '제출함' : x.status === 'draft' ? '초안' : '아직 없음'}</span>)}</p>)}
+          </div>}
         </section>
       )}
     </div>
