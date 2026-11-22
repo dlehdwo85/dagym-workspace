@@ -148,43 +148,72 @@ describe('#1096 2단계 월간 보고서', () => {
     const acts = (await sql`select count(*)::int as n from audit_logs where action = 'branch_report.usage_file'`)[0].n; assert.equal(acts, 4);
   });
 
-  test('#1112 하이링크 회원목록 엑셀 → 회원(이용권) 현황: \'전체\' 시트만 · 이름·연락처는 어디에도 남지 않음 · 전달 대비(30% 넘게 줄면 빨강) · 제외 켜기/끄기 · 엑셀·인쇄 · 막힘', async () => {
+  test('#1112·#1115 하이링크 회원목록 엑셀 → 이용권·수강권 현황: \'전체\' 시트만 · 이름·연락처는 어디에도 남지 않음 · 분류(회사 기억)·바꾸기 · 전달 대비 · 제외 켜기/끄기 · 제출하면 분류 굳음 · 막힘', async () => {
     const { writeXlsx } = await import('../../src/lib/xlsx.ts');
+    const ml = await import('../../src/lib/branchReport/memberList.ts');
     const H = ['순번', '동', '호수', '이름', '연락처', '이용권명', '금액', '시작일', '종료일', '이용권 상태', '락커', '자리번호', '부과월'];
     const rows = [
       ['1', '401', '1203', '가나다회원', '010-9999-1111', '헬스권', '50000', '2026-10-03', '', '활성', 'X', '', '매월'],
       ['2', '401', '1203', '라마바회원', '010-9999-2222', '(여) 헬스+골프+수영', '120000', '2026-09-01', '', '활성', 'O', '12', '매월'],
       ['3', '402', '101', '사아자회원', '010-9999-3333', '남자 독서실', '30000', '2026-10-10', '', '활성', 'X', '', '매월'],
-      ['4', '999', '1', '직원회원', '010-9999-4444', '헬스권', '0', '2026-10-01', '', '활성', 'X', '', '매월'],
-      ['5', '403', '7', '차카타회원', '010-9999-5555', '테스트', '0', '', '', '활성', 'X', '', '매월'],
+      ['4', '402', '101', '하하하회원', '010-9999-6666', '오전 수영강습A (월수금 9시)', '60000', '2026-10-05', '', '활성', 'X', '', '매월'],
+      ['5', '999', '1', '직원회원', '010-9999-4444', '헬스권', '0', '2026-10-01', '', '활성', 'X', '', '매월'],
+      ['6', '403', '7', '차카타회원', '010-9999-5555', '테스트', '0', '', '', '활성', 'X', '', '매월'],
     ];
     // 동별 시트는 같은 내용(중복) — '전체' 만 읽어야 2배로 세지 않음
     const x = writeXlsx([{ name: '전체', rows: [H, ...rows] }, { name: '401동', rows: [H, rows[0], rows[1]] }]);
-    // 지난달(9월) 집계를 먼저 넣어 둠(헬스 5 → 이번 달 1 = 80% 감소 → 빨강)
-    const prev = { active: 8, households: 6, billing: 500000, newThisMonth: 1, endedThisMonth: 0, groups: { '헬스': 5, '통합(헬스+골프+수영)': 1, 'GX': 0, '수영 강습': 0, '독서실': 2, '락커': 0, '골프 레슨': 0, 'PT': 0, '기타': 0 }, byDong: { 401: 4 }, rows: 8 };
-    await sql`insert into branch_member_stats (site_id, month, tenant, stats, stats_all, excluded) values (${siteA}, '2026-09', 'default', ${sql.json(prev)}, ${sql.json(prev)}, 0)`;
+    // 지난달(9월) 집계를 먼저 넣어 둠: 헬스권 5 · 수영강습 1 → 이번 달 헬스권 1(80% 감소 → 빨강)
+    const pr = [1, 2, 3, 4, 5].map((k) => ['', '401', String(k), '', '', '헬스권', '50000', '', '', '활성']).concat([['', '402', '101', '', '', '오전 수영강습A (월수금 9시)', '60000', '', '', '활성']]);
+    const pv = ml.aggregateMembers(H.slice(0, 10), pr, '2026-09');
+    await sql`insert into branch_member_stats (site_id, month, tenant, stats, stats_all, excluded) values (${siteA}, '2026-09', 'default', ${sql.json(pv.stats)}, ${sql.json(pv.statsAll)}, 0)`;
     const up = (c, name, buf) => c.req('POST', `/api/branch-reports/${reportId}/member-file`, { name, b64: Buffer.from(buf).toString('base64') });
     const r = (await up(ctx.staffA.client, '회원목록_2026-10-31.xlsx', x)).body;
-    assert.equal(r.active, 3, '활성 3(직원 999동·테스트 제외)'); assert.equal(r.excluded, 2); assert.equal(r.prev, true);
+    assert.equal(r.active, 4, '활성 4(직원 999동·테스트 제외)'); assert.equal(r.excluded, 2); assert.equal(r.prev, true);
     const mb = r.report.body.members;
-    assert.equal(mb.month, '2026-10'); assert.equal(mb.exclude, true); assert.equal(mb.stats.households, 2); assert.equal(mb.stats.billing, 200000);
-    assert.equal(mb.stats.groups['헬스'], 1); assert.equal(mb.prev.month, '2026-09');
-    // 이름·연락처는 보고서·집계 표·감사 기록 어디에도 없음
-    const blob = JSON.stringify(r.report.body) + JSON.stringify(await sql`select * from branch_member_stats`) + JSON.stringify(await sql`select detail from audit_logs where action like 'branch_report.member%'`);
-    assert.ok(!/회원"|가나다|라마바|010-9999/.test(blob), '이름·연락처 저장 안 함');
+    assert.equal(mb.v, 2); assert.equal(mb.month, '2026-10'); assert.equal(mb.exclude, true); assert.equal(mb.prev.month, '2026-09');
+    const swim = ml.nameKey('오전 수영강습A (월수금 9시)');
+    assert.equal(mb.kinds[swim], 'class'); assert.equal(mb.kinds[ml.nameKey('헬스권')], 'use'); assert.equal(mb.kinds[ml.nameKey('남자 독서실')], 'use');
+    assert.equal(mb.unconfirmed.length, 5, '처음 보는 이름 5개(헬스권·통합·독서실·수영강습 + 제외 줄의 테스트) — 분류 확인 표시');
+    const use = ml.viewOf(mb.stats, mb.kinds, 'use'), cls = ml.viewOf(mb.stats, mb.kinds, 'class'), all = ml.viewOf(mb.stats, mb.kinds, 'all');
+    assert.deepEqual([use.active, use.households, use.billing], [3, 2, 200000]); assert.deepEqual([cls.active, cls.households, cls.billing], [1, 1, 60000]);
+    assert.deepEqual([all.active, all.households, all.billing], [4, 2, 260000]);
+    // 이름·연락처는 보고서·집계 표·분류 목록·감사 기록 어디에도 없음
+    const blob = JSON.stringify(r.report.body) + JSON.stringify(await sql`select * from branch_member_stats`) + JSON.stringify(await sql`select * from branch_pass_kinds`) + JSON.stringify(await sql`select detail from audit_logs where action like 'branch_report.member%' or action = 'branch_report.pass_kind'`);
+    assert.ok(!/회원"|가나다|라마바|하하하|010-9999|1203/.test(blob), '이름·연락처·호수 저장 안 함');
     const p = await ctx.staffA.client.req('GET', `/branch-print/${reportId}`);
-    assert.match(p.body, /회원\(이용권\) 현황/); assert.match(p.body, /30% 넘게 줄어듦/); assert.match(p.body, /시험·직원 줄 2건 제외/);
+    assert.match(p.body, /이용권 현황/); assert.match(p.body, /수강권 현황/); assert.match(p.body, /전체 합계\(이용권 \+ 수강권\)/);
+    assert.match(p.body, /30% 넘게 줄어듦/); assert.match(p.body, /시험·직원 줄 2건 제외/); assert.match(p.body, /오전 수영강습A \(월수금 9시\)/);
+    // 분류 바꾸기 → 회사 목록에 기억(확인됨) · 이 보고서에 바로 반영
+    const k1 = await ctx.staffA.client.ok('PATCH', `/api/branch-reports/${reportId}/member-file`, { pass: { key: swim, kind: 'use' } });
+    assert.equal(k1.report.body.members.kinds[swim], 'use'); assert.equal(k1.report.body.members.unconfirmed.includes(swim), false);
+    const [pk] = await sql`select kind, confirmed from branch_pass_kinds where tenant = 'default' and name_key = ${swim}`; assert.deepEqual([pk.kind, pk.confirmed], ['use', true]);
+    assert.equal(ml.viewOf(k1.report.body.members.stats, k1.report.body.members.kinds, 'class').active, 0);
+    // 같은 파일을 다시 올려도 회사 분류(이용권)를 따름
+    const again = (await up(ctx.staffA.client, '회원목록_2026-10-31.xlsx', x)).body;
+    assert.equal(again.report.body.members.kinds[swim], 'use'); assert.equal(again.report.body.members.unconfirmed.length, 4);
+    assert.equal((await ctx.staffA.client.req('PATCH', `/api/branch-reports/${reportId}/member-file`, { pass: { key: '없는이름', kind: 'use' } })).status, 400);
+    await ctx.staffA.client.ok('PATCH', `/api/branch-reports/${reportId}/member-file`, { pass: { key: swim, kind: 'class' } });
     // 제외 끄기 → 포함 집계로 보임
     const off = await ctx.staffA.client.ok('PATCH', `/api/branch-reports/${reportId}/member-file`, { exclude: false });
     assert.equal(off.report.body.members.exclude, false);
     assert.match((await ctx.staffA.client.req('GET', `/branch-print/${reportId}`)).body, /시험·직원 줄 제외 안 함/);
+    await ctx.staffA.client.ok('PATCH', `/api/branch-reports/${reportId}/member-file`, { exclude: true });
     const xl = await ctx.staffA.client.req('GET', `/api/branch-reports/${reportId}/xlsx`); assert.equal(xl.status, 200);
-    // 화면 저장으로 집계를 바꿀 수 없음
+    // 화면 저장으로 집계·분류를 바꿀 수 없음
     const cur = (await ctx.staffA.client.ok('GET', `/api/branch-reports/${reportId}`)).report.body;
-    const forged = await ctx.staffA.client.ok('PUT', `/api/branch-reports/${reportId}`, { ...cur, members: { ...cur.members, stats: { ...cur.members.stats, active: 999 } } });
-    assert.equal(forged.report.body.members.stats.active, 3);
+    const forged = await ctx.staffA.client.ok('PUT', `/api/branch-reports/${reportId}`, { ...cur, members: { ...cur.members, kinds: { [swim]: 'use' }, statsAll: {} } });
+    assert.equal(forged.report.body.members.kinds[swim], 'class'); assert.equal(forged.report.body.members.statsAll.v, 2);
+    // 제출하면 그때 분류로 굳음(회사 분류가 바뀌어도 제출본은 그대로)
+    await ctx.staffA.client.ok('POST', `/api/branch-reports/${reportId}/submit`, {});
+    await sql`update branch_pass_kinds set kind = 'use' where tenant = 'default' and name_key = ${swim}`;
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/branch-reports/${reportId}`)).report.body.members.kinds[swim], 'class');
+    assert.equal((await ctx.staffA.client.req('PATCH', `/api/branch-reports/${reportId}/member-file`, { pass: { key: swim, kind: 'use' } })).status, 409);
+    await ctx.owner.ok('DELETE', `/api/branch-reports/${reportId}/submit`);
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/branch-reports/${reportId}`)).report.body.members.kinds[swim], 'use', '초안으로 돌아오면 회사 분류 지금 값');
     // 막힘
     assert.equal((await up(ctx.staffB.client, 'a.xlsx', x)).status, 404);
+    assert.equal((await other.req('PATCH', `/api/branch-reports/${reportId}/member-file`, { pass: { key: swim, kind: 'use' } })).status, 404);
+    assert.equal((await ctx.staffA.client.req('PATCH', `/api/branch-reports/${reportId}/member-file`, {})).status, 400);
     assert.equal((await up(ctx.staffA.client, 'a.csv', 'x')).status, 400);
     assert.equal((await up(ctx.staffA.client, 'b.xlsx', writeXlsx([{ name: '전체', rows: [['순번', '동'], ['1', '401']] }]))).status, 400, '이용권명 머리줄 없음');
     const [wk] = await sql`select id from branch_reports where site_id = ${siteA} and report_day = '2026-10-16'`;

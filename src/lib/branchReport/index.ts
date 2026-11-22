@@ -183,6 +183,7 @@ async function loadReport(u: SessionUser, id: string, sql: Sql) {
 }
 export async function getReport(u: SessionUser, id: string) {
   const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  if (r.kind === 'monthly' && r.status === 'draft' && r.body?.members) r.body = { ...r.body, members: await withKinds(sql, tenantOf(u), r.body.members) }; // #1115 초안은 회사 분류 지금 값으로(제출하면 그때 값으로 굳음)
   return { report: r, canWrite: canWrite(u, t) && r.status === 'draft', canReopen: canReopen(u, t) && r.status === 'submitted' && !r.purged_at, admin: isAdmin(u) };
 }
 
@@ -311,6 +312,7 @@ export async function submitReport(u: SessionUser, id: string, ip: string | null
   const sql = db(); const { r, t } = await loadReport(u, id, sql);
   if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
   if (r.status === 'submitted') throw new HttpError(409, 'submitted', '이미 제출했습니다');
+  if (r.kind === 'monthly' && r.body?.members) await sql`update branch_reports set body = ${sql.json({ ...r.body, members: await withKinds(sql, tenantOf(u), r.body.members) } as never)} where id = ${id}`; // #1115 분류를 제출 때 값으로 굳힘
   await sql`update branch_reports set status = 'submitted', submitted_by = ${u.id}, submitted_at = now(), updated_at = now() where id = ${id}`;
   await audit(sql, u.id, 'branch_report.submit', 'branch_report', id, { site: t.id, day: r.report_day }, ip);
   return getReport(u, id);
@@ -414,21 +416,49 @@ export async function uploadMemberFile(u: SessionUser, id: string, i: z.infer<ty
     values (${t.id}, ${month}, ${tenantOf(u)}, ${sql.json(got.stats as never)}, ${sql.json(got.statsAll as never)}, ${got.excluded}, ${i.name}, ${u.id})
     on conflict (site_id, month) do update set stats = excluded.stats, stats_all = excluded.stats_all, excluded = excluded.excluded, file_name = excluded.file_name, uploaded_by = excluded.uploaded_by, updated_at = now()`;
   const { prevMonth } = await import('./monthly');
+  const { isV2, defaultKind, viewOf } = await import('./memberList');
   const pm = prevMonth(month);
   const [p] = await sql<{ stats: any; stats_all: any }[]>`select stats, stats_all from branch_member_stats where site_id = ${t.id} and month = ${pm}`;
-  const members = { month, fileName: i.name, at: new Date().toISOString(), excluded: got.excluded, exclude: r.body?.members?.exclude ?? true, stats: got.stats, statsAll: got.statsAll, prev: p ? { month: pm, stats: p.stats, statsAll: p.stats_all } : null };
+  // #1115 이용권/수강권: 처음 보는 이용권명은 기본 규칙으로 회사 목록에 넣고(분류 확인 표시), 이 보고서에는 그때의 분류를 함께 둠
+  const names = new Map<string, string>();
+  for (const a of [got.statsAll, isV2(p?.stats_all) ? p.stats_all : null]) if (a) for (const [k, n] of Object.entries(a.names)) if (!names.has(k)) names.set(k, n.name);
+  if (names.size) await sql`insert into branch_pass_kinds ${sql([...names].map(([k, n]) => ({ tenant: tenantOf(u), name_key: k, name: n, kind: defaultKind(n) })), 'tenant', 'name_key', 'name', 'kind')} on conflict (tenant, name_key) do nothing`;
+  const members = await withKinds(sql, tenantOf(u), { v: 2, month, fileName: i.name, at: new Date().toISOString(), excluded: got.excluded, exclude: r.body?.members?.exclude ?? true, stats: got.stats, statsAll: got.statsAll, prev: p ? { month: pm, stats: p.stats, statsAll: p.stats_all } : null, kinds: {}, unconfirmed: [] });
   await sql`update branch_reports set body = ${sql.json({ ...(r.body ?? {}), members } as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
-  await audit(sql, u.id, 'branch_report.member_file', 'branch_report', id, { month, active: got.stats.active, excluded: got.excluded }, ip); // 숫자만(이름·연락처 없음)
-  return { ...(await getReport(u, id)), active: got.stats.active, excluded: got.excluded, prev: !!p };
+  const active = viewOf(got.stats, members.kinds, 'all')!.active;
+  await audit(sql, u.id, 'branch_report.member_file', 'branch_report', id, { month, active, excluded: got.excluded }, ip); // 숫자만(이름·연락처 없음)
+  return { ...(await getReport(u, id)), active, excluded: got.excluded, prev: !!p };
 }
-export const memberExcludeInput = z.object({ exclude: z.boolean() });
-export async function setMemberExclude(u: SessionUser, id: string, i: z.infer<typeof memberExcludeInput>, ip: string | null) {
+/** #1115 보고서에 둔 분류를 회사 목록(지금 값)으로 맞춤 — 이 보고서 파일·전달 파일에 나온 이름만 */
+async function withKinds(sql: Sql, tenant: string, m: any) {
+  if (!m) return m;
+  const keys = new Set<string>([...Object.keys(m.statsAll?.names ?? {}), ...Object.keys(m.prev?.statsAll?.names ?? {})]);
+  if (!keys.size) return m;
+  const rows = await sql<{ name_key: string; kind: 'use' | 'class'; confirmed: boolean }[]>`select name_key, kind, confirmed from branch_pass_kinds where tenant = ${tenant} and name_key = any(${[...keys]}::text[])`;
+  return { ...m, kinds: { ...(m.kinds ?? {}), ...Object.fromEntries(rows.map((x) => [x.name_key, x.kind])) }, unconfirmed: rows.filter((x) => !x.confirmed).map((x) => x.name_key).sort() };
+}
+/** 제외 켜기/끄기 · #1115 이용권명 하나의 분류 바꾸기(회사 전체 기억) */
+export const memberPatchInput = z.object({ exclude: z.boolean().optional(), pass: z.object({ key: z.string().min(1).max(200), kind: z.enum(['use', 'class']) }).optional() })
+  .refine((x) => x.exclude !== undefined || x.pass !== undefined, { message: '바꿀 것이 없습니다' });
+export async function patchMembers(u: SessionUser, id: string, i: z.infer<typeof memberPatchInput>, ip: string | null) {
   const sql = db(); const { r, t } = await loadReport(u, id, sql);
   if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
   if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다');
-  if (!r.body?.members) throw badRequest('먼저 회원목록을 올려 주세요');
-  await sql`update branch_reports set body = ${sql.json({ ...r.body, members: { ...r.body.members, exclude: i.exclude } } as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
-  await audit(sql, u.id, 'branch_report.member_exclude', 'branch_report', id, { exclude: i.exclude }, ip);
+  let m = r.body?.members;
+  if (!m) throw badRequest('먼저 회원목록을 올려 주세요');
+  if (i.pass) {
+    const name = m.statsAll?.names?.[i.pass.key]?.name ?? m.prev?.statsAll?.names?.[i.pass.key]?.name;
+    if (!name) throw badRequest('이 보고서의 회원목록에 없는 이용권명입니다');
+    await sql`insert into branch_pass_kinds (tenant, name_key, name, kind, confirmed, updated_by) values (${tenantOf(u)}, ${i.pass.key}, ${name}, ${i.pass.kind}, true, ${u.id})
+      on conflict (tenant, name_key) do update set kind = excluded.kind, confirmed = true, updated_by = excluded.updated_by, updated_at = now()`;
+    m = await withKinds(sql, tenantOf(u), m);
+    await audit(sql, u.id, 'branch_report.pass_kind', 'branch_report', id, { kind: i.pass.kind }, ip);
+  }
+  if (i.exclude !== undefined) {
+    m = { ...m, exclude: i.exclude };
+    await audit(sql, u.id, 'branch_report.member_exclude', 'branch_report', id, { exclude: i.exclude }, ip);
+  }
+  await sql`update branch_reports set body = ${sql.json({ ...r.body, members: m } as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
   return getReport(u, id);
 }
 
@@ -458,12 +488,9 @@ export async function exportReport(u: SessionUser, id: string) {
     // #1112 회원(이용권) 현황 시트(있을 때만) — 숫자만
     const m = b.members as any; const sheets = [{ name: '월간 업무 보고서', rows: main }, { name: '시설별 이용 현황', rows: c }];
     if (m) {
-      const st = m.exclude ? m.stats : m.statsAll; const pv = m.prev ? (m.exclude ? m.prev.stats : m.prev.statsAll) : null;
-      const line = (label: string, cur: number, prev: number | null) => { const d = prev === null ? null : cur - prev; const rt = prev ? Math.round(((cur - prev) / prev) * 1000) / 10 : null; return [label, prev ?? '-', cur, d === null ? '-' : d, rt === null ? '-' : `${rt}%${rt < -30 ? ' (30% 넘게 줄어듦)' : ''}`]; };
-      sheets.push({ name: '회원 현황', rows: [['구분', '전달', '이번달', '증감', '증감률'], line('활성 이용권', st.active, pv?.active ?? null), line('활성 세대', st.households, pv?.households ?? null),
-        ...Object.entries(st.groups as Record<string, number>).filter(([g, n]) => n > 0 || (pv?.groups?.[g] ?? 0) > 0).map(([g, n]) => line(g, n, pv ? (pv.groups?.[g] ?? 0) : null)),
-        line('이번 달 신규', st.newThisMonth, pv?.newThisMonth ?? null), line('이번 달 종료', st.endedThisMonth, pv?.endedThisMonth ?? null), line('월 부과 합계(원)', st.billing, pv?.billing ?? null), [],
-        ['동별 활성', ...Object.entries(st.byDong as Record<string, number>).map(([d, n]) => `${d} ${n}`)], [], [`출처: 하이링크 회원목록(${m.fileName}) · ${m.exclude ? `시험·직원 줄 ${m.excluded}건 제외` : '제외 안 함'}`]] });
+      const { memberTables } = await import('./memberList');
+      sheets.push({ name: '회원 현황', rows: memberTables(r.status === 'draft' ? await withKinds(sql, tenantOf(u), m) : m).flatMap((tb) => [[`■ ${tb.title}`], ['구분', '전달', '이번달', '증감', '증감률'],
+        ...tb.rows.map((x) => [x.label, x.prev ?? '-', x.cur, x.diff ?? '-', x.rate === null ? '-' : `${x.rate}%${x.drop ? ' (30% 넘게 줄어듦)' : ''}`]), ...tb.notes.map((x) => [x]), []]) });
     }
     return { fileName: `${r.unit_name}_월간보고_${r.period_start.slice(0, 7)}.xlsx`, data: writeXlsx(sheets) };
   }

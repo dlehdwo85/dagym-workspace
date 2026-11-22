@@ -1,6 +1,8 @@
 /**
  * #1096 2단계 — 월간 업무 보고서(양식 B) + 시설별 이용 현황(양식 C) + 미완료. 읽기 화면·인쇄(A4) 공용(훅 없음).
  */
+import { memberTables, type MemberSel, type PassKind } from '@/lib/branchReport/memberList';
+
 export type MonthlyBody = {
   important: { work: string; result: string; evidence: string[]; check?: boolean }[];
   progress: { week: string; task: string; focus: string; result: string; note: string; evidence: string[]; check?: boolean }[];
@@ -34,32 +36,28 @@ export const sumCol = (vals: string[]) => {
 };
 export const usageTotal = (usage: MonthlyBody['usage']) => ({ prev: sumCol(usage.map((x) => x.prev)), cur: sumCol(usage.map((x) => x.cur)) });
 
-/** #1112 하이링크 회원목록 집계 — 화면·인쇄 공용 */
-export type MemberStatsView = { active: number; households: number; billing: number; newThisMonth: number; endedThisMonth: number; groups: Record<string, number>; byDong: Record<string, number>; rows: number };
-export type MembersBody = { month: string; fileName: string; at: string; excluded: number; exclude: boolean; stats: MemberStatsView; statsAll: MemberStatsView; prev: { month: string; stats: MemberStatsView; statsAll: MemberStatsView } | null };
+/** #1112·#1115 하이링크 회원목록 집계 — 화면·인쇄 공용. 표는 memberTables(이용권 현황·수강권 현황·전체 합계) 그대로 */
+export type MembersBody = { v?: number; month: string; fileName: string; at: string; excluded: number; exclude: boolean; stats: unknown; statsAll: unknown;
+  prev: { month: string; stats: unknown; statsAll: unknown } | null; kinds?: Record<string, PassKind>; unconfirmed?: string[] };
 const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
-const cmp = (cur: number, prev?: number | null) => {
-  if (prev === null || prev === undefined) return { diff: '', rate: '', drop: false };
-  const d = cur - prev; const r = prev === 0 ? null : Math.round((d / prev) * 1000) / 10;
-  return { diff: `${d > 0 ? '+' : ''}${d.toLocaleString('ko-KR')}`, rate: r === null ? '' : `${r > 0 ? '▲' : r < 0 ? '▼' : ''}${Math.abs(r)}%`, drop: r !== null && r < -30 };
-};
-export function MembersSection({ m, title = true }: { m: MembersBody; title?: boolean }) {
-  const s = m.exclude ? m.stats : m.statsAll; const p = m.prev ? (m.exclude ? m.prev.stats : m.prev.statsAll) : null;
-  const rows: [string, number, number | null, boolean?][] = [
-    ['활성 이용권', s.active, p?.active ?? null], ['활성 세대', s.households, p?.households ?? null],
-    ...Object.entries(s.groups).filter(([g, n]) => n > 0 || (p?.groups?.[g] ?? 0) > 0).map(([g, n]) => [`· ${g}`, n, p ? (p.groups?.[g] ?? 0) : null] as [string, number, number | null]),
-    ['이번 달 신규', s.newThisMonth, p?.newThisMonth ?? null], ['이번 달 종료', s.endedThisMonth, p?.endedThisMonth ?? null],
-  ];
-  const bill = cmp(s.billing, p?.billing ?? null);
+const num = (n: number, money?: boolean) => (money ? won(n) : n.toLocaleString('ko-KR'));
+export const signed = (n: number | null, money?: boolean) => (n === null ? '-' : `${n > 0 ? '+' : ''}${num(n, money)}`);
+export const rateText = (r: number | null) => (r === null ? '-' : `${r > 0 ? '▲' : r < 0 ? '▼' : ''}${Math.abs(r)}%`);
+export function MembersSection({ m, title = true, sel }: { m: MembersBody; title?: boolean; sel?: MemberSel }) {
+  const tables = memberTables(m, sel);
   return (
-    <section data-testid="branch-members">
-      {title && <h2 className="mb-1.5 font-bold">회원(이용권) 현황</h2>}
-      <table className="w-full border-collapse"><thead><tr><th className={th}>구분</th><th className={th}>전달</th><th className={th}>이번달</th><th className={th}>증감</th><th className={th}>증감률</th></tr></thead>
-        <tbody>{rows.map(([label, cur, prev]) => { const c = cmp(cur, prev); return (
-          <tr key={label} className={c.drop ? 'text-red-700' : undefined}><td className={td}>{label}</td><td className={td}>{prev === null ? '-' : prev.toLocaleString('ko-KR')}</td><td className={td}>{cur.toLocaleString('ko-KR')}</td><td className={td}>{c.diff || '-'}</td><td className={td}>{c.rate || '-'}{c.drop ? ' (30% 넘게 줄어듦)' : ''}</td></tr>); })}
-          <tr className={bill.drop ? 'text-red-700' : undefined}><td className={td}>월 부과 합계</td><td className={td}>{p ? won(p.billing) : '-'}</td><td className={td}>{won(s.billing)}</td><td className={td}>{bill.diff ? `${bill.diff}원` : '-'}</td><td className={td}>{bill.rate || '-'}</td></tr></tbody></table>
-      {Object.keys(s.byDong).length > 0 && <p className="mt-1 text-[12px] text-slate-600">동별 활성: {Object.entries(s.byDong).sort(([a], [b]) => a.localeCompare(b, 'ko', { numeric: true })).map(([d, n]) => `${d === '미분류' ? d : `${d}동`} ${n}`).join(' · ')}</p>}
-      <p className="mt-1 text-[11px] text-slate-500">출처: 하이링크 회원목록({m.fileName}) · {m.exclude ? `시험·직원 줄 ${m.excluded}건 제외(이용권명 '테스트', 동 999·9999·111·빈칸)` : '시험·직원 줄 제외 안 함'} · {p ? `전달(${m.prev!.month}) 대비` : '비교할 지난달 없음'}</p>
+    <section data-testid="branch-members" className="space-y-3">
+      {title && <h2 className="mb-1.5 font-bold">회원 현황(하이링크 회원목록)</h2>}
+      {tables.map((tb) => (
+        <div key={tb.key} data-testid={`branch-members-${tb.key}`}>
+          <h3 className="mb-1 text-[13px] font-semibold">{tb.title}</h3>
+          <table className="w-full border-collapse"><thead><tr><th className={th}>구분</th><th className={th}>전달</th><th className={th}>이번달</th><th className={th}>증감</th><th className={th}>증감률</th></tr></thead>
+            <tbody>{tb.rows.map((x) => (
+              <tr key={x.label} className={[x.drop && 'text-red-700', x.total && 'font-semibold'].filter(Boolean).join(' ') || undefined}><td className={td}>{x.label}</td><td className={td}>{x.prev === null ? '-' : num(x.prev, x.money)}</td><td className={td}>{num(x.cur, x.money)}</td>
+                <td className={td}>{signed(x.diff, x.money)}</td><td className={td}>{rateText(x.rate)}{x.drop ? ' (30% 넘게 줄어듦)' : ''}</td></tr>))}</tbody></table>
+          {tb.folded && tb.folded.length > 0 && <details className="mt-1 text-[12px] text-slate-600"><summary className="cursor-pointer">활성 0인 강좌 {tb.folded.length}개</summary>{tb.folded.join(' · ')}</details>}
+          {tb.notes.map((n) => <p key={n} className="mt-1 text-[11px] text-slate-500">{n}</p>)}
+        </div>))}
     </section>
   );
 }

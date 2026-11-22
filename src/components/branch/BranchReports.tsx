@@ -4,7 +4,8 @@ import { FileDown, FileUp, Loader2, Plus, Printer, Settings2, Sparkles, Trash2 }
 import { api, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Field, Loading, Modal, PageHeader, askConfirm, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ReportView, STATE_TONE, type Body, type Line } from './ReportView';
-import { MembersSection, MonthlyView, delta, usageTotal, type MonthlyBody } from './MonthlyView';
+import { MembersSection, MonthlyView, delta, signed, usageTotal, type MembersBody, type MonthlyBody } from './MonthlyView';
+import { PASS_KIND_LABEL, isV2, kindOf, viewOf, type MemberSel, type PassKind } from '@/lib/branchReport/memberList';
 
 /**
  * #1096 지점 주간보고(다짐 전용) — 설계 docs/branch-report-design.md, 대표 결정 11/21.
@@ -240,6 +241,46 @@ function MonthlyComposer({ siteId, month, weeks, hasDraft, onDone }: { siteId: s
 }
 
 /** 월간 고치기 — 양식 B 세 표 · 양식 C(전달·이번달 → 증감 자동) · 미완료 · 메모 */
+/** #1115 회원 현황 — [전체/이용권/수강권] 선택에 맞춘 숫자 칸·표 + 이용권명 분류 바꾸기(회사 전체 기억) */
+function MembersPanel({ m, canWrite, busy, onKind }: { m: MembersBody; canWrite: boolean; busy: boolean; onKind: (key: string, kind: PassKind) => void }) {
+  const [sel, setSel] = useState<MemberSel>('all');
+  const v2 = isV2(m.statsAll);
+  const s = v2 ? sel : 'all';
+  const v = viewOf(m.exclude ? m.stats : m.statsAll, m.kinds, s); const p = m.prev ? viewOf(m.exclude ? m.prev.stats : m.prev.statsAll, m.kinds, s) : null;
+  const cells: [string, number, number | null, boolean?][] = v ? [['활성 건수', v.active, p?.active ?? null], ['활성 세대', v.households, p?.households ?? null], ['월 부과 합계', v.billing, p?.billing ?? null, true], ['이번 달 신규', v.newThisMonth, p?.newThisMonth ?? null], ['이번 달 종료', v.endedThisMonth, p?.endedThisMonth ?? null]] : [];
+  const unconf = new Set(m.unconfirmed ?? []);
+  const shown = m.exclude ? m.stats : m.statsAll; // 제외 켬이면 시험·직원 줄에만 있는 이름(예: '테스트')은 목록에서 뺌
+  const names = isV2(shown) ? Object.entries(shown.names).map(([key, n]) => ({ key, name: n.name, active: n.active, kind: kindOf(m.kinds, key, n.name), isNew: unconf.has(key) }))
+    .sort((a, b) => Number(b.isNew) - Number(a.isNew) || a.kind.localeCompare(b.kind) || b.active - a.active || a.name.localeCompare(b.name, 'ko')) : [];
+  const nNew = names.filter((x) => x.isNew).length;
+  return (
+    <div className="space-y-2.5 text-[13px]">
+      {v2 && <div className="inline-flex rounded-input border border-line bg-white p-0.5 text-sm" role="tablist" data-testid="branch-member-sel">
+        {(['all', 'use', 'class'] as const).map((k) => <button key={k} type="button" role="tab" aria-selected={sel === k} onClick={() => setSel(k)} className={cx('rounded-[6px] px-3 py-1', sel === k ? 'bg-brand-700 text-white' : 'text-ink-2 hover:bg-slate-50')} data-testid={`branch-member-sel-${k}`}>{k === 'all' ? '전체' : PASS_KIND_LABEL[k]}</button>)}
+      </div>}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" data-testid="branch-member-cells">
+        {cells.map(([label, n, pv, money]) => <div key={label} className="rounded-input border border-line px-2.5 py-1.5">
+          <div className="text-[11px] text-ink-3">{label}</div><div className="text-base font-semibold tabular-nums">{n.toLocaleString('ko-KR')}{money ? '원' : ''}</div>
+          <div className="text-[11px] text-ink-3">{pv === null ? '전달 없음' : `전달 대비 ${signed(n - pv, money)}`}</div></div>)}
+      </div>
+      <MembersSection m={m} sel={v2 ? sel : undefined} title={false} />
+      {v2 && names.length > 0 && <details open={nNew > 0} className="rounded-input border border-line px-3 py-2" data-testid="branch-pass-kinds">
+        <summary className="cursor-pointer text-[13px] font-semibold">이용권명 분류 <span className="font-normal text-ink-3">— 이용권 {names.filter((x) => x.kind === 'use').length} · 수강권 {names.filter((x) => x.kind === 'class').length}</span>{nNew > 0 && <span className="ml-1 font-normal text-amber-700">· 새 이름 {nNew}개 — 분류 확인</span>}</summary>
+        <p className="my-1.5 text-[11px] text-ink-3">바꾸면 회사 전체에서 기억합니다(띄어쓰기만 다른 이름은 같은 이름). 제출한 보고서는 바뀌지 않습니다. 맞으면 지금 분류를 한 번 눌러 확인해 주세요.</p>
+        <ul className="divide-y divide-line">{names.map((x) => (
+          <li key={x.key} className="flex flex-wrap items-center gap-2 py-1" data-testid="branch-pass-row" data-key={x.key}>
+            <span className="min-w-0 flex-1 break-words">{x.name}</span>
+            <span className="text-[12px] text-ink-3 tabular-nums">활성 {x.active}</span>
+            {x.isNew && <span className="rounded bg-amber-50 px-1.5 text-[11px] text-amber-800">새 이름 — 분류 확인</span>}
+            <span className="inline-flex rounded-input border border-line p-0.5 text-[12px]">
+              {(['use', 'class'] as const).map((k) => <button key={k} type="button" aria-pressed={x.kind === k} disabled={!canWrite || busy} onClick={() => onKind(x.key, k)} className={cx('rounded-[5px] px-2 py-0.5', x.kind === k ? 'bg-slate-800 text-white' : 'text-ink-2 hover:bg-slate-50')}>{PASS_KIND_LABEL[k]}</button>)}
+            </span>
+          </li>))}</ul>
+      </details>}
+    </div>
+  );
+}
+
 function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
   const [b, setB] = useState<MonthlyBody>(r.body as MonthlyBody); const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false);
   const set = (nb: MonthlyBody) => { setB(nb); setDirty(true); };
@@ -280,15 +321,23 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
       if (dirty) await api(`/api/branch-reports/${r.id}`, { method: 'PUT', body: b });
       const buf = new Uint8Array(await f.arrayBuffer()); let bin = ''; for (let k = 0; k < buf.length; k += 0x8000) bin += String.fromCharCode(...buf.subarray(k, k + 0x8000));
       const res = await api<any>(`/api/branch-reports/${r.id}/member-file`, { body: { name: f.name, b64: btoa(bin) } });
-      toast.ok(`회원목록을 집계했습니다 — 활성 이용권 ${res.active.toLocaleString('ko-KR')}건${res.excluded ? ` · 시험·직원 줄 ${res.excluded}건 제외` : ''}${res.prev ? '' : ' · 비교할 지난달 없음'}`);
+      toast.ok(`회원목록을 집계했습니다 — 활성(이용권+수강권) ${res.active.toLocaleString('ko-KR')}건${res.excluded ? ` · 시험·직원 줄 ${res.excluded}건 제외` : ''}${res.prev ? '' : ' · 비교할 지난달 없음'}`);
       onChange();
     } catch (e: any) { toast.error(e.message); } finally { setMemBusy(false); }
   };
-  const toggleExclude = async (on: boolean) => {
-    const before = b; if (b.members) setB({ ...b, members: { ...b.members, exclude: on } }); // 바로 바뀌어 보이게(저장 표시는 건드리지 않음)
+  /** 제외 켜기/끄기 · #1115 이용권명 분류 바꾸기 — 바로 바뀌어 보이게 하고, 서버 답(회사 분류 지금 값)으로 맞춤. 화면을 다시 불러오지 않아 [전체/이용권/수강권] 선택이 그대로 */
+  const patchMembers = async (local: Partial<MembersBody>, patch: { exclude?: boolean; pass?: { key: string; kind: PassKind } }) => {
+    const before = b; if (!b.members) return;
+    setB({ ...b, members: { ...b.members, ...local } });
     setMemBusy(true);
-    try { if (dirty) await api(`/api/branch-reports/${r.id}`, { method: 'PUT', body: before }); await api(`/api/branch-reports/${r.id}/member-file`, { method: 'PATCH', body: { exclude: on } }); onChange(); } catch (e: any) { setB(before); toast.error(e.message); } finally { setMemBusy(false); }
+    try {
+      if (dirty) { await api(`/api/branch-reports/${r.id}`, { method: 'PUT', body: before }); setDirty(false); }
+      const res = await api<{ report: { body: MonthlyBody } }>(`/api/branch-reports/${r.id}/member-file`, { method: 'PATCH', body: patch });
+      setB((cur) => ({ ...cur, members: res.report.body.members }));
+    } catch (e: any) { setB(before); toast.error(e.message); } finally { setMemBusy(false); }
   };
+  const toggleExclude = (on: boolean) => patchMembers({ exclude: on }, { exclude: on });
+  const setKind = (key: string, kind: PassKind) => patchMembers({ kinds: { ...(b.members?.kinds ?? {}), [key]: kind }, unconfirmed: (b.members?.unconfirmed ?? []).filter((x) => x !== key) }, { pass: { key, kind } });
   const removeUsage = async () => {
     if (!(await askConfirm('첨부한 하이링크 이용현황 파일을 뺄까요? 표에 채운 값은 그대로 둡니다.', { title: '첨부 빼기', ok: '빼기' }))) return;
     try { await api(`/api/branch-reports/${r.id}/usage-file`, { method: 'DELETE' }); toast.ok('첨부를 뺐습니다'); onChange(); } catch (e: any) { toast.error(e.message); }
@@ -347,14 +396,14 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
             <td className="whitespace-nowrap px-1">{x.diff || d.diff || '-'}</td><td className="whitespace-nowrap px-1">{x.rate || d.rate || '-'}</td><td><Del on={() => set({ ...b, usage: b.usage.filter((_, j) => j !== k), usageTotal: null })} /></td></tr>); })}
           {(b.usage.length > 0 || b.usageTotal) && <tr className="font-semibold"><td className="py-1">{tot.item || '전 시설 합계'}</td><td>{tot.prev || '-'}</td><td>{tot.cur || '-'}</td><td className="px-1">{tot.diff || dt.diff || '-'}</td><td className="px-1">{tot.rate || dt.rate || '-'}</td><td /></tr>}</tbody></table></div>
       <Add label="시설" on={() => set({ ...b, usage: [...b.usage, { item: '', prev: '', cur: '', diff: '', rate: '' }], usageTotal: null })} />
-      <h3 className="text-sm font-semibold">회원(이용권) 현황 <span className="font-normal text-xs text-ink-3">— 하이링크 회원목록 엑셀을 올리면 묶음별·세대·부과 합계를 셉니다(이름·연락처는 읽지 않고, 파일은 보관하지 않음)</span></h3>
+      <h3 className="text-sm font-semibold">회원 현황(이용권·수강권) <span className="font-normal text-xs text-ink-3">— 하이링크 회원목록 엑셀을 올리면 이용권·수강권별 활성·세대·부과 합계를 셉니다(이름·연락처는 읽지 않고, 파일은 보관하지 않음)</span></h3>
       <div className="flex flex-wrap items-center gap-3 text-sm" data-testid="branch-member-file">
         {canWrite && <label className={cx('inline-flex cursor-pointer items-center gap-1.5 rounded-input border border-line px-2.5 py-1.5 hover:bg-slate-50', memBusy && 'opacity-60')}>
           {memBusy ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}하이링크 회원목록 올리기
           <input type="file" className="hidden" accept=".xlsx" onChange={(e) => { void uploadMembers(e.target.files?.[0]); e.target.value = ''; }} disabled={memBusy} data-testid="branch-member-upload" /></label>}
         {b.members && <label className="inline-flex items-center gap-1.5 text-xs text-ink-2"><input type="checkbox" checked={b.members.exclude} onChange={(e) => void toggleExclude(e.target.checked)} disabled={!canWrite || memBusy} data-testid="branch-member-exclude" />시험·직원 줄 제외({b.members.excluded}건 — 이용권명 &lsquo;테스트&rsquo;, 동 999·9999·111·빈칸)</label>}
       </div>
-      {b.members ? <div className="text-[13px]"><MembersSection m={b.members} title={false} /></div> : <p className="text-xs text-ink-3">아직 올린 회원목록이 없습니다.</p>}
+      {b.members ? <MembersPanel m={b.members} canWrite={canWrite} busy={memBusy} onKind={setKind} /> : <p className="text-xs text-ink-3">아직 올린 회원목록이 없습니다.</p>}
       <Field label="메모"><textarea className={cx(inputCls, 'min-h-[48px] text-[13px]')} value={b.notes} onChange={(e) => set({ ...b, notes: e.target.value })} disabled={!canWrite} /></Field>
       {canWrite && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={save} disabled={busy || !dirty} data-testid="branch-monthly-save">저장</Button><Button onClick={submit} disabled={busy} data-testid="branch-monthly-submit">제출</Button></div>}
     </section>
