@@ -93,19 +93,28 @@ function NewContract({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false); const [result, setResult] = useState<any>(null);
   const { pages, error } = usePdfPages(step === 3 && src ? `/api/contracts/source?key=${encodeURIComponent(src.key)}` : null);
   const drag = useRef<{ i: number; mode: 'move' | 'size'; sx: number; sy: number; f: Fld; W: number; H: number } | null>(null);
-  const [officeNote, setOfficeNote] = useState<string | null>(null);
-  async function upload(f: File) {
-    // #1125(대표 11/22 '근로계약서 워드 파일이 안 올라감'): 서명 칸을 놓으려면 쪽 그림(PDF)이 필요 — 워드·한글·엑셀은 막지 말고 바꾸는 방법 안내(PDF 로 바꿔 주는 기능은 방법 결정 뒤)
-    if (/\.(docx?|hwpx?|xlsx?|pptx?|odt|rtf)$/i.test(f.name)) { setOfficeNote(f.name); toast.info('PDF 로 바꿔 올리는 기능은 준비 중입니다 — 지금은 그 파일을 열어 [파일 › 다른 이름으로 저장 › PDF] 한 뒤 올려 주세요'); return; }
-    setOfficeNote(null);
+  const [officeNote, setOfficeNote] = useState<{ name: string; why: string } | null>(null);
+  const [conv, setConv] = useState<{ from: string; pages: number; thumbs: string[] } | null>(null); const [converting, setConverting] = useState(false);
+  async function upload(f0: File) {
+    // #1125(대표 11/22 '근로계약서 워드 파일이 안 올라감'): 서명 칸을 놓으려면 쪽 그림(PDF)이 필요.
+    // 2단계(대표 위임 11/23 — ② 브라우저 안 변환): 워드(.docx)·엑셀(.xlsx)은 이 브라우저 안에서 PDF 로 바꿔 올림(원본은 서버로 보내지 않음). 한글·옛 워드·옛 엑셀·파워포인트는 안내
+    let f = f0; setOfficeNote(null); setConv(null);
+    if (/\.(docx|xlsx)$/i.test(f.name)) {
+      setBusy(true); setConverting(true);
+      try {
+        const { officeToPdf } = await import('@/components/officeToPdf');
+        const c = await officeToPdf(f); f = c.file; setConv({ from: f0.name, pages: c.pages, thumbs: c.thumbs });
+      } catch (e: any) { setOfficeNote({ name: f0.name, why: `PDF 로 바꾸지 못했습니다(${String(e?.message ?? e).slice(0, 80)})` }); setBusy(false); setConverting(false); return; }
+      setConverting(false);
+    } else if (/\.(doc|hwpx?|xls|pptx?|odt|rtf)$/i.test(f.name)) { setOfficeNote({ name: f.name, why: '이 형식은 PDF 로 바로 바꿀 수 없습니다' }); toast.info('그 파일을 열어 [파일 › 다른 이름으로 저장 › PDF] 한 뒤 올려 주세요'); return; }
+    if (!title) setTitle(f0.name.replace(/\.[^.]+$/, '').slice(0, 120));
     setBusy(true); setPct(0);
     try {
       const t = await api('/api/contracts/upload', { body: { fileName: f.name, mime: f.type || 'application/octet-stream', size: f.size } });
       await putFile(t.upload, f, setPct);
       const r = await api('/api/contracts/source', { body: { key: t.key } });
       setSrc({ key: r.key, pages: r.pages, name: f.name }); setFields([]);
-      if (!title) setTitle(f.name.replace(/\.[^.]+$/, '').slice(0, 120));
-    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); setPct(null); }
+    } catch (e: any) { toast.error(e.message); setConv(null); } finally { setBusy(false); setPct(null); }
   }
   const setS = (i: number, p: Partial<Signer>) => setSigners((ss) => ss.map((s, j) => (j === i ? { ...s, ...p } : s)));
   const okSigners = signers.length > 0 && signers.every((s) => s.name.trim() && (s.email.trim() || s.phone.trim()));
@@ -152,18 +161,23 @@ function NewContract({ onClose }: { onClose: () => void }) {
       {step === 1 && (
         <div className="mx-auto max-w-xl space-y-3 rounded-card border border-line bg-white p-4">
           {/* #1122(대표 11/22): 점선 상자에 끌어다 놓기 — 형식 확인, 여러 개면 첫 번째만 */}
-          <DropZone onFile={(f) => void upload(f)} accept="application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg,.doc,.docx,.hwp,.hwpx,.xls,.xlsx,.ppt,.pptx" acceptLabel="PDF·png·jpg" disabled={busy} label="여기에 놓으면 계약서를 올립니다" testid="contract-drop">
+          <DropZone onFile={(f) => void upload(f)} accept="application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg,.doc,.docx,.hwp,.hwpx,.xls,.xlsx,.ppt,.pptx" acceptLabel="PDF·png·jpg·docx·xlsx" disabled={busy} label="여기에 놓으면 계약서를 올립니다" testid="contract-drop">
             <label className={cx('flex cursor-pointer flex-col items-center gap-2 rounded-card border-2 border-dashed border-line p-6 text-sm text-ink-2 hover:bg-slate-50', busy && 'pointer-events-none opacity-60')}>
               {busy ? <Loader2 className="size-6 animate-spin" /> : <Upload className="size-6" />}
-              {src ? <span><b>{src.name}</b> · {src.pages}쪽 — 다른 파일로 바꾸려면 누르거나 끌어다 놓으세요</span> : <span>계약서 파일을 끌어다 놓거나 눌러서 고르세요 (PDF·사진 png·jpg, 20MB까지)</span>}
+              {converting ? <span>PDF 로 바꾸는 중… (이 브라우저 안에서만 바꿉니다)</span>
+                : src ? <span><b>{src.name}</b> · {src.pages}쪽 — 다른 파일로 바꾸려면 누르거나 끌어다 놓으세요</span> : <span>계약서 파일을 끌어다 놓거나 눌러서 고르세요 (PDF·사진 png·jpg·워드 docx·엑셀 xlsx, 20MB까지)</span>}
               {pct !== null && <span className="text-xs">{pct}%</span>}
-              <input type="file" accept="application/pdf,image/png,image/jpeg,.doc,.docx,.hwp,.hwpx,.xls,.xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} data-testid="contract-file" />
+              <input type="file" accept="application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg,.doc,.docx,.hwp,.hwpx,.xls,.xlsx,.ppt,.pptx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} data-testid="contract-file" />
             </label>
           </DropZone>
+          {conv && src && <div className="space-y-2 rounded-input border border-teal-200 bg-teal-50/60 px-3 py-2 text-xs text-teal-900" data-testid="contract-converted">
+            <p><b>{conv.from}</b>를 이 브라우저 안에서 PDF {conv.pages}쪽으로 바꿨습니다(원본 파일은 서버로 보내지 않음). 아래 쪽 모양을 확인하세요 — 원본과 많이 다르면 그 파일에서 <b>[다른 이름으로 저장 › PDF]</b> 한 파일을 올려 주세요.</p>
+            <div className="flex gap-2 overflow-x-auto">{conv.thumbs.map((t, i) => <img key={i} src={t} alt={`${i + 1}쪽`} className="h-28 rounded border border-line bg-white" />)}</div>
+          </div>}
           {officeNote ? <div className="rounded-input border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="contract-office-note">
-            <b>{officeNote}</b> — 서명 칸을 놓으려면 PDF 가 필요합니다. 워드·한글·엑셀을 PDF 로 바꿔 올리는 기능은 준비 중입니다. 지금은 그 파일을 열어 <b>[파일 › 다른 이름으로 저장 › PDF]</b> 한 뒤 올려 주세요.
+            <b>{officeNote.name}</b> — {officeNote.why}. 서명 칸을 놓으려면 PDF 가 필요합니다. 그 파일을 열어 <b>[파일 › 다른 이름으로 저장 › PDF]</b> 한 뒤 올려 주세요.
             {' '}서명 없이 보관만 할 거면 <Link href="/agreements" className="font-semibold underline">계약 관리</Link>에 그대로 올릴 수 있습니다.</div>
-            : <p className="text-[11px] text-ink-3">한글·워드·엑셀 문서는 [PDF로 저장]한 뒤 올려 주세요. 서명 없이 보관만 할 거면 <Link href="/agreements" className="underline">계약 관리</Link>에 그대로 올릴 수 있습니다.</p>}
+            : !conv && <p className="text-[11px] text-ink-3">워드(.docx)·엑셀(.xlsx)은 올리면 PDF 로 바꿔 드립니다. 한글·옛 워드(.doc)·옛 엑셀(.xls)은 [PDF로 저장]한 뒤 올려 주세요. 서명 없이 보관만 할 거면 <Link href="/agreements" className="underline">계약 관리</Link>에 그대로 올릴 수 있습니다.</p>}
           <Field label="계약명"><input className={inputCls} value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} data-testid="contract-title" /></Field>
           <Field label="전하는 말(선택)"><textarea className={cx(inputCls, 'min-h-16')} value={message} maxLength={1000} onChange={(e) => setMessage(e.target.value)} /></Field>
           <div className="grid grid-cols-2 gap-3">

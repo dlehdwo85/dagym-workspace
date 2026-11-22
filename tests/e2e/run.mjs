@@ -111,6 +111,7 @@ import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
 import { econtractPdf } from './econtractPdf.step.mjs';
 import { drop1122 } from './drop1122.step.mjs';
+import { convert1125 } from './convert1125.step.mjs';
 import { payTest192 } from './payTest192.step.mjs';
 import { platformTabs } from './platformTabs.step.mjs';
 import { mktDraftQuality } from './mktDraftQuality.step.mjs';
@@ -3122,6 +3123,7 @@ await step('메신저 3차(대표 10/20 카톡 수준 C12·D14·D15): 머리줄 
 await step('#533 업무 첨부 [고치기](대표 10/23 23:50): 첨부 있는 업무 제목·설명 고쳐 저장 → 그대로 · 글 고쳐 v2(글 고침) · 사진 돌리기·펜 v2(가로·세로 바뀜, 크기 표시 바로 — #258) · PDF 글자·체크 v2(긴 글 줄바꿈·글자 줄이기, 넘치면 저장 막기 — #258) · 저장 PDF 다시 읽기(글 그대로·한글 그려짐 — 147차) · 한글 = 내려받아 고친 뒤 올리기 안내 → v2 · 휴대폰 폭 [고치기]', () => attachEdit({ owner, ctx, BASE, SHOTS }));
 await step('139차 전자계약 2차 화면: [새 계약] PDF 올리기 → 서명자 → 칸 놓기(쪽 그림·서명·글자) → 보내기 → 받은 사람 휴대폰 화면 PDF 쪽·칸 채우기·서명 완료', () => econtractPdf({ owner, ctx, sql, BASE, SHOTS }));
 await step('#1122 끌어다 놓기: 전자계약 1단계 점선 상자(형식 안내·첫 번째만)·놓는 칸 아닌 곳은 화면 그대로·계약 관리 계약서 파일', () => drop1122({ owner, ctx, sql, BASE, SHOTS }));
+await step('#1125 2단계 워드·엑셀 → PDF(브라우저 안 변환): 쪽 미리보기·서버로는 PDF 만', () => convert1125({ owner, BASE, SHOTS }));
 await step('192차 결제 시험 화면(대표 10/27): 결제 모듈 상태(설정 필요·정상·확인 필요 + 운영 결제 방식) + [시험 결제]만 · 시험 회사 만들기·목록·지우기 없음 · 숨은 시험 계정 하나 다시 씀 · 고객사 목록에 없음 · 휴대폰 폭', () => payTest192({ owner, ctx, sql, BASE, SHOTS }));
 await step('#565 플랫폼 운영 정리(대표 10/24 저녁 1): 오늘 볼 것 5개 → 누르면 그 탭 · 종류별 탭 5개·한 줄 설명·주소 유지 · 예전 주소(paytest·#support) · 휴대폰 폭', () => platformTabs({ owner, ctx, sql, BASE, SHOTS }));
 await step('#235 마케팅 시안 품질 ⓐ·ⓔ(로컬 10/24 저녁 6): 브랜드 키트 이번 달 소식(기간 기본 30일)·잘 된 예시 글(형식별·좋은 점·빼기) → 승인한 글 [좋은 예시로 저장]·[예시에서 빼기] → 휴대폰 넘침 없음', () => mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }));
