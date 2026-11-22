@@ -21,9 +21,11 @@ export type MonthlyBody = {
   issuesMonth?: { title: string; first: string; last: string; state: string; details: string[]; weeks: number }[] | null;
 };
 export type MonthFlowView = { months: string[]; rows: { key: string; label: string; vals: (number | null)[]; money?: boolean }[]; notes: string[] };
-/** #1116 표지 표시 — 제출한 보고서 = '고객사 제출용', 초안 = '초안(제출 전)' */
-export function ClientMark({ submitted }: { submitted: boolean }) {
-  return <span className={`ml-2 inline-block rounded border px-1.5 py-0.5 align-middle text-[11px] font-semibold ${submitted ? 'border-teal-700 text-teal-800' : 'border-amber-500 text-amber-700'}`} data-testid="branch-client-mark">{submitted ? '고객사 제출용' : '초안(제출 전)'}</span>;
+/** #1116 표지 표시 · #1117 승인 뒤에만 '고객사 제출용'(그 전은 '초안 — 고객사 제출 금지'·'승인 대기 — …') */
+export type Mark = { final: boolean; text: string };
+export function ClientMark({ mark }: { mark?: Mark }) {
+  const m = mark ?? { final: false, text: '초안 — 고객사 제출 금지' };
+  return <span className={`ml-2 inline-block rounded border px-1.5 py-0.5 align-middle text-[11px] font-semibold ${m.final ? 'border-teal-700 text-teal-800' : 'border-amber-500 text-amber-700'}`} data-testid="branch-client-mark">{m.text}</span>;
 }
 const STATE_TONE2: Record<string, string> = { '완료': 'text-emerald-700', '진행 중': 'text-sky-700', '확인 필요': 'text-amber-700' };
 /** #1116 최근 6개월 흐름(표 + 작은 막대) — 막대는 그 줄의 가장 큰 값 기준 */
@@ -98,7 +100,7 @@ export function MembersSection({ m, title = true, sel }: { m: MembersBody; title
   );
 }
 
-export function MonthlyView({ unit, start, end, author, reportDay, body, submitted = false }: { unit: string; start: string; end: string; author: string; reportDay: string; body: MonthlyBody; submitted?: boolean }) {
+export function MonthlyView({ unit, start, end, author, reportDay, body, mark }: { unit: string; start: string; end: string; author: string; reportDay: string; body: MonthlyBody; mark?: Mark }) {
   const st = body.usageTotal; const calc = usageTotal(body.usage);
   const tot = st ?? { item: '전 시설 합계', prev: calc.prev, cur: calc.cur, diff: '', rate: '' }; const td2 = delta(tot.prev, tot.cur);
   const file = body.usageFile;
@@ -106,7 +108,7 @@ export function MonthlyView({ unit, start, end, author, reportDay, body, submitt
     <article className="space-y-4 text-[13px] leading-relaxed text-slate-900" data-testid="branch-monthly-view">
       <header className="flex items-start justify-between gap-3 border-b-2 border-slate-800 pb-2">
         <div>
-          <h1 className="text-lg font-bold">{unit} 월간 업무 보고서<ClientMark submitted={submitted} /></h1>
+          <h1 className="text-lg font-bold">{unit} 월간 업무 보고서<ClientMark mark={mark} /></h1>
           <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-xs text-slate-600">
             <span>작성자</span><span>{author || '-'}</span><span>소속</span><span>주식회사 다짐 운영팀</span>
             <span>기간</span><span>{start} ~ {end}</span><span>보고일</span><span>{reportDay}</span>

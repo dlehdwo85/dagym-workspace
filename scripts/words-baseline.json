@@ -90,6 +90,9 @@
    "brand": 12,
    "domain": 3
   },
+  "src/lib/branchReport/mask.ts": {
+   "domain": 1
+  },
   "src/lib/branchReport/memberList.ts": {
    "brand": 1
   },

@@ -6,6 +6,7 @@ import { Button, Empty, ErrorBox, Field, Loading, Modal, PageHeader, askConfirm,
 import { ReportView, STATE_TONE, type Body, type Line } from './ReportView';
 import { ReportTabs } from '@/components/ReportTabs';
 import { DropZone } from '@/components/upload';
+import { ReviewPanel, markOf, type Review } from './ReviewPanel';
 import { FlowSection, MembersSection, MonthIssuesSection, MonthlyView, delta, signed, usageTotal, type MembersBody, type MonthlyBody } from './MonthlyView';
 import { PASS_KIND_LABEL, isV2, kindOf, viewOf, type MemberSel, type PassKind } from '@/lib/branchReport/memberList';
 
@@ -46,7 +47,7 @@ export function BranchReports() {
   const months = useMemo(() => (h ? monthsBack(h.today, 12) : []), [h]);
   const rep = mode === 'weekly' ? h?.reports.find((r) => r.report_day === curDay) ?? null : h?.monthly.find((r) => r.month === curMonth) ?? null;
   const weeksIn = (m: string) => (h?.reports ?? []).filter((r) => r.status === 'submitted' && r.report_day.startsWith(m)).length;
-  const detail = useApi<{ report: any; canWrite: boolean; canReopen: boolean; admin: boolean }>(rep ? `/api/branch-reports/${rep.id}` : null);
+  const detail = useApi<{ report: any; canWrite: boolean; canReopen: boolean; admin: boolean; review: Review }>(rep ? `/api/branch-reports/${rep.id}` : null);
   const [setup, setSetup] = useState(false);
   const [ev, setEv] = useState<{ refs: string[]; items?: any[] } | null>(null);
   if (home.error) return <ErrorBox error={home.error} retry={home.reload} />;
@@ -76,17 +77,17 @@ export function BranchReports() {
           {h.chat && h.chat.n > 0 && <p className="w-full text-xs text-ink-3" data-testid="branch-chat-count">올린 대화 {h.chat.n.toLocaleString('ko-KR')}건(가린 글){h.chat.last ? ` · 마지막 ${h.chat.last.slice(0, 16)}` : ''}</p>}
         </div>
         {mode === 'monthly' && siteId && curMonth && (detail.data?.report?.status === 'submitted' && detail.data.report.kind === 'monthly'
-          ? <MonthlySubmitted r={detail.data.report} canReopen={detail.data.canReopen} onChange={reload} onEvidence={showEvidence} />
+          ? <MonthlySubmitted r={detail.data.report} rv={detail.data.review} canReopen={detail.data.canReopen} onChange={reload} onEvidence={showEvidence} />
           : <>
             {h.canWrite && <MonthlyComposer key={`${siteId}:${curMonth}`} siteId={siteId} month={curMonth} weeks={weeksIn(curMonth)} hasDraft={!!rep} onDone={reload} />}
-            {detail.data?.report?.kind === 'monthly' && <MonthlyEditor key={detail.data.report.id + detail.data.report.updated_at} r={detail.data.report} canWrite={detail.data.canWrite} onChange={reload} onEvidence={showEvidence} />}
+            {detail.data?.report?.kind === 'monthly' && <MonthlyEditor key={detail.data.report.id + detail.data.report.updated_at} r={detail.data.report} rv={detail.data.review} canWrite={detail.data.canWrite} onChange={reload} onEvidence={showEvidence} />}
             {!rep && !h.canWrite && <Empty title={`${siteName} ${Number(curMonth.slice(5, 7))}월 월간 보고서가 아직 없습니다`}>작성 담당이 초안을 만들면 여기서 볼 수 있습니다.</Empty>}
           </>)}
         {mode === 'weekly' && siteId && curDay && (detail.data?.report?.status === 'submitted'
-          ? <Submitted r={detail.data.report} canReopen={detail.data.canReopen} onChange={reload} onEvidence={showEvidence} />
+          ? <Submitted r={detail.data.report} rv={detail.data.review} canReopen={detail.data.canReopen} onChange={reload} onEvidence={showEvidence} />
           : <>
             {h.canWrite && <Composer key={`${siteId}:${curDay}`} siteId={siteId} day={curDay} hasDraft={!!rep} onDone={reload} />}
-            {detail.data?.report && <Editor key={detail.data.report.id + detail.data.report.updated_at} r={detail.data.report} canWrite={detail.data.canWrite} onChange={reload} onEvidence={showEvidence} />}
+            {detail.data?.report && <Editor key={detail.data.report.id + detail.data.report.updated_at} r={detail.data.report} rv={detail.data.review} canWrite={detail.data.canWrite} onChange={reload} onEvidence={showEvidence} />}
             {!rep && !h.canWrite && <Empty title={`${siteName} ${md(curDay)} 주간보고가 아직 없습니다`}>작성 담당이 초안을 만들면 여기서 볼 수 있습니다.</Empty>}
           </>)}
       </>}
@@ -140,7 +141,7 @@ function Composer({ siteId, day, hasDraft, onDone }: { siteId: string; day: stri
 }
 
 /** 초안 고치기 — 표 칸을 바로 고침, 항목 더하기·빼기, 근거 보기, [저장]·[제출] */
-function Editor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
+function Editor({ r, rv, canWrite, onChange, onEvidence }: { r: any; rv?: Review; canWrite: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
   const [b, setB] = useState<Body>(r.body as Body); const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false);
   const set = (nb: Body) => { setB(nb); setDirty(true); };
   const need = countCheck(b);
@@ -202,13 +203,14 @@ function Editor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite: boole
         </div>); })}
       {canWrite && <button type="button" className="inline-flex items-center gap-1 text-xs text-brand-700" onClick={() => set({ ...b, issues: [...b.issues, { title: '', details: [], state: '확인 필요', evidence: [] }] })}><Plus className="size-3.5" />특이사항</button>}
       <Field label="메모"><textarea className={cx(inputCls, 'min-h-[48px] text-[13px]')} value={b.notes} onChange={(e) => set({ ...b, notes: e.target.value })} disabled={!canWrite} /></Field>
+      {rv && <ReviewPanel id={r.id} draft rv={rv} canWrite={canWrite} dirty={dirty} onChange={onChange} />}
       {canWrite && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={save} disabled={busy || !dirty} data-testid="branch-save">저장</Button><Button onClick={submit} disabled={busy} data-testid="branch-submit">제출</Button></div>}
     </section>
   );
 }
 
 /** 제출한 보고서 — 읽기 화면 · PDF · (관리자·검토 담당) 제출 취소 */
-function Submitted({ r, canReopen, onChange, onEvidence }: { r: any; canReopen: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
+function Submitted({ r, rv, canReopen, onChange, onEvidence }: { r: any; rv?: Review; canReopen: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
   const refs = useMemo(() => { const b = r.body as Body; return [...b.facilities.flatMap((f) => f.lines.flatMap((l) => l.evidence)), ...b.issues.flatMap((x) => x.evidence)]; }, [r]);
   const undo = async () => {
     if (!(await askConfirm('제출을 취소하고 초안으로 되돌릴까요? 기록이 남습니다.', { title: '제출 취소', ok: '제출 취소', danger: true }))) return;
@@ -222,7 +224,8 @@ function Submitted({ r, canReopen, onChange, onEvidence }: { r: any; canReopen: 
           <a href={`/branch-print/${r.id}`} target="_blank" className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-sm" data-testid="branch-pdf"><Printer className="size-4" />PDF</a>
           <a href={`/api/branch-reports/${r.id}/xlsx`} className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-sm" data-testid="branch-xlsx"><FileDown className="size-4" />엑셀</a>
           {canReopen && <Button size="sm" variant="secondary" onClick={undo} data-testid="branch-unsubmit">제출 취소</Button>}</span></div>
-      <ReportView unit={r.unit_name} day={r.report_day} start={r.period_start} end={r.period_end} body={r.body as Body} submitted={r.status === 'submitted'} />
+      {rv && <ReviewPanel id={r.id} draft={false} rv={rv} canWrite={false} onChange={onChange} />}
+      <ReportView unit={r.unit_name} day={r.report_day} start={r.period_start} end={r.period_end} body={r.body as Body} mark={markOf(rv)} />
     </section>
   );
 }
@@ -285,7 +288,7 @@ function MembersPanel({ m, canWrite, busy, onKind }: { m: MembersBody; canWrite:
   );
 }
 
-function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
+function MonthlyEditor({ r, rv, canWrite, onChange, onEvidence }: { r: any; rv?: Review; canWrite: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
   const [b, setB] = useState<MonthlyBody>(r.body as MonthlyBody); const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false);
   const set = (nb: MonthlyBody) => { setB(nb); setDirty(true); };
   const need = b.important.filter((x) => x.check).length + b.progress.filter((x) => x.check).length;
@@ -412,13 +415,14 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
       {b.members ? <MembersPanel m={b.members} canWrite={canWrite} busy={memBusy} onKind={setKind} /> : <p className="text-xs text-ink-3">아직 올린 회원목록이 없습니다.</p>}
       {b.flow && <div className="overflow-x-auto rounded-input border border-line p-2 text-[13px]"><FlowSection flow={b.flow} /></div>}
       <Field label="메모"><textarea className={cx(inputCls, 'min-h-[48px] text-[13px]')} value={b.notes} onChange={(e) => set({ ...b, notes: e.target.value })} disabled={!canWrite} /></Field>
+      {rv && <ReviewPanel id={r.id} draft rv={rv} canWrite={canWrite} dirty={dirty} onChange={onChange} />}
       {canWrite && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={save} disabled={busy || !dirty} data-testid="branch-monthly-save">저장</Button><Button onClick={submit} disabled={busy} data-testid="branch-monthly-submit">제출</Button></div>}
     </section>
   );
 }
 
 /** 제출한 월간 보고서 — 읽기 화면 · PDF · 엑셀 · (관리자·검토 담당) 제출 취소 */
-function MonthlySubmitted({ r, canReopen, onChange, onEvidence }: { r: any; canReopen: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
+function MonthlySubmitted({ r, rv, canReopen, onChange, onEvidence }: { r: any; rv?: Review; canReopen: boolean; onChange: () => void; onEvidence: (refs: string[]) => void }) {
   const refs = useMemo(() => { const b = r.body as MonthlyBody; return Array.from(new Set([...b.important.flatMap((x) => x.evidence), ...b.progress.flatMap((x) => x.evidence)])); }, [r]);
   const undo = async () => {
     if (!(await askConfirm('제출을 취소하고 초안으로 되돌릴까요? 기록이 남습니다.', { title: '제출 취소', ok: '제출 취소', danger: true }))) return;
@@ -432,7 +436,8 @@ function MonthlySubmitted({ r, canReopen, onChange, onEvidence }: { r: any; canR
           <a href={`/branch-print/${r.id}`} target="_blank" className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-sm" data-testid="branch-pdf"><Printer className="size-4" />PDF</a>
           <a href={`/api/branch-reports/${r.id}/xlsx`} className="inline-flex h-8 items-center gap-1 rounded-input border border-line px-2.5 text-sm" data-testid="branch-xlsx"><FileDown className="size-4" />엑셀</a>
           {canReopen && <Button size="sm" variant="secondary" onClick={undo} data-testid="branch-unsubmit">제출 취소</Button>}</span></div>
-      <MonthlyView unit={r.unit_name} start={r.period_start} end={r.period_end} author={r.submitted_by_name ?? r.created_by_name ?? ''} reportDay={r.submitted_at ? String(r.submitted_at).slice(0, 10) : ''} body={r.body as MonthlyBody} submitted={r.status === 'submitted'} />
+      {rv && <ReviewPanel id={r.id} draft={false} rv={rv} canWrite={false} onChange={onChange} />}
+      <MonthlyView unit={r.unit_name} start={r.period_start} end={r.period_end} author={r.submitted_by_name ?? r.created_by_name ?? ''} reportDay={r.submitted_at ? String(r.submitted_at).slice(0, 10) : ''} body={r.body as MonthlyBody} mark={markOf(rv)} />
     </section>
   );
 }

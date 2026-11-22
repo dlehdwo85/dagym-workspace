@@ -42,6 +42,7 @@ export const monthlyBodySchema = z.object({
   // #1116(대표 11/22 '이용인원과 금액 동선 추적 · 민원·특이사항 정리해서 고객사에'): 서버가 정함(초안은 볼 때 계산, 제출하면 그때 값으로 굳힘 — 화면 저장으로 못 바꿈)
   flow: z.any().nullable().default(null),
   issuesMonth: z.any().nullable().default(null),
+  review: z.any().nullable().default(null), // #1117 서버가 정함(그대로 두기 이유·승인)
 });
 export type MonthlyBody = z.infer<typeof monthlyBodySchema>;
 export const nextMonth = (ym: string) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7); };
