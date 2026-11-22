@@ -24,7 +24,7 @@ let kaptExtra = [], kaptApiItems = []; const detailCat = {};
 const kapt = fakeKapt({ files: { '20261021000001': [{ seq: 7001, fileName: '래미안 강남 커뮤니티 위탁운영 입찰공고.hwp' }] },
   detailHtml: (bid) => `<table><tr><th>주택관리업자</th><th>단지명</th><th>관리사무소 주소</th><th>전화번호</th><th>팩스번호</th><th>동수</th><th>세대수</th></tr><tr><td>우리관리<td>래미안 강남<td>서울 강남구 역삼로 1<td>02-555-1234<td>02-555-1235<td>12<td>1,250</tr></table>
       <table><tr><th>입찰분류</th><td>${detailCat[bid] ?? '용역 &gt; 커뮤니티 위탁운영'}</td></tr><tr><th>입찰종류</th><td>일반경쟁</td></tr><tr><th>내용</th><td><pre>커뮤니티센터 피트니스·수영장 위탁운영 사업자 선정</pre></td></tr></table><a href="javascript:fileDown('7001')">공고문.hwp</a>` });
-let agencyV2 = false, hotelMode = 'ok', lhFail = false; // #522: 새 명세(swagger) 응답 모양 · 관광숙박업 오류 응답(JSON) · 로컬 10/24 LH 오류 11
+let agencyV2 = false, hotelMode = 'ok', lhFail = false, prespecPaged = false; // #522: 새 명세(swagger) 응답 모양 · 관광숙박업 오류 응답(JSON) · 로컬 10/24 LH 오류 11 · #1123 사전규격 250건(3쪽, 관련 공고는 3쪽에만)
 const ymd8 = (n) => plus(n).replace(/-/g, '');
 let g2bMode = 'ok'; // 278차 #816: 'html' = data.go.kr 가 JSON 대신 점검 웹페이지
 const G2B_HTML = '<!DOCTYPE html><html><head><title>공공데이터포털</title><script>var a=1;</script></head><body><h1>서비스 이용 안내</h1><p>요청이 많아 잠시 뒤 다시 이용해 주세요. 문의 help@data.go.kr</p></body></html>';
@@ -53,6 +53,12 @@ before(async () => {
     if (u.pathname.startsWith('/g2b/ad/BidPublicInfoService/')) return send(200, dataGo([]), 'application/json');
     if (u.pathname.startsWith('/g2b/ao/PrvtBidNtceService/')) return nuriMode === 'denied' ? send(200, '<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>30</returnReasonCode><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>', 'application/xml')
       : send(200, dataGo(nuriMode === 'odd' ? [{ ntceNo: 'N-1', ntceNm: '시험 민간 입찰' }] : nuriMode === 'ok' && u.searchParams.get('bidNtceNm') === '커뮤니티' && u.pathname.endsWith('ServcPPSSrch') ? [{ bidNtceNo: 'R26BK00000001', bidNtceOrd: '000', bidNtceClsfc: '용역', nticeDt: `${today} 09:30:00`, refNo: '관리-12', ntceNm: '광교 센트럴 커뮤니티센터 피트니스 위탁운영 업체 선정', ntceDivNm: '일반공고', ntceInsttNm: '광교센트럴 입주자대표회의', bidMethdNm: '전자입찰', cntrctMthdNm: '제한경쟁', sucsfbidMthdNm: '적격심사최저가', rbidDivNm: '재입찰 허용', bidQlfctNm: '공고규격서 참조', ofclNm: '홍길동', ofclTelNo: '010-1234-5678', ofclEmail: 'hong@example.com', bidBeginDt: `${today} 10:00:00`, bidClseDt: `${plus(8)} 17:00:00`, opengDt: `${plus(9)} 11:00:00`, refAmtOpenYn: 'Y', refAmt: '180000000', asignBdgtAmt: '200000000', rgnLmtDivNm: '공고서 참조', servcDtlList: '커뮤니티센터 피트니스·GX 위탁운영', ntceSpecDocUrl1: 'https://nuri.g2b.go.kr/f/spec1.hwp', ntceSpecDocNm1: '공고문.hwp', aptHsmpNm: '광교 센트럴', aptCeoAdrs: '경기도 수원시 영통구 광교중앙로 1', aptMngOfficeTelNo: '0312223333', aptHshldNum: '1,200', rgstDt: `${today} 09:30:00` }] : []), 'application/json');
+    if (prespecPaged && u.pathname.startsWith('/g2b/ao/HrcspSsstndrdInfoService/')) { // #1123: 쪽마다 100건(관련 없는 것) · 3쪽 마지막에 관련 공고
+      const pg = Number(u.searchParams.get('pageNo')); const n = pg < 3 ? 100 : 50;
+      const item = Array.from({ length: n }, (_, i) => ({ bfSpecRgstNo: `PG${pg}-${i}-${u.pathname.slice(-4)}`, prdctClsfcNoNm: `도로 보수 공사 ${pg}-${i}`, orderInsttNm: '도로공사' }));
+      if (pg === 3 && u.pathname.endsWith('Servc')) item[n - 1] = { bfSpecRgstNo: 'PRE-P3', prdctClsfcNoNm: '체육센터 시설관리 용역 사전규격(3쪽)', orderInsttNm: '시설공단', rcptDt: `${today} 09:00:00`, opninRgstClseDt: `${plus(3)} 18:00:00` };
+      return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { items: item, numOfRows: 100, pageNo: pg, totalCount: 250 } } }), 'application/json');
+    }
     if (u.pathname.startsWith('/g2b/ao/HrcspSsstndrdInfoService/')) return send(200, dataGo([{ bfSpecRgstNo: 'PRE-1', prdctClsfcNoNm: '커뮤니티센터 운영 위탁 용역 사전규격', orderInsttNm: 'LH', rcptDt: `${today} 08:00:00`, opninRgstClseDt: `${plus(4)} 18:00:00`, asignBdgtAmt: '90000000' }, { bfSpecRgstNo: 'PRE-2', prdctClsfcNoNm: '도로 포장 공사 사전규격', orderInsttNm: '도로공사' }]), 'application/json');
     if (u.pathname.startsWith('/g2b/as/ScsbidInfoService/')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', bidwinnrNm: '하이링크', bidwinnrBizno: '1234567890', sucsfbidAmt: '240000000', sucsfbidRate: '87.745', prtcptCnum: '12', opengDt: `${today} 11:00:00` }] : []), 'application/json');
     if (agencyV2 && u.pathname.startsWith('/agency/')) return agency522(u, send);
@@ -139,6 +145,24 @@ test('나라장터(검색어 × 4대상) + 누리장터 활용신청 필요 → 
   assert.equal(vr.inserted, 1, JSON.stringify(vr));
   const [v] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_type' = 'vendor_recruit'`;
   assert.equal(v.row.notice_type, '협력사 모집'); assert.equal(v.row.related, true); assert.equal(v.row.classification, '중장기 영업리드', '#476 후속 d: 협력사 모집은 즉시 검토 아님'); assert.equal(v.row.posted_checked, true);
+});
+
+test('#1123 사전규격 쪽 넘기기: 원천 250건(3쪽)을 끝까지 받아 3쪽에만 있는 관련 공고도 저장 · 요약 \'원천 전체 N건 중 M건 받음\' · 낮(12·18시) 실행 시각 등록', async () => {
+  prespecPaged = true;
+  try {
+    const p = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_prespec_awards/run', {});
+    assert.match(p.summary, /사전규격 원천 전체 500건 중 500건 받음/, p.summary); // 용역·물품 각 250건
+    const [r] = await sql`select row from sales_src_rows where tbl = 'procurement_notices' and row->>'source_external_id' = 'PRE-P3'`;
+    assert.ok(r, '3쪽에만 있던 관련 사전규격도 저장'); assert.equal(r.row.notice_type, '사전규격');
+    // 목록: [사전규격] 탭(의견 마감 오늘 이후)에 보이고 숫자가 칩에 · 진행 중(입찰만)에는 없음 — 메일 '진행 중(D-3 안)'의 사전규격과 같은 기준
+    const pre = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=prespec');
+    assert.ok(pre.items.some((i) => i.title.includes('체육센터 시설관리 용역 사전규격(3쪽)')), JSON.stringify(pre.items.map((i) => i.title)));
+    assert.ok(pre.prespecCount >= 1); assert.ok(pre.items.every((i) => /pre|사전/i.test(String(i.source ?? ''))), '사전규격만');
+    const open = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=open');
+    assert.equal(open.items.some((i) => i.title.includes('(3쪽)')), false, '진행 중 탭은 입찰만');
+    const list = (await ctx.owner.ok('GET', '/api/sales/collectors')).collectors.find((c) => c.slug === 'g2b_prespec_awards');
+    assert.ok(JSON.stringify(list).includes('12') && JSON.stringify(list).includes('18'), '06·12·18시');
+  } finally { prespecPaged = false; }
 });
 
 test('영업 DB 수집기: 산업단지 CSV·부동산원 CSV(18개월)·관광숙박업 API·K-apt 사업자선정 → 파생(커뮤니티 업무만) · 수동 필드 보존', async () => {

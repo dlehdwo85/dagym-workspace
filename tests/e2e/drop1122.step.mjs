@@ -24,6 +24,10 @@ export async function drop1122({ owner, ctx, sql, BASE, SHOTS }) {
   const zone = wz.getByTestId('contract-drop');
   await dropFiles(owner, zone, [{ name: 'memo.txt', type: 'text/plain', buffer: Buffer.from('x') }]);
   await owner.getByText('이 형식은 올릴 수 없습니다 — PDF·png·jpg').first().waitFor();
+  // #1125: 워드·한글은 막지 않고 'PDF 로 바꿔 올리기 준비 중 — [다른 이름으로 저장 › PDF]' 안내 + 계약 관리(보관) 링크
+  await dropFiles(owner, zone, [{ name: '근로계약서.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from('PK') }]);
+  const note = wz.getByTestId('contract-office-note'); await note.waitFor();
+  assert.match(await note.innerText(), /근로계약서\.docx[\s\S]*다른 이름으로 저장 › PDF[\s\S]*계약 관리/);
   await dropFiles(owner, zone, [{ name: 'E2E 끌어다 놓은 계약서.pdf', type: 'application/pdf', buffer: pdf }, { name: '두번째.pdf', type: 'application/pdf', buffer: pdf }]);
   await owner.getByText('파일은 하나만 올릴 수 있어 첫 번째 파일만 올립니다').first().waitFor();
   await wz.getByText('E2E 끌어다 놓은 계약서.pdf').waitFor({ timeout: 20000 });

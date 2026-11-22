@@ -1148,7 +1148,7 @@ function Deals() {
 export { Deals };
 
 /** #611(대표 10/25 ⑦): 입찰·공고 = 영업기회 허브 '입찰' 탭 하나(검색·사업 칩·일괄·상세 전부). embedded = 허브 안(주소 칸 bt·bq·bz·bs — 허브의 tab·q 와 겹치지 않게). 옛 /s/sales/bids 주소는 여기로 넘어옴 */
-const BID_CHIPS: [string, string][] = [['open', '진행 중(마감 임박순)'], ['today', '오늘 새 공고'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['closing', '오늘 마감'], ['recruit', '협력사 모집'], ['awards', '낙찰 분석']]; // 226차 #497 R21-4 // #608: '마감 임박'·'준비 기간' 칩은 뺌(카드 왼쪽 줄로)
+const BID_CHIPS: [string, string][] = [['open', '진행 중(마감 임박순)'], ['prespec', '사전규격(의견 마감)'] /* #1123 메일 '진행 중(D-3 안)'의 사전규격과 같은 기준 */, ['today', '오늘 새 공고'], ['working', '진행 기록 있음'], ['all', '관련 전체'], ['closing', '오늘 마감'], ['recruit', '협력사 모집'], ['awards', '낙찰 분석']]; // 226차 #497 R21-4 // #608: '마감 임박'·'준비 기간' 칩은 뺌(카드 왼쪽 줄로)
 const BID_SORTS: [string, string][] = [['', '기본 순서'], ['deadline', '마감 D-day순'], ['notice', '공고일 최신순'], ['amount', '예산 큰 순']];
 export function Bids({ initialTab, initialId, embedded }: { initialTab?: string; initialId?: string; embedded?: boolean }) {
   const baseCo = useTerms().base; // 414차: 기본 회사 전용 칩(협력사 모집) 가리기
@@ -1168,7 +1168,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
   if (error) return <ErrorBox error={error} retry={reload} />;
   // 메일·홈 링크로 온 soon(마감 임박)·prep(준비 기간)·ref(참고) 탭은 칩에 없지만 그 탭에 있는 동안만 칩으로 보여 줌
   const extra: [string, string][] = tab === 'ref' ? [['ref', '참고(검색어만 일치)']] : tab === 'soon' ? [['soon', '마감 임박(3일)']] : tab === 'prep' ? [['prep', '준비 기간(D-10 안)']] : [];
-  const chips: [string, string][] = [...BID_CHIPS.filter(([k]) => baseCo || k !== 'recruit' /* 414차 F: 협력사 모집 감시는 기본 회사 원천 — 다른 회사에는 칩 없음 */).map(([k, l]) => [k, k === 'today' && data ? `${l} ${data.todayCount ?? 0}` : l] as [string, string]), ...extra, ['skip', `취소${data ? ` ${data.skipCount ?? 0}건` : ''}`], ['done', `완료${data ? ` ${data.doneCount ?? 0}건` : ''}`], ...(tab === 'canceled' || data?.canceledCount ? [['canceled', `발주처 취소${data ? ` ${data.canceledCount ?? 0}건` : ''}`] as [string, string]] : [])]; // 380차 #1015: 사람이 누른 [취소]·[완료] 탭 · 발주처가 취소한 공고는 '발주처 취소'로 구분
+  const chips: [string, string][] = [...BID_CHIPS.filter(([k]) => baseCo || k !== 'recruit' /* 414차 F: 협력사 모집 감시는 기본 회사 원천 — 다른 회사에는 칩 없음 */).map(([k, l]) => [k, k === 'today' && data ? `${l} ${data.todayCount ?? 0}` : k === 'prespec' && data ? `${l} ${data.prespecCount ?? 0}` : l] as [string, string]), ...extra, ['skip', `취소${data ? ` ${data.skipCount ?? 0}건` : ''}`], ['done', `완료${data ? ` ${data.doneCount ?? 0}건` : ''}`], ...(tab === 'canceled' || data?.canceledCount ? [['canceled', `발주처 취소${data ? ` ${data.canceledCount ?? 0}건` : ''}`] as [string, string]] : [])]; // 380차 #1015: 사람이 누른 [취소]·[완료] 탭 · 발주처가 취소한 공고는 '발주처 취소'로 구분
   const row = (n: any) => <li key={n.id} className="relative">{data?.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data?.readOnly === false} /></li>;
   return (
     <div className="space-y-3" data-testid="sales-bids">
@@ -1556,7 +1556,7 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
         {n.workBid && <BidTaskChip b={n.workBid} />}{canWrite && n.workBid && !n.workBid.result && <RevertButton bidId={String(n.id)} onDone={onChange} />}{/* 결정 15-35 입찰 업무 */}{/* 대표 10/24 추가 ②: 취소·대상 아님 공고는 넘기기 대신 [대상 아님]·[되돌리기] */}
         {n.workLeadId && <Link href={`/s/sales/leads?id=${n.workLeadId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-handoff-lead">영업 중 → 리드</Link>}
         {canWrite && n.workLeadId && n.workHandoff && <RevertButton leadId={n.workLeadId} onDone={onChange} />}{/* #610 ⓐ */}
-        <span className="ml-auto font-medium text-ink" data-testid="bid-deadline">{n.deadline ? `마감 ${kdt(n.deadline)}` : '마감일 미확인'}</span>
+        <span className="ml-auto font-medium text-ink" data-testid="bid-deadline">{n.deadline ? `${/pre|사전/i.test(String(n.source ?? '')) ? '의견 마감' : '마감'} ${kdt(n.deadline)}` : '마감일 미확인'}</span>
       </div>
       {(n.skipped || st[0] === '취소') && <BidSkip n={n} onChange={onChange} canWrite={canWrite} />}
       {n.work === '완료' && <BidDone n={n} onChange={onChange} canWrite={canWrite} />}
