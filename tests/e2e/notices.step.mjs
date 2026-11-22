@@ -15,9 +15,9 @@ export async function noticesFlow({ owner, staff, ctx, sql, BASE, SHOTS }) {
   const [n] = await sql`select id from announcements where title = 'E2E 10월 전체 회의'`;
   // 직원 홈 카드 → 열기 → 읽음
   await staff.goto(BASE + '/');
-  const card = staff.getByTestId('home-notices');
-  await card.waitFor();
-  assert.match(await card.innerText(), /안 읽은 공지 \d+건/);
+  const card = staff.getByTestId('home-notices'); // #1110 홈: 공지 최근 2개(안 읽은 것은 '새 공지')
+  await card.getByText('E2E 10월 전체 회의').waitFor();
+  assert.match(await card.innerText(), /새 공지/);
   await staff.screenshot({ path: `${SHOTS}/127-home-notice-card.png` });
   await card.getByText('E2E 10월 전체 회의').click();
   await staff.waitForURL(/\/notices\//);

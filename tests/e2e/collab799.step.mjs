@@ -84,14 +84,13 @@ export async function collab799({ staff, ctx, sql, BASE, SHOTS }) {
     const y = async (sel) => (await staff.locator(sel).first().boundingBox()).y;
     assert.ok(await y('[data-testid="my-collab"]') < await y('[data-testid="task-groups"] section[data-group]:not([data-group="collab"])'), `${q} 공동 업무가 묶음보다 위`);
   }
-  // 홈 맨 위 공동 업무 카드
+  // #1110 홈 개편(대표 11/22): 공동 업무 카드 대신 '이번 주 일정·업무' 목록 하나 — 지난 공동(기한 지남) → 오늘 공동 순, 7일 밖(D-10)은 목록 밖
   await staff.goto(`${BASE}/`);
-  const home = staff.getByTestId('home-collab');
-  await home.waitFor();
-  assert.equal(await home.getByTestId('home-collab-row').count(), n);
-  assert.match(await home.innerText(), /^공동 업무/); assert.match(await home.innerText(), /✓ 박직원/);
-  const homeOrder = (await home.getByTestId('home-collab-row').allInnerTexts()).map((t) => ['E2E 392 지난 공동', 'E2E 392 오늘 공동', 'E2E 392 입찰 D-10'].find((x) => t.includes(x))).filter(Boolean);
-  assert.deepEqual(homeOrder, ['E2E 392 지난 공동', 'E2E 392 오늘 공동', 'E2E 392 입찰 D-10'], '392차: 홈 공동 업무 카드도 마감 가까운 순');
+  const home = staff.getByTestId('home-week'); await home.locator('ul, p').first().waitFor();
+  if (await home.getByTestId('home-week-more').count()) await home.getByTestId('home-week-more').click();
+  await home.getByText('E2E 392 오늘 공동').first().waitFor();
+  const homeOrder = (await home.locator('[data-week-task]').allInnerTexts()).map((t) => ['E2E 392 지난 공동', 'E2E 392 오늘 공동', 'E2E 392 입찰 D-10'].find((x) => t.includes(x))).filter(Boolean);
+  assert.deepEqual(homeOrder.slice(0, 2), ['E2E 392 지난 공동', 'E2E 392 오늘 공동'], '홈 목록: 기한 지남 → 오늘');
   await home.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await staff.screenshot({ path: `${SHOTS}/268-collab-home.png` });
   for (const id of [co, bA, bB, solo, bid392, past392, today392]) await o.ok('DELETE', `/api/tasks/${id}`);

@@ -48,21 +48,7 @@ export async function backKeep({ owner, ctx, sql, BASE }) {
   await viaPanel('/notifications');
   await owner.getByTestId('notif-item').filter({ hasText: 'E2E 돌아오기 알림 02' }).and(owner.locator('[data-read="1"]')).waitFor();
 
-  // 2) 홈 월 캘린더: 다음 달 → 15일 → 그날 업무를 열었다 뒤로 → 같은 달·같은 날 목록
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-  const [y, m] = today.split('-').map(Number);
-  const nm = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
-  await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 돌아오기 홈 업무', assigneeId: ctx.ownerId, orgUnitId: ctx.siteA, approvalRequired: false, dueDate: `${nm}-15` });
-  await owner.goto(`${BASE}/`);
-  const home = owner.getByTestId('home-month');
-  await home.getByLabel('다음 달').click();
-  await owner.waitForFunction((v) => new URLSearchParams(location.search).get('hm') === v, nm);
-  await home.locator(`[data-day="${nm}-15"]`).click();
-  await owner.waitForFunction((v) => new URLSearchParams(location.search).get('hd') === v, `${nm}-15`);
-  await owner.getByTestId('home-month-list').getByText('E2E 돌아오기 홈 업무').click();
-  await viaPanel('/');
-  await owner.getByTestId('home-month-list').getByText('E2E 돌아오기 홈 업무').waitFor();
-  assert.match(await home.locator('h2').innerText(), new RegExp(`${Number(nm.slice(5))}월`), '홈: 보던 달 그대로');
+  // 2) 홈 월 캘린더는 #1110 홈 개편(대표 11/22)으로 없어짐 — 시험도 뺌
 
   // 3) 프로젝트 보관함 → 다른 화면 → 뒤로 = 보관함
   await owner.goto(`${BASE}/projects`);

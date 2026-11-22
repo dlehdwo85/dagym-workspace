@@ -31,5 +31,8 @@ export async function homeTodayEvents({ owner, ctx, BASE }) {
   const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((c) => c.type === 'personal').id;
   await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '오늘 홈 일정 시험', start: `${today}T23:00:00+09:00`, end: `${today}T23:30:00+09:00` });
   await owner.goto(BASE + '/');
-  await owner.getByTestId('home-week').locator(`[data-day="${today}"]`).getByText('오늘 홈 일정 시험').waitFor(); // 대표 확정(10/19): 이번 주 안 오늘 칸
+  // #1110 홈: '이번 주 일정·업무' 목록 하나(기한 지남 → 오늘 → 이번 주, 7줄) — 오늘 일정은 오늘 줄(data-day). 앞 줄이 7줄을 채우면 '외 n건'
+  const wk = owner.getByTestId('home-week'); await wk.locator('ul, p').first().waitFor();
+  if (await wk.getByTestId('home-week-more').count()) await wk.getByTestId('home-week-more').click(); // 7줄을 넘으면 [외 n건 더 보기]
+  await wk.locator(`[data-day="${today}"]`).getByText('오늘 홈 일정 시험').waitFor();
 }

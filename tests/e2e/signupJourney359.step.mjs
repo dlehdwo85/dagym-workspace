@@ -105,8 +105,7 @@ export async function signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }
     const icons = await p.evaluate(() => { const b = document.querySelector('[data-testid="trial-banner"]').getBoundingClientRect(); return [...document.querySelectorAll('[data-testid="mobile-header"] button, [data-testid="mobile-header"] a')].filter((e) => e.getBoundingClientRect().height > 0).map((e) => e.getBoundingClientRect().top >= b.bottom - 0.5); });
     assert.ok(icons.length >= 2 && icons.every(Boolean), '머리줄 단추가 모두 띠 아래');
     assert.match(await p.getByText(/아직 출근 전입니다/).first().innerText(), /근무지 미등록 — 시각만 기록/);
-    const legend = await p.getByTestId('home-month').innerText();
-    assert.ok(/일정/.test(legend) && /지난 업무/.test(legend) && !/영업|마케팅/.test(legend), '공간이 없는 회사: 달력 범례에 영업·마케팅 없음');
+    assert.equal(await p.getByTestId('home-company').locator('[data-testid="home-cell-marketing"], [data-testid="home-cell-sales"], [data-testid="home-cell-ads"]').count(), 0, '#1110 공간이 없는 회사: 홈에 영업·마케팅 칸 없음');
     await shot('312b-journey-home-mobile-band.png');
     await p.setViewportSize({ width: 1366, height: 900 });
     // ── 6) 동료가 초대 링크로 가입(승인 없이 바로 — 이미 승인된 회사)

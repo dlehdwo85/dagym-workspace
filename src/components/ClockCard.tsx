@@ -14,7 +14,8 @@ function getPos(): Promise<{ lat: number; lng: number; accuracy: number } | null
   });
 }
 
-export function ClockCard() {
+/** inline: #1110 홈 머리 오른쪽(카드 테두리 없이 상태 한 줄 + [출근하기]/[퇴근하기]) */
+export function ClockCard({ inline = false }: { inline?: boolean } = {}) {
   const st = useApi<T>('/api/attendance');
   const [busy, setBusy] = useState<'in' | 'out' | null>(null);
   const [consent, setConsent] = useState<null | 'in' | 'out'>(null);
@@ -37,15 +38,15 @@ export function ClockCard() {
   }
   const t = d.today;
   return (
-    <section className="flex flex-wrap items-center gap-2 rounded-card border border-line bg-white px-3 py-2 shadow-card" data-testid="home-clock">
-      <MapPin className="size-4 shrink-0 text-emerald-600" />
-      <div className="min-w-0 flex-1 text-sm" data-testid="home-clock-status">
+    <section className={inline ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap items-center gap-2 rounded-card border border-line bg-white px-3 py-2 shadow-card'} data-testid="home-clock">
+      {!inline && <MapPin className="size-4 shrink-0 text-emerald-600" />}
+      <div className={inline ? 'min-w-0 text-[13px]' : 'min-w-0 flex-1 text-sm'} data-testid="home-clock-status">
         {!t?.inTime ? <span className="text-ink-2">아직 출근 전입니다{d.sites ? '' : ' (근무지 미등록 — 시각만 기록)'}</span>
           : <span><b>출근 {t.inTime}</b>{t.inSite && <span className={cx('ml-1 text-xs', t.inInside === false ? 'text-amber-700' : 'text-ink-3')}>{t.inSite}{t.inInside === false ? ` 밖 · ${t.inReason}` : ''}</span>}
             {t.outTime && <> · <b>퇴근 {t.outTime}</b>{t.outSite && <span className={cx('ml-1 text-xs', t.outInside === false ? 'text-amber-700' : 'text-ink-3')}>{t.outSite}{t.outInside === false ? ` 밖 · ${t.outReason}` : ''}</span>}</>}</span>}
       </div>
-      {!t?.inTime && <Button size="sm" onClick={() => send('in')} disabled={!!busy} data-testid="clock-in"><LogIn />출근</Button>}
-      {t?.inTime && !t.outTime && <Button size="sm" variant="secondary" onClick={() => send('out')} disabled={!!busy} data-testid="clock-out"><LogOut />퇴근</Button>}
+      {!t?.inTime && <Button size="sm" onClick={() => send('in')} disabled={!!busy} data-testid="clock-in"><LogIn />{inline ? '출근하기' : '출근'}</Button>}
+      {t?.inTime && !t.outTime && <Button size="sm" variant="secondary" onClick={() => send('out')} disabled={!!busy} data-testid="clock-out"><LogOut />{inline ? '퇴근하기' : '퇴근'}</Button>}
       {consent && (
         <Modal open onClose={() => setConsent(null)} title="위치 정보 동의">
           <p className="text-sm text-ink-2">출근·퇴근을 누르는 <b>그 순간의 위치</b>만 저장해 회사가 등록한 현장 안인지 표시합니다. 그 밖의 시간에는 위치를 받지 않고, 다른 용도로 쓰지 않습니다. 위치 권한을 거부해도 시각은 기록됩니다.</p>

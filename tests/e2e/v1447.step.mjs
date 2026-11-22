@@ -15,7 +15,9 @@ export async function v1447({ owner, BASE, SHOTS }) {
     return { ev: ev.id, task: t.id };
   }, [d]);
   await owner.reload();
-  const day = owner.getByTestId('home-week').locator(`[data-day="${d}"]`);
+  const wk = owner.getByTestId('home-week'); await wk.locator('ul, p').first().waitFor();
+  if (await wk.getByTestId('home-week-more').count()) await wk.getByTestId('home-week-more').click(); // #1110: 7줄을 넘으면 [외 n건 더 보기]
+  const day = wk.locator(`[data-day="${d}"]`);
   await day.getByText('중복 묶음 시험 회의').first().waitFor();
   assert.equal(await day.getByText('중복 묶음 시험 회의').count(), 1, '한 줄');
   await day.getByText('업무 1 · 일정 1').waitFor();

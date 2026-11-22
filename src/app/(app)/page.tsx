@@ -1,15 +1,12 @@
 'use client';
 import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, CalendarDays, CalendarPlus, CalendarRange, Check, CheckCircle2, ChevronLeft, CircleCheck, Hourglass, MapPin, Megaphone, MessageSquare, PlusCircle, Sparkles, Users, Activity as ActivityIcon } from 'lucide-react';
-import { api, broadcastRefresh, useApi } from '@/components/client';
+import { useState } from 'react';
+import { CalendarPlus, Plus, SquarePen, Stamp } from 'lucide-react';
+import { useApi } from '@/components/client';
 import { ClockCard } from '@/components/ClockCard';
-import { CheckHomeCard } from '@/components/check/CheckHomeCard';
-import { AgreementHomeCard } from '@/components/agreements/AgreementHomeCard';
 import { useSession, useTerms } from '@/components/session';
-import { Avatar, Button, Card, DueChip, ErrorBox, PriorityTag, Skeleton, cx, fmtDate, fmtDateTime, fmtTime, toast } from '@/components/ui';
-import { InlineAddTask } from '@/components/TaskQuick';
+import { ErrorBox, cx, fmtDate } from '@/components/ui';
 import { useCalColors, type CalColors } from '@/components/calColors';
 import { SPACE_META } from '@/components/spaceMeta';
 import { ABSENCE_KINDS } from '@/lib/types';
@@ -17,17 +14,20 @@ import type { EventKind } from '@/lib/terms';
 import { useRowOpen } from '@/components/rowOpen';
 import { showTask } from '@/components/TaskPanelHost';
 import { ConnectCard } from '@/components/ConnectCard';
-import { HomeMonth } from '@/components/HomeMonth';
 import { useRouter } from 'next/navigation';
-import { followUpMsg, useLeadFollowUp } from '@/components/sales/LeadFollowUp';
-import { CollabPeople, collabSort, isCollab } from '@/components/CollabTasks';
 
+/**
+ * #1110(대표 11/22 시안 승인) 홈 — 한 화면 반 안에 '지금 할 일'만.
+ * 머리(인사·날짜·출근 상태 + [새로 만들기][출근하기]) → 오늘 처리할 것(숫자 칸, 0이면 숨김) → 회사 현황(대표·관리자만 4칸)
+ * → 이번 주 일정·업무(목록 하나, 7줄) + 오른쪽(휴대폰은 아래) 빠른 만들기·공지 2개. 숫자는 /api/home 한 번.
+ */
 const seoulDay = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
 const fmtHM = (d: Date | string) => dtf('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const dow = (d: string) => new Date(d + 'T00:00:00Z').getUTCDay();
 const cleanTitle = (t: string) => t.replace(/^(\[(업무|업무 시간)\]\s*)+/, '');
+const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
 /** 일정이 걸친 서울 날짜들 (종일 일정의 끝은 다음 날 0시라 하루 빼서 계산) */
 function eventDays(e: any): string[] {
   const s = seoulDay(e.start);
@@ -37,83 +37,18 @@ function eventDays(e: any): string[] {
   return out.length ? out : [s];
 }
 
-/** 대표 #799 → 280차 #824·#826(대표 10/31 "공동 업무 … 접지 말 것 · 같이 받은 사람 하단 탭을 없애고 높이를 줄여서"): 홈 맨 위 '공동 업무' — 한 줄(제목·이름표·마감), 접지 않음 */
-function HomeCollab({ tasks }: { tasks: any[] }) {
-  const { user } = useSession();
-  const list = tasks.filter(isCollab).sort(collabSort);
-  if (!list.length) return null;
-  return (
-    <section className="rounded-card border border-violet-200 bg-white p-3 shadow-card" data-testid="home-collab">
-      <div className="flex items-center gap-2"><span className="text-sm font-semibold text-violet-800">공동 업무</span>
-        <span className="rounded-full bg-violet-100 px-1.5 text-xs font-medium text-violet-800 tabular-nums">{list.length}</span>
-        <Link prefetch={false} href="/tasks?view=my" className="ml-auto text-xs text-ink-3 hover:underline">내 업무에서 보기</Link></div>
-      <ul className="mt-1 divide-y divide-line text-sm">{list.map((t) => (
-        <li key={t.id} className="flex min-w-0 items-center gap-2 py-1" data-testid="home-collab-row">
-          <Link prefetch={false} href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{t.title}</Link>
-          <CollabPeople t={t} uid={user.id} className="max-w-[45%] shrink-0" /><DueChip due={t.due_date} time={t.due_time} status={t.status} />
-        </li>))}</ul>
-    </section>
-  );
-}
-
-function Section({ title, count, children, href, icon: Icon, className, actions, testid }: {
-  title: string; count?: number; children: React.ReactNode; href?: string; icon?: typeof Users; className?: string; actions?: React.ReactNode; testid?: string;
-}) {
-  return (
-    <Card className={cx('flex flex-col', className)} data-testid={testid}>
-      <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-3.5">
-        <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold">{Icon && <Icon className="size-4 shrink-0 text-ink-3" />}<span className="truncate">{title}</span>{count !== undefined && <span className="rounded-full bg-slate-100 px-1.5 text-xs font-medium text-ink-2 tabular-nums">{count}</span>}</h2>
-        <div className="flex shrink-0 items-center gap-2">
-          {actions}
-          {href && <Link prefetch={false} href={href} className="inline-flex items-center gap-0.5 text-xs font-medium text-accent-600 hover:underline">전체<ArrowRight className="size-3" /></Link>}
-        </div>
-      </div>
-      <div className="min-w-0 flex-1 px-2 pb-2">{children}</div>
-    </Card>
-  );
-}
-
-/** 오늘의 일정 한 줄 — 줄을 누르면 상세. 대표(10/16): 왼쪽 완료 동그라미 없앰(업무 목록 V14 43·이번 주 V14 37 과 같게, 완료는 업무 안에서) */
-/** V30 ② 안 읽은 공지 카드 — 없으면 안 보임 */
-function NoticeCard() {
-  const st = useApi<{ notices: { id: string; title: string; important: boolean; pinned: boolean; created_by_name: string }[]; unread: number }>('/api/notices?unread=1&limit=3');
-  if (!st.data?.unread) return null;
-  return (
-    <section className="rounded-card border border-amber-200 bg-amber-50/60 p-3 shadow-card" data-testid="home-notices">
-      <div className="mb-1 flex items-center gap-2"><Megaphone className="size-4 text-amber-700" /><h2 className="text-sm font-semibold">안 읽은 공지 {st.data.unread}건</h2><Link prefetch={false} href="/notices?unread=1" className="ml-auto text-xs font-medium text-amber-800 underline">모두 보기</Link></div>
-      <ul className="divide-y divide-amber-100 text-sm">
-        {st.data.notices.map((n) => <li key={n.id}><Link prefetch={false} href={`/notices/${n.id}`} className="flex items-center gap-1.5 py-1.5 hover:underline">{n.important && <span className="rounded bg-red-100 px-1.5 text-[11px] font-semibold text-red-700">중요</span>}<span className="min-w-0 flex-1 truncate">{n.title}</span><span className="shrink-0 text-xs text-ink-3">{n.created_by_name}</span></Link></li>)}
-      </ul>
-    </section>
-  );
-}
-function TodayRow({ t, className }: { t: any; className?: string }) {
-  const router = useRouter();
-  const rowOpen = useRowOpen(t.id, (id) => showTask(id, (h) => router.push(h))); // 줄 아무 곳이나 눌러 상세 — 300차 #850 오른쪽 패널로
-  return (
-    <li {...rowOpen} className={cx(className, "flex min-w-0 cursor-pointer items-center gap-2.5 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50")} data-home-task={t.id}>
-      <div className="min-w-0 flex-1">
-        <Link prefetch={false} href={`/tasks/${t.id}`} className="block truncate font-medium hover:text-accent-600 hover:underline">{t.title}</Link>
-        <div className="truncate text-xs text-ink-2">{t.assignee_name ?? '담당자 없음'}{t.org_unit_name ? ` · ${t.org_unit_name}` : ''}</div>
-      </div>
-      <PriorityTag p={t.priority} label={false} />
-      <DueChip due={t.due_date} time={t.due_time} status={t.status} />
-    </li>
-  );
-}
-
-function EventRow({ e, withDate }: { e: any; withDate?: boolean }) {
-  return (
-    <li className="flex min-w-0 items-start gap-2.5 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50">
-      <span className="mt-0.5 h-8 w-1 shrink-0 rounded-full" style={{ background: e.color }} />
-      <span className="w-14 shrink-0 pt-0.5 text-xs tabular-nums text-ink-2">{withDate && <span className="block">{Number(seoulDay(e.start).slice(5, 7))}/{Number(seoulDay(e.start).slice(8))}</span>}{e.allDay ? '종일' : fmtTime(e.start)}</span>
-      <div className="min-w-0 flex-1">
-        <Link prefetch={false} href={`/calendar?date=${seoulDay(e.start)}&event=${e.id}`} className="block truncate font-medium hover:underline">{cleanTitle(e.title)}</Link>
-        {e.location && <span className="flex min-w-0 items-center gap-1 text-xs text-ink-2"><MapPin className="size-3 shrink-0" /><span className="truncate">{e.location}</span></span>}
-      </div>
-    </li>
-  );
-}
+type Summary = {
+  today: string; admin: boolean;
+  todo: { overdue: number; overdueOldestDays: number | null; dueToday: number; approvals: number; marketing: number | null; bids: number | null; unread: number };
+  company: null | {
+    sales: { dueThisWeek: number; earliestDays: number | null } | null;
+    branch: { submitted: number; total: number; day: string } | null;
+    check: { acting: number; waiting: number } | null;
+    agreement: { earliestDays: number; soon: number } | null;
+    ads: { spend: number; cap: number | null } | null;
+  };
+  notices: { id: string; title: string; important: boolean; read: boolean; at: string }[];
+};
 
 type WeekItem = { key: string; time: string; title: string; personal: boolean; tag: string; href: string; task: any | null; kind?: 'event' | 'task' | 'space' | 'overdue'; space?: 'sales' | 'marketing' };
 /** V14 47: 같은 날·같은 제목의 일정과 업무(연결 안 된 것 포함)는 한 줄로 — 시각은 일정 기준, 꼬리표 "업무 n · 일정 m" */
@@ -131,242 +66,182 @@ function mergeSameTitle(items: WeekItem[]): WeekItem[] {
   }
   return out;
 }
-/** 이번 주 한 줄: [시간/종일] [색 점·업무는 색 막대] 제목 [꼬리표] */
-function WeekRow({ r, colors, onDone }: { r: WeekItem; colors: CalColors; onDone: (t: any) => void }) {
-  const done = r.task?.status === 'done';
-  // 대표 확정(10/19): 영업·마케팅 주요 일정은 공간 색 점 + 공간 칩(캘린더 '영업'·'마케팅' 색과 같게)
-  if (r.space) { const sm = SPACE_META[r.space]; const c = colors.cals?.[`space:${r.space}`] ?? sm.color; return (
-    <li className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50" data-week-item={r.tag} data-week-space={r.space}>
-      <span className="w-10 shrink-0 text-xs tabular-nums text-ink-2">{r.time || '종일'}</span>
-      <span className="size-2.5 shrink-0 rounded-full" style={{ background: c }} aria-hidden />
-      <Link prefetch={false} href={r.href} className="min-w-0 flex-1 truncate font-medium hover:underline">{r.title}</Link>
-      <span className="shrink-0 rounded-full px-1.5 text-[10px] font-medium" style={{ background: sm.soft, color: sm.color }}>{sm.short}</span>
-    </li>); }
+/** 숫자 칸 하나 — 누르면 걸러진 목록 */
+function Cell({ k, label, value, sub, href, tone }: { k: string; label: string; value: string | number; sub?: string; href: string; tone?: 'red' | 'amber' }) {
   return (
-    <li className="flex min-w-0 items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50" data-week-item={r.tag} {...(r.task ? { 'data-week-task': r.task.id } : {})}>
-      <span className="w-10 shrink-0 text-xs tabular-nums text-ink-2">{r.time || '종일'}</span>
-      {/* V14 37번: 업무 동그라미 제거 — 업무는 색 막대, 일정은 색 점 (제목을 누르면 상세) */}
-      {r.task && r.tag !== '일정·업무'
-        ? <span className="h-3.5 w-1 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden data-week-bar />
-        : <span className="size-2.5 shrink-0 rounded-full" style={{ background: r.personal ? colors.personal : colors.company }} aria-hidden />}
-      <Link prefetch={false} href={r.href} className={cx('min-w-0 flex-1 truncate font-medium hover:underline', done && 'text-ink-3 line-through')}>{r.title}</Link>
-      <span className={cx('shrink-0 rounded-full px-1.5 text-[10px] font-medium', r.kind === 'overdue' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2')}>{r.tag}</span>
+    <Link prefetch={false} href={href} data-testid={`home-cell-${k}`}
+      className="min-w-0 rounded-input border border-line bg-white px-3 py-2.5 hover:border-slate-300 hover:bg-slate-50">
+      <span className="block truncate text-xs text-ink-2">{label}</span>
+      <span className={cx('block text-2xl font-bold tabular-nums leading-tight', tone === 'red' ? 'text-red-600' : tone === 'amber' ? 'text-amber-700' : 'text-ink')}>{value}</span>
+      {sub && <span className="block truncate text-[11px] text-ink-3">{sub}</span>}
+    </Link>
+  );
+}
+
+/** 이번 주 목록 한 줄 — 업무는 줄을 눌러 상세(휴대폰은 전체 시트), 일정은 캘린더 */
+function ListRow({ r, colors, today }: { r: WeekItem & { day: string }; colors: CalColors; today: string }) {
+  const router = useRouter();
+  const rowOpen = useRowOpen(r.task?.id ?? '', (id) => showTask(id, (h) => router.push(h)));
+  const isTask = !!r.task && (r.kind === 'task' || r.kind === 'overdue');
+  const dayLabel = r.kind === 'overdue' ? '' : r.day === today ? '오늘' : r.day === addDays(today, 1) ? '내일' : `${Number(r.day.slice(5, 7))}/${Number(r.day.slice(8))}(${DOW[dow(r.day)]})`;
+  const sm = r.space ? SPACE_META[r.space] : null;
+  const dot = sm ? (colors.cals?.[`space:${r.space}`] ?? sm.color) : r.personal ? colors.personal : colors.company;
+  return (
+    <li {...(isTask ? rowOpen : {})} className={cx('flex min-w-0 items-center gap-2 px-2 py-2 text-sm hover:bg-slate-50', isTask && 'cursor-pointer')}
+      data-day={r.day} data-week-item={r.tag} {...(r.task ? { 'data-week-task': r.task.id } : {})} {...(isTask ? { 'data-home-task': r.task.id } : {})} {...(r.space ? { 'data-week-space': r.space } : {})}>
+      <span className={cx('w-[3.25rem] shrink-0 text-xs tabular-nums', r.day === today || r.kind === 'overdue' ? 'font-semibold text-ink' : 'text-ink-2')}>{dayLabel}{dayLabel && r.time ? <span className="block font-normal text-ink-2">{r.time}</span> : !dayLabel ? r.time : ''}</span>
+      {isTask ? <span className="h-3.5 w-1 shrink-0 rounded-full" style={{ background: dot }} aria-hidden data-week-bar /> : <span className="size-2.5 shrink-0 rounded-full" style={{ background: dot }} aria-hidden />}
+      <Link prefetch={false} href={r.href} className="min-w-0 flex-1 truncate font-medium hover:underline">{r.title}</Link>
+      {sm ? <span className="shrink-0 rounded px-1.5 text-[10px] font-medium" style={{ background: sm.soft, color: sm.color }}>{sm.short}</span>
+        : <span className={cx('shrink-0 rounded px-1.5 text-[10px] font-medium', r.kind === 'overdue' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2')}>{r.tag}</span>}
     </li>
   );
 }
 
 export default function Dashboard() {
   const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
-  const { user, dir, features } = useSession();
-  const { data, error, loading, reload } = useApi<any>('/api/dashboard');
-  const [aiQ, setAiQ] = useState('');
-  const [scope, setScope] = useState<'mine' | 'all'>('mine');
-  const router = useRouter();
+  const { user } = useSession();
+  const { data, error, reload } = useApi<Summary>('/api/home');
   const { colors: calColors } = useCalColors();
-  const mine = useApi<{ tasks: any[] }>('/api/tasks?view=today&limit=50');
-  const myTeams = useApi<{ teams: { id: string; name: string; color: string }[]; tasks: any[] }>('/api/teams/today'); // V14 8번 우리 팀
-  // 내 미완료 업무 전체: 이번 주 마감(요일별 표시)·마감 없는 새 업무(48시간)
-  const myOpen = useApi<{ tasks: any[] }>('/api/tasks?view=my&limit=300');
-  const fu = useLeadFollowUp(); // 197차(#460): 리드 업무 완료 때 다음 연락일·종결
-  const today = data?.today ?? seoulDay(new Date());
-  // 대표 확정(10/19): 홈은 '이번 주 일정' 하나(오늘 칸 강조·업무 포함) — '오늘'·'이달' 칸 없앰
-  // V7: "이번 주 일정" = 오늘부터 7일
+  const [newMenu, setNewMenu] = useState(false);
+  const [allRows, setAllRows] = useState(false);
   const d0 = seoulDay(new Date());
-  const hol = useApi<{ holidays: { date: string; name: string }[] }>('/api/holidays');
-  // 영업·마케팅 주요 일정(공간에 들어갈 수 있을 때만, 하나하나가 아니라 묶음)
+  const today = data?.today ?? d0;
+  const myOpen = useApi<{ tasks: any[] }>('/api/tasks?view=my&limit=300');
   const agenda = useApi<{ items: { date: string; time: string | null; title: string; kind: string; space: 'sales' | 'marketing'; href: string }[] }>(`/api/spaces/agenda?from=${d0}&to=${addDays(d0, 6)}`, [d0]);
   const week7 = useApi<{ events: any[] }>(`/api/events?from=${encodeURIComponent(`${d0}T00:00:00+09:00`)}&to=${encodeURIComponent(`${addDays(d0, 7)}T00:00:00+09:00`)}`, [d0]);
 
-  if (error) return <ErrorBox error={error} retry={reload} />;
-  if (loading && !data) return <div className="space-y-4"><div className="skeleton h-8 w-60 rounded" /><div className="grid gap-3 lg:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-48 rounded-card" />)}</div><Skeleton rows={5} /></div>;
-  if (!data) return null;
-  const company = data.scope === 'company';
-  const tot = data.totals;
-  // V7 순서: 기한 지남 → 오늘 마감(시각순, 시각 없는 것 뒤) → 오늘 시작
-  const rank = (t: any) => (t.due_date && t.due_date < today ? 0 : t.due_date === today ? 1 : 2);
-  const todayTasks: any[] = [...(scope === 'mine' ? mine.data?.tasks ?? [] : data.todayAll ?? [])]
-    .sort((a, b) => rank(a) - rank(b) || (a.due_date ?? '').localeCompare(b.due_date ?? '') || (a.due_time ?? '99').localeCompare(b.due_time ?? '99'));
-
-  async function done(t: any) {
-    const toReview = !!t.approval_line_id; // 대표 11/18: 검토는 완료의 조건이 아님 — 결재선 업무만 결재로
-    const c = !toReview && t.lead_id ? await fu.ask(t) : 'skip';
-    if (c === null) return;
-    try {
-      const r = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: toReview ? 'review' : 'done', ...(c !== 'skip' ? { leadFollowUp: c } : {}) } });
-      const fm = followUpMsg(r); if (fm) toast.info(fm);
-      // #508: 완료는 업무 목록 맨 아래 '완료됨'으로 — 되돌리기는 거기서([완료됨 보기])
-      if (toReview) toast.ok('검토를 요청했습니다', { label: '되돌리기', run: async () => { await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: t.status } }).catch(() => {}); reload(); mine.reload(); } });
-      else toast.ok('완료됨으로 옮겼습니다', { label: '완료됨 보기', run: () => router.push('/tasks?view=my&openDone=1') });
-      reload(); mine.reload(); broadcastRefresh();
-    } catch (e: any) { toast.error(e.message); }
-  }
-  async function approve(t: any, ok: boolean) {
-    try {
-      if (ok) await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: 'done' } });
-      else {
-        const note = prompt('보완 요청 내용을 입력하세요') ?? '';
-        if (!note) return;
-        await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { status: 'in_progress', reviewNote: note } });
-        await api(`/api/tasks/${t.id}/comments`, { body: { body: `[보완 요청] ${note}` } });
-      }
-      toast.ok(ok ? '최종 완료 처리했습니다' : '보완을 요청했습니다');
-      reload(); broadcastRefresh();
-    } catch (e: any) { toast.error(e.message); }
-  }
-
-  // 이번 주 일정: 요일별
-  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(today, i));
-  const byDay = new Map<string, any[]>(weekDays.map((d) => [d, []]));
-  // 대표 지시(2026-10-15): 완료된 업무의 "업무 시간" 블록은 홈에도 안 보이게(캘린더 "완료 보기" 꺼짐과 같은 규칙)
-  const blockDone = (e: any) => e.blockTask?.status === 'done';
-  for (const e of (week7.data?.events ?? data.events).filter((x: any) => !blockDone(x))) for (const d of eventDays(e)) byDay.get(d)?.push(e);
-  // 7일 안에 마감인 내 업무도 그날에 (등록 즉시 보이게) — 시각 있는 마감은 일정과 섞어 시간순
-  const weekTasks = (myOpen.data?.tasks ?? []).filter((t) => t.due_date && t.due_date >= today && t.due_date <= weekDays[6]);
-  const tasksByDay = new Map<string, any[]>(weekDays.map((d) => [d, weekTasks.filter((t) => t.due_date === d)]));
-  // V7 5번: 일정과 업무를 같은 한 줄로 — 시간순(종일·시간 없는 마감이 맨 위), "업무에도 추가"로 연결된 일정·업무는 한 줄로 합침
-  const weekRows = new Map<string, WeekItem[]>(weekDays.map((d) => {
-    const evs = byDay.get(d) ?? [];
-    const linked = new Set(evs.flatMap((e) => [e.linkedTask?.id, ...(e.linkedTaskIds ?? [])]).filter(Boolean));
-    const items: WeekItem[] = [
-      ...evs.map((e) => ({ key: `e${e.id}${e.start}`, time: e.allDay || seoulDay(e.start) !== d ? '' : fmtHM(e.start), title: cleanTitle(e.title), personal: e.calendarType === 'personal',
-        tag: e.linkedTask ? '일정·업무' : (ABSENCE_KINDS as readonly string[]).includes(e.kind) ? T.event[e.kind as EventKind] : '일정', href: `/calendar?date=${d}&event=${e.id}`, task: e.linkedTask ? { id: e.linkedTask.id, status: e.linkedTask.status } : null, kind: e.kind === 'task_block' ? undefined : ('event' as const) })),
-      ...(tasksByDay.get(d) ?? []).filter((t) => !linked.has(t.id)).map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id,
-        tag: '업무', href: `/tasks/${t.id}`, task: t, kind: 'task' as const })),
-      ...(agenda.data?.items ?? []).filter((x) => x.date === d).map((x, i) => ({ key: `s${x.space}${i}${x.title}`, time: x.time ?? '', title: x.title, personal: false, tag: x.space, href: x.href, task: null, kind: 'space' as const, space: x.space })),
-    ];
-    // V14 20번(대표 결정): 완료된 업무·일정은 이번 주 목록에서 숨김
-    return [d, mergeSameTitle(items.filter((x) => x.task?.status !== 'done')).sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00'))] as [string, WeekItem[]];
-  }));
-  // 오늘 칸 맨 위: 기한 지난 내 업무(예전 '오늘의 일정'에 있던 것) — 빨간 '지남' 꼬리표
-  const overdue: WeekItem[] = todayTasks.filter((t) => t.due_date && t.due_date < today && t.status !== 'done')
-    .map((t) => ({ key: `o${t.id}`, time: '', title: t.title, personal: !t.project_id, tag: `지남 ${fmtDate(t.due_date)}`, href: `/tasks/${t.id}`, task: t, kind: 'overdue' as const }));
-  weekRows.set(today, [...overdue, ...(weekRows.get(today) ?? [])]);
-  const holName = (d: string) => hol.data?.holidays.find((h) => h.date === d)?.name ?? null;
-  const weekCount = [...weekRows.values()].reduce((n, x) => n + x.length, 0);
-  const freshNoDue = (myOpen.data?.tasks ?? []).filter((t) => !t.due_date && Date.now() - new Date(t.assigned_at ?? t.created_at).getTime() < 48 * 3600000);
-  // 담당자별 현황: 본사 사람(없으면 업무가 많은 순 6명)
-  const hqIds = new Set(dir.orgUnits.filter((o) => o.type === 'hq').map((o) => o.id));
-  const hqPeople = dir.users.filter((u) => u.org_unit_ids?.some((id) => hqIds.has(id)));
-  const zero = { open: 0, overdue: 0, due_today: 0, done_week: 0, this_week: 0 };
-  const people = (hqPeople.length ? hqPeople.map((u) => ({ id: u.id, name: u.name, ...zero, ...(data.workload.find((w: any) => w.id === u.id) ?? {}) })) : data.workload.slice(0, 6)) as any[];
   const hour = Number(dtf('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date()));
   const greet = hour < 11 ? '좋은 아침입니다' : hour < 17 ? '안녕하세요' : '오늘도 수고 많으셨습니다';
 
+  // 이번 주 일정·업무 — 목록 하나: 기한 지남 → 오늘 → 이번 주(날짜·시각 순). 같은 날 같은 제목의 일정·업무는 한 줄, 연결된 일정·업무도 한 줄
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(today, i));
+  const open = (myOpen.data?.tasks ?? []).filter((t) => t.status !== 'done');
+  const blockDone = (e: any) => e.blockTask?.status === 'done'; // 완료된 업무의 '업무 시간' 블록은 숨김(캘린더와 같은 규칙)
+  const evsByDay = new Map<string, any[]>(weekDays.map((d) => [d, []]));
+  for (const e of (week7.data?.events ?? []).filter((x: any) => !blockDone(x))) for (const d of eventDays(e)) evsByDay.get(d)?.push(e);
+  const rows: (WeekItem & { day: string })[] = [];
+  rows.push(...open.filter((t) => t.due_date && t.due_date < today).sort((a, b) => a.due_date.localeCompare(b.due_date))
+    .map((t) => ({ key: `o${t.id}`, day: t.due_date, time: '', title: t.title, personal: !t.project_id, tag: `지남 ${fmtDate(t.due_date)}`, href: `/tasks/${t.id}`, task: t, kind: 'overdue' as const })));
+  for (const d of weekDays) {
+    const evs = evsByDay.get(d) ?? [];
+    const linked = new Set(evs.flatMap((e) => [e.linkedTask?.id, ...(e.linkedTaskIds ?? [])]).filter(Boolean));
+    const items: WeekItem[] = [
+      ...evs.map((e) => ({ key: `e${e.id}${e.start}`, time: e.allDay || seoulDay(e.start) !== d ? '' : fmtHM(e.start), title: cleanTitle(e.title), personal: e.calendarType === 'personal',
+        tag: e.linkedTask ? '일정·업무' : (ABSENCE_KINDS as readonly string[]).includes(e.kind) ? T.event[e.kind as EventKind] : '일정', href: `/calendar?date=${d}&event=${e.id}`,
+        task: e.linkedTask ? { id: e.linkedTask.id, status: e.linkedTask.status } : null, kind: 'event' as const })),
+      ...open.filter((t) => t.due_date === d && !linked.has(t.id)).map((t) => ({ key: `t${t.id}`, time: t.due_time ?? '', title: t.title, personal: !t.project_id, tag: '업무', href: `/tasks/${t.id}`, task: t, kind: 'task' as const })),
+      ...(agenda.data?.items ?? []).filter((x) => x.date === d).map((x, i) => ({ key: `s${x.space}${i}${x.title}`, time: x.time ?? '', title: x.title, personal: false, tag: x.space, href: x.href, task: null, kind: 'space' as const, space: x.space })),
+    ];
+    rows.push(...mergeSameTitle(items.filter((x) => x.task?.status !== 'done')).sort((x, y) => (x.time || '00:00').localeCompare(y.time || '00:00')).map((x) => ({ ...x, day: d })));
+  }
+  const seen = new Set<string>(); const list = rows.filter((r) => { const k = r.task?.id ? `t${r.task.id}` : r.key; if (seen.has(k)) return false; seen.add(k); return true; });
+  const shown = allRows ? list : list.slice(0, 7); // 대표 시안: 7줄 — 넘으면 [외 n건 더 보기]
+  const listLoading = !myOpen.data || !week7.data;
+
+  const td = data?.todo; const c = data?.company;
+  const cells = td ? [
+    td.overdue > 0 && { k: 'overdue', label: '기한 지남', value: td.overdue, sub: td.overdueOldestDays ? `최대 ${td.overdueOldestDays}일 지남` : '내 업무', href: `/tasks?view=overdue&assigneeId=${user.id}`, tone: 'red' as const },
+    td.approvals > 0 && { k: 'approvals', label: '결재 대기', value: td.approvals, sub: '내 차례', href: '/approvals?view=todo', tone: 'amber' as const },
+    td.dueToday > 0 && { k: 'today', label: '오늘 마감', value: td.dueToday, sub: '내 업무', href: '/tasks?view=today' },
+    !!td.marketing && { k: 'marketing', label: '마케팅 승인', value: td.marketing, sub: '승인할 시안', href: '/s/marketing/approvals' },
+    !!td.bids && { k: 'bids', label: '새 입찰 공고', value: td.bids, sub: '오늘 아침 메일', href: '/s/sales/hub?tab=bids&bt=today' },
+    td.unread > 0 && { k: 'unread', label: '안 읽은 메시지', value: td.unread, sub: '메시지', href: '/messages' },
+  ].filter(Boolean) as Parameters<typeof Cell>[0][] : [];
+  const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
+  const companyCells = c ? [
+    c.sales && { k: 'sales', label: '영업 · 이번 주 입찰 마감', value: `${c.sales.dueThisWeek}건`, sub: c.sales.earliestDays !== null ? `가장 빠른 마감 D-${c.sales.earliestDays}` : '이번 주 마감 없음', href: '/s/sales/hub?tab=bids' },
+    c.branch && { k: 'branch', label: '지점 보고 · 이번 주 제출', value: `${c.branch.submitted}/${c.branch.total}`, sub: c.branch.total > c.branch.submitted ? `미제출 ${c.branch.total - c.branch.submitted}곳 · ${md(c.branch.day)}(금) 마감` : `모두 제출 · ${md(c.branch.day)}(금)`, href: '/branch-reports', tone: c.branch.total > c.branch.submitted ? 'amber' as const : undefined },
+    (c.check || c.agreement) && { k: 'check', label: '점검 · 계약', value: c.check ? `조치 중 ${c.check.acting}` : c.agreement ? `D-${c.agreement.earliestDays}` : '-', sub: c.agreement ? `계약 만료 가장 빠른 D-${c.agreement.earliestDays}` : '만료 예정 계약 없음', href: c.check ? '/check' : '/agreements' },
+    c.ads && { k: 'ads', label: '이번 달 광고비(메타+네이버)', value: won(c.ads.spend), sub: c.ads.cap ? `월 상한 ${won(c.ads.cap)}` : '월 상한 없음', href: '/s/marketing/ad-ops', tone: c.ads.cap && c.ads.spend > c.ads.cap * 0.9 ? 'amber' as const : undefined },
+  ].filter(Boolean) as Parameters<typeof Cell>[0][] : [];
+
+  if (error) return <ErrorBox error={error} retry={reload} />;
   return (
-    <div className="space-y-3 sm:space-y-5">
-      {fu.node}
-      <div>
-        <p className="text-sm text-ink-2">{fmtDate(data.today)} · {greet}, {user.name}님</p>
-        <h1 className="mt-0.5 text-xl font-bold tracking-tight sm:text-2xl">{company ? '전체 현황' : `${user.name}님의 업무 현황`}</h1>
+    <div className="space-y-4" data-testid="home">
+      {/* 1) 머리: 인사·날짜·출근 상태 + [새로 만들기][출근하기] */}
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-ink-2">{fmtDate(today)}</p>
+          <h1 className="mt-0.5 text-xl font-bold tracking-tight sm:text-2xl">{greet}, {user.name}님</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <ClockCard inline />
+          <div className="relative hidden sm:block">
+            <button type="button" onClick={() => setNewMenu((v) => !v)} aria-haspopup="menu" aria-expanded={newMenu} data-testid="home-new"
+              className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-3 text-sm font-medium hover:bg-slate-50"><Plus className="size-4" />새로 만들기</button>
+            {newMenu && <>
+              <div className="fixed inset-0 z-40" onClick={() => setNewMenu(false)} />
+              <div role="menu" className="absolute right-0 z-50 mt-1 w-44 rounded-input border border-line bg-white p-1 shadow-pop">
+                {QUICK.map((q) => <Link key={q.key} role="menuitem" prefetch={false} href={q.href(today)} className="flex items-center gap-2 rounded px-2.5 py-2 text-sm hover:bg-slate-50"><q.icon className="size-4 text-ink-2" />{q.label}</Link>)}
+              </div>
+            </>}
+          </div>
+        </div>
       </div>
       <ConnectCard />
-      {tot.overdue > 0 && (
-        <Link prefetch={false} href="/tasks?view=overdue" className="flex items-center gap-2 rounded-card border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100" data-testid="overdue-banner">
-          <AlertTriangle className="size-5 shrink-0" />기한 지난 업무 {tot.overdue}건<span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium">확인하기<ArrowRight className="size-3.5" /></span>
-        </Link>
-      )}
-      {features.ai && (
-        <form onSubmit={(e) => { e.preventDefault(); if (aiQ.trim()) router.push(`/assistant?q=${encodeURIComponent(aiQ.trim())}`); }} className="flex items-center gap-2 rounded-card border border-line bg-white px-3 py-2 shadow-card" data-testid="home-ai">
-          <Sparkles className="size-5 shrink-0 text-amber-500" />
-          <input value={aiQ} onChange={(e) => setAiQ(e.target.value)} placeholder="✨ AI에게 요청" title="예: 로고 찾아줘, 이번 주 내 마감 정리" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3" aria-label="AI에게 요청" />
-          <button type="submit" className="shrink-0 rounded-input bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50" disabled={!aiQ.trim()}>요청</button>
-        </form>
-      )}
-      <ClockCard />
-      <NoticeCard />
-      <CheckHomeCard />
-      <AgreementHomeCard />
-      <HomeCollab tasks={myOpen.data?.tasks ?? []} />
-      {/* V14 8번: 우리 팀 오늘의 일정 (팀에 속해 있을 때만) */}
-      {(myTeams.data?.teams.length ?? 0) > 0 && (
-        <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="home-team">
-          <div className="mb-2 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">우리 팀 오늘의 일정</h2>
-            {myTeams.data!.teams.map((t) => <Link prefetch={false} key={t.id} href={`/teams/${t.id}`} className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs hover:bg-slate-50"><span className="size-2 rounded-full" style={{ background: t.color }} />{t.name} 보드</Link>)}</div>
-          <ul className="divide-y divide-line text-sm">
-            {myTeams.data!.tasks.slice(0, 8).map((t) => (
-              <li key={t.id} className="flex items-center gap-2 py-1.5">
-                <span className="size-2 shrink-0 rounded-full" style={{ background: t.team_color ?? '#0F766E' }} />
-                <Link prefetch={false} href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate hover:underline">{t.title}</Link>
-                <span className="shrink-0 text-xs text-ink-3">{t.assignee_name ?? '담당 미정'}</span><DueChip due={t.due_date} time={t.due_time} status={t.status} />
-              </li>
-            ))}
-            {!myTeams.data!.tasks.length && <li className="py-2 text-xs text-ink-3">오늘 할 팀 업무가 없습니다</li>}
-          </ul>
+
+      {/* 2) 오늘 처리할 것 — 모든 직원, 0인 칸은 숨김 */}
+      <section data-testid="home-todo">
+        <h2 className="mb-1.5 text-sm font-semibold">오늘 처리할 것</h2>
+        {!data ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-[74px] rounded-input" />)}</div>
+          : cells.length ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">{cells.map((x) => <Cell key={x.k} {...x} />)}</div>
+          : <p className="rounded-input border border-line bg-white px-3 py-2.5 text-sm text-ink-2" data-testid="home-todo-empty">지금 처리할 것이 없습니다.</p>}
+      </section>
+
+      {/* 3) 회사 현황 — 대표·관리자만 */}
+      {companyCells.length > 0 && (
+        <section data-testid="home-company">
+          <h2 className="mb-1.5 text-sm font-semibold">회사 현황</h2>
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">{companyCells.map((x) => <Cell key={x.k} {...x} />)}</div>
         </section>
       )}
-      {/* WORKIN_V2 홈: 오늘의 일정 · 이번 주 일정 · 이달의 일정 · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동 (모바일은 위에서부터 이 순서) */}
-      <div className="grid min-w-0 gap-4 lg:grid-flow-dense lg:grid-cols-3">
-        <Section title="이번 주 일정" count={weekCount} href="/calendar" icon={CalendarDays} className="lg:col-span-2" testid="home-week">
-          <ul className="divide-y divide-line">
-            {weekDays.map((d) => {
-              const rows = weekRows.get(d) ?? [];
-              const isToday = d === today;
-              return (
-                // 날짜 줄의 빈 곳을 누르면 그 날짜로 일정 빠른 등록 (홈에 따로 만들기 버튼 없이 — V6 1번)
-                <li key={d} className={cx('flex min-w-0 cursor-pointer gap-2 py-1.5 hover:bg-slate-50/70', isToday && 'rounded-input bg-accent-50/60')} data-day={d}
-                  onClick={(ev) => { if ((ev.target as HTMLElement).closest('a,button')) return; router.push(`/calendar?quick=1&date=${d}`); }}>
-                  <span className={cx('w-12 shrink-0 px-2 pt-1.5 text-xs font-semibold tabular-nums', isToday ? 'text-accent-600' : dow(d) === 0 || holName(d) ? 'text-red-600' : 'text-ink-2')}>
-                    {DOW[dow(d)]} {Number(d.slice(8))}{isToday && <span className="block text-[10px] font-medium">오늘</span>}
-                    {holName(d) && <span className="block truncate text-[10px] font-medium text-red-600" data-holiday={d}>{holName(d)}</span>}
-                  </span>
-                  {rows.length ? <ul className="min-w-0 flex-1">{rows.map((r) => <WeekRow key={r.key} r={r} colors={calColors} onDone={done} />)}</ul>
-                    : <span className="flex-1 px-2 pt-1.5 text-xs text-ink-3">일정 없음 — 눌러서 추가</span>}
-                </li>
-              );
-            })}
-          </ul>
-          <div className="border-t border-line px-1 pt-1"><InlineAddTask muted defaultDue={data.today} onCreated={() => { mine.reload(); myOpen.reload(); reload(); }} placeholder="할 일 추가" /></div>
-        </Section>
-        {/* 로컬 10/19(대표 확정): 최근 활동 → 알림 '활동' 탭, 그 자리에 월 미니 캘린더(PC 오른쪽 위, 휴대폰은 이번 주 다음 접힌 줄) */}
-        <HomeMonth today={today} className="lg:col-start-3 lg:row-start-1" />
 
-        {scope === 'mine' && freshNoDue.length > 0 && (
-          <Section title="새로 받은 업무 (48시간, 마감 없음)" count={freshNoDue.length} icon={CheckCircle2} className="lg:col-span-2" testid="home-fresh">
-            <ul>{freshNoDue.slice(0, 5).map((t) => <TodayRow key={t.id} t={t} />)}</ul>
-          </Section>
-        )}
-        <Section title="담당자별 현황" icon={Users} href="/tasks" className="lg:col-span-2 lg:row-span-2" testid="home-people">
-          <div className="grid gap-2 px-1 sm:grid-cols-2 xl:grid-cols-3">
-            {people.map((p) => (
-              <Link prefetch={false} key={p.id} href={`/tasks?assigneeId=${p.id}`} className="min-w-0 rounded-input border border-line p-3 hover:border-slate-300 hover:shadow-card">
-                <div className="flex min-w-0 items-center gap-2"><Avatar id={p.id} name={p.name} size={28} /><span className="truncate font-semibold">{p.name}</span></div>
-                <dl className="mt-2 grid grid-cols-4 gap-1 text-center">
-                  {([['진행', p.open, ''], ['오늘 마감', p.due_today, p.due_today ? 'text-amber-700' : ''], ['지연', p.overdue, p.overdue ? 'text-red-600' : ''], ['주간 완료', p.done_week, 'text-green-600']] as const).map(([l, v, tone]) => (
-                    <div key={l} className="min-w-0"><dt className="truncate text-[10px] text-ink-3">{l}</dt><dd className={cx('text-lg font-bold tabular-nums', tone)}>{v ?? 0}</dd></div>
-                  ))}
-                </dl>
-              </Link>
-            ))}
-            {!people.length && <p className="px-2 py-6 text-center text-sm text-ink-3">담당자가 있는 업무가 없습니다</p>}
+      <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+        {/* 4) 이번 주 일정·업무 — 목록 하나, 7줄 */}
+        <section className="min-w-0 rounded-card border border-line bg-white lg:col-span-2" data-testid="home-week">
+          <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
+            <h2 className="text-sm font-semibold">이번 주 일정·업무</h2>
+            {!listLoading && <span className="text-xs text-ink-3 tabular-nums">{list.length}건</span>}
+            <Link prefetch={false} href="/calendar" className="ml-auto text-xs text-ink-2 hover:underline">캘린더</Link>
           </div>
-        </Section>
-
-        <Section title="기한 지남 · 검토 대기" icon={AlertTriangle} className="lg:col-start-3" testid="home-alerts">
-          <div className="grid grid-cols-2 gap-2 px-1">
-            <Link prefetch={false} href="/tasks?view=overdue" className="rounded-input border border-line p-3 hover:border-red-200 hover:bg-red-50/40">
-              <span className="flex items-center gap-1 text-xs text-ink-2"><AlertTriangle className="size-3.5 text-red-500" />기한 지남</span>
-              <span className={cx('text-2xl font-bold tabular-nums', tot.overdue ? 'text-red-600' : 'text-ink')}>{tot.overdue}</span>
-            </Link>
-            <Link prefetch={false} href="/tasks?view=review" className="rounded-input border border-line p-3 hover:border-amber-200 hover:bg-amber-50/40">
-              <span className="flex items-center gap-1 text-xs text-ink-2"><Hourglass className="size-3.5 text-amber-500" />검토 대기</span>
-              <span className={cx('text-2xl font-bold tabular-nums', tot.review ? 'text-amber-700' : 'text-ink')}>{tot.review}</span>
-            </Link>
+          {listLoading ? <div className="space-y-2 p-3">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-6 rounded" />)}</div>
+            : shown.length ? <ul className="divide-y divide-line">{shown.map((r) => <ListRow key={r.key} r={r} colors={calColors} today={today} />)}</ul>
+            : <p className="px-3 py-6 text-center text-sm text-ink-3">이번 주 일정·업무가 없습니다.</p>}
+          <div className="flex items-center gap-3 border-t border-line px-3 py-2 text-sm">
+            {list.length > shown.length && <button type="button" onClick={() => setAllRows(true)} className="text-xs text-ink-2 hover:underline" data-testid="home-week-more">외 {list.length - shown.length}건 더 보기</button>}
+            <Link prefetch={false} href="/tasks?view=my" className="ml-auto font-medium text-accent-600 hover:underline" data-testid="home-all-tasks">전체 업무 보기</Link>
           </div>
-          {data.canApprove && data.review.length > 0 && (
-            <ul className="mt-2">
-              {data.review.slice(0, 3).map((t: any) => (
-                <li key={t.id} className="flex min-w-0 flex-wrap items-center gap-2 rounded-input px-2 py-1.5 text-sm hover:bg-slate-50">
-                  <Link prefetch={false} href={`/tasks/${t.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{t.title}</Link>
-                  {/* V12 11번: 검토 승인·반려는 그 업무의 요청자만 */}
-                  {t.requested_by === user.id ? <span className="flex gap-1"><Button size="sm" onClick={() => approve(t, true)}>완료 확인</Button><Button size="sm" variant="secondary" onClick={() => approve(t, false)}>보완 요청</Button></span>
-                    : <span className="text-xs text-ink-3">요청자 확인 대기{t.requested_by_name ? ` · ${t.requested_by_name}` : ''}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
+        </section>
 
+        {/* 5) 오른쪽(휴대폰은 아래): 빠른 만들기 · 공지 */}
+        <div className="min-w-0 space-y-4">
+          <section className="rounded-card border border-line bg-white p-3" data-testid="home-quick">
+            <h2 className="mb-2 text-sm font-semibold">빠른 만들기</h2>
+            <div className="grid grid-cols-3 gap-2">
+              {QUICK.map((q) => <Link key={q.label} prefetch={false} href={q.href(today)} data-testid={`home-quick-${q.key}`}
+                className="flex flex-col items-center gap-1 rounded-input border border-line px-2 py-2.5 text-xs font-medium hover:bg-slate-50"><q.icon className="size-5 text-ink-2" />{q.label}</Link>)}
+            </div>
+          </section>
+          <section className="rounded-card border border-line bg-white p-3" data-testid="home-notices">
+            <div className="mb-1 flex items-center gap-2"><h2 className="text-sm font-semibold">공지</h2><Link prefetch={false} href="/notices" className="ml-auto text-xs text-ink-2 hover:underline">전체</Link></div>
+            {!data ? <div className="skeleton h-10 rounded" /> : data.notices.length ? (
+              <ul className="divide-y divide-line text-sm">{data.notices.map((n) => (
+                <li key={n.id}><Link prefetch={false} href={`/notices/${n.id}`} className="flex items-center gap-1.5 py-1.5 hover:underline">
+                  {n.important && <span className="shrink-0 rounded bg-red-50 px-1.5 text-[11px] font-semibold text-red-700">중요</span>}
+                  <span className={cx('min-w-0 flex-1 truncate', !n.read && 'font-semibold')}>{n.title}</span>
+                  {!n.read && <span className="shrink-0 text-[11px] text-accent-600">새 공지</span>}</Link></li>))}</ul>
+            ) : <p className="py-1.5 text-sm text-ink-3">공지가 없습니다.</p>}
+          </section>
+        </div>
       </div>
     </div>
   );
 }
+
+/** 빠른 만들기(머리 [새로 만들기]와 같은 세 가지) */
+const QUICK = [
+  { key: 'task', label: '업무', icon: SquarePen, href: () => '/tasks?new=1' },
+  { key: 'event', label: '일정', icon: CalendarPlus, href: (d: string) => `/calendar?quick=1&date=${d}` },
+  { key: 'approval', label: '결재 올리기', icon: Stamp, href: () => '/approvals?view=mine' },
+] as const;

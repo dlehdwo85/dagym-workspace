@@ -268,7 +268,7 @@ await step('외부 계정 없이 동작: Google 동기화 기능 꺼짐 상태�
 
 await step('① 대표 로그인 → 대시보드 표시', async () => {
   await owner.goto(BASE + '/');
-  await owner.getByRole('heading', { name: '전체 현황' }).waitFor();
+  await owner.getByTestId('home-todo').waitFor() /* #1110 홈 */;
   await owner.screenshot({ path: `${SHOTS}/01-dashboard-owner.png`, fullPage: true });
 });
 
@@ -551,7 +551,7 @@ await step('B-3 프로젝트 섹션: 추가 → 업무를 끌어 다른 섹션�
 
 await step('B-4 Ctrl+K 검색 → Enter 로 업무 열기, 권한 밖 결과 없음', async () => {
   await owner.goto(BASE + '/');
-  await owner.getByRole('heading', { name: '전체 현황' }).waitFor(); // 화면 준비 후 단축키
+  await owner.getByTestId('home-todo').waitFor() /* #1110 홈 */; // 화면 준비 후 단축키
   await owner.keyboard.press('Control+K');
   await owner.getByTestId('palette-input').fill('소방 점검');
   await owner.getByTestId('palette-results').getByText('강남점 소방 점검 대응', { exact: true }).waitFor();
@@ -564,7 +564,7 @@ await step('B-4 Ctrl+K 검색 → Enter 로 업무 열기, 권한 밖 결과 없
   await owner.waitForURL(`${BASE}/tasks/${taskId}`);
   const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR' });
   const p = await login(c, ctx.staffB.email, ctx.staffB.password);
-  await p.getByText('님의 업무 현황').waitFor();
+  await p.getByTestId('home-todo').waitFor() /* #1110 홈 */;
   await p.keyboard.press('Control+K');
   await p.getByTestId('palette-input').fill('소방 점검');
   await p.getByText('검색 결과가 없습니다').waitFor();
@@ -683,12 +683,11 @@ await step('B-2 내 업무 자동 묶음 (새로 배정됨→확인·기한 지�
 
 await step('모바일 대시보드·캘린더·하단 메뉴 화면', async () => {
   await staff.goto(BASE + '/');
-  await staff.getByText('님의 업무 현황').waitFor();
-  // 대표 검수 10/20: 휴대폰은 '이번 주' 다음에 월 전체 격자(접지 않음)
-  const wkBox = await staff.getByTestId('home-week').boundingBox(), moBox = await staff.getByTestId('home-month').boundingBox();
-  assert.ok(moBox.y > wkBox.y, '휴대폰: 이번 주 일정이 먼저');
-  assert.ok((await staff.getByTestId('home-month-grid').locator('[data-day]').count()) >= 28, '대표 검수 10/20: 휴대폰도 월 전체 격자(접지 않음)');
-  assert.equal(await staff.getByTestId('home-month-grid').isVisible(), true, '월 격자 항상 펼침');
+  // #1110 홈 개편(대표 11/22): 휴대폰 = 오늘 처리할 것(3열) → 이번 주 일정·업무 → 빠른 만들기·공지(아래) · 월 달력 없음 · 직원은 회사 현황 없음
+  await staff.getByTestId('home-todo').waitFor(); await staff.getByTestId('home-week').locator('ul, p').first().waitFor();
+  const wkBox = await staff.getByTestId('home-week').boundingBox(), qBox = await staff.getByTestId('home-quick').boundingBox();
+  assert.ok(qBox.y > wkBox.y, '휴대폰: 이번 주 목록 다음에 빠른 만들기');
+  assert.equal(await staff.getByTestId('home-month').count(), 0, '월 달력 없음'); assert.equal(await staff.getByTestId('home-company').count(), 0, '직원은 회사 현황 없음');
   await staff.screenshot({ path: `${SHOTS}/17-mobile-home.png` });
   await staff.goto(BASE + '/calendar');
   await staff.getByTestId('calendar').waitFor();
@@ -1093,28 +1092,23 @@ await step('W-2 업무 화면: 기본 전체·담당자별 묶음, "+ 업무 추
   await owner.getByTestId('group-by').selectOption('assignee');
   await owner.screenshot({ path: `${SHOTS}/56-inline-add.png` });
 });
-await step('W-3 홈: 오늘 할 일(내 것/전체) · 이번 주 일정 · 이달의 일정(미니 달력) · 담당자별 현황 · 기한 지남/검토 대기 · 최근 활동', async () => {
+await step('W-3 홈(#1110 대표 11/22 시안): 오늘 처리할 것 숫자 칸 · 회사 현황(대표) · 이번 주 일정·업무 목록 하나 · 빠른 만들기·공지 · 월 달력·담당자별 현황 없음 · 최근 활동은 알림 활동 탭', async () => {
   await owner.goto(BASE + '/');
-  // 대표 확정(10/19): '오늘'·'이달' 칸 없이 '이번 주 일정' 하나(오늘 칸 강조·업무 포함)
-  for (const id of ['home-week', 'home-people', 'home-alerts', 'home-month']) await owner.getByTestId(id).waitFor(); // 로컬 10/19(대표 확정): 최근 활동 → 월 미니 캘린더
-  for (const id of ['home-today', 'home-month-card']) assert.equal(await owner.getByTestId(id).count(), 0, `${id} 없음`);
+  for (const id of ['home-todo', 'home-week', 'home-quick', 'home-notices']) await owner.getByTestId(id).waitFor();
+  for (const id of ['home-today', 'home-month', 'home-people', 'home-alerts']) assert.equal(await owner.getByTestId(id).count(), 0, `${id} 없음`);
   // 최근 활동은 알림 화면 '활동' 탭으로 (E2E_ONLY 로 이 단계만 돌릴 때는 앞 단계의 업무가 없어 하나 만들어 둔다)
-  if (!(await sql`select 1 from tasks where title = '강남점 전단 배포' and deleted_at is null`).length) await ctx.owner.ok('POST', '/api/tasks', { title: '강남점 전단 배포', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false });
+  if (!(await sql`select 1 from tasks where title = '강남점 전단 배포' and deleted_at is null`).length) await ctx.owner.ok('POST', '/api/tasks', { title: '강남점 전단 배포', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: today, approvalRequired: false });
   await owner.goto(BASE + '/notifications');
   await owner.getByTestId('notif-activity').click();
   await owner.getByTestId('activity-list').getByText('강남점 전단 배포').first().waitFor();
   await owner.goto(BASE + '/');
-  // 월 미니 캘린더: PC 는 오른쪽(이번 주 옆), 날짜를 누르면 그날 목록, 두 번 누르면 캘린더
-  await owner.getByTestId('home-clock').waitFor(); // V30 ③ 출퇴근 카드가 뒤늦게 붙으면서 아래 칸이 밀리므로 다 그려진 뒤 잰다
-  await owner.waitForLoadState('networkidle');
-  const [wk, mo] = await Promise.all([owner.getByTestId('home-week').boundingBox(), owner.getByTestId('home-month').boundingBox()]);
-  assert.ok(mo.x > wk.x + wk.width - 5 && Math.abs(mo.y - wk.y) < 40, `월 캘린더는 이번 주 오른쪽 (${JSON.stringify([wk, mo])})`);
-  const cell = () => owner.getByTestId('home-month-grid').locator(`[data-day="${today}"]`); // 휴대폰용 접힌 주 줄(PC 숨김)에도 같은 날짜가 있어 월 격자로 한정
-  await cell().click();
-  await owner.getByTestId('home-month-list').waitFor();
-  await cell().click();
-  await owner.waitForURL(/\/calendar\?view=dayGridMonth&date=/);
-  await owner.goto(BASE + '/');
+  await owner.getByTestId('home-week').locator('ul, p').first().waitFor(); await owner.waitForLoadState('networkidle');
+  // PC: 빠른 만들기·공지는 이번 주 목록 오른쪽
+  const [wk, q] = await Promise.all([owner.getByTestId('home-week').boundingBox(), owner.getByTestId('home-quick').boundingBox()]);
+  assert.ok(q.x > wk.x + wk.width - 5 && Math.abs(q.y - wk.y) < 40, `빠른 만들기는 이번 주 목록 오른쪽 (${JSON.stringify([wk, q])})`);
+  // 숫자 칸은 0이면 숨김 · 누르면 걸러진 목록
+  const nums = await owner.getByTestId('home-todo').locator('[data-testid^="home-cell-"]').evaluateAll((els) => els.map((e) => e.querySelectorAll('span')[1]?.textContent ?? ''));
+  assert.ok(nums.every((n) => n !== '0'), `0인 칸 없음 ${nums}`);
   await owner.screenshot({ path: `${SHOTS}/59-home-dashboard.png`, fullPage: true });
 });
 await step('V14 35·V37 2·10/16 캘린더 빈 칸 = 일정만(업무 전환 없음), "할 일로도 만들기" = 누른 시각이 마감인 연결 업무 · 홈 미니 캘린더 그날 업무 + [＋업무][＋일정]', async () => {
@@ -1375,9 +1369,13 @@ await step('V3-6 휴대폰: 다른 사람 묶음에서 입력 후 바깥 누르�
   await g.locator('[data-row]').first().waitFor();
   assert.equal((await titles())[0], last, '새로고침 후에도 맨 위');
   await m.screenshot({ path: `${SHOTS}/62-mobile-add-other.png` });
-  // 홈: 기한 지난 업무 경고 띠
+  // 홈: 기한 지난 내 업무 = '오늘 처리할 것' 빨간 칸(#1110 — 예전 경고 띠 자리) → 누르면 기한 지남 목록
+  const od = (await ctx.owner.ok('POST', '/api/tasks', { title: '홈 기한 지남 칸 시험', orgUnitId: ctx.siteA, assigneeId: ctx.ownerId, dueDate: addDays(today, -1), approvalRequired: false })).id;
   await m.goto(BASE + '/');
-  await m.getByTestId('overdue-banner').getByText(/기한 지난 업무 \d+건/).waitFor();
+  await m.getByTestId('home-cell-overdue').getByText('기한 지남').waitFor();
+  await m.getByTestId('home-cell-overdue').click();
+  await m.waitForURL(/\/tasks\?view=overdue/);
+  await ctx.owner.ok('DELETE', `/api/tasks/${od}`);
   await mc.close();
 });
 await step('심사용 체험 계정: 대표가 사용자 관리에서 버튼 → 초대 링크·안내, 목록에 "심사용" 표시', async () => {
@@ -1643,12 +1641,12 @@ await step('V6-2 휴대폰(Android Chrome 터치): 행을 0.5초 꾹 눌러 위�
 });
 
 await step('V14 40번 휴대폰: 꾹 눌러 선택 → 완료 → 다시 선택 → 삭제 뒤에도 다음 터치로 상세가 열림(선택 모드·끌기 상태 정리, 안내가 막대를 덮지 않음)', () => v1440({ browser, desk, ctx, sql, BASE, SHOTS }));
-await step('V5 휴대폰: 홈 이번 주 날짜 줄 → 빠른 등록·업무에도 추가 → 주 보기 블록 제목·업무 연동 → 삭제 시 연결 업무도', async () => {
+await step('V5 휴대폰: 홈 빠른 만들기 일정 → 빠른 등록·업무에도 추가 → 주 보기 블록 제목·업무 연동 → 삭제 시 연결 업무도', async () => {
   const mc = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   const m = await mc.newPage();
   await m.goto(BASE + '/');
   assert.equal(await m.getByTestId('home-create').count(), 0, '홈에 따로 만들기 버튼 없음(V6)');
-  await m.locator(`[data-day="${today}"]`).first().click({ position: { x: 20, y: 30 } }); // 이번 주의 오늘 줄 → 빠른 등록
+  await m.getByTestId('home-quick-event').click(); // #1110: 홈 '빠른 만들기 · 일정' → 오늘 날짜 빠른 등록(예전: 이번 주 오늘 줄)
   const sheet = m.getByTestId('quick-create');
   await sheet.waitFor();
   await sheet.getByLabel('빠른 입력 제목').fill('V5 홈에서 만든 거래처 미팅 준비');
@@ -1919,8 +1917,8 @@ await step('V9: 자료실 올리기·검색 → 홈 "AI에게 요청" → 비서
     { content: [{ type: 'tool_use', id: 'e2', name: 'propose_attach_file', input: { taskId: task, fileId: f.id } }], stop_reason: 'tool_use' },
     { content: [{ type: 'text', text: '로고를 찾았습니다. 확인을 누르면 첨부됩니다.' }], stop_reason: 'end_turn' }] }) });
   await owner.goto(BASE + '/');
-  await owner.getByTestId('home-ai').getByLabel('AI에게 요청').fill('다짐 로고 찾아서 전단지 업무에 붙여줘');
-  await owner.getByTestId('home-ai').getByRole('button', { name: '요청' }).click();
+  // #1110 홈 개편: 홈의 'AI에게 요청' 줄은 없어짐(AI 비서는 오른쪽 아래 단추·메뉴) — 같은 주소(/assistant?q=)로 바로 요청
+  await owner.goto(BASE + '/assistant?q=' + encodeURIComponent('다짐 로고 찾아서 전단지 업무에 붙여줘'));
   await owner.waitForURL(/\/assistant/);
   const card = owner.getByTestId('ai-proposal');
   await card.getByText(/다짐 로고 E2E → V9 전단지 제작/).waitFor();
@@ -2522,7 +2520,7 @@ await step('V14 12·13번: 업무 여러 개 선택(Shift 범위) → 마감 일
 await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)', async () => {
   const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const p = await login(c, 'ceo@dagym.test', 'owner-pass-1234');
-  await p.getByRole('heading', { name: '전체 현황' }).waitFor();
+  await p.getByTestId('home-todo').waitFor() /* #1110 홈 */;
   await p.waitForTimeout(400);
   await p.screenshot({ path: `${SHOTS}/40-dashboard-1440.png`, fullPage: true });
   await p.goto(BASE + '/tasks?mode=list');

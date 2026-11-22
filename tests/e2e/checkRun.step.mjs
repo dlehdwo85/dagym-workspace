@@ -54,14 +54,13 @@ export async function checkRun({ owner, ctx, BASE, SHOTS }) {
   const row = owner.getByTestId('check-followup-row').filter({ hasText: '화장실' });
   await row.getByText('조치 중').waitFor();
   await row.getByText(/다짐 강남점 · 화장실 · 이직원/).waitFor();
-  // 점검 2단계 남은 것(11/20): 홈 '점검' 카드(조치 중 1 · 마지막 점검) → 점검 화면 [업무 목록에서 보기] = 업무 목록 '점검 보완만'
+  // #1110 홈 개편(대표 11/22): 점검 카드 대신 '회사 현황 · 점검·계약' 칸(조치 중 n) → 누르면 점검 화면
   await owner.goto(BASE + '/');
-  const hc = owner.getByTestId('home-check'); await hc.waitFor({ timeout: 15000 });
-  await hc.getByTestId('home-check-requested').getByText('조치 중 1').waitFor();
-  await hc.getByTestId('home-check-last').getByText(/마지막 점검 .*다짐 강남점 · 기본 매장 점검/).waitFor();
-  await fit('홈 점검 카드');
+  const hc = owner.getByTestId('home-cell-check'); await hc.waitFor({ timeout: 15000 });
+  await hc.getByText('조치 중 1').waitFor();
+  await fit('홈 회사 현황 점검 칸');
   await hc.scrollIntoViewIfNeeded(); await owner.screenshot({ path: `${SHOTS}/check-home-card-mobile.png` });
-  await hc.getByTestId('home-check-go').click();
+  await hc.click(); // → 점검 화면 [업무 목록에서 보기] = 업무 목록 '점검 보완만'
   await owner.waitForURL((u) => u.pathname === '/check');
   await owner.getByTestId('check-tasks-link').click();
   await owner.waitForURL(/\/tasks\?.*tag=/);
