@@ -92,10 +92,11 @@ export function DropZone({ onFiles, onFile, accept, acceptLabel, children, class
   };
   return (
     <div className={cx('relative', className)} data-testid={testid}
-      onDragEnter={(e) => { if (disabled || !has(e)) return; e.preventDefault(); setOver((n) => n + 1); }}
-      onDragOver={(e) => { if (disabled || !has(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
-      onDragLeave={(e) => { if (disabled || !has(e)) return; setOver((n) => Math.max(0, n - 1)); }}
-      onDrop={(e) => { if (disabled || !has(e)) return; e.preventDefault(); setOver(0); if (e.dataTransfer.files?.length) dropped(e.dataTransfer.files); }}>
+      // 안쪽 칸이 받으면 바깥 칸(겹친 DropZone)은 받지 않게 stopPropagation — 한 번 놓으면 한 번만 올라감
+      onDragEnter={(e) => { if (disabled || !has(e)) return; e.preventDefault(); e.stopPropagation(); setOver((n) => n + 1); }}
+      onDragOver={(e) => { if (disabled || !has(e)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
+      onDragLeave={(e) => { if (disabled || !has(e)) return; e.stopPropagation(); setOver((n) => Math.max(0, n - 1)); }}
+      onDrop={(e) => { if (disabled || !has(e)) return; e.preventDefault(); e.stopPropagation(); setOver(0); if (e.dataTransfer.files?.length) dropped(e.dataTransfer.files); }}>
       {children}
       {over > 0 && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-card border-2 border-dashed border-accent-500 bg-accent-50/90 text-sm font-semibold text-accent-700">
