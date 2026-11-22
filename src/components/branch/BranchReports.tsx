@@ -4,7 +4,7 @@ import { FileDown, FileUp, Loader2, Plus, Printer, Settings2, Sparkles, Trash2 }
 import { api, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Field, Loading, Modal, PageHeader, askConfirm, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ReportView, STATE_TONE, type Body, type Line } from './ReportView';
-import { MonthlyView, delta, usageTotal, type MonthlyBody } from './MonthlyView';
+import { MembersSection, MonthlyView, delta, usageTotal, type MonthlyBody } from './MonthlyView';
 
 /**
  * #1096 지점 주간보고(다짐 전용) — 설계 docs/branch-report-design.md, 대표 결정 11/21.
@@ -270,6 +270,25 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
       onChange();
     } catch (e: any) { toast.error(e.message); } finally { setUpBusy(false); }
   };
+  // #1112: 하이링크 회원목록 엑셀 → 회원(이용권) 현황(서버가 집계만 저장, 이름·연락처·원본 저장 안 함)
+  const [memBusy, setMemBusy] = useState(false);
+  const uploadMembers = async (f: File | undefined) => {
+    if (!f) return;
+    if (f.size > 3_200_000) { toast.error('3MB 가 넘습니다'); return; }
+    setMemBusy(true);
+    try {
+      if (dirty) await api(`/api/branch-reports/${r.id}`, { method: 'PUT', body: b });
+      const buf = new Uint8Array(await f.arrayBuffer()); let bin = ''; for (let k = 0; k < buf.length; k += 0x8000) bin += String.fromCharCode(...buf.subarray(k, k + 0x8000));
+      const res = await api<any>(`/api/branch-reports/${r.id}/member-file`, { body: { name: f.name, b64: btoa(bin) } });
+      toast.ok(`회원목록을 집계했습니다 — 활성 이용권 ${res.active.toLocaleString('ko-KR')}건${res.excluded ? ` · 시험·직원 줄 ${res.excluded}건 제외` : ''}${res.prev ? '' : ' · 비교할 지난달 없음'}`);
+      onChange();
+    } catch (e: any) { toast.error(e.message); } finally { setMemBusy(false); }
+  };
+  const toggleExclude = async (on: boolean) => {
+    const before = b; if (b.members) setB({ ...b, members: { ...b.members, exclude: on } }); // 바로 바뀌어 보이게(저장 표시는 건드리지 않음)
+    setMemBusy(true);
+    try { if (dirty) await api(`/api/branch-reports/${r.id}`, { method: 'PUT', body: before }); await api(`/api/branch-reports/${r.id}/member-file`, { method: 'PATCH', body: { exclude: on } }); onChange(); } catch (e: any) { setB(before); toast.error(e.message); } finally { setMemBusy(false); }
+  };
   const removeUsage = async () => {
     if (!(await askConfirm('첨부한 하이링크 이용현황 파일을 뺄까요? 표에 채운 값은 그대로 둡니다.', { title: '첨부 빼기', ok: '빼기' }))) return;
     try { await api(`/api/branch-reports/${r.id}/usage-file`, { method: 'DELETE' }); toast.ok('첨부를 뺐습니다'); onChange(); } catch (e: any) { toast.error(e.message); }
@@ -328,6 +347,14 @@ function MonthlyEditor({ r, canWrite, onChange, onEvidence }: { r: any; canWrite
             <td className="whitespace-nowrap px-1">{x.diff || d.diff || '-'}</td><td className="whitespace-nowrap px-1">{x.rate || d.rate || '-'}</td><td><Del on={() => set({ ...b, usage: b.usage.filter((_, j) => j !== k), usageTotal: null })} /></td></tr>); })}
           {(b.usage.length > 0 || b.usageTotal) && <tr className="font-semibold"><td className="py-1">{tot.item || '전 시설 합계'}</td><td>{tot.prev || '-'}</td><td>{tot.cur || '-'}</td><td className="px-1">{tot.diff || dt.diff || '-'}</td><td className="px-1">{tot.rate || dt.rate || '-'}</td><td /></tr>}</tbody></table></div>
       <Add label="시설" on={() => set({ ...b, usage: [...b.usage, { item: '', prev: '', cur: '', diff: '', rate: '' }], usageTotal: null })} />
+      <h3 className="text-sm font-semibold">회원(이용권) 현황 <span className="font-normal text-xs text-ink-3">— 하이링크 회원목록 엑셀을 올리면 묶음별·세대·부과 합계를 셉니다(이름·연락처는 읽지 않고, 파일은 보관하지 않음)</span></h3>
+      <div className="flex flex-wrap items-center gap-3 text-sm" data-testid="branch-member-file">
+        {canWrite && <label className={cx('inline-flex cursor-pointer items-center gap-1.5 rounded-input border border-line px-2.5 py-1.5 hover:bg-slate-50', memBusy && 'opacity-60')}>
+          {memBusy ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}하이링크 회원목록 올리기
+          <input type="file" className="hidden" accept=".xlsx" onChange={(e) => { void uploadMembers(e.target.files?.[0]); e.target.value = ''; }} disabled={memBusy} data-testid="branch-member-upload" /></label>}
+        {b.members && <label className="inline-flex items-center gap-1.5 text-xs text-ink-2"><input type="checkbox" checked={b.members.exclude} onChange={(e) => void toggleExclude(e.target.checked)} disabled={!canWrite || memBusy} data-testid="branch-member-exclude" />시험·직원 줄 제외({b.members.excluded}건 — 이용권명 &lsquo;테스트&rsquo;, 동 999·9999·111·빈칸)</label>}
+      </div>
+      {b.members ? <div className="text-[13px]"><MembersSection m={b.members} title={false} /></div> : <p className="text-xs text-ink-3">아직 올린 회원목록이 없습니다.</p>}
       <Field label="메모"><textarea className={cx(inputCls, 'min-h-[48px] text-[13px]')} value={b.notes} onChange={(e) => set({ ...b, notes: e.target.value })} disabled={!canWrite} /></Field>
       {canWrite && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={save} disabled={busy || !dirty} data-testid="branch-monthly-save">저장</Button><Button onClick={submit} disabled={busy} data-testid="branch-monthly-submit">제출</Button></div>}
     </section>

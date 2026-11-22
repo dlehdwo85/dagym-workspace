@@ -215,3 +215,29 @@ test("로컬 11/21 실제 하이링크 PDF: 머리줄 '증감률(%)' 이 '증감
   const c = parseHilinkUsage('시설 | 전달 인원 | 이번달 인원 | 인원 증감 | 증감률(%)\n헬스장 | 1,690명 | 1,696명 | +6명 | ▲ 0.4 %\n스크린골프(2층) 30명 31명 +1명 ▲ 3.3%');
   assert.deepEqual(c.rows.map((r) => [r.item, r.rate]), [['헬스장', '▲0.4%'], ['스크린골프(2층)', '▲3.3%']], "'|' 칸 구분·떨어진 % · 괄호 든 이름");
 });
+
+test('#1112 하이링크 회원목록 집계: 이용권 묶음·활성(상태를 믿음)·세대·부과·신규·종료·동별 · 시험·직원 줄 제외/포함 · 이름·연락처 칸은 안 읽음', async () => {
+  const m = await import('../../src/lib/branchReport/memberList.ts');
+  const g = (x) => m.groupOf(x);
+  assert.deepEqual(['헬스권', '(남) 헬스+골프+수영', '헬스장 락커 (소) ', '골프장 락커', '남자 독서실', '여자독서실', '오전 수영강습A (월수금 9시)', '어린이 수영', '수영 개인강습 8회(김코치)', '오후 요가', '줌바', '매트필라', '다이어트 댄스', '키즈 댄스', '골프레슨 8회', 'PT 8회', '테스트'].map(g),
+    ['헬스', '통합(헬스+골프+수영)', '락커', '락커', '독서실', '독서실', '수영 강습', '수영 강습', '수영 강습', 'GX', 'GX', 'GX', 'GX', 'GX', '골프 레슨', 'PT', '기타']);
+  const H = ['순번', '동', '호수', '이름', '연락처', '이용권명', '금액', '시작일', '종료일', '이용권 상태', '락커', '자리번호', '부과월'];
+  assert.equal(m.headerIndex(H).dong, 1); assert.equal(Object.values(m.headerIndex(H)).includes(3), false, '이름 칸(3)·연락처 칸(4)은 찾지 않음');
+  const R = [
+    ['1', '401', '1203', 'A', 'P', '헬스권', '50000', '2026-11-03', '', '활성', 'X', '', '매월'],
+    ['2', '401', '1203', 'B', 'P', '(여) 헬스+골프+수영', '120000', '2026-10-01', '', '활성', 'O', '12', '매월'],
+    ['3', '402', '101', 'C', 'P', '오전 수영강습A', '80000', '2026-09-01', '', '만료', 'X', '', '매월'],
+    ['4', '402', '101', 'D', 'P', '-', '0', '', '', '-', 'X', '', '매월'],
+    ['5', '999', '1', 'E', 'P', '헬스권', '0', '2026-11-01', '', '활성', 'X', '', '매월'],
+    ['6', '403', '505', 'F', 'P', '테스트', '0', '', '', '활성', 'X', '', '매월'],
+    ['7', '403', '505', 'G', 'P', 'PT 8회', '400000', '2026-07-01', '2026-11-15', '활성', 'X', '', '매월'],
+  ];
+  const r = m.aggregateMembers(H, R, '2026-11');
+  assert.equal(r.ok, true); assert.equal(r.excluded, 2);
+  assert.deepEqual([r.stats.active, r.stats.households, r.stats.billing, r.stats.newThisMonth, r.stats.endedThisMonth], [3, 2, 570000, 1, 1]);
+  assert.deepEqual(r.stats.byDong, { 401: 2, 403: 1 }); assert.equal(r.stats.groups['헬스'], 1); assert.equal(r.stats.groups['PT'], 1);
+  assert.deepEqual([r.statsAll.active, r.statsAll.households], [5, 3], '제외 끔');
+  assert.equal(m.aggregateMembers(['순번', '동'], [], '2026-11').ok, false, '필요한 칸이 없으면 실패');
+  assert.deepEqual(m.compare(6, 10), { diff: -4, rate: -40, drop: true }); assert.equal(m.compare(7, 10).drop, false, '정확히 30% 는 빨강 아님'); assert.equal(m.compare(3, null), null);
+  assert.equal(m.monthFromName('회원목록_2026-11-20.xlsx'), '2026-11');
+});

@@ -148,6 +148,49 @@ describe('#1096 2단계 월간 보고서', () => {
     const acts = (await sql`select count(*)::int as n from audit_logs where action = 'branch_report.usage_file'`)[0].n; assert.equal(acts, 4);
   });
 
+  test('#1112 하이링크 회원목록 엑셀 → 회원(이용권) 현황: \'전체\' 시트만 · 이름·연락처는 어디에도 남지 않음 · 전달 대비(30% 넘게 줄면 빨강) · 제외 켜기/끄기 · 엑셀·인쇄 · 막힘', async () => {
+    const { writeXlsx } = await import('../../src/lib/xlsx.ts');
+    const H = ['순번', '동', '호수', '이름', '연락처', '이용권명', '금액', '시작일', '종료일', '이용권 상태', '락커', '자리번호', '부과월'];
+    const rows = [
+      ['1', '401', '1203', '가나다회원', '010-9999-1111', '헬스권', '50000', '2026-10-03', '', '활성', 'X', '', '매월'],
+      ['2', '401', '1203', '라마바회원', '010-9999-2222', '(여) 헬스+골프+수영', '120000', '2026-09-01', '', '활성', 'O', '12', '매월'],
+      ['3', '402', '101', '사아자회원', '010-9999-3333', '남자 독서실', '30000', '2026-10-10', '', '활성', 'X', '', '매월'],
+      ['4', '999', '1', '직원회원', '010-9999-4444', '헬스권', '0', '2026-10-01', '', '활성', 'X', '', '매월'],
+      ['5', '403', '7', '차카타회원', '010-9999-5555', '테스트', '0', '', '', '활성', 'X', '', '매월'],
+    ];
+    // 동별 시트는 같은 내용(중복) — '전체' 만 읽어야 2배로 세지 않음
+    const x = writeXlsx([{ name: '전체', rows: [H, ...rows] }, { name: '401동', rows: [H, rows[0], rows[1]] }]);
+    // 지난달(9월) 집계를 먼저 넣어 둠(헬스 5 → 이번 달 1 = 80% 감소 → 빨강)
+    const prev = { active: 8, households: 6, billing: 500000, newThisMonth: 1, endedThisMonth: 0, groups: { '헬스': 5, '통합(헬스+골프+수영)': 1, 'GX': 0, '수영 강습': 0, '독서실': 2, '락커': 0, '골프 레슨': 0, 'PT': 0, '기타': 0 }, byDong: { 401: 4 }, rows: 8 };
+    await sql`insert into branch_member_stats (site_id, month, tenant, stats, stats_all, excluded) values (${siteA}, '2026-09', 'default', ${sql.json(prev)}, ${sql.json(prev)}, 0)`;
+    const up = (c, name, buf) => c.req('POST', `/api/branch-reports/${reportId}/member-file`, { name, b64: Buffer.from(buf).toString('base64') });
+    const r = (await up(ctx.staffA.client, '회원목록_2026-10-31.xlsx', x)).body;
+    assert.equal(r.active, 3, '활성 3(직원 999동·테스트 제외)'); assert.equal(r.excluded, 2); assert.equal(r.prev, true);
+    const mb = r.report.body.members;
+    assert.equal(mb.month, '2026-10'); assert.equal(mb.exclude, true); assert.equal(mb.stats.households, 2); assert.equal(mb.stats.billing, 200000);
+    assert.equal(mb.stats.groups['헬스'], 1); assert.equal(mb.prev.month, '2026-09');
+    // 이름·연락처는 보고서·집계 표·감사 기록 어디에도 없음
+    const blob = JSON.stringify(r.report.body) + JSON.stringify(await sql`select * from branch_member_stats`) + JSON.stringify(await sql`select detail from audit_logs where action like 'branch_report.member%'`);
+    assert.ok(!/회원"|가나다|라마바|010-9999/.test(blob), '이름·연락처 저장 안 함');
+    const p = await ctx.staffA.client.req('GET', `/branch-print/${reportId}`);
+    assert.match(p.body, /회원\(이용권\) 현황/); assert.match(p.body, /30% 넘게 줄어듦/); assert.match(p.body, /시험·직원 줄 2건 제외/);
+    // 제외 끄기 → 포함 집계로 보임
+    const off = await ctx.staffA.client.ok('PATCH', `/api/branch-reports/${reportId}/member-file`, { exclude: false });
+    assert.equal(off.report.body.members.exclude, false);
+    assert.match((await ctx.staffA.client.req('GET', `/branch-print/${reportId}`)).body, /시험·직원 줄 제외 안 함/);
+    const xl = await ctx.staffA.client.req('GET', `/api/branch-reports/${reportId}/xlsx`); assert.equal(xl.status, 200);
+    // 화면 저장으로 집계를 바꿀 수 없음
+    const cur = (await ctx.staffA.client.ok('GET', `/api/branch-reports/${reportId}`)).report.body;
+    const forged = await ctx.staffA.client.ok('PUT', `/api/branch-reports/${reportId}`, { ...cur, members: { ...cur.members, stats: { ...cur.members.stats, active: 999 } } });
+    assert.equal(forged.report.body.members.stats.active, 3);
+    // 막힘
+    assert.equal((await up(ctx.staffB.client, 'a.xlsx', x)).status, 404);
+    assert.equal((await up(ctx.staffA.client, 'a.csv', 'x')).status, 400);
+    assert.equal((await up(ctx.staffA.client, 'b.xlsx', writeXlsx([{ name: '전체', rows: [['순번', '동'], ['1', '401']] }]))).status, 400, '이용권명 머리줄 없음');
+    const [wk] = await sql`select id from branch_reports where site_id = ${siteA} and report_day = '2026-10-16'`;
+    assert.equal((await ctx.staffA.client.req('POST', `/api/branch-reports/${wk.id}/member-file`, { name: 'a.xlsx', b64: Buffer.from(x).toString('base64') })).status, 400, '주간보고에는 못 올림');
+  });
+
   test('주간보고 엑셀 내려받기', async () => {
     const [w] = await sql`select id from branch_reports where site_id = ${siteA} and report_day = '2026-10-16'`;
     const x = await ctx.staffA.client.req('GET', `/api/branch-reports/${w.id}/xlsx`);

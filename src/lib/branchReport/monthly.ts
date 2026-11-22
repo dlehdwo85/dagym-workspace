@@ -30,6 +30,9 @@ export const monthlyBodySchema = z.object({
   usageTotal: z.object({ item: s(100), prev: s(40), cur: s(40), diff: s(40), rate: s(40) }).nullable().default(null),
   usageFile: z.object({ name: s(200), size: z.number().default(0), parsed: z.boolean().default(false), rows: z.number().default(0), at: s(40) }).nullable().default(null),
   usageWeekly: z.array(z.object({ item: s(100), prev: s(40), cur: s(40) })).max(40).default([]),
+  // #1112: 하이링크 회원목록 집계(서버가 정함 — 화면 저장으로 못 바꿈). stats = 시험·직원 줄 제외, statsAll = 제외 안 함, exclude = 어느 쪽을 보일지
+  members: z.object({ month: z.string(), fileName: z.string(), at: z.string(), excluded: z.number(), exclude: z.boolean(),
+    stats: z.any(), statsAll: z.any(), prev: z.object({ month: z.string(), stats: z.any(), statsAll: z.any() }).nullable() }).nullable().default(null),
   unfinished: z.array(z.object({ title: s(300), since: s(20), lastWeek: s(20), state: s(20) })).max(60).default([]),
   resolved: z.array(z.object({ title: s(300), doneWeek: s(20) })).max(60).default([]),
   notes: z.string().max(2000).default(''),
