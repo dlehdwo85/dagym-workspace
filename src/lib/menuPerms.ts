@@ -45,6 +45,8 @@ export const MENUS = {
   check_report: { label: '점검 리포트', levels: ['none', 'view'], defaults: { owner: 'view', admin: 'view', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
   // 계약 관리 1단계(대표 11/19 · docs/contract-docs-design.md): 맺은 계약 보관·만료일 관리. 조회 = 목록·계약서 파일 열기 / 편집 = 등록·갱신·종료·파일 올리기. 금액·계약서가 보이므로 기본은 대표·본사 관리자만
   agreements: { label: '계약 관리(계약서 보관·만료 알림)', levels: ['none', 'view', 'edit'], defaults: { owner: 'edit', admin: 'edit', dept_lead: 'none', site_manager: 'none', staff: 'none' } },
+  // #1135(대표 11/23): 메모·주요 메모 — 메뉴는 기본 모두 사용, 무엇을 보는지는 메모마다 정한 사람만(대표·관리자도 자동 열람 없음)
+  memos: { label: '메모(주요 메모 포함)', levels: ['none', 'use'], defaults: { owner: 'use', admin: 'use', dept_lead: 'use', site_manager: 'use', staff: 'use' } },
 } as const;
 export type MenuKey = keyof typeof MENUS;
 export const LEVEL_LABEL: Record<string, string> = { none: '끔', view: '조회', edit: '조회·편집', use: '사용', delete: '삭제까지' };

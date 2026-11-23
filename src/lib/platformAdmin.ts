@@ -163,6 +163,7 @@ export async function tenantDeletion(u: SessionUser, tenant: string, i: z.infer<
     await sql.begin(async (tx) => {
       await tx`update tenants set status = 'deleted', deleted_at = now() where id = ${tenant}`;
       for (const r of await tx<{ id: string }[]>`select id from users where tenant = ${tenant}`) await anonymize(tx, r.id);
+      await tx`delete from memos where tenant = ${tenant}`; // #1135 영구 삭제 때 메모·주요 메모(암호문)도 함께 지움
     });
   }
   await audit(sql, u.id, `platform.tenant_${i.action}_delete`, 'tenant', null, { tenant }, ip);

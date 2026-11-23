@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, ListPartsCommand, AbortMultipartUploadCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, ListPartsCommand, AbortMultipartUploadCommand, ListMultipartUploadsCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { mkdir, writeFile, readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -109,6 +109,23 @@ export async function multipartTarget(key: string, mime: string, size: number): 
   return { method: 'PUT' as const, url: '', headers: { 'content-type': mime }, multipart: { uploadId: `local-${n}`, partSize: PART_SIZE, parts } };
 }
 /** 조각 업로드 완료 — 올린 조각을 한 파일로. 실패하면 조각을 버린다 */
+/** 로컬 11/23(D-10 확인 중 발견): 완료 전에 멈춘 조각 올리기(창 닫기·지우기)는 저장소에 '미완료 업로드'로 남는다(서버는 uploadId 를 보관하지 않아
+ *  지울 때 바로 취소할 수 없음). 하루 넘은 미완료 업로드를 취소해 공간·비용이 새지 않게 — 큰 파일 주소 유효 시간(최대 6시간)보다 충분히 김 */
+export async function abortStaleUploads(maxAgeHours = 24) {
+  if (!s3Configured()) return { aborted: 0, skipped: 'no_s3' as const };
+  const cutoff = Date.now() - maxAgeHours * 3600e3;
+  let aborted = 0, keyMarker: string | undefined, idMarker: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const r = await s3().send(new ListMultipartUploadsCommand({ Bucket: s3Env().bucket, KeyMarker: keyMarker, UploadIdMarker: idMarker, MaxUploads: 1000 }));
+    for (const up of r.Uploads ?? []) {
+      if (!up.Key || !up.UploadId || !up.Initiated || up.Initiated.getTime() > cutoff) continue;
+      await s3().send(new AbortMultipartUploadCommand({ Bucket: s3Env().bucket, Key: up.Key, UploadId: up.UploadId })).then(() => { aborted++; }).catch(() => {});
+    }
+    if (!r.IsTruncated) break;
+    keyMarker = r.NextKeyMarker; idMarker = r.NextUploadIdMarker;
+  }
+  return { aborted };
+}
 export async function completeMultipart(key: string, uploadId: string) {
   if (s3Configured()) {
     const parts: { ETag: string; PartNumber: number }[] = [];

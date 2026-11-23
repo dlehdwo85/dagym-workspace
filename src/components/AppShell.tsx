@@ -21,7 +21,7 @@ import { Onboarding } from './Onboarding';
 import { TourHost, restartTours } from './Tour';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Activity, BarChart3, Bell, Briefcase, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarPlus, Camera, Check, ChevronDown, ChevronsUpDown, CircleCheck, ClipboardCheck, Compass, Contact, FileBarChart, FileSignature, FileText, FolderClock, FolderKanban, FolderPlus, Gauge, Globe, HelpCircle, History, House, Keyboard, Landmark, LayoutTemplate, Library, Link2, ListTodo, LogOut, Mail, Megaphone, MessageCircle, MessageSquareText, Network, PanelLeftClose, PanelLeftOpen, PenTool, Phone, Plus, QrCode, Rocket, ScrollText, Search, Send, Settings, SlidersHorizontal as SlidersIcon, SquarePen, Stamp, Star, Target, TrendingUp, type LucideIcon, Users, Workflow, X } from 'lucide-react';
+import { Activity, NotebookPen, BarChart3, Bell, Briefcase, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarPlus, Camera, Check, ChevronDown, ChevronsUpDown, CircleCheck, ClipboardCheck, Compass, Contact, FileBarChart, FileSignature, FileText, FolderClock, FolderKanban, FolderPlus, Gauge, Globe, HelpCircle, History, House, Keyboard, Landmark, LayoutTemplate, Library, Link2, ListTodo, LogOut, Mail, Megaphone, MessageCircle, MessageSquareText, Network, PanelLeftClose, PanelLeftOpen, PenTool, Phone, Plus, QrCode, Rocket, ScrollText, Search, Send, Settings, SlidersHorizontal as SlidersIcon, SquarePen, Stamp, Star, Target, TrendingUp, type LucideIcon, Users, Workflow, X } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
@@ -182,7 +182,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const relabel = (n: NavItem): NavItem => (n.href === '/reports/mine' ? { ...n, label: '보고', href: session.features.branchWriter ? '/branch-reports' : '/reports/mine' } : n);
   const adminMenu = ADMIN_MENU.filter((n) => n.href !== '/reports' && (menus[ADMIN_KEY[n.href]] ?? 'none') !== 'none').map((n) => (inApp && n.href === '/admin/usage' ? { ...n, label: '사용량' } : n)); // 앱 안: 요금제 글자 없이
   const nav: NavItem[] = [...NAV.map(relabel), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : []), ...(session.features.library ? [{ href: '/library', label: '자료실', icon: Library }] : []),
-    ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: MessageSquareText }] : [])];
+    ...(session.features.ai ? [{ href: '/assistant', label: 'AI 비서', icon: MessageSquareText }] : []),
+    ...((menus.memos ?? 'use') !== 'none' ? [{ href: '/memos', label: '메모', icon: NotebookPen }] : [])]; // #1135 메모·주요 메모(메모마다 볼 사람)
   // V41: 영업·마케팅 공간 메뉴(단계 2·4에서 채움) — 업무·일정·자료·AI 는 업무 공간 것을 함께 씀
   // 대표 10/21 12:00 영업 재편 3): 홈 → 영업 기회 허브(모든 원천 입구: 신규 현장·시설·협력사·계약만료·공공데이터·지역별) → 입찰·공고 → 리드·거래처(진행 단계 포함) → 제안·계약 → 데이터 설정. '파이프라인' 메뉴 없음(리드 안 단계별 보기)
   const spaceNav: NavItem[] = space === 'sales' ? [{ href: '/s/sales', label: '홈', icon: TrendingUp }, { href: '/s/sales/hub', label: '영업 기회 허브', icon: Building2 } /* #611(대표 10/25): '입찰·공고' 메뉴는 허브 '입찰' 탭으로 합침(옛 주소는 넘김) */, { href: '/s/sales/leads', label: '영업 진행', icon: Users } /* #614 대표 결정 10/25 19:00: '리드·거래처' → '영업 진행' */, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { href: '/s/sales/support', label: '지원사업', icon: Landmark } /* #450 — 하단 탭에는 안 넣음(#438) */, { href: '/s/sales/sources', label: '데이터 설정', icon: SlidersIcon }] : space === 'marketing' ? [
@@ -203,7 +204,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
   const sp_ = space === 'work' ? '' : `?space=${space}`;
   const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'), byHref('/mail/outbox'),
-    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), byHref('/notices'), byHref('/check'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: MessageSquareText }] : [])];
+    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), ...((menus.memos ?? 'use') !== 'none' ? [{ href: '/memos', label: '메모', icon: NotebookPen }] : []) /* #1135 */, byHref('/notices'), byHref('/check'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: MessageSquareText }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);

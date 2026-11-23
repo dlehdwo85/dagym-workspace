@@ -12,5 +12,9 @@ export async function putTrash(sql: Sql, i: { tenant: string; kind: TrashKind; r
 /** 정기 실행: 30일 지난 휴지통 기록 비우기 */
 export async function trashTick(sql: Sql = db()) {
   const r = await sql`delete from trash_records where expires_at < now()`;
-  return { purged: r.count };
+  const memos = await (await import('./memos')).memoPurge(sql); // #1135 메모 휴지통 30일(암호문까지 완전히)
+  // 로컬 11/23: 하루 넘은 미완료 조각 올리기 취소 — KST 4시대 tick 에서만(목록 조회 1번이면 끝)
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(new Date()));
+  const uploads = hour === 4 ? await (await import('./storage')).abortStaleUploads().catch((e) => ({ aborted: 0, error: String((e as Error).message).slice(0, 120) })) : null;
+  return { purged: r.count, memos, uploads };
 }
