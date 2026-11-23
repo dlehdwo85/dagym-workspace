@@ -36,7 +36,7 @@ export default function NoticesPage() {
                     {!n.published && <span className="rounded bg-slate-100 px-1.5 text-[11px] text-ink-2">예약 {fmtDateTime(n.publish_at)}</span>}
                   </div>
                   <div className="line-clamp-2 text-xs text-ink-2">{n.body}</div>
-                  <div className="mt-0.5 text-[11px] text-ink-3">{n.created_by_name} · {fmtDateTime(n.publish_at)} · 대상 {AUD[n.audience.type]}{n.file_ids.length ? ` · 📎 ${n.file_ids.length}` : ''}</div>
+                  <div className="mt-0.5 text-[11px] text-ink-3">{n.created_by_name} · {fmtDateTime(n.publish_at)} · 대상 {AUD[n.audience.type]}{n.file_ids.length ? ` · 첨부 ${n.file_ids.length}` : ''}</div>
                 </div>
               </Link>
             </li>

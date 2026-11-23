@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageCircle, Sparkles } from 'lucide-react';
+import { MessageCircle, MessageSquareText } from 'lucide-react';
 import { api } from '@/components/client';
 import { cx } from '@/components/ui';
 
@@ -47,7 +47,7 @@ export function ChatBubble({ unread, ai, alarm }: { unread: number; ai: boolean;
   return (
     <div className="fixed right-4 z-[39] flex flex-col items-end gap-2 sm:hidden [[data-chat-room]_&]:hidden" style={{ bottom: 'calc(52px + var(--sab) + 14px)' }} data-testid="chat-bubble-wrap">
       {ai && <button type="button" onClick={() => router.push('/assistant')} aria-label="AI 비서" data-testid="chat-bubble-ai"
-        className="flex size-9 items-center justify-center rounded-full border border-line bg-white text-violet-700 shadow-card active:scale-95"><Sparkles className="size-4" /></button>}
+        className="flex size-9 items-center justify-center rounded-full border border-line bg-white text-ink-2 shadow-card active:scale-95"><MessageSquareText className="size-4" /></button>}
       <button type="button" onClick={() => { if (longFired.current) return; openChat(); }} onTouchStart={start} onTouchEnd={end} onTouchCancel={end} onMouseDown={start} onMouseUp={end} onMouseLeave={end}
         onContextMenu={(e) => e.preventDefault()} aria-label={`메신저${unread ? ` · 안 읽음 ${unread}` : ''}${ai ? ' (길게 누르면 AI 비서)' : ''}`} data-testid="chat-bubble"
         className={cx('relative flex size-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg active:scale-95', busy && 'opacity-70')}>

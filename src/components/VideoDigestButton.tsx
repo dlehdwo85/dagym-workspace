@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Clapperboard, Loader2 } from 'lucide-react';
 import { Modal, cx, toast } from './ui';
 import { runVideoDigest, type VideoDigestResult } from './videoDigest';
 
@@ -28,7 +28,7 @@ export function VideoDigestButton({ fileId, title, mode = 'review', className }:
   return (
     <>
       <button type="button" onClick={run} disabled={!!status} className={cx('mt-1 inline-flex h-7 items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 text-[11px] font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-60', className)} title="장면·음성만 AI 에 보내 요약과 검토 의견을 받습니다(영상 원본은 안 보냄)" data-testid="video-digest-btn">
-        {status ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}{status || (mode === 'review' ? 'AI 영상 검토' : 'AI 영상 요약')}
+        {status ? <Loader2 className="size-3 animate-spin" /> : <Clapperboard className="size-3" />}{status || (mode === 'review' ? 'AI 영상 검토' : 'AI 영상 요약')}
       </button>
       <Modal open={!!result} onClose={() => setResult(null)} title={`AI 영상 ${mode === 'review' ? '검토' : '요약'} — ${title}`}>
         {d && (

@@ -1,5 +1,5 @@
 import { db } from './db';
-import { accessibleUnitIds, isAdmin, taskVisibleSql } from './access';
+import { accessibleUnitIds, atLeast, isAdmin, taskVisibleSql } from './access';
 import { assignedSql } from './taskAssignees';
 import { addDays, todaySeoul, weekRangeSeoul } from './time';
 import { tenantOf, type SessionUser } from './types';
@@ -18,7 +18,7 @@ export async function homeSummary(u: SessionUser) {
   const { userSpaces } = await import('./spaces');
   const spaces = await userSpaces(u, sql).catch(() => [] as string[]);
 
-  const [mine, approvals, marketing, bids, unread, notices] = await Promise.all([
+  const [mine, approvals, marketing, bids, unread, notices, review] = await Promise.all([
     // 내 업무: 기한 지남(가장 오래된 날) · 오늘 마감
     safe(async () => {
       const [r] = await sql<{ overdue: number; oldest: string | null; due_today: number }[]>`select
@@ -40,6 +40,14 @@ export async function homeSummary(u: SessionUser) {
     safe(async () => (await import('./chat')).unreadTotal(u)),
     // 공지 최근 2개
     safe(async () => (await (await import('./announcements')).listNotices(u, { limit: 2 })).notices.map((n: any) => ({ id: n.id, title: n.title, important: n.important, read: n.read, at: n.publish_at ?? n.created_at }))),
+    // 검토 대기(현장 관리자 이상) — #1110 개편 때 빠진 [완료 확인]·[보완 요청] 바로 처리(예전 홈과 같은 범위: 볼 수 있는 업무 중 검토 요청된 것, 내가 요청자인 것 먼저)
+    atLeast(u, 'site_manager') ? safe(async () => {
+      const rows = await sql<{ id: string; title: string; requested_by: string | null; requested_by_name: string | null; n: number }[]>`select t.id, t.title, t.requested_by,
+          (select name from users ru where ru.id = t.requested_by) as requested_by_name, count(*) over ()::int as n
+        from tasks t where t.deleted_at is null and t.parent_id is null and t.status = 'review' and ${taskVisibleSql(sql, u, units)}
+        order by (t.requested_by = ${u.id}) desc, t.review_requested_at nulls last limit 3`;
+      return { count: rows[0]?.n ?? 0, items: rows.map(({ n: _n, ...x }) => x) };
+    }) : Promise.resolve(null),
   ]);
 
   // 회사 현황(대표·관리자만): 영업 · 지점 보고 · 점검·계약 · 이번 달 광고비
@@ -93,6 +101,7 @@ export async function homeSummary(u: SessionUser) {
       overdue: mine?.overdue ?? 0, overdueOldestDays: mine?.oldestDays ?? null, dueToday: mine?.dueToday ?? 0,
       approvals: approvals ?? 0, marketing: marketing ? marketing.drafts + marketing.ops : null, marketingSplit: marketing, bids, unread: unread ?? 0,
     },
+    review, me: u.id,
     company, notices: notices ?? [],
   };
 }

@@ -111,6 +111,9 @@ import { messengerV5 } from './messengerV5.step.mjs';
 import { attachEdit } from './attachEdit.step.mjs';
 import { econtractPdf } from './econtractPdf.step.mjs';
 import { drop1122 } from './drop1122.step.mjs';
+import { convert1125 } from './convert1125.step.mjs';
+import { review1117 } from './review1117.step.mjs';
+import { shots1113 } from './shots1113.step.mjs';
 import { payTest192 } from './payTest192.step.mjs';
 import { platformTabs } from './platformTabs.step.mjs';
 import { mktDraftQuality } from './mktDraftQuality.step.mjs';
@@ -1581,13 +1584,17 @@ await step('V3-7 휴대폰: 업무 행 빈 곳 탭 → 상세 열림, 칩 탭 �
   assert.equal(await chip.getAttribute('aria-expanded'), 'true', '칩 선택 창 열림');
   await m.keyboard.press('Escape');
   // 홈 목록
+  await ctx.owner.ok('POST', '/api/tasks', { title: 'V3-7 홈 줄 업무', assigneeId: ctx.ownerId, dueDate: today, approvalRequired: false }); // #1110 새 홈: 이번 주 목록에 업무 줄이 있게(오늘 마감)
   await m.goto(BASE + '/');
+  await m.getByTestId('home-week').locator('ul, p').first().waitFor();
+  if (await m.getByTestId('home-week-more').count()) await m.getByTestId('home-week-more').click(); // #1110: 7줄을 넘으면 [외 n건 더 보기] — 업무 줄이 일정 뒤에 있을 수 있음
   const hrow = m.locator('[data-home-task]').first();
   await hrow.waitFor();
   const hid = await hrow.getAttribute('data-home-task');
   await hrow.evaluate((el) => el.scrollIntoView({ block: 'center' })); // 달성률 카드 아래로 밀려 하단 탭에 가리지 않게
   const hb = await hrow.boundingBox();
-  await m.touchscreen.tap(hb.x + hb.width * 0.5, hb.y + hb.height - 3);
+  // #1113: 줄 아래 가장자리(-3px)를 누르면 휴대폰 크롬의 '가까운 누를 곳' 보정이 바로 아래 줄(일정)로 옮겨 감 — 왼쪽 날짜 칸(링크·칩 아님) 세로 가운데를 누른다
+  await m.touchscreen.tap(hb.x + 20, hb.y + hb.height / 2);
   await m.waitForURL((u) => new URL(u).searchParams.get('task') === hid); // 300차 #850: 홈 줄을 눌러도 패널(휴대폰 전체 시트)
   await mc.close();
 });
@@ -2456,7 +2463,7 @@ await step('V14 11·8번: 모든 화면 AI 비서(✨ 패널·화면별 추천 �
     { content: [{ type: 'tool_use', id: 'doc1', name: 'propose_create_document', input: { title: 'E2E 회의 정리', content: '# 결정\n- 전단 배포 금요일', folder: '회의록' } }], stop_reason: 'tool_use' },
     { content: [{ type: 'text', text: '사진 두 장으로 문서를 준비했습니다. 확인을 누르면 만들어집니다.' }], stop_reason: 'end_turn' }] }) });
   await dock.getByRole('button', { name: '보내기' }).click(); // 글 없이 사진만
-  await dock.getByText('📁 저장 폴더: 회의록').waitFor();
+  await dock.getByText('저장 폴더: 회의록').waitFor();
   const sent = (await fetch(`${FAKE}/__state`).then((r) => r.json())).anthropic.slice(n0)[0].body.messages.at(-1).content;
   assert.equal(sent.filter((b) => b.type === 'image').length, 2, '사진 2장이 AI 에 전달');
   await dock.getByRole('button', { name: '확인' }).click();
@@ -3122,6 +3129,9 @@ await step('메신저 3차(대표 10/20 카톡 수준 C12·D14·D15): 머리줄 
 await step('#533 업무 첨부 [고치기](대표 10/23 23:50): 첨부 있는 업무 제목·설명 고쳐 저장 → 그대로 · 글 고쳐 v2(글 고침) · 사진 돌리기·펜 v2(가로·세로 바뀜, 크기 표시 바로 — #258) · PDF 글자·체크 v2(긴 글 줄바꿈·글자 줄이기, 넘치면 저장 막기 — #258) · 저장 PDF 다시 읽기(글 그대로·한글 그려짐 — 147차) · 한글 = 내려받아 고친 뒤 올리기 안내 → v2 · 휴대폰 폭 [고치기]', () => attachEdit({ owner, ctx, BASE, SHOTS }));
 await step('139차 전자계약 2차 화면: [새 계약] PDF 올리기 → 서명자 → 칸 놓기(쪽 그림·서명·글자) → 보내기 → 받은 사람 휴대폰 화면 PDF 쪽·칸 채우기·서명 완료', () => econtractPdf({ owner, ctx, sql, BASE, SHOTS }));
 await step('#1122 끌어다 놓기: 전자계약 1단계 점선 상자(형식 안내·첫 번째만)·놓는 칸 아닌 곳은 화면 그대로·계약 관리 계약서 파일', () => drop1122({ owner, ctx, sql, BASE, SHOTS }));
+await step('#1125 2단계 워드·엑셀 → PDF(브라우저 안 변환): 쪽 미리보기·서버로는 PDF 만', () => convert1125({ owner, BASE, SHOTS }));
+await step('#1117 지점 보고 민감 내용 검사: 걸린 곳·가리기·그대로 두기 → 승인 대기 → 승인 = 고객사 제출용', () => review1117({ owner, ctx, sql, BASE, SHOTS }));
+await step('#1113 화면 사진(SHOT_OUT 있을 때만): 주요 8화면 390·768·1440', () => shots1113({ owner, ctx, sql, BASE }));
 await step('192차 결제 시험 화면(대표 10/27): 결제 모듈 상태(설정 필요·정상·확인 필요 + 운영 결제 방식) + [시험 결제]만 · 시험 회사 만들기·목록·지우기 없음 · 숨은 시험 계정 하나 다시 씀 · 고객사 목록에 없음 · 휴대폰 폭', () => payTest192({ owner, ctx, sql, BASE, SHOTS }));
 await step('#565 플랫폼 운영 정리(대표 10/24 저녁 1): 오늘 볼 것 5개 → 누르면 그 탭 · 종류별 탭 5개·한 줄 설명·주소 유지 · 예전 주소(paytest·#support) · 휴대폰 폭', () => platformTabs({ owner, ctx, sql, BASE, SHOTS }));
 await step('#235 마케팅 시안 품질 ⓐ·ⓔ(로컬 10/24 저녁 6): 브랜드 키트 이번 달 소식(기간 기본 30일)·잘 된 예시 글(형식별·좋은 점·빼기) → 승인한 글 [좋은 예시로 저장]·[예시에서 빼기] → 휴대폰 넘침 없음', () => mktDraftQuality({ owner, ctx, BASE, SHOTS, sql }));

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Copy, Loader2, Mail, MessageSquare, Send, Sparkles, Trash2 } from 'lucide-react';
+import { Copy, Loader2, Mail, MessageSquare, Send, Trash2 } from 'lucide-react';
 import { api, useApi } from './client';
 import { Button, cx, inputCls, toast } from './ui';
 import { KakaoSend } from './KakaoSend';
@@ -40,16 +40,16 @@ export function TaskAssist({ taskId, onDraft }: { taskId: string; onDraft: (d: A
         {QUICK.map(([k, l]) => (
           <button key={k} type="button" onClick={() => run(k)} disabled={!!busy} data-testid={`assist-${k}`}
             className="inline-flex items-center gap-1 rounded-full border border-line bg-white px-2.5 py-1 text-xs font-medium text-ink-2 hover:border-brand-600 hover:text-brand-700 disabled:opacity-50">
-            {busy === k ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{l}</button>
+            {busy === k && <Loader2 className="size-3.5 animate-spin" />}{l}</button>
         ))}
         {msgs.length > 0 && <button type="button" onClick={clear} className="ml-auto rounded p-1 text-ink-3 hover:bg-slate-100" aria-label="대화 지우기"><Trash2 className="size-3.5" /></button>}
       </div>
       {msgs.length > 0 && (
         <div className="max-h-80 space-y-2 overflow-y-auto rounded-input bg-slate-50 p-2" data-testid="assist-messages">
           {msgs.map((m) => m.role === 'user' ? (
-            <p key={m.id} className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-brand-600 px-3 py-1.5 text-sm text-white">{m.content}</p>
+            <p key={m.id} className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-card rounded-br-sm bg-brand-600 px-3 py-1.5 text-sm text-white">{m.content}</p>
           ) : (
-            <div key={m.id} className="max-w-[95%] space-y-1.5 rounded-2xl rounded-bl-sm bg-white px-3 py-2 text-sm shadow-card" data-testid="assist-reply">
+            <div key={m.id} className="max-w-[95%] space-y-1.5 rounded-card rounded-bl-sm bg-white px-3 py-2 text-sm shadow-card" data-testid="assist-reply">
               {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
               {m.draft && (m.draft.subject || m.draft.body) && (
                 <div className="rounded-input border border-line p-2 text-[13px]" data-testid="assist-draft">

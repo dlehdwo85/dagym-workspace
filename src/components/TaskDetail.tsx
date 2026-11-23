@@ -10,16 +10,7 @@ import { useInApp } from '@/components/inApp';
 import { showTask } from '@/components/TaskPanelHost';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import {
-  BadgeCheck, Building2, CalendarClock, CalendarDays, Camera, Check, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash,
-  Bell, Hourglass, LayoutTemplate, Link2, ListFilter, Maximize2, Merge, MoreHorizontal, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck,
-  Stamp, Tag, Timer, CalendarCheck, Trash2, Type, UserRound, Users, X, CalendarRange, AlertTriangle, type LucideIcon,
-  Megaphone, Paperclip,
-  ChevronDown,
-  Sparkles,
-  MessageCircle,
-  Lock as LockIcon,
-MapPin, Undo2, } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, Bell, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarRange, Camera, Check, ChevronDown, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash, Hourglass, LayoutTemplate, Link2, ListFilter, Lock, Lock as LockIcon, MapPin, Maximize2, Megaphone, Merge, MessageCircle, MessageSquareText, MoreHorizontal, Paperclip, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck, SmilePlus, Stamp, Tag, Timer, Trash2, Type, type LucideIcon, Undo2, UserRound, Users, X } from 'lucide-react';
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtNum, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, FileKindIcon, attKindSummary, uploadTaskFiles } from '@/components/Attachments';
@@ -393,8 +384,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             {/* V14 23번: 휴대폰은 한 줄 — [📎][📷][자동 높이 입력][등록], @ 는 입력 중 자동완성으로만 */}
             {mobile ? (
             <div className="flex items-end gap-1 px-1.5 py-1.5">
-              <button type="button" onClick={() => clipRef.current?.click()} className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="파일 첨부">📎</button>
-              <button type="button" onClick={() => camRef.current?.click()} className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="사진 찍기">📷</button>
+              <button type="button" onClick={() => clipRef.current?.click()} className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="파일 첨부"><Paperclip className="size-5" /></button>
+              <button type="button" onClick={() => camRef.current?.click()} className="inline-flex size-9 shrink-0 items-center justify-center rounded-input text-ink-2 active:bg-slate-100" aria-label="사진 찍기"><Camera className="size-5" /></button>
               <input ref={clipRef} type="file" multiple className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
               <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => { if (e.target.files?.length) { await uploadTaskFiles(Array.from(e.target.files), { taskId: id }, setCprog); reload(); broadcastRefresh(); } e.target.value = ''; }} />
               {/* 대표: 댓글도 음성으로 — 말한 글이 입력칸에 들어감(바로 보내지 않음) */}
@@ -420,7 +411,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
     <div className={cx(!inPanel && 'mx-auto max-w-4xl lg:max-w-6xl', 'pb-[calc(4.5rem+var(--sab))] sm:pb-6')} data-testid={inPanel ? 'task-panel-body' : 'task-page'}>
       {fu.node}{rs.node}
       {/* 상단 도구 막대 */}
-      <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white/95 px-4 py-2 backdrop-blur', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
+      <div className={cx('sticky top-0 z-20 flex items-center gap-1.5 border-b border-line bg-white px-4 py-2', !inPanel && 'rounded-t-card border', inPanel && 'pt-[calc(var(--sat)+0.5rem)] sm:pt-2')}>
         {t.status === 'done' && <span className="inline-flex h-8 items-center gap-1.5 rounded-input bg-green-50 px-2.5 text-sm font-semibold text-green-700"><CircleCheck className="size-4" />완료됨</span>}
         <span className="flex-1" />
         {/* V13 10번: 업무별 대화방 */}
@@ -439,7 +430,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 <MenuItem icon={Clock} onClick={() => setBlockOpen(true)}>실행 시간 배정</MenuItem>
                 <MenuItem icon={ListFilter} onClick={() => setDepOpen(true)}>선행 업무 지정</MenuItem>
                 <MenuItem icon={LayoutTemplate} onClick={saveTemplate}>템플릿으로 저장</MenuItem>
-                {features.ai && <MenuItem icon={Sparkles} onClick={() => router.push(`/assistant?task=${id}`)}>✨ AI에게 요청</MenuItem>}
+                {features.ai && <MenuItem icon={MessageSquareText} onClick={() => router.push(`/assistant?task=${id}`)}>AI 비서에게 요청</MenuItem>}
                 {t.sales_ref?.kind === 'support' && t.sales_ref.id && <MenuItem icon={Undo2} onClick={withdrawSupport}>지원사업으로 회수</MenuItem>}
                 {t.batch_id && (t.batch?.total ?? 0) > 1 && (t.requested_by === user.id || t.created_by === user.id || ['owner', 'admin'].includes(user.role)) && <MenuItem icon={Merge} onClick={mergeBatch}>공동 업무로 합치기</MenuItem>}
                 {perms.delete && <><div className="my-1 border-t border-line" /><MenuItem icon={Trash2} danger onClick={del}>삭제</MenuItem></>}
@@ -574,7 +565,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <span className="text-xs text-ink-2">{data.reviewTarget.assignee_name ?? '담당 없음'} · {STATUS_LABEL[data.reviewTarget.status as TaskStatus] ?? data.reviewTarget.status}</span>
             </div>
             {data.reviewTarget.status === 'review' && t.assignee_id !== user.id ? (
-              <p className="mt-1 flex items-center gap-1 text-xs text-ink-2" data-testid="review-locked">🔒 승인·반려는 검토 담당자{t.assignee_name ? ` ${t.assignee_name}님` : ''}만 할 수 있습니다</p>
+              <p className="mt-1 flex items-center gap-1 text-xs text-ink-2" data-testid="review-locked"><Lock className="size-3.5 shrink-0" aria-hidden />승인·반려는 검토 담당자{t.assignee_name ? ` ${t.assignee_name}님` : ''}만 할 수 있습니다</p>
             ) : data.reviewTarget.status === 'review' ? (
               <div className="mt-2 flex gap-2">
                 <Button size="sm" onClick={async () => { try { await api(`/api/tasks/${data.reviewTarget.id}`, { method: 'PATCH', body: { status: 'done' } }); toast.ok('승인했습니다 — 원 업무 완료'); reload(); broadcastRefresh(); } catch (e: any) { toast.error(e.message); } }} data-testid="review-approve"><Check />승인</Button>
@@ -1365,7 +1356,7 @@ function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: stri
               className={cx('inline-flex h-6 items-center gap-1 rounded-full border px-1.5', r.mine ? 'border-accent-500 bg-accent-50 text-accent-700' : 'border-line bg-white text-ink-2')}>{r.emoji}<span className="tabular-nums">{r.n}</span></button>
           ))}
           <span className="relative">
-            <button type="button" onClick={() => setPick(!pick)} className="rounded px-1.5 py-0.5 hover:bg-slate-100" aria-label="반응 추가" data-testid="react-open">🙂+</button>
+            <button type="button" onClick={() => setPick(!pick)} className="rounded px-1.5 py-0.5 hover:bg-slate-100" aria-label="반응 추가" data-testid="react-open"><SmilePlus className="size-4" /></button>
             {pick && <span className="absolute left-0 top-6 z-20 flex gap-0.5 rounded-full border border-line bg-white p-1 shadow-pop">
               {REACTIONS.map(([e, l]) => <button key={e} type="button" onClick={() => react(e)} title={l} aria-label={l} className="size-7 rounded-full text-base hover:bg-slate-100">{e}</button>)}
             </span>}

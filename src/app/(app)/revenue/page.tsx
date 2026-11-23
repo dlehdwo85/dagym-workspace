@@ -1,7 +1,7 @@
 'use client';
 import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Download, FileUp, Info, Sparkles } from 'lucide-react';
+import { BarChart3, Download, FileUp, Info } from 'lucide-react';
 import { DropHint, DropZone, UploadProgress, putFile } from '@/components/upload';
 import { api, useApi } from '@/components/client';
 import { RevenueAuto } from '@/components/RevenueAuto';
@@ -285,7 +285,7 @@ function AiInputPanel({ units, onDone }: { units: { name: string }[]; onDone: ()
     <DropZone onFiles={(fl) => void go(fl)} accept=".xlsx,.xls,.csv,.pdf,image/*" acceptLabel="엑셀·CSV·PDF·사진" disabled={!!busy} label="여기에 놓으면 정산서를 올려 AI 가 숫자를 뽑습니다" testid="revenue-ai-input-drop">
     <Card className="p-4" data-testid="revenue-ai-input">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-violet-500" />자료로 입력 (AI)</h2>
+        <h2 className="flex items-center gap-2 text-sm font-semibold"><FileUp className="size-4 text-ink-2" />자료로 입력 (AI)</h2>
         <Button size="sm" variant="secondary" onClick={() => ref.current?.click()} disabled={!!busy}><FileUp />정산서 올리기</Button>
         <input ref={ref} type="file" multiple accept=".xlsx,.xls,.csv,.pdf,image/*" className="hidden" onChange={(e) => go(e.target.files)} data-testid="revenue-ai-file" aria-label="정산서 파일 선택" />
       </div>

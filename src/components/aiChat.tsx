@@ -145,7 +145,7 @@ export function LiveAnswer({ live, className }: { live: LiveReply | null; classN
   if (!live.text) return <div className="flex items-center gap-2 text-sm text-ink-3" data-testid="ai-live-status"><Loader2 className="size-4 animate-spin" />{live.status ?? '찾아보는 중…'}</div>;
   return (
     <div className="flex flex-col items-start">
-      <div className={cx('rounded-2xl bg-slate-100 px-3 text-sm text-ink', className)} data-testid="ai-live" aria-live="polite" aria-busy="true">
+      <div className={cx('rounded-card bg-slate-100 px-3 text-sm text-ink', className)} data-testid="ai-live" aria-live="polite" aria-busy="true">
         <AiText text={live.text} tail={<span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-ink-3 align-[-2px]" aria-hidden />} />
       </div>
     </div>

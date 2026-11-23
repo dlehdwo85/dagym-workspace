@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { ClipboardList, Link2, ListPlus, NotebookPen, Plus, Repeat, Trash2, Unlink, Wand2 } from 'lucide-react';
+import { ClipboardList, Link2, ListChecks, ListPlus, NotebookPen, Plus, Repeat, Trash2, Unlink } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
 import { Avatar, Button, DueChip, Modal, StatusBadge, cx, inputCls, toast } from './ui';
@@ -129,7 +129,7 @@ export function EventWork({ eventId, occurrenceStart, eventDate, recurring, atte
 
       {!recurring && canEdit && (
         <section>
-          <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><Wand2 className="size-4 text-ink-3" />준비 업무 자동 만들기</h3>
+          <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><ListChecks className="size-4 text-ink-3" />준비 업무 자동 만들기</h3>
           <div className="flex flex-wrap gap-2">
             <select className={inputCls + ' h-9 w-auto'} value={prep.preset} onChange={(e) => setPrep({ ...prep, preset: e.target.value })} aria-label="준비 업무 묶음">
               <option value="">묶음 선택</option>

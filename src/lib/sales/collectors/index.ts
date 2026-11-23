@@ -222,7 +222,7 @@ export async function runCollectorManual(u: SessionUser, slug: string, opt: { fu
   if (!find(slug)) throw notFound('그런 수집기가 없습니다');
   const [running] = await db()<{ id: number }[]>`select id from sales_collector_runs where slug = ${slug} and status = 'running' and started_at > now() - interval '3 minutes'`;
   if (running) throw forbidden('이미 실행 중입니다 — 잠시 뒤 다시');
-  const r = await runCollector(slug, 'manual', { deadlineMs: 40000, ...(opt.full ? { params: { full: true } } : {}) }); // 278차 #816: [14일 다시 받기]
+  const r = await runCollector(slug, 'manual', { deadlineMs: opt.full ? 100000 : 40000, ...(opt.full ? { params: { full: true } } : {}) }); // 278차 #816: [14일 다시 받기] · #1123 보완: 14일은 쪽이 많아(사전규격 약 75쪽) 100초
   await audit(db(), u.id, 'sales_collector.run', 'tenant', null, { slug, status: r.status, full: !!opt.full }).catch(() => {});
   if (seesInternals(u)) return r;
   // #602 고객사: 결과는 '받았습니다 n건 / 못 받았습니다 — 연결을 확인해 주세요'만(오류 원문·원천별 상세 없음)

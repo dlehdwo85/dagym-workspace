@@ -1,7 +1,7 @@
 'use client';
 import { dtf } from '@/lib/dtf';
 import { useRef, useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { Clapperboard, Loader2, Paperclip, X } from 'lucide-react';
 import { uploadToLibrary } from './libraryUpload';
 import { isVideoFile, runVideoDigest } from './videoDigest';
 import { toast } from './ui';
@@ -62,7 +62,7 @@ export function AttachChips({ files, uploading, onRemove, compact }: { files: Ai
     <div className={compact ? 'flex flex-wrap gap-1.5 px-2 pt-2 text-xs' : 'mt-2 flex flex-wrap gap-1.5 text-xs'} data-testid="ai-files">
       {files.map((f) => (
         <span key={f.id} className="inline-flex max-w-[14rem] items-center gap-1 rounded-full bg-amber-50 py-0.5 pl-0.5 pr-2 text-amber-800">
-          {f.thumb ? <img src={f.thumb} alt="" className="size-6 rounded-full object-cover" /> : <span className="pl-1.5" title={f.digest ? `요약: ${f.digest}` : undefined}>{f.video ? '🎬' : '📎'}</span>}
+          {f.thumb ? <img src={f.thumb} alt="" className="size-6 rounded-full object-cover" /> : <span className="pl-1.5" title={f.digest ? `요약: ${f.digest}` : undefined}>{f.video ? <Clapperboard className="inline size-3.5" /> : <Paperclip className="inline size-3.5" />}</span>}
           <span className="truncate">{f.name}</span>
           <button type="button" onClick={() => onRemove(f.id)} aria-label={`${f.name} 빼기`}><X className="size-3" /></button>
         </span>

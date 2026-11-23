@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { BarChart3, Bot, Headset, Lightbulb, Palette, Rocket, Search, Wallet, type LucideIcon } from 'lucide-react';
+import { BarChart3, Headset, Lightbulb, Palette, Rocket, Search, type LucideIcon, Users, Wallet } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ScoreChip } from './QualityPanel';
@@ -49,7 +49,7 @@ export function Team() {
   return (
     <div className="mx-auto max-w-6xl space-y-4" data-testid="team">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="flex items-center gap-2 text-xl font-bold" style={{ color: C }}><Bot className="size-5" />AI 마케팅팀</h1>
+        <h1 className="flex items-center gap-2 text-xl font-bold" style={{ color: C }}><Users className="size-5" />AI 마케팅팀</h1>
         <Link href="/s/marketing/ops" className="ml-auto text-xs text-ink-2 underline">운영 계획 →</Link>
       </div>
       <p className="text-xs text-ink-2">역할마다 일정·기록·기억을 따로 둡니다. AI 가 초안을 만들고, 결정은 대표가 합니다 — 광고 켜기·증액·영상 [생성]처럼 돈이 나가는 일은 지금처럼 승인 뒤에만. 가장 귀찮은 일부터 하나씩 켜세요.</p>

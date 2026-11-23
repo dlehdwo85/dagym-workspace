@@ -66,7 +66,7 @@ export async function support249({ owner, ctx, sql, BASE, FAKE, SHOTS, tick }) {
     await ctx.owner.ok('PUT', '/api/sales/support/profile', { ...prof, autoAi: true });
     await owner.goto(`${BASE}/s/sales/support`); await owner.getByTestId('support-search').fill('E2E249');
     const ic = list.getByTestId('support-item').filter({ hasText: 'E2E249 무료 마케팅 컨설팅' }); await ic.waitFor();
-    assert.deepEqual([await ic.getByTestId('support-verdict').innerText(), await ic.getByTestId('support-verdict').getAttribute('data-queued')], ['⏳ AI 확인 중', '1']);
+    assert.deepEqual([await ic.getByTestId('support-verdict').innerText(), await ic.getByTestId('support-verdict').getAttribute('data-queued')], ['AI 확인 중', '1']);
     assert.equal(await ia.getByTestId('support-verdict').getAttribute('data-by'), 'ai', '이미 판단한 공고는 차례 아님');
     assert.match(await owner.getByTestId('support-auto-note').innerText(), /AI 세일즈가 새 공고를 자동으로 판단합니다[\s\S]*지금 판단 차례 2건/);
     await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: [0, 1].map((i) => ({ content: [{ type: 'text', text: JSON.stringify({ verdict: 'maybe',

@@ -3,7 +3,8 @@ import { dtf } from '@/lib/dtf';
 import { useTerms } from './session';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, MessageCircle, CheckCircle2, Eye, Library, Loader2, Mail, MessageSquare, Paperclip, RotateCcw, Search, Send, Sparkles, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Eye, Library, Loader2, Mail, MessageCircle, MessageSquare, Paperclip, PenLine, RotateCcw, Search, Send, Upload } from 'lucide-react';
+import { AiMark } from '@/components/ui';
 import QRCode from 'qrcode';
 import { api, broadcastRefresh, useApi } from './client';
 import { SuggestInput, SuggestList, useRecipientSuggest } from './contacts/RecipientSuggest';
@@ -324,7 +325,7 @@ function Compose({ taskId, onClose, onSent, onAttach, initial }: { taskId: strin
             className={cx('rounded-full border px-2.5 py-0.5 text-sm', f.company === c.key ? 'border-brand-600 bg-brand-50 font-medium text-brand-700' : 'border-line hover:bg-slate-50')}>{c.name}</button>)}
           <span className="ml-2 text-xs text-ink-3">양식</span>
           <span className="w-40"><select className={cx(inputCls, 'py-1')} value={f.kind} onChange={(e) => pickKind(e.target.value)} aria-label="메일 양식">{d.kinds.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></span>
-          <Button size="sm" variant="ghost" onClick={() => aiDraft()} disabled={drafting} data-testid="mail-ai-draft"><Sparkles />{drafting ? 'AI 작성 중…' : 'AI 초안'}</Button>
+          <Button size="sm" variant="ghost" onClick={() => aiDraft()} disabled={drafting} data-testid="mail-ai-draft"><PenLine />{drafting ? '쓰는 중…' : '초안 쓰기'}<AiMark /></Button>
           {channel !== 'kakao' && <span className="flex flex-wrap items-center gap-1 text-[11px] text-ink-3" data-testid="mail-ai-intents">다시 쓰기:
             {Object.entries(INTENTS).map(([k, l]) => <button key={k} type="button" disabled={drafting} onClick={() => aiDraft(k)} className="rounded-full border border-line bg-white px-2 py-0.5 hover:bg-slate-50" data-testid={`mail-ai-intent-${k}`}>{l}</button>)}</span>}
         </div>

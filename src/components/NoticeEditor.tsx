@@ -1,7 +1,7 @@
 'use client';
 // V30 ② 공지 쓰기/고치기 창 — 대상 전체/팀/사람, 상단 고정, 중요, 예약 게시, 자료실 첨부
 import { useEffect, useState } from 'react';
-import { Pin, Search, Star, X } from 'lucide-react';
+import { Paperclip, Pin, Search, Star, X } from 'lucide-react';
 import { api, useApi } from './client';
 import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
 
@@ -46,7 +46,7 @@ export function NoticeEditor({ initial, onClose, onSaved }: { initial?: Notice; 
           <Field label="자료실 첨부(선택)">
             <div className="relative"><Search className="pointer-events-none absolute left-2 top-2.5 size-4 text-ink-3" /><input className={cx(inputCls, 'pl-8')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="자료 이름으로 찾기" aria-label="자료 찾기" /></div>
             {!!found.length && <ul className="mt-1 max-h-32 overflow-auto rounded-input border border-line bg-white text-sm">{found.map((x) => <li key={x.id}><button type="button" className="w-full px-2 py-1 text-left hover:bg-slate-50" onClick={() => { if (!f.fileIds.includes(x.id)) { setF({ ...f, fileIds: [...f.fileIds, x.id] }); setFiles((s) => [...s, x]); } setQ(''); }}>{x.title}</button></li>)}</ul>}
-            {!!f.fileIds.length && <div className="mt-1 flex flex-wrap gap-1">{f.fileIds.map((id) => <span key={id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs">📎 {files.find((x) => x.id === id)?.title ?? '첨부'}<button type="button" onClick={() => setF({ ...f, fileIds: f.fileIds.filter((y) => y !== id) })} aria-label="첨부 빼기"><X className="size-3" /></button></span>)}</div>}
+            {!!f.fileIds.length && <div className="mt-1 flex flex-wrap gap-1">{f.fileIds.map((id) => <span key={id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"><Paperclip className="size-3" aria-hidden />{files.find((x) => x.id === id)?.title ?? '첨부'}<button type="button" onClick={() => setF({ ...f, fileIds: f.fileIds.filter((y) => y !== id) })} aria-label="첨부 빼기"><X className="size-3" /></button></span>)}</div>}
           </Field>
         </div>
         <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>취소</Button><Button onClick={save} disabled={busy || !f.title.trim() || (f.type !== 'all' && !f.ids.length)} data-testid="notice-save">{initial ? '저장' : '올리기'}</Button></div>

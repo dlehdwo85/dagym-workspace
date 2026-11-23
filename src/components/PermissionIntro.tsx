@@ -88,7 +88,7 @@ export function PermissionIntro({ userId }: { userId: string }) {
   return (
     <div className="fixed inset-0 z-[70] bg-black/40" onClick={later} data-testid="perm-intro-backdrop">
       <div role="dialog" aria-modal="true" aria-labelledby="perm-intro-title" data-perm-intro data-testid="perm-intro" onClick={(e) => e.stopPropagation()}
-        className="absolute inset-x-0 bottom-0 max-h-[90dvh] animate-fade-up overflow-y-auto overscroll-contain rounded-t-2xl bg-white p-4 pb-[calc(var(--sab)+16px)] shadow-pop sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-[440px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-card sm:pb-4">
+        className="absolute inset-x-0 bottom-0 max-h-[90dvh] animate-fade-up overflow-y-auto overscroll-contain rounded-t-card bg-white p-4 pb-[calc(var(--sab)+16px)] shadow-pop sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-[440px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-card sm:pb-4">
         <div className="flex items-center gap-3"><img src="/icon.svg" alt="" width={36} height={36} className="size-9" />
           <div><h2 id="perm-intro-title" className="text-base font-bold">휴대폰 알림 맞추기</h2><p className="text-xs text-ink-2">{done ? '모두 준비됐습니다.' : '워크인이 제때 알려 드리려면 아래를 허용해 주세요. 1분이면 됩니다.'}</p></div></div>
         <ul className="mt-3 divide-y divide-line rounded-card border border-line">

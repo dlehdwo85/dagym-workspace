@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Bot, Camera, FileImage, Upload, UserRound } from 'lucide-react';
+import { Camera, FileImage, Upload, UserRound } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { shrinkImage } from '@/components/Attachments';
 import { DropZone, PICK_MAX, putFile } from '@/components/upload';
@@ -102,7 +102,7 @@ function Card({ r, focus, canEdit, reload }: { r: Row; focus: boolean; canEdit: 
         <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-ink">{r.brand || '브랜드 없음'}</span>
         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-ink-2">{KIND[r.kind]} {r.wanted}개</span>
         <span className={cx('inline-flex items-center gap-0.5 rounded px-1.5 py-0.5', r.source === 'ai' ? 'bg-violet-50 text-violet-700' : 'bg-slate-50 text-ink-2')}>
-          {r.source === 'ai' ? <><Bot className="size-3" />AI 마케터</> : <><UserRound className="size-3" />사람</>}</span>
+          {r.source === 'ai' ? <>AI 마케터</> : <><UserRound className="size-3" />사람</>}</span>
         <span className={cx('rounded px-1.5 py-0.5', r.status === 'requested' ? 'bg-amber-50 text-amber-800' : r.status === 'canceled' ? 'bg-slate-100 text-slate-500' : 'bg-emerald-50 text-emerald-700')} data-testid="material-status">{STATUS[r.status]}</span>
         {r.status === 'requested' && <span className={cx('font-medium', late ? 'text-red-600' : 'text-ink-2')}>기한 {r.due_on.slice(5).replace('-', '/')} · {dday(r.due_on)}</span>}
         <span className="text-ink-2">담당 {r.assignee ?? '없음'}</span>

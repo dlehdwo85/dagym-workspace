@@ -153,7 +153,7 @@ export function TaxInvoiceButton({ payment }: { payment: { id: string; status: s
       <button className="text-[11px] text-brand-700 underline" onClick={start} data-testid="tax-request">세금계산서</button>
       {open && f && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="dialog" aria-label="세금계산서 요청">
-          <div className="w-full max-w-sm space-y-2 rounded-card bg-white p-4 text-sm shadow-xl" data-testid="tax-form">
+          <div className="w-full max-w-sm space-y-2 rounded-card bg-white p-4 text-sm shadow-pop" data-testid="tax-form">
             <h3 className="font-semibold">세금계산서 요청</h3>
             <input className={inputCls} value={f.companyName} onChange={(e) => setF({ ...f, companyName: e.target.value })} placeholder="상호" aria-label="상호" data-testid="tax-company" />
             <input className={inputCls} value={f.bizNo} onChange={(e) => setF({ ...f, bizNo: e.target.value })} placeholder="사업자등록번호 000-00-00000" aria-label="사업자등록번호" data-testid="tax-bizno" />

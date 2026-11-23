@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Gauge, HardDrive, Sparkles, Users } from 'lucide-react';
+import { Gauge, HardDrive, Users } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Meter, fmtBytes, won } from '@/components/usage';
 import { BillingSection } from '@/components/Billing';
@@ -64,9 +64,9 @@ export default function UsagePage() {
       <div className="grid gap-3 sm:grid-cols-3">
         <Meter label="저장공간" icon={HardDrive} used={usage.storageBytes / GB} limit={limits.storageGb} usedLabel={fmtBytes(usage.storageBytes)} limitLabel={lim(limits.storageGb, 'GB')} testid="meter-storage" />
         {/* 대표 10/24 ②: 회사 월 AI 예산 게이지 — 80% 알림·100% 멈춤, 다음 달 1일 초기화, 영상 제작은 마케팅 크레딧으로 따로 · 351차 #939 ③: 원 없이 사용 %·남은 양 % */}
-        {ab ? <Meter label="이번 달 AI 사용량" icon={Sparkles} used={ab.usedKrw} limit={ab.limitKrw} usedLabel={ab.pct === null ? '제한 없음' : `사용 ${ab.pct}%`} limitLabel={ab.pct === null ? '회사 공유' : `남은 양 ${pctLeft(ab.pct)}%`} testid="meter-ai"
+        {ab ? <Meter label="이번 달 AI 사용량" icon={Gauge} used={ab.usedKrw} limit={ab.limitKrw} usedLabel={ab.pct === null ? '제한 없음' : `사용 ${ab.pct}%`} limitLabel={ab.pct === null ? '회사 공유' : `남은 양 ${pctLeft(ab.pct)}%`} testid="meter-ai"
           note={<span data-testid="meter-ai-note">{ab.over ? <b className="text-red-600">AI 기능 멈춤 — {ab.resetLabel}에 다시 채워짐</b> : `${ab.resetLabel}에 다시 채워짐`}{budgetWhy(ab) && ` · ${budgetWhy(ab)}`} · 영상 제작은 마케팅 크레딧으로 따로</span>} />
-          : <Meter label="이번 달 AI 사용량" icon={Sparkles} used={ai.costUsd ?? ai.cost} limit={ai.limitUsd ?? ai.limit} usedLabel={`사용 ${ai.pct}%`} limitLabel={`남은 양 ${pctLeft(ai.pct)}%`} testid="meter-ai" />}
+          : <Meter label="이번 달 AI 사용량" icon={Gauge} used={ai.costUsd ?? ai.cost} limit={ai.limitUsd ?? ai.limit} usedLabel={`사용 ${ai.pct}%`} limitLabel={`남은 양 ${pctLeft(ai.pct)}%`} testid="meter-ai" />}
         <Meter label="사용자" icon={Users} used={usage.users} limit={limits.users} usedLabel={`${usage.users}명${usage.invited ? ` (+초대 중 ${usage.invited})` : ''}`} limitLabel={lim(limits.users, '명')} testid="meter-users" />
       </div>
       {limits.tasksTotal != null && <TaskQuota used={usage.tasks} limit={limits.tasksTotal} canEdit={canEdit} onChanged={reload} />}

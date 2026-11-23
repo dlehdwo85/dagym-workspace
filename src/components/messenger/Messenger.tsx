@@ -64,7 +64,7 @@ const isLong = (b: string) => b.length > 600 || b.split('\n').length > 15;
 /** 목록 미리보기: 사진·영상·스티커·투표·일정은 종류로 */
 const lastPreview = (r: RoomRow) => {
   if (r.last_kind === 'sticker') return `(스티커) ${r.last_body ?? ''}`;
-  if (r.last_kind === 'poll') return `📊 투표: ${r.last_body ?? ''}`;
+  if (r.last_kind === 'poll') return `투표: ${r.last_body ?? ''}`;
   if (r.last_file && !plain(r.last_body)) return /^image\//.test(r.last_mime ?? '') ? '사진' : /^video\//.test(r.last_mime ?? '') ? '동영상' : `파일 ${r.last_file}`;
   return plain(r.last_body);
 };
@@ -137,9 +137,9 @@ export function useLive(): Live {
 function RoomIcon({ r, size = 40 }: { r: Pick<RoomRow, 'kind' | 'other_id' | 'name'> & { photo?: string | null }; size?: number }) {
   if (r.kind === 'dm') return <Avatar id={r.other_id} name={r.name} size={size} badge={false} />;
   // 메신저 3차 D14 방 사진(그룹·회사 전체방)
-  if (r.photo) return <img src={r.photo} alt="" className="shrink-0 rounded-2xl border border-line bg-slate-100 object-cover" style={{ width: size, height: size }} data-testid="room-photo" />;
+  if (r.photo) return <img src={r.photo} alt="" className="shrink-0 rounded-card border border-line bg-slate-100 object-cover" style={{ width: size, height: size }} data-testid="room-photo" />;
   return (
-    <span className={cx('inline-flex shrink-0 items-center justify-center rounded-2xl', r.kind === 'company' ? 'bg-teal-700 text-white' : r.kind === 'task' ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700')} style={{ width: size, height: size }}>
+    <span className={cx('inline-flex shrink-0 items-center justify-center rounded-card', r.kind === 'company' ? 'bg-teal-700 text-white' : r.kind === 'task' ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700')} style={{ width: size, height: size }}>
       {r.kind === 'company' ? <Hash className="size-5" /> : r.kind === 'task' ? <SquarePen className="size-5" /> : <Users className="size-5" />}
     </span>
   );
@@ -837,16 +837,16 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
             return (
               <div key={m.id} data-msg-id={m.id} data-batch-ids={run.length > 1 ? run.map((x) => x.id).join(' ') : undefined}>
                 {dateLine}{readLineEl}
-                <div className={cx('group relative flex gap-2 rounded-xl transition-colors duration-500', m.mine && 'flex-row-reverse', head ? 'mt-2.5' : 'mt-0.5', flash === m.id && 'bg-amber-100/80')} data-testid="chat-message" data-mine={m.mine ? '1' : '0'}>
+                <div className={cx('group relative flex gap-2 rounded-xl transition-colors duration-300', m.mine && 'flex-row-reverse', head ? 'mt-2.5' : 'mt-0.5', flash === m.id && 'bg-amber-100/80')} data-testid="chat-message" data-mine={m.mine ? '1' : '0'}>
                   {!m.mine && (head ? <Avatar id={m.author_id} name={m.author_name} size={compact ? 30 : 34} badge={false} /> : <span className={cx('shrink-0', compact ? 'w-[30px]' : 'w-[34px]')} />)}
                   <div className={cx('flex min-w-0 max-w-[78%] flex-col', m.mine ? 'items-end' : 'items-start')}>
                     {head && !m.mine && <div className="mb-0.5 flex items-center gap-1 text-xs font-medium text-ink-2">{m.author_name}<RoleBadge role={u0?.role} guest={u0?.is_demo} />{u0?.title && <span className="font-normal text-ink-3">{u0.title}</span>}</div>}
                     <div className={cx('flex items-end gap-1.5', m.mine && 'flex-row-reverse')}>
                       {editing?.id === m.id ? (
                         <form onSubmit={saveEdit} className="flex gap-1"><input autoFocus className={cx(inputCls, 'h-8')} value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null); }} aria-label="메시지 고치기" /><Button size="sm">저장</Button></form>
-                      ) : gone ? <span className="rounded-2xl bg-slate-100 px-3 py-1.5 text-sm italic text-ink-3">삭제된 메시지</span> : (
+                      ) : gone ? <span className="rounded-card bg-slate-100 px-3 py-1.5 text-sm italic text-ink-3">삭제된 메시지</span> : (
                         <div onClick={(e) => { e.stopPropagation(); setActive(active === m.id ? null : m.id); }}
-                          className={cx('min-w-0 whitespace-pre-wrap break-words text-left text-sm', bare ? '' : cx('rounded-2xl px-3 py-1.5', m.mine ? 'rounded-tr-md bg-teal-700 text-white' : 'rounded-tl-md border border-line bg-white text-ink'), m.pinned_at && 'rounded-2xl ring-2 ring-amber-300')}>
+                          className={cx('min-w-0 whitespace-pre-wrap break-words text-left text-sm', bare ? '' : cx('rounded-card px-3 py-1.5', m.mine ? 'rounded-tr-md bg-teal-700 text-white' : 'rounded-tl-md border border-line bg-white text-ink'), m.pinned_at && 'rounded-card ring-2 ring-amber-300')}>
                           {m.kind === 'forward' && <div className={cx('mb-0.5 flex items-center gap-1 text-[11px]', m.mine && !bare ? 'text-white/75' : 'text-ink-3')} data-testid="chat-forwarded"><Forward className="size-3" />전달된 메시지</div>}
                           {m.reply && (
                             <button type="button" onClick={(e) => { e.stopPropagation(); if (m.reply_to) jumpTo(m.reply_to); }} title="원래 메시지로 가기"
@@ -989,7 +989,7 @@ export function ChatRoom({ id, live, onRead, onBack, compact, onExpand, onClose,
                 ['voice', voice ? '음성 모드 끄기' : '음성 모드', Headphones, toggleVoice, 'bg-indigo-50 text-indigo-700'],
               ] as const).map(([k, label, Icon, run, tone]) => (
                 <button key={k} type="button" onClick={run} className="flex flex-col items-center gap-1 rounded-input px-1 py-2 text-[11px] text-ink-2 hover:bg-slate-50" data-testid={`plus-${k}`}>
-                  <span className={cx('inline-flex size-10 items-center justify-center rounded-2xl', tone)}><Icon className="size-5" /></span>{label}
+                  <span className={cx('inline-flex size-10 items-center justify-center rounded-card', tone)}><Icon className="size-5" /></span>{label}
                 </button>
               ))}
               <IosPickHint className="col-span-4 px-1 pt-1 text-[11px] leading-snug text-ink-3" />
@@ -1121,7 +1121,7 @@ function EmojiPanel({ tab, setTab, onEmoji, onSticker }: { tab: 'emoji' | 'stick
         </div>
       ) : (
         <div className="grid max-h-60 grid-cols-4 gap-1.5 overflow-y-auto" data-testid="sticker-grid">
-          {STICKERS.map((st) => <button type="button" key={st.code} onClick={() => onSticker(st.code)} className="rounded-2xl p-0.5 hover:bg-slate-50" aria-label={`스티커 ${st.text}`} data-testid={`sticker-${st.code}`}><StickerView s={st} small /></button>)}
+          {STICKERS.map((st) => <button type="button" key={st.code} onClick={() => onSticker(st.code)} className="rounded-card p-0.5 hover:bg-slate-50" aria-label={`스티커 ${st.text}`} data-testid={`sticker-${st.code}`}><StickerView s={st} small /></button>)}
         </div>
       )}
     </div>
@@ -1148,7 +1148,7 @@ function PollCard({ m, canClose, onChanged }: { m: Msg; canClose: boolean; onCha
     try { await api(`/api/chat/messages/${m.id}/poll`, { body: { close: true } }); onChanged({ ...p, closed: true }); } catch (e: any) { toast.error(e.message); }
   }
   return (
-    <div className="w-64 max-w-full rounded-2xl border border-line bg-white p-3 text-ink shadow-card" data-testid="chat-poll" onClick={(e) => e.stopPropagation()}>
+    <div className="w-64 max-w-full rounded-card border border-line bg-white p-3 text-ink shadow-card" data-testid="chat-poll" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-teal-700"><BarChart3 className="size-3.5" />투표
         {p.closed && <span className="ml-auto rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-ink-2" data-testid="poll-closed">마감</span>}</div>
       <p className="mt-1 whitespace-pre-wrap break-words text-sm font-semibold" data-testid="poll-question">{p.question}</p>
@@ -1189,7 +1189,7 @@ function EventCardView({ ev, onChanged }: { ev: EventCard; onChanged: (e: EventC
   }
   const btn = (on: boolean) => cx('rounded-input border px-2 py-1 text-xs font-medium', on ? 'border-teal-700 bg-teal-700 text-white' : 'border-line text-ink-2 hover:bg-slate-50');
   return (
-    <div className="w-64 max-w-full rounded-2xl border border-line bg-white p-3 text-ink shadow-card" data-testid="chat-event" onClick={(e) => e.stopPropagation()}>
+    <div className="w-64 max-w-full rounded-card border border-line bg-white p-3 text-ink shadow-card" data-testid="chat-event" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700"><CalendarPlus className="size-3.5" />일정
         {ev.cancelled && <span className="ml-auto rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-ink-2">취소됨</span>}</div>
       <p className={cx('mt-1 break-words text-sm font-semibold', ev.cancelled && 'text-ink-3 line-through')} data-testid="event-title">{ev.title}</p>

@@ -1,7 +1,7 @@
 'use client';
 // #161 V25 매출 자료 자동 분석 — 매출 화면 맨 위: 확인 대기 자료(읽은 값 vs 지금 값) · 분석 대기열 · AI 분석 보고서(동향·전망·대안·확인 필요)
 import { useEffect, useState } from 'react';
-import { FileText, Sparkles } from 'lucide-react';
+import { FileText } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { Button, Card, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -168,7 +168,7 @@ export function RevenueAuto({ period, aiEnabled, canEdit, sites, onFocus, onAppl
       {(aiEnabled || reports.length > 0) && (
         <Card className="p-4" data-testid="revenue-ai">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-violet-500" />AI 분석 보고서{r ? ` · ${r.period.slice(0, 4)}년 ${mon(r.period)}` : ''}
+            <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold"><FileText className="size-4 text-ink-2" />AI 분석 보고서{r ? ` · ${r.period.slice(0, 4)}년 ${mon(r.period)}` : ''}
               {r && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-ink-2" data-testid="revenue-report-kind">{KIND[r.kind] ?? r.kind}</span>}</h2>
             <div className="flex flex-wrap items-center gap-2">
               {reports.length > 1 && (

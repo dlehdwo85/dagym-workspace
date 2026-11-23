@@ -144,6 +144,7 @@ export const bodySchema = z.object({
   issues: z.array(z.object({ title: s200, details: z.array(z.string().max(500)).max(20).default([]), state: STATE.default('확인 필요'), evidence: z.array(z.string().max(20)).max(20).default([]) })).max(40).default([]),
   notes: z.string().max(2000).default(''),
   sources: z.object({ w: z.array(z.object({ ref: z.string(), taskId: z.string(), title: z.string() })).default([]) }).default({ w: [] }),
+  review: z.any().nullable().default(null), // #1117 서버가 정함(그대로 두기 이유·승인)
 });
 export type ReportBody = z.infer<typeof bodySchema>;
 
@@ -171,7 +172,7 @@ export function verifyBody(b: ReportBody, ctx: { dLines: number; msgIds: Set<str
 }
 
 const reportCols = (sql: Sql) => sql`r.id, r.site_id, s.name as unit_name, r.kind, r.period_start::text as period_start, r.period_end::text as period_end, r.report_day::text as report_day, r.status, r.source_text, r.body, r.ai_model,
-  r.submitted_at, r.updated_at, r.purged_at, cb.name as created_by_name, sb.name as submitted_by_name`;
+  r.submitted_at, r.submitted_by, r.updated_at, r.purged_at, cb.name as created_by_name, sb.name as submitted_by_name`;
 async function loadReport(u: SessionUser, id: string, sql: Sql) {
   requireOn(u);
   if (!isUuid(id)) throw notFound('보고서를 찾을 수 없습니다');
@@ -181,10 +182,54 @@ async function loadReport(u: SessionUser, id: string, sql: Sql) {
   const t = await siteFor(u, r.site_id, sql); // 볼 수 있는 지점(작성 담당은 자기 지점만, 검토 담당·관리자는 전체)
   return { r, t };
 }
+/**
+ * #1116(대표 11/22 '이용인원과 금액 동선을 추적 · 민원·특이사항을 정리해 고객사에 전달'): 월간 보고에
+ *  ① 최근 6개월 흐름 — 시설 이용인원 합계(하이링크 이용현황: 그 달 월간 합계, 없으면 다음 달 보고의 '전달') · 활성 이용권 · 활성 수강권 · 월 부과 합계(하이링크 회원목록 집계)
+ *     저장된 집계로만(AI·추정 없음), 없는 달은 null('-'). 이용권/수강권 분류·시험 줄 제외는 이 보고서 설정 그대로
+ *  ② 이번 달 민원·특이사항 — 그 달 제출된 주간보고의 특이사항을 한 표로(처리 상태 포함)
+ */
+async function monthExtras(sql: Sql, tenant: string, r: { site_id: string; report_day: string; body: any }) {
+  const { lastMonths, monthIssues, nextMonth, numOf, sumCol } = await import('./monthly');
+  const { viewOf } = await import('./memberList');
+  const month = String(r.report_day).slice(0, 7); const range = monthRange(month)!;
+  const weeklies = await sql<{ id: string; day: string; body: any }[]>`select id, report_day::text as day, body from branch_reports
+    where site_id = ${r.site_id} and kind = 'weekly' and status = 'submitted' and report_day between ${range.start} and ${range.end} order by report_day`;
+  const months = lastMonths(month);
+  const [stats, reps] = await Promise.all([
+    sql<{ month: string; stats: any; stats_all: any }[]>`select month, stats, stats_all from branch_member_stats where tenant = ${tenant} and site_id = ${r.site_id} and month = any(${months})`,
+    sql<{ m: string; ut: any; usage: any }[]>`select to_char(report_day, 'YYYY-MM') as m, body->'usageTotal' as ut, body->'usage' as usage from branch_reports
+      where site_id = ${r.site_id} and kind = 'monthly' and report_day between ${`${months[0]}-01`} and ${monthRange(nextMonth(month))!.end}`,
+  ]);
+  const rep = new Map(reps.map((x) => [x.m, { ut: x.ut, usage: x.usage }])); rep.set(month, { ut: r.body?.usageTotal ?? null, usage: r.body?.usage ?? [] });
+  const col = (b: { ut: any; usage: any } | undefined, k: 'cur' | 'prev') => {
+    const v = b?.ut?.[k] || (Array.isArray(b?.usage) && b!.usage.length ? sumCol(b!.usage.map((x: any) => String(x?.[k] ?? ''))) : '');
+    return numOf(String(v ?? ''));
+  };
+  const usage = months.map((m) => col(rep.get(m), 'cur') ?? col(rep.get(nextMonth(m)), 'prev'));
+  const mem = r.body?.members; const exclude = mem?.exclude ?? true; const kinds = mem?.kinds;
+  const st = new Map(stats.map((x) => [x.month, exclude ? x.stats : x.stats_all]));
+  const view = (m: string, sel: 'all' | 'use' | 'class') => { const a = st.get(m); return a ? viewOf(a, kinds, sel) : null; };
+  const flow = { months, rows: [
+    { key: 'usage', label: '시설 이용인원 합계(명)', vals: usage },
+    { key: 'use', label: '활성 이용권(개)', vals: months.map((m) => view(m, 'use')?.active ?? null) },
+    { key: 'class', label: '활성 수강권(개)', vals: months.map((m) => view(m, 'class')?.active ?? null) },
+    { key: 'billing', label: '월 부과 합계(원)', vals: months.map((m) => view(m, 'all')?.billing ?? null), money: true },
+  ], notes: [`출처: 하이링크 이용현황(시설 이용인원)·하이링크 회원목록(이용권·수강권·부과) — 그 달에 올린 파일의 숫자만, 없는 달은 '-'`,
+    `회원 숫자는 ${exclude ? '시험·직원 줄 제외' : '시험·직원 줄 포함'}, 이용권/수강권 분류는 이 보고서 기준`] };
+  return { flow, issuesMonth: monthIssues(weeklies.map((w) => ({ id: w.id, day: w.day, body: w.body ?? {} }))) };
+}
+/** 화면에 보이는 본문 — 월간 초안은 #1115 회사 분류 지금 값 · #1116 흐름·민원 모음을 볼 때 계산(제출본은 굳은 값) */
+async function viewBody(sql: Sql, u: SessionUser, r: any) {
+  let b = r.body ?? {};
+  if (r.kind !== 'monthly') return b;
+  if (r.status === 'draft' && b.members) b = { ...b, members: await withKinds(sql, tenantOf(u), b.members) };
+  if (r.status === 'draft' || !b.flow) b = { ...b, ...(await monthExtras(sql, tenantOf(u), { ...r, body: b })) };
+  return b;
+}
 export async function getReport(u: SessionUser, id: string) {
   const sql = db(); const { r, t } = await loadReport(u, id, sql);
-  if (r.kind === 'monthly' && r.status === 'draft' && r.body?.members) r.body = { ...r.body, members: await withKinds(sql, tenantOf(u), r.body.members) }; // #1115 초안은 회사 분류 지금 값으로(제출하면 그때 값으로 굳음)
-  return { report: r, canWrite: canWrite(u, t) && r.status === 'draft', canReopen: canReopen(u, t) && r.status === 'submitted' && !r.purged_at, admin: isAdmin(u) };
+  r.body = await viewBody(sql, u, r);
+  return { report: r, canWrite: canWrite(u, t) && r.status === 'draft', canReopen: canReopen(u, t) && r.status === 'submitted' && !r.purged_at, admin: isAdmin(u), review: await reviewOf(u, t, r) };
 }
 
 // ---------------- 초안 만들기(AI) ----------------
@@ -302,7 +347,7 @@ export async function saveReport(u: SessionUser, id: string, b: unknown, ip: str
   if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다 — 관리자에게 [제출 취소]를 요청하세요');
   const schema = r.kind === 'monthly' ? monthlyBodySchema : bodySchema;
   // 서버가 정하는 칸(근거 목록·올린 하이링크 파일 표시·주간 값 제안)은 화면에서 온 값으로 바꾸지 않음
-  const fixedKeys = r.kind === 'monthly' ? { usageFile: r.body?.usageFile ?? null, usageWeekly: r.body?.usageWeekly ?? [], members: r.body?.members ?? null } : {};
+  const fixedKeys = r.kind === 'monthly' ? { usageFile: r.body?.usageFile ?? null, usageWeekly: r.body?.usageWeekly ?? [], members: r.body?.members ?? null, flow: r.body?.flow ?? null, issuesMonth: r.body?.issuesMonth ?? null, review: r.body?.review ?? null } : { review: r.body?.review ?? null };
   const body = schema.parse({ ...(b as object), ...fixedKeys, sources: r.body?.sources ?? { w: [] } });
   await sql`update branch_reports set body = ${sql.json(body as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
   await audit(sql, u.id, 'branch_report.edit', 'branch_report', id, {}, ip);
@@ -312,9 +357,24 @@ export async function submitReport(u: SessionUser, id: string, ip: string | null
   const sql = db(); const { r, t } = await loadReport(u, id, sql);
   if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
   if (r.status === 'submitted') throw new HttpError(409, 'submitted', '이미 제출했습니다');
-  if (r.kind === 'monthly' && r.body?.members) await sql`update branch_reports set body = ${sql.json({ ...r.body, members: await withKinds(sql, tenantOf(u), r.body.members) } as never)} where id = ${id}`; // #1115 분류를 제출 때 값으로 굳힘
-  await sql`update branch_reports set status = 'submitted', submitted_by = ${u.id}, submitted_at = now(), updated_at = now() where id = ${id}`;
-  await audit(sql, u.id, 'branch_report.submit', 'branch_report', id, { site: t.id, day: r.report_day }, ip);
+  let body = r.body ?? {};
+  if (r.kind === 'monthly') { // #1115 분류 · #1116 6개월 흐름·민원 모음을 제출 때 값으로 굳힘(고객사에 낸 그대로)
+    body = { ...body, ...(body.members ? { members: await withKinds(sql, tenantOf(u), body.members) } : {}) };
+    body = { ...body, ...(await monthExtras(sql, tenantOf(u), { ...r, body })) };
+  }
+  // #1117 민감 내용 검사: 고치지도 '그대로 두기'도 안 한 곳이 있으면 제출 막음 · 그대로 둔 것이 있으면 본사 승인 대기 · 없으면 바로 고객사 제출용
+  const flags = await scanOf({ ...r, body }); const kept = body.review?.kept ?? {};
+  const open = flags.filter((f) => !kept[f.key]);
+  if (open.length) throw new HttpError(409, 'sensitive', `민감 내용 ${open.length}곳 — [가리기]로 고치거나 '그대로 두기' 이유를 적은 뒤 제출하세요(${open.slice(0, 3).map((f) => f.label).join(', ')}${open.length > 3 ? ' …' : ''})`);
+  const state = flags.length ? 'pending' : 'clean';
+  body = { ...body, review: { kept, state, checkedAt: new Date().toISOString(), flags: flags.length } };
+  await sql`update branch_reports set body = ${sql.json(body as never)}, status = 'submitted', submitted_by = ${u.id}, submitted_at = now(), updated_at = now() where id = ${id}`;
+  await audit(sql, u.id, 'branch_report.submit', 'branch_report', id, { site: t.id, day: r.report_day, review: state, kept: flags.map((f) => ({ label: f.label, kind: f.kind, reason: kept[f.key]?.reason })) }, ip);
+  if (state === 'pending') {
+    const { notify } = await import('../notifications');
+    const title = `${t.name} ${r.kind === 'monthly' ? `${Number(String(r.period_start).slice(5, 7))}월 월간 보고` : `${String(r.report_day).slice(5).replace('-', '/')} 주간보고`}`;
+    await notify(sql, { userIds: await approversOf(sql, tenantOf(u), t), type: 'branch_report', title: `${title} — 고객사 제출 승인 필요`, body: `민감 내용 ${flags.length}곳을 '그대로 두기'로 제출했습니다. 확인 뒤 [승인]·[반려] 해 주세요`, link: '/branch-reports', entityType: 'branch_report', entityId: id, actorId: u.id, push: true, space: 'work', dedupeKey: `branch-review:pending:${id}:${Date.now()}` } as never).catch(() => {});
+  }
   return getReport(u, id);
 }
 export async function unsubmitReport(u: SessionUser, id: string, ip: string | null) {
@@ -322,7 +382,7 @@ export async function unsubmitReport(u: SessionUser, id: string, ip: string | nu
   if (!canReopen(u, t)) throw forbidden('제출 취소는 관리자·검토 담당만 할 수 있습니다');
   if (r.status !== 'submitted') throw new HttpError(409, 'not_submitted', '제출하지 않은 보고서입니다');
   if (r.purged_at) throw new HttpError(409, 'purged', '제출 30일이 지나 근거 글을 지운 보고서는 제출 취소할 수 없습니다');
-  await sql`update branch_reports set status = 'draft', submitted_by = null, submitted_at = null, updated_at = now() where id = ${id}`;
+  await sql`update branch_reports set status = 'draft', submitted_by = null, submitted_at = null, updated_at = now(), body = ${sql.json({ ...(r.body ?? {}), review: { kept: r.body?.review?.kept ?? {} } } as never)} where id = ${id}`; // #1117 다시 검사·승인
   await audit(sql, u.id, 'branch_report.unsubmit', 'branch_report', id, {}, ip);
   return getReport(u, id);
 }
@@ -463,22 +523,119 @@ export async function patchMembers(u: SessionUser, id: string, i: z.infer<typeof
 }
 
 // ---------------- 내려받기(엑셀, 2단계) — 주간·월간 ----------------
+// ---------------- #1117 민감 내용 검사 → 그대로 두면 본사 승인 → 승인 뒤에만 '고객사 제출용' ----------------
+/** 월간: 전달 대비 30% 넘게 바뀐 숫자(시설별 이용 현황·회원 현황) — 메모에 그 이름을 적어 설명했으면 뺌 */
+async function monthChanges(b: any) {
+  const { numOf } = await import('./monthly');
+  const out: { path: string; label: string; text: string }[] = [];
+  const said = (name: string) => !!b?.notes && String(b.notes).replace(/\s+/g, '').includes(String(name).replace(/\s+/g, ''));
+  const rows: [string, any][] = [...(b?.usage ?? []).map((x: any, i: number) => [`usage.${i}`, x] as [string, any]), ...(b?.usageTotal ? [['usageTotal', b.usageTotal] as [string, any]] : [])];
+  for (const [path, x] of rows) {
+    const a = numOf(String(x?.prev ?? '')), c = numOf(String(x?.cur ?? ''));
+    if (a === null || c === null || !a || Math.abs((c - a) / a) <= 0.3 || said(x.item)) continue;
+    out.push({ path, label: `시설별 이용 현황 · ${x.item || '합계'}`, text: `${x.prev} → ${x.cur}(${c > a ? '▲' : '▼'}${Math.abs(Math.round(((c - a) / a) * 1000) / 10)}%)` });
+  }
+  if (b?.members) {
+    const { memberTables } = await import('./memberList');
+    for (const tb of memberTables(b.members)) for (const x of tb.rows) {
+      if (x.rate === null || Math.abs(x.rate) <= 30 || said(x.label.replace(/^·\s*/, ''))) continue;
+      out.push({ path: `members.${tb.key}.${x.label}`, label: `${tb.title} · ${x.label.replace(/^·\s*/, '')}`, text: `${(x.prev ?? 0).toLocaleString('ko-KR')} → ${x.cur.toLocaleString('ko-KR')}(${x.rate > 0 ? '▲' : '▼'}${Math.abs(x.rate)}%)` });
+    }
+  }
+  return out;
+}
+type ReviewState = 'draft' | 'rejected' | 'clean' | 'pending' | 'approved' | 'unchecked';
+async function scanOf(r: any) {
+  const { scanReport } = await import('./mask');
+  return scanReport(r.kind, r.body ?? {}, r.kind === 'monthly' ? { changes: await monthChanges(r.body) } : {});
+}
+/** 화면·인쇄·엑셀이 같이 보는 검사 결과 — final = 고객사에 낼 수 있음 */
+async function reviewOf(u: SessionUser, t: Site, r: any) {
+  const flags = await scanOf(r); const rv = r.body?.review ?? {}; const kept: Record<string, { reason: string; byName?: string; at?: string }> = rv.kept ?? {};
+  const state: ReviewState = r.status !== 'submitted' ? (rv.state === 'rejected' ? 'rejected' : 'draft') : (rv.state ?? (flags.length ? 'unchecked' : 'clean'));
+  const list = flags.map((f) => ({ ...f, kept: kept[f.key] ?? null }));
+  return { state, final: r.status === 'submitted' && (state === 'clean' || state === 'approved'), flags: list, open: list.filter((f) => !f.kept).length,
+    approvedByName: rv.approvedByName ?? null, approvedAt: rv.approvedAt ?? null, rejectReason: rv.rejectReason ?? null, rejectedByName: rv.rejectedByName ?? null,
+    canApprove: r.status === 'submitted' && state === 'pending' && canReopen(u, t) && (isAdmin(u) || r.submitted_by !== u.id) };
+}
+export { REVIEW_MARK as MARK } from './mask';
+async function approversOf(sql: Sql, tenant: string, t: Site) {
+  const rows = await sql<{ id: string }[]>`select id from users where tenant = ${tenant} and status = 'active' and role in ('owner', 'admin')`;
+  return [...new Set([...rows.map((x) => x.id), ...(t.reviewer_user_id ? [t.reviewer_user_id] : [])])];
+}
+export const reviewInput = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('mask'), key: z.string().min(1).max(600) }),
+  z.object({ action: z.literal('maskAll') }),
+  z.object({ action: z.literal('keep'), key: z.string().min(1).max(600), reason: z.string().trim().min(2, '그대로 두는 이유를 적어 주세요').max(300) }),
+  z.object({ action: z.literal('unkeep'), key: z.string().min(1).max(600) }),
+  z.object({ action: z.literal('approve') }),
+  z.object({ action: z.literal('reject'), reason: z.string().trim().min(2, '반려 사유를 적어 주세요').max(500) }),
+]);
+export async function reviewAction(u: SessionUser, id: string, i: z.infer<typeof reviewInput>, ip: string | null) {
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
+  const { applyMask } = await import('./mask');
+  const { notify } = await import('../notifications');
+  const title = `${r.unit_name} ${r.kind === 'monthly' ? `${Number(String(r.period_start).slice(5, 7))}월 월간 보고` : `${String(r.report_day).slice(5).replace('-', '/')} 주간보고`}`;
+  const view = { ...r, body: await viewBody(sql, u, r) }; // 화면과 같은 본문으로 검사(가리기·그대로 두기는 저장된 본문에)
+  if (i.action === 'approve' || i.action === 'reject') {
+    const rv = await reviewOf(u, t, view);
+    if (!rv.canApprove) throw r.status === 'submitted' && rv.state === 'pending' ? forbidden(r.submitted_by === u.id ? '내가 제출한 보고는 다른 승인자가 승인해야 합니다' : '승인은 대표·관리자·그 지점 검토 담당만 할 수 있습니다') : new HttpError(409, 'not_pending', '승인 대기 중인 보고서가 아닙니다');
+    const writers = [r.submitted_by, t.writer_user_id].filter(Boolean) as string[];
+    if (i.action === 'approve') {
+      await sql`update branch_reports set body = ${sql.json({ ...r.body, review: { ...(r.body?.review ?? {}), state: 'approved', approvedBy: u.id, approvedByName: u.name, approvedAt: new Date().toISOString() } } as never)}, updated_at = now() where id = ${id}`;
+      await audit(sql, u.id, 'branch_report.approve', 'branch_report', id, { kept: rv.flags.filter((f) => f.kept).map((f) => ({ label: f.label, reason: f.kept!.reason })) }, ip);
+      await notify(sql, { userIds: writers, type: 'branch_report', title: `${title} 승인됨`, body: `${u.name}님이 승인했습니다 — '고객사 제출용' 파일을 내려받을 수 있습니다`, link: '/branch-reports', entityType: 'branch_report', entityId: id, actorId: u.id, space: 'work', dedupeKey: `branch-review:approved:${id}:${Date.now()}` } as never).catch(() => {});
+    } else {
+      await sql`update branch_reports set status = 'draft', submitted_by = null, submitted_at = null, updated_at = now(),
+        body = ${sql.json({ ...r.body, review: { ...(r.body?.review ?? {}), state: 'rejected', rejectReason: i.reason, rejectedByName: u.name, rejectedAt: new Date().toISOString() } } as never)} where id = ${id}`;
+      await audit(sql, u.id, 'branch_report.reject', 'branch_report', id, { reason: i.reason }, ip);
+      await notify(sql, { userIds: writers, type: 'branch_report', title: `${title} 반려됨`, body: `${u.name}: ${i.reason.slice(0, 120)} — 고친 뒤 다시 제출해 주세요`, link: '/branch-reports', entityType: 'branch_report', entityId: id, actorId: u.id, push: true, space: 'work', dedupeKey: `branch-review:rejected:${id}:${Date.now()}` } as never).catch(() => {});
+    }
+    return getReport(u, id);
+  }
+  if (!canWrite(u, t)) throw forbidden('이 지점 보고를 쓸 권한이 없습니다');
+  if (r.status === 'submitted') throw new HttpError(409, 'submitted', '제출한 보고서는 고칠 수 없습니다 — [제출 취소] 뒤에 고치세요');
+  const flags = await scanOf(view);
+  const f = 'key' in i ? flags.find((x) => x.key === i.key) : null;
+  if ('key' in i && !f && i.action !== 'unkeep') throw new HttpError(409, 'stale', '내용이 바뀌었습니다 — 화면을 새로 고친 뒤 다시 해 주세요');
+  let body = r.body ?? {};
+  if (i.action === 'mask' || i.action === 'maskAll') {
+    let n = 0;
+    for (const x of i.action === 'mask' ? [f!] : flags.filter((y) => y.mask && !y.fixIn)) { const nb = applyMask(body, x); if (nb) { body = nb; n++; } }
+    if (!n) throw badRequest(i.action === 'mask' ? '이 말은 가릴 수 없습니다 — 글을 고치거나 그대로 두기 이유를 적어 주세요' : '가릴 수 있는 곳이 없습니다');
+    await audit(sql, u.id, 'branch_report.mask', 'branch_report', id, { n, kinds: i.action === 'mask' ? [f!.kind] : undefined }, ip);
+  } else {
+    const kept = { ...(body.review?.kept ?? {}) };
+    if (i.action === 'keep') kept[i.key] = { reason: i.reason, by: u.id, byName: u.name, at: new Date().toISOString(), label: f!.label, match: f!.match };
+    else delete kept[i.key];
+    body = { ...body, review: { ...(body.review ?? {}), kept } };
+    await audit(sql, u.id, `branch_report.${i.action}`, 'branch_report', id, { label: f?.label ?? null, kind: f?.kind ?? null, reason: i.action === 'keep' ? i.reason : undefined }, ip);
+  }
+  await sql`update branch_reports set body = ${sql.json(body as never)}, updated_by = ${u.id}, updated_at = now() where id = ${id}`;
+  return getReport(u, id);
+}
+
 export async function exportReport(u: SessionUser, id: string) {
-  const sql = db(); const { r } = await loadReport(u, id, sql);
+  const sql = db(); const { r, t } = await loadReport(u, id, sql);
   const { writeXlsx } = await import('../xlsx');
   const { delta, numOf, sumCol } = await import('./monthly');
   const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   const b = r.body ?? {};
   const author = r.submitted_by_name ?? r.created_by_name ?? '';
+  const rv = await reviewOf(u, t, { ...r, body: await viewBody(sql, u, r) }); const mark = (await import('./mask')).REVIEW_MARK[rv.state as ReviewState]; const filePre = rv.final ? '고객사제출용' : '초안'; // #1116 표지·파일 이름 · #1117 승인 뒤에만 고객사 제출용
   if (r.kind === 'monthly') {
+    // #1116 6개월 흐름·민원 모음 — 초안은 지금 계산(분류도 지금 값), 제출한 것은 굳힌 값
+    const ex = r.status === 'draft' || !b.flow ? await monthExtras(sql, tenantOf(u), { ...r, body: r.status === 'draft' && b.members ? { ...b, members: await withKinds(sql, tenantOf(u), b.members) } : b }) : { flow: b.flow, issuesMonth: b.issuesMonth };
     const usage: { item: string; prev: string; cur: string; diff?: string; rate?: string }[] = b.usage ?? [];
     const st = b.usageTotal as { item: string; prev: string; cur: string; diff: string; rate: string } | null;
     const tot = st ?? { item: '전 시설 합계', prev: sumCol(usage.map((x) => x.prev)), cur: sumCol(usage.map((x) => x.cur)), diff: '', rate: '' };
     const main = [
-      ['월간 업무 보고서', r.unit_name], ['작성자', author], ['소속', '주식회사 다짐 운영팀'], ['기간', `${r.period_start} ~ ${r.period_end}`], ['보고일', r.submitted_at ? new Date(r.submitted_at).toISOString().slice(0, 10) : '(초안)'], [],
+      [`${mark} · 월간 업무 보고서`, r.unit_name], ['작성자', author], ['소속', '주식회사 다짐 운영팀'], ['기간', `${r.period_start} ~ ${r.period_end}`], ['보고일', r.submitted_at ? new Date(r.submitted_at).toISOString().slice(0, 10) : '(초안)'], [],
       ['■ 당월 중요업무 내역'], ['번호', '업무내용', '결과/산출물'], ...(b.important ?? []).map((x: any, k: number) => [k + 1, x.work, x.result]), [],
       ['■ 업무 진행사항'], ['주차', '실천업무', '중점 확인사항', '결과', '비고'], ...(b.progress ?? []).map((x: any) => [x.week, x.task, x.focus, x.result, x.note]), [],
       ['■ 차월 업무목표 및 실천사항'], ['업무목표', '실천사항'], ...(b.next ?? []).map((x: any) => [x.goal, x.actions]), [],
+      ['■ 이번 달 민원·특이사항(처리 결과 포함)'], ['번호', '내용', '처음 보고', '처리 결과', '세부'],
+      ...(ex.issuesMonth ?? []).map((x: any, k: number) => [k + 1, x.title, x.first, `${x.state}${x.last !== x.first ? ` (${x.last} 기준)` : ''}`, (x.details ?? []).join('\n')]), ...(ex.issuesMonth?.length ? [] : [['', '이번 달 주간보고에 적힌 민원·특이사항 없음']]), [],
       ['■ 미완료(다음 달 확인)'], ['항목', '상태', '처음', '마지막 주'], ...(b.unfinished ?? []).map((x: any) => [x.title, x.state, x.since, x.lastWeek]),
       ...(b.notes ? [[], ['메모', b.notes]] : []),
     ];
@@ -486,16 +643,18 @@ export async function exportReport(u: SessionUser, id: string) {
     const c = [['시설', '전달 인원', '이번달 인원', '증감', '증감률'], ...usage.map((x) => { const d = delta(x.prev, x.cur); return [x.item, x.prev, x.cur, x.diff || d.diff, x.rate || d.rate]; }),
       ...(usage.length || st ? [(() => { const d = delta(tot.prev, tot.cur); return [tot.item || '전 시설 합계', tot.prev, tot.cur, tot.diff || d.diff, tot.rate || d.rate]; })()] : []), ...fileNote];
     // #1112 회원(이용권) 현황 시트(있을 때만) — 숫자만
-    const m = b.members as any; const sheets = [{ name: '월간 업무 보고서', rows: main }, { name: '시설별 이용 현황', rows: c }];
+    const fl = ex.flow as { months: string[]; rows: { label: string; vals: (number | null)[] }[]; notes: string[] } | null;
+    const flowRows = fl ? [['구분', ...fl.months.map((x) => `${x.slice(0, 4)}.${x.slice(5)}`)], ...fl.rows.map((x) => [x.label, ...x.vals.map((v) => (v === null ? '-' : v))]), [], ...fl.notes.map((x) => [x])] : [];
+    const m = b.members as any; const sheets = [{ name: '월간 업무 보고서', rows: main }, { name: '시설별 이용 현황', rows: c }, ...(fl ? [{ name: '최근 6개월 흐름', rows: flowRows }] : [])];
     if (m) {
       const { memberTables } = await import('./memberList');
       sheets.push({ name: '회원 현황', rows: memberTables(r.status === 'draft' ? await withKinds(sql, tenantOf(u), m) : m).flatMap((tb) => [[`■ ${tb.title}`], ['구분', '전달', '이번달', '증감', '증감률'],
         ...tb.rows.map((x) => [x.label, x.prev ?? '-', x.cur, x.diff ?? '-', x.rate === null ? '-' : `${x.rate}%${x.drop ? ' (30% 넘게 줄어듦)' : ''}`]), ...tb.notes.map((x) => [x]), []]) });
     }
-    return { fileName: `${r.unit_name}_월간보고_${r.period_start.slice(0, 7)}.xlsx`, data: writeXlsx(sheets) };
+    return { fileName: `${filePre}_${r.unit_name}_월간보고_${r.period_start.slice(0, 7)}.xlsx`, data: writeXlsx(sheets) };
   }
   const rows = [
-    ['커뮤니티 주간 운영 보고서', r.unit_name], ['기준일시', `${md(r.report_day)}(금) 11:00`], ['기간', `${md(r.period_start)} ~ ${md(r.period_end)}`], ['작성', '주식회사 다짐 (DAGYM)'], [],
+    [`${mark} · 커뮤니티 주간 운영 보고서`, r.unit_name], ['기준일시', `${md(r.report_day)}(금) 11:00`], ['기간', `${md(r.period_start)} ~ ${md(r.period_end)}`], ['작성', '주식회사 다짐 (DAGYM)'], [],
     ['1. 이용 인원 현황'], ['항목', '인원'], ...(b.usage ?? []).map((x: any) => [x.item, x.count]),
     ...((b.lockers ?? []).length ? [[], ['락커 구분', '사용', '전체', '사용률'], ...b.lockers.map((x: any) => { const u = numOf(x.used), t = numOf(x.total); return [x.name, x.used, x.total, u !== null && t ? `${Math.round((u / t) * 100)}%` : '']; })] : []), [],
     ['2. 시설 점검 보고'], ['시설', '총 이용인원', '청소 상태', '시설 상태'],
@@ -503,7 +662,7 @@ export async function exportReport(u: SessionUser, id: string) {
     ['3. 특이사항 · 건의사항 · 민원'], ['제목', '처리', '세부'], ...(b.issues ?? []).map((x: any) => [x.title, x.state, (x.details ?? []).join('\n')]),
     ...(b.notes ? [[], ['메모', b.notes]] : []),
   ];
-  return { fileName: `${r.unit_name}_주간보고_${r.report_day}.xlsx`, data: writeXlsx([{ name: '주간 운영 보고서', rows }]) };
+  return { fileName: `${filePre}_${r.unit_name}_주간보고_${r.report_day}.xlsx`, data: writeXlsx([{ name: '주간 운영 보고서', rows }]) };
 }
 
 // ---------------- 정기 작업: 제출 30일 뒤 근거 지우기 · 금요일 11시 작성 알림 ----------------

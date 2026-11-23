@@ -4,7 +4,7 @@ import { aiName } from '@/lib/aiNames';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Check, Headphones, Loader2, MessageSquarePlus, Mic, Paperclip, Pin, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { CalendarDays, Check, Folder, Headphones, Loader2, MessageSquarePlus, MessageSquareText, Mic, Paperclip, Pin, Search, Send, Trash2, X } from 'lucide-react';
 import { AI_ACCEPT } from '@/components/libraryUpload';
 import { AttachChips, askFor, useAiAttach } from '@/components/aiAttach';
 import { DropZone } from '@/components/upload';
@@ -153,7 +153,7 @@ export default function AssistantPage() {
     try { await api('/api/ai/limit', { method: 'PUT', body: v.trim() === '' ? { clear: true } : { pct } }); status.reload(); toast.ok('한도를 바꿨습니다'); } catch (e: any) { toast.error(e.message); }
   }
 
-  if (status.data && !status.data.enabled) return <Empty title="AI 비서가 꺼져 있습니다" icon={Sparkles}>관리자가 AI 를 설정하면 사용할 수 있습니다.</Empty>;
+  if (status.data && !status.data.enabled) return <Empty title="AI 비서가 꺼져 있습니다" icon={MessageSquareText}>관리자가 AI 를 설정하면 사용할 수 있습니다.</Empty>;
   return (
     <div className="mx-auto flex max-w-5xl gap-4">
     {/* V14 2번: 대화 목록 (휴대폰은 위 "대화 목록" 버튼) */}
@@ -169,7 +169,7 @@ export default function AssistantPage() {
           <li key={t.id} className={cx('group flex items-center gap-1 rounded-input px-2 py-1.5 text-sm', threadId === t.id ? 'bg-brand-50 font-medium' : 'hover:bg-slate-50')}>
             <button className="min-w-0 flex-1 text-left" onClick={() => openThread(t.id)}>
               <span className="flex items-center gap-1">{t.pinned && <Pin className="size-3 shrink-0 text-amber-600" />}<span className="truncate">{t.title}</span></span>
-              <span className="block truncate text-[11px] text-ink-3">{t.task_title ? `📌 ${t.task_title} · ` : ''}{t.turns}번 · {dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }).format(new Date(t.updated_at))}</span>
+              <span className="block truncate text-[11px] text-ink-3">{t.task_title ? `업무: ${t.task_title} · ` : ''}{t.turns}번 · {dtf('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }).format(new Date(t.updated_at))}</span>
             </button>
             <span className="flex shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
               <button className="rounded p-1 text-ink-3 hover:text-ink" onClick={() => threadAct(t, 'pin')} aria-label={t.pinned ? '고정 해제' : '고정'}><Pin className="size-3.5" /></button>
@@ -182,7 +182,7 @@ export default function AssistantPage() {
       </ul>
     </aside>
     <div className="flex h-[calc(100dvh-9rem)] min-w-0 flex-1 flex-col sm:h-[calc(100dvh-6rem)]">
-      <PageHeader title={aiName(space)} icon={Sparkles}
+      <PageHeader title={aiName(space)} icon={MessageSquareText}
         sub={<>자료실·업무·일정{user.role === 'owner' || user.role === 'admin' ? '·매출' : ''}을 내 권한 안에서 찾아 답합니다. 업무 만들기·첨부·댓글은 <b>[확인]</b>을 눌러야 반영됩니다.
           {status.data?.company?.usedKrw !== undefined && <span className="ml-1 text-xs text-ink-3" data-testid="ai-company-line">회사 이번 달 AI 사용량 {status.data.company.pct === null ? '제한 없음' : `${status.data.company.pct}%`} · {status.data.company.resetLabel} 초기화{status.data?.canSetLimit && <button onClick={editLimit} className="ml-1 text-brand-600 underline">한도 바꾸기</button>}</span>}</>} />
       <div className="mb-2"><AiBudgetBar budget={status.data?.budget} company={status.data?.company} creditMessage={status.data?.creditMessage} onChanged={status.reload} /></div>
@@ -204,23 +204,23 @@ export default function AssistantPage() {
           <div key={i} className={cx('flex flex-col', m.role === 'user' ? 'items-end' : 'items-start')}>
             {m.stopped ? <div className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-ink-3" data-testid="ai-stopped">■ 멈춤</div>
             : m.note ? <div className="rounded-input bg-green-50 px-2.5 py-1 text-xs text-green-800" data-testid="ai-kept">✓ {m.text}</div> : <>
-            <div className={cx('max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.blocked ? 'ai-blocked' : m.role === 'user' ? 'ai-user-msg' : 'ai-answer'}>
-              {m.files?.length ? <div className="mb-1 text-xs opacity-80">📎 {m.files.join(', ')}</div> : null}
+            <div className={cx('max-w-[88%] whitespace-pre-wrap break-words rounded-card px-3 py-2 text-sm', m.role === 'user' ? 'bg-brand-600 text-white' : m.error ? 'bg-red-50 text-red-700' : m.blocked ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-ink')} data-testid={m.blocked ? 'ai-blocked' : m.role === 'user' ? 'ai-user-msg' : 'ai-answer'}>
+              {m.files?.length ? <div className="mb-1 text-xs opacity-80"><Paperclip className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />{m.files.join(', ')}</div> : null}
               {m.role === 'assistant' && !m.error ? <AiText text={m.text} /> : m.text}
               {!!m.proposals?.length && (
                 <div className="mt-2 space-y-1.5">
                   {m.proposals.map((p) => (p.kind === 'draft_sms' || p.kind === 'draft_quote') ? <SpecialProposal key={p.id} p={p} onDecided={(a, patch) => decide(i, p, a, patch)} /> : (
                     <div key={p.id} className="rounded-input border border-amber-200 bg-white p-2 text-ink" data-testid="ai-proposal">
-                      <div className="text-xs font-semibold text-amber-700">✨ AI 제안</div>
+                      <div className="text-xs font-semibold text-amber-800">AI 제안</div>
                       <div className="text-sm">{p.summary}</div>
                       {p.preview && (
                         <div className="mt-1 space-y-1 text-xs text-ink-2" data-testid="ai-proposal-preview">
-                          {p.preview.assignees && <div>담당: {p.preview.assignees.join(', ')}{p.preview.assignees.length > 1 && (p.preview.mode === 'together' ? ` (${p.preview.assignees.length}명 함께 담당 1건)` : ' (각자 1건씩)')}{p.preview.due && ` · 마감 ${p.preview.due}`}{p.preview.files ? ` · 📎 ${p.preview.files}개 첨부` : ''}</div>}
+                          {p.preview.assignees && <div>담당: {p.preview.assignees.join(', ')}{p.preview.assignees.length > 1 && (p.preview.mode === 'together' ? ` (${p.preview.assignees.length}명 함께 담당 1건)` : ' (각자 1건씩)')}{p.preview.due && ` · 마감 ${p.preview.due}`}{p.preview.files ? ` · 첨부 ${p.preview.files}개` : ''}</div>}
                           {!!p.preview.checklist?.length && <details><summary className="cursor-pointer">체크리스트 {p.preview.checklist.length}개</summary><ul className="ml-4 list-disc">{p.preview.checklist.map((c, k) => <li key={k}>{c}</li>)}</ul></details>}
                           {p.preview.description && <p className="line-clamp-3 whitespace-pre-wrap rounded bg-slate-50 p-1.5">{p.preview.description}</p>}
-                          {p.preview.when && <div data-testid="ai-event-preview">🗓 {p.preview.when}{p.preview.place && ` · 📍 ${p.preview.place}`}{p.preview.calendar && ` · ${p.preview.calendar}`}{!!p.preview.attendees?.length && <div>참석: {p.preview.attendees.join(', ')}</div>}{!!p.preview.tasks?.length && <div data-testid="ai-event-tasks">연결 업무: {p.preview.tasks.join(', ')} · 마감 {p.preview.taskDue} (일정과 날짜 연동)</div>}</div>}
+                          {p.preview.when && <div data-testid="ai-event-preview"><CalendarDays className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />{p.preview.when}{p.preview.place && ` · 장소 ${p.preview.place}`}{p.preview.calendar && ` · ${p.preview.calendar}`}{!!p.preview.attendees?.length && <div>참석: {p.preview.attendees.join(', ')}</div>}{!!p.preview.tasks?.length && <div data-testid="ai-event-tasks">연결 업무: {p.preview.tasks.join(', ')} · 마감 {p.preview.taskDue} (일정과 날짜 연동)</div>}</div>}
                           {!!p.preview.moves?.length && <ul className="ml-4 list-disc" data-testid="ai-organize-preview">{p.preview.moves.map((x, k) => <li key={k}>{x}</li>)}</ul>}
-                          {p.preview.folder && <div>📁 저장 폴더: {p.preview.folder}</div>}
+                          {p.preview.folder && <div><Folder className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />저장 폴더: {p.preview.folder}</div>}
                           {!!p.preview.warnings?.length && <ul className="rounded bg-amber-50 p-1.5 text-amber-800" data-testid="ai-event-warnings">{p.preview.warnings.map((w, k) => <li key={k}>⚠ {w}</li>)}</ul>}
                         </div>
                       )}

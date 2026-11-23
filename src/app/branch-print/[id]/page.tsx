@@ -6,7 +6,13 @@ import { ReportView, type Body } from '@/components/branch/ReportView';
 import { MonthlyView, type MonthlyBody } from '@/components/branch/MonthlyView';
 import { PrintButton } from '@/components/branch/PrintButton';
 
-export const metadata: Metadata = { title: '지점 보고 인쇄', robots: { index: false, follow: false } };
+/** #1116 인쇄 창 'PDF로 저장' 기본 파일 이름 = 문서 제목 — 제출한 것은 '고객사제출용_…', 초안은 '초안_…' */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params; const u = await currentUser();
+  const r = u ? await getReport(u, id).catch(() => null) : null; const x = r?.report;
+  const title = x ? `${r!.review.final ? '고객사제출용' : '초안'}_${x.unit_name}_${x.kind === 'monthly' ? `월간보고_${String(x.period_start).slice(0, 7)}` : `주간보고_${x.report_day}`}` : '지점 보고 인쇄';
+  return { title: { absolute: title }, robots: { index: false, follow: false } };
+}
 
 /** #1096 지점 주간보고 PDF(인쇄 모양 A4) — 브라우저 [인쇄 → PDF로 저장]. 앱 틀 없이 보고서만. 권한은 화면과 같음(없으면 404) */
 export default async function BranchPrint({ params }: { params: Promise<{ id: string }> }) {
@@ -16,6 +22,8 @@ export default async function BranchPrint({ params }: { params: Promise<{ id: st
   const r = await getReport(u, id).catch(() => null);
   if (!r) notFound();
   const x = r.report;
+  const { MARK } = await import('@/lib/branchReport');
+  const mark = { final: r.review.final, text: MARK[r.review.state] };
   return (
     <main className="mx-auto max-w-[210mm] bg-white p-[12mm] text-slate-900 print:p-0">
       <style>{'@page { size: A4; margin: 14mm 12mm; } @media print { .no-print { display: none !important } body { background: #fff } }'}</style>
@@ -24,8 +32,10 @@ export default async function BranchPrint({ params }: { params: Promise<{ id: st
         <span className="flex items-center gap-2"><a href={`/api/branch-reports/${x.id}/xlsx`} className="rounded-input border border-slate-300 bg-white px-2.5 py-1 text-sm" data-testid="branch-xlsx">엑셀</a><PrintButton /></span>
       </div>
       {x.kind === 'monthly'
-        ? <MonthlyView unit={x.unit_name} start={x.period_start} end={x.period_end} author={x.submitted_by_name ?? x.created_by_name ?? ''} reportDay={x.submitted_at ? new Date(x.submitted_at).toISOString().slice(0, 10) : '(초안)'} body={x.body as MonthlyBody} />
-        : <ReportView unit={x.unit_name} day={x.report_day} start={x.period_start} end={x.period_end} body={x.body as Body} />}
+        ? <MonthlyView unit={x.unit_name} start={x.period_start} end={x.period_end} author={x.submitted_by_name ?? x.created_by_name ?? ''} reportDay={x.submitted_at ? new Date(x.submitted_at).toISOString().slice(0, 10) : '(초안)'} body={x.body as MonthlyBody} mark={mark} />
+        : <ReportView unit={x.unit_name} day={x.report_day} start={x.period_start} end={x.period_end} body={x.body as Body} mark={mark} />}
+      {!mark.final && <div aria-hidden className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-around overflow-hidden" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} data-testid="branch-watermark">
+        {[0, 1, 2].map((k) => <div key={k} className="-rotate-[24deg] whitespace-nowrap text-5xl font-bold text-red-600/15">{mark.text}</div>)}</div>}
     </main>
   );
 }

@@ -305,3 +305,26 @@ test('#1115 엑셀 읽기: 끝에 공백이 있는 글자 칸 <v xml:space="pres
   const got = []; await eachXlsxRow(new Uint8Array(buf), (cells) => { got.push([...cells.values()]); }, { sheetPath: 'xl/worksheets/sheet1.xml' });
   assert.deepEqual(got[1], ['헬스장 락커 (대) ', '10000'], '흘려 읽기(입찰 큰 파일)도 같음');
 });
+
+test('#1117 민감 내용 검사: 개인정보(가리기)·민원인 특정·사고/법적 책임·내부 정보 · 흔한 말은 이름으로 안 봄 · 걸린 말만 가림', async () => {
+  const { scanText, scanReport, applyMask, pathLabel } = await import('../../src/lib/branchReport/mask.ts');
+  const k = (t) => scanText(t).map((h) => [h.kind, h.match, h.mask ?? null]);
+  assert.deepEqual(k('403동 1002호 입주민이 샤워실 온수 민원'), [['resident', '403동 1002호 입주민', '입주민']]);
+  assert.deepEqual(k('1203동 504호 도어락 고장'), [['pii', '1203동 504호', '1203동']]);
+  assert.deepEqual(k('연락처 010-1234-5678 로 회신'), [['pii', '010-1234-5678', '010-****-5678']]);
+  assert.deepEqual(k('12가3456 차량 주차 민원'), [['pii', '12가3456', '12가****']]);
+  assert.deepEqual(k('김철수님이 락커 키 분실'), [['pii', '김철수님', '김*수님']]);
+  assert.deepEqual(k('관리자님 확인 · 이용자님 문의 · 고객님 응대 · 신규회원 안내'), [], '흔한 말은 이름 아님');
+  assert.deepEqual(k('러닝머신에서 넘어져 부상 — 저희 과실 인정, 보상해드리기로'), [['legal', '부상', null], ['legal', '저희 과실', null], ['legal', '보상해드리', null]]);
+  assert.deepEqual(k('강사 급여 인상 건 · 직원 평가 반영'), [['internal', '급여', null], ['internal', '직원 평가', null]]);
+  assert.deepEqual(k('헬스장 러닝머신 3번 소음 — 업체 수리 완료'), [], '보통 운영 글은 걸리지 않음');
+  const body = { usage: [], facilities: [{ name: '헬스장', cleaning: '청결', condition: '양호', lines: [{ item: '러닝머신', status: '고장', action: '101동 202호 회원 신고', state: '완료' }] }], issues: [{ title: '사우나 민원', details: ['박영희님 010-2222-3333 문의'], state: '완료' }], notes: '' };
+  const f = scanReport('weekly', body);
+  assert.deepEqual(f.map((x) => [x.label, x.kind, x.match]), [['특이사항 1 · 세부 1', 'pii', '박영희님'], ['특이사항 1 · 세부 1', 'pii', '010-2222-3333'], ['시설 점검 1 · 줄 1 · 조치', 'resident', '101동 202호 회원']]);
+  const masked = applyMask(applyMask(body, f[0]), f[1]);
+  assert.equal(masked.issues[0].details[0], '박*희님 010-****-3333 문의'); assert.equal(body.issues[0].details[0], '박영희님 010-2222-3333 문의', '원본은 그대로');
+  assert.equal(applyMask(body, { path: 'issuesMonth.0.title', match: 'x', mask: 'y' }), null, '월간 모음은 주간에서 고침');
+  assert.equal(pathLabel('progress.1.focus'), '업무 진행 2 · 중점 확인사항');
+  const m = scanReport('monthly', { important: [{ work: '사고 처리', result: '' }], progress: [], next: [], unfinished: [], resolved: [], issuesMonth: [{ title: '701동 1101호 입주민 소음', details: [] }], notes: '' }, { changes: [{ path: 'usage.1', label: '시설별 이용 현황 · 골프장', text: '269명 → 174명(▼35.3%)' }] });
+  assert.deepEqual(m.map((x) => [x.label, x.kind, x.fixIn ?? '']), [['중요업무 1 · 업무내용', 'legal', ''], ['이번 달 민원·특이사항 1 · 제목', 'resident', 'weekly'], ['시설별 이용 현황 · 골프장', 'change', '']]);
+});

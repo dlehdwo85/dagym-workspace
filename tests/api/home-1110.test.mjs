@@ -19,6 +19,16 @@ before(async () => {
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 
 describe('#1110 홈 요약', () => {
+  test('#1113 검토 대기(현장 관리자 이상): 검토 요청된 업무 수·내가 요청자인 것 먼저 3건 — 직원은 없음(null)', async () => {
+    const t = await ctx.managerA.client.ok('POST', '/api/tasks', { title: '홈 검토 대기 업무', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: true });
+    const id = t.id ?? t.task?.id;
+    await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
+    const m = await ctx.managerA.client.ok('GET', '/api/home');
+    assert.ok(m.review.count >= 1); assert.equal(m.review.items[0].title, '홈 검토 대기 업무'); assert.equal(m.review.items[0].requested_by, m.me, '내가 요청자인 것 먼저');
+    assert.equal((await ctx.staffA.client.ok('GET', '/api/home')).review, null, '직원은 검토 칸 없음');
+    assert.ok(!(await other.ok('GET', '/api/home')).review?.items?.some((x) => x.title === '홈 검토 대기 업무'), '다른 회사에는 안 보임');
+  });
+
   test('직원: 내 업무 기한 지남(가장 오래된 날)·오늘 마감 · 회사 현황 없음 · 남의 업무는 안 셈', async () => {
     const today = seoul();
     for (const [title, due] of [['홈 지남 3일', addDays(today, -3)], ['홈 지남 1일', addDays(today, -1)], ['홈 오늘', today], ['홈 다음 주', addDays(today, 8)]])

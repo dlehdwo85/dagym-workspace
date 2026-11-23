@@ -51,6 +51,10 @@ export function Card({ className, children, ...p }: React.HTMLAttributes<HTMLDiv
   return <div {...p} className={clsx('min-w-0 rounded-card border border-line bg-white shadow-card', className)}>{children}</div>;
 }
 
+/** #1113(대표 11/22 'AI 티 없애기'): AI 를 쓰는 기능 표시는 이 작은 'AI' 글자 하나로 통일 — 반짝이 아이콘·보라색 쓰지 않음(글자색을 따라감) */
+export function AiMark({ className }: { className?: string }) {
+  return <span className={clsx('inline-flex h-4 shrink-0 items-center rounded-[4px] border border-current px-1 text-[10px] font-semibold leading-none opacity-70', className)} title="AI 를 씁니다" data-ai-mark>AI</span>;
+}
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="rounded border border-line bg-slate-50 px-1.5 py-px font-sans text-[10px] font-medium text-slate-500">{children}</kbd>;
 }
@@ -88,9 +92,9 @@ export function Modal({ open, onClose, title, children, wide, xl }: { open: bool
   if (!open || !mounted) return null;
   // body 로 띄움: 업무 상세 패널(transform) 안에서 fixed·z-index 가 갇혀 스크롤이 안 되고 댓글 입력줄 아래로 깔리던 문제
   return createPortal(
-    <div data-modal-root className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-[1px] sm:items-center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div data-modal-root className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 sm:items-center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal="true" aria-label={title}
-        className={clsx('max-h-[calc(100dvh-var(--sat)-12px)] sm:max-h-[92vh] w-full animate-fade-up overflow-y-auto overscroll-contain rounded-t-2xl bg-white shadow-pop sm:rounded-card', xl ? 'sm:max-w-5xl' : wide ? 'sm:max-w-3xl' : 'sm:max-w-lg')}>
+        className={clsx('max-h-[calc(100dvh-var(--sat)-12px)] sm:max-h-[92vh] w-full animate-fade-up overflow-y-auto overscroll-contain rounded-t-card bg-white shadow-pop sm:rounded-card', xl ? 'sm:max-w-5xl' : wide ? 'sm:max-w-3xl' : 'sm:max-w-lg')}>
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden />
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-white px-5 py-3">
           <h2 className="text-base font-semibold">{title}</h2>

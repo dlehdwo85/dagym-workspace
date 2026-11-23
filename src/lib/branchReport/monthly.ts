@@ -39,8 +39,18 @@ export const monthlyBodySchema = z.object({
   resolved: z.array(z.object({ title: s(300), doneWeek: s(20) })).max(60).default([]),
   notes: z.string().max(2000).default(''),
   sources: z.object({ w: z.array(z.object({ ref: z.string(), reportId: z.string(), day: z.string() })).default([]) }).default({ w: [] }),
+  // #1116(대표 11/22 '이용인원과 금액 동선 추적 · 민원·특이사항 정리해서 고객사에'): 서버가 정함(초안은 볼 때 계산, 제출하면 그때 값으로 굳힘 — 화면 저장으로 못 바꿈)
+  flow: z.any().nullable().default(null),
+  issuesMonth: z.any().nullable().default(null),
+  review: z.any().nullable().default(null), // #1117 서버가 정함(그대로 두기 이유·승인)
 });
 export type MonthlyBody = z.infer<typeof monthlyBodySchema>;
+export const nextMonth = (ym: string) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7); };
+/** #1116 최근 6개월(이 달 포함, 오래된 달부터) */
+export const lastMonths = (ym: string, n = 6) => { const out = [ym]; while (out.length < n) out.unshift(prevMonth(out[0])); return out; };
+export type FlowRow = { key: 'usage' | 'use' | 'class' | 'billing'; label: string; vals: (number | null)[]; money?: boolean };
+export type MonthFlow = { months: string[]; rows: FlowRow[]; notes: string[] };
+export type MonthIssue = { title: string; first: string; last: string; state: string; details: string[]; weeks: number };
 
 /** 주간보고 본문(주간 양식에서 필요한 것만) */
 export type WeeklyIn = { id: string; day: string; body: {
@@ -74,6 +84,17 @@ export function trackItems(weeklies: WeeklyIn[]) {
   };
 }
 
+/** #1116 그 달 주간보고의 특이사항·민원을 월간에 한 표로 — 같은 제목은 한 줄(처음 주·마지막 주·마지막 처리 상태·세부 합침) */
+export function monthIssues(weeklies: WeeklyIn[]): MonthIssue[] {
+  const map = new Map<string, { title: string; first: string; last: string; state: string; details: string[]; weeks: number }>();
+  for (const w of [...weeklies].sort((a, b) => a.day.localeCompare(b.day))) for (const x of w.body.issues ?? []) {
+    if (!x.title?.trim()) continue;
+    const k = norm(x.title); const cur = map.get(k); const det = (x.details ?? []).map((d) => d.trim()).filter(Boolean);
+    if (!cur) { map.set(k, { title: x.title.trim(), first: w.day, last: w.day, state: x.state, details: det.slice(0, 12), weeks: 1 }); continue; }
+    map.set(k, { ...cur, last: w.day, state: x.state, details: [...cur.details, ...det.filter((d) => !cur.details.includes(d))].slice(0, 12), weeks: cur.weeks + (cur.last === w.day ? 0 : 1) });
+  }
+  return [...map.values()].map((x) => ({ ...x, first: weekLabel(x.first), last: weekLabel(x.last) }));
+}
 /** 양식 C: 이번달 = 그 달 마지막 주간보고의 이용 인원, 전달 = 지난달 마지막 주간보고의 이용 인원(없으면 빈칸) — 항목 이름이 같은 것끼리 */
 export function usageC(month: WeeklyIn[], prev: WeeklyIn | null) {
   const last = (ws: WeeklyIn[], item: string) => { for (const w of [...ws].sort((a, b) => b.day.localeCompare(a.day))) { const u = (w.body.usage ?? []).find((x) => norm(x.item) === norm(item)); if (u) return u.count; } return ''; };

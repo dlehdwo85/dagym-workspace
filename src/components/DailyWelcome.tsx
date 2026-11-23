@@ -35,9 +35,8 @@ export function DailyWelcome({ userId, name }: { userId: string; name: string })
   return (
     <div role="status" aria-live="polite" data-testid="daily-welcome" data-state={state} style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
       className={`pointer-events-none fixed inset-x-0 z-[80] flex justify-center px-4 transition-opacity duration-300 motion-reduce:transition-none${state === 'out' ? ' opacity-0' : ''}`}>
-      <style>{'@keyframes wosWelcomePop{0%{transform:scale(.6);opacity:0}60%{transform:scale(1.08);opacity:1}100%{transform:scale(1)}}'}</style>
-      <div className="flex max-w-full items-center gap-3 rounded-full border border-line bg-white/95 py-2 pl-2.5 pr-4 shadow-pop backdrop-blur animate-fade-up motion-reduce:animate-none">
-        <img src="/icon.svg" alt="" width={32} height={32} className="size-8 shrink-0 animate-[wosWelcomePop_.44s_cubic-bezier(.34,1.56,.64,1)_both] motion-reduce:animate-none" data-testid="daily-welcome-icon" />
+      <div className="flex max-w-full items-center gap-3 rounded-full border border-line bg-white py-2 pl-2.5 pr-4 shadow-pop animate-fade-up motion-reduce:animate-none">
+        <img src="/icon.svg" alt="" width={32} height={32} className="size-8 shrink-0" data-testid="daily-welcome-icon" />
         <div className="min-w-0 leading-tight"><div className="truncate text-sm font-semibold text-ink">{line.hello}, {name}님</div><div className="text-[11px] text-ink-3">{line.date}</div></div>
       </div>
     </div>

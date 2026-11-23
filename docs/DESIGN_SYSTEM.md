@@ -23,6 +23,17 @@
 
 ## 아이콘
 `lucide-react` 하나만 사용합니다. 글자 기호(☑ ☰ ▦)와 컬러 이모지(🔔 💬 📎)는 쓰지 않습니다.
+- 상태 표시(첨부·장소·기밀·일정 등록·판정 등)도 아이콘으로 — 메신저 이모지 고르기·업무 반응·화상회의 손들기만 이모지(#1113).
+
+## AI 표시 (#1113, 대표 11/22 'AI 티 없애기')
+- 반짝이(Sparkles)·마술봉(Wand)·로봇(Bot) 아이콘과 AI 전용 보라색을 쓰지 않습니다.
+- AI 를 쓰는 기능은 `AiMark`(작은 'AI' 글자, 글자색을 따라감) 하나로 표시하고, 단추 글자는 하는 일로 씁니다(예: '✨ AI 초안' → '초안 쓰기' + AI 표식). 글자에 이미 'AI'가 있으면 표식을 덧붙이지 않습니다.
+- AI 비서 단추·메뉴 아이콘은 `MessageSquareText`(대화)로 통일합니다.
+
+## 모서리·그림자·움직임 (#1113)
+- 모서리는 `rounded-card`(12px)·`rounded-input`(8px)·둥근 칩 `rounded-full` 셋만 — `rounded-2xl`/`3xl` 쓰지 않음(메신저 스티커 그림만 예외).
+- 그림자는 `shadow-card`·`shadow-pop` 둘만 — `shadow-xl`/`2xl` 쓰지 않음. 흐림(backdrop-blur)·유리 효과 쓰지 않음(화면 가림 보호막만 예외).
+- 움직임은 불러오는 중(돌기·뼈대)·메뉴/창/알림이 열릴 때(0.16~0.18초, ease-out)만. 튀어나오는 효과(overshoot)·장식용 움직임은 쓰지 않음. 0.3초 넘는 전환 없음, `motion-reduce` 존중.
 
 ## 공통 부품 (`src/components/ui.tsx`)
 Button(primary·secondary·ghost·danger·accent) · IconButton(aria-label 필수) · Card · Kbd · Field · inputCls · Modal(모바일은 아래에서 올라오는 시트) · Toast(되돌리기 등 동작 버튼) · StatusBadge · PriorityTag · BrandDot · Avatar/AvatarStack · **DueChip**(오늘 파랑, 지남 빨강+며칠, 3일 이내 주황) · Skeleton · Empty(아이콘+설명+다음 행동) · ErrorBox · PageHeader

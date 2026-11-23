@@ -3,13 +3,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MediaFull, MediaThumb } from '@/components/MediaView';
 import { useBackClose } from '@/components/backClose';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ChevronRight, Download, ExternalLink, FilePenLine, FileSpreadsheet, FileText, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock,
-  Check, Pencil, Search, ShieldAlert, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronRight, Download, ExternalLink, FilePenLine, FileSpreadsheet, FileText, Folder, FolderCheck, FolderInput, FolderPlus, FolderTree, Home, Image as ImageIcon, LayoutGrid, Library, List, Loader2, Lock, Pencil, Search, ShieldAlert, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useSession, useTerms } from '@/components/session';
 import { DropZone, PICK_MAX, UploadProgress, fileHash, putFile } from '@/components/upload';
 import { type Role } from '@/lib/types';
-import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
+import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast, AiMark } from '@/components/ui';
 
 type Sec = 'public' | 'internal' | 'confidential';
 type F = { id: string; folder: string; title: string; file_name: string; mime_type: string; size_bytes: number; tags: string[]; description: string | null;
@@ -271,10 +270,10 @@ export default function LibraryPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-3">
-      <PageHeader title="자료실" icon={Library} sub="폴더로 정리하고, 업무에 바로 첨부하고, AI 비서가 찾아 씁니다. 🔒 기밀 자료는 권한 있는 사람만 봅니다."
+      <PageHeader title="자료실" icon={Library} sub="폴더로 정리하고, 업무에 바로 첨부하고, AI 비서가 찾아 씁니다. 기밀 자료는 권한 있는 사람만 봅니다."
         actions={<>
           {data?.confEdit && <Button variant="ghost" onClick={() => setLogOpen(true)} data-testid="conf-log-open"><ShieldAlert />기밀 열람 기록</Button>}
-          {canUpload && admin && <Button variant="secondary" onClick={previewAll} disabled={!!allBusy} data-testid="library-organize-all">{allBusy ? <><Loader2 className="animate-spin" />{allBusy}</> : <><Sparkles />전체 정리</>}</Button>}
+          {canUpload && admin && <Button variant="secondary" onClick={previewAll} disabled={!!allBusy} data-testid="library-organize-all">{allBusy ? <><Loader2 className="animate-spin" />{allBusy}</> : <><FolderTree />전체 정리<AiMark /></>}</Button>}
           {canUpload && <Button variant="secondary" onClick={() => setDlg({ kind: 'doc', value: '' })} data-testid="library-new-doc"><FilePenLine />새 문서</Button>}
           {canUpload && libSpace === 'work' && (
             <select className={cx(inputCls, 'h-9 !w-auto text-sm')} value={upTo} onChange={(e) => setUpPick(e.target.value)} aria-label="올릴 곳" title="새로 올리는 파일·새 문서가 들어갈 곳" data-testid="library-upload-to">
@@ -346,7 +345,7 @@ export default function LibraryPage() {
             {cur && user.role === 'owner' && <Button size="sm" variant="ghost" onClick={() => setPermFolder(cur)} data-testid="folder-perms-open"><Lock />폴더 권한</Button>}
             {cur && (admin || data?.confEdit) && (
               <select className={cx(inputCls, 'h-8 !w-auto text-xs')} value={folders.find((f) => f.folder === cur) ? (secOf(cur) === 'public' ? '' : secOf(cur)) : ''} onChange={(e) => setFolderSec(e.target.value)} aria-label="폴더 보안 등급">
-                <option value="">등급: 상속·일반</option><option value="internal">등급: 내부</option><option value="confidential">등급: 🔒 기밀</option>
+                <option value="">등급: 상속·일반</option><option value="internal">등급: 내부</option><option value="confidential">등급: 기밀</option>
               </select>
             )}
             {!!data?.review && <button onClick={() => setReview(!review)} aria-pressed={review} data-testid="library-review"
@@ -461,7 +460,7 @@ export default function LibraryPage() {
             <Field label="태그" hint="쉼표로 구분"><input className={inputCls} value={edit.tags as never} onChange={(e) => setEdit({ ...edit, tags: e.target.value as never })} /></Field>
             <Field label="보안 등급" hint="폴더 등급보다 낮출 수는 없습니다. 기밀을 내리려면 기밀 편집 권한이 필요합니다">
               <select className={inputCls} value={edit.security} onChange={(e) => setEdit({ ...edit, security: e.target.value as Sec })} aria-label="보안 등급">
-                <option value="public">일반 — 전 직원</option><option value="internal">내부 — 내부 자료 열람 권한</option><option value="confidential">🔒 기밀 — 기밀 열람 권한자만</option></select></Field>
+                <option value="public">일반 — 전 직원</option><option value="internal">내부 — 내부 자료 열람 권한</option><option value="confidential">기밀 — 기밀 열람 권한자만</option></select></Field>
             {(edit.space ?? 'work') === 'work' && !(edit as F & { task_id?: string | null }).task_id && (edit.created_by === user.id || admin) && (
               <Field label="보관 범위" hint="우리 팀 = 팀과 위 부서·대표·관리자 · 내 파일 = 나만(올린 사람만 고를 수 있음)">
                 <select className={inputCls} value={edit.scope === 'team' ? `team:${edit.team_id ?? ''}` : edit.scope ?? 'company'} aria-label="보관 범위" data-testid="library-edit-scope"
@@ -486,7 +485,7 @@ export default function LibraryPage() {
                   <input type="checkbox" className="mt-1" checked={p.on} onChange={(e) => setPreview(preview.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)))} aria-label={`${p.from?.title} 적용`} />
                   <div className="min-w-0 flex-1"><div className="truncate font-medium">{p.from?.title} → {p.title}</div>
                     <div className="text-xs text-ink-3">{p.from?.folder || '최상위'} → <b className="text-ink">{p.folder || '최상위'}</b> · {p.tags.slice(0, 4).map((t: string) => '#' + t).join(' ')}
-                      {p.suggestedSecurity === 'confidential' && <span className="ml-1 text-red-700">🔒 기밀 제안</span>}{p.error && <span className="ml-1 text-amber-700">({p.error})</span>}</div></div>
+                      {p.suggestedSecurity === 'confidential' && <span className="ml-1 text-red-700"><Lock className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />기밀 제안</span>}{p.error && <span className="ml-1 text-amber-700">({p.error})</span>}</div></div>
                 </li>
               ))}
             </ul>
@@ -522,8 +521,8 @@ function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder,
           {f.effective_security !== 'internal' && <SecBadge s={f.effective_security} />}
           {f.scope === 'team' && <span className="inline-flex shrink-0 items-center rounded bg-sky-50 px-1.5 text-[11px] font-semibold text-sky-800" data-testid="scope-team">{f.team_name ?? '팀'}</span>}
           {f.scope === 'mine' && <span className="inline-flex shrink-0 items-center rounded bg-slate-800 px-1.5 text-[11px] font-semibold text-white" data-testid="scope-mine">내 파일</span>}
-          {f.organized_by && <span className={cx('inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 text-[11px] font-semibold', f.needs_review ? 'bg-amber-100 text-amber-800' : 'bg-violet-100 text-violet-700')}
-            title={f.ai_confidence !== null ? `확신 ${Math.round(f.ai_confidence * 100)}%` : undefined} data-testid="ai-organized"><Sparkles className="size-3" />{f.organized_by === 'ai' ? 'AI 정리됨' : '규칙 정리'}{f.needs_review && ' · 확인 필요'}</span>}
+          {f.organized_by && <span className={cx('inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 text-[11px] font-semibold', f.needs_review ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-ink-2')}
+            title={f.ai_confidence !== null ? `확신 ${Math.round(f.ai_confidence * 100)}%` : undefined} data-testid="ai-organized"><FolderCheck className="size-3" />{f.organized_by === 'ai' ? 'AI 정리됨' : '규칙 정리'}{f.needs_review && ' · 확인 필요'}</span>}
         </div>
         <div className="truncate text-xs text-ink-3">
           {showFolder && <button onClick={onOpenFolder} className="mr-1.5 hover:underline"><Folder className="mr-0.5 inline size-3" />{f.folder || '최상위'}</button>}
@@ -532,9 +531,9 @@ function FileRow({ f, hi, sel, onSel, onDrag, user, admin, confEdit, showFolder,
         </div>
         {f.snippet && <div className="mt-0.5 line-clamp-1 text-xs text-ink-2">…{f.snippet}…</div>}
         {f.vision?.caption && <div className="mt-0.5 truncate text-xs text-ink-2" title={f.vision.scene} data-testid="photo-vision">AI 사진 설명: {f.vision.caption}{f.vision.promo || (f.vision.kind && f.vision.kind !== 'photo') ? ' · 글자 든 그래픽(시안·블로그에 안 씀)' : f.vision.text === 'much' ? ' · 글자 많은 실사(블로그 본문에만 씀)' : f.vision.text === 'none' ? ' · 글자 없는 실사' : ''}</div>}
-        {f.organize_status === 'pending' && <div className="mt-0.5 flex items-center gap-1 text-xs text-violet-700" data-testid="organize-pending"><Loader2 className="size-3 animate-spin" />AI 정리 중…</div>}
+        {f.organize_status === 'pending' && <div className="mt-0.5 flex items-center gap-1 text-xs text-ink-2" data-testid="organize-pending"><Loader2 className="size-3 animate-spin" />AI 정리 중…</div>}
         {f.organize_status === 'done' && f.organized_by === 'ai' && (
-          <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-violet-700" data-testid="organize-done">
+          <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-ink-2" data-testid="organize-done">
             <span className="truncate">AI 정리됨 → {f.folder || '최상위'}{f.tags.length > 0 && ` · ${f.tags.slice(0, 4).map((t) => '#' + t).join(' ')}`}</span>
             {(mine || admin) && <button className="shrink-0 font-semibold underline" onClick={onEdit}>바꾸기</button>}
           </div>
@@ -573,7 +572,7 @@ function ConfLog({ onClose }: { onClose: () => void }) {
   const { data } = useApi<{ logs: { id: number; action: string; detail: any; created_at: string; user_name: string }[] }>('/api/library/confidential-log');
   const L: Record<string, string> = { 'library.confidential_open': '열람', 'library.confidential_download': '내려받기', 'library.confidential_ai': 'AI 참조' };
   return (
-    <Modal open onClose={onClose} title="🔒 기밀 자료 열람 기록" wide>
+    <Modal open onClose={onClose} title="기밀 자료 열람 기록" wide>
       <ul className="max-h-[60vh] divide-y divide-line overflow-y-auto text-sm" data-testid="conf-log">
         {data?.logs.map((l) => <li key={l.id} className="flex gap-2 py-1.5"><span className="w-20 shrink-0 font-medium">{L[l.action] ?? l.action}</span><span className="min-w-0 flex-1 truncate">{l.detail?.title}</span>
           <span className="shrink-0 text-xs text-ink-3">{l.user_name} · {fmtDateTime(l.created_at)}</span></li>)}

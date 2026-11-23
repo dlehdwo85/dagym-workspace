@@ -50,7 +50,7 @@ export function CommandPalette({ open, onClose, onQuickAdd }: { open: boolean; o
   let lastGroup = '';
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/40 p-4 pt-[10vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-label="빠른 검색" className="w-full max-w-xl overflow-hidden rounded-xl bg-white shadow-2xl">
+      <div role="dialog" aria-label="빠른 검색" className="w-full max-w-xl overflow-hidden rounded-xl bg-white shadow-pop">
         <input ref={input} value={q} onChange={(e) => { setQ(e.target.value); setSel(0); }} placeholder="업무·프로젝트·일정·사람 검색 또는 명령"
           className="w-full border-b px-4 py-3 text-base outline-none" aria-label="빠른 검색어" data-testid="palette-input"
           onKeyDown={(e) => {

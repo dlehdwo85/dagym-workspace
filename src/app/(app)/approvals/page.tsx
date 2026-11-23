@@ -6,7 +6,7 @@ import { dtf } from '@/lib/dtf';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Download, FileEdit, Plus, Settings2, Stamp, Trash2 } from 'lucide-react';
+import { CalendarCheck, Download, FileEdit, Plus, Settings2, Stamp, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { MultiUserSelect } from '@/components/pickers';
 import { isAdminRole, useSession } from '@/components/session';
@@ -92,7 +92,7 @@ export default function ApprovalsPage() {
                     {r.doc_no && <span className="mr-1 font-mono text-[11px] text-ink-2" data-testid="approval-doc-no">{r.doc_no}</span>}
                     {r.requester_name} · {fmtDateTime(r.created_at)}
                     {r.steps?.length ? ` · ${r.steps.map((s) => `${s.label} ${s.status === 'approved' ? '✓' : s.status === 'rejected' ? '✗' : s.status === 'pending' ? '…' : '·'}`).join(' → ')}` : ''}
-                    {r.event_id && ' · 📅 캘린더 등록됨'}
+                    {r.event_id && <> · <CalendarCheck className="inline size-3.5 align-[-2px]" aria-hidden /> 캘린더 등록됨</>}
                   </div>
                   {/* ③ 멈춘 단계 · ④ 반려 사유 */}
                   {r.status === 'pending' && r.stuck && <div className={cx('mt-0.5 text-xs', stuckDays >= 3 ? 'font-medium text-amber-700' : 'text-ink-2')} data-testid="approval-stuck">{r.stuck.label} 단계에서 {stuckDays === 0 ? '오늘부터' : `${stuckDays}일째`} 기다리는 중</div>}

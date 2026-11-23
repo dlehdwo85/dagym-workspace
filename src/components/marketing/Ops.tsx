@@ -1,4 +1,5 @@
 'use client';
+import { Sunrise } from 'lucide-react';
 import Link from 'next/link';
 import { useTerms } from '@/components/session';
 import { useState } from 'react';
@@ -66,7 +67,7 @@ export function Ops() {
         {data.review?.signals?.length ? <span className="text-[11px]" data-testid="ops-review-signals">{data.review.signals.map((s) => s.title).join(' · ')}</span> : data.review ? <span className="text-[11px]">오늘 게시 {data.review.metrics?.posts ?? 0} · 클릭 {data.review.metrics?.clicks ?? 0} · 문의 {data.review.metrics?.inquiries ?? 0} · 계약 {data.review.metrics?.contracts ?? 0}</span> : <span className="text-[11px]">1시간마다 지표를 보고 변화가 있으면 카드로 제안합니다</span>}
         <span className="ml-auto text-[11px] opacity-80" data-testid="ops-review-at">{data.review ? `최근 검토 ${fmtDateTime(data.review.reviewedAt)}` : ''}</span>
         {data.canEdit && <Button size="sm" variant="secondary" onClick={reviewNow} disabled={busy} data-testid="ops-review-now">지금 검토</Button>}</div>}
-      {data?.review?.brief && <p className="rounded-input bg-slate-50 px-3 py-1.5 text-xs text-ink-2" data-testid="ops-brief">🌅 아침 브리핑 · {data.review.brief}</p>}
+      {data?.review?.brief && <p className="rounded-input bg-slate-50 px-3 py-1.5 text-xs text-ink-2" data-testid="ops-brief"><Sunrise className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />아침 브리핑 · {data.review.brief}</p>}
       <p className="text-xs text-ink-2">AI 마케터가 숫자(게시·문의·광고비·캠페인)를 보고 분석·게시 방향·협업·인플루언서·향후 계획을 카드로 올립니다. 대표가 [승인]하면 실행됩니다 — 계획·방향은 제작의뢰실 의뢰로, 협업·인플루언서·분석은 담당 업무로. 돈을 쓰거나 밖으로 보내는 일은 사람이 합니다. 매주 월요일 분석·방향 카드가 자동으로 올라옵니다.</p>
       {!data ? <Skeleton rows={5} /> : <>
         <RevenueGoal canEdit={data.canEdit} month={data.month} />
