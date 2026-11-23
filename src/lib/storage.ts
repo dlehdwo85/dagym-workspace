@@ -1,6 +1,6 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, ListPartsCommand, AbortMultipartUploadCommand, ListMultipartUploadsCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, ListPartsCommand, AbortMultipartUploadCommand, ListMultipartUploadsCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { mkdir, writeFile, readFile, stat, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, stat, unlink, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { hmac } from './crypto';
 
@@ -209,4 +209,44 @@ export async function getObject(key: string, max = READ_GUARD_MAX): Promise<Buff
   const b = await readLocal(key);
   if (b.length > max) throw new Error(BIG_FILE_NOTE);
   return b;
+}
+
+/** 상용화 B4 회사 파기: 경로(prefix) 아래 파일 열쇠를 최대 max 개 — S3 는 목록, 로컬은 폴더를 훑음 */
+export async function listKeys(prefix: string, max = 1000): Promise<string[]> {
+  if (!prefix || prefix === '/' || prefix.includes('..')) return [];
+  if (s3Configured()) {
+    const r = await s3().send(new ListObjectsV2Command({ Bucket: s3Env().bucket, Prefix: prefix, MaxKeys: Math.min(1000, max) }));
+    return (r.Contents ?? []).map((o) => o.Key!).filter(Boolean);
+  }
+  const out: string[] = [];
+  const walk = async (rel: string) => {
+    if (out.length >= max) return;
+    let ents: { name: string; isDirectory(): boolean }[];
+    try { ents = await readdir(path.join(LOCAL_DIR, rel), { withFileTypes: true }); } catch { return; }
+    for (const e of ents) { if (out.length >= max) return; const k = `${rel}${e.name}`; if (e.isDirectory()) await walk(`${k}/`); else out.push(k); }
+  };
+  await walk(prefix.endsWith('/') ? prefix : `${prefix}/`);
+  return out;
+}
+/** 상용화 B4 회사 파기: 파일 여러 개 지우기(없는 파일은 지난 것으로 봄) — 지운 개수 */
+export async function deleteKeys(keys: string[]): Promise<number> {
+  const ks = [...new Set(keys.filter((k) => k && !k.includes('..')))];
+  if (!ks.length) return 0;
+  if (s3Configured()) {
+    let n = 0;
+    for (let i = 0; i < ks.length; i += 1000) {
+      const part = ks.slice(i, i + 1000);
+      const r = await s3().send(new DeleteObjectsCommand({ Bucket: s3Env().bucket, Delete: { Objects: part.map((Key) => ({ Key })), Quiet: true } }));
+      if (r.Errors?.length) throw new Error(`파일 ${r.Errors.length}개를 지우지 못했습니다: ${r.Errors[0]?.Code ?? ''}`);
+      n += part.length;
+    }
+    return n;
+  }
+  for (const k of ks) await unlink(path.join(LOCAL_DIR, k)).catch((e) => { if (e?.code !== 'ENOENT') throw e; });
+  return ks.length;
+}
+/** 로컬(개발·시험)에서 빈 폴더 정리 */
+export async function removeLocalDir(prefix: string) {
+  if (s3Configured() || !prefix || prefix.includes('..')) return;
+  await rm(path.join(LOCAL_DIR, prefix), { recursive: true, force: true }).catch(() => {});
 }

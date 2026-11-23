@@ -172,7 +172,10 @@ export async function tenantDeletion(u: SessionUser, tenant: string, i: z.infer<
       await tx`update tenants set status = 'deleted', deleted_at = now() where id = ${tenant}`;
       for (const r of await tx<{ id: string }[]>`select id from users where tenant = ${tenant}`) await anonymize(tx, r.id);
       await tx`delete from memos where tenant = ${tenant}`; // #1135 영구 삭제 때 메모·주요 메모(암호문)도 함께 지움
+      // 상용화 B4: 회사 자료·파일 실제 파기 — 정기 실행(tenantPurge)이 이어서. 결제·세금계산서·감사 기록은 남김
+      await tx`update tenants set purge = ${tx.json({ state: 'queued', at: new Date().toISOString(), by: u.id } as never)} where id = ${tenant}`;
     });
+    await (await import('./tenantPurge')).runTenantPurge(tenant, 20_000).catch(async (e) => { await (await import('./log')).logError('tenant-purge', e).catch(() => {}); });
   }
   await audit(sql, u.id, `platform.tenant_${i.action}_delete`, 'tenant', null, { tenant }, ip);
   return { ok: true };
