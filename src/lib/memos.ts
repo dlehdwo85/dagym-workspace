@@ -304,3 +304,47 @@ export async function memoPurge(sql: Sql = db()) {
   const r = await sql`delete from memos where deleted_at < now() - interval '30 days'`;
   return r.count;
 }
+
+// ---------------- #1135 2단계: 퇴사 처리 연동 ----------------
+/** 퇴사 처리 전에: 그 사람이 볼 수 있던 주요 메모(만든 것·사람 공유·부서 공유) — 인수인계로 만든 사람이 바뀌기 전에 모은다 */
+export async function secretMemosSeenBy(tenant: string, userId: string) {
+  return db()<{ id: string; title: string; site_url: string | null; created_by: string }[]>`with recursive lu as (
+      select o.id, o.parent_id from org_units o join memberships mb on mb.org_unit_id = o.id where mb.user_id = ${userId} and o.tenant = ${tenant}
+      union select p.id, p.parent_id from org_units p join lu c on p.id = c.parent_id
+    ) select m.id, m.title, m.site_url, m.created_by from memos m
+    where m.tenant = ${tenant} and m.kind = 'secret' and m.deleted_at is null
+      and (m.created_by = ${userId} or exists (select 1 from memo_access a where a.memo_id = m.id and (a.user_id = ${userId} or a.org_unit_id in (select id from lu))))
+    order by m.title`;
+}
+
+/**
+ * 퇴사 처리 뒤: 그 사람이 볼 수 있던 주요 메모마다 '비밀번호 바꾸기' — 맡을 사람(메모를 만든 사람 → 인수자 → 퇴사 처리한 관리자)별로 업무 1건, 메모는 체크리스트 한 줄씩.
+ * 업무에는 메모 제목·사이트 주소만(아이디·비밀번호 값은 넣지 않음).
+ */
+type SeenMemo = { id: string; title: string; site_url: string | null; created_by: string };
+export async function passwordChangeTasks(actor: SessionUser, leaver: { id: string; name: string }, memos: SeenMemo[], handoverTo: string | null, ip: string | null) {
+  if (!memos.length) return { tasks: 0, memos: 0 };
+  const sql = db();
+  const ids = memos.map((m) => m.id);
+  const now = await sql<{ id: string; created_by: string; active: boolean }[]>`select m.id, m.created_by, (u.status = 'active') as active from memos m join users u on u.id = m.created_by where m.id = any(${ids})`;
+  const owner = new Map(now.map((r) => [r.id, r.active && r.created_by !== leaver.id ? r.created_by : null]));
+  const groups = new Map<string, SeenMemo[]>();
+  for (const m of memos) {
+    const to = owner.get(m.id) ?? handoverTo ?? actor.id;
+    groups.set(to, [...(groups.get(to) ?? []), m]);
+  }
+  const { createTask, taskInput } = await import('./tasks');
+  const due = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(Date.now() + 3 * 864e5));
+  let n = 0;
+  for (const [assigneeId, list] of groups) {
+    await createTask(actor, taskInput.parse({
+      title: `[보안] 퇴사한 ${leaver.name}님이 볼 수 있던 주요 메모 ${list.length}건 — 비밀번호 바꾸기`,
+      description: '퇴사한 사람이 볼 수 있던 사이트 계정입니다. 각 사이트에서 비밀번호를 바꾼 뒤 워크인 › 메모 › 주요 메모의 비밀번호 칸도 고쳐 주세요. 다 바꾼 줄은 체크하세요.',
+      assigneeId, priority: 'high', dueDate: due, tags: ['보안'],
+      checklist: list.slice(0, 100).map((m) => `${m.title}${m.site_url ? ` (${m.site_url})` : ''}`.slice(0, 300)),
+    }), { quiet: false, skipQuota: true });
+    n++;
+  }
+  await audit(sql, actor.id, 'memo.leave_password_tasks', 'user', leaver.id, { memos: memos.length, tasks: n }, ip);
+  return { tasks: n, memos: memos.length };
+}

@@ -26,6 +26,12 @@ export async function memos({ owner, staff, ctx, BASE, SHOTS }) {
   await f.getByTestId('memo-in-title').fill('세금계산서 발행 사이트');
   await f.getByTestId('memo-in-url').fill('tax.example.com');
   await f.getByTestId('memo-in-username').fill('dagym-tax');
+  // 2단계 비밀번호 만들기: 16자, 대·소문자·숫자·기호 하나씩은 꼭 — 확인 뒤 시험용 값으로 바꿔 넣음
+  await f.getByTestId('memo-gen-password').click();
+  const gen = await f.getByTestId('memo-in-password').inputValue();
+  assert.ok(gen.length === 16 && /[A-Z]/.test(gen) && /[a-z]/.test(gen) && /[0-9]/.test(gen) && /[^A-Za-z0-9]/.test(gen), `만든 비밀번호 ${gen.length}자`);
+  await f.getByTestId('memo-gen-password').click();
+  assert.notEqual(await f.getByTestId('memo-in-password').inputValue(), gen, '누를 때마다 새 값');
   await f.getByTestId('memo-in-password').fill('E2E-pass-1135!');
   await f.getByTestId('memo-share-add-user').selectOption(ctx.staffA.id); // 같은 회사 사람 목록(이름 + 이메일)에서 직원 A
   assert.equal(await f.getByTestId('memo-share-row').count(), 1);

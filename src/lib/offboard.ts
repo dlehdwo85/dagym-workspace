@@ -32,6 +32,8 @@ export async function leaveUser(actor: SessionUser, id: string, i: z.infer<typeo
   }
   const date = i.date ?? ymd(new Date());
   let handover: Awaited<ReturnType<typeof doHandover>> | null = null;
+  const memoMod = await import('./memos');
+  const seenSecrets = await memoMod.secretMemosSeenBy(tenantOf(actor), id); // #1135 2단계: 인수인계로 만든 사람이 바뀌기 전에
   await sql.begin(async (tx) => {
     await tx`update users set status = 'left', left_at = ${date}, left_by = ${actor.id}, rejoin_until = ${plusDays(date, 30)}, updated_at = now() where id = ${id}`;
     await tx`update sessions set revoked_at = now() where user_id = ${id} and revoked_at is null`;
@@ -49,7 +51,9 @@ export async function leaveUser(actor: SessionUser, id: string, i: z.infer<typeo
     await audit(tx, actor.id, 'user.leave', 'user', id, { date, name: cur.name }, ip);
   });
   if (i.toUserId && i.items?.length) handover = await doHandover(actor, id, { toUserId: i.toUserId, items: i.items }, ip);
-  return { ok: true, leftAt: date, rejoinUntil: plusDays(date, 30), handover };
+  // #1135 2단계: 그 사람이 볼 수 있던 주요 메모 → 맡을 사람별 '비밀번호 바꾸기' 업무(값은 넣지 않음). 실패해도 퇴사 처리는 끝난 것으로
+  const passwordTasks = await memoMod.passwordChangeTasks(actor, { id, name: cur.name }, seenSecrets, i.toUserId ?? null, ip).catch(() => ({ tasks: 0, memos: seenSecrets.length, failed: true }));
+  return { ok: true, leftAt: date, rejoinUntil: plusDays(date, 30), handover, passwordTasks };
 }
 
 /** 인수인계 항목: key → 라벨·개수 SQL·이전 SQL */
@@ -78,6 +82,13 @@ const ITEMS: Record<string, { label: string; count: (sql: ReturnType<typeof db>,
     move: async (sql, id, to) => n(await sql`with u as (update events set created_by = ${to} where created_by = ${id} and end_at >= now() and not cancelled returning 1) select count(*)::int as n from u`) },
   contacts: { label: '담당 연락처', count: async (sql, id) => n(await sql`select count(*)::int as n from contacts where owner_id = ${id}`),
     move: async (sql, id, to) => n(await sql`with u as (update contacts set owner_id = ${to} where owner_id = ${id} returning 1) select count(*)::int as n from u`) },
+  // #1135 2단계: 그 사람이 만든 '공유한' 메모(볼 사람이 있는 것)는 받는 사람이 만든 사람이 됨 — 나만 보는 메모는 넘기지 않음(개인 메모 보호)
+  memos: { label: '공유한 메모(만든 사람 넘기기)', count: async (sql, id) => n(await sql`select count(*)::int as n from memos m where m.created_by = ${id} and m.deleted_at is null and exists (select 1 from memo_access a where a.memo_id = m.id)`),
+    move: async (sql, id, to) => {
+      const moved = await sql<{ id: string }[]>`update memos m set created_by = ${to}, updated_at = now() where m.created_by = ${id} and m.deleted_at is null and exists (select 1 from memo_access a where a.memo_id = m.id) returning m.id`;
+      if (moved.length) await sql`delete from memo_access where user_id = ${to} and memo_id = any(${moved.map((r) => r.id)})`; // 만든 사람은 늘 고치기 — 따로 둔 줄은 정리
+      return moved.length;
+    } },
   projects: { label: '프로젝트 책임', count: async (sql, id) => n(await sql`select count(*)::int as n from projects where owner_id = ${id} and not archived`),
     move: async (sql, id, to) => n(await sql`with u as (update projects set owner_id = ${to} where owner_id = ${id} and not archived returning 1) select count(*)::int as n from u`) },
 };

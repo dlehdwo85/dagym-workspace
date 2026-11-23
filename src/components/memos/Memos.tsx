@@ -3,7 +3,7 @@
 // 메모마다 볼 사람(사람·부서, 보기/고치기)을 정한다. 기본은 나만. 주요 메모의 아이디·비밀번호·참고는 ●●●● 로 가려 두고,
 // [보기]·[복사]는 본인 확인(10분) 뒤에만 서버에서 그 칸만 받아 30초 보여 주고 지운다. 복사한 값은 30초 뒤 클립보드를 비운다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArchiveRestore, Copy, Eye, EyeOff, ExternalLink, History, KeyRound, Lock, LockOpen, NotebookPen, Plus, Search, StickyNote, Trash2, Users } from 'lucide-react';
+import { ArchiveRestore, Copy, Eye, EyeOff, ExternalLink, History, KeyRound, Lock, LockOpen, NotebookPen, Plus, Search, StickyNote, Trash2, Users, Wand } from 'lucide-react';
 import { ApiError, api, useApi } from '@/components/client';
 import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, askConfirm, cx, fmtDate, fmtDateTime, inputCls, toast } from '@/components/ui';
 
@@ -295,6 +295,16 @@ function MemoDetail({ id, status, unlock, ensureUnlocked, onClose, onChanged }: 
   );
 }
 
+/** #1135 2단계 비밀번호 만들기: 브라우저 암호용 난수(crypto.getRandomValues)로 16자 — 헷갈리는 글자(0·O·l·1 등) 빼고, 대·소문자·숫자·기호 하나씩은 꼭 */
+const PW_SETS = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '!@#$%^&*-_=+?'];
+/** 0 ≤ x < n 고른 정수(치우침 없게 넘치는 값은 다시 뽑음) */
+function randInt(n: number) { const buf = new Uint32Array(1); const lim = Math.floor(0x100000000 / n) * n; do { crypto.getRandomValues(buf); } while (buf[0] >= lim); return buf[0] % n; }
+export function makePassword(len = 16) {
+  const all = PW_SETS.join('');
+  const chars = [...PW_SETS.map((set) => set[randInt(set.length)]), ...Array.from({ length: len - PW_SETS.length }, () => all[randInt(all.length)])];
+  for (let i = chars.length - 1; i > 0; i--) { const k = randInt(i + 1); [chars[i], chars[k]] = [chars[k], chars[i]]; } // 섞기(종류별 첫 글자 자리가 고정되지 않게)
+  return chars.join('');
+}
 function SecretInputs({ v, set }: { v: { username?: string; password?: string; note?: string }; set: (p: { username?: string; password?: string; note?: string }) => void }) {
   const [show, setShow] = useState(false);
   return <>
@@ -303,6 +313,7 @@ function SecretInputs({ v, set }: { v: { username?: string; password?: string; n
       <div className="flex gap-2">
         <input type={show ? 'text' : 'password'} value={v.password ?? ''} onChange={(e) => set({ password: e.target.value })} className={inputCls} autoComplete="new-password" data-testid="memo-in-password" />
         <Button type="button" variant="secondary" onClick={() => setShow((s) => !s)} aria-label={show ? '비밀번호 가리기' : '비밀번호 보기'}>{show ? <EyeOff /> : <Eye />}</Button>
+        <Button type="button" variant="secondary" onClick={() => { set({ password: makePassword() }); setShow(true); }} title="이 기기에서 무작위로 만듦(16자) — 사이트 비밀번호를 이것으로 바꾼 뒤 저장하세요" data-testid="memo-gen-password"><Wand />만들기</Button>
       </div>
     </Field>
     <Field label="참고(보안 질문·2단계 인증 안내 등)"><textarea value={v.note ?? ''} onChange={(e) => set({ note: e.target.value })} rows={3} className={inputCls} data-testid="memo-in-note" /></Field>
