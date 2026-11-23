@@ -19,3 +19,13 @@
 
 참고: 자료 PDF 자체가 frontend-design 이 꼽는 'AI 티' 2번 모양이다(검은 바탕 + 형광 초록 강조 하나).
 릴스 댓글 6만 개는 '댓글 달면 PDF 보내 줌' 방식이라, 반응이 크다고 해서 근거가 되지는 않음.
+
+## 정정 (11/23 대표)
+"워크인에 도입하라는 게 아니라 클로드 코드가 자체적으로 학습해 두라는 것"
+- 노트북 클로드 코드 전역(`~/.claude/skills`, 모든 프로젝트)에 커밋 고정으로 설치함(원본 그대로, 자동 갱신 안 함)
+  - frontend-design
+  - claude-automation-recommender(= claude-code-setup)
+  - remotion-best-practices(remotion-dev/skills 6f55706)
+- Playwright·skill-creator 는 원래 있음
+- 이 저장소의 `.claude/skills/frontend-design` 은 워크인 기능이 아니라, 클라우드 세션이 같은 기준을 쓰게 하려는 사본임
+- security-guidance(자동 훅 + 패키지 내려받기 → 회사 원칙상 시험 저장소)와 Discord(봇 토큰·외부 통합)는 대표 답을 기다림
