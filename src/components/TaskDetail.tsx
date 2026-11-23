@@ -1217,6 +1217,27 @@ function blocks(text: string): (string | string[][])[] {
   return out;
 }
 
+/** 주소 속 %EC%95… 를 읽을 수 있게(검색어 n_query 등 한글) — 깨진 인코딩은 그대로 */
+const decodeUrlText = (t: string) => t.replace(/(?:%[0-9A-Fa-f]{2})+/g, (m) => { try { return decodeURIComponent(m); } catch { return m; } });
+/**
+ * #1133: 설명 표의 값 — 공백 없이 긴 주소·경로(유입 경로의 /resident-app?n_media=…&n_query=… 등)는 읽을 수 있게 풀어서 한 줄 말줄임 + [복사]·[열기](http 주소일 때만).
+ * 나머지는 그대로(굵게·링크 자동 연결).
+ */
+function descValue(v: string, inline: (line: string) => React.ReactNode[]) {
+  const long = v.split(/\s+/).find((w) => w.length > 40 && /[/?=&%]/.test(w));
+  if (!long) return inline(v);
+  const full = decodeUrlText(v);
+  const http = /^https?:\/\//.test(long) ? long : null;
+  return (
+    <span className="flex min-w-0 items-center gap-1.5" data-testid="desc-long">
+      <span className="min-w-0 flex-1 truncate" title={full}>{full}</span>
+      <button type="button" className="shrink-0 rounded border border-line px-1.5 text-[11px] text-ink-2 hover:bg-slate-50" data-testid="desc-copy"
+        onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(full).then(() => toast.ok('복사했습니다'), () => toast.error('복사하지 못했습니다')); }}>복사</button>
+      {http && <a href={http} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="shrink-0 rounded border border-line px-1.5 text-[11px] text-ink-2 hover:bg-slate-50" data-testid="desc-open">열기</a>}
+    </span>
+  );
+}
+
 function RichText({ text }: { text: string }) {
   const [more, setMore] = useState(false);
   const long = text.split('\n').length > 6 || text.length > 420;
@@ -1235,11 +1256,23 @@ function RichText({ text }: { text: string }) {
   };
   return (
     <div>
-      <div className={cx('whitespace-pre-wrap break-words', long && !more && 'line-clamp-6')} data-testid="desc-rich">
+      <div className={cx('min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]', long && !more && 'line-clamp-6')} data-testid="desc-rich">
         {blocks(text).map((b, i) => typeof b === 'string' ? <span key={i}>{inline(b, i)}{'\n'}</span> : (
-          <table key={i} className="my-1 w-full border-collapse whitespace-normal text-[13px]" data-testid="desc-table"><tbody>
-            {b.map((r, j) => <tr key={j} className="border-b border-line last:border-0">{r.map((c, k) => k === 0 ? <th key={k} className="w-32 py-1 pr-2 text-left align-top font-medium text-ink-2">{inline(c, i * 1000 + j)}</th> : <td key={k} className="py-1 align-top">{inline(c, i * 1000 + j * 10 + k)}</td>)}</tr>)}
-          </tbody></table>
+          // #1133(대표 11/23 '사이드바 내용이 칸을 넘고 이름 칸 글씨 배치가 마음에 안 든다'): 두 칸 표(항목 | 내용)는 이름·값 목록으로 —
+          // 이름 칸 고정 폭(7.5글자, 줄바꿈 없음, 작고 흐리게) · 값 칸은 어디서든 줄바꿈(긴 주소가 패널 밖으로 안 나감) · 좁은 패널은 이름 위·값 아래로 저절로 내려감
+          b.every((r) => r.length === 2) ? (
+            <div key={i} className="my-1 whitespace-normal text-[13px]" data-testid="desc-table">
+              {b.map((r, j) => (
+                <div key={j} className="flex flex-wrap gap-x-3 border-b border-line py-1.5 last:border-0" data-testid="desc-row">
+                  <div className="w-[7.5em] shrink-0 self-start whitespace-nowrap pt-px text-xs leading-5 text-ink-3" data-testid="desc-key">{inline(r[0], i * 1000 + j)}</div>
+                  <div className="min-w-[11em] flex-1 [overflow-wrap:anywhere]" data-testid="desc-val">{descValue(r[1], (line) => inline(line, i * 1000 + j * 10 + 1))}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+          <div key={i} className="my-1 max-w-full overflow-x-auto"><table className="w-full border-collapse whitespace-normal text-[13px]" data-testid="desc-table"><tbody>
+            {b.map((r, j) => <tr key={j} className="border-b border-line last:border-0">{r.map((c, k) => k === 0 ? <th key={k} className="w-32 whitespace-nowrap py-1 pr-2 text-left align-top text-xs font-medium text-ink-3">{inline(c, i * 1000 + j)}</th> : <td key={k} className="py-1 align-top [overflow-wrap:anywhere]">{inline(c, i * 1000 + j * 10 + k)}</td>)}</tr>)}
+          </tbody></table></div>)
         ))}
       </div>
       {long && <button type="button" className="mt-1 text-xs font-medium text-accent-600" onClick={(e) => { e.stopPropagation(); setMore(!more); }} data-testid="desc-more">{more ? '접기' : '더 보기'}</button>}

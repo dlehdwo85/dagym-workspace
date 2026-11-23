@@ -2228,6 +2228,29 @@ await step('V12-9: 첨부 칸·자료실에 파일 끌어 놓기(여러 개·진
   await owner.getByTestId('library-list').getByText('끌기 자료').waitFor();
 });
 
+await step('#1133 업무 패널 설명 표(문의 정보): 이름 칸 한 줄·고정 폭 · 긴 유입 경로는 한글로 풀어 한 줄 말줄임 + [복사] · 패널 가로 넘침 없음(1440·390)', async () => {
+  const utm = '/resident-app?n_media=27758&n_query=%EC%95%84%ED%8C%8C%ED%8A%B8%EC%BB%A4%EB%AE%A4%EB%8B%88%ED%8B%B0&n_rank=1&n_ad_group=grp-a001-01-000000046419118&n_ad=nad-a001-01-000000331116&n_keyword_id=nkw-a001-01-000006513939612&n_campaign_type=1&n_contract=tct-a001-01-000000001149869&n_ad_group_type=1&NaPm=ct%3Dmi5q8h2x%7Cci%3D0z00003';
+  const description = ['| 항목 | 내용 |', '|---|---|', '| 문의 유형 | 커뮤니티 운영 |', '| 회사/단지명 | 시험 메트로원 |', '| 시설 규모/세대수 | 1,200세대 |', '| 단지 정보(K-apt) | 1,212세대 · 준공 2021년 3월 |',
+    '| 현재 운영 상황 | 직영 중이며 위탁 운영으로 바꾸려고 알아보는 중입니다 |', `| 유입 경로 | source=naver · medium=cpc · 랜딩 ${utm} |`].join('\n');
+  const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '[하이링크 문의] 시험 메트로원 · 표 정렬', assigneeId: ctx.ownerId, approvalRequired: false, description })).id;
+  for (const [w, h] of [[1440, 900], [390, 844]]) {
+    await owner.setViewportSize({ width: w, height: h });
+    await owner.goto(`${BASE}/?task=${t}`); // 홈 위 오른쪽 패널(휴대폰은 전체 시트)
+    const panel = owner.getByTestId('global-task-panel'); await panel.waitFor();
+    const tbl = panel.getByTestId('desc-table'); await tbl.waitFor();
+    const keys = await tbl.getByTestId('desc-key').evaluateAll((els) => els.map((e) => [e.textContent, Math.round(e.getBoundingClientRect().height)]));
+    assert.ok(keys.every(([, hh]) => hh <= 24), `이름 칸은 한 줄(${w}): ${JSON.stringify(keys)}`);
+    const long = tbl.getByTestId('desc-long'); await long.waitFor();
+    assert.match(await long.innerText(), /n_query=아파트커뮤니티/, '검색어는 한글로 풀어서');
+    await long.getByTestId('desc-copy').waitFor();
+    const over = await panel.evaluate((root) => { const bad = []; for (const el of [root, ...root.querySelectorAll('*')]) { const cs = getComputedStyle(el); if (/(auto|scroll)/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1 && !el.closest('table')) bad.push(`${el.tagName}.${String(el.className).slice(0, 40)}`); } return bad; });
+    assert.deepEqual(over, [], `패널 가로 스크롤 없음(${w})`);
+    assert.ok(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `화면 가로 넘침 없음(${w})`);
+    await owner.screenshot({ path: `${SHOTS}/1133-desc-kv-${w}.png` });
+  }
+  await owner.setViewportSize({ width: 1366, height: 900 });
+});
+
 await step('V13 11·12·8번: 업무 상세 — 설명 위·오른쪽 속성 열(PC), 빈 체크리스트·하위 업무 한 줄, (?) 안내, 하위 업무 추가·n/m, 답글·반응', async () => {
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13 상세 배치', orgUnitId: ctx.siteA, assigneeId: ctx.ownerId, description: '**중요** 기준 문서 https://example.com/guide 참고', approvalRequired: false })).id;
   await ctx.staffA.client.ok('POST', `/api/tasks/${t}/comments`, { body: '자료 확인했습니다' });
