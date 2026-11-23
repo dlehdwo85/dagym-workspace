@@ -12,7 +12,7 @@ let srv, ctx, sql, cafe, academy, jpg;
 const S = {};
 async function join(email, company, industry) {
   const c = new Client(email);
-  const r = await c.ok('POST', '/api/auth/signup', { email, password: 'signup-pass-1234', name: '김사장', mode: 'team', company, industry, agree: { terms: true, age14: true, privacy: true, ai: false, marketing: false } });
+  const r = await c.ok('POST', '/api/auth/signup', { email, password: 'signup-pass-1234', name: '김사장', mode: 'team', company, industry, agree: { terms: true, age14: true, privacy: true, ai: true, marketing: false } /* #1087 AI 동의 필수 */ });
   await c.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
   return { c, tenant: (await c.ok('GET', '/api/auth/me')).user.tenant };
 }

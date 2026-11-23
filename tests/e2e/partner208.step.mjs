@@ -50,7 +50,7 @@ export async function partner208({ owner, browser, ctx, sql, BASE, SHOTS, tick, 
 
   // 파트너 대표: 초대 수락 → 화면 띠 '설계 파트너 기간이 끝나 읽기 전용입니다'
   const c = new Client('partner208');
-  await c.ok('POST', `/api/invitations/${invite.split('/').pop()}/accept`, { password: 'partner-208-pass' });
+  await c.ok('POST', `/api/invitations/${invite.split('/').pop()}/accept`, { password: 'partner-208-pass', ai: true });
   await sql`update tenants set onboarded_at = now() where id = ${t.id}`; // 첫 로그인 안내 창은 이 시험과 무관 — 띠가 보이게
   const pc = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   try {

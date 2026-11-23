@@ -107,14 +107,14 @@ for (const r of rows.filter((r) => r.w === 360 && r.smallN)) console.log('small'
 if (process.env.LANDING === '1') {
   // 랜딩 캡처: 가입한 샘플 팀 공간(회사 실제 데이터 아님)
   const c = new Client('sample');
-  const sg = await c.ok('POST', '/api/auth/signup', { email: 'sample@workin.test', password: 'sample-pass-1234', name: '김하늘', mode: 'team', company: '샘플상사', agree: { terms: true, age14: true, privacy: true } });
+  const sg = await c.ok('POST', '/api/auth/signup', { email: 'sample@workin.test', password: 'sample-pass-1234', name: '김하늘', mode: 'team', company: '샘플상사', agree: { terms: true, age14: true, privacy: true, ai: true } });
   await c.ok('POST', '/api/auth/verify', { token: sg.devLink.split('/').pop() });
   await c.ok('POST', '/api/onboarding', { title: '팀장', done: true });
   const me = await c.ok('GET', '/api/auth/me'); const unit = me.orgUnits[0].id;
   const ppl = [];
   for (const [n, e] of [['이서준', 'seojun'], ['박지우', 'jiwoo'], ['최민서', 'minseo']]) {
     const inv = await c.ok('POST', '/api/admin/users', { email: `${e}@workin.test`, name: n, role: 'staff', orgUnitIds: [unit], title: '매니저' });
-    const x = new Client(e); await x.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'sample-pass-1234' });
+    const x = new Client(e); await x.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'sample-pass-1234', ai: true });
     ppl.push((await x.ok('GET', '/api/auth/me')).user.id);
   }
   const T = [['신제품 소개 자료 최종본 정리', 0, 0, 'high'], ['거래처 미팅 준비 — 견적서 확인', 1, 0, 'urgent'], ['월간 매출 보고서 작성', 2, 1, 'normal'], ['홈페이지 이벤트 배너 교체', 0, 2, 'normal'],

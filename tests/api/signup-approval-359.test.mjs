@@ -10,7 +10,7 @@ import { Client, bootstrap, resetDb, startServer, testDb, BASE } from '../helper
 const RESEND_PORT = 3359, OAUTH_PORT = 3360, FAKE = `http://localhost:${OAUTH_PORT}`;
 let srv, sql, ctx, mailSrv, oauthSrv;
 const mails = [];
-const agree = { terms: true, age14: true, privacy: true };
+const agree = { terms: true, age14: true, privacy: true, ai: true };
 const mailTo = (to, re) => mails.filter((m) => m.to.includes(to) && re.test(m.subject));
 const verifyToken = (to) => { const m = mailTo(to, /이메일 확인/).at(-1); assert.ok(m, `${to} 확인 메일`); return m.text.match(/\/verify\/([A-Za-z0-9_-]+)/)[1]; };
 
@@ -136,7 +136,7 @@ describe('359차 승인제 가입', () => {
     const inv = await boss.ok('POST', '/api/admin/users', { email: 'staff@approval.test', name: '초대직원', role: 'staff', orgUnitIds: [hq.id] });
     // 초대받은 직원 가입은 그대로(승인 대기 없음 — 이미 승인된 회사)
     const s = new Client('staff');
-    await s.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'staff-pass-1234' });
+    await s.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'staff-pass-1234', ai: true });
     assert.equal((await s.req('GET', '/api/tasks')).status, 200);
     assert.equal((await ctx.owner.post(`/api/platform/signups/${tenant}/approve`, {})).status, 409);
     assert.equal((await ctx.owner.post(`/api/platform/signups/${tenant}/reject`, { reason: '이미 승인됨' })).status, 409, '승인된 회사는 거절 못 함');

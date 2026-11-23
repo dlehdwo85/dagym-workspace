@@ -27,7 +27,7 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     await p.goto(BASE + '/signup');
     await p.getByLabel('이름').fill('김대표'); await p.getByLabel('이메일').fill(email);
     await p.locator('input[type="password"]').first().fill(pw);
-    for (const k of ['terms', 'privacy', 'age14']) await p.getByTestId(`agree-${k}`).check();
+    for (const k of ['terms', 'privacy', 'age14', 'ai']) await p.getByTestId(`agree-${k}`).check(); // #1087 AI 동의 필수
     await shot('281-cust-signup-account.png');
     scanText('가입 1단계', await body()); await consentScan('가입 1단계');
     await p.getByTestId('signup-next').click();

@@ -22,7 +22,7 @@ before(async () => {
   srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1' }); sql = testDb(); ctx = await bootstrap();
   T = await join('ceo@other-weekly.test', '박대표', '튼튼상사');
   const inv = await T.c.ok('POST', '/api/admin/users', { email: 'staff@other-weekly.test', name: '김사원', role: 'staff', orgUnitIds: [T.unit] });
-  mate = new Client('staff@other-weekly.test'); await mate.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'mate-pass-1234' });
+  mate = new Client('staff@other-weekly.test'); await mate.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'mate-pass-1234', ai: true });
   Z = await join('ceo@quiet-weekly.test', '조용한', '조용상사'); // 업무가 하나도 없는 회사
   // 업무: 다짐 2건(1건은 '회원 민원' 태그) · 튼튼상사 2건(1건은 지난주 금요일 마감 = 지연)
   await ctx.owner.ok('POST', '/api/tasks', { title: '다짐 주간 업무', orgUnitId: ctx.siteA, dueDate: addDays(today, 2) });

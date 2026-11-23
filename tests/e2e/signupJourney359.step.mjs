@@ -26,7 +26,7 @@ export async function signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }
     await p.getByText('14일 무료 체험 신청').first().waitFor();
     await p.getByLabel('이름').fill('김새별'); await p.getByLabel('이메일').fill(email);
     await p.locator('input[type="password"]').first().fill(pw);
-    for (const k of ['terms', 'privacy', 'age14']) await p.getByTestId(`agree-${k}`).check();
+    for (const k of ['terms', 'privacy', 'age14', 'ai']) await p.getByTestId(`agree-${k}`).check(); // #1087 AI 동의 필수
     await p.getByTestId('signup-next').click();
     await p.getByTestId('mode-team').click();
     await p.getByTestId('signup-step-company').locator('input').first().fill(company);
@@ -118,6 +118,7 @@ export async function signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }
     await sp.locator('input[type="password"]').first().fill('staff-pass-1234');
     const pws = sp.locator('input[type="password"]'); if (await pws.count() > 1) await pws.nth(1).fill('staff-pass-1234');
     await sp.screenshot({ path: `${SHOTS}/313-journey-invite-accept-390.png` });
+    await sp.getByTestId('agree-ai').check(); // 대표 11/23 #1087 AI 동의 필수
     await sp.getByRole('button', { name: '가입하고 시작하기' }).click();
     await sp.waitForURL(BASE + '/');
     assert.equal(await sp.getByTestId('signup-pending').count(), 0, '초대받은 직원은 승인 대기 없음');
@@ -182,7 +183,7 @@ export async function signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }
     assert.equal((await me.req('GET', '/api/tasks')).status, 200, '보기는 그대로');
     // 휴대폰 폭 '가입 신청 접수' 화면(거절 안내와 같은 틀) — 두 번째 신청은 거절까지
     const r2 = new Client('reject359');
-    const sres = await r2.ok('POST', '/api/auth/signup', { email: 'nope@reject.test', name: '거절시험', password: 'reject-pass-1234', mode: 'team', company: '거절상사', size: '1', contact: '01099998888', agree: { terms: true, age14: true, privacy: true } });
+    const sres = await r2.ok('POST', '/api/auth/signup', { email: 'nope@reject.test', name: '거절시험', password: 'reject-pass-1234', mode: 'team', company: '거절상사', size: '1', contact: '01099998888', agree: { terms: true, age14: true, privacy: true, ai: true } });
     await r2.ok('POST', '/api/auth/verify', { token: sres.devLink.split('/').pop() });
     const [rt] = await sql`select tenant from users where email = 'nope@reject.test'`;
     await ctx.owner.ok('POST', `/api/platform/signups/${rt.tenant}/reject`, { reason: '연락이 닿지 않았습니다' });

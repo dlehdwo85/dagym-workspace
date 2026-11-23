@@ -4,7 +4,7 @@ import { Client } from '../helpers.mjs';
 
 export async function offboardFlow({ owner, ctx, BASE, SHOTS }) {
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'leaver@dagym.test', name: '이퇴사', role: 'staff', orgUnitIds: [ctx.hq] });
-  const c = new Client('leaver'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'leaver-pass-1234' });
+  const c = new Client('leaver'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'leaver-pass-1234', ai: true });
   await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 퇴사자 업무', assigneeId: inv.userId, orgUnitId: ctx.hq, approvalRequired: false });
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(`${BASE}/admin/users`);

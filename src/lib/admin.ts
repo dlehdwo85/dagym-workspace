@@ -138,20 +138,21 @@ export async function invitationInfo(token: string) {
   return inv;
 }
 
-/** ai = 초대 수락 화면의 [선택] AI 기능 이용 동의 한 줄(#1086) — 체크했으면 AI 동의(지금 판)로 저장 */
+/** ai = 초대 수락 화면의 AI 기능 이용 동의 한 줄(#1086 · 대표 11/23 #1087 웹·안드로이드는 필수 — 라우트가 확인) — 체크했으면 AI 동의(지금 판)로 저장 */
 export async function acceptInvitation(token: string, password: string, ai = false) {
   if (password.length < 8) throw badRequest('비밀번호는 8자 이상이어야 합니다');
   const sql = db();
   return sql.begin(async (tx) => {
     const [inv] = await tx`select * from invitations where token_hash = ${sha256(token)} for update`;
     if (!inv || inv.revoked_at || inv.accepted_at || new Date(inv.expires_at) < new Date()) throw badRequest('사용할 수 없는 초대 링크입니다');
-    const [u] = await tx<{ id: string; status: string; name: string }[]>`select id, status, name from users where id = ${inv.user_id}`;
+    const [u] = await tx<{ id: string; status: string; name: string; is_demo: boolean }[]>`select id, status, name, coalesce(is_demo, false) as is_demo from users where id = ${inv.user_id}`;
     if (!u || (u.status !== 'invited' && u.status !== 'active')) throw forbidden('비활성화된 계정입니다. 관리자에게 문의하세요.');
     await tx`update users set password_hash = ${await hashPassword(password)}, status = 'active', updated_at = now() where id = ${u.id}`;
     await tx`update invitations set accepted_at = now() where id = ${inv.id}`;
     await ensurePersonalCalendar(u.id, u.name, tx);
     await audit(tx, u.id, 'user.accept_invite', 'user', u.id, {});
-    if (ai) await (await import('./ai/consent')).recordAiAgree(tx as unknown as Sql, u.id, 'invite');
+    // #1087: 앱 심사용 계정(is_demo)은 대표가 웹에서 비밀번호를 정할 때 체크해도 동의로 남기지 않는다 — 아이폰 앱에서 심사 담당자가 동의 창을 처음부터 봄(review.ts 와 같은 뜻)
+    if (ai && !u.is_demo) await (await import('./ai/consent')).recordAiAgree(tx as unknown as Sql, u.id, 'invite');
     return { userId: u.id };
   });
 }

@@ -8,7 +8,7 @@ const P = {};
 before(async () => {
   await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'gone@dagym.test', name: '퇴사예정', role: 'staff', orgUnitIds: [ctx.hq] });
-  const c = new Client('gone'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'gone-pass-1234' });
+  const c = new Client('gone'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'gone-pass-1234', ai: true });
   P.gone = { id: inv.userId, c };
   P.room = (await P.gone.c.ok('POST', '/api/chat/rooms', { kind: 'group', name: '퇴사자 방', userIds: [ctx.ownerId] })).id; // 퇴사자가 방장
   P.team = (await ctx.owner.ok('POST', '/api/teams', { name: '본사팀', members: [{ userId: ctx.ownerId, lead: true }, { userId: P.gone.id, lead: false }] })).id;

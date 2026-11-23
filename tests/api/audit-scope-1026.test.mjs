@@ -17,7 +17,7 @@ before(async () => {
   // 다짐 본사 관리자(플랫폼 운영자 아님)
   const hq = ctx.hq;
   const invA = await ctx.owner.ok('POST', '/api/admin/users', { email: 'hqadmin@dagym.test', name: '본사관리', role: 'admin', orgUnitIds: [hq] });
-  admin = new Client('hqadmin'); await admin.ok('POST', `/api/invitations/${invA.path.split('/').pop()}/accept`, { password: 'admin-pass-1234' });
+  admin = new Client('hqadmin'); await admin.ok('POST', `/api/invitations/${invA.path.split('/').pop()}/accept`, { password: 'admin-pass-1234', ai: true });
   // 다른 회사(대표 + 직원)
   const c = new Client('ceo@other-audit.test');
   const r = await c.ok('POST', '/api/auth/signup', { email: 'ceo@other-audit.test', password: 'signup-pass-1234', name: '박대표', mode: 'team', company: '튼튼상사', industry: '유통·판매', industries: [], agree: { terms: true, age14: true, privacy: true, ai: true } });
@@ -26,7 +26,7 @@ before(async () => {
   T = { c, id: me.user.id, tenant: me.user.tenant };
   const units = (await c.ok('GET', '/api/admin/org-units')).units;
   const inv = await c.ok('POST', '/api/admin/users', { email: 'staff@other-audit.test', name: '김사원', role: 'staff', orgUnitIds: [units[0].id] });
-  mate = new Client('staff@other-audit.test'); await mate.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'mate-pass-1234' });
+  mate = new Client('staff@other-audit.test'); await mate.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'mate-pass-1234', ai: true });
   // 기록 만들기: 플랫폼 운영 행위(다짐 대표 → 튼튼상사) · 로그인 실패 3종(다짐 직원 · 튼튼상사 대표 · 없는 메일)
   await ctx.owner.ok('PUT', `/api/platform/tenants/${T.tenant}/memo`, { memo: '계약 12월' });
   for (const email of ['staffA@dagym.test', 'ceo@other-audit.test', 'nobody@nowhere.test']) await new Client().req('POST', '/api/auth/login', { email, password: 'wrong-password-000' });

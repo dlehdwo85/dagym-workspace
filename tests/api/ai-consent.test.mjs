@@ -60,7 +60,7 @@ describe('AI 동의', () => {
     await ctl({ anthropicReset: true, anthropicQueue: [say('네.')] });
     assert.equal((await chat(ctx.staffA.client)).status, 200);
     assert.equal((await chat(ctx.owner)).status, 403);
-    assert.equal((await consent(ctx.staffB.client)).state, 'none', '다른 직원은 아직 정하지 않음');
+    assert.equal((await consent(ctx.staffB.client)).state, 'agreed', '#1087 다른 직원은 초대 수락 때 필수 동의(그 사람 자신의 동의)');
   });
 
   test('안내 글 판이 바뀌면(받는 곳이 늘면) 예전 동의는 다시 물음 · 거부는 그대로 거부', async () => {
@@ -126,7 +126,7 @@ describe('AI 동의', () => {
   test('심사용 체험 계정: 버튼을 다시 누르면 동의 기록을 지워 심사 담당자가 동의 창을 처음부터 본다', async () => {
     const r = await ctx.owner.ok('POST', '/api/admin/review-account', { email: 'review@workin.test' });
     const c = new Client('review');
-    await c.ok('POST', `/api/invitations/${r.invitePath.split('/').pop()}/accept`, { password: 'review-pass-1234' });
+    await c.ok('POST', `/api/invitations/${r.invitePath.split('/').pop()}/accept`, { password: 'review-pass-1234', ai: true });
     assert.equal((await consent(c)).state, 'none');
     await c.ok('PUT', '/api/account/ai-consent', { agreed: true });
     assert.equal((await consent(c)).state, 'agreed');

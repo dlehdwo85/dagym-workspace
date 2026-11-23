@@ -172,8 +172,8 @@ describe('플랫폼 운영 고객사 추가', () => {
     // 초대 다시 보내기 → 이전 링크 무효, 새 링크로 수락 → 대표 로그인·회사 소속
     const re = await ctx.owner.ok('POST', `/api/platform/tenants/${r.tenant}/reinvite`, {});
     const c = new Client('newboss');
-    assert.equal((await c.req('POST', `/api/invitations/${r.inviteLink.split('/').pop()}/accept`, { password: 'new-boss-pass-1234' })).status, 400, '이전 링크 무효');
-    await c.ok('POST', `/api/invitations/${re.inviteLink.split('/').pop()}/accept`, { password: 'new-boss-pass-1234' });
+    assert.equal((await c.req('POST', `/api/invitations/${r.inviteLink.split('/').pop()}/accept`, { password: 'new-boss-pass-1234', ai: true })).status, 400, '이전 링크 무효');
+    await c.ok('POST', `/api/invitations/${re.inviteLink.split('/').pop()}/accept`, { password: 'new-boss-pass-1234', ai: true });
     const me = await c.ok('GET', '/api/auth/me');
     assert.deepEqual([me.user.tenant, me.user.role, me.user.name], [r.tenant, 'owner', '신대표']);
     assert.equal((await ctx.owner.ok('GET', `/api/platform/tenants/${r.tenant}/detail`)).ownerInvite.pending, false);

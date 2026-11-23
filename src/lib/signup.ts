@@ -22,7 +22,7 @@ export const signupInput = z.object({
   name: z.string().trim().min(1, '이름을 입력하세요').max(50),
   mode: z.enum(['personal', 'team']),
   company: z.string().trim().max(60).optional(),
-  agree: z.object({ terms: z.literal(true, { errorMap: () => ({ message: '이용약관에 동의해 주세요' }) }), age14: z.literal(true, { errorMap: () => ({ message: '만 14세 이상만 가입할 수 있습니다' }) }), privacy: z.literal(true, { errorMap: () => ({ message: '개인정보 처리방침에 동의해 주세요' }) }), ai: z.boolean().default(false), marketing: z.boolean().default(false), ads: z.boolean().default(false), alimtalk: z.boolean().default(false) }),
+  agree: z.object({ terms: z.literal(true, { errorMap: () => ({ message: '이용약관에 동의해 주세요' }) }), age14: z.literal(true, { errorMap: () => ({ message: '만 14세 이상만 가입할 수 있습니다' }) }), privacy: z.literal(true, { errorMap: () => ({ message: '개인정보 처리방침에 동의해 주세요' }) }), ai: z.literal(true, { errorMap: () => ({ message: 'AI 기능 이용에 동의해 주세요(필수 — 워크인의 핵심 기능입니다)' }) }) /* 대표 11/23 #1087 필수(가입은 웹에서만 — 두 앱 모두 /signup 은 로그인으로) */, marketing: z.boolean().default(false), ads: z.boolean().default(false), alimtalk: z.boolean().default(false) }),
   /** 304차 #871: 결제·약관 안내 카카오 알림톡 받을 휴대폰(선택 — alimtalk 동의할 때만 저장) */
   phone: z.string().trim().max(20).optional(),
   /** 359차 승인제 가입: 연락받을 전화(승인 안내 — 승인제가 켜져 있으면 필수) */

@@ -8,7 +8,7 @@ before(async () => {
   await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'lead@dagym.test', name: '김부서장', role: 'dept_lead', orgUnitIds: [ctx.hq] });
   lead = new Client('lead');
-  await lead.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'lead-pass-1234' });
+  await lead.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'lead-pass-1234', ai: true });
 });
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 

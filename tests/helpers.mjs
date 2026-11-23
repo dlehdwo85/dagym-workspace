@@ -156,7 +156,7 @@ export async function bootstrap() {
     const inv = await owner.ok('POST', '/api/admin/users', { email: `${key}@dagym.test`, name, role, orgUnitIds: [unit] });
     const c = new Client(key);
     const token = inv.path.split('/').pop();
-    await c.ok('POST', `/api/invitations/${token}/accept`, { password: `${key}-pass-1234` });
+    await c.ok('POST', `/api/invitations/${token}/accept`, { password: `${key}-pass-1234`, ai: true });
     const me = await c.ok('GET', '/api/auth/me');
     users[key] = { client: c, id: me.user.id, email: `${key}@dagym.test`, password: `${key}-pass-1234` };
   }

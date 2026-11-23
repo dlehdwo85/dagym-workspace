@@ -4,7 +4,7 @@ import { AuthCard, PasswordInput } from '@/components/AuthCard';
 import { Button, Field, inputCls } from '@/components/ui';
 import { api } from '@/components/client';
 import { OrDivider, SocialButtons } from '@/components/SocialButtons';
-import { isInApp } from '@/components/inApp';
+import { isInApp, isIosApp } from '@/components/inApp';
 import { AiConsentLine } from '@/components/AiConsent';
 import { APPSTORE_URL, APP_GET_PATH } from '@/lib/storeLinks';
 
@@ -25,11 +25,14 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   const [pw, setPw] = useState(''); const [pw2, setPw2] = useState('');
   const [social, setSocial] = useState(0);
   const [done, setDone] = useState<null | 'android' | 'ios'>(null);
-  const [ai, setAi] = useState(false); // #1086 [선택] AI 기능 이용 동의(기본 체크 안 됨)
+  const [ai, setAi] = useState(false); // #1086 AI 기능 이용 동의(기본 체크 안 됨)
+  const [aiReq, setAiReq] = useState(true); // 대표 11/23 #1087: 필수 — 아이폰 앱만 선택(1.2.0 심사 통과 전까지)
+  useEffect(() => setAiReq(!isIosApp()), []);
   useEffect(() => { api(`/api/invitations/${token}`).then(setInfo).catch((e) => setErr(e.message)); }, [token]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (pw !== pw2) return setErr('비밀번호가 서로 다릅니다');
+    if (aiReq && !ai) return setErr('AI 기능 이용 동의(필수)에 체크해 주세요');
     try { await api(`/api/invitations/${token}/accept`, { body: { password: pw, ai } }); const ph = phoneBrowser(); if (ph) setDone(ph); else location.href = '/'; } catch (e: any) { setErr(e.message); }
   }
   return (
@@ -53,7 +56,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
           {social > 0 && <OrDivider text="또는 비밀번호로" />}
           <Field label="비밀번호 (8자 이상)"><PasswordInput autoComplete="new-password" minLength={8} value={pw} onChange={setPw} /></Field>
           <Field label="비밀번호 확인"><PasswordInput autoComplete="new-password" value={pw2} onChange={setPw2} /></Field>
-          <div className="rounded-card border border-line p-3"><AiConsentLine checked={ai} onChange={setAi} stt={!!info.aiStt} /></div>
+          <div className="rounded-card border border-line p-3"><AiConsentLine checked={ai} onChange={setAi} stt={!!info.aiStt} required={aiReq} /></div>
           {err && <p className="text-sm text-red-600" role="alert">{err}</p>}
           <Button type="submit" className="w-full">가입하고 시작하기</Button>
         </form>

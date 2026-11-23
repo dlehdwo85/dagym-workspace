@@ -37,13 +37,13 @@ export default function SignupPage() {
 
   function toCompany(e: React.FormEvent) {
     e.preventDefault(); setErr(null);
-    if (!agree.terms || !agree.privacy || !agree.age14) { setErr('필수 약관에 동의해 주세요'); return; }
+    if (!agree.terms || !agree.privacy || !agree.age14 || !agree.ai) { setErr('필수 약관에 동의해 주세요'); return; }
     if (f.password.length < 8) { setErr('비밀번호는 8자 이상이어야 합니다'); return; }
     setStep(2); window.scrollTo({ top: 0 });
   }
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setErr(null);
-    if (!agree.terms || !agree.privacy || !agree.age14) { setStep(1); setErr('필수 약관에 동의해 주세요'); return; }
+    if (!agree.terms || !agree.privacy || !agree.age14 || !agree.ai) { setStep(1); setErr('필수 약관에 동의해 주세요'); return; }
     if (mode === 'team' && !f.company.trim()) { setErr('회사(팀) 이름을 입력하세요'); return; }
     if (approval && !contact.trim()) { setErr('연락받을 전화번호를 적어 주세요 — 24시간 안에 연락드립니다'); return; }
     setBusy(true);
@@ -92,7 +92,7 @@ export default function SignupPage() {
           {box('terms', <><Link href="/terms" target="_blank" className="underline">이용약관</Link> 동의</>, true)}
           {box('privacy', <><Link href="/privacy" target="_blank" className="underline">개인정보 수집·이용</Link> 동의</>, true)}
           {box('age14', '만 14세 이상입니다', true)}
-          <AiConsentLine checked={agree.ai} onChange={(v) => setAgree({ ...agree, ai: v })} stt={aiStt} />{/* #1086 약관처럼 한 줄 + 자세히(접힘) */}
+          <AiConsentLine checked={agree.ai} onChange={(v) => setAgree({ ...agree, ai: v })} stt={aiStt} required />{/* 대표 11/23 #1087 필수 */}{/* #1086 약관처럼 한 줄 + 자세히(접힘) */}
           {box('marketing', '새 기능·혜택 소식 받기', false)}
           {box('alimtalk', '결제·가입 안내를 카카오 알림톡으로 받기(관리자, 광고 없음)', false)}
           {agree.alimtalk && <input className={inputCls + ' h-10'} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" maxLength={20} placeholder="휴대폰 번호 (예: 010-1234-5678)" aria-label="알림톡 받을 휴대폰" data-testid="signup-alimtalk-phone" />}

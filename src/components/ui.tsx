@@ -2,7 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import clsx from 'clsx';
 import { useSheetBack } from './backClose';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertCircle, CalendarDays, CheckCircle2, Flag, Inbox, Info, Loader2, Lock, RotateCw, UserRound, X, type LucideIcon } from 'lucide-react';
 import { STATUS_LABEL, PRIORITY_LABEL, type TaskStatus, type Priority } from '@/lib/types';
@@ -71,7 +71,9 @@ export function Field({ label, children, hint, className }: { label: string; chi
 
 export const inputCls = 'w-full rounded-input border border-slate-300 bg-white px-3 py-2 text-sm text-ink placeholder:text-slate-400 transition-colors hover:border-slate-400 focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20 disabled:bg-slate-50';
 
-export function Modal({ open, onClose, title, children, wide, xl }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean; xl?: boolean /* 336차: 미리보기 패널이 열리면 더 넓게 */ }) {
+export function Modal({ open, onClose: close, title, children, wide, xl, locked }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean; xl?: boolean /* 336차: 미리보기 패널이 열리면 더 넓게 */; locked?: boolean /* #1087 필수 동의처럼 닫을 수 없는 창 — 닫기 단추·바깥 누르기·Esc·뒤로 없음 */ }) {
+  const noop = useCallback(() => {}, []);
+  const onClose = locked ? noop : close;
   useSheetBack(open, onClose); // V14 39번: 앱 뒤로 버튼은 열린 시트부터 닫는다
   useEffect(() => {
     if (!open) return;
@@ -98,7 +100,7 @@ export function Modal({ open, onClose, title, children, wide, xl }: { open: bool
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden />
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-white px-5 py-3">
           <h2 className="text-base font-semibold">{title}</h2>
-          <IconButton label="닫기" onClick={onClose}><X /></IconButton>
+          {!locked && <IconButton label="닫기" onClick={onClose}><X /></IconButton>}
         </div>
         <div className="p-5 pb-[calc(var(--sab)+20px)] sm:pb-5">{children}</div>
       </div>

@@ -13,7 +13,7 @@ before(async () => {
   ctx = await bootstrap();
   for (const [k, name, unit] of [['hqA', '본사직원', ctx.hq], ['opsA', '운영팀장', ctx.siteA]]) {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: `${k}@dagym.test`, name, role: 'staff', orgUnitIds: [unit] });
-    const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234` });
+    const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234`, ai: true });
     D[k] = { c, id: (await c.ok('GET', '/api/auth/me')).user.id };
   }
   D.hqTeam = (await ctx.owner.ok('POST', '/api/teams', { name: '본사팀', members: [{ userId: D.hqA.id, lead: true }] })).id;
@@ -50,7 +50,7 @@ describe('R-16 팀 권한 계층', () => {
       .catch(async () => sql`insert into tasks (title, org_unit_id, team_id, created_by) values ('남의 팀 업무', ${o.id}, ${tm.id}, ${(await sql`select id from users where email = 'hqA@dagym.test'`)[0].id}) returning id`);
     // 만든 사람이 아닌 우리 회사 관리자로 확인
     const adm = await ctx.owner.ok('POST', '/api/admin/users', { email: 'adm2@dagym.test', name: '관리자2', role: 'admin', orgUnitIds: [] });
-    const a = new Client('adm2'); await a.ok('POST', `/api/invitations/${adm.path.split('/').pop()}/accept`, { password: 'adm2-pass-1234' });
+    const a = new Client('adm2'); await a.ok('POST', `/api/invitations/${adm.path.split('/').pop()}/accept`, { password: 'adm2-pass-1234', ai: true });
     assert.equal((await a.get(`/api/tasks/${t.id}`)).status, 404);
     assert.ok(!(await a.ok('GET', '/api/tasks?view=all')).tasks.some((x) => x.id === t.id));
   });

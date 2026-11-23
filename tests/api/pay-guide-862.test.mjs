@@ -19,7 +19,7 @@ before(async () => {
   const c = await ctx.owner.ok('POST', '/api/platform/tenants', { company: '결제안내회사', industries: [], size: '2-10', ownerName: '김대표', ownerEmail: 'boss@pay862.test', segment: 'customer', trialDays: 14 });
   N.t = c.tenant;
   N.boss = new Client('pay-boss');
-  await N.boss.ok('POST', `/api/invitations/${c.inviteLink.split('/').pop()}/accept`, { password: 'pay-boss-1234' });
+  await N.boss.ok('POST', `/api/invitations/${c.inviteLink.split('/').pop()}/accept`, { password: 'pay-boss-1234', ai: true });
 });
 after(async () => { srv?.proc.kill(); mailSrv?.close(); await sql?.end(); });
 

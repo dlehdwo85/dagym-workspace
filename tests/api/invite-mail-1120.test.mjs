@@ -55,7 +55,7 @@ describe('직원 초대 메일 자동 발송', () => {
     assert.match(m2.text, /^시험회사 워크인 초대\n\n이전에 받은 초대 메일의 링크는 쓸 수 없습니다\. 이 메일의 \[초대 수락\]을 눌러 주세요\./); assert.doesNotMatch(m1.text, /이전에 받은/);
     assert.ok(to('newbie@dagym.test')[1].html.includes(`/invite/${token}`), '새 링크가 메일에');
     const old = await new Client('x').req('GET', `/api/invitations/${firstToken}`); assert.equal(old.status, 400); assert.match(old.body.error.message, /취소된 초대/);
-    await new Client('newbie').ok('POST', `/api/invitations/${token}/accept`, { password: 'newbie-pass-1' });
+    await new Client('newbie').ok('POST', `/api/invitations/${token}/accept`, { password: 'newbie-pass-1', ai: true });
     assert.equal((await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.email === 'newbie@dagym.test').status, 'active');
   });
 
@@ -67,7 +67,7 @@ describe('직원 초대 메일 자동 발송', () => {
     const [inv] = await sql`select mail_status, mail_error from invitations where email = 'bounce@dagym.test' and revoked_at is null`;
     assert.equal(inv.mail_status, 'failed'); assert.match(inv.mail_error, /메일 발송 실패 \(500\)/);
     assert.equal((await sql`select count(*)::int n from audit_logs where action = 'user.invite_mail_failed'`)[0].n, 1);
-    await new Client('bounce').ok('POST', `/api/invitations/${r.path.split('/').pop()}/accept`, { password: 'bounce-pass-1' });
+    await new Client('bounce').ok('POST', `/api/invitations/${r.path.split('/').pop()}/accept`, { password: 'bounce-pass-1', ai: true });
   });
 
   test('앱 심사용 계정은 초대 메일을 보내지 않음(링크만)', async () => {
@@ -96,7 +96,7 @@ describe('직원 초대 메일 자동 발송', () => {
     assert.equal(to('oops@dagym.test').at(-1).subject, '[워크인] 시험회사에서 초대했습니다(새 링크)', '취소 뒤 다시 초대한 메일도 "(새 링크)" — 첫 메일과 다른 제목(로컬 11/21: 같은 제목이라 지메일에서 묻힘)');
     assert.match(to('oops@dagym.test').at(-1).text, /이전에 받은 초대 메일의 링크는 쓸 수 없습니다/);
     assert.equal((await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.id === u.id).status, 'invited', '다시 초대하면 초대됨으로');
-    await new Client('oops').ok('POST', `/api/invitations/${again.path.split('/').pop()}/accept`, { password: 'oops-pass-1234' });
+    await new Client('oops').ok('POST', `/api/invitations/${again.path.split('/').pop()}/accept`, { password: 'oops-pass-1234', ai: true });
     assert.equal((await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.id === u.id).status, 'active');
   });
 

@@ -38,7 +38,7 @@ before(async () => {
   // 본부장(부서 책임자)·본사 관리자
   for (const [k, name, role] of [['head', '박본부장', 'dept_lead'], ['adm', '정관리', 'admin']]) {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: `${k}@dagym.test`, name, role, orgUnitIds: [ctx.hq] });
-    const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234` });
+    const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234`, ai: true });
     D[k] = { c, id: (await c.ok('GET', '/api/auth/me')).user.id };
   }
   D.conf = await up(ctx.owner, { fileName: '2026 급여 대장.csv', folder: '인사' }, '이름,급여\n김대표,9000000\n');

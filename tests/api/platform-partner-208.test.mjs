@@ -50,7 +50,7 @@ describe('208차 #667 설계 파트너', () => {
 
   test('끝 3일 전: 슈퍼관리자에게 전환·연장·종료 알림 한 번(그 회사 관리 창 링크) · 파트너 대표에겐 "설계 파트너 기간" · 연장하면 새 기간에 다시', async () => {
     const boss = new Client('partner-boss');
-    await boss.ok('POST', `/api/invitations/${N.pInvite.split('/').pop()}/accept`, { password: 'partner-boss-1234' });
+    await boss.ok('POST', `/api/invitations/${N.pInvite.split('/').pop()}/accept`, { password: 'partner-boss-1234', ai: true });
     N.boss = boss; N.bossId = (await boss.ok('GET', '/api/auth/me')).user.id;
     await sql`update tenant_subscriptions set trial_ends_at = now() + interval '2 days' where tenant in (${N.p}, ${N.c})`;
     await tick(); await tick();

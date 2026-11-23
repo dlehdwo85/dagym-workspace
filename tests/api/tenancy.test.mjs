@@ -148,7 +148,7 @@ describe('V15 회사 간 분리 — 다른 회사 데이터는 404·빈 목록',
     const unit = T.me.orgUnits[0].id;
     const inv = await T.c.ok('POST', '/api/admin/users', { email: 'emp@other.test', name: '남직원', role: 'staff', orgUnitIds: [unit] });
     const e = new Client('emp');
-    await e.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'emp-pass-12345' });
+    await e.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'emp-pass-12345', ai: true });
     const org = await e.ok('GET', '/api/org');
     assert.deepEqual(org.users.map((u) => u.name).sort(), ['남사장', '남직원']);
     assert.equal((await e.get(`/api/tasks/${D.task}`)).status, 404);

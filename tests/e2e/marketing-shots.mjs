@@ -24,7 +24,7 @@ const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromi
 try {
   // ── 가짜 회사 '윤슬공간'(인테리어·공간 디자인) + 직원 5명 ─────────────────────────
   const owner = new Client('owner');
-  const sg = await owner.ok('POST', '/api/auth/signup', { email: 'seoyeon@example.com', password: PW, name: '박서연', mode: 'team', company: '윤슬공간', agree: { terms: true, age14: true, privacy: true } });
+  const sg = await owner.ok('POST', '/api/auth/signup', { email: 'seoyeon@example.com', password: PW, name: '박서연', mode: 'team', company: '윤슬공간', agree: { terms: true, age14: true, privacy: true, ai: true } });
   await owner.ok('POST', '/api/auth/verify', { token: sg.devLink.split('/').pop() });
   await owner.ok('POST', '/api/onboarding', { title: '대표', done: true });
   const me = await owner.ok('GET', '/api/auth/me'); const unit = me.orgUnits[0].id; const ownerId = me.user.id;
@@ -34,7 +34,7 @@ try {
   const P = {};
   for (const [key, name, title, n] of [['woojin', '정우진', '실장', 1101], ['serin', '오세린', '디자이너', 1102], ['haneul', '장하늘', '현장 매니저', 1103], ['junho', '서준호', '영업 매니저', 1104], ['dain', '류다인', '마케팅 매니저', 1105]]) {
     const inv = await owner.ok('POST', '/api/admin/users', { email: `${key}@example.com`, name, role: 'staff', orgUnitIds: [unit], title });
-    const c = new Client(key); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: PW });
+    const c = new Client(key); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: PW, ai: true });
     P[key] = { id: (await c.ok('GET', '/api/auth/me')).user.id, c, name };
     await sql`update users set phone = ${`010-0000-${n}`} where id = ${P[key].id}`.catch(() => {});
   }

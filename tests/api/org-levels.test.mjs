@@ -15,7 +15,7 @@ before(async () => {
   for (const [k, name] of [['hqStaff', '본사기획'], ['divLead', '사업부장'], ['salesLead', '영업부장'], ['t1Lead', '영업1팀장'], ['t1Mem', '영업1팀원'], ['t2Mem', '영업2팀원'],
     ['mktLead', '마케팅부장'], ['mktMem', '마케팅부원'], ['acct', '회계팀원']]) {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: `${k}@dagym.test`, name, role: 'staff', orgUnitIds: [ctx.hq] });
-    const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234` });
+    const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234`, ai: true });
     P[k] = { id: inv.userId, c };
   }
 });

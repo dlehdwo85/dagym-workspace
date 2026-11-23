@@ -299,6 +299,7 @@ await step('① 직원이 초대 링크로 가입·로그인 → 허용된 현�
   await p.getByText('초대했습니다').waitFor();
   await p.getByLabel('비밀번호 (8자 이상)').fill('newbie-pass-1');
   await p.getByLabel('비밀번호 확인').fill('newbie-pass-1');
+  await p.getByTestId('agree-ai').check(); // 대표 11/23 #1087 AI 동의 필수
   await p.getByRole('button', { name: '가입하고 시작하기' }).click();
   await p.waitForURL(BASE + '/');
   await p.goto(BASE + '/tasks');
@@ -1290,7 +1291,7 @@ await step('V13 메뉴 권한: 대표만 "메뉴 권한" 탭 → 현장 관리�
 await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 행에서 요청자·우선순위 변경, 손잡이로 끌어 순서 → 새로고침해도 유지, 정렬·내가 요청한 업무', async () => {
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'minsu@dagym.test', name: '김민수', role: 'staff', orgUnitIds: [ctx.hq] });
   const c = new Client('minsu');
-  await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'minsu-pass-1234' });
+  await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'minsu-pass-1234', ai: true });
   const minsu = (await c.ok('GET', '/api/auth/me')).user.id;
   for (const n of ['순서 시험 1', '순서 시험 2']) await ctx.owner.ok('POST', '/api/tasks', { title: n, orgUnitId: ctx.hq, assigneeId: ctx.ownerId });
   await owner.evaluate(() => { localStorage.setItem('wos_task_sort2', 'manual'); localStorage.removeItem('wos_task_group'); }); // 기본은 마감순 — 끌어 놓기 시험은 직접 순서로
@@ -2725,7 +2726,7 @@ await step('190차 브랜드 키트 AI로 채우기(대표 #689): 자동 제작 
 await step('#497 R06 채널별 실제 게시 화면 미리보기: 인스타 피드(3장 옆으로 넘기기·n/N·점·2번째 장 보임·더 보기·해시태그·계정 이름) · 승인함 카드 [게시 화면으로 보기] · 페이스북(글 위·사진 격자) · 릴스(세로·오른쪽 아이콘·팔로우) · 스레드 · 블로그(문단 사이 사진) · 유튜브 · 휴대폰 손가락 넘기기', () => mktPreview({ owner, ctx, sql, BASE, SHOTS }));
 await step('#497 R44 AI 비서 답 실시간 출력: 쓰는 중 말풍선(글이 이어서·[멈춤]) → 끝나면 서식(제목·굵게·목록·표·링크) · 도구 단계 한 줄 · 패널 같음 · 휴대폰 표 넘침 없음', () => aiStream({ browser, desk, owner, BASE, FAKE, SHOTS }));
 await step('점검 1단계 점검 가이드(375): 공통 기본 템플릿 · 찾기 · 항목 추가 · 기준 사진 · 직원 공유(2판·개정 이력) · 글자로 복사 · 업종 템플릿 넣기 · 직원은 공유된 양호 기준만', () => checkGuide({ owner, staff, BASE, SHOTS }));
-await step('AI 동의(대표 11/19·애플 5.1.2): 들어오면 동의 창(무엇을·어디로·왜·동의하지 않으면) · 나중에 정하기 · 동의 전 AI 는 막힘 → 동의 뒤 답 · 설정에서 끄고 켜기 · 회사 자동 AI 스위치 · 휴대폰 폭', () => aiConsent({ owner, BASE, FAKE, SHOTS }));
+await step('AI 동의(대표 11/19·애플 5.1.2 · #1087 웹 필수): 들어오면 동의 창(무엇을·어디로·왜·동의하지 않으면) · 나중에 정하기 · 동의 전 AI 는 막힘 → 동의 뒤 답 · 설정에서 끄고 켜기 · 회사 자동 AI 스위치 · 휴대폰 폭', () => aiConsent({ owner, browser, BASE, FAKE, SHOTS }));
 await step('점검 2단계 점검하기·보완 흐름(375): 코스로 점검(양호·보완 필요·메모·사진) → 끝내기 = 보완 요청 업무 → 완료되면 확인 대기 → 다시 보완(새 업무 2차) → 양호 확인 · 수시 점검 · 코스 만들기', () => checkRun({ owner, ctx, BASE, SHOTS }));
 await step('계약 관리 1단계: 관리 메뉴 [계약 관리] → 등록 → 상세(만료 임박 D-n)·계약서 파일 → 요약 숫자 → 자동 연장은 통보 기한 기준 → 갱신 등록(지난 기간) → 알림 날짜 → 종료 → 390 · 권한 없는 직원은 화면 없음', () => agreements({ owner, staff, ctx, sql, BASE, SHOTS }));
 await step('#516 승인함 시안 없음: 승인할 시안 수에서 빼고 빨간 묶음·빨간 띠·[승인] 없음 → [지금 만들기](서버 그리기·크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧]', () => mktVisual({ owner, ctx, sql, BASE, SHOTS }));
@@ -2834,7 +2835,7 @@ await step('대표 10/22 19:47 캘린더 시간 격자(주): 종일·시간 없�
 await step('#429 결재 설정: 결재 화면 [결재 설정] → 탭(결재선·양식·팀별 배정) → ← 이전 화면 / 주소로 바로 열면 결재로 · 1차·2차 순서 바꾸기 · 3단계 예시 · 팀별 배정·적용 확인 · 휴대폰 넘침 없음', async () => {
   // 부서·팀(E2E 결재부 › E2E 결재1팀) 준비 — 다른 단계 소속이 없는 새 직원으로
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'appr429@dagym.test', name: '결재직원', role: 'staff', orgUnitIds: [ctx.hq] });
-  await new Client('appr429').ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'appr429-pass-1234' });
+  await new Client('appr429').ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'appr429-pass-1234', ai: true });
   const dept = (await ctx.owner.ok('POST', '/api/teams', { name: 'E2E 결재부', kind: 'dept', members: [{ userId: ctx.managerA.id, lead: true }] })).id;
   await ctx.owner.ok('POST', '/api/teams', { name: 'E2E 결재1팀', kind: 'team', parentId: dept, isolated: false, members: [{ userId: ctx.ownerId, lead: true }, { userId: inv.userId, lead: false }] });
   await owner.goto(BASE + '/approvals');
@@ -2903,7 +2904,7 @@ await step('#429 결재 설정: 결재 화면 [결재 설정] → 탭(결재선�
 await step('#77 처음 사용 안내: 처음 로그인 홈 → 버튼을 가리키는 말풍선(다음·이전·건너뛰기) → 끝나면 다시 안 뜸(서버 기록) · 업무 화면 첫 방문 안내 · [사용 안내 다시 보기] · 휴대폰은 하단 탭을 가리킴', async () => {
   const newUser = async (key, name) => {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: `${key}@dagym.test`, name, role: 'staff', orgUnitIds: [ctx.hq] });
-    await new Client(key).ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${key}-pass-1234` });
+    await new Client(key).ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${key}-pass-1234`, ai: true });
   };
   await newUser('tour77', '투어직원'); await newUser('tour77m', '투어폰');
   const c = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
@@ -3062,14 +3063,15 @@ await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]�
     await p.getByLabel('이름').fill('전환시험'); await p.getByLabel('이메일').fill(email);
     await p.locator('input[type="password"]').first().fill('signup-pass-1234');
     for (const k of ['terms', 'privacy', 'age14']) await p.getByTestId(`agree-${k}`).check();
-    // 대표 11/20 #1086: [선택] AI 기능 이용 동의 한 줄(약관처럼) — 기본 체크 안 됨 · [자세히]를 펼치면 무엇을·어디로·국외 이전(시기·방법·보유 기간)
+    // 대표 11/20 #1086: AI 기능 이용 동의 한 줄(약관처럼) — 기본 체크 안 됨 · [자세히]를 펼치면 무엇을·어디로·국외 이전(시기·방법·보유 기간) · 대표 11/23 #1087: [필수]
     const aiLine = p.getByTestId('ai-consent-line'); await aiLine.waitFor();
-    assert.match(await aiLine.innerText(), /\[선택\] AI 기능 이용 동의 — 답을 만들 때 필요한 내용만 AI 회사\(Anthropic(·OpenAI)?\)에 보내 처리/); // 시험 서버는 받아쓰기 키(가짜)가 있어 OpenAI 도
+    assert.match(await aiLine.innerText(), /\[필수\] AI 기능 이용 동의 — 답을 만들 때 필요한 내용만 AI 회사\(Anthropic(·OpenAI)?\)에 보내 처리/); // 시험 서버는 받아쓰기 키(가짜)가 있어 OpenAI 도
     assert.equal(await p.getByTestId('agree-ai').isChecked(), false, 'AI 줄은 기본 체크 안 됨');
     assert.equal(await p.getByTestId('ai-consent-line-detail').count(), 0, '자세한 것은 접혀 있음');
     await p.getByTestId('ai-consent-line-more').click();
     assert.match(await p.getByTestId('ai-consent-line-detail').innerText(), /무엇을 보내나요[\s\S]*Anthropic\(미국\)[\s\S]*국외 이전[\s\S]*보유 기간: 위탁 계약 종료 또는 탈퇴 시까지/);
-    if (consent) await p.getByTestId('agree-ai').check();
+    await p.getByTestId('signup-next').click(); await p.getByRole('alert').getByText('필수 약관에 동의해 주세요').waitFor(); // AI 줄을 빼면 다음으로 못 감(#1087)
+    await p.getByTestId('agree-ai').check();
     await p.getByTestId('agree-ads').waitFor();
     if (consent) await p.getByTestId('agree-ads').check();
     await p.getByTestId('signup-next').click();
@@ -3094,10 +3096,10 @@ await step('#449 가입 전환 태그: 플랫폼 운영 [가입 전환 태그]�
   const no = await signupWith('conv-no@workin.test', false);
   assert.equal(no.dl.filter((a) => a[1] === 'conversion').length, 0, '동의 안 하면 안 보냄');
   assert.equal(no.hits.filter((u) => /googleadservices/.test(u)).length, 0, '동의 안 하면 전환 호출 없음(소개 화면 측정 태그는 #627 로 실림)'); assert.equal(no.gcl, undefined);
-  // #1086: 가입 목록의 AI 줄을 체크한 사람 = AI 동의(지금 판) 저장 → 로그인 뒤 창이 다시 뜨지 않음 · 체크 안 한 사람은 '아직 안 정함'(줄 없음 — 거절 아님)
+  // #1086: 가입 목록의 AI 줄을 체크한 사람 = AI 동의(지금 판) 저장 → 로그인 뒤 창이 다시 뜨지 않음 · 대표 11/23 #1087: AI 줄은 필수라 광고 측정에 동의하지 않은 사람도 AI 동의는 함
   const aiRows = async (email) => (await sql`select c.agreed, c.version from consents c join users u on u.id = c.user_id where lower(u.email) = ${email} and c.kind = 'ai_share'`).map((r) => [r.agreed, r.version.replace(/\+stt$/, '')]);
   assert.deepEqual(await aiRows('conv-yes@workin.test'), [[true, '2026-11']], '가입 때 체크 = AI 동의(지금 판 — 시험 서버는 +stt)');
-  assert.deepEqual(await aiRows('conv-no@workin.test'), [], '체크 안 함 = 아직 안 정함');
+  assert.deepEqual(await aiRows('conv-no@workin.test'), [[true, '2026-11']], '#1087 필수 — 광고 측정만 동의 안 함');
   await ctx.owner.ok('PUT', '/api/platform/conversion-tags', { googleAds: '' });
 });
 

@@ -92,7 +92,7 @@ describe('299차 Apple로 로그인', () => {
     const t = to.searchParams.get('t');
     const info = await c.ok('GET', `/api/auth/oauth/pending?t=${t}`);
     assert.equal(info.providerLabel, 'Apple'); assert.equal(info.email, 'x7k2@privaterelay.appleid.com'); assert.equal(info.name, '홍길동', '한글 이름은 성+이름');
-    await c.ok('POST', '/api/auth/oauth/complete', { token: t, name: info.name, mode: 'personal', agree: { terms: true, age14: true, privacy: true, ai: false, marketing: false } });
+    await c.ok('POST', '/api/auth/oauth/complete', { token: t, name: info.name, mode: 'personal', agree: { terms: true, age14: true, privacy: true, ai: true, marketing: false } /* #1087 AI 동의 필수 */ });
     const me = await c.ok('GET', '/api/auth/me');
     assert.equal(me.user.email, 'x7k2@privaterelay.appleid.com'); P.u1 = me.user.id; P.c1 = c;
     const [idn] = await sql`select provider, subject, secret from user_identities where user_id = ${me.user.id}`;

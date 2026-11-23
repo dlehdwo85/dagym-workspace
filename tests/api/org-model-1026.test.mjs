@@ -34,7 +34,7 @@ describe('405차 조직 모델', () => {
     const [hq] = await sql`select id, name from org_units where tenant = ${T.tenant}`;
     const inv = await T.c.ok('POST', '/api/admin/users', { email: 'barista@other-org.test', name: '김바리', role: 'staff' });
     const mate = new Client('barista@other-org.test');
-    await mate.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'mate-pass-1234' });
+    await mate.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'mate-pass-1234', ai: true });
     const me = await mate.ok('GET', '/api/auth/me');
     const ms = await sql`select org_unit_id from memberships where user_id = ${me.user.id}`;
     assert.deepEqual(ms.map((m) => m.org_unit_id), [hq.id], '그 회사의 조직 1곳에 자동 소속');

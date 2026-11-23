@@ -9,7 +9,7 @@ before(async () => {
   await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   for (const [k, name] of [['a1', '영업팀원'], ['b1', '개발팀원'], ['iso', '격리팀원']]) {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: `${k}@dagym.test`, name, role: 'staff', orgUnitIds: [ctx.hq] });
-    const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234` });
+    const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234`, ai: true });
     P[k] = { id: inv.userId, c };
   }
   P.dept = (await ctx.owner.ok('POST', '/api/teams', { name: '본사', members: [{ userId: ctx.ownerId, lead: true }] })).id;

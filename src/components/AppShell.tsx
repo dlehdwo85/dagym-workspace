@@ -323,6 +323,9 @@ export function AppShell({ session, children }: { session: Sess; children: React
     await refreshWidget(); // #194 바탕화면 위젯이 앞 사람의 할 일을 계속 보이지 않게(로그인 안내로)
     location.href = '/login';
   }
+  // #1087 필수 AI 동의 화면의 [로그아웃] — 메뉴의 로그아웃과 같은 정리(알림 끊기·위젯)
+  const logoutRef = useRef(logout); logoutRef.current = logout;
+  useEffect(() => { const h = () => { void logoutRef.current(); }; window.addEventListener('wos-logout', h); return () => window.removeEventListener('wos-logout', h); }, []);
   const toggleCollapsed = () => setCollapsed((c) => { writePref('wos_nav_collapsed', c ? '0' : '1'); return !c; });
   const create = (what: 'task' | 'event' | 'project') => {
     setCreateMenu(false);

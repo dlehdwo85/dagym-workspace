@@ -8,14 +8,14 @@ import { BASE, Client, addDays } from '../helpers.mjs';
 /** opts.image(이름, 제목, [r,g,b]) = 시안 그림(브라우저로 그린 제목 카드) — 없으면 단색 PNG */
 export async function seedSample(sql, today, opts = {}) {
   const c = new Client('sample');
-  const sg = await c.ok('POST', '/api/auth/signup', { email: 'sample@workin.test', password: 'sample-pass-1234', name: '김하늘', mode: 'team', company: '하늘솔루션', agree: { terms: true, age14: true, privacy: true } });
+  const sg = await c.ok('POST', '/api/auth/signup', { email: 'sample@workin.test', password: 'sample-pass-1234', name: '김하늘', mode: 'team', company: '하늘솔루션', agree: { terms: true, age14: true, privacy: true, ai: true } });
   await c.ok('POST', '/api/auth/verify', { token: sg.devLink.split('/').pop() });
   await c.ok('POST', '/api/onboarding', { title: '대표', done: true });
   const me = await c.ok('GET', '/api/auth/me'); const unit = me.orgUnits[0].id; const tenant = me.user.tenant ?? (await sql`select tenant from users where email = 'sample@workin.test'`)[0].tenant;
   const ppl = []; const staff = []; // 316차: 직원 로그인 그대로(전자결재·메신저)
   for (const [n, e] of [['이서준', 'seojun'], ['박지우', 'jiwoo'], ['최민서', 'minseo']]) {
     const inv = await c.ok('POST', '/api/admin/users', { email: `${e}@workin.test`, name: n, role: 'staff', orgUnitIds: [unit], title: '매니저' });
-    const x = new Client(e); await x.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'sample-pass-1234' });
+    const x = new Client(e); await x.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'sample-pass-1234', ai: true });
     ppl.push((await x.ok('GET', '/api/auth/me')).user.id);
     staff.push(x);
   }

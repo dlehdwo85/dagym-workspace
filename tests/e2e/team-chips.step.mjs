@@ -4,7 +4,7 @@ import { Client } from '../helpers.mjs';
 
 export async function teamChipsFlow({ browser, owner, ctx, sql, BASE, SHOTS, login }) {
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'chip@dagym.test', name: '칩직원', role: 'staff', orgUnitIds: [ctx.hq] });
-  const c = new Client('chip'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'chip-pass-1234' });
+  const c = new Client('chip'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'chip-pass-1234', ai: true });
   const dept = (await ctx.owner.ok('POST', '/api/teams', { name: 'E2E 본부', members: [{ userId: ctx.ownerId, lead: true }] })).id;
   const t1 = (await ctx.owner.ok('POST', '/api/teams', { name: 'E2E 칩팀', parentId: dept, isolated: false, members: [{ userId: inv.userId, lead: true }] })).id;
   const t2 = (await ctx.owner.ok('POST', '/api/teams', { name: 'E2E 다른팀', parentId: dept, isolated: false, members: [{ userId: ctx.staffA.id, lead: true }] })).id;

@@ -15,7 +15,7 @@ before(async () => {
 after(async () => { srv?.proc.kill(); await sql?.end(); });
 
 const view = (page) => fetch(`${BASE}/api/public/landing-view`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ page }) });
-const agree = { terms: true, age14: true, privacy: true, ai: false, marketing: false };
+const agree = { terms: true, age14: true, privacy: true, ai: true, marketing: false } /* #1087 AI 동의 필수 */;
 async function signup(email, company, utm) {
   const c = new Client(`lf-${email}`);
   const r = await c.ok('POST', '/api/auth/signup', { email, name: '가입자', mode: 'team', company, password: 'landing-pass-1234', agree, utm });

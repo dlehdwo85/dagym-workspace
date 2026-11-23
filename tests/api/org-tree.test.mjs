@@ -26,7 +26,7 @@ describe('부서·팀 재정비(트리·주 소속)', () => {
 
   test('초대: 소속(주 소속 + 겸직)만 고르고 접근 조직은 비움 → 본사 자동, 팀원·팀 대화방·주 소속 표시(users GET teams)', async () => {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'tree@dagym.test', name: '이트리', role: 'staff', teamIds: [P.s1, P.m1], primaryTeamId: P.m1 });
-    const c = new Client('tree'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'tree-pass-1234' });
+    const c = new Client('tree'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'tree-pass-1234', ai: true });
     const u = (await ctx.owner.ok('GET', '/api/admin/users')).users.find((x) => x.id === inv.userId);
     assert.deepEqual(u.org_unit_ids, [ctx.hq], '접근 조직 자동 = 본사');
     assert.deepEqual(u.teams.map((t) => [t.path, t.primary]), [['영업부 › 수도권영업부 › 수도권1팀', true], ['영업부 › 영업1팀', false]], '주 소속 먼저');

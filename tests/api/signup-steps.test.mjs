@@ -14,7 +14,7 @@ describe('V32 3 가입 단계', () => {
     assert.equal((await pub.req('POST', '/api/public/signup-step', { anon: 'x', step: 'account_view' })).status, 400);
     assert.equal((await pub.req('POST', '/api/public/signup-step', { anon: 'anon-test-0001', step: 'verified' })).status, 400, '서버 단계는 밖에서 못 넣음');
     const c = new Client('boss');
-    const r = await c.ok('POST', '/api/auth/signup', { email: 'boss@steps.test', name: '대표', password: 'signup-pass-1234', mode: 'team', company: '단계상사', size: '2-10', agree: { terms: true, age14: true, privacy: true } });
+    const r = await c.ok('POST', '/api/auth/signup', { email: 'boss@steps.test', name: '대표', password: 'signup-pass-1234', mode: 'team', company: '단계상사', size: '2-10', agree: { terms: true, age14: true, privacy: true, ai: true } });
     await c.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
     const [{ tenant }] = await sql`select tenant from users where email = 'boss@steps.test'`;
     const steps = async () => (await sql`select step from signup_steps where tenant = ${tenant} order by id`).map((x) => x.step);
@@ -28,7 +28,7 @@ describe('V32 3 가입 단계', () => {
     const [hq] = await sql`select id from org_units where tenant = ${tenant} and type = 'hq'`;
     const inv = await c.ok('POST', '/api/admin/users', { email: 'staff@steps.test', name: '직원', role: 'staff', orgUnitIds: [hq.id] });
     const s = new Client('staff');
-    await s.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'staff-pass-1234' });
+    await s.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'staff-pass-1234', ai: true });
     await s.ok('POST', '/api/onboarding', { channels: { replyTo: 'other', workEmail: 'other@steps.test' }, invited: true });
     assert.equal((await sql`select work_email from users where email = 'staff@steps.test'`)[0].work_email, null, '직원은 반영 안 됨');
     assert.deepEqual(await steps(), ['submitted', 'verified', 'channels_done']);

@@ -76,7 +76,7 @@ test('관리자 본인 휴대폰·동의: 관리자만 · 번호 형식 · 동�
 
 test('가입: 알림톡 선택 동의 + 휴대폰 → 이메일 확인 끝나면 가입·약관 동의 완료 알림톡 1번(본인) · 동의만 하고 번호가 틀리면 가입 막음 · 동의 안 하면 번호 저장 안 함', async () => {
   const a = new Client('alim-signup');
-  const agree = { terms: true, age14: true, privacy: true, ai: false, marketing: false };
+  const agree = { terms: true, age14: true, privacy: true, ai: true, marketing: false } /* #1087 AI 동의 필수 */;
   assert.equal((await a.req('POST', '/api/auth/signup', { email: 'alim1@example.com', name: '알림씨', mode: 'team', company: '알림상사', password: 'alim-pass-1234', agree: { ...agree, alimtalk: true }, phone: '123' })).status, 400);
   got.length = 0;
   const r = await a.ok('POST', '/api/auth/signup', { email: 'alim1@example.com', name: '알림씨', mode: 'team', company: '알림상사', password: 'alim-pass-1234', agree: { ...agree, alimtalk: true }, phone: '010 9876 5432' });

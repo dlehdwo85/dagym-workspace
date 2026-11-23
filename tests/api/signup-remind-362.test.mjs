@@ -10,7 +10,7 @@ import { Client, bootstrap, resetDb, startServer, testDb, tick } from '../helper
 const RESEND_PORT = 3362;
 let srv, sql, ctx, mailSrv;
 const mails = [];
-const agree = { terms: true, age14: true, privacy: true };
+const agree = { terms: true, age14: true, privacy: true, ai: true };
 const mailTo = (re) => mails.filter((m) => re.test(m.subject));
 const signup = (c, email, company) => c.ok('POST', '/api/auth/signup', { email, name: '신청자', password: 'signup-pass-1234', mode: 'team', company, size: '2-10', industry: '제조', agree, contact: '010 1234 5678' });
 const tenantOf = async (email) => (await sql`select tenant from users where email = ${email}`)[0].tenant;

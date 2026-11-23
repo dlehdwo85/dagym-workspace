@@ -108,8 +108,9 @@ export async function appGet({ browser, owner, BASE, SHOTS, sql }) {
   assert.equal(await oops.getByTestId('user-cancel-invite').count() + await oops.getByTestId('user-reinvite').count() + await oops.getByTestId('user-contract').count(), 0, '취소한 줄에는 초대·전자계약서 단추가 없음');
   await a.goto(link); await a.getByText('초대했습니다').waitFor();
   await a.getByLabel('비밀번호 (8자 이상)').fill('appget-pass-1'); await a.getByLabel('비밀번호 확인').fill('appget-pass-1');
-  // #1086: 초대 수락에도 [선택] AI 기능 이용 동의 한 줄 — 체크하면 AI 동의(지금 판)로 저장
-  assert.match(await a.getByTestId('ai-consent-line').innerText(), /\[선택\] AI 기능 이용 동의/); assert.equal(await a.getByTestId('agree-ai').isChecked(), false);
+  // #1086: 초대 수락에도 AI 기능 이용 동의 한 줄 — 체크하면 AI 동의(지금 판)로 저장 · 대표 11/23 #1087: [필수] — 빼고 누르면 막힘
+  assert.match(await a.getByTestId('ai-consent-line').innerText(), /\[필수\] AI 기능 이용 동의/); assert.equal(await a.getByTestId('agree-ai').isChecked(), false);
+  await a.getByRole('button', { name: '가입하고 시작하기' }).click(); await a.getByRole('alert').getByText('AI 기능 이용 동의(필수)에 체크해 주세요').waitFor();
   await a.getByTestId('agree-ai').check(); await noOverflow(a, '초대 수락(AI 줄)');
   await a.getByRole('button', { name: '가입하고 시작하기' }).click();
   const done = a.getByTestId('invite-done'); await done.waitFor();

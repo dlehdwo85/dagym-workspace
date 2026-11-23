@@ -13,7 +13,7 @@ const RESEND_PORT = 3361, NAVER_PORT = 3362;
 let srv, sql, ctx, mailSrv, naver;
 const mails = [];
 let calls = [];
-const agree = { terms: true, age14: true, privacy: true };
+const agree = { terms: true, age14: true, privacy: true, ai: true };
 const RESULT = /광고성 정보 수신 동의 처리 결과/;
 const mailTo = (to, re) => mails.filter((m) => [m.to].flat().some((x) => String(x).toLowerCase() === to.toLowerCase()) && re.test(m.subject)); // 초대 메일 주소는 소문자로 저장됨
 const camps = {
@@ -87,7 +87,7 @@ describe('360차 광고성 정보 수신 동의(정보통신망법 50조)', () =
     st = await a.ok('PUT', '/api/account/marketing-consent', { agreed: false });
     assert.equal(st.agreed, false); assert.equal(st.changed, true);
     assert.match(mailTo('staffA@dagym.test', RESULT).at(-1).text, /처리 결과: 수신 거부/);
-    const audits = await sql`select action from audit_logs where actor_id = ${ctx.staffA.id} and action like 'consent.%' order by created_at`;
+    const audits = await sql`select action from audit_logs where actor_id = ${ctx.staffA.id} and action like 'consent.marketing%' order by created_at`;
     assert.deepEqual(audits.map((x) => x.action), ['consent.marketing_agree', 'consent.marketing_withdraw']);
     assert.deepEqual((await sql`select reason from consent_notices where user_id = ${ctx.staffA.id} order by id`).map((x) => x.reason), ['result_agree', 'result_withdraw']);
   });

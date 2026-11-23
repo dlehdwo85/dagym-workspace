@@ -108,7 +108,7 @@ for (const P of PERSONAS) {
     await p.goto(BASE + '/signup');
     await p.getByLabel('이름').fill(P.name); await p.getByLabel('이메일').fill(email);
     await p.locator('input[type="password"]').first().fill(pw);
-    for (const k of ['terms', 'privacy', 'age14']) await p.getByTestId(`agree-${k}`).check();
+    for (const k of ['terms', 'privacy', 'age14', 'ai']) await p.getByTestId(`agree-${k}`).check(); // #1087 AI 동의 필수
     await snap('가입 1단계(계정)');
     await p.getByTestId('signup-next').click();
     await p.getByTestId('mode-team').click();
@@ -144,7 +144,7 @@ for (const P of PERSONAS) {
     const api = new Client(P.key); await api.ok('POST', '/api/auth/login', { email, password: pw });
     const me = await api.ok('GET', '/api/auth/me'); const unit = me.orgUnits?.[0]?.id;
     const inv = await api.ok('POST', '/api/admin/users', { email: `staff@${P.key}-walk.test`, name: P.staff, role: 'staff', orgUnitIds: [unit] });
-    const st = new Client(`${P.key}-staff`); await st.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: pw });
+    const st = new Client(`${P.key}-staff`); await st.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: pw, ai: true });
     const sid = (await st.ok('GET', '/api/auth/me')).user.id;
     await api.ok('POST', '/api/tasks', { title: P.task, orgUnitId: unit, assigneeId: sid });
     // 5) 화면 순회(PC)

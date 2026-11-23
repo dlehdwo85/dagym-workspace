@@ -69,7 +69,7 @@ describe('범용화 2단계 용어 사전', () => {
     assert.equal((await sql`select role_badge from tenants where id = ${T.tenant}`)[0].role_badge, 'ko', '새 회사는 한글 배지');
     assert.equal((await T.c.ok('GET', '/api/org/role-badge')).modeLabels.ko, '한글 (대표 · 관리자 · 팀 책임자 · 지점 관리자 · 직원)');
     assert.equal((await new Client('anon').ok('GET', `/api/invitations/${mate.token}`)).roleLabel, '직원');
-    await mate.c.ok('POST', `/api/invitations/${mate.token}/accept`, { password: 'mate-pass-1234' });
+    await mate.c.ok('POST', `/api/invitations/${mate.token}/accept`, { password: 'mate-pass-1234', ai: true });
     const p = await mate.c.req('POST', '/api/projects', { name: '직원이 만드는 프로젝트', orgUnitId: unitO });
     assert.equal(p.status, 403); assert.equal(msg(p), '프로젝트는 지점 관리자 이상이 만들 수 있습니다');
     assert.ok(!msg(p).includes('현장'));

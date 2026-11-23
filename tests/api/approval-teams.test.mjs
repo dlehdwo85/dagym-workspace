@@ -10,7 +10,7 @@ const today = seoulToday();
 const nextMon = (() => { let d = addDays(today, 7); while (new Date(d + 'T00:00:00Z').getUTCDay() !== 1) d = addDays(d, 1); return d; })();
 const invite = async (k, name, unit) => {
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: `${k}@dagym.test`, name, role: 'staff', orgUnitIds: [unit] });
-  const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234` });
+  const c = new Client(k); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${k}-pass-1234`, ai: true });
   return { c, id: (await c.ok('GET', '/api/auth/me')).user.id };
 };
 const leave = (c, from, to, extra = {}) => c.ok('POST', '/api/approvals/requests', { kind: 'leave', data: { leave_type: '연차', period: { from, to }, reason: '개인 사유', ...extra } });

@@ -11,7 +11,7 @@ before(async () => {
   await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'admin365@dagym.test', name: '관리자365', role: 'admin', orgUnitIds: [ctx.hq] });
   const c = new Client('admin365');
-  await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'admin365-pass-1234' });
+  await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'admin365-pass-1234', ai: true });
   admin = { client: c, id: (await c.ok('GET', '/api/auth/me')).user.id };
 });
 after(async () => { srv?.proc.kill(); await sql?.end(); });

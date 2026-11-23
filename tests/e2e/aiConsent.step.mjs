@@ -2,9 +2,81 @@
 // ① 아직 정하지 않은 사람은 들어오면 동의 창(무엇을·어디로·왜·동의하지 않으면, 받는 곳 = Anthropic) ② [나중에 정하기] → 이 기기에서는 다시 안 뜸
 // ③ 동의하지 않은 사람이 AI 를 누르면 짧은 안내 → [내용 보고 정하기] → [AI 기능 쓰기] → AI 가 답함 ④ 설정 › 개인정보·AI 에서 끄고 다시 켜기
 // ⑤ 관리 › 회사 정보의 '회사 자료 자동 AI 처리' ⑥ 휴대폰 폭에서 넘침 없음. (시험 서버는 '아직 정하지 않음'을 동의함으로 보므로, 들어올 때 뜨는 창은 상태 응답만 바꿔서 봄)
+// 대표 11/23 #1087: 웹·안드로이드는 필수 동의 — ⓪ 아직 동의하지 않은 사람(정하지 않음·쓰지 않기)은 닫을 수 없는 동의 화면([동의하고 계속]·[로그아웃]) ·
+// 설정은 [필수]·끄기 없음. ①~⑥ 의 예전(선택) 흐름은 아이폰 앱(1.2.0 심사 통과 전까지 그대로)으로 — 앱 표시(WorkInApp) 붙은 창에서 봄
 import assert from 'node:assert/strict';
 
-export async function aiConsent({ owner, BASE, FAKE, SHOTS }) {
+export async function aiConsent({ owner: web, browser, BASE, FAKE, SHOTS }) {
+  await aiConsentRequired({ web, BASE, SHOTS });
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await web.context().storageState(),
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WorkInApp' });
+  const owner = await ctx.newPage();
+  try { await aiConsentIos({ owner, BASE, FAKE, SHOTS }); } finally { await ctx.close(); }
+}
+
+/** #1087 웹(필수): 들어오면 닫을 수 없는 동의 화면 · 쓰지 않기로 했던 사람도 다시 · 설정은 [필수]·끄기 없음 · [내용 다시 보기]는 닫기만 */
+async function aiConsentRequired({ web, BASE, SHOTS }) {
+  const put = (agreed) => web.evaluate((a) => fetch('/api/account/ai-consent', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agreed: a }) }).then((r) => r.json()), agreed);
+  let fakeNone = true;
+  const route = (r) => (fakeNone && r.request().method() === 'GET' ? r.fulfill({ json: { state: 'none', at: null, version: '2026-11', stt: false } }) : r.continue());
+  await web.route('**/api/account/ai-consent', route);
+  try {
+    await web.setViewportSize({ width: 1366, height: 900 });
+    await web.goto(BASE + '/tasks');
+    const req = web.getByTestId('ai-consent-required');
+    await req.waitFor({ timeout: 15000 });
+    const dlg = web.getByRole('dialog', { name: 'AI 기능 이용 동의(필수)' });
+    assert.equal(await dlg.count(), 1, '필수 동의 창 제목');
+    assert.equal(await dlg.getByRole('button', { name: '닫기' }).count(), 0, '닫기 단추 없음');
+    for (const t of ['ai-consent-later', 'ai-consent-refuse']) assert.equal(await web.getByTestId(t).count(), 0, `${t} 없음(나중에·쓰지 않기 없음)`);
+    await web.getByTestId('ai-consent-logout').waitFor(); // [로그아웃]은 있음(누르지는 않음 — 뒤 단계가 이 로그인을 씀)
+    await web.keyboard.press('Escape'); await web.waitForTimeout(200);
+    assert.equal(await req.isVisible(), true, 'Esc 로 안 닫힘');
+    await web.mouse.click(5, 5); await web.waitForTimeout(200);
+    assert.equal(await req.isVisible(), true, '바깥을 눌러도 안 닫힘');
+    assert.match(await req.getByTestId('ai-consent-required-lead').innerText(), /워크인을 계속 쓰려면/);
+    await req.getByTestId('ai-consent-more').locator('summary').click();
+    await req.getByText('AI 처리는 워크인의 핵심 기능이라 꼭 동의를 받습니다.').waitFor();
+    await req.getByText('AI 처리는 워크인의 핵심 기능이라, 동의하지 않으면 워크인을 쓸 수 없습니다.').waitFor();
+    assert.equal(await req.getByText('동의하지 않아도 업무·일정·메신저·결재는 그대로 씁니다.').count(), 0, '선택일 때의 문장은 없음');
+    assert.match(await req.getByTestId('ai-consent-transfer').innerText(), /받는 곳·나라: Anthropic\(미국\)/, '국외 이전 고지');
+    await web.screenshot({ path: `${SHOTS}/ai-consent-required.png` });
+    await web.setViewportSize({ width: 390, height: 844 });
+    assert.ok(await web.evaluate(() => document.documentElement.scrollWidth <= 390), '390 가로 넘침 없음');
+    const b = await web.getByTestId('ai-consent-required-agree').boundingBox();
+    assert.ok(b && b.y + b.height <= 844, '[동의하고 계속]이 화면 안에 보임');
+    await web.screenshot({ path: `${SHOTS}/ai-consent-required-mobile.png` });
+    await web.setViewportSize({ width: 1366, height: 900 });
+    fakeNone = false;
+    await web.getByTestId('ai-consent-required-agree').click();
+    await req.waitFor({ state: 'hidden' });
+    // 예전에 '쓰지 않기'로 정한 사람도 들어오면 다시 필수 동의 화면
+    assert.equal((await put(false)).state, 'declined');
+    await web.goto(BASE + '/tasks');
+    await req.waitFor({ timeout: 15000 });
+    await web.getByTestId('ai-consent-required-agree').click();
+    await req.waitFor({ state: 'hidden' });
+    // 설정 › 개인정보·AI: [필수] · 끄기 없음 · 탈퇴 안내 · [내용 다시 보기]는 닫기만
+    await web.goto(BASE + '/settings');
+    const set = web.getByTestId('ai-consent-setting');
+    await set.scrollIntoViewIfNeeded();
+    await set.getByText('[필수]').waitFor();
+    assert.equal(await web.getByTestId('ai-consent-toggle').count(), 0, '끄기 없음');
+    assert.match(await set.getByTestId('ai-consent-required-note').innerText(), /끌 수 없습니다[\s\S]*탈퇴/);
+    assert.match(await set.innerText(), /동의/);
+    await set.getByTestId('ai-consent-review').click();
+    await web.getByTestId('ai-consent').waitFor();
+    assert.equal(await web.getByTestId('ai-consent-refuse').count(), 0, '다시 보기 창에 쓰지 않기 없음');
+    await web.getByTestId('ai-consent-close').click();
+    await web.getByTestId('ai-consent').waitFor({ state: 'hidden' });
+  } finally {
+    await web.unroute('**/api/account/ai-consent', route);
+    await put(true).catch(() => {});
+  }
+}
+
+/** 아이폰 앱(심사 통과 전까지 예전 그대로 — 선택): ①~⑥ */
+async function aiConsentIos({ owner, BASE, FAKE, SHOTS }) {
   const q = (items) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true, anthropicQueue: items }) });
   const say = (text) => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn' });
   const put = (agreed) => owner.evaluate((a) => fetch('/api/account/ai-consent', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agreed: a }) }).then((r) => r.json()), agreed);
@@ -13,6 +85,7 @@ export async function aiConsent({ owner, BASE, FAKE, SHOTS }) {
   await owner.route('**/api/account/ai-consent', route);
   try {
     await owner.setViewportSize({ width: 1366, height: 900 });
+    await owner.goto(BASE + '/privacy'); // 새 창(빈 페이지)은 저장소를 못 읽음 — 같은 사이트의 앱 틀 없는 화면을 먼저
     await owner.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('wos_ai_later_')) localStorage.removeItem(k); });
     // ① 들어오면 동의 창
     await owner.goto(BASE + '/tasks');

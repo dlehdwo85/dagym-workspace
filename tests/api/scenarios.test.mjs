@@ -52,8 +52,8 @@ describe('① 초대 → 로그인 → 허용된 현장만 조회', () => {
   test('초대 링크는 한 번만 쓸 수 있다', async () => {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'once@dagym.test', name: '한번', role: 'staff', orgUnitIds: [ctx.siteA] });
     const t = inv.path.split('/').pop();
-    await new Client().ok('POST', `/api/invitations/${t}/accept`, { password: 'once-pass-123' });
-    const r2 = await new Client().post(`/api/invitations/${t}/accept`, { password: 'again-pass-123' });
+    await new Client().ok('POST', `/api/invitations/${t}/accept`, { password: 'once-pass-123', ai: true });
+    const r2 = await new Client().post(`/api/invitations/${t}/accept`, { password: 'again-pass-123', ai: true });
     assert.equal(r2.status, 400);
   });
 });
@@ -990,7 +990,7 @@ describe('직원 비활성화·퇴사 즉시 차단 + 감사 기록', () => {
   test('관리자는 대표 권한을 줄 수 없고, 마지막 대표는 강등 불가', async () => {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'adm@dagym.test', name: '관리자', role: 'admin', orgUnitIds: [] });
     const a = new Client('adm');
-    await a.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'admin-pass-123' });
+    await a.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'admin-pass-123', ai: true });
     assert.equal((await a.patch(`/api/admin/users/${ctx.staffA.id}`, { role: 'owner' })).status, 403);
     assert.equal((await a.patch(`/api/admin/users/${ctx.ownerId}`, { status: 'disabled' })).status, 403);
     assert.equal((await ctx.owner.patch(`/api/admin/users/${ctx.ownerId}`, { status: 'disabled' })).status, 400);
@@ -1191,7 +1191,7 @@ describe('데모(체험) 계정 격리 — is_demo 조직·계정은 밖을 못 
     const unit = (await ctx.owner.ok('POST', '/api/admin/org-units', { name: '격리 시험 지점', type: 'branch', parentId: null, isDemo: true })).id;
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'iso@dagym.test', name: '격리직원', role: 'staff', orgUnitIds: [unit] });
     const c = new Client('iso');
-    await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'iso-pass-1234' });
+    await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'iso-pass-1234', ai: true });
     const [iso] = await sql`select is_demo from users where email = 'iso@dagym.test'`;
     assert.equal(iso.is_demo, true, '격리 조직에만 소속된 직원은 체험(격리) 계정이 됨 — 사용자 관리 화면 초대만으로');
     const compCal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'company');
@@ -1225,7 +1225,7 @@ describe('WORKIN_V3 서로 배정 · 요청자 · 직접 순서', () => {
   test('본사 직원끼리 서로 배정 → 배정받은 사람이 보고, 본사 직원은 본사 아래 전체를 본다', async () => {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'hq2@dagym.test', name: '김민수', role: 'staff', orgUnitIds: [ctx.hq] });
     hq2 = new Client('hq2');
-    await hq2.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'hq2-pass-1234' });
+    await hq2.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'hq2-pass-1234', ai: true });
     const me = (await hq2.ok('GET', '/api/auth/me')).user;
     hq2.id = me.id;
     const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '본사 서로 배정', orgUnitId: ctx.hq, assigneeId: me.id })).id;
@@ -1274,7 +1274,7 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
     assert.ok(r.invitePath.startsWith('/invite/'));
     assert.deepEqual([r.sample.tasks, r.sample.events, r.sample.rooms, r.sample.files, r.sample.leads, r.sample.marketing], [12, 7, 2, 4, 5, 2], '스토어 스크린샷용 예시(로컬 10/19)');
     const c = new Client('review');
-    await c.ok('POST', `/api/invitations/${r.invitePath.split('/').pop()}/accept`, { password: 'review-pass-1234' }); // 비밀번호는 대표가 링크에서 직접
+    await c.ok('POST', `/api/invitations/${r.invitePath.split('/').pop()}/accept`, { password: 'review-pass-1234', ai: true }); // 비밀번호는 대표가 링크에서 직접
     const me = await c.ok('GET', '/api/auth/me');
     assert.equal(me.user.role, 'site_manager');
     const list = await c.ok('GET', '/api/tasks?limit=500');
@@ -1325,7 +1325,7 @@ describe('WORKIN_V4 본사 사람끼리 일정 보기 · 비공개', () => {
   test('본사 소속·대표는 서로의 개인 일정을 보고, 비공개는 "바쁨"(내용·메모 없음), 현장 직원에게는 안 보임', async () => {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'hqcal@dagym.test', name: '김소담', role: 'staff', orgUnitIds: [ctx.hq] });
     const c = new Client('hqcal');
-    await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'hqcal-pass-1234' });
+    await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'hqcal-pass-1234', ai: true });
     const me = (await c.ok('GET', '/api/auth/me')).user;
     const d = addDays(today, 2);
     const ownerCal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
@@ -1418,7 +1418,7 @@ describe('WORKIN_V6 상태 알림 · 일괄 생성 · 삭제/휴지통 · 오늘
   const mk = async (email, name) => {
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email, name, role: 'staff', orgUnitIds: [ctx.hq] });
     const c = new Client(email);
-    await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${email}-pass-1234` });
+    await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${email}-pass-1234`, ai: true });
     c.id = (await c.ok('GET', '/api/auth/me')).user.id;
     return c;
   };
@@ -1530,7 +1530,7 @@ describe('WORKIN_V6 엑셀 내려받기', () => {
     const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
     await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: '엑셀 비밀 약속', start: `${today}T10:00:00+09:00`, end: `${today}T11:00:00+09:00`, isPrivate: true });
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'xls@dagym.test', name: '엑셀본사', role: 'staff', orgUnitIds: [ctx.hq] });
-    const c = new Client('xls'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'xls-pass-1234' });
+    const c = new Client('xls'); await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'xls-pass-1234', ai: true });
     const r3 = await dl(c, `/api/export/calendar?start=${today}&end=${today}`);
     assert.equal(r3.status, 200);
     const f3 = `/tmp/wos-export3-${Date.now()}.xlsx`; writeFileSync(f3, Buffer.from(await r3.arrayBuffer()));
@@ -2161,7 +2161,7 @@ describe('WORKIN_V12 3번 ICS 구독 · 2단계 인증 · 도움말 문의 · �
   test('2단계 인증: 설정 → 코드로 켜기 → 로그인 시 코드 요구(코드 전에는 401) → 코드 확인 후 로그인, 틀리면 거절, 끄기', async () => {
     const em = 'mfa@dagym.test', pw = 'mfa-pass-1234';
     const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: em, name: '두단계', role: 'staff', orgUnitIds: [ctx.siteA] });
-    const u = new Client('mfa'); await u.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: pw });
+    const u = new Client('mfa'); await u.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: pw, ai: true });
     const { secret } = await u.ok('POST', '/api/auth/2fa', {});
     assert.equal((await u.req('PUT', '/api/auth/2fa', { code: '000000' })).status, 400);
     await u.ok('PUT', '/api/auth/2fa', { code: totp(secret) });

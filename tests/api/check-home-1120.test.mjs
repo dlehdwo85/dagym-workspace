@@ -13,7 +13,7 @@ const sum = (c) => c.ok('GET', '/api/check/summary');
 before(async () => {
   await resetDb(); srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1' }); sql = testDb(); ctx = await bootstrap();
   const c = new Client('ceo@check-home.test');
-  const r = await c.ok('POST', '/api/auth/signup', { email: 'ceo@check-home.test', password: 'signup-pass-1234', name: '김사장', mode: 'team', company: '모퉁이커피', industry: '외식·카페', agree: { terms: true, age14: true, privacy: true, ai: false, marketing: false } });
+  const r = await c.ok('POST', '/api/auth/signup', { email: 'ceo@check-home.test', password: 'signup-pass-1234', name: '김사장', mode: 'team', company: '모퉁이커피', industry: '외식·카페', agree: { terms: true, age14: true, privacy: true, ai: true, marketing: false } /* #1087 AI 동의 필수 */ });
   await c.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
   cafe = { c };
 });

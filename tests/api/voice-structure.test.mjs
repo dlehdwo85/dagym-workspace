@@ -10,7 +10,7 @@ const say = (o) => ({ content: [{ type: 'text', text: JSON.stringify(o) }], stop
 const today = seoulToday();
 before(async () => { await resetDb(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'kms@dagym.test', name: '김민수', role: 'staff', title: '본부장', orgUnitIds: [ctx.siteA] });
-  await new Client('kms').ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'kms-pass-1234' });
+  await new Client('kms').ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'kms-pass-1234', ai: true });
   kms = (await sql`select id from users where email = 'kms@dagym.test'`)[0].id;
   await sql`update users set title = '본부장' where id = ${kms}`;
 });

@@ -9,7 +9,7 @@ const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-
 async function addUser(key, name, unit) {
   const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: `${key}@dagym.test`, name, role: 'staff', orgUnitIds: [unit] });
   const c = new Client(key);
-  await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${key}-pass-1234` });
+  await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: `${key}-pass-1234`, ai: true });
 }
 
 before(async () => { await resetDb(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();

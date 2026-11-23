@@ -58,6 +58,7 @@ Claude Code 데스크톱 앱에서는 "폴더 열기"로 `C:\Users\User\Document
 - 비밀값(토큰, `.env.local`, `google-services.json`, keystore, `.p8`/`.p12`)은 **어느 쪽도 커밋하지 않습니다**. 값은 Vercel 환경 변수와 GitHub Secrets에만 넣습니다.
 - **`main` = 운영 배포 브랜치** (Vercel Production, 고정 주소 https://dagym-workspace.vercel.app 로 검수). **2026-10-13 대표 지시로 작업은 PR·승인 대기 없이 바로 `main` 에 푸시**한다. 클라우드는 `claude/cool-pascal-h2e787` 에서 커밋해 그 브랜치와 `main` 에 함께 푸시하고, 로컬은 `main`(필요하면 `local/*`)에서 작업해 `main` 에 푸시한다. 푸시 전 할 수 있는 시험을 돌리고, CI 가 실패하거나 운영 화면에서 문제가 보이면 후속 커밋으로 바로 고친다. 강제 푸시·rebase 금지는 그대로.
 - 새 작업을 시작할 때는 항상 `git fetch origin` 후 최신 `main` 을 자기 브랜치에 merge 하고 시작한다.
+- **연결이 끊겼을 때(대표 11/23)**: [docs/handoff/OFFLINE_PROTOCOL.md](docs/handoff/OFFLINE_PROTOCOL.md) — 저장소 기록(LOCAL_LOG '클라우드 → 로컬' 줄 + 커밋 제목 [로컬요청]/[배포확인요청])이 기본 통로, 메시지는 보조 · 요청 뒤 30분 안에 답이 없으면 '로컬 끊김' — 멈추지 말고 다음 일, 운영 확인은 '로컬 확인 대기' · 급한 결정은 클라우드 대화에서 대표에게 직접 + 대표결정함([docs/handoff/CEO_DECISIONS.md](docs/handoff/CEO_DECISIONS.md)) '열림' · 돈·삭제·공개·설정 변경은 대표 승인 뒤
 
 ## 5. 로컬(PC 브라우저 로그인·기기·로컬 도구)이 필요한 작업 — 로컬 Claude Code 담당
 | ID | 작업 | 필요한 것 | 결과를 남길 곳 |
