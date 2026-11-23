@@ -42,6 +42,9 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
         <li>결제: (주)나이스페이먼츠 — 카드·계좌이체·가상계좌 결제, 정기 결제(빌링)</li>
         <li>소셜 로그인: Google LLC, (주)카카오, 네이버(주) — 로그인·가입 시 본인 확인</li>
         <li>푸시 알림: Google(Firebase), Apple — 앱 알림</li>
+        <li data-testid="privacy-alimtalk">카카오 알림톡·문자 발송(회사가 켠 경우): 솔라피(SOLAPI) — 받는 사람 전화번호와 보내는 내용</li>
+        <li data-testid="privacy-meet">화상회의(회사가 켠 경우): LiveKit, Inc.(미국) — 회의 참가자의 이름과 회의 중 음성·영상·화면 공유 전송</li>
+        <li data-testid="privacy-higgsfield">마케팅 영상·이미지 만들기(마케팅 공간을 쓰는 회사): Higgsfield AI(미국) — 영상·이미지를 만들 때 넣은 문구와 사진</li>
         <li data-testid="privacy-ai">AI 처리(서비스의 핵심 기능 · 국외 이전 — 동의한 사람의 내용만): Anthropic PBC(미국) — AI 기능을 쓸 때 AI에게 쓴 글·붙인 파일·답에 필요한 업무·일정·자료 내용(지점 운영 보고 초안을 만들 때는 가린 뒤의 보고 글·대화)을 전송합니다.{stt ? ' OpenAI(미국) — 회의 녹음을 글로 바꿀 때 녹음을 전송합니다.' : ''} 받는 회사의 이용 조건에 따라 그 회사 AI를 가르치는 데 쓰이지 않습니다. AI 처리는 서비스의 핵심 기능이라 가입할 때(이미 쓰던 분은 다음에 들어올 때) 동의를 받으며, 동의 철회는 탈퇴로 할 수 있습니다(<a href="/ai-notice" className="underline">AI 이용 안내</a>)</li>
       </ul>
       <p className="text-xs text-slate-500">국외 이전 항목: 위 2번 항목 중 해당 기능 처리에 필요한 정보 · 이전 시기: 서비스 이용 시 네트워크로 전송 · 보유 기간: 위탁 계약 종료 또는 탈퇴 시까지.</p>
@@ -56,7 +59,7 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
       <H>8. 안전성 확보 조치</H>
       <p>비밀번호 해시 저장, 외부 연동 토큰 암호화, 전 구간 HTTPS, 공간(회사)별 데이터 분리와 서버 권한 검사, 접근 기록 보관, 2단계 인증 제공.</p>
       <H>9. 위치정보</H>
-      <p>서비스는 위치정보를 수집하지 않습니다(위치기반서비스 미제공).</p>
+      <p data-testid="privacy-location">회사가 출퇴근 기록을 켜고 본인이 동의한 경우에만, [출근]·[퇴근]을 누르는 그 순간의 위치(위도·경도)를 받아 회사가 등록한 현장 안에서 눌렀는지 표시하는 데 씁니다(위 2번). 그 밖의 시간에는 위치를 받지 않고, 계속 위치를 따라가거나 다른 사람에게 위치를 알려 주는 서비스(위치기반서비스)는 제공하지 않습니다. 출퇴근 기록은 회사의 근태 관리 기록으로 보관되며, 탈퇴·회사 삭제 때 함께 파기합니다.</p>
       <H>10. 앱 접근 권한</H>
       <p>Android·iOS 앱은 아래 기능을 쓸 때만 권한을 요청합니다. 모두 선택 권한이며, 허용하지 않아도 나머지 기능은 쓸 수 있습니다. 휴대폰 설정에서 언제든 바꿀 수 있습니다.</p>
       <ul className="list-disc pl-5">
