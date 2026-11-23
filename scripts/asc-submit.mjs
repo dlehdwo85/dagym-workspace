@@ -95,6 +95,8 @@ const REQUIRED = [DISPLAY, IPAD_DISPLAY]; // 앱이 아이폰·아이패드 둘 
 const apps = (await api('GET', `/apps?filter[bundleId]=${encodeURIComponent(BUNDLE)}`)).data;
 if (!apps.length) throw new Error(`번들 ${BUNDLE} 앱이 없습니다`);
 const app = apps[0]; log(`앱 ${app.attributes.name} (${app.id}) · 모드 ${MODE}${SUBMIT ? ' + 제출' : ''}`);
+// 로컬 11/24: 앱의 Apple ID(숫자) = 스토어 주소 — 심사 통과 뒤 NEXT_PUBLIC_APPSTORE_URL 에 넣음(공개 정보라 그대로 찍음)
+log(`Apple ID ${app.id} · 스토어 주소 https://apps.apple.com/kr/app/id${app.id}`);
 const versions = (await api('GET', `/apps/${app.id}/appStoreVersions?filter[platform]=IOS&limit=20`)).data;
 const stateOf = (v) => v.attributes.appVersionState ?? v.attributes.appStoreState ?? '?';
 log('버전:'); for (const v of versions) log(`  ${v.attributes.versionString} · ${stateOf(v)} (${v.id})`);

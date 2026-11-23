@@ -59,7 +59,7 @@ export async function attachSourceFiles(u: SessionUser, i: { kind: SourceKind; i
   const t = tenantOf(u); const sql = db();
   const src = await sourceOf(t, i.kind, i.id);
   if (!src || !src.files.length || !i.taskIds.length) return { total: src?.files.length ?? 0, ok: 0, failed: [] as { name: string; reason: string }[], listError: src?.listError };
-  const folder = `영업/공고/${src.name.replace(/[\\/]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40)}`;
+  const folder = `영업/${i.kind === 'support' ? '지원사업' : '공고'}/${src.name.replace(/[\\/]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40)}`;
   const { saveGeneratedFile } = await import('../library');
   const libs: Lib[] = []; const failed: { name: string; reason: string }[] = [];
   for (const [k, f] of src.files.entries()) {

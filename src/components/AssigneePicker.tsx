@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useApi } from '@/components/client';
 import { Button, Modal, Skeleton, cx, inputCls } from '@/components/ui';
 
-type People = { people: { id: string; name: string; title: string | null; inSpace: boolean }[]; me: string; suggested: string | null };
+type People = { people: { id: string; name: string; title: string | null; inSpace: boolean; spaces?: string[] }[]; me: string; suggested: string | null };
 
 /**
  * #1124: 담당 고르기(입찰 [넘기기]와 같은 모양) — 여러 명, 처음 고른 사람이 주 담당. 그 공간 권한이 없는 사람은 회색(고를 수 없음) + 안내.
@@ -24,7 +24,7 @@ export function AssigneePicker({ space, kind, value, onChange }: { space: 'sales
               className={cx('inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs', !p.inSpace ? 'cursor-not-allowed border-line bg-slate-50 text-ink-3' : 'cursor-pointer', on ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : p.inSpace && 'border-line bg-white')}
               data-testid="assignee-option" data-in-space={p.inSpace ? '1' : '0'}>
               <input type="checkbox" className="sr-only" disabled={!p.inSpace} checked={on} onChange={(e) => onChange(e.target.checked ? [...value, p.id] : value.filter((x) => x !== p.id))} />
-              {p.name}{p.id === d.data!.me ? ' (나)' : ''}{p.title ? <span className="text-ink-3"> {p.title}</span> : null}{on && value.length > 1 ? <span className="text-[10px] text-ink-3">{i === 0 ? ' 주 담당' : ' 공동'}</span> : null}
+              {p.name}{p.id === d.data!.me ? ' (나)' : ''}{p.title ? <span className="text-ink-3"> {p.title}</span> : null}{p.spaces?.length ? <span className="text-[10px] text-ink-3" data-testid="assignee-spaces"> · {p.spaces.map((x) => (x === 'sales' ? '영업' : x === 'marketing' ? '마케팅' : x)).join('·')}</span> : null}{on && value.length > 1 ? <span className="text-[10px] text-ink-3">{i === 0 ? ' 주 담당' : ' 공동'}</span> : null}
             </label>);
         })}
       </div>

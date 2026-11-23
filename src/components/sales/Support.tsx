@@ -7,6 +7,7 @@ import { Check, CircleAlert, CircleCheck, CircleX, Download, ExternalLink, Hourg
 import { api, useApi } from '@/components/client';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast, AiMark } from '@/components/ui';
 import { PortalApplyLink, portalService } from './PortalApply';
+import { AssignDialog } from '@/components/AssigneePicker';
 
 /** #450 영업실 '지원사업' — 기업마당·K-Startup·기관 공지 공고를 회사 프로필로 맞춤(1차 규칙 + AI 세일즈 판단) → 관심·신청 준비(담당 업무·마감 알림) → 신청·선정·탈락 기록 */
 const C = '#2563EB';
@@ -23,7 +24,7 @@ type Item = { id: string; title: string; agency: string | null; executor: string
   rule: { score: number; verdict: 'fit' | 'maybe' | 'no'; flags: Flag[] }; ai: Ai | null; hidden: boolean; work: Work | null };
 type View = { sort: string | null; dd: string; kind: string; aud?: string };
 type Blanks = { fields: { key: string; label: string; items: number }[]; items: number };
-type ListData = { tab: string; today: string; items: Item[]; total: number; counts: Record<string, number>; hiddenNo: number; weekly: Weekly | null; canEdit: boolean; platformAdmin: boolean; aiOn: boolean; people: { id: string; name: string }[];
+type ListData = { tab: string; today: string; items: Item[]; total: number; counts: Record<string, number>; filteredOut?: number; searchAll?: boolean; hiddenNo: number; weekly: Weekly | null; canEdit: boolean; platformAdmin: boolean; aiOn: boolean; people: { id: string; name: string }[];
   view: View; sortUsed: string; chips: { dd: Record<string, number>; kind: Record<string, number>; aud?: Record<string, number> } | null; kindLabel: Record<string, string>; audLabel?: Record<string, string>; pendingCount: number; blanks: Blanks; aiCostKrw: number | null; weeklyAiMax: number;
   auto: { on: boolean; enabled: boolean; saved: boolean; queue: number; stopped: string | null; left: number; at: string | null; done: number };
   profile: { saved: boolean; filled: boolean; autoAi: boolean; region: string | null; sigungu: string | null; size: string | null; founded: string | null; interests: string[]; brands: string[] };
@@ -87,9 +88,23 @@ export function Support() {
     (prev ? api(`/api/sales/support/${it.id}/work`, { body: { status: prev.status, ...(prev.ownerId ? { ownerId: prev.ownerId } : {}) } }) : api(`/api/sales/support/${it.id}/withdraw`, { body: { confirm: true } }))
       .then(() => { toast.ok(prev ? `'${prev.statusLabel}'(으)로 되돌렸습니다` : '되돌렸습니다 — 만든 업무는 휴지통으로 옮겼습니다'); reload(); }).catch((e) => toast.error(e.message));
   } });
-  async function act(it: Item, status: 'interest' | 'preparing') {
+  // #1150(대표 11/24 '신청 준비할 때 담당자 선택이 보이게'): [관심]·[신청 준비]는 담당 고르기 창(기본 = 나 또는 원천 담당 규칙) → 고른 사람에게
+  const [ask, setAsk] = useState<{ it: Item; status: 'interest' | 'preparing' } | null>(null);
+  function act(it: Item, status: 'interest' | 'preparing') { setAsk({ it, status }); }
+  /** #1150: 목록 카드에서 상시 [되돌리기](= 회수: 업무 휴지통 + 진행 기록 처음 상태) */
+  async function withdrawCard(it: Item) {
+    if (!confirm('이 공고를 처음 상태로 되돌릴까요?\n만든 업무는 휴지통(30일 보관)으로 가고, 진행 기록은 처음 상태가 됩니다.')) return;
+    setBusy(`${it.id}:withdraw`);
+    try {
+      const url = `/api/sales/support/${it.id}/withdraw`;
+      let r = await api<any>(url, { body: {} });
+      if (r?.needsConfirm) { if (!confirm(r.message)) return; r = await api<any>(url, { body: { confirm: true } }); }
+      toast.ok('되돌렸습니다 — 만든 업무는 휴지통에서 30일 동안 되살릴 수 있습니다'); reload();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  async function doAct(it: Item, status: 'interest' | 'preparing', ownerId: string | null) {
     setBusy(`${it.id}:${status}`);
-    try { await api(`/api/sales/support/${it.id}/work`, { body: { status } }); toast.ok(status === 'interest' ? '관심으로 두고 담당 업무를 만들었습니다 — 마감 7일·3일 전에 알립니다' : '신청 준비 업무(체크리스트)를 만들었습니다 — 마감 7일·3일 전에 알립니다', undoOf(it)); reload(); }
+    try { await api(`/api/sales/support/${it.id}/work`, { body: { status, ...(ownerId ? { ownerId } : {}) } }); setAsk(null); toast.ok(status === 'interest' ? '관심으로 두고 담당 업무를 만들었습니다 — 마감 7일·3일 전에 알립니다' : '신청 준비 업무(체크리스트)를 만들었습니다 — 마감 7일·3일 전에 알립니다', undoOf(it)); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function follow(it: Item) {
@@ -153,6 +168,9 @@ export function Support() {
   const noKeys = data && !data.keys.bizinfo && !data.keys.datago;
   return (
     <div className="mx-auto max-w-5xl space-y-3" data-testid="sales-support">
+      <AssignDialog open={!!ask} onClose={() => setAsk(null)} title={ask?.status === 'interest' ? '관심 — 담당 고르기' : '신청 준비 — 담당 고르기'} space="sales" kind="support" busy={!!busy}
+        note={ask ? <>‘{ask.it.title.slice(0, 60)}’ 업무를 고른 사람에게 만듭니다(처음 고른 사람이 담당). 회색은 영업 공간 권한이 없는 사람입니다.</> : null}
+        okLabel={ask?.status === 'interest' ? '관심으로 두기' : '신청 준비 만들기'} onOk={(ids) => { if (ask) void doAct(ask.it, ask.status, ids[0] ?? null); }} />
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold" style={{ color: C }}>지원사업</h1>
         <span className="text-xs text-ink-2">정부·지자체 지원사업 공고를 우리 회사 기준으로 걸러 봅니다</span>
@@ -169,6 +187,9 @@ export function Support() {
       {!data ? <Skeleton rows={5} /> : <>
         {data.bySource && <p className="text-[11px] text-ink-3" data-testid="support-source-counts">출처(열린 공고) {data.bySource.counts.map((c) => `${c.label} ${c.n}`).join(' · ')}{data.bySource.lastAt ? ` · 마지막 수집 ${fmtDateTime(data.bySource.lastAt)}` : ''}</p>}
         {data.chips && <ViewBar data={data} cur={cur} onPick={pickView} />}
+        {(data.filteredOut ?? 0) > 0 && <p className="flex flex-wrap items-center gap-2 rounded-input bg-amber-50 px-3 py-1.5 text-xs text-amber-900" data-testid="support-filtered-out">거름(종류·마감·대상)으로 {data.filteredOut}건 숨김
+          <button type="button" className="font-medium underline" onClick={() => pickView({ kind: 'all', dd: 'all', aud: 'all' })} data-testid="support-filter-clear">거름 풀기</button></p>}{/* #1151 */}
+        {data.searchAll && <p className="text-xs text-ink-3" data-testid="support-search-all">찾기는 탭·거름과 관계없이 전체에서 찾습니다.</p>}
         {tab === 'fit' && (data.weekly || (data.canEdit && data.aiOn)) && <WeeklyBox weekly={data.weekly} canEdit={data.canEdit && data.aiOn} auto={data.weeklyAiMax} busy={busy === 'weekly'} onNow={weeklyNow} onOpen={(id) => go({ id })} />}
         {tab === 'fit' && <AutoNote data={data} />}
         {tab === 'fit' && <p className="text-xs text-ink-3">1차 규칙 = 본점 지역·시·군, 업력, 규모·상시근로자, 업종, 인증, 관심 분야.{data.hiddenNo > 0 && <> 자격이 안 맞는 공고 {data.hiddenNo}건은 빼고 보여 줍니다 — <button type="button" className="underline" onClick={() => setShowNo(true)} data-testid="support-show-no">보기</button></>}{showNo && <> · <button type="button" className="underline" onClick={() => setShowNo(false)}>다시 빼기</button></>}</p>}
@@ -194,7 +215,8 @@ export function Support() {
                 <span className="text-xs text-ink-2">{it.work.ownerName ? `담당 ${it.work.ownerName}` : ''}{it.work.appliedAt ? ` · 신청 ${kday(it.work.appliedAt)}` : ''}{it.work.resultMemo ? ` · ${it.work.resultMemo.slice(0, 40)}` : ''}</span>
                 {it.work.status === 'interest' && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">신청 준비</Button>}
                 {canFollow(it.work) && <Button size="sm" disabled={!!busy} onClick={() => follow(it)} data-testid="support-follow-task" title="담당은 [진행 기록]에서 바꿀 수 있습니다">{busy === `${it.id}:task` ? '…' : `업무로 · ${FOLLOW[it.work.status][1]}`}</Button>}
-                <Button size="sm" variant="secondary" onClick={() => go({ id: it.id })}>진행 기록</Button></>
+                <Button size="sm" variant="secondary" onClick={() => go({ id: it.id })}>진행 기록</Button>
+                {['interest', 'preparing'].includes(it.work.status) && <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => withdrawCard(it)} data-testid="support-withdraw-card">{busy === `${it.id}:withdraw` ? '…' : '되돌리기'}</Button>}</>
                 : <><Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'interest')} data-testid="support-interest">{busy === `${it.id}:interest` ? '…' : '관심'}</Button>
                   <Button size="sm" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">{busy === `${it.id}:preparing` ? '…' : '신청 준비'}</Button></>}
               {data.aiOn && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => analyze(it)} data-testid="support-analyze" title="회사 AI 예산에서 씁니다"><ScanSearch className="size-3.5" aria-hidden />{busy === `${it.id}:ai` ? '판단 중…' : it.ai ? '다시 판단' : 'AI 판단'}</Button>}

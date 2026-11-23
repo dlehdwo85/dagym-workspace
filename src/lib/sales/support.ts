@@ -563,19 +563,25 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
     all: (x) => open(x) || !!x.work,
   };
   // 탭 숫자(맞춤 n)는 '해당 없음 보기'(showNo)와 무관 — 로컬 10/25 158차 확인: showNo=1 로 읽으면 맞춤 수가 112 → 880(숨긴 '해당 없음'까지 센 것)이 되던 것
-  const counts = Object.fromEntries(Object.entries(inTab).map(([k, f]) => [k, all.filter((x) => f(x) && hit(x)).length]));
-  // #788: 소상공인 칩은 우리 회사에 해당 없어도 보임(해당 없음 이유와 함께 — 대표가 소상공인 지원도 '확인') — 맞춤 탭은 '해당 없음'까지 담아 두고 칩·보기에 따라 거름
-  const pool = all.filter((x) => (tab === 'fit' ? fitBase(x) : inTab[tab](x)) && hit(x));
-  const noOk = (x: SupportItem, aud: string) => tab !== 'fit' || !!q.showNo || aud === 'small' || !isNo(x);
-  let items = pool.filter((x) => noOk(x, view.aud));
   // #781 칩 숫자: D-day 칩은 고른 종류 안에서, 종류 칩은 고른 D-day 안에서 셈(신청·결과 탭은 칩 없음)
   const ddOk = (x: SupportItem, k: string) => k === 'all' || (k === 'open' ? x.dday == null : x.dday != null && x.dday >= 0 && x.dday <= Number(k.slice(1)));
   const kindOk = (x: SupportItem, k: string) => k === 'all' || x.kinds.includes(k as Kind);
   const audOk = (x: SupportItem, k: string) => k === 'all' || x.aud.includes(k);
-  const chips = tab === 'results' ? null : { dd: Object.fromEntries(DDS.map((k) => [k, items.filter((x) => ddOk(x, k) && kindOk(x, view.kind) && audOk(x, view.aud)).length])),
+  // #1151·#1152(대표 11/24 '관심·준비 5인데 들어가면 1개 · 넘긴 공고가 안 보임'): ① 우리가 진행 중인 탭(관심·준비·신청·결과)은 종류·D-day·대상 거름과 관계없이 늘 다 보임
+  //   ② 다른 탭의 숫자는 지금 거름을 적용한 값(목록과 같게) ③ 찾기(q)는 탭과 관계없이 전체에서 찾음(거름은 그대로 — 거름에 걸려 숨은 건수와 [거름 풀기]를 보여 줌)
+  const NOFILTER = ['mine', 'results'];
+  const viewOk = (x: SupportItem) => ddOk(x, view.dd) && kindOk(x, view.kind) && audOk(x, view.aud);
+  const counts = Object.fromEntries(Object.entries(inTab).map(([k, f]) => [k, all.filter((x) => f(x) && hit(x) && (NOFILTER.includes(k) || viewOk(x))).length]));
+  // #788: 소상공인 칩은 우리 회사에 해당 없어도 보임(해당 없음 이유와 함께 — 대표가 소상공인 지원도 '확인') — 맞춤 탭은 '해당 없음'까지 담아 두고 칩·보기에 따라 거름
+  const pool = term ? all.filter((x) => hit(x)) : all.filter((x) => (tab === 'fit' ? fitBase(x) : inTab[tab](x)) && hit(x));
+  const noOk = (x: SupportItem, aud: string) => !!term || tab !== 'fit' || !!q.showNo || aud === 'small' || !isNo(x);
+  let items = pool.filter((x) => noOk(x, view.aud));
+  const chips = tab === 'results' || tab === 'mine' ? null : { dd: Object.fromEntries(DDS.map((k) => [k, items.filter((x) => ddOk(x, k) && kindOk(x, view.kind) && audOk(x, view.aud)).length])),
     kind: Object.fromEntries(KIND_KEYS.map((k) => [k, items.filter((x) => kindOk(x, k) && ddOk(x, view.dd) && audOk(x, view.aud)).length])),
     aud: Object.fromEntries(AUD_KEYS.map((k) => [k, pool.filter((x) => noOk(x, k) && audOk(x, k) && ddOk(x, view.dd) && kindOk(x, view.kind)).length])) };
+  const beforeFilter = items.length;
   if (chips) items = items.filter((x) => ddOk(x, view.dd) && kindOk(x, view.kind) && audOk(x, view.aud));
+  const filteredOut = chips ? beforeFilter - items.length : 0; // #1151 '거름으로 n건 숨김 · [거름 풀기]'
   const end = (x: SupportItem) => x.applyEnd ?? '9999-12-31';
   const sortUsed = tab === 'results' ? 'results' : view.sort ?? TAB_SORT[tab];
   const byFit = (a: SupportItem, b: SupportItem) => rankOf(a) - rankOf(b) || b.rule.score - a.rule.score || end(a).localeCompare(end(b));
@@ -600,7 +606,7 @@ export async function listView(u: SessionUser, q: { tab?: string; q?: string; sh
   // #787(대표 "K-Startup 에서만 발췌하는지?"): 출처별 열린 공고 수 + 마지막 수집 — 화면 위 한 줄
   const per = new Map<string, number>(); for (const x of all) if (open(x) && !x.hidden) per.set(x.source, (per.get(x.source) ?? 0) + 1);
   const bySource = { counts: Object.keys(SOURCE_LABEL).map((k) => ({ source: k, label: SOURCE_LABEL[k], n: per.get(k) ?? 0 })), lastAt: sources.map((s) => s.last_run_at).filter(Boolean).sort().pop() ?? null };
-  return { tab, today, items, total, counts, hiddenNo, view, sortUsed, chips, kindLabel: KIND_LABEL, audLabel: AUD_LABEL, pendingCount, blanks, aiCostKrw: aiOn ? await aiCostKrw(sql, t) : null, bySource,
+  return { tab, today, items, total, counts, filteredOut, searchAll: !!term, hiddenNo, view, sortUsed, chips, kindLabel: KIND_LABEL, audLabel: AUD_LABEL, pendingCount, blanks, aiCostKrw: aiOn ? await aiCostKrw(sql, t) : null, bySource,
     auto: { on: autoOn, enabled: autoAi, saved, queue: autoQueue, stopped: autoOn ? autoState?.stopped ?? null : null, left: autoState?.left ?? 0, at: autoState?.at ?? null, done: autoState?.done ?? 0 },
     weeklyAiMax: Math.max(0, Number(process.env.SUPPORT_WEEKLY_AI_MAX ?? 5) || 0), profile: { saved, filled: !!pr, autoAi, region: profile.region_sido, sigungu: profile.region_sigungu, size: profile.size, founded: profile.founded, interests: profile.interests, brands: profile.brands },
     sources: sources.map((s) => ({ ...s, label: SOURCE_LABEL[Object.entries(SOURCE_SLUG).find(([, v]) => v === s.slug)?.[0] ?? ''] ?? s.slug })), off,
@@ -805,6 +811,7 @@ async function ensureTask(sql: Sql, u: SessionUser, p: Prog, w: { id: string; st
   const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: owner, requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', '지원사업'], checklist: steps } as never, { quiet: owner === u.id, skipQuota: true });
   await sql`update tasks set sales_ref = ${sql.json({ kind: 'support', id: p.id, name: p.title.slice(0, 120) })} where id = ${r.id}`;
   if ((p.attachments ?? []).length) (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'support', id: p.id, taskIds: [r.id] }); // #507 공고 첨부 자동
+  else if (p.source === 'kstartup') void (await import('./supportFiles')).fillSupportAttachments({ programId: p.id }).catch(() => null); // #1149 K-Startup 은 상세 화면에서 첨부를 읽어 채움(응답 뒤)
   return r.id;
 }
 /** 280차 #820(대표 10/31 '진행중인 지원사업도 업무로 넘길 수 있도록 담당자 설정해서'): 신청 완료 = 결과 확인 업무, 선정 = 협약·정산 업무(체크리스트) */
@@ -1143,7 +1150,9 @@ export async function sendWeeklyManual(u: SessionUser) {
 // ---------------- 알림·홈 카드 ----------------
 /** 마감 7일·3일 전 담당자 알림(관심·신청 준비) — tick 마다, KST 08~20시에만. 3일 안에 처음 잡힌 건은 3일 전 알림 하나만 */
 export async function supportTick(opt: { now?: Date } = {}) {
-  const now = opt.now ?? new Date(); const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(now)) % 24;
+  const now = opt.now ?? new Date();
+  // #1149: 진행 중(관심·준비·신청) K-Startup 공고의 첨부 채우기 + 기존 업무에 붙이기 — 한 번에 몇 건씩(하루 한 번 다시 확인)
+  await (await import('./supportFiles')).fillSupportAttachments({ max: 5 }).catch(() => null); const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(now)) % 24;
   const [h0, h1] = (process.env.SUPPORT_REMIND_HOURS ?? '8-20').split('-').map(Number); // 시험은 0-24
   if (hour < h0 || hour >= h1) return { sent: 0, skipped: 'quiet' };
   const sql = db(); const today = ymd(now);

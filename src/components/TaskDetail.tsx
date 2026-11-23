@@ -11,7 +11,7 @@ import { useInApp } from '@/components/inApp';
 import { showTask } from '@/components/TaskPanelHost';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { AlertTriangle, BadgeCheck, Globe2, Bell, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarRange, Camera, Check, ChevronDown, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash, Hourglass, LayoutTemplate, Link2, ListFilter, Lock, Lock as LockIcon, MapPin, Maximize2, Megaphone, Merge, MessageCircle, MessageSquareText, MoreHorizontal, Paperclip, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck, SmilePlus, Stamp, Tag, Timer, Trash2, Type, type LucideIcon, Undo2, UserRound, Users, X } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, Globe2, Bell, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarRange, Camera, Check, ChevronDown, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash, Hourglass, LayoutTemplate, Link2, ListFilter, Lock, Lock as LockIcon, MapPin, Maximize2, Megaphone, Merge, MessageCircle, MessageSquareText, MoreHorizontal, Paperclip, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck, SmilePlus, Stamp, Tag, Timer, Trash2, Type, type LucideIcon, UserRound, Users, X } from 'lucide-react';
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtNum, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, FileKindIcon, attKindSummary, uploadTaskFiles } from '@/components/Attachments';
@@ -257,18 +257,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   }
   /** 361차 #977: 기본 확인창 두 번 대신 앱 안 삭제 창 하나(연결 일정 함께 지우기·묶음 범위·되살리면 일정도) */
   function del() { setDelOpen(true); }
-  /** #815 지원사업에서 넘어온 업무 → 업무는 휴지통, 지원사업 진행 기록은 처음 상태(넘긴 사람·담당·관리자) */
-  async function withdrawSupport() {
-    const ref = data?.task?.sales_ref; if (!ref?.id) return;
-    if (!confirm('이 업무를 지원사업으로 회수할까요?\n업무는 휴지통(30일 보관)으로 가고, 지원사업 진행 기록은 처음 상태로 돌아갑니다.')) return;
-    try {
-      const url = `/api/sales/support/${ref.id}/withdraw`;
-      let r = await api<any>(url, { body: {} });
-      if (r.needsConfirm) { if (!confirm(r.message)) return; r = await api<any>(url, { body: { confirm: true } }); }
-      toast.ok('지원사업으로 회수했습니다 — 업무는 휴지통에서 30일 동안 되살릴 수 있습니다');
-      broadcastRefresh(); router.push(`/s/sales/support?id=${ref.id}`);
-    } catch (e: any) { toast.error(e.message); }
-  }
+  // #1150·#1143(대표 11/24): '지원사업으로 회수'는 업무 화면에서 없앰 — 영업 › 지원사업 카드 [되돌리기]·상세 [업무 회수]에서만
   /** 280차 #821: '각자 1건씩' 묶음 → 공동 업무 1건(댓글·첨부·체크리스트를 모아 남길 업무로, 나머지는 휴지통) */
   async function mergeBatch() {
     const t0 = data?.task; if (!t0?.batch_id) return;
@@ -432,7 +421,6 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 <MenuItem icon={ListFilter} onClick={() => setDepOpen(true)}>선행 업무 지정</MenuItem>
                 <MenuItem icon={LayoutTemplate} onClick={saveTemplate}>템플릿으로 저장</MenuItem>
                 {features.ai && <MenuItem icon={MessageSquareText} onClick={() => router.push(`/assistant?task=${id}`)}>AI 비서에게 요청</MenuItem>}
-                {t.sales_ref?.kind === 'support' && t.sales_ref.id && <MenuItem icon={Undo2} onClick={withdrawSupport}>지원사업으로 회수</MenuItem>}
                 {t.batch_id && (t.batch?.total ?? 0) > 1 && (t.requested_by === user.id || t.created_by === user.id || ['owner', 'admin'].includes(user.role)) && <MenuItem icon={Merge} onClick={mergeBatch}>공동 업무로 합치기</MenuItem>}
                 {perms.delete && <><div className="my-1 border-t border-line" /><MenuItem icon={Trash2} danger onClick={del}>삭제</MenuItem></>}
               </div>

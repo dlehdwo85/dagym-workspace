@@ -13,8 +13,11 @@ export const GET = handler(async ({ req, user }) => {
   if (space !== 'sales' && space !== 'marketing') throw badRequest('공간을 골라 주세요');
   await assertSpace(user, space);
   const sql = db(); const t = tenantOf(user);
-  const people = await sql<{ id: string; name: string; title: string | null; inSpace: boolean }[]>`select u.id, u.name, u.title,
-      (u.role in ('owner', 'admin') or ${space} = any(coalesce(m.spaces, '{}'))) as "inSpace"
+  // #1150: 이름 옆에 그 사람이 쓰는 공간(영업·마케팅)도 — 관리자는 회사가 켠 공간 전부
+  const on = (await (await import('@/lib/spaces')).tenantSpaces(t, sql)).filter((x) => x !== 'work');
+  const people = await sql<{ id: string; name: string; title: string | null; inSpace: boolean; spaces: string[] }[]>`select u.id, u.name, u.title,
+      (u.role in ('owner', 'admin') or ${space} = any(coalesce(m.spaces, '{}'))) as "inSpace",
+      case when u.role in ('owner', 'admin') then ${on}::text[] else array(select x from unnest(coalesce(m.spaces, '{}')) x where x = any(${on}::text[])) end as spaces
     from users u left join space_members m on m.user_id = u.id and m.tenant = u.tenant
     where u.tenant = ${t} and u.status = 'active' and not u.is_demo order by (u.id = ${user.id}) desc, "inSpace" desc, u.name`;
   const kind = req.nextUrl.searchParams.get('kind');

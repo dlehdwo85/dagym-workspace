@@ -40,6 +40,11 @@ export async function supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   assert.equal(await i1.getByTestId('support-verdict').getAttribute('data-by'), 'ai');
   // [신청 준비] → 담당 업무
   await i1.getByTestId('support-prepare').click();
+  // #1150: 담당 고르기 창(기본 = 나 · 이름 옆에 공간) → [신청 준비 만들기]
+  const ad = owner.getByTestId('assign-dialog'); await ad.waitFor();
+  await ad.getByTestId('assignee-option').first().waitFor();
+  assert.match(await ad.innerText(), /\(나\)/);
+  await ad.getByTestId('assign-dialog-go').click();
   await owner.getByText(/신청 준비 업무\(체크리스트\)를 만들었습니다/).waitFor();
   await i1.getByTestId('support-status').getByText('신청 준비').waitFor();
   const [t] = await sql`select title, due_date::text due from tasks where sales_ref->>'id' = ${p1} and deleted_at is null`;
@@ -88,6 +93,8 @@ export async function supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await owner.goto(`${BASE}/s/sales/support?tab=all`);
   const i2 = owner.getByTestId('support-list').getByTestId('support-item').filter({ hasText: 'E2E 소상공인 온라인 판로' }); await i2.waitFor();
   await i2.getByTestId('support-interest').click();
+  await owner.getByTestId('assign-dialog').getByTestId('assignee-option').first().waitFor();
+  await owner.getByTestId('assign-dialog-go').click();
   const tst = owner.getByTestId('toast').filter({ hasText: '관심으로 두고 담당 업무를 만들었습니다' }); await tst.waitFor();
   await i2.getByTestId('support-status').waitFor();
   await tst.getByRole('button', { name: '되돌리기' }).click();
@@ -95,7 +102,9 @@ export async function supportPrograms({ owner, ctx, sql, BASE, FAKE, SHOTS }) {
   await i2.getByTestId('support-interest').waitFor(); // 처음 상태: [관심]·[신청 준비] 단추가 다시
   const made = await sql`select deleted_at from tasks where sales_ref->>'name' like 'E2E 소상공인%'`;
   assert.ok(made.length === 1 && made[0].deleted_at, '만든 업무는 휴지통');
-  await i2.getByTestId('support-interest').click(); await i2.getByTestId('support-status').waitFor();
+  await i2.getByTestId('support-interest').click(); await owner.getByTestId('assign-dialog').getByTestId('assignee-option').first().waitFor(); await owner.getByTestId('assign-dialog-go').click();
+  await i2.getByTestId('support-status').waitFor();
+  assert.equal(await i2.getByTestId('support-withdraw-card').count(), 1, '#1150 진행 중 카드에 [되돌리기] 상시');
   await i2.getByRole('button', { name: '진행 기록' }).click();
   const dt2 = owner.getByTestId('support-detail'); await dt2.waitFor();
   owner.once('dialog', (d) => d.accept());
