@@ -21,7 +21,7 @@ import { Onboarding } from './Onboarding';
 import { TourHost, restartTours } from './Tour';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Activity, NotebookPen, BarChart3, Bell, Briefcase, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarPlus, Camera, Check, ChevronDown, ChevronsUpDown, CircleCheck, ClipboardCheck, Compass, Contact, FileBarChart, FileSignature, FileText, FolderClock, FolderKanban, FolderPlus, Gauge, Globe, HelpCircle, History, House, Keyboard, Landmark, LayoutTemplate, Library, Link2, ListTodo, LogOut, Mail, Megaphone, MessageCircle, MessageSquareText, Network, PanelLeftClose, PanelLeftOpen, PenTool, Phone, Plus, QrCode, Rocket, ScrollText, Search, Send, Settings, SlidersHorizontal as SlidersIcon, SquarePen, Stamp, Star, Target, TrendingUp, type LucideIcon, Users, Workflow, X } from 'lucide-react';
+import { Activity, Lock, NotebookPen, BarChart3, Bell, Briefcase, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarPlus, Camera, Check, ChevronDown, ChevronsUpDown, CircleCheck, ClipboardCheck, Compass, Contact, FileBarChart, FileSignature, FileText, FolderClock, FolderKanban, FolderPlus, Gauge, Globe, HelpCircle, History, House, Keyboard, Landmark, LayoutTemplate, Library, Link2, ListTodo, LogOut, Mail, Megaphone, MessageCircle, MessageSquareText, Network, PanelLeftClose, PanelLeftOpen, PenTool, Phone, Plus, QrCode, Rocket, ScrollText, Search, Send, Settings, SlidersHorizontal as SlidersIcon, SquarePen, Stamp, Star, Target, TrendingUp, type LucideIcon, Users, Workflow, X } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
 import { api, flushOutbox, useOutboxCount, broadcastRefresh, useApi } from './client';
@@ -142,6 +142,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const admin = isAdminRole(session.user.role);
   // V41 공간: 지금 공간(주소로) · 들어갈 수 있는 공간 · 전환(마지막 공간 기억)
   const spaces = (session.spaces ?? ['work']) as SpaceKey[];
+  const locked = (session.lockedSpaces ?? []).filter((x) => x === 'sales' || x === 'marketing') as ('sales' | 'marketing')[]; // #1139
   // 대표 지적(10/18): 영업·마케팅 공간에서 공통 메뉴(업무·캘린더·메시지·자료실·AI 비서)로 가도 그 공간에 머묾 — 공간 메뉴 아래 '공통' 묶음
   // 대표 10/24 저녁(#567): 연락처·공지·관리(사용자 관리·사용량 등)·설정에서도 상단 공간·사이드바·하단 탭 유지 — 업무 전용 화면(WORK_PATHS)으로 갈 때만 업무.
   // 마지막 공간은 탭마다 기억(sessionStorage), 새 탭·앱을 공통 화면으로 바로 열면 마지막으로 고른 공간(localStorage wos_space)
@@ -401,6 +402,17 @@ export function AppShell({ session, children }: { session: Sess; children: React
             {!collapsed && <div className="min-w-0 leading-tight"><div className="truncate text-sm font-bold text-ink">워크인</div><div className="truncate text-[11px] text-slate-500">{session.tenant?.name ?? '워크인'}</div></div>}
           </div>
           )}
+          {locked.length > 0 && ( // #1139(대표 11/24 '영업·마케팅 페이지가 잠겨 보이게, 잠금 표시는 사이드바에서'): 회사가 켜지 않은 공간 = 자물쇠 + 상담 후 사용
+            <div className={cx('space-y-0.5 px-2 pb-1 pt-1.5', collapsed && 'px-1')} data-testid="space-locked">
+              {locked.map((sp) => (
+                <Link key={sp} href={`/spaces/locked?space=${sp}`} prefetch={false} data-testid={`space-locked-${sp}`} title={`${SPACE_META[sp].label} — 상담 후 사용`}
+                  className={cx('flex items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-[13px] text-slate-500 hover:bg-slate-50 hover:text-ink', collapsed && 'justify-center px-0')}>
+                  <span className="relative flex shrink-0 opacity-60"><SpaceIcon s={sp} />{collapsed && <Lock className="absolute -bottom-1 -right-1.5 size-3 rounded-full bg-white" aria-hidden />}</span>
+                  {!collapsed && <><span className="min-w-0 flex-1 truncate">{SPACE_META[sp].short}</span><span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-slate-400"><Lock className="size-3" aria-hidden />상담 후 사용</span></>}
+                </Link>
+              ))}
+            </div>
+          )}
           <nav className="scrollbar-thin flex-1 space-y-0.5 overflow-y-auto px-2 pb-3" aria-label="주 메뉴">
             {v3 ? <div className={cx('mb-0.5 flex items-center gap-1.5 px-2.5 pb-1 pt-1 text-[11px] font-semibold text-slate-500', collapsed && 'sr-only')} data-testid="nav-space-head"><span className="h-3 w-1 shrink-0 rounded-full" style={{ background: sm.color }} aria-hidden />{sm.short} 메뉴</div>
               : space !== 'work' && !collapsed && <div className="px-2.5 pb-1 pt-0.5 text-[11px] font-semibold text-slate-400">{sm.short}</div>}
@@ -643,6 +655,17 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <button onClick={() => setMore(false)} className="rounded-full p-2 text-ink-3" aria-label="닫기"><X className="size-5" /></button>
               </div>
               {/* 대표 확정 10/22(#422 b): 하단 '더보기'를 없애고 이 시트는 오른쪽 위 프로필 버튼으로 연다 — '만들기' 줄은 뺌(업무 화면 [업무 추가]·캘린더·리드 화면에 있음, 음성은 업무 등록 창 안 [음성]) */}
+              {locked.length > 0 && ( // #1139 휴대폰: 프로필 시트에도 잠긴 공간(자물쇠 + 상담 후 사용)
+                <div className="space-y-1 border-t border-line px-1 pb-1 pt-2" data-testid="mobile-space-locked">
+                  {locked.map((sp) => (
+                    <Link key={sp} href={`/spaces/locked?space=${sp}`} prefetch={false} onClick={() => setMore(false)} data-testid={`mobile-space-locked-${sp}`}
+                      className="flex min-h-[48px] w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-ink-2 hover:bg-slate-50">
+                      <span className="opacity-60"><SpaceIcon s={sp} /></span><span className="min-w-0 flex-1 text-[15px]">{SPACE_META[sp].label}</span>
+                      <span className="inline-flex items-center gap-1 text-xs text-ink-3"><Lock className="size-3.5" aria-hidden />상담 후 사용</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
               {spaces.length > 1 && (
                 <div className="space-y-1 border-t border-line px-1 pb-1 pt-2" data-testid="mobile-spaces">
                   <div className="px-2 text-xs text-ink-3">공간 전환</div>

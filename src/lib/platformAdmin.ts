@@ -115,7 +115,10 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   const captureEvents30d = await (await import('./capturePolicy')).captureEventCount(tenant, sql); // #626 최근 30일 캡처·인쇄·자동화 사건 수
   // 208차 #667 설계 파트너: 기간(체험 정보 — 유료로 바뀌면 null)·마케팅 월 크레딧
   const partner = t.segment === 'partner' ? { trial: await P.trialInfo(tenant, sql), mktCredits: (await sql<{ c: number | null }[]>`select monthly_credits::float8 c from mkt_settings where tenant = ${tenant}`)[0]?.c ?? null } : null;
-  return { ownerInvite, captureEvents30d, partner, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
+  // #1139 영업·마케팅 상담 신청 내역(최근 20건)
+  const consults = await sql`select c.id, c.spaces, c.name, c.phone, c.email, c.memo, c.status, c.created_at, c.handled_at, h.name as handled_by_name
+    from space_consults c left join users h on h.id = c.handled_by where c.tenant = ${tenant} order by c.created_at desc limit 20`;
+  return { consults, ownerInvite, captureEvents30d, partner, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
     mktWrite: await (await import('./mktPlans')).tenantWriteView(tenant).catch(() => null) }; // 대표 10/24 추가 ① 마케팅 글 모델
 }
 
@@ -347,9 +350,12 @@ export const tenantSpacesInput = z.object({ spaces: z.array(z.enum(['sales', 'ma
 export async function setTenantSpacesByPlatform(u: SessionUser, tenant: string, i: z.infer<typeof tenantSpacesInput>, ip: string | null) {
   requirePlatform(u);
   const sql = db();
+  const [prev] = await sql<{ spaces: string[] | null }[]>`select spaces from tenants where id = ${tenant}`;
   const r = await sql`update tenants set spaces = ${['work', ...new Set(i.spaces)]} where id = ${tenant} returning id`;
   if (!r.length) throw notFound('없는 회사입니다');
-  await audit(sql, u.id, 'platform.tenant_spaces', 'tenant', tenant, { spaces: i.spaces }, ip);
+  await audit(sql, u.id, 'platform.tenant_spaces', 'tenant', tenant, { spaces: i.spaces, before: prev?.spaces ?? [] }, ip);
+  // #1139: 상담 신청 처리 표시('열림') + 회사 관리자 알림
+  await (await import('./spaceConsult')).afterPlatformSpaces(sql, u, tenant, prev?.spaces ?? [], i.spaces);
   return { ok: true };
 }
 export const tenantMemoInput = z.object({ memo: z.string().max(2000) });

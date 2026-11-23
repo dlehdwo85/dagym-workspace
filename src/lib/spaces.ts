@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
 import { isAdmin, requireAdmin } from './access';
-import { badRequest, notFound } from './errors';
+import { HttpError, badRequest, notFound } from './errors';
 import { audit } from './log';
 import { tenantOf, type SessionUser } from './types';
 
@@ -37,12 +37,14 @@ export async function spaceSettings(u: SessionUser) {
   const users = await sql<{ id: string; name: string; role: string; spaces: string[] | null }[]>`
     select u.id, u.name, u.role, m.spaces from users u left join space_members m on m.user_id = u.id and m.tenant = u.tenant
     where u.tenant = ${t} and u.status in ('active', 'invited') and not coalesce(u.is_demo, false) order by u.name`;
-  return { enabled: await tenantSpaces(t, sql), users: users.map((x) => ({ id: x.id, name: x.name, role: x.role, admin: ['owner', 'admin'].includes(x.role), spaces: x.spaces ?? ['work'] })) };
+  return { enabled: await tenantSpaces(t, sql), free: await (await import('./spaceConsult')).consultFree(t, sql) /* #1139 상담 없이 직접 켜는 회사 */, users: users.map((x) => ({ id: x.id, name: x.name, role: x.role, admin: ['owner', 'admin'].includes(x.role), spaces: x.spaces ?? ['work'] })) };
 }
 export const spaceToggleInput = z.object({ space: z.enum(['sales', 'marketing']), on: z.boolean() });
 export async function setTenantSpace(u: SessionUser, i: z.infer<typeof spaceToggleInput>, ip: string | null) {
   requireAdmin(u);
   const sql = db(); const t = tenantOf(u);
+  // #1139(대표 11/24): 영업·마케팅은 상담 후 플랫폼 운영자가 엶 — 회사 관리자는 직접 켜지 못함(끄기는 됨). 우리 회사·심사용 demo·검수용 시험 회사·결제 시험 test_* 는 예외
+  if (i.on && !(await (await import('./spaceConsult')).consultFree(t, sql))) throw new HttpError(403, 'consult_required', '영업·마케팅은 상담 후 사용할 수 있습니다 — [상담 신청]을 보내 주세요');
   if (i.on) await sql`update tenants set spaces = (select array_agg(distinct x) from unnest(spaces || ${[i.space]}::text[]) x) where id = ${t}`;
   else await sql`update tenants set spaces = array_remove(spaces, ${i.space}) where id = ${t}`;
   await audit(sql, u.id, 'space.toggle', 'tenant', null, { space: i.space, on: i.on }, ip);

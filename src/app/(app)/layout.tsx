@@ -56,6 +56,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     menus,
     terms: await (await import('@/lib/termsServer')).termsOfUser(user), // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
     spaces, // V41 공간
+    lockedSpaces: await (await import('@/lib/spaceConsult')).lockedSpaces(tenantOf(user)).catch(() => []), // #1139 회사가 켜지 않은 영업·마케팅 — 사이드바 자물쇠 + 상담 후 사용
     tours: { seen: await (await import('@/lib/tours')).seenTours(user.id).catch(() => []), auto: (await import('@/lib/tours')).toursAuto(user) }, // #77 처음 사용 안내
     // V15 공간(회사) 이름 · 개인 공간 · 첫 로그인 안내(가입한 공간 대표만)
     tenant: { roleBadge: (['en', 'ko', 'off'].includes(t?.role_badge ?? '') ? t!.role_badge : 'en') as 'en' | 'ko' | 'off', /* #101 권한 배지 */ name: t?.name ?? '워크인', personal: t?.kind === 'personal', internal: ['default', 'demo'].includes(tenantOf(user)), multiSite: (await import('@/lib/orgModel')).multiSiteOf(tenantOf(user), t?.multi_site) /* 405차 조직 모델: 다른 회사는 켰을 때만 지점 */, captureBlock: cap.block, captureWatermark: cap.watermark, captureAutomation: cap.automation, inquiries: tenantOf(user) === 'default' && !user.isDemo, onboarding: !!t && !signup && t.owner_user_id === user.id && !t.onboarded_at && !['default', 'demo'].includes(tenantOf(user)), signup,

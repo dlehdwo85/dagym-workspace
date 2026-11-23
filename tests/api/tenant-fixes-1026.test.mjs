@@ -100,7 +100,7 @@ describe('범용화 1단계 S-01~S-05', () => {
   });
 
   test('S-03 옛 영업 자료가 없는 다른 회사는 영업 쓰기가 열림 · 다짐은 전환 기록이 정하는 그대로(행 없으면 닫힘)', async () => {
-    await T.c.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true });
+    await T.c.ok('PUT', '/api/admin/spaces', { space: 'sales', on: true }); // 시험 서버는 직접 켜기 허용(SPACES_SELF_SERVE) — 잠금은 space-consult-1139
     await sql`delete from sales_cutover where tenant = ${T.tenant}`; // 마이그레이션이 넣어 준 행이 없는 회사(뒤에 생긴 회사) 흉내
     const lead = await T.c.ok('POST', '/api/sales/leads', { name: '튼튼짐 첫 거래처' });
     assert.ok(lead.id);

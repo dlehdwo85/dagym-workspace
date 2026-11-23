@@ -42,7 +42,7 @@ const FEATURES: { key: string; icon: typeof Mic; name: string; t: string; d: str
   { key: 'messages', icon: MessageSquare, name: '메시지', t: '업무 이야기는 업무 옆에서', d: '1:1·그룹 대화에 사진·파일을 함께 보내고, 업무 상세의 [대화]에서 그 업무 이야기를 바로 이어 갑니다.', img: '/landing/messages.png' },
   { key: 'check', icon: ClipboardCheck, name: '점검', t: '매장·시설 점검을 기준대로', d: '무엇을 보고 어떤 상태가 양호인지 사진과 함께 정해 두고, 돌면서 양호·보완 필요를 누릅니다. 보완 필요는 담당자 업무로 넘어가고 조치 뒤 확인합니다.', img: '/landing/check.png' },
   { key: 'ai', icon: MessageSquareText, name: 'AI 비서', t: '말하면 업무·일정이 됩니다', d: '"내일 3시 거래처 미팅 잡아 줘"처럼 말하거나 쓰면 등록해 주고, 메일·문자 초안도 써 줍니다. 등록하거나 보내기 전에는 꼭 확인을 받고, 사용에 동의한 사람만 씁니다.', href: '#ai', go: 'AI 비서 자세히' },
-  { key: 'spaces', icon: LayoutGrid, name: '영업·마케팅 공간', t: '필요할 때 켜는 공간', d: '영업(리드·입찰·계약)과 마케팅(콘텐츠 승인·광고 성과)은 관리자가 켤 때만 보입니다. 안 쓰는 회사는 업무 공간만 씁니다.', href: '#spaces', go: '세 공간 보기' },
+  { key: 'spaces', icon: LayoutGrid, name: '영업·마케팅 공간', t: '상담 후 여는 공간', d: '영업(리드·입찰·계약)과 마케팅(콘텐츠 승인·광고 성과)은 상담으로 회사에 맞게 설정한 뒤 열어 드립니다. 안 쓰는 회사는 업무 공간만 씁니다.', href: '#spaces', go: '세 공간 보기' },
 ];
 const STEPS = [['체험 신청 1분', '이메일이나 구글·카카오·네이버 계정으로 신청하면 24시간 안에 연락드리고, 승인되면 14일 동안 체험합니다.'], ['직원 초대', '링크 하나로 초대. 부서·팀과 권한은 소속에서 자동.'], ['공간 켜기', '영업·마케팅은 필요할 때 관리자가 켭니다. 안 쓰는 회사는 업무만.']];
 const AI_DEMO = [['내일 3시 거래처 미팅 잡아 줘', '내일 15:00 “거래처 미팅” 일정을 만들고 30분 전 알림을 걸었습니다. 준비 업무도 하나 만들까요?'], ['이번 주 연락할 리드 알려 줘', '다음 연락일이 이번 주인 리드 4곳입니다 — 한빛상사(수), 새봄디자인(목)… 첫 연락 업무를 담당자에게 만들었습니다.'], ['10월 블로그 원고 초안 써 줘', '브랜드 키트의 말투로 원고 2편을 만들어 승인함에 올렸습니다. 표지·본문 사진을 붙이면 승인 요청됩니다.']];
@@ -114,7 +114,7 @@ export default async function Welcome() {
       <section id="spaces" className="bg-slate-50 py-12">
         <div className="mx-auto max-w-6xl px-4">
           <h2 className="text-center text-2xl font-bold">세 공간, 한 계정</h2>
-          <p className="mt-1 text-center text-sm text-ink-2">업무는 기본. 영업·마케팅은 관리자가 켜면 사이드바와 휴대폰 탭이 그 공간 메뉴로 바뀝니다.</p>
+          <p className="mt-1 text-center text-sm text-ink-2">업무는 바로 쓰고, 영업·마케팅은 상담 후 열면 사이드바와 휴대폰 탭이 그 공간 메뉴로 바뀝니다.</p>
           <div className="mt-8 space-y-8" data-testid="landing-spaces">{SPACES.map((s, i) => (
             <article key={s.key} className={'grid items-center gap-5 md:grid-cols-2 ' + (i % 2 ? 'md:[&>figure]:order-2' : '')} data-testid={`landing-space-${s.key}`}>
               <figure className="overflow-hidden rounded-card border border-line bg-white shadow-card"><img src={s.img} alt={`${s.name} 공간 화면`} loading="lazy" className="aspect-[4/3] w-full object-cover object-left-top" width={1280} height={960} /></figure>
@@ -147,7 +147,7 @@ export default async function Welcome() {
         <h2 className="text-2xl font-bold">요금</h2>
         <div className="mx-auto mt-6 max-w-md rounded-card border border-brand-600 p-6 ring-1 ring-brand-600" data-testid="pricing">
           <div className="text-sm font-semibold text-brand-700">14일 무료 체험</div><div className="mt-1 text-4xl font-bold">0원</div><div className="text-sm text-ink-3">14일 동안 모든 기능 · 체험이 끝나면 요금제를 고릅니다</div>
-          <ul className="mt-4 space-y-1.5 text-left text-sm">{['업무·일정·캘린더·메신저·결재·자료실 전부', '영업·마케팅 공간 켜기 가능', 'ai'].map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 text-green-600" />{x === 'ai' ? <LandingAiLine /> : x}</li>)}</ul>
+          <ul className="mt-4 space-y-1.5 text-left text-sm">{['업무·일정·캘린더·메신저·결재·자료실 전부', '영업·마케팅 공간은 상담 후 사용', 'ai'].map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 text-green-600" />{x === 'ai' ? <LandingAiLine /> : x}</li>)}</ul>
           <Link href="/signup" className="mt-5 inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white hover:bg-brand-700" data-track="start-pricing">14일 무료 체험 신청<ArrowRight className="size-4" /></Link>
         </div>
         <p className="mt-3 text-xs text-ink-3">체험 뒤 요금·더 큰 저장 공간·AI 한도는 아래로 문의해 주세요.</p>

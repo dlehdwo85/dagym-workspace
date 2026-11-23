@@ -187,7 +187,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             ))}
           </ul>
         </div>
-        {!internal && <TenantOps id={id} t={t} ownerInvite={d.data.ownerInvite} run={run} />}
+        {!internal && <TenantOps consults={d.data.consults} id={id} t={t} ownerInvite={d.data.ownerInvite} run={run} />}
         {!internal && <CrmBox key={`${t.lifecycle ?? ''}:${t.contact_phone ?? ''}:${d.data.billing?.discount_pct ?? 0}`} id={id} t={t} stage={d.data.stage} contacts={d.data.contacts ?? []} billing={d.data.billing} run={run} />}
         {!internal && (
           <div className="flex flex-wrap items-center gap-2 rounded-input border border-line p-3">
@@ -238,7 +238,7 @@ function PartnerBox({ id, p, aiKrw, run }: { id: string; p: PartnerInfo; aiKrw: 
 }
 
 /** 대표 10/20 ① 고객사 상세 — 대표 초대 상태·공간·메모·감사 기록 (대신 보기 없음) */
-function TenantOps({ id, t, ownerInvite, run }: { id: string; t: any; ownerInvite: { pending: boolean; expiresAt?: string | null; expired?: boolean }; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+function TenantOps({ id, t, ownerInvite, consults, run }: { id: string; t: any; ownerInvite: { pending: boolean; expiresAt?: string | null; expired?: boolean }; consults?: any[]; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
   const [memo, setMemo] = useState<string>(t.platform_memo ?? '');
   const [showAudit, setShowAudit] = useState(false);
   const audit = useApi<{ logs: any[] }>(showAudit ? `/api/platform/tenants/${id}/audit` : null, [showAudit]);
@@ -257,6 +257,19 @@ function TenantOps({ id, t, ownerInvite, run }: { id: string; t: any; ownerInvit
         {(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={spaces.includes(sp)} data-testid={`company-space-${sp}`}
           onChange={(e) => run(() => api(`/api/platform/tenants/${id}/spaces`, { method: 'PUT', body: { spaces: e.target.checked ? [...spaces, sp] : spaces.filter((x) => x !== sp) } }), `${SPACE_LABEL[sp]} 공간을 ${e.target.checked ? '켰' : '껐'}습니다`)} />{SPACE_LABEL[sp]}</label>)}
       </div>
+      {(consults ?? []).length > 0 && ( // #1139 영업·마케팅 상담 신청 — 상담 뒤 위 체크로 열면 '열림'으로 바뀌고 회사 관리자에게 알림
+        <ul className="space-y-1 rounded-input bg-slate-50 p-2 text-xs" data-testid="company-consults">
+          {(consults ?? []).map((c: any) => (
+            <li key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5" data-testid="company-consult">
+              <span className={cx('rounded-full px-1.5 py-0.5 font-medium', c.status === 'requested' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-50 text-emerald-800')}>{c.status === 'requested' ? '상담 신청' : c.status === 'opened' ? '열림' : '닫음'}</span>
+              <span>{(c.spaces as string[]).map((x) => SPACE_LABEL[x as 'sales' | 'marketing'] ?? x).join('·')}</span>
+              <span className="text-ink-2">{c.name}{c.phone ? ` · ${c.phone}` : ''} · {c.email}</span>
+              <span className="text-ink-3">{String(c.created_at).slice(0, 10)}{c.handled_by_name ? ` · ${c.handled_by_name} 처리` : ''}</span>
+              {c.memo && <span className="basis-full text-ink-2">{c.memo}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="flex items-start gap-2">
         <textarea className={cx(inputCls, 'min-h-[56px] flex-1 text-xs')} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="운영 메모(계약·담당자·특이사항) — 운영자만 봅니다" aria-label="운영 메모" data-testid="company-memo" />
         <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/platform/tenants/${id}/memo`, { method: 'PUT', body: { memo } }), '메모를 저장했습니다')} data-testid="company-memo-save">메모 저장</Button>

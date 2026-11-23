@@ -180,6 +180,7 @@ import { aiConsent } from './aiConsent.step.mjs';
 import { agreements } from './agreements.step.mjs';
 import { memos } from './memos.step.mjs';
 import { shareMode } from './shareMode.step.mjs';
+import { spaceLock } from './spaceLock.step.mjs';
 import { meeting } from './meeting.step.mjs';
 import { spaces } from './spaces.step.mjs';
 import { marketing } from './marketing.step.mjs';
@@ -2757,6 +2758,7 @@ await step('점검 2단계 점검하기·보완 흐름(375): 코스로 점검(�
 await step('계약 관리 1단계: 관리 메뉴 [계약 관리] → 등록 → 상세(만료 임박 D-n)·계약서 파일 → 요약 숫자 → 자동 연장은 통보 기한 기준 → 갱신 등록(지난 기간) → 알림 날짜 → 종료 → 390 · 권한 없는 직원은 화면 없음', () => agreements({ owner, staff, ctx, sql, BASE, SHOTS }));
 await step('#1135 메모·주요 메모: 사이드바 [메모] → 일반 메모(나만) → 주요 메모 만들기(직원 A 보기 공유) → ●●●● → [보기]에 본인 확인(틀림 안내 → 맞음) → 그 칸만 보임·남은 시간 → 10분 안 다시 안 물음 → 기록 → 직원 A(390)는 보기만·대표 개인 메모 없음', () => memos({ owner, staff, ctx, BASE, SHOTS }));
 await step('#1129 자료실 › [공개 방식]: 대표만 바꿈(영향 건수 → 확인) → 회사 전체 공유면 다른 지점 업무가 보임 → 업무 \'공개 범위\' 이 부서·팀만이면 다시 안 보임 → 되돌림', () => shareMode({ owner, ctx, sql, BASE, SHOTS }));
+await step('#1139 잠긴 공간: 사이드바 [마케팅 · 상담 후 사용] → 안내(금액 없음) → [상담 신청](연락처 미리 채움) → 상담 신청됨 · 직원 390 은 관리자 안내', () => spaceLock({ owner, staff, ctx, sql, BASE, SHOTS }));
 await step('#1128 파일 한 개 최대 크기: 관리 › 회사 정보에서 50MB 로 → 업무 첨부 안내 글이 최대 50MB → 2GB 로 되돌림', async () => {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(BASE + '/admin/company');
