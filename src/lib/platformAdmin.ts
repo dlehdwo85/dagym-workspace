@@ -289,7 +289,8 @@ export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof n
     else if (i.trialDays) await tx`update tenant_subscriptions set trial_ends_at = now() + ${i.trialDays} * interval '1 day', period_end = (now() + ${i.trialDays} * interval '1 day')::date where tenant = ${tenant}`;
     if (i.segment === 'partner') await (await import('./plans')).applyPartnerPreset(tenant, tx); // #667 AI 월 5,000원·마케팅 크레딧 0
     if (i.isTest) { // D-08: 검수용 시험 회사 — 고객 목록·가입 통계에서 빠짐(is_test) · 배포 확인이 체험 만료로 막히지 않게 체험 기간을 길게
-      await tx`update tenants set is_test = true where id = ${tenant}`;
+      // #626 자동화 브라우저 차단은 외부 고객사 기본값 — 깃허브의 자동 확인(헤드리스 브라우저·스크립트)이 로그인하도록 이 회사만 끔(가짜 자료뿐, 사유는 회사 상세에 보임)
+      await tx`update tenants set is_test = true, capture_block = false, capture_note = ${'D-08 검수용 시험 회사 — 배포 자동 확인(가짜 자료만)'} where id = ${tenant}`;
       if (!plan) await tx`update tenant_subscriptions set trial_ends_at = now() + interval '3650 days', period_end = (now() + interval '3650 days')::date where tenant = ${tenant}`;
     }
     const [hq] = await tx<{ id: string }[]>`select id from org_units where tenant = ${tenant} and type = 'hq' order by sort limit 1`;
