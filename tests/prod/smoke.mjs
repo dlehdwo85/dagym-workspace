@@ -1,7 +1,7 @@
 // D-08(대표 11/23 승인): 배포 직후 운영 화면 확인 — '검수용 시험 회사' 계정으로 (가짜 자료만, 다짐과 분리)
 //   PROD_QA_EMAIL / PROD_QA_PASSWORD (깃허브 비밀값) · BASE(기본 https://www.work-in.dev) · EXPECT_SHA(이 커밋이 운영에 뜰 때까지 기다림, 최대 8분)
 // 공개 저장소라 실행 기록도 공개 — 이메일·이름·화면 사진을 찍지 않고 단계 이름과 통과/실패만 남긴다.
-// 만들고 지우는 것: 업무 1건(만들기→완료→지우기) · 계약 1건 + 계약서 파일 6MB(저장소 직접 올리기 = R2 CORS 확인) → 보관 → 완전 삭제
+// 만들고 지우는 것: 업무 1건(만들기→완료→지우기) · 계약 1건 + 계약서 파일 6MB(저장소 직접 올리기 = R2 CORS 확인) → 보관 → 완전 삭제 · 메모(가짜 값) → 휴지통
 // 하지 않는 것: AI 기능·메일·알림톡·결제·초대(돈·밖으로 나가는 일 없음)
 import { chromium } from 'playwright';
 
@@ -98,6 +98,28 @@ await step('파일 저장소 직접 올리기(6MB — R2 허용 주소 확인)',
   } finally {
     await api('DELETE', `/api/agreements/${a.id}`).catch(() => {});
     await api('DELETE', `/api/agreements/${a.id}?purge=1`).catch(() => {}); // 검수 계정이 대표(owner)면 완전 삭제
+  }
+});
+
+// #1135 메모: 일반 메모 만들기 → 내 목록 → 휴지통 · 주요 메모(운영 키가 있을 때만): 본인 확인 전 [보기] 막힘 → 확인 → 그 칸만 → 잠그기 → 휴지통
+await step('메모·주요 메모(본인 확인 전 막힘 → 확인 뒤 보기)', async () => {
+  const st = await api('GET', '/api/memos/status');
+  const n = await api('POST', '/api/memos', { kind: 'note', title: `[검수] 메모 ${SHA}`, body: '가짜 내용' });
+  ok((await api('GET', '/api/memos')).memos.some((m) => m.id === n.id), '만든 메모가 목록에 없음');
+  await api('DELETE', `/api/memos/${n.id}`);
+  if (!st.secretReady) { console.log('  (주요 메모 키 없음 — 주요 메모 단계는 건너뜀)'); return; }
+  const s = await api('POST', '/api/memos', { kind: 'secret', title: `[검수] 주요 메모 ${SHA}`, username: 'qa-fake', password: 'qa-fake-pass' });
+  try {
+    await api('DELETE', '/api/memos/unlock');
+    const locked = await fetch(`${BASE}/api/memos/${s.id}/reveal`, { method: 'POST', headers: { cookie, origin: BASE, 'content-type': 'application/json' }, body: JSON.stringify({ fields: ['password'] }) });
+    ok(locked.status === 403, `본인 확인 전 [보기]가 막히지 않음(${locked.status})`);
+    ok(st.method === 'password', `검수 계정 본인 확인 방식이 비밀번호가 아님(${st.method}) — 2단계 인증을 끄세요`);
+    await api('POST', '/api/memos/unlock', { password: PASSWORD });
+    const r = await api('POST', `/api/memos/${s.id}/reveal`, { fields: ['password'] });
+    ok(r.values?.password === 'qa-fake-pass' && r.values.username === undefined, '고른 칸만 돌아오지 않음');
+  } finally {
+    await api('DELETE', '/api/memos/unlock').catch(() => {});
+    await api('DELETE', `/api/memos/${s.id}`).catch(() => {});
   }
 });
 
