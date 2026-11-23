@@ -24,7 +24,7 @@ let kaptExtra = [], kaptApiItems = []; const detailCat = {};
 const kapt = fakeKapt({ files: { '20261021000001': [{ seq: 7001, fileName: '래미안 강남 커뮤니티 위탁운영 입찰공고.hwp' }] },
   detailHtml: (bid) => `<table><tr><th>주택관리업자</th><th>단지명</th><th>관리사무소 주소</th><th>전화번호</th><th>팩스번호</th><th>동수</th><th>세대수</th></tr><tr><td>우리관리<td>래미안 강남<td>서울 강남구 역삼로 1<td>02-555-1234<td>02-555-1235<td>12<td>1,250</tr></table>
       <table><tr><th>입찰분류</th><td>${detailCat[bid] ?? '용역 &gt; 커뮤니티 위탁운영'}</td></tr><tr><th>입찰종류</th><td>일반경쟁</td></tr><tr><th>내용</th><td><pre>커뮤니티센터 피트니스·수영장 위탁운영 사업자 선정</pre></td></tr></table><a href="javascript:fileDown('7001')">공고문.hwp</a>` });
-let agencyV2 = false, hotelMode = 'ok', lhFail = false, prespecPaged = false, prespecFail3 = false; // #522: 새 명세(swagger) 응답 모양 · 관광숙박업 오류 응답(JSON) · 로컬 10/24 LH 오류 11 · #1123 사전규격 250건(3쪽, 관련 공고는 3쪽에만)
+let agencyV2 = false, hotelMode = 'ok', lhFail = false, prespecPaged = false, prespecFail3 = false, prespecBig = false; // #522: 새 명세(swagger) 응답 모양 · 관광숙박업 오류 응답(JSON) · 로컬 10/24 LH 오류 11 · #1123 사전규격 250건(3쪽, 관련 공고는 3쪽에만)
 const ymd8 = (n) => plus(n).replace(/-/g, '');
 let g2bMode = 'ok'; // 278차 #816: 'html' = data.go.kr 가 JSON 대신 점검 웹페이지
 const G2B_HTML = '<!DOCTYPE html><html><head><title>공공데이터포털</title><script>var a=1;</script></head><body><h1>서비스 이용 안내</h1><p>요청이 많아 잠시 뒤 다시 이용해 주세요. 문의 help@data.go.kr</p></body></html>';
@@ -54,11 +54,13 @@ before(async () => {
     if (u.pathname.startsWith('/g2b/ao/PrvtBidNtceService/')) return nuriMode === 'denied' ? send(200, '<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>30</returnReasonCode><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>', 'application/xml')
       : send(200, dataGo(nuriMode === 'odd' ? [{ ntceNo: 'N-1', ntceNm: '시험 민간 입찰' }] : nuriMode === 'ok' && u.searchParams.get('bidNtceNm') === '커뮤니티' && u.pathname.endsWith('ServcPPSSrch') ? [{ bidNtceNo: 'R26BK00000001', bidNtceOrd: '000', bidNtceClsfc: '용역', nticeDt: `${today} 09:30:00`, refNo: '관리-12', ntceNm: '광교 센트럴 커뮤니티센터 피트니스 위탁운영 업체 선정', ntceDivNm: '일반공고', ntceInsttNm: '광교센트럴 입주자대표회의', bidMethdNm: '전자입찰', cntrctMthdNm: '제한경쟁', sucsfbidMthdNm: '적격심사최저가', rbidDivNm: '재입찰 허용', bidQlfctNm: '공고규격서 참조', ofclNm: '홍길동', ofclTelNo: '010-1234-5678', ofclEmail: 'hong@example.com', bidBeginDt: `${today} 10:00:00`, bidClseDt: `${plus(8)} 17:00:00`, opengDt: `${plus(9)} 11:00:00`, refAmtOpenYn: 'Y', refAmt: '180000000', asignBdgtAmt: '200000000', rgnLmtDivNm: '공고서 참조', servcDtlList: '커뮤니티센터 피트니스·GX 위탁운영', ntceSpecDocUrl1: 'https://nuri.g2b.go.kr/f/spec1.hwp', ntceSpecDocNm1: '공고문.hwp', aptHsmpNm: '광교 센트럴', aptCeoAdrs: '경기도 수원시 영통구 광교중앙로 1', aptMngOfficeTelNo: '0312223333', aptHshldNum: '1,200', rgstDt: `${today} 09:30:00` }] : []), 'application/json');
     if (prespecPaged && u.pathname.startsWith('/g2b/ao/HrcspSsstndrdInfoService/')) { // #1123: 쪽마다 100건(관련 없는 것) · 3쪽 마지막에 관련 공고
-      const pg = Number(u.searchParams.get('pageNo')); const n = pg < 3 ? 100 : 50;
+      const big = prespecBig && u.pathname.endsWith('Servc'); const last = big ? 43 : 3; // #1123: big = 용역 4,250건(43쪽 — 쪽 상한 40 넘음)
+      const pg = Number(u.searchParams.get('pageNo')); const n = pg < last ? 100 : 50;
       if (prespecFail3 && pg === 3) return send(502, 'bad gateway'); // #1123 보완: 3쪽만 잠깐 실패
       const item = Array.from({ length: n }, (_, i) => ({ bfSpecRgstNo: `PG${pg}-${i}-${u.pathname.slice(-4)}`, prdctClsfcNoNm: `도로 보수 공사 ${pg}-${i}`, orderInsttNm: '도로공사' }));
       if (pg === 3 && u.pathname.endsWith('Servc')) item[n - 1] = { bfSpecRgstNo: 'PRE-P3', prdctClsfcNoNm: '체육센터 시설관리 용역 사전규격(3쪽)', orderInsttNm: '시설공단', rcptDt: `${today} 09:00:00`, opninRgstClseDt: `${plus(3)} 18:00:00` };
-      return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { items: item, numOfRows: 100, pageNo: pg, totalCount: 250 } } }), 'application/json');
+      if (big && pg === 43) item[n - 1] = { bfSpecRgstNo: 'PRE-P43', prdctClsfcNoNm: '체육센터 시설관리 용역 사전규격(43쪽)', orderInsttNm: '시설공단', rcptDt: `${today} 09:00:00`, opninRgstClseDt: `${plus(3)} 18:00:00` };
+      return send(200, JSON.stringify({ response: { header: { resultCode: '00' }, body: { items: item, numOfRows: 100, pageNo: pg, totalCount: big ? 4250 : 250 } } }), 'application/json');
     }
     if (u.pathname.startsWith('/g2b/ao/HrcspSsstndrdInfoService/')) return send(200, dataGo([{ bfSpecRgstNo: 'PRE-1', prdctClsfcNoNm: '커뮤니티센터 운영 위탁 용역 사전규격', orderInsttNm: 'LH', rcptDt: `${today} 08:00:00`, opninRgstClseDt: `${plus(4)} 18:00:00`, asignBdgtAmt: '90000000' }, { bfSpecRgstNo: 'PRE-2', prdctClsfcNoNm: '도로 포장 공사 사전규격', orderInsttNm: '도로공사' }]), 'application/json');
     if (u.pathname.startsWith('/g2b/as/ScsbidInfoService/')) return send(200, dataGo(u.searchParams.get('bidNtceNm') === '피트니스' ? [{ bidNtceNo: '20261021001', bidNtceOrd: '00', bidNtceNm: '국민체육센터 피트니스 위탁운영 용역', bidwinnrNm: '하이링크', bidwinnrBizno: '1234567890', sucsfbidAmt: '240000000', sucsfbidRate: '87.745', prtcptCnum: '12', opengDt: `${today} 11:00:00` }] : []), 'application/json');
@@ -188,6 +190,22 @@ test('#1123 보완(로컬 11/23): 못 받은 쪽(3쪽)을 조회 기간과 함�
     const [st2] = await sql`select value from app_settings where key = 'g2b_prespec_resume'`;
     assert.deepEqual(st2.value.groups, [], '다 받으면 기억 지움');
   } finally { prespecPaged = false; prespecFail3 = false; }
+});
+
+test('#1123 보완(로컬 11/23 14일 다시 받기 \'못 받은 쪽 8\'인데 이어 받기 없음): 쪽 상한(40쪽)을 넘은 쪽도 기억 → 다음 실행이 이어 받아 저장', async () => {
+  await sql`delete from app_settings where key = 'g2b_prespec_resume'`;
+  prespecPaged = true; prespecBig = true;
+  try {
+    const a = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_prespec_awards/run', {});
+    assert.match(a.summary, /원천 전체 4500건 중 4250건 받음\(못 받은 쪽 3\)/, a.summary); // 용역 4,250(43쪽 중 40쪽) + 물품 250
+    assert.match(a.summary, /남은 쪽 4\(다음 실행에 이어 받음\)/, a.summary); // 41~43쪽 + 44쪽(밀림 대비)
+    const [st] = await sql`select value from app_settings where key = 'g2b_prespec_resume'`;
+    assert.deepEqual(st.value.groups[0].tasks.map((t) => t[3]).sort((x, y) => x - y), [41, 42, 43, 44]);
+    assert.equal((await sql`select 1 from sales_src_rows where row->>'source_external_id' = 'PRE-P43'`).length, 0, '상한 밖 43쪽 공고는 아직 없음');
+    const b = await ctx.owner.ok('POST', '/api/sales/collectors/g2b_prespec_awards/run', {});
+    assert.match(b.summary, /지난번 못 받은 쪽 이어 받음 4쪽\(관련 1건\)/, b.summary);
+    assert.equal((await sql`select 1 from sales_src_rows where row->>'source_external_id' = 'PRE-P43'`).length, 1, '이어 받아 저장');
+  } finally { prespecPaged = false; prespecBig = false; await sql`delete from app_settings where key = 'g2b_prespec_resume'`; }
 });
 
 test('영업 DB 수집기: 산업단지 CSV·부동산원 CSV(18개월)·관광숙박업 API·K-apt 사업자선정 → 파생(커뮤니티 업무만) · 수동 필드 보존', async () => {
