@@ -16,7 +16,7 @@ import { isUuid } from './access';
 import { menuLevel, requireMenu } from './menuPerms';
 import { agreementLeftText } from './agreementLabel';
 import { notify } from './notifications';
-import { MAX_UPLOAD_BYTES, completeMultipart, downloadUrl, objectSize, uploadTargetFor } from './storage';
+import { PLATFORM_MAX_BYTES, assertFileSize, completeMultipart, downloadUrl, objectSize, uploadTargetFor } from './storage';
 import { addDays, todaySeoul } from './time';
 import { tenantOf, type SessionUser } from './types';
 
@@ -190,12 +190,13 @@ export async function endAgreement(u: SessionUser, id: string, i: z.infer<typeof
 }
 
 // ---------- 계약서 파일 ----------
-export const fileInput = z.object({ fileName: z.string().trim().min(1).max(200), mimeType: z.string().trim().max(120).optional(), size: z.number().int().min(1).max(MAX_UPLOAD_BYTES) });
+export const fileInput = z.object({ fileName: z.string().trim().min(1).max(200), mimeType: z.string().trim().max(120).optional(), size: z.number().int().min(1).max(PLATFORM_MAX_BYTES) }); // #1128 회사 상한은 initFile 에서
 const safeName = (s: string) => s.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120);
 export async function initFile(u: SessionUser, id: string, i: z.infer<typeof fileInput>) {
   await requireMenu(u, 'agreements', 'edit');
   const sql = db(); const t = tenantOf(u);
   const cur = await load(u, id, sql);
+  await assertFileSize(t, i.size); // #1128
   await (await import('./plans')).assertStorage(u, i.size);
   const fid = crypto.randomUUID(); const mime = i.mimeType || 'application/octet-stream';
   const key = `agr/${t}/${id}/${fid}/${safeName(i.fileName)}`;

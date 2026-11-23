@@ -3,7 +3,7 @@ import { db } from './db';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { isAdmin, denyDemo, accessibleUnitIds, taskVisibleSql, teamScope } from './access';
 import { activity } from './log';
-import { MAX_UPLOAD_BYTES, completeMultipart, downloadUrl, getObject, maxUploadBytes, objectSize, putObject, tooLargeMsg, uploadTargetFor } from './storage';
+import { BIG_FILE_NOTE, CONTENT_READ_MAX, assertFileSize, completeMultipart, downloadUrl, getObject, objectSize, putObject, uploadTargetFor } from './storage';
 import { extractText, extractTextDeep, extractTextResult } from './textExtract';
 import type { Role, SessionUser } from './types';
 import { RANK, menuLevel, requireMenu } from './menuPerms';
@@ -245,7 +245,7 @@ export async function createLibraryFile(u: SessionUser, i: z.infer<typeof librar
   if (!revenue) { await requireMenu(u, 'library', 'edit'); if (scope === 'company') await requireFolder(u, folder, 'edit'); }
   if (space !== 'work' && !(await librarySpaces(u)).includes(space)) throw notFound();
   const mime = i.mimeType || 'application/octet-stream';
-  if (i.size > maxUploadBytes(mime)) throw badRequest(tooLargeMsg(mime)); // #109: 영상 100MB(조각), 그 외 50MB
+  await assertFileSize(tenantOf(u), i.size); // #1128: 회사 설정(기본 2GB, 영상 포함 같은 값)
   if (BLOCKED_EXT.test(i.fileName)) throw badRequest('실행 파일은 올릴 수 없습니다');
   await (await import('./plans')).assertStorage(u, i.size); // V10 회사 저장공간 한도
   const sql = db();
@@ -322,7 +322,8 @@ export async function completeLibraryFile(u: SessionUser, id: string, uploadId?:
   if (uploadId) await completeMultipart(f.storage_key, uploadId).catch((e) => { throw badRequest(`조각 합치기 실패: ${(e as Error).message}`); }); // #109 영상 조각 업로드
   const size = await objectSize(f.storage_key);
   if (size === null) throw badRequest('업로드된 파일을 찾을 수 없습니다. 다시 올려 주세요.');
-  const tx = await getObject(f.storage_key).then((b) => extractTextResult(b, f.file_name, f.mime_type)).catch((e) => ({ text: null, error: `파일 읽기 실패: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) })); // V14 32: HWP·HWPX·PDF 본문도
+  // #1128: 50MB 넘는 파일은 글을 뽑지 않음(보관·내려받기만) — 2GB 까지 올릴 수 있게 되어 서버가 통째로 읽지 않게
+  const tx = size > CONTENT_READ_MAX ? { text: null, error: BIG_FILE_NOTE } : await getObject(f.storage_key).then((b) => extractTextResult(b, f.file_name, f.mime_type)).catch((e) => ({ text: null, error: `파일 읽기 실패: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) })); // V14 32: HWP·HWPX·PDF 본문도
   await db()`update library_files set upload_status = 'ready', size_bytes = ${size}, text_content = ${tx.text}, text_error = ${tx.error}, text_tried_at = now(), updated_at = now() where id = ${id}`;
   // V13 3번: 올리자마자 자동 정리(AI, 한도 소진·AI 꺼짐이면 파일명 규칙). 정리 실패는 올리기 성공에 영향 없음
   const organized = f.source === 'revenue' || f.source === 'ai_attach' ? null : await organizeLibraryFile(u, id, { keepFolder: !!f.folder, frames }).catch(async (e: any) => {
@@ -360,7 +361,7 @@ async function organizedNotice(u: SessionUser, id: string, folder: string) {
 export async function textExtractJob(limit = 15) {
   const sql = db();
   const rows = await sql<{ id: string; file_name: string; mime_type: string; storage_key: string | null }[]>`select id, file_name, mime_type, storage_key from library_files
-    where deleted_at is null and upload_status = 'ready' and text_content is null and text_tried_at is null and storage_key is not null
+    where deleted_at is null and upload_status = 'ready' and text_content is null and text_tried_at is null and storage_key is not null and coalesce(size_bytes, 0) <= ${CONTENT_READ_MAX}
       and (lower(file_name) ~ '\\.(hwp|hwpx|pdf)$' or mime_type in ('application/pdf', 'application/x-hwp', 'application/haansofthwp', 'application/hwp+zip'))
     order by created_at desc limit ${limit}`;
   let got = 0;
@@ -376,6 +377,7 @@ export async function retextLibraryFile(u: SessionUser, id: string) {
   const f = await loadLibraryFile(u, id, 'meta');
   if (f.created_by !== u.id && !isAdmin(u)) throw forbidden();
   if (!f.storage_key) throw badRequest('아직 올라가지 않은 파일입니다');
+  if (Number(f.size_bytes ?? 0) > CONTENT_READ_MAX) throw badRequest(BIG_FILE_NOTE); // #1128
   const tx = await getObject(f.storage_key).then((b) => extractTextResult(b, f.file_name, f.mime_type)).catch((e) => ({ text: null, error: `파일 읽기 실패: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) }));
   await db()`update library_files set text_content = ${tx.text}, text_error = ${tx.error}, text_tried_at = now() where id = ${id}`;
   return { id, hasText: !!tx.text, chars: tx.text?.length ?? 0, error: tx.error };

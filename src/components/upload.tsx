@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Upload } from 'lucide-react';
-import { cx, toast } from './ui';
+import { askConfirm, cx, toast } from './ui';
+import { useApi } from './client';
 /** 379차 #1003(대표 11/07 '아이폰 사진 한 번에 100장 이상'): 한 번에 고르는 최대 개수 — 메신저(CHAT_FILES_MAX 200, 213차)와 같게 업무 첨부·자료실·마케팅 자료 요청도 200 */
 export const PICK_MAX = 200;
 
@@ -12,6 +13,12 @@ export const PICK_MAX = 200;
 export type PutTarget = { url: string; method?: string; headers?: Record<string, string>; fallback?: string; fallbackMax?: number; multipart?: { uploadId: string; partSize: number; parts: { n: number; url: string }[] } };
 /** 돌려주는 uploadId 는 조각 업로드일 때만 — 완료 API(…/complete 또는 메시지 file.uploadId)에 넘겨야 서버가 조각을 합친다 */
 export async function putFile(target: PutTarget, file: Blob, onProgress?: (pct: number) => void): Promise<{ uploadId?: string }> {
+  // #1128(로컬 11/23 선택안): 휴대폰 데이터(셀룰러)로 100MB 넘는 파일을 올릴 때 한 번 확인 — 연결 종류를 알려 주는 브라우저(안드로이드 크롬 등)만
+  const conn = typeof navigator !== 'undefined' ? (navigator as Navigator & { connection?: { type?: string } }).connection : undefined;
+  if (file.size > 100 * 1024 * 1024 && conn?.type === 'cellular'
+    && !(await askConfirm(`휴대폰 데이터로 ${Math.round(file.size / 1024 / 1024)}MB 를 올립니다. 와이파이가 아니면 데이터 요금이 나올 수 있습니다. 계속할까요?`, { title: '큰 파일 올리기', ok: '올리기' }))) {
+    throw new Error('올리기를 취소했습니다');
+  }
   // #109 영상 100MB: 8MB 조각을 차례로(조각마다 2번까지 재시도), 진행률은 전체 기준
   if (target.multipart) {
     const { parts, partSize, uploadId } = target.multipart;
@@ -22,7 +29,7 @@ export async function putFile(target: PutTarget, file: Blob, onProgress?: (pct: 
       for (let tryN = 0; tryN < 3; tryN++) {
         try { await xhrPut(p.url, 'PUT', target.headers, chunk, (pct) => onProgress?.(Math.round(((done + (chunk.size * pct) / 100) / file.size) * 100))); last = null; break; } catch (e) { last = e; }
       }
-      if (last) throw new Error(`조각 ${p.n}/${parts.length}: ${(last as Error).message}`);
+      if (last) throw new Error(`조각 ${p.n}/${parts.length}: ${blockedHint((last as Error).message)}`);
       done += chunk.size; onProgress?.(Math.round((done / file.size) * 100));
     }
     return { uploadId };
@@ -35,7 +42,7 @@ export async function putFile(target: PutTarget, file: Blob, onProgress?: (pct: 
       try { onProgress?.(0); await xhrPut(target.fallback, 'PUT', target.headers, file, onProgress); return {}; }
       catch (e2) { throw new Error(`${(e as Error).message} / 서버 경유 재시도도 실패: ${(e2 as Error).message}`); }
     }
-    throw e;
+    throw new Error(blockedHint((e as Error).message));
   }
   return {};
 }
@@ -53,11 +60,19 @@ function xhrPut(url: string, method: string, headers: Record<string, string> | u
     x.send(file);
   });
 }
+/**
+ * #1132(로컬 11/23): 저장소로 바로 보내기가 막힘(상태 0, 인터넷은 연결됨) — 4MB 넘는 파일·조각은 서버 경유 재시도가 안 되므로(Vercel 요청 4.5MB 한계·조각 최소 5MB)
+ * 원인이 보이게: 이 주소가 저장소 허용 주소(CORS)에 없을 때가 대부분
+ */
+function blockedHint(msg: string) {
+  if (msg !== uploadErrorText(0) || typeof navigator === 'undefined' || navigator.onLine === false) return msg;
+  return `파일 저장소가 이 주소(${typeof location !== 'undefined' ? location.host : ''})에서 보낸 4MB 넘는 파일을 받지 않았습니다(저장소 허용 주소 설정 문제) — 관리자에게 알려 주세요`;
+}
 export function uploadErrorText(status: number) {
   if (status === 0) return navigator.onLine === false ? '인터넷에 연결되어 있지 않습니다 — 연결 후 다시 올려 주세요'
     : '파일 저장소에 연결하지 못했습니다(저장소 접근 설정 또는 네트워크 문제) — 잠시 후 다시 시도하고, 계속되면 관리자에게 알려 주세요';
   if (status === 403) return '업로드 허가가 만료되었거나 거부되었습니다 — 다시 올려 주세요(계속되면 관리자에게 알려 주세요)';
-  if (status === 413) return '파일이 너무 큽니다 — 50MB(영상 100MB) 이하로 줄여서 올려 주세요';
+  if (status === 413) return '파일이 너무 큽니다 — 회사가 정한 파일 한 개 최대 크기(관리 › 회사 정보) 이하로 줄여서 올려 주세요';
   if (status >= 500) return `파일 저장소가 일시적으로 응답하지 않습니다(${status}) — 잠시 후 다시 올려 주세요`;
   return `파일을 보내지 못했습니다(${status}) — 다시 올려 주세요`;
 }
@@ -147,19 +162,21 @@ export function UploadProgress({ items }: { items: { name: string; pct: number; 
 }
 
 /** V12 10번: 업로드 안내 상자 — PC "끌어다 놓거나 눌러서 선택", 휴대폰 "눌러서 사진 찍기·파일 선택" */
-export function DropHint({ onClick, disabled, what = '사진·PDF·문서', max = '50MB', testid = 'drop-hint' }: { onClick: () => void; disabled?: boolean; what?: string; max?: string; testid?: string }) {
+export function DropHint({ onClick, disabled, what = '사진·PDF·문서', max, testid = 'drop-hint' }: { onClick: () => void; disabled?: boolean; what?: string; max?: string; testid?: string }) {
+  const fm = useApi<{ text: string }>(max ? null : '/api/org/file-max'); // #1128: 회사가 정한 파일 한 개 최대 크기
+  const maxText = max ?? fm.data?.text;
   return (
     <button type="button" onClick={onClick} disabled={disabled} data-testid={testid}
       className="flex w-full flex-col items-center justify-center gap-1 rounded-card border-2 border-dashed border-slate-300 bg-slate-50/60 px-3 py-4 text-center text-sm text-ink-2 transition-colors hover:border-accent-500 hover:bg-accent-50/50 disabled:opacity-50">
       <Upload className="size-5 text-ink-3" />
       <span className="hidden sm:inline">파일을 여기로 <b className="font-semibold text-ink">끌어다 놓거나 눌러서 선택</b>하세요</span>
       <span className="sm:hidden"><b className="font-semibold text-ink">눌러서 사진 찍기·파일 선택</b></span>
-      <span className="text-xs text-ink-3">{what}, 최대 {max} · 여러 개 가능</span>
+      <span className="text-xs text-ink-3">{what}{maxText ? `, 최대 ${maxText}` : ''} · 여러 개 가능</span>
     </button>
   );
 }
 
-/** V13 3번 중복 감지: 기기에서 SHA-256 (50MB 넘거나 보안 연결이 아니면 생략) */
+/** V13 3번 중복 감지: 기기에서 SHA-256 (50MB 넘거나 보안 연결이 아니면 생략 — #1128 2GB 파일도 브라우저 메모리에 통째로 읽지 않음) */
 export async function fileHash(file: Blob): Promise<string | undefined> {
   try {
     if (file.size > 50 * 1024 * 1024 || !globalThis.crypto?.subtle) return undefined;

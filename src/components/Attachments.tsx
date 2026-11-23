@@ -361,8 +361,8 @@ export function Attachments({ items, taskId, eventId, canEdit, onChange, meId, r
         {taskId && <Button size="sm" variant="secondary" onClick={() => setLibOpen(true)} disabled={!!busy} title="자료실에 있는 파일을 이 업무에 연결(복사 아님, 자료실 권한 그대로)" data-testid="att-from-library"><FolderOpen />자료실에서</Button>}
         <Button size="sm" variant="secondary" onClick={() => pick.open(camRef, 'camera')} disabled={!!busy}><Camera />사진 촬영</Button>
         <Button size="sm" variant="secondary" onClick={() => pick.open(albumRef, 'photo')} disabled={!!busy} data-testid="att-album"><ImageIcon />사진</Button>
-        <Button size="sm" variant="secondary" onClick={() => pick.open(vidAlbumRef, 'video')} disabled={!!busy} title="영상 고르기(100MB 까지)" data-testid="att-video-album"><Video />영상</Button>
-        <Button size="sm" variant="secondary" onClick={() => pick.open(vidRef, 'video')} disabled={!!busy} className="sm:hidden" title="영상 촬영(100MB 까지)" data-testid="att-video-capture"><Video />영상 촬영</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(vidAlbumRef, 'video')} disabled={!!busy} title="영상 고르기" data-testid="att-video-album"><Video />영상</Button>
+        <Button size="sm" variant="secondary" onClick={() => pick.open(vidRef, 'video')} disabled={!!busy} className="sm:hidden" title="영상 촬영" data-testid="att-video-capture"><Video />영상 촬영</Button>
         <Button size="sm" variant="secondary" onClick={() => setLinkOpen(true)}><Link2 />문서 링크 연결</Button>
         {busy && <span className="inline-flex items-center gap-1.5 text-xs text-ink-2"><Loader2 className="size-3.5 animate-spin" />{busy}</span>}
       </div>

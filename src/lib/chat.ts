@@ -5,7 +5,7 @@ import { badRequest, forbidden, notFound } from './errors';
 import { loadTaskForUser, teamScope } from './access';
 import { notify } from './notifications';
 import { audit } from './log';
-import { completeMultipart, downloadUrl, getObject, maxUploadBytes, objectSize, putObject, tooLargeMsg, uploadTargetFor } from './storage';
+import { assertFileSize, completeMultipart, downloadUrl, getObject, objectSize, putObject, uploadTargetFor } from './storage';
 import type { SessionUser } from './types';
 import { ALL_ID, CHAT_FILES_MAX, POLL_MAX, POLL_MIN, QUICK_DEFAULT, REACTIONS, stickerOf, whenText } from './chatShared';
 
@@ -514,7 +514,7 @@ export async function setTyping(u: SessionUser, roomId: string) {
 export async function fileTarget(u: SessionUser, roomId: string, i: { fileName: string; mime: string; size: number }) {
   const sql = db();
   const r = await loadRoom(u, roomId, sql);
-  if (i.size > maxUploadBytes(i.mime)) throw badRequest(tooLargeMsg(i.mime)); // #109: 영상 100MB(조각)
+  await assertFileSize(tenantOf(u), i.size); // #1128: 회사 설정(기본 2GB, 영상 포함 같은 값)
   if (/\.(exe|bat|cmd|com|msi|scr|ps1|vbs|jar|apk|ipa|dll|sh)$/i.test(i.fileName)) throw badRequest('실행 파일은 올릴 수 없습니다');
   await (await import('./plans')).assertStorage(u, i.size);
   const key = `chat/${r.tenant}/${r.id}/${crypto.randomUUID()}/${i.fileName.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120)}`;

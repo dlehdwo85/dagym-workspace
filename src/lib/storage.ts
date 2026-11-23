@@ -4,14 +4,38 @@ import { mkdir, writeFile, readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { hmac } from './crypto';
 
+/** 서버를 거치는 로컬(개발) 업로드 한 번의 최대 — 운영(S3)은 브라우저가 저장소로 바로 보냄 */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
-/** 대표 10/20 17:00 (#109): 영상은 100MB 까지 — 8MB 조각으로 나눠 올린다(조각 업로드는 20MB 넘는 파일부터) */
-export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+/**
+ * #1128(대표 11/23 '올리는 건 자유롭게 하되 최대 용량을 정할 수 있으면'): 파일 한 개 플랫폼 최대 2GB(영상 포함 같은 값) —
+ * 회사 관리자가 50MB·200MB·1GB·2GB 중에서 정함(tenants.file_max_mb, 비면 2GB). 회사 전체 저장 한도(요금제)는 그대로.
+ * 20MB 넘는 파일은 8MB 조각으로 브라우저가 저장소에 바로 올림(서버 크기 제약 없음). 예전 상한: 50MB·영상 100MB(#109).
+ */
+export const PLATFORM_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+export const FILE_MAX_CHOICES_MB = [50, 200, 1024, 2048] as const;
+export const DEFAULT_FILE_MAX_MB = 2048;
+/** 내용을 읽는 기능(AI 정리·글 뽑기·미리보기·브라우저에서 고치기)은 이 크기까지 — 넘으면 보관·내려받기만 */
+export const CONTENT_READ_MAX = 50 * 1024 * 1024;
+export const BIG_FILE_NOTE = '큰 파일은 보관·내려받기만 됩니다 — 50MB 넘는 파일은 AI 정리·글 뽑기·미리보기·브라우저에서 고치기를 하지 않습니다';
+/** 서버가 파일 하나를 메모리로 한 번에 읽는 최대(안전장치 — 회의 녹음·영상 장면 등 예전 100~150MB 기능 포함) */
+export const READ_GUARD_MAX = 200 * 1024 * 1024;
 export const PART_SIZE = 8 * 1024 * 1024;
 export const MULTIPART_FROM = 20 * 1024 * 1024;
 export const isVideoMime = (mime: string | null | undefined) => /^video\//i.test(mime ?? '');
-export const maxUploadBytes = (mime: string | null | undefined) => (isVideoMime(mime) ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES);
-export const tooLargeMsg = (mime: string | null | undefined) => `${isVideoMime(mime) ? '영상' : '파일'}은 ${maxUploadBytes(mime) / 1024 / 1024}MB 까지 올릴 수 있습니다`;
+export const mbText = (mb: number) => (mb >= 1024 ? `${Math.round((mb / 1024) * 10) / 10}GB` : `${mb}MB`);
+/** 회사의 파일 한 개 최대 크기(바이트) */
+export async function tenantFileMaxBytes(tenant: string): Promise<number> {
+  const { db } = await import('./db');
+  const [t] = await db()<{ file_max_mb: number | null }[]>`select file_max_mb from tenants where id = ${tenant}`.catch(() => [] as never[]);
+  const mb = t?.file_max_mb && (FILE_MAX_CHOICES_MB as readonly number[]).includes(t.file_max_mb) ? t.file_max_mb : DEFAULT_FILE_MAX_MB;
+  return Math.min(mb * 1024 * 1024, PLATFORM_MAX_BYTES);
+}
+export const tooLargeMsg = (maxBytes: number) => `파일은 ${mbText(Math.round(maxBytes / 1024 / 1024))}까지 올릴 수 있습니다(회사 설정 — 관리 › 회사 정보에서 회사 관리자가 바꿀 수 있습니다)`;
+/** 회사 상한을 넘으면 400 — 올리기 시작(init) 때 */
+export async function assertFileSize(tenant: string, size: number) {
+  const max = await tenantFileMaxBytes(tenant);
+  if (size > max) { const { badRequest } = await import('./errors'); throw badRequest(tooLargeMsg(max)); }
+}
 /** 서버 경유 업로드 최대 크기 (Vercel 함수 요청 본문 한도 4.5MB 아래) */
 export const FALLBACK_MAX = 4 * 1024 * 1024;
 const LOCAL_DIR = process.env.LOCAL_UPLOAD_DIR ?? path.join(process.cwd(), '.data', 'uploads');
@@ -76,7 +100,8 @@ export async function multipartTarget(key: string, mime: string, size: number): 
   const n = Math.max(1, Math.ceil(size / PART_SIZE));
   if (s3Configured()) {
     const c = await s3().send(new CreateMultipartUploadCommand({ Bucket: s3Env().bucket, Key: key, ContentType: mime }));
-    const parts = await Promise.all(Array.from({ length: n }, async (_, i) => ({ n: i + 1, url: await getSignedUrl(s3(), new UploadPartCommand({ Bucket: s3Env().bucket, Key: key, UploadId: c.UploadId!, PartNumber: i + 1 }), { expiresIn: 3600 }) })));
+    const ttl = size > 500 * 1024 * 1024 ? 6 * 3600 : 3600; // #1128: 큰 파일(최대 2GB)은 느린 연결에서 1시간이 넘을 수 있어 조각 주소를 6시간
+    const parts = await Promise.all(Array.from({ length: n }, async (_, i) => ({ n: i + 1, url: await getSignedUrl(s3(), new UploadPartCommand({ Bucket: s3Env().bucket, Key: key, UploadId: c.UploadId!, PartNumber: i + 1 }), { expiresIn: ttl }) })));
     return { method: 'PUT' as const, url: '', headers: {}, multipart: { uploadId: c.UploadId!, partSize: PART_SIZE, parts } };
   }
   const exp = Date.now() + 3600_000;
@@ -157,10 +182,14 @@ export async function putObject(key: string, data: Buffer, mime: string) {
 }
 
 /** 서버가 파일 내용을 읽음 (자료실 글자 추출·AI 읽기) */
-export async function getObject(key: string): Promise<Buffer> {
+export async function getObject(key: string, max = READ_GUARD_MAX): Promise<Buffer> {
   if (s3Configured()) {
     const r = await s3().send(new GetObjectCommand({ Bucket: s3Env().bucket, Key: key }));
+    // #1128 안전장치: 2GB 까지 올릴 수 있게 되어 큰 파일을 통째로 메모리에 읽지 않음
+    if ((r.ContentLength ?? 0) > max) { (r.Body as { destroy?: () => void } | undefined)?.destroy?.(); throw new Error(BIG_FILE_NOTE); }
     return Buffer.from(await r.Body!.transformToByteArray());
   }
-  return readLocal(key);
+  const b = await readLocal(key);
+  if (b.length > max) throw new Error(BIG_FILE_NOTE);
+  return b;
 }

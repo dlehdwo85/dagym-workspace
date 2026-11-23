@@ -5,8 +5,8 @@ import { loadTaskOrBatchMate } from './taskBatch';
 import { loadEvent } from './events';
 import { badRequest, forbidden, notFound } from './errors';
 import { activity } from './log';
-import { maxUploadBytes, tooLargeMsg, uploadTargetFor } from './storage';
-import type { SessionUser } from './types';
+import { assertFileSize, uploadTargetFor } from './storage';
+import { tenantOf, type SessionUser } from './types';
 import { zDate, zUuid } from './api';
 
 export const attachmentInput = z.object({
@@ -66,7 +66,7 @@ export async function createAttachment(u: SessionUser, i: z.infer<typeof attachm
     return { id: a.id };
   }
   if (!i.fileName || !i.size) throw badRequest('파일 이름과 크기가 필요합니다');
-  if (i.size > maxUploadBytes(i.mimeType)) throw badRequest(tooLargeMsg(i.mimeType)); // #109: 영상 100MB(조각)
+  await assertFileSize(tenantOf(u), i.size); // #1128: 회사 설정(기본 2GB, 영상 포함 같은 값)
   if (BLOCKED_EXT.test(i.fileName)) throw badRequest('실행 파일은 첨부할 수 없습니다');
   // 332차(대표 11/02 16:1x ⑤ · 로컬: 30장 제한으로 나눠 올리다 같은 사진 21장이 두 번 올라감): 같은 이름·크기 파일이 이미 있으면 다시 안 올림
   if (i.skipDuplicate) {

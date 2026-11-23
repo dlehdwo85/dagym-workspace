@@ -46,6 +46,7 @@ export default function CompanyPage() {
       <AiProfile />
       <AttachToLibrary />
       <AiAutoSetting />
+      <FileMaxSetting />
       <RoleBadgeSetting />
       <RoleNamesSetting />
       <OrgModelSetting />
@@ -109,6 +110,26 @@ function RoleBadgeSetting() {
       <p className="mb-2 text-xs text-ink-3">이름 옆에 붙는 권한 표시. 사용자 관리·담당자 칩·메신저 참여자·방 정보·댓글·프로필·명함에 같이 적용됩니다. 심사용·체험 계정은 Guest.</p>
       <div className="flex flex-col gap-1.5 text-sm" role="radiogroup" aria-label="권한 배지 표시">
         {(['en', 'ko', 'off'] as const).map((m) => <label key={m} className="flex items-center gap-2"><input type="radio" name="role-badge" checked={st.data!.mode === m} disabled={busy} onChange={() => set(m)} data-testid={`role-badge-${m}`} />{st.data!.modeLabels[m]}</label>)}
+      </div>
+    </section>
+  );
+}
+
+/** #1128(대표 11/23): 파일 한 개 최대 크기 — 회사 관리자가 50MB·200MB·1GB·2GB 중에서(기본 2GB). 회사 전체 저장 한도는 요금제 그대로 */
+function FileMaxSetting() {
+  const st = useApi<{ mb: number; text: string; choices: { mb: number; text: string }[]; contentReadMb: number }>('/api/org/file-max');
+  const [busy, setBusy] = useState(false);
+  if (!st.data) return null;
+  const set = async (mb: number) => {
+    setBusy(true);
+    try { await api('/api/org/file-max', { method: 'PUT', body: { mb } }); st.reload(); toast.ok('파일 한 개 최대 크기를 바꿨습니다'); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="file-max-setting">
+      <h2 className="text-sm font-semibold">파일 한 개 최대 크기</h2>
+      <p className="mb-2 text-xs text-ink-3">업무 첨부·자료실·메신저·계약서 파일에 함께 적용됩니다. 회사 전체 저장 공간은 요금제 한도를 따릅니다. {st.data.contentReadMb}MB 넘는 파일은 보관·내려받기만 되고 AI 정리·글 뽑기·미리보기·브라우저에서 고치기는 하지 않습니다.</p>
+      <div className="flex flex-wrap gap-3 text-sm" role="radiogroup" aria-label="파일 한 개 최대 크기">
+        {st.data.choices.map((c) => <label key={c.mb} className="flex items-center gap-1.5"><input type="radio" name="file-max" checked={st.data!.mb === c.mb} disabled={busy} onChange={() => set(c.mb)} data-testid={`file-max-${c.mb}`} />{c.text}</label>)}
       </div>
     </section>
   );

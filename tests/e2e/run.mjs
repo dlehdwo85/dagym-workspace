@@ -2729,6 +2729,18 @@ await step('점검 1단계 점검 가이드(375): 공통 기본 템플릿 · 찾
 await step('AI 동의(대표 11/19·애플 5.1.2 · #1087 웹 필수): 들어오면 동의 창(무엇을·어디로·왜·동의하지 않으면) · 나중에 정하기 · 동의 전 AI 는 막힘 → 동의 뒤 답 · 설정에서 끄고 켜기 · 회사 자동 AI 스위치 · 휴대폰 폭', () => aiConsent({ owner, browser, BASE, FAKE, SHOTS }));
 await step('점검 2단계 점검하기·보완 흐름(375): 코스로 점검(양호·보완 필요·메모·사진) → 끝내기 = 보완 요청 업무 → 완료되면 확인 대기 → 다시 보완(새 업무 2차) → 양호 확인 · 수시 점검 · 코스 만들기', () => checkRun({ owner, ctx, BASE, SHOTS }));
 await step('계약 관리 1단계: 관리 메뉴 [계약 관리] → 등록 → 상세(만료 임박 D-n)·계약서 파일 → 요약 숫자 → 자동 연장은 통보 기한 기준 → 갱신 등록(지난 기간) → 알림 날짜 → 종료 → 390 · 권한 없는 직원은 화면 없음', () => agreements({ owner, staff, ctx, sql, BASE, SHOTS }));
+await step('#1128 파일 한 개 최대 크기: 관리 › 회사 정보에서 50MB 로 → 업무 첨부 안내 글이 최대 50MB → 2GB 로 되돌림', async () => {
+  await owner.setViewportSize({ width: 1366, height: 900 });
+  await owner.goto(BASE + '/admin/company');
+  const set = owner.getByTestId('file-max-setting'); await set.waitFor();
+  assert.equal(await owner.getByTestId('file-max-2048').isChecked(), true, '기본 2GB');
+  await owner.getByTestId('file-max-50').click(); await owner.getByText('파일 한 개 최대 크기를 바꿨습니다').first().waitFor(); // 저장 뒤 다시 읽어 체크가 바뀜(check() 는 바로 바뀌길 기다려 실패)
+  await owner.waitForFunction(() => document.querySelector('[data-testid=file-max-50]')?.checked === true);
+  const t = await ctx.owner.ok('POST', '/api/tasks', { title: '#1128 안내 확인', assigneeId: ctx.ownerId, approvalRequired: false });
+  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.getByTestId('drop-hint').first().getByText(/최대 50MB/).waitFor();
+  await ctx.owner.ok('PUT', '/api/org/file-max', { mb: 2048 });
+});
 await step('#516 승인함 시안 없음: 승인할 시안 수에서 빼고 빨간 묶음·빨간 띠·[승인] 없음 → [지금 만들기](서버 그리기·크레딧 0) → 승인할 시안으로 올라가 [승인]·[AI 이미지로 다시 · 약 6.5크레딧]', () => mktVisual({ owner, ctx, sql, BASE, SHOTS }));
 await step('#545(+#534) 수정 요청 → AI 수정본: 카드 [수정 요청] → AI 가 글·시안을 함께 고친 수정본 v3 바로 승인함 → 배지 \'수정본 v3 — 반영한 요청\'·AI 수정 1번째·[수정본 v3 승인] → 이전 버전과 나란히 비교(시안·바뀐 줄) → 같은 카드 다시 수정 요청(사진만 = v4) → 상세 비교 · 휴대폰 폭', () => mktRevision({ owner, ctx, sql, BASE, FAKE, SHOTS }));
 await step('255차 #791·#792 승인함: 게시일 지난 승인 대기 → 게시일 지남 띠·[승인] = 다음 빈 게시 칸 · 영상 다시 만들기 비용 카드([승인하고 제작 요청]·[이미지 카드뉴스로]) · 처리 안 된 수정 요청 [AI 수정본 만들기] · 휴대폰 폭', () => mktInbox255({ owner, ctx, sql, BASE, FAKE, SHOTS }));

@@ -25,10 +25,11 @@ before(async () => {
 after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); });
 
 describe('#109 영상 조각 업로드', () => {
-  test('자료실: 영상은 100MB 까지(그 외 50MB) · 20MB 넘으면 8MB 조각 목록 → 조각 올리고 complete(uploadId) 로 합침', async () => {
+  test('자료실: 파일 한 개 최대 = 회사 설정(기본 2GB, 영상 포함 같은 값 — #1128) · 20MB 넘으면 8MB 조각 목록 → 조각 올리고 complete(uploadId) 로 합침', async () => {
     const big = 60 * 1024 * 1024;
-    assert.equal((await ctx.owner.req('POST', '/api/library', { fileName: '큰 문서.pdf', mimeType: 'application/pdf', size: big, folder: '일반' })).status, 400, '문서는 50MB 까지');
-    assert.equal((await ctx.owner.req('POST', '/api/library', { fileName: '긴 영상.mp4', mimeType: 'video/mp4', size: 101 * 1024 * 1024, folder: '일반' })).status, 400, '영상도 100MB 까지');
+    const over = 2 * 1024 * 1024 * 1024 + 1;
+    assert.equal((await ctx.owner.req('POST', '/api/library', { fileName: '큰 문서.pdf', mimeType: 'application/pdf', size: over, folder: '일반' })).status, 400, '2GB 넘으면 막힘');
+    assert.equal((await ctx.owner.req('POST', '/api/library', { fileName: '긴 영상.mp4', mimeType: 'video/mp4', size: over, folder: '일반' })).status, 400, '영상도 같은 값');
     const init = await ctx.owner.ok('POST', '/api/library', { fileName: '현장 영상.mp4', mimeType: 'video/mp4', size: big, folder: '일반' });
     assert.ok(init.upload.multipart, '조각 업로드 대상');
     assert.equal(init.upload.multipart.parts.length, 8, '60MB / 8MB = 8조각');
@@ -53,7 +54,7 @@ describe('#109 영상 조각 업로드', () => {
     for (const p of a.upload.multipart.parts) await fetch(BASE + p.url, { method: 'PUT', headers: { 'content-type': 'video/quicktime' }, body: Buffer.from('x') });
     assert.equal((await ctx.owner.ok('POST', `/api/attachments/${a.id}/complete`, { uploadId: a.upload.multipart.uploadId })).ok, true);
     assert.equal(Number((await sql`select size_bytes from attachments where id = ${a.id}`)[0].size_bytes), 4);
-    assert.equal((await ctx.owner.req('POST', '/api/attachments', { taskId: t, kind: 'file', fileName: '큰 사진.png', mimeType: 'image/png', size: 60 * 1024 * 1024 })).status, 400, '사진은 50MB 까지');
+    assert.equal((await ctx.owner.req('POST', '/api/attachments', { taskId: t, kind: 'file', fileName: '큰 사진.png', mimeType: 'image/png', size: 3 * 1024 * 1024 * 1024 })).status, 400, '2GB 넘으면 막힘(#1128)');
     const room = (await ctx.owner.ok('POST', '/api/chat/rooms', { kind: 'dm', userId: ctx.staffA.id })).id;
     const ft = await ctx.owner.ok('POST', `/api/chat/rooms/${room}/files`, { fileName: '회의 영상.mp4', mime: 'video/mp4', size: 25 * 1024 * 1024 });
     assert.equal(ft.upload.multipart.parts.length, 4);
