@@ -27,6 +27,11 @@ if (SHA) await step(`운영에 ${SHA} 반영될 때까지 기다림`, async () =
   }
   throw new Error('8분 안에 새 커밋이 운영에 뜨지 않음');
 });
+else await step('지금 운영에 떠 있는 커밋 확인(수동 실행)', async () => {
+  const h = await fetch(`${BASE}/api/health`).then((r) => r.json());
+  ok(typeof h.commit === 'string' && h.commit.length >= 7, '운영 상태 응답에 커밋 없음');
+  console.log(`  운영 커밋 ${h.commit}`);
+});
 
 let cookie = '';
 await step('검수용 계정 로그인', async () => {

@@ -23,7 +23,8 @@ jobs:
     timeout-minutes: 20
     env:
       BASE: ${{ github.event.inputs.base || 'https://www.work-in.dev' }}
-      EXPECT_SHA: ${{ github.event.deployment.sha || github.sha }}
+      # 배포 알림으로 돌 때만 그 커밋을 기다림 — 수동 실행은 지금 운영에 떠 있는 커밋을 그대로 확인(문서만 바뀐 커밋은 배포되지 않으므로 main 맨 위와 비교하지 않음)
+      EXPECT_SHA: ${{ github.event.deployment.sha || '' }}
       PROD_QA_EMAIL: ${{ secrets.PROD_QA_EMAIL }}
       PROD_QA_PASSWORD: ${{ secrets.PROD_QA_PASSWORD }}
     steps:

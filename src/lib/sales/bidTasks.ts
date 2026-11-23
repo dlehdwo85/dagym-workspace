@@ -123,9 +123,28 @@ async function addBidEvent(sql: Sql, tenant: string, d: any, m: Milestone, notic
   const { createEvent } = await import('../events');
   const ev: any = await createEvent(u, { calendarId: cal.id, title: `[입찰] ${m.label} · ${String(d.bid_name ?? '입찰')}`.slice(0, 200), description: `입찰 일정 — 담당 ${people.map((p) => p.name).join('·')}\n업무: /tasks/${d.bid_task_id}\n공고: ${bidLink(noticeId)}`,
     start: m.w.start, end: m.w.end, allDay: m.w.allDay, attendeeIds: ids, reminderMinutes: m.w.allDay ? [1440] : [1440, 60] } as never);
-  return String(ev?.id ?? ev?.event?.id ?? '') || null;
+  const eid = String(ev?.id ?? ev?.event?.id ?? '') || null;
+  if (eid) await linkBidEvents(sql, d.bid_task_id, { [m.key]: eid }, u.id, bidSyncKey({ ...(d.bid_events ?? {}), [m.key]: eid }));
+  return eid;
 }
 const soonEvents = (d: any) => Object.values(d?.bid_events ?? {}).filter((x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x));
+/** #1141(대표 11/24): 입찰 일정 ↔ 입찰 업무 연결 — 연결된 업무가 모두 끝나면 캘린더·홈에서 숨김('완료 보기'에서만 취소선).
+ *  #1144(대표 11/24): '입찰 마감'(없으면 '참가신청 마감') 일정 하나만 날짜 맞춤(sync) — 일정을 옮기면 업무 마감이, 업무 마감을 바꾸면 일정이 따라감. 현장설명회는 연결만(옮겨도 마감 그대로)
+ *  events = { 일정 종류(MilestoneKey): 일정 id } */
+export const bidSyncKey = (evs: Record<string, unknown>) => (typeof evs.close === 'string' ? 'close' : typeof evs.apply === 'string' ? 'apply' : null);
+export async function linkBidEvents(sql: Sql, taskId: string | null | undefined, events: Record<string, unknown>, actorId: string | null, syncKey: string | null = bidSyncKey(events)) {
+  if (!taskId || !/^[0-9a-f-]{36}$/i.test(taskId)) return 0;
+  let n = 0;
+  for (const [k, id] of Object.entries(events)) {
+    if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) continue;
+    const sync = k === syncKey;
+    const r = await sql`insert into event_tasks (event_id, task_id, role, sync, hide_when_done, created_by)
+      select e.id, ${taskId}, 'link', ${sync}, true, ${actorId} from events e where e.id = ${id}
+      on conflict (event_id, task_id) do update set hide_when_done = true, sync = event_tasks.sync or excluded.sync`;
+    n += r.count;
+  }
+  return n;
+}
 /** 열린 입찰 업무·일정 취소(소프트 삭제 + 활동 기록) */
 async function cancelTaskAndEvents(sql: Sql, d: any, actorId: string | null, reason: string, noticeId: string) {
   const tasks = d?.bid_task_id ? await sql<{ id: string }[]>`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = ${d.bid_task_id} and deleted_at is null and status <> 'done' returning id` : [];
@@ -208,6 +227,7 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
       }
     } else eventErrors.push('회사 공용 캘린더가 없어 일정은 만들지 않았습니다');
   }
+  await linkBidEvents(sql, task.id, events, u.id);
   const d = { ...(cur?.data ?? {}), status: BID_STATUS, notice_id: i.id, bid_task_id: task.id, bid_due_auto: due, bid_due_time: dueTime, bid_due_rule: DUE_RULE, bid_name: name, bid_agency: agency ?? null,
     bid_dates: Object.fromEntries(ms.map((m) => [m.key, m.w.start])), bid_events: events, bid_result: null, handoff_by: u.id, handoff_at: new Date().toISOString(), assignees: ids, handoff_prev_status: cur?.status ?? null };
   await sql`insert into sales_work_records (tenant, src_tbl, src_id, ref_id, status, lead_id, data) values (${t}, ${SRC}, ${cur?.src_id ?? `w:bid:${i.id}`}, ${i.id}, ${BID_STATUS}, null, ${sql.json(d)})
@@ -645,6 +665,7 @@ export async function moveBidLeads(u: SessionUser, i: z.infer<typeof moveBidLead
       const events: Record<string, string> = {};
       for (const e of evs) { const label = e.title.replace(/^\[[^\]]*\]\s*/, '').split(' · ')[0]; const k = MS.find(([, l]) => l === label || label.startsWith(`${l}(`))?.[0]; if (k) events[k] = e.id; } // 239차 '현장설명회(필수)'
       await tx`update events set lead_id = null where lead_id = ${r.id}`;
+      if (main) await linkBidEvents(tx as unknown as Sql, main.id, events, u.id);
       const wd = { ...(r.work_data ?? {}) }; for (const k of ['lead_id', 'converted_by', 'converted_at']) delete wd[k];
       const assignees: string[] = Array.isArray(r.src?.assignees) && r.src.assignees.length ? r.src.assignees : r.owner_id ? [r.owner_id] : [];
       const prevSt = typeof wd.handoff_prev_status === 'string' && wd.handoff_prev_status ? wd.handoff_prev_status : '검토중';
@@ -791,10 +812,16 @@ export async function bidDueAlignTick(max = 300) {
   let moved = 0; const changed: { id: string; from: string | null; fromTime: string | null; to: string; toTime: string | null }[] = [];
   for (const r of rows) {
     const d = r.nid ? dues.get(r.nid) : null; if (!d) continue;
-    if (r.due === d.day && (r.tm ?? null) === (d.time ?? null)) continue;
+    // #1144(대표 11/24): 사람이 바꾼 마감(캘린더에서 '입찰 마감' 일정을 옮기거나 업무 마감을 직접 고침 → sales_ref.dueManual)은 공고 마감이 그대로면 두고,
+    //   공고 자체의 마감이 바뀌었을 때만 따라감 — 마지막으로 본 공고 마감은 sales_ref.noticeDue 에 적어 둠(일정은 공고 정정 때 bidTasksTick 이 옮김)
+    const k = `${d.day} ${d.time ?? ''}`.trim(); const seen = typeof r.sales_ref?.noticeDue === 'string' ? r.sales_ref.noticeDue : null; const manual = !!r.sales_ref?.dueManual;
+    const stamp = (clear: boolean) => sql`update tasks set sales_ref = (coalesce(sales_ref, '{}'::jsonb) ${clear ? sql`- 'dueManual'` : sql``}) || ${sql.json({ noticeDue: k } as never)} where id = ${r.id} and sales_ref is not null`;
+    if (manual && (seen === null || seen === k)) { if (seen === null) await stamp(false); continue; }
+    if (r.due === d.day && (r.tm ?? null) === (d.time ?? null)) { if (seen !== k || manual) await stamp(true); continue; }
     const n = await sql`update tasks set due_date = ${d.day}::date, due_time = ${d.time}::time, updated_at = now(), version = version + 1 where id = ${r.id} and deleted_at is null and status <> 'done'`;
     if (!n.count) continue;
-    await activity(sql, 'task', r.id, null, 'updated', { dueDate: { from: r.due, to: d.day }, dueTime: { from: r.tm, to: d.time }, reason: 'bid_deadline_align' }).catch(() => {});
+    await stamp(true);
+    await activity(sql, 'task', r.id, null, 'updated', { dueDate: { from: r.due, to: d.day }, dueTime: { from: r.tm, to: d.time }, reason: manual ? 'bid_deadline_changed' : 'bid_deadline_align' }).catch(() => {});
     moved++; changed.push({ id: r.id, from: r.due, fromTime: r.tm, to: d.day, toTime: d.time });
   }
   await sql`insert into app_settings (key, value) values ('bid_due_align_331', ${sql.json({ at: new Date().toISOString(), checked: rows.length, moved, changed: changed.slice(0, 200) } as never)}) on conflict (key) do nothing`;

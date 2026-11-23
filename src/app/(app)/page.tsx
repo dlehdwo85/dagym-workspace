@@ -118,7 +118,7 @@ export default function Dashboard() {
   // 이번 주 일정·업무 — 목록 하나: 기한 지남 → 오늘 → 이번 주(날짜·시각 순). 같은 날 같은 제목의 일정·업무는 한 줄, 연결된 일정·업무도 한 줄
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(today, i));
   const open = (myOpen.data?.tasks ?? []).filter((t) => t.status !== 'done');
-  const blockDone = (e: any) => e.blockTask?.status === 'done'; // 완료된 업무의 '업무 시간' 블록은 숨김(캘린더와 같은 규칙)
+  const blockDone = (e: any) => e.blockTask?.status === 'done' || !!e.tasksDone; // 완료된 업무의 '업무 시간' 블록·연결 업무가 모두 끝난 입찰 일정은 숨김(캘린더와 같은 규칙, #1141)
   const evsByDay = new Map<string, any[]>(weekDays.map((d) => [d, []]));
   for (const e of (week7.data?.events ?? []).filter((x: any) => !blockDone(x))) for (const d of eventDays(e)) evsByDay.get(d)?.push(e);
   const rows: (WeekItem & { day: string })[] = [];

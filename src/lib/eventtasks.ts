@@ -325,7 +325,9 @@ export async function syncTasksFromEvent(tx: Sql, eventId: string, oldStart: Dat
   for (const r of rows) {
     const due = shift ? addDays(r.due_date!, shift) : r.due_date!;
     if (due === r.due_date && time === r.due_time) continue;
-    await tx`update tasks set due_date = ${due}, due_time = ${time}, version = version + 1, updated_at = now() where id = ${r.id}`;
+    // #1144: 영업·입찰 업무는 '사람이 바꾼 마감'으로 표시 — 공고 마감 맞춤 정기 작업이 되돌리지 않게(bidDueAlignTick)
+    await tx`update tasks set due_date = ${due}, due_time = ${time}, version = version + 1, updated_at = now(),
+      sales_ref = case when sales_ref is null then null else sales_ref || '{"dueManual": true}'::jsonb end where id = ${r.id}`;
     await activity(tx, 'task', r.id, actorId, 'updated', { dueDate: { from: r.due_date, to: due }, dueTime: { from: r.due_time, to: time }, via: 'event', eventId });
   }
   return rows.length;

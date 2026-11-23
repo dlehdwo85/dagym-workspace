@@ -151,6 +151,13 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
         select et.event_id, t.id, t.status, t.assignee_id from event_tasks et join tasks t on t.id = et.task_id
         where et.sync and et.event_id = any(${ids}::uuid[]) and t.deleted_at is null`
     : [];
+  // #1141(대표 11/24): 입찰 넘기기 일정처럼 '업무가 모두 끝나면 숨김'(hide_when_done) 연결이 있는 일정 — 그 일정에 연결된 업무(연결) 중 열린 것이 하나라도 있으면 보임
+  const doneLinks = ids.length
+    ? await sql<{ event_id: string; status: string }[]>`
+        select et.event_id, t.status from event_tasks et join tasks t on t.id = et.task_id
+        where et.role = 'link' and t.deleted_at is null and et.event_id = any(${ids}::uuid[])
+          and exists (select 1 from event_tasks h where h.event_id = et.event_id and h.hide_when_done)`
+    : [];
   // 대표 지시(2026-10-15): "업무 시간" 블록의 업무 — 완료면 "완료 보기"를 켤 때만, 삭제된 업무의 블록은 그리지 않음
   const blockIds = rows.filter((r) => r.kind === 'task_block').map((r) => r.id);
   const blocks = blockIds.length
@@ -178,6 +185,8 @@ export async function listEvents(u: SessionUser, from: Date, to: Date, calendarI
       linkedTask: lt && !masked ? { id: lt.id, status: e.rrule ? null : lt.status } : null,
       linkedTaskIds: masked ? [] : lts.map((x) => x.id),
       blockTask: bt && !masked ? { id: bt.id, status: bt.status } : null,
+      // #1141: 연결된 업무가 모두 완료 → 캘린더·홈에서 숨김('완료 보기'에서만 취소선)
+      tasksDone: !masked && !e.rrule && ((hl) => hl.length > 0 && hl.every((x) => x.status === 'done'))(doneLinks.filter((x) => x.event_id === e.id)),
     };
     if (!e.rrule) {
       out.push({ ...base, id: e.id, seriesId: null, title: e.title, location: e.location, meetingUrl: e.meeting_url ?? null, description: e.description,

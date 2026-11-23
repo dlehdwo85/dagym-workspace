@@ -38,6 +38,15 @@ export async function bid246({ owner, ctx, sql, BASE, SHOTS }) {
     await owner.getByText('업무를 완료했습니다').first().waitFor();
     assert.equal((await sql`select status from tasks where id = ${tk}`)[0].status, 'done');
     await owner.keyboard.press('Escape');
+    // #1141(대표 11/24): 묶인 업무가 모두 완료면 일정 줄도 숨김 → [완료 보기]를 켤 때만 취소선으로
+    await owner.waitForFunction(() => ![...document.querySelectorAll('.fc-timegrid-event')].some((x) => x.textContent?.includes('E2E246 묶음 단지')));
+    // [완료 보기] — 넓은 화면은 위 칩, 그 밖에는 왼쪽 목록의 체크(같은 상태)
+    const showDone = async () => { const chip = owner.getByTestId('cal-show-done'); if (await chip.isVisible()) await chip.click(); else await owner.locator('input[aria-label="완료된 업무·일정 보기"]').first().click(); };
+    await showDone();
+    await block.first().waitFor();
+    assert.equal(await block.first().locator('[data-done="1"]').count(), 1, '완료 보기에서는 취소선(완료 표시)');
+    await showDone(); // 원래대로(다음 단계 화면에 영향 없게)
+    await owner.waitForFunction(() => ![...document.querySelectorAll('.fc-timegrid-event')].some((x) => x.textContent?.includes('E2E246 묶음 단지')));
 
     // #773 [대상 아님] 탭 — 달마다 묶음 · 마감 지난 것 접힘 · 사유 칩
     await put(N1, { source_type: 'kapt_bid', source_external_id: 'E2E246-1', title: '[경기] E2E246 앞으로 단지 주민운동시설 위탁운영', issuer: 'E2E246 앞으로 단지', related: true, fit_business: '다짐', classification: '검토',

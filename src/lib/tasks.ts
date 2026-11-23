@@ -857,6 +857,8 @@ export async function updateTask(u: SessionUser, id: string, i: Partial<TaskInpu
     }
     if (reassigned) await notifyReassign(tx, u, { id, title, from: cur.assignee_id as string, to: (set.assignee_id as string | null) ?? null, requestedBy: cur.requested_by as string | null, version: upd.version });
     if ('due_date' in set || 'due_time' in set) {
+      // #1144: 영업·입찰 업무의 마감을 사람이 바꿈 → 공고 마감 맞춤 정기 작업이 되돌리지 않게 표시(공고 마감 자체가 바뀌면 그때만 따라감)
+      await tx`update tasks set sales_ref = sales_ref || '{"dueManual": true}'::jsonb where id = ${id} and sales_ref is not null`;
       // V5 "업무에도 추가"로 연결된 일정도 같은 날짜·시각으로
       const { syncEventsFromTask } = await import('./eventtasks');
       await syncEventsFromTask(tx, id, ('due_date' in set ? set.due_date : cur.due_date) as string | null, ('due_time' in set ? set.due_time : cur.due_time_s) as string | null, u.id);

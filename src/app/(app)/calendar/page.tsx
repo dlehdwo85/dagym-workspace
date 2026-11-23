@@ -318,6 +318,16 @@ function CalendarPage() {
     const hit = day.find((x) => x.key === k) ?? day.find((x) => sameCore(x.core, c));
     if (hit) { const key = `${t.due_date}|${hit.key}`; foldedBy.set(key, [...(foldedBy.get(key) ?? []), t]); foldedTasks.add(t.id); }
   }
+  // #1141(대표 11/24): 제목 접기로 묶인 일정도 묶인 업무가 모두 완료면 완료로(숨김·'완료 보기'에서 취소선) — 열린 업무가 하나라도 있으면 보임
+  const foldAll = new Map<string, any[]>();
+  for (const t of tasks) {
+    if (!t.due_date || syncedIds.has(t.id)) continue;
+    const day = evByDay.get(t.due_date) ?? []; const k = normT(t.title), c = coreKey(t.title);
+    const hit = day.find((x) => x.key === k) ?? day.find((x) => sameCore(x.core, c));
+    if (hit) { const key = `${t.due_date}|${hit.key}`; foldAll.set(key, [...(foldAll.get(key) ?? []), t]); }
+  }
+  const foldDone = (e: any) => { if (e.linkedTask || e.blockTask || e.masked || e.kind === 'task_block' || (ABSENCE_KINDS as readonly string[]).includes(e.kind)) return false; const fs = foldAll.get(`${seoulDate(e.start)}|${normT(e.title)}`) ?? []; return fs.length > 0 && fs.every((t) => t.status === 'done'); };
+  const evDone = (e: any) => (e.linkedTask ?? e.blockTask)?.status === 'done' || !!e.tasksDone || foldDone(e);
   const foldTail = (fs: any[]) => (!fs.length ? '' : fs.length > 1 ? ` · 업무 ${fs.length}` : ` · 업무 ${fs[0].status === 'done' ? '완료' : fs[0].assignee_name ? `${fs[0].assignee_name}` : '담당 없음'}`);
   const taskCores = new Map<string, string[]>();
   for (const t of tasks) if (t.due_date && (showDone || t.status !== 'done')) taskCores.set(t.due_date, [...(taskCores.get(t.due_date) ?? []), coreKey(t.title)]);
@@ -332,7 +342,7 @@ function CalendarPage() {
       editable: false, durationEditable: false, backgroundColor: spaceColor(x.space), borderColor: 'transparent', textColor: '#ffffff', classNames: ['space-item'], extendedProps: { type: 'space', item: x } })),
     ...(hol.data?.holidays ?? []).map((h) => ({ id: `holiday|${h.date}`, title: h.name, start: h.date, allDay: true, editable: false, durationEditable: false,
       backgroundColor: '#fef2f2', borderColor: 'transparent', textColor: '#dc2626', classNames: ['holiday'], extendedProps: { type: 'holiday' } })),
-    ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e) && (showDone || (e.linkedTask ?? e.blockTask)?.status !== 'done')).map((e) => ({ // 완료된 업무의 일정·업무 시간 블록은 "완료 보기"를 켤 때만
+    ...events.filter((e) => !hidden.includes(e.calendarId) && showEvent(e) && (showDone || !evDone(e))).map((e) => ({ // 완료된 업무의 일정·업무 시간 블록은 "완료 보기"를 켤 때만
       id: `${e.id}|${e.originalStart ?? ''}`, title: `${(ABSENCE_KINDS as readonly string[]).includes(e.kind) ? `[${T.event[e.kind as EventKind]}] ` : ''}${cleanTitle(e.title)}${foldTail(foldedBy.get(`${seoulDate(e.start)}|${normT(e.title)}`) ?? [])}`,
       classNames: [...(e.kind === 'task_block' ? ['task-block'] : []), ...(!e.masked && e.location?.trim() ? ['is-travel'] : []), /* V36 4: 장소 있음 = 이동 일정 */ ...(e.linkedTask || foldedBy.has(`${seoulDate(e.start)}|${normT(e.title)}`) ? ['has-task'] : []), ...((e.linkedTask ?? e.blockTask)?.status === 'done' ? ['is-done'] : [])], // R-15 1번: 연결 업무가 끝나면 일정도 완료 모양
       start: e.allDay ? seoulDate(e.start) : e.start, end: e.allDay ? seoulDate(e.end) : e.end, allDay: e.allDay,
@@ -340,7 +350,7 @@ function CalendarPage() {
       // 대표 지적(10/19 ②): 일정별 색 → 사람 색 → 캘린더 색 → 개인/회사 기본
       backgroundColor: eventColorOf(e, calColors, user.id), borderColor: 'transparent', textColor: '#ffffff',
       // V14 41번: 사람 머리글자는 제목이 아니라 따로 — 휴대폰 주·3일 보기에선 빼고(색·필터로 구분), 일 보기·PC 에선 앞에 붙인다
-      extendedProps: { type: 'event', ev: e, folded: foldedBy.get(`${seoulDate(e.start)}|${normT(e.title)}`) ?? [], ...whoOf(e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? e.ownerId : null, e.ownerName) }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
+      extendedProps: { type: 'event', ev: e, done: evDone(e), folded: foldedBy.get(`${seoulDate(e.start)}|${normT(e.title)}`) ?? [], ...whoOf(e.ownerId && e.ownerId !== user.id && e.calendarType === 'personal' ? e.ownerId : null, e.ownerName) }, editable: !(e.calendarType === 'personal' && e.ownerId !== user.id && e.createdBy !== user.id),
     })),
     // HQ_SIMPLIFY 3-4: "업무" 캘린더 — 마감일(마감 시각이 있으면 그 시각) 칸에 체크 모양으로. "업무에도 추가"로 일정과 연결된 업무는 일정 블록(✓)으로 보이므로 따로 안 그림
     ...(showTasks ? tasks.filter((t) => t.due_date && t.show_on_calendar !== false && showTask(t) && (showDone || t.status !== 'done') && !syncedIds.has(t.id) && !syncedIds.has(t.recurrence_source_id) && !foldedTasks.has(t.id) && !(t.due_time && blockedDay.has(`${t.id}|${t.due_date}`))).map((t) => ({
@@ -722,7 +732,7 @@ function CalendarPage() {
               if (p.type === 'holiday') return true;
               const isTask = p.type === 'task';
               const t = p.task, lt = p.ev?.linkedTask ?? p.ev?.blockTask;
-              const done = isTask ? t.status === 'done' : lt?.status === 'done';
+              const done = isTask ? t.status === 'done' : lt?.status === 'done' || !!p.done;
               const timed = arg.view.type.startsWith('timeGrid') && !arg.event.allDay;
               const month = arg.view.type === 'dayGridMonth';
               const mins = arg.event.end && arg.event.start ? (+arg.event.end - +arg.event.start) / 60000 : 60;
