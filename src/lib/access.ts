@@ -72,6 +72,17 @@ const TEAM_DEF: Record<string, [string, string]> = { owner: ['edit', 'edit'], ad
 
 /** 업무 조회 가능 조건 (tasks 별칭 t 기준)
  * V14 8번: 팀 업무(team_id)는 소속(현장)이 아니라 팀으로 — 팀원("팀 업무" 조회 이상) · "다른 팀 업무 보기" 권한자만. 본인이 담당·요청·만든·참여한 업무는 항상 */
+/**
+ * #1129(대표 11/23): 회사 공개 방식 — tenants.share_mode('team' 기본 = 지금 동작 · 'company' = 회사 전체 공유),
+ * 항목마다 share(null = 회사 설정 따름 · 'team' · 'company'). 회사 전체 공유가 되는 업무: 같은 회사 부서 업무 또는 격리 아닌 팀 업무.
+ * 격리 팀 구성원은 넓어지지 않는다(자기 팀만), 데모 조직 업무는 섞지 않는다.
+ */
+export function companyShareTaskSql(sql: Sql, u: SessionUser) {
+  return sql`(coalesce(t.share, (select tn.share_mode from tenants tn where tn.id = ${tenantOf(u)})) = 'company'
+    and not ${isolatedSql(sql, u)}
+    and ((t.team_id is null and exists (select 1 from org_units cu where cu.id = t.org_unit_id and cu.tenant = ${tenantOf(u)} and not cu.is_demo))
+      or (t.team_id is not null and exists (select 1 from teams ct where ct.id = t.team_id and ct.tenant = ${tenantOf(u)} and not ct.isolated and not ct.archived))))`;
+}
 export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null) {
   // 대표·본사 관리자(전체)에게도 앱 심사용 데모 조직 업무는 섞지 않는다
   if (units === null) return sql`not exists (select 1 from org_units dz where dz.id = t.org_unit_id and dz.is_demo)`;
@@ -87,6 +98,7 @@ export function taskVisibleSql(sql: Sql, u: SessionUser, units: string[] | null)
     or t.requested_by = ${u.id}
     or exists (select 1 from task_collaborators tc where tc.task_id = t.id and tc.user_id = ${u.id})
     or exists (select 1 from task_checklist_items ci where ci.task_id = t.id and ci.assignee_id = ${u.id})
+    or ${companyShareTaskSql(sql, u)}
   )`;
 }
 
@@ -190,14 +202,16 @@ export async function taskPerms(u: SessionUser, t: TaskAccessRow, sql: Sql = db(
   for (const r of await sql<{ team_id: string }[]>`select team_id from task_teams where task_id = ${t.id}`) {
     if ((await teamTaskLevel(u, r.team_id, sql)) !== 'none') { collabSeen = true; break; }
   }
+  // #1129 회사 전체 공유(회사 설정 또는 이 업무만) — 보기·댓글만 넓어짐(수정은 위 규칙 그대로)
+  const companyShared = async () => (await sql`select 1 from tasks t where t.id = ${t.id} and ${companyShareTaskSql(sql, u)}`).length > 0;
   if (t.team_id) { // V14 8번 팀 업무: 보기는 팀 권한, 수정은 위 규칙
     const lv = await teamTaskLevel(u, t.team_id, sql);
     const [lead] = await sql`select 1 from team_members where team_id = ${t.team_id} and user_id = ${u.id} and is_lead`;
     const teamManager = isAdmin(u) || (!!lead && lv === 'edit');
-    return { view: lv !== 'none' || involved || deptLead || collabSeen, edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del, co: isCo, finish: finish ?? (lead ? '팀장' : null), dueNow: dueNow ?? (lead ? '팀장' : null) };
+    return { view: lv !== 'none' || involved || deptLead || collabSeen || (await companyShared()), edit, approve: teamManager || (inUnit && atLeast(u, 'site_manager')), delete: del, co: isCo, finish: finish ?? (lead ? '팀장' : null), dueNow: dueNow ?? (lead ? '팀장' : null) };
   }
   const manager = inUnit && atLeast(u, 'site_manager');
-  return { view: inUnit || involved || deptLead || collabSeen, edit, approve: manager, delete: del, co: isCo, finish, dueNow };
+  return { view: inUnit || involved || deptLead || collabSeen || (await companyShared()), edit, approve: manager, delete: del, co: isCo, finish, dueNow };
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
