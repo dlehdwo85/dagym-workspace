@@ -199,4 +199,16 @@ describe('플랫폼 운영 고객사 추가', () => {
     assert.equal((await N.c.get(`/api/platform/tenants/${N.tenant}/audit`)).status, 404, '고객사 대표는 운영 API 없음');
     assert.equal((await ctx.owner.get('/api/platform/tenants/nope/audit')).status, 404);
   });
+  test('D-08 검수용 시험 회사: 시험 표시(is_test)·체험 10년·고객 목록에서 빠짐 → 초대 받아 로그인', async () => {
+    const r = await ctx.owner.ok('POST', '/api/platform/tenants', { company: '워크인 검수(시험)', ownerName: '검수', ownerEmail: 'qa@cust.test', isTest: true });
+    assert.equal((await sql`select is_test from tenants where id = ${r.tenant}`)[0].is_test, true);
+    const [sub] = await sql`select status, (trial_ends_at::date - current_date) as days from tenant_subscriptions where tenant = ${r.tenant}`;
+    assert.equal(sub.status, 'trial'); assert.ok(Number(sub.days) >= 3649, `체험 10년 (${sub.days})`);
+    assert.ok(!(await ctx.owner.ok('GET', '/api/platform/tenants')).tenants.some((x) => x.id === r.tenant), '고객 목록에서 빠짐');
+    const c = new Client('qa');
+    await c.ok('POST', `/api/invitations/${r.inviteLink.split('/').pop()}/accept`, { password: 'qa-pass-12345678', ai: true });
+    assert.deepEqual([(await c.ok('GET', '/api/auth/me')).user.tenant, (await c.ok('GET', '/api/auth/me')).user.role], [r.tenant, 'owner']);
+    const plain = await ctx.owner.ok('POST', '/api/platform/tenants', { company: '보통고객', ownerName: '보대표', ownerEmail: 'plain@cust.test' });
+    assert.equal((await sql`select is_test from tenants where id = ${plain.tenant}`)[0].is_test, false, '체크 안 하면 보통 회사');
+  });
 });

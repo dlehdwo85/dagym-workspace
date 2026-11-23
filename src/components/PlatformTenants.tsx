@@ -277,7 +277,7 @@ function TenantOps({ id, t, ownerInvite, run }: { id: string; t: any; ownerInvit
 function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
   const plans = useApi<{ plans: { code: string; name: string; active: boolean }[] }>('/api/platform');
   const [f, setF] = useState({ company: '', industries: [] as string[], size: '2-10', ownerName: '', ownerEmail: '', planCode: 'trial', trialDays: '14', spaces: [] as string[], memo: '',
-    contactName: '', contactPhone: '', contactTitle: '', segment: 'customer', source: '' }); // #656 담당자·구분·소개 경로
+    contactName: '', contactPhone: '', contactTitle: '', segment: 'customer', source: '', isTest: false }); // #656 담당자·구분·소개 경로 · D-08 검수용 시험 회사
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ tenant: string; inviteLink: string; mail: 'sent' | 'dev' | 'failed' } | null>(null);
   const toggle = (k: 'industries' | 'spaces', v: string) => setF({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] });
@@ -287,7 +287,7 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
     e.preventDefault(); setBusy(true);
     try {
       const r = await api('/api/platform/tenants', { body: { ...f, planCode: f.planCode || 'trial', trialDays: f.planCode === 'trial' ? Number(f.trialDays) || undefined : undefined, memo: f.memo || undefined,
-        contactName: f.contactName || undefined, contactPhone: f.contactPhone || undefined, contactTitle: f.contactTitle || undefined, segment: f.segment || undefined, source: f.source || undefined } });
+        contactName: f.contactName || undefined, contactPhone: f.contactPhone || undefined, contactTitle: f.contactTitle || undefined, segment: f.segment || undefined, source: f.source || undefined, isTest: f.isTest || undefined } });
       setResult(r); toast.ok(r.mail === 'sent' ? `${f.company} 회사를 만들고 ${f.ownerEmail} 로 초대 메일을 보냈습니다` : `${f.company} 회사를 만들었습니다 — 초대 링크를 직접 전달하세요`);
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
@@ -311,6 +311,7 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
             <Field label="규모"><select className={inputCls} value={f.size} onChange={(e) => setF({ ...f, size: e.target.value })} data-testid="new-company-size">{Object.entries(SIZE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
             <Field label="요금제"><select className={inputCls} value={f.planCode} disabled={partner} title={partner ? '설계 파트너는 체험으로 시작합니다 — 유료 전환은 고객사 관리에서' : undefined} onChange={(e) => setF({ ...f, planCode: e.target.value })} data-testid="new-company-plan"><option value="trial">체험(카드 없음)</option>{(plans.data?.plans ?? []).filter((p) => p.active && p.code !== 'trial').map((p) => <option key={p.code} value={p.code}>{p.name}({p.code})</option>)}</select></Field>
             {f.planCode === 'trial' && <Field label={partner ? `파트너 기간(일, 꼭 적기 · ${PARTNER.maxDays}일까지)` : '체험 기간(일)'}><input type="number" min={1} max={partner ? PARTNER.maxDays : 90} required={partner} placeholder={partner ? '기간을 적어 주세요' : undefined} className={inputCls} value={f.trialDays} onChange={(e) => setF({ ...f, trialDays: e.target.value })} data-testid="new-company-trial-days" /></Field>}
+            <label className="flex items-start gap-2 py-2 text-xs sm:col-span-2"><input type="checkbox" className="mt-0.5" checked={f.isTest} onChange={(e) => setF({ ...f, isTest: e.target.checked })} data-testid="new-company-test" /><span><b className="font-medium">검수용 시험 회사</b> — 고객 목록·가입 통계에서 빼고 체험 기간이 끝나지 않게(배포 확인용, 가짜 자료만)</span></label>
             <Field label="시작 공간(업무는 항상)"><div className="flex items-center gap-3 py-2 text-xs">{(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={f.spaces.includes(sp)} onChange={() => toggle('spaces', sp)} data-testid={`new-company-space-${sp}`} />{SPACE_LABEL[sp]}</label>)}</div></Field>
             <Field label="대표 이름"><input className={inputCls} value={f.ownerName} onChange={(e) => setF({ ...f, ownerName: e.target.value })} required maxLength={50} data-testid="new-company-owner" /></Field>
             <Field label="대표 이메일(초대 메일 받을 주소)"><input type="email" className={inputCls} value={f.ownerEmail} onChange={(e) => setF({ ...f, ownerEmail: e.target.value })} required data-testid="new-company-email" /></Field>

@@ -1,0 +1,40 @@
+# D-08(대표 11/23 승인): 운영 배포 직후, 노트북 없이 운영 화면 확인
+#   ① 기본 점검 scripts/verify-prod.mjs(헬스·정기 실행·보안 헤더 등 11개 + 검수 계정 로그인)
+#   ② 운영 화면 확인 tests/prod/smoke.mjs — '검수용 시험 회사' 계정(가짜 자료만, 다짐과 분리)으로 주요 화면·업무 만들고 지우기·6MB 파일 올리기(R2 허용 주소)
+# 비밀값 PROD_QA_EMAIL·PROD_QA_PASSWORD 는 대표가 저장소 Settings › Secrets and variables › Actions 에 직접 넣음(없으면 ②는 건너뜀)
+# 공개 저장소라 실행 기록이 공개 — 화면 사진·실패 사진을 올리지 않고(artifact 없음), 로그에 이메일·이름을 찍지 않는다.
+# PR 에서는 돌지 않음(다른 사람이 보낸 PR 이 비밀값을 읽지 못하게) — 운영 배포 알림 또는 손으로 실행할 때만
+name: prod-check
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      base: { description: '확인할 주소', required: false, default: 'https://www.work-in.dev' }
+permissions:
+  contents: read
+concurrency:
+  group: prod-check
+  cancel-in-progress: false
+jobs:
+  check:
+    # Vercel 운영(Production) 배포가 성공했을 때만 — 미리보기 배포·실패·진행 중 알림은 건너뜀
+    if: github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BASE: ${{ github.event.inputs.base || 'https://www.work-in.dev' }}
+      EXPECT_SHA: ${{ github.event.deployment.sha || github.sha }}
+      PROD_QA_EMAIL: ${{ secrets.PROD_QA_EMAIL }}
+      PROD_QA_PASSWORD: ${{ secrets.PROD_QA_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.deployment.sha || github.sha }}' }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps chromium
+      - name: 기본 점검(11개 + 검수 계정 로그인)
+        env: { SMOKE_EMAIL: '${{ secrets.PROD_QA_EMAIL }}', SMOKE_PASSWORD: '${{ secrets.PROD_QA_PASSWORD }}' }
+        run: node scripts/verify-prod.mjs "$BASE"
+      - name: 운영 화면 확인(검수용 시험 회사)
+        run: node tests/prod/smoke.mjs

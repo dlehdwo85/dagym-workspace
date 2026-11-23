@@ -253,7 +253,9 @@ export const newTenantInput = z.object({
   trialDays: z.number().int().min(1).max(PARTNER.maxDays).optional(), spaces: z.array(z.enum(['sales', 'marketing'])).max(2).default([]), memo: z.string().max(2000).optional(),
   // #656: 담당자(비우면 대표)·연락처·직책, 구분(설계 파트너 체험단/일반), 소개 경로
   contactName: z.string().trim().max(50).optional(), contactPhone: z.string().trim().max(30).optional(), contactTitle: z.string().trim().max(30).optional(),
-  segment: z.enum(['partner', 'customer']).optional(), source: z.string().trim().max(100).optional() })
+  segment: z.enum(['partner', 'customer']).optional(), source: z.string().trim().max(100).optional(),
+  /** D-08(대표 11/23 승인): 검수용 시험 회사 — 고객 목록·통계에서 빼고, 체험 기간이 끝나 막히지 않게 */
+  isTest: z.boolean().optional() })
   .superRefine((v, ctx) => { // 208차 #667 설계 파트너: 체험으로 시작 · 기간(일)은 슈퍼관리자가 꼭 적음(기본값 없음, 1년까지) — 일반 체험은 90일까지
     if (v.segment !== 'partner') { if ((v.trialDays ?? 0) > 90) ctx.addIssue({ code: 'custom', path: ['trialDays'], message: '체험 기간은 90일까지입니다' }); return; }
     if (v.planCode && v.planCode !== 'trial') ctx.addIssue({ code: 'custom', path: ['planCode'], message: '설계 파트너는 체험으로 시작합니다 — 유료 전환은 고객사 관리에서 해 주세요' });
@@ -286,6 +288,10 @@ export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof n
     if (plan) await tx`update tenant_subscriptions set plan_code = ${plan}, status = 'active', trial_ends_at = null, period_end = null where tenant = ${tenant}`;
     else if (i.trialDays) await tx`update tenant_subscriptions set trial_ends_at = now() + ${i.trialDays} * interval '1 day', period_end = (now() + ${i.trialDays} * interval '1 day')::date where tenant = ${tenant}`;
     if (i.segment === 'partner') await (await import('./plans')).applyPartnerPreset(tenant, tx); // #667 AI 월 5,000원·마케팅 크레딧 0
+    if (i.isTest) { // D-08: 검수용 시험 회사 — 고객 목록·가입 통계에서 빠짐(is_test) · 배포 확인이 체험 만료로 막히지 않게 체험 기간을 길게
+      await tx`update tenants set is_test = true where id = ${tenant}`;
+      if (!plan) await tx`update tenant_subscriptions set trial_ends_at = now() + interval '3650 days', period_end = (now() + interval '3650 days')::date where tenant = ${tenant}`;
+    }
     const [hq] = await tx<{ id: string }[]>`select id from org_units where tenant = ${tenant} and type = 'hq' order by sort limit 1`;
     await tx`insert into invitations (email, name, role, org_unit_ids, token_hash, invited_by, user_id, expires_at) values (${i.ownerEmail}, ${i.ownerName}, 'owner', ${hq ? [hq.id] : []}, ${sha256(token)}, ${u.id}, ${userId}, now() + interval '7 days')`;
     await audit(tx, u.id, 'platform.tenant_create', 'tenant', tenant, { company: i.company, ownerEmail: i.ownerEmail, plan: plan ?? `trial${i.trialDays ? `(${i.trialDays}d)` : ''}`, spaces: i.spaces, industries: inds, segment: i.segment ?? null, ...(i.segment === 'partner' ? { preset: PARTNER } : {}) }, ip);

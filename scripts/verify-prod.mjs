@@ -45,7 +45,7 @@ if (process.env.SMOKE_EMAIL) {
     const me = await (await get('/api/auth/me', { headers: { cookie } })).json();
     const t = await (await get('/api/tasks?view=my', { headers: { cookie } })).json();
     await get('/api/auth/logout', { method: 'POST', headers: { cookie, origin: base } });
-    return `${me.user.name} · 내 업무 ${t.tasks.length}건`;
+    return `${me.user ? '내 정보 확인' : '내 정보 없음'} · 내 업무 ${t.tasks.length}건`; // 공개 실행 기록에 이름을 찍지 않음(D-08)
   });
 }
 const failed = results.filter((r) => !r.ok).length;

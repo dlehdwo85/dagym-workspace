@@ -13,6 +13,7 @@ export async function partner208({ owner, browser, ctx, sql, BASE, SHOTS, tick, 
   await f.getByTestId('new-company-email').fill('e2e-partner208@dagym.test');
   const days = f.getByTestId('new-company-trial-days');
   assert.equal(await days.inputValue(), '14', '일반 고객 체험은 14일 기본');
+  assert.equal(await f.getByTestId('new-company-test').isChecked(), false, 'D-08 검수용 시험 회사는 기본으로 꺼짐');
   await f.getByTestId('new-company-segment').selectOption('partner');
   assert.equal(await days.inputValue(), '', '파트너 기간은 기본값 없음');
   assert.equal(await f.getByTestId('new-company-plan').isDisabled(), true, '요금제는 체험 고정');
