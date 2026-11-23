@@ -9,6 +9,7 @@ import { useSession, useTerms } from '@/components/session';
 import { DropZone, PICK_MAX, UploadProgress, fileHash, putFile } from '@/components/upload';
 import { type Role } from '@/lib/types';
 import { Button, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDateTime, inputCls, toast, AiMark } from '@/components/ui';
+import { ItemShareSelect, ShareModeButton } from '@/components/ShareMode';
 
 type Sec = 'public' | 'internal' | 'confidential';
 type F = { id: string; folder: string; title: string; file_name: string; mime_type: string; size_bytes: number; tags: string[]; description: string | null;
@@ -272,6 +273,7 @@ export default function LibraryPage() {
     <div className="mx-auto max-w-6xl space-y-3">
       <PageHeader title="자료실" icon={Library} sub="폴더로 정리하고, 업무에 바로 첨부하고, AI 비서가 찾아 씁니다. 기밀 자료는 권한 있는 사람만 봅니다."
         actions={<>
+          <ShareModeButton /> {/* #1129 자료실·업무 공개 방식(보기 누구나, 바꾸기 대표) */}
           {data?.confEdit && <Button variant="ghost" onClick={() => setLogOpen(true)} data-testid="conf-log-open"><ShieldAlert />기밀 열람 기록</Button>}
           {canUpload && admin && <Button variant="secondary" onClick={previewAll} disabled={!!allBusy} data-testid="library-organize-all">{allBusy ? <><Loader2 className="animate-spin" />{allBusy}</> : <><FolderTree />전체 정리<AiMark /></>}</Button>}
           {canUpload && <Button variant="secondary" onClick={() => setDlg({ kind: 'doc', value: '' })} data-testid="library-new-doc"><FilePenLine />새 문서</Button>}
@@ -470,6 +472,10 @@ export default function LibraryPage() {
                   {teams.map((t) => <option key={t.id} value={`team:${t.id}`}>{t.name}(우리 팀)</option>)}
                   {edit.created_by === user.id && <option value="mine">내 파일(나만)</option>}
                 </select></Field>)}
+            {/* #1129 '우리 팀' 자료 공개 범위: 회사 설정(공개 방식) 따름 / 회사 전체 / 이 팀만 — 저장된 팀 자료에서만, 바로 저장 */}
+            {edit.scope === 'team' && (edit as F & { share?: 'team' | 'company' | null }).share !== undefined && (edit.created_by === user.id || admin) && (
+              <Field label="공개 범위" hint="회사 공개 방식이 '회사 전체 공유'여도 '이 부서·팀만'이면 이 팀만 봅니다">
+                <ItemShareSelect url={`/api/library/${edit.id}/share`} value={(edit as F & { share?: 'team' | 'company' | null }).share ?? null} testid="library-edit-share" /></Field>)}
             <Field label="설명"><textarea className={inputCls} value={edit.description ?? ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></Field>
             <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setEdit(null)}>취소</Button><Button type="submit">저장</Button></div>
           </form>

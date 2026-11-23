@@ -56,7 +56,7 @@ export function Ops() {
     <div className="mx-auto max-w-5xl space-y-4" data-testid="mkt-ops">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold" style={{ color: C }}>운영 계획 <span className="text-sm font-normal text-ink-2">AI 마케터</span></h1>
-        <Link href="/s/marketing/team" className="text-xs text-ink-2 underline" data-testid="ops-team-link">AI 마케팅팀(역할·일정·기억) →</Link>
+        <Link href="/s/marketing/team" className="text-xs text-ink-2 underline" data-testid="ops-team-link">AI 마케팅팀(역할·일정·기억)</Link>
         <select className={cx(inputCls, 'h-8 w-auto py-0 text-sm')} value={data?.month ?? ''} onChange={(e) => setMonth(e.target.value)} aria-label="달" data-testid="ops-month">{(data?.months ?? []).map((m) => <option key={m} value={m}>{mk(m)}</option>)}</select>
         {data?.canEdit && <Button size="sm" variant="secondary" className="ml-auto" onClick={weekly} disabled={busy} data-testid="ops-weekly">주간 제안 만들기</Button>}
         {data?.canEdit && <Button size="sm" onClick={propose} disabled={busy} data-testid="ops-propose">AI 마케터 제안 받기</Button>}
@@ -126,7 +126,7 @@ export function ProposalCard({ p, kinds, canEdit, onChange }: { p: Proposal; kin
       {p.revision_note && <p className="mt-2 rounded-input border border-amber-200 bg-amber-50/50 px-2.5 py-1.5 text-[11px] text-ink-2" data-testid="ops-card-revision"><b className="text-amber-800">수정 요청 사유 → 반영한 점</b> {p.revision_note}</p>}
       {p.decision_note && <p className="mt-1 text-[11px] text-ink-2">결정 메모: {p.decision_note}</p>}
       {p.status !== 'pending' && p.decided_by_name && <p className="mt-1 text-[11px] text-ink-3">{p.decided_by_name} · {p.decided_at ? fmtDateTime(p.decided_at) : ''}{ex.briefs?.length ? ` · 제작의뢰 ${ex.briefs.length}건` : ''}{ex.tasks?.length ? ` · 업무 ${ex.tasks.length}건` : ''}</p>}
-      {p.status === 'approved' && <p className="mt-1 text-[11px]">{ex.briefs?.length ? <Link href="/s/marketing/automation?tab=studio" className="underline">제작의뢰실에서 진행 →</Link> : ex.tasks?.length ? <Link href={`/tasks/${ex.tasks[0]}`} className="underline">업무 열기 →</Link> : null}</p>}
+      {p.status === 'approved' && <p className="mt-1 text-[11px]">{ex.briefs?.length ? <Link href="/s/marketing/automation?tab=studio" className="underline">제작의뢰실에서 진행</Link> : ex.tasks?.length ? <Link href={`/tasks/${ex.tasks[0]}`} className="underline">업무 열기</Link> : null}</p>}
       {canEdit && p.status === 'pending' && <div className="mt-3 flex flex-wrap items-center gap-1.5">
         {/* 요청 C §3-5(대표 10/25 22:20): 운영 제안도 콘텐츠와 같은 두 단추 [승인]·[수정 요청](사유 → AI 가 반영한 안을 다시 올림) — 서버 동작(reject)은 그대로 */}
         {!reject ? <><Button size="sm" onClick={() => act({ action: 'approve' }, '승인했습니다 — 실행으로 넘겼습니다')} disabled={busy} data-testid="ops-approve">승인</Button>
@@ -182,7 +182,7 @@ export function BudgetCard({ b, month, canEdit, busy, onDraft, onChange, ownerTo
             <td className="py-1.5 text-right tabular-nums">{edit ? <input className={cx(inputCls, 'h-7 w-28 py-0 text-right text-xs')} value={plan[p.provider] ?? ''} onChange={(e) => setPlan({ ...plan, [p.provider]: e.target.value })} inputMode="numeric" aria-label={`${p.label} 월 예산`} data-testid={`budget-in-${p.provider}`} /> : won(p.monthly)}</td>
             <td className="py-1.5 text-right tabular-nums text-ink-2">{won(p.daily)}</td>
             <td className="py-1.5 text-right tabular-nums">{p.connected ? <>{won(p.used)}{p.rate !== null && <span className={cx('ml-1', p.rate >= 80 ? 'font-semibold text-red-700' : 'text-ink-3')}>{p.rate}%</span>}</> : '—'}</td>
-            <td className="py-1.5 text-ink-2">{p.note}{p.rate !== null && p.rate >= 80 && p.charge && <a href={p.charge} target="_blank" rel="noreferrer" className="ml-1 font-semibold text-red-700 underline" data-testid={`budget-charge-${p.provider}`}>충전 필요 →</a>}</td></tr>)}</tbody>
+            <td className="py-1.5 text-ink-2">{p.note}{p.rate !== null && p.rate >= 80 && p.charge && <a href={p.charge} target="_blank" rel="noreferrer" className="ml-1 font-semibold text-red-700 underline" data-testid={`budget-charge-${p.provider}`}>충전 필요</a>}</td></tr>)}</tbody>
           <tfoot><tr className="border-t border-line font-semibold"><td className="py-1.5">합계</td><td className="py-1.5 text-right tabular-nums" data-testid="budget-total">{won(b.total)}</td><td colSpan={3} /></tr></tfoot></table>
         {/* ③ 브랜드 축: 비중(대표 지정 → 이름 기본값) · 우선순위 · 세팅안 수(없으면 '세팅안 필요') · 메모(바디랩 지역 한정) */}
         {!!b.brand_plan?.length && <table className="mt-3 w-full text-xs" data-testid="budget-brands"><thead className="text-left text-ink-3"><tr><th className="py-1">브랜드</th><th className="py-1 text-right">비중</th><th className="py-1 text-right">월 예산</th><th className="py-1">세팅안</th><th className="py-1">메모</th></tr></thead>
@@ -190,7 +190,7 @@ export function BudgetCard({ b, month, canEdit, busy, onDraft, onChange, ownerTo
             <td className="py-1.5"><span className="mr-1 rounded-full bg-slate-100 px-1.5 text-[10px] text-ink-3">{x.priority ?? '-'}순위</span>{x.name}</td>
             <td className="py-1.5 text-right tabular-nums">{x.share}%</td>
             <td className="py-1.5 text-right tabular-nums">{edit ? <input className={cx(inputCls, 'h-7 w-28 py-0 text-right text-xs')} value={bplan[x.brandId] ?? ''} onChange={(e) => setBplan({ ...bplan, [x.brandId]: e.target.value })} inputMode="numeric" aria-label={`${x.name} 월 예산`} data-testid={`budget-brand-in-${x.name}`} /> : won(x.monthly)}</td>
-            <td className="py-1.5">{x.plans ? <span className="text-emerald-800">네이버 {x.plans}건</span> : <Link href="/s/marketing/ad-ops?tab=naver" className="font-semibold text-amber-800 underline" data-testid={`budget-brand-needs-${x.name}`}>세팅안 필요 →</Link>}</td>
+            <td className="py-1.5">{x.plans ? <span className="text-emerald-800">네이버 {x.plans}건</span> : <Link href="/s/marketing/ad-ops?tab=naver" className="font-semibold text-amber-800 underline" data-testid={`budget-brand-needs-${x.name}`}>세팅안 필요</Link>}</td>
             <td className="py-1.5 text-ink-2">{x.note}</td></tr>)}</tbody></table>}
         {b.reject_note && <p className="mt-2 text-[11px] text-ink-3" data-testid="budget-reject-note">반려 사유: {b.reject_note}</p>}
         {b.revision_note && <p className="mt-1 rounded-input border border-amber-200 bg-amber-50/50 px-2.5 py-1.5 text-[11px] text-ink-2" data-testid="budget-revision"><b className="text-amber-800">반려 사유 → 반영한 점</b> {b.revision_note}</p>}

@@ -77,7 +77,7 @@ export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id, t.review_of,
   t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id, t.reminder_minutes, t.alarm, t.lead_id, t.sales_ref, t.assigned_by_rule,
-  t.complete_rule, t.assignee_done_at is not null as assignee_done, ${coAssigneesCol(sql)},
+  t.complete_rule, t.assignee_done_at is not null as assignee_done, t.share, ${coAssigneesCol(sql)},
   t.due_extend_count, (select json_build_object('id', x.id, 'from', to_char(x.from_date, 'YYYY-MM-DD'), 'to', to_char(x.to_date, 'YYYY-MM-DD'), 'toTime', to_char(x.to_time, 'HH24:MI'), 'reason', x.reason, 'by', x.requested_by, 'byName', xu.name)
     from task_due_extensions x join users xu on xu.id = x.requested_by where x.task_id = t.id and x.status = 'pending' order by x.created_at desc limit 1) as ext_pending,
   t.team_id, (select tm.name from teams tm where tm.id = t.team_id) as team_name, (select tm.color from teams tm where tm.id = t.team_id) as team_color,

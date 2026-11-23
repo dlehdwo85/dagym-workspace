@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { AiAsk, AI_ASK_EXAMPLES } from '@/components/AiAsk';
 import { RevenueGoal } from '@/components/marketing/RevenueGoal';
 import Link from 'next/link';
+import { StatStrip } from '@/components/StatStrip';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, CalendarDays, Circle, CircleCheck, ClipboardList, Copy, Download, ExternalLink, FileText, Handshake, MessageCircle, MessageSquare, Paperclip, Phone, RefreshCw, type LucideIcon } from 'lucide-react';
 import type { SearchHint } from '@/lib/sales/sourceLink';
@@ -296,9 +297,7 @@ export function TodayRow({ date, cards, color = C }: { date: string; cards: [str
   return (
     <section className="rounded-card border bg-white p-3 shadow-card" style={{ borderColor: color }} data-testid="today-row">
       <h2 className="mb-2 text-sm font-semibold">오늘 <span className="font-normal text-ink-3">{date}</span></h2>
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">{cards.map(([l, n, h, sub]) => (
-        <Link key={l} href={h} className="rounded-input border border-line p-2.5 hover:bg-slate-50" data-testid="today-card"><div className="text-xs text-ink-2">{l}</div>
-          <div className="mt-0.5 text-xl font-bold tabular-nums" style={{ color: n ? color : undefined }}>{n}</div>{sub && <div className="truncate text-[11px] text-ink-3">{sub}</div>}</Link>))}</div>
+      <StatStrip big cols={4} items={cards.map(([l, n, h, sub]) => ({ label: l, value: n, href: h, sub, color: n ? color : undefined, testid: 'today-card' }))} /> {/* D-03: 같은 모양 카드 4개 → 숫자 줄 */}
     </section>
   );
 }
@@ -326,7 +325,7 @@ export function SalesHome() {
       {data.setupNeeded && (
         <section className="rounded-card border-2 border-[#93C5FD] bg-[#EFF6FF] p-4" data-testid="sales-setup-prompt">
           <h2 className="text-base font-bold text-[#1D4ED8]">영업 출처부터 고르세요</h2>
-          <p className="mt-1 text-sm text-ink-2">회사 업종·지역·주력 상품을 보고 AI 가 맞는 출처(공공데이터·입찰 등)를 근거와 함께 추천합니다. 체크로 고르고, 목록 밖 사이트·키워드·엑셀도 직접 넣을 수 있어요.</p>
+          <p className="mt-1 text-sm text-ink-2">회사 업종, 지역, 주력 상품을 보고 AI 가 맞는 출처(공공데이터·입찰 등)를 근거와 함께 추천합니다. 체크로 고르고, 목록 밖 사이트, 키워드, 엑셀도 직접 넣을 수 있어요.</p>
           <Link href="/s/sales/sources" className="mt-2 inline-block rounded-input bg-[#2563EB] px-4 py-2 text-sm font-medium text-white" data-testid="sales-setup-go">출처 추천받기</Link>
           {/* #408 온보딩 업종 템플릿: 업종을 고르면 영업 화면 용어가 따라옴 — 데이터 설정에서 바꿀 수 있음 */}
           <p className="mt-2 text-xs text-ink-2" data-testid="sales-setup-template">업종 템플릿: <b>{T.label}</b> — 화면 용어({T.kind.building}·{T.kind.facility}·{T.kind.vendor})를 업종에 맞춥니다. <Link href="/s/sales/sources#template" className={linkCls}>바꾸기</Link></p>
@@ -334,8 +333,8 @@ export function SalesHome() {
       {/* #647(대표 10/25 22:20): 앱에서 지원사업이 잘 안 보여서 — 홈 상단 고정 카드 '이번 주 맞는 지원사업 n건'(7일 안 마감 맞춤) + 허브 '지원사업' 탭 */}
       {data.support && <Link href="/s/sales/support?tab=fit" className="flex items-center gap-3 rounded-card border-2 border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 shadow-card hover:border-blue-400" data-testid="sales-support-pin">
         <div className="min-w-0 flex-1"><div className="text-sm font-semibold text-[#1D4ED8]">이번 주 맞는 지원사업 <span className="text-lg tabular-nums" data-testid="sales-support-pin-n">{data.support.fit}</span>건</div>
-          <div className="truncate text-[11px] text-ink-2">7일 안 마감 기준 · 신청할 수 있는 맞춤 {data.support.fitOpen ?? 0}건 · 관심·준비 중 {data.support.mineOpen ?? data.support.mine}건{data.support.pending ? ` · 규칙상 맞음·AI 판단 전 ${data.support.pending}건` : ''}</div></div>
-        <span className="shrink-0 text-xs font-medium text-[#1D4ED8]">지원사업 보기 →</span>
+          <div className="truncate text-[11px] text-ink-2">7일 안에 마감하는 공고 중 신청할 수 있는 맞춤 {data.support.fitOpen ?? 0}건, 관심·준비 중 {data.support.mineOpen ?? data.support.mine}건{data.support.pending ? ` · 규칙상 맞음·AI 판단 전 ${data.support.pending}건` : ''}</div></div>
+        <span className="shrink-0 text-xs font-medium text-[#1D4ED8]">지원사업 보기</span>
       </Link>}
       {data.today && <TodayRow date={data.today.date} cards={[
         ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/hub?tab=bids&sub=today'] as [string, number, string]] : []), // #537 영업기회 › 입찰 › 오늘 새 공고
@@ -350,14 +349,13 @@ export function SalesHome() {
       {/* S2-6 영업기회 요약 타일 6 + 목록별 진행 현황표 */}
       {data.tiles && <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="sales-tiles">
         <h2 className="mb-2 text-sm font-semibold">영업기회 요약</h2>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 text-center">{([['지금 영업할 곳', data.tiles.nowSales, '/s/sales/hub?tab=bids&bt=working'], ...(bids ? [['진행 중 입찰', data.tiles.bidsOpen, '/s/sales/hub?tab=bids&bt=open'], ['계약만료·재입찰', data.tiles.contracts, '/s/sales/contracts']] : []), ...(movedOn('buildings') ? [[T.kind.building, data.tiles.buildings, '/s/sales/hub?tab=buildings']] : []), ...(facOn ? [[T.facilitiesTab, data.tiles.facilities, '/s/sales/hub?tab=facilities']] : []), ...(movedOn('vendors') ? [[T.vendorsTab, data.tiles.vendors, '/s/sales/hub?tab=vendors']] : [])] as [string, number, string][]).map(([l, n, h]) => (
-          <Link key={l} href={h} className="rounded-input border border-line p-2 hover:border-blue-300" data-testid="sales-tile"><div className="text-[11px] text-ink-2">{l}</div><div className="text-lg font-bold tabular-nums" style={{ color: C }}>{n}</div></Link>))}</div>
+        <StatStrip cols={6} items={([['지금 영업할 곳', data.tiles.nowSales, '/s/sales/hub?tab=bids&bt=working'], ...(bids ? [['진행 중 입찰', data.tiles.bidsOpen, '/s/sales/hub?tab=bids&bt=open'], ['계약만료·재입찰', data.tiles.contracts, '/s/sales/contracts']] : []), ...(movedOn('buildings') ? [[T.kind.building, data.tiles.buildings, '/s/sales/hub?tab=buildings']] : []), ...(facOn ? [[T.facilitiesTab, data.tiles.facilities, '/s/sales/hub?tab=facilities']] : []), ...(movedOn('vendors') ? [[T.vendorsTab, data.tiles.vendors, '/s/sales/hub?tab=vendors']] : [])] as [string, number, string][]).map(([l, n, h]) => ({ label: l, value: n, href: h, color: C, testid: 'sales-tile' }))} /> {/* D-03: 타일 6개 → 숫자 줄 */}
         {data.progress && <div className="mt-2 hidden overflow-x-auto md:block" data-testid="sales-progress"><table className="w-full text-xs"><thead><tr className="text-left text-ink-3"><th className="py-1 pr-2">목록</th>{PROG_COLS.map((c) => <th key={c} className="py-1 pr-2 text-right">{c}</th>)}</tr></thead>
           <tbody>{(data.progress as [string, Record<string, number>][]).map(([name, m]) => <tr key={name} className="border-t border-line"><td className="py-1 pr-2 font-medium">{name}</td>{PROG_COLS.map((c) => <td key={c} className="py-1 pr-2 text-right tabular-nums">{Object.entries(m).filter(([k]) => PROG_MATCH[c].test(k)).reduce((a, [, v]) => a + v, 0) || ''}</td>)}</tr>)}</tbody></table></div>}
       </section>}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">{cards.map(([l, n, h]) => (
-        <Link key={l} href={h} className="rounded-card border border-line bg-white p-3 shadow-card hover:border-blue-300" data-testid={l === '마감 임박 지원사업' ? 'sales-kpi-support' : 'sales-kpi'}><div className="text-xs text-ink-2">{l}</div><div className={cx('mt-1 text-2xl font-bold tabular-nums', l === '연락 지남' && n ? 'text-red-600' : '')} style={l === '연락 지남' && n ? undefined : { color: C }}>{n}</div>
-          {l === '마감 임박 지원사업' && data.support && <div className="truncate text-[11px] text-ink-3">관심·준비 {data.support.mine} · 맞춤 {data.support.fit}</div>}</Link>))}</div>
+      <StatStrip cols={4} testid="sales-kpis" items={cards.map(([l, n, h]) => ({ label: l, value: n, href: h, alert: l === '연락 지남' && !!n, color: C,
+        sub: l === '마감 임박 지원사업' && data.support ? `관심·준비 ${data.support.mine}, 맞춤 ${data.support.fit}` : undefined,
+        testid: l === '마감 임박 지원사업' ? 'sales-kpi-support' : 'sales-kpi' }))} /> {/* D-03: 카드 8개 → 숫자 줄 */}
       <div className="grid gap-3 lg:grid-cols-2">
         <section className="rounded-card border border-line bg-white p-3 shadow-card"><h2 className="mb-2 text-sm font-semibold">다가오는 연락</h2>
           <ul className="divide-y divide-line text-sm">{data.due.map((l: any) => <li key={l.id} className="flex items-center gap-2 py-1.5"><Link href={`/s/sales/leads?id=${encodeURIComponent(l.id)}`} className="min-w-0 flex-1 truncate hover:underline">{l.name}</Link>{chip(l.status)}<span className={cx('text-xs tabular-nums', l.next < today() ? 'font-semibold text-red-600' : 'text-ink-2')}>{kd(l.next)}</span></li>)}
@@ -386,7 +384,7 @@ function TodoGroups({ todo, bids, vendors = true, facilities = true }: { todo: R
   return (
     <section className="rounded-card border border-line bg-white p-3 shadow-card" data-testid="sales-todo">
       <div className="mb-2 flex items-center gap-2"><h2 className="text-sm font-semibold">오늘 할 일 <span className="font-normal text-ink-3">{total}건</span></h2>
-        {first && <Link href={hrefOf(first)} className="ml-auto rounded-input px-2.5 py-1 text-xs font-medium text-white" style={{ background: C }} data-testid="sales-todo-start">순서대로 시작 →</Link>}</div>
+        {first && <Link href={hrefOf(first)} className="ml-auto rounded-input px-2.5 py-1 text-xs font-medium text-white" style={{ background: C }} data-testid="sales-todo-start">순서대로 시작</Link>}</div>
       <ul className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-4">{groups.map(([k, label, hint]) => { const items: any[] = todo[k] ?? []; const open = openK === k;
         return <li key={k} className={cx('rounded-input border p-2', items.length ? 'border-line' : 'border-dashed border-line/70 text-ink-3')} data-testid={`sales-todo-${k}`}>
           <button type="button" className="flex w-full items-center gap-1.5 text-left text-sm" onClick={() => setOpenK(open ? null : k)} title={hint} aria-expanded={open}><span className="min-w-0 flex-1 truncate">{label}</span><b className={cx('tabular-nums', items.length ? '' : 'font-normal')} style={items.length ? { color: C } : undefined}>{items.length}</b></button>
@@ -1797,9 +1795,9 @@ const BID_RES: Record<string, [string, string]> = { won: ['낙찰', 'bg-emerald-
 function BidTaskChip({ b }: { b: any }) {
   const r = b.result ? BID_RES[String(b.result)] : null;
   return <span className="inline-flex flex-wrap items-center gap-1.5" data-testid="sales-bid-task-chip">
-    {b.result !== 'canceled' && <Link href={`/tasks/${b.taskId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-bid-task">입찰 업무{!b.result && b.due ? ` · 마감 ${kd(b.due)}${b.dueTime ? ` ${b.dueTime}` : ''}` : ''} →</Link>}
+    {b.result !== 'canceled' && <Link href={`/tasks/${b.taskId}`} className={cx(linkCls, 'text-emerald-800')} data-testid="sales-bid-task">입찰 업무{!b.result && b.due ? ` · 마감 ${kd(b.due)}${b.dueTime ? ` ${b.dueTime}` : ''}` : ''}</Link>}
     {r && <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', r[1])} data-testid="sales-bid-result">{r[0]}{b.auto && b.result !== 'canceled' ? ' · 자동 판정' : ''}</span>}
-    {b.contractTaskId && <Link href={`/tasks/${b.contractTaskId}`} className={cx(linkCls, 'text-ink-2')} data-testid="sales-bid-contract">계약 업무 →</Link>}
+    {b.contractTaskId && <Link href={`/tasks/${b.contractTaskId}`} className={cx(linkCls, 'text-ink-2')} data-testid="sales-bid-contract">계약 업무</Link>}
   </span>;
 }
 /** 입찰 상세의 입찰 업무 칸 — 결과 [낙찰]·[미낙찰]·[유찰](자동 판정 바로잡기 포함), 낙찰은 계약 기간·금액(선택) */

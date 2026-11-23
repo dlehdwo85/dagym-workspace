@@ -538,7 +538,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
           <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{!!homeInfo?.badge && homeInfo.href && <Link href={homeInfo.href} prefetch={false} data-testid="space-badge-line"
             className="mb-3 flex items-center gap-2 rounded-card border px-3 py-2 text-xs text-ink-2 hover:bg-white" style={{ borderColor: sm.border, background: sm.soft }}>
             <SpaceBadge sp={space} n={homeInfo.badge} label={homeInfo.label} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />
-            <span className="min-w-0 flex-1"><b className="text-ink">{homeInfo.label} {homeInfo.badge}건</b> — 공간 전환 칸의 {sm.short} 숫자는 이 숫자입니다(알림 종 숫자와 다름)</span><span className="shrink-0 font-medium" style={{ color: sm.color }}>보기 →</span></Link>}
+            <span className="min-w-0 flex-1"><b className="text-ink">{homeInfo.label} {homeInfo.badge}건</b> — 공간 전환 칸의 {sm.short} 숫자는 이 숫자입니다(알림 종 숫자와 다름)</span><span className="shrink-0 font-medium" style={{ color: sm.color }}>보기</span></Link>}
             {pageAlarms > 0 && pageArea && <PageAlarms area={pageArea} n={pageAlarms} onRead={(u) => { setUnread(u); setAreas((a) => ({ ...a, [pageArea]: 0 })); pollRef.current(); }} />}
             {children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>

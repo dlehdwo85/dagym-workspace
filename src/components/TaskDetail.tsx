@@ -1,4 +1,5 @@
 'use client';
+import { ItemShareSelect } from './ShareMode';
 import { dtf } from '@/lib/dtf';
 import { RoleBadge } from '@/components/RoleBadge';
 import Link from 'next/link';
@@ -10,7 +11,7 @@ import { useInApp } from '@/components/inApp';
 import { showTask } from '@/components/TaskPanelHost';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { AlertTriangle, BadgeCheck, Bell, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarRange, Camera, Check, ChevronDown, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash, Hourglass, LayoutTemplate, Link2, ListFilter, Lock, Lock as LockIcon, MapPin, Maximize2, Megaphone, Merge, MessageCircle, MessageSquareText, MoreHorizontal, Paperclip, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck, SmilePlus, Stamp, Tag, Timer, Trash2, Type, type LucideIcon, Undo2, UserRound, Users, X } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, Globe2, Bell, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarRange, Camera, Check, ChevronDown, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash, Hourglass, LayoutTemplate, Link2, ListFilter, Lock, Lock as LockIcon, MapPin, Maximize2, Megaphone, Merge, MessageCircle, MessageSquareText, MoreHorizontal, Paperclip, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck, SmilePlus, Stamp, Tag, Timer, Trash2, Type, type LucideIcon, Undo2, UserRound, Users, X } from 'lucide-react';
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtNum, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, FileKindIcon, attKindSummary, uploadTaskFiles } from '@/components/Attachments';
@@ -773,6 +774,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
             {/* P2 조직 개편(대표 10/26): 부서 간 협업 — 붙이면 그 부서(팀)와 위 단위가 같이 봄. 바꾸기는 요청자·담당자 */}
             {(t.team_id || data.collabTeams?.length > 0 || data.orgHasTeams) && <Prop icon={Building2} label="함께하는 부서" hint="그 부서와 위 단위도 이 업무를 봅니다" asDiv>
               <CollabTeams value={data.collabTeams ?? []} ownerTeamId={t.team_id ?? null} canEdit={!!perms.edit} onChange={(ids) => patch({ collabTeamIds: ids }, '함께하는 부서를 바꿨습니다')} /></Prop>}
+            {/* #1129 공개 범위: 회사 설정(자료실 › 공개 방식) 따름 / 회사 전체 / 이 부서·팀만 — 바꾸기는 요청자·담당자·대표·관리자 */}
+            <Prop icon={Globe2} label="공개 범위" hint="이 업무를 볼 수 있는 범위" asDiv><span className="pl-1"><ItemShareSelect url={`/api/tasks/${t.id}/share`} value={t.share ?? null} disabled={!perms.edit && !['owner', 'admin'].includes(user.role)} testid="detail-share" /></span></Prop>
             <Prop icon={Megaphone} label="요청자">
               <span className="flex pl-2 items-center gap-1.5" data-testid="detail-requester"><Avatar id={t.requested_by} name={t.requested_by_name} size={22} /><UserSelect className={ghostCls} value={t.requested_by} onChange={(v) => patch({ requestedById: v })} /></span>
             </Prop>

@@ -147,7 +147,7 @@ export function ConceptSetCard({ s, canDecide, userId, maxRevisions, onChange }:
               {c.angle && <p className="mt-0.5 text-ink-3">{c.angle}</p>}
               {c.score && !c.score.pass && (c.score.fails.length > 0 || c.score.notes.length > 0) && <p className="mt-0.5 text-[11px] text-amber-800">{[...c.score.fails, ...c.score.notes].join(' · ')}</p>}
               {(c.headline || c.primary) && <details className="mt-1"><summary className="cursor-pointer text-[11px] text-ink-2">제목·본문</summary><p className="mt-1 font-medium">{c.headline}</p><p className="whitespace-pre-line text-ink-2">{c.primary}</p></details>}
-              {c.decision === 'adopted' && <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">{b && <Link href="/s/marketing/automation?tab=studio" className="underline" data-testid="concept-brief">제작 의뢰 · {b.status} →</Link>}
+              {c.decision === 'adopted' && <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">{b && <Link href="/s/marketing/automation?tab=studio" className="underline" data-testid="concept-brief">제작 의뢰 · {b.status}</Link>}
                 <Button size="sm" variant="secondary" disabled={busy !== ''} onClick={() => variant(c)} data-testid="concept-variant">{busy === `v-${c.id}` ? '만드는 중…' : '새 각도'}</Button></div>}
             </div>
           </div>

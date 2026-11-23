@@ -134,7 +134,7 @@ function ReportCard({ p, view, open }: { p: Report; view: View; open: boolean })
             <p className="mt-1 font-semibold text-ink">{s.hook}</p>
             <ul className="mt-0.5 space-y-0.5 text-ink-2">{s.lines.map((l, j) => <li key={j}>{l}</li>)}</ul>
             {s.cta && <p className="mt-0.5">→ {s.cta}</p>}
-            <Link href={studioHref(s, p.brand_id)} className="mt-1 inline-block underline" style={{ color: '#7C3AED' }} data-testid="adref-script-studio">제작의뢰실로 →</Link>
+            <Link href={studioHref(s, p.brand_id)} className="mt-1 inline-block underline" style={{ color: '#7C3AED' }} data-testid="adref-script-studio">제작의뢰실로</Link>
           </div>))}</div>}
       </div>
     </details>

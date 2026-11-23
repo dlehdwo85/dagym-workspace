@@ -290,7 +290,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         {c.status === 'approved' && c.approved_version === c.current_version && data.canDecide && !c.is_test && !data.publish?.canServer && (data.publish?.targets ?? []).some((t: any) => t.reason && t.reason !== 'none') && (
           <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="mkt-publish-blocked">
             {(data.publish.targets as any[]).some((t) => t.reason === 'unassigned') ? `계정에 브랜드를 지정하세요 — ${(data.publish.targets as any[]).flatMap((t) => t.unassigned).join('·')} 은 브랜드 미지정이라 게시 대상에서 빠져 있습니다.` : `이 브랜드(${c.brand ?? '브랜드 없음'})에 지정된 계정이 없습니다 — 다른 브랜드 계정으로는 나가지 않습니다.`}
-            <Link href="/s/marketing/connections" className="ml-1 font-medium underline">연결 계정에서 지정 →</Link></p>
+            <Link href="/s/marketing/connections" className="ml-1 font-medium underline">연결 계정에서 지정</Link></p>
         )}
         {c.status === 'approved' && (
           <div className="flex gap-2"><input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="직접 올렸다면 게시한 글 주소(https://…)" aria-label="게시 주소" /><Button onClick={publish} disabled={!url} data-testid="mkt-publish">게시 확인</Button></div>
@@ -394,19 +394,19 @@ function ProposalGroups({ d, onChange }: { d: Inbox; onChange: () => void }) {
 function InboxTab({ tab, d, onChange }: { tab: string; d: Inbox; onChange: () => void }) {
   const empty = (t: string, href: string, label: string) => <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3" data-testid="mkt-inbox-empty">{t} <Link href={href} className="underline">{label}</Link></p>;
   if (tab === 'proposals') return d.proposals.length ? <ProposalGroups d={d} onChange={onChange} />
-    : empty('대기 중인 운영 제안 카드가 없습니다.', '/s/marketing/ops', '운영 계획에서 [AI 마케터 제안 받기] →');
+    : empty('대기 중인 운영 제안 카드가 없습니다.', '/s/marketing/ops', '운영 계획에서 [AI 마케터 제안 받기]');
   if (tab === 'budget') return d.budgets.length ? <div className="space-y-3" data-testid="mkt-inbox-budget">{d.budgets.map((b) => <BudgetCard key={b.id} b={b} month={b.month} canEdit={d.canEdit} busy={false} onDraft={() => {}} onChange={onChange} compact />)}</div>
-    : empty('승인 대기 중인 광고 예산 계획이 없습니다.', '/s/marketing/ops', '운영 계획에서 예산 계획 만들기 →');
+    : empty('승인 대기 중인 광고 예산 계획이 없습니다.', '/s/marketing/ops', '운영 계획에서 예산 계획 만들기');
   // #494 메타 광고 초안(Meta 에 꺼진 채로 만든 것) — 승인하면 서버가 상한을 다시 확인하고 켬
   if (tab === 'ads') return d.ads.length ? <div className="grid gap-3 xl:grid-cols-2" data-testid="mkt-inbox-ads">{d.ads.map((r) => <MetaDraftCard key={r.id} r={r} canEdit={d.canEdit} onChange={onChange} />)}</div>
-    : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops?tab=meta', '광고 집행에서 메타 광고 세팅 →');
+    : empty('승인 대기 중인 광고 초안이 없습니다.', '/s/marketing/ad-ops?tab=meta', '광고 집행에서 메타 광고 세팅');
   // #499-4 상황 매트릭스: 1~4개 채택 → 광고형 제작 의뢰 · 반려 사유 → AI 고친 안
   if (tab === 'concepts') return d.concepts.length ? <div className="space-y-3" data-testid="mkt-inbox-concepts">{d.concepts.map((s) => <ConceptSetCard key={s.id} s={s} canDecide={d.canEdit} userId={d.userId} maxRevisions={d.maxRevisions} onChange={onChange} />)}</div>
-    : empty('채택을 기다리는 광고 컨셉이 없습니다.', '/s/marketing/ops#concepts', '운영 계획에서 상황 매트릭스 만들기 →');
+    : empty('채택을 기다리는 광고 컨셉이 없습니다.', '/s/marketing/ops#concepts', '운영 계획에서 상황 매트릭스 만들기');
   if (tab === 'goals') return d.goals.length ? <div className="space-y-3" data-testid="mkt-inbox-goals">{d.goals.map((g) => <GoalCard key={g.id} g={g} canEdit={d.canEdit} today={d.today} onChange={onChange} />)}</div>
-    : empty('승인 대기 중인 월 운영 목표 초안이 없습니다.', '/s/marketing/goals', '월 운영 목표 →');
+    : empty('승인 대기 중인 월 운영 목표 초안이 없습니다.', '/s/marketing/goals', '월 운영 목표');
   return d.briefs.length ? <div className="grid gap-3 md:grid-cols-2" data-testid="mkt-inbox-briefs">{d.briefs.map((b) => <BriefDecisionCard key={b.id} b={b} canEdit={d.canEdit} onChange={onChange} />)}</div>
-    : empty('생성 결정을 기다리는 제작 의뢰가 없습니다.', '/s/marketing/automation?tab=studio', '제작의뢰실 →');
+    : empty('생성 결정을 기다리는 제작 의뢰가 없습니다.', '/s/marketing/automation?tab=studio', '제작의뢰실');
 }
 /** 제작 의뢰(프롬프트 준비됨): 관리자가 [생성](크레딧) 또는 [취소]. 프롬프트 수정은 제작의뢰실에서 */
 function BriefDecisionCard({ b, canEdit, onChange }: { b: InboxBrief; canEdit: boolean; onChange: () => void }) {
@@ -421,7 +421,7 @@ function BriefDecisionCard({ b, canEdit, onChange }: { b: InboxBrief; canEdit: b
       <h3 className="mt-1.5 text-sm font-bold">{b.message}</h3>
       {b.summary_ko && <p className="mt-1 whitespace-pre-wrap text-xs text-ink-2">{b.summary_ko.slice(0, 300)}</p>}
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <Link href={`/s/marketing/automation?tab=studio&brief=${b.id}`} className="text-xs underline">프롬프트 보기·고치기 →</Link>
+        <Link href={`/s/marketing/automation?tab=studio&brief=${b.id}`} className="text-xs underline">프롬프트 보기·고치기</Link>
         {canEdit && <span className="ml-auto flex gap-1.5"><Button size="sm" onClick={() => act('generate', '생성을 시작했습니다 — 시안이 나오면 승인 대기로 올라옵니다')} disabled={busy} data-testid="inbox-brief-generate">생성</Button>
           <Button size="sm" variant="secondary" onClick={() => { if (confirm('이 의뢰를 취소할까요?')) void act('cancel', '취소했습니다'); }} disabled={busy} data-testid="inbox-brief-cancel">취소</Button></span>}
       </div>
@@ -471,7 +471,7 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
         <div className="mt-2 space-y-2">{noVisual.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {approvedWait.length > 0 && <details open className="rounded-card border border-emerald-200 bg-emerald-50/30 p-3 text-sm" data-testid="mkt-approved-wait"><summary className="cursor-pointer font-medium text-emerald-900">승인됨 · 게시 전 {approvedWait.length}건 — 열어서 [지금 게시] 또는 예정 시각에 자동</summary>
         <div className="mt-2 space-y-2">{(moreApproved ? approvedWait : approvedWait.slice(0, 10)).map((c) => <div key={c.id} className="space-y-1"><ApprovalCard c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />
-          {canDecide && <Button size="sm" variant="secondary" onClick={() => onOpen(c.id)} data-testid="mkt-approved-publish">열어서 게시 →</Button>}</div>)}
+          {canDecide && <Button size="sm" variant="secondary" onClick={() => onOpen(c.id)} data-testid="mkt-approved-publish">열어서 게시</Button>}</div>)}
           {!moreApproved && approvedWait.length > 10 && <Button variant="secondary" className="w-full" onClick={() => setMoreApproved(true)} data-testid="mkt-approved-more">{approvedWait.length - 10}건 더 보기</Button>}</div></details>}
       {approvedPast.length > 0 && <Fold className="rounded-card border border-line bg-white p-3 text-sm" testId="mkt-approved-past"><summary className="cursor-pointer font-medium text-ink-2">승인됨 · 예정 지남 {approvedPast.length}건 — 열어서 “브랜드·게시 예정 바로잡기”로 재배치</summary>
         <div className="mt-2 space-y-2">{approvedPast.slice(0, 30).map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></Fold>}

@@ -1,6 +1,7 @@
 'use client';
 import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
+import { StatStrip } from '@/components/StatStrip';
 import { RevenueGoal } from './RevenueGoal';
 import { MediaThumb } from '@/components/MediaView';
 import { useEffect, useRef, useState } from 'react';
@@ -66,7 +67,7 @@ function HomeChat() {
         <div className="mt-2 rounded-input bg-violet-50/50 p-2 text-sm" data-testid="mkt-home-answer">
           <div className="text-xs text-ink-3">Q. {last.q}</div>
           <div className="mt-1 whitespace-pre-wrap">{last.a}</div>
-          <Link href="/assistant?space=marketing" className="mt-1 inline-block text-xs font-medium" style={{ color: C }}>{HOME_AI_LABEL}에서 이어서 →</Link>
+          <Link href="/assistant?space=marketing" className="mt-1 inline-block text-xs font-medium" style={{ color: C }}>{HOME_AI_LABEL}에서 이어서</Link>
         </div>
       )}
     </section>
@@ -141,10 +142,7 @@ export function MarketingHome() {
   ];
   const sections: Record<string, React.ReactNode> = {
     chat: <HomeChat key="chat" />,
-    kpi: <div key="kpi" className="space-y-2"><section className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="mkt-home-kpi">
-      {kpi.map(([l, v, sub, href]) => <Link key={l} href={href} className="rounded-card border border-line bg-white p-3 shadow-card hover:border-violet-300" data-testid="mkt-kpi"><div className="text-[11px] text-ink-2">{l}</div>
-<div className="text-xl font-bold tabular-nums" style={{ color: C }}>{v}</div><div className="truncate text-[11px] text-ink-3">{sub}</div></Link>)}
-    </section>
+    kpi: <div key="kpi" className="space-y-2"><StatStrip cols={4} testid="mkt-home-kpi" items={kpi.map(([l, v, sub, href]) => ({ label: l, value: v, sub, href, color: C, testid: 'mkt-kpi' }))} /> {/* D-03: 같은 모양 카드 4개 → 숫자 줄 */}
       {/* 대표 10/20 15:40 (#103): 이번 달 남은 제작 n건 · 초과 안내 */}
       {data.production && data.production.leftCredits !== null && <Link href="/s/marketing/automation" className={cx('block rounded-card border p-3 text-sm shadow-card hover:border-violet-300', data.production.over ? 'border-red-200 bg-red-50/40' : 'border-line bg-white')} data-testid="mkt-home-production">
         <b>이번 달 남은 제작</b> <span className="tabular-nums">이미지 {data.production.images}장 또는 영상 {data.production.videos}편 <span className="text-xs text-ink-3">(남은 양 {(data.production.monthlyCredits ?? 0) > 0 ? Math.max(0, Math.round((data.production.leftCredits / (data.production.monthlyCredits ?? 1)) * 100)) : 0}%{!inApp && data.production.planLabel ? ` · ${data.production.planLabel}` : ''})</span></span>
@@ -156,14 +154,14 @@ export function MarketingHome() {
         <div className="mt-2 grid gap-2 sm:grid-cols-3 text-xs">{([['게시', data.goal.posts.done, data.goal.posts.target, '건'], ['문의', data.goal.inquiries.done, data.goal.inquiries.target, '건'], ['광고비', data.goal.adCost.spent, data.goal.adCost.budget, '원']] as [string, number, number | null, string][]).map(([l, d, t, u]) => (
           <div key={l}><div className="flex justify-between"><span className="text-ink-2">{l}</span><span className="tabular-nums" data-testid={`mkt-goal-${l}`}>{u === '원' ? d.toLocaleString('ko-KR') : d}{t ? `/${u === '원' ? t.toLocaleString('ko-KR') : t}` : ''}{u}</span></div>
             <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${t ? Math.min(100, Math.round((d / t) * 100)) : 0}%`, background: C }} /></div></div>))}</div>
-      </Link> : data.canEdit ? <Link href="/s/marketing/goals" className="block rounded-card border border-dashed border-line p-3 text-center text-xs text-ink-2 hover:border-violet-300" data-testid="mkt-home-goal-none">이번 달 운영 목표가 없습니다 — AI 초안 만들기 →</Link> : null}
+      </Link> : data.canEdit ? <Link href="/s/marketing/goals" className="block rounded-card border border-dashed border-line p-3 text-center text-xs text-ink-2 hover:border-violet-300" data-testid="mkt-home-goal-none">이번 달 운영 목표가 없습니다 — AI 초안 만들기</Link> : null}
       {/* 대표 10/20 20:00 ③ 월 매출 목표 vs 실적(영업 계약 + 워크인 결제) */}
       <RevenueGoal canEdit={data.canEdit} />
     </div>,
     brief: <BrandBriefs key="brief" compact />, // 399차 #1025 사업별 광고 요약(이번 달 광고비·클릭·문의·할 일 한 줄)
     approve: <section key="approve" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-now">
       <h2 className="flex items-center justify-between text-base font-bold" data-testid="mkt-home-head"><span>{data.kpi.approvalsDetail.contents ? <>① 지금 승인할 것 <span className="text-orange-700">{data.kpi.approvalsDetail.contents}건</span></> : '① 지금 승인할 것 없음'}</span>
-        {data.kpi.approvalsDetail.contents > 0 && <Link href="/s/marketing/approvals" className="text-xs font-medium" style={{ color: C }}>전체 →</Link>}</h2>
+        {data.kpi.approvalsDetail.contents > 0 && <Link href="/s/marketing/approvals" className="text-xs font-medium" style={{ color: C }}>전체</Link>}</h2>
       {data.approve.length ? <ul className="divide-y divide-line">{data.approve.map((c) => (
         <li key={c.id} className="flex gap-3 py-2" data-testid="mkt-home-approve">
           <Thumb media={c.media} mime={(c as any).mediaMime} channel={c.channel} />
@@ -173,7 +171,7 @@ export function MarketingHome() {
         : <p className="mt-1 text-xs text-ink-3">새 시안이 올라오면 마감 임박 순으로 여기에 보입니다.</p>}
     </section>,
     queue: <section key="queue" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-queue">
-      <h2 className="flex items-center justify-between text-base font-bold"><span>AI 작업 큐 <span className="text-sm font-normal text-ink-3">대기 → 실행 중 → 완료</span></span><Link href="/s/marketing/automation" className="text-xs font-medium" style={{ color: C }}>자동 제작 →</Link></h2>
+      <h2 className="flex items-center justify-between text-base font-bold"><span>AI 작업 큐 <span className="text-sm font-normal text-ink-3">대기 → 실행 중 → 완료</span></span><Link href="/s/marketing/automation" className="text-xs font-medium" style={{ color: C }}>자동 제작</Link></h2>
       {data.queue.length ? <ul className="divide-y divide-line text-sm">{data.queue.map((q) => (
         <li key={`${q.kind}:${q.id}`} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-queue-row" data-state={q.state}>
           <span className={cx('rounded-full px-2 py-0.5 text-[11px] font-medium', STATE[q.state][1])}>{STATE[q.state][0]}</span>
@@ -184,7 +182,7 @@ export function MarketingHome() {
           {q.canRun && <Button size="sm" variant="secondary" disabled={busy === q.id} onClick={() => act({ action: 'run', kind: q.kind, id: q.id }, q.id, '실행했습니다')} data-testid="mkt-queue-run"><Play className="size-3.5" />지금 실행</Button>}
           {q.canNight && <Button size="sm" variant="secondary" disabled={busy === q.id} onClick={() => act({ action: 'night', kind: q.kind, id: q.id }, q.id, '오늘 밤 22시에 실행합니다')} data-testid="mkt-queue-night"><Moon className="size-3.5" />밤에</Button>}
         </li>))}</ul>
-        : <p className="mt-1 text-xs text-ink-3">기다리는 AI 작업이 없습니다. 자동 제작 규칙·광고 개선안·문서 작업·문자/견적 시안이 여기에 모입니다.</p>}
+        : <p className="mt-1 text-xs text-ink-3">기다리는 AI 작업이 없습니다. 자동 제작 규칙, 광고 개선안, 문서 작업, 문자/견적 시안이 여기에 모입니다.</p>}
       {data.night.length > 0 && <div className="mt-3 rounded-input border border-violet-200 bg-violet-50/40 p-2 text-sm" data-testid="mkt-home-night">
         <div className="font-semibold"><Moon className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />밤사이 결과 <span className="font-normal text-ink-3">{data.night.length}건</span></div>
         <ul className="mt-1 space-y-0.5 text-xs">{data.night.map((n) => <li key={n.id}><Link href={n.kind === 'doc' ? '/assistant?space=marketing' : `/s/marketing/approvals?c=${n.id}`} className="hover:underline">{n.title}</Link></li>)}</ul>
@@ -192,18 +190,18 @@ export function MarketingHome() {
       {data.canEdit && !Object.values(data.nightScope).some(Boolean) && <p className="mt-2 text-[11px] text-ink-3">밤사이 비서는 꺼져 있습니다 — 관리 › AI 사용 내역 › 보관·한도 설정에서 범위를 켭니다(돈·외부 발송은 자동 아님).</p>}
     </section>,
     week: <section key="week" className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-week">
-      <h2 className="flex items-center justify-between text-base font-bold"><span>② 이번 주 게시</span><Link href="/s/marketing/calendar" className="text-xs font-medium" style={{ color: C }}>콘텐츠 캘린더 →</Link></h2>
+      <h2 className="flex items-center justify-between text-base font-bold"><span>② 이번 주 게시</span><Link href="/s/marketing/calendar" className="text-xs font-medium" style={{ color: C }}>콘텐츠 캘린더</Link></h2>
       <div className="mt-2 grid grid-cols-7 gap-1">{data.week.map((d, i) => (
         <Link key={d.day} href="/s/marketing/calendar" className={cx('rounded-input border p-1.5 text-center', i === 0 ? 'border-violet-300 bg-violet-50/40' : 'border-line')} data-testid="mkt-week-day" title={d.posts.map((p) => p.title).join('\n')}>
           <div className="text-[11px] text-ink-2">{i === 0 ? '오늘' : `${dayShort(d.day)}(${wd(d.day)})`}</div>
           <div className="mt-1 flex min-h-[14px] flex-wrap justify-center gap-0.5">{d.posts.map((p) => <span key={p.id} className={cx('size-2.5 rounded-full', p.status === 'published' ? 'ring-1 ring-emerald-500 ring-offset-1' : '')} style={{ background: CH_COLOR[p.channel] ?? CH_COLOR.other }} data-testid="mkt-week-row" />)}</div>
         </Link>))}</div>
-      <p className="mt-1 text-[11px] text-ink-3">점 색 = 채널(인스타 분홍·페북 파랑·블로그 초록·유튜브 빨강), 초록 테두리 = 게시됨</p>
+      <p className="mt-1 text-[11px] text-ink-3">점 색 = 채널(인스타 분홍, 페북 파랑, 블로그 초록, 유튜브 빨강), 초록 테두리 = 게시됨</p>
     </section>,
     perf: <section key="perf" className="grid gap-3 md:grid-cols-2" data-testid="mkt-home-perf">
       <div className="rounded-card border border-line bg-white p-4 shadow-card">
-        <h2 className="flex items-center justify-between text-base font-bold"><span>③ 성과 <span className="text-sm font-normal text-ink-3">최근 7일</span></span><Link href="/s/marketing/ads" className="text-xs font-medium" style={{ color: C }}>자세히 →</Link></h2>
-        <div className="mt-2 grid grid-cols-3 gap-2 text-sm">{([['광고비', won(cost7)], ['전화·문의', `${calls7}건`], ['문의 1건당', calls7 ? won(cost7 / calls7) : '—']] as [string, string][]).map(([l, v]) => <div key={l} className="rounded-input bg-slate-50 p-2" data-testid="mkt-perf-card"><div className="text-[11px] text-ink-2">{l}</div><div className="text-base font-bold tabular-nums">{v}</div></div>)}</div>
+        <h2 className="flex items-center justify-between text-base font-bold"><span>③ 성과 <span className="text-sm font-normal text-ink-3">최근 7일</span></span><Link href="/s/marketing/ads" className="text-xs font-medium" style={{ color: C }}>자세히</Link></h2>
+        <dl className="mt-2 grid grid-cols-3 divide-x divide-line text-sm">{([['광고비', won(cost7)], ['전화·문의', `${calls7}건`], ['문의 1건당', calls7 ? won(cost7 / calls7) : '—']] as [string, string][]).map(([l, v]) => <div key={l} className="px-3 first:pl-0" data-testid="mkt-perf-card"><dt className="text-[11px] text-ink-2">{l}</dt><dd className="text-base font-semibold tabular-nums">{v}</dd></div>)}</dl>{/* D-03: 회색 상자 3개 → 선으로 나눈 숫자 줄 */}
         <svg viewBox="0 0 140 44" className="mt-2 h-14 w-full" role="img" aria-label="최근 7일 광고비·문의" data-testid="mkt-perf-chart">
           {data.perf.map((p, i) => <rect key={p.day} x={i * 20 + 4} y={40 - (p.cost / maxCost) * 30} width={12} height={(p.cost / maxCost) * 30} rx={2} fill="#C4B5FD" />)}
           <polyline points={data.perf.map((p, i) => `${i * 20 + 10},${40 - (p.calls / maxCalls) * 30}`).join(' ')} fill="none" stroke="#7C3AED" strokeWidth={1.5} />
@@ -211,12 +209,12 @@ export function MarketingHome() {
         </svg>
       </div>
       <div className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-ads">
-        <h2 className="flex items-center justify-between text-base font-bold"><span>광고</span><Link href="/s/marketing/ad-ops" className="text-xs font-medium" style={{ color: C }}>광고 집행 →</Link></h2>
+        <h2 className="flex items-center justify-between text-base font-bold"><span>광고</span><Link href="/s/marketing/ad-ops" className="text-xs font-medium" style={{ color: C }}>광고 집행</Link></h2>
         {data.ads ? <>
           <p className="mt-1 text-sm">캠페인 켜짐 <b>{data.ads.on}</b> · 꺼짐 {data.ads.off}{data.ads.monthlyCap !== null && <> · 월 상한 {won(data.ads.monthlyCap)}{data.ads.stopped && <span className="ml-1 rounded-full bg-red-50 px-1.5 text-[11px] text-red-700">상한 도달</span>}</>} · 오늘 지출 {won(data.ads.today)}</p>
           {data.ads.campaigns.length > 0 && <ul className="mt-1 divide-y divide-line text-xs">{data.ads.campaigns.map((c) => <li key={c.id} className="flex items-center gap-2 py-1"><span className="min-w-0 flex-1 truncate">{c.name}</span><span className="tabular-nums text-ink-2">CTR {c.ctr ?? '—'}%</span><span className="tabular-nums text-ink-2">CPC {c.cpc !== null ? won(c.cpc) : '—'}</span></li>)}</ul>}
           <p className="mt-1 text-[11px] text-ink-3">{data.ads.suggestions ? `개선안 ${data.ads.suggestions}건 대표 승인 대기` : '개선안 없음'} · [켜기]는 대표 승인(광고 운영 화면)</p>
-        </> : <p className="mt-1 text-xs text-ink-3">광고 계정을 연결하면 캠페인 상태·예산·오늘 지출·소재별 CTR/CPC 가 여기에 보입니다.</p>}
+        </> : <p className="mt-1 text-xs text-ink-3">광고 계정을 연결하면 캠페인 상태, 예산, 오늘 지출, 소재별 CTR/CPC 가 여기에 보입니다.</p>}
       </div>
     </section>,
     recent: <section key="recent" className="grid gap-3 md:grid-cols-2" data-testid="mkt-home-recent">

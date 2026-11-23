@@ -232,7 +232,7 @@ function Editor({ it, view, reload }: { it: Item; view: View; reload: () => Prom
         {canCancel && <Button type="button" variant="secondary" disabled={!!busy} onClick={cancel} data-testid="carousel-cancel">취소</Button>}
         <span className="ml-auto flex flex-wrap items-center gap-2">
           {!it.content_id && <label className="flex items-center gap-1 whitespace-nowrap text-xs text-ink-2">게시 예정<input type="datetime-local" className={cx(inputCls, 'w-auto py-1')} value={when} onChange={(e) => setWhen(e.target.value)} data-testid="carousel-schedule" /></label>}
-          {it.content_id && <Link href={`/s/marketing/approvals?c=${it.content_id}`} className="text-xs underline" style={{ color: C }} data-testid="carousel-content-link">승인함에서 보기 →</Link>}
+          {it.content_id && <Link href={`/s/marketing/approvals?c=${it.content_id}`} className="text-xs underline" style={{ color: C }} data-testid="carousel-content-link">승인함에서 보기</Link>}
           <Button type="button" disabled={!!busy || blocked} onClick={render} title={blocked ? '채울 곳·금지어를 먼저 고쳐 주세요' : undefined} data-testid="carousel-render">{busy === 'render' ? `${n}장 그리는 중…` : it.content_id ? '다시 그려 재승인 요청' : '이미지로 만들어 승인 요청'}</Button>
         </span>
       </div>

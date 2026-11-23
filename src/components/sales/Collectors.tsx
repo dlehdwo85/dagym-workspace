@@ -209,7 +209,7 @@ export function CollectorAlerts({ alerts, link }: { alerts: CollectorAlert[]; li
           ? <>{' '}<details className="inline"><summary className="inline cursor-pointer list-none text-red-700/80 underline decoration-dotted" data-testid="sales-collector-alert-more">자세히</summary><span className="ml-1 text-red-800/90" data-testid="sales-collector-alert-detail">{a.reason}{a.lastOkAt ? ` · 마지막 성공 ${fmtDateTime(a.lastOkAt)}` : ''}{a.error ? ` · ${a.error}` : ''}</span></details></>
           : a.lastOkAt ? ` (마지막 성공 ${fmtDateTime(a.lastOkAt)})` : ''}
       </li>)}</ul>
-      {link && <Link href="/s/sales/sources#collectors" className="mt-1 inline-block text-xs font-semibold underline">수집기 보기 · [지금 수집] →</Link>}
+      {link && <Link href="/s/sales/sources#collectors" className="mt-1 inline-block text-xs font-semibold underline">수집기 보기 · [지금 수집]</Link>}
     </div>
   );
 }

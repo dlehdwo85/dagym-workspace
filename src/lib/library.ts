@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db } from './db';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
-import { isAdmin, denyDemo, accessibleUnitIds, taskVisibleSql, teamScope } from './access';
+import { isAdmin, denyDemo, accessibleUnitIds, isolatedSql, taskVisibleSql, teamScope } from './access';
 import { activity } from './log';
 import { BIG_FILE_NOTE, CONTENT_READ_MAX, assertFileSize, completeMultipart, downloadUrl, getObject, objectSize, putObject, uploadTargetFor } from './storage';
 import { extractText, extractTextDeep, extractTextResult } from './textExtract';
@@ -70,7 +70,7 @@ async function teamFor(u: SessionUser, teamId: string | undefined, sql = db()) {
 /** #615 ①: 맨 위 폴더 이름이 공간 이름이면 그 공간 — '마케팅/…' → marketing, '영업/…' → sales (자동 제작 사진 고르기·영업 자료는 space 칸으로 봄) */
 export const spaceForFolder = (folder: string): 'sales' | 'marketing' | null => { const top = folder.split('/')[0]?.trim(); return top === '마케팅' ? 'marketing' : top === '영업' ? 'sales' : null; };
 
-const COLS = `f.id, f.scope, f.team_id, f.folder, f.security, f.security_suggested, f.security_confirmed, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
+const COLS = `f.id, f.scope, f.share, f.team_id, f.folder, f.security, f.security_suggested, f.security_confirmed, f.title, f.file_name, f.mime_type, f.size_bytes, f.tags, f.description, f.upload_status, f.created_at, f.updated_at, f.created_by,
   (f.text_content is not null) as has_text, f.text_error, f.text_tried_at, f.organized_by, f.ai_confidence, f.needs_review, (f.ai_prev is not null) as can_undo, f.organize_status, f.organize_error, f.task_id, f.source, f.vision`;
 
 // ---------------- V14 15번 보안 등급 (일반·내부·기밀) ----------------
@@ -199,7 +199,10 @@ export async function listLibrary(u: SessionUser, q: { q?: string; folder?: stri
   // 292차: 회사 전체 = 지금 규칙 · 우리 팀 = 볼 수 있는 팀(폴더 권한 대신 팀 구성원 여부) + 등급 · 내 파일 = 내가 올린 것만
   const teams = await visibleTeamIds(u, sql);
   const companyOk = sql`(f.scope = 'company' and (f.folder = any(${visibleNames}::text[]) or f.created_by = ${u.id}) and ${secCond})`;
-  const teamOk = sql`(f.scope = 'team' and f.space = any(${spaceList}::text[]) and (f.created_by = ${u.id} or (f.security = any(${secs}::text[]) and f.team_id = any(${teams}::uuid[]))))`;
+  // #1129: 회사 전체 공유(회사 설정 또는 이 파일만)면 같은 회사 격리 아닌 팀의 '우리 팀' 자료도 봄 — 등급(기밀)·격리 팀 구성원은 그대로
+  const shareTeam = sql`(coalesce(f.share, (select tn.share_mode from tenants tn where tn.id = ${tenantOf(u)})) = 'company' and not ${isolatedSql(sql, u)}
+    and exists (select 1 from teams st where st.id = f.team_id and st.tenant = ${tenantOf(u)} and not st.isolated and not st.archived))`;
+  const teamOk = sql`(f.scope = 'team' and f.space = any(${spaceList}::text[]) and (f.created_by = ${u.id} or (f.security = any(${secs}::text[]) and (f.team_id = any(${teams}::uuid[]) or ${shareTeam}))))`;
   const mineOk = sql`(f.scope = 'mine' and f.created_by = ${u.id})`;
   const scope = ['company', 'team', 'mine'].includes(q.scope ?? '') ? (q.scope as Scope) : null;
   const teamPick = scope === 'team' && q.teamId && /^[0-9a-f-]{36}$/i.test(q.teamId) ? sql`and f.team_id = ${q.teamId}` : sql``;
@@ -282,6 +285,13 @@ export async function saveGeneratedFile(u: SessionUser, p: { fileName: string; m
   return { id: f.id, storageKey: key };
 }
 
+/** #1129: 이 '우리 팀' 파일이 회사 전체 공유인지(회사 설정 또는 파일만) — 같은 회사 격리 아닌 팀, 보는 사람도 격리 팀이 아님 */
+async function fileCompanyShared(u: SessionUser, f: { id: string; team_id: string | null }) {
+  const sql = db();
+  return (await sql`select 1 from library_files f where f.id = ${f.id}
+    and coalesce(f.share, (select tn.share_mode from tenants tn where tn.id = ${tenantOf(u)})) = 'company' and not ${isolatedSql(sql, u)}
+    and exists (select 1 from teams st where st.id = f.team_id and st.tenant = ${tenantOf(u)} and not st.isolated and not st.archived)`).length > 0;
+}
 /** purpose: open(보기·고치기) · download(내려받기) · ai(AI 가 읽음) — 기밀이면 누가·언제를 감사 기록에 남긴다 */
 export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open' | 'download' | 'ai' | 'meta' = 'open') {
   if (purpose === 'ai') denyDemo(u); // 체험 계정: 보기·내려받기는 됨, AI 읽기는 막음
@@ -292,7 +302,7 @@ export async function loadLibraryFile(u: SessionUser, id: string, purpose: 'open
   f.effective_security = effSec(sc, f);
   if (f.scope === 'mine' && f.created_by !== u.id) throw notFound('자료가 없습니다'); // 292차: 내 파일 = 올린 사람만(대표·관리자도 존재를 모름)
   if (f.scope === 'team' && f.created_by !== u.id) { // 292차: 팀 자료 = 그 팀·위 단위 구성원·대표·관리자 — 폴더 권한 대신 팀, 등급은 그대로
-    if (!f.team_id || !(await visibleTeamIds(u)).includes(f.team_id)) throw notFound('자료가 없습니다');
+    if (!f.team_id || (!(await visibleTeamIds(u)).includes(f.team_id) && !(await fileCompanyShared(u, f)))) throw notFound('자료가 없습니다');
     await requireMenu(u, 'library', 'view');
     if (!canSeeSec(sc, u, f)) throw notFound('자료가 없습니다');
     if (f.effective_security === 'confidential' && purpose !== 'meta') await secAudit(u, f, purpose);

@@ -675,7 +675,7 @@ function DoneFold({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any
               </li>
             );
           })}
-          <li className="flex justify-end px-3 py-1.5"><Link href="/tasks?view=done" className="text-xs font-medium text-accent-600 hover:underline" data-testid="done-fold-all">완료 전체 보기 →</Link></li>
+          <li className="flex justify-end px-3 py-1.5"><Link href="/tasks?view=done" className="text-xs font-medium text-accent-600 hover:underline" data-testid="done-fold-all">완료 전체 보기</Link></li>
         </ul>
       )}
     </div>

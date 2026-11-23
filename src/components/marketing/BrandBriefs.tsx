@@ -29,7 +29,7 @@ function Card({ b, d }: { b: Brief; d: Data }) {
       <header className="flex flex-wrap items-center gap-2">
         <span className="size-2.5 shrink-0 rounded-full" style={{ background: b.color ?? '#94A3B8' }} aria-hidden />
         <h3 className="text-sm font-bold">{b.name}</h3>
-        {b.brandId && <Link href={`/s/marketing/ads?brand=${b.brandId}`} className="ml-auto text-xs font-medium" style={{ color: C }} data-testid="brief-more">성과 자세히 →</Link>}
+        {b.brandId && <Link href={`/s/marketing/ads?brand=${b.brandId}`} className="ml-auto text-xs font-medium" style={{ color: C }} data-testid="brief-more">성과 자세히</Link>}
       </header>
       <dl className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Num label="광고비" value={won(b.cost)} sub={b.plan ? `계획 ${won(b.plan)}의 ${b.planPct}%` : '이번 달 계획 없음'} warn={fast} />
@@ -90,7 +90,7 @@ export function BrandBriefs({ compact, only }: { compact?: boolean; only?: strin
     return (
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="mkt-home-brief">
         <h2 className="flex flex-wrap items-baseline justify-between gap-2 text-base font-bold"><span>사업별 광고 요약 <span className="text-sm font-normal text-ink-3">이번 달 {until(data.day)}</span></span>
-          <Link href="/s/marketing/ad-ops" className="text-xs font-medium" style={{ color: C }}>광고 집행 →</Link></h2>
+          <Link href="/s/marketing/ad-ops" className="text-xs font-medium" style={{ color: C }}>광고 집행</Link></h2>
         <ul className="mt-1 divide-y divide-line">{live.map((b) => (
           <li key={b.brandId ?? 'none'} className="py-1.5" data-testid="mkt-home-brief-row" data-brand={b.name}>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm">

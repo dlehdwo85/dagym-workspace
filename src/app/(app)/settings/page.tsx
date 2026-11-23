@@ -61,7 +61,7 @@ export default function Settings() {
       <section className="rounded-lg border bg-white p-4 text-sm">
         <div className="font-semibold">{user.name}</div>
         <div className="flex items-center gap-1.5 text-slate-500">{user.email} · {T.role[user.role]}<RoleBadge role={user.role} size="sm" /></div>
-        {features.googleSync && <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 (선택 기능) →</Link>}
+        {features.googleSync && <Link href="/settings/google" className="mt-2 inline-block text-brand-600 hover:underline">Google Calendar 연동 (선택 기능)</Link>}
         {/* 397차 #1023(애플 11/06 반려 5.1.1(v) '앱 안에 계정 삭제를 시작하는 메뉴가 없음'): 설정 맨 위에서 바로 — 아래 '계정 › 계정 삭제' 칸을 펼쳐 보여 줌 */}
         <a href="#delete-account" className="mt-2 block w-fit text-xs text-red-700 underline" data-testid="to-delete-account">계정 삭제</a>
       </section>
@@ -127,7 +127,7 @@ export default function Settings() {
             </span>
           </Field>
         </div>
-        <p className="mt-1 text-xs text-slate-500">조용한 시간에 생긴 푸시는 모아서 끝나는 시각(아침)에 보냅니다. 앱 안 알림은 바로 쌓입니다. 종류별 푸시 기본값: 나에게 온 요청·내 일정·요청한 업무 완료는 켬, 내가 보낸 결과·자동 정리 결과는 끔(위 표에서 바꿀 수 있음).</p>
+        <p className="mt-1 text-xs text-slate-500">조용한 시간에 생긴 푸시는 모아서 끝나는 시각(아침)에 보냅니다. 앱 안 알림은 바로 쌓입니다. 종류별 푸시 기본값: 나에게 온 요청, 내 일정, 요청한 업무 완료는 켬, 내가 보낸 결과·자동 정리 결과는 끔(위 표에서 바꿀 수 있음).</p>
         <Button className="mt-3" onClick={save}>저장</Button>
       </section>
       {data.spaces?.length > 0 && <SpaceNotifyPrefs spaces={data.spaces} modeLabels={data.modeLabels} canSetCompany={data.canSetCompany} reload={reload} />}
@@ -210,7 +210,7 @@ function MktNotifyPrefs({ rows: init, labels, reload }: { rows: MktRow[]; labels
   return (
     <section className="rounded-lg border bg-white p-4" data-testid="mkt-notify">
       <h2 className="mb-1 text-sm font-semibold">마케팅 알림</h2>
-      <p className="mb-2 text-xs text-ink-3">휴대폰에는 꼭 필요한 것(주간 묶음 승인 요청·마감 임박·게시 실패·돈)만 갑니다. 나머지는 알림함에서 볼 수 있습니다. 항목마다 바꿀 수 있습니다.</p>
+      <p className="mb-2 text-xs text-ink-3">휴대폰에는 꼭 필요한 것(주간 묶음 승인 요청, 마감 임박, 게시 실패, 돈)만 갑니다. 나머지는 알림함에서 볼 수 있습니다. 항목마다 바꿀 수 있습니다.</p>
       <ul className="divide-y divide-line rounded-card border border-line">
         {rows.map((r, i) => (
           <li key={r.kind} className="flex flex-wrap items-center gap-2 px-3 py-2" data-testid={`mkt-notify-${r.kind}`}>
@@ -254,8 +254,8 @@ function CalendarFeed() {
   }
   return (
     <section className="rounded-lg border bg-white p-4 text-sm" data-testid="calendar-feed">
-      <h2 className="font-semibold">캘린더 구독 주소 (구글·아웃룩·애플)</h2>
-      <p className="mt-1 text-xs text-ink-2">내 일정·참석 일정·내 업무 마감을 다른 캘린더 앱에서 볼 수 있습니다(읽기 전용, 한 시간쯤마다 갱신). 주소를 아는 사람은 누구나 볼 수 있으니 공유하지 마세요.</p>
+      <h2 className="font-semibold">캘린더 구독 주소 (구글, 아웃룩, 애플)</h2>
+      <p className="mt-1 text-xs text-ink-2">내 일정, 참석 일정, 내 업무 마감을 다른 캘린더 앱에서 볼 수 있습니다(읽기 전용, 한 시간쯤마다 갱신). 주소를 아는 사람은 누구나 볼 수 있으니 공유하지 마세요.</p>
       {url ? (
         <div className="mt-2 space-y-1.5">
           <input readOnly className={cx(inputCls, 'font-mono text-xs')} value={url} onFocus={(e) => e.currentTarget.select()} aria-label="캘린더 구독 주소" />
@@ -428,13 +428,13 @@ function AccountSection() {
     try { await api('/api/account/delete', { body: { password: pw, confirm } }); location.href = '/login'; } catch (e: any) { toast.error(e.message); }
   }
   async function dropSpace() {
-    if (!window.confirm(`"${tenant?.name}" 공간의 모든 사람·업무·일정이 삭제됩니다. 계속할까요?`)) return;
+    if (!window.confirm(`"${tenant?.name}" 공간의 모든 사람, 업무, 일정이 삭제됩니다. 계속할까요?`)) return;
     try { await api('/api/account/space', { method: 'DELETE', body: { password: pw, confirmName: space } }); location.href = '/login'; } catch (e: any) { toast.error(e.message); }
   }
   return (
     <section className="rounded-lg border bg-white p-4 text-sm" data-testid="account">
       <h2 className="font-semibold">계정</h2>
-      <p className="mt-1 text-ink-2">내 업무·일정·댓글·메시지를 파일(JSON)로 내려받을 수 있습니다.</p>
+      <p className="mt-1 text-ink-2">내 업무, 일정, 댓글, 메시지를 파일(JSON)로 내려받을 수 있습니다.</p>
       <a href="/api/account/export" className="mt-2 inline-block rounded-input border border-line px-3 py-1.5 font-medium hover:bg-slate-50" data-testid="account-export">내 데이터 내려받기</a>
       <LinkedAccounts />
       <AiConsentSetting />
@@ -596,7 +596,7 @@ function MarketingConsent() {
       <label className="flex items-start gap-2">
         <input type="checkbox" className="mt-0.5" checked={pick ?? data.agreed} disabled={busy} onChange={(e) => toggle(e.target.checked)} data-testid="marketing-consent-toggle" />
         <span><span className="font-medium">{data.label}</span> <span className="text-ink-3">(선택)</span>
-          <span className="mt-0.5 block text-xs text-ink-3">{data.agreed && data.at ? `${fmtDateTime(data.at)} 동의 · 2년마다 동의 여부를 메일로 다시 알려 드립니다` : '받지 않음'} · 바꾸면 처리 결과를 메일로 알려 드립니다. 업무 알림·결제·보안 메일은 동의와 관계없이 갑니다.</span></span>
+          <span className="mt-0.5 block text-xs text-ink-3">{data.agreed && data.at ? `${fmtDateTime(data.at)} 동의 · 2년마다 동의 여부를 메일로 다시 알려 드립니다` : '받지 않음'} · 바꾸면 처리 결과를 메일로 알려 드립니다. 업무 알림, 결제, 보안 메일은 동의와 관계없이 갑니다.</span></span>
       </label>
     </div>
   );

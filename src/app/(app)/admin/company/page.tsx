@@ -182,7 +182,7 @@ function OrgModelSetting() {
       <h2 className="text-sm font-semibold">지점</h2>
       <label className="mt-1 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={d.multiSite} disabled={busy} onChange={(e) => set(e.target.checked)} data-testid="org-multi-site" />
         <span><b>지점이 여러 곳</b><span className="block text-xs text-ink-3">끄면 모든 사람이 한 조직에 속하고 부서·팀으로만 나눕니다. 켜면 지점마다 조직을 만들어, 직원이 자기 지점과 그 아래 업무만 보게 할 수 있습니다.</span></span></label>
-      {d.multiSite && <a href="/admin/org" className="mt-2 inline-block text-xs font-medium text-brand-700 underline" data-testid="org-model-open">조직 구성 열기 →</a>}
+      {d.multiSite && <a href="/admin/org" className="mt-2 inline-block text-xs font-medium text-brand-700 underline" data-testid="org-model-open">조직 구성 열기</a>}
     </section>
   );
 }
