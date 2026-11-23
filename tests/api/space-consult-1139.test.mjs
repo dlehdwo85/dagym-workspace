@@ -62,3 +62,20 @@ test('우리 회사(default)·검수용 시험 회사는 관리자가 직접 켬
   await T.c.ok('PUT', '/api/admin/spaces', { space: 'marketing', on: true });
   assert.deepEqual((await T.c.ok('GET', '/api/spaces/consult')).locked, []);
 });
+
+test('#1139 2부 [설계 파트너로 지정]: 운영자만 · 우리 회사·검수용 시험 회사는 안 됨 · 기간(일)·체험·파트너 기본값 · 감사 기록', async () => {
+  await sql`update tenants set is_test = false where id = ${T.tenant}`;
+  assert.equal((await T.c.req('PUT', `/api/platform/tenants/${T.tenant}/partner`, { days: 30 })).status, 404, '운영자가 아니면 없는 화면처럼');
+  assert.equal((await ctx.owner.req('PUT', '/api/platform/tenants/default/partner', { days: 30 })).status, 400, '우리 회사는 안 됨');
+  await sql`update tenants set is_test = true where id = ${T.tenant}`;
+  assert.equal((await ctx.owner.req('PUT', `/api/platform/tenants/${T.tenant}/partner`, { days: 30 })).status, 400, '검수용 시험 회사는 표시를 풀어야');
+  await sql`update tenants set is_test = false where id = ${T.tenant}`;
+  await ctx.owner.ok('PUT', `/api/platform/tenants/${T.tenant}/partner`, { days: 30 });
+  const [t] = await sql`select t.segment, s.status, (s.trial_ends_at::date - current_date) as d from tenants t join tenant_subscriptions s on s.tenant = t.id where t.id = ${T.tenant}`;
+  assert.deepEqual([t.segment, t.status], ['partner', 'trial']); assert.ok(t.d >= 29 && t.d <= 30);
+  const d = await ctx.owner.ok('GET', `/api/platform/tenants/${T.tenant}/detail`);
+  assert.ok(d.partner, '회사 상세에 설계 파트너 칸');
+  assert.equal((await ctx.owner.req('PUT', `/api/platform/tenants/${T.tenant}/partner`, { days: 30 })).status, 400, '두 번은 안 됨');
+  const [au] = await sql`select detail from audit_logs where action = 'platform.partner_set' order by id desc limit 1`;
+  assert.equal(au.detail.days, 30);
+});

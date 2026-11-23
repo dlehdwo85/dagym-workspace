@@ -41,7 +41,7 @@ export function PlatformTenants() {
     <section className="rounded-card border border-line bg-white shadow-card" data-testid="platform-company-list">
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <h2 className="text-sm font-semibold">고객사 관리 {list.data && <span className="text-xs font-normal text-ink-3">{list.data.tenants.length}곳</span>}</h2>
-        <Button size="sm" onClick={() => setAdding(true)} data-testid="platform-add-company"><Plus />고객사 추가</Button>
+        <Button size="sm" onClick={() => setAdding(true)} data-testid="platform-add-company" title="실제 고객사는 공개 가입으로만 받습니다(#1139)"><Plus />검수용 시험 회사 만들기</Button>
         <a className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-xs font-medium text-ink-2 hover:bg-slate-50" href={`/api/platform/tenants/export?${qs}`} data-testid="platform-export-companies" title="지금 보이는 목록을 엑셀로 내려받습니다 (?format=csv 로 CSV)"><Download className="size-3.5" />내보내기</a>
         <form className="ml-auto flex gap-1.5" onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }}>
           <input className={cx(inputCls, 'h-8 w-48 py-1 text-xs')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="회사·대표 이메일·id" aria-label="회사 찾기" />
@@ -171,7 +171,14 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
         </div>
         {d.data.mktWrite && <MktWriteBox id={id} w={d.data.mktWrite} pick={wt} setPick={setWt} run={run} />}
-        {!internal && <TestMarkBox id={id} on={!!d.data.tenant?.is_test} run={run} />}{/* D-08 검수용 시험 회사 표시(로컬 11/24) */}
+        {!internal && <TestMarkBox id={id} on={!!d.data.tenant?.is_test} run={run} />}
+        {!internal && !d.data.partner && !d.data.tenant?.is_test && ( // #1139 2부: 설계 파트너는 공개 가입한 회사의 상세에서 지정
+          <div className="flex flex-wrap items-center gap-2 rounded-input border border-violet-200 p-3 text-xs" data-testid="company-partner-set">
+            <span className="min-w-0 flex-1 text-ink-2">설계 파트너 — 체험으로 시작하고 AI 월 예산 {PARTNER.aiBudgetKrw.toLocaleString('ko-KR')}원 · 마케팅 크레딧 {PARTNER.mktCredits}(파트너 기본값). 기간(일)은 꼭 정합니다.</span>
+            <Button size="sm" variant="secondary" data-testid="company-partner-set-go" onClick={() => { const v = prompt(`설계 파트너 기간(일, ${PARTNER.maxDays}일까지)`, ''); const n = Number(v); if (!v || !Number.isInteger(n) || n < 1 || n > PARTNER.maxDays) return;
+              void run(() => api(`/api/platform/tenants/${id}/partner`, { method: 'PUT', body: { days: n } }), `설계 파트너로 지정했습니다(${n}일)`); }}>설계 파트너로 지정</Button>
+          </div>
+        )}{/* D-08 검수용 시험 회사 표시(로컬 11/24) */}
         {!internal && <CaptureBox id={id} t={d.data.tenant} trial={d.data.subscription?.status === 'trial'} events={d.data.captureEvents30d ?? 0} run={run} />}{/* #626 캡처 차단 스위치(외부 고객사만) */}
         <div>
           <p className="mb-1 text-xs font-medium text-ink-2">사용자 {d.data.users.length}명 — 비밀번호는 보거나 정할 수 없고 재설정 메일만 보냅니다</p>
@@ -291,22 +298,20 @@ function TenantOps({ id, t, ownerInvite, consults, run }: { id: string; t: any; 
 function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
   const plans = useApi<{ plans: { code: string; name: string; active: boolean }[] }>('/api/platform');
   const [f, setF] = useState({ company: '', industries: [] as string[], size: '2-10', ownerName: '', ownerEmail: '', planCode: 'trial', trialDays: '14', spaces: [] as string[], memo: '',
-    contactName: '', contactPhone: '', contactTitle: '', segment: 'customer', source: '', isTest: false }); // #656 담당자·구분·소개 경로 · D-08 검수용 시험 회사
+    contactName: '', contactPhone: '', contactTitle: '', segment: 'customer', source: '', isTest: true }); // #656 담당자·소개 경로 · #1139 2부(대표 11/24): 여기서는 검수용 시험 회사만 — 실제 고객사는 공개 가입, 설계 파트너는 회사 상세에서 지정
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ tenant: string; inviteLink: string; mail: 'sent' | 'dev' | 'failed' } | null>(null);
   const toggle = (k: 'industries' | 'spaces', v: string) => setF({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] });
-  const partner = f.segment === 'partner'; // 208차 #667: 체험으로 시작 · 기간은 꼭 적음(기본값 없음 — 손대지 않은 기본 14일은 비우고, 적어 둔 값은 그대로)
-  const setSegment = (v: string) => setF({ ...f, segment: v, planCode: v === 'partner' ? 'trial' : f.planCode, trialDays: v === 'partner' ? (f.trialDays === '14' ? '' : f.trialDays) : f.trialDays || '14' });
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
     try {
       const r = await api('/api/platform/tenants', { body: { ...f, planCode: f.planCode || 'trial', trialDays: f.planCode === 'trial' ? Number(f.trialDays) || undefined : undefined, memo: f.memo || undefined,
-        contactName: f.contactName || undefined, contactPhone: f.contactPhone || undefined, contactTitle: f.contactTitle || undefined, segment: f.segment || undefined, source: f.source || undefined, isTest: f.isTest || undefined } });
+        contactName: f.contactName || undefined, contactPhone: f.contactPhone || undefined, contactTitle: f.contactTitle || undefined, source: f.source || undefined, isTest: true } });
       setResult(r); toast.ok(r.mail === 'sent' ? `${f.company} 회사를 만들고 ${f.ownerEmail} 로 초대 메일을 보냈습니다` : `${f.company} 회사를 만들었습니다 — 초대 링크를 직접 전달하세요`);
     } catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
   }
   return (
-    <Modal open onClose={onClose} title="고객사 추가">
+    <Modal open onClose={onClose} title="검수용 시험 회사 만들기">
       {result ? (
         <div className="space-y-2 text-sm" data-testid="new-company-done">
           <p><b>{f.company}</b> 회사가 만들어졌습니다 (id {result.tenant}). 대표 {f.ownerName}({f.ownerEmail})이 초대 링크에서 비밀번호를 정하면 바로 시작합니다 — 운영자가 대신 로그인하는 기능은 없습니다.</p>
@@ -318,17 +323,14 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
         </div>
       ) : (
         <form onSubmit={submit} className="space-y-3 text-sm" data-testid="new-company">
+          <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="new-company-test-only">여기서는 <b>검수용 시험 회사</b>만 만듭니다(고객 목록·통계에서 빠지고 체험 10년). 실제 고객사는 공개 가입으로만 받고, 설계 파트너는 가입한 회사의 회사 관리에서 [설계 파트너로 지정]합니다.</p>
           <Field label="회사명"><input className={inputCls} value={f.company} onChange={(e) => setF({ ...f, company: e.target.value })} required maxLength={60} data-testid="new-company-name" /></Field>
           <Field label="업종(여러 개 가능 · 첫 번째가 주 업종)">
             <div className="flex flex-wrap gap-1" data-testid="new-company-industries">{INDUSTRIES.map((k) => <button key={k} type="button" onClick={() => toggle('industries', k)} aria-pressed={f.industries.includes(k)}
               className={cx('rounded-full border px-2.5 py-0.5 text-xs', f.industries.includes(k) ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2')}>{k}{f.industries[0] === k && f.industries.length > 1 ? ' · 주' : ''}</button>)}</div>
           </Field>
           <div className="grid gap-2 sm:grid-cols-2">
-            <Field label="구분"><select className={inputCls} value={f.segment} onChange={(e) => setSegment(e.target.value)} data-testid="new-company-segment"><option value="customer">일반 고객</option><option value="partner">설계 파트너 체험단</option></select></Field>
             <Field label="규모"><select className={inputCls} value={f.size} onChange={(e) => setF({ ...f, size: e.target.value })} data-testid="new-company-size">{Object.entries(SIZE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
-            <Field label="요금제"><select className={inputCls} value={f.planCode} disabled={partner} title={partner ? '설계 파트너는 체험으로 시작합니다 — 유료 전환은 고객사 관리에서' : undefined} onChange={(e) => setF({ ...f, planCode: e.target.value })} data-testid="new-company-plan"><option value="trial">체험(카드 없음)</option>{(plans.data?.plans ?? []).filter((p) => p.active && p.code !== 'trial').map((p) => <option key={p.code} value={p.code}>{p.name}({p.code})</option>)}</select></Field>
-            {f.planCode === 'trial' && <Field label={partner ? `파트너 기간(일, 꼭 적기 · ${PARTNER.maxDays}일까지)` : '체험 기간(일)'}><input type="number" min={1} max={partner ? PARTNER.maxDays : 90} required={partner} placeholder={partner ? '기간을 적어 주세요' : undefined} className={inputCls} value={f.trialDays} onChange={(e) => setF({ ...f, trialDays: e.target.value })} data-testid="new-company-trial-days" /></Field>}
-            <label className={cx('flex items-start gap-2 rounded-input border px-3 py-2 text-xs sm:col-span-2', f.isTest ? 'border-amber-400 bg-amber-50' : 'border-amber-200 bg-amber-50/50')}><input type="checkbox" className="mt-0.5 size-4" checked={f.isTest} onChange={(e) => setF({ ...f, isTest: e.target.checked })} data-testid="new-company-test" /><span><b className="text-sm font-semibold text-ink">검수용 시험 회사로 만들기</b> <span className="text-ink-2">— 배포 자동 확인용(가짜 자료만). 고객 목록·가입 통계에서 빠지고, 체험이 끝나지 않으며, 자동 확인이 로그인할 수 있게 자동화 차단을 끕니다. 실제 고객사는 체크하지 마세요.</span></span></label>
             <Field label="시작 공간(업무는 항상)"><div className="flex items-center gap-3 py-2 text-xs">{(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={f.spaces.includes(sp)} onChange={() => toggle('spaces', sp)} data-testid={`new-company-space-${sp}`} />{SPACE_LABEL[sp]}</label>)}</div></Field>
             <Field label="대표 이름"><input className={inputCls} value={f.ownerName} onChange={(e) => setF({ ...f, ownerName: e.target.value })} required maxLength={50} data-testid="new-company-owner" /></Field>
             <Field label="대표 이메일(초대 메일 받을 주소)"><input type="email" className={inputCls} value={f.ownerEmail} onChange={(e) => setF({ ...f, ownerEmail: e.target.value })} required data-testid="new-company-email" /></Field>
@@ -337,7 +339,6 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
             <Field label="담당자 연락처(선택)"><input className={inputCls} value={f.contactPhone} onChange={(e) => setF({ ...f, contactPhone: e.target.value })} maxLength={30} placeholder="010-0000-0000" data-testid="new-company-contact-phone" /></Field>
             <Field label="담당자 직책(선택)"><input className={inputCls} value={f.contactTitle} onChange={(e) => setF({ ...f, contactTitle: e.target.value })} maxLength={30} data-testid="new-company-contact-title" /></Field>
           </div>
-          {partner && <p className="rounded-input border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-900" data-testid="new-company-partner-note">설계 파트너는 체험으로 시작하고 AI 월 예산 {PARTNER.aiBudgetKrw.toLocaleString('ko-KR')}원 · 마케팅 크레딧 {PARTNER.mktCredits}으로 자동 설정됩니다. 끝나기 {PARTNER.alertDays}일 전 슈퍼관리자에게 [유료 전환]·[기간 연장]·[지금 종료] 알림이 가고, 그대로 두면 끝나는 날 읽기 전용이 됩니다.</p>}
           <Field label="운영 메모(선택)"><textarea className={cx(inputCls, 'min-h-[56px]')} value={f.memo} onChange={(e) => setF({ ...f, memo: e.target.value })} maxLength={2000} data-testid="new-company-memo" /></Field>
           <p className="text-xs text-ink-3">만들면 대표에게 초대 메일(7일 유효)이 갑니다. 비밀번호는 대표가 직접 정하고, 운영자가 대신 들어가 보는 기능은 없습니다(지원 모드는 고객사가 허용한 때만).</p>
           <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy} data-testid="new-company-go">회사 만들기 · 초대 메일</Button></div>

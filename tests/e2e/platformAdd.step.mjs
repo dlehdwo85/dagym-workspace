@@ -10,13 +10,11 @@ export async function platformAdd({ owner, BASE, SHOTS, sql }) {
   const chips = f.getByTestId('new-company-industries').getByRole('button');
   await chips.nth(0).click(); await chips.nth(1).click();
   await f.getByTestId('new-company-size').selectOption('11-30');
-  await f.getByTestId('new-company-trial-days').fill('30');
   await f.getByTestId('new-company-space-marketing').check();
   await f.getByTestId('new-company-owner').fill('이고객');
   await f.getByTestId('new-company-email').fill('e2e-cust@dagym.test');
   await f.getByTestId('new-company-memo').fill('E2E 메모');
   // #656 담당자·구분·소개 경로
-  await f.getByTestId('new-company-segment').selectOption('partner');
   await f.getByTestId('new-company-source').fill('하이링크 고객');
   await f.getByTestId('new-company-contact-name').fill('김담당');
   await f.getByTestId('new-company-contact-phone').fill('010-1234-5678');
@@ -27,6 +25,12 @@ export async function platformAdd({ owner, BASE, SHOTS, sql }) {
   assert.match(link ?? '', /^\/invite\//);
   await done.getByTestId('new-company-open').click();
   const d = owner.getByTestId('company-detail'); await d.waitFor();
+  // #1139 2부: 여기서 만든 회사는 검수용 시험 회사 — 고객사 관리 흐름 시험을 위해 표시를 풀고 [설계 파트너로 지정]
+  await d.getByTestId('company-test-unmark').click(); await owner.getByTestId('confirm-ok').click(); // 앱 안 확인 창
+  await d.getByTestId('company-partner-set').waitFor();
+  owner.once('dialog', (dlg) => dlg.accept('30'));
+  await d.getByTestId('company-partner-set-go').click();
+  await d.getByTestId('company-partner').waitFor();
   await d.getByTestId('company-invite-pending').waitFor();
   assert.equal(await d.getByTestId('company-space-marketing').isChecked(), true);
   assert.equal(await d.getByTestId('company-space-sales').isChecked(), false);

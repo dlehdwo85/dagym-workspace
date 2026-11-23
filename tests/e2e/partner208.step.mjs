@@ -11,24 +11,22 @@ export async function partner208({ owner, browser, ctx, sql, BASE, SHOTS, tick, 
   await f.getByTestId('new-company-name').fill('E2E 설계파트너');
   await f.getByTestId('new-company-owner').fill('정파트너');
   await f.getByTestId('new-company-email').fill('e2e-partner208@dagym.test');
-  const days = f.getByTestId('new-company-trial-days');
-  assert.equal(await days.inputValue(), '14', '일반 고객 체험은 14일 기본');
-  assert.equal(await f.getByTestId('new-company-test').isChecked(), false, 'D-08 검수용 시험 회사는 기본으로 꺼짐');
-  await f.getByTestId('new-company-segment').selectOption('partner');
-  assert.equal(await days.inputValue(), '', '파트너 기간은 기본값 없음');
-  assert.equal(await f.getByTestId('new-company-plan').isDisabled(), true, '요금제는 체험 고정');
-  assert.match(await f.getByTestId('new-company-partner-note').innerText(), /AI 월 예산 5,000원 · 마케팅 크레딧 0/);
-  await f.getByTestId('new-company-go').click(); // 기간 없이 → 브라우저가 막음
-  assert.equal(await days.evaluate((el) => el.validity.valueMissing), true);
-  assert.equal(await owner.getByTestId('new-company-done').count(), 0);
-  await days.fill('45');
+  // #1139 2부(대표 11/24): [검수용 시험 회사 만들기]는 시험 회사만 — 설계 파트너는 회사 상세 [설계 파트너로 지정](시험 표시를 풀어야 지정됨)
+  assert.match(await f.getByTestId('new-company-test-only').innerText(), /검수용 시험 회사/);
+  assert.equal(await f.getByTestId('new-company-segment').count(), 0, '구분(설계 파트너) 고르기 없음');
   await owner.screenshot({ path: `${SHOTS}/551-platform-partner-add.png` });
   await f.getByTestId('new-company-go').click();
   const done = owner.getByTestId('new-company-done'); await done.waitFor();
+  await done.getByTestId('new-company-test-done').waitFor();
   const invite = await done.getByTestId('new-company-link').getAttribute('href');
   await done.getByTestId('new-company-open').click();
+  const det = owner.getByTestId('company-detail'); await det.waitFor();
+  assert.equal(await det.getByTestId('company-partner-set').count(), 0, '시험 회사는 파트너 지정 칸 없음');
+  await det.getByTestId('company-test-unmark').click(); await owner.getByTestId('confirm-ok').click(); // 앱 안 확인 창 // 실제 회사처럼(검수 흐름 시험용)
+  await det.getByTestId('company-partner-set').waitFor();
+  owner.once('dialog', (dlg) => dlg.accept('45'));
+  await det.getByTestId('company-partner-set-go').click();
   const box = owner.getByTestId('company-detail').getByTestId('company-partner'); await box.waitFor();
-  await owner.getByTestId('company-detail').getByTestId('company-test-mark-on').waitFor(); // D-08 로컬 11/24: 이미 만든 회사도 [검수용 시험 회사로 표시]
   assert.match(await box.getByTestId('company-partner-period').innerText(), /D-4[45]/);
   assert.match(await box.getByTestId('company-partner-preset').innerText(), /AI 월 예산 5,000원 · 마케팅 월 크레딧 0 \(파트너 기본값\)/);
   const [t] = await sql`select id from tenants where name = 'E2E 설계파트너'`;

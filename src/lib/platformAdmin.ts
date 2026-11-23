@@ -311,6 +311,24 @@ async function applyTestMark(tx: Sql, tenant: string) {
   await tx`update tenant_subscriptions set status = 'trial', trial_ends_at = now() + interval '3650 days', period_end = (now() + interval '3650 days')::date
     where tenant = ${tenant} and status in ('trial', 'expired')`;
 }
+/** #1139 2부(대표 11/24 위임): 설계 파트너는 [고객사 추가]가 아니라 공개 가입한 회사의 상세에서 [설계 파트너로 지정] — 기간(일)·체험으로 · AI 월 예산·마케팅 크레딧 파트너 기본값 */
+export const partnerSetInput = z.object({ days: z.number().int().min(1).max(PARTNER.maxDays) });
+export async function setTenantPartner(u: SessionUser, tenant: string, i: z.infer<typeof partnerSetInput>, ip: string | null) {
+  requirePlatform(u);
+  if (INTERNAL.includes(tenant)) throw badRequest('우리 회사는 설계 파트너로 지정하지 않습니다');
+  const sql = db();
+  const [t] = await sql<{ id: string; is_test: boolean | null; segment: string | null }[]>`select id, is_test, segment from tenants where id = ${tenant}`;
+  if (!t) throw notFound('없는 회사입니다');
+  if (t.is_test) throw badRequest('검수용 시험 회사는 설계 파트너로 지정할 수 없습니다 — 먼저 시험 회사 표시를 풀어 주세요');
+  if (t.segment === 'partner') throw badRequest('이미 설계 파트너입니다 — 기간은 설계 파트너 칸에서 늘려 주세요');
+  await sql.begin(async (tx) => {
+    await tx`update tenants set segment = 'partner' where id = ${tenant}`;
+    await tx`update tenant_subscriptions set status = 'trial', trial_ends_at = now() + ${i.days} * interval '1 day', period_end = (now() + ${i.days} * interval '1 day')::date where tenant = ${tenant}`;
+    await (await import('./plans')).applyPartnerPreset(tenant, tx as never);
+    await audit(tx, u.id, 'platform.partner_set', 'tenant', tenant, { days: i.days }, ip);
+  });
+  return { ok: true };
+}
 export const testMarkInput = z.object({ on: z.boolean() });
 /** 로컬 11/24(D-08): 이미 만든 회사도 회사 상세에서 [검수용 시험 회사로 표시] — 만들 때 체크한 것과 같은 효과. 끄면 시험 표시·차단 예외만 풀림(체험 기간은 그대로) */
 export async function setTenantTestMark(u: SessionUser, tenant: string, i: z.infer<typeof testMarkInput>, ip: string | null) {
