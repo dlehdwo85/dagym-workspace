@@ -28,6 +28,7 @@ export async function partner208({ owner, browser, ctx, sql, BASE, SHOTS, tick, 
   const invite = await done.getByTestId('new-company-link').getAttribute('href');
   await done.getByTestId('new-company-open').click();
   const box = owner.getByTestId('company-detail').getByTestId('company-partner'); await box.waitFor();
+  await owner.getByTestId('company-detail').getByTestId('company-test-mark-on').waitFor(); // D-08 로컬 11/24: 이미 만든 회사도 [검수용 시험 회사로 표시]
   assert.match(await box.getByTestId('company-partner-period').innerText(), /D-4[45]/);
   assert.match(await box.getByTestId('company-partner-preset').innerText(), /AI 월 예산 5,000원 · 마케팅 월 크레딧 0 \(파트너 기본값\)/);
   const [t] = await sql`select id from tenants where name = 'E2E 설계파트너'`;

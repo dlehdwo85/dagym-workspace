@@ -211,4 +211,21 @@ describe('플랫폼 운영 고객사 추가', () => {
     const plain = await ctx.owner.ok('POST', '/api/platform/tenants', { company: '보통고객', ownerName: '보대표', ownerEmail: 'plain@cust.test' });
     assert.deepEqual(Object.values((await sql`select is_test, capture_block from tenants where id = ${plain.tenant}`)[0]), [false, null], '체크 안 하면 보통 회사(차단 기본값)');
   });
+  test('D-08 이미 만든 회사도 [검수용 시험 회사로 표시] — 만들 때 체크와 같은 효과 · 풀면 시험 표시·차단 예외만 풀림 · 플랫폼 운영자만 · 우리 회사 불가', async () => {
+    const r = await ctx.owner.ok('POST', '/api/platform/tenants', { company: '나중표시 검수', ownerName: '검수2', ownerEmail: 'qa2@cust.test' });
+    assert.equal((await ctx.staffA.client.req('PUT', `/api/platform/tenants/${r.tenant}/test-mark`, { on: true })).status, 404, '운영자만');
+    await sql`update tenant_subscriptions set status = 'expired', trial_ends_at = now() - interval '1 day' where tenant = ${r.tenant}`; // 체험이 끝난 회사였어도
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${r.tenant}/test-mark`, { on: true });
+    const [t] = await sql`select is_test, capture_block, capture_note from tenants where id = ${r.tenant}`;
+    assert.deepEqual([t.is_test, t.capture_block], [true, false]); assert.match(t.capture_note, /검수용 시험 회사/);
+    const [sub] = await sql`select status, (trial_ends_at::date - current_date) as days from tenant_subscriptions where tenant = ${r.tenant}`;
+    assert.equal(sub.status, 'trial'); assert.ok(Number(sub.days) >= 3649, `체험 10년 (${sub.days})`);
+    assert.equal((await ctx.owner.ok('GET', `/api/platform/tenants/${r.tenant}/detail`)).tenant.is_test, true);
+    assert.ok(!(await ctx.owner.ok('GET', '/api/platform/tenants')).tenants.some((x) => x.id === r.tenant), '고객 목록에서 빠짐');
+    await ctx.owner.ok('PUT', `/api/platform/tenants/${r.tenant}/test-mark`, { on: false });
+    assert.deepEqual(Object.values((await sql`select is_test, capture_block, capture_note from tenants where id = ${r.tenant}`)[0]), [false, null, null], '풀면 기본값');
+    assert.equal((await ctx.owner.req('PUT', '/api/platform/tenants/default/test-mark', { on: true })).status, 400, '우리 회사 불가');
+    const acts = (await sql`select detail from audit_logs where action = 'platform.tenant_test_mark' and target_id = ${r.tenant} order by id`).map((x) => x.detail.on);
+    assert.deepEqual(acts, [true, false]);
+  });
 });

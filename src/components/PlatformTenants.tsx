@@ -7,7 +7,7 @@ import { INDUSTRIES } from '@/lib/industries';
 import { PARTNER } from '@/lib/partner';
 import { api, useApi } from './client';
 import { fmtBytes } from './usage';
-import { Button, Field, Modal, cx, fmtDateTime, inputCls, toast } from './ui';
+import { Button, Field, Modal, askConfirm, cx, fmtDateTime, inputCls, toast } from './ui';
 const SIZE_LABEL: Record<string, string> = { '1': '혼자', '2-10': '2~10명', '11-30': '11~30명', '31-100': '31~100명', '100+': '100명 넘게' };
 const SPACE_LABEL: Record<string, string> = { sales: '영업', marketing: '마케팅' };
 
@@ -171,6 +171,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
         </div>
         {d.data.mktWrite && <MktWriteBox id={id} w={d.data.mktWrite} pick={wt} setPick={setWt} run={run} />}
+        {!internal && <TestMarkBox id={id} on={!!d.data.tenant?.is_test} run={run} />}{/* D-08 검수용 시험 회사 표시(로컬 11/24) */}
         {!internal && <CaptureBox id={id} t={d.data.tenant} trial={d.data.subscription?.status === 'trial'} events={d.data.captureEvents30d ?? 0} run={run} />}{/* #626 캡처 차단 스위치(외부 고객사만) */}
         <div>
           <p className="mb-1 text-xs font-medium text-ink-2">사용자 {d.data.users.length}명 — 비밀번호는 보거나 정할 수 없고 재설정 메일만 보냅니다</p>
@@ -297,6 +298,9 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
         <div className="space-y-2 text-sm" data-testid="new-company-done">
           <p><b>{f.company}</b> 회사가 만들어졌습니다 (id {result.tenant}). 대표 {f.ownerName}({f.ownerEmail})이 초대 링크에서 비밀번호를 정하면 바로 시작합니다 — 운영자가 대신 로그인하는 기능은 없습니다.</p>
           <p className="text-xs">{result.mail === 'sent' ? '초대 메일을 보냈습니다. 같은 링크를 직접 전달해도 됩니다: ' : result.mail === 'failed' ? '초대 메일 발송에 실패했습니다(메일 설정 확인) — 아래 링크를 직접 전달하세요: ' : '메일이 설정되지 않아 링크를 직접 전달해야 합니다: '}<a className="underline" href={result.inviteLink} data-testid="new-company-link">{result.inviteLink}</a></p>
+          {f.isTest
+            ? <p className="rounded-input bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="new-company-test-done">검수용 시험 회사로 만들었습니다 — 고객 목록에는 보이지 않습니다(회사 관리는 아래 단추로).</p>
+            : <p className="text-xs text-ink-3" data-testid="new-company-test-hint">배포 확인용 시험 회사라면 회사 관리에서 [검수용 시험 회사로 표시]를 누르세요.</p>}
           <div className="flex justify-end"><Button onClick={() => onDone(result.tenant)} data-testid="new-company-open">회사 관리 열기</Button></div>
         </div>
       ) : (
@@ -311,7 +315,7 @@ function NewTenant({ onClose, onDone }: { onClose: () => void; onDone: (id: stri
             <Field label="규모"><select className={inputCls} value={f.size} onChange={(e) => setF({ ...f, size: e.target.value })} data-testid="new-company-size">{Object.entries(SIZE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
             <Field label="요금제"><select className={inputCls} value={f.planCode} disabled={partner} title={partner ? '설계 파트너는 체험으로 시작합니다 — 유료 전환은 고객사 관리에서' : undefined} onChange={(e) => setF({ ...f, planCode: e.target.value })} data-testid="new-company-plan"><option value="trial">체험(카드 없음)</option>{(plans.data?.plans ?? []).filter((p) => p.active && p.code !== 'trial').map((p) => <option key={p.code} value={p.code}>{p.name}({p.code})</option>)}</select></Field>
             {f.planCode === 'trial' && <Field label={partner ? `파트너 기간(일, 꼭 적기 · ${PARTNER.maxDays}일까지)` : '체험 기간(일)'}><input type="number" min={1} max={partner ? PARTNER.maxDays : 90} required={partner} placeholder={partner ? '기간을 적어 주세요' : undefined} className={inputCls} value={f.trialDays} onChange={(e) => setF({ ...f, trialDays: e.target.value })} data-testid="new-company-trial-days" /></Field>}
-            <label className="flex items-start gap-2 py-2 text-xs sm:col-span-2"><input type="checkbox" className="mt-0.5" checked={f.isTest} onChange={(e) => setF({ ...f, isTest: e.target.checked })} data-testid="new-company-test" /><span><b className="font-medium">검수용 시험 회사</b> — 고객 목록·가입 통계에서 빼고 체험 기간이 끝나지 않게(배포 확인용, 가짜 자료만)</span></label>
+            <label className={cx('flex items-start gap-2 rounded-input border px-3 py-2 text-xs sm:col-span-2', f.isTest ? 'border-amber-400 bg-amber-50' : 'border-amber-200 bg-amber-50/50')}><input type="checkbox" className="mt-0.5 size-4" checked={f.isTest} onChange={(e) => setF({ ...f, isTest: e.target.checked })} data-testid="new-company-test" /><span><b className="text-sm font-semibold text-ink">검수용 시험 회사로 만들기</b> <span className="text-ink-2">— 배포 자동 확인용(가짜 자료만). 고객 목록·가입 통계에서 빠지고, 체험이 끝나지 않으며, 자동 확인이 로그인할 수 있게 자동화 차단을 끕니다. 실제 고객사는 체크하지 마세요.</span></span></label>
             <Field label="시작 공간(업무는 항상)"><div className="flex items-center gap-3 py-2 text-xs">{(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={f.spaces.includes(sp)} onChange={() => toggle('spaces', sp)} data-testid={`new-company-space-${sp}`} />{SPACE_LABEL[sp]}</label>)}</div></Field>
             <Field label="대표 이름"><input className={inputCls} value={f.ownerName} onChange={(e) => setF({ ...f, ownerName: e.target.value })} required maxLength={50} data-testid="new-company-owner" /></Field>
             <Field label="대표 이메일(초대 메일 받을 주소)"><input type="email" className={inputCls} value={f.ownerEmail} onChange={(e) => setF({ ...f, ownerEmail: e.target.value })} required data-testid="new-company-email" /></Field>
@@ -344,6 +348,23 @@ function MktWriteBox({ id, w, pick, setPick, run }: { id: string; w: { company: 
         {(['fast', 'default', 'deep'] as const).map((k) => <option key={k} value={k}>{TIER[k]} · 글 1건 약 {w.byTier[k].toLocaleString('ko-KR')}원</option>)}
       </select>
       <Button size="sm" variant="secondary" onClick={() => run(() => api(`/api/platform/tenants/${id}/mkt-write`, { method: 'PUT', body: { tier: v || null } }), '글 모델을 바꿨습니다')} data-testid="company-mkt-write-save">저장</Button>
+    </div>
+  );
+}
+
+/** D-08(로컬 11/24): 이미 만든 회사를 검수용 시험 회사로 — 만들 때 체크한 것과 같은 효과(고객 목록·통계 제외·자동화 차단 끔·체험 10년) */
+function TestMarkBox({ id, on, run }: { id: string; on: boolean; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+  const mark = async (v: boolean) => {
+    const msg = v ? '이 회사를 검수용 시험 회사로 표시할까요? 고객 목록·가입 통계에서 빠지고, 자동화 차단이 꺼지고, 체험 기간이 10년으로 늘어납니다. 실제 고객사에는 쓰지 마세요.'
+      : '검수용 시험 회사 표시를 풀까요? 고객 목록에 다시 보이고, 이 표시로 꺼 둔 자동화 차단은 기본값(켬)으로 돌아갑니다(체험 기간은 그대로).';
+    if (!(await askConfirm(msg, { title: '검수용 시험 회사', ok: v ? '표시' : '풀기', danger: !v }))) return;
+    await run(() => api(`/api/platform/tenants/${id}/test-mark`, { method: 'PUT', body: { on: v } }), v ? '검수용 시험 회사로 표시했습니다' : '시험 회사 표시를 풀었습니다');
+  };
+  return (
+    <div className={cx('flex flex-wrap items-center gap-2 rounded-input border p-3 text-xs', on ? 'border-amber-300 bg-amber-50' : 'border-line')} data-testid="company-test-mark">
+      <span className="min-w-0 flex-1 text-ink-2">{on ? <><b className="text-ink">검수용 시험 회사</b> — 고객 목록·가입 통계에서 빠지고, 자동화 차단이 꺼져 배포 자동 확인이 로그인합니다.</> : '배포 확인용 시험 회사라면 표시하세요(고객 목록·통계 제외 · 자동화 차단 끔 · 체험 10년).'}</span>
+      {on ? <Button size="sm" variant="secondary" onClick={() => mark(false)} data-testid="company-test-unmark">표시 풀기</Button>
+        : <Button size="sm" variant="secondary" onClick={() => mark(true)} data-testid="company-test-mark-on">검수용 시험 회사로 표시</Button>}
     </div>
   );
 }

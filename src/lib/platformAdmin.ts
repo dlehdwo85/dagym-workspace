@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { db } from './db';
+import { db, type Sql } from './db';
 import { newToken, sha256 } from './crypto';
 import { HttpError, badRequest, conflict, forbidden, notFound } from './errors';
 import { audit } from './log';
@@ -289,11 +289,7 @@ export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof n
     if (plan) await tx`update tenant_subscriptions set plan_code = ${plan}, status = 'active', trial_ends_at = null, period_end = null where tenant = ${tenant}`;
     else if (i.trialDays) await tx`update tenant_subscriptions set trial_ends_at = now() + ${i.trialDays} * interval '1 day', period_end = (now() + ${i.trialDays} * interval '1 day')::date where tenant = ${tenant}`;
     if (i.segment === 'partner') await (await import('./plans')).applyPartnerPreset(tenant, tx); // #667 AI 월 5,000원·마케팅 크레딧 0
-    if (i.isTest) { // D-08: 검수용 시험 회사 — 고객 목록·가입 통계에서 빠짐(is_test) · 배포 확인이 체험 만료로 막히지 않게 체험 기간을 길게
-      // #626 자동화 브라우저 차단은 외부 고객사 기본값 — 깃허브의 자동 확인(헤드리스 브라우저·스크립트)이 로그인하도록 이 회사만 끔(가짜 자료뿐, 사유는 회사 상세에 보임)
-      await tx`update tenants set is_test = true, capture_block = false, capture_note = ${'D-08 검수용 시험 회사 — 배포 자동 확인(가짜 자료만)'} where id = ${tenant}`;
-      if (!plan) await tx`update tenant_subscriptions set trial_ends_at = now() + interval '3650 days', period_end = (now() + interval '3650 days')::date where tenant = ${tenant}`;
-    }
+    if (i.isTest) await applyTestMark(tx as never, tenant); // D-08: 검수용 시험 회사(아래 applyTestMark — 회사 상세 [검수용 시험 회사로 표시]와 같은 효과)
     const [hq] = await tx<{ id: string }[]>`select id from org_units where tenant = ${tenant} and type = 'hq' order by sort limit 1`;
     await tx`insert into invitations (email, name, role, org_unit_ids, token_hash, invited_by, user_id, expires_at) values (${i.ownerEmail}, ${i.ownerName}, 'owner', ${hq ? [hq.id] : []}, ${sha256(token)}, ${u.id}, ${userId}, now() + interval '7 days')`;
     await audit(tx, u.id, 'platform.tenant_create', 'tenant', tenant, { company: i.company, ownerEmail: i.ownerEmail, plan: plan ?? `trial${i.trialDays ? `(${i.trialDays}d)` : ''}`, spaces: i.spaces, industries: inds, segment: i.segment ?? null, ...(i.segment === 'partner' ? { preset: PARTNER } : {}) }, ip);
@@ -301,6 +297,32 @@ export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof n
   });
   const m = await tryMail(i.ownerEmail, inviteMail(i.company, i.ownerName, `${appUrl()}/invite/${token}`));
   return { ok: true, tenant: r.tenant, ownerUserId: r.userId, mail: m, inviteLink: `/invite/${token}` }; // 링크는 직원 초대와 같이 운영자에게도 보여 직접 전달 가능
+}
+/**
+ * D-08 검수용 시험 회사: 고객 목록·가입 통계에서 빠짐(is_test) · #626 자동화 브라우저 차단 끔(깃허브 자동 확인이 로그인 — 가짜 자료뿐, 사유는 회사 상세에 보임)
+ * · 체험 중(또는 끝난 체험)이면 10년으로 늘림(배포 확인이 체험 만료로 막히지 않게 — 유료 요금제는 그대로)
+ */
+const TEST_NOTE = 'D-08 검수용 시험 회사 — 배포 자동 확인(가짜 자료만)';
+async function applyTestMark(tx: Sql, tenant: string) {
+  await tx`update tenants set is_test = true, capture_block = false, capture_note = ${TEST_NOTE} where id = ${tenant}`;
+  await tx`update tenant_subscriptions set status = 'trial', trial_ends_at = now() + interval '3650 days', period_end = (now() + interval '3650 days')::date
+    where tenant = ${tenant} and status in ('trial', 'expired')`;
+}
+export const testMarkInput = z.object({ on: z.boolean() });
+/** 로컬 11/24(D-08): 이미 만든 회사도 회사 상세에서 [검수용 시험 회사로 표시] — 만들 때 체크한 것과 같은 효과. 끄면 시험 표시·차단 예외만 풀림(체험 기간은 그대로) */
+export async function setTenantTestMark(u: SessionUser, tenant: string, i: z.infer<typeof testMarkInput>, ip: string | null) {
+  requirePlatform(u);
+  if (INTERNAL.includes(tenant)) throw badRequest('우리 회사·체험 조직은 시험 회사로 표시하지 않습니다');
+  const sql = db();
+  const [t] = await sql<{ is_test: boolean; capture_note: string | null }[]>`select is_test, capture_note from tenants where id = ${tenant}`;
+  if (!t) throw notFound('없는 회사입니다');
+  await sql.begin(async (tx) => {
+    if (i.on) await applyTestMark(tx as never, tenant);
+    else await tx`update tenants set is_test = false, capture_block = case when capture_note = ${TEST_NOTE} then null else capture_block end,
+      capture_note = case when capture_note = ${TEST_NOTE} then null else capture_note end where id = ${tenant}`; // 이 표시로 끈 차단만 기본값으로
+    await audit(tx as never, u.id, 'platform.tenant_test_mark', 'tenant', tenant, { on: i.on, was: t.is_test }, ip);
+  });
+  return { ok: true, isTest: i.on };
 }
 /** 대표가 아직 초대를 안 받았을 때 초대 메일 다시 보내기(새 링크, 이전 링크는 무효) */
 export async function reinviteOwner(u: SessionUser, tenant: string, ip: string | null) {
