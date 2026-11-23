@@ -2756,7 +2756,7 @@ await step('AI 동의(대표 11/19·애플 5.1.2 · #1087 웹 필수): 들어오
 await step('점검 2단계 점검하기·보완 흐름(375): 코스로 점검(양호·보완 필요·메모·사진) → 끝내기 = 보완 요청 업무 → 완료되면 확인 대기 → 다시 보완(새 업무 2차) → 양호 확인 · 수시 점검 · 코스 만들기', () => checkRun({ owner, ctx, BASE, SHOTS }));
 await step('계약 관리 1단계: 관리 메뉴 [계약 관리] → 등록 → 상세(만료 임박 D-n)·계약서 파일 → 요약 숫자 → 자동 연장은 통보 기한 기준 → 갱신 등록(지난 기간) → 알림 날짜 → 종료 → 390 · 권한 없는 직원은 화면 없음', () => agreements({ owner, staff, ctx, sql, BASE, SHOTS }));
 await step('#1135 메모·주요 메모: 사이드바 [메모] → 일반 메모(나만) → 주요 메모 만들기(직원 A 보기 공유) → ●●●● → [보기]에 본인 확인(틀림 안내 → 맞음) → 그 칸만 보임·남은 시간 → 10분 안 다시 안 물음 → 기록 → 직원 A(390)는 보기만·대표 개인 메모 없음', () => memos({ owner, staff, ctx, BASE, SHOTS }));
-await step('#1129 자료실 › [공개 방식]: 대표만 바꿈(영향 건수 → 확인) → 회사 전체 공유면 다른 지점 업무가 보임 → 업무 \'공개 범위\' 이 부서·팀만이면 다시 안 보임 → 되돌림', () => shareMode({ owner, staff, ctx, BASE, SHOTS }));
+await step('#1129 자료실 › [공개 방식]: 대표만 바꿈(영향 건수 → 확인) → 회사 전체 공유면 다른 지점 업무가 보임 → 업무 \'공개 범위\' 이 부서·팀만이면 다시 안 보임 → 되돌림', () => shareMode({ owner, ctx, sql, BASE, SHOTS }));
 await step('#1128 파일 한 개 최대 크기: 관리 › 회사 정보에서 50MB 로 → 업무 첨부 안내 글이 최대 50MB → 2GB 로 되돌림', async () => {
   await owner.setViewportSize({ width: 1366, height: 900 });
   await owner.goto(BASE + '/admin/company');

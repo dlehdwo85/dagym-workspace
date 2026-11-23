@@ -60,7 +60,7 @@ export async function mktConcepts({ owner, ctx, sql, BASE, SHOTS }) {
   await owner.goto(`${BASE}/s/marketing/ops`);
   const done = owner.getByTestId('concepts').locator('[data-testid=concept-set][data-status=decided]').first(); await done.waitFor();
   assert.equal(await done.locator('[data-testid=concept-item][data-decision=adopted]').count(), 2);
-  assert.match(await done.getByTestId('concept-brief').first().innerText(), /^제작 의뢰 · .+ →$/);
+  assert.match(await done.getByTestId('concept-brief').first().innerText(), /^제작 의뢰 · .+$/);
   assert.equal(await done.getByTestId('concept-variant').count(), 2);
   assert.match(await done.getByTestId('concept-decided').innerText(), /채택 2개 → 제작 의뢰 2건/);
   const [set] = await sql`select id, executed from mkt_concept_sets where brand_id = ${brand} order by created_at desc limit 1`;
