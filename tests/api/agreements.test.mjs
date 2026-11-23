@@ -161,3 +161,29 @@ test('④ 갱신 등록(기간 이력·알림 다시) · 종료 ⑤ 계약서 �
   assert.equal(Buffer.from(await x.arrayBuffer()).subarray(0, 2).toString(), 'PK');
   assert.equal((await fetch(`${BASE}/api/agreements/export`, { headers: { cookie: ctx.staffB.client.cookie } })).status, 404);
 });
+
+test('D-05(대표 11/23): 보관(숨김) → 목록·홈 카드·엑셀에서 빠짐 · 보관함에서 되살리기 · 완전 삭제는 대표만(보관한 것만) · 휴지통 기록 · 다른 회사 404', async () => {
+  const [adm] = await sql`insert into users (email, name, role, status, tenant) values ('adm@agr.test', '관리자', 'admin', 'active', 'default') returning id`;
+  const token = randomBytes(32).toString('base64url');
+  await sql`insert into sessions (id, user_id, client, expires_at) values (${createHash('sha256').update(token).digest('hex')}, ${adm.id}, 'web', now() + interval '1 day')`;
+  const admin = new Client('adm'); admin.cookie = `wos_session=${token}`;
+  const id = (await ctx.owner.ok('POST', '/api/agreements', { title: '[시험] 계약 관리 확인용', counterparty: '시험상대', endDate: day(10) })).id;
+  assert.ok((await ctx.owner.ok('GET', '/api/agreements/summary')).items.some((x) => x.id === id), '보관 전에는 홈 카드에');
+  assert.equal((await other.req('DELETE', `/api/agreements/${id}`)).status, 404, '다른 회사');
+  assert.equal((await ctx.owner.req('DELETE', `/api/agreements/${id}?purge=1`)).status, 404, '보관하지 않은 계약은 완전 삭제 안 됨(두 단계)');
+  await admin.ok('DELETE', `/api/agreements/${id}`); // 관리자도 보관은 됨
+  assert.equal((await ctx.owner.ok('GET', '/api/agreements?state=all')).agreements.some((x) => x.id === id), false, '목록에서 빠짐');
+  assert.equal((await ctx.owner.req('GET', `/api/agreements/${id}`)).status, 404);
+  assert.equal(((await ctx.owner.ok('GET', '/api/agreements/summary')).items ?? []).some((x) => x.id === id), false, '홈 카드에서 빠짐');
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/agreements?archived=1')).agreements.map((x) => x.id), [id], '보관함');
+  await admin.ok('POST', `/api/agreements/${id}/restore`, {});
+  assert.ok((await ctx.owner.ok('GET', '/api/agreements?state=all')).agreements.some((x) => x.id === id), '되살림');
+  await admin.ok('DELETE', `/api/agreements/${id}`);
+  assert.equal((await admin.req('DELETE', `/api/agreements/${id}?purge=1`)).status, 403, '완전 삭제는 대표만');
+  await ctx.owner.ok('DELETE', `/api/agreements/${id}?purge=1`);
+  assert.equal((await sql`select 1 from agreements where id = ${id}`).length, 0);
+  const [tr] = await sql`select kind, title, data from trash_records where ref_id = ${id}`;
+  assert.deepEqual([tr.kind, tr.title, tr.data.agreement.counterparty], ['agreement', '[시험] 계약 관리 확인용', '시험상대']);
+  const acts = (await sql`select action from audit_logs where target_id = ${id} order by created_at`).map((x) => x.action);
+  for (const x of ['agreement.archive', 'agreement.restore', 'agreement.purge']) assert.ok(acts.includes(x), x);
+});

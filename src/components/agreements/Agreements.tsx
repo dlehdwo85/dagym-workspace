@@ -3,11 +3,11 @@
 // 목록(임박한 것부터) · 등록·고치기 · 갱신 등록(기간 이력) · 종료 · 계약서 파일(계약 관리 권한이 있는 사람만 열고, 열람은 감사 기록에 남음) · 회사 기본 알림 날짜 · 엑셀.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { BellRing, Download, FileText, FolderClock, History, Loader2, Paperclip, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, BellRing, Download, FileText, FolderClock, History, Loader2, Paperclip, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { MultiUserSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { useSession } from '@/components/session';
-import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, fmtDate, inputCls, toast } from '@/components/ui';
+import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, askConfirm, cx, fmtDate, inputCls, toast } from '@/components/ui';
 import { DropZone, putFile } from '@/components/upload';
 import { agreementLeftText } from '@/lib/agreementLabel';
 
@@ -30,7 +30,7 @@ export function AgreementsHome() {
   const sess = useSession(); const router = useRouter(); const sp = useSearchParams();
   const canEdit = (sess.menus?.agreements ?? 'none') === 'edit';
   const [q, setQ] = useState(''); const [tag, setTag] = useState(''); const [state, setState] = useState('open');
-  const qs = useMemo(() => { const p = new URLSearchParams(); if (q.trim()) p.set('q', q.trim()); if (tag) p.set('tag', tag); if (state && state !== 'all') p.set('state', state); return p.toString(); }, [q, tag, state]);
+  const qs = useMemo(() => { const p = new URLSearchParams(); if (q.trim()) p.set('q', q.trim()); if (tag) p.set('tag', tag); if (state === 'archived') p.set('archived', '1'); else if (state && state !== 'all') p.set('state', state); return p.toString(); }, [q, tag, state]);
   const list = useApi<List>(`/api/agreements${qs ? `?${qs}` : ''}`, [qs]);
   const [open, setOpen] = useState<string | null>(null);
   const [form, setForm] = useState<{ edit: Agr | null } | null>(null);
@@ -38,7 +38,8 @@ export function AgreementsHome() {
   useEffect(() => { const id = sp.get('open'); if (id) setOpen(id); }, [sp]);
   const close = () => { setOpen(null); if (sp.get('open')) router.replace('/agreements'); };
   const c = list.data?.counts;
-  const chips: [string, string, number | undefined][] = [['open', '진행 중', c?.total], ['attention', '챙길 것', c?.attention], ['soon', '만료 임박', undefined], ['ended', '종료', c?.ended], ['all', '모두', undefined]];
+  const chips: [string, string, number | undefined][] = [['open', '진행 중', state === 'archived' ? undefined : c?.total], ['attention', '챙길 것', state === 'archived' ? undefined : c?.attention], ['soon', '만료 임박', undefined], ['ended', '종료', state === 'archived' ? undefined : c?.ended], ['all', '모두', undefined],
+    ...(canEdit ? [['archived', '보관함', undefined] as [string, string, undefined]] : [])]; // D-05(대표 11/23): 보관(숨김)한 계약 — 되살리기 · 대표는 완전 삭제
   const rows = (list.data?.agreements ?? []).filter((a) => state !== 'attention' || ['expired', 'renew_check', 'notice_passed'].includes(a.state));
   return (
     <div className="mx-auto max-w-5xl" data-testid="agreements-page">
@@ -68,7 +69,7 @@ export function AgreementsHome() {
           {q || tag || state !== 'open' ? '찾는 말이나 상태를 바꿔 보세요.' : '임대차·용역·렌탈·보험처럼 기한이 있는 계약을 등록해 두면 만료 전에 알려 드립니다.'}</Empty>
       ) : (
         <ul className="divide-y divide-line overflow-hidden rounded-card border border-line bg-white shadow-card" data-testid="agr-list">
-          {rows.map((a) => (
+          {rows.map((a) => state === 'archived' ? <ArchivedRow key={a.id} a={a} owner={sess.user.role === 'owner'} onDone={list.reload} /> : (
             <li key={a.id}><button type="button" className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50" onClick={() => setOpen(a.id)} data-testid="agr-row" data-state={a.state}>
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-1.5"><b className="truncate font-semibold text-ink">{a.title}</b>
@@ -86,6 +87,22 @@ export function AgreementsHome() {
       {form && <FormModal edit={form.edit} companyDays={list.data?.alertDays ?? [90, 60, 30, 7]} onClose={() => setForm(null)} onSaved={(id) => { setForm(null); list.reload(); setOpen(id); }} />}
       {settings && <SettingsModal onClose={() => setSettings(false)} onSaved={() => { setSettings(false); list.reload(); }} />}
     </div>
+  );
+}
+
+/** D-05(대표 11/23 '추천대로'): 보관함 줄 — [되살리기] · 대표만 [완전 삭제](지운 내용은 휴지통 기록 30일) */
+function ArchivedRow({ a, owner, onDone }: { a: Agr; owner: boolean; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<unknown>, ok: string) => { setBusy(true); try { await fn(); toast.ok(ok); onDone(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); } };
+  return (
+    <li className="flex items-center gap-3 px-3 py-2.5" data-testid="agr-archived-row">
+      <span className="min-w-0 flex-1"><b className="block truncate font-semibold text-ink-2">{a.title}</b><span className="block truncate text-xs text-ink-3">{[a.counterparty, a.endDate ? `만료 ${fmtDate(a.endDate)}` : null].filter(Boolean).join(' · ')}</span></span>
+      <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(() => api(`/api/agreements/${a.id}/restore`, { method: 'POST' }), '되살렸습니다')} data-testid="agr-restore"><ArchiveRestore />되살리기</Button>
+      {owner && <Button size="sm" variant="secondary" disabled={busy} className="text-red-700" data-testid="agr-purge" onClick={async () => {
+        if (!(await askConfirm(`'${a.title}' 계약을 완전히 지울까요?\n\n기간 이력·계약서 파일 목록까지 지워져 되돌릴 수 없습니다(지운 내용은 30일 동안 휴지통 기록에 남습니다). 기록이 남습니다.`, { title: '계약 완전 삭제', ok: '완전 삭제', danger: true }))) return;
+        await run(() => api(`/api/agreements/${a.id}?purge=1`, { method: 'DELETE' }), '완전히 지웠습니다');
+      }}><Trash2 />완전 삭제</Button>}
+    </li>
   );
 }
 
@@ -175,6 +192,10 @@ function DetailModal({ id, canEdit, onClose, onChanged, onEdit }: { id: string; 
               <Button size="sm" variant="secondary" onClick={() => onEdit(a)} data-testid="agr-edit">고치기</Button>
               {a.status === 'active' && a.endDate && <Button size="sm" onClick={() => setRenew(true)} data-testid="agr-renew"><RefreshCw />갱신 등록</Button>}
               {a.status === 'active' && <Button size="sm" variant="secondary" onClick={() => setEnd(true)} data-testid="agr-end-open">종료</Button>}
+              <Button size="sm" variant="ghost" data-testid="agr-archive" onClick={async () => { // D-05(대표 11/23): 보관 = 목록·알림에서 숨김(보관함에서 되살림)
+                if (!(await askConfirm(`'${a.title}' 계약을 보관함으로 옮길까요?\n\n목록·만료 알림·홈 카드에서 빠지고, [보관함]에서 언제든 되살릴 수 있습니다.`, { title: '계약 보관', ok: '보관' }))) return;
+                try { await api(`/api/agreements/${a.id}`, { method: 'DELETE' }); toast.ok('보관함으로 옮겼습니다'); onChanged(); onClose(); } catch (e: any) { toast.error(e.message); }
+              }}><Archive />보관</Button>
             </span>}
           </div>
           <dl className="divide-y divide-line rounded-card border border-line px-3">

@@ -47,7 +47,7 @@ export function BranchReports() {
   const months = useMemo(() => (h ? monthsBack(h.today, 12) : []), [h]);
   const rep = mode === 'weekly' ? h?.reports.find((r) => r.report_day === curDay) ?? null : h?.monthly.find((r) => r.month === curMonth) ?? null;
   const weeksIn = (m: string) => (h?.reports ?? []).filter((r) => r.status === 'submitted' && r.report_day.startsWith(m)).length;
-  const detail = useApi<{ report: any; canWrite: boolean; canReopen: boolean; admin: boolean; review: Review }>(rep ? `/api/branch-reports/${rep.id}` : null);
+  const detail = useApi<{ report: any; canWrite: boolean; canReopen: boolean; admin: boolean; review: Review; canDelete?: boolean }>(rep ? `/api/branch-reports/${rep.id}` : null);
   const [setup, setSetup] = useState(false);
   const [ev, setEv] = useState<{ refs: string[]; items?: any[] } | null>(null);
   if (home.error) return <ErrorBox error={home.error} retry={home.reload} />;
@@ -90,6 +90,8 @@ export function BranchReports() {
             {detail.data?.report && <Editor key={detail.data.report.id + detail.data.report.updated_at} r={detail.data.report} rv={detail.data.review} canWrite={detail.data.canWrite} onChange={reload} onEvidence={showEvidence} />}
             {!rep && !h.canWrite && <Empty title={`${siteName} ${md(curDay)} 주간보고가 아직 없습니다`}>작성 담당이 초안을 만들면 여기서 볼 수 있습니다.</Empty>}
           </>)}
+        {/* D-01(대표 11/23): 지우기 — 초안 = 만든 사람·관리자, 제출본 = 대표만 */}
+        {detail.data?.report && detail.data.canDelete && (detail.data.report.kind === 'monthly') === (mode === 'monthly') && <DeleteReport r={detail.data.report} onDone={reload} />}
       </>}
       {setup && <Setup onClose={() => { setSetup(false); home.reload(); }} />}
       <Modal open={!!ev} onClose={() => setEv(null)} title="근거">
@@ -207,6 +209,18 @@ function Editor({ r, rv, canWrite, onChange, onEvidence }: { r: any; rv?: Review
       {canWrite && <div className="flex justify-end gap-2"><Button variant="secondary" onClick={save} disabled={busy || !dirty} data-testid="branch-save">저장</Button><Button onClick={submit} disabled={busy} data-testid="branch-submit">제출</Button></div>}
     </section>
   );
+}
+
+/** D-01(대표 11/23 '추천대로'): 보고서 지우기 — 지운 것은 휴지통 기록에 30일 */
+function DeleteReport({ r, onDone }: { r: any; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const del = async () => {
+    const what = `${r.unit_name} ${r.kind === 'monthly' ? `${Number(String(r.period_start).slice(5, 7))}월 월간 보고` : `${md(r.report_day)} 주간보고`}`;
+    if (!(await askConfirm(`${what}${r.status === 'submitted' ? '(제출함)' : '(초안)'}를 지울까요?\n\n목록에서 사라지고, 내용은 30일 동안 휴지통 기록에 남습니다. 기록이 남습니다.`, { title: '보고서 지우기', ok: '지우기', danger: true }))) return;
+    setBusy(true);
+    try { await api(`/api/branch-reports/${r.id}`, { method: 'DELETE' }); toast.ok('보고서를 지웠습니다'); onDone(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return <div className="flex justify-end"><button type="button" disabled={busy} onClick={del} className="inline-flex items-center gap-1 text-xs text-red-700 hover:underline disabled:opacity-50" data-testid="branch-delete"><Trash2 className="size-3.5" aria-hidden />이 보고서 지우기</button></div>;
 }
 
 /** 제출한 보고서 — 읽기 화면 · PDF · (관리자·검토 담당) 제출 취소 */

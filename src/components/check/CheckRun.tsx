@@ -4,10 +4,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Camera, Check, ChevronDown, ClipboardCheck, Loader2, Play, Plus, Search } from 'lucide-react';
+import { Camera, Check, ChevronDown, ClipboardCheck, Loader2, Play, Plus, Search, Trash2 } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { useMultiSite, useSession, useTerms } from '@/components/session';
-import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, cx, inputCls, toast } from '@/components/ui';
+import { Button, Empty, ErrorBox, Field, Modal, PageHeader, Skeleton, askConfirm, cx, inputCls, toast } from '@/components/ui';
 import { shrinkImage } from '@/components/shrink';
 import { DropZone } from '@/components/upload';
 import { FOLLOWUP_TAG } from '@/lib/check/tags';
@@ -203,6 +203,13 @@ export function RoundScreen({ id }: { id: string }) {
           <Button className="h-11 px-5 shadow-pop" disabled={!data.done} onClick={() => setFinish(true)} data-testid="check-finish-open">점검 끝내기</Button></div></div>
       )}
       {finish && <FinishSheet data={data} onClose={() => setFinish(false)} onDone={() => router.push('/check?tab=run')} />}
+      {/* D-01(대표 11/23 '추천대로'): 대표·관리자만 — 시험 점검·잘못 시작한 회차 지우기(휴지통 기록 30일 · 보완 요청 업무는 남음) */}
+      {(sess.user.role === 'owner' || sess.user.role === 'admin') && <div className={cx('mt-6 flex justify-end', mineOpen && 'mb-16')}>
+        <button type="button" className="inline-flex items-center gap-1 text-xs text-red-700 hover:underline" data-testid="check-round-delete" onClick={async () => {
+          if (!(await askConfirm(`${r.orgUnitName} 점검 회차를 지울까요?\n\n결과·사진·보완 요청 기록이 함께 지워지고 리포트 숫자에서도 빠집니다. 보완 요청으로 만든 업무는 남습니다. 지운 내용은 30일 동안 휴지통 기록에 남습니다.`, { title: '점검 회차 지우기', ok: '지우기', danger: true }))) return;
+          try { await api(`/api/check/rounds/${id}`, { method: 'DELETE' }); toast.ok('점검 회차를 지웠습니다'); router.push('/check?tab=run'); } catch (e: any) { toast.error(e.message); }
+        }}><Trash2 className="size-3.5" aria-hidden />이 점검 회차 지우기</button>
+      </div>}
     </div>
   );
 }

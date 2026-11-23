@@ -91,6 +91,25 @@ export async function agreements({ owner, staff, ctx, sql, BASE, SHOTS }) {
   await owner.keyboard.press('Escape'); await det.waitFor({ state: 'hidden' });
   await owner.getByTestId('agr-state-ended').click();
   await owner.waitForFunction(() => document.querySelectorAll('[data-testid=agr-row]').length === 1 && document.querySelector('[data-testid=agr-left]').textContent.trim() === '종료');
+  // D-05(대표 11/23): 보관(숨김) → 보관함 → 되살리기 → 다시 보관 → 대표만 완전 삭제
+  await owner.getByTestId('agr-row').filter({ hasText: '지난 유지보수' }).click(); await det.waitFor();
+  await det.getByTestId('agr-archive').click();
+  await owner.getByTestId('confirm-ok').click();
+  await det.waitFor({ state: 'hidden' });
+  await owner.waitForFunction(() => ![...document.querySelectorAll('[data-testid=agr-row] b')].some((b) => b.textContent === '지난 유지보수'));
+  await owner.getByTestId('agr-state-archived').click();
+  const ar = owner.getByTestId('agr-archived-row').filter({ hasText: '지난 유지보수' }); await ar.waitFor();
+  await ar.getByTestId('agr-restore').click(); await ar.waitFor({ state: 'detached' });
+  await owner.getByTestId('agr-state-ended').click();
+  await owner.getByTestId('agr-row').filter({ hasText: '지난 유지보수' }).click(); await det.waitFor();
+  await det.getByTestId('agr-archive').click();
+  await owner.getByTestId('confirm-ok').click();
+  await det.waitFor({ state: 'hidden' });
+  await owner.getByTestId('agr-state-archived').click(); await ar.waitFor();
+  await ar.getByTestId('agr-purge').click();
+  assert.match(await owner.getByTestId('confirm-message').innerText(), /되돌릴 수 없습니다/); await owner.getByTestId('confirm-ok').click();
+  await ar.waitFor({ state: 'detached' });
+  await owner.getByText('완전히 지웠습니다').first().waitFor();
   await owner.getByTestId('agr-state-open').click();
   // 휴대폰 폭
   await owner.setViewportSize({ width: 390, height: 844 });

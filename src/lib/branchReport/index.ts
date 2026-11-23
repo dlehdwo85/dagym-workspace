@@ -172,7 +172,7 @@ export function verifyBody(b: ReportBody, ctx: { dLines: number; msgIds: Set<str
 }
 
 const reportCols = (sql: Sql) => sql`r.id, r.site_id, s.name as unit_name, r.kind, r.period_start::text as period_start, r.period_end::text as period_end, r.report_day::text as report_day, r.status, r.source_text, r.body, r.ai_model,
-  r.submitted_at, r.submitted_by, r.updated_at, r.purged_at, cb.name as created_by_name, sb.name as submitted_by_name`;
+  r.submitted_at, r.submitted_by, r.created_by, r.updated_at, r.purged_at, cb.name as created_by_name, sb.name as submitted_by_name`;
 async function loadReport(u: SessionUser, id: string, sql: Sql) {
   requireOn(u);
   if (!isUuid(id)) throw notFound('보고서를 찾을 수 없습니다');
@@ -229,7 +229,8 @@ async function viewBody(sql: Sql, u: SessionUser, r: any) {
 export async function getReport(u: SessionUser, id: string) {
   const sql = db(); const { r, t } = await loadReport(u, id, sql);
   r.body = await viewBody(sql, u, r);
-  return { report: r, canWrite: canWrite(u, t) && r.status === 'draft', canReopen: canReopen(u, t) && r.status === 'submitted' && !r.purged_at, admin: isAdmin(u), review: await reviewOf(u, t, r) };
+  return { report: r, canWrite: canWrite(u, t) && r.status === 'draft', canReopen: canReopen(u, t) && r.status === 'submitted' && !r.purged_at, admin: isAdmin(u), review: await reviewOf(u, t, r),
+    canDelete: r.status === 'submitted' ? u.role === 'owner' : isAdmin(u) || r.created_by === u.id /* D-01 */ };
 }
 
 // ---------------- 초안 만들기(AI) ----------------
@@ -385,6 +386,26 @@ export async function unsubmitReport(u: SessionUser, id: string, ip: string | nu
   await sql`update branch_reports set status = 'draft', submitted_by = null, submitted_at = null, updated_at = now(), body = ${sql.json({ ...(r.body ?? {}), review: { kept: r.body?.review?.kept ?? {} } } as never)} where id = ${id}`; // #1117 다시 검사·승인
   await audit(sql, u.id, 'branch_report.unsubmit', 'branch_report', id, {}, ip);
   return getReport(u, id);
+}
+
+/**
+ * D-01(대표 11/23 '추천대로'): 보고서 지우기 — 초안은 작성한 사람·관리자, 제출본은 대표(owner)만. 올린 하이링크 파일 줄도 함께,
+ * 지우기 전 줄은 휴지통 기록에 30일(근거 글이 들어 있어 30일 뒤 비움) · 감사 기록. 같은 주(같은 날)의 초안은 다시 만들 수 있음.
+ */
+export async function deleteReport(u: SessionUser, id: string, ip: string | null) {
+  const sql = db(); const { r } = await loadReport(u, id, sql);
+  if (r.status === 'submitted' ? u.role !== 'owner' : !(isAdmin(u) || r.created_by === u.id)) {
+    throw forbidden(r.status === 'submitted' ? '제출한 보고서는 대표만 지울 수 있습니다 — 먼저 제출 취소를 하면 초안으로 돌아갑니다' : '초안은 만든 사람과 관리자만 지울 수 있습니다');
+  }
+  return sql.begin(async (tx) => {
+    const [row] = await tx`select * from branch_reports where id = ${id} and tenant = ${tenantOf(u)}`;
+    const files = await tx`select id, report_id, kind, name, mime, created_at from branch_report_files where report_id = ${id}`;
+    const title = `${r.unit_name ?? ''} ${r.kind === 'monthly' ? '월간' : '주간'} ${r.report_day ?? ''}`.trim();
+    await (await import('../trash')).putTrash(tx as unknown as Sql, { tenant: tenantOf(u), kind: 'branch_report', refId: id, title, data: { report: row, files }, by: u.id });
+    await tx`delete from branch_reports where id = ${id} and tenant = ${tenantOf(u)}`;
+    await audit(tx as unknown as Sql, u.id, 'branch_report.delete', 'branch_report', id, { title, status: r.status }, ip);
+    return { ok: true };
+  });
 }
 
 /** 근거 보기: D줄(붙여 넣은 글, 가린 뒤) · M(대화, 가린 글) */

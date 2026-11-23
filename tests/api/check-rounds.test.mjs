@@ -201,3 +201,21 @@ test('회사 분리: 다른 회사의 점검·보완 요청은 없는 것처럼(
   const per = await sql`select tenant, count(*)::int n from chk_rounds group by tenant`;
   assert.deepEqual(per.map((x) => [x.tenant === 'default' ? 'default' : 'other', x.n]).sort(), [['default', 6], ['other', 1]]);
 });
+
+test('D-01(대표 11/23): 점검 회차 지우기 — 대표·관리자만(점검자도 직원 관리자 아니면 403) · 결과·보완 요청 기록 함께 · 업무는 남음 · 휴지통 기록 · 다른 회사 404', async () => {
+  const st = await ctx.managerA.client.ok('POST', '/api/check/rounds', { orgUnitId: ctx.siteA });
+  const found = (await ctx.managerA.client.ok('GET', `/api/check/rounds/${st.id}/items?q=${encodeURIComponent('소화기')}`)).items;
+  await ctx.managerA.client.ok('PUT', `/api/check/rounds/${st.id}/results`, { itemId: found[0].id, verdict: 'fix', memo: '시험 보완' });
+  const fin = await ctx.managerA.client.ok('POST', `/api/check/rounds/${st.id}/finish`, { followups: [] }).catch(() => null);
+  const taskIds = (await sql`select task_id from chk_followups f join chk_results r on r.id = f.result_id where r.round_id = ${st.id} and f.task_id is not null`).map((x) => x.task_id);
+  assert.equal((await ctx.managerA.client.req('DELETE', `/api/check/rounds/${st.id}`)).status, 403, '점검자(현장 관리자)는 못 지움');
+  assert.equal((await cafe.c.req('DELETE', `/api/check/rounds/${st.id}`)).status, 404, '다른 회사는 없는 것처럼');
+  await ctx.owner.ok('DELETE', `/api/check/rounds/${st.id}`);
+  assert.equal((await ctx.owner.req('GET', `/api/check/rounds/${st.id}`)).status, 404);
+  assert.equal((await sql`select 1 from chk_results where round_id = ${st.id}`).length, 0, '결과도 함께');
+  const [tr] = await sql`select kind, title, data from trash_records where ref_id = ${st.id}`;
+  assert.equal(tr.kind, 'check_round'); assert.equal(tr.data.results.length, 1, '지우기 전 결과가 휴지통 기록에');
+  for (const id of taskIds) assert.equal((await sql`select 1 from tasks where id = ${id}`).length, 1, '보완 요청 업무는 남음');
+  assert.equal((await sql`select 1 from audit_logs where action = 'check.round_delete' and target_id = ${st.id}`).length, 1);
+  void fin;
+});

@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 import { db, type Sql } from './db';
-import { badRequest, notFound } from './errors';
+import { badRequest, forbidden, notFound } from './errors';
 import { audit, logError } from './log';
 import { isUuid } from './access';
 import { menuLevel, requireMenu } from './menuPerms';
@@ -84,12 +84,13 @@ const view = (r: Row, today: string, tdays: number[]) => {
     status: r.status, endedAt: r.ended_at, endedReason: r.ended_reason, createdAt: r.created_at, updatedAt: r.updated_at, files: r.files, state: s.state, stateLabel: STATE_LABEL[s.state], basis: s.basis, basisKind: s.basisKind, daysLeft: s.daysLeft };
 };
 const ORDER: Record<AgreementState, number> = { renew_check: 0, expired: 1, notice_passed: 2, soon: 3, active: 4, open_ended: 5, ended: 6 };
-export async function listAgreements(u: SessionUser, f: { q?: string | null; tag?: string | null; state?: string | null; ownerId?: string | null } = {}) {
+export async function listAgreements(u: SessionUser, f: { q?: string | null; tag?: string | null; state?: string | null; ownerId?: string | null; archived?: boolean } = {}) {
   await requireMenu(u, 'agreements', 'view');
   const sql = db(); const t = tenantOf(u); const today = todaySeoul(); const tdays = await tenantAlertDays(t, sql);
   const q = (f.q ?? '').trim().slice(0, 60);
   const ownerId = f.ownerId && isUuid(f.ownerId) ? f.ownerId : null; // 주소에 엉뚱한 값이 와도 서버 오류가 나지 않게(모양이 틀리면 거르지 않음)
-  const rows = await sql<Row[]>`select ${COLS(sql)} ${FROM(sql)} where a.tenant = ${t} and a.deleted_at is null
+  // D-05(대표 11/23): archived = 보관함(숨긴 계약)만
+  const rows = await sql<Row[]>`select ${COLS(sql)} ${FROM(sql)} where a.tenant = ${t} and ${f.archived ? sql`a.deleted_at is not null` : sql`a.deleted_at is null`}
     ${q ? sql`and (a.title ilike ${'%' + q + '%'} or a.counterparty ilike ${'%' + q + '%'} or a.memo ilike ${'%' + q + '%'})` : sql``}
     ${f.tag ? sql`and ${f.tag} = any(a.tags)` : sql``} ${ownerId ? sql`and a.owner_id = ${ownerId}` : sql``} limit 1000`;
   let items = rows.map((r) => view(r, today, tdays));
@@ -232,6 +233,47 @@ export async function removeFile(u: SessionUser, fileId: string, ip: string | nu
   if (!r.length) throw notFound();
   await audit(sql, u.id, 'agreement.file_remove', 'agreement', r[0].agreement_id, { file: r[0].file_name }, ip);
   return { ok: true };
+}
+
+// ---------- D-05(대표 11/23 '추천대로'): 보관(숨김) · 되살리기 · 완전 삭제(대표만) ----------
+/** 보관 = 목록·알림·홈 카드에서 숨김(지우지 않음 — 보관함에서 되살림). 고칠 수 있는 사람 */
+export async function archiveAgreement(u: SessionUser, id: string, ip: string | null = null) {
+  await requireMenu(u, 'agreements', 'edit');
+  const sql = db();
+  const cur = await load(u, id, sql);
+  await sql`update agreements set deleted_at = now(), updated_at = now() where id = ${id} and tenant = ${tenantOf(u)} and deleted_at is null`;
+  await audit(sql, u.id, 'agreement.archive', 'agreement', id, { title: cur.title }, ip);
+  return { ok: true };
+}
+async function loadArchived(u: SessionUser, id: string, sql: Sql) {
+  if (!isUuid(id)) throw notFound();
+  const [r] = await sql<{ id: string; title: string }[]>`select id, title from agreements where id = ${id} and tenant = ${tenantOf(u)} and deleted_at is not null`;
+  if (!r) throw notFound();
+  return r;
+}
+export async function restoreAgreement(u: SessionUser, id: string, ip: string | null = null) {
+  await requireMenu(u, 'agreements', 'edit');
+  const sql = db();
+  const r = await loadArchived(u, id, sql);
+  await sql`update agreements set deleted_at = null, updated_at = now() where id = ${id} and tenant = ${tenantOf(u)}`;
+  await audit(sql, u.id, 'agreement.restore', 'agreement', id, { title: r.title }, ip);
+  return { ok: true };
+}
+/** 완전 삭제 = 대표(owner)만 · 보관함에 있는 것만(두 단계) · 지우기 전 줄(기간 이력·파일 목록 포함)을 휴지통 기록에 30일 */
+export async function purgeAgreement(u: SessionUser, id: string, ip: string | null = null) {
+  await requireMenu(u, 'agreements', 'edit');
+  if (u.role !== 'owner') throw forbidden('계약 완전 삭제는 대표만 할 수 있습니다 — 보관(숨김)은 고칠 수 있는 사람 누구나');
+  const sql = db(); const t = tenantOf(u);
+  const r = await loadArchived(u, id, sql);
+  return sql.begin(async (tx) => {
+    const [row] = await tx`select * from agreements where id = ${id} and tenant = ${t}`;
+    const terms = await tx`select * from agreement_terms where agreement_id = ${id} and tenant = ${t}`;
+    const files = await tx`select * from agreement_files where agreement_id = ${id} and tenant = ${t}`;
+    await (await import('./trash')).putTrash(tx as unknown as Sql, { tenant: t, kind: 'agreement', refId: id, title: r.title, data: { agreement: row, terms, files }, by: u.id });
+    await tx`delete from agreements where id = ${id} and tenant = ${t}`;
+    await audit(tx as unknown as Sql, u.id, 'agreement.purge', 'agreement', id, { title: r.title, files: files.length }, ip);
+    return { ok: true };
+  });
 }
 
 // ---------- 회사 기본 알림 날짜 ----------

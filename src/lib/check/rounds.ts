@@ -9,8 +9,10 @@
  */
 import { z } from 'zod';
 import { db, type Sql } from '../db';
-import { accessibleUnitIds, isUuid } from '../access';
-import { badRequest, conflict, notFound } from '../errors';
+import { accessibleUnitIds, isAdmin, isUuid } from '../access';
+import { badRequest, conflict, forbidden, notFound } from '../errors';
+import { audit } from '../log';
+import { putTrash } from '../trash';
 import { menuLevel, requireMenu } from '../menuPerms';
 import { notify } from '../notifications';
 import { addDays, todaySeoul } from '../time';
@@ -99,6 +101,30 @@ async function loadRound(u: SessionUser, id: string, sql: Sql): Promise<RoundRow
   if (!r || (mine !== null && !mine.includes(r.org_unit_id))) throw notFound();
   return r;
 }
+/**
+ * D-01(대표 11/23 '추천대로'): 점검 회차 지우기 — 대표·관리자만(시험 점검·잘못 시작한 회차). 결과·보완 요청 기록·결과 사진 줄을 함께 지우고,
+ * 지우기 전 줄은 휴지통 기록에 30일. 보완 요청으로 만든 업무는 남긴다(업무는 업무 화면에서 따로 지움). 리포트 숫자에서도 빠짐.
+ */
+export async function deleteRound(u: SessionUser, id: string, ip: string | null = null) {
+  await requireMenu(u, 'check_run', 'use');
+  if (!isAdmin(u)) throw forbidden('점검 회차 지우기는 대표·관리자만 할 수 있습니다');
+  if (!isUuid(id)) throw notFound();
+  const sql = db(); const t = tenantOf(u);
+  const r = await loadRound(u, id, sql);
+  return sql.begin(async (tx) => {
+    const [round] = await tx`select * from chk_rounds where id = ${id} and tenant = ${t}`;
+    const results = await tx`select * from chk_results where round_id = ${id} and tenant = ${t}`;
+    const ids = results.map((x: any) => x.id as string);
+    const followups = ids.length ? await tx`select * from chk_followups where result_id = any(${ids}::uuid[]) and tenant = ${t}` : [];
+    const photos = ids.length ? await tx`select * from chk_photos where tenant = ${t} and owner_kind = 'result' and owner_id = any(${ids}::uuid[])` : [];
+    await putTrash(tx as unknown as Sql, { tenant: t, kind: 'check_round', refId: id, title: `${r.org_unit_name} ${r.course_name ?? '수시 점검'}`, data: { round, results, followups, photos }, by: u.id });
+    if (ids.length) await tx`delete from chk_photos where tenant = ${t} and owner_kind = 'result' and owner_id = any(${ids}::uuid[])`;
+    await tx`delete from chk_rounds where id = ${id} and tenant = ${t}`; // 결과·보완 요청 기록은 딸려서 지워짐(on delete cascade)
+    await audit(tx as unknown as Sql, u.id, 'check.round_delete', 'chk_round', id, { unit: r.org_unit_name, results: ids.length, followups: followups.length }, ip);
+    return { ok: true };
+  });
+}
+
 /** 점검 시작 — 코스를 고르면 정기(또는 표본), 코스 없이 시작하면 수시 점검 */
 export async function startRound(u: SessionUser, i: z.infer<typeof roundInput>) {
   await requireMenu(u, 'check_run', 'use');

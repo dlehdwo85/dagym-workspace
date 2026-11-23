@@ -196,4 +196,30 @@ describe('#1096 지점 주간보고', () => {
     assert.equal(g.report.body.usage[0].count, '120', '보고서 본문은 남음');
     assert.equal((await ctx.owner.req('DELETE', `/api/branch-reports/${reportId}/submit`)).status, 409);
   });
+
+  test('D-01(대표 11/23): 보고서 지우기 — 초안 = 만든 사람·관리자(검토 담당은 못 함) · 제출본 = 대표만 · 휴지통 기록 · 다른 지점·다른 회사 404', async () => {
+    const day = addDays(friday, -14);
+    const [d] = await sql`insert into branch_reports (tenant, site_id, kind, period_start, period_end, report_day, status, body, created_by)
+      values ('default', ${siteA}, 'weekly', ${addDays(day, -6)}, ${day}, ${day}, 'draft', ${sql.json({ usage: [], facilities: [], issues: [], notes: '시험 초안' })}, ${ctx.staffA.id}) returning id`;
+    assert.equal((await ctx.staffA.client.ok('GET', `/api/branch-reports/${d.id}`)).canDelete, true, '만든 사람');
+    assert.equal((await ctx.managerA.client.ok('GET', `/api/branch-reports/${d.id}`)).canDelete, false, '검토 담당(관리자 아님)');
+    assert.equal((await ctx.managerA.client.req('DELETE', `/api/branch-reports/${d.id}`)).status, 403);
+    assert.equal((await ctx.staffB.client.req('DELETE', `/api/branch-reports/${d.id}`)).status, 404, '다른 지점');
+    assert.equal((await other.req('DELETE', `/api/branch-reports/${d.id}`)).status, 404, '다른 회사');
+    await ctx.staffA.client.ok('DELETE', `/api/branch-reports/${d.id}`);
+    assert.equal((await ctx.owner.req('GET', `/api/branch-reports/${d.id}`)).status, 404);
+    const [tr] = await sql`select kind, data from trash_records where ref_id = ${d.id}`;
+    assert.equal(tr.kind, 'branch_report'); assert.equal(tr.data.report.body.notes, '시험 초안', '지우기 전 줄이 휴지통 기록에');
+    // 제출본: 작성 담당·검토 담당은 못 지움 → 대표만
+    assert.equal((await ctx.owner.ok('GET', `/api/branch-reports/${reportId}`)).canDelete, true);
+    for (const c of [ctx.staffA.client, ctx.managerA.client]) assert.equal((await c.req('DELETE', `/api/branch-reports/${reportId}`)).status, 403);
+    await ctx.owner.ok('DELETE', `/api/branch-reports/${reportId}`);
+    assert.equal((await sql`select 1 from branch_reports where id = ${reportId}`).length, 0);
+    const acts = (await sql`select action from audit_logs where action = 'branch_report.delete'`).length;
+    assert.equal(acts, 2);
+    // 30일 지난 휴지통 기록은 정기 실행이 비움
+    await sql`update trash_records set expires_at = now() - interval '1 minute' where ref_id = ${d.id}`;
+    await tick();
+    assert.deepEqual((await sql`select ref_id from trash_records where kind = 'branch_report'`).map((x) => x.ref_id), [reportId]);
+  });
 });
