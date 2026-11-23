@@ -142,7 +142,7 @@ export function MetaAuto() {
                 {(p.status === 'draft' || p.status === 'failed') && <Button size="sm" disabled={!!issues.length || !data.cap || busy === p.id} data-testid="meta-plan-draft"
                   onClick={() => confirm(`'${p.name}' 을(를) Meta 에 꺼진 상태로 만듭니다(소재 올리기 + 캠페인·광고 세트·광고, 총 상한 ${won(p.plan.totalCap)}). 승인하기 전에는 광고비가 나가지 않습니다. 만들까요?`)
                     && run(p.id, () => api(`/api/marketing/ad-ops/meta/${p.id}/draft`, { body: {} }), (r) => (r?.pending ? r.message : 'Meta 에 꺼진 초안을 만들었습니다 — 승인함에서 승인해 주세요'))}>Meta에 초안 만들기</Button>}
-                {p.status === 'created' && <Link href="/s/marketing/approvals?tab=ads" className="rounded-input bg-amber-50 px-2 py-1 text-xs font-medium text-amber-900" data-testid="meta-plan-to-inbox">승인함에서 승인 →</Link>}
+                {p.status === 'created' && <Link href="/s/marketing/approvals?tab=ads" className="rounded-input bg-amber-50 px-2 py-1 text-xs font-medium text-amber-900" data-testid="meta-plan-to-inbox">승인함에서 승인</Link>}
                 {p.status === 'active' && <Button size="sm" variant="secondary" disabled={busy === p.id} onClick={() => act(p, { action: 'pause' }, '광고를 껐습니다')} data-testid="meta-plan-pause">끄기</Button>}
                 {p.status === 'paused' && <Button size="sm" disabled={busy === p.id} data-testid="meta-plan-enable"
                   onClick={() => confirm(`광고를 다시 켭니다. 하루 최대 ${won(p.plan.dailyBudget)}(이번 달 ${won(data.monthSpend)} / 상한 ${data.cap ? won(data.cap.monthlyCap) : '없음'}). 켤까요?`) && act(p, { action: 'enable' }, '광고를 다시 켰습니다')}>다시 켜기</Button>}

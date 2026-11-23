@@ -50,7 +50,7 @@ export function Team() {
     <div className="mx-auto max-w-6xl space-y-4" data-testid="team">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="flex items-center gap-2 text-xl font-bold" style={{ color: C }}><Users className="size-5" />AI 마케팅팀</h1>
-        <Link href="/s/marketing/ops" className="ml-auto text-xs text-ink-2 underline">운영 계획 →</Link>
+        <Link href="/s/marketing/ops" className="ml-auto text-xs text-ink-2 underline">운영 계획</Link>
       </div>
       <p className="text-xs text-ink-2">역할마다 일정·기록·기억을 따로 둡니다. AI 가 초안을 만들고, 결정은 대표가 합니다 — 광고 켜기·증액·영상 [생성]처럼 돈이 나가는 일은 지금처럼 승인 뒤에만. 가장 귀찮은 일부터 하나씩 켜세요.</p>
       {!data ? <Skeleton rows={6} /> : <>
@@ -203,7 +203,7 @@ function RoleCard({ r, data, busy, team }: { r: RoleView; data: View; busy: stri
       </details>}
       {r.key === 'designer' && <GuideBox data={data} busy={busy} team={team} />}
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
-        <Link href={r.link.href} className="text-xs font-medium underline" style={{ color: C }}>{r.link.label} →</Link>
+        <Link href={r.link.href} className="text-xs font-medium underline" style={{ color: C }}>{r.link.label}</Link>
         {r.canRun && data.canDecide && r.key !== 'planner' && <Button size="sm" variant="secondary" className="ml-auto" disabled={!!busy} data-testid="team-role-run"
           onClick={() => team({ action: 'run', role: r.key }, `run:${r.key}`, (x) => (r.key === 'researcher' ? (x.created ? `주간 분석(${x.week})을 만들었습니다 — 광고 ${x.n}개` : x.skipped === 'done' ? `이번 주(${x.week}) 분석은 이미 있습니다` : `지난 7일 새 광고가 ${x.n ?? 0}개라 건너뜁니다(3개부터)`) : `주간 운영 제안을 만들었습니다(${x.items ?? 0}건) — 승인함에서 확인`))}>
           {busy === `run:${r.key}` ? '하는 중…' : '지금 일하기'}</Button>}

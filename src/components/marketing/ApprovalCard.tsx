@@ -222,7 +222,7 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
           {noVisual && <p className="text-xs font-bold text-red-800" data-testid="approval-no-media-band">시안 없음 — 글만으로는 승인할 수 없습니다</p>}
           <p className="text-xs text-ink-2">{c.production ? `${c.production.kind.includes('video') ? '영상' : '이미지'} 제작 요청이 열려 있습니다${c.production.status === 'needs_approval' ? ' (한도 승인 대기)' : ''} — 붙으면 여기에 보입니다` : c.auto && !c.produced_at && c.produce_at ? `AI 제작 예정 ${fmtDateTime(c.produce_at)}` : drawable ? '[지금 만들기]를 누르면 브랜드 키트·자료실 사진으로 바로 그려 붙입니다(크레딧 0)' : '아직 시안이 없습니다 — 상세에서 수정본에 사진을 붙여 주세요'}</p>
           {noVisual && !done && (drawable ? <Button size="sm" onClick={() => makeNow()} disabled={making} data-testid="approval-make-visual">{making ? '그리는 중…' : '지금 만들기'}</Button>
-            : VIDEO_KINDS.includes(c.kind ?? '') ? <Link href="/s/marketing/automation" className="inline-block text-xs font-medium text-violet-700 underline" data-testid="approval-production-link">제작 요청 카드 보기 →</Link> : null)}
+            : VIDEO_KINDS.includes(c.kind ?? '') ? <Link href="/s/marketing/automation" className="inline-block text-xs font-medium text-violet-700 underline" data-testid="approval-production-link">제작 요청 카드 보기</Link> : null)}
         </div>
       </div>}
       {/* #497 R06 ⑥: 상세와 같은 '실제 게시 화면' 틀을 카드에서도(기본 접힘 — 승인함 길이 유지) */}

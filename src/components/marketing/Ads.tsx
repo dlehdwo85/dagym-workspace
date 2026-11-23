@@ -315,7 +315,7 @@ export function Ads() {
       <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2" data-testid="ads-accounts-link">
         <span>연결된 광고 계정 {data.accounts.length}개{data.accounts.some((a) => a.status === 'error') && <b className="ml-1 text-red-700">· 읽기 실패 {data.accounts.filter((a) => a.status === 'error').length}개</b>}</span>
         <Link href="/s/marketing/connections" className="font-medium underline" style={{ color: C }}>계정 연결은 설정 › 연결 계정</Link>
-        {data.month && <Link href={`/s/marketing/report?month=${data.month}`} className="ml-auto font-medium underline" style={{ color: C }} data-testid="ads-report-link">{monthLabel(data.month)} 월간 보고 →</Link>}
+        {data.month && <Link href={`/s/marketing/report?month=${data.month}`} className="ml-auto font-medium underline" style={{ color: C }} data-testid="ads-report-link">{monthLabel(data.month)} 월간 보고</Link>}
       </p>
     </div>
   );
