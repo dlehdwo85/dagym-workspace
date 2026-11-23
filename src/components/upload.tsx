@@ -66,7 +66,7 @@ function xhrPut(url: string, method: string, headers: Record<string, string> | u
  */
 function blockedHint(msg: string) {
   if (msg !== uploadErrorText(0) || typeof navigator === 'undefined' || navigator.onLine === false) return msg;
-  return `파일 저장소가 이 주소(${typeof location !== 'undefined' ? location.host : ''})에서 보낸 4MB 넘는 파일을 받지 않았습니다(저장소 허용 주소 설정 문제) — 관리자에게 알려 주세요`;
+  return `파일 저장소에 연결하지 못했습니다 — 이 주소(${typeof location !== 'undefined' ? location.host : ''})가 저장소 허용 주소에 없거나 네트워크 문제일 수 있습니다. 잠시 후 다시 시도하고, 계속되면 관리자에게 알려 주세요`; // 첫머리는 예전 안내와 같게(사람·시험이 같은 말로 알아봄)
 }
 export function uploadErrorText(status: number) {
   if (status === 0) return navigator.onLine === false ? '인터넷에 연결되어 있지 않습니다 — 연결 후 다시 올려 주세요'

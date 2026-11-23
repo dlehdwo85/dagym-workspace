@@ -2216,9 +2216,10 @@ await step('V12-9: 첨부 칸·자료실에 파일 끌어 놓기(여러 개·진
   assert.equal((await sql`select count(*)::int n from attachments where task_id = ${t} and deleted_at is null`)[0].n, 2);
   // 저장소 연결 실패(CORS·네트워크) → 원인 안내
   await owner.route('**/api/files/local**', (r) => (r.request().method() === 'PUT' ? r.abort('failed') : r.continue()));
-  await drop('comment-drop', [{ name: '실패.txt', type: 'text/plain', body: 'x' }]);
-  await owner.getByTestId('upload-progress').getByText(/파일 저장소에 연결하지 못했습니다/).first().waitFor();
-  await owner.unroute('**/api/files/local**');
+  try { // 실패해도 막힘을 꼭 풀어 뒤 단계의 올리기가 줄줄이 실패하지 않게(11/23 CI 5eda076: 안내 글이 바뀌어 여기서 멈추자 뒤 올리기 시험 14개가 따라 실패)
+    await drop('comment-drop', [{ name: '실패.txt', type: 'text/plain', body: 'x' }]);
+    await owner.getByTestId('upload-progress').getByText(/파일 저장소에 연결하지 못했습니다/).first().waitFor();
+  } finally { await owner.unroute('**/api/files/local**'); }
   // 앞 단계에서 남은 가짜 AI 응답이 있으면 자료 자동 정리가 그 응답으로 폴더를 옮겨 버린다 → 비우고 시작(정리 실패 = 맨 위에 남음)
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true }) });
   await owner.goto(BASE + '/library');
