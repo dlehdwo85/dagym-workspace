@@ -85,9 +85,10 @@ test('영업 공간 화면', async () => {
   assert.deepEqual((await ctx.staffA.client.ok('GET', '/api/spaces/agenda')).items, [], '공간 없는 직원은 빈 목록');
   assert.deepEqual(b.items[1].classification, '적합');
   const all = await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all');
-  assert.equal(all.items.length, 8);
+  assert.equal(all.items.length, 7, '#1142: 미참여 공고는 [미참여] 탭에만');
+  assert.ok((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=noentry')).items.some((n) => n.title === '미참여로 정리한 공고'));
   assert.deepEqual([all.items.find((n) => n.title === '낙찰된 공고').sourceLabel, all.items.find((n) => n.title === '낙찰된 공고').winner, all.items.find((n) => n.title === '낙찰된 공고').awardAmount], ['K-apt', '좋은업체', 123000000]);
-  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.length, 2);
+  assert.equal((await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.length, 1, '#1142: 미참여 공고는 진행 기록 탭에서도 빠지고 [미참여] 탭에만');
   // S1-3: 신규단지 current_stage·sales_priority·household_count·source_url·첨부·추정치, 시설 facility_scale(+unit)·completion_date·__progress.next_action/notes·etl_suggested_next_action·경과일, 협력사 recruit_visibility/timing·cert_required·register_url·recruit_url
   const bd = (await ctx.owner.ok('GET', '/api/sales/src?view=hub&tab=buildings')).items[0];
   assert.deepEqual([bd.households, bd.status, bd.priority, bd.url, bd.attachments, bd.estimated, bd.dates.find(([k]) => k === '세대수')[1]], [1200, '착공', '높음', 'https://example.com/approval/1', ['https://www.g2b.go.kr/files/b1.pdf'], true, 1200]);

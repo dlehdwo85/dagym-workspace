@@ -38,10 +38,15 @@ async function openTask(sql: Sql, tenant: string, kind: SalesKind, id: string) {
  * 상태·다음 연락일이 바뀔 때마다 부른다(saveWork·convertToLead·updateLead·createLead). 반환: 만든/바꾼 업무 id 와 한 일.
  * 만든 사람·요청자 = 바꾼 사람(u), 담당 = assigneeId(리드 담당) 없으면 u.
  */
-export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Promise<{ taskId: string | null; action: 'created' | 'updated' | 'held' | 'done' | 'none' }> {
+export async function syncSalesTask(sql: Sql, u: SessionUser, i: SyncInput): Promise<{ taskId: string | null; action: 'created' | 'updated' | 'held' | 'done' | 'trashed' | 'none'; taskIds?: string[] }> {
   const t = tenantOf(u);
   const cur = await openTask(sql, t, i.kind, i.id);
   const st = String(i.status ?? '');
+  // #1142(대표 11/24 위임): 입찰 '미참여' = 완료가 아니라 정리 — 이 공고로 만든 열린 업무는 휴지통(30일 안에 되살림), 연결된 자동 일정은 삭제(되살리면 함께 돌아옴)
+  if (st === '미참여' && i.kind === 'bid') {
+    const r = await (await import('./bidSkip')).trashBidWork(sql, t, i.id, null, u.id, '미참여', 'bid_skip');
+    return { taskId: r.taskIds[0] ?? null, action: r.taskIds.length ? 'trashed' : 'none', taskIds: r.taskIds };
+  }
   if (DONE.has(st)) {
     if (!cur) return { taskId: null, action: 'none' };
     await sql`update tasks set status = 'done', completed_at = now(), updated_at = now(), version = version + 1 where id = ${cur.id}`;

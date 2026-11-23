@@ -45,9 +45,9 @@ describe('영업 진행 → 업무 자동 리스트업', () => {
     assert.equal((await openTask('bid', 'N1'))[0].status, 'on_hold');
     assert.equal((await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '연락중' })).task.action, 'updated');
     assert.equal((await openTask('bid', 'N1'))[0].status, 'todo');
-    assert.equal((await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '미참여' })).task.action, 'done');
-    const [t] = await sql`select status, completed_at from tasks where sales_ref->>'id' = 'N1' order by created_at desc limit 1`;
-    assert.equal(t.status, 'done'); assert.ok(t.completed_at);
+    assert.equal((await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N1', status: '미참여' })).task.action, 'trashed', '#1142(대표 11/24): 입찰 미참여는 완료가 아니라 휴지통');
+    const [t] = await sql`select status, deleted_at from tasks where sales_ref->>'id' = 'N1' order by created_at desc limit 1`;
+    assert.ok(t.deleted_at); assert.notEqual(t.status, 'done');
     await ctx.owner.ok('POST', '/api/sales/work', { kind: 'bid', id: 'N2', status: '연락중' });
     const [t2] = await openTask('bid', 'N2');
     assert.deepEqual([t2.due, (await sql`select to_char(due_time, 'HH24:MI') t from tasks where id = ${t2.id}`)[0].t], [addDays(today, 1), '17:00'], '내일 17시 마감 → 업무 마감 내일 17:00');

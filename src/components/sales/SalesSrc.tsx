@@ -1177,7 +1177,7 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
   if (error) return <ErrorBox error={error} retry={reload} />;
   // 메일·홈 링크로 온 soon(마감 임박)·prep(준비 기간)·ref(참고) 탭은 칩에 없지만 그 탭에 있는 동안만 칩으로 보여 줌
   const extra: [string, string][] = tab === 'ref' ? [['ref', '참고(검색어만 일치)']] : tab === 'soon' ? [['soon', '마감 임박(3일)']] : tab === 'prep' ? [['prep', '준비 기간(D-10 안)']] : [];
-  const chips: [string, string][] = [...BID_CHIPS.filter(([k]) => baseCo || k !== 'recruit' /* 414차 F: 협력사 모집 감시는 기본 회사 원천 — 다른 회사에는 칩 없음 */).map(([k, l]) => [k, k === 'today' && data ? `${l} ${data.todayCount ?? 0}` : k === 'prespec' && data ? `${l} ${data.prespecCount ?? 0}` : l] as [string, string]), ...extra, ['skip', `취소${data ? ` ${data.skipCount ?? 0}건` : ''}`], ['done', `완료${data ? ` ${data.doneCount ?? 0}건` : ''}`], ...(tab === 'canceled' || data?.canceledCount ? [['canceled', `발주처 취소${data ? ` ${data.canceledCount ?? 0}건` : ''}`] as [string, string]] : [])]; // 380차 #1015: 사람이 누른 [취소]·[완료] 탭 · 발주처가 취소한 공고는 '발주처 취소'로 구분
+  const chips: [string, string][] = [...BID_CHIPS.filter(([k]) => baseCo || k !== 'recruit' /* 414차 F: 협력사 모집 감시는 기본 회사 원천 — 다른 회사에는 칩 없음 */).map(([k, l]) => [k, k === 'today' && data ? `${l} ${data.todayCount ?? 0}` : k === 'prespec' && data ? `${l} ${data.prespecCount ?? 0}` : l] as [string, string]), ...extra, ['skip', `취소${data ? ` ${data.skipCount ?? 0}건` : ''}`], ['done', `완료${data ? ` ${data.doneCount ?? 0}건` : ''}`], ['noentry', `미참여${data ? ` ${data.noEntryCount ?? 0}건` : ''}`] /* #1142 */, ...(tab === 'canceled' || data?.canceledCount ? [['canceled', `발주처 취소${data ? ` ${data.canceledCount ?? 0}건` : ''}`] as [string, string]] : [])]; // 380차 #1015: 사람이 누른 [취소]·[완료] 탭 · 발주처가 취소한 공고는 '발주처 취소'로 구분
   const row = (n: any) => <li key={n.id} className="relative">{data?.readOnly === false && !n.workLeadId && <input type="checkbox" className="absolute right-3 top-3 z-10 size-4" checked={sel.includes(n.id)} onChange={(e) => setSel((v) => e.target.checked ? [...v, n.id] : v.filter((x) => x !== n.id))} aria-label={`${n.title} 선택`} data-testid="bid-select" />}<BidCard n={n} onOpen={() => setOpen(n)} onChange={reload} canWrite={data?.readOnly === false} /></li>;
   return (
     <div className="space-y-3" data-testid="sales-bids">
@@ -1569,6 +1569,7 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
       </div>
       {(n.skipped || st[0] === '취소') && <BidSkip n={n} onChange={onChange} canWrite={canWrite} />}
       {n.work === '완료' && <BidDone n={n} onChange={onChange} canWrite={canWrite} />}
+      {n.work === '미참여' && <BidNoEntry n={n} onChange={onChange} canWrite={canWrite} />}
     </li>
   );
 }
@@ -1584,6 +1585,23 @@ function BidHistory({ h }: { h?: { cancelDay: string | null; cancelNotice: boole
     </div>
   );
 }
+/** #1142(대표 11/24 위임): [미참여] 공고 줄 = 누가·언제·사유 + [되돌리기](휴지통으로 보낸 업무·지운 일정을 되살리고 이전 상태로) */
+function BidNoEntry({ n, onChange, canWrite }: { n: any; onChange?: () => void; canWrite?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  async function undo() {
+    setBusy(true);
+    try { const r = await api<{ status: string; tasks: number; events: number }>('/api/sales/work/bid-skip', { body: { id: String(n.id), undo: true } }); toast.ok(`되돌렸습니다 — '${r.status}'${r.tasks ? ` · 업무 ${r.tasks}건${r.events ? `·일정 ${r.events}건` : ''} 되살림` : ''}`); onChange?.(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  const x = n.noEntry;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-input bg-slate-50 px-2 py-1 text-xs text-ink-2" data-testid="bid-noentry">
+      <b>미참여</b>{[x?.by, x?.at && fmtDateTime(x.at)].filter(Boolean).map((v: string) => <span key={v}>· {v}</span>)}{x?.reason && <span data-testid="bid-noentry-reason">· 사유: {x.reason}</span>}
+      {canWrite && <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={undo} data-testid="bid-noentry-undo">되돌리기</Button>}
+    </div>
+  );
+}
+const NOENTRY_WHY = ['일정이 맞지 않음', '참가 자격 미달', '수익성 낮음', '현장 여건'];
 /** 380차 #1015: [완료] 공고 줄 = 누가·언제 + [되돌리기](검토중으로) */
 function BidDone({ n, onChange, canWrite }: { n: any; onChange?: () => void; canWrite?: boolean }) {
   const [busy, setBusy] = useState(false);
@@ -1803,6 +1821,13 @@ function BidTaskChip({ b }: { b: any }) {
 /** 입찰 상세의 입찰 업무 칸 — 결과 [낙찰]·[미낙찰]·[유찰](자동 판정 바로잡기 포함), 낙찰은 계약 기간·금액(선택) */
 function BidTaskPanel({ n, onSaved }: { n: any; onSaved: () => void }) {
   const b = n.workBid; const [busy, setBusy] = useState(false); const [wonOpen, setWonOpen] = useState(false); const [f, setF] = useState({ start: '', end: '', amount: '' });
+  const [skipOpen, setSkipOpen] = useState(false); const [why, setWhy] = useState('');
+  async function skip() { // #1142 [미참여]
+    setBusy(true);
+    try { const r = await api<{ tasks: number; events: number }>('/api/sales/work/bid-skip', { body: { id: String(n.id), reason: why.trim() || null } });
+      toast.ok(`미참여로 정리했습니다 — 업무 ${r.tasks}건 휴지통 · 일정 ${r.events}건 삭제`); setSkipOpen(false); onSaved(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
   async function result(r: 'won' | 'lost' | 'failed', extra: Record<string, unknown> = {}) {
     setBusy(true);
     try { const x = await api<{ status: string }>('/api/sales/work/bid-result', { body: { id: String(n.id), result: r, ...extra } });
@@ -1819,7 +1844,15 @@ function BidTaskPanel({ n, onSaved }: { n: any; onSaved: () => void }) {
         <Button size="sm" variant={b.result === 'won' ? 'primary' : 'secondary'} disabled={busy} onClick={() => setWonOpen(!wonOpen)} data-testid="bid-result-won">낙찰</Button>
         <Button size="sm" variant={b.result === 'lost' ? 'primary' : 'secondary'} disabled={busy || b.result === 'lost'} onClick={() => result('lost')} data-testid="bid-result-lost">미낙찰</Button>
         <Button size="sm" variant={b.result === 'failed' ? 'primary' : 'secondary'} disabled={busy || b.result === 'failed'} onClick={() => result('failed')} data-testid="bid-result-failed">유찰</Button>
+        {!b.result && <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSkipOpen(!skipOpen)} data-testid="bid-skip-open">미참여</Button>}
       </div>
+      {skipOpen && !b.result && <div className="space-y-2 rounded-input border border-line bg-white p-2 text-xs" data-testid="bid-skip-form">
+        <p className="text-ink-2">입찰에 들어가지 않습니다 — 이 공고로 만든 열린 업무는 휴지통(30일 안에 되살림), 입찰 마감·현장설명회 일정은 지우고, 공고는 [미참여] 탭에 사유와 함께 남깁니다.</p>
+        <div className="flex flex-wrap gap-1.5">{NOENTRY_WHY.map((w) => <button key={w} type="button" className={cx('rounded-full border px-2 py-0.5', why === w ? 'border-brand-600 bg-brand-50 font-semibold' : 'border-line')} onClick={() => setWhy(w)} data-testid="bid-skip-why">{w}</button>)}</div>
+        <input className={cx(inputCls, 'h-8 py-1 text-xs')} value={why} onChange={(e) => setWhy(e.target.value)} maxLength={300} placeholder="사유(직접 쓰기)" aria-label="미참여 사유" data-testid="bid-skip-reason" />
+        <div className="flex justify-end gap-1.5"><Button size="sm" variant="secondary" onClick={() => setSkipOpen(false)}>닫기</Button>
+          <Button size="sm" variant="danger" disabled={busy} onClick={skip} data-testid="bid-skip-go">미참여로 정리</Button></div>
+      </div>}
       {wonOpen && <div className="grid gap-2 rounded-input border border-line bg-white p-2 sm:grid-cols-4" data-testid="bid-won-form">
         <Field label="계약 시작"><input type="date" className={inputCls} value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} aria-label="계약 시작" data-testid="bid-won-start" /></Field>
         <Field label="계약 종료"><input type="date" className={inputCls} value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} aria-label="계약 종료" data-testid="bid-won-end" /></Field>

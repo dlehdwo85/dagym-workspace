@@ -32,7 +32,7 @@ export const DELETE = handler<{ id: string }>(async ({ req, user, params }) => {
   const picked = picks === 'none' ? [] : pickEvents(await deletePlan(user, [params.id]), picks);
   const was = [...(await affectedByTask(params.id).catch(() => [])), ...(await Promise.all(picked.map((p) => affectedByEvent(p.id).catch(() => [])))).flat()];
   after(() => remindersChanged(was).catch(() => {}));
-  const out: Record<string, unknown> = await deleteTask(user, params.id);
+  const out: Record<string, unknown> = await deleteTask(user, params.id, req.nextUrl.searchParams.get('reason'));
   if (picked.length) {
     const r = await deletePickedEvents(user, picked);
     out.eventsDeleted = r.deleted; out.eventsKept = picked.length - r.deleted;

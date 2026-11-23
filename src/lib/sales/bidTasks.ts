@@ -413,11 +413,27 @@ export async function canceledBidTaskSweep() {
     // 넘긴 공고 줄 자신은 원천 상태가 '취소'일 때만 취소로(제목에 '취소'가 든 일반 공고 오판 방지) — 정기 점검과 같은 규칙
     const g1 = g.map((x) => (String(x.id) === t.nid && x.notice_kind === 'cancel' && !/취소/.test(String(x.current_status ?? '')) ? { ...x, notice_kind: null } : x));
     const ci = noticeCancelInfo(g1); if (!ci) continue;
-    if (await markBidTaskCanceled(sql, t.id, ci)) canceled++;
+    if (await trashCanceledTask(sql, t.id, t.nid, ci)) canceled++;
   }
+  // #1142: 예전 방식(344차)으로 '공고 취소' 표시만 하고 열린 채 남은 업무도 같은 정리로(휴지통 + 알림)
+  for (const x of await sql<{ id: string; nid: string; cancel: any }[]>`select id, sales_ref->>'id' as nid, sales_ref->'cancel' as cancel from tasks
+    where deleted_at is null and status <> 'done' and parent_id is null and sales_ref->>'id' is not null and (sales_ref -> 'cancel') is not null limit 200`)
+    if (await trashCanceledTask(sql, x.id, x.nid, { day: x.cancel?.day ?? null, reason: x.cancel?.reason ?? null })) canceled++;
   return { checked: tasks.length, canceled };
 }
 
+/** #1142: 공고 취소로 감지된 업무 하나 — 그 업무의 회사 진행 기록과 함께 [미참여]와 같은 정리(휴지통·자동 일정 삭제·알림). 진행 기록이 있으면 '공고 취소'로 */
+async function trashCanceledTask(sql: Sql, taskId: string, noticeId: string, c: { day: string | null; reason: string | null }) {
+  const [t] = await sql<{ tenant: string }[]>`select cu.tenant from tasks t join users cu on cu.id = t.created_by where t.id = ${taskId} and t.deleted_at is null and t.status <> 'done'`;
+  if (!t) return false;
+  const [rec] = await sql<{ src_id: string; status: string; data: any }[]>`select src_id, status, data from sales_work_records where tenant = ${t.tenant} and src_tbl = ${SRC} and ref_id = ${noticeId} order by updated_at desc limit 1`;
+  const d = rec?.data?.bid_task_id === taskId ? rec.data : { ...(rec?.data ?? {}), bid_task_id: taskId, bid_events: rec?.data?.bid_task_id ? {} : rec?.data?.bid_events };
+  const r = await (await import('./bidSkip')).trashCanceledBid(sql, t.tenant, noticeId, d, c);
+  if (rec && rec.data?.bid_task_id === taskId && rec.status !== BID_RESULT_STATUS.canceled)
+    await sql`update sales_work_records set status = ${BID_RESULT_STATUS.canceled}, data = ${sql.json({ ...rec.data, status: BID_RESULT_STATUS.canceled, bid_result: 'canceled', bid_canceled_at: new Date().toISOString(), bid_cancel_reason: c.reason })}, updated_at = now()
+      where tenant = ${t.tenant} and src_tbl = ${SRC} and src_id = ${rec.src_id}`;
+  return r.taskIds.length > 0;
+}
 /** 344차(#925): 업무는 그대로 두고 sales_ref.cancel(취소 공고·취소일·사유·표시 시각) + 활동 기록 + 담당·공동 담당·요청자(+넘긴 사람) 알림. 이미 표시된·완료·휴지통 업무는 건너뜀(false) */
 export async function markBidTaskCanceled(sql: Sql, taskId: string, c: { noticeId: string; day: string | null; reason: string | null }, extraTo: (string | null | undefined)[] = []) {
   const [t] = await sql<{ id: string; title: string; assignee_id: string | null; requested_by: string | null }[]>`update tasks set sales_ref = coalesce(sales_ref, '{}'::jsonb) || ${sql.json({ cancel: { noticeId: c.noticeId, day: c.day, reason: c.reason, at: new Date().toISOString() } } as never)}::jsonb, updated_at = now(), version = version + 1
@@ -498,10 +514,9 @@ export async function bidTasksTick(now = new Date()) {
       const g0 = g.map((x) => (String(x.id) === id && x.notice_kind === 'cancel' && !/취소/.test(String(x.current_status ?? '')) ? { ...x, notice_kind: null } : x));
       const ci = noticeCancelInfo(g0);
       if (ci) {
-        // 344차(대표 11/02 #925): 업무는 지우지 않고 경고 표시(sales_ref.cancel)+담당·요청자·넘긴 사람 알림 → 사람이 [공고 취소로 완료]. 일정만 취소, 진행 기록은 취소 상태(재공고는 다시 넘겨 새 업무)
-        if (d?.bid_task_id) await markBidTaskCanceled(sql, String(d.bid_task_id), ci, [d.handoff_by]);
-        const ev = soonEvents(d); const events = ev.length ? await sql<{ id: string }[]>`update events set deleted_at = now(), updated_at = now(), version = version + 1 where id = any(${ev}::uuid[]) and deleted_at is null returning id` : [];
-        for (const e of events) await activity(sql, 'event', e.id, null, 'canceled', { reason: 'notice_canceled', noticeId: id });
+        // #1142(대표 11/24 위임): 공고 취소 = [미참여]와 같은 정리를 자동으로 — 열린 입찰 업무는 휴지통(30일 안에 되살림), 자동 일정은 삭제, 담당·요청자·넘긴 사람 알림.
+        //   (344차의 '업무는 두고 빨간 띠 + [공고 취소로 완료]'는 없앰 — 업무 화면에 영업 전용 단추를 두지 않음 #1143) · 진행 기록은 '공고 취소'(재공고는 다시 넘겨 새 업무)
+        await (await import('./bidSkip')).trashCanceledBid(sql, rec.tenant, id, d, { day: ci.day, reason: ci.reason });
         await sql`update sales_work_records set status = ${BID_RESULT_STATUS.canceled}, data = ${sql.json({ ...d, status: BID_RESULT_STATUS.canceled, bid_result: 'canceled', bid_canceled_at: new Date().toISOString(), bid_cancel_reason: ci.reason })}, updated_at = now()
           where tenant = ${rec.tenant} and src_tbl = ${SRC} and src_id = ${rec.src_id}`;
         canceled++; continue;

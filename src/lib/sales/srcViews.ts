@@ -509,7 +509,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const folded = (r: any) => skips.under.has(String(r.id ?? r.__id));
     const since = await lastMailAt(t);
     // [대상 아님] 탭: 누가·언제·사유(진행 기록) — 사유 칸이 생기기 전에 넘긴 것은 마지막으로 고친 사람·시각
-    const who = tab === 'skip' || tab === 'done' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
+    const who = tab === 'skip' || tab === 'done' || tab === 'noentry' ? new Map((await sql<{ id: string; name: string }[]>`select id, name from users where tenant = ${t}`).map((x) => [x.id, x.name])) : null;
     const td = today();
     // 338차(대표 11/02 #922 새 공고 날짜별): ?day=YYYY-MM-DD(오늘이 아닌 날) → '그날 새 공고' = 그날 처음 수집했거나 공고일이 그날인 공고(마감 지난 것 포함) · days = 최근 7일 날짜별 건수
     const dayPick = tab === 'today' && isDay(q.day) && String(q.day) !== td ? String(q.day) : null;
@@ -528,6 +528,8 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         history: r.__history ?? null, ...relink(r), skipped,
         // 380차 #1015: [완료] 누가·언제
         done: who && w && String(pick(w, 'status') ?? '') === '완료' ? { by: who.get(String(pick(w, 'updated_by') ?? '')) ?? null, at: pick(w, '__updated_at', 'updated_at') } : null,
+        // #1142: [미참여] 탭 — 누가·언제·사유(같은 칸)
+        noEntry: who && w && String(pick(w, 'status') ?? '') === '미참여' ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') ?? null } : null,
         skip: who && skipped && !folded(r) ? { by: who.get(String(pick(w, 'skip_by', 'updated_by') ?? '')) ?? null, at: pick(w, 'skip_at', '__updated_at', 'updated_at'), reason: pick(w, 'skip_reason') } : null,
         linked: tab === 'skip' && skipped && !folded(r) ? skips.linked(r).map((x) => { const m = notice(x); return { id: m.id, title: m.title, sourceLabel: m.sourceLabel, noticeDate: m.noticeDate, close: m.close, own: skips.own(x) }; }) : undefined }; });
     // 탭 조건 — #613 '오늘 새 공고 n' 칩 건수도 같은 조건. soon(마감 임박)·prep(준비 기간) 탭은 칩에서 뺐지만(#608) 메일·홈 링크는 그대로 동작
@@ -563,7 +565,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const canceledCard = (n: (typeof all)[number]) => /취소/.test(String(n.status ?? '')) || !!(n.history as { cancelDay?: string | null } | null)?.cancelDay;
     // 380차 #1015(대표 11/07 '대상 아님 말고 [취소]·[완료]'): [완료](입찰 참여·처리를 마친 공고)는 다른 탭에서 빼고 '완료' 탭에만 · [취소] = 예전 대상 아님 탭 그대로
     const doneCard = (n: (typeof all)[number]) => String(n.work ?? '') === '완료';
-    const inTab = (n: (typeof all)[number], tb: string) => (tb === 'done' ? doneCard(n) && !n.skipped : tb === 'skip' ? n.skipped && !!n.skip : !n.skipped && (tb === 'ref' || !doneCard(n))) && (tb === 'skip' || tb === 'done' || tb === 'ref' /* 참고 = 지난 메일에 실린 그대로 */ || (tb === 'canceled') === canceledCard(n)) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
+    // #1142(대표 11/24 위임): [미참여] 공고는 다른 탭에서 빼고 '미참여' 탭에만(사유와 함께) — 완료와 같은 규칙
+    const noEntryCard = (n: (typeof all)[number]) => String(n.work ?? '') === '미참여';
+    const inTab = (n: (typeof all)[number], tb: string) => (tb === 'done' ? doneCard(n) && !n.skipped : tb === 'skip' ? n.skipped && !!n.skip : tb === 'noentry' ? noEntryCard(n) && !n.skipped : !n.skipped && (tb === 'ref' || (!doneCard(n) && !noEntryCard(n)))) && (tb === 'skip' || tb === 'done' || tb === 'noentry' || tb === 'ref' /* 참고 = 지난 메일에 실린 그대로 */ || (tb === 'canceled') === canceledCard(n)) && (tb !== 'working' || !!n.work) && (tb !== 'open' || isOpenBid({ ...n, related: true }, n.work, td))
       && (tb !== 'today' || (dayPick ? dayHit(n, dayPick) : (n.todayHit && (n.result || !bidEnded(n, td))))) /* #537 후속2: 마감 지남·취소는 오늘 새 공고에서 뺌(결과는 아래 묶음) */ && (tb !== 'closing' || n.close === td) && (tb !== 'recruit' || n.vendorRecruit)
       && (tb !== 'soon' || (((!!n.close && n.close >= td && n.close <= plus(3)) || briefSoon(n, td)) && isOpenBid({ ...n, related: true }, n.work, td))) // #537 마감 임박 = 오늘~3일 안 마감, 아직 진행 중 · 239차 필수 현장설명 3일 안
       && (tb !== 'prep' || (!!n.close && n.close >= td && n.close <= plus(10) && isOpenBid({ ...n, related: true }, n.work, td)))
@@ -606,6 +610,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     const regions = [...regionCount.entries()].map(([key, n]) => ({ key, n })).sort((a, b) => (a.key === '지역 미정' ? 1 : b.key === '지역 미정' ? -1 : b.n - a.n || a.key.localeCompare(b.key, 'ko')));
     const canceledCount = all.filter((n) => inTab(n, 'canceled')).length;
     const doneCount = all.filter((n) => inTab(n, 'done')).length; // 380차 #1015 '완료' 탭 건수
+    const noEntryCount = all.filter((n) => inTab(n, 'noentry')).length; // #1142 '미참여' 탭 건수
     // 258차(로컬 10/29 09:20 ⓑ): 진행 중 탭에서 마감일 칸이 빈 공고(예고·협력사 등록·마감 칸 빈 입찰) 수 — 화면은 따로 묶어 보여 줌
     const noClose = tab === 'open' ? items.filter((n) => !n.close).length : 0;
     // 372차 #995 ④(로컬 21라인 대조 '래미안·공고 번호로 찾으면 안 나옴'): 검색어가 있으면 이 탭 밖(대상 아님·취소된 공고·다른 탭)과 목록에 안 읽힌 '관련 아님' 공고도
@@ -653,7 +658,7 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
     }
     // 414차: 다른 회사가 검색어를 아직 안 넣었으면 화면이 '관심 검색어를 넣어 주세요' 안내를 보여 줌
     const needKeywords = !ownsJudge(t) && !(await judgeWords(t)).length;
-    return { ...meta, ...(needKeywords ? { needKeywords } : {}), tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, doneCount, todayCount, prespecCount, day: dayPick ?? (tab === 'today' ? td : null), days, region: regionPick || null, regions, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, outside, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
+    return { ...meta, ...(needKeywords ? { needKeywords } : {}), tab, sort: sortKey, total: N.filter((r) => !skips.hidden(r)).length, skipCount, doneCount, noEntryCount, todayCount, prespecCount, day: dayPick ?? (tab === 'today' ? td : null), days, region: regionPick || null, regions, canceledCount, noClose, items: tab === 'today' ? items.filter((n) => !n.result) : items, results, outside, biz: q.biz ?? null, categories: cats.map((c) => ({ key: c.key, name: c.name, color: c.color })) };
   }
   if (view === 'hub') {
     const tab = q.tab ?? 'buildings'; const td = today();

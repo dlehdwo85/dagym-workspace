@@ -53,7 +53,8 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const go = (tid: string) => (inPanel ? showTask(tid, (h) => router.push(h)) : router.push(`/tasks/${tid}`));
   // #242(대표 10/24 '창 닫기·돌아가기를 누르면 다른 화면으로 넘어가지 않게'): 전체 화면 닫기 = 직전 화면(앱 안에서 옮겨 왔으면 뒤로가기), 새 탭·링크로 바로 연 경우만 업무 목록
   const closePage = () => { if (((window as any).__wosNav ?? 0) > 1 && window.history.length > 1) router.back(); else router.push('/tasks'); };
-  const { user, dir, features, menus } = useSession();
+  const { user, dir, features, menus, spaces } = useSession();
+  const salesOn = (spaces ?? []).includes('sales'); // #1143: 영업 출처 정보·질문은 영업 공간을 쓰는 사람에게만
   const [mailDraft, setMailDraft] = useState<AssistDraft | null>(null); // V28-1 업무 AI 비서 초안 → 시안 창
   const { data, error, loading, reload, setData } = useApi<any>(`/api/tasks/${id}`);
   const fu = useLeadFollowUp(); // 197차(#460): 리드 업무 완료 때 다음 연락일·종결을 묻는 창
@@ -217,7 +218,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       if (c === null) return;
       if (c !== 'skip') body = { ...body, leadFollowUp: c };
     }
-    if (body.status === 'done' && t.status !== 'done' && t.sales_ref?.kind === 'research' && (await rs.ask({ id, title: t.title, sales_ref: t.sales_ref })) === null) return;
+    if (body.status === 'done' && t.status !== 'done' && t.sales_ref?.kind === 'research' && salesOn && (await rs.ask({ id, title: t.title, sales_ref: t.sales_ref })) === null) return; // #1143 영업 공간이 없는 회사에서는 안 물음
     try {
       const r = await api(`/api/tasks/${id}`, { method: 'PATCH', body: { ...body, version: t.version } });
       // 대표 10/24: 담당자가 여럿이면 [완료] = 내 몫 완료 — 남은 사람 안내(마지막 사람이면 원래 안내)
@@ -433,7 +434,6 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
 
       <div className={cx('space-y-6 px-5 py-5', !inPanel && 'rounded-b-card border border-t-0 border-line bg-white')}>
         {/* 344차(대표 11/02 #925): 발주처가 공고를 취소한 입찰 업무 — 맨 위 빨간 경고 띠 + [공고 취소로 완료] */}
-        {t.sales_ref?.cancel && <BidCancelBanner t={t} id={id} reload={() => { reload(); broadcastRefresh(); }} />}
         <div>
           <div className="mb-1.5 flex flex-wrap items-center gap-1 text-xs text-ink-2">
             <Link href="/tasks" className="hover:underline">업무</Link>
@@ -614,7 +614,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
 
         <div className={cx('flex flex-col gap-6', wide && 'lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-x-6')}>
         <section className={cx(wide && 'lg:col-start-1 lg:row-start-1')} data-testid="desc-section">
-          {t.sales_ref?.bidInfo && <BidInfoBox info={t.sales_ref.bidInfo} />}{/* 335차: 공고 업무 고정 칸(세대수·입찰 마감·현장설명회) */}
+          {t.sales_ref?.bidInfo && salesOn && <BidInfoBox info={t.sales_ref.bidInfo} />}{/* 335차: 공고 업무 고정 칸(세대수·입찰 마감·현장설명회) */}
           <h2 className="mb-1.5 text-sm font-semibold">설명</h2>
           {desc === null ? (
             <div className="min-h-[56px] cursor-text rounded-card border border-line bg-slate-50/70 px-3 py-2.5 text-sm leading-relaxed hover:border-slate-300" onClick={(e) => { descH.current = e.currentTarget.offsetHeight; descSent.current = t.description; setDescState(''); setDesc(t.description); }} data-testid="desc-view">
@@ -818,7 +818,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
               <Attachments items={data.batchAttachments} canEdit={false} readOnly onChange={reload} meId={user.id} />
             </div>
           )}
-          {!fold.att && <SourceFilesButton taskId={id} t={t} attachments={data.attachments} onDone={reload} />}
+          {!fold.att && salesOn && <SourceFilesButton taskId={id} t={t} attachments={data.attachments} onDone={reload} />}
           {!fold.att && <TaskMail taskId={id} onChange={reload} draft={mailDraft} onDraftUsed={() => setMailDraft(null)} />}
           {/* V28-1 이 업무의 AI 비서 — 자료·첨부 바로 아래(초안 → 메일·문자 시안 창) */}
           {features.ai && menus?.assistant !== 'none' && (
@@ -1397,27 +1397,7 @@ function CommentItem({ c, meId, onChange, onReply, small }: { c: any; meId: stri
 }
 
 /** #507 공고·지원사업에서 넘어온 업무: 원천 첨부를 받아 붙이기(자동으로 못 붙였거나 기능 전에 만든 업무) — 이미 붙은 파일은 건너뜀 */
-/** 344차(대표 11/02 #925): 발주처가 취소한 공고의 업무 — 빨간 경고 띠(취소일·사유) + [공고 취소로 완료]. 완료된 뒤에는 회색 안내 한 줄 */
-function BidCancelBanner({ t, id, reload }: { t: any; id: string; reload: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const c = t?.sales_ref?.cancel; if (!c) return null;
-  const md = (d?: string | null) => (d && /^\d{4}-\d{2}-\d{2}/.test(d) ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : null);
-  const when = md(c.day);
-  if (t.status === 'done') return <div className="rounded-card border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-ink-2" data-testid="bid-cancel-done-note">발주처가 공고를 취소해{when ? `(${when})` : ''} 완료 처리한 업무입니다{c.reason ? ` · 사유: ${c.reason}` : ''}. 재공고가 올라오면 영업기회 › 입찰에서 다시 넘겨 새 업무를 만듭니다.</div>;
-  return (
-    <div className="rounded-card border border-red-300 bg-red-50 px-3 py-2.5 text-sm text-red-900" role="alert" data-testid="bid-cancel-banner">
-      <p className="font-semibold">이 공고는 발주처가 취소했습니다{when ? `(취소일 ${when})` : ''}.</p>
-      {c.reason && <p className="mt-0.5 text-xs">사유: {c.reason}</p>}
-      <p className="mt-1 text-xs text-red-800">확인 후 [공고 취소로 완료]를 눌러 주세요. 남은 체크리스트는 건너뜀으로 표시되고, 재공고가 올라오면 그때 공고를 다시 넘겨 새 업무를 만듭니다.</p>
-      <Button size="sm" className="mt-2" disabled={busy} data-testid="bid-cancel-done" onClick={async () => {
-        setBusy(true);
-        try { const r = await api(`/api/tasks/${id}/bid-cancel-done`, { method: 'POST', body: {} }); toast.ok(`공고 취소로 완료 처리했습니다${r?.skippedChecklist ? ` · 체크리스트 ${r.skippedChecklist}개 건너뜀` : ''}`); reload(); }
-        catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
-      }}>공고 취소로 완료</Button>
-    </div>
-  );
-}
-
+/** #1142·#1143(대표 11/24): 공고 취소는 서버가 업무를 휴지통으로 정리하고 알림만 — 업무 화면의 빨간 띠·[공고 취소로 완료]는 없앰 */
 function SourceFilesButton({ taskId, t, attachments, onDone }: { taskId: string; t: any; attachments: any[]; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const kind = t?.sales_ref?.kind;

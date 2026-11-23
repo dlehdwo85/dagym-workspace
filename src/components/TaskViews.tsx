@@ -203,7 +203,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
       if (c === null) return false;
       if (c !== 'skip') body = { ...body, leadFollowUp: c };
     }
-    if (body.status === 'done' && t.status !== 'done' && t.sales_ref?.kind === 'research' && (await rs.ask(t)) === null) return false;
+    if (body.status === 'done' && t.status !== 'done' && t.sales_ref?.kind === 'research' && (sess.spaces ?? []).includes('sales') && (await rs.ask(t)) === null) return false; // #1143 영업 공간이 없으면 안 물음
     const before = data;
     // #508: 완료하면 목록에서 빠져 묶음 맨 아래 '완료됨'으로 — 되돌리기는 거기서(바로 전 상태 기억)
     if (body.status === 'done' && t.status !== 'done') PREV_STATUS.set(t.id, t.status);
@@ -1381,7 +1381,6 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
             <CarriedBadge t={t} />
             {/* 380차 #1017(대표 11/07 '입찰과 본사 그리고 요청, 웹사이트, 문의, 다짐 표기를 없애고 현설과 입찰 마감'): 출처 칩(입찰·리드) 뺌 — 상세에 있음 */}
             {/* 344차(대표 11/02 #925): 발주처가 취소한 공고의 열린 업무 — '공고 취소' 빨간 칩(상세에서 [공고 취소로 완료]) */}
-            {t.sales_ref?.cancel && t.status !== 'done' && <span className="shrink-0 rounded-full bg-red-50 px-1.5 text-[10px] font-semibold text-red-700" data-testid="row-bid-canceled" title={`발주처가 공고를 취소했습니다${t.sales_ref.cancel.reason ? ` · 사유: ${t.sales_ref.cancel.reason}` : ''} — 상세에서 [공고 취소로 완료]`}>공고 취소</span>}
             {/* 380차 #1017: 입찰 업무 줄 = '현설 11/9 11시'(필수면 '필수', 3일 안 빨강, 지나면 회색) · '입찰 마감 11/16 17시' — 정시는 'n시', 분이 있으면 '11:30'(폭이 좁아서) */}
             {/* 395차 #1020(대표 11/08 '현설 표기'): 입찰 업무 줄은 늘 현설 칩 — '현설 11/9 11시 필수'(일시) · '현설 없음' · '현설 공고문 참조' · '현설 필수/임의'(일시 미정) ·
                 원천 목록에 정보가 없으면 '현설 공고문 확인'(396차 — K-apt 아닌 공고, 노트북 11/13 다올이음터). 예전엔 일시가 있을 때만 보여 '없음'·'공고문 참조' 업무는 칩이 없었음 */}

@@ -1092,17 +1092,20 @@ export async function unhideTaskBlocks(tx: Sql, taskIds: string[]) {
   await tx`update events set deleted_at = null, hidden_by_task = null, updated_at = now(), version = version + 1 where hidden_by_task = any(${taskIds}::uuid[])`;
 }
 
-export async function deleteTask(u: SessionUser, id: string) {
+export async function deleteTask(u: SessionUser, id: string, reason?: string | null) {
   const sql = db();
   const { perms } = await loadTaskForUser(u, id, sql);
   if (!perms.delete) throw forbidden('삭제 권한이 없습니다 (작성자 또는 관리자)');
-  await sql.begin(async (tx) => {
+  const why = String(reason ?? '').trim().slice(0, 300) || null; // #1142: 삭제 창의 공통 '사유(선택)'
+  const notice = await sql.begin(async (tx) => {
     const gone = await tx<{ id: string }[]>`update tasks set deleted_at = now(), updated_at = now(), version = version + 1 where id = ${id} or parent_id = ${id} returning id`;
     await hideTaskBlocks(tx, gone.map((g) => g.id));
-    await activity(tx, 'task', id, u.id, 'deleted');
+    await activity(tx, 'task', id, u.id, 'deleted', why ? { reason: why } : {});
     await syncReviewTask(tx, id, u.id);
+    // #1142·#1143: 업무 쪽은 공통 [삭제]만 — 출처가 공고면 서버가 공고를 '미참여(업무에서 삭제)'로 영업 DB 에 남김(되살리면 이전 상태로)
+    return (await import('./sales/bidSkip')).bidTaskDeleted(tx as unknown as typeof sql, u, id, why);
   });
-  return { ok: true };
+  return { ok: true, ...(notice ? { notice } : {}) };
 }
 
 /** V6 11번 휴지통: 삭제 후 30일까지, 삭제 권한이 있었던 사람(만든 사람·요청자·관리자)에게 보임 */
@@ -1134,7 +1137,9 @@ export async function restoreTask(u: SessionUser, id: string) {
   });
   // 361차 #977: 업무와 함께 지웠던 연결 일정도 되살림(외부 캘린더 반영은 라우트가 calendars 로)
   const ev = await (await import('./taskEventDelete')).restoreTaskEvents(u, backIds).catch(() => ({ restored: 0, calendars: [] as string[] }));
-  return { ok: true, eventsRestored: ev.restored, calendars: ev.calendars };
+  // #1142: 이 업무 때문에 '미참여'가 된 공고는 이전 상태로(넘긴 공고면 '입찰 진행')
+  const noticesBack = await (await import('./sales/bidSkip')).bidTasksRestored(sql, u, backIds).catch(() => 0);
+  return { ok: true, eventsRestored: ev.restored, calendars: ev.calendars, ...(noticesBack ? { noticesBack } : {}) };
 }
 
 // ---- 댓글 ----

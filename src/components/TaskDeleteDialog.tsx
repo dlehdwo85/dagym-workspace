@@ -20,6 +20,7 @@ export function TaskDeleteDialog({ open, onClose, taskId, title, batch, onDelete
   const plan = useApi<Plan>(open ? `/api/tasks/${taskId}/delete-plan${all ? '?batch=1' : ''}` : null, [open, all]);
   const [pick, setPick] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState(''); // #1142 공통 '사유(선택)' — 업무 기록에 남고, 출처가 공고면 '미참여(업무에서 삭제)' 사유로
   useEffect(() => { if (plan.data) setPick(new Set(plan.data.events.filter((e) => e.checked).map((e) => e.key))); }, [plan.data]);
   useEffect(() => { if (!open) setAll(false); }, [open]);
   const events = plan.data?.events ?? [];
@@ -30,7 +31,7 @@ export function TaskDeleteDialog({ open, onClose, taskId, title, batch, onDelete
   async function go() {
     if (busy || !plan.data) return;
     setBusy(true);
-    const q = `?events=${chosen.length ? encodeURIComponent(chosen.map((e) => e.key).join(',')) : 'none'}`;
+    const q = `?events=${chosen.length ? encodeURIComponent(chosen.map((e) => e.key).join(',')) : 'none'}${reason.trim() ? `&reason=${encodeURIComponent(reason.trim().slice(0, 300))}` : ''}`;
     try {
       const r = await api<{ eventsDeleted?: number }>(all && batch ? `/api/tasks/batch/${batch.id}${q}` : `/api/tasks/${taskId}${q}`, { method: 'DELETE' });
       const ids = plan.data.taskIds;
@@ -73,6 +74,7 @@ export function TaskDeleteDialog({ open, onClose, taskId, title, batch, onDelete
               </li>))}</ul>
           </div>
         )}
+        <input className="w-full rounded-input border border-slate-300 px-3 py-2 text-sm" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} placeholder="사유(선택) — 예: 입찰 안 함, 중복 업무" aria-label="삭제 사유" data-testid="task-delete-reason" />
         {chosen.length > 0 && <p className="text-xs text-ink-2">업무를 되살리면(되돌리기·휴지통) 함께 지운 일정도 다시 돌아옵니다{attendees ? ' — 참석자에게 다시 잡혔다고 알려요' : ''}.</p>}
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="secondary" onClick={onClose}>취소</Button>

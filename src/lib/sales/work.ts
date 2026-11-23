@@ -84,7 +84,10 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>, opt
     status = WORK_STATUS[i.kind].includes(prev) && !SKIP.test(prev) ? prev : first;
   } else if (i.status === undefined && i.memo && status === first && !pick(cur?.data, 'memo', 'last_note')) status = review;
   const skipNow = SKIP.test(status), skipWas = SKIP.test(String(cur?.status ?? ''));
-  const { skip_by: _by, skip_at: _at, skip_reason: _why, skip_prev: _prev, ...d0 } = cur?.data ?? {};
+  const { skip_by: _by, skip_at: _at, skip_reason: _why, skip_prev: _prev, bid_skip: _bs, ...d0x } = cur?.data ?? {};
+  // #1142: 미참여 공고는 사유·누가·언제(bid_skip·skip_*)를 메모만 고칠 때도 그대로, 다른 상태로 바꾸면 지움
+  const keepNoEntry = status === '미참여' && cur?.status === '미참여';
+  const d0 = keepNoEntry ? { ...d0x, bid_skip: _bs, skip_by: _by, skip_at: _at, skip_reason: _why } : d0x;
   // 이미 대상 아님인데 메모만 고치면 넘긴 사람·시각 그대로, 다른 상태로 바꾸면(되돌리기 포함) 지움
   const d = !skipNow ? d0 : skipWas && i.reason === undefined ? { ...d0, skip_by: _by, skip_at: _at, skip_reason: _why, skip_prev: _prev }
     : { ...d0, skip_by: u.id, skip_at: new Date().toISOString(), skip_reason: i.reason?.trim() || null, skip_prev: skipWas ? _prev ?? null : cur?.status ?? null };
@@ -110,6 +113,12 @@ export async function saveWork(u: SessionUser, i: z.infer<typeof workInput>, opt
   const dl = i.kind === 'bid' ? (await import('./bidTasks')).bidDue((await import('./bidTasks')).bidMilestones(r).filter((m) => m.key === 'close'), '0000-00-00') : null;
   const task = await (await import('./autoTasks')).syncSalesTask(sql, u, { kind: i.kind, id: i.id, name: (i.kind === 'bid' ? bidName : String(pick(r, 'name', 'complex_name', 'company', 'company_name', 'facility_name', 'title') ?? '')) || (await kindName(t, i.kind)), status, nextDate: next,
     deadline: dl?.day ?? null, deadlineTime: dl?.time ?? null, nextAction: pick(cur?.data, 'next_action') });
+  // #1142: 미참여로 휴지통에 보낸 업무 — 사유·이전 상태를 남겨 미참여 탭에 보이고, 업무를 되살리면 공고 상태도 이전으로
+  if (task.action === 'trashed' || (status === '미참여' && i.kind === 'bid' && cur?.status !== '미참여')) {
+    const at = new Date().toISOString(); const why = i.reason?.trim() || '미참여';
+    await sql`update sales_work_records set data = data || ${sql.json({ bid_skip: { by: u.id, at, reason: why, prev: cur?.status ?? first, taskIds: task.taskIds ?? [] }, skip_by: u.id, skip_at: at, skip_reason: why } as never)}
+      where tenant = ${t} and src_tbl = ${SRC_TBL[i.kind]} and src_id = ${srcId}`;
+  }
   return { ok: true, status, memo, nextDate: next, task, ...(together.length ? { together } : {}) };
 }
 const norm = (s: string) => s.replace(/[\s()（）·\-_,.]/g, '').toLowerCase();

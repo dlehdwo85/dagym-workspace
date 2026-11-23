@@ -114,13 +114,14 @@ describe('입찰 업무로 넘기기', () => {
     assert.equal((await work('B2')).status, '입찰 진행', '취소 전에는 그대로');
     await put({ id: 'B2c', source_type: 'g2b_bid', source_external_id: 'R26BK0001-001', title: '[취소] 주민운동시설 위탁 운영', issuer: '구청', notice_kind: 'cancel', current_status: '취소', related: true, posted_date: today, first_seen_at: today });
     const d = await tick(); assert.ok(d.bidTasks?.canceled >= 1, JSON.stringify(d.bidTasks));
-    // 344차(대표 11/02 #925): 업무는 지우지 않고 취소 표시(sales_ref.cancel)+활동 기록 — 사람이 [공고 취소로 완료]
-    const [tk] = await sql`select deleted_at, status, sales_ref from tasks where id = ${r.taskId}`;
-    assert.equal(tk.deleted_at, null, '업무는 휴지통으로 안 감(344차)'); assert.equal(tk.status, 'todo'); assert.equal(tk.sales_ref.cancel?.noticeId, 'B2c', '취소 공고 줄로 표시');
-    assert.equal((await sql`select count(*)::int c from activities where entity_id = ${r.taskId} and action = 'notice_canceled'`)[0].c, 1);
+    // #1142(대표 11/24 위임): 공고 취소 = [미참여]와 같은 정리를 자동으로 — 열린 입찰 업무는 휴지통(30일 안에 되살림)·자동 일정 삭제·알림만(344차 빨간 띠·[공고 취소로 완료] 없앰)
+    const [tk] = await sql`select deleted_at, status from tasks where id = ${r.taskId}`;
+    assert.ok(tk.deleted_at, '업무는 휴지통'); assert.notEqual(tk.status, 'done');
+    const [da] = await sql`select changes from activities where entity_id = ${r.taskId} and action = 'deleted' order by id desc limit 1`;
+    assert.equal(da.changes.via, 'notice_canceled');
     assert.equal((await sql`select count(*)::int c from events where id = any(${r.eventIds}::uuid[]) and deleted_at is not null`)[0].c, 2, '일정 취소');
     const w = await work('B2'); assert.deepEqual([w.status, w.data.bid_result], ['공고 취소', 'canceled']);
-    const [n] = await sql`select type, link, body from notifications where user_id = ${ctx.staffA.id} and title like '공고 취소:%'`; assert.equal(n?.type, 'bid_update'); assert.equal(n?.link, `/tasks/${r.taskId}`); assert.match(n?.body ?? '', /\[공고 취소로 완료\]/);
+    const [n] = await sql`select type, link, body from notifications where user_id = ${ctx.staffA.id} and title like '공고 취소:%'`; assert.equal(n?.type, 'bid_update'); assert.match(n?.link ?? '', /^\/s\/sales\/hub\?tab=bids/); assert.match(n?.body ?? '', /휴지통\(30일 안에 되살릴 수 있음\)/);
     assert.ok(!(await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=working')).items.some((x) => x.id === 'B2'), '278차 #830: 취소 공고는 작업 중 탭에서 빠짐');
     const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=canceled')).items.find((x) => x.id === 'B2');
     assert.equal(card?.workBid?.result, 'canceled');

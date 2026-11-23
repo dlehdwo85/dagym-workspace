@@ -28,9 +28,9 @@ async function deletingIds(sql: Sql, rootIds: string[]) {
 export async function deletePlan(u: SessionUser, rootIds: string[], sql: Sql = db()): Promise<PlanEvent[]> {
   const ids = await deletingIds(sql, rootIds);
   if (!ids.length) return [];
-  const rows = await sql<{ event_id: string; task_id: string; role: string; sync: boolean; occurrence_start: Date | null; task_at: Date; ev_at: Date; link_at: Date;
+  const rows = await sql<{ event_id: string; task_id: string; role: string; sync: boolean; hide_when_done: boolean; occurrence_start: Date | null; task_at: Date; ev_at: Date; link_at: Date;
     title: string; start_at: Date; end_at: Date; all_day: boolean; rrule: string | null; calendar_id: string }[]>`
-    select et.event_id, et.task_id, et.role, et.sync, et.occurrence_start, t.created_at as task_at, e.created_at as ev_at, et.created_at as link_at,
+    select et.event_id, et.task_id, et.role, et.sync, et.hide_when_done, et.occurrence_start, t.created_at as task_at, e.created_at as ev_at, et.created_at as link_at,
       e.title, e.start_at, e.end_at, e.all_day, e.rrule, e.calendar_id
     from event_tasks et join events e on e.id = et.event_id join tasks t on t.id = et.task_id
     where et.task_id = any(${ids}::uuid[]) and et.role <> 'block' and e.kind <> 'task_block' and e.deleted_at is null
@@ -51,7 +51,8 @@ export async function deletePlan(u: SessionUser, rootIds: string[], sql: Sql = d
       union select t3.id from tasks t3 where t3.recurrence_source_id = ${r.task_id} and t3.deleted_at is null and not (t3.id = any(${ids}::uuid[]))) x`;
     const [{ a }] = await sql<{ a: number }[]>`select count(*)::int a from event_attendees where event_id = ${r.event_id} and user_id <> ${u.id}`;
     // 이 업무가 주인 = '업무에도 추가'(sync) 또는 업무보다 뒤에 만들어지면서 곧바로 연결된 일정(미팅 장소). 이미 있던 일정에 나중에 연결한 것은 일정이 주인
-    const own = r.sync || (r.role === 'link' && +r.ev_at >= +r.task_at && Math.abs(+r.link_at - +r.ev_at) < 60_000);
+    // #1142: 업무와 함께 자동으로 만든 일정(입찰 마감·현장설명회 — hide_when_done)도 이 업무가 주인 → 기본 체크(업무를 지우면 같이 지움)
+    const own = r.sync || r.hide_when_done || (r.role === 'link' && +r.ev_at >= +r.task_at && Math.abs(+r.link_at - +r.ev_at) < 60_000);
     let kind: PlanEvent['kind'] = own ? 'own' : 'from_event'; let disabled = false; let note: string | null;
     if (!perms.edit) { kind = 'no_perm'; disabled = true; note = '지울 권한이 없는 일정이라 남겨요'; }
     else if (r.rrule && !occ) { kind = 'series'; disabled = true; note = '반복 일정 전체는 지우지 않아요 — 캘린더에서 지워 주세요'; }
