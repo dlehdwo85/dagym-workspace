@@ -192,7 +192,8 @@ async function sendOrd(sql: Sql, c: ContractRow, ord: number, resend = false) {
   for (const s of signers) {
     const { token, code, link } = await issue(sql, s.id);
     let mail: 'sent' | 'dev' | 'none' | 'failed' = 'none';
-    if (s.email) {
+    if (s.email && !(await (await import('./sendQuota')).takeSendQuota(c.tenant, 'mail', 1, sql))) mail = 'failed'; // 상용화 B5: 하루 상한 — 화면의 링크·문자 문구로 직접 전달
+    else if (s.email) {
       try {
         mail = await sendMail(s.email, `[${company.name}] ${c.title} 서명 요청`, `${s.name}님, ${company.name}에서 보낸 "${c.title}" 에 전자서명해 주세요.\n${c.message ? `\n전하는 말: ${c.message}\n` : ''}\n서명 링크: ${link}\n${c.code_by === 'mail' ? `접속 코드: ${code}\n` : '접속 코드(6자리)는 담당자가 문자로 따로 보내 드립니다.\n'}\n링크는 ${c.expires_at ? new Date(c.expires_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }) : '기한'}까지 유효하며, 본인만 열어 주세요. 문의: ${company.name}`);
       } catch { mail = 'failed'; }
@@ -553,7 +554,7 @@ async function complete(sql: Sql, c: ContractRow, signers: SignerRow[]) {
   await event(sql, c.id, 'completed', { detail: { fileId: f.id, bytes: pdf.length } });
   const to = [c.created_by, ...signers.map((s) => s.user_id)].filter((x): x is string => !!x);
   await notify(sql, { userIds: [...new Set(to)], type: 'mention', title: `전자계약 완료: ${c.title}`, body: `모든 서명이 끝나 PDF 가 자료실(인사/전자계약서)에 보관되었습니다`, link: `/library?file=${f.id}`, entityType: 'contract', entityId: c.id, dedupeKey: `contract_done:${c.id}` });
-  for (const s of signers) if (s.email) sendMail(s.email, `[${company.name}] ${c.title} 서명 완료`, `${s.name}님, "${c.title}" 의 모든 서명이 끝났습니다.\n서명할 때 받은 링크에서 접속 코드로 완료본(PDF)을 내려받을 수 있습니다.\n문의: ${company.name}`).catch(() => {});
+  for (const s of signers) if (s.email && await (await import('./sendQuota')).takeSendQuota(c.tenant, 'mail', 1, sql)) sendMail(s.email, `[${company.name}] ${c.title} 서명 완료`, `${s.name}님, "${c.title}" 의 모든 서명이 끝났습니다.\n서명할 때 받은 링크에서 접속 코드로 완료본(PDF)을 내려받을 수 있습니다.\n문의: ${company.name}`).catch(() => {});
 }
 /** 완료본 PDF(코드 확인 뒤) */
 export async function signPdf(token: string, code: string, ip: string | null, ua: string | null) {

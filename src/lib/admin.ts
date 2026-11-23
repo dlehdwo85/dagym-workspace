@@ -56,7 +56,9 @@ export async function sendInviteMail(actor: SessionUser, inv: { id: string; user
     select u.name, coalesce(nullif(u.title_short, ''), nullif(u.title, '')) as title, (select nullif(t.name, '') from tenants t where t.id = ${tenantOf(actor)}) as company from users u where u.id = ${actor.id}`;
   const m = inviteMailParts({ company: me?.company ?? '우리 회사', name: inv.name, by: me ? (me.title ? `${me.name} ${me.title}` : me.name) : '관리자', link: `${appUrl()}/invite/${inv.token}`, expires: inv.expires, resent: inv.resent });
   let mail: InviteMail; let mailError: string | undefined;
-  try { mail = await sendFramedMail(inv.email, m.title, m.lines, m.button, m.subject, m.links); }
+  const Q = await import('./sendQuota'); // 상용화 B5: 회사별 하루 메일 상한 — 넘으면 메일 없이 링크만(관리자가 직접 전달)
+  if (!(await Q.takeSendQuota(tenantOf(actor), 'mail', 1, sql))) { mail = 'failed'; mailError = Q.capMessage('mail'); }
+  else try { mail = await sendFramedMail(inv.email, m.title, m.lines, m.button, m.subject, m.links); }
   catch (e) { mail = 'failed'; mailError = String((e as Error)?.message ?? e).slice(0, 200); }
   try { await sql`update invitations set mail_status = ${mail}, mail_at = now(), mail_error = ${mailError ?? null} where id = ${inv.id}`; } catch { /* 267 전: 칸이 없으면 기록만 건너뜀 */ }
   await audit(sql, actor.id, mail === 'failed' ? 'user.invite_mail_failed' : 'user.invite_mail', 'user', inv.userId ?? null, { invitationId: inv.id, mail }, null);

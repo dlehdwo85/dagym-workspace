@@ -354,7 +354,7 @@ export async function sendDigest(tenant: string, opt: { force?: boolean; day?: s
       const q = await queueSystemMail(tenant, { to: emails, subject: mail.subject, text: mail.text, html: mail.html, replyTo, createdBy: opt.actorId ?? to[0].id, fromName }).catch((e) => { mailError ??= e instanceof Error ? e.message : String(e); return null; });
       if (q?.skipped === 'self') { mailVia = q.channel; mailError = '받는 사람이 보내는 회사 메일 주소뿐이라 보내지 않았습니다 — 워크인 발송을 켜면 받은메일함으로 옵니다'; }
       else if (q) { mailed = q.to.length; mailVia = q.channel; if (opt.actorId) await (await import('../mailbox')).outboxTick().catch(() => null); } // [지금 보내기]는 바로(정시 발송은 같은 tick 의 보관함 단계가)
-      else for (const e of emails) { try { mailVia = await sendMail(e, mail.subject, mail.text, mail.html); mailed++; } catch (err) { mailError ??= err instanceof Error ? err.message : String(err); /* 메일 경로 없음·실패면 알림만 — 사유는 기록 */ } }
+      else for (const e of emails) { if (!(await (await import('../sendQuota')).takeSendQuota(tenant, 'mail', 1, sql))) { mailError ??= (await import('../sendQuota')).capMessage('mail'); break; } try { mailVia = await sendMail(e, mail.subject, mail.text, mail.html); mailed++; } catch (err) { mailError ??= err instanceof Error ? err.message : String(err); /* 메일 경로 없음·실패면 알림만 — 사유는 기록 */ } }
     }
     const first = (d.counts.total ? shown.find((i) => i.section !== 'soon' && i.section !== 'result') : null) ?? shown[0];
     if (!test) notified = (await notify(sql, { userIds: to.map((u) => u.id), type: 'briefing', space: 'sales',

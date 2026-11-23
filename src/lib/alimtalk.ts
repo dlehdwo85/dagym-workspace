@@ -92,7 +92,8 @@ async function deliver(t: Target, kind: AlimKind, vars: Record<string, string>, 
   const templateId = c?.templates[kind];
   if (!c || !templateId) return 'off' as const;
   if (dedupeKey && (await sql`select 1 from alimtalk_logs where dedupe_key = ${dedupeKey} and user_id = ${t.id} and ok limit 1`).length) return 'dup' as const;
-  const r = await sendSolapi(c, t.phone, templateId, vars);
+  // 상용화 B5: 회사별 하루 알림톡 상한 — 넘으면 보내지 않고 기록만(메일은 따로 감)
+  const r = (await (await import('./sendQuota')).takeSendQuota(t.tenant, 'alimtalk', 1, sql)) ? await sendSolapi(c, t.phone, templateId, vars) : { ok: false, error: 'daily_cap' } as { ok: boolean; id?: string; error?: string };
   await sql`insert into alimtalk_logs (tenant, user_id, kind, ok, error, provider, message_id, dedupe_key) values (${t.tenant}, ${t.id}, ${kind}, ${r.ok}, ${r.error ?? null}, ${c.provider}, ${r.id ?? null}, ${dedupeKey})
     on conflict do nothing`.catch(() => {});
   if (!r.ok) await (await import('./log')).logError('alimtalk', new Error(`${kind}: ${r.error}`)).catch(() => {});

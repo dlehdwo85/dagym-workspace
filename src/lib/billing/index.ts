@@ -38,8 +38,8 @@ async function requireBillingAdmin(u: SessionUser) {
  *  고객 화면에서 내린 요금제(public = false)도 지금 그 요금제를 쓰는 회사는 견적·갱신 결제가 된다 */
 export async function quote(tenant: string, planCode: string, cycle: 'monthly' | 'annual', sql: Sql = db()) {
   const [p] = await sql<any[]>`select code, name, monthly_krw, per_user_krw, annual_monthly_krw, annual_per_user_krw, min_users, limits from plans
-    where code = ${planCode} and active and code not in ('trial', 'free', 'team_free', 'w_free')
-      and (public or code = (select plan_code from tenant_subscriptions where tenant = ${tenant}))`;
+    where code = ${planCode} and code not in ('trial', 'free', 'team_free', 'w_free')
+      and ((active and public) or code = (select plan_code from tenant_subscriptions where tenant = ${tenant}))`; // 상용화 B1: 정리한(active = false) 예전 요금제도 지금 쓰는 회사는 갱신
   if (!p) throw badRequest('결제할 수 없는 요금제입니다');
   const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from users where tenant = ${tenant} and status = 'active'`;
   const band = await (await import('../bands')).tenantBand(tenant, p.limits, sql, n);

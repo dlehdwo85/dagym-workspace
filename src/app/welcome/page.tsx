@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { LandingEvents } from '@/components/LandingEvents';
 import { LandingAiLine } from '@/components/LandingAiLine';
+import { LandingWorkPrice } from '@/components/LandingWorkPrice';
 import { BizFooter } from '@/components/BizFooter';
 import { LandingHeader } from '@/components/LandingHeader';
 import { conversionTags } from '@/lib/conversionTags';
@@ -142,7 +143,7 @@ export default async function Welcome() {
         <div className="mx-auto max-w-6xl px-4"><h2 className="text-center text-2xl font-bold">도입 3단계</h2>
           <ol className="mt-6 grid gap-3 sm:grid-cols-3" data-testid="landing-steps">{STEPS.map(([t, d], i) => <li key={t} className="rounded-card border border-line bg-white p-4"><span className="flex size-8 items-center justify-center rounded-full bg-brand-600 text-sm font-bold text-white">{i + 1}</span><div className="mt-2 font-semibold">{t}</div><div className="text-sm text-ink-2">{d}</div></li>)}</ol></div>
       </section>
-      {/* 요금: 14일 무료 체험(#466 — 5명 무료 폐지, 카드 등록 문구는 대표 결정 전이라 넣지 않음) */}
+      {/* 요금: 14일 무료 체험(#466 — 5명 무료 폐지, 카드 등록 문구는 대표 결정 전이라 넣지 않음) · 상용화 B3: 체험 뒤 업무 요금표만 공개(영업·마케팅은 상담 후 견적) */}
       <section id="pricing" className="mx-auto max-w-6xl px-4 py-12 text-center">
         <h2 className="text-2xl font-bold">요금</h2>
         <div className="mx-auto mt-6 max-w-md rounded-card border border-brand-600 p-6 ring-1 ring-brand-600" data-testid="pricing">
@@ -150,7 +151,8 @@ export default async function Welcome() {
           <ul className="mt-4 space-y-1.5 text-left text-sm">{['업무·일정·캘린더·메신저·결재·자료실 전부', '영업·마케팅 공간은 상담 후 사용', 'ai'].map((x) => <li key={x} className="flex gap-1.5"><Check className="mt-0.5 size-4 text-green-600" />{x === 'ai' ? <LandingAiLine /> : x}</li>)}</ul>
           <Link href="/signup" className="mt-5 inline-flex items-center gap-1.5 rounded-input bg-brand-600 px-5 py-3 font-semibold text-white hover:bg-brand-700" data-track="start-pricing">14일 무료 체험 신청<ArrowRight className="size-4" /></Link>
         </div>
-        <p className="mt-3 text-xs text-ink-3">체험 뒤 요금·더 큰 저장 공간·AI 한도는 아래로 문의해 주세요.</p>
+        <LandingWorkPrice />
+        <p className="mt-3 text-xs text-ink-3">영업·마케팅은 상담 후 견적입니다. 더 큰 저장 공간·AI 한도도 아래로 문의해 주세요.</p>
       </section>
       {/* 앱 다운로드 */}
       <section id="app" className="bg-slate-50 py-12">

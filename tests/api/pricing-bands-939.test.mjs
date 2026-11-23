@@ -111,7 +111,10 @@ describe('구간 정액 요금(#939 ①②)', () => {
     await ctx.owner.ok('PUT', '/api/platform/plans/w_work', { name: '업무', monthlyKrw: 19900, perUserKrw: null, public: true, limits: { ...plan.limits } });
     u = await usage(); assert.equal(u.subscription.monthlyKrw, 39900);
     assert.equal((await cust.req('PUT', '/api/platform/plans/w_work', { name: 'x', monthlyKrw: 1, limits: { users: null, storageGb: null, aiRequests: null } })).status, 404);
-    // 예전 스탠다드(1인 4,500 · 최소 3인)를 쓰는 회사: 고객 요금표엔 없지만 다음 결제 견적은 됨(갱신 결제가 끊기지 않게)
+    // 상용화 B1(DB 280): 켜 둔 요금제는 지금 요금표(업무·업무 + 영업)와 시스템(체험·운영사)만 — 예전 요금제는 새로 붙이지 못함
+    assert.deepEqual((await sql`select code from plans where active order by code`).map((x) => x.code), ['internal', 'trial', 'w_sales', 'w_work']);
+    assert.equal((await ctx.owner.req('POST', '/api/platform/tenants', { company: '예전요금', ownerName: '김', ownerEmail: 'old-plan@cust.test', planCode: 'w_standard' })).status, 400, '정리한 요금제로 새 회사 못 만듦');
+    // 예전 스탠다드(1인 4,500 · 최소 3인, 정리됨)를 쓰는 회사: 고객 요금표엔 없지만 다음 결제 견적은 됨(갱신 결제가 끊기지 않게)
     await ctx.owner.ok('PUT', `/api/platform/tenants/${tid}`, { planCode: 'w_standard', status: 'active' });
     await sql`update tenant_subscriptions set billing_cycle = 'monthly', next_billing_on = current_date + 10 where tenant = ${tid}`;
     const d = await ctx.owner.ok('GET', `/api/platform/tenants/${tid}/detail`);
