@@ -118,7 +118,7 @@ async function searchAll(ops: readonly (readonly [string, string])[], words: str
   const items: Record<string, unknown>[] = []; const errors: string[] = []; const denied = new Set<string>(); const seen = new Set<string>(); const started = ctx.now(); const left = () => ctx.deadlineMs - (ctx.now() - started); const stats: DataGoStats = { calls: 0, codes: {}, total: 0, raw: 0 };
   // #1123 보완(로컬 11/23): seed = 지난 실행에서 못 받은 쪽만(같은 조회 기간 extra 로) — 그 쪽부터 이어 받기
   const tasks: PageTask[] = seed ? seed.map((x) => [...x] as PageTask) : []; if (!seed) for (const [op, cat] of ops) for (const w of words) tasks.push([op, cat, w, 1]);
-  const pages = { missed: 0, capped: 0 }; const rest: PageTask[] = []; // rest = 시간이 모자라 못 받은 쪽·잠깐 실패한 2쪽 이후(다음 실행이 이어 받음)
+  const pages = { missed: 0, capped: 0 }; const rest: PageTask[] = []; // rest = 시간이 모자라 못 받은 쪽·쪽 상한을 넘은 쪽·잠깐 실패한 2쪽 이후(다음 실행이 이어 받음)
   const win = { ...windowParams(days), ...extra };
   let next = 0;
   await Promise.all(Array.from({ length: 4 }, async () => { while (next < tasks.length) { const task = tasks[next++]; const [op, cat, w, page] = task; if (denied.has(op)) continue; if (left() < 6000) { pages.missed++; rest.push(task); continue; }
@@ -126,7 +126,7 @@ async function searchAll(ops: readonly (readonly [string, string])[], words: str
     const out: { total?: number; noTotal?: boolean } = { noTotal: page > 1 };
     try {
       for (const it of await callDataGo(u, ctx.fetchImpl, key, Math.min(12000, left() - 2000), stats, undefined, out)) { const p = map(it, cat); if (!p) continue; const k = `${p.source_type}|${p.source_external_id}`; if (seen.has(k)) continue; seen.add(k); items.push(p); }
-      if (page === 1 && (out.total ?? 0) > 100) { const all = Math.ceil(out.total! / 100); const upto = Math.min(all, maxPages); for (let pg = 2; pg <= upto; pg++) tasks.push([op, cat, w, pg]); pages.capped += all - upto; }
+      if (page === 1 && (out.total ?? 0) > 100) { const all = Math.ceil(out.total! / 100); const upto = Math.min(all, maxPages); for (let pg = 2; pg <= upto; pg++) tasks.push([op, cat, w, pg]); pages.capped += all - upto; for (let pg = upto + 1; pg <= all; pg++) rest.push([op, cat, w, pg]); } // #1123(로컬 11/23 14일 다시 받기 '못 받은 쪽 8'·이어 받기 없음): 상한(maxPages)을 넘은 쪽도 기억해 다음 실행이 이어 받음
     }
     catch (e) { const m = e instanceof Error ? e.message : String(e); stats.failed = (stats.failed ?? 0) + 1; if (page > 1 && !/활용신청 필요|주소 확인 필요/.test(m)) rest.push(task); if (/활용신청 필요|주소 확인 필요/.test(m)) { denied.add(op); errors.push(`${cat}(${op.split('/').slice(-1)[0]}): ${m}`); /* 서비스 단위 오류 — 같은 op 의 남은 검색어는 건너뜀 */ } else if (errors.length < 12) errors.push(`${cat} '${w}'${page > 1 ? ` ${page}쪽` : ''}: ${m}`); } } }));
   if (stats.htmlHead) errors.push(`웹페이지(HTML) 응답 ${stats.html}회 — 앞 500자: ${stats.htmlHead}`);
