@@ -5,7 +5,7 @@ import { Field, cx, inputCls, toast } from '@/components/ui';
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', video: '생성 영상', shorts: '쇼츠', story: '스토리', photo: '사진 게시물' };
 type Plan = { label: string; price: number | null; weekly: Record<string, number>; monthlyCredits: number; videoMonthly: number; regenMonthly: number };
 type Data = { planCode: string | null; overrides: { monthlyCredits: number | null; weeklyCredits: number | null; videoMonthly: number | null; regenMonthly: number | null };
-  plans: Record<string, Plan>; used: { monthCredits: number; monthVideos: number; monthRegens: number }; canEdit: boolean };
+  plans: Record<string, Plan>; used: { monthCredits: number; monthVideos: number; monthRegens: number }; canEdit: boolean; canEditPlan?: boolean };
 
 /**
  * 대표 10/27 ⑤ '요금제는 한곳에 모아 달라 — 자동 제작실은 제작하는 곳으로만': 마케팅 제작 요금제(월 제작 크레딧·주간 제작 수)를 사용량·요금제 화면에서 고르고 고친다.
@@ -33,7 +33,7 @@ export function MktPlanSection() {
         const limit = cur && data.overrides.monthlyCredits !== null ? data.overrides.monthlyCredits : p.monthlyCredits;
         const left = Math.round((limit - used) * 10) / 10; const lp = limit > 0 ? Math.round((left / limit) * 100) : left < 0 ? -100 : 0;
         return (
-          <button key={k} type="button" disabled={!data.canEdit} onClick={() => pick(k, p)} aria-pressed={cur} data-testid={`auto-plan-${k}`}
+          <button key={k} type="button" disabled={!(data.canEditPlan ?? data.canEdit)} onClick={() => pick(k, p)} aria-pressed={cur} data-testid={`auto-plan-${k}`}
             className={cx('rounded-input border p-3 text-left text-xs disabled:cursor-default', cur ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line hover:bg-slate-50')}>
             <div className="text-sm font-semibold">{p.label}{cur && <span className="ml-1.5 rounded-full bg-brand-600 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-white">지금 요금제</span>}
               <span className="ml-1 font-normal text-ink-3">· 가격 {p.price ? `${Number(p.price).toLocaleString('ko-KR')}원/월` : '결정 전'}</span></div>
@@ -42,7 +42,8 @@ export function MktPlanSection() {
             <div className={cx('mt-1 font-semibold tabular-nums', left < 0 ? 'text-red-700' : 'text-emerald-700')} data-testid={`auto-plan-left-${k}`}>이번 달 {lp < 0 ? `${-lp}% 초과` : `${lp}% 남음`}</div>
           </button>);
       })}</div>
-      {data.canEdit && <div className="mt-3 grid gap-2 sm:grid-cols-4">
+      {data.canEdit && data.canEditPlan === false && <p className="mt-2 text-xs text-ink-3" data-testid="auto-plan-operator">요금제·크레딧·AI 한도는 상담 후 운영자가 정합니다. 바꾸려면 [상담 신청]을 보내 주세요.</p>}
+      {(data.canEditPlan ?? data.canEdit) && <div className="mt-3 grid gap-2 sm:grid-cols-4">
         <Field label="월 크레딧(비우면 요금제)"><input className={inputCls} type="number" defaultValue={data.overrides.monthlyCredits ?? ''} onBlur={(e) => save({ monthlyCredits: num(e.target.value) })} data-testid="mkt-plan-monthly" /></Field>
         <Field label="주 크레딧(비우면 월÷4.3)"><input className={inputCls} type="number" defaultValue={data.overrides.weeklyCredits ?? ''} onBlur={(e) => save({ weeklyCredits: num(e.target.value) })} /></Field>
         <Field label="월 생성 영상"><input className={inputCls} type="number" defaultValue={data.overrides.videoMonthly ?? ''} onBlur={(e) => save({ videoMonthly: num(e.target.value) })} /></Field>

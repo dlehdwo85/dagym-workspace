@@ -79,3 +79,13 @@ test('#1139 2부 [설계 파트너로 지정]: 운영자만 · 우리 회사·�
   const [au] = await sql`select detail from audit_logs where action = 'platform.partner_set' order by id desc limit 1`;
   assert.equal(au.detail.days, 30);
 });
+
+test('상용화 A1: 고객 회사 관리자는 마케팅 요금제·크레딧·AI 한도를 바꾸지 못함(다른 설정은 됨) · 화면은 보기만', async () => {
+  await sql`update tenants set is_test = false, spaces = array['work', 'marketing'] where id = ${T.tenant}`;
+  const r = await T.c.req('PUT', '/api/marketing/auto', { monthlyCredits: 999 });
+  assert.equal(r.status, 403); assert.match(JSON.stringify(r.body), /운영자/);
+  assert.equal((await T.c.req('PUT', '/api/marketing/auto', { videoMonthly: 50 })).status, 403);
+  await T.c.ok('PUT', '/api/marketing/auto', { quietStart: 22 });
+  const v = await T.c.ok('GET', '/api/marketing/plan');
+  assert.deepEqual([v.canEdit, v.canEditPlan], [true, false], '요금제 화면은 보기만');
+});

@@ -1344,7 +1344,9 @@ export async function mktPlanView(u: SessionUser) {
   const full = seesInternals(u); const rate = (await import('./ai/provider')).usdKrw();
   return { planCode: s.plan_code, overrides: { monthlyCredits: s.monthly_credits, weeklyCredits: s.weekly_credits, videoMonthly: s.video_monthly, regenMonthly: s.regen_monthly },
     plans: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, full ? p : { ...p, aiMonthlyUsd: null, aiMonthlyKrw: p.aiMonthlyUsd === null ? null : Math.round(p.aiMonthlyUsd * rate), writeTier: null }])),
-    used: { monthCredits: use.monthCredits, monthVideos: use.monthVideos, monthRegens: use.monthRegens }, canEdit: isAdmin(u) };
+    used: { monthCredits: use.monthCredits, monthVideos: use.monthVideos, monthRegens: use.monthRegens }, canEdit: isAdmin(u),
+    // #1139 상용화 A1(대표 11/24): 마케팅 요금제·크레딧·AI 한도는 상담 후 플랫폼 운영자가 정함 — 고객 회사 관리자는 보기만(우리 회사·심사용·시험 회사는 예전처럼)
+    canEditPlan: isAdmin(u) && (!!u.platformAdmin || await (await import('./spaceConsult')).consultFree(tenantOf(u))) };
 }
 function adminOnly(u: SessionUser) { if (!isAdmin(u)) throw forbidden('자동 제작 설정은 관리자가 합니다'); }
 
@@ -1361,6 +1363,12 @@ export const settingsInput = z.object({ planCode: z.enum(['basic', 'standard', '
 export async function saveSettings(u: SessionUser, i: z.infer<typeof settingsInput>) {
   await assertSpace(u, 'marketing'); adminOnly(u);
   const cur = await settingsOf(tenantOf(u));
+  // #1139 상용화 A1: 요금제·크레딧·영상·재생성·AI 월 한도는 상담 후 운영자가 — 고객 회사 관리자가 바꾸려 하면 막음(다른 설정은 그대로 저장)
+  const planKeys = ['planCode', 'monthlyCredits', 'weeklyCredits', 'videoMonthly', 'regenMonthly', 'aiMonthlyUsd'] as const;
+  if (planKeys.some((k) => i[k] !== undefined) && !u.platformAdmin && !(await (await import('./spaceConsult')).consultFree(tenantOf(u)))) {
+    const { HttpError } = await import('./errors');
+    throw new HttpError(403, 'plan_by_operator', '마케팅 요금제·크레딧·AI 한도는 상담 후 운영자가 정합니다 — 바꾸려면 상담을 신청해 주세요');
+  }
   const v = { plan_code: i.planCode !== undefined ? i.planCode : cur.plan_code, monthly_credits: i.monthlyCredits !== undefined ? i.monthlyCredits : cur.monthly_credits, weekly_credits: i.weeklyCredits !== undefined ? i.weeklyCredits : cur.weekly_credits,
     video_monthly: i.videoMonthly !== undefined ? i.videoMonthly : cur.video_monthly, regen_monthly: i.regenMonthly !== undefined ? i.regenMonthly : cur.regen_monthly, approval_hour: i.approvalHour ?? cur.approval_hour,
     lead_days: i.leadDays ?? cur.lead_days, lead_hour: i.leadHour ?? cur.lead_hour, remind_hours: i.remindHours ?? cur.remind_hours, quiet_start: i.quietStart ?? cur.quiet_start, quiet_end: i.quietEnd ?? cur.quiet_end,
