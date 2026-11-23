@@ -194,7 +194,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             ))}
           </ul>
         </div>
-        {!internal && <TenantOps consults={d.data.consults} id={id} t={t} ownerInvite={d.data.ownerInvite} run={run} />}
+        {!internal && <TenantOps consults={d.data.consults} spaceBilling={d.data.spaceBilling} id={id} t={t} ownerInvite={d.data.ownerInvite} run={run} />}
         {!internal && <CrmBox key={`${t.lifecycle ?? ''}:${t.contact_phone ?? ''}:${d.data.billing?.discount_pct ?? 0}`} id={id} t={t} stage={d.data.stage} contacts={d.data.contacts ?? []} billing={d.data.billing} run={run} />}
         {!internal && (
           <div className="flex flex-wrap items-center gap-2 rounded-input border border-line p-3">
@@ -245,7 +245,9 @@ function PartnerBox({ id, p, aiKrw, run }: { id: string; p: PartnerInfo; aiKrw: 
 }
 
 /** 대표 10/20 ① 고객사 상세 — 대표 초대 상태·공간·메모·감사 기록 (대신 보기 없음) */
-function TenantOps({ id, t, ownerInvite, consults, run }: { id: string; t: any; ownerInvite: { pending: boolean; expiresAt?: string | null; expired?: boolean }; consults?: any[]; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+type SpaceBilling = { grants: Record<string, string>; mktPlanCode: string | null; mktBilled: { code: string; label: string; krw: number } | null; mktPlans: { code: string; label: string; price: number | null }[] };
+const GRANT_LABEL: Record<string, string> = { plan: '결제로 열림', operator: '운영자가 엶' };
+function TenantOps({ id, t, ownerInvite, consults, spaceBilling, run }: { id: string; t: any; ownerInvite: { pending: boolean; expiresAt?: string | null; expired?: boolean }; consults?: any[]; spaceBilling?: SpaceBilling; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
   const [memo, setMemo] = useState<string>(t.platform_memo ?? '');
   const [showAudit, setShowAudit] = useState(false);
   const audit = useApi<{ logs: any[] }>(showAudit ? `/api/platform/tenants/${id}/audit` : null, [showAudit]);
@@ -262,8 +264,21 @@ function TenantOps({ id, t, ownerInvite, consults, run }: { id: string; t: any; 
       <div className="flex flex-wrap items-center gap-3 text-xs" data-testid="company-spaces">
         <span className="text-ink-2">공간: 업무(항상)</span>
         {(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={spaces.includes(sp)} data-testid={`company-space-${sp}`}
-          onChange={(e) => run(() => api(`/api/platform/tenants/${id}/spaces`, { method: 'PUT', body: { spaces: e.target.checked ? [...spaces, sp] : spaces.filter((x) => x !== sp) } }), `${SPACE_LABEL[sp]} 공간을 ${e.target.checked ? '켰' : '껐'}습니다`)} />{SPACE_LABEL[sp]}</label>)}
+          onChange={(e) => run(() => api(`/api/platform/tenants/${id}/spaces`, { method: 'PUT', body: { spaces: e.target.checked ? [...spaces, sp] : spaces.filter((x) => x !== sp) } }), `${SPACE_LABEL[sp]} 공간을 ${e.target.checked ? '켰' : '껐'}습니다`)} />{SPACE_LABEL[sp]}
+          {spaces.includes(sp) && spaceBilling?.grants?.[sp] && <span className="text-ink-3" data-testid={`company-space-grant-${sp}`}>({GRANT_LABEL[spaceBilling.grants[sp]] ?? spaceBilling.grants[sp]})</span>}</label>)}
       </div>
+      {spaceBilling && ( // 상용화 A4: 업무 + 영업 결제는 영업을 자동으로 엶(해지·30일 미납이면 잠금, 자료는 그대로) · 마케팅은 상담 뒤 여기서 요금제를 정하면 결제 금액에 합침
+        <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="company-mkt-billing">
+          <span className="text-ink-2">마케팅 요금제(결제에 합침)</span>
+          <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} aria-label="마케팅 요금제(결제에 합침)" data-testid="company-mkt-plan"
+            value={spaceBilling.grants?.marketing === 'plan' ? spaceBilling.mktPlanCode ?? '' : ''}
+            onChange={(e) => run(() => api(`/api/platform/tenants/${id}/mkt-billing`, { method: 'PUT', body: { planCode: e.target.value || null } }), e.target.value ? '마케팅 요금제를 정했습니다 — 다음 결제부터 합쳐 청구합니다' : '마케팅을 결제에서 뺐습니다(공간은 그대로)')}>
+            <option value="">결제에 넣지 않음</option>
+            {spaceBilling.mktPlans.filter((p) => p.price).map((p) => <option key={p.code} value={p.code}>{p.label} · 월 {Number(p.price).toLocaleString('ko-KR')}원(부가세 별도)</option>)}
+          </select>
+          {spaceBilling.mktBilled && <span className="text-ink-3" data-testid="company-mkt-billed">다음 결제부터 {spaceBilling.mktBilled.label} 월 {spaceBilling.mktBilled.krw.toLocaleString('ko-KR')}원을 합칩니다</span>}
+        </div>
+      )}
       {(consults ?? []).length > 0 && ( // #1139 영업·마케팅 상담 신청 — 상담 뒤 위 체크로 열면 '열림'으로 바뀌고 회사 관리자에게 알림
         <ul className="space-y-1 rounded-input bg-slate-50 p-2 text-xs" data-testid="company-consults">
           {(consults ?? []).map((c: any) => (

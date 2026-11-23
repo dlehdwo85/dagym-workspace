@@ -118,7 +118,12 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   // #1139 영업·마케팅 상담 신청 내역(최근 20건)
   const consults = await sql`select c.id, c.spaces, c.name, c.phone, c.email, c.memo, c.status, c.created_at, c.handled_at, h.name as handled_by_name
     from space_consults c left join users h on h.id = c.handled_by where c.tenant = ${tenant} order by c.created_at desc limit 20`;
-  return { consults, ownerInvite, captureEvents30d, partner, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
+  // 상용화 A4: 공간을 연 이유(결제 'plan' · 운영자 'operator')와 결제에 합치는 마케팅 요금제
+  const SC = await import('./spaceConsult');
+  const mktPlans = Object.values(await (await import('./mktAuto')).planTable()).map((x) => ({ code: x.code, label: x.label, price: x.price }));
+  const [ms] = await sql<{ plan_code: string | null }[]>`select plan_code from mkt_settings where tenant = ${tenant}`;
+  const spaceBilling = { grants: t.space_grants ?? {}, mktPlanCode: ms?.plan_code ?? null, mktBilled: await SC.billedMarketing(sql, tenant), mktPlans };
+  return { spaceBilling, consults, ownerInvite, captureEvents30d, partner, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
     mktWrite: await (await import('./mktPlans')).tenantWriteView(tenant).catch(() => null) }; // 대표 10/24 추가 ① 마케팅 글 모델
 }
 
@@ -289,6 +294,8 @@ export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof n
     await tx`update users set status = 'invited', updated_at = now() where id = ${userId}`; // 초대를 받으면 active
     await tx`update tenants set spaces = ${['work', ...new Set(i.spaces)]}, platform_memo = ${i.memo?.trim() || null},
       contact_name = ${i.contactName?.trim() || null}, contact_phone = ${i.contactPhone?.trim() || null}, contact_title = ${i.contactTitle?.trim() || null}, segment = ${i.segment ?? null}, source = ${i.source?.trim() || null} where id = ${tenant}`; // #656
+    // 상용화 A4: 운영자가 만들며 켠 영업·마케팅은 '운영자가 연 공간'(결제와 무관)
+    await tx`update tenants set space_grants = coalesce((select jsonb_object_agg(x, 'operator') from unnest(spaces) x where x in ('sales', 'marketing')), '{}'::jsonb) where id = ${tenant}`;
     if (plan) await tx`update tenant_subscriptions set plan_code = ${plan}, status = 'active', trial_ends_at = null, period_end = null where tenant = ${tenant}`;
     else if (i.trialDays) await tx`update tenant_subscriptions set trial_ends_at = now() + ${i.trialDays} * interval '1 day', period_end = (now() + ${i.trialDays} * interval '1 day')::date where tenant = ${tenant}`;
     if (i.segment === 'partner') await (await import('./plans')).applyPartnerPreset(tenant, tx); // #667 AI 월 5,000원·마케팅 크레딧 0

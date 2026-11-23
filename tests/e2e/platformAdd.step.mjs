@@ -35,6 +35,14 @@ export async function platformAdd({ owner, BASE, SHOTS, sql }) {
   assert.equal(await d.getByTestId('company-space-marketing').isChecked(), true);
   assert.equal(await d.getByTestId('company-space-sales').isChecked(), false);
   assert.equal(await d.getByTestId('company-memo').inputValue(), 'E2E 메모');
+  // 상용화 A4: 만들며 켠 마케팅 = '운영자가 엶' · 마케팅 요금제를 정하면 결제에 합침(다음 결제부터) → 다시 빼기
+  await d.getByTestId('company-space-grant-marketing').filter({ hasText: '운영자가 엶' }).waitFor();
+  await d.getByTestId('company-mkt-plan').selectOption('basic');
+  await d.getByTestId('company-mkt-billed').waitFor();
+  await d.getByTestId('company-space-grant-marketing').filter({ hasText: '결제로 열림' }).waitFor();
+  await owner.screenshot({ path: `${SHOTS}/153b-platform-company-mkt-billing.png` });
+  await d.getByTestId('company-mkt-plan').selectOption('');
+  await d.getByTestId('company-mkt-billed').waitFor({ state: 'detached' });
   await d.getByTestId('company-audit-toggle').click();
   await d.getByTestId('company-audit').getByText('platform.tenant_create').waitFor();
   await owner.screenshot({ path: `${SHOTS}/153-platform-company-ops.png` });

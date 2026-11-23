@@ -54,8 +54,13 @@ export async function quote(tenant: string, planCode: string, cycle: 'monthly' |
   // #656 회사별 할인(플랫폼 운영자가 건 것, 기한 안) — 공급가에 적용. 다음 결제부터 반영
   const [ds] = await sql<{ discount_pct: number; discount_until: string | null }[]>`select discount_pct, to_char(discount_until, 'YYYY-MM-DD') as discount_until from tenant_subscriptions where tenant = ${tenant}`;
   const discountPct = ds && Number(ds.discount_pct) > 0 && (!ds.discount_until || ds.discount_until >= today()) ? Number(ds.discount_pct) : 0;
+  // 상용화 A4(대표 위임 11/24): 운영자가 상담 뒤 정한 마케팅 요금제(space_grants.marketing = 'plan')는 같은 결제에 합침 — 월 금액, 연간은 × 12
+  const mk = await (await import('../spaceConsult')).billedMarketing(sql, tenant);
+  const mkSupply = mk ? mk.krw * (cycle === 'annual' ? 12 : 1) : 0;
+  list += mkSupply;
   const supply = Math.round(list * (1 - discountPct / 100));
-  return { plan: p, seats, unit, supply, listSupply: list, discountPct, amount: Math.round(supply * VAT), cycle, goodsName: `Workin ${p.code} ${cycle}`, band: band?.label ?? null };
+  return { plan: p, seats, unit, supply, listSupply: list, discountPct, amount: Math.round(supply * VAT), cycle, goodsName: `Workin ${p.code}${mk ? '+mkt_' + mk.code : ''} ${cycle}`, band: band?.label ?? null,
+    marketing: mk ? { code: mk.code, label: mk.label, supply: mkSupply } : null };
 }
 
 export async function billingOverview(u: SessionUser) {
@@ -72,7 +77,7 @@ export async function billingOverview(u: SessionUser) {
     sql`select plan_code, amount_krw, cycle, created_at from billing_consents where tenant = ${t} order by created_at desc limit 1`, // V34-B 마지막 정기결제 동의
   ]);
   const quotes = [];
-  for (const p of plans) for (const cy of ['monthly', 'annual'] as const) { const q = await quote(t, p.code, cy, sql); quotes.push({ planCode: p.code, name: q.plan.name, cycle: cy, seats: q.seats, band: q.band, supply: q.supply, amount: q.amount }); }
+  for (const p of plans) for (const cy of ['monthly', 'annual'] as const) { const q = await quote(t, p.code, cy, sql); quotes.push({ planCode: p.code, name: q.plan.name, cycle: cy, seats: q.seats, band: q.band, supply: q.supply, amount: q.amount, marketing: q.marketing?.label ?? null }); }
   return { enabled: !!npConf(), mode: npConf()?.mode ?? null, card: card ?? null, sub: sub ?? null, payments, quotes, autoRenewConsent: consent ?? null, addons: addons.map((a: any) => ({ ...a, amount: Math.round(a.monthly_krw * VAT) })),
     easyPays: easyPaysOn().map((k) => ({ key: k, label: EASY_PAYS[k].label })) /* 200차 #706 켠 간편결제만 */ };
 }
@@ -116,6 +121,7 @@ async function activate(sql: Sql, tenant: string, planCode: string, cycle: 'mont
   const P = await import('../plans');
   P.clearReadOnlyCache(tenant); // B2: 결제되면 읽기 전용·이용 중지 즉시 복구
   await P.liftPartnerIfPaid(tenant, planCode, sql); // #667 설계 파트너가 결제하면 파트너 기본값(AI 월 5,000원·마케팅 크레딧 0)을 걷고 요금제 한도로
+  await (await import('../spaceConsult')).syncPaidSpaces(sql, tenant); // 상용화 A4: 업무 + 영업 결제 = 영업 열림
 }
 
 const PM_LABEL: Record<string, string> = { CARD: '카드', BANK: '계좌이체', VBANK: '가상계좌' };
@@ -240,6 +246,7 @@ async function revertPlan(sql: Sql, p: any) {
       next_billing_on = ${prev.next_billing_on}, period_start = ${prev.period_start}, period_end = ${prev.period_end}, trial_ends_at = ${prev.trial_ends_at}, updated_at = now() where tenant = ${p.tenant}`;
   }
   (await import('../plans')).clearReadOnlyCache(p.tenant);
+  await (await import('../spaceConsult')).syncPaidSpaces(sql, p.tenant).catch(() => null); // 상용화 A4: 결제 취소로 업무 + 영업이 풀리면 영업도 잠금
   return true;
 }
 
@@ -343,6 +350,7 @@ export async function billingJob() {
     if (s.cancel_at_period_end) {
       await sql`update tenant_subscriptions set status = 'expired', billing_cycle = null, updated_at = now() where tenant = ${s.tenant}`;
       (await import('../plans')).clearReadOnlyCache(s.tenant); ended++;
+      await (await import('../spaceConsult')).syncPaidSpaces(sql, s.tenant).catch(() => null); // 상용화 A4: 해지 = 결제로 연 영업 잠금(자료 그대로)
       await tell(s.tenant, s.name, '구독이 해지되어 읽기 전용이 되었습니다', '다시 결제하면 바로 쓸 수 있어요', `bill-end:${s.tenant}:${d}`);
       continue;
     }
@@ -354,6 +362,7 @@ export async function billingJob() {
       await sql`update tenant_subscriptions set next_billing_on = ${addPeriod(s.next_billing_on ? DateTime.fromJSDate(new Date(s.next_billing_on)).setZone(TZ).toISODate()! : d, s.billing_cycle)},
         billing_amount = ${amount}, past_due_since = null, retry_count = 0, next_retry_on = null, billing_lock = null, billing_grace_until = null, updated_at = now() where tenant = ${s.tenant}`;
       (await import('../plans')).clearReadOnlyCache(s.tenant);
+      await (await import('../spaceConsult')).syncPaidSpaces(sql, s.tenant).catch(() => null); // 이용 중지 뒤 결제되면 영업 다시 열림
       charged++;
       continue;
     }
@@ -378,6 +387,7 @@ export async function billingJob() {
     if (!want || want === s.billing_lock || (s.billing_lock === 'suspended' && want === 'read_only')) continue;
     await sql`update tenant_subscriptions set billing_lock = ${want}, updated_at = now() where tenant = ${s.tenant}`;
     (await import('../plans')).clearReadOnlyCache(s.tenant); locked++;
+    await (await import('../spaceConsult')).syncPaidSpaces(sql, s.tenant).catch(() => null); // 30일 미납(이용 중지) = 결제로 연 영업 잠금
     await tell(s.tenant, s.name, want === 'suspended' ? '30일 미납으로 워크인 이용이 중지되었습니다' : '7일 미납으로 보기만 할 수 있습니다',
       want === 'suspended' ? '관리자가 결제하면 바로 다시 쓸 수 있습니다. 데이터는 지우지 않았습니다.' : '보기·내보내기는 됩니다. 결제하면 바로 복구됩니다(30일 미납이면 이용 중지).', `bill-lock:${s.tenant}:${want}:${d}`);
   }
@@ -395,6 +405,7 @@ export async function platformBillingAction(u: SessionUser, tenant: string, i: z
     : await sql`update tenant_subscriptions set billing_lock = null, updated_at = now() where tenant = ${tenant} returning tenant`;
   if (!r.length) throw notFound('없는 회사입니다');
   (await import('../plans')).clearReadOnlyCache(tenant);
+  await (await import('../spaceConsult')).syncPaidSpaces(sql, tenant).catch(() => null);
   await audit(sql, u.id, `platform.billing_${i.action}`, 'tenant', null, { tenant, days: i.days ?? null }, ip);
   return { ok: true };
 }

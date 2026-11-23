@@ -139,7 +139,7 @@ export function BillingSection() {
               <p className="text-xs font-semibold text-ink-2">월 구독 (VAT 포함, 현재 인원 기준)</p>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <select className={cx(inputCls, 'w-auto')} value={plan} onChange={(e) => setPlan(e.target.value)} aria-label="구독할 요금제">
-                  <option value="">요금제 선택</option>{monthly.map((q: any) => <option key={q.planCode} value={q.planCode}>{q.name} · 월 {won(q.amount)} ({q.band ? `${q.band} 구간 · 지금 ${q.seats}명` : `${q.seats}인`})</option>)}
+                  <option value="">요금제 선택</option>{monthly.map((q: any) => <option key={q.planCode} value={q.planCode}>{q.name}{q.marketing ? ` + 마케팅 ${q.marketing}` : ''} · 월 {won(q.amount)} ({q.band ? `${q.band} 구간 · 지금 ${q.seats}명` : `${q.seats}인`})</option>)}
                 </select>
                 <Button size="sm" disabled={!plan || !data.card || !renewOk || busy} onClick={() => subscribe(plan)} data-testid="billing-subscribe">{data.card ? '등록 카드로 결제·자동 결제' : '카드를 먼저 등록하세요'}</Button>
                 <Button size="sm" variant="secondary" disabled={!plan || busy} onClick={() => openWindow({ kind: 'monthly', planCode: plan })} data-testid="billing-window-monthly">결제창으로 1개월</Button>
@@ -147,7 +147,7 @@ export function BillingSection() {
               {plan && (() => { const q = monthly.find((x: any) => x.planCode === plan); return q ? (
                 <label className="mt-2 flex items-start gap-2 rounded-input border border-line bg-slate-50 p-2 text-xs text-ink-2" data-testid="billing-consent">
                   <input type="checkbox" className="mt-0.5" checked={renewOk} onChange={(e) => setRenewOk(e.target.checked)} aria-label="자동 결제 동의" />
-                  <span><b className="text-ink-1">[필수] 정기결제 동의</b> — {q.name} 요금제를 매월 {won(q.amount)}(VAT 포함, 인원이 바뀌면 다음 결제부터 반영)씩 등록한 카드로 자동 결제합니다. 설정에서 언제든 해지를 예약할 수 있고, 해지하면 이미 결제한 기간까지 쓴 뒤 자동 결제가 멈춥니다. 청약철회·환불 기준은 <a href="/terms" target="_blank" className="underline">이용약관 제6조</a>를 따릅니다.</span>
+                  <span><b className="text-ink-1">[필수] 정기결제 동의</b> — {q.name}{q.marketing ? `(마케팅 ${q.marketing} 포함)` : ''} 요금제를 매월 {won(q.amount)}(VAT 포함, 인원이 바뀌면 다음 결제부터 반영)씩 등록한 카드로 자동 결제합니다. 설정에서 언제든 해지를 예약할 수 있고, 해지하면 이미 결제한 기간까지 쓴 뒤 자동 결제가 멈춥니다. 청약철회·환불 기준은 <a href="/terms" target="_blank" className="underline">이용약관 제6조</a>를 따릅니다.</span>
                 </label>) : null; })()}
               {plan && aiSt.data && aiSt.data.state !== 'agreed' && <div className="mt-1.5 rounded-input border border-line bg-slate-50 p-2" data-testid="billing-ai-consent"><AiConsentLine checked={aiOk} onChange={setAiOk} stt={aiSt.data.stt} /></div>}
               {data.autoRenewConsent && <p className="mt-1 text-[11px] text-ink-3" data-testid="billing-consent-log">정기결제 동의 기록: {fmtDateTime(data.autoRenewConsent.created_at)} · {data.autoRenewConsent.plan_code} · {won(data.autoRenewConsent.amount_krw)}/{data.autoRenewConsent.cycle === 'annual' ? '년' : '월'}</p>}

@@ -289,6 +289,7 @@ export async function setSubscription(u: SessionUser, tenant: string, i: z.infer
     on conflict (tenant) do update set plan_code = excluded.plan_code, addons = excluded.addons, period_end = excluded.period_end, status = excluded.status,
       note = excluded.note, updated_by = excluded.updated_by, updated_at = now(), period_start = case when tenant_subscriptions.plan_code <> excluded.plan_code then current_date else tenant_subscriptions.period_start end`;
   if (i.status === 'active') await liftPartnerIfPaid(tenant, i.planCode, sql); // #667
+  await (await import('./spaceConsult')).syncPaidSpaces(sql, tenant).catch(() => null); // 상용화 A4
   await audit(sql, u.id, 'platform.subscription', null, null, { tenant, ...i }, null);
   return { ok: true };
 }
@@ -557,6 +558,7 @@ export async function platformTrial(u: SessionUser, tenant: string, i: z.infer<t
     await liftPartnerIfPaid(tenant, code, sql);
   }
   clearReadOnlyCache(tenant);
+  await (await import('./spaceConsult')).syncPaidSpaces(sql, tenant).catch(() => null); // 상용화 A4: 업무 + 영업으로 전환 = 영업 열림
   await audit(sql, u.id, `platform.trial_${i.action}`, 'tenant', null, { tenant, ...i }, null);
   return { ok: true, trial: await trialInfo(tenant, sql) };
 }

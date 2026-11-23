@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import { db, type Sql } from './db';
 import { isAdmin } from './access';
-import { badRequest, forbidden } from './errors';
+import { badRequest, forbidden, notFound } from './errors';
 import { audit } from './log';
 import { notify } from './notifications';
 import { tenantSpaces, type Space } from './spaces';
@@ -84,10 +84,69 @@ export async function afterPlatformSpaces(sql: Sql, u: SessionUser, tenant: stri
   const opened = LOCKABLE.filter((s) => after.includes(s) && !before.includes(s));
   const closed = LOCKABLE.filter((s) => before.includes(s) && !after.includes(s));
   if (opened.length) await sql`update space_consults set status = 'opened', handled_by = ${u.id}, handled_at = now() where tenant = ${tenant} and status = 'requested' and spaces && ${opened}::text[]`;
+  // A4: 운영자가 연 공간은 'operator'(결제와 무관) · 닫으면 표시도 지움
+  for (const sp of opened) await sql`update tenants set space_grants = case when space_grants ? ${sp} then space_grants else space_grants || jsonb_build_object(${sp}::text, 'operator') end where id = ${tenant}`;
+  for (const sp of closed) await sql`update tenants set space_grants = space_grants - ${sp}::text where id = ${tenant}`;
   if (!opened.length && !closed.length) return;
   const admins = (await sql<{ id: string }[]>`select id from users where tenant = ${tenant} and role in ('owner', 'admin') and status = 'active' and not coalesce(is_demo, false)`).map((x) => x.id);
   for (const [list, on] of [[opened, true], [closed, false]] as const) for (const sp of list) if (admins.length)
     await notify(sql, { userIds: admins, type: 'announcement', title: on ? `${LABEL[sp]} 공간을 열었습니다` : `${LABEL[sp]} 공간을 닫았습니다`,
       body: on ? `이제 ${LABEL[sp]}을(를) 쓸 수 있습니다. 직원 배정은 관리 › 사용자 › 공간에서 합니다.` : `${LABEL[sp]} 공간이 닫혔습니다. 자료는 그대로 남아 있고, 다시 열면 이어서 쓸 수 있습니다.`,
       link: on ? `/s/${sp}` : '/', entityType: 'tenant', entityId: null, actorId: u.id, dedupeKey: `space-toggle:${tenant}:${sp}:${on}:${Date.now()}` } as never).catch(() => {});
+}
+
+/**
+ * #1139 상용화 A4(대표 위임): 업무+영업(w_sales) 결제가 살아 있으면 영업을 열고(space_grants.sales = 'plan'), 해지·만료·30일 미납(이용 중지)이면 다시 잠금 — 자료는 그대로.
+ * 운영자가 상담 후 연 공간('operator')은 결제와 무관하게 그대로. 결제 상태가 바뀌는 곳(결제 성공·정기 결제 정기 실행·요금제 변경)에서 부름
+ */
+export async function syncPaidSpaces(sql: Sql, tenant: string) {
+  if (['default', 'demo'].includes(tenant)) return null;
+  const [t] = await sql<{ spaces: string[] | null; space_grants: Record<string, string> | null; plan_code: string | null; status: string | null; billing_lock: string | null }[]>`
+    select t.spaces, t.space_grants, s.plan_code, s.status, s.billing_lock from tenants t left join tenant_subscriptions s on s.tenant = t.id where t.id = ${tenant}`;
+  if (!t) return null;
+  const spaces = t.spaces ?? []; const grants = { ...(t.space_grants ?? {}) };
+  // 7일 미납(보기만)은 다른 화면처럼 영업도 보기만 — 30일 미납(이용 중지)·해지·만료에서 잠금
+  const entitled = t.plan_code === 'w_sales' && t.status === 'active' && t.billing_lock !== 'suspended';
+  let change: 'opened' | 'locked' | null = null;
+  if (entitled && !spaces.includes('sales')) {
+    await sql`update tenants set spaces = case when 'sales' = any(coalesce(spaces, '{}')) then spaces else array_append(coalesce(spaces, '{}'::text[]), 'sales') end, space_grants = space_grants || '{"sales":"plan"}'::jsonb where id = ${tenant}`;
+    change = 'opened';
+  } else if (!entitled && grants.sales === 'plan') {
+    await sql`update tenants set spaces = array_remove(spaces, 'sales'), space_grants = space_grants - 'sales' where id = ${tenant}`;
+    change = 'locked';
+  }
+  if (!change) return null;
+  await audit(sql, null, change === 'opened' ? 'space.plan_open' : 'space.plan_lock', 'tenant', tenant, { tenant, space: 'sales', plan: t.plan_code, status: t.status, lock: t.billing_lock }).catch(() => {});
+  const admins = (await sql<{ id: string }[]>`select id from users where tenant = ${tenant} and role in ('owner', 'admin') and status = 'active' and not coalesce(is_demo, false)`).map((x) => x.id);
+  if (admins.length) await notify(sql, { userIds: admins, type: 'announcement', title: change === 'opened' ? '영업 공간을 열었습니다' : '영업 공간이 잠겼습니다',
+    body: change === 'opened' ? '업무 + 영업 결제가 확인되어 영업을 쓸 수 있습니다. 직원 배정은 관리 › 사용자 › 공간에서 합니다.' : '업무 + 영업 결제가 끝나(해지·만료·30일 미납) 영업이 잠겼습니다. 자료는 그대로 남아 있고, 다시 결제하면 이어서 쓸 수 있습니다.',
+    link: change === 'opened' ? '/s/sales' : '/admin/usage', entityType: 'tenant', actorId: null, dedupeKey: `space-plan:${tenant}:${change}:${new Date().toISOString().slice(0, 10)}` }).catch(() => {});
+  return change;
+}
+
+/** 결제 금액에 합칠 마케팅 요금제 — 운영자가 회사 상세에서 정한 것만(space_grants.marketing = 'plan') */
+export async function billedMarketing(sql: Sql, tenant: string): Promise<{ code: string; label: string; krw: number } | null> {
+  const [t] = await sql<{ g: string | null; plan: string | null; on: boolean }[]>`select t.space_grants->>'marketing' as g, m.plan_code as plan, 'marketing' = any(coalesce(t.spaces, '{}')) as on
+    from tenants t left join mkt_settings m on m.tenant = t.id where t.id = ${tenant}`;
+  if (!t || t.g !== 'plan' || !t.on || !t.plan) return null;
+  const plans = await (await import('./mktAuto')).planTable();
+  const p = (plans as Record<string, { label: string; price: number | null }>)[t.plan];
+  return p && p.price ? { code: t.plan, label: p.label, krw: p.price } : null;
+}
+
+export const mktBillInput = z.object({ planCode: z.enum(['basic', 'standard', 'pro']).nullable() });
+/** 플랫폼 운영자: 상담 뒤 회사의 마케팅 요금제를 정함 → 결제 금액에 합침(다음 결제부터) · null = 결제에서 뺌(공간은 그대로) */
+export async function setMarketingBilling(u: SessionUser, tenant: string, i: z.infer<typeof mktBillInput>, ip: string | null) {
+  if (!u.platformAdmin || u.support) throw notFound(); // 다른 운영 화면처럼 운영자가 아니면 없는 화면
+  const sql = db();
+  const [t] = await sql<{ id: string }[]>`select id from tenants where id = ${tenant}`;
+  if (!t) throw badRequest('없는 회사입니다');
+  if (i.planCode) {
+    await sql`insert into mkt_settings (tenant, plan_code, updated_by) values (${tenant}, ${i.planCode}, ${u.id}) on conflict (tenant) do update set plan_code = excluded.plan_code, updated_by = excluded.updated_by, updated_at = now()`;
+    await sql`update tenants set spaces = case when 'marketing' = any(coalesce(spaces, '{}')) then spaces else array_append(coalesce(spaces, '{}'::text[]), 'marketing') end, space_grants = space_grants || '{"marketing":"plan"}'::jsonb where id = ${tenant}`;
+  } else {
+    await sql`update tenants set space_grants = case when space_grants->>'marketing' = 'plan' then (space_grants - 'marketing') || '{"marketing":"operator"}'::jsonb else space_grants end where id = ${tenant}`;
+  }
+  await audit(sql, u.id, 'platform.mkt_billing', 'tenant', tenant, { planCode: i.planCode }, ip);
+  return { billed: await billedMarketing(sql, tenant) };
 }
