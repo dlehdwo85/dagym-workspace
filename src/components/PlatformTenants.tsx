@@ -6,6 +6,7 @@ import { Download, Eye, KeyRound, Lock, LockOpen, Plus, Search, ShieldOff, Trash
 import { INDUSTRIES } from '@/lib/industries';
 import { PARTNER } from '@/lib/partner';
 import { api, useApi } from './client';
+import { PaymentDetail } from './Billing';
 import { fmtBytes } from './usage';
 import { Button, Field, Modal, askConfirm, cx, fmtDateTime, inputCls, toast } from './ui';
 const SIZE_LABEL: Record<string, string> = { '1': '혼자', '2-10': '2~10명', '11-30': '11~30명', '31-100': '31~100명', '100+': '100명 넘게' };
@@ -106,6 +107,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const d = useApi<any>(`/api/platform/tenants/${id}/detail`, [id]);
   const [ov, setOv] = useState<{ users: string; storageGb: string; aiRequests: string; tasksTotal: string; aiBudgetKrw: string } | null>(null);
   const [wt, setWt] = useState<string | null>(null); // 대표 10/24 추가 ① 마케팅 글 모델(고른 값, 저장 전)
+  const [payOpen, setPayOpen] = useState<string | null>(null); // #1160 결제 상세·환불 창
   const t = d.data?.tenant;
   const run = async (fn: () => Promise<any>, ok: string) => { try { const r = await fn(); toast.ok(ok); d.reload(); return r; } catch (e: any) { toast.error(e.message); } };
   if (!d.data) return <Modal open onClose={onClose} title="회사 관리" wide><p className="text-sm text-ink-3">불러오는 중…</p></Modal>;
@@ -118,6 +120,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <Modal open onClose={onClose} title={`회사 관리 — ${t.name}`} wide>
       <div className="space-y-4 text-sm" data-testid="company-detail">
+        {payOpen && <PaymentDetail id={payOpen} onClose={() => setPayOpen(null)} onChanged={() => d.reload()} />}
         <p className="text-xs text-ink-2">{t.id} · 대표 {t.owner_email ?? '-'} · 요금제 {d.data.subscription.planCode}({SUB[d.data.subscription.status] ?? d.data.subscription.status}) · {STATUS[t.status] ?? t.status}
           {' '}· 사용 {d.data.usage.users}명 / 저장 {fmtBytes(d.data.usage.storageBytes)} / AI {d.data.usage.aiRequests}회{d.data.usage.tasks !== undefined && ` / 업무 ${d.data.usage.tasks.toLocaleString('ko-KR')}개`}</p>
         {!internal && (
@@ -128,6 +131,14 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             {[7, 14].map((x) => <Button key={x} size="sm" variant="ghost" onClick={() => run(() => api(`/api/platform/tenants/${id}/trial`, { body: { action: 'extend', days: x } }), `체험 ${x}일 연장`)}>체험 +{x}일</Button>)}
             <Button size="sm" variant="ghost" onClick={() => confirm('읽기 전용으로 바꿀까요? (체험 종료와 같음)') && run(() => api(`/api/platform/tenants/${id}/trial`, { body: { action: 'end' } }), '읽기 전용으로 바꿨습니다')}>읽기 전용</Button>
             <Button size="sm" variant="ghost" onClick={() => { const code = prompt('바꿀 요금제 코드 (예: personal · team · business · trial)', d.data.subscription.planCode); if (code) run(() => api(`/api/platform/tenants/${id}`, { method: 'PUT', body: { planCode: code, addons: d.data.subscription.addons ?? {}, status: code === 'trial' ? 'trial' : 'active' } }), '요금제를 바꿨습니다'); }}>요금제 변경</Button>
+          </div>
+        )}
+        {!internal && ( // #1160 고객사 한눈에: 구독 · 결제 수단 · 공간 · 상담 · 담당자(자세한 칸은 아래)
+          <div className="grid gap-2 rounded-input bg-slate-50 p-3 text-xs sm:grid-cols-2" data-testid="company-glance">
+            <p><span className="text-ink-3">구독 </span>{d.data.subscription.planName ?? d.data.subscription.planCode} · {SUB[d.data.subscription.status] ?? d.data.subscription.status}{d.data.billing?.billing_cycle ? ` · ${d.data.billing.billing_cycle === 'annual' ? '연간' : '월'} 자동 결제 · 다음 ${String(d.data.billing.next_billing_on ?? '').slice(0, 10)} ${Number(d.data.billing.billing_amount ?? 0).toLocaleString()}원` : ''}{d.data.billing?.cancel_at_period_end ? ' · 해지 예약' : ''}{d.data.billing?.billing_lock ? ` · ${d.data.billing.billing_lock === 'suspended' ? '이용 중지' : '읽기 전용'}` : ''}</p>
+            <p data-testid="company-card"><span className="text-ink-3">결제 수단 </span>{d.data.card ? `${d.data.card.card_name ?? '카드'} ····${d.data.card.card_last4 ?? ''} · 등록 ${String(d.data.card.created_at).slice(0, 10)}` : '등록 카드 없음'}</p>
+            <p><span className="text-ink-3">공간 </span>업무{(t.spaces ?? []).filter((x: string) => x !== 'work').map((x: string) => ` · ${x === 'sales' ? '영업' : '마케팅'}${d.data.spaceBilling?.grants?.[x] ? `(${d.data.spaceBilling.grants[x] === 'plan' ? '결제로 엶' : '운영자가 엶'})` : ''}`).join('')}</p>
+            <p><span className="text-ink-3">상담 신청 </span>{(d.data.consults ?? []).filter((c: any) => c.status === 'requested').length}건 대기 · <span className="text-ink-3">연락처 </span>{t.contact_name ?? '-'}{t.contact_phone ? ` ${t.contact_phone}` : ''}</p>
           </div>
         )}
         {!internal && d.data.partner && <PartnerBox id={id} p={d.data.partner} aiKrw={o.aiBudgetKrw} run={run} />}
@@ -146,7 +157,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             )}
             {!!d.data.payments?.length && (
               <ul className="mt-2 max-h-32 overflow-y-auto text-xs text-ink-2">
-                {d.data.payments.map((p: any) => <li key={p.id}>{String(p.paid_at ?? p.created_at).slice(0, 16).replace('T', ' ')} · {p.kind} {p.plan_code ?? ''} · {Number(p.amount).toLocaleString()}원{p.settlement && <span className={p.settlement === 'settled' ? 'text-emerald-700' : p.settlement === 'mismatch' ? 'text-red-600' : 'text-ink-3'}> · 정산 {p.settlement === 'settled' ? `완료 ${p.settled_on ?? ''}` : p.settlement === 'mismatch' ? '차이' : `예정 ${p.expected_on ?? ''}`}</span>} · <b className={p.status === 'paid' ? 'text-emerald-700' : p.status === 'failed' ? 'text-red-600' : ''}>{p.status}</b>{p.result_msg && ` · ${p.result_msg}`}</li>)}
+                {d.data.payments.map((p: any) => <li key={p.id}><button type="button" className="w-full text-left hover:underline" onClick={() => setPayOpen(p.id)} data-testid={`company-payment-${p.id}`}>{String(p.paid_at ?? p.created_at).slice(0, 16).replace('T', ' ')} · {p.kind} {p.plan_code ?? ''} · {Number(p.amount).toLocaleString()}원{p.settlement && <span className={p.settlement === 'settled' ? 'text-emerald-700' : p.settlement === 'mismatch' ? 'text-red-600' : 'text-ink-3'}> · 정산 {p.settlement === 'settled' ? `완료 ${p.settled_on ?? ''}` : p.settlement === 'mismatch' ? '차이' : `예정 ${p.expected_on ?? ''}`}</span>} · <b className={p.status === 'paid' ? 'text-emerald-700' : p.status === 'failed' ? 'text-red-600' : ''}>{p.status}</b>{p.result_msg && ` · ${p.result_msg}`}{p.via ? ` · ${({ window: '일반 결제', first: '정기결제 첫 결제', renewal: '정기결제(자동)' } as Record<string, string>)[p.via]}` : ''}{p.canceled_amount ? ` · 환불 ${Number(p.canceled_amount).toLocaleString()}원` : ''}</button></li>)}
               </ul>
             )}
           </div>
@@ -274,7 +285,7 @@ function TenantOps({ id, t, ownerInvite, consults, spaceBilling, run }: { id: st
             value={spaceBilling.grants?.marketing === 'plan' ? spaceBilling.mktPlanCode ?? '' : ''}
             onChange={(e) => run(() => api(`/api/platform/tenants/${id}/mkt-billing`, { method: 'PUT', body: { planCode: e.target.value || null } }), e.target.value ? '마케팅 요금제를 정했습니다 — 다음 결제부터 합쳐 청구합니다' : '마케팅을 결제에서 뺐습니다(공간은 그대로)')}>
             <option value="">결제에 넣지 않음</option>
-            {spaceBilling.mktPlans.filter((p) => p.price).map((p) => <option key={p.code} value={p.code}>{p.label} · 월 {Number(p.price).toLocaleString('ko-KR')}원(부가세 별도)</option>)}
+            {spaceBilling.mktPlans.filter((p) => p.price).map((p) => <option key={p.code} value={p.code}>{p.label} · 월 {Number(p.price).toLocaleString('ko-KR')}원(부가세 포함)</option>)}
           </select>
           {spaceBilling.mktBilled && <span className="text-ink-3" data-testid="company-mkt-billed">다음 결제부터 {spaceBilling.mktBilled.label} 월 {spaceBilling.mktBilled.krw.toLocaleString('ko-KR')}원을 합칩니다</span>}
         </div>

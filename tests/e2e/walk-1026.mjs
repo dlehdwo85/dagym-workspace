@@ -30,7 +30,7 @@ const PAGES = [
   ['AI 비서', '/assistant'], ['도움말', '/help'], ['신고 QR', '/forms'], ['결재', '/approvals'], ['템플릿', '/templates'], ['프로젝트', '/projects'], ['팀', '/teams'], ['업무량', '/workload'],
   ['주간 보고', '/reports'], ['통계', '/insights'], ['자동화', '/automations'], ['견적서', '/quotes'], ['전자계약', '/contracts'], ['설정', '/settings'], ['요금제', '/plan'],
   ['관리·사용자', '/admin/users'], ['관리·회사 정보', '/admin/company'], ['관리·조직', '/admin/org'], ['관리·결재 양식', '/admin/approval-forms'], ['관리·결재 설정', '/admin/approval-settings'],
-  ['관리·출퇴근', '/admin/attendance'], ['관리·휴일', '/admin/holidays'], ['관리·이용 현황', '/admin/usage'], ['관리·감사 기록', '/admin/audit'],
+  ['관리·출퇴근', '/admin/attendance'], ['관리·휴일', '/admin/holidays'], ['관리·이용 현황', '/admin/usage']
 ];
 const SALES_PAGES = [['영업 홈', '/s/sales'], ['영업기회 허브', '/s/sales/hub'], ['영업 진행', '/s/sales/leads'], ['제안·계약', '/s/sales/deals'], ['지원사업', '/s/sales/support'], ['영업 데이터 설정', '/s/sales/sources']];
 const MKT_PAGES = [['마케팅 홈', '/s/marketing'], ['마케팅 캘린더', '/s/marketing/calendar'], ['마케팅 승인함', '/s/marketing/approvals'], ['마케팅 채널 연결', '/s/marketing/connections']];

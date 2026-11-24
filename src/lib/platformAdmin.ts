@@ -96,12 +96,12 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
     P.effectiveLimits(tenant, sql), P.currentUsage(tenant, sql),
     sql`select id, name, email, role, status, last_login_at, (totp_enabled_at is not null) as totp, platform_admin, created_at from users where tenant = ${tenant} and deleted_at is null order by (role = 'owner') desc, name`,
     sql`select s.created_at, s.expires_at, s.ended_at, s.reason, a.name as admin_name from support_sessions s join users a on a.id = s.admin_id where s.tenant = ${tenant} order by s.created_at desc limit 10`,
-    sql`select p.id, p.kind, p.plan_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.paid_at, p.created_at, s.status as settlement, to_char(s.expected_on, 'YYYY-MM-DD') as expected_on, to_char(s.settled_on, 'YYYY-MM-DD') as settled_on
+    sql`select p.id, p.kind, p.plan_code, p.addon_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.paid_at, p.created_at, s.status as settlement, ${sql.unsafe((await import('./billing')).PAY_VIA_SQL)} as via, to_char(s.expected_on, 'YYYY-MM-DD') as expected_on, to_char(s.settled_on, 'YYYY-MM-DD') as settled_on
       from payments p left join payment_settlements s on s.payment_id = p.id where p.tenant = ${tenant} order by p.created_at desc limit 12`, // V32 2 정산 상태 같이
     import('./ai/companyBudget').then((B) => B.companyAiBudget(tenant, sql)), // 대표 10/24 ② 회사 월 AI 예산(원)·내역
   ]);
   // V28 B2: 이번 달 청구 예정(정기 결제 금액, VAT 포함)·미납·AI 원가율 · #656 할인(기한 안이면 다음 결제 견적에 반영)
-  const [b] = await sql<any[]>`select billing_cycle, next_billing_on, billing_amount, past_due_since, billing_lock, billing_grace_until, plan_code, discount_pct, to_char(discount_until, 'YYYY-MM-DD') as discount_until, discount_note from tenant_subscriptions where tenant = ${tenant}`;
+  const [b] = await sql<any[]>`select billing_cycle, next_billing_on, billing_amount, past_due_since, billing_lock, billing_grace_until, plan_code, cancel_at_period_end, discount_pct, to_char(discount_until, 'YYYY-MM-DD') as discount_until, discount_note from tenant_subscriptions where tenant = ${tenant}`;
   const [{ krw }] = await sql<{ krw: number }[]>`select coalesce(sum(cost_krw), 0)::float8 krw from ai_usage where tenant = ${tenant} and created_at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul'`;
   const nextQuote = b?.billing_cycle && b.plan_code ? await (await import('./billing')).quote(tenant, b.plan_code, b.billing_cycle, sql).catch(() => null) : null;
   const charge = nextQuote ? nextQuote.amount : b?.billing_amount ?? 0; // 다음 결제 금액(할인 반영) — 견적이 안 되면 마지막 결제 금액
@@ -123,7 +123,9 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   const mktPlans = Object.values(await (await import('./mktAuto')).planTable()).map((x) => ({ code: x.code, label: x.label, price: x.price }));
   const [ms] = await sql<{ plan_code: string | null }[]>`select plan_code from mkt_settings where tenant = ${tenant}`;
   const spaceBilling = { grants: t.space_grants ?? {}, mktPlanCode: ms?.plan_code ?? null, mktBilled: await SC.billedMarketing(sql, tenant), mktPlans };
-  return { spaceBilling, consults, ownerInvite, captureEvents30d, partner, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
+  // #1158 결제 수단(보기 전용 — 카드 바꾸기·삭제는 회사 관리자 결제 화면에서)
+  const [card] = await sql<{ card_name: string | null; card_last4: string | null; created_at: Date }[]>`select card_name, card_last4, created_at from billing_cards where tenant = ${tenant} and removed_at is null`;
+  return { card: card ?? null, spaceBilling, consults, ownerInvite, captureEvents30d, partner, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
     mktWrite: await (await import('./mktPlans')).tenantWriteView(tenant).catch(() => null) }; // 대표 10/24 추가 ① 마케팅 글 모델
 }
 

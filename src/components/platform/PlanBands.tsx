@@ -21,7 +21,7 @@ export function PlanBands({ plan, onSave }: { plan: { code: string; name: string
       salesPerUserKrw: e.sales.trim() === '' ? null : toNum(e.sales), annualOffPct: toNum(e.annual) } }, () => {});
   return (
     <div className="space-y-1.5 rounded-input border border-line bg-slate-50 p-2 text-xs" data-testid={`plan-bands-edit-${plan.code}`}>
-      <div className="font-medium text-ink-2">{plan.name} 구간 정액 — 활성 인원 기준(구간 안에서는 인원이 늘어도 같은 금액) · AI 예산(원)은 내부 기준, 고객 화면에는 %만</div>
+      <div className="font-medium text-ink-2">{plan.name} 구간 정액 — 활성 인원 기준(구간 안에서는 인원이 늘어도 같은 금액) · {lim.vatIncluded ? '금액은 부가세 포함(= 결제 금액, 연간 월 환산은 천 원 단위 올림)' : '금액은 부가세 별도(결제 때 × 1.1)'} · AI 예산(원)은 내부 기준, 고객 화면에는 %만</div>
       <div className="flex flex-wrap gap-2">
         {e.bands.map((b, i) => (
           <div key={i} className="flex items-center gap-1 rounded border border-line bg-white px-1.5 py-1">

@@ -1872,10 +1872,10 @@ describe('WORKIN_V10 회사별 사용량 · 요금제 (결제 연동 없음)', (
     // 355차 #939 ①②(대표 11/04): 구간 정액 업무·업무+영업만 — 예전 1인 요금제(베이직·스탠다드·프로)·개인·팀·비즈니스·내부·체험·무료는 목록에 없음
     const P = Object.fromEntries(u.plans.map((p) => [p.code, p]));
     assert.deepEqual(u.plans.map((p) => p.code), ['w_work', 'w_sales'], `요금표: ${u.plans.map((p) => p.code).join(',')}`);
-    assert.deepEqual(P.w_work.bandRows.map((b) => b.krw), [19900, 39900, 69000, 169000, 3900]);
-    assert.deepEqual(P.w_sales.bandRows.map((b) => b.krw), [34900, 64900, 109000, 249000, 3900]);
+    assert.deepEqual(P.w_work.bandRows.map((b) => b.krw), [22000, 44000, 76000, 186000, 5000]);
+    assert.deepEqual(P.w_sales.bandRows.map((b) => b.krw), [39000, 72000, 120000, 274000, 5000]);
     assert.doesNotMatch(JSON.stringify(u.plans.map((p) => p.description)), /원분/, '요금제 설명에 AI 원 금액 없음');
-    assert.deepEqual(u.addons.map((a) => a.monthly_krw).sort((a, b) => a - b), [4000, 9900, 29000, 59000], 'AI 크레딧 3종·저장 +50GB');
+    assert.deepEqual(u.addons.map((a) => a.monthly_krw).sort((a, b) => a - b), [5000, 11000, 32000, 65000], 'AI 크레딧 3종·저장 +50GB(#1161 부가세 포함)');
     assert.equal((await ctx.staffA.client.req('GET', '/api/usage')).status, 404, 'V14 7번: 메뉴 권한이 꺼져 있으면 404');
     const pf = await ctx.owner.ok('GET', '/api/platform');
     assert.deepEqual(pf.tenants.map((t) => t.id).sort(), ['default', 'demo']);

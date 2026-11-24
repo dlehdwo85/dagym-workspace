@@ -92,7 +92,9 @@ export async function requirePlatformOps(u: SessionUser, need: 'view' | 'edit' =
  */
 export const AUDIT_COMPANY = 'audit_company';
 export const AUDIT_SIDEBAR = 'audit_sidebar';
-const auditHidden = (u: SessionUser) => !!u.isDemo || tenantOf(u) === 'demo';
+// #1157(대표 11/24 '감사 기록은 고객이 볼 이유가 없다'): 고객 회사에는 감사 기록 화면·메뉴가 없음(기록은 계속 쌓이고, 플랫폼 운영자가 회사 상세에서 봄 · 큰 고객이 보안 감사로 요청하면 운영자가 내보내 줌).
+// 우리 회사(default)는 예전처럼 [운영 상태] 안에서 들어감(다짐 설정 불변 원칙)
+const auditHidden = (u: SessionUser) => !!u.isDemo || tenantOf(u) !== 'default';
 export async function requireCompanyAudit(u: SessionUser, sql: Sql = db()) {
   if (auditHidden(u)) throw notFound();
   return requireMenu(u, 'ops', 'view', sql);

@@ -50,21 +50,20 @@ describe('407차 감사 기록 회사별', () => {
     assert.ok(n > 0);
   });
 
-  test('다른 회사 [감사 기록]: 대표는 자기 회사 기록만(예전 404 → 열림) · 직원은 메뉴 없음 · 다짐 기록·운영자가 한 일은 안 보임', async () => {
-    const { logs } = await T.c.ok('GET', '/api/admin/audit');
+  test('다른 회사 [감사 기록]: #1157(대표 11/24) 고객 회사에는 화면·메뉴 없음(대표도 404) · 기록은 계속 쌓이고 플랫폼 운영자가 회사 상세에서 그 회사 것만 봄', async () => {
+    for (const who of [T.c, mate]) assert.equal((await who.get('/api/admin/audit')).status, 404, '고객 회사(대표·직원) 감사 기록 없음');
+    const page = async (c, path) => { const r = await c.get(path); return { status: r.status, blocked: String(r.body).includes('admin-no-access') }; };
+    assert.deepEqual(await page(T.c, '/admin/audit'), { status: 200, blocked: true });
+    assert.deepEqual(await page(T.c, '/admin/ops'), { status: 200, blocked: true });
+    assert.deepEqual(await page(ctx.owner, '/admin/audit'), { status: 200, blocked: false }, '다짐(기본 회사)은 그대로');
+    assert.deepEqual(await page(mate, '/admin/audit'), { status: 200, blocked: true });
+    // 기록은 그대로 쌓임 → 플랫폼 운영자의 회사 상세(회사별 감사 기록)에서 봄
+    const { logs } = await ctx.owner.ok('GET', `/api/platform/tenants/${T.tenant}/audit`);
     const s = j(logs);
     assert.ok(logs.some((l) => l.action === 'user.invite' && l.actor_name === '박대표'), s.slice(0, 300));
     assert.ok(logs.some((l) => l.action === 'user.accept_invite'), '직원 초대 수락');
     assert.ok(logs.some((l) => l.action === 'auth.login_failed' && l.detail.email === 'ceo@other-audit.test'), '자기 회사 계정의 로그인 실패');
-    assert.ok(!logs.some((l) => ['김대표', '본사관리', '이직원'].includes(l.actor_name)) && !s.includes('dagym.test') && !s.includes('nowhere.test'));
-    assert.ok(!logs.some((l) => String(l.action).startsWith('platform.')), '운영자가 남긴 메모 기록은 고객사 화면에 없음');
-    assert.ok([403, 404].includes((await mate.get('/api/admin/audit')).status), '직원은 권한 없음');
-    // 화면 입구: 다른 회사 대표도 감사 기록 화면이 열림 · 운영 상태(서버 운영)는 예전처럼 권한 없음
-    const page = async (c, path) => { const r = await c.get(path); return { status: r.status, blocked: String(r.body).includes('admin-no-access') }; };
-    assert.deepEqual(await page(T.c, '/admin/audit'), { status: 200, blocked: false });
-    assert.deepEqual(await page(T.c, '/admin/ops'), { status: 200, blocked: true });
-    assert.deepEqual(await page(ctx.owner, '/admin/audit'), { status: 200, blocked: false });
-    assert.deepEqual(await page(mate, '/admin/audit'), { status: 200, blocked: true });
+    assert.ok(!logs.some((l) => ['김대표', '본사관리', '이직원'].includes(l.actor_name) && !String(l.action).startsWith('platform.')) && !s.includes('dagym.test') && !s.includes('nowhere.test'));
   });
 
   test('플랫폼 운영 화면(대표 계정 전용): 모든 회사 감사 기록 — 회사 열·거름 · 본사 관리자·고객사 대표는 404', async () => {
@@ -126,7 +125,7 @@ describe('407차 감사 기록 회사별', () => {
     await sql.unsafe(readFileSync('db/migrations/258_audit_bid_scope.sql', 'utf8'));
     const after = Object.fromEntries((await sql`select id, tenant from audit_logs where id = any(${[one.id, two.id, none.id]}::bigint[])`).map((r) => [r.id, r.tenant]));
     assert.deepEqual([after[one.id], after[two.id], after[none.id]], [T.tenant, null, null]);
-    assert.ok((await T.c.ok('GET', '/api/admin/audit')).logs.some((l) => l.action === 'sales.bid_result' && l.target_id === 'N-ONE'), '그 회사 감사 기록에 보임');
+    assert.ok((await ctx.owner.ok('GET', `/api/platform/tenants/${T.tenant}/audit`)).logs.some((l) => l.action === 'sales.bid_result' && l.target_id === 'N-ONE'), '그 회사 감사 기록에 보임(플랫폼 회사 상세)');
     assert.ok(!(await ctx.owner.ok('GET', '/api/admin/audit')).logs.some((l) => l.action === 'sales.bid_result'), '다짐 화면에는 없음');
   });
 });

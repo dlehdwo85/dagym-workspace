@@ -11,12 +11,14 @@ export type Band = { upTo: number; krw: number; storageGb: number; aiBudgetKrw: 
 export type BandPlan = {
   bands: Band[]; overPerUserKrw: number; overPerUserStorageGb: number; overPerUserAiBudgetKrw: number;
   salesPerUserKrw?: number | null; annualOffPct?: number | null;
+  /** #1161(대표 11/24): 금액이 부가세 포함(천 원 단위) — 결제 금액 = 이 금액, 공급가는 거꾸로 셈. 연간 월 환산도 천 원 단위로 올림 */
+  vatIncluded?: boolean | null;
 };
 export type BandPick = {
   /** '1~5인' · '51인~' */ label: string; from: number; upTo: number | null; people: number; salesPeople: number | null;
   krw: number; annualKrw: number; storageGb: number; aiBudgetKrw: number; over: boolean;
 };
-export const BAND_KEYS = ['bands', 'overPerUserKrw', 'overPerUserStorageGb', 'overPerUserAiBudgetKrw', 'salesPerUserKrw', 'annualOffPct'] as const;
+export const BAND_KEYS = ['bands', 'overPerUserKrw', 'overPerUserStorageGb', 'overPerUserAiBudgetKrw', 'salesPerUserKrw', 'annualOffPct', 'vatIncluded'] as const;
 
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v));
 /** 요금제 limits 가 구간 요금제인지 — 구간 1개 이상, 숫자 칸이 모두 있어야 */
@@ -25,7 +27,9 @@ export function isBanded(lim: unknown): lim is BandPlan {
   return !!l && Array.isArray(l.bands) && l.bands.length > 0 && l.bands.every((b) => b && n(b.upTo) > 0 && n(b.krw) >= 0);
 }
 const sorted = (p: BandPlan) => [...p.bands].map((b) => ({ upTo: n(b.upTo), krw: n(b.krw), storageGb: n(b.storageGb) || 0, aiBudgetKrw: n(b.aiBudgetKrw) || 0 })).sort((a, b) => a.upTo - b.upTo);
-const annualOf = (p: BandPlan, krw: number) => Math.round(krw * 12 * (1 - Math.min(90, Math.max(0, n(p.annualOffPct ?? 20) || 0)) / 100));
+const offOf = (p: BandPlan) => 1 - Math.min(90, Math.max(0, n(p.annualOffPct ?? 20) || 0)) / 100;
+/** 연간 결제 금액(12개월). #1161 부가세 포함 요금제: 월 금액 × (1 − 할인)을 천 원 단위로 올린 월 환산 × 12(예: 22,000 → 17,600 → 18,000 × 12) */
+export const annualOf = (p: BandPlan, krw: number) => (p.vatIncluded ? Math.ceil((krw * offOf(p)) / 1000 - 1e-9) * 1000 * 12 : Math.round(krw * 12 * offOf(p)));
 
 /** 구간 표(요금 안내용): 구간마다 이름·월 금액·연간·저장. AI 원 예산은 내부 값이라 화면용 표에는 비율(첫 구간 = 1배)만 */
 export function bandRows(p: BandPlan) {
@@ -48,7 +52,9 @@ export function pickBand(p: BandPlan, people: number, salesPeople: number | null
   }
   const last = bs.at(-1)!; const sales = p.salesPerUserKrw ? Math.max(0, Math.min(k, salesPeople ?? k)) : 0;
   const krw = n(p.overPerUserKrw) * k + (p.salesPerUserKrw ? n(p.salesPerUserKrw) * sales : 0);
-  return { label: `${last.upTo + 1}인~`, from: last.upTo + 1, upTo: null, people: k, salesPeople: p.salesPerUserKrw ? sales : salesPeople, krw, annualKrw: annualOf(p, krw),
+  // #1161: 부가세 포함 요금제의 연간은 1인 금액마다 천 원 단위로 올린 월 환산 × 인원(요금표의 '1인 4,000원'과 같은 셈)
+  const annualKrw = p.vatIncluded ? annualOf(p, n(p.overPerUserKrw)) * k + (p.salesPerUserKrw ? annualOf(p, n(p.salesPerUserKrw)) * sales : 0) : annualOf(p, krw);
+  return { label: `${last.upTo + 1}인~`, from: last.upTo + 1, upTo: null, people: k, salesPeople: p.salesPerUserKrw ? sales : salesPeople, krw, annualKrw,
     storageGb: n(p.overPerUserStorageGb) * k, aiBudgetKrw: n(p.overPerUserAiBudgetKrw) * k, over: true };
 }
 

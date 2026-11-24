@@ -97,7 +97,7 @@ describe('#656 고객사 관리 확장', () => {
 
   test('할인: 20%·기한 → 다음 결제 견적(quote)에 반영, 기한 지나면 미적용, 0 이면 해제, 기본 회사 불가', async () => {
     const today = seoulToday();
-    const [plan] = await sql`select code, monthly_krw, per_user_krw, min_users from plans where public and active and code not in ('trial', 'free', 'team_free', 'w_free') order by sort limit 1`;
+    const [plan] = await sql`select code, monthly_krw, per_user_krw, min_users, limits from plans where public and active and code not in ('trial', 'free', 'team_free', 'w_free') order by sort limit 1`;
     assert.ok(plan, '결제 가능한 요금제가 있어야 함');
     await ctx.owner.ok('PUT', `/api/platform/tenants/${N.tenant}/discount`, { pct: 20, until: addDays(today, 30), note: '설계 파트너 1개월' });
     // 정기 결제 중인 것처럼 — 상세 '다음 결제' 금액이 견적(할인 반영)으로 나온다
@@ -106,14 +106,15 @@ describe('#656 고객사 관리 확장', () => {
     const [{ n }] = await sql`select count(*)::int n from users where tenant = ${N.tenant} and status = 'active'`;
     const seats = plan.per_user_krw ? Math.max(plan.min_users ?? 1, Number(n)) : 1;
     const list = Math.round((plan.per_user_krw ?? plan.monthly_krw) * seats);
-    assert.equal(d.billing.expectedThisMonth, Math.round(Math.round(list * 0.8) * 1.1), '공급가 20% 할인 × VAT');
+    const incl = !!plan.limits?.vatIncluded; // #1161: 지금 요금표는 부가세 포함 금액 = 결제 금액
+    assert.equal(d.billing.expectedThisMonth, incl ? Math.round(list * 0.8) : Math.round(Math.round(list * 0.8) * 1.1), '20% 할인(부가세 포함 금액에서 · 예전 요금제는 공급가 × VAT)');
     assert.deepEqual([d.billing.discount_pct, d.billing.discount_until, d.billing.discountApplied], [20, addDays(today, 30), 20]);
     const row = (await ctx.owner.ok('GET', '/api/platform/tenants?q=파트너체험단')).tenants.find((x) => x.id === N.tenant);
     assert.deepEqual([row.discount_pct, row.discount_until, row.stage], [20, addDays(today, 30), 'paid']);
     // 기한이 지난 할인은 적용되지 않는다
     await ctx.owner.ok('PUT', `/api/platform/tenants/${N.tenant}/discount`, { pct: 20, until: addDays(today, -1) });
     const d2 = await ctx.owner.ok('GET', `/api/platform/tenants/${N.tenant}/detail`);
-    assert.deepEqual([d2.billing.expectedThisMonth, d2.billing.discountApplied], [Math.round(list * 1.1), 0]);
+    assert.deepEqual([d2.billing.expectedThisMonth, d2.billing.discountApplied], [incl ? list : Math.round(list * 1.1), 0]);
     await ctx.owner.ok('PUT', `/api/platform/tenants/${N.tenant}/discount`, { pct: 0 });
     const [s] = await sql`select discount_pct, discount_until, discount_note from tenant_subscriptions where tenant = ${N.tenant}`;
     assert.deepEqual([s.discount_pct, s.discount_until, s.discount_note], [0, null, null], '0 이면 기한·사유도 지움');

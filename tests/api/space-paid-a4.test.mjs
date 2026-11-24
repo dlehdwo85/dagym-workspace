@@ -86,8 +86,9 @@ test('마케팅 요금제(운영자) → 결제 금액에 합침 · 빼면 공�
   const q1 = b.quotes.find((q) => q.cycle === 'monthly' && q.planCode === q0.planCode);
   const a1 = b.quotes.find((q) => q.cycle === 'annual' && q.planCode === q0.planCode);
   assert.equal(q1.marketing, r.billed.label);
-  assert.equal(q1.supply - q0.supply, r.billed.krw, '월 결제에 마케팅 월 금액을 더함');
-  assert.ok(a1.supply >= r.billed.krw * 12, '연간은 12개월치');
+  assert.equal(q1.amount - q0.amount, r.billed.krw, '월 결제에 마케팅 월 금액(부가세 포함 — #1161)을 더함');
+  assert.equal(r.billed.krw, 32000, '스탠다드 32,000원');
+  assert.ok(a1.amount >= r.billed.krw * 12, '연간은 12개월치');
   const d = await ctx.owner.ok('GET', `/api/platform/tenants/${T.tenant}/detail`);
   assert.equal(d.spaceBilling.mktBilled.code, 'standard');
   assert.ok(d.spaceBilling.mktPlans.length >= 3);

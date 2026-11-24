@@ -305,7 +305,7 @@ export const planInput = z.object({
       .min(1).max(10).refine((b) => b.every((x, i) => !i || x.upTo > b[i - 1].upTo), '구간 인원은 작은 것부터 커져야 합니다').optional(),
     overPerUserKrw: z.number().int().min(0).max(1_000_000).optional(), overPerUserStorageGb: z.number().min(0).max(10_000).optional(),
     overPerUserAiBudgetKrw: z.number().int().min(0).max(1_000_000).optional(), salesPerUserKrw: z.number().int().min(0).max(1_000_000).nullable().optional(),
-    annualOffPct: z.number().int().min(0).max(90).optional() }),
+    annualOffPct: z.number().int().min(0).max(90).optional(), vatIncluded: z.boolean().optional() /* #1161 부가세 포함 금액 */ }),
   perUserKrw: z.number().int().min(0).max(1_000_000).nullable().optional(),
   description: z.string().max(200).nullable().optional(), public: z.boolean().optional(), active: z.boolean().optional(), sort: z.number().int().optional(),
 });
@@ -328,8 +328,9 @@ export async function upsertAddon(u: SessionUser, code: string, i: z.infer<typeo
   requirePlatform(u);
   if (!/^[a-z0-9_-]{2,40}$/.test(code)) throw badRequest('코드는 영문 소문자·숫자 2~40자');
   const sql = db();
-  await sql`insert into plan_addons (code, name, monthly_krw, adds, active) values (${code}, ${i.name}, ${i.monthlyKrw}, ${sql.json(i.adds)}, ${i.active ?? true})
-    on conflict (code) do update set name = excluded.name, monthly_krw = excluded.monthly_krw, adds = excluded.adds, active = excluded.active, updated_at = now()`;
+  // #1161(대표 11/24): 팩 금액은 부가세 포함(= 결제 금액)으로 적는다
+  await sql`insert into plan_addons (code, name, monthly_krw, adds, active, vat_included) values (${code}, ${i.name}, ${i.monthlyKrw}, ${sql.json(i.adds)}, ${i.active ?? true}, true)
+    on conflict (code) do update set name = excluded.name, monthly_krw = excluded.monthly_krw, adds = excluded.adds, active = excluded.active, vat_included = true, updated_at = now()`;
   await audit(sql, u.id, 'platform.addon', null, null, { code, ...i }, null);
   return { ok: true };
 }

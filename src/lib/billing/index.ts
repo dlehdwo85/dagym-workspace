@@ -10,7 +10,8 @@ import { TERMS_VERSION } from '../signup';
 import { EASY_PAYS, approveAuth, approveBilling, cancelPayment, easyPaysOn, npConf, npLiveConf, npTestConf, parseNiceForm, registerBillKey, removeBillKey, windowParams, type NpConf } from './nicepay';
 
 /**
- * 18차 결제(나이스페이). 금액은 VAT 별도 요금 × 1.1 (원 단위 반올림).
+ * 18차 결제(나이스페이). #1161(대표 11/24)부터 지금 요금표·추가 팩·마케팅 요금제는 부가세 포함 금액(천 원 단위) = 결제 금액, 공급가 = 합계 ÷ 1.1.
+ * 예전 요금제(정리한 것)만 VAT 별도 요금 × 1.1 (원 단위 반올림).
  * - 정기(월): 카드 빌키로 매달 자동 승인. 실패하면 1·3·5일 뒤 재시도, 첫 실패 7일 뒤 읽기 전용(expired).
  * - 연간·팩: 결제창(인증결제) 단건. 연간은 1년 뒤 같은 카드로 갱신(카드가 없으면 만료).
  * - 해지: 다음 결제일에 끝(그때 읽기 전용). 데이터는 지우지 않는다.
@@ -18,6 +19,8 @@ import { EASY_PAYS, approveAuth, approveBilling, cancelPayment, easyPaysOn, npCo
 const TZ = 'Asia/Seoul';
 const today = () => DateTime.now().setZone(TZ).toISODate()!;
 const VAT = 1.1;
+/** #1161: 추가 팩 결제 금액 — 부가세 포함으로 정한 팩(vat_included)은 그 금액 그대로, 예전 팩은 × 1.1 */
+const addonAmount = (a: { monthly_krw: number; vat_included?: boolean | null }) => (a.vat_included ? Number(a.monthly_krw) : Math.round(Number(a.monthly_krw) * VAT));
 const conf = () => { const c = npConf(); if (!c) throw new HttpError(503, 'billing_off', '결제가 아직 설정되지 않았습니다(NICEPAY 환경변수)'); return c; };
 /** V32 1: 결제 시험 회사의 결제는 늘 시험 상점으로(운영이 live 여도) */
 const confFor = (p: { meta?: { test?: boolean; liveSmoke?: boolean } | null }) => {
@@ -56,11 +59,14 @@ export async function quote(tenant: string, planCode: string, cycle: 'monthly' |
   const discountPct = ds && Number(ds.discount_pct) > 0 && (!ds.discount_until || ds.discount_until >= today()) ? Number(ds.discount_pct) : 0;
   // 상용화 A4(대표 위임 11/24): 운영자가 상담 뒤 정한 마케팅 요금제(space_grants.marketing = 'plan')는 같은 결제에 합침 — 월 금액, 연간은 × 12
   const mk = await (await import('../spaceConsult')).billedMarketing(sql, tenant);
-  const mkSupply = mk ? mk.krw * (cycle === 'annual' ? 12 : 1) : 0;
-  list += mkSupply;
-  const supply = Math.round(list * (1 - discountPct / 100));
-  return { plan: p, seats, unit, supply, listSupply: list, discountPct, amount: Math.round(supply * VAT), cycle, goodsName: `Workin ${p.code}${mk ? '+mkt_' + mk.code : ''} ${cycle}`, band: band?.label ?? null,
-    marketing: mk ? { code: mk.code, label: mk.label, supply: mkSupply } : null };
+  // #1161(대표 11/24): 마케팅 요금제 금액은 부가세 포함. 지금 요금표(limits.vatIncluded)는 구간 금액도 부가세 포함 → 합계 = 결제 금액, 공급가는 거꾸로 셈
+  const mkKrw = mk ? mk.krw * (cycle === 'annual' ? 12 : 1) : 0;
+  const off = (x: number) => Math.round(x * (1 - discountPct / 100));
+  const incl = !!band && !!p.limits?.vatIncluded;
+  const amount = incl ? off(list + mkKrw) : Math.round(off(list) * VAT) + off(mkKrw); // 예전 요금제(VAT 별도)는 요금제 몫만 × 1.1
+  const supply = Math.round(amount / VAT);
+  return { plan: p, seats, unit, supply, vat: amount - supply, listSupply: incl ? Math.round((list + mkKrw) / VAT) : list + Math.round(mkKrw / VAT), discountPct, amount, vatIncluded: incl, cycle, goodsName: `Workin ${p.code}${mk ? '+mkt_' + mk.code : ''} ${cycle}`, band: band?.label ?? null,
+    marketing: mk ? { code: mk.code, label: mk.label, krw: mkKrw, supply: Math.round(mkKrw / VAT) } : null };
 }
 
 export async function billingOverview(u: SessionUser) {
@@ -71,14 +77,14 @@ export async function billingOverview(u: SessionUser) {
   const [[card], [sub], payments, plans, addons, [consent]] = await Promise.all([
     sql`select card_name, card_last4, created_at from billing_cards where tenant = ${t} and removed_at is null`,
     sql`select plan_code, status, billing_cycle, next_billing_on, billing_amount, cancel_at_period_end, past_due_since, next_retry_on, trial_ends_at, billing_lock, billing_grace_until from tenant_subscriptions where tenant = ${t}`,
-    sql`select id, kind, plan_code, addon_code, amount, status, canceled_amount, result_msg, card_name, card_no, paid_at, created_at, tid, meta->>'payMethod' as pay_method, meta->>'easyPay' as easy_pay, meta->'vbank' as vbank from payments where tenant = ${t} order by created_at desc limit 30`,
+    sql`select id, kind, plan_code, addon_code, amount, status, canceled_amount, result_msg, card_name, card_no, paid_at, created_at, tid, meta->>'payMethod' as pay_method, meta->>'easyPay' as easy_pay, meta->'vbank' as vbank, ${sql.unsafe(PAY_VIA_SQL)} as via from payments p where p.tenant = ${t} order by p.created_at desc limit 30`,
     sql<{ code: string }[]>`select code from plans where public and active and code not in ('trial', 'free', 'team_free', 'w_free') order by sort`,
-    sql`select code, name, monthly_krw from plan_addons where active order by sort`,
+    sql`select code, name, monthly_krw, vat_included from plan_addons where active order by sort`,
     sql`select plan_code, amount_krw, cycle, created_at from billing_consents where tenant = ${t} order by created_at desc limit 1`, // V34-B 마지막 정기결제 동의
   ]);
   const quotes = [];
-  for (const p of plans) for (const cy of ['monthly', 'annual'] as const) { const q = await quote(t, p.code, cy, sql); quotes.push({ planCode: p.code, name: q.plan.name, cycle: cy, seats: q.seats, band: q.band, supply: q.supply, amount: q.amount, marketing: q.marketing?.label ?? null }); }
-  return { enabled: !!npConf(), mode: npConf()?.mode ?? null, card: card ?? null, sub: sub ?? null, payments, quotes, autoRenewConsent: consent ?? null, addons: addons.map((a: any) => ({ ...a, amount: Math.round(a.monthly_krw * VAT) })),
+  for (const p of plans) for (const cy of ['monthly', 'annual'] as const) { const q = await quote(t, p.code, cy, sql); quotes.push({ planCode: p.code, name: q.plan.name, cycle: cy, seats: q.seats, band: q.band, supply: q.supply, vat: q.vat, amount: q.amount, marketing: q.marketing?.label ?? null }); }
+  return { enabled: !!npConf(), mode: npConf()?.mode ?? null, card: card ?? null, sub: sub ?? null, payments, quotes, autoRenewConsent: consent ?? null, addons: addons.map((a: any) => ({ ...a, amount: addonAmount(a) })),
     easyPays: easyPaysOn().map((k) => ({ key: k, label: EASY_PAYS[k].label })) /* 200차 #706 켠 간편결제만 */ };
 }
 
@@ -101,11 +107,26 @@ export async function registerCard(u: SessionUser, i: z.infer<typeof cardInput>,
   return { ok: true, card: { card_name: r.cardName ?? null, card_last4: i.cardNo.slice(-4) } };
 }
 
-async function chargeCard(sql: Sql, c: NpConf, tenant: string, kind: 'subscription' | 'annual', planCode: string, amount: number, goodsName: string, actor: string | null) {
+/**
+ * #1158 등록 카드 삭제(관리자) — 자동 결제가 살아 있으면(해지 예약 전) 막고 해지 예약을 먼저 안내. 나이스페이 빌키도 지움. 감사 기록
+ */
+export async function removeCard(u: SessionUser, ip: string | null) {
+  const t = await requireBillingAdmin(u); const sql = db();
+  const [card] = await sql<{ bid_enc: string; card_last4: string | null }[]>`select bid_enc, card_last4 from billing_cards where tenant = ${t} and removed_at is null`;
+  if (!card) throw badRequest('등록된 카드가 없습니다');
+  const [s] = await sql<{ billing_cycle: string | null; cancel_at_period_end: boolean; status: string }[]>`select billing_cycle, cancel_at_period_end, status from tenant_subscriptions where tenant = ${t}`;
+  if (s?.billing_cycle && s.status === 'active' && !s.cancel_at_period_end) throw new HttpError(409, 'subscription_active', '매월 자동 결제가 이 카드로 진행 중입니다 — 먼저 [구독 해지(다음 결제일에 끝)]를 예약하거나 [카드 변경]으로 바꿔 주세요');
+  await sql`update billing_cards set removed_at = now() where tenant = ${t} and removed_at is null`;
+  const c = npConf(); if (c) removeBillKey(c, decrypt(card.bid_enc), moid('rm')).catch(() => {});
+  await audit(sql, u.id, 'billing.card_removed', 'tenant', null, { tenant: t, last4: card.card_last4 }, ip);
+  return { ok: true };
+}
+
+async function chargeCard(sql: Sql, c: NpConf, tenant: string, kind: 'subscription' | 'annual', planCode: string, amount: number, goodsName: string, actor: string | null, extraMeta: Record<string, unknown> = {}) {
   const [card] = await sql<{ bid_enc: string; card_name: string | null }[]>`select bid_enc, card_name from billing_cards where tenant = ${tenant} and removed_at is null`;
   if (!card) return { ok: false, msg: '등록된 카드가 없습니다', paymentId: null as string | null };
   const m = moid(kind);
-  const [p] = await sql<{ id: string }[]>`insert into payments (tenant, kind, plan_code, moid, amount, created_by, meta) values (${tenant}, ${kind}, ${planCode}, ${m}, ${amount}, ${actor}, ${sql.json({ billing: true })}) returning id`;
+  const [p] = await sql<{ id: string }[]>`insert into payments (tenant, kind, plan_code, moid, amount, created_by, meta) values (${tenant}, ${kind}, ${planCode}, ${m}, ${amount}, ${actor}, ${sql.json({ billing: true, ...extraMeta } as never)}) returning id`;
   const r = await approveBilling(c, { bid: decrypt(card.bid_enc), moid: m, amount, goodsName });
   await sql`update payments set status = ${r.ok ? 'paid' : 'failed'}, tid = ${r.tid ?? null}, result_code = ${r.code ?? null}, result_msg = ${r.msg ?? null},
     card_name = ${r.cardName ?? card.card_name}, card_no = ${r.cardNo ?? null}, auth_code = ${r.authCode ?? null}, paid_at = ${r.ok ? new Date() : null}, updated_at = now() where id = ${p.id}`;
@@ -155,7 +176,9 @@ export async function subscribeMonthly(u: SessionUser, i: z.infer<typeof subscri
   const t = await requireBillingAdmin(u);
   const c = conf(); const sql = db();
   const q = await quote(t, i.planCode, 'monthly', sql);
-  const r = await chargeCard(sql, c, t, 'subscription', i.planCode, q.amount, q.goodsName, u.id);
+  // #1160(로컬 11/24 D-16 reverted:false): 카드 정기결제 첫 결제도 결제 전 구독 상태를 남겨 환불 때 '요금제 되돌리기'가 되게 · #1159 첫 결제 표시
+  const [prev] = await sql`select plan_code, status, billing_cycle, billing_amount, next_billing_on::text, period_start::text, period_end::text, trial_ends_at, addons from tenant_subscriptions where tenant = ${t}`;
+  const r = await chargeCard(sql, c, t, 'subscription', i.planCode, q.amount, q.goodsName, u.id, { first: true, prev: prev ?? null });
   if (!r.ok) throw badRequest(`결제하지 못했습니다: ${r.msg ?? '카드사 거절'}`);
   await activate(sql, t, i.planCode, 'monthly', q.amount);
   await sql`insert into billing_consents (tenant, user_id, plan_code, amount_krw, cycle, text, terms_version, ip) values (${t}, ${u.id}, ${i.planCode}, ${q.amount}, 'monthly', ${autoRenewConsentText(q.plan.name, q.amount, 'monthly')}, ${TERMS_VERSION}, ${ip})`;
@@ -188,9 +211,9 @@ async function openWindow(t: string, u: SessionUser, i: z.infer<typeof windowInp
   let amount: number, goodsName: string, plan: string | null = null, addon: string | null = null;
   if (i.kind === 'annual' || i.kind === 'monthly') { const q = await quote(t, i.planCode, i.kind, sql); amount = q.amount; goodsName = q.goodsName; plan = i.planCode; }
   else {
-    const [a] = await sql<{ code: string; monthly_krw: number }[]>`select code, monthly_krw from plan_addons where code = ${i.addonCode} and active`;
+    const [a] = await sql<{ code: string; monthly_krw: number; vat_included: boolean }[]>`select code, monthly_krw, vat_included from plan_addons where code = ${i.addonCode} and active`;
     if (!a) throw badRequest('없는 팩입니다');
-    amount = Math.round(a.monthly_krw * VAT); goodsName = `Workin pack ${a.code}`; addon = a.code;
+    amount = addonAmount(a); goodsName = `Workin pack ${a.code}`; addon = a.code;
   }
   const kind = i.kind === 'monthly' ? 'subscription' : i.kind;
   const m = moid(kind);
@@ -411,10 +434,45 @@ export async function platformBillingAction(u: SessionUser, tenant: string, i: z
 }
 
 // ---- 플랫폼 운영 ----
-export async function platformPayments(u: SessionUser) {
+/** #1159 결제 방식 이름: 결제창 = 일반 결제 · 카드 첫 결제(사람이 누름) = 정기결제 첫 결제 · 정기 실행이 낸 것 = 정기결제(자동) */
+export const PAY_VIA_SQL = `case when p.meta->>'window' = 'true' then 'window' when p.meta->>'billing' = 'true' and (p.meta->>'first' = 'true' or p.created_by is not null) then 'first' when p.meta->>'billing' = 'true' then 'renewal' else null end`;
+export const platformPaymentsQuery = z.object({ q: z.string().trim().max(60).optional(), status: z.enum(['', 'paid', 'pending', 'failed', 'canceled', 'partial_canceled']).optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  min: z.coerce.number().int().min(0).optional(), max: z.coerce.number().int().min(0).optional(), hideTest: z.enum(['0', '1']).optional() });
+/** #1160 플랫폼 결제 목록 — 회사(이름·id)·기간(결제·만든 날, 서울)·상태·금액 거르기 · 시험 회사 숨김(기본 숨김) */
+export async function platformPayments(u: SessionUser, f: z.infer<typeof platformPaymentsQuery> = {}) {
   if (!u.platformAdmin) throw notFound();
-  return { payments: await db()`select p.id, p.tenant, t.name as tenant_name, p.kind, p.plan_code, p.addon_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.card_name, p.card_no, p.paid_at, p.created_at, t.is_test
-    from payments p join tenants t on t.id = p.tenant order by p.created_at desc limit 200`, enabled: !!npConf(), mode: npConf()?.mode ?? null };
+  const sql = db(); const q = f.q ? `%${f.q}%` : null; const hideTest = f.hideTest !== '0';
+  const payments = await sql`select p.id, p.tenant, t.name as tenant_name, p.kind, p.plan_code, p.addon_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.card_name, p.card_no, p.paid_at, p.created_at, t.is_test,
+      ${sql.unsafe(PAY_VIA_SQL)} as via, p.meta->>'test' = 'true' as test_pay
+    from payments p join tenants t on t.id = p.tenant
+    where (${q}::text is null or t.name ilike ${q} or p.tenant ilike ${q})
+      and (${f.status || null}::text is null or p.status = ${f.status || null})
+      and (${f.from ?? null}::date is null or (coalesce(p.paid_at, p.created_at) at time zone 'Asia/Seoul')::date >= ${f.from ?? null}::date)
+      and (${f.to ?? null}::date is null or (coalesce(p.paid_at, p.created_at) at time zone 'Asia/Seoul')::date <= ${f.to ?? null}::date)
+      and (${f.min ?? null}::int is null or p.amount >= ${f.min ?? null}::int) and (${f.max ?? null}::int is null or p.amount <= ${f.max ?? null}::int)
+      and (not ${hideTest} or not t.is_test)
+    order by p.created_at desc limit 200`;
+  return { payments, enabled: !!npConf(), mode: npConf()?.mode ?? null };
+}
+/** #1160 결제 상세 — 회사·요금제·카드·승인 시각·영수증·취소 내역·되돌릴 요금제(결제 전 상태) */
+export async function platformPaymentDetail(u: SessionUser, id: string) {
+  if (!u.platformAdmin) throw notFound();
+  const sql = db();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
+  const [p] = await sql<any[]>`select p.*, t.name as tenant_name, t.is_test, ${sql.unsafe(PAY_VIA_SQL)} as via, cu.name as created_by_name
+    from payments p join tenants t on t.id = p.tenant left join users cu on cu.id = p.created_by where p.id = ${id}`;
+  if (!p) throw notFound();
+  const [sub] = await sql`select plan_code, status, billing_cycle, next_billing_on::text, billing_amount from tenant_subscriptions where tenant = ${p.tenant}`;
+  const refunds = await sql`select a.created_at, a.detail, us.name as by_name from audit_logs a left join users us on us.id = a.actor_id where a.action = 'billing.refund' and a.target_id = ${id} order by a.created_at`;
+  const prev = p.meta?.prev ?? null;
+  return { payment: { id: p.id, tenant: p.tenant, tenantName: p.tenant_name, isTest: p.is_test, kind: p.kind, planCode: p.plan_code, addonCode: p.addon_code, amount: p.amount, canceled: p.canceled_amount, status: p.status,
+      via: p.via, cardName: p.card_name, cardNo: p.card_no, authCode: p.auth_code, paidAt: p.paid_at, createdAt: p.created_at, resultMsg: p.result_msg, createdBy: p.created_by_name,
+      receiptUrl: p.tid && ['paid', 'partial_canceled', 'canceled'].includes(p.status) ? `https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0` : null,
+      testPay: p.meta?.test === true, payMethod: p.meta?.payMethod ?? null, easyPay: p.meta?.easyPay ?? null },
+    subscription: sub ?? null, refunds: refunds.map((r: any) => ({ at: r.created_at, amount: r.detail?.amount ?? null, reason: r.detail?.reason ?? null, reverted: !!r.detail?.reverted, by: r.by_name })),
+    canRefund: ['paid', 'partial_canceled'].includes(p.status) && !!p.tid, left: p.amount - p.canceled_amount,
+    revert: prev ? { planCode: prev.plan_code ?? null, status: prev.status ?? null, cycle: prev.billing_cycle ?? null } : null };
 }
 export const refundInput = z.object({ amount: z.number().int().positive().optional(), reason: z.string().trim().min(1).max(100), revertPlan: z.boolean().optional() });
 /** 환불(전체·부분 취소) */

@@ -22,7 +22,7 @@ export async function landing({ browser, owner, BASE, SHOTS }) {
   assert.match(await p.getByTestId('pricing').innerText(), /14일 무료 체험[\s\S]*0원/); assert.equal(await p.getByTestId('pricing').getByText(/베이직|스탠다드|프로/).count(), 0, '요금은 14일 체험만');
   // 상용화 B3: 체험 뒤 업무 요금표만 공개(고객 결제 화면과 같은 구간 데이터) · 영업·마케팅 금액은 없음(상담 후 견적)
   const wp = p.getByTestId('landing-work-price'); await wp.waitFor();
-  assert.match(await wp.innerText(), /1~5인[\s\S]*19,900원/); assert.match(await wp.innerText(), /51인~[\s\S]*1인 3,900원/);
+  assert.match(await wp.innerText(), /부가세 포함/); assert.match(await wp.innerText(), /1~5인[\s\S]*22,000원[\s\S]*18,000원/); assert.match(await wp.innerText(), /51인~[\s\S]*1인 5,000원[\s\S]*1인 4,000원/); // #1161
   assert.doesNotMatch(await wp.innerText(), /34,900|베이직|스탠다드|프로/, '영업·마케팅 금액은 공개하지 않음');
   assert.doesNotMatch(await p.locator('body').innerText(), /5명까지|카드 등록 없음|6명 이상/, '#466 5명 무료 폐지 · 카드 등록 문구는 대표 결정 전'); // 대표 10/23
   assert.match(await p.getByTestId('landing-contact').innerText(), /dagym-in@naver\.com/);

@@ -187,14 +187,10 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     if (hid.length) note('§3-5 사용량 숨은 글(title 등)', hid.join(' | '));
     const perHit = usageText.match(/1(회|건|장|편) 약 [\d,]+원/g);
     if (perHit) note('§3-5 사용량 1건 원가', [...new Set(perHit)].join(', '));
-    // ── 7-1b) 407차 감사 기록: 새 회사 대표도 사이드바 [감사 기록]으로 자기 회사 기록만 본다(예전엔 화면이 없었음)
+    // ── 7-1b) #1157(대표 11/24): 고객 회사에는 [감사 기록] 화면·사이드바 줄이 없음(기록은 쌓이고 플랫폼 운영자가 회사 상세에서 봄)
     await p.goto(BASE + '/admin/audit');
-    await p.getByTestId('audit').waitFor();
-    const auditRows = await p.getByTestId('audit').locator('tbody tr').count();
-    assert.ok(auditRows >= 1, '새 회사 감사 기록 1건 이상(가입·로그인 등)');
-    const auditText = await p.getByTestId('audit').innerText();
-    assert.ok(!/dagym\.test|platform\.|이직원|박직원|최매니저/.test(auditText), `새 회사 감사 기록에 다른 회사·운영 기록 없음: ${auditText.slice(0, 200)}`); // 이 시험의 새 회사 대표 이름도 '김대표'라 이름으로는 가리지 않음
-    if (!(await p.locator('a[href="/admin/audit"]').count())) note('§7-1b 감사 기록', '사이드바에 [감사 기록] 줄이 안 보임');
+    await p.getByTestId('admin-no-access').waitFor();
+    assert.equal(await p.locator('a[href="/admin/audit"]').count(), 0, '사이드바에 [감사 기록] 줄 없음');
     // ── 7-1c) 408차 주간 보고(G-17·G-55): 새 회사도 [지난주 보고 지금 만들기]가 되고(예전 404), 보고 머리글은 회사 이름 · '미해결 민원'·'다짐 · 하이링크' 없음
     await p.goto(BASE + '/reports');
     await p.getByRole('button', { name: '지난주 보고 지금 만들기' }).click();

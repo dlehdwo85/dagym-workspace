@@ -21,7 +21,7 @@ export function LandingWorkPrice() {
   return (
     <div className="mx-auto mt-6 max-w-md text-left" data-testid="landing-work-price">
       <h3 className="text-sm font-semibold">체험 뒤 업무 요금</h3>
-      <p className="mt-0.5 text-xs text-ink-3">회사 단위 · 부가세 별도 · 구간 안에서는 인원이 늘어도 같은 금액</p>
+      <p className="mt-0.5 text-xs text-ink-3">회사 단위 · 부가세 포함 · 구간 안에서는 인원이 늘어도 같은 금액</p>
       <table className="mt-2 w-full border-collapse text-sm">
         <thead><tr className="border-b border-line text-xs text-ink-3"><th className="py-1.5 text-left font-medium">인원</th><th className="py-1.5 text-right font-medium">월 결제</th><th className="py-1.5 text-right font-medium">연간 결제(월 환산)</th></tr></thead>
         <tbody>

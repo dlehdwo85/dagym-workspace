@@ -142,7 +142,7 @@ export default function UsagePage() {
         </ul>
       </section>
       {!inApp && <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="plan-table">
-        <h2 className="text-sm font-semibold">요금제 (VAT 별도 · 월 · 구간 정액 — 구간 안에서는 인원이 늘어도 같은 금액 · 연간 결제 20% 할인)</h2>
+        <h2 className="text-sm font-semibold">요금제 (부가세 포함 · 월 · 구간 정액 — 구간 안에서는 인원이 늘어도 같은 금액 · 연간 결제 20% 할인)</h2>
         <div className="mt-2 overflow-x-auto">
           <table className="w-full min-w-[480px] text-sm">
             <thead><tr className="text-left text-xs text-ink-3"><th className="py-1">요금제</th><th>월 요금</th><th>사용자</th><th>저장공간</th><th>AI(회사 공유)/월</th></tr></thead>

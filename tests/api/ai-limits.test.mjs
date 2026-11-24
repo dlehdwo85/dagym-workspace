@@ -47,12 +47,12 @@ test('사용량·요금제: 세 AI 줄 — 공간별 쓴 양(purpose 로 구분)
   // 요금제별 기준표 — 355차 #939 ①②: 구간 정액(업무·업무+영업) + 마케팅 공간은 따로(회사당, 구간 무관) + AI 크레딧 팩
   assert.deepEqual(L.plans.plans.map((p) => p.code), ['w_work', 'w_sales'], '예전 1인 요금제(베이직·스탠다드·프로)는 고객 표에서 내림');
   const work = L.plans.plans.find((p) => p.code === 'w_work');
-  assert.deepEqual(work.bands.map((b) => [b.label, b.krw, b.storageGb]), [['1~5인', 19900, 10], ['6~10인', 39900, 25], ['11~20인', 69000, 60], ['21~50인', 169000, 150], ['51인~', 3900, 5]]);
-  assert.equal(work.bands[4].perUserKrw, 3900); assert.equal(work.marketing, null); assert.equal(work.work.perUserBudgetKrw, null);
+  assert.deepEqual(work.bands.map((b) => [b.label, b.krw, b.storageGb]), [['1~5인', 22000, 10], ['6~10인', 44000, 25], ['11~20인', 76000, 60], ['21~50인', 186000, 150], ['51인~', 5000, 5]]);
+  assert.equal(work.bands[4].perUserKrw, 5000); assert.equal(work.marketing, null); assert.equal(work.work.perUserBudgetKrw, null);
   assert.deepEqual(work.bands.slice(0, 4).map((b) => b.aiTimes), [1, 2, 4, 10], 'AI 는 원 대신 첫 구간 대비 배수');
-  assert.equal(L.plans.plans.find((p) => p.code === 'w_sales').bands[4].salesPerUserKrw, 7900);
+  assert.equal(L.plans.plans.find((p) => p.code === 'w_sales').bands[4].salesPerUserKrw, 9000);
   const mb = L.plans.marketingPlans.find((x) => x.code === 'basic');
-  assert.deepEqual([mb.label, mb.price, mb.monthlyCredits, mb.images], ['베이직', 9900, 30, 4]);
+  assert.deepEqual([mb.label, mb.price, mb.monthlyCredits, mb.images], ['베이직', 11000, 30, 4]);
   assert.equal(L.plans.plans.find((p) => p.code === 'w_free'), undefined, '#466 무료 5명 폐지(188) — 요금표에서 내림'); // 대표 10/23
   assert.ok(L.plans.packs.some((a) => a.code === 'ai_credit_s' && a.aiRequests === 100 && a.aiBudgetKrw === 4950));
   assert.equal(L.budget.source, 'legacy', '우리 회사(internal)는 예전 회사 월 한도'); assert.equal(L.budget.limitKrw, 14000);

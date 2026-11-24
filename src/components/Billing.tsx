@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { CreditCard } from 'lucide-react';
 import { api, useApi } from './client';
-import { Button, Field, cx, fmtDateTime, inputCls, toast } from './ui';
+import { Button, Field, Modal, askConfirm, cx, fmtDateTime, inputCls, toast } from './ui';
 import { TaxInvoiceButton } from './PlatformSettlement';
 import { AiConsentLine } from './AiConsent';
 
@@ -58,6 +58,7 @@ export function BillingSection() {
   // 200차 #706: 간편결제 바로 열기(나이스페이 결제창 생략 — 결제 대행 약관 동의는 여기서). 켠 간편결제(data.easyPays)만 보임
   const [ep, setEp] = useState<string | null>(null); const [epOk, setEpOk] = useState(false);
   const [renewOk, setRenewOk] = useState(false); // V34-B (#282) 정기결제 별도 동의(체크해야 결제)
+  const [cardForm, setCardForm] = useState(false); // #1158 [카드 변경]을 눌렀을 때만 입력 칸
   // 대표 11/20 #1086: 요금제 동의 목록에도 [선택] AI 기능 이용 동의 한 줄 — 누르는 관리자 본인의 동의로 기록(결제와 함께 보낼 때). 이미 동의한 사람에게는 안 보임
   const aiSt = useApi<{ state: string; stt: boolean }>('/api/account/ai-consent');
   const [aiOk, setAiOk] = useState(false);
@@ -89,8 +90,14 @@ export function BillingSection() {
     if (!m) return toast.error('유효기간은 MM/YY 로 적어 주세요');
     setBusy(true);
     try { await api('/api/billing/card', { body: { cardNo: card.cardNo.replace(/\D/g, ''), expMonth: m[1], expYear: m[2], ...(card.idNo ? { idNo: card.idNo.replace(/\D/g, '') } : {}), ...(card.cardPw ? { cardPw: card.cardPw } : {}) } });
-      setCard({ cardNo: '', exp: '', idNo: '', cardPw: '' }); toast.ok('카드를 등록했습니다'); reload(); }
+      setCard({ cardNo: '', exp: '', idNo: '', cardPw: '' }); setCardForm(false); toast.ok(data.card ? '정기결제 카드를 바꿨습니다 — 다음 결제부터 이 카드로 결제됩니다' : '정기결제 카드를 등록했습니다'); reload(); }
     catch (er: any) { toast.error(er.message); } finally { setBusy(false); }
+  }
+  /** #1158 카드 삭제 — 매월 자동 결제가 이 카드로 진행 중이면 해지 예약을 먼저 안내(서버도 409) */
+  async function removeCard() {
+    if (sub.billing_cycle && !sub.cancel_at_period_end) { toast.error('매월 자동 결제가 이 카드로 진행 중입니다 — 먼저 [구독 해지]를 예약하거나 [카드 변경]으로 바꿔 주세요'); return; }
+    if (!(await askConfirm(`${data.card.card_name ?? '카드'} ····${data.card.card_last4} 를 지울까요? 결제사(나이스페이)에 저장된 정기결제 정보도 함께 지웁니다.`, { title: '정기결제 카드 삭제', ok: '카드 삭제', danger: true }))) return;
+    try { await api('/api/billing/card', { method: 'DELETE' }); toast.ok('카드를 지웠습니다'); reload(); } catch (e: any) { toast.error(e.message); }
   }
   async function subscribe(code: string) {
     const q = monthly.find((x: any) => x.planCode === code);
@@ -118,21 +125,37 @@ export function BillingSection() {
               {sub.past_due_since && <div className="rounded-input bg-red-50 px-2 py-1 text-red-700" data-testid="billing-past-due">결제 실패(미납) {String(sub.past_due_since).slice(0, 10)}부터{sub.next_retry_on ? ` · ${String(sub.next_retry_on).slice(0, 10)}에 다시 시도` : ''}{sub.billing_lock === 'suspended' ? ' · 이용 중지됨' : sub.billing_lock === 'read_only' ? ' · 읽기 전용' : ' · 7일 지나면 읽기 전용, 30일 지나면 이용 중지'} — 카드를 바꾸거나 아래에서 바로 결제하면 즉시 복구됩니다.</div>}
               {sub.next_billing_on && <div className="text-ink-2">다음 결제: {String(sub.next_billing_on).slice(0, 10)} · {won(sub.billing_amount)}{sub.cancel_at_period_end && <b className="ml-1 text-red-600">해지 예약 — 이날 끝납니다</b>}</div>}
               {sub.past_due_since && <div className="font-medium text-red-600">결제 실패 — {sub.next_retry_on ? `${String(sub.next_retry_on).slice(0, 10)}에 다시 시도` : ''} (첫 실패 7일 뒤 읽기 전용)</div>}
-              <div className="mt-1 text-ink-2">카드: {data.card ? `${data.card.card_name ?? ''} ····${data.card.card_last4}` : '없음'}</div>
               {sub.billing_cycle && <div className="mt-2">{sub.cancel_at_period_end
                 ? <Button size="sm" variant="secondary" onClick={async () => { await api('/api/billing/autorenew', { body: { renew: true } }); reload(); }}>해지 취소</Button>
                 : <Button size="sm" variant="ghost" onClick={async () => { if (confirm('다음 결제일에 구독을 끝낼까요? 그 뒤에는 읽기 전용이 됩니다(데이터는 남음).')) { await api('/api/billing/autorenew', { body: { renew: false } }); reload(); } }} data-testid="billing-cancel">구독 해지(다음 결제일에 종료)</Button>}</div>}
             </div>
-            <form onSubmit={saveCard} className="space-y-2" data-testid="billing-card-form">
-              <p className="text-xs font-semibold text-ink-2">{data.card ? '카드 바꾸기' : '카드 등록(정기 결제)'} <span className="font-normal text-ink-3">— 카드번호는 저장하지 않고 결제사(나이스페이) 빌키로만 씁니다</span></p>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="카드번호"><input className={inputCls} inputMode="numeric" autoComplete="cc-number" value={card.cardNo} onChange={(e) => setCard({ ...card, cardNo: e.target.value })} required /></Field>
-                <Field label="유효기간 (MM/YY)"><input className={inputCls} inputMode="numeric" autoComplete="cc-exp" value={card.exp} onChange={(e) => setCard({ ...card, exp: e.target.value })} required /></Field>
-                <Field label="생년월일 6자리 / 사업자번호"><input className={inputCls} inputMode="numeric" value={card.idNo} onChange={(e) => setCard({ ...card, idNo: e.target.value })} /></Field>
-                <Field label="비밀번호 앞 2자리"><input className={inputCls} type="password" inputMode="numeric" maxLength={2} value={card.cardPw} onChange={(e) => setCard({ ...card, cardPw: e.target.value })} /></Field>
-              </div>
-              <Button size="sm" type="submit" disabled={busy}>{data.card ? '카드 바꾸기' : '카드 등록'}</Button>
-            </form>
+            <div className="rounded-input border border-line p-3" data-testid="billing-card">
+              <p className="text-xs font-semibold text-ink-2">결제 수단 — 정기결제(매월 자동 결제) 카드</p>
+              {data.card ? (
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
+                  <span data-testid="billing-card-info">{data.card.card_name ?? '카드'} ····{data.card.card_last4} <span className="text-xs text-ink-3">· 등록 {String(data.card.created_at).slice(0, 10)}</span></span>
+                  <Button size="sm" variant="secondary" onClick={() => setCardForm((v) => !v)} data-testid="billing-card-change">{cardForm ? '닫기' : '카드 변경'}</Button>
+                  <Button size="sm" variant="ghost" onClick={removeCard} data-testid="billing-card-remove">카드 삭제</Button>
+                </div>
+              ) : <p className="mt-1 text-sm text-ink-3">등록된 카드가 없습니다</p>}
+              <p className="mt-1 text-[11px] text-ink-3" data-testid="billing-easypay-note">카카오페이·네이버페이·토스페이 같은 간편결제는 매월 자동 결제(정기결제)에 쓸 수 없습니다 — {(data.easyPays ?? []).length ? '결제창 1회 결제에서만 쓸 수 있습니다' : '지금은 결제창 간편결제도 열려 있지 않습니다'}.</p>
+              {(!data.card || cardForm) && (
+                <form onSubmit={saveCard} className="mt-2 space-y-2" data-testid="billing-card-form">
+                  <p className="text-xs font-semibold text-ink-1">{data.card ? '정기결제 카드 변경' : '정기결제(매월 자동 결제) 카드 등록'} <span className="font-normal text-ink-3">— 카드번호는 저장하지 않고 결제사(나이스페이) 정기결제 키로만 씁니다</span></p>
+                  <p className="rounded-input bg-slate-50 px-2 py-1 text-xs text-ink-2" data-testid="billing-card-preview">{sub.billing_cycle && sub.next_billing_on && !sub.cancel_at_period_end
+                    ? `이 카드로 ${String(sub.next_billing_on).slice(0, 10)}에 ${won(sub.billing_amount)}(부가세 포함)이 자동 결제되고, 그 뒤 매${sub.billing_cycle === 'annual' ? '년' : '월'} 같은 날 결제됩니다.`
+                    : (() => { const q = monthly.find((x: any) => x.planCode === plan); const d = new Date(); d.setMonth(d.getMonth() + 1);
+                      return q ? `등록한 뒤 [등록 카드로 결제·자동 결제]를 누르면 오늘 ${won(q.amount)}(부가세 포함)이 결제되고, 다음 결제는 ${d.toISOString().slice(0, 10)}입니다.` : '카드만 등록해서는 결제되지 않습니다 — 오른쪽에서 요금제를 고르고 [등록 카드로 결제·자동 결제]를 눌러야 첫 결제와 매월 자동 결제가 시작됩니다.'; })()}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="카드번호"><input className={inputCls} inputMode="numeric" autoComplete="cc-number" value={card.cardNo} onChange={(e) => setCard({ ...card, cardNo: e.target.value })} required /></Field>
+                    <Field label="유효기간 (MM/YY)"><input className={inputCls} inputMode="numeric" autoComplete="cc-exp" value={card.exp} onChange={(e) => setCard({ ...card, exp: e.target.value })} required /></Field>
+                    <Field label="생년월일 6자리 / 사업자번호"><input className={inputCls} inputMode="numeric" value={card.idNo} onChange={(e) => setCard({ ...card, idNo: e.target.value })} /></Field>
+                    <Field label="비밀번호 앞 2자리"><input className={inputCls} type="password" inputMode="numeric" maxLength={2} value={card.cardPw} onChange={(e) => setCard({ ...card, cardPw: e.target.value })} /></Field>
+                  </div>
+                  <Button size="sm" type="submit" disabled={busy} data-testid="billing-card-save">{data.card ? '이 카드로 바꾸기' : '정기결제 카드 등록'}</Button>
+                </form>
+              )}
+            </div>
           </div>
           <div className="space-y-3 text-sm">
             <div>
@@ -187,7 +210,7 @@ export function BillingSection() {
                 {data.payments.map((p: any) => (
                   <li key={p.id} className="flex flex-wrap items-center gap-2 px-2 py-1.5">
                     <span className="w-28 shrink-0 text-ink-3">{fmtDateTime(p.paid_at ?? p.created_at)}</span>
-                    <span className="flex-1">{KIND[p.kind]} {p.plan_code ?? p.addon_code ?? ''} · {won(p.amount)}{p.pay_method && p.pay_method !== 'CARD' ? ` · ${p.pay_method === 'BANK' ? '계좌이체' : '가상계좌'}` : ''}{p.easy_pay ? ` · ${EASY_LABEL[p.easy_pay] ?? p.easy_pay}` : ''}{p.card_no ? ` · ${p.card_name ?? ''} ${p.card_no}` : ''}
+                    <span className="flex-1">{KIND[p.kind]} {p.plan_code ?? p.addon_code ?? ''} · {won(p.amount)}{p.via ? <span className="text-ink-3" data-testid="billing-pay-via"> · {VIA[p.via]}</span> : null}{p.pay_method && p.pay_method !== 'CARD' ? ` · ${p.pay_method === 'BANK' ? '계좌이체' : '가상계좌'}` : ''}{p.easy_pay ? ` · ${EASY_LABEL[p.easy_pay] ?? p.easy_pay}` : ''}{p.card_no ? ` · ${p.card_name ?? ''} ${p.card_no}` : ''}
                       {p.status === 'pending' && p.vbank && <span className="block text-amber-700" data-testid="billing-vbank">입금 대기: {p.vbank.bank} {p.vbank.num}{p.vbank.exp ? ` · ${String(p.vbank.exp).slice(0, 4)}-${String(p.vbank.exp).slice(4, 6)}-${String(p.vbank.exp).slice(6, 8)}까지` : ''}</span>}
                       {p.status === 'paid' && p.tid && <a className="ml-1 text-brand-700 underline" href={`https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0`} target="_blank" rel="noreferrer">영수증</a>}{' '}<TaxInvoiceButton payment={p} /></span>
                     <span className={cx('rounded-full px-1.5', p.status === 'paid' ? 'bg-green-50 text-green-700' : p.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2')} title={p.result_msg ?? ''}>{STATUS[p.status]}</span>
@@ -204,29 +227,98 @@ export function BillingSection() {
 }
 
 /** 플랫폼 운영: 결제 내역·환불 */
+const VIA: Record<string, string> = { window: '일반 결제(결제창)', first: '정기결제 첫 결제', renewal: '정기결제(자동)' };
+/** #1160 플랫폼 운영: 결제 목록(회사·기간·상태·금액 거르기, 시험 회사 숨김) → 결제 상세 창(영수증·취소 내역) → 창 안에서 전액/부분 환불(사유 필수·요금제 되돌리기) */
 export function PlatformPayments() {
-  const { data, reload } = useApi<any>('/api/platform/payments');
-  if (!data) return null;
-  async function refund(p: any) {
-    const left = p.amount - p.canceled_amount;
-    const amt = prompt(`환불 금액(원) — 최대 ${left}`, String(left)); if (!amt) return;
-    const reason = prompt('환불 사유', '고객 요청'); if (!reason) return;
-    try { await api(`/api/platform/payments/${p.id}/refund`, { body: { amount: Number(amt), reason } }); toast.ok('환불했습니다'); reload(); } catch (e: any) { toast.error(e.message); }
-  }
+  const [f, setF] = useState({ q: '', status: '', from: '', to: '', min: '', max: '', hideTest: true });
+  const qs = new URLSearchParams(Object.entries({ q: f.q, status: f.status, from: f.from, to: f.to, min: f.min, max: f.max, hideTest: f.hideTest ? '1' : '0' }).filter(([, v]) => v !== '') as [string, string][]).toString();
+  const { data, reload } = useApi<any>(`/api/platform/payments?${qs}`, [qs]);
+  const [open, setOpen] = useState<string | null>(null);
+  const sel = 'h-8 w-auto py-0 text-xs';
   return (
     <section className="rounded-card border border-line bg-white shadow-card" data-testid="platform-payments">
-      <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">결제 내역 {data.mode && <span className="text-xs font-normal text-ink-3">나이스페이 {data.mode === 'test' ? '시험' : '실결제'} 모드</span>}{!data.enabled && <span className="text-xs font-normal text-ink-3">결제 미설정</span>}</h2>
-      <ul className="max-h-80 divide-y divide-line overflow-y-auto text-xs">
-        {data.payments.map((p: any) => (
-          <li key={p.id} className="flex flex-wrap items-center gap-2 px-3 py-1.5">
-            <span className="w-28 shrink-0 text-ink-3">{fmtDateTime(p.paid_at ?? p.created_at)}</span>
-            <span className="min-w-0 flex-1">{p.tenant_name} · {KIND[p.kind]} {p.plan_code ?? p.addon_code ?? ''} · {won(p.amount)}{p.canceled_amount ? ` (환불 ${won(p.canceled_amount)})` : ''}</span>
-            <span>{STATUS[p.status]}</span>
-            {['paid', 'partial_canceled'].includes(p.status) && <Button size="sm" variant="ghost" onClick={() => refund(p)}>환불</Button>}
+      <h2 className="border-b border-line px-3 py-2 text-sm font-semibold">결제 내역 {data?.mode && <span className="text-xs font-normal text-ink-3">나이스페이 {data.mode === 'test' ? '시험' : '실결제'} 모드</span>}{data && !data.enabled && <span className="text-xs font-normal text-ink-3"> · 결제 꺼짐</span>}</h2>
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-2 text-xs" data-testid="payments-filters">
+        <input className={cx(inputCls, 'h-8 w-40 py-0 text-xs')} value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} placeholder="회사 이름·id" aria-label="회사 찾기" data-testid="payments-q" />
+        <select className={cx(inputCls, sel)} value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} aria-label="상태" data-testid="payments-status">
+          <option value="">상태 전체</option>{Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <input type="date" className={cx(inputCls, sel)} value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} aria-label="시작일" data-testid="payments-from" />
+        <span className="text-ink-3">~</span>
+        <input type="date" className={cx(inputCls, sel)} value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} aria-label="끝일" data-testid="payments-to" />
+        <input className={cx(inputCls, 'h-8 w-24 py-0 text-xs')} inputMode="numeric" value={f.min} onChange={(e) => setF({ ...f, min: e.target.value.replace(/\D/g, '') })} placeholder="최소 금액" aria-label="최소 금액" />
+        <input className={cx(inputCls, 'h-8 w-24 py-0 text-xs')} inputMode="numeric" value={f.max} onChange={(e) => setF({ ...f, max: e.target.value.replace(/\D/g, '') })} placeholder="최대 금액" aria-label="최대 금액" />
+        <label className="flex items-center gap-1 text-ink-2"><input type="checkbox" checked={f.hideTest} onChange={(e) => setF({ ...f, hideTest: e.target.checked })} data-testid="payments-hide-test" />시험 회사 숨김</label>
+      </div>
+      <ul className="max-h-96 divide-y divide-line overflow-y-auto text-xs" data-testid="payments-list">
+        {(data?.payments ?? []).map((p: any) => (
+          <li key={p.id}>
+            <button type="button" className="flex w-full flex-wrap items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50" onClick={() => setOpen(p.id)} data-testid={`payment-row-${p.id}`}>
+              <span className="w-28 shrink-0 text-ink-3">{fmtDateTime(p.paid_at ?? p.created_at)}</span>
+              <span className="min-w-0 flex-1">{p.tenant_name}{p.is_test ? ' (시험 회사)' : ''} · {KIND[p.kind]} {p.plan_code ?? p.addon_code ?? ''} · {won(p.amount)}{p.canceled_amount ? ` (환불 ${won(p.canceled_amount)})` : ''}{p.via ? ` · ${VIA[p.via]}` : ''}</span>
+              <span className={cx('rounded-full px-1.5', p.status === 'paid' ? 'bg-green-50 text-green-700' : p.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-ink-2')}>{STATUS[p.status]}</span>
+            </button>
           </li>
         ))}
-        {!data.payments.length && <li className="px-3 py-2 text-ink-3">결제 내역이 없습니다</li>}
+        {data && !data.payments.length && <li className="px-3 py-2 text-ink-3">조건에 맞는 결제가 없습니다</li>}
       </ul>
+      {open && <PaymentDetail id={open} onClose={() => setOpen(null)} onChanged={reload} />}
     </section>
+  );
+}
+
+export function PaymentDetail({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+  const { data, reload } = useApi<any>(`/api/platform/payments/${id}`, [id]);
+  const [mode, setMode] = useState<null | 'full' | 'partial'>(null);
+  const [amt, setAmt] = useState(''); const [reason, setReason] = useState(''); const [revert, setRevert] = useState(false); const [confirmStep, setConfirmStep] = useState(false); const [busy, setBusy] = useState(false);
+  const p = data?.payment;
+  function start(m: 'full' | 'partial') { setMode(m); setAmt(m === 'full' ? String(data.left) : ''); setReason(''); setRevert(m === 'full' && !!data.revert); setConfirmStep(false); }
+  async function refund() {
+    setBusy(true);
+    try {
+      const r = await api<{ canceled: number; reverted: boolean }>(`/api/platform/payments/${id}/refund`, { body: { amount: Number(amt), reason: reason.trim(), revertPlan: mode === 'full' ? revert : false } });
+      toast.ok(`${won(Number(amt))} 환불했습니다${r.reverted ? ' — 요금제를 결제 전으로 되돌렸습니다' : ''}`); setMode(null); reload(); onChanged();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  const n = Number(amt); const okAmt = n > 0 && data && n <= data.left;
+  return (
+    <Modal open onClose={onClose} title="결제 상세" wide>
+      {!p ? <p className="text-sm text-ink-3">불러오는 중…</p> : (
+        <div className="space-y-3 text-sm" data-testid="payment-detail">
+          <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-xs">
+            <dt className="text-ink-3">회사</dt><dd>{p.tenantName}{p.isTest ? ' (시험 회사)' : ''}</dd>
+            <dt className="text-ink-3">종류</dt><dd>{KIND[p.kind]} {p.planCode ?? p.addonCode ?? ''}{p.via ? ` · ${VIA[p.via]}` : ''}{p.testPay ? ' · 시험 상점' : ''}</dd>
+            <dt className="text-ink-3">금액</dt><dd>{won(p.amount)}{p.canceled ? ` · 환불 ${won(p.canceled)} · 남은 ${won(data.left)}` : ''}</dd>
+            <dt className="text-ink-3">상태</dt><dd>{STATUS[p.status]}{p.resultMsg ? ` · ${p.resultMsg}` : ''}</dd>
+            <dt className="text-ink-3">결제 수단</dt><dd>{p.easyPay ? EASY_LABEL[p.easyPay] ?? p.easyPay : p.payMethod === 'BANK' ? '계좌이체' : p.payMethod === 'VBANK' ? '가상계좌' : '카드'}{p.cardName || p.cardNo ? ` · ${p.cardName ?? ''} ${p.cardNo ?? ''}` : ''}{p.authCode ? ` · 승인번호 ${p.authCode}` : ''}</dd>
+            <dt className="text-ink-3">승인 시각</dt><dd>{p.paidAt ? fmtDateTime(p.paidAt) : '-'} · 만든 시각 {fmtDateTime(p.createdAt)}{p.createdBy ? ` · ${p.createdBy}` : ' · 자동'}</dd>
+            <dt className="text-ink-3">지금 구독</dt><dd>{data.subscription ? `${data.subscription.plan_code} · ${data.subscription.status}${data.subscription.billing_cycle ? ` · ${data.subscription.billing_cycle === 'annual' ? '연간' : '월'} 자동 결제 · 다음 ${data.subscription.next_billing_on ?? '-'}` : ''}` : '-'}</dd>
+            <dt className="text-ink-3">영수증</dt><dd>{p.receiptUrl ? <a className="text-brand-700 underline" href={p.receiptUrl} target="_blank" rel="noreferrer" data-testid="payment-receipt">나이스페이 영수증</a> : '-'}</dd>
+          </dl>
+          <div>
+            <p className="text-xs font-semibold text-ink-2">취소 내역</p>
+            <ul className="mt-1 divide-y divide-line rounded-input border border-line text-xs" data-testid="payment-refunds">
+              {data.refunds.map((r: any, k: number) => <li key={k} className="px-2 py-1">{fmtDateTime(r.at)} · {won(r.amount)} · {r.reason ?? ''}{r.reverted ? ' · 요금제 되돌림' : ''}{r.by ? ` · ${r.by}` : ''}</li>)}
+              {!data.refunds.length && <li className="px-2 py-1 text-ink-3">없음</li>}
+            </ul>
+          </div>
+          {data.canRefund && !mode && <div className="flex gap-2"><Button size="sm" variant="secondary" onClick={() => start('full')} data-testid="refund-full">전액 환불 {won(data.left)}</Button><Button size="sm" variant="ghost" onClick={() => start('partial')} data-testid="refund-partial">부분 환불</Button></div>}
+          {mode && (
+            <div className="space-y-2 rounded-input border border-red-200 bg-red-50/40 p-3" data-testid="refund-form">
+              <p className="text-xs font-semibold">{mode === 'full' ? '전액 환불' : '부분 환불'}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Field label={`금액(원) — 최대 ${won(data.left)}`}><input className={inputCls} inputMode="numeric" value={amt} onChange={(e) => { setAmt(e.target.value.replace(/\D/g, '')); setConfirmStep(false); }} readOnly={mode === 'full'} data-testid="refund-amount" /></Field>
+                <Field label="사유(필수)"><input className={inputCls} value={reason} onChange={(e) => { setReason(e.target.value); setConfirmStep(false); }} maxLength={100} placeholder="예: 고객 요청 · 중복 결제" data-testid="refund-reason" /></Field>
+              </div>
+              {mode === 'full' && <label className={cx('flex items-start gap-1.5 text-xs', data.revert ? 'text-ink-2' : 'text-ink-3')}><input type="checkbox" className="mt-0.5" checked={revert} disabled={!data.revert} onChange={(e) => setRevert(e.target.checked)} data-testid="refund-revert" />
+                <span>요금제 되돌리기{data.revert ? ` — 결제 전 상태(${data.revert.planCode ?? '-'} · ${data.revert.status ?? '-'})로` : ' — 이 결제에는 결제 전 상태 기록이 없어 되돌릴 수 없습니다'}</span></label>}
+              {!confirmStep
+                ? <div className="flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={() => setMode(null)}>취소</Button><Button size="sm" disabled={!okAmt || !reason.trim()} onClick={() => setConfirmStep(true)} data-testid="refund-next">다음</Button></div>
+                : <div className="flex flex-wrap items-center justify-end gap-2"><span className="text-xs font-semibold text-red-700" data-testid="refund-confirm-text">{p.tenantName} 결제 {won(n)}를 환불합니다{mode === 'full' && revert ? ' · 요금제를 되돌립니다' : ''}. 되돌릴 수 없습니다.</span><Button size="sm" variant="ghost" onClick={() => setConfirmStep(false)}>고치기</Button><Button size="sm" variant="danger" disabled={busy} onClick={refund} data-testid="refund-go">{busy ? '환불 중…' : '환불 실행'}</Button></div>}
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }

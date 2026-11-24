@@ -85,10 +85,10 @@ describe('18차 나이스페이 결제', () => {
     assert.deepEqual(b.easyPays, [], '200차 #706 간편결제는 NICEPAY_EASY_PAY 로 켜지 않으면 없음');
     assert.equal((await owner.post('/api/billing/window', { kind: 'monthly', planCode: 'w_work', easyPay: 'naverpay', agree: true })).status, 400, '켜지 않은 간편결제는 안 열림');
     const team = b.quotes.find((q) => q.planCode === 'w_work' && q.cycle === 'monthly');
-    // 355차 #939 ①②: 구간 정액 — 1~5인 업무 월 19,900원(VAT 별도), 연간 20% 할인 · 예전 1인 요금제(스탠다드)는 고객 견적에서 빠짐
-    assert.equal(team.band, '1~5인'); assert.ok(team.seats >= 1 && team.seats <= 5); assert.equal(team.amount, Math.round(19900 * 1.1));
-    assert.equal(b.quotes.find((q) => q.planCode === 'w_work' && q.cycle === 'annual').amount, Math.round(19900 * 12 * 0.8 * 1.1));
-    assert.equal(b.quotes.find((q) => q.planCode === 'w_sales' && q.cycle === 'monthly').amount, Math.round(34900 * 1.1));
+    // 355차 #939 ①②: 구간 정액 — 1~5인 업무 월 22,000원(#1161 부가세 포함), 연간 20% 할인(월 환산 천 원 올림) · 예전 1인 요금제(스탠다드)는 고객 견적에서 빠짐
+    assert.equal(team.band, '1~5인'); assert.ok(team.seats >= 1 && team.seats <= 5); assert.equal(team.amount, 22000); assert.deepEqual([team.supply, team.vat], [20000, 2000], '#1161 부가세 포함 22,000 → 공급가 20,000 · 부가세 2,000');
+    assert.equal(b.quotes.find((q) => q.planCode === 'w_work' && q.cycle === 'annual').amount, 18000 * 12, '#1161 연간 = 22,000 × 0.8 → 천 원 올림 18,000 × 12');
+    assert.equal(b.quotes.find((q) => q.planCode === 'w_sales' && q.cycle === 'monthly').amount, 39000);
     assert.equal(b.quotes.some((q) => q.planCode === 'w_standard'), false);
   });
 
@@ -106,11 +106,11 @@ describe('18차 나이스페이 결제', () => {
     assert.equal((await owner.post('/api/billing/subscribe', { planCode: 'w_work' })).status, 400, 'V34-B 정기결제 동의 없으면 결제 안 함');
     assert.equal((await sql`select count(*)::int c from payments where tenant = ${tid} and kind = 'subscription'`)[0].c, 0);
     const r = await owner.ok('POST', '/api/billing/subscribe', { planCode: 'w_work', consent: true });
-    assert.equal(r.amount, 21890);
+    assert.equal(r.amount, 22000);
     const [bc] = await sql`select plan_code, amount_krw, cycle, text, terms_version, user_id from billing_consents where tenant = ${tid}`;
-    assert.deepEqual([bc.plan_code, bc.amount_krw, bc.cycle, bc.user_id], ['w_work', 21890, 'monthly', (await owner.ok('GET', '/api/auth/me')).user.id]);
-    assert.match(bc.text, /업무 요금제를 매월 21,890원/); assert.match(bc.text, /해지/); assert.ok(bc.terms_version);
-    assert.equal((await owner.ok('GET', '/api/billing')).autoRenewConsent.amount_krw, 21890);
+    assert.deepEqual([bc.plan_code, bc.amount_krw, bc.cycle, bc.user_id], ['w_work', 22000, 'monthly', (await owner.ok('GET', '/api/auth/me')).user.id]);
+    assert.match(bc.text, /업무 요금제를 매월 22,000원/); assert.match(bc.text, /해지/); assert.ok(bc.terms_version);
+    assert.equal((await owner.ok('GET', '/api/billing')).autoRenewConsent.amount_krw, 22000);
     const s = await sub();
     assert.equal(s.status, 'active'); assert.equal(s.plan_code, 'w_work'); assert.equal(s.billing_cycle, 'monthly');
     const b = await owner.ok('GET', '/api/billing');
@@ -235,6 +235,35 @@ describe('18차 나이스페이 결제', () => {
     assert.equal((await sql`select status from payments where id = ${p.id}`)[0].status, 'canceled');
     const cancel = state.calls.filter((x) => x.path.endsWith('cancel_process.jsp')).at(-1);
     assert.equal(cancel.f.MID, BMID, '빌링 결제는 빌링 MID 로 취소');
+  });
+
+  test('#1160 결제 목록 거르기·상세(취소 내역·영수증) · 카드 정기결제 첫 결제도 요금제 되돌리기 · #1158 카드 삭제(자동 결제 중 409) · #1159 결제 방식 이름', async () => {
+    const [tn] = await sql`select name from tenants where id = ${tid}`;
+    const L = await platform.ok('GET', `/api/platform/payments?q=${encodeURIComponent(tn.name)}&hideTest=0`);
+    assert.ok(L.payments.length >= 1 && L.payments.every((p) => p.tenant === tid));
+    const first = L.payments.find((p) => p.kind === 'subscription' && p.status === 'canceled');
+    assert.equal(first.via, 'first', '카드 첫 결제 = 정기결제 첫 결제');
+    assert.ok((await platform.ok('GET', `/api/platform/payments?q=${encodeURIComponent(tn.name)}&hideTest=0&status=canceled`)).payments.every((p) => p.status === 'canceled'));
+    assert.equal((await platform.ok('GET', `/api/platform/payments?q=${encodeURIComponent(tn.name)}&hideTest=0&min=99999999`)).payments.length, 0);
+    assert.equal((await owner.req('GET', `/api/platform/payments/${first.id}`)).status, 404, '운영자만');
+    const D = await platform.ok('GET', `/api/platform/payments/${first.id}`);
+    assert.equal(D.refunds.length, 2); assert.deepEqual(D.refunds.map((r) => r.reason), ['부분 환불', '나머지']);
+    assert.ok(D.payment.receiptUrl); assert.equal(D.canRefund, false);
+    // 새 정기결제(카드) → 카드 삭제는 자동 결제 중이라 409 → 전액 환불 + 요금제 되돌리기 → 결제 전 상태 → 카드 삭제 됨
+    const before = await sub();
+    const r = await owner.ok('POST', '/api/billing/subscribe', { planCode: 'w_work', consent: true });
+    assert.equal((await owner.req('DELETE', '/api/billing/card')).status, 409, '자동 결제 중에는 해지 예약 먼저');
+    const D2 = await platform.ok('GET', `/api/platform/payments/${r.paymentId}`);
+    assert.deepEqual([D2.payment.via, D2.revert.planCode, D2.revert.status], ['first', before.plan_code, before.status], '결제 전 상태를 남김');
+    const rf = await platform.ok('POST', `/api/platform/payments/${r.paymentId}/refund`, { reason: '시험 — 전액 환불', revertPlan: true });
+    assert.equal(rf.reverted, true, '카드 정기결제도 요금제 되돌리기(D-16 reverted:false 고침)');
+    const after = await sub();
+    assert.deepEqual([after.plan_code, after.status, after.billing_cycle], [before.plan_code, before.status, before.billing_cycle]);
+    assert.equal((await owner.ok('GET', '/api/billing')).payments.find((p) => p.id === r.paymentId).via, 'first', '고객 결제 내역에도 구분');
+    await owner.ok('DELETE', '/api/billing/card');
+    assert.equal((await owner.ok('GET', '/api/billing')).card, null);
+    assert.ok((await sql`select 1 from audit_logs where action = 'billing.card_removed'`).length);
+    await owner.ok('POST', '/api/billing/card', { cardNo: '4111111111111234', expYear: '29', expMonth: '12', idNo: '900101', cardPw: '12' }); // 다음 시험을 위해 다시 등록
   });
   test('V32 1 결제 시험 회사: 플랫폼만 만듦 → 시험 상점 결제창 → 승인 후 자동 확인 → 자동 결제 제외 → 취소하면 원복 · 1시간 지난 시험 결제 자동 취소', async () => {
     await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;

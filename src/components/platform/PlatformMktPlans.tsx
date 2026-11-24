@@ -38,7 +38,7 @@ export function PlatformMktPlans() {
       <h2 className="text-sm font-semibold">마케팅 요금제 — 만들 수 있는 양과 금액</h2>
       <p className="mt-1 text-xs text-ink-2">글 모델 = 자동 제작 원고·수정본·블로그를 쓰는 AI(품질 검사는 빠른 모델 그대로) — 회사 관리에서 회사별로 따로 정한 값이 먼저입니다. 숫자만 바꾸고 [저장]하면 고객 화면(자동 제작 › 요금제·한도, 홈 ‘이번 달 남은 제작’)에 바로 적용됩니다. 가격·초과 크레딧 금액을 비우면 ‘결정 전’. 원가율 = 월 크레딧 × 1크레딧 원화 ÷ 월 요금.</p>
       <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[1100px] text-xs" data-testid="mkt-plan-table">
-        <thead><tr className="text-left text-ink-3"><th className="py-1">요금제</th><th>월 요금(원)</th><th>월 크레딧</th>{KINDS.map(([, l]) => <th key={l}>주 {l}</th>)}<th>생성 영상/월</th><th>재생성/월</th><th>AI $/월</th><th>글 모델</th><th>초과 1크레딧(원)</th><th>환산</th><th>월 원가·원가율</th><th></th></tr></thead>
+        <thead><tr className="text-left text-ink-3"><th className="py-1">요금제</th><th>월 요금(원·부가세 포함)</th><th>월 크레딧</th>{KINDS.map(([, l]) => <th key={l}>주 {l}</th>)}<th>생성 영상/월</th><th>재생성/월</th><th>AI $/월</th><th>글 모델</th><th>초과 1크레딧(원)</th><th>환산</th><th>월 원가·원가율</th><th></th></tr></thead>
         <tbody>{data.plans.map((p) => (
           <tr key={p.code} className="border-t border-line align-top" data-testid={`mkt-plan-row-${p.code}`}>
             <td className="py-1.5 pr-2"><input className={cx(inputCls, 'h-7 w-24 py-0.5 text-xs')} value={val(p, 'label', p.label)} onChange={(e) => set(p.code, 'label', e.target.value)} aria-label={`${p.code} 이름`} /><div className="text-ink-3">{p.code}</div></td>
