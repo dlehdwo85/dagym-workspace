@@ -39,7 +39,10 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
     select t.id, t.name, t.kind, t.status, t.is_test, t.created_at, t.delete_scheduled_at, t.support_consent_at, t.signup_status, ow.email as owner_email, (ow.status = 'invited') as owner_invited,
       t.contact_name, t.contact_phone, t.contact_title, t.segment, t.source, t.lifecycle, t.lifecycle_note, t.lifecycle_at, t.industries, t.size_band, t.platform_memo,
       ts.plan_code, ts.status as sub_status, ts.trial_ends_at, ts.limit_overrides, ts.discount_pct, to_char(ts.discount_until, 'YYYY-MM-DD') as discount_until,
-      ts.billing_cycle, ts.next_billing_on, ts.billing_amount, ts.past_due_since, ts.billing_lock, ts.billing_grace_until,
+      ts.billing_cycle, ts.next_billing_on, ts.billing_amount, ts.past_due_since, ts.billing_lock, ts.billing_grace_until, ts.cancel_at_period_end,
+      -- #1163 ①: 이번 달(서울) 결제 합계 — 부가세 포함, 환불(취소)한 만큼 뺀 금액
+      (select coalesce(sum(p.amount - coalesce(p.canceled_amount, 0)), 0)::int from payments p where p.tenant = t.id and p.status in ('paid', 'partial_canceled', 'canceled')
+        and p.paid_at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul') as month_paid,
       (select count(*)::int from users x where x.tenant = t.id and x.status = 'active' and x.last_login_at > now() - interval '7 days') as active7,
       (select max(l.at) from tenant_contact_logs l where l.tenant = t.id) as last_contact_at,
       (select to_char(l.next_at, 'YYYY-MM-DD') from tenant_contact_logs l where l.tenant = t.id and l.next_at is not null order by l.at desc, l.created_at desc limit 1) as next_contact_at,
@@ -64,6 +67,7 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
     sql<{ tenant: string; credits: number }[]>`select tenant, coalesce(sum(credits), 0)::float8 credits from mkt_credit_ledger where created_at >= (${monthStart}::date::timestamp at time zone 'Asia/Seoul') group by tenant`.catch(() => []),
   ]);
   const B = await import('./ai/companyBudget');
+  const risks = await (await import('./customerOps')).riskOf(sql, rows.filter((r) => !r.is_test).map((r) => r.id)).catch(() => new Map()); // #1163 ② 해지 위험
   const tenants = await Promise.all(rows.map(async (r) => {
     const { limits } = await P.effectiveLimits(r.id, sql).catch(() => ({ limits: { aiRequests: null } as { aiRequests: number | null } }));
     const budget = await B.companyAiBudget(r.id, sql).catch(() => null); // 대표 10/24 ② 회사 월 AI 예산(원)
@@ -71,7 +75,8 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
     const creditsLimit = ms ? ms.monthly_credits ?? (ms.plan_code ? mktPlans[ms.plan_code]?.monthlyCredits ?? null : null) : null;
     const creditsUsed = mktUsed.find((x) => x.tenant === r.id)?.credits ?? 0;
     const aiLimit = limits.aiRequests ?? null;
-    return { ...r, stage: stageOf(r), ai_limit_requests: aiLimit, ai_left_requests: aiLimit === null ? null : Math.max(0, aiLimit - Number(r.ai_requests)),
+    const overdue_days = r.past_due_since ? Math.max(0, Math.floor((Date.now() - new Date(r.past_due_since).getTime()) / 86_400_000)) : null; // #1163 ① 미납 일수
+    return { ...r, overdue_days, risks: risks.get(r.id) ?? [], stage: stageOf(r), ai_limit_requests: aiLimit, ai_left_requests: aiLimit === null ? null : Math.max(0, aiLimit - Number(r.ai_requests)),
       ai_budget: budget ? { source: budget.source, limitKrw: budget.limitKrw, usedKrw: budget.usedKrw, pct: budget.pct, over: budget.over } : null,
       mkt_plan_code: ms?.plan_code ?? null, mkt_credits_limit: creditsLimit, mkt_credits_used: creditsUsed, mkt_credits_left: creditsLimit === null ? null : Math.max(0, Math.round((creditsLimit - creditsUsed) * 10) / 10) };
   }));
@@ -81,6 +86,7 @@ export async function tenantDirectory(u: SessionUser, q: { q?: string; status?: 
   const revenueKrw = Math.round(customers.reduce((a, t) => a + (t.billing_amount ? (t.billing_cycle === 'annual' ? Number(t.billing_amount) / 12 : Number(t.billing_amount)) / 1.1 : 0), 0));
   const summary = { month: monthStart.slice(0, 7), aiCostKrw, customerAiCostKrw, revenueKrw, marginKrw: revenueKrw - customerAiCostKrw, marginPct: revenueKrw > 0 ? Math.round(((revenueKrw - customerAiCostKrw) / revenueKrw) * 1000) / 10 : null,
     customers: customers.length, paying: customers.filter((t) => t.billing_amount).length,
+    monthPaidKrw: customers.reduce((a, t) => a + Number(t.month_paid ?? 0), 0), risky: customers.filter((t) => t.risks.length).length, overdue: customers.filter((t) => t.overdue_days !== null).length, // #1163 ①②
     contactDue: customers.filter((t) => t.next_contact_at && t.next_contact_at <= kstDay()).length }; // #656 오늘까지 연락할 곳
   const stage = (q.stage ?? '').trim();
   return { tenants: stage ? tenants.filter((t) => t.stage === stage) : tenants, summary };
@@ -125,7 +131,8 @@ export async function tenantAdminDetail(u: SessionUser, tenant: string) {
   const spaceBilling = { grants: t.space_grants ?? {}, mktPlanCode: ms?.plan_code ?? null, mktBilled: await SC.billedMarketing(sql, tenant), mktPlans };
   // #1158 결제 수단(보기 전용 — 카드 바꾸기·삭제는 회사 관리자 결제 화면에서)
   const [card] = await sql<{ card_name: string | null; card_last4: string | null; created_at: Date }[]>`select card_name, card_last4, created_at from billing_cards where tenant = ${tenant} and removed_at is null`;
-  return { card: card ?? null, spaceBilling, consults, ownerInvite, captureEvents30d, partner, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
+  const risks = t.is_test ? [] : ((await (await import('./customerOps')).riskOf(sql, [tenant]).catch(() => new Map())).get(tenant) ?? []); // #1163 ② 해지 위험 사유
+  return { risks, card: card ?? null, spaceBilling, consults, ownerInvite, captureEvents30d, partner, billing, payments, tenant: t, stage, contacts, subscription: { planCode: sub.plan_code, planName: sub.plan_name, status: sub.status, trialEndsAt: sub.trial_ends_at ?? null, overrides: sub.limit_overrides ?? {}, addons: sub.addons ?? {} }, limits, usage, users, support, aiBudget,
     mktWrite: await (await import('./mktPlans')).tenantWriteView(tenant).catch(() => null) }; // 대표 10/24 추가 ① 마케팅 글 모델
 }
 

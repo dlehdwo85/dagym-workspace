@@ -1,6 +1,6 @@
 'use client';
 import { dtf } from '@/lib/dtf';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Download, Eye, KeyRound, Lock, LockOpen, Plus, Search, ShieldOff, Trash2 } from 'lucide-react';
 import { INDUSTRIES } from '@/lib/industries';
@@ -30,8 +30,15 @@ export function PlatformTenants() {
   const [status, setStatus] = useState('');
   const [segment, setSegment] = useState(''); // #656 구분(설계 파트너/일반)
   const [stage, setStage] = useState(''); // #656 단계(체험/유료/보류/해지)
+  const [sort, setSort] = useState<'' | 'paid' | 'next' | 'overdue' | 'risk'>(''); // #1163 ① 정렬(화면에서 — 목록은 최대 300곳)
   const qs = `q=${encodeURIComponent(query)}&status=${status}&segment=${segment}&stage=${stage}`;
-  const list = useApi<{ tenants: any[]; summary?: { month: string; aiCostKrw: number; customerAiCostKrw: number; revenueKrw: number; marginKrw: number; marginPct: number | null; customers: number; paying: number; contactDue?: number } }>(`/api/platform/tenants?${qs}`, [qs]);
+  const list = useApi<{ tenants: any[]; summary?: { month: string; aiCostKrw: number; customerAiCostKrw: number; revenueKrw: number; marginKrw: number; marginPct: number | null; customers: number; paying: number; contactDue?: number; monthPaidKrw?: number; risky?: number; overdue?: number } }>(`/api/platform/tenants?${qs}`, [qs]);
+  const rows = useMemo(() => {
+    const all = list.data?.tenants ?? []; if (!sort) return all;
+    const key = (t: any): number => sort === 'paid' ? -Number(t.month_paid ?? 0) : sort === 'next' ? (t.next_billing_on ? new Date(t.next_billing_on).getTime() : Infinity)
+      : sort === 'overdue' ? -(t.overdue_days ?? -1) : -(t.risks?.length ?? 0);
+    return [...all].sort((a, b) => key(a) - key(b) || String(b.created_at).localeCompare(String(a.created_at)));
+  }, [list.data, sort]);
   const sm = list.data?.summary;
   const [open, setOpen] = useState<string | null>(null);
   const sp = useSearchParams(); // 208차 #667: 알림 링크(?tenant=)로 오면 그 회사 관리 창을 바로 연다
@@ -63,16 +70,20 @@ export function PlatformTenants() {
           {sm.month} AI 원가(고객사) <b>{sm.customerAiCostKrw.toLocaleString('ko-KR')}원</b>{sm.aiCostKrw !== sm.customerAiCostKrw && <span className="text-ink-3"> (우리 회사·시험 포함 {sm.aiCostKrw.toLocaleString('ko-KR')}원)</span>}
           {' '}vs 요금 합계(월 환산·VAT 제외) <b>{sm.revenueKrw.toLocaleString('ko-KR')}원</b> → 마진 <b className={sm.marginKrw < 0 ? 'text-red-600' : 'text-emerald-700'}>{sm.marginKrw.toLocaleString('ko-KR')}원{sm.marginPct !== null ? ` (${sm.marginPct}%)` : ''}</b>
           <span className="text-ink-3"> · 고객사 {sm.customers}곳 중 결제 {sm.paying}곳</span>
+          {sm.monthPaidKrw !== undefined && <span className="text-ink-2" data-testid="platform-month-paid"> · 이번 달 결제 합계 <b>{sm.monthPaidKrw.toLocaleString('ko-KR')}원</b>(부가세 포함, 환불 뺌)</span>}
+          {!!sm.overdue && <span className="ml-1 rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-700">미납 {sm.overdue}곳</span>}
+          {!!sm.risky && <button type="button" className="ml-1 rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-700 underline-offset-2 hover:underline" onClick={() => setSort('risk')} data-testid="platform-risky">해지 위험 {sm.risky}곳</button>}
           {!!sm.contactDue && <span className="ml-1 rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-700" data-testid="platform-contact-due">오늘까지 연락할 곳 {sm.contactDue}곳</span>}
         </p>
       )}
       <div className="max-h-[28rem] overflow-auto">
-        <table className="w-full min-w-[1180px] text-sm">
-          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>회사</th><th className={cell}>단계</th><th className={cell}>담당자</th><th className={cell}>요금제</th><th className={cell}>상태</th><th className={cell}>인원</th><th className={cell}>저장</th><th className={cell}>AI(이번 달)</th><th className={cell}>청구·미납</th><th className={cell}>연락</th><th className={cell}>최근 접속</th><th className={cell}>가입</th><th className={cell} /></tr></thead>
+        <table className="w-full min-w-[1320px] text-sm">
+          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>회사</th><th className={cell}>단계</th><th className={cell}>담당자</th><th className={cell}>요금제</th><th className={cell}>상태</th><th className={cell}>인원</th><th className={cell}>저장</th><th className={cell}>AI(이번 달)</th>
+            {([['paid', '이번 달 결제'], ['next', '다음 결제'], ['overdue', '미납']] as const).map(([k, l]) => <th key={k} className={cell}><button type="button" className={cx('underline-offset-2 hover:underline', sort === k && 'font-semibold text-ink-1')} onClick={() => setSort(sort === k ? '' : k)} data-testid={`platform-sort-${k}`}>{l}{sort === k ? ' ↓' : ''}</button></th>)}<th className={cell}>연락</th><th className={cell}>최근 접속</th><th className={cell}>가입</th><th className={cell} /></tr></thead>
           <tbody>
-            {(list.data?.tenants ?? []).map((t) => (
+            {rows.map((t) => (
               <tr key={t.id} className={cx('border-t border-line', t.status !== 'active' && 'bg-slate-50 text-ink-3')} data-tenant={t.id}>
-                <td className={cell}><div className="font-medium">{t.name}{t.segment === 'partner' && <span className="ml-1 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-normal text-violet-800" data-testid={`company-partner-${t.id}`}>파트너</span>}{t.owner_invited && <span className="ml-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-normal text-amber-800">초대 대기</span>}</div><div className="text-[11px] text-ink-3">{t.id} · {t.owner_email ?? '-'}</div></td>
+                <td className={cell}><div className="font-medium">{t.name}{t.segment === 'partner' && <span className="ml-1 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-normal text-violet-800" data-testid={`company-partner-${t.id}`}>파트너</span>}{t.owner_invited && <span className="ml-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-normal text-amber-800">초대 대기</span>}{!!t.risks?.length && <span className="ml-1 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700" title={t.risks.map((r: any) => r.label).join('\n')} data-testid={`company-risk-${t.id}`}>해지 위험 {t.risks.length}</span>}</div><div className="text-[11px] text-ink-3">{t.id} · {t.owner_email ?? '-'}</div></td>
                 <td className={cell}><span className={cx('rounded-full px-2 py-0.5 text-xs', STAGE_CLS[t.stage] ?? 'bg-slate-100')} data-testid={`company-stage-${t.id}`}>{STAGE[t.stage] ?? t.stage}</span>{t.lifecycle && <div className="text-[11px] text-ink-3" title={t.lifecycle_note ?? ''}>직접 정함{t.lifecycle_note ? ` · ${t.lifecycle_note}` : ''}</div>}</td>
                 <td className={cell}>{t.contact_name || t.contact_phone ? <><div>{t.contact_name ?? '-'}{t.contact_title ? <span className="text-[11px] text-ink-3"> {t.contact_title}</span> : null}</div><div className="text-[11px] text-ink-3">{t.contact_phone ?? ''}</div></> : <span className="text-ink-3">-</span>}{t.source && <div className="text-[11px] text-ink-3">경로 {t.source}</div>}</td>
                 <td className={cell}>{t.plan_code ?? '-'}<div className="text-[11px] text-ink-3" data-testid={`company-sub-${t.id}`}>{t.signup_status === 'rejected' ? '해당 없음(가입 거절)' : t.signup_status === 'pending' ? '체험 전(승인 대기)' : SUB[t.sub_status] ?? ''}{t.signup_status === 'approved' && t.sub_status === 'trial' && t.trial_ends_at ? ` ~${String(t.trial_ends_at).slice(0, 10)}` : ''}{t.discount_pct ? ` · 할인 ${t.discount_pct}%` : ''}</div></td>
@@ -83,17 +94,20 @@ export function PlatformTenants() {
                   <div className="text-[11px] text-ink-3">{t.ai_left_requests === null || t.ai_left_requests === undefined ? 'AI 요청 무제한' : `남은 ${t.ai_left_requests}회`}{t.mkt_credits_limit !== null && t.mkt_credits_limit !== undefined ? ` · 마케팅 ${t.mkt_credits_left}/${t.mkt_credits_limit}크레딧` : ''}</div>
                   {t.ai_budget && t.ai_budget.source !== 'legacy' && <div className={cx('text-[11px]', t.ai_budget.over ? 'font-semibold text-red-600' : (t.ai_budget.pct ?? 0) >= 80 ? 'text-amber-700' : 'text-ink-3')} data-testid={`company-ai-budget-${t.id}`}>
                     월 AI 예산 {t.ai_budget.limitKrw === null ? '무제한' : `${Number(t.ai_budget.limitKrw).toLocaleString()}원 중 ${t.ai_budget.pct}%`}{t.ai_budget.over ? ' · 멈춤' : ''}</div>}</td>
-                <td className={cell}>{t.billing_amount ? `${Number(t.billing_amount).toLocaleString()}원/${t.billing_cycle === 'annual' ? '년' : '월'}` : '-'}
-                  {t.next_billing_on && <div className="text-[11px] text-ink-3">다음 {String(t.next_billing_on).slice(0, 10)}</div>}
-                  {t.past_due_since && <div className="text-[11px] font-medium text-red-600">미납 {String(t.past_due_since).slice(0, 10)}~{t.billing_lock === 'suspended' ? ' · 이용 중지' : t.billing_lock === 'read_only' ? ' · 읽기 전용' : ''}</div>}
+                <td className={cx(cell, 'tabular-nums')} data-testid={`company-month-paid-${t.id}`}>{Number(t.month_paid) ? `${Number(t.month_paid).toLocaleString()}원` : '-'}
+                  {t.billing_amount ? <div className="text-[11px] text-ink-3">정기 {Number(t.billing_amount).toLocaleString()}원/{t.billing_cycle === 'annual' ? '년' : '월'}</div> : null}
                   {t.last_payment && <div className="text-[11px] text-ink-3">최근 {String(t.last_payment.at).slice(0, 10)} {t.last_payment.status === 'paid' ? '성공' : t.last_payment.status}</div>}</td>
+                <td className={cx(cell, 'whitespace-nowrap')} data-testid={`company-next-bill-${t.id}`}>{t.next_billing_on ? String(t.next_billing_on).slice(0, 10) : '-'}{t.cancel_at_period_end && <div className="text-[11px] text-amber-700">해지 예약</div>}</td>
+                <td className={cx(cell, 'whitespace-nowrap')} data-testid={`company-overdue-${t.id}`}>{t.overdue_days !== null && t.overdue_days !== undefined
+                  ? <><span className="font-medium text-red-600">{t.overdue_days}일</span><div className="text-[11px] text-red-600">{String(t.past_due_since).slice(0, 10)}부터{t.billing_lock === 'suspended' ? ' · 이용 중지' : t.billing_lock === 'read_only' ? ' · 읽기 전용' : ''}</div></>
+                  : <span className="text-ink-3">-</span>}</td>
                 <td className={cell} data-testid={`company-contact-${t.id}`}>{t.next_contact_at ? <div className={cx('text-xs', t.next_contact_at <= today ? 'font-medium text-red-600' : 'text-ink-2')}>다음 {t.next_contact_at}</div> : null}{t.last_contact_at ? <div className="text-[11px] text-ink-3">마지막 {String(t.last_contact_at).slice(0, 10)}</div> : !t.next_contact_at ? <span className="text-ink-3">-</span> : null}</td>
                 <td className={cell}>{t.last_login_at ? fmtDateTime(t.last_login_at) : '-'}</td>
                 <td className={cell}>{String(t.created_at).slice(0, 10)}</td>
                 <td className={cell}><Button size="sm" variant="secondary" onClick={() => setOpen(t.id)} data-testid={`company-open-${t.id}`}>관리</Button></td>
               </tr>
             ))}
-            {list.data && !list.data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={13}>찾는 회사가 없습니다</td></tr>}
+            {list.data && !list.data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={15}>찾는 회사가 없습니다</td></tr>}
           </tbody>
         </table>
       </div>

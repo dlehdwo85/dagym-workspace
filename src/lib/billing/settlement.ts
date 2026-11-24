@@ -221,21 +221,27 @@ export async function myTaxInvoices(u: SessionUser) {
   const sql = db(); const t = tenantOf(u);
   if (!isAdmin(u)) return { requests: [], defaults: null };
   const [prof] = await sql<any[]>`select name, biz_no, ceo, address, email from company_profiles where tenant = ${t} order by is_default desc, updated_at desc limit 1`;
-  const requests = await sql`select id, payment_id, company_name, biz_no, email, amount, status, issued_at, created_at from tax_invoice_requests where tenant = ${t} order by created_at desc limit 50`;
+  const requests = await sql`select r.id, r.payment_id, r.company_name, r.biz_no, r.email, r.amount, ${sql.unsafe(TAX_STATE_SQL)} as status, r.issued_at, r.sent_at, r.created_at from tax_invoice_requests r where r.tenant = ${t} order by created_at desc limit 50`;
   return { requests, defaults: prof ? { companyName: prof.name, bizNo: prof.biz_no, ceo: prof.ceo, address: prof.address, email: prof.email || u.email } : { companyName: '', bizNo: '', ceo: '', address: '', email: u.email } };
 }
 export async function listTaxInvoices(u: SessionUser, status?: string) {
   requirePlatform(u);
-  return { requests: await db()`select r.id, r.tenant, t.name as tenant_name, r.payment_id, r.company_name, r.biz_no, r.ceo, r.address, r.email, r.amount, r.status, r.issued_at, r.note, r.created_at, us.name as requested_by_name,
+  return { requests: await db()`select r.id, r.tenant, t.name as tenant_name, r.payment_id, r.company_name, r.biz_no, r.ceo, r.address, r.email, r.amount, ${db().unsafe(TAX_STATE_SQL)} as status, r.issued_at, r.sent_at, r.note, r.created_at, us.name as requested_by_name,
       p.paid_at, p.plan_code, p.kind from tax_invoice_requests r join tenants t on t.id = r.tenant left join users us on us.id = r.requested_by left join payments p on p.id = r.payment_id
     where ${status ? db()`r.status = ${status}` : db()`true`} order by (r.status = 'requested') desc, r.created_at desc limit 200` };
 }
-export const taxMarkInput = z.object({ status: z.enum(['requested', 'issued', 'canceled']), note: z.string().max(300).optional().nullable() });
+/** #1163 ⑤ 상태: 요청(requested) → 발행(issued) → 보냄(sent = issued + sent_at) · 취소(canceled). 운영자가 바꾸고 감사 기록 */
+export const taxMarkInput = z.object({ status: z.enum(['requested', 'issued', 'sent', 'canceled']), note: z.string().max(300).optional().nullable() });
 export async function markTaxInvoice(u: SessionUser, id: string, i: z.infer<typeof taxMarkInput>, ip: string | null) {
   requirePlatform(u);
   const sql = db();
-  const [r] = await sql<{ id: string }[]>`update tax_invoice_requests set status = ${i.status}, issued_at = ${i.status === 'issued' ? new Date() : null}, note = coalesce(${i.note ?? null}, note), updated_at = now() where id = ${id} returning id`;
+  const st = i.status === 'sent' ? 'issued' : i.status;
+  const [r] = await sql<{ id: string; tenant: string; payment_id: string | null }[]>`update tax_invoice_requests set status = ${st},
+      issued_at = ${st === 'issued' ? sql`coalesce(issued_at, now())` : sql`null`}, sent_at = ${i.status === 'sent' ? sql`coalesce(sent_at, now())` : sql`null`},
+      note = coalesce(${i.note ?? null}, note), updated_at = now() where id = ${id} returning id, tenant, payment_id`;
   if (!r) throw notFound();
-  await audit(sql, u.id, 'tax_invoice.mark', 'tax_invoice', id, { status: i.status }, ip);
+  await audit(sql, u.id, 'tax_invoice.mark', 'tax_invoice', id, { status: i.status, tenant: r.tenant, paymentId: r.payment_id }, ip);
   return { ok: true };
 }
+/** 화면용 상태 이름 */
+export const TAX_STATE_SQL = `case when r.status = 'issued' and r.sent_at is not null then 'sent' else r.status end`;

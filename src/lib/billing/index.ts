@@ -474,7 +474,8 @@ export async function platformPayments(u: SessionUser, f: z.infer<typeof platfor
   if (!u.platformAdmin) throw notFound();
   const sql = db(); const q = f.q ? `%${f.q}%` : null; const hideTest = f.hideTest !== '0';
   const payments = await sql`select p.id, p.tenant, t.name as tenant_name, p.kind, p.plan_code, p.addon_code, p.amount, p.status, p.canceled_amount, p.result_msg, p.card_name, p.card_no, p.paid_at, p.created_at, t.is_test,
-      ${sql.unsafe(PAY_VIA_SQL)} as via, p.meta->>'test' = 'true' as test_pay
+      ${sql.unsafe(PAY_VIA_SQL)} as via, p.meta->>'test' = 'true' as test_pay,
+      (select case when r.status = 'issued' and r.sent_at is not null then 'sent' else r.status end from tax_invoice_requests r where r.payment_id = p.id and r.status <> 'canceled' limit 1) as tax -- #1163 ⑤
     from payments p join tenants t on t.id = p.tenant
     where (${q}::text is null or t.name ilike ${q} or p.tenant ilike ${q})
       and (${f.status || null}::text is null or p.status = ${f.status || null})
@@ -495,16 +496,21 @@ export async function platformPaymentDetail(u: SessionUser, id: string) {
   if (!p) throw notFound();
   const [sub] = await sql`select plan_code, status, billing_cycle, next_billing_on::text, billing_amount from tenant_subscriptions where tenant = ${p.tenant}`;
   const refunds = await sql`select a.created_at, a.detail, us.name as by_name from audit_logs a left join users us on us.id = a.actor_id where a.action = 'billing.refund' and a.target_id = ${id} order by a.created_at`;
+  // #1163 ⑤ 세금계산서(요청 → 발행 → 보냄) — 운영자가 결제 상세에서 바꿈
+  const [tax] = await sql`select r.id, case when r.status = 'issued' and r.sent_at is not null then 'sent' else r.status end as status, r.company_name, r.biz_no, r.email, r.amount, r.created_at, r.issued_at, r.sent_at
+    from tax_invoice_requests r where r.payment_id = ${id} and r.status <> 'canceled' order by r.created_at desc limit 1`;
   const prev = p.meta?.prev ?? null;
   return { payment: { id: p.id, tenant: p.tenant, tenantName: p.tenant_name, isTest: p.is_test, kind: p.kind, planCode: p.plan_code, addonCode: p.addon_code, amount: p.amount, canceled: p.canceled_amount, status: p.status,
       via: p.via, cardName: p.card_name, cardNo: p.card_no, authCode: p.auth_code, paidAt: p.paid_at, createdAt: p.created_at, resultMsg: p.result_msg, createdBy: p.created_by_name,
       receiptUrl: p.tid && ['paid', 'partial_canceled', 'canceled'].includes(p.status) ? `https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=${encodeURIComponent(p.tid)}&type=0` : null,
       testPay: p.meta?.test === true, payMethod: p.meta?.payMethod ?? null, easyPay: p.meta?.easyPay ?? null },
+    tax: tax ?? null,
     subscription: sub ?? null, refunds: refunds.map((r: any) => ({ at: r.created_at, amount: r.detail?.amount ?? null, reason: r.detail?.reason ?? null, reverted: !!r.detail?.reverted, by: r.by_name })),
     canRefund: ['paid', 'partial_canceled'].includes(p.status) && !!p.tid, left: p.amount - p.canceled_amount,
     revert: prev ? { planCode: prev.plan_code ?? null, status: prev.status ?? null, cycle: prev.billing_cycle ?? null } : null };
 }
-export const refundInput = z.object({ amount: z.number().int().positive().optional(), reason: z.string().trim().min(1).max(100), revertPlan: z.boolean().optional() });
+export const refundInput = z.object({ amount: z.number().int().positive().optional(), reason: z.string().trim().min(1).max(100), revertPlan: z.boolean().optional(),
+  reasonCode: z.enum(['customer', 'duplicate', 'unhappy', 'test', 'other']).optional() }); // #1163 ⑥ 사유 고르기(통계)
 /** 환불(전체·부분 취소) */
 export async function refundPayment(u: SessionUser, id: string, i: z.infer<typeof refundInput>, ip: string | null) {
   if (!u.platformAdmin) throw notFound();
@@ -522,6 +528,6 @@ export async function refundPayment(u: SessionUser, id: string, i: z.infer<typeo
   await sql`update payments set canceled_amount = ${canceled}, status = ${canceled >= p.amount ? 'canceled' : 'partial_canceled'}, updated_at = now() where id = ${id}`;
   // V32 1: 전체 취소면 요금제 원복(시험 결제는 늘, 실제 결제는 고른 경우만)
   const reverted = canceled >= p.amount && (i.revertPlan ?? !!p.meta?.test) ? await revertPlan(sql, p) : false;
-  await audit(sql, u.id, 'billing.refund', 'payment', id, { tenant: p.tenant, amount: amt, reason: i.reason, reverted }, ip);
+  await audit(sql, u.id, 'billing.refund', 'payment', id, { tenant: p.tenant, amount: amt, reason: i.reason, reasonCode: i.reasonCode ?? (await import('../customerOps')).refundCodeOf({ reason: i.reason }), reverted }, ip);
   return { ok: true, canceled, reverted };
 }
