@@ -48,7 +48,10 @@ const api = async (method, path, body) => {
   return j;
 };
 
-const browser = await chromium.launch().catch(() => chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })); // 깃허브는 설치한 것, 클라우드 시험 기계는 미리 깔린 것
+// 로컬 11/24(prod-check 10분 넘음 — 브라우저 설치가 7분): 깃허브 실행기에는 크롬이 미리 깔려 있어 PW_CHANNEL=chrome 이면 그것을 씀(설치 없음)
+// 그 밖에는 설치한 Playwright 크로미움 → 클라우드 시험 기계에 미리 깔린 것 순서
+const browser = await (process.env.PW_CHANNEL ? chromium.launch({ channel: process.env.PW_CHANNEL }) : Promise.reject(new Error('채널 없음')))
+  .catch(() => chromium.launch()).catch(() => chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }));
 const ctx = await browser.newContext({ locale: 'ko-KR', timezoneId: 'Asia/Seoul', viewport: { width: 1440, height: 900 } });
 await ctx.addCookies([{ name: 'wos_session', value: cookie.split('=').slice(1).join('='), url: BASE }]);
 const page = await ctx.newPage();

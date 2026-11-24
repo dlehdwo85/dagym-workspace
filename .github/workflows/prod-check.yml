@@ -33,7 +33,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci --ignore-scripts
-      - run: npx playwright install --with-deps chromium
+      # 로컬 11/24: 'playwright install --with-deps' 가 7분 걸려 점검이 10분을 넘음 — 실행기에 미리 깔린 크롬이 있으면 그것을 씀(점검 자체는 1분 안)
+      - name: 브라우저 준비(미리 깔린 크롬, 없으면 설치)
+        run: |
+          if command -v google-chrome >/dev/null 2>&1; then echo "PW_CHANNEL=chrome" >> "$GITHUB_ENV"; google-chrome --version
+          else npx playwright install --with-deps chromium; fi
       - name: 기본 점검(11개 + 검수 계정 로그인)
         env: { SMOKE_EMAIL: '${{ secrets.PROD_QA_EMAIL }}', SMOKE_PASSWORD: '${{ secrets.PROD_QA_PASSWORD }}' }
         run: node scripts/verify-prod.mjs "$BASE"

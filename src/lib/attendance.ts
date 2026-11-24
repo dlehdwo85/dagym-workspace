@@ -96,12 +96,14 @@ export async function clock(u: SessionUser, i: z.infer<typeof clockInput>, ip: s
     if (!inside && !i.reason) throw new HttpError(400, 'outside', `현장 밖입니다 (${d.s.name}에서 ${Math.round(d.dist)}m) — 사유를 적어 주세요`, { nearest });
   }
   const lat = has ? i.lat! : null, lng = has ? i.lng! : null;
+  // D-18 보호조치 ③: 좌표는 앱 수준 암호화 칸에만 저장(평문 위도·경도 칸은 비움) — 근무지 판정은 위에서 받은 값으로 이미 끝남
+  const locEnc = await (await import('./locationProtect')).encLoc(lat, lng, has ? i.accuracy ?? null : null);
   const reason = i.reason?.trim() || (!has && ss.length ? '위치 없음' : null);
   if (i.type === 'in') {
-    await sql`insert into attendance (tenant, user_id, day, in_at, in_lat, in_lng, in_site_id, in_inside, in_reason) values (${t}, ${u.id}, ${day}, now(), ${lat}, ${lng}, ${siteId}, ${inside}, ${reason})
-      on conflict (tenant, user_id, day) do update set in_at = now(), in_lat = excluded.in_lat, in_lng = excluded.in_lng, in_site_id = excluded.in_site_id, in_inside = excluded.in_inside, in_reason = excluded.in_reason, updated_at = now()`;
+    await sql`insert into attendance (tenant, user_id, day, in_at, in_lat, in_lng, in_loc_enc, in_site_id, in_inside, in_reason) values (${t}, ${u.id}, ${day}, now(), null, null, ${locEnc}, ${siteId}, ${inside}, ${reason})
+      on conflict (tenant, user_id, day) do update set in_at = now(), in_lat = null, in_lng = null, in_loc_enc = excluded.in_loc_enc, in_site_id = excluded.in_site_id, in_inside = excluded.in_inside, in_reason = excluded.in_reason, updated_at = now()`;
   } else {
-    await sql`update attendance set out_at = now(), out_lat = ${lat}, out_lng = ${lng}, out_site_id = ${siteId}, out_inside = ${inside}, out_reason = ${reason}, updated_at = now() where tenant = ${t} and user_id = ${u.id} and day = ${day}`;
+    await sql`update attendance set out_at = now(), out_lat = null, out_lng = null, out_loc_enc = ${locEnc}, out_site_id = ${siteId}, out_inside = ${inside}, out_reason = ${reason}, updated_at = now() where tenant = ${t} and user_id = ${u.id} and day = ${day}`;
   }
   if (has) await logLocation(sql, t, 'collect', u.id, { type: i.type, day, inside });
   await audit(sql, u.id, `attendance.${i.type}`, 'attendance', null, { day, inside, site: nearest?.name ?? null }, ip);
@@ -235,18 +237,22 @@ export async function myLocation(u: SessionUser) {
 export async function withdrawLocation(u: SessionUser, ip: string | null) {
   const sql = db(); const t = tenantOf(u);
   await sql`update user_settings set location_consent_at = null where user_id = ${u.id}`;
-  const r = await sql`update attendance set in_lat = null, in_lng = null, out_lat = null, out_lng = null, updated_at = now()
-    where user_id = ${u.id} and (in_lat is not null or out_lat is not null)`;
+  const r = await sql`update attendance set in_lat = null, in_lng = null, out_lat = null, out_lng = null, in_loc_enc = null, out_loc_enc = null, updated_at = now()
+    where user_id = ${u.id} and (in_lat is not null or out_lat is not null or in_loc_enc is not null or out_loc_enc is not null)`;
   await logLocation(sql, t, 'withdraw', u.id, { purged: r.count });
   await audit(sql, u.id, 'attendance.location_withdraw', 'user', u.id, { purged: r.count }, ip);
   return { ok: true, purged: r.count };
 }
 /** 정기 실행: 6개월 지난 출퇴근 좌표 파기 · 1년 지난 확인자료 삭제(법정 6개월 이상 보관) */
 export async function locationRetentionTick(sql: Sql = db()) {
-  const rows = await sql<{ tenant: string; n: number }[]>`with x as (update attendance set in_lat = null, in_lng = null, out_lat = null, out_lng = null
-      where day < (now() at time zone 'Asia/Seoul')::date - interval '6 months' and (in_lat is not null or out_lat is not null) returning tenant)
+  const P = await import('./locationProtect');
+  const moved = await P.migratePlainCoords(sql).catch(() => 0); // D-18 ③ 예전 평문 좌표 → 암호화 칸
+  const rows = await sql<{ tenant: string; n: number }[]>`with x as (update attendance set in_lat = null, in_lng = null, out_lat = null, out_lng = null, in_loc_enc = null, out_loc_enc = null
+      where day < (now() at time zone 'Asia/Seoul')::date - interval '6 months' and (in_lat is not null or out_lat is not null or in_loc_enc is not null or out_loc_enc is not null) returning tenant)
     select tenant, count(*)::int n from x group by tenant`;
   for (const r of rows) await logLocation(sql, r.tenant, 'purge', null, { rows: r.n, rule: '6개월' });
-  const old = await sql`delete from location_logs where created_at < now() - interval '1 year'`;
-  return { purgedTenants: rows.length, purgedRows: rows.reduce((a, b) => a + b.n, 0), oldLogs: old.count };
+  // D-18 ④ 확인자료는 트리거가 지키므로(1년 전 지우기·고치기 금지) 이 거래 안에서만 정기 파기 표시를 켜고 지움
+  const old = await db().begin(async (tx: Sql) => { await tx`select set_config('app.location_purge', 'on', true)`; return tx`delete from location_logs where created_at < now() - interval '1 year'`; });
+  const protect = await P.locationProtectTick(sql).catch(() => null); // ④ 매일 요약 해시 · ⑥ 자체 점검
+  return { moved, purgedTenants: rows.length, purgedRows: rows.reduce((a, b) => a + b.n, 0), oldLogs: old.count, protect };
 }

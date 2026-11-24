@@ -21,8 +21,8 @@ test('목록 밖 회사는 위치 없이 시각만 · 우리 회사는 지금처
   const v = await T.c.ok('GET', '/api/attendance');
   assert.equal(v.location, false);
   await T.c.ok('POST', '/api/attendance', { type: 'in', lat: 37.5665, lng: 126.978, accuracy: 10 }); // 동의 없이도 됨(묻지 않음)
-  const [a] = await sql`select in_at, in_lat, in_lng from attendance where user_id = ${T.id} and day = ${seoulToday()}`;
-  assert.ok(a.in_at); assert.deepEqual([a.in_lat, a.in_lng], [null, null], '좌표를 저장하지 않음');
+  const [a] = await sql`select in_at, in_lat, in_lng, in_loc_enc from attendance where user_id = ${T.id} and day = ${seoulToday()}`;
+  assert.ok(a.in_at); assert.deepEqual([a.in_lat, a.in_lng, a.in_loc_enc], [null, null, null], '좌표를 저장하지 않음');
   assert.equal((await sql`select location_consent_at from user_settings where user_id = ${T.id}`)[0]?.location_consent_at ?? null, null, '동의 기록도 만들지 않음');
 
   const o = await ctx.owner.ok('GET', '/api/attendance');
@@ -30,6 +30,6 @@ test('목록 밖 회사는 위치 없이 시각만 · 우리 회사는 지금처
   const no = await ctx.owner.req('POST', '/api/attendance', { type: 'in', lat: 37.5665, lng: 126.978, accuracy: 10 });
   assert.equal(no.status, 400, '우리 회사는 지금처럼 위치 동의 필요');
   await ctx.owner.ok('POST', '/api/attendance', { type: 'in', lat: 37.5665, lng: 126.978, accuracy: 10, consent: true });
-  const [b] = await sql`select in_lat from attendance where user_id = ${ctx.ownerId} and day = ${seoulToday()}`;
-  assert.ok(b.in_lat, '우리 회사는 위치 저장');
+  const [b] = await sql`select in_lat, in_loc_enc from attendance where user_id = ${ctx.ownerId} and day = ${seoulToday()}`;
+  assert.ok(b.in_loc_enc?.startsWith('v1.'), '우리 회사는 위치 저장 — D-18 보호조치 ③ 암호화 칸에만'); assert.equal(b.in_lat, null, '평문 좌표 없음');
 });
