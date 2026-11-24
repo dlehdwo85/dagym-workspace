@@ -66,17 +66,37 @@ export async function fillSupportAttachments(opt: { max?: number; programId?: st
       await sql`update support_programs set raw = coalesce(raw, '{}'::jsonb) || ${sql.json({ files_checked_at: new Date().toISOString().slice(0, 19), files_found: files.length, files_error: null, files_v: FILES_V } as never)}${files.length ? sql`, attachments = ${sql.json(files as never)}` : sql``} where id = ${p.id}`;
       if (!files.length) continue;
       filled++;
-      // 그 공고로 만든 열린 업무(회사마다) → 자료실 저장 + 업무에 붙임(같은 파일은 한 번)
-      const works = await sql<{ tenant: string; task_id: string; owner_id: string | null; created_by: string | null }[]>`select w.tenant, w.task_id, w.owner_id, w.created_by from support_work w join tasks t on t.id = w.task_id
-        where w.program_id = ${p.id} and w.withdrawn_at is null and t.deleted_at is null and t.status <> 'done'`;
-      for (const w of works) {
-        const { actorOf } = await import('./bidTasks');
-        const u = (await actorOf(sql, w.owner_id)) ?? (await actorOf(sql, w.created_by));
-        if (!u || u.tenant !== w.tenant) continue;
-        const r = await (await import('./autoAttach')).attachSourceFiles(u, { kind: 'support', id: p.id, taskIds: [w.task_id] }).catch((e) => { errors.push(String(e?.message ?? e).slice(0, 80)); return null; });
-        attached += r?.ok ?? 0;
-      }
+      // 그 공고로 만든 업무(회사마다) → 자료실 저장 + 업무에 붙임(같은 파일은 한 번)
+      // 로컬 11/24: 업무가 '완료'여도 공고가 관심·신청 준비·신청이면 붙임(완료 업무에 기록으로 남는 것은 해가 없음 — 신청 뒤 결과 확인 때 공고문을 다시 봄)
+      attached += await attachToWorks(sql, p.id, errors);
     } catch (e) { errors.push(`${p.source_id}: ${String((e as Error)?.message ?? e).slice(0, 80)}`); await sql`update support_programs set raw = coalesce(raw, '{}'::jsonb) || ${sql.json({ files_checked_at: new Date().toISOString().slice(0, 19), files_error: String((e as Error)?.message ?? e).slice(0, 120), files_v: FILES_V } as never)} where id = ${p.id}`; }
   }
-  return { checked: ids.size, filled, attached, errors: errors.slice(0, 5) };
+  // 이미 첨부를 읽은 공고인데 그때 업무가 '완료'라 붙지 않았던 것(로컬 11/24 179564·179175·179470) — 업무마다 한 번만 이어서 붙임
+  const late = await sql<{ id: string }[]>`select distinct p.id from support_programs p join support_work w on w.program_id = p.id join tasks t on t.id = w.task_id
+    where p.source = 'kstartup' and coalesce(jsonb_array_length(case when jsonb_typeof(p.attachments) = 'array' then p.attachments else '[]'::jsonb end), 0) > 0
+      and w.withdrawn_at is null and w.status in ('interest', 'preparing', 'applied') and t.deleted_at is null
+      and not (coalesce(p.raw->'files_tasks', '[]'::jsonb) ? w.task_id::text)
+      and not exists (select 1 from attachments a where a.task_id = w.task_id and a.source = 'sales_auto' and a.deleted_at is null)
+      and (${opt.programId ?? null}::uuid is null or p.id = ${opt.programId ?? null}::uuid)
+    limit ${opt.max ?? 20}`;
+  for (const l of late) attached += await attachToWorks(sql, l.id, errors);
+  return { checked: ids.size, filled, attached, late: late.length, errors: errors.slice(0, 5) };
+}
+
+/** 공고의 진행 중(관심·신청 준비·신청) 업무에 첨부를 붙이고, 붙인 업무를 공고에 기록(raw.files_tasks — 같은 업무는 한 번, 다른 곳과 동시에 하지 않게 먼저 맡음) */
+async function attachToWorks(sql: ReturnType<typeof db>, programId: string, errors: string[]) {
+  const works = await sql<{ tenant: string; task_id: string; owner_id: string | null; created_by: string | null }[]>`select w.tenant, w.task_id, w.owner_id, w.created_by from support_work w join tasks t on t.id = w.task_id
+    where w.program_id = ${programId} and w.withdrawn_at is null and w.status in ('interest', 'preparing', 'applied') and t.deleted_at is null`;
+  let n = 0;
+  for (const w of works) {
+    const [claimed] = await sql`update support_programs set raw = jsonb_set(coalesce(raw, '{}'::jsonb), '{files_tasks}', coalesce(raw->'files_tasks', '[]'::jsonb) || to_jsonb(${w.task_id}::text))
+      where id = ${programId} and not (coalesce(raw->'files_tasks', '[]'::jsonb) ? ${w.task_id}::text) returning id`;
+    if (!claimed) continue;
+    const { actorOf } = await import('./bidTasks');
+    const u = (await actorOf(sql, w.owner_id)) ?? (await actorOf(sql, w.created_by));
+    if (!u || u.tenant !== w.tenant) continue;
+    const r = await (await import('./autoAttach')).attachSourceFiles(u, { kind: 'support', id: programId, taskIds: [w.task_id] }).catch((e) => { errors.push(String(e?.message ?? e).slice(0, 80)); return null; });
+    n += r?.ok ?? 0;
+  }
+  return n;
 }

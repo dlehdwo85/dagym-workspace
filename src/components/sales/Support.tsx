@@ -17,7 +17,7 @@ type Effect = { receive: string; amount: string | null; selfPay: string | null; 
 type Ai = { verdict: 'fit' | 'maybe' | 'no'; reasons: string[]; brands: string[]; docs: string[]; summary: string | null; at: string | null; use: string[]; schedule: string | null; auto: boolean; stale?: boolean; effect?: Effect | null };
 /** #568 주 1회 묶음 — 이번 주 맞는 공고(AI ✅ 또는 1차 ✅) 상위 10건 */
 type Weekly = { week: string; items: { id: string; title: string; by: 'ai' | 'rule'; dday: number | null; applyEnd: string | null; agency: string | null; brands: string[]; use: string | null; auto: boolean }[]; aiCount: number; aiFailed: number; sentTo: number; createdAt: string };
-type Work = { id: string; status: string; statusLabel: string; ownerId: string | null; ownerName: string | null; taskId: string | null; brands: string[]; appliedAt: string | null; resultAt: string | null; amountAwarded: string | null; resultMemo: string | null; memo: string | null; taskOpen?: string | null };
+type Work = { id: string; status: string; statusLabel: string; ownerId: string | null; ownerName: string | null; taskId: string | null; brands: string[]; appliedAt: string | null; resultAt: string | null; amountAwarded: string | null; resultMemo: string | null; memo: string | null; taskOpen?: string | null; taskDone?: boolean };
 type Item = { id: string; title: string; agency: string | null; executor: string | null; category: string | null; source: string; sourceLabel: string; regions: string[]; nationwide: boolean; applyStart: string | null; applyEnd: string | null;
   applyText: string | null; dday: number | null; amount: string | null; amountKrw: number | null; kinds: string[]; url: string | null; applyUrl: string | null; manual: boolean; mine: boolean; isNew: boolean; target: string | null; alsoOn: string[]; pending?: boolean; queued?: boolean; listed?: boolean; listedAt?: string | null;
   final?: { verdict: 'fit' | 'maybe' | 'no'; by: 'ai' | 'rule'; conflict: boolean };
@@ -105,6 +105,12 @@ export function Support() {
   async function doAct(it: Item, status: 'interest' | 'preparing', ownerId: string | null) {
     setBusy(`${it.id}:${status}`);
     try { await api(`/api/sales/support/${it.id}/work`, { body: { status, ...(ownerId ? { ownerId } : {}) } }); setAsk(null); toast.ok(status === 'interest' ? '관심으로 두고 담당 업무를 만들었습니다 — 마감 7일·3일 전에 알립니다' : '신청 준비 업무(체크리스트)를 만들었습니다 — 마감 7일·3일 전에 알립니다', undoOf(it)); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  }
+  /** 로컬 11/24: 공고는 관심·신청 준비인데 연결 업무가 이미 완료 — 신청했다면 [신청 완료]로(신청일 = 오늘) */
+  async function markApplied(it: Item) {
+    setBusy(`${it.id}:applied`);
+    try { await api(`/api/sales/support/${it.id}/work`, { body: { status: 'applied' } }); toast.ok('신청 완료로 바꿨습니다 — 결과 확인 업무는 [업무로 · 결과 확인]으로 만들 수 있습니다'); reload(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
   }
   async function follow(it: Item) {
@@ -213,7 +219,9 @@ export function Support() {
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {it.work ? <><span className={cx('rounded-full px-2 py-0.5 text-[11px] font-semibold', STATUS_CLS[it.work.status])} data-testid="support-status">{it.work.statusLabel}</span>
                 <span className="text-xs text-ink-2">{it.work.ownerName ? `담당 ${it.work.ownerName}` : ''}{it.work.appliedAt ? ` · 신청 ${kday(it.work.appliedAt)}` : ''}{it.work.resultMemo ? ` · ${it.work.resultMemo.slice(0, 40)}` : ''}</span>
-                {it.work.status === 'interest' && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">신청 준비</Button>}
+                {it.work.taskDone && ['interest', 'preparing'].includes(it.work.status) && <><span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800" data-testid="support-task-done-hint" title="연결된 업무는 완료됐는데 공고는 아직 신청 전입니다">업무 완료</span>
+                  <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => markApplied(it)} data-testid="support-mark-applied">{busy === `${it.id}:applied` ? '…' : '신청 완료로'}</Button></>}
+                {it.work.status === 'interest' && !it.work.taskDone && <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => act(it, 'preparing')} data-testid="support-prepare">신청 준비</Button>}
                 {canFollow(it.work) && <Button size="sm" disabled={!!busy} onClick={() => follow(it)} data-testid="support-follow-task" title="담당은 [진행 기록]에서 바꿀 수 있습니다">{busy === `${it.id}:task` ? '…' : `업무로 · ${FOLLOW[it.work.status][1]}`}</Button>}
                 <Button size="sm" variant="secondary" onClick={() => go({ id: it.id })}>진행 기록</Button>
                 {['interest', 'preparing'].includes(it.work.status) && <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => withdrawCard(it)} data-testid="support-withdraw-card">{busy === `${it.id}:withdraw` ? '…' : '되돌리기'}</Button>}</>

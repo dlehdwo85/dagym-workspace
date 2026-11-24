@@ -92,6 +92,25 @@ test('로컬 11/24: 모집이 끝난 공고는 마감 주소에서 첨부를 읽
   assert.equal((await sql`select raw->>'files_v' v from support_programs where id = ${p}`)[0].v, '2');
 });
 
+test('로컬 11/24: 이미 첨부를 읽은 공고인데 업무가 완료였던 것 → 완료 업무에도 한 번 붙임(두 번 안 붙음) · 카드에 업무 완료 표시(taskDone)', async () => {
+  const p = await ins({ source_id: 'KG179175', title: '언론홍보 지원(업무 먼저 완료)', attachments: sql.json([{ name: '모집 공고.hwp', url: `http://127.0.0.1:${PORT}/afile/fileDownload/AAA111` }, { name: '양식.docx', url: `http://127.0.0.1:${PORT}/afile/fileDownload/BBB222` }]) });
+  await sql`update support_programs set raw = coalesce(raw, '{}'::jsonb) || ${sql.json({ files_checked_at: new Date().toISOString().slice(0, 19), files_found: 2, files_v: '2' })} where id = ${p}`;
+  const t = await ctx.owner.ok('POST', '/api/tasks', { title: '언론홍보 신청 준비(완료됨)' });
+  await ctx.owner.ok('PATCH', `/api/tasks/${t.id}`, { status: 'done' });
+  await sql`insert into support_work (tenant, program_id, status, owner_id, task_id) values ('default', ${p}, 'preparing', ${ctx.ownerId}, ${t.id})`;
+  const d0 = await ctx.owner.ok('GET', `/api/sales/support/${p}`);
+  assert.equal(d0.item.work.taskDone, true, '카드에 업무 완료 표시');
+  let att = [];
+  for (let i = 0; i < 10 && !att.length; i++) { await tick(); att = await sql`select file_name from attachments where task_id = ${t.id} and deleted_at is null`; }
+  assert.equal(att.length, 1, '완료 업무에도 받을 수 있는 파일은 붙음');
+  await tick(); await tick();
+  assert.equal((await sql`select count(*)::int n from attachments where task_id = ${t.id} and deleted_at is null`)[0].n, 1, '두 번 안 붙음');
+  assert.ok((await sql`select raw->'files_tasks' ? ${t.id} as ok from support_programs where id = ${p}`)[0].ok);
+  await ctx.owner.ok('POST', `/api/sales/support/${p}/work`, { status: 'applied' });
+  const d1 = await ctx.owner.ok('GET', `/api/sales/support/${p}`);
+  assert.equal(d1.item.work.status, 'applied'); assert.ok(d1.item.work.appliedAt, '신청일 = 오늘');
+});
+
 test('#1151·#1152 탭 숫자는 거름 적용 · 관심·준비 탭은 거름과 관계없이 다 보임 · 찾기는 전체 · 거름으로 n건 숨김', async () => {
   const ev = await ins({ source_id: 'K1151', title: '스타트업 밋업 행사 참가자 모집', category: '행사·네트워크' });
   await ctx.owner.ok('POST', `/api/sales/support/${ev}/work`, { status: 'interest' });

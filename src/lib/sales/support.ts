@@ -411,7 +411,7 @@ export function ruleMatch(p: Prog, pr: Profile | null, today: string): Rule {
 // ---------------- 목록·상세 ----------------
 type Match = { program_id: string; ai_verdict: 'fit' | 'maybe' | 'no' | null; ai_reasons: string[]; ai_brands: string[]; ai_docs: string[]; ai_summary: string | null; ai_amount: string | null; ai_at: string | null; hidden: boolean;
   ai_use?: string[]; ai_schedule?: string | null; ai_auto?: boolean; auto_fail?: number; ai_effect?: Effect | null; listed_at?: string | null; ai_rule_verdict?: string | null };
-type Work = { id: string; program_id: string; status: string; owner_id: string | null; owner_name: string | null; task_id: string | null; brands: string[]; applied_at: string | null; result_at: string | null; amount_awarded: string | null; result_memo: string | null; memo: string | null; updated_at: string; /** 280차 #820 열린 담당 업무 단계(없으면 null · 신청 전 업무 'prep' · 'result'·'contract') */ task_open?: string | null };
+type Work = { id: string; program_id: string; status: string; owner_id: string | null; owner_name: string | null; task_id: string | null; brands: string[]; applied_at: string | null; result_at: string | null; amount_awarded: string | null; result_memo: string | null; memo: string | null; updated_at: string; /** 280차 #820 열린 담당 업무 단계(없으면 null · 신청 전 업무 'prep' · 'result'·'contract') */ task_open?: string | null; task_done?: boolean };
 const RANK: Record<string, number> = { fit: 0, maybe: 1, none: 2, no: 3 };
 async function disabledSources(sql: Sql, t: string) {
   const off = await sql<{ slug: string }[]>`select slug from sales_collector_settings where tenant = ${t} and not enabled and slug = any(${Object.values(SOURCE_SLUG)})`;
@@ -507,7 +507,7 @@ function itemOf(p: Prog, rule: Rule, m: Match | undefined, w: Work | undefined, 
     rule, ai: m?.ai_verdict ? { verdict: m.ai_verdict, reasons: m.ai_reasons ?? [], brands: m.ai_brands ?? [], docs: m.ai_docs ?? [], summary: m.ai_summary, at: m.ai_at, use: Array.isArray(m.ai_use) ? m.ai_use : [], schedule: m.ai_schedule ?? null, auto: !!m.ai_auto, stale, effect: m.ai_effect ?? null, ruleAt: m.ai_rule_verdict ?? null } : null, final, hidden: !!m?.hidden, listed: !!m?.listed_at, listedAt: m?.listed_at ?? null,
     queued: false, autoFail: m?.auto_fail ?? 0, // #785 자동 판단 차례(listView 가 채움) · 자동 판단 실패 횟수
     work: w ? { id: w.id, status: w.status, statusLabel: STATUS_LABEL[w.status] ?? w.status, ownerId: w.owner_id, ownerName: w.owner_name, taskId: w.task_id, brands: w.brands ?? [], appliedAt: w.applied_at, resultAt: w.result_at,
-      amountAwarded: w.amount_awarded, resultMemo: w.result_memo, memo: w.memo, taskOpen: w.task_open ?? null } : null,
+      amountAwarded: w.amount_awarded, resultMemo: w.result_memo, memo: w.memo, taskOpen: w.task_open ?? null, taskDone: !!w.task_done } : null,
   };
 }
 export type SupportItem = ReturnType<typeof itemOf>;
@@ -626,7 +626,8 @@ async function supportAll(sql: Sql, t: string, uid: string, today: string) {
   const [{ profile, saved, autoAi, basisAt, autoState }, off, matches, works] = await Promise.all([profileOf(t, sql), disabledSources(sql, t),
     sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto, auto_fail, ai_effect, listed_at, ai_rule_verdict from support_matches where tenant = ${t}`,
     sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at,
-    (select coalesce(tk.sales_ref->>'stage', 'prep') from tasks tk where tk.id = w.task_id and tk.deleted_at is null and tk.status <> 'done') as task_open from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.withdrawn_at is null`]);
+    (select coalesce(tk.sales_ref->>'stage', 'prep') from tasks tk where tk.id = w.task_id and tk.deleted_at is null and tk.status <> 'done') as task_open,
+    exists (select 1 from tasks tk where tk.id = w.task_id and tk.deleted_at is null and tk.status = 'done') as task_done from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.withdrawn_at is null`]);
   const mm = new Map(matches.map((m) => [m.program_id, m])); const wm = new Map(works.map((w) => [w.program_id, w]));
   const workIds = works.map((w) => w.program_id);
   // 열린 공고(마감 전·마감 미정) + 우리 회사 진행 중인 것(마감 지나도)
@@ -653,7 +654,8 @@ export async function detailView(u: SessionUser, id: string) {
   const { profile, saved, basisAt } = await profileOf(t, sql);
   const [m] = await sql<Match[]>`select program_id, ai_verdict, ai_reasons, ai_brands, ai_docs, ai_summary, ai_amount, ai_at, hidden, ai_use, ai_schedule, ai_auto, auto_fail, ai_effect, listed_at, ai_rule_verdict from support_matches where tenant = ${t} and program_id = ${id}`;
   const [w] = await sql<Work[]>`select w.id, w.program_id, w.status, w.owner_id, ou.name as owner_name, w.task_id, w.brands, w.applied_at::text, w.result_at::text, w.amount_awarded, w.result_memo, w.memo, w.updated_at,
-    (select coalesce(tk.sales_ref->>'stage', 'prep') from tasks tk where tk.id = w.task_id and tk.deleted_at is null and tk.status <> 'done') as task_open from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.program_id = ${id} and w.withdrawn_at is null`;
+    (select coalesce(tk.sales_ref->>'stage', 'prep') from tasks tk where tk.id = w.task_id and tk.deleted_at is null and tk.status <> 'done') as task_open,
+    exists (select 1 from tasks tk where tk.id = w.task_id and tk.deleted_at is null and tk.status = 'done') as task_done from support_work w left join users ou on ou.id = w.owner_id where w.tenant = ${t} and w.program_id = ${id} and w.withdrawn_at is null`;
   const log = w ? await sql`select l.from_status, l.to_status, l.note, l.changed_at, us.name as by from support_work_log l left join users us on us.id = l.changed_by where l.work_id = ${w.id} order by l.changed_at desc limit 30` : [];
   const [task] = w?.task_id ? await sql<{ id: string; title: string; status: string; due_date: string | null; total: number; done: number }[]>`select t.id, t.title, t.status, t.due_date::text,
     (select count(*)::int from task_checklist_items ci where ci.task_id = t.id) total, (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.done) done from tasks t where t.id = ${w.task_id} and t.deleted_at is null` : [];
