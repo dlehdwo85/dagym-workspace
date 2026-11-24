@@ -40,6 +40,8 @@ export async function GET() {
         googleCalendar: googleSyncEnabled(), // 선택 기능
         salesSrcKey: (await import('@/lib/sales/supabaseSrc')).srcKeyKind(), // V41 단계 2: 영업관리 원본 키 종류(값은 안 보임)
         funnelStats: !!process.env.FUNNEL_STATS_TOKEN && process.env.FUNNEL_STATS_TOKEN.length >= 16, // 로컬 10/21 16:50: 주간 퍼널 읽기 토큰이 설정됐는지(값은 안 보임)
+        // D-18(로컬 11/24): 출퇴근 위치를 받는 회사 — 'all'(지금처럼 모두) 또는 'only:<회사 수>[+default]'(목록 회사만). 회사 id 는 우리 회사(default)만 표시
+        attendanceLocation: (() => { const v = (process.env.ATTENDANCE_LOCATION_ONLY ?? '').split(',').map((x) => x.trim()).filter(Boolean); return v.length ? `only:${v.length}${v.includes('default') ? '+default' : ''}` : 'all'; })(),
 
       },
       env: process.env.VERCEL_ENV ?? process.env.NODE_ENV,

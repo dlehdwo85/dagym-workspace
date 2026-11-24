@@ -188,6 +188,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('trial', async () => (await import('./plans')).trialJob());
   await step('billing', async () => (await import('./billing')).billingJob()); // 18차 정기 결제·재시도
   await step('tenantPurge', async () => (await import('./tenantPurge')).tenantPurgeTick()); // 상용화 B4: 영구 삭제한 회사 자료·파일 파기 이어서
+  await step('locationRetention', async () => (await import('./attendance')).locationRetentionTick()); // D-18 ①: 6개월 지난 출퇴근 좌표 파기 · 1년 지난 위치 확인자료 삭제
   await step('settlement', async () => (await import('./billing/settlement')).fillExpected()); // V32 2 정산 예정일 채우기
   await step('docJobs', async () => (await import('./ai/docEngine')).docJobsJob()); // V22 끊긴 문서 작업 다시
   await step('monthClose', async () => (await import('./monthClose')).monthCloseJob()); // V20 월 마감 기록(매월 1일)

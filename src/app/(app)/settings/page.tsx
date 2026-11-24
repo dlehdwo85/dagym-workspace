@@ -438,6 +438,7 @@ function AccountSection() {
       <a href="/api/account/export" className="mt-2 inline-block rounded-input border border-line px-3 py-1.5 font-medium hover:bg-slate-50" data-testid="account-export">내 데이터 내려받기</a>
       <LinkedAccounts />
       <AiConsentSetting />
+      <LocationRights />
       <MarketingConsent />
       {user.role === 'owner' && <SupportConsent />}
       {/* 397차 #1023(3.1.1): 앱 안에는 회사(팀) 만들기가 없음 — 웹에서만 */}
@@ -602,3 +603,33 @@ function MarketingConsent() {
   );
 }
 
+
+/** D-18 ①(위치기반서비스 신고 준비): 출퇴근 위치 동의 상태 · [동의 철회](내 좌표 바로 파기) · 누가 언제 내 위치 결과를 받았는지(최근 6개월) */
+const LOC_KIND: Record<string, string> = { collect: '출퇴근 때 위치를 받음', provide: '관리자에게 근무지 안/밖이 보임', consent: '위치 동의', withdraw: '동의 철회(좌표 파기)', purge: '보관 기간 지나 좌표 파기' };
+function LocationRights() {
+  const { data, reload } = useApi<{ allowed: boolean; consent: boolean; consentAt: string | null; logs: { kind: string; at: string; viewer: string | null; detail: Record<string, unknown> }[] }>('/api/attendance/location');
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  if (!data || (!data.consent && !data.logs.length)) return null;
+  async function withdraw() {
+    if (!confirm('출퇴근 위치 동의를 철회할까요?\n지금까지 저장된 내 출퇴근 좌표를 바로 지웁니다. 출퇴근 시각은 그대로 남습니다.')) return;
+    setBusy(true);
+    try { const r = await api<{ purged: number }>('/api/attendance/location', { body: { withdraw: true } }); toast.ok(`철회했습니다 — 좌표 ${r.purged}건을 지웠습니다`); reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="mt-3 rounded-input border border-line p-3" data-testid="location-rights">
+      <p className="font-medium">출퇴근 위치</p>
+      <p className="mt-0.5 text-xs text-ink-2">{data.consent ? `위치 동의함(${data.consentAt ? fmtDateTime(data.consentAt) : ''}) — 출퇴근을 누르는 순간의 위치만 받습니다.` : '위치 동의 안 함 — 출퇴근은 시각만 기록합니다.'} <a href="/lbs-terms" target="_blank" rel="noreferrer" className="underline">위치기반서비스 이용약관</a></p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {data.consent && <Button size="sm" variant="secondary" disabled={busy} onClick={withdraw} data-testid="location-withdraw">{busy ? '…' : '동의 철회'}</Button>}
+        {data.logs.length > 0 && <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} data-testid="location-logs-toggle">{open ? '기록 닫기' : `이용·제공 기록 ${data.logs.length}건`}</Button>}
+      </div>
+      {open && (
+        <ul className="mt-2 max-h-56 divide-y divide-line overflow-y-auto rounded-input border border-line text-xs" data-testid="location-logs">
+          {data.logs.map((l, k) => <li key={k} className="flex gap-2 px-2 py-1"><span className="shrink-0 text-ink-3">{fmtDateTime(l.at)}</span><span className="min-w-0 flex-1">{LOC_KIND[l.kind] ?? l.kind}{l.viewer ? ` · ${l.viewer}` : ''}{typeof l.detail?.what === 'string' ? ` · ${l.detail.what}` : ''}</span></li>)}
+        </ul>
+      )}
+    </div>
+  );
+}

@@ -37,6 +37,18 @@ export const locationAllowed = (t: string) => {
   const v = (process.env.ATTENDANCE_LOCATION_ONLY ?? '').trim();
   return !v || v.split(',').map((x) => x.trim()).filter(Boolean).includes(t);
 };
+const LOC_PURPOSE = '출퇴근 근무지 확인';
+/** D-18 ①: 위치정보 이용·제공 사실 확인자료 — 좌표 값은 남기지 않음 */
+async function logLocation(sql: Sql, t: string, kind: 'collect' | 'consent' | 'withdraw' | 'purge', subject: string | null, detail: Record<string, unknown> = {}) {
+  await sql`insert into location_logs (tenant, subject_user_id, kind, purpose, detail) values (${t}, ${subject}, ${kind}, ${LOC_PURPOSE}, ${sql.json(detail as never)})`.catch(() => {});
+}
+/** 관리자에게 근무지 안/밖 결과가 보일 때 — 사람마다 하루 한 줄 */
+async function logProvide(sql: Sql, t: string, viewer: string, subjects: string[], what: string) {
+  if (!subjects.length) return;
+  await sql`insert into location_logs (tenant, subject_user_id, viewer_user_id, kind, purpose, detail)
+    select ${t}, s, ${viewer}, 'provide', ${LOC_PURPOSE}, ${sql.json({ what } as never)} from unnest(${subjects}::uuid[]) s
+    on conflict (viewer_user_id, subject_user_id, day) where kind = 'provide' do nothing`.catch(() => {});
+}
 async function settings(sql: Sql, t: string) {
   const [r] = await sql<{ attendance_on: boolean; work_start: string }[]>`select attendance_on, work_start from tenants where id = ${t}`;
   return { on: r?.attendance_on ?? true, workStart: r?.work_start ?? '09:00' };
@@ -61,7 +73,11 @@ export async function clock(u: SessionUser, i: z.infer<typeof clockInput>, ip: s
   const st = await settings(sql, t);
   if (!st.on) throw badRequest('이 회사는 출퇴근 기록을 쓰지 않습니다(관리자 설정)');
   if (!locationAllowed(t)) i = { ...i, lat: undefined, lng: undefined, accuracy: undefined, noLocation: true, consent: false }; // D-18: 위치를 받지 않는 회사 — 보내와도 버림
-  if (i.consent) await sql`insert into user_settings (user_id, location_consent_at) values (${u.id}, now()) on conflict (user_id) do update set location_consent_at = coalesce(user_settings.location_consent_at, now())`;
+  if (i.consent) {
+    const [was] = await sql<{ at: Date | null }[]>`select location_consent_at as at from user_settings where user_id = ${u.id}`;
+    await sql`insert into user_settings (user_id, location_consent_at) values (${u.id}, now()) on conflict (user_id) do update set location_consent_at = coalesce(user_settings.location_consent_at, now())`;
+    if (!was?.at) await logLocation(sql, t, 'consent', u.id);
+  }
   const [cs] = await sql<{ location_consent_at: Date | null }[]>`select location_consent_at from user_settings where user_id = ${u.id}`;
   if (!cs?.location_consent_at && !i.noLocation) throw new HttpError(400, 'consent', '위치 동의가 필요합니다 — 출퇴근 순간의 위치만 저장합니다');
   const day = todaySeoul();
@@ -87,6 +103,7 @@ export async function clock(u: SessionUser, i: z.infer<typeof clockInput>, ip: s
   } else {
     await sql`update attendance set out_at = now(), out_lat = ${lat}, out_lng = ${lng}, out_site_id = ${siteId}, out_inside = ${inside}, out_reason = ${reason}, updated_at = now() where tenant = ${t} and user_id = ${u.id} and day = ${day}`;
   }
+  if (has) await logLocation(sql, t, 'collect', u.id, { type: i.type, day, inside });
   await audit(sql, u.id, `attendance.${i.type}`, 'attendance', null, { day, inside, site: nearest?.name ?? null }, ip);
   return { ok: true, ...(await myToday(u)), nearest };
 }
@@ -106,6 +123,7 @@ export async function sheet(u: SessionUser, f: { day?: string; month?: string })
     const holName = await (await import('./holidays')).holidayName(t, day, sql); const hol = holName ? { name: holName } : undefined;
     const dow = new Date(`${day}T00:00:00+09:00`).getUTCDay();
     const workday = !hol && dow !== 0 && dow !== 6;
+    await logProvide(sql, t, u.id, rows.filter((r) => r.in_inside !== null || r.out_inside !== null).map((r) => r.user_id), `출퇴근 표 ${day}`);
     return { day, workday, holiday: hol?.name ?? null, workStart: st.workStart, rows: people.map((p) => {
       const a = rows.find((r) => r.user_id === p.id); const aw = away.get(`${p.id}:${day}`);
       return { id: p.id, name: p.name, title: p.title, inTime: hhmm(a?.in_at ?? null), inSite: a?.in_site_name ?? null, inInside: a?.in_inside ?? null, inReason: a?.in_reason ?? null, outTime: hhmm(a?.out_at ?? null), outSite: a?.out_site_name ?? null, outInside: a?.out_inside ?? null, outReason: a?.out_reason ?? null,
@@ -120,6 +138,7 @@ export async function sheet(u: SessionUser, f: { day?: string; month?: string })
   const today = todaySeoul();
   const days: string[] = []; for (let d = new Date(`${from}T00:00:00Z`); d.toISOString().slice(0, 10) <= to; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
   const workdays = days.filter((d) => d <= today && !hols.has(d) && ![0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay()));
+  await logProvide(sql, t, u.id, [...new Set(rows.filter((r) => r.in_inside !== null || r.out_inside !== null).map((r) => r.user_id as string))], `출퇴근 월 요약 ${month}`);
   return { month, workStart: st.workStart, days: workdays.length, rows: people.map((p) => {
     const mine = rows.filter((r) => r.user_id === p.id);
     const present = mine.filter((r) => r.in_at).length, lateN = mine.filter((r) => late(r.in_at)).length, outside = mine.filter((r) => r.in_inside === false || r.out_inside === false).length;
@@ -200,4 +219,34 @@ export async function clockStates(sql: Sql, t: string): Promise<Record<string, '
   const out: Record<string, 'before' | 'done'> = {};
   for (const r of rows) { if (!r.in_at) out[r.id] = 'before'; else if (r.out_at) out[r.id] = 'done'; }
   return out;
+}
+
+// ---- D-18 ① 위치 동의·철회·열람(개인위치정보주체 권리) · 보관 기간 ----
+/** 내 위치 동의 상태 + 최근 6개월 내 위치정보 이용·제공 기록(누가·언제·무엇) */
+export async function myLocation(u: SessionUser) {
+  const sql = db(); const t = tenantOf(u);
+  const [cs] = await sql<{ at: Date | null }[]>`select location_consent_at as at from user_settings where user_id = ${u.id}`;
+  const logs = await sql<{ kind: string; purpose: string | null; at: Date; viewer: string | null; detail: Record<string, unknown> }[]>`
+    select l.kind, l.purpose, l.created_at as at, v.name as viewer, l.detail from location_logs l left join users v on v.id = l.viewer_user_id
+    where l.subject_user_id = ${u.id} and l.created_at > now() - interval '6 months' order by l.created_at desc limit 200`;
+  return { allowed: locationAllowed(t), consent: !!cs?.at, consentAt: cs?.at ?? null, logs };
+}
+/** 동의 철회 — 동의 기록을 지우고 내 출퇴근 좌표를 바로 파기(근무지 안/밖·시각 기록은 근태 기록으로 남음) */
+export async function withdrawLocation(u: SessionUser, ip: string | null) {
+  const sql = db(); const t = tenantOf(u);
+  await sql`update user_settings set location_consent_at = null where user_id = ${u.id}`;
+  const r = await sql`update attendance set in_lat = null, in_lng = null, out_lat = null, out_lng = null, updated_at = now()
+    where user_id = ${u.id} and (in_lat is not null or out_lat is not null)`;
+  await logLocation(sql, t, 'withdraw', u.id, { purged: r.count });
+  await audit(sql, u.id, 'attendance.location_withdraw', 'user', u.id, { purged: r.count }, ip);
+  return { ok: true, purged: r.count };
+}
+/** 정기 실행: 6개월 지난 출퇴근 좌표 파기 · 1년 지난 확인자료 삭제(법정 6개월 이상 보관) */
+export async function locationRetentionTick(sql: Sql = db()) {
+  const rows = await sql<{ tenant: string; n: number }[]>`with x as (update attendance set in_lat = null, in_lng = null, out_lat = null, out_lng = null
+      where day < (now() at time zone 'Asia/Seoul')::date - interval '6 months' and (in_lat is not null or out_lat is not null) returning tenant)
+    select tenant, count(*)::int n from x group by tenant`;
+  for (const r of rows) await logLocation(sql, r.tenant, 'purge', null, { rows: r.n, rule: '6개월' });
+  const old = await sql`delete from location_logs where created_at < now() - interval '1 year'`;
+  return { purgedTenants: rows.length, purgedRows: rows.reduce((a, b) => a + b.n, 0), oldLogs: old.count };
 }

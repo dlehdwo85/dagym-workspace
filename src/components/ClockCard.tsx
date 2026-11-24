@@ -49,7 +49,12 @@ export function ClockCard({ inline = false }: { inline?: boolean } = {}) {
       {t?.inTime && !t.outTime && <Button size="sm" variant="secondary" onClick={() => send('out')} disabled={!!busy} data-testid="clock-out"><LogOut />{inline ? '퇴근하기' : '퇴근'}</Button>}
       {consent && (
         <Modal open onClose={() => setConsent(null)} title="위치 정보 동의">
-          <p className="text-sm text-ink-2">출근·퇴근을 누르는 <b>그 순간의 위치</b>만 저장해 회사가 등록한 현장 안인지 표시합니다. 그 밖의 시간에는 위치를 받지 않고, 다른 용도로 쓰지 않습니다. 위치 권한을 거부해도 시각은 기록됩니다.</p>
+          <p className="text-sm text-ink-2">출근·퇴근을 누르는 <b>그 순간의 위치</b>만 받아 회사가 등록한 근무지 안인지 표시합니다. 그 밖의 시간에는 위치를 받지 않고, 다른 용도로 쓰지 않습니다. 위치 권한을 거부해도 시각은 기록됩니다.</p>
+          <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-ink-2" data-testid="clock-consent-notes">
+            <li>소속 회사의 출퇴근 관리자에게 <b>근무지 안/밖과 근무지 이름</b>이 보입니다.</li>
+            <li>좌표는 6개월 뒤 지웁니다. 동의는 설정 › 출퇴근 위치에서 언제든 철회할 수 있고, 철회하면 내 좌표를 바로 지웁니다.</li>
+            <li>누가 언제 내 위치 결과를 봤는지 설정에서 볼 수 있습니다. <a href="/lbs-terms" target="_blank" rel="noreferrer" className="underline" data-testid="clock-lbs-terms">위치기반서비스 이용약관</a></li>
+          </ul>
           <div className="mt-3 flex justify-end gap-2"><Button variant="secondary" onClick={() => { const c = consent; setConsent(null); void send(c, { noLocation: true }); }}>위치 없이 기록</Button><Button onClick={() => { const c = consent; void send(c, { consent: true }); }} data-testid="clock-consent">동의하고 {consent === 'in' ? '출근' : '퇴근'}</Button></div>
         </Modal>
       )}

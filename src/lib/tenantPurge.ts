@@ -13,7 +13,8 @@
 import { db, type Sql } from './db';
 
 const KEEP = new Set(['tenants', 'users', 'payments', 'payment_settlements', 'payment_notifications', 'billing_consents', 'tax_invoice_requests', 'settlement_uploads',
-  'audit_logs', 'tenant_subscriptions', 'tenant_contact_logs', 'support_sessions', 'tenant_purge_files', 'schema_migrations']);
+  'audit_logs', 'tenant_subscriptions', 'tenant_contact_logs', 'support_sessions', 'tenant_purge_files', 'schema_migrations',
+  'location_logs' /* D-18: 위치정보 이용·제공 확인자료(좌표 없음) — 법정 6개월 이상 보관, 1년 뒤 정기 실행이 지움 */]);
 /** 회사와 무관한 공용 표 — 사람 연결로 지우지 않음 */
 const GLOBAL = new Set(['app_settings', 'mkt_plan_limits', 'plans', 'plan_addons', 'menu_role_perms', 'data_sources', 'brands', 'prospects', 'sales_src_rows', 'sales_collector_runs',
   'sales_collector_state', 'bid_alert_subscribers', 'bid_alert_sends', 'job_locks', 'job_runs', 'perf_probes', 'perf_screens', 'perf_weekly', 'landing_views', 'signup_attempts', 'error_logs', 'oauth_pending']);
