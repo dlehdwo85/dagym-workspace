@@ -62,6 +62,19 @@ test('로컬 11/24: 진행 업무가 있는 공고가 첨부 없는 다른 공�
   assert.equal((await sql`select count(*)::int n from support_programs where source_id like 'KX%' and raw ? 'files_checked_at'`)[0].n, 0, '진행하지 않는 공고는 읽지 않음');
 });
 
+test('로컬 11/24: 진행 공고 상세를 열면 정기 실행을 기다리지 않고 응답 뒤 첨부를 읽음(하루 한 번)', async () => {
+  const p = await ins({ source_id: 'K1149C', title: '열면 바로 읽는 공고', apply_end: d(60) });
+  await sql`insert into support_work (tenant, program_id, status, owner_id) values ('default', ${p}, 'interest', ${ctx.staffA.id})`;
+  const first = await ctx.owner.ok('GET', `/api/sales/support/${p}`);
+  assert.equal(first.filesStatus.checkedAt, null);
+  let st = null;
+  for (let i = 0; i < 20 && !st?.checkedAt; i++) { await new Promise((r) => setTimeout(r, 300)); st = (await ctx.owner.ok('GET', `/api/sales/support/${p}`)).filesStatus; } // 시계 진행 없이(정기 실행 없이)
+  assert.equal(st.found, 2, '열기만 해도 읽음'); assert.ok(st.checkedAt);
+  const none = await ins({ source_id: 'K1149D', title: '진행하지 않는 공고(열어도 안 읽음)' });
+  await ctx.owner.ok('GET', `/api/sales/support/${none}`); await new Promise((r) => setTimeout(r, 1500));
+  assert.equal((await ctx.owner.ok('GET', `/api/sales/support/${none}`)).filesStatus.checkedAt, null);
+});
+
 test('#1151·#1152 탭 숫자는 거름 적용 · 관심·준비 탭은 거름과 관계없이 다 보임 · 찾기는 전체 · 거름으로 n건 숨김', async () => {
   const ev = await ins({ source_id: 'K1151', title: '스타트업 밋업 행사 참가자 모집', category: '행사·네트워크' });
   await ctx.owner.ok('POST', `/api/sales/support/${ev}/work`, { status: 'interest' });

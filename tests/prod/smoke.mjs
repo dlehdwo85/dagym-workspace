@@ -88,6 +88,10 @@ await step('업무 만들기 → 완료 → 지우기', async () => {
 });
 
 await step('파일 저장소 직접 올리기(6MB — R2 허용 주소 확인)', async () => {
+  // 로컬 11/24: 일시적인 네트워크 끊김(fetch failed)으로 거짓 실패가 나서 한 번만 5초 쉬고 다시 시도(두 번째도 실패면 진짜 실패)
+  try { await uploadOnce(); } catch (e) { console.log(`  (한 번 더 시도 — ${String(e?.message ?? e).slice(0, 120)})`); await sleep(5000); await uploadOnce(); }
+});
+async function uploadOnce() {
   const a = await api('POST', '/api/agreements', { title: `[검수] 파일 올리기 ${SHA}`, counterparty: '검수', endDate: '2099-12-31' });
   try {
     const f = await api('POST', `/api/agreements/${a.id}/files`, { fileName: 'prod-check.pdf', mimeType: 'application/pdf', size: 6 * 1024 * 1024 });
@@ -104,7 +108,7 @@ await step('파일 저장소 직접 올리기(6MB — R2 허용 주소 확인)',
     await api('DELETE', `/api/agreements/${a.id}`).catch(() => {});
     await api('DELETE', `/api/agreements/${a.id}?purge=1`).catch(() => {}); // 검수 계정이 대표(owner)면 완전 삭제
   }
-});
+}
 
 // #1135 메모: 일반 메모 만들기 → 내 목록 → 휴지통 · 주요 메모(운영 키가 있을 때만): 본인 확인 전 [보기] 막힘 → 확인 → 그 칸만 → 잠그기 → 휴지통
 await step('메모·주요 메모(본인 확인 전 막힘 → 확인 뒤 보기)', async () => {
