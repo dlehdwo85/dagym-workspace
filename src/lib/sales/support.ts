@@ -659,10 +659,11 @@ export async function detailView(u: SessionUser, id: string) {
     (select count(*)::int from task_checklist_items ci where ci.task_id = t.id) total, (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.done) done from tasks t where t.id = ${w.task_id} and t.deleted_at is null` : [];
   const pr = saved || profile.region_sido || profile.industries.length || profile.interests.length ? profile : null;
   // 로컬 11/24: 첨부 수집 상태(K-Startup 상세 화면 읽기 — 마지막 시도·찾은 수·오류)를 상세 응답에 — 로컬·화면에서 '아직 안 읽음/읽었는데 없음/오류'를 구분
-  const [fs] = await sql<{ checked: string | null; found: string | null; error: string | null }[]>`select raw->>'files_checked_at' as checked, raw->>'files_found' as found, raw->>'files_error' as error from support_programs where id = ${p.id}`;
+  const [fs] = await sql<{ checked: string | null; found: string | null; error: string | null; v: string | null }[]>`select raw->>'files_checked_at' as checked, raw->>'files_found' as found, raw->>'files_error' as error, raw->>'files_v' as v from support_programs where id = ${p.id}`;
+  const FV = (await import('./supportFiles')).FILES_V;
   const filesStatus = p.source === 'kstartup' ? { checkedAt: fs?.checked ?? null, found: fs?.found != null ? Number(fs.found) : null, error: fs?.error ?? null } : null;
   // 로컬 11/24: 진행 중인 K-Startup 공고를 열었는데 첨부를 아직 안 읽었으면(또는 하루 지났으면) 응답 뒤 바로 읽음 — 정기 실행 차례를 기다리지 않게(같은 공고는 하루 한 번)
-  if (filesStatus && !(p.attachments ?? []).length && w && ['interest', 'preparing', 'applied'].includes(w.status) && (!filesStatus.checkedAt || Date.parse(`${filesStatus.checkedAt}Z`) < Date.now() - 864e5))
+  if (filesStatus && !(p.attachments ?? []).length && w && ['interest', 'preparing', 'applied'].includes(w.status) && (!filesStatus.checkedAt || fs?.v !== FV || Date.parse(`${filesStatus.checkedAt}Z`) < Date.now() - 864e5))
     (await import('../later')).runLater('support-files', async () => (await import('./supportFiles')).fillSupportAttachments({ programId: p.id }));
   return { filesStatus, item: itemOf(p, ruleMatch(p, pr, today), m, w, today, u.id, basisAt), summary: p.summary, target: p.target, hashtags: p.hashtags ?? [], attachments: p.attachments ?? [], applyText: p.apply_text, bizYears: p.biz_years,
     log, task: task ?? null, canEdit: isAdmin(u), canEditProgram: !!p.tenant && (p.created_by === u.id || isAdmin(u)), aiOn: aiEnabled(), people: await peopleOf(sql, t), statusLabel: STATUS_LABEL };

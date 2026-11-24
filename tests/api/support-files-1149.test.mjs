@@ -15,6 +15,11 @@ before(async () => {
     if (req.url.startsWith('/kstartup/K1149')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(`<html><body><ul class="file_bg">
       <li><span>모집공고문_Next OI.hwp</span><a href="/afile/fileDownload/AAA111" class="btn">다운로드</a></li>
       <li><span>신청서 양식.docx</span><a href="/afile/fileDownload/BBB222" class="btn">다운로드</a></li></ul></body></html>`); return; }
+    // 로컬 11/24: 모집이 끝난 공고 — '진행 중' 주소는 스크립트로 넘기는 빈 화면, '마감' 주소에 실제 화면 구조(file_bg 이름 → [다운로드])
+    if (req.url.startsWith('/kstartup/KD')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html><script>location.href = data.endPoint</script></html>'); return; }
+    if (req.url.startsWith('/kstartup-deadline/KD')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(`<div class="board_file"><ul>
+      <li class="clear"><a class="file_bg" style="cursor: auto;" title="[첨부파일] 특허 바우처 공고문.pdf">특허 바우처 공고문.pdf</a><div class="btn_wrap"><ul><li><a href="javascript:void(0)" class="btn_view"><span>바로보기</span></a></li><li><a href="/afile/fileDownload/AAA111" class="btn_down" name="downloadBtn"><span>다운로드</span></a></li></ul></div></li>
+      <li class="clear"><a class="file_bg" style="cursor: auto;" title="[첨부파일] 포스터 텍스트.txt">포스터 텍스트.txt</a><div class="btn_wrap"><ul><li><a href="/afile/fileDownload/CCC333" class="btn_down" name="downloadBtn"><span>다운로드</span></a></li></ul></div></li></ul></div>`); return; }
     if (req.url.startsWith('/kstartup/')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html><body>첨부 없음</body></html>'); return; }
     if (req.url === '/afile/fileDownload/AAA111') { res.writeHead(200, { 'content-type': 'application/x-hwp', 'content-disposition': 'attachment; filename="notice.hwp"' }); res.end(Buffer.from('HWP-FAKE-1149')); return; }
     if (req.url === '/afile/fileDownload/BBB222') { res.writeHead(403); res.end('login required'); return; }
@@ -73,6 +78,18 @@ test('로컬 11/24: 진행 공고 상세를 열면 정기 실행을 기다리지
   const none = await ins({ source_id: 'K1149D', title: '진행하지 않는 공고(열어도 안 읽음)' });
   await ctx.owner.ok('GET', `/api/sales/support/${none}`); await new Promise((r) => setTimeout(r, 1500));
   assert.equal((await ctx.owner.ok('GET', `/api/sales/support/${none}`)).filesStatus.checkedAt, null);
+});
+
+test('로컬 11/24: 모집이 끝난 공고는 마감 주소에서 첨부를 읽음 · 이름은 화면의 파일 이름(.txt 포함) · 예전 규칙으로 0개였던 공고는 하루 기다리지 않고 다시 읽음', async () => {
+  const p = await ins({ source_id: 'KD179470', title: '특허출원·등록 비용 바우처(모집 마감)', apply_end: d(-1) });
+  await sql`update support_programs set raw = coalesce(raw, '{}'::jsonb) || ${sql.json({ files_checked_at: new Date().toISOString().slice(0, 19), files_found: 0 })} where id = ${p}`; // 예전 규칙(오늘 읽었는데 0개)
+  await sql`insert into support_work (tenant, program_id, status, owner_id) values ('default', ${p}, 'applied', ${ctx.staffA.id})`;
+  await ctx.owner.ok('GET', `/api/sales/support/${p}`);
+  let r = null;
+  for (let i = 0; i < 20 && !(r?.filesStatus?.found > 0); i++) { await new Promise((x) => setTimeout(x, 300)); r = await ctx.owner.ok('GET', `/api/sales/support/${p}`); }
+  assert.equal(r.filesStatus.found, 2, '마감 주소에서 2개');
+  assert.deepEqual(r.attachments.map((a) => a.name), ['특허 바우처 공고문.pdf', '포스터 텍스트.txt']);
+  assert.equal((await sql`select raw->>'files_v' v from support_programs where id = ${p}`)[0].v, '2');
 });
 
 test('#1151·#1152 탭 숫자는 거름 적용 · 관심·준비 탭은 거름과 관계없이 다 보임 · 찾기는 전체 · 거름으로 n건 숨김', async () => {
