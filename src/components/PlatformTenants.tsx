@@ -103,6 +103,29 @@ export function PlatformTenants() {
   );
 }
 
+/** 로컬 11/24: 운영자 [정기결제 멈추기] — 자동 결제 일정을 지우고, 고르면 카드(정기결제 키) 삭제·체험으로 되돌리기(검수 회사는 10년 체험). 사유 필수 · 감사 기록 */
+function BillingStop({ id, test, run }: { id: string; test: boolean; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ removeCard: true, toTrial: test, reason: test ? '검수 회사 실결제 시험 뒤 정리' : '' });
+  if (!open) return <div><Button size="sm" variant="ghost" onClick={() => setOpen(true)} data-testid="company-billing-stop">정기결제 멈추기</Button></div>;
+  const go = async () => {
+    if (f.reason.trim().length < 2) return toast.error('사유를 적어 주세요');
+    const msg = `자동 결제 일정을 지웁니다(다음 결제 없음)${f.removeCard ? ' · 등록 카드(정기결제 키)도 지웁니다' : ''}${f.toTrial ? ` · 요금제를 체험으로 되돌립니다${test ? '(검수 회사 10년)' : '(14일)'}` : ''}. 이미 한 결제·환불은 그대로입니다.`;
+    if (!(await askConfirm(msg, { title: '정기결제 멈추기', ok: '멈추기', danger: true }))) return;
+    await run(() => api(`/api/platform/tenants/${id}/billing`, { body: { action: 'stop', ...f, reason: f.reason.trim() } }), '정기결제를 멈췄습니다');
+    setOpen(false);
+  };
+  return (
+    <div className="space-y-2 rounded-input border border-line p-3 text-xs" data-testid="company-billing-stop-form">
+      <p className="font-semibold text-ink-1">정기결제 멈추기 <span className="font-normal text-ink-3">— 결제 기록·환불은 그대로(환불은 결제 내역 줄을 눌러서)</span></p>
+      <label className="flex items-center gap-1.5"><input type="checkbox" checked={f.removeCard} onChange={(e) => setF({ ...f, removeCard: e.target.checked })} data-testid="company-billing-stop-card" />등록 카드(나이스페이 정기결제 키)도 지우기</label>
+      <label className="flex items-center gap-1.5"><input type="checkbox" checked={f.toTrial} onChange={(e) => setF({ ...f, toTrial: e.target.checked })} data-testid="company-billing-stop-trial" />요금제를 체험으로 되돌리기{test ? '(검수 회사 10년)' : '(14일)'}</label>
+      <input className={inputCls} placeholder="사유(필수)" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} maxLength={200} aria-label="정기결제 멈추는 사유" data-testid="company-billing-stop-reason" />
+      <div className="flex gap-1.5"><Button size="sm" variant="danger" onClick={go} data-testid="company-billing-stop-go">멈추기</Button><Button size="sm" variant="ghost" onClick={() => setOpen(false)}>닫기</Button></div>
+    </div>
+  );
+}
+
 function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const d = useApi<any>(`/api/platform/tenants/${id}/detail`, [id]);
   const [ov, setOv] = useState<{ users: string; storageGb: string; aiRequests: string; tasksTotal: string; aiBudgetKrw: string } | null>(null);
@@ -141,6 +164,7 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             <p><span className="text-ink-3">상담 신청 </span>{(d.data.consults ?? []).filter((c: any) => c.status === 'requested').length}건 대기 · <span className="text-ink-3">연락처 </span>{t.contact_name ?? '-'}{t.contact_phone ? ` ${t.contact_phone}` : ''}</p>
           </div>
         )}
+        {!internal && (d.data.billing?.billing_cycle || d.data.card) && <BillingStop id={id} test={!!t.is_test} run={run} />}
         {!internal && d.data.partner && <PartnerBox id={id} p={d.data.partner} aiKrw={o.aiBudgetKrw} run={run} />}
         {d.data.billing && (
           <div className="rounded-input border border-line p-3" data-testid="company-billing">

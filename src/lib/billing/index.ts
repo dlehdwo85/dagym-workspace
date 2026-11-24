@@ -418,11 +418,14 @@ export async function billingJob() {
   return { due: due.length, charged, failed, ended, locked, testCanceled };
 }
 
-export const graceInput = z.object({ action: z.enum(['grace', 'unlock']), days: z.number().int().min(1).max(60).optional() });
-/** 플랫폼: 미납 유예 연장(그동안 잠금 풀림) · 잠금 바로 해제 */
+export const graceInput = z.object({ action: z.enum(['grace', 'unlock', 'stop']), days: z.number().int().min(1).max(60).optional(),
+  // 'stop'(로컬 11/24 요청): 정기결제 멈추기 — 카드(정기결제 키)도 지우기 · 체험으로 되돌리기 · 사유 필수
+  removeCard: z.boolean().optional(), toTrial: z.boolean().optional(), reason: z.string().trim().max(200).optional() });
+/** 플랫폼: 미납 유예 연장(그동안 잠금 풀림) · 잠금 바로 해제 · 정기결제 멈추기 */
 export async function platformBillingAction(u: SessionUser, tenant: string, i: z.infer<typeof graceInput>, ip: string | null) {
   if (!u.platformAdmin || u.support) throw notFound();
   const sql = db();
+  if (i.action === 'stop') return platformStopBilling(u, sql, tenant, i, ip);
   const r = i.action === 'grace'
     ? await sql`update tenant_subscriptions set billing_grace_until = now() + make_interval(days => ${i.days ?? 7}), billing_lock = null, updated_at = now() where tenant = ${tenant} returning tenant`
     : await sql`update tenant_subscriptions set billing_lock = null, updated_at = now() where tenant = ${tenant} returning tenant`;
@@ -431,6 +434,33 @@ export async function platformBillingAction(u: SessionUser, tenant: string, i: z
   await (await import('../spaceConsult')).syncPaidSpaces(sql, tenant).catch(() => null);
   await audit(sql, u.id, `platform.billing_${i.action}`, 'tenant', null, { tenant, days: i.days ?? null }, ip);
   return { ok: true };
+}
+
+/**
+ * 로컬 11/24 요청: 운영자가 회사의 정기결제를 멈춤(예: 검수 회사 실결제 시험 뒤 정리, 고객 요청 해지 대행).
+ * 자동 결제 일정·미납 상태를 지우고(다음 결제 없음) · 고르면 카드(나이스페이 정기결제 키)를 지우고 · 고르면 체험으로 되돌림(검수용 시험 회사는 10년 체험).
+ * 결제 기록·환불은 건드리지 않는다(환불은 결제 상세에서). 우리 회사·체험 조직은 대상 아님.
+ */
+async function platformStopBilling(u: SessionUser, sql: Sql, tenant: string, i: z.infer<typeof graceInput>, ip: string | null) {
+  if (['default', 'demo'].includes(tenant)) throw badRequest('우리 회사·체험 조직은 결제가 없습니다');
+  if (!i.reason || i.reason.length < 2) throw badRequest('사유를 적어 주세요');
+  const [t] = await sql<{ is_test: boolean }[]>`select is_test from tenants where id = ${tenant}`;
+  if (!t) throw notFound('없는 회사입니다');
+  const [before] = await sql<{ plan_code: string; status: string; billing_cycle: string | null; next_billing_on: string | null }[]>`select plan_code, status, billing_cycle, next_billing_on::text from tenant_subscriptions where tenant = ${tenant}`;
+  await sql`update tenant_subscriptions set billing_cycle = null, next_billing_on = null, cancel_at_period_end = false, past_due_since = null, retry_count = 0, next_retry_on = null,
+    billing_lock = null, updated_by = ${u.id}, updated_at = now() where tenant = ${tenant}`;
+  if (i.toTrial) await sql`update tenant_subscriptions set plan_code = 'trial', status = 'trial',
+      trial_ends_at = ${t.is_test ? sql`now() + interval '3650 days'` : sql`greatest(coalesce(trial_ends_at, now()), now() + interval '14 days')`},
+      period_end = (${t.is_test ? sql`now() + interval '3650 days'` : sql`greatest(coalesce(trial_ends_at, now()), now() + interval '14 days')`})::date where tenant = ${tenant}`;
+  let card: string | null = null;
+  if (i.removeCard) {
+    const [c] = await sql<{ bid_enc: string; card_last4: string | null }[]>`update billing_cards set removed_at = now() where tenant = ${tenant} and removed_at is null returning bid_enc, card_last4`;
+    if (c) { card = c.card_last4; const conf = npConf(); if (conf) removeBillKey(conf, decrypt(c.bid_enc), moid('rm')).catch(() => {}); }
+  }
+  (await import('../plans')).clearReadOnlyCache(tenant);
+  await (await import('../spaceConsult')).syncPaidSpaces(sql, tenant).catch(() => null);
+  await audit(sql, u.id, 'platform.billing_stop', 'tenant', null, { tenant, reason: i.reason, removeCard: !!i.removeCard, cardLast4: card, toTrial: !!i.toTrial, before: before ?? null }, ip);
+  return { ok: true, cardRemoved: !!card, toTrial: !!i.toTrial };
 }
 
 // ---- 플랫폼 운영 ----

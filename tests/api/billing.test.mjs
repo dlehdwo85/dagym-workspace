@@ -265,6 +265,30 @@ describe('18차 나이스페이 결제', () => {
     assert.ok((await sql`select 1 from audit_logs where action = 'billing.card_removed'`).length);
     await owner.ok('POST', '/api/billing/card', { cardNo: '4111111111111234', expYear: '29', expMonth: '12', idNo: '900101', cardPw: '12' }); // 다음 시험을 위해 다시 등록
   });
+
+  test('로컬 11/24: 운영자 [정기결제 멈추기] — 자동 결제 일정 지움 · 카드(정기결제 키) 삭제 · 체험으로 되돌림 · 사유 필수 · 운영자만 · 감사 기록', async () => {
+    const before = await sub();
+    await owner.ok('POST', '/api/billing/subscribe', { planCode: 'w_work', consent: true });
+    let s = await sub();
+    assert.ok(s.billing_cycle && s.next_billing_on, '정기결제 중');
+    const url = `/api/platform/tenants/${tid}/billing`;
+    assert.equal((await owner.req('POST', url, { action: 'stop', reason: '고객이 직접' })).status, 404, '고객사는 못 함');
+    assert.equal((await platform.req('POST', url, { action: 'stop', removeCard: true })).status, 400, '사유 필수');
+    assert.equal((await platform.req('POST', '/api/platform/tenants/default/billing', { action: 'stop', reason: '우리 회사' })).status, 400);
+    const r = await platform.ok('POST', url, { action: 'stop', removeCard: true, toTrial: true, reason: '시험 — 정기결제 정리' });
+    assert.deepEqual([r.cardRemoved, r.toTrial], [true, true]);
+    s = await sub();
+    assert.deepEqual([s.billing_cycle, s.next_billing_on, s.plan_code, s.status, s.past_due_since], [null, null, 'trial', 'trial', null]);
+    assert.ok(new Date(s.trial_ends_at) > new Date(Date.now() + 13 * 86400_000), '체험 14일');
+    assert.equal((await owner.ok('GET', '/api/billing')).card, null, '카드 지워짐');
+    const [a] = await sql`select detail from audit_logs where action = 'platform.billing_stop' order by id desc limit 1`;
+    assert.deepEqual([a.detail.tenant, a.detail.reason, a.detail.removeCard, a.detail.before.billing_cycle], [tid, '시험 — 정기결제 정리', true, 'monthly']);
+    // 결제 기록은 그대로(환불은 결제 상세에서)
+    assert.ok((await platform.ok('GET', `/api/platform/payments?q=${tid}&hideTest=0&status=paid`)).payments.length >= 1, '결제 기록은 남음');
+    // 다음 시험을 위해 원래대로
+    await sql`update tenant_subscriptions set plan_code = ${before.plan_code}, status = ${before.status}, billing_cycle = ${before.billing_cycle}, next_billing_on = ${before.next_billing_on}, trial_ends_at = ${before.trial_ends_at} where tenant = ${tid}`;
+    await owner.ok('POST', '/api/billing/card', { cardNo: '4111111111111234', expYear: '29', expMonth: '12', idNo: '900101', cardPw: '12' });
+  });
   test('V32 1 결제 시험 회사: 플랫폼만 만듦 → 시험 상점 결제창 → 승인 후 자동 확인 → 자동 결제 제외 → 취소하면 원복 · 1시간 지난 시험 결제 자동 취소', async () => {
     await sql`update users set platform_admin = true where id = ${ctx.ownerId}`;
     assert.equal((await ctx.staffA.client.post('/api/platform/pay-test', {})).status, 404, '플랫폼 운영자만');
