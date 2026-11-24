@@ -48,6 +48,20 @@ test('#1149 진행 중 K-Startup 공고: 상세 화면 첨부를 채우고 기�
   assert.match(t.description, /공고 첨부 2건 중 1건 자동 첨부 실패/, '막힌 파일은 업무에 원문 안내 줄');
 });
 
+test('로컬 11/24: 진행 업무가 있는 공고가 첨부 없는 다른 공고들에 밀리지 않음 · 상세 응답에 첨부 수집 상태', async () => {
+  // 예전: 첨부 없는 K-Startup 공고 전체에서 마감 순 5건을 먼저 고른 뒤 진행 업무가 있는 것만 남겨, 더 늦게 마감하는 진행 공고는 차례가 오지 않았음
+  for (let k = 0; k < 6; k++) await ins({ source_id: `KX${k}`, title: `진행하지 않는 공고 ${k}`, apply_end: d(3) });
+  const p = await ins({ source_id: 'K1149B', title: '늦게 마감하는 진행 공고', apply_end: d(40) });
+  await sql`insert into support_work (tenant, program_id, status, owner_id) values ('default', ${p}, 'preparing', ${ctx.staffA.id})`; // 즉시 채우기 없이(정기 실행만으로)
+  const before = await ctx.owner.ok('GET', `/api/sales/support/${p}`);
+  assert.deepEqual(before.filesStatus, { checkedAt: null, found: null, error: null }, '아직 안 읽음');
+  for (let i = 0; i < 10; i++) { const [x] = await sql`select jsonb_array_length(attachments) n from support_programs where id = ${p}`; if (x.n) break; await tick(); }
+  const after = await ctx.owner.ok('GET', `/api/sales/support/${p}`);
+  assert.equal(after.attachments.length, 2, '진행 공고의 첨부가 채워짐');
+  assert.equal(after.filesStatus.found, 2); assert.ok(after.filesStatus.checkedAt); assert.equal(after.filesStatus.error, null);
+  assert.equal((await sql`select count(*)::int n from support_programs where source_id like 'KX%' and raw ? 'files_checked_at'`)[0].n, 0, '진행하지 않는 공고는 읽지 않음');
+});
+
 test('#1151·#1152 탭 숫자는 거름 적용 · 관심·준비 탭은 거름과 관계없이 다 보임 · 찾기는 전체 · 거름으로 n건 숨김', async () => {
   const ev = await ins({ source_id: 'K1151', title: '스타트업 밋업 행사 참가자 모집', category: '행사·네트워크' });
   await ctx.owner.ok('POST', `/api/sales/support/${ev}/work`, { status: 'interest' });

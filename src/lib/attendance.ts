@@ -29,6 +29,14 @@ export function distanceM(a: { lat: number; lng: number }, b: { lat: number; lng
 const hhmm = (d: Date | null) => (d ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(d) : null);
 const canAdmin = async (u: SessionUser, need: 'view' | 'edit', sql: Sql = db()) => isAdmin(u) || RANK[await menuLevel(u, 'attendance_admin', sql)] >= RANK[need];
 
+/**
+ * D-18(위치기반서비스 신고 전 대비, 로컬 11/24 요청): 출퇴근 위치를 받는 회사 — 환경 변수 ATTENDANCE_LOCATION_ONLY(쉼표로 회사 id, 예: 'default').
+ * 비어 있으면 지금처럼 모든 회사가 위치를 받음. 넣으면 목록 밖 회사는 위치 동의를 묻지 않고 좌표를 받지도 저장하지도 않음(시각만 기록). 배포 없이 Vercel 설정으로 켬
+ */
+export const locationAllowed = (t: string) => {
+  const v = (process.env.ATTENDANCE_LOCATION_ONLY ?? '').trim();
+  return !v || v.split(',').map((x) => x.trim()).filter(Boolean).includes(t);
+};
 async function settings(sql: Sql, t: string) {
   const [r] = await sql<{ attendance_on: boolean; work_start: string }[]>`select attendance_on, work_start from tenants where id = ${t}`;
   return { on: r?.attendance_on ?? true, workStart: r?.work_start ?? '09:00' };
@@ -43,7 +51,7 @@ export async function myToday(u: SessionUser) {
   const [row] = await sql<any[]>`select a.*, si.name as in_site_name, so.name as out_site_name from attendance a left join work_sites si on si.id = a.in_site_id left join work_sites so on so.id = a.out_site_id where a.tenant = ${t} and a.user_id = ${u.id} and a.day = ${day}`;
   const [cs] = await sql<{ location_consent_at: Date | null }[]>`select location_consent_at from user_settings where user_id = ${u.id}`;
   const st = await settings(sql, t); const ss = await sites(sql, t);
-  return { on: st.on, day, consent: !!cs?.location_consent_at, sites: ss.length, workStart: st.workStart,
+  return { on: st.on, location: locationAllowed(t), day, consent: !!cs?.location_consent_at, sites: ss.length, workStart: st.workStart,
     today: row ? { inAt: row.in_at, inTime: hhmm(row.in_at), inSite: row.in_site_name, inInside: row.in_inside, inReason: row.in_reason, outAt: row.out_at, outTime: hhmm(row.out_at), outSite: row.out_site_name, outInside: row.out_inside, outReason: row.out_reason } : null };
 }
 /** 출근/퇴근 기록 — 현장이 등록돼 있고 위치가 있으면 가장 가까운 현장과 반경 안인지, 밖이면 사유 필요(없으면 400 outside) */
@@ -52,6 +60,7 @@ export async function clock(u: SessionUser, i: z.infer<typeof clockInput>, ip: s
   const sql = db(); const t = tenantOf(u);
   const st = await settings(sql, t);
   if (!st.on) throw badRequest('이 회사는 출퇴근 기록을 쓰지 않습니다(관리자 설정)');
+  if (!locationAllowed(t)) i = { ...i, lat: undefined, lng: undefined, accuracy: undefined, noLocation: true, consent: false }; // D-18: 위치를 받지 않는 회사 — 보내와도 버림
   if (i.consent) await sql`insert into user_settings (user_id, location_consent_at) values (${u.id}, now()) on conflict (user_id) do update set location_consent_at = coalesce(user_settings.location_consent_at, now())`;
   const [cs] = await sql<{ location_consent_at: Date | null }[]>`select location_consent_at from user_settings where user_id = ${u.id}`;
   if (!cs?.location_consent_at && !i.noLocation) throw new HttpError(400, 'consent', '위치 동의가 필요합니다 — 출퇴근 순간의 위치만 저장합니다');

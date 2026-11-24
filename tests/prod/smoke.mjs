@@ -128,6 +128,24 @@ await step('메모·주요 메모(본인 확인 전 막힘 → 확인 뒤 보기
   }
 });
 
+// #1139 잠긴 공간(로컬 11/24 요청 — 검수용 시험 회사는 업무만 켜져 있음): 사이드바 자물쇠 '상담 후 사용' → 안내 화면 → [상담 신청] 단추까지만(보내면 운영자 메일이 가므로 누르지 않음) → 잠긴 공간 API 는 서버가 막음(404)
+await step('잠긴 공간(자물쇠 → 안내 → 상담 신청 단추 · 서버 404)', async () => {
+  const v = await api('GET', '/api/spaces/consult');
+  if (!v.locked.length) { console.log('  (검수 회사에 영업·마케팅이 모두 켜져 있어 건너뜀)'); return; }
+  const sp = v.locked.includes('sales') ? 'sales' : v.locked[0];
+  await visit('/', 'home-todo');
+  const lock = page.getByTestId(`space-locked-${sp}`).first();
+  await lock.waitFor({ timeout: 20_000 });
+  ok(/상담 후 사용/.test(`${await lock.getAttribute('title')} ${await lock.innerText()}`), '자물쇠 칸에 "상담 후 사용" 없음');
+  await lock.click();
+  await page.waitForURL(/\/spaces\/locked/, { timeout: 20_000 });
+  await page.getByTestId('space-locked-page').waitFor({ timeout: 20_000 });
+  await page.getByTestId(v.canRequest ? 'space-consult-send' : 'space-consult-staff').waitFor({ timeout: 10_000 });
+  const path = sp === 'sales' ? '/api/sales/award-stats' : '/api/marketing/plan';
+  const r = await fetch(BASE + path, { headers: { cookie, origin: BASE } });
+  ok(r.status === 404, `잠긴 공간 API(${path})가 막히지 않음(${r.status})`);
+});
+
 await step('화면 오류(자바스크립트) 없음', async () => ok(errors.length === 0, `${errors.length}건: ${errors.slice(0, 3).join(' | ')}`));
 await browser.close();
 report();

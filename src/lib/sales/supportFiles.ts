@@ -40,15 +40,17 @@ export async function fillSupportAttachments(opt: { max?: number; programId?: st
     where p.source = 'kstartup' and coalesce(jsonb_array_length(case when jsonb_typeof(p.attachments) = 'array' then p.attachments else '[]'::jsonb end), 0) = 0
       and coalesce(p.raw->>'files_checked_at', '') < to_char(now() - interval '1 day', 'YYYY-MM-DD"T"HH24:MI:SS')
       and (${opt.programId ?? null}::uuid is null or p.id = ${opt.programId ?? null}::uuid)
+      -- 로컬 11/24(#1149 Next OI 첨부 0개): 예전엔 첨부 없는 공고 전체에서 5건을 먼저 고른 뒤 '진행 중 업무가 있는 공고'만 남겨,
+      -- 업무가 있는 공고가 그 5건 밖이면 영영 차례가 오지 않았음 → 처음부터 진행 중 업무(관심·신청 준비·신청)가 있는 공고만 고름
+      and (${opt.programId ?? null}::uuid is not null or exists (select 1 from support_work w where w.program_id = p.id and w.withdrawn_at is null and w.status in ('interest', 'preparing', 'applied')))
     order by p.apply_end nulls last limit ${opt.max ?? 20}`;
-  const want = opt.programId ? rows : await sql<{ id: string }[]>`select distinct w.program_id as id from support_work w where w.withdrawn_at is null and w.status in ('interest', 'preparing', 'applied') and w.program_id = any(${rows.map((r) => r.id)}::uuid[])`;
-  const ids = new Set(want.map((w) => w.id));
+  const ids = new Set(rows.map((r) => r.id));
   let filled = 0, attached = 0; const errors: string[] = [];
   for (const p of rows.filter((r) => ids.has(r.id))) {
     const url = base ? `${base}/${encodeURIComponent(p.source_id)}` : p.url ?? `${KS}/web/contents/bizpbanc-ongoing.do?schM=view&pbancSn=${encodeURIComponent(p.source_id)}`;
     try {
       const files = kstartupFilesFromHtml(await fetchHtml(url), base ?? KS);
-      await sql`update support_programs set raw = coalesce(raw, '{}'::jsonb) || ${sql.json({ files_checked_at: new Date().toISOString().slice(0, 19), files_found: files.length } as never)}${files.length ? sql`, attachments = ${sql.json(files as never)}` : sql``} where id = ${p.id}`;
+      await sql`update support_programs set raw = coalesce(raw, '{}'::jsonb) || ${sql.json({ files_checked_at: new Date().toISOString().slice(0, 19), files_found: files.length, files_error: null } as never)}${files.length ? sql`, attachments = ${sql.json(files as never)}` : sql``} where id = ${p.id}`;
       if (!files.length) continue;
       filled++;
       // 그 공고로 만든 열린 업무(회사마다) → 자료실 저장 + 업무에 붙임(같은 파일은 한 번)

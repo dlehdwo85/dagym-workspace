@@ -6,7 +6,7 @@ import { LogIn, LogOut, MapPin } from 'lucide-react';
 import { api, useApi } from './client';
 import { Button, Modal, cx, inputCls, toast } from './ui';
 
-type T = { on: boolean; day: string; consent: boolean; sites: number; workStart: string; today: { inTime: string | null; inSite: string | null; inInside: boolean | null; inReason: string | null; outTime: string | null; outSite: string | null; outInside: boolean | null; outReason: string | null } | null };
+type T = { on: boolean; location?: boolean; day: string; consent: boolean; sites: number; workStart: string; today: { inTime: string | null; inSite: string | null; inInside: boolean | null; inReason: string | null; outTime: string | null; outSite: string | null; outInside: boolean | null; outReason: string | null } | null };
 function getPos(): Promise<{ lat: number; lng: number; accuracy: number } | null> {
   return new Promise((res) => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return res(null);
@@ -25,7 +25,7 @@ export function ClockCard({ inline = false }: { inline?: boolean } = {}) {
   async function send(type: 'in' | 'out', extra: Record<string, unknown> = {}) {
     setBusy(type);
     try {
-      const pos = await getPos();
+      const pos = d.location === false ? null : await getPos(); // D-18: 위치를 받지 않는 회사는 묻지도 않음(시각만)
       const r = await api('/api/attendance', { body: { type, ...(pos ? { lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy } : { noLocation: true }), ...extra } });
       const t = r.today; const site = type === 'in' ? t.inSite : t.outSite; const inside = type === 'in' ? t.inInside : t.outInside;
       toast.ok(`${type === 'in' ? '출근' : '퇴근'} ${type === 'in' ? t.inTime : t.outTime}${site ? ` · ${site}${inside === false ? ' 밖' : ''}` : pos ? '' : ' · 위치 없음'}`);
@@ -41,7 +41,7 @@ export function ClockCard({ inline = false }: { inline?: boolean } = {}) {
     <section className={inline ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap items-center gap-2 rounded-card border border-line bg-white px-3 py-2 shadow-card'} data-testid="home-clock">
       {!inline && <MapPin className="size-4 shrink-0 text-emerald-600" />}
       <div className={inline ? 'min-w-0 text-[13px]' : 'min-w-0 flex-1 text-sm'} data-testid="home-clock-status">
-        {!t?.inTime ? <span className="text-ink-2">아직 출근 전입니다{d.sites ? '' : ' (근무지 미등록 — 시각만 기록)'}</span>
+        {!t?.inTime ? <span className="text-ink-2">아직 출근 전입니다{d.location === false ? ' (시각만 기록)' : d.sites ? '' : ' (근무지 미등록 — 시각만 기록)'}</span>
           : <span><b>출근 {t.inTime}</b>{t.inSite && <span className={cx('ml-1 text-xs', t.inInside === false ? 'text-amber-700' : 'text-ink-3')}>{t.inSite}{t.inInside === false ? ` 밖 · ${t.inReason}` : ''}</span>}
             {t.outTime && <> · <b>퇴근 {t.outTime}</b>{t.outSite && <span className={cx('ml-1 text-xs', t.outInside === false ? 'text-amber-700' : 'text-ink-3')}>{t.outSite}{t.outInside === false ? ` 밖 · ${t.outReason}` : ''}</span>}</>}</span>}
       </div>

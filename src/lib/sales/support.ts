@@ -658,7 +658,10 @@ export async function detailView(u: SessionUser, id: string) {
   const [task] = w?.task_id ? await sql<{ id: string; title: string; status: string; due_date: string | null; total: number; done: number }[]>`select t.id, t.title, t.status, t.due_date::text,
     (select count(*)::int from task_checklist_items ci where ci.task_id = t.id) total, (select count(*)::int from task_checklist_items ci where ci.task_id = t.id and ci.done) done from tasks t where t.id = ${w.task_id} and t.deleted_at is null` : [];
   const pr = saved || profile.region_sido || profile.industries.length || profile.interests.length ? profile : null;
-  return { item: itemOf(p, ruleMatch(p, pr, today), m, w, today, u.id, basisAt), summary: p.summary, target: p.target, hashtags: p.hashtags ?? [], attachments: p.attachments ?? [], applyText: p.apply_text, bizYears: p.biz_years,
+  // 로컬 11/24: 첨부 수집 상태(K-Startup 상세 화면 읽기 — 마지막 시도·찾은 수·오류)를 상세 응답에 — 로컬·화면에서 '아직 안 읽음/읽었는데 없음/오류'를 구분
+  const [fs] = await sql<{ checked: string | null; found: string | null; error: string | null }[]>`select raw->>'files_checked_at' as checked, raw->>'files_found' as found, raw->>'files_error' as error from support_programs where id = ${p.id}`;
+  const filesStatus = p.source === 'kstartup' ? { checkedAt: fs?.checked ?? null, found: fs?.found != null ? Number(fs.found) : null, error: fs?.error ?? null } : null;
+  return { filesStatus, item: itemOf(p, ruleMatch(p, pr, today), m, w, today, u.id, basisAt), summary: p.summary, target: p.target, hashtags: p.hashtags ?? [], attachments: p.attachments ?? [], applyText: p.apply_text, bizYears: p.biz_years,
     log, task: task ?? null, canEdit: isAdmin(u), canEditProgram: !!p.tenant && (p.created_by === u.id || isAdmin(u)), aiOn: aiEnabled(), people: await peopleOf(sql, t), statusLabel: STATUS_LABEL };
 }
 
@@ -811,7 +814,7 @@ async function ensureTask(sql: Sql, u: SessionUser, p: Prog, w: { id: string; st
   const r = await createTask(u, { title, description: desc, space: 'sales', assigneeId: owner, requestedById: u.id, dueDate: due, approvalRequired: false, tags: ['영업', '지원사업'], checklist: steps } as never, { quiet: owner === u.id, skipQuota: true });
   await sql`update tasks set sales_ref = ${sql.json({ kind: 'support', id: p.id, name: p.title.slice(0, 120) })} where id = ${r.id}`;
   if ((p.attachments ?? []).length) (await import('./autoAttach')).attachSourceFilesLater(u, { kind: 'support', id: p.id, taskIds: [r.id] }); // #507 공고 첨부 자동
-  else if (p.source === 'kstartup') void (await import('./supportFiles')).fillSupportAttachments({ programId: p.id }).catch(() => null); // #1149 K-Startup 은 상세 화면에서 첨부를 읽어 채움(응답 뒤)
+  else if (p.source === 'kstartup') (await import('../later')).runLater('support-files', async () => (await import('./supportFiles')).fillSupportAttachments({ programId: p.id })); // #1149 K-Startup 은 상세 화면에서 첨부를 읽어 채움(응답 뒤 — after, 예전 void 는 서버가 응답 뒤 끊을 수 있었음)
   return r.id;
 }
 /** 280차 #820(대표 10/31 '진행중인 지원사업도 업무로 넘길 수 있도록 담당자 설정해서'): 신청 완료 = 결과 확인 업무, 선정 = 협약·정산 업무(체크리스트) */
