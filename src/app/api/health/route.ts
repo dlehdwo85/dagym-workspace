@@ -7,6 +7,17 @@ import { googleSyncEnabled } from '@/lib/google/client';
 
 export const dynamic = 'force-dynamic';
 
+/** Neon 호스트 'ep-…(-pooler).<지역>.<클라우드>.neon.tech' → '<클라우드>-<지역>' · 로컬 → 'local' · 그 밖 → 'unknown' */
+function dbRegionOf(url: string | undefined): string {
+  let host = '';
+  try { host = new URL(url ?? '').hostname.toLowerCase(); } catch { return 'unknown'; }
+  if (!host) return 'unknown';
+  if (host === 'localhost' || host === '127.0.0.1' || !host.includes('.')) return 'local';
+  const p = host.split('.');
+  if (host.endsWith('.neon.tech') && p.length >= 5 && /^[a-z0-9-]+$/.test(p[p.length - 4]) && /^[a-z]+$/.test(p[p.length - 3])) return `${p[p.length - 3]}-${p[p.length - 4]}`;
+  return 'unknown';
+}
+
 export async function GET() {
   const started = Date.now();
   try {
@@ -41,6 +52,8 @@ export async function GET() {
         salesSrcKey: (await import('@/lib/sales/supabaseSrc')).srcKeyKind(), // V41 단계 2: 영업관리 원본 키 종류(값은 안 보임)
         funnelStats: !!process.env.FUNNEL_STATS_TOKEN && process.env.FUNNEL_STATS_TOKEN.length >= 16, // 로컬 10/21 16:50: 주간 퍼널 읽기 토큰이 설정됐는지(값은 안 보임)
         // D-18(로컬 11/24): 출퇴근 위치를 받는 회사 — 'all'(지금처럼 모두) 또는 'only:<회사 수>[+default]'(목록 회사만). 회사 id 는 우리 회사(default)만 표시
+        // D-22(로컬 11/24 #1167): 데이터베이스 지역 — 연결 주소의 호스트에서 지역 조각만(예: 'aws-ap-southeast-1'). 주소·계정·비밀번호는 내보내지 않음
+        dbRegion: dbRegionOf(process.env.DATABASE_URL),
         attendanceLocation: (() => { const v = (process.env.ATTENDANCE_LOCATION_ONLY ?? '').split(',').map((x) => x.trim()).filter(Boolean); return v.length ? `only:${v.length}${v.includes('default') ? '+default' : ''}` : 'all'; })(),
 
       },

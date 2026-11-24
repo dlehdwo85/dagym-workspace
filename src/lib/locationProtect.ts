@@ -101,7 +101,7 @@ export async function locationCheckView(u: SessionUser, q: z.infer<typeof lbsChe
   const sql = db();
   const month = q.month ?? DateTime.now().setZone(TZ).minus({ months: 1 }).toFormat('yyyy-MM');
   const from = `${month}-01`; const to = DateTime.fromISO(from, { zone: TZ }).plus({ months: 1 }).toISODate()!;
-  const [kinds, viewers, tenants, checks, issues] = await Promise.all([
+  const [kinds, viewers, tenants, checks, issues, consents] = await Promise.all([
     sql<{ kind: string; n: number }[]>`select kind, count(*)::int n from location_logs where day >= ${from}::date and day < ${to}::date group by kind order by kind`,
     sql<{ viewer: string | null; tenant_name: string | null; n: number; people: number; days: number }[]>`select v.name as viewer, t.name as tenant_name, count(*)::int n, count(distinct l.subject_user_id)::int people, count(distinct l.day)::int days
       from location_logs l left join users v on v.id = l.viewer_user_id left join tenants t on t.id = l.tenant
@@ -110,8 +110,11 @@ export async function locationCheckView(u: SessionUser, q: z.infer<typeof lbsChe
       where l.kind = 'collect' and l.day >= ${from}::date and l.day < ${to}::date group by t.name order by collects desc limit 30`,
     sql<{ at: Date; by: string | null; detail: any }[]>`select a.created_at as at, us.name as by, a.detail from audit_logs a left join users us on us.id = a.actor_id where a.action = 'lbs.monthly_check' order by a.created_at desc limit 12`,
     locationSelfCheck(sql),
+    // #1167(로컬 11/24): 사업계획서 '사업 규모' — 지금 위치 이용에 동의해 둔 사람 수(회사별, 사용 중인 계정만 · 둘러보기 제외)
+    sql<{ tenant_name: string | null; n: number }[]>`select t.name as tenant_name, count(*)::int n from users u join user_settings us on us.user_id = u.id left join tenants t on t.id = u.tenant
+      where us.location_consent_at is not null and u.deleted_at is null and u.status = 'active' and not u.is_demo group by t.name order by n desc limit 30`,
   ]);
-  return { month, kinds, viewers, tenants, checks: checks.map((c) => ({ at: c.at, by: c.by, month: c.detail?.month ?? null, note: c.detail?.note ?? null, issues: c.detail?.issues ?? 0 })), issues };
+  return { month, kinds, viewers, tenants, consents, consentTotal: consents.reduce((a, b) => a + b.n, 0), checks: checks.map((c) => ({ at: c.at, by: c.by, month: c.detail?.month ?? null, note: c.detail?.note ?? null, issues: c.detail?.issues ?? 0 })), issues };
 }
 export const lbsCheckInput = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), note: z.string().trim().max(500).optional() });
 export async function markLocationChecked(u: SessionUser, i: z.infer<typeof lbsCheckInput>, ip: string | null) {

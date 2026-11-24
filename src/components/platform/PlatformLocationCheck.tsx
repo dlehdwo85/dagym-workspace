@@ -8,6 +8,8 @@ type View = {
   kinds: { kind: string; n: number }[];
   viewers: { viewer: string | null; tenant_name: string | null; n: number; people: number; days: number }[];
   tenants: { tenant_name: string | null; collects: number }[];
+  consents: { tenant_name: string | null; n: number }[];
+  consentTotal: number;
   checks: { at: string; by: string | null; month: string | null; note: string | null; issues: number }[];
   issues: { code: string; label: string }[];
 };
@@ -48,6 +50,7 @@ export function PlatformLocationCheck() {
                 {!data.viewers.length && <tr><td colSpan={5} className="py-1 text-ink-3">이 달에는 없음</td></tr>}</tbody>
             </table>
           </div>
+          <p className="text-ink-2" data-testid="lbs-check-consents">위치 동의 인원(지금, 사용 중인 계정): {data.consentTotal}명{data.consents.length ? ` — ${data.consents.map((c) => `${c.tenant_name ?? '-'} ${c.n}명`).join(' · ')}` : ''}</p>
           {!!data.tenants.length && <p className="text-ink-2">회사별 수집: {data.tenants.map((t) => `${t.tenant_name ?? '-'} ${t.collects}건`).join(' · ')}</p>}
           <div className="flex flex-wrap items-center gap-2">
             <input className={`${inputCls} h-8 max-w-md flex-1 py-0 text-xs`} value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="점검 메모(선택) — 예: 이상 없음, 관리자 1명 열람 많음 확인" aria-label="점검 메모" data-testid="lbs-check-note" />

@@ -2,7 +2,7 @@
 // ⑤⑥ 플랫폼 '위치정보 월 점검'(요약·자체 점검·[점검 완료] 기록) · 자체 점검 문제 = 플랫폼 운영자 알림
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { bootstrap, resetDb, startServer, testDb, tick, seoulToday } from '../helpers.mjs';
+import { BASE, bootstrap, resetDb, startServer, testDb, tick, seoulToday } from '../helpers.mjs';
 
 let srv, sql, ctx;
 before(async () => { await resetDb(); srv = await startServer(); sql = testDb(); ctx = await bootstrap(); await sql`update users set platform_admin = true where id = ${ctx.ownerId}`; });
@@ -34,6 +34,14 @@ test('평문 좌표 옮기기 · 확인자료 고치기/지우기 금지 · 요�
   const month = seoulToday().slice(0, 7);
   const v = await ctx.owner.ok('GET', `/api/platform/location-check?month=${month}`);
   assert.ok(v.kinds.some((k) => k.kind === 'provide') && v.viewers.length >= 1);
+  // #1167 운영 상태 응답의 데이터베이스 지역(주소·비밀번호는 안 나옴) — 시험 DB 는 localhost
+  const h = await (await fetch(`${BASE}/api/health`)).json();
+  assert.equal(h.config.dbRegion, 'local'); assert.ok(!JSON.stringify(h).includes('workos:workos'), '연결 주소 안 나옴');
+  // #1167 위치 동의 인원(회사별) — 동의 1명 넣으면 1명
+  assert.equal(v.consentTotal, 0);
+  await sql`insert into user_settings (user_id, location_consent_at) values (${sid}, now()) on conflict (user_id) do update set location_consent_at = now()`;
+  const vc = await ctx.owner.ok('GET', `/api/platform/location-check?month=${month}`);
+  assert.equal(vc.consentTotal, 1); assert.equal(vc.consents[0].n, 1);
   assert.equal((await ctx.staffA.client.get('/api/platform/location-check')).status, 404);
 
   // 누군가 트리거를 끄고 기록을 고치면 → 요약 해시와 달라 자체 점검이 잡음 · 운영자 알림
