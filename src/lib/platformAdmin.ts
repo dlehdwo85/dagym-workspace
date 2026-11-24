@@ -169,9 +169,9 @@ export async function tenantDeletion(u: SessionUser, tenant: string, i: z.infer<
     await sql`update tenants set delete_scheduled_at = now() + interval '30 days' where id = ${tenant}`;
     const admins = (await sql<{ id: string; email: string }[]>`select id, email from users where tenant = ${tenant} and status = 'active' and role in ('owner', 'admin')`);
     const { notify } = await import('./notifications');
-    await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title: '워크인 공간 삭제가 예약되었습니다', body: '30일 뒤 삭제됩니다 — 필요한 자료는 설정 > 내보내기로 받아 두세요. 문의는 고객센터로.',
-      link: '/settings', dedupeKey: `tenant-delete:${tenant}:${Date.now()}` });
-    for (const a of admins) await sendMail(a.email, '[워크인] 공간 삭제 예약 안내', `${t.name} 공간 삭제가 예약되었습니다(30일 뒤).\n필요한 자료는 설정 > 내보내기로 받아 두세요.\n${appUrl()}/settings`).catch(() => {});
+    await notify(sql, { userIds: admins.map((a) => a.id), type: 'usage_alert', title: '워크인 공간 삭제가 예약되었습니다', body: '30일 뒤 삭제됩니다 — 필요한 자료는 설정 › 회사 전체 내보내기로 받아 두세요. 문의는 고객센터로.',
+      link: '/settings#company-export', dedupeKey: `tenant-delete:${tenant}:${Date.now()}` });
+    for (const a of admins) await sendMail(a.email, '[워크인] 공간 삭제 예약 안내', `${t.name} 공간 삭제가 예약되었습니다(30일 뒤).\n필요한 자료는 설정 › 회사 전체 내보내기로 받아 두세요(업무·일정·연락처·파일 원본을 압축 파일 하나로).\n${appUrl()}/settings#company-export`).catch(() => {});
   } else if (i.action === 'cancel') {
     await sql`update tenants set delete_scheduled_at = null where id = ${tenant}`;
   } else {

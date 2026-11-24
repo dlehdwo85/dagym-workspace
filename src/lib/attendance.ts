@@ -5,7 +5,7 @@ import { db, type Sql } from './db';
 import { HttpError, badRequest, forbidden, notFound } from './errors';
 import { isAdmin, denyDemo } from './access';
 import { RANK, menuLevel } from './menuPerms';
-import { audit } from './log';
+import { audit, logError } from './log';
 import { todaySeoul } from './time';
 import { tenantOf, type SessionUser } from './types';
 
@@ -246,13 +246,17 @@ export async function withdrawLocation(u: SessionUser, ip: string | null) {
 /** 정기 실행: 6개월 지난 출퇴근 좌표 파기 · 1년 지난 확인자료 삭제(법정 6개월 이상 보관) */
 export async function locationRetentionTick(sql: Sql = db()) {
   const P = await import('./locationProtect');
-  const moved = await P.migratePlainCoords(sql).catch(() => 0); // D-18 ③ 예전 평문 좌표 → 암호화 칸
+  // D-18 ③ 예전 평문 좌표 → 암호화 칸. 실패해도 파기는 계속하되 이유를 정기 실행 기록(/admin/ops)·오류 기록에 남김(11/24 로컬: 평문 7줄 확인)
+  const soft = async <T,>(name: string, fn: () => Promise<T>) => {
+    try { return await fn(); } catch (e) { await logError(`tick:locationRetention:${name}`, e); return { error: (e as Error).message }; }
+  };
+  const moved = await soft('migrate', () => P.migratePlainCoords(sql));
   const rows = await sql<{ tenant: string; n: number }[]>`with x as (update attendance set in_lat = null, in_lng = null, out_lat = null, out_lng = null, in_loc_enc = null, out_loc_enc = null
       where day < (now() at time zone 'Asia/Seoul')::date - interval '6 months' and (in_lat is not null or out_lat is not null or in_loc_enc is not null or out_loc_enc is not null) returning tenant)
     select tenant, count(*)::int n from x group by tenant`;
   for (const r of rows) await logLocation(sql, r.tenant, 'purge', null, { rows: r.n, rule: '6개월' });
   // D-18 ④ 확인자료는 트리거가 지키므로(1년 전 지우기·고치기 금지) 이 거래 안에서만 정기 파기 표시를 켜고 지움
   const old = await db().begin(async (tx: Sql) => { await tx`select set_config('app.location_purge', 'on', true)`; return tx`delete from location_logs where created_at < now() - interval '1 year'`; });
-  const protect = await P.locationProtectTick(sql).catch(() => null); // ④ 매일 요약 해시 · ⑥ 자체 점검
+  const protect = await soft('protect', () => P.locationProtectTick(sql)); // ④ 매일 요약 해시 · ⑥ 자체 점검
   return { moved, purgedTenants: rows.length, purgedRows: rows.reduce((a, b) => a + b.n, 0), oldLogs: old.count, protect };
 }

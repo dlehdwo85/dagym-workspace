@@ -72,6 +72,7 @@ export default function Settings() {
       <AwaySection />
       <MyMailSection />
       <AccountSection />
+      {(user.role === 'owner' || user.role === 'admin') && <CompanyExport />}
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 종류별 수신</h2>
         <table className="w-full text-sm" data-testid="prefs">
@@ -402,6 +403,57 @@ function MyMailSection() {
             </form>
           )}
         </>
+      )}
+    </section>
+  );
+}
+
+type ExportItem = { id: string; status: 'queued' | 'running' | 'done' | 'failed' | 'expired'; cursor: number; total: number; parts: { n: number; size: number; files: number }[];
+  counts: { big: number; files: number; missing: number } | null; error: string | null; created_at: string; expires_at: string | null; by: string | null };
+const EXPORT_ST: Record<ExportItem['status'], string> = { queued: '준비 중', running: '만드는 중', done: '준비됨', failed: '만들지 못함', expired: '기간 지남(파일 지움)' };
+/** 상용화 B4 회사 전체 내보내기(대표·관리자): 요청 → 준비되면 알림·메일 → 7일 동안 내려받기. 앱에서는 요청만, 내려받기는 PC 웹(앱 파일 저장 제약) */
+function CompanyExport() {
+  const { support } = useSession();
+  const inApp = useInApp();
+  const { data, reload } = useApi<{ items: ExportItem[]; keepDays: number }>('/api/export/company');
+  const [busy, setBusy] = useState(false);
+  const working = !!data?.items.some((x) => x.status === 'queued' || x.status === 'running');
+  useEffect(() => { if (!working) return; const t = setInterval(reload, 10_000); return () => clearInterval(t); }, [working, reload]);
+  const loaded = !!data;
+  // 알림·메일 링크(/settings#company-export): 설정 화면은 불러온 뒤 그려져 브라우저가 칸을 못 찾음 → 불러온 뒤 그 칸으로
+  useEffect(() => { if (loaded && location.hash === '#company-export') document.getElementById('company-export')?.scrollIntoView({ block: 'start' }); }, [loaded]);
+  if (support) return null;
+  async function ask() {
+    setBusy(true);
+    try { await api('/api/export/company', { body: {} }); toast.ok('요청했습니다 — 준비되면 알림·메일로 알려 드립니다'); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  const mb = (b: number) => (b >= 1024 * 1024 * 1024 ? `${(b / 1024 ** 3).toFixed(1)}GB` : `${Math.max(0.1, Math.round((b / 1024 / 1024) * 10) / 10)}MB`);
+  return (
+    <section id="company-export" className="scroll-mt-20 rounded-lg border bg-white p-4 text-sm" data-testid="company-export">
+      <h2 className="font-semibold">회사 전체 내보내기</h2>
+      <p className="mt-1 text-ink-2">업무·일정·연락처·영업·결재·계약·대화(회사·팀·업무 대화방) 목록과 자료실·첨부 파일 원본을 압축 파일로 만듭니다. 목록은 엑셀에서 바로 열립니다.
+        준비되면 알림·메일로 알려 드리고, {data?.keepDays ?? 7}일 동안 대표·관리자만 내려받을 수 있습니다(하루 한 번 요청).</p>
+      <p className="mt-1 text-xs text-ink-3">1:1 대화, 직원의 &lsquo;내 파일&rsquo;, 메모, 출퇴근 위치 좌표, 비공개 일정 내용은 넣지 않습니다. 자세한 것은 압축 파일 안 &lsquo;읽어 주세요.txt&rsquo;에 있습니다.</p>
+      <Button className="mt-2" size="sm" disabled={busy || working} onClick={ask} data-testid="company-export-request">{working ? '만드는 중…' : '내보내기 요청'}</Button>
+      {inApp && <p className="mt-1 text-xs text-ink-3">내려받기는 PC 웹에서 해 주세요(앱에서는 요청만 됩니다).</p>}
+      {!!data?.items.length && (
+        <ul className="mt-3 divide-y divide-line border-t border-line" data-testid="company-export-list">
+          {data.items.map((x) => (
+            <li key={x.id} className="py-2" data-testid={`company-export-${x.status}`}>
+              <p className="text-ink-2">{fmtDateTime(x.created_at)} · {x.by ?? '-'} 요청 · <b className={x.status === 'failed' ? 'text-red-700' : 'text-ink-1'}>{EXPORT_ST[x.status]}</b>
+                {(x.status === 'queued' || x.status === 'running') && x.total > 0 && <span className="tabular-nums"> · 파일 {x.cursor}/{x.total}</span>}
+                {x.status === 'done' && x.expires_at && <span> · {fmtDateTime(x.expires_at)}까지</span>}</p>
+              {x.status === 'done' && !inApp && (
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {x.parts.map((p) => <a key={p.n} href={`/api/export/company/${x.id}/download?part=${p.n}`} className="rounded-input border border-line px-2.5 py-1 font-medium hover:bg-slate-50" data-testid={`company-export-dl-${p.n}`}>
+                    {x.parts.length > 1 ? `압축 파일 ${p.n}/${x.parts.length}` : '압축 파일 내려받기'} ({mb(p.size)})</a>)}
+                </div>
+              )}
+              {x.counts && (x.counts.big > 0 || x.counts.missing > 0) && <p className="mt-1 text-xs text-amber-800">{x.counts.big > 0 && `200MB 넘는 파일 ${x.counts.big}개는 담지 않았습니다(목록에 위치 표시) `}{x.counts.missing > 0 && `· 읽지 못한 파일 ${x.counts.missing}개`}</p>}
+              {x.status === 'failed' && x.error && <p className="mt-1 text-xs text-red-700">다시 요청해 주세요. 계속되면 고객센터로 알려 주세요.</p>}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

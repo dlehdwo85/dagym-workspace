@@ -33,3 +33,38 @@ export function buildZip(files: ZipFile[]): Buffer {
   end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(0, 4); end.writeUInt16LE(0, 6); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(cenSize, 12); end.writeUInt32LE(offset, 16); end.writeUInt16LE(0, 20);
   return Buffer.concat([...parts, ...central, end]);
 }
+
+/** 압축 안 경로 한 칸(폴더·파일 이름) — 쓸 수 없는 글자는 _ */
+export const zipSeg = (s: string, max = 120) => s.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').replace(/^\.+/, '_').trim().slice(0, max) || '_';
+/**
+ * 회사 전체 내보내기(B4): 압축 파일을 앞에서부터 써 나감(파일 하나씩 — 전체를 메모리에 두지 않음). 이름의 '/' 는 폴더(각 칸은 zipSeg 로 정리해서 넘김).
+ * 압축 없이 담기(buildZip 과 같은 형식) · 한 압축 파일은 4GB·65,535개 미만으로 부르는 쪽이 나눔
+ */
+export class ZipWriter {
+  private central: Buffer[] = [];
+  private offset = 0;
+  private count = 0;
+  constructor(private sink: { write(b: Buffer): Promise<void> }) {}
+  get bytes() { return this.offset; }
+  get files() { return this.count; }
+  async add(name: string, data: Buffer, mtime?: Date) {
+    const nameB = Buffer.from(name, 'utf8'); const crc = crcOf(data); const { time, date } = dosTime(mtime ?? new Date());
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6); local.writeUInt16LE(0, 8); local.writeUInt16LE(time, 10); local.writeUInt16LE(date, 12);
+    local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nameB.length, 26); local.writeUInt16LE(0, 28);
+    const cen = Buffer.alloc(46);
+    cen.writeUInt32LE(0x02014b50, 0); cen.writeUInt16LE(20, 4); cen.writeUInt16LE(20, 6); cen.writeUInt16LE(0x0800, 8); cen.writeUInt16LE(0, 10); cen.writeUInt16LE(time, 12); cen.writeUInt16LE(date, 14);
+    cen.writeUInt32LE(crc, 16); cen.writeUInt32LE(data.length, 20); cen.writeUInt32LE(data.length, 24); cen.writeUInt16LE(nameB.length, 28); cen.writeUInt16LE(0, 30); cen.writeUInt16LE(0, 32);
+    cen.writeUInt16LE(0, 34); cen.writeUInt16LE(0, 36); cen.writeUInt32LE(0, 38); cen.writeUInt32LE(this.offset, 42);
+    await this.sink.write(Buffer.concat([local, nameB]));
+    await this.sink.write(data);
+    this.central.push(cen, nameB); this.offset += local.length + nameB.length + data.length; this.count++;
+  }
+  async finish() {
+    const cd = Buffer.concat(this.central);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(this.count, 8); end.writeUInt16LE(this.count, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(this.offset, 16);
+    await this.sink.write(Buffer.concat([cd, end]));
+    return this.offset + cd.length + end.length;
+  }
+}

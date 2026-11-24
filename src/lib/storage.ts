@@ -1,6 +1,6 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, ListPartsCommand, AbortMultipartUploadCommand, ListMultipartUploadsCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { mkdir, writeFile, readFile, stat, unlink, readdir, rm } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, stat, unlink, readdir, rm, open } from 'node:fs/promises';
 import path from 'node:path';
 import { hmac } from './crypto';
 
@@ -209,6 +209,44 @@ export async function getObject(key: string, max = READ_GUARD_MAX): Promise<Buff
   const b = await readLocal(key);
   if (b.length > max) throw new Error(BIG_FILE_NOTE);
   return b;
+}
+
+/**
+ * 회사 전체 내보내기(B4): 서버가 큰 파일을 앞에서부터 조금씩 써 올림(전체를 메모리에 두지 않음).
+ * S3(R2)는 8MB 넘게 모이면 멀티파트 조각으로 보내고 close 때 합침, 로컬은 파일에 이어 씀. 실패하면 abort 로 반쯤 올린 것을 버림
+ */
+export type ObjectWriter = { write(b: Buffer): Promise<void>; close(): Promise<number>; abort(): Promise<void>; readonly size: number };
+export async function objectWriter(key: string, mime: string): Promise<ObjectWriter> {
+  if (!key || key.includes('..')) throw new Error('잘못된 저장 경로입니다');
+  let size = 0;
+  if (s3Configured()) {
+    const Bucket = s3Env().bucket;
+    const c = await s3().send(new CreateMultipartUploadCommand({ Bucket, Key: key, ContentType: mime }));
+    const UploadId = c.UploadId!; const parts: { ETag: string; PartNumber: number }[] = [];
+    let buf: Buffer[] = []; let len = 0;
+    const flush = async () => {
+      if (!len) return;
+      const Body = Buffer.concat(buf); buf = []; len = 0;
+      const PartNumber = parts.length + 1;
+      const r = await s3().send(new UploadPartCommand({ Bucket, Key: key, UploadId, PartNumber, Body }));
+      parts.push({ ETag: r.ETag!, PartNumber });
+    };
+    return {
+      get size() { return size; },
+      async write(b) { size += b.length; buf.push(b); len += b.length; if (len >= PART_SIZE) await flush(); },
+      async close() { await flush(); await s3().send(new CompleteMultipartUploadCommand({ Bucket, Key: key, UploadId, MultipartUpload: { Parts: parts } })); return size; },
+      async abort() { await s3().send(new AbortMultipartUploadCommand({ Bucket, Key: key, UploadId })).catch(() => {}); },
+    };
+  }
+  const p = path.join(LOCAL_DIR, key);
+  await mkdir(path.dirname(p), { recursive: true });
+  const fh = await open(p, 'w');
+  return {
+    get size() { return size; },
+    async write(b) { size += b.length; await fh.write(b); },
+    async close() { await fh.close(); return size; },
+    async abort() { await fh.close().catch(() => {}); await unlink(p).catch(() => {}); },
+  };
 }
 
 /** 상용화 B4 회사 파기: 경로(prefix) 아래 파일 열쇠를 최대 max 개 — S3 는 목록, 로컬은 폴더를 훑음 */
