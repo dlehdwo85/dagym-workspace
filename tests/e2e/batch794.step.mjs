@@ -21,7 +21,7 @@ export async function batch794({ staff, ctx, sql, BASE, SHOTS }) {
   await upload(b, B, '판교 점검표.pdf', 'application/pdf', Buffer.from('%PDF-1.4 판교'));
   await upload(b, B, '판교 현장.png', 'image/png', PNG);
 
-  await staff.goto(`${BASE}/tasks/${A}`);
+  await staff.goto(`${BASE}/tasks/${A}?full=1`);
   const head = staff.getByTestId('comment-from').first();
   await head.waitFor();
   assert.equal(await head.innerText(), '박직원 업무에서');

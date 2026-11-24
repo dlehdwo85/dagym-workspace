@@ -71,12 +71,25 @@ export const taskInput = z.object({
 });
 export type TaskInput = z.infer<typeof taskInput>;
 
+/**
+ * #1164(대표 11/24 "영업시트에서 넘어온 업무 중 현설이 없거나 미팅이 없으면 스케줄을 잡으라는 표시"): 영업 출처(sales_ref) 열린 업무에
+ * 연결된 일정이 하나도 없으면 'any'(현장설명회·미팅을 잡아 주세요), 공고에 현장설명회 '없음'이 적혀 있으면 'meeting'(미팅만 권함), 아니면 null.
+ * '일정' = 업무에 연결된 일정·업무로 만든 일정 중 입찰 마감(날짜 맞춤 sync) 일정과 업무 시간 배정(블록)은 뺀 것 — 현장설명회·미팅·같은 출처 일정.
+ * 완료·보류, 마감이 지난 업무는 띄우지 않는다. 화면에서는 영업 공간을 쓰는 사람에게만 보인다(#1143).
+ */
+export const NEEDS_SCHEDULE_SQL = (sql: Sql) => sql`case when t.sales_ref is not null and t.status not in ('done', 'on_hold')
+    and (t.due_date is null or t.due_date >= (now() at time zone 'Asia/Seoul')::date)
+    and not exists (select 1 from event_tasks lk join events le on le.id = lk.event_id where lk.task_id = t.id and le.deleted_at is null and not coalesce(lk.sync, false) and lk.role <> 'block' and le.kind <> 'task_block')
+    and not exists (select 1 from events oe where oe.task_id = t.id and oe.deleted_at is null and oe.kind <> 'task_block')
+  then case when coalesce((t.sales_ref->'bidInfo'->>'briefingNone')::boolean, false) then 'meeting' else 'any' end end`;
+
 export const TASK_COLS = (sql: Sql, uid: string | null = null) => sql`
   t.id, t.title, t.description, t.status, t.priority, t.project_id, t.parent_id, t.org_unit_id, t.brand_id, t.space,
   t.assignee_id, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.tags, t.approval_required,
   t.review_requested_at, t.approved_at, t.approved_by, t.completed_at, t.recurrence_rule, t.recurrence_stopped,
   t.version, t.created_by, t.created_at, t.updated_at, t.sort_order, t.section_id, t.assignee_ack_at, t.task_type, t.photo_required, t.approval_line_id, t.review_of,
   t.estimate_minutes, t.show_on_calendar, t.requested_by, rq.name as requested_by_name, t.batch_id, t.reminder_minutes, t.alarm, t.lead_id, t.sales_ref, t.assigned_by_rule,
+  ${NEEDS_SCHEDULE_SQL(sql)} as needs_schedule,
   t.complete_rule, t.assignee_done_at is not null as assignee_done, t.share, ${coAssigneesCol(sql)},
   t.due_extend_count, (select json_build_object('id', x.id, 'from', to_char(x.from_date, 'YYYY-MM-DD'), 'to', to_char(x.to_date, 'YYYY-MM-DD'), 'toTime', to_char(x.to_time, 'HH24:MI'), 'reason', x.reason, 'by', x.requested_by, 'byName', xu.name)
     from task_due_extensions x join users xu on xu.id = x.requested_by where x.task_id = t.id and x.status = 'pending' order by x.created_at desc limit 1) as ext_pending,
@@ -169,6 +182,8 @@ export const listQuery = z.object({
   hasAttach: z.enum(['1']).optional().catch(undefined),
   /** 꼬리표가 정확히 이 값인 업무만 — 업무 목록 '점검 보완만'(점검에서 만든 보완 요청 업무) */
   tag: z.string().trim().min(1).max(40).optional().catch(undefined),
+  /** #1164 '일정 없음' — 영업 출처 열린 업무 중 현장설명회·미팅 일정이 없는 것 */
+  noSchedule: z.enum(['1']).optional().catch(undefined),
 });
 
 /** V20 완료 보관: 달별 완료 개수 (서울 기준 완료일, 볼 수 있는 업무만, 담당자 필터 선택) */
@@ -236,6 +251,7 @@ function taskWhere(sql: Sql, u: SessionUser, q: z.infer<typeof listQuery>, units
   if (q.doneMonth) conds.push(sql`t.completed_at >= (${q.doneMonth + '-01'}::date::timestamp at time zone 'Asia/Seoul') and t.completed_at < ((${q.doneMonth + '-01'}::date + interval '1 month')::timestamp at time zone 'Asia/Seoul')`);
   if (q.hasAttach) conds.push(sql`exists (select 1 from attachments at where at.task_id = t.id and at.deleted_at is null)`);
   if (q.tag) conds.push(sql`${q.tag} = any(t.tags)`);
+  if (q.noSchedule) conds.push(sql`${NEEDS_SCHEDULE_SQL(sql)} is not null`);
   if (q.carried) conds.push(sql`t.status <> 'done' and coalesce(t.due_date, (t.created_at at time zone 'Asia/Seoul')::date) < date_trunc('month', (now() at time zone 'Asia/Seoul'))::date`);
   if (q.from) conds.push(sql`coalesce(t.due_date, t.start_date) >= ${q.from}`);
   if (q.to) conds.push(sql`coalesce(t.start_date, t.due_date) <= ${q.to}`);

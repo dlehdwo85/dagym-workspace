@@ -1,4 +1,5 @@
 'use client';
+import { openTaskPanel } from '@/components/TaskPanelHost';
 import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -154,7 +155,7 @@ export default function PlanPage() {
             droppable editable eventDurationEditable events={fc}
             datesSet={(a: DatesSetArg) => setRange({ from: a.start.toISOString(), to: a.end.toISOString() })}
             eventReceive={receive} eventDrop={move} eventResize={move}
-            eventClick={(i) => { const e = i.event.extendedProps.ev; if (e?.taskId) location.href = `/tasks/${e.taskId}`; else location.href = `/calendar?event=${e.id}`; }}
+            eventClick={(i) => { const e = i.event.extendedProps.ev; if (e?.taskId) openTaskPanel(e.taskId); else location.href = `/calendar?event=${e.id}`; }}
             dayHeaderContent={(a) => {
               const d = dayInfo(a.date);
               return (

@@ -24,7 +24,7 @@ export async function contactsFlow({ owner, ctx, BASE, SHOTS, sql }) {
   // 업무 문자 시안: 받는 번호 칸에 이름 → 자동 완성 → 번호
   await sql`insert into mail_accounts (tenant, provider, host, port, secure, username, from_email, from_name, password_enc) values ('default', 'naver', 'smtp.naver.com', 465, true, 'office', 'office@mail.test', '시험회사', 'v1.x.y.z') on conflict (tenant) do nothing`;
   const t = await ctx.owner.ok('POST', '/api/tasks', { title: '연락처 자동 완성 시험', approvalRequired: false });
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('mail-compose-open').click();
   const c = owner.getByTestId('mail-compose');
   await c.waitFor();

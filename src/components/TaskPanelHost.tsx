@@ -23,7 +23,8 @@ export function openTaskPanel(id: string, fallback?: (href: string) => void) {
 const SWAP = 'wos-panel-swap';
 /** 업무 목록(TaskViews)의 패널이 열려 있으면 그 패널 내용을 바꾸고, 아니면 전역 패널 — 패널 안 [열기]·만들기 뒤 [보기] 등 */
 export function showTask(id: string, push?: (href: string) => void) {
-  if (typeof document !== 'undefined' && document.querySelector('[data-testid="task-panel"]')) window.dispatchEvent(new CustomEvent(SWAP, { detail: id }));
+  // #1165: 업무 목록 화면(TaskViews)이 떠 있으면 패널이 닫혀 있어도 그 목록의 오른쪽 패널로(주소 /tasks/:id — 닫으면 같은 목록)
+  if (typeof document !== 'undefined' && (document.querySelector('[data-testid="task-panel"]') || ((window as any).__wosTaskViews ?? 0) > 0)) window.dispatchEvent(new CustomEvent(SWAP, { detail: id }));
   else openTaskPanel(id, push);
 }
 export const PANEL_SWAP_EVENT = SWAP;

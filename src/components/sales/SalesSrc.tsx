@@ -23,6 +23,7 @@ import { LeadMergeBox } from '@/components/sales/LeadMerge';
 import { StageChip, useStages } from '@/components/sales/stages';
 import { Button, ErrorBox, Field, Modal, Skeleton, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { AssignDialog } from '@/components/AssigneePicker';
+import { openTaskPanel } from '../TaskPanelHost';
 
 /** V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본, 전환일까지 읽기 전용(고치는 것은 영업관리에서, 매일 다시 가져옴) */
 const C = '#2563EB';
@@ -1670,7 +1671,7 @@ function ResearchHandoff({ ids, name, onDone }: { ids: string[]; name?: string; 
     setBusy(true);
     try { const r = await api<{ taskId: string | null; items: number; skipped: { name: string; why: string }[] }>('/api/sales/research/handoff', { body: { ids, assigneeId: who || undefined } });
       const nm = people.data?.people.find((p) => p.id === who)?.name;
-      if (r.items) toast.ok(`후속조사 ${r.items}곳을 넘겼습니다${nm ? ` — 담당 ${nm}` : ''}${r.skipped.length ? ` · 이미 조사 중 ${r.skipped.length}곳 건너뜀` : ''}`, r.taskId ? { label: '업무 열기', run: () => { window.location.href = `/tasks/${r.taskId}`; } } : undefined);
+      if (r.items) toast.ok(`후속조사 ${r.items}곳을 넘겼습니다${nm ? ` — 담당 ${nm}` : ''}${r.skipped.length ? ` · 이미 조사 중 ${r.skipped.length}곳 건너뜀` : ''}`, r.taskId ? { label: '업무 열기', run: () => { openTaskPanel(String(r.taskId)); } } : undefined);
       else toast.info(`넘길 곳이 없습니다 — ${r.skipped.map((x) => `${x.name} ${x.why}`).join(' · ')}`);
       setOpen(false); onDone?.(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }

@@ -73,7 +73,7 @@ export async function orgLevels({ owner, ctx, BASE, SHOTS }) {
   const hq = (await ctx.owner.ok('GET', '/api/teams')).teams.find((t) => t.name === 'E2E 본사');
   const sales = (await ctx.owner.ok('GET', '/api/teams')).teams.find((t) => t.name === '영업부');
   const task = (await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 부서 협업 업무', teamId: hq.id, assigneeId: ctx.ownerId, approvalRequired: false })).id;
-  await owner.goto(BASE + `/tasks/${task}`);
+  await owner.goto(BASE + `/tasks/${task}?full=1`);
   const ct = owner.getByTestId('collab-teams'); await ct.waitFor();
   await ct.getByTestId('collab-team-add').click();
   const pick = ct.getByTestId('collab-team-pick'); await pick.waitFor();

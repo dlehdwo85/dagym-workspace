@@ -110,12 +110,14 @@ function Reconcile({ onDone }: { onDone: () => void }) {
 function TaxInvoices() {
   const st = useApi<{ requests: any[] }>('/api/platform/tax-invoices');
   if (!st.data) return null;
-  const mark = async (id: string, status: string) => { try { await api(`/api/platform/tax-invoices/${id}`, { method: 'PATCH', body: { status } }); toast.ok(status === 'issued' ? '발행 완료로 표시했습니다' : '되돌렸습니다'); st.reload(); } catch (e: any) { toast.error(e.message); } };
+  const mark = async (id: string, status: string) => { try { await api(`/api/platform/tax-invoices/${id}`, { method: 'PATCH', body: { status } }); toast.ok(status === 'issued' ? '발행 완료로 표시했습니다' : status === 'sent' ? '보냄으로 표시했습니다' : '되돌렸습니다'); st.reload(); } catch (e: any) { toast.error(e.message); } };
   return (
     <ul className="divide-y divide-line px-3 pb-3 text-xs" data-testid="settle-tax">
       {st.data.requests.map((r) => (
         <li key={r.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="tax-row" data-status={r.status}>
-          <label className="inline-flex items-center gap-1"><input type="checkbox" checked={r.status === 'issued'} onChange={(e) => mark(r.id, e.target.checked ? 'issued' : 'requested')} aria-label="발행 완료" data-testid="tax-issued" />발행</label>
+          <label className="inline-flex items-center gap-1"><input type="checkbox" checked={r.status === 'issued' || r.status === 'sent'} onChange={(e) => mark(r.id, e.target.checked ? 'issued' : 'requested')} aria-label="발행 완료" data-testid="tax-issued" />발행</label>
+          {/* #1163 ⑤ 요청 → 발행 → 보냄(고객에게 보낸 것까지) */}
+          <label className="inline-flex items-center gap-1"><input type="checkbox" checked={r.status === 'sent'} disabled={!['issued', 'sent'].includes(r.status)} onChange={(e) => mark(r.id, e.target.checked ? 'sent' : 'issued')} aria-label="보냄" data-testid="tax-sent" />보냄</label>
           <b>{r.tenant_name}</b><span>{r.company_name} · {r.biz_no}{r.ceo ? ` · ${r.ceo}` : ''}</span><span className="text-ink-2">{r.email}</span><span className="tabular-nums">{won(r.amount)}</span>
           <span className="text-ink-3">{r.plan_code ?? r.kind} · 결제 {r.paid_at ? fmtDateTime(r.paid_at) : ''} · 요청 {fmtDateTime(r.created_at)}{r.requested_by_name ? ` · ${r.requested_by_name}` : ''}{r.issued_at ? ` · 발행 ${fmtDateTime(r.issued_at)}` : ''}</span>
           {r.status !== 'canceled' && <button className="ml-auto text-ink-3 underline" onClick={() => mark(r.id, 'canceled')}>취소</button>}
@@ -145,7 +147,7 @@ export function TaxInvoiceButton({ payment }: { payment: { id: string; status: s
   const [f, setF] = useState<{ companyName: string; bizNo: string; ceo: string; address: string; email: string } | null>(null);
   if (!ok || !st.data?.defaults) return null; // 관리자(회사 정보 기본값이 오는 사람)만
   const mine = st.data?.requests.find((r) => r.payment_id === payment.id && r.status !== 'canceled');
-  if (mine) return <span className="text-[11px] text-ink-3" data-testid="tax-state">{mine.status === 'issued' ? '세금계산서 발행됨' : '세금계산서 요청됨'}</span>;
+  if (mine) return <span className="text-[11px] text-ink-3" data-testid="tax-state">{mine.status === 'sent' ? '세금계산서 보냄' : mine.status === 'issued' ? '세금계산서 발행됨' : '세금계산서 요청됨'}</span>;
   const start = () => { const d = st.data?.defaults; setF({ companyName: d?.companyName ?? '', bizNo: d?.bizNo ?? '', ceo: d?.ceo ?? '', address: d?.address ?? '', email: d?.email ?? '' }); setOpen(true); };
   const send = async () => { try { await api('/api/billing/tax-invoice', { body: { paymentId: payment.id, ...f, ceo: f?.ceo || undefined, address: f?.address || undefined } }); toast.ok('세금계산서를 요청했습니다 — 운영자가 발행 후 메일로 보내 드립니다'); setOpen(false); st.reload(); } catch (e: any) { toast.error(e.message); } };
   return (

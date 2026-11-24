@@ -45,7 +45,7 @@ export async function v30import({ owner, BASE, SHOTS }) {
 export async function sheetPhone({ owner, BASE, SHOTS }) {
   await owner.setViewportSize({ width: 390, height: 700 });
   const t = await owner.evaluate(async () => (await (await fetch('/api/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '시트 스크롤 시험', approvalRequired: false }) })).json()));
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('comment-form').waitFor();
   await owner.getByTestId('mail-compose-open').click();
   await owner.getByTestId('mail-compose').waitFor();
@@ -99,7 +99,7 @@ export async function notifRead({ owner, BASE, SHOTS, ctx }) {
   await list.getByText('알림읽음 시험 A', { exact: false }).click();
   await owner.waitForURL((u) => new URL(u).searchParams.get('task') === a || new URL(u).pathname === `/tasks/${a}`); // 300차 #850: 업무는 패널로(?task=)
   // 업무 B 를 직접 열면 자동 읽음
-  await owner.goto(`${BASE}/tasks/${b}`);
+  await owner.goto(`${BASE}/tasks/${b}?full=1`);
   await owner.waitForFunction(async () => (await (await fetch('/api/notifications?unread=1')).json()).unread === 0, null, { timeout: 10000 });
   await owner.goto(`${BASE}/notifications`);
   // 안 읽은 목록에서 두 알림이 빠짐(그사이 예약 알림 등 다른 알림이 올 수 있어 "비었음" 대신 이 두 건으로 확인)
@@ -124,7 +124,7 @@ export async function checkScroll({ owner, BASE, SHOTS }) {
     const c = await j(`/api/tasks/${task.id}/comments`, { body: '아래쪽 댓글' });
     return { id: task.id, comment: c.id };
   });
-  await owner.goto(`${BASE}/tasks/${t.id}#c-${t.comment}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1#c-${t.comment}`);
   const box = owner.getByTestId('checklist').getByRole('checkbox', { name: '둘째 단계' });
   await box.waitFor();
   await owner.waitForTimeout(800); // 처음 한 번은 댓글로 이동 — 그 뒤 체크리스트로 올라와서 시험

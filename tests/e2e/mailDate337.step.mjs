@@ -8,7 +8,7 @@ export async function mailDate337({ owner, ctx, BASE, SHOTS, sql }) {
   await ctx.owner.ok('PUT', '/api/org/company-profiles', { key: 'hilink', name: 'HI-LINK 시험', phone: '1555-0000', address: '시험시 시험로 36, 8층', website: 'www.hilink.test' });
   const t = await ctx.owner.ok('POST', '/api/tasks', { title: '337 빈칸 메일 업무', approvalRequired: false });
   await owner.setViewportSize({ width: 1366, height: 900 });
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('mail-compose-open').click();
   const c = owner.getByTestId('mail-compose'); await c.waitFor();
   if (await c.getByTestId('mail-company-hilink').count()) await c.getByTestId('mail-company-hilink').click();

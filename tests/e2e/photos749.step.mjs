@@ -29,7 +29,7 @@ export async function photos749({ browser, devices, ctx, sql, BASE }) {
     const m = await login(mob, BASE, 'ceo@dagym.test', 'owner-pass-1234');
     // ① 업무 첨부
     const t = await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 749 사진 147장', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, approvalRequired: false });
-    await m.goto(`${BASE}/tasks/${t.id}`);
+    await m.goto(`${BASE}/tasks/${t.id}?full=1`);
     await m.getByTestId('attachments').waitFor();
     assert.match(await m.getByTestId('ios-pick-hint').first().innerText(), /50장씩 나눠 고르면/, '아이폰이면 고르기 전에 한 줄 안내');
     await longTasks(m);

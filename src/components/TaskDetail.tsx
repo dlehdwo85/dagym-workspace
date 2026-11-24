@@ -11,7 +11,7 @@ import { useInApp } from '@/components/inApp';
 import { showTask } from '@/components/TaskPanelHost';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { useSession } from '@/components/session';
-import { AlertTriangle, BadgeCheck, Globe2, Bell, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarRange, Camera, Check, ChevronDown, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash, Hourglass, LayoutTemplate, Link2, ListFilter, Lock, Lock as LockIcon, MapPin, Maximize2, Megaphone, Merge, MessageCircle, MessageSquareText, MoreHorizontal, Paperclip, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck, SmilePlus, Stamp, Tag, Timer, Trash2, Type, type LucideIcon, UserRound, Users, X } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, Globe2, Bell, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarPlus, CalendarRange, Camera, Check, ChevronDown, ChevronRight, CircleCheck, Clock, Copy, CornerDownRight, Flag, FolderKanban, Hash, Hourglass, LayoutTemplate, Link2, ListFilter, Lock, Lock as LockIcon, MapPin, Maximize2, Megaphone, Merge, MessageCircle, MessageSquareText, MoreHorizontal, Paperclip, Percent, Plus, Repeat, Rows3, Shapes, ShieldCheck, SmilePlus, Stamp, Tag, Timer, Trash2, Type, type LucideIcon, UserRound, Users, X } from 'lucide-react';
 import { Avatar, Button, personLabel, PriorityTag, DueChip, ErrorBox, Field, IconButton, Modal, Skeleton, STATUS_TONE, StatusBadge, cx, fmtDateTime, fmtMinutes, fmtNum, fmtTimeRange, inputCls, toast, todayStr } from '@/components/ui';
 import { BrandSelect, MultiUserSelect, RecurSelect, UnitSelect, UserSelect } from '@/components/pickers';
 import { Attachments, FileKindIcon, attKindSummary, uploadTaskFiles } from '@/components/Attachments';
@@ -50,7 +50,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const router = useRouter();
   const inApp = useInApp();
   // 300차 #850: 다른 업무로 = 패널 안이면 패널 내용만 바꿈(목록 패널·전역 패널), 전체 화면이면 그 업무 화면으로
-  const go = (tid: string) => (inPanel ? showTask(tid, (h) => router.push(h)) : router.push(`/tasks/${tid}`));
+  const go = (tid: string) => (inPanel ? showTask(tid, (h) => router.push(h)) : router.push(`/tasks/${tid}?full=1`)); // #1165: 넓은 화면([크게 보기])에서는 넓은 화면 그대로
   // #242(대표 10/24 '창 닫기·돌아가기를 누르면 다른 화면으로 넘어가지 않게'): 전체 화면 닫기 = 직전 화면(앱 안에서 옮겨 왔으면 뒤로가기), 새 탭·링크로 바로 연 경우만 업무 목록
   const closePage = () => { if (((window as any).__wosNav ?? 0) > 1 && window.history.length > 1) router.back(); else router.push('/tasks'); };
   const { user, dir, features, menus, spaces } = useSession();
@@ -408,7 +408,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
         {/* V13 10번: 업무별 대화방 */}
         <IconButton label="대화방 열기" data-testid="task-chat" onClick={async () => { try { const r = await api('/api/chat/rooms', { body: { kind: 'task', taskId: id } }); router.push(`/messages?room=${r.id}`); } catch (e: any) { toast.error(e.message); } }}><MessageCircle /></IconButton>
         <IconButton label="링크 복사" onClick={() => { navigator.clipboard?.writeText(location.origin + `/tasks/${id}`); toast.ok('링크를 복사했습니다'); }}><Link2 /></IconButton>
-        {inPanel && !inApp && <IconButton label="크게 보기(새 탭)" className="max-sm:hidden" data-testid="task-open-tab" onClick={() => window.open(`/tasks/${id}`, '_blank', 'noopener')}><Maximize2 /></IconButton>}{/* 300차 #850: 전체 화면은 새 탭으로만 */}
+        {inPanel && !inApp && <IconButton label="크게 보기(새 탭)" className="max-sm:hidden" data-testid="task-open-tab" onClick={() => window.open(`/tasks/${id}?full=1`, '_blank', 'noopener')}><Maximize2 /></IconButton>}{/* 300차 #850: 전체 화면은 새 탭으로만 */}
         <div className="relative">
           <IconButton label="더보기" onClick={() => setMenu(!menu)} aria-expanded={menu}><MoreHorizontal /></IconButton>
           {menu && (
@@ -450,6 +450,14 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
                 onKeyDown={(e) => { if (e.key === 'Escape') { titleCancel.current = true; setTitle(null); } }}
                 onBlur={() => { if (!titleCancel.current && title.trim() && title.trim() !== t.title) saveText('title', title.trim()); titleCancel.current = false; setTitle(null); }} />
             </form>
+          )}
+          {/* #1164(대표 11/24): 영업 출처 열린 업무에 현장설명회·미팅 일정이 없으면 제목 바로 아래 노란 띠 — 영업 공간을 쓰는 사람에게만(#1143). 일정을 잡으면 사라짐 */}
+          {t.needs_schedule && salesOn && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-input border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="task-needs-schedule" data-kind={t.needs_schedule}>
+              <CalendarPlus className="size-4 shrink-0" aria-hidden />
+              <span className="min-w-0 flex-1">{t.needs_schedule === 'meeting' ? '현장설명회 없음 — 필요하면 미팅 일정을 잡아 주세요' : '아직 잡힌 일정이 없습니다 — 현장설명회·미팅 일정을 잡아 주세요'}</span>
+              {perms.edit && <Button size="sm" variant="secondary" onClick={() => setMeetOpen(true)} data-testid="task-needs-schedule-go">일정 잡기</Button>}
+            </div>
           )}
           {/* 대표 피드백(10/15): 따로 있던 큰 [완료] 버튼 대신 진행 단계를 한 줄로 크게 — 단계를 눌러 바로 바꾸고, 현재 단계가 색으로 보인다 */}
           <div className="mt-3 space-y-2" data-testid="task-actions">
@@ -886,7 +894,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
       <TaskDeleteDialog open={delOpen} onClose={() => setDelOpen(false)} taskId={id} title={t.title}
         batch={t.batch_id && (t.batch?.total ?? 0) > 1 ? { id: t.batch_id, total: t.batch.total, canAll: t.requested_by === user.id || t.created_by === user.id } : null}
         onDeleted={() => { if (onClose) onClose(); else closePage(); }} />
-      <MergeModal open={mergeOpen} onClose={() => setMergeOpen(false)} taskId={id} title={t.title} onMerged={(into) => { broadcastRefresh(); if (onClose && inPanel) onClose(); router.push(`/tasks/${into}`); }} />
+      <MergeModal open={mergeOpen} onClose={() => setMergeOpen(false)} taskId={id} title={t.title} onMerged={(into) => { broadcastRefresh(); go(into); }} />
     </div>
   );
 }

@@ -150,6 +150,29 @@ await step('잠긴 공간(자물쇠 → 안내 → 상담 신청 단추 · 서�
   ok(r.status === 404, `잠긴 공간 API(${path})가 막히지 않음(${r.status})`);
 });
 
+// #1165(대표 11/24 "업무가 자꾸 전체 화면으로 뜹니다"): 업무는 어디서 열든 오른쪽 패널 — ① 다른 화면의 업무 링크(알림·메신저·검색과 같은 링크)는 그 화면 위 패널
+// ② 주소로 바로(메일·앱 푸시·새로 고침) 들어와도 업무 목록 + 오른쪽 패널(가운데 전체 카드 없음). 검수 업무 1건 만들고 지움
+await step('업무 링크 → 오른쪽 패널(#1165 — 다른 화면 위 · 주소로 바로 들어와도 목록 + 패널)', async () => {
+  me ??= (await api('GET', '/api/auth/me')).user;
+  const t = await api('POST', '/api/tasks', { title: `[검수] 패널 ${SHA || 'manual'}`, assigneeId: me.id, approvalRequired: false });
+  try {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await visit('/calendar', null);
+    await page.evaluate((id) => { const a = document.createElement('a'); a.href = `/tasks/${id}`; a.id = 'smoke-task-link'; a.textContent = '업무 링크';
+      a.style.cssText = 'position:fixed;top:90px;left:320px;z-index:60;background:#fff;padding:4px'; document.body.appendChild(a); }, t.id);
+    await page.click('#smoke-task-link');
+    const g = page.getByTestId('global-task-panel');
+    await g.waitFor({ timeout: 15_000 });
+    ok(new URL(page.url()).pathname === '/calendar', `뒤 화면이 바뀜(${new URL(page.url()).pathname})`);
+    const b1 = await g.boundingBox();
+    ok(b1 && b1.x >= 400 && b1.width <= 620, `오른쪽 패널이 아님(${JSON.stringify(b1)})`);
+    await visit(`/tasks/${t.id}`, 'task-panel');
+    ok((await page.getByTestId('task-page').count()) === 0, '가운데 전체 카드가 보임');
+    const b2 = await page.getByTestId('task-panel').boundingBox();
+    ok(b2 && b2.x >= 400 && b2.width <= 620, `주소로 들어왔을 때 오른쪽 패널이 아님(${JSON.stringify(b2)})`);
+  } finally { await api('DELETE', `/api/tasks/${t.id}`).catch(() => {}); }
+});
+
 // #1157(대표 11/24, 로컬 요청): 고객 회사에는 감사 기록 화면·메뉴가 없음 — API 404 · 화면 '권한 없음' · 사이드바 줄 없음
 await step('감사 기록 없음(#1157 — API 404 · 화면 권한 없음 · 사이드바 줄 없음)', async () => {
   const r = await fetch(`${BASE}/api/admin/audit`, { headers: { cookie, origin: BASE } });

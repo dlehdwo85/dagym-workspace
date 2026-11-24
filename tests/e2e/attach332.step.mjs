@@ -17,7 +17,7 @@ export async function attach332({ owner, ctx, sql, BASE }) {
   const old = []; for (let k = 0; k < 11; k++) old.push(await up(`E2E 옛 자료 ${k + 1}.txt`, 'text/plain', Buffer.from(`old ${k}`)));
   await sql`update attachments set created_at = created_at - interval '1 day' where id = any(${old}::uuid[])`; // 어제 올린 묶음(접힘)
   await owner.setViewportSize({ width: 1366, height: 900 });
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   const att = owner.getByTestId('attachments'); await att.waitFor();
   await owner.getByTestId('att-photo-summary').getByText('첨부 15개').waitFor();
   assert.match(await owner.getByTestId('att-photo-summary').innerText(), /사진 1장 · 문서 14개/);

@@ -41,7 +41,7 @@ export async function dueExtend({ staff, owner, ctx, sql, BASE }) {
   await row.getByTestId('due-picker').getByText(`${md(addDays(due, 3))} 14시`).waitFor(); // 380차 #1017: 정시는 'n시'
   assert.equal(await row.getByTestId('due-picker').getByTestId('due-dday').textContent(), 'D-5');
   // 요청자(PC): 업무 상세 '마감 연장 기록' — 사유·누가·앞뒤 날짜시각
-  await owner.goto(`${BASE}/tasks/${id}`);
+  await owner.goto(`${BASE}/tasks/${id}?full=1`);
   const hist = owner.getByTestId('ext-history');
   await hist.getByText('마감 연장 기록').waitFor();
   const last = (await hist.getByTestId('ext-history-last').innerText()).replace(/\s+/g, ' ');
@@ -73,7 +73,7 @@ export async function dueExtend({ staff, owner, ctx, sql, BASE }) {
   assert.equal((await sql`select to_char(due_date, 'YYYY-MM-DD') d from tasks where id = ${id}`)[0].d, addDays(due, 6));
   // 365차 #988: 대표는 요청자가 아니어도(최매니저가 요청한 업무) 머리 [마감 연장] → 사유 → 바로 반영(승인 없음)·요청자·담당자 알림
   const id2 = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: '대표 바로 연장 시험', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, dueDate: due, approvalRequired: false })).id;
-  await owner.goto(`${BASE}/tasks/${id2}`);
+  await owner.goto(`${BASE}/tasks/${id2}?full=1`);
   await owner.getByTestId('sum-extend').click();
   const dlg2 = owner.getByTestId('extend-dialog');
   await dlg2.getByText('승인 없이 바로 바뀝니다').waitFor();

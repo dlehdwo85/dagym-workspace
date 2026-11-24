@@ -7,7 +7,7 @@ export async function mention300({ owner, ctx, sql, BASE }) {
   const people = (await ctx.owner.ok('GET', `/api/tasks/${t.id}/mentionable`)).users.filter((u) => u.id !== ctx.ownerId);
   assert.ok(people.length >= 2, `멘션 후보 ${people.length}명`);
   await owner.setViewportSize({ width: 1366, height: 900 });
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   const input = owner.getByTestId('task-page').getByTestId('comment-input');
   await input.waitFor();
   assert.equal(await owner.getByLabel('멘션할 사람').count(), 0, "아래 '멘션할 사람' 고르기 없음");

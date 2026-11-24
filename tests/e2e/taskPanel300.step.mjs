@@ -9,8 +9,8 @@ export async function taskPanel300({ owner, ctx, BASE }) {
   const panel = owner.getByTestId('global-task-panel');
   try {
     await owner.setViewportSize({ width: 1366, height: 900 });
-    // 업무 전체 화면의 하위 업무 링크(Next 링크) → 그 화면 위 오른쪽 패널(주소 ?task=)
-    await owner.goto(`${BASE}/tasks/${parent.id}`);
+    // 업무 넓은 화면([크게 보기] = ?full=1)의 하위 업무 링크(Next 링크) → 그 화면 위 오른쪽 패널(주소 ?task=)
+    await owner.goto(`${BASE}/tasks/${parent.id}?full=1`);
     await owner.getByTestId('task-page').waitFor();
     const link = owner.getByTestId('task-page').getByRole('link', { name: 'E2E 패널 하위 업무' });
     await link.click();
@@ -40,7 +40,7 @@ export async function taskPanel300({ owner, ctx, BASE }) {
     // [크게 보기(새 탭)] = 새 탭에 전체 화면
     const [pop] = await Promise.all([owner.context().waitForEvent('page'), panel.getByTestId('task-open-tab').click()]);
     await pop.waitForLoadState();
-    assert.equal(new URL(pop.url()).pathname, `/tasks/${child.id}`);
+    assert.equal(new URL(pop.url()).pathname, `/tasks/${child.id}`); assert.equal(new URL(pop.url()).searchParams.get('full'), '1');
     await pop.getByTestId('task-page').waitFor();
     await pop.close();
     await panel.getByRole('button', { name: '패널 닫기' }).click();
@@ -50,6 +50,18 @@ export async function taskPanel300({ owner, ctx, BASE }) {
     await owner.goto(`${BASE}/calendar?task=${parent.id}`);
     await panel.waitFor();
     assert.equal(new URL(owner.url()).pathname, '/calendar');
+    // #1165(대표 11/24 "업무가 자꾸 전체 화면으로"): 업무 주소(/tasks/:id)로 바로 들어와도(메일·앱 푸시·새로 고침) 업무 목록 + 오른쪽 패널 — 가운데 전체 카드 없음
+    await owner.goto(`${BASE}/tasks/${child.id}`);
+    const lp = owner.getByTestId('task-panel');
+    await lp.getByText('상위: E2E 패널 상위 업무').waitFor();
+    assert.equal(await owner.getByTestId('task-page').count(), 0, '가운데 전체 카드 없음');
+    await owner.getByTestId('view-chips').waitFor(); // 뒤에 업무 목록
+    const lb = await lp.boundingBox();
+    assert.ok(lb && lb.x > 500 && lb.width <= 600, `오른쪽 패널 ${JSON.stringify(lb)}`);
+    await owner.reload(); await lp.getByText('상위: E2E 패널 상위 업무').waitFor(); // 새로 고침도 패널
+    await lp.getByRole('button', { name: '패널 닫기' }).click();
+    await owner.waitForURL((x) => new URL(x).pathname === '/tasks');
+    await owner.goto(`${BASE}/calendar?task=${parent.id}`); await panel.waitFor();
     // 휴대폰 = 전체 시트(화면 폭 그대로)
     await owner.setViewportSize({ width: 390, height: 800 });
     await owner.waitForTimeout(200);

@@ -58,7 +58,7 @@ export async function approvalsFlow({ owner, staff, ctx, sql, BASE, SHOTS, addDa
   assert.match(await trow.innerText(), /대표 단계에서 오늘부터 기다리는 중/, '#114 ③ 멈춘 단계');
   await owner.screenshot({ path: `${SHOTS}/131b-approvals-todo.png` });
   // 대표: 결재 업무에서 승인
-  await owner.goto(`${BASE}/tasks/${req.task_id}`);
+  await owner.goto(`${BASE}/tasks/${req.task_id}?full=1`);
   await owner.getByTestId('appr-approve').click();
   await owner.getByText(/승인|완료/).first().waitFor();
   await owner.waitForFunction(async (id) => (await (await fetch(`/api/approvals/requests`)).json()).requests.find((r) => r.task_id === id)?.status === 'approved', req.task_id, { timeout: 15000 });

@@ -161,7 +161,7 @@ export async function signupJourney359({ browser, owner, ctx, sql, BASE, SHOTS }
     await p.waitForTimeout(300);
     await shot('320-journey-marketing-consent.png');
     // ── 9) 업무 메일 쓰기 창(보내기는 메일 계정 연결 뒤 — 새 회사 첫 화면 그대로)
-    await p.goto(BASE + `/tasks/${taskId}`);
+    await p.goto(BASE + `/tasks/${taskId}?full=1`);
     const open = p.getByTestId('mail-compose-open');
     if (await open.waitFor({ timeout: 15_000 }).then(() => true, () => false)) {
       await open.click();

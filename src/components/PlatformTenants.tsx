@@ -31,6 +31,8 @@ export function PlatformTenants() {
   const [segment, setSegment] = useState(''); // #656 구분(설계 파트너/일반)
   const [stage, setStage] = useState(''); // #656 단계(체험/유료/보류/해지)
   const [sort, setSort] = useState<'' | 'paid' | 'next' | 'overdue' | 'risk'>(''); // #1163 ① 정렬(화면에서 — 목록은 최대 300곳)
+  const [picked, setPicked] = useState<Set<string>>(new Set()); // #1163 ④ 메일·공지 받을 회사(체크)
+  const [bcast, setBcast] = useState(false);
   const qs = `q=${encodeURIComponent(query)}&status=${status}&segment=${segment}&stage=${stage}`;
   const list = useApi<{ tenants: any[]; summary?: { month: string; aiCostKrw: number; customerAiCostKrw: number; revenueKrw: number; marginKrw: number; marginPct: number | null; customers: number; paying: number; contactDue?: number; monthPaidKrw?: number; risky?: number; overdue?: number } }>(`/api/platform/tenants?${qs}`, [qs]);
   const rows = useMemo(() => {
@@ -50,6 +52,7 @@ export function PlatformTenants() {
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <h2 className="text-sm font-semibold">고객사 관리 {list.data && <span className="text-xs font-normal text-ink-3">{list.data.tenants.length}곳</span>}</h2>
         <Button size="sm" onClick={() => setAdding(true)} data-testid="platform-add-company" title="실제 고객사는 공개 가입으로만 받습니다(#1139)"><Plus />검수용 시험 회사 만들기</Button>
+        <Button size="sm" variant="secondary" onClick={() => setBcast(true)} data-testid="platform-broadcast">메일·공지 보내기{picked.size ? ` (${picked.size}곳)` : ''}</Button>
         <a className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-2.5 text-xs font-medium text-ink-2 hover:bg-slate-50" href={`/api/platform/tenants/export?${qs}`} data-testid="platform-export-companies" title="지금 보이는 목록을 엑셀로 내려받습니다 (?format=csv 로 CSV)"><Download className="size-3.5" />내보내기</a>
         <form className="ml-auto flex gap-1.5" onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }}>
           <input className={cx(inputCls, 'h-8 w-48 py-1 text-xs')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="회사·대표 이메일·id" aria-label="회사 찾기" />
@@ -78,11 +81,15 @@ export function PlatformTenants() {
       )}
       <div className="max-h-[28rem] overflow-auto">
         <table className="w-full min-w-[1320px] text-sm">
-          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}>회사</th><th className={cell}>단계</th><th className={cell}>담당자</th><th className={cell}>요금제</th><th className={cell}>상태</th><th className={cell}>인원</th><th className={cell}>저장</th><th className={cell}>AI(이번 달)</th>
+          <thead><tr className="text-left text-xs text-ink-3"><th className={cell}><input type="checkbox" aria-label="보이는 회사 모두 고르기" data-testid="platform-pick-all"
+            checked={rows.length > 0 && rows.filter((t) => !['default', 'demo'].includes(t.id)).every((t) => picked.has(t.id))}
+            onChange={(e) => setPicked(e.target.checked ? new Set(rows.filter((t) => !['default', 'demo'].includes(t.id)).map((t) => t.id)) : new Set())} /></th><th className={cell}>회사</th><th className={cell}>단계</th><th className={cell}>담당자</th><th className={cell}>요금제</th><th className={cell}>상태</th><th className={cell}>인원</th><th className={cell}>저장</th><th className={cell}>AI(이번 달)</th>
             {([['paid', '이번 달 결제'], ['next', '다음 결제'], ['overdue', '미납']] as const).map(([k, l]) => <th key={k} className={cell}><button type="button" className={cx('underline-offset-2 hover:underline', sort === k && 'font-semibold text-ink-1')} onClick={() => setSort(sort === k ? '' : k)} data-testid={`platform-sort-${k}`}>{l}{sort === k ? ' ↓' : ''}</button></th>)}<th className={cell}>연락</th><th className={cell}>최근 접속</th><th className={cell}>가입</th><th className={cell} /></tr></thead>
           <tbody>
             {rows.map((t) => (
               <tr key={t.id} className={cx('border-t border-line', t.status !== 'active' && 'bg-slate-50 text-ink-3')} data-tenant={t.id}>
+                <td className={cell}>{!['default', 'demo'].includes(t.id) && <input type="checkbox" aria-label={`${t.name} 고르기`} checked={picked.has(t.id)} data-testid={`platform-pick-${t.id}`}
+                  onChange={(e) => setPicked((s) => { const n = new Set(s); if (e.target.checked) n.add(t.id); else n.delete(t.id); return n; })} />}</td>
                 <td className={cell}><div className="font-medium">{t.name}{t.segment === 'partner' && <span className="ml-1 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-normal text-violet-800" data-testid={`company-partner-${t.id}`}>파트너</span>}{t.owner_invited && <span className="ml-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-normal text-amber-800">초대 대기</span>}{!!t.risks?.length && <span className="ml-1 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700" title={t.risks.map((r: any) => r.label).join('\n')} data-testid={`company-risk-${t.id}`}>해지 위험 {t.risks.length}</span>}</div><div className="text-[11px] text-ink-3">{t.id} · {t.owner_email ?? '-'}</div></td>
                 <td className={cell}><span className={cx('rounded-full px-2 py-0.5 text-xs', STAGE_CLS[t.stage] ?? 'bg-slate-100')} data-testid={`company-stage-${t.id}`}>{STAGE[t.stage] ?? t.stage}</span>{t.lifecycle && <div className="text-[11px] text-ink-3" title={t.lifecycle_note ?? ''}>직접 정함{t.lifecycle_note ? ` · ${t.lifecycle_note}` : ''}</div>}</td>
                 <td className={cell}>{t.contact_name || t.contact_phone ? <><div>{t.contact_name ?? '-'}{t.contact_title ? <span className="text-[11px] text-ink-3"> {t.contact_title}</span> : null}</div><div className="text-[11px] text-ink-3">{t.contact_phone ?? ''}</div></> : <span className="text-ink-3">-</span>}{t.source && <div className="text-[11px] text-ink-3">경로 {t.source}</div>}</td>
@@ -107,12 +114,100 @@ export function PlatformTenants() {
                 <td className={cell}><Button size="sm" variant="secondary" onClick={() => setOpen(t.id)} data-testid={`company-open-${t.id}`}>관리</Button></td>
               </tr>
             ))}
-            {list.data && !list.data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={15}>찾는 회사가 없습니다</td></tr>}
+            {list.data && !list.data.tenants.length && <tr><td className={cx(cell, 'text-ink-3')} colSpan={16}>찾는 회사가 없습니다</td></tr>}
           </tbody>
         </table>
       </div>
       {open && <TenantDetail id={open} onClose={() => { setOpen(null); list.reload(); }} />}
+      {bcast && <BroadcastModal picked={[...picked]} filtered={rows.filter((t) => !['default', 'demo'].includes(t.id)).map((t) => t.id)} onClose={() => setBcast(false)} />}
       {adding && <NewTenant onClose={() => setAdding(false)} onDone={(id) => { setAdding(false); list.reload(); setOpen(id); }} />}
+    </section>
+  );
+}
+
+/** #1163 ④ 여러 고객사에 메일·공지 — 받는 회사(체크한 곳 / 지금 거른 결과 전체) → 미리 보기(받는 사람 수·실제 문구) → 보내기.
+ *  받는 사람 = 그 회사 대표·관리자. 공지는 앱 알림함만(금액·결제 이야기 금지) · 광고성 메일은 (광고) 표기 + 수신 동의한 사람만 · 하루 상한 */
+function BroadcastModal({ picked, filtered, onClose }: { picked: string[]; filtered: string[]; onClose: () => void }) {
+  const [target, setTarget] = useState<'picked' | 'filtered'>(picked.length ? 'picked' : 'filtered');
+  const [f, setF] = useState({ channel: 'mail' as 'mail' | 'notice', ad: false, title: '', body: '' });
+  const [pv, setPv] = useState<any>(null); const [busy, setBusy] = useState(false);
+  const tenants = target === 'picked' ? picked : filtered;
+  const body = { tenants, channel: f.channel, ad: f.channel === 'mail' && f.ad, title: f.title.trim(), body: f.body.trim() };
+  const edit = (x: Partial<typeof f>) => { setF({ ...f, ...x }); setPv(null); };
+  async function preview() {
+    setBusy(true);
+    try { setPv((await api<any>('/api/platform/broadcast', { body })).preview); } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  async function send() {
+    if (!(await askConfirm(`${pv.companies}곳 · ${pv.recipients}명에게 ${f.channel === 'mail' ? '메일' : '앱 공지'}를 보냅니다. 보낸 뒤에는 되돌릴 수 없습니다.`, { title: '보내기', ok: '보내기' }))) return;
+    setBusy(true);
+    try { const r = await api<any>('/api/platform/broadcast', { body: { ...body, send: true } }); toast.ok(`${r.sent}명에게 ${f.channel === 'mail' ? '메일을 보내는 중입니다' : '공지를 보냈습니다'}`); onClose(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title="여러 고객사에 메일·공지" wide>
+      <div className="space-y-3 text-sm" data-testid="broadcast-modal">
+        <div className="flex flex-wrap gap-3 text-xs">
+          <label className="flex items-center gap-1"><input type="radio" checked={target === 'picked'} disabled={!picked.length} onChange={() => { setTarget('picked'); setPv(null); }} data-testid="broadcast-target-picked" />체크한 회사 {picked.length}곳</label>
+          <label className="flex items-center gap-1"><input type="radio" checked={target === 'filtered'} onChange={() => { setTarget('filtered'); setPv(null); }} data-testid="broadcast-target-filtered" />지금 거른 결과 전체 {filtered.length}곳</label>
+        </div>
+        <div className="flex flex-wrap gap-3 text-xs">
+          <label className="flex items-center gap-1"><input type="radio" checked={f.channel === 'mail'} onChange={() => edit({ channel: 'mail' })} data-testid="broadcast-mail" />메일(대표·관리자)</label>
+          <label className="flex items-center gap-1"><input type="radio" checked={f.channel === 'notice'} onChange={() => edit({ channel: 'notice', ad: false })} data-testid="broadcast-notice" />앱 공지(알림함만 — 금액·결제 이야기 금지)</label>
+          {f.channel === 'mail' && <label className="flex items-center gap-1"><input type="checkbox" checked={f.ad} onChange={(e) => edit({ ad: e.target.checked })} data-testid="broadcast-ad" />광고성(새 기능·혜택 소개) — (광고) 표기·수신 동의한 사람만</label>}
+        </div>
+        <Field label="제목"><input className={inputCls} value={f.title} onChange={(e) => edit({ title: e.target.value })} maxLength={80} data-testid="broadcast-title" /></Field>
+        <Field label="내용"><textarea className={cx(inputCls, 'min-h-32')} value={f.body} onChange={(e) => edit({ body: e.target.value })} maxLength={4000} data-testid="broadcast-body" /></Field>
+        {pv && (
+          <div className="space-y-1 rounded-input border border-line bg-slate-50 p-3 text-xs" data-testid="broadcast-preview">
+            <p><b>{pv.companies}곳 · {pv.recipients}명</b>{pv.noConsent ? ` (수신 동의 안 한 ${pv.noConsent}명 뺌)` : ''}{pv.skippedTenants ? ` · 시험·우리 회사 ${pv.skippedTenants}곳 뺌` : ''}{pv.cap ? ` · 오늘 ${pv.todaySent}/${pv.cap}통 보냄` : ''}</p>
+            <pre className="whitespace-pre-wrap font-sans text-ink-2">{f.channel === 'mail' ? `${pv.sample.subject}
+
+${pv.sample.text}` : `${pv.sample.title}
+${pv.sample.body}`}</pre>
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>닫기</Button>
+          <Button variant="secondary" disabled={busy || !tenants.length || f.title.trim().length < 2 || f.body.trim().length < 2} onClick={preview} data-testid="broadcast-preview-btn">미리 보기</Button>
+          <Button disabled={busy || !pv || !pv.recipients} onClick={send} data-testid="broadcast-send">보내기</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** #1163 ③ 회사 타임라인 — 결제·환불·상담 신청·공간·연락·메모·요금제·해지 예약을 시간순 한 줄씩, 종류 거르기(처음엔 접힘) */
+const TL_KINDS: [string, string][] = [['pay', '결제'], ['refund', '환불'], ['consult', '상담 신청'], ['space', '공간'], ['contact', '연락'], ['memo', '메모'], ['plan', '요금제'], ['cancel', '해지 예약']];
+const TL_CLS: Record<string, string> = { pay: 'bg-emerald-50 text-emerald-800', refund: 'bg-red-50 text-red-700', consult: 'bg-amber-50 text-amber-800', space: 'bg-violet-50 text-violet-800',
+  contact: 'bg-sky-50 text-sky-800', memo: 'bg-slate-100 text-ink-2', plan: 'bg-brand-50 text-brand-800', cancel: 'bg-orange-50 text-orange-800' };
+function CompanyTimeline({ id }: { id: string }) {
+  const [open, setOpen] = useState(false);
+  const [kinds, setKinds] = useState<string[]>([]);
+  const tl = useApi<{ items: { at: string; kind: string; title: string; by: string | null }[] }>(open ? `/api/platform/tenants/${id}/timeline?kinds=${kinds.join(',')}` : null, [id, open, kinds.join(',')]);
+  const toggle = (k: string) => setKinds((v) => (v.includes(k) ? v.filter((x) => x !== k) : [...v, k]));
+  return (
+    <section className="rounded-input border border-line p-3 text-xs" data-testid="company-timeline">
+      <button type="button" className="text-sm font-semibold underline-offset-2 hover:underline" onClick={() => setOpen((v) => !v)} data-testid="company-timeline-toggle">회사 타임라인 {open ? '접기' : '보기'}</button>
+      {open && (
+        <>
+          <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label="종류 거르기">
+            {TL_KINDS.map(([k, l]) => <button key={k} type="button" aria-pressed={kinds.includes(k)} onClick={() => toggle(k)} data-testid={`timeline-kind-${k}`}
+              className={cx('rounded-full border px-2 py-0.5', kinds.includes(k) ? 'border-brand-600 bg-brand-50 font-semibold text-brand-800' : 'border-line text-ink-2')}>{l}</button>)}
+            {!!kinds.length && <button type="button" className="px-1 text-ink-3 underline" onClick={() => setKinds([])}>전체</button>}
+          </div>
+          <ul className="mt-2 max-h-72 divide-y divide-line overflow-y-auto" data-testid="company-timeline-list">
+            {(tl.data?.items ?? []).map((x, i) => (
+              <li key={i} className="flex flex-wrap items-baseline gap-2 py-1">
+                <span className="w-28 shrink-0 tabular-nums text-ink-3">{fmtDateTime(x.at)}</span>
+                <span className={cx('shrink-0 rounded-full px-1.5', TL_CLS[x.kind] ?? 'bg-slate-100')}>{TL_KINDS.find(([k]) => k === x.kind)?.[1] ?? x.kind}</span>
+                <span className="min-w-0 flex-1">{x.title}{x.by ? <span className="text-ink-3"> · {x.by}</span> : null}</span>
+              </li>
+            ))}
+            {tl.data && !tl.data.items.length && <li className="py-1 text-ink-3">기록이 없습니다</li>}
+          </ul>
+        </>
+      )}
     </section>
   );
 }
@@ -178,7 +273,13 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
             <p><span className="text-ink-3">상담 신청 </span>{(d.data.consults ?? []).filter((c: any) => c.status === 'requested').length}건 대기 · <span className="text-ink-3">연락처 </span>{t.contact_name ?? '-'}{t.contact_phone ? ` ${t.contact_phone}` : ''}</p>
           </div>
         )}
+        {!internal && !!d.data.risks?.length && ( // #1163 ② 해지 위험 사유
+          <div className="rounded-input border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800" data-testid="company-risks">
+            <b>해지 위험</b> — {d.data.risks.map((r: any) => r.label).join(' · ')}
+          </div>
+        )}
         {!internal && (d.data.billing?.billing_cycle || d.data.card) && <BillingStop id={id} test={!!t.is_test} run={run} />}
+        {!internal && <CompanyTimeline id={id} />}
         {!internal && d.data.partner && <PartnerBox id={id} p={d.data.partner} aiKrw={o.aiBudgetKrw} run={run} />}
         {d.data.billing && (
           <div className="rounded-input border border-line p-3" data-testid="company-billing">

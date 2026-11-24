@@ -3,6 +3,7 @@
 // 다른 사람 커서·이름, 보는 사람, 보기/편집 공유, 변경 기록·되돌리기, .docx 내보내기. 휴대폰(앱)도 같은 화면.
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { showTask } from '@/components/TaskPanelHost';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Collaboration from '@tiptap/extension-collaboration';
@@ -72,7 +73,7 @@ export default function DocPage() {
       <div className="flex flex-wrap items-center gap-2">
         {/* #615 ②(대표 10/25): 화살표만 있던 자리를 [← 목록] 단추로 — 그 파일의 폴더로 돌아가 줄을 강조(?file=) · #806: 업무 첨부에서 연 문서(?att=)는 그 업무로 */}
         {att && open.file.task_id
-          ? <button onClick={() => router.push(`/tasks/${open.file.task_id}`)} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-input px-2 text-sm font-medium text-ink-2 hover:bg-slate-100" aria-label="업무로 돌아가기" data-testid="doc-back" data-to="task"><ArrowLeft className="size-4" />업무로</button>
+          ? <button onClick={() => showTask(String(open.file.task_id), (h) => router.push(h))} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-input px-2 text-sm font-medium text-ink-2 hover:bg-slate-100" aria-label="업무로 돌아가기" data-testid="doc-back" data-to="task"><ArrowLeft className="size-4" />업무로</button>
           : <button onClick={() => router.push(`/library?folder=${encodeURIComponent(open.file.folder)}&file=${id}`)} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-input px-2 text-sm font-medium text-ink-2 hover:bg-slate-100" aria-label="자료실 목록으로" data-testid="doc-back"><ArrowLeft className="size-4" />목록</button>}
         <input className={cx(inputCls, 'min-w-0 flex-1 text-base font-semibold')} value={title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
           readOnly={!canEdit} aria-label="문서 제목" data-testid="doc-title" />

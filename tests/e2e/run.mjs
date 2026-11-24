@@ -42,6 +42,7 @@ import { teamChipsFlow } from './team-chips.step.mjs';
 import { offboardFlow } from './offboard.step.mjs';
 import { messengerV3 } from './messengerV3.step.mjs';
 import { platformAdd } from './platformAdd.step.mjs';
+import { ops1163 } from './ops1163.step.mjs';
 import { orgTree } from './orgTree.step.mjs';
 import { orgLevels } from './orgLevels.step.mjs';
 import { chatKeyboard } from './chatKeyboard.step.mjs';
@@ -471,9 +472,9 @@ await step('B-1 목록에서 업무를 오른쪽 패널로 열기 → URL /tasks
   await owner.getByTestId('task-panel').waitFor({ state: 'detached' });
   assert.ok(owner.url().includes('/tasks?'), '목록 주소로 돌아옴: ' + owner.url());
   assert.equal(await owner.getByLabel('업무 검색').inputValue(), '보기 전환', '검색 필터 유지');
-  // 새로고침해도 같은 업무가 열림 (공유 가능)
+  // 새로고침해도 같은 업무가 열림 (공유 가능) — #1165 목록 + 오른쪽 패널
   await owner.goto(`${BASE}/tasks/${t3}`);
-  await owner.getByTestId('task-page').waitFor();
+  await owner.getByTestId('task-panel').waitFor();
 });
 
 await step('V37 4 뒤로가기: 목록 → 업무 A(패널) → 하위 업무 B → 뒤로 = 목록 (기록 한 칸)', async () => {
@@ -634,7 +635,7 @@ await step('④ 월·일·일정목록 보기 렌더링', async () => {
 
 // 네트워크 끊김
 await step('⑨ 오프라인에서 댓글 작성 → 재연결 시 자동 전송(중복 없음)', async () => {
-  await staff.goto(`${BASE}/tasks/${t3}`);
+  await staff.goto(`${BASE}/tasks/${t3}?full=1`);
   await staff.getByTestId('comment-input').waitFor();
   await mob.setOffline(true);
   await staff.getByTestId('comment-input').fill('지하 주차장이라 오프라인에서 작성');
@@ -651,7 +652,7 @@ await step('⑨ 오프라인에서 댓글 작성 → 재연결 시 자동 전송
 await step('⑥ 다른 현장 직원은 화면에서도 접근 불가 안내', async () => {
   const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR' });
   const p = await login(c, ctx.staffB.email, ctx.staffB.password);
-  await p.goto(`${BASE}/tasks/${taskId}`);
+  await p.goto(`${BASE}/tasks/${taskId}?full=1`);
   await p.getByText('찾을 수 없거나 접근 권한이 없습니다').waitFor();
   await p.screenshot({ path: `${SHOTS}/16-forbidden-task.png` });
   await p.goto(`${BASE}/admin/users`);
@@ -663,7 +664,7 @@ await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 �
   // V14 50: 일정 수정은 요청자·담당자만 — 직원이 담당인 업무로 시험
   // V32 4: 담당자는 마감을 미루면 연장 요청 → 여기서는 앞당기기(바로 반영)
   const t7 = (await ctx.owner.ok('POST', '/api/tasks', { title: '모바일 수정 시험', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 8) })).id;
-  await staff.goto(`${BASE}/tasks/${t7}`);
+  await staff.goto(`${BASE}/tasks/${t7}?full=1`);
   const nd = addDays(today, 3);
   // V13 11번: 휴대폰은 "세부 정보" 요약 한 줄 → 눌러서 펼침
   await staff.getByTestId('details-toggle').waitFor();
@@ -671,7 +672,7 @@ await step('⑦ PC·모바일 데이터 일치 (모바일 수정 → PC 즉시 �
   await staff.getByTestId('detail-due').getByTestId('due-picker').click(); // 마감일 칩 → 빠른 선택·달력
   await staff.getByLabel('마감일 날짜 선택').fill(nd);
   await staff.locator(`[data-testid="detail-due"][data-value="${nd}"]`).waitFor();
-  await owner.goto(`${BASE}/tasks/${t7}`);
+  await owner.goto(`${BASE}/tasks/${t7}?full=1`);
   assert.equal(await owner.getByTestId('detail-due').getAttribute('data-value'), nd);
   assert.equal(await owner.getByTestId('status-chip').count(), 1, '상태 표시는 칩 하나');
 });
@@ -829,18 +830,18 @@ await step('B-9 결재선 화면에서 2단계 결재선 만들기 → 업무에
   await dlg.getByRole('button', { name: '저장' }).click();
   await owner.getByTestId('approval-lines').getByText('계약 결재').waitFor();
   const id = (await ctx.managerA.client.ok('POST', '/api/tasks', { title: 'PT 강사 계약서 검토', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, taskType: 'approval' })).id;
-  await owner.goto(`${BASE}/tasks/${id}`);
+  await owner.goto(`${BASE}/tasks/${id}?full=1`);
   // V14 27번: 상세 화면에서 결재선 칸은 뺌(데이터는 유지) — 결재선 지정은 API/업무 생성 때
   const line = (await ctx.owner.ok('GET', '/api/approval-lines')).lines.find((l) => l.name === '계약 결재');
   await ctx.managerA.client.ok('PATCH', `/api/tasks/${id}`, { approvalLineId: line.id }); // V14 50: 요청자가 결재선 지정
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${id}`, { status: 'review' });
   const c = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const m = await login(c, ctx.managerA.email, ctx.managerA.password);
-  await m.goto(`${BASE}/tasks/${id}`);
+  await m.goto(`${BASE}/tasks/${id}?full=1`);
   await m.getByTestId('approval-steps').getByRole('button', { name: '승인' }).click();
   await m.getByText('승인했습니다').waitFor();
   await c.close();
-  await owner.goto(`${BASE}/tasks/${id}`);
+  await owner.goto(`${BASE}/tasks/${id}?full=1`);
   await owner.getByTestId('approval-steps').getByText('승인 · 최매니저').waitFor();
   await owner.screenshot({ path: `${SHOTS}/38-approval-steps.png` });
   await owner.getByTestId('approval-steps').getByRole('button', { name: '승인' }).click();
@@ -861,7 +862,7 @@ await step('B-11 프로젝트 필드: 퍼센트 필드 추가 → 업무 상세�
   await owner.getByTestId('fields-manager').getByRole('cell', { name: '달성률', exact: true }).waitFor();
   const tasks = (await ctx.owner.ok('GET', `/api/tasks?projectId=${pid}`)).tasks;
   for (const [i, v] of [[0, '80'], [1, '90']]) {
-    await owner.goto(`${BASE}/tasks/${tasks[i].id}`);
+    await owner.goto(`${BASE}/tasks/${tasks[i].id}?full=1`);
     await owner.getByTestId('task-title').waitFor();
     await owner.getByTestId('task-title').waitFor();
     await openMoreFields(owner);
@@ -978,7 +979,7 @@ await step('S-2 회의 메모 2줄 → 후속 업무 2건(담당=참석자) 자�
 });
 await step('S-3 업무 시간 배정: 담당자 조직 캘린더 + 담당자 참석, 블록 미리보기에서 업무 완료', async () => {
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: '소화기 위치 표지 교체', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, dueDate: addDays(today, 2), approvalRequired: false, estimateMinutes: 120 })).id;
-  await owner.goto(`${BASE}/tasks/${t}`);
+  await owner.goto(`${BASE}/tasks/${t}?full=1`);
   assert.equal(await owner.getByTestId('linked-events').count(), 0, 'V14 27번: 연결 일정이 없으면 줄 없음');
   await owner.getByRole('button', { name: '더보기' }).click();
   await owner.getByRole('menuitem', { name: '실행 시간 배정' }).click();
@@ -1547,7 +1548,7 @@ await step('저장 버튼: 한 줄 추가는 저장 버튼·Enter 로만 생성(
   const [t] = await sql`select id, to_char(due_date, 'YYYY-MM-DD') due, to_char(due_time, 'HH24:MI') tm from tasks where title = '자동 저장 시험 업무'`;
   assert.equal(t.due, d, '고른 마감일이 함께 저장'); assert.equal(t.tm, '15:00', '마감 시각도 저장');
   // 상세 설명: 입력 후 바로 다른 화면으로 이동해도 저장
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('desc-view').click();
   await owner.getByLabel('설명', { exact: true }).fill('이동해도 남아야 하는 설명');
   await owner.goto(BASE + '/tasks');
@@ -1750,7 +1751,7 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   // 361차 #977: 업무에서 만든 미팅 일정 — 삭제 창 하나(기본 체크) → 함께 지움 → 되돌리기면 일정도 다시
   const dayAfter = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
   const meet = await ctx.owner.ok('POST', `/api/tasks/${del}/meeting`, { location: '본사', start: `${dayAfter}T10:00:00+09:00`, end: `${dayAfter}T11:00:00+09:00` });
-  await owner.goto(`${BASE}/tasks/${del}`);
+  await owner.goto(`${BASE}/tasks/${del}?full=1`);
   await owner.getByRole('button', { name: '더보기', exact: true }).click();
   await owner.getByRole('menuitem', { name: '삭제' }).click();
   const delDlg = owner.getByTestId('task-delete-dialog');
@@ -1784,7 +1785,7 @@ await step('V6 화면: 여러 명 일괄 생성·완료 제자리·완료 월별
   assert.match(head.headers()['content-disposition'], /filename\*=UTF-8''%EC%9B%8C%ED%81%AC%EC%9D%B8_%EC%97%85%EB%AC%B4_\d{4}-\d{2}\.xlsx/, '워크인_업무_YYYY-MM.xlsx');
   // 사용자 지정 반복 (Google 형)
   const rt = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V6 반복 지정', orgUnitId: ctx.hq, dueDate: today, approvalRequired: false })).id;
-  await owner.goto(`${BASE}/tasks/${rt}`);
+  await owner.goto(`${BASE}/tasks/${rt}?full=1`);
   await owner.getByTestId('detail-repeat').getByLabel('반복 규칙').selectOption('__custom');
   const cr = owner.getByTestId('custom-recur');
   await cr.getByLabel('반복 단위').selectOption('WEEKLY');
@@ -1866,7 +1867,7 @@ await step('V8: 등록 창 한 번에(자동 인식·템플릿·우선순위·�
   const [t] = await sql`select id, assignee_id, priority, recurrence_rule, to_char(due_date,'YYYY-MM-DD') d, to_char(due_time,'HH24:MI') tm from tasks where title = '장비 견적 비교'`;
   assert.equal(t.d, addDays(today, 1)); assert.equal(t.tm, '15:00'); assert.equal(t.assignee_id, ctx.managerA.id); assert.equal(t.priority, 'high'); assert.match(t.recurrence_rule, /FREQ=WEEKLY/);
   // 🔔 미리 알림
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('detail-remind').getByTestId('bell-chip').click();
   await owner.getByRole('button', { name: '30분 전' }).click();
   await owner.waitForTimeout(600);
@@ -2207,7 +2208,7 @@ await step('V12-8: 업무 등록 "📎 자료로 채우기" → 제목·설명·
 
 await step('V12-9: 첨부 칸·자료실에 파일 끌어 놓기(여러 개·진행률), 저장소 연결 실패 시 알기 쉬운 원인 표시', async () => {
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V12 끌어 놓기 업무', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, approvalRequired: false })).id;
-  await owner.goto(`${BASE}/tasks/${t}`);
+  await owner.goto(`${BASE}/tasks/${t}?full=1`);
   const drop = async (testid, files) => owner.getByTestId(testid).first().evaluate((el, fs) => {
     const dt = new DataTransfer();
     for (const f of fs) dt.items.add(new File([f.body], f.name, { type: f.type }));
@@ -2259,7 +2260,7 @@ await step('V13 11·12·8번: 업무 상세 — 설명 위·오른쪽 속성 열
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V13 상세 배치', orgUnitId: ctx.siteA, assigneeId: ctx.ownerId, description: '**중요** 기준 문서 https://example.com/guide 참고', approvalRequired: false })).id;
   await ctx.staffA.client.ok('POST', `/api/tasks/${t}/comments`, { body: '자료 확인했습니다' });
   await owner.setViewportSize({ width: 1440, height: 900 });
-  await owner.goto(`${BASE}/tasks/${t}`);
+  await owner.goto(`${BASE}/tasks/${t}?full=1`);
   await owner.getByTestId('desc-rich').getByText('중요').waitFor();
   assert.equal(await owner.getByTestId('desc-rich').locator('a[href="https://example.com/guide"]').count(), 1, '링크');
   const desc = await owner.getByTestId('desc-section').boundingBox(), aside = await owner.getByTestId('detail-aside').boundingBox();
@@ -2393,7 +2394,7 @@ await step('V14 19번·R-15·R-16: 업무 상세 머리 요약·D-day·다음 �
   await ctx.owner.ok('POST', `/api/tasks/${tk}/checklist`, { text: '자료 모으기', assigneeId: ctx.managerA.id });
   await ctx.owner.ok('POST', `/api/tasks/${tk}/comments`, { body: '시작합니다' });
   await ctx.owner.ok('PATCH', `/api/admin/users/${ctx.ownerId}`, { titleShort: 'CEO' }); // V14 24번 직책 약칭
-  await owner.goto(`${BASE}/tasks/${tk}`);
+  await owner.goto(`${BASE}/tasks/${tk}?full=1`);
   await owner.locator('[data-testid="avatar-badge"][title$="· CEO"]').first().waitFor();
   const sum = owner.getByTestId('task-summary');
   await sum.getByTestId('dday').getByText('D-2').waitFor();
@@ -2438,7 +2439,7 @@ await step('V14 19번·R-15·R-16: 업무 상세 머리 요약·D-day·다음 �
   await owner.getByRole('dialog', { name: '메신저' }).getByLabel('닫기').click();
   // 휴대폰: 댓글 입력줄이 화면 아래 고정
   const st = (await ctx.owner.ok('POST', '/api/tasks', { title: 'V19 휴대폰', orgUnitId: ctx.siteA, assigneeId: ctx.staffA.id, approvalRequired: false })).id;
-  await staff.goto(`${BASE}/tasks/${st}`);
+  await staff.goto(`${BASE}/tasks/${st}?full=1`);
   const form = staff.getByTestId('comment-form');
   await form.waitFor();
   // 화면 폭 판정 뒤 아래로 옮겨 붙는다 — 고정될 때까지 기다림
@@ -2565,7 +2566,7 @@ await step('화면 캡처: 대시보드·목록·보드·업무 상세(1440px)',
   await p.goto(BASE + '/tasks?mode=board');
   await p.getByTestId('board').waitFor();
   await p.screenshot({ path: `${SHOTS}/42-board-1440.png` });
-  await p.goto(`${BASE}/tasks/${taskId}`);
+  await p.goto(`${BASE}/tasks/${taskId}?full=1`);
   await p.getByTestId('task-title').waitFor();
   await p.screenshot({ path: `${SHOTS}/43-task-detail-1440.png`, fullPage: true });
   await p.goto(BASE + '/login');
@@ -2584,7 +2585,7 @@ await step('⑨ 서버 재시작 중 오류 안내 → 재시작 후 데이터 �
   const r = await owner.goto(`${BASE}/tasks`).catch((e) => e);
   assert.ok(r instanceof Error || r.status() >= 500, '서버 중단 확인');
   srv = await startServer();
-  await owner.goto(`${BASE}/tasks/${t3}`);
+  await owner.goto(`${BASE}/tasks/${t3}?full=1`);
   await owner.getByTestId('task-title').waitFor();
   const h = await (await fetch(BASE + '/api/health')).json();
   assert.equal(h.db, 'ok');
@@ -2656,13 +2657,13 @@ await step('로컬 10/20 알림 바로 처리: 배정 알림 [오늘 할 일에 
 // 대표 11/18: 검토는 완료의 조건이 아님 — '검토 필수' 칸 없음 · 예전 표시가 있어도 바로 완료 · 검토 중에도 바로 완료
 await step('#410 일반 업무 검토 요청(휴대폰 담당자) → 요청자 반려 → 다시 요청 → 승인(PC) · 검토 없이 바로 완료(대표 11/18)', async () => {
   const id = (await ctx.owner.ok('POST', '/api/tasks', { title: '#410 검토 흐름 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false })).id;
-  await staff.goto(`${BASE}/tasks/${id}`);
+  await staff.goto(`${BASE}/tasks/${id}?full=1`);
   await staff.getByTestId('review-ask').waitFor();
   assert.equal(await staff.getByTestId('step-review').count(), 1, '검토 칸 항상 표시(일반 업무)');
   await staff.getByTestId('review-ask').click();
   await staff.getByTestId('review-wait').waitFor();
   await staff.screenshot({ path: `${SHOTS}/176-task-review-ask.png`, fullPage: true });
-  await owner.goto(`${BASE}/tasks/${id}`);
+  await owner.goto(`${BASE}/tasks/${id}?full=1`);
   await owner.getByTestId('review-decide').waitFor();
   owner.once('dialog', (d) => d.accept('사진 더 붙여 주세요'));
   await owner.getByTestId('review-reject-here').click();
@@ -2676,11 +2677,11 @@ await step('#410 일반 업무 검토 요청(휴대폰 담당자) → 요청자 
   // 대표 11/18 '검토는 담당자가 필요시에 요청자에게 검토를 요청하는 것이지 완료의 조건으로 두지는 않는다':
   //   요청자 '검토 필수' 칸(#410 ②③)은 없앰 · 예전에 검토 필수가 켜진 업무도 담당자가 큰 단추 [완료]로 바로 완료
   const id2 = (await ctx.owner.ok('POST', '/api/tasks', { title: '#410 예전 검토 필수 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: true })).id;
-  await owner.goto(`${BASE}/tasks/${id2}`);
+  await owner.goto(`${BASE}/tasks/${id2}?full=1`);
   await owner.getByTestId('task-title').waitFor();
   await owner.getByRole('button', { name: /세부 정보/ }).first().click().catch(() => {});
   assert.equal(await owner.getByTestId('approval-required').count(), 0, "요청자 화면에 '검토 필수' 칸 없음");
-  await staff.goto(`${BASE}/tasks/${id2}`);
+  await staff.goto(`${BASE}/tasks/${id2}?full=1`);
   await staff.getByTestId('review-ask').waitFor();
   assert.equal((await staff.getByTestId('next-action').first().innerText()).trim(), '완료', "큰 단추는 [완료](예전: '완료 → 검토 요청')");
   await staff.getByTestId('next-action').first().click();
@@ -2688,7 +2689,7 @@ await step('#410 일반 업무 검토 요청(휴대폰 담당자) → 요청자 
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id2}`)).task.status, 'done', '예전 검토 필수 업무도 검토 없이 바로 완료');
   // 393차(대표 11/13 '업무 담당자가 검토 승인 요청 후 완료 처리를 할 수 없는 상황'): 검토를 기다리는 중에도 담당자 [완료] → 바로 완료 — 예전 검토 필수 표시가 있어도 같음
   const id3 = (await ctx.owner.ok('POST', '/api/tasks', { title: '#393 검토 기다리다 완료', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: true })).id;
-  await staff.goto(`${BASE}/tasks/${id3}`);
+  await staff.goto(`${BASE}/tasks/${id3}?full=1`);
   await staff.getByTestId('review-ask').waitFor(); await staff.getByTestId('review-ask').click();
   const wait = staff.getByTestId('review-wait'); await wait.waitFor();
   assert.match(await wait.innerText(), /승인을 기다리지 않고 바로 완료할 수도 있어요/);
@@ -2699,7 +2700,7 @@ await step('#410 일반 업무 검토 요청(휴대폰 담당자) → 요청자 
   // 대표 11/18 휴대폰 화면 그대로: 검토 중인 업무에서 위쪽 단계 줄의 [완료] 칸을 눌러도 바로 완료(예전: 잠김 안내만)
   const id4 = (await ctx.owner.ok('POST', '/api/tasks', { title: '#1118 검토 중 완료 칸', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: true })).id;
   await ctx.staffA.client.ok('PATCH', `/api/tasks/${id4}`, { status: 'review' });
-  await staff.goto(`${BASE}/tasks/${id4}`); await staff.getByTestId('review-wait').waitFor();
+  await staff.goto(`${BASE}/tasks/${id4}?full=1`); await staff.getByTestId('review-wait').waitFor();
   await staff.getByTestId('step-done').click();
   await staff.getByText('완료 처리했습니다 — 검토 담당자에게 알렸습니다').waitFor();
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${id4}`)).task.status, 'done', '검토 중 [완료] 칸 → 바로 완료');
@@ -2719,6 +2720,7 @@ await step('로컬 10/20 캘린더 재발: 빠른 입력 첫 화면 색 줄 → 
 await step('대표 10/20 4) 팀별 보기: 업무 화면 팀 칩(볼 수 있는 팀만) → 칩으로 그 팀 업무만 → 메뉴 권한 \'팀 업무 보기\' 지정 팀 → 직원 화면에 그 팀 칩', () => teamChipsFlow({ browser, owner, ctx, sql, BASE, SHOTS, login }));
 await step('대표 10/20 7) 퇴사 처리·인수인계: 창에서 퇴사일·받을 사람·항목 개수 → 퇴사(날짜)·접힘·인수인계·복직 버튼 → 로그인 차단·업무 이전', () => offboardFlow({ owner, ctx, BASE, SHOTS }));
 await step('메신저 1차(대표 10/20): 새 대화 다중 선택·그룹 자동 이름·방 정보(초대·내보내기)·시스템 메시지·안 읽은 수(이름)·공지 바·전달', () => messengerV3({ owner, ctx, BASE, SHOTS }));
+await step('#1163·#1164·#1165 고객사 관리 고도화(목록 매출·다음 결제·미납·정렬·해지 위험·메일·공지 미리 보기·타임라인·환불 사유 통계) · 영업 업무 일정 없음 띠·배지·거르기 → 일정 잡기 · 업무 주소 = 목록 + 오른쪽 패널', () => ops1163({ owner, ctx, sql, BASE, SHOTS }));
 await step('대표 10/20 ① 플랫폼 운영 [고객사 추가]: 회사명·업종 여러 개·규모·체험 기간·시작 공간·대표 → 초대 링크 → 회사 관리 초대 대기·공간·메모·감사 기록', () => platformAdd({ owner, BASE, SHOTS, sql }));
 await step('대표 10/20 15:15 부서·팀 재정비: 트리(들여쓰기·경로 "영업부 › 영업1팀")·상위 부서·장 1명 → 초대 \'소속\' 하나(주 소속 + 겸직, 고급 접힘) → 목록 경로·접근 조직 자동', () => orgTree({ owner, ctx, BASE, SHOTS }));
 await step('영업 S2 1차(대표 14:15): 허브 일괄 [영업 진행으로] → 업무 자동 → 홈 오늘 할 일 7묶음·요약 타일·진행표 → 업무 영업 원천 배지 → 계약만료·재입찰', () => salesTodo({ owner, ctx, sql, BASE, SHOTS }));
@@ -2767,7 +2769,7 @@ await step('#1128 파일 한 개 최대 크기: 관리 › 회사 정보에서 5
   await owner.getByTestId('file-max-50').click(); await owner.getByText('파일 한 개 최대 크기를 바꿨습니다').first().waitFor(); // 저장 뒤 다시 읽어 체크가 바뀜(check() 는 바로 바뀌길 기다려 실패)
   await owner.waitForFunction(() => document.querySelector('[data-testid=file-max-50]')?.checked === true);
   const t = await ctx.owner.ok('POST', '/api/tasks', { title: '#1128 안내 확인', assigneeId: ctx.ownerId, approvalRequired: false });
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('drop-hint').first().getByText(/최대 50MB/).waitFor();
   await ctx.owner.ok('PUT', '/api/org/file-max', { mb: 2048 });
 });

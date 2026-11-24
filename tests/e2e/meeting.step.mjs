@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 export async function meeting({ owner, ctx, sql, BASE }) {
   const id = (await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 고객사 미팅', assigneeId: ctx.ownerId, approvalRequired: false })).id;
-  await owner.goto(`${BASE}/tasks/${id}`);
+  await owner.goto(`${BASE}/tasks/${id}?full=1`);
   await owner.getByTestId('meeting-open').click();
   const dlg = owner.getByTestId('meeting-dialog');
   await dlg.getByTestId('meeting-location').fill('강남역 3번 출구 카페');

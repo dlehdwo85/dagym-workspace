@@ -26,5 +26,9 @@ export async function settlementFlow({ owner, ctx, BASE, SHOTS, sql }) {
   await tax.getByTestId('tax-issued').click(); // 서버 반영 뒤 다시 불러와 체크됨(즉시 바뀌지 않음)
   await owner.getByText('발행 완료로 표시했습니다').waitFor();
   await owner.waitForFunction(() => document.querySelector('[data-testid="tax-row"]')?.getAttribute('data-status') === 'issued');
+  // #1163 ⑤ 발행 → 보냄
+  await tax.getByTestId('tax-sent').click();
+  await owner.getByText('보냄으로 표시했습니다').waitFor();
+  await owner.waitForFunction(() => document.querySelector('[data-testid="tax-row"]')?.getAttribute('data-status') === 'sent');
   await owner.screenshot({ path: `${SHOTS}/137-settlement-tax.png` });
 }

@@ -20,7 +20,7 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   await sql`insert into mail_accounts (tenant, provider, host, port, secure, username, from_email, from_name, password_enc) values ('default', 'naver', 'smtp.naver.com', 465, true, 'office', 'office@mail.test', '시험회사', 'v1.x.y.z')
     on conflict (tenant) do nothing`;
   const t = await call('/api/tasks', 'POST', { title: '메일 시안 시험', approvalRequired: false });
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('mail-compose-open').click();
   const c = owner.getByTestId('mail-compose');
   await c.waitFor();
@@ -58,7 +58,7 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   // V28-1 이 업무의 AI 비서: [메일 초안] → 시안 창이 초안(제목·본문)으로 열림
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true,
     anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ reply: '회신 초안입니다.', subject: 'AI 초안 제목', body: 'AI 초안 본문입니다.', attach: [] }) }], stop_reason: 'end_turn' }] }) });
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('assist-section').waitFor();
   await owner.getByTestId('assist-mail').click();
   const c2 = owner.getByTestId('mail-compose');
@@ -72,7 +72,7 @@ export async function v21({ owner, BASE, SHOTS, sql }) {
   await owner.addInitScript(() => { window.__KAKAO_STUB = { calls: [], Share: { sendDefault(o) { window.__KAKAO_STUB.calls.push(o); } } }; });
   await fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anthropicReset: true,
     anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ reply: '카톡 초안입니다.', subject: '', body: '소장님, 견적서 메일로 보내 드렸습니다. 확인 부탁드립니다.', attach: [] }) }], stop_reason: 'end_turn' }] }) });
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('assist-kakao').click();
   const ks = owner.getByTestId('kakao-send').last();
   await ks.getByTestId('kakao-open').click();

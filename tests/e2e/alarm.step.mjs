@@ -7,7 +7,7 @@ export async function alarmFlow({ staff, ctx, sql, BASE, SHOTS }) {
   assert.deepEqual([await d.getByTestId('alarm-events').isChecked(), await d.getByTestId('alarm-tasks').isChecked(), await d.getByTestId('alarm-important').isChecked()], [false, false, true], '기본값: 일정 끔·업무 끔·중요 켬');
   // 업무 상세: 알람 선택(중요 업무는 '기본(중요 → 켬)')
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 알람 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.siteA, approvalRequired: false, priority: 'high', dueDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()), dueTime: '23:00' })).id;
-  await staff.goto(`${BASE}/tasks/${t}`);
+  await staff.goto(`${BASE}/tasks/${t}?full=1`);
   await staff.getByTestId('details-toggle').click(); // 휴대폰은 '세부 정보' 접힘
   const sel = staff.getByTestId('task-alarm'); await sel.waitFor();
   assert.match(await sel.locator('option[value="default"]').innerText(), /중요 → 켬/);

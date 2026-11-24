@@ -31,7 +31,7 @@ export async function coAssign({ owner, staff, ctx, sql, BASE, SHOTS }) {
   const co = async () => (await sql`select user_id from task_assignees where task_id = ${t.id} order by added_at`).map((r) => r.user_id);
   assert.deepEqual((await co()).sort(), [ctx.staffA.id, ctx.staffB.id].sort());
   // 상세: '담당자' 칸 하나에 칩 3개(같은 모양) · 요약 '외 2명 · 0/3 완료' · 관리자는 빼기·추가·[+]
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('sum-co').getByText('외 2명').waitFor();
   assert.match(await owner.getByTestId('sum-parts').innerText(), /0\/3 완료/);
   const box = owner.getByTestId('assignees');
@@ -89,7 +89,7 @@ export async function coAssign({ owner, staff, ctx, sql, BASE, SHOTS }) {
   assert.equal((await sql`select status from tasks where id = ${t.id}`)[0].status, 'todo', '업무 상태 그대로');
   await mine.screenshot({ path: `${SHOTS}/214-co-part-mobile.png` });
   // 상세: '담당 3명 중 1명 완료 — 남은 사람' 상자 + [내 몫 완료 취소] · 직원에게는 담당자 추가 [+] 없음
-  await staff.goto(`${BASE}/tasks/${t.id}`);
+  await staff.goto(`${BASE}/tasks/${t.id}?full=1`);
   const pbox = staff.getByTestId('part-box');
   await pbox.waitFor();
   assert.equal(await pbox.getAttribute('data-done'), '1');

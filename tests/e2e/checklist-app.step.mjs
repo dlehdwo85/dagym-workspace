@@ -9,7 +9,7 @@ export async function checklistAppFlow({ browser, desk, ctx, sql, BASE, SHOTS })
   const m = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   try {
     const p = await m.newPage();
-    await p.goto(`${BASE}/tasks/${one}`);
+    await p.goto(`${BASE}/tasks/${one}?full=1`);
     const list = p.getByTestId('checklist'); await list.waitFor();
     assert.equal(await p.getByTestId('checklist-meeting').count(), 0, '항목별 미팅 일정 버튼 없음');
     assert.equal(await list.getByRole('combobox').count(), 0, '담당 1명 → 항목 담당 선택 없음');
@@ -28,7 +28,7 @@ export async function checklistAppFlow({ browser, desk, ctx, sql, BASE, SHOTS })
     assert.ok(nb.x >= 0 && nb.x + nb.width <= 360, `안내가 화면 안 (${nb.x}~${nb.x + nb.width})`);
     await p.screenshot({ path: `${SHOTS}/141-checklist-360.png`, fullPage: true });
     // 담당 여럿 → 항목 담당 선택·새 항목 담당 노출
-    await p.goto(`${BASE}/tasks/${many}`);
+    await p.goto(`${BASE}/tasks/${many}?full=1`);
     await p.getByTestId('checklist').waitFor();
     await p.getByLabel('자료 모으기 담당').waitFor();
     assert.equal(await p.getByLabel('새 항목 담당').count(), 1);

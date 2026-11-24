@@ -13,7 +13,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import dynamic from 'next/dynamic';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSalesTerms, useSession } from './session';
-import { CalendarDays as CalIcon, Camera, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, ClipboardCheck, Diamond, FileSpreadsheet, Flag, GanttChart, GripVertical, KanbanSquare, LayoutList, ListChecks, Lock, MapPin, MessageSquare, MoreHorizontal, Paperclip, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, Users, X } from 'lucide-react';
+import { CalendarDays as CalIcon, CalendarPlus, Camera, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, ClipboardCheck, Diamond, FileSpreadsheet, Flag, GanttChart, GripVertical, KanbanSquare, LayoutList, ListChecks, Lock, MapPin, MessageSquare, MoreHorizontal, Paperclip, Plus, Repeat, Search, SlidersHorizontal, Stamp, Trash2, Users, X } from 'lucide-react';
 import { FOLLOWUP_TAG } from '@/lib/check/tags';
 import { Avatar, BrandDot, Button, DueChip, Empty, ErrorBox, Modal, PriorityTag, STATUS_TONE, Skeleton, StatusBadge, cx, fmtDate, inputCls, toast, todayStr } from './ui';
 import { HIDDEN_BRANDS, ROLE_RANK, STATUSES, STATUS_LABEL, type Role, type TaskStatus } from '@/lib/types';
@@ -55,6 +55,8 @@ export type Task = {
   batch_id?: string | null; batch?: { total: number; done: number } | null; batch_people?: { id: string | null; name: string | null; status: string }[] | null; recurrence_source_id?: string | null;
   /** V32 4 마감 연장: 횟수 · 대기 중인 요청 */
   meeting?: { id: string; location: string; start: string } | null;
+  /** #1164 영업 출처 열린 업무에 현장설명회·미팅 일정 없음 — any | meeting(현설 없음 공고) */
+  needs_schedule?: 'any' | 'meeting' | null;
   due_extend_count?: number; ext_pending?: { id: string; from: string | null; to: string; reason: string; by: string; byName: string } | null;
 };
 
@@ -88,7 +90,7 @@ const VIEW_MODES: ViewMode[] = ['list', 'board', 'calendar', 'timeline'];
 const LIST_VIEWS = ['all', 'my', 'today', 'overdue', 'week', 'review', 'risk', 'requested', 'done', 'extend'];
 const cleanView = (v: string | null) => (v && LIST_VIEWS.includes(v) ? v : '');
 /** #242(대표 10/24 '내 업무에서 업무를 열었다 닫으면 전체로'): 목록 거르기·검색어·보기 방식은 주소에 둔다(기록은 쌓지 않음) — 닫기·뒤로가기·새로 고침·링크 공유에도 같은 목록 */
-const URL_KEYS = ['view', 'brandId', 'space', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId', 'hasAttach', 'carried', 'tag'] as const;
+const URL_KEYS = ['view', 'brandId', 'space', 'orgUnitId', 'assigneeId', 'status', 'from', 'to', 'teamId', 'hasAttach', 'carried', 'tag', 'noSchedule'] as const;
 const PANEL_PATH = /^\/tasks\/([0-9a-f-]{36})$/;
 function filtersOf(sp: { get: (k: string) => string | null }) {
   const f: Record<string, string> = {};
@@ -252,6 +254,10 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     else window.history.pushState(st, '', `/tasks/${id}`);
     setPanelId(id);
   }, []);
+  useEffect(() => { // #1165: 이 목록이 떠 있음을 알림 — 만들기 뒤 [열기] 등(showTask)이 이 목록의 오른쪽 패널로 열리게
+    const w = window as any; w.__wosTaskViews = (w.__wosTaskViews ?? 0) + 1;
+    return () => { w.__wosTaskViews = Math.max(0, (w.__wosTaskViews ?? 1) - 1); };
+  }, []);
   useEffect(() => { // 300차 #850: 패널 안의 다른 업무 링크·[열기] = 이 패널 내용만 바꿈(TaskPanelHost)
     const onSwap = (e: Event) => { const v = (e as CustomEvent<string>).detail; if (typeof v === 'string') openTask(v); };
     window.addEventListener(PANEL_SWAP_EVENT, onSwap);
@@ -265,9 +271,9 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     const m = PANEL_PATH.exec(location.pathname);
     if (!m) return;
     const st = window.history.state;
-    if (st?.wosPanel) setPanelId(m[1]);
+    setPanelId(m[1]); // #1165: 주소로 바로 들어와도(새로 고침·메일·푸시·뒤로가기) 목록 + 오른쪽 패널 — 닫으면 업무 목록
     if (st?.wosPanel && typeof st.wosList === 'string') { listUrl.current = st.wosList; fromUrl(new URLSearchParams(st.wosList.split('?')[1] ?? '')); }
-    else adopt.current = true;
+    else { adopt.current = true; listUrl.current = listUrl.current ?? '/tasks'; }
   }, []);
   useEffect(() => { // #242 목록 상태를 주소에(replaceState·기록 안 쌓임). 패널이 열린 동안(/tasks/:id)은 닫혀 목록 주소로 돌아온 뒤에 씀
     if (PANEL_PATH.test(location.pathname)) return;
@@ -351,6 +357,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
     ...(filters.status ? [['status', `상태: ${filters.status.split(',').map((x) => STATUS_LABEL[x as TaskStatus] ?? x).join('·')}`]] : []),
     ...(filters.carried ? [['carried', '이월만']] : []),
     ...(filters.hasAttach ? [['hasAttach', '첨부 있음']] : []),
+    ...(filters.noSchedule ? [['noSchedule', '일정 없음(영업)']] : []),
     ...(filters.tag ? [['tag', filters.tag === FOLLOWUP_TAG ? '점검 보완만' : `꼬리표: ${filters.tag}`]] : []),
     ...(filters.from || filters.to ? [['period', `기간: ${filters.from ? fmtDate(filters.from) : '처음'} ~ ${filters.to ? fmtDate(filters.to) : '끝'}`]] : []),
   ] as [string, string][];
@@ -510,6 +517,10 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
           {/* V20 이월만 보기 (담당자 묶음 안에서도) */}
           <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.carried === '1'} onChange={(e) => setFilters((f) => ({ ...f, carried: e.target.checked ? '1' : '' }))} data-testid="filter-carried" />이월만 보기</label>
           <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.hasAttach === '1'} onChange={(e) => setFilters((f) => ({ ...f, hasAttach: e.target.checked ? '1' : '' }))} data-testid="filter-attach" /><Paperclip className="size-3.5 text-sky-700" />첨부 있음</label>
+          {/* #1164: 영업 출처 업무 중 현장설명회·미팅 일정이 없는 것만 — 영업 공간을 쓰는 사람에게만(주소로 들어온 경우는 누구에게나) */}
+          {((sess.spaces ?? []).includes('sales') || filters.noSchedule === '1') && (
+            <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.noSchedule === '1'} onChange={(e) => setFilters((f) => ({ ...f, noSchedule: e.target.checked ? '1' : '' }))} data-testid="filter-no-schedule" /><CalendarPlus className="size-3.5 text-amber-700" />일정 없음(영업)</label>
+          )}
           {/* 점검 2단계: 점검에서 만든 보완 요청 업무만 — 점검을 하는 사람(점검하기 권한)에게만 보이고, 주소로 들어온 경우에는 누구에게나 */}
           {((sess.menus?.check_run ?? 'none') !== 'none' || filters.tag === FOLLOWUP_TAG) && (
             <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-input border border-line px-3 text-sm"><input type="checkbox" checked={filters.tag === FOLLOWUP_TAG} onChange={(e) => setFilters((f) => ({ ...f, tag: e.target.checked ? FOLLOWUP_TAG : '' }))} data-testid="filter-check" /><ClipboardCheck className="size-3.5 text-brand-700" />점검 보완만</label>)}
@@ -590,6 +601,7 @@ function meetingWhen(iso: string) {
 }
 
 function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onPatch?: (t: Task, b: any) => any; collab?: boolean }) {
+  const salesOn = (useSession().spaces ?? []).includes('sales'); // #1164 '일정 없음' 배지는 영업 공간을 쓰는 사람에게만
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-ink-2">
       {/* 로컬 검수 10/17: 휴대폰 둘째 줄은 상태·연장 요청·열람·첨부·경고만, 프로젝트·하위·체크리스트·댓글 수는 숨김(상세에 있음). 2차: 그래도 넘치면 잘리지 않게 줄바꿈 */}
@@ -614,6 +626,7 @@ function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onP
       {t.blocked_by_count > 0 && <span className="shrink-0 font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
       {/* V37 8: 연결 미팅 일정 📍장소·시간 (장소는 일정에 한 번만) */}
       {t.meeting && <span className="inline-flex min-w-0 max-w-[12rem] shrink items-center gap-0.5 rounded-full bg-rose-50 px-1.5 text-[11px] font-medium text-rose-800" title={`미팅 ${t.meeting.location}`} data-testid="meeting-chip"><MapPin className="size-3 shrink-0" aria-hidden /><span className="truncate">{t.meeting.location}</span><span className="shrink-0 tabular-nums">· {meetingWhen(t.meeting.start)}</span></span>}
+      {t.needs_schedule && salesOn && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={t.needs_schedule === 'meeting' ? '현장설명회 없음 — 필요하면 미팅 일정을 잡아 주세요' : '현장설명회·미팅 일정을 잡아 주세요'} data-testid="no-schedule-chip"><CalendarPlus className="size-3" aria-hidden />일정 없음</span>}
       {!t.ext_pending && !!t.due_extend_count && <span className="max-lg:hidden shrink-0 rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}
     </span>
   );
@@ -670,7 +683,7 @@ function DoneFold({ tasks, onPatch }: { tasks: Task[]; onPatch: (t: Task, b: any
                   // #508 후속(로컬 10/23): 완료 때 자동으로 생긴 다음 회차·리드 후속 업무 — 손대지 않은 것은 서버가 같이 지움, 손댄 것은 그대로 두고 [열기]
                   const removed: { id: string }[] = r?.autoRemoved ?? []; const kept: { id: string; title: string }[] = r?.autoKept ?? [];
                   const tail = kept.length ? ' · 다음 회차/후속 업무는 그대로 두었습니다' : removed.length ? ` · 완료 때 자동으로 만든 다음 업무 ${removed.length}건도 지웠습니다` : '';
-                  toast.ok(`되돌렸습니다 — ${STATUS_LABEL[back]}${tail}`, kept.length ? { label: '열기', run: () => router.push(`/tasks/${kept[0].id}`) } : undefined);
+                  toast.ok(`되돌렸습니다 — ${STATUS_LABEL[back]}${tail}`, kept.length ? { label: '열기', run: () => window.dispatchEvent(new CustomEvent(PANEL_SWAP_EVENT, { detail: kept[0].id })) } : undefined);
                 }}>되돌리기</Button>}
               </li>
             );

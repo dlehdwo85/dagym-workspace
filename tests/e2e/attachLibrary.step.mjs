@@ -7,7 +7,7 @@ export async function attachLibrary({ owner, ctx, BASE, SHOTS }) {
   await ctx.owner.ok('POST', `/api/library/${lf.id}/complete`);
   const t = (await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 자료실 첨부 업무', assigneeId: ctx.staffA.id, orgUnitId: ctx.hq, approvalRequired: false })).id;
   await owner.setViewportSize({ width: 1366, height: 900 });
-  await owner.goto(`${BASE}/tasks/${t}`);
+  await owner.goto(`${BASE}/tasks/${t}?full=1`);
   // 마감일 버튼: 높이 ≥ 32, 선택 창의 날짜 칸 높이 ≥ 36
   const due = owner.getByTestId('detail-due').getByTestId('due-picker'); await due.waitFor();
   const db = await due.boundingBox(); assert.ok(db && db.height >= 32, `마감일 버튼 높이 ${db?.height}`);
@@ -44,7 +44,7 @@ export async function attachLibrary({ owner, ctx, BASE, SHOTS }) {
   assert.ok(d.history.some((h) => h.action === 'file_attached' && h.changes?.from === 'library'), '타임라인 자료실에서 첨부');
   // 휴대폰
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/tasks/${t}`);
+  await owner.goto(`${BASE}/tasks/${t}?full=1`);
   await owner.getByTestId('att-from-library').waitFor();
   await owner.screenshot({ path: `${SHOTS}/169-attach-from-library-390.png` });
   // 336차 휴대폰: 줄을 누르면 목록 자리에 미리보기 · [‹ 목록]으로 돌아감

@@ -61,7 +61,7 @@ export async function leadList197({ owner, ctx, sql, BASE, SHOTS }) {
     owner.once('dialog', (d) => d.accept()); await leads.getByTestId('leads-uview-del').click(); await uv.waitFor({ state: 'detached' });
     // #460 업무 [완료] → 다음 행동 창: 1주 뒤 + 할 일 → 그날 업무
     const [ta] = await sql`select id from tasks where lead_id = ${A} and deleted_at is null and status <> 'done' order by created_at limit 1`;
-    await owner.goto(`${BASE}/tasks/${ta.id}`);
+    await owner.goto(`${BASE}/tasks/${ta.id}?full=1`);
     await owner.getByTestId('next-action').click();
     const dlg = owner.getByTestId('lead-fu'); await dlg.waitFor();
     assert.equal(await dlg.getByTestId('lead-fu-save').isDisabled(), true, '고르기 전에는 [완료] 못 누름');
@@ -75,7 +75,7 @@ export async function leadList197({ owner, ctx, sql, BASE, SHOTS }) {
     assert.equal((await sql`select count(*)::int c from tasks where lead_id = ${A} and deleted_at is null and status <> 'done' and title like '%견적서 보내기' and due_date = ${ymd(7)}::date`)[0].c, 1);
     // 종결: 보류 + 사유 칩 + 다시 볼 날 6개월 → 종결 보기에 사유
     const [tb] = await sql`select id from tasks where lead_id = ${B} and deleted_at is null and status <> 'done' order by created_at limit 1`;
-    await owner.goto(`${BASE}/tasks/${tb.id}`);
+    await owner.goto(`${BASE}/tasks/${tb.id}?full=1`);
     await owner.getByTestId('next-action').click(); await dlg.waitFor();
     await dlg.getByTestId('lead-fu-mode-close').click(); await dlg.getByTestId('lead-fu-close-보류').click();
     assert.equal(await dlg.getByTestId('lead-fu-save').isDisabled(), true, '보류는 사유 전에는 못 누름');

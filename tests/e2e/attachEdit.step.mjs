@@ -22,7 +22,7 @@ export async function attachEdit({ owner, ctx, BASE, SHOTS }) {
     hwp: await up('E2E 계획서.hwp', 'application/x-hwp', Buffer.from('HWP Document File E2E')),
   };
   await owner.setViewportSize({ width: 1366, height: 900 });
-  await owner.goto(`${BASE}/tasks/${t}`);
+  await owner.goto(`${BASE}/tasks/${t}?full=1`);
   const att = owner.getByTestId('attachments'); await att.getByText('E2E 메모.txt').waitFor();
   const row = (name) => att.locator('li').filter({ hasText: name });
   const v2 = (name) => row(name).getByTestId('att-versions').filter({ hasText: 'v2' }).waitFor();
@@ -111,7 +111,7 @@ export async function attachEdit({ owner, ctx, BASE, SHOTS }) {
   await v2('E2E 계획서.hwp');
   // 휴대폰 폭
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(`${BASE}/tasks/${t}`);
+  await owner.goto(`${BASE}/tasks/${t}?full=1`);
   const edit = row('E2E 메모.txt').getByTestId('att-edit'); await edit.waitFor();
   const eb = await edit.boundingBox(); assert.ok(eb && eb.x >= 0 && eb.x + eb.width <= 390, `휴대폰 폭 안 [고치기] ${JSON.stringify(eb)}`);
   for (const n of ['E2E 메모.txt', 'E2E 사진.png']) { const nb = await row(n).locator('a').first().boundingBox(); assert.ok(nb && nb.width > 100, `휴대폰에서 파일 이름이 보임(버튼에 밀리지 않음) ${n} ${nb?.width}`); }

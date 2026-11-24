@@ -86,10 +86,11 @@ export async function listKeep({ owner, ctx, BASE, SHOTS }) {
     await panel.waitFor({ state: 'detached' });
   } else await page.getByTestId('task-page-close').click();
   await kept('대화방 → 뒤로가기 → 닫기');
-  // 링크(알림·새 탭)로 바로 연 상세의 [닫기] = 업무 목록(기본)
+  // 링크(알림·새 탭)로 바로 연 업무 = #1165 목록 + 오른쪽 패널 → [패널 닫기] = 업무 목록(기본)
   await owner.goto(`${BASE}/tasks/${ids[0]}`);
-  await owner.getByTestId('task-page').waitFor();
-  await owner.getByTestId('task-page-close').click();
+  await panel.waitFor();
+  assert.equal(await owner.getByTestId('task-page').count(), 0, '#1165 가운데 전체 카드 없음');
+  await panel.getByRole('button', { name: '패널 닫기' }).click();
   await owner.waitForURL((u) => u.pathname === '/tasks');
   await owner.getByTestId('view-chips').waitFor();
   assert.equal(new URL(owner.url()).searchParams.get('view'), null, '바로 연 상세의 닫기는 기본 목록');

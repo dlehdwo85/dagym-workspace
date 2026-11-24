@@ -8,6 +8,7 @@ import { Button, ErrorBox, Field, Loading, Modal, inputCls, toast } from '@/comp
 import { MultiSiteOnly, UnitSelect, UserSelect } from '@/components/pickers';
 import { PRIORITY_LABEL } from '@/lib/types';
 import { describeRule } from '@/lib/recurrence';
+import { showTask } from '@/components/TaskPanelHost';
 
 export default function Templates() {
   const T = useTerms(); // 범용화 2단계: 회사별 용어(다짐은 지금 표현 그대로)
@@ -18,7 +19,7 @@ export default function Templates() {
   const [f, setF] = useState<any>({});
   async function apply(e: React.FormEvent) {
     e.preventDefault();
-    try { const r = await api(`/api/templates/${use.id}/apply`, { body: { ...f, dueDate: f.dueDate || undefined } }); toast.ok('템플릿으로 업무를 만들었습니다'); router.push(`/tasks/${r.id}`); } catch (er: any) { toast.error(er.message); }
+    try { const r = await api(`/api/templates/${use.id}/apply`, { body: { ...f, dueDate: f.dueDate || undefined } }); toast.ok('템플릿으로 업무를 만들었습니다'); showTask(r.id, (h) => router.push(h)); } catch (er: any) { toast.error(er.message); }
   }
   return (
     <div className="space-y-3">

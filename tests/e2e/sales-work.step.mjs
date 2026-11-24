@@ -67,7 +67,7 @@ export async function salesWorkFlow({ browser, desk, ctx, sql, BASE, SHOTS }) {
     // #507 공고 첨부: 공고에서 넘어온 업무 상세 — 자동 첨부가 없으면 [공고 파일 붙이기](공고에 파일이 없으면 안내) · 자동 첨부가 있으면 '공고 첨부(자동)' 표시·버튼 숨김
     const [tk] = await sql`select t.id from tasks t join sales_work_records w on t.id::text = w.data->>'bid_task_id' where w.ref_id = ${id2} and t.deleted_at is null`;
     await p.evaluate(() => { try { localStorage.removeItem('wos_td_fold'); } catch {} });
-    await p.goto(`${BASE}/tasks/${tk.id}`);
+    await p.goto(`${BASE}/tasks/${tk.id}?full=1`);
     const sf = p.getByTestId('task-source-files'); await sf.waitFor();
     assert.equal(await sf.innerText(), '공고 파일 붙이기');
     await sf.tap(); await p.getByText('공고에 첨부 파일이 없습니다').first().waitFor();

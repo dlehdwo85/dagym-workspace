@@ -9,7 +9,7 @@ export async function ceo211({ owner, ctx, sql, BASE, SHOTS }) {
   const t = await ctx.owner.ok('POST', '/api/tasks', { title: 'E2E 211 현장 사진 정리', orgUnitId: ctx.hq, assigneeId: ctx.ownerId, approvalRequired: false });
   const files = await Promise.all(Array.from({ length: 14 }, async (_, k) => ({ name: `E2E현장${String(k + 1).padStart(2, '0')}.png`, mimeType: 'image/png',
     buffer: await sharp({ create: { width: 96, height: 96, channels: 3, background: { r: (k * 37) % 255, g: (k * 71) % 255, b: (k * 113) % 255 } } }).png().toBuffer() })));
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('attachments').waitFor();
   await owner.getByTestId('album-input').setInputFiles(files);
   await owner.getByTestId('upload-summary').waitFor();
@@ -42,7 +42,7 @@ export async function ceo211({ owner, ctx, sql, BASE, SHOTS }) {
   await album.getByTestId('photo-album-close').click(); await album.waitFor({ state: 'detached' });
   // 활동 기록: 첨부 14개가 한 줄
   await owner.setViewportSize({ width: 1366, height: 900 });
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByRole('tab', { name: '변경 이력' }).click();
   const hf = owner.getByTestId('hist-files').first(); await hf.waitFor();
   assert.match(await hf.innerText(), /^14개 — .+ 외 11개$/);

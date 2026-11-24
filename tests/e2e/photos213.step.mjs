@@ -21,7 +21,7 @@ export async function photos213({ owner: pc, browser, devices, ctx, sql, BASE, S
   const diag0 = (await sql`select coalesce(max(id), 0)::int m from error_logs`)[0].m;
   const diagOf = async (ev, n = 1) => { for (let k = 0; k < 50; k++) { const r = await sql`select context from error_logs where id > ${diag0} and source = 'diag:pick' and context->>'event' = ${ev} order by id`; if (r.length >= n) return r.map((x) => x.context); await pc.waitForTimeout(200); } throw new Error(`진단 ${ev} 없음`); };
   // #805(대표 10/29 'PC 에서도 휴대폰 준비 중 띠가 뜸'): PC 는 고르기 창을 열어도 띠·아이폰 안내 없음(고르기 취소 기록은 그대로)
-  await pc.goto(`${BASE}/tasks/${t.id}`);
+  await pc.goto(`${BASE}/tasks/${t.id}?full=1`);
   await pc.getByTestId('attachments').waitFor();
   let chooser = pc.waitForEvent('filechooser');
   await pc.getByTestId('att-album').click();
@@ -37,7 +37,7 @@ export async function photos213({ owner: pc, browser, devices, ctx, sql, BASE, S
   const mob = await browser.newContext({ ...devices['Pixel 7'], locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   try {
   const owner = await login(mob, BASE, 'ceo@dagym.test', 'owner-pass-1234');
-  await owner.goto(`${BASE}/tasks/${t.id}`);
+  await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('attachments').waitFor();
   assert.equal(await owner.getByTestId('ios-pick-hint').count(), 0, '안드로이드는 아이폰 안내 없음');
   // 248차 #780(김민수 본부장 아이폰 50장): 사진 고르기 칸은 HEIC 를 글자 그대로 넣은 명시 목록(와일드카드면 아이폰이 [추가] 뒤 한 장씩 변환) · 영상은 따로
