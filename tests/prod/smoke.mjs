@@ -245,6 +245,54 @@ await step('공간 전환 숫자 = 사이드바 숫자 합(#1171·#1173 — 세 
   }
 });
 
+// #1181 로컬 11/26 요청: 검수 회사로만 볼 수 있는 것 — 바꾼 설정은 단계 끝에 되돌림
+const raw = (method, path, body) => fetch(BASE + path, { method, headers: { cookie, origin: BASE, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+await step('회사별 기능 켜기: 점검 [안 씀] → 사이드바·API 없음 → [사용] 되돌림(#1181)', async () => {
+  const r = await raw('GET', '/api/admin/features');
+  if (r.status === 403 || r.status === 404) { console.log('  (검수 계정이 대표·관리자가 아님 — 건너뜀)'); return; }
+  const before = (await r.json()).features?.find((x) => x.key === 'check')?.on;
+  ok(typeof before === 'boolean', '쓰는 기능 목록에 점검이 없음');
+  try {
+    await api('PUT', '/api/admin/features', { key: 'check', on: false });
+    await visit('/', 'home-todo'); await sleep(800);
+    ok(await page.locator('nav a[href="/check"]').count() === 0, '점검을 껐는데 사이드바에 점검이 보임');
+    ok((await raw('GET', '/api/check/categories')).status === 404, '점검을 껐는데 점검 API 가 열림');
+  } finally { await api('PUT', '/api/admin/features', { key: 'check', on: before }); }
+  await visit('/', 'home-todo'); await sleep(800);
+  if (before) ok(await page.locator('nav a[href="/check"]').count() > 0, '되돌린 뒤 사이드바에 점검이 없음');
+});
+await step('회사 초대 링크 화면 — 왼쪽 판 회사 계정 문구(#1176·#1181, 만든 링크는 바로 끔)', async () => {
+  const r = await raw('GET', '/api/admin/join');
+  if (r.status === 403 || r.status === 404) { console.log('  (검수 계정이 대표·관리자가 아님 — 건너뜀)'); return; }
+  const v = await r.json(); let made = false; let url = v.link?.live ? v.link.url : null;
+  if (!url) { url = (await api('POST', '/api/admin/join', { action: 'link', days: 7, maxUses: 10 })).url; made = true; }
+  try {
+    const u = new URL(url); await visit(`${u.pathname}${u.search}`, 'join-form');
+    const body = await page.evaluate(() => document.body.innerText);
+    ok(/회사 관리자가 초대한 계정/.test(body), "왼쪽 판에 '회사 관리자가 초대한 계정' 문구가 없음");
+    ok(!/14일 무료 체험으로 시작/.test(body), "합류 신청 화면에 '14일 무료 체험으로 시작'이 보임");
+  } finally { if (made) await api('POST', '/api/admin/join', { action: 'disable' }); }
+});
+await step('검수 회사 입찰 검색어 → 목록·즉시 검토·영업 포인트(#1181 — 공고 0건이면 건너뜀)', async () => {
+  const o = await raw('GET', '/api/sales/options');
+  if (o.status !== 200) { console.log(`  (영업 공간이 열려 있지 않음 ${o.status} — 건너뜀)`); return; }
+  const opt = await o.json(); const prefs = await api('GET', '/api/sales/digest/prefs').catch(() => null);
+  const keep = prefs?.prefs?.keywords ?? prefs?.keywords ?? [];
+  try {
+    if (!opt.bids) await api('PUT', '/api/sales/options', { bids: true });
+    await api('PUT', '/api/sales/digest/prefs', { keywords: [...new Set([...keep, '홈페이지', '유지보수'])] });
+    const items = (await api('GET', '/api/sales/src?view=bids&tab=all')).items ?? [];
+    if (!items.length) { console.log('  (검색어에 맞는 공고 0건 — 실제 공고 수 확인용이라 건너뜀)'); return; }
+    console.log(`  검색어 공고 ${items.length}건 · 즉시 검토 ${items.filter((x) => x.category === '즉시 검토').length}건`);
+    ok(items.every((x) => x.category === '즉시 검토' || x.category === '검토' || x.category == null), '판정 이름이 회사 낱말 판정이 아님');
+    ok(items.some((x) => typeof x.salesPoint === 'string' && /제목에|분류·업무 범위에/.test(x.salesPoint)), '영업 포인트(회사 낱말)가 없음');
+    ok(!JSON.stringify(items).includes('"다짐"'), '다른 회사 목록에 기본 회사 판정 글자');
+  } finally {
+    await api('PUT', '/api/sales/digest/prefs', { keywords: keep }).catch(() => {});
+    if (!opt.bids) await api('PUT', '/api/sales/options', { bids: false }).catch(() => {});
+  }
+});
+
 await step('화면 오류(자바스크립트) 없음', async () => ok(errors.length === 0, `${errors.length}건: ${errors.slice(0, 3).join(' | ')}`));
 await browser.close();
 report();
