@@ -58,7 +58,7 @@ export const SECTIONS: { key: Exclude<DigestSection, 'ref'>; title: string; sub:
   { key: 'result', title: '결과(낙찰·유찰)', sub: '영업 기회가 아닌 결과 — 새 공고 수에는 넣지 않음' }, // 로컬 10/24 12:20(#537 후속·#530)
 ];
 /** 414차: 다른 회사 메일의 구역 설명 — '관련 사업' 판정이 아니라 회사 검색어 기준 */
-const sectionsOf = (d: Digest) => (!d.plain ? SECTIONS : SECTIONS.map((s) => (s.key === 'review' ? { ...s, sub: '관심 검색어에 맞는 공고' } : s.key === 'change' ? { ...s, sub: '관심 검색어에 맞거나 진행 기록이 있는 공고만' } : s)));
+const sectionsOf = (d: Digest) => (!d.plain ? SECTIONS : SECTIONS.map((s) => (s.key === 'now' ? { ...s, sub: '제목에 관심 검색어가 든 공고(#1181 회사 낱말 판정)' } : s.key === 'review' ? { ...s, sub: '분류·업무 범위에 관심 검색어가 맞은 공고 — 확인 필요' } : s.key === 'change' ? { ...s, sub: '관심 검색어에 맞거나 진행 기록이 있는 공고만' } : s)));
 const of = (d: Digest, s: DigestSection) => d.items.filter((i) => i.section === s);
 /** 로컬 10/23 22:45: 마감 임박은 10건까지 보이고 나머지는 '나머지 n건 — [보기]'(입찰 화면 진행 중·마감 임박순) */
 const SOON_MAX = 10;

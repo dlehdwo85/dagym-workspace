@@ -14,7 +14,7 @@ import { sourceAsOf } from './collectors/store';
 import { briefingLine, briefingOf, termsLine, termsRows } from './bidTerms';
 import { eligView } from './eligibilityText';
 import { sidoIn } from './region';
-import { judgeWords, likePatterns, ownsJudge, plainNotice } from './tenantJudge';
+import { judgeSet, judgeWords, likePatterns, ownsJudge, plainNotice, tenantJudgeRow } from './tenantJudge';
 
 /**
  * V41 단계 2 영업 공간 화면(V39 B) — 옮긴 영업관리 원본(sales_src_rows)을 읽어 보여 줌. **전환일까지 읽기 전용**:
@@ -67,7 +67,10 @@ async function tenantNoticeRows(tenant: string, ids: Iterable<string> = [], opt:
       or src_id = any(${list}::text[]) or row->>'id' = any(${list}::text[]))
     and (coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${since} or coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) !~ '^[0-9]{4}-')
     order by coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) desc, ctid desc limit 20000`;
-  return rows.reverse().map((r) => { const n = plainNotice({ ...r.row, __id: r.src_id }); const f = passPrefs(n, p, false); return { ...n, related: f.ok, matched_keywords: f.words ?? [] }; });
+  // #1181 상업화 마감 2: 회사 낱말 가중치로 점수·분류(즉시 검토/검토)·영업 포인트 — 다짐 판정 대신(다짐은 이 함수를 안 씀)
+  const set = await judgeSet(tenant);
+  return rows.reverse().map((r) => { const n = plainNotice({ ...r.row, __id: r.src_id }); const f = passPrefs(n, p, false); const j = tenantJudgeRow(n, set);
+    return { ...n, related: f.ok, matched_keywords: f.words ?? [], ...(j ? { classification: j.classification, fit_score: j.score, sales_point: j.salesPoint } : {}) }; });
 }
 /** 전환 뒤(쓰기 열림): 리드는 정식 표(sales_leads)가 정본 — 원본 행 칸 이름으로 맞춰 돌려줌(화면 코드 그대로) */
 /** date 칸: 운영 DB 연결은 date 를 'YYYY-MM-DD' 문자열로, 시험 DB 는 Date 로 줄 수 있음 — 둘 다(핫픽스 10/19: 문자열을 format 해 500) */

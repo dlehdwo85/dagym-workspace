@@ -286,6 +286,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
   const prof = (await (await import('./support')).profileOf(tenant).catch(() => null))?.profile;
   const hq = prof?.region_sido ? { sido: prof.region_sido, sigungu: prof.region_sigungu ?? null } : null;
   const items: DigestItem[] = [];
+  const TJ = base ? null : await import('./tenantJudge'); const jset = TJ ? await TJ.judgeSet(tenant) : null; // #1181 상업화 마감 2: 다른 회사 = 회사 낱말 판정(즉시 검토/검토)
   for (const c of [...today, ...soon]) {
     const r = c.r; const st = String(r.source_type ?? ''); const isChange = c.kind === 'amend' || c.kind === 'cancel'; const partner = c.kind === 'result' ? null : partnerNeed(r);
     let section: DigestSection;
@@ -294,7 +295,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     else if (c.kind === 'result') section = 'result';
     else if (isChange) section = mine || linked.has(c.id) ? 'change' : 'ref'; // 정정·취소는 관련 사업이거나 진행 기록이 걸린 것만 — 나머지는 '참고'
     else if (!mine && st !== 'vendor_recruit') section = 'ref'; // 검색어만 일치
-    else section = (cls.get(c.id) ?? (!base ? '검토' : partner ? '검토' : r.classification ?? initialClassification({ ...r, fit_business: c.fit }))) === '즉시 검토' ? 'now' : 'review'; // #752 면허 업체 협력 필요는 검토(회사가 바꾼 분류는 그대로) · 다른 회사는 회사가 '즉시 검토'로 바꾼 것만 ★
+    else section = (cls.get(c.id) ?? (!base ? (TJ && jset ? TJ.tenantJudgeRow(r, jset)?.classification ?? '검토' : '검토') : partner ? '검토' : r.classification ?? initialClassification({ ...r, fit_business: c.fit }))) === '즉시 검토' ? 'now' : 'review'; // #752 면허 업체 협력 필요는 검토(회사가 바꾼 분류는 그대로) · 다른 회사는 회사가 '즉시 검토'로 바꾼 것만 ★
     const dl = when(r.deadline_at); const dd = dl ? Math.round((Date.parse(dl.d) - Date.parse(day)) / 864e5) : null; const dday = c.kind === 'cancel' || (dd != null && dd < 0) ? null : dd; // 결과 줄은 마감이 지났음 — D-day 없음 · 로컬 10/25 10:55 취소 공고는 'D-n · 준비 시작' 없이 마감일만
     const state = String(r.notice_state ?? '');
     const method = `${r.contract_method ?? ''} ${r.award_method ?? ''}`; const briefing = fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at));

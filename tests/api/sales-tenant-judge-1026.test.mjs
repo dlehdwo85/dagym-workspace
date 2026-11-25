@@ -26,7 +26,8 @@ async function join(email, company, industry) {
 }
 const tick = async () => { const r = await fetch(`${BASE}/api/cron/tick?reason=test`, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } }); assert.equal(r.status, 200); return r.json(); };
 const bids = async (c, tab = 'all') => (await c.ok('GET', `/api/sales/src?view=bids&tab=${tab}`));
-const LEAK = /"다짐"|"하이링크"|즉시 검토|중장기 영업리드|면허 업체 협력|영업 포인트 메모|부족 자격 메모/;
+// #1181 상업화 마감 2: '즉시 검토'는 이제 그 회사 낱말 판정의 이름이라 빠짐(다짐 판정 글자·영업 메모는 여전히 없어야)
+const LEAK = /"다짐"|"하이링크"|중장기 영업리드|면허 업체 협력|영업 포인트 메모|부족 자격 메모|헬스장|출입통제/;
 
 before(async () => {
   await resetDb(); srv = await startServer({ PUBLIC_SIGNUP: '1', MAIL_DEV: '1', SALES_RESEARCH_WEEKLY: 'any', SALES_RESEARCH_MAX: '3' }); sql = testDb(); ctx = await bootstrap();
@@ -86,7 +87,8 @@ describe('414차 영업 일반화 — 다른 회사 경로', () => {
     assert.deepEqual(b1.items.map((x) => x.title).sort(), ['시험시 식자재 보관 창고 임대', '시험시 학교 급식 식자재 납품 업체 선정']);
     assert.ok(!b1.needKeywords);
     const n2 = b1.items.find((x) => /납품/.test(x.title));
-    assert.deepEqual([n2.related, n2.category, n2.fitBusiness, n2.partner, n2.keywords], [true, null, null, null, '식 자재']);
+    // #1181 상업화 마감 2: 다른 회사도 회사 낱말 판정 — 제목에 검색어 = 즉시 검토 · 점수 60 · 영업 포인트(다짐 적합 사업·협력사 칸은 그대로 비어 있음)
+    assert.deepEqual([n2.related, n2.category, n2.fitBusiness, n2.partner, n2.keywords, n2.fit, n2.salesPoint], [true, '즉시 검토', null, null, '식 자재', 60, "제목에 '식 자재'"]);
     // 관심 사업 낱말도 검색어 — 사업 배지가 붙는다
     await cafe.c.ok('PUT', '/api/sales/business-categories', { items: [{ name: '카페 운영', keywords: ['카페'], color: '#2563EB' }] });
     const b2 = await bids(cafe.c);
@@ -107,15 +109,15 @@ describe('414차 영업 일반화 — 다른 회사 경로', () => {
     assert.ok(w, '진행 기록 있는 공고'); assert.deepEqual([w.related, w.category, w.fitBusiness, w.keywords, w.salesPoint ?? null], [false, null, null, null, null]);
   });
 
-  test('C·D·F 아침 메일: 다른 회사는 검색어에 맞은 공고만(검토 구역)·협력사 모집 없음·구역 설명이 검색어 기준 · 검색어 없는 회사는 정시 발송 안 함', async () => {
+  test('C·D·F 아침 메일: 다른 회사는 검색어에 맞은 공고만(제목에 검색어 = 즉시 검토 구역, #1181)·협력사 모집 없음·구역 설명이 검색어 기준 · 검색어 없는 회사는 정시 발송 안 함', async () => {
     const d = await cafe.c.ok('GET', '/api/sales/digest');
     assert.equal(d.plain, true);
-    assert.deepEqual(d.items.map((x) => [x.title, x.section, x.fit, x.why]).sort(), [['시험구청 청사 카페 운영자 모집 공고', 'review', null, '검색어 카페'], ['시험시 학교 급식 식자재 납품 업체 선정', 'review', null, '검색어 식 자재']]);
+    assert.deepEqual(d.items.map((x) => [x.title, x.section, x.fit, x.why]).sort(), [['시험구청 청사 카페 운영자 모집 공고', 'now', null, '검색어 카페'], ['시험시 학교 급식 식자재 납품 업체 선정', 'now', null, '검색어 식 자재']]);
     assert.deepEqual(d.items.find((x) => /카페/.test(x.title)).biz.map((b) => b.name), ['카페 운영']);
-    assert.deepEqual([d.counts.total, d.counts.now, d.counts.review, d.counts.ref], [2, 0, 2, 0]);
+    assert.deepEqual([d.counts.total, d.counts.now, d.counts.review, d.counts.ref], [2, 2, 0, 0], '#1181 마감 2: 제목에 검색어가 있으면 즉시 검토 구역');
     assert.ok(!LEAK.test(JSON.stringify(d)), JSON.stringify(d).match(LEAK)?.[0]);
     const html = await (await cafe.c.req('GET', '/api/sales/digest?preview=html')).body;
-    assert.ok(/관심 검색어에 맞는 공고/.test(html) && !/관련 사업이지만|다짐|하이링크|협력사 모집/.test(html), '메일 본문');
+    assert.ok(/제목에 관심 검색어가 든 공고/.test(html) && !/관련 사업이지만|다짐|하이링크|협력사 모집/.test(html), '메일 본문');
     // 정시 발송(tick): 검색어를 넣고 입찰을 켠 회사(카페)는 보냄 · 검색어 없는 회사(건설)는 안 보냄 · 기본 회사는 보냄
     await sql`insert into sales_bid_prefs (tenant, digest_hour) values ('default', 0) on conflict (tenant) do update set digest_hour = 0`;
     await sql`update sales_bid_prefs set digest_hour = 0 where tenant = ${cafe.tenant}`;

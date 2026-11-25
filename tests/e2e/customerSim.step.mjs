@@ -156,7 +156,8 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     await p.reload(); await p.getByText('E2E414 사무용품 납품 업체 선정').first().waitFor();
     assert.equal(await p.getByTestId('bids-need-keywords').count(), 0);
     const bidsText = await body();
-    assert.ok(!/E2E414 아파트 헬스장|즉시 검토|적합 다짐/.test(bidsText), `다른 회사 입찰 목록에 기본 회사 판정: ${bidsText.match(/E2E414 아파트 헬스장|즉시 검토|적합 다짐/)?.[0]}`);
+    // #1181 상업화 마감 2: '즉시 검토'는 이제 이 회사 낱말 판정(제목에 '사무용품')의 이름 — 기본 회사 판정 공고·적합 사업 글자는 여전히 없어야
+    assert.ok(!/E2E414 아파트 헬스장|적합 다짐|헬스장/.test(bidsText), `다른 회사 입찰 목록에 기본 회사 판정: ${bidsText.match(/E2E414 아파트 헬스장|적합 다짐|헬스장/)?.[0]}`);
     await shot('414-cust-bids-keywords.png');
     await sql`delete from sales_src_rows where src_id = any(${[jid, jid2]})`;
     // ── 6) 마케팅 첫 화면: 연결 계정 0개 → '채널 연결 3단계'
