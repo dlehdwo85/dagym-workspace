@@ -1,0 +1,205 @@
+{
+ "steps": [
+  {
+   "area": "A 가입·승인·첫 화면",
+   "name": "공개 가입(승인제) → 신청 메일 → 승인 대기 화면",
+   "ok": true,
+   "note": "메일 1통",
+   "ms": 8134
+  },
+  {
+   "area": "A 가입·승인·첫 화면",
+   "name": "운영자 승인 → 환영 메일 → 온보딩 → 첫 화면(빈 회사)",
+   "ok": true,
+   "note": "회사 t_er8n4ko68ppl",
+   "ms": 8149
+  },
+  {
+   "area": "A 가입·승인·첫 화면",
+   "name": "빈 상태 화면(자료 0건) 둘러보기",
+   "ok": true,
+   "note": "",
+   "ms": 20882
+  }
+ ],
+ "findings": [
+  {
+   "area": "A 가입·승인·첫 화면",
+   "where": "가입 1단계",
+   "kind": "화면",
+   "cat": "internal",
+   "word": "Anthropic",
+   "ctx": "동의 — 답을 만들 때 필요한 내용만 AI 회사(Anthropic·OpenAI)에 보내 처리 자세히 [선택]새 기능"
+  },
+  {
+   "area": "A 가입·승인·첫 화면",
+   "where": "가입 1단계",
+   "kind": "화면",
+   "cat": "internal",
+   "word": "OpenAI",
+   "ctx": "들 때 필요한 내용만 AI 회사(Anthropic·OpenAI)에 보내 처리 자세히 [선택]새 기능·혜택 소식"
+  },
+  {
+   "area": "A 가입·승인·첫 화면",
+   "where": "설정 (/settings)",
+   "kind": "화면",
+   "cat": "internal",
+   "word": "Anthropic",
+   "ctx": "I에게 쓴 글·붙인 파일·답에 필요한 업무 내용이 Anthropic(미국)·OpenAI(미국)로 전송됩니다. 필수"
+  },
+  {
+   "area": "A 가입·승인·첫 화면",
+   "where": "설정 (/settings)",
+   "kind": "화면",
+   "cat": "internal",
+   "word": "OpenAI",
+   "ctx": "답에 필요한 업무 내용이 Anthropic(미국)·OpenAI(미국)로 전송됩니다. 필수 동의 — 워크인의 핵"
+  }
+ ],
+ "shots": [
+  {
+   "no": 1,
+   "area": "A 가입·승인·첫 화면",
+   "name": "가입 1단계",
+   "path": "/signup",
+   "file": "01-가입-1단계.jpg",
+   "errors": []
+  },
+  {
+   "no": 2,
+   "area": "A 가입·승인·첫 화면",
+   "name": "가입 2단계 회사 정보",
+   "path": "/signup",
+   "file": "02-가입-2단계-회사-정보.jpg",
+   "errors": []
+  },
+  {
+   "no": 3,
+   "area": "A 가입·승인·첫 화면",
+   "name": "가입 신청 끝",
+   "path": "/signup",
+   "file": "03-가입-신청-끝.jpg",
+   "errors": []
+  },
+  {
+   "no": 4,
+   "area": "A 가입·승인·첫 화면",
+   "name": "승인 대기 화면",
+   "path": "/",
+   "file": "04-승인-대기-화면.jpg",
+   "errors": []
+  },
+  {
+   "no": 5,
+   "area": "A 가입·승인·첫 화면",
+   "name": "온보딩 1 연락 채널",
+   "path": "/",
+   "file": "05-온보딩-1-연락-채널.jpg",
+   "errors": []
+  },
+  {
+   "no": 6,
+   "area": "A 가입·승인·첫 화면",
+   "name": "온보딩 2 동료 초대",
+   "path": "/",
+   "file": "06-온보딩-2-동료-초대.jpg",
+   "errors": []
+  },
+  {
+   "no": 7,
+   "area": "A 가입·승인·첫 화면",
+   "name": "온보딩 3 알림",
+   "path": "/",
+   "file": "07-온보딩-3-알림.jpg",
+   "errors": []
+  },
+  {
+   "no": 8,
+   "area": "A 가입·승인·첫 화면",
+   "name": "첫 화면 홈(빈 회사)",
+   "path": "/",
+   "file": "08-첫-화면-홈-빈-회사.jpg",
+   "errors": []
+  },
+  {
+   "no": 9,
+   "area": "A 가입·승인·첫 화면",
+   "name": "업무 목록 빈 상태",
+   "path": "/tasks",
+   "file": "09-업무-목록-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 10,
+   "area": "A 가입·승인·첫 화면",
+   "name": "캘린더 빈 상태",
+   "path": "/calendar",
+   "file": "10-캘린더-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 11,
+   "area": "A 가입·승인·첫 화면",
+   "name": "자료실 빈 상태",
+   "path": "/library",
+   "file": "11-자료실-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 12,
+   "area": "A 가입·승인·첫 화면",
+   "name": "메신저 빈 상태",
+   "path": "/messages",
+   "file": "12-메신저-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 13,
+   "area": "A 가입·승인·첫 화면",
+   "name": "결재 빈 상태",
+   "path": "/approvals",
+   "file": "13-결재-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 14,
+   "area": "A 가입·승인·첫 화면",
+   "name": "보고 빈 상태",
+   "path": "/reports",
+   "file": "14-보고-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 15,
+   "area": "A 가입·승인·첫 화면",
+   "name": "프로젝트 빈 상태",
+   "path": "/projects",
+   "file": "15-프로젝트-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 16,
+   "area": "A 가입·승인·첫 화면",
+   "name": "알림 빈 상태",
+   "path": "/notifications",
+   "file": "16-알림-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 17,
+   "area": "A 가입·승인·첫 화면",
+   "name": "연락처 빈 상태",
+   "path": "/contacts",
+   "file": "17-연락처-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 18,
+   "area": "A 가입·승인·첫 화면",
+   "name": "설정",
+   "path": "/settings",
+   "file": "18-설정.jpg",
+   "errors": []
+  }
+ ]
+}
