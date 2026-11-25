@@ -70,19 +70,33 @@ export async function bid246({ owner, ctx, sql, BASE, SHOTS }) {
     assert.equal(await g.getByText('E2E246 앞으로 단지').count(), 0, '사유 칩으로 거름');
     await owner.screenshot({ path: `${SHOTS}/593-bids-skip-groups.png` });
 
-    // #774 공간 배지 — 오늘 새 공고(당일 공고 메일과 같은 수)
+    // #774 → #1171(대표 11/26): 공간 전환 숫자 = 영업 사이드바 숫자의 합 · 허브 숫자 = 안 본 오늘 공고(아침 공고 알림 묶음의 공고 수) · 데이터 설정은 점
     await sql`insert into sales_digests (tenant, day, counts) values ('default', ${today}, ${sql.json({ total: 7 })}) on conflict (tenant, day) do update set counts = sales_digests.counts || ${sql.json({ total: 7 })}`;
+    await sql`delete from notifications where user_id = ${ctx.ownerId} and dedupe_key like 'salesdigest:%'`;
+    await sql`insert into notifications (user_id, type, title, link, dedupe_key, space) values (${ctx.ownerId}, 'briefing', '오늘 새 공고 7건', '/s/sales/hub?tab=bids&bt=today', ${'salesdigest:default:' + today}, 'sales')`;
+    await owner.goto(`${BASE}/s/sales`);
+    const nav = owner.locator('nav[aria-label="주 메뉴"]');
+    const hubLink = nav.locator('a[href="/s/sales/hub"]');
+    await hubLink.locator('[data-nav-badge]').waitFor();
+    assert.equal(await hubLink.locator('[data-nav-badge]').innerText(), '7', '허브 = 안 본 오늘 공고 7');
+    assert.match(await hubLink.getAttribute('title') ?? '', /안 본 오늘 공고 7건/, '마우스를 올리면 무엇을 세는지');
+    const menuSum = async () => { let sum = 0; for (const b of await nav.locator('a[href^="/s/sales/"] [data-nav-badge]').all()) sum += Number(await b.innerText()); return sum; };
+    const sum = await menuSum();
+    const line = owner.getByTestId('space-badge-line'); await line.waitFor();
+    assert.match(await line.innerText(), new RegExp(`공간 전환 칸의 영업 숫자 ${sum} =[\\s\\S]*영업 기회 허브 7`));
     await owner.goto(`${BASE}/`);
     const badge = owner.getByTestId('space-tab-sales').getByTestId('space-badge-sales'); await badge.waitFor();
-    assert.equal(await badge.innerText(), '7');
-    assert.equal(await badge.getAttribute('title'), '오늘 새 공고 7건');
+    assert.equal(Number(await badge.innerText()), sum, '공간 전환 숫자 = 영업 사이드바 숫자 합');
+    assert.equal(await badge.getAttribute('title'), `영업 메뉴 숫자 합 ${sum}건`);
     const st = await badge.evaluate((el) => { const c = getComputedStyle(el); return [c.borderTopLeftRadius, c.backgroundColor]; });
     assert.deepEqual(st, ['5px', 'rgb(37, 99, 235)'], '알림(빨간 동그라미)과 다른 모양 — 영업 색 네모');
     await owner.goto(`${BASE}/s/sales`);
-    const line = owner.getByTestId('space-badge-line'); await line.waitFor();
-    assert.match(await line.innerText(), /오늘 새 공고 7건 — 공간 전환 칸의 영업 숫자는 이 숫자입니다/);
-    assert.equal(await line.getAttribute('href'), '/s/sales/hub?tab=bids&bt=today');
+    await line.waitFor();
     await owner.screenshot({ path: `${SHOTS}/594-space-badge-line.png`, clip: { x: 0, y: 0, width: 1366, height: 260 } });
+    // '오늘 새 공고'를 열면 안 본 숫자 0(아침 공고 알림 읽음)
+    await owner.goto(`${BASE}/s/sales/hub?tab=bids&bt=today`);
+    await owner.waitForFunction(() => !document.querySelector('nav[aria-label="주 메뉴"] a[href="/s/sales/hub"] [data-nav-badge]'), null, { timeout: 15000 });
+    assert.equal((await sql`select count(*)::int n from notifications where user_id = ${ctx.ownerId} and dedupe_key like 'salesdigest:%' and read_at is null`)[0].n, 0);
   } finally {
     if (dg0) await sql`update sales_digests set counts = ${sql.json(dg0.counts)} where tenant = 'default' and day = ${today}`; else await sql`delete from sales_digests where tenant = 'default' and day = ${today}`;
     if (ev) await sql`update events set deleted_at = now() where id = ${ev}`;

@@ -22,3 +22,32 @@ export const AREA_LABEL: Record<string, string> = {
 export const areaLabel = (a: string) => AREA_LABEL[a] ?? '이 화면';
 /** 주소 검사(알림 화면 ?area=) — 영문·숫자·/·-·_ 만 */
 export const AREA_OK = /^\/[A-Za-z0-9/_-]{1,80}$/;
+
+/** #1171 공간 전환 숫자 = 그 공간 사이드바 숫자들의 합(서버 navCounts.ts·화면 AppShell 이 같은 기준 — 이 파일은 화면에서도 씀) */
+export type SpaceKey = 'work' | 'sales' | 'marketing';
+/** 설정 경고·정보성 알림 화면 — 숫자 대신 빨간 점, 공간 숫자에 넣지 않음(#1171 영업 데이터 설정 · #1173 마케팅 연결 계정(잔액·토큰) · 광고 집행·광고 성과(성과 보고·상한·자동 정지 알림)) */
+export const DOT_AREAS = new Set(['/s/sales/sources', '/s/marketing/connections', '/s/marketing/ad-ops', '/s/marketing/ads']);
+export const HUB_AREA = '/s/sales/hub';
+/** 공간별 사이드바 메뉴 화면(홈·공통 메뉴 제외 — 공통(캘린더·알림·메시지·자료실 등)은 어느 공간에서나 보여 공간 숫자에 넣지 않음) */
+export const MENU_AREAS: Record<SpaceKey, string[]> = {
+  work: ['/tasks', '/projects', '/reports', '/approvals', '/revenue'],
+  sales: ['/s/sales/hub', '/s/sales/leads', '/s/sales/deals', '/s/sales/support', '/s/sales/sources'],
+  marketing: ['/s/marketing/goals', '/s/marketing/ops', '/s/marketing/team', '/s/marketing/approvals', '/s/marketing/automation', '/s/marketing/materials', '/s/marketing/calendar',
+    '/s/marketing/connections', '/s/marketing/ads', '/s/marketing/ad-ops', '/s/marketing/sites', '/s/marketing/calls', '/s/marketing/history'],
+};
+/** 메뉴가 없는 하위 화면 → 그 화면을 여는 메뉴(허브 안 입찰·계약만료·시설·지역 탭 등) */
+export const AREA_ALIAS: Record<string, string> = {
+  '/branch-reports': '/reports', '/s/sales/bids': HUB_AREA, '/s/sales/contracts': HUB_AREA, '/s/sales/prospects': HUB_AREA, '/s/sales/regions': HUB_AREA,
+  '/s/sales/pipeline': '/s/sales/leads', '/s/marketing/report': '/s/marketing/ads',
+};
+export const menuArea = (a: string | null) => (a ? AREA_ALIAS[a] ?? a : null);
+export function spaceOfArea(a: string): SpaceKey | null {
+  for (const sp of ['work', 'sales', 'marketing'] as SpaceKey[]) if (MENU_AREAS[sp].includes(a)) return sp;
+  return null;
+}
+/** 공간별 합계(점 화면 제외) — counts 는 menuArea 로 접은 메뉴 숫자 */
+export function spaceSums(counts: Record<string, number>): Record<SpaceKey, number> {
+  const s: Record<SpaceKey, number> = { work: 0, sales: 0, marketing: 0 };
+  for (const [a, n] of Object.entries(counts)) { const sp = spaceOfArea(a); if (sp && !DOT_AREAS.has(a) && n > 0) s[sp] += n; }
+  return s;
+}

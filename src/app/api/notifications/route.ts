@@ -30,8 +30,9 @@ export const GET = handler(async ({ req, user }) => {
   // #114 ⑦ 휴대폰 상단 '결재할 것 n건' — 같은 폴링에 실어 보낸다(별도 폴링 없음)
   const approvalsTodo = unreadOnly ? await (await import('@/lib/approvalForms')).todoCount(sql, user).catch(() => 0) : undefined;
   // 394차: 화면별 안 읽은 알림 수(메뉴·하단 탭 숫자, 화면 위 알림 줄) — 같은 폴링에 실어 보냄(메신저는 메시지 화면 배지로 따로)
-  const areas = unreadOnly ? Object.fromEntries((await sql<{ a: string; n: number }[]>`select regexp_replace(split_part(split_part(link, '?', 1), '#', 1), ${AREA_SQL_RE}, '\\1') as a, count(*)::int as n
-      from notifications where user_id = ${user.id} and read_at is null and type <> 'chat' and link like '/%' group by 1`).map((r) => [r.a, r.n])) : undefined;
+  // #1171: 메뉴 숫자(counts)·설정 경고 점(dots)·공간 전환 숫자(sums = 그 공간 메뉴 숫자의 합)를 같은 곳에서 셈(navCounts.ts)
+  const nav = unreadOnly ? await (await import('@/lib/navCounts')).navCounts(sql, user, { approvalsTodo }) : undefined;
+  const areas = nav?.areas;
   // #618: 푸시는 모든 알림에 [확인]이 붙지만, 웹 목록은 줄마다 [읽음]·[보관]이 있으므로 [확인]만 있는 줄은 버튼 없이(webActions)
-  return { items: items.map((n) => ({ ...n, actions: webActions(actionsFor(n as NotifRow), !(n as { read_at?: string | null }).read_at) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}), ...(areas ? { areas } : {}), ...(area ? { area } : {}) };
+  return { items: items.map((n) => ({ ...n, actions: webActions(actionsFor(n as NotifRow), !(n as { read_at?: string | null }).read_at) })), unread: c.c, ...(alarms ? { alarms } : {}), ...(approvalsTodo !== undefined ? { approvalsTodo } : {}), ...(areas ? { areas } : {}), ...(nav ? { counts: nav.counts, dots: nav.dots, sums: nav.sums, hubUnseen: nav.hubUnseen, why: nav.why } : {}), ...(area ? { area } : {}) };
 });

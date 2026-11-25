@@ -211,6 +211,40 @@ await step('결제 수단 칸·정기결제 표시(#1158·#1159 — 보기만)',
   }
 });
 
+// #1171·#1173(대표 11/26 "영업 알림 14인데 메뉴는 7" · "마케팅 숫자 근거를 모르겠다"): 공간 전환 숫자 = 그 공간 사이드바 '할 일' 숫자의 합(설정 경고는 점 — 합 밖) — 세 공간 모두
+await step('공간 전환 숫자 = 사이드바 숫자 합(#1171·#1173 — 세 공간)', async () => {
+  const MENU = {
+    work: ['/tasks', '/projects', '/reports', '/approvals', '/revenue'],
+    sales: ['/s/sales/hub', '/s/sales/leads', '/s/sales/deals', '/s/sales/support', '/s/sales/sources'],
+    marketing: ['/s/marketing/goals', '/s/marketing/ops', '/s/marketing/team', '/s/marketing/approvals', '/s/marketing/automation', '/s/marketing/materials', '/s/marketing/calendar',
+      '/s/marketing/connections', '/s/marketing/ads', '/s/marketing/ad-ops', '/s/marketing/sites', '/s/marketing/calls', '/s/marketing/history'],
+  };
+  const n = await api('GET', '/api/notifications?unread=1');
+  ok(n.counts && n.sums && n.dots, '메뉴 숫자(counts·sums·dots)가 없음 — #1171 이전 판');
+  for (const k of Object.keys(MENU)) {
+    const sum = MENU[k].filter((a) => !n.dots.includes(a)).reduce((a, x) => a + (n.counts[x] ?? 0), 0);
+    ok(n.sums[k] === sum, `${k} 공간 숫자 ${n.sums[k]} ≠ 메뉴 숫자 합 ${sum}`);
+  }
+  const sp = await api('GET', '/api/spaces');
+  for (const k of sp.spaces) ok(sp.summary[k].badge === n.sums[k], `공간 전환 칸(${k}) ${sp.summary[k].badge} ≠ 메뉴 합 ${n.sums[k]}`);
+  // 화면: 영업·마케팅 공간 사이드바 숫자 합 = 업무 공간에서 본 그 공간 전환 칸 숫자(공간이 하나뿐이면 화면 대조는 건너뜀)
+  const others = sp.spaces.filter((k) => k !== 'work');
+  if (!others.length) { console.log('  (검수 회사는 업무 공간만 — 화면 대조는 건너뜀, API 대조만)'); return; }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const k of others) {
+    await visit(`/s/${k}`, null);
+    await page.locator('nav[aria-label="주 메뉴"]').waitFor({ timeout: 20_000 });
+    await sleep(1500);
+    const nums = await page.locator(`nav[aria-label="주 메뉴"] a[href^="/s/${k}/"] [data-nav-badge]`).allInnerTexts();
+    if (nums.some((t) => t.includes('+'))) { console.log(`  (${k}: 99+ 메뉴가 있어 화면 대조 건너뜀)`); continue; }
+    const side = nums.reduce((a, t) => a + Number(t), 0);
+    await visit('/', 'home-todo'); await sleep(1500);
+    const b = page.getByTestId(`space-tab-${k}`).getByTestId(`space-badge-${k}`);
+    const shown = (await b.count()) ? Number(await b.innerText()) : 0;
+    ok(shown === side, `${k}: 공간 전환 칸 ${shown} ≠ 사이드바 숫자 합 ${side}`);
+  }
+});
+
 await step('화면 오류(자바스크립트) 없음', async () => ok(errors.length === 0, `${errors.length}건: ${errors.slice(0, 3).join(' | ')}`));
 await browser.close();
 report();

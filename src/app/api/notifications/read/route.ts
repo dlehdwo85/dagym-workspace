@@ -5,11 +5,13 @@ import { AREA_OK, AREA_SQL_RE } from '@/lib/notifAreas';
 
 /** 읽음: ids · 전부 · link(V32 0: 그 화면을 열면 그 화면으로 가는 알림 자동 읽음) · archive(#110: ids 를 읽음+보관 — 목록에서 빠지고 보관함 탭에만). 읽음으로 바뀐 개수와 남은 안 읽음 수를 돌려준다 */
 export const POST = handler(async ({ req, user }) => {
-  const i = await body(req, z.object({ ids: z.array(zUuid).max(500).optional(), all: z.boolean().optional(), link: z.string().startsWith('/').max(300).optional(), archive: z.boolean().optional(), unarchive: z.boolean().optional(), area: z.string().regex(AREA_OK).optional() }));
+  const i = await body(req, z.object({ ids: z.array(zUuid).max(500).optional(), all: z.boolean().optional(), link: z.string().startsWith('/').max(300).optional(), archive: z.boolean().optional(), unarchive: z.boolean().optional(), area: z.string().regex(AREA_OK).optional(), salesDigest: z.boolean().optional() }));
   const sql = db();
   let r: { id: string }[] = [];
   // 394차: 화면 위 알림 줄·알림 화면의 [이 화면 알림 모두 읽음] — 그 화면으로 가는 알림만
-  if (i.area) r = await sql`update notifications set read_at = now() where user_id = ${user.id} and read_at is null and type <> 'chat'
+  // #1171: 영업 기회 허브 '오늘 새 공고'를 열면 오늘 공고 알림(안 본 오늘 공고 숫자)만 읽음 — 허브의 다른 알림은 그대로
+  if (i.salesDigest) r = await sql`update notifications set read_at = now() where user_id = ${user.id} and read_at is null and dedupe_key like 'salesdigest:%' returning id`;
+  else if (i.area) r = await sql`update notifications set read_at = now() where user_id = ${user.id} and read_at is null and type <> 'chat'
       and regexp_replace(split_part(split_part(link, '?', 1), '#', 1), ${AREA_SQL_RE}, '\\1') = ${i.area} returning id`;
   else if (i.all) r = await sql`update notifications set read_at = now() where user_id = ${user.id} and read_at is null returning id`;
   else if (i.ids?.length && i.archive) r = await sql`update notifications set read_at = coalesce(read_at, now()), archived_at = coalesce(archived_at, now()) where user_id = ${user.id} and id = any(${i.ids}::uuid[]) and archived_at is null returning id`;

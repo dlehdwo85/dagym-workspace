@@ -338,7 +338,7 @@ export function SalesHome() {
         <span className="shrink-0 text-xs font-medium text-[#1D4ED8]">지원사업 보기</span>
       </Link>}
       {data.today && <TodayRow date={data.today.date} cards={[
-        ...(bids ? [['오늘 새 공고', data.today.newNotices, '/s/sales/hub?tab=bids&sub=today'] as [string, number, string]] : []), // #537 영업기회 › 입찰 › 오늘 새 공고
+        ...(bids ? [['오늘 새 공고(전체)', data.today.newNotices, '/s/sales/hub?tab=bids&sub=today'] as [string, number, string]] : []), // #537 영업기회 › 입찰 › 오늘 새 공고 · #1171: 오늘 새로 올라온 관련 공고 전체(허브 '오늘 새 공고' 칩과 같은 수) — 공간 전환·허브 숫자는 '안 본 오늘 공고'(아침 공고 알림 묶음)
         ...(movedOn('buildings') || facOn || movedOn('vendors') ? [['오늘 새 영업 DB', data.today.newDb.buildings + (facOn ? data.today.newDb.facilities : 0) + data.today.newDb.vendors, `/s/sales/hub?day=today&tab=${data.today.newDb.facilities >= data.today.newDb.buildings && data.today.newDb.facilities >= data.today.newDb.vendors ? 'facilities' : data.today.newDb.vendors > data.today.newDb.buildings ? 'vendors' : 'buildings'}`,
           [movedOn('buildings') && `${T.kind.building} ${data.today.newDb.buildings}`, facOn && `${T.kind.facility} ${data.today.newDb.facilities}`, movedOn('vendors') && `${T.kind.vendor} ${data.today.newDb.vendors}`].filter(Boolean).join(' · ')] as [string, number, string, string]] : []),
         ['오늘 연락할 리드', data.today.contact, '/s/sales/leads?day=today'],
@@ -1168,6 +1168,9 @@ export function Bids({ initialTab, initialId, embedded }: { initialTab?: string;
   const [tabRaw, setTab] = useUrlState(embedded ? 'bt' : 'tab', embedded ? (initialTab ?? 'open') : 'open'); const dayTab = /^\d{4}-\d{2}-\d{2}$/.test(tabRaw) ? tabRaw : null; const tab = dayTab ? 'today' : tabRaw; /* 338차: ?bt=YYYY-MM-DD = 그날 새 공고(오늘 새 공고 칩 안 날짜 고르기) */
   const [rg, setRg] = useUrlState(embedded ? 'br' : 'region', ''); /* 339차(#924): 지역(시·도) 칩 — 주소 ?br= */ const [s, setS] = useUrlState(embedded ? 'bq' : 'q', ''); const [open, setOpen] = useState<any>(null); const [biz, setBiz] = useUrlState(embedded ? 'bz' : 'biz', '');
   const [sort, setSort] = useUrlState(embedded ? 'bs' : 'sort', ''); // #606 정렬(주소에 저장 — 새로 고침해도 유지)
+  // #1171(대표 11/26): '오늘 새 공고'를 열면 오늘 아침 공고 알림을 읽음 → 사이드바 '영업 기회 허브'·공간 전환의 '안 본 오늘 공고' 숫자가 0
+  useEffect(() => { if (tabRaw !== 'today') return;
+    api<{ changed: number; unread: number }>('/api/notifications/read', { body: { salesDigest: true } }).then((r) => { if (r.changed) window.dispatchEvent(new CustomEvent('wos-unread', { detail: { value: r.unread } })); }).catch(() => {}); }, [tabRaw]);
   const { data, error, reload } = useApi<any>(tab === 'awards' ? null : `/api/sales/src?${q({ view: 'bids', tab, day: dayTab ?? undefined, region: rg, q: s, biz, sort })}`, [tab, dayTab, rg, s, biz, sort]); // [낙찰 분석]은 목록 대신 업체별 묶음
   // #510: 당일 공고 메일 제목(?id=) → 그 공고 상세를 바로 — 지금 탭 목록에 없어도 한 건 찾아서. #242 2단계: 허브 안·뒤로가기로 돌아온 상세도(?id=)
   const [deep, setDeep] = useState<string | null>(initialId ?? sp.get('id'));

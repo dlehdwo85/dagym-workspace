@@ -1,7 +1,7 @@
 'use client';
 import { ChatBubble } from '@/components/ChatBubble';
 import { RoleBadge } from '@/components/RoleBadge';
-import { areaLabel, areaOf } from '@/lib/notifAreas';
+import { areaLabel, areaOf, DOT_AREAS, HUB_AREA, menuArea } from '@/lib/notifAreas';
 import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
 import { IOS_ADMIN_NOTE, billingNote, useInApp } from './inApp';
@@ -20,7 +20,7 @@ import { CaptureGuard } from './CaptureGuard';
 import { Onboarding } from './Onboarding';
 import { TourHost, restartTours } from './Tour';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type TouchEvent as RTouchEvent, type MouseEvent as RMouseEvent } from 'react';
 import { Activity, Lock, NotebookPen, BarChart3, Bell, Briefcase, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarPlus, Camera, Check, ChevronDown, ChevronsUpDown, CircleCheck, ClipboardCheck, Compass, Contact, FileBarChart, FileSignature, FileText, FolderClock, FolderKanban, FolderPlus, Gauge, Globe, HelpCircle, History, House, Keyboard, Landmark, LayoutTemplate, Library, Link2, ListTodo, LogOut, Mail, Megaphone, MessageCircle, MessageSquareText, Network, PanelLeftClose, PanelLeftOpen, PenTool, Phone, Plus, QrCode, Rocket, ScrollText, Search, Send, Settings, SlidersHorizontal as SlidersIcon, SquarePen, Stamp, Star, Target, TrendingUp, type LucideIcon, Users, Workflow, X } from 'lucide-react';
 import { SessionCtx, canManage, isAdminRole, type Sess } from './session';
 import { SPACE_META, spaceOfPath, type SpaceKey } from './spaceMeta';
@@ -79,6 +79,8 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const [unread, setUnread] = useState(0);
   // 394차(대표 11/13 '각 페이지별 알람이 보일 수 있도록'): 화면별 안 읽은 알림 수 — 메뉴·하단 탭 숫자, 화면 위 '이 화면 새 알림' 줄
   const [areas, setAreas] = useState<Record<string, number>>({});
+  // #1171(대표 11/26): 메뉴 숫자(counts — 허브 = 안 본 오늘 공고, 결재·승인함 = 할 것)·설정 경고 점(dots)·공간 전환 숫자(sums = 그 공간 메뉴 숫자 합) — 서버 navCounts 한 곳에서 셈
+  const [navC, setNavC] = useState<{ counts: Record<string, number>; dots: string[]; sums: Record<string, number>; why: Record<string, string> } | null>(null);
   const pollRef = useRef<() => Promise<void> | void>(() => {});
   const [readyPath, setReadyPath] = useState(''); // 394차: 이 화면 자동 읽음(V32 0)이 끝난 주소 — 그 뒤에 남은 것만 화면 위 줄로(떴다 사라지지 않게)
   const [alarms, setAlarms] = useState<AlarmItem[]>([]); // 로컬 10/20(대표): 웹 알람 띠(알람처럼 울리는 알림, 해제 전)
@@ -166,7 +168,13 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const v3 = session.features.sidebar3 !== false; // ⑦ 사이드바 3구역(대표 승인 10/20 오후). FEATURE_SIDEBAR3=0 → 예전 모양
   const atSpaceHome = space !== 'work' && path === sm.home; // 246차 #774: 공간 첫 화면 맨 위 '배지 숫자 = 무엇' 한 줄
   const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number; label?: string; href?: string }> }>(spaces.length > 1 && (v3 || spaceMenu || more || spaceSheet || space === 'marketing' || atSpaceHome) ? '/api/spaces' : null, [space]);
-  const homeInfo = atSpaceHome ? spaceInfo.data?.summary[space] : undefined;
+  /** #1171: 메뉴 숫자 — 서버가 센 counts(공간 전환 숫자와 같은 기준). 설정 경고 화면은 숫자 대신 점(menuDot) */
+  const menuBadge = (href: string) => { const a = menuArea(areaOf(href)); if (!a || DOT_AREAS.has(a)) return 0; return navC ? navC.counts[a] ?? 0 : areas[a] ?? 0; };
+  const menuDot = (href: string) => { const a = menuArea(areaOf(href)); return !!a && DOT_AREAS.has(a) && ((navC ? navC.counts[a] ?? 0 : areas[a] ?? 0) > 0); };
+  /** #1173: 숫자 설명(마우스를 올리면 · 휴대폰은 길게 누르면) */
+  const menuWhy = (href: string) => { const a = menuArea(areaOf(href)); return a ? navC?.why[a] : undefined; };
+  /** 공간 전환 칸 숫자 = 그 공간 메뉴 숫자의 합(점 제외) — 폴링 전에는 /api/spaces 값 */
+  const spaceBadgeN = (sp: SpaceKey) => navC?.sums[sp] ?? spaceInfo.data?.summary[sp]?.badge ?? 0;
   const goSpace = (sp: SpaceKey) => { setSpaceMenu(false); try { localStorage.setItem('wos_space', sp); } catch {} router.push(SPACE_META[sp].home); };
   useEffect(() => { // 앱을 처음 열 때 마지막으로 쓴 공간으로
     if (path !== '/') return;
@@ -204,6 +212,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const byHref = (h: string) => relabel(NAV.find((n) => n.href === h)!);
   const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
   const sp_ = space === 'work' ? '' : `?space=${space}`;
+  // #1171·#1173: 공간 첫 화면 맨 위 한 줄 — 공간 전환 숫자 = 이 공간 메뉴 숫자들의 합(어느 메뉴에서 왔는지 · 점은 합계 밖)
+  const homeParts = atSpaceHome ? spaceMenuV3.filter((n) => menuBadge(n.href) > 0).map((n) => ({ href: n.href, label: n.label, n: menuBadge(n.href), why: menuWhy(n.href) })) : [];
+  const homeSum = homeParts.reduce((a, b) => a + b.n, 0);
+  const homeDots = atSpaceHome ? spaceMenuV3.filter((n) => menuDot(n.href)).map((n) => n.label) : [];
   const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'), byHref('/mail/outbox'),
     ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), ...((menus.memos ?? 'use') !== 'none' ? [{ href: '/memos', label: '메모', icon: NotebookPen }] : []) /* #1135 */, byHref('/notices'), byHref('/check'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: MessageSquareText }] : [])];
 
@@ -233,7 +245,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     let alive = true;
     const poll = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // 10/21 DB 쿼터 장애: 가려진 탭은 폴링하지 않음
-      try { const r = await api('/api/notifications?unread=1'); if (alive) { setUnread(r.unread); setAlarms(r.alarms ?? []); setApprovalsTodo(r.approvalsTodo ?? 0); setAreas(r.areas ?? {}); } } catch {}
+      try { const r = await api('/api/notifications?unread=1'); if (alive) { setUnread(r.unread); setAlarms(r.alarms ?? []); setApprovalsTodo(r.approvalsTodo ?? 0); setAreas(r.areas ?? {}); setNavC(r.counts ? { counts: r.counts, dots: r.dots ?? [], sums: r.sums ?? {}, why: r.why ?? {} } : null); } } catch {}
       try { const c = await api('/api/chat/unread'); if (alive) setChatUnread(c.unread); } catch {}
     };
     poll(); pollRef.current = poll;
@@ -242,7 +254,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
     window.addEventListener('focus', onFocus);
     // V32 0: 읽음 즉시 배지 반영(알림 화면이 보내는 값) + 다른 화면에서 바뀌면 다시 셈
     const onUnread = (e: Event) => { const d = (e as CustomEvent<{ delta?: number; value?: number }>).detail ?? {}; setUnread((u) => Math.max(0, d.value ?? u + (d.delta ?? 0)));
-      if (d.value === 0) setAreas({}); else { clearTimeout(rt); rt = setTimeout(poll, 400); } }; // 394차: 화면별 숫자도 다시 셈
+      if (d.value === 0) setAreas({}); clearTimeout(rt); rt = setTimeout(poll, 400); }; // 394차: 화면별 숫자도 다시 셈(#1171 결재·승인함·허브 숫자는 알림이 아니라 다시 셈)
     let rt: ReturnType<typeof setTimeout> | undefined;
     const onRefresh = () => { clearTimeout(rt); rt = setTimeout(poll, 400); };
     window.addEventListener('wos-unread', onUnread);
@@ -292,10 +304,10 @@ export function AppShell({ session, children }: { session: Sess; children: React
     // 대표 확정 10/24(#537·#518 로컬 추천 A): 영업 하단 = 홈 · 영업기회(오늘 새 공고 배지) · 리드 · 제안·계약 · 메시지. 입찰은 하단 칸이 아니라 영업기회 안 '입찰' 탭(켠 회사만, #438)
     // — 영업기회 칸은 허브·입찰·계약만료·공공데이터·지원사업 화면에서도 켜짐
     ? [{ href: '/s/sales', label: '홈', icon: TrendingUp },
-        { href: session.features.salesBids ? '/s/sales/hub?tab=bids&bt=today' : '/s/sales/hub', label: '영업기회', icon: Building2, /* #613: 허브 입찰 기본은 '진행 중'이지만 앱 하단 칸은 그대로 오늘 새 공고로 */ badge: spaceInfo.data?.summary.sales?.badge ?? 0, match: ['/s/sales/hub', '/s/sales/bids', '/s/sales/contracts', '/s/sales/prospects', '/s/sales/support', '/s/sales/regions'] },
+        { href: session.features.salesBids ? '/s/sales/hub?tab=bids&bt=today' : '/s/sales/hub', label: '영업기회', icon: Building2, /* #613: 허브 입찰 기본은 '진행 중'이지만 앱 하단 칸은 그대로 오늘 새 공고로 */ badge: menuBadge(HUB_AREA), match: ['/s/sales/hub', '/s/sales/bids', '/s/sales/contracts', '/s/sales/prospects', '/s/sales/support', '/s/sales/regions'] },
         { href: '/s/sales/leads', label: '영업 진행', icon: Users } /* 대표 10/25 22:20 결정 15-14(#642): '리드' → '영업 진행' — 5탭 통일(#630)은 대표 확인 뒤 */, { href: '/s/sales/deals', label: '제안·계약', icon: FileText }, { ...byHref('/messages'), badge: chatUnread }]
     : tabSpace === 'marketing'
-      ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인함', icon: ClipboardCheck, badge: spaceInfo.data?.summary.marketing?.badge ?? 0 },
+      ? [{ href: '/s/marketing', label: '홈', icon: Megaphone }, { href: '/s/marketing/approvals', label: '승인함', icon: ClipboardCheck, badge: menuBadge('/s/marketing/approvals') },
         { href: '/s/marketing/calendar', label: '캘린더', icon: CalendarDays }, { href: '/s/marketing/ads', label: '광고 성과', icon: BarChart3 }]
       // 대표 핫픽스 10/20 19:10(앱 캡처): 업무 공간 하단 = 홈 · 업무 · 캘린더 · 결재 · 더보기 — 프로젝트는 더보기 › 업무 메뉴로. 탭 구성 변경은 앞으로 대표 확인 뒤에만
       // 대표 확정 10/22(#422): 업무 공간 하단 = 홈 · 업무 · 캘린더 · 메시지 · 결재, 더보기 없음 — 나머지 메뉴는 오른쪽 위 프로필 버튼 시트로
@@ -340,15 +352,17 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const pageArea = areaOf(path);
   const pageAlarms = pageArea && path !== '/notifications' && readyPath === path ? areas[pageArea] ?? 0 : 0;
   /** quiet = 394차 화면별 알림 숫자(링크 이름에 섞지 않음 — '업무'를 '업무 3'으로 바꾸지 않게, 전체 수는 알림 종의 이름에) */
-  const navLink = (n: NavItem, badge?: number, quiet = false) => {
+  const navLink = (n: NavItem, badge?: number, quiet = false, dot = false) => {
     const on = active(n.href);
+    const why = (badge || dot) && n.href !== '/notifications' && n.href !== '/messages' ? menuWhy(n.href) : undefined;
     return (
-      <Link key={n.href} href={n.href} prefetch={NAV_PREFETCH.has(n.href) ? undefined : false} aria-current={on ? 'page' : undefined} title={collapsed ? n.label : undefined} style={on && space !== 'work' ? { background: sm.color } : undefined}
+      <Link key={n.href} href={n.href} prefetch={NAV_PREFETCH.has(n.href) ? undefined : false} aria-current={on ? 'page' : undefined} title={collapsed ? `${n.label}${why ? ` — ${why}` : ''}` : why} data-nav-why={why} {...pressHint(why)} style={on && space !== 'work' ? { background: sm.color } : undefined}
         className={cx('group relative flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm transition-colors', on ? 'bg-brand-600 font-semibold text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-ink', collapsed && 'justify-center px-0')}>
         <NavPending className="inset-x-2 bottom-0.5" />
         <n.icon className={cx('size-[18px] shrink-0', on ? 'text-white' : 'text-slate-400 group-hover:text-slate-600')} aria-hidden />
         {!collapsed && <span className="flex-1 truncate">{n.label}</span>}
         {!!badge && <span aria-hidden={quiet || undefined} data-nav-badge={quiet ? 'area' : undefined} className={cx('rounded-full bg-red-500 text-[10px] font-semibold leading-4 text-white tabular-nums', collapsed ? 'absolute ml-5 -mt-5 px-1' : 'px-1.5')}>{badge > 99 ? '99+' : badge}</span>}
+        {!badge && dot && <span role="img" aria-label="확인할 설정 경고" title="확인할 설정 경고(공간 전환 숫자에는 넣지 않음)" data-nav-dot className={cx('size-2 rounded-full bg-red-500', collapsed && 'absolute ml-5 -mt-5')} />}
       </Link>
     );
   };
@@ -366,7 +380,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                   <button key={sp} role="tab" aria-selected={on} onClick={() => goSpace(sp)} data-testid={`space-tab-${sp}`} title={`${SPACE_META[sp].label}${info?.text ? ` · ${info.text}` : ''} (Ctrl ${i + 1})`}
                     className={cx('relative flex h-8 items-center justify-center gap-1 rounded-[8px] text-xs font-semibold transition-colors', on ? 'text-white shadow-sm' : 'text-slate-500 hover:text-ink')} style={on ? { background: SPACE_META[sp].color } : undefined}>
                     <SpaceIcon s={sp} />{!collapsed && <span>{SPACE_META[sp].short}</span>}
-                    {!on && !!info?.badge && <SpaceBadge sp={sp} n={info.badge} label={info.label} className="absolute -right-0.5 -top-1 min-w-[16px] px-1 text-[10px] leading-4" />}
+                    {!on && spaceBadgeN(sp) > 0 && <SpaceBadge sp={sp} n={spaceBadgeN(sp)} label={`${SPACE_META[sp].short} 메뉴 숫자 합`} className="absolute -right-0.5 -top-1 min-w-[16px] px-1 text-[10px] leading-4" />}
                   </button>); })}
               </div>
               {!collapsed && <div className="truncate px-1 pt-1.5 text-[11px] text-slate-500"><span data-testid="space-current">{sm.label}</span>{session.tenant?.name && session.tenant.name !== '워크인' && <span> · {session.tenant.name}</span>}</div>}
@@ -421,7 +435,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 {/* 로컬 검수 10/19 → #481(대표 10/23): 마케팅 메뉴 묶음 계획·제작·게시·성과·설정 */}
                 {k < spaceNav.length && n.group && n.group !== spaceNav[k - 1]?.group && <div className={cx('px-2.5 pb-1 pt-2.5 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-group">{n.group}</div>}
                 {!v3 && space !== 'work' && k === spaceNav.length && <div className={cx('px-2.5 pb-1 pt-3 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-common">공통</div>}
-                {n.href === '/notifications' ? navLink(n, unread) : n.href === '/messages' ? navLink(n, chatUnread) : navLink(n, areaBadge(n.href), true)}
+                {n.href === '/notifications' ? navLink(n, unread) : n.href === '/messages' ? navLink(n, chatUnread) : navLink(n, menuBadge(n.href), true, menuDot(n.href))}
                 {/* 즐겨찾는 프로젝트는 "프로젝트" 바로 아래 */}
                 {n.href === '/projects' && !collapsed && favorites.length > 0 && (
                   <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l border-line pl-2">
@@ -437,7 +451,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
             {v3 && (<div className="pt-2" data-testid="nav-common-v3">
               <div className="my-1.5 border-t border-line" />
               <div className={cx('px-2.5 pb-1 text-[11px] font-semibold text-slate-400', collapsed && 'sr-only')} data-testid="nav-common">공통</div>
-              {commonV3.map((n) => <div key={n.href}>{n.href === '/notifications' ? navLink(n, unread) : n.href === '/messages' ? navLink(n, chatUnread) : navLink(n, areaBadge(n.href), true)}</div>)}
+              {commonV3.map((n) => <div key={n.href}>{n.href === '/notifications' ? navLink(n, unread) : n.href === '/messages' ? navLink(n, chatUnread) : navLink(n, menuBadge(n.href), true)}</div>)}
             </div>)}
             {(adminMenu.length > 0 || session.user.platformAdmin) && (
               <div className="pt-3" data-testid="nav-admin">
@@ -547,10 +561,11 @@ export function AppShell({ session, children }: { session: Sess; children: React
           {/* 대표(10/19): 휴대폰 상단 공간 메뉴 칩 줄은 없앰 — 하단 탭 + 더보기 › 공간 메뉴로(하단 탭과 겹치고 깔끔하지 않음) */}
           <PushRehome appHost={session.features.appHost} />{/* 198차 주소 분리: app. 에서 브라우저 알림 다시 켜기 안내(스위치 켰을 때만) */}
           <AlarmBar items={alarms} onChange={(id) => { setAlarms((a) => a.filter((x) => x.id !== id)); window.dispatchEvent(new Event('wos-refresh')); }} />
-          <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{!!homeInfo?.badge && homeInfo.href && <Link href={homeInfo.href} prefetch={false} data-testid="space-badge-line"
-            className="mb-3 flex items-center gap-2 rounded-card border px-3 py-2 text-xs text-ink-2 hover:bg-white" style={{ borderColor: sm.border, background: sm.soft }}>
-            <SpaceBadge sp={space} n={homeInfo.badge} label={homeInfo.label} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />
-            <span className="min-w-0 flex-1"><b className="text-ink">{homeInfo.label} {homeInfo.badge}건</b> — 공간 전환 칸의 {sm.short} 숫자는 이 숫자입니다(알림 종 숫자와 다름)</span><span className="shrink-0 font-medium" style={{ color: sm.color }}>보기</span></Link>}
+          <main className="mx-auto max-w-7xl p-3 sm:p-6 sm:pb-24">{atSpaceHome && (homeSum > 0 || homeDots.length > 0) && <div data-testid="space-badge-line"
+            className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-card border px-3 py-2 text-xs text-ink-2" style={{ borderColor: sm.border, background: sm.soft }}>
+            {homeSum > 0 && <SpaceBadge sp={space} n={homeSum} label={`${sm.short} 메뉴 숫자 합`} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />}
+            <span className="min-w-0 flex-1">{homeSum > 0 && <><b className="text-ink">공간 전환 칸의 {sm.short} 숫자 {homeSum}</b> = {homeParts.map((p, k) => <span key={p.href}>{k > 0 && ' + '}<Link href={p.href} prefetch={false} title={p.why} className="font-medium underline-offset-2 hover:underline" data-testid="space-badge-part">{p.label} {p.n}</Link></span>)}</>}
+              {homeDots.length > 0 && <span data-testid="space-badge-dots">{homeSum > 0 ? ' · ' : ''}<span className="mr-1 inline-block size-2 rounded-full bg-red-500 align-middle" aria-hidden />{homeDots.join('·')}: 설정 경고·정보라 숫자에 넣지 않음</span>}</span></div>}
             {pageAlarms > 0 && pageArea && <PageAlarms area={pageArea} n={pageAlarms} onRead={(u) => { setUnread(u); setAreas((a) => ({ ...a, [pageArea]: 0 })); pollRef.current(); }} />}
             {children}</main>{/* 점검 ⑧: PC 오른쪽 아래 떠 있는 메신저·AI 버튼이 마지막 줄을 가리지 않게 */}
         </div>
@@ -619,7 +634,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
         {/* 하단 탭 (모바일): 홈 · 업무 · [+] · 캘린더 · 메시지 (+ 정중앙) */}
         {/* 대표 결정(10/19): 가운데 + 버튼 없이 공간마다 같은 크기 5칸 — 4개 메뉴 + 더보기(그 공간 나머지 메뉴·공통·공간 전환·만들기) */}
         <nav className={cx('fixed bottom-0 left-0 right-0 z-40 grid border-t border-line bg-white pb-[var(--sab)] sm:hidden [[data-chat-room]_&]:hidden', mobileTabs.length >= 5 ? 'grid-cols-5' : 'grid-cols-4')} aria-label="하단 메뉴" data-testid="mobile-tabs" data-space={tabSpace}>
-          {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={n.match ? n.match.some((m) => path.startsWith(m)) : active(n.href)} badge={n.badge || areaBadge(n.href)} quiet={!n.badge && !!areaBadge(n.href)} />)}
+          {mobileTabs.map((n) => <TabLink key={n.href} n={n} on={n.match ? n.match.some((m) => path.startsWith(m)) : active(n.href)} badge={n.badge || menuBadge(n.href)} quiet={!n.badge && !!menuBadge(n.href)} why={(n.badge || menuBadge(n.href)) && n.href !== '/messages' ? menuWhy(n.href) : undefined} />)}
         </nav>
         {/* 대표 10/20 16:20 (#106) 휴대폰 오른쪽 아래 말풍선 — 최근 대화방 바로·안 읽은 수·길게 누르면 AI 비서, 대화방·키보드·알람 띠에서 숨김 */}
         <ChatBubble unread={chatUnread} ai={!!session.features.ai} alarm={alarms.length > 0} />
@@ -636,7 +651,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                   <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-white" style={{ background: SPACE_META[sp].color }}><SpaceIcon s={sp} /></span>
                   <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-xs text-ink-2">{spaceInfo.data.summary[sp].text}</span>}</span>
                   {sp === space && <Check className="size-5" style={{ color: SPACE_META[sp].color }} aria-label="지금 공간" />}
-                  {sp !== space && !!spaceInfo.data?.summary[sp]?.badge && <SpaceBadge sp={sp} n={spaceInfo.data.summary[sp].badge} label={spaceInfo.data.summary[sp].label} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />}
+                  {sp !== space && spaceBadgeN(sp) > 0 && <SpaceBadge sp={sp} n={spaceBadgeN(sp)} label={`${SPACE_META[sp].short} 메뉴 숫자 합`} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />}
                 </button>))}</div>
               <p className="px-2 pt-2 text-[11px] text-ink-3">{admin ? '관리자는 켠 공간을 모두 봅니다' : '배정된 공간만 보입니다'}</p>
             </div>
@@ -675,7 +690,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                       <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-white" style={{ background: SPACE_META[sp].color }}><SpaceIcon s={sp} /></span>
                       <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-xs text-ink-2">{spaceInfo.data.summary[sp].text}</span>}</span>
                       {sp === space && <Check className="size-5" style={{ color: SPACE_META[sp].color }} aria-label="지금 공간" />}
-                      {sp !== space && !!spaceInfo.data?.summary[sp]?.badge && <SpaceBadge sp={sp} n={spaceInfo.data.summary[sp].badge} label={spaceInfo.data.summary[sp].label} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />}
+                      {sp !== space && spaceBadgeN(sp) > 0 && <SpaceBadge sp={sp} n={spaceBadgeN(sp)} label={`${SPACE_META[sp].short} 메뉴 숫자 합`} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />}
                     </button>
                   ))}
                 </div>
@@ -763,9 +778,22 @@ function PageAlarms({ area, n, onRead }: { area: string; n: number; onRead: (unr
   );
 }
 
-function TabLink({ n, on, badge, quiet }: { n: NavItem; on: boolean; badge?: number; quiet?: boolean }) {
+/** #1173(대표 11/26 '어떤 숫자를 근거로 알림이 표시되는지 모르겠다'): 휴대폰에서 메뉴를 길게 누르면 숫자 설명(마우스는 title) — 길게 누른 뒤에는 이동하지 않음 */
+function pressHint(text?: string) {
+  if (!text) return {};
+  let t: ReturnType<typeof setTimeout> | undefined; let fired = false;
+  return {
+    onTouchStart: () => { fired = false; clearTimeout(t); t = setTimeout(() => { fired = true; toast.info(text); }, 550); },
+    onTouchMove: () => clearTimeout(t),
+    onTouchEnd: (e: RTouchEvent) => { clearTimeout(t); if (fired) e.preventDefault(); },
+    onContextMenu: (e: RMouseEvent) => { if (fired || 'ontouchstart' in window) e.preventDefault(); },
+    onClick: (e: RMouseEvent) => { if (fired) { e.preventDefault(); fired = false; } },
+  };
+}
+
+function TabLink({ n, on, badge, quiet, why }: { n: NavItem; on: boolean; badge?: number; quiet?: boolean; why?: string }) {
   return (
-    <Link href={n.href} className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs active:bg-slate-100', on ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
+    <Link href={n.href} title={why} data-nav-why={why} {...pressHint(why)} className={cx('relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-1.5 text-xs active:bg-slate-100', on ? 'font-bold text-brand-700' : 'font-medium text-ink-2')}>
       <NavPending className="inset-x-4 top-0" />
       <n.icon className="size-6" strokeWidth={on ? 2.4 : 1.8} aria-hidden />{n.label}
       {!!badge && <span aria-hidden={quiet || undefined} data-nav-badge={quiet ? 'area' : undefined} className="absolute left-1/2 top-1 ml-2 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{badge > 99 ? '99+' : badge}</span>}
