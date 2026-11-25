@@ -9,7 +9,8 @@ import { useInApp } from './inApp';
 export const SITE_HOME = `${(process.env.NEXT_PUBLIC_SITE_URL ?? '').replace(/\/$/, '')}/welcome`;
 
 /** 로그인·초대·재설정 공통 틀: 왼쪽 회사 소개, 오른쪽 입력 */
-export function AuthCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+/** member: 초대 수락·회사 합류 신청 화면 — 이미 있는 회사에 들어오는 직원이라 '14일 무료 체험으로 시작' 대신 회사 계정 문구(#1181-1 새 고객사 흐름 시험) */
+export function AuthCard({ title, sub, children, member }: { title: string; sub?: string; children: React.ReactNode; member?: boolean }) {
   const iosApp = useInApp(); // #839 아이폰 앱(아이패드 가로 화면에서 왼쪽 판이 보임) → 351차 #942(대표 11/04): 안드로이드 앱도 무료 체험 문구 없음
   return (
     <div className="flex min-h-screen bg-canvas">
@@ -27,12 +28,12 @@ export function AuthCard({ title, sub, children }: { title: string; sub?: string
           <ul className="mt-8 space-y-4 text-sm text-slate-300">
             <li className="flex items-center gap-3"><CheckCircle2 className="size-5 text-green-400" />업무 배정 · 완료 확인 · 결재까지 한 흐름으로</li>
             <li className="flex items-center gap-3"><CalendarDays className="size-5 text-sky-400" />회사·부서·현장 일정과 마감일을 한 캘린더에</li>
-            {iosApp
+            {iosApp || member
               ? <li className="flex items-center gap-3"><ShieldCheck className="size-5 text-orange-300" />회사 관리자가 초대한 계정으로 로그인</li>
               : <li className="flex items-center gap-3"><Gift className="size-5 text-orange-300" />14일 무료 체험으로 시작</li>}
           </ul>
         </div>
-        <div className="relative text-xs text-slate-400">{iosApp ? '회사 계정 전용' : '14일 무료 체험'}</div>{/* #466 대표 결정 10/23: 무료 = 14일 체험(5명 무료 폐지) */}
+        <div className="relative text-xs text-slate-400">{iosApp || member ? '회사 계정 전용' : '14일 무료 체험'}</div>{/* #466 대표 결정 10/23: 무료 = 14일 체험(5명 무료 폐지) */}
       </section>
       <section className="flex flex-1 flex-col items-center justify-center p-5">
         <div className="w-full max-w-sm">

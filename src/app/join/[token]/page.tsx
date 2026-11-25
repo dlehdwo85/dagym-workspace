@@ -31,7 +31,7 @@ export default function JoinPage({ params }: { params: Promise<{ token: string }
     <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={agree[k]} onChange={(e) => setAgree({ ...agree, [k]: e.target.checked })} data-testid={`join-agree-${k}`} /><span>{label}</span></label>
   );
   return (
-    <AuthCard title={info?.company ? `${info.company} 합류 신청` : '회사 합류 신청'}>
+    <AuthCard member title={info?.company ? `${info.company} 합류 신청` : '회사 합류 신청'}>
       {!info && <p className="text-sm">확인 중…</p>}
       {info && !info.ok && <p className="text-sm text-red-700" role="alert" data-testid="join-problem">{info.problem}</p>}
       {done && <div className="space-y-2 text-sm" data-testid="join-done">

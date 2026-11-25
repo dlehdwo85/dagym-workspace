@@ -186,7 +186,8 @@ export function Support() {
           <Button size="sm" onClick={() => setAdding(true)} data-testid="support-add"><Plus className="size-3.5" aria-hidden />직접 추가</Button>
         </span>
       </div>
-      {noKeys && <div className="rounded-card border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="support-keys-needed"><b>원천 인증키 입력 필요</b> — 기업마당 인증키(또는 공공데이터포털 인증키)가 들어가면 하루 두 번(08·14시) 새 공고를 가져옵니다. {data!.platformAdmin ? <Link href="/platform" className="underline">플랫폼 운영 › 영업 수집기 설정</Link> : '플랫폼 운영자에게 요청해 주세요.'} 그 전에도 [직접 추가]로 공고·지난 신청 이력을 넣을 수 있습니다.</div>}
+      {noKeys && <div className="rounded-card border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="support-keys-needed">{data!.platformAdmin ? <><b>원천 인증키 입력 필요</b> — 기업마당 인증키(또는 공공데이터포털 인증키)가 들어가면 하루 두 번(08·14시) 새 공고를 가져옵니다. <Link href="/platform" className="underline">플랫폼 운영 › 영업 수집기 설정</Link></>
+        : /* #1181-1: 고객 화면에는 인증키·운영자 같은 내부 사정 대신 지금 상태와 할 수 있는 일만 */ <><b>지원사업 공고를 아직 가져오지 못했습니다</b> — 워크인 운영팀이 연결을 확인하고 있습니다.</>} 그 전에도 [직접 추가]로 공고·지난 신청 이력을 넣을 수 있습니다.</div>}
       <ProfileBox summary={data?.profile ?? null} blanks={data?.blanks ?? null} onSaved={reload} />
       <div className="flex flex-wrap gap-1.5" role="tablist">{TABS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => go({ tab: k === 'fit' ? null : k })}
         className={cx('rounded-full border px-3 py-1 text-xs', tab === k ? 'border-transparent font-semibold text-white' : 'border-line bg-white')} style={tab === k ? { background: C } : undefined} data-testid={`support-tab-${k}`}>{l} <span className="tabular-nums">{data?.counts?.[k] ?? ''}</span></button>)}</div>

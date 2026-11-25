@@ -5,57 +5,143 @@
    "name": "공개 가입(승인제) → 신청 메일 → 승인 대기 화면",
    "ok": true,
    "note": "메일 1통",
-   "ms": 8134
+   "ms": 7663
   },
   {
    "area": "A 가입·승인·첫 화면",
    "name": "운영자 승인 → 환영 메일 → 온보딩 → 첫 화면(빈 회사)",
    "ok": true,
-   "note": "회사 t_er8n4ko68ppl",
-   "ms": 8149
+   "note": "회사 t_gppd2gnn7r7",
+   "ms": 8008
   },
   {
    "area": "A 가입·승인·첫 화면",
    "name": "빈 상태 화면(자료 0건) 둘러보기",
    "ok": true,
    "note": "",
-   "ms": 20882
+   "ms": 27979
+  },
+  {
+   "area": "B 직원 합류",
+   "name": "이메일 초대 → 직원 수락 → 사용자 관리",
+   "ok": true,
+   "note": "",
+   "ms": 1380
+  },
+  {
+   "area": "B 직원 합류",
+   "name": "회사 초대 링크 → 링크로 합류 신청(화면) → 확인 메일 → 관리자 승인(화면) → 로그인",
+   "ok": true,
+   "note": "신청한 비밀번호로 로그인됨",
+   "ms": 5280
+  },
+  {
+   "area": "C 업무",
+   "name": "업무 만들기·배정 → 직원 업무 목록",
+   "ok": true,
+   "note": "직원 업무 1건",
+   "ms": 1381
+  },
+  {
+   "area": "C 업무",
+   "name": "결재: 결재선 만들기 → 직원 결재 올림 → 대표 승인",
+   "ok": true,
+   "note": "결재선 없을 때 안내: 결재선이 없습니다 — 관리자가 결재 › 결재 설정에서 먼저 만들어 주세요",
+   "ms": 2804
+  },
+  {
+   "area": "C 업무",
+   "name": "일정 만들기 → 캘린더",
+   "ok": true,
+   "note": "",
+   "ms": 1735
+  },
+  {
+   "area": "C 업무",
+   "name": "자료실 올리기",
+   "ok": true,
+   "note": "",
+   "ms": 2822
+  },
+  {
+   "area": "C 업무",
+   "name": "메신저: 단체방 만들기 → 메시지",
+   "ok": true,
+   "note": "",
+   "ms": 8643
+  },
+  {
+   "area": "C 업무",
+   "name": "보고: 직원 주간 보고 제출 → 회사 주간 요약",
+   "ok": true,
+   "note": "",
+   "ms": 2513
+  },
+  {
+   "area": "D 잠금·상담·열기",
+   "name": "잠김 표시 → 상담 신청(화면) → 운영자가 열기 → 열림 알림",
+   "ok": true,
+   "note": "스스로 켜기 403(막힘이 정상) · 열림 알림 2건",
+   "ms": 3333
+  },
+  {
+   "area": "E 영업",
+   "name": "영업 첫 화면(빈 상태)",
+   "ok": true,
+   "note": "",
+   "ms": 8078
+  },
+  {
+   "area": "E 영업",
+   "name": "회사 프로필(업종·지역) · 입찰 켜기 · 검색어",
+   "ok": true,
+   "note": "업종 틀 it · 입찰 기본 꺼짐",
+   "ms": 1358
+  },
+  {
+   "area": "E 영업",
+   "name": "공고 맞춤(검색어가 든 공고만) → 업무로 넘기기 → 미참여",
+   "ok": true,
+   "note": "API 공고 2건(맞는 것만)",
+   "ms": 4305
+  },
+  {
+   "area": "E 영업",
+   "name": "지원사업 → 신청 준비(체크리스트 업무)",
+   "ok": true,
+   "note": "신청 준비 업무 만들어짐",
+   "ms": 2649
+  },
+  {
+   "area": "F 마케팅",
+   "name": "마케팅 첫 화면(빈 상태)",
+   "ok": true,
+   "note": "",
+   "ms": 6427
+  },
+  {
+   "area": "F 마케팅",
+   "name": "브랜드 키트 저장",
+   "ok": true,
+   "note": "",
+   "ms": 1289
+  },
+  {
+   "area": "F 마케팅",
+   "name": "시안 만들기(인스타 그림 + 광고 문구 글) → 승인 → 게시 예약",
+   "ok": true,
+   "note": "승인 approved · 예약 시각 있음 · 서버 예약 게시 409(채널 연결 전 — 안내 문구: 인스타그램에 이 브랜드 계정이 없습니다 — 연결 계정 화면에서 [연결]·브랜드 지정 뒤 다시, 그동안은 게시)",
+   "ms": 4195
+  },
+  {
+   "area": "F 마케팅",
+   "name": "휴대폰 390 주요 화면",
+   "ok": true,
+   "note": "",
+   "ms": 5967
   }
  ],
- "findings": [
-  {
-   "area": "A 가입·승인·첫 화면",
-   "where": "가입 1단계",
-   "kind": "화면",
-   "cat": "internal",
-   "word": "Anthropic",
-   "ctx": "동의 — 답을 만들 때 필요한 내용만 AI 회사(Anthropic·OpenAI)에 보내 처리 자세히 [선택]새 기능"
-  },
-  {
-   "area": "A 가입·승인·첫 화면",
-   "where": "가입 1단계",
-   "kind": "화면",
-   "cat": "internal",
-   "word": "OpenAI",
-   "ctx": "들 때 필요한 내용만 AI 회사(Anthropic·OpenAI)에 보내 처리 자세히 [선택]새 기능·혜택 소식"
-  },
-  {
-   "area": "A 가입·승인·첫 화면",
-   "where": "설정 (/settings)",
-   "kind": "화면",
-   "cat": "internal",
-   "word": "Anthropic",
-   "ctx": "I에게 쓴 글·붙인 파일·답에 필요한 업무 내용이 Anthropic(미국)·OpenAI(미국)로 전송됩니다. 필수"
-  },
-  {
-   "area": "A 가입·승인·첫 화면",
-   "where": "설정 (/settings)",
-   "kind": "화면",
-   "cat": "internal",
-   "word": "OpenAI",
-   "ctx": "답에 필요한 업무 내용이 Anthropic(미국)·OpenAI(미국)로 전송됩니다. 필수 동의 — 워크인의 핵"
-  }
- ],
+ "findings": [],
  "shots": [
   {
    "no": 1,
@@ -196,9 +282,385 @@
   {
    "no": 18,
    "area": "A 가입·승인·첫 화면",
+   "name": "점검 빈 상태",
+   "path": "/check",
+   "file": "18-점검-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 19,
+   "area": "A 가입·승인·첫 화면",
+   "name": "메모 빈 상태",
+   "path": "/memos",
+   "file": "19-메모-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 20,
+   "area": "A 가입·승인·첫 화면",
+   "name": "공지 빈 상태",
+   "path": "/notices",
+   "file": "20-공지-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 21,
+   "area": "A 가입·승인·첫 화면",
+   "name": "AI 비서",
+   "path": "/assistant",
+   "file": "21-AI-비서.jpg",
+   "errors": []
+  },
+  {
+   "no": 22,
+   "area": "A 가입·승인·첫 화면",
+   "name": "요금제",
+   "path": "/plan",
+   "file": "22-요금제.jpg",
+   "errors": []
+  },
+  {
+   "no": 23,
+   "area": "A 가입·승인·첫 화면",
+   "name": "사용자 관리",
+   "path": "/admin/users",
+   "file": "23-사용자-관리.jpg",
+   "errors": []
+  },
+  {
+   "no": 24,
+   "area": "A 가입·승인·첫 화면",
    "name": "설정",
    "path": "/settings",
-   "file": "18-설정.jpg",
+   "file": "24-설정.jpg",
+   "errors": []
+  },
+  {
+   "no": 25,
+   "area": "B 직원 합류",
+   "name": "사용자 관리 직원 1명",
+   "path": "/admin/users",
+   "file": "25-사용자-관리-직원-1명.jpg",
+   "errors": []
+  },
+  {
+   "no": 26,
+   "area": "B 직원 합류",
+   "name": "초대 링크 합류 신청 화면",
+   "path": "/join/MFzfayQOY9iHEs1EZDD-jK6a",
+   "file": "26-초대-링크-합류-신청-화면.jpg",
+   "errors": []
+  },
+  {
+   "no": 27,
+   "area": "B 직원 합류",
+   "name": "합류 신청 끝",
+   "path": "/join/MFzfayQOY9iHEs1EZDD-jK6a",
+   "file": "27-합류-신청-끝.jpg",
+   "errors": []
+  },
+  {
+   "no": 28,
+   "area": "B 직원 합류",
+   "name": "합류 신청 확인됨",
+   "path": "/join/sent",
+   "file": "28-합류-신청-확인됨.jpg",
+   "errors": []
+  },
+  {
+   "no": 29,
+   "area": "B 직원 합류",
+   "name": "관리자 합류 신청 1건",
+   "path": "/admin/users",
+   "file": "29-관리자-합류-신청-1건.jpg",
+   "errors": []
+  },
+  {
+   "no": 30,
+   "area": "B 직원 합류",
+   "name": "합류 승인 창",
+   "path": "/admin/users",
+   "file": "30-합류-승인-창.jpg",
+   "errors": []
+  },
+  {
+   "no": 31,
+   "area": "C 업무",
+   "name": "업무 1건 배정",
+   "path": "/tasks",
+   "file": "31-업무-1건-배정.jpg",
+   "errors": []
+  },
+  {
+   "no": 32,
+   "area": "C 업무",
+   "name": "결재 대기 1건",
+   "path": "/approvals",
+   "file": "32-결재-대기-1건.jpg",
+   "errors": []
+  },
+  {
+   "no": 33,
+   "area": "C 업무",
+   "name": "결재 승인됨",
+   "path": "/approvals",
+   "file": "33-결재-승인됨.jpg",
+   "errors": []
+  },
+  {
+   "no": 34,
+   "area": "C 업무",
+   "name": "캘린더 일정 1건",
+   "path": "/calendar?date=2026-11-27",
+   "file": "34-캘린더-일정-1건.jpg",
+   "errors": []
+  },
+  {
+   "no": 35,
+   "area": "C 업무",
+   "name": "자료실 파일 1개",
+   "path": "/library",
+   "file": "35-자료실-파일-1개.jpg",
+   "errors": []
+  },
+  {
+   "no": 36,
+   "area": "C 업무",
+   "name": "메신저 단체방",
+   "path": "/messages?room=5fb835aa-bafa-4a55-8f2b-441586615b15",
+   "file": "36-메신저-단체방.jpg",
+   "errors": []
+  },
+  {
+   "no": 37,
+   "area": "C 업무",
+   "name": "회사 주간 요약",
+   "path": "/reports",
+   "file": "37-회사-주간-요약.jpg",
+   "errors": []
+  },
+  {
+   "no": 38,
+   "area": "C 업무",
+   "name": "내 주간 보고(대표)",
+   "path": "/reports/mine",
+   "file": "38-내-주간-보고-대표.jpg",
+   "errors": []
+  },
+  {
+   "no": 39,
+   "area": "D 잠금·상담·열기",
+   "name": "영업 잠김 안내",
+   "path": "/spaces/locked",
+   "file": "39-영업-잠김-안내.jpg",
+   "errors": []
+  },
+  {
+   "no": 40,
+   "area": "D 잠금·상담·열기",
+   "name": "상담 신청 보냄",
+   "path": "/spaces/locked",
+   "file": "40-상담-신청-보냄.jpg",
+   "errors": []
+  },
+  {
+   "no": 41,
+   "area": "D 잠금·상담·열기",
+   "name": "영업 열린 뒤 홈",
+   "path": "/",
+   "file": "41-영업-열린-뒤-홈.jpg",
+   "errors": []
+  },
+  {
+   "no": 42,
+   "area": "E 영업",
+   "name": "영업 홈",
+   "path": "/s/sales",
+   "file": "42-영업-홈.jpg",
+   "errors": []
+  },
+  {
+   "no": 43,
+   "area": "E 영업",
+   "name": "영업기회 허브",
+   "path": "/s/sales/hub",
+   "file": "43-영업기회-허브.jpg",
+   "errors": []
+  },
+  {
+   "no": 44,
+   "area": "E 영업",
+   "name": "영업 진행",
+   "path": "/s/sales/leads",
+   "file": "44-영업-진행.jpg",
+   "errors": []
+  },
+  {
+   "no": 45,
+   "area": "E 영업",
+   "name": "제안·계약",
+   "path": "/s/sales/deals",
+   "file": "45-제안-계약.jpg",
+   "errors": []
+  },
+  {
+   "no": 46,
+   "area": "E 영업",
+   "name": "지원사업 빈 상태",
+   "path": "/s/sales/support",
+   "file": "46-지원사업-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 47,
+   "area": "E 영업",
+   "name": "영업 데이터 설정",
+   "path": "/s/sales/sources",
+   "file": "47-영업-데이터-설정.jpg",
+   "errors": []
+  },
+  {
+   "no": 48,
+   "area": "E 영업",
+   "name": "입찰 켠 뒤 검색어 없음",
+   "path": "/s/sales/hub?tab=bids&bt=all",
+   "file": "48-입찰-켠-뒤-검색어-없음.jpg",
+   "errors": []
+  },
+  {
+   "no": 49,
+   "area": "E 영업",
+   "name": "입찰 공고 맞춤",
+   "path": "/s/sales/hub?tab=bids&bt=all",
+   "file": "49-입찰-공고-맞춤.jpg",
+   "errors": []
+  },
+  {
+   "no": 50,
+   "area": "E 영업",
+   "name": "공고를 업무로 넘긴 뒤 업무 목록",
+   "path": "/tasks",
+   "file": "50-공고를-업무로-넘긴-뒤-업무-목록.jpg",
+   "errors": []
+  },
+  {
+   "no": 51,
+   "area": "E 영업",
+   "name": "미참여 공고",
+   "path": "/s/sales/hub?tab=bids&bt=noentry",
+   "file": "51-미참여-공고.jpg",
+   "errors": []
+  },
+  {
+   "no": 52,
+   "area": "E 영업",
+   "name": "지원사업 1건",
+   "path": "/s/sales/support",
+   "file": "52-지원사업-1건.jpg",
+   "errors": []
+  },
+  {
+   "no": 53,
+   "area": "E 영업",
+   "name": "지원사업 신청 준비",
+   "path": "/s/sales/support",
+   "file": "53-지원사업-신청-준비.jpg",
+   "errors": []
+  },
+  {
+   "no": 54,
+   "area": "F 마케팅",
+   "name": "마케팅 홈",
+   "path": "/s/marketing",
+   "file": "54-마케팅-홈.jpg",
+   "errors": []
+  },
+  {
+   "no": 55,
+   "area": "F 마케팅",
+   "name": "마케팅 승인함 빈 상태",
+   "path": "/s/marketing/approvals",
+   "file": "55-마케팅-승인함-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 56,
+   "area": "F 마케팅",
+   "name": "콘텐츠 캘린더 빈 상태",
+   "path": "/s/marketing/calendar",
+   "file": "56-콘텐츠-캘린더-빈-상태.jpg",
+   "errors": []
+  },
+  {
+   "no": 57,
+   "area": "F 마케팅",
+   "name": "연결 계정",
+   "path": "/s/marketing/connections",
+   "file": "57-연결-계정.jpg",
+   "errors": []
+  },
+  {
+   "no": 58,
+   "area": "F 마케팅",
+   "name": "자동 제작",
+   "path": "/s/marketing/automation",
+   "file": "58-자동-제작.jpg",
+   "errors": []
+  },
+  {
+   "no": 59,
+   "area": "F 마케팅",
+   "name": "브랜드 키트",
+   "path": "/s/marketing/automation?view=all",
+   "file": "59-브랜드-키트.jpg",
+   "errors": []
+  },
+  {
+   "no": 60,
+   "area": "F 마케팅",
+   "name": "승인함 시안 2건",
+   "path": "/s/marketing/approvals",
+   "file": "60-승인함-시안-2건.jpg",
+   "errors": []
+  },
+  {
+   "no": 61,
+   "area": "F 마케팅",
+   "name": "콘텐츠 캘린더 승인됨",
+   "path": "/s/marketing/calendar",
+   "file": "61-콘텐츠-캘린더-승인됨.jpg",
+   "errors": []
+  },
+  {
+   "no": 62,
+   "area": "F 마케팅",
+   "name": "휴대폰 홈",
+   "path": "/",
+   "file": "62-휴대폰-홈.jpg",
+   "errors": []
+  },
+  {
+   "no": 63,
+   "area": "F 마케팅",
+   "name": "휴대폰 업무",
+   "path": "/tasks",
+   "file": "63-휴대폰-업무.jpg",
+   "errors": []
+  },
+  {
+   "no": 64,
+   "area": "F 마케팅",
+   "name": "휴대폰 영업 허브",
+   "path": "/s/sales/hub",
+   "file": "64-휴대폰-영업-허브.jpg",
+   "errors": []
+  },
+  {
+   "no": 65,
+   "area": "F 마케팅",
+   "name": "휴대폰 마케팅 승인함",
+   "path": "/s/marketing/approvals",
+   "file": "65-휴대폰-마케팅-승인함.jpg",
    "errors": []
   }
  ]

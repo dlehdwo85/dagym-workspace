@@ -36,7 +36,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
     try { await api(`/api/invitations/${token}/accept`, { body: { password: pw, ai } }); const ph = phoneBrowser(); if (ph) setDone(ph); else location.href = '/'; } catch (e: any) { setErr(e.message); }
   }
   return (
-    <AuthCard title={done ? '가입 완료' : '초대 수락'}>
+    <AuthCard member title={done ? '가입 완료' : '초대 수락'}>
       {done && (
         <div className="space-y-3 break-keep" data-testid="invite-done">
           <p className="text-sm text-slate-700">가입이 끝났습니다. {done === 'android' || APPSTORE_URL
