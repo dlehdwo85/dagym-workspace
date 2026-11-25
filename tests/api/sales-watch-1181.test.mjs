@@ -19,12 +19,15 @@ const rss = () => `<?xml version="1.0"?><rss version="2.0"><channel><title>t</ti
 <item><title>RSS 새 소식 하나</title><link>${BASEX}/r/1</link><pubDate>${new Date().toUTCString()}</pubDate></item>
 <item><title><![CDATA[RSS 새 소식 둘]]></title><link>${BASEX}/r/2</link></item></channel></rss>`;
 
+// 로컬 11/26(행안부 보도자료 RSS = 본문까지 실어 1MB 넘음): 앞부분만 받아 끝이 온전한 항목만 읽음
+const bigRss = () => `<?xml version="1.0"?><rss version="2.0"><channel><title>big</title>${Array.from({ length: 40 }, (_, i) => `<item><title>큰 피드 글 ${i + 1}</title><link>${BASEX}/big/${i + 1}</link><pubDate>${new Date().toUTCString()}</pubDate><description><![CDATA[${'본문'.repeat(20_000)}]]></description></item>`).join('')}</channel></rss>`;
 before(async () => {
   fake = http.createServer((req, res) => {
     const send = (code, body, type = 'text/html; charset=utf-8', headers = {}) => { res.writeHead(code, { 'content-type': type, ...headers }); res.end(body); };
     if (req.url === '/robots.txt') return send(200, 'User-agent: *\nDisallow: /secret/\n', 'text/plain');
     if (req.url === '/board') return send(200, board());
     if (req.url === '/feed') return send(200, rss(), 'application/rss+xml');
+    if (req.url === '/bigfeed') return send(200, bigRss(), 'application/rss+xml');
     if (req.url === '/hop') return send(302, '', 'text/plain', { location: 'http://127.0.0.1:5432/' });
     return send(404, 'no');
   }).listen(PORT);
@@ -70,4 +73,14 @@ test('게시판·RSS 글 모으기 · 찾을 낱말 · 30일 · 글 → 업무 �
   assert.equal((await ctx.staffA.client.req('GET', '/api/sales/watch')).status, 200, '영업 공간 직원은 볼 수 있음');
   const [{ tenant: other }] = await sql`select id as tenant from tenants where id <> 'default' limit 1`.catch(() => [{ tenant: null }]);
   if (other) assert.equal((await sql`select count(*)::int n from sales_watch_items where tenant = ${other}`)[0].n, 0, '다른 회사 표에는 없음');
+});
+
+test('1MB 넘는 RSS(본문을 실은 공공기관 목록)는 앞부분만 받아 끝이 온전한 글만 넣음(로컬 11/26)', async () => {
+  const r = await ctx.owner.ok('POST', '/api/sales/watch', { label: '큰 피드', url: `${BASEX}/bigfeed` });
+  assert.equal(r.check.status, 'ok', JSON.stringify(r.check));
+  assert.ok(r.check.added >= 5 && r.check.added < 40, `앞부분 글만 ${r.check.added}건`);
+  const [s] = await sql`select status, last_error from sales_watch_sources where id = ${r.id}`; assert.equal(s.last_error, null);
+  const titles = (await sql`select title from sales_watch_items where source_id = ${r.id} order by title`).map((x) => x.title);
+  assert.ok(titles.includes('큰 피드 글 1') && titles.every((t) => /^큰 피드 글 \d+$/.test(t)), titles.slice(0, 3).join(','));
+  await ctx.owner.ok('DELETE', `/api/sales/watch/${r.id}`);
 });

@@ -102,7 +102,7 @@ export async function checkSource(id: string): Promise<{ status: string; found: 
   if (!s) throw notFound();
   try {
     if (await robotsBlocked(s.url)) { await sql`update sales_watch_sources set status = 'blocked', last_checked_at = now(), last_error = 'robots.txt' where id = ${id}`; return { status: 'blocked', found: 0, added: 0 }; }
-    const r = await safeFetch(s.url);
+    const r = await safeFetch(s.url, { truncate: true }); // 1MB 넘는 목록은 앞부분(새 글)만 — 끝이 잘린 항목은 읽지 않음
     if (r.status >= 400) throw new Error(`응답 ${r.status}`);
     const words = (s.words ?? []).map(norm).filter(Boolean);
     const posts = parseWatch(r.text, r.url).filter((p) => !words.length || words.some((w) => norm(p.title).includes(w)));

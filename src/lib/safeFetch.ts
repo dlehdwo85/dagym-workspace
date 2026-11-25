@@ -41,8 +41,9 @@ export async function assertPublicUrl(raw: string | URL): Promise<URL> {
   return u;
 }
 
-export type SafeResponse = { status: number; text: string; contentType: string; url: string };
-export async function safeFetch(raw: string, opt: { timeoutMs?: number; maxBytes?: number; maxRedirects?: number; fetchImpl?: typeof fetch } = {}): Promise<SafeResponse> {
+export type SafeResponse = { status: number; text: string; contentType: string; url: string; truncated?: boolean };
+/** truncate: 크기를 넘으면 오류 대신 앞부분(maxBytes)만 받고 멈춤 — 공공기관 RSS 처럼 본문까지 실어 1MB 를 넘는 목록(로컬 11/26 행안부 보도자료)에서 앞쪽 새 글만 읽을 때 */
+export async function safeFetch(raw: string, opt: { timeoutMs?: number; maxBytes?: number; maxRedirects?: number; fetchImpl?: typeof fetch; truncate?: boolean } = {}): Promise<SafeResponse> {
   const timeoutMs = opt.timeoutMs ?? 10_000, maxBytes = opt.maxBytes ?? 1_000_000, maxRedirects = opt.maxRedirects ?? 3; const f = opt.fetchImpl ?? fetch;
   let url = await assertPublicUrl(raw);
   for (let hop = 0; ; hop++) {
@@ -51,10 +52,10 @@ export async function safeFetch(raw: string, opt: { timeoutMs?: number; maxBytes
       if (hop >= maxRedirects) throw badRequest('주소가 너무 여러 번 다른 곳으로 넘어갑니다');
       url = await assertPublicUrl(new URL(res.headers.get('location')!, url)); continue;
     }
-    const reader = res.body?.getReader(); const chunks: Uint8Array[] = []; let size = 0;
-    if (reader) for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > maxBytes) { await reader.cancel().catch(() => {}); throw badRequest('페이지가 너무 큽니다(1MB 넘음)'); } chunks.push(value); }
+    const reader = res.body?.getReader(); const chunks: Uint8Array[] = []; let size = 0; let truncated = false;
+    if (reader) for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > maxBytes) { await reader.cancel().catch(() => {}); if (!opt.truncate) throw badRequest('페이지가 너무 큽니다(1MB 넘음)'); chunks.push(value.subarray(0, value.byteLength - (size - maxBytes))); truncated = true; break; } chunks.push(value); }
     const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
-    return { status: res.status, text: buf.toString('utf8'), contentType: res.headers.get('content-type') ?? '', url: url.toString() };
+    return { status: res.status, text: buf.toString('utf8'), contentType: res.headers.get('content-type') ?? '', url: url.toString(), ...(truncated ? { truncated } : {}) };
   }
 }
 
