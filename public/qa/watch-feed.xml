@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 운영 자동 확인(tests/prod/smoke.mjs) 전용 시험 피드: '내 수집 원천' 받기·저장·지우기를 확인할 때만 씀. 날짜 없는 RSS 항목은 받는 쪽이 그대로 넣음 -->
+<rss version="2.0">
+  <channel>
+    <title>워크인 운영 확인용 시험 피드</title>
+    <link>https://www.work-in.dev/</link>
+    <description>운영 자동 확인 전용</description>
+    <item><title>운영 확인용 시험 글 하나</title><link>https://www.work-in.dev/welcome#qa-1</link></item>
+    <item><title>운영 확인용 시험 글 둘</title><link>https://www.work-in.dev/welcome#qa-2</link></item>
+  </channel>
+</rss>

@@ -54,8 +54,8 @@ async function salesAdmin(u: SessionUser) { await assertSpace(u, 'sales'); if (!
 export async function watchView(u: SessionUser) {
   await assertSpace(u, 'sales');
   const sql = db(); const t = tenantOf(u);
-  const sources = await sql<{ id: string; label: string; url: string; words: string[]; status: string; last_checked_at: Date | null; last_ok_at: Date | null; items: number }[]>`
-    select s.id, s.label, s.url, s.words, s.status, s.last_checked_at, s.last_ok_at, (select count(*)::int from sales_watch_items i where i.source_id = s.id) as items
+  const sources = await sql<{ id: string; label: string; url: string; words: string[]; status: string; last_checked_at: Date | null; last_ok_at: Date | null; last_error: string | null; items: number }[]>`
+    select s.id, s.label, s.url, s.words, s.status, s.last_checked_at, s.last_ok_at, s.last_error, (select count(*)::int from sales_watch_items i where i.source_id = s.id) as items
     from sales_watch_sources s where s.tenant = ${t} and s.deleted_at is null order by s.created_at`;
   const items = await sql<{ id: string; source_id: string; title: string; url: string; posted_date: string | null; first_seen_at: Date; task_id: string | null; label: string }[]>`
     select i.id, i.source_id, i.title, i.url, i.posted_date::text, i.first_seen_at, i.task_id, s.label from sales_watch_items i join sales_watch_sources s on s.id = i.source_id

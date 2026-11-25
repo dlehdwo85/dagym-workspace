@@ -1297,7 +1297,8 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
       nrow('RV-N4', '심사시험 주민공동시설 위탁운영 업체 선정', { related: true, fit_business: '다짐', classification: '즉시 검토' })])}`; // N4: 기본 회사 판정 공고지만 체험 검색어 밖 → 안 보임
     const bids = await c.ok('GET', '/api/sales/src?view=bids&tab=all'); const rv = bids.items.filter((x) => String(x.id).startsWith('RV-'));
     assert.deepEqual(rv.map((x) => x.id).sort(), ['RV-N1', 'RV-N2'], '검색어에 맞는 공고만'); assert.ok(!bids.needKeywords);
-    assert.deepEqual(rv.map((x) => [x.category ?? null, x.fitBusiness ?? null]), [[null, null], [null, null]]);
+    // #1181 마감 2(2ba0cd3): 분류는 이 회사 검색어로 낸 자기 판정(제목에 검색어 → '즉시 검토') — N2 는 기본 회사 판정이 없는데도 같음 = 기본 회사 판정이 아님 · 적합 사업(다짐·하이링크)은 안 보임
+    assert.deepEqual(rv.map((x) => [x.category ?? null, x.fitBusiness ?? null]), [['즉시 검토', null], ['즉시 검토', null]]);
     await sql`delete from sales_src_rows where src_id in ('RV-N1', 'RV-N2', 'RV-N3', 'RV-N4')`;
     assert.equal((await c.ok('GET', '/api/marketing/contents')).contents.length, 2, '마케팅 시안 2');
     const csv = (await c.ok('GET', '/api/library')).files.find((f) => f.file_name === '팀 일정표(예시).csv');

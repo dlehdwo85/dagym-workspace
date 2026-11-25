@@ -17,6 +17,7 @@ const step = async (name, fn) => {
   catch (e) { results.push([name, false]); console.log(`✖ ${name} — ${String(e?.message ?? e).replace(EMAIL, '<계정>').slice(0, Number(process.env.SMOKE_ERR_LEN ?? 300))}`); }
 };
 const ok = (c, m) => { if (!c) throw new Error(m); };
+const unverified = []; // 밖 사이트 사정으로 확인 못한 것 — 통과도 실패도 아님(요약 줄에 따로)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 if (SHA) await step(`운영에 ${SHA} 반영될 때까지 기다림`, async () => {
@@ -47,6 +48,8 @@ const api = async (method, path, body) => {
   if (!r.ok) throw new Error(`${method} ${path} → ${r.status} ${JSON.stringify(j?.error ?? j).slice(0, 160)}`);
   return j;
 };
+
+const raw = (method, path, body) => fetch(BASE + path, { method, headers: { cookie, origin: BASE, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
 
 // 로컬 11/24(prod-check 10분 넘음 — 브라우저 설치가 7분): 깃허브 실행기에는 크롬이 미리 깔려 있어 PW_CHANNEL=chrome 이면 그것을 씀(설치 없음)
 // 그 밖에는 설치한 Playwright 크로미움 → 클라우드 시험 기계에 미리 깔린 것 순서
@@ -153,6 +156,20 @@ await step('잠긴 공간(자물쇠 → 안내 → 상담 신청 단추 · 서�
   ok(r.status === 404, `잠긴 공간 API(${path})가 막히지 않음(${r.status})`);
 });
 
+// 로컬 11/26 요청: 검수 회사(시험 회사 = 상담 없이 직접 켜기)는 업무 공간만 열려 있어 영업·마케팅 단계가 건너뛰어짐 → 잠긴 공간 확인 뒤 회사 관리자 권한으로 직접 열고, 맨 끝에 원래대로 닫음
+// (플랫폼 운영자 API 를 쓰지 않음 — 알림·상담 처리 기록이 생기지 않고, 검수 계정에 운영자 권한이 필요 없음)
+const openedSpaces = [];
+await step('검수 회사 영업·마케팅 열기(시험 회사 직접 켜기 — 끝에 되돌림)', async () => {
+  const r = await raw('GET', '/api/admin/spaces');
+  if (r.status === 403 || r.status === 404) { console.log('  (검수 계정이 대표·관리자가 아님 — 건너뜀)'); return; }
+  const v = await r.json();
+  if (!v.free) { console.log('  (검수 회사가 직접 켜기 회사가 아님 — 건너뜀)'); return; }
+  for (const sp of ['sales', 'marketing']) if (!(v.enabled ?? []).includes(sp)) { await api('PUT', '/api/admin/spaces', { space: sp, on: true }); openedSpaces.push(sp); }
+  const now = (await api('GET', '/api/admin/spaces')).enabled ?? [];
+  ok(['sales', 'marketing'].every((sp) => now.includes(sp)), `열리지 않음: ${now.join(',')}`);
+  console.log(`  연 공간: ${openedSpaces.join(', ') || '(이미 열려 있음)'}`);
+});
+
 // #1165(대표 11/24 "업무가 자꾸 전체 화면으로 뜹니다"): 업무는 어디서 열든 오른쪽 패널 — ① 다른 화면의 업무 링크(알림·메신저·검색과 같은 링크)는 그 화면 위 패널
 // ② 주소로 바로(메일·앱 푸시·새로 고침) 들어와도 업무 목록 + 오른쪽 패널(가운데 전체 카드 없음). 검수 업무 1건 만들고 지움
 await step('업무 링크 → 오른쪽 패널(#1165 — 다른 화면 위 · 주소로 바로 들어와도 목록 + 패널)', async () => {
@@ -246,7 +263,6 @@ await step('공간 전환 숫자 = 사이드바 숫자 합(#1171·#1173 — 세 
 });
 
 // #1181 로컬 11/26 요청: 검수 회사로만 볼 수 있는 것 — 바꾼 설정은 단계 끝에 되돌림
-const raw = (method, path, body) => fetch(BASE + path, { method, headers: { cookie, origin: BASE, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
 await step('회사별 기능 켜기: 점검 [안 씀] → 사이드바·API 없음 → [사용] 되돌림(#1181)', async () => {
   const r = await raw('GET', '/api/admin/features');
   if (r.status === 403 || r.status === 404) { console.log('  (검수 계정이 대표·관리자가 아님 — 건너뜀)'); return; }
@@ -293,6 +309,39 @@ await step('검수 회사 입찰 검색어 → 목록·즉시 검토·영업 포
   }
 });
 
+// 로컬 11/26 요청 ②: 내 수집 원천 — 넣기 → 받기 1번 → 1건 이상 → 지우기. ㉠ 우리 사이트의 시험 피드(public/qa/watch-feed.xml)로 받기·저장·지우기 자체를 확인
+// ㉡ 공공기관 RSS(정책브리핑 정책뉴스)를 실제로 받아 봄 — 운영 서버(싱가포르)에서 국내 공공 사이트가 막히면 여기서 드러남
+const watchOnce = async (label, url) => {
+  const r = await raw('POST', '/api/sales/watch', { label, url });
+  const j = await r.json().catch(() => null);
+  ok(r.ok, `넣기 ${r.status} ${JSON.stringify(j?.error ?? j).slice(0, 160)}`);
+  try {
+    const src = ((await api('GET', '/api/sales/watch')).sources ?? []).find((x) => x.id === j.id);
+    return { check: j.check, src };
+  } finally { await api('DELETE', `/api/sales/watch/${j.id}`).catch(() => {}); }
+};
+await step('내 수집 원천: 시험 피드 넣기 → 받기 → 2건 → 지우기(#1181 A)', async () => {
+  const o = await raw('GET', '/api/sales/watch');
+  if (o.status !== 200) { console.log(`  (영업 공간이 열려 있지 않음 ${o.status} — 건너뜀)`); return; }
+  const w = await watchOnce('운영 확인 시험 피드', `${BASE}/qa/watch-feed.xml`);
+  ok(w.check?.status === 'ok', `받기 상태 ${JSON.stringify(w.check)}`);
+  ok(w.check.found >= 2 && w.src?.items >= 2, `시험 피드 글 받음 ${w.check.found}건 · 저장 ${w.src?.items}건(2건이어야 함)`);
+  ok(!(await api('GET', '/api/sales/watch')).sources?.some((x) => x.label === '운영 확인 시험 피드'), '지운 원천이 목록에 남아 있음');
+});
+// 주소는 클라우드 시험 기계에서 국내 공공 사이트가 막혀 미리 확인하지 못함 → 받지 못하면 '확인 못함'으로 남기고 실패로 세지 않음(주소·운영 서버 위치를 확인한 뒤 실패로 올림)
+await step('내 수집 원천: 공공기관 RSS(정책브리핑) 실제 받기 1건 이상(#1181 A — 못 받으면 확인 못함)', async () => {
+  const o = await raw('GET', '/api/sales/watch');
+  if (o.status !== 200) { console.log(`  (영업 공간이 열려 있지 않음 ${o.status} — 건너뜀)`); return; }
+  const w = await watchOnce('운영 확인 정책브리핑', 'https://www.korea.kr/rss/policy.xml');
+  console.log(`  받기 ${JSON.stringify(w.check)} · 원천 상태 ${w.src?.statusLabel ?? '-'} ${w.src?.last_error ?? ''}`);
+  if (w.check?.status !== 'ok' || !(w.check.found >= 1)) unverified.push(`정책브리핑 RSS(${w.src?.last_error ?? `${w.check?.status} ${w.check?.found ?? 0}건`})`);
+});
+await step('검수 회사 공간 되돌리기(연 것만 닫음)', async () => {
+  for (const sp of openedSpaces) await api('PUT', '/api/admin/spaces', { space: sp, on: false });
+  const now = (openedSpaces.length ? (await api('GET', '/api/admin/spaces')).enabled : null) ?? [];
+  ok(openedSpaces.every((sp) => !now.includes(sp)), `닫히지 않음: ${now.join(',')}`);
+});
+
 await step('화면 오류(자바스크립트) 없음', async () => ok(errors.length === 0, `${errors.length}건: ${errors.slice(0, 3).join(' | ')}`));
 await browser.close();
 report();
@@ -301,4 +350,5 @@ process.exit(results.every(([, k]) => k) ? 0 : 1);
 function report() {
   const bad = results.filter(([, k]) => !k);
   console.log(`\n운영 화면 확인 ${results.length - bad.length}/${results.length} 통과 — ${BASE}`);
+  if (unverified.length) console.log(`확인 못함 ${unverified.length}건(실패로 세지 않음): ${unverified.join(' · ')}`);
 }

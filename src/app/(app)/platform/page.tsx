@@ -21,6 +21,7 @@ import { PlatformSpeed } from '@/components/platform/PlatformSpeed';
 import { PlatformSystemAi } from '@/components/platform/PlatformSystemAi';
 import { PlatformAudit } from '@/components/platform/PlatformAudit';
 import { PlatformLocationCheck } from '@/components/platform/PlatformLocationCheck';
+import { CustomerRequests } from '@/components/platform/CustomerRequests';
 import { PlanBands } from '@/components/platform/PlanBands';
 import { PlatformSalesMigrate } from '@/components/sales/PlatformSalesMigrate';
 import { PlatformOpsImport } from '@/components/marketing/PlatformOpsImport';
@@ -42,7 +43,7 @@ export default function PlatformPage() { // useSearchParams 를 쓰므로 Suspen
 const TABS = [
   { key: 'company', label: '회사·가입', desc: '새로 가입한 회사, 회사 목록과 사용량, 가입이 어디서 들어오는지 봅니다.' },
   { key: 'billing', label: '요금·결제', desc: '요금제 금액, 결제·환불 내역, 정산, 결제 시험, 마케팅 요금제를 다룹니다.' },
-  { key: 'support', label: '고객 지원', desc: '고객 문의에 답하고, 요금제 변경 요청과 홈페이지 문의 연결을 관리합니다.' },
+  { key: 'support', label: '고객 지원', desc: '고객 요청함(문의·상담·메모를 한곳에서 분류·진행), 문의 답변, 요금제 변경 요청, 홈페이지 문의 연결을 관리합니다.' },
   { key: 'ai', label: 'AI·제작 도구', desc: 'AI 비용 예상, 영상·사진·목소리 만들기 연결, 글 품질 규칙을 정합니다.' },
   { key: 'sales', label: '영업 데이터', desc: '공고 수집기 설정과 공공데이터 수집, 예전 영업·마케팅 자료 옮기기를 합니다.' },
   { key: 'speed', label: '속도', desc: '핵심 API 응답 시간(30분마다 검침)과 실제 화면 표시 시간(웹·앱)을 보고, 기준을 넘은 곳을 찾습니다.' }, // #948
@@ -194,7 +195,7 @@ function PlatformInner() {
       <PlatformTabs tab={tab} go={go} />
       {tab === 'company' && <><PlatformTenants /><Signups />{usageEl}<PlatformFunnel /><PlatformConversionTags /><PlatformAudit /><PlatformLocationCheck /></>}
       {tab === 'billing' && <>{plansEl}<PlatformPayments /><PlatformSettlement /><Suspense><PayTest /></Suspense><PlatformMktPlans /></>}
-      {tab === 'support' && <>{supportEl}{requestsEl}<InquiryLink /></>}
+      {tab === 'support' && <><CustomerRequests />{/* #1175 고객 요청함 */}{supportEl}{requestsEl}<InquiryLink /></>}
       {tab === 'ai' && <><AiForecast /><PlatformSystemAi /><PlatformHiggsfield /><PlatformTts /><PlatformQualityRules /></>}
       {tab === 'sales' && <><PlatformCollectorSettings /><PlatformSalesSources /><PlatformSalesMigrate /><PlatformOpsImport /></>}
       {tab === 'speed' && <PlatformSpeed />}
