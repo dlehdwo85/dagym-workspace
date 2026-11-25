@@ -72,6 +72,7 @@ export default function Settings() {
       <AwaySection />
       <MyMailSection />
       <AccountSection />
+      {(user.role === 'owner' || user.role === 'admin') && <CompanyFeatures />}{/* #1181 상업화 마감 4번: 쓰는 기능 */}
       {(user.role === 'owner' || user.role === 'admin') && <CompanyExport />}
       <section className="rounded-lg border bg-white p-4">
         <h2 className="mb-2 text-sm font-semibold">알림 종류별 수신</h2>
@@ -412,6 +413,32 @@ type ExportItem = { id: string; status: 'queued' | 'running' | 'done' | 'failed'
   counts: { big: number; files: number; missing: number } | null; error: string | null; created_at: string; expires_at: string | null; by: string | null };
 const EXPORT_ST: Record<ExportItem['status'], string> = { queued: '준비 중', running: '만드는 중', done: '준비됨', failed: '만들지 못함', expired: '기간 지남(파일 지움)' };
 /** 상용화 B4 회사 전체 내보내기(대표·관리자): 요청 → 준비되면 알림·메일 → 7일 동안 내려받기. 앱에서는 요청만, 내려받기는 PC 웹(앱 파일 저장 제약) */
+/** #1181 상업화 마감 4번(설계 COMMERCIAL_DESIGN_2026-11-26 B): 쓰는 기능 — 회사가 안 쓰는 기능은 끔(메뉴·화면·API 모두 없음). 운영사만 바꾸는 기능은 여기 없음 */
+function CompanyFeatures() {
+  const { support } = useSession();
+  const { data, reload } = useApi<{ features: { key: string; label: string; desc: string; on: boolean }[] }>('/api/admin/features');
+  const [busy, setBusy] = useState('');
+  if (support || !data?.features.length) return null;
+  async function flip(key: string, on: boolean) {
+    setBusy(key);
+    try { await api('/api/admin/features', { method: 'PUT', body: { key, on } }); toast.ok(on ? '켰습니다 — 메뉴는 새로 고치면 보입니다' : '껐습니다 — 메뉴는 새로 고치면 사라집니다'); reload(); } catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
+  }
+  return (
+    <section className="rounded-lg border bg-white p-4 text-sm" data-testid="company-features">
+      <h2 className="font-semibold">쓰는 기능</h2>
+      <p className="mt-1 text-ink-2">회사에서 쓰지 않는 기능은 끌 수 있습니다. 끄면 모든 직원에게 메뉴와 화면이 보이지 않고, 쌓인 기록은 지우지 않습니다(다시 켜면 그대로).</p>
+      <ul className="mt-2 divide-y divide-line">
+        {data.features.map((f) => (
+          <li key={f.key} className="flex flex-wrap items-center gap-2 py-2" data-testid={`company-feature-${f.key}`}>
+            <span className="min-w-0 flex-1"><b>{f.label}</b> <span className="text-xs text-ink-2">{f.desc}</span></span>
+            <label className="inline-flex items-center gap-1.5 text-xs"><input type="checkbox" checked={f.on} disabled={busy === f.key} onChange={(e) => flip(f.key, e.target.checked)} data-testid="company-feature-switch" />{f.on ? '사용' : '안 씀'}</label>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function CompanyExport() {
   const { support } = useSession();
   const inApp = useInApp();

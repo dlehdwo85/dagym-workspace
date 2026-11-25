@@ -17,7 +17,7 @@ export const CYCLES = { daily: '매일', weekly: '매주', monthly: '매월', qu
 export type Cycle = keyof typeof CYCLES;
 
 /** 처음 여는 회사(가입 때 템플릿을 못 넣은 예전 회사 포함)는 공통 기본 + 회사 업종 템플릿을 한 번 설치 */
-const ready = async (u: SessionUser) => (await import('./install')).ensureCheckTemplates(tenantOf(u), u.id);
+const ready = async (u: SessionUser) => { if (!(await (await import('../features')).featureOn(tenantOf(u), 'check'))) throw notFound(); return (await import('./install')).ensureCheckTemplates(tenantOf(u), u.id); }; // #1181 점검을 끈 회사는 직원 공유 기준까지 없음
 
 const uuid = z.string().uuid();
 const name = z.string().trim().min(1).max(60);

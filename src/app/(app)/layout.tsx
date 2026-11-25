@@ -51,6 +51,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         const b = await (await import('@/lib/branchReport')).branchReportAccess(user).catch(() => ({ company: false, visible: false, writer: false }));
         return { branchReport: b.visible, branchCompany: b.company, branchWriter: b.writer };
       })()),
+      check: await (await import('@/lib/features')).featureOn(tenantOf(user), 'check'), // #1181 회사별 기능 켜기(점검)
       meetings: (await import('@/lib/meetings')).meetingsOn(tenantOf(user)), // 219차 워크인 화상회의(기본 꺼짐) · #946 MEETINGS_TENANTS 면 그 회사만
       appHost: (() => { const h = hostSplit(); return h.on ? h.app : null; })() /* 198차 결정 15-29 주소 분리(켰을 때만) */ },
     menus,

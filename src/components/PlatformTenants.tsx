@@ -329,7 +329,8 @@ function TenantDetail({ id, onClose }: { id: string; onClose: () => void }) {
               void run(() => api(`/api/platform/tenants/${id}/partner`, { method: 'PUT', body: { days: n } }), `설계 파트너로 지정했습니다(${n}일)`); }}>설계 파트너로 지정</Button>
           </div>
         )}{/* D-08 검수용 시험 회사 표시(로컬 11/24) */}
-        {!internal && <CaptureBox id={id} t={d.data.tenant} trial={d.data.subscription?.status === 'trial'} events={d.data.captureEvents30d ?? 0} run={run} />}{/* #626 캡처 차단 스위치(외부 고객사만) */}
+        {!internal && <CaptureBox id={id} t={d.data.tenant} trial={d.data.subscription?.status === 'trial'} events={d.data.captureEvents30d ?? 0} run={run} />}
+        <FeatureBox id={id} />{/* #1181 상업화 마감 4번 · #1175 회사별 기능 켜기·베타 */}{/* #626 캡처 차단 스위치(외부 고객사만) */}
         <div>
           <p className="mb-1 text-xs font-medium text-ink-2">사용자 {d.data.users.length}명 — 비밀번호는 보거나 정할 수 없고 재설정 메일만 보냅니다</p>
           <ul className="divide-y divide-line rounded-input border border-line" data-testid="company-users">
@@ -567,6 +568,32 @@ function CaptureBox({ id, t, trial, events, run }: { id: string; t: any; trial?:
             <button type="button" className="font-medium text-brand-700 underline" onClick={() => run(() => api(`/api/platform/tenants/${id}/capture`, { method: 'PUT', body: { on: true } }), '체험 중에도 물표시를 켰습니다')} data-testid="company-capture-trial-on">체험 중에도 켜기</button></>}
         </p>
       )}
+    </div>
+  );
+}
+
+/** #1181 상업화 마감 4번 · #1175: 회사별 기능 켜기(기본값 = 지금 동작, 바꾼 것만 표시) · 회사별 베타 기능(beta:이름) — 바꿀 때마다 감사 기록 */
+function FeatureBox({ id }: { id: string }) {
+  const f = useApi<{ features: { key: string; label: string; desc: string; customer: boolean; on: boolean; def: boolean; changed: boolean; by: string | null; at: string | null }[] }>(`/api/platform/tenants/${id}/features`);
+  const [beta, setBeta] = useState('');
+  const put = async (key: string, on: boolean | null, ok: string) => { try { await api(`/api/platform/tenants/${id}/features`, { method: 'PUT', body: { key, on } }); toast.ok(ok); f.reload(); } catch (e) { toast.error((e as Error).message); } };
+  return (
+    <div className="space-y-2 rounded-input border border-line p-3 text-xs" data-testid="company-features">
+      <p className="font-medium text-ink">기능 <span className="font-normal text-ink-2">— 이 회사에서 켜고 끄는 기능(기본값은 지금 동작). 고객이 끌 수 있는 기능은 회사 설정에도 보입니다.</span></p>
+      <ul className="divide-y divide-line">
+        {(f.data?.features ?? []).map((x) => (
+          <li key={x.key} className="flex flex-wrap items-center gap-2 py-1.5" data-testid={`company-feature-${x.key}`}>
+            <span className="min-w-0 flex-1"><b className="text-ink">{x.label}</b> <span className="text-ink-2">{x.desc}</span>{x.changed && <span className="ml-1 text-ink-3">· 바꿈{x.by ? ` ${x.by}` : ''}{x.at ? ` ${fmtDateTime(x.at)}` : ''}</span>}</span>
+            <span className={cx('rounded-full px-2 py-0.5 font-medium', x.on ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-ink-2')} data-testid="company-feature-state">{x.on ? '켬' : '끔'}</span>
+            <Button size="sm" variant="secondary" onClick={() => put(x.key, !x.on, `${x.label} ${x.on ? '끔' : '켬'}`)} data-testid="company-feature-toggle">{x.on ? '끄기' : '켜기'}</Button>
+            {x.changed && !x.key.startsWith('beta:') && <button type="button" className="text-brand-700 underline" onClick={() => put(x.key, null, `${x.label} 기본값으로`)} data-testid="company-feature-reset">기본값으로</button>}
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap items-center gap-2">
+        <input className={cx(inputCls, 'h-8 w-48 py-1 text-xs')} value={beta} onChange={(e) => setBeta(e.target.value.replace(/[^a-z0-9_-]/g, '').slice(0, 40))} placeholder="베타 기능 이름(영문 소문자)" data-testid="company-beta-key" />
+        <Button size="sm" variant="secondary" disabled={beta.length < 2} onClick={() => { void put(`beta:${beta}`, true, `베타 ${beta} 켬`); setBeta(''); }} data-testid="company-beta-on">베타 켜기</Button>
+      </div>
     </div>
   );
 }

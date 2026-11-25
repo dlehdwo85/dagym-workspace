@@ -397,7 +397,8 @@ export async function checkTick(now = new Date()) {
   const waiting = await sql<{ id: string; tenant: string; requested_by: string | null; item_title: string; org_unit_name: string; task_id: string; round_no: number }[]>`
     select f.id, f.tenant, f.requested_by, x.item_title, o.name as org_unit_name, f.task_id, f.round_no from chk_followups f join chk_results x on x.id = f.result_id join org_units o on o.id = f.org_unit_id
       join tasks tk on tk.id = f.task_id and tk.deleted_at is null
-    where f.status = 'requested' and tk.status = 'done' and f.waiting_notified_at is null limit 200`;
+    where f.status = 'requested' and tk.status = 'done' and f.waiting_notified_at is null
+      and not exists (select 1 from tenant_features tf where tf.tenant = f.tenant and tf.key = 'check' and not tf.enabled) limit 200`; // #1181 점검을 끈 회사는 알림 없음
   for (const f of waiting) {
     await sql`update chk_followups set waiting_notified_at = now() where id = ${f.id} and waiting_notified_at is null`;
     if (f.requested_by) await notify(sql, { userIds: [f.requested_by], type: 'check_followup', title: `보완 확인 요청: ${f.item_title}`, body: `${f.org_unit_name} — 담당자가 조치를 끝냈습니다. 사진을 보고 확인해 주세요.`, link: '/check?tab=run', dedupeKey: `chkwait:${f.id}:${f.round_no}` }).catch(() => []); // 회차마다 한 번(같은 날 다시 보완 → 다시 완료도 알림)
@@ -405,7 +406,8 @@ export async function checkTick(now = new Date()) {
   const today = todaySeoul(now);
   const overdue = await sql<{ id: string; target: string; by_user: string | null; item_title: string; reply_due: string }[]>`
     select e.id, e.target, e.by_user, x.item_title, e.reply_due::text from chk_external e join chk_followups f on f.id = e.followup_id join chk_results x on x.id = f.result_id
-    where e.closed_at is null and e.reply_due is not null and e.reply_due < ${today}::date and e.overdue_notified_at is null limit 200`;
+    where e.closed_at is null and e.reply_due is not null and e.reply_due < ${today}::date and e.overdue_notified_at is null
+      and not exists (select 1 from tenant_features tf where tf.tenant = f.tenant and tf.key = 'check' and not tf.enabled) limit 200`;
   for (const e of overdue) {
     await sql`update chk_external set overdue_notified_at = now() where id = ${e.id} and overdue_notified_at is null`;
     if (e.by_user) await notify(sql, { userIds: [e.by_user], type: 'check_followup', title: `회신 기한이 지났습니다: ${e.target}`, body: `${e.item_title} — 회신 기한(${e.reply_due})이 지났습니다. 다시 연락하거나 결과를 적어 주세요.`, link: '/check?tab=run', dedupeKey: `chkext:${e.id}` }).catch(() => []);

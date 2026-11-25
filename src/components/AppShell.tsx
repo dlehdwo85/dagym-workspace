@@ -219,7 +219,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const homeSum = homeParts.reduce((a, b) => a + b.n, 0);
   const homeDots = atSpaceHome ? spaceMenuV3.filter((n) => menuDot(n.href)).map((n) => n.label) : [];
   const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'), byHref('/mail/outbox'),
-    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), ...((menus.memos ?? 'use') !== 'none' ? [{ href: '/memos', label: '메모', icon: NotebookPen }] : []) /* #1135 */, byHref('/notices'), byHref('/check'), ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: MessageSquareText }] : [])];
+    ...(session.features.library ? [{ href: `/library${sp_}`, label: '자료실', icon: Library }] : []), byHref('/contacts'), ...((menus.memos ?? 'use') !== 'none' ? [{ href: '/memos', label: '메모', icon: NotebookPen }] : []) /* #1135 */, byHref('/notices'), ...(session.features.check !== false ? [byHref('/check')] : []) /* #1181 회사별 기능 켜기 */, ...(session.features.ai ? [{ href: `/assistant${sp_}`, label: aiName(space), icon: MessageSquareText }] : [])];
 
   // 단축키: Ctrl K, N, ?, g h / g m / g c
   const gPressed = useRef(0);
