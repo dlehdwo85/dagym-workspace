@@ -4,6 +4,7 @@ import { assertSpace } from './spaces';
 import { isAdmin } from './access';
 import { badRequest, forbidden, notFound } from './errors';
 import { tenantOf, type SessionUser } from './types';
+import { PLAIN_ISSUE } from './mktMediaRules';
 import { brandAliases, contactLine, factsOf, otherBrandNames, otherBrands } from './mktQuality';
 import { markedNoText, markedSkip, markedText, photoFlags, visionBackdrop, visionGraphic, visionOk, visionText } from './mktPhotos';
 
@@ -442,7 +443,7 @@ export const coverMark = (d: { photoFix?: string[]; scene?: boolean; gen?: boole
  * 295차 #835(대표 10/31 '배경 단색에 글자 하나 툭 놓고 단조롭다 — 레퍼런스대로'): 인스타·페이스북 피드·스토리 표지가 단색 바탕 + 글자뿐이면 승인함에 올리지 않음(수정 요청 + 이 줄).
  * 같은 브랜드 실사를 참고해 표지 사진을 생성(회사 설정 photo_gen — 정기 실행)하면 그 줄을 지우고 승인 대기로. 블로그 대표 이미지는 본문 사진 규칙(3장)으로 따로 봄
  */
-export const PLAIN_ISSUE = '표지가 단색 바탕 + 글자뿐 — 사진·화면·도표가 든 표지로 바꾼 뒤 승인함에 올립니다(같은 브랜드 실사 참고 생성 또는 자료 요청)';
+export { PLAIN_ISSUE };
 export const plainCoverOf = (c: { channel: string; kind?: string | null }) => c.channel !== 'blog' && (c.kind === 'feed' || c.kind === 'story');
 /** 표지 단색 여부에 맞춰 검사 줄·통과·상태를 다시 맞춤(그 밖 검사 줄은 그대로) — 단색이 풀리고 남은 검사 줄이 없으면 수정 요청 → 승인 대기 */
 export function plainStatus(c: { channel: string; kind?: string | null }, q: { passed?: boolean; issues?: string[] }, plain: boolean, status: string) {
@@ -1140,7 +1141,7 @@ export async function makeVisualNow(u: SessionUser, id: string, opts: { redraw?:
   const sql = db();
   const [c] = await sql<(Content & { status: string; quality: any })[]>`select id, tenant, brand_id, title, channel, kind, created_by, is_test, current_version, status, quality, auto from mkt_contents where id = ${id} and tenant = ${tenantOf(u)}`;
   if (!c) throw notFound('콘텐츠를 찾을 수 없습니다');
-  if (!serverVisual(c)) throw badRequest(c.channel === 'threads' ? '스레드는 글만으로 올릴 수 있습니다' : '영상 시안은 서버가 그리지 않습니다 — 제작 요청 카드(제작의뢰실)로 만들어 주세요');
+  if (!serverVisual(c)) throw badRequest(c.channel === 'threads' ? '스레드는 글만으로 올릴 수 있습니다' : c.channel === 'other' ? '기타(광고 문구 등)는 글만으로 승인할 수 있습니다 — 그림이 필요하면 상세에서 사진을 붙여 주세요' : '영상 시안은 서버가 그리지 않습니다 — 제작 요청 카드(제작의뢰실)로 만들어 주세요');
   if (['published', 'canceled'].includes(c.status)) throw badRequest('게시했거나 취소한 콘텐츠입니다');
   const [v] = await sql<{ body: string; media_ids: string[] }[]>`select body, media_ids from mkt_versions where content_id = ${id} and version = ${c.current_version}`;
   const vis = c.quality?.visual;

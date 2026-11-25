@@ -11,6 +11,7 @@ import { Button, cx, fmtDateTime, inputCls, toast } from '@/components/ui';
 import { ModeChip } from './ModeToggle';
 import { ChannelPreview, Slides } from './ChannelPreview';
 import { VersionCompare, partsLabel, requestLabel, requestNote, type Revision } from './VersionCompare';
+import { textOk } from '@/lib/mktMediaRules';
 
 /** 운영실 화면 명세(OPS_ROOM_SCREEN_SPEC 2-2·5절)에 맞춘 승인 카드·라벨 — 승인함·현황이 같이 씀 */
 const KIND: Record<string, string> = { feed: '피드', blog: '블로그', reels: '릴스', video: '생성 영상', shorts: '쇼츠', story: '스토리', photo: '사진 게시물' };
@@ -30,8 +31,8 @@ export const BrandChip = ({ name, color }: { name: string | null; color?: string
 const VIDEO_KINDS = ['reels', 'shorts', 'video'];
 /** #516 서버가 바로 그릴 수 있는 시안(인스타·페북 피드·스토리, 크레딧 0) — 서버 mktAutoVisual.serverVisual 과 같은 규칙 */
 export const canDrawVisual = (c: { channel: string; kind?: string | null }) => ['instagram', 'facebook', 'blog'].includes(c.channel) && !VIDEO_KINDS.includes(c.kind ?? '');
-/** #516 시안이 없어 승인할 수 없는 카드(스레드만 글로 승인 — 서버 decide 와 같은 규칙) */
-export const needsVisual = (c: { channel: string; media_ids?: string[] }) => c.channel !== 'threads' && !c.media_ids?.length;
+/** #516 시안이 없어 승인할 수 없는 카드(스레드·기타(광고 문구)는 글로 승인 — #1181-2, 서버 decide 와 같은 규칙 mktMediaRules.textOk) */
+export const needsVisual = (c: { channel: string; media_ids?: string[] }) => !textOk(c.channel) && !c.media_ids?.length;
 /** [AI 이미지로 다시] 수정 요청 문구 — 서버 classifyRevision 이 이미지 재생성(regen_image)으로 읽음 */
 const AI_REGEN = 'AI 이미지로 다시 만들어 주세요(사진 재생성)';
 const AI_REGEN_CREDITS = 6.5;
@@ -217,10 +218,10 @@ export function ApprovalCard({ c, canDecide, onDone, onOpen, simple = false }: {
       {/* 대표 재지적 10/20 18:45 ②: 시안이 없어도 카드 첫 화면에 자리(회색 상자)를 늘 보여 줌 — 제작 중이면 예정 시각
           #516 (c): 시안 없이는 승인할 수 없는 카드(스레드 빼고)는 빨간 띠 '시안 없음' + [지금 만들기](서버 그리기, 크레딧 0) — [승인] 단추는 숨김 */}
       {media.length === 0 && <div className={cx('mt-2 flex items-center gap-3 rounded-input border p-2', noVisual ? 'border-red-300 bg-red-50' : 'border-dashed border-line bg-slate-50')} data-testid="approval-no-media" data-blocked={noVisual || undefined}>
-        <div className={cx('flex size-20 shrink-0 items-center justify-center rounded-input text-center text-[11px] leading-tight', noVisual ? 'bg-red-100 font-semibold text-red-800' : 'bg-slate-200 text-ink-2')}>{c.production || (c.auto && !c.produced_at) ? '시안\n제작 중'.split('\n').map((t, i) => <span key={i} className="block">{t}</span>) : '시안 없음'}</div>
+        <div className={cx('flex size-20 shrink-0 items-center justify-center rounded-input text-center text-[11px] leading-tight', noVisual ? 'bg-red-100 font-semibold text-red-800' : 'bg-slate-200 text-ink-2')}>{c.production || (c.auto && !c.produced_at) ? '시안\n제작 중'.split('\n').map((t, i) => <span key={i} className="block">{t}</span>) : textOk(c.channel) ? '글 시안' : '시안 없음'}</div>
         <div className="min-w-0 flex-1 space-y-1">
           {noVisual && <p className="text-xs font-bold text-red-800" data-testid="approval-no-media-band">시안 없음 — 글만으로는 승인할 수 없습니다</p>}
-          <p className="text-xs text-ink-2">{c.production ? `${c.production.kind.includes('video') ? '영상' : '이미지'} 제작 요청이 열려 있습니다${c.production.status === 'needs_approval' ? ' (한도 승인 대기)' : ''} — 붙으면 여기에 보입니다` : c.auto && !c.produced_at && c.produce_at ? `AI 제작 예정 ${fmtDateTime(c.produce_at)}` : drawable ? '[지금 만들기]를 누르면 브랜드 키트·자료실 사진으로 바로 그려 붙입니다(크레딧 0)' : '아직 시안이 없습니다 — 상세에서 수정본에 사진을 붙여 주세요'}</p>
+          <p className="text-xs text-ink-2">{c.production ? `${c.production.kind.includes('video') ? '영상' : '이미지'} 제작 요청이 열려 있습니다${c.production.status === 'needs_approval' ? ' (한도 승인 대기)' : ''} — 붙으면 여기에 보입니다` : c.auto && !c.produced_at && c.produce_at ? `AI 제작 예정 ${fmtDateTime(c.produce_at)}` : textOk(c.channel) ? `${c.channel === 'threads' ? '스레드' : '기타(광고 문구 등)'}는 글만으로 승인할 수 있습니다 — 사진은 선택` : drawable ? '[지금 만들기]를 누르면 브랜드 키트·자료실 사진으로 바로 그려 붙입니다(크레딧 0)' : '아직 시안이 없습니다 — 상세에서 수정본에 사진을 붙여 주세요'}</p>
           {noVisual && !done && (drawable ? <Button size="sm" onClick={() => makeNow()} disabled={making} data-testid="approval-make-visual">{making ? '그리는 중…' : '지금 만들기'}</Button>
             : VIDEO_KINDS.includes(c.kind ?? '') ? <Link href="/s/marketing/automation" className="inline-block text-xs font-medium text-violet-700 underline" data-testid="approval-production-link">제작 요청 카드 보기</Link> : null)}
         </div>

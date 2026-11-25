@@ -8,6 +8,8 @@ import { audit } from './log';
 import { tenantOf, type SessionUser } from './types';
 import { zUuid } from './api';
 import { purgeAt } from './mktTrash';
+import { BLOG_AUTO_RULE, BLOG_PHOTO_RULE, FEED_PAGE_RULE, STORY_FRAME_RULE, textOk } from './mktMediaRules';
+export { BLOG_AUTO_RULE, BLOG_PHOTO_RULE, FEED_PAGE_RULE, MEDIA_RULES, STORY_FRAME_RULE } from './mktMediaRules';
 
 /** V41 단계 4-2 마케팅 공간 핵심: 콘텐츠·버전·승인함(버전 단위, 승인·수정 요청·보류)·콘텐츠 캘린더·전화 문의 → 영업 업무 */
 export const CHANNELS = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' } as const;
@@ -104,17 +106,12 @@ export async function createBrand(u: SessionUser, i: z.infer<typeof brandInput>)
 }
 
 /** 대표 재지적 10/20 18:45 ③: 블로그는 표지 1장 + 본문 사진 1장 이상이 있어야 승인 요청(승인 대기)·승인이 됩니다 — 없으면 '수정 요청' 상태로 사진을 기다림 */
-export const BLOG_PHOTO_RULE = '블로그는 표지 1장 + 본문 사진 1장 이상을 붙여야 승인 요청됩니다';
 export const needsPhotos = (channel: string, mediaCount: number) => channel === 'blog' && mediaCount < 2;
 /** 요청 C §3-1·3-3(대표 10/25 22:20 '시안이 표지만 있다'): 자동 제작 글의 사진 수 규칙 — 못 미치면 승인함에 못 올리고(수정 요청 칸 + 사유) 승인도 안 됨.
  *  피드(인스타·페북) = 카드뉴스 3~5장(표지 포함, 대표 15-11) · 스토리 = 3~5프레임 · 블로그 = 표지 + 본문 3장(실사 → 모자라면 브랜드 색 도표형 카드). 사람이 직접 올린 글은 예전 규칙(블로그 2장)만 */
-export const BLOG_AUTO_RULE = '블로그는 표지 1장 + 본문 사진 3장 이상(실사 또는 도표형 카드)이 붙어야 승인 요청됩니다';
-export const FEED_PAGE_RULE = '피드는 카드뉴스 3~5장(표지 포함)이 붙어야 승인 요청됩니다';
-export const STORY_FRAME_RULE = '스토리는 3~5프레임이 붙어야 승인 요청됩니다';
-export const MEDIA_RULES = [BLOG_PHOTO_RULE, BLOG_AUTO_RULE, FEED_PAGE_RULE, STORY_FRAME_RULE];
 export function mediaRule(channel: string, kind: string | null | undefined, n: number, auto: boolean): string | null {
   if (channel === 'blog' || kind === 'blog') return auto ? (n < 4 ? BLOG_AUTO_RULE : null) : (n < 2 ? BLOG_PHOTO_RULE : null);
-  if (!auto || channel === 'threads') return null;
+  if (!auto || textOk(channel)) return null;
   if (kind === 'feed' && (channel === 'instagram' || channel === 'facebook')) return n < 3 ? FEED_PAGE_RULE : null;
   if (kind === 'story') return n < 3 ? STORY_FRAME_RULE : null;
   return null;
@@ -310,7 +307,7 @@ export async function decide(u: SessionUser, id: string, i: z.infer<typeof decid
     if (i.version !== c.current_version) throw new HttpError(409, 'stale_version', `최신 버전(v${c.current_version})이 아닙니다 — 새로 고쳐 보고 결정해 주세요`);
     if (i.decision === 'approve' && c.quality?.photoAudit?.pending) throw badRequest('AI 사진·글 대조가 아직 끝나지 않았습니다 — 잠시 뒤 새로 고쳐 승인해 주세요'); // 329차
     if (c.status === 'published') throw badRequest('이미 게시한 콘텐츠입니다');
-    if (i.decision === 'approve' && c.channel !== 'threads') { // 스레드는 글만으로도 승인(사진은 선택). 블로그는 표지+본문 사진 — 대표 10/20 18:45 · 요청 C: 자동 제작 피드 3~5장·스토리 3~5프레임·블로그 표지+3장
+    if (i.decision === 'approve' && !textOk(c.channel)) { // 스레드·기타(광고 문구 — #1181-2)는 글만으로도 승인(사진은 선택). 블로그는 표지+본문 사진 — 대표 10/20 18:45 · 요청 C: 자동 제작 피드 3~5장·스토리 3~5프레임·블로그 표지+3장
       const [v] = await tx<{ n: number }[]>`select cardinality(media_ids) as n from mkt_versions where content_id = ${id} and version = ${i.version}`;
       if (!v?.n && c.channel !== 'blog') throw badRequest('시안 이미지가 없어 승인할 수 없습니다 — 시안을 붙인 뒤 다시');
       const rule = mediaRule(c.channel, c.kind, v?.n ?? 0, !!c.auto);

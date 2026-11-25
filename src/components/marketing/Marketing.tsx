@@ -22,6 +22,7 @@ import { QualityPanel, type QReport } from './QualityPanel';
 import { ChannelPreview } from './ChannelPreview';
 import { AssignDialog } from '@/components/AssigneePicker';
 import { MODE_HINT, MODE_LABEL, ModeChip, ModeToggle, type Mode } from './ModeToggle';
+import { photoNeeded, photoNeedLabel, textOk } from '@/lib/mktMediaRules';
 
 const C = '#7C3AED';
 export const CHANNELS: Record<string, string> = { instagram: '인스타그램', facebook: '페이스북', threads: '스레드', blog: '블로그', youtube: '유튜브', naver_place: '네이버 플레이스', other: '기타' };
@@ -77,7 +78,7 @@ export function ApproveRow({ c, canDecide, onDone }: { c: CardContent; canDecide
       </div>
       <p className="text-xs text-ink-2">{[c.brand, channelLabel(c.channel, c.kind)].filter(Boolean).join(' · ')} · {whenLabel(c.scheduled_at)} 게시{c.current_version > 1 ? ` · 수정본 v${c.current_version}` : ''}</p>
       {/* #516 (c): 시안 없는 글(홈은 첫 시안 id 만 받음)은 [승인] 대신 승인함 [지금 만들기]로 */}
-      {!canDecide ? null : mode === 'idle' ? <div className="mt-1 flex flex-wrap items-center gap-1.5">{'media' in c && !(c as { media?: string | null }).media && c.channel !== 'threads'
+      {!canDecide ? null : mode === 'idle' ? <div className="mt-1 flex flex-wrap items-center gap-1.5">{'media' in c && !(c as { media?: string | null }).media && !textOk(c.channel)
         ? <Link href={`/s/marketing/approvals?c=${c.id}`} className="text-xs font-semibold text-red-700 underline" data-testid="home-no-visual">시안 없음 — 승인함에서 [지금 만들기]</Link>
         : <Button size="sm" disabled={busy} onClick={() => decide('approve')} data-testid="home-approve">승인</Button>}<Button size="sm" variant="secondary" onClick={() => setMode('changes')} data-testid="home-changes">수정 요청</Button></div>
         : <div className="mt-1 flex flex-wrap gap-1.5"><input className={cx(inputCls, 'min-w-0 flex-1')} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="무엇을 고칠지(두 글자 이상)" aria-label="수정 요청 메모" data-testid="home-changes-memo" />
@@ -240,7 +241,7 @@ function ContentDetail({ id, onClose, onChange }: { id: string; onClose: () => v
         {v && <ChannelPreview channel={c.channel} kind={c.kind} brand={c.brand} handle={c.handle} logo={c.brand_logo} color={c.brand_color} title={c.title} body={v.body} media={v.media_ids} info={(data.media ?? []).map((m: any) => ({ id: m.id, mime: m.mime_type }))} />}
         {!v ? <p className="rounded-input bg-slate-50 p-3 text-xs text-ink-3">아직 만든 시안이 없습니다{c.auto && c.produce_at ? ` — 제작 예정 ${fmtDateTime(c.produce_at)}` : ''}</p> : <>
         <div className="rounded-input bg-slate-50 p-3"><p className="mb-1 text-xs text-ink-3">v{v.version} · {v.created_by_name}{v.note ? ` · ${v.note}` : ''}</p><p className="whitespace-pre-wrap">{v.body || '(본문 없음)'}</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{c.channel === 'blog' || c.channel === 'threads' ? `사진 없음 — ${c.channel === 'blog' ? '블로그' : '스레드'}는 글만으로도 승인됩니다` : '시안 없음 — 승인 불가'}</span>}</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">{v.media_ids.length ? v.media_ids.map((m: string) => <a key={m} href={`/api/library/${m}/download?inline=1`} target="_blank" rel="noopener" className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-800 underline">{titleOf(m)}</a>) : <span className="text-xs text-amber-700">{textOk(c.channel) ? `사진 없음 — ${c.channel === 'threads' ? '스레드' : '기타(광고 문구 등)'}는 글만으로도 승인됩니다` : c.channel === 'blog' ? '사진 없음 — 블로그는 표지·본문 사진을 붙여야 승인됩니다' : '시안 없음 — 승인 불가'}</span>}</div>
           {(data.media ?? []).some((m: any) => m.faces && v.media_ids.includes(m.id)) && <p className="mt-2 rounded-input border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900" data-testid="content-face-warning">얼굴이 나온 실사 사진이 있습니다 — 촬영·게시 동의를 받은 사진인지 확인한 뒤 승인해 주세요.</p>}</div>
         {!!data.photoRecord?.length && <PhotoRecord rows={data.photoRecord} />}
         {data.fill && (data.fill.status || data.fill.empty > 0) && <FillBox id={id} f={data.fill as FillView} onDone={() => { reload(); onChange(); }} />}
@@ -449,7 +450,9 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
   const ready = plain ? list : list.filter((c) => c.status === 'pending' && !needsVisual(c));
   const noVisual = plain ? [] : list.filter((c) => c.status === 'pending' && needsVisual(c));
   const postponed = plain ? [] : list.filter((c) => c.status === 'hold' && c.quality?.postponed); // 로컬 10/24 09:00: 옮길 날짜가 없어 멈춘 글(취소 아님)
-  const waiting = plain ? [] : list.filter((c) => c.status === 'changes' || (c.status === 'hold' && !c.quality?.postponed));
+  // #1181-2(대표 11/26 '4건이 아니라 3건'): 수정 요청 칸이지만 사진·시안만 붙이면 승인 대기로 올라가는 글은 위쪽 '사진 필요' 줄로 따로 보임
+  const photoNeed = plain ? [] : list.filter((c) => photoNeeded(c)).sort(byWhen);
+  const waiting = plain ? [] : list.filter((c) => (c.status === 'changes' && !photoNeeded(c)) || (c.status === 'hold' && !c.quality?.postponed));
   // 로컬 10/21 08:10·09:20: 승인됐지만 아직 게시 전 — 예정 시각 임박·미래 순, 지난 건은 '예정 지남' 접힘, 기본 10건 + 더보기(브랜드 필터 적용)
   const nowMs = Date.now(); const [moreApproved, setMoreApproved] = useState(false);
   const approvedAll = plain ? [] : list.filter((c) => c.status === 'approved').sort((a, b) => String(a.scheduled_at ?? '9999').localeCompare(String(b.scheduled_at ?? '9999')));
@@ -461,12 +464,16 @@ function ApprovalList({ contents, canDecide, plain, onOpen, onDone, simple = fal
       {brands.length > 1 && <div className="flex flex-wrap gap-1.5" data-testid="mkt-brand-tabs">{['', ...brands].map((b) => (
         <button key={b || 'all'} type="button" onClick={() => setBrand(b)} className={cx('rounded-full border px-3 py-1 text-xs', brand === b ? 'border-violet-600 bg-violet-50 font-semibold text-violet-800' : 'border-line bg-white')}>
           {b || '전체'} {contents.filter((c) => (!b || c.brand === b) && c.status === 'pending' && !needsVisual(c)).length}</button>))}</div>}
-      {!plain && <p className="text-sm" data-testid="mkt-approvable-count">승인할 시안 <b className="text-orange-700">{ready.length}건</b>{rule && <span className="ml-2 text-xs text-ink-2" data-testid="mkt-deadline-rule">승인 마감 {rule}</span>}</p>}
+      {!plain && <p className="text-sm" data-testid="mkt-approvable-count">승인할 시안 <b className="text-orange-700">{ready.length}건</b>{(photoNeed.length > 0 || noVisual.length > 0) && <span className="ml-1 text-ink-2" data-testid="mkt-approvable-more">· {[photoNeed.length ? `사진 필요 ${photoNeed.length}건` : '', noVisual.length ? `시안 없음 ${noVisual.length}건` : ''].filter(Boolean).join(' · ')} — 아래에서 사진·시안을 붙이면 승인할 수 있습니다</span>}{rule && <span className="ml-2 text-xs text-ink-2" data-testid="mkt-deadline-rule">승인 마감 {rule}</span>}</p>}
       {!plain && <BatchBoxes list={list} onOpen={onOpen} />}
       {!ready.length ? <p className="rounded-card border border-dashed border-line bg-white p-6 text-center text-sm text-ink-3">{plain ? '해당 콘텐츠가 없습니다' : '지금 승인할 최종 시안이 없습니다.'}</p> : (
         <div className="space-y-2">{shown.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}
           {!more && ready.length > 3 && <Button variant="secondary" className="w-full" onClick={() => setMore(true)} data-testid="mkt-more">{ready.length - 3}건 더 보기</Button>}</div>
       )}
+      {photoNeed.length > 0 && <details open className="rounded-card border border-amber-300 bg-amber-50/40 p-3 text-sm" data-testid="mkt-photo-need"><summary className="cursor-pointer font-medium text-amber-900">사진 필요 {photoNeed.length}건 — 사진·시안을 붙이면 승인 대기로 올라옵니다</summary>
+        <ul className="mt-2 divide-y divide-amber-200 text-xs">{photoNeed.map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5" data-testid="mkt-photo-need-row"><button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => onOpen(c.id)}>{c.title}</button>
+          <span className="text-amber-900">{photoNeedLabel(c)}</span><span className="text-ink-3">{[channelLabel(c.channel, c.kind), whenLabel(c.scheduled_at)].filter(Boolean).join(' · ')}</span>{c.brand && <BrandChip name={c.brand} color={c.brand_color ?? null} />}
+          {canDecide && <Button size="sm" variant="secondary" onClick={() => onOpen(c.id)} data-testid="mkt-photo-need-open">열어서 사진 붙이기</Button>}</li>)}</ul></details>}
       {noVisual.length > 0 && <details open className="rounded-card border border-red-300 bg-red-50/40 p-3 text-sm" data-testid="mkt-no-visual"><summary className="cursor-pointer font-medium text-red-800">시안 없음 — 시안을 붙여야 승인할 수 있습니다 {noVisual.length}건 (승인 숫자에서 뺌)</summary>
         <div className="mt-2 space-y-2">{noVisual.map((c) => <ApprovalCard key={c.id} c={c} canDecide={canDecide} simple={simple} onDone={onDone} onOpen={() => onOpen(c.id)} />)}</div></details>}
       {approvedWait.length > 0 && <details open className="rounded-card border border-emerald-200 bg-emerald-50/30 p-3 text-sm" data-testid="mkt-approved-wait"><summary className="cursor-pointer font-medium text-emerald-900">승인됨 · 게시 전 {approvedWait.length}건 — 열어서 [지금 게시] 또는 예정 시각에 자동</summary>

@@ -6,6 +6,7 @@ import { assertSpace } from './spaces';
 import { badRequest, forbidden, notFound } from './errors';
 import { zUuid } from './api';
 import { layoutBody, layoutCaption, placePhotos } from './mktText';
+import { VISUAL_ISSUE_IMAGE, textOk } from './mktMediaRules';
 import { JSON_LIKE, avoidOf, voiceInput, factsInput, otherBrands, otherBrandNames, otherBrandLabels, activeNews, newsText, dayAdd, todayKst, factsOf,
   exampleInput, examplesOf, exampleKindOf, examplesPrompt, EXAMPLE_KINDS, EXAMPLE_PER_KIND } from './mktQuality';
 import { FEED_STYLES, FEED_TEMPLATES, NEED_LABEL, TEMPLATE_IDS, feedInput, normalizeFeed } from './mktFeedTemplates';
@@ -698,8 +699,9 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
   const M = await import('./marketing');
   const mediaIssue = M.mediaRule(c.channel, kind, mediaIds.length, true);
   if (mediaIssue && (mediaIds.length || kind === 'blog')) { q.passed = false; q.issues = [...q.issues, mediaIssue]; }
-  const visualIssue = VIDEO_KINDS.includes(kind) ? '영상 시안 제작 중 — 영상이 붙으면 승인 대기로 올라갑니다' : '시안 이미지 없음 — 승인함에서 [지금 만들기]';
-  if (!mediaIds.length && c.channel !== 'threads' && kind !== 'blog') { q.passed = false; q.issues = [...q.issues, visualIssue]; }
+  const visualIssue = VIDEO_KINDS.includes(kind) ? '영상 시안 제작 중 — 영상이 붙으면 승인 대기로 올라갑니다' : VISUAL_ISSUE_IMAGE;
+  const textOnly = textOk(c.channel) && !VIDEO_KINDS.includes(kind); // #1181-2: 스레드·기타(광고 문구)는 글 시안으로 승인
+  if (!mediaIds.length && !textOnly && kind !== 'blog') { q.passed = false; q.issues = [...q.issues, visualIssue]; }
   // 295차 #835(대표 '배경 단색에 글자 하나 툭'): 피드·스토리 표지가 단색 바탕 + 글자뿐이면 승인함 대신 수정 요청 — 정기 실행이 같은 브랜드 실사 참고로 표지 사진을 만들면 승인 대기로
   if (cover.plain && V.plainCoverOf({ channel: c.channel, kind })) { q.passed = false; q.issues = [...q.issues, V.PLAIN_ISSUE]; }
   const visualOnly = !q.passed && q.issues.length === 1 && q.issues[0] === visualIssue;
@@ -731,8 +733,8 @@ export async function produceContent(c: any, actorId?: string | null, how: 'auto
     // 271차 #811 영상 만드는 방법(브랜드 영상 키트): 앱 화면 녹화 = 생성 비용 0 — 녹화 파일을 붙이는 카드(예상 크레딧 0)
     const screen = VIDEO_KINDS.includes(kind) && videoMethod === 'screen';
     const brief = screen ? `앱 화면 녹화로 만듭니다(생성 비용 0) — 데모 회사 화면을 녹화해 자료실 '마케팅/화면 녹화'에 올린 뒤 이 글에 붙여 주세요.\n\n${base}` : base;
-    if (!mediaIds.length && !held) await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', f.timing ? `${brief}\n\n${f.timing}` : brief, screen ? 0 : kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
-    else await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'generate_image', 0, '시안 서버 그리기 — 크레딧 0', ${f.title})`;
+    if (!mediaIds.length && !held && !textOnly) await requestCard(c, v, kind === 'video' || kind === 'reels' || kind === 'shorts' ? 'video' : 'image', f.timing ? `${brief}\n\n${f.timing}` : brief, screen ? 0 : kind === 'video' ? EST.video : kind === 'reels' || kind === 'shorts' ? EST.video_reels : EST.image, tx);
+    else if (mediaIds.length) await tx`insert into mkt_credit_ledger (tenant, content_id, version, kind, credits, note, title) values (${c.tenant}, ${c.id}, ${v}, 'generate_image', 0, '시안 서버 그리기 — 크레딧 0', ${f.title})`;
   });
   // 329차: 표지·장·본문 사진을 글과 AI 로 대조(글당 몇 원) — 안 맞는 칸이 있으면 승인 대기 대신 수정 요청(사유)·자료 요청
   if (auditNeeded) { const a = await PA.auditContent(c.id, { quiet: true }).catch(() => null); if (a && 'passed' in a && !a.passed) { q.passed = false; q.issues = [...q.issues, PA.auditIssue(a)]; } }

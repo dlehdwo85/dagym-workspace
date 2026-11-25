@@ -6,6 +6,7 @@
 import { db } from './db';
 import { assertSpace } from './spaces';
 import { tenantOf, type SessionUser } from './types';
+import { photoNeeded, textOk } from './mktMediaRules';
 
 const VIDEO = ['reels', 'shorts', 'video'];
 const KST = (d: Date | string | null) => (d ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d)) : null);
@@ -30,10 +31,11 @@ export async function inboxStatus(u: SessionUser) {
   const s = await A.settingsOf(t); const now = Date.now();
   const rows = await rowsOf(t, sql`c.status in ('pending', 'changes', 'hold', 'draft', 'approved')`);
   const late = (r: Row) => !!r.scheduled_at && (M.approvalDeadline(r.scheduled_at, s)?.getTime() ?? Infinity) < now;
-  const noVisual = (r: Row) => !r.media && r.channel !== 'threads';
+  const noVisual = (r: Row) => !r.media && !textOk(r.channel); // #1181-2: 스레드·기타(광고 문구)는 글 시안으로 승인
   const pending = rows.filter((r) => r.status === 'pending');
   const approvable = pending.filter((r) => !noVisual(r));
   const changes = rows.filter((r) => r.status === 'changes');
+  const photoNeed = changes.filter(photoNeeded); // #1181-2: 수정 요청 칸이지만 사진·시안만 붙이면 승인 대기로 올라가는 글
   const postponed = rows.filter((r) => r.status === 'hold' && r.quality?.postponed);
   const hold = rows.filter((r) => r.status === 'hold' && !r.quality?.postponed);
   const held = rows.filter((r) => r.status === 'draft' && r.quality?.held);
@@ -49,6 +51,7 @@ export async function inboxStatus(u: SessionUser) {
   if (!approvable.length) why.push('승인할 시안이 0건입니다');
   if (pending.some(late)) why.push(`게시일(승인 마감)이 지난 승인 대기 ${pending.filter(late).length}건 — 승인함에 '게시일 지남'으로 보이고, 승인하면 가장 가까운 빈 게시 칸으로 옮겨 게시합니다`);
   if (pending.some(noVisual)) why.push(`시안(사진·영상)이 없어 승인 숫자에서 뺀 글 ${pending.filter(noVisual).length}건 — 승인함 '시안 없음' 칸의 [지금 만들기]`);
+  if (photoNeed.length) why.push(`사진 필요 ${photoNeed.length}건 — 수정 요청 칸에 있고 사진·시안을 붙이면 승인 대기로 올라옵니다(승인함 위쪽 '사진 필요' 줄)`);
   if (s.auto_pause) why.push('자동 제작 일시정지 중 — 정기 칸·자동 제작·밤사이·주간 계획·운영 제안이 멈춰 새 시안이 올라오지 않습니다(다시 켜기는 대표 결정)');
   if (changes.some(unprocessed)) why.push(`수정 요청 ${changes.filter(unprocessed).length}건이 아직 AI 수정본으로 안 만들어짐 — 승인함 카드의 [AI 수정본 만들기]`);
   if (changes.some((r) => r.production?.status === 'needs_approval')) why.push(`영상·AI 이미지 다시 만들기 ${changes.filter((r) => r.production?.status === 'needs_approval').length}건이 비용 승인을 기다림`);
@@ -58,7 +61,7 @@ export async function inboxStatus(u: SessionUser) {
   const brief = (r: Row) => ({ id: r.id, title: r.title, brand: r.brand, status: STATUS[r.status] ?? r.status, format: VIDEO.includes(r.kind ?? '') ? `${r.channel} 영상(${r.kind})` : `${r.channel}${r.kind ? ` ${r.kind}` : ''}`,
     version: r.current_version, scheduled: KST(r.scheduled_at), late: late(r), media: r.media, link: `/s/marketing/approvals?c=${r.id}` });
   return {
-    counts: { approvable: approvable.length, approvableLate: approvable.filter(late).length, noVisual: pending.filter(noVisual).length, changes: changes.length, changesUnprocessed: changes.filter(unprocessed).length,
+    counts: { approvable: approvable.length, approvableLate: approvable.filter(late).length, noVisual: pending.filter(noVisual).length, photoNeeded: photoNeed.length, changes: changes.length, changesUnprocessed: changes.filter(unprocessed).length,
       hold: hold.length, postponed: postponed.length, heldDrafts: held.length, batchWaiting: batchWait.length, plannedDrafts: planned.length, approvedNotPublished: approved.length, approvedPastDue: approvedPast.length,
       productionOpen: o.requests, productionNeedsApproval: o.asks, proposals: o.proposals, budgets: o.budgets, goals: o.goals, briefs: o.briefs },
     autoPaused: !!s.auto_pause, why,
