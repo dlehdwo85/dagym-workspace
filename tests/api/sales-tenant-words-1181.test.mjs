@@ -59,7 +59,7 @@ test('다른 회사 검색어로도 받음 → 그 회사 입찰 목록에만 ·
   assert.ok(mine.includes('시험1181 시청 홈페이지 유지보수 용역'), `그 회사 입찰 목록: ${JSON.stringify(mine)}`);
   // #1181 상업화 마감 2: 그 회사 낱말 판정 — 제목에 검색어 = 즉시 검토 · 점수 60 · 영업 포인트
   const h = list.find((x) => x.title === '시험1181 시청 홈페이지 유지보수 용역');
-  assert.deepEqual([h.category, h.fit, h.salesPoint], ['즉시 검토', 60, "제목에 '홈페이지'"]);
+  assert.deepEqual([h.category, h.fit, h.salesPoint], ['검토', 60, "제목에 '홈페이지'"]); // 로컬 11/26 기준 좁힘: 제목에 낱말 하나만 = 검토(즉시 검토는 한 가지 더 맞을 때)
   const base = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.map((x) => x.title);
   assert.ok(!base.includes('시험1181 시청 홈페이지 유지보수 용역'), '다짐(기본 회사) 목록에는 안 보임');
 });

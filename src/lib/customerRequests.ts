@@ -27,20 +27,23 @@ async function sync() {
     where c.created_at > now() - interval '180 days' on conflict (source, source_id) do nothing`;
 }
 
-export async function listRequests(u: SessionUser, f: { status?: string | null; category?: string | null } = {}) {
+// 로컬 11/26: 검수용 시험 회사·심사용 demo·결제 시험(test_*) 요청은 기본 목록·숫자에서 뺌(test=1 이면 함께, '시험 회사' 표시)
+const TEST_TENANT = (col: string) => `(${col} = 'demo' or ${col} like 'test\\_%' or coalesce((select t.is_test from tenants t where t.id = ${col}), false))`;
+export async function listRequests(u: SessionUser, f: { status?: string | null; category?: string | null; test?: boolean } = {}) {
   only(u); await sync();
   const sql = db();
   const rows = await sql<any[]>`
-    select r.id, r.tenant, tn.name as tenant_name, r.source, r.title, r.body, r.category, r.status, r.owner_id, ou.name as owner_name, r.group_id, r.reply, r.replied_at, r.created_at, r.updated_at,
+    select r.id, r.tenant, tn.name as tenant_name, (r.tenant is not null and ${sql.unsafe(TEST_TENANT('r.tenant'))}) as test_company, r.source, r.title, r.body, r.category, r.status, r.owner_id, ou.name as owner_name, r.group_id, r.reply, r.replied_at, r.created_at, r.updated_at,
       (select count(distinct coalesce(x.tenant, x.id::text))::int from customer_requests x where x.group_id = r.id or x.id = r.id) as companies,
       (select count(*)::int from customer_requests x where x.group_id = r.id) as grouped
     from customer_requests r left join tenants tn on tn.id = r.tenant left join users ou on ou.id = r.owner_id
-    where r.group_id is null
+    where r.group_id is null ${f.test ? sql`` : sql`and not (r.tenant is not null and ${sql.unsafe(TEST_TENANT('r.tenant'))})`}
       ${f.status ? sql`and r.status = ${f.status}` : sql`and r.status not in ('done', 'rejected')`}
       ${f.category ? sql`and r.category = ${f.category}` : sql``}
     order by (select count(distinct coalesce(x.tenant, x.id::text)) from customer_requests x where x.group_id = r.id or x.id = r.id) desc, r.created_at desc limit 200`;
-  const counts = await sql<{ status: string; n: number }[]>`select status, count(*)::int as n from customer_requests where group_id is null group by status`;
-  return { items: rows, counts: Object.fromEntries(counts.map((c) => [c.status, c.n])), labels: { category: CATEGORY_LABEL, status: STATUS_LABEL, source: SOURCE_LABEL } };
+  const counts = await sql<{ status: string; n: number }[]>`select status, count(*)::int as n from customer_requests where group_id is null ${f.test ? sql`` : sql`and not (tenant is not null and ${sql.unsafe(TEST_TENANT('tenant'))})`} group by status`;
+  const [{ hidden }] = await sql<{ hidden: number }[]>`select count(*)::int as hidden from customer_requests where group_id is null and tenant is not null and ${sql.unsafe(TEST_TENANT('tenant'))}`;
+  return { items: rows, testHidden: f.test ? 0 : hidden, counts: Object.fromEntries(counts.map((c) => [c.status, c.n])), labels: { category: CATEGORY_LABEL, status: STATUS_LABEL, source: SOURCE_LABEL } };
 }
 
 export const addInput = z.object({ source: z.enum(['memo', 'mail']), tenant: z.string().trim().max(60).nullable().optional(), title: z.string().trim().min(2).max(200), body: z.string().trim().max(5000).optional() });

@@ -87,13 +87,15 @@ describe('414차 영업 일반화 — 다른 회사 경로', () => {
     assert.deepEqual(b1.items.map((x) => x.title).sort(), ['시험시 식자재 보관 창고 임대', '시험시 학교 급식 식자재 납품 업체 선정']);
     assert.ok(!b1.needKeywords);
     const n2 = b1.items.find((x) => /납품/.test(x.title));
-    // #1181 상업화 마감 2: 다른 회사도 회사 낱말 판정 — 제목에 검색어 = 즉시 검토 · 점수 60 · 영업 포인트(다짐 적합 사업·협력사 칸은 그대로 비어 있음)
-    assert.deepEqual([n2.related, n2.category, n2.fitBusiness, n2.partner, n2.keywords, n2.fit, n2.salesPoint], [true, '즉시 검토', null, null, '식 자재', 60, "제목에 '식 자재'"]);
+    // #1181 상업화 마감 2: 다른 회사도 회사 낱말 판정 — 점수 60 · 영업 포인트(다짐 적합 사업·협력사 칸은 그대로 비어 있음)
+    // 로컬 11/26 기준 좁힘: 제목에 낱말 하나만 맞으면 '검토'(즉시 검토는 낱말 2개 이상 또는 관심 사업 낱말)
+    assert.deepEqual([n2.related, n2.category, n2.fitBusiness, n2.partner, n2.keywords, n2.fit, n2.salesPoint], [true, '검토', null, null, '식 자재', 60, "제목에 '식 자재'"]);
     // 관심 사업 낱말도 검색어 — 사업 배지가 붙는다
     await cafe.c.ok('PUT', '/api/sales/business-categories', { items: [{ name: '카페 운영', keywords: ['카페'], color: '#2563EB' }] });
     const b2 = await bids(cafe.c);
     const n4 = b2.items.find((x) => /카페/.test(x.title));
     assert.ok(n4, '관심 사업 낱말로 잡힘'); assert.deepEqual(n4.businesses.map((x) => x.name), ['카페 운영']);
+    assert.equal(n4.category, '즉시 검토', '제목에 관심 사업 낱말 = 즉시 검토');
     assert.equal(b2.items.length, 3);
     // 제외어
     await cafe.c.ok('PUT', '/api/sales/digest/prefs', { excludes: ['창고'] });
@@ -109,12 +111,12 @@ describe('414차 영업 일반화 — 다른 회사 경로', () => {
     assert.ok(w, '진행 기록 있는 공고'); assert.deepEqual([w.related, w.category, w.fitBusiness, w.keywords, w.salesPoint ?? null], [false, null, null, null, null]);
   });
 
-  test('C·D·F 아침 메일: 다른 회사는 검색어에 맞은 공고만(제목에 검색어 = 즉시 검토 구역, #1181)·협력사 모집 없음·구역 설명이 검색어 기준 · 검색어 없는 회사는 정시 발송 안 함', async () => {
+  test('C·D·F 아침 메일: 다른 회사는 검색어에 맞은 공고만(제목에 낱말 + 한 가지 더 = 즉시 검토 구역, #1181·로컬 11/26)·협력사 모집 없음·구역 설명이 검색어 기준 · 검색어 없는 회사는 정시 발송 안 함', async () => {
     const d = await cafe.c.ok('GET', '/api/sales/digest');
     assert.equal(d.plain, true);
-    assert.deepEqual(d.items.map((x) => [x.title, x.section, x.fit, x.why]).sort(), [['시험구청 청사 카페 운영자 모집 공고', 'now', null, '검색어 카페'], ['시험시 학교 급식 식자재 납품 업체 선정', 'now', null, '검색어 식 자재']]);
+    assert.deepEqual(d.items.map((x) => [x.title, x.section, x.fit, x.why]).sort(), [['시험구청 청사 카페 운영자 모집 공고', 'now', null, '검색어 카페'], ['시험시 학교 급식 식자재 납품 업체 선정', 'review', null, '검색어 식 자재']]);
     assert.deepEqual(d.items.find((x) => /카페/.test(x.title)).biz.map((b) => b.name), ['카페 운영']);
-    assert.deepEqual([d.counts.total, d.counts.now, d.counts.review, d.counts.ref], [2, 2, 0, 0], '#1181 마감 2: 제목에 검색어가 있으면 즉시 검토 구역');
+    assert.deepEqual([d.counts.total, d.counts.now, d.counts.review, d.counts.ref], [2, 1, 1, 0], '로컬 11/26: 카페(관심 사업 낱말) = 즉시 검토 · 식자재(낱말 하나) = 검토');
     assert.ok(!LEAK.test(JSON.stringify(d)), JSON.stringify(d).match(LEAK)?.[0]);
     const html = await (await cafe.c.req('GET', '/api/sales/digest?preview=html')).body;
     assert.ok(/제목에 관심 검색어가 든 공고/.test(html) && !/관련 사업이지만|다짐|하이링크|협력사 모집/.test(html), '메일 본문');

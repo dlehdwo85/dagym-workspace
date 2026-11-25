@@ -310,7 +310,8 @@ await step('검수 회사 입찰 검색어 → 목록·즉시 검토·영업 포
 });
 
 // 로컬 11/26 요청 ②: 내 수집 원천 — 넣기 → 받기 1번 → 1건 이상 → 지우기. ㉠ 우리 사이트의 시험 피드(public/qa/watch-feed.xml)로 받기·저장·지우기 자체를 확인
-// ㉡ 공공기관 RSS(정책브리핑 정책뉴스)를 실제로 받아 봄 — 운영 서버(싱가포르)에서 국내 공공 사이트가 막히면 여기서 드러남
+// ㉡ 공공기관 RSS(행정안전부 보도자료)를 실제로 받아 봄 — 운영 서버(싱가포르)에서 국내 공공 사이트가 막히면 여기서 드러남
+//    (정책브리핑 RSS 는 2026-07-01 서비스 중단 — 로컬 11/26 대표 PC 확인. 행안부 주소는 대표 PC 에서 항목 29개 확인)
 const watchOnce = async (label, url) => {
   const r = await raw('POST', '/api/sales/watch', { label, url });
   const j = await r.json().catch(() => null);
@@ -328,13 +329,13 @@ await step('내 수집 원천: 시험 피드 넣기 → 받기 → 2건 → 지�
   ok(w.check.found >= 2 && w.src?.items >= 2, `시험 피드 글 받음 ${w.check.found}건 · 저장 ${w.src?.items}건(2건이어야 함)`);
   ok(!(await api('GET', '/api/sales/watch')).sources?.some((x) => x.label === '운영 확인 시험 피드'), '지운 원천이 목록에 남아 있음');
 });
-// 주소는 클라우드 시험 기계에서 국내 공공 사이트가 막혀 미리 확인하지 못함 → 받지 못하면 '확인 못함'으로 남기고 실패로 세지 않음(주소·운영 서버 위치를 확인한 뒤 실패로 올림)
-await step('내 수집 원천: 공공기관 RSS(정책브리핑) 실제 받기 1건 이상(#1181 A — 못 받으면 확인 못함)', async () => {
+// 운영 서버(싱가포르)에서 받아지는지는 아직 모름 → 받지 못하면 '확인 못함'으로 남기고 실패로 세지 않음(받아지는 것을 확인한 뒤 실패로 올림)
+await step('내 수집 원천: 공공기관 RSS(행정안전부 보도자료) 실제 받기 1건 이상(#1181 A — 못 받으면 확인 못함)', async () => {
   const o = await raw('GET', '/api/sales/watch');
   if (o.status !== 200) { console.log(`  (영업 공간이 열려 있지 않음 ${o.status} — 건너뜀)`); return; }
-  const w = await watchOnce('운영 확인 정책브리핑', 'https://www.korea.kr/rss/policy.xml');
+  const w = await watchOnce('운영 확인 행안부 보도자료', 'https://www.mois.go.kr/gpms/view/jsp/rss/rss.jsp?ctxCd=1012');
   console.log(`  받기 ${JSON.stringify(w.check)} · 원천 상태 ${w.src?.statusLabel ?? '-'} ${w.src?.last_error ?? ''}`);
-  if (w.check?.status !== 'ok' || !(w.check.found >= 1)) unverified.push(`정책브리핑 RSS(${w.src?.last_error ?? `${w.check?.status} ${w.check?.found ?? 0}건`})`);
+  if (w.check?.status !== 'ok' || !(w.check.found >= 1)) unverified.push(`행안부 보도자료 RSS(${w.src?.last_error ?? `${w.check?.status} ${w.check?.found ?? 0}건`})`);
 });
 await step('검수 회사 공간 되돌리기(연 것만 닫음)', async () => {
   for (const sp of openedSpaces) await api('PUT', '/api/admin/spaces', { space: sp, on: false });

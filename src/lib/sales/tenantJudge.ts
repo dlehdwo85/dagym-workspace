@@ -68,6 +68,7 @@ export async function judgeSet(tenant: string): Promise<JudgeSet> {
  * #1181 상업화 마감 2(로컬 코드 점검 11/26 '적합 판정·점수·영업 포인트가 다짐 전용'): 다른 회사 공고 판정 — 회사가 넣은 낱말의 가중치로
  *  점수(0~100) · 분류(즉시 검토 / 검토) · 영업 포인트 한 줄. 다짐(기본 회사)은 matchFit·저장된 판정 그대로라 이 함수를 쓰지 않는다.
  *  제목에 낱말 = 60, 분류·업무 범위에만 = 40 · 맞은 낱말이 더 있으면 하나에 10(최대 20) · 관심 사업 낱말이면 10 · 최대 100.
+ *  즉시 검토 = 제목에 낱말 + (맞은 낱말 2개 이상 또는 관심 사업 낱말) · 사전규격·취소 공고는 검토(로컬 11/26 기준 좁힘)
  *  즉시 검토 = 제목에 낱말이 있고 사전규격·취소 공고가 아님. 나머지는 검토(아침 메일 '검토' 구역).
  */
 export function tenantJudgeRow(r: Record<string, any>, set: JudgeSet): { score: number; classification: '즉시 검토' | '검토'; salesPoint: string; words: string[]; biz: string | null } | null {
@@ -80,7 +81,9 @@ export function tenantJudgeRow(r: Record<string, any>, set: JudgeSet): { score: 
   const cat = set.cats.find((c) => c.keywords.some((k) => hit.has(normText(k)))) ?? null;
   const score = Math.min(100, (inTitle.length ? 60 : 40) + Math.min(20, 10 * (hit.size - 1)) + (cat ? 10 : 0));
   const kind = String(r.notice_kind ?? ''); const prespec = /prespec/.test(String(r.source_type ?? '')) || r.notice_type === '사전규격';
-  const classification = inTitle.length && !prespec && kind !== 'cancel' && !/취소/.test(String(r.current_status ?? '')) ? '즉시 검토' : '검토';
+  // 로컬 11/26(검수 회사 142건 중 131건 '즉시 검토' — 너무 넓음): 제목에 낱말이 있고 한 가지 더 맞을 때만 즉시 검토 — 맞은 낱말 2개 이상 또는 관심 사업 낱말
+  const strong = inTitle.length > 0 && (hit.size >= 2 || !!cat);
+  const classification = strong && !prespec && kind !== 'cancel' && !/취소/.test(String(r.current_status ?? '')) ? '즉시 검토' : '검토';
   const q = (xs: string[]) => xs.slice(0, 3).map((x) => `'${x}'`).join('·');
   const salesPoint = [inTitle.length ? `제목에 ${q(inTitle)}` : null, inRest.length ? `분류·업무 범위에 ${q(inRest)}` : null, cat ? `관심 사업 '${cat.name}'` : null].filter(Boolean).join(' · ');
   return { score, classification, salesPoint, words: [...inTitle, ...inRest], biz: cat?.name ?? null };

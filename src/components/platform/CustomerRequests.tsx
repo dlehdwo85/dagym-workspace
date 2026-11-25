@@ -3,13 +3,14 @@ import { useState } from 'react';
 import { api, useApi } from '../client';
 import { Button, cx, fmtDateTime, inputCls, toast } from '../ui';
 
-type Item = { id: string; tenant: string | null; tenant_name: string | null; source: string; title: string; body: string | null; category: string | null; status: string; owner_name: string | null; reply: string | null; created_at: string; companies: number; grouped: number };
-type Data = { items: Item[]; counts: Record<string, number>; labels: { category: Record<string, string>; status: Record<string, string>; source: Record<string, string> } };
+type Item = { id: string; tenant: string | null; tenant_name: string | null; test_company: boolean; source: string; title: string; body: string | null; category: string | null; status: string; owner_name: string | null; reply: string | null; created_at: string; companies: number; grouped: number };
+type Data = { items: Item[]; testHidden: number; counts: Record<string, number>; labels: { category: Record<string, string>; status: Record<string, string>; source: Record<string, string> } };
 
 /** #1175 고객 요청함(설계 COMMERCIAL_DESIGN_2026-11-26 C): 앱 문의·상담 신청 자동 + 운영자 메모·메일 — 분류·상태·답변 기록·같은 요청 묶기(요청 회사 n곳) */
 export function CustomerRequests() {
-  const [status, setStatus] = useState('');
-  const { data, reload } = useApi<Data>(`/api/platform/customer-requests${status ? `?status=${status}` : ''}`, [status]);
+  const [status, setStatus] = useState(''); const [withTest, setWithTest] = useState(false); // 로컬 11/26: 시험 회사 요청은 기본으로 숨김
+  const qs = [status && `status=${status}`, withTest && 'test=1'].filter(Boolean).join('&');
+  const { data, reload } = useApi<Data>(`/api/platform/customer-requests${qs ? `?${qs}` : ''}`, [status, withTest]);
   const [add, setAdd] = useState({ title: '', body: '', source: 'memo' }); const [open, setOpen] = useState<string | null>(null); const [reply, setReply] = useState(''); const [groupTo, setGroupTo] = useState('');
   if (!data) return null;
   const patch = async (id: string, body: Record<string, unknown>, ok: string) => { try { await api(`/api/platform/customer-requests/${id}`, { method: 'PATCH', body }); toast.ok(ok); reload(); } catch (e: any) { toast.error(e.message); } };
@@ -20,6 +21,7 @@ export function CustomerRequests() {
       <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
         {[['', '진행 중'], ...Object.entries(L.status)].map(([k, v]) => (
           <button key={k || 'open'} type="button" onClick={() => setStatus(k)} className={cx('rounded-full border px-2.5 py-1', status === k ? 'border-brand-600 bg-brand-50 font-semibold' : 'border-line')} data-testid={`req-filter-${k || 'open'}`}>{v}{k && data.counts[k] ? ` ${data.counts[k]}` : ''}</button>))}
+        {(withTest || data.testHidden > 0) && <button type="button" onClick={() => setWithTest(!withTest)} className={cx('rounded-full border px-2.5 py-1', withTest ? 'border-brand-600 bg-brand-50 font-semibold' : 'border-line text-ink-3')} data-testid="req-filter-test">{withTest ? '시험 회사 빼기' : `시험 회사 포함 ${data.testHidden}`}</button>}
       </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_auto]" data-testid="req-add">
         <select className={cx(inputCls, 'h-9')} value={add.source} onChange={(e) => setAdd({ ...add, source: e.target.value })}><option value="memo">운영자 메모</option><option value="mail">메일</option></select>
@@ -33,6 +35,7 @@ export function CustomerRequests() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px]">{L.source[r.source] ?? r.source}</span>
               <button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => { setOpen(open === r.id ? null : r.id); setReply(r.reply ?? ''); }}>{r.title}</button>
+              {r.test_company && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800" data-testid="req-test">시험 회사</span>}
               {r.companies > 1 && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-800" data-testid="req-companies">요청 회사 {r.companies}곳</span>}
               <span className="text-xs text-ink-3">{r.tenant_name ?? '회사 미정'} · {fmtDateTime(r.created_at)}</span>
               <div className="flex shrink-0 gap-1.5">

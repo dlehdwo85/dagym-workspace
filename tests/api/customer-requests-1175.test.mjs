@@ -56,4 +56,13 @@ test('자동 모음 · 메모 · 분류·상태·답변 · 같은 요청 묶기 
   await ctx.owner.ok('PATCH', `/api/platform/customer-requests/${t1.id}`, { status: 'done' });
   assert.ok(!(await ctx.owner.ok('GET', '/api/platform/customer-requests')).items.some((x) => x.id === t1.id));
   assert.ok((await ctx.owner.ok('GET', '/api/platform/customer-requests?status=done')).items.some((x) => x.id === t1.id));
+
+  // 로컬 11/26: 시험 회사(is_test) 요청은 기본 목록·숫자에서 빠지고 ?test=1 이면 '시험 회사' 표시와 함께 보임
+  const q = await company('ceo@req-qa.test', '검수시험'); await sql`update tenants set is_test = true where id = ${q.tenant}`;
+  await sql`insert into support_tickets (tenant, user_id, category, subject, body) select ${q.tenant}, id, 'idea', '[검수] 시험 문의', 'smoke' from users where email = 'ceo@req-qa.test'`;
+  const plain = await ctx.owner.ok('GET', '/api/platform/customer-requests');
+  assert.ok(!plain.items.some((x) => x.title === '[검수] 시험 문의'), '시험 회사 요청은 기본 목록에서 빠짐'); assert.equal(plain.testHidden, 1);
+  const withTest = await ctx.owner.ok('GET', '/api/platform/customer-requests?test=1');
+  const qt = withTest.items.find((x) => x.title === '[검수] 시험 문의'); assert.ok(qt, '?test=1 이면 보임'); assert.equal(qt.test_company, true);
+  assert.ok(withTest.items.filter((x) => x.title !== '[검수] 시험 문의').every((x) => !x.test_company), '다른 줄은 시험 회사 아님');
 });
