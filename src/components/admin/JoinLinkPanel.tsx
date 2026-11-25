@@ -81,7 +81,7 @@ export function JoinLinkPanel({ canEdit }: { canEdit: boolean }) {
 
       <div className="mt-3 rounded-input border border-line p-3 text-xs" data-testid="join-domain">
         <p className="text-sm font-medium">회사 메일 도메인 합류(선택)</p>
-        <p className="mt-0.5 text-ink-3">켜면 @{data.domain.value ?? data.domain.mine} 메일로 워크인에 가입하는 사람에게 새 회사 대신 이 회사 합류 신청을 권합니다(관리자 승인은 그대로). 네이버·지메일 같은 공용 메일은 등록할 수 없습니다.</p>
+        <p className="mt-0.5 text-ink-3">켜면 {data.domain.value ? `@${data.domain.value}` : data.domain.canSet ? `@${data.domain.mine}` : '회사 도메인(@회사도메인)'} 메일로 워크인에 가입하는 사람에게 새 회사 대신 이 회사 합류 신청을 권합니다(관리자 승인은 그대로). 네이버·지메일 같은 공용 메일은 등록할 수 없습니다.</p>
         {data.domain.value ? <p className="mt-1.5">켜짐: <b>@{data.domain.value}</b> {canEdit && <Button size="sm" variant="secondary" className="ml-2" onClick={() => domain(null)} data-testid="join-domain-off">끄기</Button>}</p>
           : data.domain.canSet ? (canEdit && <Button size="sm" variant="secondary" className="mt-1.5" onClick={() => domain(data.domain.mine)} data-testid="join-domain-on">@{data.domain.mine} 로 켜기</Button>)
             : <p className="mt-1.5 text-ink-3">{data.domain.publicBlocked ? `내 로그인 메일(@${data.domain.mine})이 공용 메일이라 켤 수 없습니다 — 회사 도메인 메일로 로그인한 ${T.role.owner}·관리자가 켤 수 있습니다.` : '켤 수 없습니다.'}</p>}

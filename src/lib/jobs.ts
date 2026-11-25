@@ -188,6 +188,7 @@ export async function runTick(trigger: string, opt: { forceDigest?: boolean } = 
   await step('trial', async () => (await import('./plans')).trialJob());
   await step('billing', async () => (await import('./billing')).billingJob()); // 18차 정기 결제·재시도
   await step('tenantPurge', async () => (await import('./tenantPurge')).tenantPurgeTick()); // 상용화 B4: 영구 삭제한 회사 자료·파일 파기 이어서
+  await step('salesWatch', async () => (await import('./sales/watch')).watchTick()); // #1181 상업화 마감 3번: 내 수집 원천(09·15시 KST)
   await step('companyExport', async () => { // 상용화 B4 회사 전체 내보내기: 만들 것·기간 지난 것이 있을 때만 응답 뒤에(정기 실행 한 번에 압축 파일 한 개)
     const X = await import('./companyExport');
     return (await X.companyExportPending()) ? (await import('./later')).runLater('companyExport', () => X.companyExportTick()) : 'idle';
