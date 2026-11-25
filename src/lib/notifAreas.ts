@@ -33,12 +33,20 @@ export const MENU_AREAS: Record<SpaceKey, string[]> = {
   work: ['/tasks', '/projects', '/reports', '/approvals', '/revenue'],
   sales: ['/s/sales/hub', '/s/sales/leads', '/s/sales/deals', '/s/sales/support', '/s/sales/sources'],
   marketing: ['/s/marketing/goals', '/s/marketing/ops', '/s/marketing/team', '/s/marketing/approvals', '/s/marketing/automation', '/s/marketing/materials', '/s/marketing/calendar',
-    '/s/marketing/connections', '/s/marketing/ads', '/s/marketing/ad-ops', '/s/marketing/sites', '/s/marketing/calls', '/s/marketing/history'],
+    '/s/marketing/connections', '/s/marketing/ads', '/s/marketing/ad-ops', '/s/marketing/report', '/s/marketing/sites', '/s/marketing/calls', '/s/marketing/history'],
+};
+/** 공간 전환 칸 설명(마우스 올리기·공간 시트)에 쓰는 메뉴 이름 — 사이드바 이름과 같게 */
+export const MENU_LABEL: Record<string, string> = {
+  '/tasks': '업무', '/projects': '프로젝트', '/reports': '보고', '/approvals': '결재', '/revenue': '매출',
+  '/s/sales/hub': '영업 기회 허브', '/s/sales/leads': '영업 진행', '/s/sales/deals': '제안·계약', '/s/sales/support': '지원사업', '/s/sales/sources': '데이터 설정',
+  '/s/marketing/goals': '월 운영 목표', '/s/marketing/ops': '운영 계획', '/s/marketing/team': 'AI 마케팅팀', '/s/marketing/approvals': '승인함', '/s/marketing/automation': '자동 제작',
+  '/s/marketing/materials': '자료 요청', '/s/marketing/calendar': '콘텐츠 캘린더', '/s/marketing/connections': '연결 계정', '/s/marketing/ads': '광고 성과', '/s/marketing/ad-ops': '광고 집행',
+  '/s/marketing/report': '월간 보고', '/s/marketing/sites': '사이트별 집계', '/s/marketing/calls': '전화 문의', '/s/marketing/history': '이전 요청 기록',
 };
 /** 메뉴가 없는 하위 화면 → 그 화면을 여는 메뉴(허브 안 입찰·계약만료·시설·지역 탭 등) */
 export const AREA_ALIAS: Record<string, string> = {
   '/branch-reports': '/reports', '/s/sales/bids': HUB_AREA, '/s/sales/contracts': HUB_AREA, '/s/sales/prospects': HUB_AREA, '/s/sales/regions': HUB_AREA,
-  '/s/sales/pipeline': '/s/sales/leads', '/s/marketing/report': '/s/marketing/ads',
+  '/s/sales/pipeline': '/s/sales/leads',
 };
 export const menuArea = (a: string | null) => (a ? AREA_ALIAS[a] ?? a : null);
 export function spaceOfArea(a: string): SpaceKey | null {
@@ -50,4 +58,11 @@ export function spaceSums(counts: Record<string, number>): Record<SpaceKey, numb
   const s: Record<SpaceKey, number> = { work: 0, sales: 0, marketing: 0 };
   for (const [a, n] of Object.entries(counts)) { const sp = spaceOfArea(a); if (sp && !DOT_AREAS.has(a) && n > 0) s[sp] += n; }
   return s;
+}
+/** 공간 전환 칸 설명: '업무 41 + 보고 2 = 43'(메뉴 하나면 '업무 41') — 숫자가 없으면 빈 글자. detail = 메뉴별 괄호 설명 */
+export function spaceBreakdown(counts: Record<string, number>, sp: SpaceKey, detail: Record<string, string> = {}) {
+  const on = MENU_AREAS[sp].filter((a) => !DOT_AREAS.has(a) && (counts[a] ?? 0) > 0);
+  const parts = on.map((a) => `${MENU_LABEL[a] ?? a} ${counts[a]}${detail[a] ? `(${detail[a]})` : ''}`);
+  const sum = on.reduce((x, a) => x + counts[a], 0);
+  return parts.length > 1 ? `${parts.join(' + ')} = ${sum}` : parts[0] ?? '';
 }

@@ -24,7 +24,7 @@ async function spacesMain({ browser, desk, owner, staff, BASE, sql, SHOTS }) {
   await owner.goto(`${BASE}/`);
   // ⑦ 사이드바 3구역(대표 승인 10/20 오후): ① 맨 위 공간 전환 탭(요약은 title) ② '업무 메뉴'(홈·업무·프로젝트·보고·결재) ③ '공통'(캘린더·알림·메시지·자료실·연락처·공지·AI 비서) + 관리(접힘)
   await owner.getByTestId('space-tabs').waitFor();
-  await owner.waitForFunction(() => /내 업무 \d+/.test(document.querySelector('[data-testid="space-tab-work"]')?.getAttribute('title') ?? '')); // 요약은 /api/spaces 가 온 뒤
+  await owner.waitForFunction(() => /내 업무 \d+|(업무|보고|결재|프로젝트|매출) \d+/.test(document.querySelector('[data-testid="space-tab-work"]')?.getAttribute('title') ?? '')); // 요약은 /api/spaces 가 온 뒤 · #1171 숫자가 있으면 '업무 41 + 보고 2 = 43'
   const navLabels = async (tid) => (await owner.getByTestId(tid).getByRole('link').allInnerTexts()).map((x) => x.replace(/\d+$/, '').trim());
   assert.equal(await owner.getByTestId('nav-space-head').innerText(), '업무 메뉴');
   const side = owner.getByRole('navigation', { name: '주 메뉴' });

@@ -14,11 +14,16 @@ import { tenantOf, type SessionUser } from './types';
 export type NavCounts = { areas: Record<string, number>; counts: Record<string, number>; dots: string[]; sums: Record<SpaceKey, number>; hubUnseen: number; approvalsTodo: number;
   /** #1173 숫자 설명(메뉴에 마우스를 올리거나 길게 누르면) */ why: Record<string, string> };
 export async function navCounts(sql: Sql, u: SessionUser, opt: { spaces?: string[]; approvalsTodo?: number } = {}): Promise<NavCounts> {
-  const areas: Record<string, number> = Object.fromEntries((await sql<{ a: string; n: number }[]>`select regexp_replace(split_part(split_part(link, '?', 1), '#', 1), ${AREA_SQL_RE}, '\\1') as a, count(*)::int as n
-      from notifications where user_id = ${u.id} and read_at is null and type <> 'chat' and link like '/%' group by 1`).map((r) => [r.a, r.n]));
+  const rows = await sql<{ a: string; appr: boolean; n: number }[]>`select regexp_replace(split_part(split_part(link, '?', 1), '#', 1), ${AREA_SQL_RE}, '\\1') as a,
+      coalesce(meta->>'approval', '') = 'true' as appr, count(*)::int as n
+      from notifications where user_id = ${u.id} and read_at is null and type <> 'chat' and link like '/%' group by 1, 2`;
+  const areas: Record<string, number> = {}; // 화면별 안 읽은 알림(화면 위 '이 화면 새 알림' 줄 — 그대로)
+  for (const r of rows) areas[r.a] = (areas[r.a] ?? 0) + r.n;
   // 메뉴가 없는 하위 화면의 알림은 그 화면을 여는 메뉴 숫자로 접음(AREA_ALIAS)
   const notifs: Record<string, number> = {};
-  for (const [a, n] of Object.entries(areas)) { const m = menuArea(a)!; notifs[m] = (notifs[m] ?? 0) + n; }
+  // 승인 요청 알림(meta.approval — 마케팅 운영 제안·예산·월 목표 등)은 승인함 '승인할 것' 숫자로 세므로 다른 메뉴 숫자에 다시 세지 않음(#1173 이중 셈 방지)
+  let apprNotifs = 0;
+  for (const r of rows) { const m = menuArea(r.a)!; if (r.appr && m.startsWith('/s/marketing/')) { apprNotifs += r.n; continue; } notifs[m] = (notifs[m] ?? 0) + r.n; }
   const counts: Record<string, number> = { ...notifs };
   // 영업 기회 허브: 오늘 공고 알림(안 읽음)은 1건이 아니라 그 묶음의 공고 수로
   const dg = await sql<{ n: number }[]>`select greatest(coalesce((d.counts->>'total')::int, 0), 1) as n from notifications n
@@ -28,12 +33,13 @@ export async function navCounts(sql: Sql, u: SessionUser, opt: { spaces?: string
   if (dg.length) counts[HUB_AREA] = Math.max(0, (counts[HUB_AREA] ?? 0) - dg.length) + hubUnseen;
   // 결재할 것 · 마케팅 승인할 것
   const approvalsTodo = opt.approvalsTodo ?? (await (await import('./approvalForms')).todoCount(sql, u).catch(() => 0));
-  if (approvalsTodo > (counts['/approvals'] ?? 0)) counts['/approvals'] = approvalsTodo;
+  // 결재 = 내가 결재할 것(결재 결과 등 알림은 알림 종에서 — 숫자에 넣지 않음)
+  if (approvalsTodo > 0) counts['/approvals'] = approvalsTodo; else delete counts['/approvals'];
   const spaces = opt.spaces ?? (await (await import('./spaces')).userSpaces(u, sql).catch(() => ['work']));
   let mk: { drafts: number; ops: number } | null = null;
   if (spaces.includes('marketing')) {
     mk = await (await import('./marketing')).approvalCounts(tenantOf(u)).catch(() => ({ drafts: 0, ops: 0 }));
-    if (mk.drafts + mk.ops > (counts['/s/marketing/approvals'] ?? 0)) counts['/s/marketing/approvals'] = mk.drafts + mk.ops;
+    if (mk.drafts + mk.ops > 0) counts['/s/marketing/approvals'] = mk.drafts + mk.ops; else delete counts['/s/marketing/approvals']; // 승인함 = 승인할 것(시안 + 운영 승인)
   }
   // 들어갈 수 없는 공간 화면의 숫자는 빼 둠(공간을 끈 뒤 남은 알림)
   for (const a of Object.keys(counts)) { const sp = spaceOfArea(a); if (sp && sp !== 'work' && !spaces.includes(sp)) delete counts[a]; }
@@ -46,8 +52,8 @@ export async function navCounts(sql: Sql, u: SessionUser, opt: { spaces?: string
     if (!(counts[a] > 0)) continue;
     if (DOT_AREAS.has(a)) why[a] = `${notif(a) || '확인할 것 있음'} — 설정 경고·정보 알림이라 숫자 대신 점(공간 숫자에 넣지 않음)`;
     else if (a === HUB_AREA) why[a] = join(hubUnseen ? `안 본 오늘 공고 ${hubUnseen}건(오늘 아침 공고 알림을 아직 안 엶 — '오늘 새 공고'를 열면 0)` : '', notif(a, dg.length));
-    else if (a === '/approvals') why[a] = join(approvalsTodo ? `내가 결재할 것 ${approvalsTodo}건` : '', approvalsTodo >= (notifs[a] ?? 0) ? '' : notif(a)) || notif(a);
-    else if (a === '/s/marketing/approvals' && mk) why[a] = join(`승인할 것 ${mk.drafts + mk.ops}건(승인 대기 시안 ${mk.drafts} · 운영 승인 ${mk.ops})`, notif(a) ? `${notif(a)}(같은 일에 대한 알림 — 큰 쪽 숫자만 셈)` : '');
+    else if (a === '/approvals') why[a] = join(`내가 결재할 것 ${approvalsTodo}건`, notif(a) ? `결재 화면 ${notif(a)}은 숫자에 넣지 않음(알림 종에서 확인)` : '');
+    else if (a === '/s/marketing/approvals' && mk) why[a] = join(`승인할 것 ${mk.drafts + mk.ops}건(승인 대기 시안 ${mk.drafts} · 운영 승인 ${mk.ops})`, apprNotifs ? `승인 요청 알림 ${apprNotifs}건은 이 숫자로 셈(다른 메뉴에 따로 세지 않음)` : '');
     else why[a] = `${notif(a)}(이 화면으로 가는 알림 — 열어 보면 줄어듦)`;
   }
   return { areas, counts, dots, sums: spaceSums(counts), hubUnseen, approvalsTodo, why };

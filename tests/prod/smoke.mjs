@@ -217,7 +217,7 @@ await step('공간 전환 숫자 = 사이드바 숫자 합(#1171·#1173 — 세 
     work: ['/tasks', '/projects', '/reports', '/approvals', '/revenue'],
     sales: ['/s/sales/hub', '/s/sales/leads', '/s/sales/deals', '/s/sales/support', '/s/sales/sources'],
     marketing: ['/s/marketing/goals', '/s/marketing/ops', '/s/marketing/team', '/s/marketing/approvals', '/s/marketing/automation', '/s/marketing/materials', '/s/marketing/calendar',
-      '/s/marketing/connections', '/s/marketing/ads', '/s/marketing/ad-ops', '/s/marketing/sites', '/s/marketing/calls', '/s/marketing/history'],
+      '/s/marketing/connections', '/s/marketing/ads', '/s/marketing/ad-ops', '/s/marketing/report', '/s/marketing/sites', '/s/marketing/calls', '/s/marketing/history'],
   };
   const n = await api('GET', '/api/notifications?unread=1');
   ok(n.counts && n.sums && n.dots, '메뉴 숫자(counts·sums·dots)가 없음 — #1171 이전 판');

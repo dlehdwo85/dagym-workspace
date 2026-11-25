@@ -1,7 +1,7 @@
 'use client';
 import { ChatBubble } from '@/components/ChatBubble';
 import { RoleBadge } from '@/components/RoleBadge';
-import { areaLabel, areaOf, DOT_AREAS, HUB_AREA, menuArea } from '@/lib/notifAreas';
+import { areaLabel, areaOf, DOT_AREAS, HUB_AREA, menuArea, spaceBreakdown } from '@/lib/notifAreas';
 import { aiName } from '@/lib/aiNames';
 import { TitleBar } from '@/components/TitleBar';
 import { IOS_ADMIN_NOTE, billingNote, useInApp } from './inApp';
@@ -169,12 +169,14 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const atSpaceHome = space !== 'work' && path === sm.home; // 246차 #774: 공간 첫 화면 맨 위 '배지 숫자 = 무엇' 한 줄
   const spaceInfo = useApi<{ summary: Record<string, { text: string; badge: number; label?: string; href?: string }> }>(spaces.length > 1 && (v3 || spaceMenu || more || spaceSheet || space === 'marketing' || atSpaceHome) ? '/api/spaces' : null, [space]);
   /** #1171: 메뉴 숫자 — 서버가 센 counts(공간 전환 숫자와 같은 기준). 설정 경고 화면은 숫자 대신 점(menuDot) */
-  const menuBadge = (href: string) => { const a = menuArea(areaOf(href)); if (!a || DOT_AREAS.has(a)) return 0; return navC ? navC.counts[a] ?? 0 : areas[a] ?? 0; };
+  const menuBadge = (href: string) => { const a = menuArea(areaOf(href)); if (!a || DOT_AREAS.has(a) || /[?&]tab=/.test(href)) return 0; /* 같은 화면의 탭 메뉴(제작의뢰실 = 자동 제작 ?tab=studio)는 숫자를 한 번만 */ return navC ? navC.counts[a] ?? 0 : areas[a] ?? 0; };
   const menuDot = (href: string) => { const a = menuArea(areaOf(href)); return !!a && DOT_AREAS.has(a) && ((navC ? navC.counts[a] ?? 0 : areas[a] ?? 0) > 0); };
   /** #1173: 숫자 설명(마우스를 올리면 · 휴대폰은 길게 누르면) */
   const menuWhy = (href: string) => { const a = menuArea(areaOf(href)); return a ? navC?.why[a] : undefined; };
   /** 공간 전환 칸 숫자 = 그 공간 메뉴 숫자의 합(점 제외) — 폴링 전에는 /api/spaces 값 */
   const spaceBadgeN = (sp: SpaceKey) => navC?.sums[sp] ?? spaceInfo.data?.summary[sp]?.badge ?? 0;
+  /** 공간 전환 칸 설명 = '업무 41 + 보고 2 = 43'(숫자와 같은 기준 · 로컬 11/26) — 서버 글(괄호 설명 포함)이 지금 숫자와 같으면 그것, 아니면 지금 숫자로 만듦 */
+  const spaceText = (sp: SpaceKey) => { const info = spaceInfo.data?.summary[sp]; const live = navC ? spaceBreakdown(navC.counts, sp) : ''; return info && info.badge === spaceBadgeN(sp) ? info.text : live || info?.text || ''; };
   const goSpace = (sp: SpaceKey) => { setSpaceMenu(false); try { localStorage.setItem('wos_space', sp); } catch {} router.push(SPACE_META[sp].home); };
   useEffect(() => { // 앱을 처음 열 때 마지막으로 쓴 공간으로
     if (path !== '/') return;
@@ -213,7 +215,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
   const spaceMenuV3: NavItem[] = space === 'work' ? [byHref('/'), byHref('/tasks'), byHref('/projects'), byHref('/reports/mine'), byHref('/approvals'), ...(!admin && (menus.revenue ?? 'none') !== 'none' ? [{ href: '/revenue', label: '매출', icon: BarChart3 }] : [])] : spaceNav;
   const sp_ = space === 'work' ? '' : `?space=${space}`;
   // #1171·#1173: 공간 첫 화면 맨 위 한 줄 — 공간 전환 숫자 = 이 공간 메뉴 숫자들의 합(어느 메뉴에서 왔는지 · 점은 합계 밖)
-  const homeParts = atSpaceHome ? spaceMenuV3.filter((n) => menuBadge(n.href) > 0).map((n) => ({ href: n.href, label: n.label, n: menuBadge(n.href), why: menuWhy(n.href) })) : [];
+  const homeParts = atSpaceHome ? spaceMenuV3.filter((n, i, all) => menuBadge(n.href) > 0 && all.findIndex((m) => menuArea(areaOf(m.href)) === menuArea(areaOf(n.href))) === i).map((n) => ({ href: n.href, label: n.label, n: menuBadge(n.href), why: menuWhy(n.href) })) : [];
   const homeSum = homeParts.reduce((a, b) => a + b.n, 0);
   const homeDots = atSpaceHome ? spaceMenuV3.filter((n) => menuDot(n.href)).map((n) => n.label) : [];
   const commonV3: NavItem[] = [...(space !== 'work' ? [byHref('/tasks')] : []), byHref('/calendar'), byHref('/notifications'), byHref('/messages'), byHref('/mail/outbox'),
@@ -377,7 +379,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
             <div className={cx('px-2 pt-2', collapsed && 'px-1')} data-testid="space-tabs">
               <div className={cx('grid gap-1 rounded-[10px] bg-slate-100 p-1', collapsed ? 'grid-cols-1' : spaces.length >= 3 ? 'grid-cols-3' : 'grid-cols-2')} role="tablist" aria-label="공간 전환">
                 {spaces.map((sp, i) => { const on = sp === space; const info = spaceInfo.data?.summary[sp]; return (
-                  <button key={sp} role="tab" aria-selected={on} onClick={() => goSpace(sp)} data-testid={`space-tab-${sp}`} title={`${SPACE_META[sp].label}${info?.text ? ` · ${info.text}` : ''} (Ctrl ${i + 1})`}
+                  <button key={sp} role="tab" aria-selected={on} onClick={() => goSpace(sp)} data-testid={`space-tab-${sp}`} title={`${SPACE_META[sp].label}${spaceText(sp) ? ` · ${spaceText(sp)}` : ''} (Ctrl ${i + 1})`}
                     className={cx('relative flex h-8 items-center justify-center gap-1 rounded-[8px] text-xs font-semibold transition-colors', on ? 'text-white shadow-sm' : 'text-slate-500 hover:text-ink')} style={on ? { background: SPACE_META[sp].color } : undefined}>
                     <SpaceIcon s={sp} />{!collapsed && <span>{SPACE_META[sp].short}</span>}
                     {!on && spaceBadgeN(sp) > 0 && <SpaceBadge sp={sp} n={spaceBadgeN(sp)} label={`${SPACE_META[sp].short} 메뉴 숫자 합`} className="absolute -right-0.5 -top-1 min-w-[16px] px-1 text-[10px] leading-4" />}
@@ -401,7 +403,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                   {spaces.map((sp, i) => (
                     <button key={sp} role="menuitem" onClick={() => goSpace(sp)} data-testid={`space-go-${sp}`} className="flex w-full items-center gap-2.5 rounded-[10px] p-2.5 text-left hover:bg-slate-50" style={sp === space ? { background: SPACE_META[sp].soft } : undefined}>
                       <span className="size-3 shrink-0 rounded-full" style={{ background: SPACE_META[sp].color }} />
-                      <span className="min-w-0 flex-1"><span className={cx('block text-sm', sp === space ? 'font-bold' : 'font-medium')}>{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-[11px] text-ink-3">{spaceInfo.data.summary[sp].text}</span>}</span>
+                      <span className="min-w-0 flex-1"><span className={cx('block text-sm', sp === space ? 'font-bold' : 'font-medium')}>{SPACE_META[sp].label}</span>{!!spaceText(sp) && <span className="block truncate text-[11px] text-ink-3" data-testid={`space-text-${sp}`}>{spaceText(sp)}</span>}</span>
                       {sp === space ? <span className="text-xs" style={{ color: SPACE_META[sp].color }}>지금</span> : <Kbd>Ctrl {i + 1}</Kbd>}
                     </button>
                   ))}
@@ -649,7 +651,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                 <button key={sp} onClick={() => { setSpaceSheet(false); goSpace(sp); }} data-testid={`sheet-space-${sp}`} className="flex min-h-[60px] w-full items-center gap-3 rounded-xl border-[1.5px] px-3 py-2 text-left"
                   style={sp === space ? { background: SPACE_META[sp].soft, borderColor: SPACE_META[sp].color } : { borderColor: 'transparent' }}>
                   <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-white" style={{ background: SPACE_META[sp].color }}><SpaceIcon s={sp} /></span>
-                  <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-xs text-ink-2">{spaceInfo.data.summary[sp].text}</span>}</span>
+                  <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{!!spaceText(sp) && <span className="block truncate text-xs text-ink-2" data-testid={`space-text-${sp}`}>{spaceText(sp)}</span>}</span>
                   {sp === space && <Check className="size-5" style={{ color: SPACE_META[sp].color }} aria-label="지금 공간" />}
                   {sp !== space && spaceBadgeN(sp) > 0 && <SpaceBadge sp={sp} n={spaceBadgeN(sp)} label={`${SPACE_META[sp].short} 메뉴 숫자 합`} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />}
                 </button>))}</div>
@@ -688,7 +690,7 @@ export function AppShell({ session, children }: { session: Sess; children: React
                     <button key={sp} onClick={() => goSpace(sp)} data-testid={`mobile-space-${sp}`} className="flex min-h-[60px] w-full items-center gap-3 rounded-xl border-[1.5px] px-3 py-2 text-left"
                       style={sp === space ? { background: SPACE_META[sp].soft, borderColor: SPACE_META[sp].color } : { borderColor: 'transparent' }}>
                       <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-white" style={{ background: SPACE_META[sp].color }}><SpaceIcon s={sp} /></span>
-                      <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{spaceInfo.data?.summary[sp] && <span className="block truncate text-xs text-ink-2">{spaceInfo.data.summary[sp].text}</span>}</span>
+                      <span className="min-w-0 flex-1"><span className="block text-[15px] font-bold">{SPACE_META[sp].label}</span>{!!spaceText(sp) && <span className="block truncate text-xs text-ink-2" data-testid={`space-text-${sp}`}>{spaceText(sp)}</span>}</span>
                       {sp === space && <Check className="size-5" style={{ color: SPACE_META[sp].color }} aria-label="지금 공간" />}
                       {sp !== space && spaceBadgeN(sp) > 0 && <SpaceBadge sp={sp} n={spaceBadgeN(sp)} label={`${SPACE_META[sp].short} 메뉴 숫자 합`} className="min-w-[22px] px-1.5 text-xs leading-[22px]" />}
                     </button>

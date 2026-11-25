@@ -95,8 +95,13 @@ export async function bid246({ owner, ctx, sql, BASE, SHOTS }) {
     await owner.screenshot({ path: `${SHOTS}/594-space-badge-line.png`, clip: { x: 0, y: 0, width: 1366, height: 260 } });
     // '오늘 새 공고'를 열면 안 본 숫자 0(아침 공고 알림 읽음)
     await owner.goto(`${BASE}/s/sales/hub?tab=bids&bt=today`);
-    await owner.waitForFunction(() => !document.querySelector('nav[aria-label="주 메뉴"] a[href="/s/sales/hub"] [data-nav-badge]'), null, { timeout: 15000 });
-    assert.equal((await sql`select count(*)::int n from notifications where user_id = ${ctx.ownerId} and dedupe_key like 'salesdigest:%' and read_at is null`)[0].n, 0);
+    const unreadDigest = async () => (await sql`select count(*)::int n from notifications where user_id = ${ctx.ownerId} and dedupe_key like 'salesdigest:%' and read_at is null`)[0].n;
+    for (let i = 0; i < 30 && (await unreadDigest()) > 0; i++) await owner.waitForTimeout(500);
+    assert.equal(await unreadDigest(), 0, "'오늘 새 공고'를 열면 아침 공고 알림 읽음");
+    await owner.goto(`${BASE}/s/sales`);
+    await owner.waitForFunction(() => !!document.querySelector('nav[aria-label="주 메뉴"] a[href="/s/sales/hub"]'), null, { timeout: 15000 });
+    await owner.waitForTimeout(1500); // 알림 폴링(메뉴 숫자)이 온 뒤
+    assert.equal(await hubLink.locator('[data-nav-badge]').count(), 0, '허브 숫자 0');
   } finally {
     if (dg0) await sql`update sales_digests set counts = ${sql.json(dg0.counts)} where tenant = 'default' and day = ${today}`; else await sql`delete from sales_digests where tenant = 'default' and day = ${today}`;
     if (ev) await sql`update events set deleted_at = now() where id = ${ev}`;

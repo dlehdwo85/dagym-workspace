@@ -73,7 +73,7 @@ test('#537 입찰 마감 임박(3일) 탭 · 앱 하단 영업기회 배지 = �
     on conflict (tenant, day) do update set counts = excluded.counts`;
   assert.equal((await ctx.owner.ok('GET', '/api/spaces')).summary.sales.text, '오늘 공고 3건(모두 봄)', '아침 공고 알림이 없거나 읽었으면 안 본 숫자 0');
   await sql`insert into notifications (user_id, type, title, link, dedupe_key, space) values (${ctx.ownerId}, 'briefing', '오늘 새 공고 3건', '/s/sales/hub?tab=bids&bt=today', ${'salesdigest:default:' + today}, 'sales')`;
-  assert.deepEqual((await ctx.owner.ok('GET', '/api/spaces')).summary.sales, { text: '안 본 오늘 공고 3건', badge: 3, label: '영업 메뉴 숫자 합', href: '/s/sales/hub?tab=bids&bt=today' }); // 246차 #774 → #1171 허브 = 안 본 오늘 공고
+  assert.deepEqual((await ctx.owner.ok('GET', '/api/spaces')).summary.sales, { text: '영업 기회 허브 3(안 본 오늘 공고 3)', badge: 3, label: '영업 메뉴 숫자 합', href: '/s/sales/hub?tab=bids&bt=today' }); // 246차 #774 → #1171 허브 = 안 본 오늘 공고
 });
 
 test('#537 후속(로컬 10/24 12:20): 결과(낙찰·유찰)는 오늘 새 공고에서 빼고 아래 결과 묶음 · 홈 수도 빼고 · 당일 메일은 결과 구역(새 공고 수 밖)', async () => {
