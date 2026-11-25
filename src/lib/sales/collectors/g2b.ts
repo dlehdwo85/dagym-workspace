@@ -285,7 +285,7 @@ export async function g2bNoDeadline() {
 const noKey = (label: string): CollectorResult => ({ inserted: 0, updated: 0, unchanged: 0, errors: 0, summary: `${label}: DATA_GO_KR_SERVICE_KEY 미설정 — 건너뜀`, providerMode: 'api' });
 
 export const g2bBidNotices: Collector = {
-  slug: 'g2b_bid_notices', label: '나라장터·누리장터 입찰공고', hourKst: 6, againKst: [10, 14, 18], source: 'apis.data.go.kr/1230000 BidPublicInfoService(4대상) + PrvtBidNtceService(누리장터) — 검색어 15개 × 06시 최근 14일, 10·14·18시 최근 3일', needs: ['DATA_GO_KR_SERVICE_KEY'],
+  slug: 'g2b_bid_notices', label: '나라장터·누리장터 입찰공고', hourKst: 6, againKst: [10, 14, 18], source: 'apis.data.go.kr/1230000 BidPublicInfoService(4대상) + PrvtBidNtceService(누리장터) — 검색어 15개 × 06시 최근 14일, 10·14·18시 최근 3일 + 입찰을 켠 다른 회사 검색어(한 번 최대 8개, 나라장터 4대상)', needs: ['DATA_GO_KR_SERVICE_KEY'],
   async run(ctx: CollectorCtx): Promise<CollectorResult> {
     const key = dataGoKey(); if (!key) return noKey('나라장터');
     // #476 c: 06시는 최근 14일 전체, 낮 수집(10·14·18시·그 뒤 [지금 수집])은 최근 3일 — 낮에 올라온 공고를 그날 잡는다
@@ -303,9 +303,18 @@ export const g2bBidNotices: Collector = {
     const pubAll = (pw?.items ?? []).filter((x) => !have.has(String(x.source_external_id)));
     items.push(...pubAll);
     const pubFit = pubAll.filter((x) => matchFit(String(x.title ?? ''), String(x.bid_category ?? '')).fit).length;
+    // #1181 상업화 마감 1: 다른 회사(입찰 켬) 검색어로도 나라장터 4대상을 받음 — 다짐 검색어·판정은 그대로(다짐 결과는 늘기만), 판정은 회사별(tenantJudge).
+    //  한 번에 G2B_TENANT_WORDS_MAX(기본 8 — 4대상이라 최대 32회 더 부름, 0 이면 끔)개 · 15초 안 · 더 많으면 회차마다 돌아가며. 실패는 요약 한 줄로만(수집 실패로 안 셈)
+    const TJ = await import('../tenantJudge');
+    const tw = await TJ.tenantSearchWords([...G2B_WORDS, ...PUB_WORDS], { slot: Math.floor(ctx.now() / 36e5) }).catch(() => ({ words: [] as string[], total: 0, tenants: 0 }));
+    for (const x of pubAll) have.add(String(x.source_external_id));
+    const tr = tw.words.length ? await searchAll(BID_OPS, tw.words, days, (it, cat) => g2bPayload(it, 'g2b_bid', cat), { ...ctx, deadlineMs: Math.min(ctx.deadlineMs, 15_000) }, key).catch(() => null) : null;
+    const tenantAll = (tr?.items ?? []).filter((x) => !have.has(String(x.source_external_id)));
+    items.push(...tenantAll);
+    const tenantNote = tw.words.length ? `회사 검색어 ${tw.words.length}개${tw.total > tw.words.length ? `(전체 ${tw.total}개 중 이번 차례)` : ''} ${tenantAll.length}건${tr && !tr.items.length && (tr.failed || tr.denied.length) ? '(검색 못 함 — 수집 실패로 안 셈)' : ''}` : null;
     const pubNote = pw && !pw.items.length && (pw.failed || pw.denied.length) ? '공공 시설 위탁 검색 못 함 — 수집 실패로 안 셈' : null;
     const etcNote = e && !e.items.length && (e.failed || e.denied.length) ? `기타 공고 조회 못 함${e.denied.length ? '(활용신청 범위 밖)' : ''} — 수집 실패로 안 셈` : null;
-    const lim = await readG2bLimits([...a.items, ...etc, ...pubAll], ctx, key, errors).catch((e) => { errors.push(`제한 조회: ${e instanceof Error ? e.message : String(e)}`); return { read: 0, found: 0, keys: [] as string[], diag: '' }; });
+    const lim = await readG2bLimits([...a.items, ...etc, ...pubAll, ...tenantAll], ctx, key, errors).catch((e) => { errors.push(`제한 조회: ${e instanceof Error ? e.message : String(e)}`); return { read: 0, found: 0, keys: [] as string[], diag: '' }; });
     const r = await write(items, errors);
     if (lim.read && !lim.found) errors.push(`제한 조회 ${lim.read}건 — 값을 못 읽음${lim.keys.length ? `(받은 칸: ${lim.keys.join(', ')})` : ''}${lim.diag ? ` · ${lim.diag}` : ''}`);
     // 278차 #816: 실패한 검색 수도 오류로 셈 — 하나도 못 받으면 '실패'(예전엔 0건 '성공'으로 남아 알림이 안 감)
@@ -314,7 +323,7 @@ export const g2bBidNotices: Collector = {
     const maint = maintOf(a.stats.htmlHead) ?? maintOf(b.stats.htmlHead);
     return { inserted: r.inserted, updated: r.updated, unchanged: r.unchanged, errors: r.errors + r.invalid + a.failed + b.failed, errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'api', sources, retry: retryable(a) || retryable(b),
       ...(maint ? { maint } : {}),
-      summary: `${[!sources.g2b.ok && '나라장터 못 받음', !sources.nuri.ok && '누리장터 못 받음', etcNote, pubNote].filter(Boolean).map((x) => `${x} · `).join('')}${etc.length ? `나라장터 기타 ${etc.length}건 · ` : ''}${pubAll.length ? `공공 시설 위탁 검색 ${pubAll.length}건(관련 ${pubFit}) · ` : ''}${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건(${statLine(b.stats, b.items.length)}) (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (lim.read ? ` · 참가 제한 조회 ${lim.read}건(값 ${lim.found})` : '') + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
+      summary: `${[!sources.g2b.ok && '나라장터 못 받음', !sources.nuri.ok && '누리장터 못 받음', etcNote, pubNote, tenantNote].filter(Boolean).map((x) => `${x} · `).join('')}${etc.length ? `나라장터 기타 ${etc.length}건 · ` : ''}${pubAll.length ? `공공 시설 위탁 검색 ${pubAll.length}건(관련 ${pubFit}) · ` : ''}${days === 14 ? '' : '빠른 수집(최근 3일) · '}나라장터 ${a.items.length}건 · 누리장터 ${b.items.length}건(${statLine(b.stats, b.items.length)}) (관련 ${items.filter((p) => matchFit(String(p.title), String(p.bid_category ?? '')).fit).length}) · 신규 ${r.inserted} · 갱신 ${r.updated} · 변화없음 ${r.unchanged}` + (lim.read ? ` · 참가 제한 조회 ${lim.read}건(값 ${lim.found})` : '') + (a.denied.length + b.denied.length ? ` · 활용신청·주소 확인 필요 ${a.denied.length + b.denied.length}개 서비스` : '') };
   },
 };
 export function prespecPayload(it: any, cat: string): Record<string, unknown> | null {

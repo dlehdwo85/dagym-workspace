@@ -27,3 +27,30 @@ export async function judgeWords(tenant: string): Promise<string[]> {
 
 /** SQL like 조각(빈칸 없는 대문자 제목에 대고 봄) */
 export const likePatterns = (words: string[]) => words.map((w) => `%${normText(w).replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+
+/**
+ * #1181 상업화 마감 1(로컬 코드 점검 11/26: '공용 입찰 수집 검색어가 다짐 업종으로 고정 — 다른 업종 회사는 나라장터 본공고가 거의 안 모임'):
+ * 공용 수집에 더할 '다른 회사 검색어' — 입찰을 켠 회사(기본 회사·둘러보기(demo)·삭제·정지 회사 빼고 — 검수용 시험 회사는 넣음)의 맞춤 검색어 + 켜 둔 관심 사업 낱말.
+ * 여러 회사가 같이 쓰는 낱말 먼저, 기본 검색어(base)와 같은 낱말은 뺌. 다짐 검색어·판정은 그대로라 다짐 결과는 늘기만 한다(받는 공고 풀이 넓어질 뿐).
+ * 한 번 수집에 쓰는 수는 max 로 자르고, 낱말이 더 많으면 수집 회차(slot)마다 다음 묶음으로 돌아가며 씀
+ */
+export async function tenantSearchWords(base: string[], opt: { max?: number; slot?: number } = {}): Promise<{ words: string[]; total: number; tenants: number }> {
+  const sql = db();
+  const rows = await sql<{ tenant: string; words: string[] | null }[]>`
+    select t.id as tenant, (coalesce(p.keywords, '{}'::text[]) || coalesce((select array_agg(k) from sales_business_categories c, unnest(c.keywords) k where c.tenant = t.id and c.active), '{}'::text[])) as words
+    from tenants t left join sales_bid_prefs p on p.tenant = t.id
+    where t.id not in ('default', 'demo') and t.deleted_at is null and coalesce(t.status, 'active') = 'active'`;
+  const { salesBidsOn } = await import('./options');
+  const seenBase = new Set(base.map(normText)); const count = new Map<string, { w: string; n: number }>(); let tenants = 0;
+  for (const r of rows) {
+    const mine = new Set<string>(); for (const w of r.words ?? []) { const k = String(w ?? '').trim(); const n = normText(k); if (n.length >= 2 && !seenBase.has(n)) mine.add(k); }
+    if (!mine.size || !(await salesBidsOn(r.tenant).catch(() => false))) continue;
+    tenants++;
+    const once = new Set<string>(); for (const k of mine) { const n = normText(k); if (once.has(n)) continue; once.add(n); const c = count.get(n); if (c) c.n++; else count.set(n, { w: k, n: 1 }); }
+  }
+  const all = [...count.values()].sort((a, b) => b.n - a.n || a.w.localeCompare(b.w, 'ko')).map((x) => x.w);
+  const max = Math.max(0, opt.max ?? Number(process.env.G2B_TENANT_WORDS_MAX ?? 8));
+  if (all.length <= max) return { words: all, total: all.length, tenants };
+  const start = ((opt.slot ?? 0) * max) % all.length;
+  return { words: [...all.slice(start), ...all.slice(0, start)].slice(0, max), total: all.length, tenants };
+}
