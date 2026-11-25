@@ -37,7 +37,7 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
       <p>법령에 근거가 있거나 이용자가 동의한 경우 외에는 제3자에게 제공하지 않습니다.</p>
       <H>5. 처리 위탁 · 국외 이전</H>
       <ul className="list-disc pl-5">
-        <li>호스팅·데이터베이스·파일 저장: Vercel Inc., Neon Inc., Cloudflare Inc.(미국 등) — 서비스 운영</li>
+        <li data-testid="privacy-hosting">웹·API 서버·데이터베이스·파일 저장: Vercel Inc., Neon Inc., Cloudflare, Inc.(모두 미국 법인 — 서버는 싱가포르·아시아·태평양 지역, 아래 5-2) — 서비스 운영</li>
         <li>메일 발송: Resend(미국) — 가입 확인·알림 메일, &ldquo;워크인 발송&rdquo; 업무 메일 / 회사가 연결한 메일 업체(네이버·다음·Google 등) — 회사 메일 계정으로 보내는 업무 메일</li>
         <li>결제: (주)나이스페이먼츠 — 카드·계좌이체·가상계좌 결제, 정기 결제(빌링)</li>
         <li>소셜 로그인: Google LLC, (주)카카오, 네이버(주) — 로그인·가입 시 본인 확인</li>
@@ -47,7 +47,15 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
         <li data-testid="privacy-higgsfield">마케팅 영상·이미지 만들기(마케팅 공간을 쓰는 회사): Higgsfield AI(미국) — 영상·이미지를 만들 때 넣은 문구와 사진</li>
         <li data-testid="privacy-ai">AI 처리(서비스의 핵심 기능 · 국외 이전 — 동의한 사람의 내용만): Anthropic PBC(미국) — AI 기능을 쓸 때 AI에게 쓴 글·붙인 파일·답에 필요한 업무·일정·자료 내용(지점 운영 보고 초안을 만들 때는 가린 뒤의 보고 글·대화)을 전송합니다.{stt ? ' OpenAI(미국) — 회의 녹음을 글로 바꿀 때 녹음을 전송합니다.' : ''} 받는 회사의 이용 조건에 따라 그 회사 AI를 가르치는 데 쓰이지 않습니다. AI 처리는 서비스의 핵심 기능이라 가입할 때(이미 쓰던 분은 다음에 들어올 때) 동의를 받으며, 동의 철회는 탈퇴로 할 수 있습니다(<a href="/ai-notice" className="underline">AI 이용 안내</a>)</li>
       </ul>
-      <p className="text-xs text-slate-500">국외 이전 항목: 위 2번 항목 중 해당 기능 처리에 필요한 정보 · 이전 시기: 서비스 이용 시 네트워크로 전송 · 보유 기간: 위탁 계약 종료 또는 탈퇴 시까지.</p>
+      <p className="text-xs text-slate-500">위 목록의 국외 회사(메일·푸시·소셜 로그인·화상회의·AI 등): 이전 항목은 위 2번 항목 중 해당 기능 처리에 필요한 정보 · 이전 시기·방법: 그 기능을 쓸 때 네트워크로 전송(암호화) · 보유 기간: 위탁 계약 종료 또는 탈퇴 시까지.</p>
+      <H>5-2. 국외 이전 — 서비스 서버(모든 이용자)</H>
+      <ul className="list-disc pl-5" data-testid="privacy-transfer">
+        <li>받는 자·지역·목적: <b>Vercel Inc.</b>(미국 법인, 개인정보 문의 privacy@vercel.com) — 웹·API 서버, <b>싱가포르</b>(sin1 · 메일 보내기·회사 메일 계정 연결·공공데이터 조회 일부는 서울 icn1에서 처리) · <b>Neon Inc.</b>(미국 법인, 개인정보 문의는 neon.com/privacy-policy 안내 창구) — 데이터베이스, <b>싱가포르</b>(AWS ap-southeast-1) · <b>Cloudflare, Inc.</b>(미국 법인, 개인정보 문의 privacyquestions@cloudflare.com) — 파일 저장소(R2), <b>아시아·태평양</b> 지역 — 서비스 제공을 위한 서버 운영·데이터 보관</li>
+        <li>이전 항목: 위 2번의 계정·업무 자료(이름·이메일·업무·일정·댓글·메시지·연락처 등), 첨부·자료실 파일(Cloudflare), 출퇴근 좌표(앱에서 암호화해 저장)와 위치정보 이용·제공 사실 확인자료(Neon)</li>
+        <li>이전 일시·방법: 서비스를 이용할 때마다 네트워크로 전송(HTTPS로 암호화)</li>
+        <li>보유·이용 기간: 위 3번 보유 기간과 같습니다(탈퇴하면 지체 없이 파기 · 공간 삭제는 30일 후 파기 · 출퇴근 좌표 6개월 · 위치정보 이용·제공 사실 확인자료 1년). 위탁 계약이 끝나면 지체 없이 파기합니다.</li>
+        <li>거부 방법과 불이익: 서비스는 이 서버에서만 운영되므로 이 국외 이전을 거부하려면 가입하지 않거나 탈퇴(설정 › 계정)하면 되며, 이 경우 서비스를 이용할 수 없습니다. 출퇴근 위치만 거부하려면 위치 이용에 동의하지 않거나 철회(설정 › 출퇴근 위치)하면 되고, 위치 없이 출퇴근 시각만 기록되며 다른 불이익은 없습니다.</li>
+      </ul>
       <H>6. Google 사용자 데이터</H>
       <p>Google Calendar 데이터는 사용자가 고른 캘린더를 워크인 캘린더와 동기화하는 목적으로만 쓰며, 광고·판매 등 다른 목적으로 쓰지 않습니다. 설정 화면에서 언제든 연결을 끊을 수 있습니다.</p>
       {META_PRIVACY_PARAGRAPHS.length > 0 && <><H>6-2. Meta(페이스북·인스타그램) 연동 시 처리하는 정보</H>{META_PRIVACY_PARAGRAPHS.map((t, i) => <p key={i}>{t}</p>)}</>}
@@ -59,7 +67,7 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
       <H>8. 안전성 확보 조치</H>
       <p>비밀번호 해시 저장, 외부 연동 토큰 암호화, 전 구간 HTTPS, 공간(회사)별 데이터 분리와 서버 권한 검사, 접근 기록 보관, 2단계 인증 제공.</p>
       <H>9. 위치정보</H>
-      <p data-testid="privacy-location">회사가 출퇴근 기록을 켜고 본인이 동의한 경우에만, [출근]·[퇴근]을 누르는 그 순간의 위치(위도·경도)를 받아 회사가 등록한 현장 안에서 눌렀는지 표시하는 데 씁니다(위 2번). 그 밖의 시간에는 위치를 받지 않고 계속 위치를 따라가지 않습니다. 소속 회사의 출퇴근 관리자에게는 근무지 안/밖과 근무지 이름이 보입니다. 좌표는 6개월 뒤 파기하고, 동의를 철회하면(설정 › 출퇴근 위치) 바로 파기합니다. 출퇴근 시각·근무지 안/밖 기록은 회사의 근태 관리 기록으로 보관되며 탈퇴·회사 삭제 때 함께 파기합니다. 자세한 내용은 <a href="/lbs-terms" className="underline">위치기반서비스 이용약관</a>을 따릅니다.</p>
+      <p data-testid="privacy-location">회사가 출퇴근 기록을 켜고 본인이 동의한 경우에만, [출근]·[퇴근]을 누르는 그 순간의 위치(위도·경도)를 받아 회사가 등록한 현장 안에서 눌렀는지 표시하는 데 씁니다(위 2번). 그 밖의 시간에는 위치를 받지 않고 계속 위치를 따라가지 않습니다. 소속 회사의 출퇴근 관리자에게는 근무지 안/밖과 근무지 이름이 보입니다. 좌표는 앱에서 암호화해 싱가포르 지역 데이터베이스에 저장하고(위 5-2) 6개월 뒤 파기하며, 동의를 철회하면(설정 › 출퇴근 위치) 바로 파기합니다. 출퇴근 시각·근무지 안/밖 기록은 회사의 근태 관리 기록으로 보관되며 탈퇴·회사 삭제 때 함께 파기합니다. 자세한 내용은 <a href="/lbs-terms" className="underline">위치기반서비스 이용약관</a>을 따릅니다.</p>
       <H>10. 앱 접근 권한</H>
       <p>Android·iOS 앱은 아래 기능을 쓸 때만 권한을 요청합니다. 모두 선택 권한이며, 허용하지 않아도 나머지 기능은 쓸 수 있습니다. 휴대폰 설정에서 언제든 바꿀 수 있습니다.</p>
       <ul className="list-disc pl-5">
@@ -73,6 +81,8 @@ export default async function Privacy({ searchParams }: { searchParams: Promise<
       <p>앱·웹의 설정 → 계정 → 회원 탈퇴(회사 계정은 &ldquo;계정 삭제 요청&rdquo;)에서 삭제할 수 있고, 로그인할 수 없으면 <a href="/account-deletion" className="underline">계정 삭제 안내</a> 페이지에서 요청할 수 있습니다.</p>
       <H>12. 개인정보 보호책임자</H>
       <p>{b.officer} · 전화 {b.phone} · 이메일 {b.privacyEmail}</p>
+      <H>부칙</H>
+      <p data-testid="privacy-revised">이 방침은 2026년 11월 25일 개정·시행합니다(5-2 국외 이전 — 서버 지역·받는 자·항목·보유 기간·거부 방법을 자세히 적음, 9번 출퇴근 좌표 암호화 저장).</p>
     </LegalDoc>
   );
 }

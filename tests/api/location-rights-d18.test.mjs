@@ -44,4 +44,10 @@ test('동의·수집·제공 기록(하루 한 줄) · 본인 열람 · 동의 �
   // 약관 화면(로그인 없이)
   const page = await fetch(`${BASE}/lbs-terms`).then((r) => r.text());
   assert.match(page, /위치기반서비스 이용약관/); assert.match(page, /좌표는 6개월 보관한 뒤 지우고/);
+  // #1169(D-22 확정): 국외 처리 정확 표기 — 약관 제6조의2 · 처리방침 5-2(받는 자·지역·항목·시기·보유·거부)
+  assert.match(page, /제6조의2\(개인위치정보의 국외 처리\)/); assert.match(page, /AWS ap-southeast-1/); assert.match(page, /2026년 12월 2일 시행/);
+  const pv = await fetch(`${BASE}/privacy`).then((r) => r.text());
+  for (const t of ['5-2. 국외 이전', 'Vercel Inc.', 'Neon Inc.', 'Cloudflare, Inc.', '아시아·태평양', 'AWS ap-southeast-1', '이전 일시·방법', '보유·이용 기간', '거부 방법과 불이익', '2026년 11월 25일 개정'])
+    assert.ok(pv.includes(t), `처리방침에 '${t}'`);
+  assert.ok(!pv.includes('(미국 등)'), '예전 뭉뚱그린 표기 없음');
 });
