@@ -84,5 +84,6 @@ export const NOTIFICATION_TYPES = {
   agreement_expiry: '계약 만료 알림(계약 관리에서 알림 받는 사람으로 정해졌을 때 — 만료·해지 통보 기한 90·60·30·7일 전)',
   signup_request: '새 체험 신청(승인제 가입 — 승인·거절할 새 회사, 플랫폼 운영자만)',
   company_export: '회사 전체 내보내기 준비됨·실패(요청한 대표·관리자 — 7일 동안 내려받기)',
+  join_request: '회사 합류 신청(초대 링크·회사 메일 도메인 — 대표·관리자가 승인)',
 } as const;
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

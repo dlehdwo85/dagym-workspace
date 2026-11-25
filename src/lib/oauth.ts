@@ -53,10 +53,10 @@ const redirectUri = (p: Provider) => `${appUrl()}/api/auth/oauth/${p}/callback`;
 
 // ---------------- 시작: 상태 쿠키(서명) + 제공자 화면으로 ----------------
 export const STATE_COOKIE = 'wos_oauth';
-type State = { n: string; p: Provider; mode: 'login' | 'link'; invite?: string; client: string; utm?: Record<string, string>; at: number; ac?: string };
+type State = { n: string; p: Provider; mode: 'login' | 'link'; invite?: string; /** #1176 회사 초대 링크로 합류 신청 */ join?: string; client: string; utm?: Record<string, string>; at: number; ac?: string };
 const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
 export const startInput = z.object({
-  mode: z.enum(['login', 'link']).default('login'), invite: z.string().max(200).optional(), client: z.enum(['web', 'android', 'ios']).default('web'),
+  mode: z.enum(['login', 'link']).default('login'), invite: z.string().max(200).optional(), join: z.string().max(100).optional(), client: z.enum(['web', 'android', 'ios']).default('web'),
   utm_source: z.string().max(80).optional(), utm_medium: z.string().max(80).optional(), utm_campaign: z.string().max(120).optional(),
   /** 앱: 시스템 브라우저에서 로그인 → 앱으로 복귀. 앱이 만든 검증값의 sha256(hex) */
   ac: z.string().regex(/^[0-9a-f]{64}$/).optional(),
@@ -67,7 +67,7 @@ export function startOAuth(p: Provider, i: z.infer<typeof startInput>) {
   const c = conf(p);
   if (!c) throw notFound('이 로그인 방법은 아직 준비 중입니다');
   const utm = Object.fromEntries(Object.entries({ source: i.utm_source, medium: i.utm_medium, campaign: i.utm_campaign }).filter(([, v]) => v)) as Record<string, string>;
-  const st: State = { n: newToken(16), p, mode: i.mode, invite: i.invite, client: i.client, utm: Object.keys(utm).length ? utm : undefined, at: Date.now(), ac: i.ac };
+  const st: State = { n: newToken(16), p, mode: i.mode, invite: i.invite, join: i.join, client: i.client, utm: Object.keys(utm).length ? utm : undefined, at: Date.now(), ac: i.ac };
   const body = enc(st);
   const cookie = `${body}.${hmac('oauth:' + body)}`;
   const q = new URLSearchParams({ response_type: 'code', client_id: c.id, redirect_uri: redirectUri(p), state: st.n });
@@ -150,6 +150,7 @@ export type CallbackResult =
   | { kind: 'login'; userId: string; mfa: boolean; client: string }
   | { kind: 'linked' }
   | { kind: 'pending'; token: string }
+  | { kind: 'join'; company: string }
   | { kind: 'error'; message: string; code?: string };
 
 /** 콜백 처리 — 결과에 따라 라우트가 로그인 세션을 만들거나 화면으로 보낸다 */
@@ -213,6 +214,13 @@ export async function oauthCallback(p: Provider, q: { code: string | null; state
     return { kind: 'login', userId, mfa: false, client: st.client };
   }
 
+  // #1176 회사 초대 링크 → 소셜 계정으로 합류 신청(제공자가 확인한 메일) — 관리자가 승인하면 이 소셜 계정으로 로그인. 앱(아이폰 포함)에서도 '초대 링크로 합류'는 됨
+  if (st.join) {
+    if (!email) return { kind: 'error', code: 'no_email', message: `${PROVIDER_LABEL[p]}에서 이메일 제공에 동의해야 합류 신청을 할 수 있습니다. 다시 시도할 때 이메일 항목을 체크해 주세요.` };
+    if (!prof.emailVerified) return { kind: 'error', code: 'unverified', message: `${PROVIDER_LABEL[p]} 계정의 이메일이 인증되지 않았습니다. 초대 링크 화면에서 이메일로 신청해 주세요.` };
+    const r = await (await import('./joinLinks')).socialJoinRequest(st.join, { provider: p, subject: prof.subject, email, name: prof.name?.slice(0, 50) ?? null, secret }, ip);
+    return { kind: 'join', company: r.company };
+  }
   // 299차 #858·#839: 아이폰 앱은 가입이 없음(회사 관리자 초대로만) — 처음 보는 소셜 계정이면 회사 만들기 대신 안내
   if (st.client === 'ios') return { kind: 'error', code: 'no_account', message: `이 ${PROVIDER_LABEL[p]} 계정과 연결된 워크인 계정이 없습니다. 계정은 회사 관리자의 초대로 만들어집니다 — 초대 메일의 링크로 들어오거나, 이메일로 로그인한 뒤 설정 › 계정에서 ${PROVIDER_LABEL[p]}를 연결해 주세요.` };
   // 처음 — 이메일이 꼭 필요(확인된 이메일)
@@ -244,7 +252,7 @@ export async function completeSocialSignup(i: z.infer<typeof completeInput>, ip:
   if (!signupEnabled()) throw notFound();
   if (i.mode === 'team' && !i.company) throw badRequest('회사(팀) 이름을 입력하세요');
   const sql = db();
-  const [{ d }] = await sql<{ d: number }[]>`select count(*)::int d from signup_attempts where ip is not distinct from ${ip} and ok and created_at > now() - interval '1 day'`;
+  const [{ d }] = await sql<{ d: number }[]>`select count(*)::int d from signup_attempts where ip is not distinct from ${ip} and ok and created_at > now() - interval '1 day' and reason is distinct from 'join'`;
   if (d >= Number(process.env.SIGNUP_IP_PER_DAY ?? 3)) throw new HttpError(429, 'too_many', '가입 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.');
   const pend = await loadPending(i.token);
   const phone = i.agree.alimtalk ? await (await import('./signup')).alimtalkPhone(i.phone) : null; // 304차 #871

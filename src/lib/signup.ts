@@ -30,6 +30,8 @@ export const signupInput = z.object({
   /** 봇 방지: 사람에게 안 보이는 칸(채워져 있으면 봇) · 화면을 연 시각(너무 빨리 제출하면 봇) */
   website: z.string().max(200).optional(),
   openedAt: z.number().optional(),
+  /** #1176: 회사 메일 도메인 합류 안내를 본 뒤에도 '새 회사로 가입'을 고름 */
+  newCompany: z.boolean().optional(),
   /** 유입 경로(첫 방문 UTM) — 마케팅 퍼널 집계용, 개인정보 아님 */
   utm: z.object({ source: z.string().max(80), medium: z.string().max(80), campaign: z.string().max(120), page: z.string().regex(/^[a-z0-9-]{1,40}$/), term: z.string().max(80), landing: z.string().max(500).regex(/^\//) }).partial().optional(), // 311차 #867 page = 처음 들어온 소개 페이지(home·landing slug)
   /** V29 가입 2단계: 인원 규모·업종(선택) */
@@ -118,14 +120,17 @@ export async function signup(i: z.infer<typeof signupInput>, ip: string | null) 
   const sql = db();
   // 봇: 조용히 성공처럼 응답(아무것도 만들지 않음)
   if (i.website || (i.openedAt && Date.now() - i.openedAt < 2500)) { await attempt(sql, ip, i.email, false, 'bot'); return { ok: true, message: genericMsg() }; }
-  const [{ h }] = await sql<{ h: number }[]>`select count(*)::int h from signup_attempts where ip is not distinct from ${ip} and created_at > now() - interval '1 hour'`;
-  const [{ d }] = await sql<{ d: number }[]>`select count(*)::int d from signup_attempts where ip is not distinct from ${ip} and ok and created_at > now() - interval '1 day'`;
-  const [{ t }] = await sql<{ t: number }[]>`select count(*)::int t from signup_attempts where ok and created_at > now() - interval '1 day'`;
+  // #1176: 회사 초대 링크 합류 신청(reason 'join')은 따로 셈 — 같은 사무실에서 여럿이 신청해도 새 회사 가입 제한에 섞이지 않게
+  const [{ h }] = await sql<{ h: number }[]>`select count(*)::int h from signup_attempts where ip is not distinct from ${ip} and created_at > now() - interval '1 hour' and reason is distinct from 'join'`;
+  const [{ d }] = await sql<{ d: number }[]>`select count(*)::int d from signup_attempts where ip is not distinct from ${ip} and ok and created_at > now() - interval '1 day' and reason is distinct from 'join'`;
+  const [{ t }] = await sql<{ t: number }[]>`select count(*)::int t from signup_attempts where ok and created_at > now() - interval '1 day' and reason is distinct from 'join'`;
   if (h >= LIMIT.ipPerHour || d >= LIMIT.ipSignupsPerDay || t >= LIMIT.totalPerDay) {
     await attempt(sql, ip, i.email, false, 'rate');
     throw new HttpError(429, 'too_many', '가입 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.');
   }
   if (i.mode === 'team' && !i.company) throw badRequest('회사(팀) 이름을 입력하세요');
+  // #1176 회사 메일 도메인 합류: 그 도메인을 등록한 회사가 있으면 새 회사 대신 합류 신청을 권함(고르면 '새 회사로 가입'도 됨)
+  if (!i.newCompany) { const dc = await (await import('./joinLinks')).domainCompany(i.email); if (dc) throw new HttpError(409, 'domain_join', `이 메일 도메인은 '${dc.name}' 회사가 워크인을 쓰고 있습니다 — 그 회사에 합류 신청을 보내거나 새 회사로 가입할 수 있습니다`, { company: dc.name }); }
   const approval = signupApprovalOn();
   const contact = contactPhone(i.contact); // 359차 승인제 가입: 승인 안내 연락처
   if (approval && !contact) throw badRequest('연락받을 전화번호를 적어 주세요 — 24시간 안에 연락드립니다');

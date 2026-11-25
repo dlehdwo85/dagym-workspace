@@ -17,6 +17,7 @@ import { AlertTriangle } from 'lucide-react';
 import { OffboardModal } from '@/components/admin/Offboard';
 import { AssigneeRulesTab } from '@/components/admin/AssigneeRules';
 import { ContractsTab, SendContractModal, type ContractPreset } from '@/components/admin/Contracts'; // #116 전자계약서
+import { JoinLinkPanel } from '@/components/admin/JoinLinkPanel';
 
 const STATUS: Record<string, string> = { invited: '초대됨', active: '사용 중', disabled: '사용 중지', left: '퇴사' };
 
@@ -135,6 +136,7 @@ function Users() {
       </div>
       {demoN > 0 && <button type="button" className="text-xs text-ink-2 underline" onClick={() => setShowDemo((x) => !x)} data-testid="demo-toggle">{showDemo ? '심사용 체험 계정 숨기기' : `심사용 체험 계정 ${demoN}개 보기`}</button>}
       {leftN > 0 && <button type="button" className="ml-3 text-xs text-ink-2 underline" onClick={() => setShowLeft((x) => !x)} data-testid="left-toggle">{showLeft ? '퇴사자 숨기기' : `퇴사자 ${leftN}명 보기`}</button>}
+      {(user.role === 'owner' || user.role === 'admin') && <JoinLinkPanel canEdit={canEdit} />}{/* #1176 회사 초대 링크 · 합류 신청 · 회사 메일 도메인 */}
       {error ? <ErrorBox error={error} retry={reload} /> : loading && !data ? <Loading /> : (
         <div className="overflow-x-auto rounded-lg border bg-white">
           <table className="w-full text-sm" data-testid="users">

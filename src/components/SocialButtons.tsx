@@ -15,7 +15,7 @@ const LOOK: Record<string, { label: string; cls: string; mark: React.ReactNode }
 };
 
 /** V29 소셜 가입·로그인 버튼 — 키가 등록된 제공자만(없으면 아무것도 안 보임) */
-export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady }: { verb?: string; invite?: string; mode?: 'login' | 'link'; onReady?: (n: number) => void }) {
+export function SocialButtons({ verb = '시작', invite, join, mode = 'login', onReady }: { verb?: string; invite?: string; /** #1176 회사 초대 링크 */ join?: string; mode?: 'login' | 'link'; onReady?: (n: number) => void }) {
   const [ps, setPs] = useState<string[]>([]);
   const [base, setBase] = useState<string | undefined>();
   useEffect(() => { if (hasBrowser() && mode === 'login') watchOAuthReturn().catch(() => {}); }, [mode]); // #1107 로그인 화면에서도 앱 복귀 링크를 받음(앱이 다시 켜진 경우 포함)
@@ -35,6 +35,7 @@ export function SocialButtons({ verb = '시작', invite, mode = 'login', onReady
   const href = (p: string) => {
     const q = new URLSearchParams({ mode, client: Capacitor.isNativePlatform() ? Capacitor.getPlatform() : 'web' });
     if (invite) q.set('invite', invite);
+    if (join) q.set('join', join);
     // #1114: 워크인에서 로그아웃한 직후 첫 소셜 로그인 — 제공자에게 다시 로그인을 요청(카카오 prompt=login · 네이버 auth_type=reauthenticate)
     try { if (mode === 'login' && localStorage.getItem('wos_oauth_fresh') === '1') q.set('fresh', '1'); } catch {}
     const u = readUtm();

@@ -44,6 +44,7 @@ import { messengerV3 } from './messengerV3.step.mjs';
 import { platformAdd } from './platformAdd.step.mjs';
 import { ops1163 } from './ops1163.step.mjs';
 import { companyExport } from './companyExport.step.mjs';
+import { join1176 } from './join1176.step.mjs';
 import { orgTree } from './orgTree.step.mjs';
 import { orgLevels } from './orgLevels.step.mjs';
 import { chatKeyboard } from './chatKeyboard.step.mjs';
@@ -2723,6 +2724,7 @@ await step('대표 10/20 7) 퇴사 처리·인수인계: 창에서 퇴사일·�
 await step('메신저 1차(대표 10/20): 새 대화 다중 선택·그룹 자동 이름·방 정보(초대·내보내기)·시스템 메시지·안 읽은 수(이름)·공지 바·전달', () => messengerV3({ owner, ctx, BASE, SHOTS }));
 await step('#1163·#1164·#1165 고객사 관리 고도화(목록 매출·다음 결제·미납·정렬·해지 위험·메일·공지 미리 보기·타임라인·환불 사유 통계) · 영업 업무 일정 없음 띠·배지·거르기 → 일정 잡기 · 업무 주소 = 목록 + 오른쪽 패널', () => ops1163({ owner, ctx, sql, BASE, SHOTS }));
 await step('상용화 B4 회사 전체 내보내기(설정 › 요청 → 준비됨 → 압축 파일 내려받기)', () => companyExport({ owner, sql, BASE, SHOTS }));
+await step('#1176 회사 초대 링크(만들기 → 링크로 합류 신청 → 메일 확인 → 관리자 승인 → 계정)', () => join1176({ browser, owner, sql, BASE, SHOTS }));
 await step('대표 10/20 ① 플랫폼 운영 [고객사 추가]: 회사명·업종 여러 개·규모·체험 기간·시작 공간·대표 → 초대 링크 → 회사 관리 초대 대기·공간·메모·감사 기록', () => platformAdd({ owner, BASE, SHOTS, sql }));
 await step('대표 10/20 15:15 부서·팀 재정비: 트리(들여쓰기·경로 "영업부 › 영업1팀")·상위 부서·장 1명 → 초대 \'소속\' 하나(주 소속 + 겸직, 고급 접힘) → 목록 경로·접근 조직 자동', () => orgTree({ owner, ctx, BASE, SHOTS }));
 await step('영업 S2 1차(대표 14:15): 허브 일괄 [영업 진행으로] → 업무 자동 → 홈 오늘 할 일 7묶음·요약 타일·진행표 → 업무 영업 원천 배지 → 계약만료·재입찰', () => salesTodo({ owner, ctx, sql, BASE, SHOTS }));

@@ -43,6 +43,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
     if (ac) {
       if (r.kind === 'error') return toApp({ error: r.message });
       if (r.kind === 'pending') return toApp({ pending: r.token });
+      if (r.kind === 'join') return toApp({ error: `${r.company} 합류 신청을 보냈습니다 — 관리자가 승인하면 이 계정으로 로그인할 수 있습니다` });
       if (r.kind === 'login') return toApp({ t: await createHandoff(r.userId, r.mfa, r.client, ac) });
     }
     if (sheet && r.kind !== 'linked') return toApp({ error: r.kind === 'error' ? r.message : '로그인을 마치지 못했습니다. 앱에서 다시 시도해 주세요.' });
@@ -51,6 +52,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
     if (r.kind === 'error') return go(`/login?oauth_error=${encodeURIComponent(r.message)}${r.code ? `&code=${r.code}` : ''}`);
     if (r.kind === 'linked') return go(`/settings?linked=${provider}`);
     if (r.kind === 'pending') return go(`/signup/social?t=${encodeURIComponent(r.token)}`);
+    if (r.kind === 'join') return go('/join/sent?via=social'); // #1176 합류 신청 보냄(관리자 승인 뒤 로그인)
     const { token, maxAge } = await createSession(r.userId, r.client, req.headers.get('user-agent'), { ip: clientIp(req), mfaPending: r.mfa });
     const res = go(r.mfa ? '/login?mfa=1' : '/');
     res.cookies.set(sessionCookie(token, r.mfa ? 600 : maxAge));

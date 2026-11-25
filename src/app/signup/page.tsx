@@ -27,6 +27,7 @@ export default function SignupPage() {
   const [ads, setAds] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [domainJoin, setDomainJoin] = useState<string | null>(null); // #1176 회사 메일 도메인 합류(그 도메인을 등록한 회사 이름)
   const [done, setDone] = useState<{ message: string; devLink?: string } | null>(null);
   const [step, setStep] = useState<1 | 2>(1);
   const opened = useRef(Date.now());
@@ -41,7 +42,13 @@ export default function SignupPage() {
     if (f.password.length < 8) { setErr('비밀번호는 8자 이상이어야 합니다'); return; }
     setStep(2); window.scrollTo({ top: 0 });
   }
-  async function submit(e: React.FormEvent) {
+  /** #1176: 등록된 회사 도메인 메일 → 그 회사에 합류 신청(확인 메일 → 관리자 승인) */
+  async function joinDomain() {
+    setBusy(true); setErr(null);
+    try { const r = await api('/api/join/domain', { body: { email: f.email, name: f.name, password: f.password, agree: { terms: agree.terms, age14: agree.age14, privacy: agree.privacy, ai: agree.ai } } }); setDomainJoin(null); setDone({ message: r.message, devLink: r.devVerify }); }
+    catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
+  }
+  async function submit(e: React.FormEvent, newCompany = false) {
     e.preventDefault(); setErr(null);
     if (!agree.terms || !agree.privacy || !agree.age14 || !agree.ai) { setStep(1); setErr('필수 약관에 동의해 주세요'); return; }
     if (mode === 'team' && !f.company.trim()) { setErr('회사(팀) 이름을 입력하세요'); return; }
@@ -49,10 +56,10 @@ export default function SignupPage() {
     setBusy(true);
     try {
       setAdsConsent(ads);
-      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, mode, agree: { ...agree, ads }, phone: agree.alimtalk ? phone.trim() : undefined, contact: contact.trim() || undefined, openedAt: opened.current, utm: readUtm() } });
+      const r = await api('/api/auth/signup', { body: { ...f, company: mode === 'team' ? f.company : undefined, size: mode === 'team' && f.size ? f.size : undefined, industry: mode === 'team' && f.industry ? f.industry : undefined, industries: mode === 'team' ? f.industries : undefined, mode, agree: { ...agree, ads }, phone: agree.alimtalk ? phone.trim() : undefined, contact: contact.trim() || undefined, openedAt: opened.current, utm: readUtm(), ...(newCompany ? { newCompany: true } : {}) } });
       await fireSignupConversion().catch(() => {}); // #449 회사가 만들어진 이 순간(광고를 누른 그 브라우저) — 확인 메일을 다른 기기에서 열어도 전환이 빠지지 않게
       setDone(r);
-    } catch (e) { setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
+    } catch (e) { if (e instanceof ApiError && e.code === 'domain_join') { setDomainJoin(e.detail?.company ?? '회사'); return; } setErr(e instanceof ApiError ? e.message : '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.'); } finally { setBusy(false); }
   }
 
   if (enabled === false) return (
@@ -116,6 +123,13 @@ export default function SignupPage() {
         {mode === 'team' && <CompanyFields v={f} onChange={(v) => setF({ ...f, ...v })} />}
         {approval && <Field label="연락받을 전화번호 (24시간 안에 연락드립니다)"><input className={inputCls + ' h-11'} value={contact} onChange={(e) => setContact(e.target.value)} inputMode="tel" maxLength={20} placeholder="예: 010-1234-5678" required aria-label="연락받을 전화번호" data-testid="signup-contact" /></Field>}
         {err && <p className="rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{err}</p>}
+        {domainJoin && <div className="space-y-2 rounded-input border border-brand-200 bg-brand-50 p-3 text-sm text-ink" data-testid="domain-join">
+          <p>이 메일 도메인은 <b>{domainJoin}</b> 회사가 워크인을 쓰고 있습니다. 같은 회사라면 합류 신청을 보내세요 — 메일 확인 뒤 회사 관리자가 승인하면 로그인할 수 있습니다.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" disabled={busy} onClick={joinDomain} data-testid="domain-join-send">{domainJoin}에 합류 신청</Button>
+            <Button type="button" variant="secondary" disabled={busy} onClick={(e) => { setDomainJoin(null); void submit(e as unknown as React.FormEvent, true); }} data-testid="domain-join-new">새 회사로 가입</Button>
+          </div>
+        </div>}
         <Button type="submit" className="h-11 w-full text-[15px]" disabled={busy || enabled === null} data-testid="signup-submit">{busy ? <><Loader2 className="animate-spin" />{approval ? '신청 중…' : '가입 중…'}</> : <>{approval ? '체험 신청하고 확인 메일 받기' : '가입하고 확인 메일 받기'}<ArrowRight /></>}</Button>
         <button type="button" className="w-full text-center text-sm text-ink-2 underline" onClick={() => { setErr(null); setStep(1); }}>이전 단계</button>
         <p className="text-center text-xs text-ink-3">{approval ? '승인되면 메일로 알려 드립니다. ③ 연락 채널·④ 동료 초대는 승인 뒤 처음 로그인할 때 안내합니다.' : '③ 연락 채널·④ 동료 초대는 메일 확인 뒤 처음 로그인할 때 안내합니다(나중에 해도 됩니다).'}</p>
