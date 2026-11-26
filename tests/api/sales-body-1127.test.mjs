@@ -19,17 +19,18 @@ const GOOD = `시험스타힐스 입주민 편의시설 위탁운영업체 선�
 2. 운영대상: 커뮤니티 주민공동시설(피트니스, 독서실 등)
 3. 입찰 참가자격
 가. 자본금 5억원 이상 나. 최근 5년간 800세대 이상 주민공동시설 5개 이상 운영 완료 실적
-4. 현장설명회: ${plus(5)} 09:00~14:00 개별 방문. 현장설명회 참석자는 명함을 제출하고 명단에 서명해야만 입찰에 참여할 수 있습니다.
-9. 입찰가격: 월 위탁운영비 × 36개월 총액으로 기재
+4. 현장설명회: ${plus(5).slice(0, 4)}년 ${Number(plus(5).slice(5, 7))}월 ${plus(5).slice(8)}일(수) 09시 ~ 14시 개별방문 (장소 : 관리사무소)\n   현장설명회 참석자는 명함을 제출하고 명단에 서명해야만 입찰에 참여할 수 있습니다.
+9. 입찰가격: 월간 산출 총금액 × 계약기간 36개월로 기재
 10. 계약기간: 계약일로부터 2년
 ※ 산출내역서는 월 금액 × 24개월로 작성
 평가 비고: 최근 5년간 1,000세대 이상 단지 운영 실적 가점`;
 const AD = `시험단지 공용시설 운영업체 선정 공고
 1. 목적: 단지 커뮤니티 시설·승강기 미디어보드 광고 사업 운영업체 선정(최고가 낙찰)
 2. 광고료는 36개월분을 선납`;
-const B = { good: '20261127100000001', ad: '20261127100000002', guard: '20261127100000003', build: '20261127100000004', old: '20261127100000005' };
+const B = { good: '20261127100000001', ad: '20261127100000002', guard: '20261127100000003', build: '20261127100000004', old: '20261127100000005', hil: '20261127100000006' };
+const HIL = `시험단지 커뮤니티 출입 연동 시스템 용역\n1. 용역 범위: 주민공동시설 예약·결제 시스템(웹·모바일 앱·키오스크) 제공, 출입 통제 연동, 회원·이용료 정산, 유지보수\n2. 계약기간: 1년`;
 const files = { [B.good]: [{ seq: 112701, fileName: '1. 입주민 편의시설 위탁운영업체 선정 입찰공고.txt', body: Buffer.from(GOOD) }], [B.ad]: [{ seq: 112702, fileName: '입찰공고.txt', body: Buffer.from(AD) }],
-  [B.guard]: [{ seq: 112703, fileName: '입찰공고.txt', body: Buffer.from(GOOD) }], [B.build]: [{ seq: 112704, fileName: '입찰공고.txt', body: Buffer.from(GOOD) }] };
+  [B.guard]: [{ seq: 112703, fileName: '입찰공고.txt', body: Buffer.from(GOOD) }], [B.build]: [{ seq: 112704, fileName: '입찰공고.txt', body: Buffer.from(GOOD) }], [B.hil]: [{ seq: 112706, fileName: '입찰공고.txt', body: Buffer.from(HIL) }] };
 const detail = (cat) => `<table class="contTbl"><tbody><tr> <th scope="col">입찰분류</th> <td> ${cat} </td> <th scope="col">입찰종류</th> <td> 제한경쟁 </td> </tr></tbody></table>`;
 const tr = (id, cells) => `<tr>${cells.map((c, i) => (i === 3 ? `<td><a href="javascript:goView('${id}')">${c}</a></td>` : `<td>${c}</td>`)).join('')}</tr>`;
 const TGOOD = '[인천] 시험스타힐스 공용시설 운영업체 선정 입찰공고';
@@ -61,7 +62,8 @@ before(async () => {
   await put(B.ad, '[서울] 시험단지 공용시설 운영업체 선정(2)', { bid_category: '사업자 - 용역 - 기타' });
   await put(B.guard, '[서울] 시험단지 경비 운영업체 선정', { bid_category: '사업자 - 용역 - 경비' });
   await put(B.build, '[서울] 시험단지 운영업체 사무실 보수공사', { bid_category: '사업자 - 공사 - 기타' });
-  await put(B.old, '[경기] 시험단지 공용시설 운영 사업자 선정', {}); // 분류 빈 줄 — 상세에서 분류를 받고(파일 없음) 본문은 '첨부 공고문 없음'
+  await put(B.old, '[경기] 시험단지 공용시설 운영 사업자 선정', {});
+  await put(B.hil, '[인천] 시험단지 커뮤니티 출입 연동 시스템 용역 사업자 선정', { bid_category: '사업자 - 용역 - 지능형홈네트워크' }); // 분류 빈 줄 — 상세에서 분류를 받고(파일 없음) 본문은 '첨부 공고문 없음'
 });
 after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
 
@@ -74,12 +76,15 @@ test('순수 함수: 본문 판정·현장설명 필수·서로 다른 값', asy
 
 test('공고문 본문 판정(운영자 [지금 읽기] = 정기 실행과 같은 일): 본문의 주민공동시설·피트니스로 다짐 즉시 검토 · 광고 본문·경비 분류·공사 제목은 그대로', async () => {
   const r = await ctx.owner.ok('POST', '/api/platform/sales-notices', { refit: true, body: true });
-  assert.ok(r.bodyFit.done >= 3, JSON.stringify(r.bodyFit)); assert.equal(r.bodyFit.raised, 1, JSON.stringify(r.bodyFit));
+  assert.ok(r.bodyFit.done >= 3, JSON.stringify(r.bodyFit)); assert.equal(r.bodyFit.raised, 2, JSON.stringify(r.bodyFit));
   const g = await rowOf(B.good);
   assert.equal(g.related, true); assert.equal(g.fit_business, '다짐'); assert.equal(g.classification, '즉시 검토'); assert.ok(g.refound_at, '마감 전 = 다시 찾은 공고');
   assert.match(g.body_fit.why, /^공고문 본문에서 찾음: /); assert.ok(g.body_fit.words.some((w) => /주민공동|피트니스|독서실|커뮤니티/.test(w)), JSON.stringify(g.body_fit));
   assert.equal(g.doc_briefing_kind, '필수'); assert.match(g.doc_briefing_label, /서명해야만 입찰에 참여/);
-  assert.ok(g.doc_checks.some((x) => /개월 수가 서로 다름: .*36개월.*24개월/.test(x)), JSON.stringify(g.doc_checks));
+  // 로컬 11/27 21번: 곱하는 개월 수는 출처별(본문·산출내역서), 계약 기간은 따로
+  assert.ok(g.doc_checks.includes('입찰가·계약 개월 수가 서로 다름: 금액 곱하기 36개월(본문) · 금액 곱하기 24개월(산출내역서) · 계약 2년'), JSON.stringify(g.doc_checks));
+  // 22번: 공고문 현장설명 일시·장소
+  assert.equal(g.doc_briefing_at, `${plus(5)}T09:00:00+09:00`); assert.equal(g.doc_briefing_place, '관리사무소');
   assert.ok(g.doc_checks.some((x) => /실적 세대 기준이 서로 다름: 800세대 · 1,000세대/.test(x)), JSON.stringify(g.doc_checks));
   const a = await rowOf(B.ad); assert.equal(a.related, false); assert.match(a.body_fit.skip, /광고/);
   const gd = await rowOf(B.guard); assert.equal(gd.related, false); assert.equal(gd.body_fit, undefined, '경비 제목은 대상 아님');
@@ -88,6 +93,9 @@ test('공고문 본문 판정(운영자 [지금 읽기] = 정기 실행과 같�
   // 카드: 까닭·현장설명 필수·관리사무소에 물어볼 것
   const card = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === B.good);
   assert.ok(card, '입찰 목록에 보임'); assert.match(card.bodyWhy, /^공고문 본문에서 찾음/); assert.equal(card.briefing?.required, true); assert.equal(card.docChecks.length, 2);
+  assert.equal(card.briefing?.at, `${plus(5)}T09:00:00+09:00`); assert.equal(card.briefing?.place, '관리사무소');
+  // 23번 ③: 하이링크도 본문으로 — 제목은 '시스템' 때문에 다짐에서 빠지고 하이링크 낱말이 없던 공고
+  const h = await rowOf(B.hil); assert.equal(h.related, true, JSON.stringify(h.body_fit)); assert.equal(h.fit_business, '하이링크'); assert.match(h.body_fit.why, /예약·결제시스템|키오스크/);
   // 한 공고에 한 번 — 다시 돌려도 받지 않음
   const n = fileCalls(B.good); await ctx.owner.ok('POST', '/api/platform/sales-notices', { refit: true, body: true }); assert.equal(fileCalls(B.good), n);
 });
@@ -99,5 +107,5 @@ test('다음 수집·다시 판정이 본문으로 올린 공고를 되돌리지
   assert.equal((await rowOf(B.good)).related, true, '다시 판정이 되돌리지 않음');
   const c = (await ctx.owner.ok('GET', '/api/platform/sales-notices?bodyfit=count')).bodyFit;
   const today = c.find((x) => x.day === kst(new Date()));
-  assert.ok(today && today.titles >= 3 && today.raised === 1, JSON.stringify(c));
+  assert.ok(today && today.titles >= 4 && today.raised === 2, JSON.stringify(c));
 });

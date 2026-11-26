@@ -8,21 +8,25 @@
 // 비용: 첨부 받기·글자 뽑기는 무료(규칙). AI 는 쓰지 않음.
 import { db } from '../db';
 import { extractTextResult } from '../textExtract';
-import { AD_RE, DIRECT_OPS, initialClassification, matchFit, type FitBusiness } from './collectors/procurement';
+import { AD_RE, DIRECT_OPS, HILINK_KEYWORDS, initialClassification, matchFit, type FitBusiness } from './collectors/procurement';
 
 type Row = Record<string, any>;
 const kstDay = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 /** 본문 판정 대상 제목 — 운영 맡김·편의시설·커뮤니티 말 */
-export const BODY_TITLE = /운영|위탁|편의\s*시설|커뮤니티|주민\s*공동|부대\s*복리/;
+export const BODY_TITLE = /운영|위탁|편의\s*시설|커뮤니티|주민\s*공동|부대\s*복리|예약|출입|키오스크|무인|회원\s*관리|통합\s*관리/;
+/** 로컬 11/27 23번: 하이링크 쪽 제목(시스템·예약·출입…) — 분류 '지능형홈네트워크'·'통신'도 읽음(다짐 쪽은 시설 서비스로 봄) */
+const HILINK_TITLE = /시스템|예약|출입|키오스크|무인|회원\s*관리|통합\s*관리|앱|플랫폼|솔루션/;
+const NET_CAT = /지능형|홈네트워크|통신|인터넷/;
 /** 본문을 읽어도 다짐·하이링크가 아닌 제목(광고·공사·물품·시설 서비스) */
 const BODY_SKIP_TITLE = /공사|설치|교체|보수|도색|방수|구매|구입|렌탈|납품|청소|미화|경비|소독|방역|승강기|주택\s*관리|위탁\s*관리|관리\s*업자|재활용|음식물|택배|알뜰|매각|보험|회계/;
 /** K-apt 분류 세 번째 칸(사업자 - 용역 - ○○)이 시설 서비스면 읽지 않음 */
 const SERVICE_CAT = /경비|청소|미화|소독|방역|승강기|위탁\s*관리|주택\s*관리|전기|소방|보험|회계|감사|도장|방수|재활용|음식물|택배|알뜰|조경|수목|정화조|저수조|급수|주차|통신|인터넷|지능형|홈네트워크|보수/;
 const catPart = (cat: string) => cat.split(/\s*-\s*/).map((x) => x.trim())[2] ?? '';
 /** 분류로 본 대상 여부 — 빈 분류는 '모름'(상세에서 받아 다시 봄) */
-export function bodyCategoryOk(cat: string | null | undefined): boolean | null {
+export function bodyCategoryOk(cat: string | null | undefined, title = ''): boolean | null {
   const c = String(cat ?? '').trim(); if (!c) return null;
-  return /사업자/.test(c) && /용역/.test(c) && !SERVICE_CAT.test(catPart(c));
+  const part = catPart(c); const hilink = HILINK_TITLE.test(title);
+  return /사업자/.test(c) && /용역/.test(c) && (!SERVICE_CAT.test(part) || (hilink && NET_CAT.test(part) && !SERVICE_CAT.test(part.replace(/지능형|홈네트워크|통신|인터넷/g, ''))));
 }
 export const bodyTitleOk = (title: string) => BODY_TITLE.test(title) && !BODY_SKIP_TITLE.test(title) && !AD_RE.test(title);
 
@@ -34,6 +38,8 @@ export function bodySnippet(text: string): string {
   return parts.join('\n').slice(0, 4000);
 }
 /** 광고 자리 운영 본문(광고료·광고 사업) — 시설 운영 말이 없으면 다짐 아님 */
+const nrm = (x: string) => x.toUpperCase().replace(/\s+/g, '');
+const isHilinkWord = (w: string) => HILINK_KEYWORDS.some((h) => nrm(h) === nrm(w)) || /시스템|프로그램|솔루션/.test(w);
 const AD_BODY = /광고\s*(?:료|사업|대행|게재|수익|물)|미디어\s*보드|전광판|사이니지/;
 const FAC_BODY = /피트니스|헬스|체력\s*단련|운동\s*시설|GX|골프|수영|사우나|독서실|도서관|커뮤니티\s*(?:센터|시설)|주민\s*공동\s*시설|카페|게스트\s*하우스/;
 export type BodyFit = { at: string; fit: FitBusiness | null; words: string[]; direct: boolean; why: string | null; quote: string | null; file: string | null; skip?: string; error?: string; tries?: number };
@@ -42,16 +48,37 @@ export function bodyJudge(title: string, cat: string | null, text: string): Pick
   const snip = bodySnippet(text);
   const f = matchFit(title, cat, snip, '공동주택');
   if (!f.fit) return { fit: null, skip: f.dropped?.[0]?.why ?? '본문에도 우리 사업 낱말 없음' };
-  if (!/위탁|운영/.test(snip)) return { fit: null, skip: '본문에 운영·위탁 말 없음' };
+  // 다짐은 본문에 운영·위탁 말이 있어야 · 하이링크(시스템·예약·출입)는 없어도 됨(로컬 11/27 23번)
+  let fit: FitBusiness | null = f.fit; let matched = f.matched;
+  if (/다짐/.test(fit) && !/위탁|운영/.test(snip)) { fit = /하이링크/.test(fit) ? '하이링크' : null; matched = matched.filter(isHilinkWord); }
+  if (!fit) return { fit: null, skip: '본문에 운영·위탁 말 없음' };
   const flat = snip.replace(/\s+/g, ' ');
   // 목적(첫 단락)이 광고 자리 운영이면 시설 낱말이 섞여도 다짐 아님 · 그 밖은 시설 운영 말이 없을 때만 거름
   if (AD_BODY.test(flat.slice(0, 400)) || (AD_BODY.test(flat) && !FAC_BODY.test(flat))) return { fit: null, skip: '광고 자리 운영(광고료·광고 사업)' };
-  const words = f.matched.slice(0, 6);
+  const words = matched.slice(0, 6);
   const at = words.map((w) => flat.indexOf(w)).filter((i) => i >= 0).sort((a, b) => a - b)[0];
   const quote = at == null ? null : flat.slice(Math.max(0, at - 30), at + 60).trim();
-  return { fit: f.fit, words, direct: f.direct || DIRECT_OPS.test(flat), why: `공고문 본문에서 찾음: ${words.slice(0, 4).join('·')}`, quote };
+  return { fit, words, direct: f.direct || DIRECT_OPS.test(flat), why: `공고문 본문에서 찾음: ${words.slice(0, 4).join('·')}`, quote };
 }
 
+const pad = (x: string | number) => String(x).padStart(2, '0');
+/** 로컬 11/27 22번(서희스타힐스 '2026년 12월 02일(수) 09시 ~ 14시 개별방문 (장소 : 관리사무소)'): 현장설명 줄의 일시·장소 — 시각이 없으면 날짜만 */
+export function docBriefingWhen(text: string): { at: string | null; place: string | null } {
+  const lines = String(text ?? '').replace(/\r/g, '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (!/현장\s*설명/.test(lines[i])) continue;
+    const l = `${lines[i]} ${lines[i + 1] ?? ''}`.replace(/\s+/g, ' ');
+    const d = l.match(/(20\d{2})\s*[년.\-/]\s*(\d{1,2})\s*[월.\-/]\s*(\d{1,2})\s*일?/);
+    if (!d) continue;
+    const rest = l.slice((d.index ?? 0) + d[0].length);
+    const tm = rest.match(/^\s*(?:\([^)]{0,4}\)\s*)?(?:(오전|오후)\s*)?(\d{1,2})\s*(?:시|:)\s*(\d{2})?/);
+    let h = tm ? Number(tm[2]) : null; if (h != null && tm?.[1] === '오후' && h < 12) h += 12;
+    const day = `${d[1]}-${pad(d[2])}-${pad(d[3])}`;
+    const pl = l.match(/장\s*소\s*[:：]\s*([^)\n,·]{2,30})/);
+    return { at: h != null && h < 24 ? `${day}T${pad(h)}:${tm?.[3] ?? '00'}:00+09:00` : day, place: pl ? pl[1].trim() : null };
+  }
+  return { at: null, place: null };
+}
 /** 현장설명 필수·없음 — 공고문 문장 우선(K-apt 칸은 필수·임의가 함께 찍혀 애매할 때가 있음). 못 찾으면 null */
 export function docBriefing(text: string): { kind: '필수' | '없음'; label: string } | null {
   const lines = String(text ?? '').replace(/\r/g, '').split(/\n|(?<=[.。])\s+/).map((x) => x.replace(/\s+/g, ' ').trim()).filter((x) => /현장\s*설명/.test(x));
@@ -66,10 +93,21 @@ export function docBriefing(text: string): { kind: '필수' | '없음'; label: s
 export function docChecks(text: string): string[] {
   const t = String(text ?? '').replace(/\s+/g, ' ');
   const out: string[] = [];
-  const months = new Map<number, string>();
-  for (const m of t.matchAll(/[×xX*]\s*(\d{1,2})\s*개월/g)) { const n = Number(m[1]); if (n >= 6 && !months.has(n)) months.set(n, `${n}개월(금액 곱하기)`); }
-  for (const m of t.matchAll(/계약\s*기간\s*[:：]?\s*(?:은|는)?[^.]{0,30}?(\d{1,2})\s*(년|개월)/g)) { const n = Number(m[1]) * (m[2] === '년' ? 12 : 1); if (n >= 6 && n <= 120 && !months.has(n)) months.set(n, `${m[1]}${m[2]}(계약 기간)`); }
-  if (months.size > 1) out.push(`입찰가·계약 개월 수가 서로 다름: ${[...months.values()].join(' · ')}`);
+  // 로컬 11/27 21번(서희스타힐스: 본문 9-바 '월간 산출 총금액 × 계약기간 36개월' · 산출내역서 '월청구금액 * 24개월' · 계약기간 '2년'): 곱하는 개월 수는 출처별로(본문·산출내역서), 계약 기간은 따로
+  const mult: { n: number; src: string }[] = []; const seenMul = new Set<string>();
+  for (const m of t.matchAll(/[×xX*]\s*(?:계약\s*기간\s*)?(\d{1,2})\s*개월/g)) {
+    const n = Number(m[1]); if (n < 6) continue;
+    const src = /산출\s*내역/.test(t.slice(Math.max(0, (m.index ?? 0) - 200), m.index ?? 0)) ? '산출내역서' : '본문';
+    const k = `${n}|${src}`; if (!seenMul.has(k)) { seenMul.add(k); mult.push({ n, src }); }
+  }
+  const terms: { n: number; label: string }[] = [];
+  for (const m of t.matchAll(/계약\s*기간\s*[:：]?\s*(?:은|는)?\s*(?:계약일?\s*(?:로부터|부터)\s*)?(\d{1,2})\s*(년|개월)/g)) {
+    if (/[×xX*]\s*$/.test(t.slice(Math.max(0, (m.index ?? 0) - 3), m.index ?? 0))) continue; // '× 계약기간 36개월' = 곱하기
+    const n = Number(m[1]) * (m[2] === '년' ? 12 : 1); if (n < 6 || n > 120 || terms.some((x) => x.n === n)) continue;
+    terms.push({ n, label: `계약 ${m[1]}${m[2]}` });
+  }
+  const months = new Set([...mult.map((x) => x.n), ...terms.map((x) => x.n)]);
+  if (months.size > 1) out.push(`입찰가·계약 개월 수가 서로 다름: ${[...mult.map((x) => `금액 곱하기 ${x.n}개월(${x.src})`), ...terms.map((x) => x.label)].join(' · ')}`);
   const hh = new Map<number, string>();
   for (const m of t.matchAll(/(\d{1,2},?\d{3}|\d{3})\s*세대\s*(?:이상|규모)/g)) {
     const ctx = t.slice(Math.max(0, (m.index ?? 0) - 60), (m.index ?? 0) + 60);
@@ -82,25 +120,25 @@ export function docChecks(text: string): string[] {
 /** 공고문 글 → 줄에 붙일 칸(현장설명 필수·서로 다른 값) */
 export function docPatch(text: string | null | undefined): Record<string, unknown> {
   if (!text) return {};
-  const b = docBriefing(text); const c = docChecks(text);
-  return { ...(b ? { doc_briefing_kind: b.kind, doc_briefing_label: b.label } : {}), doc_checks: c, doc_read_at: new Date().toISOString() };
+  const b = docBriefing(text); const c = docChecks(text); const w = docBriefingWhen(text);
+  return { ...(b ? { doc_briefing_kind: b.kind, doc_briefing_label: b.label } : {}), ...(w.at ? { doc_briefing_at: w.at } : {}), ...(w.place ? { doc_briefing_place: w.place } : {}), doc_checks: c, doc_read_at: new Date().toISOString() };
 }
 
 /** 본문 판정 후보(마감 전·관련 아님·K-apt) — days 는 처음 본 때 기준 */
 async function candidates(days: number) {
   const sql = db(); const td = kstDay(); const from = new Date(Date.now() - days * 864e5).toISOString();
   const rows = await sql<{ src_id: string; row: Row }[]>`select src_id, row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone
-    and row->>'source_type' = 'kapt_bid' and coalesce(row->>'related', 'false') <> 'true' and coalesce(row->>'title', '') ~ '운영|위탁|편의|커뮤니티|주민|부대'
+    and row->>'source_type' = 'kapt_bid' and coalesce(row->>'related', 'false') <> 'true' and coalesce(row->>'title', '') ~ '운영|위탁|편의|커뮤니티|주민|부대|예약|출입|키오스크|무인|회원|통합'
     and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${from} and left(coalesce(row->>'deadline_at', ''), 10) >= ${td}
     and coalesce(row->>'current_status', '') !~ '취소|낙찰|유찰' order by row->>'deadline_at' asc`;
-  return rows.filter((r) => bodyTitleOk(String(r.row.title ?? '')) && bodyCategoryOk(r.row.bid_category) !== false);
+  return rows.filter((r) => bodyTitleOk(String(r.row.title ?? '')) && bodyCategoryOk(r.row.bid_category, String(r.row.title ?? '')) !== false);
 }
 /** 운영자 조회(로컬 9번 '하루 몇 건'): 최근 14일 날짜별 — 제목 후보·분류 통과·읽음·올림 */
 export async function bodyFitCounts(days = 14) {
   const sql = db(); const from = new Date(Date.now() - days * 864e5).toISOString();
   const rows = await sql<{ row: Row }[]>`select jsonb_build_object('title', row->'title', 'cat', row->'bid_category', 'first', coalesce(row->>'first_seen_at', row->>'created_at'), 'related', row->'related',
       'body', row->'body_fit', 'dl', row->'deadline_at') as row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'source_type' = 'kapt_bid'
-    and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${from} and coalesce(row->>'title', '') ~ '운영|위탁|편의|커뮤니티|주민|부대'`;
+    and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${from} and coalesce(row->>'title', '') ~ '운영|위탁|편의|커뮤니티|주민|부대|예약|출입|키오스크|무인|회원|통합'`;
   const by = new Map<string, { day: string; titles: number; unrelated: number; catOk: number; catUnknown: number; read: number; raised: number }>();
   for (const { row } of rows) {
     if (!bodyTitleOk(String(row.title ?? ''))) continue;
@@ -110,7 +148,7 @@ export async function bodyFitCounts(days = 14) {
     if (row.body && !row.body.error) c.read++;
     if (row.related === true && !row.body?.fit) continue;
     c.unrelated++;
-    const ok = bodyCategoryOk(row.cat); if (ok) c.catOk++; else if (ok === null) c.catUnknown++;
+    const ok = bodyCategoryOk(row.cat, String(row.title ?? '')); if (ok) c.catOk++; else if (ok === null) c.catUnknown++;
   }
   return [...by.values()].sort((a, b) => b.day.localeCompare(a.day));
 }
@@ -132,7 +170,7 @@ export async function readBodyFit(id: string, opt: { fetchImpl?: typeof fetch } 
       if (s.status === 200) { const d = parseKaptBidDetail(s.html); if (d.category) { cat = d.category; extra.bid_category = d.category; } if (d.bidKind) extra.contract_method = d.bidKind; if (d.content) extra.task_scope = d.content; extra.category_probed_at = t; }
     } catch { /* 분류 없이 본문으로 */ }
   }
-  if (bodyCategoryOk(cat) === false) return save({ at: t, fit: null, words: [], direct: false, why: null, quote: null, file: null, skip: `분류 '${catPart(String(cat))}' — 시설 서비스` }, extra);
+  if (bodyCategoryOk(cat, String(row.title ?? '')) === false) return save({ at: t, fit: null, words: [], direct: false, why: null, quote: null, file: null, skip: `분류 '${catPart(String(cat))}' — 시설 서비스` }, extra);
   const { noticeFiles } = await import('./autoAttach'); const { fetchFile } = await import('./files'); const { rankFiles } = await import('./eligibility');
   const src = await noticeFiles(id).catch(() => null);
   const files = rankFiles(src?.files ?? []).slice(0, 2);
@@ -163,7 +201,7 @@ export async function bodyFitTick(o: { budgetMs?: number; max?: number; days?: n
     if (done >= max || Date.now() - t0 > budget) break;
     const b = await readBodyFit(src_id, { fetchImpl: o.fetchImpl }).catch((e) => { tried.push(`${String(row.source_external_id ?? src_id).slice(0, 24)} 오류(${String((e as Error)?.message ?? e).slice(0, 30)})`); return null; }); done++;
     if (b?.fit) raised++;
-    if (b) tried.push(`${String(row.source_external_id ?? src_id).slice(0, 24)} ${b.fit ? '올림' : b.error ? '못 받음' : '그대로'}`);
+    if (b) tried.push(`${String(row.source_external_id ?? src_id).slice(0, 24)} ${b.fit ? '올림' : b.error ? `못 받음(${String(b.error).slice(0, 50)})` : '그대로'}`); // 로컬 11/27 24번: 못 받은 까닭
   }
   return { candidates: rows.length, due: due.length, done, raised, tried }; // 공개 정기 실행 기록에는 번호·결과만(제목·단지 이름 없음)
 }

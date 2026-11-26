@@ -123,3 +123,14 @@ test('로컬 02:00 오탐 2가지: 광고 자리 운영(미디어보드·광고�
   for (const no of ['20261126153915104', '20261126144218065', 'kg2b_143752']) { const x = await rowOf(no); assert.equal(x.related, false, no); assert.equal(x.refound_at, undefined, `${no} 다시 찾은 공고 표시 지움`); }
   assert.equal((await rowOf('20261125113139380')).related, true, '부산 커뮤니티시설 위탁운영은 그대로');
 });
+
+test('로컬 11/27 23번 하이링크 누락: 검암역 로열파크씨티푸르지오 1단지 \'커뮤니티(주민공동시설) 예약관리 시스템 용역\' = 하이링크 즉시 검토 · 다시 판정이 올림', async () => {
+  const T = '[인천] 시험역 로열파크씨티 1단지 커뮤니티(주민공동시설) 예약관리 시스템 용역 사업자 선정 입찰공고';
+  await put('20261126151725829', T, { bid_category: '사업자-용역-지능형홈네트워크' });
+  const r = (await ctx.owner.ok('GET', '/api/platform/sales-notices?no=20261126151725829')).items[0].nowRule;
+  assert.equal(r.fit, '하이링크'); assert.equal(r.direct, true); assert.ok(r.matched.includes('예약관리시스템'), JSON.stringify(r));
+  await ctx.owner.ok('POST', '/api/platform/sales-notices', { refit: true, days: 60 });
+  const x = await rowOf('20261126151725829');
+  assert.equal(x.related, true); assert.equal(x.fit_business, '하이링크'); assert.equal(x.classification, '즉시 검토'); assert.ok(x.refound_at, '마감 전 = 다시 찾은 공고');
+});
+

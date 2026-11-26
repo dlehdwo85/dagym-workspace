@@ -200,7 +200,10 @@ export async function kaptCategoryProbe(opt: { days?: number; limit?: number; fe
     try {
       const s = await kaptSession(String(r.ext), fetchImpl, 8000); if (s.status !== 200) throw new Error(`HTTP ${s.status}`);
       const d = parseKaptBidDetail(s.html);
-      const patch = { category_probed_at: new Date().toISOString(), ...(d.category ? { bid_category: d.category } : {}), ...(d.bidKind ? { contract_method: d.bidKind } : {}), ...(d.content ? { task_scope: d.content } : {}) };
+      const patch = { category_probed_at: new Date().toISOString(), ...(d.category ? { bid_category: d.category } : {}), ...(d.bidKind ? { contract_method: d.bidKind } : {}), ...(d.content ? { task_scope: d.content } : {}),
+        // 로컬 11/27 22번: 상세의 현장설명 종류·일시·장소·참가 조건도(분류로 관련이 되면 일정·D-n 이 바로 생기게 — 목록 수집의 상세 읽기와 같은 칸)
+        ...(d.terms ? { site_briefing_kind: d.terms.briefingKind, site_briefing_at: d.terms.briefingAt, site_briefing_place: d.terms.briefingPlace, bid_docs: d.terms.bidDocs, credit_rating_cert: d.terms.creditCert,
+          performance_cert: d.terms.perfCert, bid_bond: d.terms.bidBond, docs_deadline_at: d.terms.docsDeadline, bid_method: d.terms.bidMethod, urgent_bid: d.terms.urgent, payment_terms: d.terms.payTerms, terms_read_at: new Date().toISOString() } : {}) };
       await sql`update sales_src_rows set row = row || ${sql.json(patch as never)}::jsonb, synced_at = now() where scope = 'global' and tbl = 'procurement_notices' and src_id = ${r.src_id}`;
       out.probed++; if (d.category) out.categorized++; if (/주민\s*운동\s*시설의?\s*위탁/.test(d.category ?? '')) out.gym++;
     } catch { out.failed++; }
@@ -211,7 +214,7 @@ export async function kaptCategoryProbe(opt: { days?: number; limit?: number; fe
 /** 대표 11/27(로컬 긴급 ①④): 판정 규칙을 바꾼 배포 뒤 — 정기 실행(tick)에서 입찰 공고 수집 차례가 아닐 때 한 번씩 최근 60일 '관련 아님' K-apt 운영 공고의 분류를 상세에서 받고
  *  지금 규칙으로 다시 판정(refitNotices). 새로 관련이 된 공고(단지·마감)는 app_settings 'fit_rules_refit' 에 쌓아 플랫폼 공고 조회(GET /api/platform/sales-notices?refit=last)로 본다
  *  (깃허브 정기 실행 기록은 공개라 응답에는 숫자만). 아직 마감 전인 공고는 다시 판정이 '다시 찾은 공고'로 표시 — 입찰 목록·당일 메일에 오름. 후보를 다 읽었거나 4번 돌면 끝 */
-export const FIT_RULES_VERSION = '2026-11-27 편의시설·빈 분류';
+export const FIT_RULES_VERSION = '2026-11-27b 예약관리 시스템·광고·락커'; // 로컬 11/27 23번: 규칙을 바꿔 한 번 더(검암역 로열파크씨티푸르지오 올림 · 광고 2건·락커 1건 내림)
 export type FitRulesRaised = { id: string; no: string | null; source: string | null; title: string; complex: string | null; deadline: string | null; fit: string | null; open: boolean; at: string };
 export async function fitRulesRefit(opt: { fetchImpl?: typeof fetch; deadlineMs?: number; force?: boolean; now?: Date } = {}) {
   const sql = db(); const now = opt.now ?? new Date(); const t = now.toISOString(); const td = kstYmd(now);

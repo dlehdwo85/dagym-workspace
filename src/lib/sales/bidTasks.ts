@@ -59,7 +59,7 @@ const MS: [MilestoneKey, string, string[]][] = [
 export const bidMilestones = (r: any): Milestone[] => MS.flatMap(([key, label, keys]) => {
   const bk = String(r?.doc_briefing_kind ?? r?.kg2b_briefing_kind ?? r?.site_briefing_kind ?? '');
   if (key === 'briefing' && bk === '없음') return [];
-  const w = when(pick(r, ...(key === 'briefing' ? [...keys, 'kg2b_briefing_at'] : keys))); if (!w) return [];
+  const w = when(pick(r, ...(key === 'briefing' ? [...keys, 'kg2b_briefing_at', 'doc_briefing_at'] : keys))); if (!w) return []; // 로컬 11/27 22번: 공고문 일시
   // 242차 #761: 필수·임의·공고문 참조 모두 이름에 붙여 일정에서 바로 알게
   return [{ key, label: key === 'briefing' && ['필수', '임의', '공고문 참조'].includes(bk) ? `${label}(${bk})` : label, w }];
 });

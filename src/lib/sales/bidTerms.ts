@@ -15,7 +15,7 @@ export type Briefing = { kind: string | null; at: string | null; place: string |
 export const briefKind = (r: Row): string | null => s0(r?.doc_briefing_kind) ?? s0(r?.kg2b_briefing_kind) ?? s0(r?.site_briefing_kind);
 export function briefingOf(r: Row): Briefing | null {
   // 280차: KG2B 상세의 현장설명(실제 입찰 사이트 값)을 K-apt '공고문 참조'보다 먼저
-  const kind = briefKind(r); /* 대표 11/27(로컬 7): 공고문 문장('…참석해야만 입찰 참여')이 먼저 */ const at = s0(r.site_briefing_at ?? r.briefing_at) ?? s0(r.kg2b_briefing_at); const place = s0(r.site_briefing_place);
+  const kind = briefKind(r); /* 대표 11/27(로컬 7): 공고문 문장('…참석해야만 입찰 참여')이 먼저 */ const at = s0(r.site_briefing_at ?? r.briefing_at) ?? s0(r.kg2b_briefing_at) ?? s0(r.doc_briefing_at); const place = s0(r.site_briefing_place) ?? s0(r.doc_briefing_place); // 로컬 11/27 22번: 공고문 일시·장소
   if (kind === '없음' || (!at && !kind)) return null;
   return { kind, at, place, required: kind === '필수' };
 }

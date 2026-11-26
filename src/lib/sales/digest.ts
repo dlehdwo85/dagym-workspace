@@ -258,7 +258,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
   // 239차(#744): 필수 현장설명이 D-3 안이면 입찰 마감이 멀어도 함께(현장설명에 빠지면 입찰 못 함)
   const soonRows = await sql<{ src_id: string; row: any }[]>`select src_id, row from sales_src_rows where tbl = 'procurement_notices' and scope = 'global' and not gone
     and ((row->>'deadline_at' >= ${plusDays(day, -1)} and row->>'deadline_at' < ${end})
-      or (coalesce(row->>'doc_briefing_kind', row->>'site_briefing_kind') = '필수' and row->>'site_briefing_at' >= ${plusDays(day, -1)} and row->>'site_briefing_at' < ${end} and row->>'deadline_at' >= ${day})) limit 3000`;
+      or (coalesce(row->>'doc_briefing_kind', row->>'site_briefing_kind') = '필수' and coalesce(row->>'site_briefing_at', row->>'doc_briefing_at') >= ${plusDays(day, -1)} and coalesce(row->>'site_briefing_at', row->>'doc_briefing_at') < ${end} and row->>'deadline_at' >= ${day})) limit 3000`;
   const soonCands: Cand[] = [];
   for (const { src_id, row } of soonRows) {
     const r = base ? row : plainNotice(row);
@@ -269,7 +269,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     const f = passPrefs(r, pj, base); if (!f.ok || (base && !f.fit)) continue;
     const dl = when(r.deadline_at); if (!dl) continue;
     const ahead = (w: NonNullable<ReturnType<typeof when>>) => { const n = Math.round((Date.parse(w.d) - Date.parse(day)) / 864e5); return n >= 0 && n <= 3 && !(n === 0 && w.t && Date.parse(`${w.d}T${w.t}:00+09:00`) < Date.now()); }; // 오늘인데 시각이 지남은 뺌
-    const bf = (r.doc_briefing_kind ?? r.site_briefing_kind) === '필수' ? when(r.site_briefing_at) : null;
+    const bf = (r.doc_briefing_kind ?? r.site_briefing_kind) === '필수' ? when(r.site_briefing_at ?? r.doc_briefing_at) : null;
     if (!ahead(dl) && !(bf && ahead(bf) && dl.d >= day)) continue;
     soonCands.push({ id: String(r.id ?? src_id), r, isNew: false, kind: String(r.notice_kind ?? 'new'), late: false, fit: f.fit, why: f.why, words: f.words, soon: true });
   }
@@ -301,7 +301,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
     else section = (cls.get(c.id) ?? (!base ? (TJ && jset ? TJ.tenantJudgeRow(r, jset)?.classification ?? '검토' : '검토') : partner ? '검토' : r.classification ?? initialClassification({ ...r, fit_business: c.fit }))) === '즉시 검토' ? 'now' : 'review'; // #752 면허 업체 협력 필요는 검토(회사가 바꾼 분류는 그대로) · 다른 회사는 회사가 '즉시 검토'로 바꾼 것만 ★
     const dl = when(r.deadline_at); const dd = dl ? Math.round((Date.parse(dl.d) - Date.parse(day)) / 864e5) : null; const dday = c.kind === 'cancel' || (dd != null && dd < 0) ? null : dd; // 결과 줄은 마감이 지났음 — D-day 없음 · 로컬 10/25 10:55 취소 공고는 'D-n · 준비 시작' 없이 마감일만
     const state = String(r.notice_state ?? '');
-    const method = `${r.contract_method ?? ''} ${r.award_method ?? ''}`; const briefing = fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at));
+    const method = `${r.contract_method ?? ''} ${r.award_method ?? ''}`; const briefing = fmtWhen(when(r.site_briefing_at ?? r.briefing_at ?? r.explanation_at ?? r.field_briefing_at ?? r.site_visit_at ?? r.kg2b_briefing_at ?? r.doc_briefing_at));
     // #530 ⑦(로컬 10/24): 21라인 범례처럼 공고 유형 배지 — 정정·취소·재공고·재게시·긴급 + 수의계약·견적·현장설명 · 결과는 낙찰/유찰
     const badges = c.kind === 'result' ? [/유찰/.test(String(r.current_status ?? '')) && !String(r.winner_name ?? '').trim() ? '유찰' : '낙찰', ...(c.filled ? ['보완'] : [])]
       : [c.kind === 'cancel' ? '취소' : c.kind === 'amend' || /정정|변경/.test(state) ? '정정' : null, c.kind === 'rebid' || /재공고/.test(state) ? '재공고' : reposted.has(c.id) ? '재게시' : null, c.kind === 'urgent' || /긴급/.test(state) ? '긴급' : null,
@@ -315,7 +315,7 @@ export async function buildDigest(tenant: string, day = kstDay()) {
       section, noticeNo: st === 'vendor_recruit' ? null : String(r.source_external_id ?? '').trim() || null, badges, biz: biz.length ? biz : c.fit ? [{ name: c.fit, color: '#2563EB' }] : [], tags: tagsOf(r), amount: amounts.join(' · ') || null, amounts,
       limit: c.kind === 'result' || c.kind === 'cancel' ? null : regionLimit(r.region_restriction, hq), progress,
       deadlineAt: fmtWhen(dl), deadlineSrc: r.deadline_src === 'agreement' || r.deadline_src === 'doc' ? r.deadline_src : null, participationAt: fmtWhen(when(r.participation_deadline_at)), openingAt: fmtWhen(when(r.opening_at)),
-      briefingAt: briefing, briefingKind: r.doc_briefing_kind ?? r.site_briefing_kind ?? null, briefingPlace: r.site_briefing_place ?? null, // 239차(#744)
+      briefingAt: briefing, briefingKind: r.doc_briefing_kind ?? r.site_briefing_kind ?? null, briefingPlace: r.site_briefing_place ?? r.doc_briefing_place ?? null, // 239차(#744)
       elig: c.kind === 'result' || c.kind === 'cancel' ? null : eligSay(eligView(r)), // 252차 #786 — 목록 줄과 같은 말
       bidSystem: st === 'kapt_bid' && r.bid_system && sysKey(r.bid_system) !== sysKey(SRC[st]) ? String(r.bid_system) : null, // 투찰처가 원천(K-APT)과 같으면 숨김 — KG2B 같은 다른 곳만
       result: c.kind === 'result' ? resultOf(r) : c.kind === 'cancel' && r.result_note ? `취소 사유: ${String(r.result_note).slice(0, 80)}` : null }); // #751 취소 사유(K-apt 상세)
