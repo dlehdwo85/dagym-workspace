@@ -159,7 +159,7 @@
   },
   "src/lib/sales/collectors/procurement.ts": {
    "domain": 7,
-   "brand": 21
+   "brand": 25
   },
   "src/lib/sales/collectors/prospects.ts": {
    "domain": 7
