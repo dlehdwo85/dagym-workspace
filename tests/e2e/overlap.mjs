@@ -113,7 +113,7 @@ export async function findOverlaps(page, { maxReport = 30 } = {}) {
 export const overlapText = (res) => res.issues.map((x) => `${x.type}: ${x.a}${x.b ? ` ↔ ${x.b}` : ''} (${x.px.join('×')}px @${x.at.join(',')})`).join('\n');
 
 // 대표 11/26 상시 규칙 '낱말 중간 줄바꿈 금지'(docs/DESIGN_SYSTEM.md): 여러 줄로 감긴 글자에서 줄이 낱말 가운데(앞뒤 모두 글자·숫자)에서 바뀌면 찾는다
-// 예: 인사말 '오늘도 수고 많으셨습니다, 이동 / 재님' — 줄은 띄어쓰기·문장 부호에서만 바뀌어야 함. 칸보다 긴 한 낱말(주소 등)은 data-break-ok 로 뺀다
+// 예: 인사말 '오늘도 수고 많으셨습니다, 홍길 / 동님' — 줄은 띄어쓰기·문장 부호에서만 바뀌어야 함. 칸보다 긴 한 낱말(주소 등)은 data-break-ok 로 뺀다
 export async function findWordBreaks(page, { maxReport = 20 } = {}) {
   return page.evaluate((maxReport) => {
     const issues = []; const seen = new Set();

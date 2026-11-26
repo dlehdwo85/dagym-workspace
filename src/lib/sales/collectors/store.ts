@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '../../db';
 import { sourceFiles } from '../files';
-import { DAGYM_KEYWORDS, HILINK_KEYWORDS, PROCUREMENT_ETL_FIELDS, aptContext, initialClassification, matchFit, planNoticeBatch } from './procurement';
+import { DAGYM_KEYWORDS, DAGYM_TITLE_WORDS, HILINK_KEYWORDS, PROCUREMENT_ETL_FIELDS, aptContext, initialClassification, matchFit, planNoticeBatch } from './procurement';
 import { COMPLEX_RANK, complexMatchKeys, planBatch, prospectFromKaptSelection } from './prospects';
 import type { CollectorResult } from './types';
 
@@ -137,7 +137,7 @@ export async function refitNotices(opt: { days?: number; now?: Date } = {}): Pro
   for (const p of patches) await sql`update sales_src_rows set row = row || ${sql.json(p.patch as never)}::jsonb, synced_at = now() where scope = ${SCOPE} and tbl = 'procurement_notices' and src_id = ${p.id}`;
   return { checked: rows.length + up.length, raised: patches.length, reopened, lowered: lowers.length, changed: changes.length, linked, ids: patches.map((p) => p.id), loweredIds: lowIds, changedIds: changes.map((p) => p.id) };
 }
-const DAGYM_SET = new Set<string>(DAGYM_KEYWORDS); const HILINK_SET = new Set<string>(HILINK_KEYWORDS);
+const DAGYM_SET = new Set<string>([...DAGYM_KEYWORDS, ...DAGYM_TITLE_WORDS]); const HILINK_SET = new Set<string>(HILINK_KEYWORDS);
 /** 공고 줄마다 진행 기록·업무 연결 수(회사 무관): 정식 진행 기록·원본 진행 칸(__progress)·opportunity_work·업무(sales_ref) */
 export async function noticeLinks(ids: string[]): Promise<Map<string, number>> {
   if (!ids.length) return new Map();

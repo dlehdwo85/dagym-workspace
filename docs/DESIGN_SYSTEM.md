@@ -55,7 +55,7 @@ Button(primary·secondary·ghost·danger·accent) · IconButton(aria-label 필�
   - 운영 확인(prod-check): 같은 검사를 읽기 전용으로 돌린다.
 
 ## 낱말 중간 줄바꿈 금지 (대표 11/26 상시 규칙 — 모든 화면)
-한글은 띄어쓰기에서만 줄을 바꾼다. 사람 이름·제목이 '이동 / 재님'처럼 낱말 가운데서 끊기지 않는다.
+한글은 띄어쓰기에서만 줄을 바꾼다. 사람 이름·제목이 '홍길 / 동님'처럼 낱말 가운데서 끊기지 않는다.
 - 앱 전체 기본값: `body { word-break: keep-all; overflow-wrap: break-word; }`(`src/app/globals.css`). 칸보다 긴 한 낱말(주소·메일)만 어쩔 수 없을 때 끊는다.
 - 이름 + '님' 같은 한 덩어리는 `whitespace-nowrap` span 으로 묶는다(예: 홈 인사말).
 - 일부러 아무 데서나 끊어야 하는 곳(긴 주소·코드)은 `break-all` 과 함께 `data-break-ok` 표식을 붙인다.

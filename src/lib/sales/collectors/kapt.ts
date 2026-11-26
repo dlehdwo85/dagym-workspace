@@ -177,6 +177,64 @@ async function kaptApiNotices(ctx: CollectorCtx, days: number): Promise<{ items:
   return { items, note: `공식 API ${items.length}건(최근 ${days}일)` };
 }
 
+/** 대표 11/27(로컬 긴급 ③ — 강화 서희스타힐스 1,2단지 '입주민 편의시설 운영업체 선정' K-apt 20261125102521723: 상세의 입찰분류 '사업자-용역-주민운동시설의 위탁'을
+ *  읽지 않아 제목만으로 '관련 아님'): K-apt 목록 수집은 상세를 관련 공고만 읽어 나머지 줄은 분류가 비어 있다. 제목에 운영업체·운영 사업자·운영자 선정·위탁운영·시설 위탁·
+ *  위탁 업체 선정 같은 운영 맡김 말이 있는데 '관련 아님'인 최근 줄은 상세(bidDetail.do)에서 입찰분류·입찰종류·내용을 받아 저장(한 줄에 한 번 — category_probed_at).
+ *  바로 뒤 다시 판정(refitNotices)이 분류로 다시 본다(분류 '…주민운동시설의 위탁' = 다짐 즉시 검토). 주택관리(위탁관리 업자)·경비·청소·소독·승강기 같은 시설 서비스 위탁과
+ *  공사·설치·교체는 다짐 일이 아니라 읽지 않음 */
+export const KAPT_PROBE_TITLE = /운영\s*(?:업체|사업자|자\s*(?:선정|모집))|위탁\s*운영|운영\s*위탁|시설의?\s*위탁|위탁\s*(?:업체|사업자)\s*(?:선정|모집)/;
+const KAPT_PROBE_SKIP = /주택\s*관리|관리\s*업자|경비|청소|미화|소독|방역|승강기|엘리베이터|전기|소방|보험|회계|공사|설치|교체|보수|도색|방수|주차|택배|재활용|음식물/;
+export type KaptProbeResult = { candidates: number; probed: number; categorized: number; gym: number; failed: number; left: number };
+export async function kaptCategoryProbe(opt: { days?: number; limit?: number; fetchImpl?: typeof fetch; left?: () => number; now?: Date } = {}): Promise<KaptProbeResult> {
+  const sql = db(); const now = opt.now ?? new Date(); const days = opt.days ?? 60; const limit = opt.limit ?? 20; const left = opt.left ?? (() => Infinity); const fetchImpl = opt.fetchImpl ?? fetch;
+  const from = new Date(now.getTime() - days * 864e5).toISOString(); const td = kstYmd(now);
+  const rows = await sql<{ src_id: string; ext: string | null; title: string }[]>`select src_id, row->>'source_external_id' as ext, row->>'title' as title from sales_src_rows
+    where scope = 'global' and tbl = 'procurement_notices' and not gone and row->>'source_type' = 'kapt_bid' and coalesce(row->>'related', 'false') <> 'true'
+      and coalesce(row->>'bid_category', '') = '' and not (row ? 'category_probed_at') and coalesce(row->>'title', '') ~ '운영|위탁'
+      and coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${from}
+    order by left(coalesce(row->>'deadline_at', ''), 10) >= ${td} desc, row->>'deadline_at' desc nulls last, src_id`;
+  const cand = rows.filter((r) => r.ext && KAPT_PROBE_TITLE.test(r.title) && !KAPT_PROBE_SKIP.test(r.title));
+  const out: KaptProbeResult = { candidates: cand.length, probed: 0, categorized: 0, gym: 0, failed: 0, left: 0 };
+  await pool(cand.slice(0, limit), 6, async (r) => {
+    if (left() < 8000) return;
+    try {
+      const s = await kaptSession(String(r.ext), fetchImpl, 8000); if (s.status !== 200) throw new Error(`HTTP ${s.status}`);
+      const d = parseKaptBidDetail(s.html);
+      const patch = { category_probed_at: new Date().toISOString(), ...(d.category ? { bid_category: d.category } : {}), ...(d.bidKind ? { contract_method: d.bidKind } : {}), ...(d.content ? { task_scope: d.content } : {}) };
+      await sql`update sales_src_rows set row = row || ${sql.json(patch as never)}::jsonb, synced_at = now() where scope = 'global' and tbl = 'procurement_notices' and src_id = ${r.src_id}`;
+      out.probed++; if (d.category) out.categorized++; if (/주민\s*운동\s*시설의?\s*위탁/.test(d.category ?? '')) out.gym++;
+    } catch { out.failed++; }
+  });
+  out.left = cand.length - out.probed;
+  return out;
+}
+/** 대표 11/27(로컬 긴급 ①④): 판정 규칙을 바꾼 배포 뒤 — 정기 실행(tick)에서 입찰 공고 수집 차례가 아닐 때 한 번씩 최근 60일 '관련 아님' K-apt 운영 공고의 분류를 상세에서 받고
+ *  지금 규칙으로 다시 판정(refitNotices). 새로 관련이 된 공고(단지·마감)는 app_settings 'fit_rules_refit' 에 쌓아 플랫폼 공고 조회(GET /api/platform/sales-notices?refit=last)로 본다
+ *  (깃허브 정기 실행 기록은 공개라 응답에는 숫자만). 아직 마감 전인 공고는 다시 판정이 '다시 찾은 공고'로 표시 — 입찰 목록·당일 메일에 오름. 후보를 다 읽었거나 4번 돌면 끝 */
+export const FIT_RULES_VERSION = '2026-11-27 편의시설·빈 분류';
+export type FitRulesRaised = { id: string; no: string | null; source: string | null; title: string; complex: string | null; deadline: string | null; fit: string | null; open: boolean; at: string };
+export async function fitRulesRefit(opt: { fetchImpl?: typeof fetch; deadlineMs?: number; force?: boolean; now?: Date } = {}) {
+  const sql = db(); const now = opt.now ?? new Date(); const t = now.toISOString(); const td = kstYmd(now);
+  const [s] = await sql<{ value: any }[]>`select value from app_settings where key = 'fit_rules_refit'`;
+  const prev = s?.value?.version === FIT_RULES_VERSION ? s.value : null;
+  if (prev?.done && !opt.force) return null;
+  const started = Date.now(); const deadlineMs = opt.deadlineMs ?? 40000; const left = () => deadlineMs - (Date.now() - started);
+  const probe = await kaptCategoryProbe({ days: 60, limit: 150, fetchImpl: opt.fetchImpl, left, now });
+  const r = await refitNotices({ days: 60, now });
+  const got = r.ids.length ? await sql<{ src_id: string; row: any }[]>`select src_id, jsonb_build_object('no', row->'source_external_id', 'source', row->'source_type', 'title', row->'title', 'complex', coalesce(row->'facility_name', row->'issuer'),
+      'deadline', row->'deadline_at', 'fit', row->'fit_business') as row from sales_src_rows where scope = 'global' and tbl = 'procurement_notices' and src_id = any(${r.ids})` : [];
+  const fresh: FitRulesRaised[] = got.map(({ src_id, row }) => { const dl = row.deadline ? String(row.deadline) : null;
+    return { id: src_id, no: row.no ?? null, source: row.source ?? null, title: String(row.title ?? ''), complex: row.complex ?? null, deadline: dl, fit: row.fit ?? null, open: !dl || dl.slice(0, 10) >= td, at: t }; });
+  const seen = new Set<string>(); const raised = [...fresh, ...((prev?.raised ?? []) as FitRulesRaised[])].filter((x) => (seen.has(x.id) ? false : (seen.add(x.id), true))).slice(0, 400);
+  const runs = (prev?.runs ?? 0) + 1; const done = probe.left === 0 || runs >= 4;
+  const sum = (k: keyof KaptProbeResult) => (prev?.probe?.[k] ?? 0) + (k === 'candidates' || k === 'left' ? 0 : probe[k]);
+  const value = { version: FIT_RULES_VERSION, runs, done, startedAt: prev?.startedAt ?? t, at: t,
+    probe: { probed: sum('probed'), categorized: sum('categorized'), gym: sum('gym'), failed: sum('failed'), candidates: probe.candidates, left: probe.left },
+    refit: { checked: r.checked, raised: (prev?.refit?.raised ?? 0) + r.raised, reopened: (prev?.refit?.reopened ?? 0) + r.reopened, lowered: (prev?.refit?.lowered ?? 0) + r.lowered }, raised };
+  await sql`insert into app_settings (key, value) values ('fit_rules_refit', ${sql.json(value as never)}) on conflict (key) do update set value = excluded.value, updated_at = now()`;
+  return { version: FIT_RULES_VERSION, runs, done, probed: probe.probed, categorized: probe.categorized, gym: probe.gym, failed: probe.failed, candidatesLeft: probe.left, raised: r.raised, reopened: r.reopened, lowered: r.lowered };
+}
+
 export const kaptBidNotices: Collector = {
   slug: 'kapt_bid_notices', label: 'K-apt 전국 입찰공고', hourKst: 6, againKst: [10, 14, 18],
   source: 'k-apt.go.kr/bid/bidList.do (K-APT·조달청·민간 전자입찰 통합, 키 불필요) + 공식 API(data.go.kr 15058166, 키 있으면 함께) — 06시 전체, 10·14·18시는 최신 500건',
@@ -261,6 +319,8 @@ export const kaptBidNotices: Collector = {
     // 279차 #828: kg2b_ 공고는 KG2B 상세에서 현장설명·개찰·공고문 첨부(참가자격은 첨부가 생기면 다시 읽음)
     const kg = left() > 12000 ? await readKg2bDetails(fetchImpl, left).catch((e) => { errors.push(`KG2B 상세: ${e instanceof Error ? e.message : String(e)}`); return null; }) : null;
     if (kg?.errors.length) errors.push(...kg.errors);
+    // 대표 11/27(로컬 긴급 ③): 분류가 빈 '관련 아님' 운영 공고(이번 목록의 새 줄 포함)는 상세에서 입찰분류를 받아 둠 — 바로 아래 다시 판정이 분류로 다시 봄. 한 번에 20건
+    const probe = left() > 15000 ? await kaptCategoryProbe({ fetchImpl, left, limit: 20, now: new Date(now()) }).catch((e) => { errors.push(`분류 빈 운영 공고 상세: ${e instanceof Error ? e.message : String(e)}`); return null; }) : null;
     // 185차(로컬 10/26 19:20 A4): 규칙이 바뀐 뒤에도 예전 판정('관련 아님')으로 남은 최근 공고를 다시 판정(올리기만) — 모든 원천 공고
     const refit = left() > 4000 ? await refitNotices().catch((e) => { errors.push(`다시 판정: ${e instanceof Error ? e.message : String(e)}`); return null; }) : null;
     // 258차(로컬 10/29 09:20 ⓒ 20260528163030684): 마감일 칸이 빈 K-apt 줄이 전체 목록에 14일 넘게 안 보이면 '사라짐'(다시 보이면 수집이 되돌림) — 마감이 있는 줄은 결과(낙찰) 추적이 쓰므로 그대로
@@ -271,7 +331,7 @@ export const kaptBidNotices: Collector = {
     let direct = 0; const fitCount = { 다짐: 0, 하이링크: 0, 둘다: 0 };
     for (const r of fitRows) { const d = details.get(r.bidNum); const m = matchFit(r.title, d?.category, d?.content, '공동주택'); if (m.direct) direct++; if (m.fit === '다짐') fitCount.다짐++; else if (m.fit === '하이링크') fitCount.하이링크++; else if (m.fit) fitCount.둘다++; }
     return { inserted, updated, unchanged, errors: writeErrors + invalid + listFailures + (api.error ? 1 : 0) + (written < ordered.length ? 1 : 0), errorLog: errors.length ? errors.join('\n') : undefined, providerMode: 'web_scrape',
-      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}${watched.length ? ` · 목록 밖 마감 전 공고 다시 확인 ${watched.length}건${watchCanceled ? `(취소 ${watchCanceled})` : ''}` : ''}${filesRead || listFailed ? ` · 첨부 목록 ${filesRead}건(파일 ${listFiles}${listFailed ? `, 못 읽음 ${listFailed}` : ''})` : ''}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') + (refit?.raised ? ` · 다시 판정으로 관련 ${refit.raised}건(마감 전 ${refit.reopened})` : '') + (kg?.read ? ` · KG2B 상세 ${kg.read}건(공고문 ${kg.files}${kg.attached ? `, 넘긴 업무 ${kg.attached}건에 붙임` : ''})` : '') + (stale ? ` · 마감일 없이 14일 넘게 안 보인 줄 ${stale}건 사라짐 표시` : '') + (refit?.lowered || refit?.changed ? ` · 다시 판정으로 내림 ${refit.lowered}건·사업 바꿈 ${refit.changed}건` : '') };
+      summary: `${full ? '' : '빠른 수집(최신 500건) · '}K-apt 입찰공고 목록 ${uniq.length}건 · 관련 ${fitRows.length}건(즉시 검토 ${direct} · 다짐 ${fitCount.다짐}·하이링크 ${fitCount.하이링크}·둘다 ${fitCount.둘다}, 상세 ${details.size}${watched.length ? ` · 목록 밖 마감 전 공고 다시 확인 ${watched.length}건${watchCanceled ? `(취소 ${watchCanceled})` : ''}` : ''}${filesRead || listFailed ? ` · 첨부 목록 ${filesRead}건(파일 ${listFiles}${listFailed ? `, 못 읽음 ${listFailed}` : ''})` : ''}) · ${api.note}${apiOnly.length ? `(목록에 없던 ${apiOnly.length}건 추가)` : ''} · 적재 ${written}건: 신규 ${inserted} · 갱신 ${updated} · 변화없음 ${unchanged}` + (invalid ? ` · 무효 ${invalid}` : '') + (probe?.probed ? ` · 분류 빈 운영 공고 상세 ${probe.probed}건(분류 받음 ${probe.categorized}${probe.gym ? ` · 주민운동시설의 위탁 ${probe.gym}` : ''}${probe.left ? ` · 남은 ${probe.left}` : ''})` : '') + (refit?.raised ? ` · 다시 판정으로 관련 ${refit.raised}건(마감 전 ${refit.reopened})` : '') + (kg?.read ? ` · KG2B 상세 ${kg.read}건(공고문 ${kg.files}${kg.attached ? `, 넘긴 업무 ${kg.attached}건에 붙임` : ''})` : '') + (stale ? ` · 마감일 없이 14일 넘게 안 보인 줄 ${stale}건 사라짐 표시` : '') + (refit?.lowered || refit?.changed ? ` · 다시 판정으로 내림 ${refit.lowered}건·사업 바꿈 ${refit.changed}건` : '') };
   },
 };
 

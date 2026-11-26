@@ -197,7 +197,7 @@ export default function Dashboard() {
       <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm text-ink-2">{fmtDate(today)}</p>
-          <h1 className="mt-0.5 text-xl font-bold tracking-tight sm:text-2xl">{greet}, <span className="whitespace-nowrap">{user.name}님</span></h1>{/* 대표 11/26: 이름은 한 덩어리('이동 / 재님' 끊김 금지) */}
+          <h1 className="mt-0.5 text-xl font-bold tracking-tight sm:text-2xl">{greet}, <span className="whitespace-nowrap">{user.name}님</span></h1>{/* 대표 11/26: 이름은 한 덩어리('홍길 / 동님' 끊김 금지) */}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ClockCard inline />

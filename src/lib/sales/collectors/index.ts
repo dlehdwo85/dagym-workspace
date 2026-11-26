@@ -9,7 +9,7 @@ import { CUSTOMER_COPY, INTERNAL_TENANT, collectorState, seesInternals } from '.
 import { completeRun, mergeNoticeDuplicates, startRun } from './store';
 import { collectorTodo, type CollectorTodo } from './todo';
 import { TRANSIENT, type Collector, type CollectorCtx, type CollectorResult } from './types';
-import { kaptBidNotices, kaptBidResults, kaptSaSun, operatingFromKapt } from './kapt';
+import { fitRulesRefit, kaptBidNotices, kaptBidResults, kaptSaSun, operatingFromKapt } from './kapt';
 import { g2bBidNotices, g2bPrespecAwards } from './g2b';
 import { kg2bBidNotices } from './kg2b';
 import { publicAgencyBids } from './publicAgency';
@@ -79,6 +79,8 @@ export async function collectorsTick(opt: { now?: Date } = {}) {
   // 대표 11/14 '영업 DB 누락'(실행 기록 11/11~11/15): 한 번에 수집기 하나라 06시 차례인 나라장터·LH 수집이 07시 시설 수집기(목록 앞쪽)에 밀려 매일 08:49·09:50경에야 돌았다
   //   → 아침 8시 메일에 그날 새 나라장터·LH 공고가 못 들어감(다음 날 메일에 들어감). 차례가 된 수집기 가운데 입찰 공고 수집기를 먼저 돌린다(그 밖은 예전 순서)
   const firstBid = FIRST.map((slug) => dueAll.find((c) => c.slug === slug)).find(Boolean);
+  // 대표 11/27(로컬 긴급 ①④): 판정 규칙을 바꾼 배포 뒤 입찰 공고 수집 차례가 아닌 tick 에서 한 번씩 — 분류 빈 K-apt 운영 공고 상세 읽기 + 최근 60일 다시 판정(끝나면 더 안 돎)
+  if (!firstBid && process.env.SALES_FIT_RULES_TICK !== 'off') { const rr = await fitRulesRefit().catch(async (e) => { await logError('sales-fit-rules-refit', e).catch(() => {}); return null; }); if (rr) return { ran: 'fit_rules_refit', ...rr }; }
   // 278차 #816: 원천이 웹페이지·요청 실패로 못 받았으면(detail.retry) 30분 뒤 다시 — 최근 14일 전체로 받아 놓친 공고를 채움. 하루 RETRY_MAX 번까지
   //   11/15 06:34 KG2B 실패 → 정기 차례가 13시까지 이어져 '30분 뒤 다시'가 한 번도 못 돌았음 → 입찰 공고 정기 차례 다음으로는 다시 받기를 먼저(연달아 두 번은 안 함 — 정기 차례가 굶지 않게)
   const again = firstBid ? null : await retryDue(now);
