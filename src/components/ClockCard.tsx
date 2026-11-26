@@ -41,10 +41,10 @@ export function ClockCard({ inline = false }: { inline?: boolean } = {}) {
     <section className={inline ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap items-center gap-2 rounded-card border border-line bg-white px-3 py-2 shadow-card'} data-testid="home-clock">
       {!inline && <MapPin className="size-4 shrink-0 text-emerald-600" />}
       <div className={inline ? 'min-w-0 text-[13px]' : 'min-w-0 flex-1 text-sm'} data-testid="home-clock-status">
-        {!t?.inTime ? <>
-          <span className={cx('text-ink-2', inline && 'lg:hidden')}>아직 출근 전입니다{d.location === false ? ' (시각만 기록)' : d.sites ? '' : ' (근무지 미등록 — 시각만 기록)'}</span>
-          {/* 대표 11/26(웹 홈 구성): 데스크톱 홈 머리는 짧게 — 휴대폰·앱 문구는 그대로 */}
-          {inline && <span className="hidden text-ink-2 lg:inline" data-testid="home-clock-short">출근 전{d.location === false || !d.sites ? ' · 시각만 기록' : ''}</span>}</>
+        {!t?.inTime ? (inline
+          // 대표 11/26: 홈 머리는 휴대폰·데스크톱 모두 짧게(근무지 미등록 안내는 긴 문구 대신 '시각만 기록')
+          ? <span className="text-ink-2" data-testid="home-clock-short">출근 전{d.location === false || !d.sites ? ' · 시각만 기록' : ''}</span>
+          : <span className="text-ink-2">아직 출근 전입니다{d.location === false ? ' (시각만 기록)' : d.sites ? '' : ' (근무지 미등록 — 시각만 기록)'}</span>)
           : <span><b>출근 {t.inTime}</b>{t.inSite && <span className={cx('ml-1 text-xs', t.inInside === false ? 'text-amber-700' : 'text-ink-3')}>{t.inSite}{t.inInside === false ? ` 밖 · ${t.inReason}` : ''}</span>}
             {t.outTime && <> · <b>퇴근 {t.outTime}</b>{t.outSite && <span className={cx('ml-1 text-xs', t.outInside === false ? 'text-amber-700' : 'text-ink-3')}>{t.outSite}{t.outInside === false ? ` 밖 · ${t.outReason}` : ''}</span>}</>}</span>}
       </div>

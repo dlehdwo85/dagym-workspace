@@ -608,7 +608,7 @@ function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onP
       {/* V11 1번: 휴대폰은 제목 아래 줄에 상태 칩(누르면 바로 변경) — PC 는 상태 열 */}
       {onPatch && <span className="shrink-0 lg:hidden"><StatusChip t={t} onPatch={onPatch} plain={collab} /></span>}
       {/* V32 4: 연장 요청 대기(요청자가 목록에서 바로 알아봄). 로컬 검수 10/17: 휴대폰 둘째 줄이 넘치면 잘리므로 상태 칩 바로 다음·짧게("연장→10/20") */}
-      {t.ext_pending && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장<span className="max-lg:hidden"> 요청</span> → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
+      {t.ext_pending && <span className="max-w-full shrink-0 truncate rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={`${t.ext_pending.byName}: ${t.ext_pending.reason}`} data-testid="ext-chip">연장<span className="max-lg:hidden"> 요청</span> → {Number(t.ext_pending.to.slice(5, 7))}/{Number(t.ext_pending.to.slice(8))}</span>}
       {/* 381차(로컬 11/07 운영 확인 — #1017 '본사' 표기 39곳 남음): 팀 칩(본사·운영팀 등)도 줄에서 뺌 — 팀은 상세·팀 필터에 있음 */}
       {(t.collab_teams?.length ?? 0) > 0 && <span className="inline-flex min-w-0 max-w-[8rem] truncate rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2 max-lg:hidden" title={`함께하는 부서: ${t.collab_teams!.join(', ')}`} data-testid="collab-chip">+{t.collab_teams![0]}{t.collab_teams!.length > 1 ? ` 외 ${t.collab_teams!.length - 1}` : ''}</span>}
       {/* 검수(10/16): 휴대폰 둘째 줄은 상태·진행·경고만 — 요청자→담당·소속·브랜드·반복·일괄·연장 횟수는 숨김(오른쪽 아바타·상세에 있음) */}
@@ -617,17 +617,18 @@ function Meta({ t, compact, onPatch, collab }: { t: Task; compact?: boolean; onP
       {/* 395차 #1020(대표 11/08 '할 일 개수는 뺍니다 · 댓글과 첨부 표시만'): 업무 줄의 '할 일 n/m'(체크리스트)·하위 업무 n/m 칩은 뺌 — 개수는 상세에 */}
       {t.comment_count > 0 && <span className="inline-flex items-center max-lg:hidden gap-0.5 tabular-nums" title="댓글"><MessageSquare className="size-3.5" />{t.comment_count}</span>}
       {/* V35 1: 첨부는 파란 칩으로 눈에 띄게, 고객에게 보냄 = 초록 · 고객이 열어 봄 = 진한 초록 */}
+      {/* 대표 11/26 겹침 금지: 칩은 칸보다 넓어지지 않게(max-w-full) 하고 글자는 말줄임 — 옆 마감 칸 위로 넘쳐 그려지지 않게 */}
       {/* 330차(대표 11/02 15:2x): 개수 대신 종류 — 'PDF' · 'HWP 2 · PDF 1'(휴대폰 폭에서도 줄 바꿈 없이) */}
-      {t.attachment_count > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full bg-sky-100 px-1.5 text-[11px] font-semibold tabular-nums text-sky-800" title={`첨부 ${t.attachment_count}개`} data-testid="att-chip" data-att-count={t.attachment_count}><Paperclip className="size-3" />{t.attachment_kinds?.length ? attKindSummaryCounts(t.attachment_kinds) : t.attachment_count}</span>}
-      {t.share_state && <span className={cx('shrink-0 rounded-full px-1.5 text-[11px] font-semibold', t.share_state === 'opened' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700')} title={t.share_state === 'opened' ? '고객이 자료를 열어 봄' : '고객에게 자료를 보냄'} data-testid="share-chip">{t.share_state === 'opened' ? '열람' : '보냄'}</span>}
+      {t.attachment_count > 0 && <span className="inline-flex min-w-0 max-w-full shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full bg-sky-100 px-1.5 text-[11px] font-semibold tabular-nums text-sky-800" title={`첨부 ${t.attachment_count}개${t.attachment_kinds?.length ? ` · ${attKindSummaryCounts(t.attachment_kinds)}` : ''}`} data-testid="att-chip" data-att-count={t.attachment_count}><Paperclip className="size-3 shrink-0" /><span className="min-w-0 truncate">{t.attachment_kinds?.length ? attKindSummaryCounts(t.attachment_kinds) : t.attachment_count}</span></span>}
+      {t.share_state && <span className={cx('max-w-full shrink-0 truncate rounded-full px-1.5 text-[11px] font-semibold', t.share_state === 'opened' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700')} title={t.share_state === 'opened' ? '고객이 자료를 열어 봄' : '고객에게 자료를 보냄'} data-testid="share-chip">{t.share_state === 'opened' ? '열람' : '보냄'}</span>}
       {!!t.photo_required && <span className={cx('inline-flex items-center gap-0.5 tabular-nums', (t.photo_count ?? 0) >= t.photo_required ? 'text-green-600' : 'text-amber-700')} title="완료 증빙 사진"><Camera className="size-3.5" />{t.photo_count ?? 0}/{t.photo_required}</span>}
       {t.recurrence_rule && <span title="반복 업무" className="max-lg:hidden"><Repeat className="size-3.5" /></span>}
       {!collab && t.batch && t.batch.total > 1 && <span className="max-lg:hidden rounded-full bg-violet-50 px-1.5 text-[11px] font-medium text-violet-700" title="담당자별로 같이 만든 업무 — 완료/전체" data-batch>일괄 {t.batch.total}건 · {t.batch.done}/{t.batch.total}</span>}
-      {t.blocked_by_count > 0 && <span className="shrink-0 font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
+      {t.blocked_by_count > 0 && <span className="max-w-full shrink-0 truncate font-medium text-amber-700">선행 대기 {t.blocked_by_count}</span>}
       {/* V37 8: 연결 미팅 일정 📍장소·시간 (장소는 일정에 한 번만) */}
-      {t.meeting && <span className="inline-flex min-w-0 max-w-[12rem] shrink items-center gap-0.5 rounded-full bg-rose-50 px-1.5 text-[11px] font-medium text-rose-800" title={`미팅 ${t.meeting.location}`} data-testid="meeting-chip"><MapPin className="size-3 shrink-0" aria-hidden /><span className="truncate">{t.meeting.location}</span><span className="shrink-0 tabular-nums">· {meetingWhen(t.meeting.start)}</span></span>}
-      {t.needs_schedule && salesOn && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={t.needs_schedule === 'meeting' ? '현장설명회 없음 — 필요하면 미팅 일정을 잡아 주세요' : '현장설명회·미팅 일정을 잡아 주세요'} data-testid="no-schedule-chip"><CalendarPlus className="size-3" aria-hidden />일정 없음</span>}
-      {!t.ext_pending && !!t.due_extend_count && <span className="max-lg:hidden shrink-0 rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}
+      {t.meeting && <span className="inline-flex min-w-0 max-w-[12rem] shrink items-center gap-0.5 overflow-hidden rounded-full bg-rose-50 px-1.5 text-[11px] font-medium text-rose-800" title={`미팅 ${t.meeting.location} · ${meetingWhen(t.meeting.start)}`} data-testid="meeting-chip"><MapPin className="size-3 shrink-0" aria-hidden /><span className="min-w-0 truncate">{t.meeting.location}</span><span className="min-w-0 shrink-[0.1] truncate tabular-nums">· {meetingWhen(t.meeting.start)}</span></span>}{/* 대표 11/26 겹침 금지: 칸이 아주 좁으면 장소 먼저, 그다음 시각도 … 로 — 칩 밖으로 넘치지 않음 */}
+      {t.needs_schedule && salesOn && <span className="inline-flex min-w-0 max-w-full shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900" title={t.needs_schedule === 'meeting' ? '현장설명회 없음 — 필요하면 미팅 일정을 잡아 주세요' : '현장설명회·미팅 일정을 잡아 주세요'} data-testid="no-schedule-chip"><CalendarPlus className="size-3 shrink-0" aria-hidden /><span className="min-w-0 truncate">일정 없음</span></span>}
+      {!t.ext_pending && !!t.due_extend_count && <span className="max-lg:hidden max-w-full shrink-0 truncate rounded-full bg-slate-100 px-1.5 text-[11px] font-medium text-ink-2" data-testid="ext-count">연장 {t.due_extend_count}회</span>}
     </span>
   );
 }
@@ -1385,12 +1386,12 @@ const ListRow = memo(function ListRow({ t, onPatch, onAck, handle, onMove, dragH
         {/* 점검 2026-10-16 ①: 1024px 미만(태블릿·좁은 창)은 휴대폰처럼 제목 두 줄 + 아래 줄에 상태·정보 — 고정 열에 제목이 눌리지 않게 */}
         {/* 대표 실기기(10/16): 휴대폰은 오른쪽 마감·담당 칸 때문에 제목이 절반 폭에서 줄바꿈 → 제목은 한 줄 전체 폭, 마감·담당은 아래 줄(상태 칩 옆) */}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 max-lg:contents lg:flex-row lg:items-center lg:gap-3">
-          <span className={cx('flex min-w-0 items-center gap-1.5 max-lg:basis-full lg:max-w-[55%] lg:shrink-0', sq && 'flex-wrap')} data-testid="row-title">
+          <span className={cx('flex min-w-0 items-center gap-1.5 max-lg:basis-full lg:max-w-[55%] lg:shrink-0 lg:overflow-hidden', sq && 'flex-wrap')} data-testid="row-title">{/* 대표 11/26 겹침 금지: 칩이 많아 55%를 넘으면 옆 칸('일정 없음' 등) 위로 넘치지 않게 이 칸 안에서 잘림 — 제목은 최소 8rem */}
             {/* 308차 #866: 공동 업무 줄은 우선순위 열 대신 높음·긴급만 제목 앞 깃발(보통·낮음은 안 보임) */}
             {collab && (t.priority === 'urgent' || t.priority === 'high') && <Flag className={cx('size-3.5 shrink-0', t.priority === 'urgent' ? 'fill-red-500 text-red-600' : 'fill-orange-400 text-orange-500')} aria-label={t.priority === 'urgent' ? '긴급' : '높음'} data-testid="row-pri-flag" />}
             <TypeIcon t={t} />
             {/* 대표(10/16): 제목은 한 줄 전체 폭·길면 … (두 줄은 목록이 길어져 눈이 피로) — 전체 제목은 줄을 눌러 상세에서 */}
-            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline', sq ? 'line-clamp-2 whitespace-normal break-words' : 'truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{sq ? <Hi text={t.title} q={sq} /> : t.title}</TaskLink>
+            <TaskLink id={t.id} className={cx('min-w-0 text-sm font-medium text-ink hover:text-accent-600 hover:underline lg:min-w-[8rem]', sq ? 'line-clamp-2 whitespace-normal break-words' : 'truncate', t.status === 'done' && 'text-ink-3 line-through', myPartDone(t, user.id) && 'text-ink-3')}>{sq ? <Hi text={t.title} q={sq} /> : t.title}</TaskLink>
             <CarriedBadge t={t} />
             {/* 380차 #1017(대표 11/07 '입찰과 본사 그리고 요청, 웹사이트, 문의, 다짐 표기를 없애고 현설과 입찰 마감'): 출처 칩(입찰·리드) 뺌 — 상세에 있음 */}
             {/* 344차(대표 11/02 #925): 발주처가 취소한 공고의 열린 업무 — '공고 취소' 빨간 칩(상세에서 [공고 취소로 완료]) */}

@@ -56,7 +56,8 @@ export async function checkRun({ owner, ctx, BASE, SHOTS }) {
   await row.getByText(/다짐 강남점 · 화장실 · 이직원/).waitFor();
   // #1110 홈 개편(대표 11/22): 점검 카드 대신 '회사 현황 · 점검·계약' 칸(조치 중 n) → 누르면 점검 화면
   await owner.goto(BASE + '/');
-  const hc = owner.getByTestId('home-cell-check'); await hc.waitFor({ timeout: 15000 });
+  // 대표 11/26: 휴대폰·태블릿 회사 현황은 목록 줄(home-company-row-check), 데스크톱은 칸(home-cell-check) — 보이는 쪽
+  const hc = owner.locator('[data-testid="home-cell-check"]:visible, [data-testid="home-company-row-check"]:visible').first(); await hc.waitFor({ timeout: 15000 });
   await hc.getByText('조치 중 1').waitFor();
   await fit('홈 회사 현황 점검 칸');
   await hc.scrollIntoViewIfNeeded(); await owner.screenshot({ path: `${SHOTS}/check-home-card-mobile.png` });

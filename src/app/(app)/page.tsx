@@ -1,7 +1,7 @@
 'use client';
 import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { CalendarPlus, Plus, SquarePen, Stamp } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { ClockCard } from '@/components/ClockCard';
@@ -69,10 +69,11 @@ function mergeSameTitle(items: WeekItem[]): WeekItem[] {
   return out;
 }
 /** 숫자 칸 하나 — 누르면 걸러진 목록 */
-function Cell({ k, label, value, sub, href, tone }: { k: string; label: string; value: string | number; sub?: string; href: string; tone?: 'red' | 'amber' }) {
+type CellProps = { k: string; label: string; value: string | number; sub?: string; href: string; tone?: 'red' | 'amber' };
+function Cell({ k, label, value, sub, href, tone, className, style }: CellProps & { className?: string; style?: CSSProperties }) {
   return (
-    <Link prefetch={false} href={href} data-testid={`home-cell-${k}`}
-      className="min-w-0 rounded-input border border-line bg-white px-3 py-2.5 hover:border-slate-300 hover:bg-slate-50">
+    <Link prefetch={false} href={href} data-testid={`home-cell-${k}`} style={style}
+      className={cx('min-w-0 rounded-input border border-line bg-white px-3 py-2.5 hover:border-slate-300 hover:bg-slate-50', className)}>
       <span className="block truncate text-xs text-ink-2">{label}</span>
       <span className={cx('block text-2xl font-bold tabular-nums leading-tight', tone === 'red' ? 'text-red-600' : tone === 'amber' ? 'text-amber-700' : 'text-ink')}>{value}</span>
       {sub && <span className="block truncate text-[11px] text-ink-3">{sub}</span>}
@@ -81,6 +82,24 @@ function Cell({ k, label, value, sub, href, tone }: { k: string; label: string; 
 }
 
 /** 이번 주 목록 한 줄 — 업무는 줄을 눌러 상세(휴대폰은 전체 시트), 일정은 캘린더 */
+/** 대표 11/26(앱 홈 빈 칸): n칸을 한 줄 최대 max칸으로 고르게 나눔 — 각 칸이 든 줄의 칸 수(예: 휴대폰 4 → [2,2], 5 → [3,2], 7 → [3,2,2] · 데스크톱 7 → [4,3]) */
+function rowSizes(n: number, max: number): number[] {
+  if (n <= 0) return [];
+  const rows = Math.ceil(n / max); const base = Math.floor(n / rows); const extra = n % rows; const out: number[] = [];
+  for (let r = 0; r < rows; r++) { const k = base + (r < extra ? 1 : 0); for (let j = 0; j < k; j++) out.push(k); }
+  return out;
+}
+/** 줄마다 칸 수대로 폭을 나눠 빈 자리 없이(휴대폰 최대 mobileMax · 데스크톱 lg~ 최대 deskMax) — flex 줄바꿈 + 칸 폭 = (줄 폭 - 사이 간격) / 그 줄 칸 수 */
+function BalancedCells({ cells, mobileMax, deskMax, testid, className }: { cells: CellProps[]; mobileMax: number; deskMax: number; testid: string; className?: string }) {
+  const m = rowSizes(cells.length, mobileMax), d = rowSizes(cells.length, deskMax);
+  const w = (k: number) => `calc((100% - ${(k - 1) * 0.5}rem) / ${k} - 0.5px)`; // 0.5px 여유 = 반올림으로 줄이 일찍 넘어가지 않게(남는 폭은 grow 가 채움)
+  return (
+    <div className={cx('flex flex-wrap gap-2', className)} data-testid={testid}>
+      {cells.map((x, i) => <Cell key={x.k} {...x} className="shrink-0 grow basis-[var(--wm)] lg:basis-[var(--wd)]" style={{ '--wm': w(m[i]), '--wd': w(d[i]) } as CSSProperties} />)}
+    </div>
+  );
+}
+
 function ListRow({ r, colors, today }: { r: WeekItem & { day: string }; colors: CalColors; today: string }) {
   const router = useRouter();
   const rowOpen = useRowOpen(r.task?.id ?? '', (id) => showTask(id, (h) => router.push(h)));
@@ -91,7 +110,8 @@ function ListRow({ r, colors, today }: { r: WeekItem & { day: string }; colors: 
   return (
     <li {...(isTask ? rowOpen : {})} className={cx('flex min-w-0 items-center gap-2 px-2 py-2 text-sm hover:bg-slate-50', isTask && 'cursor-pointer')}
       data-day={r.day} data-week-item={r.tag} {...(r.task ? { 'data-week-task': r.task.id } : {})} {...(isTask ? { 'data-home-task': r.task.id } : {})} {...(r.space ? { 'data-week-space': r.space } : {})}>
-      <span className={cx('w-[3.25rem] shrink-0 text-xs tabular-nums', r.day === today || r.kind === 'overdue' ? 'font-semibold text-ink' : 'text-ink-2')}>{dayLabel}{dayLabel && r.time ? <span className="block font-normal text-ink-2">{r.time}</span> : !dayLabel ? r.time : ''}</span>
+      {/* 대표 11/26(앱): 기한 지난 줄은 시각 칸이 비어 제목이 일찍 잘림 → 휴대폰은 빈 시각 칸을 접음(오른쪽 '지남 날짜' 꼬리표가 알려 줌) */}
+      <span className={cx('w-[3.25rem] shrink-0 text-xs tabular-nums', r.day === today || r.kind === 'overdue' ? 'font-semibold text-ink' : 'text-ink-2', !dayLabel && !r.time && 'max-sm:hidden')}>{dayLabel}{dayLabel && r.time ? <span className="block font-normal text-ink-2">{r.time}</span> : !dayLabel ? r.time : ''}</span>
       {isTask ? <span className="h-3.5 w-1 shrink-0 rounded-full" style={{ background: dot }} aria-hidden data-week-bar /> : <span className="size-2.5 shrink-0 rounded-full" style={{ background: dot }} aria-hidden />}
       <Link prefetch={false} href={r.href} className="min-w-0 flex-1 truncate font-medium hover:underline">{r.title}</Link>
       {sm ? <span className="shrink-0 rounded px-1.5 text-[10px] font-medium" style={{ background: sm.soft, color: sm.color }}>{sm.short}</span>
@@ -150,14 +170,14 @@ export default function Dashboard() {
     !!td.marketing && { k: 'marketing', label: '마케팅 승인', value: td.marketing, sub: td.marketingSplit ? `시안 ${td.marketingSplit.drafts} · 운영 ${td.marketingSplit.ops}` : '승인할 것', href: '/s/marketing/approvals' },
     !!td.bids && { k: 'bids', label: '새 입찰 공고', value: td.bids, sub: '오늘 아침 메일', href: '/s/sales/hub?tab=bids&bt=today' },
     td.unread > 0 && { k: 'unread', label: '안 읽은 메시지', value: td.unread, sub: '메시지', href: '/messages' },
-  ].filter(Boolean) as Parameters<typeof Cell>[0][] : [];
+  ].filter(Boolean) as CellProps[] : [];
   const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
   const companyCells = c ? [
     c.sales && { k: 'sales', label: '영업 · 이번 주 입찰 마감', value: `${c.sales.dueThisWeek}건`, sub: c.sales.earliestDays !== null ? `가장 빠른 마감 D-${c.sales.earliestDays}` : '이번 주 마감 없음', href: '/s/sales/hub?tab=bids' },
     c.branch && { k: 'branch', label: '지점 보고 · 이번 주 제출', value: `${c.branch.submitted}/${c.branch.total}`, sub: c.branch.total > c.branch.submitted ? `미제출 ${c.branch.total - c.branch.submitted}곳 · ${md(c.branch.day)}(금) 마감` : `모두 제출 · ${md(c.branch.day)}(금)`, href: '/branch-reports', tone: c.branch.total > c.branch.submitted ? 'amber' as const : undefined },
     (c.check || c.agreement) && { k: 'check', label: '점검 · 계약', value: c.check ? `조치 중 ${c.check.acting}` : c.agreement ? `D-${c.agreement.earliestDays}` : '-', sub: c.agreement ? `계약 만료 가장 빠른 D-${c.agreement.earliestDays}` : '만료 예정 계약 없음', href: c.check ? '/check' : '/agreements' },
     c.ads && { k: 'ads', label: '이번 달 광고비(전체 매체)', value: won(c.ads.spend), sub: c.ads.cap ? `월 상한 ${won(c.ads.cap)}` : '월 상한 없음', href: '/s/marketing/ad-ops', tone: c.ads.cap && c.ads.spend > c.ads.cap * 0.9 ? 'amber' as const : undefined },
-  ].filter(Boolean) as Parameters<typeof Cell>[0][] : [];
+  ].filter(Boolean) as CellProps[] : [];
 
   async function decide(id: string, ok: boolean) { // 예전 홈과 같은 동작: 완료 = done, 보완 = 진행 중 + 보완 요청 댓글
     try {
@@ -199,8 +219,8 @@ export default function Dashboard() {
       {/* 2) 오늘 처리할 것 — 모든 직원, 0인 칸은 숨김 */}
       <section data-testid="home-todo">
         <h2 className="mb-1.5 text-sm font-semibold">오늘 처리할 것</h2>
-        {!data ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]" data-testid="home-todo-grid">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-[74px] rounded-input" />)}</div>
-          : cells.length ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]" data-testid="home-todo-grid">{cells.map((x) => <Cell key={x.k} {...x} />)}</div>
+        {!data ? <div className="flex gap-2">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-[74px] flex-1 rounded-input" />)}</div>
+          : cells.length ? <BalancedCells cells={cells} mobileMax={3} deskMax={6} testid="home-todo-grid" />
           : <p className="rounded-input border border-line bg-white px-3 py-2.5 text-sm text-ink-2" data-testid="home-todo-empty">지금 처리할 것이 없습니다.</p>}
         {/* 검토 대기 — 요청자는 홈에서 바로 [완료 확인]·[보완 요청](#1110 개편 때 빠진 것 되살림) */}
         {!!data?.review?.items.length && <ul className="mt-2 divide-y divide-line rounded-input border border-line bg-white" data-testid="home-review">
@@ -216,7 +236,13 @@ export default function Dashboard() {
       {companyCells.length > 0 && (
         <section data-testid="home-company">
           <h2 className="mb-1.5 text-sm font-semibold">회사 현황</h2>
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]" data-testid="home-company-grid">{companyCells.map((x) => <Cell key={x.k} {...x} />)}</div>
+          {/* 대표 11/26: 휴대폰·태블릿(lg 미만)은 카드 하나 안의 목록 줄(빈 자리 없음) · 데스크톱은 한 줄 칸(최대 4칸, 고르게) */}
+          <ul className="divide-y divide-line rounded-input border border-line bg-white lg:hidden" data-testid="home-company-list">
+            {companyCells.map((x) => <li key={x.k}><Link prefetch={false} href={x.href} className="flex min-w-0 items-center gap-3 px-3 py-2.5 hover:bg-slate-50" data-testid={`home-company-row-${x.k}`}>
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm text-ink">{x.label}</span>{x.sub && <span className="block truncate text-[11px] text-ink-3">{x.sub}</span>}</span>
+              <span className={cx('shrink-0 text-lg font-bold tabular-nums', x.tone === 'red' ? 'text-red-600' : x.tone === 'amber' ? 'text-amber-700' : 'text-ink')}>{x.value}</span></Link></li>)}
+          </ul>
+          <BalancedCells cells={companyCells} mobileMax={2} deskMax={4} testid="home-company-grid" className="hidden lg:flex" />
         </section>
       )}
 

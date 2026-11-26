@@ -46,7 +46,8 @@ export async function agreements({ owner, staff, ctx, sql, BASE, SHOTS }) {
   await owner.screenshot({ path: `${SHOTS}/agreements-list.png` });
   // #1110 홈 개편(대표 11/22): 계약 카드 대신 '회사 현황 · 점검·계약' 칸 — 계약 만료 가장 빠른 D-n
   await owner.goto(BASE + '/');
-  const hc = owner.getByTestId('home-cell-check'); await hc.waitFor({ timeout: 15000 });
+  // 대표 11/26: 휴대폰·태블릿 회사 현황은 목록 줄(home-company-row-check), 데스크톱은 칸(home-cell-check) — 보이는 쪽
+  const hc = owner.locator('[data-testid="home-cell-check"]:visible, [data-testid="home-company-row-check"]:visible').first(); await hc.waitFor({ timeout: 15000 });
   assert.match(await hc.innerText(), /계약 만료 가장 빠른 D-\d+/);
   await hc.scrollIntoViewIfNeeded(); await owner.screenshot({ path: `${SHOTS}/agreements-home-card.png` });
   await owner.goto(BASE + '/agreements');
