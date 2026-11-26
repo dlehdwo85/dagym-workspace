@@ -18,7 +18,8 @@ import { useRouter } from 'next/navigation';
 
 /**
  * #1110(대표 11/22 시안 승인) 홈 — 한 화면 반 안에 '지금 할 일'만.
- * 머리(인사·날짜·출근 상태 + [새로 만들기][출근하기]) → 오늘 처리할 것(숫자 칸, 0이면 숨김) → 회사 현황(대표·관리자만 4칸)
+ * 머리(인사·날짜·출근 상태 + [새로 만들기](태블릿 폭만)[출근하기]) → 오늘 처리할 것(숫자 칸, 0이면 숨김) → 회사 현황(대표·관리자만)
+ * 대표 11/26(웹 홈 구성): 데스크톱은 숫자 칸 두 줄이 칸 수와 관계없이 전체 폭을 채움(빈 칸 없이 늘어나고 많으면 다음 줄) — 세 줄 오른쪽 끝이 같은 선
  * → 이번 주 일정·업무(목록 하나, 7줄) + 오른쪽(휴대폰은 아래) 빠른 만들기·공지 2개. 숫자는 /api/home 한 번.
  */
 const seoulDay = (d: Date | string) => dtf('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(d));
@@ -180,7 +181,8 @@ export default function Dashboard() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ClockCard inline />
-          <div className="relative hidden sm:block">
+          {/* 대표 11/26(웹 홈 구성): 데스크톱(lg~)은 상단 바 [+ 만들기]·오른쪽 빠른 만들기와 겹쳐 뺌 — 태블릿 폭은 그대로 */}
+          <div className="relative hidden sm:block lg:hidden">
             <button type="button" onClick={() => setNewMenu((v) => !v)} aria-haspopup="menu" aria-expanded={newMenu} data-testid="home-new"
               className="inline-flex h-8 items-center gap-1 rounded-input border border-line bg-white px-3 text-sm font-medium hover:bg-slate-50"><Plus className="size-4" />새로 만들기</button>
             {newMenu && <>
@@ -197,8 +199,8 @@ export default function Dashboard() {
       {/* 2) 오늘 처리할 것 — 모든 직원, 0인 칸은 숨김 */}
       <section data-testid="home-todo">
         <h2 className="mb-1.5 text-sm font-semibold">오늘 처리할 것</h2>
-        {!data ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-[74px] rounded-input" />)}</div>
-          : cells.length ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">{cells.map((x) => <Cell key={x.k} {...x} />)}</div>
+        {!data ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]" data-testid="home-todo-grid">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-[74px] rounded-input" />)}</div>
+          : cells.length ? <div className="grid grid-cols-3 gap-2 lg:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]" data-testid="home-todo-grid">{cells.map((x) => <Cell key={x.k} {...x} />)}</div>
           : <p className="rounded-input border border-line bg-white px-3 py-2.5 text-sm text-ink-2" data-testid="home-todo-empty">지금 처리할 것이 없습니다.</p>}
         {/* 검토 대기 — 요청자는 홈에서 바로 [완료 확인]·[보완 요청](#1110 개편 때 빠진 것 되살림) */}
         {!!data?.review?.items.length && <ul className="mt-2 divide-y divide-line rounded-input border border-line bg-white" data-testid="home-review">
@@ -214,11 +216,11 @@ export default function Dashboard() {
       {companyCells.length > 0 && (
         <section data-testid="home-company">
           <h2 className="mb-1.5 text-sm font-semibold">회사 현황</h2>
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">{companyCells.map((x) => <Cell key={x.k} {...x} />)}</div>
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]" data-testid="home-company-grid">{companyCells.map((x) => <Cell key={x.k} {...x} />)}</div>
         </section>
       )}
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-3" data-testid="home-lower">
         {/* 4) 이번 주 일정·업무 — 목록 하나, 7줄 */}
         <section className="min-w-0 rounded-card border border-line bg-white lg:col-span-2" data-testid="home-week">
           <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">

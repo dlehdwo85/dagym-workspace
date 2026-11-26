@@ -48,6 +48,7 @@ import { join1176 } from './join1176.step.mjs';
 import { mktText1181 } from './mktText1181.step.mjs';
 import { features1181 } from './features1181.step.mjs';
 import { watch1181 } from './watch1181.step.mjs';
+import { homeLayout1126 } from './homeLayout1126.step.mjs';
 import { orgTree } from './orgTree.step.mjs';
 import { orgLevels } from './orgLevels.step.mjs';
 import { chatKeyboard } from './chatKeyboard.step.mjs';
@@ -2731,6 +2732,7 @@ await step('#1176 회사 초대 링크(만들기 → 링크로 합류 신청 →
 await step('#1181-2 승인함: 기타(광고 문구) 글 시안 바로 승인 · 사진 필요 n건 줄', () => mktText1181({ owner, ctx, sql, BASE, SHOTS }));
 await step('#1181 회사별 기능 켜기: 설정 › 쓰는 기능에서 점검 끄기 → 메뉴·화면 없음 → 운영자 [기본값으로] → 돌아옴', () => features1181({ owner, ctx, sql, BASE, SHOTS }));
 await step('#1181 내 수집 원천: 데이터 설정 원천 줄·최근 글·[업무로]', () => watch1181({ owner, ctx, sql, BASE, SHOTS }));
+await step('대표 11/26 웹 홈 구성: 1880 폭 세 줄 오른쪽 끝 같은 선·머리 [새로 만들기] 없음·짧은 출근 문구 · 375 폭은 그대로', () => homeLayout1126({ browser, desk, ctx, BASE, SHOTS }));
 await step('대표 10/20 ① 플랫폼 운영 [고객사 추가]: 회사명·업종 여러 개·규모·체험 기간·시작 공간·대표 → 초대 링크 → 회사 관리 초대 대기·공간·메모·감사 기록', () => platformAdd({ owner, BASE, SHOTS, sql }));
 await step('대표 10/20 15:15 부서·팀 재정비: 트리(들여쓰기·경로 "영업부 › 영업1팀")·상위 부서·장 1명 → 초대 \'소속\' 하나(주 소속 + 겸직, 고급 접힘) → 목록 경로·접근 조직 자동', () => orgTree({ owner, ctx, BASE, SHOTS }));
 await step('영업 S2 1차(대표 14:15): 허브 일괄 [영업 진행으로] → 업무 자동 → 홈 오늘 할 일 7묶음·요약 타일·진행표 → 업무 영업 원천 배지 → 계약만료·재입찰', () => salesTodo({ owner, ctx, sql, BASE, SHOTS }));
