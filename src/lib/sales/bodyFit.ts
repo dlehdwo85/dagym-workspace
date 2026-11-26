@@ -8,7 +8,7 @@
 // 비용: 첨부 받기·글자 뽑기는 무료(규칙). AI 는 쓰지 않음.
 import { db } from '../db';
 import { extractTextResult } from '../textExtract';
-import { AD_RE, DIRECT_OPS, HILINK_KEYWORDS, initialClassification, matchFit, type FitBusiness } from './collectors/procurement';
+import { AD_RE, DIRECT_OPS, HILINK_KEYWORDS, excludedTopic, initialClassification, matchFit, type FitBusiness } from './collectors/procurement';
 
 type Row = Record<string, any>;
 const kstDay = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
@@ -28,7 +28,7 @@ export function bodyCategoryOk(cat: string | null | undefined, title = ''): bool
   const part = catPart(c); const hilink = HILINK_TITLE.test(title);
   return /사업자/.test(c) && /용역/.test(c) && (!SERVICE_CAT.test(part) || (hilink && NET_CAT.test(part) && !SERVICE_CAT.test(part.replace(/지능형|홈네트워크|통신|인터넷/g, ''))));
 }
-export const bodyTitleOk = (title: string) => BODY_TITLE.test(title) && !BODY_SKIP_TITLE.test(title) && !AD_RE.test(title);
+export const bodyTitleOk = (title: string) => BODY_TITLE.test(title) && !BODY_SKIP_TITLE.test(title) && !AD_RE.test(title) && !excludedTopic(title); // 로컬 11/27 30번: 어린이집·장터 등 제외 주제는 받지 않음
 
 /** 판정에 쓰는 본문 부분 — 첫 1,200자 + '목적·운영 대상·대상 시설·위탁 대상·사업 개요·과업 범위·운영 시설' 머리 뒤 400자씩(참가자격·평가표·서식은 뺌) */
 export function bodySnippet(text: string): string {

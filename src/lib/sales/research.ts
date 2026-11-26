@@ -147,7 +147,8 @@ export async function researchWeeklyTick(opt: { now?: Date } = {}) {
     and not exists (select 1 from sales_research_weekly w where w.tenant = t.id and w.week = ${week}::date) order by t.id limit 20`;
   const out: Record<string, unknown> = {};
   // 414차(안 표 B): 자동 생성은 기본 회사만 — 다른 회사는 시설 탭을 켠 관리자가 [지금 만들기]를 누를 때만(researchNow)
-  for (const t of tenants.filter((x) => x.id === 'default')) out[t.id] = await researchWeekly(t.id, { now }).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }));
+  const { featureOn } = await import('../features');
+  for (const t of tenants) { if (!(await featureOn(t.id, 'research_auto', sql))) continue; out[t.id] = await researchWeekly(t.id, { now }).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) })); } // B 나머지: 회사별 기능 '후속조사 자동 묶음'
   return { week, tenants: tenants.length, out };
 }
 
@@ -161,7 +162,7 @@ export async function researchOverview(u: SessionUser) {
   const [n] = w?.task_id ? await sql<{ done: number; none: number }[]>`select count(*) filter (where status = 'done')::int as done, count(*) filter (where status = 'none')::int as none from sales_research where task_id = ${w.task_id}` : [{ done: 0, none: 0 }];
   const gate = RESEARCH_WEEKLY_GATE();
   return { latest: w ? { week: w.week, thisWeek: w.week === week, taskId: w.deleted ? null : w.task_id, items: w.items, due: w.due, assignee: w.assignee, taskDone: w.task_status === 'done', done: n.done, none: n.none } : null,
-    max: RESEARCH_MAX(), auto: t === 'default' && gate !== 'off' /* 414차(안 표 B): 자동 묶음은 기본 회사만 */, canRun: isAdmin(u) && w?.week !== week };
+    max: RESEARCH_MAX(), auto: gate !== 'off' && (await (await import('../features')).featureOn(t, 'research_auto', sql)) /* 414차(안 표 B)·B 나머지: 자동 묶음 = 회사별 기능(기본 회사만 켬) */, canRun: isAdmin(u) && w?.week !== week };
 }
 /** [이번 주 후속조사 지금 만들기] — 관리자. 이번 주 묶음이 이미 있으면 그것을 돌려줌 */
 export async function runResearchManual(u: SessionUser) {

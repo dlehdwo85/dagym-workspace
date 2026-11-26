@@ -13,9 +13,13 @@ import { isAdmin } from './access';
 import { tenantOf, type SessionUser } from './types';
 
 type Def = { label: string; desc: string; customer: boolean; def: (tenant: string) => boolean };
-export type FeatureKey = 'check';
+export type FeatureKey = 'check' | 'revenue' | 'research_auto';
+/** 기본값: 기본 회사(다짐) = 지금 동작. B 나머지(로컬 11/27 순서): 코드의 기본 회사 비교를 기능 이름으로 — 운영자가 회사별로 켜고 끔 */
+const base = (tenant: string) => tenant === 'default';
 export const FEATURES: Record<FeatureKey, Def> = {
   check: { label: '점검', desc: '점검 가이드·점검하기·보완 확인·점검 리포트(사이드바 메뉴와 홈 점검 칸)', customer: true, def: () => true },
+  revenue: { label: '현장 매출', desc: '매출 메뉴(지점 매출 입력·집계)와 AI 비서의 매출 요약 도구 — 켜도 메뉴 권한(매출)이 있는 사람만', customer: false, def: base },
+  research_auto: { label: '후속조사 자동 묶음', desc: '영업 시설 후속조사를 매주 자동으로 묶어 업무로 만듦(끄면 관리자가 [지금 만들기]를 누를 때만)', customer: false, def: base },
 };
 const BETA = /^beta:[a-z0-9_-]{2,40}$/;
 const known = (k: string): k is FeatureKey => Object.prototype.hasOwnProperty.call(FEATURES, k);

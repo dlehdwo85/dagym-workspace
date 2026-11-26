@@ -44,12 +44,33 @@ test('점검 끄기·켜기(회사 관리자) · 운영자 기능 표·베타 ·
   assert.equal((await c.req('GET', `/api/platform/tenants/${T}/features`)).status, 404, '운영자만');
   await ctx.owner.ok('PUT', `/api/platform/tenants/${T}/features`, { key: 'check', on: false, note: '시험' });
   let pf = (await ctx.owner.ok('GET', `/api/platform/tenants/${T}/features`)).features;
-  assert.deepEqual(pf.map((x) => [x.key, x.on, x.changed]), [['check', false, true]]);
+  assert.deepEqual(pf.map((x) => [x.key, x.on, x.changed]), [['check', false, true], ['revenue', false, false], ['research_auto', false, false]]);
   await ctx.owner.ok('PUT', `/api/platform/tenants/${T}/features`, { key: 'check', on: null });
   await ctx.owner.ok('PUT', `/api/platform/tenants/${T}/features`, { key: 'beta:newui', on: true, note: '새 화면 미리 보기' });
   pf = (await ctx.owner.ok('GET', `/api/platform/tenants/${T}/features`)).features;
-  assert.deepEqual(pf.map((x) => [x.key, x.on, x.changed]), [['check', true, false], ['beta:newui', true, true]]);
+  assert.deepEqual(pf.map((x) => [x.key, x.on, x.changed]), [['check', true, false], ['revenue', false, false], ['research_auto', false, false], ['beta:newui', true, true]]);
   assert.deepEqual((await c.ok('GET', '/api/admin/features')).features.map((x) => x.key), ['check'], '고객 화면에는 베타·운영사 전용 없음');
   const acts = await sql`select count(*)::int n from audit_logs where action = 'feature.set' and target_id = ${T}`;
   assert.equal(acts[0].n, 5, '바꿀 때마다 감사 기록(고객 끄기·켜기 + 운영자 끄기·기본값·베타)');
 });
+
+test('B 나머지(로컬 11/27 순서): 현장 매출·후속조사 자동 = 회사별 기능 — 기본 회사만 켬(지금 동작) · 운영자가 다른 회사에 켜면 매출 메뉴가 열림 · 고객은 못 바꿈', async () => {
+  const c = new Client('ceo2@feat-1181.test');
+  const r = await c.ok('POST', '/api/auth/signup', { email: 'ceo2@feat-1181.test', password: 'signup-pass-1234', name: '대표', mode: 'team', company: '매출상사', industry: 'IT·소프트웨어', agree });
+  await c.ok('POST', '/api/auth/verify', { token: r.devLink.split('/').pop() });
+  const [t] = await sql`select tenant from users where email = 'ceo2@feat-1181.test'`; const T = t.tenant;
+  await sql`update tenants set signup_status = 'approved' where id = ${T}`;
+  // 기본 회사 = 켬(지금 동작) · 새 회사 = 끔
+  const base = (await ctx.owner.ok('GET', '/api/platform/tenants/default/features')).features;
+  assert.deepEqual(base.filter((x) => x.key !== 'check').map((x) => [x.key, x.on, x.def]), [['revenue', true, true], ['research_auto', true, true]]);
+  assert.equal((await ctx.owner.req('GET', '/api/revenue')).status, 200, '기본 회사 매출 그대로');
+  assert.notEqual((await c.req('GET', '/api/revenue')).status, 200, '새 회사는 매출 메뉴 없음');
+  // 고객 관리자는 운영사 전용 기능을 못 바꿈
+  assert.equal((await c.req('PUT', '/api/admin/features', { key: 'revenue', on: true })).status, 403);
+  // 운영자가 켜면 열림 · 기본값으로 되돌리면 닫힘
+  await ctx.owner.ok('PUT', `/api/platform/tenants/${T}/features`, { key: 'revenue', on: true, note: '시험' });
+  assert.equal((await c.req('GET', '/api/revenue')).status, 200, '운영자가 켜면 매출 메뉴');
+  await ctx.owner.ok('PUT', `/api/platform/tenants/${T}/features`, { key: 'revenue', on: null });
+  assert.notEqual((await c.req('GET', '/api/revenue')).status, 200);
+});
+

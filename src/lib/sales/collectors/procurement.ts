@@ -15,6 +15,8 @@ export const EXCLUDE_TOPICS = ['어린이집', '보육', '알뜰', '장터', '�
  *  같은 제목·분류에 로비폰·공동현관·인터폰·월패드·출입이 있으면 로비폰(인터폰) 중계기라 하이링크 일이므로 제외하지 않음(norm 한 글자에 대고 봄) */
 const LOBBY_CTX = /로비폰|공동현관|인터폰|월패드|비디오폰|출입/;
 const excluded = (normHead: string) => EXCLUDE_TOPICS.some((k) => normHead.includes(norm(k)) && !(k === '중계기' && LOBBY_CTX.test(normHead)));
+/** 로컬 11/27 30번: 제목·분류가 대표가 정한 제외 주제(어린이집·보육·장터·급식 …)인지 — 공고문 본문 판정 대상에서 뺄 때 */
+export const excludedTopic = (title: string, cat?: string | null) => excluded(norm(`${title} ${cat ?? ''}`));
 // #476 d: '주민 운동시설 위탁관리업체 선정'(K-apt 분류 '사업자-용역-주민운동시설의 위탁')이 중장기로 빠졌다 → 위탁 관리(업체)·시설의 위탁·위탁 업체/사업자 선정도 즉시 검토
 // 191차(대표 10/27 정정): 즉시 검토 낱말을 둘로 — 다짐은 운영·위탁 낱말만(예전 '스크린골프'·'타석'은 다짐 즉시 검토가 아님), 하이링크는 시스템 낱말
 export const DIRECT_OPS = /(위탁\s*운영|운영\s*위탁|운영\s*업체|운영\s*사업자|운영자|위탁\s*용역|위탁\s*관리(?:\s*업체)?|시설의\s*위탁|위탁\s*(?:업체|사업자)\s*선정)/;

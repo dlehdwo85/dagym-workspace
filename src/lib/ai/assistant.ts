@@ -997,9 +997,11 @@ const MORE_TOOLS: AiTool = { name: 'more_tools', description: '이번 질문에�
  * 다른 회사에 없는 매출 메뉴 도구(revenue_summary)는 목록에서 뺀다. 기본 회사(다짐)는 지금 목록·글 그대로.
  */
 const TOOL_WORDS_OTHER: [string, string][] = [['다짐 기본 견적서', '기본 견적서'], ['플랫폼 시연 일정 잡기', '제품 시연 일정 잡기'], ['조직(현장·부서)', '조직(지점·부서)']];
-export function toolsForTenant(tools: AiTool[], tenant: string): AiTool[] {
-  if (tenant === 'default') return tools;
-  return tools.filter((t) => t.name !== 'revenue_summary').map((t) => {
+export function toolsForTenant(tools: AiTool[], tenant: string, revenueOn = tenant === 'default'): AiTool[] {
+  // B 나머지: 매출 요약 도구는 회사별 기능 '현장 매출'을 켠 회사만(낱말 바꾸기는 그대로 기본 회사 아닌 곳)
+  const kept = revenueOn ? tools : tools.filter((t) => t.name !== 'revenue_summary');
+  if (tenant === 'default') return kept;
+  return kept.map((t) => {
     let s = JSON.stringify(t); let hit = false;
     for (const [a, b] of TOOL_WORDS_OTHER) if (s.includes(a)) { s = s.split(a).join(b); hit = true; }
     return hit ? JSON.parse(s) as AiTool : t;
@@ -1103,7 +1105,8 @@ export async function chat(u: SessionUser, i: z.infer<typeof chatInput>, provide
   }
   const c: Ctx = { u, proposals: [], confidential: false, threadId, docJobs: [] };
   // V22 웹 검색·페이지 읽기 (회사 설정으로 끄기)
-  const pick = () => { const base = docMode ? TOOLS.filter((t) => DOC_TOOL_NAMES.has(t.name)) : toolsFor(userText, !!i.fileIds?.length, c.allTools, i.space); return toolsForTenant(!docMode && settings.web_tools ? [...base, ...WEB_TOOLS] : base, tenantOf(u)); }; // 410차 G-26: 다른 회사에는 공통 예시로(뒤에 붙는 도구까지)
+  const revenueOn = await (await import('../features')).featureOn(tenantOf(u), 'revenue');
+  const pick = () => { const base = docMode ? TOOLS.filter((t) => DOC_TOOL_NAMES.has(t.name)) : toolsFor(userText, !!i.fileIds?.length, c.allTools, i.space); return toolsForTenant(!docMode && settings.web_tools ? [...base, ...WEB_TOOLS] : base, tenantOf(u), revenueOn); }; // 410차 G-26: 다른 회사에는 공통 예시로(뒤에 붙는 도구까지)
   let tools = pick();
   if (i.fileIds?.length && fbConf) c.confidential = true;
   const sql = db();
