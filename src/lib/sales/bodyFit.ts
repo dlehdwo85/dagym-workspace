@@ -74,8 +74,9 @@ export function docBriefingWhen(text: string): { at: string | null; place: strin
     const tm = rest.match(/^\s*(?:\([^)]{0,4}\)\s*)?(?:(오전|오후)\s*)?(\d{1,2})\s*(?:시|:)\s*(\d{2})?/);
     let h = tm ? Number(tm[2]) : null; if (h != null && tm?.[1] === '오후' && h < 12) h += 12;
     const day = `${d[1]}-${pad(d[2])}-${pad(d[3])}`;
-    const pl = l.match(/장\s*소\s*[:：]\s*([^)\n,·]{2,30})/);
-    return { at: h != null && h < 24 ? `${day}T${pad(h)}:${tm?.[3] ?? '00'}:00+09:00` : day, place: pl ? pl[1].trim() : null };
+    // 로컬 11/27 26번(검암역 '일시 및 장소 : 2026년 12월 02일(수) 11시 정각 (장소 : 당 아파트 대연회장)'): 날짜로 시작하는 '장소 :' 값은 건너뜀(괄호 안 장소를)
+    const place = [...l.matchAll(/장\s*소\s*[:：]\s*([^)\n,·]{2,30})/g)].map((x) => x[1].trim()).find((v) => !/^(?:20\d{2}|\d{1,2}\s*[월./-])/.test(v)) ?? null;
+    return { at: h != null && h < 24 ? `${day}T${pad(h)}:${tm?.[3] ?? '00'}:00+09:00` : day, place };
   }
   return { at: null, place: null };
 }
@@ -94,15 +95,23 @@ export function docChecks(text: string): string[] {
   const t = String(text ?? '').replace(/\s+/g, ' ');
   const out: string[] = [];
   // 로컬 11/27 21번(서희스타힐스: 본문 9-바 '월간 산출 총금액 × 계약기간 36개월' · 산출내역서 '월청구금액 * 24개월' · 계약기간 '2년'): 곱하는 개월 수는 출처별로(본문·산출내역서), 계약 기간은 따로
-  const mult: { n: number; src: string }[] = []; const seenMul = new Set<string>();
-  for (const m of t.matchAll(/[×xX*]\s*(?:계약\s*기간\s*)?(\d{1,2})\s*개월/g)) {
-    const n = Number(m[1]); if (n < 6) continue;
-    const src = /산출\s*내역/.test(t.slice(Math.max(0, (m.index ?? 0) - 200), m.index ?? 0)) ? '산출내역서' : '본문';
-    const k = `${n}|${src}`; if (!seenMul.has(k)) { seenMul.add(k); mult.push({ n, src }); }
-  }
+  // 로컬 11/27 25번(서희스타힐스 hwpx 원문): 본문 9-바 '월간 산출 총금액에서 계약기간 36개월을 곱하여' = 곱하기(× 없음) · 붙임4) 세부산출내역서 표 맨 아래 '월청구금액 * 24개월' —
+  // 출처는 그 자리 앞의 가장 가까운 '붙임·별첨·별지' 머리에 '산출'이 있으면 산출내역서(표 칸이라 200자 안에 낱말이 없음), 붙임 머리가 없으면 본문
+  const srcOf = (at: number) => {
+    const before = t.slice(0, at); let head: RegExpMatchArray | null = null;
+    for (const h of before.matchAll(/(?:붙\s*임|별\s*첨|별\s*지)\s*(?:제?\s*\d+\s*(?:호)?)?\s*[)\].:]?/g)) head = h;
+    const label = head ? t.slice(head.index ?? 0, (head.index ?? 0) + 60) : '';
+    return /산\s*출/.test(label) || /산출\s*내역/.test(t.slice(Math.max(0, at - 200), at)) ? '산출내역서' : head ? (label.match(/^[^\s)\].:]+\s*\d*/)?.[0]?.replace(/\s+/g, '') ?? '붙임') : '본문';
+  };
+  const mult: { n: number; src: string; at: number }[] = []; const seenMul = new Set<string>();
+  const addMul = (n: number, at: number) => { if (n < 6) return; const src = srcOf(at); const k = `${n}|${src}`; if (!seenMul.has(k)) { seenMul.add(k); mult.push({ n, src, at }); } };
+  for (const m of t.matchAll(/[×xX*]\s*(?:계약\s*기간\s*)?(\d{1,2})\s*개월/g)) addMul(Number(m[1]), m.index ?? 0);
+  for (const m of t.matchAll(/(\d{1,2})\s*개월\s*(?:을|를|로|으로)?\s*곱/g)) addMul(Number(m[1]), m.index ?? 0);
+  mult.sort((a, b) => a.at - b.at); // 공고문에 나온 차례대로
   const terms: { n: number; label: string }[] = [];
   for (const m of t.matchAll(/계약\s*기간\s*[:：]?\s*(?:은|는)?\s*(?:계약일?\s*(?:로부터|부터)\s*)?(\d{1,2})\s*(년|개월)/g)) {
     if (/[×xX*]\s*$/.test(t.slice(Math.max(0, (m.index ?? 0) - 3), m.index ?? 0))) continue; // '× 계약기간 36개월' = 곱하기
+    if (/^\s*(?:을|를|로|으로)?\s*곱/.test(t.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 8))) continue; // '계약기간 36개월을 곱하여' = 곱하기
     const n = Number(m[1]) * (m[2] === '년' ? 12 : 1); if (n < 6 || n > 120 || terms.some((x) => x.n === n)) continue;
     terms.push({ n, label: `계약 ${m[1]}${m[2]}` });
   }
