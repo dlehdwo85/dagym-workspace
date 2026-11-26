@@ -1,30 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { timingSafeEqual } from 'node:crypto';
 import { runTick } from '@/lib/jobs';
 import { logError } from '@/lib/log';
+import { cronAuthorized } from '@/lib/cronAuth';
 
 export const maxDuration = 300; // 대표 10/24 ①: 마케팅 글 제작(최상 모델)은 응답 뒤(after)로 돌아 이 시간 안에서 끝남
 export const dynamic = 'force-dynamic';
 
-const GITHUB_JWKS = createRemoteJWKSet(new URL('https://token.actions.githubusercontent.com/.well-known/jwks'));
-const TICK_AUDIENCE = 'company-work-os-tick';
-
-async function authorized(req: NextRequest): Promise<string | null> {
-  const auth = req.headers.get('authorization') ?? '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!token) return null;
-  const secret = process.env.CRON_SECRET;
-  if (secret && token.length === secret.length && timingSafeEqual(Buffer.from(token), Buffer.from(secret))) return 'secret';
-  try {
-    const { payload } = await jwtVerify(token, GITHUB_JWKS, { issuer: 'https://token.actions.githubusercontent.com', audience: TICK_AUDIENCE });
-    if (payload.repository === (process.env.SCHEDULER_REPO ?? 'dlehdwo85/dagym-workspace')) return 'github-oidc';
-  } catch { /* 무효 토큰 */ }
-  return null;
-}
-
 async function handle(req: NextRequest) {
-  const who = await authorized(req);
+  const who = await cronAuthorized(req);
   if (!who) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   try {
     const reason = req.nextUrl.searchParams.get('reason') ?? who;

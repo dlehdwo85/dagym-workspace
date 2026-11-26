@@ -5,7 +5,8 @@ import QRCode from 'qrcode';
 import { Download, MonitorSmartphone, Share, Smartphone } from 'lucide-react';
 import { hostSplit } from '@/lib/hostSplit';
 import { SITE } from '@/lib/landingPages';
-import { APPSTORE_URL, APP_GET_PATH, PLAY_URL, deviceOf, type Device } from '@/lib/storeLinks';
+import { APP_GET_PATH, PLAY_URL, deviceOf, type Device } from '@/lib/storeLinks';
+import { appStoreUrl } from '@/lib/appStore';
 
 /**
  * 앱 받기(대표 11/20 "사이트 주소를 공유하면 직원들이 앱을 내려받은 후 진행할 수 있도록") — 직원에게 이 주소 하나만 알려 주면 된다.
@@ -40,6 +41,7 @@ const AFTER = [
 ];
 
 export default async function AppGetPage({ searchParams }: { searchParams: Promise<{ os?: string }> }) {
+  const APPSTORE_URL = await appStoreUrl(); // #1177: 환경 변수 → 없으면 App Store 공개 조회(1시간 캐시) — 올라오면 재배포 없이 단추가 켜짐
   const sp = await searchParams;
   const ua = (await headers()).get('user-agent') ?? '';
   const os: Device = OS.includes(sp.os as Device) ? (sp.os as Device) : deviceOf(ua);

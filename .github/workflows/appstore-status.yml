@@ -1,0 +1,39 @@
+# #1177(App Store 심사 승인·반려 알림): 1시간마다 App Store Connect 에서 iOS 최신 버전 심사 상태를 읽어(읽기만) 운영 서버에 보냄 →
+# 상태가 바뀌면 플랫폼 운영자에게 앱 알림 + 메일. 키는 appstore-submit 과 같은 Secrets(ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8),
+# 서버 인증은 tick 과 같은 GitHub OIDC(audience company-work-os-tick) — 새 비밀값 없음. 키가 없거나 APP_URL 변수가 없으면 아무것도 안 함.
+name: appstore-status
+on:
+  schedule:
+    - cron: '41 * * * *'
+  workflow_dispatch: {}
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  status:
+    if: ${{ vars.APP_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 설정 확인
+        id: cfg
+        run: echo "ready=${{ secrets.ASC_KEY_P8 != '' && secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' }}" >> "$GITHUB_OUTPUT"
+      - if: steps.cfg.outputs.ready != 'true'
+        run: echo "App Store Connect 키가 Secrets 에 없어 건너뜀"
+      - if: steps.cfg.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with: { sparse-checkout: scripts/asc-status.mjs, sparse-checkout-cone-mode: false }
+      - if: steps.cfg.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - if: steps.cfg.outputs.ready == 'true'
+        name: 심사 상태 → 운영 서버
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          export OIDC_TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=company-work-os-tick" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          echo "::add-mask::$OIDC_TOKEN"
+          node scripts/asc-status.mjs

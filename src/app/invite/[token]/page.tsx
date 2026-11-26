@@ -6,7 +6,7 @@ import { api } from '@/components/client';
 import { OrDivider, SocialButtons } from '@/components/SocialButtons';
 import { isInApp, isIosApp } from '@/components/inApp';
 import { AiConsentLine } from '@/components/AiConsent';
-import { APPSTORE_URL, APP_GET_PATH } from '@/lib/storeLinks';
+import { APPSTORE_URL as APPSTORE_ENV, APP_GET_PATH } from '@/lib/storeLinks';
 
 /** 휴대폰 브라우저(앱 아님·홈 화면 웹앱 아님)에서 초대를 받은 사람 — 가입 뒤 '앱 받기' 한 단계를 보여 준다(대표 11/20). PC 는 지금처럼 바로 홈으로 */
 function phoneBrowser(): 'android' | 'ios' | null {
@@ -28,6 +28,8 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   const [ai, setAi] = useState(false); // #1086 AI 기능 이용 동의(기본 체크 안 됨)
   const [aiReq, setAiReq] = useState(true); // 대표 11/23 #1087: 필수 — 아이폰 앱만 선택(1.2.0 심사 통과 전까지)
   useEffect(() => setAiReq(!isIosApp()), []);
+  const [APPSTORE_URL, setAppStore] = useState(APPSTORE_ENV); // #1177: 환경 변수 없으면 공개 조회로 찾은 주소(앱이 올라오면 재배포 없이)
+  useEffect(() => { if (!APPSTORE_ENV) fetch('/api/public/app-links').then((r) => r.json()).then((j) => setAppStore(j?.appstore ?? '')).catch(() => {}); }, []);
   useEffect(() => { api(`/api/invitations/${token}`).then(setInfo).catch((e) => setErr(e.message)); }, [token]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();

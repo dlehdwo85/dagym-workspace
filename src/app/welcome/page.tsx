@@ -7,7 +7,8 @@ import { BizFooter } from '@/components/BizFooter';
 import { LandingHeader } from '@/components/LandingHeader';
 import { conversionTags } from '@/lib/conversionTags';
 import { LANDING_PAGES, SITE } from '@/lib/landingPages';
-import { APPSTORE_URL, APP_GET_PATH, PLAY_URL } from '@/lib/storeLinks';
+import { APP_GET_PATH, PLAY_URL } from '@/lib/storeLinks';
+import { appStoreUrl } from '@/lib/appStore';
 import { AppGetBar } from '@/components/AppGetBar';
 import { ArrowRight, BellRing, Briefcase, Check, ClipboardCheck, Download, FolderOpen, LayoutGrid, Mail, Megaphone, MessageSquare, MessageSquareText, Mic, Phone, Stamp, TrendingUp, Users } from 'lucide-react';
 
@@ -17,7 +18,7 @@ import { ArrowRight, BellRing, Briefcase, Check, ClipboardCheck, Download, Folde
  */
 // #627: 주소(호스트)는 src/lib/landingPages SITE 하나로(NEXT_PUBLIC_SITE_URL, 기본 www) — 도메인 방향(apex → www)은 Vercel 설정
 // 대표 11/19: Google Play 는 출시됨 → 공개 주소를 코드 기본값으로(환경 변수로 바꿀 수 있음). App Store 는 아직 — 주소가 생기면 env 로
-const PLAY = PLAY_URL, APPSTORE = APPSTORE_URL; // 주소는 src/lib/storeLinks 한 곳(앱 받기 화면·휴대폰 띠와 같이 씀)
+const PLAY = PLAY_URL; // 주소는 src/lib/storeLinks 한 곳(앱 받기 화면·휴대폰 띠와 같이 씀) · App Store 는 #1177 공개 조회
 const CONTACT_MAIL = 'dagym-in@naver.com';
 const TITLE = '워크인 — 중소기업 업무관리·전자결재·협업툴을 한 화면에서'; // #627: 검색어(업무관리·전자결재·협업툴)를 제목에, H1 은 대표 문구 그대로
 const DESC = '업무·일정·메신저·전자결재와 영업·마케팅까지 한 화면에서. 중소기업 업무관리·협업툴, 14일 무료 체험. 웹·휴대폰 앱.';
@@ -49,6 +50,7 @@ const STEPS = [['체험 신청 1분', '이메일이나 구글·카카오·네이
 const AI_DEMO = [['내일 3시 거래처 미팅 잡아 줘', '내일 15:00 “거래처 미팅” 일정을 만들고 30분 전 알림을 걸었습니다. 준비 업무도 하나 만들까요?'], ['이번 주 연락할 리드 알려 줘', '다음 연락일이 이번 주인 리드 4곳입니다 — 한빛상사(수), 새봄디자인(목)… 첫 연락 업무를 담당자에게 만들었습니다.'], ['10월 블로그 원고 초안 써 줘', '브랜드 키트의 말투로 원고 2편을 만들어 승인함에 올렸습니다. 표지·본문 사진을 붙이면 승인 요청됩니다.']];
 
 export default async function Welcome() {
+  const APPSTORE = await appStoreUrl(); // #1177
   const tags = await conversionTags().catch(() => null); // #627: 소개 화면 측정 ID(플랫폼 운영 저장값 > 빌드 값)
   const ld = {
     '@context': 'https://schema.org', '@graph': [

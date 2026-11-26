@@ -4,7 +4,7 @@ import { BizFooter } from '@/components/BizFooter';
 import { InAppHint } from '@/components/inApp';
 import { APP_SHEET_COOKIE, hostSplit } from '@/lib/hostSplit';
 import { AppGetBar } from '@/components/AppGetBar';
-import { APPSTORE_URL } from '@/lib/storeLinks';
+import { appStoreUrl } from '@/lib/appStore';
 
 // #627(SEO_AUDIT 2-1): 로그인 화면 고유 제목·설명(색인은 하지 않음 — 루트 noindex 그대로)
 export const metadata: Metadata = { title: '워크인 로그인', description: '워크인 계정으로 로그인합니다. 회사 업무·일정·메신저·영업·마케팅을 한 화면에서.' };
@@ -16,5 +16,5 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const inApp = /WorkInApp/i.test((await headers()).get('user-agent') ?? '') || (await cookies()).get(APP_SHEET_COOKIE)?.value === '1';
   // 대표 11/20: 휴대폰 브라우저로 로그인 화면에 온 직원에게 맨 위 띠 '앱 받기'(앱 안·앱이 띄운 창에서는 그리지 않음). 앱 받기 화면은 소개 사이트(www)에 있다
   const hs = hostSplit(); const site = hs.on ? `https://${hs.site}` : '';
-  return <InAppHint value={inApp}>{!inApp && <AppGetBar appstore={!!APPSTORE_URL} base={site} />}{children}<BizFooter linksOnly={inApp} /></InAppHint>;
+  return <InAppHint value={inApp}>{!inApp && <AppGetBar appstore={!!(await appStoreUrl())} base={site} />}{children}<BizFooter linksOnly={inApp} /></InAppHint>;
 }
