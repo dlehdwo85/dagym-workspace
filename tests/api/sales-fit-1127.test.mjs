@@ -106,3 +106,20 @@ test('K-apt 수집: 서희스타힐스 제목(상세 분류 없음) = 다짐 즉
   await ctx.owner.ok('POST', '/api/sales/collectors/kapt_bid_notices/run', {});
   const b2 = await rowOf(B); assert.equal(b2.bid_category, GYM); assert.equal(b2.related, true); assert.equal(b2.category_probed_at, probedAt, '분류 빈 줄 읽기는 한 번만');
 });
+
+test('로컬 02:00 오탐 2가지: 광고 자리 운영(미디어보드·광고게시판) = 다짐 아님 → 다시 판정이 내림 · 락커 철거·재설치 = 하이링크 아님 · 진짜 운영 공고는 그대로', async () => {
+  const up = { related: true, classification: '즉시 검토', refit_at: new Date().toISOString(), refound_at: new Date().toISOString() };
+  await put('20261126153915104', '[서울] 시험동부센트레빌 공용시설 미디어보드 운영업체 선정', { ...up, fit_business: '다짐', matched_keywords: ['운영업체'], bid_category: '사업자 - 용역 - 기타' });
+  await put('20261126144218065', '[서울] 시험동부센트레빌 공용시설 광고게시판 운영업체 선정', { ...up, fit_business: '다짐', matched_keywords: ['운영업체'], bid_category: '사업자 - 용역 - 기타' });
+  await put('kg2b_143752', '시험파크팰리스 상가 락커룸 일시철거 및 재설치', { ...up, source_type: 'kg2b_bid', source_url: 'https://www.kg2b.com/x', issuer: '시험파크팰리스', fit_business: '하이링크', matched_keywords: ['락커'] });
+  await put('20261125113139380', '[부산] 시험공원비스타 커뮤니티시설 위탁운영 용역사업자 선정 수정공고', { ...up, fit_business: '다짐', matched_keywords: ['커뮤니티', '위탁운영'] });
+  const now = async (no) => (await ctx.owner.ok('GET', `/api/platform/sales-notices?no=${no}`)).items[0].nowRule;
+  const ad = await now('20261126153915104'); assert.equal(ad.fit, null); assert.match(ad.dropped[0].why, /광고 사업은 다짐 아님/);
+  assert.equal((await now('20261126144218065')).fit, null);
+  const lk = await now('kg2b_143752'); assert.equal(lk.fit, null); assert.match(lk.dropped[0].why, /락커·사물함 철거·재설치/);
+  assert.equal((await now('20261125113139380')).fit, '다짐');
+  const r = await ctx.owner.ok('POST', '/api/platform/sales-notices', { refit: true, days: 60 });
+  assert.ok(r.lowered >= 3, JSON.stringify(r));
+  for (const no of ['20261126153915104', '20261126144218065', 'kg2b_143752']) { const x = await rowOf(no); assert.equal(x.related, false, no); assert.equal(x.refound_at, undefined, `${no} 다시 찾은 공고 표시 지움`); }
+  assert.equal((await rowOf('20261125113139380')).related, true, '부산 커뮤니티시설 위탁운영은 그대로');
+});

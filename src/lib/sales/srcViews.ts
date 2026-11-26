@@ -12,7 +12,7 @@ import { BASE_ONLY_TBLS, hubTabsOn, ownsMoved } from './hubTabs';
 import { LEAD_STAGES, stageName } from './terms';
 import { sourceAsOf } from './collectors/store';
 import { briefingLine, briefingOf, termsLine, termsRows } from './bidTerms';
-import { eligView } from './eligibilityText';
+import { eligView, qualGaps } from './eligibilityText';
 import { sidoIn } from './region';
 import { judgeSet, judgeWords, likePatterns, ownsJudge, plainNotice, tenantJudgeRow } from './tenantJudge';
 
@@ -600,6 +600,9 @@ export async function salesView(u: SessionUser, view: string, q: { q?: string; i
         : sortKey === 'amount' ? (Number(b.amount) || 0) - (Number(a.amount) || 0)
           : tab === 'open' || tab === 'soon' || tab === 'prep' || tab === 'prespec' ? String(a.deadline ?? '9999').localeCompare(String(b.deadline ?? '9999')) : tab === 'skip' ? String(b.skip?.at ?? '').localeCompare(String(a.skip?.at ?? '')) : String(b.posted).localeCompare(String(a.posted));
     const items = all.filter((n) => inTab(n, tab) && hit(n) && bizOk(n) && (!regionPick || sidoOfNotice(n) === regionPick)).sort(cmp).slice(0, 300); // 339차: 지역 칩
+    // 대표 11/27(로컬): 회사 자격 표(영업 맞춤 설정)와 공고 참가자격 대조 — 모자란 것만 카드에 '자격 부족'(숨기지 않음)
+    const quals = (await (await import('./digest')).prefsOf(t)).quals;
+    if (quals && Object.keys(quals).length) for (const n of items as any[]) { const g = qualGaps(n.elig?.text, quals); if (g.length) n.eligGap = `자격 부족: ${g.join(' · ')}`; }
     // 로컬 10/24 12:20(#537 후속): 오늘 새 공고에서 결과(낙찰·유찰)는 빼고 아래 '결과' 묶음으로 — 당일 메일 결과 구역과 같은 기준(isAwardResult)
     const results = tab === 'today' ? items.filter((n) => n.result) : [];
     const skipCount = N.filter((r) => skips.own(r) && !folded(r)).length; // [대상 아님] 탭 장 수(같은 사업은 한 장)

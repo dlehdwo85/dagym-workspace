@@ -36,6 +36,14 @@ const WEAK = new Set(['커뮤니티', '주민공동시설', '주민공동', '부
 export const DAGYM_TITLE_WORDS = ['편의시설'] as const;
 const CONV_FAC = /편의\s*시설(?!\s*물)/;
 const CONV_NOT = /장애인|병원|의료원|보건소|본사|사옥|청사|휴게소|터미널|공항|대학교|캠퍼스/;
+/** 대표 11/27(로컬 02:00 — 다시 판정이 올린 미아동부센트레빌 '공용시설 미디어보드 운영업체'·'공용시설 광고게시판 운영업체' = 승강기·현관 광고 사업, 최고가낙찰·광고료 선납):
+ *  제목·분류에 광고·미디어보드·게시판·전광판·디지털 사이니지가 있으면 다짐 아님(운영업체 낱말이 있어도 광고 자리 운영 — 다짐은 시설 운영만) */
+const AD_RE = /광고|미디어\s*보드|게시판|전광판|사이니지/;
+/** 대표 11/27(로컬 02:00 — KG2B 경희궁 파크팰리스 '상가 락커룸 일시철거 및 재설치'가 하이링크): 락커·사물함이 철거·재설치·이설과 함께고 시스템 낱말이 없으면
+ *  물건 옮기기 공사 — 하이링크(무인·스마트 락커 시스템) 아님 */
+const LOCKER_WORDS = new Set(['락커', '사물함']);
+const LOCKER_MOVE = /철거|재설치|이설|이전\s*설치/;
+const LOCKER_SYS = /시스템|무인|스마트|키오스크|전자|RFID|카드|관제|IoT|앱/i;
 const APT_CONTEXT = /아파트|단지|주민|입주|공동주택|커뮤니티|관리사무소|오피스텔|레지던스/;
 const CONSTRUCTION_RE = /공사|관급자재|설계|감리|측량|폐기물|골재|건립|신축|증축|개축|철거|타일|안전진단|기술지도|시공/;
 const FACILITY_SERVICE_RE = /청소|경비|소독|방역|안전점검|정기점검|점검용역|제습|공조기|냉난방|보일러|여과기|승강기/;
@@ -107,6 +115,8 @@ export function matchFit(...texts: (string | null | undefined)[]): FitResult {
   if (h.length && !BAY_SYS.test(head)) h = h.filter((k) => !BAY_WORDS.has(k));
   if (bayOnly && !h.length) dropped.push({ business: '하이링크', why: '타석만 있고 관제·시스템 낱말이 없음(골프 타석 설치·공사)' });
   if (!h.length && /시스템\s*에어컨/.test(`${texts[0] ?? ''} ${texts[1] ?? ''}`)) dropped.push({ business: '하이링크', why: "'시스템 에어컨'은 냉난방기 — 하이링크 시스템 아님" }); // 235차: 다시 판정이 예전 판정을 내리도록 까닭을 남김
+  // 대표 11/27: 락커·사물함 철거·재설치(시스템 낱말 없음)는 하이링크 아님
+  if (h.length && h.every((k) => LOCKER_WORDS.has(k)) && LOCKER_MOVE.test(head) && !LOCKER_SYS.test(head)) { dropped.push({ business: '하이링크', why: '락커·사물함 철거·재설치 공사 — 시스템 낱말 없음' }); h = []; }
   const cmty = parts[0] ? parts[0].match(CMTY_SYS)?.[0] : undefined;
   if (cmty && !h.some((k) => norm(cmty).includes(norm(k)))) h = [...h, cmty.replace(/\s+/g, ' ').trim()];
   // 191차: 다짐은 운영·위탁만 — 제목에 설치·시공·공사·교체·렌탈·장비·시스템·구축(그리고 예전 규칙의 공사·설계·청소·경비 같은 시설 서비스)이 있으면
@@ -114,6 +124,9 @@ export function matchFit(...texts: (string | null | undefined)[]): FitResult {
   const ops = OPS_RE.test(head);
   const build = title.match(BUILD_RE)?.[0] ?? title.match(CONSTRUCTION_RE)?.[0] ?? title.match(FACILITY_SERVICE_RE)?.[0] ?? null;
   if (d.length && build && !ops) { dropped.push({ business: '다짐', why: `제목에 '${build}' — 다짐은 운영·위탁만` }); d = []; }
+  // 대표 11/27: 광고 자리 운영(미디어보드·광고게시판·전광판)은 다짐 아님
+  const ad = head.match(AD_RE)?.[0];
+  if (d.length && ad) { dropped.push({ business: '다짐', why: `'${ad}' — 광고 사업은 다짐 아님(다짐은 시설 운영만)` }); d = []; }
   // 227차(로컬 10/28 ③): 제목에 '공사'가 없어도 업무 구분(분류)이 공사면 운영·위탁 낱말 없을 때 다짐 아님
   if (d.length && !ops && /공사/.test(parts[1] ?? '')) { dropped.push({ business: '다짐', why: '업무 구분이 공사 — 다짐은 운영·위탁만' }); d = []; }
   if (d.length && d.every((k) => OPERATION_ONLY.has(k))) d = []; // 위탁운영만으로는 시설 단어 필요

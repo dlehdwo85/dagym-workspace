@@ -68,7 +68,7 @@ export function Collectors() {
 }
 
 type Prefs = { keywords: string[]; excludes: string[]; regions: string[]; issuers: string[]; item_codes: string[]; amount_min: number | null; amount_max: number | null; digest_enabled: boolean; digest_hour: number; digest_mail: boolean; digest_to: string[];
-  digest_emails: string[]; digest_from_name: string | null; digest_reply_to: string | null };
+  digest_emails: string[]; digest_from_name: string | null; digest_reply_to: string | null; quals?: { sport1?: number | null; sport2?: number | null; capitalEok?: number | null } };
 type MailRoute = { channel: 'email:workin' | 'email:smtp' | null; smtpFrom: string | null; fallback: 'resend' | 'dev' | null; fromName: string; replyTo: string | null };
 type PD = { prefs: Prefs; people: { id: string; name: string; email: string; role: string }[]; last: { day: string; counts: any; items: any[]; mailed: number; notified: number; created_at: string } | null; canEdit: boolean; mail?: MailRoute };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -93,12 +93,12 @@ export function BidPrefs() {
   if (!data) return <Skeleton rows={4} />;
   const p = data.prefs; const emails = p.digest_emails ?? [];
   const form = f ?? { keywords: p.keywords.join(', '), excludes: p.excludes.join(', '), issuers: p.issuers.join(', '), item_codes: p.item_codes.join(', '), amount_min: p.amount_min == null ? '' : String(p.amount_min), amount_max: p.amount_max == null ? '' : String(p.amount_max), digest_hour: String(p.digest_hour),
-    from_name: p.digest_from_name ?? '', reply_to: p.digest_reply_to ?? '' };
+    from_name: p.digest_from_name ?? '', reply_to: p.digest_reply_to ?? '', q_sport1: p.quals?.sport1 == null ? '' : String(p.quals.sport1), q_sport2: p.quals?.sport2 == null ? '' : String(p.quals.sport2), q_capital: p.quals?.capitalEok == null ? '' : String(p.quals.capitalEok) };
   const set = (k: string, v: string) => setF({ ...form, [k]: v });
   async function save(extra: Record<string, unknown> = {}) {
     setBusy(true);
     try { await api('/api/sales/digest/prefs', { method: 'PUT', body: { keywords: csv(form.keywords), excludes: csv(form.excludes), issuers: csv(form.issuers), itemCodes: csv(form.item_codes), amountMin: form.amount_min ? Number(form.amount_min) : null, amountMax: form.amount_max ? Number(form.amount_max) : null, digestHour: Number(form.digest_hour),
-      digestFromName: form.from_name.trim() || null, digestReplyTo: form.reply_to.trim(), ...extra } }); toast.ok('저장했습니다'); setF(null); reload(); return true; }
+      digestFromName: form.from_name.trim() || null, digestReplyTo: form.reply_to.trim(), quals: { sport1: form.q_sport1 ? Number(form.q_sport1) : null, sport2: form.q_sport2 ? Number(form.q_sport2) : null, capitalEok: form.q_capital ? Number(form.q_capital) : null }, ...extra } }); toast.ok('저장했습니다'); setF(null); reload(); return true; }
     catch (e: any) { toast.error(e.message); return false; } finally { setBusy(false); }
   }
   // #509 b: 직원 말고 메일 주소 직접(회사 메일 등) — 최대 5개, 형식 확인
@@ -128,6 +128,13 @@ export function BidPrefs() {
         <Field label="물품·업종 코드(쉼표, 비우면 전체)"><input className={inputCls} value={form.item_codes} onChange={(e) => set('item_codes', e.target.value)} placeholder={base ? '예: 1156, 위탁용역' : '예: 물품 분류 번호, 용역'} disabled={!data.canEdit} /></Field>
         <Field label="추정가격 최소(원)"><input className={inputCls} inputMode="numeric" value={form.amount_min} onChange={(e) => set('amount_min', e.target.value.replace(/\D/g, ''))} disabled={!data.canEdit} /></Field>
         <Field label="추정가격 최대(원)"><input className={inputCls} inputMode="numeric" value={form.amount_max} onChange={(e) => set('amount_max', e.target.value.replace(/\D/g, ''))} disabled={!data.canEdit} /></Field>
+      </div>
+      {/* 대표 11/27(로컬): 회사 자격 표 — 공고 참가자격과 대조해 카드에 '자격 부족' 표시(숨기지 않음). 빈 칸 = 모름(대조 안 함) */}
+      <p className="mt-3 text-xs font-medium text-ink">우리 회사 자격 <span className="font-normal text-ink-2">— 공고 참가자격과 대조해 모자라면 카드에 ‘자격 부족’으로 표시합니다(공고는 그대로 보임). 모르면 비워 두세요.</span></p>
+      <div className="mt-1 grid gap-2 sm:grid-cols-3" data-testid="prefs-quals">
+        <Field label="생활스포츠지도사 1급(명)"><input className={inputCls} inputMode="numeric" value={form.q_sport1} onChange={(e) => set('q_sport1', e.target.value.replace(/\D/g, ''))} placeholder="모름" disabled={!data.canEdit} data-testid="prefs-q-sport1" /></Field>
+        <Field label="생활스포츠지도사 2급(명)"><input className={inputCls} inputMode="numeric" value={form.q_sport2} onChange={(e) => set('q_sport2', e.target.value.replace(/\D/g, ''))} placeholder="모름" disabled={!data.canEdit} data-testid="prefs-q-sport2" /></Field>
+        <Field label="자본금(억 원)"><input className={inputCls} inputMode="decimal" value={form.q_capital} onChange={(e) => set('q_capital', e.target.value.replace(/[^\d.]/g, ''))} placeholder="모름" disabled={!data.canEdit} data-testid="prefs-q-capital" /></Field>
       </div>
       <KwSuggest onApplied={() => { setF(null); reload(); }} />
       <div className="mt-2 flex flex-wrap gap-1 text-xs" data-testid="prefs-regions">{SIDO.map((s) => <button key={s} type="button" disabled={!data.canEdit} onClick={() => toggleRegion(s)} className={cx('rounded-full border px-2 py-0.5', p.regions.includes(s) ? 'border-[#2563EB] bg-white font-semibold text-[#1D4ED8]' : 'border-line bg-white text-ink-2')}>{s}</button>)}<span className="self-center text-ink-3">{p.regions.length ? '' : '지역 제한 없음(전국)'}</span></div>

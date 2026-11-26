@@ -18,7 +18,7 @@ import { BID_COLLECTORS } from './collectors';
 import { listBizCats, matchBiz, type BizCat } from './bizCats';
 import { regionLimit, sidoIn, type RegionLimit } from './region';
 import { digestMail } from './digestMail';
-import { eligSay, eligView } from './eligibilityText';
+import { eligSay, eligView, type CompanyQuals } from './eligibilityText';
 import { SKIP_ONLY, isCancel, isPrespec, noKey, noticeKeys, projectSkipOf, settledWork, titleKey } from './noticeGroups';
 import { fixG2bUrl, searchHint, type SearchHint } from './sourceLink';
 import { judgeWords, ownsJudge, plainNotice } from './tenantJudge';
@@ -29,11 +29,13 @@ const email = z.string().trim().toLowerCase().email('메일 주소 형식이 아
 export const prefsInput = z.object({ keywords: words.optional(), excludes: words.optional(), regions: z.array(z.string().max(10)).max(17).optional(), issuers: words.optional(), itemCodes: z.array(z.string().trim().min(1).max(20)).max(50).optional(),
   amountMin: z.number().int().min(0).nullable().optional(), amountMax: z.number().int().min(0).nullable().optional(), digestEnabled: z.boolean().optional(), digestHour: z.number().int().min(0).max(23).optional(), digestMail: z.boolean().optional(), digestTo: z.array(zUuid).max(20).optional(),
   // #509 b·c: 직원 선택 말고 메일 주소 직접(회사 메일 등, 최대 5) · 보낸 사람 이름(비우면 '<회사 이름> 영업실') · 답장 주소(비우면 회사 메일 계정 주소)
-  digestEmails: z.array(email).max(5, '메일 주소는 5개까지 넣을 수 있습니다').optional(), digestFromName: z.string().trim().max(60).nullable().optional(), digestReplyTo: z.union([z.literal(''), email]).nullable().optional() });
+  digestEmails: z.array(email).max(5, '메일 주소는 5개까지 넣을 수 있습니다').optional(), digestFromName: z.string().trim().max(60).nullable().optional(), digestReplyTo: z.union([z.literal(''), email]).nullable().optional(),
+  // 대표 11/27: 회사 자격 표(빈 칸 = 모름) — 체육 지도 자격 1급·2급 인원, 자본금(억 원)
+  quals: z.object({ sport1: z.number().int().min(0).max(999).nullable().optional(), sport2: z.number().int().min(0).max(999).nullable().optional(), capitalEok: z.number().min(0).max(100000).nullable().optional() }).optional() });
 export type Prefs = { keywords: string[]; excludes: string[]; regions: string[]; issuers: string[]; item_codes: string[]; amount_min: number | null; amount_max: number | null; digest_enabled: boolean; digest_hour: number; digest_mail: boolean; digest_to: string[];
-  digest_emails: string[]; digest_from_name: string | null; digest_reply_to: string | null };
-const DEF: Prefs = { keywords: [], excludes: [], regions: [], issuers: [], item_codes: [], amount_min: null, amount_max: null, digest_enabled: true, digest_hour: 8, digest_mail: true, digest_to: [], digest_emails: [], digest_from_name: null, digest_reply_to: null };
-export async function prefsOf(tenant: string): Promise<Prefs> { const [p] = await db()<any[]>`select * from sales_bid_prefs where tenant = ${tenant}`; return p ? { ...DEF, ...p, digest_emails: p.digest_emails ?? [], amount_min: p.amount_min == null ? null : Number(p.amount_min), amount_max: p.amount_max == null ? null : Number(p.amount_max) } : { ...DEF }; }
+  digest_emails: string[]; digest_from_name: string | null; digest_reply_to: string | null; quals: CompanyQuals };
+const DEF: Prefs = { keywords: [], excludes: [], regions: [], issuers: [], item_codes: [], amount_min: null, amount_max: null, digest_enabled: true, digest_hour: 8, digest_mail: true, digest_to: [], digest_emails: [], digest_from_name: null, digest_reply_to: null, quals: {} };
+export async function prefsOf(tenant: string): Promise<Prefs> { const [p] = await db()<any[]>`select * from sales_bid_prefs where tenant = ${tenant}`; return p ? { ...DEF, ...p, digest_emails: p.digest_emails ?? [], quals: p.quals ?? {}, amount_min: p.amount_min == null ? null : Number(p.amount_min), amount_max: p.amount_max == null ? null : Number(p.amount_max) } : { ...DEF }; }
 const companyName = async (tenant: string) => (await db()<{ name: string }[]>`select name from tenants where id = ${tenant}`)[0]?.name ?? '워크인';
 const fromNameOf = (p: Prefs, company: string) => (p.digest_from_name?.trim() || `${company} 영업실`).slice(0, 60);
 /** #509: 이 회사 당일 메일이 나가는 길 — 화면 안내·답장 주소 기본값 */
@@ -56,12 +58,13 @@ export async function savePrefs(u: SessionUser, i: z.infer<typeof prefsInput>) {
   const n: Prefs = { keywords: i.keywords ?? cur.keywords, excludes: i.excludes ?? cur.excludes, regions: (i.regions ?? cur.regions).filter((r) => SIDO.includes(r)), issuers: i.issuers ?? cur.issuers, item_codes: i.itemCodes ?? cur.item_codes,
     amount_min: i.amountMin === undefined ? cur.amount_min : i.amountMin, amount_max: i.amountMax === undefined ? cur.amount_max : i.amountMax, digest_enabled: i.digestEnabled ?? cur.digest_enabled, digest_hour: i.digestHour ?? cur.digest_hour, digest_mail: i.digestMail ?? cur.digest_mail, digest_to: i.digestTo ?? cur.digest_to,
     digest_emails: i.digestEmails ? [...new Set(i.digestEmails)] : cur.digest_emails, digest_from_name: i.digestFromName === undefined ? cur.digest_from_name : i.digestFromName?.trim() || null,
-    digest_reply_to: i.digestReplyTo === undefined ? cur.digest_reply_to : i.digestReplyTo || null };
-  await sql`insert into sales_bid_prefs (tenant, keywords, excludes, regions, issuers, item_codes, amount_min, amount_max, digest_enabled, digest_hour, digest_mail, digest_to, digest_emails, digest_from_name, digest_reply_to, updated_by)
-    values (${t}, ${n.keywords}, ${n.excludes}, ${n.regions}, ${n.issuers}, ${n.item_codes}, ${n.amount_min}, ${n.amount_max}, ${n.digest_enabled}, ${n.digest_hour}, ${n.digest_mail}, ${n.digest_to}::uuid[], ${n.digest_emails}, ${n.digest_from_name}, ${n.digest_reply_to}, ${u.id})
+    digest_reply_to: i.digestReplyTo === undefined ? cur.digest_reply_to : i.digestReplyTo || null,
+    quals: i.quals ? Object.fromEntries(Object.entries({ ...cur.quals, ...i.quals }).filter(([, v]) => v != null)) as CompanyQuals : cur.quals };
+  await sql`insert into sales_bid_prefs (tenant, keywords, excludes, regions, issuers, item_codes, amount_min, amount_max, digest_enabled, digest_hour, digest_mail, digest_to, digest_emails, digest_from_name, digest_reply_to, quals, updated_by)
+    values (${t}, ${n.keywords}, ${n.excludes}, ${n.regions}, ${n.issuers}, ${n.item_codes}, ${n.amount_min}, ${n.amount_max}, ${n.digest_enabled}, ${n.digest_hour}, ${n.digest_mail}, ${n.digest_to}::uuid[], ${n.digest_emails}, ${n.digest_from_name}, ${n.digest_reply_to}, ${sql.json(n.quals as never)}, ${u.id})
     on conflict (tenant) do update set keywords = excluded.keywords, excludes = excluded.excludes, regions = excluded.regions, issuers = excluded.issuers, item_codes = excluded.item_codes, amount_min = excluded.amount_min, amount_max = excluded.amount_max, digest_enabled = excluded.digest_enabled,
-      digest_hour = excluded.digest_hour, digest_mail = excluded.digest_mail, digest_to = excluded.digest_to, digest_emails = excluded.digest_emails, digest_from_name = excluded.digest_from_name, digest_reply_to = excluded.digest_reply_to, updated_by = excluded.updated_by, updated_at = now()`;
-  await audit(sql, u.id, 'sales_bid_prefs.save', 'tenant', null, { keywords: n.keywords.length, regions: n.regions, emails: n.digest_emails.length }).catch(() => {});
+      digest_hour = excluded.digest_hour, digest_mail = excluded.digest_mail, digest_to = excluded.digest_to, digest_emails = excluded.digest_emails, digest_from_name = excluded.digest_from_name, digest_reply_to = excluded.digest_reply_to, quals = excluded.quals, updated_by = excluded.updated_by, updated_at = now()`;
+  await audit(sql, u.id, 'sales_bid_prefs.save', 'tenant', null, { keywords: n.keywords.length, regions: n.regions, emails: n.digest_emails.length, ...(i.quals ? { quals: n.quals } : {}) }).catch(() => {});
   return prefsOf(t);
 }
 const kstDay = (d: Date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);

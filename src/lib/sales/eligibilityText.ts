@@ -94,7 +94,49 @@ const one = (s: string) => s.replace(/\s+/g, ' ').trim();
 /** 등록·면허 — 자주 나오는 이름(업종 중립: 회사 이름 아님) + 'OO공사업·OO사업자·OO관리업' 꼴 */
 const LIC_WORDS = ['주민운동시설 위탁운영 등록', '체육시설업', '소프트웨어사업자', '정보통신공사업', '전기공사업', '소방시설공사업', '소방시설관리업', '경비업', '주택관리업', '실내건축공사업', '시설물유지관리업', '기계설비공사업',
   '건물위생관리업', '엔지니어링사업자', '직접생산확인', '정보보호전문서비스', '전문건설업', '종합건설업', '조경공사업', '승강기'];
-const STAFF_WORDS = ['생활체육지도자', '건강운동관리사', '스포츠지도사', '체육지도자', '정보처리기사', '정보통신기사', '전기기사', '소방설비기사', '전기산업기사', '기술자', '기술인력', '전문인력', '관리사무소장', '주택관리사'];
+const STAFF_WORDS = ['건강운동관리사', '정보처리기사', '정보통신기사', '전기기사', '소방설비기사', '전기산업기사', '기술자', '기술인력', '전문인력', '관리사무소장', '주택관리사'];
+/** 대표 11/27(로컬 — 요약이 급수를 지움: '생활스포츠지도사 2급 이상의 직원 5인 이상' → '스포츠지도사 5명 이상', 강화 서희스타힐스는 '1급 이상 … 1인 이상 보유한 업체일 것'인데 2급 공고와 구분이 안 됨):
+ *  체육 지도 자격(생활스포츠지도사·생활체육지도자·스포츠지도사·체육지도자)은 급수·인원·4대보험·필수 여부를 그대로 — '생활스포츠지도사 1급 1명 이상(필수)', '생활스포츠지도사 2급 이상 5명 이상(4대보험)'.
+ *  이름은 원문 그대로(빈칸만 뺌) */
+export type SportReq = { name: string; grades: number[]; orMore: boolean; count: number | null; insured: boolean; required: boolean; bonus: boolean };
+const SPORT_RE = /(생활\s*(?:스포츠|체육)\s*지도(?:사|자)|스포츠\s*지도사|체육\s*지도자)/g;
+export function sportReqs(section: string | null | undefined): SportReq[] {
+  const t = one(String(section ?? '')); const out: SportReq[] = [];
+  for (const m of t.matchAll(SPORT_RE)) {
+    const at = (m.index ?? 0) + m[0].length;
+    const end = t.slice(at).search(/[.;]|※|\s[가-하]\.\s|\s\d{1,2}\)\s/); const clause = t.slice(at, end < 0 ? at + 90 : at + Math.min(end, 90));
+    const head = t.slice(Math.max(0, (m.index ?? 0) - 30), m.index ?? 0).split(/[.;]|※/).pop() ?? '';
+    const name = m[0].replace(/\s+/g, ''); // 원문 이름 그대로(빈칸만 뺌) — 생활체육지도자(예전 이름)도 같은 자격으로 대조
+    const g = clause.match(/^[^.;]{0,8}?([123])\s*급(?:\s*(이상)|\s*(?:또는|이나|혹은|·|,|및|\/)\s*([123])\s*급(?:\s*(이상))?)?/);
+    const grades = g ? [Number(g[1]), ...(g[3] ? [Number(g[3])] : [])] : [];
+    const c = clause.match(/(\d+)\s*(?:명|인)\s*(이상)?/);
+    const bonus = /가점|우대|가산/.test(clause);
+    out.push({ name, grades, orMore: !!(g?.[2] || g?.[4]) && Math.max(...grades) > 1, count: c ? Number(c[1]) : null, insured: /4\s*대\s*보험/.test(clause + head), bonus,
+      required: !bonus && /필수|반드시|보유한?\s*(?:업체|자)\s*(?:일|이어야|여야)|(?:일|할)\s*것|하여야|이어야/.test(clause) });
+  }
+  // 같은 자격·급수는 하나로(인원·조건이 있는 쪽)
+  const seen = new Map<string, SportReq>();
+  for (const r of out) { const k = `${r.name}|${r.grades.join(',')}|${r.orMore}`; const p = seen.get(k); if (!p || (!p.count && r.count)) seen.set(k, { ...r, insured: r.insured || !!p?.insured, required: r.required || !!p?.required }); }
+  return [...seen.values()];
+}
+export const sportLabel = (r: SportReq) => `${r.name}${r.grades.length ? ` ${r.grades.join('·')}급${r.orMore ? ' 이상' : ''}` : ''}${r.count ? ` ${r.count}명 이상` : ''}${r.insured ? '(4대보험)' : r.required ? '(필수)' : r.bonus ? '(우대)' : ''}`;
+/** 회사 자격 표(영업 맞춤 설정 — 비어 있으면 대조 안 함): 체육 지도 자격 1급·2급 인원, 자본금(억 원) */
+export type CompanyQuals = { sport1?: number | null; sport2?: number | null; capitalEok?: number | null };
+/** 공고 참가자격 절 ↔ 회사 자격 표 — 모자란 것(숨기지 않고 카드에 표시만, 대표 11/07 '공고는 계속 보이게') */
+export function qualGaps(section: string | null | undefined, q: CompanyQuals | null | undefined): string[] {
+  if (!q || !section) return [];
+  const out: string[] = []; const known = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  for (const r of sportReqs(section)) {
+    if (!r.grades.length || r.bonus) continue;
+    const need = r.count ?? 1; const min = Math.min(...r.grades), max = Math.max(...r.grades);
+    const only1 = max === 1 && !(r.orMore && min > 1); // '1급'·'1급 이상' = 1급만
+    if (only1 && known(q.sport1) && q.sport1 < need) out.push(q.sport1 === 0 ? `${r.name} 1급 없음` : `${r.name} 1급 ${need - q.sport1}명 부족`);
+    else if (!only1 && max <= 2 && known(q.sport1) && known(q.sport2) && q.sport1 + q.sport2 < need) out.push(`${r.name} 2급 이상 ${need - q.sport1 - q.sport2}명 부족`);
+  }
+  const cap = one(section).match(/자본금[^.;]{0,24}?(\d+(?:[.,]\d+)?)\s*(억|천만|백만)\s*원?\s*(이상|초과)?/);
+  if (cap && known(q.capitalEok)) { const need = Number(cap[1].replace(',', '.')) * (cap[2] === '억' ? 1 : cap[2] === '천만' ? 0.1 : 0.01); if (q.capitalEok < need) out.push(`자본금 ${cap[1]}${cap[2]} 미만`); }
+  return [...new Set(out)];
+}
 /** 절 → 요건 항목(자본금·등록·면허·실적·인력·신용등급·지역·현장설명 참가·공동도급). 공통 문구(제26조)만 있으면 [] */
 export function eligibilityItems(section: string | null | undefined): EligItem[] {
   const t = one(String(section ?? '')); if (!t) return [];
@@ -120,7 +162,7 @@ export function eligibilityItems(section: string | null | undefined): EligItem[]
     const perf = t.match(new RegExp(`((?:최근|과거)\\s*\\d+\\s*년\\s*(?:간|이내|동안)?[^.;]{0,40}?${UNIT})`)) ?? t.match(new RegExp(`(실적[^.;]{0,50}?${UNIT})`));
     if (perf && /실적|수행|위탁\s*운영|용역|공사/.test(perf[1] + t.slice(Math.max(0, (perf.index ?? 0) - 15), perf.index ?? 0) + t.slice((perf.index ?? 0) + perf[0].length, (perf.index ?? 0) + perf[0].length + 20))) out.push({ k: 'perf', label: `실적 ${one(perf[1].replace(/(?:사업\s*)?실적\s*[:：]?\s*/g, ' ').replace(/(\d+)\s*년\s*간/, '$1년').replace(/\s*이상$/, ' 이상'))}` });
   }
-  const staff: string[] = [];
+  const staff: string[] = sportReqs(t).slice(0, 2).map(sportLabel);
   for (const w of STAFF_WORDS) {
     const m = t.match(new RegExp(`${w}[^.;]{0,20}?(\\d+)\\s*(?:명|인)\\s*(이상)?`));
     if (staff.some((x) => x.includes(w))) continue; // '생활체육지도자' 안의 '체육지도자'
