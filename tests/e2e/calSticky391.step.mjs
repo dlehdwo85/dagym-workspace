@@ -11,10 +11,12 @@ export async function calSticky391({ owner, BASE }) {
       const hdr = [...document.querySelectorAll('header.sticky')].map((h) => h.getBoundingClientRect()).filter((r) => r.height > 0).reduce((a, r) => Math.max(a, r.bottom), 0);
       const cell = document.querySelector('.fc-col-header-cell'); const r = cell.getBoundingClientRect();
       const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return { y: Math.round(window.scrollY), hdr: Math.round(hdr), top: Math.round(r.top), seen: !!hit?.closest('.fc-col-header') };
+      const nat = document.querySelector('.fc-view-harness').getBoundingClientRect().top; // 날짜 줄이 붙지 않았다면 있을 자리(달력 맨 위)
+      return { y: Math.round(window.scrollY), hdr: Math.round(hdr), top: Math.round(r.top), nat: Math.round(nat), seen: !!hit?.closest('.fc-col-header') };
     });
     assert.ok(m.y > 40, `${what}: 페이지가 내려감 ${JSON.stringify(m)}`);
-    assert.ok(Math.abs(m.top - m.hdr) <= 2, `${what}: 날짜 줄이 앱 머리줄 바로 아래에 붙음 ${JSON.stringify(m)}`);
+    // 11/26 CI 흔들림: 월 보기처럼 페이지가 조금만 내려가면(달력 맨 위가 아직 머리줄 아래) 날짜 줄은 제자리 — 기대 위치 = max(머리줄 아래, 달력 맨 위)
+    assert.ok(Math.abs(m.top - Math.max(m.hdr, m.nat)) <= 2, `${what}: 날짜 줄이 앱 머리줄 바로 아래에 붙음 ${JSON.stringify(m)}`);
     assert.ok(m.seen, `${what}: 날짜 줄이 가려지지 않고 보임 ${JSON.stringify(m)}`);
   };
   try {

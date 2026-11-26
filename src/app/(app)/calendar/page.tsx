@@ -725,6 +725,7 @@ function CalendarPage() {
             datesSet={(a: DatesSetArg) => { setAgRange({ from: seoulDate(a.start), to: seoulDate(new Date(a.end.getTime() - 1)) }); setRange({ from: a.start.toISOString(), to: a.end.toISOString(), start: a.view.currentStart, view: a.view.type }); if (mobile) try { localStorage.setItem('wos_cal_view2', a.view.type); } catch {} keepInUrl({ view: a.view.type, date: seoulDate(a.view.calendar.getDate()) }); }}
             eventClick={onClick}
             eventReceive={receive}
+            // 대표 11/26 '낱말 중간 줄바꿈 금지': 일정 칸 글자는 띄어쓰기에서만 줄바꿈(break-keep) — 칸보다 긴 낱말은 끊지 않고 칸 끝에서 잘림(overflow-hidden, 두 줄)
             eventContent={(arg) => {
               // V14 37번: 업무 동그라미 아이콘 제거 — 업무는 블록 왼쪽 굵은 선(CSS .task-item)으로 구분, 완료는 흐림·취소선
               // V14 38번(Google 수준 가독성): 12px·줄간 1.25, 제목은 블록 높이만큼 여러 줄, 시간은 아래 작은 글자, 짧은 블록은 "제목, 9:00" 한 줄, 월 보기는 시간 생략 한 줄
@@ -760,7 +761,7 @@ function CalendarPage() {
                 const lines = Math.max(1, Math.floor((Math.max(18, (mins / 60) * (arg.view.type === 'timeGridWeek' ? 40 : 48)) - 4 - (showTime ? 12 : 0)) / 13.2)); // #757 실제 블록 높이(최소 18px)로
                 return (
                   <div className="flex h-full min-w-0 flex-col overflow-hidden text-[11px] leading-[1.2]" data-narrow-block="1" {...attrs}>
-                    <span className={cx('line-clamp-2 min-h-0 overflow-hidden whitespace-normal break-all font-medium', done && 'line-through opacity-80')} style={{ WebkitLineClamp: lines }}>{dot}{icon}{label}</span>
+                    <span className={cx('line-clamp-2 min-h-0 overflow-hidden whitespace-normal break-keep [overflow-wrap:normal] font-medium', done && 'line-through opacity-80')} style={{ WebkitLineClamp: lines }}>{dot}{icon}{label}</span>
                     {showTime && <span className="mt-auto shrink-0 truncate text-[10px] font-normal opacity-85" data-block-time>{when}</span>}
                   </div>
                 );
@@ -772,14 +773,14 @@ function CalendarPage() {
                 </div>
               );
               if (mobile && timed && mins < 90) return (
-                <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-all px-[3px] text-[12px] leading-[1.2]" {...attrs}>
+                <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-keep [overflow-wrap:normal] px-[3px] text-[12px] leading-[1.2]" {...attrs}>
                   <span className={cx('font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>{when && <span className="ml-1 text-[10.5px] font-normal opacity-85" data-block-time>{when}</span>}
                 </div>
               );
               // 대표 지적(10/19 ③ 글자 표시량): 안쪽 여백 3px·줄간 1.2 — 제목 먼저 블록 높이만큼 줄바꿈, 시간은 뒤에 작게
               if (timed && mins >= 45) return (
                 <div className="flex h-full min-w-0 flex-col overflow-hidden px-[3px] text-[12px] leading-[1.2]" {...attrs} data-chip-dense="1">
-                  <span className={cx('min-h-0 shrink overflow-hidden whitespace-normal break-all font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
+                  <span className={cx('min-h-0 shrink overflow-hidden whitespace-normal break-keep [overflow-wrap:normal] font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
                   {when && <span className="shrink-0 truncate text-[10.5px] font-normal opacity-85">{when}</span>}
                 </div>
               );
@@ -791,7 +792,7 @@ function CalendarPage() {
               );
               // 짧은 블록(45분 미만)도 2줄까지 — 시간은 제목 뒤 작게
               if (timed) return (
-                <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-all px-[3px] text-[12px] leading-[1.15]" {...attrs} data-chip-dense="1">
+                <div className="line-clamp-2 min-w-0 overflow-hidden whitespace-normal break-keep [overflow-wrap:normal] px-[3px] text-[12px] leading-[1.15]" {...attrs} data-chip-dense="1">
                   <span className={cx('font-semibold', done && 'line-through opacity-80')}>{dot}{icon}{label}</span>
                   {when && <span className="ml-1 text-[10.5px] font-normal opacity-85">{when}</span>}
                 </div>

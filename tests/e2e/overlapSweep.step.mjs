@@ -1,9 +1,9 @@
-// 대표 11/26 상시 규칙 '겹침 금지' 자동 검사: 375·412·1024·1880 네 폭 × 주요 화면 전부에서 글자·칩·아이콘 겹침과 칸 밖 넘침을 찾는다(tests/e2e/overlap.mjs)
+// 대표 11/26 상시 규칙 '겹침 금지'·'낱말 중간 줄바꿈 금지'(휴대폰 375·412) 자동 검사: 375·412·1024·1880 네 폭 × 주요 화면 전부에서 글자·칩·아이콘 겹침과 칸 밖 넘침을 찾는다(tests/e2e/overlap.mjs)
 // 시험 자료: 긴 제목 + 첨부 다섯 가지(HWPX 2·HWP·PDF·XLSX) + 시각 있는 마감 + 댓글 — 대표 갤럭시에서 첨부 칩이 마감 칸 위로 겹쳐 그려진 업무 줄과 같은 모양
 // 하나라도 있으면 실패(OVERLAP_REPORT=1 이면 목록만 남기고 통과 — 처음 전수 조사용)
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
-import { findOverlaps, overlapText } from './overlap.mjs';
+import { findOverlaps, findWordBreaks, overlapText } from './overlap.mjs';
 
 const WIDTHS = [375, 412, 1024, 1880];
 
@@ -50,6 +50,7 @@ export async function overlapSweep({ browser, desk, ctx, sql, BASE, SHOTS }) {
           await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
           await p.waitForTimeout(400);
           const res = await findOverlaps(p);
+          if (w <= 412) { const wb = await findWordBreaks(p); res.count += wb.count; res.issues.push(...wb.issues); } // 휴대폰 폭: 낱말 중간 줄바꿈도
           if (res.count) { found.push({ w, name, path, ...res }); await p.screenshot({ path: `${SHOTS}/overlap-${w}-${name.replace(/\s/g, '_')}.png` }).catch(() => {}); }
         }
       } finally { await c.close(); }
@@ -64,6 +65,17 @@ export async function overlapSweep({ browser, desk, ctx, sql, BASE, SHOTS }) {
         const res = await findOverlaps(p);
         await p.screenshot({ path: `${SHOTS}/overlap-selftest-412.png` });
         assert.ok(res.issues.some((x) => /att-chip|HWPX/.test(`${x.a} ${x.b}`)), `검사기가 일부러 넓힌 첨부 칩 겹침을 못 잡음: ${overlapText(res) || '0건'}`);
+      } finally { await c.close(); }
+    }
+    // 검사기 자체 확인 ②: 홈(375)에서 낱말 아무 데서나 끊기게 하면(break-all) 인사말 등에서 반드시 잡아야 함
+    {
+      const c = await browser.newContext({ viewport: { width: 375, height: 844 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', reducedMotion: 'reduce', storageState: await desk.storageState() });
+      try {
+        const p = await c.newPage(); await p.goto(`${BASE}/`); await p.getByTestId('home-todo').waitFor({ timeout: 20_000 });
+        assert.equal((await findWordBreaks(p)).count, 0, '홈 375: 낱말 중간 줄바꿈 0건');
+        await p.addStyleTag({ content: 'body,body *{word-break:break-all!important;white-space:normal!important} h1{width:9.5em!important}' });
+        const res = await findWordBreaks(p);
+        assert.ok(res.count > 0, '검사기가 일부러 낱말 중간에서 끊은 줄을 못 잡음');
       } finally { await c.close(); }
     }
   } finally {

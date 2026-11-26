@@ -4,7 +4,7 @@
 // 만들고 지우는 것: 업무 1건(만들기→완료→지우기) · 계약 1건 + 계약서 파일 6MB(저장소 직접 올리기 = R2 CORS 확인) → 보관 → 완전 삭제 · 메모(가짜 값) → 휴지통
 // 하지 않는 것: AI 기능·메일·알림톡·결제·카드 지우기·초대(돈·밖으로 나가는 일 없음 — 결제 화면은 보기만)
 import { chromium } from 'playwright';
-import { findOverlaps, overlapText } from '../e2e/overlap.mjs';
+import { findOverlaps, findWordBreaks, overlapText } from '../e2e/overlap.mjs';
 
 const BASE = (process.env.BASE ?? 'https://www.work-in.dev').replace(/\/$/, '');
 const EMAIL = process.env.PROD_QA_EMAIL, PASSWORD = process.env.PROD_QA_PASSWORD;
@@ -339,7 +339,7 @@ await step('내 수집 원천: 공공기관 RSS(행정안전부 보도자료) �
   if (w.check?.status !== 'ok' || !(w.check.found >= 1)) unverified.push(`행안부 보도자료 RSS(${w.src?.last_error ?? `${w.check?.status} ${w.check?.found ?? 0}건`})`);
 });
 // 대표 11/26 상시 규칙 '겹침 금지'(docs/DESIGN_SYSTEM.md): 네 폭 × 주요 화면 — 글자·칩·아이콘 겹침·칸 밖 넘침 0건(읽기 전용, 화면만 봄)
-await step('겹침 금지: 375·412·1024·1880 × 홈·업무·보드·캘린더·메시지·결재·보고·설정·영업·마케팅 — 0건', async () => {
+await step('겹침 금지(휴대폰 폭은 낱말 중간 줄바꿈도): 375·412·1024·1880 × 홈·업무·보드·캘린더·메시지·결재·보고·설정·영업·마케팅 — 0건', async () => {
   const screens = [['홈', '/'], ['업무 목록', '/tasks'], ['업무 보드', '/tasks?view=board'], ['캘린더 월', '/calendar?view=dayGridMonth'], ['캘린더 주', '/calendar?view=timeGridWeek'],
     ['메시지', '/messages'], ['결재', '/approvals'], ['보고', '/reports'], ['설정', '/settings'], ['영업 허브', '/s/sales/hub'], ['영업 공고', '/s/sales/hub?tab=bids&bt=all'], ['마케팅 승인함', '/s/marketing/approvals']];
   const bad = [];
@@ -354,6 +354,7 @@ await step('겹침 금지: 375·412·1024·1880 × 홈·업무·보드·캘린�
         if (!r || r.status() >= 400) continue; // 열리지 않은 공간
         await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {}); await sleep(400);
         const res = await findOverlaps(p, { maxReport: 5 });
+        if (w <= 412) { const wb = await findWordBreaks(p, { maxReport: 5 }); res.count += wb.count; res.issues.push(...wb.issues); } // 휴대폰 폭: 낱말 중간 줄바꿈도
         if (res.count) bad.push(`${w}폭 ${name} ${res.count}건\n${overlapText(res)}`);
       }
     } finally { await c.close(); }

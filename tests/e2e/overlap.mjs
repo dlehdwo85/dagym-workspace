@@ -111,3 +111,35 @@ export async function findOverlaps(page, { maxReport = 30 } = {}) {
 
 /** 사람이 읽을 한 줄 요약 */
 export const overlapText = (res) => res.issues.map((x) => `${x.type}: ${x.a}${x.b ? ` ↔ ${x.b}` : ''} (${x.px.join('×')}px @${x.at.join(',')})`).join('\n');
+
+// 대표 11/26 상시 규칙 '낱말 중간 줄바꿈 금지'(docs/DESIGN_SYSTEM.md): 여러 줄로 감긴 글자에서 줄이 낱말 가운데(앞뒤 모두 글자·숫자)에서 바뀌면 찾는다
+// 예: 인사말 '오늘도 수고 많으셨습니다, 이동 / 재님' — 줄은 띄어쓰기·문장 부호에서만 바뀌어야 함. 칸보다 긴 한 낱말(주소 등)은 data-break-ok 로 뺀다
+export async function findWordBreaks(page, { maxReport = 20 } = {}) {
+  return page.evaluate((maxReport) => {
+    const issues = []; const seen = new Set();
+    const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n; (n = tw.nextNode());) {
+      const t = n.nodeValue; if (!t || t.trim().length < 2 || t.length > 400) continue;
+      const el = n.parentElement; if (!el || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|OPTION|TITLE|TEXTAREA)$/.test(el.tagName) || el.closest('[data-break-ok],[data-overlap-ok],svg')) continue;
+      if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })) continue;
+      if (el.closest('details:not([open])') && !el.closest('summary')) continue;
+      const all = document.createRange(); all.selectNodeContents(n);
+      const lines = [...all.getClientRects()].filter((r) => r.width > 0.5);
+      if (lines.length < 2 || new Set(lines.map((r) => Math.round(r.top))).size < 2) continue; // 한 줄이면 볼 것 없음
+      let prev = null;
+      for (let i = 0; i < t.length; i++) {
+        if (/\s/.test(t[i])) { prev = null; continue; }
+        const cr = document.createRange(); cr.setStart(n, i); cr.setEnd(n, i + 1); const b = cr.getBoundingClientRect();
+        if (b.width < 0.5) continue;
+        if (prev && b.top > prev.top + prev.height * 0.5 && /[\p{L}\p{N}]/u.test(t[i - 1] ?? '') && /[\p{L}\p{N}]/u.test(t[i])) {
+          const tid = el.closest('[data-testid]')?.getAttribute('data-testid');
+          const where = `${t.slice(Math.max(0, i - 8), i)} / ${t.slice(i, i + 8)}`.replace(/\s+/g, ' ');
+          const key = `${tid}|${where}`; if (!seen.has(key)) { seen.add(key); issues.push({ type: '낱말 중간 줄바꿈', a: `${tid ? `[${tid}] ` : ''}${where}`, b: null, px: [0, 0], at: [Math.round(b.left), Math.round(b.top)] }); }
+          break;
+        }
+        prev = b;
+      }
+    }
+    return { count: issues.length, issues: issues.slice(0, maxReport) };
+  }, maxReport);
+}

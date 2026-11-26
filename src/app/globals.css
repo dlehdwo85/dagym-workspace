@@ -15,6 +15,8 @@
 :root[data-wco] .sticky.top-0 { top: var(--wco-h, 0px); }
 html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 body { background: var(--canvas); color: var(--ink); font-feature-settings: 'ss06'; letter-spacing: -0.005em; }
+/* 대표 11/26 상시 규칙 '낱말 중간 줄바꿈 금지'(docs/DESIGN_SYSTEM.md): 한글은 띄어쓰기에서만 줄바꿈(이름·낱말이 '이동 / 재님'처럼 끊기지 않게) — 칸보다 긴 한 낱말(주소·메일)만 어쩔 수 없을 때 끊음 */
+body { word-break: keep-all; overflow-wrap: break-word; }
 .tabular, time, .num { font-variant-numeric: tabular-nums; }
 input, select, textarea { font-size: 16px; } /* iOS 확대 방지 */
 @media (min-width: 640px) { input, select, textarea { font-size: 14px; } }
