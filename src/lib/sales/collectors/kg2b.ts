@@ -104,6 +104,20 @@ export async function readKg2bDetails(fetchImpl: typeof fetch, left: () => numbe
   return out;
 }
 
+/** 로컬 11/27(24번 kg2b_143707 '못 받음'): 공고문 본문 판정은 '관련 아님' 줄도 보는데 KG2B 상세는 관련 공고만 읽어 kg2b_ 줄에는 첨부(공고문)가 없음 →
+ *  한 줄만 KG2B 상세를 읽어(서울 중계) 첨부·현장설명·개찰 칸을 채움. 같은 번호의 다른 줄은 다음 상세 읽기가 채움 */
+export async function readKg2bOne(srcId: string, row: Record<string, any>, fetchImpl: typeof fetch = fetch): Promise<{ files: number } | { error: string }> {
+  const code = kg2bCode(row?.source_external_id); if (!code) return { error: 'kg2b 번호 아님' };
+  try {
+    const res = await viaKr(fetchImpl)(kg2bDetailUrl(code), { headers: { 'User-Agent': 'Mozilla/5.0 (WorkIn sales)' }, signal: AbortSignal.timeout(relayOn() ? 20000 : 8000), redirect: 'follow' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = parseKg2bDetail(await res.text());
+    if (!d.noticeNo && !d.files.length && !d.close) throw new Error('KG2B 상세 칸을 못 읽음(화면이 바뀜?)');
+    const sql = db(); const { patch } = kg2bPatch(row, d);
+    await sql`update sales_src_rows set row = row || ${sql.json(patch as never)}::jsonb, synced_at = now() where scope = 'global' and tbl = 'procurement_notices' and src_id = ${srcId}`;
+    return { files: d.files.length };
+  } catch (e) { return { error: `KG2B 상세 ${fetchErr(e)}` }; }
+}
 /** 377차(로컬 11/06 kg2b_142990 '8건에 안 들어감'): K-apt 수집(06·10·14·18시)은 남은 시간 안에서만 KG2B 상세를 읽어 밀린 공고가 남음 →
  *  정기 실행(15~30분)마다 5건씩 더 읽음(서울 중계, 20초 안). 시험 서버(SALES_COLLECTORS_TICK=off)는 건너뜀 */
 export async function kg2bDetailTick() {

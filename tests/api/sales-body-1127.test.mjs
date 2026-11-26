@@ -56,6 +56,10 @@ before(async () => {
     const send = (code, text, type = 'text/html; charset=utf-8') => { res.statusCode = code; res.setHeader('content-type', type); res.end(text); };
     if (u.pathname === '/kapt/bid/bidList.do') return send(200, `<html><table>${u.searchParams.get('pageNo') === '1' ? tr(B.good, ['1', 'K-apt', '적격심사', TGOOD, `${plus(11)} 17:00`, '신규공고', '시험스타힐스', `${plus(-1)} 10:25`]) : ''}</table></html>`);
     if (u.pathname === '/kaptbidapi/getPblAncDeSearchV3') return send(200, JSON.stringify({ response: { header: { resultCode: '00', resultMsg: 'NORMAL SERVICE' }, body: { items: [], numOfRows: 100, pageNo: 1, totalCount: 0 } } }), 'application/json');
+    // 로컬 11/27 24번: kg2b_ 줄은 KG2B 상세(공고문 goLoad)를 먼저 읽고 그 공고문으로 본문 판정
+    if (u.pathname === '/kg2b/user/bid_list/KaptBidView') return send(200, `<html><body><table><tr><th>공고번호</th><td>K-2026-1127</td></tr><tr><th>현장설명회 실시유무</th><td>필수</td></tr></table>
+<a href="javascript:goLoad('20261127/','AB12CD.txt','bid','입찰공고문.txt');">입찰공고문.txt</a></body></html>`);
+    if (u.pathname === '/kg2b/common/util/download') { res.statusCode = 200; res.setHeader('content-type', 'application/octet-stream'); res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent('입찰공고문.txt')}`); return res.end(Buffer.from(GOOD)); }
     if (kapt.handle(req, res, body)) return;
     send(404, 'nope');
   }).listen(PORT);
@@ -68,7 +72,8 @@ before(async () => {
   await put(B.guard, '[서울] 시험단지 경비 운영업체 선정', { bid_category: '사업자 - 용역 - 경비' });
   await put(B.build, '[서울] 시험단지 운영업체 사무실 보수공사', { bid_category: '사업자 - 공사 - 기타' });
   await put(B.old, '[경기] 시험단지 공용시설 운영 사업자 선정', {});
-  await put(B.hil, '[인천] 시험단지 커뮤니티 출입 연동 시스템 용역 사업자 선정', { bid_category: '사업자 - 용역 - 지능형홈네트워크' }); // 분류 빈 줄 — 상세에서 분류를 받고(파일 없음) 본문은 '첨부 공고문 없음'
+  await put(B.hil, '[인천] 시험단지 커뮤니티 출입 연동 시스템 용역 사업자 선정', { bid_category: '사업자 - 용역 - 지능형홈네트워크' });
+  await put('kg2b_143707', '[경기] 시험케이지단지 공용시설 운영업체 선정', { bid_category: '사업자 - 용역 - 기타' }); // 분류 빈 줄 — 상세에서 분류를 받고(파일 없음) 본문은 '첨부 공고문 없음'
 });
 after(async () => { srv?.proc.kill(); fake?.close(); await sql?.end(); });
 
@@ -81,7 +86,7 @@ test('순수 함수: 본문 판정·현장설명 필수·서로 다른 값', asy
 
 test('공고문 본문 판정(운영자 [지금 읽기] = 정기 실행과 같은 일): 본문의 주민공동시설·피트니스로 다짐 즉시 검토 · 광고 본문·경비 분류·공사 제목은 그대로', async () => {
   const r = await ctx.owner.ok('POST', '/api/platform/sales-notices', { refit: true, body: true });
-  assert.ok(r.bodyFit.done >= 3, JSON.stringify(r.bodyFit)); assert.equal(r.bodyFit.raised, 2, JSON.stringify(r.bodyFit));
+  assert.ok(r.bodyFit.done >= 3, JSON.stringify(r.bodyFit)); assert.equal(r.bodyFit.raised, 3, JSON.stringify(r.bodyFit));
   const g = await rowOf(B.good);
   assert.equal(g.related, true); assert.equal(g.fit_business, '다짐'); assert.equal(g.classification, '즉시 검토'); assert.ok(g.refound_at, '마감 전 = 다시 찾은 공고');
   assert.match(g.body_fit.why, /^공고문 본문에서 찾음: /); assert.ok(g.body_fit.words.some((w) => /주민공동|피트니스|독서실|커뮤니티/.test(w)), JSON.stringify(g.body_fit));
@@ -100,6 +105,8 @@ test('공고문 본문 판정(운영자 [지금 읽기] = 정기 실행과 같�
   assert.ok(card, '입찰 목록에 보임'); assert.match(card.bodyWhy, /^공고문 본문에서 찾음/); assert.equal(card.briefing?.required, true); assert.equal(card.docChecks.length, 2);
   assert.equal(card.briefing?.at, `${plus(5)}T09:00:00+09:00`); assert.equal(card.briefing?.place, '관리사무소');
   // 23번 ③: 하이링크도 본문으로 — 제목은 '시스템' 때문에 다짐에서 빠지고 하이링크 낱말이 없던 공고
+  const k = await rowOf('kg2b_143707'); assert.equal(k.related, true, JSON.stringify(k.body_fit)); assert.equal(k.fit_business, '다짐'); assert.ok(k.kg2b_read_at, 'KG2B 상세를 읽음'); assert.equal(k.kg2b_briefing_kind, '필수');
+  assert.equal(k.attachment_urls?.[0]?.name, '입찰공고문.txt'); assert.equal(k.body_fit.file, '입찰공고문.txt');
   const h = await rowOf(B.hil); assert.equal(h.related, true, JSON.stringify(h.body_fit)); assert.equal(h.fit_business, '하이링크'); assert.match(h.body_fit.why, /예약·결제시스템|키오스크/);
   // 한 공고에 한 번 — 다시 돌려도 받지 않음
   const n = fileCalls(B.good); await ctx.owner.ok('POST', '/api/platform/sales-notices', { refit: true, body: true }); assert.equal(fileCalls(B.good), n);
@@ -112,5 +119,5 @@ test('다음 수집·다시 판정이 본문으로 올린 공고를 되돌리지
   assert.equal((await rowOf(B.good)).related, true, '다시 판정이 되돌리지 않음');
   const c = (await ctx.owner.ok('GET', '/api/platform/sales-notices?bodyfit=count')).bodyFit;
   const today = c.find((x) => x.day === kst(new Date()));
-  assert.ok(today && today.titles >= 4 && today.raised === 2, JSON.stringify(c));
+  assert.ok(today && today.titles >= 5 && today.raised === 3, JSON.stringify(c));
 });

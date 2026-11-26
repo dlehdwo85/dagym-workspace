@@ -185,6 +185,12 @@ export async function readBodyFit(id: string, opt: { fetchImpl?: typeof fetch } 
     } catch { /* 분류 없이 본문으로 */ }
   }
   if (bodyCategoryOk(cat, String(row.title ?? '')) === false) return save({ at: t, fit: null, words: [], direct: false, why: null, quote: null, file: null, skip: `분류 '${catPart(String(cat))}' — 시설 서비스` }, extra);
+  // 로컬 11/27 24번: kg2b_ 줄(공고문이 KG2B 에만)은 KG2B 상세를 먼저 읽어 첨부를 채움
+  const pre: string[] = [];
+  if (/^kg2b_\d+$/.test(String(row.source_external_id ?? '')) && !(Array.isArray(row.attachment_urls) && row.attachment_urls.length)) {
+    const k = await (await import('./collectors/kg2b')).readKg2bOne(id, row, opt.fetchImpl ?? fetch);
+    if ('error' in k) pre.push(k.error); else if (!k.files) pre.push('KG2B 상세에 공고문 없음');
+  }
   const { noticeFiles } = await import('./autoAttach'); const { fetchFile } = await import('./files'); const { rankFiles } = await import('./eligibility');
   const src = await noticeFiles(id).catch(() => null);
   const files = rankFiles(src?.files ?? []).slice(0, 2);
@@ -193,7 +199,7 @@ export async function readBodyFit(id: string, opt: { fetchImpl?: typeof fetch } 
     try { const got = await fetchFile(f.url, f.name, { bid: src?.bid ?? null }); const x = await extractTextResult(got.data, got.fileName, got.mime); if (x.text) { text = x.text; file = got.fileName; break; } errs.push(x.error ?? '글자 없음'); }
     catch (e) { errs.push(String((e as Error)?.message ?? e).slice(0, 40)); }
   }
-  if (!text) return save({ at: t, fit: null, words: [], direct: false, why: null, quote: null, file: null, error: files.length ? errs.join(' · ').slice(0, 120) : '첨부 공고문 없음', tries: (prev?.tries ?? 0) + 1 }, extra);
+  if (!text) return save({ at: t, fit: null, words: [], direct: false, why: null, quote: null, file: null, error: [...pre, ...(files.length ? errs : ['첨부 공고문 없음'])].join(' · ').slice(0, 120), tries: (prev?.tries ?? 0) + 1 }, extra);
   const j = bodyJudge(String(row.title ?? ''), cat, text);
   const bf: BodyFit = 'skip' in j ? { at: t, fit: null, words: [], direct: false, why: null, quote: null, file, skip: j.skip } : { at: t, ...j, file };
   const doc = docPatch(text);
