@@ -1,6 +1,6 @@
 # 워크인 Meta 앱 — 이용 사례·권한·심사 시연 시나리오 (2026-10-19 초안)
 
-> 앱 소유: 김소담 부사장 계정(안내서 `docs/handoff/META_APP_SETUP_GUIDE.md`). 앱 ID 가 나오면 Vercel 에 `META_APP_ID`·`META_APP_SECRET` 를 넣는다.
+> 앱 소유: 부사장 계정(안내서 `docs/handoff/META_APP_SETUP_GUIDE.md`). 앱 ID 가 나오면 Vercel 에 `META_APP_ID`·`META_APP_SECRET` 를 넣는다.
 > 대표 방향: '경쟁사보다 높은 수준으로'. 기능 설계는 `MKT_PUBLISHING_DESIGN.md` 6절과 `AI_ADS_OPERATIONS_DESIGN.md` 6절에 있다.
 > **권한 이름·심사 요건·정책 수치는 기억과 조사를 바탕으로 정리했다. 제출 직전 Meta 공식 문서(앱 대시보드의 이용 사례 화면·권한 참고 문서)로 다시 확인한다.** 확실하지 않은 칸은 '확인 필요'로 표시했다.
 > 비밀값·검수자 로그인 정보는 이 문서에 쓰지 않는다. 검수자 정보는 심사 양식에만 넣는다.

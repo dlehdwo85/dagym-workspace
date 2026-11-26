@@ -206,7 +206,7 @@ export async function updateUser(actor: SessionUser, id: string, p: z.infer<type
       await tx`delete from memberships where user_id = ${id}`;
       for (const o of new Set(p.orgUnitIds)) await tx`insert into memberships (user_id, org_unit_id) values (${id}, ${o})`;
     }
-    // #681(로컬 10/26 15:33 김민수 사례): 소속에서 빠지면 그곳의 장이 비는데 알 길이 없었음 → 새 장을 같이 정하거나, 빈 곳을 돌려줘 화면이 알림
+    // #681(로컬 10/26 15:33 본부장 사례): 소속에서 빠지면 그곳의 장이 비는데 알 길이 없었음 → 새 장을 같이 정하거나, 빈 곳을 돌려줘 화면이 알림
     const ledBefore = p.teamIds ? (await tx<{ team_id: string }[]>`select team_id from team_members where user_id = ${id} and is_lead`).map((r) => r.team_id) : [];
     if (p.teamIds) await (await import('./teams')).setUserTeams(tx, tenantOf(actor), id, p.teamIds, p.primaryTeamId ?? null);
     for (const nl of p.newLeads ?? []) {

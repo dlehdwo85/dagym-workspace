@@ -65,7 +65,7 @@ export async function aiLimitsView(tenant: string, sql: Sql = db(), full = true)
   const poolPct = limits.aiRequests !== null && limits.aiRequests > 0 ? Math.max(Math.round((usage.aiRequests / limits.aiRequests) * 100), b.pct ?? 0) : b.pct;
   const w = of('work'), s = of('sales'), k = of('marketing');
   const ml = M.limitsOf(ms);
-  const creditsLeft = ml.monthlyCredits === null ? null : Math.max(0, Math.round((ml.monthlyCredits - mu.monthCredits) * 10) / 10);
+  const creditsLeft = M.planUndecided(ms) ? 0 /* F4: 요금제 미정 = 사진·영상 생성 없음 */ : ml.monthlyCredits === null ? null : Math.max(0, Math.round((ml.monthlyCredits - mu.monthCredits) * 10) / 10);
   const mktUsdLimit = ml.aiMonthlyUsd ?? null;
   const mktUsdLeft = mktUsdLimit === null ? poolUsdLeft : Math.max(0, r2(mktUsdLimit - k.usd));
   const rows: AiLimitRow[] = [
@@ -80,13 +80,13 @@ export async function aiLimitsView(tenant: string, sql: Sql = db(), full = true)
     { key: 'marketing', name: AI_NAME.marketing, shared: mktUsdLimit === null, planLabel: ms.plan?.label ?? null,
       limit: { requests: null, usd: mktUsdLimit, credits: ml.monthlyCredits, videos: ml.videoMonthly }, used: { requests: k.requests, usd: r2(k.usd), credits: mu.monthCredits, videos: mu.monthVideos },
       left: { requests: null, usd: mktUsdLeft, credits: creditsLeft, videos: ml.videoMonthly === null ? null : Math.max(0, ml.videoMonthly - mu.monthVideos) },
-      pct: ml.monthlyCredits ? Math.min(999, Math.round((mu.monthCredits / ml.monthlyCredits) * 100)) : mktUsdLimit ? Math.round((k.usd / mktUsdLimit) * 100) : null,
+      pct: ml.monthlyCredits ? Math.min(999, Math.round((mu.monthCredits / ml.monthlyCredits) * 100)) : mktUsdLimit ? Math.round((k.usd / mktUsdLimit) * 100) : M.planUndecided(ms) ? poolPct : null, // F4: 요금제 미정 = 회사 AI 예산(글)
       feel: [
         { label: '시안 이미지', n: creditsLeft === null ? null : Math.floor(creditsLeft / cost.imageCredits), unit: '장', per: `1장 ${cost.imageCredits}크레딧` },
         { label: '생성 영상', n: creditsLeft === null ? null : Math.floor(creditsLeft / cost.videoCredits), unit: '편', per: `1편 ${cost.videoCredits}크레딧` },
         ...feelOf(mktUsdLeft, [['원고·캡션', rates.marketing_produce, '건']], rate),
       ],
-      note: ms.plan_code ? `마케팅 요금제 ${ms.plan?.label ?? ms.plan_code}: 월 크레딧·마케팅 AI 한도·생성 영상 편수` : '마케팅 요금제를 고르면 크레딧 한도가 생깁니다(지금은 회사 AI 한도만)' },
+      note: ms.plan_code ? `마케팅 요금제 ${ms.plan?.label ?? ms.plan_code}: 월 크레딧·마케팅 AI 한도·생성 영상 편수` : M.planUndecided(ms) ? '요금제 미정 — 글은 회사 AI 예산 안에서, 사진·영상 생성은 요금제를 정한 뒤' : '마케팅 요금제를 고르면 크레딧 한도가 생깁니다(지금은 회사 AI 한도만)' },
   ];
   for (const r of rows) { // 체감 단위 환산은 서버에서(화면은 숫자만 보여 줌)
     const f = r.feel[0]; const left = r.left.usd, used = r.used.usd ?? 0;

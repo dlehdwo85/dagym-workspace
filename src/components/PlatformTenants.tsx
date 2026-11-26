@@ -401,6 +401,7 @@ const GRANT_LABEL: Record<string, string> = { plan: '결제로 열림', operator
 function TenantOps({ id, t, ownerInvite, consults, spaceBilling, run }: { id: string; t: any; ownerInvite: { pending: boolean; expiresAt?: string | null; expired?: boolean }; consults?: any[]; spaceBilling?: SpaceBilling; run: (fn: () => Promise<any>, ok: string) => Promise<any> }) {
   const [memo, setMemo] = useState<string>(t.platform_memo ?? '');
   const [showAudit, setShowAudit] = useState(false);
+  const [mktOpening, setMktOpening] = useState(false); const [mktUse, setMktUse] = useState('basic'); // 상업화 마감 F4: 마케팅을 열 때 한도 요금제(기본 베이직)
   const audit = useApi<{ logs: any[] }>(showAudit ? `/api/platform/tenants/${id}/audit` : null, [showAudit]);
   const spaces: string[] = (t.spaces ?? []).filter((x: string) => x !== 'work');
   const [link, setLink] = useState<string | null>(null);
@@ -415,9 +416,25 @@ function TenantOps({ id, t, ownerInvite, consults, spaceBilling, run }: { id: st
       <div className="flex flex-wrap items-center gap-3 text-xs" data-testid="company-spaces">
         <span className="text-ink-2">공간: 업무(항상)</span>
         {(['sales', 'marketing'] as const).map((sp) => <label key={sp} className="flex items-center gap-1"><input type="checkbox" checked={spaces.includes(sp)} data-testid={`company-space-${sp}`}
-          onChange={(e) => run(() => api(`/api/platform/tenants/${id}/spaces`, { method: 'PUT', body: { spaces: e.target.checked ? [...spaces, sp] : spaces.filter((x) => x !== sp) } }), `${SPACE_LABEL[sp]} 공간을 ${e.target.checked ? '켰' : '껐'}습니다`)} />{SPACE_LABEL[sp]}
-          {spaces.includes(sp) && spaceBilling?.grants?.[sp] && <span className="text-ink-3" data-testid={`company-space-grant-${sp}`}>({GRANT_LABEL[spaceBilling.grants[sp]] ?? spaceBilling.grants[sp]})</span>}</label>)}
+          onChange={(e) => { if (sp === 'marketing' && e.target.checked && spaceBilling && !spaceBilling.mktPlanCode && id !== 'default') { setMktOpening(true); return; }
+            run(() => api(`/api/platform/tenants/${id}/spaces`, { method: 'PUT', body: { spaces: e.target.checked ? [...spaces, sp] : spaces.filter((x) => x !== sp) } }), `${SPACE_LABEL[sp]} 공간을 ${e.target.checked ? '켰' : '껐'}습니다`); }} />{SPACE_LABEL[sp]}
+          {spaces.includes(sp) && spaceBilling?.grants?.[sp] && <span className="text-ink-3" data-testid={`company-space-grant-${sp}`}>({GRANT_LABEL[spaceBilling.grants[sp]] ?? spaceBilling.grants[sp]})</span>}
+          {sp === 'marketing' && spaces.includes(sp) && spaceBilling?.mktPlanCode && <span className="text-ink-3" data-testid="company-mkt-use">· {spaceBilling.mktPlans.find((p) => p.code === spaceBilling.mktPlanCode)?.label ?? spaceBilling.mktPlanCode} 한도</span>}</label>)}
       </div>
+      {spaceBilling && id !== 'default' && (mktOpening || (spaces.includes('marketing') && !spaceBilling.mktPlanCode)) && ( // 상업화 마감 F4: 요금제 미정이면 고객 화면에 '제한 없음'이 보이고 사진·영상 생성 한도가 없었음
+        <div className="flex flex-wrap items-center gap-2 rounded-input border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-xs text-amber-900" data-testid="company-mkt-plan-pick">
+          <span>{mktOpening ? '마케팅을 열면서 한도 요금제를 정합니다(결제에 합치는 것은 아래에서 따로)' : '마케팅 요금제 미정 — 글은 회사 AI 예산 안에서, 사진·영상 생성은 요금제를 정한 뒤'}</span>
+          <select className={cx(inputCls, 'h-8 w-auto py-0 text-xs')} aria-label="마케팅 한도 요금제" data-testid="company-mkt-plan-use" value={mktUse} onChange={(e) => setMktUse(e.target.value)}>
+            {spaceBilling.mktPlans.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
+          </select>
+          <Button size="sm" data-testid="company-mkt-open" onClick={async () => {
+            const opening = !spaces.includes('marketing');
+            await run(() => api(`/api/platform/tenants/${id}/spaces`, { method: 'PUT', body: { spaces: opening ? [...spaces, 'marketing'] : spaces, mktPlan: mktUse } }), opening ? '마케팅 공간을 열고 한도 요금제를 정했습니다' : '마케팅 한도 요금제를 정했습니다');
+            setMktOpening(false);
+          }}>{spaces.includes('marketing') ? '요금제 정하기' : '마케팅 열기'}</Button>
+          {mktOpening && <Button size="sm" variant="ghost" data-testid="company-mkt-open-cancel" onClick={() => setMktOpening(false)}>취소</Button>}
+        </div>
+      )}
       {spaceBilling && ( // 상용화 A4: 업무 + 영업 결제는 영업을 자동으로 엶(해지·30일 미납이면 잠금, 자료는 그대로) · 마케팅은 상담 뒤 여기서 요금제를 정하면 결제 금액에 합침
         <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="company-mkt-billing">
           <span className="text-ink-2">마케팅 요금제(결제에 합침)</span>

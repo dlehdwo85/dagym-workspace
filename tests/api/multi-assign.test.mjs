@@ -1,4 +1,4 @@
-// 로컬 10/21 22:00 ① (#414): 부서장(김민수 역할 = dept_lead) 계정이 제목만 넣고 '3명에게 각각 만들기'(마감 11/16) → 각자 1건씩 — 장애(DB 쿼터) 시각과 겹쳤는지 확인용 재현
+// 로컬 10/21 22:00 ① (#414): 부서장(본부장 역할 = dept_lead) 계정이 제목만 넣고 '3명에게 각각 만들기'(마감 11/16) → 각자 1건씩 — 장애(DB 쿼터) 시각과 겹쳤는지 확인용 재현
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { bootstrap, resetDb, startServer, testDb, Client } from '../helpers.mjs';
@@ -22,7 +22,7 @@ test('부서장: 제목만 + 3명 각각 + 마감 11/16 → 3건(묶음 id 같�
   assert.deepEqual(rows.map((x) => x.assignee_id).sort(), [ctx.staffA.id, ctx.staffB.id, ctx.managerA.id].sort());
   assert.ok(rows.every((x) => x.d === '2026-11-16' && x.requested_by === me && x.batch_id === r.batchId));
   assert.equal((await sql`select count(*)::int n from notifications where type = 'task_assigned' and entity_id = any(${r.ids}::uuid[])`)[0].n, 3, '담당자 3명 배정 알림');
-  // 본인을 포함한 3명(김민수 사례: 부서장이 자기도 넣음)
+  // 본인을 포함한 3명(본부장 사례: 부서장이 자기도 넣음)
   const r2 = await lead.ok('POST', '/api/tasks', { title: '본인 포함', assigneeId: me, assigneeIds: [me, ctx.staffA.id, ctx.staffB.id], requestedById: me, dueDate: '2026-11-16', approvalRequired: false });
   assert.equal(r2.ids.length, 3);
   // 직원(staff)도 서로 배정 가능(V3)

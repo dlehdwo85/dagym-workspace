@@ -290,6 +290,33 @@ await step('회사 초대 링크 화면 — 왼쪽 판 회사 계정 문구(#117
     ok(!/14일 무료 체험으로 시작/.test(body), "합류 신청 화면에 '14일 무료 체험으로 시작'이 보임");
   } finally { if (made) await api('POST', '/api/admin/join', { action: 'disable' }); }
 });
+await step('결재선 없는 회사 — [대표 1단계 결재선 바로 만들기] → 결재 올리는 창 미리 보기(상업화 F1 — 만든 결재선은 바로 지움)', async () => {
+  const r = await raw('GET', '/api/approval-lines');
+  if (r.status === 403 || r.status === 404) { console.log('  (검수 계정이 대표·관리자가 아님 — 건너뜀)'); return; }
+  const before = (await r.json()).lines ?? [];
+  let made = null;
+  try {
+    if (!before.length) {
+      const pv0 = await api('GET', '/api/approvals/line-preview?kind=general');
+      ok(!pv0.lineId, '결재선이 없는데 미리 보기에 결재선이 잡힘');
+      await visit('/admin/approval-settings', 'tpl-one-empty');
+      await page.getByTestId('tpl-one-empty').click();
+      for (let i = 0; i < 20 && !made; i++) { await sleep(500); made = ((await api('GET', '/api/approval-lines')).lines ?? [])[0] ?? null; }
+    } else {
+      console.log(`  (이미 결재선 ${before.length}개 — 빈 화면 대신 예시 [1단계 · 대표만] 만들기만 확인)`);
+      const m = await api('POST', '/api/approval-lines/templates', { preset: 'one' });
+      made = ((await api('GET', '/api/approval-lines')).lines ?? []).find((l) => l.id === m.id) ?? null;
+    }
+    ok(made, '결재선이 만들어지지 않음');
+    ok(/^1단계\(/.test(made.name) && made.steps?.length === 1 && made.steps[0].role === 'owner', `만든 결재선 모양: ${made.steps?.length}단계`);
+    if (!before.length) {
+      const pv = await api('GET', '/api/approvals/line-preview?kind=general');
+      ok(pv.lineId === made.id, '결재 올리는 창 미리 보기에 새 결재선이 안 잡힘(관리자 계정 기준 — 직원 계정은 CI 비밀값에 없음)');
+      console.log(`  결재선 0개 → [대표 1단계] → 미리 보기 ${(pv.steps ?? pv.chain ?? []).length || 1}단계 확인`);
+    }
+  } finally { if (made?.id) await api('DELETE', `/api/approval-lines/${made.id}`); }
+  ok(((await api('GET', '/api/approval-lines')).lines ?? []).length === before.length, '되돌린 뒤 결재선 수가 처음과 다름');
+});
 await step('검수 회사 입찰 검색어 → 목록·즉시 검토·영업 포인트(#1181 — 공고 0건이면 건너뜀)', async () => {
   const o = await raw('GET', '/api/sales/options');
   if (o.status !== 200) { console.log(`  (영업 공간이 열려 있지 않음 ${o.status} — 건너뜀)`); return; }

@@ -227,6 +227,7 @@ export async function actBrief(u: SessionUser, id: string, i: z.infer<typeof bri
 /** 생성: 콘텐츠(초안) + (연동 켜짐) Higgsfield → 자료실 → 새 버전 → 승인 대기 / (연동 전) 제작 요청 카드(프롬프트·참고 사진 포함) → 로컬 도우미가 [제작 완료]로 붙이면 승인 대기 */
 async function generateBrief(u: SessionUser, b: any) {
   const sql = db(); const t = tenantOf(u); const spec = KIND_SPEC[b.kind]; const p = b.prompt ?? {};
+  { const M = await import('./mktAuto'); if (M.planUndecided(await M.settingsOf(t)) && (await hfSettings()).enabled) throw badRequest(M.UNDECIDED_GEN); } // 상업화 마감 F4
   const [brand] = b.brand_id ? await sql<any[]>`select name, test_mode from mkt_brands where id = ${b.brand_id}` : [];
   const isTest = !!brand?.test_mode;
   const title = `${isTest ? '[시험] ' : ''}${spec.label} · ${String(b.message).slice(0, 60)}`;

@@ -1,5 +1,5 @@
 /**
- * V8 4번: "내일 3시 김민수 견적서 보내기" → 제목·마감일·시각·담당자.
+ * V8 4번: "내일 3시 홍길동 견적서 보내기" → 제목·마감일·시각·담당자.
  * 음성 받아쓰기와 키보드 입력 모두에 쓴다. 화면에서는 "인식한 내용 적용" 으로 확인 후 반영한다.
  */
 export type Parsed = { title: string; dueDate: string | null; dueTime: string | null; assigneeId: string | null; assigneeName: string | null; matched: string[];
@@ -63,12 +63,12 @@ export function parseTaskText(text: string, people: { id: string; name: string; 
   let assignee: { id: string; name: string } | null = null;
   for (const p of [...people].sort((a, b) => b.name.length - a.name.length)) {
     const esc = p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // "김민수 본부장한테" — 이름 뒤 직책까지 함께 뺀다
+    // "홍길동 본부장한테" — 이름 뒤 직책까지 함께 뺀다
     const ttl = [p.title, p.title_short].filter(Boolean).map((x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
     const re = new RegExp(`\\s@?${esc}(님|씨)?${ttl ? `(\\s*(${ttl}))?(님)?` : ''}(에게|한테|께|이|가)?\\s`);
     if (re.test(t)) { cut(re); assignee = p; break; }
   }
-  // 대표 실기기(10/16): "김민수 본부장한테 업무 배정해 줘"를 인식기가 "나 지금 본부장한테"로 들음 → 이름이 안 맞으면 직책으로(그 직책이 1명일 때만)
+  // 대표 실기기(10/16): "홍길동 본부장한테 업무 배정해 줘"를 인식기가 "나 지금 본부장한테"로 들음 → 이름이 안 맞으면 직책으로(그 직책이 1명일 때만)
   if (!assignee) {
     for (const tm of t.matchAll(/\s(\S+?)(님)?(에게|한테|께)(?=\s)/g)) {
       const said = tm[1];

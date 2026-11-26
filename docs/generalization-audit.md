@@ -32,8 +32,8 @@ S = 편향 이전에 오류·누출이라 범용화와 별개로 고쳐야 하�
 | S-04 ✔ | src/lib/calColors.ts:32,61-65 | `app_settings 'cal_colors'` 전역 한 줄. 아무 회사 대표나 '모두의 기본값'으로 덮어씀 | A | 한 회사 대표가 모든 회사의 캘린더 기본 색을 바꿈 | 회사별 설정으로 | 다짐 기본색 보존 | 하 | P2 |
 | S-05 ✔ | db/migrations/010_p2_reports_holidays.sql:10-16 · api/holidays/[date]/route.ts:15,24 · attendance.ts:97,109 · briefing.ts:40 · availability.ts:57 | holidays 기본키가 date, 저장·조회에 회사 조건 없음(tenant 칸은 037 에서 추가만 됨) | A | 다짐이 넣은 휴무일이 모든 회사 근태·아침 브리핑에 적용. 회사별 휴무일을 넣을 수 없음(S-02 로 화면도 막힘) | (회사, 날짜) 키 + 공용(법정 공휴일) 분리 | 다짐 휴무일 옮김 필요 | 중 | P2 |
 | S-06 | src/lib/types.ts:42 · db/migrations/037_tenancy.sql:9-23 · access.ts:256 · admin.ts:237 · automation.ts:77 | tenant 칸 기본값 'default', tenant 없이 넣는 insert | E | 신규 회사의 개인 캘린더·자동화 규칙 행이 다짐 회사(default)로 저장됨. 조회가 소유자·조직 기준이라 지금 보이는 문제는 작을 것(추정) | 기본값 없애고 insert 에 회사 명시 | 있음(기존 행 정리) | 중 | P3 |
-| G-01 | src/components/QuickAddTask.tsx:238 | placeholder "…김민수 본부장한테 푸르지오 비교 파일 검수받고…" | C | 직원 실명·직급·아파트 브랜드가 첫 업무 입력칸에 보임 | "금요일까지 홍길동에게 견적서 검토 요청" 같은 공통 예시 | 없음 | 하 | P1 |
-| G-02 | src/components/VoiceAddTask.tsx:13 | 음성 등록 예시 "금요일까지 김민수 두정점 원판 수량 파악, 중요" | C | 실명·다짐 지점명·헬스 기구 | 공통 예시(업종 템플릿에서 가져와도 됨) | 없음 | 하 | P1 |
+| G-01 | src/components/QuickAddTask.tsx:238 | placeholder "…본부장한테 푸르지오 비교 파일 검수받고…" | C | 직원 실명·직급·아파트 브랜드가 첫 업무 입력칸에 보임 | "금요일까지 홍길동에게 견적서 검토 요청" 같은 공통 예시 | 없음 | 하 | P1 |
+| G-02 | src/components/VoiceAddTask.tsx:13 | 음성 등록 예시 "금요일까지 홍길동 두정점 원판 수량 파악, 중요" | C | 실명·다짐 지점명·헬스 기구 | 공통 예시(업종 템플릿에서 가져와도 됨) | 없음 | 하 | P1 |
 | G-03 | src/components/TaskAssist.tsx:72 · KakaoSend.tsx:63 · lib/mailbox.ts:836 · contacts/page.tsx:95 | AI 입력 예시 "관리소장님께 회신 써줘", 호칭 예시 "관리소장님", 태그 "고객, 관리소" | B | 관리사무소 소장은 아파트 위탁업 호칭 | "담당자님께", 태그 "고객, 거래처" | 없음 | 하 | P1 |
 | G-04 | src/lib/contacts.ts:14,321 · app/(app)/contacts/page.tsx:17,89,147 | 연락처 칸 이름 '회사·단지' | B | 연락처는 기본 메뉴. '단지'는 아파트 용어 | '회사·지점'(용어 사전: 다짐은 '단지') | 없음(사전으로 유지) | 하 | P1 |
 | G-05 | src/lib/types.ts:17 · pickers.tsx:20 · admin/org/page.tsx:32,43,49 | 조직 유형 `hq:'본사'`, `site:'위탁운영 현장'`, 조직 고르기 "회사명 (본사)", 안내 "브랜드별 지점·위탁운영 현장을 구성합니다" | B | 1인 카페 사장에게 '본사', 학원에 '위탁운영 현장' | '회사'·'지점·사업장', 다짐은 사전으로 기존 표현 | 없음(사전으로 유지) | 중 | P1 |
@@ -51,7 +51,7 @@ S = 편향 이전에 오류·누출이라 범용화와 별개로 고쳐야 하�
 | G-17 | src/lib/insights.ts:150,159 · app/(app)/reports/page.tsx:18-19 · api/reports/route.ts:14 | 사이드바 주간 보고: "다음 월요일에 자동으로 만들어집니다" — 실제 생성은 다짐 회사만 | D | 신규 회사 대표에게 영원히 비어 있는 메뉴, [지금 만들기]는 404 | 회사별로 만들거나 신규 회사에서 숨김 | 없음 | 중 | P1 |
 | G-18 | src/lib/adminPages.ts:14 · contracts.ts:31,35-46 | 사이드바 '전자계약', 기본 서식 근로계약서·비밀유지서약서 | D | 사용자 관리 권한과 묶여 바로 보임. 한국 표준근로계약서 항목 고정 | 별도 메뉴 키와 스위치 | 없음 | 하 | P1 |
 | G-19 | src/components/AppShell.tsx:58,60 · approvalForms.ts:20,72 | 기본 메뉴 '내 주간 보고'·'결재', 결재 양식 6종(휴가·지출결의·품의·출장·구매·경조사) | D | 품의·결재 문화가 기본. 1~3인 가게에는 과하고, S-02 로 결재선도 못 만듦 | 회사 규모·업종별 기본 메뉴 | 없음 | 중 | P1 |
-| G-20 | src/app/(app)/help/page.tsx:10 | 도움말 "내일 3시 김민수 견적서" | C | 직원 실명 | "홍길동" | 없음 | 하 | P2 |
+| G-20 | src/app/(app)/help/page.tsx:10 | 도움말 "내일 3시 홍길동 견적서" | C | 직원 실명 | "홍길동" | 없음 | 하 | P2 |
 | G-21 | src/components/TaskViews.tsx:1384-1391 · TaskDetail.tsx:637 · sales/BidInfoBox.tsx:27 | 업무 줄 칩 '현설 11/9 11시 필수'·'입찰 마감', 고정 칸 '세대수' | B | 입찰 업무에만 나옴. '현설'은 업계 약어(대표 11/07 요청 표기) | 공통 표현 '현장설명회', 다짐은 사전으로 '현설' | 없음(사전으로 유지) | 하 | P2 |
 | G-22 | src/lib/sales/bidTasks.ts:124,178,190,205 · autoTasks.ts:78 | 업무·일정 제목 머리말 [입찰]·[영업] | A | 영업 공간을 켠 회사만 해당. 머리말이 코드에 고정 | 회사 설정 | 없음 | 중 | P2 |
 | G-23 | src/app/r/[token]/page.tsx:44 · forms.ts:66-69 | QR 신고 공개 화면 머리 `info?.brand ?? '다짐 · 하이링크'` | A | 브랜드가 없는 회사의 공개 신고 화면에 다짐 이름 | 회사 이름으로 | 없음 | 하 | P2 |

@@ -40,7 +40,7 @@ export async function photos213({ owner: pc, browser, devices, ctx, sql, BASE, S
   await owner.goto(`${BASE}/tasks/${t.id}?full=1`);
   await owner.getByTestId('attachments').waitFor();
   assert.equal(await owner.getByTestId('ios-pick-hint').count(), 0, '안드로이드는 아이폰 안내 없음');
-  // 248차 #780(김민수 본부장 아이폰 50장): 사진 고르기 칸은 HEIC 를 글자 그대로 넣은 명시 목록(와일드카드면 아이폰이 [추가] 뒤 한 장씩 변환) · 영상은 따로
+  // 248차 #780(본부장 아이폰 50장): 사진 고르기 칸은 HEIC 를 글자 그대로 넣은 명시 목록(와일드카드면 아이폰이 [추가] 뒤 한 장씩 변환) · 영상은 따로
   assert.equal(await owner.getByTestId('album-input').getAttribute('accept'), PHOTO);
   assert.equal(await owner.getByTestId('video-album-input').getAttribute('accept'), 'video/*');
   chooser = owner.waitForEvent('filechooser');

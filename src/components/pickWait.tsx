@@ -6,7 +6,7 @@ import { api } from './client';
 
 const MAX_WAIT_MS = 20 * 60_000;
 
-/** 248차 #780(대표 '김민수 본부장 50장 사진 업로드 불가 — 원인 분석하고 해결'): 사진 고르기 칸 accept 를 'image/*' 대신 명시 목록으로.
+/** 248차 #780(대표 '본부장 50장 사진 업로드 불가 — 원인 분석하고 해결'): 사진 고르기 칸 accept 를 'image/*' 대신 명시 목록으로.
  *  아이폰 웹킷은 accept 가 와일드카드면 HEIC 를 '목록에 없음'으로 보고 [추가] 뒤 사진마다 JPEG 로 바꿔 넘김(장수에 비례, 그동안 아무 표시 없음 — WebKit 267277·303803).
  *  HEIC 를 글자 그대로 넣으면 바꾸지 않고 바로 넘김 → 웹에서 한 장씩 줄여 JPEG 로 올림(shrinkImage). 영상은 따로 고르기(영상 변환에 사진이 묶이지 않게) */
 export const PHOTO_ACCEPT = 'image/jpeg,image/heic,image/heif,image/png,image/webp,image/gif';

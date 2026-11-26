@@ -308,6 +308,8 @@ export async function createTenantByPlatform(u: SessionUser, i: z.infer<typeof n
       contact_name = ${i.contactName?.trim() || null}, contact_phone = ${i.contactPhone?.trim() || null}, contact_title = ${i.contactTitle?.trim() || null}, segment = ${i.segment ?? null}, source = ${i.source?.trim() || null} where id = ${tenant}`; // #656
     // 상용화 A4: 운영자가 만들며 켠 영업·마케팅은 '운영자가 연 공간'(결제와 무관)
     await tx`update tenants set space_grants = coalesce((select jsonb_object_agg(x, 'operator') from unnest(spaces) x where x in ('sales', 'marketing')), '{}'::jsonb) where id = ${tenant}`;
+    // 상업화 마감 F4: 마케팅을 켜고 만든 회사는 한도 요금제 베이직(결제에 합치는 것은 회사 상세에서 따로)
+    if (i.spaces.includes('marketing')) await tx`insert into mkt_settings (tenant, plan_code, updated_by) values (${tenant}, 'basic', ${u.id}) on conflict (tenant) do update set plan_code = coalesce(mkt_settings.plan_code, excluded.plan_code)`;
     if (plan) await tx`update tenant_subscriptions set plan_code = ${plan}, status = 'active', trial_ends_at = null, period_end = null where tenant = ${tenant}`;
     else if (i.trialDays) await tx`update tenant_subscriptions set trial_ends_at = now() + ${i.trialDays} * interval '1 day', period_end = (now() + ${i.trialDays} * interval '1 day')::date where tenant = ${tenant}`;
     if (i.segment === 'partner') await (await import('./plans')).applyPartnerPreset(tenant, tx); // #667 AI 월 5,000원·마케팅 크레딧 0
@@ -382,7 +384,8 @@ export async function reinviteOwner(u: SessionUser, tenant: string, ip: string |
   const m = await tryMail(ow.email, inviteMail(t.name, ow.name, `${appUrl()}/invite/${token}`));
   return { ok: true, mail: m, inviteLink: `/invite/${token}` };
 }
-export const tenantSpacesInput = z.object({ spaces: z.array(z.enum(['sales', 'marketing'])).max(2) });
+export const tenantSpacesInput = z.object({ spaces: z.array(z.enum(['sales', 'marketing'])).max(2),
+  /** 상업화 마감 F4: 마케팅을 열 때(또는 요금제 미정인 열린 마케팅에) 쓸 한도 요금제 — 비우면 베이직. 결제에 합치는 것은 따로(mkt-billing) */ mktPlan: z.enum(['basic', 'standard', 'pro']).optional() });
 /** 고객사 공간(영업·마케팅) 켜기/끄기 — 업무 공간은 항상 */
 export async function setTenantSpacesByPlatform(u: SessionUser, tenant: string, i: z.infer<typeof tenantSpacesInput>, ip: string | null) {
   requirePlatform(u);
@@ -390,10 +393,19 @@ export async function setTenantSpacesByPlatform(u: SessionUser, tenant: string, 
   const [prev] = await sql<{ spaces: string[] | null }[]>`select spaces from tenants where id = ${tenant}`;
   const r = await sql`update tenants set spaces = ${['work', ...new Set(i.spaces)]} where id = ${tenant} returning id`;
   if (!r.length) throw notFound('없는 회사입니다');
-  await audit(sql, u.id, 'platform.tenant_spaces', 'tenant', tenant, { spaces: i.spaces, before: prev?.spaces ?? [] }, ip);
+  // 상업화 마감 F4: 운영자가 마케팅을 열면 한도 요금제를 함께 정함(기본 베이직) — 이미 요금제가 있으면 그대로, 우리 회사는 건드리지 않음
+  let mktPlan: string | null = null;
+  if (tenant !== 'default' && i.spaces.includes('marketing') && (i.mktPlan || !(prev?.spaces ?? []).includes('marketing'))) {
+    const [ms] = await sql<{ plan_code: string | null }[]>`select plan_code from mkt_settings where tenant = ${tenant}`;
+    if (!ms?.plan_code) {
+      mktPlan = i.mktPlan ?? 'basic';
+      await sql`insert into mkt_settings (tenant, plan_code, updated_by) values (${tenant}, ${mktPlan}, ${u.id}) on conflict (tenant) do update set plan_code = excluded.plan_code, updated_by = excluded.updated_by, updated_at = now()`;
+    }
+  }
+  await audit(sql, u.id, 'platform.tenant_spaces', 'tenant', tenant, { spaces: i.spaces, before: prev?.spaces ?? [], ...(mktPlan ? { mktPlan } : {}) }, ip);
   // #1139: 상담 신청 처리 표시('열림') + 회사 관리자 알림
   await (await import('./spaceConsult')).afterPlatformSpaces(sql, u, tenant, prev?.spaces ?? [], i.spaces);
-  return { ok: true };
+  return { ok: true, mktPlan };
 }
 export const tenantMemoInput = z.object({ memo: z.string().max(2000) });
 export async function setTenantMemo(u: SessionUser, tenant: string, i: z.infer<typeof tenantMemoInput>, ip: string | null) {

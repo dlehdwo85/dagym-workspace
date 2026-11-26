@@ -14,7 +14,7 @@ async function addUser(key, name, unit) {
 
 before(async () => { await resetDb(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
   await ctx.managerA.client.ok('POST', '/api/projects', { name: '노태2단지', orgUnitId: ctx.siteA });
-  await addUser('kms', '김민수', ctx.siteA); await addUser('kmj', '김민주', ctx.siteA);
+  await addUser('kms', '홍길수', ctx.siteA); await addUser('kmj', '홍길주', ctx.siteA);
 });
 after(async () => { srv?.proc.kill(); fake?.server.close(); await sql?.end(); });
 
@@ -35,14 +35,14 @@ describe('V24 음성 보정', () => {
     assert.equal(r.text, '노태 2단지 점검'); assert.equal(r.fixes.length, 0);
   });
 
-  test('애매하면(김민수·김민주) AI 1번 — 보기 안의 말만 받아들이고 사용량 기록', async () => {
-    await ctl({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ picks: ['김민주'] }) }], stop_reason: 'end_turn' }] });
-    const r = await ctx.owner.ok('POST', '/api/voice/correct', { text: '김민추 내일 보고' });
-    assert.equal(r.text, '김민주 내일 보고'); assert.equal(r.fixes[0].how, 'ai');
+  test('애매하면(홍길수·홍길주) AI 1번 — 보기 안의 말만 받아들이고 사용량 기록', async () => {
+    await ctl({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ picks: ['홍길주'] }) }], stop_reason: 'end_turn' }] });
+    const r = await ctx.owner.ok('POST', '/api/voice/correct', { text: '홍길추 내일 보고' });
+    assert.equal(r.text, '홍길주 내일 보고'); assert.equal(r.fixes[0].how, 'ai');
     assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'voice'`)[0].n, 1);
     await ctl({ anthropicReset: true, anthropicQueue: [{ content: [{ type: 'text', text: JSON.stringify({ picks: ['지어낸이름'] }) }], stop_reason: 'end_turn' }] });
-    const r2 = await ctx.owner.ok('POST', '/api/voice/correct', { text: '김민추 내일 보고' });
-    assert.equal(r2.text, '김민추 내일 보고', '보기에 없는 답은 버림');
+    const r2 = await ctx.owner.ok('POST', '/api/voice/correct', { text: '홍길추 내일 보고' });
+    assert.equal(r2.text, '홍길추 내일 보고', '보기에 없는 답은 버림');
   });
 
   test('학습: 받아들인 짝은 다음부터 바로(이미 고친 말은 그대로), 되돌린 짝은 다시 안 씀, 회사별', async () => {

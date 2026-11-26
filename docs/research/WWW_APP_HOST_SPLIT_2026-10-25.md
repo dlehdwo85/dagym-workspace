@@ -69,7 +69,7 @@
 | 네이버 로그인 | 같은 꼴 | app. 추가 — 네이버는 앱 '검수 요청' 전이면 그냥 추가 | 로컬 |
 | 카카오 로그인 | 같은 꼴 | app. 추가 | 로컬 |
 | 구글 캘린더(`FEATURE_GOOGLE_SYNC`) | `…/api/google/callback` | app. 추가 | 로컬 |
-| Meta(페이스북·인스타) + Threads | `…/api/marketing/publish/callback/meta`·`/threads`, 데이터 삭제 콜백 | '유효한 OAuth 리디렉션 URI' 에 app. 추가 — 앱 검수 중이면 URI 추가는 재심사 대상이 아닌 것으로 알고 있음(**확인 못함**) | 로컬(김소담 부사장 계정) |
+| Meta(페이스북·인스타) + Threads | `…/api/marketing/publish/callback/meta`·`/threads`, 데이터 삭제 콜백 | '유효한 OAuth 리디렉션 URI' 에 app. 추가 — 앱 검수 중이면 URI 추가는 재심사 대상이 아닌 것으로 알고 있음(**확인 못함**) | 로컬(부사장 계정) |
 | YouTube(GCP) | `…/api/marketing/publish/callback/youtube` | app. 추가(검증 제출 전) | 로컬 |
 | 네이버·구글 광고 | `…/api/marketing/ads/callback/{제공자}` | app. 추가 | 로컬 |
 | 나이스페이 | 돌아올 주소는 요청 때 보냄 | 콘솔 변경 없음(**로컬 확인**: 허용 도메인 등록 여부) | 로컬 |

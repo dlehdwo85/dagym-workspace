@@ -9,7 +9,7 @@ const ctl = (b) => fetch(`${FAKE}/__ctl`, { method: 'POST', headers: { 'content-
 const say = (o) => ({ content: [{ type: 'text', text: JSON.stringify(o) }], stop_reason: 'end_turn' });
 const today = seoulToday();
 before(async () => { await resetDb(); fake = await startFakeGoogle(); srv = await startServer(); sql = testDb(); ctx = await bootstrap();
-  const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'kms@dagym.test', name: '김민수', role: 'staff', title: '본부장', orgUnitIds: [ctx.siteA] });
+  const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'kms@dagym.test', name: '홍길동', role: 'staff', title: '본부장', orgUnitIds: [ctx.siteA] });
   await new Client('kms').ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'kms-pass-1234', ai: true });
   kms = (await sql`select id from users where email = 'kms@dagym.test'`)[0].id;
   await sql`update users set title = '본부장' where id = ${kms}`;
@@ -23,12 +23,12 @@ describe('음성 업무 정리', () => {
     const n0 = (await (await fetch(`${FAKE}/__state`)).json()).anthropic.length;
     const r = await ctx.owner.ok('POST', '/api/voice/structure', { text });
     assert.equal(r.ok, true); assert.equal(r.title, '푸르지오 주안 아파트 비교 파일 검수 후 보고');
-    assert.equal(r.assigneeId, kms, '직책 "본부장" 이 한 명 → 김민수'); assert.equal(r.dueDate, addDays(today, 7));
+    assert.equal(r.assigneeId, kms, '직책 "본부장" 이 한 명 → 홍길동'); assert.equal(r.dueDate, addDays(today, 7));
     const sent = JSON.stringify((await (await fetch(`${FAKE}/__state`)).json()).anthropic.slice(n0)[0].body);
-    assert.ok(sent.includes('김민수 (본부장)') && sent.includes('푸르지오'));
+    assert.ok(sent.includes('홍길동 (본부장)') && sent.includes('푸르지오'));
     assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'voice'`)[0].n, 1);
-    await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '견적서 보내기', assignee: '김민수', dueDate: '2020-01-01', dueTime: '25시' })] });
-    const r2 = await ctx.owner.ok('POST', '/api/voice/structure', { text: '김민수 견적서 보내기' });
+    await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '견적서 보내기', assignee: '홍길동', dueDate: '2020-01-01', dueTime: '25시' })] });
+    const r2 = await ctx.owner.ok('POST', '/api/voice/structure', { text: '홍길동 견적서 보내기' });
     assert.equal(r2.assigneeId, kms); assert.equal(r2.dueDate, null, '지난 날짜는 버림'); assert.equal(r2.dueTime, null);
     await ctl({ anthropicReset: true, anthropicQueue: [say({ title: '정리', assignee: '없는사람', dueDate: null, dueTime: null })] });
     assert.equal((await ctx.owner.ok('POST', '/api/voice/structure', { text: '없는사람한테 정리 맡겨' })).assigneeId, null, '목록에 없는 사람은 지어내지 않음');

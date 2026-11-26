@@ -157,7 +157,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
             title: finalTitle(), assigneeId: f.assigneeId || null, requestedById: user.id, dueDate: f.dueDate || (f.rrule ? todayStr() : null), dueTime: f.dueDate && f.dueTime ? f.dueTime : null, projectId: f.projectId || null,
             priority: f.priority ?? 'normal', recurrenceRule: f.rrule ?? null, reminderMinutes: f.remind ?? null,
             ...(f.description ? { description: f.description } : {}), ...(f.checklist?.length ? { checklist: f.checklist } : {}),
-            // 대표 10/22(김민수): 팀 소속 직원은 열릴 때 '내 팀' 태그가 자동으로 붙어(teamId) 여러 명을 골라도 assigneeIds 가 빠지고 주 담당 1건만 생겼다
+            // 대표 10/22(본부장 사례): 팀 소속 직원은 열릴 때 '내 팀' 태그가 자동으로 붙어(teamId) 여러 명을 골라도 assigneeIds 가 빠지고 주 담당 1건만 생겼다
             //   → 여러 명이면 팀은 태그로만 두고 고른 사람 모두에게 각각(팀원 전체 '각각'은 팀 쪽이 정함)
             ...(multiEach ? { assigneeIds: [f.assigneeId, ...(f.more ?? [])].filter(Boolean) } : {}),
             // R-15 6번: "한 업무로 함께" — 첫 사람이 주 담당, 나머지는 협업자
@@ -260,7 +260,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
             <span className="text-[11px] text-rose-800/80">{f.dueDate ? '마감일' : '오늘'} · 1시간</span>
           </div>
         )}
-        {/* V8 9번: "내일 3시 @김민수 !높음 #입찰 매주" 처럼 쓰면 알아봄 → 적용 */}
+        {/* V8 9번: "내일 3시 @홍길동 !높음 #입찰 매주" 처럼 쓰면 알아봄 → 적용 */}
         {parsed && parsed.matched.length > 0 && (
           <div className={cx('-mt-1 inline-flex flex-wrap items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium', noAuto ? 'bg-slate-100 text-ink-3' : 'bg-accent-50 text-accent-700')} data-testid="quick-nl-apply">
             <CalendarCheck className="size-3.5" />{noAuto ? '자동 인식 꺼짐' : '자동 인식'}: {[parsed.dueDate && `${Number(parsed.dueDate.slice(5, 7))}/${Number(parsed.dueDate.slice(8))}`, parsed.dueTime, parsed.assigneeName, parsed.priority && PRIORITY_LABEL[parsed.priority], parsed.projectName && `#${parsed.projectName}`, parsed.rrule && '반복'].filter(Boolean).join(' · ')}

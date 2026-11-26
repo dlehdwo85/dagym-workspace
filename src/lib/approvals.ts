@@ -61,6 +61,20 @@ export async function saveLine(u: SessionUser, id: string | null, i: z.infer<typ
   await audit(sql, u.id, 'approval_line.save', 'approval_line', id, i, ip);
   return { id };
 }
+/** 쓴 적 없는 결재선 지우기(로컬 11/27 — 운영 자동 확인이 만든 [대표 1단계] 결재선을 원상복구). 결재 요청·업무에 쓰인 결재선은 기록이 남도록 끄기만(409) — 팀별 배정은 함께 지워짐 */
+export async function deleteLine(u: SessionUser, id: string, ip: string | null) {
+  await (await import('./menuPerms')).requireMenu(u, 'ops', 'edit');
+  const sql = db(); const t = tenantOf(u);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('결재선이 없습니다');
+  const [l] = await sql<{ id: string; name: string; used: boolean }[]>`select l.id, l.name,
+      (exists (select 1 from approval_requests r where r.line_id = l.id) or exists (select 1 from tasks k where k.approval_line_id = l.id)) as used
+    from approval_lines l where l.id = ${id} and ${lineScope(sql, t)}`;
+  if (!l) throw notFound('결재선이 없습니다');
+  if (l.used) { const { HttpError } = await import('./errors'); throw new HttpError(409, 'line_used', '이미 결재에 쓰인 결재선은 지울 수 없습니다 — 끄기(사용 안 함)로 바꿔 주세요'); }
+  await sql`delete from approval_lines where id = ${id}`;
+  await audit(sql, u.id, 'approval_line.delete', 'approval_line', id, { name: l.name }, ip);
+  return { ok: true };
+}
 
 /** #429 예시 결재선(빈 회사도 바로): 2단계 = 팀장 → 대표, 3단계 = 팀장 → 본부장(상위 부서장) → 대표, 휴가 = 팀장 → (3일 이상이면) 대표 */
 export const TEMPLATES: Record<string, { name: string; steps: Step[] }> = {

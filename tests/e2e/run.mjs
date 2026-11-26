@@ -1303,7 +1303,7 @@ await step('V13 메뉴 권한: 대표만 "메뉴 권한" 탭 → 현장 관리�
   await c.close();
 });
 await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 행에서 요청자·우선순위 변경, 손잡이로 끌어 순서 → 새로고침해도 유지, 정렬·내가 요청한 업무', async () => {
-  const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'minsu@dagym.test', name: '김민수', role: 'staff', orgUnitIds: [ctx.hq] });
+  const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'minsu@dagym.test', name: '홍길동', role: 'staff', orgUnitIds: [ctx.hq] });
   const c = new Client('minsu');
   await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'minsu-pass-1234', ai: true });
   const minsu = (await c.ok('GET', '/api/auth/me')).user.id;
@@ -1313,7 +1313,7 @@ await step('V3 업무 0건인 본사 사람도 묶음·그 사람에게 추가, 
   const groups = owner.getByTestId('task-groups');
   const g = groups.locator(`[data-group="${minsu}"]`);
   await g.getByText('업무 없음').waitFor();
-  const add = g.getByPlaceholder('김민수님에게 업무 추가');
+  const add = g.getByPlaceholder('홍길동님에게 업무 추가');
   await add.fill('신규 회원 이벤트 기획');
   await add.press('Enter');
   await g.getByText('신규 회원 이벤트 기획').waitFor();
@@ -1367,16 +1367,16 @@ await step('V3-6 휴대폰: 다른 사람 묶음에서 입력 후 바깥 누르�
   await m.goto(BASE + '/tasks');
   const [minsu] = await sql`select id from users where email = 'minsu@dagym.test'`;
   const g = m.getByTestId('task-groups').locator(`[data-group="${minsu.id}"]`);
-  const add = g.getByPlaceholder('김민수님에게 업무 추가');
+  const add = g.getByPlaceholder('홍길동님에게 업무 추가');
   await add.fill('두정점 원판 수량 파악');
   await g.getByTestId('inline-save').click(); // 업무 생성은 저장 버튼 (WORKIN_SAVE_AND_SPEED)
-  await m.getByText('김민수님에게 추가됨: 두정점 원판 수량 파악').waitFor();
+  await m.getByText('홍길동님에게 추가됨: 두정점 원판 수량 파악').waitFor();
   await g.getByText('두정점 원판 수량 파악').waitFor();
   await g.locator('[data-fresh="1"]').first().waitFor();
   assert.equal(await add.inputValue(), '', '저장 후 입력 비움');
   const [t] = await sql`select assignee_id from tasks where title = '두정점 원판 수량 파악'`;
   assert.equal(t.assignee_id, minsu.id);
-  // 순서 메뉴: 김민수 묶음 마지막 업무를 맨 위로
+  // 순서 메뉴: 홍길동 묶음 마지막 업무를 맨 위로
   const titles = async () => (await g.locator('[data-row] a[data-open-task]').allTextContents()).map((x) => x.trim());
   const before = await titles();
   assert.ok(before.length >= 2);
@@ -1435,7 +1435,7 @@ await step('V4 캘린더: 휴대폰 빈 칸 한 번 탭 → 빠른 등록 시트
   assert.equal(ev.s, `${d} 14:00`);
   const cal = (await ctx.owner.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
   await ctx.owner.ok('POST', '/api/events', { calendarId: cal, title: 'V4 비밀 일정', start: `${d}T16:00:00+09:00`, end: `${d}T17:00:00+09:00`, isPrivate: true });
-  // 본사 동료(김민수) 화면
+  // 본사 동료(홍길동) 화면
   const mctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const mp = await login(mctx, 'minsu@dagym.test', 'minsu-pass-1234');
   await mp.goto(`${BASE}/calendar?date=${d}`);

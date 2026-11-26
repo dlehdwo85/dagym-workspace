@@ -27,6 +27,7 @@ const TERMINAL = new Set(['completed', 'failed', 'nsfw', 'canceled', 'timeout'])
 export const NOT_READY = '사진 생성이 아직 준비되지 않았습니다(운영사 설정)';
 const NO_REF = '참고할 실사가 없습니다 — 같은 브랜드의 얼굴이 보이지 않는 실사가 필요합니다';
 const LIMIT = '이번 주(또는 이번 달) 크레딧 한도라 생성하지 않았습니다';
+async function limitReason(tenant: string) { const M = await import('./mktAuto'); return M.planUndecided(await M.settingsOf(tenant)) ? M.UNDECIDED_GEN : LIMIT; }
 type Slot = 'cover' | number;
 export type FillJob = { slot: Slot; requestId: string; statusUrl: string; status: string; ref: string; fileId?: string; error?: string };
 export type Fill = { v: number; checked?: number; status: 'generating' | 'done' | 'skipped' | 'failed' | 'stale' | 'none'; reason?: string; model?: string; per?: number; credits?: number; jobs?: FillJob[]; at: string; by: 'auto' | 'manual'; error?: string };
@@ -77,6 +78,7 @@ export async function budgetFor(tenant: string, per: number, want: number): Prom
   if (want <= 0) return 0;
   if (!(per > 0)) return want;
   const M = await import('./mktAuto');
+  if (M.planUndecided(await M.settingsOf(tenant))) return 0; // 상업화 마감 F4: 요금제 미정 고객 회사는 생성하지 않음
   const lim = M.limitsOf(await M.settingsOf(tenant)); const use = await M.usageOf(tenant); const busy = (await inflight(tenant)) * per;
   const fit = (limit: number | null, used: number) => (limit === null ? want : Math.floor((limit - used - busy) / per + 1e-9));
   const s = await M.settingsOf(tenant);
@@ -151,7 +153,7 @@ export async function startFill(c: Row, by: 'auto' | 'manual'): Promise<Fill> {
   if (need <= 0) return saveFill(c.id, q.fill?.status === 'done' ? { ...q.fill, checked: v } : { v, status: 'none', at, by }, v);
   const per = Number(r.m.credits) || 0;
   const n = await budgetFor(c.tenant, per, Math.min(FILL_MAX, slots.length, need));
-  if (!n) return { v, status: 'skipped', reason: LIMIT, at, by, per };
+  if (!n) return { v, status: 'skipped', reason: await limitReason(c.tenant), at, by, per };
   const [ver] = await sql<{ body: string }[]>`select body from mkt_versions where content_id = ${c.id} and version = ${v}`;
   const pages: CardPage[] = Array.isArray(q.pages) ? q.pages : [];
   const pool = await V.photoPool(c);
@@ -277,7 +279,7 @@ export async function startRegen(u: SessionUser, fileId: string) {
   const r = await ready();
   if (!r) throw badRequest(NOT_READY);
   const per = Number(r.m.credits) || 0;
-  if (!(await budgetFor(t, per, 1))) throw badRequest(LIMIT);
+  if (!(await budgetFor(t, per, 1))) throw badRequest(await limitReason(t));
   const { libBytes } = await import('./mktVideo');
   const raw = await libBytes(t, f.id, /^image\//);
   if (!raw) throw badRequest('사진 파일을 읽지 못했습니다');

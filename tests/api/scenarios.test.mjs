@@ -1223,7 +1223,7 @@ describe('데모(체험) 계정 격리 — is_demo 조직·계정은 밖을 못 
 describe('WORKIN_V3 서로 배정 · 요청자 · 직접 순서', () => {
   let hq2;
   test('본사 직원끼리 서로 배정 → 배정받은 사람이 보고, 본사 직원은 본사 아래 전체를 본다', async () => {
-    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'hq2@dagym.test', name: '김민수', role: 'staff', orgUnitIds: [ctx.hq] });
+    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'hq2@dagym.test', name: '홍길동', role: 'staff', orgUnitIds: [ctx.hq] });
     hq2 = new Client('hq2');
     await hq2.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'hq2-pass-1234', ai: true });
     const me = (await hq2.ok('GET', '/api/auth/me')).user;
@@ -1324,7 +1324,7 @@ describe('심사용 체험 계정 (대표 결정 A — 비밀번호 없는 로�
 
 describe('WORKIN_V4 본사 사람끼리 일정 보기 · 비공개', () => {
   test('본사 소속·대표는 서로의 개인 일정을 보고, 비공개는 "바쁨"(내용·메모 없음), 현장 직원에게는 안 보임', async () => {
-    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'hqcal@dagym.test', name: '김소담', role: 'staff', orgUnitIds: [ctx.hq] });
+    const inv = await ctx.owner.ok('POST', '/api/admin/users', { email: 'hqcal@dagym.test', name: '이영희', role: 'staff', orgUnitIds: [ctx.hq] });
     const c = new Client('hqcal');
     await c.ok('POST', `/api/invitations/${inv.path.split('/').pop()}/accept`, { password: 'hqcal-pass-1234', ai: true });
     const me = (await c.ok('GET', '/api/auth/me')).user;
@@ -1350,7 +1350,7 @@ describe('WORKIN_V4 본사 사람끼리 일정 보기 · 비공개', () => {
     assert.equal((await ctx.staffA.client.get(`/api/events/${open}`)).status, 404);
     // 대표도 본사 직원 일정을 봄
     const myCal = (await c.ok('GET', '/api/calendars')).calendars.find((x) => x.type === 'personal').id;
-    const mine = (await c.ok('POST', '/api/events', { calendarId: myCal, title: '김소담 외근', start: `${d}T13:00:00+09:00`, end: `${d}T14:00:00+09:00` })).id;
+    const mine = (await c.ok('POST', '/api/events', { calendarId: myCal, title: '이영희 외근', start: `${d}T13:00:00+09:00`, end: `${d}T14:00:00+09:00` })).id;
     assert.ok((await ctx.owner.ok('GET', q)).events.some((e) => e.id === mine && e.ownerId === me.id));
   });
 });

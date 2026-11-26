@@ -22,7 +22,7 @@ const FAKE_SR_PAUSE = () => {
     start() {
       const k = n++;
       const res = (t, fin) => { const r = [{ transcript: t }]; r.isFinal = fin; return r; };
-      if (k === 0) { setTimeout(() => this.onresult?.({ results: [res('김민수 본부장한테', true)] }), 150); setTimeout(() => this.onend?.(), 400); return; }
+      if (k === 0) { setTimeout(() => this.onresult?.({ results: [res('홍길동 본부장한테', true)] }), 150); setTimeout(() => this.onend?.(), 400); return; }
       if (k === 1) { setTimeout(() => this.onresult?.({ results: [res('내일까지 견적서 보내기', true)] }), 900); setTimeout(() => this.onend?.(), 1200); return; }
       setTimeout(() => this.onend?.(), 500);
     }
@@ -82,7 +82,7 @@ export async function v24({ browser, desk, BASE, sql }) {
     await p2.goto(BASE + '/assistant');
     await p2.getByTestId('ai-enter-hint').waitFor();
     await p2.getByRole('button', { name: '음성으로 요청' }).click();
-    await p2.waitForFunction(() => document.querySelector('textarea[aria-label="AI 에게 요청"]')?.value === '김민수 본부장한테 내일까지 견적서 보내기', null, { timeout: 25000 });
+    await p2.waitForFunction(() => document.querySelector('textarea[aria-label="AI 에게 요청"]')?.value === '홍길동 본부장한테 내일까지 견적서 보내기', null, { timeout: 25000 });
     // 조용해지면(8초) 스스로 끝나 마이크가 꺼짐
     await p2.getByRole('button', { name: '음성으로 요청' }).waitFor({ timeout: 25000 });
   } finally { await c2.close(); }

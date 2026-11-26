@@ -209,12 +209,12 @@ export async function customerSim({ browser, BASE, SHOTS, sql }) {
     assert.ok(!(await body()).includes('현장별'), 'AI 비서 예시 칩에 "현장별 매출" 없음');
     await p.goto(BASE + '/contacts');
     const phs = await p.evaluate(() => [...document.querySelectorAll('input[placeholder],textarea[placeholder]')].map((e) => e.getAttribute('placeholder')).join(' | '));
-    assert.ok(!/관리소|푸르지오|두정점|김민수/.test(phs), `입력칸 예시에 다짐 낱말 없음: ${phs.slice(0, 200)}`);
+    assert.ok(!/관리소|푸르지오|두정점/.test(phs), `입력칸 예시에 다짐 낱말 없음: ${phs.slice(0, 200)}`);
     // ── 7-1e) 410차 P2 문구 ①(G-20·G-28·G-36): 도움말·결재 설정·회사 정보에 다짐 직원 이름·직함·회사 키 예시가 없다
     await p.goto(BASE + '/help');
     await p.getByText('업무는 어떻게 만들어요?').first().waitFor();
     const helpAll = await p.evaluate(() => document.body.textContent ?? ''); // 접힌 답까지(보이는 글만으로는 안 잡힘)
-    assert.ok(/내일 3시 홍길동 견적서/.test(helpAll) && !helpAll.includes('김민수'), `도움말 예시 이름: ${(helpAll.match(/내일 3시 .{0,12}/) ?? [''])[0]}`);
+    assert.ok(/내일 3시 홍길동 견적서/.test(helpAll), `도움말 예시 이름: ${(helpAll.match(/내일 3시 .{0,12}/) ?? [''])[0]}`);
     await p.goto(BASE + '/admin/approval-settings');
     await p.getByTestId('tpl-three').waitFor();
     assert.equal((await p.getByTestId('tpl-three').innerText()).trim(), '3단계 · 팀장 → 부서장 → 대표');

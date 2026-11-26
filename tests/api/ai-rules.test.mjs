@@ -20,10 +20,10 @@ describe('AI 비서 대화 규칙(대표 지적 10/19)', () => {
   test('① 업무 배정 의도 힌트 · ②③⑤⑥ 규칙 · 도구 목록', async () => {
     const n0 = (await fakeState()).anthropic.length;
     await queue([say('네')]);
-    await ctx.owner.ok('POST', '/api/ai/chat', { text: '김소담부사장한테 다음주 금요일까지 업무보고서 만들라고 해줘' });
+    await ctx.owner.ok('POST', '/api/ai/chat', { text: '이영희부사장한테 다음주 금요일까지 업무보고서 만들라고 해줘' });
     const req = (await fakeState()).anthropic.slice(n0)[0];
     const sys = sysOf(req);
-    assert.match(sys, /의도 힌트\(규칙\): "김소담" 에게 일을 시키는 요청 — 업무 배정/, '① 직함 떼고 사람·업무 배정');
+    assert.match(sys, /의도 힌트\(규칙\): "이영희" 에게 일을 시키는 요청 — 업무 배정/, '① 직함 떼고 사람·업무 배정');
     assert.match(sys, /메시지 전달로 해석하지 마세요/);
     assert.match(sys, /propose_update_task\(담당자 변경·마감일·마감 시각/, '② 담당 변경·마감 시각 수정 가능 안내');
     assert.match(sys, /"안 된다·화면에서 직접 하세요"라고 답하지 마세요/);

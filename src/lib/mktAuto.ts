@@ -87,6 +87,10 @@ export async function settingsOf(tenant: string): Promise<MktSettings> {
 }
 /** 270차 #809: 내부 회사가 월 실제 비용 한도(원)를 정했으면 요금제 숫자(크레딧·영상 편수·재생성 횟수) 대신 그 금액으로만 막음 */
 export const costMode = (s: Pick<MktSettings, 'internal' | 'cost_cap_krw'>) => !!s.internal && s.cost_cap_krw !== null;
+/** 상업화 마감 F4(빈틈 — 요금제 미정 회사는 '제한 없음·한도 없음'으로 보였고 사진·영상 생성 크레딧 한도가 없었음): 고객 회사인데 요금제·직접 정한 크레딧이 없음.
+ *  글(원고·캡션)은 회사 월 AI 예산 안에서 그대로 · 사진·영상 생성은 요금제를 정한 뒤(자동 생성 0장, 제작 요청 카드는 관리자 승인 뒤) */
+export const planUndecided = (s: Pick<MktSettings, 'internal' | 'plan_code' | 'monthly_credits' | 'cost_cap_krw'>) => !s.internal && !s.plan_code && s.monthly_credits === null && !costMode(s);
+export const UNDECIDED_GEN = '마케팅 요금제가 아직 정해지지 않아 사진·영상을 생성하지 않습니다 — 운영자에게 요금제를 요청해 주세요';
 /** 이번 달 이미지·영상 생성에 쓴 돈(원, 어림) = 쓴 크레딧 × 1크레딧 최고 단가 — 한도 비교는 넉넉하게(높게) 잡음 */
 export async function monthGenKrw(tenant: string) {
   const [use, cc] = await Promise.all([usageOf(tenant), creditCost()]);
@@ -152,7 +156,7 @@ export async function productionLeft(tenant: string) {
   const weekly = costMode(s) ? [] : Object.entries(plan?.weekly ?? {}).map(([kind, limit]) => ({ kind, label: (KIND_LABEL as Record<string, string>)[kind] ?? kind, limit: Number(limit), used: wk.find((w) => w.kind === kind)?.n ?? 0 }));
   const extra = plan?.extraCreditKrw ?? null; const shortfall = lim.monthlyCredits === null ? 0 : Math.max(0, Math.round((use.monthCredits - lim.monthlyCredits) * 10) / 10);
   const gen = s.internal ? await monthGenKrw(tenant) : null; // 270차 #809
-  return { internal: !!s.internal, costCapKrw: s.cost_cap_krw, monthGenKrw: gen?.krw ?? null, monthGenKrwMin: gen?.krwMin ?? null,
+  return { internal: !!s.internal, undecided: planUndecided(s), costCapKrw: s.cost_cap_krw, monthGenKrw: gen?.krw ?? null, monthGenKrwMin: gen?.krwMin ?? null,
     planCode: s.plan_code, planLabel: plan?.label ?? null, monthlyCredits: lim.monthlyCredits, usedCredits: use.monthCredits, leftCredits: left, images: left === null ? null : Math.floor(left / cost.imageCredits), videos: left === null ? null : Math.floor(left / cost.videoCredits),
     videosLeft: lim.videoMonthly === null ? null : Math.max(0, lim.videoMonthly - use.monthVideos), regensLeft: lim.regenMonthly === null ? null : Math.max(0, lim.regenMonthly - use.monthRegens), weekly, over, shortfall, extraCreditKrw: extra,
     overMessage: over ? `이번 달 제작 크레딧 ${lim.monthlyCredits}을 모두 썼습니다${shortfall ? ` (초과 ${shortfall})` : ''}. ${extra ? `초과분은 1크레딧당 ${extra.toLocaleString('ko-KR')}원으로 추가 구매(${shortfall ? `${Math.ceil(shortfall * extra).toLocaleString('ko-KR')}원` : '필요 시'})` : '초과 크레딧 금액은 결정 전'} — 또는 요금제를 올려 주세요.` : null, cost };
@@ -626,6 +630,7 @@ export async function requestCard(c: any, version: number, kind: 'image' | 'vide
   if (kind === 'video' && est >= EST.video && lim.videoMonthly !== null && use.monthVideos >= lim.videoMonthly) reason = `이번 달 생성 영상 ${lim.videoMonthly}편을 다 썼습니다`;
   else if (kind.startsWith('regen') && lim.regenMonthly !== null && use.monthRegens >= lim.regenMonthly) reason = `이번 달 재생성 ${lim.regenMonthly}회를 다 썼습니다 — 추가 1회 = 약 ${est}크레딧`;
   else if (est > 0 && lim.weeklyCredits !== null && use.weekCredits + est > lim.weeklyCredits) reason = `이번 주 크레딧 한도(${lim.weeklyCredits}) 초과 예상 — 약 ${est}크레딧`;
+  else if (est > 0 && planUndecided(s)) reason = `마케팅 요금제 미정 — 이미지·영상 제작은 관리자 승인 뒤(약 ${est}크레딧)`; // F4
   else if (est > 0 && costMode(s)) { // 270차 #809 내부 회사: 월 실제 비용 한도(원)
     const g = await monthGenKrw(c.tenant); const add = Math.round(est * g.perCreditMax);
     if (g.krw + add > (s.cost_cap_krw ?? 0)) reason = `이번 달 이미지·영상 생성 비용 한도 ${(s.cost_cap_krw ?? 0).toLocaleString('ko-KR')}원을 넘습니다(지금 약 ${g.krw.toLocaleString('ko-KR')}원, 이번 제작 약 ${add.toLocaleString('ko-KR')}원)`;

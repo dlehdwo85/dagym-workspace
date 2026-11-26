@@ -44,8 +44,8 @@ export const TERMS_BASE: Terms = {
   event: { normal: '일정', vacation: '연차', half_day: '반차', outside: '외근', business_trip: '출장', task_block: '업무 시간' },
   contactOrg: '회사·단지',
   capacity: { 요청자: '요청자', 관리자: '관리자', 부서장: '부서장', 팀장: '팀장', 대표: '대표', 담당자: '담당자' },
-  example: { quickTask: '예: 다음 주 금요일까지 김민수 본부장한테 푸르지오 비교 파일 검수받고 보고하라고 해 줘', voiceTask: '금요일까지 김민수 두정점 원판 수량 파악, 중요',
-    assistReply: '예: 견적서 첨부해서 관리소장님께 회신 써줘', honorific: '관리소장님', contactTags: '고객, 관리소', aiChip: '3분기 매출 현장별로 엑셀 만들어줘', person: '김민수', profileKey: 'dagym', upperLead: '본부장' },
+  example: { quickTask: '예: 다음 주 금요일까지 홍길동 본부장한테 푸르지오 비교 파일 검수받고 보고하라고 해 줘', voiceTask: '금요일까지 홍길동 두정점 원판 수량 파악, 중요',
+    assistReply: '예: 견적서 첨부해서 관리소장님께 회신 써줘', honorific: '관리소장님', contactTags: '고객, 관리소', aiChip: '3분기 매출 현장별로 엑셀 만들어줘', person: '홍길동', profileKey: 'dagym', upperLead: '본부장' },
 };
 /** 다른 회사 기본값(대표 11/13: 대표·관리자·팀 책임자·지점 관리자·직원) */
 export const TERMS_COMMON: Terms = {

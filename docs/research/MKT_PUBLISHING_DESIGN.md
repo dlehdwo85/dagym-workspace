@@ -110,7 +110,7 @@
 
 ## 6. Meta 앱 이용 사례 반영(로컬 요청 10/19 — 대표: '경쟁사보다 높은 수준으로')
 
-- Meta 앱은 김소담 부사장 계정으로 만든다. 이용 사례는 5개다: 인스타 메시지·콘텐츠, 페이지 관리, 광고 성과, Lead Ads, 광고 MCP.
+- Meta 앱은 부사장 계정으로 만든다. 이용 사례는 5개다: 인스타 메시지·콘텐츠, 페이지 관리, 광고 성과, Lead Ads, 광고 MCP.
 - 권한과 심사 녹화 시나리오는 `META_APP_REVIEW_PLAN.md` 에 정리했다.
 - 게시(⑤-2) 연결 권한에 문의함용 권한(instagram_manage_messages·instagram_manage_comments·pages_manage_engagement·pages_read_user_content·pages_manage_metadata)을 더한다. 한 번 [연결]로 같이 받는다.
 

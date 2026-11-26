@@ -9,7 +9,7 @@ import { TOUR_PAGES, requestTour, restartTours } from '@/components/Tour';
 import { useTerms } from '@/components/session';
 
 const FAQ: [string, string][] = [
-  ['업무는 어떻게 만들어요?', '아래 + 버튼(휴대폰) 또는 위쪽 "만들기"(PC) → 업무. 목록 묶음 끝 "업무 추가" 줄에 바로 써도 됩니다. "내일 3시 김민수 견적서"처럼 쓰면 날짜·담당자를 알아봅니다. 음성 등록도 됩니다.'],
+  ['업무는 어떻게 만들어요?', '아래 + 버튼(휴대폰) 또는 위쪽 "만들기"(PC) → 업무. 목록 묶음 끝 "업무 추가" 줄에 바로 써도 됩니다. "내일 3시 홍길동 견적서"처럼 쓰면 날짜·담당자를 알아봅니다. 음성 등록도 됩니다.'],
   ['여러 사람에게 같은 업무를 주려면?', '담당자 선택에서 여러 명을 체크하면 "n명에게 각각 만들기"로 사람마다 1건씩 만들어집니다.'],
   ['업무 상태는 누가 바꾸나요?', '진행 상태(확인·진행 중·검토 요청·완료)는 담당자만 바꿉니다. 요청자·관리자는 검토 요청을 승인(완료)하거나 반려하고, 보류할 수 있습니다.'],
   ['알림이 안 와요', '설정 → 알림에서 앱 알림을 켜고, 휴대폰 설정에서 워크인 알림이 허용되어 있는지 확인하세요. 일정·마감 미리 알림은 휴대폰에 예약되어 인터넷이 없어도 울립니다.'],
@@ -47,7 +47,7 @@ export default function HelpPage() {
       </section>
       <section className="rounded-card border border-line bg-white p-4 shadow-card">
         <h2 className="text-sm font-semibold">자주 묻는 질문</h2>
-        <div className="mt-2 divide-y divide-line">{FAQ.map(([q, a0]) => [q, a0.replace('김민수', person)] as const).map(([q, a]) => <details key={q} className="py-2"><summary className="cursor-pointer text-sm font-medium">{q}</summary><p className="mt-1 text-sm text-ink-2">{a}</p></details>)}</div>
+        <div className="mt-2 divide-y divide-line">{FAQ.map(([q, a0]) => [q, a0.replace('홍길동', person)] as const).map(([q, a]) => <details key={q} className="py-2"><summary className="cursor-pointer text-sm font-medium">{q}</summary><p className="mt-1 text-sm text-ink-2">{a}</p></details>)}</div>
       </section>
       <section className="rounded-card border border-line bg-white p-4 shadow-card" data-testid="support-form">
         <h2 className="text-sm font-semibold">문의 남기기</h2>

@@ -31,3 +31,18 @@ test('새 회사: 결재선 없음 → 관리자 [대표 1단계] 한 번 → �
   assert.equal((await ctx.owner.ok('POST', '/api/approval-lines/templates', { preset: 'one' })).id != null, true);
   assert.ok((await ctx.owner.ok('GET', '/api/approval-lines')).lines.some((l) => l.name === '1단계(대표)'));
 });
+
+test('쓴 적 없는 결재선 지우기(운영 자동 확인 원상복구) · 결재에 쓰인 결재선은 409 · 직원 못 지움 · 다른 회사 404', async () => {
+  const made = await ctx.owner.ok('POST', '/api/approval-lines/templates', { preset: 'one' });
+  assert.equal((await ctx.staffA.client.req('DELETE', `/api/approval-lines/${made.id}`)).status >= 400, true, '직원은 못 지움');
+  const other = new Client('ceo@f1-1127.test'); await other.ok('POST', '/api/auth/login', { email: 'ceo@f1-1127.test', password: 'signup-pass-1234' });
+  assert.equal((await other.req('DELETE', `/api/approval-lines/${made.id}`)).status, 404, '다른 회사 결재선은 없는 것처럼');
+  await ctx.owner.ok('DELETE', `/api/approval-lines/${made.id}`);
+  assert.equal((await sql`select count(*)::int n from approval_lines where id = ${made.id}`)[0].n, 0);
+  assert.equal((await sql`select count(*)::int n from audit_logs where action = 'approval_line.delete'`)[0].n, 1);
+  const used = await ctx.owner.ok('POST', '/api/approval-lines/templates', { preset: 'one' });
+  const task = await ctx.owner.ok('POST', '/api/tasks', { title: '결재선 지우기 시험', orgUnitId: ctx.siteA });
+  await sql`update tasks set approval_line_id = ${used.id} where id = ${task.id}`;
+  assert.equal((await ctx.owner.req('DELETE', `/api/approval-lines/${used.id}`)).status, 409, '업무에 쓰인 결재선은 끄기만');
+  assert.equal((await sql`select count(*)::int n from approval_lines where id = ${used.id}`)[0].n, 1);
+});
