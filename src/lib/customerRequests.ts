@@ -42,7 +42,9 @@ export async function listRequests(u: SessionUser, f: { status?: string | null; 
       ${f.category ? sql`and r.category = ${f.category}` : sql``}
     order by (select count(distinct coalesce(x.tenant, x.id::text)) from customer_requests x where x.group_id = r.id or x.id = r.id) desc, r.created_at desc limit 200`;
   const counts = await sql<{ status: string; n: number }[]>`select status, count(*)::int as n from customer_requests where group_id is null ${f.test ? sql`` : sql`and not (tenant is not null and ${sql.unsafe(TEST_TENANT('tenant'))})`} group by status`;
-  const [{ hidden }] = await sql<{ hidden: number }[]>`select count(*)::int as hidden from customer_requests where group_id is null and tenant is not null and ${sql.unsafe(TEST_TENANT('tenant'))}`;
+  // 로컬 11/26: 숨긴 시험 회사 요청 수도 지금 보는 상태·분류 기준으로(진행 중 화면이면 완료·반려 빼고) — 눌러도 빈 화면이 되지 않게
+  const [{ hidden }] = await sql<{ hidden: number }[]>`select count(*)::int as hidden from customer_requests where group_id is null and tenant is not null and ${sql.unsafe(TEST_TENANT('tenant'))}
+    ${f.status ? sql`and status = ${f.status}` : sql`and status not in ('done', 'rejected')`} ${f.category ? sql`and category = ${f.category}` : sql``}`;
   return { items: rows, testHidden: f.test ? 0 : hidden, counts: Object.fromEntries(counts.map((c) => [c.status, c.n])), labels: { category: CATEGORY_LABEL, status: STATUS_LABEL, source: SOURCE_LABEL } };
 }
 

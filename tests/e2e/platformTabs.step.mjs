@@ -16,7 +16,8 @@ export async function platformTabs({ owner, ctx, sql, BASE, SHOTS }) {
   await today.getByTestId('today-support').click();
   await owner.waitForURL(/\/platform\?tab=support/);
   await owner.getByTestId('support-inbox').waitFor();
-  assert.match(await owner.getByTestId('platform-tab-desc').innerText(), /고객 문의에 답하고/);
+  assert.match(await owner.getByTestId('platform-tab-desc').innerText(), /고객 요청함.*문의 답변/); // #1175(a84de69): 고객 요청함이 탭 맨 위
+  await owner.getByTestId('customer-requests').waitFor();
   assert.equal(await owner.getByTestId('platform-company-list').count(), 0, '다른 탭 칸은 안 보임');
   await owner.getByTestId('platform-tab-ai').click();
   await owner.getByTestId('platform-tts').waitFor();

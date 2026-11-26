@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 export async function calEditFlow({ browser, desk, owner, ctx, sql, BASE, SHOTS }) {
   const cals = (await ctx.owner.ok('GET', '/api/calendars')).calendars;
   const personal = cals.find((c) => c.type === 'personal');
-  const d = '2026-12-02';
+  // CI 11/26: 다른 시험이 '오늘 + n일'로 만든 일정이 2026-12-02 14시에 겹쳐 빈 칸 탭이 그 일정을 열었음(빠른 입력 안 뜸) → 다른 시험이 닿지 않는 먼 날짜(수요일)
+  const d = '2027-06-16';
   // ① 휴대폰
   const mc = await browser.newContext({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true, locale: 'ko-KR', timezoneId: 'Asia/Seoul', storageState: await desk.storageState() });
   try {

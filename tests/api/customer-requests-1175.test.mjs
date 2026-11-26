@@ -65,4 +65,8 @@ test('자동 모음 · 메모 · 분류·상태·답변 · 같은 요청 묶기 
   const withTest = await ctx.owner.ok('GET', '/api/platform/customer-requests?test=1');
   const qt = withTest.items.find((x) => x.title === '[검수] 시험 문의'); assert.ok(qt, '?test=1 이면 보임'); assert.equal(qt.test_company, true);
   assert.ok(withTest.items.filter((x) => x.title !== '[검수] 시험 문의').every((x) => !x.test_company), '다른 줄은 시험 회사 아님');
+  // 숨긴 수는 지금 보는 상태 기준(로컬 11/26: 반려된 시험 요청이 '진행 중' 화면의 [시험 회사 포함 n]에 세지면 눌러도 빈 화면)
+  await ctx.owner.ok('PATCH', `/api/platform/customer-requests/${qt.id}`, { status: 'rejected' });
+  assert.equal((await ctx.owner.ok('GET', '/api/platform/customer-requests')).testHidden, 0, '진행 중 화면: 반려된 시험 요청은 세지 않음');
+  assert.equal((await ctx.owner.ok('GET', '/api/platform/customer-requests?status=rejected')).testHidden, 1, '반려 화면: 1');
 });
