@@ -17,7 +17,7 @@ const LOBBY_CTX = /로비폰|공동현관|인터폰|월패드|비디오폰|출�
 const excluded = (normHead: string) => EXCLUDE_TOPICS.some((k) => normHead.includes(norm(k)) && !(k === '중계기' && LOBBY_CTX.test(normHead)));
 // #476 d: '주민 운동시설 위탁관리업체 선정'(K-apt 분류 '사업자-용역-주민운동시설의 위탁')이 중장기로 빠졌다 → 위탁 관리(업체)·시설의 위탁·위탁 업체/사업자 선정도 즉시 검토
 // 191차(대표 10/27 정정): 즉시 검토 낱말을 둘로 — 다짐은 운영·위탁 낱말만(예전 '스크린골프'·'타석'은 다짐 즉시 검토가 아님), 하이링크는 시스템 낱말
-const DIRECT_OPS = /(위탁\s*운영|운영\s*위탁|운영\s*업체|운영\s*사업자|운영자|위탁\s*용역|위탁\s*관리(?:\s*업체)?|시설의\s*위탁|위탁\s*(?:업체|사업자)\s*선정)/;
+export const DIRECT_OPS = /(위탁\s*운영|운영\s*위탁|운영\s*업체|운영\s*사업자|운영자|위탁\s*용역|위탁\s*관리(?:\s*업체)?|시설의\s*위탁|위탁\s*(?:업체|사업자)\s*선정)/;
 const DIRECT_SYS = /(출입\s*통제|출입\s*시스템|출입시스템|출입\s*구축|출입\s*장치|자동\s*출입|통합\s*보안|안면\s*인식|얼굴\s*인식|키오스크|회원\s*관리|예약\s*시스템|타석\s*관제|커뮤니티\s*시스템)/;
 /** 191차(대표 10/27 "스크린 골프나 골프연습장 설치 및 공사는 저희가 하지 않습니다. 운영만 합니다" · "커뮤니티센터 통합관리시스템 구축 … 이건 하이링크지"):
  *  다짐 = 시설 운영·위탁운영만. 제목에 설치·시공·공사·교체·렌탈·장비·리모델링·보수·시스템·구축 같은 말이 있으면 골프·헬스·커뮤니티라도 다짐이 아님 —
@@ -38,7 +38,7 @@ const CONV_FAC = /편의\s*시설(?!\s*물)/;
 const CONV_NOT = /장애인|병원|의료원|보건소|본사|사옥|청사|휴게소|터미널|공항|대학교|캠퍼스/;
 /** 대표 11/27(로컬 02:00 — 다시 판정이 올린 미아동부센트레빌 '공용시설 미디어보드 운영업체'·'공용시설 광고게시판 운영업체' = 승강기·현관 광고 사업, 최고가낙찰·광고료 선납):
  *  제목·분류에 광고·미디어보드·게시판·전광판·디지털 사이니지가 있으면 다짐 아님(운영업체 낱말이 있어도 광고 자리 운영 — 다짐은 시설 운영만) */
-const AD_RE = /광고|미디어\s*보드|게시판|전광판|사이니지/;
+export const AD_RE = /광고|미디어\s*보드|게시판|전광판|사이니지/;
 /** 대표 11/27(로컬 02:00 — KG2B 경희궁 파크팰리스 '상가 락커룸 일시철거 및 재설치'가 하이링크): 락커·사물함이 철거·재설치·이설과 함께고 시스템 낱말이 없으면
  *  물건 옮기기 공사 — 하이링크(무인·스마트 락커 시스템) 아님 */
 const LOCKER_WORDS = new Set(['락커', '사물함']);
@@ -249,6 +249,11 @@ export const aptContext = (r: { source_type?: unknown; issuer?: unknown; title?:
 
 export type NoticeValidate = { ok: true; row: NoticeRow } | { ok: false; reason: string };
 /** 수집 payload → 저장 행(ETL 필드만). 적합 분류·상태·공고구분은 여기서 계산 */
+/** 대표 11/27(로컬 6): 저장된 본문 판정(body_fit)을 지금 판정에 더함 — 제목·분류로 관련이 아니고 지금 규칙이 뺀 까닭도 없을 때만 */
+export function bodyFitOf(bf: unknown, f0: FitResult): FitResult | null {
+  const b = bf as { fit?: FitBusiness | null; words?: string[]; direct?: boolean } | null | undefined;
+  return !f0.fit && !f0.dropped?.length && b?.fit ? { fit: b.fit, matched: Array.isArray(b.words) ? b.words : [], direct: !!b.direct } : null;
+}
 export function validateNoticePayload(p: Record<string, unknown>, now: Date): NoticeValidate {
   const sourceType = txt(p.source_type), ext = txt(p.source_external_id), title = txt(p.title), url = txt(p.source_url);
   if (!sourceType) return { ok: false, reason: 'source_type required' };
@@ -259,7 +264,9 @@ export function validateNoticePayload(p: Record<string, unknown>, now: Date): No
   const fit0 = matchFit(title, txt(p.bid_category), txt(p.task_scope), aptContext({ source_type: sourceType, issuer: p.issuer, title }));
   // #522 온비드: '스포츠센터 내 용품점 및 자판기 사용·수익허가'처럼 제외 낱말(자판기)이 섞인 체육시설 임대도 놓치지 않게 — 수집기가 준 적합 힌트
   const hint = txt(p.fit_hint) as FitBusiness | null;
-  const fit: FitResult = fit0.fit || !hint ? fit0 : { fit: hint, matched: Array.isArray(p.fit_words) ? (p.fit_words as string[]).slice(0, 5) : [], direct: false };
+  // 대표 11/27(로컬 6): 공고문 본문으로 관련이 된 공고(body_fit) — 다음 수집(제목·분류만)이 '관련 아님'으로 되돌리지 않게. 지금 규칙이 뺀 공고(광고·공사 등)는 그대로 뺌
+  const bodyFit = bodyFitOf(p.body_fit, fit0);
+  const fit: FitResult = fit0.fit ? fit0 : bodyFit ? bodyFit : !hint ? fit0 : { fit: hint, matched: Array.isArray(p.fit_words) ? (p.fit_words as string[]).slice(0, 5) : [], direct: false };
   const winner = txt(p.winner_name);
   const row: NoticeRow = {
     source_type: sourceType, source_external_id: ext, source_url: url, notice_file_url: txt(p.notice_file_url), issuer: txt(p.issuer), title, region: txt(p.region),
@@ -323,7 +330,7 @@ export function planNoticeBatch(items: Record<string, unknown>[], prev: Map<stri
   for (const it0 of items) {
     // 185차: 이번 실행에서 상세(분류·본문)를 못 읽은 기존 공고는 저장된 분류·본문으로 판정 — 본문 낱말로 관련이 된 공고가 다음 빠른 수집에서 '관련 아님'으로 내려가지 않게
     const pv = prev.get(String(it0.source_external_id ?? '').trim());
-    const it = pv && mergeScope === 'all' ? { ...it0, bid_category: it0.bid_category ?? pv.bid_category ?? null, task_scope: it0.task_scope ?? pv.task_scope ?? null } : it0;
+    const it = pv && mergeScope === 'all' ? { ...it0, bid_category: it0.bid_category ?? pv.bid_category ?? null, task_scope: it0.task_scope ?? pv.task_scope ?? null, body_fit: it0.body_fit ?? pv.body_fit ?? null } : it0;
     const v = validateNoticePayload(it, now);
     if (!v.ok) { plan.invalid++; if (plan.errLog.length < 20) plan.errLog.push(`invalid: ${v.reason}`); continue; }
     const key = `${v.row.source_type}|${v.row.source_external_id}`;

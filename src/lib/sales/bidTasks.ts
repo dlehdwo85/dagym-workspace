@@ -57,7 +57,7 @@ const MS: [MilestoneKey, string, string[]][] = [
 // 388차(대표 11/10 '스케줄에는 공고에서 올라오는 현장설명회와 입찰 마감'): KG2B 상세의 현장설명(kg2b_briefing_*)을 K-apt 값보다 먼저(280차 briefingOf 와 같은 규칙) —
 //   예전엔 K-apt 칸만 봐서 KG2B 에만 현설일시가 있는 공고는 현장설명회 일정이 안 생겼고, KG2B '없음'인데 K-apt 칸으로 일정이 생길 수 있었다
 export const bidMilestones = (r: any): Milestone[] => MS.flatMap(([key, label, keys]) => {
-  const bk = String(r?.kg2b_briefing_kind ?? r?.site_briefing_kind ?? '');
+  const bk = String(r?.doc_briefing_kind ?? r?.kg2b_briefing_kind ?? r?.site_briefing_kind ?? '');
   if (key === 'briefing' && bk === '없음') return [];
   const w = when(pick(r, ...(key === 'briefing' ? [...keys, 'kg2b_briefing_at'] : keys))); if (!w) return [];
   // 242차 #761: 필수·임의·공고문 참조 모두 이름에 붙여 일정에서 바로 알게
@@ -175,7 +175,7 @@ export async function handoffBid(u: SessionUser, i: z.infer<typeof bidHandoffInp
   const link = bidLink(i.id);
   // 281차 #822: 현장설명회(필수 여부·일시·장소) · 세대수 · 준공(사용승인)년월 — 단지 정보는 K-apt 단지 목록에서 이름으로(못 찾으면 줄 없음)
   const { briefingLine, briefingOf } = await import('./bidTerms'); const { complexFacts, yearMonth } = await import('./complexInfo');
-  const kind = String(r.kg2b_briefing_kind ?? r.site_briefing_kind ?? '').trim();
+  const kind = String(r.doc_briefing_kind ?? r.kg2b_briefing_kind ?? r.site_briefing_kind ?? '').trim();
   const brief = briefingOf(r) ? briefingLine(r) : kind === '없음' ? '현장설명 없음' : null;
   const cx = await complexFacts(sql, pick(r, 'facility_name', 'complex_name', 'issuer'), pick(r, 'region') ?? pick(r, 'office_address')).catch(() => null);
   const hh = Number(pick(r, 'household_count', 'households')) || cx?.households || null;
@@ -763,7 +763,7 @@ export async function bidInfoOf(sql: Sql, id: string, r: any, opt: { complex?: b
   }
   if (!households && opt.prev?.households) households = opt.prev.households;
   const ms = bidMilestones(r); const close = ms.find((m) => m.key === 'close') ?? ms.find((m) => m.key === 'apply') ?? null;
-  const b = briefingOf(r); const kind = String(r?.kg2b_briefing_kind ?? r?.site_briefing_kind ?? '').trim();
+  const b = briefingOf(r); const kind = String(r?.doc_briefing_kind ?? r?.kg2b_briefing_kind ?? r?.site_briefing_kind ?? '').trim();
   const prevCancel = await prevCancelOf(sql, id, r).catch(() => null); // 347차
   return { v: 1, apt, source: r?.source_type ? String(r.source_type) : null, households, deadline: close ? (close.w.allDay ? close.w.day : `${close.w.day}T${hm(close.w.start)}`) : null, deadlineLabel: close ? fmtWhen(close.w) : null,
     briefing: b ? { kind: b.kind, at: b.at, place: b.place, required: b.required } : null, briefingNone: !b && kind === '없음', updatedAt: new Date().toISOString(), prevCancel, eligFail: eligFailOf(r) };

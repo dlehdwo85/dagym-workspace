@@ -15,6 +15,13 @@ import { showTask } from './TaskPanelHost';
 
 const addDays = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 /** 마감 빠른 선택: 오늘 · 내일 · 이번 주 금요일 · 다음 주 월요일 */
+/** 로컬 11/27 19번(대표 화면 '오늘 11/27'·'이번 주 금요일 11/27' — 금요일): 고르기 목록은 같은 날짜를 두 번 보이지 않게 — 이번 주 금요일이 오늘·내일이면 다음 주 금요일, 그래도 겹치면 뺌.
+ *  quickDues() 는 목록 거르기(이번 주 등)가 자리로 쓰므로 그대로 */
+export function quickDueChoices(): [string, string][] {
+  const q = quickDues(); const t = q[0][1];
+  const fixed = q.map(([l, d]) => (l === '이번 주 금요일' && d <= addDays(t, 1) ? ['다음 주 금요일', addDays(d, 7)] : [l, d]) as [string, string]);
+  const seen = new Set<string>(); return fixed.filter(([, d]) => (seen.has(d) ? false : (seen.add(d), true)));
+}
 export function quickDues() {
   const t = todayStr();
   const dow = new Date(t + 'T00:00:00Z').getUTCDay(); // 0=일
@@ -96,8 +103,11 @@ function TimeGrid({ value, onChange, label }: { value: string | null | undefined
 }
 
 /** 마감일 칩: 누르면 빠른 선택 + 날짜 선택 */
-export function DuePicker({ value, onChange, status, label = '마감일', compact, emptyText, time, onTime, onExtend, extendLabel }: { value: string | null | undefined; onChange: (v: string | null) => void; status?: string; label?: string; compact?: boolean; emptyText?: string; time?: string | null; onTime?: (v: string | null) => void; onExtend?: () => void; extendLabel?: string }) {
+export function DuePicker({ value, onChange, status, label = '마감일', compact, emptyText, time, onTime, onExtend, extendLabel }: { value: string | null | undefined; onChange: (v: string | null) => unknown; status?: string; label?: string; compact?: boolean; emptyText?: string; time?: string | null; onTime?: (v: string | null) => unknown; onExtend?: () => void; extendLabel?: string }) {
   const [open, setOpen] = useState(false);
+  // 로컬 11/27 18번: 고른 값이 [마감 연장] 창으로 가면(onChange·onTime 이 true) 팝오버를 닫음 — 시각이 있으면 날짜를 고른 뒤에도 열어 둬 시각을 이어서 고름
+  const pickDate = (d: string | null) => { if (onChange(d) === true || !onTime) setOpen(false); };
+  const pickTime = (v: string | null) => { if (onTime?.(v) === true) setOpen(false); };
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <span className="relative inline-flex">
@@ -110,20 +120,20 @@ export function DuePicker({ value, onChange, status, label = '마감일', compac
         {/* V32 4: 마감 연장(담당자 = 요청자에게 요청, 요청자 = 바로) — 목록에서도 상세에 들어가지 않고 */}
         {onExtend && <button type="button" onClick={() => { setOpen(false); onExtend(); }} data-testid="due-extend-open"
           className="mb-1 flex w-full items-center gap-2 rounded-input bg-amber-50 px-2.5 py-2 text-left text-sm font-semibold text-amber-900 hover:bg-amber-100"><CalendarDays className="size-4" />{extendLabel ?? '마감 연장'}</button>}
-        {quickDues().map(([l, d]) => (
-          <button key={l} type="button" onClick={() => { onChange(d); if (!onTime) setOpen(false); }} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
+        {quickDueChoices().map(([l, d]) => (
+          <button key={l} type="button" onClick={() => pickDate(d)} className="flex w-full items-center justify-between rounded-input px-2.5 py-1.5 text-left text-sm hover:bg-slate-50">
             <span>{l}</span><span className="text-xs text-ink-3 tabular-nums">{Number(d.slice(5, 7))}/{Number(d.slice(8))}</span>
           </button>
         ))}
         {/* 대표 10/20 23:40: 날짜(넓게)·시각(좁게) 한 줄 두 칸, 둘 다 높이 40px */}
         <div className="flex items-center gap-1.5 px-1.5 py-1.5" data-testid="due-date-row">
           <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-input border border-line bg-white px-2.5 text-sm hover:border-slate-300 focus-within:border-brand-500"><CalendarDays className="size-4 shrink-0 text-ink-3" />
-            <input type="date" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none" value={value ?? ''} onChange={(e) => { onChange(e.target.value || null); if (!onTime) setOpen(false); }} aria-label={`${label} 날짜 선택`} data-testid="due-date-input" /></label>
-          {onTime && <TimePick className="h-10 w-24 shrink-0 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={time ?? ''} onChange={onTime} ariaLabel={`${label} 시각`} emptyLabel="시각" />}
+            <input type="date" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none" value={value ?? ''} onChange={(e) => pickDate(e.target.value || null)} aria-label={`${label} 날짜 선택`} data-testid="due-date-input" /></label>
+          {onTime && <TimePick className="h-10 w-24 shrink-0 rounded-input border border-line bg-white px-1.5 text-sm text-ink-2 hover:border-slate-300" value={time?.slice(0, 5) ?? ''} onChange={pickTime} ariaLabel={`${label} 시각`} emptyLabel="시각" />}
         </div>
         {/* V6 10번: 날짜 다음에 시각(15분, 기본 없음) */}
-        {value && onTime && <TimeGrid value={time} onChange={onTime} label={label} />}
-        {value && <button type="button" onClick={() => { onChange(null); onTime?.(null); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded-input px-2.5 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><X className="size-3.5" />마감일 지우기</button>}
+        {value && onTime && <TimeGrid value={time?.slice(0, 5) ?? null} onChange={pickTime} label={label} />}
+        {value && <button type="button" data-testid="due-clear" onClick={() => { onChange(null); onTime?.(null); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded-input px-2.5 py-1.5 text-left text-sm text-ink-2 hover:bg-slate-50"><X className="size-3.5" />마감일 지우기</button>}
       </Popover>
     </span>
   );
@@ -448,7 +458,7 @@ export function OrderMenu({ title, onMove }: { title: string; onMove: (to: 'top'
 /** V32 4 마감 연장 대화창: +1일·+3일·+1주·날짜 고르기 + 사유(필수).
  *  378차(대표 11/06): 담당자도 승인 없이 바로 연장(뒤로만) · 날짜와 함께 시각도 고름(지금 시각이 기본, '시간 없음' = 종일) · 사유는 업무 '마감 연장 기록'에 남음
  *  boss = 앞당기기도 되는 사람(요청자·대표·부서장·팀장) */
-export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { task: { id: string; title: string; due_date: string | null; due_time?: string | null }; boss: boolean; open: boolean; onClose: () => void; initial?: string | null; onDone?: () => void }) {
+export function ExtendDialog({ task, boss, open, onClose, initial, initialTime, onDone }: { task: { id: string; title: string; due_date: string | null; due_time?: string | null }; boss: boolean; open: boolean; onClose: () => void; initialTime?: string | null; initial?: string | null; onDone?: () => void }) {
   const base = task.due_date ?? todayStr();
   const baseTime = task.due_time?.slice(0, 5) ?? null;
   const [to, setTo] = useState<string>(initial ?? addDays(base, 1));
@@ -456,7 +466,8 @@ export function ExtendDialog({ task, boss, open, onClose, initial, onDone }: { t
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   // 365차 #988: 바로 바꾸는 사람(요청자·대표·부서장·팀장)은 앞당기기도 이 창에서(사유 기록·알림)
-  useEffect(() => { if (open) { setTo(initial && (boss ? initial !== base : initial >= base) ? initial : addDays(base, 1)); setTime(baseTime); setReason(''); } }, [open, initial, base, baseTime, boss]);
+  // 로컬 11/27 18번: 목록에서 같은 날 시각만 바꿔 온 경우(initialTime)는 그 날짜·시각 그대로
+  useEffect(() => { if (open) { setTo(initial && (initialTime !== undefined || (boss ? initial !== base : initial >= base)) ? initial : addDays(base, 1)); setTime(initialTime !== undefined ? initialTime : baseTime); setReason(''); } }, [open, initial, initialTime, base, baseTime, boss]);
   const key = (d: string, t: string | null) => `${d} ${t ?? '24:00'}`; // 시각 없음 = 그날 끝(서버와 같은 비교)
   const same = key(to, time) === key(base, baseTime);
   const earlier = key(to, time) < key(base, baseTime);

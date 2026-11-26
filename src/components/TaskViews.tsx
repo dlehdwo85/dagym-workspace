@@ -831,20 +831,36 @@ function StatusChip({ t, onPatch, plain }: { t: Task; onPatch: (t: Task, b: any)
 /** 마감일 칩 + 그 위의 투명 날짜 입력 (눌러서 바로 변경) */
 function DueEdit({ t, onPatch }: { t: Task; onPatch: (t: Task, b: any) => void }) {
   const { user } = useSession();
-  const [ext, setExt] = useState<string | null | false>(false);
+  const [ext, setExt] = useState<string | null | false>(false); const [extT, setExtT] = useState<string | null | undefined>(undefined);
   const ownerDue = user.role === 'owner'; // 365차 #988: 대표는 요청자가 아니어도 바로(사유 창)
   const ex = extendRole(t, user.id, ownerDue);
   const requester = (t.requested_by ?? (t as Task & { created_by?: string }).created_by) === user.id;
   // V32 4: 담당자가 마감을 뒤로 미루면 바로 바꾸지 않고 연장 요청 창(사유 필수)으로 · #988 대표(요청자 아님)는 마감 바꾸기 = 사유 창(바로 반영)
-  const change = (v: string | null) => ((ex === 'request' || (ownerDue && !requester)) && t.due_date && v && (ex === 'boss' ? v !== t.due_date : v > t.due_date) ? setExt(v)
-    : ex === 'request' && t.due_date && !v ? setExt(null) : onPatch(t, { dueDate: v }));
+  // 로컬 11/27 18번(대표 '마감일자 고르고 시간 선택하는게 없네요'): 목록 마감 칩에서도 시각 — 날짜와 같은 규칙(담당자가 뒤로 미루면·대표가 남의 업무를 바꾸면 [마감 연장] 창, 그 밖은 바로).
+  // true 를 돌려주면 팝오버를 닫음(연장 창이 열림) · 마감일 지우기 = 시각도 지움(한 번에)
+  const viaExt = ex === 'request' || (ownerDue && !requester);
+  const cleared = useRef(false);
+  const change = (v: string | null): boolean => {
+    if (viaExt && t.due_date && v && (ex === 'boss' ? v !== t.due_date : v > t.due_date)) { setExtT(undefined); setExt(v); return true; }
+    if (ex === 'request' && t.due_date && !v) { setExtT(undefined); setExt(null); return true; }
+    if (!v) cleared.current = true;
+    onPatch(t, v ? { dueDate: v } : { dueDate: null, dueTime: null }); return false;
+  };
+  const changeTime = (v: string | null): boolean => {
+    if (cleared.current) { cleared.current = false; return false; } // 마감일 지우기에서 이어 온 호출 — 위에서 함께 지움
+    const cur = t.due_time?.slice(0, 5) ?? null; if ((v ?? null) === cur) return false;
+    if (!t.due_date) { onPatch(t, { dueDate: todayStr(), dueTime: v }); return false; } // 날짜 없이 시각만 고르면 오늘
+    const k = (x: string | null) => x ?? '24:00'; // 시각 없음 = 그날 끝(서버와 같은 비교)
+    if (viaExt && (ex === 'boss' || k(v) > k(cur))) { setExtT(v); setExt(t.due_date); return true; }
+    onPatch(t, { dueTime: v }); return false;
+  };
   // 로컬 검수 10/17(390폭): 마감 칩이 92px 보다 넓으면(시간 포함 등) 왼쪽으로 넘쳐 둘째 줄 칩을 덮음 → 휴대폰은 칩 폭 그대로·줄 흐름 안에서
   return (
     // 308차 #866: 마감 칸은 고정 폭·왼쪽 맞춤(칩 길이가 달라도 줄마다 왼쪽 끝이 세로로 맞게)
     <span className="inline-flex w-[136px] shrink-0 justify-start max-lg:w-auto" data-testid="due-cell">
       {/* 378차(대표 11/06 '업무 D-day 옆에는 시간'): 목록 마감 칩에도 시각(11/9 18:00 D-3) */}
-      <DuePicker value={t.due_date} time={t.due_time} status={t.status} onChange={change} label={`${t.title} 마감일`} onExtend={ex ? () => setExt(null) : undefined} extendLabel="마감 연장" />
-      {ex && <ExtendDialog task={t} boss={ex === 'boss'} open={ext !== false} initial={ext || null} onClose={() => setExt(false)} />}
+      <DuePicker value={t.due_date} time={t.due_time} status={t.status} onChange={change} onTime={changeTime} label={`${t.title} 마감일`} onExtend={ex ? () => { setExtT(undefined); setExt(null); } : undefined} extendLabel="마감 연장" />
+      {ex && <ExtendDialog task={t} boss={ex === 'boss'} open={ext !== false} initial={ext || null} initialTime={extT} onClose={() => { setExt(false); setExtT(undefined); }} />}
     </span>
   );
 }

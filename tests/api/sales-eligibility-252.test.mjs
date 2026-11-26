@@ -73,12 +73,12 @@ test('자르기·뽑기(규칙): 세 가지 공고문 꼴 → 절(머리부터 �
   assert.equal(E.eligSay({ error: '첨부 공고문 없음' }), '공고문에서 참가자격을 못 찾음 — 원문 확인(이유: 첨부 공고문 없음)');
   assert.equal(E.eligSay({ line: '업종 체육시설업', error: '글 뽑기 오류' }), '업종 체육시설업 · 공고문에서 참가자격을 못 찾음 — 원문 확인(이유: 글 뽑기 오류)');
   // 253차 운영 공고문 꼴 — 실적이 빠지던 것
-  assert.equal(E.lineOf(E.eligibilitySection(R1)), '자본금 5억 이상 · 실적 최근 5년 아파트 커뮤니티 시설 5개 단지 이상 위탁운영');
-  assert.equal(E.lineOf(E.eligibilitySection(R2)), '자본금 2억 이상 · 실적 5년 공동주택 1개 단지 수영장운용');
+  assert.equal(E.lineOf(E.eligibilitySection(R1)), '자본금 5억 이상 · 실적 최근 5년 아파트 커뮤니티 시설 5개 단지 이상 위탁운영(공고일 기준)');
+  assert.equal(E.lineOf(E.eligibilitySection(R2)), '자본금 2억 이상 · 실적 5년 공동주택 1개 단지 수영장운용(공고일 기준)'); // 로컬 11/27 16번: '공고일 현재로부터' = 기준일
   assert.equal(E.lineOf(E.eligibilitySection(COMMON)), E.COMMON_ONLY);
   // 256차(로컬 10/29 08:35 운영 오탐 3종) a) 지침 이름 「주택관리업자 및 사업자 선정지침」 속 '주택관리업'은 면허 아님 b) '완료실적이 3 건 이상' 건수 붙임 c) '입찰참가자격 등록 … 콜센터' 줄은 절 머리 아님
   const R3 = `3. 입찰 참가자격\n가. 「주택관리업자 및 사업자 선정지침」 제26조에 해당하지 않는 사업자\n나. 입찰공고일 현재 자본금 5억원 이상인 사업자\n다. 입찰공고일 현재 최근 5년간 900 세대 이상 공동주택의 주민공동시설 위탁운영 완료실적이 3 건 이상인 사업자\n※ 실적은 계약기간이 끝난 실적만 인정\n4. 현장설명`;
-  assert.equal(E.lineOf(E.eligibilitySection(R3)), '자본금 5억 이상 · 실적 최근 5년 900세대 이상 공동주택의 주민공동시설 위탁운영 3건 이상');
+  assert.equal(E.lineOf(E.eligibilitySection(R3)), '자본금 5억 이상 · 실적 최근 5년 900세대 이상 공동주택의 주민공동시설 위탁운영 완료 3건 이상(공고일 기준)'); // 로컬 11/27 16번: '완료'·기준일은 줄에 남김(운영 중 계약 불인정)
   assert.ok(E.eligibilitySection(R3).includes('완료실적이 3 건 이상') && E.eligibilitySection(R3).includes('끝난 실적만 인정'), '원문엔 그대로');
   assert.equal(E.lineOf(E.eligibilitySection('5. 입찰참가자격\n가. 「주택관리업자 및 사업자 선정지침」 제26조 제1항 각 호에 해당하지 않는 자\n나. 정보통신공사업 등록 업체\n6. 제출서류')), '정보통신공사업');
   assert.equal(E.lineOf(E.eligibilitySection('4. 참가자격\n가. 주택관리업자 및 사업자 선정지침 제26조에 해당하지 않는 자\n5. 기타')), E.COMMON_ONLY, '꺾쇠 없는 지침 이름도');
@@ -307,7 +307,7 @@ test('#790 사진 공고문: 글이 없으면 AI 비전으로 참가자격 절�
   await ctx.owner.ok('POST', '/api/sales/eligibility', { id: N.PHOTO.id }); // 같은 첨부 — 다시 부르지 않고 읽은 글 그대로
   assert.equal((await sql`select count(*)::int n from ai_usage where purpose = 'sales_eligibility_vision'`)[0].n, 1);
   const it = (await ctx.owner.ok('GET', '/api/sales/src?view=bids&tab=all')).items.find((x) => x.noticeNo === N.PHOTO.bid);
-  assert.deepEqual([it.elig.vision, it.elig.line], [true, '자본금 5억 이상 · 실적 최근 5년 아파트 커뮤니티 시설 5개 단지 이상 위탁운영']);
+  assert.deepEqual([it.elig.vision, it.elig.line], [true, '자본금 5억 이상 · 실적 최근 5년 아파트 커뮤니티 시설 5개 단지 이상 위탁운영(공고일 기준)']);
   const { aiPurposeLabel } = await import('../../src/components/aiPurpose.ts');
   assert.equal(aiPurposeLabel('sales_eligibility_vision'), '입찰 참가자격 사진 읽기(회사 한도 밖)');
 });

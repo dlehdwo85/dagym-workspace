@@ -50,6 +50,7 @@ import { features1181 } from './features1181.step.mjs';
 import { watch1181 } from './watch1181.step.mjs';
 import { homeLayout1126 } from './homeLayout1126.step.mjs';
 import { overlapSweep } from './overlapSweep.step.mjs';
+import { dueTime1127 } from './dueTime1127.step.mjs';
 import { orgTree } from './orgTree.step.mjs';
 import { orgLevels } from './orgLevels.step.mjs';
 import { chatKeyboard } from './chatKeyboard.step.mjs';
@@ -410,6 +411,7 @@ await step('③ 목록에서 마감일 변경 → 보드·캘린더·타임라�
   await row.getByTestId('due-picker').click();
   await owner.getByLabel('보기 전환 시험 업무 마감일 날짜 선택').fill(nd);
   await owner.waitForTimeout(800);
+  await owner.keyboard.press('Escape'); // 로컬 11/27 18번: 날짜를 고른 뒤에도 시각을 고르도록 열려 있음
   assert.equal((await ctx.owner.ok('GET', `/api/tasks/${t3}`)).task.due_date, nd);
   await owner.getByRole('tab', { name: '보드' }).click();
   await owner.getByTestId('board').locator(`[data-task-id="${t3}"]`).getByText(new RegExp(`${Number(nd.slice(5, 7))}\\. ${Number(nd.slice(8))}\\.`)).waitFor();
@@ -1097,6 +1099,7 @@ await step('W-2 업무 화면: 기본 전체·담당자별 묶음, "+ 업무 추
   const row = owner.locator(`[data-row="${t.id}"]`);
   await row.getByTestId('due-picker').click();
   await owner.getByRole('button', { name: /^내일/ }).click();
+  await owner.keyboard.press('Escape'); // 로컬 11/27 18번: 날짜를 고른 뒤에도 시각 고르기로 열려 있음
   await row.getByTestId('assignee-picker').click();
   await owner.getByRole('dialog').getByRole('button', { name: /^최매니저/ }).click();
   await owner.waitForTimeout(800);
@@ -2735,6 +2738,7 @@ await step('#1181 회사별 기능 켜기: 설정 › 쓰는 기능에서 점검
 await step('#1181 내 수집 원천: 데이터 설정 원천 줄·최근 글·[업무로]', () => watch1181({ owner, ctx, sql, BASE, SHOTS }));
 await step('대표 11/26 홈 구성: 칸 1~7개 줄마다 고르게(375·412·1880 빈 자리 없음)·휴대폰 회사 현황 목록·세 줄 끝 맞춤·[새로 만들기] 없음·짧은 출근 문구', () => homeLayout1126({ browser, desk, BASE, SHOTS }));
 await step('대표 11/26 겹침 금지: 375·412·1024·1880 × 주요 화면 14곳 — 글자·칩·아이콘 겹침·칸 밖 넘침 0건 · 휴대폰 폭 낱말 중간 줄바꿈 0건', () => overlapSweep({ browser, desk, ctx, sql, BASE, SHOTS }));
+await step('로컬 11/27 18~20: 업무 목록 마감 칩에서 시각 고르기(대표 14:00 바로 · 담당자 뒤로 미루면 연장 창 · 앞당기면 바로) · 빠른 선택 날짜 겹침 없음 · 마감일 지우기 = 시각도', () => dueTime1127({ browser, desk, ctx, BASE, SHOTS, login }));
 await step('대표 10/20 ① 플랫폼 운영 [고객사 추가]: 회사명·업종 여러 개·규모·체험 기간·시작 공간·대표 → 초대 링크 → 회사 관리 초대 대기·공간·메모·감사 기록', () => platformAdd({ owner, BASE, SHOTS, sql }));
 await step('대표 10/20 15:15 부서·팀 재정비: 트리(들여쓰기·경로 "영업부 › 영업1팀")·상위 부서·장 1명 → 초대 \'소속\' 하나(주 소속 + 겸직, 고급 접힘) → 목록 경로·접근 조직 자동', () => orgTree({ owner, ctx, BASE, SHOTS }));
 await step('영업 S2 1차(대표 14:15): 허브 일괄 [영업 진행으로] → 업무 자동 → 홈 오늘 할 일 7묶음·요약 타일·진행표 → 업무 영업 원천 배지 → 계약만료·재입찰', () => salesTodo({ owner, ctx, sql, BASE, SHOTS }));

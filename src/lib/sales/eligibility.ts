@@ -91,6 +91,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   let found: { text: string; items: EligItem[]; line: string } | null = null; let used: SrcFile | null = null; let tried: SrcFile | null = null; const errs: string[] = [];
   let full: string | null = null; // 264차: 절을 찾은 공고문 글 전체(잘린 절을 더 길게 다시 자를 때)
   const needDl = needsDocDeadline(row); let dl: { at: string; label: string } | null = null; // 259차
+  let docText: string | null = null;
   let photo: { f: SrcFile; doc: PhotoDoc } | null = null; let by: 'vision' | undefined; let visionUsd: number | undefined; let visionDone = false; let visionSkip = false; let visionStop: unknown = null;
   for (const f of files) {
     tried = tried ?? f;
@@ -103,6 +104,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
         if (terr === PHOTO_ONLY && !photo) photo = { f, doc: { data: got.data, fileName: got.fileName, mime: got.mime } }; }
       if (!text) { errs.push(terr ?? '본문 글자 없음'); continue; }
       if (needDl && !dl) dl = docDeadline(text, row.posted_date ? String(row.posted_date) : null);
+      docText ??= text; // 대표 11/27(로컬 7·8): 현장설명 필수·서로 다른 값
       found = eligibilityOf(text, row); used = f;
       if (found) { full = text; break; }
       errs.push('참가자격 절 없음');
@@ -119,6 +121,7 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
       if (!text) { errs.push(`${d.name}: 글 없음`); continue; }
       tried = tried ?? { url: d.url, name: d.name };
       if (needDl && !dl) dl = docDeadline(text, row.posted_date ? String(row.posted_date) : null);
+      docText ??= text;
       found = eligibilityOf(text, row);
       if (found) { full = text; used = { url: d.url, name: d.name }; break; }
       errs.push(`${d.name}: 참가자격 절 없음`);
@@ -172,7 +175,8 @@ export async function readEligibility(id: string, opt: { maxFiles?: number; visi
   const st = String(row.source_type ?? ''); const ext = String(row.source_external_id ?? '');
   // 259차: 공고문에서 제출 마감을 찾으면 마감으로(deadline_src 'doc' — 다음 수집의 임시 마감이 덮지 않음, API 에 진짜 입찰 마감이 오면 그것으로)
   const dlPatch = dl ? { deadline_at: dl.at, deadline_src: 'doc', doc_deadline_label: jsonSafe(dl.label) } : {};
-  await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: out, ...dlPatch } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices'
+  const dp = docText ? (await import('./bodyFit')).docPatch(docText) : {}; const docP = Object.fromEntries(Object.entries(dp).map(([k, v]) => [k, typeof v === 'string' ? jsonSafe(v) : Array.isArray(v) ? v.map((x) => jsonSafe(String(x))) : v]));
+  await sql`update sales_src_rows set row = row || ${sql.json({ eligibility: out, ...dlPatch, ...docP } as never)}::jsonb where scope = 'global' and tbl = 'procurement_notices'
     and (src_id = ${id} ${st && ext ? sql`or (row->>'source_type' = ${st} and row->>'source_external_id' = ${ext})` : sql``})`; // synced_at 은 그대로(메일 '고침'으로 안 셈)
   await noteElig(sql, id, String(row.title ?? ''), { vision: visionStop ? 'stop' : visionDone ? 'done' : null, stopErr: visionStop, ai: out.ai });
   return out;

@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '../../db';
 import { sourceFiles } from '../files';
-import { DAGYM_KEYWORDS, DAGYM_TITLE_WORDS, HILINK_KEYWORDS, PROCUREMENT_ETL_FIELDS, aptContext, initialClassification, matchFit, planNoticeBatch } from './procurement';
+import { DAGYM_KEYWORDS, DAGYM_TITLE_WORDS, HILINK_KEYWORDS, PROCUREMENT_ETL_FIELDS, aptContext, bodyFitOf, initialClassification, matchFit, planNoticeBatch } from './procurement';
 import { COMPLEX_RANK, complexMatchKeys, planBatch, prospectFromKaptSelection } from './prospects';
 import type { CollectorResult } from './types';
 
@@ -87,11 +87,11 @@ export async function refitNotices(opt: { days?: number; now?: Date } = {}): Pro
   const from = new Date(now.getTime() - days * 864e5).toISOString();
   const td = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(now);
   const t = now.toISOString();
-  const fitOf = (row: any) => matchFit(String(row.title), row.bid_category ?? null, row.task_scope ?? null, aptContext(row));
+  const fitOf = (row: any) => { const f0 = matchFit(String(row.title), row.bid_category ?? null, row.task_scope ?? null, aptContext(row)); return bodyFitOf(row.body_fit, f0) ?? f0; }; // 대표 11/27: 공고문 본문 판정
   // 191차: 줄이 많아도(K-apt 전체 공고 등) 끝까지 — 예전엔 순서 없이 2만 줄까지만 읽어 일부 공고를 다시 판정하지 못했다. 판정에 쓰는 칸만 5천 줄씩
   const page = async (related: boolean, after: string) => sql<{ src_id: string; row: any }[]>`select src_id, jsonb_build_object('title', row->'title', 'bid_category', row->'bid_category',
       'task_scope', row->'task_scope', 'source_type', row->'source_type', 'issuer', row->'issuer', 'deadline_at', row->'deadline_at', 'refound_at', row->'refound_at', 'refit_at', row->'refit_at',
-      'classification', row->'classification', 'fit_business', row->'fit_business', 'matched_keywords', row->'matched_keywords') as row
+      'classification', row->'classification', 'fit_business', row->'fit_business', 'matched_keywords', row->'matched_keywords', 'body_fit', row->'body_fit') as row
     from sales_src_rows where scope = ${SCOPE} and tbl = 'procurement_notices' and not gone and src_id > ${after}
     and ${related ? sql`coalesce(row->>'related', 'false') = 'true'` : sql`coalesce(row->>'related', 'false') <> 'true'`} and coalesce(row->>'source_type', '') <> 'vendor_recruit'
     and (${related ? sql`row ? 'refit_at' or ` : sql``}coalesce(row->>'first_seen_at', row->>'created_at', synced_at::text) >= ${from}) order by src_id limit 5000`;

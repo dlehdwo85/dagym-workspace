@@ -1509,6 +1509,8 @@ function BidTermsLine({ n, bdd }: { n: any; bdd: number | null }) {
           현장설명{b.kind && b.kind !== '공고문 참조' ? ` ${b.kind}` : ''}{!past && bdd !== null ? (bdd === 0 ? ' 오늘' : ` D-${bdd}`) : past ? ' 지남' : ''}</span>
         <span className="text-ink-2">{[b.at ? mdhm(b.at) : b.kind === '공고문 참조' ? '일시 공고문 참조' : null, b.place, b.at && b.kind === '공고문 참조' ? '필수 여부 공고문 참조' : null].filter(Boolean).join(' · ')}</span></div>}
       {n.elig && <EligLine e={n.elig} n={n} />}
+      {n.bodyWhy && <p className="text-ink-2" data-testid="bid-body-why">{n.bodyWhy}</p>}
+      {n.docChecks?.length > 0 && <p className="text-amber-800" data-testid="bid-doc-checks"><span className="font-medium">발주처에 물어볼 것</span> {(n.docChecks as string[]).join(' · ')}</p>}
       {n.terms && <details className="group" data-testid="bid-terms-more"><summary className="cursor-pointer list-none text-ink-2 [&::-webkit-details-marker]:hidden"><span className="font-medium text-ink">입찰 방식</span> {n.terms} <span className="text-ink-3 group-open:hidden">▾</span></summary>
         <dl className="mt-1 grid grid-cols-[7rem_1fr] gap-x-2 gap-y-0.5 rounded-input bg-slate-50 p-2">{(n.termRows as [string, string][] ?? []).map(([k, v]) => [<dt key={k} className="text-ink-3">{k}</dt>, <dd key={k + 'v'} className="break-words">{v}</dd>])}</dl></details>}
     </div>
@@ -1555,7 +1557,7 @@ function BidCard({ n, onOpen, onChange, canWrite }: { n: any; onOpen?: () => voi
       {n.prevCancel && <div className="mt-0.5 text-xs text-amber-800" data-testid="bid-prev-cancel">재공고 — 이전 공고 취소{n.prevCancel.day ? `(${kd(n.prevCancel.day)})` : ''}{n.prevCancel.reason ? ` · 사유: ${n.prevCancel.reason}` : ''}
         {/* 344차(#925 ②): 이전 공고를 넘겨 만든 업무의 상태 — 재공고는 되살리지 않고 다시 넘겨 새 업무 */}
         {n.prevCancel.task && <> · <Link href={`/tasks/${n.prevCancel.task.id}`} className="underline" data-testid="bid-prev-cancel-task">이전 업무 {n.prevCancel.task.done ? '완료됨' : '열려 있음(확인 필요)'}</Link></>}</div>}
-      {(n.briefing || n.terms || n.elig?.line || n.elig?.text || n.elig?.error) && <BidTermsLine n={n} bdd={bdd} />}
+      {(n.briefing || n.terms || n.elig?.line || n.elig?.text || n.elig?.error || n.bodyWhy || n.docChecks) && <BidTermsLine n={n} bdd={bdd} />}
       {(won(n.amount) || n.winner) && <div className="mt-0.5 text-xs text-ink-2">{won(n.amount) && <>예산 {won(n.amount)}</>}{n.winner && <>{won(n.amount) ? ' · ' : ''}낙찰 {n.winner}{won(n.awardAmount) ? ` · ${won(n.awardAmount)}` : ''}{n.awardDate ? ` (${kd(n.awardDate)})` : ''}</>}</div>}
       <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3" data-testid="bid-dates"><span className="hidden md:inline">{[n.noticeDate && `공고 ${kd(n.noticeDate)}`, n.posted && `DB 등록 ${kd(n.posted)}`].filter(Boolean).join(' · ')}</span>{n.todayNew && <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white" data-testid="bid-today">오늘 등록</span>}{n.todayLabel && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900" title="오늘 탭에 있는 까닭 — 공고일과 수집 시각이 다름" data-testid="bid-today-why">{n.todayLabel}</span>}</div>
       <BidHistory h={n.history} />

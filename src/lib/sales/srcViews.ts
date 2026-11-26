@@ -5,7 +5,7 @@ import { badRequest, notFound } from '../errors';
 import { tenantOf, type SessionUser } from '../types';
 import { type BizCat, bizKey, listBizCats, matchBiz } from './bizCats';
 import { vendorDateOk } from './collectors/vendorRules';
-import { isAwardResult, onbidSale, partnerNeed, zonedKst } from './collectors/procurement';
+import { aptContext, isAwardResult, matchFit, onbidSale, partnerNeed, zonedKst } from './collectors/procurement';
 import { groupNotices, isCancel, oneCardPerNotice, plainTitle, renoticeKey, skipLinks } from './noticeGroups';
 import { fixG2bUrl, searchHint } from './sourceLink';
 import { BASE_ONLY_TBLS, hubTabsOn, ownsMoved } from './hubTabs';
@@ -174,6 +174,9 @@ const notice = (r: any, cats: BizCat[] = []) => { const m = matchBiz(r, cats); r
   terms: termsLine(r, { limits: false }), termRows: termsRows(r), briefing: briefingOf(r),
   // 252차 #786: 참가자격 = 첨부 공고문 '참가자격' 절(원문·뽑은 요건 한 줄·못 찾은 이유) — 아직 안 읽었으면 나라장터 API 업종·지역만
   elig: eligView(r),
+  // 대표 11/27(로컬 6·8): 공고문 본문으로 관련이 된 까닭('공고문 본문에서 찾음: …') · 공고문 안 서로 다른 값(관리사무소에 물어볼 것)
+  bodyWhy: r.body_fit?.fit && !matchFit(String(r.title ?? ''), r.bid_category ?? null, r.task_scope ?? null, aptContext(r)).fit ? String(r.body_fit.why ?? '') || null : null,
+  docChecks: Array.isArray(r.doc_checks) && r.doc_checks.length ? r.doc_checks.map(String).slice(0, 4) : null,
   // #751(로컬 10/28 17:25): 취소 사유(K-apt 상세 '낙찰/유찰/취소 사유')
   cancelReason: /취소/.test(String(r.current_status ?? '')) ? pick(r, 'result_note') : null,
   detail: { tasks: pick(r, 'main_tasks', 'scope_of_work', 'tasks') ?? (/^\s*(첨부\s*)?공고문\s*참조\s*$/.test(String(r.task_scope ?? '')) ? null : pick(r, 'task_scope')),

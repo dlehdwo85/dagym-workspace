@@ -25,6 +25,8 @@ export const GET = handler(async ({ req, user }) => {
   if (u.searchParams.get('g2b') === 'nodl') return { g2bNoDeadline: await (await import('@/lib/sales/collectors/g2b')).g2bNoDeadline() }; // 259차: 입찰 마감이 API 에 없는 나라장터 공고 수
   if (u.searchParams.get('g2b') === 'dates' && /^[A-Za-z0-9]{6,24}(?:-\d{1,3})?$/.test(no)) return { g2bDates: await (await import('@/lib/sales/collectors/g2b')).probeG2bDates(no) };
   // 대표 11/27(로컬 긴급 ④): 판정 규칙을 바꾼 뒤 한 번 돈 다시 판정의 결과 — 새로 관련이 된 공고(단지·마감·마감 전 여부)와 분류 빈 운영 공고 상세 읽기 수
+  // 대표 11/27(로컬 9 '하루 몇 건 대상인지'): 공고문 본문 판정 대상 — 최근 14일 날짜별 제목 후보·관련 아님·분류 통과·분류 모름·읽음·올림
+  if (u.searchParams.get('bodyfit') === 'count') return { bodyFit: await (await import('@/lib/sales/bodyFit')).bodyFitCounts(14) };
   if (u.searchParams.get('refit') === 'last') { const [s] = await db()<{ value: any }[]>`select value from app_settings where key = 'fit_rules_refit'`; return { fitRulesRefit: s?.value ?? null }; }
   const out = await lookupNotices({ no: u.searchParams.get('no'), q: u.searchParams.get('q') }, user);
   // 241차(로컬 10/28 19:20): probe=1 이면 K-apt 상세를 지금 받아 응답 코드·길이·취소 여부만(저장 안 함) — 수집이 그 번호 상세를 받는지 확인용
@@ -33,11 +35,17 @@ export const GET = handler(async ({ req, user }) => {
 });
 /** 지금 규칙으로 다시 판정 — 수집기 실행 때도 자동으로 돎. days = 처음 본 때 기준 최근 n일(기본 120).
  *  185차 '관련 아님' 줄 올리기 + 191차(대표 10/27 정정) 지금 규칙이 뺀 사업 내리기·다시 판정이 올린 줄 되돌리기 */
-const input = z.object({ refit: z.literal(true), days: z.number().int().min(1).max(1100).optional(), rules: z.literal(true).optional() });
+const input = z.object({ refit: z.literal(true), days: z.number().int().min(1).max(1100).optional(), rules: z.literal(true).optional(), body: z.literal(true).optional() });
 export const POST = handler(async ({ req, user }) => {
   if (!user.platformAdmin) throw notFound();
   const i = await body(req, input);
   // 대표 11/27: rules = 판정 규칙을 바꾼 뒤의 다시 판정(분류 빈 K-apt 운영 공고 상세 읽기 + 최근 60일 다시 판정)을 지금 한 번 — 정기 실행을 기다리지 않을 때
+  // 대표 11/27(로컬 6): body = 공고문 본문 판정을 지금 한 번(정기 실행과 같은 대상·규칙, 한 번에 10건·40초)
+  if (i.body) {
+    const b = await (await import('@/lib/sales/bodyFit')).bodyFitTick({ force: true, max: 10, budgetMs: 40000 });
+    await audit(db(), user.id, 'platform.sales_notices.body_fit', 'sales_src_rows', null, b).catch(() => {});
+    return { bodyFit: b };
+  }
   if (i.rules) {
     const rr = await (await import('@/lib/sales/collectors/kapt')).fitRulesRefit({ force: true, deadlineMs: 40000 });
     await audit(db(), user.id, 'platform.sales_notices.refit_rules', 'sales_src_rows', null, rr ?? {}).catch(() => {});

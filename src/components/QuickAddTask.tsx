@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, broadcastRefresh, useApi } from './client';
 import { Button, Field, Modal, cx, fmtMinutes, inputCls, toast, todayStr } from './ui';
 import { UserSelect } from './pickers';
-import { BellChip, RepeatChip, noteAway, quickDues, voiceInput } from './TaskQuick';
+import { BellChip, RepeatChip, noteAway, quickDueChoices, voiceInput } from './TaskQuick';
 import { LibraryPickModal } from './Attachments';
 import { VoiceButton } from './voice';
 import { parseTaskText } from '@/lib/nlparse';
@@ -325,7 +325,7 @@ export function QuickAddTask({ open, onClose, defaults, onCreated, switchTo }: {
           </div>
         )}
         <div className="flex flex-wrap gap-1.5" aria-label="마감 빠른 선택">
-          {quickDues().map(([l, d]) => (
+          {quickDueChoices().map(([l, d]) => (
             <button key={l} type="button" onClick={() => set('dueDate')(d)}
               className={cx('rounded-full border px-2.5 py-1 text-xs font-medium', f.dueDate === d ? 'border-brand-600 bg-brand-600 text-white' : 'border-line bg-white text-ink-2 hover:border-slate-300')}>{l}</button>
           ))}

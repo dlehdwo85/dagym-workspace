@@ -108,10 +108,12 @@ export function sportReqs(section: string | null | undefined): SportReq[] {
     const head = t.slice(Math.max(0, (m.index ?? 0) - 30), m.index ?? 0).split(/[.;]|※/).pop() ?? '';
     const name = m[0].replace(/\s+/g, ''); // 원문 이름 그대로(빈칸만 뺌) — 생활체육지도자(예전 이름)도 같은 자격으로 대조
     const g = clause.match(/^[^.;]{0,8}?([123])\s*급(?:\s*(이상)|\s*(?:또는|이나|혹은|·|,|및|\/)\s*([123])\s*급(?:\s*(이상))?)?/);
-    const grades = g ? [Number(g[1]), ...(g[3] ? [Number(g[3])] : [])] : [];
+    // 로컬 11/27 15번(나노시티역롯데캐슬 '2급 이상 생활스포츠지도사 5인 이상'): 급수가 이름 앞에 온 문장
+    const pg = g ? null : t.slice(Math.max(0, (m.index ?? 0) - 14), m.index ?? 0).match(/([123])\s*급\s*(이상)?\s*(?:의\s*)?$/);
+    const grades = g ? [Number(g[1]), ...(g[3] ? [Number(g[3])] : [])] : pg ? [Number(pg[1])] : [];
     const c = clause.match(/(\d+)\s*(?:명|인)\s*(이상)?/);
     const bonus = /가점|우대|가산/.test(clause);
-    out.push({ name, grades, orMore: !!(g?.[2] || g?.[4]) && Math.max(...grades) > 1, count: c ? Number(c[1]) : null, insured: /4\s*대\s*보험/.test(clause + head), bonus,
+    out.push({ name, grades, orMore: !!(g?.[2] || g?.[4] || pg?.[2]) && Math.max(...grades) > 1, count: c ? Number(c[1]) : null, insured: /4\s*대\s*보험/.test(clause + head), bonus,
       required: !bonus && /필수|반드시|보유한?\s*(?:업체|자)\s*(?:일|이어야|여야)|(?:일|할)\s*것|하여야|이어야/.test(clause) });
   }
   // 같은 자격·급수는 하나로(인원·조건이 있는 쪽)
@@ -156,8 +158,11 @@ export function eligibilityItems(section: string | null | undefined): EligItem[]
     const per = p1[1].replace(/현재로부터|공고일\s*(?:현재|기준)(?:로부터)?/g, '').replace(/(\d+)\s*년\s*(?:간|동안)/, '$1년').trim();
     // 256차(로컬 10/29 08:35 '… 위탁운영 완료실적이 3 건 이상'): '실적' 뒤 건수도 붙임('완료'·'완료실적만 인정'은 원문에만)
     const cnt = t.slice((p1.index ?? 0) + p1[0].length, (p1.index ?? 0) + p1[0].length + 16).match(/^\s*(?:이|가|은|는)?\s*(\d[\d,]*)\s*(건|개소|단지|회|곳|개)\s*(이상)?/);
-    const base = one(`실적 ${per} ${p1[2]} ${p1[3]} ${p1[4].replace(/\s*완료$/, '')}`).replace(/\s*(?:이|가|의|을|를)$/, '').replace(/(\d)\s+(건|개소|단지|회|세대|곳|개)/g, '$1$2').slice(0, cnt ? 52 : 60);
-    out.push({ k: 'perf', label: cnt ? `${base} ${cnt[1]}${cnt[2]}${cnt[3] ? ' 이상' : ''}` : base });
+    // 로컬 11/27 16번(남위례역아테라 '입찰 마감일 현재 … 운영 완료 실적'): '완료'(운영 중인 계약은 불인정)·기준일(마감일·공고일 현재)은 자격 판단을 바꾸는 말이라 줄에 남김 · ' 의' 앞 빈칸 없앰
+    const pre = `${t.slice(Math.max(0, (p1.index ?? 0) - 16), p1.index ?? 0)} ${p1[1]}`;
+    const basis = /마감일?\s*(?:현재|기준)/.test(pre) ? '마감일 기준' : /공고일\s*(?:현재|기준)/.test(pre) ? '공고일 기준' : null;
+    const base = one(`실적 ${per} ${p1[2]} ${p1[3]} ${p1[4]}`).replace(/\s+의(?=\s|$)/g, '의').replace(/\s*(?:이|가|의|을|를)$/, '').replace(/(\d)\s+(건|개소|단지|회|세대|곳|개)/g, '$1$2').slice(0, cnt ? 52 : 60);
+    out.push({ k: 'perf', label: `${cnt ? `${base} ${cnt[1]}${cnt[2]}${cnt[3] ? ' 이상' : ''}` : base}${basis ? `(${basis})` : ''}` });
   } else {
     const perf = t.match(new RegExp(`((?:최근|과거)\\s*\\d+\\s*년\\s*(?:간|이내|동안)?[^.;]{0,40}?${UNIT})`)) ?? t.match(new RegExp(`(실적[^.;]{0,50}?${UNIT})`));
     if (perf && /실적|수행|위탁\s*운영|용역|공사/.test(perf[1] + t.slice(Math.max(0, (perf.index ?? 0) - 15), perf.index ?? 0) + t.slice((perf.index ?? 0) + perf[0].length, (perf.index ?? 0) + perf[0].length + 20))) out.push({ k: 'perf', label: `실적 ${one(perf[1].replace(/(?:사업\s*)?실적\s*[:：]?\s*/g, ' ').replace(/(\d+)\s*년\s*간/, '$1년').replace(/\s*이상$/, ' 이상'))}` });
