@@ -92,26 +92,31 @@ export function docBriefing(text: string): { kind: '필수' | '없음'; label: s
 }
 /** 공고문 안 서로 다른 값 — 입찰가 산정 개월 수(× n개월·계약기간 n년/n개월) · 실적 세대 기준. 관리사무소에 물어볼 것 */
 export function docChecks(text: string): string[] {
-  const t = String(text ?? '').replace(/\s+/g, ' ');
+  const raw = String(text ?? '').replace(/\r/g, ''); const t = raw.replace(/\s+/g, ' ');
   const out: string[] = [];
   // 로컬 11/27 21번(서희스타힐스: 본문 9-바 '월간 산출 총금액 × 계약기간 36개월' · 산출내역서 '월청구금액 * 24개월' · 계약기간 '2년'): 곱하는 개월 수는 출처별로(본문·산출내역서), 계약 기간은 따로
   // 로컬 11/27 25번(서희스타힐스 hwpx 원문): 본문 9-바 '월간 산출 총금액에서 계약기간 36개월을 곱하여' = 곱하기(× 없음) · 붙임4) 세부산출내역서 표 맨 아래 '월청구금액 * 24개월' —
   // 출처는 그 자리 앞의 가장 가까운 '붙임·별첨·별지' 머리에 '산출'이 있으면 산출내역서(표 칸이라 200자 안에 낱말이 없음), 붙임 머리가 없으면 본문
+  // 로컬 11/27 28번(서희 hwpx: 본문 9-바 뒤에 '붙 임 : 1. 입찰서 양식 … 4. 인건비 산출내역서 양식' 목록 줄, 앞쪽엔 '산출 내역서 참조' 같은 말): 머리는 줄 맨 앞의
+  // 번호 붙은 '붙임n)'·'[별첨n]'·'【별지 제n호' 꼴만 — 목록 줄·본문 속 '산출내역서'는 머리가 아님. 줄 정보가 없는 글이면 번호+괄호 꼴('붙임4)')만
+  const HEAD_LINE = /(?:^|\n)[ \t]*[\[【<(]?[ \t]*(?:붙[ \t]*임|별[ \t]*첨|별[ \t]*지)[ \t]*(?:제[ \t]*)?\d+[ \t]*(?:호)?[ \t]*[)\]】>.:]/g;
+  const HEAD_FLAT = /[\[【<(]?(?:붙\s*임|별\s*첨|별\s*지)\s*(?:제\s*)?\d+\s*(?:호)?\s*[)\]】>]/g;
+  const heads = (() => { const a = [...raw.matchAll(HEAD_LINE)]; return a.length ? a : [...raw.matchAll(HEAD_FLAT)]; })();
   const srcOf = (at: number) => {
-    const before = t.slice(0, at); let head: RegExpMatchArray | null = null;
-    for (const h of before.matchAll(/(?:붙\s*임|별\s*첨|별\s*지)\s*(?:제?\s*\d+\s*(?:호)?)?\s*[)\].:]?/g)) head = h;
-    const label = head ? t.slice(head.index ?? 0, (head.index ?? 0) + 60) : '';
-    return /산\s*출/.test(label) || /산출\s*내역/.test(t.slice(Math.max(0, at - 200), at)) ? '산출내역서' : head ? (label.match(/^[^\s)\].:]+\s*\d*/)?.[0]?.replace(/\s+/g, '') ?? '붙임') : '본문';
+    let head: RegExpMatchArray | null = null; for (const h of heads) { if ((h.index ?? 0) < at) head = h; else break; }
+    if (!head) return '본문';
+    const label = raw.slice(head.index ?? 0, (head.index ?? 0) + 70).replace(/\s+/g, ' ').trim();
+    return /산\s*출/.test(label) ? '산출내역서' : (label.match(/^[\[【<(]?\s*(?:붙\s*임|별\s*첨|별\s*지)\s*(?:제\s*)?\d+/)?.[0]?.replace(/[\s\[【<(]+/g, '') ?? '붙임');
   };
   const mult: { n: number; src: string; at: number }[] = []; const seenMul = new Set<string>();
   const addMul = (n: number, at: number) => { if (n < 6) return; const src = srcOf(at); const k = `${n}|${src}`; if (!seenMul.has(k)) { seenMul.add(k); mult.push({ n, src, at }); } };
-  for (const m of t.matchAll(/[×xX*]\s*(?:계약\s*기간\s*)?(\d{1,2})\s*개월/g)) addMul(Number(m[1]), m.index ?? 0);
-  for (const m of t.matchAll(/(\d{1,2})\s*개월\s*(?:을|를|로|으로)?\s*곱/g)) addMul(Number(m[1]), m.index ?? 0);
+  for (const m of raw.matchAll(/[×xX*]\s*(?:계약\s*기간\s*)?(\d{1,2})\s*개월/g)) addMul(Number(m[1]), m.index ?? 0);
+  for (const m of raw.matchAll(/(\d{1,2})\s*개월\s*(?:을|를|로|으로)?\s*곱/g)) addMul(Number(m[1]), m.index ?? 0);
   mult.sort((a, b) => a.at - b.at); // 공고문에 나온 차례대로
   const terms: { n: number; label: string }[] = [];
-  for (const m of t.matchAll(/계약\s*기간\s*[:：]?\s*(?:은|는)?\s*(?:계약일?\s*(?:로부터|부터)\s*)?(\d{1,2})\s*(년|개월)/g)) {
-    if (/[×xX*]\s*$/.test(t.slice(Math.max(0, (m.index ?? 0) - 3), m.index ?? 0))) continue; // '× 계약기간 36개월' = 곱하기
-    if (/^\s*(?:을|를|로|으로)?\s*곱/.test(t.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 8))) continue; // '계약기간 36개월을 곱하여' = 곱하기
+  for (const m of raw.matchAll(/계약\s*기간\s*[:：]?\s*(?:은|는)?\s*(?:계약일?\s*(?:로부터|부터)\s*)?(\d{1,2})\s*(년|개월)/g)) {
+    if (/[×xX*]\s*$/.test(raw.slice(Math.max(0, (m.index ?? 0) - 3), m.index ?? 0))) continue; // '× 계약기간 36개월' = 곱하기
+    if (/^\s*(?:을|를|로|으로)?\s*곱/.test(raw.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 8))) continue; // '계약기간 36개월을 곱하여' = 곱하기
     const n = Number(m[1]) * (m[2] === '년' ? 12 : 1); if (n < 6 || n > 120 || terms.some((x) => x.n === n)) continue;
     terms.push({ n, label: `계약 ${m[1]}${m[2]}` });
   }

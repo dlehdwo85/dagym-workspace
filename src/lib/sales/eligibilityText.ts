@@ -140,6 +140,18 @@ export function qualGaps(section: string | null | undefined, q: CompanyQuals | n
   return [...new Set(out)];
 }
 /** 절 → 요건 항목(자본금·등록·면허·실적·인력·신용등급·지역·현장설명 참가·공동도급). 공통 문구(제26조)만 있으면 [] */
+/** 낱말이 나오는 모든 자리가 참가 제한 사유 문장(…에 해당하지 않는 자 · 배우자·직계·임원인 업체) 안인지 */
+function restrictOnly(t: string, w: string): boolean {
+  const at = [...t.matchAll(new RegExp(w, 'g'))].map((x) => x.index ?? 0); if (!at.length) return false;
+  return at.every((i) => { const a = Math.max(t.lastIndexOf('. ', i), t.search(/./) - 1); const seg = t.slice(Math.max(0, a), i + 80).split(/\s[가-하]\.\s/).pop() ?? '';
+    return /제한\s*사유|해당하지\s*않|배우자|직계|임원인|결격/.test(seg); });
+}
+/** 로컬 11/27 29번(검암역 '업태에 소프트웨어 개발 · 공급 또는 정보 통신 서비스가 포함된 자'): 사업자등록 업태 요건 */
+function bizTypeOf(t: string): string | null {
+  const m = t.match(/업\s*태(?:\s*\(종목\))?\s*(?:에|가|로|은|는)?\s*[「"']?([^.;「」"']{3,50}?)[」"']?\s*(?:이|가|을|를)?\s*(?:포함된|포함되어|등록된|등재된|인)\s*(?:자|업체|사업자|법인)/);
+  if (!m) return null;
+  return one(m[1]).replace(/\s*[·ㆍ]\s*/g, '·').replace(/정보\s*통신/g, '정보통신').replace(/\s*(?:이|가)$/, '').slice(0, 40);
+}
 export function eligibilityItems(section: string | null | undefined): EligItem[] {
   const t = one(String(section ?? '')); if (!t) return [];
   const out: EligItem[] = [];
@@ -151,6 +163,7 @@ export function eligibilityItems(section: string | null | undefined): EligItem[]
   for (const w of LIC_WORDS) if (tl.replace(/\s/g, '').includes(w.replace(/\s/g, ''))) lic.add(w === '주민운동시설 위탁운영 등록' ? '주민운동시설 위탁운영 등록업체' : w);
   for (const m of tl.matchAll(/([가-힣]{2,10}(?:공사업|사업자|관리업|용역업|엔지니어링업))(?=\s*(?:등록|면허|허가|신고|,|·|및|를|을|\(|\)|$))/g)) if (![...lic].some((x) => x.includes(m[1]) || m[1].includes(x)) && !/^(?:해당|모든|입찰|참가|당해|기타)/.test(m[1])) lic.add(m[1]);
   if (lic.size) { const names = [...lic]; out.push({ k: 'license', label: `${names.join('·')}${/면허/.test(t) && !names.some((n) => /등록업체$/.test(n)) ? ' 면허' : ''}` }); }
+  const biz = bizTypeOf(t); if (biz) out.push({ k: 'license', label: `업태 ${biz}` });
   // 실적 — ① 'N년(간) … N개 단지 이상 (위탁)운영 실적'(숫자가 '실적' 앞, 252차 운영 hwp·hwpx 공고문) ② '최근 N년간 공사 실적 N건'·'실적 … N건'
   const UNIT = '\\d[\\d,]*\\s*(?:개\\s*)?(?:건|개소|단지|회|세대|곳|개)\\s*(?:이상)?';
   const p1 = t.match(new RegExp(`((?:최근|과거|현재로부터|공고일\\s*(?:현재|기준)(?:로부터)?)?\\s*\\d+\\s*년\\s*(?:간|이내|동안|내)?)\\s*([^.;]{0,40}?)(${UNIT})\\s*([^.;]{0,24}?)\\s*(?:의\\s*)?실적`));
@@ -171,6 +184,8 @@ export function eligibilityItems(section: string | null | undefined): EligItem[]
   for (const w of STAFF_WORDS) {
     const m = t.match(new RegExp(`${w}[^.;]{0,20}?(\\d+)\\s*(?:명|인)\\s*(이상)?`));
     if (staff.some((x) => x.includes(w))) continue; // '생활체육지도자' 안의 '체육지도자'
+    // 로컬 11/27 29번(검암역 '라. 지침에서 정한 참가 제한 사유(… 관리사무소장의 배우자ㆍ직계존비속이 임원인 업체 등)에 해당하지 않는 자'): 제한 사유 문장 속 낱말은 요건이 아님
+    if (!m && t.includes(w) && restrictOnly(t, w)) continue;
     if (m) staff.push(`${w} ${m[1]}명${m[2] ? ' 이상' : ''}`);
     else if (t.includes(w) && !staff.some((x) => x.includes(w)) && !/기술자|기술인력|전문인력/.test(w)) staff.push(w);
   }
