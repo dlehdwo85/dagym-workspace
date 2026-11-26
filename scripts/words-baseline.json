@@ -138,6 +138,9 @@
   "src/lib/sales/bidTasks.ts": {
    "domain": 4
   },
+  "src/lib/sales/bodyFit.ts": {
+   "brand": 1
+  },
   "src/lib/sales/collectors/facilities.ts": {
    "domain": 24
   },
