@@ -92,11 +92,13 @@ function LinesTab() {
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => setEdit({ name: '', orgUnitId: '', steps: [{ key: key(), label: T.role.site_manager, type: 'role', role: 'site_manager' }, { key: key(), label: T.role.owner, type: 'role', role: 'owner' }], active: true })}><Plus />결재선 만들기</Button>
         <span className="text-xs text-ink-3">예시로 시작:</span>
+        <Button size="sm" variant="secondary" onClick={() => template('one')} data-testid="tpl-one">1단계 · {T.role.owner}만</Button>
         <Button size="sm" variant="secondary" onClick={() => template('two')} data-testid="tpl-two">2단계 · 팀장 → {T.role.owner}</Button>
         <Button size="sm" variant="secondary" onClick={() => template('three')} data-testid="tpl-three">3단계 · 팀장 → {T.example.upperLead} → {T.role.owner}</Button>
         <Button size="sm" variant="secondary" onClick={() => template('leave3')} data-testid="tpl-leave3">휴가 · 3일 이상이면 {T.role.owner} 추가</Button>
       </div>
-      {!data ? <Skeleton rows={3} /> : !data.lines.length ? <Empty title="결재선이 없습니다" icon={Stamp}>위 예시 버튼으로 2단계·3단계 결재선을 바로 만들 수 있습니다. 예: 팀장 → {T.example.upperLead} → {T.role.owner}</Empty> : (
+      {!data ? <Skeleton rows={3} /> : !data.lines.length ? <Empty title="결재선이 없습니다" icon={Stamp}>결재선이 없으면 직원이 결재를 올릴 수 없습니다. 우선 {T.role.owner} 1단계로 시작하고, 팀이 생기면 위 예시(2단계·3단계)로 바꾸세요.
+          <div className="mt-3"><Button size="sm" onClick={() => template('one')} data-testid="tpl-one-empty">{T.role.owner} 1단계 결재선 바로 만들기</Button></div></Empty> : (
         <ul className="space-y-2" data-testid="approval-lines">
           {data.lines.map((l) => (
             <li key={l.id} className={cx('flex flex-wrap items-center gap-3 rounded-card border border-line bg-white p-4 shadow-card', !l.active && 'opacity-60')} data-testid="approval-line-card">

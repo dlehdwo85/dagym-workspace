@@ -64,6 +64,7 @@ export async function saveLine(u: SessionUser, id: string | null, i: z.infer<typ
 
 /** #429 예시 결재선(빈 회사도 바로): 2단계 = 팀장 → 대표, 3단계 = 팀장 → 본부장(상위 부서장) → 대표, 휴가 = 팀장 → (3일 이상이면) 대표 */
 export const TEMPLATES: Record<string, { name: string; steps: Step[] }> = {
+  one: { name: '1단계(대표)', steps: [{ label: '대표', type: 'role', role: 'owner' }] }, // F1(상업화 마감 7번): 새 회사 첫 결재가 막히지 않게 — 결재 화면·설정에서 한 번에
   two: { name: '2단계(팀장 → 대표)', steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: '대표', type: 'role', role: 'owner' }] },
   three: { name: '3단계(팀장 → 본부장 → 대표)', steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: '본부장', type: 'lead', up: 1 }, { label: '대표', type: 'role', role: 'owner' }] },
   leave3: { name: '휴가(팀장, 3일 이상 대표)', steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: '대표', type: 'role', role: 'owner', when: { minDays: 3 } }] },
@@ -74,6 +75,7 @@ async function templatesFor(u: SessionUser): Promise<typeof TEMPLATES> {
   const t = await (await import('./termsServer')).termsOfUser(u);
   const owner = t.role.owner, up = t.example.upperLead;
   return {
+    one: { name: `1단계(${owner})`, steps: [{ label: owner, type: 'role', role: 'owner' }] },
     two: { name: `2단계(팀장 → ${owner})`, steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: owner, type: 'role', role: 'owner' }] },
     three: { name: `3단계(팀장 → ${up} → ${owner})`, steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: up, type: 'lead', up: 1 }, { label: owner, type: 'role', role: 'owner' }] },
     leave3: { name: `휴가(팀장, 3일 이상 ${owner})`, steps: [{ label: '팀장', type: 'lead', up: 0 }, { label: owner, type: 'role', role: 'owner', when: { minDays: 3 } }] },

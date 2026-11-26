@@ -131,13 +131,19 @@ function RequestModal({ form, draft, lines, onClose, onMade }: { form: Form; dra
   const [data, setData] = useState<Record<string, any>>(draft?.data ?? {});
   const [lineId, setLineId] = useState<string>(draft?.line_id ?? '');
   const [cc, setCc] = useState<string[]>(draft?.cc_user_ids ?? []);
-  const [busy, setBusy] = useState<'' | 'submit' | 'draft'>('');
+  const [busy, setBusy] = useState<'' | 'submit' | 'draft' | 'line'>(''); const { user } = useSession();
   const [draftId, setDraftId] = useState<string | null>(draft?.id ?? null);
   const set = (k: string, v: any) => setData((d) => ({ ...d, [k]: v }));
   // ② 결재선 미리 보기(기안 → 1차·2차·3차 결재자 이름) — 결재선을 바꾸거나 기간·금액이 바뀌면 다시(#429 조건 단계, 입력이 멈춘 뒤)
   const [pd, setPd] = useState('');
   useEffect(() => { const h = setTimeout(() => setPd(JSON.stringify({ period: data.period, leave_type: data.leave_type, amount: data.amount, leave_days: data.leave_days })), 400); return () => clearTimeout(h); }, [data.period, data.leave_type, data.amount, data.leave_days]);
   const preview = useApi<Preview>(`/api/approvals/line-preview?kind=${form.kind}${form.id ? `&formId=${form.id}` : ''}${lineId ? `&lineId=${lineId}` : ''}${pd ? `&d=${encodeURIComponent(pd)}` : ''}`);
+  // F1(상업화 마감 7번): 결재선 없는 새 회사 — 관리자는 올리는 창에서 바로 대표 1단계 결재선을 만들고 이어서 올림
+  const makeOneLine = async () => {
+    setBusy('line');
+    try { await api('/api/approval-lines/templates', { body: { preset: 'one' } }); toast.ok('대표 1단계 결재선을 만들었습니다 — 이어서 올리면 됩니다'); preview.reload(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(''); }
+  };
   const submit = async () => {
     setBusy('submit');
     try {
@@ -180,7 +186,8 @@ function RequestModal({ form, draft, lines, onClose, onMade }: { form: Form; dra
             {preview.data?.lineName && <span className="text-ink-3" data-testid="line-source">{preview.data.lineName}{preview.data.sourceLabel ? ` · ${preview.data.sourceLabel}${preview.data.via ? `(${preview.data.via})` : ''}` : ''}</span>}
           </div>
           <LineChain p={preview.data} loading={!preview.data && !preview.error} />
-          {preview.data && !preview.data.lineId && <p className="mt-1 text-xs text-red-600">결재선이 없습니다 — 관리자가 결재 › 결재 설정에서 먼저 만들어야 올릴 수 있습니다.</p>}
+          {preview.data && !preview.data.lineId && <p className="mt-1 text-xs text-red-600" data-testid="no-line">결재선이 없습니다 — {isAdminRole(user.role) ? '아래 단추로 대표 1단계 결재선을 바로 만들 수 있습니다.' : '관리자가 결재 › 결재 설정에서 먼저 만들어야 올릴 수 있습니다.'}
+            {isAdminRole(user.role) && <Button size="sm" className="ml-2" onClick={makeOneLine} disabled={!!busy} data-testid="no-line-make">대표 1단계 결재선 만들기</Button>}</p>}
           {preview.data?.missing && <p className="mt-1 text-xs text-amber-700">결재자가 비어 있는 단계가 있습니다 — 그 단계 역할의 사람이 조직에 없으면 올릴 때 막힙니다.</p>}
           <div className="mt-2 text-xs"><b className="font-semibold">참조자</b> <span className="text-ink-3">(보기·알림만, 결재 권한 없음)</span></div>
           <div className="mt-1" data-testid="cc-select"><MultiUserSelect value={cc} onChange={setCc} /></div>
