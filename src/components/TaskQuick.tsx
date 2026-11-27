@@ -1,6 +1,7 @@
 'use client';
 import { RoleBadge } from '@/components/RoleBadge';
 import { useEffect, useRef, useState } from 'react';
+import { useSheetBack } from './backClose';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { ArrowUpDown, Bell, CalendarCheck, CalendarDays, Check, Mic, Plus, Repeat, UserRound, X } from 'lucide-react';
@@ -37,6 +38,7 @@ export function quickDues() {
 export function Popover({ open, onClose, anchor, children, width = 224, title }: { open: boolean; onClose: () => void; anchor: React.RefObject<HTMLElement | null>; children: React.ReactNode; width?: number; title?: string }) {
   const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | 'sheet' | null>(null);
   const closeRef = useRef(onClose); closeRef.current = onClose; // 부모가 매번 새 함수를 넘겨도 위치 계산을 다시 돌리지 않게
+  useSheetBack(open, onClose); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(휴대폰 아래 시트·PC 떠 있는 창 모두 — 마감일·담당·상태·우선순위·꼬리표 칩)
   useEffect(() => {
     if (!open) { setPos(null); return; }
     // V14 45번: 칩 바로 아래(공간이 모자라면 위)에, 칩 왼쪽에 맞춰 화면 안쪽 8px 안으로. 높이는 그쪽 남은 공간까지 — 넘치면 창 안에서 스크롤

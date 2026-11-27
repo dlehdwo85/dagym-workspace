@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useSheetBack } from './backClose';
 import { AlarmClock, Bell, Check, LayoutGrid, Moon } from 'lucide-react';
 import { enableNativePush, openAlarmSettings, openNotificationSettings, permissionStatus, requestAlarmAuthorization, requestPinWidget, type PermissionStatus } from './native';
 import { cx, toast } from './ui';
@@ -65,6 +66,7 @@ export function PermissionIntro({ userId }: { userId: string }) {
     document.addEventListener('visibilitychange', re); window.addEventListener('wos-perm-intro', show);
     return () => { document.removeEventListener('visibilitychange', re); window.removeEventListener('wos-perm-intro', show); };
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useSheetBack(open && !!st, () => { remember(`later:${Date.now()}`); setOpen(false); }); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(= 나중에)
   if (!open || !st) return null;
   const rows = rowsOf(st);
   const done = rows.every((r) => r.ok);

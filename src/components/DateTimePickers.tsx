@@ -1,6 +1,7 @@
 'use client';
 import { dtf } from '@/lib/dtf';
 import { useEffect, useRef, useState } from 'react';
+import { useSheetBack } from './backClose';
 import { createPortal } from 'react-dom';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cx, todayStr } from './ui';
@@ -12,6 +13,7 @@ export const fmtDateLabel = (d: string) => { const t = new Date(d + 'T00:00:00Z'
 /** Google Calendar 처럼: 날짜 버튼 → 작은 달력 팝업 */
 export function DateField({ value, onChange, label, min }: { value: string; onChange: (v: string) => void; label: string; min?: string }) {
   const [open, setOpen] = useState(false);
+  useSheetBack(open, () => setOpen(false)); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(달력)
   const [month, setMonth] = useState(value.slice(0, 7));
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);

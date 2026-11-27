@@ -3,6 +3,7 @@ import { dtf } from '@/lib/dtf';
 // V32 2 정산(플랫폼 운영): 월 선택 → 집계 카드(총결제·취소·순매출·VAT·PG 수수료 추정·입금 예정) · 수단별/요금제별 · 장부(정산 상태·직접 표시) · 엑셀 ·
 // 입금 대사(나이스페이 정산 내역 엑셀/CSV 올리기 → 맞음/차이/장부에 없음) · 미수(던닝) · 세금계산서 요청(발행 체크)
 import { useRef, useState } from 'react';
+import { useSheetBack } from './backClose';
 import { Download, FileSpreadsheet, Upload } from 'lucide-react';
 import { api, useApi } from '@/components/client';
 import { won } from '@/components/usage';
@@ -144,6 +145,7 @@ export function TaxInvoiceButton({ payment }: { payment: { id: string; status: s
   const ok = ['paid', 'partial_canceled'].includes(payment.status);
   const st = useApi<{ requests: { payment_id: string; status: string }[]; defaults: { companyName: string; bizNo: string | null; ceo: string | null; address: string | null; email: string } | null }>(ok ? '/api/billing/tax-invoice' : null);
   const [open, setOpen] = useState(false);
+  useSheetBack(open, () => setOpen(false)); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기
   const [f, setF] = useState<{ companyName: string; bizNo: string; ceo: string; address: string; email: string } | null>(null);
   if (!ok || !st.data?.defaults) return null; // 관리자(회사 정보 기본값이 오는 사람)만
   const mine = st.data?.requests.find((r) => r.payment_id === payment.id && r.status !== 'canceled');

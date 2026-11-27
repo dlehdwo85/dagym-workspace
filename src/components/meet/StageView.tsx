@@ -3,6 +3,7 @@
 // 레퍼런스(docs/reference/zoom — 공개 자료만): 아래 한 줄 도구줄(휴대폰은 항상 표시) · 참가자 목록 · 회의 중 채팅 · 나란히/말하는 사람 크게 · 반응·손들기 · 대기실은 사람이 올 때 띠로 알림.
 // 줌의 로고·색·아이콘·문구는 쓰지 않는다(워크인 디자인 문서 기준). 영상 연결은 StageConn(라이브킷·가짜)이 맡고 이 화면은 엔진을 모른다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSheetBack } from '../backClose';
 import { Camera, Check, ChevronLeft, ChevronRight, Copy, FileImage, Hand, LayoutGrid, Loader2, Lock, LogOut, MessageSquare, Mic, MicOff, Minus, MonitorUp, MoreHorizontal, Pin, Plus, RefreshCw, Send, Share2,
   SignalLow, Smartphone, Unlock, UserRound, Users, Video, VideoOff, Volume2, X } from 'lucide-react';
 import { Button, cx, toast } from '@/components/ui';
@@ -85,6 +86,7 @@ function useChat(api: ChatApi, open: boolean, every: number) {
 export function StageView({ conn, title, elapsed, selfLabel, canShare, hostMeetingId, onEnded, chat: chatApi, inviteUrl, onLeave, busy, engineNote, screenTicket }: StageProps) {
   const host = useHost(hostMeetingId, onEnded);
   const [panel, setPanel] = useState<Panel>(null);
+  useSheetBack(!!panel, () => setPanel(null)); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(참가자·채팅·나가기 확인 창 — 회의는 그대로)
   const [view, setView] = useState<'gallery' | 'speaker'>('gallery');
   const [pin, setPin] = useState<string | null>(null);
   const [reacts, setReacts] = useState<Record<string, { e: string; until: number }>>({});

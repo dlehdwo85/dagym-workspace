@@ -2,6 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import Link from 'next/link';
 import { useState, type CSSProperties } from 'react';
+import { useSheetBack } from '@/components/backClose';
 import { CalendarPlus, Plus, SquarePen, Stamp } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from '@/components/client';
 import { ClockCard } from '@/components/ClockCard';
@@ -126,6 +127,7 @@ export default function Dashboard() {
   const { data, error, reload } = useApi<Summary>('/api/home');
   const { colors: calColors } = useCalColors();
   const [newMenu, setNewMenu] = useState(false);
+  useSheetBack(newMenu, () => setNewMenu(false)); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(만들기 메뉴)
   const [allRows, setAllRows] = useState(false);
   const d0 = seoulDay(new Date());
   const today = data?.today ?? d0;

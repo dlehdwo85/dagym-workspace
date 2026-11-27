@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSheetBack } from './backClose';
 import { api } from './client';
 import { StatusBadge, cx, fmtDate, fmtDateTime } from './ui';
 
@@ -9,6 +10,7 @@ type Item = { key: string; label: string; sub?: string; href?: string; run?: () 
 /** B-4 빠른 검색·명령 (Ctrl+K / ⌘K). 결과는 서버가 권한 범위로 거른다 */
 export function CommandPalette({ open, onClose, onQuickAdd }: { open: boolean; onClose: () => void; onQuickAdd: () => void }) {
   const router = useRouter();
+  useSheetBack(open, onClose); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(빠른 검색)
   const [q, setQ] = useState('');
   const [res, setRes] = useState<any>(null);
   const [sel, setSel] = useState(0);

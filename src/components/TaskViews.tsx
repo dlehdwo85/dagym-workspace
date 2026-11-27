@@ -24,7 +24,7 @@ const daysTo = (iso: string) => Math.round((Date.parse(iso.slice(0, 10)) - Date.
 import { UnitSelect } from './pickers';
 import { TaskDetail } from './TaskDetail';
 import { PANEL_SWAP_EVENT } from './TaskPanelHost';
-import { keepScroll } from './backClose';
+import { keepScroll, useSheetBack } from './backClose';
 import { AssigneePicker, DuePicker, ExtendDialog, extendRole, InlineAddTask, OrderMenu, Popover, PriorityPicker, isFresh, quickDues } from './TaskQuick';
 import { coOf, confirmFinishAll, multiOf, myPartDone, partMsg, partsOf, type Co } from './CoAssignees';
 import { CollabFaces, collabSort, isCollab } from './CollabTasks';
@@ -147,6 +147,7 @@ export function TaskViews({ fixed, title, defaultMode = 'list' }: { fixed?: Reco
   const rs = useResearchAsk(); // 212차 #612: 후속조사 업무 완료 때 곳마다 조사한 값을 적는 창
   const kbProxy = useRef<HTMLInputElement>(null);
   const [moreMenu, setMoreMenu] = useState(false);
+  useSheetBack(moreMenu, () => setMoreMenu(false)); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(더보기 시트)
   const [exportOpen, setExportOpen] = useState(false);
   const [addKey, setAddKey] = useState(0);
   // V6 12번: 휴대폰은 업무 등록 시트(맨 위 줄이 화면 밖이거나 이미 열려 있어 반응 없던 문제), PC 는 맨 위 한 줄 추가(누를 때마다 새로 열고 초점)

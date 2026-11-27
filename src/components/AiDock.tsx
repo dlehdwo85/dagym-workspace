@@ -1,6 +1,7 @@
 'use client';
 import { dtf } from '@/lib/dtf';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSheetBack } from './backClose';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Check, Folder, Maximize2, Menu, MessageSquareText, Paperclip, Pin, Plus, Search, Send, X } from 'lucide-react';
@@ -53,6 +54,7 @@ const SUGGEST: Record<Ctx['page'], string[]> = {
 /** V14 11번: 모든 화면의 AI 비서 — PC 오른쪽 아래 ✨ 패널, 휴대폰은 상단 ✨ → 아래 시트. 대화는 AI 비서 화면과 같은 보관 구조 */
 export function AiDock({ open, onOpenChange, name = 'AI 비서' }: { open: boolean; onOpenChange: (v: boolean) => void; /** 공간별 이름(AI 비서·AI 세일즈·AI 마케터) */ name?: string }) {
   const dockHidden = useDockHide();
+  useSheetBack(open, () => onOpenChange(false)); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(AI 창)
   const ctx = useCtx();
   const path = usePathname();
   const [threadId, setThreadId] = useState<string | null>(null);

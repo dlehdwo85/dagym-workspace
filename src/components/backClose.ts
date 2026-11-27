@@ -146,3 +146,5 @@ export function closeTopSheet() {
   top.close();
   return true;
 }
+// 로컬 11/27 34번: 화면 시험이 앱 뒤로 버튼과 같은 함수를 부를 수 있게(앱 밖 브라우저에서는 아무도 부르지 않음)
+if (typeof window !== 'undefined') (window as unknown as { __wosCloseTopSheet?: () => boolean }).__wosCloseTopSheet = closeTopSheet;

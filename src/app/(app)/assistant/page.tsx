@@ -2,6 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import { aiName } from '@/lib/aiNames';
 import { useEffect, useRef, useState } from 'react';
+import { useSheetBack } from '@/components/backClose';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CalendarDays, Check, Folder, Headphones, Loader2, MessageSquarePlus, MessageSquareText, Mic, Paperclip, Pin, Search, Send, Trash2, X } from 'lucide-react';
@@ -37,6 +38,7 @@ export default function AssistantPage() {
   const threads = useApi<{ threads: Thread[] }>(`/api/ai/threads?${new URLSearchParams({ ...(tq ? { q: tq } : {}) })}`, [tq]);
   const taskThreads = useApi<{ threads: Thread[] }>(taskId ? `/api/ai/threads?taskId=${taskId}` : null);
   const [listOpen, setListOpen] = useState(false);
+  useSheetBack(listOpen, () => setListOpen(false)); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(대화 목록)
   useEffect(() => { if (taskId && !sp.get('thread') && taskThreads.data?.threads[0] && !threadId) openThread(taskThreads.data.threads[0].id); }, [taskThreads.data]); // eslint-disable-line react-hooks/exhaustive-deps
   async function openThread(id: string | null) {
     setListOpen(false); setThreadId(id);

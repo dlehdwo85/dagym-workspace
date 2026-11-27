@@ -5,6 +5,7 @@ import { RoleBadge } from '@/components/RoleBadge';
 import Link from 'next/link';
 import { CarriedBadge } from './carried';
 import { useEffect, useRef, useState } from 'react';
+import { useSheetBack } from './backClose';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useInApp } from '@/components/inApp';
@@ -78,6 +79,7 @@ export function TaskDetail({ id, onClose, inPanel }: { id: string; onClose?: () 
   const [depOpen, setDepOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [menu, setMenu] = useState(false);
+  useSheetBack(menu, () => setMenu(false)); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(더보기)
   const [meetOpen, setMeetOpen] = useState(false); // V37 8 미팅 일정 만들기
   const [delOpen, setDelOpen] = useState(false); // 361차 #977 업무 삭제 창
   const [tab, setTab] = useState<'comments' | 'history'>('comments'); // V14 23번: 활동 탭 철회 — 댓글(기본)·변경 이력

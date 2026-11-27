@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useSheetBack } from './backClose';
 import { Check } from 'lucide-react';
 import { api, broadcastRefresh, useApi } from './client';
 import { useSession } from './session';
@@ -31,6 +32,7 @@ export async function saveColorPart(part: { cals?: Record<string, string | null>
 /** 색 점: 누르면 12색 + 직접 선택 + 기본으로 (Google 캘린더 목록의 색 점) */
 export function ColorDot({ color, label, onPick, testId, size = 'size-3' }: { color: string; label: string; onPick: (c: string | null) => void; testId?: string; size?: string }) {
   const [open, setOpen] = useState(false);
+  useSheetBack(open, () => setOpen(false)); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(색 고르기)
   return (
     <span className="relative inline-flex">
       <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(!open); }} aria-label={`${label} 색 바꾸기`} aria-expanded={open} data-testid={testId}

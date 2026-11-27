@@ -2,6 +2,7 @@
 import { dtf } from '@/lib/dtf';
 import { useTerms } from './session';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSheetBack } from './backClose';
 import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, Eye, Library, Loader2, Mail, MessageCircle, MessageSquare, Paperclip, PenLine, RotateCcw, Search, Send, Upload } from 'lucide-react';
 import { AiMark } from '@/components/ui';
@@ -505,6 +506,7 @@ function SchedulePicker({ value, onPick, onClose, down }: { value: string | null
   const k0 = value ? kstParts(new Date(value)) : kstParts(new Date(Date.now() + 3600000));
   const [date, setDate] = useState(k0.date); const [hm, setHm] = useState(value ? k0.hm : `${k0.hm.slice(0, 2)}:00`);
   const iso = kstIso(date, hm); const warn = sendTimeWarning(iso); const past = Date.parse(iso) < Date.now() + 60000;
+  useSheetBack(true, onClose); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(예약 시각)
   return (
     <>
       <span className="fixed inset-0 z-40" onClick={onClose} />

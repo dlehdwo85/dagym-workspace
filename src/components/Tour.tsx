@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useSheetBack } from './backClose';
 import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
@@ -219,6 +220,7 @@ export function TourHost({ userId, seen: seen0, auto, admin, blocked, features }
 
 function Coach({ run, admin, userId, onSample, onNext, onPrev, onClose }: { run: Run; admin: boolean; userId: string; onSample: () => Promise<void>; onNext: () => void; onPrev: () => void; onClose: () => void }) {
   const st = run.steps[run.i];
+  useSheetBack(true, onClose); // 로컬 11/27 33번(대표 "뒤로가기를 누르면 홈으로"): 앱 뒤로 버튼 = 이 창만 닫기(둘러보기 = 건너뛰기와 같음)
   const [acting, setActing] = useState(false);
   const [sampleDone, setSampleDone] = useState(() => { try { return localStorage.getItem(sampleKey(userId)) === '1'; } catch { return false; } });
   async function act() {
